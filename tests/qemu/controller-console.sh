@@ -120,7 +120,7 @@ for expected in \
     'test linux [summary|interfaces|syscalls|all|syscall NAME|NUMBER]' \
     'Linux userspace runtime conformance summary:' \
     'Interfaces: 16 passed, 7 failed, 23 total' \
-    'Syscalls: 17 passed, 221 unverified, 37 policy-denied, 100 unsupported, 375 total' \
+    'Syscalls: 17 passed, 222 unverified, 37 policy-denied, 99 unsupported, 375 total' \
     "Run 'test linux all' for every result." \
     'Linux userspace interface runtime tests (bounded profile):' \
     'PASS syscall-entry' \
@@ -153,7 +153,7 @@ for expected in \
     'UNVERIFIED 43 accept' \
     'POLICY-DENIED 105 setuid' \
     'UNSUPPORTED 462 mseal' \
-    'Summary: 17 passed, 221 unverified, 37 policy-denied, 100 unsupported, 375 total' \
+    'Summary: 17 passed, 222 unverified, 37 policy-denied, 99 unsupported, 375 total' \
     'PASS requires a runtime conformance probe; dispatch alone remains UNVERIFIED.' \
     'FAIL unknown Linux syscall' \
     'network list' \

@@ -609,6 +609,39 @@ ginux_linux_system_init:
     test rax, rax
     jne .Lfailure
 
+    lea rdi, [rip + .Lrseq_area]
+    mov esi, 32
+    xor edx, edx
+    mov r10d, 0x53053053
+    mov eax, 334
+    syscall
+    test rax, rax
+    jne .Lfailure
+    cmp dword ptr [rip + .Lrseq_area], 0
+    jne .Lfailure
+    cmp dword ptr [rip + .Lrseq_area + 4], 0
+    jne .Lfailure
+    lea rdi, [rip + .Lrseq_area]
+    mov esi, 32
+    xor edx, edx
+    mov r10d, 0x53053053
+    mov eax, 334
+    syscall
+    cmp rax, -16
+    jne .Lfailure
+    lea rdi, [rip + .Lrseq_area]
+    mov esi, 32
+    mov edx, 1
+    mov r10d, 0x53053053
+    mov eax, 334
+    syscall
+    test rax, rax
+    jne .Lfailure
+    cmp dword ptr [rip + .Lrseq_area], -1
+    jne .Lfailure
+    cmp dword ptr [rip + .Lrseq_area + 4], -1
+    jne .Lfailure
+
     xor edi, edi
     lea rsi, [rip + .Lsched_attr]
     mov edx, 56
@@ -1177,6 +1210,9 @@ ginux_linux_system_init:
 .align 8
 .Lsched_attr:
     .space 56
+.align 32
+.Lrseq_area:
+    .space 32
 .Ldevfs_marker:
     .ascii "DEVFS_READY\n"
 .Lprocfs_marker:

@@ -354,6 +354,7 @@ const LINUX_PREADV2_SYSCALL: u64 = 327;
 const LINUX_PWRITEV2_SYSCALL: u64 = 328;
 const LINUX_EXECVEAT_SYSCALL: u64 = 322;
 const LINUX_MEMFD_CREATE_SYSCALL: u64 = 319;
+const LINUX_RSEQ_SYSCALL: u64 = 334;
 const LINUX_GETRANDOM_SYSCALL: u64 = 318;
 const LINUX_STATX_SYSCALL: u64 = 332;
 const LINUX_RENAMEAT2_SYSCALL: u64 = 316;
@@ -1131,6 +1132,10 @@ static LINUX_THREAD_CLEAR_CHILD_TIDS: [BankedAtomicU64; LINUX_THREAD_LIMIT] =
     [const { BankedAtomicU64::new(0) }; LINUX_THREAD_LIMIT];
 static LINUX_THREAD_ROBUST_LISTS: [BankedAtomicU64; LINUX_THREAD_LIMIT] =
     [const { BankedAtomicU64::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_RSEQ_POINTERS: [BankedAtomicU64; LINUX_THREAD_LIMIT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_RSEQ_SIGNATURES: [BankedAtomicU32; LINUX_THREAD_LIMIT] =
+    [const { BankedAtomicU32::new(0) }; LINUX_THREAD_LIMIT];
 static LINUX_THREAD_SIGNAL_MASKS: [BankedAtomicU64; LINUX_THREAD_LIMIT] =
     [const { BankedAtomicU64::new(0) }; LINUX_THREAD_LIMIT];
 static LINUX_THREAD_WAIT_KINDS: [BankedAtomicU8; LINUX_THREAD_LIMIT] =
@@ -4135,6 +4140,8 @@ fn reserve_linux_thread(
     LINUX_THREAD_STACK_SIZES[slot].store(stack_size as u64, Ordering::SeqCst);
     LINUX_THREAD_CLEAR_CHILD_TIDS[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_ROBUST_LISTS[slot].store(0, Ordering::SeqCst);
+    LINUX_THREAD_RSEQ_POINTERS[slot].store(0, Ordering::SeqCst);
+    LINUX_THREAD_RSEQ_SIGNATURES[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_SIGNAL_MASKS[slot].store(inherited_signal_mask, Ordering::SeqCst);
     LINUX_THREAD_WAIT_KINDS[slot].store(LINUX_THREAD_WAIT_NONE, Ordering::SeqCst);
     LINUX_THREAD_WAIT_KEYS[slot].store(0, Ordering::SeqCst);
@@ -4432,6 +4439,8 @@ fn clear_linux_thread_slot(slot: usize) {
     LINUX_THREAD_STACK_SIZES[slot].store(0, Ordering::SeqCst);
     clear_linux_thread_execution(slot);
     LINUX_THREAD_ROBUST_LISTS[slot].store(0, Ordering::SeqCst);
+    LINUX_THREAD_RSEQ_POINTERS[slot].store(0, Ordering::SeqCst);
+    LINUX_THREAD_RSEQ_SIGNATURES[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_SIGNAL_MASKS[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_WAIT_KINDS[slot].store(LINUX_THREAD_WAIT_NONE, Ordering::SeqCst);
     LINUX_THREAD_WAIT_KEYS[slot].store(0, Ordering::SeqCst);
@@ -4603,6 +4612,48 @@ fn current_linux_robust_list() -> Option<u64> {
     current_linux_thread_slot().map(|slot| LINUX_THREAD_ROBUST_LISTS[slot].load(Ordering::SeqCst))
 }
 
+fn linux_rseq(address: u64, length: u64, flags: u64, signature: u64) -> u64 {
+    const RSEQ_SIZE: u64 = 32;
+    const RSEQ_FLAG_UNREGISTER: u64 = 1;
+    if length != RSEQ_SIZE || flags & !RSEQ_FLAG_UNREGISTER != 0 || signature > u32::MAX as u64 {
+        return LINUX_EINVAL;
+    }
+    let Some(slot) = current_linux_thread_slot() else {
+        return LINUX_ESRCH;
+    };
+    let registered = LINUX_THREAD_RSEQ_POINTERS[slot].load(Ordering::SeqCst);
+    if flags == RSEQ_FLAG_UNREGISTER {
+        if registered != address
+            || LINUX_THREAD_RSEQ_SIGNATURES[slot].load(Ordering::SeqCst) != signature as u32
+        {
+            return LINUX_EINVAL;
+        }
+        if !copy_to_linux_user(address, &u32::MAX.to_ne_bytes())
+            || !copy_to_linux_user(address + 4, &u32::MAX.to_ne_bytes())
+        {
+            return LINUX_EFAULT;
+        }
+        LINUX_THREAD_RSEQ_POINTERS[slot].store(0, Ordering::SeqCst);
+        LINUX_THREAD_RSEQ_SIGNATURES[slot].store(0, Ordering::SeqCst);
+        return 0;
+    }
+    if registered != 0 {
+        return LINUX_EBUSY;
+    }
+    if address == 0 || !address.is_multiple_of(32) {
+        return LINUX_EINVAL;
+    }
+    if !linux_writable_user_range_contains(address, RSEQ_SIZE as usize)
+        || !copy_to_linux_user(address, &0_u32.to_ne_bytes())
+        || !copy_to_linux_user(address + 4, &0_u32.to_ne_bytes())
+    {
+        return LINUX_EFAULT;
+    }
+    LINUX_THREAD_RSEQ_POINTERS[slot].store(address, Ordering::SeqCst);
+    LINUX_THREAD_RSEQ_SIGNATURES[slot].store(signature as u32, Ordering::SeqCst);
+    0
+}
+
 fn finish_linux_thread_table() -> bool {
     let clean = LINUX_CURRENT_THREAD_SLOT.load(Ordering::SeqCst) == LINUX_THREAD_SLOT_NONE
         && LINUX_THREAD_STATES
@@ -4653,6 +4704,12 @@ fn finish_linux_thread_table() -> bool {
             .iter()
             .all(|value| value.load(Ordering::SeqCst) == 0)
         && LINUX_THREAD_ROBUST_LISTS
+            .iter()
+            .all(|value| value.load(Ordering::SeqCst) == 0)
+        && LINUX_THREAD_RSEQ_POINTERS
+            .iter()
+            .all(|value| value.load(Ordering::SeqCst) == 0)
+        && LINUX_THREAD_RSEQ_SIGNATURES
             .iter()
             .all(|value| value.load(Ordering::SeqCst) == 0)
         && LINUX_THREAD_SIGNAL_MASKS
@@ -8223,6 +8280,7 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_OPENAT_SYSCALL => linux_openat(first_argument, buffer, count, register(0)),
         LINUX_OPENAT2_SYSCALL => linux_openat2(first_argument, buffer, count, register(0)),
         LINUX_MEMFD_CREATE_SYSCALL => linux_memfd_create(first_argument, buffer),
+        LINUX_RSEQ_SYSCALL => linux_rseq(first_argument, buffer, count, register(0)),
         LINUX_CREAT_SYSCALL => linux_openat(
             u64::from(LINUX_AT_FDCWD),
             first_argument,
@@ -8594,7 +8652,6 @@ extern "sysv64" fn linux_syscall_handler(
         number if linux_privileged_operation(number).is_some() => {
             linux_deny_privileged_operation(number)
         }
-        334 => LINUX_ENOSYS,
         _ => {
             let _ = LINUX_RUNTIME_FIRST_UNSUPPORTED_SYSCALL.compare_exchange(
                 u64::MAX,
@@ -10209,6 +10266,8 @@ struct LinuxProcessRuntimeState {
     thread_tls_size: u64,
     clear_child_tid: u64,
     robust_list: u64,
+    rseq_pointer: u64,
+    rseq_signature: u32,
     thread_signal_mask: u64,
     tid: u32,
     next_tid: u32,
@@ -10240,6 +10299,8 @@ impl LinuxProcessRuntimeState {
         thread_tls_size: 0,
         clear_child_tid: 0,
         robust_list: 0,
+        rseq_pointer: 0,
+        rseq_signature: 0,
         thread_signal_mask: 0,
         tid: 0,
         next_tid: 0,
@@ -10311,6 +10372,8 @@ fn capture_linux_process_runtime_state() -> Option<LinuxProcessRuntimeState> {
         thread_tls_size: LINUX_THREAD_TLS_SIZES[thread_slot].load(Ordering::SeqCst),
         clear_child_tid: LINUX_THREAD_CLEAR_CHILD_TIDS[thread_slot].load(Ordering::SeqCst),
         robust_list: LINUX_THREAD_ROBUST_LISTS[thread_slot].load(Ordering::SeqCst),
+        rseq_pointer: LINUX_THREAD_RSEQ_POINTERS[thread_slot].load(Ordering::SeqCst),
+        rseq_signature: LINUX_THREAD_RSEQ_SIGNATURES[thread_slot].load(Ordering::SeqCst),
         thread_signal_mask: LINUX_THREAD_SIGNAL_MASKS[thread_slot].load(Ordering::SeqCst),
         tid: LINUX_THREAD_TIDS[thread_slot].load(Ordering::SeqCst),
         next_tid: LINUX_NEXT_TID.load(Ordering::SeqCst),
@@ -10349,6 +10412,8 @@ fn restore_linux_process_runtime_state(state: LinuxProcessRuntimeState) {
         LINUX_THREAD_TLS_SIZES[slot].store(state.thread_tls_size, Ordering::SeqCst);
         LINUX_THREAD_CLEAR_CHILD_TIDS[slot].store(state.clear_child_tid, Ordering::SeqCst);
         LINUX_THREAD_ROBUST_LISTS[slot].store(state.robust_list, Ordering::SeqCst);
+        LINUX_THREAD_RSEQ_POINTERS[slot].store(state.rseq_pointer, Ordering::SeqCst);
+        LINUX_THREAD_RSEQ_SIGNATURES[slot].store(state.rseq_signature, Ordering::SeqCst);
         LINUX_THREAD_SIGNAL_MASKS[slot].store(state.thread_signal_mask, Ordering::SeqCst);
         LINUX_THREAD_TIDS[slot].store(state.tid, Ordering::SeqCst);
     }
