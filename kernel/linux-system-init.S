@@ -9,6 +9,14 @@ ginux_linux_system_init:
     cmp rax, 1
     jne .Lfailure
 
+    xor edi, edi
+    xor esi, esi
+    xor edx, edx
+    mov eax, 154
+    syscall
+    test rax, rax
+    jne .Lfailure
+
     mov edi, -100
     lea rsi, [rip + .Lconsole]
     mov edx, 1

@@ -240,6 +240,7 @@ const LINUX_ACCT_SYSCALL: u64 = 163;
 const LINUX_SETTIMEOFDAY_SYSCALL: u64 = 164;
 const LINUX_PRCTL_SYSCALL: u64 = 157;
 const LINUX_ARCH_PRCTL_SYSCALL: u64 = 158;
+const LINUX_MODIFY_LDT_SYSCALL: u64 = 154;
 const LINUX_PIVOT_ROOT_SYSCALL: u64 = 155;
 const LINUX_CHROOT_SYSCALL: u64 = 161;
 const LINUX_MOUNT_SYSCALL: u64 = 165;
@@ -8277,6 +8278,7 @@ extern "sysv64" fn linux_syscall_handler(
             0
         }
         LINUX_ARCH_PRCTL_SYSCALL => LINUX_EINVAL,
+        LINUX_MODIFY_LDT_SYSCALL => linux_modify_ldt(first_argument, buffer, count),
         LINUX_UNAME_SYSCALL => {
             let mut name = [0_u8; LINUX_UTSNAME_SIZE];
             name[..6].copy_from_slice(b"Linux\0");
@@ -22708,6 +22710,14 @@ fn linux_set_process_name(address: u64) -> u64 {
     ELF_PROBE_PROCESS_NAME_LOW.store(u64::from_ne_bytes(low), Ordering::SeqCst);
     ELF_PROBE_PROCESS_NAME_HIGH.store(u64::from_ne_bytes(high), Ordering::SeqCst);
     0
+}
+
+const fn linux_modify_ldt(function: u64, _address: u64, _byte_count: u64) -> u64 {
+    if function == 0 {
+        0
+    } else {
+        LINUX_ENOSYS
+    }
 }
 
 fn linux_get_process_name(address: u64) -> u64 {

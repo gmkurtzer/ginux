@@ -42,7 +42,7 @@ implemented calls lives in [Linux Syscall Entry v0](../specs/kernel/linux-syscal
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **17 Complete**, **250 Partial**, **44 Policy-denied**, **64 Missing**.
+Current totals: **17 Complete**, **251 Partial**, **44 Policy-denied**, **63 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -238,7 +238,7 @@ therefore omitted.
 | 151 | mlockall | Partial |
 | 152 | munlockall | Partial |
 | 153 | vhangup | Policy-denied |
-| 154 | modify_ldt | Missing |
+| 154 | modify_ldt | Partial |
 | 155 | pivot_root | Policy-denied |
 | 156 | _sysctl | Complete |
 | 157 | prctl | Partial |
