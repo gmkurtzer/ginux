@@ -5,6 +5,7 @@ repo_root=$(cd "$(dirname "$0")/../.." && pwd)
 output_file=$(mktemp "${TMPDIR:-/tmp}/ginux-alpine-shell.XXXXXX")
 volume_image=$(mktemp "${TMPDIR:-/tmp}/ginux-alpine-shell-volume.XXXXXX")
 qemu_pid_file=$(mktemp "${TMPDIR:-/tmp}/ginux-alpine-shell-pid.XXXXXX")
+host_socket_port=18080
 qemu_pid=""
 
 stop_qemu() {
@@ -133,10 +134,29 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
     printf 'q'
     printf '%s\n' \
         "printf 'PIPE_LESS_EXIT_OK\\n'" \
+        "printf 'SERVER_SOCKET_READY_1\\n'" \
+        'nc -l -p 8080 -e /bin/uname' \
+        "printf 'SERVER_SOCKET_ACCEPTED_1\\n'" \
         "printf 'FORK_STATE_RESTORE_OK\\n'" \
         "printf 'FORK_EXEC_OK\\n'" \
         "printf 'OCI_FILESYSTEM_OK\\n'"
     wait_for_line 'PIPE_LESS_EXIT_OK'
+    wait_for_line 'SERVER_SOCKET_READY_1'
+    socket_response=$(nc -w 5 127.0.0.1 "$host_socket_port")
+    [[ "$socket_response" == "Linux" ]]
+    wait_for_line 'SERVER_SOCKET_ACCEPTED_1'
+    printf '%s\n' \
+        "printf 'SERVER_SOCKET_RESPONSE_1_OK\\n'" \
+        "printf 'SERVER_SOCKET_READY_2\\n'" \
+        'nc -l -p 8080 -e /bin/uname' \
+        "printf 'SERVER_SOCKET_ACCEPTED_2\\n'"
+    wait_for_line 'SERVER_SOCKET_RESPONSE_1_OK'
+    wait_for_line 'SERVER_SOCKET_READY_2'
+    socket_response=$(nc -w 5 127.0.0.1 "$host_socket_port")
+    [[ "$socket_response" == "Linux" ]]
+    wait_for_line 'SERVER_SOCKET_ACCEPTED_2'
+    printf '%s\n' "printf 'SERVER_SOCKET_RESPONSE_2_OK\\n'"
+    wait_for_line 'SERVER_SOCKET_RESPONSE_2_OK'
     wait_for_line 'FORK_STATE_RESTORE_OK'
     wait_for_line 'FORK_EXEC_OK'
     wait_for_line 'PROCFS_OK'
@@ -174,6 +194,7 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
     wait_for_count 'ginux> ' 7
     printf '%s\n' 'shutdown'
 } | GINUX_VOLUME_IMAGE="$volume_image" GINUX_QEMU_PID_FILE="$qemu_pid_file" \
+    GINUX_QEMU_HOSTFWD="tcp:127.0.0.1:${host_socket_port}-:8080" \
     "$repo_root/tools/qemu/run.sh" >"$output_file" 2>&1 &
 qemu_pid=$!
 
@@ -212,6 +233,10 @@ for expected in \
     'NESTED_FORK_OUTER_OK' \
     'PIPE_RUNTIME_64K_OK' \
     'PIPE_LESS_EXIT_OK' \
+    'SERVER_SOCKET_RESPONSE_1_OK' \
+    'SERVER_SOCKET_ACCEPTED_1' \
+    'SERVER_SOCKET_RESPONSE_2_OK' \
+    'SERVER_SOCKET_ACCEPTED_2' \
     'FORK_STATE_RESTORE_OK' \
     '/etc' \
     'FORK_EXEC_OK' \

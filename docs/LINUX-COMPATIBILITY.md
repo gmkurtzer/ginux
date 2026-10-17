@@ -42,7 +42,7 @@ implemented calls lives in [Linux Syscall Entry v0](../specs/kernel/linux-syscal
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **207 Partial**, **28 Policy-denied**, **140 Missing**.
+Current totals: **211 Partial**, **28 Policy-denied**, **136 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -122,14 +122,14 @@ therefore omitted.
 | 40 | sendfile | Partial |
 | 41 | socket | Partial |
 | 42 | connect | Partial |
-| 43 | accept | Missing |
+| 43 | accept | Partial |
 | 44 | sendto | Partial |
 | 45 | recvfrom | Partial |
 | 46 | sendmsg | Partial |
 | 47 | recvmsg | Partial |
 | 48 | shutdown | Partial |
-| 49 | bind | Missing |
-| 50 | listen | Missing |
+| 49 | bind | Partial |
+| 50 | listen | Partial |
 | 51 | getsockname | Partial |
 | 52 | getpeername | Partial |
 | 53 | socketpair | Partial |
@@ -367,7 +367,7 @@ therefore omitted.
 | 285 | fallocate | Partial |
 | 286 | timerfd_settime | Partial |
 | 287 | timerfd_gettime | Partial |
-| 288 | accept4 | Missing |
+| 288 | accept4 | Partial |
 | 289 | signalfd4 | Missing |
 | 290 | eventfd2 | Partial |
 | 291 | epoll_create1 | Partial |

@@ -767,6 +767,19 @@ an explicit nonnegative offset is updated instead. Regular output offsets
 advance normally. Transfers may exceed one page, short socket or filesystem
 writes return the completed byte count, and a nonblocking socket preserves its
 normal `-EAGAIN` behavior. Same-file and append-file output remain rejected.
+`bind` admits IPv4 TCP or UDP sockets on the configured host address or
+`INADDR_ANY`. Port zero selects an ephemeral port; conflicting bindings return
+`-EADDRINUSE`, and nonlocal addresses return `-EADDRNOTAVAIL`. `listen` turns a
+bound, or automatically bound, TCP socket into a listener. The backlog argument
+is validated but the current smoltcp-backed listener holds one pending
+connection. `accept` and `accept4` return a new descriptor for that connection,
+copy its peer address transactionally when requested, and immediately rearm the
+original descriptor with a fresh TCP socket and buffer so it can accept again.
+`accept4` supports `SOCK_CLOEXEC` and `SOCK_NONBLOCK`; a nonblocking listener
+returns `-EAGAIN` when no connection is pending. A blocking accept polls the
+network until a connection arrives or the listener becomes invalid. IPv6, Unix
+pathname listeners, interruptible scheduler wait queues, and multi-entry listen
+backlogs remain outside this profile.
 `openat2` accepts the 24-byte version-zero `open_how` structure and delegates
 zero-resolve requests to the same per-domain VFS path as `openat`. Larger
 structures up to one page are accepted only when every extension byte is zero;

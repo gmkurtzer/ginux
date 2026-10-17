@@ -104,6 +104,7 @@ const LINUX_SETITIMER_SYSCALL: u64 = 38;
 const LINUX_GETPID_SYSCALL: u64 = 39;
 const LINUX_SENDFILE_SYSCALL: u64 = 40;
 const LINUX_SOCKET_SYSCALL: u64 = 41;
+const LINUX_ACCEPT_SYSCALL: u64 = 43;
 const LINUX_SOCKETPAIR_SYSCALL: u64 = 53;
 const LINUX_CONNECT_SYSCALL: u64 = 42;
 const LINUX_SENDTO_SYSCALL: u64 = 44;
@@ -111,6 +112,8 @@ const LINUX_RECVFROM_SYSCALL: u64 = 45;
 const LINUX_SENDMSG_SYSCALL: u64 = 46;
 const LINUX_RECVMSG_SYSCALL: u64 = 47;
 const LINUX_SHUTDOWN_SYSCALL: u64 = 48;
+const LINUX_BIND_SYSCALL: u64 = 49;
+const LINUX_LISTEN_SYSCALL: u64 = 50;
 const LINUX_GETSOCKNAME_SYSCALL: u64 = 51;
 const LINUX_GETPEERNAME_SYSCALL: u64 = 52;
 const LINUX_SETSOCKOPT_SYSCALL: u64 = 54;
@@ -293,6 +296,7 @@ const LINUX_EVENTFD_SYSCALL: u64 = 284;
 const LINUX_FALLOCATE_SYSCALL: u64 = 285;
 const LINUX_TIMERFD_SETTIME_SYSCALL: u64 = 286;
 const LINUX_TIMERFD_GETTIME_SYSCALL: u64 = 287;
+const LINUX_ACCEPT4_SYSCALL: u64 = 288;
 const LINUX_EVENTFD2_SYSCALL: u64 = 290;
 const LINUX_EPOLL_CREATE1_SYSCALL: u64 = 291;
 const LINUX_DUP3_SYSCALL: u64 = 292;
@@ -371,6 +375,8 @@ const LINUX_EAFNOSUPPORT: u64 = u64::MAX - 96;
 const LINUX_EPROTONOSUPPORT: u64 = u64::MAX - 92;
 const LINUX_ENETUNREACH: u64 = u64::MAX - 100;
 const LINUX_ENFILE: u64 = u64::MAX - 22;
+const LINUX_EADDRINUSE: u64 = u64::MAX - 97;
+const LINUX_EADDRNOTAVAIL: u64 = u64::MAX - 98;
 const LINUX_XATTR_CREATE: u64 = 1;
 const LINUX_XATTR_REPLACE: u64 = 2;
 const LINUX_XATTR_SIZE_MAX: usize = 65_536;
@@ -7393,6 +7399,10 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_SOCKET_SYSCALL => linux_socket_create(first_argument, buffer, count),
         LINUX_SOCKETPAIR_SYSCALL => linux_socket_pair(first_argument, buffer, count, register(0)),
         LINUX_CONNECT_SYSCALL => linux_socket_connect(first_argument, buffer, count),
+        LINUX_ACCEPT_SYSCALL => linux_socket_accept(first_argument, buffer, count, 0),
+        LINUX_BIND_SYSCALL => linux_socket_bind(first_argument, buffer, count),
+        LINUX_LISTEN_SYSCALL => linux_socket_listen(first_argument, buffer),
+        LINUX_ACCEPT4_SYSCALL => linux_socket_accept(first_argument, buffer, count, register(0)),
         LINUX_SENDTO_SYSCALL => linux_socket_sendto(
             first_argument,
             buffer,
@@ -15270,6 +15280,8 @@ fn linux_socket_error(error: crate::linux_socket::Error) -> u64 {
     match error {
         crate::linux_socket::Error::Unavailable => LINUX_ENETUNREACH,
         crate::linux_socket::Error::Exhausted => LINUX_ENFILE,
+        crate::linux_socket::Error::AddressInUse => LINUX_EADDRINUSE,
+        crate::linux_socket::Error::AddressNotAvailable => LINUX_EADDRNOTAVAIL,
         crate::linux_socket::Error::Invalid => LINUX_EINVAL,
         crate::linux_socket::Error::InProgress => LINUX_EINPROGRESS,
         crate::linux_socket::Error::WouldBlock => LINUX_EAGAIN,
@@ -15417,6 +15429,98 @@ fn linux_socket_address(address: u64, length: u64) -> Result<smoltcp::wire::IpEn
         return Err(LINUX_EINVAL);
     }
     Ok(crate::linux_socket::endpoint(ipv4, port))
+}
+
+fn linux_socket_bind_address(address: u64, length: u64) -> Result<(u32, u16), u64> {
+    if length < 16 {
+        return Err(LINUX_EINVAL);
+    }
+    let mut sockaddr = [0_u8; 16];
+    if !copy_from_linux_user(address, &mut sockaddr) {
+        return Err(LINUX_EFAULT);
+    }
+    if u16::from_ne_bytes(sockaddr[..2].try_into().unwrap()) != 2 {
+        return Err(LINUX_EAFNOSUPPORT);
+    }
+    Ok((
+        u32::from_be_bytes(sockaddr[4..8].try_into().unwrap()),
+        u16::from_be_bytes(sockaddr[2..4].try_into().unwrap()),
+    ))
+}
+
+fn linux_socket_bind(descriptor: u64, address: u64, length: u64) -> u64 {
+    let Some(slot) = linux_socket_slot(descriptor) else {
+        return LINUX_EBADF;
+    };
+    let (address, port) = match linux_socket_bind_address(address, length) {
+        Ok(endpoint) => endpoint,
+        Err(error) => return error,
+    };
+    crate::linux_socket::bind(slot, address, port).map_or_else(linux_socket_error, |_| 0)
+}
+
+fn linux_socket_listen(descriptor: u64, backlog: u64) -> u64 {
+    let Some(slot) = linux_socket_slot(descriptor) else {
+        return LINUX_EBADF;
+    };
+    if backlog > i32::MAX as u64 {
+        return LINUX_EINVAL;
+    }
+    if crate::linux_socket::kind(slot) != Some(crate::linux_socket::Kind::Tcp) {
+        return LINUX_EOPNOTSUPP;
+    }
+    crate::linux_socket::listen(slot).map_or_else(linux_socket_error, |()| 0)
+}
+
+fn linux_socket_accept_address_valid(address: u64, length: u64) -> bool {
+    if address == 0 {
+        return true;
+    }
+    let mut supplied = [0_u8; 4];
+    if length == 0 || !copy_from_linux_user(length, &mut supplied) {
+        return false;
+    }
+    let address_length = usize::try_from(u32::from_ne_bytes(supplied).min(16)).unwrap_or(16);
+    linux_writable_user_range_contains(length, 4)
+        && linux_writable_user_range_contains(address, address_length)
+}
+
+fn linux_socket_accept(descriptor: u64, address: u64, length: u64, flags: u64) -> u64 {
+    const SOCK_NONBLOCK: u64 = 0x800;
+    const SOCK_CLOEXEC: u64 = 0x8_0000;
+    if flags & !(SOCK_NONBLOCK | SOCK_CLOEXEC) != 0 {
+        return LINUX_EINVAL;
+    }
+    let Some(listener_slot) = linux_socket_slot(descriptor) else {
+        return LINUX_EBADF;
+    };
+    let Some(accepted_descriptor) = (LINUX_AUX_DESCRIPTOR_FIRST..LINUX_AUX_DESCRIPTOR_LIMIT)
+        .find(|descriptor| linux_aux_descriptor_free(*descriptor))
+    else {
+        return LINUX_EMFILE;
+    };
+    if !linux_socket_accept_address_valid(address, length) {
+        return LINUX_EFAULT;
+    }
+    let accepted = if linux_socket_nonblocking(descriptor) {
+        crate::linux_socket::accept(listener_slot)
+    } else {
+        crate::linux_socket::accept_blocking(listener_slot)
+    };
+    let (accepted_slot, remote) = match accepted {
+        Ok(accepted) => accepted,
+        Err(error) => return linux_socket_error(error),
+    };
+    if address != 0 && !linux_write_socket_address(address, length, remote) {
+        let _ = crate::linux_socket::close(accepted_slot);
+        return LINUX_EFAULT;
+    }
+    let index = (accepted_descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize;
+    ELF_PROBE_SOCKET_SLOTS[index].store(accepted_slot + 1, Ordering::SeqCst);
+    ELF_PROBE_SOCKET_FLAGS[index].store((flags & SOCK_NONBLOCK) as u32, Ordering::SeqCst);
+    ELF_PROBE_DEVICE_DESCRIPTORS[index].store(LINUX_DEVICE_SOCKET | 3, Ordering::SeqCst);
+    set_linux_descriptor_close_on_exec(accepted_descriptor, flags & SOCK_CLOEXEC != 0);
+    accepted_descriptor
 }
 
 fn linux_socket_connect(descriptor: u64, address: u64, length: u64) -> u64 {

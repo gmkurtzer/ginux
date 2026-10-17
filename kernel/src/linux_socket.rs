@@ -71,6 +71,8 @@ pub(crate) enum Kind {
 pub(crate) enum Error {
     Unavailable,
     Exhausted,
+    AddressInUse,
+    AddressNotAvailable,
     Invalid,
     InProgress,
     WouldBlock,
@@ -86,6 +88,8 @@ struct Slot {
     handle: Option<SocketHandle>,
     remote: Option<IpEndpoint>,
     local_port: u16,
+    tcp_buffer: Option<u8>,
+    listening: bool,
     peer: Option<u8>,
     local_first: memory::FrameLease,
     local_last: memory::FrameLease,
@@ -101,6 +105,8 @@ impl Slot {
         handle: None,
         remote: None,
         local_port: 0,
+        tcp_buffer: None,
+        listening: false,
         peer: None,
         local_first: memory::FrameLease::EMPTY,
         local_last: memory::FrameLease::EMPTY,
@@ -133,6 +139,14 @@ static mut UDP_RX_META: [[udp::PacketMetadata; UDP_PACKET_COUNT]; SLOT_COUNT] =
     [[udp::PacketMetadata::EMPTY; UDP_PACKET_COUNT]; SLOT_COUNT];
 static mut UDP_TX_META: [[udp::PacketMetadata; UDP_PACKET_COUNT]; SLOT_COUNT] =
     [[udp::PacketMetadata::EMPTY; UDP_PACKET_COUNT]; SLOT_COUNT];
+
+fn free_tcp_buffer() -> Option<usize> {
+    (0..SLOT_COUNT).find(|candidate| unsafe {
+        SLOTS
+            .iter()
+            .all(|slot| !slot.occupied || slot.tcp_buffer.map(usize::from) != Some(*candidate))
+    })
+}
 
 fn local_page(frame: memory::FrameLease) -> Option<&'static LocalDataPage> {
     let address = frame.direct_map_address()?;
@@ -211,13 +225,19 @@ pub(crate) fn configure(
 pub(crate) fn open(kind: Kind) -> Result<u8, Error> {
     let runtime = runtime()?;
     let slot = unsafe { SLOTS.iter().position(|slot| !slot.occupied) }.ok_or(Error::Exhausted)?;
+    let tcp_buffer = if kind == Kind::Tcp {
+        Some(free_tcp_buffer().ok_or(Error::Exhausted)? as u8)
+    } else {
+        None
+    };
     let handle = match kind {
         Kind::Tcp => {
+            let buffer = usize::from(tcp_buffer.ok_or(Error::Exhausted)?);
             let rx = tcp::SocketBuffer::new(unsafe {
-                core::slice::from_raw_parts_mut(TCP_RX[slot].as_mut_ptr(), TCP_BUFFER_SIZE)
+                core::slice::from_raw_parts_mut(TCP_RX[buffer].as_mut_ptr(), TCP_BUFFER_SIZE)
             });
             let tx = tcp::SocketBuffer::new(unsafe {
-                core::slice::from_raw_parts_mut(TCP_TX[slot].as_mut_ptr(), TCP_BUFFER_SIZE)
+                core::slice::from_raw_parts_mut(TCP_TX[buffer].as_mut_ptr(), TCP_BUFFER_SIZE)
             });
             runtime.sockets.add(tcp::Socket::new(rx, tx))
         }
@@ -256,6 +276,8 @@ pub(crate) fn open(kind: Kind) -> Result<u8, Error> {
             handle: Some(handle),
             remote: None,
             local_port: 0,
+            tcp_buffer,
+            listening: false,
             peer: None,
             local_first: memory::FrameLease::EMPTY,
             local_last: memory::FrameLease::EMPTY,
@@ -284,6 +306,8 @@ pub(crate) fn open_pair() -> Result<(u8, u8), Error> {
             handle: None,
             remote: None,
             local_port: 0,
+            tcp_buffer: None,
+            listening: false,
             peer: Some(second as u8),
             local_first: memory::FrameLease::EMPTY,
             local_last: memory::FrameLease::EMPTY,
@@ -297,6 +321,8 @@ pub(crate) fn open_pair() -> Result<(u8, u8), Error> {
             handle: None,
             remote: None,
             local_port: 0,
+            tcp_buffer: None,
+            listening: false,
             peer: Some(first as u8),
             local_first: memory::FrameLease::EMPTY,
             local_last: memory::FrameLease::EMPTY,
@@ -354,6 +380,168 @@ pub(crate) fn duplicate(slot: u8) -> bool {
         .is_some()
 }
 
+fn port_in_use(kind: Kind, port: u16, except: usize) -> bool {
+    unsafe {
+        SLOTS.iter().enumerate().any(|(index, slot)| {
+            index != except
+                && slot.occupied
+                && slot.kind == kind
+                && slot.local_port == port
+                && port != 0
+        })
+    }
+}
+
+fn allocate_ephemeral_port(runtime: &mut Runtime, kind: Kind, except: usize) -> Option<u16> {
+    for _ in 0..(u16::MAX - 49_152) {
+        let port = runtime.next_port.max(49_152);
+        runtime.next_port = port.wrapping_add(1).max(49_152);
+        if !port_in_use(kind, port, except) {
+            return Some(port);
+        }
+    }
+    None
+}
+
+pub(crate) fn kind(slot: u8) -> Option<Kind> {
+    unsafe { SLOTS.get(usize::from(slot)) }
+        .filter(|state| state.occupied)
+        .map(|state| state.kind)
+}
+
+pub(crate) fn bind(slot: u8, address: u32, requested_port: u16) -> Result<u16, Error> {
+    poll();
+    let runtime = runtime()?;
+    let index = usize::from(slot);
+    let state = unsafe { SLOTS.get(index).copied() }
+        .filter(|state| state.occupied)
+        .ok_or(Error::Invalid)?;
+    if state.kind == Kind::Unix || state.local_port != 0 || state.remote.is_some() {
+        return Err(Error::Invalid);
+    }
+    if address != 0 && address != runtime.local_address {
+        return Err(Error::AddressNotAvailable);
+    }
+    let port = if requested_port == 0 {
+        allocate_ephemeral_port(runtime, state.kind, index).ok_or(Error::Exhausted)?
+    } else {
+        requested_port
+    };
+    if port_in_use(state.kind, port, index) {
+        return Err(Error::AddressInUse);
+    }
+    if state.kind == Kind::Udp {
+        let handle = state.handle.ok_or(Error::Invalid)?;
+        runtime
+            .sockets
+            .get_mut::<udp::Socket>(handle)
+            .bind(port)
+            .map_err(|_| Error::AddressInUse)?;
+    }
+    unsafe { SLOTS[index].local_port = port };
+    Ok(port)
+}
+
+pub(crate) fn listen(slot: u8) -> Result<(), Error> {
+    poll();
+    let runtime = runtime()?;
+    let index = usize::from(slot);
+    let state = unsafe { SLOTS.get(index).copied() }
+        .filter(|state| state.occupied && state.kind == Kind::Tcp)
+        .ok_or(Error::Invalid)?;
+    if state.remote.is_some() {
+        return Err(Error::Invalid);
+    }
+    let local_port = if state.local_port == 0 {
+        allocate_ephemeral_port(runtime, Kind::Tcp, index).ok_or(Error::Exhausted)?
+    } else {
+        state.local_port
+    };
+    let handle = state.handle.ok_or(Error::Invalid)?;
+    runtime
+        .sockets
+        .get_mut::<tcp::Socket>(handle)
+        .listen(local_port)
+        .map_err(|_| Error::Invalid)?;
+    unsafe {
+        SLOTS[index].local_port = local_port;
+        SLOTS[index].listening = true;
+    }
+    Ok(())
+}
+
+fn add_tcp_socket(runtime: &mut Runtime, buffer: usize) -> SocketHandle {
+    let rx = tcp::SocketBuffer::new(unsafe {
+        core::slice::from_raw_parts_mut(TCP_RX[buffer].as_mut_ptr(), TCP_BUFFER_SIZE)
+    });
+    let tx = tcp::SocketBuffer::new(unsafe {
+        core::slice::from_raw_parts_mut(TCP_TX[buffer].as_mut_ptr(), TCP_BUFFER_SIZE)
+    });
+    runtime.sockets.add(tcp::Socket::new(rx, tx))
+}
+
+pub(crate) fn accept(slot: u8) -> Result<(u8, IpEndpoint), Error> {
+    poll();
+    let runtime = runtime()?;
+    let listener_index = usize::from(slot);
+    let listener = unsafe { SLOTS.get(listener_index).copied() }
+        .filter(|state| state.occupied && state.kind == Kind::Tcp && state.listening)
+        .ok_or(Error::Invalid)?;
+    let handle = listener.handle.ok_or(Error::Invalid)?;
+    let socket = runtime.sockets.get::<tcp::Socket>(handle);
+    if !matches!(
+        socket.state(),
+        tcp::State::Established | tcp::State::CloseWait
+    ) {
+        return Err(Error::WouldBlock);
+    }
+    let remote = socket.remote_endpoint().ok_or(Error::Invalid)?;
+    let accepted_index =
+        unsafe { SLOTS.iter().position(|state| !state.occupied) }.ok_or(Error::Exhausted)?;
+    let replacement_buffer = free_tcp_buffer().ok_or(Error::Exhausted)?;
+    let replacement = add_tcp_socket(runtime, replacement_buffer);
+    if runtime
+        .sockets
+        .get_mut::<tcp::Socket>(replacement)
+        .listen(listener.local_port)
+        .is_err()
+    {
+        runtime.sockets.remove(replacement);
+        return Err(Error::Invalid);
+    }
+    unsafe {
+        SLOTS[accepted_index] = Slot {
+            occupied: true,
+            references: 1,
+            kind: Kind::Tcp,
+            handle: Some(handle),
+            remote: Some(remote),
+            local_port: listener.local_port,
+            tcp_buffer: listener.tcp_buffer,
+            listening: false,
+            peer: None,
+            local_first: memory::FrameLease::EMPTY,
+            local_last: memory::FrameLease::EMPTY,
+            local_head: 0,
+            local_length: 0,
+        };
+        SLOTS[listener_index].handle = Some(replacement);
+        SLOTS[listener_index].remote = None;
+        SLOTS[listener_index].tcp_buffer = Some(replacement_buffer as u8);
+        SLOTS[listener_index].listening = true;
+    }
+    Ok((accepted_index as u8, remote))
+}
+
+pub(crate) fn accept_blocking(slot: u8) -> Result<(u8, IpEndpoint), Error> {
+    loop {
+        match accept(slot) {
+            Err(Error::WouldBlock | Error::InProgress) => core::hint::spin_loop(),
+            result => return result,
+        }
+    }
+}
+
 fn teardown() -> bool {
     let Some(platform) = (unsafe { PLATFORM }) else {
         return false;
@@ -369,14 +557,19 @@ fn teardown() -> bool {
 pub(crate) fn connect(slot: u8, remote: IpEndpoint) -> Result<(), Error> {
     poll();
     let runtime = runtime()?;
-    let state = unsafe { SLOTS.get_mut(usize::from(slot)) }
+    let index = usize::from(slot);
+    let state = unsafe { SLOTS.get(index).copied() }
         .filter(|slot| slot.occupied)
         .ok_or(Error::Invalid)?;
     let handle = state.handle.ok_or(Error::Invalid)?;
-    if state.local_port == 0 {
-        state.local_port = runtime.next_port;
-        runtime.next_port = runtime.next_port.wrapping_add(1).max(49_152);
+    if state.listening {
+        return Err(Error::Invalid);
     }
+    let local_port = if state.local_port == 0 {
+        allocate_ephemeral_port(runtime, state.kind, index).ok_or(Error::Exhausted)?
+    } else {
+        state.local_port
+    };
     match state.kind {
         Kind::Tcp => {
             let socket = runtime.sockets.get_mut::<tcp::Socket>(handle);
@@ -388,17 +581,23 @@ pub(crate) fn connect(slot: u8, remote: IpEndpoint) -> Result<(), Error> {
                 };
             }
             socket
-                .connect(runtime.interface.context(), remote, state.local_port)
+                .connect(runtime.interface.context(), remote, local_port)
                 .map_err(|_| Error::Invalid)?;
-            state.remote = Some(remote);
+            unsafe {
+                SLOTS[index].local_port = local_port;
+                SLOTS[index].remote = Some(remote);
+            }
             Err(Error::InProgress)
         }
         Kind::Udp => {
             let socket = runtime.sockets.get_mut::<udp::Socket>(handle);
             if !socket.is_open() {
-                socket.bind(state.local_port).map_err(|_| Error::Invalid)?;
+                socket.bind(local_port).map_err(|_| Error::Invalid)?;
             }
-            state.remote = Some(remote);
+            unsafe {
+                SLOTS[index].local_port = local_port;
+                SLOTS[index].remote = Some(remote);
+            }
             Ok(())
         }
         Kind::Unix => Err(Error::Invalid),
@@ -640,11 +839,22 @@ pub(crate) fn readiness(slot: u8) -> Option<(bool, bool, bool)> {
     Some(match state.kind {
         Kind::Tcp => {
             let socket = runtime.sockets.get::<tcp::Socket>(handle);
-            (
-                socket.can_recv() || !socket.may_recv(),
-                socket.can_send(),
-                !socket.is_open() && state.remote.is_some(),
-            )
+            if state.listening {
+                (
+                    matches!(
+                        socket.state(),
+                        tcp::State::Established | tcp::State::CloseWait
+                    ),
+                    false,
+                    false,
+                )
+            } else {
+                (
+                    socket.can_recv() || !socket.may_recv(),
+                    socket.can_send(),
+                    !socket.is_open() && state.remote.is_some(),
+                )
+            }
         }
         Kind::Udp => {
             let socket = runtime.sockets.get::<udp::Socket>(handle);

@@ -45,6 +45,9 @@ qemu_netdev="user,id=ginux-net,restrict=off"
 if [[ -n "${GINUX_QEMU_DNS:-}" ]]; then
     qemu_netdev+=",dns=${GINUX_QEMU_DNS}"
 fi
+if [[ -n "${GINUX_QEMU_HOSTFWD:-}" ]]; then
+    qemu_netdev+=",hostfwd=${GINUX_QEMU_HOSTFWD}"
+fi
 
 exec "$qemu" \
     -machine "q35,accel=$accelerator" \
