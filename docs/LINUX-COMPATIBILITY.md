@@ -42,7 +42,7 @@ implemented calls lives in [Linux Syscall Entry v0](../specs/kernel/linux-syscal
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **174 Partial**, **28 Policy-denied**, **173 Missing**.
+Current totals: **190 Partial**, **28 Policy-denied**, **157 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -59,7 +59,7 @@ Current totals: **174 Partial**, **28 Policy-denied**, **173 Missing**.
 | `/proc` | Partial | Automatically mounted per domain with domain-local PID directories, `status`, `stat`, `statm`, `mountinfo`, namespace maps, `cpuinfo`, `meminfo`, `stat`, `uptime`, `loadavg`, `filesystems`, and `cmdline`. Broader Linux procfs coverage and unconstrained process enumeration remain incomplete. |
 | IPv4 sockets | Partial | Domain descriptors expose repeated client TCP and UDP connections over the shared host NIC with IOMMU-confined virtio queues; AF_UNIX stream socket pairs cover local runtime coordination. Server sockets, ancillary data, IPv6, and complete option/error semantics remain pending. |
 | OCI overlay root | Partial | Verified layers are assembled in manifest order with replacements and OCI whiteouts. Broader overlay conformance remains under test. |
-| Runtime `mmap` | Partial | Page-table-backed anonymous and OCI file mappings, fixed placement, protection changes, unmap, `madvise`, and `mincore` support Alpine and the validated Rocky glibc/coreutils path. Process snapshot metadata is still bounded and demand paging, COW, shared mappings, and full Linux semantics remain incomplete. |
+| Runtime `mmap` | Partial | Page-table-backed anonymous and OCI file mappings, fixed placement, in-place growth/shrink and movable anonymous `mremap`, protection changes, unmap, `madvise`, and `mincore` support Alpine and the validated Rocky glibc/coreutils path. Process snapshot metadata is still bounded and COW, shared mappings, `MREMAP_DONTUNMAP`, movable file mappings, and full Linux semantics remain incomplete. |
 | `/dev` and terminal ABI | Partial | Selected console/device nodes and bounded termios/winsize ioctls. |
 | `/sys` | Missing | No Linux-compatible sysfs contract. |
 | Credentials and user namespaces | Partial | Container-scoped identity and hard privilege boundary; many mutation calls are policy-denied. |
@@ -104,7 +104,7 @@ therefore omitted.
 | 22 | pipe | Partial |
 | 23 | select | Partial |
 | 24 | sched_yield | Partial |
-| 25 | mremap | Missing |
+| 25 | mremap | Partial |
 | 26 | msync | Partial |
 | 27 | mincore | Partial |
 | 28 | madvise | Partial |
@@ -178,7 +178,7 @@ therefore omitted.
 | 96 | gettimeofday | Partial |
 | 97 | getrlimit | Partial |
 | 98 | getrusage | Partial |
-| 99 | sysinfo | Missing |
+| 99 | sysinfo | Partial |
 | 100 | times | Partial |
 | 101 | ptrace | Missing |
 | 102 | getuid | Partial |
@@ -227,11 +227,11 @@ therefore omitted.
 | 145 | sched_getscheduler | Partial |
 | 146 | sched_get_priority_max | Partial |
 | 147 | sched_get_priority_min | Partial |
-| 148 | sched_rr_get_interval | Missing |
-| 149 | mlock | Missing |
-| 150 | munlock | Missing |
-| 151 | mlockall | Missing |
-| 152 | munlockall | Missing |
+| 148 | sched_rr_get_interval | Partial |
+| 149 | mlock | Partial |
+| 150 | munlock | Partial |
+| 151 | mlockall | Partial |
+| 152 | munlockall | Partial |
 | 153 | vhangup | Missing |
 | 154 | modify_ldt | Missing |
 | 155 | pivot_root | Policy-denied |
@@ -239,9 +239,9 @@ therefore omitted.
 | 157 | prctl | Partial |
 | 158 | arch_prctl | Partial |
 | 159 | adjtimex | Missing |
-| 160 | setrlimit | Missing |
+| 160 | setrlimit | Partial |
 | 161 | chroot | Policy-denied |
-| 162 | sync | Missing |
+| 162 | sync | Partial |
 | 163 | acct | Missing |
 | 164 | settimeofday | Missing |
 | 165 | mount | Policy-denied |
@@ -266,7 +266,7 @@ therefore omitted.
 | 184 | tuxcall | Missing |
 | 185 | security | Missing |
 | 186 | gettid | Partial |
-| 187 | readahead | Missing |
+| 187 | readahead | Partial |
 | 188 | setxattr | Partial |
 | 189 | lsetxattr | Partial |
 | 190 | fsetxattr | Partial |
@@ -292,7 +292,7 @@ therefore omitted.
 | 210 | io_cancel | Missing |
 | 211 | get_thread_area | Missing |
 | 212 | lookup_dcookie | Missing |
-| 213 | epoll_create | Missing |
+| 213 | epoll_create | Partial |
 | 214 | epoll_ctl_old | Missing |
 | 215 | epoll_wait_old | Missing |
 | 216 | remap_file_pages | Missing |
@@ -330,8 +330,8 @@ therefore omitted.
 | 248 | add_key | Missing |
 | 249 | request_key | Missing |
 | 250 | keyctl | Missing |
-| 251 | ioprio_set | Missing |
-| 252 | ioprio_get | Missing |
+| 251 | ioprio_set | Partial |
+| 252 | ioprio_get | Partial |
 | 253 | inotify_init | Missing |
 | 254 | inotify_add_watch | Missing |
 | 255 | inotify_rm_watch | Missing |
@@ -385,7 +385,7 @@ therefore omitted.
 | 303 | name_to_handle_at | Missing |
 | 304 | open_by_handle_at | Missing |
 | 305 | clock_adjtime | Missing |
-| 306 | syncfs | Missing |
+| 306 | syncfs | Partial |
 | 307 | sendmmsg | Missing |
 | 308 | setns | Policy-denied |
 | 309 | getcpu | Partial |
@@ -403,8 +403,8 @@ therefore omitted.
 | 321 | bpf | Policy-denied |
 | 322 | execveat | Partial |
 | 323 | userfaultfd | Missing |
-| 324 | membarrier | Missing |
-| 325 | mlock2 | Missing |
+| 324 | membarrier | Partial |
+| 325 | mlock2 | Partial |
 | 326 | copy_file_range | Missing |
 | 327 | preadv2 | Missing |
 | 328 | pwritev2 | Missing |

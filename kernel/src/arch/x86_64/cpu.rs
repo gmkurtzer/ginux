@@ -90,6 +90,7 @@ const LINUX_ACCESS_SYSCALL: u64 = 21;
 const LINUX_PIPE_SYSCALL: u64 = 22;
 const LINUX_SELECT_SYSCALL: u64 = 23;
 const LINUX_SCHED_YIELD_SYSCALL: u64 = 24;
+const LINUX_MREMAP_SYSCALL: u64 = 25;
 const LINUX_MSYNC_SYSCALL: u64 = 26;
 const LINUX_MINCORE_SYSCALL: u64 = 27;
 const LINUX_MADVISE_SYSCALL: u64 = 28;
@@ -174,6 +175,7 @@ const LINUX_UMASK_SYSCALL: u64 = 95;
 const LINUX_GETTIMEOFDAY_SYSCALL: u64 = 96;
 const LINUX_GETRLIMIT_SYSCALL: u64 = 97;
 const LINUX_GETRUSAGE_SYSCALL: u64 = 98;
+const LINUX_SYSINFO_SYSCALL: u64 = 99;
 const LINUX_TIMES_SYSCALL: u64 = 100;
 const LINUX_GETUID_SYSCALL: u64 = 102;
 const LINUX_GETGID_SYSCALL: u64 = 104;
@@ -209,6 +211,13 @@ const LINUX_SCHED_SETSCHEDULER_SYSCALL: u64 = 144;
 const LINUX_SCHED_GETSCHEDULER_SYSCALL: u64 = 145;
 const LINUX_SCHED_GET_PRIORITY_MAX_SYSCALL: u64 = 146;
 const LINUX_SCHED_GET_PRIORITY_MIN_SYSCALL: u64 = 147;
+const LINUX_SCHED_RR_GET_INTERVAL_SYSCALL: u64 = 148;
+const LINUX_MLOCK_SYSCALL: u64 = 149;
+const LINUX_MUNLOCK_SYSCALL: u64 = 150;
+const LINUX_MLOCKALL_SYSCALL: u64 = 151;
+const LINUX_MUNLOCKALL_SYSCALL: u64 = 152;
+const LINUX_SETRLIMIT_SYSCALL: u64 = 160;
+const LINUX_SYNC_SYSCALL: u64 = 162;
 const LINUX_PRCTL_SYSCALL: u64 = 157;
 const LINUX_ARCH_PRCTL_SYSCALL: u64 = 158;
 const LINUX_PIVOT_ROOT_SYSCALL: u64 = 155;
@@ -225,6 +234,7 @@ const LINUX_IOPERM_SYSCALL: u64 = 173;
 const LINUX_INIT_MODULE_SYSCALL: u64 = 175;
 const LINUX_DELETE_MODULE_SYSCALL: u64 = 176;
 const LINUX_GETTID_SYSCALL: u64 = 186;
+const LINUX_READAHEAD_SYSCALL: u64 = 187;
 const LINUX_SETXATTR_SYSCALL: u64 = 188;
 const LINUX_LSETXATTR_SYSCALL: u64 = 189;
 const LINUX_FSETXATTR_SYSCALL: u64 = 190;
@@ -242,6 +252,7 @@ const LINUX_SCHED_SETAFFINITY_SYSCALL: u64 = 203;
 const LINUX_SCHED_GETAFFINITY_SYSCALL: u64 = 204;
 const LINUX_GETDENTS64_SYSCALL: u64 = 217;
 const LINUX_FADVISE64_SYSCALL: u64 = 221;
+const LINUX_EPOLL_CREATE_SYSCALL: u64 = 213;
 const LINUX_SET_TID_ADDRESS_SYSCALL: u64 = 218;
 const LINUX_CLOCK_GETTIME_SYSCALL: u64 = 228;
 const LINUX_CLOCK_GETRES_SYSCALL: u64 = 229;
@@ -279,11 +290,16 @@ const LINUX_CLONE3_SYSCALL: u64 = 435;
 const LINUX_PIPE2_SYSCALL: u64 = 293;
 const LINUX_PRLIMIT64_SYSCALL: u64 = 302;
 const LINUX_GETCPU_SYSCALL: u64 = 309;
+const LINUX_IOPRIO_SET_SYSCALL: u64 = 251;
+const LINUX_IOPRIO_GET_SYSCALL: u64 = 252;
+const LINUX_SYNCFS_SYSCALL: u64 = 306;
 const LINUX_PERF_EVENT_OPEN_SYSCALL: u64 = 298;
 const LINUX_SETNS_SYSCALL: u64 = 308;
 const LINUX_FINIT_MODULE_SYSCALL: u64 = 313;
 const LINUX_KEXEC_FILE_LOAD_SYSCALL: u64 = 320;
 const LINUX_BPF_SYSCALL: u64 = 321;
+const LINUX_MEMBARRIER_SYSCALL: u64 = 324;
+const LINUX_MLOCK2_SYSCALL: u64 = 325;
 const LINUX_EXECVEAT_SYSCALL: u64 = 322;
 const LINUX_GETRANDOM_SYSCALL: u64 = 318;
 const LINUX_STATX_SYSCALL: u64 = 332;
@@ -7450,6 +7466,9 @@ extern "sysv64" fn linux_syscall_handler(
             )
         }
         LINUX_MUNMAP_SYSCALL => linux_munmap(first_argument, buffer),
+        LINUX_MREMAP_SYSCALL => {
+            linux_mremap(first_argument, buffer, count, register(0), register(2))
+        }
         LINUX_MSYNC_SYSCALL => linux_msync(first_argument, buffer, count),
         LINUX_MPROTECT_SYSCALL => {
             if !first_argument.is_multiple_of(PAGE_SIZE as u64) || buffer == 0 {
@@ -7907,6 +7926,17 @@ extern "sysv64" fn linux_syscall_handler(
                 LINUX_EINVAL
             }
         }
+        LINUX_SCHED_RR_GET_INTERVAL_SYSCALL => linux_sched_rr_get_interval(first_argument, buffer),
+        LINUX_MLOCK_SYSCALL | LINUX_MUNLOCK_SYSCALL => linux_memory_lock(first_argument, buffer, 0),
+        LINUX_MLOCK2_SYSCALL => linux_memory_lock(first_argument, buffer, count),
+        LINUX_MLOCKALL_SYSCALL => {
+            if first_argument != 0 && first_argument & !7 == 0 {
+                0
+            } else {
+                LINUX_EINVAL
+            }
+        }
+        LINUX_MUNLOCKALL_SYSCALL => 0,
         LINUX_PRCTL_SYSCALL => match first_argument {
             LINUX_PR_SET_NAME => linux_set_process_name(buffer),
             LINUX_PR_GET_NAME => linux_get_process_name(buffer),
@@ -8123,7 +8153,10 @@ extern "sysv64" fn linux_syscall_handler(
             }
             0
         }
+        LINUX_SETRLIMIT_SYSCALL => linux_setrlimit(first_argument, buffer),
+        LINUX_SYNC_SYSCALL => 0,
         LINUX_GETRUSAGE_SYSCALL => linux_getrusage(first_argument, buffer),
+        LINUX_SYSINFO_SYSCALL => linux_sysinfo(first_argument),
         LINUX_TIMES_SYSCALL => linux_times(first_argument),
         LINUX_FUTEX_SYSCALL => linux_futex_live_return(
             registers,
@@ -8193,11 +8226,29 @@ extern "sysv64" fn linux_syscall_handler(
         }
         LINUX_GETRANDOM_SYSCALL => linux_getrandom(first_argument, buffer, count),
         LINUX_GETDENTS64_SYSCALL => linux_getdents64(first_argument, buffer, count),
+        LINUX_READAHEAD_SYSCALL => linux_readahead(first_argument, buffer, count),
+        LINUX_EPOLL_CREATE_SYSCALL => {
+            if first_argument == 0 {
+                LINUX_EINVAL
+            } else {
+                linux_epoll_create1(0)
+            }
+        }
+        LINUX_IOPRIO_GET_SYSCALL => linux_ioprio_get(first_argument, buffer),
+        LINUX_IOPRIO_SET_SYSCALL => linux_ioprio_set(first_argument, buffer, count),
         LINUX_CLOCK_GETTIME_SYSCALL => linux_clock_gettime(first_argument, buffer),
         LINUX_CLOCK_GETRES_SYSCALL => linux_clock_getres(first_argument, buffer),
         LINUX_UTIMENSAT_SYSCALL => linux_utimensat(first_argument, buffer, count, register(0)),
         LINUX_STATX_SYSCALL => linux_statx(first_argument, buffer, count, register(0), register(2)),
         LINUX_CLOSE_RANGE_SYSCALL => linux_close_range(first_argument, buffer, count),
+        LINUX_SYNCFS_SYSCALL => {
+            if linux_descriptor_open(first_argument) {
+                0
+            } else {
+                LINUX_EBADF
+            }
+        }
+        LINUX_MEMBARRIER_SYSCALL => linux_membarrier(first_argument, buffer, count),
         LINUX_WAIT4_SYSCALL => linux_wait4(first_argument, buffer, count, register(0)),
         LINUX_EXIT_SYSCALL
             if LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
@@ -9278,6 +9329,23 @@ fn linux_times(output_address: u64) -> u64 {
         }
     }
     ticks
+}
+
+fn linux_sysinfo(output_address: u64) -> u64 {
+    let Some((uptime, _)) = linux_elapsed_time() else {
+        return LINUX_ENOSYS;
+    };
+    let mut information = [0_u8; 112];
+    information[..8].copy_from_slice(&uptime.to_ne_bytes());
+    information[32..40].copy_from_slice(&(1024_u64 * 1024 * 1024).to_ne_bytes());
+    information[40..48].copy_from_slice(&(768_u64 * 1024 * 1024).to_ne_bytes());
+    information[80..82].copy_from_slice(&1_u16.to_ne_bytes());
+    information[104..108].copy_from_slice(&1_u32.to_ne_bytes());
+    if copy_to_linux_user(output_address, &information) {
+        0
+    } else {
+        LINUX_EFAULT
+    }
 }
 
 fn linux_getrusage(who: u64, output_address: u64) -> u64 {
@@ -10504,6 +10572,155 @@ fn linux_runtime_munmap(address: u64, length: u64) -> u64 {
         }
     }
     0
+}
+
+fn install_linux_runtime_page(address: u64, page: address_space::LinuxRuntimePage) -> bool {
+    match page.frame {
+        Some(frame) => {
+            address_space::install_current_linux_runtime_page(
+                address,
+                frame,
+                page.protection,
+                page.file,
+                false,
+            ) == Some(None)
+        }
+        None => {
+            address_space::reserve_current_linux_runtime_page(
+                address,
+                page.protection,
+                page.file,
+                false,
+            ) == Some(None)
+        }
+    }
+}
+
+fn linux_mremap(
+    old_address: u64,
+    old_length: u64,
+    new_length: u64,
+    flags: u64,
+    fixed_address: u64,
+) -> u64 {
+    const MREMAP_MAYMOVE: u64 = 1;
+    const MREMAP_FIXED: u64 = 2;
+    const MREMAP_DONTUNMAP: u64 = 4;
+    if !LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
+        return LINUX_ENOSYS;
+    }
+    let Some((old_end, old_pages)) = linux_runtime_mapping_range(old_address, old_length) else {
+        return LINUX_EINVAL;
+    };
+    let Ok(new_pages) = usize::try_from(new_length.div_ceil(PAGE_SIZE as u64)) else {
+        return LINUX_ENOMEM;
+    };
+    if new_length == 0
+        || flags & !(MREMAP_MAYMOVE | MREMAP_FIXED | MREMAP_DONTUNMAP) != 0
+        || flags & MREMAP_FIXED != 0 && flags & MREMAP_MAYMOVE == 0
+        || flags & MREMAP_DONTUNMAP != 0
+        || (0..old_pages).any(|page| {
+            !address_space::current_linux_runtime_page(old_address + (page * PAGE_SIZE) as u64)
+                .occupied
+        })
+    {
+        return LINUX_EINVAL;
+    }
+    if old_pages == new_pages {
+        return old_address;
+    }
+    if new_pages < old_pages {
+        for page in new_pages..old_pages {
+            if !release_linux_runtime_page(address_space::remove_current_linux_runtime_page(
+                old_address + (page * PAGE_SIZE) as u64,
+            )) {
+                return LINUX_EINVAL;
+            }
+        }
+        return old_address;
+    }
+
+    let template = address_space::current_linux_runtime_page(old_address);
+    let extension_pages = new_pages - old_pages;
+    if template.file {
+        return LINUX_ENOMEM;
+    }
+    if linux_runtime_range_available(old_end, extension_pages) {
+        for page in 0..extension_pages {
+            let address = old_end + (page * PAGE_SIZE) as u64;
+            if address_space::reserve_current_linux_runtime_page(
+                address,
+                template.protection,
+                false,
+                false,
+            ) != Some(None)
+            {
+                let _ = rollback_linux_runtime_mapping(old_end, page);
+                return LINUX_ENOMEM;
+            }
+        }
+        return old_address;
+    }
+    if flags & MREMAP_MAYMOVE == 0 {
+        return LINUX_ENOMEM;
+    }
+    let fixed = flags & MREMAP_FIXED != 0;
+    let Some(destination) = linux_runtime_select_mapping(fixed_address, new_pages, fixed) else {
+        return LINUX_ENOMEM;
+    };
+    let Some(destination_end) = destination.checked_add((new_pages * PAGE_SIZE) as u64) else {
+        return LINUX_ENOMEM;
+    };
+    if destination < old_end && old_address < destination_end
+        || !linux_runtime_range_available(destination, new_pages)
+    {
+        return if fixed { LINUX_EINVAL } else { LINUX_ENOMEM };
+    }
+
+    for page_index in 0..old_pages {
+        let source = old_address + (page_index * PAGE_SIZE) as u64;
+        let target = destination + (page_index * PAGE_SIZE) as u64;
+        let page = address_space::remove_current_linux_runtime_page(source);
+        if !page.occupied || !install_linux_runtime_page(target, page) {
+            if page.occupied {
+                let _ = install_linux_runtime_page(source, page);
+            }
+            for rollback in 0..page_index {
+                let moved = address_space::remove_current_linux_runtime_page(
+                    destination + (rollback * PAGE_SIZE) as u64,
+                );
+                let _ =
+                    install_linux_runtime_page(old_address + (rollback * PAGE_SIZE) as u64, moved);
+            }
+            return LINUX_ENOMEM;
+        }
+    }
+    for page in old_pages..new_pages {
+        let target = destination + (page * PAGE_SIZE) as u64;
+        if address_space::reserve_current_linux_runtime_page(
+            target,
+            template.protection,
+            false,
+            false,
+        ) != Some(None)
+        {
+            for extension in old_pages..page {
+                let _ =
+                    release_linux_runtime_page(address_space::remove_current_linux_runtime_page(
+                        destination + (extension * PAGE_SIZE) as u64,
+                    ));
+            }
+            for rollback in 0..old_pages {
+                let moved = address_space::remove_current_linux_runtime_page(
+                    destination + (rollback * PAGE_SIZE) as u64,
+                );
+                let _ =
+                    install_linux_runtime_page(old_address + (rollback * PAGE_SIZE) as u64, moved);
+            }
+            return LINUX_ENOMEM;
+        }
+    }
+    destination
 }
 
 fn linux_msync(address: u64, length: u64, flags: u64) -> u64 {
@@ -19519,6 +19736,119 @@ fn linux_resource_limit(resource: u64) -> Option<[u8; 16]> {
     limit[..8].copy_from_slice(&value.to_ne_bytes());
     limit[8..].copy_from_slice(&value.to_ne_bytes());
     Some(limit)
+}
+
+fn linux_setrlimit(resource: u64, address: u64) -> u64 {
+    let Some(current) = linux_resource_limit(resource) else {
+        return LINUX_EINVAL;
+    };
+    let mut requested = [0_u8; 16];
+    if !copy_from_linux_user(address, &mut requested) {
+        return LINUX_EFAULT;
+    }
+    if requested == current {
+        0
+    } else {
+        LINUX_EPERM
+    }
+}
+
+fn linux_sched_rr_get_interval(pid: u64, address: u64) -> u64 {
+    if !matches!(pid, 0 | 1) {
+        return LINUX_ESRCH;
+    }
+    let mut interval = [0_u8; 16];
+    interval[8..].copy_from_slice(&100_000_000_u64.to_ne_bytes());
+    if copy_to_linux_user(address, &interval) {
+        0
+    } else {
+        LINUX_EFAULT
+    }
+}
+
+fn linux_memory_lock(address: u64, length: u64, flags: u64) -> u64 {
+    if flags & !1 != 0 {
+        return LINUX_EINVAL;
+    }
+    if length == 0 {
+        return 0;
+    }
+    let Ok(length) = usize::try_from(length) else {
+        return LINUX_ENOMEM;
+    };
+    if address_space::current_linux_range_mapped(address, length, false) {
+        // Ginux has no swapping or reclaim path: every mapped page is already
+        // resident, so locking and unlocking do not require additional state.
+        0
+    } else {
+        LINUX_ENOMEM
+    }
+}
+
+fn linux_readahead(descriptor: u64, offset: u64, _count: u64) -> u64 {
+    if !linux_descriptor_open(descriptor) {
+        return LINUX_EBADF;
+    }
+    if (offset as i64) < 0 {
+        return LINUX_EINVAL;
+    }
+    let state = linux_device_descriptor(descriptor);
+    if linux_overlay_descriptor_handle(descriptor).is_some()
+        || linux_oci_entry(descriptor).is_some()
+        || linux_regular_file(state).is_some()
+    {
+        // File contents are already resident in the immutable image or the
+        // in-memory overlay, so there is no asynchronous read-ahead work.
+        0
+    } else {
+        LINUX_EINVAL
+    }
+}
+
+fn linux_ioprio_get(which: u64, who: u64) -> u64 {
+    if !matches!(which, 1..=3) {
+        return LINUX_EINVAL;
+    }
+    if who == 0 || who == 1 {
+        0
+    } else {
+        LINUX_ESRCH
+    }
+}
+
+fn linux_ioprio_set(which: u64, who: u64, priority: u64) -> u64 {
+    if !matches!(which, 1..=3) {
+        return LINUX_EINVAL;
+    }
+    if !matches!(who, 0 | 1) {
+        return LINUX_ESRCH;
+    }
+    if priority == 0 {
+        0
+    } else {
+        LINUX_EPERM
+    }
+}
+
+fn linux_membarrier(command: u64, flags: u64, cpu_id: u64) -> u64 {
+    const MEMBARRIER_CMD_QUERY: u64 = 0;
+    const MEMBARRIER_CMD_PRIVATE_EXPEDITED: u64 = 1 << 3;
+    const MEMBARRIER_CMD_REGISTER_PRIVATE_EXPEDITED: u64 = 1 << 4;
+    let supported = MEMBARRIER_CMD_PRIVATE_EXPEDITED | MEMBARRIER_CMD_REGISTER_PRIVATE_EXPEDITED;
+    if command == MEMBARRIER_CMD_QUERY {
+        return supported;
+    }
+    if flags != 0 || cpu_id != 0 {
+        return LINUX_EINVAL;
+    }
+    match command {
+        MEMBARRIER_CMD_REGISTER_PRIVATE_EXPEDITED => 0,
+        MEMBARRIER_CMD_PRIVATE_EXPEDITED => {
+            core::sync::atomic::fence(Ordering::SeqCst);
+            0
+        }
+        _ => LINUX_EINVAL,
+    }
 }
 
 fn linux_console_stat() -> [u8; LINUX_STAT_SIZE] {

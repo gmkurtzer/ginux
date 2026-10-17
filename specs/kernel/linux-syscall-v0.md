@@ -725,6 +725,20 @@ all resource counters remain zero. The no-child proof returns an all-zero
 structure for `RUSAGE_CHILDREN`. Other selectors return `-EINVAL`, and an
 invalid complete output returns `-EFAULT` without a partial write. This is
 single-task compatibility accounting, not scheduler-derived usage accounting.
+`sysinfo` publishes the same one-GiB, no-swap memory profile exposed through
+the current procfs compatibility files plus monotonic uptime and one process.
+`sched_rr_get_interval` reports a 100 ms quantum for the current process.
+Because Ginux has no swap or page reclaim path, `mlock`, `mlock2`, `munlock`,
+`mlockall`, and `munlockall` validate their admitted arguments and mapped
+ranges but require no additional residency state. `setrlimit` accepts an
+idempotent write of the current bounded stack or descriptor limit; changing a
+limit remains denied. `sync`, `syncfs`, and `readahead` are successful for
+valid memory-backed filesystem objects because their data is already resident
+and there is no durable backing store in this milestone. Legacy
+`epoll_create` delegates to `epoll_create1(0)`. The current process, group, or
+user may query the default I/O priority or idempotently set it to default.
+`membarrier` advertises, registers, and executes the private-expedited profile
+with a sequentially consistent kernel fence; other commands remain rejected.
 `rax = 36` (`__NR_getitimer`) reports each of `ITIMER_REAL`, `ITIMER_VIRTUAL`,
 and `ITIMER_PROF` as a zero-initialized, disabled 32-byte x86-64 `itimerval`.
 `rax = 38` (`__NR_setitimer`) accepts an all-zero value to idempotently disarm
@@ -863,6 +877,15 @@ mappings outside the admitted executable pages, ranges outside the bounded
 window, arbitrary files, demand paging, and mapping growth are unsupported.
 Outside the scratch window, fixed placement is available only for the seven
 admitted main pages and two admitted dependency pages described above.
+For runtime domains, `rax = 25` (`__NR_mremap`) accepts a complete mapped
+page-aligned range in the dynamic mapping region. Shrink releases trailing
+pages; growth extends an anonymous mapping in place when the following range
+is free. `MREMAP_MAYMOVE` relocates the same generation-bound frames and
+preserves page protections when in-place growth is impossible, while
+`MREMAP_FIXED` additionally selects a non-overlapping free destination.
+Relocation rollback restores every page to its source range on a failed move.
+File-backed growth and `MREMAP_DONTUNMAP` remain unsupported. The boot probe
+profile continues to reject `mremap` with `-ENOSYS`.
 `rax = 28` (`__NR_madvise`) accepts only `MADV_DONTNEED` for a fully mapped
 nonzero range rounding to one through four anonymous pages. The range may cross adjacent registry
 records. Immutable-file mappings and `PROT_NONE` reservations reject advice
