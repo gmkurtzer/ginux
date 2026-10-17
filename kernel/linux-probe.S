@@ -250,6 +250,15 @@ valid_interpreter_base:
     jmp .Llinux_ni_probe
 .Llinux_ni_probe_done:
     pop r12
+    xor edi, edi
+    mov eax, 37
+    syscall
+    test rax, rax
+    jne failure
+    mov eax, 219
+    syscall
+    cmp rax, -4
+    jne failure
 #endif
 
     push 1

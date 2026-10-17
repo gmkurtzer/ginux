@@ -42,7 +42,7 @@ implemented calls lives in [Linux Syscall Entry v0](../specs/kernel/linux-syscal
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **17 Complete**, **212 Partial**, **37 Policy-denied**, **109 Missing**.
+Current totals: **17 Complete**, **214 Partial**, **37 Policy-denied**, **107 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -116,7 +116,7 @@ therefore omitted.
 | 34 | pause | Partial |
 | 35 | nanosleep | Partial |
 | 36 | getitimer | Partial |
-| 37 | alarm | Missing |
+| 37 | alarm | Partial |
 | 38 | setitimer | Partial |
 | 39 | getpid | Partial |
 | 40 | sendfile | Partial |
@@ -298,7 +298,7 @@ therefore omitted.
 | 216 | remap_file_pages | Missing |
 | 217 | getdents64 | Partial |
 | 218 | set_tid_address | Partial |
-| 219 | restart_syscall | Missing |
+| 219 | restart_syscall | Partial |
 | 220 | semtimedop | Missing |
 | 221 | fadvise64 | Partial |
 | 222 | timer_create | Missing |

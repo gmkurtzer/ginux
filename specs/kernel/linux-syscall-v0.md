@@ -815,6 +815,12 @@ microsecond-resolution inputs to overlay timestamps; null time pointers select
 the current realtime value, matching the existing bounded `utimensat` policy.
 `rax = 36` (`__NR_getitimer`) reports each of `ITIMER_REAL`, `ITIMER_VIRTUAL`,
 and `ITIMER_PROF` as a zero-initialized, disabled 32-byte x86-64 `itimerval`.
+`alarm(0)` idempotently disarms the same currently disabled `ITIMER_REAL`
+profile and returns zero. Arming through `alarm` remains unsupported until
+asynchronous `SIGALRM` delivery exists. A direct `restart_syscall` with no
+installed restart block returns `-EINTR`, matching Linux's initial
+`do_no_restart_syscall` state; resumable interrupted operations are not yet
+represented by a restart block.
 `rax = 38` (`__NR_setitimer`) accepts an all-zero value to idempotently disarm
 one of those timers and optionally returns its previous disabled value. Arming
 a timer returns `-ENOSYS` until asynchronous signal delivery exists. Invalid

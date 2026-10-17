@@ -100,6 +100,7 @@ const LINUX_DUP2_SYSCALL: u64 = 33;
 const LINUX_PAUSE_SYSCALL: u64 = 34;
 const LINUX_NANOSLEEP_SYSCALL: u64 = 35;
 const LINUX_GETITIMER_SYSCALL: u64 = 36;
+const LINUX_ALARM_SYSCALL: u64 = 37;
 const LINUX_SETITIMER_SYSCALL: u64 = 38;
 const LINUX_GETPID_SYSCALL: u64 = 39;
 const LINUX_SENDFILE_SYSCALL: u64 = 40;
@@ -286,6 +287,7 @@ const LINUX_EPOLL_CREATE_SYSCALL: u64 = 213;
 const LINUX_EPOLL_CTL_OLD_SYSCALL: u64 = 214;
 const LINUX_EPOLL_WAIT_OLD_SYSCALL: u64 = 215;
 const LINUX_SET_TID_ADDRESS_SYSCALL: u64 = 218;
+const LINUX_RESTART_SYSCALL: u64 = 219;
 const LINUX_CLOCK_GETTIME_SYSCALL: u64 = 228;
 const LINUX_CLOCK_GETRES_SYSCALL: u64 = 229;
 const LINUX_CLOCK_NANOSLEEP_SYSCALL: u64 = 230;
@@ -7689,7 +7691,15 @@ extern "sysv64" fn linux_syscall_handler(
             register(0),
         ),
         LINUX_GETITIMER_SYSCALL => linux_getitimer(first_argument, buffer),
+        LINUX_ALARM_SYSCALL => {
+            if first_argument == 0 {
+                0
+            } else {
+                LINUX_ENOSYS
+            }
+        }
         LINUX_SETITIMER_SYSCALL => linux_setitimer(first_argument, buffer, count),
+        LINUX_RESTART_SYSCALL => LINUX_EINTR,
         LINUX_EPOLL_WAIT_SYSCALL => linux_epoll_wait_live_return(
             registers,
             syscall_return,
