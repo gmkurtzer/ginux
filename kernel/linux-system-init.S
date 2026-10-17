@@ -320,6 +320,67 @@ ginux_linux_system_init:
     test rax, rax
     jne .Lfailure
 
+    mov edi, 2
+    mov esi, 0x80801
+    xor edx, edx
+    mov eax, 41
+    syscall
+    cmp rax, 4
+    jne .Lfailure
+    mov qword ptr [rip + .Lstatus], 2
+    mov qword ptr [rip + .Lstatus + 8], 0
+    mov edi, 4
+    lea rsi, [rip + .Lstatus]
+    mov edx, 16
+    mov eax, 49
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov edi, 4
+    mov esi, 4
+    mov eax, 50
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov dword ptr [rip + .Lstatus + 16], 16
+    mov edi, 4
+    lea rsi, [rip + .Lstatus]
+    lea rdx, [rip + .Lstatus + 16]
+    mov eax, 51
+    syscall
+    test rax, rax
+    jne .Lfailure
+    cmp word ptr [rip + .Lstatus], 2
+    jne .Lfailure
+    cmp word ptr [rip + .Lstatus + 2], 0
+    je .Lfailure
+    mov edi, 4
+    xor esi, esi
+    xor edx, edx
+    mov eax, 43
+    syscall
+    cmp rax, -11
+    jne .Lfailure
+    mov edi, 4
+    xor esi, esi
+    xor edx, edx
+    mov r10d, 1
+    mov eax, 288
+    syscall
+    cmp rax, -22
+    jne .Lfailure
+    mov edi, 4
+    mov esi, 2
+    mov eax, 48
+    syscall
+    cmp rax, -107
+    jne .Lfailure
+    mov edi, 4
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Lfailure
+
     mov rdi, r15
     lea rsi, [rip + .Ldevfs_marker]
     mov edx, 12

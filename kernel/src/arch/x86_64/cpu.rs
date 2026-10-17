@@ -8808,6 +8808,7 @@ extern "sysv64" fn linux_syscall_handler(
                 if current_linux_clear_child_tid() != Some(0)
                     || current_linux_robust_list() != Some(0)
                     || !linux_close_all_descriptors()
+                    || !crate::linux_socket::shutdown()
                     || !linux_tmpfs::teardown()
                     || !crate::linux_overlay::teardown()
                     || !retire_current_linux_thread()
@@ -8833,6 +8834,7 @@ extern "sysv64" fn linux_syscall_handler(
                 || !set_current_linux_clear_child_tid(0)
                 || !set_current_linux_robust_list(0)
                 || !linux_close_all_descriptors()
+                || !crate::linux_socket::shutdown()
                 || !linux_tmpfs::teardown()
                 || !crate::linux_overlay::teardown()
             {
@@ -16995,13 +16997,23 @@ fn linux_write_socket_address(
 }
 
 fn linux_socket_shutdown(descriptor: u64, how: u64) -> u64 {
-    if linux_socket_slot(descriptor).is_none() {
+    let Some(slot) = linux_socket_slot(descriptor) else {
         return LINUX_EBADF;
-    }
+    };
     if how > 2 {
         return LINUX_EINVAL;
     }
-    0
+    match crate::linux_socket::kind(slot) {
+        Some(crate::linux_socket::Kind::Unix) => 0,
+        Some(crate::linux_socket::Kind::Tcp | crate::linux_socket::Kind::Udp) => {
+            if crate::linux_socket::names(slot).is_some_and(|(_, remote)| remote.is_some()) {
+                0
+            } else {
+                LINUX_ENOTCONN
+            }
+        }
+        None => LINUX_EBADF,
+    }
 }
 
 fn linux_socket_name(descriptor: u64, address: u64, length: u64, peer: bool) -> u64 {
@@ -24080,7 +24092,10 @@ fn linux_terminate_by_default_signal(signal: u64) -> u64 {
     for descriptor in 0..LINUX_AUX_DESCRIPTOR_LIMIT {
         let _ = linux_descriptor_close(descriptor);
     }
-    if !linux_tmpfs::teardown() || !crate::linux_overlay::teardown() {
+    if !crate::linux_socket::shutdown()
+        || !linux_tmpfs::teardown()
+        || !crate::linux_overlay::teardown()
+    {
         return LINUX_EIO;
     }
     retire_all_linux_threads();
@@ -26666,7 +26681,7 @@ fn host_inspect(domain_id: u64, capability: u64, frame: *const UserTrapFrame) ->
 }
 
 pub(crate) fn publish_linux_abi_test_results() -> bool {
-    const VERIFIED_LINUX_PROFILE: u64 = (1 << 16) - 1;
+    const VERIFIED_LINUX_PROFILE: u64 = ((1 << 16) - 1) | (1 << 18);
 
     if control_abi::LINUX_ABI_TEST_COUNT > u64::BITS as usize {
         return false;

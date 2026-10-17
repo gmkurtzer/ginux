@@ -72,10 +72,11 @@ qemu_pid=""
 
 for expected in \
     'Linux userspace runtime conformance summary:' \
-    'Interfaces: 16 passed, 7 failed, 23 total' \
+    'Interfaces: 17 passed, 6 failed, 23 total' \
     'Syscalls: 17 passed, 260 unverified, 44 policy-denied, 54 unsupported, 375 total' \
     'Linux userspace interface runtime tests (bounded profile):' \
     'PASS syscall-entry' \
+    'PASS socket-api' \
     'FAIL linux-module-userspace-api' \
     'UNVERIFIED 0 read' \
     'UNVERIFIED 34 pause' \

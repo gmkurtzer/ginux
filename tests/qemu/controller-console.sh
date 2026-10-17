@@ -117,7 +117,7 @@ for expected in \
     'test ENVIRONMENT' \
     'Test a userspace compatibility environment' \
     'Linux userspace runtime conformance summary:' \
-    'Interfaces: 16 passed, 7 failed, 23 total' \
+    'Interfaces: 17 passed, 6 failed, 23 total' \
     'Syscalls: 17 passed, 260 unverified, 44 policy-denied, 54 unsupported, 375 total' \
     "Run 'test linux all' for every result." \
     'Linux userspace interface runtime tests (bounded profile):' \
@@ -137,14 +137,14 @@ for expected in \
     'PASS credentials-and-user-namespaces' \
     'PASS clocks-and-timers' \
     'PASS ioctl-profile' \
+    'PASS socket-api' \
     'FAIL sysfs' \
     'FAIL mount-and-namespace-api' \
-    'FAIL socket-api' \
     'FAIL cgroups' \
     'FAIL seccomp-audit-and-lsm' \
     'FAIL vdso-and-vvar' \
     'FAIL linux-module-userspace-api' \
-    'Summary: 16 passed, 7 failed, 23 total' \
+    'Summary: 17 passed, 6 failed, 23 total' \
     'PASS covers the current bounded Linux profile; FAIL is unsupported or unverified.' \
     'Linux x86-64 syscall conformance ledger:' \
     'UNVERIFIED 0 read' \

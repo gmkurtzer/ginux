@@ -924,6 +924,9 @@ pub(crate) fn endpoint(address: u32, port: u16) -> IpEndpoint {
 }
 
 fn poll() {
+    if !network::link_is_up() {
+        return;
+    }
     let Some(runtime) = runtime_existing() else {
         return;
     };
@@ -944,7 +947,7 @@ fn runtime() -> Result<&'static mut Runtime, Error> {
     let ipv4 = configuration as u32;
     let prefix = (configuration >> 32) as u8;
     let gateway = network::ipv4_gateway() as u32;
-    if !network::link_is_up() || ipv4 == 0 || prefix > 32 || gateway == 0 {
+    if ipv4 == 0 || prefix > 32 || gateway == 0 {
         return Err(Error::Unavailable);
     }
     let receive = platform
