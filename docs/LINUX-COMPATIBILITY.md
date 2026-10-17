@@ -42,7 +42,7 @@ Detailed bounded behavior for implemented calls lives in
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **55 Complete**, **272 Partial**, **48 Policy-denied**, **0 Missing**.
+Current totals: **56 Complete**, **271 Partial**, **48 Policy-denied**, **0 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -348,7 +348,7 @@ therefore omitted.
 | 218 | set_tid_address | Complete |
 | 219 | restart_syscall | Partial |
 | 220 | semtimedop | Partial |
-| 221 | fadvise64 | Partial |
+| 221 | fadvise64 | Complete |
 | 222 | timer_create | Partial |
 | 223 | timer_settime | Partial |
 | 224 | timer_gettime | Partial |

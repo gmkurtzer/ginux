@@ -789,6 +789,13 @@ limit remains denied. `sync` has a direct userspace conformance probe and
 succeeds after synchronizing every filesystem in the current RAM-backed and
 immutable-storage profile. `syncfs` has runtime success and bad-descriptor
 assertions and synchronizes the filesystem associated with any open descriptor.
+`fadvise64` accepts all six Linux advice values for non-pipe open descriptors;
+resident immutable and RAM-backed data already satisfies each hint. It applies
+Linux integer narrowing, rejects negative offsets and lengths or unknown advice
+with `-EINVAL`, invalid descriptors with `-EBADF`, and pipes with `-ESPIPE`
+before range or advice validation. Runtime tests cover all advice values,
+overflowing positive ranges, negative values, high register bits, invalid
+descriptors, and pipe error precedence.
 `readahead` is successful for readable regular OCI, overlay, and tmpfs files
 because their data is already resident. It implements Linux descriptor
 narrowing and distinguishes bad or write-only descriptors (`-EBADF`), negative

@@ -8149,15 +8149,7 @@ extern "sysv64" fn linux_syscall_handler(
                 LINUX_EBADF
             }
         }
-        LINUX_FADVISE64_SYSCALL => {
-            if !linux_descriptor_open(first_argument) {
-                LINUX_EBADF
-            } else if register(0) <= 5 {
-                0
-            } else {
-                LINUX_EINVAL
-            }
-        }
+        LINUX_FADVISE64_SYSCALL => linux_fadvise64(first_argument, buffer, count, register(0)),
         LINUX_TRUNCATE_SYSCALL => linux_truncate(first_argument, buffer),
         LINUX_FTRUNCATE_SYSCALL => linux_ftruncate(first_argument, buffer),
         LINUX_FALLOCATE_SYSCALL => linux_fallocate(first_argument, buffer, count, register(0)),
@@ -12734,6 +12726,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let membarrier = verify_linux_membarrier_syscall();
     let readahead = verify_linux_readahead_syscall();
     let memory_locking = verify_linux_memory_locking_syscalls();
+    let fadvise = verify_linux_fadvise64_syscall();
     let mappings_released =
         address_space::release_current_linux_runtime_mappings(LINUX_RUNTIME_DYNAMIC_MMAP_BASE);
     ELF_PROBE_MMAP_NEXT.store(LINUX_RUNTIME_DYNAMIC_MMAP_BASE, Ordering::SeqCst);
@@ -12769,6 +12762,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && membarrier
         && readahead
         && memory_locking
+        && fadvise
         && mappings_released
 }
 
@@ -13176,6 +13170,65 @@ fn verify_linux_memory_locking_syscalls() -> bool {
         && linux_mlockall((1_u64 << 32) | 1) == 0;
     let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64 * 2) == 0;
     all && unmapped
+}
+
+fn verify_linux_fadvise64_syscall() -> bool {
+    let mapping = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    if !(LINUX_RUNTIME_DYNAMIC_MMAP_BASE..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
+        .contains(&mapping)
+    {
+        return false;
+    }
+    let Some(node) = crate::linux_overlay::create_file(b"ginux-fadvise", 0o600, b"resident") else {
+        let _ = linux_runtime_munmap(mapping, PAGE_SIZE as u64);
+        return false;
+    };
+    let descriptor = if copy_to_linux_user(mapping, b"/ginux-fadvise\0") {
+        linux_openat(u64::from(LINUX_AT_FDCWD), mapping, 0, 0)
+    } else {
+        LINUX_EFAULT
+    };
+    let regular = descriptor < LINUX_AUX_DESCRIPTOR_LIMIT
+        && (0_u64..=5).all(|advice| linux_fadvise64(descriptor, 0, 0, advice) == 0)
+        && linux_fadvise64(
+            (1_u64 << 32) | descriptor,
+            i64::MAX as u64,
+            i64::MAX as u64,
+            (1_u64 << 32) | 5,
+        ) == 0
+        && linux_fadvise64(descriptor, u64::MAX, 0, 0) == LINUX_EINVAL
+        && linux_fadvise64(descriptor, 0, u64::MAX, 0) == LINUX_EINVAL
+        && linux_fadvise64(descriptor, 0, 0, 6) == LINUX_EINVAL
+        && linux_fadvise64(LINUX_AUX_DESCRIPTOR_LIMIT, 0, 0, 0) == LINUX_EBADF;
+    let pipe_created = regular && linux_pipe(mapping + 128, 0) == 0;
+    let mut descriptors = [0_u8; 8];
+    let pipe = if pipe_created && copy_from_linux_user(mapping + 128, &mut descriptors) {
+        [
+            u64::from(u32::from_ne_bytes(descriptors[..4].try_into().unwrap())),
+            u64::from(u32::from_ne_bytes(descriptors[4..].try_into().unwrap())),
+        ]
+    } else {
+        [LINUX_AUX_DESCRIPTOR_LIMIT; 2]
+    };
+    let pipe_rejected = pipe[0] < LINUX_AUX_DESCRIPTOR_LIMIT
+        && pipe[1] < LINUX_AUX_DESCRIPTOR_LIMIT
+        && linux_fadvise64(pipe[0], u64::MAX, u64::MAX, 6) == LINUX_ESPIPE;
+    let closed = descriptor < LINUX_AUX_DESCRIPTOR_LIMIT
+        && linux_descriptor_close(descriptor) == 0
+        && pipe[0] < LINUX_AUX_DESCRIPTOR_LIMIT
+        && linux_descriptor_close(pipe[0]) == 0
+        && pipe[1] < LINUX_AUX_DESCRIPTOR_LIMIT
+        && linux_descriptor_close(pipe[1]) == 0;
+    let removed = crate::linux_overlay::unlink(node);
+    let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
+    pipe_rejected && closed && removed && unmapped
 }
 
 fn verify_linux_io_uring_syscalls() -> bool {
@@ -26722,6 +26775,23 @@ fn linux_readahead(descriptor: u64, offset: u64, _count: u64) -> u64 {
     } else {
         LINUX_EINVAL
     }
+}
+
+fn linux_fadvise64(descriptor: u64, offset: u64, length: u64, advice: u64) -> u64 {
+    let descriptor = u64::from(descriptor as u32);
+    let advice = advice as u32;
+    if !linux_descriptor_open(descriptor) {
+        return LINUX_EBADF;
+    }
+    if linux_pipe_descriptor(descriptor) {
+        return LINUX_ESPIPE;
+    }
+    if (offset as i64) < 0 || (length as i64) < 0 || advice > 5 {
+        return LINUX_EINVAL;
+    }
+    // All Ginux file data is resident in immutable image pages or RAM-backed
+    // filesystems, so every valid Linux access pattern hint is already met.
+    0
 }
 
 fn linux_ioprio_get(which: u64, who: u64) -> u64 {
