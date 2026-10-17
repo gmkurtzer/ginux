@@ -42,7 +42,7 @@ Detailed bounded behavior for implemented calls lives in
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **57 Complete**, **270 Partial**, **48 Policy-denied**, **0 Missing**.
+Current totals: **71 Complete**, **256 Partial**, **48 Policy-denied**, **0 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -168,21 +168,21 @@ therefore omitted.
 | 38 | setitimer | Partial |
 | 39 | getpid | Complete |
 | 40 | sendfile | Partial |
-| 41 | socket | Partial |
+| 41 | socket | Complete |
 | 42 | connect | Partial |
 | 43 | accept | Partial |
-| 44 | sendto | Partial |
-| 45 | recvfrom | Partial |
-| 46 | sendmsg | Partial |
-| 47 | recvmsg | Partial |
-| 48 | shutdown | Partial |
-| 49 | bind | Partial |
-| 50 | listen | Partial |
-| 51 | getsockname | Partial |
+| 44 | sendto | Complete |
+| 45 | recvfrom | Complete |
+| 46 | sendmsg | Complete |
+| 47 | recvmsg | Complete |
+| 48 | shutdown | Complete |
+| 49 | bind | Complete |
+| 50 | listen | Complete |
+| 51 | getsockname | Complete |
 | 52 | getpeername | Partial |
-| 53 | socketpair | Partial |
-| 54 | setsockopt | Partial |
-| 55 | getsockopt | Partial |
+| 53 | socketpair | Complete |
+| 54 | setsockopt | Complete |
+| 55 | getsockopt | Complete |
 | 56 | clone | Partial |
 | 57 | fork | Partial |
 | 58 | vfork | Partial |
@@ -426,7 +426,7 @@ therefore omitted.
 | 296 | pwritev | Partial |
 | 297 | rt_tgsigqueueinfo | Partial |
 | 298 | perf_event_open | Policy-denied |
-| 299 | recvmmsg | Partial |
+| 299 | recvmmsg | Complete |
 | 300 | fanotify_init | Partial |
 | 301 | fanotify_mark | Partial |
 | 302 | prlimit64 | Partial |
@@ -434,7 +434,7 @@ therefore omitted.
 | 304 | open_by_handle_at | Partial |
 | 305 | clock_adjtime | Policy-denied |
 | 306 | syncfs | Complete |
-| 307 | sendmmsg | Partial |
+| 307 | sendmmsg | Complete |
 | 308 | setns | Policy-denied |
 | 309 | getcpu | Complete |
 | 310 | process_vm_readv | Partial |
