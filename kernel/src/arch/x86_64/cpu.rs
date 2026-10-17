@@ -353,6 +353,7 @@ const LINUX_MLOCK2_SYSCALL: u64 = 325;
 const LINUX_PREADV2_SYSCALL: u64 = 327;
 const LINUX_PWRITEV2_SYSCALL: u64 = 328;
 const LINUX_EXECVEAT_SYSCALL: u64 = 322;
+const LINUX_MEMFD_CREATE_SYSCALL: u64 = 319;
 const LINUX_GETRANDOM_SYSCALL: u64 = 318;
 const LINUX_STATX_SYSCALL: u64 = 332;
 const LINUX_RENAMEAT2_SYSCALL: u64 = 316;
@@ -8215,6 +8216,7 @@ extern "sysv64" fn linux_syscall_handler(
         }
         LINUX_OPENAT_SYSCALL => linux_openat(first_argument, buffer, count, register(0)),
         LINUX_OPENAT2_SYSCALL => linux_openat2(first_argument, buffer, count, register(0)),
+        LINUX_MEMFD_CREATE_SYSCALL => linux_memfd_create(first_argument, buffer),
         LINUX_CREAT_SYSCALL => linux_openat(
             u64::from(LINUX_AT_FDCWD),
             first_argument,
@@ -14156,6 +14158,38 @@ fn linux_openat2(directory: u64, path_address: u64, how_address: u64, size: u64)
         return LINUX_EINVAL;
     }
     linux_openat(directory, path_address, flags, mode)
+}
+
+fn linux_memfd_create(name_address: u64, flags: u64) -> u64 {
+    const MFD_CLOEXEC: u64 = 1;
+    const MFD_ALLOW_SEALING: u64 = 2;
+    if flags & !(MFD_CLOEXEC | MFD_ALLOW_SEALING) != 0 {
+        return LINUX_EINVAL;
+    }
+    let mut name = [0_u8; 250];
+    if let Err(error) = copy_linux_c_string(name_address, &mut name) {
+        return error;
+    }
+    let Some(descriptor) = (LINUX_AUX_DESCRIPTOR_FIRST..LINUX_AUX_DESCRIPTOR_LIMIT)
+        .find(|descriptor| linux_aux_descriptor_free(*descriptor))
+    else {
+        return LINUX_EMFILE;
+    };
+    let Some(handle) = crate::linux_overlay::create_file(b"/tmp/.ginux-memfd", 0o777, &[]) else {
+        return LINUX_ENOSPC;
+    };
+    if !crate::linux_overlay::unlink(handle) {
+        return LINUX_EIO;
+    }
+    let index = (descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize;
+    ELF_PROBE_DEVICE_DESCRIPTORS[index].store(LINUX_FILE_TMP_SCRATCH | 3, Ordering::SeqCst);
+    ELF_PROBE_OCI_DESCRIPTORS[index].store(0, Ordering::SeqCst);
+    ELF_PROBE_TMP_FILE_GENERATIONS[index]
+        .store(crate::linux_overlay::generation(handle), Ordering::SeqCst);
+    ELF_PROBE_SOCKET_FLAGS[index].store(0, Ordering::SeqCst);
+    linux_descriptor_offset(descriptor).store(0, Ordering::SeqCst);
+    set_linux_descriptor_close_on_exec(descriptor, flags & MFD_CLOEXEC != 0);
+    descriptor
 }
 
 fn linux_newfstatat(directory: u64, path_address: u64, stat_address: u64, flags: u64) -> u64 {

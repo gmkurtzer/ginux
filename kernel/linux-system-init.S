@@ -571,6 +571,44 @@ ginux_linux_system_init:
     cmp rax, 12
     jne .Lfailure
 
+    lea rdi, [rip + .Lmemfd_name]
+    mov esi, 1
+    mov eax, 319
+    syscall
+    test rax, rax
+    js .Lfailure
+    mov r9, rax
+    mov rdi, rax
+    lea rsi, [rip + .Lmemfd_payload]
+    mov edx, 5
+    mov eax, 1
+    syscall
+    cmp rax, 5
+    jne .Lfailure
+    mov rdi, r9
+    xor esi, esi
+    xor edx, edx
+    mov eax, 8
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov rdi, r9
+    lea rsi, [rip + .Lstatus]
+    mov edx, 5
+    xor eax, eax
+    syscall
+    cmp rax, 5
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus], 0x666d656d
+    jne .Lfailure
+    cmp byte ptr [rip + .Lstatus + 4], 'd'
+    jne .Lfailure
+    mov rdi, r9
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Lfailure
+
     lea rax, [rip + .Lsignal_handler]
     mov qword ptr [rip + .Lsignal_action], rax
     mov qword ptr [rip + .Lsignal_action + 8], 0x4000000
@@ -1110,6 +1148,10 @@ ginux_linux_system_init:
     .ascii "ready\n"
 .Ltmp_marker:
     .ascii "TMPFS_READY\n"
+.Lmemfd_name:
+    .asciz "ginux-test"
+.Lmemfd_payload:
+    .ascii "memfd"
 .Ldevfs_marker:
     .ascii "DEVFS_READY\n"
 .Lprocfs_marker:
