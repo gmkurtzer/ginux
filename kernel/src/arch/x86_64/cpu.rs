@@ -296,6 +296,7 @@ const LINUX_EVENTFD2_SYSCALL: u64 = 290;
 const LINUX_EPOLL_CREATE1_SYSCALL: u64 = 291;
 const LINUX_DUP3_SYSCALL: u64 = 292;
 const LINUX_CLONE3_SYSCALL: u64 = 435;
+const LINUX_OPENAT2_SYSCALL: u64 = 437;
 const LINUX_PIPE2_SYSCALL: u64 = 293;
 const LINUX_PREADV_SYSCALL: u64 = 295;
 const LINUX_PWRITEV_SYSCALL: u64 = 296;
@@ -8120,6 +8121,7 @@ extern "sysv64" fn linux_syscall_handler(
             linux_openat(u64::from(LINUX_AT_FDCWD), first_argument, buffer, count)
         }
         LINUX_OPENAT_SYSCALL => linux_openat(first_argument, buffer, count, register(0)),
+        LINUX_OPENAT2_SYSCALL => linux_openat2(first_argument, buffer, count, register(0)),
         LINUX_CREAT_SYSCALL => linux_openat(
             u64::from(LINUX_AT_FDCWD),
             first_argument,
@@ -13981,6 +13983,45 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64, mode: u64) -> u64
     };
     linux_descriptor_offset(descriptor).store(initial_offset, Ordering::SeqCst);
     descriptor
+}
+
+fn linux_openat2(directory: u64, path_address: u64, how_address: u64, size: u64) -> u64 {
+    const OPEN_HOW_SIZE_VER0: usize = 24;
+    let Ok(size) = usize::try_from(size) else {
+        return LINUX_E2BIG;
+    };
+    if size < OPEN_HOW_SIZE_VER0 {
+        return LINUX_EINVAL;
+    }
+    if size > PAGE_SIZE {
+        return LINUX_E2BIG;
+    }
+    let mut how = [0_u8; OPEN_HOW_SIZE_VER0];
+    if !copy_from_linux_user(how_address, &mut how) {
+        return LINUX_EFAULT;
+    }
+    let mut extension_offset = OPEN_HOW_SIZE_VER0;
+    let mut extension = [0_u8; 64];
+    while extension_offset < size {
+        let length = (size - extension_offset).min(extension.len());
+        let Some(address) = how_address.checked_add(extension_offset as u64) else {
+            return LINUX_EFAULT;
+        };
+        if !copy_from_linux_user(address, &mut extension[..length]) {
+            return LINUX_EFAULT;
+        }
+        if extension[..length].iter().any(|byte| *byte != 0) {
+            return LINUX_E2BIG;
+        }
+        extension_offset += length;
+    }
+    let flags = u64::from_ne_bytes(how[..8].try_into().unwrap());
+    let mode = u64::from_ne_bytes(how[8..16].try_into().unwrap());
+    let resolve = u64::from_ne_bytes(how[16..24].try_into().unwrap());
+    if resolve != 0 || mode & !0o7777 != 0 || mode != 0 && flags & LINUX_O_CREAT == 0 {
+        return LINUX_EINVAL;
+    }
+    linux_openat(directory, path_address, flags, mode)
 }
 
 fn linux_newfstatat(directory: u64, path_address: u64, stat_address: u64, flags: u64) -> u64 {

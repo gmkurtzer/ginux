@@ -760,6 +760,13 @@ and updated without changing the descriptor offset. Zero flags are required.
 The same backing file, negative offsets, non-regular descriptors, and aliased
 offset pointers return `-EINVAL`; inaccessible offsets return `-EFAULT`, and an
 append-only output returns `-EBADF`.
+`openat2` accepts the 24-byte version-zero `open_how` structure and delegates
+zero-resolve requests to the same per-domain VFS path as `openat`. Larger
+structures up to one page are accepted only when every extension byte is zero;
+nonzero extensions and larger structures return `-E2BIG`. Undersized
+structures, unsupported resolve policies, modes outside `07777`, and a nonzero
+mode without `O_CREAT` return `-EINVAL`. This profile does not yet implement
+the `RESOLVE_*` lookup constraints.
 `fchmodat2` delegates to the admitted zero-flag `fchmodat` profile.
 Legacy `utime`, `utimes`, and `futimesat` convert their second-resolution or
 microsecond-resolution inputs to overlay timestamps; null time pointers select

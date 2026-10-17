@@ -4079,6 +4079,22 @@ linux_child_joined:
     push 87
     pop rax
     call syscall_expect_zero
+
+    mov qword ptr [0x4053a0], 0
+    mov qword ptr [0x4053a8], 0
+    mov qword ptr [0x4053b0], 0
+    mov edi, -100
+    mov esi, 0x405340
+    mov edx, 0x4053a0
+    push 24
+    pop r10
+    mov eax, 437
+    call syscall_expect_three
+    push 3
+    pop rdi
+    push 3
+    pop rax
+    call syscall_expect_zero
 #endif
 
     mov esi, 0x405380
