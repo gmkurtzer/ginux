@@ -1036,6 +1036,18 @@ configured receive-buffer size. `mq_getsetattr` reports limits and current
 depth and changes only `O_NONBLOCK`; `mq_notify` accepts unregister and
 `SIGEV_NONE`. Full/empty queues return `EAGAIN`. Scheduler-backed absolute
 deadline waits, `SIGEV_SIGNAL`, and `SIGEV_THREAD` delivery remain unsupported.
+`rax = 206` through `210` and `333` provide a dynamic per-domain legacy Linux
+AIO profile. `io_setup` allocates an mmap-backed ring, publishes the native
+header and context identifier atomically, and creates a page-allocated kernel
+completion queue. `io_submit` accepts native 64-byte `iocb` records and
+executes `IOCB_CMD_PREAD`, `PWRITE`, `FSYNC`, and `FDSYNC`, retaining the user
+data and request address in 32-byte `io_event` completions. `io_getevents` and
+`io_pgetevents` drain completions in order, validate timeout and optional
+signal-mask records, and honor zero-duration polling. `io_destroy` unmaps the
+ring and releases queued records. Work currently completes synchronously, so
+`io_cancel` reports `EINVAL`; scheduler-backed waits, in-flight cancellation,
+vectored and poll requests, eventfd signaling, and userspace ring consumption
+remain unsupported.
 `rax = 462` (`__NR_mseal`) irreversibly seals complete page-rounded ranges in
 the bounded anonymous scratch window and the runtime dynamic mapping region.
 The operation preflights every page before changing state, is idempotent, and

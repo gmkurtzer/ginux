@@ -42,7 +42,7 @@ Detailed bounded behavior for implemented calls lives in
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **19 Complete**, **281 Partial**, **45 Policy-denied**, **30 Missing**.
+Current totals: **19 Complete**, **287 Partial**, **45 Policy-denied**, **24 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -111,6 +111,13 @@ page allocator. `mq_open`, `mq_unlink`, `mq_timedsend`, `mq_timedreceive`,
 duplication and close, unlink lifetime, priority ordering, attributes,
 `O_NONBLOCK`, and `SIGEV_NONE`. Blocking deadline waits and signal/thread
 notification delivery remain pending, so this family remains Partial.
+
+Legacy Linux AIO uses dynamically allocated per-domain contexts and completion
+records. `io_setup`, `io_submit`, `io_getevents`, `io_pgetevents`,
+`io_cancel`, and `io_destroy` support synchronous `PREAD`, `PWRITE`, `FSYNC`,
+and `FDSYNC` submission with Linux `iocb`/`io_event` layouts and an mmap-backed
+ring header. True asynchronous execution, blocking waits, cancellation of
+in-flight work, vectored requests, poll, and eventfd completion remain pending.
 
 ## Syscall index
 
@@ -326,11 +333,11 @@ therefore omitted.
 | 203 | sched_setaffinity | Partial |
 | 204 | sched_getaffinity | Partial |
 | 205 | set_thread_area | Complete |
-| 206 | io_setup | Missing |
-| 207 | io_destroy | Missing |
-| 208 | io_getevents | Missing |
-| 209 | io_submit | Missing |
-| 210 | io_cancel | Missing |
+| 206 | io_setup | Partial |
+| 207 | io_destroy | Partial |
+| 208 | io_getevents | Partial |
+| 209 | io_submit | Partial |
+| 210 | io_cancel | Partial |
 | 211 | get_thread_area | Complete |
 | 212 | lookup_dcookie | Complete |
 | 213 | epoll_create | Partial |
@@ -453,7 +460,7 @@ therefore omitted.
 | 330 | pkey_alloc | Partial |
 | 331 | pkey_free | Partial |
 | 332 | statx | Partial |
-| 333 | io_pgetevents | Missing |
+| 333 | io_pgetevents | Partial |
 | 334 | rseq | Partial |
 | 335 | uretprobe | Missing |
 | 424 | pidfd_send_signal | Partial |

@@ -10,6 +10,7 @@ mod executable;
 mod image_store;
 mod initramfs;
 mod ipc;
+mod linux_aio;
 mod linux_elf;
 mod linux_mount;
 mod linux_overlay;

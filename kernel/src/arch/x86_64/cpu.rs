@@ -304,6 +304,11 @@ const LINUX_SCHED_SETAFFINITY_SYSCALL: u64 = 203;
 const LINUX_SCHED_GETAFFINITY_SYSCALL: u64 = 204;
 const LINUX_SET_THREAD_AREA_SYSCALL: u64 = 205;
 const LINUX_GET_THREAD_AREA_SYSCALL: u64 = 211;
+const LINUX_IO_SETUP_SYSCALL: u64 = 206;
+const LINUX_IO_DESTROY_SYSCALL: u64 = 207;
+const LINUX_IO_GETEVENTS_SYSCALL: u64 = 208;
+const LINUX_IO_SUBMIT_SYSCALL: u64 = 209;
+const LINUX_IO_CANCEL_SYSCALL: u64 = 210;
 const LINUX_LOOKUP_DCOOKIE_SYSCALL: u64 = 212;
 const LINUX_GETDENTS64_SYSCALL: u64 = 217;
 const LINUX_FADVISE64_SYSCALL: u64 = 221;
@@ -405,6 +410,7 @@ const LINUX_PWRITEV2_SYSCALL: u64 = 328;
 const LINUX_EXECVEAT_SYSCALL: u64 = 322;
 const LINUX_MEMFD_CREATE_SYSCALL: u64 = 319;
 const LINUX_RSEQ_SYSCALL: u64 = 334;
+const LINUX_IO_PGETEVENTS_SYSCALL: u64 = 333;
 const LINUX_PKEY_MPROTECT_SYSCALL: u64 = 329;
 const LINUX_PKEY_ALLOC_SYSCALL: u64 = 330;
 const LINUX_PKEY_FREE_SYSCALL: u64 = 331;
@@ -7832,6 +7838,21 @@ extern "sysv64" fn linux_syscall_handler(
         }
         LINUX_MQ_NOTIFY_SYSCALL => linux_mq_notify(first_argument, buffer),
         LINUX_MQ_GETSETATTR_SYSCALL => linux_mq_getsetattr(first_argument, buffer, count),
+        LINUX_IO_SETUP_SYSCALL => linux_io_setup(first_argument, buffer),
+        LINUX_IO_DESTROY_SYSCALL => linux_io_destroy(first_argument),
+        LINUX_IO_SUBMIT_SYSCALL => linux_io_submit(first_argument, buffer, count),
+        LINUX_IO_GETEVENTS_SYSCALL => {
+            linux_io_getevents(first_argument, buffer, count, register(0), register(2), 0)
+        }
+        LINUX_IO_PGETEVENTS_SYSCALL => linux_io_getevents(
+            first_argument,
+            buffer,
+            count,
+            register(0),
+            register(2),
+            register(1),
+        ),
+        LINUX_IO_CANCEL_SYSCALL => linux_io_cancel(first_argument, buffer, count),
         LINUX_SEMTIMEDOP_SYSCALL => linux_semop(first_argument, buffer, count, register(0)),
         LINUX_MREMAP_SYSCALL => {
             linux_mremap(first_argument, buffer, count, register(0), register(2))
@@ -9830,7 +9851,8 @@ fn finish_linux_runtime(mmap: u64, saved_msrs: [u64; 5]) -> LinuxElfResult {
     let tmpfs_released = linux_tmpfs::teardown();
     let overlay_released = crate::linux_overlay::teardown();
     let registry_finished = linux_process::finish_runtime_process_registry();
-    let sysv_ipc_released = registry_finished && crate::linux_sysv_ipc::teardown();
+    let aio_released = registry_finished && crate::linux_aio::teardown();
+    let sysv_ipc_released = aio_released && crate::linux_sysv_ipc::teardown();
     let mount_deactivated = linux_mount::deactivate_initial();
     let timer_finished = timer::finish_linux_wait_timer();
     let msrs_restored = restore_linux_syscall(saved_msrs);
@@ -12040,6 +12062,253 @@ fn linux_mq_getsetattr(descriptor: u64, new: u64, old: u64) -> u64 {
     0
 }
 
+fn linux_aio_error(error: crate::linux_aio::Error) -> u64 {
+    match error {
+        crate::linux_aio::Error::Invalid => LINUX_EINVAL,
+        crate::linux_aio::Error::NoMemory => LINUX_ENOMEM,
+        crate::linux_aio::Error::Full => LINUX_EAGAIN,
+    }
+}
+
+fn linux_io_setup(events: u64, output: u64) -> u64 {
+    if events == 0 || events > u64::from(u32::MAX) || !LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
+        return LINUX_EINVAL;
+    }
+    let mut old = [0_u8; 8];
+    if !copy_from_linux_user(output, &mut old) {
+        return LINUX_EFAULT;
+    }
+    if u64::from_ne_bytes(old) != 0 {
+        return LINUX_EINVAL;
+    }
+    let Some(bytes) = events
+        .checked_mul(32)
+        .and_then(|bytes| bytes.checked_add(32))
+    else {
+        return LINUX_EINVAL;
+    };
+    let pages = bytes.div_ceil(PAGE_SIZE as u64);
+    let mapping = linux_runtime_mmap(
+        0,
+        pages * PAGE_SIZE as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_SHARED | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    if mapping >= LINUX_RETURN_TO_KERNEL {
+        return mapping;
+    }
+    if let Err(error) = crate::linux_aio::create(mapping, events, pages) {
+        let _ = linux_runtime_munmap(mapping, pages * PAGE_SIZE as u64);
+        return linux_aio_error(error);
+    }
+    let mut header = [0_u8; 32];
+    header[..4].copy_from_slice(&(mapping as u32).to_ne_bytes());
+    header[4..8].copy_from_slice(&(events as u32).to_ne_bytes());
+    header[16..20].copy_from_slice(&0xa10a_10a1_u32.to_ne_bytes());
+    header[28..32].copy_from_slice(&32_u32.to_ne_bytes());
+    if !copy_to_linux_user(mapping, &header) || !copy_to_linux_user(output, &mapping.to_ne_bytes())
+    {
+        let _ = crate::linux_aio::destroy(mapping);
+        let _ = linux_runtime_munmap(mapping, pages * PAGE_SIZE as u64);
+        return LINUX_EFAULT;
+    }
+    0
+}
+
+fn linux_io_destroy(context: u64) -> u64 {
+    let pages = match crate::linux_aio::destroy(context) {
+        Ok(pages) => pages,
+        Err(error) => return linux_aio_error(error),
+    };
+    linux_runtime_munmap(context, pages * PAGE_SIZE as u64)
+}
+
+fn linux_io_submit(context: u64, count: u64, pointers: u64) -> u64 {
+    if count > 1024 {
+        return LINUX_EINVAL;
+    }
+    if crate::linux_aio::info(context).is_err() {
+        return LINUX_EINVAL;
+    }
+    let mut submitted = 0_u64;
+    for index in 0..count {
+        match crate::linux_aio::can_submit(context) {
+            Ok(true) => {}
+            Ok(false) => {
+                return if submitted == 0 {
+                    LINUX_EAGAIN
+                } else {
+                    submitted
+                }
+            }
+            Err(error) => {
+                return if submitted == 0 {
+                    linux_aio_error(error)
+                } else {
+                    submitted
+                }
+            }
+        }
+        let Some(pointer_address) = pointers.checked_add(index * 8) else {
+            return if submitted == 0 {
+                LINUX_EFAULT
+            } else {
+                submitted
+            };
+        };
+        let mut pointer = [0_u8; 8];
+        if !copy_from_linux_user(pointer_address, &mut pointer) {
+            return if submitted == 0 {
+                LINUX_EFAULT
+            } else {
+                submitted
+            };
+        }
+        let object = u64::from_ne_bytes(pointer);
+        let mut control = [0_u8; 64];
+        if !copy_from_linux_user(object, &mut control) {
+            return if submitted == 0 {
+                LINUX_EFAULT
+            } else {
+                submitted
+            };
+        }
+        let data = u64::from_ne_bytes(control[..8].try_into().unwrap());
+        let opcode = u16::from_ne_bytes(control[16..18].try_into().unwrap());
+        let descriptor = u32::from_ne_bytes(control[20..24].try_into().unwrap()) as u64;
+        let buffer = u64::from_ne_bytes(control[24..32].try_into().unwrap());
+        let length = u64::from_ne_bytes(control[32..40].try_into().unwrap());
+        let offset = i64::from_ne_bytes(control[40..48].try_into().unwrap());
+        if offset < 0 {
+            return if submitted == 0 {
+                LINUX_EINVAL
+            } else {
+                submitted
+            };
+        }
+        let result = match opcode {
+            0 => linux_regular_file_read_at(descriptor, buffer, length, offset as u64),
+            1 => linux_regular_file_write_at(descriptor, buffer, length, offset as u64),
+            2 | 3 => {
+                if linux_descriptor_open(descriptor) {
+                    0
+                } else {
+                    LINUX_EBADF
+                }
+            }
+            _ => {
+                return if submitted == 0 {
+                    LINUX_EINVAL
+                } else {
+                    submitted
+                }
+            }
+        };
+        let event = crate::linux_aio::Event {
+            data,
+            object,
+            result: result as i64,
+            result2: 0,
+        };
+        if let Err(error) = crate::linux_aio::push(context, event) {
+            return if submitted == 0 {
+                linux_aio_error(error)
+            } else {
+                submitted
+            };
+        }
+        submitted += 1;
+    }
+    submitted
+}
+
+fn linux_io_getevents(
+    context: u64,
+    minimum: u64,
+    maximum: u64,
+    output: u64,
+    timeout: u64,
+    signal: u64,
+) -> u64 {
+    if minimum > maximum || maximum > 1024 || crate::linux_aio::info(context).is_err() {
+        return LINUX_EINVAL;
+    }
+    let mut zero_timeout = false;
+    if timeout != 0 {
+        let mut value = [0_u8; 16];
+        if !copy_from_linux_user(timeout, &mut value) {
+            return LINUX_EFAULT;
+        }
+        let Some(duration) = linux_timespec_nanoseconds(&value) else {
+            return LINUX_EINVAL;
+        };
+        zero_timeout = duration == 0;
+    }
+    if signal != 0 {
+        let mut descriptor = [0_u8; 16];
+        if !copy_from_linux_user(signal, &mut descriptor) {
+            return LINUX_EFAULT;
+        }
+        let set = u64::from_ne_bytes(descriptor[..8].try_into().unwrap());
+        let size = u64::from_ne_bytes(descriptor[8..].try_into().unwrap());
+        let mut mask = [0_u8; 8];
+        if size != 8 || set == 0 || !copy_from_linux_user(set, &mut mask) {
+            return if size != 8 {
+                LINUX_EINVAL
+            } else {
+                LINUX_EFAULT
+            };
+        }
+    }
+    let mut received = 0_u64;
+    while received < maximum {
+        let event = match crate::linux_aio::pop(context) {
+            Ok(Some(event)) => event,
+            Ok(None) => break,
+            Err(error) => {
+                return if received == 0 {
+                    linux_aio_error(error)
+                } else {
+                    received
+                }
+            }
+        };
+        let mut bytes = [0_u8; 32];
+        bytes[..8].copy_from_slice(&event.data.to_ne_bytes());
+        bytes[8..16].copy_from_slice(&event.object.to_ne_bytes());
+        bytes[16..24].copy_from_slice(&event.result.to_ne_bytes());
+        bytes[24..].copy_from_slice(&event.result2.to_ne_bytes());
+        let Some(destination) = received
+            .checked_mul(32)
+            .and_then(|offset| output.checked_add(offset))
+        else {
+            return if received == 0 {
+                LINUX_EFAULT
+            } else {
+                received
+            };
+        };
+        if !copy_to_linux_user(destination, &bytes) {
+            return if received == 0 {
+                LINUX_EFAULT
+            } else {
+                received
+            };
+        }
+        received += 1;
+    }
+    if received < minimum && !zero_timeout {
+        return LINUX_EAGAIN;
+    }
+    received
+}
+
+fn linux_io_cancel(_context: u64, _control: u64, _result: u64) -> u64 {
+    LINUX_EINVAL
+}
+
 fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let old_runtime = LINUX_RUNTIME_MODE.swap(true, Ordering::SeqCst);
     let id = linux_shmget(0, 2 * PAGE_SIZE as u64, 0o600);
@@ -12078,6 +12347,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let messages = verify_linux_sysv_message_queue_syscalls();
     let process_advice = verify_linux_process_madvise_syscall();
     let posix_queues = verify_linux_posix_message_queue_syscalls();
+    let aio = verify_linux_aio_syscalls();
     let mappings_released =
         address_space::release_current_linux_runtime_mappings(LINUX_RUNTIME_DYNAMIC_MMAP_BASE);
     ELF_PROBE_MMAP_NEXT.store(LINUX_RUNTIME_DYNAMIC_MMAP_BASE, Ordering::SeqCst);
@@ -12090,7 +12360,58 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && messages
         && process_advice
         && posix_queues
+        && aio
         && mappings_released
+}
+
+fn verify_linux_aio_syscalls() -> bool {
+    let mapping = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    if !(LINUX_RUNTIME_DYNAMIC_MMAP_BASE..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
+        .contains(&mapping)
+    {
+        return false;
+    }
+    let zero = 0_u64.to_ne_bytes();
+    let setup = copy_to_linux_user(mapping, &zero) && linux_io_setup(4, mapping) == 0;
+    let mut context_bytes = [0_u8; 8];
+    let context = if setup && copy_from_linux_user(mapping, &mut context_bytes) {
+        u64::from_ne_bytes(context_bytes)
+    } else {
+        0
+    };
+    let mut control = [0_u8; 64];
+    control[..8].copy_from_slice(&0x4749_4e55_5841_494f_u64.to_ne_bytes());
+    control[16..18].copy_from_slice(&2_u16.to_ne_bytes());
+    control[20..24].copy_from_slice(&1_u32.to_ne_bytes());
+    let submitted = context != 0
+        && copy_to_linux_user(mapping + 64, &(mapping + 128).to_ne_bytes())
+        && copy_to_linux_user(mapping + 128, &control)
+        && linux_io_submit(context, 1, mapping + 64) == 1;
+    let timeout = [0_u8; 16];
+    let completed = submitted
+        && copy_to_linux_user(mapping + 224, &timeout)
+        && linux_io_getevents(context, 1, 1, mapping + 256, mapping + 224, 0) == 1
+        && {
+            let mut event = [0_u8; 32];
+            copy_from_linux_user(mapping + 256, &mut event)
+                && u64::from_ne_bytes(event[..8].try_into().unwrap()) == 0x4749_4e55_5841_494f
+                && u64::from_ne_bytes(event[8..16].try_into().unwrap()) == mapping + 128
+                && i64::from_ne_bytes(event[16..24].try_into().unwrap()) == 0
+        };
+    let empty =
+        completed && linux_io_getevents(context, 0, 1, mapping + 256, mapping + 224, 0) == 0;
+    let destroyed = context != 0
+        && linux_io_cancel(context, mapping + 128, mapping + 256) == LINUX_EINVAL
+        && linux_io_destroy(context) == 0;
+    let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
+    empty && destroyed && unmapped
 }
 
 fn verify_linux_posix_message_queue_syscalls() -> bool {
