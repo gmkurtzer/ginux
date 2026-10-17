@@ -42,7 +42,7 @@ implemented calls lives in [Linux Syscall Entry v0](../specs/kernel/linux-syscal
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **17 Complete**, **222 Partial**, **37 Policy-denied**, **99 Missing**.
+Current totals: **17 Complete**, **227 Partial**, **37 Policy-denied**, **94 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -70,6 +70,11 @@ Current totals: **17 Complete**, **222 Partial**, **37 Policy-denied**, **99 Mis
 | vDSO/vvar | Missing | Time calls currently cross the syscall boundary. |
 | Linux module userspace ABI | Policy-denied | Module management is owned by the trusted control plane. |
 | ioctl families | Partial | Only explicitly admitted console, pipe, and device requests; ioctl is a family of ABIs, not one completed interface. |
+
+The current POSIX timer profile provides one monotonic `SIGEV_NONE` timer per
+domain, including relative/absolute arm, query, overrun, and
+delete operations. Signal/thread notification, realtime clocks, multiple timer
+objects, and overrun accumulation remain pending.
 
 ## Syscall index
 
@@ -301,11 +306,11 @@ therefore omitted.
 | 219 | restart_syscall | Partial |
 | 220 | semtimedop | Missing |
 | 221 | fadvise64 | Partial |
-| 222 | timer_create | Missing |
-| 223 | timer_settime | Missing |
-| 224 | timer_gettime | Missing |
-| 225 | timer_getoverrun | Missing |
-| 226 | timer_delete | Missing |
+| 222 | timer_create | Partial |
+| 223 | timer_settime | Partial |
+| 224 | timer_gettime | Partial |
+| 225 | timer_getoverrun | Partial |
+| 226 | timer_delete | Partial |
 | 227 | clock_settime | Policy-denied |
 | 228 | clock_gettime | Partial |
 | 229 | clock_getres | Partial |

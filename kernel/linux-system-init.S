@@ -664,6 +664,50 @@ ginux_linux_system_init:
     test rax, rax
     jne .Lfailure
 
+    mov dword ptr [rip + .Ltimer_event + 12], 1
+    mov edi, 1
+    lea rsi, [rip + .Ltimer_event]
+    lea rdx, [rip + .Ltimer_id]
+    mov eax, 222
+    syscall
+    test rax, rax
+    jne .Lfailure
+    cmp dword ptr [rip + .Ltimer_id], 1
+    jne .Lfailure
+    mov qword ptr [rip + .Ltimer_new + 16], 1
+    mov edi, 1
+    xor esi, esi
+    lea rdx, [rip + .Ltimer_new]
+    xor r10d, r10d
+    mov eax, 223
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov edi, 1
+    lea rsi, [rip + .Ltimer_current]
+    mov eax, 224
+    syscall
+    test rax, rax
+    jne .Lfailure
+    cmp qword ptr [rip + .Ltimer_current + 16], 0
+    je .Lfailure
+    mov edi, 1
+    mov eax, 225
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov edi, 1
+    mov eax, 226
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov edi, 1
+    lea rsi, [rip + .Ltimer_current]
+    mov eax, 224
+    syscall
+    cmp rax, -22
+    jne .Lfailure
+
     lea rax, [rip + .Lsignal_handler]
     mov qword ptr [rip + .Lsignal_action], rax
     mov qword ptr [rip + .Lsignal_action + 8], 0x4000000
@@ -1212,6 +1256,16 @@ ginux_linux_system_init:
     .space 56
 .align 32
 .Lrseq_area:
+    .space 32
+.align 8
+.Ltimer_event:
+    .space 64
+.Ltimer_id:
+    .long 0
+.align 8
+.Ltimer_new:
+    .space 32
+.Ltimer_current:
     .space 32
 .Ldevfs_marker:
     .ascii "DEVFS_READY\n"

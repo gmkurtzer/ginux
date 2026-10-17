@@ -290,6 +290,11 @@ const LINUX_EPOLL_CTL_OLD_SYSCALL: u64 = 214;
 const LINUX_EPOLL_WAIT_OLD_SYSCALL: u64 = 215;
 const LINUX_SET_TID_ADDRESS_SYSCALL: u64 = 218;
 const LINUX_RESTART_SYSCALL: u64 = 219;
+const LINUX_TIMER_CREATE_SYSCALL: u64 = 222;
+const LINUX_TIMER_SETTIME_SYSCALL: u64 = 223;
+const LINUX_TIMER_GETTIME_SYSCALL: u64 = 224;
+const LINUX_TIMER_GETOVERRUN_SYSCALL: u64 = 225;
+const LINUX_TIMER_DELETE_SYSCALL: u64 = 226;
 const LINUX_CLOCK_GETTIME_SYSCALL: u64 = 228;
 const LINUX_CLOCK_GETRES_SYSCALL: u64 = 229;
 const LINUX_CLOCK_NANOSLEEP_SYSCALL: u64 = 230;
@@ -1261,6 +1266,9 @@ static ELF_PROBE_TIMERFD_DESCRIPTOR: BankedAtomicU16 = BankedAtomicU16::new(0);
 static ELF_PROBE_TIMERFD_FLAGS: BankedAtomicU32 = BankedAtomicU32::new(0);
 static ELF_PROBE_TIMERFD_INTERVAL: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_TIMERFD_DEADLINE: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_POSIX_TIMER_ACTIVE: BankedAtomicBool = BankedAtomicBool::new(false);
+static ELF_PROBE_POSIX_TIMER_INTERVAL: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_POSIX_TIMER_DEADLINE: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_PIPE_READ_DESCRIPTOR: BankedAtomicU16 = BankedAtomicU16::new(0);
 static ELF_PROBE_PIPE_WRITE_DESCRIPTOR: BankedAtomicU16 = BankedAtomicU16::new(0);
 static ELF_PROBE_PIPE_READ_FLAGS: BankedAtomicU32 = BankedAtomicU32::new(0);
@@ -5707,6 +5715,9 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     ELF_PROBE_TIMERFD_FLAGS.store(0, Ordering::SeqCst);
     ELF_PROBE_TIMERFD_INTERVAL.store(0, Ordering::SeqCst);
     ELF_PROBE_TIMERFD_DEADLINE.store(0, Ordering::SeqCst);
+    ELF_PROBE_POSIX_TIMER_ACTIVE.store(false, Ordering::SeqCst);
+    ELF_PROBE_POSIX_TIMER_INTERVAL.store(0, Ordering::SeqCst);
+    ELF_PROBE_POSIX_TIMER_DEADLINE.store(0, Ordering::SeqCst);
     ELF_PROBE_PIPE_READ_DESCRIPTOR.store(0, Ordering::SeqCst);
     ELF_PROBE_PIPE_WRITE_DESCRIPTOR.store(0, Ordering::SeqCst);
     ELF_PROBE_PIPE_READ_FLAGS.store(0, Ordering::SeqCst);
@@ -7785,6 +7796,13 @@ extern "sysv64" fn linux_syscall_handler(
             }
         }
         LINUX_SETITIMER_SYSCALL => linux_setitimer(first_argument, buffer, count),
+        LINUX_TIMER_CREATE_SYSCALL => linux_timer_create(first_argument, buffer, count),
+        LINUX_TIMER_SETTIME_SYSCALL => {
+            linux_timer_settime(first_argument, buffer, count, register(0))
+        }
+        LINUX_TIMER_GETTIME_SYSCALL => linux_timer_gettime(first_argument, buffer),
+        LINUX_TIMER_GETOVERRUN_SYSCALL => linux_timer_getoverrun(first_argument),
+        LINUX_TIMER_DELETE_SYSCALL => linux_timer_delete(first_argument),
         LINUX_RESTART_SYSCALL => LINUX_EINTR,
         LINUX_EPOLL_WAIT_SYSCALL => linux_epoll_wait_live_return(
             registers,
@@ -17776,6 +17794,116 @@ fn linux_timerfd_create(clock: u64, flags: u64) -> u64 {
     descriptor
 }
 
+fn linux_timer_create(clock: u64, event_address: u64, timer_address: u64) -> u64 {
+    const SIGEV_NONE: u32 = 1;
+    if clock != LINUX_CLOCK_MONOTONIC {
+        return LINUX_EINVAL;
+    }
+    if ELF_PROBE_POSIX_TIMER_ACTIVE.load(Ordering::SeqCst) {
+        return LINUX_EAGAIN;
+    }
+    if event_address == 0 {
+        return LINUX_ENOSYS;
+    }
+    let mut event = [0_u8; 64];
+    if !copy_from_linux_user(event_address, &mut event) {
+        return LINUX_EFAULT;
+    }
+    if u32::from_ne_bytes(event[12..16].try_into().unwrap()) != SIGEV_NONE {
+        return LINUX_ENOSYS;
+    }
+    if !copy_to_linux_user(timer_address, &1_i32.to_ne_bytes()) {
+        return LINUX_EFAULT;
+    }
+    ELF_PROBE_POSIX_TIMER_INTERVAL.store(0, Ordering::SeqCst);
+    ELF_PROBE_POSIX_TIMER_DEADLINE.store(0, Ordering::SeqCst);
+    ELF_PROBE_POSIX_TIMER_ACTIVE.store(true, Ordering::SeqCst);
+    0
+}
+
+fn linux_timer_settime(timer: u64, flags: u64, new_address: u64, old_address: u64) -> u64 {
+    const TIMER_ABSTIME: u64 = 1;
+    if timer != 1 || !ELF_PROBE_POSIX_TIMER_ACTIVE.load(Ordering::SeqCst) {
+        return LINUX_EINVAL;
+    }
+    if flags & !TIMER_ABSTIME != 0 {
+        return LINUX_EINVAL;
+    }
+    if old_address != 0 && !linux_writable_user_range_contains(old_address, 32) {
+        return LINUX_EFAULT;
+    }
+    let mut specification = [0_u8; 32];
+    if !copy_from_linux_user(new_address, &mut specification) {
+        return LINUX_EFAULT;
+    }
+    let Some(interval) = linux_timespec_nanoseconds(&specification[..16]) else {
+        return LINUX_EINVAL;
+    };
+    let Some(value) = linux_timespec_nanoseconds(&specification[16..]) else {
+        return LINUX_EINVAL;
+    };
+    let Some(now) = linux_elapsed_nanoseconds() else {
+        return LINUX_ENOSYS;
+    };
+    let old = linux_timer_specification(
+        ELF_PROBE_POSIX_TIMER_INTERVAL.load(Ordering::SeqCst),
+        ELF_PROBE_POSIX_TIMER_DEADLINE.load(Ordering::SeqCst),
+        now,
+    );
+    let deadline = if value == 0 {
+        0
+    } else if flags & TIMER_ABSTIME != 0 {
+        value
+    } else {
+        let Some(deadline) = now.checked_add(value) else {
+            return LINUX_EINVAL;
+        };
+        deadline
+    };
+    if old_address != 0 && !copy_to_linux_user(old_address, &old) {
+        return LINUX_EFAULT;
+    }
+    ELF_PROBE_POSIX_TIMER_INTERVAL.store(interval, Ordering::SeqCst);
+    ELF_PROBE_POSIX_TIMER_DEADLINE.store(deadline, Ordering::SeqCst);
+    0
+}
+
+fn linux_timer_gettime(timer: u64, address: u64) -> u64 {
+    if timer != 1 || !ELF_PROBE_POSIX_TIMER_ACTIVE.load(Ordering::SeqCst) {
+        return LINUX_EINVAL;
+    }
+    let Some(now) = linux_elapsed_nanoseconds() else {
+        return LINUX_ENOSYS;
+    };
+    let specification = linux_timer_specification(
+        ELF_PROBE_POSIX_TIMER_INTERVAL.load(Ordering::SeqCst),
+        ELF_PROBE_POSIX_TIMER_DEADLINE.load(Ordering::SeqCst),
+        now,
+    );
+    if copy_to_linux_user(address, &specification) {
+        0
+    } else {
+        LINUX_EFAULT
+    }
+}
+
+fn linux_timer_getoverrun(timer: u64) -> u64 {
+    if timer == 1 && ELF_PROBE_POSIX_TIMER_ACTIVE.load(Ordering::SeqCst) {
+        0
+    } else {
+        LINUX_EINVAL
+    }
+}
+
+fn linux_timer_delete(timer: u64) -> u64 {
+    if timer != 1 || !ELF_PROBE_POSIX_TIMER_ACTIVE.swap(false, Ordering::SeqCst) {
+        return LINUX_EINVAL;
+    }
+    ELF_PROBE_POSIX_TIMER_INTERVAL.store(0, Ordering::SeqCst);
+    ELF_PROBE_POSIX_TIMER_DEADLINE.store(0, Ordering::SeqCst);
+    0
+}
+
 fn linux_timerfd_settime(descriptor: u64, flags: u64, new_address: u64, old_address: u64) -> u64 {
     if !linux_timerfd_descriptor(descriptor) {
         return LINUX_EBADF;
@@ -17884,6 +18012,10 @@ fn linux_timespec_nanoseconds(timespec: &[u8]) -> Option<u64> {
 fn linux_timerfd_specification(now: u64) -> [u8; 32] {
     let interval = ELF_PROBE_TIMERFD_INTERVAL.load(Ordering::SeqCst);
     let deadline = ELF_PROBE_TIMERFD_DEADLINE.load(Ordering::SeqCst);
+    linux_timer_specification(interval, deadline, now)
+}
+
+fn linux_timer_specification(interval: u64, deadline: u64, now: u64) -> [u8; 32] {
     let remaining = if deadline == 0 {
         0
     } else if now < deadline {
