@@ -7,7 +7,6 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 pub(crate) const FILE_CAPACITY: usize = 64;
 const PAGE_SIZE: usize = 4096;
-const FILE_LIMIT: usize = 4;
 const NAME_CAPACITY: usize = 64;
 const DATA_CAPACITY: usize = PAGE_SIZE - core::mem::size_of::<FrameLease>();
 const FILE_NAME: &[u8] = b"ginux-ready";
@@ -44,11 +43,21 @@ struct DataPage {
     bytes: [u8; DATA_CAPACITY],
 }
 
+const FILES_PER_PAGE: usize =
+    (PAGE_SIZE - core::mem::size_of::<FrameLease>()) / core::mem::size_of::<Option<File>>();
+
+#[repr(C)]
+struct FilePage {
+    next: FrameLease,
+    files: [Option<File>; FILES_PER_PAGE],
+}
+
 struct Tmpfs {
     generation: u32,
     used: usize,
     allocated_pages: usize,
-    files: [Option<File>; FILE_LIMIT],
+    first_file_page: FrameLease,
+    file_page_count: usize,
 }
 
 impl Tmpfs {
@@ -57,7 +66,8 @@ impl Tmpfs {
             generation: 0,
             used: 0,
             allocated_pages: 0,
-            files: [None; FILE_LIMIT],
+            first_file_page: FrameLease::EMPTY,
+            file_page_count: 0,
         }
     }
 
@@ -73,16 +83,16 @@ impl Tmpfs {
         if !Self::valid_name(name) || self.find(name, false).is_some() {
             return None;
         }
-        let slot = self.files.iter().position(Option::is_none)?;
+        let (page, slot) = self.free_file_slot()?;
         let generation = self.generation.checked_add(1)?;
         let mut stored_name = [0_u8; NAME_CAPACITY];
         stored_name[..name.len()].copy_from_slice(name);
         let handle = FileHandle {
             generation,
-            inode: FIRST_FILE_INODE + slot as u64,
+            inode: FIRST_FILE_INODE.checked_add(u64::from(generation) - 1)?,
         };
         self.generation = generation;
-        self.files[slot] = Some(File {
+        file_page_mut(page)?.files[slot] = Some(File {
             handle,
             name_length: name.len() as u8,
             name: stored_name,
@@ -98,26 +108,55 @@ impl Tmpfs {
     }
 
     fn find(&self, name: &[u8], published_only: bool) -> Option<FileHandle> {
-        self.files.iter().flatten().find_map(|file| {
-            (!published_only || file.published)
-                .then_some(())
-                .filter(|_| file.name() == name)
-                .map(|_| file.handle)
-        })
+        self.find_file(|file| (!published_only || file.published) && file.name() == name)
+            .and_then(|(page, slot)| file_page(page)?.files[slot].map(|file| file.handle))
     }
 
     fn file(&self, handle: FileHandle) -> Option<&File> {
-        self.files
-            .iter()
-            .flatten()
-            .find(|file| file.handle == handle)
+        let (page, slot) = self.find_file(|file| file.handle == handle)?;
+        file_page(page)?.files[slot].as_ref()
     }
 
     fn file_mut(&mut self, handle: FileHandle) -> Option<&mut File> {
-        self.files
-            .iter_mut()
-            .flatten()
-            .find(|file| file.handle == handle)
+        let (page, slot) = self.find_file(|file| file.handle == handle)?;
+        file_page_mut(page)?.files[slot].as_mut()
+    }
+
+    fn find_file(&self, predicate: impl Fn(&File) -> bool) -> Option<(FrameLease, usize)> {
+        let mut page = self.first_file_page;
+        while page != FrameLease::EMPTY {
+            let metadata = file_page(page)?;
+            if let Some(slot) = metadata
+                .files
+                .iter()
+                .position(|file| file.as_ref().is_some_and(&predicate))
+            {
+                return Some((page, slot));
+            }
+            page = metadata.next;
+        }
+        None
+    }
+
+    fn free_file_slot(&mut self) -> Option<(FrameLease, usize)> {
+        let mut page = self.first_file_page;
+        let mut last = FrameLease::EMPTY;
+        while page != FrameLease::EMPTY {
+            let metadata = file_page(page)?;
+            if let Some(slot) = metadata.files.iter().position(Option::is_none) {
+                return Some((page, slot));
+            }
+            last = page;
+            page = metadata.next;
+        }
+        let page = allocate_file_page()?;
+        if last == FrameLease::EMPTY {
+            self.first_file_page = page;
+        } else {
+            file_page_mut(last)?.next = page;
+        }
+        self.file_page_count += 1;
+        Some((page, 0))
     }
 
     fn read(&mut self, handle: FileHandle, offset: usize, output: &mut [u8]) -> Option<usize> {
@@ -154,15 +193,12 @@ impl Tmpfs {
     }
 
     fn write(&mut self, handle: FileHandle, offset: usize, input: &[u8]) -> Option<usize> {
-        let slot = self
-            .files
-            .iter()
-            .position(|file| file.is_some_and(|file| file.handle == handle))?;
+        let (metadata_page, slot) = self.find_file(|file| file.handle == handle)?;
         if input.is_empty() {
             return Some(0);
         }
         let end = offset.checked_add(input.len())?;
-        let file = self.files[slot].as_ref()?;
+        let file = file_page(metadata_page)?.files[slot].as_ref()?;
         if file.published && file.name() != FILE_NAME {
             return None;
         }
@@ -202,7 +238,7 @@ impl Tmpfs {
             page = data.next;
         }
 
-        let file = self.files[slot].as_mut()?;
+        let file = file_page_mut(metadata_page)?.files[slot].as_mut()?;
         file.first_page = first_page;
         file.last_page = last_page;
         file.page_count = required_page_count;
@@ -226,14 +262,11 @@ impl Tmpfs {
     }
 
     fn unlink(&mut self, handle: FileHandle) -> bool {
-        let Some(slot) = self
-            .files
-            .iter()
-            .position(|file| file.is_some_and(|file| file.handle == handle))
-        else {
+        let Some((metadata_page, slot)) = self.find_file(|file| file.handle == handle) else {
             return false;
         };
-        let Some(file) = self.files[slot].as_mut() else {
+        let Some(file) = file_page_mut(metadata_page).and_then(|page| page.files[slot].as_mut())
+        else {
             return false;
         };
         let page_count = file.page_count;
@@ -255,12 +288,47 @@ impl Tmpfs {
         file.last_page = FrameLease::EMPTY;
         file.cached_page = FrameLease::EMPTY;
         file.cached_page_index = 0;
-        self.files[slot] = None;
-        true
+        let Some(page) = file_page_mut(metadata_page) else {
+            return false;
+        };
+        page.files[slot] = None;
+        self.release_empty_file_pages()
     }
 
     fn clean(&self) -> bool {
-        self.used == 0 && self.allocated_pages == 0 && self.files.iter().all(Option::is_none)
+        self.used == 0
+            && self.allocated_pages == 0
+            && self.file_page_count == 0
+            && self.first_file_page == FrameLease::EMPTY
+    }
+
+    fn release_empty_file_pages(&mut self) -> bool {
+        let mut previous = FrameLease::EMPTY;
+        let mut current = self.first_file_page;
+        while current != FrameLease::EMPTY {
+            let Some(page) = file_page(current) else {
+                return false;
+            };
+            let next = page.next;
+            if page.files.iter().all(Option::is_none) {
+                if !memory::scrub_and_release_frames(FrameOwner::KERNEL, &[current]) {
+                    return false;
+                }
+                if previous == FrameLease::EMPTY {
+                    self.first_file_page = next;
+                } else {
+                    let Some(previous_page) = file_page_mut(previous) else {
+                        return false;
+                    };
+                    previous_page.next = next;
+                }
+                self.file_page_count -= 1;
+            } else {
+                previous = current;
+            }
+            current = next;
+        }
+        true
     }
 }
 
@@ -268,6 +336,35 @@ impl File {
     fn name(&self) -> &[u8] {
         &self.name[..usize::from(self.name_length)]
     }
+}
+
+fn allocate_file_page() -> Option<FrameLease> {
+    let [page] = memory::allocate_frames::<1>(FrameOwner::KERNEL)?;
+    let Some(address) = page.direct_map_address() else {
+        let _ = memory::scrub_and_release_frames(FrameOwner::KERNEL, &[page]);
+        return None;
+    };
+    unsafe {
+        core::ptr::write_bytes(address as *mut u8, 0, PAGE_SIZE);
+        core::ptr::write(
+            address as *mut FilePage,
+            FilePage {
+                next: FrameLease::EMPTY,
+                files: [None; FILES_PER_PAGE],
+            },
+        );
+    }
+    Some(page)
+}
+
+fn file_page(page: FrameLease) -> Option<&'static FilePage> {
+    let address = page.direct_map_address()?;
+    Some(unsafe { &*(address as *const FilePage) })
+}
+
+fn file_page_mut(page: FrameLease) -> Option<&'static mut FilePage> {
+    let address = page.direct_map_address()?;
+    Some(unsafe { &mut *(address as *mut FilePage) })
 }
 
 fn allocate_data_pages(count: usize) -> Option<FrameLease> {
@@ -400,14 +497,42 @@ pub(crate) fn verify_contract() -> bool {
     let Some(replacement) = tmpfs.create(FILE_NAME, true) else {
         return false;
     };
-    replacement.generation > stale.generation
-        && replacement.inode == stale.inode
-        && tmpfs.read(replacement, 0, &mut output) == Some(0)
-        && !tmpfs.unlink(stale)
-        && tmpfs.unlink(replacement)
-        && tmpfs.unlink(staged)
-        && tmpfs.clean()
-        && memory::owner_live_frame_count(FrameOwner::KERNEL) == Some(frames_before)
+    if replacement.generation <= stale.generation
+        || replacement.inode <= stale.inode
+        || tmpfs.read(replacement, 0, &mut output) != Some(0)
+        || tmpfs.unlink(stale)
+        || !tmpfs.unlink(replacement)
+        || !tmpfs.unlink(staged)
+    {
+        return false;
+    }
+    for index in 0..=FILES_PER_PAGE {
+        let name = [
+            b'm',
+            b'a' + u8::try_from(index / 26).unwrap_or(25),
+            b'a' + u8::try_from(index % 26).unwrap_or(25),
+        ];
+        if tmpfs.create(&name, false).is_none() {
+            return false;
+        }
+    }
+    if tmpfs.file_page_count < 2 {
+        return false;
+    }
+    for index in 0..=FILES_PER_PAGE {
+        let name = [
+            b'm',
+            b'a' + u8::try_from(index / 26).unwrap_or(25),
+            b'a' + u8::try_from(index % 26).unwrap_or(25),
+        ];
+        let Some(handle) = tmpfs.find(&name, false) else {
+            return false;
+        };
+        if !tmpfs.unlink(handle) {
+            return false;
+        }
+    }
+    tmpfs.clean() && memory::owner_live_frame_count(FrameOwner::KERNEL) == Some(frames_before)
 }
 
 pub(crate) fn install() -> bool {
@@ -499,12 +624,10 @@ pub(crate) fn verify_live_object_contract() -> bool {
 }
 
 pub(crate) fn from_generation(generation: u32) -> Option<FileHandle> {
-    live()?
-        .files
-        .iter()
-        .flatten()
-        .find(|file| file.published && file.handle.generation == generation)
-        .map(|file| file.handle)
+    let tmpfs = live()?;
+    let (page, slot) =
+        tmpfs.find_file(|file| file.published && file.handle.generation == generation)?;
+    file_page(page)?.files[slot].map(|file| file.handle)
 }
 
 pub(crate) fn generation(handle: FileHandle) -> u32 {
@@ -542,11 +665,14 @@ pub(crate) fn teardown() -> bool {
     let Some(tmpfs) = live_mut() else {
         return false;
     };
-    for slot in 0..FILE_LIMIT {
-        if let Some(handle) = tmpfs.files[slot].map(|file| file.handle) {
-            if !tmpfs.unlink(handle) {
-                return false;
-            }
+    while let Some((page, slot)) = tmpfs.find_file(|_| true) {
+        let Some(handle) =
+            file_page(page).and_then(|page| page.files[slot].map(|file| file.handle))
+        else {
+            return false;
+        };
+        if !tmpfs.unlink(handle) {
+            return false;
         }
     }
     tmpfs.clean()

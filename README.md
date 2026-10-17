@@ -6,6 +6,9 @@ Ginux is an experimental, immutable host OS designed to run familiar Linux
 userspaces directly on hardware without a conventional host distribution and
 without a guest kernel for every container.
 
+Runtime allocation policy and remaining fixed-capacity migrations are tracked
+in [the runtime capacity audit](docs/RUNTIME-CAPACITY-AUDIT.md).
+
 The kernel provides the mechanisms that must be shared and trusted: CPU
 scheduling, memory isolation, capabilities, IPC, interrupts, device access,
 and container-facing kernel objects. Everything else is divided into explicit
