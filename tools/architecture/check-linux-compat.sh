@@ -6,6 +6,12 @@ matrix="${repo_root}/docs/LINUX-COMPATIBILITY.md"
 dispatcher="${repo_root}/kernel/src/arch/x86_64/cpu.rs"
 
 awk '
+BEGIN {
+    count_by_status["Complete"] = 0
+    count_by_status["Partial"] = 0
+    count_by_status["Policy-denied"] = 0
+    count_by_status["Missing"] = 0
+}
 function fail(message) {
     print "Linux compatibility check: " message > "/dev/stderr"
     failed = 1

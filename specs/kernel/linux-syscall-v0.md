@@ -1753,6 +1753,16 @@ optional Landlock security module is not enabled at boot. Ginux does not
 advertise a Landlock ABI until every access right in that ABI can be enforced;
 security-module selection remains an explicit host policy decision.
 
+`rax = 425..427` (`io_uring_setup`, `io_uring_enter`, and
+`io_uring_register`) provide a bounded shared-ring ABI. Setup rounds up to at
+most 64 submission entries, publishes Linux SQ/CQ offsets, and exposes the
+three standard mmap offsets for SQ, CQ, and SQEs. Enter synchronously consumes
+SQ indices and publishes CQEs with acquire/release-visible head/tail updates;
+`IORING_OP_NOP` is supported and unsupported opcodes complete with `-EINVAL`.
+`IORING_REGISTER_PROBE` reports the NOP operation. SQPOLL/IOPOLL, registered
+resources, linked requests, cancellation, personalities, and asynchronous
+file/network operations remain pending.
+
 Every other call
 returns `-ENOSYS` without disarming
 the task, so a caller can handle the error and continue. The entire path
