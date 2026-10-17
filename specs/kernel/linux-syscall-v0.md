@@ -743,6 +743,14 @@ with a sequentially consistent kernel fence; other commands remain rejected.
 iovec profile to regular files without changing the descriptor offset. The
 current profile accepts a zero high offset and, for the v2 calls, zero flags.
 Regular-file `readv` and `writev` also cover mutable overlay and tmpfs files.
+`ftruncate` accepts a writable regular-file descriptor, copies an immutable OCI
+file into the per-domain overlay when necessary, and grows or shrinks it with
+demand-allocated pages. Negative lengths return `-EINVAL`. `fallocate` admits
+mode zero for writable regular files and ensures that `offset + length` bytes
+are allocated without shrinking an existing file. It uses the same copy-up and
+demand-allocation path. Negative inputs and zero lengths return `-EINVAL`,
+range overflow returns `-EFBIG`, unavailable memory returns `-ENOSPC`, and
+allocation modes such as hole punching remain explicitly `-EOPNOTSUPP`.
 `fchmodat2` delegates to the admitted zero-flag `fchmodat` profile.
 Legacy `utime`, `utimes`, and `futimesat` convert their second-resolution or
 microsecond-resolution inputs to overlay timestamps; null time pointers select

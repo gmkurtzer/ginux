@@ -289,6 +289,7 @@ const LINUX_EPOLL_PWAIT_SYSCALL: u64 = 281;
 const LINUX_UTIMENSAT_SYSCALL: u64 = 280;
 const LINUX_TIMERFD_CREATE_SYSCALL: u64 = 283;
 const LINUX_EVENTFD_SYSCALL: u64 = 284;
+const LINUX_FALLOCATE_SYSCALL: u64 = 285;
 const LINUX_TIMERFD_SETTIME_SYSCALL: u64 = 286;
 const LINUX_TIMERFD_GETTIME_SYSCALL: u64 = 287;
 const LINUX_EVENTFD2_SYSCALL: u64 = 290;
@@ -347,6 +348,7 @@ const LINUX_ENOTDIR: u64 = u64::MAX - 19;
 const LINUX_EISDIR: u64 = u64::MAX - 20;
 const LINUX_ENOMEM: u64 = u64::MAX - 11;
 const LINUX_ENOSPC: u64 = u64::MAX - 27;
+const LINUX_EFBIG: u64 = u64::MAX - 26;
 const LINUX_ESPIPE: u64 = u64::MAX - 28;
 const LINUX_EMFILE: u64 = u64::MAX - 23;
 const LINUX_EINVAL: u64 = u64::MAX - 21;
@@ -7686,6 +7688,7 @@ extern "sysv64" fn linux_syscall_handler(
         }
         LINUX_TRUNCATE_SYSCALL => linux_truncate(first_argument, buffer),
         LINUX_FTRUNCATE_SYSCALL => linux_ftruncate(first_argument, buffer),
+        LINUX_FALLOCATE_SYSCALL => linux_fallocate(first_argument, buffer, count, register(0)),
         LINUX_BRK_SYSCALL => {
             if runtime_mode {
                 linux_runtime_brk(first_argument)
@@ -14292,17 +14295,49 @@ fn linux_ftruncate(descriptor: u64, length: u64) -> u64 {
     if state & 3 != LINUX_DESCRIPTOR_OUTPUT && state & 3 != 3 {
         return LINUX_EBADF;
     }
-    let Some(handle) = linux_overlay_descriptor_handle(descriptor) else {
-        return if linux_descriptor_open(descriptor) {
-            LINUX_EINVAL
-        } else {
-            LINUX_EBADF
-        };
-    };
-    let Ok(length) = usize::try_from(length) else {
+    if length > i64::MAX as u64 {
         return LINUX_EINVAL;
+    }
+    let handle = match linux_copy_up_descriptor(descriptor) {
+        Ok(handle) => handle,
+        Err(error) => return error,
     };
+    let length = length as usize;
     if crate::linux_overlay::truncate(handle, length) {
+        0
+    } else {
+        LINUX_ENOSPC
+    }
+}
+
+fn linux_fallocate(descriptor: u64, mode: u64, offset: u64, length: u64) -> u64 {
+    let state = linux_device_descriptor(descriptor);
+    if state & 3 != LINUX_DESCRIPTOR_OUTPUT && state & 3 != 3 {
+        return LINUX_EBADF;
+    }
+    if mode != 0 {
+        return LINUX_EOPNOTSUPP;
+    }
+    if offset > i64::MAX as u64 || length == 0 || length > i64::MAX as u64 {
+        return LINUX_EINVAL;
+    }
+    let Some(end) = offset
+        .checked_add(length)
+        .filter(|end| *end <= i64::MAX as u64)
+    else {
+        return LINUX_EFBIG;
+    };
+    let handle = match linux_copy_up_descriptor(descriptor) {
+        Ok(handle) => handle,
+        Err(error) => return error,
+    };
+    let Some(metadata) = crate::linux_overlay::metadata(handle) else {
+        return LINUX_EIO;
+    };
+    if metadata.kind != crate::linux_overlay::NodeKind::File {
+        return LINUX_EISDIR;
+    }
+    if metadata.size >= end as usize || crate::linux_overlay::truncate(handle, end as usize) {
         0
     } else {
         LINUX_ENOSPC
