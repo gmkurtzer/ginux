@@ -42,7 +42,7 @@ Detailed bounded behavior for implemented calls lives in
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **19 Complete**, **291 Partial**, **45 Policy-denied**, **20 Missing**.
+Current totals: **19 Complete**, **293 Partial**, **45 Policy-denied**, **18 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -64,7 +64,7 @@ Current totals: **19 Complete**, **291 Partial**, **45 Policy-denied**, **20 Mis
 | `/dev` and terminal ABI | Partial | Selected console/device nodes and bounded termios/winsize ioctls. |
 | `/sys` | Missing | No Linux-compatible sysfs contract. |
 | Credentials and user namespaces | Partial | Container-scoped identity and hard privilege boundary; many mutation calls are policy-denied. |
-| Mount and namespace APIs | Policy-denied | Container roots are kernel-created; general mount, chroot, pivot, unshare, and setns are unavailable. |
+| Mount and namespace APIs | Partial | Container roots are kernel-created; `listmount` and `statmount` enumerate and describe the domain root and automatic proc mount. General mount, chroot, pivot, unshare, and setns are policy-denied. |
 | Socket API | Partial | Linux TCP/UDP sockets use the kernel network stack and survive the connection churn of OCI and DNF downloads; TCP server sockets and local `socketpair` are supported. IPv6, ancillary data, interruptible socket waits, and the full option surface remain pending. |
 | cgroups | Missing | No Linux cgroup filesystem or ABI. |
 | seccomp, audit, LSM ABI | Partial | The Linux LSM query API accurately reports no active Linux LSM modules and rejects unsupported Linux security contexts; seccomp and audit remain missing. |
@@ -496,8 +496,8 @@ therefore omitted.
 | 454 | futex_wake | Partial |
 | 455 | futex_wait | Partial |
 | 456 | futex_requeue | Partial |
-| 457 | statmount | Missing |
-| 458 | listmount | Missing |
+| 457 | statmount | Partial |
+| 458 | listmount | Partial |
 | 459 | lsm_get_self_attr | Partial |
 | 460 | lsm_set_self_attr | Partial |
 | 461 | lsm_list_modules | Partial |

@@ -283,6 +283,21 @@ pub(crate) fn current_mountinfo() -> Option<&'static [u8]> {
     current_root_is_read_only().then_some(MOUNTINFO)
 }
 
+pub(crate) fn current_namespace_id() -> Option<u64> {
+    current()
+        .filter(|_| current_root_is_read_only())
+        .map(|handle| u64::from(handle.id))
+}
+
+pub(crate) fn current_unique_mount_id(local_id: u64) -> Option<u64> {
+    if !matches!(local_id, 1 | 2) {
+        return None;
+    }
+    current_namespace_id()?
+        .checked_shl(32)
+        .and_then(|namespace| namespace.checked_add(local_id))
+}
+
 fn current() -> Option<MountNamespaceHandle> {
     let slot = CURRENT_SLOT.load(Ordering::Acquire);
     let generation = CURRENT_GENERATION.load(Ordering::Acquire);

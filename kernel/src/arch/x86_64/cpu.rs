@@ -422,6 +422,8 @@ const LINUX_MSEAL_SYSCALL: u64 = 462;
 const LINUX_LSM_GET_SELF_ATTR_SYSCALL: u64 = 459;
 const LINUX_LSM_SET_SELF_ATTR_SYSCALL: u64 = 460;
 const LINUX_LSM_LIST_MODULES_SYSCALL: u64 = 461;
+const LINUX_STATMOUNT_SYSCALL: u64 = 457;
+const LINUX_LISTMOUNT_SYSCALL: u64 = 458;
 const LINUX_FUTEX_WAITV_SYSCALL: u64 = 449;
 const LINUX_PIDFD_SEND_SIGNAL_SYSCALL: u64 = 424;
 const LINUX_PIDFD_OPEN_SYSCALL: u64 = 434;
@@ -477,6 +479,7 @@ const LINUX_EMFILE: u64 = u64::MAX - 23;
 const LINUX_EINVAL: u64 = u64::MAX - 21;
 const LINUX_ENOTTY: u64 = u64::MAX - 24;
 const LINUX_ERANGE: u64 = u64::MAX - 33;
+const LINUX_EOVERFLOW: u64 = u64::MAX - 74;
 const LINUX_ENODATA: u64 = u64::MAX - 60;
 const LINUX_EMSGSIZE: u64 = u64::MAX - 89;
 const LINUX_EOPNOTSUPP: u64 = u64::MAX - 94;
@@ -7865,6 +7868,12 @@ extern "sysv64" fn linux_syscall_handler(
             linux_lsm_set_self_attr(first_argument, buffer, count, register(0))
         }
         LINUX_LSM_LIST_MODULES_SYSCALL => linux_lsm_list_modules(first_argument, buffer, count),
+        LINUX_STATMOUNT_SYSCALL => {
+            linux_statmount(first_argument, buffer, count, register(0))
+        }
+        LINUX_LISTMOUNT_SYSCALL => {
+            linux_listmount(first_argument, buffer, count, register(0))
+        }
         LINUX_SEMTIMEDOP_SYSCALL => linux_semop(first_argument, buffer, count, register(0)),
         LINUX_MREMAP_SYSCALL => {
             linux_mremap(first_argument, buffer, count, register(0), register(2))
@@ -12364,6 +12373,209 @@ fn linux_lsm_list_modules(_identifiers: u64, size: u64, flags: u64) -> u64 {
     0
 }
 
+fn linux_mount_id_request(address: u64) -> Result<(u64, u64), u64> {
+    const VERSION_ZERO_SIZE: usize = 24;
+    const VERSION_ONE_SIZE: usize = 32;
+    let mut request = [0_u8; VERSION_ONE_SIZE];
+    if !copy_from_linux_user(address, &mut request[..4]) {
+        return Err(LINUX_EFAULT);
+    }
+    let size = u32::from_ne_bytes(request[..4].try_into().unwrap()) as usize;
+    if size < VERSION_ZERO_SIZE || size > PAGE_SIZE {
+        return Err(LINUX_EINVAL);
+    }
+    let copied = size.min(VERSION_ONE_SIZE);
+    if !copy_from_linux_user(address, &mut request[..copied]) {
+        return Err(LINUX_EFAULT);
+    }
+    if request[4..8].iter().any(|byte| *byte != 0) {
+        return Err(LINUX_EINVAL);
+    }
+    if size > VERSION_ONE_SIZE {
+        let mut extension = [0_u8; 64];
+        let mut offset = VERSION_ONE_SIZE;
+        while offset < size {
+            let length = (size - offset).min(extension.len());
+            if !copy_from_linux_user(address + offset as u64, &mut extension[..length]) {
+                return Err(LINUX_EFAULT);
+            }
+            if extension[..length].iter().any(|byte| *byte != 0) {
+                return Err(LINUX_E2BIG);
+            }
+            offset += length;
+        }
+    }
+    let namespace = if size >= VERSION_ONE_SIZE {
+        u64::from_ne_bytes(request[24..32].try_into().unwrap())
+    } else {
+        0
+    };
+    let current_namespace = linux_mount::current_namespace_id().ok_or(LINUX_EINVAL)?;
+    if namespace != 0 && namespace != current_namespace {
+        return Err(LINUX_ENOENT);
+    }
+    Ok((
+        u64::from_ne_bytes(request[8..16].try_into().unwrap()),
+        u64::from_ne_bytes(request[16..24].try_into().unwrap()),
+    ))
+}
+
+fn linux_statmount(request_address: u64, output_address: u64, capacity: u64, flags: u64) -> u64 {
+    const FIXED_SIZE: usize = 512;
+    const SB_BASIC: u64 = 1;
+    const MNT_BASIC: u64 = 2;
+    const PROPAGATE_FROM: u64 = 4;
+    const MNT_ROOT: u64 = 8;
+    const MNT_POINT: u64 = 0x10;
+    const FS_TYPE: u64 = 0x20;
+    const MNT_NS_ID: u64 = 0x40;
+    const MNT_OPTS: u64 = 0x80;
+    const SUPPORTED: u64 = SB_BASIC
+        | MNT_BASIC
+        | PROPAGATE_FROM
+        | MNT_ROOT
+        | MNT_POINT
+        | FS_TYPE
+        | MNT_NS_ID
+        | MNT_OPTS;
+    if flags != 0 {
+        return LINUX_EINVAL;
+    }
+    let (mount_id, requested) = match linux_mount_id_request(request_address) {
+        Ok(request) => request,
+        Err(error) => return error,
+    };
+    if requested & !SUPPORTED != 0 {
+        return LINUX_EINVAL;
+    }
+    let Some(root_id) = linux_mount::current_unique_mount_id(1) else {
+        return LINUX_EINVAL;
+    };
+    let Some(proc_id) = linux_mount::current_unique_mount_id(2) else {
+        return LINUX_EINVAL;
+    };
+    let proc_mount = if mount_id == root_id {
+        false
+    } else if mount_id == proc_id {
+        true
+    } else {
+        return LINUX_ENOENT;
+    };
+    let mut output = [0_u8; FIXED_SIZE + 96];
+    output[8..16].copy_from_slice(&requested.to_ne_bytes());
+    if requested & SB_BASIC != 0 {
+        output[16..20].copy_from_slice(&0_u32.to_ne_bytes());
+        output[20..24].copy_from_slice(&(if proc_mount { 2_u32 } else { 1 }).to_ne_bytes());
+        output[24..32].copy_from_slice(
+            &(if proc_mount { 0x9fa0_u64 } else { 0x8584_58f6 }).to_ne_bytes(),
+        );
+        output[32..36]
+            .copy_from_slice(&(if proc_mount { 0_u32 } else { 1 }).to_ne_bytes());
+    }
+    if requested & MNT_BASIC != 0 {
+        output[40..48].copy_from_slice(&mount_id.to_ne_bytes());
+        output[48..56].copy_from_slice(&(if proc_mount { root_id } else { mount_id }).to_ne_bytes());
+        output[56..60].copy_from_slice(&(if proc_mount { 2_u32 } else { 1 }).to_ne_bytes());
+        output[60..64].copy_from_slice(&1_u32.to_ne_bytes());
+        output[64..72]
+            .copy_from_slice(&(if proc_mount { 0x0e_u64 } else { 0x07 }).to_ne_bytes());
+        output[72..80].copy_from_slice(&(1_u64 << 18).to_ne_bytes());
+    }
+    if requested & PROPAGATE_FROM != 0 {
+        output[96..104].copy_from_slice(&0_u64.to_ne_bytes());
+    }
+    if requested & MNT_NS_ID != 0 {
+        output[112..120].copy_from_slice(
+            &linux_mount::current_namespace_id().unwrap_or(0).to_ne_bytes(),
+        );
+    }
+    let mut used = FIXED_SIZE;
+    let mut append = |field: usize, value: &[u8]| -> bool {
+        let offset = used - FIXED_SIZE;
+        let Some(end) = used.checked_add(value.len() + 1) else {
+            return false;
+        };
+        let Some(destination) = output.get_mut(used..end) else {
+            return false;
+        };
+        destination[..value.len()].copy_from_slice(value);
+        destination[value.len()] = 0;
+        output[field..field + 4].copy_from_slice(&(offset as u32).to_ne_bytes());
+        used = end;
+        true
+    };
+    if requested & MNT_OPTS != 0
+        && !append(
+            4,
+            if proc_mount {
+                b"rw,nosuid,nodev,noexec,relatime"
+            } else {
+                b"ro,nosuid,nodev"
+            },
+        )
+        || requested & FS_TYPE != 0
+            && !append(36, if proc_mount { b"proc" } else { b"ginux-root" })
+        || requested & MNT_ROOT != 0 && !append(104, b"/")
+        || requested & MNT_POINT != 0
+            && !append(108, if proc_mount { b"/proc" } else { b"/" })
+    {
+        return LINUX_EOVERFLOW;
+    }
+    output[..4].copy_from_slice(&(used as u32).to_ne_bytes());
+    if capacity < used as u64 {
+        return LINUX_EOVERFLOW;
+    }
+    if copy_to_linux_user(output_address, &output[..used]) {
+        0
+    } else {
+        LINUX_EFAULT
+    }
+}
+
+fn linux_listmount(request_address: u64, output_address: u64, count: u64, flags: u64) -> u64 {
+    const LSMT_ROOT: u64 = u64::MAX;
+    const LISTMOUNT_REVERSE: u64 = 1;
+    if flags & !LISTMOUNT_REVERSE != 0 || count == 0 {
+        return LINUX_EINVAL;
+    }
+    let (parent, last) = match linux_mount_id_request(request_address) {
+        Ok(request) => request,
+        Err(error) => return error,
+    };
+    let Some(root) = linux_mount::current_unique_mount_id(1) else {
+        return LINUX_EINVAL;
+    };
+    let Some(proc_mount) = linux_mount::current_unique_mount_id(2) else {
+        return LINUX_EINVAL;
+    };
+    if !matches!(parent, LSMT_ROOT) && parent != root && parent != proc_mount {
+        return LINUX_ENOENT;
+    }
+    let candidates = if flags & LISTMOUNT_REVERSE != 0 {
+        [proc_mount, root]
+    } else {
+        [root, proc_mount]
+    };
+    let mut output = [0_u8; 16];
+    let mut returned = 0_usize;
+    for mount in candidates {
+        let under_parent = parent == LSMT_ROOT || parent == root && mount == proc_mount;
+        let after_cursor = if flags & LISTMOUNT_REVERSE != 0 {
+            last == 0 || mount < last
+        } else {
+            mount > last
+        };
+        if under_parent && after_cursor && returned < count.min(2) as usize {
+            output[returned * 8..returned * 8 + 8].copy_from_slice(&mount.to_ne_bytes());
+            returned += 1;
+        }
+    }
+    if returned != 0 && !copy_to_linux_user(output_address, &output[..returned * 8]) {
+        return LINUX_EFAULT;
+    }
+    returned as u64
+}
+
 fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let old_runtime = LINUX_RUNTIME_MODE.swap(true, Ordering::SeqCst);
     let id = linux_shmget(0, 2 * PAGE_SIZE as u64, 0o600);
@@ -12404,6 +12616,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let posix_queues = verify_linux_posix_message_queue_syscalls();
     let aio = verify_linux_aio_syscalls();
     let secret_memory = verify_linux_memfd_secret_syscall();
+    let mount_queries = verify_linux_mount_query_syscalls();
     let mappings_released =
         address_space::release_current_linux_runtime_mappings(LINUX_RUNTIME_DYNAMIC_MMAP_BASE);
     ELF_PROBE_MMAP_NEXT.store(LINUX_RUNTIME_DYNAMIC_MMAP_BASE, Ordering::SeqCst);
@@ -12418,7 +12631,73 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && posix_queues
         && aio
         && secret_memory
+        && mount_queries
         && mappings_released
+}
+
+fn verify_linux_mount_query_syscalls() -> bool {
+    let mapping = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    if !(LINUX_RUNTIME_DYNAMIC_MMAP_BASE..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
+        .contains(&mapping)
+    {
+        return false;
+    }
+    let namespace = linux_mount::current_namespace_id().unwrap_or(0);
+    let mut request = [0_u8; 32];
+    request[..4].copy_from_slice(&32_u32.to_ne_bytes());
+    request[8..16].copy_from_slice(&u64::MAX.to_ne_bytes());
+    request[24..].copy_from_slice(&namespace.to_ne_bytes());
+    let listed = copy_to_linux_user(mapping, &request)
+        && linux_listmount(mapping, mapping + 64, 2, 0) == 2;
+    let mut identifiers = [0_u8; 16];
+    let (root, proc_mount) = if listed && copy_from_linux_user(mapping + 64, &mut identifiers) {
+        (
+            u64::from_ne_bytes(identifiers[..8].try_into().unwrap()),
+            u64::from_ne_bytes(identifiers[8..].try_into().unwrap()),
+        )
+    } else {
+        (0, 0)
+    };
+    request[8..16].copy_from_slice(&root.to_ne_bytes());
+    request[16..24].copy_from_slice(&0xff_u64.to_ne_bytes());
+    let root_stat = root != 0
+        && proc_mount != 0
+        && copy_to_linux_user(mapping, &request)
+        && linux_statmount(mapping, mapping + 512, 1024, 0) == 0;
+    let mut stat = [0_u8; 608];
+    let root_valid = root_stat
+        && copy_from_linux_user(mapping + 512, &mut stat)
+        && u32::from_ne_bytes(stat[..4].try_into().unwrap()) > 512
+        && u64::from_ne_bytes(stat[8..16].try_into().unwrap()) == 0xff
+        && u64::from_ne_bytes(stat[40..48].try_into().unwrap()) == root
+        && u64::from_ne_bytes(stat[48..56].try_into().unwrap()) == root
+        && u32::from_ne_bytes(stat[56..60].try_into().unwrap()) == 1;
+    request[8..16].copy_from_slice(&proc_mount.to_ne_bytes());
+    request[16..24].copy_from_slice(&2_u64.to_ne_bytes());
+    let proc_valid = root_valid
+        && copy_to_linux_user(mapping, &request)
+        && linux_statmount(mapping, mapping + 512, 512, 0) == 0
+        && {
+            let mut basic = [0_u8; 64];
+            copy_from_linux_user(mapping + 512, &mut basic)
+                && u64::from_ne_bytes(basic[40..48].try_into().unwrap()) == proc_mount
+                && u64::from_ne_bytes(basic[48..56].try_into().unwrap()) == root
+                && u32::from_ne_bytes(basic[56..60].try_into().unwrap()) == 2
+        };
+    request[16..24].copy_from_slice(&0x100_u64.to_ne_bytes());
+    let rejected = proc_valid
+        && copy_to_linux_user(mapping, &request)
+        && linux_statmount(mapping, mapping + 512, 1024, 0) == LINUX_EINVAL
+        && linux_listmount(mapping, mapping + 64, 0, 0) == LINUX_EINVAL;
+    let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
+    rejected && unmapped
 }
 
 fn verify_linux_memfd_secret_syscall() -> bool {

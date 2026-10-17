@@ -1057,6 +1057,19 @@ size record, resets the required size to zero, then returns `EOPNOTSUPP` because
 there is no Linux security context provider. `lsm_set_self_attr` similarly
 validates its selector and reserved flags before returning `EOPNOTSUPP`.
 Native domain policy is neither enumerated nor mutable through this ABI.
+`rax = 457` and `458` (`__NR_statmount` and `__NR_listmount`) expose the
+read-only Linux v6.12 mount-query ABI for the current domain. Version-zero and
+version-one `mnt_id_req` records are accepted, zero-filled forward extensions
+are tolerated, and a version-one namespace identifier must select the active
+domain namespace. `listmount` enumerates stable unique identifiers for the
+domain root and its automatic proc child, supports cursors and reverse order,
+and reports unknown parents with `ENOENT`. `statmount` fills the 512-byte
+v6.12 fixed record and requested superblock, mount, propagation, root,
+mountpoint, filesystem-type, namespace-ID, and option fields, with string
+offsets relative to `str[]`; undersized output returns `EOVERFLOW`. The virtual
+dev and tmp trees are not distinct VFS mounts yet, namespace selection by file
+descriptor is outside the v6.12 baseline, and arbitrary mount trees remain
+unavailable, so both calls remain Partial.
 `rax = 447` (`__NR_memfd_secret`) creates an anonymous read/write file with an
 initial size of zero and accepts only Linux's `FD_CLOEXEC` flag. `ftruncate`
 sets its elastic overlay-backed size and `MAP_SHARED` read/write mappings are
