@@ -8488,11 +8488,10 @@ extern "sysv64" fn linux_syscall_handler(
             }
         }
         LINUX_SCHED_GET_PRIORITY_MAX_SYSCALL | LINUX_SCHED_GET_PRIORITY_MIN_SYSCALL => {
-            if first_argument == 0 {
-                0
-            } else {
-                LINUX_EINVAL
-            }
+            linux_scheduler_priority_range(
+                first_argument,
+                number == LINUX_SCHED_GET_PRIORITY_MAX_SYSCALL,
+            )
         }
         LINUX_SCHED_RR_GET_INTERVAL_SYSCALL => linux_sched_rr_get_interval(first_argument, buffer),
         LINUX_SCHED_SETATTR_SYSCALL => linux_sched_setattr(first_argument, buffer, count),
@@ -12746,6 +12745,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let landlock_disabled = linux_landlock_disabled(0, 0, 1, 0) == LINUX_EOPNOTSUPP
         && linux_landlock_disabled(u64::MAX, u64::MAX, u64::MAX, u64::MAX) == LINUX_EOPNOTSUPP;
     let io_uring = verify_linux_io_uring_syscalls();
+    let scheduler_priorities = verify_linux_scheduler_priority_ranges();
     let mappings_released =
         address_space::release_current_linux_runtime_mappings(LINUX_RUNTIME_DYNAMIC_MMAP_BASE);
     ELF_PROBE_MMAP_NEXT.store(LINUX_RUNTIME_DYNAMIC_MMAP_BASE, Ordering::SeqCst);
@@ -12771,7 +12771,25 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && fanotify
         && landlock_disabled
         && io_uring
+        && scheduler_priorities
         && mappings_released
+}
+
+fn verify_linux_scheduler_priority_ranges() -> bool {
+    [
+        (0, 0, 0),
+        (1, 1, 99),
+        (2, 1, 99),
+        (3, 0, 0),
+        (5, 0, 0),
+        (6, 0, 0),
+    ]
+    .into_iter()
+    .all(|(policy, minimum, maximum)| {
+        linux_scheduler_priority_range(policy, false) == minimum
+            && linux_scheduler_priority_range(policy, true) == maximum
+    }) && linux_scheduler_priority_range(4, false) == LINUX_EINVAL
+        && linux_scheduler_priority_range(u64::MAX, true) == LINUX_EINVAL
 }
 
 fn verify_linux_io_uring_syscalls() -> bool {
@@ -26067,6 +26085,15 @@ fn linux_setrlimit(resource: u64, address: u64) -> u64 {
         0
     } else {
         LINUX_EPERM
+    }
+}
+
+fn linux_scheduler_priority_range(policy: u64, maximum: bool) -> u64 {
+    match policy {
+        1 | 2 if maximum => 99,
+        1 | 2 => 1,
+        0 | 3 | 5 | 6 => 0,
+        _ => LINUX_EINVAL,
     }
 }
 

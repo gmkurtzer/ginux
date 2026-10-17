@@ -684,9 +684,10 @@ single-bootstrap-processor profile and do not claim SMP scheduling support.
 and otherwise succeeds as a no-op. `sched_getscheduler` reports
 `SCHED_OTHER` for PID 0 or 1, and `sched_getparam` copies its priority of zero
 only after validating the complete output. `sched_get_priority_min` and
-`sched_get_priority_max` both report zero for `SCHED_OTHER`. Unknown PIDs
-return `-ESRCH`, an invalid output returns `-EFAULT`, and unsupported policies
-return `-EINVAL`. `sched_setparam` and `sched_setscheduler` accept only an
+`sched_get_priority_max` report 1 and 99 for `SCHED_FIFO`/`SCHED_RR`, and zero
+for `SCHED_OTHER`, `SCHED_BATCH`, `SCHED_IDLE`, and `SCHED_DEADLINE`; unknown
+policies return `-EINVAL`. Unknown PIDs return `-ESRCH`, and an invalid output
+returns `-EFAULT`. `sched_setparam` and `sched_setscheduler` accept only an
 idempotent priority-zero `SCHED_OTHER` request; invalid pointers return
 `-EFAULT`, and other policies return `-EPERM`. `rax = 140`
 (`__NR_getpriority`) reports nice value zero for the sole process by returning
@@ -1685,7 +1686,8 @@ bounded anonymous and immutable-file `mmap`/`munmap` plus bounded
 `sigaltstack`, `umask`, read-only
 `getrlimit`/`prlimit64`,
 bounded one-waiter `futex`,
-`sched_yield`, bounded scheduler-policy and priority queries, `sched_getaffinity`, `getcpu`,
+`sched_yield`, bounded scheduler-policy queries, complete scheduler priority
+range queries, `sched_getaffinity`, `getcpu`,
 bounded `clock_gettime`/`clock_getres`/`times`/`getrusage`, disabled
 `getitimer`/`setitimer`, bounded `nanosleep`,
 `arch_prctl(ARCH_SET_FS/ARCH_GET_FS)`,
