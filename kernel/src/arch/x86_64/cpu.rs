@@ -327,6 +327,8 @@ const LINUX_PPOLL_SYSCALL: u64 = 271;
 const LINUX_SET_ROBUST_LIST_SYSCALL: u64 = 273;
 const LINUX_GET_ROBUST_LIST_SYSCALL: u64 = 274;
 const LINUX_SYNC_FILE_RANGE_SYSCALL: u64 = 277;
+const LINUX_SPLICE_SYSCALL: u64 = 275;
+const LINUX_TEE_SYSCALL: u64 = 276;
 const LINUX_VMSPLICE_SYSCALL: u64 = 278;
 const LINUX_UNSHARE_SYSCALL: u64 = 272;
 const LINUX_MIGRATE_PAGES_SYSCALL: u64 = 256;
@@ -8394,6 +8396,15 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_FREMOVEXATTR_SYSCALL => linux_fremovexattr(first_argument, buffer),
         LINUX_EPOLL_CREATE1_SYSCALL => linux_epoll_create1(first_argument),
         LINUX_PIPE2_SYSCALL => linux_pipe(first_argument, buffer),
+        LINUX_SPLICE_SYSCALL => linux_splice(
+            first_argument,
+            buffer,
+            count,
+            register(0),
+            register(2),
+            register(1),
+        ),
+        LINUX_TEE_SYSCALL => linux_tee(first_argument, buffer, count, register(0)),
         LINUX_VMSPLICE_SYSCALL => linux_vmsplice(first_argument, buffer, count, register(0)),
         LINUX_TIMERFD_CREATE_SYSCALL => linux_timerfd_create(first_argument, buffer),
         LINUX_EVENTFD_SYSCALL => linux_eventfd(first_argument, 0),
@@ -18912,6 +18923,67 @@ fn linux_vmsplice(descriptor: u64, vectors: u64, count: u64, flags: u64) -> u64 
         return LINUX_EBADF;
     }
     linux_descriptor_writev(descriptor, vectors, count)
+}
+
+fn linux_splice(
+    input: u64,
+    input_offset: u64,
+    output: u64,
+    output_offset: u64,
+    length: u64,
+    flags: u64,
+) -> u64 {
+    if input_offset != 0 || output_offset != 0 {
+        return LINUX_ESPIPE;
+    }
+    linux_splice_pipes(input, output, length, flags, true)
+}
+
+fn linux_tee(input: u64, output: u64, length: u64, flags: u64) -> u64 {
+    linux_splice_pipes(input, output, length, flags, false)
+}
+
+fn linux_splice_pipes(input: u64, output: u64, length: u64, flags: u64, consume: bool) -> u64 {
+    const SPLICE_F_MOVE: u64 = 1;
+    const SPLICE_F_NONBLOCK: u64 = 2;
+    const SPLICE_F_MORE: u64 = 4;
+    if flags & !(SPLICE_F_MOVE | SPLICE_F_NONBLOCK | SPLICE_F_MORE) != 0 {
+        return LINUX_EINVAL;
+    }
+    if input == output || !linux_pipe_read_descriptor(input) || !linux_pipe_write_descriptor(output)
+    {
+        return LINUX_EBADF;
+    }
+    if length == 0 {
+        return 0;
+    }
+    let Some(input_slot) = linux_socket_slot(input) else {
+        return LINUX_ENOSYS;
+    };
+    let Some(output_slot) = linux_socket_slot(output) else {
+        return LINUX_ENOSYS;
+    };
+    let requested = usize::try_from(length).unwrap_or(usize::MAX).min(PAGE_SIZE);
+    let mut bytes = [0_u8; PAGE_SIZE];
+    let available = match crate::linux_socket::peek_local(input_slot, &mut bytes[..requested]) {
+        Ok(available) => available,
+        Err(error) => return linux_socket_error(error),
+    };
+    if available == 0 {
+        return 0;
+    }
+    let sent = match crate::linux_socket::send(output_slot, &bytes[..available], None) {
+        Ok(sent) => sent,
+        Err(error) => return linux_socket_error(error),
+    };
+    if consume && sent != 0 {
+        let mut discarded = [0_u8; PAGE_SIZE];
+        match crate::linux_socket::recv(input_slot, &mut discarded[..sent]) {
+            Ok((received, _)) if received == sent => {}
+            _ => return LINUX_EIO,
+        }
+    }
+    sent as u64
 }
 
 fn linux_runtime_pipe(address: u64, flags: u64) -> u64 {

@@ -769,6 +769,46 @@ pub(crate) fn recv(slot: u8, output: &mut [u8]) -> Result<(usize, Option<IpEndpo
     }
 }
 
+pub(crate) fn peek_local(slot: u8, output: &mut [u8]) -> Result<usize, Error> {
+    let state = unsafe { SLOTS.get(usize::from(slot)) }
+        .filter(|slot| slot.occupied && slot.kind == Kind::Unix)
+        .ok_or(Error::Invalid)?;
+    let returned = output.len().min(state.local_length);
+    let mut page = state.local_first;
+    let mut head = state.local_head;
+    let mut copied = 0_usize;
+    while copied < returned {
+        let data = local_page(page).ok_or(Error::Invalid)?;
+        let used = usize::try_from(data.used)
+            .ok()
+            .filter(|used| *used <= LOCAL_DATA_CAPACITY)
+            .ok_or(Error::Invalid)?;
+        if head >= used {
+            return Err(Error::Invalid);
+        }
+        let amount = (returned - copied).min(used - head);
+        output[copied..copied + amount].copy_from_slice(&data.bytes[head..head + amount]);
+        copied += amount;
+        head += amount;
+        if head == used {
+            page = data.next;
+            head = 0;
+        }
+    }
+    if returned != 0 {
+        return Ok(returned);
+    }
+    let peer_open = state
+        .peer
+        .and_then(|peer| unsafe { SLOTS.get(usize::from(peer)) })
+        .is_some_and(|peer| peer.occupied);
+    if peer_open {
+        Err(Error::WouldBlock)
+    } else {
+        Ok(0)
+    }
+}
+
 pub(crate) fn recv_blocking(
     slot: u8,
     output: &mut [u8],

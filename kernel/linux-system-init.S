@@ -155,6 +155,24 @@ ginux_linux_system_init:
     syscall
     test rax, rax
     jne .Lfailure
+    mov edi, dword ptr [rip + .Lpipe_pair]
+    xor esi, esi
+    mov edx, dword ptr [rip + .Lpipe_pair + 4]
+    xor r10d, r10d
+    xor r8d, r8d
+    xor r9d, r9d
+    mov eax, 275
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Lpipe_pair]
+    mov esi, dword ptr [rip + .Lpipe_pair + 4]
+    xor edx, edx
+    xor r10d, r10d
+    mov eax, 276
+    syscall
+    test rax, rax
+    jne .Lfailure
     lea rax, [rip + .Lvmsplice_payload]
     mov qword ptr [rip + .Lvmsplice_iov], rax
     mov qword ptr [rip + .Lvmsplice_iov + 8], 8
