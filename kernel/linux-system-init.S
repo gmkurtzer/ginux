@@ -1155,6 +1155,36 @@ ginux_linux_system_init:
     cmp qword ptr [rip + .Lstatus], 0
     jne .Lfailure
 
+    mov rdi, -1
+    lea rsi, [rip + .Lsignal_set]
+    mov edx, 8
+    mov r10d, 0x80000
+    mov eax, 289
+    syscall
+    test rax, rax
+    js .Lfailure
+    mov r12, rax
+    mov edi, 1
+    mov esi, 10
+    mov eax, 62
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov rdi, r12
+    lea rsi, [rip + .Lsignalfd_info]
+    mov edx, 128
+    xor eax, eax
+    syscall
+    cmp rax, 128
+    jne .Lfailure
+    cmp dword ptr [rip + .Lsignalfd_info], 10
+    jne .Lfailure
+    mov rdi, r12
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Lfailure
+
     mov edi, 1
     lea rsi, [rip + .Lsignal_set]
     xor edx, edx
@@ -1757,6 +1787,8 @@ ginux_linux_system_init:
 .Lsignal_old_usr2:
     .space 32
 .Lqueue_info:
+    .space 128
+.Lsignalfd_info:
     .space 128
 .Luserns_marker:
     .ascii "USERNS_READY\n"

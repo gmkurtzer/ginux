@@ -394,6 +394,8 @@ const LINUX_FUTEX_WAITV_SYSCALL: u64 = 449;
 const LINUX_PIDFD_SEND_SIGNAL_SYSCALL: u64 = 424;
 const LINUX_PIDFD_OPEN_SYSCALL: u64 = 434;
 const LINUX_PIDFD_GETFD_SYSCALL: u64 = 438;
+const LINUX_SIGNALFD_SYSCALL: u64 = 282;
+const LINUX_SIGNALFD4_SYSCALL: u64 = 289;
 const LINUX_GETRANDOM_SYSCALL: u64 = 318;
 const LINUX_STATX_SYSCALL: u64 = 332;
 const LINUX_RENAMEAT2_SYSCALL: u64 = 316;
@@ -535,6 +537,7 @@ const LINUX_DEVICE_ZERO: u16 = 1 << 2;
 const LINUX_DEVICE_CONSOLE: u16 = 1 << 3;
 const LINUX_DEVICE_DIRECTORY: u16 = 1 << 4;
 const LINUX_DEVICE_PIDFD: u16 = 1 << 13;
+const LINUX_DEVICE_SIGNALFD: u16 = 1 << 12;
 const LINUX_DEVICE_PIPE: u16 = 1 << 14;
 const LINUX_DEVICE_SOCKET: u16 = 1 << 15;
 const LINUX_FILE_INIT: u16 = 1 << 5;
@@ -8526,6 +8529,8 @@ extern "sysv64" fn linux_syscall_handler(
             syscall_return,
             (user_rip, user_rflags),
         ),
+        LINUX_SIGNALFD_SYSCALL => linux_signalfd(first_argument, buffer, count, 0),
+        LINUX_SIGNALFD4_SYSCALL => linux_signalfd(first_argument, buffer, count, register(0)),
         LINUX_PRLIMIT64_SYSCALL => {
             if !matches!(first_argument, 0 | 1) {
                 return LINUX_ESRCH;
@@ -16994,6 +16999,9 @@ fn linux_socket_getsockopt(
 }
 
 fn linux_descriptor_read(descriptor: u64, address: u64, count: u64) -> u64 {
+    if let Some(result) = linux_signalfd_read(descriptor, address, count) {
+        return result;
+    }
     if linux_socket_slot(descriptor).is_some() {
         let device = linux_device_descriptor(descriptor);
         if device & LINUX_DEVICE_PIPE != 0 && device & 3 != LINUX_DESCRIPTOR_INPUT {
@@ -19777,6 +19785,78 @@ fn linux_pidfd_descriptor(descriptor: u64) -> bool {
     linux_device_descriptor(descriptor) & LINUX_DEVICE_PIDFD != 0
 }
 
+fn linux_signalfd_descriptor(descriptor: u64) -> bool {
+    linux_device_descriptor(descriptor) & LINUX_DEVICE_SIGNALFD != 0
+}
+
+fn linux_signalfd(descriptor: u64, mask_address: u64, mask_size: u64, flags: u64) -> u64 {
+    const SFD_NONBLOCK: u64 = 0x800;
+    const SFD_CLOEXEC: u64 = 0x8_0000;
+    if mask_size != LINUX_SIGNAL_SET_SIZE || flags & !(SFD_NONBLOCK | SFD_CLOEXEC) != 0 {
+        return LINUX_EINVAL;
+    }
+    let mut bytes = [0_u8; LINUX_SIGNAL_SET_SIZE as usize];
+    if !copy_from_linux_user(mask_address, &mut bytes) {
+        return LINUX_EFAULT;
+    }
+    let mask = u64::from_ne_bytes(bytes) & !LINUX_UNBLOCKABLE_SIGNALS;
+    let descriptor = if descriptor == u64::MAX {
+        let Some(descriptor) = (LINUX_AUX_DESCRIPTOR_FIRST..LINUX_AUX_DESCRIPTOR_LIMIT)
+            .find(|descriptor| linux_aux_descriptor_free(*descriptor))
+        else {
+            return LINUX_EMFILE;
+        };
+        descriptor
+    } else if linux_signalfd_descriptor(descriptor) {
+        descriptor
+    } else {
+        return LINUX_EBADF;
+    };
+    let index = (descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize;
+    ELF_PROBE_DEVICE_DESCRIPTORS[index].store(LINUX_DEVICE_SIGNALFD, Ordering::SeqCst);
+    ELF_PROBE_SOCKET_FLAGS[index].store(flags as u32, Ordering::SeqCst);
+    ELF_PROBE_DESCRIPTOR_OFFSETS[index].store(mask, Ordering::SeqCst);
+    set_linux_descriptor_close_on_exec(descriptor, flags & SFD_CLOEXEC != 0);
+    descriptor
+}
+
+fn linux_signalfd_read(descriptor: u64, address: u64, count: u64) -> Option<u64> {
+    if !linux_signalfd_descriptor(descriptor) {
+        return None;
+    }
+    if count < 128 {
+        return Some(LINUX_EINVAL);
+    }
+    let mask = linux_descriptor_offset(descriptor).load(Ordering::SeqCst);
+    let pending = ELF_PROBE_PENDING_SIGNALS.load(Ordering::SeqCst) & mask;
+    if pending == 0 {
+        return Some(LINUX_EAGAIN);
+    }
+    let signal = u64::from(pending.trailing_zeros()) + 1;
+    let index = signal as usize - 1;
+    let mut information = [0_u8; 128];
+    information[..4].copy_from_slice(&(signal as u32).to_ne_bytes());
+    information[8..12].copy_from_slice(
+        &ELF_PROBE_PENDING_SIGNAL_CODES[index]
+            .load(Ordering::SeqCst)
+            .to_ne_bytes(),
+    );
+    information[12..16].copy_from_slice(&current_linux_process_pid().to_ne_bytes());
+    information[56..64].copy_from_slice(
+        &ELF_PROBE_PENDING_SIGNAL_VALUES[index]
+            .load(Ordering::SeqCst)
+            .to_ne_bytes(),
+    );
+    if !copy_to_linux_user(address, &information) {
+        return Some(LINUX_EFAULT);
+    }
+    let signal_bit = 1_u64 << (signal - 1);
+    ELF_PROBE_PENDING_SIGNALS.fetch_and(!signal_bit, Ordering::SeqCst);
+    ELF_PROBE_PENDING_SIGNAL_CODES[index].store(0, Ordering::SeqCst);
+    ELF_PROBE_PENDING_SIGNAL_VALUES[index].store(0, Ordering::SeqCst);
+    Some(128)
+}
+
 fn linux_pidfd_open(process: u64, flags: u64) -> u64 {
     const PIDFD_NONBLOCK: u64 = 0x800;
     if flags & !PIDFD_NONBLOCK != 0 {
@@ -19846,6 +19926,14 @@ fn linux_descriptor_poll_events(descriptor: i32, requested: u16) -> u16 {
     let Ok(descriptor) = u64::try_from(descriptor) else {
         return 0;
     };
+    if linux_signalfd_descriptor(descriptor) {
+        let mask = linux_descriptor_offset(descriptor).load(Ordering::SeqCst);
+        return if ELF_PROBE_PENDING_SIGNALS.load(Ordering::SeqCst) & mask != 0 {
+            requested & LINUX_POLLIN
+        } else {
+            0
+        };
+    }
     if let Some(slot) = linux_socket_slot(descriptor) {
         let Some((readable, writable, error)) = crate::linux_socket::readiness(slot) else {
             return LINUX_POLLNVAL;

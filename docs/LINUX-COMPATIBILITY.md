@@ -42,7 +42,7 @@ implemented calls lives in [Linux Syscall Entry v0](../specs/kernel/linux-syscal
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **17 Complete**, **254 Partial**, **44 Policy-denied**, **60 Missing**.
+Current totals: **17 Complete**, **256 Partial**, **44 Policy-denied**, **58 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -366,14 +366,14 @@ therefore omitted.
 | 279 | move_pages | Partial |
 | 280 | utimensat | Partial |
 | 281 | epoll_pwait | Partial |
-| 282 | signalfd | Missing |
+| 282 | signalfd | Partial |
 | 283 | timerfd_create | Partial |
 | 284 | eventfd | Partial |
 | 285 | fallocate | Partial |
 | 286 | timerfd_settime | Partial |
 | 287 | timerfd_gettime | Partial |
 | 288 | accept4 | Partial |
-| 289 | signalfd4 | Missing |
+| 289 | signalfd4 | Partial |
 | 290 | eventfd2 | Partial |
 | 291 | epoll_create1 | Partial |
 | 292 | dup3 | Partial |
