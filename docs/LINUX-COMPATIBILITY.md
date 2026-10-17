@@ -42,7 +42,7 @@ implemented calls lives in [Linux Syscall Entry v0](../specs/kernel/linux-syscal
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **17 Complete**, **251 Partial**, **44 Policy-denied**, **63 Missing**.
+Current totals: **17 Complete**, **254 Partial**, **44 Policy-denied**, **60 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -420,7 +420,7 @@ therefore omitted.
 | 333 | io_pgetevents | Missing |
 | 334 | rseq | Partial |
 | 335 | uretprobe | Missing |
-| 424 | pidfd_send_signal | Missing |
+| 424 | pidfd_send_signal | Partial |
 | 425 | io_uring_setup | Missing |
 | 426 | io_uring_enter | Missing |
 | 427 | io_uring_register | Missing |
@@ -430,11 +430,11 @@ therefore omitted.
 | 431 | fsconfig | Policy-denied |
 | 432 | fsmount | Policy-denied |
 | 433 | fspick | Policy-denied |
-| 434 | pidfd_open | Missing |
+| 434 | pidfd_open | Partial |
 | 435 | clone3 | Partial |
 | 436 | close_range | Partial |
 | 437 | openat2 | Partial |
-| 438 | pidfd_getfd | Missing |
+| 438 | pidfd_getfd | Partial |
 | 439 | faccessat2 | Partial |
 | 440 | process_madvise | Missing |
 | 441 | epoll_pwait2 | Partial |

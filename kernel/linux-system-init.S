@@ -26,6 +26,40 @@ ginux_linux_system_init:
     js .Lfailure
     mov r8, rax
 
+    mov edi, 1
+    xor esi, esi
+    mov eax, 434
+    syscall
+    test rax, rax
+    js .Lfailure
+    mov r12, rax
+    mov rdi, rax
+    mov rsi, r8
+    xor edx, edx
+    mov eax, 438
+    syscall
+    test rax, rax
+    js .Lfailure
+    mov r13, rax
+    mov rdi, rax
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov rdi, r12
+    xor esi, esi
+    xor edx, edx
+    xor r10d, r10d
+    mov eax, 424
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov rdi, r12
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Lfailure
+
     mov edi, -100
     lea rsi, [rip + .Ldev_path]
     mov edx, 0x10000

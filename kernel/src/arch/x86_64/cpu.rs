@@ -391,6 +391,9 @@ const LINUX_FUTEX_WAKE_SYSCALL: u64 = 454;
 const LINUX_FUTEX_WAIT_SYSCALL: u64 = 455;
 const LINUX_FUTEX_REQUEUE_SYSCALL: u64 = 456;
 const LINUX_FUTEX_WAITV_SYSCALL: u64 = 449;
+const LINUX_PIDFD_SEND_SIGNAL_SYSCALL: u64 = 424;
+const LINUX_PIDFD_OPEN_SYSCALL: u64 = 434;
+const LINUX_PIDFD_GETFD_SYSCALL: u64 = 438;
 const LINUX_GETRANDOM_SYSCALL: u64 = 318;
 const LINUX_STATX_SYSCALL: u64 = 332;
 const LINUX_RENAMEAT2_SYSCALL: u64 = 316;
@@ -531,6 +534,7 @@ const LINUX_DESCRIPTOR_OUTPUT: u16 = 2;
 const LINUX_DEVICE_ZERO: u16 = 1 << 2;
 const LINUX_DEVICE_CONSOLE: u16 = 1 << 3;
 const LINUX_DEVICE_DIRECTORY: u16 = 1 << 4;
+const LINUX_DEVICE_PIDFD: u16 = 1 << 13;
 const LINUX_DEVICE_PIPE: u16 = 1 << 14;
 const LINUX_DEVICE_SOCKET: u16 = 1 << 15;
 const LINUX_FILE_INIT: u16 = 1 << 5;
@@ -8510,6 +8514,17 @@ extern "sysv64" fn linux_syscall_handler(
             count,
             register(0),
             register(2),
+        ),
+        LINUX_PIDFD_OPEN_SYSCALL => linux_pidfd_open(first_argument, buffer),
+        LINUX_PIDFD_GETFD_SYSCALL => linux_pidfd_getfd(first_argument, buffer, count),
+        LINUX_PIDFD_SEND_SIGNAL_SYSCALL => linux_pidfd_send_signal(
+            first_argument,
+            buffer,
+            count,
+            register(0),
+            registers,
+            syscall_return,
+            (user_rip, user_rflags),
         ),
         LINUX_PRLIMIT64_SYSCALL => {
             if !matches!(first_argument, 0 | 1) {
@@ -19756,6 +19771,75 @@ fn linux_aux_descriptor_free(descriptor: u64) -> bool {
         && !linux_eventfd_descriptor(descriptor)
         && !linux_timerfd_descriptor(descriptor)
         && !linux_pipe_descriptor(descriptor)
+}
+
+fn linux_pidfd_descriptor(descriptor: u64) -> bool {
+    linux_device_descriptor(descriptor) & LINUX_DEVICE_PIDFD != 0
+}
+
+fn linux_pidfd_open(process: u64, flags: u64) -> u64 {
+    const PIDFD_NONBLOCK: u64 = 0x800;
+    if flags & !PIDFD_NONBLOCK != 0 {
+        return LINUX_EINVAL;
+    }
+    if process != u64::from(current_linux_process_pid()) {
+        return LINUX_ESRCH;
+    }
+    let Some(descriptor) = (LINUX_AUX_DESCRIPTOR_FIRST..LINUX_AUX_DESCRIPTOR_LIMIT)
+        .find(|descriptor| linux_aux_descriptor_free(*descriptor))
+    else {
+        return LINUX_EMFILE;
+    };
+    let index = (descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize;
+    ELF_PROBE_DEVICE_DESCRIPTORS[index].store(LINUX_DEVICE_PIDFD, Ordering::SeqCst);
+    ELF_PROBE_SOCKET_FLAGS[index].store(flags as u32, Ordering::SeqCst);
+    ELF_PROBE_DESCRIPTOR_OFFSETS[index].store(process, Ordering::SeqCst);
+    set_linux_descriptor_close_on_exec(descriptor, true);
+    descriptor
+}
+
+fn linux_pidfd_getfd(pid_descriptor: u64, target: u64, flags: u64) -> u64 {
+    if flags != 0 {
+        return LINUX_EINVAL;
+    }
+    if !linux_pidfd_descriptor(pid_descriptor) {
+        return LINUX_EBADF;
+    }
+    if linux_descriptor_offset(pid_descriptor).load(Ordering::SeqCst)
+        != u64::from(current_linux_process_pid())
+    {
+        return LINUX_ESRCH;
+    }
+    linux_console_dup(target)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn linux_pidfd_send_signal(
+    descriptor: u64,
+    signal: u64,
+    information: u64,
+    flags: u64,
+    output: *mut LinuxSyscallFrame,
+    interrupted: LinuxUserContext,
+    return_registers: (u64, u64),
+) -> u64 {
+    if flags != 0 {
+        return LINUX_EINVAL;
+    }
+    if !linux_pidfd_descriptor(descriptor) {
+        return LINUX_EBADF;
+    }
+    let process = linux_descriptor_offset(descriptor).load(Ordering::SeqCst);
+    if information != 0 {
+        return LINUX_ENOSYS;
+    }
+    linux_kill(
+        process,
+        (signal, LINUX_SI_USER, None),
+        output,
+        interrupted,
+        return_registers,
+    )
 }
 
 fn linux_descriptor_poll_events(descriptor: i32, requested: u16) -> u16 {
