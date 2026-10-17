@@ -42,7 +42,7 @@ implemented calls lives in [Linux Syscall Entry v0](../specs/kernel/linux-syscal
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **17 Complete**, **243 Partial**, **44 Policy-denied**, **71 Missing**.
+Current totals: **17 Complete**, **246 Partial**, **44 Policy-denied**, **68 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -450,9 +450,9 @@ therefore omitted.
 | 451 | cachestat | Partial |
 | 452 | fchmodat2 | Partial |
 | 453 | map_shadow_stack | Missing |
-| 454 | futex_wake | Missing |
-| 455 | futex_wait | Missing |
-| 456 | futex_requeue | Missing |
+| 454 | futex_wake | Partial |
+| 455 | futex_wait | Partial |
+| 456 | futex_requeue | Partial |
 | 457 | statmount | Missing |
 | 458 | listmount | Missing |
 | 459 | lsm_get_self_attr | Missing |

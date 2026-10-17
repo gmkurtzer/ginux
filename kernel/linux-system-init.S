@@ -1129,6 +1129,37 @@ ginux_linux_system_init:
     test rax, rax
     jne .Lfailure
 
+    lea rdi, [rip + .Lfutex_word]
+    mov esi, -1
+    mov edx, 1
+    mov r10d, 2
+    mov eax, 454
+    syscall
+    test rax, rax
+    jne .Lfailure
+    lea rdi, [rip + .Lfutex_word]
+    xor esi, esi
+    mov edx, -1
+    mov r10d, 2
+    xor r8d, r8d
+    mov r9d, 1
+    mov eax, 455
+    syscall
+    cmp rax, -11
+    jne .Lfailure
+    lea rax, [rip + .Lfutex_word]
+    mov qword ptr [rip + .Lfutex_requeue + 8], rax
+    lea rax, [rip + .Lfutex_target]
+    mov qword ptr [rip + .Lfutex_requeue + 32], rax
+    lea rdi, [rip + .Lfutex_requeue]
+    xor esi, esi
+    mov edx, 1
+    mov r10d, 1
+    mov eax, 456
+    syscall
+    test rax, rax
+    jne .Lfailure
+
     mov rdi, r8
     lea rsi, [rip + .Lfutex_marker]
     mov edx, 12
@@ -1577,6 +1608,18 @@ ginux_linux_system_init:
 .align 4
 .Lfutex_word:
     .long 1
+.Lfutex_target:
+    .long 0
+.align 8
+.Lfutex_requeue:
+    .quad 1
+    .quad 0
+    .long 2
+    .long 0
+    .quad 0
+    .quad 0
+    .long 2
+    .long 0
 .Lfutex_marker:
     .ascii "FUTEX_READY\n"
 .Lsupervisor_shutdown_marker:
