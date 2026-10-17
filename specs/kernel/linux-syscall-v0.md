@@ -1048,6 +1048,15 @@ ring and releases queued records. Work currently completes synchronously, so
 `io_cancel` reports `EINVAL`; scheduler-backed waits, in-flight cancellation,
 vectored and poll requests, eventfd signaling, and userspace ring consumption
 remain unsupported.
+`rax = 459`, `460`, and `461` expose the Linux v6.12 LSM userspace query
+surface without conflating it with Ginux's native domain security boundary.
+`lsm_list_modules` validates its flags and size pointer, writes a required size
+of zero, and returns zero because no Linux LSM module is active.
+`lsm_get_self_attr` validates Linux attribute IDs, `LSM_FLAG_SINGLE`, and the
+size record, resets the required size to zero, then returns `EOPNOTSUPP` because
+there is no Linux security context provider. `lsm_set_self_attr` similarly
+validates its selector and reserved flags before returning `EOPNOTSUPP`.
+Native domain policy is neither enumerated nor mutable through this ABI.
 `rax = 462` (`__NR_mseal`) irreversibly seals complete page-rounded ranges in
 the bounded anonymous scratch window and the runtime dynamic mapping region.
 The operation preflights every page before changing state, is idempotent, and

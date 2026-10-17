@@ -42,7 +42,7 @@ Detailed bounded behavior for implemented calls lives in
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **19 Complete**, **287 Partial**, **45 Policy-denied**, **24 Missing**.
+Current totals: **19 Complete**, **290 Partial**, **45 Policy-denied**, **21 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -67,7 +67,7 @@ Current totals: **19 Complete**, **287 Partial**, **45 Policy-denied**, **24 Mis
 | Mount and namespace APIs | Policy-denied | Container roots are kernel-created; general mount, chroot, pivot, unshare, and setns are unavailable. |
 | Socket API | Partial | Linux TCP/UDP sockets use the kernel network stack and survive the connection churn of OCI and DNF downloads; TCP server sockets and local `socketpair` are supported. IPv6, ancillary data, interruptible socket waits, and the full option surface remain pending. |
 | cgroups | Missing | No Linux cgroup filesystem or ABI. |
-| seccomp, audit, LSM ABI | Missing | No Linux-compatible userspace interfaces. |
+| seccomp, audit, LSM ABI | Partial | The Linux LSM query API accurately reports no active Linux LSM modules and rejects unsupported Linux security contexts; seccomp and audit remain missing. |
 | vDSO/vvar | Missing | Time calls currently cross the syscall boundary. |
 | Linux module userspace ABI | Policy-denied | Module management is owned by the trusted control plane. |
 | ioctl families | Partial | Only explicitly admitted console, pipe, and device requests; ioctl is a family of ABIs, not one completed interface. |
@@ -498,9 +498,9 @@ therefore omitted.
 | 456 | futex_requeue | Partial |
 | 457 | statmount | Missing |
 | 458 | listmount | Missing |
-| 459 | lsm_get_self_attr | Missing |
-| 460 | lsm_set_self_attr | Missing |
-| 461 | lsm_list_modules | Missing |
+| 459 | lsm_get_self_attr | Partial |
+| 460 | lsm_set_self_attr | Partial |
+| 461 | lsm_list_modules | Partial |
 | 462 | mseal | Partial |
 
 ## Completion requirements
