@@ -438,6 +438,34 @@ pub struct Rootfs<'a> {
     content_length: usize,
 }
 
+/// Opaque validation result for reopening an immutable root filesystem
+/// without rescanning every tar header.
+#[derive(Clone, Copy)]
+pub struct RootfsMetadata {
+    entry_count: usize,
+    content_length: usize,
+}
+
+impl RootfsMetadata {
+    pub const fn new(entry_count: usize, content_length: usize) -> Option<Self> {
+        if entry_count == 0 || entry_count > TAR_MAX_ENTRIES {
+            return None;
+        }
+        Some(Self {
+            entry_count,
+            content_length,
+        })
+    }
+
+    pub const fn entry_count(self) -> usize {
+        self.entry_count
+    }
+
+    pub const fn content_length(self) -> usize {
+        self.content_length
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Child<'a> {
     pub index: usize,
@@ -481,6 +509,39 @@ impl<'a> Rootfs<'a> {
         self.entry_count
     }
 
+    pub const fn metadata(&self) -> RootfsMetadata {
+        RootfsMetadata {
+            entry_count: self.entry_count,
+            content_length: self.content_length,
+        }
+    }
+
+    /// Reopens the same immutable bytes that produced `metadata`.
+    ///
+    /// The archive terminator and bounds are checked in constant time. The
+    /// caller must preserve the bytes after the original successful parse.
+    pub fn from_metadata(bytes: &'a [u8], metadata: RootfsMetadata) -> Option<Self> {
+        if metadata.entry_count == 0 || metadata.entry_count > TAR_MAX_ENTRIES {
+            return None;
+        }
+        let terminator_end = metadata
+            .content_length
+            .checked_add(TAR_BLOCK_SIZE.checked_mul(2)?)?;
+        if !metadata.content_length.is_multiple_of(TAR_BLOCK_SIZE)
+            || !bytes
+                .get(metadata.content_length..terminator_end)?
+                .iter()
+                .all(|byte| *byte == 0)
+        {
+            return None;
+        }
+        Some(Self {
+            bytes,
+            entry_count: metadata.entry_count,
+            content_length: metadata.content_length,
+        })
+    }
+
     /// Length through the final archive entry, excluding the two terminating
     /// zero blocks. OCI layer installers use this to join verified tar layers.
     pub const fn content_length(&self) -> usize {
@@ -492,6 +553,12 @@ impl<'a> Rootfs<'a> {
     }
 
     pub fn entry(&self, wanted: usize) -> Option<Entry<'a>> {
+        self.entry_indexed(wanted).map(|(_, entry)| entry)
+    }
+
+    /// Returns the archive offset with an entry so trusted users can cache
+    /// repeated descriptor reads without rescanning preceding headers.
+    pub fn entry_indexed(&self, wanted: usize) -> Option<(usize, Entry<'a>)> {
         if wanted >= self.entry_count {
             return None;
         }
@@ -499,14 +566,35 @@ impl<'a> Rootfs<'a> {
         for index in 0..self.entry_count {
             let (entry, next) = parse_entry(self.bytes, offset)?;
             if index == wanted {
-                return Some(entry);
+                return Some((offset, entry));
             }
             offset = next;
         }
         None
     }
 
+    /// Reads an entry at an offset obtained from this immutable archive.
+    pub fn entry_at_offset(&self, offset: usize) -> Option<Entry<'a>> {
+        (offset < self.content_length)
+            .then(|| parse_entry(self.bytes, offset).map(|(entry, _)| entry))
+            .flatten()
+    }
+
+    /// Reads an entry and the following archive offset. This supports a
+    /// single linear indexing pass without rescanning earlier entries.
+    pub fn entry_and_next_at_offset(&self, offset: usize) -> Option<(Entry<'a>, usize)> {
+        (offset < self.content_length)
+            .then(|| parse_entry(self.bytes, offset))
+            .flatten()
+    }
+
     pub fn find_index(&self, path: &[u8]) -> Option<(usize, Entry<'a>)> {
+        self.find_indexed(path)
+            .map(|(index, _, entry)| (index, entry))
+    }
+
+    /// Finds an entry and returns its stable archive offset.
+    pub fn find_indexed(&self, path: &[u8]) -> Option<(usize, usize, Entry<'a>)> {
         if !valid_path(path)
             || path
                 .rsplit(|byte| *byte == b'/')
@@ -524,7 +612,7 @@ impl<'a> Rootfs<'a> {
             } else if entry_path_matches(entry, path) {
                 // OCI layers are applied in manifest order. The last entry for
                 // a path is therefore the visible overlay entry.
-                found = Some((index, entry));
+                found = Some((index, offset, entry));
             }
             offset = next;
         }

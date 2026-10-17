@@ -6,11 +6,10 @@ use core::{
 
 use crate::{address_space, arch::x86_64::cpu, control_abi, linux_user, memory, scheduler};
 
-const PROCESS_LIMIT: usize = 4;
+pub(crate) const PROCESS_LIMIT: usize = 6;
 const PROCESS_HIERARCHY_LIMIT: usize = cpu::LINUX_PROCESS_HIERARCHY_LIMIT;
 const PROCESS_PRIVATE_PAGE_LIMIT: usize = cpu::LINUX_PROCESS_MAPPING_LIMIT;
 const PROCESS_PRIVATE_COPY_LIMIT: usize = cpu::LINUX_PROCESS_MAPPING_LIMIT;
-const PROCESS_LEASE_LIMIT: usize = PROCESS_HIERARCHY_LIMIT + PROCESS_PRIVATE_PAGE_LIMIT;
 const PAGE_SIZE: usize = 4096;
 const FORK_PRIVATE_PAGE_LIMIT: usize = 2;
 const PRESENT: u64 = 1 << 0;
@@ -47,6 +46,23 @@ static LIVE_FORK_SCRATCH: LiveForkScratchCell =
         child_mappings: [cpu::LinuxActiveImageMapping::EMPTY; PROCESS_PRIVATE_PAGE_LIMIT],
         parent_pages: [memory::FrameLease::EMPTY; PROCESS_PRIVATE_PAGE_LIMIT],
     }));
+struct LiveForkAllocationScratch(UnsafeCell<[memory::FrameLease; PROCESS_PRIVATE_COPY_LIMIT]>);
+
+unsafe impl Sync for LiveForkAllocationScratch {}
+
+static LIVE_FORK_ALLOCATION_SCRATCH: LiveForkAllocationScratch = LiveForkAllocationScratch(
+    UnsafeCell::new([memory::FrameLease::EMPTY; PROCESS_PRIVATE_COPY_LIMIT]),
+);
+struct LiveForkHierarchyAllocationScratch(
+    UnsafeCell<[memory::FrameLease; PROCESS_HIERARCHY_LIMIT]>,
+);
+
+unsafe impl Sync for LiveForkHierarchyAllocationScratch {}
+
+static LIVE_FORK_HIERARCHY_ALLOCATION_SCRATCH: LiveForkHierarchyAllocationScratch =
+    LiveForkHierarchyAllocationScratch(UnsafeCell::new(
+        [memory::FrameLease::EMPTY; PROCESS_HIERARCHY_LIMIT],
+    ));
 static mut TEST_PROCESS_TABLE: MaybeUninit<ProcessTable> = MaybeUninit::uninit();
 
 fn mapping_requires_fork_copy(mapping: &cpu::LinuxActiveImageMapping) -> bool {
@@ -169,18 +185,36 @@ impl ProcessExecutionContext {
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 struct ProcessAddressSpace {
-    hierarchy: [memory::FrameLease; PROCESS_HIERARCHY_LIMIT],
-    hierarchy_count: u8,
-    mappings: [cpu::LinuxActiveImageMapping; PROCESS_PRIVATE_PAGE_LIMIT],
+    storage_slot: u8,
+    hierarchy_count: u16,
     mapping_count: u16,
 }
 
+#[derive(Clone, Copy)]
+struct ProcessAddressSpaceStorage {
+    hierarchy: [memory::FrameLease; PROCESS_HIERARCHY_LIMIT],
+    mappings: [cpu::LinuxActiveImageMapping; PROCESS_PRIVATE_PAGE_LIMIT],
+}
+
+impl ProcessAddressSpaceStorage {
+    const EMPTY: Self = Self {
+        hierarchy: [memory::FrameLease::EMPTY; PROCESS_HIERARCHY_LIMIT],
+        mappings: [cpu::LinuxActiveImageMapping::EMPTY; PROCESS_PRIVATE_PAGE_LIMIT],
+    };
+}
+
+static mut PROCESS_ADDRESS_SPACE_STORAGE: [[ProcessAddressSpaceStorage; PROCESS_LIMIT];
+    PROCESS_INSTANCE_LIMIT] =
+    [[ProcessAddressSpaceStorage::EMPTY; PROCESS_LIMIT]; PROCESS_INSTANCE_LIMIT];
+
 impl ProcessAddressSpace {
     fn new(
+        storage_slot: usize,
         hierarchy: &[memory::FrameLease],
         mappings: &[cpu::LinuxActiveImageMapping],
     ) -> Option<Self> {
-        if !(4..=PROCESS_HIERARCHY_LIMIT).contains(&hierarchy.len())
+        if storage_slot >= PROCESS_LIMIT
+            || !(4..=PROCESS_HIERARCHY_LIMIT).contains(&hierarchy.len())
             || mappings.is_empty()
             || mappings.len() > PROCESS_PRIVATE_PAGE_LIMIT
             || !memory::frames_owned_by(memory::FrameOwner::KERNEL, hierarchy)
@@ -196,34 +230,79 @@ impl ProcessAddressSpace {
                         || memory::frame_lease_is_runtime(mapping.frame))
                     || hierarchy.contains(&mapping.frame)
                     || mappings[..index].iter().any(|prior| {
-                        prior.address == mapping.address || prior.frame == mapping.frame
+                        prior.address == mapping.address
+                            || prior.frame == mapping.frame
+                                && (mapping.writable
+                                    || prior.writable
+                                    || !memory::frame_lease_is_runtime(mapping.frame))
                     })
             })
             || !address_space::validate_linux_process_address_space(hierarchy, mappings)
         {
             return None;
         }
-        let mut space = Self {
-            hierarchy: [memory::FrameLease::EMPTY; PROCESS_HIERARCHY_LIMIT],
-            hierarchy_count: u8::try_from(hierarchy.len()).ok()?,
-            mappings: [cpu::LinuxActiveImageMapping::EMPTY; PROCESS_PRIVATE_PAGE_LIMIT],
-            mapping_count: u16::try_from(mappings.len()).ok()?,
+        let storage = unsafe {
+            &mut *core::ptr::addr_of_mut!(PROCESS_ADDRESS_SPACE_STORAGE)
+                .cast::<ProcessAddressSpaceStorage>()
+                .add(current_process_instance() * PROCESS_LIMIT + storage_slot)
         };
-        space.hierarchy[..hierarchy.len()].copy_from_slice(hierarchy);
-        space.mappings[..mappings.len()].copy_from_slice(mappings);
-        Some(space)
+        storage.hierarchy.fill(memory::FrameLease::EMPTY);
+        storage.mappings.fill(cpu::LinuxActiveImageMapping::EMPTY);
+        storage.hierarchy[..hierarchy.len()].copy_from_slice(hierarchy);
+        storage.mappings[..mappings.len()].copy_from_slice(mappings);
+        Some(Self {
+            storage_slot: storage_slot as u8,
+            hierarchy_count: u16::try_from(hierarchy.len()).ok()?,
+            mapping_count: u16::try_from(mappings.len()).ok()?,
+        })
+    }
+
+    fn from_validated_snapshot(
+        storage_slot: usize,
+        hierarchy: &[memory::FrameLease],
+        mappings: &[cpu::LinuxActiveImageMapping],
+    ) -> Option<Self> {
+        if storage_slot >= PROCESS_LIMIT
+            || !(4..=PROCESS_HIERARCHY_LIMIT).contains(&hierarchy.len())
+            || mappings.is_empty()
+            || mappings.len() > PROCESS_PRIVATE_PAGE_LIMIT
+        {
+            return None;
+        }
+        let storage = unsafe {
+            &mut *core::ptr::addr_of_mut!(PROCESS_ADDRESS_SPACE_STORAGE)
+                .cast::<ProcessAddressSpaceStorage>()
+                .add(current_process_instance() * PROCESS_LIMIT + storage_slot)
+        };
+        storage.hierarchy.fill(memory::FrameLease::EMPTY);
+        storage.mappings.fill(cpu::LinuxActiveImageMapping::EMPTY);
+        storage.hierarchy[..hierarchy.len()].copy_from_slice(hierarchy);
+        storage.mappings[..mappings.len()].copy_from_slice(mappings);
+        Some(Self {
+            storage_slot: storage_slot as u8,
+            hierarchy_count: u16::try_from(hierarchy.len()).ok()?,
+            mapping_count: u16::try_from(mappings.len()).ok()?,
+        })
+    }
+
+    fn storage(&self) -> &'static ProcessAddressSpaceStorage {
+        unsafe {
+            &*core::ptr::addr_of!(PROCESS_ADDRESS_SPACE_STORAGE)
+                .cast::<ProcessAddressSpaceStorage>()
+                .add(current_process_instance() * PROCESS_LIMIT + usize::from(self.storage_slot))
+        }
     }
 
     fn hierarchy(&self) -> &[memory::FrameLease] {
-        &self.hierarchy[..usize::from(self.hierarchy_count)]
+        &self.storage().hierarchy[..usize::from(self.hierarchy_count)]
     }
 
     fn root(&self) -> memory::FrameLease {
-        self.hierarchy[0]
+        self.storage().hierarchy[0]
     }
 
     fn mappings(&self) -> &[cpu::LinuxActiveImageMapping] {
-        &self.mappings[..usize::from(self.mapping_count)]
+        &self.storage().mappings[..usize::from(self.mapping_count)]
     }
 
     fn is_valid(&self) -> bool {
@@ -234,45 +313,67 @@ impl ProcessAddressSpace {
             )
     }
 
-    fn leases(&self) -> ([memory::FrameLease; PROCESS_LEASE_LIMIT], usize) {
-        let hierarchy_count = usize::from(self.hierarchy_count);
-        let mut leases = [memory::FrameLease::EMPTY; PROCESS_LEASE_LIMIT];
-        leases[..hierarchy_count].copy_from_slice(&self.hierarchy[..hierarchy_count]);
-        let mut count = hierarchy_count;
-        for mapping in self.mappings() {
-            if !memory::frame_lease_is_runtime(mapping.frame)
-                && memory::frames_owned_by(memory::FrameOwner::KERNEL, &[mapping.frame])
-            {
-                leases[count] = mapping.frame;
-                count += 1;
-            }
-        }
-        (leases, count)
-    }
-
     fn is_owned(&self) -> bool {
-        let (leases, count) = self.leases();
-        memory::frames_owned_by(memory::FrameOwner::KERNEL, &leases[..count])
+        memory::frames_owned_by(memory::FrameOwner::KERNEL, self.hierarchy())
+            && self.mappings().iter().all(|mapping| {
+                memory::frame_lease_is_runtime(mapping.frame)
+                    || memory::frames_owned_by(memory::FrameOwner::KERNEL, &[mapping.frame])
+            })
     }
 
     fn is_live(&self) -> bool {
-        let (leases, count) = self.leases();
-        memory::any_frame_lease_live(&leases[..count])
+        memory::any_frame_lease_live(self.hierarchy())
+            || self.mappings().iter().any(|mapping| {
+                !memory::frame_lease_is_runtime(mapping.frame)
+                    && memory::any_frame_lease_live(&[mapping.frame])
+            })
     }
 
     fn overlaps(&self, other: &Self) -> bool {
-        let (left, left_count) = self.leases();
-        let (right, right_count) = other.leases();
-        left[..left_count].iter().any(|left| {
-            right[..right_count]
-                .iter()
-                .any(|right| left.address() == right.address())
-        })
+        self.hierarchy()
+            .iter()
+            .chain(
+                self.mappings()
+                    .iter()
+                    .filter(|mapping| !memory::frame_lease_is_runtime(mapping.frame))
+                    .map(|mapping| &mapping.frame),
+            )
+            .any(|left| {
+                other
+                    .hierarchy()
+                    .iter()
+                    .chain(
+                        other
+                            .mappings()
+                            .iter()
+                            .filter(|mapping| !memory::frame_lease_is_runtime(mapping.frame))
+                            .map(|mapping| &mapping.frame),
+                    )
+                    .any(|right| left.address() == right.address())
+            })
     }
 
     fn scrub_and_release(&self) -> bool {
-        let (leases, count) = self.leases();
-        memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &leases[..count])
+        if !memory::frame_leases_releasable(memory::FrameOwner::KERNEL, self.hierarchy())
+            || self.mappings().iter().any(|mapping| {
+                !memory::frame_lease_is_runtime(mapping.frame)
+                    && !memory::frame_leases_releasable(
+                        memory::FrameOwner::KERNEL,
+                        &[mapping.frame],
+                    )
+            })
+        {
+            return false;
+        }
+        let mut released =
+            memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, self.hierarchy());
+        for mapping in self.mappings() {
+            if !memory::frame_lease_is_runtime(mapping.frame) {
+                released &=
+                    memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[mapping.frame]);
+            }
+        }
+        released
     }
 }
 
@@ -391,24 +492,22 @@ impl ProcessTable {
         )
     }
 
-    fn refresh_init(
+    fn refresh_process_inner(
         &mut self,
+        handle: ProcessHandle,
         address_space: ProcessAddressSpace,
         context: ProcessExecutionContext,
+        validate_address_space: bool,
     ) -> bool {
-        if !address_space.is_valid() || !context.is_valid(&address_space) {
+        if validate_address_space && !address_space.is_valid() || !context.is_valid(&address_space)
+        {
             return false;
         }
-        let Some(init) = self.init else {
+        let Some(process) = self.process_mut(handle) else {
             return false;
         };
-        let Some(process) = self.process_mut(init) else {
-            return false;
-        };
-        if process.parent.is_some()
-            || linux_user::credentials(process.user_namespace).is_none()
+        if linux_user::credentials(process.user_namespace).is_none()
             || process.retiring_address_space.is_some()
-            || process.scheduler_thread.is_some()
             || process.state != ProcessState::Running
         {
             return false;
@@ -424,16 +523,27 @@ impl ProcessTable {
         address_space: ProcessAddressSpace,
         context: ProcessExecutionContext,
     ) -> bool {
-        if !address_space.is_valid()
-            || !context.is_valid(&address_space)
-            || self.processes.iter().flatten().any(|process| {
-                process
-                    .address_space
-                    .is_some_and(|existing| existing.overlaps(&address_space))
-                    || process
-                        .retiring_address_space
-                        .is_some_and(|existing| existing.overlaps(&address_space))
-            })
+        self.commit_fork_inner(handle, address_space, context, true)
+    }
+
+    fn commit_fork_inner(
+        &mut self,
+        handle: ProcessHandle,
+        address_space: ProcessAddressSpace,
+        context: ProcessExecutionContext,
+        validate_address_space: bool,
+    ) -> bool {
+        if !context.is_valid(&address_space)
+            || validate_address_space
+                && (!address_space.is_valid()
+                    || self.processes.iter().flatten().any(|process| {
+                        process
+                            .address_space
+                            .is_some_and(|existing| existing.overlaps(&address_space))
+                            || process
+                                .retiring_address_space
+                                .is_some_and(|existing| existing.overlaps(&address_space))
+                    }))
         {
             return false;
         }
@@ -517,6 +627,7 @@ impl ProcessTable {
         child_hierarchy: &[memory::FrameLease],
         child_pages: &[memory::FrameLease],
     ) -> bool {
+        LIVE_FORK_EXECUTION_STAGE.store(1131, Ordering::Release);
         let Some(preparing) = self.process(handle) else {
             return false;
         };
@@ -542,8 +653,9 @@ impl ProcessTable {
             let _ = self.abort_fork(handle);
             return false;
         };
+        LIVE_FORK_EXECUTION_STAGE.store(1132, Ordering::Release);
         if parent.state != ProcessState::Running
-            || !parent_space.is_valid()
+            || !parent_space.is_owned()
             || child_hierarchy.len() != parent_space.hierarchy().len()
             || child_pages.len()
                 != parent_space
@@ -558,6 +670,7 @@ impl ProcessTable {
         }
 
         let scratch = unsafe { &mut *LIVE_FORK_SCRATCH.0.get() };
+        LIVE_FORK_EXECUTION_STAGE.store(1133, Ordering::Release);
         let child_mappings = &mut scratch.child_mappings;
         let parent_pages = &mut scratch.parent_pages;
         child_mappings.fill(cpu::LinuxActiveImageMapping::EMPTY);
@@ -590,23 +703,34 @@ impl ProcessTable {
             parent_page_count += 1;
         }
         let mapping_count = parent_space.mappings().len();
+        LIVE_FORK_EXECUTION_STAGE.store(1134, Ordering::Release);
         let published = private_index == child_pages.len()
             && parent_page_count == child_pages.len()
-            && copy_private_pages(&parent_pages[..parent_page_count], child_pages);
+            && copy_validated_private_pages(&parent_pages[..parent_page_count], child_pages);
+        LIVE_FORK_EXECUTION_STAGE.store(1135, Ordering::Release);
         let published = published
-            && address_space::clone_linux_process_hierarchy(
+            && address_space::clone_validated_linux_process_hierarchy(
                 parent_space.mappings(),
                 parent_space.hierarchy(),
                 child_hierarchy,
                 child_pages,
             );
+        LIVE_FORK_EXECUTION_STAGE.store(1136, Ordering::Release);
         let child_space = if published {
-            ProcessAddressSpace::new(child_hierarchy, &child_mappings[..mapping_count])
+            LIVE_FORK_EXECUTION_STAGE.store(11361, Ordering::Release);
+            ProcessAddressSpace::from_validated_snapshot(
+                usize::from(handle.slot),
+                child_hierarchy,
+                &child_mappings[..mapping_count],
+            )
         } else {
             None
         };
+        LIVE_FORK_EXECUTION_STAGE.store(1137, Ordering::Release);
         if let Some(child_space) = child_space {
-            if self.commit_fork(handle, child_space, parent_context.fork_child()) {
+            LIVE_FORK_EXECUTION_STAGE.store(1138, Ordering::Release);
+            if self.commit_fork_inner(handle, child_space, parent_context.fork_child(), false) {
+                LIVE_FORK_EXECUTION_STAGE.store(1139, Ordering::Release);
                 return true;
             }
         }
@@ -726,6 +850,47 @@ impl ProcessTable {
             return None;
         };
         Some(WaitResult { pid, status })
+    }
+
+    fn reap_init_zombies(&mut self) -> bool {
+        let Some(init) = self.init else {
+            return false;
+        };
+        loop {
+            let Some(pid) = self
+                .processes
+                .iter()
+                .flatten()
+                .find(|process| {
+                    process.parent == Some(init)
+                        && matches!(process.state, ProcessState::Zombie { .. })
+                })
+                .map(|process| process.handle.pid)
+            else {
+                return true;
+            };
+            if self.wait(init, pid).is_none() {
+                return false;
+            }
+        }
+    }
+
+    fn reap_all_zombies(&mut self) -> bool {
+        for process in &mut self.processes {
+            let Some(candidate) = process.as_ref() else {
+                continue;
+            };
+            if matches!(candidate.state, ProcessState::Zombie { .. }) {
+                if candidate.address_space.is_some()
+                    || candidate.retiring_address_space.is_some()
+                    || candidate.scheduler_thread.is_some()
+                {
+                    return false;
+                }
+                *process = None;
+            }
+        }
+        true
     }
 
     fn handle_by_pid(&self, pid: u32) -> Option<ProcessHandle> {
@@ -913,7 +1078,7 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
     {
         return false;
     }
-    let Some(init_space) = ProcessAddressSpace::new(&frames[0..4], &init_mappings) else {
+    let Some(init_space) = ProcessAddressSpace::new(0, &frames[0..4], &init_mappings) else {
         return false;
     };
     let init_context = test_context();
@@ -965,7 +1130,8 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
     {
         return false;
     }
-    let Some(shared_page_space) = ProcessAddressSpace::new(&frames[6..10], &shared_page_mappings)
+    let Some(shared_page_space) =
+        ProcessAddressSpace::new(1, &frames[6..10], &shared_page_mappings)
     else {
         return false;
     };
@@ -993,14 +1159,14 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
     wrong_permission[0].executable = false;
     let mut wrong_address = first_mappings;
     wrong_address[0].address += 2 * PAGE_SIZE;
-    if ProcessAddressSpace::new(&frames[6..10], &wrong_permission).is_some()
-        || ProcessAddressSpace::new(&frames[6..10], &wrong_address).is_some()
+    if ProcessAddressSpace::new(1, &frames[6..10], &wrong_permission).is_some()
+        || ProcessAddressSpace::new(1, &frames[6..10], &wrong_address).is_some()
     {
         return false;
     }
     let (Some(first_space), Some(second_space)) = (
-        ProcessAddressSpace::new(&frames[6..10], &first_mappings),
-        ProcessAddressSpace::new(&frames[12..16], &second_mappings),
+        ProcessAddressSpace::new(1, &frames[6..10], &first_mappings),
+        ProcessAddressSpace::new(2, &frames[12..16], &second_mappings),
     ) else {
         return false;
     };
@@ -1014,9 +1180,12 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
     let mut stale_hierarchy: [memory::FrameLease; 4] =
         core::array::from_fn(|index| frames[6 + index]);
     stale_hierarchy[0] = stale_root;
-    let stale_space = ProcessAddressSpace::new(&stale_hierarchy, &first_mappings);
-    let mut stale_expected = first_space;
-    stale_expected.hierarchy[0] = stale_root;
+    let stale_space = ProcessAddressSpace::new(3, &stale_hierarchy, &first_mappings);
+    let stale_expected = ProcessAddressSpace {
+        storage_slot: 3,
+        hierarchy_count: first_space.hierarchy_count,
+        mapping_count: first_space.mapping_count,
+    };
     if init.pid != 1
         || rejected_child.pid != 2
         || table.create_init(first_space, init_context).is_some()
@@ -1143,14 +1312,18 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
     let Some(first_resources) = table.begin_exit(first_child, first_space) else {
         return false;
     };
-    let (first_leases, first_lease_count) = first_resources.leases();
+    let first_root = first_resources.hierarchy()[0];
     if table.exit(first_child, child_exit_status)
-        || !memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &first_leases[..1])
+        || !memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[first_root])
         || table.exit(first_child, child_exit_status)
         || !memory::scrub_and_release_frames(
             memory::FrameOwner::KERNEL,
-            &first_leases[1..first_lease_count],
+            &first_resources.hierarchy()[1..],
         )
+        || first_resources.mappings().iter().any(|mapping| {
+            !memory::frame_lease_is_runtime(mapping.frame)
+                && !memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[mapping.frame])
+        })
         || !table.exit(first_child, child_exit_status)
         || table.wait(first_child, first_child.pid).is_some()
         || table.wait(init, first_child.pid)
@@ -1206,7 +1379,8 @@ pub(crate) fn install_live_process_registry(
     {
         return false;
     }
-    let Some(address_space) = ProcessAddressSpace::new(snapshot.hierarchy(), snapshot.mappings())
+    let Some(address_space) =
+        ProcessAddressSpace::new(0, snapshot.hierarchy(), snapshot.mappings())
     else {
         return false;
     };
@@ -1253,6 +1427,7 @@ pub(crate) fn install_live_process_registry(
 }
 
 pub(crate) fn refresh_live_process_registry(
+    pid: u32,
     snapshot: &cpu::LinuxProcessAddressSpaceSnapshot,
     general: [u64; 15],
     rip: u64,
@@ -1260,16 +1435,59 @@ pub(crate) fn refresh_live_process_registry(
     rflags: u64,
     fs_base: u64,
 ) -> bool {
+    refresh_live_process_registry_inner(pid, snapshot, general, rip, rsp, rflags, fs_base, true)
+}
+
+pub(crate) fn refresh_validated_runtime_process_registry(
+    pid: u32,
+    snapshot: &cpu::LinuxProcessAddressSpaceSnapshot,
+    general: [u64; 15],
+    rip: u64,
+    rsp: u64,
+    rflags: u64,
+    fs_base: u64,
+) -> bool {
+    refresh_live_process_registry_inner(pid, snapshot, general, rip, rsp, rflags, fs_base, false)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn refresh_live_process_registry_inner(
+    pid: u32,
+    snapshot: &cpu::LinuxProcessAddressSpaceSnapshot,
+    general: [u64; 15],
+    rip: u64,
+    rsp: u64,
+    rflags: u64,
+    fs_base: u64,
+    validate_address_space: bool,
+) -> bool {
     let Some(table) = live_process_table_mut() else {
         crate::serial_write("ginux: live registry refresh has no table\r\n");
         return false;
     };
-    let Some(address_space) = ProcessAddressSpace::new(snapshot.hierarchy(), snapshot.mappings())
-    else {
+    let Some(handle) = table.handle_by_pid(pid) else {
+        crate::serial_write("ginux: live registry refresh has no process\r\n");
+        return false;
+    };
+    let address_space = if validate_address_space {
+        ProcessAddressSpace::new(
+            usize::from(handle.slot),
+            snapshot.hierarchy(),
+            snapshot.mappings(),
+        )
+    } else {
+        ProcessAddressSpace::from_validated_snapshot(
+            usize::from(handle.slot),
+            snapshot.hierarchy(),
+            snapshot.mappings(),
+        )
+    };
+    let Some(address_space) = address_space else {
         crate::serial_write("ginux: live registry refresh rejected address space\r\n");
         return false;
     };
-    let refreshed = table.refresh_init(
+    let refreshed = table.refresh_process_inner(
+        handle,
         address_space,
         ProcessExecutionContext {
             general,
@@ -1278,6 +1496,7 @@ pub(crate) fn refresh_live_process_registry(
             rflags,
             fs_base,
         },
+        validate_address_space,
     );
     if refreshed {
         let instance = active_process_instance().unwrap_or(HOST_PROCESS_INSTANCE);
@@ -1346,7 +1565,9 @@ fn finish_live_process_registry_with_refresh_floor(refresh_floor: u32) -> bool {
     let Some(table) = live_process_table_mut() else {
         return false;
     };
-    let valid = table.init.is_some()
+    let valid = table.reap_init_zombies()
+        && table.reap_all_zombies()
+        && table.init.is_some()
         && LIVE_PROCESS_REFRESH_COUNT[instance].load(Ordering::Acquire) >= refresh_floor
         && table.processes.iter().flatten().count() == 1
         && table.processes.iter().flatten().all(|process| {
@@ -1397,6 +1618,24 @@ pub(crate) fn live_process_status(pid: u32) -> Option<LiveProcessStatus> {
     })
 }
 
+pub(crate) fn live_process_parent_pid(pid: u32) -> Option<u32> {
+    let table = live_process_table_mut()?;
+    let handle = table.handle_by_pid(pid)?;
+    let process = table.process(handle)?;
+    Some(
+        process
+            .parent
+            .and_then(|parent| table.process(parent).map(|parent| parent.handle.pid))
+            .unwrap_or(0),
+    )
+}
+
+pub(crate) fn live_process_slot(pid: u32) -> Option<usize> {
+    let table = live_process_table_mut()?;
+    let handle = table.handle_by_pid(pid)?;
+    Some(usize::from(handle.slot))
+}
+
 pub(crate) fn live_process_mapping(
     pid: u32,
     address: usize,
@@ -1437,7 +1676,12 @@ pub(crate) fn replace_live_process_mapping(
     let Some(space) = process.address_space.as_mut() else {
         return false;
     };
-    let Some(mapping) = space.mappings[..usize::from(space.mapping_count)]
+    let storage = unsafe {
+        &mut *core::ptr::addr_of_mut!(PROCESS_ADDRESS_SPACE_STORAGE)
+            .cast::<ProcessAddressSpaceStorage>()
+            .add(current_process_instance() * PROCESS_LIMIT + usize::from(space.storage_slot))
+    };
+    let Some(mapping) = storage.mappings[..usize::from(space.mapping_count)]
         .iter_mut()
         .find(|mapping| mapping.address == address && mapping.frame == expected)
     else {
@@ -1494,13 +1738,33 @@ pub(crate) fn dispatch_live_init_with_return(value: u64) -> Option<LiveProcessDi
 }
 
 #[inline(never)]
-pub(crate) fn begin_live_fork() -> Option<LiveProcessDispatch> {
+pub(crate) fn begin_live_fork(parent_pid: u32) -> Option<LiveProcessDispatch> {
     LIVE_FORK_EXECUTION_STAGE.store(10, Ordering::Release);
-    let table = live_process_table_mut()?;
-    let parent_handle = table.init?;
-    let parent = table.process(parent_handle)?;
-    let parent_space = parent.address_space.as_ref()?;
-    if parent.state != ProcessState::Running || !parent_space.is_valid() {
+    let Some(table) = live_process_table_mut() else {
+        LIVE_FORK_EXECUTION_STAGE.store(101, Ordering::Release);
+        return None;
+    };
+    let Some(parent_handle) = table.handle_by_pid(parent_pid) else {
+        LIVE_FORK_EXECUTION_STAGE.store(102, Ordering::Release);
+        return None;
+    };
+    let Some(parent) = table.process(parent_handle) else {
+        LIVE_FORK_EXECUTION_STAGE.store(103, Ordering::Release);
+        return None;
+    };
+    let Some(parent_space) = parent.address_space.as_ref() else {
+        LIVE_FORK_EXECUTION_STAGE.store(104, Ordering::Release);
+        return None;
+    };
+    if parent.state != ProcessState::Running || !parent_space.is_owned() {
+        LIVE_FORK_EXECUTION_STAGE.store(
+            if parent.state != ProcessState::Running {
+                105
+            } else {
+                106
+            },
+            Ordering::Release,
+        );
         return None;
     }
     let hierarchy_count = parent_space.hierarchy().len();
@@ -1512,38 +1776,40 @@ pub(crate) fn begin_live_fork() -> Option<LiveProcessDispatch> {
     LIVE_FORK_EXECUTION_STAGE.store(11, Ordering::Release);
     let child_handle = table.prepare_fork(parent_handle)?;
     LIVE_FORK_EXECUTION_STAGE.store(111, Ordering::Release);
-    let Some(child_hierarchy) =
-        memory::allocate_frames::<PROCESS_HIERARCHY_LIMIT>(memory::FrameOwner::KERNEL)
-    else {
-        let _ = table.abort_fork(child_handle);
-        return None;
-    };
-    LIVE_FORK_EXECUTION_STAGE.store(112, Ordering::Release);
-    if private_count == 0 || private_count > PROCESS_PRIVATE_COPY_LIMIT {
-        let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &child_hierarchy);
+    let child_hierarchy = unsafe { &mut *LIVE_FORK_HIERARCHY_ALLOCATION_SCRATCH.0.get() };
+    if !memory::allocate_frame_prefix_into(
+        memory::FrameOwner::KERNEL,
+        child_hierarchy,
+        hierarchy_count,
+    ) {
         let _ = table.abort_fork(child_handle);
         return None;
     }
-    let Some(child_pages) = memory::allocate_frame_prefix::<PROCESS_PRIVATE_COPY_LIMIT>(
-        memory::FrameOwner::KERNEL,
-        private_count,
-    ) else {
-        let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &child_hierarchy);
+    LIVE_FORK_EXECUTION_STAGE.store(112, Ordering::Release);
+    if private_count == 0 || private_count > PROCESS_PRIVATE_COPY_LIMIT {
+        let _ = memory::scrub_and_release_frames(
+            memory::FrameOwner::KERNEL,
+            &child_hierarchy[..hierarchy_count],
+        );
         let _ = table.abort_fork(child_handle);
         return None;
-    };
+    }
+    let child_pages = unsafe { &mut *LIVE_FORK_ALLOCATION_SCRATCH.0.get() };
+    if !memory::allocate_frame_prefix_into(memory::FrameOwner::KERNEL, child_pages, private_count) {
+        let _ = memory::scrub_and_release_frames(
+            memory::FrameOwner::KERNEL,
+            &child_hierarchy[..hierarchy_count],
+        );
+        let _ = table.abort_fork(child_handle);
+        return None;
+    }
     LIVE_FORK_EXECUTION_STAGE.store(113, Ordering::Release);
     let published = table.commit_cloned_fork(
         child_handle,
         &child_hierarchy[..hierarchy_count],
         &child_pages[..private_count],
     );
-    let hierarchy_extras_released = hierarchy_count == child_hierarchy.len()
-        || memory::scrub_and_release_frames(
-            memory::FrameOwner::KERNEL,
-            &child_hierarchy[hierarchy_count..],
-        );
-    if !published || !hierarchy_extras_released {
+    if !published {
         return None;
     }
     LIVE_FORK_EXECUTION_STAGE.store(12, Ordering::Release);
@@ -1582,39 +1848,52 @@ pub(crate) fn begin_live_fork() -> Option<LiveProcessDispatch> {
         let _ = discard_live_fork(table, parent_handle, child_handle);
         return None;
     };
-    let Some(run_queue) = scheduler::acquire_process_scheduler_workspace() else {
-        let _ = discard_live_fork(table, parent_handle, child_handle);
-        return None;
-    };
     LIVE_FORK_EXECUTION_STAGE.store(13, Ordering::Release);
     let scheduler_domain = table.scheduler_domain();
-    if !table.admit_to_scheduler(parent_handle, run_queue, scheduler_domain) {
+    let nested = table
+        .process(parent_handle)
+        .is_some_and(|process| process.scheduler_thread.is_some());
+    let run_queue = if nested {
+        scheduler::active_process_scheduler_workspace()
+    } else {
+        scheduler::acquire_process_scheduler_workspace()
+    }?;
+    if !nested && !table.admit_to_scheduler(parent_handle, run_queue, scheduler_domain) {
         let _ = scheduler::release_process_scheduler_workspace();
         let _ = discard_live_fork(table, parent_handle, child_handle);
         return None;
     }
     if !table.admit_to_scheduler(child_handle, run_queue, scheduler_domain) {
-        let _ = table.withdraw_from_scheduler(parent_handle, run_queue);
-        let _ = scheduler::release_process_scheduler_workspace();
+        if !nested {
+            let _ = table.withdraw_from_scheduler(parent_handle, run_queue);
+            let _ = scheduler::release_process_scheduler_workspace();
+        }
         let _ = discard_live_fork(table, parent_handle, child_handle);
         return None;
     }
     let scheduled = (|| {
         let parent_thread = table.process(parent_handle)?.scheduler_thread?;
         let child_thread = table.process(child_handle)?.scheduler_thread?;
-        let initial = run_queue.schedule_next()?;
-        let selected = (initial.handle() == parent_thread
-            && initial.context() == parent_scheduler_context)
-            .then(|| run_queue.yield_current(parent_thread, parent_scheduler_context))
-            .flatten()?;
+        let selected = if nested {
+            run_queue.switch_current(parent_thread, parent_scheduler_context, child_thread)?
+        } else {
+            let initial = run_queue.schedule_next()?;
+            (initial.handle() == parent_thread && initial.context() == parent_scheduler_context)
+                .then(|| {
+                    run_queue.switch_current(parent_thread, parent_scheduler_context, child_thread)
+                })
+                .flatten()?
+        };
         (selected.handle() == child_thread && selected.context() == child_scheduler_context)
             .then_some(())
     })()
     .is_some();
     if !scheduled {
         let _ = table.withdraw_from_scheduler(child_handle, run_queue);
-        let _ = table.withdraw_from_scheduler(parent_handle, run_queue);
-        let _ = scheduler::release_process_scheduler_workspace();
+        if !nested {
+            let _ = table.withdraw_from_scheduler(parent_handle, run_queue);
+            let _ = scheduler::release_process_scheduler_workspace();
+        }
         let _ = discard_live_fork(table, parent_handle, child_handle);
         return None;
     }
@@ -1651,10 +1930,11 @@ fn discard_live_fork(
 pub(crate) fn complete_live_child_exit(pid: u32, status: u8) -> Option<LiveProcessDispatch> {
     LIVE_FORK_EXECUTION_STAGE.store(15, Ordering::Release);
     let table = live_process_table_mut()?;
-    let parent_handle = table.init?;
+    LIVE_FORK_EXECUTION_STAGE.store(151, Ordering::Release);
     let child_handle = table.handle_by_pid(pid)?;
-    let parent = table.process(parent_handle)?;
     let child = table.process(child_handle)?;
+    let parent_handle = child.parent?;
+    let parent = table.process(parent_handle)?;
     if child.parent != Some(parent_handle) || child.state != ProcessState::Running {
         return None;
     }
@@ -1662,24 +1942,31 @@ pub(crate) fn complete_live_child_exit(pid: u32, status: u8) -> Option<LiveProce
     let parent_context = parent.context?;
     let child_space = child.address_space?;
     let child_context = child.context?;
+    LIVE_FORK_EXECUTION_STAGE.store(152, Ordering::Release);
     let parent_scheduler_context = parent_context.scheduler_context(parent_space)?;
     let child_scheduler_context = child_context.scheduler_context(&child_space)?;
     let parent_thread = parent.scheduler_thread?;
     let child_thread = child.scheduler_thread?;
     let run_queue = scheduler::active_process_scheduler_workspace()?;
-    let resumed = run_queue.yield_current(child_thread, child_scheduler_context)?;
+    LIVE_FORK_EXECUTION_STAGE.store(153, Ordering::Release);
+    let resumed = run_queue.switch_current(child_thread, child_scheduler_context, parent_thread)?;
+    LIVE_FORK_EXECUTION_STAGE.store(154, Ordering::Release);
     if resumed.handle() != parent_thread || resumed.context() != parent_scheduler_context {
         return None;
     }
     LIVE_FORK_EXECUTION_STAGE.store(16, Ordering::Release);
-    if !table.withdraw_from_scheduler(child_handle, run_queue)
-        || !table.withdraw_from_scheduler(parent_handle, run_queue)
-        || !scheduler::release_process_scheduler_workspace()
+    let nested = parent.parent.is_some();
+    if !table.withdraw_from_scheduler(child_handle, run_queue) {
+        return None;
+    }
+    if !nested
+        && (!table.withdraw_from_scheduler(parent_handle, run_queue)
+            || !scheduler::release_process_scheduler_workspace())
     {
         return None;
     }
     LIVE_FORK_EXECUTION_STAGE.store(161, Ordering::Release);
-    if !address_space::retire_current_linux_child_address_space() {
+    if !address_space::retire_linux_child_address_space(child_space.root()) {
         LIVE_FORK_EXECUTION_STAGE.store(162, Ordering::Release);
         return None;
     }
@@ -2173,16 +2460,13 @@ fn scrub_candidate_resources(
     hierarchy: &[memory::FrameLease],
     pages: &[memory::FrameLease],
 ) -> bool {
-    if hierarchy.len() + pages.len() > PROCESS_LEASE_LIMIT {
+    if !memory::frame_leases_releasable(memory::FrameOwner::KERNEL, hierarchy)
+        || !memory::frame_leases_releasable(memory::FrameOwner::KERNEL, pages)
+    {
         return false;
     }
-    let mut leases = [memory::FrameLease::EMPTY; PROCESS_LEASE_LIMIT];
-    leases[..hierarchy.len()].copy_from_slice(hierarchy);
-    leases[hierarchy.len()..hierarchy.len() + pages.len()].copy_from_slice(pages);
-    memory::scrub_and_release_frames(
-        memory::FrameOwner::KERNEL,
-        &leases[..hierarchy.len() + pages.len()],
-    )
+    memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, hierarchy)
+        && memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, pages)
 }
 
 pub(crate) fn copy_private_pages(
@@ -2222,6 +2506,35 @@ pub(crate) fn copy_private_pages(
         };
         // SAFETY: all leases and direct-map extents were validated before the
         // first write, and source/destination frames are live and disjoint.
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                source_address as *const u8,
+                destination_address as *mut u8,
+                PAGE_SIZE,
+            );
+        }
+    }
+    true
+}
+
+fn copy_validated_private_pages(
+    source: &[memory::FrameLease],
+    destination: &[memory::FrameLease],
+) -> bool {
+    if source.is_empty()
+        || source.len() != destination.len()
+        || source.len() > PROCESS_PRIVATE_PAGE_LIMIT
+        || !memory::frames_owned_by(memory::FrameOwner::KERNEL, destination)
+    {
+        return false;
+    }
+    for (source_frame, destination_frame) in source.iter().zip(destination) {
+        let (Some(source_address), Some(destination_address)) = (
+            source_frame.direct_map_address(),
+            destination_frame.direct_map_address(),
+        ) else {
+            return false;
+        };
         unsafe {
             core::ptr::copy_nonoverlapping(
                 source_address as *const u8,

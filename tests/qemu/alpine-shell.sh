@@ -110,6 +110,10 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
         '/bin/cat /proc/1/statm' \
         '/bin/cat /proc/1/mountinfo' \
         'ls /' \
+        "/usr/bin/readlink -f /bin/sh >/dev/null && printf 'READLINK_RUNTIME_OK\\n'" \
+        "/bin/sh -c '/bin/sh -c \"/bin/true; echo NESTED_FORK_INNER_OK\"; echo NESTED_FORK_OUTER_OK'" \
+        "bytes=\$(/bin/dd if=/dev/zero bs=1024 count=64 2>/dev/null | /usr/bin/wc -c); test \"\$bytes\" -eq 65536 && echo PIPE_RUNTIME_64K_OK" \
+        "{ printf one; printf two; printf three; } | grep -qx onetwothree && echo PIPE_FRAGMENTED_WRITES_OK" \
         "printf 'FORK_STATE_RESTORE_OK\\n'" \
         "printf 'FORK_EXEC_OK\\n'" \
         "printf 'OCI_FILESYSTEM_OK\\n'"
@@ -120,6 +124,11 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
     wait_for_line 'ROOT_CWD_STATUS=0'
     wait_for_line 'RELATIVE_CWD_STATUS=0'
     wait_for_line '/etc'
+    wait_for_line 'READLINK_RUNTIME_OK'
+    wait_for_line 'NESTED_FORK_INNER_OK'
+    wait_for_line 'NESTED_FORK_OUTER_OK'
+    wait_for_line 'PIPE_RUNTIME_64K_OK'
+    wait_for_line 'PIPE_FRAGMENTED_WRITES_OK'
     wait_for_line 'FORK_STATE_RESTORE_OK'
     wait_for_line 'FORK_EXEC_OK'
     wait_for_line 'PROCFS_OK'
@@ -190,6 +199,10 @@ for expected in \
     'NAME="Alpine Linux"' \
     'ROOT_CWD_STATUS=0' \
     'RELATIVE_CWD_STATUS=0' \
+    'READLINK_RUNTIME_OK' \
+    'NESTED_FORK_INNER_OK' \
+    'NESTED_FORK_OUTER_OK' \
+    'PIPE_RUNTIME_64K_OK' \
     'FORK_STATE_RESTORE_OK' \
     '/etc' \
     'FORK_EXEC_OK' \

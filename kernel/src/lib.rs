@@ -12,7 +12,9 @@ mod initramfs;
 mod ipc;
 mod linux_elf;
 mod linux_mount;
+mod linux_overlay;
 mod linux_process;
+mod linux_socket;
 mod linux_tmpfs;
 mod linux_user;
 mod manifest;
@@ -3710,6 +3712,15 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     if !network::initialize_runtime() {
         kernel_fail("\r\nginux: runtime network initialization failed\r\n");
     }
+    if !linux_socket::configure(
+        virtio_network,
+        virtio_network_initialization,
+        virtio_network_common_mmio,
+        virtio_network_notify_mmio,
+        virtio_network_iommu_profile,
+    ) {
+        kernel_fail("\r\nginux: Linux socket transport configuration failed\r\n");
+    }
     OPERATOR_CONSOLE_READY.store(true, Ordering::Release);
     serial_write_raw(b"ginux: platform, security, devices, and runtime ready\r\n");
     let mut controller_recovery_attempts = 0_u8;
@@ -3781,16 +3792,31 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             serial_write("ginux: pulling OCI image ");
             serial_write_bytes(&image[..image_size]);
             serial_write("\r\n");
-            let downloaded = image_size != 0
-                && address_space::pull_native_oci_image(
-                    &network_image,
-                    virtio_network,
-                    virtio_network_initialization,
-                    virtio_network_iommu_profile,
-                    virtio_network_common_mmio,
-                    &image[..image_size],
-                    boot_info.unix_time,
-                );
+            let mut downloaded = false;
+            if image_size != 0 {
+                for attempt in 0..3 {
+                    if attempt != 0 {
+                        serial_write("ginux: retrying OCI registry pull (");
+                        serial_write_u64((attempt + 1) as u64);
+                        serial_write("/3)\r\n");
+                        if !image_store::discard_published_layers() {
+                            break;
+                        }
+                    }
+                    downloaded = address_space::pull_native_oci_image(
+                        &network_image,
+                        virtio_network,
+                        virtio_network_initialization,
+                        virtio_network_iommu_profile,
+                        virtio_network_common_mmio,
+                        &image[..image_size],
+                        boot_info.unix_time,
+                    );
+                    if downloaded {
+                        break;
+                    }
+                }
+            }
             if downloaded {
                 serial_write("ginux: OCI unpacking image filesystem\r\n");
             }

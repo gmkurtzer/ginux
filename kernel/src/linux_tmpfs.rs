@@ -9,10 +9,7 @@ pub(crate) const FILE_CAPACITY: usize = 64;
 const PAGE_SIZE: usize = 4096;
 const FILE_LIMIT: usize = 4;
 const NAME_CAPACITY: usize = 64;
-const OBJECT_PAGE_LIMIT: usize = 4;
-const TOTAL_PAGE_LIMIT: usize = 8;
-const OBJECT_CAPACITY: usize = OBJECT_PAGE_LIMIT * PAGE_SIZE;
-const TOTAL_CAPACITY: usize = TOTAL_PAGE_LIMIT * PAGE_SIZE;
+const DATA_CAPACITY: usize = PAGE_SIZE - core::mem::size_of::<FrameLease>();
 const FILE_NAME: &[u8] = b"ginux-ready";
 const FIRST_FILE_INODE: u64 = 18;
 const HOST_INSTANCE: usize = control_abi::DOMAIN_LIMIT;
@@ -33,9 +30,18 @@ struct File {
     name_length: u8,
     name: [u8; NAME_CAPACITY],
     length: usize,
-    page_count: u8,
-    pages: [FrameLease; OBJECT_PAGE_LIMIT],
+    page_count: usize,
+    first_page: FrameLease,
+    last_page: FrameLease,
+    cached_page: FrameLease,
+    cached_page_index: usize,
     published: bool,
+}
+
+#[repr(C)]
+struct DataPage {
+    next: FrameLease,
+    bytes: [u8; DATA_CAPACITY],
 }
 
 struct Tmpfs {
@@ -82,7 +88,10 @@ impl Tmpfs {
             name: stored_name,
             length: 0,
             page_count: 0,
-            pages: [FrameLease::EMPTY; OBJECT_PAGE_LIMIT],
+            first_page: FrameLease::EMPTY,
+            last_page: FrameLease::EMPTY,
+            cached_page: FrameLease::EMPTY,
+            cached_page_index: 0,
             published,
         });
         Some(handle)
@@ -111,22 +120,35 @@ impl Tmpfs {
             .find(|file| file.handle == handle)
     }
 
-    fn read(&self, handle: FileHandle, offset: usize, output: &mut [u8]) -> Option<usize> {
-        let file = self.file(handle)?;
+    fn read(&mut self, handle: FileHandle, offset: usize, output: &mut [u8]) -> Option<usize> {
+        let file = self.file_mut(handle)?;
         let start = offset.min(file.length);
         let end = start.saturating_add(output.len()).min(file.length);
+        let target_page = start / DATA_CAPACITY;
+        let (mut page, mut page_index) =
+            if file.cached_page != FrameLease::EMPTY && file.cached_page_index <= target_page {
+                (file.cached_page, file.cached_page_index)
+            } else {
+                (file.first_page, 0)
+            };
+        while page_index < target_page {
+            page = data_page(page)?.next;
+            page_index += 1;
+        }
+        file.cached_page = page;
+        file.cached_page_index = page_index;
+        let mut skipped = page_index * DATA_CAPACITY;
         let mut copied = 0;
         while start + copied < end {
             let position = start + copied;
-            let page_index = position / PAGE_SIZE;
-            let page_offset = position % PAGE_SIZE;
-            let length = (end - position).min(PAGE_SIZE - page_offset);
-            let address = file.pages.get(page_index)?.direct_map_address()?;
-            let source = unsafe {
-                core::slice::from_raw_parts((address + page_offset) as *const u8, length)
-            };
-            output[copied..copied + length].copy_from_slice(source);
+            let data = data_page(page)?;
+            let page_offset = position - skipped;
+            let length = (end - position).min(DATA_CAPACITY - page_offset);
+            output[copied..copied + length]
+                .copy_from_slice(&data.bytes[page_offset..page_offset + length]);
             copied += length;
+            skipped += DATA_CAPACITY;
+            page = data.next;
         }
         Some(copied)
     }
@@ -140,71 +162,54 @@ impl Tmpfs {
             return Some(0);
         }
         let end = offset.checked_add(input.len())?;
-        if end > OBJECT_CAPACITY {
-            return None;
-        }
         let file = self.files[slot].as_ref()?;
         if file.published && file.name() != FILE_NAME {
             return None;
         }
         let old_length = file.length;
-        let old_page_count = usize::from(file.page_count);
-        let required_page_count = end.div_ceil(PAGE_SIZE);
+        let old_page_count = file.page_count;
+        let required_page_count = end.div_ceil(DATA_CAPACITY);
         let additional_page_count = required_page_count.saturating_sub(old_page_count);
-        if self.allocated_pages.checked_add(additional_page_count)? > TOTAL_PAGE_LIMIT {
-            return None;
-        }
-
-        let mut additions = [FrameLease::EMPTY; OBJECT_PAGE_LIMIT];
-        let mut addition_count = 0;
-        while addition_count < additional_page_count {
-            let Some([frame]) = memory::allocate_frames::<1>(FrameOwner::KERNEL) else {
-                if addition_count != 0 {
-                    let _ = memory::scrub_and_release_frames(
-                        FrameOwner::KERNEL,
-                        &additions[..addition_count],
-                    );
-                }
-                return None;
-            };
-            additions[addition_count] = frame;
-            addition_count += 1;
-        }
-
-        let mut pages = file.pages;
-        pages[old_page_count..required_page_count].copy_from_slice(&additions[..addition_count]);
-        if pages[..required_page_count]
-            .iter()
-            .any(|frame| frame.direct_map_address().is_none())
-        {
-            if addition_count != 0 {
-                let _ = memory::scrub_and_release_frames(
-                    FrameOwner::KERNEL,
-                    &additions[..addition_count],
-                );
+        let first_page = file.first_page;
+        let old_last_page = file.last_page;
+        let additions = allocate_data_pages(additional_page_count)?;
+        let first_page = if first_page == FrameLease::EMPTY {
+            additions
+        } else {
+            if additions != FrameLease::EMPTY {
+                data_page_mut(old_last_page)?.next = additions;
             }
-            return None;
-        }
+            first_page
+        };
+        let last_page = if additions == FrameLease::EMPTY {
+            old_last_page
+        } else {
+            data_page_at(additions, additional_page_count.checked_sub(1)?)?
+        };
 
+        let mut page = data_page_at(first_page, offset / DATA_CAPACITY)?;
+        let mut page_start = offset / DATA_CAPACITY * DATA_CAPACITY;
         let mut copied = 0;
         while copied < input.len() {
             let position = offset + copied;
-            let page_index = position / PAGE_SIZE;
-            let page_offset = position % PAGE_SIZE;
-            let length = (input.len() - copied).min(PAGE_SIZE - page_offset);
-            let address = pages[page_index].direct_map_address()?;
-            let output = unsafe {
-                core::slice::from_raw_parts_mut((address + page_offset) as *mut u8, length)
-            };
-            output.copy_from_slice(&input[copied..copied + length]);
+            let page_offset = position - page_start;
+            let length = (input.len() - copied).min(DATA_CAPACITY - page_offset);
+            let data = data_page_mut(page)?;
+            data.bytes[page_offset..page_offset + length]
+                .copy_from_slice(&input[copied..copied + length]);
             copied += length;
+            page_start += DATA_CAPACITY;
+            page = data.next;
         }
 
         let file = self.files[slot].as_mut()?;
-        file.pages = pages;
-        file.page_count = required_page_count as u8;
+        file.first_page = first_page;
+        file.last_page = last_page;
+        file.page_count = required_page_count;
+        file.cached_page = page;
+        file.cached_page_index = page_start / DATA_CAPACITY;
         file.length = old_length.max(end);
-        self.allocated_pages += addition_count;
+        self.allocated_pages += additional_page_count;
         self.used += end.saturating_sub(old_length);
         Some(input.len())
     }
@@ -231,10 +236,8 @@ impl Tmpfs {
         let Some(file) = self.files[slot].as_mut() else {
             return false;
         };
-        let page_count = usize::from(file.page_count);
-        if page_count != 0
-            && !memory::scrub_and_release_frames(FrameOwner::KERNEL, &file.pages[..page_count])
-        {
+        let page_count = file.page_count;
+        if !release_data_pages(file.first_page) {
             return false;
         }
         self.used -= file.length;
@@ -248,7 +251,10 @@ impl Tmpfs {
             core::ptr::write_volatile(&mut file.page_count, 0);
             core::ptr::write_volatile(&mut file.published, false);
         }
-        file.pages.fill(FrameLease::EMPTY);
+        file.first_page = FrameLease::EMPTY;
+        file.last_page = FrameLease::EMPTY;
+        file.cached_page = FrameLease::EMPTY;
+        file.cached_page_index = 0;
         self.files[slot] = None;
         true
     }
@@ -262,6 +268,71 @@ impl File {
     fn name(&self) -> &[u8] {
         &self.name[..usize::from(self.name_length)]
     }
+}
+
+fn allocate_data_pages(count: usize) -> Option<FrameLease> {
+    let mut first = FrameLease::EMPTY;
+    let mut last = FrameLease::EMPTY;
+    for _ in 0..count {
+        let Some([page]) = memory::allocate_frames::<1>(FrameOwner::KERNEL) else {
+            let _ = release_data_pages(first);
+            return None;
+        };
+        let Some(address) = page.direct_map_address() else {
+            let _ = memory::scrub_and_release_frames(FrameOwner::KERNEL, &[page]);
+            let _ = release_data_pages(first);
+            return None;
+        };
+        unsafe {
+            core::ptr::write_bytes(address as *mut u8, 0, PAGE_SIZE);
+            core::ptr::write(
+                address as *mut DataPage,
+                DataPage {
+                    next: FrameLease::EMPTY,
+                    bytes: [0; DATA_CAPACITY],
+                },
+            );
+        }
+        if first == FrameLease::EMPTY {
+            first = page;
+        } else {
+            data_page_mut(last)?.next = page;
+        }
+        last = page;
+    }
+    Some(first)
+}
+
+fn data_page_at(mut page: FrameLease, index: usize) -> Option<FrameLease> {
+    for _ in 0..index {
+        page = data_page(page)?.next;
+    }
+    (page != FrameLease::EMPTY).then_some(page)
+}
+
+fn data_page(page: FrameLease) -> Option<&'static DataPage> {
+    (page != FrameLease::EMPTY).then_some(())?;
+    let address = page.direct_map_address()?;
+    Some(unsafe { &*(address as *const DataPage) })
+}
+
+fn data_page_mut(page: FrameLease) -> Option<&'static mut DataPage> {
+    (page != FrameLease::EMPTY).then_some(())?;
+    let address = page.direct_map_address()?;
+    Some(unsafe { &mut *(address as *mut DataPage) })
+}
+
+fn release_data_pages(mut page: FrameLease) -> bool {
+    while page != FrameLease::EMPTY {
+        let Some(next) = data_page(page).map(|data| data.next) else {
+            return false;
+        };
+        if !memory::scrub_and_release_frames(FrameOwner::KERNEL, &[page]) {
+            return false;
+        }
+        page = next;
+    }
+    true
 }
 
 pub(crate) fn verify_contract() -> bool {
@@ -287,8 +358,8 @@ pub(crate) fn verify_contract() -> bool {
         return false;
     };
     if tmpfs.find(staged_name, true).is_some()
-        || tmpfs.write(staged, PAGE_SIZE - 2, b"abcd") != Some(4)
-        || tmpfs.read(staged, PAGE_SIZE - 2, &mut output[..4]) != Some(4)
+        || tmpfs.write(staged, DATA_CAPACITY - 2, b"abcd") != Some(4)
+        || tmpfs.read(staged, DATA_CAPACITY - 2, &mut output[..4]) != Some(4)
         || &output[..4] != b"abcd"
         || !tmpfs.publish(staged)
         || tmpfs.publish(staged)
@@ -302,17 +373,20 @@ pub(crate) fn verify_contract() -> bool {
     let Some(aborted) = tmpfs.create(aborted_name, false) else {
         return false;
     };
-    if tmpfs.write(aborted, OBJECT_CAPACITY - 1, b"z") != Some(1) {
+    let beyond_old_quota = 8 * PAGE_SIZE + 17;
+    if tmpfs.write(aborted, beyond_old_quota, b"z") != Some(1)
+        || tmpfs.read(aborted, beyond_old_quota, &mut output[..1]) != Some(1)
+        || output[0] != b'z'
+    {
         return false;
     }
-    let quota_name = b"sha256:cccccccc";
-    let Some(quota) = tmpfs.create(quota_name, false) else {
+    let second_name = b"sha256:cccccccc";
+    let Some(second) = tmpfs.create(second_name, false) else {
         return false;
     };
-    if tmpfs.write(quota, PAGE_SIZE - 1, b"q") != Some(1)
-        || tmpfs.write(quota, PAGE_SIZE, b"x").is_some()
+    if tmpfs.write(second, beyond_old_quota, b"q") != Some(1)
         || tmpfs.find(aborted_name, true).is_some()
-        || !tmpfs.unlink(quota)
+        || !tmpfs.unlink(second)
         || !tmpfs.unlink(aborted)
         || tmpfs.find(aborted_name, false).is_some()
     {
@@ -376,8 +450,8 @@ pub(crate) fn abort_object(handle: FileHandle) -> bool {
     staged && live_mut().is_some_and(|tmpfs| tmpfs.unlink(handle))
 }
 
-pub(crate) fn usage() -> (usize, usize) {
-    live().map_or((0, TOTAL_CAPACITY), |tmpfs| (tmpfs.used, TOTAL_CAPACITY))
+pub(crate) fn usage() -> usize {
+    live().map_or(0, |tmpfs| tmpfs.used)
 }
 
 pub(crate) fn verify_live_object_contract() -> bool {
@@ -387,14 +461,14 @@ pub(crate) fn verify_live_object_contract() -> bool {
     let first_name = b"sha256:live-a";
     let second_name = b"sha256:live-b";
     let overflow_name = b"sha256:overflow";
-    if usage() != (0, TOTAL_CAPACITY) {
+    if usage() != 0 {
         return false;
     }
     let Some(first) = stage_object(first_name) else {
         return false;
     };
     if open(first_name).is_some()
-        || write(first, PAGE_SIZE - 2, b"abcd") != Some(4)
+        || write(first, DATA_CAPACITY - 2, b"abcd") != Some(4)
         || !publish_object(first)
         || open(first_name) != Some(first)
         || abort_object(first)
@@ -408,16 +482,16 @@ pub(crate) fn verify_live_object_contract() -> bool {
     let Some(overflow) = stage_object(overflow_name) else {
         return false;
     };
-    if write(second, OBJECT_CAPACITY - 1, b"s") != Some(1)
-        || write(overflow, 2 * PAGE_SIZE - 1, b"o") != Some(1)
-        || write(overflow, 2 * PAGE_SIZE, b"x").is_some()
+    let beyond_old_quota = 8 * PAGE_SIZE + 17;
+    if write(second, beyond_old_quota, b"s") != Some(1)
+        || write(overflow, beyond_old_quota, b"o") != Some(1)
         || !abort_object(overflow)
         || !abort_object(second)
         || !unlink(first_name, first)
     {
         return false;
     }
-    usage() == (0, TOTAL_CAPACITY)
+    usage() == 0
         && open(first_name).is_none()
         && open(second_name).is_none()
         && open(overflow_name).is_none()
@@ -450,7 +524,7 @@ pub(crate) fn size(handle: FileHandle) -> Option<usize> {
 }
 
 pub(crate) fn read(handle: FileHandle, offset: usize, output: &mut [u8]) -> Option<usize> {
-    live()?.read(handle, offset, output)
+    live_mut()?.read(handle, offset, output)
 }
 
 pub(crate) fn write(handle: FileHandle, offset: usize, input: &[u8]) -> Option<usize> {

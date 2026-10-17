@@ -10,7 +10,10 @@ const LOW_MEMORY_LIMIT: u64 = 1024 * 1024;
 const MAX_RANGES: usize = 128;
 const MAX_RECYCLED_FRAMES: usize = 262_144;
 const MAX_LIVE_FRAMES: usize = 262_144;
+const MAX_LIVE_INDEX: usize = MAX_LIVE_FRAMES * 2;
 const DOMAIN_FRAME_LIMIT: usize = 192;
+const LIVE_INDEX_EMPTY: u32 = 0;
+const LIVE_INDEX_TOMBSTONE: u32 = u32::MAX;
 
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
 static RUNTIME_EXTENT_STARTS: [AtomicU64; crate::control_abi::DOMAIN_LIMIT] =
@@ -28,6 +31,10 @@ struct Range {
 const EMPTY_RANGE: Range = Range { next: 0, end: 0 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+// Process snapshots contain many leases. Keep the wire-like lease record
+// compact; callers obtain fields through by-value accessors so no reference
+// to a potentially unaligned packed field escapes.
+#[repr(C, packed)]
 pub(crate) struct FrameLease {
     address: u64,
     generation: u32,
@@ -92,6 +99,7 @@ pub(crate) struct FrameAllocator<
     const LIVE_LIMIT: usize = MAX_LIVE_FRAMES,
     const RECYCLED_LIMIT: usize = MAX_RECYCLED_FRAMES,
     const OWNER_LIMIT: usize = DOMAIN_FRAME_LIMIT,
+    const INDEX_LIMIT: usize = MAX_LIVE_INDEX,
 > {
     ranges: [Range; MAX_RANGES],
     range_count: usize,
@@ -100,13 +108,18 @@ pub(crate) struct FrameAllocator<
     reclaimed_boot_service_frames: u64,
     live_frames: [FrameLease; LIVE_LIMIT],
     live_owners: [FrameOwner; LIVE_LIMIT],
+    live_index: [u32; INDEX_LIMIT],
     live_count: usize,
     recycled: [FrameLease; RECYCLED_LIMIT],
     recycled_count: usize,
 }
 
-impl<const LIVE_LIMIT: usize, const RECYCLED_LIMIT: usize, const OWNER_LIMIT: usize>
-    FrameAllocator<LIVE_LIMIT, RECYCLED_LIMIT, OWNER_LIMIT>
+impl<
+        const LIVE_LIMIT: usize,
+        const RECYCLED_LIMIT: usize,
+        const OWNER_LIMIT: usize,
+        const INDEX_LIMIT: usize,
+    > FrameAllocator<LIVE_LIMIT, RECYCLED_LIMIT, OWNER_LIMIT, INDEX_LIMIT>
 {
     fn populate_uefi_map(&mut self, boot_info: &BootInfo, ceiling: u64) -> Option<()> {
         let count = boot_info.memory_map_size / boot_info.memory_descriptor_size;
@@ -302,7 +315,7 @@ impl<const LIVE_LIMIT: usize, const RECYCLED_LIMIT: usize, const OWNER_LIMIT: us
                 .filter(|(frame, frame_owner)| {
                     **frame_owner == owner
                         && frame.generation == start.generation
-                        && (start.address..end).contains(&frame.address)
+                        && (start.address..end).contains(&frame.address())
                         && frame.address.is_multiple_of(PAGE_SIZE)
                 })
                 .count()
@@ -315,11 +328,23 @@ impl<const LIVE_LIMIT: usize, const RECYCLED_LIMIT: usize, const OWNER_LIMIT: us
             let frame = self.live_frames[index];
             if self.live_owners[index] == owner
                 && frame.generation == start.generation
-                && (start.address..end).contains(&frame.address)
+                && (start.address..end).contains(&frame.address())
             {
+                if self.remove_live_index(frame.address()) != Some(index) {
+                    return false;
+                }
                 self.live_count -= 1;
-                self.live_frames[index] = self.live_frames[self.live_count];
-                self.live_owners[index] = self.live_owners[self.live_count];
+                if index != self.live_count {
+                    self.live_frames[index] = self.live_frames[self.live_count];
+                    self.live_owners[index] = self.live_owners[self.live_count];
+                    if !self.update_live_index(
+                        self.live_frames[index].address(),
+                        self.live_count,
+                        index,
+                    ) {
+                        return false;
+                    }
+                }
                 self.live_frames[self.live_count] = EMPTY_LEASE;
                 self.live_owners[self.live_count] = FrameOwner::KERNEL;
                 self.recycled[self.recycled_count] = frame;
@@ -366,6 +391,123 @@ impl<const LIVE_LIMIT: usize, const RECYCLED_LIMIT: usize, const OWNER_LIMIT: us
         None
     }
 
+    fn live_index_start(address: u64) -> Option<usize> {
+        if INDEX_LIMIT < LIVE_LIMIT.checked_mul(2)? || !INDEX_LIMIT.is_power_of_two() {
+            return None;
+        }
+        let page = address.checked_div(PAGE_SIZE)?;
+        Some(page.wrapping_mul(0x9e37_79b9_7f4a_7c15) as usize & (INDEX_LIMIT - 1))
+    }
+
+    fn live_position(&self, address: u64) -> Option<usize> {
+        let start = Self::live_index_start(address)?;
+        for probe in 0..INDEX_LIMIT {
+            let slot = (start + probe) & (INDEX_LIMIT - 1);
+            match self.live_index[slot] {
+                LIVE_INDEX_EMPTY => return None,
+                LIVE_INDEX_TOMBSTONE => continue,
+                encoded => {
+                    let index = encoded.checked_sub(1)? as usize;
+                    if index < self.live_count && self.live_frames[index].address() == address {
+                        return Some(index);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn insert_live_index(&mut self, address: u64, index: usize) -> bool {
+        let Some(encoded) = u32::try_from(index)
+            .ok()
+            .and_then(|value| value.checked_add(1))
+        else {
+            return false;
+        };
+        let Some(start) = Self::live_index_start(address) else {
+            return false;
+        };
+        let mut tombstone = None;
+        for probe in 0..INDEX_LIMIT {
+            let slot = (start + probe) & (INDEX_LIMIT - 1);
+            match self.live_index[slot] {
+                LIVE_INDEX_EMPTY => {
+                    self.live_index[tombstone.unwrap_or(slot)] = encoded;
+                    return true;
+                }
+                LIVE_INDEX_TOMBSTONE => {
+                    if tombstone.is_none() {
+                        tombstone = Some(slot);
+                    }
+                }
+                existing => {
+                    let existing = (existing - 1) as usize;
+                    if existing < self.live_count && self.live_frames[existing].address() == address
+                    {
+                        return false;
+                    }
+                }
+            };
+        }
+        if let Some(slot) = tombstone {
+            self.live_index[slot] = encoded;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn remove_live_index(&mut self, address: u64) -> Option<usize> {
+        let start = Self::live_index_start(address)?;
+        for probe in 0..INDEX_LIMIT {
+            let slot = (start + probe) & (INDEX_LIMIT - 1);
+            match self.live_index[slot] {
+                LIVE_INDEX_EMPTY => return None,
+                LIVE_INDEX_TOMBSTONE => continue,
+                encoded => {
+                    let index = encoded.checked_sub(1)? as usize;
+                    if index < self.live_count && self.live_frames[index].address() == address {
+                        self.live_index[slot] = LIVE_INDEX_TOMBSTONE;
+                        return Some(index);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn update_live_index(&mut self, address: u64, old_index: usize, new_index: usize) -> bool {
+        let Some(old_encoded) = u32::try_from(old_index)
+            .ok()
+            .and_then(|value| value.checked_add(1))
+        else {
+            return false;
+        };
+        let Some(new_encoded) = u32::try_from(new_index)
+            .ok()
+            .and_then(|value| value.checked_add(1))
+        else {
+            return false;
+        };
+        let Some(start) = Self::live_index_start(address) else {
+            return false;
+        };
+        for probe in 0..INDEX_LIMIT {
+            let slot = (start + probe) & (INDEX_LIMIT - 1);
+            match self.live_index[slot] {
+                LIVE_INDEX_EMPTY => return false,
+                LIVE_INDEX_TOMBSTONE => continue,
+                current => {
+                    if current == old_encoded && self.live_frames[old_index].address() == address {
+                        self.live_index[slot] = new_encoded;
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
     fn can_release(&self, owner: FrameOwner, frames: &[FrameLease]) -> bool {
         if frames.is_empty()
             || self
@@ -384,13 +526,9 @@ impl<const LIVE_LIMIT: usize, const RECYCLED_LIMIT: usize, const OWNER_LIMIT: us
                 || frames[..index]
                     .iter()
                     .any(|prior| prior.address == frame.address)
-                || self.recycled[..self.recycled_count]
-                    .iter()
-                    .any(|recycled| recycled.address == frame.address)
-                || !self.live_frames[..self.live_count]
-                    .iter()
-                    .zip(&self.live_owners[..self.live_count])
-                    .any(|(live, live_owner)| live == frame && *live_owner == owner)
+                || !self.live_position(frame.address()).is_some_and(|position| {
+                    self.live_frames[position] == *frame && self.live_owners[position] == owner
+                })
             {
                 return false;
             }
@@ -403,15 +541,21 @@ impl<const LIVE_LIMIT: usize, const RECYCLED_LIMIT: usize, const OWNER_LIMIT: us
             return false;
         }
         for frame in frames.iter().copied() {
-            let Some(index) = self.live_frames[..self.live_count]
-                .iter()
-                .position(|live| *live == frame)
-            else {
+            let Some(index) = self.remove_live_index(frame.address()) else {
                 return false;
             };
             self.live_count -= 1;
-            self.live_frames[index] = self.live_frames[self.live_count];
-            self.live_owners[index] = self.live_owners[self.live_count];
+            if index != self.live_count {
+                self.live_frames[index] = self.live_frames[self.live_count];
+                self.live_owners[index] = self.live_owners[self.live_count];
+                if !self.update_live_index(
+                    self.live_frames[index].address(),
+                    self.live_count,
+                    index,
+                ) {
+                    return false;
+                }
+            }
             self.live_frames[self.live_count] = EMPTY_LEASE;
             self.live_owners[self.live_count] = FrameOwner::KERNEL;
             self.recycled[self.recycled_count] = frame;
@@ -430,14 +574,13 @@ impl<const LIVE_LIMIT: usize, const RECYCLED_LIMIT: usize, const OWNER_LIMIT: us
     }
 
     fn record_live(&mut self, frame: FrameLease, owner: FrameOwner) -> Option<()> {
-        if self.live_count == LIVE_LIMIT
-            || self.live_frames[..self.live_count]
-                .iter()
-                .any(|live| live.address == frame.address)
-        {
+        if self.live_count == LIVE_LIMIT || self.live_position(frame.address()).is_some() {
             return None;
         }
         let allocated = self.allocated_frames.checked_add(1)?;
+        if !self.insert_live_index(frame.address(), self.live_count) {
+            return None;
+        }
         self.live_frames[self.live_count] = frame;
         self.live_owners[self.live_count] = owner;
         self.live_count += 1;
@@ -480,29 +623,25 @@ impl<const LIVE_LIMIT: usize, const RECYCLED_LIMIT: usize, const OWNER_LIMIT: us
 
     fn owns(&self, owner: FrameOwner, frames: &[FrameLease]) -> bool {
         frames.iter().all(|frame| {
-            self.live_frames[..self.live_count]
-                .iter()
-                .zip(&self.live_owners[..self.live_count])
-                .any(|(live, live_owner)| live == frame && *live_owner == owner)
+            self.live_position(frame.address()).is_some_and(|position| {
+                self.live_frames[position] == *frame && self.live_owners[position] == owner
+            })
         })
     }
 
     fn tracks_any(&self, frames: &[FrameLease]) -> bool {
         !frames.is_empty()
             && frames.iter().any(|frame| {
-                self.live_frames[..self.live_count]
-                    .iter()
-                    .any(|live| live == frame)
+                self.live_position(frame.address())
+                    .is_some_and(|position| self.live_frames[position] == *frame)
             })
     }
 
     fn owns_addresses(&self, owner: FrameOwner, addresses: &[u64]) -> bool {
         !addresses.is_empty()
             && addresses.iter().all(|address| {
-                self.live_frames[..self.live_count]
-                    .iter()
-                    .zip(&self.live_owners[..self.live_count])
-                    .any(|(live, live_owner)| live.address == *address && *live_owner == owner)
+                self.live_position(*address)
+                    .is_some_and(|position| self.live_owners[position] == owner)
             })
     }
 
@@ -613,6 +752,40 @@ pub(crate) fn allocate_frame_prefix<const N: usize>(
         }
         Some(frames)
     }
+}
+
+pub(crate) fn allocate_frame_prefix_into(
+    owner: FrameOwner,
+    output: &mut [FrameLease],
+    count: usize,
+) -> bool {
+    if !INITIALIZED.load(Ordering::Acquire) || count == 0 || count > output.len() {
+        return false;
+    }
+    output.fill(FrameLease::EMPTY);
+    unsafe {
+        let allocator = core::ptr::addr_of_mut!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
+        for index in 0..count {
+            let Some(frame) = (*allocator).allocate_one(owner) else {
+                if index != 0 {
+                    let _ = (*allocator).release_slice(owner, &output[..index]);
+                    output[..index].fill(FrameLease::EMPTY);
+                }
+                return false;
+            };
+            let Some(address) = frame.direct_map_address() else {
+                let _ = (*allocator).release_slice(owner, core::slice::from_ref(&frame));
+                if index != 0 {
+                    let _ = (*allocator).release_slice(owner, &output[..index]);
+                    output[..index].fill(FrameLease::EMPTY);
+                }
+                return false;
+            };
+            core::ptr::write_bytes(address as *mut u8, 0, PAGE_SIZE as usize);
+            output[index] = frame;
+        }
+    }
+    true
 }
 
 pub(crate) fn allocate_contiguous_frames<const N: usize>(
@@ -784,17 +957,8 @@ pub(crate) fn live_frame_lease(owner: FrameOwner, address: u64) -> Option<FrameL
     }
     unsafe {
         let allocator = core::ptr::addr_of!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
-        (&(*allocator).live_frames)[..(*allocator).live_count]
-            .iter()
-            .copied()
-            .zip(
-                (&(*allocator).live_owners)[..(*allocator).live_count]
-                    .iter()
-                    .copied(),
-            )
-            .find_map(|(frame, live_owner)| {
-                (frame.address == address && live_owner == owner).then_some(frame)
-            })
+        let position = (*allocator).live_position(address)?;
+        ((*allocator).live_owners[position] == owner).then_some((*allocator).live_frames[position])
     }
 }
 
@@ -902,7 +1066,9 @@ pub(crate) fn reclaimed_boot_service_frame_count() -> Option<u64> {
 
 pub(crate) fn verify_reservation_invariants() -> bool {
     const TEST_FRAME_LIMIT: usize = 64;
-    type TestFrameAllocator = FrameAllocator<TEST_FRAME_LIMIT, TEST_FRAME_LIMIT, 16>;
+    const TEST_INDEX_LIMIT: usize = TEST_FRAME_LIMIT * 2;
+    type TestFrameAllocator =
+        FrameAllocator<TEST_FRAME_LIMIT, TEST_FRAME_LIMIT, 16, TEST_INDEX_LIMIT>;
     let mut allocator = TestFrameAllocator {
         ranges: [EMPTY_RANGE; MAX_RANGES],
         range_count: 2,
@@ -911,6 +1077,7 @@ pub(crate) fn verify_reservation_invariants() -> bool {
         reclaimed_boot_service_frames: 0,
         live_frames: [EMPTY_LEASE; TEST_FRAME_LIMIT],
         live_owners: [FrameOwner::KERNEL; TEST_FRAME_LIMIT],
+        live_index: [LIVE_INDEX_EMPTY; TEST_INDEX_LIMIT],
         live_count: 0,
         recycled: [EMPTY_LEASE; TEST_FRAME_LIMIT],
         recycled_count: 0,
@@ -966,6 +1133,7 @@ pub(crate) fn verify_reservation_invariants() -> bool {
         reclaimed_boot_service_frames: 0,
         live_frames: [EMPTY_LEASE; TEST_FRAME_LIMIT],
         live_owners: [FrameOwner::KERNEL; TEST_FRAME_LIMIT],
+        live_index: [LIVE_INDEX_EMPTY; TEST_INDEX_LIMIT],
         live_count: 0,
         recycled: [EMPTY_LEASE; TEST_FRAME_LIMIT],
         recycled_count: 0,
@@ -996,6 +1164,7 @@ pub(crate) fn verify_reservation_invariants() -> bool {
         reclaimed_boot_service_frames: 0,
         live_frames: [EMPTY_LEASE; TEST_FRAME_LIMIT],
         live_owners: [FrameOwner::KERNEL; TEST_FRAME_LIMIT],
+        live_index: [LIVE_INDEX_EMPTY; TEST_INDEX_LIMIT],
         live_count: 0,
         recycled: [EMPTY_LEASE; TEST_FRAME_LIMIT],
         recycled_count: 0,

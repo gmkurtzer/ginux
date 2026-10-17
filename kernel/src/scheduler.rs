@@ -771,6 +771,34 @@ impl Scheduler {
         self.schedule_next()
     }
 
+    fn switch_current(
+        &mut self,
+        id: ThreadId,
+        saved: UserContext,
+        target: ThreadId,
+    ) -> Option<Scheduled> {
+        if self.current != Some(id) || id == target || !saved.is_valid() {
+            return None;
+        }
+        let current = self.thread_mut(id)?;
+        if current.state != State::Running {
+            return None;
+        }
+        current.context = saved;
+        current.state = State::Ready;
+        let target_thread = self.thread_mut(target)?;
+        if target_thread.state != State::Ready {
+            return None;
+        }
+        target_thread.state = State::Running;
+        let context = target_thread.context;
+        self.current = Some(target);
+        Some(Scheduled {
+            id: target,
+            context,
+        })
+    }
+
     fn block_current(
         &mut self,
         id: ThreadId,
@@ -1051,6 +1079,20 @@ impl ProcessScheduler {
     ) -> Option<ScheduledProcess> {
         self.scheduler
             .yield_current(handle.0, context.0)
+            .map(|scheduled| ScheduledProcess {
+                handle: ProcessThreadHandle(scheduled.id),
+                context: ProcessSchedulerContext(scheduled.context),
+            })
+    }
+
+    pub(crate) fn switch_current(
+        &mut self,
+        handle: ProcessThreadHandle,
+        context: ProcessSchedulerContext,
+        target: ProcessThreadHandle,
+    ) -> Option<ScheduledProcess> {
+        self.scheduler
+            .switch_current(handle.0, context.0, target.0)
             .map(|scheduled| ScheduledProcess {
                 handle: ProcessThreadHandle(scheduled.id),
                 context: ProcessSchedulerContext(scheduled.context),

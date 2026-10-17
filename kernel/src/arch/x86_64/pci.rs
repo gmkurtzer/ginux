@@ -1257,6 +1257,93 @@ pub(crate) unsafe fn activate_network_queues_without_io(
         && network_function_is_disabled(device)
 }
 
+/// Activates the kernel-owned virtio-net queues and leaves DMA enabled.
+///
+/// # Safety
+///
+/// The caller must exclusively own the DMA page and an active IOMMU
+/// translation that restricts this device to that page. Both must remain live
+/// until the device is reset and bus mastering is revoked.
+pub(crate) unsafe fn activate_kernel_network_queues(
+    device: VirtioNetworkDevice,
+    common_mapping: MmioMapping,
+    dma_physical: u64,
+    dma_virtual: usize,
+) -> bool {
+    if !dma_physical.is_multiple_of(DMA_PAGE_SIZE as u64)
+        || !dma_virtual.is_multiple_of(DMA_PAGE_SIZE)
+        || !network_function_is_disabled(device)
+        || !network_msix_is_disabled(device)
+        || !verify_network_dma_layout()
+    {
+        return false;
+    }
+    let Some((common_physical, common_length)) = device.common_region() else {
+        return false;
+    };
+    let Some(common) = common_mapping.address(common_physical, common_length) else {
+        return false;
+    };
+    core::ptr::write_bytes(dma_virtual as *mut u8, 0, DMA_PAGE_SIZE);
+    write_config_u16(
+        device.bus,
+        device.device,
+        device.function,
+        PCI_COMMAND,
+        COMMAND_MEMORY_SPACE,
+    );
+    let Some(initialization) = negotiate_network(common) else {
+        return false;
+    };
+    if initialization.queue_count < 2 {
+        return false;
+    }
+    for (queue, descriptor, available, used) in [
+        (
+            0_u16,
+            NET_RX_DESC_OFFSET,
+            NET_RX_AVAIL_OFFSET,
+            NET_RX_USED_OFFSET,
+        ),
+        (
+            1_u16,
+            NET_TX_DESC_OFFSET,
+            NET_TX_AVAIL_OFFSET,
+            NET_TX_USED_OFFSET,
+        ),
+    ] {
+        write_common_u16(common, COMMON_QUEUE_SELECT, queue);
+        if validate_network_queue_size(read_common_u16(common, COMMON_QUEUE_SIZE)).is_none()
+            || read_common_u16(common, COMMON_QUEUE_ENABLE) != 0
+        {
+            return false;
+        }
+        write_common_u16(common, COMMON_QUEUE_SIZE, QUEUE_SIZE);
+        write_common_u64(common, COMMON_QUEUE_DESC, dma_physical + descriptor as u64);
+        write_common_u64(common, COMMON_QUEUE_DRIVER, dma_physical + available as u64);
+        write_common_u64(common, COMMON_QUEUE_DEVICE, dma_physical + used as u64);
+        write_common_u16(common, COMMON_QUEUE_ENABLE, 1);
+    }
+    write_common_u8(
+        common,
+        COMMON_DEVICE_STATUS,
+        STATUS_ACKNOWLEDGE | STATUS_DRIVER | STATUS_FEATURES_OK | STATUS_DRIVER_OK,
+    );
+    write_config_u16(
+        device.bus,
+        device.device,
+        device.function,
+        PCI_COMMAND,
+        COMMAND_MEMORY_SPACE | COMMAND_BUS_MASTER,
+    );
+    read_common_u8(common, COMMON_DEVICE_STATUS)
+        == STATUS_ACKNOWLEDGE | STATUS_DRIVER | STATUS_FEATURES_OK | STATUS_DRIVER_OK
+        && network_function_command(device)
+            & (COMMAND_IO_SPACE | COMMAND_MEMORY_SPACE | COMMAND_BUS_MASTER)
+            == COMMAND_MEMORY_SPACE | COMMAND_BUS_MASTER
+        && network_empty_queues_are_bound(device, common_mapping, dma_physical, true)
+}
+
 pub(crate) fn prepare_network_for_isolated_service(
     device: VirtioNetworkDevice,
     common_mapping: MmioMapping,

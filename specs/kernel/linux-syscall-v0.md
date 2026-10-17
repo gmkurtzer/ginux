@@ -498,22 +498,23 @@ retained post-reap records remain absent.
 The measured `/tmp` directory anchors one synthetic mutable regular file,
 `/tmp/ginux-ready`. The directory begins empty. Absolute `openat` with
 `O_CREAT | O_EXCL` creates the one admitted file with mode `0600`, zero length,
-a new nonzero generation, and a fixed 64-byte kernel-owned capacity.
+and a new nonzero generation.
 Descriptors retain that generation and have independent offsets. Scalar
 `read`, `write`, and `lseek` use the existing checked offset rules; writes are
-fully staged before committing any byte and overflow returns `-ENOSPC`.
+fully staged before committing any byte and backing frames are allocated on
+demand.
 `getdents64` reflects creation and removal. `unlinkat` accepts the closed file,
 scrubs all backing bytes, and makes later lookup return `-ENOENT`; an open file
 is rejected with `-EBUSY`. Final process teardown performs the same scrub if
 the file remains. The in-kernel contract also creates a replacement generation
 and rejects the retired handle. The backing RAM store allocates owned pages on
 demand and separately proves multiple named objects, cross-page I/O, hidden
-staging, atomic publish, aggregate page-quota enforcement, abort, frame
-scrubbing, and complete lease recovery; those objects are not exposed in this
-Linux view. `readv`, `writev`, file mapping, truncation,
+staging, atomic publish, growth beyond the former 32 KiB aggregate ceiling,
+abort, frame scrubbing, and complete lease recovery; those objects are not
+exposed in this Linux view. `readv`, `writev`, file mapping, truncation,
 rename, subdirectories, relative creation/unlink, additional files, and
-unlink-while-open Linux semantics remain outside this profile. This is a
-bounded volatile filesystem contract, not general tmpfs.
+unlink-while-open Linux semantics remain outside this legacy synthetic-file
+profile. General runtime writes use the demand-allocated per-domain overlay.
 
 `rax = 59` (`__NR_execve`) provides bounded replacement transitions for the
 single-threaded proof process. Absolute and current-directory-relative
@@ -620,9 +621,10 @@ and executes it through the descriptor while retaining canonical
 `AT_SYMLINK_NOFOLLOW` behavior remains unsupported.
 
 `rax = 97` (`__NR_getrlimit`) and `rax = 302` (`__NR_prlimit64`) expose immutable
-limits for `RLIMIT_STACK` and `RLIMIT_NOFILE`. The stack soft and hard limits
-are one page, matching the bounded mapped stack; the descriptor limits are 4,
-matching the highest descriptor number the profile can accept plus one.
+limits for `RLIMIT_STACK` and `RLIMIT_NOFILE`. The probe retains its one-page
+stack and bounded descriptor profile. Runtime domains report an unlimited
+stack because their initially mapped page grows downward on demand, and report
+the runtime descriptor-table limit.
 `prlimit64` accepts PID 0 or 1 and an optional old-limit destination. Other
 PIDs return `-ESRCH`, unsupported resources return `-EINVAL`, and any non-null
 new-limit pointer returns `-EPERM`. Output is copied only after the full

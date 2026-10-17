@@ -436,6 +436,7 @@ dependencies = [
  "ginux-volume-format",
  "ginux-volume-service",
  "miniz_oxide",
+ "smoltcp",
 ]
 
 [[package]]

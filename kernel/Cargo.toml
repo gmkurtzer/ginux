@@ -20,3 +20,4 @@ ginux-native-abi = { path = "../crates/native-abi" }
 ginux-volume-format = { path = "../crates/volume-format" }
 ginux-volume-service = { path = "../crates/volume-service" }
 miniz_oxide = { version = "=0.9.1", default-features = false }
+smoltcp = { version = "=0.14.0", default-features = false, features = ["medium-ethernet", "proto-ipv4", "socket-udp", "socket-tcp"] }
