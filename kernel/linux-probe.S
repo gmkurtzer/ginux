@@ -4652,7 +4652,7 @@ linux_child_joined:
     mov edi, 0x4061f0
     mov esi, 24
     mov eax, 273
-    call syscall_expect_efault
+    call syscall_expect_zero
 
     mov edi, 0x4051b0
     mov esi, 24

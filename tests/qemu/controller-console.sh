@@ -118,7 +118,7 @@ for expected in \
     'Test a userspace compatibility environment' \
     'Linux userspace runtime conformance summary:' \
     'Interfaces: 17 passed, 6 failed, 23 total' \
-    'Syscalls: 47 passed, 280 unverified, 48 policy-denied, 0 unsupported, 375 total' \
+    'Syscalls: 48 passed, 279 unverified, 48 policy-denied, 0 unsupported, 375 total' \
     "Run 'test linux all' for every result." \
     'Linux userspace interface runtime tests (bounded profile):' \
     'PASS syscall-entry' \
@@ -168,12 +168,13 @@ for expected in \
     'PASS 203 sched_setaffinity' \
     'PASS 204 sched_getaffinity' \
     'PASS 218 set_tid_address' \
+    'PASS 274 get_robust_list' \
     'PASS 306 syncfs' \
     'PASS 309 getcpu' \
     'UNVERIFIED 43 accept' \
     'POLICY-DENIED 105 setuid' \
     'UNVERIFIED 462 mseal' \
-    'Summary: 47 passed, 280 unverified, 48 policy-denied, 0 unsupported, 375 total' \
+    'Summary: 48 passed, 279 unverified, 48 policy-denied, 0 unsupported, 375 total' \
     'PASS requires a runtime conformance probe; dispatch alone remains UNVERIFIED.' \
     'FAIL unknown Linux syscall' \
     'network list' \

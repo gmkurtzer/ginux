@@ -5479,6 +5479,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
                 || current_linux_tid() != Some(1)
                 || current_linux_clear_child_tid() != Some(0x1110)
                 || current_linux_robust_list() != Some(0x1120)
+                || linux_thread_robust_list(2) != Ok(0x2220)
                 || LINUX_THREAD_CLEAR_CHILD_TIDS[usize::from(sibling_thread.slot)]
                     .load(Ordering::SeqCst)
                     != 0x2210
@@ -8369,24 +8370,12 @@ extern "sysv64" fn linux_syscall_handler(
             if buffer != LINUX_ROBUST_LIST_HEAD_SIZE as u64 {
                 return LINUX_EINVAL;
             }
-            if !linux_writable_user_range_contains(first_argument, LINUX_ROBUST_LIST_HEAD_SIZE) {
-                return LINUX_EFAULT;
-            }
             if !set_current_linux_robust_list(first_argument) {
                 return LINUX_ESRCH;
             }
             0
         }
-        LINUX_GET_ROBUST_LIST_SYSCALL => {
-            let current_tid = current_linux_tid().map_or(0, u64::from);
-            if first_argument != 0 && first_argument != current_tid {
-                return LINUX_ESRCH;
-            }
-            if !copy_linux_robust_list(buffer, count) {
-                return LINUX_EFAULT;
-            }
-            0
-        }
+        LINUX_GET_ROBUST_LIST_SYSCALL => linux_get_robust_list(first_argument, buffer, count),
         LINUX_GETUID_SYSCALL => {
             current_linux_credentials().map_or(LINUX_ESRCH, |value| u64::from(value.uid))
         }
@@ -12698,6 +12687,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let scheduler_affinity = verify_linux_scheduler_affinity();
     let realtime_queries = verify_linux_realtime_queries();
     let filesystem_sync = linux_syncfs(1) == 0 && linux_syncfs(99) == LINUX_EBADF;
+    let robust_list = verify_linux_robust_list_syscalls();
     let mappings_released =
         address_space::release_current_linux_runtime_mappings(LINUX_RUNTIME_DYNAMIC_MMAP_BASE);
     ELF_PROBE_MMAP_NEXT.store(LINUX_RUNTIME_DYNAMIC_MMAP_BASE, Ordering::SeqCst);
@@ -12728,6 +12718,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && scheduler_affinity
         && realtime_queries
         && filesystem_sync
+        && robust_list
         && mappings_released
 }
 
@@ -12880,6 +12871,50 @@ fn verify_linux_realtime_queries() -> bool {
         && timezone == sentinel[..8];
     let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
     ordered_faults && unmapped
+}
+
+fn verify_linux_robust_list_syscalls() -> bool {
+    let mapping = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    if !(LINUX_RUNTIME_DYNAMIC_MMAP_BASE..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
+        .contains(&mapping)
+    {
+        return false;
+    }
+    let saved = current_linux_robust_list().unwrap_or(0);
+    let sentinel = u64::MAX.to_ne_bytes();
+    let registered = set_current_linux_robust_list(1)
+        && copy_to_linux_user(mapping, &sentinel)
+        && copy_to_linux_user(mapping + 8, &sentinel);
+    let mut head = [0_u8; 8];
+    let mut size = [0_u8; 8];
+    let current = registered
+        && linux_get_robust_list(0, mapping, mapping + 8) == 0
+        && copy_from_linux_user(mapping, &mut head)
+        && u64::from_ne_bytes(head) == 1
+        && copy_from_linux_user(mapping + 8, &mut size)
+        && u64::from_ne_bytes(size) == LINUX_ROBUST_LIST_HEAD_SIZE as u64
+        && linux_get_robust_list(1_u64 << 32, mapping, mapping + 8) == 0;
+    let ordered_faults = current
+        && copy_to_linux_user(mapping, &sentinel)
+        && linux_get_robust_list(0, mapping, 1) == LINUX_EFAULT
+        && copy_from_linux_user(mapping, &mut head)
+        && head == sentinel
+        && copy_to_linux_user(mapping + 8, &sentinel)
+        && linux_get_robust_list(0, 1, mapping + 8) == LINUX_EFAULT
+        && copy_from_linux_user(mapping + 8, &mut size)
+        && u64::from_ne_bytes(size) == LINUX_ROBUST_LIST_HEAD_SIZE as u64
+        && linux_get_robust_list(2, mapping, mapping + 8) == LINUX_ESRCH
+        && linux_get_robust_list(u64::MAX, mapping, mapping + 8) == LINUX_ESRCH;
+    let restored = set_current_linux_robust_list(saved);
+    let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
+    ordered_faults && restored && unmapped
 }
 
 fn verify_linux_io_uring_syscalls() -> bool {
@@ -15900,16 +15935,34 @@ fn linux_clock_getres(clock: u64, output_address: u64) -> u64 {
     0
 }
 
-fn copy_linux_robust_list(head_address: u64, size_address: u64) -> bool {
-    let word_size = size_of::<u64>();
-    if !linux_writable_user_range_contains(head_address, word_size)
-        || !linux_writable_user_range_contains(size_address, word_size)
-    {
-        return false;
+fn linux_thread_robust_list(tid: u64) -> Result<u64, u64> {
+    let tid = tid as i32;
+    let handle = if tid == 0 {
+        current_linux_thread_handle()
+    } else if tid > 0 {
+        linux_thread_handle_by_tid(tid as u64)
+    } else {
+        None
     }
-    let head = current_linux_robust_list().unwrap_or(0).to_ne_bytes();
-    let size = (LINUX_ROBUST_LIST_HEAD_SIZE as u64).to_ne_bytes();
-    copy_to_linux_user(head_address, &head) && copy_to_linux_user(size_address, &size)
+    .ok_or(LINUX_ESRCH)?;
+    (linux_thread_handle(usize::from(handle.slot)) == Some(handle))
+        .then(|| LINUX_THREAD_ROBUST_LISTS[usize::from(handle.slot)].load(Ordering::SeqCst))
+        .ok_or(LINUX_ESRCH)
+}
+
+fn linux_get_robust_list(tid: u64, head_address: u64, size_address: u64) -> u64 {
+    let head = match linux_thread_robust_list(tid) {
+        Ok(head) => head,
+        Err(error) => return error,
+    };
+    if !copy_to_linux_user(
+        size_address,
+        &(LINUX_ROBUST_LIST_HEAD_SIZE as u64).to_ne_bytes(),
+    ) || !copy_to_linux_user(head_address, &head.to_ne_bytes())
+    {
+        return LINUX_EFAULT;
+    }
+    0
 }
 
 fn linux_readlink_at(

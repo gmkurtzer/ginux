@@ -42,7 +42,7 @@ Detailed bounded behavior for implemented calls lives in
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **47 Complete**, **280 Partial**, **48 Policy-denied**, **0 Missing**.
+Current totals: **48 Complete**, **279 Partial**, **48 Policy-denied**, **0 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -401,7 +401,7 @@ therefore omitted.
 | 271 | ppoll | Partial |
 | 272 | unshare | Policy-denied |
 | 273 | set_robust_list | Partial |
-| 274 | get_robust_list | Partial |
+| 274 | get_robust_list | Complete |
 | 275 | splice | Partial |
 | 276 | tee | Partial |
 | 277 | sync_file_range | Partial |

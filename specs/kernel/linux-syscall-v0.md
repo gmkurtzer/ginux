@@ -1533,14 +1533,16 @@ from the thread's slot. As on Linux, exit ignores a fault while clearing an
 invalid registered pointer. The bounded
 clone child uses the same per-slot state; its exit also wakes the one parent
 blocked on that exact address. `rax = 273`
-(`__NR_set_robust_list`) registers one writable 24-byte
-robust-list head in the current generation-tagged thread slot. Other lengths return `-EINVAL`, and a head
-crossing the declared writable extent returns `-EFAULT`. `rax = 274`
-(`__NR_get_robust_list`) reports the retained head and length for PID 0 or the
-current table entry's TID;
-foreign PIDs return `-ESRCH`. Both eight-byte output ranges are validated before
-either is changed. Exit discards the registration, but no robust futex traversal
-or recovery is attempted. Internal TID lifecycle testing assigns distinct
+(`__NR_set_robust_list`) registers an arbitrary 24-byte robust-list head pointer
+in the current generation-tagged thread slot without dereferencing it, matching
+Linux; other lengths return `-EINVAL`. `rax = 274`
+(`__NR_get_robust_list`) reports the retained head and length for PID 0 or any
+live thread visible in the domain; unknown and negative TIDs return `-ESRCH`.
+Linux's ordered output behavior is preserved: the eight-byte size is written
+before the head pointer, and remains written when a bad head destination then
+returns `-EFAULT`. A bad size destination leaves the head untouched. Exit
+discards the registration, but robust futex traversal and owner-death recovery
+remain pending, so `set_robust_list` remains Partial. Internal TID lifecycle testing assigns distinct
 clear-child-TID and robust-list sentinels to two slots, proves they follow the
 current-thread selection, and proves retirement clears them before slot reuse.
 
