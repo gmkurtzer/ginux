@@ -11,6 +11,14 @@ length. The kernel accepts 1 through 256 bytes, validates the descriptor and
 complete readable VMA range, enables supervisor access only around the bounded
 copy-in, emits the exact bytes to the pinned console, and returns the requested
 length. A zero-length request or one above the limit returns `-EINVAL`. Next,
+The Linux v6.12 x86-64 table deliberately maps `uselib`, `_sysctl`,
+`create_module`, `get_kernel_syms`, `query_module`, `nfsservctl`, `getpmsg`,
+`putpmsg`, `afs_syscall`, `tuxcall`, `security`, `set_thread_area`,
+`get_thread_area`, `lookup_dcookie`, `epoll_ctl_old`, `epoll_wait_old`, and
+`vserver` to the not-implemented entry. Ginux dispatches each of those numbers
+explicitly to `-ENOSYS`, independently of its unknown-syscall fallback. The
+measured ELF probe calls every entry and requires `-ENOSYS`; Linux's
+not-implemented entry does not inspect the argument registers.
 `rax = 0` (`__NR_read`) exposes descriptor 0 as a currently disconnected
 console-input stream. It returns zero for EOF without reading or validating the
 caller buffer; output, closed, and unknown descriptors return `-EBADF`. This is

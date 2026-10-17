@@ -236,6 +236,22 @@ valid_interpreter_base:
     cmp qword ptr [rsp + 320], 0
     require_equal
 
+#if !defined(GINUX_LINKED) || !defined(GINUX_GRAPH)
+    push r12
+    lea r12, [rip + linux_ni_syscalls]
+.Llinux_ni_probe:
+    movzx eax, word ptr [r12]
+    test eax, eax
+    jz .Llinux_ni_probe_done
+    syscall
+    cmp rax, -38
+    jne failure
+    add r12, 2
+    jmp .Llinux_ni_probe
+.Llinux_ni_probe_done:
+    pop r12
+#endif
+
     push 1
     pop rdi
     lea rsi, [rip + readable_payload]
@@ -6093,6 +6109,13 @@ copy_range_path:
     .asciz "GINUX=1"
 .Ldynamic_exec_environment_second:
     .asciz "GINUX_MODE=exec"
+#endif
+
+#if !defined(GINUX_LINKED) || !defined(GINUX_GRAPH)
+.balign 4
+linux_ni_syscalls:
+    .short 134, 156, 174, 177, 178, 180, 181, 182, 183
+    .short 184, 185, 205, 211, 212, 214, 215, 236, 0
 #endif
 
 .section .data

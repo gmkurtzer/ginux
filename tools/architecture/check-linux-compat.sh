@@ -54,17 +54,19 @@ $0 ~ /^const LINUX_[A-Z0-9_]+_SYSCALL: u64 = [0-9]+;$/ {
     }
 }
 END {
-    if (declared_count != 3 \
-        || declared[1] != count_by_status["Partial"] \
-        || declared[2] != count_by_status["Policy-denied"] \
-        || declared[3] != count_by_status["Missing"]) {
+    if (declared_count != 4 \
+        || declared[1] != count_by_status["Complete"] \
+        || declared[2] != count_by_status["Partial"] \
+        || declared[3] != count_by_status["Policy-denied"] \
+        || declared[4] != count_by_status["Missing"]) {
         fail("declared syscall totals do not match the matrix")
     }
     if (failed) {
         exit 1
     }
-    print "Linux compatibility matrix check passed (" count_by_status["Partial"] \
-        " partial, " count_by_status["Policy-denied"] " policy-denied, " \
+    print "Linux compatibility matrix check passed (" count_by_status["Complete"] \
+        " complete, " count_by_status["Partial"] " partial, " \
+        count_by_status["Policy-denied"] " policy-denied, " \
         count_by_status["Missing"] " missing)"
 }
 ' "$matrix" "$dispatcher"

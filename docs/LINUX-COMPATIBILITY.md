@@ -42,7 +42,7 @@ implemented calls lives in [Linux Syscall Entry v0](../specs/kernel/linux-syscal
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **211 Partial**, **28 Policy-denied**, **136 Missing**.
+Current totals: **17 Complete**, **211 Partial**, **28 Policy-denied**, **119 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -57,14 +57,14 @@ Current totals: **211 Partial**, **28 Policy-denied**, **136 Missing**.
 | Signals | Partial | Selected standard signal, mask, alternate-stack, delivery, and return behavior; no complete restart/nesting semantics. |
 | VFS and path lookup | Partial | Immutable OCI lower root with a demand-allocated, per-domain RAM overlay, directories, symlinks, cwd, tmpfs, devfs, procfs subsets, and frame-chained extended attributes. Overlay file and xattr data grow by allocating frames rather than stopping at a fixed aggregate cache ceiling; open-unlinked objects live through their descriptors, directory renames include descendants, and permission/ownership operations cover the package-manager path. This is not yet a complete Linux VFS. |
 | `/proc` | Partial | Automatically mounted per domain with domain-local PID directories, `status`, `stat`, `statm`, `mountinfo`, namespace maps, `cpuinfo`, `meminfo`, `stat`, `uptime`, `loadavg`, `filesystems`, and `cmdline`. Broader Linux procfs coverage and unconstrained process enumeration remain incomplete. |
-| IPv4 sockets | Partial | Domain descriptors expose repeated client TCP and UDP connections over the shared host NIC with IOMMU-confined virtio queues; AF_UNIX stream socket pairs cover local runtime coordination. Server sockets, ancillary data, IPv6, and complete option/error semantics remain pending. |
+| IPv4 sockets | Partial | Domain descriptors expose repeated client TCP and UDP connections plus TCP bind/listen/accept over the shared host NIC with IOMMU-confined virtio queues; AF_UNIX stream socket pairs cover local runtime coordination. Ancillary data, IPv6, multi-entry listen backlogs, and complete option/error semantics remain pending. |
 | OCI overlay root | Partial | Verified layers are assembled in manifest order with replacements and OCI whiteouts. Broader overlay conformance remains under test. |
 | Runtime `mmap` | Partial | Page-table-backed anonymous and OCI file mappings, fixed placement, in-place growth/shrink and movable anonymous `mremap`, protection changes, unmap, `madvise`, and `mincore` support Alpine and the validated Rocky glibc/coreutils path. Process snapshot metadata is still bounded and COW, shared mappings, `MREMAP_DONTUNMAP`, movable file mappings, and full Linux semantics remain incomplete. |
 | `/dev` and terminal ABI | Partial | Selected console/device nodes and bounded termios/winsize ioctls. |
 | `/sys` | Missing | No Linux-compatible sysfs contract. |
 | Credentials and user namespaces | Partial | Container-scoped identity and hard privilege boundary; many mutation calls are policy-denied. |
 | Mount and namespace APIs | Policy-denied | Container roots are kernel-created; general mount, chroot, pivot, unshare, and setns are unavailable. |
-| Socket API | Partial | Linux client TCP/UDP sockets use the kernel network stack and survive the connection churn of OCI and DNF downloads; local `socketpair` is supported. Server sockets, IPv6, ancillary data, and the full option surface remain pending. |
+| Socket API | Partial | Linux TCP/UDP sockets use the kernel network stack and survive the connection churn of OCI and DNF downloads; TCP server sockets and local `socketpair` are supported. IPv6, ancillary data, interruptible socket waits, and the full option surface remain pending. |
 | cgroups | Missing | No Linux cgroup filesystem or ABI. |
 | seccomp, audit, LSM ABI | Missing | No Linux-compatible userspace interfaces. |
 | vDSO/vvar | Missing | Time calls currently cross the syscall boundary. |
@@ -213,7 +213,7 @@ therefore omitted.
 | 131 | sigaltstack | Partial |
 | 132 | utime | Partial |
 | 133 | mknod | Missing |
-| 134 | uselib | Missing |
+| 134 | uselib | Complete |
 | 135 | personality | Partial |
 | 136 | ustat | Missing |
 | 137 | statfs | Partial |
@@ -235,7 +235,7 @@ therefore omitted.
 | 153 | vhangup | Missing |
 | 154 | modify_ldt | Missing |
 | 155 | pivot_root | Policy-denied |
-| 156 | _sysctl | Missing |
+| 156 | _sysctl | Complete |
 | 157 | prctl | Partial |
 | 158 | arch_prctl | Partial |
 | 159 | adjtimex | Missing |
@@ -253,18 +253,18 @@ therefore omitted.
 | 171 | setdomainname | Policy-denied |
 | 172 | iopl | Policy-denied |
 | 173 | ioperm | Policy-denied |
-| 174 | create_module | Missing |
+| 174 | create_module | Complete |
 | 175 | init_module | Policy-denied |
 | 176 | delete_module | Policy-denied |
-| 177 | get_kernel_syms | Missing |
-| 178 | query_module | Missing |
+| 177 | get_kernel_syms | Complete |
+| 178 | query_module | Complete |
 | 179 | quotactl | Missing |
-| 180 | nfsservctl | Missing |
-| 181 | getpmsg | Missing |
-| 182 | putpmsg | Missing |
-| 183 | afs_syscall | Missing |
-| 184 | tuxcall | Missing |
-| 185 | security | Missing |
+| 180 | nfsservctl | Complete |
+| 181 | getpmsg | Complete |
+| 182 | putpmsg | Complete |
+| 183 | afs_syscall | Complete |
+| 184 | tuxcall | Complete |
+| 185 | security | Complete |
 | 186 | gettid | Partial |
 | 187 | readahead | Partial |
 | 188 | setxattr | Partial |
@@ -284,17 +284,17 @@ therefore omitted.
 | 202 | futex | Partial |
 | 203 | sched_setaffinity | Partial |
 | 204 | sched_getaffinity | Partial |
-| 205 | set_thread_area | Missing |
+| 205 | set_thread_area | Complete |
 | 206 | io_setup | Missing |
 | 207 | io_destroy | Missing |
 | 208 | io_getevents | Missing |
 | 209 | io_submit | Missing |
 | 210 | io_cancel | Missing |
-| 211 | get_thread_area | Missing |
-| 212 | lookup_dcookie | Missing |
+| 211 | get_thread_area | Complete |
+| 212 | lookup_dcookie | Complete |
 | 213 | epoll_create | Partial |
-| 214 | epoll_ctl_old | Missing |
-| 215 | epoll_wait_old | Missing |
+| 214 | epoll_ctl_old | Complete |
+| 215 | epoll_wait_old | Complete |
 | 216 | remap_file_pages | Missing |
 | 217 | getdents64 | Partial |
 | 218 | set_tid_address | Partial |
@@ -315,7 +315,7 @@ therefore omitted.
 | 233 | epoll_ctl | Partial |
 | 234 | tgkill | Partial |
 | 235 | utimes | Partial |
-| 236 | vserver | Missing |
+| 236 | vserver | Complete |
 | 237 | mbind | Missing |
 | 238 | set_mempolicy | Missing |
 | 239 | get_mempolicy | Missing |
