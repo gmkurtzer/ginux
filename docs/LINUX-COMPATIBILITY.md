@@ -42,7 +42,7 @@ Detailed bounded behavior for implemented calls lives in
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **45 Complete**, **282 Partial**, **48 Policy-denied**, **0 Missing**.
+Current totals: **46 Complete**, **281 Partial**, **48 Policy-denied**, **0 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -289,7 +289,7 @@ therefore omitted.
 | 159 | adjtimex | Policy-denied |
 | 160 | setrlimit | Partial |
 | 161 | chroot | Policy-denied |
-| 162 | sync | Partial |
+| 162 | sync | Complete |
 | 163 | acct | Policy-denied |
 | 164 | settimeofday | Policy-denied |
 | 165 | mount | Policy-denied |

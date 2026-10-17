@@ -779,7 +779,9 @@ Because Ginux has no swap or page reclaim path, `mlock`, `mlock2`, `munlock`,
 `mlockall`, and `munlockall` validate their admitted arguments and mapped
 ranges but require no additional residency state. `setrlimit` accepts an
 idempotent write of the current bounded stack or descriptor limit; changing a
-limit remains denied. `sync`, `syncfs`, and `readahead` are successful for
+limit remains denied. `sync` has a direct userspace conformance probe and
+succeeds after synchronizing every filesystem in the current RAM-backed and
+immutable-storage profile. `syncfs` and `readahead` are successful for
 valid memory-backed filesystem objects because their data is already resident
 and there is no durable backing store in this milestone. Legacy
 `epoll_create` delegates to `epoll_create1(0)`. The current process, group, or

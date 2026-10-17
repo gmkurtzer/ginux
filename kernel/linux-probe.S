@@ -5165,6 +5165,9 @@ resolution_valid:
     mov eax, 218
     call syscall_expect_one
 
+    mov eax, 162
+    call syscall_expect_zero
+
     mov dword ptr [0x405190], 0x12345678
     mov edi, 0x405190
     mov eax, 218

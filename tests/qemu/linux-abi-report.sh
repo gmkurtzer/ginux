@@ -73,7 +73,7 @@ qemu_pid=""
 for expected in \
     'Linux userspace runtime conformance summary:' \
     'Interfaces: 17 passed, 6 failed, 23 total' \
-    'Syscalls: 45 passed, 282 unverified, 48 policy-denied, 0 unsupported, 375 total' \
+    'Syscalls: 46 passed, 281 unverified, 48 policy-denied, 0 unsupported, 375 total' \
     'Linux userspace interface runtime tests (bounded profile):' \
     'PASS syscall-entry' \
     'PASS socket-api' \
@@ -97,6 +97,7 @@ for expected in \
     'PASS 145 sched_getscheduler' \
     'PASS 146 sched_get_priority_max' \
     'PASS 147 sched_get_priority_min' \
+    'PASS 162 sync' \
     'PASS 201 time' \
     'PASS 203 sched_setaffinity' \
     'PASS 204 sched_getaffinity' \
@@ -127,7 +128,7 @@ for expected in \
     'POLICY-DENIED 164 settimeofday' \
     'POLICY-DENIED 305 clock_adjtime' \
     'UNVERIFIED 462 mseal' \
-    'Summary: 45 passed, 282 unverified, 48 policy-denied, 0 unsupported, 375 total' \
+    'Summary: 46 passed, 281 unverified, 48 policy-denied, 0 unsupported, 375 total' \
     'FAIL unknown Linux syscall' \
     '1      0      R      controller' \
     'Shutting down Ginux.'; do
