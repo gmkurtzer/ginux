@@ -27735,10 +27735,10 @@ fn linux_set_scheduler(pid: u64, policy: u64, parameter_address: u64) -> u64 {
 fn linux_sched_setattr(pid: u64, attribute_address: u64, flags: u64) -> u64 {
     const SCHED_ATTR_MIN_SIZE: usize = 48;
     const SCHED_ATTR_SIZE: usize = 56;
-    if !matches!(pid, 0 | 1) {
-        return LINUX_ESRCH;
+    if let Err(error) = linux_scheduler_process(pid) {
+        return error;
     }
-    if flags != 0 {
+    if flags as u32 != 0 {
         return LINUX_EINVAL;
     }
     let mut header = [0_u8; 4];
@@ -27779,6 +27779,9 @@ fn linux_sched_setattr(pid: u64, attribute_address: u64, flags: u64) -> u64 {
     let runtime = u64::from_ne_bytes(attribute[24..32].try_into().unwrap());
     let deadline = u64::from_ne_bytes(attribute[32..40].try_into().unwrap());
     let period = u64::from_ne_bytes(attribute[40..48].try_into().unwrap());
+    if !matches!(policy, 0 | 1 | 2 | 3 | 5 | 6) {
+        return LINUX_EINVAL;
+    }
     if policy != 0 || scheduler_flags != 0 {
         return LINUX_EPERM;
     }
@@ -27790,10 +27793,11 @@ fn linux_sched_setattr(pid: u64, attribute_address: u64, flags: u64) -> u64 {
 
 fn linux_sched_getattr(pid: u64, attribute_address: u64, size: u64, flags: u64) -> u64 {
     const SCHED_ATTR_SIZE: usize = 56;
-    if !matches!(pid, 0 | 1) {
-        return LINUX_ESRCH;
+    if let Err(error) = linux_scheduler_process(pid) {
+        return error;
     }
-    if flags != 0 || size < SCHED_ATTR_SIZE as u64 {
+    let size = u64::from(size as u32);
+    if flags as u32 != 0 || size < SCHED_ATTR_SIZE as u64 {
         return LINUX_EINVAL;
     }
     if size > PAGE_SIZE as u64 {

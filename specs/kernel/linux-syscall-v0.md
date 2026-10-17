@@ -790,6 +790,12 @@ privileged policies return `-EPERM`, retired processes return `-ESRCH`, and the
 parameter is copied only after process and policy validation. Runtime probes
 cover success, invalid priority and policy, bad pointers, negative PIDs, and
 retired PIDs.
+`sched_setattr` and `sched_getattr` expose the same default-policy contract
+through Linux's extensible 56-byte attribute. Size and flag arguments use their
+Linux 32-bit widths; getters zero supported extensions and setters accept only
+zero-filled extensions. The conformance probe covers current and retired
+processes, negative PIDs, short structures, bad pointers, unknown and
+privileged policies, nonzero nice values, and invalid flags.
 Because Ginux has no swap or page reclaim path, every current and future
 userspace mapping is resident. `mlock`, `mlock2`, `munlock`, `mlockall`, and
 `munlockall` therefore implement the complete Linux-visible contract without

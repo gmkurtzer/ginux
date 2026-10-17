@@ -1416,6 +1416,46 @@ ginux_linux_system_init:
     jne .Lfailure
     cmp dword ptr [rip + .Lsched_attr + 52], 1024
     jne .Lfailure
+    mov edi, 2
+    lea rsi, [rip + .Lsched_attr]
+    mov edx, 56
+    xor r10d, r10d
+    mov eax, 315
+    syscall
+    cmp rax, -3
+    jne .Lfailure
+    mov rdi, -1
+    lea rsi, [rip + .Lsched_attr]
+    mov edx, 56
+    xor r10d, r10d
+    mov eax, 315
+    syscall
+    cmp rax, -22
+    jne .Lfailure
+    xor edi, edi
+    lea rsi, [rip + .Lsched_attr]
+    mov edx, 55
+    xor r10d, r10d
+    mov eax, 315
+    syscall
+    cmp rax, -22
+    jne .Lfailure
+    xor edi, edi
+    lea rsi, [rip + .Lsched_attr]
+    mov edx, 56
+    mov r10d, 1
+    mov eax, 315
+    syscall
+    cmp rax, -22
+    jne .Lfailure
+    xor edi, edi
+    mov esi, 1
+    mov edx, 56
+    xor r10d, r10d
+    mov eax, 315
+    syscall
+    cmp rax, -14
+    jne .Lfailure
     xor edi, edi
     lea rsi, [rip + .Lsched_attr]
     xor edx, edx
@@ -1423,6 +1463,69 @@ ginux_linux_system_init:
     syscall
     test rax, rax
     jne .Lfailure
+    mov edi, 2
+    lea rsi, [rip + .Lsched_attr]
+    xor edx, edx
+    mov eax, 314
+    syscall
+    cmp rax, -3
+    jne .Lfailure
+    mov rdi, -1
+    lea rsi, [rip + .Lsched_attr]
+    xor edx, edx
+    mov eax, 314
+    syscall
+    cmp rax, -22
+    jne .Lfailure
+    xor edi, edi
+    lea rsi, [rip + .Lsched_attr]
+    mov edx, 1
+    mov eax, 314
+    syscall
+    cmp rax, -22
+    jne .Lfailure
+    xor edi, edi
+    mov esi, 1
+    xor edx, edx
+    mov eax, 314
+    syscall
+    cmp rax, -14
+    jne .Lfailure
+    mov dword ptr [rip + .Lsched_attr], 47
+    xor edi, edi
+    lea rsi, [rip + .Lsched_attr]
+    xor edx, edx
+    mov eax, 314
+    syscall
+    cmp rax, -7
+    jne .Lfailure
+    mov dword ptr [rip + .Lsched_attr], 56
+    mov dword ptr [rip + .Lsched_attr + 4], 4
+    xor edi, edi
+    lea rsi, [rip + .Lsched_attr]
+    xor edx, edx
+    mov eax, 314
+    syscall
+    cmp rax, -22
+    jne .Lfailure
+    mov dword ptr [rip + .Lsched_attr + 4], 1
+    xor edi, edi
+    lea rsi, [rip + .Lsched_attr]
+    xor edx, edx
+    mov eax, 314
+    syscall
+    cmp rax, -1
+    jne .Lfailure
+    mov dword ptr [rip + .Lsched_attr + 4], 0
+    mov dword ptr [rip + .Lsched_attr + 16], 1
+    xor edi, edi
+    lea rsi, [rip + .Lsched_attr]
+    xor edx, edx
+    mov eax, 314
+    syscall
+    cmp rax, -22
+    jne .Lfailure
+    mov dword ptr [rip + .Lsched_attr + 16], 0
 
     mov dword ptr [rip + .Ltimer_event + 12], 1
     mov edi, 1
