@@ -42,7 +42,7 @@ implemented calls lives in [Linux Syscall Entry v0](../specs/kernel/linux-syscal
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **17 Complete**, **219 Partial**, **37 Policy-denied**, **102 Missing**.
+Current totals: **17 Complete**, **221 Partial**, **37 Policy-denied**, **100 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -393,8 +393,8 @@ therefore omitted.
 | 311 | process_vm_writev | Missing |
 | 312 | kcmp | Missing |
 | 313 | finit_module | Policy-denied |
-| 314 | sched_setattr | Missing |
-| 315 | sched_getattr | Missing |
+| 314 | sched_setattr | Partial |
+| 315 | sched_getattr | Partial |
 | 316 | renameat2 | Partial |
 | 317 | seccomp | Missing |
 | 318 | getrandom | Partial |

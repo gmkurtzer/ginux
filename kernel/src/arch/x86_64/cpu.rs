@@ -357,6 +357,8 @@ const LINUX_MEMFD_CREATE_SYSCALL: u64 = 319;
 const LINUX_GETRANDOM_SYSCALL: u64 = 318;
 const LINUX_STATX_SYSCALL: u64 = 332;
 const LINUX_RENAMEAT2_SYSCALL: u64 = 316;
+const LINUX_SCHED_SETATTR_SYSCALL: u64 = 314;
+const LINUX_SCHED_GETATTR_SYSCALL: u64 = 315;
 const LINUX_CLOSE_RANGE_SYSCALL: u64 = 436;
 const LINUX_FACCESSAT2_SYSCALL: u64 = 439;
 const LINUX_EPOLL_PWAIT2_SYSCALL: u64 = 441;
@@ -8136,6 +8138,10 @@ extern "sysv64" fn linux_syscall_handler(
             }
         }
         LINUX_SCHED_RR_GET_INTERVAL_SYSCALL => linux_sched_rr_get_interval(first_argument, buffer),
+        LINUX_SCHED_SETATTR_SYSCALL => linux_sched_setattr(first_argument, buffer, count),
+        LINUX_SCHED_GETATTR_SYSCALL => {
+            linux_sched_getattr(first_argument, buffer, count, register(0))
+        }
         LINUX_MLOCK_SYSCALL | LINUX_MUNLOCK_SYSCALL => linux_memory_lock(first_argument, buffer, 0),
         LINUX_MLOCK2_SYSCALL => linux_memory_lock(first_argument, buffer, count),
         LINUX_MLOCKALL_SYSCALL => {
@@ -21491,6 +21497,94 @@ fn linux_set_scheduler(pid: u64, policy: u64, parameter_address: u64) -> u64 {
     } else {
         LINUX_EINVAL
     }
+}
+
+fn linux_sched_setattr(pid: u64, attribute_address: u64, flags: u64) -> u64 {
+    const SCHED_ATTR_MIN_SIZE: usize = 48;
+    const SCHED_ATTR_SIZE: usize = 56;
+    if !matches!(pid, 0 | 1) {
+        return LINUX_ESRCH;
+    }
+    if flags != 0 {
+        return LINUX_EINVAL;
+    }
+    let mut header = [0_u8; 4];
+    if !copy_from_linux_user(attribute_address, &mut header) {
+        return LINUX_EFAULT;
+    }
+    let size = u32::from_ne_bytes(header) as usize;
+    if size < SCHED_ATTR_MIN_SIZE {
+        return LINUX_E2BIG;
+    }
+    if size > PAGE_SIZE {
+        return LINUX_E2BIG;
+    }
+    let mut attribute = [0_u8; SCHED_ATTR_SIZE];
+    let copied = size.min(attribute.len());
+    if !copy_from_linux_user(attribute_address, &mut attribute[..copied]) {
+        return LINUX_EFAULT;
+    }
+    let mut extension_offset = attribute.len();
+    let mut extension = [0_u8; 64];
+    while extension_offset < size {
+        let length = (size - extension_offset).min(extension.len());
+        let Some(address) = attribute_address.checked_add(extension_offset as u64) else {
+            return LINUX_EFAULT;
+        };
+        if !copy_from_linux_user(address, &mut extension[..length]) {
+            return LINUX_EFAULT;
+        }
+        if extension[..length].iter().any(|byte| *byte != 0) {
+            return LINUX_E2BIG;
+        }
+        extension_offset += length;
+    }
+    let policy = u32::from_ne_bytes(attribute[4..8].try_into().unwrap());
+    let scheduler_flags = u64::from_ne_bytes(attribute[8..16].try_into().unwrap());
+    let nice = i32::from_ne_bytes(attribute[16..20].try_into().unwrap());
+    let priority = u32::from_ne_bytes(attribute[20..24].try_into().unwrap());
+    let runtime = u64::from_ne_bytes(attribute[24..32].try_into().unwrap());
+    let deadline = u64::from_ne_bytes(attribute[32..40].try_into().unwrap());
+    let period = u64::from_ne_bytes(attribute[40..48].try_into().unwrap());
+    if policy != 0 || scheduler_flags != 0 {
+        return LINUX_EPERM;
+    }
+    if nice != 0 || priority != 0 || runtime != 0 || deadline != 0 || period != 0 {
+        return LINUX_EINVAL;
+    }
+    0
+}
+
+fn linux_sched_getattr(pid: u64, attribute_address: u64, size: u64, flags: u64) -> u64 {
+    const SCHED_ATTR_SIZE: usize = 56;
+    if !matches!(pid, 0 | 1) {
+        return LINUX_ESRCH;
+    }
+    if flags != 0 || size < SCHED_ATTR_SIZE as u64 {
+        return LINUX_EINVAL;
+    }
+    if size > PAGE_SIZE as u64 {
+        return LINUX_E2BIG;
+    }
+    let mut attribute = [0_u8; SCHED_ATTR_SIZE];
+    attribute[..4].copy_from_slice(&(SCHED_ATTR_SIZE as u32).to_ne_bytes());
+    attribute[52..56].copy_from_slice(&1024_u32.to_ne_bytes());
+    if !copy_to_linux_user(attribute_address, &attribute) {
+        return LINUX_EFAULT;
+    }
+    let mut extension_offset = attribute.len();
+    let zeros = [0_u8; 64];
+    while extension_offset < size as usize {
+        let length = (size as usize - extension_offset).min(zeros.len());
+        let Some(address) = attribute_address.checked_add(extension_offset as u64) else {
+            return LINUX_EFAULT;
+        };
+        if !copy_to_linux_user(address, &zeros[..length]) {
+            return LINUX_EFAULT;
+        }
+        extension_offset += length;
+    }
+    0
 }
 
 fn linux_set_process_name(address: u64) -> u64 {

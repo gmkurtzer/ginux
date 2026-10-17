@@ -609,6 +609,28 @@ ginux_linux_system_init:
     test rax, rax
     jne .Lfailure
 
+    xor edi, edi
+    lea rsi, [rip + .Lsched_attr]
+    mov edx, 56
+    xor r10d, r10d
+    mov eax, 315
+    syscall
+    test rax, rax
+    jne .Lfailure
+    cmp dword ptr [rip + .Lsched_attr], 56
+    jne .Lfailure
+    cmp dword ptr [rip + .Lsched_attr + 4], 0
+    jne .Lfailure
+    cmp dword ptr [rip + .Lsched_attr + 52], 1024
+    jne .Lfailure
+    xor edi, edi
+    lea rsi, [rip + .Lsched_attr]
+    xor edx, edx
+    mov eax, 314
+    syscall
+    test rax, rax
+    jne .Lfailure
+
     lea rax, [rip + .Lsignal_handler]
     mov qword ptr [rip + .Lsignal_action], rax
     mov qword ptr [rip + .Lsignal_action + 8], 0x4000000
@@ -1152,6 +1174,9 @@ ginux_linux_system_init:
     .asciz "ginux-test"
 .Lmemfd_payload:
     .ascii "memfd"
+.align 8
+.Lsched_attr:
+    .space 56
 .Ldevfs_marker:
     .ascii "DEVFS_READY\n"
 .Lprocfs_marker:
