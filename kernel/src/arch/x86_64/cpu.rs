@@ -212,6 +212,7 @@ const LINUX_CAPGET_SYSCALL: u64 = 125;
 const LINUX_CAPSET_SYSCALL: u64 = 126;
 const LINUX_SIGALTSTACK_SYSCALL: u64 = 131;
 const LINUX_UTIME_SYSCALL: u64 = 132;
+const LINUX_MKNOD_SYSCALL: u64 = 133;
 const LINUX_USELIB_SYSCALL: u64 = 134;
 const LINUX_STATFS_SYSCALL: u64 = 137;
 const LINUX_FSTATFS_SYSCALL: u64 = 138;
@@ -301,6 +302,7 @@ const LINUX_EPOLL_WAIT_SYSCALL: u64 = 232;
 const LINUX_EPOLL_CTL_SYSCALL: u64 = 233;
 const LINUX_OPENAT_SYSCALL: u64 = 257;
 const LINUX_MKDIRAT_SYSCALL: u64 = 258;
+const LINUX_MKNODAT_SYSCALL: u64 = 259;
 const LINUX_FCHOWNAT_SYSCALL: u64 = 260;
 const LINUX_FUTIMESAT_SYSCALL: u64 = 261;
 const LINUX_RENAMEAT_SYSCALL: u64 = 264;
@@ -8189,6 +8191,10 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_NEWFSTATAT_SYSCALL => linux_newfstatat(first_argument, buffer, count, register(0)),
         LINUX_MKDIR_SYSCALL => linux_mkdirat(u64::from(LINUX_AT_FDCWD), first_argument, buffer),
         LINUX_MKDIRAT_SYSCALL => linux_mkdirat(first_argument, buffer, count),
+        LINUX_MKNOD_SYSCALL => {
+            linux_mknodat(u64::from(LINUX_AT_FDCWD), first_argument, buffer, count)
+        }
+        LINUX_MKNODAT_SYSCALL => linux_mknodat(first_argument, buffer, count, register(0)),
         LINUX_UNLINK_SYSCALL => linux_unlinkat(u64::from(LINUX_AT_FDCWD), first_argument, 0),
         LINUX_LINK_SYSCALL => linux_linkat(
             u64::from(LINUX_AT_FDCWD),
@@ -13835,6 +13841,7 @@ fn linux_overlay_stat(metadata: crate::linux_overlay::Metadata) -> [u8; LINUX_ST
         crate::linux_overlay::NodeKind::File => 0o100000,
         crate::linux_overlay::NodeKind::Directory => 0o040000,
         crate::linux_overlay::NodeKind::Symlink => 0o120000,
+        crate::linux_overlay::NodeKind::Fifo => 0o010000,
     };
     let mut stat = linux_stat(kind | metadata.mode, metadata.handle.inode());
     stat[48..56].copy_from_slice(&(metadata.size as u64).to_ne_bytes());
@@ -13968,6 +13975,7 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64, mode: u64) -> u64
             Some(crate::linux_overlay::NodeKind::File) => LINUX_FILE_TMP_SCRATCH,
             Some(crate::linux_overlay::NodeKind::Directory) => LINUX_ROOT_MEASURED_DIRECTORY,
             Some(crate::linux_overlay::NodeKind::Symlink) => return LINUX_EINVAL,
+            Some(crate::linux_overlay::NodeKind::Fifo) => return LINUX_EOPNOTSUPP,
             None => return LINUX_ENOENT,
         }
     } else if path == b"/etc/resolv.conf" {
@@ -14208,6 +14216,49 @@ fn linux_mkdirat(directory: u64, path_address: u64, mode: u64) -> u64 {
     .map_or(LINUX_ENOSPC, |_| 0)
 }
 
+fn linux_mknodat(directory: u64, path_address: u64, mode: u64, _device: u64) -> u64 {
+    const S_IFMT: u64 = 0o170000;
+    const S_IFIFO: u64 = 0o010000;
+    const S_IFCHR: u64 = 0o020000;
+    const S_IFBLK: u64 = 0o060000;
+    const S_IFREG: u64 = 0o100000;
+
+    let kind = mode & S_IFMT;
+    if matches!(kind, S_IFCHR | S_IFBLK) {
+        return LINUX_EPERM;
+    }
+    if !matches!(kind, 0 | S_IFREG | S_IFIFO) {
+        return LINUX_EINVAL;
+    }
+    let mut path = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+    let path_length = match copy_linux_c_string(path_address, &mut path) {
+        Ok(length) => length,
+        Err(error) => return error,
+    };
+    let requested_path = &path[..path_length];
+    let mut canonical = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+    let length = match linux_canonical_path_at(directory, requested_path, &mut canonical) {
+        Ok(length) => length,
+        Err(error) => return error,
+    };
+    let path = &canonical[..length];
+    if crate::linux_overlay::lookup(path).is_some()
+        || linux_oci_metadata_path_at(directory, requested_path).is_some()
+    {
+        return LINUX_EEXIST;
+    }
+    if !linux_overlay_parent_exists(path) {
+        return LINUX_ENOENT;
+    }
+    let permissions = (mode as u32) & 0o7777 & !(ELF_PROBE_UMASK.load(Ordering::SeqCst) as u32);
+    let created = if kind == S_IFIFO {
+        crate::linux_overlay::create_fifo(path, permissions)
+    } else {
+        crate::linux_overlay::create_file(path, permissions, &[])
+    };
+    created.map_or(LINUX_ENOSPC, |_| 0)
+}
+
 fn linux_symlinkat(target_address: u64, directory: u64, path_address: u64) -> u64 {
     let mut target = [0_u8; crate::linux_overlay::PATH_CAPACITY];
     let target_length = match copy_linux_c_string(target_address, &mut target) {
@@ -14299,6 +14350,9 @@ fn linux_linkat(
                     return LINUX_EIO;
                 };
                 crate::linux_overlay::create_symlink(destination, &target[..length])
+            }
+            crate::linux_overlay::NodeKind::Fifo => {
+                crate::linux_overlay::create_fifo(destination, source.mode)
             }
             crate::linux_overlay::NodeKind::Directory => None,
         };
@@ -15228,6 +15282,7 @@ fn linux_statx(directory: u64, path_address: u64, flags: u64, mask: u64, stat_ad
                 crate::linux_overlay::NodeKind::File => 0o100000,
                 crate::linux_overlay::NodeKind::Directory => 0o040000,
                 crate::linux_overlay::NodeKind::Symlink => 0o120000,
+                crate::linux_overlay::NodeKind::Fifo => 0o010000,
             } | metadata.mode;
             let size = metadata.size as u64;
             let mut stat = [0_u8; 256];
@@ -20261,6 +20316,7 @@ fn linux_getdents(descriptor: u64, address: u64, count: u64, legacy: bool) -> u6
                 crate::linux_overlay::NodeKind::File => 8,
                 crate::linux_overlay::NodeKind::Directory => 4,
                 crate::linux_overlay::NodeKind::Symlink => 10,
+                crate::linux_overlay::NodeKind::Fifo => 1,
             };
             let Some(cookie) = child.next_cursor.checked_add(2) else {
                 return LINUX_EINVAL;

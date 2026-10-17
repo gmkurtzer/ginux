@@ -17,6 +17,7 @@ pub(crate) enum NodeKind {
     File,
     Directory,
     Symlink,
+    Fifo,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -261,6 +262,10 @@ pub(crate) fn create_symlink(path: &[u8], target: &[u8]) -> Option<Handle> {
     create(path, NodeKind::Symlink, 0o777, target)
 }
 
+pub(crate) fn create_fifo(path: &[u8], mode: u32) -> Option<Handle> {
+    create(path, NodeKind::Fifo, mode, &[])
+}
+
 fn create(path: &[u8], kind: NodeKind, mode: u32, initial: &[u8]) -> Option<Handle> {
     valid_path(path)?;
     if lookup(path).is_some() {
@@ -370,7 +375,7 @@ pub(crate) fn whiteout(path: &[u8]) -> bool {
 
 pub(crate) fn read(handle: Handle, offset: usize, output: &mut [u8]) -> Option<usize> {
     let node = node_mut(handle)?;
-    if node.kind == NodeKind::Directory {
+    if matches!(node.kind, NodeKind::Directory | NodeKind::Fifo) {
         return None;
     }
     let start = offset.min(node.size);
@@ -409,7 +414,7 @@ pub(crate) fn write(handle: Handle, offset: usize, input: &[u8]) -> Option<usize
         return Some(0);
     }
     let node = node_mut(handle)?;
-    if node.kind == NodeKind::Directory {
+    if matches!(node.kind, NodeKind::Directory | NodeKind::Fifo) {
         return None;
     }
     ensure_data_pages(node, end.div_ceil(DATA_CAPACITY))?;

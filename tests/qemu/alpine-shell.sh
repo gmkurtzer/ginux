@@ -91,6 +91,7 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
     printf '%s\n' \
         "printf 'LIBC_RUNTIME_OK\\n'" \
         "test -f /bin/busybox && printf 'STAT_ABI_OK\\n'" \
+        "mknod /tmp/ginux-fifo p && test -p /tmp/ginux-fifo && rm /tmp/ginux-fifo && printf 'MKNOD_FIFO_OK\\n'" \
         "while IFS= read -r line; do echo \"\$line\"; done < /etc/os-release" \
         'echo /*' \
         'echo /etc/os-*' \
@@ -119,6 +120,7 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
         'apk --help | less'
     wait_for_line 'LIBC_RUNTIME_OK'
     wait_for_line 'STAT_ABI_OK'
+    wait_for_line 'MKNOD_FIFO_OK'
     wait_for_line 'NAME="Alpine Linux"'
     wait_for_line '/'
     wait_for_line 'ROOT_CWD_STATUS=0'
@@ -225,6 +227,7 @@ for expected in \
     'ginux: entering configured OCI init' \
     'LIBC_RUNTIME_OK' \
     'STAT_ABI_OK' \
+    'MKNOD_FIFO_OK' \
     'NAME="Alpine Linux"' \
     'ROOT_CWD_STATUS=0' \
     'RELATIVE_CWD_STATUS=0' \

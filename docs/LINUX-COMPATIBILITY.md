@@ -42,7 +42,7 @@ implemented calls lives in [Linux Syscall Entry v0](../specs/kernel/linux-syscal
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **17 Complete**, **214 Partial**, **37 Policy-denied**, **107 Missing**.
+Current totals: **17 Complete**, **216 Partial**, **37 Policy-denied**, **105 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -55,7 +55,7 @@ Current totals: **17 Complete**, **214 Partial**, **37 Policy-denied**, **107 Mi
 | TLS | Partial | Bounded static TLS and `arch_prctl` FS-base support. |
 | Process and thread model | Partial | Repeated fork/exec/exit/wait works for Alpine and Rocky shells. Fork preserves parent memory and descriptor state; exec privately replaces shared image pages. Copy-on-write, larger process tables, and general Linux scheduling semantics remain incomplete. |
 | Signals | Partial | Selected standard signal, mask, alternate-stack, delivery, and return behavior; no complete restart/nesting semantics. |
-| VFS and path lookup | Partial | Immutable OCI lower root with a demand-allocated, per-domain RAM overlay, directories, symlinks, cwd, tmpfs, devfs, procfs subsets, and frame-chained extended attributes. Overlay file and xattr data grow by allocating frames rather than stopping at a fixed aggregate cache ceiling; open-unlinked objects live through their descriptors, directory renames include descendants, and permission/ownership operations cover the package-manager path. This is not yet a complete Linux VFS. |
+| VFS and path lookup | Partial | Immutable OCI lower root with a demand-allocated, per-domain RAM overlay, directories, symlinks, FIFO metadata, cwd, tmpfs, devfs, procfs subsets, and frame-chained extended attributes. Overlay file and xattr data grow by allocating frames rather than stopping at a fixed aggregate cache ceiling; open-unlinked objects live through their descriptors, directory renames include descendants, and permission/ownership operations cover the package-manager path. `mknod`/`mknodat` create regular files and FIFOs; opening named FIFOs and creating socket nodes are pending, while device nodes are denied by domain policy. This is not yet a complete Linux VFS. |
 | `/proc` | Partial | Automatically mounted per domain with domain-local PID directories, `status`, `stat`, `statm`, `mountinfo`, namespace maps, `cpuinfo`, `meminfo`, `stat`, `uptime`, `loadavg`, `filesystems`, and `cmdline`. Broader Linux procfs coverage and unconstrained process enumeration remain incomplete. |
 | IPv4 sockets | Partial | Domain descriptors expose repeated client TCP and UDP connections plus TCP bind/listen/accept over the shared host NIC with IOMMU-confined virtio queues; AF_UNIX stream socket pairs cover local runtime coordination. Ancillary data, IPv6, multi-entry listen backlogs, and complete option/error semantics remain pending. |
 | OCI overlay root | Partial | Verified layers are assembled in manifest order with replacements and OCI whiteouts. Broader overlay conformance remains under test. |
@@ -212,7 +212,7 @@ therefore omitted.
 | 130 | rt_sigsuspend | Partial |
 | 131 | sigaltstack | Partial |
 | 132 | utime | Partial |
-| 133 | mknod | Missing |
+| 133 | mknod | Partial |
 | 134 | uselib | Complete |
 | 135 | personality | Partial |
 | 136 | ustat | Missing |
@@ -338,7 +338,7 @@ therefore omitted.
 | 256 | migrate_pages | Missing |
 | 257 | openat | Partial |
 | 258 | mkdirat | Partial |
-| 259 | mknodat | Missing |
+| 259 | mknodat | Partial |
 | 260 | fchownat | Partial |
 | 261 | futimesat | Partial |
 | 262 | newfstatat | Partial |
