@@ -397,6 +397,12 @@ struct WaitResult {
     status: u8,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ChildWaitState {
+    Running,
+    Exited { pid: u32, status: u8 },
+}
+
 #[derive(Clone, Copy)]
 pub(crate) struct LiveProcessDispatch {
     pub(crate) pid: u32,
@@ -858,6 +864,34 @@ impl ProcessTable {
             return None;
         };
         Some(WaitResult { pid, status })
+    }
+
+    fn child_wait_state(&self, parent: ProcessHandle, pid: Option<u32>) -> Option<ChildWaitState> {
+        if self.process(parent)?.state != ProcessState::Running {
+            return None;
+        }
+        let mut children = self
+            .processes
+            .iter()
+            .flatten()
+            .filter(|process| process.parent == Some(parent));
+        let child = if let Some(pid) = pid {
+            children.find(|process| process.handle.pid == pid)
+        } else {
+            children
+                .clone()
+                .find(|process| matches!(process.state, ProcessState::Zombie { .. }))
+                .or_else(|| children.next())
+        }?;
+        match child.state {
+            ProcessState::Running | ProcessState::Preparing | ProcessState::Exiting => {
+                Some(ChildWaitState::Running)
+            }
+            ProcessState::Zombie { status } => Some(ChildWaitState::Exited {
+                pid: child.handle.pid,
+                status,
+            }),
+        }
     }
 
     fn reap_init_zombies(&mut self) -> bool {
@@ -1326,6 +1360,7 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
         return false;
     }
     if table.process_group(first_child.pid) != Some((1, 1))
+        || table.child_wait_state(init, Some(first_child.pid)) != Some(ChildWaitState::Running)
         || table.set_process_group(init.pid, first_child.pid, first_child.pid) != Ok(())
         || table.process_group(first_child.pid) != Some((3, 1))
         || table.set_process_group(init.pid, first_child.pid, init.pid) != Ok(())
@@ -1429,6 +1464,11 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
                 && !memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[mapping.frame])
         })
         || !table.exit(first_child, child_exit_status)
+        || table.child_wait_state(init, Some(first_child.pid))
+            != Some(ChildWaitState::Exited {
+                pid: first_child.pid,
+                status: child_exit_status,
+            })
         || table.wait(first_child, first_child.pid).is_some()
         || table.wait(init, first_child.pid)
             != Some(WaitResult {
@@ -2119,21 +2159,13 @@ pub(crate) fn wait_live_child(parent_pid: u32, child_pid: u32) -> Option<(u32, u
         .map(|result| (result.pid, result.status))
 }
 
-pub(crate) fn wait_live_child_any(parent_pid: u32) -> Option<(u32, u8)> {
+pub(crate) fn live_child_wait_state(
+    parent_pid: u32,
+    child_pid: Option<u32>,
+) -> Option<ChildWaitState> {
     let table = live_process_table_mut()?;
     let parent = table.handle_by_pid(parent_pid)?;
-    let child_pid = table
-        .processes
-        .iter()
-        .flatten()
-        .find(|process| {
-            process.parent == Some(parent) && matches!(process.state, ProcessState::Zombie { .. })
-        })?
-        .handle
-        .pid;
-    table
-        .wait(parent, child_pid)
-        .map(|result| (result.pid, result.status))
+    table.child_wait_state(parent, child_pid)
 }
 
 #[inline(never)]

@@ -1400,8 +1400,13 @@ active address space is released. `wait4` accepts only the exact positive child
 PID, zero options, and a null rusage pointer. It validates a non-null four-byte
 status output before reaping, writes `42 << 8`, and returns PID 2. Invalid
 options return `-EINVAL`, an invalid status pointer returns `-EFAULT`, and a
-missing or already reaped child returns `-ECHILD`. General process-style
-`clone`, `vfork`, wait options, rusage, multiple children, and concurrent
+missing or already reaped child returns `-ECHILD`. `waitid` admits `P_ALL` and
+positive `P_PID` with `WEXITED`, optionally combined with `WNOHANG` and
+`WNOWAIT`. It produces a fully initialized `SIGCHLD`/`CLD_EXITED` `siginfo_t`,
+supports non-consuming observation, zeroes the result for a running child under
+`WNOHANG`, and validates optional zeroed rusage before consuming a zombie.
+Blocking on a running child, group and pidfd selectors, stopped/continued
+states, nonzero accounting, general process-style `clone`, and concurrent
 parent/child execution remain unsupported.
 Immediately before entry, the kernel:
 

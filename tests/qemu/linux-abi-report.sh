@@ -73,7 +73,7 @@ qemu_pid=""
 for expected in \
     'Linux userspace runtime conformance summary:' \
     'Interfaces: 16 passed, 7 failed, 23 total' \
-    'Syscalls: 0 passed, 202 unverified, 28 policy-denied, 145 unsupported, 375 total' \
+    'Syscalls: 0 passed, 203 unverified, 28 policy-denied, 144 unsupported, 375 total' \
     'Linux userspace interface runtime tests (bounded profile):' \
     'PASS syscall-entry' \
     'FAIL linux-module-userspace-api' \
@@ -83,9 +83,10 @@ for expected in \
     'UNVERIFIED 109 setpgid' \
     'UNVERIFIED 112 setsid' \
     'UNVERIFIED 130 rt_sigsuspend' \
+    'UNVERIFIED 247 waitid' \
     'POLICY-DENIED 105 setuid' \
     'UNSUPPORTED 462 mseal' \
-    'Summary: 0 passed, 202 unverified, 28 policy-denied, 145 unsupported, 375 total' \
+    'Summary: 0 passed, 203 unverified, 28 policy-denied, 144 unsupported, 375 total' \
     'FAIL unknown Linux syscall' \
     '1      0      R      controller' \
     'Shutting down Ginux.'; do

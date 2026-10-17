@@ -1,6 +1,7 @@
 # Bounded Linux Process Lifecycle v0
 
-**Status:** Bounded `fork`/`wait4` lifecycle verified during x86-64 QEMU boot.
+**Status:** Bounded `fork`, `wait4`, and `waitid` model implemented; its process
+table lifecycle is verified during x86-64 QEMU boot.
 
 This contract introduces the kernel-owned process identity and lifecycle model
 used by the first process-style Linux `fork` and `wait4` implementation.
@@ -294,6 +295,15 @@ and restores the parent's pre-fork return value. Successful completion requires
 an empty scheduler workspace and leaves only the unchanged running PID 1
 record.
 
+`waitid` accepts `P_ALL` and positive `P_PID` selectors with mandatory
+`WEXITED`, plus `WNOHANG` and `WNOWAIT`. A zombie produces a zero-initialized
+128-byte `siginfo_t` containing `SIGCHLD`, `CLD_EXITED`, PID, UID 0, and exit
+status; optional rusage is zeroed. `WNOWAIT` observes without consuming the
+zombie. `WNOHANG` reports a still-running matching child with zeroed signal
+information, while an absent child returns `ECHILD`. Invalid selectors,
+options, and ranges fail before consumption. A blocking wait for a running
+child remains outside this scheduler slice and returns `ENOSYS`.
+
 ## Process groups and sessions
 
 Every live process record owns a process-group ID and session ID. PID 1 begins
@@ -314,7 +324,8 @@ management. It does not implement:
 
 - copy-on-write, concurrent parent/child execution, or more than one public
   child lifecycle;
-- process-style `clone`, `vfork`, `waitid`, wait groups, `WNOHANG`, or rusage;
+- process-style `clone`, general `vfork`, wait groups, stopped/continued child
+  reporting, blocking `waitid`, or nonzero rusage accounting;
 - independently modeled descriptor, signal, or mount inheritance; the user
   namespace handle alone is inherited exactly;
 - concurrent process scheduling or process-directed signal delivery;

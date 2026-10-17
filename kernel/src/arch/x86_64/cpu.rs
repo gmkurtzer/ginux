@@ -263,6 +263,7 @@ const LINUX_CLOCK_GETTIME_SYSCALL: u64 = 228;
 const LINUX_CLOCK_GETRES_SYSCALL: u64 = 229;
 const LINUX_CLOCK_NANOSLEEP_SYSCALL: u64 = 230;
 const LINUX_KEXEC_LOAD_SYSCALL: u64 = 246;
+const LINUX_WAITID_SYSCALL: u64 = 247;
 const LINUX_UTIMES_SYSCALL: u64 = 235;
 const LINUX_EXIT_GROUP_SYSCALL: u64 = 231;
 const LINUX_EPOLL_WAIT_SYSCALL: u64 = 232;
@@ -374,7 +375,12 @@ const LINUX_RLIMIT_STACK: u64 = 3;
 const LINUX_RLIMIT_NOFILE: u64 = 7;
 const LINUX_WNOHANG: u64 = 1;
 const LINUX_WUNTRACED: u64 = 2;
+const LINUX_WEXITED: u64 = 4;
 const LINUX_WCONTINUED: u64 = 8;
+const LINUX_WNOWAIT: u64 = 0x0100_0000;
+const LINUX_P_ALL: u64 = 0;
+const LINUX_P_PID: u64 = 1;
+const LINUX_CLD_EXITED: i32 = 1;
 const LINUX_RUSAGE_SIZE: usize = 144;
 const LINUX_PROT_READ: u64 = 1;
 const LINUX_PROT_WRITE: u64 = 2;
@@ -8350,6 +8356,9 @@ extern "sysv64" fn linux_syscall_handler(
         }
         LINUX_MEMBARRIER_SYSCALL => linux_membarrier(first_argument, buffer, count),
         LINUX_WAIT4_SYSCALL => linux_wait4(first_argument, buffer, count, register(0)),
+        LINUX_WAITID_SYSCALL => {
+            linux_waitid(first_argument, buffer, count, register(0), register(2))
+        }
         LINUX_EXIT_SYSCALL
             if LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
                 && first_argument <= u64::from(u8::MAX)
@@ -8991,18 +9000,26 @@ fn linux_wait4(pid: u64, status_address: u64, options: u64, rusage: u64) -> u64 
     if rusage != 0 && !linux_writable_user_range_contains(rusage, LINUX_RUSAGE_SIZE) {
         return LINUX_EFAULT;
     }
-    let waited = if pid as u32 == u32::MAX {
-        linux_process::wait_live_child_any(parent_pid)
+    let selector = if pid as u32 == u32::MAX {
+        None
     } else {
-        u32::try_from(pid)
-            .ok()
-            .and_then(|pid| linux_process::wait_live_child(parent_pid, pid))
+        let Ok(pid) = u32::try_from(pid) else {
+            return LINUX_ECHILD;
+        };
+        Some(pid)
     };
-    let Some((waited, status)) = waited else {
+    let Some(state) = linux_process::live_child_wait_state(parent_pid, selector) else {
+        return LINUX_ECHILD;
+    };
+    let linux_process::ChildWaitState::Exited {
+        pid: waited,
+        status,
+    } = state
+    else {
         return if options & LINUX_WNOHANG != 0 {
             0
         } else {
-            LINUX_ECHILD
+            LINUX_ENOSYS
         };
     };
     let encoded = u32::from(status) << 8;
@@ -9012,8 +9029,71 @@ fn linux_wait4(pid: u64, status_address: u64, options: u64, rusage: u64) -> u64 
     if rusage != 0 && !copy_to_linux_user(rusage, &[0_u8; LINUX_RUSAGE_SIZE]) {
         return LINUX_EFAULT;
     }
+    if linux_process::wait_live_child(parent_pid, waited) != Some((waited, status)) {
+        return LINUX_ECHILD;
+    }
     LINUX_PROCESS_WAIT_COUNT.fetch_add(1, Ordering::SeqCst);
     u64::from(waited)
+}
+
+fn linux_waitid(id_type: u64, id: u64, information: u64, options: u64, rusage: u64) -> u64 {
+    const SIGNAL_INFORMATION_SIZE: usize = size_of::<LinuxSignalInformation>();
+
+    if current_linux_tid() != Some(current_linux_process_pid()) {
+        return LINUX_ECHILD;
+    }
+    if options & !(LINUX_WEXITED | LINUX_WNOHANG | LINUX_WNOWAIT) != 0
+        || options & LINUX_WEXITED == 0
+    {
+        return LINUX_EINVAL;
+    }
+    let child = match id_type {
+        LINUX_P_ALL => None,
+        LINUX_P_PID if (1..=i32::MAX as u64).contains(&id) => Some(id as u32),
+        LINUX_P_PID => return LINUX_EINVAL,
+        _ => return LINUX_EINVAL,
+    };
+    if information != 0 && !linux_writable_user_range_contains(information, SIGNAL_INFORMATION_SIZE)
+    {
+        return LINUX_EFAULT;
+    }
+    if rusage != 0 && !linux_writable_user_range_contains(rusage, LINUX_RUSAGE_SIZE) {
+        return LINUX_EFAULT;
+    }
+    let parent = current_linux_process_pid();
+    let Some(state) = linux_process::live_child_wait_state(parent, child) else {
+        return LINUX_ECHILD;
+    };
+    let linux_process::ChildWaitState::Exited { pid, status } = state else {
+        if options & LINUX_WNOHANG == 0 {
+            return LINUX_ENOSYS;
+        }
+        if information != 0 && !copy_to_linux_user(information, &[0_u8; SIGNAL_INFORMATION_SIZE]) {
+            return LINUX_EFAULT;
+        }
+        if rusage != 0 && !copy_to_linux_user(rusage, &[0_u8; LINUX_RUSAGE_SIZE]) {
+            return LINUX_EFAULT;
+        }
+        return 0;
+    };
+    let mut result = [0_u8; SIGNAL_INFORMATION_SIZE];
+    result[..4].copy_from_slice(&(LINUX_SIGCHLD as i32).to_ne_bytes());
+    result[8..12].copy_from_slice(&LINUX_CLD_EXITED.to_ne_bytes());
+    result[16..20].copy_from_slice(&pid.to_ne_bytes());
+    result[24..28].copy_from_slice(&u32::from(status).to_ne_bytes());
+    if information != 0 && !copy_to_linux_user(information, &result) {
+        return LINUX_EFAULT;
+    }
+    if rusage != 0 && !copy_to_linux_user(rusage, &[0_u8; LINUX_RUSAGE_SIZE]) {
+        return LINUX_EFAULT;
+    }
+    if options & LINUX_WNOWAIT == 0
+        && linux_process::wait_live_child(parent, pid) != Some((pid, status))
+    {
+        return LINUX_ECHILD;
+    }
+    LINUX_PROCESS_WAIT_COUNT.fetch_add(1, Ordering::SeqCst);
+    0
 }
 
 fn linux_sched_yield_live_return(

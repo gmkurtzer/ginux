@@ -42,7 +42,7 @@ implemented calls lives in [Linux Syscall Entry v0](../specs/kernel/linux-syscal
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **202 Partial**, **28 Policy-denied**, **145 Missing**.
+Current totals: **203 Partial**, **28 Policy-denied**, **144 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -326,7 +326,7 @@ therefore omitted.
 | 244 | mq_notify | Missing |
 | 245 | mq_getsetattr | Missing |
 | 246 | kexec_load | Policy-denied |
-| 247 | waitid | Missing |
+| 247 | waitid | Partial |
 | 248 | add_key | Missing |
 | 249 | request_key | Missing |
 | 250 | keyctl | Missing |
