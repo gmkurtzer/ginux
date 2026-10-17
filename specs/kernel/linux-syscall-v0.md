@@ -1701,6 +1701,12 @@ runs it again, and child exit clears its word, wakes the blocked parent, and
 resumes that wait with zero. This handshake repeats for a second monotonic TID
 through the scrubbed slot. There is no general TID allocation, arbitrary or
 parallel thread creation, general futex queue, or robust futex recovery yet.
+`rax = 335` (`__NR_uretprobe`) follows Linux's direct-call boundary. Ginux does
+not install return uprobes yet, so a userspace invocation generates `SIGILL`
+with `SI_KERNEL`; a registered Linux signal action can receive it, and the
+default action terminates the domain init process. The kernel-only trampoline
+path and return-probe consumers remain unsupported.
+
 Every other call
 returns `-ENOSYS` without disarming
 the task, so a caller can handle the error and continue. The entire path

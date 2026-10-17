@@ -42,7 +42,7 @@ Detailed bounded behavior for implemented calls lives in
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **19 Complete**, **296 Partial**, **45 Policy-denied**, **15 Missing**.
+Current totals: **19 Complete**, **297 Partial**, **45 Policy-denied**, **14 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -462,7 +462,7 @@ therefore omitted.
 | 332 | statx | Partial |
 | 333 | io_pgetevents | Partial |
 | 334 | rseq | Partial |
-| 335 | uretprobe | Missing |
+| 335 | uretprobe | Partial |
 | 424 | pidfd_send_signal | Partial |
 | 425 | io_uring_setup | Missing |
 | 426 | io_uring_enter | Missing |
