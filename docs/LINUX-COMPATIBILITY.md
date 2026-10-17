@@ -42,7 +42,7 @@ implemented calls lives in [Linux Syscall Entry v0](../specs/kernel/linux-syscal
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **17 Complete**, **238 Partial**, **44 Policy-denied**, **76 Missing**.
+Current totals: **17 Complete**, **240 Partial**, **44 Policy-denied**, **74 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -383,7 +383,7 @@ therefore omitted.
 | 296 | pwritev | Partial |
 | 297 | rt_tgsigqueueinfo | Partial |
 | 298 | perf_event_open | Policy-denied |
-| 299 | recvmmsg | Missing |
+| 299 | recvmmsg | Partial |
 | 300 | fanotify_init | Missing |
 | 301 | fanotify_mark | Missing |
 | 302 | prlimit64 | Partial |
@@ -391,7 +391,7 @@ therefore omitted.
 | 304 | open_by_handle_at | Missing |
 | 305 | clock_adjtime | Policy-denied |
 | 306 | syncfs | Partial |
-| 307 | sendmmsg | Missing |
+| 307 | sendmmsg | Partial |
 | 308 | setns | Policy-denied |
 | 309 | getcpu | Partial |
 | 310 | process_vm_readv | Partial |

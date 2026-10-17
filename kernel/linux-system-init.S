@@ -49,6 +49,62 @@ ginux_linux_system_init:
     test rax, rax
     jne .Lfailure
 
+    mov edi, 1
+    mov esi, 1
+    xor edx, edx
+    lea r10, [rip + .Lsocket_pair]
+    mov eax, 53
+    syscall
+    test rax, rax
+    jne .Lfailure
+    lea rax, [rip + .Lmmsg_send_iov]
+    mov qword ptr [rip + .Lmmsg_send + 16], rax
+    mov qword ptr [rip + .Lmmsg_send + 24], 1
+    lea rax, [rip + .Lmmsg_payload]
+    mov qword ptr [rip + .Lmmsg_send_iov], rax
+    mov qword ptr [rip + .Lmmsg_send_iov + 8], 5
+    mov edi, dword ptr [rip + .Lsocket_pair]
+    lea rsi, [rip + .Lmmsg_send]
+    mov edx, 1
+    xor r10d, r10d
+    mov eax, 307
+    syscall
+    cmp rax, 1
+    jne .Lfailure
+    cmp dword ptr [rip + .Lmmsg_send + 56], 5
+    jne .Lfailure
+    lea rax, [rip + .Lmmsg_recv_iov]
+    mov qword ptr [rip + .Lmmsg_recv + 16], rax
+    mov qword ptr [rip + .Lmmsg_recv + 24], 1
+    lea rax, [rip + .Lmmsg_output]
+    mov qword ptr [rip + .Lmmsg_recv_iov], rax
+    mov qword ptr [rip + .Lmmsg_recv_iov + 8], 5
+    mov edi, dword ptr [rip + .Lsocket_pair + 4]
+    lea rsi, [rip + .Lmmsg_recv]
+    mov edx, 1
+    xor r10d, r10d
+    xor r8d, r8d
+    mov eax, 299
+    syscall
+    cmp rax, 1
+    jne .Lfailure
+    cmp dword ptr [rip + .Lmmsg_recv + 56], 5
+    jne .Lfailure
+    cmp dword ptr [rip + .Lmmsg_output], 0x67736d6d
+    jne .Lfailure
+    cmp byte ptr [rip + .Lmmsg_output + 4], '!'
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Lsocket_pair]
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Lsocket_pair + 4]
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Lfailure
+
     mov edi, -100
     lea rsi, [rip + .Lnull_path]
     mov edx, 2
@@ -1406,6 +1462,22 @@ ginux_linux_system_init:
     .asciz "ginux-test"
 .Lmemfd_payload:
     .ascii "memfd"
+.align 8
+.Lsocket_pair:
+    .space 8
+.Lmmsg_payload:
+    .ascii "mmsg!"
+.Lmmsg_output:
+    .space 5
+.align 8
+.Lmmsg_send_iov:
+    .space 16
+.Lmmsg_recv_iov:
+    .space 16
+.Lmmsg_send:
+    .space 64
+.Lmmsg_recv:
+    .space 64
 .align 8
 .Lcachestat_range:
     .quad 0

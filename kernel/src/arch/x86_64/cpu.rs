@@ -354,8 +354,10 @@ const LINUX_SET_MEMPOLICY_HOME_NODE_SYSCALL: u64 = 450;
 const LINUX_CACHESTAT_SYSCALL: u64 = 451;
 const LINUX_PIPE2_SYSCALL: u64 = 293;
 const LINUX_RT_TGSIGQUEUEINFO_SYSCALL: u64 = 297;
+const LINUX_RECVMMSG_SYSCALL: u64 = 299;
 const LINUX_PREADV_SYSCALL: u64 = 295;
 const LINUX_PWRITEV_SYSCALL: u64 = 296;
+const LINUX_SENDMMSG_SYSCALL: u64 = 307;
 const LINUX_COPY_FILE_RANGE_SYSCALL: u64 = 326;
 const LINUX_PRLIMIT64_SYSCALL: u64 = 302;
 const LINUX_GETCPU_SYSCALL: u64 = 309;
@@ -7565,6 +7567,10 @@ extern "sysv64" fn linux_syscall_handler(
         ),
         LINUX_SENDMSG_SYSCALL => linux_socket_sendmsg(first_argument, buffer, count),
         LINUX_RECVMSG_SYSCALL => linux_socket_recvmsg(first_argument, buffer, count),
+        LINUX_RECVMMSG_SYSCALL => {
+            linux_socket_recvmmsg(first_argument, buffer, count, register(0), register(2))
+        }
+        LINUX_SENDMMSG_SYSCALL => linux_socket_sendmmsg(first_argument, buffer, count, register(0)),
         LINUX_SHUTDOWN_SYSCALL => linux_socket_shutdown(first_argument, buffer),
         LINUX_GETSOCKNAME_SYSCALL => linux_socket_name(first_argument, buffer, count, false),
         LINUX_GETPEERNAME_SYSCALL => linux_socket_name(first_argument, buffer, count, true),
@@ -16447,6 +16453,115 @@ fn linux_socket_recvmsg(descriptor: u64, message: u64, flags: u64) -> u64 {
         return LINUX_EFAULT;
     }
     received as u64
+}
+
+fn linux_socket_sendmmsg(descriptor: u64, messages: u64, count: u64, flags: u64) -> u64 {
+    const MMSGHDR_SIZE: u64 = 64;
+    let Ok(count) = usize::try_from(count) else {
+        return LINUX_EINVAL;
+    };
+    if count > LINUX_IOV_LIMIT {
+        return LINUX_EINVAL;
+    }
+    let mut completed = 0_u64;
+    for index in 0..count {
+        let Some(message) = messages.checked_add((index as u64) * MMSGHDR_SIZE) else {
+            return if completed == 0 {
+                LINUX_EFAULT
+            } else {
+                completed
+            };
+        };
+        let result = linux_socket_sendmsg(descriptor, message, flags);
+        if result >= u64::MAX - 4095 {
+            return if completed == 0 { result } else { completed };
+        }
+        let Some(length) = u32::try_from(result).ok() else {
+            return if completed == 0 {
+                LINUX_EINVAL
+            } else {
+                completed
+            };
+        };
+        if !copy_to_linux_user(message + 56, &length.to_ne_bytes()) {
+            return if completed == 0 {
+                LINUX_EFAULT
+            } else {
+                completed
+            };
+        }
+        completed += 1;
+    }
+    completed
+}
+
+fn linux_socket_recvmmsg(
+    descriptor: u64,
+    messages: u64,
+    count: u64,
+    flags: u64,
+    timeout: u64,
+) -> u64 {
+    const MSG_DONTWAIT: u64 = 0x40;
+    const MSG_WAITFORONE: u64 = 0x1_0000;
+    const MMSGHDR_SIZE: u64 = 64;
+    if flags & !(MSG_DONTWAIT | MSG_WAITFORONE) != 0 {
+        return LINUX_EINVAL;
+    }
+    let Ok(count) = usize::try_from(count) else {
+        return LINUX_EINVAL;
+    };
+    if count > LINUX_IOV_LIMIT {
+        return LINUX_EINVAL;
+    }
+    if timeout != 0 {
+        let mut value = [0_u8; 16];
+        if !copy_from_linux_user(timeout, &mut value) {
+            return LINUX_EFAULT;
+        }
+        if linux_timespec_nanoseconds(&value).is_none() {
+            return LINUX_EINVAL;
+        }
+    }
+    let mut completed = 0_u64;
+    for index in 0..count {
+        let Some(message) = messages.checked_add((index as u64) * MMSGHDR_SIZE) else {
+            return if completed == 0 {
+                LINUX_EFAULT
+            } else {
+                completed
+            };
+        };
+        let receive_flags = (flags & MSG_DONTWAIT)
+            | (u64::from(flags & MSG_WAITFORONE != 0 && completed != 0) * MSG_DONTWAIT);
+        let result = linux_socket_recvmsg(descriptor, message, receive_flags);
+        if result >= u64::MAX - 4095 {
+            return if completed == 0 { result } else { completed };
+        }
+        let Some(length) = u32::try_from(result).ok() else {
+            return if completed == 0 {
+                LINUX_EINVAL
+            } else {
+                completed
+            };
+        };
+        if !copy_to_linux_user(message + 56, &length.to_ne_bytes()) {
+            return if completed == 0 {
+                LINUX_EFAULT
+            } else {
+                completed
+            };
+        }
+        completed += 1;
+    }
+    if timeout != 0 && !copy_to_linux_user(timeout, &[0_u8; 16]) {
+        return if completed == 0 {
+            LINUX_EFAULT
+        } else {
+            completed
+        };
+    }
+    completed
 }
 
 fn linux_write_socket_address(
