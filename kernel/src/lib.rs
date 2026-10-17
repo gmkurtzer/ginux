@@ -15,6 +15,7 @@ mod linux_mount;
 mod linux_overlay;
 mod linux_process;
 mod linux_socket;
+mod linux_sysv_ipc;
 mod linux_tmpfs;
 mod linux_user;
 mod manifest;
@@ -1768,6 +1769,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             kernel_fail("ginux: bounded Linux child hierarchy clone invalid\r\n");
         }
         serial_write("ginux: bounded Linux child hierarchy clone validated\r\n");
+        if !linux_sysv_ipc::verify_shared_memory_lifecycle() {
+            kernel_fail("ginux: Linux SysV shared memory lifecycle invalid\r\n");
+        }
+        serial_write("ginux: Linux SysV shared memory lifecycle validated\r\n");
         let Some(system_init_node) = initramfs::published_regular_file_node(b"sbin/init") else {
             kernel_fail("ginux: minimal system init missing\r\n");
         };

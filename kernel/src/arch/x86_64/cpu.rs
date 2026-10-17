@@ -248,6 +248,10 @@ const LINUX_PIVOT_ROOT_SYSCALL: u64 = 155;
 const LINUX_CHROOT_SYSCALL: u64 = 161;
 const LINUX_MOUNT_SYSCALL: u64 = 165;
 const LINUX_UMOUNT2_SYSCALL: u64 = 166;
+const LINUX_SHMGET_SYSCALL: u64 = 29;
+const LINUX_SHMAT_SYSCALL: u64 = 30;
+const LINUX_SHMCTL_SYSCALL: u64 = 31;
+const LINUX_SHMDT_SYSCALL: u64 = 67;
 const LINUX_SWAPON_SYSCALL: u64 = 167;
 const LINUX_SWAPOFF_SYSCALL: u64 = 168;
 const LINUX_REBOOT_SYSCALL: u64 = 169;
@@ -6059,6 +6063,17 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
         return LinuxElfResult::FAILED;
     }
+    if cfg!(feature = "verification-boot")
+        && !execution.runtime
+        && !verify_linux_sysv_shared_memory_syscalls()
+    {
+        let _ = linux_process::finish_live_process_registry();
+        let _ = linux_mount::deactivate_initial();
+        let _ = timer::finish_linux_wait_timer();
+        let _ = restore_linux_syscall(saved_msrs);
+        ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
+        return LinuxElfResult::FAILED;
+    }
     if execution.runtime && !restore_container_extended_state() {
         let _ = linux_process::finish_runtime_process_registry();
         let _ = linux_mount::deactivate_initial();
@@ -7776,6 +7791,10 @@ extern "sysv64" fn linux_syscall_handler(
             )
         }
         LINUX_MUNMAP_SYSCALL => linux_munmap(first_argument, buffer),
+        LINUX_SHMGET_SYSCALL => linux_shmget(first_argument, buffer, count),
+        LINUX_SHMAT_SYSCALL => linux_shmat(first_argument, buffer, count),
+        LINUX_SHMCTL_SYSCALL => linux_shmctl(first_argument, buffer, count),
+        LINUX_SHMDT_SYSCALL => linux_shmdt(first_argument),
         LINUX_MREMAP_SYSCALL => {
             linux_mremap(first_argument, buffer, count, register(0), register(2))
         }
@@ -11244,6 +11263,203 @@ fn rollback_linux_runtime_mapping(address: u64, pages: usize) -> bool {
             address_space::remove_current_linux_runtime_page(address + (page * PAGE_SIZE) as u64);
         release_linux_runtime_page(page)
     })
+}
+
+fn linux_sysv_ipc_error(error: crate::linux_sysv_ipc::Error) -> u64 {
+    match error {
+        crate::linux_sysv_ipc::Error::Exists => LINUX_EEXIST,
+        crate::linux_sysv_ipc::Error::Invalid => LINUX_EINVAL,
+        crate::linux_sysv_ipc::Error::NoEntry => LINUX_ENOENT,
+        crate::linux_sysv_ipc::Error::NoMemory => LINUX_ENOMEM,
+    }
+}
+
+fn linux_shmget(key: u64, size: u64, flags: u64) -> u64 {
+    const IPC_CREAT: u64 = 0o1000;
+    const IPC_EXCL: u64 = 0o2000;
+    if flags & !(0o777 | IPC_CREAT | IPC_EXCL) != 0 {
+        return LINUX_EINVAL;
+    }
+    let key = key as u32 as i32;
+    crate::linux_sysv_ipc::get_or_create(
+        key,
+        size,
+        flags as u16,
+        key == 0 || flags & IPC_CREAT != 0,
+        flags & IPC_EXCL != 0,
+        current_linux_process_pid(),
+    )
+    .map_or_else(linux_sysv_ipc_error, u64::from)
+}
+
+fn linux_shmat(id: u64, requested: u64, flags: u64) -> u64 {
+    const SHM_RDONLY: u64 = 0o10_000;
+    const SHM_RND: u64 = 0o20_000;
+    const SHM_REMAP: u64 = 0o40_000;
+    const SHM_EXEC: u64 = 0o100_000;
+    const SHMLBA: u64 = PAGE_SIZE as u64;
+    if !LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
+        return LINUX_ENOSYS;
+    }
+    if id > u64::from(u32::MAX)
+        || flags & !(SHM_RDONLY | SHM_RND | SHM_REMAP | SHM_EXEC) != 0
+        || flags & SHM_REMAP != 0
+    {
+        return LINUX_EINVAL;
+    }
+    if flags & SHM_EXEC != 0 && flags & SHM_RDONLY == 0 {
+        return LINUX_EACCES;
+    }
+    let Ok(segment) = crate::linux_sysv_ipc::segment(id as u32) else {
+        return LINUX_EINVAL;
+    };
+    let Ok(pages) = usize::try_from(segment.size.div_ceil(PAGE_SIZE as u64)) else {
+        return LINUX_ENOMEM;
+    };
+    let requested = if requested != 0 && flags & SHM_RND != 0 {
+        requested & !(SHMLBA - 1)
+    } else {
+        requested
+    };
+    if requested != 0 && !requested.is_multiple_of(SHMLBA) {
+        return LINUX_EINVAL;
+    }
+    let Some(address) = linux_runtime_select_mapping(requested, pages, requested != 0) else {
+        return LINUX_ENOMEM;
+    };
+    if !linux_runtime_range_available(address, pages) {
+        return LINUX_EINVAL;
+    }
+    let protection = if flags & SHM_EXEC != 0 {
+        5
+    } else if flags & SHM_RDONLY != 0 {
+        1
+    } else {
+        3
+    };
+    for index in 0..pages {
+        let Ok(frame) = crate::linux_sysv_ipc::frame(id as u32, index) else {
+            let _ = rollback_linux_runtime_mapping(address, index);
+            return LINUX_EINVAL;
+        };
+        if !address_space::install_current_linux_shared_page(
+            address + (index * PAGE_SIZE) as u64,
+            frame,
+            protection,
+        ) {
+            let _ = rollback_linux_runtime_mapping(address, index);
+            return LINUX_ENOMEM;
+        }
+    }
+    if let Err(error) =
+        crate::linux_sysv_ipc::attach(id as u32, address, current_linux_process_pid())
+    {
+        let _ = rollback_linux_runtime_mapping(address, pages);
+        return linux_sysv_ipc_error(error);
+    }
+    address
+}
+
+fn linux_shmdt(address: u64) -> u64 {
+    if !LINUX_RUNTIME_MODE.load(Ordering::SeqCst) || !address.is_multiple_of(PAGE_SIZE as u64) {
+        return LINUX_EINVAL;
+    }
+    let Ok((_, length)) =
+        crate::linux_sysv_ipc::attachment_at(address, current_linux_process_pid())
+    else {
+        return LINUX_EINVAL;
+    };
+    let result = linux_runtime_munmap(address, length);
+    if result != 0 {
+        return result;
+    }
+    crate::linux_sysv_ipc::detach(address, current_linux_process_pid())
+        .map_or_else(linux_sysv_ipc_error, |()| 0)
+}
+
+fn linux_shmctl(id: u64, command: u64, address: u64) -> u64 {
+    const IPC_RMID: u64 = 0;
+    const IPC_SET: u64 = 1;
+    const IPC_STAT: u64 = 2;
+    const IPC_64: u64 = 0x100;
+    if id > u64::from(u32::MAX) || command & !(IPC_64 | 0xff) != 0 {
+        return LINUX_EINVAL;
+    }
+    match command & !IPC_64 {
+        IPC_RMID => crate::linux_sysv_ipc::mark_for_removal(id as u32, current_linux_process_pid())
+            .map_or_else(linux_sysv_ipc_error, |()| 0),
+        IPC_SET => {
+            let mut input = [0_u8; 112];
+            if !copy_from_linux_user(address, &mut input) {
+                return LINUX_EFAULT;
+            }
+            crate::linux_sysv_ipc::set_mode(
+                id as u32,
+                u16::from_ne_bytes(input[20..22].try_into().unwrap()),
+                current_linux_process_pid(),
+            )
+            .map_or_else(linux_sysv_ipc_error, |()| 0)
+        }
+        IPC_STAT => {
+            let Ok(segment) = crate::linux_sysv_ipc::segment(id as u32) else {
+                return LINUX_EINVAL;
+            };
+            let mut output = [0_u8; 112];
+            output[0..4].copy_from_slice(&segment.key.to_ne_bytes());
+            output[20..22].copy_from_slice(&segment.mode.to_ne_bytes());
+            output[48..56].copy_from_slice(&segment.size.to_ne_bytes());
+            output[80..84].copy_from_slice(&segment.creator_pid.to_ne_bytes());
+            output[84..88].copy_from_slice(&segment.last_pid.to_ne_bytes());
+            output[88..96].copy_from_slice(&segment.attachments.to_ne_bytes());
+            if !copy_to_linux_user(address, &output) {
+                LINUX_EFAULT
+            } else {
+                0
+            }
+        }
+        _ => LINUX_EINVAL,
+    }
+}
+
+fn verify_linux_sysv_shared_memory_syscalls() -> bool {
+    let old_runtime = LINUX_RUNTIME_MODE.swap(true, Ordering::SeqCst);
+    let id = linux_shmget(0, 2 * PAGE_SIZE as u64, 0o600);
+    let first = (id <= i32::MAX as u64).then(|| linux_shmat(id, 0, 0));
+    let second = first
+        .filter(|address| *address < LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
+        .map(|_| linux_shmat(id, 0, 0));
+    let mapped = first.zip(second).filter(|(first, second)| {
+        *first >= LINUX_RUNTIME_DYNAMIC_MMAP_BASE
+            && *first < LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39)
+            && *second >= LINUX_RUNTIME_DYNAMIC_MMAP_BASE
+            && *second < LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39)
+            && first != second
+    });
+    let shared = mapped.is_some_and(|(first, second)| unsafe {
+        with_supervisor_user_access(|| {
+            (first as *mut u64).write_volatile(0x4749_4e55_5853_5956);
+            (second as *const u64).read_volatile() == 0x4749_4e55_5853_5956
+        })
+    });
+    let removed_while_attached = mapped.is_some()
+        && linux_shmctl(id, 0, 0) == 0
+        && crate::linux_sysv_ipc::segment(id as u32).is_ok();
+    let detached = mapped.is_some_and(|(first, second)| {
+        linux_shmdt(first) == 0
+            && crate::linux_sysv_ipc::segment(id as u32)
+                .is_ok_and(|segment| segment.attachments == 1)
+            && linux_shmdt(second) == 0
+    });
+    let destroyed = id <= i32::MAX as u64
+        && matches!(
+            crate::linux_sysv_ipc::segment(id as u32),
+            Err(crate::linux_sysv_ipc::Error::Invalid)
+        );
+    let mappings_released =
+        address_space::release_current_linux_runtime_mappings(LINUX_RUNTIME_DYNAMIC_MMAP_BASE);
+    ELF_PROBE_MMAP_NEXT.store(LINUX_RUNTIME_DYNAMIC_MMAP_BASE, Ordering::SeqCst);
+    LINUX_RUNTIME_MODE.store(old_runtime, Ordering::SeqCst);
+    shared && removed_while_attached && detached && destroyed && mappings_released
 }
 
 fn linux_runtime_mmap(

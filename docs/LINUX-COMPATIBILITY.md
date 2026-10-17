@@ -42,7 +42,7 @@ Detailed bounded behavior for implemented calls lives in
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **19 Complete**, **261 Partial**, **45 Policy-denied**, **50 Missing**.
+Current totals: **19 Complete**, **265 Partial**, **45 Policy-denied**, **46 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -60,7 +60,7 @@ Current totals: **19 Complete**, **261 Partial**, **45 Policy-denied**, **50 Mis
 | `/proc` | Partial | Automatically mounted per domain with domain-local PID directories, `status`, `stat`, `statm`, `mountinfo`, namespace maps, `cpuinfo`, `meminfo`, `stat`, `uptime`, `loadavg`, `filesystems`, and `cmdline`. Broader Linux procfs coverage and unconstrained process enumeration remain incomplete. |
 | IPv4 sockets | Partial | Domain descriptors expose repeated client TCP and UDP connections plus TCP bind/listen/accept over the shared host NIC with IOMMU-confined virtio queues; AF_UNIX stream socket pairs cover local runtime coordination. Ancillary data, IPv6, multi-entry listen backlogs, and complete option/error semantics remain pending. |
 | OCI overlay root | Partial | Verified layers are assembled in manifest order with replacements and OCI whiteouts. Broader overlay conformance remains under test. |
-| Runtime `mmap` | Partial | Page-table-backed anonymous and OCI file mappings, fixed placement, in-place growth/shrink and movable anonymous `mremap`, protection changes, unmap, `madvise`, and `mincore` support Alpine and the validated Rocky glibc/coreutils path. NUMA policy calls expose the current single node, validate node-0 masks, and make node-0 placement/migration operations explicit no-ops. Process snapshot metadata is still bounded and COW, shared mappings, `MREMAP_DONTUNMAP`, movable file mappings, multi-node NUMA policy, and full Linux semantics remain incomplete. |
+| Runtime `mmap` | Partial | Page-table-backed anonymous and OCI file mappings, fixed placement, in-place growth/shrink and movable anonymous `mremap`, protection changes, unmap, `madvise`, and `mincore` support Alpine and the validated Rocky glibc/coreutils path. SysV shared-memory pages remain shared across process hierarchy cloning. NUMA policy calls expose the current single node, validate node-0 masks, and make node-0 placement/migration operations explicit no-ops. Process snapshot metadata is still bounded and COW, general file-backed `MAP_SHARED`, `MREMAP_DONTUNMAP`, movable file mappings, multi-node NUMA policy, and full Linux semantics remain incomplete. |
 | `/dev` and terminal ABI | Partial | Selected console/device nodes and bounded termios/winsize ioctls. |
 | `/sys` | Missing | No Linux-compatible sysfs contract. |
 | Credentials and user namespaces | Partial | Container-scoped identity and hard privilege boundary; many mutation calls are policy-denied. |
@@ -77,12 +77,14 @@ domain, including relative/absolute arm, query, overrun, and
 delete operations. Signal/thread notification, realtime clocks, multiple timer
 objects, and overrun accumulation remain pending.
 
-System V shared memory remains deliberately missing until Ginux has
-domain-owned shared frame objects whose lifetime is independent of any one
-mapping. That prerequisite must provide attachment reference counts, inherited
-fork attachments, and deferred destruction after `IPC_RMID`; implementing
-`shmat` as an ordinary anonymous mapping would lose segment contents on detach
-and would not be Linux-compatible.
+System V shared memory now uses domain-owned, dynamically allocated frame
+objects whose lifetime is independent of any one mapping. `shmget`, `shmat`,
+`shmdt`, and `shmctl(IPC_STAT/IPC_RMID)` provide keyed creation, shared page
+mapping, attachment reference counts, and deferred destruction after
+`IPC_RMID`. `IPC_SET` updates the permission mode, and fork preserves shared
+page identity. Fork attachment-accounting, `SHM_REMAP`, timestamps, owner/group
+updates, permission enforcement, and Linux's
+information commands remain pending, so these calls remain Partial.
 
 ## Syscall index
 
@@ -121,9 +123,9 @@ therefore omitted.
 | 26 | msync | Partial |
 | 27 | mincore | Partial |
 | 28 | madvise | Partial |
-| 29 | shmget | Missing |
-| 30 | shmat | Missing |
-| 31 | shmctl | Missing |
+| 29 | shmget | Partial |
+| 30 | shmat | Partial |
+| 31 | shmctl | Partial |
 | 32 | dup | Partial |
 | 33 | dup2 | Partial |
 | 34 | pause | Partial |
@@ -159,7 +161,7 @@ therefore omitted.
 | 64 | semget | Missing |
 | 65 | semop | Missing |
 | 66 | semctl | Missing |
-| 67 | shmdt | Missing |
+| 67 | shmdt | Partial |
 | 68 | msgget | Missing |
 | 69 | msgsnd | Missing |
 | 70 | msgrcv | Missing |

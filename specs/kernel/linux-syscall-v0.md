@@ -981,6 +981,20 @@ preserves page protections when in-place growth is impossible, while
 Relocation rollback restores every page to its source range on a failed move.
 File-backed growth and `MREMAP_DONTUNMAP` remain unsupported. The boot probe
 profile continues to reject `mremap` with `-ENOSYS`.
+`rax = 29`, `30`, `31`, and `67` (`__NR_shmget`, `shmat`, `shmctl`, and
+`shmdt`) provide the first System V shared-memory profile in runtime domains.
+Segments and their frame inventories grow from allocator-owned metadata pages
+rather than a fixed object or size table. Keyed creation implements
+`IPC_CREAT`/`IPC_EXCL`; `IPC_PRIVATE` always creates a new segment. `shmat`
+installs the segment's existing frames at a free dynamic address, supports
+read-only and read-execute attachment under W^X, and records an independent
+attachment. `shmdt` removes that mapping without releasing object-owned data.
+`shmctl(IPC_STAT)` returns the native x86-64 112-byte `shmid_ds` subset,
+`IPC_SET` updates its mode, and `IPC_RMID` hides the key immediately while deferring destruction until the
+last recorded attachment leaves. Process hierarchy cloning preserves the
+shared PTE marker and aliases the same writable frames instead of copying
+them. Fork attachment-accounting, `SHM_REMAP`, timestamps, owner/group updates,
+permission enforcement, and information commands remain unsupported.
 `rax = 462` (`__NR_mseal`) irreversibly seals complete page-rounded ranges in
 the bounded anonymous scratch window and the runtime dynamic mapping region.
 The operation preflights every page before changing state, is idempotent, and

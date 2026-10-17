@@ -2640,6 +2640,10 @@ fn current_process_instance() -> usize {
     cpu::current_container_slot().unwrap_or(HOST_PROCESS_INSTANCE)
 }
 
+pub(crate) fn current_ipc_instance() -> usize {
+    current_process_instance()
+}
+
 fn active_process_instance() -> Option<usize> {
     let instance = usize::from(LIVE_PROCESS_ACTIVE_INSTANCE.load(Ordering::Acquire));
     (instance < PROCESS_INSTANCE_LIMIT).then_some(instance)

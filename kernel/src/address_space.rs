@@ -4866,10 +4866,6 @@ pub(crate) fn install_current_linux_runtime_page(
     .then_some(old.frame)
 }
 
-#[expect(
-    dead_code,
-    reason = "the SysV shmat path uses this shared-page primitive in the next ABI slice"
-)]
 pub(crate) fn install_current_linux_shared_page(
     address: u64,
     frame: memory::FrameLease,
