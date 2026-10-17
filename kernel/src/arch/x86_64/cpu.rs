@@ -12836,14 +12836,71 @@ fn verify_linux_io_uring_syscalls() -> bool {
             && u64::from_ne_bytes(completion[..8].try_into().unwrap()) == 0x4749_4e55_5852_494f
             && i32::from_ne_bytes(completion[8..12].try_into().unwrap()) == 0
     };
-    let probe = completed && linux_io_uring_register(descriptor, 8, parameters + 256, 1) == 0 && {
-        let mut output = [0_u8; 24];
-        copy_from_linux_user(parameters + 256, &mut output)
-            && output[1] == 1
-            && u16::from_ne_bytes(output[2..4].try_into().unwrap()) == 0
-            && output[16] == 0
-            && u16::from_ne_bytes(output[18..20].try_into().unwrap()) == 1
+    let io_descriptor = if completed && copy_to_linux_user(parameters + 512, b"/dev/zero\0") {
+        linux_openat(u64::from(LINUX_AT_FDCWD), parameters + 512, 2, 0)
+    } else {
+        LINUX_EBADF
     };
+    let read_sqe = io_descriptor < LINUX_AUX_DESCRIPTOR_LIMIT && {
+        let mut sqe = [0_u8; 64];
+        sqe[0] = 22;
+        sqe[4..8].copy_from_slice(&(io_descriptor as u32).to_ne_bytes());
+        sqe[8..16].copy_from_slice(&u64::MAX.to_ne_bytes());
+        sqe[16..24].copy_from_slice(&(parameters + 1024).to_ne_bytes());
+        sqe[24..28].copy_from_slice(&16_u32.to_ne_bytes());
+        sqe[32..40].copy_from_slice(&0x5245_4144_u64.to_ne_bytes());
+        copy_to_linux_user(sq + 28, &1_u32.to_ne_bytes())
+            && copy_to_linux_user(sq + 4, &2_u32.to_ne_bytes())
+            && copy_to_linux_user(sqes + 64, &sqe)
+            && linux_io_uring_enter(descriptor, 1, 1, 1, 0, 0) == 1
+    };
+    let read_completed = read_sqe && {
+        let mut completion = [0_u8; 16];
+        let mut bytes = [1_u8; 16];
+        copy_from_linux_user(cq + 36, &mut completion)
+            && u64::from_ne_bytes(completion[..8].try_into().unwrap()) == 0x5245_4144
+            && i32::from_ne_bytes(completion[8..12].try_into().unwrap()) == 16
+            && copy_from_linux_user(parameters + 1024, &mut bytes)
+            && bytes == [0_u8; 16]
+    };
+    let write_sqe = read_completed && {
+        let mut sqe = [0_u8; 64];
+        sqe[0] = 23;
+        sqe[4..8].copy_from_slice(&(io_descriptor as u32).to_ne_bytes());
+        sqe[8..16].copy_from_slice(&u64::MAX.to_ne_bytes());
+        sqe[16..24].copy_from_slice(&(parameters + 1024).to_ne_bytes());
+        sqe[24..28].copy_from_slice(&16_u32.to_ne_bytes());
+        sqe[32..40].copy_from_slice(&0x0057_5249_5445_u64.to_ne_bytes());
+        copy_to_linux_user(sq + 32, &2_u32.to_ne_bytes())
+            && copy_to_linux_user(sq + 4, &3_u32.to_ne_bytes())
+            && copy_to_linux_user(sqes + 128, &sqe)
+            && linux_io_uring_enter(descriptor, 1, 1, 1, 0, 0) == 1
+    };
+    let io_completed = write_sqe && {
+        let mut completion = [0_u8; 16];
+        copy_from_linux_user(cq + 52, &mut completion)
+            && u64::from_ne_bytes(completion[..8].try_into().unwrap()) == 0x0057_5249_5445
+            && i32::from_ne_bytes(completion[8..12].try_into().unwrap()) == 16
+            && linux_descriptor_close(io_descriptor) == 0
+    };
+    let probe =
+        io_completed && linux_io_uring_register(descriptor, 8, parameters + 256, 24) == 0 && {
+            let mut output = [0_u8; 16 + 24 * 8];
+            copy_from_linux_user(parameters + 256, &mut output)
+                && output[0] == 23
+                && output[1] == 24
+                && u16::from_ne_bytes(output[2..4].try_into().unwrap()) == 0
+                && output[16] == 0
+                && u16::from_ne_bytes(output[18..20].try_into().unwrap()) == 1
+                && output[24] == 1
+                && u16::from_ne_bytes(output[26..28].try_into().unwrap()) == 1
+                && output[40] == 3
+                && u16::from_ne_bytes(output[42..44].try_into().unwrap()) == 1
+                && output[192] == 22
+                && u16::from_ne_bytes(output[194..196].try_into().unwrap()) == 1
+                && output[200] == 23
+                && u16::from_ne_bytes(output[202..204].try_into().unwrap()) == 1
+        };
     let duplicate = if probe {
         linux_console_dup(descriptor)
     } else {
@@ -13040,10 +13097,37 @@ fn linux_io_uring_enter(
         if !copy_from_linux_user(sqes + u64::from(index) * 64, &mut sqe) {
             return LINUX_EFAULT;
         }
-        let result = if sqe[0] == 0 { 0_i32 } else { -22_i32 };
+        let descriptor = u32::from_ne_bytes(sqe[4..8].try_into().unwrap()) as u64;
+        let offset = u64::from_ne_bytes(sqe[8..16].try_into().unwrap());
+        let address = u64::from_ne_bytes(sqe[16..24].try_into().unwrap());
+        let length = u32::from_ne_bytes(sqe[24..28].try_into().unwrap()) as u64;
+        let operation_flags = u32::from_ne_bytes(sqe[28..32].try_into().unwrap());
+        let result = match sqe[0] {
+            0 => 0,
+            1 if offset == u64::MAX && operation_flags == 0 => {
+                linux_descriptor_readv(descriptor, address, length)
+            }
+            2 if offset == u64::MAX && operation_flags == 0 => {
+                linux_descriptor_writev(descriptor, address, length)
+            }
+            3 if operation_flags & !1 == 0 => {
+                if linux_descriptor_open(descriptor) {
+                    0
+                } else {
+                    LINUX_EBADF
+                }
+            }
+            22 if offset == u64::MAX && operation_flags == 0 => {
+                linux_descriptor_read(descriptor, address, length)
+            }
+            23 if offset == u64::MAX && operation_flags == 0 => {
+                linux_descriptor_write(descriptor, address, length)
+            }
+            _ => LINUX_EINVAL,
+        };
         let mut cqe = [0_u8; 16];
         cqe[..8].copy_from_slice(&sqe[32..40]);
-        cqe[8..12].copy_from_slice(&result.to_ne_bytes());
+        cqe[8..12].copy_from_slice(&(result as i32).to_ne_bytes());
         let cqe_address = cq + 20 + u64::from(cq_tail & (cq_entries as u32 - 1)) * 16;
         if !copy_to_linux_user(cqe_address, &cqe) {
             return LINUX_EFAULT;
@@ -13067,14 +13151,28 @@ fn linux_io_uring_register(descriptor: u64, opcode: u64, argument: u64, count: u
     if !linux_io_uring_descriptor(descriptor) {
         return LINUX_EBADF;
     }
-    if opcode != REGISTER_PROBE || count == 0 {
+    if opcode != REGISTER_PROBE {
         return LINUX_EOPNOTSUPP;
     }
-    let mut probe = [0_u8; 24];
-    probe[1] = 1;
-    probe[16] = 0;
-    probe[18..20].copy_from_slice(&1_u16.to_ne_bytes());
-    if copy_to_linux_user(argument, &probe) {
+    if count == 0 {
+        return LINUX_EINVAL;
+    }
+    const OPERATION_COUNT: usize = 24;
+    const SUPPORTED: [u8; 6] = [0, 1, 2, 3, 22, 23];
+    let entries = usize::try_from(count)
+        .unwrap_or(usize::MAX)
+        .min(OPERATION_COUNT);
+    let mut probe = [0_u8; 16 + OPERATION_COUNT * 8];
+    probe[0] = (OPERATION_COUNT - 1) as u8;
+    probe[1] = entries as u8;
+    for operation in 0..entries {
+        let offset = 16 + operation * 8;
+        probe[offset] = operation as u8;
+        if SUPPORTED.contains(&(operation as u8)) {
+            probe[offset + 2..offset + 4].copy_from_slice(&1_u16.to_ne_bytes());
+        }
+    }
+    if copy_to_linux_user(argument, &probe[..16 + entries * 8]) {
         0
     } else {
         LINUX_EFAULT

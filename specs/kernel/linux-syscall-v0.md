@@ -1757,11 +1757,13 @@ security-module selection remains an explicit host policy decision.
 `io_uring_register`) provide a bounded shared-ring ABI. Setup rounds up to at
 most 64 submission entries, publishes Linux SQ/CQ offsets, and exposes the
 three standard mmap offsets for SQ, CQ, and SQEs. Enter synchronously consumes
-SQ indices and publishes CQEs with acquire/release-visible head/tail updates;
-`IORING_OP_NOP` is supported and unsupported opcodes complete with `-EINVAL`.
-`IORING_REGISTER_PROBE` reports the NOP operation. SQPOLL/IOPOLL, registered
-resources, linked requests, cancellation, personalities, and asynchronous
-file/network operations remain pending.
+SQ indices and publishes CQEs with acquire/release-visible head/tail updates.
+`IORING_OP_NOP`, `READ`, `WRITE`, `READV`, `WRITEV`, and `FSYNC` use the same
+validated descriptor, VFS, and socket paths as their syscall equivalents;
+unsupported operations complete with `-EINVAL`. `IORING_REGISTER_PROBE`
+publishes operation records through `IORING_OP_WRITE`. SQPOLL/IOPOLL,
+registered resources, linked requests, cancellation, personalities, multiple
+rings, positioned I/O, and true asynchronous execution remain pending.
 
 Every other call
 returns `-ENOSYS` without disarming
