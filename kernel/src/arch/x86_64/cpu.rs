@@ -259,6 +259,12 @@ const LINUX_MSGGET_SYSCALL: u64 = 68;
 const LINUX_MSGSND_SYSCALL: u64 = 69;
 const LINUX_MSGRCV_SYSCALL: u64 = 70;
 const LINUX_MSGCTL_SYSCALL: u64 = 71;
+const LINUX_MQ_OPEN_SYSCALL: u64 = 240;
+const LINUX_MQ_UNLINK_SYSCALL: u64 = 241;
+const LINUX_MQ_TIMEDSEND_SYSCALL: u64 = 242;
+const LINUX_MQ_TIMEDRECEIVE_SYSCALL: u64 = 243;
+const LINUX_MQ_NOTIFY_SYSCALL: u64 = 244;
+const LINUX_MQ_GETSETATTR_SYSCALL: u64 = 245;
 const LINUX_SEMTIMEDOP_SYSCALL: u64 = 220;
 const LINUX_SWAPON_SYSCALL: u64 = 167;
 const LINUX_SWAPOFF_SYSCALL: u64 = 168;
@@ -462,6 +468,7 @@ const LINUX_EINVAL: u64 = u64::MAX - 21;
 const LINUX_ENOTTY: u64 = u64::MAX - 24;
 const LINUX_ERANGE: u64 = u64::MAX - 33;
 const LINUX_ENODATA: u64 = u64::MAX - 60;
+const LINUX_EMSGSIZE: u64 = u64::MAX - 89;
 const LINUX_EOPNOTSUPP: u64 = u64::MAX - 94;
 const LINUX_ENAMETOOLONG: u64 = u64::MAX - 35;
 const LINUX_ENOSYS: u64 = u64::MAX - 37;
@@ -562,6 +569,7 @@ const LINUX_DESCRIPTOR_OUTPUT: u16 = 2;
 const LINUX_DEVICE_ZERO: u16 = 1 << 2;
 const LINUX_DEVICE_CONSOLE: u16 = 1 << 3;
 const LINUX_DEVICE_DIRECTORY: u16 = 1 << 4;
+const LINUX_DEVICE_POSIX_MQ: u16 = 1 << 10;
 const LINUX_DEVICE_INOTIFY: u16 = 1 << 11;
 const LINUX_DEVICE_PIDFD: u16 = 1 << 13;
 const LINUX_DEVICE_SIGNALFD: u16 = 1 << 12;
@@ -7814,6 +7822,16 @@ extern "sysv64" fn linux_syscall_handler(
             linux_msgrcv(first_argument, buffer, count, register(0), register(2))
         }
         LINUX_MSGCTL_SYSCALL => linux_msgctl(first_argument, buffer, count),
+        LINUX_MQ_OPEN_SYSCALL => linux_mq_open(first_argument, buffer, count, register(0)),
+        LINUX_MQ_UNLINK_SYSCALL => linux_mq_unlink(first_argument),
+        LINUX_MQ_TIMEDSEND_SYSCALL => {
+            linux_mq_timedsend(first_argument, buffer, count, register(0), register(2))
+        }
+        LINUX_MQ_TIMEDRECEIVE_SYSCALL => {
+            linux_mq_timedreceive(first_argument, buffer, count, register(0), register(2))
+        }
+        LINUX_MQ_NOTIFY_SYSCALL => linux_mq_notify(first_argument, buffer),
+        LINUX_MQ_GETSETATTR_SYSCALL => linux_mq_getsetattr(first_argument, buffer, count),
         LINUX_SEMTIMEDOP_SYSCALL => linux_semop(first_argument, buffer, count, register(0)),
         LINUX_MREMAP_SYSCALL => {
             linux_mremap(first_argument, buffer, count, register(0), register(2))
@@ -10998,6 +11016,31 @@ fn retain_linux_descriptor_runtime_state(state: &LinuxDescriptorRuntimeState) ->
         }
         retained += 1;
     }
+    let devices = state.stdio_devices.iter().chain(&state.devices);
+    let offsets = state.stdio_offsets.iter().chain(&state.offsets).copied();
+    let mut mq_retained = 0;
+    for (device, id) in devices.zip(offsets) {
+        if device & !3 != LINUX_DEVICE_POSIX_MQ {
+            continue;
+        }
+        if u32::try_from(id).is_err()
+            || crate::linux_sysv_ipc::posix_queue_duplicate(id as u32).is_err()
+        {
+            for prior_id in state
+                .stdio_devices
+                .iter()
+                .chain(&state.devices)
+                .zip(state.stdio_offsets.iter().chain(&state.offsets).copied())
+                .filter(|(device, _)| *device & !3 == LINUX_DEVICE_POSIX_MQ)
+                .map(|(_, id)| id)
+                .take(mq_retained)
+            {
+                let _ = crate::linux_sysv_ipc::posix_queue_close(prior_id as u32);
+            }
+            return false;
+        }
+        mq_retained += 1;
+    }
     true
 }
 
@@ -11010,6 +11053,16 @@ fn release_linux_descriptor_runtime_state(state: &LinuxDescriptorRuntimeState) {
         .filter(|slot| *slot != 0)
     {
         let _ = crate::linux_socket::close(socket - 1);
+    }
+    for (device, id) in state
+        .stdio_devices
+        .iter()
+        .chain(&state.devices)
+        .zip(state.stdio_offsets.iter().chain(&state.offsets).copied())
+    {
+        if device & !3 == LINUX_DEVICE_POSIX_MQ {
+            let _ = crate::linux_sysv_ipc::posix_queue_close(id as u32);
+        }
     }
 }
 
@@ -11750,6 +11803,243 @@ fn linux_msgctl(id: u64, command: u64, address: u64) -> u64 {
     }
 }
 
+fn linux_mq_name(address: u64, output: &mut [u8; 256]) -> Result<usize, u64> {
+    let length = copy_linux_c_string(address, output)?;
+    if length < 2 || output[0] != b'/' || output[1..length].contains(&b'/') {
+        return Err(LINUX_EINVAL);
+    }
+    Ok(length)
+}
+
+fn linux_mq_descriptor_id(descriptor: u64) -> Option<u32> {
+    (linux_device_descriptor(descriptor) & !3 == LINUX_DEVICE_POSIX_MQ)
+        .then(|| u32::try_from(linux_descriptor_offset(descriptor).load(Ordering::SeqCst)).ok())
+        .flatten()
+}
+
+fn linux_mq_open(name_address: u64, flags: u64, mode: u64, attributes: u64) -> u64 {
+    let valid = 3 | LINUX_O_CREAT | LINUX_O_EXCL | LINUX_O_NONBLOCK | LINUX_O_CLOEXEC;
+    if flags & !valid != 0
+        || flags & 3 == 3
+        || flags & LINUX_O_EXCL != 0 && flags & LINUX_O_CREAT == 0
+    {
+        return LINUX_EINVAL;
+    }
+    let mut name = [0_u8; 256];
+    let length = match linux_mq_name(name_address, &mut name) {
+        Ok(length) => length,
+        Err(error) => return error,
+    };
+    let (max_messages, max_message_size) = if flags & LINUX_O_CREAT != 0 && attributes != 0 {
+        let mut attr = [0_u8; 64];
+        if !copy_from_linux_user(attributes, &mut attr) {
+            return LINUX_EFAULT;
+        }
+        let max_messages = i64::from_ne_bytes(attr[8..16].try_into().unwrap());
+        let max_message_size = i64::from_ne_bytes(attr[16..24].try_into().unwrap());
+        if max_messages <= 0
+            || max_message_size <= 0
+            || max_messages > i64::from(u32::MAX)
+            || max_message_size > i64::from(u32::MAX)
+        {
+            return LINUX_EINVAL;
+        }
+        (max_messages as u32, max_message_size as u32)
+    } else {
+        (10, 8192)
+    };
+    let info = match crate::linux_sysv_ipc::posix_queue_open(
+        &name[..length],
+        flags & LINUX_O_CREAT != 0,
+        flags & LINUX_O_EXCL != 0,
+        mode as u16,
+        max_messages,
+        max_message_size,
+    ) {
+        Ok(info) => info,
+        Err(error) => return linux_sysv_ipc_error(error),
+    };
+    let Some(descriptor) = (LINUX_AUX_DESCRIPTOR_FIRST..LINUX_AUX_DESCRIPTOR_LIMIT)
+        .find(|descriptor| linux_aux_descriptor_free(*descriptor))
+    else {
+        let _ = crate::linux_sysv_ipc::posix_queue_close(info.id);
+        return LINUX_EMFILE;
+    };
+    let index = (descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize;
+    ELF_PROBE_DEVICE_DESCRIPTORS[index]
+        .store(LINUX_DEVICE_POSIX_MQ | flags as u16 & 3, Ordering::SeqCst);
+    ELF_PROBE_SOCKET_FLAGS[index].store((flags & LINUX_O_NONBLOCK) as u32, Ordering::SeqCst);
+    ELF_PROBE_DESCRIPTOR_OFFSETS[index].store(u64::from(info.id), Ordering::SeqCst);
+    set_linux_descriptor_close_on_exec(descriptor, flags & LINUX_O_CLOEXEC != 0);
+    descriptor
+}
+
+fn linux_mq_unlink(name_address: u64) -> u64 {
+    let mut name = [0_u8; 256];
+    let length = match linux_mq_name(name_address, &mut name) {
+        Ok(length) => length,
+        Err(error) => return error,
+    };
+    crate::linux_sysv_ipc::posix_queue_unlink(&name[..length])
+        .map_or_else(linux_sysv_ipc_error, |()| 0)
+}
+
+fn linux_mq_timeout(address: u64) -> Result<(), u64> {
+    if address == 0 {
+        return Ok(());
+    }
+    let mut timeout = [0_u8; 16];
+    if !copy_from_linux_user(address, &mut timeout) {
+        return Err(LINUX_EFAULT);
+    }
+    linux_timespec_nanoseconds(&timeout)
+        .map(|_| ())
+        .ok_or(LINUX_EINVAL)
+}
+
+fn linux_mq_timedsend(
+    descriptor: u64,
+    message: u64,
+    length: u64,
+    priority: u64,
+    timeout: u64,
+) -> u64 {
+    let Some(id) = linux_mq_descriptor_id(descriptor) else {
+        return LINUX_EBADF;
+    };
+    if linux_device_descriptor(descriptor) & 3 == 0 {
+        return LINUX_EBADF;
+    }
+    if priority >= 32_768 {
+        return LINUX_EINVAL;
+    }
+    if let Err(error) = linux_mq_timeout(timeout) {
+        return error;
+    }
+    let Ok(info) = crate::linux_sysv_ipc::posix_queue_info(id) else {
+        return LINUX_EBADF;
+    };
+    if length > info.max_message_size || info.messages >= info.max_messages {
+        return if length > info.max_message_size {
+            LINUX_EMSGSIZE
+        } else {
+            LINUX_EAGAIN
+        };
+    }
+    let Ok(length_usize) = usize::try_from(length) else {
+        return LINUX_EMSGSIZE;
+    };
+    crate::linux_sysv_ipc::message_send(
+        id,
+        (32_768 - priority) as i64,
+        length_usize,
+        current_linux_process_pid(),
+        |offset, output| {
+            message
+                .checked_add(offset as u64)
+                .is_some_and(|address| copy_from_linux_user(address, output))
+        },
+    )
+    .map_or_else(linux_sysv_ipc_error, |()| 0)
+}
+
+fn linux_mq_timedreceive(
+    descriptor: u64,
+    message: u64,
+    length: u64,
+    priority: u64,
+    timeout: u64,
+) -> u64 {
+    let Some(id) = linux_mq_descriptor_id(descriptor) else {
+        return LINUX_EBADF;
+    };
+    if linux_device_descriptor(descriptor) & 3 == 1 {
+        return LINUX_EBADF;
+    }
+    if let Err(error) = linux_mq_timeout(timeout) {
+        return error;
+    }
+    let Ok(info) = crate::linux_sysv_ipc::posix_queue_info(id) else {
+        return LINUX_EBADF;
+    };
+    if length < info.max_message_size {
+        return LINUX_EMSGSIZE;
+    }
+    let Ok(length) = usize::try_from(length) else {
+        return LINUX_EMSGSIZE;
+    };
+    crate::linux_sysv_ipc::message_receive(
+        id,
+        length,
+        -32_768,
+        false,
+        false,
+        false,
+        current_linux_process_pid(),
+        |kind, offset, bytes| {
+            let priority_written = priority == 0
+                || offset != 0
+                || copy_to_linux_user(priority, &((32_768 - kind) as u32).to_ne_bytes());
+            priority_written
+                && message
+                    .checked_add(offset as u64)
+                    .is_some_and(|address| copy_to_linux_user(address, bytes))
+        },
+    )
+    .map_or_else(linux_sysv_ipc_error, |size| size as u64)
+}
+
+fn linux_mq_notify(descriptor: u64, event: u64) -> u64 {
+    if linux_mq_descriptor_id(descriptor).is_none() {
+        return LINUX_EBADF;
+    }
+    if event == 0 {
+        return 0;
+    }
+    let mut value = [0_u8; 16];
+    if !copy_from_linux_user(event, &mut value) {
+        return LINUX_EFAULT;
+    }
+    if i32::from_ne_bytes(value[12..16].try_into().unwrap()) == 1 {
+        0
+    } else {
+        LINUX_EINVAL
+    }
+}
+
+fn linux_mq_getsetattr(descriptor: u64, new: u64, old: u64) -> u64 {
+    let Some(id) = linux_mq_descriptor_id(descriptor) else {
+        return LINUX_EBADF;
+    };
+    let Ok(info) = crate::linux_sysv_ipc::posix_queue_info(id) else {
+        return LINUX_EBADF;
+    };
+    let flags = linux_socket_flags(descriptor).unwrap_or(0) & LINUX_O_NONBLOCK as u32;
+    if old != 0 {
+        let mut attr = [0_u8; 64];
+        attr[..8].copy_from_slice(&u64::from(flags).to_ne_bytes());
+        attr[8..16].copy_from_slice(&info.max_messages.to_ne_bytes());
+        attr[16..24].copy_from_slice(&info.max_message_size.to_ne_bytes());
+        attr[24..32].copy_from_slice(&info.messages.to_ne_bytes());
+        if !copy_to_linux_user(old, &attr) {
+            return LINUX_EFAULT;
+        }
+    }
+    if new != 0 {
+        let mut attr = [0_u8; 64];
+        if !copy_from_linux_user(new, &mut attr) {
+            return LINUX_EFAULT;
+        }
+        let requested = u64::from_ne_bytes(attr[..8].try_into().unwrap());
+        if requested & !LINUX_O_NONBLOCK != 0 {
+            return LINUX_EINVAL;
+        }
+        let index = (descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize;
+        ELF_PROBE_SOCKET_FLAGS[index].store(requested as u32, Ordering::SeqCst);
+    }
+    0
+}
+
 fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let old_runtime = LINUX_RUNTIME_MODE.swap(true, Ordering::SeqCst);
     let id = linux_shmget(0, 2 * PAGE_SIZE as u64, 0o600);
@@ -11787,6 +12077,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let semaphores = verify_linux_sysv_semaphore_syscalls();
     let messages = verify_linux_sysv_message_queue_syscalls();
     let process_advice = verify_linux_process_madvise_syscall();
+    let posix_queues = verify_linux_posix_message_queue_syscalls();
     let mappings_released =
         address_space::release_current_linux_runtime_mappings(LINUX_RUNTIME_DYNAMIC_MMAP_BASE);
     ELF_PROBE_MMAP_NEXT.store(LINUX_RUNTIME_DYNAMIC_MMAP_BASE, Ordering::SeqCst);
@@ -11798,7 +12089,73 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && semaphores
         && messages
         && process_advice
+        && posix_queues
         && mappings_released
+}
+
+fn verify_linux_posix_message_queue_syscalls() -> bool {
+    let mapping = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    if !(LINUX_RUNTIME_DYNAMIC_MMAP_BASE..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
+        .contains(&mapping)
+    {
+        return false;
+    }
+    let name = b"/ginux-abi\0";
+    let mut attr = [0_u8; 64];
+    attr[8..16].copy_from_slice(&4_u64.to_ne_bytes());
+    attr[16..24].copy_from_slice(&32_u64.to_ne_bytes());
+    let prepared = copy_to_linux_user(mapping, name) && copy_to_linux_user(mapping + 64, &attr);
+    let descriptor = if prepared {
+        linux_mq_open(mapping, LINUX_O_CREAT | 2, 0o600, mapping + 64)
+    } else {
+        LINUX_EFAULT
+    };
+    let opened = descriptor < LINUX_AUX_DESCRIPTOR_LIMIT;
+    let sent = opened
+        && copy_to_linux_user(mapping + 256, b"low")
+        && linux_mq_timedsend(descriptor, mapping + 256, 3, 3, 0) == 0
+        && copy_to_linux_user(mapping + 256, b"high")
+        && linux_mq_timedsend(descriptor, mapping + 256, 4, 9, 0) == 0;
+    let received =
+        sent && linux_mq_timedreceive(descriptor, mapping + 512, 32, mapping + 600, 0) == 4 && {
+            let mut message = [0_u8; 4];
+            let mut priority = [0_u8; 4];
+            copy_from_linux_user(mapping + 512, &mut message)
+                && copy_from_linux_user(mapping + 600, &mut priority)
+                && message == *b"high"
+                && u32::from_ne_bytes(priority) == 9
+        };
+    let mut event = [0_u8; 16];
+    event[12..].copy_from_slice(&1_i32.to_ne_bytes());
+    let queried = copy_to_linux_user(mapping + 640, &event)
+        && linux_mq_notify(descriptor, mapping + 640) == 0
+        && linux_mq_getsetattr(descriptor, 0, mapping + 704) == 0
+        && {
+            let mut current = [0_u8; 64];
+            copy_from_linux_user(mapping + 704, &mut current)
+                && u64::from_ne_bytes(current[8..16].try_into().unwrap()) == 4
+                && u64::from_ne_bytes(current[16..24].try_into().unwrap()) == 32
+                && u64::from_ne_bytes(current[24..32].try_into().unwrap()) == 1
+        };
+    let duplicate = if opened {
+        linux_console_dup(descriptor)
+    } else {
+        LINUX_EBADF
+    };
+    let lifecycle = duplicate < LINUX_AUX_DESCRIPTOR_LIMIT
+        && linux_mq_unlink(mapping) == 0
+        && linux_mq_open(mapping, 2, 0, 0) == LINUX_ENOENT
+        && linux_descriptor_close(duplicate) == 0
+        && linux_descriptor_close(descriptor) == 0;
+    let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
+    received && queried && lifecycle && unmapped
 }
 
 fn verify_linux_process_madvise_syscall() -> bool {
@@ -22408,6 +22765,11 @@ fn linux_descriptor_close_with_wake(descriptor: u64, wake_waiters: bool) -> u64 
     if linux_inotify_descriptor(descriptor) {
         linux_inotify_release(descriptor);
     }
+    if let Some(id) = linux_mq_descriptor_id(descriptor) {
+        if crate::linux_sysv_ipc::posix_queue_close(id).is_err() {
+            return LINUX_EBADF;
+        }
+    }
     if descriptor < LINUX_AUX_DESCRIPTOR_FIRST && linux_device_descriptor(descriptor) != 0 {
         let index = descriptor as usize;
         ELF_PROBE_STDIO_DEVICE_DESCRIPTORS[index].store(0, Ordering::SeqCst);
@@ -22591,6 +22953,11 @@ fn linux_console_dup2(source: u64, target: u64) -> u64 {
         }
         if linux_descriptor_open(target) && linux_descriptor_close(target) != 0 {
             return LINUX_EBADF;
+        }
+        if let Some(id) = linux_mq_descriptor_id(source) {
+            if crate::linux_sysv_ipc::posix_queue_duplicate(id).is_err() {
+                return LINUX_EBADF;
+            }
         }
         if let Some(slot) = linux_socket_slot(source) {
             if !crate::linux_socket::duplicate(slot) {

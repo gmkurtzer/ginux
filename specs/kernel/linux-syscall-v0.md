@@ -1024,6 +1024,18 @@ lowest-type negative selection, `MSG_EXCEPT`, nondestructive ordinal
 x86-64 120-byte `IPC_STAT` layout. Empty/full operations return `EAGAIN`;
 blocking wait scheduling, timestamps, owner/group updates, credential
 enforcement, and Linux information commands remain unsupported.
+`rax = 240` through `245` provide per-domain POSIX message queues.
+`mq_open` accepts one-component slash-prefixed names, Linux access/create,
+exclusive, nonblocking, and close-on-exec flags, and native 64-byte `mq_attr`
+records. Named objects and payload chains allocate pages on demand rather than
+using a fixed queue or byte array. Descriptors participate in dup, fork,
+close-on-exec, close, and unlink reference accounting. `mq_timedsend` validates
+priorities below 32768 and orders equal-priority messages FIFO;
+`mq_timedreceive` returns the highest priority first and requires Linux's full
+configured receive-buffer size. `mq_getsetattr` reports limits and current
+depth and changes only `O_NONBLOCK`; `mq_notify` accepts unregister and
+`SIGEV_NONE`. Full/empty queues return `EAGAIN`. Scheduler-backed absolute
+deadline waits, `SIGEV_SIGNAL`, and `SIGEV_THREAD` delivery remain unsupported.
 `rax = 462` (`__NR_mseal`) irreversibly seals complete page-rounded ranges in
 the bounded anonymous scratch window and the runtime dynamic mapping region.
 The operation preflights every page before changing state, is idempotent, and

@@ -79,6 +79,14 @@ pub(crate) struct MessageQueueInfo {
     pub(crate) last_receiver: u32,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct PosixQueueInfo {
+    pub(crate) id: u32,
+    pub(crate) max_messages: u64,
+    pub(crate) max_message_size: u64,
+    pub(crate) messages: u64,
+}
+
 #[repr(C)]
 struct MessageQueue {
     next_queue: memory::FrameLease,
@@ -93,6 +101,13 @@ struct MessageQueue {
     tail: memory::FrameLease,
     last_sender: u32,
     last_receiver: u32,
+    posix: u8,
+    linked: u8,
+    name_length: u16,
+    max_messages: u32,
+    max_message_size: u32,
+    open_references: u64,
+    name: [u8; 256],
 }
 
 #[repr(C)]
@@ -1175,6 +1190,185 @@ pub(crate) fn message_get_or_create(
         Some(frame),
     );
     Ok(id)
+}
+
+fn posix_info(queue: &MessageQueue) -> PosixQueueInfo {
+    PosixQueueInfo {
+        id: queue.id,
+        max_messages: u64::from(queue.max_messages),
+        max_message_size: u64::from(queue.max_message_size),
+        messages: queue.messages,
+    }
+}
+
+pub(crate) fn posix_queue_open(
+    name: &[u8],
+    create: bool,
+    exclusive: bool,
+    mode: u16,
+    max_messages: u32,
+    max_message_size: u32,
+) -> Result<PosixQueueInfo, Error> {
+    if name.is_empty() || name.len() > 255 || max_messages == 0 || max_message_size == 0 {
+        return Err(Error::Invalid);
+    }
+    let guard = Guard::acquire().ok_or(Error::Invalid)?;
+    let mut current = root(
+        &MESSAGE_ROOT_ADDRESSES,
+        &MESSAGE_ROOT_GENERATIONS,
+        guard.instance,
+    );
+    for _ in 0..WALK_LIMIT {
+        let Some(frame) = current else { break };
+        let queue = message_queue_mut(frame).ok_or(Error::Invalid)?;
+        if queue.posix != 0
+            && queue.linked != 0
+            && usize::from(queue.name_length) == name.len()
+            && queue.name[..name.len()] == *name
+        {
+            if create && exclusive {
+                return Err(Error::Exists);
+            }
+            queue.open_references = queue
+                .open_references
+                .checked_add(1)
+                .ok_or(Error::NoMemory)?;
+            return Ok(posix_info(queue));
+        }
+        current = (queue.next_queue != memory::FrameLease::EMPTY).then_some(queue.next_queue);
+    }
+    if !create {
+        return Err(Error::NoEntry);
+    }
+    let frame = allocate_zeroed().ok_or(Error::NoMemory)?;
+    let id = NEXT_MESSAGE_IDS[guard.instance].fetch_add(1, Ordering::AcqRel);
+    if id == 0 || id > i32::MAX as u32 {
+        let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[frame]);
+        return Err(Error::NoMemory);
+    }
+    let old_root = root(
+        &MESSAGE_ROOT_ADDRESSES,
+        &MESSAGE_ROOT_GENERATIONS,
+        guard.instance,
+    );
+    let queue = message_queue_mut(frame).ok_or(Error::NoMemory)?;
+    queue.next_queue = old_root.unwrap_or(memory::FrameLease::EMPTY);
+    queue.id = id;
+    queue.mode = mode & 0o777;
+    queue.byte_limit = u64::from(max_messages) * u64::from(max_message_size);
+    queue.posix = 1;
+    queue.linked = 1;
+    queue.name_length = name.len() as u16;
+    queue.max_messages = max_messages;
+    queue.max_message_size = max_message_size;
+    queue.open_references = 1;
+    queue.name[..name.len()].copy_from_slice(name);
+    let info = posix_info(queue);
+    publish_root(
+        &MESSAGE_ROOT_ADDRESSES,
+        &MESSAGE_ROOT_GENERATIONS,
+        guard.instance,
+        Some(frame),
+    );
+    Ok(info)
+}
+
+pub(crate) fn posix_queue_info(id: u32) -> Result<PosixQueueInfo, Error> {
+    let guard = Guard::acquire().ok_or(Error::Invalid)?;
+    let (frame, _) = find_message_queue(guard.instance, id).ok_or(Error::Invalid)?;
+    let queue = message_queue(frame).ok_or(Error::Invalid)?;
+    (queue.posix != 0)
+        .then(|| posix_info(queue))
+        .ok_or(Error::Invalid)
+}
+
+pub(crate) fn posix_queue_duplicate(id: u32) -> Result<(), Error> {
+    let guard = Guard::acquire().ok_or(Error::Invalid)?;
+    let (frame, _) = find_message_queue(guard.instance, id).ok_or(Error::Invalid)?;
+    let queue = message_queue_mut(frame).ok_or(Error::Invalid)?;
+    if queue.posix == 0 {
+        return Err(Error::Invalid);
+    }
+    queue.open_references = queue
+        .open_references
+        .checked_add(1)
+        .ok_or(Error::NoMemory)?;
+    Ok(())
+}
+
+pub(crate) fn posix_queue_close(id: u32) -> Result<(), Error> {
+    let guard = Guard::acquire().ok_or(Error::Invalid)?;
+    let (frame, previous) = find_message_queue(guard.instance, id).ok_or(Error::Invalid)?;
+    let queue = message_queue_mut(frame).ok_or(Error::Invalid)?;
+    if queue.posix == 0 || queue.open_references == 0 {
+        return Err(Error::Invalid);
+    }
+    queue.open_references -= 1;
+    if queue.open_references == 0 && queue.linked == 0 {
+        remove_message_queue_locked(guard.instance, frame, previous)
+    } else {
+        Ok(())
+    }
+}
+
+pub(crate) fn posix_queue_unlink(name: &[u8]) -> Result<(), Error> {
+    let guard = Guard::acquire().ok_or(Error::Invalid)?;
+    let mut current = root(
+        &MESSAGE_ROOT_ADDRESSES,
+        &MESSAGE_ROOT_GENERATIONS,
+        guard.instance,
+    );
+    let mut previous = None;
+    for _ in 0..WALK_LIMIT {
+        let Some(frame) = current else { break };
+        let queue = message_queue_mut(frame).ok_or(Error::Invalid)?;
+        if queue.posix != 0
+            && queue.linked != 0
+            && usize::from(queue.name_length) == name.len()
+            && queue.name[..name.len()] == *name
+        {
+            queue.linked = 0;
+            queue.name_length = 0;
+            queue.name.fill(0);
+            return if queue.open_references == 0 {
+                remove_message_queue_locked(guard.instance, frame, previous)
+            } else {
+                Ok(())
+            };
+        }
+        previous = Some(frame);
+        current = (queue.next_queue != memory::FrameLease::EMPTY).then_some(queue.next_queue);
+    }
+    Err(Error::NoEntry)
+}
+
+fn remove_message_queue_locked(
+    instance: usize,
+    frame: memory::FrameLease,
+    previous: Option<memory::FrameLease>,
+) -> Result<(), Error> {
+    let queue = message_queue(frame).ok_or(Error::Invalid)?;
+    let next = (queue.next_queue != memory::FrameLease::EMPTY).then_some(queue.next_queue);
+    let messages = (queue.head != memory::FrameLease::EMPTY).then_some(queue.head);
+    if let Some(previous) = previous {
+        message_queue_mut(previous)
+            .ok_or(Error::Invalid)?
+            .next_queue = next.unwrap_or(memory::FrameLease::EMPTY);
+    } else {
+        publish_root(
+            &MESSAGE_ROOT_ADDRESSES,
+            &MESSAGE_ROOT_GENERATIONS,
+            instance,
+            next,
+        );
+    }
+    if release_messages(messages)
+        && memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[frame])
+    {
+        Ok(())
+    } else {
+        Err(Error::Invalid)
+    }
 }
 
 pub(crate) fn message_queue_info(id: u32) -> Result<MessageQueueInfo, Error> {

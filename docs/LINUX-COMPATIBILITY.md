@@ -42,7 +42,7 @@ Detailed bounded behavior for implemented calls lives in
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **19 Complete**, **275 Partial**, **45 Policy-denied**, **36 Missing**.
+Current totals: **19 Complete**, **281 Partial**, **45 Policy-denied**, **30 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -104,6 +104,13 @@ Linux type selection, `MSG_EXCEPT`, nondestructive `MSG_COPY`, and
 not constrained to a static aggregate cache. Blocking wait/wakeup, timestamps,
 credential enforcement, and Linux's information commands remain pending, so
 the family remains Partial.
+
+POSIX message queues use named per-domain objects backed by the same dynamic
+page allocator. `mq_open`, `mq_unlink`, `mq_timedsend`, `mq_timedreceive`,
+`mq_notify`, and `mq_getsetattr` cover create/exclusive lookup, descriptor
+duplication and close, unlink lifetime, priority ordering, attributes,
+`O_NONBLOCK`, and `SIGEV_NONE`. Blocking deadline waits and signal/thread
+notification delivery remain pending, so this family remains Partial.
 
 ## Syscall index
 
@@ -353,12 +360,12 @@ therefore omitted.
 | 237 | mbind | Partial |
 | 238 | set_mempolicy | Partial |
 | 239 | get_mempolicy | Partial |
-| 240 | mq_open | Missing |
-| 241 | mq_unlink | Missing |
-| 242 | mq_timedsend | Missing |
-| 243 | mq_timedreceive | Missing |
-| 244 | mq_notify | Missing |
-| 245 | mq_getsetattr | Missing |
+| 240 | mq_open | Partial |
+| 241 | mq_unlink | Partial |
+| 242 | mq_timedsend | Partial |
+| 243 | mq_timedreceive | Partial |
+| 244 | mq_notify | Partial |
+| 245 | mq_getsetattr | Partial |
 | 246 | kexec_load | Policy-denied |
 | 247 | waitid | Partial |
 | 248 | add_key | Missing |
