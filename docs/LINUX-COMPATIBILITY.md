@@ -42,7 +42,7 @@ implemented calls lives in [Linux Syscall Entry v0](../specs/kernel/linux-syscal
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **200 Partial**, **28 Policy-denied**, **147 Missing**.
+Current totals: **202 Partial**, **28 Policy-denied**, **145 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -113,7 +113,7 @@ therefore omitted.
 | 31 | shmctl | Missing |
 | 32 | dup | Partial |
 | 33 | dup2 | Partial |
-| 34 | pause | Missing |
+| 34 | pause | Partial |
 | 35 | nanosleep | Partial |
 | 36 | getitimer | Partial |
 | 37 | alarm | Missing |
@@ -209,7 +209,7 @@ therefore omitted.
 | 127 | rt_sigpending | Partial |
 | 128 | rt_sigtimedwait | Partial |
 | 129 | rt_sigqueueinfo | Missing |
-| 130 | rt_sigsuspend | Missing |
+| 130 | rt_sigsuspend | Partial |
 | 131 | sigaltstack | Partial |
 | 132 | utime | Partial |
 | 133 | mknod | Missing |

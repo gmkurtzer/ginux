@@ -81,6 +81,7 @@ const LINUX_RT_SIGPROCMASK_SYSCALL: u64 = 14;
 const LINUX_RT_SIGRETURN_SYSCALL: u64 = 15;
 const LINUX_RT_SIGPENDING_SYSCALL: u64 = 127;
 const LINUX_RT_SIGTIMEDWAIT_SYSCALL: u64 = 128;
+const LINUX_RT_SIGSUSPEND_SYSCALL: u64 = 130;
 const LINUX_IOCTL_SYSCALL: u64 = 16;
 const LINUX_PREAD64_SYSCALL: u64 = 17;
 const LINUX_PWRITE64_SYSCALL: u64 = 18;
@@ -96,6 +97,7 @@ const LINUX_MINCORE_SYSCALL: u64 = 27;
 const LINUX_MADVISE_SYSCALL: u64 = 28;
 const LINUX_DUP_SYSCALL: u64 = 32;
 const LINUX_DUP2_SYSCALL: u64 = 33;
+const LINUX_PAUSE_SYSCALL: u64 = 34;
 const LINUX_NANOSLEEP_SYSCALL: u64 = 35;
 const LINUX_GETITIMER_SYSCALL: u64 = 36;
 const LINUX_SETITIMER_SYSCALL: u64 = 38;
@@ -1037,6 +1039,8 @@ const LINUX_THREAD_WAIT_PIPE_READ: u8 = 9;
 const LINUX_THREAD_WAIT_TIMERFD_READ: u8 = 10;
 const LINUX_THREAD_WAIT_PIPE_WRITE: u8 = 11;
 const LINUX_THREAD_WAIT_EVENTFD_WRITE: u8 = 12;
+const LINUX_THREAD_WAIT_PAUSE: u8 = 13;
+const LINUX_THREAD_WAIT_SIGSUSPEND: u8 = 14;
 const LINUX_SYSCALL_FRAME_REGISTERS: usize = 12;
 static LINUX_THREAD_STATES: [BankedAtomicU8; LINUX_THREAD_LIMIT] =
     [const { BankedAtomicU8::new(LINUX_THREAD_FREE) }; LINUX_THREAD_LIMIT];
@@ -4457,6 +4461,8 @@ fn block_current_linux_thread(kind: u8, key: u64, output: u64, deadline: u64) ->
             | LINUX_THREAD_WAIT_TIMERFD_READ
             | LINUX_THREAD_WAIT_PIPE_WRITE
             | LINUX_THREAD_WAIT_EVENTFD_WRITE
+            | LINUX_THREAD_WAIT_PAUSE
+            | LINUX_THREAD_WAIT_SIGSUSPEND
     ) || key == 0
         || LINUX_THREAD_STATES[slot].load(Ordering::SeqCst) != LINUX_THREAD_RUNNING
         || LINUX_THREAD_WAIT_KINDS[slot].load(Ordering::SeqCst) != LINUX_THREAD_WAIT_NONE
@@ -7712,6 +7718,27 @@ extern "sysv64" fn linux_syscall_handler(
             count,
             register(0),
         ),
+        LINUX_PAUSE_SYSCALL => linux_signal_suspend_live_return(
+            registers,
+            syscall_return,
+            LINUX_THREAD_WAIT_PAUSE,
+            None,
+        ),
+        LINUX_RT_SIGSUSPEND_SYSCALL => {
+            let mask = match linux_temporary_signal_mask(LinuxSignalMaskInput {
+                address: first_argument,
+                size: buffer,
+            }) {
+                Ok(mask) => mask,
+                Err(error) => return error,
+            };
+            linux_signal_suspend_live_return(
+                registers,
+                syscall_return,
+                LINUX_THREAD_WAIT_SIGSUSPEND,
+                Some(mask),
+            )
+        }
         LINUX_CLONE_SYSCALL
             if (saved_registers.rdi == LINUX_SIGCHLD
                 || saved_registers.rdi
@@ -15962,6 +15989,18 @@ fn linux_poll_live_return(
     )
 }
 
+fn linux_signal_suspend_live_return(
+    output: *mut LinuxSyscallFrame,
+    caller: LinuxUserContext,
+    wait_kind: u8,
+    temporary_signal_mask: Option<u64>,
+) -> u64 {
+    // The poll wait engine already provides the required atomic
+    // save/block/schedule transition. A nonzero private key satisfies its
+    // generation-safe wait record without exposing a descriptor or pointer.
+    linux_poll_wait_live_return(output, caller, 1, 0, None, wait_kind, temporary_signal_mask)
+}
+
 fn linux_poll_wait_live_return(
     output: *mut LinuxSyscallFrame,
     caller: LinuxUserContext,
@@ -16117,10 +16156,14 @@ fn linux_poll_wait_live_return(
         return LINUX_EINVAL;
     }
     LINUX_LIVE_RETURN_VALIDATED.store(true, Ordering::SeqCst);
-    if wait_kind == LINUX_THREAD_WAIT_PPOLL {
-        LINUX_PPOLL_WAIT_BLOCK_COUNT.fetch_add(1, Ordering::SeqCst);
-    } else {
-        LINUX_POLL_WAIT_BLOCK_COUNT.fetch_add(1, Ordering::SeqCst);
+    match wait_kind {
+        LINUX_THREAD_WAIT_PPOLL => {
+            LINUX_PPOLL_WAIT_BLOCK_COUNT.fetch_add(1, Ordering::SeqCst);
+        }
+        LINUX_THREAD_WAIT_PAUSE | LINUX_THREAD_WAIT_SIGSUSPEND => {}
+        _ => {
+            LINUX_POLL_WAIT_BLOCK_COUNT.fetch_add(1, Ordering::SeqCst);
+        }
     }
     selected.rax
 }
@@ -21599,6 +21642,8 @@ fn linux_deliver_signal_to_blocked_wait(
                 | LINUX_THREAD_WAIT_TIMERFD_READ
                 | LINUX_THREAD_WAIT_PIPE_WRITE
                 | LINUX_THREAD_WAIT_EVENTFD_WRITE
+                | LINUX_THREAD_WAIT_PAUSE
+                | LINUX_THREAD_WAIT_SIGSUSPEND
                 | LINUX_THREAD_WAIT_PPOLL
                 | LINUX_THREAD_WAIT_EPOLL_PWAIT
         )
@@ -21632,7 +21677,7 @@ fn linux_deliver_signal_to_blocked_wait(
     interrupted.rax = interrupted_result;
     let masked_wait = matches!(
         wait_kind,
-        LINUX_THREAD_WAIT_PPOLL | LINUX_THREAD_WAIT_EPOLL_PWAIT
+        LINUX_THREAD_WAIT_PPOLL | LINUX_THREAD_WAIT_EPOLL_PWAIT | LINUX_THREAD_WAIT_SIGSUSPEND
     );
     let restored_mask = if masked_wait {
         LINUX_THREAD_WAIT_PRIOR_SIGNAL_MASKS[slot].load(Ordering::SeqCst)

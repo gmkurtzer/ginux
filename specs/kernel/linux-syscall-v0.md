@@ -1111,6 +1111,16 @@ exact waiter, and resumes it with signal number 15. No other signal set,
 process, or workload receives this no-peer admission; those waits continue to
 return `-ENOSYS`. `specs/kernel/linux-supervisor-v0.md` defines the complete
 bounded lifecycle.
+`rax = 34` (`__NR_pause`) and `rax = 130` (`__NR_rt_sigsuspend`) use the same
+generation-bound blocked-thread transaction. `pause` retains the current mask;
+`rt_sigsuspend` requires an exact eight-byte mask, removes `SIGKILL` and
+`SIGSTOP`, and installs it atomically with blocking. A caught, unmasked signal
+restores the prior mask into both the saved context and thread record, commits
+the handler frame, and leaves the suspended syscall returning `-EINTR` after
+`rt_sigreturn`. Invalid mask pointers and sizes fail before state changes. The
+current bounded scheduler requires another runnable Linux thread to enter the
+wait; no-peer suspension and immediate delivery of a signal already pending at
+entry remain unsupported and return `-ENOSYS` rather than falsely succeeding.
 `rax = 131` (`__NR_sigaltstack`) reports an initially disabled 24-byte x86-64
 alternate-stack record. It accepts `SS_DISABLE`, or a zero-flag or
 `SS_AUTODISARM` stack of at least
