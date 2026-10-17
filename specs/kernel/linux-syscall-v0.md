@@ -1738,6 +1738,14 @@ authority. `UFFDIO_API` negotiates API `0xaa`; the empty event stream returns
 `EAGAIN`. Range registration, page-fault events, copy/zeropage/write-protect,
 and fork/remap/remove events remain unsupported and their ioctls are rejected.
 
+`rax = 300..301` (`fanotify_init` and `fanotify_mark`) provide one notification
+group per domain with close-on-exec/nonblocking descriptor behavior. Exact-file
+`FAN_MARK_ADD`, `FAN_MARK_REMOVE`, and `FAN_MARK_FLUSH` operations support
+`FAN_MODIFY`; successful overlay writes queue Linux v3 fanotify metadata with
+an owned descriptor for the affected file. Reads do not generate modification
+events. Multiple groups, directory/mount/filesystem marks, permission events,
+FID reporting, unlimited queues/marks, and other event classes remain pending.
+
 Every other call
 returns `-ENOSYS` without disarming
 the task, so a caller can handle the error and continue. The entire path

@@ -447,6 +447,8 @@ const LINUX_INOTIFY_INIT_SYSCALL: u64 = 253;
 const LINUX_INOTIFY_ADD_WATCH_SYSCALL: u64 = 254;
 const LINUX_INOTIFY_RM_WATCH_SYSCALL: u64 = 255;
 const LINUX_INOTIFY_INIT1_SYSCALL: u64 = 294;
+const LINUX_FANOTIFY_INIT_SYSCALL: u64 = 300;
+const LINUX_FANOTIFY_MARK_SYSCALL: u64 = 301;
 const LINUX_GETRANDOM_SYSCALL: u64 = 318;
 const LINUX_STATX_SYSCALL: u64 = 332;
 const LINUX_RENAMEAT2_SYSCALL: u64 = 316;
@@ -562,6 +564,7 @@ const LINUX_DESCRIPTOR_TABLE_LIMIT: u64 = 1024;
 const LINUX_DEVICE_DESCRIPTOR_COUNT: usize =
     LINUX_DESCRIPTOR_TABLE_LIMIT as usize - LINUX_AUX_DESCRIPTOR_FIRST as usize;
 const LINUX_INOTIFY_WATCH_LIMIT: usize = 16;
+const LINUX_FANOTIFY_MARK_LIMIT: usize = 16;
 const LINUX_INOTIFY_INSTANCE_SLOT_COUNT: usize = LINUX_RUNTIME_INSTANCE_LIMIT;
 const LINUX_INOTIFY_WATCH_SLOT_COUNT: usize =
     LINUX_RUNTIME_INSTANCE_LIMIT * LINUX_INOTIFY_WATCH_LIMIT;
@@ -599,6 +602,7 @@ const LINUX_DEVICE_ZERO: u16 = 1 << 2;
 const LINUX_DEVICE_CONSOLE: u16 = 1 << 3;
 const LINUX_DEVICE_DIRECTORY: u16 = 1 << 4;
 const LINUX_DEVICE_USERFAULTFD: u16 = 1 << 8;
+const LINUX_DEVICE_FANOTIFY: u16 = 1 << 9;
 const LINUX_DEVICE_POSIX_MQ: u16 = 1 << 10;
 const LINUX_DEVICE_INOTIFY: u16 = 1 << 11;
 const LINUX_DEVICE_PIDFD: u16 = 1 << 13;
@@ -1360,6 +1364,13 @@ static LINUX_INOTIFY_WATCH_DESCRIPTORS: [AtomicU32; LINUX_INOTIFY_WATCH_SLOT_COU
     [const { AtomicU32::new(0) }; LINUX_INOTIFY_WATCH_SLOT_COUNT];
 static LINUX_INOTIFY_PENDING_MASKS: [AtomicU32; LINUX_INOTIFY_WATCH_SLOT_COUNT] =
     [const { AtomicU32::new(0) }; LINUX_INOTIFY_WATCH_SLOT_COUNT];
+static LINUX_FANOTIFY_REFS: BankedAtomicU16 = BankedAtomicU16::new(0);
+static LINUX_FANOTIFY_MARK_PATHS: [BankedAtomicU64; LINUX_FANOTIFY_MARK_LIMIT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_FANOTIFY_MARK_LIMIT];
+static LINUX_FANOTIFY_MARK_MASKS: [BankedAtomicU64; LINUX_FANOTIFY_MARK_LIMIT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_FANOTIFY_MARK_LIMIT];
+static LINUX_FANOTIFY_PENDING_MASK: BankedAtomicU64 = BankedAtomicU64::new(0);
+static LINUX_FANOTIFY_PENDING_DESCRIPTOR: BankedAtomicU64 = BankedAtomicU64::new(u64::MAX);
 static ELF_PROBE_STDIO_DEVICE_DESCRIPTORS: [BankedAtomicU16; 3] =
     [const { BankedAtomicU16::new(0) }; 3];
 static ELF_PROBE_STDIO_OCI_DESCRIPTORS: [BankedAtomicU16; 3] =
@@ -5880,6 +5891,15 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     for pending in &LINUX_INOTIFY_PENDING_MASKS[inotify_watch_start..inotify_watch_end] {
         pending.store(0, Ordering::SeqCst);
     }
+    LINUX_FANOTIFY_REFS.store(0, Ordering::SeqCst);
+    for path in &LINUX_FANOTIFY_MARK_PATHS {
+        path.store(0, Ordering::SeqCst);
+    }
+    for mask in &LINUX_FANOTIFY_MARK_MASKS {
+        mask.store(0, Ordering::SeqCst);
+    }
+    LINUX_FANOTIFY_PENDING_MASK.store(0, Ordering::SeqCst);
+    LINUX_FANOTIFY_PENDING_DESCRIPTOR.store(u64::MAX, Ordering::SeqCst);
     for descriptor in &ELF_PROBE_STDIO_DEVICE_DESCRIPTORS {
         descriptor.store(0, Ordering::SeqCst);
     }
@@ -8780,6 +8800,10 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_INOTIFY_INIT1_SYSCALL => linux_inotify_init(first_argument),
         LINUX_INOTIFY_ADD_WATCH_SYSCALL => linux_inotify_add_watch(first_argument, buffer, count),
         LINUX_INOTIFY_RM_WATCH_SYSCALL => linux_inotify_rm_watch(first_argument, buffer),
+        LINUX_FANOTIFY_INIT_SYSCALL => linux_fanotify_init(first_argument, buffer),
+        LINUX_FANOTIFY_MARK_SYSCALL => {
+            linux_fanotify_mark(first_argument, buffer, count, register(0), register(2))
+        }
         LINUX_ADD_KEY_SYSCALL => {
             linux_add_key(first_argument, buffer, count, register(0), register(2))
         }
@@ -12682,6 +12706,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let remap_file_pages = verify_linux_remap_file_pages_syscall();
     let keyrings = verify_linux_keyring_syscalls();
     let userfaultfd = verify_linux_userfaultfd_syscall();
+    let fanotify = verify_linux_fanotify_syscalls();
     let mappings_released =
         address_space::release_current_linux_runtime_mappings(LINUX_RUNTIME_DYNAMIC_MMAP_BASE);
     ELF_PROBE_MMAP_NEXT.store(LINUX_RUNTIME_DYNAMIC_MMAP_BASE, Ordering::SeqCst);
@@ -12704,7 +12729,68 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && remap_file_pages
         && keyrings
         && userfaultfd
+        && fanotify
         && mappings_released
+}
+
+fn verify_linux_fanotify_syscalls() -> bool {
+    let mapping = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    if !(LINUX_RUNTIME_DYNAMIC_MMAP_BASE..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
+        .contains(&mapping)
+    {
+        return false;
+    }
+    let Some(node) = crate::linux_overlay::create_file(b"ginux-fanotify", 0o600, &[]) else {
+        let _ = linux_runtime_munmap(mapping, PAGE_SIZE as u64);
+        return false;
+    };
+    let prepared = copy_to_linux_user(mapping, b"/ginux-fanotify\0")
+        && copy_to_linux_user(mapping + 64, b"fan");
+    let source = if prepared {
+        linux_openat(u64::from(LINUX_AT_FDCWD), mapping, 2, 0)
+    } else {
+        LINUX_EBADF
+    };
+    let group = if source < LINUX_AUX_DESCRIPTOR_LIMIT {
+        linux_fanotify_init(3, LINUX_O_CLOEXEC)
+    } else {
+        LINUX_EBADF
+    };
+    let marked = group < LINUX_AUX_DESCRIPTOR_LIMIT
+        && linux_fanotify_mark(group, 1, 2, u64::from(LINUX_AT_FDCWD), mapping) == 0;
+    let notified = marked
+        && linux_descriptor_write(source, mapping + 64, 3) == 3
+        && linux_fanotify_read(group, mapping + 128, 24) == Some(24);
+    let mut event = [0_u8; 24];
+    let event_descriptor = if notified && copy_from_linux_user(mapping + 128, &mut event) {
+        u32::from_ne_bytes(event[16..20].try_into().unwrap()) as u64
+    } else {
+        u64::MAX
+    };
+    let event_valid = event_descriptor < LINUX_AUX_DESCRIPTOR_LIMIT
+        && u32::from_ne_bytes(event[..4].try_into().unwrap()) == 24
+        && event[4] == 3
+        && u16::from_ne_bytes(event[6..8].try_into().unwrap()) == 24
+        && u64::from_ne_bytes(event[8..16].try_into().unwrap()) == 2
+        && linux_descriptor_open(event_descriptor);
+    let removed = event_valid
+        && linux_fanotify_mark(group, 2, 2, u64::from(LINUX_AT_FDCWD), mapping) == 0
+        && linux_descriptor_write(source, mapping + 64, 3) == 3
+        && linux_fanotify_read(group, mapping + 128, 24) == Some(LINUX_EAGAIN);
+    let closed = event_descriptor < LINUX_AUX_DESCRIPTOR_LIMIT
+        && linux_descriptor_close(event_descriptor) == 0
+        && linux_descriptor_close(source) == 0
+        && linux_descriptor_close(group) == 0;
+    let removed_file = crate::linux_overlay::unlink(node);
+    let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
+    removed && closed && removed_file && unmapped
 }
 
 fn verify_linux_userfaultfd_syscall() -> bool {
@@ -19790,6 +19876,9 @@ fn linux_descriptor_read(descriptor: u64, address: u64, count: u64) -> u64 {
     if let Some(result) = linux_inotify_read(descriptor, address, count) {
         return result;
     }
+    if let Some(result) = linux_fanotify_read(descriptor, address, count) {
+        return result;
+    }
     if linux_socket_slot(descriptor).is_some() {
         let device = linux_device_descriptor(descriptor);
         if device & LINUX_DEVICE_PIPE != 0 && device & 3 != LINUX_DESCRIPTOR_INPUT {
@@ -22727,6 +22816,185 @@ fn linux_userfaultfd_ioctl(descriptor: u64, request: u64, argument: u64) -> u64 
     }
 }
 
+fn linux_fanotify_descriptor(descriptor: u64) -> bool {
+    linux_device_descriptor(descriptor) & !3 == LINUX_DEVICE_FANOTIFY
+}
+
+fn linux_fanotify_init(flags: u64, event_flags: u64) -> u64 {
+    const FAN_CLOEXEC: u64 = 1;
+    const FAN_NONBLOCK: u64 = 2;
+    const EVENT_FLAGS: u64 = LINUX_O_LARGEFILE | LINUX_O_CLOEXEC | LINUX_O_NONBLOCK;
+    if flags & !(FAN_CLOEXEC | FAN_NONBLOCK) != 0 || event_flags & !EVENT_FLAGS != 0 {
+        return LINUX_EINVAL;
+    }
+    if LINUX_FANOTIFY_REFS.load(Ordering::SeqCst) != 0 {
+        return LINUX_EMFILE;
+    }
+    let Some(descriptor) = (LINUX_AUX_DESCRIPTOR_FIRST..LINUX_AUX_DESCRIPTOR_LIMIT)
+        .find(|descriptor| linux_aux_descriptor_free(*descriptor))
+    else {
+        return LINUX_EMFILE;
+    };
+    let index = (descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize;
+    ELF_PROBE_DEVICE_DESCRIPTORS[index].store(
+        LINUX_DEVICE_FANOTIFY | LINUX_DESCRIPTOR_INPUT,
+        Ordering::SeqCst,
+    );
+    ELF_PROBE_SOCKET_FLAGS[index].store(
+        if flags & FAN_NONBLOCK != 0 {
+            LINUX_O_NONBLOCK as u32
+        } else {
+            0
+        },
+        Ordering::SeqCst,
+    );
+    set_linux_descriptor_close_on_exec(descriptor, flags & FAN_CLOEXEC != 0);
+    LINUX_FANOTIFY_REFS.store(1, Ordering::SeqCst);
+    descriptor
+}
+
+fn linux_fanotify_mark(
+    descriptor: u64,
+    flags: u64,
+    mask: u64,
+    directory: u64,
+    path_address: u64,
+) -> u64 {
+    const FAN_MARK_ADD: u64 = 1;
+    const FAN_MARK_REMOVE: u64 = 2;
+    const FAN_MARK_FLUSH: u64 = 0x80;
+    const FAN_MODIFY: u64 = 2;
+    if !linux_fanotify_descriptor(descriptor) {
+        return LINUX_EBADF;
+    }
+    if flags == FAN_MARK_FLUSH {
+        if mask != 0 {
+            return LINUX_EINVAL;
+        }
+        for path in &LINUX_FANOTIFY_MARK_PATHS {
+            path.store(0, Ordering::SeqCst);
+        }
+        for mark_mask in &LINUX_FANOTIFY_MARK_MASKS {
+            mark_mask.store(0, Ordering::SeqCst);
+        }
+        return 0;
+    }
+    if !matches!(flags, FAN_MARK_ADD | FAN_MARK_REMOVE) || mask == 0 || mask & !FAN_MODIFY != 0 {
+        return LINUX_EINVAL;
+    }
+    let mut path = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+    let path_length = match copy_linux_c_string(path_address, &mut path) {
+        Ok(length) => length,
+        Err(error) => return error,
+    };
+    let mut canonical = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+    let length = match linux_canonical_path_at(directory, &path[..path_length], &mut canonical) {
+        Ok(length) => length,
+        Err(error) => return error,
+    };
+    let overlay = crate::linux_overlay::lookup(&canonical[..length]);
+    let oci =
+        crate::oci_image::lookup_metadata_at(crate::oci_image::ROOT_HANDLE, &canonical[..length]);
+    if overlay.is_none() && oci.is_none() {
+        return LINUX_ENOENT;
+    }
+    let hash = linux_inotify_path_hash(&canonical[..length]);
+    if let Some(index) = (0..LINUX_FANOTIFY_MARK_LIMIT)
+        .find(|index| LINUX_FANOTIFY_MARK_PATHS[*index].load(Ordering::SeqCst) == hash)
+    {
+        if flags == FAN_MARK_ADD {
+            LINUX_FANOTIFY_MARK_MASKS[index].fetch_or(mask, Ordering::SeqCst);
+            return 0;
+        }
+        let old = LINUX_FANOTIFY_MARK_MASKS[index].load(Ordering::SeqCst);
+        if old & mask == 0 {
+            return LINUX_ENOENT;
+        }
+        let new = old & !mask;
+        LINUX_FANOTIFY_MARK_MASKS[index].store(new, Ordering::SeqCst);
+        if new == 0 {
+            LINUX_FANOTIFY_MARK_PATHS[index].store(0, Ordering::SeqCst);
+        }
+        return 0;
+    }
+    if flags == FAN_MARK_REMOVE {
+        return LINUX_ENOENT;
+    }
+    let Some(index) = (0..LINUX_FANOTIFY_MARK_LIMIT)
+        .find(|index| LINUX_FANOTIFY_MARK_PATHS[*index].load(Ordering::SeqCst) == 0)
+    else {
+        return LINUX_ENOSPC;
+    };
+    LINUX_FANOTIFY_MARK_MASKS[index].store(mask, Ordering::SeqCst);
+    LINUX_FANOTIFY_MARK_PATHS[index].store(hash, Ordering::SeqCst);
+    0
+}
+
+fn linux_fanotify_notify_path_hash(path_hash: u64, source: u64, event: u64) {
+    if LINUX_FANOTIFY_REFS.load(Ordering::SeqCst) == 0
+        || !(0..LINUX_FANOTIFY_MARK_LIMIT).any(|index| {
+            LINUX_FANOTIFY_MARK_PATHS[index].load(Ordering::SeqCst) == path_hash
+                && LINUX_FANOTIFY_MARK_MASKS[index].load(Ordering::SeqCst) & event != 0
+        })
+    {
+        return;
+    }
+    if LINUX_FANOTIFY_PENDING_DESCRIPTOR.load(Ordering::SeqCst) == u64::MAX {
+        let duplicate = linux_console_dup(source);
+        if duplicate >= LINUX_AUX_DESCRIPTOR_LIMIT {
+            return;
+        }
+        LINUX_FANOTIFY_PENDING_DESCRIPTOR.store(duplicate, Ordering::SeqCst);
+    }
+    LINUX_FANOTIFY_PENDING_MASK.fetch_or(event, Ordering::SeqCst);
+    wake_linux_descriptor_waits();
+}
+
+fn linux_fanotify_read(descriptor: u64, address: u64, count: u64) -> Option<u64> {
+    const EVENT_SIZE: u64 = 24;
+    if !linux_fanotify_descriptor(descriptor) {
+        return None;
+    }
+    if count < EVENT_SIZE {
+        return Some(LINUX_EINVAL);
+    }
+    let event_descriptor = LINUX_FANOTIFY_PENDING_DESCRIPTOR.load(Ordering::SeqCst);
+    let mask = LINUX_FANOTIFY_PENDING_MASK.load(Ordering::SeqCst);
+    if event_descriptor == u64::MAX || mask == 0 {
+        return Some(LINUX_EAGAIN);
+    }
+    let mut event = [0_u8; EVENT_SIZE as usize];
+    event[..4].copy_from_slice(&(EVENT_SIZE as u32).to_ne_bytes());
+    event[4] = 3;
+    event[6..8].copy_from_slice(&(EVENT_SIZE as u16).to_ne_bytes());
+    event[8..16].copy_from_slice(&mask.to_ne_bytes());
+    event[16..20].copy_from_slice(&(event_descriptor as i32).to_ne_bytes());
+    event[20..24].copy_from_slice(&current_linux_process_pid().to_ne_bytes());
+    if !copy_to_linux_user(address, &event) {
+        return Some(LINUX_EFAULT);
+    }
+    LINUX_FANOTIFY_PENDING_DESCRIPTOR.store(u64::MAX, Ordering::SeqCst);
+    LINUX_FANOTIFY_PENDING_MASK.store(0, Ordering::SeqCst);
+    Some(EVENT_SIZE)
+}
+
+fn linux_fanotify_release() {
+    if LINUX_FANOTIFY_REFS.fetch_add(u16::MAX, Ordering::SeqCst) != 1 {
+        return;
+    }
+    let pending = LINUX_FANOTIFY_PENDING_DESCRIPTOR.swap(u64::MAX, Ordering::SeqCst);
+    if pending != u64::MAX {
+        let _ = linux_descriptor_close(pending);
+    }
+    LINUX_FANOTIFY_PENDING_MASK.store(0, Ordering::SeqCst);
+    for path in &LINUX_FANOTIFY_MARK_PATHS {
+        path.store(0, Ordering::SeqCst);
+    }
+    for mask in &LINUX_FANOTIFY_MARK_MASKS {
+        mask.store(0, Ordering::SeqCst);
+    }
+}
+
 fn linux_inotify_instance_range() -> core::ops::Range<usize> {
     let instance = linux_execution_instance();
     instance..instance + 1
@@ -23063,6 +23331,13 @@ fn linux_descriptor_poll_events(descriptor: i32, requested: u16) -> u16 {
     }
     if linux_inotify_descriptor(descriptor) {
         return if linux_inotify_ready(descriptor) {
+            requested & LINUX_POLLIN
+        } else {
+            0
+        };
+    }
+    if linux_fanotify_descriptor(descriptor) {
+        return if LINUX_FANOTIFY_PENDING_MASK.load(Ordering::SeqCst) != 0 {
             requested & LINUX_POLLIN
         } else {
             0
@@ -23926,11 +24201,6 @@ fn linux_overlay_read(descriptor: u64, state: u16, address: u64, count: u64) -> 
             start.saturating_add(result as usize) as u64,
             Ordering::SeqCst,
         );
-        if result != 0 {
-            if let Some(path_hash) = crate::linux_overlay::path_hash(handle) {
-                linux_inotify_notify_path_hash(path_hash, 0x0000_0002);
-            }
-        }
     }
     Some(result)
 }
@@ -23991,6 +24261,12 @@ fn linux_overlay_write(descriptor: u64, state: u16, address: u64, count: u64) ->
             start.saturating_add(result as usize) as u64,
             Ordering::SeqCst,
         );
+        if result != 0 {
+            if let Some(path_hash) = crate::linux_overlay::path_hash(handle) {
+                linux_inotify_notify_path_hash(path_hash, 0x0000_0002);
+                linux_fanotify_notify_path_hash(path_hash, descriptor, 0x0000_0002);
+            }
+        }
     }
     Some(result)
 }
@@ -24238,6 +24514,9 @@ fn linux_descriptor_close_with_wake(descriptor: u64, wake_waiters: bool) -> u64 
     }
     if linux_inotify_descriptor(descriptor) {
         linux_inotify_release(descriptor);
+    }
+    if linux_fanotify_descriptor(descriptor) {
+        linux_fanotify_release();
     }
     if let Some(id) = linux_mq_descriptor_id(descriptor) {
         if crate::linux_sysv_ipc::posix_queue_close(id).is_err() {
@@ -24504,6 +24783,9 @@ fn linux_console_dup2(source: u64, target: u64) -> u64 {
             if let Some(instance) = linux_inotify_instance(source) {
                 LINUX_INOTIFY_INSTANCE_REFS[instance].fetch_add(1, Ordering::SeqCst);
             }
+        }
+        if linux_fanotify_descriptor(source) {
+            LINUX_FANOTIFY_REFS.fetch_add(1, Ordering::SeqCst);
         }
         set_linux_descriptor_close_on_exec(target, false);
         return target;
@@ -25430,6 +25712,7 @@ fn linux_descriptor_stat(descriptor: u64) -> Option<[u8; LINUX_STAT_SIZE]> {
         || linux_eventfd_descriptor(descriptor)
         || linux_timerfd_descriptor(descriptor)
         || linux_userfaultfd_descriptor(descriptor)
+        || linux_fanotify_descriptor(descriptor)
         || linux_socket_slot(descriptor).is_some()
     {
         return Some(linux_stat(LINUX_STAT_ANONYMOUS_MODE, 4));
