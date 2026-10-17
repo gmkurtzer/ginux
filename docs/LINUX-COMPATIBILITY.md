@@ -42,7 +42,7 @@ Detailed bounded behavior for implemented calls lives in
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **43 Complete**, **284 Partial**, **48 Policy-denied**, **0 Missing**.
+Current totals: **44 Complete**, **283 Partial**, **48 Policy-denied**, **0 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -151,7 +151,7 @@ therefore omitted.
 | 21 | access | Partial |
 | 22 | pipe | Partial |
 | 23 | select | Partial |
-| 24 | sched_yield | Partial |
+| 24 | sched_yield | Complete |
 | 25 | mremap | Partial |
 | 26 | msync | Partial |
 | 27 | mincore | Partial |
