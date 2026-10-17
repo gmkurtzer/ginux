@@ -42,7 +42,7 @@ Detailed bounded behavior for implemented calls lives in
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **56 Complete**, **271 Partial**, **48 Policy-denied**, **0 Missing**.
+Current totals: **57 Complete**, **270 Partial**, **48 Policy-denied**, **0 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -275,7 +275,7 @@ therefore omitted.
 | 145 | sched_getscheduler | Complete |
 | 146 | sched_get_priority_max | Complete |
 | 147 | sched_get_priority_min | Complete |
-| 148 | sched_rr_get_interval | Partial |
+| 148 | sched_rr_get_interval | Complete |
 | 149 | mlock | Complete |
 | 150 | munlock | Complete |
 | 151 | mlockall | Complete |
