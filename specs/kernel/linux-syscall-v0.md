@@ -1522,10 +1522,11 @@ arguments and reports it. Rejected calls return `-EINVAL` without changing the
 bit. The proof requires it to remain set through exit. Future exec and
 credential-mutation paths must honor this boundary before they are admitted.
 Next, `rax = 218` (`__NR_set_tid_address`) registers a
-four-byte word inside the declared RW segment and returns the current table
-entry's TID 1. The bounded
-proof rejects an out-of-segment registration with `-EFAULT`. Exit zeroes the
-registered word and clears the pointer from that thread's slot. The bounded
+clear-child-TID pointer without dereferencing it and returns the current table
+entry's TID 1. The proof registers an unmapped pointer successfully, replaces
+it with a writable word, and observes exit zero that word and clear the pointer
+from the thread's slot. As on Linux, exit ignores a fault while clearing an
+invalid registered pointer. The bounded
 clone child uses the same per-slot state; its exit also wakes the one parent
 blocked on that exact address. `rax = 273`
 (`__NR_set_robust_list`) registers one writable 24-byte

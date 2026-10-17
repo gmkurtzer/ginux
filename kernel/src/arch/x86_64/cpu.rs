@@ -8360,9 +8360,6 @@ extern "sysv64" fn linux_syscall_handler(
         }
         LINUX_SIGALTSTACK_SYSCALL => linux_sigaltstack(first_argument, buffer),
         LINUX_SET_TID_ADDRESS_SYSCALL => {
-            if !linux_writable_user_range_contains(first_argument, size_of::<u32>()) {
-                return LINUX_EFAULT;
-            }
             if !set_current_linux_clear_child_tid(first_argument) {
                 return LINUX_ESRCH;
             }
@@ -9000,8 +8997,13 @@ extern "sysv64" fn linux_syscall_handler(
                 return LINUX_ESRCH;
             }
             if ELF_PROBE_EXEC_REPLACED.load(Ordering::SeqCst) {
-                if current_linux_clear_child_tid() != Some(0)
-                    || current_linux_robust_list() != Some(0)
+                let clear_child_tid = current_linux_clear_child_tid().unwrap_or(0);
+                if clear_child_tid != 0 {
+                    let _ = copy_to_linux_user(clear_child_tid, &0_u32.to_ne_bytes());
+                    let _ = wake_linux_futex(clear_child_tid, 1);
+                }
+                if !set_current_linux_clear_child_tid(0)
+                    || !set_current_linux_robust_list(0)
                     || !linux_close_all_descriptors()
                     || !crate::linux_socket::shutdown()
                     || !linux_tmpfs::teardown()
@@ -9022,8 +9024,9 @@ extern "sysv64" fn linux_syscall_handler(
             }
             let clear_child_tid = current_linux_clear_child_tid().unwrap_or(0);
             let robust_list = current_linux_robust_list().unwrap_or(0);
-            if clear_child_tid == 0 || !copy_to_linux_user(clear_child_tid, &0_u32.to_ne_bytes()) {
-                return LINUX_EFAULT;
+            if clear_child_tid != 0 {
+                let _ = copy_to_linux_user(clear_child_tid, &0_u32.to_ne_bytes());
+                let _ = wake_linux_futex(clear_child_tid, 1);
             }
             if robust_list == 0
                 || !set_current_linux_clear_child_tid(0)
@@ -9534,8 +9537,8 @@ fn linux_schedule_new_thread(
 
 fn linux_exit_child_to_parent(output: *mut LinuxSyscallFrame) -> u64 {
     let clear_child_tid = current_linux_clear_child_tid().unwrap_or(0);
-    if clear_child_tid != 0 && !copy_to_linux_user(clear_child_tid, &0_u32.to_ne_bytes()) {
-        return LINUX_EFAULT;
+    if clear_child_tid != 0 {
+        let _ = copy_to_linux_user(clear_child_tid, &0_u32.to_ne_bytes());
     }
     let woken = wake_linux_futex(clear_child_tid, 1);
     if !set_current_linux_clear_child_tid(0)

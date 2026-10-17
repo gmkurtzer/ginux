@@ -42,7 +42,7 @@ Detailed bounded behavior for implemented calls lives in
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **44 Complete**, **283 Partial**, **48 Policy-denied**, **0 Missing**.
+Current totals: **45 Complete**, **282 Partial**, **48 Policy-denied**, **0 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -345,7 +345,7 @@ therefore omitted.
 | 215 | epoll_wait_old | Complete |
 | 216 | remap_file_pages | Partial |
 | 217 | getdents64 | Partial |
-| 218 | set_tid_address | Partial |
+| 218 | set_tid_address | Complete |
 | 219 | restart_syscall | Partial |
 | 220 | semtimedop | Partial |
 | 221 | fadvise64 | Partial |
