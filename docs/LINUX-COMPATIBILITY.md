@@ -42,7 +42,7 @@ Detailed bounded behavior for implemented calls lives in
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **19 Complete**, **305 Partial**, **45 Policy-denied**, **6 Missing**.
+Current totals: **19 Complete**, **305 Partial**, **48 Policy-denied**, **3 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -483,9 +483,9 @@ therefore omitted.
 | 441 | epoll_pwait2 | Partial |
 | 442 | mount_setattr | Policy-denied |
 | 443 | quotactl_fd | Policy-denied |
-| 444 | landlock_create_ruleset | Missing |
-| 445 | landlock_add_rule | Missing |
-| 446 | landlock_restrict_self | Missing |
+| 444 | landlock_create_ruleset | Policy-denied |
+| 445 | landlock_add_rule | Policy-denied |
+| 446 | landlock_restrict_self | Policy-denied |
 | 447 | memfd_secret | Partial |
 | 448 | process_mrelease | Partial |
 | 449 | futex_waitv | Partial |

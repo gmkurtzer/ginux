@@ -1746,6 +1746,13 @@ an owned descriptor for the affected file. Reads do not generate modification
 events. Multiple groups, directory/mount/filesystem marks, permission events,
 FID reporting, unlimited queues/marks, and other event classes remain pending.
 
+`rax = 444..446` (`landlock_create_ruleset`, `landlock_add_rule`, and
+`landlock_restrict_self`) expose Linux's disabled-LSM boundary and return
+`EOPNOTSUPP`, including the ABI-version query. This matches Linux when the
+optional Landlock security module is not enabled at boot. Ginux does not
+advertise a Landlock ABI until every access right in that ABI can be enforced;
+security-module selection remains an explicit host policy decision.
+
 Every other call
 returns `-ENOSYS` without disarming
 the task, so a caller can handle the error and continue. The entire path

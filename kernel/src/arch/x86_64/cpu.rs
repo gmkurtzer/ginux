@@ -418,6 +418,9 @@ const LINUX_PWRITEV2_SYSCALL: u64 = 328;
 const LINUX_EXECVEAT_SYSCALL: u64 = 322;
 const LINUX_MEMFD_CREATE_SYSCALL: u64 = 319;
 const LINUX_MEMFD_SECRET_SYSCALL: u64 = 447;
+const LINUX_LANDLOCK_CREATE_RULESET_SYSCALL: u64 = 444;
+const LINUX_LANDLOCK_ADD_RULE_SYSCALL: u64 = 445;
+const LINUX_LANDLOCK_RESTRICT_SELF_SYSCALL: u64 = 446;
 const LINUX_RSEQ_SYSCALL: u64 = 334;
 const LINUX_USERFAULTFD_SYSCALL: u64 = 323;
 const LINUX_URETPROBE_SYSCALL: u64 = 335;
@@ -8569,6 +8572,11 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_OPEN_BY_HANDLE_AT_SYSCALL => linux_open_by_handle_at(first_argument, buffer, count),
         LINUX_MEMFD_CREATE_SYSCALL => linux_memfd_create(first_argument, buffer),
         LINUX_MEMFD_SECRET_SYSCALL => linux_memfd_secret(first_argument),
+        LINUX_LANDLOCK_CREATE_RULESET_SYSCALL
+        | LINUX_LANDLOCK_ADD_RULE_SYSCALL
+        | LINUX_LANDLOCK_RESTRICT_SELF_SYSCALL => {
+            linux_landlock_disabled(first_argument, buffer, count, register(0))
+        }
         LINUX_MAP_SHADOW_STACK_SYSCALL => linux_map_shadow_stack(first_argument, buffer, count),
         LINUX_URETPROBE_SYSCALL => linux_kill(
             1,
@@ -12707,6 +12715,8 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let keyrings = verify_linux_keyring_syscalls();
     let userfaultfd = verify_linux_userfaultfd_syscall();
     let fanotify = verify_linux_fanotify_syscalls();
+    let landlock_disabled = linux_landlock_disabled(0, 0, 1, 0) == LINUX_EOPNOTSUPP
+        && linux_landlock_disabled(u64::MAX, u64::MAX, u64::MAX, u64::MAX) == LINUX_EOPNOTSUPP;
     let mappings_released =
         address_space::release_current_linux_runtime_mappings(LINUX_RUNTIME_DYNAMIC_MMAP_BASE);
     ELF_PROBE_MMAP_NEXT.store(LINUX_RUNTIME_DYNAMIC_MMAP_BASE, Ordering::SeqCst);
@@ -12730,7 +12740,14 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && keyrings
         && userfaultfd
         && fanotify
+        && landlock_disabled
         && mappings_released
+}
+
+fn linux_landlock_disabled(_first: u64, _second: u64, _third: u64, _fourth: u64) -> u64 {
+    // Equivalent to a Linux kernel built with the Landlock syscall surface
+    // while the Landlock LSM is not enabled in the active security policy.
+    LINUX_EOPNOTSUPP
 }
 
 fn verify_linux_fanotify_syscalls() -> bool {
