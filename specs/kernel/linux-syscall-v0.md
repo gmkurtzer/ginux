@@ -682,8 +682,9 @@ the obsolete cache pointer is ignored as on Linux. These results describe the
 single-bootstrap-processor profile and do not claim SMP scheduling support.
 `rax = 24` (`__NR_sched_yield`) selects the sole ready sibling when one exists
 and otherwise succeeds as a no-op. `sched_getscheduler` reports
-`SCHED_OTHER` for PID 0 or 1, and `sched_getparam` copies its priority of zero
-only after validating the complete output. `sched_get_priority_min` and
+`SCHED_OTHER` for any live process visible in the domain, and `sched_getparam`
+copies its priority of zero. Both implement Linux's negative-PID, null-pointer,
+retired-PID, and output-fault error precedence. `sched_get_priority_min` and
 `sched_get_priority_max` report 1 and 99 for `SCHED_FIFO`/`SCHED_RR`, and zero
 for `SCHED_OTHER`, `SCHED_BATCH`, `SCHED_IDLE`, and `SCHED_DEADLINE`; unknown
 policies return `-EINVAL`. Unknown PIDs return `-ESRCH`, and an invalid output

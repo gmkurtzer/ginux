@@ -8468,22 +8468,8 @@ extern "sysv64" fn linux_syscall_handler(
         }
         LINUX_SCHED_SETPARAM_SYSCALL => linux_set_scheduler(first_argument, 0, buffer),
         LINUX_SCHED_SETSCHEDULER_SYSCALL => linux_set_scheduler(first_argument, buffer, count),
-        LINUX_SCHED_GETPARAM_SYSCALL => {
-            if !matches!(first_argument, 0 | 1) {
-                return LINUX_ESRCH;
-            }
-            if !copy_to_linux_user(buffer, &0_u32.to_ne_bytes()) {
-                return LINUX_EFAULT;
-            }
-            0
-        }
-        LINUX_SCHED_GETSCHEDULER_SYSCALL => {
-            if matches!(first_argument, 0 | 1) {
-                0
-            } else {
-                LINUX_ESRCH
-            }
-        }
+        LINUX_SCHED_GETPARAM_SYSCALL => linux_sched_getparam(first_argument, buffer),
+        LINUX_SCHED_GETSCHEDULER_SYSCALL => linux_sched_getscheduler(first_argument),
         LINUX_SCHED_GET_PRIORITY_MAX_SYSCALL | LINUX_SCHED_GET_PRIORITY_MIN_SYSCALL => {
             linux_scheduler_priority_range(
                 first_argument,
@@ -12743,6 +12729,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && linux_landlock_disabled(u64::MAX, u64::MAX, u64::MAX, u64::MAX) == LINUX_EOPNOTSUPP;
     let io_uring = verify_linux_io_uring_syscalls();
     let scheduler_priorities = verify_linux_scheduler_priority_ranges();
+    let scheduler_queries = verify_linux_scheduler_queries();
     let mappings_released =
         address_space::release_current_linux_runtime_mappings(LINUX_RUNTIME_DYNAMIC_MMAP_BASE);
     ELF_PROBE_MMAP_NEXT.store(LINUX_RUNTIME_DYNAMIC_MMAP_BASE, Ordering::SeqCst);
@@ -12769,6 +12756,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && landlock_disabled
         && io_uring
         && scheduler_priorities
+        && scheduler_queries
         && mappings_released
 }
 
@@ -12787,6 +12775,41 @@ fn verify_linux_scheduler_priority_ranges() -> bool {
             && linux_scheduler_priority_range(policy, true) == maximum
     }) && linux_scheduler_priority_range(4, false) == LINUX_EINVAL
         && linux_scheduler_priority_range(u64::MAX, true) == LINUX_EINVAL
+}
+
+fn verify_linux_scheduler_queries() -> bool {
+    let mapping = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    if !(LINUX_RUNTIME_DYNAMIC_MMAP_BASE..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
+        .contains(&mapping)
+    {
+        return false;
+    }
+    let current = u64::from(current_linux_process_pid());
+    let scheduler = linux_sched_getscheduler(0) == 0
+        && linux_sched_getscheduler(current) == 0
+        && linux_sched_getscheduler(2) == LINUX_ESRCH
+        && linux_sched_getscheduler(u64::MAX) == LINUX_EINVAL;
+    let parameter = scheduler
+        && copy_to_linux_user(mapping, &u32::MAX.to_ne_bytes())
+        && linux_sched_getparam(0, mapping) == 0
+        && {
+            let mut value = [0_u8; 4];
+            copy_from_linux_user(mapping, &mut value) && u32::from_ne_bytes(value) == 0
+        }
+        && linux_sched_getparam(0, 0) == LINUX_EINVAL
+        && linux_sched_getparam(u64::MAX, mapping) == LINUX_EINVAL
+        && linux_sched_getparam(2, 0) == LINUX_EINVAL
+        && linux_sched_getparam(2, 1) == LINUX_ESRCH
+        && linux_sched_getparam(current, 1) == LINUX_EFAULT;
+    let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
+    parameter && unmapped
 }
 
 fn verify_linux_io_uring_syscalls() -> bool {
@@ -26091,6 +26114,39 @@ fn linux_scheduler_priority_range(policy: u64, maximum: bool) -> u64 {
         1 | 2 => 1,
         0 | 3 | 5 | 6 => 0,
         _ => LINUX_EINVAL,
+    }
+}
+
+fn linux_scheduler_process(pid: u64) -> Result<u32, u64> {
+    let pid = pid as i32;
+    if pid < 0 {
+        return Err(LINUX_EINVAL);
+    }
+    let pid = if pid == 0 {
+        current_linux_process_pid()
+    } else {
+        pid as u32
+    };
+    linux_process::live_process_status(pid)
+        .map(|_| pid)
+        .ok_or(LINUX_ESRCH)
+}
+
+fn linux_sched_getscheduler(pid: u64) -> u64 {
+    linux_scheduler_process(pid).map_or_else(|error| error, |_| 0)
+}
+
+fn linux_sched_getparam(pid: u64, address: u64) -> u64 {
+    if address == 0 || (pid as i32) < 0 {
+        return LINUX_EINVAL;
+    }
+    if let Err(error) = linux_scheduler_process(pid) {
+        return error;
+    }
+    if copy_to_linux_user(address, &0_u32.to_ne_bytes()) {
+        0
+    } else {
+        LINUX_EFAULT
     }
 }
 
