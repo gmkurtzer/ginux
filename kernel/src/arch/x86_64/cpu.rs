@@ -12738,6 +12738,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let robust_list = verify_linux_robust_list_syscalls();
     let rseq = verify_linux_rseq_syscall();
     let membarrier = verify_linux_membarrier_syscall();
+    let readahead = verify_linux_readahead_syscall();
     let mappings_released =
         address_space::release_current_linux_runtime_mappings(LINUX_RUNTIME_DYNAMIC_MMAP_BASE);
     ELF_PROBE_MMAP_NEXT.store(LINUX_RUNTIME_DYNAMIC_MMAP_BASE, Ordering::SeqCst);
@@ -12771,6 +12772,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && robust_list
         && rseq
         && membarrier
+        && readahead
         && mappings_released
 }
 
@@ -13091,6 +13093,62 @@ fn verify_linux_membarrier_syscall() -> bool {
         && linux_membarrier(u64::from(u32::MAX), 0, 0) == LINUX_EINVAL;
     ELF_PROBE_MEMBARRIER_REGISTRATIONS.store(saved, Ordering::SeqCst);
     rejected
+}
+
+fn verify_linux_readahead_syscall() -> bool {
+    let mapping = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    if !(LINUX_RUNTIME_DYNAMIC_MMAP_BASE..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
+        .contains(&mapping)
+    {
+        return false;
+    }
+    let Some(node) = crate::linux_overlay::create_file(b"ginux-readahead", 0o600, b"resident")
+    else {
+        let _ = linux_runtime_munmap(mapping, PAGE_SIZE as u64);
+        return false;
+    };
+    let prepared = copy_to_linux_user(mapping, b"/ginux-readahead\0");
+    let input = if prepared {
+        linux_openat(u64::from(LINUX_AT_FDCWD), mapping, 0, 0)
+    } else {
+        LINUX_EFAULT
+    };
+    let output = if input < LINUX_AUX_DESCRIPTOR_LIMIT {
+        linux_openat(u64::from(LINUX_AT_FDCWD), mapping, 1, 0)
+    } else {
+        LINUX_EFAULT
+    };
+    let directory = if output < LINUX_AUX_DESCRIPTOR_LIMIT && copy_to_linux_user(mapping, b"/\0") {
+        linux_openat(u64::from(LINUX_AT_FDCWD), mapping, LINUX_O_DIRECTORY, 0)
+    } else {
+        LINUX_EFAULT
+    };
+    let positive = input < LINUX_AUX_DESCRIPTOR_LIMIT
+        && output < LINUX_AUX_DESCRIPTOR_LIMIT
+        && directory < LINUX_AUX_DESCRIPTOR_LIMIT
+        && linux_readahead(input, 0, 0) == 0
+        && linux_readahead((1_u64 << 32) | input, 1, u64::MAX) == 0;
+    let errors = positive
+        && linux_readahead(input, u64::MAX, 1) == LINUX_EINVAL
+        && linux_readahead(output, 0, 1) == LINUX_EBADF
+        && linux_readahead(LINUX_AUX_DESCRIPTOR_LIMIT, 0, 1) == LINUX_EBADF
+        && linux_readahead(directory, 0, 1) == LINUX_EINVAL;
+    let closed = input < LINUX_AUX_DESCRIPTOR_LIMIT
+        && linux_descriptor_close(input) == 0
+        && output < LINUX_AUX_DESCRIPTOR_LIMIT
+        && linux_descriptor_close(output) == 0
+        && directory < LINUX_AUX_DESCRIPTOR_LIMIT
+        && linux_descriptor_close(directory) == 0;
+    let removed = crate::linux_overlay::unlink(node);
+    let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
+    errors && closed && removed && unmapped
 }
 
 fn verify_linux_io_uring_syscalls() -> bool {
@@ -26601,6 +26659,7 @@ fn linux_syncfs(descriptor: u64) -> u64 {
 }
 
 fn linux_readahead(descriptor: u64, offset: u64, _count: u64) -> u64 {
+    let descriptor = u64::from(descriptor as u32);
     if !linux_descriptor_open(descriptor) {
         return LINUX_EBADF;
     }
@@ -26608,6 +26667,9 @@ fn linux_readahead(descriptor: u64, offset: u64, _count: u64) -> u64 {
         return LINUX_EINVAL;
     }
     let state = linux_device_descriptor(descriptor);
+    if !matches!(state & 3, LINUX_DESCRIPTOR_INPUT | 3) || linux_path_descriptor(descriptor) {
+        return LINUX_EBADF;
+    }
     if linux_overlay_descriptor_handle(descriptor).is_some()
         || linux_oci_entry(descriptor).is_some()
         || linux_regular_file(state).is_some()

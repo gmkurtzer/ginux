@@ -783,9 +783,12 @@ limit remains denied. `sync` has a direct userspace conformance probe and
 succeeds after synchronizing every filesystem in the current RAM-backed and
 immutable-storage profile. `syncfs` has runtime success and bad-descriptor
 assertions and synchronizes the filesystem associated with any open descriptor.
-`readahead` is successful for
-valid memory-backed filesystem objects because their data is already resident
-and there is no durable backing store in this milestone. Legacy
+`readahead` is successful for readable regular OCI, overlay, and tmpfs files
+because their data is already resident. It implements Linux descriptor
+narrowing and distinguishes bad or write-only descriptors (`-EBADF`), negative
+offsets (`-EINVAL`), and inapplicable file kinds (`-EINVAL`). Count does not cap
+the operation. Runtime tests cover zero and maximum counts, high register bits,
+negative offsets, write-only files, directories, and invalid descriptors. Legacy
 `epoll_create` delegates to `epoll_create1(0)`. The current process, group, or
 user may query the default I/O priority or idempotently set it to default.
 `membarrier` implements a complete single-CPU advertised profile: global,

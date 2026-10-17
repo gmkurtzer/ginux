@@ -42,7 +42,7 @@ Detailed bounded behavior for implemented calls lives in
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **49 Complete**, **278 Partial**, **48 Policy-denied**, **0 Missing**.
+Current totals: **50 Complete**, **277 Partial**, **48 Policy-denied**, **0 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -314,7 +314,7 @@ therefore omitted.
 | 184 | tuxcall | Complete |
 | 185 | security | Complete |
 | 186 | gettid | Complete |
-| 187 | readahead | Partial |
+| 187 | readahead | Complete |
 | 188 | setxattr | Partial |
 | 189 | lsetxattr | Partial |
 | 190 | fsetxattr | Partial |
