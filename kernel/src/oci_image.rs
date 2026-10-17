@@ -383,7 +383,7 @@ pub(crate) fn lookup_metadata_at(
     if length == 0 {
         return Some((ROOT_HANDLE, None));
     }
-    let (index, entry) = find_visible(&rootfs, &resolved[..length])?;
+    let (index, entry) = lookup_metadata_in(&rootfs, &resolved[..length])?;
     if entry.kind == EntryKind::Hardlink {
         let target = entry.link.strip_prefix(b"/").unwrap_or(entry.link);
         let (index, entry) = lookup_in(&rootfs, target)?;
@@ -392,6 +392,50 @@ pub(crate) fn lookup_metadata_at(
     }
     let handle = u16::try_from(index.checked_add(ENTRY_HANDLE_BASE)?).ok()?;
     Some((handle, Some(entry)))
+}
+
+fn lookup_metadata_in<'a>(rootfs: &Rootfs<'a>, path: &[u8]) -> Option<(usize, Entry<'a>)> {
+    let path = path.strip_prefix(b"/").unwrap_or(path);
+    let path = path.strip_suffix(b"/").unwrap_or(path);
+    if path.is_empty() {
+        return None;
+    }
+    let mut current = [0_u8; PATH_CAPACITY];
+    current.get_mut(..path.len())?.copy_from_slice(path);
+    let mut length = path.len();
+    for _ in 0..16 {
+        if let Some(entry) = find_visible(rootfs, &current[..length]) {
+            return Some(entry);
+        }
+        let mut source = [0_u8; PATH_CAPACITY];
+        source[..length].copy_from_slice(&current[..length]);
+        let mut replaced = false;
+        for prefix_end in source[..length]
+            .iter()
+            .enumerate()
+            .filter_map(|(index, byte)| (*byte == b'/').then_some(index))
+        {
+            let Some((_, entry)) = find_visible(rootfs, &source[..prefix_end]) else {
+                continue;
+            };
+            if !matches!(entry.kind, EntryKind::Symlink | EntryKind::Hardlink) {
+                continue;
+            }
+            length = replace_link_path(
+                &source[..prefix_end],
+                entry.kind,
+                entry.link,
+                &source[prefix_end + 1..length],
+                &mut current,
+            )?;
+            replaced = true;
+            break;
+        }
+        if !replaced {
+            return None;
+        }
+    }
+    None
 }
 
 fn resolve_at_in(

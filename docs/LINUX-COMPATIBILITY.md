@@ -42,7 +42,7 @@ implemented calls lives in [Linux Syscall Entry v0](../specs/kernel/linux-syscal
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **190 Partial**, **28 Policy-denied**, **157 Missing**.
+Current totals: **195 Partial**, **28 Policy-denied**, **152 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -374,8 +374,8 @@ therefore omitted.
 | 292 | dup3 | Partial |
 | 293 | pipe2 | Partial |
 | 294 | inotify_init1 | Missing |
-| 295 | preadv | Missing |
-| 296 | pwritev | Missing |
+| 295 | preadv | Partial |
+| 296 | pwritev | Partial |
 | 297 | rt_tgsigqueueinfo | Missing |
 | 298 | perf_event_open | Policy-denied |
 | 299 | recvmmsg | Missing |
@@ -406,8 +406,8 @@ therefore omitted.
 | 324 | membarrier | Partial |
 | 325 | mlock2 | Partial |
 | 326 | copy_file_range | Missing |
-| 327 | preadv2 | Missing |
-| 328 | pwritev2 | Missing |
+| 327 | preadv2 | Partial |
+| 328 | pwritev2 | Partial |
 | 329 | pkey_mprotect | Missing |
 | 330 | pkey_alloc | Missing |
 | 331 | pkey_free | Missing |
@@ -443,7 +443,7 @@ therefore omitted.
 | 449 | futex_waitv | Missing |
 | 450 | set_mempolicy_home_node | Missing |
 | 451 | cachestat | Missing |
-| 452 | fchmodat2 | Missing |
+| 452 | fchmodat2 | Partial |
 | 453 | map_shadow_stack | Missing |
 | 454 | futex_wake | Missing |
 | 455 | futex_wait | Missing |

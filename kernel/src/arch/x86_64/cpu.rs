@@ -288,6 +288,8 @@ const LINUX_EPOLL_CREATE1_SYSCALL: u64 = 291;
 const LINUX_DUP3_SYSCALL: u64 = 292;
 const LINUX_CLONE3_SYSCALL: u64 = 435;
 const LINUX_PIPE2_SYSCALL: u64 = 293;
+const LINUX_PREADV_SYSCALL: u64 = 295;
+const LINUX_PWRITEV_SYSCALL: u64 = 296;
 const LINUX_PRLIMIT64_SYSCALL: u64 = 302;
 const LINUX_GETCPU_SYSCALL: u64 = 309;
 const LINUX_IOPRIO_SET_SYSCALL: u64 = 251;
@@ -300,6 +302,8 @@ const LINUX_KEXEC_FILE_LOAD_SYSCALL: u64 = 320;
 const LINUX_BPF_SYSCALL: u64 = 321;
 const LINUX_MEMBARRIER_SYSCALL: u64 = 324;
 const LINUX_MLOCK2_SYSCALL: u64 = 325;
+const LINUX_PREADV2_SYSCALL: u64 = 327;
+const LINUX_PWRITEV2_SYSCALL: u64 = 328;
 const LINUX_EXECVEAT_SYSCALL: u64 = 322;
 const LINUX_GETRANDOM_SYSCALL: u64 = 318;
 const LINUX_STATX_SYSCALL: u64 = 332;
@@ -307,6 +311,7 @@ const LINUX_RENAMEAT2_SYSCALL: u64 = 316;
 const LINUX_CLOSE_RANGE_SYSCALL: u64 = 436;
 const LINUX_FACCESSAT2_SYSCALL: u64 = 439;
 const LINUX_EPOLL_PWAIT2_SYSCALL: u64 = 441;
+const LINUX_FCHMODAT2_SYSCALL: u64 = 452;
 const LINUX_ARCH_SET_FS: u64 = 0x1002;
 const LINUX_ARCH_GET_FS: u64 = 0x1003;
 const LINUX_PROBE_EXIT_STATUS: u64 = 42;
@@ -340,6 +345,7 @@ const LINUX_EINVAL: u64 = u64::MAX - 21;
 const LINUX_ENOTTY: u64 = u64::MAX - 24;
 const LINUX_ERANGE: u64 = u64::MAX - 33;
 const LINUX_ENODATA: u64 = u64::MAX - 60;
+const LINUX_EOPNOTSUPP: u64 = u64::MAX - 94;
 const LINUX_ENAMETOOLONG: u64 = u64::MAX - 35;
 const LINUX_ENOSYS: u64 = u64::MAX - 37;
 const LINUX_ENOTEMPTY: u64 = u64::MAX - 38;
@@ -7568,6 +7574,42 @@ extern "sysv64" fn linux_syscall_handler(
             buffer,
             count,
         ),
+        LINUX_PREADV_SYSCALL => linux_positioned_iov(
+            first_argument,
+            buffer,
+            count,
+            register(0),
+            register(2),
+            0,
+            false,
+        ),
+        LINUX_PWRITEV_SYSCALL => linux_positioned_iov(
+            first_argument,
+            buffer,
+            count,
+            register(0),
+            register(2),
+            0,
+            true,
+        ),
+        LINUX_PREADV2_SYSCALL => linux_positioned_iov(
+            first_argument,
+            buffer,
+            count,
+            register(0),
+            register(2),
+            register(1),
+            false,
+        ),
+        LINUX_PWRITEV2_SYSCALL => linux_positioned_iov(
+            first_argument,
+            buffer,
+            count,
+            register(0),
+            register(2),
+            register(1),
+            true,
+        ),
         LINUX_PIPE_SYSCALL => linux_pipe(first_argument, 0),
         LINUX_MINCORE_SYSCALL => linux_mincore(first_argument, buffer, count),
         LINUX_MADVISE_SYSCALL => linux_madvise(first_argument, buffer, count),
@@ -8243,6 +8285,7 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_CLOCK_GETTIME_SYSCALL => linux_clock_gettime(first_argument, buffer),
         LINUX_CLOCK_GETRES_SYSCALL => linux_clock_getres(first_argument, buffer),
         LINUX_UTIMENSAT_SYSCALL => linux_utimensat(first_argument, buffer, count, register(0)),
+        LINUX_FCHMODAT2_SYSCALL => linux_fchmodat(first_argument, buffer, count, register(0)),
         LINUX_STATX_SYSCALL => linux_statx(first_argument, buffer, count, register(0), register(2)),
         LINUX_CLOSE_RANGE_SYSCALL => linux_close_range(first_argument, buffer, count),
         LINUX_SYNCFS_SYSCALL => {
@@ -12575,6 +12618,8 @@ fn linux_oci_execve(path: &[u8], arguments_address: u64, environment_address: u6
     else {
         return LINUX_ENOEXEC;
     };
+    ELF_PROBE_CODE_BASE.store(main_code.virtual_page, Ordering::SeqCst);
+    ELF_PROBE_CODE_SIZE.store((main_code.page_count * PAGE_SIZE) as u64, Ordering::SeqCst);
     let Some(loader_code) = plan.interpreter.segments[..plan.interpreter.segment_count]
         .iter()
         .flatten()
@@ -12582,8 +12627,6 @@ fn linux_oci_execve(path: &[u8], arguments_address: u64, environment_address: u6
     else {
         return LINUX_ENOEXEC;
     };
-    ELF_PROBE_CODE_BASE.store(main_code.virtual_page, Ordering::SeqCst);
-    ELF_PROBE_CODE_SIZE.store((main_code.page_count * PAGE_SIZE) as u64, Ordering::SeqCst);
     ELF_PROBE_LOADER_CODE_BASE.store(loader_code.virtual_page, Ordering::SeqCst);
     ELF_PROBE_LOADER_CODE_SIZE.store(
         (loader_code.page_count * PAGE_SIZE) as u64,
@@ -17799,8 +17842,23 @@ fn linux_descriptor_readv(descriptor: u64, vectors: u64, count: u64) -> u64 {
         return result;
     }
     let device = linux_device_descriptor(descriptor);
-    if linux_tmp_file(device) {
-        return LINUX_ENOSYS;
+    if linux_overlay_descriptor_handle(descriptor).is_some() || linux_tmp_file(device) {
+        let (ranges, vector_count) = match linux_socket_iov_ranges(vectors, count, true) {
+            Ok(ranges) => ranges,
+            Err(error) => return error,
+        };
+        let mut total = 0_u64;
+        for (address, length) in ranges[..vector_count].iter().copied() {
+            let result = linux_descriptor_read(descriptor, address, length as u64);
+            if result >= u64::MAX - 4095 {
+                return if total == 0 { result } else { total };
+            }
+            total = total.saturating_add(result);
+            if result != length as u64 {
+                break;
+            }
+        }
+        return total;
     }
     let access = device & 3;
     if access != LINUX_DESCRIPTOR_INPUT
@@ -17894,6 +17952,49 @@ fn linux_descriptor_readv(descriptor: u64, vectors: u64, count: u64) -> u64 {
     total as u64
 }
 
+fn linux_positioned_iov(
+    descriptor: u64,
+    vectors: u64,
+    count: u64,
+    offset_low: u64,
+    offset_high: u64,
+    flags: u64,
+    write: bool,
+) -> u64 {
+    if offset_high != 0 || flags != 0 {
+        return LINUX_EOPNOTSUPP;
+    }
+    let (ranges, vector_count) = match linux_socket_iov_ranges(vectors, count, !write) {
+        Ok(ranges) => ranges,
+        Err(error) => return error,
+    };
+    let mut offset = offset_low;
+    let mut total = 0_u64;
+    for (address, length) in ranges[..vector_count].iter().copied() {
+        let result = if write {
+            linux_regular_file_write_at(descriptor, address, length as u64, offset)
+        } else {
+            linux_regular_file_read_at(descriptor, address, length as u64, offset)
+        };
+        if result >= u64::MAX - 4095 {
+            return if total == 0 { result } else { total };
+        }
+        total = total.saturating_add(result);
+        let Some(next) = offset.checked_add(result) else {
+            return if total == result {
+                LINUX_EINVAL
+            } else {
+                total - result
+            };
+        };
+        offset = next;
+        if result != length as u64 {
+            break;
+        }
+    }
+    total
+}
+
 fn linux_console_write(descriptor: u64, address: u64, count: u64) -> u64 {
     if u16::from(linux_console_descriptor(descriptor)) != LINUX_DESCRIPTOR_OUTPUT {
         return LINUX_EBADF;
@@ -17932,8 +18033,23 @@ fn linux_descriptor_writev(descriptor: u64, vectors: u64, count: u64) -> u64 {
         return result;
     }
     let device = linux_device_descriptor(descriptor);
-    if linux_tmp_file(device) {
-        return LINUX_ENOSYS;
+    if linux_overlay_descriptor_handle(descriptor).is_some() || linux_tmp_file(device) {
+        let (ranges, vector_count) = match linux_socket_iov_ranges(vectors, count, false) {
+            Ok(ranges) => ranges,
+            Err(error) => return error,
+        };
+        let mut total = 0_u64;
+        for (address, length) in ranges[..vector_count].iter().copied() {
+            let result = linux_descriptor_write(descriptor, address, length as u64);
+            if result >= u64::MAX - 4095 {
+                return if total == 0 { result } else { total };
+            }
+            total = total.saturating_add(result);
+            if result != length as u64 {
+                break;
+            }
+        }
+        return total;
     }
     let access = device & 3;
     let writable_device = device != 0 && (access == LINUX_DESCRIPTOR_OUTPUT || access == 3);

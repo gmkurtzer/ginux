@@ -68,9 +68,11 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
     wait_for 'ginux: entering configured OCI init' 30
     printf '%s\n' \
         "/usr/bin/readlink -f /bin/sh >/dev/null; printf 'REALPATH_RUNTIME_EXIT=%s\\n' \"\$?\"" \
-        "/usr/bin/dd if=/dev/zero of=/tmp/ginux-overlay.bin bs=1024 count=64 status=none && test \"\$(/usr/bin/wc -c < /tmp/ginux-overlay.bin)\" -eq 65536; printf 'OVERLAY_RUNTIME_EXIT=%s\\n' \"\$?\""
+        "/usr/bin/dd if=/dev/zero of=/tmp/ginux-overlay.bin bs=1024 count=64 status=none && test \"\$(/usr/bin/wc -c < /tmp/ginux-overlay.bin)\" -eq 65536; printf 'OVERLAY_RUNTIME_EXIT=%s\\n' \"\$?\"" \
+        "/usr/sbin/iconvconfig -o /tmp/ginux-gconv.cache; printf 'WRITEV_RUNTIME_EXIT=%s\\n' \"\$?\""
     wait_for 'REALPATH_RUNTIME_EXIT=0' 300
     wait_for 'OVERLAY_RUNTIME_EXIT=0' 300
+    wait_for 'WRITEV_RUNTIME_EXIT=0' 300
     printf '%s\n' \
         '/usr/bin/dnf -y update' \
         "printf 'DNF_UPDATE_EXIT=%s\\n' \"\$?\"" \
@@ -104,6 +106,7 @@ qemu_pid=""
 
 if ! grep -Fq 'GINUX_KERNEL_OK' "$output_file" \
     || ! grep -Fq 'DNF_UPDATE_EXIT=0' "$output_file" \
+    || ! grep -Fq 'WRITEV_RUNTIME_EXIT=0' "$output_file" \
     || grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC|OCI init (execution|setup) failed|OCI init exited with status 127' "$output_file"; then
     fail 'dnf update did not complete cleanly'
 fi
