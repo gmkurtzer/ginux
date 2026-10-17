@@ -183,8 +183,10 @@ const LINUX_SETUID_SYSCALL: u64 = 105;
 const LINUX_SETGID_SYSCALL: u64 = 106;
 const LINUX_GETEUID_SYSCALL: u64 = 107;
 const LINUX_GETEGID_SYSCALL: u64 = 108;
+const LINUX_SETPGID_SYSCALL: u64 = 109;
 const LINUX_GETPPID_SYSCALL: u64 = 110;
 const LINUX_GETPGRP_SYSCALL: u64 = 111;
+const LINUX_SETSID_SYSCALL: u64 = 112;
 const LINUX_GETGROUPS_SYSCALL: u64 = 115;
 const LINUX_SETGROUPS_SYSCALL: u64 = 116;
 const LINUX_SETREUID_SYSCALL: u64 = 113;
@@ -7831,13 +7833,31 @@ extern "sysv64" fn linux_syscall_handler(
             linux_process::live_process_parent_pid(current_linux_process_pid())
                 .map_or(LINUX_ESRCH, u64::from)
         }
-        LINUX_GETPGRP_SYSCALL => 1,
-        LINUX_GETPGID_SYSCALL | LINUX_GETSID_SYSCALL => {
-            if matches!(first_argument, 0 | 1) {
-                1
-            } else {
-                LINUX_ESRCH
+        LINUX_SETPGID_SYSCALL => linux_setpgid(first_argument, buffer),
+        LINUX_SETSID_SYSCALL => {
+            let pid = current_linux_process_pid();
+            match linux_process::create_live_process_session(pid) {
+                Ok(session) => u64::from(session),
+                Err(linux_process::ProcessGroupError::NoSuchProcess) => LINUX_ESRCH,
+                Err(linux_process::ProcessGroupError::Permission) => LINUX_EPERM,
             }
+        }
+        LINUX_GETPGRP_SYSCALL => linux_process::live_process_group(current_linux_process_pid())
+            .map_or(LINUX_ESRCH, u64::from),
+        LINUX_GETPGID_SYSCALL | LINUX_GETSID_SYSCALL => {
+            let pid = if first_argument == 0 {
+                current_linux_process_pid()
+            } else if first_argument <= i32::MAX as u64 {
+                first_argument as u32
+            } else {
+                return LINUX_ESRCH;
+            };
+            let value = if number == LINUX_GETPGID_SYSCALL {
+                linux_process::live_process_group(pid)
+            } else {
+                linux_process::live_process_session(pid)
+            };
+            value.map_or(LINUX_ESRCH, u64::from)
         }
         LINUX_SIGALTSTACK_SYSCALL => linux_sigaltstack(first_argument, buffer),
         LINUX_SET_TID_ADDRESS_SYSCALL => {
@@ -8525,6 +8545,19 @@ fn linux_controller_syscall(
             })
         }
         _ => Some(LINUX_ENOSYS),
+    }
+}
+
+fn linux_setpgid(pid: u64, process_group: u64) -> u64 {
+    if pid > i32::MAX as u64 || process_group > i32::MAX as u64 {
+        return LINUX_EINVAL;
+    }
+    let caller = current_linux_process_pid();
+    let target = if pid == 0 { caller } else { pid as u32 };
+    match linux_process::set_live_process_group(caller, target, process_group as u32) {
+        Ok(()) => 0,
+        Err(linux_process::ProcessGroupError::NoSuchProcess) => LINUX_ESRCH,
+        Err(linux_process::ProcessGroupError::Permission) => LINUX_EPERM,
     }
 }
 

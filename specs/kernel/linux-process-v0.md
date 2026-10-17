@@ -294,6 +294,19 @@ and restores the parent's pre-fork return value. Successful completion requires
 an empty scheduler workspace and leaves only the unchanged running PID 1
 record.
 
+## Process groups and sessions
+
+Every live process record owns a process-group ID and session ID. PID 1 begins
+as process-group and session leader 1, while a forked child inherits both IDs.
+`setpgid` accepts the caller or its direct child, resolves zero PID and PGID
+arguments using Linux rules, requires the target and requested group to be in
+the caller's session, and rejects session leaders. `setsid` rejects an existing
+process-group leader and otherwise makes the caller leader of a new session and
+process group. `getpgrp`, `getpgid`, and `getsid` read these live records rather
+than returning fixed values. The lifecycle proof covers inheritance, group
+creation and rejoining, successful child session creation, cross-session
+denial, leader denial, and unknown-process rejection.
+
 ## Deliberate limits
 
 This is a bounded compatibility slice rather than general Linux process
@@ -305,7 +318,8 @@ management. It does not implement:
 - independently modeled descriptor, signal, or mount inheritance; the user
   namespace handle alone is inherited exactly;
 - concurrent process scheduling or process-directed signal delivery;
-- orphan reparenting, subreapers, process groups, or sessions;
+- orphan reparenting, subreapers, controlling terminals, orphaned process-group
+  signaling, or process-group wait selectors;
 - resource accounting, limits, PID namespaces, or procfs generation from this
   table; or
 - general capacity or PID/generation rollover recovery.

@@ -42,7 +42,7 @@ implemented calls lives in [Linux Syscall Entry v0](../specs/kernel/linux-syscal
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **198 Partial**, **28 Policy-denied**, **149 Missing**.
+Current totals: **200 Partial**, **28 Policy-denied**, **147 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -188,10 +188,10 @@ therefore omitted.
 | 106 | setgid | Policy-denied |
 | 107 | geteuid | Partial |
 | 108 | getegid | Partial |
-| 109 | setpgid | Missing |
+| 109 | setpgid | Partial |
 | 110 | getppid | Partial |
 | 111 | getpgrp | Partial |
-| 112 | setsid | Missing |
+| 112 | setsid | Partial |
 | 113 | setreuid | Policy-denied |
 | 114 | setregid | Policy-denied |
 | 115 | getgroups | Partial |

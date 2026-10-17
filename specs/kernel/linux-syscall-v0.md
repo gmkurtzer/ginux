@@ -1245,9 +1245,16 @@ runnable thread. `getpid` returns the fixed process ID 1, while `gettid`
 resolves the running entry in the bounded generation-tagged thread table and
 returns its TID 1. Internal lifecycle verification temporarily reserves TIDs 2
 and 3 but retires them before ring-3 entry, so they are never userspace-visible
-or runnable. `getppid` returns 0, and `getpgrp`,
-`getpgid(0)`, and `getsid(0)` return 1. `getpgid` and `getsid` return `-ESRCH`
-for an unknown PID. `rax = 157` (`__NR_prctl`) supports `PR_SET_NAME` and
+or runnable. `getppid` returns 0. `getpgrp`, `getpgid`, and `getsid` query the
+live process record. PID 1 starts as process-group and session leader 1, and
+forked children inherit both IDs. `setpgid` accepts the caller or its direct
+child, applies Linux zero-argument substitutions, rejects negative PID
+encodings, requires an existing group in the same session unless the target
+creates a group named for itself, and rejects session leaders or cross-session
+changes. `setsid` rejects an existing process-group leader and otherwise makes
+the caller leader of a new session and process group. Unknown processes return
+`-ESRCH`; authority and session violations return `-EPERM`. `rax = 157`
+(`__NR_prctl`) supports `PR_SET_NAME` and
 `PR_GET_NAME` for this sole thread. The 16-byte name starts as `init`, setters
 copy at most 15 bytes and always retain a trailing NUL, and getters atomically
 copy all 16 bytes. Invalid user pointers return `-EFAULT`, unknown operations

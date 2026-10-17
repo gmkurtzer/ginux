@@ -381,6 +381,8 @@ impl ProcessAddressSpace {
 struct Process {
     handle: ProcessHandle,
     parent: Option<ProcessHandle>,
+    process_group: u32,
+    session: u32,
     user_namespace: linux_user::UserNamespaceHandle,
     address_space: Option<ProcessAddressSpace>,
     retiring_address_space: Option<ProcessAddressSpace>,
@@ -417,6 +419,12 @@ pub(crate) struct LiveProcessStatus {
     pub(crate) pid: u32,
     pub(crate) parent_pid: u32,
     pub(crate) state: LiveProcessState,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ProcessGroupError {
+    NoSuchProcess,
+    Permission,
 }
 
 struct ProcessTable {
@@ -951,10 +959,15 @@ impl ProcessTable {
             generation,
             pid,
         };
+        let (process_group, session) = parent
+            .and_then(|parent| self.process(parent))
+            .map_or((pid, pid), |parent| (parent.process_group, parent.session));
         self.generations[slot] = generation;
         self.processes[slot] = Some(Process {
             handle,
             parent,
+            process_group,
+            session,
             user_namespace,
             address_space,
             retiring_address_space: None,
@@ -963,6 +976,82 @@ impl ProcessTable {
             state,
         });
         Some(handle)
+    }
+
+    fn process_group(&self, pid: u32) -> Option<(u32, u32)> {
+        let process = self.process(self.handle_by_pid(pid)?)?;
+        matches!(
+            process.state,
+            ProcessState::Running | ProcessState::Zombie { .. }
+        )
+        .then_some((process.process_group, process.session))
+    }
+
+    fn set_process_group(
+        &mut self,
+        caller_pid: u32,
+        target_pid: u32,
+        process_group: u32,
+    ) -> Result<(), ProcessGroupError> {
+        let caller = self
+            .handle_by_pid(caller_pid)
+            .ok_or(ProcessGroupError::NoSuchProcess)?;
+        let target = self
+            .handle_by_pid(target_pid)
+            .ok_or(ProcessGroupError::NoSuchProcess)?;
+        let caller_process = self
+            .process(caller)
+            .filter(|process| process.state == ProcessState::Running)
+            .ok_or(ProcessGroupError::NoSuchProcess)?;
+        let target_process = self
+            .process(target)
+            .filter(|process| process.state == ProcessState::Running)
+            .ok_or(ProcessGroupError::NoSuchProcess)?;
+        if target != caller && target_process.parent != Some(caller) {
+            return Err(ProcessGroupError::NoSuchProcess);
+        }
+        if target_process.session != caller_process.session
+            || target_process.session == target_process.handle.pid
+        {
+            return Err(ProcessGroupError::Permission);
+        }
+        let requested = if process_group == 0 {
+            target_process.handle.pid
+        } else {
+            process_group
+        };
+        if requested != target_process.handle.pid
+            && !self.processes.iter().flatten().any(|process| {
+                process.process_group == requested && process.session == caller_process.session
+            })
+        {
+            return Err(ProcessGroupError::Permission);
+        }
+        self.process_mut(target)
+            .ok_or(ProcessGroupError::NoSuchProcess)?
+            .process_group = requested;
+        Ok(())
+    }
+
+    fn create_session(&mut self, pid: u32) -> Result<u32, ProcessGroupError> {
+        let handle = self
+            .handle_by_pid(pid)
+            .ok_or(ProcessGroupError::NoSuchProcess)?;
+        if self
+            .processes
+            .iter()
+            .flatten()
+            .any(|process| process.process_group == pid)
+        {
+            return Err(ProcessGroupError::Permission);
+        }
+        let process = self
+            .process_mut(handle)
+            .filter(|process| process.state == ProcessState::Running)
+            .ok_or(ProcessGroupError::NoSuchProcess)?;
+        process.process_group = pid;
+        process.session = pid;
+        Ok(pid)
     }
 
     fn process(&self, handle: ProcessHandle) -> Option<&Process> {
@@ -1188,6 +1277,8 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
     };
     if init.pid != 1
         || rejected_child.pid != 2
+        || table.process_group(init.pid) != Some((1, 1))
+        || table.create_session(init.pid) != Err(ProcessGroupError::Permission)
         || table.create_init(first_space, init_context).is_some()
         || table.commit_fork(rejected_child, init_space, init_context.fork_child())
         || stale_space.is_some()
@@ -1231,6 +1322,19 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
         || table.exit(first_child, 42)
         || table.begin_exit(first_child, second_space).is_some()
         || table.begin_exit(first_child, stale_expected).is_some()
+    {
+        return false;
+    }
+    if table.process_group(first_child.pid) != Some((1, 1))
+        || table.set_process_group(init.pid, first_child.pid, first_child.pid) != Ok(())
+        || table.process_group(first_child.pid) != Some((3, 1))
+        || table.set_process_group(init.pid, first_child.pid, init.pid) != Ok(())
+        || table.create_session(first_child.pid) != Ok(first_child.pid)
+        || table.process_group(first_child.pid) != Some((3, 3))
+        || table.set_process_group(init.pid, first_child.pid, init.pid)
+            != Err(ProcessGroupError::Permission)
+        || table.set_process_group(first_child.pid, init.pid, init.pid)
+            != Err(ProcessGroupError::NoSuchProcess)
     {
         return false;
     }
@@ -1628,6 +1732,34 @@ pub(crate) fn live_process_parent_pid(pid: u32) -> Option<u32> {
             .and_then(|parent| table.process(parent).map(|parent| parent.handle.pid))
             .unwrap_or(0),
     )
+}
+
+pub(crate) fn live_process_group(pid: u32) -> Option<u32> {
+    live_process_table_mut()?
+        .process_group(pid)
+        .map(|group| group.0)
+}
+
+pub(crate) fn live_process_session(pid: u32) -> Option<u32> {
+    live_process_table_mut()?
+        .process_group(pid)
+        .map(|group| group.1)
+}
+
+pub(crate) fn set_live_process_group(
+    caller_pid: u32,
+    target_pid: u32,
+    process_group: u32,
+) -> Result<(), ProcessGroupError> {
+    live_process_table_mut()
+        .ok_or(ProcessGroupError::NoSuchProcess)?
+        .set_process_group(caller_pid, target_pid, process_group)
+}
+
+pub(crate) fn create_live_process_session(pid: u32) -> Result<u32, ProcessGroupError> {
+    live_process_table_mut()
+        .ok_or(ProcessGroupError::NoSuchProcess)?
+        .create_session(pid)
 }
 
 pub(crate) fn live_process_slot(pid: u32) -> Option<usize> {
