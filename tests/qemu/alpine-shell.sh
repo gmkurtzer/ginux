@@ -114,9 +114,8 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
         "/bin/sh -c '/bin/sh -c \"/bin/true; echo NESTED_FORK_INNER_OK\"; echo NESTED_FORK_OUTER_OK'" \
         "bytes=\$(/bin/dd if=/dev/zero bs=1024 count=64 2>/dev/null | /usr/bin/wc -c); test \"\$bytes\" -eq 65536 && echo PIPE_RUNTIME_64K_OK" \
         "{ printf one; printf two; printf three; } | grep -qx onetwothree && echo PIPE_FRAGMENTED_WRITES_OK" \
-        "printf 'FORK_STATE_RESTORE_OK\\n'" \
-        "printf 'FORK_EXEC_OK\\n'" \
-        "printf 'OCI_FILESYSTEM_OK\\n'"
+        "printf 'PIPE_LESS_BEGIN\\n'" \
+        'apk --help | less'
     wait_for_line 'LIBC_RUNTIME_OK'
     wait_for_line 'STAT_ABI_OK'
     wait_for_line 'NAME="Alpine Linux"'
@@ -129,6 +128,15 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
     wait_for_line 'NESTED_FORK_OUTER_OK'
     wait_for_line 'PIPE_RUNTIME_64K_OK'
     wait_for_line 'PIPE_FRAGMENTED_WRITES_OK'
+    wait_for_line 'PIPE_LESS_BEGIN'
+    wait_for 'Usage: apk'
+    printf 'q'
+    printf '%s\n' \
+        "printf 'PIPE_LESS_EXIT_OK\\n'" \
+        "printf 'FORK_STATE_RESTORE_OK\\n'" \
+        "printf 'FORK_EXEC_OK\\n'" \
+        "printf 'OCI_FILESYSTEM_OK\\n'"
+    wait_for_line 'PIPE_LESS_EXIT_OK'
     wait_for_line 'FORK_STATE_RESTORE_OK'
     wait_for_line 'FORK_EXEC_OK'
     wait_for_line 'PROCFS_OK'
@@ -203,6 +211,7 @@ for expected in \
     'NESTED_FORK_INNER_OK' \
     'NESTED_FORK_OUTER_OK' \
     'PIPE_RUNTIME_64K_OK' \
+    'PIPE_LESS_EXIT_OK' \
     'FORK_STATE_RESTORE_OK' \
     '/etc' \
     'FORK_EXEC_OK' \
