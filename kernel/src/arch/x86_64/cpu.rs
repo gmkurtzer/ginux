@@ -345,6 +345,8 @@ const LINUX_PWRITEV_SYSCALL: u64 = 296;
 const LINUX_COPY_FILE_RANGE_SYSCALL: u64 = 326;
 const LINUX_PRLIMIT64_SYSCALL: u64 = 302;
 const LINUX_GETCPU_SYSCALL: u64 = 309;
+const LINUX_PROCESS_VM_READV_SYSCALL: u64 = 310;
+const LINUX_PROCESS_VM_WRITEV_SYSCALL: u64 = 311;
 const LINUX_IOPRIO_SET_SYSCALL: u64 = 251;
 const LINUX_IOPRIO_GET_SYSCALL: u64 = 252;
 const LINUX_SYNCFS_SYSCALL: u64 = 306;
@@ -8554,6 +8556,15 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_SYNC_FILE_RANGE_SYSCALL => {
             linux_sync_file_range(first_argument, buffer, count, register(0))
         }
+        LINUX_PROCESS_VM_READV_SYSCALL | LINUX_PROCESS_VM_WRITEV_SYSCALL => linux_process_vm_iov(
+            first_argument,
+            buffer,
+            count,
+            register(0),
+            register(1),
+            register(2),
+            number == LINUX_PROCESS_VM_WRITEV_SYSCALL,
+        ),
         LINUX_MEMBARRIER_SYSCALL => linux_membarrier(first_argument, buffer, count),
         LINUX_WAIT4_SYSCALL => linux_wait4(first_argument, buffer, count, register(0)),
         LINUX_WAITID_SYSCALL => {
@@ -11200,6 +11211,74 @@ fn linux_sync_file_range(descriptor: u64, offset: u64, length: u64, flags: u64) 
         return LINUX_EBADF;
     }
     0
+}
+
+fn linux_process_vm_iov(
+    pid: u64,
+    local_vectors: u64,
+    local_count: u64,
+    remote_vectors: u64,
+    remote_count: u64,
+    flags: u64,
+    write_remote: bool,
+) -> u64 {
+    if flags != 0 {
+        return LINUX_EINVAL;
+    }
+    if pid != u64::from(current_linux_process_pid()) {
+        return LINUX_ESRCH;
+    }
+    let (local, local_count) =
+        match linux_socket_iov_ranges(local_vectors, local_count, !write_remote) {
+            Ok(value) => value,
+            Err(error) => return error,
+        };
+    let (remote, remote_count) =
+        match linux_socket_iov_ranges(remote_vectors, remote_count, write_remote) {
+            Ok(value) => value,
+            Err(error) => return error,
+        };
+    let mut local_index = 0;
+    let mut remote_index = 0;
+    let mut local_offset = 0;
+    let mut remote_offset = 0;
+    let mut transferred = 0_u64;
+    let mut bytes = [0_u8; 256];
+    while local_index < local_count && remote_index < remote_count {
+        let local_remaining = local[local_index].1 - local_offset;
+        let remote_remaining = remote[remote_index].1 - remote_offset;
+        if local_remaining == 0 {
+            local_index += 1;
+            local_offset = 0;
+            continue;
+        }
+        if remote_remaining == 0 {
+            remote_index += 1;
+            remote_offset = 0;
+            continue;
+        }
+        let length = local_remaining.min(remote_remaining).min(bytes.len());
+        let local_address = local[local_index].0 + local_offset as u64;
+        let remote_address = remote[remote_index].0 + remote_offset as u64;
+        let (source, destination) = if write_remote {
+            (local_address, remote_address)
+        } else {
+            (remote_address, local_address)
+        };
+        if !copy_from_linux_user(source, &mut bytes[..length])
+            || !copy_to_linux_user(destination, &bytes[..length])
+        {
+            return if transferred == 0 {
+                LINUX_EFAULT
+            } else {
+                transferred
+            };
+        }
+        local_offset += length;
+        remote_offset += length;
+        transferred += length as u64;
+    }
+    transferred
 }
 
 fn linux_runtime_mprotect(address: u64, length: u64, protection: u64) -> u64 {

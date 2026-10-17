@@ -724,6 +724,53 @@ ginux_linux_system_init:
     cmp rax, -22
     jne .Lfailure
 
+    lea rax, [rip + .Lprocess_vm_output]
+    mov qword ptr [rip + .Lprocess_vm_local], rax
+    mov qword ptr [rip + .Lprocess_vm_local + 8], 4
+    add rax, 4
+    mov qword ptr [rip + .Lprocess_vm_local + 16], rax
+    mov qword ptr [rip + .Lprocess_vm_local + 24], 6
+    lea rax, [rip + .Lprocess_vm_source]
+    mov qword ptr [rip + .Lprocess_vm_remote], rax
+    mov qword ptr [rip + .Lprocess_vm_remote + 8], 10
+    mov edi, 1
+    lea rsi, [rip + .Lprocess_vm_local]
+    mov edx, 2
+    lea r10, [rip + .Lprocess_vm_remote]
+    mov r8d, 1
+    xor r9d, r9d
+    mov eax, 310
+    syscall
+    cmp rax, 10
+    jne .Lfailure
+    mov rax, qword ptr [rip + .Lprocess_vm_source]
+    cmp qword ptr [rip + .Lprocess_vm_output], rax
+    jne .Lfailure
+    mov ax, word ptr [rip + .Lprocess_vm_source + 8]
+    cmp word ptr [rip + .Lprocess_vm_output + 8], ax
+    jne .Lfailure
+    lea rax, [rip + .Lprocess_vm_output]
+    mov qword ptr [rip + .Lprocess_vm_local], rax
+    mov qword ptr [rip + .Lprocess_vm_local + 8], 10
+    lea rax, [rip + .Lprocess_vm_target]
+    mov qword ptr [rip + .Lprocess_vm_remote], rax
+    mov edi, 1
+    lea rsi, [rip + .Lprocess_vm_local]
+    mov edx, 1
+    lea r10, [rip + .Lprocess_vm_remote]
+    mov r8d, 1
+    xor r9d, r9d
+    mov eax, 311
+    syscall
+    cmp rax, 10
+    jne .Lfailure
+    mov rax, qword ptr [rip + .Lprocess_vm_source]
+    cmp qword ptr [rip + .Lprocess_vm_target], rax
+    jne .Lfailure
+    mov ax, word ptr [rip + .Lprocess_vm_source + 8]
+    cmp word ptr [rip + .Lprocess_vm_target + 8], ax
+    jne .Lfailure
+
     lea rax, [rip + .Lsignal_handler]
     mov qword ptr [rip + .Lsignal_action], rax
     mov qword ptr [rip + .Lsignal_action + 8], 0x4000000
@@ -1283,6 +1330,18 @@ ginux_linux_system_init:
     .space 32
 .Ltimer_current:
     .space 32
+.align 8
+.Lprocess_vm_source:
+    .ascii "process-vm"
+.Lprocess_vm_output:
+    .space 10
+.Lprocess_vm_target:
+    .space 10
+.align 8
+.Lprocess_vm_local:
+    .space 32
+.Lprocess_vm_remote:
+    .space 16
 .Ldevfs_marker:
     .ascii "DEVFS_READY\n"
 .Lprocfs_marker:
