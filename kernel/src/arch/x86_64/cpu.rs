@@ -93,6 +93,7 @@ const LINUX_PIPE_SYSCALL: u64 = 22;
 const LINUX_SELECT_SYSCALL: u64 = 23;
 const LINUX_SCHED_YIELD_SYSCALL: u64 = 24;
 const LINUX_MREMAP_SYSCALL: u64 = 25;
+const LINUX_REMAP_FILE_PAGES_SYSCALL: u64 = 216;
 const LINUX_MSYNC_SYSCALL: u64 = 26;
 const LINUX_MINCORE_SYSCALL: u64 = 27;
 const LINUX_MADVISE_SYSCALL: u64 = 28;
@@ -7895,6 +7896,9 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_MREMAP_SYSCALL => {
             linux_mremap(first_argument, buffer, count, register(0), register(2))
         }
+        LINUX_REMAP_FILE_PAGES_SYSCALL => {
+            linux_remap_file_pages(first_argument, buffer, count, register(0), register(2))
+        }
         LINUX_MSYNC_SYSCALL => linux_msync(first_argument, buffer, count),
         LINUX_MPROTECT_SYSCALL => linux_mprotect(first_argument, buffer, count),
         LINUX_MSEAL_SYSCALL => linux_mseal(first_argument, buffer, count),
@@ -12655,6 +12659,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let uretprobe = linux_default_signal_terminates(LINUX_SIGILL)
         && !linux_default_signal_terminates(LINUX_SIGCHLD);
     let seccomp = verify_linux_seccomp_syscall();
+    let remap_file_pages = verify_linux_remap_file_pages_syscall();
     let mappings_released =
         address_space::release_current_linux_runtime_mappings(LINUX_RUNTIME_DYNAMIC_MMAP_BASE);
     ELF_PROBE_MMAP_NEXT.store(LINUX_RUNTIME_DYNAMIC_MMAP_BASE, Ordering::SeqCst);
@@ -12674,7 +12679,49 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && shadow_stack
         && uretprobe
         && seccomp
+        && remap_file_pages
         && mappings_released
+}
+
+fn linux_remap_file_pages(start: u64, length: u64, protection: u64, page: u64, _flags: u64) -> u64 {
+    if start == 0
+        || !start.is_multiple_of(PAGE_SIZE as u64)
+        || length == 0
+        || !length.is_multiple_of(PAGE_SIZE as u64)
+        || protection != 0
+        || page.checked_mul(PAGE_SIZE as u64).is_none()
+    {
+        return LINUX_EINVAL;
+    }
+    // Linux accepts only MAP_SHARED file VMAs here. Ginux currently exposes
+    // anonymous shared mappings and private file mappings, neither of which is
+    // an eligible nonlinear file VMA.
+    LINUX_EINVAL
+}
+
+fn verify_linux_remap_file_pages_syscall() -> bool {
+    let mapping = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    if !(LINUX_RUNTIME_DYNAMIC_MMAP_BASE..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
+        .contains(&mapping)
+    {
+        return false;
+    }
+    let private_rejected =
+        linux_remap_file_pages(mapping, PAGE_SIZE as u64, 0, 0, 0) == LINUX_EINVAL;
+    let invalid_rejected = linux_remap_file_pages(mapping + 1, PAGE_SIZE as u64, 0, 0, 0)
+        == LINUX_EINVAL
+        && linux_remap_file_pages(mapping, 0, 0, 0, 0) == LINUX_EINVAL
+        && linux_remap_file_pages(mapping, PAGE_SIZE as u64, 1, 0, 0) == LINUX_EINVAL
+        && linux_remap_file_pages(mapping, PAGE_SIZE as u64, 0, u64::MAX, 0) == LINUX_EINVAL;
+    let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
+    private_rejected && invalid_rejected && unmapped
 }
 
 fn linux_seccomp_strict_syscall_allowed(number: u64) -> bool {

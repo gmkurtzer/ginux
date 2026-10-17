@@ -1715,6 +1715,12 @@ the action used by this profile. BPF filter mode, synchronization across a
 general thread group, logging, tracing, and user notification remain
 unsupported and fail explicitly rather than silently weakening a filter.
 
+`rax = 216` (`__NR_remap_file_pages`) recognizes Linux's deprecated nonlinear
+file-remapping ABI and validates its address, size, protection, and page-index
+contract. All VMAs Ginux currently creates are ineligible: file mappings are
+private and shared mappings are anonymous, so Linux-compatible `EINVAL` is
+returned. Successful nonlinear `MAP_SHARED` file remapping remains pending.
+
 Every other call
 returns `-ENOSYS` without disarming
 the task, so a caller can handle the error and continue. The entire path
