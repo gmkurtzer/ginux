@@ -42,7 +42,7 @@ Detailed bounded behavior for implemented calls lives in
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **50 Complete**, **277 Partial**, **48 Policy-denied**, **0 Missing**.
+Current totals: **55 Complete**, **272 Partial**, **48 Policy-denied**, **0 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -276,10 +276,10 @@ therefore omitted.
 | 146 | sched_get_priority_max | Complete |
 | 147 | sched_get_priority_min | Complete |
 | 148 | sched_rr_get_interval | Partial |
-| 149 | mlock | Partial |
-| 150 | munlock | Partial |
-| 151 | mlockall | Partial |
-| 152 | munlockall | Partial |
+| 149 | mlock | Complete |
+| 150 | munlock | Complete |
+| 151 | mlockall | Complete |
+| 152 | munlockall | Complete |
 | 153 | vhangup | Policy-denied |
 | 154 | modify_ldt | Partial |
 | 155 | pivot_root | Policy-denied |
@@ -452,7 +452,7 @@ therefore omitted.
 | 322 | execveat | Partial |
 | 323 | userfaultfd | Partial |
 | 324 | membarrier | Complete |
-| 325 | mlock2 | Partial |
+| 325 | mlock2 | Complete |
 | 326 | copy_file_range | Partial |
 | 327 | preadv2 | Partial |
 | 328 | pwritev2 | Partial |

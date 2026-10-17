@@ -775,9 +775,15 @@ the current procfs compatibility files plus monotonic uptime and one process.
 `sched_rr_get_interval` reports the bounded scheduler's 100 ms quantum for any
 live process visible in the domain and matches Linux's negative-PID,
 retired-PID, and output-fault ordering.
-Because Ginux has no swap or page reclaim path, `mlock`, `mlock2`, `munlock`,
-`mlockall`, and `munlockall` validate their admitted arguments and mapped
-ranges but require no additional residency state. `setrlimit` accepts an
+Because Ginux has no swap or page reclaim path, every current and future
+userspace mapping is resident. `mlock`, `mlock2`, `munlock`, `mlockall`, and
+`munlockall` therefore implement the complete Linux-visible contract without
+additional residency state. They validate mapped ranges, Linux integer
+narrowing, `MLOCK_ONFAULT`, and the `MCL_CURRENT`, `MCL_FUTURE`, and
+`MCL_ONFAULT` combinations; zero-length ranges are successful and unmapped
+nonempty ranges return `-ENOMEM`. One runtime probe covers all five calls,
+valid and invalid flags, mapped and unmapped ranges, and unaligned range
+rounding. `setrlimit` accepts an
 idempotent write of the current bounded stack or descriptor limit; changing a
 limit remains denied. `sync` has a direct userspace conformance probe and
 succeeds after synchronizing every filesystem in the current RAM-backed and

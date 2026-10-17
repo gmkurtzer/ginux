@@ -8503,13 +8503,7 @@ extern "sysv64" fn linux_syscall_handler(
         }
         LINUX_MLOCK_SYSCALL | LINUX_MUNLOCK_SYSCALL => linux_memory_lock(first_argument, buffer, 0),
         LINUX_MLOCK2_SYSCALL => linux_memory_lock(first_argument, buffer, count),
-        LINUX_MLOCKALL_SYSCALL => {
-            if first_argument != 0 && first_argument & !7 == 0 {
-                0
-            } else {
-                LINUX_EINVAL
-            }
-        }
+        LINUX_MLOCKALL_SYSCALL => linux_mlockall(first_argument),
         LINUX_MUNLOCKALL_SYSCALL => 0,
         LINUX_PRCTL_SYSCALL => match first_argument {
             LINUX_PR_SET_NAME => linux_set_process_name(buffer),
@@ -12739,6 +12733,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let rseq = verify_linux_rseq_syscall();
     let membarrier = verify_linux_membarrier_syscall();
     let readahead = verify_linux_readahead_syscall();
+    let memory_locking = verify_linux_memory_locking_syscalls();
     let mappings_released =
         address_space::release_current_linux_runtime_mappings(LINUX_RUNTIME_DYNAMIC_MMAP_BASE);
     ELF_PROBE_MMAP_NEXT.store(LINUX_RUNTIME_DYNAMIC_MMAP_BASE, Ordering::SeqCst);
@@ -12773,6 +12768,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && rseq
         && membarrier
         && readahead
+        && memory_locking
         && mappings_released
 }
 
@@ -13149,6 +13145,37 @@ fn verify_linux_readahead_syscall() -> bool {
     let removed = crate::linux_overlay::unlink(node);
     let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
     errors && closed && removed && unmapped
+}
+
+fn verify_linux_memory_locking_syscalls() -> bool {
+    let mapping = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64 * 2,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    if !(LINUX_RUNTIME_DYNAMIC_MMAP_BASE..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
+        .contains(&mapping)
+    {
+        return false;
+    }
+    let ranges = linux_memory_lock(u64::MAX, 0, 0) == 0
+        && linux_memory_lock(mapping + 1, PAGE_SIZE as u64, 0) == 0
+        && linux_memory_lock(mapping, PAGE_SIZE as u64 * 2, 1) == 0
+        && linux_memory_lock(mapping, PAGE_SIZE as u64, 2) == LINUX_EINVAL
+        && linux_memory_lock(mapping + PAGE_SIZE as u64 * 2, 1, 0) == LINUX_ENOMEM;
+    let all = ranges
+        && [1_u64, 2, 3, 5, 6, 7]
+            .into_iter()
+            .all(|flags| linux_mlockall(flags) == 0)
+        && linux_mlockall(0) == LINUX_EINVAL
+        && linux_mlockall(4) == LINUX_EINVAL
+        && linux_mlockall(8) == LINUX_EINVAL
+        && linux_mlockall((1_u64 << 32) | 1) == 0;
+    let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64 * 2) == 0;
+    all && unmapped
 }
 
 fn verify_linux_io_uring_syscalls() -> bool {
@@ -26632,6 +26659,7 @@ fn linux_sched_setaffinity(pid: u64, length: u64, address: u64) -> u64 {
 }
 
 fn linux_memory_lock(address: u64, length: u64, flags: u64) -> u64 {
+    let flags = flags as u32;
     if flags & !1 != 0 {
         return LINUX_EINVAL;
     }
@@ -26648,6 +26676,20 @@ fn linux_memory_lock(address: u64, length: u64, flags: u64) -> u64 {
     } else {
         LINUX_ENOMEM
     }
+}
+
+fn linux_mlockall(flags: u64) -> u64 {
+    const MCL_CURRENT: u32 = 1;
+    const MCL_FUTURE: u32 = 2;
+    const MCL_ONFAULT: u32 = 4;
+    let flags = flags as u32;
+    if flags == 0 || flags & !(MCL_CURRENT | MCL_FUTURE | MCL_ONFAULT) != 0 || flags == MCL_ONFAULT
+    {
+        return LINUX_EINVAL;
+    }
+    // Every present and future Ginux userspace mapping is resident because the
+    // kernel has no swap or page-reclaim path.
+    0
 }
 
 fn linux_syncfs(descriptor: u64) -> u64 {
