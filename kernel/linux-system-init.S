@@ -150,6 +150,43 @@ ginux_linux_system_init:
     cmp rax, -22
     jne .Lfailure
 
+    lea rdi, [rip + .Lpipe_pair]
+    mov eax, 22
+    syscall
+    test rax, rax
+    jne .Lfailure
+    lea rax, [rip + .Lvmsplice_payload]
+    mov qword ptr [rip + .Lvmsplice_iov], rax
+    mov qword ptr [rip + .Lvmsplice_iov + 8], 8
+    mov edi, dword ptr [rip + .Lpipe_pair + 4]
+    lea rsi, [rip + .Lvmsplice_iov]
+    mov edx, 1
+    xor r10d, r10d
+    mov eax, 278
+    syscall
+    cmp rax, 8
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Lpipe_pair]
+    lea rsi, [rip + .Lvmsplice_output]
+    mov edx, 8
+    xor eax, eax
+    syscall
+    cmp rax, 8
+    jne .Lfailure
+    mov rax, 0x216563696c707376
+    cmp qword ptr [rip + .Lvmsplice_output], rax
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Lpipe_pair]
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Lpipe_pair + 4]
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Lfailure
+
     mov edi, -100
     lea rsi, [rip + .Lnull_path]
     mov edx, 2
@@ -1565,6 +1602,16 @@ ginux_linux_system_init:
     .space 64
 .Lmmsg_recv:
     .space 64
+.align 8
+.Lpipe_pair:
+    .space 8
+.Lvmsplice_payload:
+    .ascii "vsplice!"
+.Lvmsplice_output:
+    .space 8
+.align 8
+.Lvmsplice_iov:
+    .space 16
 .align 8
 .Lcachestat_range:
     .quad 0

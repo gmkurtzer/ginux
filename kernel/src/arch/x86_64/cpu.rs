@@ -327,6 +327,7 @@ const LINUX_PPOLL_SYSCALL: u64 = 271;
 const LINUX_SET_ROBUST_LIST_SYSCALL: u64 = 273;
 const LINUX_GET_ROBUST_LIST_SYSCALL: u64 = 274;
 const LINUX_SYNC_FILE_RANGE_SYSCALL: u64 = 277;
+const LINUX_VMSPLICE_SYSCALL: u64 = 278;
 const LINUX_UNSHARE_SYSCALL: u64 = 272;
 const LINUX_MIGRATE_PAGES_SYSCALL: u64 = 256;
 const LINUX_MOVE_PAGES_SYSCALL: u64 = 279;
@@ -8393,6 +8394,7 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_FREMOVEXATTR_SYSCALL => linux_fremovexattr(first_argument, buffer),
         LINUX_EPOLL_CREATE1_SYSCALL => linux_epoll_create1(first_argument),
         LINUX_PIPE2_SYSCALL => linux_pipe(first_argument, buffer),
+        LINUX_VMSPLICE_SYSCALL => linux_vmsplice(first_argument, buffer, count, register(0)),
         LINUX_TIMERFD_CREATE_SYSCALL => linux_timerfd_create(first_argument, buffer),
         LINUX_EVENTFD_SYSCALL => linux_eventfd(first_argument, 0),
         LINUX_EVENTFD2_SYSCALL => linux_eventfd(first_argument, buffer),
@@ -18898,6 +18900,18 @@ fn linux_pipe(address: u64, flags: u64) -> u64 {
         set_linux_descriptor_close_on_exec(descriptor, flags & LINUX_O_CLOEXEC != 0);
     }
     0
+}
+
+fn linux_vmsplice(descriptor: u64, vectors: u64, count: u64, flags: u64) -> u64 {
+    const SPLICE_F_MORE: u64 = 4;
+    const SPLICE_F_GIFT: u64 = 8;
+    if flags & !(SPLICE_F_MORE | SPLICE_F_GIFT) != 0 {
+        return LINUX_EINVAL;
+    }
+    if !linux_pipe_write_descriptor(descriptor) {
+        return LINUX_EBADF;
+    }
+    linux_descriptor_writev(descriptor, vectors, count)
 }
 
 fn linux_runtime_pipe(address: u64, flags: u64) -> u64 {
