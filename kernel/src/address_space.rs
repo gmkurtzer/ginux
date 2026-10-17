@@ -121,8 +121,11 @@ const NO_EXECUTE: u64 = 1 << 63;
 const LINUX_RUNTIME_FILE: u64 = 1 << 9;
 const LINUX_RUNTIME_RESERVED: u64 = 1 << 10;
 const LINUX_RUNTIME_DEMAND: u64 = 1 << 11;
-const LINUX_RUNTIME_SEALED: u64 = 1 << 12;
-const LINUX_RUNTIME_SHARED: u64 = 1 << 13;
+// Bits 12 through 51 encode the physical frame and must never carry software
+// metadata. x86-64 leaves these high leaf-PTE bits available to software when
+// protection keys are not in use.
+const LINUX_RUNTIME_SEALED: u64 = 1 << 58;
+const LINUX_RUNTIME_SHARED: u64 = 1 << 57;
 const LINUX_INIT_ARGUMENT: [u8; 6] = [b'/', b'i', b'n', b'i', b't', 0];
 const LINUX_INIT_ENVIRONMENT: [u8; 8] = [b'G', b'I', b'N', b'U', b'X', b'=', b'1', 0];
 const LINUX_PLATFORM: [u8; 7] = [b'x', b'8', b'6', b'_', b'6', b'4', 0];
