@@ -105,6 +105,51 @@ ginux_linux_system_init:
     test rax, rax
     jne .Lfailure
 
+    xor edi, edi
+    mov esi, 4096
+    mov edx, 3
+    mov r10d, 0x22
+    mov r8, -1
+    xor r9d, r9d
+    mov eax, 9
+    syscall
+    test rax, rax
+    js .Lfailure
+    mov r12, rax
+    mov rdi, rax
+    mov esi, 4096
+    mov edx, 1
+    mov r10, -1
+    mov eax, 329
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov rdi, r12
+    mov esi, 4096
+    mov edx, 3
+    xor r10d, r10d
+    mov eax, 329
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov rdi, r12
+    mov esi, 4096
+    mov eax, 11
+    syscall
+    test rax, rax
+    jne .Lfailure
+    xor edi, edi
+    xor esi, esi
+    mov eax, 330
+    syscall
+    cmp rax, -28
+    jne .Lfailure
+    xor edi, edi
+    mov eax, 331
+    syscall
+    cmp rax, -22
+    jne .Lfailure
+
     mov edi, -100
     lea rsi, [rip + .Lnull_path]
     mov edx, 2

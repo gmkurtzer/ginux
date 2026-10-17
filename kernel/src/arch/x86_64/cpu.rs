@@ -380,6 +380,9 @@ const LINUX_PWRITEV2_SYSCALL: u64 = 328;
 const LINUX_EXECVEAT_SYSCALL: u64 = 322;
 const LINUX_MEMFD_CREATE_SYSCALL: u64 = 319;
 const LINUX_RSEQ_SYSCALL: u64 = 334;
+const LINUX_PKEY_MPROTECT_SYSCALL: u64 = 329;
+const LINUX_PKEY_ALLOC_SYSCALL: u64 = 330;
+const LINUX_PKEY_FREE_SYSCALL: u64 = 331;
 const LINUX_GETRANDOM_SYSCALL: u64 = 318;
 const LINUX_STATX_SYSCALL: u64 = 332;
 const LINUX_RENAMEAT2_SYSCALL: u64 = 316;
@@ -7663,45 +7666,12 @@ extern "sysv64" fn linux_syscall_handler(
             linux_mremap(first_argument, buffer, count, register(0), register(2))
         }
         LINUX_MSYNC_SYSCALL => linux_msync(first_argument, buffer, count),
-        LINUX_MPROTECT_SYSCALL => {
-            if !first_argument.is_multiple_of(PAGE_SIZE as u64) || buffer == 0 {
-                return LINUX_EINVAL;
-            }
-            let relro = ELF_PROBE_RELRO.load(Ordering::SeqCst);
-            let relro_size = ELF_PROBE_RELRO_SIZE.load(Ordering::SeqCst);
-            let relro_active_index = linux_active_image_writable_index(first_argument);
-            if LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
-                && count == LINUX_PROT_READ
-                && buffer.is_multiple_of(PAGE_SIZE as u64)
-                && address_space::protect_current_linux_range_read_only(first_argument, buffer)
-            {
-                let end = first_argument.saturating_add(buffer);
-                let active_count = usize::from(ELF_PROBE_ACTIVE_IMAGE_COUNT.load(Ordering::SeqCst));
-                for index in 0..active_count {
-                    let address = ELF_PROBE_ACTIVE_IMAGE_ADDRESSES[index].load(Ordering::SeqCst);
-                    if (first_argument..end).contains(&address) {
-                        ELF_PROBE_ACTIVE_IMAGE_FLAGS[index].fetch_and(!1, Ordering::SeqCst);
-                    }
-                }
-                return 0;
-            }
-            if count == LINUX_PROT_READ
-                && first_argument == relro
-                && buffer == PAGE_SIZE as u64
-                && relro_size != 0
-                && relro_size <= PAGE_SIZE as u64
-                && ELF_PROBE_READ_ONLY_DATA_PAGE.load(Ordering::SeqCst) == 0
-            {
-                if let Some(relro_active_index) = relro_active_index {
-                    if address_space::protect_current_user_page_read_only(first_argument) {
-                        ELF_PROBE_ACTIVE_IMAGE_FLAGS[relro_active_index].store(0, Ordering::SeqCst);
-                        ELF_PROBE_READ_ONLY_DATA_PAGE.store(first_argument, Ordering::SeqCst);
-                        return 0;
-                    }
-                }
-            }
-            linux_mprotect_mmap(first_argument, buffer, count)
+        LINUX_MPROTECT_SYSCALL => linux_mprotect(first_argument, buffer, count),
+        LINUX_PKEY_MPROTECT_SYSCALL => {
+            linux_pkey_mprotect(first_argument, buffer, count, register(0))
         }
+        LINUX_PKEY_ALLOC_SYSCALL => linux_pkey_alloc(first_argument, buffer),
+        LINUX_PKEY_FREE_SYSCALL => linux_pkey_free(first_argument),
         LINUX_IOCTL_SYSCALL => {
             if linux_pipe_descriptor(first_argument) {
                 if buffer != LINUX_FIONREAD {
@@ -11684,6 +11654,64 @@ fn linux_runtime_mincore(address: u64, length: u64, vector: u64) -> u64 {
     } else {
         LINUX_EINVAL
     }
+}
+
+fn linux_mprotect(address: u64, length: u64, protection: u64) -> u64 {
+    if !address.is_multiple_of(PAGE_SIZE as u64) || length == 0 {
+        return LINUX_EINVAL;
+    }
+    let relro = ELF_PROBE_RELRO.load(Ordering::SeqCst);
+    let relro_size = ELF_PROBE_RELRO_SIZE.load(Ordering::SeqCst);
+    let relro_active_index = linux_active_image_writable_index(address);
+    if LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
+        && protection == LINUX_PROT_READ
+        && length.is_multiple_of(PAGE_SIZE as u64)
+        && address_space::protect_current_linux_range_read_only(address, length)
+    {
+        let end = address.saturating_add(length);
+        let active_count = usize::from(ELF_PROBE_ACTIVE_IMAGE_COUNT.load(Ordering::SeqCst));
+        for index in 0..active_count {
+            let image_address = ELF_PROBE_ACTIVE_IMAGE_ADDRESSES[index].load(Ordering::SeqCst);
+            if (address..end).contains(&image_address) {
+                ELF_PROBE_ACTIVE_IMAGE_FLAGS[index].fetch_and(!1, Ordering::SeqCst);
+            }
+        }
+        return 0;
+    }
+    if protection == LINUX_PROT_READ
+        && address == relro
+        && length == PAGE_SIZE as u64
+        && relro_size != 0
+        && relro_size <= PAGE_SIZE as u64
+        && ELF_PROBE_READ_ONLY_DATA_PAGE.load(Ordering::SeqCst) == 0
+    {
+        if let Some(relro_active_index) = relro_active_index {
+            if address_space::protect_current_user_page_read_only(address) {
+                ELF_PROBE_ACTIVE_IMAGE_FLAGS[relro_active_index].store(0, Ordering::SeqCst);
+                ELF_PROBE_READ_ONLY_DATA_PAGE.store(address, Ordering::SeqCst);
+                return 0;
+            }
+        }
+    }
+    linux_mprotect_mmap(address, length, protection)
+}
+
+fn linux_pkey_mprotect(address: u64, length: u64, protection: u64, key: u64) -> u64 {
+    if key != 0 && key != u64::MAX {
+        return LINUX_EINVAL;
+    }
+    linux_mprotect(address, length, protection)
+}
+
+fn linux_pkey_alloc(flags: u64, access_rights: u64) -> u64 {
+    if flags != 0 || access_rights & !3 != 0 {
+        return LINUX_EINVAL;
+    }
+    LINUX_ENOSPC
+}
+
+const fn linux_pkey_free(_key: u64) -> u64 {
+    LINUX_EINVAL
 }
 
 fn linux_mprotect_mmap(address: u64, length: u64, protection: u64) -> u64 {
