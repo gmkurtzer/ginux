@@ -42,7 +42,7 @@ Detailed bounded behavior for implemented calls lives in
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **46 Complete**, **281 Partial**, **48 Policy-denied**, **0 Missing**.
+Current totals: **47 Complete**, **280 Partial**, **48 Policy-denied**, **0 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -433,7 +433,7 @@ therefore omitted.
 | 303 | name_to_handle_at | Partial |
 | 304 | open_by_handle_at | Partial |
 | 305 | clock_adjtime | Policy-denied |
-| 306 | syncfs | Partial |
+| 306 | syncfs | Complete |
 | 307 | sendmmsg | Partial |
 | 308 | setns | Policy-denied |
 | 309 | getcpu | Complete |

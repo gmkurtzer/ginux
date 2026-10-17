@@ -8873,13 +8873,7 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_FCHMODAT2_SYSCALL => linux_fchmodat(first_argument, buffer, count, register(0)),
         LINUX_STATX_SYSCALL => linux_statx(first_argument, buffer, count, register(0), register(2)),
         LINUX_CLOSE_RANGE_SYSCALL => linux_close_range(first_argument, buffer, count),
-        LINUX_SYNCFS_SYSCALL => {
-            if linux_descriptor_open(first_argument) {
-                0
-            } else {
-                LINUX_EBADF
-            }
-        }
+        LINUX_SYNCFS_SYSCALL => linux_syncfs(first_argument),
         LINUX_SYNC_FILE_RANGE_SYSCALL => {
             linux_sync_file_range(first_argument, buffer, count, register(0))
         }
@@ -12703,6 +12697,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let scheduler_queries = verify_linux_scheduler_queries();
     let scheduler_affinity = verify_linux_scheduler_affinity();
     let realtime_queries = verify_linux_realtime_queries();
+    let filesystem_sync = linux_syncfs(1) == 0 && linux_syncfs(99) == LINUX_EBADF;
     let mappings_released =
         address_space::release_current_linux_runtime_mappings(LINUX_RUNTIME_DYNAMIC_MMAP_BASE);
     ELF_PROBE_MMAP_NEXT.store(LINUX_RUNTIME_DYNAMIC_MMAP_BASE, Ordering::SeqCst);
@@ -12732,6 +12727,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && scheduler_queries
         && scheduler_affinity
         && realtime_queries
+        && filesystem_sync
         && mappings_released
 }
 
@@ -26298,6 +26294,14 @@ fn linux_memory_lock(address: u64, length: u64, flags: u64) -> u64 {
         0
     } else {
         LINUX_ENOMEM
+    }
+}
+
+fn linux_syncfs(descriptor: u64) -> u64 {
+    if linux_descriptor_open(descriptor) {
+        0
+    } else {
+        LINUX_EBADF
     }
 }
 
