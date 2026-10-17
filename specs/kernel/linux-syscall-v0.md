@@ -1730,6 +1730,14 @@ profile is bounded to 3760 bytes. General key types, nested keyring links,
 permission mutation, request-key upcalls, quotas, expiry, and asymmetric-key
 operations remain unsupported.
 
+`rax = 323` (`userfaultfd`) creates an anonymous nonblocking descriptor when
+`UFFD_USER_MODE_ONLY` is requested, with Linux `O_CLOEXEC`/`O_NONBLOCK`
+semantics. Calls without that flag fail with `EPERM`, matching a Linux host
+that disables unprivileged kernel-fault handling for a caller without ptrace
+authority. `UFFDIO_API` negotiates API `0xaa`; the empty event stream returns
+`EAGAIN`. Range registration, page-fault events, copy/zeropage/write-protect,
+and fork/remap/remove events remain unsupported and their ioctls are rejected.
+
 Every other call
 returns `-ENOSYS` without disarming
 the task, so a caller can handle the error and continue. The entire path

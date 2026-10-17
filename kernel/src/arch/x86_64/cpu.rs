@@ -419,6 +419,7 @@ const LINUX_EXECVEAT_SYSCALL: u64 = 322;
 const LINUX_MEMFD_CREATE_SYSCALL: u64 = 319;
 const LINUX_MEMFD_SECRET_SYSCALL: u64 = 447;
 const LINUX_RSEQ_SYSCALL: u64 = 334;
+const LINUX_USERFAULTFD_SYSCALL: u64 = 323;
 const LINUX_URETPROBE_SYSCALL: u64 = 335;
 const LINUX_SECCOMP_SYSCALL: u64 = 317;
 const LINUX_IO_PGETEVENTS_SYSCALL: u64 = 333;
@@ -597,6 +598,7 @@ const LINUX_DESCRIPTOR_OUTPUT: u16 = 2;
 const LINUX_DEVICE_ZERO: u16 = 1 << 2;
 const LINUX_DEVICE_CONSOLE: u16 = 1 << 3;
 const LINUX_DEVICE_DIRECTORY: u16 = 1 << 4;
+const LINUX_DEVICE_USERFAULTFD: u16 = 1 << 8;
 const LINUX_DEVICE_POSIX_MQ: u16 = 1 << 10;
 const LINUX_DEVICE_INOTIFY: u16 = 1 << 11;
 const LINUX_DEVICE_PIDFD: u16 = 1 << 13;
@@ -7913,6 +7915,9 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_PKEY_ALLOC_SYSCALL => linux_pkey_alloc(first_argument, buffer),
         LINUX_PKEY_FREE_SYSCALL => linux_pkey_free(first_argument),
         LINUX_IOCTL_SYSCALL => {
+            if linux_userfaultfd_descriptor(first_argument) {
+                return linux_userfaultfd_ioctl(first_argument, buffer, count);
+            }
             if linux_pipe_descriptor(first_argument) {
                 if buffer != LINUX_FIONREAD {
                     return LINUX_ENOTTY;
@@ -8782,6 +8787,7 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_KEYCTL_SYSCALL => {
             linux_keyctl(first_argument, buffer, count, register(0), register(2))
         }
+        LINUX_USERFAULTFD_SYSCALL => linux_userfaultfd(first_argument),
         LINUX_PRLIMIT64_SYSCALL => {
             if !matches!(first_argument, 0 | 1) {
                 return LINUX_ESRCH;
@@ -12675,6 +12681,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let seccomp = verify_linux_seccomp_syscall();
     let remap_file_pages = verify_linux_remap_file_pages_syscall();
     let keyrings = verify_linux_keyring_syscalls();
+    let userfaultfd = verify_linux_userfaultfd_syscall();
     let mappings_released =
         address_space::release_current_linux_runtime_mappings(LINUX_RUNTIME_DYNAMIC_MMAP_BASE);
     ELF_PROBE_MMAP_NEXT.store(LINUX_RUNTIME_DYNAMIC_MMAP_BASE, Ordering::SeqCst);
@@ -12696,7 +12703,50 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && seccomp
         && remap_file_pages
         && keyrings
+        && userfaultfd
         && mappings_released
+}
+
+fn verify_linux_userfaultfd_syscall() -> bool {
+    let mapping = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    if !(LINUX_RUNTIME_DYNAMIC_MMAP_BASE..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
+        .contains(&mapping)
+    {
+        return false;
+    }
+    let policy = linux_userfaultfd(0) == LINUX_EPERM && linux_userfaultfd(2) == LINUX_EINVAL;
+    let descriptor = if policy {
+        linux_userfaultfd(1 | LINUX_O_NONBLOCK | LINUX_O_CLOEXEC)
+    } else {
+        LINUX_EBADF
+    };
+    let opened = descriptor < LINUX_AUX_DESCRIPTOR_LIMIT
+        && linux_descriptor_close_on_exec(descriptor)
+        && linux_descriptor_fcntl(descriptor, LINUX_F_GETFL, 0) == (2 | LINUX_O_NONBLOCK);
+    let mut api = [0_u8; 24];
+    api[..8].copy_from_slice(&0xaa_u64.to_ne_bytes());
+    let negotiated = opened
+        && copy_to_linux_user(mapping, &api)
+        && linux_userfaultfd_ioctl(descriptor, 0xc018_aa3f, mapping) == 0
+        && copy_from_linux_user(mapping, &mut api)
+        && u64::from_ne_bytes(api[..8].try_into().unwrap()) == 0xaa
+        && u64::from_ne_bytes(api[8..16].try_into().unwrap()) == 0
+        && u64::from_ne_bytes(api[16..24].try_into().unwrap()) == 1_u64 << 63;
+    let empty = negotiated
+        && linux_descriptor_read(descriptor, mapping + 64, 32) == LINUX_EAGAIN
+        && linux_userfaultfd_ioctl(descriptor, 0, mapping) == LINUX_ENOTTY;
+    let closed = descriptor < LINUX_AUX_DESCRIPTOR_LIMIT
+        && linux_descriptor_close(descriptor) == 0
+        && linux_descriptor_read(descriptor, mapping, 1) == LINUX_EBADF;
+    let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
+    empty && closed && unmapped
 }
 
 fn verify_linux_keyring_syscalls() -> bool {
@@ -19757,6 +19807,9 @@ fn linux_descriptor_read(descriptor: u64, address: u64, count: u64) -> u64 {
         return result;
     }
     let device = linux_device_descriptor(descriptor);
+    if linux_userfaultfd_descriptor(descriptor) {
+        return LINUX_EAGAIN;
+    }
     if linux_path_descriptor(descriptor) {
         return LINUX_EBADF;
     }
@@ -22620,6 +22673,60 @@ fn linux_inotify_descriptor(descriptor: u64) -> bool {
     linux_device_descriptor(descriptor) & !3 == LINUX_DEVICE_INOTIFY
 }
 
+fn linux_userfaultfd_descriptor(descriptor: u64) -> bool {
+    linux_device_descriptor(descriptor) & !3 == LINUX_DEVICE_USERFAULTFD
+}
+
+fn linux_userfaultfd(flags: u64) -> u64 {
+    const USER_MODE_ONLY: u64 = 1;
+    const VALID_FLAGS: u64 = USER_MODE_ONLY | LINUX_O_NONBLOCK | LINUX_O_CLOEXEC;
+    if flags & !VALID_FLAGS != 0 {
+        return LINUX_EINVAL;
+    }
+    // Domains intentionally lack host ptrace authority. Linux requires either
+    // that authority or UFFD_USER_MODE_ONLY when unprivileged userfaultfd is
+    // disabled.
+    if flags & USER_MODE_ONLY == 0 {
+        return LINUX_EPERM;
+    }
+    let Some(descriptor) = (LINUX_AUX_DESCRIPTOR_FIRST..LINUX_AUX_DESCRIPTOR_LIMIT)
+        .find(|descriptor| linux_aux_descriptor_free(*descriptor))
+    else {
+        return LINUX_EMFILE;
+    };
+    let index = (descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize;
+    ELF_PROBE_DEVICE_DESCRIPTORS[index].store(LINUX_DEVICE_USERFAULTFD | 3, Ordering::SeqCst);
+    ELF_PROBE_SOCKET_FLAGS[index].store((flags & !USER_MODE_ONLY) as u32, Ordering::SeqCst);
+    set_linux_descriptor_close_on_exec(descriptor, flags & LINUX_O_CLOEXEC != 0);
+    descriptor
+}
+
+fn linux_userfaultfd_ioctl(descriptor: u64, request: u64, argument: u64) -> u64 {
+    const UFFDIO_API: u64 = 0xc018_aa3f;
+    const API: u64 = 0xaa;
+    if !linux_userfaultfd_descriptor(descriptor) {
+        return LINUX_EBADF;
+    }
+    if request != UFFDIO_API {
+        return LINUX_ENOTTY;
+    }
+    let mut api = [0_u8; 24];
+    if !copy_from_linux_user(argument, &mut api) {
+        return LINUX_EFAULT;
+    }
+    if u64::from_ne_bytes(api[..8].try_into().unwrap()) != API
+        || u64::from_ne_bytes(api[8..16].try_into().unwrap()) != 0
+    {
+        return LINUX_EINVAL;
+    }
+    api[16..24].copy_from_slice(&(1_u64 << 63).to_ne_bytes());
+    if copy_to_linux_user(argument, &api) {
+        0
+    } else {
+        LINUX_EFAULT
+    }
+}
+
 fn linux_inotify_instance_range() -> core::ops::Range<usize> {
     let instance = linux_execution_instance();
     instance..instance + 1
@@ -23049,6 +23156,9 @@ fn linux_descriptor_poll_events(descriptor: i32, requested: u16) -> u16 {
 }
 
 fn linux_descriptor_write(descriptor: u64, address: u64, count: u64) -> u64 {
+    if linux_userfaultfd_descriptor(descriptor) {
+        return LINUX_EINVAL;
+    }
     if linux_socket_slot(descriptor).is_some() {
         let device = linux_device_descriptor(descriptor);
         if device & LINUX_DEVICE_PIPE != 0 && device & 3 != LINUX_DESCRIPTOR_OUTPUT {
@@ -25319,6 +25429,7 @@ fn linux_descriptor_stat(descriptor: u64) -> Option<[u8; LINUX_STAT_SIZE]> {
     if linux_epoll_descriptor(descriptor)
         || linux_eventfd_descriptor(descriptor)
         || linux_timerfd_descriptor(descriptor)
+        || linux_userfaultfd_descriptor(descriptor)
         || linux_socket_slot(descriptor).is_some()
     {
         return Some(linux_stat(LINUX_STAT_ANONYMOUS_MODE, 4));
