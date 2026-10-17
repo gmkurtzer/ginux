@@ -771,6 +771,70 @@ ginux_linux_system_init:
     cmp word ptr [rip + .Lprocess_vm_target + 8], ax
     jne .Lfailure
 
+    xor edi, edi
+    xor esi, esi
+    xor edx, edx
+    mov eax, 238
+    syscall
+    test rax, rax
+    jne .Lfailure
+    lea rdi, [rip + .Lnuma_mode]
+    lea rsi, [rip + .Lnuma_mask]
+    mov edx, 64
+    xor r10d, r10d
+    mov r8d, 4
+    mov eax, 239
+    syscall
+    test rax, rax
+    jne .Lfailure
+    cmp dword ptr [rip + .Lnuma_mode], 0
+    jne .Lfailure
+    cmp qword ptr [rip + .Lnuma_mask], 1
+    jne .Lfailure
+    lea rdi, [rip + .Lstatus]
+    and rdi, -4096
+    mov esi, 4096
+    xor edx, edx
+    xor r10d, r10d
+    xor r8d, r8d
+    xor r9d, r9d
+    mov eax, 237
+    syscall
+    test rax, rax
+    jne .Lfailure
+    xor edi, edi
+    mov esi, 64
+    lea rdx, [rip + .Lnuma_mask]
+    lea r10, [rip + .Lnuma_mask]
+    mov eax, 256
+    syscall
+    test rax, rax
+    jne .Lfailure
+    lea rax, [rip + .Lstatus]
+    and rax, -4096
+    mov qword ptr [rip + .Lnuma_page], rax
+    xor edi, edi
+    mov esi, 1
+    lea rdx, [rip + .Lnuma_page]
+    lea r10, [rip + .Lnuma_node]
+    lea r8, [rip + .Lnuma_status]
+    xor r9d, r9d
+    mov eax, 279
+    syscall
+    test rax, rax
+    jne .Lfailure
+    cmp dword ptr [rip + .Lnuma_status], 0
+    jne .Lfailure
+    lea rdi, [rip + .Lstatus]
+    and rdi, -4096
+    mov esi, 4096
+    xor edx, edx
+    xor r10d, r10d
+    mov eax, 450
+    syscall
+    test rax, rax
+    jne .Lfailure
+
     lea rax, [rip + .Lsignal_handler]
     mov qword ptr [rip + .Lsignal_action], rax
     mov qword ptr [rip + .Lsignal_action + 8], 0x4000000
@@ -1342,6 +1406,17 @@ ginux_linux_system_init:
     .space 32
 .Lprocess_vm_remote:
     .space 16
+.align 8
+.Lnuma_mask:
+    .quad 1
+.Lnuma_page:
+    .quad 0
+.Lnuma_mode:
+    .long -1
+.Lnuma_node:
+    .long 0
+.Lnuma_status:
+    .long -1
 .Ldevfs_marker:
     .ascii "DEVFS_READY\n"
 .Lprocfs_marker:

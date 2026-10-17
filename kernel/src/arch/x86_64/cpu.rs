@@ -303,6 +303,9 @@ const LINUX_KEXEC_LOAD_SYSCALL: u64 = 246;
 const LINUX_WAITID_SYSCALL: u64 = 247;
 const LINUX_UTIMES_SYSCALL: u64 = 235;
 const LINUX_VSERVER_SYSCALL: u64 = 236;
+const LINUX_MBIND_SYSCALL: u64 = 237;
+const LINUX_SET_MEMPOLICY_SYSCALL: u64 = 238;
+const LINUX_GET_MEMPOLICY_SYSCALL: u64 = 239;
 const LINUX_EXIT_GROUP_SYSCALL: u64 = 231;
 const LINUX_EPOLL_WAIT_SYSCALL: u64 = 232;
 const LINUX_EPOLL_CTL_SYSCALL: u64 = 233;
@@ -325,6 +328,8 @@ const LINUX_SET_ROBUST_LIST_SYSCALL: u64 = 273;
 const LINUX_GET_ROBUST_LIST_SYSCALL: u64 = 274;
 const LINUX_SYNC_FILE_RANGE_SYSCALL: u64 = 277;
 const LINUX_UNSHARE_SYSCALL: u64 = 272;
+const LINUX_MIGRATE_PAGES_SYSCALL: u64 = 256;
+const LINUX_MOVE_PAGES_SYSCALL: u64 = 279;
 const LINUX_EPOLL_PWAIT_SYSCALL: u64 = 281;
 const LINUX_UTIMENSAT_SYSCALL: u64 = 280;
 const LINUX_TIMERFD_CREATE_SYSCALL: u64 = 283;
@@ -345,6 +350,7 @@ const LINUX_FSCONFIG_SYSCALL: u64 = 431;
 const LINUX_FSMOUNT_SYSCALL: u64 = 432;
 const LINUX_FSPICK_SYSCALL: u64 = 433;
 const LINUX_MOUNT_SETATTR_SYSCALL: u64 = 442;
+const LINUX_SET_MEMPOLICY_HOME_NODE_SYSCALL: u64 = 450;
 const LINUX_PIPE2_SYSCALL: u64 = 293;
 const LINUX_RT_TGSIGQUEUEINFO_SYSCALL: u64 = 297;
 const LINUX_PREADV_SYSCALL: u64 = 295;
@@ -8572,6 +8578,32 @@ extern "sysv64" fn linux_syscall_handler(
             register(2),
             number == LINUX_PROCESS_VM_WRITEV_SYSCALL,
         ),
+        LINUX_SET_MEMPOLICY_SYSCALL => linux_set_mempolicy(first_argument, buffer, count),
+        LINUX_GET_MEMPOLICY_SYSCALL => {
+            linux_get_mempolicy(first_argument, buffer, count, register(0), register(1))
+        }
+        LINUX_MBIND_SYSCALL => linux_mbind(
+            first_argument,
+            buffer,
+            count,
+            register(0),
+            register(1),
+            register(2),
+        ),
+        LINUX_MIGRATE_PAGES_SYSCALL => {
+            linux_migrate_pages(first_argument, buffer, count, register(0))
+        }
+        LINUX_MOVE_PAGES_SYSCALL => linux_move_pages(
+            first_argument,
+            buffer,
+            count,
+            register(0),
+            register(1),
+            register(2),
+        ),
+        LINUX_SET_MEMPOLICY_HOME_NODE_SYSCALL => {
+            linux_set_mempolicy_home_node(first_argument, buffer, count, register(0))
+        }
         LINUX_MEMBARRIER_SYSCALL => linux_membarrier(first_argument, buffer, count),
         LINUX_WAIT4_SYSCALL => linux_wait4(first_argument, buffer, count, register(0)),
         LINUX_WAITID_SYSCALL => {
@@ -11293,6 +11325,189 @@ fn linux_process_vm_iov(
         transferred += length as u64;
     }
     transferred
+}
+
+fn linux_node_zero_mask(address: u64, maximum_node: u64) -> Result<bool, u64> {
+    if address == 0 {
+        return Ok(false);
+    }
+    let byte_count = maximum_node.checked_add(7).ok_or(LINUX_EINVAL)? / 8;
+    if byte_count == 0 || byte_count > PAGE_SIZE as u64 {
+        return Err(LINUX_EINVAL);
+    }
+    let mut offset = 0_u64;
+    let mut chunk = [0_u8; 64];
+    let mut node_zero = false;
+    while offset < byte_count {
+        let length = usize::try_from((byte_count - offset).min(chunk.len() as u64)).unwrap();
+        let source = address.checked_add(offset).ok_or(LINUX_EFAULT)?;
+        if !copy_from_linux_user(source, &mut chunk[..length]) {
+            return Err(LINUX_EFAULT);
+        }
+        for (index, byte) in chunk[..length].iter().copied().enumerate() {
+            if offset == 0 && index == 0 {
+                node_zero = byte & 1 != 0;
+                if byte & !1 != 0 {
+                    return Ok(false);
+                }
+            } else if byte != 0 {
+                return Ok(false);
+            }
+        }
+        offset += length as u64;
+    }
+    Ok(node_zero)
+}
+
+fn linux_set_mempolicy(mode: u64, nodes: u64, maximum_node: u64) -> u64 {
+    if mode != 0 || nodes != 0 {
+        return LINUX_EINVAL;
+    }
+    let _ = maximum_node;
+    0
+}
+
+fn linux_get_mempolicy(
+    mode_address: u64,
+    nodes: u64,
+    maximum_node: u64,
+    address: u64,
+    flags: u64,
+) -> u64 {
+    const MPOL_F_MEMS_ALLOWED: u64 = 4;
+    if !matches!(flags, 0 | MPOL_F_MEMS_ALLOWED) || flags == MPOL_F_MEMS_ALLOWED && address != 0 {
+        return LINUX_EINVAL;
+    }
+    if mode_address != 0 && !copy_to_linux_user(mode_address, &0_i32.to_ne_bytes()) {
+        return LINUX_EFAULT;
+    }
+    if nodes == 0 {
+        return 0;
+    }
+    let byte_count = match maximum_node.checked_add(7) {
+        Some(bits) if maximum_node != 0 && bits / 8 <= PAGE_SIZE as u64 => bits / 8,
+        _ => return LINUX_EINVAL,
+    };
+    let mut offset = 0_u64;
+    let mut zeros = [0_u8; 64];
+    if flags == MPOL_F_MEMS_ALLOWED {
+        zeros[0] = 1;
+    }
+    while offset < byte_count {
+        let length = usize::try_from((byte_count - offset).min(zeros.len() as u64)).unwrap();
+        let Some(target) = nodes.checked_add(offset) else {
+            return LINUX_EFAULT;
+        };
+        if !copy_to_linux_user(target, &zeros[..length]) {
+            return LINUX_EFAULT;
+        }
+        zeros[0] = 0;
+        offset += length as u64;
+    }
+    0
+}
+
+fn linux_mbind(
+    address: u64,
+    length: u64,
+    mode: u64,
+    nodes: u64,
+    maximum_node: u64,
+    flags: u64,
+) -> u64 {
+    if mode != 0
+        || nodes != 0
+        || flags != 0
+        || length == 0
+        || !address.is_multiple_of(PAGE_SIZE as u64)
+    {
+        return LINUX_EINVAL;
+    }
+    let Ok(length) = usize::try_from(length) else {
+        return LINUX_ENOMEM;
+    };
+    let _ = maximum_node;
+    if address_space::current_linux_range_mapped(address, length, false) {
+        0
+    } else {
+        LINUX_ENOMEM
+    }
+}
+
+fn linux_migrate_pages(pid: u64, maximum_node: u64, old_nodes: u64, new_nodes: u64) -> u64 {
+    if pid != 0 && pid != u64::from(current_linux_process_pid()) {
+        return LINUX_ESRCH;
+    }
+    match (
+        linux_node_zero_mask(old_nodes, maximum_node),
+        linux_node_zero_mask(new_nodes, maximum_node),
+    ) {
+        (Ok(true), Ok(true)) => 0,
+        (Err(error), _) | (_, Err(error)) => error,
+        _ => LINUX_EINVAL,
+    }
+}
+
+fn linux_move_pages(pid: u64, count: u64, pages: u64, nodes: u64, status: u64, flags: u64) -> u64 {
+    if pid != 0 && pid != u64::from(current_linux_process_pid()) {
+        return LINUX_ESRCH;
+    }
+    if flags != 0 {
+        return LINUX_EINVAL;
+    }
+    let Ok(count) = usize::try_from(count) else {
+        return LINUX_EINVAL;
+    };
+    let Some(page_bytes) = count.checked_mul(size_of::<u64>()) else {
+        return LINUX_EINVAL;
+    };
+    let Some(status_bytes) = count.checked_mul(size_of::<i32>()) else {
+        return LINUX_EINVAL;
+    };
+    if count != 0
+        && (!linux_readable_user_range_contains(pages, page_bytes)
+            || !linux_writable_user_range_contains(status, status_bytes)
+            || nodes != 0 && !linux_readable_user_range_contains(nodes, status_bytes))
+    {
+        return LINUX_EFAULT;
+    }
+    for index in 0..count {
+        let mut page = [0_u8; 8];
+        if !copy_from_linux_user(pages + (index * 8) as u64, &mut page) {
+            return LINUX_EFAULT;
+        }
+        let page = u64::from_ne_bytes(page) & !(PAGE_SIZE as u64 - 1);
+        if !address_space::current_linux_range_mapped(page, PAGE_SIZE, false) {
+            return LINUX_EFAULT;
+        }
+        if nodes != 0 {
+            let mut node = [0_u8; 4];
+            if !copy_from_linux_user(nodes + (index * 4) as u64, &mut node) {
+                return LINUX_EFAULT;
+            }
+            if i32::from_ne_bytes(node) != 0 {
+                return LINUX_ENODEV;
+            }
+        }
+        if !copy_to_linux_user(status + (index * 4) as u64, &0_i32.to_ne_bytes()) {
+            return LINUX_EFAULT;
+        }
+    }
+    0
+}
+
+fn linux_set_mempolicy_home_node(address: u64, length: u64, home_node: u64, flags: u64) -> u64 {
+    if home_node != 0 || flags != 0 || length == 0 || !address.is_multiple_of(PAGE_SIZE as u64) {
+        return LINUX_EINVAL;
+    }
+    let Ok(length) = usize::try_from(length) else {
+        return LINUX_ENOMEM;
+    };
+    if address_space::current_linux_range_mapped(address, length, false) {
+        0
+    } else {
+        LINUX_ENOMEM
+    }
 }
 
 fn linux_runtime_mprotect(address: u64, length: u64, protection: u64) -> u64 {

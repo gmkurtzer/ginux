@@ -42,7 +42,7 @@ implemented calls lives in [Linux Syscall Entry v0](../specs/kernel/linux-syscal
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **17 Complete**, **230 Partial**, **44 Policy-denied**, **84 Missing**.
+Current totals: **17 Complete**, **236 Partial**, **44 Policy-denied**, **78 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -59,7 +59,7 @@ Current totals: **17 Complete**, **230 Partial**, **44 Policy-denied**, **84 Mis
 | `/proc` | Partial | Automatically mounted per domain with domain-local PID directories, `status`, `stat`, `statm`, `mountinfo`, namespace maps, `cpuinfo`, `meminfo`, `stat`, `uptime`, `loadavg`, `filesystems`, and `cmdline`. Broader Linux procfs coverage and unconstrained process enumeration remain incomplete. |
 | IPv4 sockets | Partial | Domain descriptors expose repeated client TCP and UDP connections plus TCP bind/listen/accept over the shared host NIC with IOMMU-confined virtio queues; AF_UNIX stream socket pairs cover local runtime coordination. Ancillary data, IPv6, multi-entry listen backlogs, and complete option/error semantics remain pending. |
 | OCI overlay root | Partial | Verified layers are assembled in manifest order with replacements and OCI whiteouts. Broader overlay conformance remains under test. |
-| Runtime `mmap` | Partial | Page-table-backed anonymous and OCI file mappings, fixed placement, in-place growth/shrink and movable anonymous `mremap`, protection changes, unmap, `madvise`, and `mincore` support Alpine and the validated Rocky glibc/coreutils path. Process snapshot metadata is still bounded and COW, shared mappings, `MREMAP_DONTUNMAP`, movable file mappings, and full Linux semantics remain incomplete. |
+| Runtime `mmap` | Partial | Page-table-backed anonymous and OCI file mappings, fixed placement, in-place growth/shrink and movable anonymous `mremap`, protection changes, unmap, `madvise`, and `mincore` support Alpine and the validated Rocky glibc/coreutils path. NUMA policy calls expose the current single node, validate node-0 masks, and make node-0 placement/migration operations explicit no-ops. Process snapshot metadata is still bounded and COW, shared mappings, `MREMAP_DONTUNMAP`, movable file mappings, multi-node NUMA policy, and full Linux semantics remain incomplete. |
 | `/dev` and terminal ABI | Partial | Selected console/device nodes and bounded termios/winsize ioctls. |
 | `/sys` | Missing | No Linux-compatible sysfs contract. |
 | Credentials and user namespaces | Partial | Container-scoped identity and hard privilege boundary; many mutation calls are policy-denied. |
@@ -321,9 +321,9 @@ therefore omitted.
 | 234 | tgkill | Partial |
 | 235 | utimes | Partial |
 | 236 | vserver | Complete |
-| 237 | mbind | Missing |
-| 238 | set_mempolicy | Missing |
-| 239 | get_mempolicy | Missing |
+| 237 | mbind | Partial |
+| 238 | set_mempolicy | Partial |
+| 239 | get_mempolicy | Partial |
 | 240 | mq_open | Missing |
 | 241 | mq_unlink | Missing |
 | 242 | mq_timedsend | Missing |
@@ -340,7 +340,7 @@ therefore omitted.
 | 253 | inotify_init | Missing |
 | 254 | inotify_add_watch | Missing |
 | 255 | inotify_rm_watch | Missing |
-| 256 | migrate_pages | Missing |
+| 256 | migrate_pages | Partial |
 | 257 | openat | Partial |
 | 258 | mkdirat | Partial |
 | 259 | mknodat | Partial |
@@ -363,7 +363,7 @@ therefore omitted.
 | 276 | tee | Missing |
 | 277 | sync_file_range | Partial |
 | 278 | vmsplice | Missing |
-| 279 | move_pages | Missing |
+| 279 | move_pages | Partial |
 | 280 | utimensat | Partial |
 | 281 | epoll_pwait | Partial |
 | 282 | signalfd | Missing |
@@ -446,7 +446,7 @@ therefore omitted.
 | 447 | memfd_secret | Missing |
 | 448 | process_mrelease | Missing |
 | 449 | futex_waitv | Missing |
-| 450 | set_mempolicy_home_node | Missing |
+| 450 | set_mempolicy_home_node | Partial |
 | 451 | cachestat | Missing |
 | 452 | fchmodat2 | Partial |
 | 453 | map_shadow_stack | Missing |
