@@ -1057,6 +1057,19 @@ size record, resets the required size to zero, then returns `EOPNOTSUPP` because
 there is no Linux security context provider. `lsm_set_self_attr` similarly
 validates its selector and reserved flags before returning `EOPNOTSUPP`.
 Native domain policy is neither enumerated nor mutable through this ABI.
+`rax = 447` (`__NR_memfd_secret`) creates an anonymous read/write file with an
+initial size of zero and accepts only Linux's `FD_CLOEXEC` flag. `ftruncate`
+sets its elastic overlay-backed size and `MAP_SHARED` read/write mappings are
+usable directly by the owning userspace. Those pages carry page-table metadata
+that survives `mprotect`; every normal kernel user-copy path rejects them, so
+passing a secret pointer to another syscall returns `EFAULT`. Descriptor
+`read`, `write`, positioned I/O, and kernel-mediated range copies reject the
+file with `EINVAL`, and duplication preserves its secret identity. Private or
+executable mappings and unknown flags return `EINVAL`. The current bounded
+profile eagerly allocates mapping pages and does not yet remove them from the
+kernel direct map, maintain coherence between repeated mappings, charge locked
+memory, prevent hibernation exposure, or preserve secret metadata through
+`fork`, so the call remains Partial.
 `rax = 462` (`__NR_mseal`) irreversibly seals complete page-rounded ranges in
 the bounded anonymous scratch window and the runtime dynamic mapping region.
 The operation preflights every page before changing state, is idempotent, and

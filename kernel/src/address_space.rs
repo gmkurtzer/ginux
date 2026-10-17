@@ -126,6 +126,7 @@ const LINUX_RUNTIME_DEMAND: u64 = 1 << 11;
 // protection keys are not in use.
 const LINUX_RUNTIME_SEALED: u64 = 1 << 58;
 const LINUX_RUNTIME_SHARED: u64 = 1 << 57;
+const LINUX_RUNTIME_SECRET: u64 = 1 << 56;
 const LINUX_INIT_ARGUMENT: [u8; 6] = [b'/', b'i', b'n', b'i', b't', 0];
 const LINUX_INIT_ENVIRONMENT: [u8; 8] = [b'G', b'I', b'N', b'U', b'X', b'=', b'1', 0];
 const LINUX_PLATFORM: [u8; 7] = [b'x', b'8', b'6', b'_', b'6', b'4', 0];
@@ -4746,6 +4747,7 @@ pub(crate) struct LinuxRuntimePage {
     pub(crate) file: bool,
     pub(crate) sealed: bool,
     pub(crate) shared: bool,
+    pub(crate) secret: bool,
 }
 
 impl LinuxRuntimePage {
@@ -4756,6 +4758,7 @@ impl LinuxRuntimePage {
         file: false,
         sealed: false,
         shared: false,
+        secret: false,
     };
 }
 
@@ -4779,6 +4782,7 @@ fn linux_runtime_page_from_value(value: u64) -> LinuxRuntimePage {
         file: value & LINUX_RUNTIME_FILE != 0,
         sealed: value & LINUX_RUNTIME_SEALED != 0,
         shared: value & LINUX_RUNTIME_SHARED != 0,
+        secret: value & LINUX_RUNTIME_SECRET != 0,
     }
 }
 
@@ -4888,6 +4892,21 @@ pub(crate) fn install_current_linux_shared_page(
     linux_runtime_page_from_value(unsafe { entry.read() }).shared
 }
 
+pub(crate) fn mark_current_linux_runtime_page_secret(address: u64) -> bool {
+    let Some(entry) = current_linux_leaf(address) else {
+        return false;
+    };
+    let value = unsafe { entry.read() };
+    if !linux_runtime_page_from_value(value).occupied {
+        return false;
+    }
+    unsafe {
+        entry.write(value | LINUX_RUNTIME_SECRET);
+        asm!("invlpg [{}]", in(reg) address, options(nostack, preserves_flags));
+    }
+    linux_runtime_page_from_value(unsafe { entry.read() }).secret
+}
+
 pub(crate) fn reserve_current_linux_runtime_page(
     address: u64,
     protection: u8,
@@ -4957,6 +4976,8 @@ pub(crate) fn protect_current_linux_runtime_page(address: u64, protection: u8) -
                 | if protection & 2 != 0 { WRITABLE } else { 0 }
                 | if protection & 4 != 0 { 0 } else { NO_EXECUTE }
                 | if old.file { LINUX_RUNTIME_FILE } else { 0 }
+                | if old.shared { LINUX_RUNTIME_SHARED } else { 0 }
+                | if old.secret { LINUX_RUNTIME_SECRET } else { 0 }
         }
         Some(frame) if protection == 0 => {
             frame.address()
@@ -4964,6 +4985,8 @@ pub(crate) fn protect_current_linux_runtime_page(address: u64, protection: u8) -
                 | USER
                 | NO_EXECUTE
                 | if old.file { LINUX_RUNTIME_FILE } else { 0 }
+                | if old.shared { LINUX_RUNTIME_SHARED } else { 0 }
+                | if old.secret { LINUX_RUNTIME_SECRET } else { 0 }
         }
         Some(frame) => {
             frame.address()
@@ -4972,6 +4995,8 @@ pub(crate) fn protect_current_linux_runtime_page(address: u64, protection: u8) -
                 | if protection & 2 != 0 { WRITABLE } else { 0 }
                 | if protection & 4 != 0 { 0 } else { NO_EXECUTE }
                 | if old.file { LINUX_RUNTIME_FILE } else { 0 }
+                | if old.shared { LINUX_RUNTIME_SHARED } else { 0 }
+                | if old.secret { LINUX_RUNTIME_SECRET } else { 0 }
         }
     };
     unsafe {
@@ -5020,7 +5045,9 @@ pub(crate) fn materialize_current_linux_runtime_page(
         | if protection & 2 != 0 { WRITABLE } else { 0 }
         | if protection & 4 != 0 { 0 } else { NO_EXECUTE }
         | if file { LINUX_RUNTIME_FILE } else { 0 }
-        | if old.sealed { LINUX_RUNTIME_SEALED } else { 0 };
+        | if old.sealed { LINUX_RUNTIME_SEALED } else { 0 }
+        | if old.shared { LINUX_RUNTIME_SHARED } else { 0 }
+        | if old.secret { LINUX_RUNTIME_SECRET } else { 0 };
     unsafe {
         entry.write(value);
         asm!("invlpg [{}]", in(reg) address, options(nostack, preserves_flags));
@@ -5030,6 +5057,8 @@ pub(crate) fn materialize_current_linux_runtime_page(
         && current.protection == protection
         && current.file == file
         && current.sealed == old.sealed
+        && current.shared == old.shared
+        && current.secret == old.secret
 }
 
 pub(crate) fn release_current_linux_runtime_mappings(base: u64) -> bool {

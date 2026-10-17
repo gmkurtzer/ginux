@@ -409,6 +409,7 @@ const LINUX_PREADV2_SYSCALL: u64 = 327;
 const LINUX_PWRITEV2_SYSCALL: u64 = 328;
 const LINUX_EXECVEAT_SYSCALL: u64 = 322;
 const LINUX_MEMFD_CREATE_SYSCALL: u64 = 319;
+const LINUX_MEMFD_SECRET_SYSCALL: u64 = 447;
 const LINUX_RSEQ_SYSCALL: u64 = 334;
 const LINUX_IO_PGETEVENTS_SYSCALL: u64 = 333;
 const LINUX_PKEY_MPROTECT_SYSCALL: u64 = 329;
@@ -684,6 +685,7 @@ const LINUX_O_EXCL: u64 = 0x80;
 const LINUX_O_TRUNC: u64 = 0x200;
 const LINUX_O_APPEND: u64 = 0x400;
 const LINUX_O_NONBLOCK: u64 = 0x800;
+const LINUX_PRIVATE_SECRET_DESCRIPTOR: u32 = 1 << 31;
 const LINUX_O_LARGEFILE: u64 = 0x8000;
 const LINUX_O_NOFOLLOW: u64 = 0x20000;
 const LINUX_PR_SET_NAME: u64 = 15;
@@ -8502,6 +8504,7 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_OPENAT_SYSCALL => linux_openat(first_argument, buffer, count, register(0)),
         LINUX_OPENAT2_SYSCALL => linux_openat2(first_argument, buffer, count, register(0)),
         LINUX_MEMFD_CREATE_SYSCALL => linux_memfd_create(first_argument, buffer),
+        LINUX_MEMFD_SECRET_SYSCALL => linux_memfd_secret(first_argument),
         LINUX_RSEQ_SYSCALL => linux_rseq(first_argument, buffer, count, register(0)),
         LINUX_CREAT_SYSCALL => linux_openat(
             u64::from(LINUX_AT_FDCWD),
@@ -12400,6 +12403,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let process_advice = verify_linux_process_madvise_syscall();
     let posix_queues = verify_linux_posix_message_queue_syscalls();
     let aio = verify_linux_aio_syscalls();
+    let secret_memory = verify_linux_memfd_secret_syscall();
     let mappings_released =
         address_space::release_current_linux_runtime_mappings(LINUX_RUNTIME_DYNAMIC_MMAP_BASE);
     ELF_PROBE_MMAP_NEXT.store(LINUX_RUNTIME_DYNAMIC_MMAP_BASE, Ordering::SeqCst);
@@ -12413,7 +12417,72 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && process_advice
         && posix_queues
         && aio
+        && secret_memory
         && mappings_released
+}
+
+fn verify_linux_memfd_secret_syscall() -> bool {
+    let descriptor = linux_memfd_secret(1);
+    if descriptor >= LINUX_AUX_DESCRIPTOR_LIMIT {
+        return false;
+    }
+    let duplicate = linux_console_dup(descriptor);
+    let prepared = duplicate < LINUX_AUX_DESCRIPTOR_LIMIT
+        && linux_descriptor_close_on_exec(descriptor)
+        && linux_secret_descriptor(duplicate)
+        && linux_ftruncate(descriptor, PAGE_SIZE as u64) == 0;
+    let private_rejected = prepared
+        && linux_runtime_mmap(
+            0,
+            PAGE_SIZE as u64,
+            LINUX_PROT_READ | LINUX_PROT_WRITE,
+            LINUX_MAP_PRIVATE,
+            descriptor,
+            0,
+        ) == LINUX_EINVAL;
+    let executable_rejected = private_rejected
+        && linux_runtime_mmap(
+            0,
+            PAGE_SIZE as u64,
+            LINUX_PROT_READ | LINUX_PROT_EXEC,
+            LINUX_MAP_SHARED,
+            descriptor,
+            0,
+        ) == LINUX_EINVAL;
+    let mapping = if executable_rejected {
+        linux_runtime_mmap(
+            0,
+            PAGE_SIZE as u64,
+            LINUX_PROT_READ | LINUX_PROT_WRITE,
+            LINUX_MAP_SHARED,
+            descriptor,
+            0,
+        )
+    } else {
+        LINUX_EINVAL
+    };
+    let mapped = (LINUX_RUNTIME_DYNAMIC_MMAP_BASE
+        ..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
+        .contains(&mapping)
+        && address_space::current_linux_runtime_page(mapping).secret;
+    let userspace_accessible = mapped && unsafe {
+        with_supervisor_user_access(|| {
+            (mapping as *mut u64).write_volatile(0x5345_4352_4554_4d45);
+            (mapping as *const u64).read_volatile() == 0x5345_4352_4554_4d45
+        })
+    };
+    let kernel_copy_denied = userspace_accessible
+        && !copy_from_linux_user(mapping, &mut [0_u8; 8])
+        && !copy_to_linux_user(mapping, &[0_u8; 8])
+        && linux_descriptor_read(descriptor, mapping, 8) == LINUX_EINVAL
+        && linux_descriptor_write(descriptor, mapping, 8) == LINUX_EINVAL;
+    let protection_preserved = kernel_copy_denied
+        && linux_mprotect(mapping, PAGE_SIZE as u64, LINUX_PROT_READ) == 0
+        && address_space::current_linux_runtime_page(mapping).secret
+        && !copy_from_linux_user(mapping, &mut [0_u8; 8]);
+    let released = mapped && linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
+    let closed = linux_descriptor_close(duplicate) == 0 && linux_descriptor_close(descriptor) == 0;
+    protection_preserved && released && closed && linux_memfd_secret(2) == LINUX_EINVAL
 }
 
 fn verify_linux_aio_syscalls() -> bool {
@@ -12805,11 +12874,16 @@ fn linux_runtime_mmap(
         return LINUX_EEXIST;
     }
     let mut overlay_file = None;
+    let mut secret = false;
     let file = if anonymous {
         None
     } else {
         let state = linux_device_descriptor(fd);
         if let Some(handle) = linux_overlay_descriptor_handle(fd) {
+            secret = linux_secret_descriptor(fd);
+            if secret && (sharing != LINUX_MAP_SHARED || protection & LINUX_PROT_EXEC != 0) {
+                return LINUX_EINVAL;
+            }
             let Some(metadata) = crate::linux_overlay::metadata(handle) else {
                 return LINUX_EBADF;
             };
@@ -12933,6 +13007,10 @@ fn linux_runtime_mmap(
                 core::slice::from_ref(&frame),
             )
         }) {
+            let _ = rollback_linux_runtime_mapping(mapping, installed + 1);
+            return LINUX_ENOMEM;
+        }
+        if secret && !address_space::mark_current_linux_runtime_page_secret(page_address) {
             let _ = rollback_linux_runtime_mapping(mapping, installed + 1);
             return LINUX_ENOMEM;
         }
@@ -16805,6 +16883,38 @@ fn linux_memfd_create(name_address: u64, flags: u64) -> u64 {
     descriptor
 }
 
+fn linux_memfd_secret(flags: u64) -> u64 {
+    const FD_CLOEXEC: u64 = 1;
+    if flags & !FD_CLOEXEC != 0 {
+        return LINUX_EINVAL;
+    }
+    let Some(descriptor) = (LINUX_AUX_DESCRIPTOR_FIRST..LINUX_AUX_DESCRIPTOR_LIMIT)
+        .find(|descriptor| linux_aux_descriptor_free(*descriptor))
+    else {
+        return LINUX_EMFILE;
+    };
+    let Some(handle) = crate::linux_overlay::create_file(b"tmp/.ginux-secret", 0o600, &[]) else {
+        return LINUX_ENOSPC;
+    };
+    if !crate::linux_overlay::unlink(handle) {
+        return LINUX_EIO;
+    }
+    let index = (descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize;
+    ELF_PROBE_DEVICE_DESCRIPTORS[index].store(LINUX_FILE_TMP_SCRATCH | 3, Ordering::SeqCst);
+    ELF_PROBE_OCI_DESCRIPTORS[index].store(0, Ordering::SeqCst);
+    ELF_PROBE_TMP_FILE_GENERATIONS[index]
+        .store(crate::linux_overlay::generation(handle), Ordering::SeqCst);
+    ELF_PROBE_SOCKET_FLAGS[index].store(LINUX_PRIVATE_SECRET_DESCRIPTOR, Ordering::SeqCst);
+    linux_descriptor_offset(descriptor).store(0, Ordering::SeqCst);
+    set_linux_descriptor_close_on_exec(descriptor, flags & FD_CLOEXEC != 0);
+    descriptor
+}
+
+fn linux_secret_descriptor(descriptor: u64) -> bool {
+    linux_socket_flags(descriptor)
+        .is_some_and(|flags| flags & LINUX_PRIVATE_SECRET_DESCRIPTOR != 0)
+}
+
 fn linux_newfstatat(directory: u64, path_address: u64, stat_address: u64, flags: u64) -> u64 {
     if flags & !LINUX_AT_SYMLINK_NOFOLLOW != 0 {
         return LINUX_EINVAL;
@@ -18812,6 +18922,9 @@ fn linux_descriptor_read(descriptor: u64, address: u64, count: u64) -> u64 {
         return result;
     }
     let device = linux_device_descriptor(descriptor);
+    if linux_secret_descriptor(descriptor) {
+        return LINUX_EINVAL;
+    }
     if u16::from(linux_console_descriptor(descriptor)) == LINUX_DESCRIPTOR_INPUT
         || device & LINUX_DEVICE_CONSOLE != 0 && device & 3 == LINUX_DESCRIPTOR_INPUT
     {
@@ -18947,6 +19060,9 @@ fn linux_resolv_conf() -> ([u8; 32], usize) {
 
 fn linux_regular_file_read_at(descriptor: u64, address: u64, count: u64, offset: u64) -> u64 {
     let state = linux_device_descriptor(descriptor);
+    if linux_secret_descriptor(descriptor) {
+        return LINUX_EINVAL;
+    }
     if let Some(handle) = linux_overlay_descriptor_handle(descriptor) {
         if !matches!(state & 3, LINUX_DESCRIPTOR_INPUT | 3) {
             return LINUX_EBADF;
@@ -19003,6 +19119,9 @@ fn linux_regular_file_read_at(descriptor: u64, address: u64, count: u64, offset:
 
 fn linux_regular_file_write_at(descriptor: u64, address: u64, count: u64, offset: u64) -> u64 {
     let state = linux_device_descriptor(descriptor);
+    if linux_secret_descriptor(descriptor) {
+        return LINUX_EINVAL;
+    }
     if !matches!(state & 3, LINUX_DESCRIPTOR_OUTPUT | 3) {
         return LINUX_EBADF;
     }
@@ -19025,6 +19144,9 @@ fn linux_regular_file_read_kernel(
     output: &mut [u8],
 ) -> Result<usize, u64> {
     let state = linux_device_descriptor(descriptor);
+    if linux_secret_descriptor(descriptor) {
+        return Err(LINUX_EINVAL);
+    }
     if !matches!(state & 3, LINUX_DESCRIPTOR_INPUT | 3) {
         return Err(LINUX_EBADF);
     }
@@ -19063,6 +19185,9 @@ fn linux_regular_file_write_kernel(
     input: &[u8],
 ) -> Result<usize, u64> {
     let state = linux_device_descriptor(descriptor);
+    if linux_secret_descriptor(descriptor) {
+        return Err(LINUX_EINVAL);
+    }
     if !matches!(state & 3, LINUX_DESCRIPTOR_OUTPUT | 3) {
         return Err(LINUX_EBADF);
     }
@@ -22097,6 +22222,9 @@ fn linux_descriptor_write(descriptor: u64, address: u64, count: u64) -> u64 {
         return result;
     }
     let device = linux_device_descriptor(descriptor);
+    if linux_secret_descriptor(descriptor) {
+        return LINUX_EINVAL;
+    }
     if let Some(result) = linux_overlay_write(descriptor, device, address, count) {
         return result;
     }
@@ -23667,7 +23795,11 @@ fn linux_descriptor_fcntl(descriptor: u64, command: u64, argument: u64) -> u64 {
             linux_fcntl_lock(command, argument)
         }
         LINUX_F_GETFL => {
-            u64::from((state & 3) - 1) | u64::from(linux_socket_flags(descriptor).unwrap_or(0))
+            u64::from((state & 3) - 1)
+                | u64::from(
+                    linux_socket_flags(descriptor).unwrap_or(0)
+                        & !LINUX_PRIVATE_SECRET_DESCRIPTOR,
+                )
         }
         LINUX_F_SETFL => {
             let Some(flags) = linux_socket_descriptor_index(descriptor)
@@ -24651,6 +24783,9 @@ fn materialize_linux_runtime_user_range(address: u64, length: usize, writable: b
     let last = (end - 1) & !(PAGE_SIZE as u64 - 1);
     let mut page_address = first;
     loop {
+        if address_space::current_linux_runtime_page(page_address).secret {
+            return false;
+        }
         if address_space::current_linux_range_mapped(page_address, PAGE_SIZE, writable) {
             if page_address == last {
                 return true;
