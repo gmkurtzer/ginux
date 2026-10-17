@@ -18,7 +18,8 @@ their pointers or applying state:
 - kernel control: `reboot`, hostname/domain-name mutation, module load/delete,
   and both kexec interfaces;
 - namespace control: `unshare` and `setns`;
-- hardware/observation: `iopl`, `ioperm`, and `perf_event_open`; and
+- hardware/observation: `iopl`, `ioperm`, and `perf_event_open`;
+- process observation and mutation: `ptrace`; and
 - program injection: `bpf`.
 
 When the current process is bound to the initial namespace, each classified
@@ -28,7 +29,8 @@ operation: the dispatcher would still return `-ENOSYS` until a separate
 implementation and authorization contract is added.
 
 Measured PID 1 attempts `setuid`, `setgroups`, `chroot`, `mount`, `reboot`,
-`iopl`, `unshare(CLONE_NEWUSER)`, and `bpf`; every call must return `-EPERM`.
+`iopl`, `ptrace(PTRACE_TRACEME)`, `unshare(CLONE_NEWUSER)`, and `bpf`; every
+call must return `-EPERM`.
 It then issues an unclassified syscall and requires `-ENOSYS`, rechecks UID and
 GID 0, and subsequently validates the unchanged immutable root mount. Only
 then does it emit `PRIVILEGE_BOUNDARY_READY`.

@@ -186,6 +186,7 @@ const LINUX_GETRLIMIT_SYSCALL: u64 = 97;
 const LINUX_GETRUSAGE_SYSCALL: u64 = 98;
 const LINUX_SYSINFO_SYSCALL: u64 = 99;
 const LINUX_TIMES_SYSCALL: u64 = 100;
+const LINUX_PTRACE_SYSCALL: u64 = 101;
 const LINUX_SYSLOG_SYSCALL: u64 = 103;
 const LINUX_GETUID_SYSCALL: u64 = 102;
 const LINUX_GETGID_SYSCALL: u64 = 104;
@@ -9073,6 +9074,7 @@ fn linux_privileged_operation(number: u64) -> Option<linux_user::PrivilegedOpera
         LINUX_QUOTACTL_SYSCALL | LINUX_QUOTACTL_FD_SYSCALL => {
             Some(PrivilegedOperation::ManageStorageQuota)
         }
+        LINUX_PTRACE_SYSCALL => Some(PrivilegedOperation::TraceProcesses),
         _ => None,
     }
 }

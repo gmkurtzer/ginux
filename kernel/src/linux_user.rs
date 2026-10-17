@@ -49,6 +49,7 @@ pub(crate) enum PrivilegedOperation {
     ProcessAccounting,
     ManageTerminal,
     ManageStorageQuota,
+    TraceProcesses,
 }
 
 impl PrivilegedOperation {
@@ -193,6 +194,7 @@ pub(crate) fn verify_contract() -> bool {
             PrivilegedOperation::ProcessAccounting,
             PrivilegedOperation::ManageTerminal,
             PrivilegedOperation::ManageStorageQuota,
+            PrivilegedOperation::TraceProcesses,
         ]
         .into_iter()
         .any(|operation| !privileged_operation_denied_in(namespace, operation))
