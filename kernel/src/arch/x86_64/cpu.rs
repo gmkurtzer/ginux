@@ -396,6 +396,10 @@ const LINUX_PIDFD_OPEN_SYSCALL: u64 = 434;
 const LINUX_PIDFD_GETFD_SYSCALL: u64 = 438;
 const LINUX_SIGNALFD_SYSCALL: u64 = 282;
 const LINUX_SIGNALFD4_SYSCALL: u64 = 289;
+const LINUX_INOTIFY_INIT_SYSCALL: u64 = 253;
+const LINUX_INOTIFY_ADD_WATCH_SYSCALL: u64 = 254;
+const LINUX_INOTIFY_RM_WATCH_SYSCALL: u64 = 255;
+const LINUX_INOTIFY_INIT1_SYSCALL: u64 = 294;
 const LINUX_GETRANDOM_SYSCALL: u64 = 318;
 const LINUX_STATX_SYSCALL: u64 = 332;
 const LINUX_RENAMEAT2_SYSCALL: u64 = 316;
@@ -503,6 +507,10 @@ const LINUX_AUX_DESCRIPTOR_LIMIT: u64 = 1024;
 const LINUX_DESCRIPTOR_TABLE_LIMIT: u64 = 1024;
 const LINUX_DEVICE_DESCRIPTOR_COUNT: usize =
     LINUX_DESCRIPTOR_TABLE_LIMIT as usize - LINUX_AUX_DESCRIPTOR_FIRST as usize;
+const LINUX_INOTIFY_WATCH_LIMIT: usize = 16;
+const LINUX_INOTIFY_INSTANCE_SLOT_COUNT: usize = LINUX_RUNTIME_INSTANCE_LIMIT;
+const LINUX_INOTIFY_WATCH_SLOT_COUNT: usize =
+    LINUX_RUNTIME_INSTANCE_LIMIT * LINUX_INOTIFY_WATCH_LIMIT;
 const LINUX_DESCRIPTOR_FLAG_WORD_COUNT: usize =
     LINUX_DESCRIPTOR_TABLE_LIMIT.div_ceil(u64::BITS as u64) as usize;
 const LINUX_POLLIN: u16 = 1;
@@ -536,6 +544,7 @@ const LINUX_DESCRIPTOR_OUTPUT: u16 = 2;
 const LINUX_DEVICE_ZERO: u16 = 1 << 2;
 const LINUX_DEVICE_CONSOLE: u16 = 1 << 3;
 const LINUX_DEVICE_DIRECTORY: u16 = 1 << 4;
+const LINUX_DEVICE_INOTIFY: u16 = 1 << 11;
 const LINUX_DEVICE_PIDFD: u16 = 1 << 13;
 const LINUX_DEVICE_SIGNALFD: u16 = 1 << 12;
 const LINUX_DEVICE_PIPE: u16 = 1 << 14;
@@ -1277,6 +1286,20 @@ static ELF_PROBE_STDIO_SOCKET_SLOTS: [BankedAtomicU8; 3] = [const { BankedAtomic
 static ELF_PROBE_STDIO_SOCKET_FLAGS: [BankedAtomicU32; 3] = [const { BankedAtomicU32::new(0) }; 3];
 static ELF_PROBE_TMP_FILE_GENERATIONS: [BankedAtomicU32; LINUX_DEVICE_DESCRIPTOR_COUNT] =
     [const { BankedAtomicU32::new(0) }; LINUX_DEVICE_DESCRIPTOR_COUNT];
+static LINUX_INOTIFY_INSTANCE_REFS: [AtomicU16; LINUX_INOTIFY_INSTANCE_SLOT_COUNT] =
+    [const { AtomicU16::new(0) }; LINUX_INOTIFY_INSTANCE_SLOT_COUNT];
+static LINUX_INOTIFY_NEXT_WD: [AtomicU32; LINUX_INOTIFY_INSTANCE_SLOT_COUNT] =
+    [const { AtomicU32::new(1) }; LINUX_INOTIFY_INSTANCE_SLOT_COUNT];
+static LINUX_INOTIFY_WATCH_OWNERS: [AtomicU16; LINUX_INOTIFY_WATCH_SLOT_COUNT] =
+    [const { AtomicU16::new(0) }; LINUX_INOTIFY_WATCH_SLOT_COUNT];
+static LINUX_INOTIFY_WATCH_PATHS: [AtomicU64; LINUX_INOTIFY_WATCH_SLOT_COUNT] =
+    [const { AtomicU64::new(0) }; LINUX_INOTIFY_WATCH_SLOT_COUNT];
+static LINUX_INOTIFY_WATCH_MASKS: [AtomicU32; LINUX_INOTIFY_WATCH_SLOT_COUNT] =
+    [const { AtomicU32::new(0) }; LINUX_INOTIFY_WATCH_SLOT_COUNT];
+static LINUX_INOTIFY_WATCH_DESCRIPTORS: [AtomicU32; LINUX_INOTIFY_WATCH_SLOT_COUNT] =
+    [const { AtomicU32::new(0) }; LINUX_INOTIFY_WATCH_SLOT_COUNT];
+static LINUX_INOTIFY_PENDING_MASKS: [AtomicU32; LINUX_INOTIFY_WATCH_SLOT_COUNT] =
+    [const { AtomicU32::new(0) }; LINUX_INOTIFY_WATCH_SLOT_COUNT];
 static ELF_PROBE_STDIO_DEVICE_DESCRIPTORS: [BankedAtomicU16; 3] =
     [const { BankedAtomicU16::new(0) }; 3];
 static ELF_PROBE_STDIO_OCI_DESCRIPTORS: [BankedAtomicU16; 3] =
@@ -5727,6 +5750,26 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     for generation in &ELF_PROBE_TMP_FILE_GENERATIONS {
         generation.store(0, Ordering::SeqCst);
     }
+    let inotify_instance = linux_execution_instance();
+    LINUX_INOTIFY_INSTANCE_REFS[inotify_instance].store(0, Ordering::SeqCst);
+    LINUX_INOTIFY_NEXT_WD[inotify_instance].store(1, Ordering::SeqCst);
+    let inotify_watch_start = inotify_instance * LINUX_INOTIFY_WATCH_LIMIT;
+    let inotify_watch_end = inotify_watch_start + LINUX_INOTIFY_WATCH_LIMIT;
+    for owner in &LINUX_INOTIFY_WATCH_OWNERS[inotify_watch_start..inotify_watch_end] {
+        owner.store(0, Ordering::SeqCst);
+    }
+    for path in &LINUX_INOTIFY_WATCH_PATHS[inotify_watch_start..inotify_watch_end] {
+        path.store(0, Ordering::SeqCst);
+    }
+    for mask in &LINUX_INOTIFY_WATCH_MASKS[inotify_watch_start..inotify_watch_end] {
+        mask.store(0, Ordering::SeqCst);
+    }
+    for descriptor in &LINUX_INOTIFY_WATCH_DESCRIPTORS[inotify_watch_start..inotify_watch_end] {
+        descriptor.store(0, Ordering::SeqCst);
+    }
+    for pending in &LINUX_INOTIFY_PENDING_MASKS[inotify_watch_start..inotify_watch_end] {
+        pending.store(0, Ordering::SeqCst);
+    }
     for descriptor in &ELF_PROBE_STDIO_DEVICE_DESCRIPTORS {
         descriptor.store(0, Ordering::SeqCst);
     }
@@ -8531,6 +8574,10 @@ extern "sysv64" fn linux_syscall_handler(
         ),
         LINUX_SIGNALFD_SYSCALL => linux_signalfd(first_argument, buffer, count, 0),
         LINUX_SIGNALFD4_SYSCALL => linux_signalfd(first_argument, buffer, count, register(0)),
+        LINUX_INOTIFY_INIT_SYSCALL => linux_inotify_init(0),
+        LINUX_INOTIFY_INIT1_SYSCALL => linux_inotify_init(first_argument),
+        LINUX_INOTIFY_ADD_WATCH_SYSCALL => linux_inotify_add_watch(first_argument, buffer, count),
+        LINUX_INOTIFY_RM_WATCH_SYSCALL => linux_inotify_rm_watch(first_argument, buffer),
         LINUX_PRLIMIT64_SYSCALL => {
             if !matches!(first_argument, 0 | 1) {
                 return LINUX_ESRCH;
@@ -17002,6 +17049,9 @@ fn linux_descriptor_read(descriptor: u64, address: u64, count: u64) -> u64 {
     if let Some(result) = linux_signalfd_read(descriptor, address, count) {
         return result;
     }
+    if let Some(result) = linux_inotify_read(descriptor, address, count) {
+        return result;
+    }
     if linux_socket_slot(descriptor).is_some() {
         let device = linux_device_descriptor(descriptor);
         if device & LINUX_DEVICE_PIPE != 0 && device & 3 != LINUX_DESCRIPTOR_INPUT {
@@ -19857,6 +19907,267 @@ fn linux_signalfd_read(descriptor: u64, address: u64, count: u64) -> Option<u64>
     Some(128)
 }
 
+fn linux_inotify_descriptor(descriptor: u64) -> bool {
+    linux_device_descriptor(descriptor) & !3 == LINUX_DEVICE_INOTIFY
+}
+
+fn linux_inotify_instance_range() -> core::ops::Range<usize> {
+    let instance = linux_execution_instance();
+    instance..instance + 1
+}
+
+fn linux_inotify_watch_range() -> core::ops::Range<usize> {
+    let start = linux_execution_instance() * LINUX_INOTIFY_WATCH_LIMIT;
+    start..start + LINUX_INOTIFY_WATCH_LIMIT
+}
+
+fn linux_inotify_instance(descriptor: u64) -> Option<usize> {
+    if !linux_inotify_descriptor(descriptor) {
+        return None;
+    }
+    let instance = linux_descriptor_offset(descriptor).load(Ordering::SeqCst);
+    let instance = instance
+        .checked_sub(1)
+        .and_then(|index| usize::try_from(index).ok())
+        .filter(|index| *index < LINUX_INOTIFY_INSTANCE_SLOT_COUNT)?;
+    linux_inotify_instance_range()
+        .contains(&instance)
+        .then_some(instance)
+}
+
+fn linux_inotify_init(flags: u64) -> u64 {
+    const IN_NONBLOCK: u64 = 0x800;
+    const IN_CLOEXEC: u64 = 0x8_0000;
+    if flags & !(IN_NONBLOCK | IN_CLOEXEC) != 0 {
+        return LINUX_EINVAL;
+    }
+    let instances = linux_inotify_instance_range();
+    let Some(instance) = LINUX_INOTIFY_INSTANCE_REFS[instances.clone()]
+        .iter()
+        .position(|references| references.load(Ordering::SeqCst) == 0)
+        .map(|index| instances.start + index)
+    else {
+        return LINUX_EMFILE;
+    };
+    let Some(descriptor) = (LINUX_AUX_DESCRIPTOR_FIRST..LINUX_AUX_DESCRIPTOR_LIMIT)
+        .find(|descriptor| linux_aux_descriptor_free(*descriptor))
+    else {
+        return LINUX_EMFILE;
+    };
+    LINUX_INOTIFY_INSTANCE_REFS[instance].store(1, Ordering::SeqCst);
+    LINUX_INOTIFY_NEXT_WD[instance].store(1, Ordering::SeqCst);
+    let index = (descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize;
+    ELF_PROBE_DEVICE_DESCRIPTORS[index].store(LINUX_DEVICE_INOTIFY, Ordering::SeqCst);
+    ELF_PROBE_SOCKET_FLAGS[index].store(flags as u32, Ordering::SeqCst);
+    ELF_PROBE_DESCRIPTOR_OFFSETS[index].store(instance as u64 + 1, Ordering::SeqCst);
+    set_linux_descriptor_close_on_exec(descriptor, flags & IN_CLOEXEC != 0);
+    descriptor
+}
+
+fn linux_inotify_path_hash(path: &[u8]) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for byte in path {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100_0000_01b3);
+    }
+    hash.max(1)
+}
+
+fn linux_inotify_add_watch(descriptor: u64, path_address: u64, mask: u64) -> u64 {
+    const IN_ONLYDIR: u32 = 0x0100_0000;
+    const IN_MASK_CREATE: u32 = 0x1000_0000;
+    const IN_MASK_ADD: u32 = 0x2000_0000;
+    const IN_ALL_EVENTS: u32 = 0x0000_0fff;
+    const IN_ALLOWED: u32 = IN_ALL_EVENTS | 0xb700_0000;
+    let Some(instance) = linux_inotify_instance(descriptor) else {
+        return LINUX_EBADF;
+    };
+    let Ok(mask) = u32::try_from(mask) else {
+        return LINUX_EINVAL;
+    };
+    if mask & IN_ALL_EVENTS == 0 || mask & !IN_ALLOWED != 0 {
+        return LINUX_EINVAL;
+    }
+    let mut path = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+    let path_length = match copy_linux_c_string(path_address, &mut path) {
+        Ok(length) => length,
+        Err(error) => return error,
+    };
+    let mut canonical = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+    let length = if &path[..path_length] == b"/" {
+        0
+    } else {
+        match linux_canonical_path_at(
+            u64::from(LINUX_AT_FDCWD),
+            &path[..path_length],
+            &mut canonical,
+        ) {
+            Ok(length) => length,
+            Err(error) => return error,
+        }
+    };
+    let overlay = crate::linux_overlay::lookup(&canonical[..length]);
+    let oci =
+        crate::oci_image::lookup_metadata_at(crate::oci_image::ROOT_HANDLE, &canonical[..length]);
+    if overlay.is_none() && oci.is_none() {
+        return LINUX_ENOENT;
+    }
+    let directory = overlay
+        .is_some_and(|metadata| metadata.kind == crate::linux_overlay::NodeKind::Directory)
+        || oci.is_some_and(|(_, entry)| {
+            entry.is_none_or(|entry| entry.kind == ginux_oci::EntryKind::Directory)
+        });
+    if mask & IN_ONLYDIR != 0 && !directory {
+        return LINUX_ENOTDIR;
+    }
+    let owner = instance as u16 + 1;
+    let path_hash = linux_inotify_path_hash(&canonical[..length]);
+    if let Some(index) = linux_inotify_watch_range().find(|index| {
+        LINUX_INOTIFY_WATCH_OWNERS[*index].load(Ordering::SeqCst) == owner
+            && LINUX_INOTIFY_WATCH_PATHS[*index].load(Ordering::SeqCst) == path_hash
+            && LINUX_INOTIFY_WATCH_MASKS[*index].load(Ordering::SeqCst) != 0
+    }) {
+        if mask & IN_MASK_CREATE != 0 {
+            return LINUX_EEXIST;
+        }
+        let previous = LINUX_INOTIFY_WATCH_MASKS[index].load(Ordering::SeqCst);
+        let events = mask & IN_ALL_EVENTS;
+        LINUX_INOTIFY_WATCH_MASKS[index].store(
+            if mask & IN_MASK_ADD != 0 {
+                previous | events
+            } else {
+                events
+            },
+            Ordering::SeqCst,
+        );
+        return u64::from(LINUX_INOTIFY_WATCH_DESCRIPTORS[index].load(Ordering::SeqCst));
+    }
+    let watches = linux_inotify_watch_range();
+    let Some(index) = LINUX_INOTIFY_WATCH_OWNERS[watches.clone()]
+        .iter()
+        .position(|owner| owner.load(Ordering::SeqCst) == 0)
+        .map(|index| watches.start + index)
+    else {
+        return LINUX_ENOSPC;
+    };
+    let wd = LINUX_INOTIFY_NEXT_WD[instance]
+        .fetch_add(1, Ordering::SeqCst)
+        .max(1);
+    LINUX_INOTIFY_WATCH_PATHS[index].store(path_hash, Ordering::SeqCst);
+    LINUX_INOTIFY_WATCH_MASKS[index].store(mask & IN_ALL_EVENTS, Ordering::SeqCst);
+    LINUX_INOTIFY_WATCH_DESCRIPTORS[index].store(wd, Ordering::SeqCst);
+    LINUX_INOTIFY_PENDING_MASKS[index].store(0, Ordering::SeqCst);
+    LINUX_INOTIFY_WATCH_OWNERS[index].store(owner, Ordering::SeqCst);
+    u64::from(wd)
+}
+
+fn linux_inotify_rm_watch(descriptor: u64, watch_descriptor: u64) -> u64 {
+    const IN_IGNORED: u32 = 0x0000_8000;
+    let Some(instance) = linux_inotify_instance(descriptor) else {
+        return LINUX_EBADF;
+    };
+    let Ok(wd) = u32::try_from(watch_descriptor) else {
+        return LINUX_EINVAL;
+    };
+    let owner = instance as u16 + 1;
+    let Some(index) = linux_inotify_watch_range().find(|index| {
+        LINUX_INOTIFY_WATCH_OWNERS[*index].load(Ordering::SeqCst) == owner
+            && LINUX_INOTIFY_WATCH_DESCRIPTORS[*index].load(Ordering::SeqCst) == wd
+            && LINUX_INOTIFY_WATCH_MASKS[*index].load(Ordering::SeqCst) != 0
+    }) else {
+        return LINUX_EINVAL;
+    };
+    LINUX_INOTIFY_WATCH_MASKS[index].store(0, Ordering::SeqCst);
+    LINUX_INOTIFY_PENDING_MASKS[index].fetch_or(IN_IGNORED, Ordering::SeqCst);
+    wake_linux_descriptor_waits();
+    0
+}
+
+fn linux_inotify_notify_path_hash(path_hash: u64, event: u32) {
+    let mut queued = false;
+    for index in linux_inotify_watch_range() {
+        if LINUX_INOTIFY_WATCH_PATHS[index].load(Ordering::SeqCst) == path_hash
+            && LINUX_INOTIFY_WATCH_MASKS[index].load(Ordering::SeqCst) & event != 0
+        {
+            LINUX_INOTIFY_PENDING_MASKS[index].fetch_or(event, Ordering::SeqCst);
+            queued = true;
+        }
+    }
+    if queued {
+        wake_linux_descriptor_waits();
+    }
+}
+
+fn linux_inotify_read(descriptor: u64, address: u64, count: u64) -> Option<u64> {
+    const EVENT_SIZE: u64 = 16;
+    const IN_IGNORED: u32 = 0x0000_8000;
+    let instance = linux_inotify_instance(descriptor)?;
+    if count < EVENT_SIZE {
+        return Some(LINUX_EINVAL);
+    }
+    let owner = instance as u16 + 1;
+    let mut written = 0_u64;
+    for index in linux_inotify_watch_range() {
+        if written + EVENT_SIZE > count
+            || LINUX_INOTIFY_WATCH_OWNERS[index].load(Ordering::SeqCst) != owner
+        {
+            continue;
+        }
+        let pending = LINUX_INOTIFY_PENDING_MASKS[index].swap(0, Ordering::SeqCst);
+        if pending == 0 {
+            continue;
+        }
+        let mut event = [0_u8; EVENT_SIZE as usize];
+        event[..4].copy_from_slice(
+            &LINUX_INOTIFY_WATCH_DESCRIPTORS[index]
+                .load(Ordering::SeqCst)
+                .to_ne_bytes(),
+        );
+        event[4..8].copy_from_slice(&pending.to_ne_bytes());
+        if !copy_to_linux_user(address + written, &event) {
+            LINUX_INOTIFY_PENDING_MASKS[index].fetch_or(pending, Ordering::SeqCst);
+            return Some(if written == 0 { LINUX_EFAULT } else { written });
+        }
+        written += EVENT_SIZE;
+        if pending & IN_IGNORED != 0 {
+            LINUX_INOTIFY_WATCH_OWNERS[index].store(0, Ordering::SeqCst);
+            LINUX_INOTIFY_WATCH_PATHS[index].store(0, Ordering::SeqCst);
+            LINUX_INOTIFY_WATCH_DESCRIPTORS[index].store(0, Ordering::SeqCst);
+        }
+    }
+    Some(if written == 0 { LINUX_EAGAIN } else { written })
+}
+
+fn linux_inotify_ready(descriptor: u64) -> bool {
+    let Some(instance) = linux_inotify_instance(descriptor) else {
+        return false;
+    };
+    let owner = instance as u16 + 1;
+    linux_inotify_watch_range().any(|index| {
+        LINUX_INOTIFY_WATCH_OWNERS[index].load(Ordering::SeqCst) == owner
+            && LINUX_INOTIFY_PENDING_MASKS[index].load(Ordering::SeqCst) != 0
+    })
+}
+
+fn linux_inotify_release(descriptor: u64) {
+    let Some(instance) = linux_inotify_instance(descriptor) else {
+        return;
+    };
+    if LINUX_INOTIFY_INSTANCE_REFS[instance].fetch_add(u16::MAX, Ordering::SeqCst) != 1 {
+        return;
+    }
+    let owner = instance as u16 + 1;
+    for index in linux_inotify_watch_range() {
+        if LINUX_INOTIFY_WATCH_OWNERS[index].load(Ordering::SeqCst) == owner {
+            LINUX_INOTIFY_WATCH_OWNERS[index].store(0, Ordering::SeqCst);
+            LINUX_INOTIFY_WATCH_PATHS[index].store(0, Ordering::SeqCst);
+            LINUX_INOTIFY_WATCH_MASKS[index].store(0, Ordering::SeqCst);
+            LINUX_INOTIFY_WATCH_DESCRIPTORS[index].store(0, Ordering::SeqCst);
+            LINUX_INOTIFY_PENDING_MASKS[index].store(0, Ordering::SeqCst);
+        }
+    }
+}
+
 fn linux_pidfd_open(process: u64, flags: u64) -> u64 {
     const PIDFD_NONBLOCK: u64 = 0x800;
     if flags & !PIDFD_NONBLOCK != 0 {
@@ -19929,6 +20240,13 @@ fn linux_descriptor_poll_events(descriptor: i32, requested: u16) -> u16 {
     if linux_signalfd_descriptor(descriptor) {
         let mask = linux_descriptor_offset(descriptor).load(Ordering::SeqCst);
         return if ELF_PROBE_PENDING_SIGNALS.load(Ordering::SeqCst) & mask != 0 {
+            requested & LINUX_POLLIN
+        } else {
+            0
+        };
+    }
+    if linux_inotify_descriptor(descriptor) {
+        return if linux_inotify_ready(descriptor) {
             requested & LINUX_POLLIN
         } else {
             0
@@ -20783,6 +21101,11 @@ fn linux_overlay_read(descriptor: u64, state: u16, address: u64, count: u64) -> 
             start.saturating_add(result as usize) as u64,
             Ordering::SeqCst,
         );
+        if result != 0 {
+            if let Some(path_hash) = crate::linux_overlay::path_hash(handle) {
+                linux_inotify_notify_path_hash(path_hash, 0x0000_0002);
+            }
+        }
     }
     Some(result)
 }
@@ -21070,6 +21393,9 @@ fn linux_descriptor_close_with_wake(descriptor: u64, wake_waiters: bool) -> u64 
         set_linux_descriptor_close_on_exec(descriptor, false);
         return 0;
     }
+    if linux_inotify_descriptor(descriptor) {
+        linux_inotify_release(descriptor);
+    }
     if descriptor < LINUX_AUX_DESCRIPTOR_FIRST && linux_device_descriptor(descriptor) != 0 {
         let index = descriptor as usize;
         ELF_PROBE_STDIO_DEVICE_DESCRIPTORS[index].store(0, Ordering::SeqCst);
@@ -21320,6 +21646,11 @@ fn linux_console_dup2(source: u64, target: u64) -> u64 {
             ELF_PROBE_STDIO_TMP_FILE_GENERATIONS[index].store(source_tmp, Ordering::SeqCst);
             ELF_PROBE_STDIO_SOCKET_FLAGS[index].store(source_flags, Ordering::SeqCst);
             ELF_PROBE_STDIO_OFFSETS[index].store(source_offset, Ordering::SeqCst);
+        }
+        if linux_inotify_descriptor(source) {
+            if let Some(instance) = linux_inotify_instance(source) {
+                LINUX_INOTIFY_INSTANCE_REFS[instance].fetch_add(1, Ordering::SeqCst);
+            }
         }
         set_linux_descriptor_close_on_exec(target, false);
         return target;

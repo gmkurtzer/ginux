@@ -217,6 +217,16 @@ pub(crate) fn copy_path(handle: Handle, output: &mut [u8]) -> Option<usize> {
     })
 }
 
+pub(crate) fn path_hash(handle: Handle) -> Option<u64> {
+    let node = node(handle)?;
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for byte in node.path() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100_0000_01b3);
+    }
+    Some(hash.max(1))
+}
+
 pub(crate) fn next_child(directory: Handle, cursor: usize) -> Option<Option<Child>> {
     let mut parent = [0_u8; PATH_CAPACITY];
     let parent_length = copy_path(directory, &mut parent)?;

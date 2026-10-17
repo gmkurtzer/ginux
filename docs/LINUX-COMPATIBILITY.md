@@ -42,7 +42,7 @@ implemented calls lives in [Linux Syscall Entry v0](../specs/kernel/linux-syscal
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **17 Complete**, **256 Partial**, **44 Policy-denied**, **58 Missing**.
+Current totals: **17 Complete**, **260 Partial**, **44 Policy-denied**, **54 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -56,6 +56,7 @@ Current totals: **17 Complete**, **256 Partial**, **44 Policy-denied**, **58 Mis
 | Process and thread model | Partial | Repeated fork/exec/exit/wait works for Alpine and Rocky shells. Fork preserves parent memory and descriptor state; exec privately replaces shared image pages. `process_vm_readv`/`process_vm_writev` support validated same-process transfers and reject crossing the process/domain boundary. `kcmp` identifies same-process VM/resource tables and known shared descriptors; cross-process comparison remains unavailable. Per-thread `rseq` registration exposes CPU 0 and supports matching unregister, but migration and critical-section abort semantics await SMP. Copy-on-write, larger process tables, and general Linux scheduling semantics remain incomplete. |
 | Signals | Partial | Selected standard signal, mask, alternate-stack, queued self-delivery with preserved `sigval`, delivery, and return behavior; no complete real-time queueing, cross-process delivery, or restart/nesting semantics. |
 | VFS and path lookup | Partial | Immutable OCI lower root with a demand-allocated, per-domain RAM overlay, directories, symlinks, FIFO metadata, cwd, tmpfs, devfs, procfs subsets, and frame-chained extended attributes. Overlay file and xattr data grow by allocating frames rather than stopping at a fixed aggregate cache ceiling; open-unlinked objects live through their descriptors, directory renames include descendants, and permission/ownership operations cover the package-manager path. `cachestat` reports RAM-resident pages for regular OCI/overlay files. `memfd_create` provides elastic anonymous files and `MFD_CLOEXEC`; sealing operations remain pending. `mknod`/`mknodat` create regular files and FIFOs; opening named FIFOs and creating socket nodes are pending, while device nodes are denied by domain policy. This is not yet a complete Linux VFS. |
+| Filesystem notifications | Partial | `inotify_init[1]`, one instance with up to 16 watches per domain, watch replacement/addition, removal with `IN_IGNORED`, descriptor duplication, readiness, event reads, and coalesced `IN_MODIFY` events for overlay writes are supported. Multiple instances, directory child names, blocking reads, and the remaining mutation event classes are pending. |
 | `/proc` | Partial | Automatically mounted per domain with domain-local PID directories, `status`, `stat`, `statm`, `mountinfo`, namespace maps, `cpuinfo`, `meminfo`, `stat`, `uptime`, `loadavg`, `filesystems`, and `cmdline`. Broader Linux procfs coverage and unconstrained process enumeration remain incomplete. |
 | IPv4 sockets | Partial | Domain descriptors expose repeated client TCP and UDP connections plus TCP bind/listen/accept over the shared host NIC with IOMMU-confined virtio queues; AF_UNIX stream socket pairs cover local runtime coordination. Ancillary data, IPv6, multi-entry listen backlogs, and complete option/error semantics remain pending. |
 | OCI overlay root | Partial | Verified layers are assembled in manifest order with replacements and OCI whiteouts. Broader overlay conformance remains under test. |
@@ -75,6 +76,13 @@ The current POSIX timer profile provides one monotonic `SIGEV_NONE` timer per
 domain, including relative/absolute arm, query, overrun, and
 delete operations. Signal/thread notification, realtime clocks, multiple timer
 objects, and overrun accumulation remain pending.
+
+System V shared memory remains deliberately missing until Ginux has
+domain-owned shared frame objects whose lifetime is independent of any one
+mapping. That prerequisite must provide attachment reference counts, inherited
+fork attachments, and deferred destruction after `IPC_RMID`; implementing
+`shmat` as an ordinary anonymous mapping would lose segment contents on detach
+and would not be Linux-compatible.
 
 ## Syscall index
 
@@ -337,9 +345,9 @@ therefore omitted.
 | 250 | keyctl | Missing |
 | 251 | ioprio_set | Partial |
 | 252 | ioprio_get | Partial |
-| 253 | inotify_init | Missing |
-| 254 | inotify_add_watch | Missing |
-| 255 | inotify_rm_watch | Missing |
+| 253 | inotify_init | Partial |
+| 254 | inotify_add_watch | Partial |
+| 255 | inotify_rm_watch | Partial |
 | 256 | migrate_pages | Partial |
 | 257 | openat | Partial |
 | 258 | mkdirat | Partial |
@@ -378,7 +386,7 @@ therefore omitted.
 | 291 | epoll_create1 | Partial |
 | 292 | dup3 | Partial |
 | 293 | pipe2 | Partial |
-| 294 | inotify_init1 | Missing |
+| 294 | inotify_init1 | Partial |
 | 295 | preadv | Partial |
 | 296 | pwritev | Partial |
 | 297 | rt_tgsigqueueinfo | Partial |
