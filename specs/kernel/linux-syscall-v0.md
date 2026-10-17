@@ -1057,6 +1057,12 @@ size record, resets the required size to zero, then returns `EOPNOTSUPP` because
 there is no Linux security context provider. `lsm_set_self_attr` similarly
 validates its selector and reserved flags before returning `EOPNOTSUPP`.
 Native domain policy is neither enumerated nor mutable through this ABI.
+`rax = 453` (`__NR_map_shadow_stack`) reports `EOPNOTSUPP` because Ginux does
+not yet enable x86 userspace CET shadow stacks. This matches Linux x86's first
+operation check when shadow stacks are unavailable, including its precedence
+over address, length, and flag validation. CET enable/status controls,
+shadow-stack VMAs, restore tokens, guard gaps, fork integration, and positive
+mapping behavior remain pending, so the call remains Partial.
 `rax = 303` and `304` (`__NR_name_to_handle_at` and
 `__NR_open_by_handle_at`) expose generation-stable handles for regular files,
 directories, and symbolic links in the OCI lower root and mutable overlay.

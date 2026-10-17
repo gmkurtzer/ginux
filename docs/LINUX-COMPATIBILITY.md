@@ -42,7 +42,7 @@ Detailed bounded behavior for implemented calls lives in
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **19 Complete**, **295 Partial**, **45 Policy-denied**, **16 Missing**.
+Current totals: **19 Complete**, **296 Partial**, **45 Policy-denied**, **15 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -492,7 +492,7 @@ therefore omitted.
 | 450 | set_mempolicy_home_node | Partial |
 | 451 | cachestat | Partial |
 | 452 | fchmodat2 | Partial |
-| 453 | map_shadow_stack | Missing |
+| 453 | map_shadow_stack | Partial |
 | 454 | futex_wake | Partial |
 | 455 | futex_wait | Partial |
 | 456 | futex_requeue | Partial |

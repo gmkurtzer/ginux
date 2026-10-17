@@ -447,6 +447,7 @@ const LINUX_CLOSE_RANGE_SYSCALL: u64 = 436;
 const LINUX_FACCESSAT2_SYSCALL: u64 = 439;
 const LINUX_EPOLL_PWAIT2_SYSCALL: u64 = 441;
 const LINUX_FCHMODAT2_SYSCALL: u64 = 452;
+const LINUX_MAP_SHADOW_STACK_SYSCALL: u64 = 453;
 const LINUX_QUOTACTL_FD_SYSCALL: u64 = 443;
 const LINUX_ARCH_SET_FS: u64 = 0x1002;
 const LINUX_ARCH_GET_FS: u64 = 0x1003;
@@ -8525,6 +8526,9 @@ extern "sysv64" fn linux_syscall_handler(
         }
         LINUX_MEMFD_CREATE_SYSCALL => linux_memfd_create(first_argument, buffer),
         LINUX_MEMFD_SECRET_SYSCALL => linux_memfd_secret(first_argument),
+        LINUX_MAP_SHADOW_STACK_SYSCALL => {
+            linux_map_shadow_stack(first_argument, buffer, count)
+        }
         LINUX_RSEQ_SYSCALL => linux_rseq(first_argument, buffer, count, register(0)),
         LINUX_CREAT_SYSCALL => linux_openat(
             u64::from(LINUX_AT_FDCWD),
@@ -12629,6 +12633,8 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let secret_memory = verify_linux_memfd_secret_syscall();
     let mount_queries = verify_linux_mount_query_syscalls();
     let file_handles = verify_linux_file_handle_syscalls();
+    let shadow_stack = linux_map_shadow_stack(0, PAGE_SIZE as u64, 0) == LINUX_EOPNOTSUPP
+        && linux_map_shadow_stack(1, 0, u64::MAX) == LINUX_EOPNOTSUPP;
     let mappings_released =
         address_space::release_current_linux_runtime_mappings(LINUX_RUNTIME_DYNAMIC_MMAP_BASE);
     ELF_PROBE_MMAP_NEXT.store(LINUX_RUNTIME_DYNAMIC_MMAP_BASE, Ordering::SeqCst);
@@ -12645,7 +12651,15 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && secret_memory
         && mount_queries
         && file_handles
+        && shadow_stack
         && mappings_released
+}
+
+fn linux_map_shadow_stack(_address: u64, _length: u64, _flags: u64) -> u64 {
+    // Linux x86 checks whether userspace CET shadow stacks are enabled before
+    // interpreting mapping arguments. Ginux does not enable that CPU/process
+    // facility yet, so the Linux-visible result is EOPNOTSUPP.
+    LINUX_EOPNOTSUPP
 }
 
 fn verify_linux_file_handle_syscalls() -> bool {
