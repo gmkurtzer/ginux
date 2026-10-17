@@ -42,7 +42,7 @@ implemented calls lives in [Linux Syscall Entry v0](../specs/kernel/linux-syscal
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **17 Complete**, **212 Partial**, **28 Policy-denied**, **118 Missing**.
+Current totals: **17 Complete**, **212 Partial**, **37 Policy-denied**, **109 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -182,7 +182,7 @@ therefore omitted.
 | 100 | times | Partial |
 | 101 | ptrace | Missing |
 | 102 | getuid | Partial |
-| 103 | syslog | Missing |
+| 103 | syslog | Policy-denied |
 | 104 | getgid | Partial |
 | 105 | setuid | Policy-denied |
 | 106 | setgid | Policy-denied |
@@ -232,18 +232,18 @@ therefore omitted.
 | 150 | munlock | Partial |
 | 151 | mlockall | Partial |
 | 152 | munlockall | Partial |
-| 153 | vhangup | Missing |
+| 153 | vhangup | Policy-denied |
 | 154 | modify_ldt | Missing |
 | 155 | pivot_root | Policy-denied |
 | 156 | _sysctl | Complete |
 | 157 | prctl | Partial |
 | 158 | arch_prctl | Partial |
-| 159 | adjtimex | Missing |
+| 159 | adjtimex | Policy-denied |
 | 160 | setrlimit | Partial |
 | 161 | chroot | Policy-denied |
 | 162 | sync | Partial |
-| 163 | acct | Missing |
-| 164 | settimeofday | Missing |
+| 163 | acct | Policy-denied |
+| 164 | settimeofday | Policy-denied |
 | 165 | mount | Policy-denied |
 | 166 | umount2 | Policy-denied |
 | 167 | swapon | Policy-denied |
@@ -258,7 +258,7 @@ therefore omitted.
 | 176 | delete_module | Policy-denied |
 | 177 | get_kernel_syms | Complete |
 | 178 | query_module | Complete |
-| 179 | quotactl | Missing |
+| 179 | quotactl | Policy-denied |
 | 180 | nfsservctl | Complete |
 | 181 | getpmsg | Complete |
 | 182 | putpmsg | Complete |
@@ -306,7 +306,7 @@ therefore omitted.
 | 224 | timer_gettime | Missing |
 | 225 | timer_getoverrun | Missing |
 | 226 | timer_delete | Missing |
-| 227 | clock_settime | Missing |
+| 227 | clock_settime | Policy-denied |
 | 228 | clock_gettime | Partial |
 | 229 | clock_getres | Partial |
 | 230 | clock_nanosleep | Partial |
@@ -384,7 +384,7 @@ therefore omitted.
 | 302 | prlimit64 | Partial |
 | 303 | name_to_handle_at | Missing |
 | 304 | open_by_handle_at | Missing |
-| 305 | clock_adjtime | Missing |
+| 305 | clock_adjtime | Policy-denied |
 | 306 | syncfs | Partial |
 | 307 | sendmmsg | Missing |
 | 308 | setns | Policy-denied |
@@ -434,7 +434,7 @@ therefore omitted.
 | 440 | process_madvise | Missing |
 | 441 | epoll_pwait2 | Partial |
 | 442 | mount_setattr | Missing |
-| 443 | quotactl_fd | Missing |
+| 443 | quotactl_fd | Policy-denied |
 | 444 | landlock_create_ruleset | Missing |
 | 445 | landlock_add_rule | Missing |
 | 446 | landlock_restrict_self | Missing |

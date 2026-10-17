@@ -19,6 +19,13 @@ The Linux v6.12 x86-64 table deliberately maps `uselib`, `_sysctl`,
 explicitly to `-ENOSYS`, independently of its unknown-syscall fallback. The
 measured ELF probe calls every entry and requires `-ENOSYS`; Linux's
 not-implemented entry does not inspect the argument registers.
+Host-global kernel logs, wall-clock adjustment, process accounting, terminal
+revocation, and storage-quota administration are outside a domain's authority.
+`syslog`, `adjtimex`, `settimeofday`, `clock_settime`, `clock_adjtime`, `acct`,
+`vhangup`, `quotactl`, and `quotactl_fd` therefore enter the ordinary
+user-namespace privilege gate and return `-EPERM` without touching user memory
+or host state. These are explicit security-policy denials, not missing
+dispatch.
 `rax = 0` (`__NR_read`) exposes descriptor 0 as a currently disconnected
 console-input stream. It returns zero for EOF without reading or validating the
 caller buffer; output, closed, and unknown descriptors return `-EBADF`. This is

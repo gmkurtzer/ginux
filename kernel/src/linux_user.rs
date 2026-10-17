@@ -44,6 +44,11 @@ pub(crate) enum PrivilegedOperation {
     ManageNamespaces,
     RawIo,
     LoadBpf,
+    ObserveKernelLog,
+    ManageClock,
+    ProcessAccounting,
+    ManageTerminal,
+    ManageStorageQuota,
 }
 
 impl PrivilegedOperation {
@@ -183,6 +188,11 @@ pub(crate) fn verify_contract() -> bool {
             PrivilegedOperation::ManageNamespaces,
             PrivilegedOperation::RawIo,
             PrivilegedOperation::LoadBpf,
+            PrivilegedOperation::ObserveKernelLog,
+            PrivilegedOperation::ManageClock,
+            PrivilegedOperation::ProcessAccounting,
+            PrivilegedOperation::ManageTerminal,
+            PrivilegedOperation::ManageStorageQuota,
         ]
         .into_iter()
         .any(|operation| !privileged_operation_denied_in(namespace, operation))
