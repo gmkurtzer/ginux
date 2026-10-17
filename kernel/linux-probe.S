@@ -2570,6 +2570,12 @@ linux_child_joined:
     cmp dword ptr [0x4050ac], 0
     require_equal
 
+    xor edi, edi
+    xor esi, esi
+    mov edx, 0xdeadbeef
+    mov eax, 309
+    call syscall_expect_zero
+
     mov edi, -100
     mov esi, 0x406200
     mov edx, 0x80002

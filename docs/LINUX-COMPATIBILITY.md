@@ -42,7 +42,7 @@ Detailed bounded behavior for implemented calls lives in
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **27 Complete**, **300 Partial**, **48 Policy-denied**, **0 Missing**.
+Current totals: **29 Complete**, **298 Partial**, **48 Policy-denied**, **0 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -67,7 +67,7 @@ Current totals: **27 Complete**, **300 Partial**, **48 Policy-denied**, **0 Miss
 | Mount and namespace APIs | Partial | Container roots are kernel-created; `listmount` and `statmount` enumerate and describe the domain root and automatic proc mount. General mount, chroot, pivot, unshare, and setns are policy-denied. |
 | Socket API | Partial | Linux TCP/UDP sockets use the kernel network stack and survive the connection churn of OCI and DNF downloads; TCP server sockets and local `socketpair` are supported. IPv6, ancillary data, interruptible socket waits, and the full option surface remain pending. |
 | cgroups | Missing | No Linux cgroup filesystem or ABI. |
-| seccomp, audit, LSM ABI | Partial | The Linux LSM query API accurately reports no active Linux LSM modules and rejects unsupported Linux security contexts; seccomp and audit remain missing. |
+| seccomp, audit, LSM ABI | Partial | Strict seccomp mode and the Linux LSM query API are implemented; BPF seccomp filters, audit, and active Linux security modules remain missing. |
 | vDSO/vvar | Missing | Time calls currently cross the syscall boundary. |
 | Linux module userspace ABI | Policy-denied | Module management is owned by the trusted control plane. |
 | ioctl families | Partial | Only explicitly admitted console, pipe, and device requests; ioctl is a family of ABIs, not one completed interface. |
@@ -222,7 +222,7 @@ therefore omitted.
 | 92 | chown | Partial |
 | 93 | fchown | Partial |
 | 94 | lchown | Partial |
-| 95 | umask | Partial |
+| 95 | umask | Complete |
 | 96 | gettimeofday | Partial |
 | 97 | getrlimit | Partial |
 | 98 | getrusage | Partial |
@@ -436,7 +436,7 @@ therefore omitted.
 | 306 | syncfs | Partial |
 | 307 | sendmmsg | Partial |
 | 308 | setns | Policy-denied |
-| 309 | getcpu | Partial |
+| 309 | getcpu | Complete |
 | 310 | process_vm_readv | Partial |
 | 311 | process_vm_writev | Partial |
 | 312 | kcmp | Partial |
