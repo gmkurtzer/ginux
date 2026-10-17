@@ -200,6 +200,7 @@ const LINUX_GETSID_SYSCALL: u64 = 124;
 const LINUX_CAPGET_SYSCALL: u64 = 125;
 const LINUX_CAPSET_SYSCALL: u64 = 126;
 const LINUX_SIGALTSTACK_SYSCALL: u64 = 131;
+const LINUX_UTIME_SYSCALL: u64 = 132;
 const LINUX_STATFS_SYSCALL: u64 = 137;
 const LINUX_FSTATFS_SYSCALL: u64 = 138;
 const LINUX_PERSONALITY_SYSCALL: u64 = 135;
@@ -258,12 +259,14 @@ const LINUX_CLOCK_GETTIME_SYSCALL: u64 = 228;
 const LINUX_CLOCK_GETRES_SYSCALL: u64 = 229;
 const LINUX_CLOCK_NANOSLEEP_SYSCALL: u64 = 230;
 const LINUX_KEXEC_LOAD_SYSCALL: u64 = 246;
+const LINUX_UTIMES_SYSCALL: u64 = 235;
 const LINUX_EXIT_GROUP_SYSCALL: u64 = 231;
 const LINUX_EPOLL_WAIT_SYSCALL: u64 = 232;
 const LINUX_EPOLL_CTL_SYSCALL: u64 = 233;
 const LINUX_OPENAT_SYSCALL: u64 = 257;
 const LINUX_MKDIRAT_SYSCALL: u64 = 258;
 const LINUX_FCHOWNAT_SYSCALL: u64 = 260;
+const LINUX_FUTIMESAT_SYSCALL: u64 = 261;
 const LINUX_RENAMEAT_SYSCALL: u64 = 264;
 const LINUX_LINKAT_SYSCALL: u64 = 265;
 const LINUX_NEWFSTATAT_SYSCALL: u64 = 262;
@@ -8285,6 +8288,9 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_CLOCK_GETTIME_SYSCALL => linux_clock_gettime(first_argument, buffer),
         LINUX_CLOCK_GETRES_SYSCALL => linux_clock_getres(first_argument, buffer),
         LINUX_UTIMENSAT_SYSCALL => linux_utimensat(first_argument, buffer, count, register(0)),
+        LINUX_UTIME_SYSCALL => linux_utime(first_argument, buffer),
+        LINUX_UTIMES_SYSCALL => linux_utimes(u64::from(LINUX_AT_FDCWD), first_argument, buffer),
+        LINUX_FUTIMESAT_SYSCALL => linux_utimes(first_argument, buffer, count),
         LINUX_FCHMODAT2_SYSCALL => linux_fchmodat(first_argument, buffer, count, register(0)),
         LINUX_STATX_SYSCALL => linux_statx(first_argument, buffer, count, register(0), register(2)),
         LINUX_CLOSE_RANGE_SYSCALL => linux_close_range(first_argument, buffer, count),
@@ -14564,43 +14570,34 @@ fn linux_fremovexattr_handle(handle: crate::linux_overlay::Handle, name_address:
     }
 }
 
-fn linux_utimensat(directory: u64, path_address: u64, times_address: u64, flags: u64) -> u64 {
+fn linux_timestamp_handle(
+    directory: u64,
+    path_address: u64,
+    flags: u64,
+) -> Result<crate::linux_overlay::Handle, u64> {
     if flags & !(LINUX_AT_SYMLINK_NOFOLLOW | LINUX_AT_EMPTY_PATH) != 0 {
-        return LINUX_EINVAL;
+        return Err(LINUX_EINVAL);
     }
     let handle = if path_address == 0 {
         if flags != 0 {
-            return LINUX_EINVAL;
+            return Err(LINUX_EINVAL);
         }
-        match linux_copy_up_descriptor(directory) {
-            Ok(handle) => handle,
-            Err(error) => return error,
-        }
+        linux_copy_up_descriptor(directory)?
     } else {
         let mut path = [0_u8; crate::linux_overlay::PATH_CAPACITY];
-        let path_length = match copy_linux_c_string(path_address, &mut path) {
-            Ok(length) => length,
-            Err(error) => return error,
-        };
+        let path_length = copy_linux_c_string(path_address, &mut path)?;
         if path_length == 0 && flags & LINUX_AT_EMPTY_PATH != 0 {
-            match linux_copy_up_descriptor(directory) {
-                Ok(handle) => handle,
-                Err(error) => return error,
-            }
+            linux_copy_up_descriptor(directory)?
         } else {
             let mut canonical = [0_u8; crate::linux_overlay::PATH_CAPACITY];
-            let length =
-                match linux_canonical_path_at(directory, &path[..path_length], &mut canonical) {
-                    Ok(length) => length,
-                    Err(error) => return error,
-                };
+            let length = linux_canonical_path_at(directory, &path[..path_length], &mut canonical)?;
             if let Some(metadata) = crate::linux_overlay::lookup(&canonical[..length]) {
                 metadata.handle
             } else {
                 let Some((_, Some(entry))) =
                     linux_oci_metadata_path_at(directory, &path[..path_length])
                 else {
-                    return LINUX_ENOENT;
+                    return Err(LINUX_ENOENT);
                 };
                 let mode = linux_oci_mode(entry) & 0o7777;
                 let created = match entry.kind {
@@ -14613,15 +14610,33 @@ fn linux_utimensat(directory: u64, path_address: u64, times_address: u64, flags:
                     ginux_oci::EntryKind::Symlink => None,
                 };
                 let Some(handle) = created else {
-                    return if entry.kind == ginux_oci::EntryKind::Symlink {
+                    return Err(if entry.kind == ginux_oci::EntryKind::Symlink {
                         LINUX_EROFS
                     } else {
                         LINUX_ENOSPC
-                    };
+                    });
                 };
                 handle
             }
         }
+    };
+    crate::linux_overlay::metadata(handle)
+        .map(|_| handle)
+        .ok_or(LINUX_ENOENT)
+}
+
+fn linux_set_times(handle: crate::linux_overlay::Handle, times: [(i64, i64); 2]) -> u64 {
+    if crate::linux_overlay::set_times(handle, times[0], times[1]) {
+        0
+    } else {
+        LINUX_EIO
+    }
+}
+
+fn linux_utimensat(directory: u64, path_address: u64, times_address: u64, flags: u64) -> u64 {
+    let handle = match linux_timestamp_handle(directory, path_address, flags) {
+        Ok(handle) => handle,
+        Err(error) => return error,
     };
     let Some(metadata) = crate::linux_overlay::metadata(handle) else {
         return LINUX_ENOENT;
@@ -14649,11 +14664,59 @@ fn linux_utimensat(directory: u64, path_address: u64, times_address: u64, flags:
             };
         }
     }
-    if crate::linux_overlay::set_times(handle, times[0], times[1]) {
-        0
-    } else {
-        LINUX_EIO
+    linux_set_times(handle, times)
+}
+
+fn linux_utime(path_address: u64, times_address: u64) -> u64 {
+    let handle = match linux_timestamp_handle(u64::from(LINUX_AT_FDCWD), path_address, 0) {
+        Ok(handle) => handle,
+        Err(error) => return error,
+    };
+    let now = linux_realtime_time()
+        .map(|(seconds, nanoseconds)| (seconds as i64, nanoseconds as i64))
+        .unwrap_or((0, 0));
+    if times_address == 0 {
+        return linux_set_times(handle, [now, now]);
     }
+    let mut input = [0_u8; 16];
+    if !copy_from_linux_user(times_address, &mut input) {
+        return LINUX_EFAULT;
+    }
+    linux_set_times(
+        handle,
+        [
+            (i64::from_ne_bytes(input[..8].try_into().unwrap()), 0),
+            (i64::from_ne_bytes(input[8..].try_into().unwrap()), 0),
+        ],
+    )
+}
+
+fn linux_utimes(directory: u64, path_address: u64, times_address: u64) -> u64 {
+    let handle = match linux_timestamp_handle(directory, path_address, 0) {
+        Ok(handle) => handle,
+        Err(error) => return error,
+    };
+    let now = linux_realtime_time()
+        .map(|(seconds, nanoseconds)| (seconds as i64, nanoseconds as i64))
+        .unwrap_or((0, 0));
+    if times_address == 0 {
+        return linux_set_times(handle, [now, now]);
+    }
+    let mut input = [0_u8; 32];
+    if !copy_from_linux_user(times_address, &mut input) {
+        return LINUX_EFAULT;
+    }
+    let mut times = [(0_i64, 0_i64); 2];
+    for (index, time) in times.iter_mut().enumerate() {
+        let offset = index * 16;
+        let seconds = i64::from_ne_bytes(input[offset..offset + 8].try_into().unwrap());
+        let microseconds = i64::from_ne_bytes(input[offset + 8..offset + 16].try_into().unwrap());
+        if !(0..1_000_000).contains(&microseconds) {
+            return LINUX_EINVAL;
+        }
+        *time = (seconds, microseconds * 1_000);
+    }
+    linux_set_times(handle, times)
 }
 
 fn linux_truncate(path_address: u64, length: u64) -> u64 {

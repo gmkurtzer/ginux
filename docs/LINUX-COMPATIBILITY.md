@@ -42,7 +42,7 @@ implemented calls lives in [Linux Syscall Entry v0](../specs/kernel/linux-syscal
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **195 Partial**, **28 Policy-denied**, **152 Missing**.
+Current totals: **198 Partial**, **28 Policy-denied**, **149 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -211,7 +211,7 @@ therefore omitted.
 | 129 | rt_sigqueueinfo | Missing |
 | 130 | rt_sigsuspend | Missing |
 | 131 | sigaltstack | Partial |
-| 132 | utime | Missing |
+| 132 | utime | Partial |
 | 133 | mknod | Missing |
 | 134 | uselib | Missing |
 | 135 | personality | Partial |
@@ -314,7 +314,7 @@ therefore omitted.
 | 232 | epoll_wait | Partial |
 | 233 | epoll_ctl | Partial |
 | 234 | tgkill | Partial |
-| 235 | utimes | Missing |
+| 235 | utimes | Partial |
 | 236 | vserver | Missing |
 | 237 | mbind | Missing |
 | 238 | set_mempolicy | Missing |
@@ -340,7 +340,7 @@ therefore omitted.
 | 258 | mkdirat | Partial |
 | 259 | mknodat | Missing |
 | 260 | fchownat | Partial |
-| 261 | futimesat | Missing |
+| 261 | futimesat | Partial |
 | 262 | newfstatat | Partial |
 | 263 | unlinkat | Partial |
 | 264 | renameat | Partial |

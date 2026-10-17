@@ -744,6 +744,9 @@ iovec profile to regular files without changing the descriptor offset. The
 current profile accepts a zero high offset and, for the v2 calls, zero flags.
 Regular-file `readv` and `writev` also cover mutable overlay and tmpfs files.
 `fchmodat2` delegates to the admitted zero-flag `fchmodat` profile.
+Legacy `utime`, `utimes`, and `futimesat` convert their second-resolution or
+microsecond-resolution inputs to overlay timestamps; null time pointers select
+the current realtime value, matching the existing bounded `utimensat` policy.
 `rax = 36` (`__NR_getitimer`) reports each of `ITIMER_REAL`, `ITIMER_VIRTUAL`,
 and `ITIMER_PROF` as a zero-initialized, disabled 32-byte x86-64 `itimerval`.
 `rax = 38` (`__NR_setitimer`) accepts an all-zero value to idempotently disarm
