@@ -997,6 +997,20 @@ and transactionally inherits attachment records. Child exit drops those
 records after its page tables retire, and domain teardown releases remaining
 segments. `SHM_REMAP`, timestamps, owner/group updates, permission enforcement,
 and information commands remain unsupported.
+`rax = 64`, `65`, `66`, and `220` (`__NR_semget`, `semop`, `semctl`, and
+`semtimedop`) provide dynamically allocated per-domain System V semaphore
+sets. Set metadata and values extend through generation-bound pages; the
+implementation enforces Linux's default `SEMMSL=32000` semaphores per set and
+`SEMOPM=500` operations per call rather than a compile-time storage array.
+Keyed `IPC_CREAT`/`IPC_EXCL` lookup and `IPC_PRIVATE` creation are supported.
+Multi-operation calls use a complete, non-mutating preflight before committing
+any value, so range and would-block failures preserve every semaphore.
+`semctl` implements `IPC_RMID`, mode-only `IPC_SET`, `IPC_STAT`, `GETPID`,
+`GETVAL`, `GETALL`, `GETNCNT`, `GETZCNT`, `SETVAL`, and atomic `SETALL`.
+Valid `semtimedop` timespecs use the same immediate operation engine.
+Operations that would sleep return `EAGAIN`; wait scheduling, `SEM_UNDO`,
+timestamps, owner/group updates, permission enforcement, and Linux information
+commands remain unsupported.
 `rax = 462` (`__NR_mseal`) irreversibly seals complete page-rounded ranges in
 the bounded anonymous scratch window and the runtime dynamic mapping region.
 The operation preflights every page before changing state, is idempotent, and

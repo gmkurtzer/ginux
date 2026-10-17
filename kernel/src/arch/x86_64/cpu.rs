@@ -251,7 +251,11 @@ const LINUX_UMOUNT2_SYSCALL: u64 = 166;
 const LINUX_SHMGET_SYSCALL: u64 = 29;
 const LINUX_SHMAT_SYSCALL: u64 = 30;
 const LINUX_SHMCTL_SYSCALL: u64 = 31;
+const LINUX_SEMGET_SYSCALL: u64 = 64;
+const LINUX_SEMOP_SYSCALL: u64 = 65;
+const LINUX_SEMCTL_SYSCALL: u64 = 66;
 const LINUX_SHMDT_SYSCALL: u64 = 67;
+const LINUX_SEMTIMEDOP_SYSCALL: u64 = 220;
 const LINUX_SWAPON_SYSCALL: u64 = 167;
 const LINUX_SWAPOFF_SYSCALL: u64 = 168;
 const LINUX_REBOOT_SYSCALL: u64 = 169;
@@ -7794,7 +7798,11 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_SHMGET_SYSCALL => linux_shmget(first_argument, buffer, count),
         LINUX_SHMAT_SYSCALL => linux_shmat(first_argument, buffer, count),
         LINUX_SHMCTL_SYSCALL => linux_shmctl(first_argument, buffer, count),
+        LINUX_SEMGET_SYSCALL => linux_semget(first_argument, buffer, count),
+        LINUX_SEMOP_SYSCALL => linux_semop(first_argument, buffer, count, 0),
+        LINUX_SEMCTL_SYSCALL => linux_semctl(first_argument, buffer, count, register(0)),
         LINUX_SHMDT_SYSCALL => linux_shmdt(first_argument),
+        LINUX_SEMTIMEDOP_SYSCALL => linux_semop(first_argument, buffer, count, register(0)),
         LINUX_MREMAP_SYSCALL => {
             linux_mremap(first_argument, buffer, count, register(0), register(2))
         }
@@ -11273,6 +11281,8 @@ fn linux_sysv_ipc_error(error: crate::linux_sysv_ipc::Error) -> u64 {
         crate::linux_sysv_ipc::Error::Invalid => LINUX_EINVAL,
         crate::linux_sysv_ipc::Error::NoEntry => LINUX_ENOENT,
         crate::linux_sysv_ipc::Error::NoMemory => LINUX_ENOMEM,
+        crate::linux_sysv_ipc::Error::Range => LINUX_ERANGE,
+        crate::linux_sysv_ipc::Error::WouldBlock => LINUX_EAGAIN,
     }
 }
 
@@ -11423,6 +11433,177 @@ fn linux_shmctl(id: u64, command: u64, address: u64) -> u64 {
     }
 }
 
+fn linux_semget(key: u64, count: u64, flags: u64) -> u64 {
+    const IPC_CREAT: u64 = 0o1000;
+    const IPC_EXCL: u64 = 0o2000;
+    const LINUX_SEMMSL: u64 = 32_000;
+    if flags & !(0o777 | IPC_CREAT | IPC_EXCL) != 0 || count > LINUX_SEMMSL {
+        return LINUX_EINVAL;
+    }
+    let key = key as u32 as i32;
+    crate::linux_sysv_ipc::semaphore_get_or_create(
+        key,
+        count,
+        flags as u16,
+        key == 0 || flags & IPC_CREAT != 0,
+        flags & IPC_EXCL != 0,
+        current_linux_process_pid(),
+    )
+    .map_or_else(linux_sysv_ipc_error, u64::from)
+}
+
+fn linux_semaphore_operation(
+    address: u64,
+    index: usize,
+) -> Option<crate::linux_sysv_ipc::SemaphoreOperation> {
+    let address = address.checked_add((index as u64).checked_mul(6)?)?;
+    let mut bytes = [0_u8; 6];
+    copy_from_linux_user(address, &mut bytes).then_some(crate::linux_sysv_ipc::SemaphoreOperation {
+        number: u16::from_ne_bytes(bytes[0..2].try_into().ok()?),
+        operation: i16::from_ne_bytes(bytes[2..4].try_into().ok()?),
+        flags: u16::from_ne_bytes(bytes[4..6].try_into().ok()?),
+    })
+}
+
+fn linux_semop(id: u64, operations: u64, count: u64, timeout: u64) -> u64 {
+    const LINUX_SEMOPM: usize = 500;
+    if id > i32::MAX as u64 {
+        return LINUX_EINVAL;
+    }
+    let Ok(count) = usize::try_from(count) else {
+        return LINUX_E2BIG;
+    };
+    if count == 0 || count > LINUX_SEMOPM {
+        return if count > LINUX_SEMOPM {
+            LINUX_E2BIG
+        } else {
+            LINUX_EINVAL
+        };
+    }
+    if timeout != 0 {
+        let mut bytes = [0_u8; 16];
+        if !copy_from_linux_user(timeout, &mut bytes) {
+            return LINUX_EFAULT;
+        }
+        let seconds = i64::from_ne_bytes(bytes[..8].try_into().unwrap());
+        let nanoseconds = i64::from_ne_bytes(bytes[8..].try_into().unwrap());
+        if seconds < 0 || !(0..1_000_000_000).contains(&nanoseconds) {
+            return LINUX_EINVAL;
+        }
+    }
+    crate::linux_sysv_ipc::semaphore_apply(id as u32, count, current_linux_process_pid(), |index| {
+        linux_semaphore_operation(operations, index)
+    })
+    .map_or_else(linux_sysv_ipc_error, |()| 0)
+}
+
+fn linux_semctl(id: u64, number: u64, command: u64, argument: u64) -> u64 {
+    const IPC_RMID: u64 = 0;
+    const IPC_SET: u64 = 1;
+    const IPC_STAT: u64 = 2;
+    const IPC_64: u64 = 0x100;
+    const GETPID: u64 = 11;
+    const GETVAL: u64 = 12;
+    const GETALL: u64 = 13;
+    const GETNCNT: u64 = 14;
+    const GETZCNT: u64 = 15;
+    const SETVAL: u64 = 16;
+    const SETALL: u64 = 17;
+    if id > i32::MAX as u64 || command & !(IPC_64 | 0xff) != 0 {
+        return LINUX_EINVAL;
+    }
+    let id = id as u32;
+    let Ok(number) = usize::try_from(number) else {
+        return LINUX_EINVAL;
+    };
+    match command & !IPC_64 {
+        IPC_RMID => {
+            crate::linux_sysv_ipc::semaphore_remove(id).map_or_else(linux_sysv_ipc_error, |()| 0)
+        }
+        IPC_SET => {
+            let mut input = [0_u8; 104];
+            if !copy_from_linux_user(argument, &mut input) {
+                return LINUX_EFAULT;
+            }
+            crate::linux_sysv_ipc::semaphore_set_mode(
+                id,
+                u16::from_ne_bytes(input[20..22].try_into().unwrap()),
+                current_linux_process_pid(),
+            )
+            .map_or_else(linux_sysv_ipc_error, |()| 0)
+        }
+        IPC_STAT => {
+            let Ok(set) = crate::linux_sysv_ipc::semaphore_set(id) else {
+                return LINUX_EINVAL;
+            };
+            let mut output = [0_u8; 104];
+            output[0..4].copy_from_slice(&set.key.to_ne_bytes());
+            output[20..22].copy_from_slice(&set.mode.to_ne_bytes());
+            output[80..88].copy_from_slice(&set.count.to_ne_bytes());
+            if copy_to_linux_user(argument, &output) {
+                0
+            } else {
+                LINUX_EFAULT
+            }
+        }
+        GETPID | GETVAL | GETNCNT | GETZCNT => {
+            let Ok((value, pid, waiting_increase, waiting_zero)) =
+                crate::linux_sysv_ipc::semaphore_get(id, number)
+            else {
+                return LINUX_EINVAL;
+            };
+            match command & !IPC_64 {
+                GETPID => u64::from(pid),
+                GETVAL => u64::from(value),
+                GETNCNT => u64::from(waiting_increase),
+                GETZCNT => u64::from(waiting_zero),
+                _ => unreachable!(),
+            }
+        }
+        SETVAL => {
+            if argument > u64::from(crate::linux_sysv_ipc::SEM_VALUE_MAX) {
+                return LINUX_ERANGE;
+            }
+            crate::linux_sysv_ipc::semaphore_set_value(
+                id,
+                number,
+                argument as u16,
+                current_linux_process_pid(),
+            )
+            .map_or_else(linux_sysv_ipc_error, |()| 0)
+        }
+        GETALL => {
+            let Ok(set) = crate::linux_sysv_ipc::semaphore_set(id) else {
+                return LINUX_EINVAL;
+            };
+            let Ok(count) = usize::try_from(set.count) else {
+                return LINUX_EINVAL;
+            };
+            for index in 0..count {
+                let Ok((value, _, _, _)) = crate::linux_sysv_ipc::semaphore_get(id, index) else {
+                    return LINUX_EINVAL;
+                };
+                let Some(address) = argument.checked_add((index * 2) as u64) else {
+                    return LINUX_EFAULT;
+                };
+                if !copy_to_linux_user(address, &value.to_ne_bytes()) {
+                    return LINUX_EFAULT;
+                }
+            }
+            0
+        }
+        SETALL => {
+            crate::linux_sysv_ipc::semaphore_set_all(id, current_linux_process_pid(), |index| {
+                let address = argument.checked_add((index * 2) as u64)?;
+                let mut bytes = [0_u8; 2];
+                copy_from_linux_user(address, &mut bytes).then_some(u16::from_ne_bytes(bytes))
+            })
+            .map_or_else(linux_sysv_ipc_error, |()| 0)
+        }
+        _ => LINUX_EINVAL,
+    }
+}
+
 fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let old_runtime = LINUX_RUNTIME_MODE.swap(true, Ordering::SeqCst);
     let id = linux_shmget(0, 2 * PAGE_SIZE as u64, 0o600);
@@ -11457,11 +11638,79 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
             crate::linux_sysv_ipc::segment(id as u32),
             Err(crate::linux_sysv_ipc::Error::Invalid)
         );
+    let semaphores = verify_linux_sysv_semaphore_syscalls();
     let mappings_released =
         address_space::release_current_linux_runtime_mappings(LINUX_RUNTIME_DYNAMIC_MMAP_BASE);
     ELF_PROBE_MMAP_NEXT.store(LINUX_RUNTIME_DYNAMIC_MMAP_BASE, Ordering::SeqCst);
     LINUX_RUNTIME_MODE.store(old_runtime, Ordering::SeqCst);
-    shared && removed_while_attached && detached && destroyed && mappings_released
+    shared && removed_while_attached && detached && destroyed && semaphores && mappings_released
+}
+
+fn verify_linux_sysv_semaphore_syscalls() -> bool {
+    const IPC_SET: u64 = 1;
+    const IPC_STAT: u64 = 2;
+    const GETVAL: u64 = 12;
+    const GETALL: u64 = 13;
+    const SETVAL: u64 = 16;
+    const SETALL: u64 = 17;
+    let mapping = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    if !(LINUX_RUNTIME_DYNAMIC_MMAP_BASE..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
+        .contains(&mapping)
+    {
+        return false;
+    }
+    let id = linux_semget(0, 2, 0o600);
+    let valid_id = id <= i32::MAX as u64;
+    let initialized =
+        valid_id && linux_semctl(id, 0, SETVAL, 2) == 0 && linux_semctl(id, 1, SETVAL, 0) == 0;
+    let operations = [0_u8, 0, 0xff, 0xff, 0, 0, 1, 0, 3, 0, 0, 0];
+    let operations_written = copy_to_linux_user(mapping, &operations);
+    let applied = initialized
+        && operations_written
+        && linux_semop(id, mapping, 2, 0) == 0
+        && linux_semctl(id, 0, GETVAL, 0) == 1
+        && linux_semctl(id, 1, GETVAL, 0) == 3;
+    let zero_operation = [0_u8, 0, 0, 0, 0, 0];
+    let timeout = [0_u8; 16];
+    let blocking_checked = copy_to_linux_user(mapping + 32, &zero_operation)
+        && copy_to_linux_user(mapping + 64, &timeout)
+        && linux_semop(id, mapping + 32, 1, mapping + 64) == LINUX_EAGAIN;
+    let stat_address = mapping + 128;
+    let stat_valid = linux_semctl(id, 0, IPC_STAT, stat_address) == 0 && {
+        let mut stat = [0_u8; 104];
+        copy_from_linux_user(stat_address, &mut stat)
+            && u16::from_ne_bytes(stat[20..22].try_into().unwrap()) == 0o600
+            && u64::from_ne_bytes(stat[80..88].try_into().unwrap()) == 2
+    };
+    let mut changed = [0_u8; 104];
+    changed[20..22].copy_from_slice(&0o640_u16.to_ne_bytes());
+    let mode_changed = copy_to_linux_user(stat_address, &changed)
+        && linux_semctl(id, 0, IPC_SET, stat_address) == 0
+        && linux_semctl(id, 0, IPC_STAT, stat_address) == 0
+        && {
+            let mut mode = [0_u8; 2];
+            copy_from_linux_user(stat_address + 20, &mut mode) && u16::from_ne_bytes(mode) == 0o640
+        };
+    let values_address = mapping + 256;
+    let all_values = linux_semctl(id, 0, GETALL, values_address) == 0
+        && {
+            let mut values = [0_u8; 4];
+            copy_from_linux_user(values_address, &mut values) && values == [1, 0, 3, 0]
+        }
+        && copy_to_linux_user(values_address, &[4, 0, 5, 0])
+        && linux_semctl(id, 0, SETALL, values_address) == 0
+        && linux_semctl(id, 0, GETVAL, 0) == 4
+        && linux_semctl(id, 1, GETVAL, 0) == 5;
+    let removed = linux_semctl(id, 0, 0, 0) == 0 && linux_semctl(id, 0, GETVAL, 0) == LINUX_EINVAL;
+    let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
+    applied && blocking_checked && stat_valid && mode_changed && all_values && removed && unmapped
 }
 
 fn linux_runtime_mmap(

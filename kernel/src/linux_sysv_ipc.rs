@@ -5,7 +5,9 @@ use crate::{control_abi, linux_process, memory};
 const PAGE_SIZE: usize = 4096;
 const INSTANCE_LIMIT: usize = control_abi::DOMAIN_LIMIT + 1;
 const FRAME_CAPACITY: usize = 320;
+const SEMAPHORE_CAPACITY: usize = 250;
 const WALK_LIMIT: usize = 262_144;
+pub(crate) const SEM_VALUE_MAX: u16 = 32_767;
 
 static LOCKS: [AtomicBool; INSTANCE_LIMIT] = [const { AtomicBool::new(false) }; INSTANCE_LIMIT];
 static ROOT_ADDRESSES: [AtomicU64; INSTANCE_LIMIT] = [const { AtomicU64::new(0) }; INSTANCE_LIMIT];
@@ -16,6 +18,12 @@ static ATTACHMENT_ROOT_ADDRESSES: [AtomicU64; INSTANCE_LIMIT] =
 static ATTACHMENT_ROOT_GENERATIONS: [AtomicU32; INSTANCE_LIMIT] =
     [const { AtomicU32::new(0) }; INSTANCE_LIMIT];
 static NEXT_IDS: [AtomicU32; INSTANCE_LIMIT] = [const { AtomicU32::new(1) }; INSTANCE_LIMIT];
+static SEMAPHORE_ROOT_ADDRESSES: [AtomicU64; INSTANCE_LIMIT] =
+    [const { AtomicU64::new(0) }; INSTANCE_LIMIT];
+static SEMAPHORE_ROOT_GENERATIONS: [AtomicU32; INSTANCE_LIMIT] =
+    [const { AtomicU32::new(0) }; INSTANCE_LIMIT];
+static NEXT_SEMAPHORE_IDS: [AtomicU32; INSTANCE_LIMIT] =
+    [const { AtomicU32::new(1) }; INSTANCE_LIMIT];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Error {
@@ -23,6 +31,8 @@ pub(crate) enum Error {
     Invalid,
     NoEntry,
     NoMemory,
+    Range,
+    WouldBlock,
 }
 
 #[derive(Clone, Copy)]
@@ -33,6 +43,45 @@ pub(crate) struct SegmentInfo {
     pub(crate) creator_pid: u32,
     pub(crate) last_pid: u32,
     pub(crate) attachments: u64,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct SemaphoreSetInfo {
+    pub(crate) key: i32,
+    pub(crate) count: u64,
+    pub(crate) mode: u16,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct SemaphoreOperation {
+    pub(crate) number: u16,
+    pub(crate) operation: i16,
+    pub(crate) flags: u16,
+}
+
+#[derive(Clone, Copy)]
+#[repr(C)]
+struct Semaphore {
+    value: u16,
+    _reserved: u16,
+    last_pid: u32,
+    waiting_increase: u32,
+    waiting_zero: u32,
+}
+
+#[repr(C)]
+struct SemaphorePage {
+    next_set: memory::FrameLease,
+    next_page: memory::FrameLease,
+    id: u32,
+    key: i32,
+    count: u64,
+    mode: u16,
+    values_used: u16,
+    creator_pid: u32,
+    last_pid: u32,
+    _padding: [u8; 4],
+    values: [Semaphore; SEMAPHORE_CAPACITY],
 }
 
 #[repr(C)]
@@ -64,6 +113,7 @@ struct Attachment {
 
 const _: () = assert!(core::mem::size_of::<SegmentPage>() <= PAGE_SIZE);
 const _: () = assert!(core::mem::size_of::<Attachment>() <= PAGE_SIZE);
+const _: () = assert!(core::mem::size_of::<SemaphorePage>() <= PAGE_SIZE);
 
 struct Guard {
     instance: usize,
@@ -125,6 +175,14 @@ fn attachment(frame: memory::FrameLease) -> Option<&'static Attachment> {
 
 fn attachment_mut(frame: memory::FrameLease) -> Option<&'static mut Attachment> {
     Some(unsafe { &mut *(frame.direct_map_address()? as *mut Attachment) })
+}
+
+fn semaphore_page(frame: memory::FrameLease) -> Option<&'static SemaphorePage> {
+    Some(unsafe { &*(frame.direct_map_address()? as *const SemaphorePage) })
+}
+
+fn semaphore_page_mut(frame: memory::FrameLease) -> Option<&'static mut SemaphorePage> {
+    Some(unsafe { &mut *(frame.direct_map_address()? as *mut SemaphorePage) })
 }
 
 fn allocate_zeroed() -> Option<memory::FrameLease> {
@@ -538,12 +596,36 @@ pub(crate) fn teardown() -> bool {
     let mut segments = root(&ROOT_ADDRESSES, &ROOT_GENERATIONS, guard.instance);
     publish_root(&ROOT_ADDRESSES, &ROOT_GENERATIONS, guard.instance, None);
     for _ in 0..WALK_LIMIT {
-        let Some(segment) = segments else { return true };
+        let Some(segment) = segments else { break };
         let Some(page) = segment_page(segment) else {
             return false;
         };
         segments = (page.next_segment != memory::FrameLease::EMPTY).then_some(page.next_segment);
         if !release_segment_chain(segment) {
+            return false;
+        }
+    }
+    if segments.is_some() {
+        return false;
+    }
+    let mut sets = root(
+        &SEMAPHORE_ROOT_ADDRESSES,
+        &SEMAPHORE_ROOT_GENERATIONS,
+        guard.instance,
+    );
+    publish_root(
+        &SEMAPHORE_ROOT_ADDRESSES,
+        &SEMAPHORE_ROOT_GENERATIONS,
+        guard.instance,
+        None,
+    );
+    for _ in 0..WALK_LIMIT {
+        let Some(set) = sets else { return true };
+        let Some(page) = semaphore_page(set) else {
+            return false;
+        };
+        sets = (page.next_set != memory::FrameLease::EMPTY).then_some(page.next_set);
+        if !release_semaphore_chain(set) {
             return false;
         }
     }
@@ -569,6 +651,386 @@ pub(crate) fn set_mode(id: u32, mode: u16, pid: u32) -> Result<(), Error> {
     page.mode = mode & 0o777;
     page.last_pid = pid;
     Ok(())
+}
+
+fn find_semaphore_set(
+    instance: usize,
+    id: u32,
+) -> Option<(memory::FrameLease, Option<memory::FrameLease>)> {
+    let mut current = root(
+        &SEMAPHORE_ROOT_ADDRESSES,
+        &SEMAPHORE_ROOT_GENERATIONS,
+        instance,
+    );
+    let mut previous = None;
+    for _ in 0..WALK_LIMIT {
+        let frame = current?;
+        let page = semaphore_page(frame)?;
+        if page.id == id {
+            return Some((frame, previous));
+        }
+        previous = current;
+        current = (page.next_set != memory::FrameLease::EMPTY).then_some(page.next_set);
+    }
+    None
+}
+
+fn find_semaphore_key(instance: usize, key: i32) -> Option<memory::FrameLease> {
+    let mut current = root(
+        &SEMAPHORE_ROOT_ADDRESSES,
+        &SEMAPHORE_ROOT_GENERATIONS,
+        instance,
+    );
+    for _ in 0..WALK_LIMIT {
+        let frame = current?;
+        let page = semaphore_page(frame)?;
+        if page.key == key {
+            return Some(frame);
+        }
+        current = (page.next_set != memory::FrameLease::EMPTY).then_some(page.next_set);
+    }
+    None
+}
+
+fn semaphore_value_frame(
+    mut frame: memory::FrameLease,
+    mut number: usize,
+) -> Option<(memory::FrameLease, usize)> {
+    for _ in 0..WALK_LIMIT {
+        let page = semaphore_page(frame)?;
+        if number < usize::from(page.values_used) {
+            return Some((frame, number));
+        }
+        number = number.checked_sub(usize::from(page.values_used))?;
+        if page.next_page == memory::FrameLease::EMPTY {
+            return None;
+        }
+        frame = page.next_page;
+    }
+    None
+}
+
+fn release_semaphore_chain(first: memory::FrameLease) -> bool {
+    let mut current = Some(first);
+    for _ in 0..WALK_LIMIT {
+        let Some(frame) = current else { return true };
+        let Some(page) = semaphore_page(frame) else {
+            return false;
+        };
+        current = (page.next_page != memory::FrameLease::EMPTY).then_some(page.next_page);
+        if !memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[frame]) {
+            return false;
+        }
+    }
+    false
+}
+
+pub(crate) fn semaphore_get_or_create(
+    key: i32,
+    count: u64,
+    mode: u16,
+    create: bool,
+    exclusive: bool,
+    pid: u32,
+) -> Result<u32, Error> {
+    let guard = Guard::acquire().ok_or(Error::Invalid)?;
+    if key != 0 {
+        if let Some(frame) = find_semaphore_key(guard.instance, key) {
+            let page = semaphore_page(frame).ok_or(Error::Invalid)?;
+            if create && exclusive {
+                return Err(Error::Exists);
+            }
+            if count > page.count {
+                return Err(Error::Invalid);
+            }
+            return Ok(page.id);
+        }
+        if !create {
+            return Err(Error::NoEntry);
+        }
+    }
+    let count = usize::try_from(count).map_err(|_| Error::Invalid)?;
+    if count == 0 {
+        return Err(Error::Invalid);
+    }
+    let first = allocate_zeroed().ok_or(Error::NoMemory)?;
+    let id = NEXT_SEMAPHORE_IDS[guard.instance].fetch_add(1, Ordering::AcqRel);
+    if id == 0 || id > i32::MAX as u32 {
+        let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[first]);
+        return Err(Error::NoMemory);
+    }
+    {
+        let Some(page) = semaphore_page_mut(first) else {
+            let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[first]);
+            return Err(Error::NoMemory);
+        };
+        page.id = id;
+        page.key = key;
+        page.count = count as u64;
+        page.mode = mode & 0o777;
+        page.creator_pid = pid;
+        page.last_pid = pid;
+    }
+    let mut metadata = first;
+    let mut remaining = count;
+    while remaining != 0 {
+        let used = remaining.min(SEMAPHORE_CAPACITY);
+        semaphore_page_mut(metadata)
+            .ok_or(Error::NoMemory)?
+            .values_used = used as u16;
+        remaining -= used;
+        if remaining != 0 {
+            let Some(next) = allocate_zeroed() else {
+                let _ = release_semaphore_chain(first);
+                return Err(Error::NoMemory);
+            };
+            let Some(page) = semaphore_page_mut(metadata) else {
+                let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[next]);
+                let _ = release_semaphore_chain(first);
+                return Err(Error::NoMemory);
+            };
+            page.next_page = next;
+            metadata = next;
+        }
+    }
+    let old_root = root(
+        &SEMAPHORE_ROOT_ADDRESSES,
+        &SEMAPHORE_ROOT_GENERATIONS,
+        guard.instance,
+    );
+    semaphore_page_mut(first).ok_or(Error::NoMemory)?.next_set =
+        old_root.unwrap_or(memory::FrameLease::EMPTY);
+    publish_root(
+        &SEMAPHORE_ROOT_ADDRESSES,
+        &SEMAPHORE_ROOT_GENERATIONS,
+        guard.instance,
+        Some(first),
+    );
+    Ok(id)
+}
+
+pub(crate) fn semaphore_set(id: u32) -> Result<SemaphoreSetInfo, Error> {
+    let guard = Guard::acquire().ok_or(Error::Invalid)?;
+    let (frame, _) = find_semaphore_set(guard.instance, id).ok_or(Error::Invalid)?;
+    let page = semaphore_page(frame).ok_or(Error::Invalid)?;
+    Ok(SemaphoreSetInfo {
+        key: page.key,
+        count: page.count,
+        mode: page.mode,
+    })
+}
+
+pub(crate) fn semaphore_get(id: u32, number: usize) -> Result<(u16, u32, u32, u32), Error> {
+    let guard = Guard::acquire().ok_or(Error::Invalid)?;
+    let (first, _) = find_semaphore_set(guard.instance, id).ok_or(Error::Invalid)?;
+    let (frame, slot) = semaphore_value_frame(first, number).ok_or(Error::Range)?;
+    let value = semaphore_page(frame).ok_or(Error::Invalid)?.values[slot];
+    Ok((
+        value.value,
+        value.last_pid,
+        value.waiting_increase,
+        value.waiting_zero,
+    ))
+}
+
+pub(crate) fn semaphore_set_value(
+    id: u32,
+    number: usize,
+    value: u16,
+    pid: u32,
+) -> Result<(), Error> {
+    if value > SEM_VALUE_MAX {
+        return Err(Error::Range);
+    }
+    let guard = Guard::acquire().ok_or(Error::Invalid)?;
+    let (first, _) = find_semaphore_set(guard.instance, id).ok_or(Error::Invalid)?;
+    let (frame, slot) = semaphore_value_frame(first, number).ok_or(Error::Range)?;
+    let semaphore = &mut semaphore_page_mut(frame).ok_or(Error::Invalid)?.values[slot];
+    semaphore.value = value;
+    semaphore.last_pid = pid;
+    semaphore_page_mut(first).ok_or(Error::Invalid)?.last_pid = pid;
+    Ok(())
+}
+
+pub(crate) fn semaphore_apply<F>(
+    id: u32,
+    operation_count: usize,
+    pid: u32,
+    mut operation: F,
+) -> Result<(), Error>
+where
+    F: FnMut(usize) -> Option<SemaphoreOperation>,
+{
+    const IPC_NOWAIT: u16 = 0o4000;
+    if operation_count == 0 {
+        return Err(Error::Invalid);
+    }
+    let guard = Guard::acquire().ok_or(Error::Invalid)?;
+    let (first, _) = find_semaphore_set(guard.instance, id).ok_or(Error::Invalid)?;
+    let set_count = semaphore_page(first).ok_or(Error::Invalid)?.count as usize;
+    for index in 0..operation_count {
+        let current = operation(index).ok_or(Error::Invalid)?;
+        if current.flags & !IPC_NOWAIT != 0 || usize::from(current.number) >= set_count {
+            return Err(Error::Invalid);
+        }
+        let (frame, slot) =
+            semaphore_value_frame(first, usize::from(current.number)).ok_or(Error::Invalid)?;
+        let mut simulated =
+            i32::from(semaphore_page(frame).ok_or(Error::Invalid)?.values[slot].value);
+        for prior_index in 0..index {
+            let prior = operation(prior_index).ok_or(Error::Invalid)?;
+            if prior.number == current.number {
+                simulated = simulated
+                    .checked_add(i32::from(prior.operation))
+                    .ok_or(Error::Range)?;
+            }
+        }
+        match current.operation.cmp(&0) {
+            core::cmp::Ordering::Greater => {
+                if simulated
+                    .checked_add(i32::from(current.operation))
+                    .is_none_or(|value| value > i32::from(SEM_VALUE_MAX))
+                {
+                    return Err(Error::Range);
+                }
+            }
+            core::cmp::Ordering::Less if simulated < -i32::from(current.operation) => {
+                return Err(Error::WouldBlock);
+            }
+            core::cmp::Ordering::Equal if simulated != 0 => return Err(Error::WouldBlock),
+            _ => {}
+        }
+    }
+    for index in 0..operation_count {
+        let current = operation(index).ok_or(Error::Invalid)?;
+        let (frame, slot) =
+            semaphore_value_frame(first, usize::from(current.number)).ok_or(Error::Invalid)?;
+        let semaphore = &mut semaphore_page_mut(frame).ok_or(Error::Invalid)?.values[slot];
+        if current.operation != 0 {
+            semaphore.value =
+                u16::try_from(i32::from(semaphore.value) + i32::from(current.operation))
+                    .map_err(|_| Error::Range)?;
+        }
+        semaphore.last_pid = pid;
+    }
+    semaphore_page_mut(first).ok_or(Error::Invalid)?.last_pid = pid;
+    Ok(())
+}
+
+pub(crate) fn semaphore_set_all<F>(id: u32, pid: u32, mut value: F) -> Result<(), Error>
+where
+    F: FnMut(usize) -> Option<u16>,
+{
+    let guard = Guard::acquire().ok_or(Error::Invalid)?;
+    let (first, _) = find_semaphore_set(guard.instance, id).ok_or(Error::Invalid)?;
+    let count = semaphore_page(first).ok_or(Error::Invalid)?.count as usize;
+    for index in 0..count {
+        if value(index)
+            .filter(|value| *value <= SEM_VALUE_MAX)
+            .is_none()
+        {
+            return Err(Error::Range);
+        }
+    }
+    for index in 0..count {
+        let (frame, slot) = semaphore_value_frame(first, index).ok_or(Error::Invalid)?;
+        let semaphore = &mut semaphore_page_mut(frame).ok_or(Error::Invalid)?.values[slot];
+        semaphore.value = value(index).ok_or(Error::Invalid)?;
+        semaphore.last_pid = pid;
+    }
+    semaphore_page_mut(first).ok_or(Error::Invalid)?.last_pid = pid;
+    Ok(())
+}
+
+pub(crate) fn semaphore_set_mode(id: u32, mode: u16, pid: u32) -> Result<(), Error> {
+    let guard = Guard::acquire().ok_or(Error::Invalid)?;
+    let (frame, _) = find_semaphore_set(guard.instance, id).ok_or(Error::Invalid)?;
+    let page = semaphore_page_mut(frame).ok_or(Error::Invalid)?;
+    page.mode = mode & 0o777;
+    page.last_pid = pid;
+    Ok(())
+}
+
+pub(crate) fn semaphore_remove(id: u32) -> Result<(), Error> {
+    let guard = Guard::acquire().ok_or(Error::Invalid)?;
+    let (frame, previous) = find_semaphore_set(guard.instance, id).ok_or(Error::Invalid)?;
+    let next = {
+        let page = semaphore_page(frame).ok_or(Error::Invalid)?;
+        (page.next_set != memory::FrameLease::EMPTY).then_some(page.next_set)
+    };
+    if let Some(previous) = previous {
+        semaphore_page_mut(previous).ok_or(Error::Invalid)?.next_set =
+            next.unwrap_or(memory::FrameLease::EMPTY);
+    } else {
+        publish_root(
+            &SEMAPHORE_ROOT_ADDRESSES,
+            &SEMAPHORE_ROOT_GENERATIONS,
+            guard.instance,
+            next,
+        );
+    }
+    release_semaphore_chain(frame)
+        .then_some(())
+        .ok_or(Error::Invalid)
+}
+
+pub(crate) fn verify_semaphore_lifecycle() -> bool {
+    let Some(before) = memory::owner_live_frame_count(memory::FrameOwner::KERNEL) else {
+        return false;
+    };
+    let Ok(id) = semaphore_get_or_create(
+        0x5345_4d41,
+        (SEMAPHORE_CAPACITY + 7) as u64,
+        0o640,
+        true,
+        true,
+        1,
+    ) else {
+        return false;
+    };
+    let operations = [
+        SemaphoreOperation {
+            number: 0,
+            operation: -2,
+            flags: 0,
+        },
+        SemaphoreOperation {
+            number: 1,
+            operation: 3,
+            flags: 0,
+        },
+    ];
+    let blocked = [
+        SemaphoreOperation {
+            number: 0,
+            operation: -1,
+            flags: 0,
+        },
+        SemaphoreOperation {
+            number: 1,
+            operation: 4,
+            flags: 0,
+        },
+    ];
+    let verified = semaphore_set_value(id, 0, 2, 1).is_ok()
+        && semaphore_apply(id, operations.len(), 1, |index| {
+            operations.get(index).copied()
+        })
+        .is_ok()
+        && semaphore_get(id, 0).is_ok_and(|value| value.0 == 0 && value.1 == 1)
+        && semaphore_get(id, 1).is_ok_and(|value| value.0 == 3 && value.1 == 1)
+        && semaphore_apply(id, blocked.len(), 2, |index| blocked.get(index).copied())
+            == Err(Error::WouldBlock)
+        && semaphore_get(id, 1).is_ok_and(|value| value.0 == 3)
+        && semaphore_set_all(id, 3, |index| Some((index % 101) as u16)).is_ok()
+        && semaphore_get(id, SEMAPHORE_CAPACITY + 6)
+            .is_ok_and(|value| value.0 == ((SEMAPHORE_CAPACITY + 6) % 101) as u16)
+        && semaphore_set_mode(id, 0o600, 3).is_ok()
+        && semaphore_set(id)
+            .is_ok_and(|set| set.count == (SEMAPHORE_CAPACITY + 7) as u64 && set.mode == 0o600)
+        && semaphore_remove(id).is_ok()
+        && matches!(semaphore_set(id), Err(Error::Invalid));
+    verified && memory::owner_live_frame_count(memory::FrameOwner::KERNEL) == Some(before)
 }
 
 pub(crate) fn verify_shared_memory_lifecycle() -> bool {

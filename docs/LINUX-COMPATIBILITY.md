@@ -42,7 +42,7 @@ Detailed bounded behavior for implemented calls lives in
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **19 Complete**, **265 Partial**, **45 Policy-denied**, **46 Missing**.
+Current totals: **19 Complete**, **269 Partial**, **45 Policy-denied**, **42 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -86,6 +86,15 @@ identity and inherits attachment accounting; process/domain teardown releases
 the corresponding references and objects. `SHM_REMAP`, timestamps, owner/group
 updates, permission enforcement, and Linux's
 information commands remain pending, so these calls remain Partial.
+
+System V semaphores use dynamically allocated, per-domain sets and chained
+value pages. `semget`, `semop`, `semtimedop`, and the principal `semctl`
+commands support keyed creation, atomic multi-operation preflight and commit,
+mode/stat queries, individual and whole-set values, and immediate removal.
+The Linux default `SEMMSL=32000` and `SEMOPM=500` limits are enforced.
+Operations that would sleep currently return `EAGAIN`; waiter scheduling,
+`SEM_UNDO`, timestamps, permission enforcement, and information commands are
+pending, so the family remains Partial.
 
 ## Syscall index
 
@@ -159,9 +168,9 @@ therefore omitted.
 | 61 | wait4 | Partial |
 | 62 | kill | Partial |
 | 63 | uname | Partial |
-| 64 | semget | Missing |
-| 65 | semop | Missing |
-| 66 | semctl | Missing |
+| 64 | semget | Partial |
+| 65 | semop | Partial |
+| 66 | semctl | Partial |
 | 67 | shmdt | Partial |
 | 68 | msgget | Missing |
 | 69 | msgsnd | Missing |
@@ -315,7 +324,7 @@ therefore omitted.
 | 217 | getdents64 | Partial |
 | 218 | set_tid_address | Partial |
 | 219 | restart_syscall | Partial |
-| 220 | semtimedop | Missing |
+| 220 | semtimedop | Partial |
 | 221 | fadvise64 | Partial |
 | 222 | timer_create | Partial |
 | 223 | timer_settime | Partial |
