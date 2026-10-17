@@ -321,7 +321,8 @@ impl ProcessAddressSpace {
     fn is_live(&self) -> bool {
         memory::any_frame_lease_live(self.hierarchy())
             || self.mappings().iter().any(|mapping| {
-                !memory::frame_lease_is_runtime(mapping.frame)
+                !mapping.shared
+                    && !memory::frame_lease_is_runtime(mapping.frame)
                     && memory::any_frame_lease_live(&[mapping.frame])
             })
     }
@@ -746,9 +747,17 @@ impl ProcessTable {
         LIVE_FORK_EXECUTION_STAGE.store(1137, Ordering::Release);
         if let Some(child_space) = child_space {
             LIVE_FORK_EXECUTION_STAGE.store(1138, Ordering::Release);
-            if self.commit_fork_inner(handle, child_space, parent_context.fork_child(), false) {
+            let attachments_inherited =
+                crate::linux_sysv_ipc::inherit_process_attachments(parent_handle.pid, handle.pid)
+                    .is_ok();
+            if attachments_inherited
+                && self.commit_fork_inner(handle, child_space, parent_context.fork_child(), false)
+            {
                 LIVE_FORK_EXECUTION_STAGE.store(1139, Ordering::Release);
                 return true;
+            }
+            if attachments_inherited {
+                let _ = crate::linux_sysv_ipc::drop_process_attachments(handle.pid);
             }
         }
         let _ = scrub_candidate_resources(child_hierarchy, child_pages);
@@ -2095,6 +2104,7 @@ fn discard_live_fork(
     };
     return_restored
         && retiring.scrub_and_release()
+        && crate::linux_sysv_ipc::drop_process_attachments(child_handle.pid).is_ok()
         && table.exit(child_handle, 0)
         && table.wait(parent_handle, child_handle.pid)
             == Some(WaitResult {
@@ -2148,7 +2158,8 @@ pub(crate) fn complete_live_child_exit(pid: u32, status: u8) -> Option<LiveProce
         return None;
     }
     for mapping in child_space.mappings() {
-        if memory::frames_owned_by(memory::FrameOwner::KERNEL, &[mapping.frame])
+        if !mapping.shared
+            && memory::frames_owned_by(memory::FrameOwner::KERNEL, &[mapping.frame])
             && !memory::scrub_and_release_frames(
                 memory::FrameOwner::KERNEL,
                 core::slice::from_ref(&mapping.frame),
@@ -2168,7 +2179,9 @@ pub(crate) fn complete_live_child_exit(pid: u32, status: u8) -> Option<LiveProce
         }
     }
     LIVE_FORK_EXECUTION_STAGE.store(163, Ordering::Release);
-    if !table.exit_after_current_address_space_retired(child_handle, status) {
+    if crate::linux_sysv_ipc::drop_process_attachments(pid).is_err()
+        || !table.exit_after_current_address_space_retired(child_handle, status)
+    {
         LIVE_FORK_EXECUTION_STAGE.store(164, Ordering::Release);
         return None;
     }
@@ -2291,6 +2304,7 @@ fn verify_live_fork_clone_and_execution_transaction() -> bool {
                 child.address == parent.address
                     && child.writable == parent.writable
                     && child.executable == parent.executable
+                    && child.shared == parent.shared
                     && (child.frame != parent.frame) == mapping_requires_fork_copy(parent)
                     && (!mapping_requires_fork_copy(parent)
                         || child
@@ -2433,6 +2447,7 @@ fn verify_live_fork_clone_only_transaction() -> bool {
                 child.address == parent.address
                     && child.writable == parent.writable
                     && child.executable == parent.executable
+                    && child.shared == parent.shared
                     && (child.frame != parent.frame) == mapping_requires_fork_copy(parent)
                     && (!mapping_requires_fork_copy(parent)
                         || child

@@ -992,9 +992,11 @@ attachment. `shmdt` removes that mapping without releasing object-owned data.
 `shmctl(IPC_STAT)` returns the native x86-64 112-byte `shmid_ds` subset,
 `IPC_SET` updates its mode, and `IPC_RMID` hides the key immediately while deferring destruction until the
 last recorded attachment leaves. Process hierarchy cloning preserves the
-shared PTE marker and aliases the same writable frames instead of copying
-them. Fork attachment-accounting, `SHM_REMAP`, timestamps, owner/group updates,
-permission enforcement, and information commands remain unsupported.
+shared PTE marker, aliases the same writable frames instead of copying them,
+and transactionally inherits attachment records. Child exit drops those
+records after its page tables retire, and domain teardown releases remaining
+segments. `SHM_REMAP`, timestamps, owner/group updates, permission enforcement,
+and information commands remain unsupported.
 `rax = 462` (`__NR_mseal`) irreversibly seals complete page-rounded ranges in
 the bounded anonymous scratch window and the runtime dynamic mapping region.
 The operation preflights every page before changing state, is idempotent, and

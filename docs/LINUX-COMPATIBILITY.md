@@ -81,8 +81,9 @@ System V shared memory now uses domain-owned, dynamically allocated frame
 objects whose lifetime is independent of any one mapping. `shmget`, `shmat`,
 `shmdt`, and `shmctl(IPC_STAT/IPC_RMID)` provide keyed creation, shared page
 mapping, attachment reference counts, and deferred destruction after
-`IPC_RMID`. `IPC_SET` updates the permission mode, and fork preserves shared
-page identity. Fork attachment-accounting, `SHM_REMAP`, timestamps, owner/group
+`IPC_RMID`. `IPC_SET` updates the permission mode; fork preserves shared page
+identity and inherits attachment accounting; process/domain teardown releases
+the corresponding references and objects. `SHM_REMAP`, timestamps, owner/group
 updates, permission enforcement, and Linux's
 information commands remain pending, so these calls remain Partial.
 

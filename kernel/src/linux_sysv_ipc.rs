@@ -377,18 +377,20 @@ pub(crate) fn attachment_at(address: u64, pid: u32) -> Result<(u32, u64), Error>
     Err(Error::Invalid)
 }
 
-pub(crate) fn detach(address: u64, pid: u32) -> Result<(), Error> {
-    let guard = Guard::acquire().ok_or(Error::Invalid)?;
+fn detach_matching(instance: usize, pid: u32, address: Option<u64>) -> Result<usize, Error> {
     let mut current = root(
         &ATTACHMENT_ROOT_ADDRESSES,
         &ATTACHMENT_ROOT_GENERATIONS,
-        guard.instance,
+        instance,
     );
     let mut previous = None;
+    let mut removed = 0;
     for _ in 0..WALK_LIMIT {
-        let record = current.ok_or(Error::Invalid)?;
+        let Some(record) = current else {
+            return Ok(removed);
+        };
         let entry = attachment(record).ok_or(Error::Invalid)?;
-        if entry.address == address && entry.pid == pid {
+        if entry.pid == pid && address.is_none_or(|address| entry.address == address) {
             let next = (entry.next != memory::FrameLease::EMPTY).then_some(entry.next);
             let segment = entry.segment;
             if let Some(previous) = previous {
@@ -398,7 +400,7 @@ pub(crate) fn detach(address: u64, pid: u32) -> Result<(), Error> {
                 publish_root(
                     &ATTACHMENT_ROOT_ADDRESSES,
                     &ATTACHMENT_ROOT_GENERATIONS,
-                    guard.instance,
+                    instance,
                     next,
                 );
             }
@@ -406,22 +408,146 @@ pub(crate) fn detach(address: u64, pid: u32) -> Result<(), Error> {
             page.attachments = page.attachments.checked_sub(1).ok_or(Error::Invalid)?;
             page.last_pid = pid;
             let remove = page.marked_for_removal != 0 && page.attachments == 0;
+            let segment_id = page.id;
             if !memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[record]) {
                 return Err(Error::Invalid);
             }
             if remove {
                 let (_, segment_previous) =
-                    find_segment(guard.instance, page.id).ok_or(Error::Invalid)?;
-                if !unlink_and_release(guard.instance, segment, segment_previous) {
+                    find_segment(instance, segment_id).ok_or(Error::Invalid)?;
+                if !unlink_and_release(instance, segment, segment_previous) {
                     return Err(Error::Invalid);
                 }
             }
-            return Ok(());
+            removed += 1;
+            current = next;
+            if address.is_some() {
+                return Ok(removed);
+            }
+            continue;
         }
         previous = current;
         current = (entry.next != memory::FrameLease::EMPTY).then_some(entry.next);
     }
     Err(Error::Invalid)
+}
+
+pub(crate) fn detach(address: u64, pid: u32) -> Result<(), Error> {
+    let guard = Guard::acquire().ok_or(Error::Invalid)?;
+    (detach_matching(guard.instance, pid, Some(address))? == 1)
+        .then_some(())
+        .ok_or(Error::Invalid)
+}
+
+pub(crate) fn inherit_process_attachments(parent: u32, child: u32) -> Result<(), Error> {
+    let guard = Guard::acquire().ok_or(Error::Invalid)?;
+    if parent == child {
+        return Err(Error::Invalid);
+    }
+    let mut current = root(
+        &ATTACHMENT_ROOT_ADDRESSES,
+        &ATTACHMENT_ROOT_GENERATIONS,
+        guard.instance,
+    );
+    for _ in 0..WALK_LIMIT {
+        let Some(record) = current else { return Ok(()) };
+        let source = attachment(record).ok_or(Error::Invalid)?;
+        let next = (source.next != memory::FrameLease::EMPTY).then_some(source.next);
+        if source.pid == child {
+            let _ = detach_matching(guard.instance, child, None);
+            return Err(Error::Invalid);
+        }
+        if source.pid == parent {
+            let Some(clone) = allocate_zeroed() else {
+                let _ = detach_matching(guard.instance, child, None);
+                return Err(Error::NoMemory);
+            };
+            let root = root(
+                &ATTACHMENT_ROOT_ADDRESSES,
+                &ATTACHMENT_ROOT_GENERATIONS,
+                guard.instance,
+            );
+            let Some(entry) = attachment_mut(clone) else {
+                let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[clone]);
+                let _ = detach_matching(guard.instance, child, None);
+                return Err(Error::NoMemory);
+            };
+            entry.next = root.unwrap_or(memory::FrameLease::EMPTY);
+            entry.segment = source.segment;
+            entry.address = source.address;
+            entry.length = source.length;
+            entry.pid = child;
+            let Some(segment) = segment_page_mut(source.segment) else {
+                let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[clone]);
+                let _ = detach_matching(guard.instance, child, None);
+                return Err(Error::Invalid);
+            };
+            let Some(attachments) = segment.attachments.checked_add(1) else {
+                let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[clone]);
+                let _ = detach_matching(guard.instance, child, None);
+                return Err(Error::NoMemory);
+            };
+            segment.attachments = attachments;
+            segment.last_pid = child;
+            publish_root(
+                &ATTACHMENT_ROOT_ADDRESSES,
+                &ATTACHMENT_ROOT_GENERATIONS,
+                guard.instance,
+                Some(clone),
+            );
+        }
+        current = next;
+    }
+    let _ = detach_matching(guard.instance, child, None);
+    Err(Error::Invalid)
+}
+
+pub(crate) fn drop_process_attachments(pid: u32) -> Result<(), Error> {
+    let guard = Guard::acquire().ok_or(Error::Invalid)?;
+    detach_matching(guard.instance, pid, None).map(|_| ())
+}
+
+pub(crate) fn teardown() -> bool {
+    let Some(guard) = Guard::acquire() else {
+        return false;
+    };
+    let mut attachments = root(
+        &ATTACHMENT_ROOT_ADDRESSES,
+        &ATTACHMENT_ROOT_GENERATIONS,
+        guard.instance,
+    );
+    for _ in 0..WALK_LIMIT {
+        let Some(record) = attachments else { break };
+        let Some(entry) = attachment(record) else {
+            return false;
+        };
+        attachments = (entry.next != memory::FrameLease::EMPTY).then_some(entry.next);
+        if !memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[record]) {
+            return false;
+        }
+    }
+    if attachments.is_some() {
+        return false;
+    }
+    publish_root(
+        &ATTACHMENT_ROOT_ADDRESSES,
+        &ATTACHMENT_ROOT_GENERATIONS,
+        guard.instance,
+        None,
+    );
+    let mut segments = root(&ROOT_ADDRESSES, &ROOT_GENERATIONS, guard.instance);
+    publish_root(&ROOT_ADDRESSES, &ROOT_GENERATIONS, guard.instance, None);
+    for _ in 0..WALK_LIMIT {
+        let Some(segment) = segments else { return true };
+        let Some(page) = segment_page(segment) else {
+            return false;
+        };
+        segments = (page.next_segment != memory::FrameLease::EMPTY).then_some(page.next_segment);
+        if !release_segment_chain(segment) {
+            return false;
+        }
+    }
+    false
 }
 
 pub(crate) fn mark_for_removal(id: u32, pid: u32) -> Result<(), Error> {
@@ -462,21 +588,27 @@ pub(crate) fn verify_shared_memory_lifecycle() -> bool {
             (second_address as *mut u8).write(0x58);
         }
         attach(id, 0x4000_0000, 1).ok()?;
+        inherit_process_attachments(1, 2).ok()?;
         let state = segment(id).ok()?;
         if state.size != 2 * PAGE_SIZE as u64
             || state.mode != 0o600
-            || state.attachments != 1
+            || state.attachments != 2
             || attachment_at(0x4000_0000, 1).ok()? != (id, 2 * PAGE_SIZE as u64)
+            || attachment_at(0x4000_0000, 2).ok()? != (id, 2 * PAGE_SIZE as u64)
             || unsafe { (first_address as *const u8).read() } != 0x47
             || unsafe { (second_address as *const u8).read() } != 0x58
         {
             return None;
         }
         mark_for_removal(id, 1).ok()?;
-        if segment(id).ok()?.attachments != 1 {
+        if segment(id).ok()?.attachments != 2 {
             return None;
         }
         detach(0x4000_0000, 1).ok()?;
+        if segment(id).ok()?.attachments != 1 {
+            return None;
+        }
+        drop_process_attachments(2).ok()?;
         matches!(segment(id), Err(Error::Invalid)).then_some(())
     })()
     .is_some();

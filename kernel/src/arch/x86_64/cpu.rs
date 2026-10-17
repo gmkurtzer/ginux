@@ -9788,6 +9788,7 @@ fn finish_linux_runtime(mmap: u64, saved_msrs: [u64; 5]) -> LinuxElfResult {
     let tmpfs_released = linux_tmpfs::teardown();
     let overlay_released = crate::linux_overlay::teardown();
     let registry_finished = linux_process::finish_runtime_process_registry();
+    let sysv_ipc_released = registry_finished && crate::linux_sysv_ipc::teardown();
     let mount_deactivated = linux_mount::deactivate_initial();
     let timer_finished = timer::finish_linux_wait_timer();
     let msrs_restored = restore_linux_syscall(saved_msrs);
@@ -9803,6 +9804,7 @@ fn finish_linux_runtime(mmap: u64, saved_msrs: [u64; 5]) -> LinuxElfResult {
         && tmpfs_released
         && overlay_released
         && registry_finished
+        && sysv_ipc_released
         && mount_deactivated
         && timer_finished
         && msrs_restored
