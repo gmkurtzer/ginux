@@ -49,7 +49,7 @@ Current totals: **198 Partial**, **28 Policy-denied**, **149 Missing**.
 | Surface | Status | Current boundary |
 |---|---|---|
 | x86-64 `SYSCALL` entry and return | Partial | Native register convention and `-errno` returns; bounded context validation. |
-| ELF64 loading | Partial | `ET_EXEC` and `ET_DYN`, bounded program-header and relocation profiles; see [Linux ELF64 Profile v0](../specs/kernel/linux-elf-v0.md). |
+| ELF64 loading | Partial | `ET_EXEC` and dynamically interpreted `ET_DYN` use bounded program-header and relocation profiles. Linux static PIE (`ET_DYN` without `PT_INTERP`, including Rocky's `ldconfig`) remains unsupported and is rejected with `ENOEXEC`; see [Linux ELF64 Profile v0](../specs/kernel/linux-elf-v0.md). |
 | Initial stack and auxiliary vector | Partial | Bounded argv/envp, selected `AT_*` entries, kernel-provided `AT_RANDOM`, and a one-page initial runtime stack that grows downward on demand; no vDSO. |
 | Dynamic loader and shared objects | Partial | Unmodified Alpine/musl and Rocky 10/glibc shells load. Rocky's dynamic coreutils `cat` and `ls` execute from the OCI root. Broader dependency, relocation, locale, and NSS coverage remains incomplete. |
 | TLS | Partial | Bounded static TLS and `arch_prctl` FS-base support. |
