@@ -42,7 +42,7 @@ implemented calls lives in [Linux Syscall Entry v0](../specs/kernel/linux-syscal
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **17 Complete**, **227 Partial**, **37 Policy-denied**, **94 Missing**.
+Current totals: **17 Complete**, **228 Partial**, **37 Policy-denied**, **93 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -361,7 +361,7 @@ therefore omitted.
 | 274 | get_robust_list | Partial |
 | 275 | splice | Missing |
 | 276 | tee | Missing |
-| 277 | sync_file_range | Missing |
+| 277 | sync_file_range | Partial |
 | 278 | vmsplice | Missing |
 | 279 | move_pages | Missing |
 | 280 | utimensat | Partial |

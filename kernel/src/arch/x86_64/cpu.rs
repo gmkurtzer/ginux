@@ -323,6 +323,7 @@ const LINUX_PSELECT6_SYSCALL: u64 = 270;
 const LINUX_PPOLL_SYSCALL: u64 = 271;
 const LINUX_SET_ROBUST_LIST_SYSCALL: u64 = 273;
 const LINUX_GET_ROBUST_LIST_SYSCALL: u64 = 274;
+const LINUX_SYNC_FILE_RANGE_SYSCALL: u64 = 277;
 const LINUX_UNSHARE_SYSCALL: u64 = 272;
 const LINUX_EPOLL_PWAIT_SYSCALL: u64 = 281;
 const LINUX_UTIMENSAT_SYSCALL: u64 = 280;
@@ -8550,6 +8551,9 @@ extern "sysv64" fn linux_syscall_handler(
                 LINUX_EBADF
             }
         }
+        LINUX_SYNC_FILE_RANGE_SYSCALL => {
+            linux_sync_file_range(first_argument, buffer, count, register(0))
+        }
         LINUX_MEMBARRIER_SYSCALL => linux_membarrier(first_argument, buffer, count),
         LINUX_WAIT4_SYSCALL => linux_wait4(first_argument, buffer, count, register(0)),
         LINUX_WAITID_SYSCALL => {
@@ -11178,6 +11182,24 @@ fn linux_msync(address: u64, length: u64, flags: u64) -> u64 {
     } else {
         LINUX_ENOMEM
     }
+}
+
+fn linux_sync_file_range(descriptor: u64, offset: u64, length: u64, flags: u64) -> u64 {
+    const SYNC_FILE_RANGE_VALID_FLAGS: u64 = 1 | 2 | 4;
+    if flags & !SYNC_FILE_RANGE_VALID_FLAGS != 0
+        || offset > i64::MAX as u64
+        || length > i64::MAX as u64
+        || offset
+            .checked_add(length)
+            .is_none_or(|end| end > i64::MAX as u64)
+    {
+        return LINUX_EINVAL;
+    }
+    let state = linux_device_descriptor(descriptor);
+    if linux_overlay_descriptor_handle(descriptor).is_none() || state & 3 == 1 {
+        return LINUX_EBADF;
+    }
+    0
 }
 
 fn linux_runtime_mprotect(address: u64, length: u64, protection: u64) -> u64 {

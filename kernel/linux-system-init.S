@@ -604,6 +604,22 @@ ginux_linux_system_init:
     cmp byte ptr [rip + .Lstatus + 4], 'd'
     jne .Lfailure
     mov rdi, r9
+    xor esi, esi
+    mov edx, 5
+    mov r10d, 7
+    mov eax, 277
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov rdi, r9
+    xor esi, esi
+    mov edx, 5
+    mov r10d, 8
+    mov eax, 277
+    syscall
+    cmp rax, -22
+    jne .Lfailure
+    mov rdi, r9
     mov eax, 3
     syscall
     test rax, rax
