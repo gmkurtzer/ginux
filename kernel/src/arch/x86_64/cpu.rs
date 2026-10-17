@@ -102,6 +102,7 @@ const LINUX_NANOSLEEP_SYSCALL: u64 = 35;
 const LINUX_GETITIMER_SYSCALL: u64 = 36;
 const LINUX_SETITIMER_SYSCALL: u64 = 38;
 const LINUX_GETPID_SYSCALL: u64 = 39;
+const LINUX_SENDFILE_SYSCALL: u64 = 40;
 const LINUX_SOCKET_SYSCALL: u64 = 41;
 const LINUX_SOCKETPAIR_SYSCALL: u64 = 53;
 const LINUX_CONNECT_SYSCALL: u64 = 42;
@@ -7375,6 +7376,7 @@ extern "sysv64" fn linux_syscall_handler(
             buffer,
             count,
         ),
+        LINUX_SENDFILE_SYSCALL => linux_sendfile(first_argument, buffer, count, register(0)),
         LINUX_PREAD64_SYSCALL => {
             linux_regular_file_read_at(first_argument, buffer, count, register(0))
         }
@@ -16069,6 +16071,23 @@ fn linux_commit_file_range_offset(
     }
 }
 
+fn linux_descriptors_same_file(
+    first: u64,
+    second: u64,
+    first_state: u16,
+    second_state: u16,
+) -> bool {
+    first == second
+        || linux_overlay_descriptor_handle(first)
+            .zip(linux_overlay_descriptor_handle(second))
+            .is_some_and(|(first, second)| first == second)
+        || (linux_oci_descriptor(first) != 0
+            && linux_oci_descriptor(first) == linux_oci_descriptor(second))
+        || linux_tmp_descriptor_handle(first, first_state)
+            .zip(linux_tmp_descriptor_handle(second, second_state))
+            .is_some_and(|(first, second)| first == second)
+}
+
 fn linux_copy_file_range(
     input: u64,
     input_offset_pointer: u64,
@@ -16105,18 +16124,7 @@ fn linux_copy_file_range(
     if input_offset_pointer != 0 && input_offset_pointer == output_offset_pointer {
         return LINUX_EINVAL;
     }
-    if input == output {
-        return LINUX_EINVAL;
-    }
-    if linux_overlay_descriptor_handle(input)
-        .zip(linux_overlay_descriptor_handle(output))
-        .is_some_and(|(input, output)| input == output)
-        || (linux_oci_descriptor(input) != 0
-            && linux_oci_descriptor(input) == linux_oci_descriptor(output))
-        || linux_tmp_descriptor_handle(input, input_state)
-            .zip(linux_tmp_descriptor_handle(output, output_state))
-            .is_some_and(|(input, output)| input == output)
-    {
+    if linux_descriptors_same_file(input, output, input_state, output_state) {
         return LINUX_EINVAL;
     }
     let (mut input_offset, explicit_input) =
@@ -16180,6 +16188,119 @@ fn linux_copy_file_range(
         } else {
             copied as u64
         };
+    }
+    if copied == 0 && terminal_error != 0 {
+        terminal_error
+    } else {
+        copied as u64
+    }
+}
+
+fn linux_sendfile(output: u64, input: u64, offset_pointer: u64, count: u64) -> u64 {
+    if !linux_descriptor_open(input) || !linux_descriptor_open(output) {
+        return LINUX_EBADF;
+    }
+    let input_state = linux_device_descriptor(input);
+    if !matches!(input_state & 3, LINUX_DESCRIPTOR_INPUT | 3) {
+        return LINUX_EBADF;
+    }
+    let input_is_regular = linux_overlay_descriptor_handle(input).is_some()
+        || linux_oci_descriptor(input) != 0
+        || linux_tmp_descriptor_handle(input, input_state).is_some();
+    if !input_is_regular {
+        return LINUX_EINVAL;
+    }
+    let output_state = linux_device_descriptor(output);
+    let output_socket = linux_socket_slot(output);
+    let output_is_regular = linux_overlay_descriptor_handle(output).is_some()
+        || linux_oci_descriptor(output) != 0
+        || linux_tmp_descriptor_handle(output, output_state).is_some();
+    if output_socket.is_none() && !output_is_regular {
+        return LINUX_EINVAL;
+    }
+    if output_is_regular && linux_descriptors_same_file(input, output, input_state, output_state) {
+        return LINUX_EINVAL;
+    }
+    if output_is_regular && !matches!(output_state & 3, LINUX_DESCRIPTOR_OUTPUT | 3) {
+        return LINUX_EBADF;
+    }
+    if output_is_regular
+        && linux_socket_flags(output).is_some_and(|flags| flags & LINUX_O_APPEND as u32 != 0)
+    {
+        return LINUX_EINVAL;
+    }
+    let (mut input_offset, explicit_offset) = match linux_file_range_offset(offset_pointer, input) {
+        Ok(offset) => offset,
+        Err(error) => return error,
+    };
+    let Ok(requested) = usize::try_from(count) else {
+        return LINUX_EINVAL;
+    };
+    if requested > isize::MAX as usize {
+        return LINUX_EINVAL;
+    }
+    let mut output_offset = if output_is_regular {
+        linux_descriptor_offset(output).load(Ordering::SeqCst) as usize
+    } else {
+        0
+    };
+    let mut buffer = [0_u8; PAGE_SIZE];
+    let mut copied = 0_usize;
+    let mut terminal_error = 0;
+    while copied < requested {
+        let chunk = (requested - copied).min(buffer.len());
+        let read = match linux_regular_file_read_kernel(input, input_offset, &mut buffer[..chunk]) {
+            Ok(read) => read,
+            Err(error) => {
+                terminal_error = error;
+                break;
+            }
+        };
+        if read == 0 {
+            break;
+        }
+        let written = if let Some(slot) = output_socket {
+            let result = if linux_socket_nonblocking(output) {
+                crate::linux_socket::send(slot, &buffer[..read], None)
+            } else {
+                crate::linux_socket::send_blocking(slot, &buffer[..read], None)
+            };
+            match result {
+                Ok(written) => written,
+                Err(error) => {
+                    terminal_error = linux_socket_error(error);
+                    break;
+                }
+            }
+        } else {
+            match linux_regular_file_write_kernel(output, output_offset, &buffer[..read]) {
+                Ok(written) => written,
+                Err(error) => {
+                    terminal_error = error;
+                    break;
+                }
+            }
+        };
+        if written == 0 {
+            break;
+        }
+        input_offset = input_offset.saturating_add(written);
+        output_offset = output_offset.saturating_add(written);
+        copied += written;
+        if written < read {
+            break;
+        }
+    }
+    if linux_commit_file_range_offset(offset_pointer, input, explicit_offset, input_offset).is_err()
+    {
+        return if copied == 0 {
+            LINUX_EFAULT
+        } else {
+            copied as u64
+        };
+    }
+    if output_is_regular {
+        linux_descriptor_offset(output).store(output_offset as u64, Ordering::SeqCst);
     }
     if copied == 0 && terminal_error != 0 {
         terminal_error

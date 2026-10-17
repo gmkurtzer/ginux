@@ -42,7 +42,7 @@ implemented calls lives in [Linux Syscall Entry v0](../specs/kernel/linux-syscal
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **206 Partial**, **28 Policy-denied**, **141 Missing**.
+Current totals: **207 Partial**, **28 Policy-denied**, **140 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -119,7 +119,7 @@ therefore omitted.
 | 37 | alarm | Missing |
 | 38 | setitimer | Partial |
 | 39 | getpid | Partial |
-| 40 | sendfile | Missing |
+| 40 | sendfile | Partial |
 | 41 | socket | Partial |
 | 42 | connect | Partial |
 | 43 | accept | Missing |

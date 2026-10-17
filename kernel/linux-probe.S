@@ -4039,6 +4039,29 @@ linux_child_joined:
     require_equal
 
     mov qword ptr [0x405380], 0
+    push 3
+    pop rdi
+    push 2
+    pop rsi
+    mov edx, 0x405380
+    push 4
+    pop r10
+    push 40
+    pop rax
+    syscall
+    cmp rax, 4
+    require_equal
+    cmp qword ptr [0x405380], 4
+    require_equal
+    push 3
+    pop rdi
+    xor esi, esi
+    xor edx, edx
+    push 8
+    pop rax
+    call syscall_expect_zero
+
+    mov qword ptr [0x405380], 0
     mov qword ptr [0x405388], 0
     push 2
     pop rdi
@@ -4058,6 +4081,13 @@ linux_child_joined:
     cmp qword ptr [0x405388], 4
     require_equal
 
+    push 3
+    pop rdi
+    xor esi, esi
+    xor edx, edx
+    push 8
+    pop rax
+    call syscall_expect_zero
     push 3
     pop rdi
     mov esi, 0x405390

@@ -47,7 +47,7 @@ native-call budget.
 
 The current profile publishes bits 0 through 15. Bits 16 through 22 remain
 unset and therefore visibly fail. The syscall ledger currently reports zero
-complete runtime probes, 206 unverified implementations, 28 policy-denied
-calls, and 141 unsupported calls. The QEMU controller test executes the full
+complete runtime probes, 207 unverified implementations, 28 policy-denied
+calls, and 140 unsupported calls. The QEMU controller test executes the full
 report, checks representative entries from every outcome, verifies continued
 controller PID 1, and shuts down without a panic.

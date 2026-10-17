@@ -760,6 +760,13 @@ and updated without changing the descriptor offset. Zero flags are required.
 The same backing file, negative offsets, non-regular descriptors, and aliased
 offset pointers return `-EINVAL`; inaccessible offsets return `-EFAULT`, and an
 append-only output returns `-EBADF`.
+`sendfile` streams a regular OCI, overlay, or tmpfs input through the same
+page-sized kernel working buffer to a writable regular file or connected
+IPv4/Unix socket. A null input-offset pointer advances the input descriptor;
+an explicit nonnegative offset is updated instead. Regular output offsets
+advance normally. Transfers may exceed one page, short socket or filesystem
+writes return the completed byte count, and a nonblocking socket preserves its
+normal `-EAGAIN` behavior. Same-file and append-file output remain rejected.
 `openat2` accepts the 24-byte version-zero `open_how` structure and delegates
 zero-resolve requests to the same per-domain VFS path as `openat`. Larger
 structures up to one page are accepted only when every extension byte is zero;
