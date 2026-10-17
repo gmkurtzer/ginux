@@ -810,6 +810,12 @@ limit remains denied. `sync` has a direct userspace conformance probe and
 succeeds after synchronizing every filesystem in the current RAM-backed and
 immutable-storage profile. `syncfs` has runtime success and bad-descriptor
 assertions and synchronizes the filesystem associated with any open descriptor.
+`sync_file_range` applies Linux's signed range validation and all combinations
+of `SYNC_FILE_RANGE_WAIT_BEFORE`, `WRITE`, and `WAIT_AFTER` to writable regular
+files. RAM-backed data is already coherent, so successful requests need no
+additional writeback. The runtime probe covers every flag bit, zero length,
+Linux 32-bit flag and descriptor narrowing, negative and overflowing ranges,
+unknown flags, and invalid descriptors.
 `fadvise64` accepts all six Linux advice values for non-pipe open descriptors;
 resident immutable and RAM-backed data already satisfies each hint. It applies
 Linux integer narrowing, rejects negative offsets and lengths or unknown advice

@@ -1266,11 +1266,92 @@ ginux_linux_system_init:
     jne .Lfailure
     mov rdi, r9
     xor esi, esi
+    xor edx, edx
+    xor r10d, r10d
+    mov eax, 277
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov rdi, r9
+    xor esi, esi
+    mov edx, 5
+    mov r10d, 1
+    mov eax, 277
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov rdi, r9
+    xor esi, esi
+    mov edx, 5
+    mov r10d, 2
+    mov eax, 277
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov rdi, r9
+    xor esi, esi
+    mov edx, 5
+    mov r10d, 4
+    mov eax, 277
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov rdi, r9
+    xor esi, esi
+    mov edx, 5
+    mov r10, 0x100000007
+    mov eax, 277
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov rdi, 0x100000000
+    or rdi, r9
+    xor esi, esi
+    mov edx, 5
+    xor r10d, r10d
+    mov eax, 277
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov rdi, r9
+    xor esi, esi
     mov edx, 5
     mov r10d, 8
     mov eax, 277
     syscall
     cmp rax, -22
+    jne .Lfailure
+    mov rdi, r9
+    mov rsi, -1
+    mov edx, 5
+    xor r10d, r10d
+    mov eax, 277
+    syscall
+    cmp rax, -22
+    jne .Lfailure
+    mov rdi, r9
+    xor esi, esi
+    mov rdx, -1
+    xor r10d, r10d
+    mov eax, 277
+    syscall
+    cmp rax, -22
+    jne .Lfailure
+    mov rdi, r9
+    mov rsi, 0x7fffffffffffffff
+    mov edx, 1
+    xor r10d, r10d
+    mov eax, 277
+    syscall
+    cmp rax, -22
+    jne .Lfailure
+    mov rdi, -1
+    xor esi, esi
+    mov edx, 5
+    xor r10d, r10d
+    mov eax, 277
+    syscall
+    cmp rax, -9
     jne .Lfailure
     mov edi, 1
     mov esi, 1

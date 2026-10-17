@@ -14923,6 +14923,8 @@ fn linux_msync(address: u64, length: u64, flags: u64) -> u64 {
 
 fn linux_sync_file_range(descriptor: u64, offset: u64, length: u64, flags: u64) -> u64 {
     const SYNC_FILE_RANGE_VALID_FLAGS: u64 = 1 | 2 | 4;
+    let descriptor = u64::from(descriptor as u32);
+    let flags = u64::from(flags as u32);
     if flags & !SYNC_FILE_RANGE_VALID_FLAGS != 0
         || offset > i64::MAX as u64
         || length > i64::MAX as u64
