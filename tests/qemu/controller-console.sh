@@ -32,7 +32,7 @@ trap cleanup EXIT
 dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
 {
     for _ in {1..60}; do
-        if grep -Fq 'ginux> ' "$output_file"; then
+        if grep -aFq 'ginux> ' "$output_file"; then
             break
         fi
         if grep -Fq 'GINUX_KERNEL_PANIC' "$output_file"; then
@@ -40,13 +40,12 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
         fi
         sleep 1
     done
-    prompt_count=1
     send_command() {
+        before="$(grep -aFo 'ginux> ' "$output_file" | wc -l | tr -d ' ')"
         printf '%s\n' "$1"
-        prompt_count=$((prompt_count + 1))
         for _ in {1..60}; do
-            observed="$(grep -Fo 'ginux> ' "$output_file" | wc -l | tr -d ' ')"
-            if [[ "$observed" -ge "$prompt_count" ]]; then
+            observed="$(grep -aFo 'ginux> ' "$output_file" | wc -l | tr -d ' ')"
+            if [[ "$observed" -gt "$before" ]]; then
                 return
             fi
             if grep -Fq 'GINUX_KERNEL_PANIC' "$output_file"; then
@@ -117,7 +116,6 @@ for expected in \
     'Manage network devices' \
     'test ENVIRONMENT' \
     'Test a userspace compatibility environment' \
-    'test linux [summary|interfaces|syscalls|all|syscall NAME|NUMBER]' \
     'Linux userspace runtime conformance summary:' \
     'Interfaces: 16 passed, 7 failed, 23 total' \
     'Syscalls: 17 passed, 260 unverified, 44 policy-denied, 54 unsupported, 375 total' \

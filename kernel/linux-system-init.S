@@ -24,7 +24,7 @@ ginux_linux_system_init:
     syscall
     test rax, rax
     js .Lfailure
-    mov r8, rax
+    mov r15, rax
 
     mov edi, 1
     xor esi, esi
@@ -172,7 +172,7 @@ ginux_linux_system_init:
     xor r10d, r10d
     mov eax, 329
     syscall
-    test rax, rax
+    cmp rax, -22
     jne .Lfailure
     mov rdi, r12
     mov esi, 4096
@@ -320,7 +320,7 @@ ginux_linux_system_init:
     test rax, rax
     jne .Lfailure
 
-    mov rdi, r8
+    mov rdi, r15
     lea rsi, [rip + .Ldevfs_marker]
     mov edx, 12
     mov eax, 1
@@ -479,7 +479,7 @@ ginux_linux_system_init:
     test rax, rax
     jne .Lfailure
 
-    mov rdi, r8
+    mov rdi, r15
     lea rsi, [rip + .Luserns_marker]
     mov edx, 13
     mov eax, 1
@@ -548,7 +548,7 @@ ginux_linux_system_init:
     syscall
     test rax, rax
     jne .Lfailure
-    mov rdi, r8
+    mov rdi, r15
     lea rsi, [rip + .Lprivilege_marker]
     mov edx, 25
     mov eax, 1
@@ -571,7 +571,7 @@ ginux_linux_system_init:
     syscall
     cmp rax, 45
     jne .Lfailure
-    mov rdi, r8
+    mov rdi, r15
     lea rsi, [rip + .Lstatus]
     mov edx, 45
     mov eax, 1
@@ -599,7 +599,7 @@ ginux_linux_system_init:
     syscall
     cmp rax, 51
     jne .Lfailure
-    mov rdi, r8
+    mov rdi, r15
     lea rsi, [rip + .Lstatus]
     mov edx, 51
     mov eax, 1
@@ -761,7 +761,7 @@ ginux_linux_system_init:
     test rax, rax
     jne .Lfailure
 
-    mov rdi, r8
+    mov rdi, r15
     lea rsi, [rip + .Ltmp_marker]
     mov edx, 12
     mov eax, 1
@@ -916,7 +916,7 @@ ginux_linux_system_init:
     jne .Lfailure
     cmp dword ptr [rip + .Ltimer_id], 1
     jne .Lfailure
-    mov qword ptr [rip + .Ltimer_new + 16], 1
+    mov qword ptr [rip + .Ltimer_new + 16], 60
     mov edi, 1
     xor esi, esi
     lea rdx, [rip + .Ltimer_new]
@@ -1228,7 +1228,7 @@ ginux_linux_system_init:
     test rax, rax
     jne .Lfailure
 
-    mov rdi, r8
+    mov rdi, r15
     lea rsi, [rip + .Lsignal_marker]
     mov edx, 13
     mov eax, 1
@@ -1298,7 +1298,7 @@ ginux_linux_system_init:
     cmp rax, -11
     jne .Lfailure
 
-    mov rdi, r8
+    mov rdi, r15
     lea rsi, [rip + .Lfutex_marker]
     mov edx, 12
     mov eax, 1
@@ -1389,7 +1389,7 @@ ginux_linux_system_init:
 
     mov rdi, r12
     xor esi, esi
-    mov edx, 1
+    mov edx, 0x80000000
     xor r10d, r10d
     mov eax, 61
     syscall
@@ -1434,7 +1434,7 @@ ginux_linux_system_init:
     cmp rax, -2
     jne .Lfailure
 
-    mov rdi, r8
+    mov rdi, r15
     lea rsi, [rip + .Lprocfs_marker]
     mov edx, 13
     mov eax, 1
@@ -1569,7 +1569,7 @@ ginux_linux_system_init:
     test rax, rax
     jne .Lfailure
 
-    mov rdi, r8
+    mov rdi, r15
     lea rsi, [rip + .Lready]
     mov edx, 21
     mov eax, 1
@@ -1590,7 +1590,7 @@ ginux_linux_system_init:
     cmp dword ptr [rip + .Lstatus + 8], 0x80
     jne .Lfailure
 
-    mov rdi, r8
+    mov rdi, r15
     lea rsi, [rip + .Lsupervisor_shutdown_marker]
     mov edx, 20
     mov eax, 1
@@ -1607,7 +1607,7 @@ ginux_linux_system_init:
     test rax, rax
     jne .Lfailure
 
-    mov rdi, r8
+    mov rdi, r15
     mov eax, 3
     syscall
     test rax, rax

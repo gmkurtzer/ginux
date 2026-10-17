@@ -149,7 +149,7 @@ impl ProcessExecutionContext {
                 mapping.writable
                     && start
                         .checked_add(PAGE_SIZE as u64)
-                        .is_some_and(|end| self.rsp > start && self.rsp <= end)
+                        .is_some_and(|end| self.rsp >= start && self.rsp <= end)
             })
         });
         if !executable {
@@ -2141,6 +2141,26 @@ pub(crate) fn complete_live_child_exit(pid: u32, status: u8) -> Option<LiveProce
     if !address_space::retire_linux_child_address_space(child_space.root()) {
         LIVE_FORK_EXECUTION_STAGE.store(162, Ordering::Release);
         return None;
+    }
+    for mapping in child_space.mappings() {
+        if memory::frames_owned_by(memory::FrameOwner::KERNEL, &[mapping.frame])
+            && !memory::scrub_and_release_frames(
+                memory::FrameOwner::KERNEL,
+                core::slice::from_ref(&mapping.frame),
+            )
+        {
+            return None;
+        }
+    }
+    for frame in child_space.hierarchy() {
+        if memory::frames_owned_by(memory::FrameOwner::KERNEL, &[*frame])
+            && !memory::scrub_and_release_frames(
+                memory::FrameOwner::KERNEL,
+                core::slice::from_ref(frame),
+            )
+        {
+            return None;
+        }
     }
     LIVE_FORK_EXECUTION_STAGE.store(163, Ordering::Release);
     if !table.exit_after_current_address_space_retired(child_handle, status) {
