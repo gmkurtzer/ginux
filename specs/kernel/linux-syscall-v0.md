@@ -981,13 +981,23 @@ preserves page protections when in-place growth is impossible, while
 Relocation rollback restores every page to its source range on a failed move.
 File-backed growth and `MREMAP_DONTUNMAP` remain unsupported. The boot probe
 profile continues to reject `mremap` with `-ENOSYS`.
+`rax = 462` (`__NR_mseal`) irreversibly seals complete page-rounded ranges in
+the bounded anonymous scratch window and the runtime dynamic mapping region.
+The operation preflights every page before changing state, is idempotent, and
+requires zero flags plus a page-aligned start. A gap returns `-ENOMEM`; invalid
+flags, alignment, or overflow return `-EINVAL`. A sealed range rejects
+`mprotect`, `pkey_mprotect`, `munmap`, `mremap`, and `MAP_FIXED` replacement
+with `-EPERM`. `MADV_DONTNEED` is rejected for sealed read-only anonymous pages
+and remains permitted for sealed writable pages, following Linux 6.12's
+destructive-advice rule. Sealing executable-image, stack, heap, and other
+non-`mmap` VMAs is not yet supported.
 `rax = 28` (`__NR_madvise`) accepts only `MADV_DONTNEED` for a fully mapped
 nonzero range rounding to one through four anonymous pages. The range may cross adjacent registry
 records. Immutable-file mappings and `PROT_NONE` reservations reject advice
 with `-EINVAL`. For an anonymous
 range it validates that every leaf still maps its allocator-owned frame, then
 zeros the frames through the supervisor direct map without changing their
-present, user, NX, or writable state. The proof also discards a sealed one-page
+present, user, NX, or writable state. The proof also discards a protected one-page
 read-only mapping, observes zeroes from ring 3, and unmaps it normally. Other
 advice, ranges, or inactive mappings return `-EINVAL` without changing the
 contents. There is no paging policy, reclamation queue, or lazy refill.

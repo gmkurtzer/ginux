@@ -265,6 +265,69 @@ ginux_linux_system_init:
     cmp rax, -22
     jne .Lfailure
 
+    xor edi, edi
+    mov esi, 4096
+    mov edx, 3
+    mov r10d, 0x22
+    mov r8, -1
+    xor r9d, r9d
+    mov eax, 9
+    syscall
+    test rax, rax
+    js .Lfailure
+    mov r12, rax
+    mov rdi, rax
+    mov esi, 1
+    mov edx, 1
+    mov eax, 462
+    syscall
+    cmp rax, -22
+    jne .Lfailure
+    mov rdi, r12
+    mov esi, 1
+    xor edx, edx
+    mov eax, 462
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov rdi, r12
+    mov esi, 4096
+    xor edx, edx
+    mov eax, 462
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov rdi, r12
+    mov esi, 4096
+    mov edx, 1
+    mov eax, 10
+    syscall
+    cmp rax, -1
+    jne .Lfailure
+    mov rdi, r12
+    mov esi, 4096
+    mov eax, 11
+    syscall
+    cmp rax, -1
+    jne .Lfailure
+    mov rdi, r12
+    mov esi, 4096
+    mov edx, 3
+    mov r10d, 0x32
+    mov r8, -1
+    xor r9d, r9d
+    mov eax, 9
+    syscall
+    cmp rax, -1
+    jne .Lfailure
+    mov edi, 0x1000
+    mov esi, 1
+    xor edx, edx
+    mov eax, 462
+    syscall
+    cmp rax, -12
+    jne .Lfailure
+
     lea rdi, [rip + .Lpipe_pair]
     mov eax, 22
     syscall

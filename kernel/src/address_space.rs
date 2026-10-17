@@ -121,6 +121,7 @@ const NO_EXECUTE: u64 = 1 << 63;
 const LINUX_RUNTIME_FILE: u64 = 1 << 9;
 const LINUX_RUNTIME_RESERVED: u64 = 1 << 10;
 const LINUX_RUNTIME_DEMAND: u64 = 1 << 11;
+const LINUX_RUNTIME_SEALED: u64 = 1 << 12;
 const LINUX_INIT_ARGUMENT: [u8; 6] = [b'/', b'i', b'n', b'i', b't', 0];
 const LINUX_INIT_ENVIRONMENT: [u8; 8] = [b'G', b'I', b'N', b'U', b'X', b'=', b'1', 0];
 const LINUX_PLATFORM: [u8; 7] = [b'x', b'8', b'6', b'_', b'6', b'4', 0];
@@ -4663,6 +4664,7 @@ pub(crate) struct LinuxRuntimePage {
     pub(crate) frame: Option<memory::FrameLease>,
     pub(crate) protection: u8,
     pub(crate) file: bool,
+    pub(crate) sealed: bool,
 }
 
 impl LinuxRuntimePage {
@@ -4671,6 +4673,7 @@ impl LinuxRuntimePage {
         frame: None,
         protection: 0,
         file: false,
+        sealed: false,
     };
 }
 
@@ -4692,6 +4695,7 @@ fn linux_runtime_page_from_value(value: u64) -> LinuxRuntimePage {
         frame,
         protection,
         file: value & LINUX_RUNTIME_FILE != 0,
+        sealed: value & LINUX_RUNTIME_SEALED != 0,
     }
 }
 
@@ -4761,7 +4765,7 @@ pub(crate) fn install_current_linux_runtime_page(
     }
     let entry = ensure_current_linux_leaf(address)?;
     let old = linux_runtime_page_from_value(unsafe { entry.read() });
-    if old.occupied && !replace {
+    if old.occupied && (!replace || old.sealed) {
         return None;
     }
     let flags = PRESENT
@@ -4793,7 +4797,7 @@ pub(crate) fn reserve_current_linux_runtime_page(
     }
     let entry = ensure_current_linux_leaf(address)?;
     let old = linux_runtime_page_from_value(unsafe { entry.read() });
-    if old.occupied && !replace {
+    if old.occupied && (!replace || old.sealed) {
         return None;
     }
     let value = LINUX_RUNTIME_RESERVED
@@ -4836,7 +4840,7 @@ pub(crate) fn protect_current_linux_runtime_page(address: u64, protection: u8) -
     };
     let old_value = unsafe { entry.read() };
     let old = linux_runtime_page_from_value(old_value);
-    if !old.occupied {
+    if !old.occupied || old.sealed {
         return false;
     }
     let value = match old.frame {
@@ -4873,6 +4877,57 @@ pub(crate) fn protect_current_linux_runtime_page(address: u64, protection: u8) -
         asm!("invlpg [{}]", in(reg) address, options(nostack, preserves_flags));
     }
     linux_runtime_page_from_value(unsafe { entry.read() }).protection == protection
+}
+
+pub(crate) fn seal_current_linux_runtime_page(address: u64) -> bool {
+    let Some(entry) = current_linux_leaf(address) else {
+        return false;
+    };
+    let value = unsafe { entry.read() };
+    if !linux_runtime_page_from_value(value).occupied {
+        return false;
+    }
+    unsafe {
+        entry.write(value | LINUX_RUNTIME_SEALED);
+        asm!("invlpg [{}]", in(reg) address, options(nostack, preserves_flags));
+    }
+    linux_runtime_page_from_value(unsafe { entry.read() }).sealed
+}
+
+pub(crate) fn materialize_current_linux_runtime_page(
+    address: u64,
+    frame: memory::FrameLease,
+    protection: u8,
+    file: bool,
+) -> bool {
+    if !matches!(protection, 1 | 3 | 5)
+        || !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[frame])
+    {
+        return false;
+    }
+    let Some(entry) = current_linux_leaf(address) else {
+        return false;
+    };
+    let old = linux_runtime_page_from_value(unsafe { entry.read() });
+    if !old.occupied || old.frame.is_some() || old.protection != protection || old.file != file {
+        return false;
+    }
+    let value = frame.address()
+        | PRESENT
+        | USER
+        | if protection & 2 != 0 { WRITABLE } else { 0 }
+        | if protection & 4 != 0 { 0 } else { NO_EXECUTE }
+        | if file { LINUX_RUNTIME_FILE } else { 0 }
+        | if old.sealed { LINUX_RUNTIME_SEALED } else { 0 };
+    unsafe {
+        entry.write(value);
+        asm!("invlpg [{}]", in(reg) address, options(nostack, preserves_flags));
+    }
+    let current = linux_runtime_page_from_value(unsafe { entry.read() });
+    current.frame == Some(frame)
+        && current.protection == protection
+        && current.file == file
+        && current.sealed == old.sealed
 }
 
 pub(crate) fn release_current_linux_runtime_mappings(base: u64) -> bool {

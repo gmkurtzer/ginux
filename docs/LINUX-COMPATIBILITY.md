@@ -42,7 +42,7 @@ Detailed bounded behavior for implemented calls lives in
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **19 Complete**, **260 Partial**, **44 Policy-denied**, **52 Missing**.
+Current totals: **19 Complete**, **261 Partial**, **44 Policy-denied**, **51 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -466,7 +466,7 @@ therefore omitted.
 | 459 | lsm_get_self_attr | Missing |
 | 460 | lsm_set_self_attr | Missing |
 | 461 | lsm_list_modules | Missing |
-| 462 | mseal | Missing |
+| 462 | mseal | Partial |
 
 ## Completion requirements
 
