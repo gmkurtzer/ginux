@@ -42,7 +42,7 @@ Detailed bounded behavior for implemented calls lives in
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **39 Complete**, **288 Partial**, **48 Policy-denied**, **0 Missing**.
+Current totals: **41 Complete**, **286 Partial**, **48 Policy-denied**, **0 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -330,8 +330,8 @@ therefore omitted.
 | 200 | tkill | Partial |
 | 201 | time | Partial |
 | 202 | futex | Partial |
-| 203 | sched_setaffinity | Partial |
-| 204 | sched_getaffinity | Partial |
+| 203 | sched_setaffinity | Complete |
+| 204 | sched_getaffinity | Complete |
 | 205 | set_thread_area | Complete |
 | 206 | io_setup | Partial |
 | 207 | io_destroy | Partial |

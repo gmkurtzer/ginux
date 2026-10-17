@@ -669,13 +669,17 @@ new-limit pointer returns `-EPERM`. Output is copied only after the full
 declared ELF extent returns `-EFAULT` without a partial write. The syscall
 entry uses an internal value outside Linux's `-1..-4095` errno range to return
 to the kernel, keeping Linux `-EPERM` observable in ring 3.
-`rax = 204` (`__NR_sched_getaffinity`) accepts PID 0 or 1, requires an
-eight-byte-or-larger caller mask, writes the one-bit CPU 0 mask, and returns 8.
-An unknown PID returns `-ESRCH`, an undersized mask returns `-EINVAL`, and an
-invalid output range returns `-EFAULT` without a partial write.
-`sched_setaffinity` accepts only an idempotent CPU-0 mask with the same PID and
-size rules; a different mask returns `-EINVAL`, and an invalid input returns
-`-EFAULT`. `rax = 309`
+`rax = 204` (`__NR_sched_getaffinity`) accepts any live process visible in the
+domain, requires a nonzero, eight-byte-aligned caller size large enough for the
+single active CPU, writes the one-bit CPU 0 mask, and returns 8. An unknown or
+negative PID returns `-ESRCH`, an invalid size returns `-EINVAL` before process
+lookup, and an invalid output range returns `-EFAULT` without a partial write.
+`sched_setaffinity` copies up to the kernel's eight-byte CPU mask before process
+lookup, accepts every caller size whose supplied mask includes active CPU 0,
+and ignores unavailable higher CPU bits as Linux does. A mask excluding CPU 0
+returns `-EINVAL`; invalid input returns `-EFAULT`, including before an unknown
+PID is reported. Both calls preserve Linux's 32-bit `cpusetsize` argument
+conversion. `rax = 309`
 (`__NR_getcpu`) reports CPU 0 and NUMA node 0 through independently optional
 four-byte pointers. Both destinations are validated before either is written;
 the obsolete cache pointer is ignored as on Linux. These results describe the
@@ -766,7 +770,9 @@ invalid complete output returns `-EFAULT` without a partial write. This is
 single-task compatibility accounting, not scheduler-derived usage accounting.
 `sysinfo` publishes the same one-GiB, no-swap memory profile exposed through
 the current procfs compatibility files plus monotonic uptime and one process.
-`sched_rr_get_interval` reports a 100 ms quantum for the current process.
+`sched_rr_get_interval` reports the bounded scheduler's 100 ms quantum for any
+live process visible in the domain and matches Linux's negative-PID,
+retired-PID, and output-fault ordering.
 Because Ginux has no swap or page reclaim path, `mlock`, `mlock2`, `munlock`,
 `mlockall`, and `munlockall` validate their admitted arguments and mapped
 ranges but require no additional residency state. `setrlimit` accepts an
@@ -1689,7 +1695,7 @@ bounded anonymous and immutable-file `mmap`/`munmap` plus bounded
 `getrlimit`/`prlimit64`,
 bounded one-waiter `futex`,
 `sched_yield`, bounded scheduler-policy queries, complete scheduler priority
-range queries, `sched_getaffinity`, `getcpu`,
+range and single-CPU affinity queries/updates, `getcpu`,
 bounded `clock_gettime`/`clock_getres`/`times`/`getrusage`, disabled
 `getitimer`/`setitimer`, bounded `nanosleep`,
 `arch_prctl(ARCH_SET_FS/ARCH_GET_FS)`,

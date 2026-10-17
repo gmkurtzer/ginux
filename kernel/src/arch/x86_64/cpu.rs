@@ -8846,35 +8846,8 @@ extern "sysv64" fn linux_syscall_handler(
             }
             0
         }
-        LINUX_SCHED_SETAFFINITY_SYSCALL => {
-            if !matches!(first_argument, 0 | 1) {
-                return LINUX_ESRCH;
-            }
-            if buffer < size_of::<u64>() as u64 {
-                return LINUX_EINVAL;
-            }
-            let mut mask = [0_u8; size_of::<u64>()];
-            if !copy_from_linux_user(count, &mut mask) {
-                return LINUX_EFAULT;
-            }
-            if u64::from_ne_bytes(mask) == 1 {
-                0
-            } else {
-                LINUX_EINVAL
-            }
-        }
-        LINUX_SCHED_GETAFFINITY_SYSCALL => {
-            if !matches!(first_argument, 0 | 1) {
-                return LINUX_ESRCH;
-            }
-            if buffer < size_of::<u64>() as u64 {
-                return LINUX_EINVAL;
-            }
-            if !copy_to_linux_user(count, &1_u64.to_ne_bytes()) {
-                return LINUX_EFAULT;
-            }
-            size_of::<u64>() as u64
-        }
+        LINUX_SCHED_SETAFFINITY_SYSCALL => linux_sched_setaffinity(first_argument, buffer, count),
+        LINUX_SCHED_GETAFFINITY_SYSCALL => linux_sched_getaffinity(first_argument, buffer, count),
         LINUX_GETCPU_SYSCALL => {
             if !copy_linux_cpu_location(first_argument, buffer) {
                 return LINUX_EFAULT;
@@ -12730,6 +12703,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let io_uring = verify_linux_io_uring_syscalls();
     let scheduler_priorities = verify_linux_scheduler_priority_ranges();
     let scheduler_queries = verify_linux_scheduler_queries();
+    let scheduler_affinity = verify_linux_scheduler_affinity();
     let mappings_released =
         address_space::release_current_linux_runtime_mappings(LINUX_RUNTIME_DYNAMIC_MMAP_BASE);
     ELF_PROBE_MMAP_NEXT.store(LINUX_RUNTIME_DYNAMIC_MMAP_BASE, Ordering::SeqCst);
@@ -12757,6 +12731,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && io_uring
         && scheduler_priorities
         && scheduler_queries
+        && scheduler_affinity
         && mappings_released
 }
 
@@ -12810,6 +12785,54 @@ fn verify_linux_scheduler_queries() -> bool {
         && linux_sched_getparam(current, 1) == LINUX_EFAULT;
     let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
     parameter && unmapped
+}
+
+fn verify_linux_scheduler_affinity() -> bool {
+    let mapping = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    if !(LINUX_RUNTIME_DYNAMIC_MMAP_BASE..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
+        .contains(&mapping)
+    {
+        return false;
+    }
+    let current = u64::from(current_linux_process_pid());
+    let sentinel = [0xa5_u8; 16];
+    let mut observed = [0_u8; 16];
+    let get = copy_to_linux_user(mapping, &sentinel)
+        && linux_sched_getaffinity(0, 8, mapping) == 8
+        && copy_from_linux_user(mapping, &mut observed)
+        && observed[..8] == 1_u64.to_ne_bytes()
+        && observed[8..] == sentinel[8..]
+        && linux_sched_getaffinity(current, 16, mapping) == 8
+        && linux_sched_getaffinity(2, 7, mapping) == LINUX_EINVAL
+        && linux_sched_getaffinity(current, 0x2000_0000, mapping) == LINUX_EINVAL
+        && linux_sched_getaffinity(2, 8, mapping) == LINUX_ESRCH
+        && linux_sched_getaffinity(u64::MAX, 8, mapping) == LINUX_ESRCH
+        && linux_sched_getaffinity(current, 8, 1) == LINUX_EFAULT;
+    let set = copy_to_linux_user(mapping, &1_u64.to_ne_bytes())
+        && linux_sched_setaffinity(0, 8, mapping) == 0
+        && linux_sched_setaffinity(current, 1, mapping) == 0
+        && copy_to_linux_user(mapping, &3_u64.to_ne_bytes())
+        && linux_sched_setaffinity(current, 8, mapping) == 0
+        && copy_to_linux_user(mapping, &2_u64.to_ne_bytes())
+        && linux_sched_setaffinity(current, 8, mapping) == LINUX_EINVAL
+        && linux_sched_setaffinity(current, 8, 1) == LINUX_EFAULT
+        && linux_sched_setaffinity(2, 8, 1) == LINUX_EFAULT
+        && linux_sched_setaffinity(2, 8, mapping) == LINUX_ESRCH
+        && linux_sched_setaffinity(2, 0, 0) == LINUX_ESRCH
+        && linux_sched_setaffinity(current, 0, 0) == LINUX_EINVAL;
+    let interval = linux_sched_rr_get_interval(current, mapping) == 0
+        && linux_sched_rr_get_interval(2, 1) == LINUX_ESRCH
+        && linux_sched_rr_get_interval(u64::MAX, mapping) == LINUX_EINVAL
+        && linux_sched_rr_get_interval(current, 1) == LINUX_EFAULT;
+    let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
+    get && set && interval && unmapped
 }
 
 fn verify_linux_io_uring_syscalls() -> bool {
@@ -26151,8 +26174,8 @@ fn linux_sched_getparam(pid: u64, address: u64) -> u64 {
 }
 
 fn linux_sched_rr_get_interval(pid: u64, address: u64) -> u64 {
-    if !matches!(pid, 0 | 1) {
-        return LINUX_ESRCH;
+    if let Err(error) = linux_scheduler_process(pid) {
+        return error;
     }
     let mut interval = [0_u8; 16];
     interval[8..].copy_from_slice(&100_000_000_u64.to_ne_bytes());
@@ -26160,6 +26183,51 @@ fn linux_sched_rr_get_interval(pid: u64, address: u64) -> u64 {
         0
     } else {
         LINUX_EFAULT
+    }
+}
+
+fn linux_affinity_process(pid: u64) -> Result<u32, u64> {
+    let pid = pid as i32;
+    let pid = if pid == 0 {
+        current_linux_process_pid()
+    } else if pid > 0 {
+        pid as u32
+    } else {
+        return Err(LINUX_ESRCH);
+    };
+    linux_process::live_process_status(pid)
+        .map(|_| pid)
+        .ok_or(LINUX_ESRCH)
+}
+
+fn linux_sched_getaffinity(pid: u64, length: u64, address: u64) -> u64 {
+    let length = length as u32;
+    if length.wrapping_mul(8) < 1 || length & (size_of::<u64>() as u32 - 1) != 0 {
+        return LINUX_EINVAL;
+    }
+    if let Err(error) = linux_affinity_process(pid) {
+        return error;
+    }
+    if copy_to_linux_user(address, &1_u64.to_ne_bytes()) {
+        size_of::<u64>() as u64
+    } else {
+        LINUX_EFAULT
+    }
+}
+
+fn linux_sched_setaffinity(pid: u64, length: u64, address: u64) -> u64 {
+    let length = (length as u32).min(size_of::<u64>() as u32) as usize;
+    let mut mask = [0_u8; size_of::<u64>()];
+    if length != 0 && !copy_from_linux_user(address, &mut mask[..length]) {
+        return LINUX_EFAULT;
+    }
+    if let Err(error) = linux_affinity_process(pid) {
+        return error;
+    }
+    if u64::from_ne_bytes(mask) & 1 == 1 {
+        0
+    } else {
+        LINUX_EINVAL
     }
 }
 
