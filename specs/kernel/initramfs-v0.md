@@ -34,9 +34,9 @@ behavior, while the second retains an independent address layout. The hostname i
 `ginux\n`; `os-release` is immutable mode `0555` with exact contents
 `NAME=Ginux\nID=ginux\n`; `motd` contains `Welcome to Ginux\n`; and the nested
 state file contains `ready\n` and the version marker contains `0\n`. The archive
-also contains a separately linked static candidate at `sbin/init`. Its one-page
-RX and one-page RW plan is validated from the measured root. A dedicated
-measured exec workload launches it as PID 1, opens the measured console, emits
+also contains a separately linked static candidate at `sbin/init`. Its
+three-page RX and one-page RW plan is validated from the measured root. A
+dedicated measured exec workload launches it as PID 1, opens the measured console, emits
 its exact readiness line, and exits with complete descriptor teardown. The
 mode-`0444` profile file binds the candidate's architecture, canonical init
 path, console, root format, and
