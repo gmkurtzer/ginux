@@ -45,9 +45,8 @@ completed, one syscall at a time moves from UNVERIFIED to PASS. All output uses
 bounded buffered console writes so the diagnostic cannot exhaust its
 native-call budget.
 
-The current profile publishes bits 0 through 15. Bits 16 through 22 remain
-unset and therefore visibly fail. The syscall ledger currently reports 17
-complete runtime probes, 214 unverified implementations, 37 policy-denied
-calls, and 107 unsupported calls. The QEMU controller test executes the full
-report, checks representative entries from every outcome, verifies continued
-controller PID 1, and shuts down without a panic.
+The current profile publishes 17 of the 23 interface bits. The syscall ledger
+currently reports 27 complete runtime probes, 300 unverified implementations,
+48 policy-denied calls, and no unsupported calls. The QEMU controller test
+executes the full report, checks representative entries from every outcome,
+verifies continued controller PID 1, and shuts down without a panic.

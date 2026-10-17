@@ -42,7 +42,7 @@ Detailed bounded behavior for implemented calls lives in
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **19 Complete**, **308 Partial**, **48 Policy-denied**, **0 Missing**.
+Current totals: **27 Complete**, **300 Partial**, **48 Policy-denied**, **0 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -166,7 +166,7 @@ therefore omitted.
 | 36 | getitimer | Partial |
 | 37 | alarm | Partial |
 | 38 | setitimer | Partial |
-| 39 | getpid | Partial |
+| 39 | getpid | Complete |
 | 40 | sendfile | Partial |
 | 41 | socket | Partial |
 | 42 | connect | Partial |
@@ -190,7 +190,7 @@ therefore omitted.
 | 60 | exit | Partial |
 | 61 | wait4 | Partial |
 | 62 | kill | Partial |
-| 63 | uname | Partial |
+| 63 | uname | Complete |
 | 64 | semget | Partial |
 | 65 | semop | Partial |
 | 66 | semctl | Partial |
@@ -229,15 +229,15 @@ therefore omitted.
 | 99 | sysinfo | Partial |
 | 100 | times | Partial |
 | 101 | ptrace | Policy-denied |
-| 102 | getuid | Partial |
+| 102 | getuid | Complete |
 | 103 | syslog | Policy-denied |
-| 104 | getgid | Partial |
+| 104 | getgid | Complete |
 | 105 | setuid | Policy-denied |
 | 106 | setgid | Policy-denied |
-| 107 | geteuid | Partial |
-| 108 | getegid | Partial |
+| 107 | geteuid | Complete |
+| 108 | getegid | Complete |
 | 109 | setpgid | Partial |
-| 110 | getppid | Partial |
+| 110 | getppid | Complete |
 | 111 | getpgrp | Partial |
 | 112 | setsid | Partial |
 | 113 | setreuid | Policy-denied |
@@ -313,7 +313,7 @@ therefore omitted.
 | 183 | afs_syscall | Complete |
 | 184 | tuxcall | Complete |
 | 185 | security | Complete |
-| 186 | gettid | Partial |
+| 186 | gettid | Complete |
 | 187 | readahead | Partial |
 | 188 | setxattr | Partial |
 | 189 | lsetxattr | Partial |
