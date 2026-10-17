@@ -141,6 +141,7 @@ const LINUX_CLONE_CHILD_CLEARTID: u64 = 0x0020_0000;
 const LINUX_CLONE_CHILD_SETTID: u64 = 0x0100_0000;
 const LINUX_SIGCHLD: u64 = 17;
 const LINUX_SIGILL: u64 = 4;
+const LINUX_SIGKILL: u64 = 9;
 const LINUX_BOUNDED_THREAD_CLONE_FLAGS: u64 = LINUX_CLONE_VM
     | LINUX_CLONE_FS
     | LINUX_CLONE_FILES
@@ -415,6 +416,7 @@ const LINUX_MEMFD_CREATE_SYSCALL: u64 = 319;
 const LINUX_MEMFD_SECRET_SYSCALL: u64 = 447;
 const LINUX_RSEQ_SYSCALL: u64 = 334;
 const LINUX_URETPROBE_SYSCALL: u64 = 335;
+const LINUX_SECCOMP_SYSCALL: u64 = 317;
 const LINUX_IO_PGETEVENTS_SYSCALL: u64 = 333;
 const LINUX_PKEY_MPROTECT_SYSCALL: u64 = 329;
 const LINUX_PKEY_ALLOC_SYSCALL: u64 = 330;
@@ -1402,6 +1404,7 @@ static LINUX_RUNTIME_SYSCALL_RESULT_TRACE: [BankedAtomicU64; LINUX_RUNTIME_SYSCA
     [const { BankedAtomicU64::new(0) }; LINUX_RUNTIME_SYSCALL_TRACE_LIMIT];
 static LINUX_RUNTIME_SYSCALL_TRACE_COUNT: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_NO_NEW_PRIVS: BankedAtomicBool = BankedAtomicBool::new(false);
+static ELF_PROBE_SECCOMP_STRICT: BankedAtomicBool = BankedAtomicBool::new(false);
 static ELF_PROBE_SIGNAL_MASK: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_PENDING_SIGNALS: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_PENDING_SIGNAL_CODES: [BankedAtomicU32; LINUX_SIGNAL_COUNT] =
@@ -5930,6 +5933,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         result.store(0, Ordering::SeqCst);
     }
     ELF_PROBE_NO_NEW_PRIVS.store(false, Ordering::SeqCst);
+    ELF_PROBE_SECCOMP_STRICT.store(false, Ordering::SeqCst);
     store_current_linux_signal_mask(0);
     ELF_PROBE_PENDING_SIGNALS.store(0, Ordering::SeqCst);
     ELF_PROBE_EXEC_IGNORED_SIGNALS.store(0, Ordering::SeqCst);
@@ -7692,6 +7696,15 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_PARENT_RESUMED.store(true, Ordering::SeqCst);
     }
     expire_linux_waits();
+    if ELF_PROBE_SECCOMP_STRICT.load(Ordering::SeqCst)
+        && !linux_seccomp_strict_syscall_allowed(number)
+    {
+        let result = linux_terminate_by_default_signal(LINUX_SIGKILL);
+        if let Some(index) = trace_index {
+            LINUX_RUNTIME_SYSCALL_RESULT_TRACE[index].store(result, Ordering::SeqCst);
+        }
+        return result;
+    }
     let result = match number {
         LINUX_READ_SYSCALL => linux_descriptor_read_live_return(
             registers,
@@ -8530,6 +8543,7 @@ extern "sysv64" fn linux_syscall_handler(
             syscall_return,
             (user_rip, user_rflags),
         ),
+        LINUX_SECCOMP_SYSCALL => linux_seccomp(first_argument, buffer, count),
         LINUX_RSEQ_SYSCALL => linux_rseq(first_argument, buffer, count, register(0)),
         LINUX_CREAT_SYSCALL => linux_openat(
             u64::from(LINUX_AT_FDCWD),
@@ -10843,6 +10857,7 @@ struct LinuxProcessRuntimeState {
     umask: u64,
     process_name: [u64; 2],
     no_new_privileges: bool,
+    seccomp_strict: bool,
     pending_signals: u64,
     pending_signal_codes: [u32; LINUX_SIGNAL_COUNT],
     pending_signal_values: [u64; LINUX_SIGNAL_COUNT],
@@ -10876,6 +10891,7 @@ impl LinuxProcessRuntimeState {
         umask: 0o022,
         process_name: [0; 2],
         no_new_privileges: false,
+        seccomp_strict: false,
         pending_signals: 0,
         pending_signal_codes: [0; LINUX_SIGNAL_COUNT],
         pending_signal_values: [0; LINUX_SIGNAL_COUNT],
@@ -10934,6 +10950,7 @@ fn capture_linux_process_runtime_state() -> Option<LinuxProcessRuntimeState> {
             ELF_PROBE_PROCESS_NAME_HIGH.load(Ordering::SeqCst),
         ],
         no_new_privileges: ELF_PROBE_NO_NEW_PRIVS.load(Ordering::SeqCst),
+        seccomp_strict: ELF_PROBE_SECCOMP_STRICT.load(Ordering::SeqCst),
         pending_signals: ELF_PROBE_PENDING_SIGNALS.load(Ordering::SeqCst),
         pending_signal_codes: core::array::from_fn(|signal| {
             ELF_PROBE_PENDING_SIGNAL_CODES[signal].load(Ordering::SeqCst)
@@ -10982,6 +10999,7 @@ fn restore_linux_process_runtime_state(state: LinuxProcessRuntimeState) {
     ELF_PROBE_PROCESS_NAME_LOW.store(state.process_name[0], Ordering::SeqCst);
     ELF_PROBE_PROCESS_NAME_HIGH.store(state.process_name[1], Ordering::SeqCst);
     ELF_PROBE_NO_NEW_PRIVS.store(state.no_new_privileges, Ordering::SeqCst);
+    ELF_PROBE_SECCOMP_STRICT.store(state.seccomp_strict, Ordering::SeqCst);
     ELF_PROBE_PENDING_SIGNALS.store(state.pending_signals, Ordering::SeqCst);
     ELF_PROBE_EXEC_IGNORED_SIGNALS.store(state.exec_ignored_signals, Ordering::SeqCst);
     ELF_PROBE_ALT_STACK_POINTER.store(state.alternate_signal_stack[0], Ordering::SeqCst);
@@ -12636,6 +12654,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && linux_map_shadow_stack(1, 0, u64::MAX) == LINUX_EOPNOTSUPP;
     let uretprobe = linux_default_signal_terminates(LINUX_SIGILL)
         && !linux_default_signal_terminates(LINUX_SIGCHLD);
+    let seccomp = verify_linux_seccomp_syscall();
     let mappings_released =
         address_space::release_current_linux_runtime_mappings(LINUX_RUNTIME_DYNAMIC_MMAP_BASE);
     ELF_PROBE_MMAP_NEXT.store(LINUX_RUNTIME_DYNAMIC_MMAP_BASE, Ordering::SeqCst);
@@ -12654,7 +12673,87 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && file_handles
         && shadow_stack
         && uretprobe
+        && seccomp
         && mappings_released
+}
+
+fn linux_seccomp_strict_syscall_allowed(number: u64) -> bool {
+    matches!(
+        number,
+        LINUX_READ_SYSCALL | LINUX_WRITE_SYSCALL | LINUX_EXIT_SYSCALL | LINUX_RT_SIGRETURN_SYSCALL
+    )
+}
+
+fn linux_seccomp(operation: u64, flags: u64, arguments: u64) -> u64 {
+    const SET_MODE_STRICT: u64 = 0;
+    const SET_MODE_FILTER: u64 = 1;
+    const GET_ACTION_AVAIL: u64 = 2;
+    const RET_KILL_THREAD: u32 = 0;
+
+    match operation {
+        SET_MODE_STRICT => {
+            if flags != 0 || arguments != 0 {
+                return LINUX_EINVAL;
+            }
+            if ELF_PROBE_SECCOMP_STRICT
+                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                .is_err()
+            {
+                return LINUX_EINVAL;
+            }
+            0
+        }
+        SET_MODE_FILTER => LINUX_EOPNOTSUPP,
+        GET_ACTION_AVAIL => {
+            if flags != 0 {
+                return LINUX_EINVAL;
+            }
+            let mut action = [0_u8; 4];
+            if !copy_from_linux_user(arguments, &mut action) {
+                return LINUX_EFAULT;
+            }
+            if u32::from_ne_bytes(action) == RET_KILL_THREAD {
+                0
+            } else {
+                LINUX_EOPNOTSUPP
+            }
+        }
+        _ => LINUX_EINVAL,
+    }
+}
+
+fn verify_linux_seccomp_syscall() -> bool {
+    const GET_ACTION_AVAIL: u64 = 2;
+    const RET_ALLOW: u32 = 0x7fff_0000;
+    let mapping = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    if !(LINUX_RUNTIME_DYNAMIC_MMAP_BASE..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
+        .contains(&mapping)
+    {
+        return false;
+    }
+    let strict_contract = linux_seccomp_strict_syscall_allowed(LINUX_READ_SYSCALL)
+        && linux_seccomp_strict_syscall_allowed(LINUX_WRITE_SYSCALL)
+        && linux_seccomp_strict_syscall_allowed(LINUX_EXIT_SYSCALL)
+        && linux_seccomp_strict_syscall_allowed(LINUX_RT_SIGRETURN_SYSCALL)
+        && !linux_seccomp_strict_syscall_allowed(LINUX_EXIT_GROUP_SYSCALL)
+        && !linux_seccomp_strict_syscall_allowed(LINUX_SECCOMP_SYSCALL);
+    let kill_available = strict_contract
+        && copy_to_linux_user(mapping, &0_u32.to_ne_bytes())
+        && linux_seccomp(GET_ACTION_AVAIL, 0, mapping) == 0;
+    let filter_action_rejected = kill_available
+        && copy_to_linux_user(mapping, &RET_ALLOW.to_ne_bytes())
+        && linux_seccomp(GET_ACTION_AVAIL, 0, mapping) == LINUX_EOPNOTSUPP
+        && linux_seccomp(GET_ACTION_AVAIL, 1, mapping) == LINUX_EINVAL
+        && linux_seccomp(GET_ACTION_AVAIL, 0, 0) == LINUX_EFAULT;
+    let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
+    filter_action_rejected && unmapped
 }
 
 fn linux_map_shadow_stack(_address: u64, _length: u64, _flags: u64) -> u64 {
@@ -26604,7 +26703,7 @@ fn linux_apply_delivered_signal_action(index: usize, signal_bit: u64, old_mask: 
 }
 
 fn linux_default_signal_terminates(signal: u64) -> bool {
-    matches!(signal, LINUX_SIGILL | LINUX_SIGPIPE)
+    matches!(signal, LINUX_SIGILL | LINUX_SIGKILL | LINUX_SIGPIPE)
 }
 
 fn linux_terminate_by_default_signal(signal: u64) -> u64 {

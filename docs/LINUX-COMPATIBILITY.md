@@ -42,7 +42,7 @@ Detailed bounded behavior for implemented calls lives in
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **19 Complete**, **297 Partial**, **45 Policy-denied**, **14 Missing**.
+Current totals: **19 Complete**, **298 Partial**, **45 Policy-denied**, **13 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -444,7 +444,7 @@ therefore omitted.
 | 314 | sched_setattr | Partial |
 | 315 | sched_getattr | Partial |
 | 316 | renameat2 | Partial |
-| 317 | seccomp | Missing |
+| 317 | seccomp | Partial |
 | 318 | getrandom | Partial |
 | 319 | memfd_create | Partial |
 | 320 | kexec_file_load | Policy-denied |

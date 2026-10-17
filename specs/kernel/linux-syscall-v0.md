@@ -1707,6 +1707,14 @@ with `SI_KERNEL`; a registered Linux signal action can receive it, and the
 default action terminates the domain init process. The kernel-only trampoline
 path and return-probe consumers remain unsupported.
 
+`rax = 317` (`__NR_seccomp`) supports Linux strict mode. Enabling it is
+irreversible for the calling process; afterward only `read`, `write`, `exit`,
+and `rt_sigreturn` are admitted, and any other syscall terminates the process
+with `SIGKILL`. `SECCOMP_GET_ACTION_AVAIL` reports `SECCOMP_RET_KILL_THREAD`,
+the action used by this profile. BPF filter mode, synchronization across a
+general thread group, logging, tracing, and user notification remain
+unsupported and fail explicitly rather than silently weakening a filter.
+
 Every other call
 returns `-ENOSYS` without disarming
 the task, so a caller can handle the error and continue. The entire path
