@@ -118,7 +118,7 @@ for expected in \
     'Test a userspace compatibility environment' \
     'Linux userspace runtime conformance summary:' \
     'Interfaces: 17 passed, 6 failed, 23 total' \
-    'Syscalls: 41 passed, 286 unverified, 48 policy-denied, 0 unsupported, 375 total' \
+    'Syscalls: 43 passed, 284 unverified, 48 policy-denied, 0 unsupported, 375 total' \
     "Run 'test linux all' for every result." \
     'Linux userspace interface runtime tests (bounded profile):' \
     'PASS syscall-entry' \
@@ -151,6 +151,7 @@ for expected in \
     'PASS 39 getpid' \
     'PASS 63 uname' \
     'PASS 95 umask' \
+    'PASS 96 gettimeofday' \
     'PASS 115 getgroups' \
     'PASS 118 getresuid' \
     'PASS 120 getresgid' \
@@ -161,13 +162,14 @@ for expected in \
     'PASS 145 sched_getscheduler' \
     'PASS 146 sched_get_priority_max' \
     'PASS 147 sched_get_priority_min' \
+    'PASS 201 time' \
     'PASS 203 sched_setaffinity' \
     'PASS 204 sched_getaffinity' \
     'PASS 309 getcpu' \
     'UNVERIFIED 43 accept' \
     'POLICY-DENIED 105 setuid' \
     'UNVERIFIED 462 mseal' \
-    'Summary: 41 passed, 286 unverified, 48 policy-denied, 0 unsupported, 375 total' \
+    'Summary: 43 passed, 284 unverified, 48 policy-denied, 0 unsupported, 375 total' \
     'PASS requires a runtime conformance probe; dispatch alone remains UNVERIFIED.' \
     'FAIL unknown Linux syscall' \
     'network list' \

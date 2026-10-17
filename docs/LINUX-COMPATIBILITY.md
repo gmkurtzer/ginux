@@ -42,7 +42,7 @@ Detailed bounded behavior for implemented calls lives in
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **41 Complete**, **286 Partial**, **48 Policy-denied**, **0 Missing**.
+Current totals: **43 Complete**, **284 Partial**, **48 Policy-denied**, **0 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -223,7 +223,7 @@ therefore omitted.
 | 93 | fchown | Partial |
 | 94 | lchown | Partial |
 | 95 | umask | Complete |
-| 96 | gettimeofday | Partial |
+| 96 | gettimeofday | Complete |
 | 97 | getrlimit | Partial |
 | 98 | getrusage | Partial |
 | 99 | sysinfo | Partial |
@@ -328,7 +328,7 @@ therefore omitted.
 | 198 | lremovexattr | Partial |
 | 199 | fremovexattr | Partial |
 | 200 | tkill | Partial |
-| 201 | time | Partial |
+| 201 | time | Complete |
 | 202 | futex | Partial |
 | 203 | sched_setaffinity | Complete |
 | 204 | sched_getaffinity | Complete |

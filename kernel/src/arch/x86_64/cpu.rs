@@ -10038,22 +10038,17 @@ fn linux_gettimeofday(timeval_address: u64, timezone_address: u64) -> u64 {
     if timeval_address == 0 && timezone_address == 0 {
         return 0;
     }
-    if timeval_address != 0 && !linux_writable_user_range_contains(timeval_address, 16) {
-        return LINUX_EFAULT;
-    }
-    if timezone_address != 0 && !linux_writable_user_range_contains(timezone_address, 8) {
-        return LINUX_EFAULT;
-    }
     let Some((seconds, nanoseconds)) = linux_realtime_time() else {
         return LINUX_ENOSYS;
     };
-    if timeval_address != 0 {
-        let mut timeval = [0_u8; 16];
-        timeval[..8].copy_from_slice(&seconds.to_ne_bytes());
-        timeval[8..].copy_from_slice(&(nanoseconds / 1_000).to_ne_bytes());
-        if !copy_to_linux_user(timeval_address, &timeval) {
-            return LINUX_EFAULT;
-        }
+    if timeval_address != 0
+        && (!copy_to_linux_user(timeval_address, &seconds.to_ne_bytes())
+            || !copy_to_linux_user(
+                timeval_address.saturating_add(8),
+                &(nanoseconds / 1_000).to_ne_bytes(),
+            ))
+    {
+        return LINUX_EFAULT;
     }
     if timezone_address != 0 && !copy_to_linux_user(timezone_address, &[0; 8]) {
         return LINUX_EFAULT;
@@ -12704,6 +12699,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let scheduler_priorities = verify_linux_scheduler_priority_ranges();
     let scheduler_queries = verify_linux_scheduler_queries();
     let scheduler_affinity = verify_linux_scheduler_affinity();
+    let realtime_queries = verify_linux_realtime_queries();
     let mappings_released =
         address_space::release_current_linux_runtime_mappings(LINUX_RUNTIME_DYNAMIC_MMAP_BASE);
     ELF_PROBE_MMAP_NEXT.store(LINUX_RUNTIME_DYNAMIC_MMAP_BASE, Ordering::SeqCst);
@@ -12732,6 +12728,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && scheduler_priorities
         && scheduler_queries
         && scheduler_affinity
+        && realtime_queries
         && mappings_released
 }
 
@@ -12833,6 +12830,57 @@ fn verify_linux_scheduler_affinity() -> bool {
         && linux_sched_rr_get_interval(current, 1) == LINUX_EFAULT;
     let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
     get && set && interval && unmapped
+}
+
+fn verify_linux_realtime_queries() -> bool {
+    let mapping = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    if !(LINUX_RUNTIME_DYNAMIC_MMAP_BASE..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
+        .contains(&mapping)
+    {
+        return false;
+    }
+    let stored_time = linux_time(mapping);
+    let mut word = [0_u8; 8];
+    let time = stored_time <= i64::MAX as u64
+        && copy_from_linux_user(mapping, &mut word)
+        && u64::from_ne_bytes(word) == stored_time
+        && linux_time(0) <= i64::MAX as u64
+        && linux_time(1) == LINUX_EFAULT;
+    let sentinel = [0xa5_u8; 16];
+    let mut timeval = [0_u8; 16];
+    let mut timezone = [0_u8; 8];
+    let gettimeofday = time
+        && copy_to_linux_user(mapping + 32, &sentinel)
+        && copy_to_linux_user(mapping + 48, &sentinel[..8])
+        && linux_gettimeofday(mapping + 32, mapping + 48) == 0
+        && copy_from_linux_user(mapping + 32, &mut timeval)
+        && u64::from_ne_bytes(timeval[..8].try_into().unwrap()) != 0
+        && u64::from_ne_bytes(timeval[8..].try_into().unwrap()) < 1_000_000
+        && copy_from_linux_user(mapping + 48, &mut timezone)
+        && timezone == [0; 8]
+        && linux_gettimeofday(0, 0) == 0;
+    let ordered_faults = gettimeofday
+        && copy_to_linux_user(mapping + PAGE_SIZE as u64 - 8, &u64::MAX.to_ne_bytes())
+        && linux_gettimeofday(mapping + PAGE_SIZE as u64 - 8, 0) == LINUX_EFAULT
+        && copy_from_linux_user(mapping + PAGE_SIZE as u64 - 8, &mut word)
+        && u64::from_ne_bytes(word) != u64::MAX
+        && copy_to_linux_user(mapping + 48, &sentinel[..8])
+        && linux_gettimeofday(mapping + 32, 1) == LINUX_EFAULT
+        && copy_from_linux_user(mapping + 32, &mut timeval)
+        && u64::from_ne_bytes(timeval[..8].try_into().unwrap()) != 0
+        && copy_to_linux_user(mapping + 48, &sentinel[..8])
+        && linux_gettimeofday(1, mapping + 48) == LINUX_EFAULT
+        && copy_from_linux_user(mapping + 48, &mut timezone)
+        && timezone == sentinel[..8];
+    let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
+    ordered_faults && unmapped
 }
 
 fn verify_linux_io_uring_syscalls() -> bool {
