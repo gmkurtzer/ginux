@@ -784,6 +784,12 @@ the current procfs compatibility files plus monotonic uptime and one process.
 `sched_rr_get_interval` reports the bounded scheduler's 100 ms quantum for any
 live process visible in the domain and matches Linux's negative-PID,
 retired-PID, and output-fault ordering.
+`sched_setparam` and `sched_setscheduler` admit idempotent `SCHED_OTHER` writes
+for any live process in the domain. Unknown policies return `-EINVAL`, valid
+privileged policies return `-EPERM`, retired processes return `-ESRCH`, and the
+parameter is copied only after process and policy validation. Runtime probes
+cover success, invalid priority and policy, bad pointers, negative PIDs, and
+retired PIDs.
 Because Ginux has no swap or page reclaim path, every current and future
 userspace mapping is resident. `mlock`, `mlock2`, `munlock`, `mlockall`, and
 `munlockall` therefore implement the complete Linux-visible contract without

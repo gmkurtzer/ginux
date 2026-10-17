@@ -1339,6 +1339,69 @@ ginux_linux_system_init:
     cmp dword ptr [rip + .Lrseq_area + 4], -1
     jne .Lfailure
 
+    mov dword ptr [rip + .Lstatus], 0
+    xor edi, edi
+    lea rsi, [rip + .Lstatus]
+    mov eax, 142
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov edi, 2
+    lea rsi, [rip + .Lstatus]
+    mov eax, 142
+    syscall
+    cmp rax, -3
+    jne .Lfailure
+    xor edi, edi
+    mov esi, 1
+    mov eax, 142
+    syscall
+    cmp rax, -14
+    jne .Lfailure
+    mov dword ptr [rip + .Lstatus], 1
+    xor edi, edi
+    lea rsi, [rip + .Lstatus]
+    mov eax, 142
+    syscall
+    cmp rax, -22
+    jne .Lfailure
+    mov dword ptr [rip + .Lstatus], 0
+    xor edi, edi
+    xor esi, esi
+    lea rdx, [rip + .Lstatus]
+    mov eax, 144
+    syscall
+    test rax, rax
+    jne .Lfailure
+    xor edi, edi
+    mov esi, 1
+    lea rdx, [rip + .Lstatus]
+    mov eax, 144
+    syscall
+    cmp rax, -1
+    jne .Lfailure
+    xor edi, edi
+    mov esi, 4
+    lea rdx, [rip + .Lstatus]
+    mov eax, 144
+    syscall
+    cmp rax, -22
+    jne .Lfailure
+    mov edi, 2
+    xor esi, esi
+    lea rdx, [rip + .Lstatus]
+    mov eax, 144
+    syscall
+    cmp rax, -3
+    jne .Lfailure
+    xor edi, edi
+    xor esi, esi
+    mov edx, 1
+    mov eax, 144
+    syscall
+    cmp rax, -14
+    jne .Lfailure
+
     xor edi, edi
     lea rsi, [rip + .Lsched_attr]
     mov edx, 56

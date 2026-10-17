@@ -42,7 +42,7 @@ Detailed bounded behavior for implemented calls lives in
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **71 Complete**, **256 Partial**, **48 Policy-denied**, **0 Missing**.
+Current totals: **73 Complete**, **254 Partial**, **48 Policy-denied**, **0 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -269,9 +269,9 @@ therefore omitted.
 | 139 | sysfs | Complete |
 | 140 | getpriority | Partial |
 | 141 | setpriority | Partial |
-| 142 | sched_setparam | Partial |
+| 142 | sched_setparam | Complete |
 | 143 | sched_getparam | Complete |
-| 144 | sched_setscheduler | Partial |
+| 144 | sched_setscheduler | Complete |
 | 145 | sched_getscheduler | Complete |
 | 146 | sched_get_priority_max | Complete |
 | 147 | sched_get_priority_min | Complete |

@@ -12847,8 +12847,19 @@ fn verify_linux_scheduler_queries() -> bool {
         && linux_sched_getparam(2, 0) == LINUX_EINVAL
         && linux_sched_getparam(2, 1) == LINUX_ESRCH
         && linux_sched_getparam(current, 1) == LINUX_EFAULT;
+    let setters = parameter
+        && copy_to_linux_user(mapping, &0_u32.to_ne_bytes())
+        && linux_set_scheduler(0, 0, mapping) == 0
+        && linux_set_scheduler(current, 0, mapping) == 0
+        && linux_set_scheduler(2, 0, mapping) == LINUX_ESRCH
+        && linux_set_scheduler(u64::MAX, 0, mapping) == LINUX_EINVAL
+        && linux_set_scheduler(0, 4, mapping) == LINUX_EINVAL
+        && linux_set_scheduler(0, 1, mapping) == LINUX_EPERM
+        && linux_set_scheduler(0, 0, 1) == LINUX_EFAULT
+        && copy_to_linux_user(mapping, &1_u32.to_ne_bytes())
+        && linux_set_scheduler(0, 0, mapping) == LINUX_EINVAL;
     let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
-    parameter && unmapped
+    setters && unmapped
 }
 
 fn verify_linux_scheduler_affinity() -> bool {
@@ -27701,8 +27712,11 @@ fn linux_capset(header_address: u64, data_address: u64) -> u64 {
 }
 
 fn linux_set_scheduler(pid: u64, policy: u64, parameter_address: u64) -> u64 {
-    if !matches!(pid, 0 | 1) {
-        return LINUX_ESRCH;
+    if let Err(error) = linux_scheduler_process(pid) {
+        return error;
+    }
+    if !matches!(policy, 0 | 1 | 2 | 3 | 5 | 6) {
+        return LINUX_EINVAL;
     }
     if policy != 0 {
         return LINUX_EPERM;
