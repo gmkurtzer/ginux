@@ -390,6 +390,8 @@ const LINUX_PWRITEV_SYSCALL: u64 = 296;
 const LINUX_SENDMMSG_SYSCALL: u64 = 307;
 const LINUX_COPY_FILE_RANGE_SYSCALL: u64 = 326;
 const LINUX_PRLIMIT64_SYSCALL: u64 = 302;
+const LINUX_NAME_TO_HANDLE_AT_SYSCALL: u64 = 303;
+const LINUX_OPEN_BY_HANDLE_AT_SYSCALL: u64 = 304;
 const LINUX_GETCPU_SYSCALL: u64 = 309;
 const LINUX_PROCESS_VM_READV_SYSCALL: u64 = 310;
 const LINUX_PROCESS_VM_WRITEV_SYSCALL: u64 = 311;
@@ -480,6 +482,8 @@ const LINUX_EINVAL: u64 = u64::MAX - 21;
 const LINUX_ENOTTY: u64 = u64::MAX - 24;
 const LINUX_ERANGE: u64 = u64::MAX - 33;
 const LINUX_EOVERFLOW: u64 = u64::MAX - 74;
+const LINUX_ELOOP: u64 = u64::MAX - 39;
+const LINUX_ESTALE: u64 = u64::MAX - 115;
 const LINUX_ENODATA: u64 = u64::MAX - 60;
 const LINUX_EMSGSIZE: u64 = u64::MAX - 89;
 const LINUX_EOPNOTSUPP: u64 = u64::MAX - 94;
@@ -691,6 +695,7 @@ const LINUX_O_NONBLOCK: u64 = 0x800;
 const LINUX_PRIVATE_SECRET_DESCRIPTOR: u32 = 1 << 31;
 const LINUX_O_LARGEFILE: u64 = 0x8000;
 const LINUX_O_NOFOLLOW: u64 = 0x20000;
+const LINUX_O_PATH: u64 = 0x20_0000;
 const LINUX_PR_SET_NAME: u64 = 15;
 const LINUX_PR_GET_NAME: u64 = 16;
 const LINUX_PR_SET_NO_NEW_PRIVS: u64 = 38;
@@ -8512,6 +8517,12 @@ extern "sysv64" fn linux_syscall_handler(
         }
         LINUX_OPENAT_SYSCALL => linux_openat(first_argument, buffer, count, register(0)),
         LINUX_OPENAT2_SYSCALL => linux_openat2(first_argument, buffer, count, register(0)),
+        LINUX_NAME_TO_HANDLE_AT_SYSCALL => {
+            linux_name_to_handle_at(first_argument, buffer, count, register(0), register(2))
+        }
+        LINUX_OPEN_BY_HANDLE_AT_SYSCALL => {
+            linux_open_by_handle_at(first_argument, buffer, count)
+        }
         LINUX_MEMFD_CREATE_SYSCALL => linux_memfd_create(first_argument, buffer),
         LINUX_MEMFD_SECRET_SYSCALL => linux_memfd_secret(first_argument),
         LINUX_RSEQ_SYSCALL => linux_rseq(first_argument, buffer, count, register(0)),
@@ -12617,6 +12628,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let aio = verify_linux_aio_syscalls();
     let secret_memory = verify_linux_memfd_secret_syscall();
     let mount_queries = verify_linux_mount_query_syscalls();
+    let file_handles = verify_linux_file_handle_syscalls();
     let mappings_released =
         address_space::release_current_linux_runtime_mappings(LINUX_RUNTIME_DYNAMIC_MMAP_BASE);
     ELF_PROBE_MMAP_NEXT.store(LINUX_RUNTIME_DYNAMIC_MMAP_BASE, Ordering::SeqCst);
@@ -12632,7 +12644,86 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && aio
         && secret_memory
         && mount_queries
+        && file_handles
         && mappings_released
+}
+
+fn verify_linux_file_handle_syscalls() -> bool {
+    let mapping = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    if !(LINUX_RUNTIME_DYNAMIC_MMAP_BASE..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
+        .contains(&mapping)
+    {
+        return false;
+    }
+    let Some(node) = crate::linux_overlay::create_file(b"ginux-handle", 0o600, b"handle") else {
+        let _ = linux_runtime_munmap(mapping, PAGE_SIZE as u64);
+        return false;
+    };
+    let path = b"/ginux-handle\0";
+    let prepared = copy_to_linux_user(mapping, path)
+        && copy_to_linux_user(mapping + 64, &0_u32.to_ne_bytes());
+    let sized = prepared
+        && linux_name_to_handle_at(
+            u64::from(LINUX_AT_FDCWD),
+            mapping,
+            mapping + 64,
+            mapping + 128,
+            0,
+        ) == LINUX_EOVERFLOW
+        && {
+            let mut size = [0_u8; 4];
+            let mut mount = [0_u8; 4];
+            copy_from_linux_user(mapping + 64, &mut size)
+                && copy_from_linux_user(mapping + 128, &mut mount)
+                && u32::from_ne_bytes(size) == 12
+                && i32::from_ne_bytes(mount) == 1
+        };
+    let named = sized
+        && linux_name_to_handle_at(
+            u64::from(LINUX_AT_FDCWD),
+            mapping,
+            mapping + 64,
+            mapping + 128,
+            0,
+        ) == 0;
+    let renamed = named && crate::linux_overlay::rename(node, b"ginux-handle-renamed");
+    let descriptor = if renamed {
+        linux_open_by_handle_at(u64::from(LINUX_AT_FDCWD), mapping + 64, 0)
+    } else {
+        LINUX_EBADF
+    };
+    let reopened = descriptor < LINUX_AUX_DESCRIPTOR_LIMIT
+        && linux_descriptor_read(descriptor, mapping + 256, 6) == 6
+        && {
+            let mut contents = [0_u8; 6];
+            copy_from_linux_user(mapping + 256, &mut contents) && contents == *b"handle"
+        };
+    let path_descriptor = if named {
+        linux_open_by_handle_at(
+            u64::from(LINUX_AT_FDCWD),
+            mapping + 64,
+            LINUX_O_PATH | LINUX_O_CLOEXEC,
+        )
+    } else {
+        LINUX_EBADF
+    };
+    let path_only = path_descriptor < LINUX_AUX_DESCRIPTOR_LIMIT
+        && linux_descriptor_close_on_exec(path_descriptor)
+        && linux_descriptor_read(path_descriptor, mapping + 256, 1) == LINUX_EBADF;
+    let closed = descriptor < LINUX_AUX_DESCRIPTOR_LIMIT
+        && linux_descriptor_close(descriptor) == 0
+        && path_descriptor < LINUX_AUX_DESCRIPTOR_LIMIT
+        && linux_descriptor_close(path_descriptor) == 0;
+    let removed = crate::linux_overlay::unlink(node);
+    let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
+    reopened && path_only && closed && removed && unmapped
 }
 
 fn verify_linux_mount_query_syscalls() -> bool {
@@ -13158,6 +13249,9 @@ fn linux_runtime_mmap(
         None
     } else {
         let state = linux_device_descriptor(fd);
+        if linux_path_descriptor(fd) {
+            return LINUX_EBADF;
+        }
         if let Some(handle) = linux_overlay_descriptor_handle(fd) {
             secret = linux_secret_descriptor(fd);
             if secret && (sharing != LINUX_MAP_SHARED || protection & LINUX_PROT_EXEC != 0) {
@@ -17194,6 +17288,229 @@ fn linux_secret_descriptor(descriptor: u64) -> bool {
         .is_some_and(|flags| flags & LINUX_PRIVATE_SECRET_DESCRIPTOR != 0)
 }
 
+fn linux_path_descriptor(descriptor: u64) -> bool {
+    linux_socket_flags(descriptor).is_some_and(|flags| flags & LINUX_O_PATH as u32 != 0)
+}
+
+fn linux_name_to_handle_at(
+    directory: u64,
+    path_address: u64,
+    handle_address: u64,
+    mount_id_address: u64,
+    flags: u64,
+) -> u64 {
+    const AT_HANDLE_MNT_ID_UNIQUE: u64 = 1;
+    const AT_HANDLE_FID: u64 = 0x200;
+    const AT_SYMLINK_FOLLOW: u64 = 0x400;
+    const HANDLE_SIZE: u32 = 12;
+    const HANDLE_TYPE: i32 = 0x474e;
+    if flags & !(AT_HANDLE_MNT_ID_UNIQUE | AT_HANDLE_FID | AT_SYMLINK_FOLLOW | LINUX_AT_EMPTY_PATH)
+        != 0
+    {
+        return LINUX_EINVAL;
+    }
+    if flags & AT_SYMLINK_FOLLOW != 0 {
+        return LINUX_EOPNOTSUPP;
+    }
+    let mut header = [0_u8; 8];
+    if !copy_from_linux_user(handle_address, &mut header) {
+        return LINUX_EFAULT;
+    }
+    let supplied = u32::from_ne_bytes(header[..4].try_into().unwrap());
+    if supplied > 128 {
+        return LINUX_EINVAL;
+    }
+    let mut path = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+    let length = match copy_linux_c_string(path_address, &mut path) {
+        Ok(length) => length,
+        Err(error) => return error,
+    };
+    let identity = if length == 0 {
+        if flags & LINUX_AT_EMPTY_PATH == 0 {
+            return LINUX_ENOENT;
+        }
+        if directory as u32 == LINUX_AT_FDCWD {
+            let overlay = ELF_PROBE_OVERLAY_CWD.load(Ordering::SeqCst);
+            if overlay != 0 {
+                Some((1_u32, overlay))
+            } else {
+                Some((2, u32::from(ELF_PROBE_OCI_CWD.load(Ordering::SeqCst))))
+            }
+        } else if let Some(handle) = linux_overlay_descriptor_handle(directory) {
+            Some((1, crate::linux_overlay::generation(handle)))
+        } else {
+            let handle = linux_oci_descriptor(directory);
+            (handle != 0).then_some((2, u32::from(handle)))
+        }
+    } else {
+        let mut canonical = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+        match linux_canonical_path_at(directory, &path[..length], &mut canonical) {
+            Ok(canonical_length) => crate::linux_overlay::lookup(&canonical[..canonical_length])
+                .map(|metadata| (1_u32, crate::linux_overlay::generation(metadata.handle)))
+                .or_else(|| {
+                    linux_oci_path_at(directory, &path[..length])
+                        .map(|(handle, _)| (2_u32, u32::from(handle)))
+                }),
+            Err(error) => return error,
+        }
+    };
+    let Some((kind, identifier)) = identity else {
+        return if length == 0 { LINUX_EBADF } else { LINUX_EOPNOTSUPP };
+    };
+    let mount_written = if flags & AT_HANDLE_MNT_ID_UNIQUE != 0 {
+        let Some(id) = linux_mount::current_unique_mount_id(1) else {
+            return LINUX_EINVAL;
+        };
+        copy_to_linux_user(mount_id_address, &id.to_ne_bytes())
+    } else {
+        copy_to_linux_user(mount_id_address, &1_i32.to_ne_bytes())
+    };
+    if !mount_written {
+        return LINUX_EFAULT;
+    }
+    header[..4].copy_from_slice(&HANDLE_SIZE.to_ne_bytes());
+    header[4..].copy_from_slice(&HANDLE_TYPE.to_ne_bytes());
+    if supplied < HANDLE_SIZE {
+        return if copy_to_linux_user(handle_address, &header) {
+            LINUX_EOVERFLOW
+        } else {
+            LINUX_EFAULT
+        };
+    }
+    let mut output = [0_u8; 20];
+    output[..8].copy_from_slice(&header);
+    output[8..12].copy_from_slice(&0x5848_4647_u32.to_ne_bytes());
+    output[12..16].copy_from_slice(&kind.to_ne_bytes());
+    output[16..20].copy_from_slice(&identifier.to_ne_bytes());
+    if copy_to_linux_user(handle_address, &output) {
+        0
+    } else {
+        LINUX_EFAULT
+    }
+}
+
+fn linux_open_by_handle_at(mount_descriptor: u64, handle_address: u64, flags: u64) -> u64 {
+    const HANDLE_TYPE: i32 = 0x474e;
+    let access = flags & 3;
+    let valid = 3
+        | LINUX_O_CLOEXEC
+        | LINUX_O_DIRECTORY
+        | LINUX_O_APPEND
+        | LINUX_O_NONBLOCK
+        | LINUX_O_LARGEFILE
+        | LINUX_O_NOFOLLOW
+        | LINUX_O_PATH;
+    if access == 3
+        || flags & !valid != 0
+        || flags & LINUX_O_PATH != 0
+            && flags
+                & !(LINUX_O_PATH | LINUX_O_CLOEXEC | LINUX_O_DIRECTORY | LINUX_O_NOFOLLOW)
+                != 0
+    {
+        return LINUX_EINVAL;
+    }
+    if mount_descriptor as u32 != LINUX_AT_FDCWD
+        && (!linux_descriptor_open(mount_descriptor)
+            || linux_proc_file(linux_device_descriptor(mount_descriptor)))
+    {
+        return LINUX_EBADF;
+    }
+    let mut handle = [0_u8; 20];
+    if !copy_from_linux_user(handle_address, &mut handle[..8]) {
+        return LINUX_EFAULT;
+    }
+    let size = u32::from_ne_bytes(handle[..4].try_into().unwrap());
+    let handle_type = i32::from_ne_bytes(handle[4..8].try_into().unwrap());
+    if size == 0 || size > 128 {
+        return LINUX_EINVAL;
+    }
+    if size != 12 || handle_type != HANDLE_TYPE {
+        return LINUX_ESTALE;
+    }
+    if !copy_from_linux_user(handle_address + 8, &mut handle[8..]) {
+        return LINUX_EFAULT;
+    }
+    if u32::from_ne_bytes(handle[8..12].try_into().unwrap()) != 0x5848_4647 {
+        return LINUX_ESTALE;
+    }
+    let kind = u32::from_ne_bytes(handle[12..16].try_into().unwrap());
+    let identifier = u32::from_ne_bytes(handle[16..20].try_into().unwrap());
+    let mut overlay = None;
+    let mut oci = 0_u16;
+    let node_kind = match kind {
+        1 => {
+            let Some(handle) = crate::linux_overlay::from_generation(identifier) else {
+                return LINUX_ESTALE;
+            };
+            let Some(metadata) = crate::linux_overlay::metadata(handle) else {
+                return LINUX_ESTALE;
+            };
+            overlay = Some(handle);
+            metadata.kind
+        }
+        2 => {
+            let Ok(handle) = u16::try_from(identifier) else {
+                return LINUX_ESTALE;
+            };
+            let entry = if handle == crate::oci_image::ROOT_HANDLE {
+                None
+            } else {
+                let Some(entry) = crate::oci_image::entry(handle) else {
+                    return LINUX_ESTALE;
+                };
+                Some(entry)
+            };
+            oci = handle;
+            match entry.map(|entry| entry.kind) {
+                None | Some(ginux_oci::EntryKind::Directory) => crate::linux_overlay::NodeKind::Directory,
+                Some(ginux_oci::EntryKind::File | ginux_oci::EntryKind::Hardlink) => {
+                    crate::linux_overlay::NodeKind::File
+                }
+                Some(ginux_oci::EntryKind::Symlink) => crate::linux_overlay::NodeKind::Symlink,
+            }
+        }
+        _ => return LINUX_ESTALE,
+    };
+    if node_kind == crate::linux_overlay::NodeKind::Symlink && flags & LINUX_O_PATH == 0 {
+        return LINUX_ELOOP;
+    }
+    if node_kind == crate::linux_overlay::NodeKind::Directory && access != 0 {
+        return LINUX_EISDIR;
+    }
+    if node_kind != crate::linux_overlay::NodeKind::Directory && flags & LINUX_O_DIRECTORY != 0 {
+        return LINUX_ENOTDIR;
+    }
+    if kind == 2 && access != 0 && flags & LINUX_O_PATH == 0 {
+        return LINUX_EROFS;
+    }
+    let Some(descriptor) = (LINUX_AUX_DESCRIPTOR_FIRST..LINUX_AUX_DESCRIPTOR_LIMIT)
+        .find(|descriptor| linux_aux_descriptor_free(*descriptor))
+    else {
+        return LINUX_EMFILE;
+    };
+    let state_kind = match node_kind {
+        crate::linux_overlay::NodeKind::Directory => LINUX_ROOT_MEASURED_DIRECTORY,
+        crate::linux_overlay::NodeKind::File | crate::linux_overlay::NodeKind::Symlink => {
+            LINUX_FILE_TMP_SCRATCH
+        }
+        crate::linux_overlay::NodeKind::Fifo => return LINUX_EOPNOTSUPP,
+    };
+    let index = (descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize;
+    ELF_PROBE_DEVICE_DESCRIPTORS[index].store(state_kind | (access + 1) as u16, Ordering::SeqCst);
+    ELF_PROBE_OCI_DESCRIPTORS[index].store(oci, Ordering::SeqCst);
+    ELF_PROBE_TMP_FILE_GENERATIONS[index].store(
+        overlay.map_or(0, crate::linux_overlay::generation),
+        Ordering::SeqCst,
+    );
+    ELF_PROBE_SOCKET_FLAGS[index].store(
+        (flags & (LINUX_O_APPEND | LINUX_O_NONBLOCK | LINUX_O_PATH)) as u32,
+        Ordering::SeqCst,
+    );
+    linux_descriptor_offset(descriptor).store(0, Ordering::SeqCst);
+    set_linux_descriptor_close_on_exec(descriptor, flags & LINUX_O_CLOEXEC != 0);
+    descriptor
+}
+
 fn linux_newfstatat(directory: u64, path_address: u64, stat_address: u64, flags: u64) -> u64 {
     if flags & !LINUX_AT_SYMLINK_NOFOLLOW != 0 {
         return LINUX_EINVAL;
@@ -19201,6 +19518,9 @@ fn linux_descriptor_read(descriptor: u64, address: u64, count: u64) -> u64 {
         return result;
     }
     let device = linux_device_descriptor(descriptor);
+    if linux_path_descriptor(descriptor) {
+        return LINUX_EBADF;
+    }
     if linux_secret_descriptor(descriptor) {
         return LINUX_EINVAL;
     }
@@ -19339,6 +19659,9 @@ fn linux_resolv_conf() -> ([u8; 32], usize) {
 
 fn linux_regular_file_read_at(descriptor: u64, address: u64, count: u64, offset: u64) -> u64 {
     let state = linux_device_descriptor(descriptor);
+    if linux_path_descriptor(descriptor) {
+        return LINUX_EBADF;
+    }
     if linux_secret_descriptor(descriptor) {
         return LINUX_EINVAL;
     }
@@ -19398,6 +19721,9 @@ fn linux_regular_file_read_at(descriptor: u64, address: u64, count: u64, offset:
 
 fn linux_regular_file_write_at(descriptor: u64, address: u64, count: u64, offset: u64) -> u64 {
     let state = linux_device_descriptor(descriptor);
+    if linux_path_descriptor(descriptor) {
+        return LINUX_EBADF;
+    }
     if linux_secret_descriptor(descriptor) {
         return LINUX_EINVAL;
     }
@@ -19423,6 +19749,9 @@ fn linux_regular_file_read_kernel(
     output: &mut [u8],
 ) -> Result<usize, u64> {
     let state = linux_device_descriptor(descriptor);
+    if linux_path_descriptor(descriptor) {
+        return Err(LINUX_EBADF);
+    }
     if linux_secret_descriptor(descriptor) {
         return Err(LINUX_EINVAL);
     }
@@ -19464,6 +19793,9 @@ fn linux_regular_file_write_kernel(
     input: &[u8],
 ) -> Result<usize, u64> {
     let state = linux_device_descriptor(descriptor);
+    if linux_path_descriptor(descriptor) {
+        return Err(LINUX_EBADF);
+    }
     if linux_secret_descriptor(descriptor) {
         return Err(LINUX_EINVAL);
     }
@@ -22501,6 +22833,9 @@ fn linux_descriptor_write(descriptor: u64, address: u64, count: u64) -> u64 {
         return result;
     }
     let device = linux_device_descriptor(descriptor);
+    if linux_path_descriptor(descriptor) {
+        return LINUX_EBADF;
+    }
     if linux_secret_descriptor(descriptor) {
         return LINUX_EINVAL;
     }

@@ -1057,6 +1057,20 @@ size record, resets the required size to zero, then returns `EOPNOTSUPP` because
 there is no Linux security context provider. `lsm_set_self_attr` similarly
 validates its selector and reserved flags before returning `EOPNOTSUPP`.
 Native domain policy is neither enumerated nor mutable through this ABI.
+`rax = 303` and `304` (`__NR_name_to_handle_at` and
+`__NR_open_by_handle_at`) expose generation-stable handles for regular files,
+directories, and symbolic links in the OCI lower root and mutable overlay.
+The name operation supports relative/absolute lookup, `AT_EMPTY_PATH`,
+`AT_HANDLE_FID`, Linux's size-discovery `EOVERFLOW`
+contract, legacy 32-bit mount IDs, and v6.12 unique 64-bit mount IDs. Handles
+remain valid across overlay renames. Opening validates the mount anchor,
+handle type and length, stale generations, access flags, directory type, and
+symlink `O_PATH` requirement; returned descriptors support close-on-exec and
+normal duplication/lifecycle rules. `O_PATH` descriptors reject data I/O.
+OCI lower files currently reopen read-only, symlink-following handle lookup
+returns `EOPNOTSUPP`, connectable-handle semantics are outside the v6.12
+baseline, and procfs, devfs, and tmpfs objects do not export handles, so both
+calls remain Partial.
 `rax = 457` and `458` (`__NR_statmount` and `__NR_listmount`) expose the
 read-only Linux v6.12 mount-query ABI for the current domain. Version-zero and
 version-one `mnt_id_req` records are accepted, zero-filled forward extensions

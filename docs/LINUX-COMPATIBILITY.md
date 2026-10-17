@@ -42,7 +42,7 @@ Detailed bounded behavior for implemented calls lives in
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **19 Complete**, **293 Partial**, **45 Policy-denied**, **18 Missing**.
+Current totals: **19 Complete**, **295 Partial**, **45 Policy-denied**, **16 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -55,7 +55,7 @@ Current totals: **19 Complete**, **293 Partial**, **45 Policy-denied**, **18 Mis
 | TLS | Partial | Bounded static TLS and `arch_prctl` FS-base support. |
 | Process and thread model | Partial | Repeated fork/exec/exit/wait works for Alpine and Rocky shells. Fork preserves parent memory and descriptor state; exec privately replaces shared image pages. `process_vm_readv`/`process_vm_writev` support validated same-process transfers and reject crossing the process/domain boundary. `kcmp` identifies same-process VM/resource tables and known shared descriptors; cross-process comparison remains unavailable. Per-thread `rseq` registration exposes CPU 0 and supports matching unregister, but migration and critical-section abort semantics await SMP. Copy-on-write, larger process tables, and general Linux scheduling semantics remain incomplete. |
 | Signals | Partial | Selected standard signal, mask, alternate-stack, queued self-delivery with preserved `sigval`, delivery, and return behavior; no complete real-time queueing, cross-process delivery, or restart/nesting semantics. |
-| VFS and path lookup | Partial | Immutable OCI lower root with a demand-allocated, per-domain RAM overlay, directories, symlinks, FIFO metadata, cwd, tmpfs, devfs, procfs subsets, and frame-chained extended attributes. Overlay file and xattr data grow by allocating frames rather than stopping at a fixed aggregate cache ceiling; open-unlinked objects live through their descriptors, directory renames include descendants, and permission/ownership operations cover the package-manager path. `cachestat` reports RAM-resident pages for regular OCI/overlay files. `memfd_create` provides elastic anonymous files and `MFD_CLOEXEC`; sealing operations remain pending. `memfd_secret` provides anonymous shared mappings that reject kernel user-copy and descriptor I/O, but direct-map removal, coherent repeated mappings, demand allocation, locked-memory accounting, and fork inheritance remain pending. `mknod`/`mknodat` create regular files and FIFOs; opening named FIFOs and creating socket nodes are pending, while device nodes are denied by domain policy. This is not yet a complete Linux VFS. |
+| VFS and path lookup | Partial | Immutable OCI lower root with a demand-allocated, per-domain RAM overlay, directories, symlinks, FIFO metadata, cwd, tmpfs, devfs, procfs subsets, and frame-chained extended attributes. Overlay file and xattr data grow by allocating frames rather than stopping at a fixed aggregate cache ceiling; open-unlinked objects live through their descriptors, directory renames include descendants, and permission/ownership operations cover the package-manager path. Generation-stable OCI and overlay file handles support size discovery, mount IDs, rename-stable reopening, and `O_PATH`; procfs and other virtual filesystems do not export handles. `cachestat` reports RAM-resident pages for regular OCI/overlay files. `memfd_create` provides elastic anonymous files and `MFD_CLOEXEC`; sealing operations remain pending. `memfd_secret` provides anonymous shared mappings that reject kernel user-copy and descriptor I/O, but direct-map removal, coherent repeated mappings, demand allocation, locked-memory accounting, and fork inheritance remain pending. `mknod`/`mknodat` create regular files and FIFOs; opening named FIFOs and creating socket nodes are pending, while device nodes are denied by domain policy. This is not yet a complete Linux VFS. |
 | Filesystem notifications | Partial | `inotify_init[1]`, one instance with up to 16 watches per domain, watch replacement/addition, removal with `IN_IGNORED`, descriptor duplication, readiness, event reads, and coalesced `IN_MODIFY` events for overlay writes are supported. Multiple instances, directory child names, blocking reads, and the remaining mutation event classes are pending. |
 | `/proc` | Partial | Automatically mounted per domain with domain-local PID directories, `status`, `stat`, `statm`, `mountinfo`, namespace maps, `cpuinfo`, `meminfo`, `stat`, `uptime`, `loadavg`, `filesystems`, and `cmdline`. Broader Linux procfs coverage and unconstrained process enumeration remain incomplete. |
 | IPv4 sockets | Partial | Domain descriptors expose repeated client TCP and UDP connections plus TCP bind/listen/accept over the shared host NIC with IOMMU-confined virtio queues; AF_UNIX stream socket pairs cover local runtime coordination. Ancillary data, IPv6, multi-entry listen backlogs, and complete option/error semantics remain pending. |
@@ -430,8 +430,8 @@ therefore omitted.
 | 300 | fanotify_init | Missing |
 | 301 | fanotify_mark | Missing |
 | 302 | prlimit64 | Partial |
-| 303 | name_to_handle_at | Missing |
-| 304 | open_by_handle_at | Missing |
+| 303 | name_to_handle_at | Partial |
+| 304 | open_by_handle_at | Partial |
 | 305 | clock_adjtime | Policy-denied |
 | 306 | syncfs | Partial |
 | 307 | sendmmsg | Partial |
