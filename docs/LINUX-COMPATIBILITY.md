@@ -42,7 +42,7 @@ implemented calls lives in [Linux Syscall Entry v0](../specs/kernel/linux-syscal
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **17 Complete**, **211 Partial**, **28 Policy-denied**, **119 Missing**.
+Current totals: **17 Complete**, **212 Partial**, **28 Policy-denied**, **118 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -157,7 +157,7 @@ therefore omitted.
 | 75 | fdatasync | Partial |
 | 76 | truncate | Partial |
 | 77 | ftruncate | Partial |
-| 78 | getdents | Missing |
+| 78 | getdents | Partial |
 | 79 | getcwd | Partial |
 | 80 | chdir | Partial |
 | 81 | fchdir | Partial |

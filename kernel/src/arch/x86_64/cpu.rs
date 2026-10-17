@@ -161,6 +161,7 @@ const LINUX_FSYNC_SYSCALL: u64 = 74;
 const LINUX_FDATASYNC_SYSCALL: u64 = 75;
 const LINUX_TRUNCATE_SYSCALL: u64 = 76;
 const LINUX_FTRUNCATE_SYSCALL: u64 = 77;
+const LINUX_GETDENTS_SYSCALL: u64 = 78;
 const LINUX_GETCWD_SYSCALL: u64 = 79;
 const LINUX_CHDIR_SYSCALL: u64 = 80;
 const LINUX_FCHDIR_SYSCALL: u64 = 81;
@@ -8370,6 +8371,7 @@ extern "sysv64" fn linux_syscall_handler(
             0
         }
         LINUX_GETRANDOM_SYSCALL => linux_getrandom(first_argument, buffer, count),
+        LINUX_GETDENTS_SYSCALL => linux_getdents(first_argument, buffer, count, true),
         LINUX_GETDENTS64_SYSCALL => linux_getdents64(first_argument, buffer, count),
         LINUX_READAHEAD_SYSCALL => linux_readahead(first_argument, buffer, count),
         LINUX_EPOLL_CREATE_SYSCALL => {
@@ -20171,6 +20173,10 @@ fn linux_descriptor_set_status_flags(
 }
 
 fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
+    linux_getdents(descriptor, address, count, false)
+}
+
+fn linux_getdents(descriptor: u64, address: u64, count: u64, legacy: bool) -> u64 {
     let state = linux_device_descriptor(descriptor);
     if state & LINUX_DEVICE_DIRECTORY == 0 {
         return LINUX_ENOTDIR;
@@ -20205,6 +20211,7 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
                 if !append_linux_dirent(
                     &mut entries[..output_capacity],
                     &mut used,
+                    legacy,
                     inode,
                     next,
                     4,
@@ -20235,6 +20242,7 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
             if !append_linux_dirent(
                 &mut entries[..output_capacity],
                 &mut used,
+                legacy,
                 child.metadata.handle.inode(),
                 next,
                 kind,
@@ -20276,6 +20284,7 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
                 if !append_linux_dirent(
                     &mut entries[..output_capacity],
                     &mut used,
+                    legacy,
                     inode,
                     next,
                     4,
@@ -20304,6 +20313,7 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
             if !append_linux_dirent(
                 &mut entries[..output_capacity],
                 &mut used,
+                legacy,
                 linux_oci_inode(child.handle),
                 next,
                 kind,
@@ -20351,6 +20361,7 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
                 if !append_linux_dirent(
                     &mut entries[..output_capacity],
                     &mut used,
+                    legacy,
                     inode,
                     next,
                     4,
@@ -20377,6 +20388,7 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
                     if !append_linux_dirent(
                         &mut entries[..output_capacity],
                         &mut used,
+                        legacy,
                         inode,
                         (index + 3) as i64,
                         8,
@@ -20406,6 +20418,7 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
                     if !append_linux_dirent(
                         &mut entries[..output_capacity],
                         &mut used,
+                        legacy,
                         inode,
                         (index + 3) as i64,
                         8,
@@ -20440,6 +20453,7 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
                     if !append_linux_dirent(
                         &mut entries[..output_capacity],
                         &mut used,
+                        legacy,
                         *inode,
                         (index + 3) as i64,
                         8,
@@ -20463,6 +20477,7 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
                         if !append_linux_dirent(
                             &mut entries[..output_capacity],
                             &mut used,
+                            legacy,
                             inode,
                             (index + 3) as i64,
                             4,
@@ -20488,6 +20503,7 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
                     if !append_linux_dirent(
                         &mut entries[..output_capacity],
                         &mut used,
+                        legacy,
                         inode,
                         3,
                         kind,
@@ -20539,6 +20555,7 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
                 if !append_linux_dirent(
                     &mut entries[..output_capacity],
                     &mut used,
+                    legacy,
                     child_inode,
                     next,
                     kind,
@@ -20577,6 +20594,7 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
             if !append_linux_dirent(
                 &mut entries[..output_capacity],
                 &mut used,
+                legacy,
                 inode,
                 next,
                 kind,
@@ -20600,12 +20618,14 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
 fn append_linux_dirent(
     output: &mut [u8],
     used: &mut usize,
+    legacy: bool,
     inode: u64,
     next: i64,
     kind: u8,
     name: &[u8],
 ) -> bool {
-    let record_size = (19 + name.len() + 1 + 7) & !7;
+    let header_size = if legacy { 18 } else { 19 };
+    let record_size = (header_size + name.len() + 1 + usize::from(legacy) + 7) & !7;
     let Some(end) = used.checked_add(record_size) else {
         return false;
     };
@@ -20615,8 +20635,13 @@ fn append_linux_dirent(
     record[..8].copy_from_slice(&inode.to_ne_bytes());
     record[8..16].copy_from_slice(&next.to_ne_bytes());
     record[16..18].copy_from_slice(&(record_size as u16).to_ne_bytes());
-    record[18] = kind;
-    record[19..19 + name.len()].copy_from_slice(name);
+    if legacy {
+        record[18..18 + name.len()].copy_from_slice(name);
+        record[record_size - 1] = kind;
+    } else {
+        record[18] = kind;
+        record[19..19 + name.len()].copy_from_slice(name);
+    }
     *used = end;
     true
 }

@@ -280,6 +280,13 @@ revalidates every output range before copying or consuming, and clears the
 snapshot on wake, close, rollback, signal interruption, or thread retirement.
 The measured graph changes the shared userspace table while the reader sleeps
 and proves that the original one-byte target still receives the writer's byte.
+`rax = 78` (`__NR_getdents`) enumerates the same admitted per-domain
+directories as `getdents64` using the native x86-64 legacy `linux_dirent`
+layout: 64-bit inode and offset fields, a 16-bit record length, the terminated
+name at offset 18, and `d_type` in the final record byte. Records remain
+eight-byte aligned, descriptor offsets advance only after a successful complete
+copy, and the proof covers a full `/dev` enumeration, EOF, rewind, names, and
+record typing. Directory coverage remains bounded by the current VFS profile.
 `rax = 79` (`__NR_getcwd`) copies the process's indexed working-directory path
 and terminator to a writable VMA and returns the required byte count. The
 initial directory is `/`; measured directories such as `/var/lib` retain their

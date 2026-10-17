@@ -3960,6 +3960,23 @@ linux_child_joined:
     push 8
     pop rax
     call syscall_expect_zero
+#if !defined(GINUX_LINKED) || !defined(GINUX_GRAPH)
+    mov esi, 0x405800
+    mov edx, 152
+    mov eax, 78
+    call syscall_expect_152
+    cmp byte ptr [0x405812], '.'
+    require_equal
+    cmp byte ptr [0x405842], 'n'
+    require_equal
+    mov eax, 78
+    call syscall_expect_zero
+    xor esi, esi
+    xor edx, edx
+    push 8
+    pop rax
+    call syscall_expect_zero
+#endif
     mov esi, 0x405800
     mov edx, 152
     mov eax, 217
