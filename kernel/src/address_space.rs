@@ -124,6 +124,9 @@ const LINUX_RUNTIME_DEMAND: u64 = 1 << 11;
 const LINUX_INIT_ARGUMENT: [u8; 6] = [b'/', b'i', b'n', b'i', b't', 0];
 const LINUX_INIT_ENVIRONMENT: [u8; 8] = [b'G', b'I', b'N', b'U', b'X', b'=', b'1', 0];
 const LINUX_PLATFORM: [u8; 7] = [b'x', b'8', b'6', b'_', b'6', b'4', 0];
+const LINUX_FIXTURE_RANDOM: [u8; 16] = [
+    0x47, 0x69, 0x6e, 0x75, 0x78, 0x2d, 0x41, 0x42, 0x49, 0x2d, 0x76, 0x30, 0x2d, 0x30, 0x30, 0x31,
+];
 const LINUX_TLS_THREAD_POINTER_OFFSET: usize = PAGE_SIZE - 64;
 const LINUX_TLS_TCB_SIZE: usize = 16;
 pub(crate) const USER_ADDRESS_SPACE_FRAMES: usize = 7;
@@ -924,11 +927,13 @@ pub(crate) fn verify_linux_elf_mapping(
             }
 
             let stack_bytes = mapped_frame::<u8>(stack_page)?;
-            let stack_offset = PAGE_SIZE - 48 * size_of::<u64>();
-            let platform_offset = PAGE_SIZE - 6 * size_of::<u64>();
+            let stack_offset = PAGE_SIZE - 50 * size_of::<u64>();
+            let random_offset = PAGE_SIZE - 7 * size_of::<u64>();
+            let platform_offset = PAGE_SIZE - 5 * size_of::<u64>();
             let environment_offset = PAGE_SIZE - 4 * size_of::<u64>();
             let argument_offset = PAGE_SIZE - 2 * size_of::<u64>();
             let platform_address = stack_virtual_page + platform_offset as u64;
+            let random_address = stack_virtual_page + random_offset as u64;
             let environment_address = stack_virtual_page + environment_offset as u64;
             let argument_address = stack_virtual_page + argument_offset as u64;
             let stack_words = stack_bytes.add(stack_offset).cast::<u64>();
@@ -938,13 +943,22 @@ pub(crate) fn verify_linux_elf_mapping(
             {
                 stack_words.add(index).write(value);
             }
-            for (index, value) in
-                crate::linux_elf::auxiliary_vector(startup, argument_address, platform_address, 0)
-                    .into_iter()
-                    .enumerate()
+            for (index, value) in crate::linux_elf::auxiliary_vector(
+                startup,
+                argument_address,
+                platform_address,
+                random_address,
+            )
+            .into_iter()
+            .enumerate()
             {
                 stack_words.add(5 + index).write(value);
             }
+            core::ptr::copy_nonoverlapping(
+                LINUX_FIXTURE_RANDOM.as_ptr(),
+                stack_bytes.add(random_offset),
+                LINUX_FIXTURE_RANDOM.len(),
+            );
             core::ptr::copy_nonoverlapping(
                 LINUX_PLATFORM.as_ptr(),
                 stack_bytes.add(platform_offset),
@@ -1094,8 +1108,14 @@ pub(crate) fn verify_linux_elf_mapping(
                 && stack_words.add(36).read() == 0
                 && stack_words.add(37).read() == 26
                 && stack_words.add(38).read() == 0
-                && stack_words.add(39).read() == 0
-                && stack_words.add(40).read() == 0
+                && stack_words.add(39).read() == 25
+                && stack_words.add(40).read() == random_address
+                && stack_words.add(41).read() == 0
+                && stack_words.add(42).read() == 0
+                && core::slice::from_raw_parts(
+                    stack_bytes.add(random_offset),
+                    LINUX_FIXTURE_RANDOM.len(),
+                ) == LINUX_FIXTURE_RANDOM
                 && core::slice::from_raw_parts(
                     stack_bytes.add(platform_offset),
                     LINUX_PLATFORM.len(),
