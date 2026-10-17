@@ -331,6 +331,9 @@ const LINUX_CLOCK_NANOSLEEP_SYSCALL: u64 = 230;
 const LINUX_CLOCK_SETTIME_SYSCALL: u64 = 227;
 const LINUX_KEXEC_LOAD_SYSCALL: u64 = 246;
 const LINUX_WAITID_SYSCALL: u64 = 247;
+const LINUX_ADD_KEY_SYSCALL: u64 = 248;
+const LINUX_REQUEST_KEY_SYSCALL: u64 = 249;
+const LINUX_KEYCTL_SYSCALL: u64 = 250;
 const LINUX_UTIMES_SYSCALL: u64 = 235;
 const LINUX_VSERVER_SYSCALL: u64 = 236;
 const LINUX_MBIND_SYSCALL: u64 = 237;
@@ -490,6 +493,8 @@ const LINUX_ERANGE: u64 = u64::MAX - 33;
 const LINUX_EOVERFLOW: u64 = u64::MAX - 74;
 const LINUX_ELOOP: u64 = u64::MAX - 39;
 const LINUX_ESTALE: u64 = u64::MAX - 115;
+const LINUX_ENOKEY: u64 = u64::MAX - 125;
+const LINUX_EKEYREVOKED: u64 = u64::MAX - 127;
 const LINUX_ENODATA: u64 = u64::MAX - 60;
 const LINUX_EMSGSIZE: u64 = u64::MAX - 89;
 const LINUX_EOPNOTSUPP: u64 = u64::MAX - 94;
@@ -8770,6 +8775,13 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_INOTIFY_INIT1_SYSCALL => linux_inotify_init(first_argument),
         LINUX_INOTIFY_ADD_WATCH_SYSCALL => linux_inotify_add_watch(first_argument, buffer, count),
         LINUX_INOTIFY_RM_WATCH_SYSCALL => linux_inotify_rm_watch(first_argument, buffer),
+        LINUX_ADD_KEY_SYSCALL => {
+            linux_add_key(first_argument, buffer, count, register(0), register(2))
+        }
+        LINUX_REQUEST_KEY_SYSCALL => linux_request_key(first_argument, buffer, count, register(0)),
+        LINUX_KEYCTL_SYSCALL => {
+            linux_keyctl(first_argument, buffer, count, register(0), register(2))
+        }
         LINUX_PRLIMIT64_SYSCALL => {
             if !matches!(first_argument, 0 | 1) {
                 return LINUX_ESRCH;
@@ -9909,6 +9921,7 @@ fn finish_linux_runtime(mmap: u64, saved_msrs: [u64; 5]) -> LinuxElfResult {
     let registry_finished = linux_process::finish_runtime_process_registry();
     let aio_released = registry_finished && crate::linux_aio::teardown();
     let sysv_ipc_released = aio_released && crate::linux_sysv_ipc::teardown();
+    let keyrings_released = sysv_ipc_released && crate::linux_keyring::teardown();
     let mount_deactivated = linux_mount::deactivate_initial();
     let timer_finished = timer::finish_linux_wait_timer();
     let msrs_restored = restore_linux_syscall(saved_msrs);
@@ -9925,6 +9938,7 @@ fn finish_linux_runtime(mmap: u64, saved_msrs: [u64; 5]) -> LinuxElfResult {
         && overlay_released
         && registry_finished
         && sysv_ipc_released
+        && keyrings_released
         && mount_deactivated
         && timer_finished
         && msrs_restored
@@ -12660,6 +12674,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && !linux_default_signal_terminates(LINUX_SIGCHLD);
     let seccomp = verify_linux_seccomp_syscall();
     let remap_file_pages = verify_linux_remap_file_pages_syscall();
+    let keyrings = verify_linux_keyring_syscalls();
     let mappings_released =
         address_space::release_current_linux_runtime_mappings(LINUX_RUNTIME_DYNAMIC_MMAP_BASE);
     ELF_PROBE_MMAP_NEXT.store(LINUX_RUNTIME_DYNAMIC_MMAP_BASE, Ordering::SeqCst);
@@ -12680,7 +12695,66 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && uretprobe
         && seccomp
         && remap_file_pages
+        && keyrings
         && mappings_released
+}
+
+fn verify_linux_keyring_syscalls() -> bool {
+    let mapping = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    if !(LINUX_RUNTIME_DYNAMIC_MMAP_BASE..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
+        .contains(&mapping)
+    {
+        return false;
+    }
+    let prepared = copy_to_linux_user(mapping, b"user\0")
+        && copy_to_linux_user(mapping + 64, b"ginux-key\0")
+        && copy_to_linux_user(mapping + 128, b"first")
+        && copy_to_linux_user(mapping + 192, b"updated");
+    let serial = if prepared {
+        linux_add_key(mapping, mapping + 64, mapping + 128, 5, (-2_i64) as u64)
+    } else {
+        LINUX_EINVAL
+    };
+    let added = (100..i32::MAX as u64).contains(&serial)
+        && linux_request_key(mapping, mapping + 64, 0, 0) == serial;
+    let read = added && linux_keyctl(11, serial, mapping + 256, 16, 0) == 5 && {
+        let mut payload = [0_u8; 5];
+        copy_from_linux_user(mapping + 256, &mut payload) && payload == *b"first"
+    };
+    let updated = read
+        && linux_keyctl(2, serial, mapping + 192, 7, 0) == 0
+        && linux_keyctl(11, serial, mapping + 256, 16, 0) == 7
+        && {
+            let mut payload = [0_u8; 7];
+            copy_from_linux_user(mapping + 256, &mut payload) && payload == *b"updated"
+        };
+    let described = updated && linux_keyctl(6, serial, mapping + 320, 64, 0) == 28 && {
+        let mut description = [0_u8; 28];
+        copy_from_linux_user(mapping + 320, &mut description)
+            && description == *b"user;0;0;3f3f0000;ginux-key\0"
+    };
+    let revoked = described
+        && linux_keyctl(3, serial, 0, 0, 0) == 0
+        && linux_keyctl(11, serial, mapping + 256, 16, 0) == LINUX_EKEYREVOKED;
+    let rejected = revoked
+        && linux_add_key(
+            mapping,
+            mapping + 64,
+            mapping + 128,
+            crate::linux_keyring::PAYLOAD_CAPACITY as u64 + 1,
+            (-2_i64) as u64,
+        ) == LINUX_E2BIG
+        && linux_request_key(mapping, mapping + 64, 0, 0) == LINUX_ENOKEY;
+    let cleared = crate::linux_keyring::clear();
+    let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
+    rejected && cleared && unmapped
 }
 
 fn linux_remap_file_pages(start: u64, length: u64, protection: u64, page: u64, _flags: u64) -> u64 {
@@ -25740,6 +25814,202 @@ fn copy_linux_c_string(address: u64, output: &mut [u8]) -> Result<usize, u64> {
         }
     }
     Err(LINUX_ENAMETOOLONG)
+}
+
+fn linux_key_error(error: crate::linux_keyring::Error) -> u64 {
+    match error {
+        crate::linux_keyring::Error::Invalid => LINUX_EINVAL,
+        crate::linux_keyring::Error::NoKey => LINUX_ENOKEY,
+        crate::linux_keyring::Error::NoMemory => LINUX_ENOMEM,
+        crate::linux_keyring::Error::Revoked => LINUX_EKEYREVOKED,
+        crate::linux_keyring::Error::TooBig => LINUX_E2BIG,
+    }
+}
+
+fn linux_keyring_id(raw: u64) -> Option<i32> {
+    let id = raw as i32;
+    match id {
+        -1 | -2 => Some(crate::linux_keyring::PROCESS_KEYRING),
+        -3 | -5 => Some(crate::linux_keyring::SESSION_KEYRING),
+        -4 => Some(crate::linux_keyring::USER_KEYRING),
+        id @ 1..=3 => Some(id),
+        _ => None,
+    }
+}
+
+fn linux_key_strings(
+    type_address: u64,
+    description_address: u64,
+) -> Result<([u8; 32], usize, [u8; 256], usize), u64> {
+    let mut key_type = [0_u8; crate::linux_keyring::TYPE_CAPACITY];
+    let type_length = copy_linux_c_string(type_address, &mut key_type)?;
+    let mut description = [0_u8; crate::linux_keyring::DESCRIPTION_CAPACITY];
+    let description_length = copy_linux_c_string(description_address, &mut description)?;
+    if !matches!(&key_type[..type_length], b"user" | b"logon") || description_length == 0 {
+        return Err(LINUX_EOPNOTSUPP);
+    }
+    Ok((key_type, type_length, description, description_length))
+}
+
+fn linux_add_key(
+    type_address: u64,
+    description_address: u64,
+    payload_address: u64,
+    payload_length: u64,
+    destination: u64,
+) -> u64 {
+    if linux_keyring_id(destination).is_none() {
+        return LINUX_ENOKEY;
+    }
+    let (key_type, type_length, description, description_length) =
+        match linux_key_strings(type_address, description_address) {
+            Ok(strings) => strings,
+            Err(error) => return error,
+        };
+    let Ok(payload_length) = usize::try_from(payload_length) else {
+        return LINUX_E2BIG;
+    };
+    if payload_length > crate::linux_keyring::PAYLOAD_CAPACITY {
+        return LINUX_E2BIG;
+    }
+    let mut payload = [0_u8; crate::linux_keyring::PAYLOAD_CAPACITY];
+    if payload_length != 0 && !copy_from_linux_user(payload_address, &mut payload[..payload_length])
+    {
+        return LINUX_EFAULT;
+    }
+    crate::linux_keyring::add(
+        &key_type[..type_length],
+        &description[..description_length],
+        &payload[..payload_length],
+    )
+    .map_or_else(linux_key_error, |serial| serial as u64)
+}
+
+fn linux_request_key(
+    type_address: u64,
+    description_address: u64,
+    callout_address: u64,
+    destination: u64,
+) -> u64 {
+    if destination != 0 && linux_keyring_id(destination).is_none() {
+        return LINUX_ENOKEY;
+    }
+    if callout_address != 0 {
+        let mut callout = [0_u8; 256];
+        if let Err(error) = copy_linux_c_string(callout_address, &mut callout) {
+            return error;
+        }
+    }
+    let (key_type, type_length, description, description_length) =
+        match linux_key_strings(type_address, description_address) {
+            Ok(strings) => strings,
+            Err(error) => return error,
+        };
+    crate::linux_keyring::search(&key_type[..type_length], &description[..description_length])
+        .map_or_else(linux_key_error, |serial| serial as u64)
+}
+
+fn linux_keyctl(command: u64, second: u64, third: u64, fourth: u64, fifth: u64) -> u64 {
+    const GET_KEYRING_ID: u64 = 0;
+    const JOIN_SESSION_KEYRING: u64 = 1;
+    const UPDATE: u64 = 2;
+    const REVOKE: u64 = 3;
+    const DESCRIBE: u64 = 6;
+    const CLEAR: u64 = 7;
+    const SEARCH: u64 = 10;
+    const READ: u64 = 11;
+    const INVALIDATE: u64 = 21;
+    match command {
+        GET_KEYRING_ID => linux_keyring_id(second).map_or(LINUX_ENOKEY, |id| id as u64),
+        JOIN_SESSION_KEYRING => {
+            if second != 0 {
+                let mut name = [0_u8; 256];
+                if let Err(error) = copy_linux_c_string(second, &mut name) {
+                    return error;
+                }
+            }
+            crate::linux_keyring::SESSION_KEYRING as u64
+        }
+        UPDATE => {
+            let Ok(length) = usize::try_from(fourth) else {
+                return LINUX_E2BIG;
+            };
+            if length > crate::linux_keyring::PAYLOAD_CAPACITY {
+                return LINUX_E2BIG;
+            }
+            let mut payload = [0_u8; crate::linux_keyring::PAYLOAD_CAPACITY];
+            if length != 0 && !copy_from_linux_user(third, &mut payload[..length]) {
+                return LINUX_EFAULT;
+            }
+            crate::linux_keyring::update(second as i32, &payload[..length])
+                .map_or_else(linux_key_error, |()| 0)
+        }
+        REVOKE | INVALIDATE => {
+            crate::linux_keyring::revoke(second as i32).map_or_else(linux_key_error, |()| 0)
+        }
+        CLEAR => {
+            if linux_keyring_id(second).is_none() {
+                LINUX_ENOKEY
+            } else if crate::linux_keyring::clear() {
+                0
+            } else {
+                LINUX_EIO
+            }
+        }
+        SEARCH => {
+            if linux_keyring_id(second).is_none() || fifth != 0 && linux_keyring_id(fifth).is_none()
+            {
+                return LINUX_ENOKEY;
+            }
+            linux_request_key(third, fourth, 0, fifth)
+        }
+        READ => {
+            let Ok(length) = usize::try_from(fourth) else {
+                return LINUX_EINVAL;
+            };
+            let mut payload = [0_u8; crate::linux_keyring::PAYLOAD_CAPACITY];
+            let capacity = payload.len();
+            match crate::linux_keyring::read(second as i32, &mut payload[..length.min(capacity)]) {
+                Ok(required) => {
+                    let copied = required.min(length);
+                    if copied != 0 && !copy_to_linux_user(third, &payload[..copied]) {
+                        LINUX_EFAULT
+                    } else {
+                        required as u64
+                    }
+                }
+                Err(error) => linux_key_error(error),
+            }
+        }
+        DESCRIBE => linux_keyctl_describe(second as i32, third, fourth),
+        _ => LINUX_EOPNOTSUPP,
+    }
+}
+
+fn linux_keyctl_describe(serial: i32, output_address: u64, output_length: u64) -> u64 {
+    let mut key_type = [0_u8; crate::linux_keyring::TYPE_CAPACITY];
+    let mut description = [0_u8; crate::linux_keyring::DESCRIPTION_CAPACITY];
+    let info = match crate::linux_keyring::describe(serial, &mut key_type, &mut description) {
+        Ok(info) => info,
+        Err(error) => return linux_key_error(error),
+    };
+    let mut output = [0_u8; 320];
+    let mut used = 0;
+    for part in [
+        &key_type[..info.type_length],
+        b";0;0;3f3f0000;",
+        &description[..info.description_length],
+    ] {
+        output[used..used + part.len()].copy_from_slice(part);
+        used += part.len();
+    }
+    used += 1;
+    let copied = used.min(output_length as usize);
+    if copied != 0 && !copy_to_linux_user(output_address, &output[..copied]) {
+        LINUX_EFAULT
+    } else {
+        used as u64
+    }
 }
 
 fn copy_linux_id_triple(first: u64, second: u64, third: u64, ids: (u32, u32, u32)) -> bool {

@@ -1721,6 +1721,15 @@ contract. All VMAs Ginux currently creates are ineligible: file mappings are
 private and shared mappings are anonymous, so Linux-compatible `EINVAL` is
 returned. Successful nonlinear `MAP_SHARED` file remapping remains pending.
 
+`rax = 248..250` (`add_key`, `request_key`, and `keyctl`) provide per-domain,
+frame-backed `user` and `logon` keys. Process, session, and user keyring
+selectors are recognized; keys receive monotonic serials and support lookup,
+payload read/update, description, revoke/invalidate, and ring clear. Payloads
+are scrubbed when their domain is torn down. The current one-frame payload
+profile is bounded to 3760 bytes. General key types, nested keyring links,
+permission mutation, request-key upcalls, quotas, expiry, and asymmetric-key
+operations remain unsupported.
+
 Every other call
 returns `-ENOSYS` without disarming
 the task, so a caller can handle the error and continue. The entire path

@@ -42,7 +42,7 @@ Detailed bounded behavior for implemented calls lives in
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **19 Complete**, **299 Partial**, **45 Policy-denied**, **12 Missing**.
+Current totals: **19 Complete**, **302 Partial**, **45 Policy-denied**, **9 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -375,9 +375,9 @@ therefore omitted.
 | 245 | mq_getsetattr | Partial |
 | 246 | kexec_load | Policy-denied |
 | 247 | waitid | Partial |
-| 248 | add_key | Missing |
-| 249 | request_key | Missing |
-| 250 | keyctl | Missing |
+| 248 | add_key | Partial |
+| 249 | request_key | Partial |
+| 250 | keyctl | Partial |
 | 251 | ioprio_set | Partial |
 | 252 | ioprio_get | Partial |
 | 253 | inotify_init | Partial |

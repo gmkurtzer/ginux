@@ -12,6 +12,7 @@ mod initramfs;
 mod ipc;
 mod linux_aio;
 mod linux_elf;
+mod linux_keyring;
 mod linux_mount;
 mod linux_overlay;
 mod linux_process;
