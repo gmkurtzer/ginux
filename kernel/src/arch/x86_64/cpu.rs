@@ -217,7 +217,9 @@ const LINUX_MKNOD_SYSCALL: u64 = 133;
 const LINUX_USELIB_SYSCALL: u64 = 134;
 const LINUX_STATFS_SYSCALL: u64 = 137;
 const LINUX_FSTATFS_SYSCALL: u64 = 138;
+const LINUX_SYSFS_SYSCALL: u64 = 139;
 const LINUX_PERSONALITY_SYSCALL: u64 = 135;
+const LINUX_USTAT_SYSCALL: u64 = 136;
 const LINUX_GETPRIORITY_SYSCALL: u64 = 140;
 const LINUX_SETPRIORITY_SYSCALL: u64 = 141;
 const LINUX_SCHED_SETPARAM_SYSCALL: u64 = 142;
@@ -8374,6 +8376,8 @@ extern "sysv64" fn linux_syscall_handler(
         }
         LINUX_STATFS_SYSCALL => linux_statfs(first_argument, buffer),
         LINUX_FSTATFS_SYSCALL => linux_fstatfs(first_argument, buffer),
+        LINUX_SYSFS_SYSCALL => linux_sysfs(first_argument, buffer, count),
+        LINUX_USTAT_SYSCALL => linux_ustat(first_argument, buffer),
         LINUX_GETCWD_SYSCALL => linux_getcwd(first_argument, buffer),
         LINUX_CHDIR_SYSCALL => linux_chdir(first_argument),
         LINUX_FCHDIR_SYSCALL => linux_fchdir(first_argument),
@@ -22681,6 +22685,21 @@ fn linux_statfs_data() -> [u8; 120] {
     stat
 }
 
+fn linux_ustat(device: u64, output_address: u64) -> u64 {
+    // The initial Linux mount namespace publishes rootfs as device 0:1.
+    if device != 1 {
+        return LINUX_EINVAL;
+    }
+    let mut output = [0_u8; 32];
+    output[..8].copy_from_slice(&1_048_576_i64.to_ne_bytes());
+    output[8..16].copy_from_slice(&1_048_576_u64.to_ne_bytes());
+    if copy_to_linux_user(output_address, &output) {
+        0
+    } else {
+        LINUX_EFAULT
+    }
+}
+
 fn linux_statfs(path_address: u64, stat_address: u64) -> u64 {
     let mut path = [0_u8; crate::linux_overlay::PATH_CAPACITY];
     let length = match copy_linux_c_string(path_address, &mut path) {
@@ -22714,6 +22733,41 @@ fn linux_fstatfs(descriptor: u64, stat_address: u64) -> u64 {
         0
     } else {
         LINUX_EFAULT
+    }
+}
+
+fn linux_sysfs(option: u64, first: u64, second: u64) -> u64 {
+    const FILE_SYSTEMS: [&[u8]; 4] = [b"rootfs", b"proc", b"tmpfs", b"devtmpfs"];
+
+    match option {
+        1 => {
+            let mut name = [0_u8; 32];
+            let length = match copy_linux_c_string(first, &mut name) {
+                Ok(length) => length,
+                Err(error) => return error,
+            };
+            FILE_SYSTEMS
+                .iter()
+                .position(|candidate| *candidate == &name[..length])
+                .map_or(LINUX_EINVAL, |index| index as u64)
+        }
+        2 => {
+            let Some(name) = usize::try_from(first)
+                .ok()
+                .and_then(|index| FILE_SYSTEMS.get(index))
+            else {
+                return LINUX_EINVAL;
+            };
+            let mut output = [0_u8; 9];
+            output[..name.len()].copy_from_slice(name);
+            if copy_to_linux_user(second, &output[..name.len() + 1]) {
+                0
+            } else {
+                LINUX_EFAULT
+            }
+        }
+        3 => FILE_SYSTEMS.len() as u64,
+        _ => LINUX_EINVAL,
     }
 }
 

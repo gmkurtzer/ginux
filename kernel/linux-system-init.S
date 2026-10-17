@@ -91,6 +91,79 @@ ginux_linux_system_init:
     test rax, rax
     jne .Lfailure
 
+    mov edi, 3
+    xor esi, esi
+    xor edx, edx
+    mov eax, 139
+    syscall
+    cmp rax, 4
+    jne .Lfailure
+    mov edi, 2
+    xor esi, esi
+    lea rdx, [rip + .Lsysfs_name]
+    mov eax, 139
+    syscall
+    test rax, rax
+    jne .Lfailure
+    cmp dword ptr [rip + .Lsysfs_name], 0x746f6f72
+    jne .Lfailure
+    cmp word ptr [rip + .Lsysfs_name + 4], 0x0073
+    jne .Lfailure
+    mov edi, 1
+    lea rsi, [rip + .Ltmpfs_name]
+    xor edx, edx
+    mov eax, 139
+    syscall
+    cmp rax, 2
+    jne .Lfailure
+    mov edi, 1
+    lea rsi, [rip + .Lunknown_fs_name]
+    xor edx, edx
+    mov eax, 139
+    syscall
+    cmp rax, -22
+    jne .Lfailure
+    mov edi, 2
+    mov esi, 4
+    lea rdx, [rip + .Lsysfs_name]
+    mov eax, 139
+    syscall
+    cmp rax, -22
+    jne .Lfailure
+    mov edi, 2
+    xor esi, esi
+    xor edx, edx
+    mov eax, 139
+    syscall
+    cmp rax, -14
+    jne .Lfailure
+    mov edi, 1
+    lea rsi, [rip + .Lustat]
+    mov eax, 136
+    syscall
+    test rax, rax
+    jne .Lfailure
+    cmp qword ptr [rip + .Lustat], 1048576
+    jne .Lfailure
+    cmp qword ptr [rip + .Lustat + 8], 1048576
+    jne .Lfailure
+    cmp qword ptr [rip + .Lustat + 16], 0
+    jne .Lfailure
+    cmp qword ptr [rip + .Lustat + 24], 0
+    jne .Lfailure
+    mov edi, 2
+    lea rsi, [rip + .Lustat]
+    mov eax, 136
+    syscall
+    cmp rax, -22
+    jne .Lfailure
+    mov edi, 1
+    xor esi, esi
+    mov eax, 136
+    syscall
+    cmp rax, -14
+    jne .Lfailure
+
     mov edi, 1
     mov esi, 1
     xor edx, edx
@@ -1737,6 +1810,15 @@ ginux_linux_system_init:
     .asciz "ginux-test"
 .Lmemfd_payload:
     .ascii "memfd"
+.Ltmpfs_name:
+    .asciz "tmpfs"
+.Lunknown_fs_name:
+    .asciz "unknown"
+.Lsysfs_name:
+    .space 9
+.align 8
+.Lustat:
+    .space 32
 .align 8
 .Lsocket_pair:
     .space 8

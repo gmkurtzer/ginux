@@ -37,12 +37,12 @@ new syscall table and UAPI changes.
 | Policy-denied | Recognized as a privileged operation and rejected by the container authority policy. This is not full syscall support. |
 | Missing | Returns `-ENOSYS` through the default dispatcher. |
 
-No syscall is currently classified as Complete. Detailed bounded behavior for
-implemented calls lives in [Linux Syscall Entry v0](../specs/kernel/linux-syscall-v0.md).
+Detailed bounded behavior for implemented calls lives in
+[Linux Syscall Entry v0](../specs/kernel/linux-syscall-v0.md).
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **17 Complete**, **260 Partial**, **44 Policy-denied**, **54 Missing**.
+Current totals: **19 Complete**, **260 Partial**, **44 Policy-denied**, **52 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -228,10 +228,10 @@ therefore omitted.
 | 133 | mknod | Partial |
 | 134 | uselib | Complete |
 | 135 | personality | Partial |
-| 136 | ustat | Missing |
+| 136 | ustat | Complete |
 | 137 | statfs | Partial |
 | 138 | fstatfs | Partial |
-| 139 | sysfs | Missing |
+| 139 | sysfs | Complete |
 | 140 | getpriority | Partial |
 | 141 | setpriority | Partial |
 | 142 | sched_setparam | Partial |

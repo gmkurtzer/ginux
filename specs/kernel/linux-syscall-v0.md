@@ -422,6 +422,21 @@ and return `-EACCES` for execute access. `faccessat2` accepts only zero flags;
 unknown mode bits or flags return `-EINVAL`, with the same path errors as
 `openat`.
 
+`rax = 139` (`__NR_sysfs`) exposes the four filesystem types implemented by
+the current Linux personality in stable registration order: `rootfs`, `proc`,
+`tmpfs`, and `devtmpfs`. Operation 1 maps an exact NUL-terminated name to its
+zero-based index, operation 2 copies the indexed name including its terminator,
+and operation 3 returns the count. Unknown names, out-of-range indexes, and
+unknown operations return `-EINVAL`; inaccessible name or output memory returns
+`-EFAULT`. This legacy syscall enumerates filesystem types and does not imply a
+mounted Linux-compatible `/sys` filesystem.
+
+`rax = 136` (`__NR_ustat`) reports the free-block and free-inode counts for the
+initial namespace's root filesystem device `0:1`, using the native x86-64
+32-byte `ustat` layout and zeroed legacy name fields. An unknown device returns
+`-EINVAL`, and inaccessible output memory returns `-EFAULT` without a partial
+copy.
+
 The immutable runtime namespace also recognizes `/init`,
 `/lib64/ld-ginux.so`, `/lib64/libginux.so`, `/lib64/libginux-aux.so`,
 `/etc/hostname`, `/etc/os-release`, and `/etc/motd`. These resolve through the retained, independently measured
