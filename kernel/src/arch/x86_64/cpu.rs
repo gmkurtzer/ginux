@@ -6627,6 +6627,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     }
     let clock_state_valid = ELF_PROBE_CLOCK_EPOCH.swap(0, Ordering::SeqCst) != 0
         && ELF_PROBE_CLOCK_FREQUENCY.swap(0, Ordering::SeqCst) == clock_frequency;
+    let sealed_mmaps_released = release_linux_sealed_mmaps_at_exit();
     let mmap_inactive = (0..LINUX_RUNTIME_MMAP_SLOT_COUNT)
         .all(|index| ELF_PROBE_MMAP_PAGES[index].swap(0, Ordering::SeqCst) == 0);
     let mmap_protection_cleared = (0..LINUX_RUNTIME_MMAP_SLOT_COUNT)
@@ -6647,7 +6648,8 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         && ELF_PROBE_MMAP_GENERATIONS
             .iter()
             .all(|generation| generation.swap(0, Ordering::SeqCst) == 0);
-    let mmap_state_valid = mmap_inactive
+    let mmap_state_valid = sealed_mmaps_released
+        && mmap_inactive
         && mmap_protection_cleared
         && mmap_file_released
         && mmap_seals_released
@@ -7766,7 +7768,7 @@ extern "sysv64" fn linux_syscall_handler(
         return LINUX_RETURN_TO_KERNEL;
     }
     let runtime_mode = LINUX_RUNTIME_MODE.load(Ordering::SeqCst);
-    let trace_index = if runtime_mode {
+    let trace_index = if runtime_mode || ELF_PROBE_SYSTEM_INIT.load(Ordering::SeqCst) {
         let index = LINUX_RUNTIME_SYSCALL_TRACE_COUNT.fetch_add(1, Ordering::SeqCst) as usize
             % LINUX_RUNTIME_SYSCALL_TRACE_LIMIT;
         LINUX_RUNTIME_SYSCALL_TRACE[index].store(number, Ordering::SeqCst);
@@ -10761,6 +10763,37 @@ fn linux_mmap_unmap_and_release_slots(start_slot: usize, pages: usize) -> bool {
         }
         linux_mmap_clear_slot_lease(slot);
     }
+    true
+}
+
+fn release_linux_sealed_mmaps_at_exit() -> bool {
+    let mut slots = linux_mmap_slot_attributes();
+    let mut start_slot = 0;
+    while start_slot < LINUX_RUNTIME_MMAP_SLOT_COUNT {
+        let pages = usize::from(ELF_PROBE_MMAP_PAGES[start_slot].load(Ordering::SeqCst));
+        if pages == 0 {
+            start_slot += 1;
+            continue;
+        }
+        if pages > LINUX_RUNTIME_MMAP_SLOT_COUNT - start_slot {
+            return false;
+        }
+        let end_slot = start_slot + pages;
+        if ELF_PROBE_MMAP_SEALED[start_slot..end_slot]
+            .iter()
+            .any(|sealed| sealed.load(Ordering::SeqCst))
+        {
+            if !linux_mmap_unmap_and_release_slots(start_slot, pages) {
+                return false;
+            }
+            for slot in start_slot..end_slot {
+                slots[slot] = None;
+                ELF_PROBE_MMAP_SEALED[slot].store(false, Ordering::SeqCst);
+            }
+        }
+        start_slot = end_slot;
+    }
+    linux_mmap_rebuild_areas(slots);
     true
 }
 

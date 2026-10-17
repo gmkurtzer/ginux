@@ -107,7 +107,9 @@ ginux_linux_system_init:
     jne .Lfailure
     cmp dword ptr [rip + .Lsysfs_name], 0x746f6f72
     jne .Lfailure
-    cmp word ptr [rip + .Lsysfs_name + 4], 0x0073
+    cmp word ptr [rip + .Lsysfs_name + 4], 0x7366
+    jne .Lfailure
+    cmp byte ptr [rip + .Lsysfs_name + 6], 0
     jne .Lfailure
     mov edi, 1
     lea rsi, [rip + .Ltmpfs_name]
@@ -1084,7 +1086,7 @@ ginux_linux_system_init:
     syscall
     test rax, rax
     jne .Lfailure
-    cmp dword ptr [rip + .Lrseq_area], -1
+    cmp dword ptr [rip + .Lrseq_area], 0
     jne .Lfailure
     cmp dword ptr [rip + .Lrseq_area + 4], -1
     jne .Lfailure
