@@ -42,7 +42,7 @@ implemented calls lives in [Linux Syscall Entry v0](../specs/kernel/linux-syscal
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **17 Complete**, **216 Partial**, **37 Policy-denied**, **105 Missing**.
+Current totals: **17 Complete**, **218 Partial**, **37 Policy-denied**, **103 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -54,7 +54,7 @@ Current totals: **17 Complete**, **216 Partial**, **37 Policy-denied**, **105 Mi
 | Dynamic loader and shared objects | Partial | Unmodified Alpine/musl and Rocky 10/glibc shells load. Rocky's dynamic coreutils `cat` and `ls` execute from the OCI root. Broader dependency, relocation, locale, and NSS coverage remains incomplete. |
 | TLS | Partial | Bounded static TLS and `arch_prctl` FS-base support. |
 | Process and thread model | Partial | Repeated fork/exec/exit/wait works for Alpine and Rocky shells. Fork preserves parent memory and descriptor state; exec privately replaces shared image pages. Copy-on-write, larger process tables, and general Linux scheduling semantics remain incomplete. |
-| Signals | Partial | Selected standard signal, mask, alternate-stack, delivery, and return behavior; no complete restart/nesting semantics. |
+| Signals | Partial | Selected standard signal, mask, alternate-stack, queued self-delivery with preserved `sigval`, delivery, and return behavior; no complete real-time queueing, cross-process delivery, or restart/nesting semantics. |
 | VFS and path lookup | Partial | Immutable OCI lower root with a demand-allocated, per-domain RAM overlay, directories, symlinks, FIFO metadata, cwd, tmpfs, devfs, procfs subsets, and frame-chained extended attributes. Overlay file and xattr data grow by allocating frames rather than stopping at a fixed aggregate cache ceiling; open-unlinked objects live through their descriptors, directory renames include descendants, and permission/ownership operations cover the package-manager path. `mknod`/`mknodat` create regular files and FIFOs; opening named FIFOs and creating socket nodes are pending, while device nodes are denied by domain policy. This is not yet a complete Linux VFS. |
 | `/proc` | Partial | Automatically mounted per domain with domain-local PID directories, `status`, `stat`, `statm`, `mountinfo`, namespace maps, `cpuinfo`, `meminfo`, `stat`, `uptime`, `loadavg`, `filesystems`, and `cmdline`. Broader Linux procfs coverage and unconstrained process enumeration remain incomplete. |
 | IPv4 sockets | Partial | Domain descriptors expose repeated client TCP and UDP connections plus TCP bind/listen/accept over the shared host NIC with IOMMU-confined virtio queues; AF_UNIX stream socket pairs cover local runtime coordination. Ancillary data, IPv6, multi-entry listen backlogs, and complete option/error semantics remain pending. |
@@ -208,7 +208,7 @@ therefore omitted.
 | 126 | capset | Partial |
 | 127 | rt_sigpending | Partial |
 | 128 | rt_sigtimedwait | Partial |
-| 129 | rt_sigqueueinfo | Missing |
+| 129 | rt_sigqueueinfo | Partial |
 | 130 | rt_sigsuspend | Partial |
 | 131 | sigaltstack | Partial |
 | 132 | utime | Partial |
@@ -376,7 +376,7 @@ therefore omitted.
 | 294 | inotify_init1 | Missing |
 | 295 | preadv | Partial |
 | 296 | pwritev | Partial |
-| 297 | rt_tgsigqueueinfo | Missing |
+| 297 | rt_tgsigqueueinfo | Partial |
 | 298 | perf_event_open | Policy-denied |
 | 299 | recvmmsg | Missing |
 | 300 | fanotify_init | Missing |

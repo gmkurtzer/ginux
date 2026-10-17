@@ -81,6 +81,7 @@ const LINUX_RT_SIGPROCMASK_SYSCALL: u64 = 14;
 const LINUX_RT_SIGRETURN_SYSCALL: u64 = 15;
 const LINUX_RT_SIGPENDING_SYSCALL: u64 = 127;
 const LINUX_RT_SIGTIMEDWAIT_SYSCALL: u64 = 128;
+const LINUX_RT_SIGQUEUEINFO_SYSCALL: u64 = 129;
 const LINUX_RT_SIGSUSPEND_SYSCALL: u64 = 130;
 const LINUX_IOCTL_SYSCALL: u64 = 16;
 const LINUX_PREAD64_SYSCALL: u64 = 17;
@@ -332,6 +333,7 @@ const LINUX_DUP3_SYSCALL: u64 = 292;
 const LINUX_CLONE3_SYSCALL: u64 = 435;
 const LINUX_OPENAT2_SYSCALL: u64 = 437;
 const LINUX_PIPE2_SYSCALL: u64 = 293;
+const LINUX_RT_TGSIGQUEUEINFO_SYSCALL: u64 = 297;
 const LINUX_PREADV_SYSCALL: u64 = 295;
 const LINUX_PWRITEV_SYSCALL: u64 = 296;
 const LINUX_COPY_FILE_RANGE_SYSCALL: u64 = 326;
@@ -615,6 +617,7 @@ const LINUX_SIGSEGV: u64 = 11;
 const LINUX_SIGPIPE: u64 = 13;
 const LINUX_SIGTERM: u64 = 15;
 const LINUX_SI_USER: i32 = 0;
+const LINUX_SI_QUEUE: i32 = -1;
 const LINUX_SI_TKILL: i32 = -6;
 const LINUX_SI_KERNEL: i32 = 0x80;
 const LINUX_SEGV_MAPERR: i32 = 1;
@@ -1276,6 +1279,8 @@ static ELF_PROBE_SIGNAL_MASK: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_PENDING_SIGNALS: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_PENDING_SIGNAL_CODES: [BankedAtomicU32; LINUX_SIGNAL_COUNT] =
     [const { BankedAtomicU32::new(0) }; LINUX_SIGNAL_COUNT];
+static ELF_PROBE_PENDING_SIGNAL_VALUES: [BankedAtomicU64; LINUX_SIGNAL_COUNT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_SIGNAL_COUNT];
 static ELF_PROBE_EXEC_IGNORED_SIGNALS: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_SIGNAL_HANDLERS: [BankedAtomicU64; LINUX_SIGNAL_COUNT] =
     [const { BankedAtomicU64::new(0) }; LINUX_SIGNAL_COUNT];
@@ -3456,7 +3461,7 @@ fn resume_linux_system_supervisor() -> bool {
 }
 
 fn resume_linux_system_supervisor_legacy() -> bool {
-    if !wake_linux_signal_wait(LINUX_SIGTERM, LINUX_SI_KERNEL) {
+    if !wake_linux_signal_wait(LINUX_SIGTERM, LINUX_SI_KERNEL, None) {
         return false;
     }
     let Some(thread) = ready_linux_thread_handle() else {
@@ -3503,7 +3508,7 @@ fn shutdown_linux_system_supervisor(failed: bool) -> bool {
                 parent_pid: 0,
                 state: linux_process::LiveProcessState::Running,
             })
-        || !wake_linux_signal_wait(LINUX_SIGTERM, LINUX_SI_KERNEL)
+        || !wake_linux_signal_wait(LINUX_SIGTERM, LINUX_SI_KERNEL, None)
     {
         return false;
     }
@@ -3908,12 +3913,25 @@ impl LinuxSignalInformation {
     };
 
     const fn generated(signal: u64, code: i32) -> Self {
+        Self::queued(signal, code, 0)
+    }
+
+    const fn queued(signal: u64, code: i32, value: u64) -> Self {
         let mut fields = [0; 112];
         let sender = 1_u32.to_ne_bytes();
         fields[0] = sender[0];
         fields[1] = sender[1];
         fields[2] = sender[2];
         fields[3] = sender[3];
+        let value = value.to_ne_bytes();
+        fields[8] = value[0];
+        fields[9] = value[1];
+        fields[10] = value[2];
+        fields[11] = value[3];
+        fields[12] = value[4];
+        fields[13] = value[5];
+        fields[14] = value[6];
+        fields[15] = value[7];
         Self {
             signal: signal as i32,
             error: 0,
@@ -5661,6 +5679,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     ELF_PROBE_EXEC_IGNORED_SIGNALS.store(0, Ordering::SeqCst);
     for signal in 0..LINUX_SIGNAL_COUNT {
         ELF_PROBE_PENDING_SIGNAL_CODES[signal].store(0, Ordering::SeqCst);
+        ELF_PROBE_PENDING_SIGNAL_VALUES[signal].store(0, Ordering::SeqCst);
         ELF_PROBE_SIGNAL_HANDLERS[signal].store(0, Ordering::SeqCst);
         ELF_PROBE_SIGNAL_FLAGS[signal].store(0, Ordering::SeqCst);
         ELF_PROBE_SIGNAL_RESTORERS[signal].store(0, Ordering::SeqCst);
@@ -6412,6 +6431,9 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     let pending_signal_codes_cleared = ELF_PROBE_PENDING_SIGNAL_CODES
         .iter()
         .all(|code| code.swap(0, Ordering::SeqCst) == 0);
+    let pending_signal_values_cleared = ELF_PROBE_PENDING_SIGNAL_VALUES
+        .iter()
+        .all(|value| value.swap(0, Ordering::SeqCst) == 0);
     let ignored_signals = ELF_PROBE_EXEC_IGNORED_SIGNALS.swap(0, Ordering::SeqCst);
     let signal_actions_restored = (exec_replaced || ignored_signals == 0)
         && (0..LINUX_SIGNAL_COUNT).all(|signal| {
@@ -6895,6 +6917,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         && signal_mask_restored
         && pending_signals_cleared
         && pending_signal_codes_cleared
+        && pending_signal_values_cleared
         && signal_actions_restored
         && alt_stack_disabled
         && live_process_registry_finished
@@ -6942,6 +6965,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             signal_mask_restored,
             pending_signals_cleared,
             pending_signal_codes_cleared,
+            pending_signal_values_cleared,
             signal_actions_restored,
             alt_stack_disabled,
             live_process_registry_finished,
@@ -7780,6 +7804,24 @@ extern "sysv64" fn linux_syscall_handler(
         }
         LINUX_RT_SIGRETURN_SYSCALL => linux_rt_sigreturn(registers, user_stack),
         LINUX_RT_SIGPENDING_SYSCALL => linux_rt_sigpending(first_argument, buffer),
+        LINUX_RT_SIGQUEUEINFO_SYSCALL => linux_rt_sigqueueinfo(
+            first_argument,
+            None,
+            buffer,
+            count,
+            registers,
+            syscall_return,
+            (user_rip, user_rflags),
+        ),
+        LINUX_RT_TGSIGQUEUEINFO_SYSCALL => linux_rt_sigqueueinfo(
+            first_argument,
+            Some(buffer),
+            count,
+            register(0),
+            registers,
+            syscall_return,
+            (user_rip, user_rflags),
+        ),
         LINUX_RT_SIGTIMEDWAIT_SYSCALL => linux_rt_sigtimedwait_live_return(
             registers,
             syscall_return,
@@ -7881,7 +7923,7 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_EXECVE_SYSCALL => linux_execve(first_argument, buffer, count),
         LINUX_KILL_SYSCALL => linux_kill(
             first_argument,
-            (buffer, LINUX_SI_USER),
+            (buffer, LINUX_SI_USER, None),
             registers,
             syscall_return,
             (user_rip, user_rflags),
@@ -7889,7 +7931,7 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_TGKILL_SYSCALL => match linux_tgkill_identity(first_argument, buffer) {
             Ok(target) if current_linux_thread_handle() == Some(target) => linux_kill(
                 1,
-                (count, LINUX_SI_TKILL),
+                (count, LINUX_SI_TKILL, None),
                 registers,
                 syscall_return,
                 (user_rip, user_rflags),
@@ -7905,7 +7947,7 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_TKILL_SYSCALL => match linux_tkill_identity(first_argument) {
             Ok(()) => linux_kill(
                 1,
-                (buffer, LINUX_SI_TKILL),
+                (buffer, LINUX_SI_TKILL, None),
                 registers,
                 syscall_return,
                 (user_rip, user_rflags),
@@ -10146,6 +10188,7 @@ struct LinuxProcessRuntimeState {
     no_new_privileges: bool,
     pending_signals: u64,
     pending_signal_codes: [u32; LINUX_SIGNAL_COUNT],
+    pending_signal_values: [u64; LINUX_SIGNAL_COUNT],
     exec_ignored_signals: u64,
     signal_handlers: [u64; LINUX_SIGNAL_COUNT],
     signal_flags: [u64; LINUX_SIGNAL_COUNT],
@@ -10176,6 +10219,7 @@ impl LinuxProcessRuntimeState {
         no_new_privileges: false,
         pending_signals: 0,
         pending_signal_codes: [0; LINUX_SIGNAL_COUNT],
+        pending_signal_values: [0; LINUX_SIGNAL_COUNT],
         exec_ignored_signals: 0,
         signal_handlers: [0; LINUX_SIGNAL_COUNT],
         signal_flags: [0; LINUX_SIGNAL_COUNT],
@@ -10233,6 +10277,9 @@ fn capture_linux_process_runtime_state() -> Option<LinuxProcessRuntimeState> {
         pending_signal_codes: core::array::from_fn(|signal| {
             ELF_PROBE_PENDING_SIGNAL_CODES[signal].load(Ordering::SeqCst)
         }),
+        pending_signal_values: core::array::from_fn(|signal| {
+            ELF_PROBE_PENDING_SIGNAL_VALUES[signal].load(Ordering::SeqCst)
+        }),
         exec_ignored_signals: ELF_PROBE_EXEC_IGNORED_SIGNALS.load(Ordering::SeqCst),
         signal_handlers: core::array::from_fn(|signal| {
             ELF_PROBE_SIGNAL_HANDLERS[signal].load(Ordering::SeqCst)
@@ -10280,6 +10327,8 @@ fn restore_linux_process_runtime_state(state: LinuxProcessRuntimeState) {
     for signal in 0..LINUX_SIGNAL_COUNT {
         ELF_PROBE_PENDING_SIGNAL_CODES[signal]
             .store(state.pending_signal_codes[signal], Ordering::SeqCst);
+        ELF_PROBE_PENDING_SIGNAL_VALUES[signal]
+            .store(state.pending_signal_values[signal], Ordering::SeqCst);
         ELF_PROBE_SIGNAL_HANDLERS[signal].store(state.signal_handlers[signal], Ordering::SeqCst);
         ELF_PROBE_SIGNAL_FLAGS[signal].store(state.signal_flags[signal], Ordering::SeqCst);
         ELF_PROBE_SIGNAL_RESTORERS[signal].store(state.signal_restorers[signal], Ordering::SeqCst);
@@ -17460,7 +17509,7 @@ fn linux_broken_pipe_live_return(
     interrupted.rax = LINUX_EPIPE;
     let result = linux_kill(
         1,
-        (LINUX_SIGPIPE, LINUX_SI_KERNEL),
+        (LINUX_SIGPIPE, LINUX_SI_KERNEL, None),
         output,
         interrupted,
         (interrupted.rip, interrupted.rflags),
@@ -19821,6 +19870,7 @@ fn linux_descriptor_close_live_return(
     let handler = ELF_PROBE_SIGNAL_HANDLERS[index].load(Ordering::SeqCst);
     if signal_mask & signal_bit != 0 {
         ELF_PROBE_PENDING_SIGNAL_CODES[index].store(LINUX_SI_KERNEL as u32, Ordering::SeqCst);
+        ELF_PROBE_PENDING_SIGNAL_VALUES[index].store(0, Ordering::SeqCst);
         ELF_PROBE_PENDING_SIGNALS.fetch_or(signal_bit, Ordering::SeqCst);
         wake_linux_descriptor_waits();
         return 0;
@@ -19842,6 +19892,7 @@ fn linux_descriptor_close_live_return(
     );
     if delivered != 0 {
         ELF_PROBE_PENDING_SIGNAL_CODES[index].store(LINUX_SI_KERNEL as u32, Ordering::SeqCst);
+        ELF_PROBE_PENDING_SIGNAL_VALUES[index].store(0, Ordering::SeqCst);
         ELF_PROBE_PENDING_SIGNALS.fetch_or(signal_bit, Ordering::SeqCst);
     }
     wake_linux_descriptor_waits();
@@ -21616,6 +21667,56 @@ fn linux_rt_sigpending(set: u64, set_size: u64) -> u64 {
     }
 }
 
+fn linux_rt_sigqueueinfo(
+    process: u64,
+    thread: Option<u64>,
+    signal: u64,
+    information: u64,
+    output: *mut LinuxSyscallFrame,
+    interrupted: LinuxUserContext,
+    return_registers: (u64, u64),
+) -> u64 {
+    if process != u64::from(current_linux_process_pid()) {
+        return LINUX_ESRCH;
+    }
+    if let Some(thread) = thread {
+        let target = match linux_tgkill_identity(process, thread) {
+            Ok(target) => target,
+            Err(error) => return error,
+        };
+        if current_linux_thread_handle() != Some(target) {
+            return LINUX_ENOSYS;
+        }
+    }
+    if signal == 0 {
+        return 0;
+    }
+    if !(1..=LINUX_STANDARD_SIGNAL_COUNT).contains(&signal) {
+        return if signal <= LINUX_SIGNAL_COUNT as u64 {
+            LINUX_ENOSYS
+        } else {
+            LINUX_EINVAL
+        };
+    }
+    let mut bytes = [0_u8; size_of::<LinuxSignalInformation>()];
+    if !copy_from_linux_user(information, &mut bytes) {
+        return LINUX_EFAULT;
+    }
+    let supplied_signal = i32::from_ne_bytes(bytes[..4].try_into().unwrap());
+    let code = i32::from_ne_bytes(bytes[8..12].try_into().unwrap());
+    if supplied_signal != signal as i32 || code != LINUX_SI_QUEUE {
+        return LINUX_EPERM;
+    }
+    let value = u64::from_ne_bytes(bytes[24..32].try_into().unwrap());
+    linux_kill(
+        1,
+        (signal, code, Some(value)),
+        output,
+        interrupted,
+        return_registers,
+    )
+}
+
 fn linux_rt_sigtimedwait(set: u64, information: u64, timeout: u64, set_size: u64) -> u64 {
     if set_size != LINUX_SIGNAL_SET_SIZE {
         return LINUX_EINVAL;
@@ -21651,9 +21752,10 @@ fn linux_rt_sigtimedwait(set: u64, information: u64, timeout: u64, set_size: u64
     let signal = u64::from(matching.trailing_zeros()) + 1;
     let index = signal as usize - 1;
     let signal_bit = 1 << (signal - 1);
-    let signal_information = LinuxSignalInformation::generated(
+    let signal_information = LinuxSignalInformation::queued(
         signal,
         ELF_PROBE_PENDING_SIGNAL_CODES[index].load(Ordering::SeqCst) as i32,
+        ELF_PROBE_PENDING_SIGNAL_VALUES[index].load(Ordering::SeqCst),
     );
     if information != 0 {
         // SAFETY: every byte in this repr(C) value is initialized, including
@@ -21670,6 +21772,7 @@ fn linux_rt_sigtimedwait(set: u64, information: u64, timeout: u64, set_size: u64
     }
     ELF_PROBE_PENDING_SIGNALS.fetch_and(!signal_bit, Ordering::SeqCst);
     ELF_PROBE_PENDING_SIGNAL_CODES[index].store(0, Ordering::SeqCst);
+    ELF_PROBE_PENDING_SIGNAL_VALUES[index].store(0, Ordering::SeqCst);
     signal
 }
 
@@ -21786,7 +21889,7 @@ fn linux_rt_sigtimedwait_live_return(
     selected.rax
 }
 
-fn wake_linux_signal_wait(signal: u64, signal_code: i32) -> bool {
+fn wake_linux_signal_wait(signal: u64, signal_code: i32, signal_value: Option<u64>) -> bool {
     let signal_bit = 1_u64 << (signal - 1);
     for slot in 0..LINUX_THREAD_LIMIT {
         if LINUX_THREAD_STATES[slot].load(Ordering::SeqCst) != LINUX_THREAD_BLOCKED
@@ -21797,7 +21900,8 @@ fn wake_linux_signal_wait(signal: u64, signal_code: i32) -> bool {
         }
         let information = LINUX_THREAD_WAIT_OUTPUTS[slot].load(Ordering::SeqCst);
         if information != 0 {
-            let value = LinuxSignalInformation::generated(signal, signal_code);
+            let value =
+                LinuxSignalInformation::queued(signal, signal_code, signal_value.unwrap_or(0));
             // SAFETY: LinuxSignalInformation is repr(C), and every byte of
             // this generated value, including padding, is initialized.
             let bytes = unsafe {
@@ -22195,6 +22299,7 @@ fn linux_terminate_by_default_signal(signal: u64) -> u64 {
     ELF_PROBE_EXEC_IGNORED_SIGNALS.store(0, Ordering::SeqCst);
     for index in 0..LINUX_SIGNAL_COUNT {
         ELF_PROBE_PENDING_SIGNAL_CODES[index].store(0, Ordering::SeqCst);
+        ELF_PROBE_PENDING_SIGNAL_VALUES[index].store(0, Ordering::SeqCst);
         ELF_PROBE_SIGNAL_HANDLERS[index].store(0, Ordering::SeqCst);
         ELF_PROBE_SIGNAL_FLAGS[index].store(0, Ordering::SeqCst);
         ELF_PROBE_SIGNAL_RESTORERS[index].store(0, Ordering::SeqCst);
@@ -22211,12 +22316,12 @@ fn linux_terminate_by_default_signal(signal: u64) -> u64 {
 
 fn linux_kill(
     pid: u64,
-    generated: (u64, i32),
+    generated: (u64, i32, Option<u64>),
     output: *mut LinuxSyscallFrame,
     interrupted: LinuxUserContext,
     return_registers: (u64, u64),
 ) -> u64 {
-    let (signal, signal_code) = generated;
+    let (signal, signal_code, signal_value) = generated;
     if !matches!(pid, 0 | 1) {
         return LINUX_ESRCH;
     }
@@ -22231,7 +22336,7 @@ fn linux_kill(
     }
     let index = signal as usize - 1;
     let signal_bit = 1 << (signal - 1);
-    if wake_linux_signal_wait(signal, signal_code) {
+    if wake_linux_signal_wait(signal, signal_code, signal_value) {
         return 0;
     }
     let handler = ELF_PROBE_SIGNAL_HANDLERS[index].load(Ordering::SeqCst);
@@ -22242,6 +22347,8 @@ fn linux_kill(
     if old_mask & signal_bit != 0 {
         if ELF_PROBE_PENDING_SIGNALS.load(Ordering::SeqCst) & signal_bit == 0 {
             ELF_PROBE_PENDING_SIGNAL_CODES[index].store(signal_code as u32, Ordering::SeqCst);
+            ELF_PROBE_PENDING_SIGNAL_VALUES[index]
+                .store(signal_value.unwrap_or(0), Ordering::SeqCst);
         }
         ELF_PROBE_PENDING_SIGNALS.fetch_or(signal_bit, Ordering::SeqCst);
         return 0;
@@ -22295,7 +22402,7 @@ fn linux_kill(
     let signal_frame = linux_rt_signal_frame(
         context,
         flags,
-        LinuxSignalInformation::generated(signal, signal_code),
+        LinuxSignalInformation::queued(signal, signal_code, signal_value.unwrap_or(0)),
         0,
         0,
         0,
@@ -22675,6 +22782,7 @@ fn linux_deliver_pending_signal(
         (
             signal,
             ELF_PROBE_PENDING_SIGNAL_CODES[index].load(Ordering::SeqCst) as i32,
+            Some(ELF_PROBE_PENDING_SIGNAL_VALUES[index].load(Ordering::SeqCst)),
         ),
         output,
         interrupted,
@@ -22683,6 +22791,7 @@ fn linux_deliver_pending_signal(
     if result == 0 {
         ELF_PROBE_PENDING_SIGNALS.fetch_and(!signal_bit, Ordering::SeqCst);
         ELF_PROBE_PENDING_SIGNAL_CODES[index].store(0, Ordering::SeqCst);
+        ELF_PROBE_PENDING_SIGNAL_VALUES[index].store(0, Ordering::SeqCst);
     }
     result
 }

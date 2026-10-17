@@ -596,9 +596,14 @@ ginux_linux_system_init:
     test rax, rax
     jne .Lfailure
 
+    mov dword ptr [rip + .Lqueue_info], 10
+    mov dword ptr [rip + .Lqueue_info + 8], -1
+    mov rax, 0x1122334455667788
+    mov qword ptr [rip + .Lqueue_info + 24], rax
     mov edi, 1
     mov esi, 10
-    mov eax, 62
+    lea rdx, [rip + .Lqueue_info]
+    mov eax, 129
     syscall
     test rax, rax
     jne .Lfailure
@@ -621,6 +626,34 @@ ginux_linux_system_init:
     cmp rax, 10
     jne .Lfailure
     cmp dword ptr [rip + .Lstatus], 10
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus + 8], -1
+    jne .Lfailure
+    mov rax, 0x1122334455667788
+    cmp qword ptr [rip + .Lstatus + 24], rax
+    jne .Lfailure
+
+    mov edi, 1
+    mov esi, 1
+    mov edx, 10
+    lea r10, [rip + .Lqueue_info]
+    mov eax, 297
+    syscall
+    test rax, rax
+    jne .Lfailure
+
+    lea rdi, [rip + .Lsignal_set]
+    lea rsi, [rip + .Lstatus]
+    xor edx, edx
+    mov r10d, 8
+    mov eax, 128
+    syscall
+    cmp rax, 10
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus + 8], -1
+    jne .Lfailure
+    mov rax, 0x1122334455667788
+    cmp qword ptr [rip + .Lstatus + 24], rax
     jne .Lfailure
 
     lea rdi, [rip + .Lstatus]
@@ -1099,6 +1132,8 @@ ginux_linux_system_init:
     .space 32
 .Lsignal_old_usr2:
     .space 32
+.Lqueue_info:
+    .space 128
 .Luserns_marker:
     .ascii "USERNS_READY\n"
 .Lprivilege_marker:
