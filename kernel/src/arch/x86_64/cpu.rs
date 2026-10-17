@@ -351,6 +351,7 @@ const LINUX_FSMOUNT_SYSCALL: u64 = 432;
 const LINUX_FSPICK_SYSCALL: u64 = 433;
 const LINUX_MOUNT_SETATTR_SYSCALL: u64 = 442;
 const LINUX_SET_MEMPOLICY_HOME_NODE_SYSCALL: u64 = 450;
+const LINUX_CACHESTAT_SYSCALL: u64 = 451;
 const LINUX_PIPE2_SYSCALL: u64 = 293;
 const LINUX_RT_TGSIGQUEUEINFO_SYSCALL: u64 = 297;
 const LINUX_PREADV_SYSCALL: u64 = 295;
@@ -360,6 +361,7 @@ const LINUX_PRLIMIT64_SYSCALL: u64 = 302;
 const LINUX_GETCPU_SYSCALL: u64 = 309;
 const LINUX_PROCESS_VM_READV_SYSCALL: u64 = 310;
 const LINUX_PROCESS_VM_WRITEV_SYSCALL: u64 = 311;
+const LINUX_KCMP_SYSCALL: u64 = 312;
 const LINUX_IOPRIO_SET_SYSCALL: u64 = 251;
 const LINUX_IOPRIO_GET_SYSCALL: u64 = 252;
 const LINUX_SYNCFS_SYSCALL: u64 = 306;
@@ -8604,6 +8606,8 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_SET_MEMPOLICY_HOME_NODE_SYSCALL => {
             linux_set_mempolicy_home_node(first_argument, buffer, count, register(0))
         }
+        LINUX_KCMP_SYSCALL => linux_kcmp(first_argument, buffer, count, register(0), register(1)),
+        LINUX_CACHESTAT_SYSCALL => linux_cachestat(first_argument, buffer, count, register(0)),
         LINUX_MEMBARRIER_SYSCALL => linux_membarrier(first_argument, buffer, count),
         LINUX_WAIT4_SYSCALL => linux_wait4(first_argument, buffer, count, register(0)),
         LINUX_WAITID_SYSCALL => {
@@ -11507,6 +11511,81 @@ fn linux_set_mempolicy_home_node(address: u64, length: u64, home_node: u64, flag
         0
     } else {
         LINUX_ENOMEM
+    }
+}
+
+fn linux_kcmp(first_pid: u64, second_pid: u64, kind: u64, first: u64, second: u64) -> u64 {
+    const KCMP_FILE: u64 = 0;
+    const KCMP_SYSVSEM: u64 = 6;
+    let pid = u64::from(current_linux_process_pid());
+    if first_pid != pid || second_pid != pid {
+        return LINUX_ESRCH;
+    }
+    if (1..=KCMP_SYSVSEM).contains(&kind) {
+        return 0;
+    }
+    if kind != KCMP_FILE {
+        return LINUX_EINVAL;
+    }
+    if !linux_descriptor_open(first) || !linux_descriptor_open(second) {
+        return LINUX_EBADF;
+    }
+    if first == second {
+        return 0;
+    }
+    let same_socket = linux_socket_slot(first)
+        .zip(linux_socket_slot(second))
+        .is_some_and(|(first, second)| first == second);
+    let same_overlay = linux_overlay_descriptor_handle(first)
+        .zip(linux_overlay_descriptor_handle(second))
+        .is_some_and(|(first, second)| first == second);
+    let same_oci = {
+        let first = linux_oci_descriptor(first);
+        let second = linux_oci_descriptor(second);
+        first != 0 && first == second
+    };
+    if same_socket || same_overlay || same_oci {
+        0
+    } else {
+        1
+    }
+}
+
+fn linux_cachestat(descriptor: u64, range_address: u64, output_address: u64, flags: u64) -> u64 {
+    if flags != 0 {
+        return LINUX_EINVAL;
+    }
+    if !linux_descriptor_open(descriptor) {
+        return LINUX_EBADF;
+    }
+    let size = if let Some(metadata) =
+        linux_overlay_descriptor_handle(descriptor).and_then(crate::linux_overlay::metadata)
+    {
+        metadata.size as u64
+    } else if let Some(entry) = linux_oci_entry(descriptor) {
+        entry.data.len() as u64
+    } else {
+        return LINUX_EBADF;
+    };
+    let mut range = [0_u8; 16];
+    if !copy_from_linux_user(range_address, &mut range) {
+        return LINUX_EFAULT;
+    }
+    let offset = u64::from_ne_bytes(range[..8].try_into().unwrap());
+    let length = u64::from_ne_bytes(range[8..].try_into().unwrap());
+    let start = offset.min(size);
+    let end = if length == 0 {
+        size
+    } else {
+        offset.saturating_add(length).min(size)
+    };
+    let cached = end.saturating_sub(start).div_ceil(PAGE_SIZE as u64);
+    let mut result = [0_u8; 40];
+    result[..8].copy_from_slice(&cached.to_ne_bytes());
+    if copy_to_linux_user(output_address, &result) {
+        0
+    } else {
+        LINUX_EFAULT
     }
 }
 

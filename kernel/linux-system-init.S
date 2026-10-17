@@ -619,6 +619,34 @@ ginux_linux_system_init:
     syscall
     cmp rax, -22
     jne .Lfailure
+    mov edi, 1
+    mov esi, 1
+    xor edx, edx
+    mov r10, r9
+    mov r8, r9
+    mov eax, 312
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov edi, 1
+    mov esi, 1
+    mov edx, 1
+    xor r10d, r10d
+    xor r8d, r8d
+    mov eax, 312
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov rdi, r9
+    lea rsi, [rip + .Lcachestat_range]
+    lea rdx, [rip + .Lcachestat_result]
+    xor r10d, r10d
+    mov eax, 451
+    syscall
+    test rax, rax
+    jne .Lfailure
+    cmp qword ptr [rip + .Lcachestat_result], 1
+    jne .Lfailure
     mov rdi, r9
     mov eax, 3
     syscall
@@ -1378,6 +1406,12 @@ ginux_linux_system_init:
     .asciz "ginux-test"
 .Lmemfd_payload:
     .ascii "memfd"
+.align 8
+.Lcachestat_range:
+    .quad 0
+    .quad 0
+.Lcachestat_result:
+    .space 40
 .align 8
 .Lsched_attr:
     .space 56

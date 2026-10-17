@@ -42,7 +42,7 @@ implemented calls lives in [Linux Syscall Entry v0](../specs/kernel/linux-syscal
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **17 Complete**, **236 Partial**, **44 Policy-denied**, **78 Missing**.
+Current totals: **17 Complete**, **238 Partial**, **44 Policy-denied**, **76 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -53,9 +53,9 @@ Current totals: **17 Complete**, **236 Partial**, **44 Policy-denied**, **78 Mis
 | Initial stack and auxiliary vector | Partial | Bounded argv/envp, selected `AT_*` entries, kernel-provided `AT_RANDOM`, and a one-page initial runtime stack that grows downward on demand; no vDSO. |
 | Dynamic loader and shared objects | Partial | Unmodified Alpine/musl and Rocky 10/glibc shells load. Rocky's dynamic coreutils `cat` and `ls` execute from the OCI root. Broader dependency, relocation, locale, and NSS coverage remains incomplete. |
 | TLS | Partial | Bounded static TLS and `arch_prctl` FS-base support. |
-| Process and thread model | Partial | Repeated fork/exec/exit/wait works for Alpine and Rocky shells. Fork preserves parent memory and descriptor state; exec privately replaces shared image pages. `process_vm_readv`/`process_vm_writev` support validated same-process transfers and reject crossing the process/domain boundary. Per-thread `rseq` registration exposes CPU 0 and supports matching unregister, but migration and critical-section abort semantics await SMP. Copy-on-write, larger process tables, and general Linux scheduling semantics remain incomplete. |
+| Process and thread model | Partial | Repeated fork/exec/exit/wait works for Alpine and Rocky shells. Fork preserves parent memory and descriptor state; exec privately replaces shared image pages. `process_vm_readv`/`process_vm_writev` support validated same-process transfers and reject crossing the process/domain boundary. `kcmp` identifies same-process VM/resource tables and known shared descriptors; cross-process comparison remains unavailable. Per-thread `rseq` registration exposes CPU 0 and supports matching unregister, but migration and critical-section abort semantics await SMP. Copy-on-write, larger process tables, and general Linux scheduling semantics remain incomplete. |
 | Signals | Partial | Selected standard signal, mask, alternate-stack, queued self-delivery with preserved `sigval`, delivery, and return behavior; no complete real-time queueing, cross-process delivery, or restart/nesting semantics. |
-| VFS and path lookup | Partial | Immutable OCI lower root with a demand-allocated, per-domain RAM overlay, directories, symlinks, FIFO metadata, cwd, tmpfs, devfs, procfs subsets, and frame-chained extended attributes. Overlay file and xattr data grow by allocating frames rather than stopping at a fixed aggregate cache ceiling; open-unlinked objects live through their descriptors, directory renames include descendants, and permission/ownership operations cover the package-manager path. `memfd_create` provides elastic anonymous files and `MFD_CLOEXEC`; sealing operations remain pending. `mknod`/`mknodat` create regular files and FIFOs; opening named FIFOs and creating socket nodes are pending, while device nodes are denied by domain policy. This is not yet a complete Linux VFS. |
+| VFS and path lookup | Partial | Immutable OCI lower root with a demand-allocated, per-domain RAM overlay, directories, symlinks, FIFO metadata, cwd, tmpfs, devfs, procfs subsets, and frame-chained extended attributes. Overlay file and xattr data grow by allocating frames rather than stopping at a fixed aggregate cache ceiling; open-unlinked objects live through their descriptors, directory renames include descendants, and permission/ownership operations cover the package-manager path. `cachestat` reports RAM-resident pages for regular OCI/overlay files. `memfd_create` provides elastic anonymous files and `MFD_CLOEXEC`; sealing operations remain pending. `mknod`/`mknodat` create regular files and FIFOs; opening named FIFOs and creating socket nodes are pending, while device nodes are denied by domain policy. This is not yet a complete Linux VFS. |
 | `/proc` | Partial | Automatically mounted per domain with domain-local PID directories, `status`, `stat`, `statm`, `mountinfo`, namespace maps, `cpuinfo`, `meminfo`, `stat`, `uptime`, `loadavg`, `filesystems`, and `cmdline`. Broader Linux procfs coverage and unconstrained process enumeration remain incomplete. |
 | IPv4 sockets | Partial | Domain descriptors expose repeated client TCP and UDP connections plus TCP bind/listen/accept over the shared host NIC with IOMMU-confined virtio queues; AF_UNIX stream socket pairs cover local runtime coordination. Ancillary data, IPv6, multi-entry listen backlogs, and complete option/error semantics remain pending. |
 | OCI overlay root | Partial | Verified layers are assembled in manifest order with replacements and OCI whiteouts. Broader overlay conformance remains under test. |
@@ -396,7 +396,7 @@ therefore omitted.
 | 309 | getcpu | Partial |
 | 310 | process_vm_readv | Partial |
 | 311 | process_vm_writev | Partial |
-| 312 | kcmp | Missing |
+| 312 | kcmp | Partial |
 | 313 | finit_module | Policy-denied |
 | 314 | sched_setattr | Partial |
 | 315 | sched_getattr | Partial |
@@ -447,7 +447,7 @@ therefore omitted.
 | 448 | process_mrelease | Missing |
 | 449 | futex_waitv | Missing |
 | 450 | set_mempolicy_home_node | Partial |
-| 451 | cachestat | Missing |
+| 451 | cachestat | Partial |
 | 452 | fchmodat2 | Partial |
 | 453 | map_shadow_stack | Missing |
 | 454 | futex_wake | Missing |
