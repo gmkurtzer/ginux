@@ -4327,9 +4327,13 @@ fn retire_all_linux_threads() {
 fn clear_linux_thread_slot(slot: usize) {
     let stack_base = LINUX_THREAD_STACK_BASES[slot].load(Ordering::SeqCst);
     let stack_size = LINUX_THREAD_STACK_SIZES[slot].load(Ordering::SeqCst);
-    if stack_base != 0 && stack_size == PAGE_SIZE as u64 {
-        // SAFETY: each live slot owns this exact writable user stack mapping.
-        // Retirement runs on the kernel syscall stack with interrupts disabled.
+    if !LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
+        && stack_base != 0
+        && stack_size == PAGE_SIZE as u64
+    {
+        // The boot proof owns its fixed sibling stack and verifies scrubbing.
+        // Runtime stacks belong to libc and remain mapped after thread exit so
+        // userspace can inspect or recycle its thread-control allocation.
         unsafe {
             with_supervisor_user_access(|| {
                 (stack_base as *mut u8).write_bytes(0, PAGE_SIZE);
