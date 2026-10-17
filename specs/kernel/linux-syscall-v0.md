@@ -1011,6 +1011,19 @@ Valid `semtimedop` timespecs use the same immediate operation engine.
 Operations that would sleep return `EAGAIN`; wait scheduling, `SEM_UNDO`,
 timestamps, owner/group updates, permission enforcement, and Linux information
 commands remain unsupported.
+`rax = 68`, `69`, `70`, and `71` (`__NR_msgget`, `msgsnd`, `msgrcv`, and
+`msgctl`) provide dynamically allocated per-domain System V message queues.
+Queue metadata and message payloads extend through generation-bound pages;
+individual messages are admitted up to Linux's default `MSGMAX=8192`, while
+each queue begins with `MSGMNB=16384` bytes and can change that limit through
+`IPC_SET`. Keyed `IPC_CREAT`/`IPC_EXCL` lookup and `IPC_PRIVATE` creation are
+supported. Receives implement FIFO selection, exact positive types, Linux's
+lowest-type negative selection, `MSG_EXCEPT`, nondestructive ordinal
+`MSG_COPY`, oversized-message preservation, and `MSG_NOERROR` truncation.
+`msgctl` implements `IPC_RMID`, mode/byte-limit `IPC_SET`, and the native
+x86-64 120-byte `IPC_STAT` layout. Empty/full operations return `EAGAIN`;
+blocking wait scheduling, timestamps, owner/group updates, credential
+enforcement, and Linux information commands remain unsupported.
 `rax = 462` (`__NR_mseal`) irreversibly seals complete page-rounded ranges in
 the bounded anonymous scratch window and the runtime dynamic mapping region.
 The operation preflights every page before changing state, is idempotent, and

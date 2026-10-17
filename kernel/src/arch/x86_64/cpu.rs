@@ -255,6 +255,10 @@ const LINUX_SEMGET_SYSCALL: u64 = 64;
 const LINUX_SEMOP_SYSCALL: u64 = 65;
 const LINUX_SEMCTL_SYSCALL: u64 = 66;
 const LINUX_SHMDT_SYSCALL: u64 = 67;
+const LINUX_MSGGET_SYSCALL: u64 = 68;
+const LINUX_MSGSND_SYSCALL: u64 = 69;
+const LINUX_MSGRCV_SYSCALL: u64 = 70;
+const LINUX_MSGCTL_SYSCALL: u64 = 71;
 const LINUX_SEMTIMEDOP_SYSCALL: u64 = 220;
 const LINUX_SWAPON_SYSCALL: u64 = 167;
 const LINUX_SWAPOFF_SYSCALL: u64 = 168;
@@ -7802,6 +7806,12 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_SEMOP_SYSCALL => linux_semop(first_argument, buffer, count, 0),
         LINUX_SEMCTL_SYSCALL => linux_semctl(first_argument, buffer, count, register(0)),
         LINUX_SHMDT_SYSCALL => linux_shmdt(first_argument),
+        LINUX_MSGGET_SYSCALL => linux_msgget(first_argument, buffer),
+        LINUX_MSGSND_SYSCALL => linux_msgsnd(first_argument, buffer, count, register(0)),
+        LINUX_MSGRCV_SYSCALL => {
+            linux_msgrcv(first_argument, buffer, count, register(0), register(2))
+        }
+        LINUX_MSGCTL_SYSCALL => linux_msgctl(first_argument, buffer, count),
         LINUX_SEMTIMEDOP_SYSCALL => linux_semop(first_argument, buffer, count, register(0)),
         LINUX_MREMAP_SYSCALL => {
             linux_mremap(first_argument, buffer, count, register(0), register(2))
@@ -11283,6 +11293,8 @@ fn linux_sysv_ipc_error(error: crate::linux_sysv_ipc::Error) -> u64 {
         crate::linux_sysv_ipc::Error::NoMemory => LINUX_ENOMEM,
         crate::linux_sysv_ipc::Error::Range => LINUX_ERANGE,
         crate::linux_sysv_ipc::Error::WouldBlock => LINUX_EAGAIN,
+        crate::linux_sysv_ipc::Error::TooBig => LINUX_E2BIG,
+        crate::linux_sysv_ipc::Error::Fault => LINUX_EFAULT,
     }
 }
 
@@ -11604,6 +11616,134 @@ fn linux_semctl(id: u64, number: u64, command: u64, argument: u64) -> u64 {
     }
 }
 
+fn linux_msgget(key: u64, flags: u64) -> u64 {
+    const IPC_CREAT: u64 = 0o1000;
+    const IPC_EXCL: u64 = 0o2000;
+    if flags & !(0o777 | IPC_CREAT | IPC_EXCL) != 0 {
+        return LINUX_EINVAL;
+    }
+    let key = key as u32 as i32;
+    crate::linux_sysv_ipc::message_get_or_create(
+        key,
+        flags as u16,
+        key == 0 || flags & IPC_CREAT != 0,
+        flags & IPC_EXCL != 0,
+    )
+    .map_or_else(linux_sysv_ipc_error, u64::from)
+}
+
+fn linux_msgsnd(id: u64, message: u64, size: u64, flags: u64) -> u64 {
+    const IPC_NOWAIT: u64 = 0o4000;
+    const LINUX_MSGMAX: usize = 8192;
+    if id > i32::MAX as u64 || flags & !IPC_NOWAIT != 0 {
+        return LINUX_EINVAL;
+    }
+    let Ok(size) = usize::try_from(size) else {
+        return LINUX_EINVAL;
+    };
+    if size > LINUX_MSGMAX {
+        return LINUX_EINVAL;
+    }
+    let mut message_type = [0_u8; 8];
+    if !copy_from_linux_user(message, &mut message_type) {
+        return LINUX_EFAULT;
+    }
+    crate::linux_sysv_ipc::message_send(
+        id as u32,
+        i64::from_ne_bytes(message_type),
+        size,
+        current_linux_process_pid(),
+        |offset, output| {
+            message
+                .checked_add(8)
+                .and_then(|address| address.checked_add(offset as u64))
+                .is_some_and(|address| copy_from_linux_user(address, output))
+        },
+    )
+    .map_or_else(linux_sysv_ipc_error, |()| 0)
+}
+
+fn linux_msgrcv(id: u64, message: u64, size: u64, selector: u64, flags: u64) -> u64 {
+    const IPC_NOWAIT: u64 = 0o4000;
+    const MSG_NOERROR: u64 = 0o10_000;
+    const MSG_EXCEPT: u64 = 0o20_000;
+    const MSG_COPY: u64 = 0o40_000;
+    if id > i32::MAX as u64
+        || flags & !(IPC_NOWAIT | MSG_NOERROR | MSG_EXCEPT | MSG_COPY) != 0
+        || flags & MSG_COPY != 0
+            && (flags & IPC_NOWAIT == 0 || flags & MSG_EXCEPT != 0 || (selector as i64) < 0)
+        || flags & MSG_EXCEPT != 0 && (selector as i64) <= 0
+    {
+        return LINUX_EINVAL;
+    }
+    let Ok(size) = usize::try_from(size) else {
+        return LINUX_EINVAL;
+    };
+    crate::linux_sysv_ipc::message_receive(
+        id as u32,
+        size,
+        selector as i64,
+        flags & MSG_NOERROR != 0,
+        flags & MSG_EXCEPT != 0,
+        flags & MSG_COPY != 0,
+        current_linux_process_pid(),
+        |message_type, offset, bytes| {
+            (offset != 0 || copy_to_linux_user(message, &message_type.to_ne_bytes()))
+                && message
+                    .checked_add(8)
+                    .and_then(|address| address.checked_add(offset as u64))
+                    .is_some_and(|address| copy_to_linux_user(address, bytes))
+        },
+    )
+    .map_or_else(linux_sysv_ipc_error, |size| size as u64)
+}
+
+fn linux_msgctl(id: u64, command: u64, address: u64) -> u64 {
+    const IPC_RMID: u64 = 0;
+    const IPC_SET: u64 = 1;
+    const IPC_STAT: u64 = 2;
+    const IPC_64: u64 = 0x100;
+    if id > i32::MAX as u64 || command & !(IPC_64 | 0xff) != 0 {
+        return LINUX_EINVAL;
+    }
+    let id = id as u32;
+    match command & !IPC_64 {
+        IPC_RMID => crate::linux_sysv_ipc::message_queue_remove(id)
+            .map_or_else(linux_sysv_ipc_error, |()| 0),
+        IPC_SET => {
+            let mut input = [0_u8; 120];
+            if !copy_from_linux_user(address, &mut input) {
+                return LINUX_EFAULT;
+            }
+            crate::linux_sysv_ipc::message_queue_set(
+                id,
+                u16::from_ne_bytes(input[20..22].try_into().unwrap()),
+                u64::from_ne_bytes(input[88..96].try_into().unwrap()),
+            )
+            .map_or_else(linux_sysv_ipc_error, |()| 0)
+        }
+        IPC_STAT => {
+            let Ok(queue) = crate::linux_sysv_ipc::message_queue_info(id) else {
+                return LINUX_EINVAL;
+            };
+            let mut output = [0_u8; 120];
+            output[0..4].copy_from_slice(&queue.key.to_ne_bytes());
+            output[20..22].copy_from_slice(&queue.mode.to_ne_bytes());
+            output[72..80].copy_from_slice(&queue.bytes.to_ne_bytes());
+            output[80..88].copy_from_slice(&queue.messages.to_ne_bytes());
+            output[88..96].copy_from_slice(&queue.byte_limit.to_ne_bytes());
+            output[96..100].copy_from_slice(&queue.last_sender.to_ne_bytes());
+            output[100..104].copy_from_slice(&queue.last_receiver.to_ne_bytes());
+            if copy_to_linux_user(address, &output) {
+                0
+            } else {
+                LINUX_EFAULT
+            }
+        }
+        _ => LINUX_EINVAL,
+    }
+}
+
 fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let old_runtime = LINUX_RUNTIME_MODE.swap(true, Ordering::SeqCst);
     let id = linux_shmget(0, 2 * PAGE_SIZE as u64, 0o600);
@@ -11639,11 +11779,18 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
             Err(crate::linux_sysv_ipc::Error::Invalid)
         );
     let semaphores = verify_linux_sysv_semaphore_syscalls();
+    let messages = verify_linux_sysv_message_queue_syscalls();
     let mappings_released =
         address_space::release_current_linux_runtime_mappings(LINUX_RUNTIME_DYNAMIC_MMAP_BASE);
     ELF_PROBE_MMAP_NEXT.store(LINUX_RUNTIME_DYNAMIC_MMAP_BASE, Ordering::SeqCst);
     LINUX_RUNTIME_MODE.store(old_runtime, Ordering::SeqCst);
-    shared && removed_while_attached && detached && destroyed && semaphores && mappings_released
+    shared
+        && removed_while_attached
+        && detached
+        && destroyed
+        && semaphores
+        && messages
+        && mappings_released
 }
 
 fn verify_linux_sysv_semaphore_syscalls() -> bool {
@@ -11711,6 +11858,92 @@ fn verify_linux_sysv_semaphore_syscalls() -> bool {
     let removed = linux_semctl(id, 0, 0, 0) == 0 && linux_semctl(id, 0, GETVAL, 0) == LINUX_EINVAL;
     let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
     applied && blocking_checked && stat_valid && mode_changed && all_values && removed && unmapped
+}
+
+fn verify_linux_sysv_message_queue_syscalls() -> bool {
+    const IPC_SET: u64 = 1;
+    const IPC_STAT: u64 = 2;
+    const IPC_NOWAIT: u64 = 0o4000;
+    const MSG_NOERROR: u64 = 0o10_000;
+    const MSG_COPY: u64 = 0o40_000;
+    let mapping = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    if !(LINUX_RUNTIME_DYNAMIC_MMAP_BASE..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
+        .contains(&mapping)
+    {
+        return false;
+    }
+    let id = linux_msgget(0, 0o600);
+    let mut first = [0_u8; 15];
+    first[..8].copy_from_slice(&7_i64.to_ne_bytes());
+    first[8..].copy_from_slice(b"message");
+    let mut second = [0_u8; 11];
+    second[..8].copy_from_slice(&2_i64.to_ne_bytes());
+    second[8..].copy_from_slice(b"two");
+    let sent = id <= i32::MAX as u64
+        && copy_to_linux_user(mapping, &first)
+        && linux_msgsnd(id, mapping, 7, 0) == 0
+        && copy_to_linux_user(mapping, &second)
+        && linux_msgsnd(id, mapping, 3, 0) == 0;
+    let stat_address = mapping + 256;
+    let stat_valid = sent && linux_msgctl(id, IPC_STAT, stat_address) == 0 && {
+        let mut stat = [0_u8; 120];
+        copy_from_linux_user(stat_address, &mut stat)
+            && u16::from_ne_bytes(stat[20..22].try_into().unwrap()) == 0o600
+            && u64::from_ne_bytes(stat[72..80].try_into().unwrap()) == 10
+            && u64::from_ne_bytes(stat[80..88].try_into().unwrap()) == 2
+            && u64::from_ne_bytes(stat[88..96].try_into().unwrap()) == 16_384
+    };
+    let output = mapping + 512;
+    let copied = linux_msgrcv(id, output, 8, 1, IPC_NOWAIT | MSG_COPY) == 3
+        && {
+            let mut bytes = [0_u8; 11];
+            copy_from_linux_user(output, &mut bytes)
+                && i64::from_ne_bytes(bytes[..8].try_into().unwrap()) == 2
+                && &bytes[8..] == b"two"
+        }
+        && linux_msgctl(id, IPC_STAT, stat_address) == 0
+        && {
+            let mut count = [0_u8; 8];
+            copy_from_linux_user(stat_address + 80, &mut count) && u64::from_ne_bytes(count) == 2
+        };
+    let selected = linux_msgrcv(id, output, 8, (-3_i64) as u64, IPC_NOWAIT) == 3 && {
+        let mut bytes = [0_u8; 11];
+        copy_from_linux_user(output, &mut bytes)
+            && i64::from_ne_bytes(bytes[..8].try_into().unwrap()) == 2
+            && &bytes[8..] == b"two"
+    };
+    let truncation = linux_msgrcv(id, output, 3, 7, IPC_NOWAIT) == LINUX_E2BIG
+        && linux_msgrcv(id, output, 3, 7, IPC_NOWAIT | MSG_NOERROR) == 3
+        && {
+            let mut bytes = [0_u8; 11];
+            copy_from_linux_user(output, &mut bytes)
+                && i64::from_ne_bytes(bytes[..8].try_into().unwrap()) == 7
+                && &bytes[8..] == b"mes"
+        }
+        && linux_msgrcv(id, output, 8, 0, IPC_NOWAIT) == LINUX_EAGAIN;
+    let mut changed = [0_u8; 120];
+    changed[20..22].copy_from_slice(&0o640_u16.to_ne_bytes());
+    changed[88..96].copy_from_slice(&32_768_u64.to_ne_bytes());
+    let changed = copy_to_linux_user(stat_address, &changed)
+        && linux_msgctl(id, IPC_SET, stat_address) == 0
+        && linux_msgctl(id, IPC_STAT, stat_address) == 0
+        && {
+            let mut stat = [0_u8; 120];
+            copy_from_linux_user(stat_address, &mut stat)
+                && u16::from_ne_bytes(stat[20..22].try_into().unwrap()) == 0o640
+                && u64::from_ne_bytes(stat[88..96].try_into().unwrap()) == 32_768
+        };
+    let removed =
+        linux_msgctl(id, 0, 0) == 0 && linux_msgctl(id, IPC_STAT, stat_address) == LINUX_EINVAL;
+    let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
+    stat_valid && copied && selected && truncation && changed && removed && unmapped
 }
 
 fn linux_runtime_mmap(

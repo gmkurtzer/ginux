@@ -1777,6 +1777,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             kernel_fail("ginux: Linux SysV semaphore lifecycle invalid\r\n");
         }
         serial_write("ginux: Linux SysV semaphore lifecycle validated\r\n");
+        if !linux_sysv_ipc::verify_message_queue_lifecycle() {
+            kernel_fail("ginux: Linux SysV message queue lifecycle invalid\r\n");
+        }
+        serial_write("ginux: Linux SysV message queue lifecycle validated\r\n");
         let Some(system_init_node) = initramfs::published_regular_file_node(b"sbin/init") else {
             kernel_fail("ginux: minimal system init missing\r\n");
         };

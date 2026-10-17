@@ -6,6 +6,7 @@ const PAGE_SIZE: usize = 4096;
 const INSTANCE_LIMIT: usize = control_abi::DOMAIN_LIMIT + 1;
 const FRAME_CAPACITY: usize = 320;
 const SEMAPHORE_CAPACITY: usize = 250;
+const MESSAGE_CAPACITY: usize = 4048;
 const WALK_LIMIT: usize = 262_144;
 pub(crate) const SEM_VALUE_MAX: u16 = 32_767;
 
@@ -24,6 +25,12 @@ static SEMAPHORE_ROOT_GENERATIONS: [AtomicU32; INSTANCE_LIMIT] =
     [const { AtomicU32::new(0) }; INSTANCE_LIMIT];
 static NEXT_SEMAPHORE_IDS: [AtomicU32; INSTANCE_LIMIT] =
     [const { AtomicU32::new(1) }; INSTANCE_LIMIT];
+static MESSAGE_ROOT_ADDRESSES: [AtomicU64; INSTANCE_LIMIT] =
+    [const { AtomicU64::new(0) }; INSTANCE_LIMIT];
+static MESSAGE_ROOT_GENERATIONS: [AtomicU32; INSTANCE_LIMIT] =
+    [const { AtomicU32::new(0) }; INSTANCE_LIMIT];
+static NEXT_MESSAGE_IDS: [AtomicU32; INSTANCE_LIMIT] =
+    [const { AtomicU32::new(1) }; INSTANCE_LIMIT];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Error {
@@ -33,6 +40,8 @@ pub(crate) enum Error {
     NoMemory,
     Range,
     WouldBlock,
+    TooBig,
+    Fault,
 }
 
 #[derive(Clone, Copy)]
@@ -57,6 +66,44 @@ pub(crate) struct SemaphoreOperation {
     pub(crate) number: u16,
     pub(crate) operation: i16,
     pub(crate) flags: u16,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct MessageQueueInfo {
+    pub(crate) key: i32,
+    pub(crate) mode: u16,
+    pub(crate) bytes: u64,
+    pub(crate) messages: u64,
+    pub(crate) byte_limit: u64,
+    pub(crate) last_sender: u32,
+    pub(crate) last_receiver: u32,
+}
+
+#[repr(C)]
+struct MessageQueue {
+    next_queue: memory::FrameLease,
+    id: u32,
+    key: i32,
+    mode: u16,
+    _reserved: u16,
+    byte_limit: u64,
+    bytes: u64,
+    messages: u64,
+    head: memory::FrameLease,
+    tail: memory::FrameLease,
+    last_sender: u32,
+    last_receiver: u32,
+}
+
+#[repr(C)]
+struct MessagePage {
+    next_message: memory::FrameLease,
+    next_page: memory::FrameLease,
+    message_type: i64,
+    size: u64,
+    used: u16,
+    _padding: [u8; 6],
+    bytes: [u8; MESSAGE_CAPACITY],
 }
 
 #[derive(Clone, Copy)]
@@ -114,6 +161,8 @@ struct Attachment {
 const _: () = assert!(core::mem::size_of::<SegmentPage>() <= PAGE_SIZE);
 const _: () = assert!(core::mem::size_of::<Attachment>() <= PAGE_SIZE);
 const _: () = assert!(core::mem::size_of::<SemaphorePage>() <= PAGE_SIZE);
+const _: () = assert!(core::mem::size_of::<MessageQueue>() <= PAGE_SIZE);
+const _: () = assert!(core::mem::size_of::<MessagePage>() == PAGE_SIZE);
 
 struct Guard {
     instance: usize,
@@ -183,6 +232,22 @@ fn semaphore_page(frame: memory::FrameLease) -> Option<&'static SemaphorePage> {
 
 fn semaphore_page_mut(frame: memory::FrameLease) -> Option<&'static mut SemaphorePage> {
     Some(unsafe { &mut *(frame.direct_map_address()? as *mut SemaphorePage) })
+}
+
+fn message_queue(frame: memory::FrameLease) -> Option<&'static MessageQueue> {
+    Some(unsafe { &*(frame.direct_map_address()? as *const MessageQueue) })
+}
+
+fn message_queue_mut(frame: memory::FrameLease) -> Option<&'static mut MessageQueue> {
+    Some(unsafe { &mut *(frame.direct_map_address()? as *mut MessageQueue) })
+}
+
+fn message_page(frame: memory::FrameLease) -> Option<&'static MessagePage> {
+    Some(unsafe { &*(frame.direct_map_address()? as *const MessagePage) })
+}
+
+fn message_page_mut(frame: memory::FrameLease) -> Option<&'static mut MessagePage> {
+    Some(unsafe { &mut *(frame.direct_map_address()? as *mut MessagePage) })
 }
 
 fn allocate_zeroed() -> Option<memory::FrameLease> {
@@ -620,12 +685,41 @@ pub(crate) fn teardown() -> bool {
         None,
     );
     for _ in 0..WALK_LIMIT {
-        let Some(set) = sets else { return true };
+        let Some(set) = sets else { break };
         let Some(page) = semaphore_page(set) else {
             return false;
         };
         sets = (page.next_set != memory::FrameLease::EMPTY).then_some(page.next_set);
         if !release_semaphore_chain(set) {
+            return false;
+        }
+    }
+    if sets.is_some() {
+        return false;
+    }
+    let mut queues = root(
+        &MESSAGE_ROOT_ADDRESSES,
+        &MESSAGE_ROOT_GENERATIONS,
+        guard.instance,
+    );
+    publish_root(
+        &MESSAGE_ROOT_ADDRESSES,
+        &MESSAGE_ROOT_GENERATIONS,
+        guard.instance,
+        None,
+    );
+    for _ in 0..WALK_LIMIT {
+        let Some(queue_frame) = queues else {
+            return true;
+        };
+        let Some(queue) = message_queue(queue_frame) else {
+            return false;
+        };
+        queues = (queue.next_queue != memory::FrameLease::EMPTY).then_some(queue.next_queue);
+        let messages = (queue.head != memory::FrameLease::EMPTY).then_some(queue.head);
+        if !release_messages(messages)
+            || !memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[queue_frame])
+        {
             return false;
         }
     }
@@ -972,6 +1066,434 @@ pub(crate) fn semaphore_remove(id: u32) -> Result<(), Error> {
     release_semaphore_chain(frame)
         .then_some(())
         .ok_or(Error::Invalid)
+}
+
+fn find_message_queue(
+    instance: usize,
+    id: u32,
+) -> Option<(memory::FrameLease, Option<memory::FrameLease>)> {
+    let mut current = root(&MESSAGE_ROOT_ADDRESSES, &MESSAGE_ROOT_GENERATIONS, instance);
+    let mut previous = None;
+    for _ in 0..WALK_LIMIT {
+        let frame = current?;
+        let queue = message_queue(frame)?;
+        if queue.id == id {
+            return Some((frame, previous));
+        }
+        previous = current;
+        current = (queue.next_queue != memory::FrameLease::EMPTY).then_some(queue.next_queue);
+    }
+    None
+}
+
+fn find_message_key(instance: usize, key: i32) -> Option<memory::FrameLease> {
+    let mut current = root(&MESSAGE_ROOT_ADDRESSES, &MESSAGE_ROOT_GENERATIONS, instance);
+    for _ in 0..WALK_LIMIT {
+        let frame = current?;
+        let queue = message_queue(frame)?;
+        if queue.key == key {
+            return Some(frame);
+        }
+        current = (queue.next_queue != memory::FrameLease::EMPTY).then_some(queue.next_queue);
+    }
+    None
+}
+
+fn release_message(first: memory::FrameLease) -> bool {
+    let mut current = Some(first);
+    for _ in 0..WALK_LIMIT {
+        let Some(frame) = current else { return true };
+        let Some(page) = message_page(frame) else {
+            return false;
+        };
+        current = (page.next_page != memory::FrameLease::EMPTY).then_some(page.next_page);
+        if !memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[frame]) {
+            return false;
+        }
+    }
+    false
+}
+
+fn release_messages(mut message: Option<memory::FrameLease>) -> bool {
+    for _ in 0..WALK_LIMIT {
+        let Some(frame) = message else { return true };
+        let Some(page) = message_page(frame) else {
+            return false;
+        };
+        message = (page.next_message != memory::FrameLease::EMPTY).then_some(page.next_message);
+        if !release_message(frame) {
+            return false;
+        }
+    }
+    false
+}
+
+pub(crate) fn message_get_or_create(
+    key: i32,
+    mode: u16,
+    create: bool,
+    exclusive: bool,
+) -> Result<u32, Error> {
+    const DEFAULT_BYTE_LIMIT: u64 = 16_384;
+    let guard = Guard::acquire().ok_or(Error::Invalid)?;
+    if key != 0 {
+        if let Some(frame) = find_message_key(guard.instance, key) {
+            let queue = message_queue(frame).ok_or(Error::Invalid)?;
+            if create && exclusive {
+                return Err(Error::Exists);
+            }
+            return Ok(queue.id);
+        }
+        if !create {
+            return Err(Error::NoEntry);
+        }
+    }
+    let frame = allocate_zeroed().ok_or(Error::NoMemory)?;
+    let id = NEXT_MESSAGE_IDS[guard.instance].fetch_add(1, Ordering::AcqRel);
+    if id == 0 || id > i32::MAX as u32 {
+        let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[frame]);
+        return Err(Error::NoMemory);
+    }
+    let old_root = root(
+        &MESSAGE_ROOT_ADDRESSES,
+        &MESSAGE_ROOT_GENERATIONS,
+        guard.instance,
+    );
+    let Some(queue) = message_queue_mut(frame) else {
+        let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[frame]);
+        return Err(Error::NoMemory);
+    };
+    queue.next_queue = old_root.unwrap_or(memory::FrameLease::EMPTY);
+    queue.id = id;
+    queue.key = key;
+    queue.mode = mode & 0o777;
+    queue.byte_limit = DEFAULT_BYTE_LIMIT;
+    publish_root(
+        &MESSAGE_ROOT_ADDRESSES,
+        &MESSAGE_ROOT_GENERATIONS,
+        guard.instance,
+        Some(frame),
+    );
+    Ok(id)
+}
+
+pub(crate) fn message_queue_info(id: u32) -> Result<MessageQueueInfo, Error> {
+    let guard = Guard::acquire().ok_or(Error::Invalid)?;
+    let (frame, _) = find_message_queue(guard.instance, id).ok_or(Error::Invalid)?;
+    let queue = message_queue(frame).ok_or(Error::Invalid)?;
+    Ok(MessageQueueInfo {
+        key: queue.key,
+        mode: queue.mode,
+        bytes: queue.bytes,
+        messages: queue.messages,
+        byte_limit: queue.byte_limit,
+        last_sender: queue.last_sender,
+        last_receiver: queue.last_receiver,
+    })
+}
+
+pub(crate) fn message_send<F>(
+    id: u32,
+    message_type: i64,
+    size: usize,
+    pid: u32,
+    mut read: F,
+) -> Result<(), Error>
+where
+    F: FnMut(usize, &mut [u8]) -> bool,
+{
+    if message_type <= 0 {
+        return Err(Error::Invalid);
+    }
+    let guard = Guard::acquire().ok_or(Error::Invalid)?;
+    let (queue_frame, _) = find_message_queue(guard.instance, id).ok_or(Error::Invalid)?;
+    let queue = message_queue(queue_frame).ok_or(Error::Invalid)?;
+    if queue
+        .bytes
+        .checked_add(size as u64)
+        .is_none_or(|bytes| bytes > queue.byte_limit)
+    {
+        return Err(Error::WouldBlock);
+    }
+    let first = allocate_zeroed().ok_or(Error::NoMemory)?;
+    {
+        let page = message_page_mut(first).ok_or(Error::NoMemory)?;
+        page.message_type = message_type;
+        page.size = size as u64;
+    }
+    let mut page_frame = first;
+    let mut offset = 0;
+    loop {
+        let length = (size - offset).min(MESSAGE_CAPACITY);
+        let page = message_page_mut(page_frame).ok_or(Error::Invalid)?;
+        if !read(offset, &mut page.bytes[..length]) {
+            let _ = release_message(first);
+            return Err(Error::Fault);
+        }
+        page.used = length as u16;
+        offset += length;
+        if offset == size {
+            break;
+        }
+        let Some(next) = allocate_zeroed() else {
+            let _ = release_message(first);
+            return Err(Error::NoMemory);
+        };
+        page.next_page = next;
+        page_frame = next;
+    }
+    let queue = message_queue_mut(queue_frame).ok_or(Error::Invalid)?;
+    if queue.tail != memory::FrameLease::EMPTY {
+        message_page_mut(queue.tail)
+            .ok_or(Error::Invalid)?
+            .next_message = first;
+    } else {
+        queue.head = first;
+    }
+    queue.tail = first;
+    queue.bytes += size as u64;
+    queue.messages += 1;
+    queue.last_sender = pid;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn message_receive<F>(
+    id: u32,
+    size: usize,
+    selector: i64,
+    no_error: bool,
+    except: bool,
+    copy: bool,
+    pid: u32,
+    mut write: F,
+) -> Result<usize, Error>
+where
+    F: FnMut(i64, usize, &[u8]) -> bool,
+{
+    let guard = Guard::acquire().ok_or(Error::Invalid)?;
+    let (queue_frame, _) = find_message_queue(guard.instance, id).ok_or(Error::Invalid)?;
+    let queue = message_queue(queue_frame).ok_or(Error::Invalid)?;
+    let mut current = (queue.head != memory::FrameLease::EMPTY).then_some(queue.head);
+    let mut previous = None;
+    let mut selected = None;
+    let mut selected_previous = None;
+    for (ordinal, _) in (0..WALK_LIMIT).enumerate() {
+        let Some(frame) = current else { break };
+        let page = message_page(frame).ok_or(Error::Invalid)?;
+        let matches = if copy {
+            i64::try_from(ordinal).is_ok_and(|ordinal| ordinal == selector)
+        } else if selector == 0 {
+            true
+        } else if selector > 0 && except {
+            page.message_type != selector
+        } else if selector > 0 {
+            page.message_type == selector
+        } else {
+            page.message_type <= selector.checked_abs().ok_or(Error::Invalid)?
+        };
+        if matches
+            && (selected.is_none()
+                || selector < 0
+                    && message_page(selected.unwrap())
+                        .is_none_or(|prior| page.message_type < prior.message_type))
+        {
+            selected = Some(frame);
+            selected_previous = previous;
+            if selector >= 0 {
+                break;
+            }
+        }
+        previous = current;
+        current = (page.next_message != memory::FrameLease::EMPTY).then_some(page.next_message);
+    }
+    let selected = selected.ok_or(Error::WouldBlock)?;
+    let first = message_page(selected).ok_or(Error::Invalid)?;
+    let message_size = usize::try_from(first.size).map_err(|_| Error::Invalid)?;
+    if message_size > size && !no_error {
+        return Err(Error::TooBig);
+    }
+    let copied = message_size.min(size);
+    if copied == 0 && !write(first.message_type, 0, &[]) {
+        return Err(Error::Fault);
+    }
+    let mut page_frame = selected;
+    let mut offset = 0;
+    while offset < copied {
+        let page = message_page(page_frame).ok_or(Error::Invalid)?;
+        let length = usize::from(page.used).min(copied - offset);
+        if length == 0 || !write(first.message_type, offset, &page.bytes[..length]) {
+            return Err(Error::Fault);
+        }
+        offset += length;
+        if offset < copied {
+            if page.next_page == memory::FrameLease::EMPTY {
+                return Err(Error::Invalid);
+            }
+            page_frame = page.next_page;
+        }
+    }
+    if copy {
+        return Ok(copied);
+    }
+    let next = (first.next_message != memory::FrameLease::EMPTY).then_some(first.next_message);
+    let queue = message_queue_mut(queue_frame).ok_or(Error::Invalid)?;
+    if let Some(previous) = selected_previous {
+        message_page_mut(previous)
+            .ok_or(Error::Invalid)?
+            .next_message = next.unwrap_or(memory::FrameLease::EMPTY);
+    } else {
+        queue.head = next.unwrap_or(memory::FrameLease::EMPTY);
+    }
+    if queue.tail == selected {
+        queue.tail = selected_previous.unwrap_or(memory::FrameLease::EMPTY);
+    }
+    queue.bytes = queue
+        .bytes
+        .checked_sub(message_size as u64)
+        .ok_or(Error::Invalid)?;
+    queue.messages = queue.messages.checked_sub(1).ok_or(Error::Invalid)?;
+    queue.last_receiver = pid;
+    release_message(selected)
+        .then_some(copied)
+        .ok_or(Error::Invalid)
+}
+
+pub(crate) fn message_queue_set(id: u32, mode: u16, byte_limit: u64) -> Result<(), Error> {
+    if byte_limit == 0 {
+        return Err(Error::Invalid);
+    }
+    let guard = Guard::acquire().ok_or(Error::Invalid)?;
+    let (frame, _) = find_message_queue(guard.instance, id).ok_or(Error::Invalid)?;
+    let queue = message_queue_mut(frame).ok_or(Error::Invalid)?;
+    if byte_limit < queue.bytes {
+        return Err(Error::Invalid);
+    }
+    queue.mode = mode & 0o777;
+    queue.byte_limit = byte_limit;
+    Ok(())
+}
+
+pub(crate) fn message_queue_remove(id: u32) -> Result<(), Error> {
+    let guard = Guard::acquire().ok_or(Error::Invalid)?;
+    let (frame, previous) = find_message_queue(guard.instance, id).ok_or(Error::Invalid)?;
+    let queue = message_queue(frame).ok_or(Error::Invalid)?;
+    let next = (queue.next_queue != memory::FrameLease::EMPTY).then_some(queue.next_queue);
+    let messages = (queue.head != memory::FrameLease::EMPTY).then_some(queue.head);
+    if let Some(previous) = previous {
+        message_queue_mut(previous)
+            .ok_or(Error::Invalid)?
+            .next_queue = next.unwrap_or(memory::FrameLease::EMPTY);
+    } else {
+        publish_root(
+            &MESSAGE_ROOT_ADDRESSES,
+            &MESSAGE_ROOT_GENERATIONS,
+            guard.instance,
+            next,
+        );
+    }
+    if !release_messages(messages)
+        || !memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[frame])
+    {
+        return Err(Error::Invalid);
+    }
+    Ok(())
+}
+
+pub(crate) fn verify_message_queue_lifecycle() -> bool {
+    let Some(before) = memory::owner_live_frame_count(memory::FrameOwner::KERNEL) else {
+        return false;
+    };
+    let Ok(id) = message_get_or_create(0x4d53_4751, 0o620, true, true) else {
+        return false;
+    };
+    let large_size = MESSAGE_CAPACITY + 37;
+    let large_sent = message_send(id, 3, large_size, 1, |offset, bytes| {
+        for (index, byte) in bytes.iter_mut().enumerate() {
+            *byte = ((offset + index) % 251) as u8;
+        }
+        true
+    });
+    let small = b"second";
+    let small_sent = message_send(id, 1, small.len(), 1, |offset, bytes| {
+        let Some(source) = small.get(offset..offset + bytes.len()) else {
+            return false;
+        };
+        bytes.copy_from_slice(source);
+        true
+    });
+    let selected_small = message_receive(
+        id,
+        small.len(),
+        -2,
+        false,
+        false,
+        false,
+        2,
+        |message_type, offset, bytes| {
+            message_type == 1 && small.get(offset..offset + bytes.len()) == Some(bytes)
+        },
+    );
+    let mut copied = 0;
+    let copied_large = message_receive(
+        id,
+        large_size,
+        0,
+        false,
+        false,
+        true,
+        2,
+        |message_type, offset, bytes| {
+            let valid = message_type == 3
+                && bytes
+                    .iter()
+                    .enumerate()
+                    .all(|(index, byte)| *byte == ((offset + index) % 251) as u8);
+            copied += bytes.len();
+            valid
+        },
+    );
+    let too_big = message_receive(id, 8, 3, false, false, false, 2, |_, _, _| true);
+    let mut truncated = [0_u8; 8];
+    let truncated_large = message_receive(
+        id,
+        truncated.len(),
+        3,
+        true,
+        false,
+        false,
+        2,
+        |message_type, offset, bytes| {
+            if message_type != 3 || offset + bytes.len() > truncated.len() {
+                return false;
+            }
+            truncated[offset..offset + bytes.len()].copy_from_slice(bytes);
+            true
+        },
+    );
+    let verified = large_sent.is_ok()
+        && small_sent.is_ok()
+        && message_queue_info(id).is_ok_and(|queue| {
+            queue.messages == 2 && queue.bytes == (large_size + small.len()) as u64
+        })
+        && selected_small == Ok(small.len())
+        && copied_large == Ok(large_size)
+        && copied == large_size
+        && message_queue_info(id).is_ok_and(|queue| queue.messages == 1)
+        && too_big == Err(Error::TooBig)
+        && message_queue_info(id).is_ok_and(|queue| queue.messages == 1)
+        && truncated_large == Ok(truncated.len())
+        && truncated
+            .iter()
+            .enumerate()
+            .all(|(index, byte)| *byte == (index % 251) as u8)
+        && message_queue_set(id, 0o600, 32_768).is_ok()
+        && message_queue_info(id).is_ok_and(|queue| {
+            queue.mode == 0o600 && queue.byte_limit == 32_768 && queue.messages == 0
+        })
+        && message_queue_remove(id).is_ok()
+        && matches!(message_queue_info(id), Err(Error::Invalid));
+    verified && memory::owner_live_frame_count(memory::FrameOwner::KERNEL) == Some(before)
 }
 
 pub(crate) fn verify_semaphore_lifecycle() -> bool {

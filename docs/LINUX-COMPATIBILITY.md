@@ -42,7 +42,7 @@ Detailed bounded behavior for implemented calls lives in
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **19 Complete**, **269 Partial**, **45 Policy-denied**, **42 Missing**.
+Current totals: **19 Complete**, **273 Partial**, **45 Policy-denied**, **38 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -95,6 +95,15 @@ The Linux default `SEMMSL=32000` and `SEMOPM=500` limits are enforced.
 Operations that would sleep currently return `EAGAIN`; waiter scheduling,
 `SEM_UNDO`, timestamps, permission enforcement, and information commands are
 pending, so the family remains Partial.
+
+System V message queues use dynamically allocated, per-domain queue and
+payload objects. `msgget`, `msgsnd`, `msgrcv`, and
+`msgctl(IPC_STAT/IPC_SET/IPC_RMID)` support keyed creation, ordered messages,
+Linux type selection, `MSG_EXCEPT`, nondestructive `MSG_COPY`, and
+`MSG_NOERROR` truncation. Queue byte limits are configurable and payloads are
+not constrained to a static aggregate cache. Blocking wait/wakeup, timestamps,
+credential enforcement, and Linux's information commands remain pending, so
+the family remains Partial.
 
 ## Syscall index
 
@@ -172,10 +181,10 @@ therefore omitted.
 | 65 | semop | Partial |
 | 66 | semctl | Partial |
 | 67 | shmdt | Partial |
-| 68 | msgget | Missing |
-| 69 | msgsnd | Missing |
-| 70 | msgrcv | Missing |
-| 71 | msgctl | Missing |
+| 68 | msgget | Partial |
+| 69 | msgsnd | Partial |
+| 70 | msgrcv | Partial |
+| 71 | msgctl | Partial |
 | 72 | fcntl | Partial |
 | 73 | flock | Partial |
 | 74 | fsync | Partial |
