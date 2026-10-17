@@ -1541,8 +1541,11 @@ live thread visible in the domain; unknown and negative TIDs return `-ESRCH`.
 Linux's ordered output behavior is preserved: the eight-byte size is written
 before the head pointer, and remains written when a bad head destination then
 returns `-EFAULT`. A bad size destination leaves the head untouched. Exit
-discards the registration, but robust futex traversal and owner-death recovery
-remain pending, so `set_robust_list` remains Partial. Internal TID lifecycle testing assigns distinct
+walks up to Linux's 2048-node limit, handles `list_op_pending`, marks matching
+ordinary futex owners with `FUTEX_OWNER_DIED`, preserves `FUTEX_WAITERS`, and
+wakes one waiter. User-memory faults terminate cleanup without failing exit.
+Priority-inheritance robust futex recovery remains pending, so
+`set_robust_list` remains Partial. Internal TID lifecycle testing assigns distinct
 clear-child-TID and robust-list sentinels to two slots, proves they follow the
 current-thread selection, and proves retirement clears them before slot reuse.
 

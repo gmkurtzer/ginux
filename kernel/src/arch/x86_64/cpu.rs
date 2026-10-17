@@ -8981,10 +8981,12 @@ extern "sysv64" fn linux_syscall_handler(
             }
             if ELF_PROBE_EXEC_REPLACED.load(Ordering::SeqCst) {
                 let clear_child_tid = current_linux_clear_child_tid().unwrap_or(0);
+                let robust_list = current_linux_robust_list().unwrap_or(0);
                 if clear_child_tid != 0 {
                     let _ = copy_to_linux_user(clear_child_tid, &0_u32.to_ne_bytes());
                     let _ = wake_linux_futex(clear_child_tid, 1);
                 }
+                exit_linux_robust_list(current_linux_tid().unwrap_or(0), robust_list);
                 if !set_current_linux_clear_child_tid(0)
                     || !set_current_linux_robust_list(0)
                     || !linux_close_all_descriptors()
@@ -9011,6 +9013,7 @@ extern "sysv64" fn linux_syscall_handler(
                 let _ = copy_to_linux_user(clear_child_tid, &0_u32.to_ne_bytes());
                 let _ = wake_linux_futex(clear_child_tid, 1);
             }
+            exit_linux_robust_list(current_linux_tid().unwrap_or(0), robust_list);
             if robust_list == 0
                 || !set_current_linux_clear_child_tid(0)
                 || !set_current_linux_robust_list(0)
@@ -9520,10 +9523,13 @@ fn linux_schedule_new_thread(
 
 fn linux_exit_child_to_parent(output: *mut LinuxSyscallFrame) -> u64 {
     let clear_child_tid = current_linux_clear_child_tid().unwrap_or(0);
+    let robust_list = current_linux_robust_list().unwrap_or(0);
+    let tid = current_linux_tid().unwrap_or(0);
     if clear_child_tid != 0 {
         let _ = copy_to_linux_user(clear_child_tid, &0_u32.to_ne_bytes());
     }
     let woken = wake_linux_futex(clear_child_tid, 1);
+    exit_linux_robust_list(tid, robust_list);
     if !set_current_linux_clear_child_tid(0)
         || !set_current_linux_robust_list(0)
         || !retire_current_linux_thread()
@@ -12912,9 +12918,47 @@ fn verify_linux_robust_list_syscalls() -> bool {
         && u64::from_ne_bytes(size) == LINUX_ROBUST_LIST_HEAD_SIZE as u64
         && linux_get_robust_list(2, mapping, mapping + 8) == LINUX_ESRCH
         && linux_get_robust_list(u64::MAX, mapping, mapping + 8) == LINUX_ESRCH;
+    let robust_head = mapping + 64;
+    let robust_node = mapping + 96;
+    let robust_futex = robust_node + 8;
+    let tid = current_linux_tid().unwrap_or(0);
+    let mut header = [0_u8; LINUX_ROBUST_LIST_HEAD_SIZE];
+    header[..8].copy_from_slice(&robust_node.to_ne_bytes());
+    header[8..16].copy_from_slice(&8_i64.to_ne_bytes());
+    let listed = ordered_faults
+        && copy_to_linux_user(robust_head, &header)
+        && copy_to_linux_user(robust_node, &robust_head.to_ne_bytes())
+        && copy_to_linux_user(robust_futex, &(tid | 0x8000_0000).to_ne_bytes());
+    if listed {
+        exit_linux_robust_list(tid, robust_head);
+    }
+    let mut futex = [0_u8; 4];
+    let owner_died = listed
+        && copy_from_linux_user(robust_futex, &mut futex)
+        && u32::from_ne_bytes(futex) == 0xc000_0000;
+    header[..8].copy_from_slice(&robust_head.to_ne_bytes());
+    header[16..24].copy_from_slice(&robust_node.to_ne_bytes());
+    let pending = owner_died
+        && copy_to_linux_user(robust_head, &header)
+        && copy_to_linux_user(robust_futex, &tid.to_ne_bytes());
+    if pending {
+        exit_linux_robust_list(tid, robust_head);
+    }
+    let pending_died = pending
+        && copy_from_linux_user(robust_futex, &mut futex)
+        && u32::from_ne_bytes(futex) == 0x4000_0000;
+    let foreign = tid.saturating_add(1);
+    let foreign_unchanged =
+        pending_died && copy_to_linux_user(robust_futex, &foreign.to_ne_bytes());
+    if foreign_unchanged {
+        exit_linux_robust_list(tid, robust_head);
+    }
+    let cleanup = foreign_unchanged
+        && copy_from_linux_user(robust_futex, &mut futex)
+        && u32::from_ne_bytes(futex) == foreign;
     let restored = set_current_linux_robust_list(saved);
     let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
-    ordered_faults && restored && unmapped
+    cleanup && restored && unmapped
 }
 
 fn verify_linux_io_uring_syscalls() -> bool {
@@ -15963,6 +16007,71 @@ fn linux_get_robust_list(tid: u64, head_address: u64, size_address: u64) -> u64 
         return LINUX_EFAULT;
     }
     0
+}
+
+fn linux_robust_futex_address(node: u64, offset: i64) -> Option<u64> {
+    if offset >= 0 {
+        node.checked_add(offset as u64)
+    } else {
+        node.checked_sub(offset.unsigned_abs())
+    }
+}
+
+fn exit_linux_robust_futex(tid: u32, node: u64, offset: i64, pi: bool) {
+    const FUTEX_TID_MASK: u32 = 0x3fff_ffff;
+    const FUTEX_OWNER_DIED: u32 = 0x4000_0000;
+    const FUTEX_WAITERS: u32 = 0x8000_0000;
+    if pi {
+        return;
+    }
+    let Some(address) = linux_robust_futex_address(node, offset) else {
+        return;
+    };
+    let mut bytes = [0_u8; size_of::<u32>()];
+    if !copy_from_linux_user(address, &mut bytes) {
+        return;
+    }
+    let value = u32::from_ne_bytes(bytes);
+    if value & FUTEX_TID_MASK != tid {
+        return;
+    }
+    let replacement = (value & FUTEX_WAITERS) | FUTEX_OWNER_DIED;
+    if copy_to_linux_user(address, &replacement.to_ne_bytes()) && value & FUTEX_WAITERS != 0 {
+        let _ = wake_linux_futex(address, 1);
+    }
+}
+
+fn exit_linux_robust_list(tid: u32, head: u64) {
+    const ROBUST_LIST_LIMIT: usize = 2048;
+    if tid == 0 || head == 0 {
+        return;
+    }
+    let mut header = [0_u8; LINUX_ROBUST_LIST_HEAD_SIZE];
+    if !copy_from_linux_user(head, &mut header) {
+        return;
+    }
+    let mut next = u64::from_ne_bytes(header[..8].try_into().unwrap());
+    let offset = i64::from_ne_bytes(header[8..16].try_into().unwrap());
+    let pending = u64::from_ne_bytes(header[16..24].try_into().unwrap());
+    let pending_node = pending & !1;
+    for _ in 0..ROBUST_LIST_LIMIT {
+        let node = next & !1;
+        if node == head || node == 0 {
+            break;
+        }
+        let pi = next & 1 != 0;
+        let mut link = [0_u8; 8];
+        if !copy_from_linux_user(node, &mut link) {
+            break;
+        }
+        next = u64::from_ne_bytes(link);
+        if node != pending_node {
+            exit_linux_robust_futex(tid, node, offset, pi);
+        }
+    }
+    if pending_node != 0 {
+        exit_linux_robust_futex(tid, pending_node, offset, pending & 1 != 0);
+    }
 }
 
 fn linux_readlink_at(
