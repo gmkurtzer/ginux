@@ -42,7 +42,7 @@ Detailed bounded behavior for implemented calls lives in
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **34 Complete**, **293 Partial**, **48 Policy-denied**, **0 Missing**.
+Current totals: **37 Complete**, **290 Partial**, **48 Policy-denied**, **0 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -238,7 +238,7 @@ therefore omitted.
 | 108 | getegid | Complete |
 | 109 | setpgid | Partial |
 | 110 | getppid | Complete |
-| 111 | getpgrp | Partial |
+| 111 | getpgrp | Complete |
 | 112 | setsid | Partial |
 | 113 | setreuid | Policy-denied |
 | 114 | setregid | Policy-denied |
@@ -248,10 +248,10 @@ therefore omitted.
 | 118 | getresuid | Complete |
 | 119 | setresgid | Policy-denied |
 | 120 | getresgid | Complete |
-| 121 | getpgid | Partial |
+| 121 | getpgid | Complete |
 | 122 | setfsuid | Policy-denied |
 | 123 | setfsgid | Policy-denied |
-| 124 | getsid | Partial |
+| 124 | getsid | Complete |
 | 125 | capget | Partial |
 | 126 | capset | Partial |
 | 127 | rt_sigpending | Partial |
