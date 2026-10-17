@@ -4577,9 +4577,9 @@ linux_child_joined:
     push 118
     pop rax
     call syscall_expect_efault
-    cmp dword ptr [0x405060], 0x12345678
+    cmp dword ptr [0x405060], 0
     require_equal
-    cmp dword ptr [0x405064], 0x12345678
+    cmp dword ptr [0x405064], 0
     require_equal
 
     mov edi, 0x405060

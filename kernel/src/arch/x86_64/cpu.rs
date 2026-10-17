@@ -8436,10 +8436,7 @@ extern "sysv64" fn linux_syscall_handler(
             } else {
                 (credentials.gid, credentials.egid, credentials.sgid)
             };
-            if !copy_linux_id_triple(first_argument, buffer, count, ids) {
-                return LINUX_EFAULT;
-            }
-            0
+            copy_linux_id_triple(first_argument, buffer, count, ids)
         }
         LINUX_PERSONALITY_SYSCALL => match first_argument {
             0 | 0xffff_ffff => 0,
@@ -26907,17 +26904,13 @@ fn linux_keyctl_describe(serial: i32, output_address: u64, output_length: u64) -
     }
 }
 
-fn copy_linux_id_triple(first: u64, second: u64, third: u64, ids: (u32, u32, u32)) -> bool {
-    let width = size_of::<u32>();
-    if !linux_writable_user_range_contains(first, width)
-        || !linux_writable_user_range_contains(second, width)
-        || !linux_writable_user_range_contains(third, width)
-    {
-        return false;
+fn copy_linux_id_triple(first: u64, second: u64, third: u64, ids: (u32, u32, u32)) -> u64 {
+    for (address, id) in [(first, ids.0), (second, ids.1), (third, ids.2)] {
+        if !copy_to_linux_user(address, &id.to_ne_bytes()) {
+            return LINUX_EFAULT;
+        }
     }
-    copy_to_linux_user(first, &ids.0.to_ne_bytes())
-        && copy_to_linux_user(second, &ids.1.to_ne_bytes())
-        && copy_to_linux_user(third, &ids.2.to_ne_bytes())
+    0
 }
 
 fn linux_capget(header_address: u64, data_address: u64) -> u64 {

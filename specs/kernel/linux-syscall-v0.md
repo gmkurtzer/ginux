@@ -1457,8 +1457,9 @@ returns zero. The initial namespace maps that container ID to outside ID
 100000. These are Linux-container credentials only. They do not select a native
 domain, add a capability, or authorize a kernel control operation. `getresuid`
 and `getresgid` copy real/effective/saved triples from the same immutable
-namespace. All three destinations are validated before any write, so an invalid
-third pointer cannot leave a partial result. `rax = 115` (`__NR_getgroups`)
+namespace using Linux's ordered `put_user` semantics: a later pointer fault
+returns `-EFAULT` after preserving any earlier successful writes. `rax = 115`
+(`__NR_getgroups`)
 reports one immutable supplementary group, container-local GID 0. A zero-sized
 query returns the required count without accessing its pointer, a negative size
 returns `-EINVAL`, and a full four-byte destination is required before copying.
