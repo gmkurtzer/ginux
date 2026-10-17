@@ -299,6 +299,7 @@ const LINUX_CLONE3_SYSCALL: u64 = 435;
 const LINUX_PIPE2_SYSCALL: u64 = 293;
 const LINUX_PREADV_SYSCALL: u64 = 295;
 const LINUX_PWRITEV_SYSCALL: u64 = 296;
+const LINUX_COPY_FILE_RANGE_SYSCALL: u64 = 326;
 const LINUX_PRLIMIT64_SYSCALL: u64 = 302;
 const LINUX_GETCPU_SYSCALL: u64 = 309;
 const LINUX_IOPRIO_SET_SYSCALL: u64 = 251;
@@ -7689,6 +7690,14 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_TRUNCATE_SYSCALL => linux_truncate(first_argument, buffer),
         LINUX_FTRUNCATE_SYSCALL => linux_ftruncate(first_argument, buffer),
         LINUX_FALLOCATE_SYSCALL => linux_fallocate(first_argument, buffer, count, register(0)),
+        LINUX_COPY_FILE_RANGE_SYSCALL => linux_copy_file_range(
+            first_argument,
+            buffer,
+            count,
+            register(0),
+            register(2),
+            register(1),
+        ),
         LINUX_BRK_SYSCALL => {
             if runtime_mode {
                 linux_runtime_brk(first_argument)
@@ -15920,6 +15929,222 @@ fn linux_regular_file_write_at(descriptor: u64, address: u64, count: u64, offset
         return LINUX_EINVAL;
     };
     linux_overlay_copy_from_user(handle, start, address, count)
+}
+
+fn linux_regular_file_read_kernel(
+    descriptor: u64,
+    offset: usize,
+    output: &mut [u8],
+) -> Result<usize, u64> {
+    let state = linux_device_descriptor(descriptor);
+    if !matches!(state & 3, LINUX_DESCRIPTOR_INPUT | 3) {
+        return Err(LINUX_EBADF);
+    }
+    if let Some(handle) = linux_overlay_descriptor_handle(descriptor) {
+        let metadata = crate::linux_overlay::metadata(handle).ok_or(LINUX_EBADF)?;
+        if metadata.kind != crate::linux_overlay::NodeKind::File {
+            return Err(LINUX_EISDIR);
+        }
+        return crate::linux_overlay::read(handle, offset, output).ok_or(LINUX_EIO);
+    }
+    if let Some(entry) = linux_oci_entry(descriptor) {
+        if entry.kind == ginux_oci::EntryKind::Directory {
+            return Err(LINUX_EISDIR);
+        }
+        if offset >= entry.data.len() {
+            return Ok(0);
+        }
+        let length = output.len().min(entry.data.len() - offset);
+        output[..length].copy_from_slice(&entry.data[offset..offset + length]);
+        return Ok(length);
+    }
+    if linux_tmp_file(state) {
+        let handle = linux_tmp_descriptor_handle(descriptor, state).ok_or(LINUX_EBADF)?;
+        return linux_tmpfs::read(handle, offset, output).ok_or(LINUX_EBADF);
+    }
+    Err(if linux_descriptor_open(descriptor) {
+        LINUX_ESPIPE
+    } else {
+        LINUX_EBADF
+    })
+}
+
+fn linux_regular_file_write_kernel(
+    descriptor: u64,
+    offset: usize,
+    input: &[u8],
+) -> Result<usize, u64> {
+    let state = linux_device_descriptor(descriptor);
+    if !matches!(state & 3, LINUX_DESCRIPTOR_OUTPUT | 3) {
+        return Err(LINUX_EBADF);
+    }
+    if linux_tmp_file(state) {
+        let handle = linux_tmp_descriptor_handle(descriptor, state).ok_or(LINUX_EBADF)?;
+        return linux_tmpfs::write(handle, offset, input).ok_or(LINUX_ENOSPC);
+    }
+    let handle = linux_copy_up_descriptor(descriptor)?;
+    let metadata = crate::linux_overlay::metadata(handle).ok_or(LINUX_EBADF)?;
+    if metadata.kind != crate::linux_overlay::NodeKind::File {
+        return Err(LINUX_EISDIR);
+    }
+    crate::linux_overlay::write(handle, offset, input).ok_or(LINUX_ENOSPC)
+}
+
+fn linux_file_range_offset(pointer: u64, descriptor: u64) -> Result<(usize, bool), u64> {
+    let offset = if pointer == 0 {
+        linux_descriptor_offset(descriptor).load(Ordering::SeqCst)
+    } else {
+        if !linux_writable_user_range_contains(pointer, core::mem::size_of::<i64>()) {
+            return Err(LINUX_EFAULT);
+        }
+        let mut bytes = [0_u8; 8];
+        if !copy_from_linux_user(pointer, &mut bytes) {
+            return Err(LINUX_EFAULT);
+        }
+        let value = i64::from_ne_bytes(bytes);
+        if value < 0 {
+            return Err(LINUX_EINVAL);
+        }
+        value as u64
+    };
+    usize::try_from(offset)
+        .map(|offset| (offset, pointer != 0))
+        .map_err(|_| LINUX_EFBIG)
+}
+
+fn linux_commit_file_range_offset(
+    pointer: u64,
+    descriptor: u64,
+    explicit: bool,
+    offset: usize,
+) -> Result<(), u64> {
+    if explicit {
+        copy_to_linux_user(pointer, &(offset as i64).to_ne_bytes())
+            .then_some(())
+            .ok_or(LINUX_EFAULT)
+    } else {
+        linux_descriptor_offset(descriptor).store(offset as u64, Ordering::SeqCst);
+        Ok(())
+    }
+}
+
+fn linux_copy_file_range(
+    input: u64,
+    input_offset_pointer: u64,
+    output: u64,
+    output_offset_pointer: u64,
+    length: u64,
+    flags: u64,
+) -> u64 {
+    if flags != 0 {
+        return LINUX_EINVAL;
+    }
+    if !linux_descriptor_open(input) || !linux_descriptor_open(output) {
+        return LINUX_EBADF;
+    }
+    let input_state = linux_device_descriptor(input);
+    let output_state = linux_device_descriptor(output);
+    if !matches!(input_state & 3, LINUX_DESCRIPTOR_INPUT | 3)
+        || !matches!(output_state & 3, LINUX_DESCRIPTOR_OUTPUT | 3)
+    {
+        return LINUX_EBADF;
+    }
+    if linux_socket_flags(output).is_some_and(|flags| flags & LINUX_O_APPEND as u32 != 0) {
+        return LINUX_EBADF;
+    }
+    let input_is_regular = linux_overlay_descriptor_handle(input).is_some()
+        || linux_oci_descriptor(input) != 0
+        || linux_tmp_descriptor_handle(input, input_state).is_some();
+    let output_is_regular = linux_overlay_descriptor_handle(output).is_some()
+        || linux_oci_descriptor(output) != 0
+        || linux_tmp_descriptor_handle(output, output_state).is_some();
+    if !input_is_regular || !output_is_regular {
+        return LINUX_EINVAL;
+    }
+    if input_offset_pointer != 0 && input_offset_pointer == output_offset_pointer {
+        return LINUX_EINVAL;
+    }
+    if input == output {
+        return LINUX_EINVAL;
+    }
+    if linux_overlay_descriptor_handle(input)
+        .zip(linux_overlay_descriptor_handle(output))
+        .is_some_and(|(input, output)| input == output)
+        || (linux_oci_descriptor(input) != 0
+            && linux_oci_descriptor(input) == linux_oci_descriptor(output))
+        || linux_tmp_descriptor_handle(input, input_state)
+            .zip(linux_tmp_descriptor_handle(output, output_state))
+            .is_some_and(|(input, output)| input == output)
+    {
+        return LINUX_EINVAL;
+    }
+    let (mut input_offset, explicit_input) =
+        match linux_file_range_offset(input_offset_pointer, input) {
+            Ok(offset) => offset,
+            Err(error) => return error,
+        };
+    let (mut output_offset, explicit_output) =
+        match linux_file_range_offset(output_offset_pointer, output) {
+            Ok(offset) => offset,
+            Err(error) => return error,
+        };
+    let Ok(requested) = usize::try_from(length) else {
+        return LINUX_EFBIG;
+    };
+    if requested > isize::MAX as usize {
+        return LINUX_EINVAL;
+    }
+    let mut buffer = [0_u8; PAGE_SIZE];
+    let mut copied = 0_usize;
+    let mut terminal_error = 0;
+    while copied < requested {
+        let chunk = (requested - copied).min(buffer.len());
+        let read = match linux_regular_file_read_kernel(input, input_offset, &mut buffer[..chunk]) {
+            Ok(read) => read,
+            Err(error) => {
+                terminal_error = error;
+                break;
+            }
+        };
+        if read == 0 {
+            break;
+        }
+        let written = match linux_regular_file_write_kernel(output, output_offset, &buffer[..read])
+        {
+            Ok(written) => written,
+            Err(error) => {
+                terminal_error = error;
+                break;
+            }
+        };
+        input_offset = input_offset.saturating_add(written);
+        output_offset = output_offset.saturating_add(written);
+        copied += written;
+        if written < read {
+            break;
+        }
+    }
+    if linux_commit_file_range_offset(input_offset_pointer, input, explicit_input, input_offset)
+        .is_err()
+        || linux_commit_file_range_offset(
+            output_offset_pointer,
+            output,
+            explicit_output,
+            output_offset,
+        )
+        .is_err()
+    {
+        return if copied == 0 {
+            LINUX_EFAULT
+        } else {
+            copied as u64
+        };
+    }
+    if copied == 0 && terminal_error != 0 {
+        terminal_error
+    } else {
+        copied as u64
+    }
 }
 
 fn clear_linux_poll_snapshot(slot: usize) {

@@ -42,7 +42,7 @@ implemented calls lives in [Linux Syscall Entry v0](../specs/kernel/linux-syscal
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **204 Partial**, **28 Policy-denied**, **143 Missing**.
+Current totals: **205 Partial**, **28 Policy-denied**, **142 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -405,7 +405,7 @@ therefore omitted.
 | 323 | userfaultfd | Missing |
 | 324 | membarrier | Partial |
 | 325 | mlock2 | Partial |
-| 326 | copy_file_range | Missing |
+| 326 | copy_file_range | Partial |
 | 327 | preadv2 | Partial |
 | 328 | pwritev2 | Partial |
 | 329 | pkey_mprotect | Missing |

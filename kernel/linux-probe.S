@@ -4009,6 +4009,78 @@ linux_child_joined:
     cmp qword ptr [0x405730], 0
     je failure
 
+#if defined(GINUX_LINKED) && !defined(GINUX_GRAPH)
+    # Create a demand-backed overlay destination and prove fallocate plus
+    # copy_file_range move data from the immutable OCI layer without changing
+    # either descriptor offset when explicit offsets are supplied.
+    mov edi, -100
+    lea rsi, [rip + copy_range_path]
+    mov edx, 0x242
+    mov r10d, 0x180
+    mov eax, 257
+    call syscall_expect_three
+
+    push 3
+    pop rdi
+    xor esi, esi
+    xor edx, edx
+    push 32
+    pop r10
+    mov eax, 285
+    call syscall_expect_zero
+
+    push 3
+    pop rdi
+    mov esi, 0x405780
+    push 5
+    pop rax
+    call syscall_expect_zero
+    cmp qword ptr [0x4057b0], 32
+    require_equal
+
+    mov qword ptr [0x405380], 0
+    mov qword ptr [0x405388], 0
+    push 2
+    pop rdi
+    mov esi, 0x405380
+    push 3
+    pop rdx
+    mov r10d, 0x405388
+    push 4
+    pop r8
+    xor r9d, r9d
+    mov eax, 326
+    syscall
+    cmp rax, 4
+    require_equal
+    cmp qword ptr [0x405380], 4
+    require_equal
+    cmp qword ptr [0x405388], 4
+    require_equal
+
+    push 3
+    pop rdi
+    mov esi, 0x405390
+    push 4
+    pop rdx
+    xor eax, eax
+    syscall
+    cmp rax, 4
+    require_equal
+    cmp dword ptr [0x405390], 0x464c457f
+    require_equal
+
+    push 3
+    pop rdi
+    push 3
+    pop rax
+    call syscall_expect_zero
+    lea rdi, [rip + copy_range_path]
+    push 87
+    pop rax
+    call syscall_expect_zero
+#endif
+
     mov esi, 0x405380
     mov edx, 1
     push 1
@@ -5961,6 +6033,10 @@ proc_self_exe:
 #ifdef GINUX_LINKED
 auxiliary_dependency_path:
     .asciz "/lib64/libginux-aux.so"
+#ifndef GINUX_GRAPH
+copy_range_path:
+    .asciz "/tmp/ginux-copy-range"
+#endif
 #endif
 #if defined(GINUX_LINKED) && defined(GINUX_GRAPH)
 .Ldynamic_exec_path:

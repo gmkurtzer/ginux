@@ -751,6 +751,15 @@ are allocated without shrinking an existing file. It uses the same copy-up and
 demand-allocation path. Negative inputs and zero lengths return `-EINVAL`,
 range overflow returns `-EFBIG`, unavailable memory returns `-ENOSPC`, and
 allocation modes such as hole punching remain explicitly `-EOPNOTSUPP`.
+`copy_file_range` copies an arbitrary requested length between distinct regular
+files through a page-sized kernel working buffer, so the working buffer does
+not cap the transfer. It supports immutable OCI inputs, demand-allocated
+overlay files, and the current tmpfs files. Null offset pointers advance the
+corresponding descriptor offset; non-null signed offsets are validated
+and updated without changing the descriptor offset. Zero flags are required.
+The same backing file, negative offsets, non-regular descriptors, and aliased
+offset pointers return `-EINVAL`; inaccessible offsets return `-EFAULT`, and an
+append-only output returns `-EBADF`.
 `fchmodat2` delegates to the admitted zero-flag `fchmodat` profile.
 Legacy `utime`, `utimes`, and `futimesat` convert their second-resolution or
 microsecond-resolution inputs to overlay timestamps; null time pointers select
