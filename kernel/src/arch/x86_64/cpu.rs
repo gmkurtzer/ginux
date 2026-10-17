@@ -410,6 +410,7 @@ const LINUX_FUTEX_WAITV_SYSCALL: u64 = 449;
 const LINUX_PIDFD_SEND_SIGNAL_SYSCALL: u64 = 424;
 const LINUX_PIDFD_OPEN_SYSCALL: u64 = 434;
 const LINUX_PIDFD_GETFD_SYSCALL: u64 = 438;
+const LINUX_PROCESS_MADVISE_SYSCALL: u64 = 440;
 const LINUX_SIGNALFD_SYSCALL: u64 = 282;
 const LINUX_SIGNALFD4_SYSCALL: u64 = 289;
 const LINUX_INOTIFY_INIT_SYSCALL: u64 = 253;
@@ -7918,6 +7919,9 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_PIPE_SYSCALL => linux_pipe(first_argument, 0),
         LINUX_MINCORE_SYSCALL => linux_mincore(first_argument, buffer, count),
         LINUX_MADVISE_SYSCALL => linux_madvise(first_argument, buffer, count),
+        LINUX_PROCESS_MADVISE_SYSCALL => {
+            linux_process_madvise(first_argument, buffer, count, register(0), register(2))
+        }
         LINUX_DUP_SYSCALL => linux_console_dup(first_argument),
         LINUX_DUP2_SYSCALL => linux_console_dup2(first_argument, buffer),
         LINUX_DUP3_SYSCALL if count == 0 => linux_console_dup2(first_argument, buffer),
@@ -11780,6 +11784,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         );
     let semaphores = verify_linux_sysv_semaphore_syscalls();
     let messages = verify_linux_sysv_message_queue_syscalls();
+    let process_advice = verify_linux_process_madvise_syscall();
     let mappings_released =
         address_space::release_current_linux_runtime_mappings(LINUX_RUNTIME_DYNAMIC_MMAP_BASE);
     ELF_PROBE_MMAP_NEXT.store(LINUX_RUNTIME_DYNAMIC_MMAP_BASE, Ordering::SeqCst);
@@ -11790,7 +11795,50 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && destroyed
         && semaphores
         && messages
+        && process_advice
         && mappings_released
+}
+
+fn verify_linux_process_madvise_syscall() -> bool {
+    let mapping = linux_runtime_mmap(
+        0,
+        (3 * PAGE_SIZE) as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    if !(LINUX_RUNTIME_DYNAMIC_MMAP_BASE..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
+        .contains(&mapping)
+    {
+        return false;
+    }
+    let first = mapping + PAGE_SIZE as u64;
+    let second = first + PAGE_SIZE as u64;
+    let initialized = copy_to_linux_user(first, &[0xa5]) && copy_to_linux_user(second, &[0x5a]);
+    let mut vectors = [0_u8; 32];
+    vectors[..8].copy_from_slice(&first.to_ne_bytes());
+    vectors[8..16].copy_from_slice(&(PAGE_SIZE as u64).to_ne_bytes());
+    vectors[16..24].copy_from_slice(&second.to_ne_bytes());
+    vectors[24..].copy_from_slice(&(PAGE_SIZE as u64).to_ne_bytes());
+    let descriptor = linux_pidfd_open(u64::from(current_linux_process_pid()), 0);
+    let advised = initialized
+        && descriptor < LINUX_AUX_DESCRIPTOR_LIMIT
+        && copy_to_linux_user(mapping, &vectors)
+        && linux_process_madvise(descriptor, mapping, 2, LINUX_MADV_DONTNEED, 0)
+            == (2 * PAGE_SIZE) as u64;
+    let cleared = advised && {
+        let mut bytes = [1_u8; 2];
+        copy_from_linux_user(first, &mut bytes[..1])
+            && copy_from_linux_user(second, &mut bytes[1..])
+            && bytes == [0, 0]
+    };
+    let errors = descriptor < LINUX_AUX_DESCRIPTOR_LIMIT
+        && linux_process_madvise(descriptor, mapping, 2, LINUX_MADV_DONTNEED, 1) == LINUX_EINVAL
+        && linux_process_madvise(descriptor, mapping, 1025, LINUX_MADV_DONTNEED, 0) == LINUX_EINVAL;
+    let closed = descriptor < LINUX_AUX_DESCRIPTOR_LIMIT && linux_descriptor_close(descriptor) == 0;
+    let unmapped = linux_runtime_munmap(mapping, (3 * PAGE_SIZE) as u64) == 0;
+    cleared && errors && closed && unmapped
 }
 
 fn verify_linux_sysv_semaphore_syscalls() -> bool {
@@ -13582,6 +13630,57 @@ fn linux_madvise(address: u64, length: u64, advice: u64) -> u64 {
         }
     }
     0
+}
+
+fn linux_process_madvise(
+    pid_descriptor: u64,
+    vectors: u64,
+    vector_count: u64,
+    advice: u64,
+    flags: u64,
+) -> u64 {
+    const IOV_MAX: u64 = 1024;
+    if flags != 0 || vector_count > IOV_MAX || advice != LINUX_MADV_DONTNEED {
+        return LINUX_EINVAL;
+    }
+    if !linux_pidfd_descriptor(pid_descriptor) {
+        return LINUX_EBADF;
+    }
+    if linux_descriptor_offset(pid_descriptor).load(Ordering::SeqCst)
+        != u64::from(current_linux_process_pid())
+    {
+        return LINUX_ESRCH;
+    }
+    let mut advised = 0_u64;
+    for index in 0..vector_count {
+        let Some(entry_address) = index
+            .checked_mul(16)
+            .and_then(|offset| vectors.checked_add(offset))
+        else {
+            return if advised == 0 { LINUX_EFAULT } else { advised };
+        };
+        let mut entry = [0_u8; 16];
+        if !copy_from_linux_user(entry_address, &mut entry) {
+            return if advised == 0 { LINUX_EFAULT } else { advised };
+        }
+        let address = u64::from_ne_bytes(entry[..8].try_into().unwrap());
+        let length = u64::from_ne_bytes(entry[8..].try_into().unwrap());
+        if length == 0 {
+            continue;
+        }
+        let result = linux_madvise(address, length, advice);
+        if result != 0 {
+            return if advised == 0 { result } else { advised };
+        }
+        let Some(total) = advised.checked_add(length) else {
+            return if advised == 0 { LINUX_EINVAL } else { advised };
+        };
+        if total > i64::MAX as u64 {
+            return if advised == 0 { LINUX_EINVAL } else { advised };
+        }
+        advised = total;
+    }
+    advised
 }
 
 fn linux_mincore(address: u64, length: u64, vector: u64) -> u64 {

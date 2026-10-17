@@ -1044,6 +1044,14 @@ present, user, NX, or writable state. The proof also discards a protected one-pa
 read-only mapping, observes zeroes from ring 3, and unmaps it normally. Other
 advice, ranges, or inactive mappings return `-EINVAL` without changing the
 contents. There is no paging policy, reclamation queue, or lazy refill.
+`rax = 440` (`__NR_process_madvise`) accepts up to Linux's `IOV_MAX=1024`
+native iovecs through a live pidfd for the calling process. It applies the same
+`MADV_DONTNEED` operation to each nonempty range and returns the total advised
+byte count. A later failing vector returns the successfully processed prefix,
+matching the syscall's partial-progress contract. Unknown flags or advice
+return `-EINVAL`, invalid vector memory returns `-EFAULT`, and a closed or
+foreign pidfd returns `-EBADF` or `-ESRCH`. Advising another process and all
+other advice values remain unsupported.
 `rax = 27` (`__NR_mincore`) accepts any fully occupied nonzero scratch range
 rounding to one through four pages, including a range crossing adjacent
 registry records, and atomically

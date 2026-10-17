@@ -42,7 +42,7 @@ Detailed bounded behavior for implemented calls lives in
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **19 Complete**, **273 Partial**, **45 Policy-denied**, **38 Missing**.
+Current totals: **19 Complete**, **274 Partial**, **45 Policy-denied**, **37 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -465,7 +465,7 @@ therefore omitted.
 | 437 | openat2 | Partial |
 | 438 | pidfd_getfd | Partial |
 | 439 | faccessat2 | Partial |
-| 440 | process_madvise | Missing |
+| 440 | process_madvise | Partial |
 | 441 | epoll_pwait2 | Partial |
 | 442 | mount_setattr | Policy-denied |
 | 443 | quotactl_fd | Policy-denied |
