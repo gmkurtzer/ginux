@@ -42,7 +42,7 @@ implemented calls lives in [Linux Syscall Entry v0](../specs/kernel/linux-syscal
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **17 Complete**, **230 Partial**, **37 Policy-denied**, **91 Missing**.
+Current totals: **17 Complete**, **230 Partial**, **44 Policy-denied**, **84 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -424,12 +424,12 @@ therefore omitted.
 | 425 | io_uring_setup | Missing |
 | 426 | io_uring_enter | Missing |
 | 427 | io_uring_register | Missing |
-| 428 | open_tree | Missing |
-| 429 | move_mount | Missing |
-| 430 | fsopen | Missing |
-| 431 | fsconfig | Missing |
-| 432 | fsmount | Missing |
-| 433 | fspick | Missing |
+| 428 | open_tree | Policy-denied |
+| 429 | move_mount | Policy-denied |
+| 430 | fsopen | Policy-denied |
+| 431 | fsconfig | Policy-denied |
+| 432 | fsmount | Policy-denied |
+| 433 | fspick | Policy-denied |
 | 434 | pidfd_open | Missing |
 | 435 | clone3 | Partial |
 | 436 | close_range | Partial |
@@ -438,7 +438,7 @@ therefore omitted.
 | 439 | faccessat2 | Partial |
 | 440 | process_madvise | Missing |
 | 441 | epoll_pwait2 | Partial |
-| 442 | mount_setattr | Missing |
+| 442 | mount_setattr | Policy-denied |
 | 443 | quotactl_fd | Policy-denied |
 | 444 | landlock_create_ruleset | Missing |
 | 445 | landlock_add_rule | Missing |
