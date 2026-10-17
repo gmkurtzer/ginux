@@ -1353,6 +1353,57 @@ ginux_linux_system_init:
     syscall
     cmp rax, -9
     jne .Lfailure
+    mov rdi, r9
+    mov eax, 74
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov rdi, r9
+    mov eax, 75
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov rdi, 0x100000000
+    or rdi, r9
+    mov eax, 74
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov rdi, -1
+    mov eax, 74
+    syscall
+    cmp rax, -9
+    jne .Lfailure
+    mov rdi, r15
+    mov eax, 74
+    syscall
+    cmp rax, -22
+    jne .Lfailure
+    lea rdi, [rip + .Lpipe_pair]
+    mov eax, 22
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Lpipe_pair]
+    mov eax, 74
+    syscall
+    cmp rax, -22
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Lpipe_pair + 4]
+    mov eax, 75
+    syscall
+    cmp rax, -22
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Lpipe_pair]
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Lpipe_pair + 4]
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Lfailure
     mov edi, 1
     mov esi, 1
     xor edx, edx

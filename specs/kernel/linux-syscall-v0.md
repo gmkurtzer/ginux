@@ -810,6 +810,13 @@ limit remains denied. `sync` has a direct userspace conformance probe and
 succeeds after synchronizing every filesystem in the current RAM-backed and
 immutable-storage profile. `syncfs` has runtime success and bad-descriptor
 assertions and synchronizes the filesystem associated with any open descriptor.
+`fsync` and `fdatasync` complete immediately for regular immutable OCI and
+RAM-backed overlay files because those objects are already coherent with their
+authoritative backing store. Directories use the same filesystem path; pipes,
+sockets, consoles, and other nonsynchronizable descriptors return `-EINVAL`.
+Closed and `O_PATH` descriptors return `-EBADF`, and descriptor arguments use
+Linux's 32-bit width. Runtime probes cover both calls, a regular memfd, a pipe,
+a console, a closed descriptor, and high register bits.
 `sync_file_range` applies Linux's signed range validation and all combinations
 of `SYNC_FILE_RANGE_WAIT_BEFORE`, `WRITE`, and `WAIT_AFTER` to writable regular
 files. RAM-backed data is already coherent, so successful requests need no

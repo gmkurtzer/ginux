@@ -42,7 +42,7 @@ Detailed bounded behavior for implemented calls lives in
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **76 Complete**, **251 Partial**, **48 Policy-denied**, **0 Missing**.
+Current totals: **78 Complete**, **249 Partial**, **48 Policy-denied**, **0 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -201,8 +201,8 @@ therefore omitted.
 | 71 | msgctl | Partial |
 | 72 | fcntl | Partial |
 | 73 | flock | Partial |
-| 74 | fsync | Partial |
-| 75 | fdatasync | Partial |
+| 74 | fsync | Complete |
+| 75 | fdatasync | Complete |
 | 76 | truncate | Partial |
 | 77 | ftruncate | Partial |
 | 78 | getdents | Partial |

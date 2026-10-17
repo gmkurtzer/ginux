@@ -8144,13 +8144,7 @@ extern "sysv64" fn linux_syscall_handler(
                 LINUX_EINVAL
             }
         }
-        LINUX_FSYNC_SYSCALL | LINUX_FDATASYNC_SYSCALL => {
-            if linux_descriptor_open(first_argument) {
-                0
-            } else {
-                LINUX_EBADF
-            }
-        }
+        LINUX_FSYNC_SYSCALL | LINUX_FDATASYNC_SYSCALL => linux_fsync(first_argument),
         LINUX_FADVISE64_SYSCALL => linux_fadvise64(first_argument, buffer, count, register(0)),
         LINUX_TRUNCATE_SYSCALL => linux_truncate(first_argument, buffer),
         LINUX_FTRUNCATE_SYSCALL => linux_ftruncate(first_argument, buffer),
@@ -14939,6 +14933,22 @@ fn linux_sync_file_range(descriptor: u64, offset: u64, length: u64, flags: u64) 
         return LINUX_EBADF;
     }
     0
+}
+
+fn linux_fsync(descriptor: u64) -> u64 {
+    let descriptor = u64::from(descriptor as u32);
+    if !linux_descriptor_open(descriptor) || linux_path_descriptor(descriptor) {
+        return LINUX_EBADF;
+    }
+    if linux_overlay_descriptor_handle(descriptor).is_some()
+        || linux_oci_entry(descriptor).is_some()
+    {
+        // Immutable OCI objects and RAM-backed overlay objects have no dirty
+        // data outside their authoritative backing store.
+        0
+    } else {
+        LINUX_EINVAL
+    }
 }
 
 fn linux_process_vm_iov(
