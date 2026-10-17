@@ -1,11 +1,18 @@
 # Linux Userspace Interface Test v0
 
-**Status:** Controller-visible report over the boot-verified bounded Linux
-profile.
+**Status:** Controller-visible runtime test and complete Linux x86-64 syscall
+conformance ledger.
 
-The controller command is `test linux`. The environment name is explicit so a
-future BSD or other compatibility profile can define an independent contract,
-implementation, and result set.
+The controller commands are:
+
+- `test linux` or `test linux summary`: run the report and print totals.
+- `test linux interfaces`: print every non-syscall interface result.
+- `test linux syscalls`: print all 375 native x86-64 syscall results.
+- `test linux syscall NAME|NUMBER`: print one syscall result.
+- `test linux all`: print every interface and syscall result.
+
+The environment name is explicit so a future BSD or other compatibility
+profile can define an independent contract, implementation, and result set.
 
 Native control operation 34 requires the controller's read-authorized host
 capability and two zero arguments. It returns a 23-bit result mask only after
@@ -21,11 +28,26 @@ seccomp/audit/LSM interfaces, vDSO/vvar, and the Linux module userspace API.
 
 A set bit prints PASS and means the boot verifier proved the currently bounded
 Ginux contract for that interface. It does not mean full Linux compatibility.
-An unset bit prints FAIL and means unsupported or unverified. The controller
-prints every result and a passed/failed/total summary, using bounded buffered
-console writes so the diagnostic cannot exhaust its native-call budget.
+An unset bit prints FAIL and means unsupported or unverified.
+
+The syscall ledger is generated at build time from every row in
+`docs/LINUX-COMPATIBILITY.md`, so a syscall cannot silently disappear from the
+runtime report. Its outcomes are:
+
+- `PASS`: a runtime conformance probe covers the documented Linux behavior.
+- `UNVERIFIED`: dispatch exists, but its Linux semantics are partial or have no
+  complete runtime conformance probe.
+- `POLICY-DENIED`: the kernel recognizes and deliberately denies the operation.
+- `UNSUPPORTED`: the syscall is absent and returns `ENOSYS`.
+
+Dispatch presence alone must never print PASS. As behavior and tests are
+completed, one syscall at a time moves from UNVERIFIED to PASS. All output uses
+bounded buffered console writes so the diagnostic cannot exhaust its
+native-call budget.
 
 The current profile publishes bits 0 through 15. Bits 16 through 22 remain
-unset and therefore visibly fail. The QEMU controller test requires all 23
-lines, the `16 passed, 7 failed, 23 total` summary, continued controller PID 1,
-and clean shutdown without a panic.
+unset and therefore visibly fail. The syscall ledger currently reports zero
+complete runtime probes, 198 unverified implementations, 28 policy-denied
+calls, and 149 unsupported calls. The QEMU controller test executes the full
+report, checks representative entries from every outcome, verifies continued
+controller PID 1, and shuts down without a panic.

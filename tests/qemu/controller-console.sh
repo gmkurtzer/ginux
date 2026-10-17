@@ -56,7 +56,7 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
         done
     }
     for command in \
-        '' '   ' $'sta\t' $'statuz\177s' $'statuz\bs' $'domain a\t' help 'domain help' 'domain set --help' 'network help' 'network set --help' 'test linux' '  status  ' components ls 'ls /etc' 'ls /proc' 'ls /proc/1' ps 'domain list' \
+        '' '   ' $'sta\t' $'statuz\177s' $'statuz\bs' $'domain a\t' help 'domain help' 'domain set --help' 'network help' 'network set --help' 'test linux' 'test linux all' 'test linux syscall read' 'test linux syscall accept' 'test linux syscall 9999' '  status  ' components ls 'ls /etc' 'ls /proc' 'ls /proc/1' ps 'domain list' \
         'network list' 'network new gnet0 type=virtual' 'network new gnet1 type=virtual uplink=gnet0' 'network list' 'network status gnet0' 'network stop gnet0' 'network status gnet0' 'network start gnet0' 'network restart gnet1' 'network status eth0' 'network status lo' 'network status eth9' 'network ping lo 127.0.0.1' 'network set lo dns 10.0.2.3' 'network set eth0 static 10.0.2.15/99 10.0.2.2' 'network set eth0 static 10.0.2.15/24 10.0.2.2' 'network set eth0 dns 10.0.2.3' 'network status eth0' 'network ping eth0 10.0.2.15' 'network ping eth0 10.0.2.2' 'network ping eth0 10.0.2.2' 'network stop eth0' 'network status eth0' 'network start eth0' 'network restart eth0' 'network ping eth0 10.0.2.2' 'network down eth0' 'network set eth0 dhcp' 'network status eth0' 'network ping eth0 10.0.2.2' 'network stop eth0' \
         'domain status default' 'domain new demo' 'domain new demo' 'domain new rocky' 'domain set rocky image=rockylinux/rockylinux:10 init=/bin/sh' 'domain list' \
         'domain start' 'domain set demo cpu=1 cpu=1' 'domain set demo personality=linux image=alpine@sha256:d56c381f961d307a21b3ca004cf1e3910f106644aefb1f43e654c8a56c4fd395 init=/bin/sh' 'domain list' 'domain set demo personality=linux image=rockylinux/rockylinux:10' 'domain list' \
@@ -117,7 +117,12 @@ for expected in \
     'Manage network devices' \
     'test ENVIRONMENT' \
     'Test a userspace compatibility environment' \
-    'Linux userspace interface tests (bounded profile):' \
+    'test linux [summary|interfaces|syscalls|all|syscall NAME|NUMBER]' \
+    'Linux userspace runtime conformance summary:' \
+    'Interfaces: 16 passed, 7 failed, 23 total' \
+    'Syscalls: 0 passed, 198 unverified, 28 policy-denied, 149 unsupported, 375 total' \
+    "Run 'test linux all' for every result." \
+    'Linux userspace interface runtime tests (bounded profile):' \
     'PASS syscall-entry' \
     'PASS elf64-loader' \
     'PASS initial-stack-and-auxv' \
@@ -143,6 +148,14 @@ for expected in \
     'FAIL linux-module-userspace-api' \
     'Summary: 16 passed, 7 failed, 23 total' \
     'PASS covers the current bounded Linux profile; FAIL is unsupported or unverified.' \
+    'Linux x86-64 syscall conformance ledger:' \
+    'UNVERIFIED 0 read' \
+    'UNSUPPORTED 43 accept' \
+    'POLICY-DENIED 105 setuid' \
+    'UNSUPPORTED 462 mseal' \
+    'Summary: 0 passed, 198 unverified, 28 policy-denied, 149 unsupported, 375 total' \
+    'PASS requires a runtime conformance probe; dispatch alone remains UNVERIFIED.' \
+    'FAIL unknown Linux syscall' \
     'network list' \
     'List network devices and their state' \
     'network new NAME type=virtual [uplink=DEVICE]' \

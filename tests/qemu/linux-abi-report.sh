@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+output_file="$(mktemp -t ginux-linux-abi.XXXXXX)"
+volume_image="$(mktemp -t ginux-linux-abi-volume.XXXXXX)"
+qemu_pid_file="$(mktemp -t ginux-linux-abi-pid.XXXXXX)"
+qemu_pid=""
+: >"$qemu_pid_file"
+
+cleanup() {
+    local pid=""
+    if [[ -s "$qemu_pid_file" ]]; then
+        read -r pid <"$qemu_pid_file" || true
+    fi
+    if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+        kill "$pid" 2>/dev/null || true
+    fi
+    if [[ -n "$qemu_pid" ]] && kill -0 "$qemu_pid" 2>/dev/null; then
+        kill "$qemu_pid" 2>/dev/null || true
+        wait "$qemu_pid" 2>/dev/null || true
+    fi
+    rm -f "$output_file" "$volume_image" "$qemu_pid_file"
+}
+trap cleanup EXIT
+
+dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
+{
+    prompt_count=1
+    for _ in {1..60}; do
+        [[ "$(grep -Fo 'ginux> ' "$output_file" | wc -l | tr -d ' ')" -ge "$prompt_count" ]] && break
+        grep -Fq 'GINUX_KERNEL_PANIC' "$output_file" && break
+        sleep 1
+    done
+    for command in 'test linux' 'test linux all' 'test linux syscall read' \
+        'test linux syscall accept' 'test linux syscall 9999' ps; do
+        printf '%s\n' "$command"
+        prompt_count=$((prompt_count + 1))
+        for _ in {1..60}; do
+            [[ "$(grep -Fo 'ginux> ' "$output_file" | wc -l | tr -d ' ')" -ge "$prompt_count" ]] && break
+            grep -Fq 'GINUX_KERNEL_PANIC' "$output_file" && break
+            sleep 1
+        done
+    done
+    printf 'shutdown\n'
+} | GINUX_VOLUME_IMAGE="$volume_image" GINUX_QEMU_PID_FILE="$qemu_pid_file" \
+    "$repo_root/tools/qemu/run.sh" >"$output_file" 2>&1 &
+qemu_pid=$!
+
+for _ in {1..75}; do
+    grep -Fq 'GINUX_KERNEL_PANIC' "$output_file" && break
+    ! kill -0 "$qemu_pid" 2>/dev/null && break
+    sleep 1
+done
+
+if kill -0 "$qemu_pid" 2>/dev/null; then
+    cat "$output_file"
+    echo "Linux ABI report test failed: QEMU did not shut down." >&2
+    exit 1
+fi
+if wait "$qemu_pid"; then
+    :
+else
+    status=$?
+    cat "$output_file"
+    echo "Linux ABI report test failed: QEMU exited with $status." >&2
+    exit 1
+fi
+qemu_pid=""
+: >"$qemu_pid_file"
+
+for expected in \
+    'Linux userspace runtime conformance summary:' \
+    'Interfaces: 16 passed, 7 failed, 23 total' \
+    'Syscalls: 0 passed, 198 unverified, 28 policy-denied, 149 unsupported, 375 total' \
+    'Linux userspace interface runtime tests (bounded profile):' \
+    'PASS syscall-entry' \
+    'FAIL linux-module-userspace-api' \
+    'UNVERIFIED 0 read' \
+    'UNSUPPORTED 43 accept' \
+    'POLICY-DENIED 105 setuid' \
+    'UNSUPPORTED 462 mseal' \
+    'Summary: 0 passed, 198 unverified, 28 policy-denied, 149 unsupported, 375 total' \
+    'FAIL unknown Linux syscall' \
+    '1      0      R      controller' \
+    'Shutting down Ginux.'; do
+    if ! grep -Fq "$expected" "$output_file"; then
+        cat "$output_file"
+        echo "Linux ABI report test failed: missing output: $expected" >&2
+        exit 1
+    fi
+done
+
+for rejected in GINUX_KERNEL_PANIC 'controller failed; restarting control plane'; do
+    if grep -Fq "$rejected" "$output_file"; then
+        cat "$output_file"
+        echo "Linux ABI report test failed: observed: $rejected" >&2
+        exit 1
+    fi
+done
+
+echo "Linux ABI controller report passed (23 interfaces, 375 syscalls)."

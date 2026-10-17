@@ -470,10 +470,17 @@ The practical compatibility gate remains workload-driven:
 4. Add focused kernel tests and a real OCI userspace regression.
 5. Change status only after those tests prove the documented boundary.
 
-The controller exposes the current grouped result ledger through `test linux`;
+The controller exposes the complete compiled ledger through `test linux all`;
 see [Linux Userspace Interface Test v0](../specs/kernel/linux-abi-test-v0.md).
-The command name is intentionally environment-specific so future compatibility
-profiles, such as BSD, can have independent tests and contracts. A PASS reports
-that the current bounded Ginux profile was verified during boot; it does not
-upgrade that interface to Complete Linux compatibility. A FAIL means the
-interface is unsupported or was not verified.
+`test linux` prints its summary, while `interfaces`, `syscalls`, and `syscall
+NAME|NUMBER` select detailed results. The command name is intentionally
+environment-specific so future compatibility profiles, such as BSD, can have
+independent tests and contracts.
+
+For grouped interfaces, PASS reports that the current bounded Ginux profile was
+verified during boot; it does not upgrade that interface to complete Linux
+compatibility. For individual syscalls, only a complete runtime conformance
+probe may print PASS. Partial dispatch prints UNVERIFIED, deliberate authority
+policy prints POLICY-DENIED, and absent dispatch prints UNSUPPORTED. The runtime
+catalog is generated from every syscall row in this file so documentation and
+the executable checklist cannot silently diverge.

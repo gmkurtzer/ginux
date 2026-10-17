@@ -77,6 +77,25 @@ const COMMAND_TEST_LINUX: u16 = 23;
 const COMMAND_DOMAIN_ATTACH: u16 = 24;
 const COMMAND_NETWORK_NEW: u16 = 25;
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+#[allow(dead_code)] // No syscall is Complete yet; the first conformance probe will construct Pass.
+enum LinuxSyscallStatus {
+    Pass,
+    Unverified,
+    PolicyDenied,
+    Unsupported,
+}
+
+#[derive(Clone, Copy)]
+struct LinuxSyscallTest {
+    number: u16,
+    name_offset: u16,
+    name_length: u8,
+    status: LinuxSyscallStatus,
+}
+
+include!(concat!(env!("OUT_DIR"), "/linux_syscall_catalog.rs"));
+
 const LINUX_ABI_TESTS: &[&[u8]] = &[
     b"syscall-entry",
     b"elf64-loader",
@@ -105,10 +124,10 @@ const LINUX_ABI_TESTS: &[&[u8]] = &[
 
 const TEST_COMMANDS: &[Command<'static>] = &[Command::leaf(
     b"linux",
-    b"test linux",
-    b"Test Linux userspace interfaces",
+    b"test linux [summary|interfaces|syscalls|all|syscall NAME|NUMBER]",
+    b"Test and inventory Linux userspace interfaces",
     COMMAND_TEST_LINUX,
-    Arity::exact(0),
+    Arity::range(0, 2),
 )];
 
 const NETWORK_COMMANDS: &[Command<'static>] = &[
@@ -441,7 +460,7 @@ extern "C" fn ginux_controller_main() -> ! {
                 restart_network(console, host, network, invocation.arguments())
             }
             COMMAND_PING => ping(console, network, invocation.arguments()),
-            COMMAND_TEST_LINUX => test_linux_userspace(console, host),
+            COMMAND_TEST_LINUX => test_linux_userspace(console, host, invocation.arguments()),
             _ => exit(NATIVE_SERVICE_EXIT_REJECTED),
         }
     }
@@ -488,16 +507,70 @@ fn read_console_byte(console: u64) -> u8 {
     exit(NATIVE_SERVICE_EXIT_REJECTED)
 }
 
-fn test_linux_userspace(console: u64, host: u64) {
+fn test_linux_userspace(console: u64, host: u64, arguments: Arguments<'_>) {
     let results = call(NATIVE_LINUX_ABI_TEST_OPERATION, host, 0, 0);
     let results = if results == NATIVE_CALL_FAILED {
         0
     } else {
         results
     };
+    let mode = arguments.first().unwrap_or(b"summary");
+    match (mode, arguments.len()) {
+        (b"summary", 0 | 1) => {
+            write_linux_test_summary(console, results);
+        }
+        (b"interfaces", 1) => {
+            write_linux_interface_tests(console, results);
+        }
+        (b"syscalls", 1) => {
+            write_linux_syscall_tests(console, None);
+        }
+        (b"all", 1) => {
+            write_linux_interface_tests(console, results);
+            write_linux_syscall_tests(console, None);
+        }
+        (b"syscall", 2) => {
+            write_linux_syscall_tests(console, arguments.get(1));
+        }
+        _ => write(
+            console,
+            b"Usage: test linux [summary|interfaces|syscalls|all|syscall NAME|NUMBER]\r\n",
+        ),
+    }
+}
+
+fn write_linux_test_summary(console: u64, results: u64) {
+    let interface_passed = (0..LINUX_ABI_TESTS.len())
+        .filter(|index| results & (1 << index) != 0)
+        .count() as u64;
+    let (passed, unverified, denied, unsupported) = linux_syscall_test_counts();
+    let mut output = ConsoleHelpWriter::new(console);
+    output.write(b"Linux userspace runtime conformance summary:\r\n");
+    output.write(b"Interfaces: ");
+    write_help_decimal(&mut output, interface_passed);
+    output.write(b" passed, ");
+    write_help_decimal(&mut output, LINUX_ABI_TESTS.len() as u64 - interface_passed);
+    output.write(b" failed, ");
+    write_help_decimal(&mut output, LINUX_ABI_TESTS.len() as u64);
+    output.write(b" total\r\nSyscalls: ");
+    write_help_decimal(&mut output, passed);
+    output.write(b" passed, ");
+    write_help_decimal(&mut output, unverified);
+    output.write(b" unverified, ");
+    write_help_decimal(&mut output, denied);
+    output.write(b" policy-denied, ");
+    write_help_decimal(&mut output, unsupported);
+    output.write(b" unsupported, ");
+    write_help_decimal(&mut output, LINUX_SYSCALL_TESTS.len() as u64);
+    output.write(b" total\r\n");
+    output.write(b"Run 'test linux all' for every result.\r\n");
+    output.finish();
+}
+
+fn write_linux_interface_tests(console: u64, results: u64) {
     let mut passed = 0_u64;
     let mut output = ConsoleHelpWriter::new(console);
-    output.write(b"Linux userspace interface tests (bounded profile):\r\n");
+    output.write(b"Linux userspace interface runtime tests (bounded profile):\r\n");
     for (index, name) in LINUX_ABI_TESTS.iter().enumerate() {
         let pass = results & (1 << index) != 0;
         output.write(if pass { b"PASS " } else { b"FAIL " });
@@ -517,6 +590,75 @@ fn test_linux_userspace(console: u64, host: u64) {
         b"PASS covers the current bounded Linux profile; FAIL is unsupported or unverified.\r\n",
     );
     output.finish();
+}
+
+fn write_linux_syscall_tests(console: u64, selector: Option<&[u8]>) {
+    let mut output = ConsoleHelpWriter::new(console);
+    output.write(b"Linux x86-64 syscall conformance ledger:\r\n");
+    let mut matched = false;
+    for test in LINUX_SYSCALL_TESTS {
+        let name = linux_syscall_test_name(*test);
+        if selector.is_some_and(|selector| {
+            selector != name && parse_decimal(selector) != Some(u64::from(test.number))
+        }) {
+            continue;
+        }
+        matched = true;
+        output.write(linux_syscall_status_name(test.status));
+        output.write(b" ");
+        write_help_decimal(&mut output, u64::from(test.number));
+        output.write(b" ");
+        output.write(name);
+        output.write(b"\r\n");
+    }
+    if !matched {
+        output.write(b"FAIL unknown Linux syscall\r\n");
+        output.finish();
+        return;
+    }
+    let (passed, unverified, denied, unsupported) = linux_syscall_test_counts();
+    output.write(b"Summary: ");
+    write_help_decimal(&mut output, passed);
+    output.write(b" passed, ");
+    write_help_decimal(&mut output, unverified);
+    output.write(b" unverified, ");
+    write_help_decimal(&mut output, denied);
+    output.write(b" policy-denied, ");
+    write_help_decimal(&mut output, unsupported);
+    output.write(b" unsupported, ");
+    write_help_decimal(&mut output, LINUX_SYSCALL_TESTS.len() as u64);
+    output.write(b" total\r\n");
+    output.write(
+        b"PASS requires a runtime conformance probe; dispatch alone remains UNVERIFIED.\r\n",
+    );
+    output.finish();
+}
+
+fn linux_syscall_test_name(test: LinuxSyscallTest) -> &'static [u8] {
+    let start = usize::from(test.name_offset);
+    &LINUX_SYSCALL_NAMES[start..start + usize::from(test.name_length)]
+}
+
+fn linux_syscall_status_name(status: LinuxSyscallStatus) -> &'static [u8] {
+    match status {
+        LinuxSyscallStatus::Pass => b"PASS",
+        LinuxSyscallStatus::Unverified => b"UNVERIFIED",
+        LinuxSyscallStatus::PolicyDenied => b"POLICY-DENIED",
+        LinuxSyscallStatus::Unsupported => b"UNSUPPORTED",
+    }
+}
+
+fn linux_syscall_test_counts() -> (u64, u64, u64, u64) {
+    let mut counts = (0, 0, 0, 0);
+    for test in LINUX_SYSCALL_TESTS {
+        match test.status {
+            LinuxSyscallStatus::Pass => counts.0 += 1,
+            LinuxSyscallStatus::Unverified => counts.1 += 1,
+            LinuxSyscallStatus::PolicyDenied => counts.2 += 1,
+            LinuxSyscallStatus::Unsupported => counts.3 += 1,
+        }
+    }
+    counts
 }
 
 fn write_help_decimal(output: &mut impl HelpWriter, mut value: u64) {

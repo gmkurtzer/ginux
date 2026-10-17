@@ -17,7 +17,7 @@ SYSTEM_PROFILE := profiles/minimal-system-v0/profile.tsv
 
 .DEFAULT_GOAL := help
 
-.PHONY: help doctor manifest system-image test-alpine test-rocky-shell test-rocky-dnf test-multi-domain probe-rocky-systemd rocky-image rocky-image-check linux-probe controller-runtime network-service protocol-service volume-service abi-conformance architecture-check linux-compat-check build build-verification run test test-c1 test-c2 fmt gate clean
+.PHONY: help doctor manifest system-image test-alpine test-rocky-shell test-rocky-dnf test-multi-domain test-linux-abi probe-rocky-systemd rocky-image rocky-image-check linux-probe controller-runtime network-service protocol-service volume-service abi-conformance architecture-check linux-compat-check build build-verification run test test-c1 test-c2 fmt gate clean
 
 help:
 	@echo "Ginux development targets"
@@ -40,6 +40,7 @@ help:
 	@echo "  make abi-conformance Compile the public native ABI as freestanding C"
 	@echo "  make architecture-check Check architecture and roadmap consistency"
 	@echo "  make linux-compat-check Validate the Linux syscall compatibility ledger"
+	@echo "  make test-linux-abi     Run the complete controller Linux ABI report"
 	@echo "  make build   Build the x86-64 UEFI image"
 	@echo "  make run     Build Ginux and boot it in headless QEMU"
 	@echo "  make test    Build and verify the automated QEMU boot test"
@@ -152,6 +153,9 @@ architecture-check:
 
 linux-compat-check:
 	@bash tools/architecture/check-linux-compat.sh
+
+test-linux-abi: build
+	@tests/qemu/linux-abi-report.sh
 
 check: manifest architecture-check linux-compat-check
 	@$(MAKE) abi-conformance
