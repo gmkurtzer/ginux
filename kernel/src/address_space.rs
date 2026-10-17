@@ -122,6 +122,7 @@ const LINUX_RUNTIME_FILE: u64 = 1 << 9;
 const LINUX_RUNTIME_RESERVED: u64 = 1 << 10;
 const LINUX_RUNTIME_DEMAND: u64 = 1 << 11;
 const LINUX_RUNTIME_SEALED: u64 = 1 << 12;
+const LINUX_RUNTIME_SHARED: u64 = 1 << 13;
 const LINUX_INIT_ARGUMENT: [u8; 6] = [b'/', b'i', b'n', b'i', b't', 0];
 const LINUX_INIT_ENVIRONMENT: [u8; 8] = [b'G', b'I', b'N', b'U', b'X', b'=', b'1', 0];
 const LINUX_PLATFORM: [u8; 7] = [b'x', b'8', b'6', b'_', b'6', b'4', 0];
@@ -306,6 +307,7 @@ pub(crate) fn run_oci_process(init: &[u8]) -> OciProcessOutcome {
                             frame,
                             writable: segment.writable,
                             executable: segment.executable,
+                            shared: false,
                         };
                     initial_image_count += 1;
                     next_frame += 1;
@@ -1152,6 +1154,7 @@ pub(crate) fn verify_linux_elf_mapping(
                     frame,
                     writable: entry & WRITABLE != 0,
                     executable: entry & NO_EXECUTE == 0,
+                    shared: false,
                 };
             }
             let rollback_frames = [
@@ -2237,6 +2240,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
                     frame,
                     writable: entry & WRITABLE != 0,
                     executable: entry & NO_EXECUTE == 0,
+                    shared: false,
                 };
             }
             let execution_result = if observed {
@@ -3399,16 +3403,23 @@ fn prepare_linux_hierarchy_replacement(
         || old_mappings.len() > cpu::LINUX_PROCESS_MAPPING_LIMIT
         || validate_collections
             && (mappings.iter().enumerate().any(|(index, mapping)| {
-                mappings[..index]
+                mappings[..index].iter().any(|prior| {
+                    prior.address == mapping.address
+                        || prior.frame == mapping.frame
+                            && !(old_mappings
+                                .iter()
+                                .any(|old| old.address == prior.address && old.shared)
+                                && old_mappings
+                                    .iter()
+                                    .any(|old| old.address == mapping.address && old.shared))
+                }) || new_hierarchy
                     .iter()
-                    .any(|prior| prior.address == mapping.address || prior.frame == mapping.frame)
-                    || new_hierarchy
-                        .iter()
-                        .any(|frame| frame.address() == mapping.frame)
+                    .any(|frame| frame.address() == mapping.frame)
             }) || old_mappings.iter().enumerate().any(|(index, mapping)| {
-                old_mappings[..index]
-                    .iter()
-                    .any(|prior| prior.address == mapping.address || prior.frame == mapping.frame)
+                old_mappings[..index].iter().any(|prior| {
+                    prior.address == mapping.address
+                        || prior.frame == mapping.frame && !(mapping.shared && prior.shared)
+                })
             }))
     {
         return false;
@@ -3456,8 +3467,14 @@ fn prepare_linux_hierarchy_replacement(
             | PRESENT
             | USER
             | if mapping.writable { WRITABLE } else { 0 }
-            | if mapping.executable { 0 } else { NO_EXECUTE };
-        if unsafe { entry.read() } & (ADDRESS_MASK | PRESENT | WRITABLE | USER | NO_EXECUTE)
+            | if mapping.executable { 0 } else { NO_EXECUTE }
+            | if mapping.shared {
+                LINUX_RUNTIME_SHARED
+            } else {
+                0
+            };
+        if unsafe { entry.read() }
+            & (ADDRESS_MASK | PRESENT | WRITABLE | USER | NO_EXECUTE | LINUX_RUNTIME_SHARED)
             != expected
         {
             return false;
@@ -3478,21 +3495,37 @@ fn prepare_linux_hierarchy_replacement(
         else {
             return false;
         };
+        let shared = old_mappings
+            .iter()
+            .find(|old| old.address == mapping.address)
+            .is_some_and(|old| old.shared);
         let flags = PRESENT
             | USER
             | if mapping.writable { WRITABLE } else { 0 }
-            | if mapping.executable { 0 } else { NO_EXECUTE };
+            | if mapping.executable { 0 } else { NO_EXECUTE }
+            | if shared { LINUX_RUNTIME_SHARED } else { 0 };
         unsafe { entry.write(mapping.frame | flags) };
     }
     !force_verification_failure
         && mappings.iter().all(|mapping| {
+            let shared = old_mappings
+                .iter()
+                .find(|old| old.address == mapping.address)
+                .is_some_and(|old| old.shared);
             let flags = PRESENT
                 | USER
                 | if mapping.writable { WRITABLE } else { 0 }
-                | if mapping.executable { 0 } else { NO_EXECUTE };
+                | if mapping.executable { 0 } else { NO_EXECUTE }
+                | if shared { LINUX_RUNTIME_SHARED } else { 0 };
             linux_leaf_in_root(new_hierarchy[0].address(), mapping.address as u64).is_some_and(
                 |entry| unsafe {
-                    entry.read() & (ADDRESS_MASK | PRESENT | WRITABLE | USER | NO_EXECUTE)
+                    entry.read()
+                        & (ADDRESS_MASK
+                            | PRESENT
+                            | WRITABLE
+                            | USER
+                            | NO_EXECUTE
+                            | LINUX_RUNTIME_SHARED)
                         == mapping.frame | flags
                 },
             )
@@ -3547,7 +3580,10 @@ fn clone_linux_process_hierarchy_inner(
     if parent_mappings.is_empty()
         || parent_mappings
             .iter()
-            .filter(|mapping| mapping.writable || !memory::frame_lease_is_runtime(mapping.frame))
+            .filter(|mapping| {
+                !mapping.shared
+                    && (mapping.writable || !memory::frame_lease_is_runtime(mapping.frame))
+            })
             .count()
             != child_pages.len()
         || parent_mappings.len() > cpu::LINUX_PROCESS_MAPPING_LIMIT
@@ -3578,10 +3614,7 @@ fn clone_linux_process_hierarchy_inner(
                         || child_pages.contains(&mapping.frame)
                         || parent_mappings[..index].iter().any(|prior| {
                             prior.address == mapping.address
-                                || prior.frame == mapping.frame
-                                    && (mapping.writable
-                                        || prior.writable
-                                        || !memory::frame_lease_is_runtime(mapping.frame))
+                                || prior.frame == mapping.frame && !(mapping.shared && prior.shared)
                         })
                 }))
     {
@@ -3615,7 +3648,9 @@ fn clone_linux_process_hierarchy_inner(
     let child_mappings = &mut scratch.child_mappings;
     let mut private_index = 0;
     for (child, parent) in child_mappings.iter_mut().zip(parent_mappings) {
-        let frame = if parent.writable || !memory::frame_lease_is_runtime(parent.frame) {
+        let frame = if !parent.shared
+            && (parent.writable || !memory::frame_lease_is_runtime(parent.frame))
+        {
             let Some(frame) = child_pages.get(private_index) else {
                 return false;
             };
@@ -3663,10 +3698,7 @@ pub(crate) fn validate_linux_process_address_space(
                 || hierarchy.contains(&mapping.frame)
                 || mappings[..index].iter().any(|prior| {
                     prior.address == mapping.address
-                        || prior.frame == mapping.frame
-                            && (mapping.writable
-                                || prior.writable
-                                || !memory::frame_lease_is_runtime(mapping.frame))
+                        || prior.frame == mapping.frame && !(mapping.shared && prior.shared)
                 })
         })
     {
@@ -3798,6 +3830,7 @@ pub(crate) fn complete_current_linux_process_snapshot(
                 frame,
                 writable: value & WRITABLE != 0,
                 executable: value & NO_EXECUTE == 0,
+                shared: value & LINUX_RUNTIME_SHARED != 0,
             };
             *mapping_count += 1;
         }
@@ -4091,9 +4124,16 @@ fn validate_complete_linux_process_user_tree(
             | PRESENT
             | USER
             | if mapping.writable { WRITABLE } else { 0 }
-            | if mapping.executable { 0 } else { NO_EXECUTE };
+            | if mapping.executable { 0 } else { NO_EXECUTE }
+            | if mapping.shared {
+                LINUX_RUNTIME_SHARED
+            } else {
+                0
+            };
         if visited_mappings[mapping_index]
-            || value & (ADDRESS_MASK | PRESENT | WRITABLE | USER | NO_EXECUTE) != expected
+            || value
+                & (ADDRESS_MASK | PRESENT | WRITABLE | USER | NO_EXECUTE | LINUX_RUNTIME_SHARED)
+                != expected
         {
             return false;
         }
@@ -4105,20 +4145,22 @@ fn validate_complete_linux_process_user_tree(
 pub(crate) fn verify_linux_process_hierarchy_clone() -> bool {
     const HIERARCHY_FRAMES: usize = 4;
     const PRIVATE_PAGES: usize = 2;
-    const TOTAL_FRAMES: usize = HIERARCHY_FRAMES + PRIVATE_PAGES;
+    const PARENT_PAGES: usize = PRIVATE_PAGES + 1;
+    const PARENT_FRAMES: usize = HIERARCHY_FRAMES + PARENT_PAGES;
+    const CHILD_FRAMES: usize = HIERARCHY_FRAMES + PRIVATE_PAGES;
     let Some(before) = memory::owner_live_frame_count(memory::FrameOwner::KERNEL) else {
         return false;
     };
-    let Some(parent) = memory::allocate_frames::<TOTAL_FRAMES>(memory::FrameOwner::KERNEL) else {
+    let Some(parent) = memory::allocate_frames::<PARENT_FRAMES>(memory::FrameOwner::KERNEL) else {
         return false;
     };
-    let Some(child) = memory::allocate_frames::<TOTAL_FRAMES>(memory::FrameOwner::KERNEL) else {
+    let Some(child) = memory::allocate_frames::<CHILD_FRAMES>(memory::FrameOwner::KERNEL) else {
         let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &parent);
         return false;
     };
     let parent_hierarchy: [memory::FrameLease; HIERARCHY_FRAMES] =
         core::array::from_fn(|index| parent[index]);
-    let parent_pages: [memory::FrameLease; PRIVATE_PAGES] =
+    let parent_pages: [memory::FrameLease; PARENT_PAGES] =
         core::array::from_fn(|index| parent[HIERARCHY_FRAMES + index]);
     let child_hierarchy: [memory::FrameLease; HIERARCHY_FRAMES] =
         core::array::from_fn(|index| child[index]);
@@ -4140,8 +4182,17 @@ pub(crate) fn verify_linux_process_hierarchy_clone() -> bool {
             table
                 .add(1)
                 .write(parent_pages[1].address() | PRESENT | WRITABLE | USER | NO_EXECUTE);
+            table.add(2).write(
+                parent_pages[2].address()
+                    | PRESENT
+                    | WRITABLE
+                    | USER
+                    | NO_EXECUTE
+                    | LINUX_RUNTIME_SHARED,
+            );
             (parent_pages[0].direct_map_address()? as *mut u8).write(0x31);
             (parent_pages[1].direct_map_address()? as *mut u8).write(0x32);
+            (parent_pages[2].direct_map_address()? as *mut u8).write(0x33);
         }
         let parent_mappings = [
             cpu::LinuxActiveImageMapping {
@@ -4149,12 +4200,21 @@ pub(crate) fn verify_linux_process_hierarchy_clone() -> bool {
                 frame: parent_pages[0],
                 writable: false,
                 executable: true,
+                shared: false,
             },
             cpu::LinuxActiveImageMapping {
                 address: USER_TEST_ADDRESS + PAGE_SIZE,
                 frame: parent_pages[1],
                 writable: true,
                 executable: false,
+                shared: false,
+            },
+            cpu::LinuxActiveImageMapping {
+                address: USER_TEST_ADDRESS + 2 * PAGE_SIZE,
+                frame: parent_pages[2],
+                writable: true,
+                executable: false,
+                shared: true,
             },
         ];
 
@@ -4183,14 +4243,15 @@ pub(crate) fn verify_linux_process_hierarchy_clone() -> bool {
                     .iter()
                     .any(|byte| *byte != 0)
             })
-        }) || !crate::linux_process::copy_private_pages(&parent_pages, &child_pages)
-            || !clone_linux_process_hierarchy(
-                &parent_mappings,
-                &parent_hierarchy,
-                &child_hierarchy,
-                &child_pages,
-            )
-        {
+        }) || !crate::linux_process::copy_private_pages(
+            &parent_pages[..PRIVATE_PAGES],
+            &child_pages,
+        ) || !clone_linux_process_hierarchy(
+            &parent_mappings,
+            &parent_hierarchy,
+            &child_hierarchy,
+            &child_pages,
+        ) {
             return Some(false);
         }
 
@@ -4203,6 +4264,9 @@ pub(crate) fn verify_linux_process_hierarchy_clone() -> bool {
             unsafe { linux_leaf_in_root(parent_root, USER_TEST_ADDRESS as u64)?.read() };
         let parent_data = unsafe {
             linux_leaf_in_root(parent_root, (USER_TEST_ADDRESS + PAGE_SIZE) as u64)?.read()
+        };
+        let shared = unsafe {
+            linux_leaf_in_root(child_root, (USER_TEST_ADDRESS + 2 * PAGE_SIZE) as u64)?.read()
         };
         let child_code_address = child_pages[0].direct_map_address()?;
         let parent_code_address = parent_pages[0].direct_map_address()?;
@@ -4217,6 +4281,19 @@ pub(crate) fn verify_linux_process_hierarchy_clone() -> bool {
                     == parent_pages[0].address() | PRESENT | USER
                 && parent_data & (ADDRESS_MASK | PRESENT | WRITABLE | USER | NO_EXECUTE)
                     == parent_pages[1].address() | PRESENT | WRITABLE | USER | NO_EXECUTE
+                && shared
+                    & (ADDRESS_MASK
+                        | PRESENT
+                        | WRITABLE
+                        | USER
+                        | NO_EXECUTE
+                        | LINUX_RUNTIME_SHARED)
+                    == parent_pages[2].address()
+                        | PRESENT
+                        | WRITABLE
+                        | USER
+                        | NO_EXECUTE
+                        | LINUX_RUNTIME_SHARED
                 && unsafe { (parent_code_address as *const u8).read() } == 0x31,
         )
     })()
@@ -4665,6 +4742,7 @@ pub(crate) struct LinuxRuntimePage {
     pub(crate) protection: u8,
     pub(crate) file: bool,
     pub(crate) sealed: bool,
+    pub(crate) shared: bool,
 }
 
 impl LinuxRuntimePage {
@@ -4674,6 +4752,7 @@ impl LinuxRuntimePage {
         protection: 0,
         file: false,
         sealed: false,
+        shared: false,
     };
 }
 
@@ -4696,6 +4775,7 @@ fn linux_runtime_page_from_value(value: u64) -> LinuxRuntimePage {
         protection,
         file: value & LINUX_RUNTIME_FILE != 0,
         sealed: value & LINUX_RUNTIME_SEALED != 0,
+        shared: value & LINUX_RUNTIME_SHARED != 0,
     }
 }
 
@@ -4784,6 +4864,29 @@ pub(crate) fn install_current_linux_runtime_page(
             | if protection & 2 != 0 { WRITABLE } else { 0 }
             | if protection & 4 != 0 { 0 } else { NO_EXECUTE })
     .then_some(old.frame)
+}
+
+#[expect(
+    dead_code,
+    reason = "the SysV shmat path uses this shared-page primitive in the next ABI slice"
+)]
+pub(crate) fn install_current_linux_shared_page(
+    address: u64,
+    frame: memory::FrameLease,
+    protection: u8,
+) -> bool {
+    if install_current_linux_runtime_page(address, frame, protection, false, false) != Some(None) {
+        return false;
+    }
+    let Some(entry) = current_linux_leaf(address) else {
+        return false;
+    };
+    let value = unsafe { entry.read() };
+    unsafe {
+        entry.write(value | LINUX_RUNTIME_SHARED);
+        asm!("invlpg [{}]", in(reg) address, options(nostack, preserves_flags));
+    }
+    linux_runtime_page_from_value(unsafe { entry.read() }).shared
 }
 
 pub(crate) fn reserve_current_linux_runtime_page(
@@ -4983,7 +5086,7 @@ pub(crate) fn release_current_linux_runtime_mappings(base: u64) -> bool {
                 let page = linux_runtime_page_from_value(value);
                 if page.occupied {
                     unsafe { leaf.write(0) };
-                    if let Some(frame) = page.frame {
+                    if let Some(frame) = page.frame.filter(|_| !page.shared) {
                         if !memory::scrub_and_release_frames(
                             memory::FrameOwner::KERNEL,
                             core::slice::from_ref(&frame),
@@ -5109,7 +5212,7 @@ pub(crate) fn retire_linux_child_address_space(root: memory::FrameLease) -> bool
             }
             unsafe { entry.write(0) };
             let address = value & ADDRESS_MASK;
-            if address != 0 {
+            if address != 0 && value & LINUX_RUNTIME_SHARED == 0 {
                 if let Some(frame) = memory::live_frame_lease(memory::FrameOwner::KERNEL, address) {
                     if !memory::scrub_and_release_frames(
                         memory::FrameOwner::KERNEL,

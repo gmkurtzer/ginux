@@ -66,7 +66,7 @@ static LIVE_FORK_HIERARCHY_ALLOCATION_SCRATCH: LiveForkHierarchyAllocationScratc
 static mut TEST_PROCESS_TABLE: MaybeUninit<ProcessTable> = MaybeUninit::uninit();
 
 fn mapping_requires_fork_copy(mapping: &cpu::LinuxActiveImageMapping) -> bool {
-    mapping.writable || !memory::frame_lease_is_runtime(mapping.frame)
+    !mapping.shared && (mapping.writable || !memory::frame_lease_is_runtime(mapping.frame))
 }
 
 const PROCESS_CHILD_PROGRAM: [u8; 42] = [
@@ -231,10 +231,7 @@ impl ProcessAddressSpace {
                     || hierarchy.contains(&mapping.frame)
                     || mappings[..index].iter().any(|prior| {
                         prior.address == mapping.address
-                            || prior.frame == mapping.frame
-                                && (mapping.writable
-                                    || prior.writable
-                                    || !memory::frame_lease_is_runtime(mapping.frame))
+                            || prior.frame == mapping.frame && !(mapping.shared && prior.shared)
                     })
             })
             || !address_space::validate_linux_process_address_space(hierarchy, mappings)
@@ -335,7 +332,9 @@ impl ProcessAddressSpace {
             .chain(
                 self.mappings()
                     .iter()
-                    .filter(|mapping| !memory::frame_lease_is_runtime(mapping.frame))
+                    .filter(|mapping| {
+                        !mapping.shared && !memory::frame_lease_is_runtime(mapping.frame)
+                    })
                     .map(|mapping| &mapping.frame),
             )
             .any(|left| {
@@ -346,7 +345,9 @@ impl ProcessAddressSpace {
                         other
                             .mappings()
                             .iter()
-                            .filter(|mapping| !memory::frame_lease_is_runtime(mapping.frame))
+                            .filter(|mapping| {
+                                !mapping.shared && !memory::frame_lease_is_runtime(mapping.frame)
+                            })
                             .map(|mapping| &mapping.frame),
                     )
                     .any(|right| left.address() == right.address())
@@ -356,7 +357,8 @@ impl ProcessAddressSpace {
     fn scrub_and_release(&self) -> bool {
         if !memory::frame_leases_releasable(memory::FrameOwner::KERNEL, self.hierarchy())
             || self.mappings().iter().any(|mapping| {
-                !memory::frame_lease_is_runtime(mapping.frame)
+                !mapping.shared
+                    && !memory::frame_lease_is_runtime(mapping.frame)
                     && !memory::frame_leases_releasable(
                         memory::FrameOwner::KERNEL,
                         &[mapping.frame],
@@ -368,7 +370,7 @@ impl ProcessAddressSpace {
         let mut released =
             memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, self.hierarchy());
         for mapping in self.mappings() {
-            if !memory::frame_lease_is_runtime(mapping.frame) {
+            if !mapping.shared && !memory::frame_lease_is_runtime(mapping.frame) {
                 released &=
                     memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[mapping.frame]);
             }
@@ -705,6 +707,7 @@ impl ProcessTable {
                 frame,
                 writable: parent.writable,
                 executable: parent.executable,
+                shared: parent.shared,
             };
         }
         let mut parent_page_count = 0;
@@ -1114,6 +1117,7 @@ fn test_mapping(
         frame,
         writable,
         executable,
+        shared: false,
     }
 }
 
@@ -1460,7 +1464,8 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
             &first_resources.hierarchy()[1..],
         )
         || first_resources.mappings().iter().any(|mapping| {
-            !memory::frame_lease_is_runtime(mapping.frame)
+            !mapping.shared
+                && !memory::frame_lease_is_runtime(mapping.frame)
                 && !memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[mapping.frame])
         })
         || !table.exit(first_child, child_exit_status)

@@ -2511,6 +2511,7 @@ pub(crate) struct LinuxActiveImageMapping {
     pub(crate) frame: memory::FrameLease,
     pub(crate) writable: bool,
     pub(crate) executable: bool,
+    pub(crate) shared: bool,
 }
 
 impl LinuxActiveImageMapping {
@@ -2519,6 +2520,7 @@ impl LinuxActiveImageMapping {
         frame: memory::FrameLease::EMPTY,
         writable: false,
         executable: false,
+        shared: false,
     };
 }
 
@@ -2722,6 +2724,7 @@ fn linux_active_image_mappings() -> Option<(
             frame,
             writable: flags & 1 != 0,
             executable: flags & 2 != 0,
+            shared: false,
         };
     }
     if (count..LINUX_ACTIVE_IMAGE_MAPPING_LIMIT).any(|index| {
@@ -2748,10 +2751,7 @@ fn append_linux_process_snapshot_mapping(
             || memory::frame_lease_is_runtime(mapping.frame))
         || mappings[..*count].iter().any(|prior| {
             prior.address == mapping.address
-                || prior.frame == mapping.frame
-                    && (mapping.writable
-                        || prior.writable
-                        || !memory::frame_lease_is_runtime(mapping.frame))
+                || prior.frame == mapping.frame && !(mapping.shared && prior.shared)
         })
         || !address_space::current_linux_mapping_matches(
             mapping.address as u64,
@@ -2909,6 +2909,7 @@ pub(crate) fn live_linux_process_address_space_snapshot(
             frame: stack_frame,
             writable: true,
             executable: false,
+            shared: false,
         },
     ) {
         if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
@@ -2949,6 +2950,7 @@ pub(crate) fn live_linux_process_address_space_snapshot(
                     frame,
                     writable: true,
                     executable: false,
+                    shared: false,
                 },
             ) {
                 return None;
@@ -2977,6 +2979,7 @@ pub(crate) fn live_linux_process_address_space_snapshot(
             frame: heap_frame,
             writable: true,
             executable: false,
+            shared: false,
         },
     ) {
         return None;
@@ -2998,6 +3001,7 @@ pub(crate) fn live_linux_process_address_space_snapshot(
                     frame,
                     writable: true,
                     executable: false,
+                    shared: false,
                 },
             ) {
                 return None;
@@ -3049,6 +3053,7 @@ pub(crate) fn live_linux_process_address_space_snapshot(
                 frame,
                 writable: true,
                 executable: false,
+                shared: false,
             },
         ) {
             serial_write("ginux: snapshot rejected TLS address/frame/current/index ");
@@ -3085,6 +3090,7 @@ pub(crate) fn live_linux_process_address_space_snapshot(
             frame: memory::FrameLease::from_parts(sibling_stack_frame, sibling_stack_generation)?,
             writable: true,
             executable: false,
+            shared: false,
         },
     ) {
         return None;
@@ -3122,6 +3128,7 @@ pub(crate) fn live_linux_process_address_space_snapshot(
                     frame: memory::FrameLease::from_parts(frame_address, generation)?,
                     writable: protection & LINUX_PROT_WRITE != 0,
                     executable: false,
+                    shared: false,
                 },
             )
         {
@@ -6850,6 +6857,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
                         frame,
                         writable: mapping.writable,
                         executable: mapping.executable,
+                        shared: false,
                     };
                     expected_active_count += 1;
                     true
@@ -6890,6 +6898,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
                     frame,
                     writable: mapping.writable && mapping.address as u64 != protected_page,
                     executable: mapping.executable,
+                    shared: false,
                 })
             })
         });
@@ -6914,6 +6923,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
                                     frame,
                                     writable: mapping.writable && address as u64 != protected_page,
                                     executable: mapping.executable,
+                                    shared: false,
                                 })
                             })
                     })
@@ -6932,6 +6942,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
                         frame,
                         writable: flags & 1 != 0,
                         executable: flags & 2 != 0,
+                        shared: false,
                     })
                 })
         })
@@ -11218,9 +11229,13 @@ fn linux_runtime_select_mapping(address: u64, pages: usize, fixed: bool) -> Opti
 }
 
 fn release_linux_runtime_page(page: address_space::LinuxRuntimePage) -> bool {
-    page.frame.is_none_or(|frame| {
-        memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, core::slice::from_ref(&frame))
-    })
+    page.shared
+        || page.frame.is_none_or(|frame| {
+            memory::scrub_and_release_frames(
+                memory::FrameOwner::KERNEL,
+                core::slice::from_ref(&frame),
+            )
+        })
 }
 
 fn rollback_linux_runtime_mapping(address: u64, pages: usize) -> bool {
@@ -14333,6 +14348,7 @@ fn linux_execve_at(
         frame: old_stack_frame,
         writable: true,
         executable: false,
+        shared: false,
     };
     let Some(old_heap_frame) = memory::FrameLease::from_parts(
         ELF_PROBE_HEAP_FRAME.load(Ordering::SeqCst),
@@ -14353,6 +14369,7 @@ fn linux_execve_at(
         frame: old_heap_frame,
         writable: true,
         executable: false,
+        shared: false,
     };
     if let Some((_, thread_pointers)) = interpreted_tls {
         for (index, thread_pointer) in thread_pointers.into_iter().enumerate() {
@@ -14377,6 +14394,7 @@ fn linux_execve_at(
                 frame,
                 writable: true,
                 executable: false,
+                shared: false,
             };
         }
     }
@@ -14404,6 +14422,7 @@ fn linux_execve_at(
             frame,
             writable: true,
             executable: false,
+            shared: false,
         };
     }
     let clear_child_tid = current_linux_clear_child_tid().unwrap_or(0);
