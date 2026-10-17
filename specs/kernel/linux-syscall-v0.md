@@ -1549,6 +1549,17 @@ Priority-inheritance robust futex recovery remains pending, so
 clear-child-TID and robust-list sentinels to two slots, proves they follow the
 current-thread selection, and proves retirement clears them before slot reuse.
 
+`rax = 334` (`__NR_rseq`) records per-thread registration pointer, length, and
+signature. It accepts the original aligned 32-byte ABI and Linux v6.12 extended
+lengths with four-byte alignment, validates the entire declared writable range,
+and publishes CPU 0, NUMA node 0, and memory-map concurrency ID 0. Repeating an
+identical registration returns `-EBUSY`; pointer or length changes return
+`-EINVAL`, while a signature mismatch returns `-EPERM`. Matching unregister
+resets `cpu_id_start`, `cpu_id`, `node_id`, and `mm_cid` in Linux field order
+before clearing the saved registration. Argument narrowing, alignment, range,
+and lifecycle cleanup are runtime-tested. Preemption/signal critical-section
+fixup and migration behavior remain pending, so the syscall remains Partial.
+
 `rax = 202` (`__NR_futex`) supports a bounded one-waiter lifecycle. Aligned,
 readable `FUTEX_WAIT` and `FUTEX_WAIT_PRIVATE` compare one 32-bit word and return
 `-EAGAIN` when it differs from the expected value. When the fixed clone child is

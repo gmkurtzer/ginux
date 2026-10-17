@@ -1255,6 +1255,8 @@ static LINUX_THREAD_ROBUST_LISTS: [BankedAtomicU64; LINUX_THREAD_LIMIT] =
     [const { BankedAtomicU64::new(0) }; LINUX_THREAD_LIMIT];
 static LINUX_THREAD_RSEQ_POINTERS: [BankedAtomicU64; LINUX_THREAD_LIMIT] =
     [const { BankedAtomicU64::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_RSEQ_LENGTHS: [BankedAtomicU32; LINUX_THREAD_LIMIT] =
+    [const { BankedAtomicU32::new(0) }; LINUX_THREAD_LIMIT];
 static LINUX_THREAD_RSEQ_SIGNATURES: [BankedAtomicU32; LINUX_THREAD_LIMIT] =
     [const { BankedAtomicU32::new(0) }; LINUX_THREAD_LIMIT];
 static LINUX_THREAD_SIGNAL_MASKS: [BankedAtomicU64; LINUX_THREAD_LIMIT] =
@@ -4343,6 +4345,7 @@ fn reserve_linux_thread(
     LINUX_THREAD_CLEAR_CHILD_TIDS[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_ROBUST_LISTS[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_RSEQ_POINTERS[slot].store(0, Ordering::SeqCst);
+    LINUX_THREAD_RSEQ_LENGTHS[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_RSEQ_SIGNATURES[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_SIGNAL_MASKS[slot].store(inherited_signal_mask, Ordering::SeqCst);
     LINUX_THREAD_WAIT_KINDS[slot].store(LINUX_THREAD_WAIT_NONE, Ordering::SeqCst);
@@ -4642,6 +4645,7 @@ fn clear_linux_thread_slot(slot: usize) {
     clear_linux_thread_execution(slot);
     LINUX_THREAD_ROBUST_LISTS[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_RSEQ_POINTERS[slot].store(0, Ordering::SeqCst);
+    LINUX_THREAD_RSEQ_LENGTHS[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_RSEQ_SIGNATURES[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_SIGNAL_MASKS[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_WAIT_KINDS[slot].store(LINUX_THREAD_WAIT_NONE, Ordering::SeqCst);
@@ -4820,44 +4824,69 @@ fn current_linux_robust_list() -> Option<u64> {
 }
 
 fn linux_rseq(address: u64, length: u64, flags: u64, signature: u64) -> u64 {
-    const RSEQ_SIZE: u64 = 32;
-    const RSEQ_FLAG_UNREGISTER: u64 = 1;
-    if length != RSEQ_SIZE || flags & !RSEQ_FLAG_UNREGISTER != 0 || signature > u32::MAX as u64 {
-        return LINUX_EINVAL;
-    }
+    const RSEQ_SIZE: u32 = 32;
+    const RSEQ_FLAG_UNREGISTER: u32 = 1;
+    let length = length as u32;
+    let flags = flags as u32;
+    let signature = signature as u32;
     let Some(slot) = current_linux_thread_slot() else {
         return LINUX_ESRCH;
     };
     let registered = LINUX_THREAD_RSEQ_POINTERS[slot].load(Ordering::SeqCst);
-    if flags == RSEQ_FLAG_UNREGISTER {
-        if registered != address
-            || LINUX_THREAD_RSEQ_SIGNATURES[slot].load(Ordering::SeqCst) != signature as u32
+    let registered_length = LINUX_THREAD_RSEQ_LENGTHS[slot].load(Ordering::SeqCst);
+    let registered_signature = LINUX_THREAD_RSEQ_SIGNATURES[slot].load(Ordering::SeqCst);
+    if flags & RSEQ_FLAG_UNREGISTER != 0 {
+        if flags & !RSEQ_FLAG_UNREGISTER != 0
+            || registered == 0
+            || registered != address
+            || registered_length != length
         {
             return LINUX_EINVAL;
         }
-        if !copy_to_linux_user(address, &u32::MAX.to_ne_bytes())
+        if registered_signature != signature {
+            return LINUX_EPERM;
+        }
+        if !copy_to_linux_user(address, &0_u32.to_ne_bytes())
             || !copy_to_linux_user(address + 4, &u32::MAX.to_ne_bytes())
+            || !copy_to_linux_user(address + 20, &0_u32.to_ne_bytes())
+            || !copy_to_linux_user(address + 24, &0_u32.to_ne_bytes())
         {
             return LINUX_EFAULT;
         }
         LINUX_THREAD_RSEQ_POINTERS[slot].store(0, Ordering::SeqCst);
+        LINUX_THREAD_RSEQ_LENGTHS[slot].store(0, Ordering::SeqCst);
         LINUX_THREAD_RSEQ_SIGNATURES[slot].store(0, Ordering::SeqCst);
         return 0;
     }
-    if registered != 0 {
-        return LINUX_EBUSY;
-    }
-    if address == 0 || !address.is_multiple_of(32) {
+    if flags != 0 {
         return LINUX_EINVAL;
     }
-    if !linux_writable_user_range_contains(address, RSEQ_SIZE as usize)
+    if registered != 0 {
+        if registered != address || registered_length != length {
+            return LINUX_EINVAL;
+        }
+        if registered_signature != signature {
+            return LINUX_EPERM;
+        }
+        return LINUX_EBUSY;
+    }
+    if length < RSEQ_SIZE
+        || length == RSEQ_SIZE && !address.is_multiple_of(RSEQ_SIZE as u64)
+        || length != RSEQ_SIZE && !address.is_multiple_of(size_of::<u32>() as u64)
+    {
+        return LINUX_EINVAL;
+    }
+    if !linux_writable_user_range_contains(address, length as usize)
         || !copy_to_linux_user(address, &0_u32.to_ne_bytes())
         || !copy_to_linux_user(address + 4, &0_u32.to_ne_bytes())
+        || !copy_to_linux_user(address + 20, &0_u32.to_ne_bytes())
+        || !copy_to_linux_user(address + 24, &0_u32.to_ne_bytes())
     {
         return LINUX_EFAULT;
     }
     LINUX_THREAD_RSEQ_POINTERS[slot].store(address, Ordering::SeqCst);
-    LINUX_THREAD_RSEQ_SIGNATURES[slot].store(signature as u32, Ordering::SeqCst);
+    LINUX_THREAD_RSEQ_LENGTHS[slot].store(length, Ordering::SeqCst);
+    LINUX_THREAD_RSEQ_SIGNATURES[slot].store(signature, Ordering::SeqCst);
     0
 }
 
@@ -4914,6 +4943,9 @@ fn finish_linux_thread_table() -> bool {
             .iter()
             .all(|value| value.load(Ordering::SeqCst) == 0)
         && LINUX_THREAD_RSEQ_POINTERS
+            .iter()
+            .all(|value| value.load(Ordering::SeqCst) == 0)
+        && LINUX_THREAD_RSEQ_LENGTHS
             .iter()
             .all(|value| value.load(Ordering::SeqCst) == 0)
         && LINUX_THREAD_RSEQ_SIGNATURES
@@ -10900,6 +10932,7 @@ struct LinuxProcessRuntimeState {
     clear_child_tid: u64,
     robust_list: u64,
     rseq_pointer: u64,
+    rseq_length: u32,
     rseq_signature: u32,
     thread_signal_mask: u64,
     tid: u32,
@@ -10934,6 +10967,7 @@ impl LinuxProcessRuntimeState {
         clear_child_tid: 0,
         robust_list: 0,
         rseq_pointer: 0,
+        rseq_length: 0,
         rseq_signature: 0,
         thread_signal_mask: 0,
         tid: 0,
@@ -11008,6 +11042,7 @@ fn capture_linux_process_runtime_state() -> Option<LinuxProcessRuntimeState> {
         clear_child_tid: LINUX_THREAD_CLEAR_CHILD_TIDS[thread_slot].load(Ordering::SeqCst),
         robust_list: LINUX_THREAD_ROBUST_LISTS[thread_slot].load(Ordering::SeqCst),
         rseq_pointer: LINUX_THREAD_RSEQ_POINTERS[thread_slot].load(Ordering::SeqCst),
+        rseq_length: LINUX_THREAD_RSEQ_LENGTHS[thread_slot].load(Ordering::SeqCst),
         rseq_signature: LINUX_THREAD_RSEQ_SIGNATURES[thread_slot].load(Ordering::SeqCst),
         thread_signal_mask: LINUX_THREAD_SIGNAL_MASKS[thread_slot].load(Ordering::SeqCst),
         tid: LINUX_THREAD_TIDS[thread_slot].load(Ordering::SeqCst),
@@ -11049,6 +11084,7 @@ fn restore_linux_process_runtime_state(state: LinuxProcessRuntimeState) {
         LINUX_THREAD_CLEAR_CHILD_TIDS[slot].store(state.clear_child_tid, Ordering::SeqCst);
         LINUX_THREAD_ROBUST_LISTS[slot].store(state.robust_list, Ordering::SeqCst);
         LINUX_THREAD_RSEQ_POINTERS[slot].store(state.rseq_pointer, Ordering::SeqCst);
+        LINUX_THREAD_RSEQ_LENGTHS[slot].store(state.rseq_length, Ordering::SeqCst);
         LINUX_THREAD_RSEQ_SIGNATURES[slot].store(state.rseq_signature, Ordering::SeqCst);
         LINUX_THREAD_SIGNAL_MASKS[slot].store(state.thread_signal_mask, Ordering::SeqCst);
         LINUX_THREAD_TIDS[slot].store(state.tid, Ordering::SeqCst);
@@ -12694,6 +12730,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let realtime_queries = verify_linux_realtime_queries();
     let filesystem_sync = linux_syncfs(1) == 0 && linux_syncfs(99) == LINUX_EBADF;
     let robust_list = verify_linux_robust_list_syscalls();
+    let rseq = verify_linux_rseq_syscall();
     let mappings_released =
         address_space::release_current_linux_runtime_mappings(LINUX_RUNTIME_DYNAMIC_MMAP_BASE);
     ELF_PROBE_MMAP_NEXT.store(LINUX_RUNTIME_DYNAMIC_MMAP_BASE, Ordering::SeqCst);
@@ -12725,6 +12762,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && realtime_queries
         && filesystem_sync
         && robust_list
+        && rseq
         && mappings_released
 }
 
@@ -12959,6 +12997,56 @@ fn verify_linux_robust_list_syscalls() -> bool {
     let restored = set_current_linux_robust_list(saved);
     let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
     cleanup && restored && unmapped
+}
+
+fn verify_linux_rseq_syscall() -> bool {
+    let Some(slot) = current_linux_thread_slot() else {
+        return false;
+    };
+    if LINUX_THREAD_RSEQ_POINTERS[slot].load(Ordering::SeqCst) != 0 {
+        return false;
+    }
+    let mapping = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    if !(LINUX_RUNTIME_DYNAMIC_MMAP_BASE..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
+        .contains(&mapping)
+    {
+        return false;
+    }
+    let signature = 0x5305_3053_u64;
+    let registered = copy_to_linux_user(mapping, &[0xa5_u8; 36])
+        && linux_rseq(mapping, (1_u64 << 32) | 36, 1_u64 << 32, signature) == 0
+        && linux_rseq(mapping, 36, 0, signature) == LINUX_EBUSY
+        && linux_rseq(mapping, 36, 0, signature + 1) == LINUX_EPERM
+        && linux_rseq(mapping + 4, 36, 0, signature) == LINUX_EINVAL
+        && linux_rseq(mapping, 35, 1, signature) == LINUX_EINVAL
+        && linux_rseq(mapping, 36, 1, signature + 1) == LINUX_EPERM;
+    let mut area = [0xa5_u8; 32];
+    let initialized = registered
+        && copy_from_linux_user(mapping, &mut area)
+        && area[..8] == [0; 8]
+        && area[20..28] == [0; 8];
+    let unregistered = initialized
+        && linux_rseq(mapping, 36, 1, signature) == 0
+        && copy_from_linux_user(mapping, &mut area)
+        && area[..4] == [0; 4]
+        && area[4..8] == u32::MAX.to_ne_bytes()
+        && area[20..28] == [0; 8]
+        && linux_rseq(mapping, 36, 1, signature) == LINUX_EINVAL
+        && linux_rseq(mapping, 31, 0, signature) == LINUX_EINVAL
+        && linux_rseq(mapping + 4, 32, 0, signature) == LINUX_EINVAL
+        && linux_rseq(mapping + PAGE_SIZE as u64, 32, 0, signature) == LINUX_EFAULT;
+    let clean = LINUX_THREAD_RSEQ_POINTERS[slot].load(Ordering::SeqCst) == 0
+        && LINUX_THREAD_RSEQ_LENGTHS[slot].load(Ordering::SeqCst) == 0
+        && LINUX_THREAD_RSEQ_SIGNATURES[slot].load(Ordering::SeqCst) == 0;
+    let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
+    unregistered && clean && unmapped
 }
 
 fn verify_linux_io_uring_syscalls() -> bool {
