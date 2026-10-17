@@ -42,7 +42,7 @@ implemented calls lives in [Linux Syscall Entry v0](../specs/kernel/linux-syscal
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **17 Complete**, **246 Partial**, **44 Policy-denied**, **68 Missing**.
+Current totals: **17 Complete**, **247 Partial**, **44 Policy-denied**, **67 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -445,7 +445,7 @@ therefore omitted.
 | 446 | landlock_restrict_self | Missing |
 | 447 | memfd_secret | Missing |
 | 448 | process_mrelease | Missing |
-| 449 | futex_waitv | Missing |
+| 449 | futex_waitv | Partial |
 | 450 | set_mempolicy_home_node | Partial |
 | 451 | cachestat | Partial |
 | 452 | fchmodat2 | Partial |

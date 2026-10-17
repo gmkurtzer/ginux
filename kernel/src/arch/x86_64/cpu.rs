@@ -386,6 +386,7 @@ const LINUX_PKEY_FREE_SYSCALL: u64 = 331;
 const LINUX_FUTEX_WAKE_SYSCALL: u64 = 454;
 const LINUX_FUTEX_WAIT_SYSCALL: u64 = 455;
 const LINUX_FUTEX_REQUEUE_SYSCALL: u64 = 456;
+const LINUX_FUTEX_WAITV_SYSCALL: u64 = 449;
 const LINUX_GETRANDOM_SYSCALL: u64 = 318;
 const LINUX_STATX_SYSCALL: u64 = 332;
 const LINUX_RENAMEAT2_SYSCALL: u64 = 316;
@@ -8486,6 +8487,15 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_FUTEX_REQUEUE_SYSCALL => {
             linux_futex_requeue(first_argument, buffer, count, register(0))
         }
+        LINUX_FUTEX_WAITV_SYSCALL => linux_futex_waitv_live_return(
+            registers,
+            syscall_return,
+            first_argument,
+            buffer,
+            count,
+            register(0),
+            register(2),
+        ),
         LINUX_PRLIMIT64_SYSCALL => {
             if !matches!(first_argument, 0 | 1) {
                 return LINUX_ESRCH;
@@ -10234,6 +10244,45 @@ fn linux_futex_wait_live_return(
     LINUX_LIVE_RETURN_VALIDATED.store(true, Ordering::SeqCst);
     LINUX_FUTEX_WAIT_BLOCK_COUNT.fetch_add(1, Ordering::SeqCst);
     selected.rax
+}
+
+#[allow(clippy::too_many_arguments)]
+fn linux_futex_waitv_live_return(
+    output: *mut LinuxSyscallFrame,
+    caller: LinuxUserContext,
+    waiters: u64,
+    count: u64,
+    flags: u64,
+    timeout: u64,
+    clock: u64,
+) -> u64 {
+    if flags != 0 || count == 0 || count > 128 {
+        return LINUX_EINVAL;
+    }
+    if count != 1 {
+        return LINUX_ENOSYS;
+    }
+    let mut waiter = [0_u8; 24];
+    if !copy_from_linux_user(waiters, &mut waiter) {
+        return LINUX_EFAULT;
+    }
+    let value = u64::from_ne_bytes(waiter[..8].try_into().unwrap());
+    let address = u64::from_ne_bytes(waiter[8..16].try_into().unwrap());
+    let waiter_flags = u32::from_ne_bytes(waiter[16..20].try_into().unwrap());
+    let reserved = u32::from_ne_bytes(waiter[20..24].try_into().unwrap());
+    if reserved != 0 {
+        return LINUX_EINVAL;
+    }
+    linux_futex_wait_live_return(
+        output,
+        caller,
+        address,
+        value,
+        u64::from(u32::MAX),
+        u64::from(waiter_flags),
+        timeout,
+        clock,
+    )
 }
 
 fn linux_futex_requeue(waiters: u64, flags: u64, wake_count: u64, requeue_count: u64) -> u64 {

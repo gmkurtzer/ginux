@@ -1159,6 +1159,17 @@ ginux_linux_system_init:
     syscall
     test rax, rax
     jne .Lfailure
+    lea rax, [rip + .Lfutex_word]
+    mov qword ptr [rip + .Lfutex_waitv + 8], rax
+    lea rdi, [rip + .Lfutex_waitv]
+    mov esi, 1
+    xor edx, edx
+    xor r10d, r10d
+    mov r8d, 1
+    mov eax, 449
+    syscall
+    cmp rax, -11
+    jne .Lfailure
 
     mov rdi, r8
     lea rsi, [rip + .Lfutex_marker]
@@ -1616,6 +1627,11 @@ ginux_linux_system_init:
     .quad 0
     .long 2
     .long 0
+    .quad 0
+    .quad 0
+    .long 2
+    .long 0
+.Lfutex_waitv:
     .quad 0
     .quad 0
     .long 2
