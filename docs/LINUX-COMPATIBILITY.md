@@ -126,6 +126,10 @@ Anonymous `mmap` accepts `MAP_POPULATE` and prefaults demand-backed pages using
 the same access-aware path. As on Linux, inability to prefault does not fail
 the mapping, and `MAP_NONBLOCK` suppresses the prefault work. Boot verification
 distinguishes physically populated pages from the nonblocking reserved form.
+`MAP_EXECUTABLE` is accepted as Linux's ignored compatibility flag.
+`MAP_LOCKED` performs best-effort prefaulting; because Ginux has no swap or
+page-reclaim path, successfully backed pages remain resident without separate
+locking metadata. The verifier covers both flags on an anonymous mapping.
 Snapshot completion imports the inheritance bit from every leaf PTE, including
 stack, heap, executable-image, and dynamically allocated mappings.
 Descriptor-control verification also covers Linux 32-bit descriptor and

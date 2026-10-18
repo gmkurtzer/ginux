@@ -554,6 +554,8 @@ const LINUX_MAP_SHARED: u64 = 1;
 const LINUX_MAP_PRIVATE: u64 = 2;
 const LINUX_MAP_FIXED: u64 = 0x10;
 const LINUX_MAP_ANONYMOUS: u64 = 0x20;
+const LINUX_MAP_EXECUTABLE: u64 = 0x1000;
+const LINUX_MAP_LOCKED: u64 = 0x2000;
 const LINUX_MAP_NORESERVE: u64 = 0x4000;
 const LINUX_MAP_DENYWRITE: u64 = 0x800;
 const LINUX_MAP_POPULATE: u64 = 0x8000;
@@ -15761,7 +15763,20 @@ fn verify_linux_process_madvise_syscall() -> bool {
         && map_nonblocking
         && linux_runtime_munmap(populated_mapping, (2 * PAGE_SIZE) as u64) == 0
         && linux_runtime_munmap(nonblocking_mapping, PAGE_SIZE as u64) == 0;
-    freed && errors && closed && unmapped && population_unmapped
+    let compatibility_mapping = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64,
+        LINUX_PROT_READ,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS | LINUX_MAP_EXECUTABLE | LINUX_MAP_LOCKED,
+        u64::MAX,
+        0,
+    );
+    let compatibility_flags = compatibility_mapping < LINUX_RETURN_TO_KERNEL
+        && address_space::current_linux_runtime_page(compatibility_mapping)
+            .frame
+            .is_some()
+        && linux_runtime_munmap(compatibility_mapping, PAGE_SIZE as u64) == 0;
+    freed && errors && closed && unmapped && population_unmapped && compatibility_flags
 }
 
 fn verify_linux_timer_argument_widths() -> bool {
@@ -16334,7 +16349,12 @@ fn linux_runtime_mmap(
     // MAP_STACK is currently a Linux compatibility hint.  Runtime mappings
     // already have page-granular backing and teardown, so neither it nor
     // MAP_NORESERVE needs a distinct mapping mechanism.
-    let ignored = flags & (LINUX_MAP_DENYWRITE | LINUX_MAP_NORESERVE | LINUX_MAP_STACK);
+    let ignored = flags
+        & (LINUX_MAP_DENYWRITE
+            | LINUX_MAP_EXECUTABLE
+            | LINUX_MAP_LOCKED
+            | LINUX_MAP_NORESERVE
+            | LINUX_MAP_STACK);
     let normalized = flags & !ignored;
     let sharing = normalized & (LINUX_MAP_SHARED | LINUX_MAP_PRIVATE);
     if !matches!(sharing, LINUX_MAP_SHARED | LINUX_MAP_PRIVATE) {
@@ -16541,7 +16561,10 @@ fn linux_runtime_mmap(
             return LINUX_ENOMEM;
         }
     }
-    if anonymous && flags & LINUX_MAP_POPULATE != 0 && flags & LINUX_MAP_NONBLOCK == 0 {
+    if anonymous
+        && (flags & LINUX_MAP_LOCKED != 0
+            || flags & LINUX_MAP_POPULATE != 0 && flags & LINUX_MAP_NONBLOCK == 0)
+    {
         let _ = materialize_linux_runtime_user_range(
             mapping,
             pages.saturating_mul(PAGE_SIZE),
