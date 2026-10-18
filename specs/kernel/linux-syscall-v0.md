@@ -377,9 +377,12 @@ descriptor, `F_GETFD`, `F_SETFD`, and `F_GETFL` expose its close-on-exec bit and
 selected access mode; duplication remains outside this bounded node profile.
 `rax = 436` (`__NR_close_range`) closes every open descriptor in an inclusive
 range while ignoring holes, or marks each open descriptor with
-`CLOSE_RANGE_CLOEXEC`. Reversed ranges, `CLOSE_RANGE_UNSHARE`, and unknown
-flags return `-EINVAL`; ranges wholly beyond the bounded table are successful
-no-ops. Shared descriptor-table unsharing is not part of this profile.
+`CLOSE_RANGE_CLOEXEC`. `CLOSE_RANGE_UNSHARE` is accepted independently or with
+`CLOEXEC`; Ginux process descriptor tables are already private, so no table
+copy is necessary. Reversed ranges and unknown flags return `-EINVAL`; ranges
+wholly beyond the table are successful no-ops. Arguments use their Linux
+32-bit widths. Runtime probes cover closure, close-on-exec marking, unsharing,
+combined flags, high register bits, reversed ranges, unknown flags, and holes.
 `F_SETFL` can toggle only `O_NONBLOCK` on eventfd, timerfd, and each pipe
 endpoint; it ignores the supplied access-mode bits and rejects other status
 flags with `-EINVAL`. Pipe read and write endpoints retain independent status

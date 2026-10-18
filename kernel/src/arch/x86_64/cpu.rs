@@ -707,6 +707,7 @@ const LINUX_F_OFD_SETLKW: u64 = 38;
 const LINUX_F_DUPFD_CLOEXEC: u64 = 1030;
 const LINUX_FD_CLOEXEC: u8 = 1;
 const LINUX_CLOSE_RANGE_CLOEXEC: u64 = 1 << 2;
+const LINUX_CLOSE_RANGE_UNSHARE: u64 = 1 << 1;
 const LINUX_O_CLOEXEC: u64 = 0x80000;
 const LINUX_O_NOCTTY: u64 = 0x100;
 const LINUX_O_DIRECTORY: u64 = 0x10000;
@@ -25538,7 +25539,10 @@ fn linux_close_all_descriptors() -> bool {
 }
 
 fn linux_close_range(first: u64, last: u64, flags: u64) -> u64 {
-    if first > last || flags & !LINUX_CLOSE_RANGE_CLOEXEC != 0 {
+    let first = u64::from(first as u32);
+    let last = u64::from(last as u32);
+    let flags = u64::from(flags as u32);
+    if first > last || flags & !(LINUX_CLOSE_RANGE_CLOEXEC | LINUX_CLOSE_RANGE_UNSHARE) != 0 {
         return LINUX_EINVAL;
     }
     let end = last.min(LINUX_DESCRIPTOR_TABLE_LIMIT - 1);
@@ -25549,7 +25553,7 @@ fn linux_close_range(first: u64, last: u64, flags: u64) -> u64 {
         if !linux_descriptor_open(descriptor) {
             continue;
         }
-        if flags == LINUX_CLOSE_RANGE_CLOEXEC {
+        if flags & LINUX_CLOSE_RANGE_CLOEXEC != 0 {
             set_linux_descriptor_close_on_exec(descriptor, true);
         } else if linux_descriptor_close(descriptor) != 0 {
             return LINUX_EBADF;
