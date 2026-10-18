@@ -111,6 +111,11 @@ convert descriptors and xattr flags according to their Linux 32-bit types.
 The filesystem verifier now performs an overlay xattr set/get/list/remove
 lifecycle and root `getdents64` enumeration with dirty upper register bits,
 then proves descriptor and overlay cleanup.
+Pipe and zero-copy boundaries convert `pipe2`, `splice`, `tee`, `vmsplice`, and
+`copy_file_range` descriptors and flag words from their Linux 32-bit types.
+Boot verification creates a close-on-exec pipe and exercises zero-length
+`tee`/`vmsplice` operations with dirty upper register bits before closing both
+ends.
 
 The ring-3 controller directly verifies its Linux PID/TID, parent,
 process-group, session, UID/GID, supplementary-group, scheduler-yield, and

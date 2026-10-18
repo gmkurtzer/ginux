@@ -14267,7 +14267,7 @@ fn verify_linux_fadvise64_syscall() -> bool {
         && linux_fadvise64(descriptor, 0, u64::MAX, 0) == LINUX_EINVAL
         && linux_fadvise64(descriptor, 0, 0, 6) == LINUX_EINVAL
         && linux_fadvise64(LINUX_AUX_DESCRIPTOR_LIMIT, 0, 0, 0) == LINUX_EBADF;
-    let pipe_created = regular && linux_pipe(mapping + 128, 0) == 0;
+    let pipe_created = regular && linux_pipe(mapping + 128, (1_u64 << 32) | LINUX_O_CLOEXEC) == 0;
     let mut descriptors = [0_u8; 8];
     let pipe = if pipe_created && copy_from_linux_user(mapping + 128, &mut descriptors) {
         [
@@ -14279,6 +14279,15 @@ fn verify_linux_fadvise64_syscall() -> bool {
     };
     let pipe_rejected = pipe[0] < LINUX_AUX_DESCRIPTOR_LIMIT
         && pipe[1] < LINUX_AUX_DESCRIPTOR_LIMIT
+        && linux_descriptor_close_on_exec(pipe[0])
+        && linux_descriptor_close_on_exec(pipe[1])
+        && linux_vmsplice((1_u64 << 32) | pipe[1], 0, 0, 1_u64 << 32) == 0
+        && linux_tee(
+            (1_u64 << 32) | pipe[0],
+            (1_u64 << 32) | pipe[1],
+            0,
+            1_u64 << 32,
+        ) == 0
         && linux_fadvise64(pipe[0], u64::MAX, u64::MAX, 6) == LINUX_ESPIPE;
     let closed = descriptor < LINUX_AUX_DESCRIPTOR_LIMIT
         && linux_descriptor_close(descriptor) == 0
@@ -23806,6 +23815,9 @@ fn linux_copy_file_range(
     length: u64,
     flags: u64,
 ) -> u64 {
+    let input = u64::from(input as u32);
+    let output = u64::from(output as u32);
+    let flags = u64::from(flags as u32);
     if flags != 0 {
         return LINUX_EINVAL;
     }
@@ -25828,6 +25840,7 @@ fn linux_store_timespec(timespec: &mut [u8], nanoseconds: u64) {
 }
 
 fn linux_pipe(address: u64, flags: u64) -> u64 {
+    let flags = u64::from(flags as u32);
     if flags & !(LINUX_O_NONBLOCK | LINUX_O_CLOEXEC) != 0 {
         return LINUX_EINVAL;
     }
@@ -25876,6 +25889,8 @@ fn linux_pipe(address: u64, flags: u64) -> u64 {
 fn linux_vmsplice(descriptor: u64, vectors: u64, count: u64, flags: u64) -> u64 {
     const SPLICE_F_MORE: u64 = 4;
     const SPLICE_F_GIFT: u64 = 8;
+    let descriptor = u64::from(descriptor as u32);
+    let flags = u64::from(flags as u32);
     if flags & !(SPLICE_F_MORE | SPLICE_F_GIFT) != 0 {
         return LINUX_EINVAL;
     }
@@ -25893,6 +25908,9 @@ fn linux_splice(
     length: u64,
     flags: u64,
 ) -> u64 {
+    let input = u64::from(input as u32);
+    let output = u64::from(output as u32);
+    let flags = u64::from(flags as u32);
     if input_offset != 0 || output_offset != 0 {
         return LINUX_ESPIPE;
     }
@@ -25900,7 +25918,13 @@ fn linux_splice(
 }
 
 fn linux_tee(input: u64, output: u64, length: u64, flags: u64) -> u64 {
-    linux_splice_pipes(input, output, length, flags, false)
+    linux_splice_pipes(
+        u64::from(input as u32),
+        u64::from(output as u32),
+        length,
+        u64::from(flags as u32),
+        false,
+    )
 }
 
 fn linux_splice_pipes(input: u64, output: u64, length: u64, flags: u64, consume: bool) -> u64 {
