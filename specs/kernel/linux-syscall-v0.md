@@ -438,7 +438,12 @@ below the process `RLIMIT_NOFILE`, sharing its open-file state and clearing
 `rax = 33` (`__NR_dup2`) atomically replaces any target below the process soft
 limit with the open source's descriptor state and clears `FD_CLOEXEC`. Equal
 source and target descriptors return the target unchanged. A closed source or
-target outside the limit returns `-EBADF`.
+target outside the limit returns `-EBADF`. The ring-3 controller proves pipe
+descriptor replacement, close-on-exec clearing, equal-descriptor identity,
+invalid-source and out-of-range-target rejection, and that a failed operation
+does not publish the requested target. Duplication of the bounded singleton
+epoll, eventfd, and timerfd objects is not implemented yet, so `dup` and `dup2`
+remain Partial in the compatibility ledger.
 `rax = 292` (`__NR_dup3`) uses the full process descriptor table, rejects equal
 source and target descriptors and unknown flags with `-EINVAL`, atomically
 replaces the target, and accepts only Linux `O_CLOEXEC`. A successful duplicate

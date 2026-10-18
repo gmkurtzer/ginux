@@ -28098,15 +28098,11 @@ fn linux_descriptor_close_live_return(
 }
 
 fn linux_console_dup(descriptor: u64) -> u64 {
-    if linux_device_descriptor(descriptor) != 0 {
-        linux_device_dup_at_least(descriptor, LINUX_AUX_DESCRIPTOR_FIRST, false)
-    } else {
-        linux_console_dup_at_least(descriptor, 0, false)
-    }
+    linux_console_dup_at_least(descriptor, 0, false)
 }
 
 fn linux_console_dup_at_least(descriptor: u64, minimum: u64, close_on_exec: bool) -> u64 {
-    if linux_console_descriptor(descriptor) == 0 {
+    if !linux_descriptor_open(descriptor) {
         return LINUX_EBADF;
     }
     let limit = linux_nofile_soft_limit();
@@ -28290,8 +28286,7 @@ fn linux_device_dup_at_least(source: u64, minimum: u64, close_on_exec: bool) -> 
             LINUX_EINVAL
         };
     }
-    let Some(target) = (minimum.max(LINUX_AUX_DESCRIPTOR_FIRST)..limit)
-        .find(|descriptor| !linux_descriptor_open(*descriptor))
+    let Some(target) = (minimum..limit).find(|descriptor| !linux_descriptor_open(*descriptor))
     else {
         return LINUX_EMFILE;
     };

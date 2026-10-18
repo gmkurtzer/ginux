@@ -55,6 +55,7 @@ const LINUX_IOCTL_SYSCALL: u64 = 16;
 const LINUX_SELECT_SYSCALL: u64 = 23;
 const LINUX_SCHED_YIELD_SYSCALL: u64 = 24;
 const LINUX_DUP_SYSCALL: u64 = 32;
+const LINUX_DUP2_SYSCALL: u64 = 33;
 const LINUX_GETPID_SYSCALL: u64 = 39;
 const LINUX_EXIT_SYSCALL: u64 = 60;
 const LINUX_UNAME_SYSCALL: u64 = 63;
@@ -2388,6 +2389,12 @@ fn linux_pipe_fionread_contract(console: u64) -> bool {
     let dup3_flags = linux_syscall(LINUX_FCNTL_SYSCALL, dup3, LINUX_F_GETFD, 0);
     let dup3_equal = linux_syscall(LINUX_DUP3_SYSCALL, reader, reader, 0);
     let dup3_bad_flags = linux_syscall(LINUX_DUP3_SYSCALL, reader, 101, 1);
+    let dup2 = linux_syscall(LINUX_DUP2_SYSCALL, reader, 100, 0);
+    let dup2_flags = linux_syscall(LINUX_FCNTL_SYSCALL, dup2, LINUX_F_GETFD, 0);
+    let dup2_equal = linux_syscall(LINUX_DUP2_SYSCALL, reader, reader, 0);
+    let dup2_bad_source = linux_syscall(LINUX_DUP2_SYSCALL, 999, 101, 0);
+    let dup2_bad_target = linux_syscall(LINUX_DUP2_SYSCALL, reader, 1024, 0);
+    let dup2_bad_target_state = linux_syscall(LINUX_FCNTL_SYSCALL, 101, LINUX_F_GETFD, 0);
     let mut initial_poll = [
         LinuxPollFd {
             descriptor: duplicate as i32,
@@ -2609,6 +2616,12 @@ fn linux_pipe_fionread_contract(console: u64) -> bool {
         && dup3_flags == LINUX_FD_CLOEXEC
         && dup3_equal == LINUX_EINVAL
         && dup3_bad_flags == LINUX_EINVAL
+        && dup2 == 100
+        && dup2_flags == 0
+        && dup2_equal == reader
+        && dup2_bad_source == LINUX_EBADF
+        && dup2_bad_target == LINUX_EBADF
+        && dup2_bad_target_state == LINUX_EBADF
         && initial_ready == 2
         && initial_poll[0].returned == 0
         && initial_poll[1].returned == LINUX_POLLOUT
