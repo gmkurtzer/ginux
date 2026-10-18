@@ -563,6 +563,7 @@ const LINUX_DEPENDENCY_MAPPING_COUNT: usize = 8;
 const LINUX_DEPENDENCY_COUNT: usize = 2;
 const LINUX_DEPENDENCY_STATE_COUNT: usize = LINUX_DEPENDENCY_COUNT * LINUX_DEPENDENCY_MAPPING_COUNT;
 const LINUX_MADV_DONTNEED: u64 = 4;
+const LINUX_MADV_FREE: u64 = 8;
 const LINUX_MADV_NORMAL: u64 = 0;
 const LINUX_MADV_RANDOM: u64 = 1;
 const LINUX_MADV_SEQUENTIAL: u64 = 2;
@@ -15703,6 +15704,21 @@ fn verify_linux_process_madvise_syscall() -> bool {
             PAGE_SIZE as u64,
             LINUX_MADV_POPULATE_READ,
         ) == LINUX_ENOMEM;
+    let freed = populated
+        && copy_to_linux_user(first, &[0xa5])
+        && linux_madvise(first, PAGE_SIZE as u64, LINUX_MADV_FREE) == 0
+        && address_space::current_linux_runtime_page(first)
+            .frame
+            .is_none()
+        && {
+            let mut byte = [1_u8];
+            copy_from_linux_user(first, &mut byte) && byte == [0]
+        }
+        && linux_madvise(
+            ELF_PROBE_CODE_BASE.load(Ordering::SeqCst),
+            PAGE_SIZE as u64,
+            LINUX_MADV_FREE,
+        ) == LINUX_EINVAL;
     let errors = descriptor < LINUX_AUX_DESCRIPTOR_LIMIT
         && linux_pidfd_open(0, 0) == LINUX_EINVAL
         && linux_process_madvise(descriptor, mapping, 2, LINUX_MADV_DONTNEED, 1) == LINUX_EINVAL
@@ -15712,7 +15728,7 @@ fn verify_linux_process_madvise_syscall() -> bool {
         && linux_process_mrelease(LINUX_DESCRIPTOR_TABLE_LIMIT, 0) == LINUX_EBADF;
     let closed = descriptor < LINUX_AUX_DESCRIPTOR_LIMIT && linux_descriptor_close(descriptor) == 0;
     let unmapped = linux_runtime_munmap(mapping, (3 * PAGE_SIZE) as u64) == 0;
-    populated && errors && closed && unmapped
+    freed && errors && closed && unmapped
 }
 
 fn verify_linux_timer_argument_widths() -> bool {
@@ -17148,13 +17164,17 @@ fn linux_runtime_madvise(address: u64, length: u64, advice: u64) -> u64 {
             LINUX_ENOMEM
         };
     }
-    if advice != LINUX_MADV_DONTNEED {
+    if !matches!(advice, LINUX_MADV_DONTNEED | LINUX_MADV_FREE) {
         return LINUX_EINVAL;
     }
+    let free = advice == LINUX_MADV_FREE;
     for page in 0..pages {
         let page_address = address + (page * PAGE_SIZE) as u64;
         let state = address_space::current_linux_runtime_page(page_address);
-        if !state.occupied || state.file || state.protection == 0 {
+        if !state.occupied
+            || free && (state.file || state.shared || state.secret)
+            || !free && (state.file || state.protection == 0)
+        {
             return LINUX_EINVAL;
         }
         if state.sealed && state.protection & LINUX_PROT_WRITE as u8 == 0 {

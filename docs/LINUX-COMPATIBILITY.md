@@ -117,6 +117,11 @@ unmapped ranges or allocation failure with `ENOMEM`, and may leave an earlier
 part of the range populated when a later page fails, matching Linux's partial
 progress contract. Boot verification proves physical backing is installed,
 write population rejects a read-only mapping, and unmapped ranges fail.
+`MADV_FREE` accepts private anonymous mappings and immediately reclaims their
+backing in the current swapless memory model; a later access receives a fresh
+zero-filled page. File-backed, shared, and secret mappings are rejected with
+`EINVAL`. Boot verification writes, frees, confirms physical reclamation, and
+then confirms zero-fill-on-demand.
 Snapshot completion imports the inheritance bit from every leaf PTE, including
 stack, heap, executable-image, and dynamically allocated mappings.
 Descriptor-control verification also covers Linux 32-bit descriptor and
