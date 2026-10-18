@@ -14127,6 +14127,7 @@ fn verify_linux_readahead_syscall() -> bool {
 }
 
 fn verify_linux_memory_locking_syscalls() -> bool {
+    const UPPER_REGISTER_BITS: u64 = 1_u64 << 32;
     let mapping = linux_runtime_mmap(
         0,
         PAGE_SIZE as u64 * 2,
@@ -14154,7 +14155,20 @@ fn verify_linux_memory_locking_syscalls() -> bool {
         && linux_mlockall(0) == LINUX_EINVAL
         && linux_mlockall(4) == LINUX_EINVAL
         && linux_mlockall(8) == LINUX_EINVAL
-        && linux_mlockall((1_u64 << 32) | 1) == 0;
+        && linux_mlockall(UPPER_REGISTER_BITS | 1) == 0
+        && linux_msync(mapping, PAGE_SIZE as u64, UPPER_REGISTER_BITS | 4) == 0
+        && linux_pkey_mprotect(
+            mapping,
+            PAGE_SIZE as u64,
+            LINUX_PROT_READ | LINUX_PROT_WRITE,
+            UPPER_REGISTER_BITS,
+        ) == 0
+        && linux_pkey_mprotect(
+            mapping,
+            PAGE_SIZE as u64,
+            LINUX_PROT_READ | LINUX_PROT_WRITE,
+            UPPER_REGISTER_BITS | u64::from(u32::MAX),
+        ) == 0;
     let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64 * 2) == 0;
     all && unmapped
 }
@@ -15584,8 +15598,13 @@ fn verify_linux_process_madvise_syscall() -> bool {
     let advised = hints
         && descriptor < LINUX_AUX_DESCRIPTOR_LIMIT
         && copy_to_linux_user(mapping, &vectors)
-        && linux_process_madvise(descriptor, mapping, 2, LINUX_MADV_DONTNEED, 0)
-            == (2 * PAGE_SIZE) as u64;
+        && linux_process_madvise(
+            (1_u64 << 32) | descriptor,
+            mapping,
+            2,
+            LINUX_MADV_DONTNEED,
+            0,
+        ) == (2 * PAGE_SIZE) as u64;
     let cleared = advised && {
         let mut bytes = [1_u8; 2];
         copy_from_linux_user(first, &mut bytes[..1])
@@ -15596,7 +15615,7 @@ fn verify_linux_process_madvise_syscall() -> bool {
         && linux_pidfd_open(0, 0) == LINUX_EINVAL
         && linux_process_madvise(descriptor, mapping, 2, LINUX_MADV_DONTNEED, 1) == LINUX_EINVAL
         && linux_process_madvise(descriptor, mapping, 1025, LINUX_MADV_DONTNEED, 0) == LINUX_EINVAL
-        && linux_process_mrelease(descriptor, 0) == LINUX_EINVAL
+        && linux_process_mrelease((1_u64 << 32) | descriptor, 0) == LINUX_EINVAL
         && linux_process_mrelease(descriptor, 1) == LINUX_EINVAL
         && linux_process_mrelease(LINUX_DESCRIPTOR_TABLE_LIMIT, 0) == LINUX_EBADF;
     let closed = descriptor < LINUX_AUX_DESCRIPTOR_LIMIT && linux_descriptor_close(descriptor) == 0;
@@ -16506,6 +16525,7 @@ fn linux_msync(address: u64, length: u64, flags: u64) -> u64 {
     const MS_ASYNC: u64 = 1;
     const MS_INVALIDATE: u64 = 2;
     const MS_SYNC: u64 = 4;
+    let flags = u64::from(flags as u32);
     if flags & !(MS_ASYNC | MS_INVALIDATE | MS_SYNC) != 0
         || flags & (MS_ASYNC | MS_SYNC) == (MS_ASYNC | MS_SYNC)
     {
@@ -17098,7 +17118,8 @@ fn linux_mseal(address: u64, length: u64, flags: u64) -> u64 {
 }
 
 fn linux_pkey_mprotect(address: u64, length: u64, protection: u64, key: u64) -> u64 {
-    if key != 0 && key != u64::MAX {
+    let key = key as i32;
+    if key != 0 && key != -1 {
         return LINUX_EINVAL;
     }
     linux_mprotect(address, length, protection)
@@ -17111,7 +17132,8 @@ fn linux_pkey_alloc(flags: u64, access_rights: u64) -> u64 {
     LINUX_ENOSPC
 }
 
-const fn linux_pkey_free(_key: u64) -> u64 {
+const fn linux_pkey_free(key: u64) -> u64 {
+    let _key = key as i32;
     LINUX_EINVAL
 }
 
@@ -17825,6 +17847,7 @@ fn linux_process_madvise(
     flags: u64,
 ) -> u64 {
     const IOV_MAX: u64 = 1024;
+    let pid_descriptor = u64::from(pid_descriptor as u32);
     let advice = u64::from(advice as u32);
     if flags != 0
         || vector_count > IOV_MAX
@@ -17880,6 +17903,7 @@ fn linux_process_madvise(
 }
 
 fn linux_process_mrelease(pid_descriptor: u64, flags: u64) -> u64 {
+    let pid_descriptor = u64::from(pid_descriptor as u32);
     let flags = u64::from(flags as u32);
     if flags != 0 {
         return LINUX_EINVAL;

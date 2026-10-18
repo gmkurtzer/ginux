@@ -97,6 +97,11 @@ register bits, including epoll registration and descriptor cleanup.
 do the same for the epoll descriptor and `maxevents`. Verification covers a
 zero-timeout select and an immediately readable epoll target with dirty upper
 register bits.
+Memory-management boundary tests cover 32-bit `msync` flags and signed
+protection-key IDs, including Linux key `-1`, plus 32-bit pidfd descriptors for
+`process_madvise` and `process_mrelease`. The remaining `MADV_DONTFORK` and
+`MADV_DOFORK` gap requires VMA inheritance metadata and is not treated as a
+no-op.
 
 The ring-3 controller directly verifies its Linux PID/TID, parent,
 process-group, session, UID/GID, supplementary-group, scheduler-yield, and
