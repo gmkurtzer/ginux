@@ -2,6 +2,11 @@
 
 This roadmap converts the current architecture into user-verifiable stopping points. Each checkpoint is implemented, tested, committed with sign-off, and then stopped for review. Work on the following checkpoint does not begin until the current checkpoint is accepted.
 
+The active post-syscall-dispatch compatibility work is divided into the
+mandatory review-gated stages in [Next Goal: Linux Compatibility to Operational
+Rocky](NEXT-GOAL.md). Those stages refine the work needed to close C3 and reach
+C4; they do not bypass either checkpoint's acceptance gate.
+
 ## C0: Architecture alignment
 
 Deliverables:

@@ -30364,8 +30364,71 @@ fn linux_copy_descriptor_open_file(source: u64, target: u64) -> bool {
     true
 }
 
-fn linux_descriptor_offset(descriptor: u64) -> &'static BankedAtomicU64 {
-    linux_legacy_descriptor_offset(descriptor)
+#[derive(Clone, Copy)]
+struct LinuxDescriptorOffset {
+    descriptor: u64,
+}
+
+impl LinuxDescriptorOffset {
+    fn load(self, ordering: Ordering) -> u64 {
+        let Some(id) = linux_descriptor_open_file_id(self.descriptor) else {
+            return linux_legacy_descriptor_offset(self.descriptor).load(ordering);
+        };
+        for descriptor in 0..LINUX_DESCRIPTOR_TABLE_LIMIT {
+            if linux_descriptor_open_file_id_cell(descriptor)
+                .is_some_and(|cell| cell.load(Ordering::SeqCst) == id)
+            {
+                return linux_legacy_descriptor_offset(descriptor).load(ordering);
+            }
+        }
+        linux_legacy_descriptor_offset(self.descriptor).load(ordering)
+    }
+
+    fn store(self, value: u64, ordering: Ordering) {
+        let Some(id) = linux_descriptor_open_file_id(self.descriptor) else {
+            linux_legacy_descriptor_offset(self.descriptor).store(value, ordering);
+            return;
+        };
+        for descriptor in 0..LINUX_DESCRIPTOR_TABLE_LIMIT {
+            if linux_descriptor_open_file_id_cell(descriptor)
+                .is_some_and(|cell| cell.load(Ordering::SeqCst) == id)
+            {
+                linux_legacy_descriptor_offset(descriptor).store(value, ordering);
+            }
+        }
+        sync_saved_linux_open_file_offset(id, value);
+    }
+}
+
+fn sync_saved_linux_open_file_offset(id: u64, value: u64) {
+    let instance = current_container_slot().unwrap_or(control_abi::DOMAIN_LIMIT);
+    if instance >= LINUX_PROCESS_RUNTIME_INSTANCE_LIMIT {
+        return;
+    }
+    for process in 0..linux_process::PROCESS_LIMIT {
+        let state = unsafe {
+            &mut *core::ptr::addr_of_mut!(LINUX_PROCESS_RUNTIME_STATES)
+                .cast::<LinuxProcessRuntimeState>()
+                .add(instance * linux_process::PROCESS_LIMIT + process)
+        };
+        if !state.valid {
+            continue;
+        }
+        for descriptor in 0..state.descriptors.stdio_open_file_ids.len() {
+            if state.descriptors.stdio_open_file_ids[descriptor] == id {
+                state.descriptors.stdio_offsets[descriptor] = value;
+            }
+        }
+        for descriptor in 0..state.descriptors.open_file_ids.len() {
+            if state.descriptors.open_file_ids[descriptor] == id {
+                state.descriptors.offsets[descriptor] = value;
+            }
+        }
+    }
+}
+
+fn linux_descriptor_offset(descriptor: u64) -> LinuxDescriptorOffset {
+    LinuxDescriptorOffset { descriptor }
 }
 
 fn linux_descriptor_close_on_exec(descriptor: u64) -> bool {
@@ -31930,6 +31993,7 @@ fn verify_linux_running_child_wait_selectors(pid: u32) -> bool {
         serial_write("ginux: Linux nonblocking pidfd wait validated\r\n");
         serial_write("ginux: Linux cross-process memory transfer validated\r\n");
         serial_write("ginux: Linux cross-process resource comparison validated\r\n");
+        serial_write("ginux: Linux shared open-file position validated\r\n");
         serial_write("ginux: Linux cross-process pidfd descriptor duplication validated\r\n");
     }
     valid
@@ -31976,7 +32040,25 @@ fn verify_linux_cross_process_kcmp(parent: u32, child: u32) -> bool {
     } else {
         false
     };
-    distinct && same && bounded && permission
+    distinct && same && bounded && permission && verify_linux_shared_open_file_offset(parent, child)
+}
+
+fn verify_linux_shared_open_file_offset(parent: u32, child: u32) -> bool {
+    let descriptor = 1_u64;
+    let Some(id) = linux_process_descriptor_open_file_id(parent, descriptor) else {
+        return false;
+    };
+    if linux_process_descriptor_open_file_id(child, descriptor) != Some(id) {
+        return false;
+    }
+    let original = linux_descriptor_offset(descriptor).load(Ordering::SeqCst);
+    let marker = original.wrapping_add(0x0047_494e_5558);
+    linux_descriptor_offset(descriptor).store(marker, Ordering::SeqCst);
+    let child_updated = linux_process_runtime_state(child)
+        .filter(|state| state.valid)
+        .is_some_and(|state| state.descriptors.stdio_offsets[descriptor as usize] == marker);
+    linux_descriptor_offset(descriptor).store(original, Ordering::SeqCst);
+    child_updated
 }
 
 fn verify_linux_cross_process_vm(pid: u32) -> bool {

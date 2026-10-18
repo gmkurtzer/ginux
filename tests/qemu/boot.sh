@@ -3326,6 +3326,10 @@ if ! grep -q '^ginux: Linux cross-process resource comparison validated' "$outpu
     echo "Boot test failed: Linux cross-process resource comparison was not validated." >&2
     exit 1
 fi
+if ! grep -q '^ginux: Linux shared open-file position validated' "$output_file"; then
+    echo "Boot test failed: Linux shared open-file position was not validated." >&2
+    exit 1
+fi
 if ! grep -q '^ginux: Linux cross-process pidfd descriptor duplication validated' "$output_file"; then
     echo "Boot test failed: Linux cross-process pidfd descriptor duplication was not validated." >&2
     exit 1
