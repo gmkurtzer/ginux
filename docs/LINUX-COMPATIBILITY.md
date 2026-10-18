@@ -79,6 +79,12 @@ Linux's 32-bit UAPI conversion rules even when the unused upper register bits
 are nonzero. Signal/thread notification, realtime clocks, multiple timer
 objects, and overrun accumulation remain pending.
 
+Filesystem syscall boundaries convert Linux `int`, `unsigned int`, `mode_t`,
+`uid_t`, and `gid_t` arguments from the low 32 register bits before validating
+them. Boot verification covers dirty upper register bits for `openat`,
+`newfstatat`, `faccessat`, and `statx`; the same conversion is applied across
+the implemented `*at`, ownership, permission, truncate, and allocation paths.
+
 The ring-3 controller directly verifies its Linux PID/TID, parent,
 process-group, session, UID/GID, supplementary-group, scheduler-yield, and
 `uname` contracts, including invalid PID, count, and userspace-address errors.

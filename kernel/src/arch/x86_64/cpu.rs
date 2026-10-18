@@ -13572,6 +13572,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let signal_argument_widths = verify_linux_signal_argument_widths();
     let descriptor_argument_widths = verify_linux_descriptor_argument_widths();
     let process_selector_widths = verify_linux_process_selector_widths();
+    let filesystem_argument_widths = verify_linux_filesystem_argument_widths();
     let process_advice = verify_linux_process_madvise_syscall();
     let posix_queues = verify_linux_posix_message_queue_syscalls();
     let unix_inflight_rights = verify_linux_unix_inflight_rights();
@@ -13619,6 +13620,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         signal_argument_widths,
         descriptor_argument_widths,
         process_selector_widths,
+        filesystem_argument_widths,
         process_advice,
         posix_queues,
         unix_inflight_rights,
@@ -13669,6 +13671,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && signal_argument_widths
         && descriptor_argument_widths
         && process_selector_widths
+        && filesystem_argument_widths
         && process_advice
         && posix_queues
         && unix_inflight_rights
@@ -15718,6 +15721,45 @@ fn verify_linux_process_selector_widths() -> bool {
             0,
         ) == 0
         && linux_move_pages(UPPER_REGISTER_BITS | pid, 0, 0, 0, 0, UPPER_REGISTER_BITS) == 0
+}
+
+fn verify_linux_filesystem_argument_widths() -> bool {
+    const UPPER_REGISTER_BITS: u64 = 1_u64 << 32;
+    let mapping = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    if mapping >= LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39)
+        || !copy_to_linux_user(mapping, b"/dev/null\0")
+    {
+        return false;
+    }
+    let directory = UPPER_REGISTER_BITS | u64::from(LINUX_AT_FDCWD);
+    let descriptor = linux_openat(
+        directory,
+        mapping,
+        UPPER_REGISTER_BITS | LINUX_O_CLOEXEC,
+        UPPER_REGISTER_BITS,
+    );
+    let valid = descriptor < LINUX_DESCRIPTOR_TABLE_LIMIT
+        && linux_descriptor_close_on_exec(descriptor)
+        && linux_newfstatat(directory, mapping, mapping + 256, UPPER_REGISTER_BITS) == 0
+        && linux_faccessat(directory, mapping, UPPER_REGISTER_BITS, UPPER_REGISTER_BITS) == 0
+        && linux_statx(
+            directory,
+            mapping,
+            UPPER_REGISTER_BITS,
+            UPPER_REGISTER_BITS,
+            mapping + 512,
+        ) == 0;
+    let closed =
+        descriptor < LINUX_DESCRIPTOR_TABLE_LIMIT && linux_descriptor_close(descriptor) == 0;
+    let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
+    valid && closed && unmapped
 }
 
 fn verify_linux_sysv_semaphore_syscalls() -> bool {
@@ -19912,6 +19954,9 @@ fn linux_overlay_stat(metadata: crate::linux_overlay::Metadata) -> [u8; LINUX_ST
 }
 
 fn linux_openat(directory: u64, path_address: u64, flags: u64, mode: u64) -> u64 {
+    let directory = u64::from(directory as u32);
+    let flags = u64::from(flags as u32);
+    let mode = u64::from(mode as u32);
     let mut path = [0_u8; 256];
     let path_length = match copy_linux_c_string(path_address, &mut path) {
         Ok(length) => length,
@@ -20138,6 +20183,7 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64, mode: u64) -> u64
 }
 
 fn linux_openat2(directory: u64, path_address: u64, how_address: u64, size: u64) -> u64 {
+    let directory = u64::from(directory as u32);
     const OPEN_HOW_SIZE_VER0: usize = 24;
     let Ok(size) = usize::try_from(size) else {
         return LINUX_E2BIG;
@@ -20347,6 +20393,8 @@ fn linux_name_to_handle_at(
 }
 
 fn linux_open_by_handle_at(mount_descriptor: u64, handle_address: u64, flags: u64) -> u64 {
+    let mount_descriptor = u64::from(mount_descriptor as u32);
+    let flags = u64::from(flags as u32);
     const HANDLE_TYPE: i32 = 0x474e;
     let access = flags & 3;
     let valid = 3
@@ -20469,6 +20517,8 @@ fn linux_open_by_handle_at(mount_descriptor: u64, handle_address: u64, flags: u6
 }
 
 fn linux_newfstatat(directory: u64, path_address: u64, stat_address: u64, flags: u64) -> u64 {
+    let directory = u64::from(directory as u32);
+    let flags = u64::from(flags as u32);
     if flags & !LINUX_AT_SYMLINK_NOFOLLOW != 0 {
         return LINUX_EINVAL;
     }
@@ -20548,6 +20598,8 @@ fn linux_newfstatat(directory: u64, path_address: u64, stat_address: u64, flags:
 }
 
 fn linux_mkdirat(directory: u64, path_address: u64, mode: u64) -> u64 {
+    let directory = u64::from(directory as u32);
+    let mode = u64::from(mode as u32);
     let mut path = [0_u8; crate::linux_overlay::PATH_CAPACITY];
     let path_length = match copy_linux_c_string(path_address, &mut path) {
         Ok(length) => length,
@@ -20575,7 +20627,10 @@ fn linux_mkdirat(directory: u64, path_address: u64, mode: u64) -> u64 {
     .map_or(LINUX_ENOSPC, |_| 0)
 }
 
-fn linux_mknodat(directory: u64, path_address: u64, mode: u64, _device: u64) -> u64 {
+fn linux_mknodat(directory: u64, path_address: u64, mode: u64, device: u64) -> u64 {
+    let directory = u64::from(directory as u32);
+    let mode = u64::from(mode as u32);
+    let _device = u64::from(device as u32);
     const S_IFMT: u64 = 0o170000;
     const S_IFIFO: u64 = 0o010000;
     const S_IFCHR: u64 = 0o020000;
@@ -20619,6 +20674,7 @@ fn linux_mknodat(directory: u64, path_address: u64, mode: u64, _device: u64) -> 
 }
 
 fn linux_symlinkat(target_address: u64, directory: u64, path_address: u64) -> u64 {
+    let directory = u64::from(directory as u32);
     let mut target = [0_u8; crate::linux_overlay::PATH_CAPACITY];
     let target_length = match copy_linux_c_string(target_address, &mut target) {
         Ok(0) => return LINUX_ENOENT,
@@ -20655,6 +20711,9 @@ fn linux_linkat(
     new_path_address: u64,
     flags: u64,
 ) -> u64 {
+    let old_directory = u64::from(old_directory as u32);
+    let new_directory = u64::from(new_directory as u32);
+    let flags = u64::from(flags as u32);
     if flags != 0 {
         return LINUX_EINVAL;
     }
@@ -20757,6 +20816,8 @@ fn linux_linkat(
 }
 
 fn linux_unlinkat(directory: u64, path_address: u64, flags: u64) -> u64 {
+    let directory = u64::from(directory as u32);
+    let flags = u64::from(flags as u32);
     if flags & !LINUX_AT_REMOVEDIR != 0 {
         return LINUX_EINVAL;
     }
@@ -20831,6 +20892,7 @@ fn linux_unlinkat(directory: u64, path_address: u64, flags: u64) -> u64 {
 }
 
 fn linux_ftruncate(descriptor: u64, length: u64) -> u64 {
+    let descriptor = u64::from(descriptor as u32);
     let state = linux_device_descriptor(descriptor);
     if state & 3 != LINUX_DESCRIPTOR_OUTPUT && state & 3 != 3 {
         return LINUX_EBADF;
@@ -20865,6 +20927,8 @@ fn linux_ftruncate(descriptor: u64, length: u64) -> u64 {
 }
 
 fn linux_fallocate(descriptor: u64, mode: u64, offset: u64, length: u64) -> u64 {
+    let descriptor = u64::from(descriptor as u32);
+    let mode = u64::from(mode as u32);
     let state = linux_device_descriptor(descriptor);
     if state & 3 != LINUX_DESCRIPTOR_OUTPUT && state & 3 != 3 {
         return LINUX_EBADF;
@@ -20909,6 +20973,8 @@ fn linux_fallocate(descriptor: u64, mode: u64, offset: u64, length: u64) -> u64 
 }
 
 fn linux_fchmod(descriptor: u64, mode: u64) -> u64 {
+    let descriptor = u64::from(descriptor as u32);
+    let mode = u64::from(mode as u32);
     let handle = match linux_copy_up_descriptor(descriptor) {
         Ok(handle) => handle,
         Err(error) => return error,
@@ -20928,6 +20994,9 @@ fn linux_fchmod(descriptor: u64, mode: u64) -> u64 {
 }
 
 fn linux_fchmodat(directory: u64, path_address: u64, mode: u64, flags: u64) -> u64 {
+    let directory = u64::from(directory as u32);
+    let mode = u64::from(mode as u32);
+    let flags = u64::from(flags as u32);
     if flags != 0 {
         return LINUX_EINVAL;
     }
@@ -20955,11 +21024,18 @@ fn linux_fchmodat(directory: u64, path_address: u64, mode: u64, flags: u64) -> u
     }
 }
 
-fn linux_fchown(descriptor: u64, _uid: u64, _gid: u64) -> u64 {
+fn linux_fchown(descriptor: u64, uid: u64, gid: u64) -> u64 {
+    let descriptor = u64::from(descriptor as u32);
+    let _uid = uid as u32;
+    let _gid = gid as u32;
     linux_copy_up_descriptor(descriptor).map_or_else(|error| error, |_| 0)
 }
 
-fn linux_fchownat(directory: u64, path_address: u64, _uid: u64, _gid: u64, flags: u64) -> u64 {
+fn linux_fchownat(directory: u64, path_address: u64, uid: u64, gid: u64, flags: u64) -> u64 {
+    let directory = u64::from(directory as u32);
+    let uid = u64::from(uid as u32);
+    let gid = u64::from(gid as u32);
+    let flags = u64::from(flags as u32);
     if flags & !(LINUX_AT_SYMLINK_NOFOLLOW | LINUX_AT_EMPTY_PATH) != 0 {
         return LINUX_EINVAL;
     }
@@ -20969,7 +21045,7 @@ fn linux_fchownat(directory: u64, path_address: u64, _uid: u64, _gid: u64, flags
         Err(error) => return error,
     };
     if path_length == 0 && flags & LINUX_AT_EMPTY_PATH != 0 {
-        return linux_fchown(directory, _uid, _gid);
+        return linux_fchown(directory, uid, gid);
     }
     let mut canonical = [0_u8; crate::linux_overlay::PATH_CAPACITY];
     let length = match linux_canonical_path_at(directory, &path[..path_length], &mut canonical) {
@@ -21380,6 +21456,8 @@ fn linux_set_times(handle: crate::linux_overlay::Handle, times: [(i64, i64); 2])
 }
 
 fn linux_utimensat(directory: u64, path_address: u64, times_address: u64, flags: u64) -> u64 {
+    let directory = u64::from(directory as u32);
+    let flags = u64::from(flags as u32);
     let handle = match linux_timestamp_handle(directory, path_address, flags) {
         Ok(handle) => handle,
         Err(error) => return error,
@@ -21491,6 +21569,9 @@ fn linux_renameat(
     new_path_address: u64,
     flags: u64,
 ) -> u64 {
+    let old_directory = u64::from(old_directory as u32);
+    let new_directory = u64::from(new_directory as u32);
+    let flags = u64::from(flags as u32);
     const RENAME_NOREPLACE: u64 = 1;
     if flags & !RENAME_NOREPLACE != 0 {
         return LINUX_EINVAL;
@@ -21545,6 +21626,9 @@ fn linux_renameat(
 }
 
 fn linux_faccessat(directory: u64, path_address: u64, mode: u64, flags: u64) -> u64 {
+    let directory = u64::from(directory as u32);
+    let mode = u64::from(mode as u32);
+    let flags = u64::from(flags as u32);
     if flags != 0 || mode & !7 != 0 {
         return LINUX_EINVAL;
     }
@@ -21621,6 +21705,9 @@ fn linux_faccessat(directory: u64, path_address: u64, mode: u64, flags: u64) -> 
 }
 
 fn linux_statx(directory: u64, path_address: u64, flags: u64, mask: u64, stat_address: u64) -> u64 {
+    let directory = u64::from(directory as u32);
+    let flags = u64::from(flags as u32);
+    let mask = u64::from(mask as u32);
     if flags
         & !(LINUX_AT_SYMLINK_NOFOLLOW
             | LINUX_AT_NO_AUTOMOUNT
