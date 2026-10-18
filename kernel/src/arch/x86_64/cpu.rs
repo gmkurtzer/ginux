@@ -15856,13 +15856,32 @@ fn verify_linux_process_madvise_syscall() -> bool {
             .frame
             .is_some()
         && linux_runtime_munmap(compatibility_mapping, PAGE_SIZE as u64) == 0;
+    let sealed_mapping = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    let sealing = compatibility_flags
+        && sealed_mapping < LINUX_RETURN_TO_KERNEL
+        && linux_mseal(sealed_mapping, PAGE_SIZE as u64, 0) == 0
+        && address_space::current_linux_runtime_page(sealed_mapping).sealed
+        && linux_mprotect(sealed_mapping, PAGE_SIZE as u64, LINUX_PROT_READ) == LINUX_EPERM
+        && linux_madvise(sealed_mapping, PAGE_SIZE as u64, LINUX_MADV_DONTNEED) == LINUX_EPERM
+        && linux_madvise(sealed_mapping, PAGE_SIZE as u64, LINUX_MADV_FREE) == LINUX_EPERM
+        && linux_madvise(sealed_mapping, PAGE_SIZE as u64, LINUX_MADV_DONTNEED_LOCKED)
+            == LINUX_EPERM
+        && linux_munmap(sealed_mapping, PAGE_SIZE as u64) == LINUX_EPERM
+        && linux_mseal(sealed_mapping, PAGE_SIZE as u64, 1) == LINUX_EINVAL;
     if !discarded_locked {
         serial_write("ginux: Linux DONTNEED_LOCKED verification failed\r\n");
     }
-    if !errors || !closed || !unmapped || !population_unmapped || !compatibility_flags {
+    if !errors || !closed || !unmapped || !population_unmapped || !sealing {
         serial_write("ginux: Linux process advice cleanup verification failed\r\n");
     }
-    discarded_locked && errors && closed && unmapped && population_unmapped && compatibility_flags
+    discarded_locked && errors && closed && unmapped && population_unmapped && sealing
 }
 
 fn verify_linux_timer_argument_widths() -> bool {
@@ -17359,7 +17378,7 @@ fn linux_runtime_madvise(address: u64, length: u64, advice: u64) -> u64 {
         {
             return LINUX_EINVAL;
         }
-        if state.sealed && state.protection & LINUX_PROT_WRITE as u8 == 0 {
+        if state.sealed {
             return LINUX_EPERM;
         }
         if state.frame.is_some() {
@@ -18390,10 +18409,7 @@ fn linux_madvise(address: u64, length: u64, advice: u64) -> u64 {
     if matches!(advice, LINUX_MADV_DONTNEED | LINUX_MADV_DONTNEED_LOCKED)
         && (0..range_pages).any(|offset| {
             let slot = start_slot + offset;
-            let read_only = areas[offset].is_some_and(|area| {
-                ELF_PROBE_MMAP_PROTECTION[area].load(Ordering::SeqCst) & LINUX_PROT_WRITE as u8 == 0
-            });
-            read_only && ELF_PROBE_MMAP_SEALED[slot].load(Ordering::SeqCst)
+            areas[offset].is_some() && ELF_PROBE_MMAP_SEALED[slot].load(Ordering::SeqCst)
         })
     {
         return LINUX_EPERM;
