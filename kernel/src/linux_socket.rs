@@ -23,6 +23,7 @@ use crate::{
 };
 
 const SLOT_COUNT: usize = 12;
+pub(crate) const PASSED_RIGHT_LIMIT: usize = SLOT_COUNT;
 const TCP_BUFFER_SIZE: usize = 64 * 1024;
 const UDP_BUFFER_SIZE: usize = 16 * 1024;
 const UDP_PACKET_COUNT: usize = 16;
@@ -111,7 +112,9 @@ struct Slot {
     receive_errors: bool,
     no_delay: bool,
     pass_credentials: bool,
-    pending_right: Option<(u8, u32)>,
+    pending_right_count: u8,
+    pending_right_slots: [u8; SLOT_COUNT],
+    pending_right_flags: [u32; SLOT_COUNT],
     pending_credentials: Option<(u32, u32, u32)>,
     local_first: memory::FrameLease,
     local_last: memory::FrameLease,
@@ -140,7 +143,9 @@ impl Slot {
         receive_errors: false,
         no_delay: false,
         pass_credentials: false,
-        pending_right: None,
+        pending_right_count: 0,
+        pending_right_slots: [0; SLOT_COUNT],
+        pending_right_flags: [0; SLOT_COUNT],
         pending_credentials: None,
         local_first: memory::FrameLease::EMPTY,
         local_last: memory::FrameLease::EMPTY,
@@ -323,7 +328,9 @@ pub(crate) fn open(kind: Kind) -> Result<u8, Error> {
             receive_errors: false,
             no_delay: false,
             pass_credentials: false,
-            pending_right: None,
+            pending_right_count: 0,
+            pending_right_slots: [0; SLOT_COUNT],
+            pending_right_flags: [0; SLOT_COUNT],
             pending_credentials: None,
             local_first: memory::FrameLease::EMPTY,
             local_last: memory::FrameLease::EMPTY,
@@ -365,7 +372,9 @@ pub(crate) fn open_pair() -> Result<(u8, u8), Error> {
             receive_errors: false,
             no_delay: false,
             pass_credentials: false,
-            pending_right: None,
+            pending_right_count: 0,
+            pending_right_slots: [0; SLOT_COUNT],
+            pending_right_flags: [0; SLOT_COUNT],
             pending_credentials: None,
             local_first: memory::FrameLease::EMPTY,
             local_last: memory::FrameLease::EMPTY,
@@ -392,7 +401,9 @@ pub(crate) fn open_pair() -> Result<(u8, u8), Error> {
             receive_errors: false,
             no_delay: false,
             pass_credentials: false,
-            pending_right: None,
+            pending_right_count: 0,
+            pending_right_slots: [0; SLOT_COUNT],
+            pending_right_flags: [0; SLOT_COUNT],
             pending_credentials: None,
             local_first: memory::FrameLease::EMPTY,
             local_last: memory::FrameLease::EMPTY,
@@ -424,9 +435,10 @@ pub(crate) fn close(slot: u8) -> bool {
                 runtime.sockets.remove(handle);
             }
         }
-        let pending_right = state.pending_right.take();
+        let pending_right_count = usize::from(state.pending_right_count);
+        let pending_rights = state.pending_right_slots;
         *state = Slot::EMPTY;
-        if let Some((right, _)) = pending_right {
+        for right in pending_rights.into_iter().take(pending_right_count) {
             let _ = close(right);
         }
         return true;
@@ -685,7 +697,9 @@ pub(crate) fn accept(slot: u8) -> Result<(u8, IpEndpoint), Error> {
                 receive_errors: listener.receive_errors,
                 no_delay: listener.no_delay,
                 pass_credentials: listener.pass_credentials,
-                pending_right: None,
+                pending_right_count: 0,
+                pending_right_slots: [0; SLOT_COUNT],
+                pending_right_flags: [0; SLOT_COUNT],
                 pending_credentials: None,
                 local_first: memory::FrameLease::EMPTY,
                 local_last: memory::FrameLease::EMPTY,
@@ -748,7 +762,9 @@ pub(crate) fn accept(slot: u8) -> Result<(u8, IpEndpoint), Error> {
             receive_errors: listener.receive_errors,
             no_delay: listener.no_delay,
             pass_credentials: listener.pass_credentials,
-            pending_right: None,
+            pending_right_count: 0,
+            pending_right_slots: [0; SLOT_COUNT],
+            pending_right_flags: [0; SLOT_COUNT],
             pending_credentials: None,
             local_first: memory::FrameLease::EMPTY,
             local_last: memory::FrameLease::EMPTY,
@@ -1352,36 +1368,46 @@ pub(crate) fn unix_peer_connected(slot: u8) -> bool {
     })
 }
 
-pub(crate) fn queue_unix_right(sender: u8, right: u8, flags: u32) -> Result<(), Error> {
+pub(crate) fn queue_unix_rights(sender: u8, rights: &[(u8, u32)]) -> Result<(), Error> {
+    if rights.is_empty() || rights.len() > PASSED_RIGHT_LIMIT {
+        return Err(Error::Invalid);
+    }
     let sender_state = unsafe { SLOTS.get(usize::from(sender)).copied() }
         .filter(|state| state.occupied && state.kind == Kind::Unix)
         .ok_or(Error::Invalid)?;
     let peer = sender_state.peer.ok_or(Error::NotConnected)?;
-    if peer == right {
+    if rights.iter().any(|(right, _)| *right == peer) {
         return Err(Error::Invalid);
     }
     let peer_state = unsafe { SLOTS.get_mut(usize::from(peer)) }
         .filter(|state| state.occupied && state.kind == Kind::Unix)
         .ok_or(Error::NotConnected)?;
-    if peer_state.pending_right.is_some() {
+    if peer_state.pending_right_count != 0 {
         return Err(Error::WouldBlock);
     }
-    peer_state.pending_right = Some((right, flags));
+    for (index, (right, flags)) in rights.iter().copied().enumerate() {
+        peer_state.pending_right_slots[index] = right;
+        peer_state.pending_right_flags[index] = flags;
+    }
+    peer_state.pending_right_count = rights.len() as u8;
     Ok(())
 }
 
-pub(crate) fn unix_right_queue_available(sender: u8, right: u8) -> Result<(), Error> {
+pub(crate) fn unix_right_queue_available(sender: u8, rights: &[u8]) -> Result<(), Error> {
+    if rights.is_empty() || rights.len() > PASSED_RIGHT_LIMIT {
+        return Err(Error::Invalid);
+    }
     let sender_state = unsafe { SLOTS.get(usize::from(sender)).copied() }
         .filter(|state| state.occupied && state.kind == Kind::Unix)
         .ok_or(Error::Invalid)?;
     let peer = sender_state.peer.ok_or(Error::NotConnected)?;
-    if peer == right {
+    if rights.contains(&peer) {
         return Err(Error::Invalid);
     }
     let peer_state = unsafe { SLOTS.get(usize::from(peer)) }
         .filter(|state| state.occupied && state.kind == Kind::Unix)
         .ok_or(Error::NotConnected)?;
-    if peer_state.pending_right.is_some() || peer_state.local_length != 0 {
+    if peer_state.pending_right_count != 0 || peer_state.local_length != 0 {
         return Err(Error::WouldBlock);
     }
     Ok(())
@@ -1401,30 +1427,48 @@ pub(crate) fn unix_credentials_queue_available(sender: u8) -> Result<(), Error> 
     Ok(())
 }
 
-pub(crate) fn receive_unix_right(
+pub(crate) fn receive_unix_rights(
     receiver: u8,
+    output: &mut [(u8, u32)],
     peek_only: bool,
-) -> Result<Option<(u8, u32)>, Error> {
+) -> Result<usize, Error> {
     let state = unsafe { SLOTS.get_mut(usize::from(receiver)) }
         .filter(|state| state.occupied && state.kind == Kind::Unix)
         .ok_or(Error::Invalid)?;
-    let Some(right) = state.pending_right else {
-        return Ok(None);
-    };
+    let count = usize::from(state.pending_right_count);
+    if output.len() < count {
+        return Err(Error::Invalid);
+    }
     if peek_only {
-        if !duplicate(right.0) {
-            return Err(Error::Exhausted);
+        for (duplicated, right) in state
+            .pending_right_slots
+            .into_iter()
+            .take(count)
+            .enumerate()
+        {
+            if !duplicate(right) {
+                for rollback in state.pending_right_slots.into_iter().take(duplicated) {
+                    let _ = close(rollback);
+                }
+                return Err(Error::Exhausted);
+            }
         }
     } else {
-        state.pending_right = None;
+        state.pending_right_count = 0;
     }
-    Ok(Some(right))
+    for (index, entry) in output.iter_mut().enumerate().take(count) {
+        *entry = (
+            state.pending_right_slots[index],
+            state.pending_right_flags[index],
+        );
+    }
+    Ok(count)
 }
 
-pub(crate) fn unix_right_pending(receiver: u8) -> bool {
-    unsafe { SLOTS.get(usize::from(receiver)) }.is_some_and(|state| {
-        state.occupied && state.kind == Kind::Unix && state.pending_right.is_some()
-    })
+pub(crate) fn unix_right_count(receiver: u8) -> usize {
+    unsafe { SLOTS.get(usize::from(receiver)) }
+        .filter(|state| state.occupied && state.kind == Kind::Unix)
+        .map_or(0, |state| usize::from(state.pending_right_count))
 }
 
 pub(crate) fn unix_peer_passes_credentials(sender: u8) -> Result<bool, Error> {
@@ -1481,10 +1525,13 @@ pub(crate) fn discard_unix_ancillary(receiver: u8) -> Result<bool, Error> {
         .filter(|state| state.occupied && state.kind == Kind::Unix)
         .ok_or(Error::Invalid)?;
     state.pending_credentials = None;
-    let Some((right, _)) = state.pending_right.take() else {
-        return Ok(false);
-    };
-    Ok(close(right))
+    let count = usize::from(core::mem::take(&mut state.pending_right_count));
+    let rights = state.pending_right_slots;
+    let mut closed = count != 0;
+    for right in rights.into_iter().take(count) {
+        closed &= close(right);
+    }
+    Ok(closed)
 }
 
 pub(crate) fn discard_unix_peer_ancillary(sender: u8) -> Result<bool, Error> {
@@ -1494,14 +1541,17 @@ pub(crate) fn discard_unix_peer_ancillary(sender: u8) -> Result<bool, Error> {
     discard_unix_ancillary(sender_state.peer.ok_or(Error::NotConnected)?)
 }
 
-pub(crate) fn discard_unix_right(receiver: u8) -> Result<bool, Error> {
+pub(crate) fn discard_unix_rights(receiver: u8) -> Result<bool, Error> {
     let state = unsafe { SLOTS.get_mut(usize::from(receiver)) }
         .filter(|state| state.occupied && state.kind == Kind::Unix)
         .ok_or(Error::Invalid)?;
-    let Some((right, _)) = state.pending_right.take() else {
-        return Ok(false);
-    };
-    Ok(close(right))
+    let count = usize::from(core::mem::take(&mut state.pending_right_count));
+    let rights = state.pending_right_slots;
+    let mut closed = count != 0;
+    for right in rights.into_iter().take(count) {
+        closed &= close(right);
+    }
+    Ok(closed)
 }
 
 pub(crate) fn endpoint(address: u32, port: u16) -> IpEndpoint {

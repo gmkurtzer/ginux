@@ -369,14 +369,14 @@ ginux_linux_system_init:
     cmp byte ptr [rip + .Lmmsg_output + 4], '!'
     jne .Lfailure
 
-    # Pass one socket descriptor over AF_UNIX and request close-on-exec.
+    # Pass two references to a socket over AF_UNIX and request close-on-exec.
     lea rax, [rip + .Lright_payload]
     mov qword ptr [rip + .Lmmsg_send_iov], rax
     mov qword ptr [rip + .Lmmsg_send_iov + 8], 1
     lea rax, [rip + .Lright_control]
     mov qword ptr [rip + .Lmmsg_send + 32], rax
     mov qword ptr [rip + .Lmmsg_send + 40], 24
-    mov qword ptr [rip + .Lright_control], 20
+    mov qword ptr [rip + .Lright_control], 24
     mov dword ptr [rip + .Lright_control + 8], 1
     mov dword ptr [rip + .Lright_control + 12], 1
     mov edi, 2
@@ -388,6 +388,7 @@ ginux_linux_system_init:
     js .Lfailure
     mov dword ptr [rip + .Lright_source], eax
     mov dword ptr [rip + .Lright_control + 16], eax
+    mov dword ptr [rip + .Lright_control + 20], eax
     mov edi, dword ptr [rip + .Lsocket_pair]
     lea rsi, [rip + .Lmmsg_send]
     xor edx, edx
@@ -416,7 +417,7 @@ ginux_linux_system_init:
     jne .Lfailure
     cmp dword ptr [rip + .Lmmsg_recv + 48], 0
     jne .Lfailure
-    cmp qword ptr [rip + .Lright_output_control], 20
+    cmp qword ptr [rip + .Lright_output_control], 24
     jne .Lfailure
     cmp dword ptr [rip + .Lright_output_control + 8], 1
     jne .Lfailure
@@ -444,8 +445,15 @@ ginux_linux_system_init:
     mov eax, 3
     syscall
     call .Lrequire_zero
+    mov edi, dword ptr [rip + .Lright_output_control + 20]
+    cmp edi, dword ptr [rip + .Lright_output_control + 16]
+    je .Lfailure
+    mov eax, 3
+    syscall
+    call .Lrequire_zero
 
-    # A short control buffer consumes the right and reports MSG_CTRUNC.
+    # A short control buffer consumes the rights and reports MSG_CTRUNC.
+    mov qword ptr [rip + .Lright_control], 20
     mov eax, dword ptr [rip + .Lsocket_pair]
     mov dword ptr [rip + .Lright_control + 16], eax
     mov edi, dword ptr [rip + .Lsocket_pair]

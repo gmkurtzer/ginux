@@ -20,17 +20,19 @@ engine. The booted proof sets and reads back each option, while short or
 unreadable values and unknown options produce `EINVAL`, `EFAULT`, and
 `ENOPROTOOPT` respectively. `SO_TYPE`, `SO_PROTOCOL`, `SO_DOMAIN`, and
 `SO_ACCEPTCONN` report live socket state, including the distinct UDP type and
-protocol. AF_UNIX `sendmsg` accepts one `SCM_RIGHTS` socket descriptor per
-message, retains the underlying open-file reference even if the sender closes
-its descriptor, and transfers the retained status flags through `recvmsg`.
+protocol. AF_UNIX `sendmsg` accepts up to twelve socket descriptors in one
+`SCM_RIGHTS` record, retains every underlying open-file reference even if the
+sender closes its descriptors, and transfers the retained status flags through
+`recvmsg`.
 `MSG_CMSG_CLOEXEC` marks the received descriptor close-on-exec. A short or
 absent receive control buffer consumes the right and reports `MSG_CTRUNC`;
 consuming the associated byte through `read` or `recvfrom` discards the right
 rather than leaking it into a later message. Malformed control headers and
 invalid passed descriptors fail before payload
-delivery. The booted proof passes a UDP socket, closes the sender descriptor,
-reads the received socket type, verifies close-on-exec, and separately verifies
-control truncation. `SO_PASSCRED` is mutable and readable on each socket. On
+delivery. The booted proof passes two references to a UDP socket, closes the
+sender descriptor, verifies two distinct received descriptors, reads the
+received socket type, verifies close-on-exec, and separately verifies control
+truncation. `SO_PASSCRED` is mutable and readable on each socket. On
 AF_UNIX it attaches an `SCM_CREDENTIALS` record containing the sender's live
 domain PID and immutable Linux UID/GID to data sent through `write`, `sendto`,
 `sendmsg`, or `sendmmsg`. Explicit `SCM_CREDENTIALS` is accepted only when all
@@ -40,9 +42,9 @@ consumption rules as rights, and a rights record plus credentials may accompany
 the same message. The booted proof enables `SO_PASSCRED`, sends through
 `write`, and checks the complete returned `ucred` against `getpid` and the
 domain's root identity. This bounded first profile admits ancillary data only
-when the peer's receive queue is empty. Multiple rights, non-socket
-descriptors, and more than one record of either ancillary type remain
-unsupported. Connected AF_INET datagram and AF_UNIX stream sockets
+when the peer's receive queue is empty. Non-socket descriptors and more than
+one record of either ancillary type remain unsupported. Connected AF_INET
+datagram and AF_UNIX stream sockets
 expose their
 peer names through `getpeername`, including Linux address truncation and actual
 length reporting, 32-bit descriptor narrowing, `ENOTCONN`, `ENOTSOCK`, `EBADF`,

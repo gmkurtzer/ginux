@@ -20659,16 +20659,18 @@ fn linux_socket_sendmsg(descriptor: u64, message: u64, flags: u64) -> u64 {
             Err(error) => return error,
         }
     };
-    let mut passed_right = None;
+    let mut passed_rights = [(0_u8, 0_u32); crate::linux_socket::PASSED_RIGHT_LIMIT];
+    let mut passed_right_count = 0_usize;
     let mut passed_credentials = None;
     if control_length != 0 {
         if crate::linux_socket::kind(slot) != Some(crate::linux_socket::Kind::Unix) {
             return LINUX_EINVAL;
         }
-        if !(20..=32).contains(&control_length) {
+        let maximum_right_length = 16 + 4 * crate::linux_socket::PASSED_RIGHT_LIMIT as u64;
+        if !(20..=maximum_right_length).contains(&control_length) {
             return LINUX_EINVAL;
         }
-        let mut ancillary = [0_u8; 28];
+        let mut ancillary = [0_u8; 16 + 4 * crate::linux_socket::PASSED_RIGHT_LIMIT];
         let copied = usize::try_from(control_length)
             .unwrap_or(usize::MAX)
             .min(ancillary.len());
@@ -20681,26 +20683,45 @@ fn linux_socket_sendmsg(descriptor: u64, message: u64, flags: u64) -> u64 {
         if level != 1 {
             return LINUX_EINVAL;
         }
-        match (kind, ancillary_length, control_length) {
-            (1, 20, 20..=24) => {
-                let descriptor = i32::from_ne_bytes(ancillary[16..20].try_into().unwrap());
-                let Ok(descriptor) = u64::try_from(descriptor) else {
-                    return LINUX_EBADF;
+        match kind {
+            1 => {
+                let Some(payload_length) = ancillary_length.checked_sub(16) else {
+                    return LINUX_EINVAL;
                 };
-                let Some(right_slot) = linux_socket_slot(descriptor) else {
-                    return LINUX_EBADF;
-                };
-                let Some(right_flags) = linux_socket_flags(descriptor) else {
-                    return LINUX_EBADF;
-                };
-                if let Err(error) =
-                    crate::linux_socket::unix_right_queue_available(slot, right_slot)
+                if payload_length == 0
+                    || payload_length % 4 != 0
+                    || ancillary_length > maximum_right_length
+                    || control_length < ancillary_length
+                    || control_length > ((ancillary_length + 7) & !7)
                 {
+                    return LINUX_EINVAL;
+                }
+                passed_right_count = payload_length as usize / 4;
+                let mut right_slots = [0_u8; crate::linux_socket::PASSED_RIGHT_LIMIT];
+                for index in 0..passed_right_count {
+                    let start = 16 + index * 4;
+                    let descriptor =
+                        i32::from_ne_bytes(ancillary[start..start + 4].try_into().unwrap());
+                    let Ok(descriptor) = u64::try_from(descriptor) else {
+                        return LINUX_EBADF;
+                    };
+                    let Some(right_slot) = linux_socket_slot(descriptor) else {
+                        return LINUX_EBADF;
+                    };
+                    let Some(right_flags) = linux_socket_flags(descriptor) else {
+                        return LINUX_EBADF;
+                    };
+                    passed_rights[index] = (right_slot, right_flags);
+                    right_slots[index] = right_slot;
+                }
+                if let Err(error) = crate::linux_socket::unix_right_queue_available(
+                    slot,
+                    &right_slots[..passed_right_count],
+                ) {
                     return linux_socket_error(error);
                 }
-                passed_right = Some((right_slot, right_flags));
             }
-            (2, 28, 28..=32) => {
+            2 if ancillary_length == 28 && (28..=32).contains(&control_length) => {
                 let pid = i32::from_ne_bytes(ancillary[16..20].try_into().unwrap());
                 let uid = u32::from_ne_bytes(ancillary[20..24].try_into().unwrap());
                 let gid = u32::from_ne_bytes(ancillary[24..28].try_into().unwrap());
@@ -20760,11 +20781,19 @@ fn linux_socket_sendmsg(descriptor: u64, message: u64, flags: u64) -> u64 {
             break;
         }
     }
-    if (passed_right.is_some() || passed_credentials.is_some()) && used == 0 {
+    if (passed_right_count != 0 || passed_credentials.is_some()) && used == 0 {
         return LINUX_EINVAL;
     }
-    if let Some((passed_slot, _)) = passed_right {
+    for (retained_rights, (passed_slot, _)) in passed_rights
+        .iter()
+        .copied()
+        .take(passed_right_count)
+        .enumerate()
+    {
         if !crate::linux_socket::duplicate(passed_slot) {
+            for (rollback, _) in passed_rights.iter().copied().take(retained_rights) {
+                let _ = crate::linux_socket::close(rollback);
+            }
             return LINUX_ENFILE;
         }
     }
@@ -20775,11 +20804,14 @@ fn linux_socket_sendmsg(descriptor: u64, message: u64, flags: u64) -> u64 {
     };
     match result {
         Ok(written) => {
-            if let Some((passed_slot, passed_flags)) = passed_right {
-                if let Err(error) =
-                    crate::linux_socket::queue_unix_right(slot, passed_slot, passed_flags)
-                {
-                    let _ = crate::linux_socket::close(passed_slot);
+            if passed_right_count != 0 {
+                if let Err(error) = crate::linux_socket::queue_unix_rights(
+                    slot,
+                    &passed_rights[..passed_right_count],
+                ) {
+                    for (passed_slot, _) in passed_rights.iter().copied().take(passed_right_count) {
+                        let _ = crate::linux_socket::close(passed_slot);
+                    }
                     return linux_socket_error(error);
                 }
             }
@@ -20792,7 +20824,7 @@ fn linux_socket_sendmsg(descriptor: u64, message: u64, flags: u64) -> u64 {
             written as u64
         }
         Err(error) => {
-            if let Some((passed_slot, _)) = passed_right {
+            for (passed_slot, _) in passed_rights.iter().copied().take(passed_right_count) {
                 let _ = crate::linux_socket::close(passed_slot);
             }
             linux_socket_error(error)
@@ -20839,19 +20871,24 @@ fn linux_socket_recvmsg(descriptor: u64, message: u64, flags: u64) -> u64 {
     if iov_count > LINUX_IOV_LIMIT {
         return LINUX_EINVAL;
     }
-    let right_pending = crate::linux_socket::unix_right_pending(slot);
+    let right_count = crate::linux_socket::unix_right_count(slot);
     let credentials_pending = crate::linux_socket::unix_credentials_pending(slot);
-    let writable_control = if right_pending && control_capacity >= 24 {
-        if credentials_pending && control_capacity >= 56 {
-            56
-        } else {
-            24
-        }
-    } else if credentials_pending && control_capacity >= 32 {
-        32
-    } else {
+    let mut right_output_count = right_count;
+    while right_output_count != 0
+        && ((16 + 4 * right_output_count as u64 + 7) & !7) > control_capacity
+    {
+        right_output_count -= 1;
+    }
+    let right_output_space = if right_output_count == 0 {
         0
+    } else {
+        (16 + 4 * right_output_count as u64 + 7) & !7
     };
+    let credentials_output =
+        credentials_pending && control_capacity.saturating_sub(right_output_space) >= 32;
+    let writable_control =
+        usize::try_from(right_output_space + if credentials_output { 32 } else { 0 })
+            .unwrap_or(usize::MAX);
     if writable_control != 0
         && (control == 0 || !linux_writable_user_range_contains(control, writable_control))
     {
@@ -20917,34 +20954,66 @@ fn linux_socket_recvmsg(descriptor: u64, message: u64, flags: u64) -> u64 {
         0
     };
     let mut control_length = 0_u64;
-    if right_pending {
-        if control_capacity < 24 {
+    if right_count != 0 {
+        if right_output_count == 0 {
             output_flags |= MSG_CTRUNC;
             if !peek_only {
-                let _ = crate::linux_socket::discard_unix_right(slot);
+                let _ = crate::linux_socket::discard_unix_rights(slot);
             }
         } else {
-            let right = match crate::linux_socket::receive_unix_right(slot, peek_only) {
-                Ok(Some(right)) => right,
-                Ok(None) => return LINUX_EINVAL,
-                Err(error) => return linux_socket_error(error),
-            };
-            if let Some(received_descriptor) =
-                linux_install_received_socket(right.0, right.1, flags & MSG_CMSG_CLOEXEC != 0)
+            let mut rights = [(0_u8, 0_u32); crate::linux_socket::PASSED_RIGHT_LIMIT];
+            let received_rights =
+                match crate::linux_socket::receive_unix_rights(slot, &mut rights, peek_only) {
+                    Ok(count) if count == right_count => count,
+                    Ok(_) => return LINUX_EINVAL,
+                    Err(error) => return linux_socket_error(error),
+                };
+            let mut ancillary = [0_u8; 16 + 4 * crate::linux_socket::PASSED_RIGHT_LIMIT];
+            ancillary[8..12].copy_from_slice(&1_i32.to_ne_bytes());
+            ancillary[12..16].copy_from_slice(&1_i32.to_ne_bytes());
+            let mut installed = 0_usize;
+            for (right_slot, right_flags) in rights
+                .iter()
+                .copied()
+                .take(received_rights.min(right_output_count))
             {
-                let mut ancillary = [0_u8; 24];
-                ancillary[..8].copy_from_slice(&20_u64.to_ne_bytes());
-                ancillary[8..12].copy_from_slice(&1_i32.to_ne_bytes());
-                ancillary[12..16].copy_from_slice(&1_i32.to_ne_bytes());
-                ancillary[16..20].copy_from_slice(&(received_descriptor as i32).to_ne_bytes());
-                if !copy_to_linux_user(control, &ancillary) {
-                    let _ = linux_descriptor_close(received_descriptor);
+                let Some(received_descriptor) = linux_install_received_socket(
+                    right_slot,
+                    right_flags,
+                    flags & MSG_CMSG_CLOEXEC != 0,
+                ) else {
+                    break;
+                };
+                let start = 16 + installed * 4;
+                ancillary[start..start + 4]
+                    .copy_from_slice(&(received_descriptor as i32).to_ne_bytes());
+                installed += 1;
+            }
+            for (right_slot, _) in rights
+                .iter()
+                .copied()
+                .skip(installed)
+                .take(received_rights - installed)
+            {
+                let _ = crate::linux_socket::close(right_slot);
+            }
+            if installed != received_rights {
+                output_flags |= MSG_CTRUNC;
+            }
+            if installed != 0 {
+                let ancillary_length = 16 + installed * 4;
+                let ancillary_space = (ancillary_length + 7) & !7;
+                ancillary[..8].copy_from_slice(&(ancillary_length as u64).to_ne_bytes());
+                if !copy_to_linux_user(control, &ancillary[..ancillary_space]) {
+                    for offset in 0..installed {
+                        let start = 16 + offset * 4;
+                        let descriptor =
+                            i32::from_ne_bytes(ancillary[start..start + 4].try_into().unwrap());
+                        let _ = linux_descriptor_close(descriptor as u64);
+                    }
                     return LINUX_EFAULT;
                 }
-                control_length = 24;
-            } else {
-                let _ = crate::linux_socket::close(right.0);
-                output_flags |= MSG_CTRUNC;
+                control_length = ancillary_space as u64;
             }
         }
     }
