@@ -929,6 +929,57 @@ pub(crate) fn peek_local(slot: u8, output: &mut [u8]) -> Result<usize, Error> {
     }
 }
 
+pub(crate) fn peek(slot: u8, output: &mut [u8]) -> Result<(usize, Option<IpEndpoint>), Error> {
+    poll();
+    let state = unsafe { SLOTS.get(usize::from(slot)) }
+        .filter(|slot| slot.occupied)
+        .ok_or(Error::Invalid)?;
+    if state.read_shutdown {
+        return Ok((0, None));
+    }
+    if state.kind == Kind::Unix || state.peer.is_some() && !state.listening {
+        return peek_local(slot, output).map(|received| (received, None));
+    }
+    let runtime = runtime()?;
+    let handle = state.handle.ok_or(Error::Invalid)?;
+    match state.kind {
+        Kind::Tcp => {
+            let socket = runtime.sockets.get_mut::<tcp::Socket>(handle);
+            if socket.can_recv() {
+                socket
+                    .peek_slice(output)
+                    .map(|size| (size, None))
+                    .map_err(|_| Error::Reset)
+            } else if socket.may_recv() {
+                Err(Error::WouldBlock)
+            } else {
+                Ok((0, None))
+            }
+        }
+        Kind::Udp => runtime
+            .sockets
+            .get_mut::<udp::Socket>(handle)
+            .peek_slice(output)
+            .map(|(size, metadata)| (size, Some(metadata.endpoint)))
+            .map_err(|_| Error::WouldBlock),
+        Kind::Unix => unreachable!(),
+    }
+}
+
+pub(crate) fn peek_blocking(
+    slot: u8,
+    output: &mut [u8],
+) -> Result<(usize, Option<IpEndpoint>), Error> {
+    for _ in 0..BLOCKING_POLL_LIMIT {
+        match peek(slot, output) {
+            Err(Error::WouldBlock | Error::InProgress) => core::hint::spin_loop(),
+            result => return result,
+        }
+    }
+    report_timeout("peek");
+    Err(Error::WouldBlock)
+}
+
 pub(crate) fn recv_blocking(
     slot: u8,
     output: &mut [u8],

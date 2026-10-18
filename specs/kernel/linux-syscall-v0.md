@@ -19,7 +19,10 @@ length reporting, 32-bit descriptor narrowing, `ENOTCONN`, `ENOTSOCK`, `EBADF`,
 and `EFAULT` paths. It also proves bidirectional AF_UNIX `socketpair` transport
 through `sendto`/`recvfrom`, `sendmsg`/`recvmsg`, and
 `sendmmsg`/`recvmmsg`, plus local shutdown, Linux `SIGPIPE`/`MSG_NOSIGNAL`
-behavior, and descriptor cleanup. Unsupported
+behavior, nondestructive `MSG_PEEK` reads across local, TCP, and UDP
+transports, and descriptor cleanup. The booted proof peeks through both
+`recvfrom` and `recvmsg`, verifies exact bytes, and then consumes the same
+bytes with an ordinary receive. Unsupported
 families, types, protocols, flags, options, pointers, and oversized message
 vectors are rejected with their documented Linux errno. Successful TCP accept,
 IPv6, ancillary data, and the broader option surface remain Partial and are not

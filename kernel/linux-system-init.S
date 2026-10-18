@@ -285,6 +285,20 @@ ginux_linux_system_init:
     mov edi, dword ptr [rip + .Lsocket_pair + 4]
     lea rsi, [rip + .Lmmsg_output]
     mov edx, 5
+    mov r10d, 2
+    xor r8d, r8d
+    xor r9d, r9d
+    mov eax, 45
+    syscall
+    cmp rax, 5
+    jne .Lfailure
+    cmp dword ptr [rip + .Lmmsg_output], 0x67736d6d
+    jne .Lfailure
+    cmp byte ptr [rip + .Lmmsg_output + 4], '!'
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Lsocket_pair + 4]
+    lea rsi, [rip + .Lmmsg_output]
+    mov edx, 5
     xor r10d, r10d
     xor r8d, r8d
     xor r9d, r9d
@@ -319,6 +333,17 @@ ginux_linux_system_init:
     mov eax, 46
     syscall
     cmp rax, 5
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Lsocket_pair + 4]
+    lea rsi, [rip + .Lmmsg_recv]
+    mov edx, 2
+    mov eax, 47
+    syscall
+    cmp rax, 5
+    jne .Lfailure
+    cmp dword ptr [rip + .Lmmsg_output], 0x67736d6d
+    jne .Lfailure
+    cmp byte ptr [rip + .Lmmsg_output + 4], '!'
     jne .Lfailure
     mov edi, dword ptr [rip + .Lsocket_pair + 4]
     lea rsi, [rip + .Lmmsg_recv]
@@ -754,6 +779,18 @@ ginux_linux_system_init:
     mov eax, 44
     syscall
     cmp rax, 4
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Ltcp_accepted]
+    lea rsi, [rip + .Ltcp_output]
+    mov edx, 4
+    mov r10d, 2
+    xor r8d, r8d
+    xor r9d, r9d
+    mov eax, 45
+    syscall
+    cmp rax, 4
+    jne .Lfailure
+    cmp dword ptr [rip + .Ltcp_output], 0x21706374
     jne .Lfailure
     mov edi, dword ptr [rip + .Ltcp_accepted]
     lea rsi, [rip + .Ltcp_output]

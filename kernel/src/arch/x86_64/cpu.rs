@@ -20547,7 +20547,9 @@ fn linux_socket_recvfrom(
     source: u64,
     source_length: u64,
 ) -> u64 {
-    const SUPPORTED_FLAGS: u64 = 0x40;
+    const MSG_PEEK: u64 = 0x2;
+    const MSG_DONTWAIT: u64 = 0x40;
+    const SUPPORTED_FLAGS: u64 = MSG_PEEK | MSG_DONTWAIT;
     let Some(slot) = linux_socket_slot(descriptor) else {
         return LINUX_EBADF;
     };
@@ -20556,7 +20558,12 @@ fn linux_socket_recvfrom(
     }
     let length = usize::try_from(count).unwrap_or(usize::MAX).min(PAGE_SIZE);
     let mut bytes = [0_u8; PAGE_SIZE];
-    let result = if flags & 0x40 != 0 || linux_socket_nonblocking(descriptor) {
+    let nonblocking = flags & MSG_DONTWAIT != 0 || linux_socket_nonblocking(descriptor);
+    let result = if flags & MSG_PEEK != 0 && nonblocking {
+        crate::linux_socket::peek(slot, &mut bytes[..length])
+    } else if flags & MSG_PEEK != 0 {
+        crate::linux_socket::peek_blocking(slot, &mut bytes[..length])
+    } else if nonblocking {
         crate::linux_socket::recv(slot, &mut bytes[..length])
     } else {
         crate::linux_socket::recv_blocking(slot, &mut bytes[..length])
@@ -20640,7 +20647,9 @@ fn linux_socket_sendmsg(descriptor: u64, message: u64, flags: u64) -> u64 {
 }
 
 fn linux_socket_recvmsg(descriptor: u64, message: u64, flags: u64) -> u64 {
-    const SUPPORTED_FLAGS: u64 = 0x40;
+    const MSG_PEEK: u64 = 0x2;
+    const MSG_DONTWAIT: u64 = 0x40;
+    const SUPPORTED_FLAGS: u64 = MSG_PEEK | MSG_DONTWAIT;
     let Some(slot) = linux_socket_slot(descriptor) else {
         return LINUX_EBADF;
     };
@@ -20675,7 +20684,12 @@ fn linux_socket_recvmsg(descriptor: u64, message: u64, flags: u64) -> u64 {
         capacity += output.1;
     }
     let mut bytes = [0_u8; PAGE_SIZE];
-    let result = if flags & 0x40 != 0 || linux_socket_nonblocking(descriptor) {
+    let nonblocking = flags & MSG_DONTWAIT != 0 || linux_socket_nonblocking(descriptor);
+    let result = if flags & MSG_PEEK != 0 && nonblocking {
+        crate::linux_socket::peek(slot, &mut bytes[..capacity])
+    } else if flags & MSG_PEEK != 0 {
+        crate::linux_socket::peek_blocking(slot, &mut bytes[..capacity])
+    } else if nonblocking {
         crate::linux_socket::recv(slot, &mut bytes[..capacity])
     } else {
         crate::linux_socket::recv_blocking(slot, &mut bytes[..capacity])
