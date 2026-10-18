@@ -106,6 +106,11 @@ Descriptor-control verification also covers Linux 32-bit descriptor and
 command conversion for `fcntl` and `flock`. `flock` now uses the same explicit,
 directly tested syscall handler in both normal execution and conformance tests
 instead of inline dispatcher logic.
+File-descriptor extended-attribute operations and directory enumeration also
+convert descriptors and xattr flags according to their Linux 32-bit types.
+The filesystem verifier now performs an overlay xattr set/get/list/remove
+lifecycle and root `getdents64` enumeration with dirty upper register bits,
+then proves descriptor and overlay cleanup.
 
 The ring-3 controller directly verifies its Linux PID/TID, parent,
 process-group, session, UID/GID, supplementary-group, scheduler-yield, and

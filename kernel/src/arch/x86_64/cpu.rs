@@ -15938,8 +15938,58 @@ fn verify_linux_filesystem_argument_widths() -> bool {
         ) == 0;
     let closed =
         descriptor < LINUX_DESCRIPTOR_TABLE_LIMIT && linux_descriptor_close(descriptor) == 0;
+    let xattr_node = crate::linux_overlay::create_file(b"ginux-xattr-width", 0o600, &[]);
+    let xattr_prepared = xattr_node.is_some()
+        && copy_to_linux_user(mapping + 768, b"/ginux-xattr-width\0")
+        && copy_to_linux_user(mapping + 832, b"user.ginux\0")
+        && copy_to_linux_user(mapping + 896, b"ok")
+        && copy_to_linux_user(mapping + 960, b"/\0");
+    let xattr_descriptor = if xattr_prepared {
+        linux_openat(directory, mapping + 768, 2, 0)
+    } else {
+        LINUX_EFAULT
+    };
+    let xattrs = xattr_descriptor < LINUX_AUX_DESCRIPTOR_LIMIT
+        && linux_fsetxattr(
+            UPPER_REGISTER_BITS | xattr_descriptor,
+            mapping + 832,
+            mapping + 896,
+            2,
+            UPPER_REGISTER_BITS,
+        ) == 0
+        && linux_fgetxattr(
+            UPPER_REGISTER_BITS | xattr_descriptor,
+            mapping + 832,
+            mapping + 1024,
+            2,
+        ) == 2
+        && linux_flistxattr(UPPER_REGISTER_BITS | xattr_descriptor, mapping + 1088, 64) == 11
+        && linux_fremovexattr(UPPER_REGISTER_BITS | xattr_descriptor, mapping + 832) == 0;
+    let xattr_closed = xattr_descriptor < LINUX_AUX_DESCRIPTOR_LIMIT
+        && linux_descriptor_close(xattr_descriptor) == 0;
+    let directory_descriptor = if xattr_closed {
+        linux_openat(directory, mapping + 960, LINUX_O_DIRECTORY, 0)
+    } else {
+        LINUX_EFAULT
+    };
+    let enumerated = directory_descriptor < LINUX_AUX_DESCRIPTOR_LIMIT
+        && linux_getdents64(
+            UPPER_REGISTER_BITS | directory_descriptor,
+            mapping + 1536,
+            512,
+        ) > 0;
+    let directory_closed = directory_descriptor < LINUX_AUX_DESCRIPTOR_LIMIT
+        && linux_descriptor_close(directory_descriptor) == 0;
+    let xattr_removed = xattr_node.is_some_and(crate::linux_overlay::unlink);
     let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
-    valid && closed && unmapped
+    valid
+        && closed
+        && xattrs
+        && xattr_closed
+        && enumerated
+        && directory_closed
+        && xattr_removed
+        && unmapped
 }
 
 fn verify_linux_sysv_semaphore_syscalls() -> bool {
@@ -21294,6 +21344,8 @@ fn linux_fsetxattr(
     value_size: u64,
     flags: u64,
 ) -> u64 {
+    let descriptor = u64::from(descriptor as u32);
+    let flags = u64::from(flags as u32);
     if flags & !(LINUX_XATTR_CREATE | LINUX_XATTR_REPLACE) != 0
         || flags == LINUX_XATTR_CREATE | LINUX_XATTR_REPLACE
     {
@@ -21360,6 +21412,7 @@ fn linux_setxattr_path(
     value_size: u64,
     flags: u64,
 ) -> u64 {
+    let flags = u64::from(flags as u32);
     let handle = match linux_xattr_path_handle(path_address) {
         Ok(handle) => handle,
         Err(error) => return error,
@@ -21374,6 +21427,7 @@ fn linux_fsetxattr_handle(
     value_size: u64,
     flags: u64,
 ) -> u64 {
+    let flags = u64::from(flags as u32);
     // Reuse the descriptor implementation's exact semantics without exposing
     // a synthetic descriptor by performing the same bounded validation here.
     if flags & !(LINUX_XATTR_CREATE | LINUX_XATTR_REPLACE) != 0
@@ -21429,6 +21483,7 @@ fn linux_fsetxattr_handle(
 }
 
 fn linux_fgetxattr(descriptor: u64, name_address: u64, value_address: u64, value_size: u64) -> u64 {
+    let descriptor = u64::from(descriptor as u32);
     let Some(handle) = linux_overlay_descriptor_handle(descriptor) else {
         return if linux_descriptor_open(descriptor) {
             LINUX_ENODATA
@@ -21501,6 +21556,7 @@ fn linux_fgetxattr_handle(
 }
 
 fn linux_flistxattr(descriptor: u64, list_address: u64, list_size: u64) -> u64 {
+    let descriptor = u64::from(descriptor as u32);
     let Some(handle) = linux_overlay_descriptor_handle(descriptor) else {
         return if linux_descriptor_open(descriptor) {
             0
@@ -21557,6 +21613,7 @@ fn linux_flistxattr_handle(
 }
 
 fn linux_fremovexattr(descriptor: u64, name_address: u64) -> u64 {
+    let descriptor = u64::from(descriptor as u32);
     let Some(handle) = linux_overlay_descriptor_handle(descriptor) else {
         return if linux_descriptor_open(descriptor) {
             LINUX_ENODATA
@@ -29191,6 +29248,7 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
 }
 
 fn linux_getdents(descriptor: u64, address: u64, count: u64, legacy: bool) -> u64 {
+    let descriptor = u64::from(descriptor as u32);
     let state = linux_device_descriptor(descriptor);
     if state & LINUX_DEVICE_DIRECTORY == 0 {
         return LINUX_ENOTDIR;
