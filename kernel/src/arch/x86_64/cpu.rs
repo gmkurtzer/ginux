@@ -796,7 +796,6 @@ const LINUX_MIN_ALT_STACK_SIZE: u64 = 2048;
 const LINUX_SS_DISABLE: u32 = 2;
 const LINUX_SS_AUTODISARM: u32 = 1 << 31;
 const LINUX_UNBLOCKABLE_SIGNALS: u64 = (1 << (9 - 1)) | (1 << (19 - 1));
-const LINUX_STANDARD_SIGNAL_COUNT: u64 = 31;
 const LINUX_SIGSEGV: u64 = 11;
 const LINUX_SIGPIPE: u64 = 13;
 const LINUX_SIGALRM: u64 = 14;
@@ -13765,8 +13764,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let file_handles = verify_linux_file_handle_syscalls();
     let shadow_stack = linux_map_shadow_stack(0, PAGE_SIZE as u64, 0) == LINUX_EOPNOTSUPP
         && linux_map_shadow_stack(1, 0, u64::MAX) == LINUX_EOPNOTSUPP;
-    let uretprobe = linux_default_signal_terminates(LINUX_SIGILL)
-        && !linux_default_signal_terminates(LINUX_SIGCHLD);
+    let uretprobe = verify_linux_default_signal_dispositions();
     let seccomp = verify_linux_seccomp_syscall();
     let remap_file_pages = verify_linux_remap_file_pages_syscall();
     let keyrings = verify_linux_keyring_syscalls();
@@ -33714,11 +33712,21 @@ fn linux_apply_delivered_signal_action(index: usize, signal_bit: u64, old_mask: 
 }
 
 fn linux_default_signal_terminates(signal: u64) -> bool {
-    signal > LINUX_STANDARD_SIGNAL_COUNT
-        || matches!(
-            signal,
-            LINUX_SIGILL | LINUX_SIGKILL | LINUX_SIGPIPE | LINUX_SIGXFSZ
-        )
+    matches!(signal, 1..=16 | 24..=27 | 29..=64)
+}
+
+fn linux_default_signal_ignored(signal: u64) -> bool {
+    matches!(signal, LINUX_SIGCHLD | 18 | 23 | 28)
+}
+
+fn verify_linux_default_signal_dispositions() -> bool {
+    (1..=LINUX_SIGNAL_COUNT as u64).all(|signal| {
+        let terminates = matches!(signal, 1..=16 | 24..=27 | 29..=64);
+        let ignored = matches!(signal, 17 | 18 | 23 | 28);
+        linux_default_signal_terminates(signal) == terminates
+            && linux_default_signal_ignored(signal) == ignored
+            && !(linux_default_signal_terminates(signal) && linux_default_signal_ignored(signal))
+    })
 }
 
 fn linux_terminate_by_default_signal(signal: u64) -> u64 {
@@ -33780,7 +33788,7 @@ fn linux_kill(
         return 0;
     }
     let handler = ELF_PROBE_SIGNAL_HANDLERS[index].load(Ordering::SeqCst);
-    if handler == 1 {
+    if handler == 1 || handler == 0 && linux_default_signal_ignored(signal) {
         return 0;
     }
     let old_mask = ELF_PROBE_SIGNAL_MASK.load(Ordering::SeqCst);
@@ -33799,6 +33807,8 @@ fn linux_kill(
         {
             linux_terminate_by_default_signal(signal)
         } else {
+            // SIGSTOP, SIGTSTP, SIGTTIN, and SIGTTOU require the pending
+            // scheduler-visible stopped-process model.
             LINUX_ENOSYS
         };
     }

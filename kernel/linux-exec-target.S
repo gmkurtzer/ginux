@@ -487,7 +487,7 @@ ginux_linux_exec_target:
     cmp qword ptr [rip + .Lsignal_count], 4
     jne .Lfailure
     mov edi, 1
-    mov esi, 15
+    mov esi, 20
     mov eax, 62
     syscall
     cmp rax, -38
