@@ -231,6 +231,18 @@ safe descriptor validation, LDTR loading, fork inheritance, and context-switch
 integration; segmented 16/32-bit execution is therefore still outside the
 current long-mode profile.
 
+`prctl` converts its option from the Linux `int` UAPI type and implements
+process-name access, dumpability state, statistical timing, strict-seccomp
+entry and mode queries, and irreversible `no_new_privs`. Dumpability is
+process-local, inherited across fork, retained across the current
+non-credential-changing exec path, and restored when Ginux switches between
+live processes. Boot verification covers valid transitions, invalid modes,
+unused-argument behavior, userspace faults, dirty upper register bits, and
+state restoration. Credential-changing exec resets, core-dump enforcement,
+parent-death signals, subreapers, capability controls, securebits, timer
+slack, speculation controls, and the remaining Linux option families are not
+implemented, so `prctl` remains Partial.
+
 The ring-3 controller directly verifies its Linux PID/TID, parent,
 process-group, session, UID/GID, supplementary-group, scheduler-yield, and
 `uname` contracts, including invalid PID, count, and userspace-address errors.
