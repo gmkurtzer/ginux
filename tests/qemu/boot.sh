@@ -3322,6 +3322,10 @@ if ! grep -q '^ginux: Linux cross-process memory transfer validated' "$output_fi
     echo "Boot test failed: Linux cross-process memory transfer was not validated." >&2
     exit 1
 fi
+if ! grep -q '^ginux: Linux cross-process resource comparison validated' "$output_file"; then
+    echo "Boot test failed: Linux cross-process resource comparison was not validated." >&2
+    exit 1
+fi
 if ! grep -q '^ginux: Linux generation-bound pidfds validated' "$output_file"; then
     echo "Boot test failed: Linux generation-bound pidfd lifecycle was not validated." >&2
     exit 1

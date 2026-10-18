@@ -1383,6 +1383,15 @@ verification fork transfers a pattern into a live child, reads it back, proves
 the parent's private page was unchanged, restores the child bytes, and exercises
 permission and address failures. Cross-domain access and `CAP_SYS_PTRACE`
 override semantics remain unsupported.
+`rax = 312` (`__NR_kcmp`) uses the same user-namespace, credential, and
+dumpability access check to compare live processes. `KCMP_VM`, `KCMP_FILES`,
+`KCMP_FS`, `KCMP_SIGHAND`, `KCMP_IO`, and `KCMP_SYSVSEM` report equality for a
+process compared with itself and distinct identity across the current fork
+boundary. PID and comparison-type arguments follow their Linux 32-bit widths;
+missing processes return `-ESRCH` and denied inspection returns `-EPERM`.
+Cross-process `KCMP_FILE` returns `-EOPNOTSUPP` until descriptor snapshots carry
+a collision-proof open-file-description identity, rather than guessing from an
+inode or socket index. `KCMP_EPOLL_TFD` is also pending.
 `rax = 27` (`__NR_mincore`) accepts any fully occupied nonzero scratch range
 rounding to one through four pages, including a range crossing adjacent
 registry records, and atomically

@@ -17925,7 +17925,7 @@ fn linux_process_vm_iov(
         if status.state != linux_process::LiveProcessState::Running {
             return LINUX_ESRCH;
         }
-        if !linux_process_vm_access_permitted(pid) {
+        if !linux_ptrace_access_permitted(pid) {
             return LINUX_EPERM;
         }
     }
@@ -18011,7 +18011,7 @@ fn linux_process_vm_iov(
     transferred
 }
 
-fn linux_process_vm_access_permitted(pid: u32) -> bool {
+fn linux_ptrace_access_permitted(pid: u32) -> bool {
     if pid == current_linux_process_pid() {
         return true;
     }
@@ -18263,15 +18263,33 @@ fn linux_kcmp(first_pid: u64, second_pid: u64, kind: u64, first: u64, second: u6
     let first_pid = first_pid as i32;
     let second_pid = second_pid as i32;
     let kind = u64::from(kind as u32);
-    let pid = current_linux_process_pid();
-    if first_pid <= 0 || second_pid <= 0 || first_pid as u32 != pid || second_pid as u32 != pid {
+    if first_pid <= 0 || second_pid <= 0 {
         return LINUX_ESRCH;
     }
+    let first_pid = first_pid as u32;
+    let second_pid = second_pid as u32;
+    if linux_process::live_process_status(first_pid).is_none()
+        || linux_process::live_process_status(second_pid).is_none()
+    {
+        return LINUX_ESRCH;
+    }
+    if !linux_ptrace_access_permitted(first_pid) || !linux_ptrace_access_permitted(second_pid) {
+        return LINUX_EPERM;
+    }
     if (1..=KCMP_SYSVSEM).contains(&kind) {
-        return 0;
+        // Every process fork currently receives a distinct VM, descriptor
+        // table, filesystem context, signal table, I/O context, and SysV undo
+        // context. A process compared with itself shares each resource.
+        return u64::from(first_pid != second_pid);
     }
     if kind != KCMP_FILE {
         return LINUX_EINVAL;
+    }
+    if first_pid != second_pid {
+        // Ordinary descriptor snapshots do not yet carry a collision-proof
+        // open-file-description identity. Do not infer equality from inode or
+        // socket numbers alone.
+        return LINUX_EOPNOTSUPP;
     }
     if !linux_descriptor_open(first) || !linux_descriptor_open(second) {
         return LINUX_EBADF;
@@ -31705,6 +31723,7 @@ fn verify_linux_running_child_wait_selectors(pid: u32) -> bool {
             0,
         ) == 0;
     let process_vm = running && verify_linux_cross_process_vm(pid);
+    let kcmp = process_vm && verify_linux_cross_process_kcmp(parent, pid);
     let parent_pidfd = linux_pidfd_open(u64::from(parent), 0);
     let parent_opened = parent_pidfd < LINUX_AUX_DESCRIPTOR_LIMIT;
     let errors = parent_opened
@@ -31718,6 +31737,7 @@ fn verify_linux_running_child_wait_selectors(pid: u32) -> bool {
         && child_opened
         && running
         && process_vm
+        && kcmp
         && parent_opened
         && errors
         && parent_closed
@@ -31726,8 +31746,45 @@ fn verify_linux_running_child_wait_selectors(pid: u32) -> bool {
         serial_write("ginux: Linux process-group wait selectors validated\r\n");
         serial_write("ginux: Linux nonblocking pidfd wait validated\r\n");
         serial_write("ginux: Linux cross-process memory transfer validated\r\n");
+        serial_write("ginux: Linux cross-process resource comparison validated\r\n");
     }
     valid
+}
+
+fn verify_linux_cross_process_kcmp(parent: u32, child: u32) -> bool {
+    const UPPER_REGISTER_BITS: u64 = 1_u64 << 32;
+    let distinct = (1..=6).all(|kind| {
+        linux_kcmp(
+            UPPER_REGISTER_BITS | u64::from(parent),
+            UPPER_REGISTER_BITS | u64::from(child),
+            UPPER_REGISTER_BITS | kind,
+            0,
+            0,
+        ) == 1
+    });
+    let same =
+        (1..=6).all(|kind| linux_kcmp(u64::from(parent), u64::from(parent), kind, 0, 0) == 0);
+    let bounded = linux_kcmp(u64::from(parent), u64::from(child), 0, 1, 1) == LINUX_EOPNOTSUPP
+        && linux_kcmp(u64::from(u32::MAX), u64::from(child), 1, 0, 0) == LINUX_ESRCH
+        && linux_kcmp(u64::from(parent), u64::from(child), 7, 0, 0) == LINUX_EINVAL;
+    let permission = if let Some(dumpable) = linux_process_runtime_state(child)
+        .filter(|state| state.valid)
+        .map(|state| {
+            let dumpable = state.dumpable;
+            state.dumpable = false;
+            dumpable
+        }) {
+        let denied = linux_kcmp(u64::from(parent), u64::from(child), 1, 0, 0) == LINUX_EPERM;
+        linux_process_runtime_state(child)
+            .filter(|state| state.valid)
+            .is_some_and(|state| {
+                state.dumpable = dumpable;
+                denied
+            })
+    } else {
+        false
+    };
+    distinct && same && bounded && permission
 }
 
 fn verify_linux_cross_process_vm(pid: u32) -> bool {
@@ -31856,7 +31913,7 @@ fn verify_linux_cross_process_vm(pid: u32) -> bool {
             target_mapping.is_some_and(|mapping| mapping.writable),
         ));
         serial_write(" ");
-        serial_write_u64(u64::from(linux_process_vm_access_permitted(pid)));
+        serial_write_u64(u64::from(linux_ptrace_access_permitted(pid)));
         serial_write(" prepare ");
         for value in [
             child_saved,
