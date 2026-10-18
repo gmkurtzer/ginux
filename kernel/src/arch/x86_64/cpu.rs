@@ -574,6 +574,12 @@ const LINUX_MADV_SEQUENTIAL: u64 = 2;
 const LINUX_MADV_WILLNEED: u64 = 3;
 const LINUX_MADV_DONTFORK: u64 = 10;
 const LINUX_MADV_DOFORK: u64 = 11;
+const LINUX_MADV_MERGEABLE: u64 = 12;
+const LINUX_MADV_UNMERGEABLE: u64 = 13;
+const LINUX_MADV_HUGEPAGE: u64 = 14;
+const LINUX_MADV_NOHUGEPAGE: u64 = 15;
+const LINUX_MADV_DONTDUMP: u64 = 16;
+const LINUX_MADV_DODUMP: u64 = 17;
 const LINUX_MADV_WIPEONFORK: u64 = 18;
 const LINUX_MADV_KEEPONFORK: u64 = 19;
 const LINUX_MADV_COLD: u64 = 20;
@@ -15625,13 +15631,30 @@ fn verify_linux_process_madvise_syscall() -> bool {
     }
     let first = mapping + PAGE_SIZE as u64;
     let second = first + PAGE_SIZE as u64;
-    let initialized = copy_to_linux_user(first, &[0xa5]) && copy_to_linux_user(second, &[0x5a]);
+    let hint_hole = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64,
+        LINUX_PROT_READ,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    let initialized = hint_hole < LINUX_RETURN_TO_KERNEL
+        && linux_runtime_munmap(hint_hole, PAGE_SIZE as u64) == 0
+        && copy_to_linux_user(first, &[0xa5])
+        && copy_to_linux_user(second, &[0x5a]);
     let hints = initialized
         && [
             LINUX_MADV_NORMAL,
             LINUX_MADV_RANDOM,
             LINUX_MADV_SEQUENTIAL,
             LINUX_MADV_WILLNEED,
+            LINUX_MADV_MERGEABLE,
+            LINUX_MADV_UNMERGEABLE,
+            LINUX_MADV_HUGEPAGE,
+            LINUX_MADV_NOHUGEPAGE,
+            LINUX_MADV_DONTDUMP,
+            LINUX_MADV_DODUMP,
         ]
         .into_iter()
         .all(|advice| linux_madvise(first, PAGE_SIZE as u64, advice) == 0)
@@ -15649,9 +15672,19 @@ fn verify_linux_process_madvise_syscall() -> bool {
         && linux_madvise(second, PAGE_SIZE as u64, LINUX_MADV_DONTFORK) == 0
         && address_space::current_linux_runtime_page(second).dontfork;
     let stack_page = ELF_PROBE_STACK.load(Ordering::SeqCst) & !(PAGE_SIZE as u64 - 1);
-    let general_inheritance = inheritance
+    let general_hints = inheritance
         && stack_page != 0
         && stack_page < LINUX_RUNTIME_DYNAMIC_MMAP_BASE
+        && [
+            LINUX_MADV_HUGEPAGE,
+            LINUX_MADV_NOHUGEPAGE,
+            LINUX_MADV_DONTDUMP,
+            LINUX_MADV_DODUMP,
+        ]
+        .into_iter()
+        .all(|advice| linux_madvise(stack_page, PAGE_SIZE as u64, advice) == 0)
+        && linux_madvise(hint_hole, PAGE_SIZE as u64, LINUX_MADV_HUGEPAGE) == LINUX_ENOMEM;
+    let general_inheritance = general_hints
         && linux_madvise(stack_page, PAGE_SIZE as u64, LINUX_MADV_DONTFORK) == 0
         && address_space::current_linux_runtime_page(stack_page).dontfork
         && linux_madvise(stack_page, PAGE_SIZE as u64, LINUX_MADV_DOFORK) == 0
@@ -15706,11 +15739,7 @@ fn verify_linux_process_madvise_syscall() -> bool {
         && linux_runtime_mprotect(first, PAGE_SIZE as u64, LINUX_PROT_READ) == 0
         && linux_madvise(first, PAGE_SIZE as u64, LINUX_MADV_POPULATE_WRITE) == LINUX_EINVAL
         && linux_runtime_mprotect(first, PAGE_SIZE as u64, LINUX_PROT_READ | LINUX_PROT_WRITE) == 0
-        && linux_madvise(
-            mapping + 3 * PAGE_SIZE as u64,
-            PAGE_SIZE as u64,
-            LINUX_MADV_POPULATE_READ,
-        ) == LINUX_ENOMEM;
+        && linux_madvise(hint_hole, PAGE_SIZE as u64, LINUX_MADV_POPULATE_READ) == LINUX_ENOMEM;
     let freed = populated
         && copy_to_linux_user(first, &[0xa5])
         && linux_madvise(first, PAGE_SIZE as u64, LINUX_MADV_FREE) == 0
@@ -15733,11 +15762,7 @@ fn verify_linux_process_madvise_syscall() -> bool {
             == (2 * PAGE_SIZE) as u64
         && linux_process_madvise(descriptor, mapping, 2, LINUX_MADV_PAGEOUT, 0)
             == (2 * PAGE_SIZE) as u64
-        && linux_madvise(
-            mapping + 3 * PAGE_SIZE as u64,
-            PAGE_SIZE as u64,
-            LINUX_MADV_COLD,
-        ) == LINUX_ENOMEM;
+        && linux_madvise(hint_hole, PAGE_SIZE as u64, LINUX_MADV_COLD) == LINUX_ENOMEM;
     let locked_written = reclaim_hints && copy_to_linux_user(first, &[0x5a]);
     let locked_discarded = locked_written
         && linux_madvise(first, PAGE_SIZE as u64, LINUX_MADV_DONTNEED_LOCKED) == 0
@@ -17275,21 +17300,49 @@ fn linux_runtime_mprotect(address: u64, length: u64, protection: u64) -> u64 {
 }
 
 fn linux_runtime_madvise(address: u64, length: u64, advice: u64) -> u64 {
+    if matches!(
+        advice,
+        LINUX_MADV_NORMAL
+            | LINUX_MADV_RANDOM
+            | LINUX_MADV_SEQUENTIAL
+            | LINUX_MADV_WILLNEED
+            | LINUX_MADV_MERGEABLE
+            | LINUX_MADV_UNMERGEABLE
+            | LINUX_MADV_HUGEPAGE
+            | LINUX_MADV_NOHUGEPAGE
+            | LINUX_MADV_DONTDUMP
+            | LINUX_MADV_DODUMP
+    ) {
+        if length == 0 || !address.is_multiple_of(PAGE_SIZE as u64) {
+            return LINUX_EINVAL;
+        }
+        let Some(pages) = length
+            .checked_add(PAGE_SIZE as u64 - 1)
+            .and_then(|rounded| usize::try_from(rounded / PAGE_SIZE as u64).ok())
+        else {
+            return LINUX_ENOMEM;
+        };
+        let Some(bytes) = pages.checked_mul(PAGE_SIZE) else {
+            return LINUX_ENOMEM;
+        };
+        if address
+            .checked_add(bytes as u64)
+            .is_none_or(|end| end > 1 << 47)
+        {
+            return LINUX_ENOMEM;
+        }
+        let valid = (0..pages).all(|page| {
+            let state =
+                address_space::current_linux_runtime_page(address + (page * PAGE_SIZE) as u64);
+            state.occupied
+                && (!matches!(advice, LINUX_MADV_MERGEABLE | LINUX_MADV_UNMERGEABLE)
+                    || !state.file && !state.shared && !state.secret)
+        });
+        return if valid { 0 } else { LINUX_ENOMEM };
+    }
     let Some((_, pages)) = linux_runtime_mapping_range(address, length) else {
         return LINUX_EINVAL;
     };
-    if matches!(
-        advice,
-        LINUX_MADV_NORMAL | LINUX_MADV_RANDOM | LINUX_MADV_SEQUENTIAL | LINUX_MADV_WILLNEED
-    ) {
-        return if (0..pages).all(|page| {
-            address_space::current_linux_runtime_page(address + (page * PAGE_SIZE) as u64).occupied
-        }) {
-            0
-        } else {
-            LINUX_ENOMEM
-        };
-    }
     if !matches!(
         advice,
         LINUX_MADV_DONTNEED | LINUX_MADV_FREE | LINUX_MADV_DONTNEED_LOCKED
@@ -18268,6 +18321,23 @@ fn linux_munmap(address: u64, length: u64) -> u64 {
 fn linux_madvise(address: u64, length: u64, advice: u64) -> u64 {
     let advice = u64::from(advice as u32);
     if LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
+        && matches!(
+            advice,
+            LINUX_MADV_NORMAL
+                | LINUX_MADV_RANDOM
+                | LINUX_MADV_SEQUENTIAL
+                | LINUX_MADV_WILLNEED
+                | LINUX_MADV_MERGEABLE
+                | LINUX_MADV_UNMERGEABLE
+                | LINUX_MADV_HUGEPAGE
+                | LINUX_MADV_NOHUGEPAGE
+                | LINUX_MADV_DONTDUMP
+                | LINUX_MADV_DODUMP
+        )
+    {
+        return linux_runtime_madvise(address, length, advice);
+    }
+    if LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
         && matches!(advice, LINUX_MADV_DONTFORK | LINUX_MADV_DOFORK)
     {
         return linux_madvise_inheritance(address, length, advice == LINUX_MADV_DONTFORK);
@@ -18300,7 +18370,16 @@ fn linux_madvise(address: u64, length: u64, advice: u64) -> u64 {
     });
     if matches!(
         advice,
-        LINUX_MADV_NORMAL | LINUX_MADV_RANDOM | LINUX_MADV_SEQUENTIAL | LINUX_MADV_WILLNEED
+        LINUX_MADV_NORMAL
+            | LINUX_MADV_RANDOM
+            | LINUX_MADV_SEQUENTIAL
+            | LINUX_MADV_WILLNEED
+            | LINUX_MADV_MERGEABLE
+            | LINUX_MADV_UNMERGEABLE
+            | LINUX_MADV_HUGEPAGE
+            | LINUX_MADV_NOHUGEPAGE
+            | LINUX_MADV_DONTDUMP
+            | LINUX_MADV_DODUMP
     ) {
         return if areas[..range_pages].iter().all(Option::is_some) {
             0

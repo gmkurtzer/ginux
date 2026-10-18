@@ -127,6 +127,13 @@ Because Ginux currently has no separate `mlock` or reclaim state, it follows
 the same immediate discard and zero-fill-on-demand path as `MADV_DONTNEED`.
 Boot verification covers direct advice and a multi-vector process operation,
 including release of physical backing and the subsequent zero-filled read.
+The reversible VMA hints `MADV_MERGEABLE`, `MADV_UNMERGEABLE`,
+`MADV_HUGEPAGE`, `MADV_NOHUGEPAGE`, `MADV_DONTDUMP`, and `MADV_DODUMP` are
+accepted after validating the complete mapped range. Ginux currently uses
+base pages, does not deduplicate memory across domains, and has no core-dump
+engine, so these hints do not alter backing or weaken isolation. Mergeability
+hints are restricted to private anonymous mappings. Boot verification covers
+anonymous mappings, a pre-seeded stack VMA, and a deliberately unmapped range.
 `MADV_COLD` and `MADV_PAGEOUT` validate mapped ranges and are accepted through
 both `madvise` and `process_madvise`. They are best-effort no-ops while Ginux
 has neither swap nor a page-reclaim queue; secret mappings remain rejected and
