@@ -13787,6 +13787,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && linux_landlock_disabled(u64::MAX, u64::MAX, u64::MAX, u64::MAX) == LINUX_EOPNOTSUPP;
     let io_uring = verify_linux_io_uring_syscalls();
     let scheduler_priorities = verify_linux_scheduler_priority_ranges();
+    let process_priorities = verify_linux_process_priorities();
     let scheduler_queries = verify_linux_scheduler_queries();
     let scheduler_affinity = verify_linux_scheduler_affinity();
     let realtime_queries = verify_linux_realtime_queries();
@@ -13835,6 +13836,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         landlock_disabled,
         io_uring,
         scheduler_priorities,
+        process_priorities,
         scheduler_queries,
         scheduler_affinity,
         realtime_queries,
@@ -13889,6 +13891,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && landlock_disabled
         && io_uring
         && scheduler_priorities
+        && process_priorities
         && scheduler_queries
         && scheduler_affinity
         && realtime_queries
@@ -13922,6 +13925,46 @@ fn verify_linux_scheduler_priority_ranges() -> bool {
         && linux_scheduler_priority_range(1_u64 << 32, false) == 0
         && linux_scheduler_priority_range((1_u64 << 32) | 1, true) == 99
         && linux_scheduler_priority_range(u64::MAX, true) == LINUX_EINVAL
+}
+
+fn verify_linux_process_priorities() -> bool {
+    const UPPER_REGISTER_BITS: u64 = 1_u64 << 32;
+    let pid = u64::from(current_linux_process_pid());
+    let saved = ELF_PROBE_NICE.load(Ordering::SeqCst);
+    let initial = u64::from(40 - saved);
+    let selectors = linux_getpriority(
+        UPPER_REGISTER_BITS | u64::from(LINUX_PRIO_PROCESS),
+        UPPER_REGISTER_BITS,
+    ) == initial
+        && linux_getpriority(LINUX_PRIO_PROCESS.into(), UPPER_REGISTER_BITS | pid) == initial
+        && linux_getpriority(LINUX_PRIO_PGRP.into(), UPPER_REGISTER_BITS) == initial
+        && linux_getpriority(LINUX_PRIO_USER.into(), UPPER_REGISTER_BITS) == initial
+        && linux_getpriority(UPPER_REGISTER_BITS | 3, 0) == LINUX_EINVAL
+        && linux_getpriority(LINUX_PRIO_PROCESS.into(), UPPER_REGISTER_BITS | 0xffff_fffe)
+            == LINUX_ESRCH;
+    let signed_and_clamped = selectors
+        && linux_setpriority(
+            UPPER_REGISTER_BITS | u64::from(LINUX_PRIO_PROCESS),
+            UPPER_REGISTER_BITS,
+            UPPER_REGISTER_BITS | u64::from(u32::MAX),
+        ) == 0
+        && linux_getpriority(LINUX_PRIO_PROCESS.into(), 0) == 21
+        && linux_setpriority(LINUX_PRIO_PROCESS.into(), 0, UPPER_REGISTER_BITS | 100) == 0
+        && linux_getpriority(LINUX_PRIO_PROCESS.into(), 0) == 1
+        && linux_setpriority(
+            LINUX_PRIO_PROCESS.into(),
+            0,
+            UPPER_REGISTER_BITS | u64::from((-100_i32) as u32),
+        ) == 0
+        && linux_getpriority(LINUX_PRIO_PROCESS.into(), 0) == 40
+        && linux_setpriority(UPPER_REGISTER_BITS | 3, 0, 0) == LINUX_EINVAL
+        && linux_setpriority(
+            LINUX_PRIO_PROCESS.into(),
+            UPPER_REGISTER_BITS | 0xffff_fffe,
+            0,
+        ) == LINUX_ESRCH;
+    ELF_PROBE_NICE.store(saved, Ordering::SeqCst);
+    signed_and_clamped && ELF_PROBE_NICE.load(Ordering::SeqCst) == saved
 }
 
 fn verify_linux_scheduler_queries() -> bool {
@@ -31159,29 +31202,30 @@ fn linux_setpriority(which: u64, who: u64, priority: u64) -> u64 {
     let Some(caller) = current_linux_credentials() else {
         return LINUX_ESRCH;
     };
+    let mut result = LINUX_ESRCH;
     for pid in targets[..count].iter().copied() {
         let Some(namespace) = linux_process::live_process_user_namespace(pid) else {
-            return LINUX_ESRCH;
+            continue;
         };
         let Some(target) = linux_user::credentials(namespace) else {
-            return LINUX_ESRCH;
+            continue;
         };
         let Some(current) = linux_process_nice(pid) else {
-            return LINUX_ESRCH;
+            continue;
         };
-        if caller.euid != 0 && caller.euid != target.uid {
-            return LINUX_EPERM;
+        if caller.euid != 0 && caller.euid != target.uid && caller.euid != target.euid {
+            result = LINUX_EPERM;
+            continue;
         }
         if caller.euid != 0 && encoded < current {
-            return LINUX_EACCES;
+            result = LINUX_EACCES;
+            continue;
+        }
+        if linux_set_process_nice(pid, encoded) && result == LINUX_ESRCH {
+            result = 0;
         }
     }
-    for pid in targets[..count].iter().copied() {
-        if !linux_set_process_nice(pid, encoded) {
-            return LINUX_ESRCH;
-        }
-    }
-    0
+    result
 }
 
 fn linux_scheduler_process(pid: u64) -> Result<u32, u64> {

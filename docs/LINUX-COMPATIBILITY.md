@@ -274,6 +274,17 @@ controller. Ginux currently treats hardware RNG availability as its ready
 entropy source; a mixed, reseeding kernel CSPRNG and interruptible large reads
 remain pending, so the syscall remains Partial.
 
+`getpriority` and `setpriority` implement Linux process, process-group, and
+real-UID selectors, raw kernel return encoding, signed 32-bit nice values,
+`-20..19` clamping, and dirty-upper-register conversion. Multi-target changes
+now match Linux's non-atomic behavior: permitted targets are updated while a
+permission error is retained for the call. Permission checks accept the
+caller's effective UID matching either target real or effective UID. Boot
+verification covers selectors, missing targets, invalid selectors, signed and
+clamped updates, and exact state restoration. `RLIMIT_NICE`-authorized
+unprivileged raises, distinct per-thread nice values, and scheduler weighting
+remain pending, so both syscalls remain Partial.
+
 `getrlimit` now accepts every Linux resource number from `RLIMIT_CPU` through
 `RLIMIT_RTTIME`. Finite limits reflect Ginux's actual process, descriptor,
 signal, nice, and realtime-priority boundaries; resources without a present
