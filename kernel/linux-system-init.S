@@ -11,6 +11,54 @@ ginux_linux_system_init:
     syscall
     call .Lrequire_one
 
+    push r12
+    push r13
+    movabs r12, 0x00000b0908070605
+    mov r13d, 6
+.Lstatic_clock_gettime_loop:
+    mov edi, r12d
+    and edi, 0xff
+    lea rsi, [rip + .Lclock]
+    mov eax, 228
+    syscall
+    call .Lrequire_zero
+    cmp qword ptr [rip + .Lclock + 8], 1000000000
+    jae .Lfailure
+    cmp edi, 5
+    jne .Lstatic_clock_fine
+    mov rax, qword ptr [rip + .Lclock + 8]
+    xor edx, edx
+    mov ecx, 10000000
+    div rcx
+    test rdx, rdx
+    jne .Lfailure
+.Lstatic_clock_fine:
+    xor esi, esi
+    mov eax, 229
+    syscall
+    call .Lrequire_zero
+    shr r12, 8
+    dec r13d
+    jne .Lstatic_clock_gettime_loop
+
+    mov edi, 5
+    lea rsi, [rip + .Lclock]
+    mov eax, 229
+    syscall
+    call .Lrequire_zero
+    cmp qword ptr [rip + .Lclock], 0
+    jne .Lfailure
+    cmp qword ptr [rip + .Lclock + 8], 10000000
+    jne .Lfailure
+
+    mov edi, 10
+    lea rsi, [rip + .Lclock]
+    mov eax, 228
+    syscall
+    call .Lrequire_einval
+    pop r13
+    pop r12
+
     xor edi, edi
     xor esi, esi
     xor edx, edx
@@ -3412,6 +3460,8 @@ ginux_linux_system_init:
 
 .section .data
 .align 8
+.Lclock:
+    .space 16
 .Lready:
     .ascii "GINUX_SYSTEM_INIT_V0\n"
 .Lready_end:

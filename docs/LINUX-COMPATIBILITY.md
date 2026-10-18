@@ -77,6 +77,15 @@ domain, including relative/absolute arm, query, overrun, and
 delete operations. Signal/thread notification, realtime clocks, multiple timer
 objects, and overrun accumulation remain pending.
 
+`clock_gettime` and `clock_getres` accept every Linux static clock ID that is
+readable without changing system time: realtime, monotonic, process/thread CPU,
+monotonic raw, realtime/monotonic coarse, boottime, realtime/boottime alarm,
+and TAI. Coarse clocks use and report the Ginux 100 Hz clock-tick resolution;
+boottime equals monotonic because Ginux does not yet suspend, and TAI equals
+realtime until a trusted time service supplies a TAI offset. Dynamic clock IDs
+and exact multi-process/thread CPU accounting remain pending, so both syscalls
+remain Partial.
+
 System V shared memory now uses domain-owned, dynamically allocated frame
 objects whose lifetime is independent of any one mapping. `shmget`, `shmat`,
 `shmdt`, and `shmctl(IPC_STAT/IPC_RMID)` provide keyed creation, shared page

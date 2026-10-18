@@ -2686,6 +2686,11 @@ if ! grep -q '^ginux: Linux restart_syscall default interruption validated' "$ou
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux static clock ID and resolution profile validated' "$output_file"; then
+    echo "Boot test failed: Linux static clock IDs and resolutions were not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux container-local root credentials verified' "$output_file"; then
     echo "Boot test failed: Linux container-local root credentials were not verified." >&2
     exit 1

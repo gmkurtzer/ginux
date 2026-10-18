@@ -773,6 +773,12 @@ const LINUX_CLOCK_REALTIME: u64 = 0;
 const LINUX_CLOCK_PROCESS_CPUTIME_ID: u64 = 2;
 const LINUX_CLOCK_THREAD_CPUTIME_ID: u64 = 3;
 const LINUX_CLOCK_MONOTONIC_RAW: u64 = 4;
+const LINUX_CLOCK_REALTIME_COARSE: u64 = 5;
+const LINUX_CLOCK_MONOTONIC_COARSE: u64 = 6;
+const LINUX_CLOCK_BOOTTIME: u64 = 7;
+const LINUX_CLOCK_REALTIME_ALARM: u64 = 8;
+const LINUX_CLOCK_BOOTTIME_ALARM: u64 = 9;
+const LINUX_CLOCK_TAI: u64 = 11;
 const NANOSECONDS_PER_SECOND: u64 = 1_000_000_000;
 const LINUX_CLOCK_TICKS_PER_SECOND: u64 = 100;
 
@@ -10103,13 +10109,27 @@ fn linux_clock_gettime(clock: u64, output_address: u64) -> u64 {
     if !linux_clock_supported(clock) {
         return LINUX_EINVAL;
     }
-    let Some((seconds, nanoseconds)) = (if clock == LINUX_CLOCK_REALTIME {
+    let realtime = matches!(
+        clock,
+        LINUX_CLOCK_REALTIME
+            | LINUX_CLOCK_REALTIME_COARSE
+            | LINUX_CLOCK_REALTIME_ALARM
+            | LINUX_CLOCK_TAI
+    );
+    let Some((seconds, mut nanoseconds)) = (if realtime {
         linux_realtime_time()
     } else {
         linux_elapsed_time()
     }) else {
         return LINUX_ENOSYS;
     };
+    if matches!(
+        clock,
+        LINUX_CLOCK_REALTIME_COARSE | LINUX_CLOCK_MONOTONIC_COARSE
+    ) {
+        let resolution = NANOSECONDS_PER_SECOND / LINUX_CLOCK_TICKS_PER_SECOND;
+        nanoseconds -= nanoseconds % resolution;
+    }
     let mut timespec = [0_u8; 16];
     timespec[..8].copy_from_slice(&seconds.to_ne_bytes());
     timespec[8..].copy_from_slice(&nanoseconds.to_ne_bytes());
@@ -10194,6 +10214,12 @@ fn linux_clock_supported(clock: u64) -> bool {
             | LINUX_CLOCK_PROCESS_CPUTIME_ID
             | LINUX_CLOCK_THREAD_CPUTIME_ID
             | LINUX_CLOCK_MONOTONIC_RAW
+            | LINUX_CLOCK_REALTIME_COARSE
+            | LINUX_CLOCK_MONOTONIC_COARSE
+            | LINUX_CLOCK_BOOTTIME
+            | LINUX_CLOCK_REALTIME_ALARM
+            | LINUX_CLOCK_BOOTTIME_ALARM
+            | LINUX_CLOCK_TAI
     )
 }
 
@@ -16428,7 +16454,14 @@ fn linux_clock_getres(clock: u64, output_address: u64) -> u64 {
     if output_address == 0 {
         return 0;
     }
-    let resolution = NANOSECONDS_PER_SECOND.div_ceil(frequency);
+    let resolution = if matches!(
+        clock,
+        LINUX_CLOCK_REALTIME_COARSE | LINUX_CLOCK_MONOTONIC_COARSE
+    ) {
+        NANOSECONDS_PER_SECOND / LINUX_CLOCK_TICKS_PER_SECOND
+    } else {
+        NANOSECONDS_PER_SECOND.div_ceil(frequency)
+    };
     let mut timespec = [0_u8; 16];
     timespec[..8].copy_from_slice(&(resolution / NANOSECONDS_PER_SECOND).to_ne_bytes());
     timespec[8..].copy_from_slice(&(resolution % NANOSECONDS_PER_SECOND).to_ne_bytes());
