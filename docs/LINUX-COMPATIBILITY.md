@@ -93,6 +93,10 @@ Event and notification interfaces apply the same rule to epoll, eventfd,
 timerfd, signalfd, inotify, fanotify, and userfaultfd descriptors and flag
 words. Boot tests create, configure, and retire these objects with dirty upper
 register bits, including epoll registration and descriptor cleanup.
+`select`/`pselect6` convert `nfds` as a signed Linux `int`; epoll wait variants
+do the same for the epoll descriptor and `maxevents`. Verification covers a
+zero-timeout select and an immediately readable epoll target with dirty upper
+register bits.
 
 The ring-3 controller directly verifies its Linux PID/TID, parent,
 process-group, session, UID/GID, supplementary-group, scheduler-yield, and

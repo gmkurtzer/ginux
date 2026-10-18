@@ -9074,7 +9074,7 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_GETDENTS64_SYSCALL => linux_getdents64(first_argument, buffer, count),
         LINUX_READAHEAD_SYSCALL => linux_readahead(first_argument, buffer, count),
         LINUX_EPOLL_CREATE_SYSCALL => {
-            if first_argument == 0 {
+            if first_argument as i32 == 0 {
                 LINUX_EINVAL
             } else {
                 linux_epoll_create1(0)
@@ -15816,6 +15816,14 @@ fn verify_linux_event_argument_widths() -> bool {
     let epoll = linux_epoll_create1(UPPER_REGISTER_BITS | LINUX_O_CLOEXEC);
     let mut event = [0_u8; 12];
     event[..4].copy_from_slice(&u32::from(LINUX_POLLIN).to_ne_bytes());
+    let caller = LinuxUserContext {
+        registers: LinuxSyscallFrame::ZERO,
+        rip: 0,
+        rsp: 0,
+        rflags: 0,
+        rax: 0,
+        fs_base: 0,
+    };
     let epoll_valid = eventfd < LINUX_AUX_DESCRIPTOR_LIMIT
         && epoll < LINUX_AUX_DESCRIPTOR_LIMIT
         && linux_descriptor_close_on_exec(epoll)
@@ -15826,12 +15834,37 @@ fn verify_linux_event_argument_widths() -> bool {
             UPPER_REGISTER_BITS | eventfd,
             mapping + 128,
         ) == 0
+        && linux_epoll_wait_duration_live_return(
+            core::ptr::null_mut(),
+            caller,
+            LinuxEpollWaitInput {
+                epoll: UPPER_REGISTER_BITS | epoll,
+                address: mapping + 256,
+                maximum: UPPER_REGISTER_BITS | 1,
+            },
+            Some(0),
+            LINUX_THREAD_WAIT_EPOLL,
+            None,
+        ) == 1
         && linux_epoll_ctl(
             UPPER_REGISTER_BITS | epoll,
             UPPER_REGISTER_BITS | LINUX_EPOLL_CTL_DEL,
             UPPER_REGISTER_BITS | eventfd,
             0,
         ) == 0;
+    let select_valid = linux_select_with_copy(
+        LinuxSelectInput {
+            descriptor_count: UPPER_REGISTER_BITS,
+            read_address: 0,
+            write_address: 0,
+            exception_address: 0,
+            timeout_address: mapping,
+            signal_mask_address: 0,
+        },
+        false,
+        copy_from_linux_user,
+        copy_to_linux_user,
+    ) == 0;
     let signalfd = linux_signalfd(
         UPPER_REGISTER_BITS | u64::from(u32::MAX),
         mapping,
@@ -15850,7 +15883,7 @@ fn verify_linux_event_argument_widths() -> bool {
         }
     }
     let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
-    epoll_valid && auxiliary_valid && closed && unmapped
+    epoll_valid && select_valid && auxiliary_valid && closed && unmapped
 }
 
 fn verify_linux_filesystem_argument_widths() -> bool {
@@ -24042,10 +24075,15 @@ struct LinuxParsedSelect {
 }
 
 fn linux_select_parse(
-    input: LinuxSelectInput,
+    mut input: LinuxSelectInput,
     pselect: bool,
     copy_from: fn(u64, &mut [u8]) -> bool,
 ) -> Result<LinuxParsedSelect, u64> {
+    let descriptor_count = input.descriptor_count as i32;
+    if descriptor_count < 0 {
+        return Err(LINUX_EINVAL);
+    }
+    input.descriptor_count = descriptor_count as u64;
     if input.descriptor_count > LINUX_AUX_DESCRIPTOR_LIMIT {
         return Err(LINUX_EINVAL);
     }
@@ -26381,9 +26419,15 @@ fn linux_epoll_wait_duration_live_return(
     wait_kind: u8,
     temporary_signal_mask: Option<u64>,
 ) -> u64 {
-    if input.maximum != 1 {
+    let maximum = input.maximum as i32;
+    if maximum != 1 {
         return LINUX_EINVAL;
     }
+    let input = LinuxEpollWaitInput {
+        epoll: u64::from(input.epoll as u32),
+        maximum: maximum as u64,
+        ..input
+    };
     match linux_epoll_event(input.epoll) {
         Ok(Some(event)) => {
             return if copy_to_linux_user(input.address, &event) {
