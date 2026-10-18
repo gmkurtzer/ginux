@@ -4050,6 +4050,16 @@ struct LinuxThreadHandle {
     tid: u32,
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum LinuxThreadSignalTarget {
+    Active(LinuxThreadHandle),
+    Saved {
+        pid: u32,
+        process_slot: usize,
+        thread_slot: usize,
+    },
+}
+
 #[derive(Clone, Copy)]
 struct LinuxCloneRequest {
     flags: u64,
@@ -8671,28 +8681,21 @@ extern "sysv64" fn linux_syscall_handler(
             syscall_return,
             (user_rip, user_rflags),
         ),
-        LINUX_TGKILL_SYSCALL => match linux_tgkill_identity(first_argument, buffer) {
-            Ok(target) => linux_send_thread_signal(
-                target,
-                count,
-                LINUX_SI_TKILL,
-                registers,
-                syscall_return,
-                (user_rip, user_rflags),
-            ),
-            Err(error) => error,
-        },
-        LINUX_TKILL_SYSCALL => match linux_tkill_identity(first_argument) {
-            Ok(target) => linux_send_thread_signal(
-                target,
-                buffer,
-                LINUX_SI_TKILL,
-                registers,
-                syscall_return,
-                (user_rip, user_rflags),
-            ),
-            Err(error) => error,
-        },
+        LINUX_TGKILL_SYSCALL => linux_tgkill(
+            first_argument,
+            buffer,
+            count,
+            registers,
+            syscall_return,
+            (user_rip, user_rflags),
+        ),
+        LINUX_TKILL_SYSCALL => linux_tkill(
+            first_argument,
+            buffer,
+            registers,
+            syscall_return,
+            (user_rip, user_rflags),
+        ),
         LINUX_TIME_SYSCALL => linux_time(first_argument),
         LINUX_EXECVEAT_SYSCALL => {
             linux_execveat(first_argument, buffer, count, register(0), register(2))
@@ -11857,6 +11860,7 @@ struct LinuxProcessRuntimeState {
     rseq_length: u32,
     rseq_signature: u32,
     thread_signal_mask: u64,
+    thread_slot: u8,
     tid: u32,
     next_tid: u32,
 }
@@ -11900,6 +11904,7 @@ impl LinuxProcessRuntimeState {
         rseq_length: 0,
         rseq_signature: 0,
         thread_signal_mask: 0,
+        thread_slot: 0,
         tid: 0,
         next_tid: 0,
     };
@@ -11983,6 +11988,7 @@ fn capture_linux_process_runtime_state() -> Option<LinuxProcessRuntimeState> {
         rseq_length: LINUX_THREAD_RSEQ_LENGTHS[thread_slot].load(Ordering::SeqCst),
         rseq_signature: LINUX_THREAD_RSEQ_SIGNATURES[thread_slot].load(Ordering::SeqCst),
         thread_signal_mask: LINUX_THREAD_SIGNAL_MASKS[thread_slot].load(Ordering::SeqCst),
+        thread_slot: thread_slot as u8,
         tid: LINUX_THREAD_TIDS[thread_slot].load(Ordering::SeqCst),
         next_tid: LINUX_NEXT_TID.load(Ordering::SeqCst),
     })
@@ -33209,27 +33215,28 @@ fn linux_rt_sigqueueinfo(
     let thread = thread.map(|thread| u64::from(thread as u32));
     let signal = u64::from(signal as u32);
     let current_process = u64::from(current_linux_process_pid());
-    let target_thread = if let Some(thread) = thread {
-        if process != current_process {
-            // Cross-process thread ownership is not yet represented while a
-            // fork child is executing, so do not guess a TID-to-slot mapping.
-            return LINUX_ESRCH;
-        }
-        let target = match linux_tgkill_identity(process, thread) {
-            Ok(target) => target,
+    let resolved_thread = if let Some(thread) = thread {
+        match linux_tgkill_target(process, thread) {
+            Ok(target) => Some(target),
             Err(error) => return error,
-        };
-        Some(target)
+        }
     } else {
         None
     };
+    let target_thread = resolved_thread.and_then(|target| match target {
+        LinuxThreadSignalTarget::Active(target) => Some(target),
+        LinuxThreadSignalTarget::Saved { .. } => None,
+    });
     if signal == 0 {
-        if process != current_process {
-            let process = process as u32;
-            if linux_process::live_process_slot(process).is_none() {
+        let target_process = resolved_thread.map_or(process as u32, |target| match target {
+            LinuxThreadSignalTarget::Active(_) => current_linux_process_pid(),
+            LinuxThreadSignalTarget::Saved { pid, .. } => pid,
+        });
+        if target_process != current_linux_process_pid() {
+            if linux_process::live_process_slot(target_process).is_none() {
                 return LINUX_ESRCH;
             }
-            if !linux_signal_permitted(process, signal) {
+            if !linux_signal_permitted(target_process, signal) {
                 return LINUX_EPERM;
             }
         }
@@ -33245,6 +33252,24 @@ fn linux_rt_sigqueueinfo(
     let code = i32::from_ne_bytes(bytes[8..12].try_into().unwrap());
     let value = u64::from_ne_bytes(bytes[24..32].try_into().unwrap());
     let (sender_pid, sender_uid) = linux_signal_sender();
+    if let Some(LinuxThreadSignalTarget::Saved {
+        pid,
+        process_slot,
+        thread_slot,
+    }) = resolved_thread
+    {
+        if !linux_signal_permitted(pid, signal) {
+            return LINUX_EPERM;
+        }
+        return linux_queue_saved_thread_signal(
+            pid,
+            process_slot,
+            thread_slot,
+            signal,
+            code,
+            Some(value),
+        );
+    }
     if process != current_process {
         let process = process as u32;
         if linux_process::live_process_slot(process).is_none() {
@@ -34734,6 +34759,175 @@ fn linux_tkill_identity(thread: u64) -> Result<LinuxThreadHandle, u64> {
         return Err(LINUX_EINVAL);
     }
     linux_thread_handle_by_tid(thread as u64).ok_or(LINUX_ESRCH)
+}
+
+fn linux_saved_thread_target(pid: u32, tid: u32) -> Option<LinuxThreadSignalTarget> {
+    if pid == current_linux_process_pid()
+        || linux_process::live_process_status(pid)?.state
+            != linux_process::LiveProcessState::Running
+    {
+        return None;
+    }
+    let process_slot = linux_process::live_process_slot(pid)?;
+    let state = linux_process_runtime_state(pid)?;
+    let thread_slot = usize::from(state.thread_slot);
+    (state.valid && state.tid == tid && thread_slot < LINUX_THREAD_LIMIT).then_some(
+        LinuxThreadSignalTarget::Saved {
+            pid,
+            process_slot,
+            thread_slot,
+        },
+    )
+}
+
+fn linux_tgkill_target(thread_group: u64, thread: u64) -> Result<LinuxThreadSignalTarget, u64> {
+    let thread_group = thread_group as i32;
+    let thread = thread as i32;
+    if thread_group <= 0 || thread <= 0 {
+        return Err(LINUX_EINVAL);
+    }
+    let pid = thread_group as u32;
+    let tid = thread as u32;
+    if pid == current_linux_process_pid() {
+        return linux_thread_handle_by_tid(u64::from(tid))
+            .map(LinuxThreadSignalTarget::Active)
+            .ok_or(LINUX_ESRCH);
+    }
+    linux_saved_thread_target(pid, tid).ok_or(LINUX_ESRCH)
+}
+
+fn linux_tkill_target(thread: u64) -> Result<LinuxThreadSignalTarget, u64> {
+    let thread = thread as i32;
+    if thread <= 0 {
+        return Err(LINUX_EINVAL);
+    }
+    let tid = thread as u32;
+    if let Some(target) = linux_thread_handle_by_tid(u64::from(tid)) {
+        return Ok(LinuxThreadSignalTarget::Active(target));
+    }
+    (0..linux_process::PROCESS_LIMIT)
+        .filter_map(linux_process::live_process_pid_at)
+        .find_map(|pid| linux_saved_thread_target(pid, tid))
+        .ok_or(LINUX_ESRCH)
+}
+
+fn linux_queue_saved_thread_signal(
+    pid: u32,
+    process_slot: usize,
+    thread_slot: usize,
+    signal: u64,
+    code: i32,
+    value: Option<u64>,
+) -> u64 {
+    if linux_target_signal_ignored(pid, signal) {
+        return 0;
+    }
+    let (sender_pid, sender_uid) = linux_signal_sender();
+    match crate::linux_signal::enqueue(
+        linux_signal_instance(),
+        crate::linux_signal::Scope::Thread,
+        linux_thread_signal_queue_slot(process_slot, thread_slot),
+        crate::linux_signal::Pending {
+            signal: signal as u8,
+            code,
+            value: value.unwrap_or(0),
+            sender_pid,
+            sender_uid,
+        },
+        signal >= 32,
+    ) {
+        Ok(_) => 0,
+        Err(crate::linux_signal::Error::NoMemory) => LINUX_EAGAIN,
+        Err(crate::linux_signal::Error::Invalid) => LINUX_EINVAL,
+    }
+}
+
+fn linux_send_resolved_thread_signal(
+    target: LinuxThreadSignalTarget,
+    signal: u64,
+    code: i32,
+    output: *mut LinuxSyscallFrame,
+    interrupted: LinuxUserContext,
+    return_registers: (u64, u64),
+) -> u64 {
+    let signal = u64::from(signal as u32);
+    if !(1..=LINUX_SIGNAL_COUNT as u64).contains(&signal) && signal != 0 {
+        return LINUX_EINVAL;
+    }
+    match target {
+        LinuxThreadSignalTarget::Active(target) => {
+            linux_send_thread_signal(target, signal, code, output, interrupted, return_registers)
+        }
+        LinuxThreadSignalTarget::Saved {
+            pid,
+            process_slot,
+            thread_slot,
+        } => {
+            if !linux_signal_permitted(pid, signal) {
+                return LINUX_EPERM;
+            }
+            if signal == 0 {
+                return 0;
+            }
+            linux_queue_saved_thread_signal(pid, process_slot, thread_slot, signal, code, None)
+        }
+    }
+}
+
+fn linux_tgkill(
+    thread_group: u64,
+    thread: u64,
+    signal: u64,
+    output: *mut LinuxSyscallFrame,
+    interrupted: LinuxUserContext,
+    return_registers: (u64, u64),
+) -> u64 {
+    let result = match linux_tgkill_target(thread_group, thread) {
+        Ok(target) => linux_send_resolved_thread_signal(
+            target,
+            signal,
+            LINUX_SI_TKILL,
+            output,
+            interrupted,
+            return_registers,
+        ),
+        Err(error) => error,
+    };
+    if LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
+        && thread_group as u32 != current_linux_process_pid()
+        && result != 0
+    {
+        serial_write("ginux: cross-process tgkill rejected pid/tid/signal/error ");
+        serial_write_u64(u64::from(thread_group as u32));
+        serial_write(" ");
+        serial_write_u64(u64::from(thread as u32));
+        serial_write(" ");
+        serial_write_u64(u64::from(signal as u32));
+        serial_write(" ");
+        serial_write_u64(result);
+        serial_write("\r\n");
+    }
+    result
+}
+
+fn linux_tkill(
+    thread: u64,
+    signal: u64,
+    output: *mut LinuxSyscallFrame,
+    interrupted: LinuxUserContext,
+    return_registers: (u64, u64),
+) -> u64 {
+    match linux_tkill_target(thread) {
+        Ok(target) => linux_send_resolved_thread_signal(
+            target,
+            signal,
+            LINUX_SI_TKILL,
+            output,
+            interrupted,
+            return_registers,
+        ),
+        Err(error) => error,
+    }
 }
 
 fn linux_send_thread_signal(

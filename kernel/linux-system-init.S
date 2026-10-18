@@ -3054,8 +3054,8 @@ ginux_linux_system_init:
     syscall
     call .Lrequire_zero
 
-    # Block SIGUSR1 before fork so the child can queue it to the parent and
-    # the parent can inspect both the pending bit and sender identity.
+    # Block SIGUSR1 before fork so the child can target the parent's saved
+    # main thread and the parent can inspect pending state and sender identity.
     mov qword ptr [rip + .Lsignal_set], 0x200
     xor edi, edi
     lea rsi, [rip + .Lsignal_set]
@@ -3074,7 +3074,8 @@ ginux_linux_system_init:
     mov r12, rax
 
     lea rdi, [rip + .Lstatus]
-    mov esi, 8
+    push 8
+    pop rsi
     mov eax, 127
     syscall
     call .Lrequire_zero
@@ -3091,7 +3092,7 @@ ginux_linux_system_init:
     jne .Lfailure
     cmp dword ptr [rip + .Lstatus], 10
     jne .Lfailure
-    cmp dword ptr [rip + .Lstatus + 8], 0
+    cmp dword ptr [rip + .Lstatus + 8], -6
     jne .Lfailure
     cmp dword ptr [rip + .Lstatus + 16], 2
     jne .Lfailure
@@ -3244,9 +3245,20 @@ ginux_linux_system_init:
     syscall
     cmp rax, -3
     jne .Lfailure
-    mov edi, 1
-    mov esi, 10
-    mov eax, 62
+    push 1
+    pop rdi
+    xor esi, esi
+    push 62
+    pop rax
+    syscall
+    call .Lrequire_zero
+    push 1
+    pop rdi
+    push 1
+    pop rsi
+    push 10
+    pop rdx
+    mov eax, 234
     syscall
     call .Lrequire_zero
 
