@@ -1616,6 +1616,8 @@ pub(crate) fn verify_message_queue_lifecycle() -> bool {
         bytes.copy_from_slice(source);
         true
     });
+    let initial_info = message_queue_info(id)
+        .is_ok_and(|queue| queue.messages == 2 && queue.bytes == (large_size + small.len()) as u64);
     let selected_small = message_receive(
         id,
         small.len(),
@@ -1629,6 +1631,7 @@ pub(crate) fn verify_message_queue_lifecycle() -> bool {
         },
     );
     let mut copied = 0;
+    let after_small = message_queue_info(id).is_ok_and(|queue| queue.messages == 1);
     let copied_large = message_receive(
         id,
         large_size,
@@ -1647,7 +1650,9 @@ pub(crate) fn verify_message_queue_lifecycle() -> bool {
             valid
         },
     );
+    let after_copy = message_queue_info(id).is_ok_and(|queue| queue.messages == 1);
     let too_big = message_receive(id, 8, 3, false, false, false, 2, |_, _, _| true);
+    let after_too_big = message_queue_info(id).is_ok_and(|queue| queue.messages == 1);
     let mut truncated = [0_u8; 8];
     let truncated_large = message_receive(
         id,
@@ -1665,18 +1670,19 @@ pub(crate) fn verify_message_queue_lifecycle() -> bool {
             true
         },
     );
+    let after_truncated = message_queue_info(id).is_ok_and(|queue| queue.messages == 0);
     let verified = large_sent.is_ok()
         && small_sent.is_ok()
-        && message_queue_info(id).is_ok_and(|queue| {
-            queue.messages == 2 && queue.bytes == (large_size + small.len()) as u64
-        })
+        && initial_info
         && selected_small == Ok(small.len())
+        && after_small
         && copied_large == Ok(large_size)
         && copied == large_size
-        && message_queue_info(id).is_ok_and(|queue| queue.messages == 1)
+        && after_copy
         && too_big == Err(Error::TooBig)
-        && message_queue_info(id).is_ok_and(|queue| queue.messages == 1)
+        && after_too_big
         && truncated_large == Ok(truncated.len())
+        && after_truncated
         && truncated
             .iter()
             .enumerate()

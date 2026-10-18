@@ -6204,7 +6204,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         && !execution.runtime
         && !verify_linux_sysv_shared_memory_syscalls()
     {
-        let _ = linux_process::finish_live_process_registry();
+        let _ = linux_process::finish_live_process_registry(0);
         let _ = linux_mount::deactivate_initial();
         let _ = timer::finish_linux_wait_timer();
         let _ = restore_linux_syscall(saved_msrs);
@@ -6238,9 +6238,10 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         }
         return finish_linux_runtime(execution.mmap as u64, saved_msrs);
     }
+    let live_fork_requested = LINUX_FORK_REQUESTED.load(Ordering::SeqCst);
     let live_fork_executed = execute_deferred_live_fork();
-    let live_process_registry_finished =
-        live_fork_executed && linux_process::finish_live_process_registry();
+    let live_process_registry_finished = live_fork_executed
+        && linux_process::finish_live_process_registry(if live_fork_requested { 2 } else { 0 });
     if !live_process_registry_finished {
         serial_write("ginux: live Linux fork stages: ");
         serial_write_u64(u64::from(live_fork_executed));

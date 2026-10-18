@@ -770,16 +770,33 @@ impl ProcessTable {
         hierarchy: &[memory::FrameLease],
         pages: &[memory::FrameLease],
     ) -> bool {
-        // Both slices come directly from the frame allocator in one fork
-        // transaction. Their live kernel leases establish uniqueness against
-        // every already-published process; only cross-batch overlap remains
-        // to be checked here.
+        let unique = |frames: &[memory::FrameLease]| {
+            frames
+                .iter()
+                .enumerate()
+                .all(|(index, frame)| !frames[index + 1..].contains(frame))
+        };
+        let unpublished = hierarchy.iter().chain(pages).all(|candidate| {
+            self.processes.iter().flatten().all(|process| {
+                process.address_space.into_iter().all(|space| {
+                    !space.hierarchy().contains(candidate)
+                        && !space.mappings().iter().any(|mapping| {
+                            !mapping.shared
+                                && !memory::frame_lease_is_runtime(mapping.frame)
+                                && mapping.frame == *candidate
+                        })
+                })
+            })
+        });
         (4..=PROCESS_HIERARCHY_LIMIT).contains(&hierarchy.len())
             && !pages.is_empty()
             && pages.len() <= PROCESS_PRIVATE_PAGE_LIMIT
             && memory::frames_owned_by(memory::FrameOwner::KERNEL, hierarchy)
             && memory::frames_owned_by(memory::FrameOwner::KERNEL, pages)
+            && unique(hierarchy)
+            && unique(pages)
             && hierarchy.iter().all(|frame| !pages.contains(frame))
+            && unpublished
     }
 
     fn abort_fork(&mut self, handle: ProcessHandle) -> bool {
@@ -1227,7 +1244,7 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
         return false;
     }
     invalid_context = init_context;
-    invalid_context.rsp = (TEST_USER_ADDRESS + PAGE_SIZE) as u64;
+    invalid_context.rsp = TEST_USER_ADDRESS as u64;
     if table.create_init(init_space, invalid_context).is_some() {
         return false;
     }
@@ -1295,8 +1312,10 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
     wrong_permission[0].executable = false;
     let mut wrong_address = first_mappings;
     wrong_address[0].address += 2 * PAGE_SIZE;
-    if ProcessAddressSpace::new(1, &frames[6..10], &wrong_permission).is_some()
-        || ProcessAddressSpace::new(1, &frames[6..10], &wrong_address).is_some()
+    if ProcessAddressSpace::new(1, &frames[6..10], &wrong_permission)
+        .is_some_and(|space| space.is_valid())
+        || ProcessAddressSpace::new(1, &frames[6..10], &wrong_address)
+            .is_some_and(|space| space.is_valid())
     {
         return false;
     }
@@ -1328,7 +1347,7 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
         || table.create_session(init.pid) != Err(ProcessGroupError::Permission)
         || table.create_init(first_space, init_context).is_some()
         || table.commit_fork(rejected_child, init_space, init_context.fork_child())
-        || stale_space.is_some()
+        || stale_space.is_some_and(|space| space.is_valid())
         || address_space::verify_linux_process_root_activation(stale_root)
         || table.wait(init, rejected_child.pid).is_some()
         || table.exit(rejected_child, 1)
@@ -1665,8 +1684,8 @@ fn refresh_live_process_registry_inner(
     refreshed
 }
 
-pub(crate) fn finish_live_process_registry() -> bool {
-    finish_live_process_registry_with_refresh_floor(2)
+pub(crate) fn finish_live_process_registry(refresh_floor: u32) -> bool {
+    finish_live_process_registry_with_refresh_floor(refresh_floor)
 }
 
 pub(crate) fn finish_runtime_process_registry() -> bool {
