@@ -52,6 +52,7 @@ const LINUX_WRITE_SYSCALL: u64 = 1;
 const LINUX_CLOSE_SYSCALL: u64 = 3;
 const LINUX_POLL_SYSCALL: u64 = 7;
 const LINUX_IOCTL_SYSCALL: u64 = 16;
+const LINUX_SELECT_SYSCALL: u64 = 23;
 const LINUX_SCHED_YIELD_SYSCALL: u64 = 24;
 const LINUX_DUP_SYSCALL: u64 = 32;
 const LINUX_GETPID_SYSCALL: u64 = 39;
@@ -75,6 +76,7 @@ const LINUX_GETTID_SYSCALL: u64 = 186;
 const LINUX_TIME_SYSCALL: u64 = 201;
 const LINUX_CLOCK_GETTIME_SYSCALL: u64 = 228;
 const LINUX_CLOCK_GETRES_SYSCALL: u64 = 229;
+const LINUX_PSELECT6_SYSCALL: u64 = 270;
 const LINUX_GETRANDOM_SYSCALL: u64 = 318;
 const LINUX_PIPE2_SYSCALL: u64 = 293;
 const LINUX_FIONREAD: u64 = 0x541b;
@@ -2238,6 +2240,34 @@ fn linux_syscall(number: u64, first: u64, second: u64, third: u64) -> u64 {
     result
 }
 
+fn linux_syscall6(
+    number: u64,
+    first: u64,
+    second: u64,
+    third: u64,
+    fourth: u64,
+    fifth: u64,
+    sixth: u64,
+) -> u64 {
+    let result: u64;
+    unsafe {
+        asm!(
+            "syscall",
+            inlateout("rax") number => result,
+            in("rdi") first,
+            in("rsi") second,
+            in("rdx") third,
+            in("r10") fourth,
+            in("r8") fifth,
+            in("r9") sixth,
+            lateout("rcx") _,
+            lateout("r11") _,
+            options(nostack)
+        );
+    }
+    result
+}
+
 fn linux_sysinfo_contract(console: u64) -> bool {
     let mut information = [0_u8; 112];
     let result = linux_syscall(LINUX_SYSINFO_SYSCALL, information.as_mut_ptr() as u64, 0, 0);
@@ -2378,6 +2408,29 @@ fn linux_pipe_fionread_contract(console: u64) -> bool {
         initial_poll.len() as u64,
         0,
     );
+    let select_limit = duplicate.max(writer) + 1;
+    let mut selected_read = 1_u64 << duplicate;
+    let mut selected_write = 1_u64 << writer;
+    let mut selected_exception = selected_write;
+    let selected_ready = linux_syscall6(
+        LINUX_SELECT_SYSCALL,
+        select_limit,
+        (&mut selected_read as *mut u64) as u64,
+        (&mut selected_write as *mut u64) as u64,
+        (&mut selected_exception as *mut u64) as u64,
+        0,
+        0,
+    );
+    let mut pselected_write = 1_u64 << writer;
+    let pselected_ready = linux_syscall6(
+        LINUX_PSELECT6_SYSCALL,
+        select_limit,
+        0,
+        (&mut pselected_write as *mut u64) as u64,
+        0,
+        0,
+        0,
+    );
     let wrong_read = linux_syscall(LINUX_READ_SYSCALL, writer, 1, 1);
     let wrong_write = linux_syscall(LINUX_WRITE_SYSCALL, reader, b"x".as_ptr() as u64, 1);
     let reader_closed = linux_syscall(LINUX_CLOSE_SYSCALL, reader, 0, 0);
@@ -2392,6 +2445,16 @@ fn linux_pipe_fionread_contract(console: u64) -> bool {
         LINUX_POLL_SYSCALL,
         readable_poll.as_mut_ptr() as u64,
         readable_poll.len() as u64,
+        0,
+    );
+    let mut selected_readable = 1_u64 << duplicate;
+    let selected_readable_ready = linux_syscall6(
+        LINUX_SELECT_SYSCALL,
+        duplicate + 1,
+        (&mut selected_readable as *mut u64) as u64,
+        0,
+        0,
+        0,
         0,
     );
     let first = linux_syscall(
@@ -2447,6 +2510,17 @@ fn linux_pipe_fionread_contract(console: u64) -> bool {
     let poll_fault = linux_syscall(LINUX_POLL_SYSCALL, 1, 1, 0);
     let poll_limit = linux_syscall(LINUX_POLL_SYSCALL, 1, 65, 0);
     let empty_poll = linux_syscall(LINUX_POLL_SYSCALL, 1, 0, 0);
+    let mut invalid_select = 1_u64 << 63;
+    let select_bad_descriptor = linux_syscall6(
+        LINUX_SELECT_SYSCALL,
+        64,
+        (&mut invalid_select as *mut u64) as u64,
+        0,
+        0,
+        0,
+        0,
+    );
+    let select_fault = linux_syscall6(LINUX_SELECT_SYSCALL, 1, 1, 0, 0, 0, 0);
     let duplicate_closed = linux_syscall(LINUX_CLOSE_SYSCALL, duplicate, 0, 0);
     let double_close = linux_syscall(LINUX_CLOSE_SYSCALL, duplicate, 0, 0);
     let valid = invalid_flags == LINUX_EINVAL
@@ -2459,12 +2533,20 @@ fn linux_pipe_fionread_contract(console: u64) -> bool {
         && initial_poll[1].returned == LINUX_POLLOUT
         && initial_poll[2].returned == LINUX_POLLNVAL
         && initial_poll[3].returned == 0
+        && selected_ready == 1
+        && selected_read == 0
+        && selected_write == 1_u64 << writer
+        && selected_exception == 0
+        && pselected_ready == 1
+        && pselected_write == 1_u64 << writer
         && wrong_read == LINUX_EBADF
         && wrong_write == LINUX_EBADF
         && reader_closed == 0
         && written == 5
         && readable_ready == 1
         && readable_poll[0].returned == LINUX_POLLIN
+        && selected_readable_ready == 1
+        && selected_readable == 1_u64 << duplicate
         && first == 0
         && available == 5
         && invalid == LINUX_EFAULT
@@ -2485,6 +2567,8 @@ fn linux_pipe_fionread_contract(console: u64) -> bool {
         && poll_fault == LINUX_EFAULT
         && poll_limit == LINUX_EINVAL
         && empty_poll == 0
+        && select_bad_descriptor == LINUX_EBADF
+        && select_fault == LINUX_EFAULT
         && duplicate_closed == 0
         && double_close == LINUX_EBADF;
     if !valid {

@@ -143,12 +143,23 @@ as a sleep. Blocking with no runnable peer retains the explicit `-ENOSYS`
 boundary. This is a two-slot, fixed-snapshot proof rather than a general
 descriptor wait queue. Blocked-signal delivery, nested delivery, and syscall
 restart remain outside this profile.
+`rax = 23` (`__NR_select`) and `rax = 270` (`__NR_pselect6`) accept one
+64-bit descriptor-set word, covering descriptor numbers zero through 63. They
+copy in every supplied read, write, and exception set before evaluation,
+ignore bits at or above `nfds`, return `-EBADF` when any selected descriptor is
+not open, and clear exception sets because the current descriptor profile has
+no `POLLPRI` source. Read and write readiness use the same live descriptor
+state as `poll`, and each ready descriptor is counted once. The ring-3
+controller proves pipe read/write readiness, exception clearing, `pselect6`
+dispatch, invalid descriptor rejection, and invalid-address handling. Timeout
+waiting, temporary `pselect6` signal masks, descriptor sets wider than one
+machine word, and Linux timeout write-back remain pending.
 `rax = 271` (`__NR_ppoll`) uses the same bounded readiness engine. A null
 timeout means an infinite wait request; otherwise the complete 16-byte x86-64
 `timespec` must contain nonnegative seconds and normalized nanoseconds. An
 optional eight-byte signal mask requires the exact signal-set size and is
 sanitized to keep `SIGKILL` and `SIGSTOP` unblocked. Zero timeouts and
-immediately ready descriptors behave like `poll`. With one through four
+immediately ready descriptors behave like `poll`. With one through 64
 descriptors, no readiness, and another runnable thread, the caller blocks with
 the temporary mask installed in its per-thread state. Readiness or an
 APIC-driven deadline restores the prior mask before making the caller runnable;

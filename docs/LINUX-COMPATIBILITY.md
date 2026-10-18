@@ -91,6 +91,12 @@ userspace addresses, the descriptor-count bound, and zero-descriptor polling.
 Blocking poll remains bounded by the controller's single-thread execution
 model, so `poll` remains Partial.
 
+The same live controller probe covers immediate `select` and `pselect6` pipe
+read/write readiness, exception-set clearing, invalid descriptor `EBADF`, and
+invalid-address `EFAULT`. Their current descriptor sets stop at 64 entries;
+blocking timeouts, signal-mask transitions, and Linux timeout write-back remain
+pending, so both calls remain Partial.
+
 `clock_gettime` and `clock_getres` accept every Linux static clock ID that is
 readable without changing system time: realtime, monotonic, process/thread CPU,
 monotonic raw, realtime/monotonic coarse, boottime, realtime/boottime alarm,

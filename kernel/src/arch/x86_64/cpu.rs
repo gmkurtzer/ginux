@@ -9334,6 +9334,14 @@ fn linux_controller_syscall(
             address_space::copy_to_current_user,
         )),
         LINUX_POLL_SYSCALL => Some(linux_controller_poll(first, second, third)),
+        LINUX_SELECT_SYSCALL | LINUX_PSELECT6_SYSCALL => Some(linux_select_with_copy(
+            first,
+            second,
+            third,
+            registers.r10,
+            address_space::copy_from_current_user,
+            address_space::copy_to_current_user,
+        )),
         LINUX_DUP_SYSCALL => Some(linux_device_dup_at_least(first, 6, false)),
         LINUX_FCNTL_SYSCALL => Some(linux_descriptor_fcntl(first, second, third)),
         LINUX_CLOSE_SYSCALL => Some(linux_descriptor_close(first)),
@@ -23402,24 +23410,50 @@ fn linux_select(
     _timeout_address: u64,
     _signal_mask_address: u64,
 ) -> u64 {
+    linux_select_with_copy(
+        descriptor_count,
+        read_address,
+        write_address,
+        exception_address,
+        copy_from_linux_user,
+        copy_to_linux_user,
+    )
+}
+
+fn linux_select_with_copy(
+    descriptor_count: u64,
+    read_address: u64,
+    write_address: u64,
+    exception_address: u64,
+    copy_from: fn(u64, &mut [u8]) -> bool,
+    copy_to: fn(u64, &[u8]) -> bool,
+) -> u64 {
     if descriptor_count > u64::BITS as u64 {
         return LINUX_EINVAL;
     }
     let mut requested_read = 0_u64;
     let mut requested_write = 0_u64;
+    let mut requested_exception = 0_u64;
     if read_address != 0 {
         let mut bytes = [0_u8; 8];
-        if !copy_from_linux_user(read_address, &mut bytes) {
+        if !copy_from(read_address, &mut bytes) {
             return LINUX_EFAULT;
         }
         requested_read = u64::from_ne_bytes(bytes);
     }
     if write_address != 0 {
         let mut bytes = [0_u8; 8];
-        if !copy_from_linux_user(write_address, &mut bytes) {
+        if !copy_from(write_address, &mut bytes) {
             return LINUX_EFAULT;
         }
         requested_write = u64::from_ne_bytes(bytes);
+    }
+    if exception_address != 0 {
+        let mut bytes = [0_u8; 8];
+        if !copy_from(exception_address, &mut bytes) {
+            return LINUX_EFAULT;
+        }
+        requested_exception = u64::from_ne_bytes(bytes);
     }
     let valid_mask = if descriptor_count == 64 {
         u64::MAX
@@ -23428,10 +23462,16 @@ fn linux_select(
     };
     requested_read &= valid_mask;
     requested_write &= valid_mask;
+    requested_exception &= valid_mask;
     let mut ready_read = 0_u64;
     let mut ready_write = 0_u64;
     for descriptor in 0..descriptor_count {
         let bit = 1_u64 << descriptor;
+        if (requested_read | requested_write | requested_exception) & bit != 0
+            && !linux_descriptor_open(descriptor)
+        {
+            return LINUX_EBADF;
+        }
         if requested_read & bit != 0
             && linux_descriptor_poll_events(descriptor as i32, LINUX_POLLIN) & LINUX_POLLIN != 0
         {
@@ -23443,13 +23483,13 @@ fn linux_select(
             ready_write |= bit;
         }
     }
-    if read_address != 0 && !copy_to_linux_user(read_address, &ready_read.to_ne_bytes()) {
+    if read_address != 0 && !copy_to(read_address, &ready_read.to_ne_bytes()) {
         return LINUX_EFAULT;
     }
-    if write_address != 0 && !copy_to_linux_user(write_address, &ready_write.to_ne_bytes()) {
+    if write_address != 0 && !copy_to(write_address, &ready_write.to_ne_bytes()) {
         return LINUX_EFAULT;
     }
-    if exception_address != 0 && !copy_to_linux_user(exception_address, &0_u64.to_ne_bytes()) {
+    if exception_address != 0 && !copy_to(exception_address, &0_u64.to_ne_bytes()) {
         return LINUX_EFAULT;
     }
     u64::from((ready_read | ready_write).count_ones())
