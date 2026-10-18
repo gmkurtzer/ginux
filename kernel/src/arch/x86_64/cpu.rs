@@ -15773,8 +15773,28 @@ fn verify_linux_process_madvise_syscall() -> bool {
         && address_space::current_linux_runtime_page(nonblocking_mapping)
             .frame
             .is_none();
+    let mincore_runtime = map_populated
+        && map_nonblocking
+        && linux_mincore(nonblocking_mapping, PAGE_SIZE as u64, populated_mapping) == 0
+        && {
+            let mut resident = [1_u8];
+            copy_from_linux_user(populated_mapping, &mut resident) && resident == [0]
+        }
+        && linux_mincore(stack_page, PAGE_SIZE as u64, populated_mapping) == 0
+        && {
+            let mut resident = [0_u8];
+            copy_from_linux_user(populated_mapping, &mut resident) && resident == [1]
+        }
+        && linux_mincore(nonblocking_mapping + 1, PAGE_SIZE as u64, populated_mapping)
+            == LINUX_EINVAL
+        && linux_mincore(
+            nonblocking_mapping + PAGE_SIZE as u64,
+            PAGE_SIZE as u64,
+            populated_mapping,
+        ) == LINUX_ENOMEM;
     let population_unmapped = map_populated
         && map_nonblocking
+        && mincore_runtime
         && linux_runtime_munmap(populated_mapping, (2 * PAGE_SIZE) as u64) == 0
         && linux_runtime_munmap(nonblocking_mapping, PAGE_SIZE as u64) == 0;
     let compatibility_mapping = linux_runtime_mmap(
@@ -17430,25 +17450,36 @@ fn linux_madvise_reclaim_hint(address: u64, length: u64) -> u64 {
 }
 
 fn linux_runtime_mincore(address: u64, length: u64, vector: u64) -> u64 {
-    let Some((_, pages)) = linux_runtime_mapping_range(address, length) else {
+    if length == 0 || !address.is_multiple_of(PAGE_SIZE as u64) {
         return LINUX_EINVAL;
+    }
+    let Some(pages) = length
+        .checked_add(PAGE_SIZE as u64 - 1)
+        .and_then(|rounded| usize::try_from(rounded / PAGE_SIZE as u64).ok())
+    else {
+        return LINUX_ENOMEM;
     };
-    let bytes = length.div_ceil(PAGE_SIZE as u64) as usize;
+    if pages.checked_mul(PAGE_SIZE).is_none()
+        || address
+            .checked_add((pages * PAGE_SIZE) as u64)
+            .is_none_or(|end| end > 1 << 47)
+    {
+        return LINUX_ENOMEM;
+    }
     for page in 0..pages {
         let state = address_space::current_linux_runtime_page(address + (page * PAGE_SIZE) as u64);
         if !state.occupied {
             return LINUX_ENOMEM;
         }
-        let resident = u8::from(state.frame.is_some() && state.protection != 0);
+    }
+    for page in 0..pages {
+        let state = address_space::current_linux_runtime_page(address + (page * PAGE_SIZE) as u64);
+        let resident = u8::from(state.frame.is_some());
         if !copy_to_linux_user(vector + page as u64, &[resident]) {
             return LINUX_EFAULT;
         }
     }
-    if bytes == pages {
-        0
-    } else {
-        LINUX_EINVAL
-    }
+    0
 }
 
 fn linux_mprotect(address: u64, length: u64, protection: u64) -> u64 {
@@ -18365,7 +18396,7 @@ fn linux_process_mrelease(pid_descriptor: u64, flags: u64) -> u64 {
 }
 
 fn linux_mincore(address: u64, length: u64, vector: u64) -> u64 {
-    if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) && address >= LINUX_RUNTIME_DYNAMIC_MMAP_BASE {
+    if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
         return linux_runtime_mincore(address, length, vector);
     }
     let Some((start_slot, range_pages)) = linux_mmap_range_slots(address, length) else {

@@ -134,6 +134,11 @@ distinguishes physically populated pages from the nonblocking reserved form.
 `MAP_LOCKED` performs best-effort prefaulting; because Ginux has no swap or
 page-reclaim path, successfully backed pages remain resident without separate
 locking metadata. The verifier covers both flags on an anonymous mapping.
+Runtime `mincore` now queries every mapped VMA rather than only the dynamic
+`mmap` arena. It reports physical residency independently of page protection,
+distinguishes reserved demand pages from backed pages, rejects unaligned input
+with `EINVAL`, and reports holes with `ENOMEM`. Boot verification covers a
+nonresident anonymous reservation and the pre-seeded process stack.
 Snapshot completion imports the inheritance bit from every leaf PTE, including
 stack, heap, executable-image, and dynamically allocated mappings.
 Descriptor-control verification also covers Linux 32-bit descriptor and
