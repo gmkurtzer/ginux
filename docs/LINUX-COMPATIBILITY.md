@@ -99,9 +99,13 @@ zero-timeout select and an immediately readable epoll target with dirty upper
 register bits.
 Memory-management boundary tests cover 32-bit `msync` flags and signed
 protection-key IDs, including Linux key `-1`, plus 32-bit pidfd descriptors for
-`process_madvise` and `process_mrelease`. The remaining `MADV_DONTFORK` and
-`MADV_DOFORK` gap requires VMA inheritance metadata and is not treated as a
-no-op.
+`process_madvise` and `process_mrelease`. Page-table-backed runtime mappings
+implement `MADV_DONTFORK` and `MADV_DOFORK` with explicit leaf-PTE inheritance
+metadata. The bit survives protection changes, demand materialization,
+`MADV_DONTNEED`, and `mremap`; process cloning omits marked pages and restores
+normal inheritance after `MADV_DOFORK`. Boot verification covers advice
+toggle/persistence and a child hierarchy in which the marked parent page is
+absent.
 Descriptor-control verification also covers Linux 32-bit descriptor and
 command conversion for `fcntl` and `flock`. `flock` now uses the same explicit,
 directly tested syscall handler in both normal execution and conformance tests

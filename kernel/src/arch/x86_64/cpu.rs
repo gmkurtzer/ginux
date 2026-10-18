@@ -567,6 +567,8 @@ const LINUX_MADV_NORMAL: u64 = 0;
 const LINUX_MADV_RANDOM: u64 = 1;
 const LINUX_MADV_SEQUENTIAL: u64 = 2;
 const LINUX_MADV_WILLNEED: u64 = 3;
+const LINUX_MADV_DONTFORK: u64 = 10;
+const LINUX_MADV_DOFORK: u64 = 11;
 const LINUX_STAT_SIZE: usize = 144;
 const LINUX_STAT_CHARACTER_DEVICE_MODE: u32 = 0o020600;
 const LINUX_STAT_DIRECTORY_MODE: u32 = 0o040555;
@@ -2695,6 +2697,7 @@ pub(crate) struct LinuxActiveImageMapping {
     pub(crate) writable: bool,
     pub(crate) executable: bool,
     pub(crate) shared: bool,
+    pub(crate) dontfork: bool,
 }
 
 impl LinuxActiveImageMapping {
@@ -2704,6 +2707,7 @@ impl LinuxActiveImageMapping {
         writable: false,
         executable: false,
         shared: false,
+        dontfork: false,
     };
 }
 
@@ -2908,6 +2912,7 @@ fn linux_active_image_mappings() -> Option<(
             writable: flags & 1 != 0,
             executable: flags & 2 != 0,
             shared: false,
+            dontfork: false,
         };
     }
     if (count..LINUX_ACTIVE_IMAGE_MAPPING_LIMIT).any(|index| {
@@ -3093,6 +3098,7 @@ pub(crate) fn live_linux_process_address_space_snapshot(
             writable: true,
             executable: false,
             shared: false,
+            dontfork: false,
         },
     ) {
         if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
@@ -3134,6 +3140,7 @@ pub(crate) fn live_linux_process_address_space_snapshot(
                     writable: true,
                     executable: false,
                     shared: false,
+                    dontfork: false,
                 },
             ) {
                 return None;
@@ -3163,6 +3170,7 @@ pub(crate) fn live_linux_process_address_space_snapshot(
             writable: true,
             executable: false,
             shared: false,
+            dontfork: false,
         },
     ) {
         return None;
@@ -3185,6 +3193,7 @@ pub(crate) fn live_linux_process_address_space_snapshot(
                     writable: true,
                     executable: false,
                     shared: false,
+                    dontfork: false,
                 },
             ) {
                 return None;
@@ -3237,6 +3246,7 @@ pub(crate) fn live_linux_process_address_space_snapshot(
                 writable: true,
                 executable: false,
                 shared: false,
+                dontfork: false,
             },
         ) {
             serial_write("ginux: snapshot rejected TLS address/frame/current/index ");
@@ -3274,6 +3284,7 @@ pub(crate) fn live_linux_process_address_space_snapshot(
             writable: true,
             executable: false,
             shared: false,
+            dontfork: false,
         },
     ) {
         return None;
@@ -3312,6 +3323,7 @@ pub(crate) fn live_linux_process_address_space_snapshot(
                     writable: protection & LINUX_PROT_WRITE != 0,
                     executable: false,
                     shared: false,
+                    dontfork: false,
                 },
             )
         {
@@ -7231,6 +7243,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
                         writable: mapping.writable,
                         executable: mapping.executable,
                         shared: false,
+                        dontfork: false,
                     };
                     expected_active_count += 1;
                     true
@@ -7272,6 +7285,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
                     writable: mapping.writable && mapping.address as u64 != protected_page,
                     executable: mapping.executable,
                     shared: false,
+                    dontfork: false,
                 })
             })
         });
@@ -7297,6 +7311,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
                                     writable: mapping.writable && address as u64 != protected_page,
                                     executable: mapping.executable,
                                     shared: false,
+                                    dontfork: false,
                                 })
                             })
                     })
@@ -7316,6 +7331,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
                         writable: flags & 1 != 0,
                         executable: flags & 2 != 0,
                         shared: false,
+                        dontfork: false,
                     })
                 })
         })
@@ -15609,6 +15625,13 @@ fn verify_linux_process_madvise_syscall() -> bool {
         .all(|advice| linux_madvise(first, PAGE_SIZE as u64, advice) == 0)
         && linux_madvise(first, PAGE_SIZE as u64, 1_u64 << 32) == 0
         && linux_madvise(first, PAGE_SIZE as u64, 24) == LINUX_EINVAL;
+    let inheritance = hints
+        && linux_madvise(first, PAGE_SIZE as u64, LINUX_MADV_DONTFORK) == 0
+        && address_space::current_linux_runtime_page(first).dontfork
+        && linux_madvise(first, PAGE_SIZE as u64, LINUX_MADV_DOFORK) == 0
+        && !address_space::current_linux_runtime_page(first).dontfork
+        && linux_madvise(second, PAGE_SIZE as u64, LINUX_MADV_DONTFORK) == 0
+        && address_space::current_linux_runtime_page(second).dontfork;
     let mut vectors = [0_u8; 32];
     vectors[..8].copy_from_slice(&first.to_ne_bytes());
     vectors[8..16].copy_from_slice(&(PAGE_SIZE as u64).to_ne_bytes());
@@ -15618,7 +15641,7 @@ fn verify_linux_process_madvise_syscall() -> bool {
         (1_u64 << 32) | u64::from(current_linux_process_pid()),
         1_u64 << 32,
     );
-    let advised = hints
+    let advised = inheritance
         && descriptor < LINUX_AUX_DESCRIPTOR_LIMIT
         && copy_to_linux_user(mapping, &vectors)
         && linux_process_madvise(
@@ -15633,6 +15656,8 @@ fn verify_linux_process_madvise_syscall() -> bool {
         copy_from_linux_user(first, &mut bytes[..1])
             && copy_from_linux_user(second, &mut bytes[1..])
             && bytes == [0, 0]
+            && !address_space::current_linux_runtime_page(first).dontfork
+            && address_space::current_linux_runtime_page(second).dontfork
     };
     let errors = descriptor < LINUX_AUX_DESCRIPTOR_LIMIT
         && linux_pidfd_open(0, 0) == LINUX_EINVAL
@@ -16444,7 +16469,7 @@ fn linux_runtime_munmap(address: u64, length: u64) -> u64 {
 }
 
 fn install_linux_runtime_page(address: u64, page: address_space::LinuxRuntimePage) -> bool {
-    match page.frame {
+    let installed = match page.frame {
         Some(frame) => {
             address_space::install_current_linux_runtime_page(
                 address,
@@ -16462,7 +16487,9 @@ fn install_linux_runtime_page(address: u64, page: address_space::LinuxRuntimePag
                 false,
             ) == Some(None)
         }
-    }
+    };
+    installed
+        && (!page.dontfork || address_space::set_current_linux_runtime_page_dontfork(address, true))
 }
 
 fn linux_mremap(
@@ -16535,6 +16562,12 @@ fn linux_mremap(
                 let _ = rollback_linux_runtime_mapping(old_end, page);
                 return LINUX_ENOMEM;
             }
+            if template.dontfork
+                && !address_space::set_current_linux_runtime_page_dontfork(address, true)
+            {
+                let _ = rollback_linux_runtime_mapping(old_end, page + 1);
+                return LINUX_ENOMEM;
+            }
         }
         return old_address;
     }
@@ -16594,6 +16627,11 @@ fn linux_mremap(
                 let _ =
                     install_linux_runtime_page(old_address + (rollback * PAGE_SIZE) as u64, moved);
             }
+            return LINUX_ENOMEM;
+        }
+        if template.dontfork
+            && !address_space::set_current_linux_runtime_page_dontfork(target, true)
+        {
             return LINUX_ENOMEM;
         }
     }
@@ -17053,6 +17091,24 @@ fn linux_runtime_madvise(address: u64, length: u64, advice: u64) -> u64 {
             LINUX_ENOMEM
         };
     }
+    if matches!(advice, LINUX_MADV_DONTFORK | LINUX_MADV_DOFORK) {
+        if (0..pages).any(|page| {
+            !address_space::current_linux_runtime_page(address + (page * PAGE_SIZE) as u64).occupied
+        }) {
+            return LINUX_ENOMEM;
+        }
+        let enabled = advice == LINUX_MADV_DONTFORK;
+        return if (0..pages).all(|page| {
+            address_space::set_current_linux_runtime_page_dontfork(
+                address + (page * PAGE_SIZE) as u64,
+                enabled,
+            )
+        }) {
+            0
+        } else {
+            LINUX_EINVAL
+        };
+    }
     if advice != LINUX_MADV_DONTNEED {
         return LINUX_EINVAL;
     }
@@ -17074,6 +17130,8 @@ fn linux_runtime_madvise(address: u64, length: u64, advice: u64) -> u64 {
                     false,
                     false,
                 ) != Some(None)
+                || state.dontfork
+                    && !address_space::set_current_linux_runtime_page_dontfork(page_address, true)
             {
                 return LINUX_EINVAL;
             }
@@ -19598,6 +19656,7 @@ fn linux_execve_at(
         writable: true,
         executable: false,
         shared: false,
+        dontfork: false,
     };
     let Some(old_heap_frame) = memory::FrameLease::from_parts(
         ELF_PROBE_HEAP_FRAME.load(Ordering::SeqCst),
@@ -19619,6 +19678,7 @@ fn linux_execve_at(
         writable: true,
         executable: false,
         shared: false,
+        dontfork: false,
     };
     if let Some((_, thread_pointers)) = interpreted_tls {
         for (index, thread_pointer) in thread_pointers.into_iter().enumerate() {
@@ -19656,6 +19716,7 @@ fn linux_execve_at(
                 writable: true,
                 executable: false,
                 shared: false,
+                dontfork: false,
             };
         }
     }
@@ -19684,6 +19745,7 @@ fn linux_execve_at(
             writable: true,
             executable: false,
             shared: false,
+            dontfork: false,
         };
     }
     let clear_child_tid = current_linux_clear_child_tid().unwrap_or(0);

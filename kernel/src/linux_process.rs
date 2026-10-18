@@ -67,7 +67,9 @@ static LIVE_FORK_HIERARCHY_ALLOCATION_SCRATCH: LiveForkHierarchyAllocationScratc
 static mut TEST_PROCESS_TABLE: MaybeUninit<ProcessTable> = MaybeUninit::uninit();
 
 fn mapping_requires_fork_copy(mapping: &cpu::LinuxActiveImageMapping) -> bool {
-    !mapping.shared && (mapping.writable || !memory::frame_lease_is_runtime(mapping.frame))
+    !mapping.dontfork
+        && !mapping.shared
+        && (mapping.writable || !memory::frame_lease_is_runtime(mapping.frame))
 }
 
 const PROCESS_CHILD_PROGRAM: [u8; 42] = [
@@ -695,7 +697,11 @@ impl ProcessTable {
         child_mappings.fill(cpu::LinuxActiveImageMapping::EMPTY);
         parent_pages.fill(memory::FrameLease::EMPTY);
         let mut private_index = 0;
-        for (child, parent) in child_mappings.iter_mut().zip(parent_space.mappings()) {
+        let mut child_mapping_count = 0;
+        for parent in parent_space.mappings() {
+            if parent.dontfork {
+                continue;
+            }
             let frame = if mapping_requires_fork_copy(parent) {
                 let frame = *child_pages
                     .get(private_index)
@@ -705,13 +711,15 @@ impl ProcessTable {
             } else {
                 parent.frame
             };
-            *child = cpu::LinuxActiveImageMapping {
+            child_mappings[child_mapping_count] = cpu::LinuxActiveImageMapping {
                 address: parent.address,
                 frame,
                 writable: parent.writable,
                 executable: parent.executable,
                 shared: parent.shared,
+                dontfork: false,
             };
+            child_mapping_count += 1;
         }
         let mut parent_page_count = 0;
         for mapping in parent_space
@@ -722,7 +730,6 @@ impl ProcessTable {
             parent_pages[parent_page_count] = mapping.frame;
             parent_page_count += 1;
         }
-        let mapping_count = parent_space.mappings().len();
         LIVE_FORK_EXECUTION_STAGE.store(1134, Ordering::Release);
         let published = private_index == child_pages.len()
             && parent_page_count == child_pages.len()
@@ -741,7 +748,7 @@ impl ProcessTable {
             ProcessAddressSpace::from_validated_snapshot(
                 usize::from(handle.slot),
                 child_hierarchy,
-                &child_mappings[..mapping_count],
+                &child_mappings[..child_mapping_count],
             )
         } else {
             None
@@ -1146,6 +1153,7 @@ fn test_mapping(
         writable,
         executable,
         shared: false,
+        dontfork: false,
     }
 }
 
