@@ -2794,6 +2794,18 @@ fn linux_timekeeping_contract(console: u64) -> bool {
             resolution.as_mut_ptr() as u64,
             0,
         ) == 0
+        && linux_syscall(
+            LINUX_CLOCK_GETTIME_SYSCALL,
+            (1_u64 << 32) | LINUX_CLOCK_REALTIME,
+            realtime.as_mut_ptr() as u64,
+            0,
+        ) == 0
+        && linux_syscall(
+            LINUX_CLOCK_GETRES_SYSCALL,
+            (1_u64 << 32) | LINUX_CLOCK_MONOTONIC,
+            resolution.as_mut_ptr() as u64,
+            0,
+        ) == 0
         && resolution[0] == 0
         && (1..1_000_000_000).contains(&resolution[1])
         && linux_syscall(LINUX_CLOCK_GETTIME_SYSCALL, 10, 1, 0) == LINUX_EINVAL

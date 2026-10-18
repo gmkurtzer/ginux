@@ -9568,6 +9568,7 @@ fn linux_controller_poll(address: u64, count: u64, timeout: u64) -> u64 {
 }
 
 fn linux_controller_clock_value(clock: u64) -> Option<(u64, u64)> {
+    let clock = u64::from(clock as u32);
     let mut value = if matches!(
         clock,
         LINUX_CLOCK_REALTIME
@@ -9615,6 +9616,7 @@ fn linux_controller_clock_gettime(clock: u64, output: u64) -> u64 {
 }
 
 fn linux_controller_clock_getres(clock: u64, output: u64) -> u64 {
+    let clock = u64::from(clock as u32);
     if !linux_clock_supported(clock) {
         return LINUX_EINVAL;
     }
@@ -10648,6 +10650,7 @@ fn linux_user_stack_pointer_valid(user_stack: u64) -> bool {
 }
 
 fn linux_clock_gettime(clock: u64, output_address: u64) -> u64 {
+    let clock = u64::from(clock as u32);
     if !linux_clock_supported(clock) {
         return LINUX_EINVAL;
     }
@@ -10786,6 +10789,7 @@ fn linux_system_elapsed_time() -> Option<(u64, u64)> {
 }
 
 fn linux_clock_supported(clock: u64) -> bool {
+    let clock = u64::from(clock as u32);
     matches!(
         clock,
         LINUX_CLOCK_REALTIME
@@ -10913,6 +10917,8 @@ fn linux_clock_nanosleep_live_return(
     request: u64,
     remaining: u64,
 ) -> u64 {
+    let clock = u64::from(clock as u32);
+    let flags = u64::from(flags as u32);
     if !matches!(clock, LINUX_CLOCK_REALTIME | LINUX_CLOCK_MONOTONIC)
         || flags & !LINUX_TIMER_ABSTIME != 0
     {
@@ -17560,6 +17566,7 @@ fn linux_mincore(address: u64, length: u64, vector: u64) -> u64 {
 }
 
 fn linux_clock_getres(clock: u64, output_address: u64) -> u64 {
+    let clock = u64::from(clock as u32);
     if !linux_clock_supported(clock) {
         return LINUX_EINVAL;
     }

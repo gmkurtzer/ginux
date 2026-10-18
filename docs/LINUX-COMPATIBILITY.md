@@ -108,7 +108,8 @@ Partial.
 `clock_gettime` and `clock_getres` accept every Linux static clock ID that is
 readable without changing system time: realtime, monotonic, process/thread CPU,
 monotonic raw, realtime/monotonic coarse, boottime, realtime/boottime alarm,
-and TAI. Coarse clocks use and report the Ginux 100 Hz clock-tick resolution;
+and TAI. Clock IDs and `clock_nanosleep` flags use Linux's 32-bit UAPI
+conversion rules. Coarse clocks use and report the Ginux 100 Hz clock-tick resolution;
 boottime equals monotonic because Ginux does not yet suspend, and TAI equals
 realtime until a trusted time service supplies a TAI offset. Dynamic clock IDs
 and exact multi-process/thread CPU accounting remain pending, so both syscalls
