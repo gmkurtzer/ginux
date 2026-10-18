@@ -89,6 +89,10 @@ and flags likewise follow their declared signed or unsigned 32-bit Linux
 types. POSIX message-queue descriptors, open flags, modes, and priorities use
 the same conversion rules; their full lifecycle tests include nonzero unused
 upper register bits.
+Event and notification interfaces apply the same rule to epoll, eventfd,
+timerfd, signalfd, inotify, fanotify, and userfaultfd descriptors and flag
+words. Boot tests create, configure, and retire these objects with dirty upper
+register bits, including epoll registration and descriptor cleanup.
 
 The ring-3 controller directly verifies its Linux PID/TID, parent,
 process-group, session, UID/GID, supplementary-group, scheduler-yield, and

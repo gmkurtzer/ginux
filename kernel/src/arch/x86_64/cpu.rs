@@ -13602,6 +13602,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let descriptor_argument_widths = verify_linux_descriptor_argument_widths();
     let process_selector_widths = verify_linux_process_selector_widths();
     let filesystem_argument_widths = verify_linux_filesystem_argument_widths();
+    let event_argument_widths = verify_linux_event_argument_widths();
     let process_advice = verify_linux_process_madvise_syscall();
     let posix_queues = verify_linux_posix_message_queue_syscalls();
     let unix_inflight_rights = verify_linux_unix_inflight_rights();
@@ -13650,6 +13651,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         descriptor_argument_widths,
         process_selector_widths,
         filesystem_argument_widths,
+        event_argument_widths,
         process_advice,
         posix_queues,
         unix_inflight_rights,
@@ -13701,6 +13703,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && descriptor_argument_widths
         && process_selector_widths
         && filesystem_argument_widths
+        && event_argument_widths
         && process_advice
         && posix_queues
         && unix_inflight_rights
@@ -14699,6 +14702,7 @@ fn linux_io_uring_release() {
 }
 
 fn verify_linux_fanotify_syscalls() -> bool {
+    const UPPER_REGISTER_BITS: u64 = 1_u64 << 32;
     let mapping = linux_runtime_mmap(
         0,
         PAGE_SIZE as u64,
@@ -14724,12 +14728,21 @@ fn verify_linux_fanotify_syscalls() -> bool {
         LINUX_EBADF
     };
     let group = if source < LINUX_AUX_DESCRIPTOR_LIMIT {
-        linux_fanotify_init(3, LINUX_O_CLOEXEC)
+        linux_fanotify_init(
+            UPPER_REGISTER_BITS | 3,
+            UPPER_REGISTER_BITS | LINUX_O_CLOEXEC,
+        )
     } else {
         LINUX_EBADF
     };
     let marked = group < LINUX_AUX_DESCRIPTOR_LIMIT
-        && linux_fanotify_mark(group, 1, 2, u64::from(LINUX_AT_FDCWD), mapping) == 0;
+        && linux_fanotify_mark(
+            UPPER_REGISTER_BITS | group,
+            UPPER_REGISTER_BITS | 1,
+            2,
+            UPPER_REGISTER_BITS | u64::from(LINUX_AT_FDCWD),
+            mapping,
+        ) == 0;
     let notified = marked
         && linux_descriptor_write(source, mapping + 64, 3) == 3
         && linux_fanotify_read(group, mapping + 128, 24) == Some(24);
@@ -14759,6 +14772,7 @@ fn verify_linux_fanotify_syscalls() -> bool {
 }
 
 fn verify_linux_userfaultfd_syscall() -> bool {
+    const UPPER_REGISTER_BITS: u64 = 1_u64 << 32;
     let mapping = linux_runtime_mmap(
         0,
         PAGE_SIZE as u64,
@@ -14774,7 +14788,7 @@ fn verify_linux_userfaultfd_syscall() -> bool {
     }
     let policy = linux_userfaultfd(0) == LINUX_EPERM && linux_userfaultfd(2) == LINUX_EINVAL;
     let descriptor = if policy {
-        linux_userfaultfd(1 | LINUX_O_NONBLOCK | LINUX_O_CLOEXEC)
+        linux_userfaultfd(UPPER_REGISTER_BITS | 1 | LINUX_O_NONBLOCK | LINUX_O_CLOEXEC)
     } else {
         LINUX_EBADF
     };
@@ -14785,7 +14799,7 @@ fn verify_linux_userfaultfd_syscall() -> bool {
     api[..8].copy_from_slice(&0xaa_u64.to_ne_bytes());
     let negotiated = opened
         && copy_to_linux_user(mapping, &api)
-        && linux_userfaultfd_ioctl(descriptor, 0xc018_aa3f, mapping) == 0
+        && linux_userfaultfd_ioctl(UPPER_REGISTER_BITS | descriptor, 0xc018_aa3f, mapping) == 0
         && copy_from_linux_user(mapping, &mut api)
         && u64::from_ne_bytes(api[..8].try_into().unwrap()) == 0xaa
         && u64::from_ne_bytes(api[8..16].try_into().unwrap()) == 0
@@ -15632,7 +15646,13 @@ fn verify_linux_timer_argument_widths() -> bool {
     );
     let timerfd_valid = posix_timer
         && timerfd < LINUX_AUX_DESCRIPTOR_LIMIT
-        && linux_timerfd_settime(timerfd, UPPER_REGISTER_BITS, mapping, 0) == 0
+        && linux_timerfd_settime(
+            UPPER_REGISTER_BITS | timerfd,
+            UPPER_REGISTER_BITS,
+            mapping,
+            0,
+        ) == 0
+        && linux_timerfd_gettime(UPPER_REGISTER_BITS | timerfd, mapping) == 0
         && linux_descriptor_close(timerfd) == 0;
     if ELF_PROBE_POSIX_TIMER_ACTIVE.load(Ordering::SeqCst) {
         let _ = linux_timer_delete(1);
@@ -15774,6 +15794,63 @@ fn verify_linux_process_selector_widths() -> bool {
             0,
         ) == 0
         && linux_move_pages(UPPER_REGISTER_BITS | pid, 0, 0, 0, 0, UPPER_REGISTER_BITS) == 0
+}
+
+fn verify_linux_event_argument_widths() -> bool {
+    const UPPER_REGISTER_BITS: u64 = 1_u64 << 32;
+    let mapping = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    if !(LINUX_RUNTIME_DYNAMIC_MMAP_BASE..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
+        .contains(&mapping)
+        || !copy_to_linux_user(mapping, &[0_u8; 128])
+    {
+        return false;
+    }
+    let eventfd = linux_eventfd(1, UPPER_REGISTER_BITS | LINUX_EFD_NONBLOCK);
+    let epoll = linux_epoll_create1(UPPER_REGISTER_BITS | LINUX_O_CLOEXEC);
+    let mut event = [0_u8; 12];
+    event[..4].copy_from_slice(&u32::from(LINUX_POLLIN).to_ne_bytes());
+    let epoll_valid = eventfd < LINUX_AUX_DESCRIPTOR_LIMIT
+        && epoll < LINUX_AUX_DESCRIPTOR_LIMIT
+        && linux_descriptor_close_on_exec(epoll)
+        && copy_to_linux_user(mapping + 128, &event)
+        && linux_epoll_ctl(
+            UPPER_REGISTER_BITS | epoll,
+            UPPER_REGISTER_BITS | LINUX_EPOLL_CTL_ADD,
+            UPPER_REGISTER_BITS | eventfd,
+            mapping + 128,
+        ) == 0
+        && linux_epoll_ctl(
+            UPPER_REGISTER_BITS | epoll,
+            UPPER_REGISTER_BITS | LINUX_EPOLL_CTL_DEL,
+            UPPER_REGISTER_BITS | eventfd,
+            0,
+        ) == 0;
+    let signalfd = linux_signalfd(
+        UPPER_REGISTER_BITS | u64::from(u32::MAX),
+        mapping,
+        LINUX_SIGNAL_SET_SIZE,
+        UPPER_REGISTER_BITS | LINUX_O_CLOEXEC,
+    );
+    let inotify = linux_inotify_init(UPPER_REGISTER_BITS | LINUX_O_CLOEXEC);
+    let auxiliary_valid = signalfd < LINUX_AUX_DESCRIPTOR_LIMIT
+        && linux_descriptor_close_on_exec(signalfd)
+        && inotify < LINUX_AUX_DESCRIPTOR_LIMIT
+        && linux_descriptor_close_on_exec(inotify);
+    let mut closed = true;
+    for descriptor in [inotify, signalfd, epoll, eventfd] {
+        if descriptor < LINUX_AUX_DESCRIPTOR_LIMIT && linux_descriptor_open(descriptor) {
+            closed &= linux_descriptor_close(descriptor) == 0;
+        }
+    }
+    let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
+    epoll_valid && auxiliary_valid && closed && unmapped
 }
 
 fn verify_linux_filesystem_argument_widths() -> bool {
@@ -24677,6 +24754,7 @@ fn linux_ppoll_live_return(
 }
 
 fn linux_epoll_create1(flags: u64) -> u64 {
+    let flags = u64::from(flags as u32);
     if flags & !LINUX_O_CLOEXEC != 0 {
         return LINUX_EINVAL;
     }
@@ -24697,6 +24775,7 @@ fn linux_epoll_create1(flags: u64) -> u64 {
 }
 
 fn linux_eventfd(initial: u64, flags: u64) -> u64 {
+    let flags = u64::from(flags as u32);
     if flags & !(LINUX_EFD_SEMAPHORE | LINUX_EFD_NONBLOCK | LINUX_O_CLOEXEC) != 0 {
         return LINUX_EINVAL;
     }
@@ -25497,6 +25576,7 @@ fn linux_timer_delete(timer: u64) -> u64 {
 }
 
 fn linux_timerfd_settime(descriptor: u64, flags: u64, new_address: u64, old_address: u64) -> u64 {
+    let descriptor = u64::from(descriptor as u32);
     let flags = u64::from(flags as u32);
     if !linux_timerfd_descriptor(descriptor) {
         return LINUX_EBADF;
@@ -25541,6 +25621,7 @@ fn linux_timerfd_settime(descriptor: u64, flags: u64, new_address: u64, old_addr
 }
 
 fn linux_timerfd_gettime(descriptor: u64, address: u64) -> u64 {
+    let descriptor = u64::from(descriptor as u32);
     if !linux_timerfd_descriptor(descriptor) {
         return LINUX_EBADF;
     }
@@ -26110,6 +26191,9 @@ fn linux_pipe_readv_ranges(descriptor: u64, ranges: &[(u64, usize)]) -> u64 {
 }
 
 fn linux_epoll_ctl(epoll: u64, operation: u64, descriptor: u64, event_address: u64) -> u64 {
+    let epoll = u64::from(epoll as u32);
+    let operation = u64::from(operation as u32);
+    let descriptor = u64::from(descriptor as u32);
     if !linux_epoll_descriptor(epoll) {
         return LINUX_EBADF;
     }
@@ -26540,6 +26624,8 @@ fn linux_signalfd_descriptor(descriptor: u64) -> bool {
 fn linux_signalfd(descriptor: u64, mask_address: u64, mask_size: u64, flags: u64) -> u64 {
     const SFD_NONBLOCK: u64 = 0x800;
     const SFD_CLOEXEC: u64 = 0x8_0000;
+    let descriptor = u64::from(descriptor as u32);
+    let flags = u64::from(flags as u32);
     if mask_size != LINUX_SIGNAL_SET_SIZE || flags & !(SFD_NONBLOCK | SFD_CLOEXEC) != 0 {
         return LINUX_EINVAL;
     }
@@ -26548,7 +26634,7 @@ fn linux_signalfd(descriptor: u64, mask_address: u64, mask_size: u64, flags: u64
         return LINUX_EFAULT;
     }
     let mask = u64::from_ne_bytes(bytes) & !LINUX_UNBLOCKABLE_SIGNALS;
-    let descriptor = if descriptor == u64::MAX {
+    let descriptor = if descriptor == u64::from(u32::MAX) {
         let Some(descriptor) = (LINUX_AUX_DESCRIPTOR_FIRST..LINUX_AUX_DESCRIPTOR_LIMIT)
             .find(|descriptor| linux_aux_descriptor_free(*descriptor))
         else {
@@ -26616,6 +26702,7 @@ fn linux_userfaultfd_descriptor(descriptor: u64) -> bool {
 fn linux_userfaultfd(flags: u64) -> u64 {
     const USER_MODE_ONLY: u64 = 1;
     const VALID_FLAGS: u64 = USER_MODE_ONLY | LINUX_O_NONBLOCK | LINUX_O_CLOEXEC;
+    let flags = u64::from(flags as u32);
     if flags & !VALID_FLAGS != 0 {
         return LINUX_EINVAL;
     }
@@ -26640,6 +26727,7 @@ fn linux_userfaultfd(flags: u64) -> u64 {
 fn linux_userfaultfd_ioctl(descriptor: u64, request: u64, argument: u64) -> u64 {
     const UFFDIO_API: u64 = 0xc018_aa3f;
     const API: u64 = 0xaa;
+    let descriptor = u64::from(descriptor as u32);
     if !linux_userfaultfd_descriptor(descriptor) {
         return LINUX_EBADF;
     }
@@ -26671,6 +26759,8 @@ fn linux_fanotify_init(flags: u64, event_flags: u64) -> u64 {
     const FAN_CLOEXEC: u64 = 1;
     const FAN_NONBLOCK: u64 = 2;
     const EVENT_FLAGS: u64 = LINUX_O_LARGEFILE | LINUX_O_CLOEXEC | LINUX_O_NONBLOCK;
+    let flags = u64::from(flags as u32);
+    let event_flags = u64::from(event_flags as u32);
     if flags & !(FAN_CLOEXEC | FAN_NONBLOCK) != 0 || event_flags & !EVENT_FLAGS != 0 {
         return LINUX_EINVAL;
     }
@@ -26711,6 +26801,9 @@ fn linux_fanotify_mark(
     const FAN_MARK_REMOVE: u64 = 2;
     const FAN_MARK_FLUSH: u64 = 0x80;
     const FAN_MODIFY: u64 = 2;
+    let descriptor = u64::from(descriptor as u32);
+    let flags = u64::from(flags as u32);
+    let directory = u64::from(directory as u32);
     if !linux_fanotify_descriptor(descriptor) {
         return LINUX_EBADF;
     }
@@ -26869,6 +26962,7 @@ fn linux_inotify_instance(descriptor: u64) -> Option<usize> {
 fn linux_inotify_init(flags: u64) -> u64 {
     const IN_NONBLOCK: u64 = 0x800;
     const IN_CLOEXEC: u64 = 0x8_0000;
+    let flags = u64::from(flags as u32);
     if flags & !(IN_NONBLOCK | IN_CLOEXEC) != 0 {
         return LINUX_EINVAL;
     }
@@ -26910,11 +27004,10 @@ fn linux_inotify_add_watch(descriptor: u64, path_address: u64, mask: u64) -> u64
     const IN_MASK_ADD: u32 = 0x2000_0000;
     const IN_ALL_EVENTS: u32 = 0x0000_0fff;
     const IN_ALLOWED: u32 = IN_ALL_EVENTS | 0xb700_0000;
+    let descriptor = u64::from(descriptor as u32);
+    let mask = mask as u32;
     let Some(instance) = linux_inotify_instance(descriptor) else {
         return LINUX_EBADF;
-    };
-    let Ok(mask) = u32::try_from(mask) else {
-        return LINUX_EINVAL;
     };
     if mask & IN_ALL_EVENTS == 0 || mask & !IN_ALLOWED != 0 {
         return LINUX_EINVAL;
@@ -26994,12 +27087,15 @@ fn linux_inotify_add_watch(descriptor: u64, path_address: u64, mask: u64) -> u64
 
 fn linux_inotify_rm_watch(descriptor: u64, watch_descriptor: u64) -> u64 {
     const IN_IGNORED: u32 = 0x0000_8000;
+    let descriptor = u64::from(descriptor as u32);
+    let watch_descriptor = watch_descriptor as i32;
     let Some(instance) = linux_inotify_instance(descriptor) else {
         return LINUX_EBADF;
     };
-    let Ok(wd) = u32::try_from(watch_descriptor) else {
+    if watch_descriptor < 0 {
         return LINUX_EINVAL;
-    };
+    }
+    let wd = watch_descriptor as u32;
     let owner = instance as u16 + 1;
     let Some(index) = linux_inotify_watch_range().find(|index| {
         LINUX_INOTIFY_WATCH_OWNERS[*index].load(Ordering::SeqCst) == owner
