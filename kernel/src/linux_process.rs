@@ -106,6 +106,7 @@ struct ProcessHandle {
 enum ProcessState {
     Preparing,
     Running,
+    Stopped { signal: u8 },
     Exiting,
     Zombie { status: u8 },
 }
@@ -397,6 +398,13 @@ struct Process {
     context: Option<ProcessExecutionContext>,
     scheduler_thread: Option<scheduler::ProcessThreadHandle>,
     state: ProcessState,
+    wait_event: Option<ProcessWaitEvent>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ProcessWaitEvent {
+    Stopped { signal: u8 },
+    Continued,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -408,6 +416,8 @@ struct WaitResult {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ChildWaitState {
     Running,
+    Stopped { pid: u32, signal: u8 },
+    Continued { pid: u32 },
     Exited { pid: u32, status: u8 },
 }
 
@@ -425,6 +435,7 @@ pub(crate) struct LiveProcessDispatch {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum LiveProcessState {
     Running,
+    Stopped,
     Zombie,
 }
 
@@ -890,6 +901,7 @@ impl ProcessTable {
             return false;
         }
         process.retiring_address_space = None;
+        process.wait_event = None;
         process.state = ProcessState::Zombie { status };
         true
     }
@@ -908,6 +920,7 @@ impl ProcessTable {
         process.address_space = None;
         process.retiring_address_space = None;
         process.context = None;
+        process.wait_event = None;
         process.state = ProcessState::Zombie { status };
         true
     }
@@ -930,24 +943,42 @@ impl ProcessTable {
         Some(WaitResult { pid, status })
     }
 
-    fn child_wait_state(&self, parent: ProcessHandle, pid: Option<u32>) -> Option<ChildWaitState> {
-        self.child_wait_state_matching(parent, |process| {
-            pid.is_none_or(|pid| process.handle.pid == pid)
-        })
+    fn child_wait_state(
+        &self,
+        parent: ProcessHandle,
+        pid: Option<u32>,
+        report_stopped: bool,
+        report_continued: bool,
+    ) -> Option<ChildWaitState> {
+        self.child_wait_state_matching(
+            parent,
+            |process| pid.is_none_or(|pid| process.handle.pid == pid),
+            report_stopped,
+            report_continued,
+        )
     }
 
     fn child_group_wait_state(
         &self,
         parent: ProcessHandle,
         process_group: u32,
+        report_stopped: bool,
+        report_continued: bool,
     ) -> Option<ChildWaitState> {
-        self.child_wait_state_matching(parent, |process| process.process_group == process_group)
+        self.child_wait_state_matching(
+            parent,
+            |process| process.process_group == process_group,
+            report_stopped,
+            report_continued,
+        )
     }
 
     fn child_wait_state_matching(
         &self,
         parent: ProcessHandle,
         matches: impl Fn(&Process) -> bool,
+        report_stopped: bool,
+        report_continued: bool,
     ) -> Option<ChildWaitState> {
         if self.process(parent)?.state != ProcessState::Running {
             return None;
@@ -960,16 +991,76 @@ impl ProcessTable {
         let child = children
             .clone()
             .find(|process| matches!(process.state, ProcessState::Zombie { .. }))
+            .or_else(|| {
+                children.clone().find(|process| {
+                    report_stopped
+                        && matches!(process.wait_event, Some(ProcessWaitEvent::Stopped { .. }))
+                        || report_continued
+                            && process.wait_event == Some(ProcessWaitEvent::Continued)
+                })
+            })
             .or_else(|| children.next())?;
-        match child.state {
-            ProcessState::Running | ProcessState::Preparing | ProcessState::Exiting => {
-                Some(ChildWaitState::Running)
+        if report_stopped {
+            if let Some(ProcessWaitEvent::Stopped { signal }) = child.wait_event {
+                return Some(ChildWaitState::Stopped {
+                    pid: child.handle.pid,
+                    signal,
+                });
             }
+        }
+        if report_continued && child.wait_event == Some(ProcessWaitEvent::Continued) {
+            return Some(ChildWaitState::Continued {
+                pid: child.handle.pid,
+            });
+        }
+        match child.state {
+            ProcessState::Running
+            | ProcessState::Stopped { .. }
+            | ProcessState::Preparing
+            | ProcessState::Exiting => Some(ChildWaitState::Running),
             ProcessState::Zombie { status } => Some(ChildWaitState::Exited {
                 pid: child.handle.pid,
                 status,
             }),
         }
+    }
+
+    fn stop(&mut self, handle: ProcessHandle, signal: u8) -> bool {
+        let Some(process) = self.process_mut(handle) else {
+            return false;
+        };
+        if process.state != ProcessState::Running || signal == 0 {
+            return false;
+        }
+        process.state = ProcessState::Stopped { signal };
+        process.wait_event = Some(ProcessWaitEvent::Stopped { signal });
+        true
+    }
+
+    fn continue_process(&mut self, handle: ProcessHandle) -> bool {
+        let Some(process) = self.process_mut(handle) else {
+            return false;
+        };
+        if !matches!(process.state, ProcessState::Stopped { .. }) {
+            return false;
+        }
+        process.state = ProcessState::Running;
+        process.wait_event = Some(ProcessWaitEvent::Continued);
+        true
+    }
+
+    fn consume_wait_event(&mut self, parent: ProcessHandle, pid: u32) -> bool {
+        let Some(handle) = self.handle_by_pid(pid) else {
+            return false;
+        };
+        let Some(process) = self.process_mut(handle) else {
+            return false;
+        };
+        if process.parent != Some(parent) || process.wait_event.is_none() {
+            return false;
+        }
+        process.wait_event = None;
+        true
     }
 
     fn reap_init_zombies(&mut self) -> bool {
@@ -1087,6 +1178,7 @@ impl ProcessTable {
             context,
             scheduler_thread: None,
             state,
+            wait_event: None,
         });
         Some(handle)
     }
@@ -1095,7 +1187,7 @@ impl ProcessTable {
         let process = self.process(self.handle_by_pid(pid)?)?;
         matches!(
             process.state,
-            ProcessState::Running | ProcessState::Zombie { .. }
+            ProcessState::Running | ProcessState::Stopped { .. } | ProcessState::Zombie { .. }
         )
         .then_some((process.process_group, process.session))
     }
@@ -1483,11 +1575,15 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
         return false;
     }
     if table.process_group(first_child.pid) != Some((1, 1))
-        || table.child_wait_state(init, Some(first_child.pid)) != Some(ChildWaitState::Running)
+        || table.child_wait_state(init, Some(first_child.pid), false, false)
+            != Some(ChildWaitState::Running)
         || table.set_process_group(init.pid, first_child.pid, first_child.pid) != Ok(())
         || table.process_group(first_child.pid) != Some((3, 1))
-        || table.child_group_wait_state(init, first_child.pid) != Some(ChildWaitState::Running)
-        || table.child_group_wait_state(init, init.pid).is_some()
+        || table.child_group_wait_state(init, first_child.pid, false, false)
+            != Some(ChildWaitState::Running)
+        || table
+            .child_group_wait_state(init, init.pid, false, false)
+            .is_some()
         || table.set_process_group(init.pid, first_child.pid, init.pid) != Ok(())
         || !table.mark_executed(first_child.pid)
         || table.set_process_group(init.pid, first_child.pid, first_child.pid)
@@ -1498,6 +1594,26 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
             != Err(ProcessGroupError::Access)
         || table.set_process_group(first_child.pid, init.pid, init.pid)
             != Err(ProcessGroupError::NoSuchProcess)
+    {
+        return false;
+    }
+    if !table.stop(first_child, 19)
+        || table.child_wait_state(init, Some(first_child.pid), false, false)
+            != Some(ChildWaitState::Running)
+        || table.child_wait_state(init, Some(first_child.pid), true, false)
+            != Some(ChildWaitState::Stopped {
+                pid: first_child.pid,
+                signal: 19,
+            })
+        || !table.consume_wait_event(init, first_child.pid)
+        || !table.continue_process(first_child)
+        || table.child_wait_state(init, Some(first_child.pid), false, true)
+            != Some(ChildWaitState::Continued {
+                pid: first_child.pid,
+            })
+        || !table.consume_wait_event(init, first_child.pid)
+        || table.child_wait_state(init, Some(first_child.pid), true, true)
+            != Some(ChildWaitState::Running)
     {
         return false;
     }
@@ -1594,12 +1710,12 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
                 && !memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[mapping.frame])
         })
         || !table.exit(first_child, child_exit_status)
-        || table.child_wait_state(init, Some(first_child.pid))
+        || table.child_wait_state(init, Some(first_child.pid), false, false)
             != Some(ChildWaitState::Exited {
                 pid: first_child.pid,
                 status: child_exit_status,
             })
-        || table.child_group_wait_state(init, first_child.pid)
+        || table.child_group_wait_state(init, first_child.pid, false, false)
             != Some(ChildWaitState::Exited {
                 pid: first_child.pid,
                 status: child_exit_status,
@@ -1887,6 +2003,7 @@ pub(crate) fn live_process_status(pid: u32) -> Option<LiveProcessStatus> {
     let process = table.process(handle)?;
     let state = match process.state {
         ProcessState::Running => LiveProcessState::Running,
+        ProcessState::Stopped { .. } => LiveProcessState::Stopped,
         ProcessState::Zombie { .. } => LiveProcessState::Zombie,
         ProcessState::Preparing | ProcessState::Exiting => return None,
     };
@@ -1895,6 +2012,28 @@ pub(crate) fn live_process_status(pid: u32) -> Option<LiveProcessStatus> {
         parent_pid: process.parent.map_or(0, |parent| parent.pid),
         state,
     })
+}
+
+pub(crate) fn set_live_process_scheduler_nice(pid: u32, nice: u8) -> bool {
+    if nice > 39 {
+        return false;
+    }
+    let Some(table) = live_process_table_mut() else {
+        return false;
+    };
+    let Some(handle) = table.handle_by_pid(pid) else {
+        return false;
+    };
+    let Some(thread) = table
+        .process(handle)
+        .and_then(|process| process.scheduler_thread)
+    else {
+        return true;
+    };
+    let Some(run_queue) = scheduler::active_process_scheduler_workspace() else {
+        return false;
+    };
+    run_queue.set_priority(thread, 39_i8 - nice as i8)
 }
 
 pub(crate) fn live_process_parent_pid(pid: u32) -> Option<u32> {
@@ -2526,19 +2665,33 @@ pub(crate) fn wait_live_child(parent_pid: u32, child_pid: u32) -> Option<(u32, u
 pub(crate) fn live_child_wait_state(
     parent_pid: u32,
     child_pid: Option<u32>,
+    report_stopped: bool,
+    report_continued: bool,
 ) -> Option<ChildWaitState> {
     let table = live_process_table_mut()?;
     let parent = table.handle_by_pid(parent_pid)?;
-    table.child_wait_state(parent, child_pid)
+    table.child_wait_state(parent, child_pid, report_stopped, report_continued)
 }
 
 pub(crate) fn live_child_group_wait_state(
     parent_pid: u32,
     process_group: u32,
+    report_stopped: bool,
+    report_continued: bool,
 ) -> Option<ChildWaitState> {
     let table = live_process_table_mut()?;
     let parent = table.handle_by_pid(parent_pid)?;
-    table.child_group_wait_state(parent, process_group)
+    table.child_group_wait_state(parent, process_group, report_stopped, report_continued)
+}
+
+pub(crate) fn consume_live_child_wait_event(parent_pid: u32, child_pid: u32) -> bool {
+    let Some(table) = live_process_table_mut() else {
+        return false;
+    };
+    let Some(parent) = table.handle_by_pid(parent_pid) else {
+        return false;
+    };
+    table.consume_wait_event(parent, child_pid)
 }
 
 #[inline(never)]

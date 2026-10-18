@@ -1526,6 +1526,10 @@ if ! grep -q '^ginux: bounded Linux process lifecycle contract validated' "$outp
     echo "Boot test failed: the bounded Linux process lifecycle contract was not validated." >&2
     exit 1
 fi
+if ! grep -q '^ginux: Linux stopped and continued child wait states validated' "$output_file"; then
+    echo "Boot test failed: stopped/continued child wait reporting was not validated." >&2
+    exit 1
+fi
 
 if ! grep -q '^ginux: generation-bound Linux process roots validated' "$output_file"; then
     echo "Boot test failed: generation-bound Linux process roots were not validated." >&2
@@ -4124,6 +4128,10 @@ fi
 
 if ! grep -q '^ginux: scheduler context lifecycle verified' "$output_file"; then
     echo "Boot test failed: scheduler context lifecycle invariants failed." >&2
+    exit 1
+fi
+if ! grep -q '^ginux: scheduler priority selection verified' "$output_file"; then
+    echo "Boot test failed: scheduler priority selection was not validated." >&2
     exit 1
 fi
 

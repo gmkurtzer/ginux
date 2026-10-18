@@ -707,6 +707,8 @@ const LINUX_FILE_TMP_SCRATCH: u16 = LINUX_FILE_MASK | LINUX_TMP_FILE_NODE;
 const LINUX_PROC_PID1_STATUS: &[u8] = b"Name:\tinit\nState:\tR (running)\nPid:\t1\nPPid:\t0\n";
 const LINUX_PROC_PID2_RUNNING_STATUS: &[u8] =
     b"Name:\tinit\nState:\tR (running)\nPid:\t2\nPPid:\t1\n";
+const LINUX_PROC_PID2_STOPPED_STATUS: &[u8] =
+    b"Name:\tinit\nState:\tT (stopped)\nPid:\t2\nPPid:\t1\n";
 const LINUX_PROC_PID2_ZOMBIE_STATUS: &[u8] =
     b"Name:\tinit\nState:\tZ (zombie)\nPid:\t2\nPPid:\t1\n";
 const LINUX_PROC_CPUINFO: &[u8] = b"processor\t: 0\nvendor_id\t: GenuineIntel\ncpu family\t: 6\nmodel\t\t: 158\nmodel name\t: Ginux virtual x86-64 CPU\nstepping\t: 10\ncpu MHz\t\t: 1000.000\ncache size\t: 16384 KB\nphysical id\t: 0\nsiblings\t: 1\ncore id\t\t: 0\ncpu cores\t: 1\nfpu\t\t: yes\ncpuid level\t: 13\nflags\t\t: fpu tsc msr pae cx8 apic sep mtrr pge cmov pat clflush mmx fxsr sse sse2 syscall nx lm constant_tsc rep_good nopl xtopology cpuid tsc_known_freq pni ssse3 cx16 sse4_1 sse4_2 x2apic popcnt aes xsave avx rdrand hypervisor\nbogomips\t: 2000.00\nclflush size\t: 64\ncache_alignment\t: 64\naddress sizes\t: 46 bits physical, 48 bits virtual\n\n";
@@ -720,6 +722,7 @@ const LINUX_PROC_CMDLINE: &[u8] = b"ginux immutable=1\n";
 const LINUX_PROC_PID1_STAT: &[u8] = b"1 (init) S 0 1 1 0 -1 4194560 0 0 0 0 0 0 0 0 20 0 1 0 1 1048576 256 0 0 0 0 0 0 0 0 0 0 0 0 0 17 0 0 0 0 0 0 0 0 0 0 0 0 0\n";
 const LINUX_PROC_PID1_STATM: &[u8] = b"256 64 32 16 0 32 0\n";
 const LINUX_PROC_PID2_RUNNING_STAT: &[u8] = b"2 (init) R 1 1 1 0 -1 4194560 0 0 0 0 0 0 0 0 20 0 1 0 1 1048576 256 0 0 0 0 0 0 0 0 0 0 0 0 0 17 0 0 0 0 0 0 0 0 0 0 0 0 0\n";
+const LINUX_PROC_PID2_STOPPED_STAT: &[u8] = b"2 (init) T 1 1 1 0 -1 4194560 0 0 0 0 0 0 0 0 20 0 1 0 1 1048576 256 0 0 0 0 0 0 0 0 0 0 0 0 0 17 0 0 0 0 0 0 0 0 0 0 0 0 0\n";
 const LINUX_PROC_PID2_ZOMBIE_STAT: &[u8] = b"2 (init) Z 1 1 1 0 -1 4194560 0 0 0 0 0 0 0 0 20 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 17 0 0 0 0 0 0 0 0 0 0 0 0 0\n";
 const LINUX_PROC_PID2_STATM: &[u8] = b"256 64 32 16 0 32 0\n";
 pub(crate) const LINUX_EXEC_MAPPING_LIMIT: usize = 8;
@@ -3705,6 +3708,11 @@ fn execute_deferred_live_fork() -> bool {
         return false;
     };
     *child_state_slot = child_runtime_state;
+    if !linux_process::set_live_process_scheduler_nice(parent_pid, parent_runtime_state.nice)
+        || !linux_process::set_live_process_scheduler_nice(child.pid, child_runtime_state.nice)
+    {
+        return false;
+    }
     if child.pid == 1 || child.general[0] != 0 {
         if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
             serial_write("ginux: runtime fork produced invalid child pid/rax ");
@@ -10380,15 +10388,25 @@ enum LinuxChildWaitSelector {
 fn linux_child_wait_state(
     parent: u32,
     selector: LinuxChildWaitSelector,
+    report_stopped: bool,
+    report_continued: bool,
 ) -> Option<linux_process::ChildWaitState> {
     match selector {
-        LinuxChildWaitSelector::Any => linux_process::live_child_wait_state(parent, None),
-        LinuxChildWaitSelector::Process(pid) => {
-            linux_process::live_child_wait_state(parent, Some(pid))
+        LinuxChildWaitSelector::Any => {
+            linux_process::live_child_wait_state(parent, None, report_stopped, report_continued)
         }
-        LinuxChildWaitSelector::ProcessGroup(group) => {
-            linux_process::live_child_group_wait_state(parent, group)
-        }
+        LinuxChildWaitSelector::Process(pid) => linux_process::live_child_wait_state(
+            parent,
+            Some(pid),
+            report_stopped,
+            report_continued,
+        ),
+        LinuxChildWaitSelector::ProcessGroup(group) => linux_process::live_child_group_wait_state(
+            parent,
+            group,
+            report_stopped,
+            report_continued,
+        ),
     }
 }
 
@@ -10421,28 +10439,43 @@ fn linux_wait4(pid: u64, status_address: u64, options: u64, rusage: u64) -> u64 
         i32::MIN => return LINUX_ESRCH,
         _ => LinuxChildWaitSelector::ProcessGroup(pid.unsigned_abs()),
     };
-    let Some(state) = linux_child_wait_state(parent_pid, selector) else {
+    let Some(state) = linux_child_wait_state(
+        parent_pid,
+        selector,
+        options & LINUX_WUNTRACED != 0,
+        options & LINUX_WCONTINUED != 0,
+    ) else {
         return LINUX_ECHILD;
     };
-    let linux_process::ChildWaitState::Exited {
-        pid: waited,
-        status,
-    } = state
-    else {
-        return if options & LINUX_WNOHANG != 0 {
-            0
-        } else {
-            LINUX_ENOSYS
-        };
+    let (waited, encoded, reaped) = match state {
+        linux_process::ChildWaitState::Exited {
+            pid: waited,
+            status,
+        } => (waited, u32::from(status) << 8, true),
+        linux_process::ChildWaitState::Stopped { pid, signal } => {
+            (pid, u32::from(signal) << 8 | 0x7f, false)
+        }
+        linux_process::ChildWaitState::Continued { pid } => (pid, 0xffff, false),
+        linux_process::ChildWaitState::Running => {
+            return if options & LINUX_WNOHANG != 0 {
+                0
+            } else {
+                LINUX_ENOSYS
+            };
+        }
     };
-    let encoded = u32::from(status) << 8;
     if status_address != 0 && !copy_to_linux_user(status_address, &encoded.to_ne_bytes()) {
         return LINUX_EFAULT;
     }
     if rusage != 0 && !copy_to_linux_user(rusage, &[0_u8; LINUX_RUSAGE_SIZE]) {
         return LINUX_EFAULT;
     }
-    if linux_process::wait_live_child(parent_pid, waited) != Some((waited, status)) {
+    if reaped {
+        let status = (encoded >> 8) as u8;
+        if linux_process::wait_live_child(parent_pid, waited) != Some((waited, status)) {
+            return LINUX_ECHILD;
+        }
+    } else if !linux_process::consume_live_child_wait_event(parent_pid, waited) {
         return LINUX_ECHILD;
     }
     LINUX_PROCESS_WAIT_COUNT.fetch_add(1, Ordering::SeqCst);
@@ -10458,8 +10491,10 @@ fn linux_waitid(id_type: u64, id: u64, information: u64, options: u64, rusage: u
     let id_type = u64::from(id_type as u32);
     let id = u64::from(id as u32);
     let options = u64::from(options as u32);
-    if options & !(LINUX_WEXITED | LINUX_WNOHANG | LINUX_WNOWAIT) != 0
-        || options & LINUX_WEXITED == 0
+    if options
+        & !(LINUX_WEXITED | LINUX_WUNTRACED | LINUX_WCONTINUED | LINUX_WNOHANG | LINUX_WNOWAIT)
+        != 0
+        || options & (LINUX_WEXITED | LINUX_WUNTRACED | LINUX_WCONTINUED) == 0
     {
         return LINUX_EINVAL;
     }
@@ -10505,10 +10540,15 @@ fn linux_waitid(id_type: u64, id: u64, information: u64, options: u64, rusage: u
         return LINUX_EFAULT;
     }
     let parent = current_linux_process_pid();
-    let Some(state) = linux_child_wait_state(parent, selector) else {
+    let Some(state) = linux_child_wait_state(
+        parent,
+        selector,
+        options & LINUX_WUNTRACED != 0,
+        options & LINUX_WCONTINUED != 0,
+    ) else {
         return LINUX_ECHILD;
     };
-    let linux_process::ChildWaitState::Exited { pid, status } = state else {
+    if state == linux_process::ChildWaitState::Running {
         if options & LINUX_WNOHANG == 0 {
             return if nonblocking_pidfd {
                 LINUX_EAGAIN
@@ -10524,15 +10564,25 @@ fn linux_waitid(id_type: u64, id: u64, information: u64, options: u64, rusage: u
         }
         return 0;
     };
+    let (pid, status, code, reaped) = match state {
+        linux_process::ChildWaitState::Exited { pid, status } => {
+            (pid, u32::from(status), LINUX_CLD_EXITED, true)
+        }
+        linux_process::ChildWaitState::Stopped { pid, signal } => {
+            (pid, u32::from(signal), 5, false)
+        }
+        linux_process::ChildWaitState::Continued { pid } => (pid, 18, 6, false),
+        linux_process::ChildWaitState::Running => unreachable!(),
+    };
     let mut result = [0_u8; SIGNAL_INFORMATION_SIZE];
     result[..4].copy_from_slice(&(LINUX_SIGCHLD as i32).to_ne_bytes());
-    result[8..12].copy_from_slice(&LINUX_CLD_EXITED.to_ne_bytes());
+    result[8..12].copy_from_slice(&code.to_ne_bytes());
     result[16..20].copy_from_slice(&pid.to_ne_bytes());
     let uid = linux_process::live_process_user_namespace(pid)
         .and_then(linux_user::credentials)
         .map_or(0, |credentials| credentials.uid);
     result[20..24].copy_from_slice(&uid.to_ne_bytes());
-    result[24..28].copy_from_slice(&u32::from(status).to_ne_bytes());
+    result[24..28].copy_from_slice(&status.to_ne_bytes());
     if information != 0 && !copy_to_linux_user(information, &result) {
         return LINUX_EFAULT;
     }
@@ -10540,7 +10590,11 @@ fn linux_waitid(id_type: u64, id: u64, information: u64, options: u64, rusage: u
         return LINUX_EFAULT;
     }
     if options & LINUX_WNOWAIT == 0 {
-        if linux_process::wait_live_child(parent, pid) != Some((pid, status)) {
+        if reaped {
+            if linux_process::wait_live_child(parent, pid) != Some((pid, status as u8)) {
+                return LINUX_ECHILD;
+            }
+        } else if !linux_process::consume_live_child_wait_event(parent, pid) {
             return LINUX_ECHILD;
         }
         LINUX_PROCESS_WAIT_COUNT.fetch_add(1, Ordering::SeqCst);
@@ -30050,6 +30104,7 @@ fn linux_regular_file(state: u16) -> Option<&'static [u8]> {
         }
         return match status.state {
             linux_process::LiveProcessState::Running => Some(LINUX_PROC_PID2_RUNNING_STATUS),
+            linux_process::LiveProcessState::Stopped => Some(LINUX_PROC_PID2_STOPPED_STATUS),
             linux_process::LiveProcessState::Zombie => Some(LINUX_PROC_PID2_ZOMBIE_STATUS),
         };
     }
@@ -30070,6 +30125,7 @@ fn linux_regular_file(state: u16) -> Option<&'static [u8]> {
             let status = linux_process::live_process_status(2)?;
             return match status.state {
                 linux_process::LiveProcessState::Running => Some(LINUX_PROC_PID2_RUNNING_STAT),
+                linux_process::LiveProcessState::Stopped => Some(LINUX_PROC_PID2_STOPPED_STAT),
                 linux_process::LiveProcessState::Zombie => Some(LINUX_PROC_PID2_ZOMBIE_STAT),
             };
         }
@@ -31920,11 +31976,15 @@ fn verify_linux_cross_process_prlimit(pid: u32) -> bool {
             0,
         ) == 0
         && linux_waitid(LINUX_P_PIDFD, pidfd, 0, LINUX_WEXITED | LINUX_WNOWAIT, 0) == 0
-        && linux_process::live_child_wait_state(current_linux_process_pid(), Some(pid))
-            == Some(linux_process::ChildWaitState::Exited {
-                pid,
-                status: LINUX_PROBE_EXIT_STATUS as u8,
-            });
+        && linux_process::live_child_wait_state(
+            current_linux_process_pid(),
+            Some(pid),
+            false,
+            false,
+        ) == Some(linux_process::ChildWaitState::Exited {
+            pid,
+            status: LINUX_PROBE_EXIT_STATUS as u8,
+        });
     let parent_group = linux_process::live_process_group(current_linux_process_pid());
     let group_wait = parent_group.is_some_and(|group| {
         linux_waitid(
@@ -32507,6 +32567,9 @@ fn linux_process_nice(pid: u32) -> Option<u8> {
 }
 
 fn linux_set_process_nice(pid: u32, nice: u8) -> bool {
+    if !linux_process::set_live_process_scheduler_nice(pid, nice) {
+        return false;
+    }
     if pid == current_linux_process_pid() {
         ELF_PROBE_NICE.store(nice, Ordering::SeqCst);
         true

@@ -1762,6 +1762,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             kernel_fail("ginux: bounded Linux process lifecycle contract invalid\r\n");
         }
         serial_write("ginux: bounded Linux process lifecycle contract validated\r\n");
+        serial_write("ginux: Linux stopped and continued child wait states validated\r\n");
         serial_write("ginux: generation-bound Linux process roots validated\r\n");
         serial_write("ginux: bounded Linux process resource bundles validated\r\n");
         serial_write("ginux: Linux process mapping inventory validated\r\n");
@@ -3760,6 +3761,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             kernel_fail("\r\nginux: per-thread FS base installation failed\r\n");
         }
         serial_write("\r\nginux: scheduler context lifecycle verified");
+        serial_write("\r\nginux: scheduler priority selection verified");
         serial_write("\r\nginux: ingress and egress packet wait keys isolated");
         serial_write("\r\nginux: ingress and egress space-wait keys isolated");
         serial_write("\r\nginux: preemptible user context flags enforced");

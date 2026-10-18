@@ -58,6 +58,7 @@ struct Thread {
     initialized: bool,
     wait: Option<WaitReason>,
     context: UserContext,
+    priority: i8,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -714,6 +715,7 @@ impl Scheduler {
             initialized: true,
             wait: None,
             context,
+            priority: 0,
         });
         Some(id)
     }
@@ -733,6 +735,16 @@ impl Scheduler {
             .filter(|thread| thread.state == State::Ready)
             .map(|thread| domain::cpu_service_class(thread.domain))
             .max()?;
+        let priority = self
+            .threads
+            .iter()
+            .flatten()
+            .filter(|thread| {
+                thread.state == State::Ready
+                    && domain::cpu_service_class(thread.domain) == service_class
+            })
+            .map(|thread| thread.priority)
+            .max()?;
         for offset in 0..MAX_THREADS {
             let slot = (self.next_slot + offset) % MAX_THREADS;
             let Some(mut thread) = self.threads[slot] else {
@@ -740,6 +752,7 @@ impl Scheduler {
             };
             if thread.state == State::Ready
                 && domain::cpu_service_class(thread.domain) == service_class
+                && thread.priority == priority
             {
                 thread.state = State::Running;
                 self.threads[slot] = Some(thread);
@@ -1101,6 +1114,14 @@ impl ProcessScheduler {
 
     pub(crate) fn retire(&mut self, handle: ProcessThreadHandle) -> bool {
         self.scheduler.retire_process(handle.0)
+    }
+
+    pub(crate) fn set_priority(&mut self, handle: ProcessThreadHandle, priority: i8) -> bool {
+        let Some(thread) = self.scheduler.thread_mut(handle.0) else {
+            return false;
+        };
+        thread.priority = priority;
+        true
     }
 }
 
@@ -2308,6 +2329,13 @@ fn verify_scheduler_invariants_inner() -> Option<bool> {
         && scheduler.thread(first).is_none()
         && scheduler.thread(replacement)?.domain == 2;
 
+    let mut priority_scheduler = Scheduler::new();
+    let low_priority = priority_scheduler.create(1, first_context)?;
+    let high_priority = priority_scheduler.create(1, second_context)?;
+    priority_scheduler.thread_mut(low_priority)?.priority = -10;
+    priority_scheduler.thread_mut(high_priority)?.priority = 10;
+    let priority_valid = priority_scheduler.schedule_next()?.id == high_priority;
+
     let mut blocking = Scheduler::new();
     let blocked = blocking.create(1, first_context)?;
     let peer = blocking.create(2, second_context)?;
@@ -2590,6 +2618,7 @@ fn verify_scheduler_invariants_inner() -> Option<bool> {
         && packet_drain.thread(drain_producer)?.context.rax == 0;
     Some(
         generation_valid
+            && priority_valid
             && rollback
             && interrupt_idle_valid
             && replacement_removed
