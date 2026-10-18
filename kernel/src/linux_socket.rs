@@ -1013,15 +1013,72 @@ pub(crate) fn recv_message_blocking(
     slot: u8,
     output: &mut [u8],
     peek_only: bool,
+    wait_all: bool,
 ) -> Result<(usize, usize, Option<IpEndpoint>), Error> {
+    if output.is_empty() {
+        return Ok((0, 0, None));
+    }
+    if !wait_all || kind(slot) == Some(Kind::Udp) {
+        for _ in 0..BLOCKING_POLL_LIMIT {
+            match recv_message(slot, output, peek_only) {
+                Err(Error::WouldBlock | Error::InProgress) => core::hint::spin_loop(),
+                result => return result,
+            }
+        }
+        report_timeout(if peek_only { "peek" } else { "receive" });
+        return Err(Error::WouldBlock);
+    }
+    if peek_only {
+        let mut observed = 0;
+        for _ in 0..BLOCKING_POLL_LIMIT {
+            match recv_message(slot, output, true) {
+                Ok((copied, _, endpoint)) if copied == output.len() || copied == 0 => {
+                    return Ok((copied, copied, endpoint));
+                }
+                Ok((copied, _, _)) => observed = copied,
+                Err(Error::WouldBlock | Error::InProgress) => core::hint::spin_loop(),
+                Err(error) => {
+                    return if observed == 0 {
+                        Err(error)
+                    } else {
+                        Ok((observed, observed, None))
+                    }
+                }
+            }
+        }
+        return if observed == 0 {
+            report_timeout("peek");
+            Err(Error::WouldBlock)
+        } else {
+            Ok((observed, observed, None))
+        };
+    }
+    let mut received = 0;
     for _ in 0..BLOCKING_POLL_LIMIT {
-        match recv_message(slot, output, peek_only) {
+        match recv_message(slot, &mut output[received..], false) {
+            Ok((0, _, endpoint)) => return Ok((received, received, endpoint)),
+            Ok((copied, _, endpoint)) => {
+                received += copied;
+                if received == output.len() {
+                    return Ok((received, received, endpoint));
+                }
+            }
             Err(Error::WouldBlock | Error::InProgress) => core::hint::spin_loop(),
-            result => return result,
+            Err(error) => {
+                return if received == 0 {
+                    Err(error)
+                } else {
+                    Ok((received, received, None))
+                };
+            }
         }
     }
-    report_timeout(if peek_only { "peek" } else { "receive" });
-    Err(Error::WouldBlock)
+    if received == 0 {
+        report_timeout("receive");
+        Err(Error::WouldBlock)
+    } else {
+        Ok((received, received, None))
+    }
 }
 
 pub(crate) fn recv_blocking(

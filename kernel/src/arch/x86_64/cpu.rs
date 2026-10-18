@@ -20550,7 +20550,8 @@ fn linux_socket_recvfrom(
     const MSG_PEEK: u64 = 0x2;
     const MSG_TRUNC: u64 = 0x20;
     const MSG_DONTWAIT: u64 = 0x40;
-    const SUPPORTED_FLAGS: u64 = MSG_PEEK | MSG_TRUNC | MSG_DONTWAIT;
+    const MSG_WAITALL: u64 = 0x100;
+    const SUPPORTED_FLAGS: u64 = MSG_PEEK | MSG_TRUNC | MSG_DONTWAIT | MSG_WAITALL;
     let Some(slot) = linux_socket_slot(descriptor) else {
         return LINUX_EBADF;
     };
@@ -20561,10 +20562,11 @@ fn linux_socket_recvfrom(
     let mut bytes = [0_u8; PAGE_SIZE];
     let nonblocking = flags & MSG_DONTWAIT != 0 || linux_socket_nonblocking(descriptor);
     let peek_only = flags & MSG_PEEK != 0;
+    let wait_all = flags & MSG_WAITALL != 0;
     let result = if nonblocking {
         crate::linux_socket::recv_message(slot, &mut bytes[..length], peek_only)
     } else {
-        crate::linux_socket::recv_message_blocking(slot, &mut bytes[..length], peek_only)
+        crate::linux_socket::recv_message_blocking(slot, &mut bytes[..length], peek_only, wait_all)
     };
     let (received, message_length, endpoint) = match result {
         Ok(result) => result,
@@ -20654,7 +20656,8 @@ fn linux_socket_recvmsg(descriptor: u64, message: u64, flags: u64) -> u64 {
     const MSG_PEEK: u64 = 0x2;
     const MSG_TRUNC: u64 = 0x20;
     const MSG_DONTWAIT: u64 = 0x40;
-    const SUPPORTED_FLAGS: u64 = MSG_PEEK | MSG_TRUNC | MSG_DONTWAIT;
+    const MSG_WAITALL: u64 = 0x100;
+    const SUPPORTED_FLAGS: u64 = MSG_PEEK | MSG_TRUNC | MSG_DONTWAIT | MSG_WAITALL;
     let Some(slot) = linux_socket_slot(descriptor) else {
         return LINUX_EBADF;
     };
@@ -20691,10 +20694,16 @@ fn linux_socket_recvmsg(descriptor: u64, message: u64, flags: u64) -> u64 {
     let mut bytes = [0_u8; PAGE_SIZE];
     let nonblocking = flags & MSG_DONTWAIT != 0 || linux_socket_nonblocking(descriptor);
     let peek_only = flags & MSG_PEEK != 0;
+    let wait_all = flags & MSG_WAITALL != 0;
     let result = if nonblocking {
         crate::linux_socket::recv_message(slot, &mut bytes[..capacity], peek_only)
     } else {
-        crate::linux_socket::recv_message_blocking(slot, &mut bytes[..capacity], peek_only)
+        crate::linux_socket::recv_message_blocking(
+            slot,
+            &mut bytes[..capacity],
+            peek_only,
+            wait_all,
+        )
     };
     let (received, message_length, endpoint) = match result {
         Ok(result) => result,
