@@ -222,6 +222,15 @@ opcodes/counts from their Linux 32-bit types. Its full setup/map/submit/probe/
 close verifier now supplies dirty upper register bits at each boundary.
 `cachestat` likewise converts its descriptor and flags before validation.
 
+`modify_ldt` implements Linux's empty per-process LDT read and the retained
+x86-64 function-2 compatibility read, including its 128-byte maximum,
+zero-fill behavior, short reads, zero-length handling, bad-pointer errors, and
+32-bit function selector conversion. Boot verification covers each boundary.
+Functions 1 and `0x11` remain unsupported until Ginux has per-mm LDT storage,
+safe descriptor validation, LDTR loading, fork inheritance, and context-switch
+integration; segmented 16/32-bit execution is therefore still outside the
+current long-mode profile.
+
 The ring-3 controller directly verifies its Linux PID/TID, parent,
 process-group, session, UID/GID, supplementary-group, scheduler-yield, and
 `uname` contracts, including invalid PID, count, and userspace-address errors.

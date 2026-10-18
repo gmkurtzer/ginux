@@ -13788,6 +13788,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let io_uring = verify_linux_io_uring_syscalls();
     let scheduler_priorities = verify_linux_scheduler_priority_ranges();
     let process_priorities = verify_linux_process_priorities();
+    let modify_ldt = verify_linux_modify_ldt_syscall();
     let scheduler_queries = verify_linux_scheduler_queries();
     let scheduler_affinity = verify_linux_scheduler_affinity();
     let realtime_queries = verify_linux_realtime_queries();
@@ -13837,6 +13838,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         io_uring,
         scheduler_priorities,
         process_priorities,
+        modify_ldt,
         scheduler_queries,
         scheduler_affinity,
         realtime_queries,
@@ -13892,6 +13894,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && io_uring
         && scheduler_priorities
         && process_priorities
+        && modify_ldt
         && scheduler_queries
         && scheduler_affinity
         && realtime_queries
@@ -13965,6 +13968,44 @@ fn verify_linux_process_priorities() -> bool {
         ) == LINUX_ESRCH;
     ELF_PROBE_NICE.store(saved, Ordering::SeqCst);
     signed_and_clamped && ELF_PROBE_NICE.load(Ordering::SeqCst) == saved
+}
+
+fn verify_linux_modify_ldt_syscall() -> bool {
+    const UPPER_REGISTER_BITS: u64 = 1_u64 << 32;
+    let mapping = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    if !(LINUX_RUNTIME_DYNAMIC_MMAP_BASE..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
+        .contains(&mapping)
+    {
+        return false;
+    }
+    let mut bytes = [0xa5_u8; 160];
+    let default = copy_to_linux_user(mapping, &bytes)
+        && linux_modify_ldt(UPPER_REGISTER_BITS | 2, mapping, u64::MAX) == 128
+        && copy_from_linux_user(mapping, &mut bytes)
+        && bytes[..128] == [0; 128]
+        && bytes[128..] == [0xa5; 32];
+    let short = default
+        && copy_to_linux_user(mapping, &[0xa5; 32])
+        && linux_modify_ldt(2, mapping, 17) == 17
+        && copy_from_linux_user(mapping, &mut bytes[..32])
+        && bytes[..17] == [0; 17]
+        && bytes[17..32] == [0xa5; 15];
+    let errors = short
+        && linux_modify_ldt(2, 1, 16) == LINUX_EFAULT
+        && linux_modify_ldt(2, 1, 0) == 0
+        && linux_modify_ldt(0, 1, u64::MAX) == 0
+        && linux_modify_ldt(1, mapping, 16) == LINUX_ENOSYS
+        && linux_modify_ldt(0x11, mapping, 16) == LINUX_ENOSYS
+        && linux_modify_ldt(3, mapping, 16) == LINUX_ENOSYS;
+    let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
+    errors && unmapped
 }
 
 fn verify_linux_scheduler_queries() -> bool {
@@ -32512,11 +32553,31 @@ fn linux_set_process_name(address: u64) -> u64 {
     0
 }
 
-const fn linux_modify_ldt(function: u64, _address: u64, _byte_count: u64) -> u64 {
-    if function == 0 {
-        0
-    } else {
-        LINUX_ENOSYS
+fn linux_modify_ldt(function: u64, address: u64, byte_count: u64) -> u64 {
+    match u64::from(function as u32) {
+        // No process can install an LDT yet, so the current LDT is empty.
+        0 => 0,
+        // Linux x86-64 retains this Linux 2.4 compatibility operation and
+        // returns at most 128 zero bytes.
+        2 => {
+            let length = usize::try_from(byte_count.min(128)).unwrap_or(128);
+            let zeros = [0_u8; 64];
+            let mut copied = 0;
+            while copied < length {
+                let count = (length - copied).min(zeros.len());
+                let Some(destination) = address.checked_add(copied as u64) else {
+                    return LINUX_EFAULT;
+                };
+                if !copy_to_linux_user(destination, &zeros[..count]) {
+                    return LINUX_EFAULT;
+                }
+                copied += count;
+            }
+            length as u64
+        }
+        // Installing a per-mm LDT requires context-switch integration that
+        // is deliberately not exposed by the current long-mode-only profile.
+        _ => LINUX_ENOSYS,
     }
 }
 
