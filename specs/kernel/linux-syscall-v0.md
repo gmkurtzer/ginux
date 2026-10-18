@@ -758,11 +758,17 @@ and executes it through the descriptor while retaining canonical
 `/proc/self/exe` identity.
 `AT_SYMLINK_NOFOLLOW` behavior remains unsupported.
 
-`rax = 97` (`__NR_getrlimit`) and `rax = 302` (`__NR_prlimit64`) expose immutable
-limits for `RLIMIT_STACK` and `RLIMIT_NOFILE`. The probe retains its one-page
-stack and bounded descriptor profile. Runtime domains report an unlimited
-stack because their initially mapped page grows downward on demand, and report
-the runtime descriptor-table limit.
+`rax = 97` (`__NR_getrlimit`) exposes all sixteen x86-64 Linux resource-limit
+indices from the process-local limit table. It applies Linux's unsigned
+32-bit resource argument conversion, rejects unknown indices with `-EINVAL`,
+and copies the complete 16-byte result atomically or returns `-EFAULT`. The
+ring-3 controller queries every index, validates the bounded special limits,
+the invalid-index and invalid-output errors, and high-register-bit truncation;
+the call is therefore classified Complete. `rax = 302` (`__NR_prlimit64`)
+uses the same table. The probe retains its one-page stack and bounded
+descriptor profile. Runtime domains report an unlimited stack because their
+initially mapped page grows downward on demand, and report the runtime
+descriptor-table limit.
 `prlimit64` accepts PID 0 or 1 and an optional old-limit destination. Other
 PIDs return `-ESRCH`, unsupported resources return `-EINVAL`, and any non-null
 new-limit pointer returns `-EPERM`. Output is copied only after the full

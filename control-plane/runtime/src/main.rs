@@ -2352,7 +2352,14 @@ fn linux_getrlimit_contract(console: u64) -> bool {
     }
     let valid = linux_syscall(LINUX_GETRLIMIT_SYSCALL, 16, limit.as_mut_ptr() as u64, 0)
         == LINUX_EINVAL
-        && linux_syscall(LINUX_GETRLIMIT_SYSCALL, 0, 1, 0) == LINUX_EFAULT;
+        && linux_syscall(LINUX_GETRLIMIT_SYSCALL, 0, 1, 0) == LINUX_EFAULT
+        && linux_syscall(
+            LINUX_GETRLIMIT_SYSCALL,
+            (1_u64 << 32) | 7,
+            limit.as_mut_ptr() as u64,
+            0,
+        ) == 0
+        && limit[0] >= 6;
     if !valid {
         write(console, b"ginux: resource-limit error semantics failed\r\n");
     }

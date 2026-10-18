@@ -29263,6 +29263,7 @@ fn linux_getrlimit(
     runtime: bool,
     copy: fn(u64, &[u8]) -> bool,
 ) -> u64 {
+    let resource = u64::from(resource as u32);
     let Some(limit) = linux_resource_limit(resource, runtime) else {
         return LINUX_EINVAL;
     };

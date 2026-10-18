@@ -46,7 +46,7 @@ bounded buffered console writes so the diagnostic cannot exhaust its
 native-call budget.
 
 The current profile publishes 17 of the 23 interface bits. The syscall ledger
-currently reports 81 complete runtime probes, 246 unverified implementations,
+currently reports 82 complete runtime probes, 245 unverified implementations,
 48 policy-denied calls, and no unsupported calls. The QEMU controller test
 executes the full report, checks representative entries from every outcome,
 verifies continued controller PID 1, and shuts down without a panic.
