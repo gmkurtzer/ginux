@@ -1459,65 +1459,58 @@ ginux_linux_system_init:
     mov esi, 1
     mov edx, 2
     call .Lset_socket_boolean
-    mov dword ptr [rip + .Lstatus], 0
-    mov dword ptr [rip + .Lstatus + 16], 4
     mov edi, 4
     mov esi, 1
     mov edx, 2
-    lea r10, [rip + .Lstatus]
-    lea r8, [rip + .Lstatus + 16]
-    mov eax, 55
-    syscall
-    call .Lrequire_zero
-    cmp dword ptr [rip + .Lstatus], 1
-    jne .Lfailure
+    call .Lget_socket_boolean
     mov edi, 4
     mov esi, 6
     mov edx, 1
     call .Lset_socket_boolean
-    mov dword ptr [rip + .Lstatus], 0
-    mov dword ptr [rip + .Lstatus + 16], 4
     mov edi, 4
     mov esi, 6
     mov edx, 1
-    lea r10, [rip + .Lstatus]
-    lea r8, [rip + .Lstatus + 16]
-    mov eax, 55
-    syscall
-    call .Lrequire_zero
-    cmp dword ptr [rip + .Lstatus], 1
-    jne .Lfailure
+    call .Lget_socket_boolean
     mov edi, 4
     mov esi, 1
     mov edx, 9
     call .Lset_socket_boolean
-    mov dword ptr [rip + .Lstatus], 0
-    mov dword ptr [rip + .Lstatus + 16], 4
     mov edi, 4
     mov esi, 1
     mov edx, 9
-    lea r10, [rip + .Lstatus]
-    lea r8, [rip + .Lstatus + 16]
-    mov eax, 55
-    syscall
-    call .Lrequire_zero
-    cmp dword ptr [rip + .Lstatus], 1
-    jne .Lfailure
+    call .Lget_socket_boolean
     mov edi, 4
     xor esi, esi
     mov edx, 11
     call .Lset_socket_boolean
-    mov dword ptr [rip + .Lstatus], 0
-    mov dword ptr [rip + .Lstatus + 16], 4
     mov edi, 4
     xor esi, esi
     mov edx, 11
+    call .Lget_socket_boolean
+    mov qword ptr [rip + .Lstatus], 2
+    mov qword ptr [rip + .Lstatus + 8], 345
+    mov edi, 4
+    mov esi, 1
+    mov edx, 20
+    lea r10, [rip + .Lstatus]
+    mov r8d, 16
+    mov eax, 54
+    syscall
+    call .Lrequire_zero
+    mov qword ptr [rip + .Lstatus], 0
+    mov qword ptr [rip + .Lstatus + 8], 0
+    mov dword ptr [rip + .Lstatus + 16], 16
+    mov edi, 4
+    mov esi, 1
+    mov edx, 20
     lea r10, [rip + .Lstatus]
     lea r8, [rip + .Lstatus + 16]
     mov eax, 55
     syscall
     call .Lrequire_zero
-    cmp dword ptr [rip + .Lstatus], 1
+    cmp qword ptr [rip + .Lstatus], 2
+    jne .Lfailure
+    cmp qword ptr [rip + .Lstatus + 8], 345
     jne .Lfailure
     mov edi, 4
     mov esi, 1
@@ -3435,6 +3428,19 @@ ginux_linux_system_init:
     mov eax, 54
     syscall
     jmp .Lrequire_zero
+
+.Lget_socket_boolean:
+    mov dword ptr [rip + .Lstatus], 0
+    mov dword ptr [rip + .Lstatus + 16], 4
+    lea r10, [rip + .Lstatus]
+    lea r8, [rip + .Lstatus + 16]
+    mov eax, 55
+    syscall
+    test rax, rax
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus], 1
+    jne .Lfailure
+    ret
 
 .Lrequire_zero:
     test rax, rax

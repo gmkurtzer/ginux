@@ -92,6 +92,12 @@ pub(crate) enum BooleanOption {
 }
 
 #[derive(Clone, Copy)]
+pub(crate) enum TimeoutOption {
+    Receive,
+    Send,
+}
+
+#[derive(Clone, Copy)]
 struct Slot {
     occupied: bool,
     references: u16,
@@ -112,6 +118,8 @@ struct Slot {
     receive_errors: bool,
     no_delay: bool,
     pass_credentials: bool,
+    receive_timeout_us: u64,
+    send_timeout_us: u64,
     pending_right_count: u8,
     pending_right_slots: [u8; SLOT_COUNT],
     pending_right_flags: [u32; SLOT_COUNT],
@@ -143,6 +151,8 @@ impl Slot {
         receive_errors: false,
         no_delay: false,
         pass_credentials: false,
+        receive_timeout_us: 0,
+        send_timeout_us: 0,
         pending_right_count: 0,
         pending_right_slots: [0; SLOT_COUNT],
         pending_right_flags: [0; SLOT_COUNT],
@@ -328,6 +338,8 @@ pub(crate) fn open(kind: Kind) -> Result<u8, Error> {
             receive_errors: false,
             no_delay: false,
             pass_credentials: false,
+            receive_timeout_us: 0,
+            send_timeout_us: 0,
             pending_right_count: 0,
             pending_right_slots: [0; SLOT_COUNT],
             pending_right_flags: [0; SLOT_COUNT],
@@ -372,6 +384,8 @@ pub(crate) fn open_pair() -> Result<(u8, u8), Error> {
             receive_errors: false,
             no_delay: false,
             pass_credentials: false,
+            receive_timeout_us: 0,
+            send_timeout_us: 0,
             pending_right_count: 0,
             pending_right_slots: [0; SLOT_COUNT],
             pending_right_flags: [0; SLOT_COUNT],
@@ -401,6 +415,8 @@ pub(crate) fn open_pair() -> Result<(u8, u8), Error> {
             receive_errors: false,
             no_delay: false,
             pass_credentials: false,
+            receive_timeout_us: 0,
+            send_timeout_us: 0,
             pending_right_count: 0,
             pending_right_slots: [0; SLOT_COUNT],
             pending_right_flags: [0; SLOT_COUNT],
@@ -588,6 +604,42 @@ pub(crate) fn boolean_option(slot: u8, option: BooleanOption) -> Result<bool, Er
     })
 }
 
+pub(crate) fn set_timeout_option(
+    slot: u8,
+    option: TimeoutOption,
+    microseconds: u64,
+) -> Result<(), Error> {
+    let state = unsafe { SLOTS.get_mut(usize::from(slot)) }
+        .filter(|state| state.occupied)
+        .ok_or(Error::Invalid)?;
+    match option {
+        TimeoutOption::Receive => state.receive_timeout_us = microseconds,
+        TimeoutOption::Send => state.send_timeout_us = microseconds,
+    }
+    Ok(())
+}
+
+pub(crate) fn timeout_option(slot: u8, option: TimeoutOption) -> Result<u64, Error> {
+    let state = unsafe { SLOTS.get(usize::from(slot)) }
+        .filter(|state| state.occupied)
+        .ok_or(Error::Invalid)?;
+    Ok(match option {
+        TimeoutOption::Receive => state.receive_timeout_us,
+        TimeoutOption::Send => state.send_timeout_us,
+    })
+}
+
+fn timeout_poll_limit(slot: u8, option: TimeoutOption) -> Option<usize> {
+    timeout_option(slot, option)
+        .ok()
+        .filter(|microseconds| *microseconds != 0)
+        .map(|microseconds| {
+            usize::try_from(microseconds.div_ceil(1_000))
+                .unwrap_or(usize::MAX)
+                .max(1)
+        })
+}
+
 pub(crate) fn bind(slot: u8, address: u32, requested_port: u16) -> Result<u16, Error> {
     poll();
     let runtime = runtime()?;
@@ -697,6 +749,8 @@ pub(crate) fn accept(slot: u8) -> Result<(u8, IpEndpoint), Error> {
                 receive_errors: listener.receive_errors,
                 no_delay: listener.no_delay,
                 pass_credentials: listener.pass_credentials,
+                receive_timeout_us: listener.receive_timeout_us,
+                send_timeout_us: listener.send_timeout_us,
                 pending_right_count: 0,
                 pending_right_slots: [0; SLOT_COUNT],
                 pending_right_flags: [0; SLOT_COUNT],
@@ -762,6 +816,8 @@ pub(crate) fn accept(slot: u8) -> Result<(u8, IpEndpoint), Error> {
             receive_errors: listener.receive_errors,
             no_delay: listener.no_delay,
             pass_credentials: listener.pass_credentials,
+            receive_timeout_us: listener.receive_timeout_us,
+            send_timeout_us: listener.send_timeout_us,
             pending_right_count: 0,
             pending_right_slots: [0; SLOT_COUNT],
             pending_right_flags: [0; SLOT_COUNT],
@@ -780,6 +836,15 @@ pub(crate) fn accept(slot: u8) -> Result<(u8, IpEndpoint), Error> {
 }
 
 pub(crate) fn accept_blocking(slot: u8) -> Result<(u8, IpEndpoint), Error> {
+    if let Some(limit) = timeout_poll_limit(slot, TimeoutOption::Receive) {
+        for _ in 0..limit {
+            match accept(slot) {
+                Err(Error::WouldBlock | Error::InProgress) => core::hint::spin_loop(),
+                result => return result,
+            }
+        }
+        return Err(Error::WouldBlock);
+    }
     loop {
         match accept(slot) {
             Err(Error::WouldBlock | Error::InProgress) => core::hint::spin_loop(),
@@ -958,7 +1023,8 @@ pub(crate) fn send_blocking(
     input: &[u8],
     remote: Option<IpEndpoint>,
 ) -> Result<usize, Error> {
-    for _ in 0..BLOCKING_POLL_LIMIT {
+    let limit = timeout_poll_limit(slot, TimeoutOption::Send).unwrap_or(BLOCKING_POLL_LIMIT);
+    for _ in 0..limit {
         match send(slot, input, remote) {
             Err(Error::WouldBlock | Error::InProgress) => core::hint::spin_loop(),
             result => return result,
@@ -1180,7 +1246,8 @@ pub(crate) fn recv_message_blocking(
         return Ok((0, 0, None));
     }
     if !wait_all || kind(slot) == Some(Kind::Udp) {
-        for _ in 0..BLOCKING_POLL_LIMIT {
+        let limit = timeout_poll_limit(slot, TimeoutOption::Receive).unwrap_or(BLOCKING_POLL_LIMIT);
+        for _ in 0..limit {
             match recv_message(slot, output, peek_only) {
                 Err(Error::WouldBlock | Error::InProgress) => core::hint::spin_loop(),
                 result => return result,
@@ -1191,7 +1258,8 @@ pub(crate) fn recv_message_blocking(
     }
     if peek_only {
         let mut observed = 0;
-        for _ in 0..BLOCKING_POLL_LIMIT {
+        let limit = timeout_poll_limit(slot, TimeoutOption::Receive).unwrap_or(BLOCKING_POLL_LIMIT);
+        for _ in 0..limit {
             match recv_message(slot, output, true) {
                 Ok((copied, _, endpoint)) if copied == output.len() || copied == 0 => {
                     return Ok((copied, copied, endpoint));
@@ -1215,7 +1283,8 @@ pub(crate) fn recv_message_blocking(
         };
     }
     let mut received = 0;
-    for _ in 0..BLOCKING_POLL_LIMIT {
+    let limit = timeout_poll_limit(slot, TimeoutOption::Receive).unwrap_or(BLOCKING_POLL_LIMIT);
+    for _ in 0..limit {
         match recv_message(slot, &mut output[received..], false) {
             Ok((0, _, endpoint)) => return Ok((received, received, endpoint)),
             Ok((copied, _, endpoint)) => {
@@ -1246,7 +1315,8 @@ pub(crate) fn recv_blocking(
     slot: u8,
     output: &mut [u8],
 ) -> Result<(usize, Option<IpEndpoint>), Error> {
-    for _ in 0..BLOCKING_POLL_LIMIT {
+    let limit = timeout_poll_limit(slot, TimeoutOption::Receive).unwrap_or(BLOCKING_POLL_LIMIT);
+    for _ in 0..limit {
         match recv(slot, output) {
             Err(Error::WouldBlock | Error::InProgress) => core::hint::spin_loop(),
             result => return result,
@@ -1257,7 +1327,8 @@ pub(crate) fn recv_blocking(
 }
 
 pub(crate) fn complete_connect(slot: u8) -> Result<(), Error> {
-    for _ in 0..BLOCKING_POLL_LIMIT {
+    let limit = timeout_poll_limit(slot, TimeoutOption::Send).unwrap_or(BLOCKING_POLL_LIMIT);
+    for _ in 0..limit {
         let Some((_, writable, error)) = readiness(slot) else {
             return Err(Error::Invalid);
         };

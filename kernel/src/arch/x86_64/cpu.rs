@@ -499,6 +499,7 @@ const LINUX_EMFILE: u64 = u64::MAX - 23;
 const LINUX_EINVAL: u64 = u64::MAX - 21;
 const LINUX_ENOTTY: u64 = u64::MAX - 24;
 const LINUX_ERANGE: u64 = u64::MAX - 33;
+const LINUX_EDOM: u64 = u64::MAX - 32;
 const LINUX_EOVERFLOW: u64 = u64::MAX - 74;
 const LINUX_ELOOP: u64 = u64::MAX - 39;
 const LINUX_ESTALE: u64 = u64::MAX - 115;
@@ -21282,6 +21283,33 @@ fn linux_socket_setsockopt(
     let Some(slot) = linux_socket_slot(descriptor) else {
         return LINUX_EBADF;
     };
+    if level == 1 && matches!(option, 20 | 21) {
+        if length < 16 {
+            return LINUX_EINVAL;
+        }
+        let mut supplied = [0_u8; 16];
+        if !copy_from_linux_user(value, &mut supplied) {
+            return LINUX_EFAULT;
+        }
+        let seconds = i64::from_ne_bytes(supplied[..8].try_into().unwrap());
+        let microseconds = i64::from_ne_bytes(supplied[8..].try_into().unwrap());
+        if seconds < 0 || !(0..1_000_000).contains(&microseconds) {
+            return LINUX_EDOM;
+        }
+        let Some(timeout) = (seconds as u64)
+            .checked_mul(1_000_000)
+            .and_then(|seconds| seconds.checked_add(microseconds as u64))
+        else {
+            return LINUX_EDOM;
+        };
+        let timeout_option = if option == 20 {
+            crate::linux_socket::TimeoutOption::Receive
+        } else {
+            crate::linux_socket::TimeoutOption::Send
+        };
+        return crate::linux_socket::set_timeout_option(slot, timeout_option, timeout)
+            .map_or_else(linux_socket_error, |()| 0);
+    }
     let boolean_option = match (level, option) {
         (0, 11) => Some(crate::linux_socket::BooleanOption::ReceiveErrors),
         (1, 2) => Some(crate::linux_socket::BooleanOption::ReuseAddress),
@@ -21293,7 +21321,7 @@ fn linux_socket_setsockopt(
             }
             Some(crate::linux_socket::BooleanOption::NoDelay)
         }
-        (1, 7 | 8 | 20 | 21) => None,
+        (1, 7 | 8) => None,
         _ => return LINUX_ENOPROTOOPT,
     };
     if length < 4 {
@@ -21320,6 +21348,34 @@ fn linux_socket_getsockopt(
     let Some(slot) = linux_socket_slot(descriptor) else {
         return LINUX_EBADF;
     };
+    if level == 1 && matches!(option, 20 | 21) {
+        let mut supplied = [0_u8; 4];
+        if !copy_from_linux_user(length, &mut supplied) {
+            return LINUX_EFAULT;
+        }
+        if u32::from_ne_bytes(supplied) < 16 {
+            return LINUX_EINVAL;
+        }
+        let timeout_option = if option == 20 {
+            crate::linux_socket::TimeoutOption::Receive
+        } else {
+            crate::linux_socket::TimeoutOption::Send
+        };
+        let timeout = match crate::linux_socket::timeout_option(slot, timeout_option) {
+            Ok(timeout) => timeout,
+            Err(error) => return linux_socket_error(error),
+        };
+        let mut output = [0_u8; 16];
+        output[..8].copy_from_slice(&(timeout / 1_000_000).to_ne_bytes());
+        output[8..].copy_from_slice(&(timeout % 1_000_000).to_ne_bytes());
+        return if copy_to_linux_user(value, &output)
+            && copy_to_linux_user(length, &16_u32.to_ne_bytes())
+        {
+            0
+        } else {
+            LINUX_EFAULT
+        };
+    }
     let mut supplied = [0_u8; 4];
     if !copy_from_linux_user(length, &mut supplied) || u32::from_ne_bytes(supplied) < 4 {
         return LINUX_EFAULT;

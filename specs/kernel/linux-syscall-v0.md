@@ -15,9 +15,13 @@ The socket profile proves AF_INET TCP creation, ephemeral bind, listen,
 `getsockname`, and Linux argument/error precedence. `SO_REUSEADDR`,
 `SO_KEEPALIVE`, `IP_RECVERR`, and `TCP_NODELAY` are mutable per-socket boolean
 options shared by duplicated descriptors; accepted TCP sockets inherit their
-listener's settings. Keepalive and no-delay also configure the underlying TCP
-engine. The booted proof sets and reads back each option, while short or
-unreadable values and unknown options produce `EINVAL`, `EFAULT`, and
+listener's settings. `SO_RCVTIMEO` and `SO_SNDTIMEO` accept and return the
+x86-64 Linux 16-byte `timeval`, reject negative or out-of-range fields with
+`EDOM`, and bound receive/accept or send/connect polling after rounding a
+nonzero interval up to the kernel network clock's millisecond tick. Keepalive
+and no-delay also configure the underlying TCP engine. The booted proof sets
+and reads back the boolean options and a non-integral receive timeout, while
+short or unreadable values and unknown options produce `EINVAL`, `EFAULT`, and
 `ENOPROTOOPT` respectively. `SO_TYPE`, `SO_PROTOCOL`, `SO_DOMAIN`, and
 `SO_ACCEPTCONN` report live socket state, including the distinct UDP type and
 protocol. AF_UNIX `sendmsg` accepts up to twelve socket descriptors in one
