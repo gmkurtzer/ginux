@@ -1002,6 +1002,9 @@ writes return the completed byte count, and a nonblocking socket preserves its
 normal `-EAGAIN` behavior. Same-file and append-file output remain rejected.
 `socket` and `socketpair` narrow their family, type, and protocol arguments to
 Linux's 32-bit UAPI types before validation, ignoring stale high register bits.
+Socket address lengths, message flags, `accept4` flags, shutdown modes, and
+socket-option identifiers and value lengths follow their corresponding Linux
+32-bit UAPI conversions as well.
 `bind` admits IPv4 TCP or UDP sockets on the configured host address or
 `INADDR_ANY`. Port zero selects an ephemeral port; conflicting bindings return
 `-EADDRINUSE`, and nonlocal addresses return `-EADDRNOTAVAIL`. `listen` turns a

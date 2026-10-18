@@ -21680,6 +21680,7 @@ fn linux_socket_pair(family: u64, socket_type: u64, protocol: u64, output: u64) 
 }
 
 fn linux_socket_address(address: u64, length: u64) -> Result<smoltcp::wire::IpEndpoint, u64> {
+    let length = u64::from(length as u32);
     if length < 16 {
         return Err(LINUX_EINVAL);
     }
@@ -21699,6 +21700,7 @@ fn linux_socket_address(address: u64, length: u64) -> Result<smoltcp::wire::IpEn
 }
 
 fn linux_socket_bind_address(address: u64, length: u64) -> Result<(u32, u16), u64> {
+    let length = u64::from(length as u32);
     if length < 16 {
         return Err(LINUX_EINVAL);
     }
@@ -21755,6 +21757,7 @@ fn linux_socket_accept_address_valid(address: u64, length: u64) -> bool {
 fn linux_socket_accept(descriptor: u64, address: u64, length: u64, flags: u64) -> u64 {
     const SOCK_NONBLOCK: u64 = 0x800;
     const SOCK_CLOEXEC: u64 = 0x8_0000;
+    let flags = u64::from(flags as u32);
     if flags & !(SOCK_NONBLOCK | SOCK_CLOEXEC) != 0 {
         return LINUX_EINVAL;
     }
@@ -21816,6 +21819,7 @@ fn linux_socket_sendto(
     destination_length: u64,
 ) -> u64 {
     const SUPPORTED_FLAGS: u64 = 0x40 | 0x4000;
+    let flags = u64::from(flags as u32);
     let Some(slot) = linux_socket_slot(descriptor) else {
         return LINUX_EBADF;
     };
@@ -21884,6 +21888,7 @@ fn linux_socket_recvfrom(
     const MSG_DONTWAIT: u64 = 0x40;
     const MSG_WAITALL: u64 = 0x100;
     const SUPPORTED_FLAGS: u64 = MSG_PEEK | MSG_TRUNC | MSG_DONTWAIT | MSG_WAITALL;
+    let flags = u64::from(flags as u32);
     let Some(slot) = linux_socket_slot(descriptor) else {
         return LINUX_EBADF;
     };
@@ -21932,6 +21937,7 @@ fn linux_socket_recvfrom(
 
 fn linux_socket_sendmsg(descriptor: u64, message: u64, flags: u64) -> u64 {
     const SUPPORTED_FLAGS: u64 = 0x40 | 0x4000;
+    let flags = u64::from(flags as u32);
     let Some(slot) = linux_socket_slot(descriptor) else {
         return LINUX_EBADF;
     };
@@ -22162,6 +22168,7 @@ fn linux_socket_recvmsg(descriptor: u64, message: u64, flags: u64) -> u64 {
     const MSG_CMSG_CLOEXEC: u64 = 0x4000_0000;
     const SUPPORTED_FLAGS: u64 =
         MSG_PEEK | MSG_TRUNC | MSG_DONTWAIT | MSG_WAITALL | MSG_CMSG_CLOEXEC;
+    let flags = u64::from(flags as u32);
     let Some(slot) = linux_socket_slot(descriptor) else {
         return LINUX_EBADF;
     };
@@ -22369,6 +22376,7 @@ fn linux_socket_recvmsg(descriptor: u64, message: u64, flags: u64) -> u64 {
 
 fn linux_socket_sendmmsg(descriptor: u64, messages: u64, count: u64, flags: u64) -> (u64, bool) {
     const MMSGHDR_SIZE: u64 = 64;
+    let flags = u64::from(flags as u32);
     let Ok(count) = usize::try_from(count) else {
         return (LINUX_EINVAL, false);
     };
@@ -22444,6 +22452,7 @@ fn linux_socket_recvmmsg(
     const MSG_DONTWAIT: u64 = 0x40;
     const MSG_WAITFORONE: u64 = 0x1_0000;
     const MMSGHDR_SIZE: u64 = 64;
+    let flags = u64::from(flags as u32);
     if flags & !(MSG_DONTWAIT | MSG_WAITFORONE) != 0 {
         return LINUX_EINVAL;
     }
@@ -22524,6 +22533,7 @@ fn linux_write_socket_address(
 
 fn linux_socket_shutdown(descriptor: u64, how: u64) -> u64 {
     let descriptor = u64::from(descriptor as u32);
+    let how = u64::from(how as u32);
     let Some(slot) = linux_socket_slot(descriptor) else {
         return if linux_descriptor_open(descriptor) {
             LINUX_ENOTSOCK
@@ -22589,6 +22599,9 @@ fn linux_socket_setsockopt(
     value: u64,
     length: u64,
 ) -> u64 {
+    let level = u64::from(level as u32);
+    let option = u64::from(option as u32);
+    let length = u64::from(length as u32);
     let Some(slot) = linux_socket_slot(descriptor) else {
         return LINUX_EBADF;
     };
@@ -22654,6 +22667,8 @@ fn linux_socket_getsockopt(
     value: u64,
     length: u64,
 ) -> u64 {
+    let level = u64::from(level as u32);
+    let option = u64::from(option as u32);
     let Some(slot) = linux_socket_slot(descriptor) else {
         return LINUX_EBADF;
     };
