@@ -1,20 +1,23 @@
 # Ginux
 
-**An operating system built around containers, not retrofitted with them.**
+**An operating system built around native domains, with Linux compatibility as
+a userspace personality.**
 
-Ginux is an experimental, immutable host OS designed to run familiar Linux
-userspaces directly on hardware without a conventional host distribution and
-without a guest kernel for every container.
+Ginux is an experimental, immutable OS designed to run familiar Linux
+userspaces directly on hardware without a conventional host distribution or a
+guest kernel for every workload. Its fundamental boundary is the **domain**:
+a kernel-native unit of isolation, ownership, accounting, scheduling, and
+failure containment.
 
 Runtime allocation policy and remaining fixed-capacity migrations are tracked
 in [the runtime capacity audit](docs/RUNTIME-CAPACITY-AUDIT.md).
 
 The kernel provides the mechanisms that must be shared and trusted: CPU
 scheduling, memory isolation, capabilities, IPC, interrupts, device access,
-and container-facing kernel objects. Everything else is divided into explicit
-security domains. A small controller runs in ring 3, services receive only the
-authority they need, and each container gets its own process, filesystem,
-device, network, and identity views.
+and personality-facing kernel objects. Everything else is divided into
+explicit domains. A small controller runs in ring 3, services receive only the
+authority they need, and each workload domain gets its own process,
+filesystem, device, network, and identity views.
 
 The long-term goal is a host that can run different **userspace personalities**
 side by side. Linux is the first and primary personality. A future BSD
@@ -23,17 +26,20 @@ sharing the same underlying isolation, scheduling, storage, and device
 mechanisms.
 
 Ginux is currently a research and engineering prototype. It boots, runs its
-statically linked Linux-ABI controller and isolated services, and executes an unmodified Alpine
-Linux userspace in QEMU. It does not yet provide complete Linux compatibility,
-boot Rocky Linux with systemd, or implement a second userspace personality.
+statically linked Linux-ABI controller and isolated native services, and
+executes an unmodified Alpine Linux userspace in a domain under QEMU. It does
+not yet provide complete Linux compatibility, boot Rocky Linux with systemd,
+or implement a second userspace personality.
 
 ## Why Ginux?
 
-- **Containers are the host abstraction.** There is no general-purpose host
+- **Domains are the host abstraction.** There is no general-purpose host
   distribution competing with workloads for authority, updates, or attack
-  surface.
+  surface. OCI images populate Linux-domain roots; they do not define the
+  security boundary.
 - **Isolation is native.** Domains and capabilities are the security boundary;
-  Linux namespaces and UID 0 are compatibility views inside that boundary.
+  Linux namespaces, containers, and UID 0 are compatibility constructs inside
+  that boundary.
 - **The booted system is fixed.** One EFI image carries the kernel, required
   components, controller, and recovery metadata. Runtime authority cannot
   exceed the envelope established at boot.
@@ -47,26 +53,38 @@ boot Rocky Linux with systemd, or implement a second userspace personality.
 ## The model
 
 ```text
-+------------------------------------------------------------------+
-| Linux domain             | Future userspace personality domain   |
-| Alpine / Rocky / apps    | e.g. a selected BSD userspace         |
-+------------------------------------------------------------------+
-| Personality contracts: syscalls, ELF, processes, VFS, devices    |
-+------------------------------------------------------------------+
-| Linux-ABI controller     | Isolated native services              |
-| lifecycle and policy     | storage, network, protocol, crypto    |
-+------------------------------------------------------------------+
-| Ginux kernel                                                    |
-| scheduling | memory | capabilities | IPC | domains | IOMMU       |
-+------------------------------------------------------------------+
-| UEFI firmware and x86-64 hardware                               |
-+------------------------------------------------------------------+
++-----------------------------------------------------------------------+
+| Control domain       | Native service domains | Workload domains      |
+| Linux-ABI controller | drivers and protocols  | Linux; others later   |
++-----------------------------------------------------------------------+
+| Domain boundary: ownership | capabilities | resources | lifecycle     |
++-----------------------------------------------------------------------+
+| Personality contracts: syscalls | ELF | processes | VFS | devices     |
++-----------------------------------------------------------------------+
+| Ginux kernel: scheduling | memory | IPC | IOMMU | core devices        |
++-----------------------------------------------------------------------+
+| UEFI firmware and x86-64 hardware                                     |
++-----------------------------------------------------------------------+
 ```
 
 This is a logical layout, not a requirement that every byte cross every
 layer. Control operations remain capability checked. Once authorized, data may
 move through shared pages or device queues without repeatedly traversing the
 controller.
+
+### Terminology
+
+- A **domain** is the outer kernel-enforced boundary and resource-policy
+  principal. The controller, isolated native services, and Linux workloads all
+  execute in domains.
+- A **personality** is the userspace contract exposed inside a workload domain.
+  `personality=linux` selects Linux x86-64 ELF, syscall, process, VFS, and
+  device semantics; it does not turn the Ginux kernel into Linux.
+- An **image** supplies a domain's initial filesystem. OCI is one supported
+  image distribution and assembly format, not an isolation mechanism.
+- A **Linux container** is a compatibility construct inside a Linux-personality
+  domain. Linux namespaces may subdivide that domain, but cannot cross or
+  weaken its outer Ginux boundary.
 
 ## Domains: the unit of separation
 
@@ -82,14 +100,14 @@ containment. It owns or is granted:
 - a lifecycle and failure policy.
 
 The kernel creates one initial userspace authority: the embedded control-plane
-domain. Every later service or container receives authority delegated from an
-existing holder. Delegation may narrow authority but cannot create rights that
-were absent from the authenticated boot envelope.
+domain. Every later service or workload domain receives authority delegated
+from an existing holder. Delegation may narrow authority but cannot create
+rights that were absent from the authenticated boot envelope.
 
 Process ancestry controls lifecycle and accounting; it does not grant
 authority. A process may be root inside a Linux domain while having no implicit
-right to inspect the host, another container, kernel memory, or an unrelated
-device.
+right to inspect the control domain, another workload domain, kernel memory,
+or an unrelated device.
 
 Domain identities are generation tagged. When a service exits or faults, stale
 capabilities, replies, interrupt routes, DMA mappings, and device ownership can
@@ -113,7 +131,7 @@ Domain resource settings do not have arbitrary host-wide ceilings.
 allocation has no configured byte cap. Values are bounded only by their ABI
 representation, addressability, and resources actually available at runtime.
 
-Each configured workload is a Ginux domain. The domain is the outer,
+Each configured workload is a Ginux domain. That domain is the outer,
 non-bypassable security boundary and owns its CPU and memory budget, process
 tree, IPC objects, filesystem root and mount view, network view, and devices.
 New domains default to `personality=linux`, selecting the Linux userspace
@@ -141,10 +159,11 @@ the same root-object contract without changing the domain boundary.
 A Linux personality domain starts with its own root Linux PID, mount, user,
 IPC, UTS, and network namespace views. Linux namespace operations such as
 `clone`, `unshare`, and `setns` may create and join descendants of those roots,
-but can never cross the enclosing Ginux domain. This makes nested containers a
-supported compatibility case: systemd or a container manager inside a Linux
-domain may create further Linux namespaces, while every resulting process and
-object remains owned and limited by the same outer Ginux domain.
+but can never cross the enclosing Ginux domain. This makes nested Linux
+containers a supported compatibility case: systemd or a container manager
+inside a Linux domain may create further Linux namespaces, while every
+resulting process and object remains owned and limited by the same outer Ginux
+domain.
 
 ## Userspace personalities
 
@@ -160,7 +179,7 @@ a domain. It includes more than an executable format:
 
 Linux x86-64 is the only personality under implementation today. Linux ELF is
 therefore the practical workload format, and Rocky Linux 10 with systemd as
-container PID 1 is the product compatibility benchmark.
+domain-local PID 1 is the product compatibility benchmark.
 
 The architecture is intended to make personality selection a property of a
 domain rather than of the whole host. A BSD personality is a plausible future
@@ -188,15 +207,15 @@ The target boot sequence is deliberately short:
 5. Executable mappings and the maximum authority for the boot are sealed.
 6. The embedded controller starts in ring 3 with exactly its configured
    capabilities.
-7. The controller delegates authority to native services and container
+7. The controller delegates authority to isolated native-service and workload
    domains, then starts each selected userspace init process.
 
-The native host does not need a distribution root filesystem. Container
-images, writable data, logs, and persistent volumes are explicit objects rather
-than files hidden in a mutable host installation.
+The native host does not need a distribution root filesystem. Workload images,
+writable data, logs, and persistent volumes are explicit objects rather than
+files hidden in a mutable host installation.
 
 Production deployments are intended to separate trust for the EFI image,
-site configuration, and container images. Changing runtime policy may reduce
+site configuration, and workload images. Changing runtime policy may reduce
 authority immediately, but expanding the boot authority ceiling requires a new
 authenticated boot.
 
@@ -216,8 +235,8 @@ Ginux aims to make authority visible, narrow, and revocable:
   queues, and DMA pages are activated and revoked in a defined order.
 - A service fault triggers domain-specific cleanup. Device access is quiesced
   before translation tables and memory are released.
-- Container root remains local to its personality domain. Linux privilege does
-  not imply native host privilege.
+- A workload root remains local to its personality domain. Linux privilege
+  does not imply control-domain or native-kernel privilege.
 - Boot manifests, executable identities, bounds, and reserved fields are
   checked fail closed.
 
@@ -345,7 +364,7 @@ environment overrides.
   controller.
 - [`services`](services) contains isolated native service runtimes.
 - [`crates`](crates) contains shared `no_std` contracts and state machines.
-- [`specs`](specs) records versioned boot, kernel, ABI, container, and service
+- [`specs`](specs) records versioned boot, kernel, ABI, domain, image, and service
   contracts.
 - [`tests`](tests) contains ABI, configuration, and end-to-end QEMU gates.
 - [`tools`](tools) contains image preparation, manifest, architecture, and QEMU
