@@ -556,6 +556,8 @@ const LINUX_MAP_FIXED: u64 = 0x10;
 const LINUX_MAP_ANONYMOUS: u64 = 0x20;
 const LINUX_MAP_NORESERVE: u64 = 0x4000;
 const LINUX_MAP_DENYWRITE: u64 = 0x800;
+const LINUX_MAP_POPULATE: u64 = 0x8000;
+const LINUX_MAP_NONBLOCK: u64 = 0x1_0000;
 const LINUX_MAP_STACK: u64 = 0x2_0000;
 const LINUX_MAP_FIXED_NOREPLACE: u64 = 0x10_0000;
 const LINUX_MAIN_MAPPING_COUNT: usize = 8;
@@ -15728,7 +15730,38 @@ fn verify_linux_process_madvise_syscall() -> bool {
         && linux_process_mrelease(LINUX_DESCRIPTOR_TABLE_LIMIT, 0) == LINUX_EBADF;
     let closed = descriptor < LINUX_AUX_DESCRIPTOR_LIMIT && linux_descriptor_close(descriptor) == 0;
     let unmapped = linux_runtime_munmap(mapping, (3 * PAGE_SIZE) as u64) == 0;
-    freed && errors && closed && unmapped
+    let populated_mapping = linux_runtime_mmap(
+        0,
+        (2 * PAGE_SIZE) as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS | LINUX_MAP_POPULATE,
+        u64::MAX,
+        0,
+    );
+    let map_populated = populated_mapping < LINUX_RETURN_TO_KERNEL
+        && address_space::current_linux_runtime_page(populated_mapping)
+            .frame
+            .is_some()
+        && address_space::current_linux_runtime_page(populated_mapping + PAGE_SIZE as u64)
+            .frame
+            .is_some();
+    let nonblocking_mapping = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS | LINUX_MAP_POPULATE | LINUX_MAP_NONBLOCK,
+        u64::MAX,
+        0,
+    );
+    let map_nonblocking = nonblocking_mapping < LINUX_RETURN_TO_KERNEL
+        && address_space::current_linux_runtime_page(nonblocking_mapping)
+            .frame
+            .is_none();
+    let population_unmapped = map_populated
+        && map_nonblocking
+        && linux_runtime_munmap(populated_mapping, (2 * PAGE_SIZE) as u64) == 0
+        && linux_runtime_munmap(nonblocking_mapping, PAGE_SIZE as u64) == 0;
+    freed && errors && closed && unmapped && population_unmapped
 }
 
 fn verify_linux_timer_argument_widths() -> bool {
@@ -16310,6 +16343,7 @@ fn linux_runtime_mmap(
     let valid_flags = if anonymous {
         sharing
             | LINUX_MAP_ANONYMOUS
+            | flags & (LINUX_MAP_POPULATE | LINUX_MAP_NONBLOCK)
             | if fixed { LINUX_MAP_FIXED } else { 0 }
             | if no_replace {
                 LINUX_MAP_FIXED_NOREPLACE
@@ -16318,6 +16352,7 @@ fn linux_runtime_mmap(
             }
     } else {
         sharing
+            | flags & (LINUX_MAP_POPULATE | LINUX_MAP_NONBLOCK)
             | if fixed { LINUX_MAP_FIXED } else { 0 }
             | if no_replace {
                 LINUX_MAP_FIXED_NOREPLACE
@@ -16505,6 +16540,13 @@ fn linux_runtime_mmap(
             let _ = rollback_linux_runtime_mapping(mapping, installed + 1);
             return LINUX_ENOMEM;
         }
+    }
+    if anonymous && flags & LINUX_MAP_POPULATE != 0 && flags & LINUX_MAP_NONBLOCK == 0 {
+        let _ = materialize_linux_runtime_user_range(
+            mapping,
+            pages.saturating_mul(PAGE_SIZE),
+            protection & LINUX_PROT_WRITE != 0,
+        );
     }
     mapping
 }
