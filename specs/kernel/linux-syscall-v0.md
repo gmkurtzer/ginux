@@ -154,9 +154,16 @@ controller proves pipe read/write readiness, exception clearing, `pselect6`
 dispatch, invalid descriptor rejection, and invalid-address handling. Select
 validates signed `timeval` seconds and normalized microseconds; `pselect6`
 validates the signed `timespec`, packed mask pointer, exact eight-byte mask
-size, and referenced mask range. Timeout waiting, atomic temporary signal-mask
-installation, descriptor sets wider than one machine word, and Linux timeout
-write-back remain pending.
+size, and referenced mask range. With no immediate readiness and another
+runnable thread, both calls snapshot all supplied sets, block in typed scheduler
+waits, wake on descriptor-state changes, and expire from the APIC-driven timer.
+`pselect6` installs its sanitized temporary mask as part of the block/schedule
+transition and restores the prior mask on readiness, timeout, failed handoff,
+or signal interruption; its input timespec is never modified. `select` writes
+the remaining timeval on immediate return, readiness, and timeout. Blocking
+with no runnable peer retains the explicit `-ENOSYS` boundary. Descriptor sets
+wider than one machine word and `select` remaining-time write-back on `EINTR`
+remain pending.
 `rax = 271` (`__NR_ppoll`) uses the same bounded readiness engine. A null
 timeout means an infinite wait request; otherwise the complete 16-byte x86-64
 `timespec` must contain nonnegative seconds and normalized nanoseconds. An

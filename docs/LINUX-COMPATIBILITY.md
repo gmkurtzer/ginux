@@ -94,9 +94,13 @@ model, so `poll` remains Partial.
 The same live controller probe covers immediate `select` and `pselect6` pipe
 read/write readiness, exception-set clearing, invalid descriptor `EBADF`, and
 invalid-address `EFAULT`, timeval/timespec ranges, and the packed `pselect6`
-signal-mask pointer and size. Their current descriptor sets stop at 64 entries;
-blocking timeouts, atomic signal-mask transitions, and Linux timeout write-back
-remain pending, so both calls remain Partial.
+signal-mask pointer and size. The kernel now snapshots their sets into typed
+scheduler waits, wakes them on descriptor changes, expires positive deadlines
+from the APIC timer, writes `select` remaining time, and atomically restores a
+temporary `pselect6` mask on every completion and interruption path. Their
+current descriptor sets stop at 64 entries, blocking still requires another
+runnable thread, and interrupted `select` does not yet write remaining time, so
+both calls remain Partial.
 
 `clock_gettime` and `clock_getres` accept every Linux static clock ID that is
 readable without changing system time: realtime, monotonic, process/thread CPU,

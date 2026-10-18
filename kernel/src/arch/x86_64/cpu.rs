@@ -1278,6 +1278,8 @@ const LINUX_THREAD_WAIT_PIPE_WRITE: u8 = 11;
 const LINUX_THREAD_WAIT_EVENTFD_WRITE: u8 = 12;
 const LINUX_THREAD_WAIT_PAUSE: u8 = 13;
 const LINUX_THREAD_WAIT_SIGSUSPEND: u8 = 14;
+const LINUX_THREAD_WAIT_SELECT: u8 = 15;
+const LINUX_THREAD_WAIT_PSELECT: u8 = 16;
 const LINUX_SYSCALL_FRAME_REGISTERS: usize = 12;
 static LINUX_THREAD_STATES: [BankedAtomicU8; LINUX_THREAD_LIMIT] =
     [const { BankedAtomicU8::new(LINUX_THREAD_FREE) }; LINUX_THREAD_LIMIT];
@@ -1336,6 +1338,20 @@ static LINUX_THREAD_POLL_DESCRIPTORS: [[BankedAtomicU32; LINUX_POLLFD_LIMIT]; LI
     [const { [const { BankedAtomicU32::new(0) }; LINUX_POLLFD_LIMIT] }; LINUX_THREAD_LIMIT];
 static LINUX_THREAD_POLL_EVENTS: [[BankedAtomicU16; LINUX_POLLFD_LIMIT]; LINUX_THREAD_LIMIT] =
     [const { [const { BankedAtomicU16::new(0) }; LINUX_POLLFD_LIMIT] }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_SELECT_READ_ADDRESSES: [BankedAtomicU64; LINUX_THREAD_LIMIT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_SELECT_WRITE_ADDRESSES: [BankedAtomicU64; LINUX_THREAD_LIMIT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_SELECT_EXCEPTION_ADDRESSES: [BankedAtomicU64; LINUX_THREAD_LIMIT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_SELECT_TIMEOUT_ADDRESSES: [BankedAtomicU64; LINUX_THREAD_LIMIT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_SELECT_READ_SETS: [BankedAtomicU64; LINUX_THREAD_LIMIT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_SELECT_WRITE_SETS: [BankedAtomicU64; LINUX_THREAD_LIMIT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_SELECT_EXCEPTION_SETS: [BankedAtomicU64; LINUX_THREAD_LIMIT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_THREAD_LIMIT];
 static LINUX_THREAD_IOV_ADDRESSES: [[BankedAtomicU64; LINUX_IOV_LIMIT]; LINUX_THREAD_LIMIT] =
     [const { [const { BankedAtomicU64::new(0) }; LINUX_IOV_LIMIT] }; LINUX_THREAD_LIMIT];
 static LINUX_THREAD_IOV_LENGTHS: [[BankedAtomicU64; LINUX_IOV_LIMIT]; LINUX_THREAD_LIMIT] =
@@ -4743,6 +4759,7 @@ fn clear_linux_thread_slot(slot: usize) {
     for events in &LINUX_THREAD_POLL_EVENTS[slot] {
         events.store(0, Ordering::SeqCst);
     }
+    clear_linux_select_snapshot(slot);
     clear_linux_iov_snapshot(slot);
     LINUX_THREAD_STATES[slot].store(LINUX_THREAD_FREE, Ordering::SeqCst);
 }
@@ -4831,6 +4848,8 @@ fn block_current_linux_thread(kind: u8, key: u64, output: u64, deadline: u64) ->
             | LINUX_THREAD_WAIT_EVENTFD_WRITE
             | LINUX_THREAD_WAIT_PAUSE
             | LINUX_THREAD_WAIT_SIGSUSPEND
+            | LINUX_THREAD_WAIT_SELECT
+            | LINUX_THREAD_WAIT_PSELECT
     ) || key == 0
         || LINUX_THREAD_STATES[slot].load(Ordering::SeqCst) != LINUX_THREAD_RUNNING
         || LINUX_THREAD_WAIT_KINDS[slot].load(Ordering::SeqCst) != LINUX_THREAD_WAIT_NONE
@@ -5061,6 +5080,27 @@ fn finish_linux_thread_table() -> bool {
         && LINUX_THREAD_POLL_EVENTS
             .iter()
             .all(|events| events.iter().all(|value| value.load(Ordering::SeqCst) == 0))
+        && LINUX_THREAD_SELECT_READ_ADDRESSES
+            .iter()
+            .all(|value| value.load(Ordering::SeqCst) == 0)
+        && LINUX_THREAD_SELECT_WRITE_ADDRESSES
+            .iter()
+            .all(|value| value.load(Ordering::SeqCst) == 0)
+        && LINUX_THREAD_SELECT_EXCEPTION_ADDRESSES
+            .iter()
+            .all(|value| value.load(Ordering::SeqCst) == 0)
+        && LINUX_THREAD_SELECT_TIMEOUT_ADDRESSES
+            .iter()
+            .all(|value| value.load(Ordering::SeqCst) == 0)
+        && LINUX_THREAD_SELECT_READ_SETS
+            .iter()
+            .all(|value| value.load(Ordering::SeqCst) == 0)
+        && LINUX_THREAD_SELECT_WRITE_SETS
+            .iter()
+            .all(|value| value.load(Ordering::SeqCst) == 0)
+        && LINUX_THREAD_SELECT_EXCEPTION_SETS
+            .iter()
+            .all(|value| value.load(Ordering::SeqCst) == 0)
         && LINUX_THREAD_IOV_ADDRESSES.iter().all(|addresses| {
             addresses
                 .iter()
@@ -8054,22 +8094,30 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_POLL_SYSCALL => {
             linux_poll_live_return(registers, syscall_return, first_argument, buffer, count)
         }
-        LINUX_SELECT_SYSCALL => linux_select(
-            first_argument,
-            buffer,
-            count,
-            register(0),
-            register(2),
-            register(1),
+        LINUX_SELECT_SYSCALL => linux_select_live_return(
+            registers,
+            syscall_return,
+            LinuxSelectInput {
+                descriptor_count: first_argument,
+                read_address: buffer,
+                write_address: count,
+                exception_address: register(0),
+                timeout_address: register(2),
+                signal_mask_address: register(1),
+            },
             false,
         ),
-        LINUX_PSELECT6_SYSCALL => linux_select(
-            first_argument,
-            buffer,
-            count,
-            register(0),
-            register(2),
-            register(1),
+        LINUX_PSELECT6_SYSCALL => linux_select_live_return(
+            registers,
+            syscall_return,
+            LinuxSelectInput {
+                descriptor_count: first_argument,
+                read_address: buffer,
+                write_address: count,
+                exception_address: register(0),
+                timeout_address: register(2),
+                signal_mask_address: register(1),
+            },
             true,
         ),
         LINUX_FSTAT_SYSCALL => {
@@ -23333,6 +23381,16 @@ fn clear_linux_poll_snapshot(slot: usize) {
     }
 }
 
+fn clear_linux_select_snapshot(slot: usize) {
+    LINUX_THREAD_SELECT_READ_ADDRESSES[slot].store(0, Ordering::SeqCst);
+    LINUX_THREAD_SELECT_WRITE_ADDRESSES[slot].store(0, Ordering::SeqCst);
+    LINUX_THREAD_SELECT_EXCEPTION_ADDRESSES[slot].store(0, Ordering::SeqCst);
+    LINUX_THREAD_SELECT_TIMEOUT_ADDRESSES[slot].store(0, Ordering::SeqCst);
+    LINUX_THREAD_SELECT_READ_SETS[slot].store(0, Ordering::SeqCst);
+    LINUX_THREAD_SELECT_WRITE_SETS[slot].store(0, Ordering::SeqCst);
+    LINUX_THREAD_SELECT_EXCEPTION_SETS[slot].store(0, Ordering::SeqCst);
+}
+
 fn clear_linux_iov_snapshot(slot: usize) {
     for address in &LINUX_THREAD_IOV_ADDRESSES[slot] {
         address.store(0, Ordering::SeqCst);
@@ -23418,30 +23476,7 @@ fn wake_linux_poll_waits() -> u32 {
     woken
 }
 
-fn linux_select(
-    descriptor_count: u64,
-    read_address: u64,
-    write_address: u64,
-    exception_address: u64,
-    timeout_address: u64,
-    signal_mask_address: u64,
-    pselect: bool,
-) -> u64 {
-    linux_select_with_copy(
-        LinuxSelectInput {
-            descriptor_count,
-            read_address,
-            write_address,
-            exception_address,
-            timeout_address,
-            signal_mask_address,
-        },
-        pselect,
-        copy_from_linux_user,
-        copy_to_linux_user,
-    )
-}
-
+#[derive(Clone, Copy)]
 struct LinuxSelectInput {
     descriptor_count: u64,
     read_address: u64,
@@ -23451,118 +23486,410 @@ struct LinuxSelectInput {
     signal_mask_address: u64,
 }
 
+#[derive(Clone, Copy)]
+struct LinuxSelectSnapshot {
+    input: LinuxSelectInput,
+    requested_read: u64,
+    requested_write: u64,
+    requested_exception: u64,
+}
+
+struct LinuxParsedSelect {
+    snapshot: LinuxSelectSnapshot,
+    duration: Option<u64>,
+    temporary_signal_mask: Option<u64>,
+}
+
+fn linux_select_parse(
+    input: LinuxSelectInput,
+    pselect: bool,
+    copy_from: fn(u64, &mut [u8]) -> bool,
+) -> Result<LinuxParsedSelect, u64> {
+    if input.descriptor_count > u64::BITS as u64 {
+        return Err(LINUX_EINVAL);
+    }
+    let duration = if input.timeout_address == 0 {
+        None
+    } else {
+        let mut timeout = [0_u8; 16];
+        if !copy_from(input.timeout_address, &mut timeout) {
+            return Err(LINUX_EFAULT);
+        }
+        let seconds = i64::from_ne_bytes(timeout[..8].try_into().unwrap());
+        let fraction = i64::from_ne_bytes(timeout[8..].try_into().unwrap());
+        let (fraction_limit, scale) = if pselect {
+            (NANOSECONDS_PER_SECOND as i64, 1)
+        } else {
+            (MICROSECONDS_PER_SECOND as i64, 1_000)
+        };
+        if seconds < 0 || !(0..fraction_limit).contains(&fraction) {
+            return Err(LINUX_EINVAL);
+        }
+        let Some(duration) = (seconds as u64)
+            .checked_mul(NANOSECONDS_PER_SECOND)
+            .and_then(|seconds| seconds.checked_add((fraction as u64) * scale))
+        else {
+            return Err(LINUX_EINVAL);
+        };
+        Some(duration)
+    };
+    let temporary_signal_mask = if pselect && input.signal_mask_address != 0 {
+        let mut argument = [0_u8; 16];
+        if !copy_from(input.signal_mask_address, &mut argument) {
+            return Err(LINUX_EFAULT);
+        }
+        let mask_address = u64::from_ne_bytes(argument[..8].try_into().unwrap());
+        let mask_size = u64::from_ne_bytes(argument[8..].try_into().unwrap());
+        if mask_size != LINUX_SIGNAL_SET_SIZE {
+            return Err(LINUX_EINVAL);
+        }
+        if mask_address == 0 {
+            None
+        } else {
+            let mut mask = [0_u8; LINUX_SIGNAL_SET_SIZE as usize];
+            if !copy_from(mask_address, &mut mask) {
+                return Err(LINUX_EFAULT);
+            }
+            Some(u64::from_ne_bytes(mask) & !LINUX_UNBLOCKABLE_SIGNALS)
+        }
+    } else {
+        None
+    };
+    let mut requested = [0_u64; 3];
+    for (address, output) in [
+        input.read_address,
+        input.write_address,
+        input.exception_address,
+    ]
+    .into_iter()
+    .zip(requested.iter_mut())
+    {
+        if address != 0 {
+            let mut bytes = [0_u8; 8];
+            if !copy_from(address, &mut bytes) {
+                return Err(LINUX_EFAULT);
+            }
+            *output = u64::from_ne_bytes(bytes);
+        }
+    }
+    let valid_mask = if input.descriptor_count == 64 {
+        u64::MAX
+    } else {
+        (1_u64 << input.descriptor_count).wrapping_sub(1)
+    };
+    Ok(LinuxParsedSelect {
+        snapshot: LinuxSelectSnapshot {
+            input,
+            requested_read: requested[0] & valid_mask,
+            requested_write: requested[1] & valid_mask,
+            requested_exception: requested[2] & valid_mask,
+        },
+        duration,
+        temporary_signal_mask,
+    })
+}
+
+fn linux_select_ready(snapshot: LinuxSelectSnapshot) -> Result<(u64, u64, u64), u64> {
+    let mut ready_read = 0_u64;
+    let mut ready_write = 0_u64;
+    for descriptor in 0..snapshot.input.descriptor_count {
+        let bit = 1_u64 << descriptor;
+        if (snapshot.requested_read | snapshot.requested_write | snapshot.requested_exception) & bit
+            != 0
+            && !linux_descriptor_open(descriptor)
+        {
+            return Err(LINUX_EBADF);
+        }
+        if snapshot.requested_read & bit != 0
+            && linux_descriptor_poll_events(descriptor as i32, LINUX_POLLIN) & LINUX_POLLIN != 0
+        {
+            ready_read |= bit;
+        }
+        if snapshot.requested_write & bit != 0
+            && linux_descriptor_poll_events(descriptor as i32, LINUX_POLLOUT) & LINUX_POLLOUT != 0
+        {
+            ready_write |= bit;
+        }
+    }
+    Ok((
+        ready_read,
+        ready_write,
+        u64::from((ready_read | ready_write).count_ones()),
+    ))
+}
+
+fn linux_select_copy_result(
+    snapshot: LinuxSelectSnapshot,
+    ready_read: u64,
+    ready_write: u64,
+    copy_to: fn(u64, &[u8]) -> bool,
+) -> u64 {
+    for (address, value) in [
+        (snapshot.input.read_address, ready_read),
+        (snapshot.input.write_address, ready_write),
+        (snapshot.input.exception_address, 0),
+    ] {
+        if address != 0 && !copy_to(address, &value.to_ne_bytes()) {
+            return LINUX_EFAULT;
+        }
+    }
+    u64::from((ready_read | ready_write).count_ones())
+}
+
 fn linux_select_with_copy(
     input: LinuxSelectInput,
     pselect: bool,
     copy_from: fn(u64, &mut [u8]) -> bool,
     copy_to: fn(u64, &[u8]) -> bool,
 ) -> u64 {
-    let LinuxSelectInput {
-        descriptor_count,
-        read_address,
-        write_address,
-        exception_address,
-        timeout_address,
-        signal_mask_address,
-    } = input;
-    if descriptor_count > u64::BITS as u64 {
-        return LINUX_EINVAL;
+    let parsed = match linux_select_parse(input, pselect, copy_from) {
+        Ok(parsed) => parsed,
+        Err(error) => return error,
+    };
+    let (ready_read, ready_write, _) = match linux_select_ready(parsed.snapshot) {
+        Ok(ready) => ready,
+        Err(error) => return error,
+    };
+    linux_select_copy_result(parsed.snapshot, ready_read, ready_write, copy_to)
+}
+
+fn store_linux_select_snapshot(slot: usize, snapshot: LinuxSelectSnapshot) {
+    LINUX_THREAD_SELECT_READ_ADDRESSES[slot].store(snapshot.input.read_address, Ordering::SeqCst);
+    LINUX_THREAD_SELECT_WRITE_ADDRESSES[slot].store(snapshot.input.write_address, Ordering::SeqCst);
+    LINUX_THREAD_SELECT_EXCEPTION_ADDRESSES[slot]
+        .store(snapshot.input.exception_address, Ordering::SeqCst);
+    LINUX_THREAD_SELECT_TIMEOUT_ADDRESSES[slot]
+        .store(snapshot.input.timeout_address, Ordering::SeqCst);
+    LINUX_THREAD_SELECT_READ_SETS[slot].store(snapshot.requested_read, Ordering::SeqCst);
+    LINUX_THREAD_SELECT_WRITE_SETS[slot].store(snapshot.requested_write, Ordering::SeqCst);
+    LINUX_THREAD_SELECT_EXCEPTION_SETS[slot].store(snapshot.requested_exception, Ordering::SeqCst);
+}
+
+fn load_linux_select_snapshot(slot: usize, descriptor_count: u64) -> LinuxSelectSnapshot {
+    LinuxSelectSnapshot {
+        input: LinuxSelectInput {
+            descriptor_count,
+            read_address: LINUX_THREAD_SELECT_READ_ADDRESSES[slot].load(Ordering::SeqCst),
+            write_address: LINUX_THREAD_SELECT_WRITE_ADDRESSES[slot].load(Ordering::SeqCst),
+            exception_address: LINUX_THREAD_SELECT_EXCEPTION_ADDRESSES[slot].load(Ordering::SeqCst),
+            timeout_address: LINUX_THREAD_SELECT_TIMEOUT_ADDRESSES[slot].load(Ordering::SeqCst),
+            signal_mask_address: 0,
+        },
+        requested_read: LINUX_THREAD_SELECT_READ_SETS[slot].load(Ordering::SeqCst),
+        requested_write: LINUX_THREAD_SELECT_WRITE_SETS[slot].load(Ordering::SeqCst),
+        requested_exception: LINUX_THREAD_SELECT_EXCEPTION_SETS[slot].load(Ordering::SeqCst),
     }
-    if timeout_address != 0 {
-        let mut timeout = [0_u8; 16];
-        if !copy_from(timeout_address, &mut timeout) {
-            return LINUX_EFAULT;
-        }
-        let seconds = i64::from_ne_bytes(timeout[..8].try_into().unwrap());
-        let fraction = i64::from_ne_bytes(timeout[8..].try_into().unwrap());
-        let fraction_limit = if pselect {
-            NANOSECONDS_PER_SECOND as i64
-        } else {
-            MICROSECONDS_PER_SECOND as i64
-        };
-        if seconds < 0 || !(0..fraction_limit).contains(&fraction) {
-            return LINUX_EINVAL;
-        }
+}
+
+fn linux_select_write_remaining(snapshot: LinuxSelectSnapshot, deadline: u64) -> bool {
+    if snapshot.input.timeout_address == 0 {
+        return true;
     }
-    if pselect && signal_mask_address != 0 {
-        let mut argument = [0_u8; 16];
-        if !copy_from(signal_mask_address, &mut argument) {
-            return LINUX_EFAULT;
-        }
-        let mask_address = u64::from_ne_bytes(argument[..8].try_into().unwrap());
-        let mask_size = u64::from_ne_bytes(argument[8..].try_into().unwrap());
-        if mask_size != 8 {
-            return LINUX_EINVAL;
-        }
-        if mask_address != 0 {
-            let mut mask = [0_u8; 8];
-            if !copy_from(mask_address, &mut mask) {
-                return LINUX_EFAULT;
+    let Some(now) = linux_elapsed_nanoseconds() else {
+        return false;
+    };
+    let remaining = deadline.saturating_sub(now);
+    let mut timeval = [0_u8; 16];
+    timeval[..8].copy_from_slice(&(remaining / NANOSECONDS_PER_SECOND).to_ne_bytes());
+    timeval[8..].copy_from_slice(&(remaining % NANOSECONDS_PER_SECOND / 1_000).to_ne_bytes());
+    copy_to_linux_user(snapshot.input.timeout_address, &timeval)
+}
+
+fn complete_linux_select_wait(slot: usize, timed_out: bool) -> bool {
+    let kind = if slot < LINUX_THREAD_LIMIT {
+        LINUX_THREAD_WAIT_KINDS[slot].load(Ordering::SeqCst)
+    } else {
+        LINUX_THREAD_WAIT_NONE
+    };
+    if slot >= LINUX_THREAD_LIMIT
+        || LINUX_THREAD_STATES[slot].load(Ordering::SeqCst) != LINUX_THREAD_BLOCKED
+        || !matches!(kind, LINUX_THREAD_WAIT_SELECT | LINUX_THREAD_WAIT_PSELECT)
+    {
+        return false;
+    }
+    let descriptor_count = LINUX_THREAD_WAIT_OUTPUTS[slot].load(Ordering::SeqCst);
+    if descriptor_count > 64 {
+        return false;
+    }
+    let snapshot = load_linux_select_snapshot(slot, descriptor_count);
+    let readiness = linux_select_ready(snapshot);
+    if readiness.is_ok_and(|(_, _, count)| count == 0) && !timed_out {
+        return false;
+    }
+    let deadline = LINUX_THREAD_WAIT_DEADLINES[slot].load(Ordering::SeqCst);
+    let result = match readiness {
+        Ok((ready_read, ready_write, _)) => {
+            let result = linux_select_copy_result(
+                snapshot,
+                if timed_out { 0 } else { ready_read },
+                if timed_out { 0 } else { ready_write },
+                copy_to_linux_user,
+            );
+            if result != LINUX_EFAULT
+                && kind == LINUX_THREAD_WAIT_SELECT
+                && !linux_select_write_remaining(snapshot, deadline)
+            {
+                LINUX_EFAULT
+            } else {
+                result
             }
         }
-    }
-    let mut requested_read = 0_u64;
-    let mut requested_write = 0_u64;
-    let mut requested_exception = 0_u64;
-    if read_address != 0 {
-        let mut bytes = [0_u8; 8];
-        if !copy_from(read_address, &mut bytes) {
-            return LINUX_EFAULT;
-        }
-        requested_read = u64::from_ne_bytes(bytes);
-    }
-    if write_address != 0 {
-        let mut bytes = [0_u8; 8];
-        if !copy_from(write_address, &mut bytes) {
-            return LINUX_EFAULT;
-        }
-        requested_write = u64::from_ne_bytes(bytes);
-    }
-    if exception_address != 0 {
-        let mut bytes = [0_u8; 8];
-        if !copy_from(exception_address, &mut bytes) {
-            return LINUX_EFAULT;
-        }
-        requested_exception = u64::from_ne_bytes(bytes);
-    }
-    let valid_mask = if descriptor_count == 64 {
-        u64::MAX
-    } else {
-        (1_u64 << descriptor_count).wrapping_sub(1)
+        Err(error) => error,
     };
-    requested_read &= valid_mask;
-    requested_write &= valid_mask;
-    requested_exception &= valid_mask;
-    let mut ready_read = 0_u64;
-    let mut ready_write = 0_u64;
-    for descriptor in 0..descriptor_count {
-        let bit = 1_u64 << descriptor;
-        if (requested_read | requested_write | requested_exception) & bit != 0
-            && !linux_descriptor_open(descriptor)
-        {
-            return LINUX_EBADF;
-        }
-        if requested_read & bit != 0
-            && linux_descriptor_poll_events(descriptor as i32, LINUX_POLLIN) & LINUX_POLLIN != 0
-        {
-            ready_read |= bit;
-        }
-        if requested_write & bit != 0
-            && linux_descriptor_poll_events(descriptor as i32, LINUX_POLLOUT) & LINUX_POLLOUT != 0
-        {
-            ready_write |= bit;
+    LINUX_THREAD_RAXS[slot].store(result, Ordering::SeqCst);
+    LINUX_THREAD_WAIT_KINDS[slot].store(LINUX_THREAD_WAIT_NONE, Ordering::SeqCst);
+    LINUX_THREAD_WAIT_KEYS[slot].store(0, Ordering::SeqCst);
+    LINUX_THREAD_WAIT_OUTPUTS[slot].store(0, Ordering::SeqCst);
+    LINUX_THREAD_WAIT_DEADLINES[slot].store(0, Ordering::SeqCst);
+    if kind == LINUX_THREAD_WAIT_PSELECT {
+        LINUX_THREAD_SIGNAL_MASKS[slot].store(
+            LINUX_THREAD_WAIT_PRIOR_SIGNAL_MASKS[slot].swap(0, Ordering::SeqCst),
+            Ordering::SeqCst,
+        );
+    }
+    clear_linux_select_snapshot(slot);
+    LINUX_THREAD_STATES[slot].store(LINUX_THREAD_READY, Ordering::SeqCst);
+    true
+}
+
+fn wake_linux_select_waits() -> u32 {
+    let mut woken = 0;
+    for slot in 0..LINUX_THREAD_LIMIT {
+        woken += u32::from(complete_linux_select_wait(slot, false));
+    }
+    woken
+}
+
+fn linux_select_live_return(
+    output: *mut LinuxSyscallFrame,
+    caller: LinuxUserContext,
+    input: LinuxSelectInput,
+    pselect: bool,
+) -> u64 {
+    let parsed = match linux_select_parse(input, pselect, copy_from_linux_user) {
+        Ok(parsed) => parsed,
+        Err(error) => return error,
+    };
+    for address in [
+        parsed.snapshot.input.read_address,
+        parsed.snapshot.input.write_address,
+        parsed.snapshot.input.exception_address,
+    ] {
+        if address != 0 && !linux_writable_user_range_contains(address, 8) {
+            return LINUX_EFAULT;
         }
     }
-    if read_address != 0 && !copy_to(read_address, &ready_read.to_ne_bytes()) {
+    if !pselect
+        && parsed.snapshot.input.timeout_address != 0
+        && !linux_writable_user_range_contains(parsed.snapshot.input.timeout_address, 16)
+    {
         return LINUX_EFAULT;
     }
-    if write_address != 0 && !copy_to(write_address, &ready_write.to_ne_bytes()) {
-        return LINUX_EFAULT;
+    let (ready_read, ready_write, ready) = match linux_select_ready(parsed.snapshot) {
+        Ok(ready) => ready,
+        Err(error) => return error,
+    };
+    if ready != 0 || parsed.duration == Some(0) {
+        let result =
+            linux_select_copy_result(parsed.snapshot, ready_read, ready_write, copy_to_linux_user);
+        if result == LINUX_EFAULT || pselect || parsed.snapshot.input.timeout_address == 0 {
+            return result;
+        }
+        let duration = parsed.duration.unwrap_or(0);
+        let Some(deadline) = linux_elapsed_nanoseconds().and_then(|now| now.checked_add(duration))
+        else {
+            return LINUX_EINVAL;
+        };
+        return if linux_select_write_remaining(parsed.snapshot, deadline) {
+            result
+        } else {
+            LINUX_EFAULT
+        };
     }
-    if exception_address != 0 && !copy_to(exception_address, &0_u64.to_ne_bytes()) {
-        return LINUX_EFAULT;
+    let Some(current) = current_linux_thread_handle() else {
+        return LINUX_ESRCH;
+    };
+    let Some(target) = ready_linux_thread_handle() else {
+        return LINUX_ENOSYS;
+    };
+    let Some(tls) = linux_thread_context(current) else {
+        return LINUX_ESRCH;
+    };
+    let deadline = if let Some(duration) = parsed.duration {
+        let Some(deadline) = linux_elapsed_nanoseconds().and_then(|now| now.checked_add(duration))
+        else {
+            return LINUX_EINVAL;
+        };
+        deadline
+    } else {
+        0
+    };
+    let slot = usize::from(current.slot);
+    store_linux_select_snapshot(slot, parsed.snapshot);
+    let wait_kind = if pselect {
+        LINUX_THREAD_WAIT_PSELECT
+    } else {
+        LINUX_THREAD_WAIT_SELECT
+    };
+    if !save_linux_thread_return_context(current, caller)
+        || !block_current_linux_thread(
+            wait_kind,
+            1,
+            parsed.snapshot.input.descriptor_count,
+            deadline,
+        )
+    {
+        clear_linux_select_snapshot(slot);
+        return LINUX_EINVAL;
     }
-    u64::from((ready_read | ready_write).count_ones())
+    let prior_signal_mask = ELF_PROBE_SIGNAL_MASK.load(Ordering::SeqCst);
+    if pselect {
+        LINUX_THREAD_WAIT_PRIOR_SIGNAL_MASKS[slot].store(prior_signal_mask, Ordering::SeqCst);
+        LINUX_THREAD_SIGNAL_MASKS[slot].store(
+            parsed.temporary_signal_mask.unwrap_or(prior_signal_mask),
+            Ordering::SeqCst,
+        );
+    }
+    let mut target_registers = LinuxSyscallFrame::ZERO;
+    let mut target_rip = 0;
+    let mut target_rsp = 0;
+    let mut target_rflags = 0;
+    let mut target_rax = 0;
+    if !install_linux_thread_return(
+        target,
+        &mut target_registers,
+        &mut target_rip,
+        &mut target_rsp,
+        &mut target_rflags,
+        &mut target_rax,
+    ) {
+        LINUX_THREAD_WAIT_KINDS[slot].store(LINUX_THREAD_WAIT_NONE, Ordering::SeqCst);
+        LINUX_THREAD_WAIT_KEYS[slot].store(0, Ordering::SeqCst);
+        LINUX_THREAD_WAIT_OUTPUTS[slot].store(0, Ordering::SeqCst);
+        LINUX_THREAD_WAIT_DEADLINES[slot].store(0, Ordering::SeqCst);
+        LINUX_THREAD_WAIT_PRIOR_SIGNAL_MASKS[slot].store(0, Ordering::SeqCst);
+        clear_linux_select_snapshot(slot);
+        LINUX_THREAD_STATES[slot].store(LINUX_THREAD_RUNNING, Ordering::SeqCst);
+        LINUX_CURRENT_THREAD_SLOT.store(current.slot, Ordering::SeqCst);
+        let _ = install_linux_tls_context(tls);
+        if pselect {
+            store_current_linux_signal_mask(prior_signal_mask);
+        }
+        return LINUX_EINVAL;
+    }
+    let selected = LinuxUserContext {
+        registers: target_registers,
+        rip: target_rip,
+        rsp: target_rsp,
+        rflags: target_rflags,
+        rax: target_rax,
+        fs_base: active_fs_base(),
+    };
+    if !write_linux_live_return(output, selected) {
+        return LINUX_EINVAL;
+    }
+    LINUX_LIVE_RETURN_VALIDATED.store(true, Ordering::SeqCst);
+    selected.rax
 }
 
 fn linux_poll_live_return(
@@ -25375,6 +25702,7 @@ fn wake_linux_epoll_waits() -> u32 {
 
 fn wake_linux_descriptor_waits() -> u32 {
     wake_linux_poll_waits()
+        + wake_linux_select_waits()
         + wake_linux_epoll_waits()
         + wake_linux_eventfd_read_waits()
         + wake_linux_eventfd_write_waits()
@@ -30722,6 +31050,15 @@ fn expire_linux_waits() -> u32 {
             }
             continue;
         }
+        if matches!(
+            LINUX_THREAD_WAIT_KINDS[slot].load(Ordering::SeqCst),
+            LINUX_THREAD_WAIT_SELECT | LINUX_THREAD_WAIT_PSELECT
+        ) {
+            if complete_linux_select_wait(slot, true) {
+                expired += 1;
+            }
+            continue;
+        }
         if LINUX_THREAD_WAIT_KINDS[slot].load(Ordering::SeqCst) == LINUX_THREAD_WAIT_TIMERFD_READ {
             if complete_linux_timerfd_read_wait(slot) {
                 expired += 1;
@@ -31277,6 +31614,8 @@ fn linux_deliver_signal_to_blocked_wait(
                 | LINUX_THREAD_WAIT_SIGSUSPEND
                 | LINUX_THREAD_WAIT_PPOLL
                 | LINUX_THREAD_WAIT_EPOLL_PWAIT
+                | LINUX_THREAD_WAIT_SELECT
+                | LINUX_THREAD_WAIT_PSELECT
         )
         || output.is_null()
         || LINUX_SIGNAL_ACTIVE.load(Ordering::SeqCst)
@@ -31308,7 +31647,10 @@ fn linux_deliver_signal_to_blocked_wait(
     interrupted.rax = interrupted_result;
     let masked_wait = matches!(
         wait_kind,
-        LINUX_THREAD_WAIT_PPOLL | LINUX_THREAD_WAIT_EPOLL_PWAIT | LINUX_THREAD_WAIT_SIGSUSPEND
+        LINUX_THREAD_WAIT_PPOLL
+            | LINUX_THREAD_WAIT_EPOLL_PWAIT
+            | LINUX_THREAD_WAIT_SIGSUSPEND
+            | LINUX_THREAD_WAIT_PSELECT
     );
     let restored_mask = if masked_wait {
         LINUX_THREAD_WAIT_PRIOR_SIGNAL_MASKS[slot].load(Ordering::SeqCst)
@@ -31461,6 +31803,12 @@ fn linux_deliver_signal_to_blocked_wait(
     }
     if matches!(wait_kind, LINUX_THREAD_WAIT_POLL | LINUX_THREAD_WAIT_PPOLL) {
         clear_linux_poll_snapshot(slot);
+    }
+    if matches!(
+        wait_kind,
+        LINUX_THREAD_WAIT_SELECT | LINUX_THREAD_WAIT_PSELECT
+    ) {
+        clear_linux_select_snapshot(slot);
     }
     if matches!(
         wait_kind,
