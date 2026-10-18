@@ -606,6 +606,97 @@ ginux_linux_system_init:
     test rax, rax
     jne .Lfailure
 
+    # UDP truncation copies the available prefix, reports the full datagram
+    # length under MSG_TRUNC, and preserves a peeked DNS response.
+    mov edi, 2
+    mov esi, 2
+    xor edx, edx
+    mov eax, 41
+    syscall
+    test rax, rax
+    js .Lfailure
+    mov dword ptr [rip + .Ldns_socket], eax
+    mov edi, eax
+    lea rsi, [rip + .Ldns_address]
+    mov edx, 16
+    mov eax, 42
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Ldns_socket]
+    lea rsi, [rip + .Ldns_query]
+    mov edx, 29
+    xor r10d, r10d
+    xor r8d, r8d
+    xor r9d, r9d
+    mov eax, 44
+    syscall
+    cmp rax, 29
+    jne .Lfailure
+    mov ebx, 1024
+.Ldns_peek:
+    mov edi, dword ptr [rip + .Ldns_socket]
+    lea rsi, [rip + .Lmmsg_output]
+    mov edx, 4
+    mov r10d, 0x62
+    xor r8d, r8d
+    xor r9d, r9d
+    mov eax, 45
+    syscall
+    cmp rax, -11
+    jne .Ldns_received
+    dec ebx
+    jnz .Ldns_peek
+    jmp .Ldns_close
+.Ldns_received:
+    cmp rax, 12
+    jb .Lfailure
+    cmp word ptr [rip + .Lmmsg_output], 0x3412
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Ldns_socket]
+    lea rsi, [rip + .Lmmsg_output]
+    mov edx, 4
+    xor r10d, r10d
+    xor r8d, r8d
+    xor r9d, r9d
+    mov eax, 45
+    syscall
+    cmp rax, 4
+    jne .Lfailure
+    cmp word ptr [rip + .Lmmsg_output], 0x3412
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Ldns_socket]
+    lea rsi, [rip + .Ldns_query]
+    mov edx, 29
+    xor r10d, r10d
+    xor r8d, r8d
+    xor r9d, r9d
+    mov eax, 44
+    syscall
+    cmp rax, 29
+    jne .Lfailure
+    lea rax, [rip + .Lmmsg_output]
+    mov qword ptr [rip + .Lmmsg_recv_iov], rax
+    mov qword ptr [rip + .Lmmsg_recv_iov + 8], 4
+    mov dword ptr [rip + .Lmmsg_recv + 48], 0
+    mov edi, dword ptr [rip + .Ldns_socket]
+    lea rsi, [rip + .Lmmsg_recv]
+    xor edx, edx
+    mov eax, 47
+    syscall
+    cmp rax, 4
+    jne .Lfailure
+    cmp dword ptr [rip + .Lmmsg_recv + 48], 0x20
+    jne .Lfailure
+    cmp word ptr [rip + .Lmmsg_output], 0x3412
+    jne .Lfailure
+.Ldns_close:
+    mov edi, dword ptr [rip + .Ldns_socket]
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Lfailure
+
     mov edi, 2
     mov esi, 2
     xor edx, edx
@@ -3275,6 +3366,22 @@ ginux_linux_system_init:
     .space 8
 .Lipv4_socket:
     .long 0
+.Ldns_socket:
+    .long 0
+.align 2
+.Ldns_address:
+    .word 2
+    .word 0x3500
+    .long 0x0302000a
+    .quad 0
+.Ldns_query:
+    .byte 0x12, 0x34, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00
+    .byte 0x00, 0x00, 0x00, 0x00
+    .byte 7
+    .ascii "example"
+    .byte 3
+    .ascii "com"
+    .byte 0, 0, 1, 0, 1
 .align 2
 .Lipv4_peer:
     .word 2

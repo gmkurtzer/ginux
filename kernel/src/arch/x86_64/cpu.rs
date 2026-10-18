@@ -20548,8 +20548,9 @@ fn linux_socket_recvfrom(
     source_length: u64,
 ) -> u64 {
     const MSG_PEEK: u64 = 0x2;
+    const MSG_TRUNC: u64 = 0x20;
     const MSG_DONTWAIT: u64 = 0x40;
-    const SUPPORTED_FLAGS: u64 = MSG_PEEK | MSG_DONTWAIT;
+    const SUPPORTED_FLAGS: u64 = MSG_PEEK | MSG_TRUNC | MSG_DONTWAIT;
     let Some(slot) = linux_socket_slot(descriptor) else {
         return LINUX_EBADF;
     };
@@ -20559,16 +20560,13 @@ fn linux_socket_recvfrom(
     let length = usize::try_from(count).unwrap_or(usize::MAX).min(PAGE_SIZE);
     let mut bytes = [0_u8; PAGE_SIZE];
     let nonblocking = flags & MSG_DONTWAIT != 0 || linux_socket_nonblocking(descriptor);
-    let result = if flags & MSG_PEEK != 0 && nonblocking {
-        crate::linux_socket::peek(slot, &mut bytes[..length])
-    } else if flags & MSG_PEEK != 0 {
-        crate::linux_socket::peek_blocking(slot, &mut bytes[..length])
-    } else if nonblocking {
-        crate::linux_socket::recv(slot, &mut bytes[..length])
+    let peek_only = flags & MSG_PEEK != 0;
+    let result = if nonblocking {
+        crate::linux_socket::recv_message(slot, &mut bytes[..length], peek_only)
     } else {
-        crate::linux_socket::recv_blocking(slot, &mut bytes[..length])
+        crate::linux_socket::recv_message_blocking(slot, &mut bytes[..length], peek_only)
     };
-    let (received, endpoint) = match result {
+    let (received, message_length, endpoint) = match result {
         Ok(result) => result,
         Err(error) => return linux_socket_error(error),
     };
@@ -20583,7 +20581,13 @@ fn linux_socket_recvfrom(
             return LINUX_EFAULT;
         }
     }
-    received as u64
+    if flags & MSG_TRUNC != 0
+        && crate::linux_socket::kind(slot) == Some(crate::linux_socket::Kind::Udp)
+    {
+        message_length as u64
+    } else {
+        received as u64
+    }
 }
 
 fn linux_socket_sendmsg(descriptor: u64, message: u64, flags: u64) -> u64 {
@@ -20648,8 +20652,9 @@ fn linux_socket_sendmsg(descriptor: u64, message: u64, flags: u64) -> u64 {
 
 fn linux_socket_recvmsg(descriptor: u64, message: u64, flags: u64) -> u64 {
     const MSG_PEEK: u64 = 0x2;
+    const MSG_TRUNC: u64 = 0x20;
     const MSG_DONTWAIT: u64 = 0x40;
-    const SUPPORTED_FLAGS: u64 = MSG_PEEK | MSG_DONTWAIT;
+    const SUPPORTED_FLAGS: u64 = MSG_PEEK | MSG_TRUNC | MSG_DONTWAIT;
     let Some(slot) = linux_socket_slot(descriptor) else {
         return LINUX_EBADF;
     };
@@ -20685,16 +20690,13 @@ fn linux_socket_recvmsg(descriptor: u64, message: u64, flags: u64) -> u64 {
     }
     let mut bytes = [0_u8; PAGE_SIZE];
     let nonblocking = flags & MSG_DONTWAIT != 0 || linux_socket_nonblocking(descriptor);
-    let result = if flags & MSG_PEEK != 0 && nonblocking {
-        crate::linux_socket::peek(slot, &mut bytes[..capacity])
-    } else if flags & MSG_PEEK != 0 {
-        crate::linux_socket::peek_blocking(slot, &mut bytes[..capacity])
-    } else if nonblocking {
-        crate::linux_socket::recv(slot, &mut bytes[..capacity])
+    let peek_only = flags & MSG_PEEK != 0;
+    let result = if nonblocking {
+        crate::linux_socket::recv_message(slot, &mut bytes[..capacity], peek_only)
     } else {
-        crate::linux_socket::recv_blocking(slot, &mut bytes[..capacity])
+        crate::linux_socket::recv_message_blocking(slot, &mut bytes[..capacity], peek_only)
     };
-    let (received, endpoint) = match result {
+    let (received, message_length, endpoint) = match result {
         Ok(result) => result,
         Err(error) => return linux_socket_error(error),
     };
@@ -20718,11 +20720,22 @@ fn linux_socket_recvmsg(descriptor: u64, message: u64, flags: u64) -> u64 {
             header[8..12].copy_from_slice(&16_u32.to_ne_bytes());
         }
     }
-    header[48..52].copy_from_slice(&0_u32.to_ne_bytes());
+    let output_flags = if message_length > received {
+        MSG_TRUNC as u32
+    } else {
+        0
+    };
+    header[48..52].copy_from_slice(&output_flags.to_ne_bytes());
     if !copy_to_linux_user(message, &header) {
         return LINUX_EFAULT;
     }
-    received as u64
+    if flags & MSG_TRUNC != 0
+        && crate::linux_socket::kind(slot) == Some(crate::linux_socket::Kind::Udp)
+    {
+        message_length as u64
+    } else {
+        received as u64
+    }
 }
 
 fn linux_socket_sendmmsg(descriptor: u64, messages: u64, count: u64, flags: u64) -> (u64, bool) {

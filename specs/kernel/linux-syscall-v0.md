@@ -22,7 +22,13 @@ through `sendto`/`recvfrom`, `sendmsg`/`recvmsg`, and
 behavior, nondestructive `MSG_PEEK` reads across local, TCP, and UDP
 transports, and descriptor cleanup. The booted proof peeks through both
 `recvfrom` and `recvmsg`, verifies exact bytes, and then consumes the same
-bytes with an ordinary receive. Unsupported
+bytes with an ordinary receive. UDP receives copy a short caller-buffer prefix
+instead of converting truncation into `EAGAIN`; `MSG_TRUNC` returns the full
+datagram length, and `recvmsg` publishes `MSG_TRUNC` in `msg_flags`. A booted
+DNS exchange, when the domain link is up, proves peek-plus-truncation,
+subsequent consumption, and the `recvmsg` output flag against the external UDP
+transport; a link-down boot skips only that external assertion without a
+blocking timeout. Unsupported
 families, types, protocols, flags, options, pointers, and oversized message
 vectors are rejected with their documented Linux errno. Successful TCP accept,
 IPv6, ancillary data, and the broader option surface remain Partial and are not

@@ -807,6 +807,10 @@ pub(crate) fn send_blocking(
 }
 
 pub(crate) fn recv(slot: u8, output: &mut [u8]) -> Result<(usize, Option<IpEndpoint>), Error> {
+    if kind(slot) == Some(Kind::Udp) {
+        return recv_message(slot, output, false)
+            .map(|(copied, _message_length, endpoint)| (copied, endpoint));
+    }
     poll();
     let state = unsafe { SLOTS.get_mut(usize::from(slot)) }
         .filter(|slot| slot.occupied)
@@ -930,6 +934,10 @@ pub(crate) fn peek_local(slot: u8, output: &mut [u8]) -> Result<usize, Error> {
 }
 
 pub(crate) fn peek(slot: u8, output: &mut [u8]) -> Result<(usize, Option<IpEndpoint>), Error> {
+    if kind(slot) == Some(Kind::Udp) {
+        return recv_message(slot, output, true)
+            .map(|(copied, _message_length, endpoint)| (copied, endpoint));
+    }
     poll();
     let state = unsafe { SLOTS.get(usize::from(slot)) }
         .filter(|slot| slot.occupied)
@@ -966,17 +974,53 @@ pub(crate) fn peek(slot: u8, output: &mut [u8]) -> Result<(usize, Option<IpEndpo
     }
 }
 
-pub(crate) fn peek_blocking(
+pub(crate) fn recv_message(
     slot: u8,
     output: &mut [u8],
-) -> Result<(usize, Option<IpEndpoint>), Error> {
+    peek_only: bool,
+) -> Result<(usize, usize, Option<IpEndpoint>), Error> {
+    if kind(slot) != Some(Kind::Udp) {
+        let (copied, endpoint) = if peek_only {
+            peek(slot, output)?
+        } else {
+            recv(slot, output)?
+        };
+        return Ok((copied, copied, endpoint));
+    }
+    poll();
+    let state = unsafe { SLOTS.get(usize::from(slot)) }
+        .filter(|slot| slot.occupied && slot.kind == Kind::Udp)
+        .ok_or(Error::Invalid)?;
+    if state.read_shutdown {
+        return Ok((0, 0, None));
+    }
+    let runtime = runtime()?;
+    let handle = state.handle.ok_or(Error::Invalid)?;
+    let socket = runtime.sockets.get_mut::<udp::Socket>(handle);
+    let (payload, endpoint) = if peek_only {
+        let (payload, metadata) = socket.peek().map_err(|_| Error::WouldBlock)?;
+        (payload, metadata.endpoint)
+    } else {
+        let (payload, metadata) = socket.recv().map_err(|_| Error::WouldBlock)?;
+        (payload, metadata.endpoint)
+    };
+    let copied = output.len().min(payload.len());
+    output[..copied].copy_from_slice(&payload[..copied]);
+    Ok((copied, payload.len(), Some(endpoint)))
+}
+
+pub(crate) fn recv_message_blocking(
+    slot: u8,
+    output: &mut [u8],
+    peek_only: bool,
+) -> Result<(usize, usize, Option<IpEndpoint>), Error> {
     for _ in 0..BLOCKING_POLL_LIMIT {
-        match peek(slot, output) {
+        match recv_message(slot, output, peek_only) {
             Err(Error::WouldBlock | Error::InProgress) => core::hint::spin_loop(),
             result => return result,
         }
     }
-    report_timeout("peek");
+    report_timeout(if peek_only { "peek" } else { "receive" });
     Err(Error::WouldBlock)
 }
 
