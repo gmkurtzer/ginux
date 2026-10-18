@@ -1000,6 +1000,8 @@ an explicit nonnegative offset is updated instead. Regular output offsets
 advance normally. Transfers may exceed one page, short socket or filesystem
 writes return the completed byte count, and a nonblocking socket preserves its
 normal `-EAGAIN` behavior. Same-file and append-file output remain rejected.
+`socket` and `socketpair` narrow their family, type, and protocol arguments to
+Linux's 32-bit UAPI types before validation, ignoring stale high register bits.
 `bind` admits IPv4 TCP or UDP sockets on the configured host address or
 `INADDR_ANY`. Port zero selects an ephemeral port; conflicting bindings return
 `-EADDRINUSE`, and nonlocal addresses return `-EADDRNOTAVAIL`. `listen` turns a

@@ -21555,6 +21555,9 @@ fn linux_socket_create(family: u64, socket_type: u64, protocol: u64) -> u64 {
     const SOCK_DGRAM: u64 = 2;
     const SOCK_NONBLOCK: u64 = 0x800;
     const SOCK_CLOEXEC: u64 = 0x8_0000;
+    let family = u64::from(family as u32);
+    let socket_type = u64::from(socket_type as u32);
+    let protocol = u64::from(protocol as u32);
     if family != AF_INET {
         return LINUX_EAFNOSUPPORT;
     }
@@ -21610,6 +21613,9 @@ fn linux_socket_pair(family: u64, socket_type: u64, protocol: u64, output: u64) 
     const SOCK_STREAM: u64 = 1;
     const SOCK_NONBLOCK: u64 = 0x800;
     const SOCK_CLOEXEC: u64 = 0x8_0000;
+    let family = u64::from(family as u32);
+    let socket_type = u64::from(socket_type as u32);
+    let protocol = u64::from(protocol as u32);
     if family != AF_UNIX {
         return LINUX_EAFNOSUPPORT;
     }
