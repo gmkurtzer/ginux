@@ -13570,6 +13570,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let messages = verify_linux_sysv_message_queue_syscalls();
     let timer_argument_widths = verify_linux_timer_argument_widths();
     let signal_argument_widths = verify_linux_signal_argument_widths();
+    let descriptor_argument_widths = verify_linux_descriptor_argument_widths();
     let process_advice = verify_linux_process_madvise_syscall();
     let posix_queues = verify_linux_posix_message_queue_syscalls();
     let unix_inflight_rights = verify_linux_unix_inflight_rights();
@@ -13615,6 +13616,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         messages,
         timer_argument_widths,
         signal_argument_widths,
+        descriptor_argument_widths,
         process_advice,
         posix_queues,
         unix_inflight_rights,
@@ -13663,6 +13665,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && messages
         && timer_argument_widths
         && signal_argument_widths
+        && descriptor_argument_widths
         && process_advice
         && posix_queues
         && unix_inflight_rights
@@ -15663,6 +15666,41 @@ fn verify_linux_signal_argument_widths() -> bool {
     }
     let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
     pidfd_valid && unmapped
+}
+
+fn verify_linux_descriptor_argument_widths() -> bool {
+    const UPPER_REGISTER_BITS: u64 = 1_u64 << 32;
+    let first = linux_console_dup(UPPER_REGISTER_BITS | 1);
+    if first >= LINUX_DESCRIPTOR_TABLE_LIMIT {
+        return false;
+    }
+    let first_closed =
+        linux_descriptor_close(UPPER_REGISTER_BITS | first) == 0 && !linux_descriptor_open(first);
+    let second = if first_closed {
+        linux_console_dup2(UPPER_REGISTER_BITS | 1, UPPER_REGISTER_BITS | first)
+    } else {
+        LINUX_EBADF
+    };
+    let second_closed = second == first
+        && linux_descriptor_close(UPPER_REGISTER_BITS | second) == 0
+        && !linux_descriptor_open(second);
+    let third = if second_closed {
+        linux_dup3(
+            UPPER_REGISTER_BITS | 1,
+            UPPER_REGISTER_BITS | first,
+            UPPER_REGISTER_BITS | LINUX_O_CLOEXEC,
+        )
+    } else {
+        LINUX_EBADF
+    };
+    let third_valid = third == first && linux_descriptor_close_on_exec(third);
+    let third_closed = third_valid
+        && linux_descriptor_close(UPPER_REGISTER_BITS | third) == 0
+        && !linux_descriptor_open(third);
+    if first < LINUX_DESCRIPTOR_TABLE_LIMIT && linux_descriptor_open(first) {
+        let _ = linux_descriptor_close(first);
+    }
+    first_closed && second_closed && third_closed
 }
 
 fn verify_linux_sysv_semaphore_syscalls() -> bool {
@@ -18202,6 +18240,7 @@ fn linux_chdir(path_address: u64) -> u64 {
 }
 
 fn linux_fchdir(descriptor: u64) -> u64 {
+    let descriptor = u64::from(descriptor as u32);
     let state = linux_device_descriptor(descriptor);
     if state == 0 {
         return LINUX_EBADF;
@@ -28101,7 +28140,7 @@ fn linux_console_close(descriptor: u64) -> u64 {
 }
 
 fn linux_descriptor_close(descriptor: u64) -> u64 {
-    linux_descriptor_close_with_wake(descriptor, true)
+    linux_descriptor_close_with_wake(u64::from(descriptor as u32), true)
 }
 
 fn linux_close_all_descriptors() -> bool {
@@ -28353,7 +28392,7 @@ fn linux_descriptor_close_live_return(
 }
 
 fn linux_console_dup(descriptor: u64) -> u64 {
-    linux_console_dup_at_least(descriptor, 0, false)
+    linux_console_dup_at_least(u64::from(descriptor as u32), 0, false)
 }
 
 fn linux_console_dup_at_least(descriptor: u64, minimum: u64, close_on_exec: bool) -> u64 {
@@ -28376,6 +28415,8 @@ fn linux_console_dup_at_least(descriptor: u64, minimum: u64, close_on_exec: bool
 }
 
 fn linux_console_dup2(source: u64, target: u64) -> u64 {
+    let source = u64::from(source as u32);
+    let target = u64::from(target as u32);
     let device = linux_device_descriptor(source);
     if device != 0 {
         if source == target {
@@ -28521,6 +28562,9 @@ fn linux_console_dup2(source: u64, target: u64) -> u64 {
 }
 
 fn linux_dup3(source: u64, target: u64, flags: u64) -> u64 {
+    let source = u64::from(source as u32);
+    let target = u64::from(target as u32);
+    let flags = u64::from(flags as u32);
     if flags & !LINUX_O_CLOEXEC != 0 || source == target {
         return LINUX_EINVAL;
     }
@@ -29839,6 +29883,7 @@ fn linux_mlockall(flags: u64) -> u64 {
 }
 
 fn linux_syncfs(descriptor: u64) -> u64 {
+    let descriptor = u64::from(descriptor as u32);
     if linux_descriptor_open(descriptor) {
         0
     } else {
@@ -30116,6 +30161,7 @@ fn linux_statfs(path_address: u64, stat_address: u64) -> u64 {
 }
 
 fn linux_fstatfs(descriptor: u64, stat_address: u64) -> u64 {
+    let descriptor = u64::from(descriptor as u32);
     if !linux_descriptor_open(descriptor) {
         return LINUX_EBADF;
     }
