@@ -576,6 +576,8 @@ const LINUX_MADV_DONTFORK: u64 = 10;
 const LINUX_MADV_DOFORK: u64 = 11;
 const LINUX_MADV_WIPEONFORK: u64 = 18;
 const LINUX_MADV_KEEPONFORK: u64 = 19;
+const LINUX_MADV_COLD: u64 = 20;
+const LINUX_MADV_PAGEOUT: u64 = 21;
 const LINUX_MADV_POPULATE_READ: u64 = 22;
 const LINUX_MADV_POPULATE_WRITE: u64 = 23;
 const LINUX_STAT_SIZE: usize = 144;
@@ -15723,6 +15725,18 @@ fn verify_linux_process_madvise_syscall() -> bool {
             PAGE_SIZE as u64,
             LINUX_MADV_FREE,
         ) == LINUX_EINVAL;
+    let reclaim_hints = freed
+        && linux_madvise(first, PAGE_SIZE as u64, LINUX_MADV_COLD) == 0
+        && linux_madvise(first, PAGE_SIZE as u64, LINUX_MADV_PAGEOUT) == 0
+        && linux_process_madvise(descriptor, mapping, 2, LINUX_MADV_COLD, 0)
+            == (2 * PAGE_SIZE) as u64
+        && linux_process_madvise(descriptor, mapping, 2, LINUX_MADV_PAGEOUT, 0)
+            == (2 * PAGE_SIZE) as u64
+        && linux_madvise(
+            mapping + 3 * PAGE_SIZE as u64,
+            PAGE_SIZE as u64,
+            LINUX_MADV_COLD,
+        ) == LINUX_ENOMEM;
     let errors = descriptor < LINUX_AUX_DESCRIPTOR_LIMIT
         && linux_pidfd_open(0, 0) == LINUX_EINVAL
         && linux_process_madvise(descriptor, mapping, 2, LINUX_MADV_DONTNEED, 1) == LINUX_EINVAL
@@ -15776,7 +15790,7 @@ fn verify_linux_process_madvise_syscall() -> bool {
             .frame
             .is_some()
         && linux_runtime_munmap(compatibility_mapping, PAGE_SIZE as u64) == 0;
-    freed && errors && closed && unmapped && population_unmapped && compatibility_flags
+    reclaim_hints && errors && closed && unmapped && population_unmapped && compatibility_flags
 }
 
 fn verify_linux_timer_argument_widths() -> bool {
@@ -17385,6 +17399,36 @@ fn linux_madvise_populate(address: u64, length: u64, writable: bool) -> u64 {
     }
 }
 
+fn linux_madvise_reclaim_hint(address: u64, length: u64) -> u64 {
+    if length == 0 || !address.is_multiple_of(PAGE_SIZE as u64) {
+        return LINUX_EINVAL;
+    }
+    let Some(pages) = length
+        .checked_add(PAGE_SIZE as u64 - 1)
+        .and_then(|rounded| usize::try_from(rounded / PAGE_SIZE as u64).ok())
+    else {
+        return LINUX_ENOMEM;
+    };
+    for page in 0..pages {
+        let Some(page_address) = page
+            .checked_mul(PAGE_SIZE)
+            .and_then(|offset| address.checked_add(offset as u64))
+        else {
+            return LINUX_ENOMEM;
+        };
+        let state = address_space::current_linux_runtime_page(page_address);
+        if !state.occupied {
+            return LINUX_ENOMEM;
+        }
+        if state.secret {
+            return LINUX_EINVAL;
+        }
+    }
+    // There is currently no swap or page-reclaim queue. Linux treats both
+    // operations as best-effort advice, so a validated no-op is accurate.
+    0
+}
+
 fn linux_runtime_mincore(address: u64, length: u64, vector: u64) -> u64 {
     let Some((_, pages)) = linux_runtime_mapping_range(address, length) else {
         return LINUX_EINVAL;
@@ -18177,6 +18221,11 @@ fn linux_madvise(address: u64, length: u64, advice: u64) -> u64 {
     {
         return linux_madvise_populate(address, length, advice == LINUX_MADV_POPULATE_WRITE);
     }
+    if LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
+        && matches!(advice, LINUX_MADV_COLD | LINUX_MADV_PAGEOUT)
+    {
+        return linux_madvise_reclaim_hint(address, length);
+    }
     if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) && address >= LINUX_RUNTIME_DYNAMIC_MMAP_BASE {
         return linux_runtime_madvise(address, length, advice);
     }
@@ -18249,6 +18298,8 @@ fn linux_process_madvise(
                 | LINUX_MADV_SEQUENTIAL
                 | LINUX_MADV_WILLNEED
                 | LINUX_MADV_DONTNEED
+                | LINUX_MADV_COLD
+                | LINUX_MADV_PAGEOUT
         )
     {
         return LINUX_EINVAL;

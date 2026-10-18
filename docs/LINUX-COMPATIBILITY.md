@@ -122,6 +122,10 @@ backing in the current swapless memory model; a later access receives a fresh
 zero-filled page. File-backed, shared, and secret mappings are rejected with
 `EINVAL`. Boot verification writes, frees, confirms physical reclamation, and
 then confirms zero-fill-on-demand.
+`MADV_COLD` and `MADV_PAGEOUT` validate mapped ranges and are accepted through
+both `madvise` and `process_madvise`. They are best-effort no-ops while Ginux
+has neither swap nor a page-reclaim queue; secret mappings remain rejected and
+unmapped ranges report `ENOMEM`.
 Anonymous `mmap` accepts `MAP_POPULATE` and prefaults demand-backed pages using
 the same access-aware path. As on Linux, inability to prefault does not fail
 the mapping, and `MAP_NONBLOCK` suppresses the prefault work. Boot verification
