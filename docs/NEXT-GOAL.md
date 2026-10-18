@@ -55,6 +55,34 @@ Remaining before Stage 2 is complete:
 Gate passed for this checkpoint: `make test`. The next review cycle should
 complete the dispatcher and blocking-wait portion of Stage 2, then stop again.
 
+### Next bounded checkpoint: domain process dispatch and exec
+
+`domain exec` is not a controller-side shell shortcut. It must create a new
+Linux process inside an already-running domain while PID 1 remains alive. That
+requires the general process dispatcher above and is the next implementation
+checkpoint.
+
+The interface contract for that checkpoint is:
+
+- `domain exec NAME COMMAND [ARG...]` runs a non-interactive process, streams
+  its standard output and error to the controller, waits for it, and returns
+  its exit status without changing domain state.
+- `domain exec --interactive NAME COMMAND [ARG...]` allocates a fresh PTY,
+  makes it the process's controlling terminal, attaches the controller to it,
+  and supports the same detach sequence as `domain attach`.
+- Each exec process receives the target domain's Linux personality, root and
+  mount namespace, PID namespace, credentials, environment baseline, resource
+  policy, and network view. It does not inherit host/control-domain authority.
+- Exec failure terminates only the exec process. PID 1 and the domain remain
+  running. Stopping PID 1 still stops the domain and all of its exec processes.
+- The control ABI carries an argument vector and explicit interactive flag;
+  command text is never reparsed by the kernel as a shell command.
+
+Acceptance gate: boot an Alpine `/sbin/init`, execute `/bin/echo` both ways,
+detach and reattach an interactive `/bin/sh`, verify independent PIDs in the
+domain's `/proc`, and confirm a failed exec leaves PID 1 running. Test and
+commit this checkpoint, then stop for operator review.
+
 ## Stage 3: Complete signal semantics
 
 Proposed scope: arbitrary eligible-thread selection, job-control stop/resume,
@@ -92,6 +120,14 @@ regression coverage.
 Proposed scope: systemd as domain PID 1, mounts, devices, credentials, cgroups,
 clocks, timers, process supervision, sockets, service activation, console
 login, and `dnf update`.
+
+Current probe: Rocky 10 UBI-init is downloaded, published, and `/sbin/init` is
+executed by the Linux personality. Systemd then reports `EINVAL` while checking
+whether `/proc`, `/sys`, and `/dev` are mount points, fails its early API
+filesystem setup, and freezes. After `domain exec` exists, a non-interactive
+systemd status command and these mount checks become the next diagnostic and
+compatibility gate; a successful exec alone must not be mistaken for a
+successful system boot.
 
 ## Stage 9: Persistence and production architecture
 
