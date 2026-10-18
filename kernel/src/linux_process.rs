@@ -390,6 +390,7 @@ struct Process {
     parent: Option<ProcessHandle>,
     process_group: u32,
     session: u32,
+    executed: bool,
     user_namespace: linux_user::UserNamespaceHandle,
     address_space: Option<ProcessAddressSpace>,
     retiring_address_space: Option<ProcessAddressSpace>,
@@ -436,6 +437,7 @@ pub(crate) struct LiveProcessStatus {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ProcessGroupError {
+    Access,
     NoSuchProcess,
     Permission,
 }
@@ -1045,6 +1047,7 @@ impl ProcessTable {
             parent,
             process_group,
             session,
+            executed: false,
             user_namespace,
             address_space,
             retiring_address_space: None,
@@ -1086,6 +1089,9 @@ impl ProcessTable {
             .ok_or(ProcessGroupError::NoSuchProcess)?;
         if target != caller && target_process.parent != Some(caller) {
             return Err(ProcessGroupError::NoSuchProcess);
+        }
+        if target != caller && target_process.executed {
+            return Err(ProcessGroupError::Access);
         }
         if target_process.session != caller_process.session
             || target_process.session == target_process.handle.pid
@@ -1129,6 +1135,20 @@ impl ProcessTable {
         process.process_group = pid;
         process.session = pid;
         Ok(pid)
+    }
+
+    fn mark_executed(&mut self, pid: u32) -> bool {
+        let Some(handle) = self.handle_by_pid(pid) else {
+            return false;
+        };
+        let Some(process) = self
+            .process_mut(handle)
+            .filter(|process| process.state == ProcessState::Running)
+        else {
+            return false;
+        };
+        process.executed = true;
+        true
     }
 
     fn process(&self, handle: ProcessHandle) -> Option<&Process> {
@@ -1434,10 +1454,13 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
         || table.set_process_group(init.pid, first_child.pid, first_child.pid) != Ok(())
         || table.process_group(first_child.pid) != Some((3, 1))
         || table.set_process_group(init.pid, first_child.pid, init.pid) != Ok(())
+        || !table.mark_executed(first_child.pid)
+        || table.set_process_group(init.pid, first_child.pid, first_child.pid)
+            != Err(ProcessGroupError::Access)
         || table.create_session(first_child.pid) != Ok(first_child.pid)
         || table.process_group(first_child.pid) != Some((3, 3))
         || table.set_process_group(init.pid, first_child.pid, init.pid)
-            != Err(ProcessGroupError::Permission)
+            != Err(ProcessGroupError::Access)
         || table.set_process_group(first_child.pid, init.pid, init.pid)
             != Err(ProcessGroupError::NoSuchProcess)
     {
@@ -1872,6 +1895,10 @@ pub(crate) fn create_live_process_session(pid: u32) -> Result<u32, ProcessGroupE
     live_process_table_mut()
         .ok_or(ProcessGroupError::NoSuchProcess)?
         .create_session(pid)
+}
+
+pub(crate) fn mark_live_process_executed(pid: u32) -> bool {
+    live_process_table_mut().is_some_and(|table| table.mark_executed(pid))
 }
 
 pub(crate) fn live_process_slot(pid: u32) -> Option<usize> {

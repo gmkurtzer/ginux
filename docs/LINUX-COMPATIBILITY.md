@@ -261,6 +261,16 @@ It also directly exercises realtime and monotonic `clock_gettime`,
 `clock_getres`, `gettimeofday`, `time`, and `times`, including invalid clock
 and userspace-address behavior.
 
+Process-group state tracks whether each process has successfully replaced its
+image. A parent can move itself or a non-executed child within its session, but
+attempting to change a child after exec now returns Linux `EACCES`; unrelated
+processes return `ESRCH`, while session-leader and cross-session changes return
+`EPERM`. The process lifecycle verifier covers child group creation, return to
+an existing group, the post-exec barrier, session creation, and cross-session
+rejection. Controlling terminals, orphaned-group signaling, and a concurrent
+ring-3 parent/child mutation proof remain pending, so `setpgid` and `setsid`
+remain Partial.
+
 The ring-3 controller also exercises `poll` against its live nonblocking pipe
 descriptors. The probe covers empty and readable input, writable output,
 ignored negative descriptors, `POLLNVAL`, writer-close `POLLHUP`, invalid

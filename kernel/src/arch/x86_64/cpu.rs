@@ -8673,6 +8673,7 @@ extern "sysv64" fn linux_syscall_handler(
             let pid = current_linux_process_pid();
             match linux_process::create_live_process_session(pid) {
                 Ok(session) => u64::from(session),
+                Err(linux_process::ProcessGroupError::Access) => LINUX_EACCES,
                 Err(linux_process::ProcessGroupError::NoSuchProcess) => LINUX_ESRCH,
                 Err(linux_process::ProcessGroupError::Permission) => LINUX_EPERM,
             }
@@ -9826,6 +9827,7 @@ fn linux_setpgid(pid: u64, process_group: u64) -> u64 {
     let target = if pid == 0 { caller } else { pid as u32 };
     match linux_process::set_live_process_group(caller, target, process_group as u32) {
         Ok(()) => 0,
+        Err(linux_process::ProcessGroupError::Access) => LINUX_EACCES,
         Err(linux_process::ProcessGroupError::NoSuchProcess) => LINUX_ESRCH,
         Err(linux_process::ProcessGroupError::Permission) => LINUX_EPERM,
     }
@@ -20333,6 +20335,7 @@ fn linux_oci_execve(path: &[u8], arguments_address: u64, environment_address: u6
         LINUX_USER_RIP = startup.initial_entry;
         LINUX_USER_RSP = new_stack;
     }
+    let _ = linux_process::mark_live_process_executed(pid);
     0
 }
 
@@ -21039,6 +21042,7 @@ fn linux_execve_at(
         return LINUX_ESRCH;
     }
     ELF_PROBE_EXEC_REPLACED.store(true, Ordering::SeqCst);
+    let _ = linux_process::mark_live_process_executed(current_linux_process_pid());
     serial_write("ginux: measured Linux exec image replaced atomically\r\n");
     0
 }
