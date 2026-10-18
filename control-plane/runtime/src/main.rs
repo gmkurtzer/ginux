@@ -2431,6 +2431,25 @@ fn linux_pipe_fionread_contract(console: u64) -> bool {
         0,
         0,
     );
+    let mut multiword_select = [1_u64 << writer, 2];
+    let multiword_ready = linux_syscall6(
+        LINUX_SELECT_SYSCALL,
+        65,
+        0,
+        multiword_select.as_mut_ptr() as u64,
+        0,
+        0,
+        0,
+    );
+    let select_descriptor_limit = linux_syscall6(
+        LINUX_SELECT_SYSCALL,
+        1025,
+        0,
+        multiword_select.as_mut_ptr() as u64,
+        0,
+        0,
+        0,
+    );
     let invalid_timeval = [-1_i64, 0];
     let select_bad_time = linux_syscall6(
         LINUX_SELECT_SYSCALL,
@@ -2588,6 +2607,9 @@ fn linux_pipe_fionread_contract(console: u64) -> bool {
         && selected_exception == 0
         && pselected_ready == 1
         && pselected_write == 1_u64 << writer
+        && multiword_ready == 1
+        && multiword_select == [1_u64 << writer, 0]
+        && select_descriptor_limit == LINUX_EINVAL
         && select_bad_time == LINUX_EINVAL
         && select_bad_time_address == LINUX_EFAULT
         && pselect_bad_time == LINUX_EINVAL

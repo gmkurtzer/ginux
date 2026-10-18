@@ -143,15 +143,17 @@ as a sleep. Blocking with no runnable peer retains the explicit `-ENOSYS`
 boundary. This is a two-slot, fixed-snapshot proof rather than a general
 descriptor wait queue. Blocked-signal delivery, nested delivery, and syscall
 restart remain outside this profile.
-`rax = 23` (`__NR_select`) and `rax = 270` (`__NR_pselect6`) accept one
-64-bit descriptor-set word, covering descriptor numbers zero through 63. They
-copy in every supplied read, write, and exception set before evaluation,
-ignore bits at or above `nfds`, return `-EBADF` when any selected descriptor is
-not open, and clear exception sets because the current descriptor profile has
-no `POLLPRI` source. Read and write readiness use the same live descriptor
-state as `poll`, and each ready descriptor is counted once. The ring-3
-controller proves pipe read/write readiness, exception clearing, `pselect6`
-dispatch, invalid descriptor rejection, and invalid-address handling. Select
+`rax = 23` (`__NR_select`) and `rax = 270` (`__NR_pselect6`) accept variable
+descriptor sets through the domain's 1,024-descriptor `RLIMIT_NOFILE`. They
+copy exactly `ceil(nfds / 64)` words from every supplied read, write, and
+exception set before evaluation, ignore bits at or above `nfds`, return
+`-EBADF` when any selected descriptor is not open, and clear exception sets
+because the current descriptor profile has no `POLLPRI` source. Read and write
+readiness use the same live descriptor state as `poll`, and each ready
+descriptor is counted once. The ring-3 controller proves pipe read/write
+readiness, a two-word boundary and high-bit clearing, exception clearing,
+`pselect6` dispatch, descriptor-limit and invalid-descriptor rejection, and
+invalid-address handling. Select
 validates signed `timeval` seconds and normalized microseconds; `pselect6`
 validates the signed `timespec`, packed mask pointer, exact eight-byte mask
 size, and referenced mask range. With no immediate readiness and another
@@ -162,8 +164,7 @@ transition and restores the prior mask on readiness, timeout, failed handoff,
 or signal interruption; its input timespec is never modified. `select` writes
 the remaining timeval on immediate return, readiness, timeout, and signal
 interruption, with transactional rollback if signal-frame publication fails.
-Blocking with no runnable peer retains the explicit `-ENOSYS` boundary, and
-descriptor sets wider than one machine word remain pending.
+Blocking with no runnable peer retains the explicit `-ENOSYS` boundary.
 `rax = 271` (`__NR_ppoll`) uses the same bounded readiness engine. A null
 timeout means an infinite wait request; otherwise the complete 16-byte x86-64
 `timespec` must contain nonnegative seconds and normalized nanoseconds. An

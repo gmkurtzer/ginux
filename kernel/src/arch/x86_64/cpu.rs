@@ -576,6 +576,7 @@ const LINUX_IOV_LIMIT: usize = 64;
 const LINUX_POLLFD_LIMIT: usize = 64;
 const LINUX_AUX_DESCRIPTOR_FIRST: u64 = 3;
 const LINUX_AUX_DESCRIPTOR_LIMIT: u64 = 1024;
+const LINUX_SELECT_WORD_LIMIT: usize = LINUX_AUX_DESCRIPTOR_LIMIT as usize / u64::BITS as usize;
 const LINUX_DESCRIPTOR_TABLE_LIMIT: u64 = 1024;
 const LINUX_DEVICE_DESCRIPTOR_COUNT: usize =
     LINUX_DESCRIPTOR_TABLE_LIMIT as usize - LINUX_AUX_DESCRIPTOR_FIRST as usize;
@@ -1346,12 +1347,15 @@ static LINUX_THREAD_SELECT_EXCEPTION_ADDRESSES: [BankedAtomicU64; LINUX_THREAD_L
     [const { BankedAtomicU64::new(0) }; LINUX_THREAD_LIMIT];
 static LINUX_THREAD_SELECT_TIMEOUT_ADDRESSES: [BankedAtomicU64; LINUX_THREAD_LIMIT] =
     [const { BankedAtomicU64::new(0) }; LINUX_THREAD_LIMIT];
-static LINUX_THREAD_SELECT_READ_SETS: [BankedAtomicU64; LINUX_THREAD_LIMIT] =
-    [const { BankedAtomicU64::new(0) }; LINUX_THREAD_LIMIT];
-static LINUX_THREAD_SELECT_WRITE_SETS: [BankedAtomicU64; LINUX_THREAD_LIMIT] =
-    [const { BankedAtomicU64::new(0) }; LINUX_THREAD_LIMIT];
-static LINUX_THREAD_SELECT_EXCEPTION_SETS: [BankedAtomicU64; LINUX_THREAD_LIMIT] =
-    [const { BankedAtomicU64::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_SELECT_READ_SETS: [[BankedAtomicU64; LINUX_SELECT_WORD_LIMIT];
+    LINUX_THREAD_LIMIT] =
+    [const { [const { BankedAtomicU64::new(0) }; LINUX_SELECT_WORD_LIMIT] }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_SELECT_WRITE_SETS: [[BankedAtomicU64; LINUX_SELECT_WORD_LIMIT];
+    LINUX_THREAD_LIMIT] =
+    [const { [const { BankedAtomicU64::new(0) }; LINUX_SELECT_WORD_LIMIT] }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_SELECT_EXCEPTION_SETS: [[BankedAtomicU64; LINUX_SELECT_WORD_LIMIT];
+    LINUX_THREAD_LIMIT] =
+    [const { [const { BankedAtomicU64::new(0) }; LINUX_SELECT_WORD_LIMIT] }; LINUX_THREAD_LIMIT];
 static LINUX_THREAD_IOV_ADDRESSES: [[BankedAtomicU64; LINUX_IOV_LIMIT]; LINUX_THREAD_LIMIT] =
     [const { [const { BankedAtomicU64::new(0) }; LINUX_IOV_LIMIT] }; LINUX_THREAD_LIMIT];
 static LINUX_THREAD_IOV_LENGTHS: [[BankedAtomicU64; LINUX_IOV_LIMIT]; LINUX_THREAD_LIMIT] =
@@ -5094,13 +5098,13 @@ fn finish_linux_thread_table() -> bool {
             .all(|value| value.load(Ordering::SeqCst) == 0)
         && LINUX_THREAD_SELECT_READ_SETS
             .iter()
-            .all(|value| value.load(Ordering::SeqCst) == 0)
+            .all(|set| set.iter().all(|value| value.load(Ordering::SeqCst) == 0))
         && LINUX_THREAD_SELECT_WRITE_SETS
             .iter()
-            .all(|value| value.load(Ordering::SeqCst) == 0)
+            .all(|set| set.iter().all(|value| value.load(Ordering::SeqCst) == 0))
         && LINUX_THREAD_SELECT_EXCEPTION_SETS
             .iter()
-            .all(|value| value.load(Ordering::SeqCst) == 0)
+            .all(|set| set.iter().all(|value| value.load(Ordering::SeqCst) == 0))
         && LINUX_THREAD_IOV_ADDRESSES.iter().all(|addresses| {
             addresses
                 .iter()
@@ -23386,9 +23390,15 @@ fn clear_linux_select_snapshot(slot: usize) {
     LINUX_THREAD_SELECT_WRITE_ADDRESSES[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_SELECT_EXCEPTION_ADDRESSES[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_SELECT_TIMEOUT_ADDRESSES[slot].store(0, Ordering::SeqCst);
-    LINUX_THREAD_SELECT_READ_SETS[slot].store(0, Ordering::SeqCst);
-    LINUX_THREAD_SELECT_WRITE_SETS[slot].store(0, Ordering::SeqCst);
-    LINUX_THREAD_SELECT_EXCEPTION_SETS[slot].store(0, Ordering::SeqCst);
+    for value in &LINUX_THREAD_SELECT_READ_SETS[slot] {
+        value.store(0, Ordering::SeqCst);
+    }
+    for value in &LINUX_THREAD_SELECT_WRITE_SETS[slot] {
+        value.store(0, Ordering::SeqCst);
+    }
+    for value in &LINUX_THREAD_SELECT_EXCEPTION_SETS[slot] {
+        value.store(0, Ordering::SeqCst);
+    }
 }
 
 fn clear_linux_iov_snapshot(slot: usize) {
@@ -23489,9 +23499,9 @@ struct LinuxSelectInput {
 #[derive(Clone, Copy)]
 struct LinuxSelectSnapshot {
     input: LinuxSelectInput,
-    requested_read: u64,
-    requested_write: u64,
-    requested_exception: u64,
+    requested_read: [u64; LINUX_SELECT_WORD_LIMIT],
+    requested_write: [u64; LINUX_SELECT_WORD_LIMIT],
+    requested_exception: [u64; LINUX_SELECT_WORD_LIMIT],
 }
 
 struct LinuxParsedSelect {
@@ -23505,7 +23515,7 @@ fn linux_select_parse(
     pselect: bool,
     copy_from: fn(u64, &mut [u8]) -> bool,
 ) -> Result<LinuxParsedSelect, u64> {
-    if input.descriptor_count > u64::BITS as u64 {
+    if input.descriptor_count > LINUX_AUX_DESCRIPTOR_LIMIT {
         return Err(LINUX_EINVAL);
     }
     let duration = if input.timeout_address == 0 {
@@ -23555,7 +23565,9 @@ fn linux_select_parse(
     } else {
         None
     };
-    let mut requested = [0_u64; 3];
+    let word_count = input.descriptor_count.div_ceil(u64::BITS as u64) as usize;
+    let byte_count = word_count * size_of::<u64>();
+    let mut requested = [[0_u64; LINUX_SELECT_WORD_LIMIT]; 3];
     for (address, output) in [
         input.read_address,
         input.write_address,
@@ -23564,76 +23576,116 @@ fn linux_select_parse(
     .into_iter()
     .zip(requested.iter_mut())
     {
-        if address != 0 {
-            let mut bytes = [0_u8; 8];
-            if !copy_from(address, &mut bytes) {
+        if address != 0 && byte_count != 0 {
+            let mut bytes = [0_u8; LINUX_SELECT_WORD_LIMIT * size_of::<u64>()];
+            if !copy_from(address, &mut bytes[..byte_count]) {
                 return Err(LINUX_EFAULT);
             }
-            *output = u64::from_ne_bytes(bytes);
+            for (word, bytes) in output[..word_count]
+                .iter_mut()
+                .zip(bytes[..byte_count].as_chunks::<8>().0)
+            {
+                *word = u64::from_ne_bytes(*bytes);
+            }
         }
     }
-    let valid_mask = if input.descriptor_count == 64 {
-        u64::MAX
-    } else {
-        (1_u64 << input.descriptor_count).wrapping_sub(1)
-    };
+    if word_count != 0 && !input.descriptor_count.is_multiple_of(u64::BITS as u64) {
+        let valid_mask = (1_u64 << (input.descriptor_count % u64::BITS as u64)) - 1;
+        for set in &mut requested {
+            set[word_count - 1] &= valid_mask;
+        }
+    }
     Ok(LinuxParsedSelect {
         snapshot: LinuxSelectSnapshot {
             input,
-            requested_read: requested[0] & valid_mask,
-            requested_write: requested[1] & valid_mask,
-            requested_exception: requested[2] & valid_mask,
+            requested_read: requested[0],
+            requested_write: requested[1],
+            requested_exception: requested[2],
         },
         duration,
         temporary_signal_mask,
     })
 }
 
-fn linux_select_ready(snapshot: LinuxSelectSnapshot) -> Result<(u64, u64, u64), u64> {
-    let mut ready_read = 0_u64;
-    let mut ready_write = 0_u64;
+fn linux_select_ready(
+    snapshot: LinuxSelectSnapshot,
+) -> Result<
+    (
+        [u64; LINUX_SELECT_WORD_LIMIT],
+        [u64; LINUX_SELECT_WORD_LIMIT],
+        u64,
+    ),
+    u64,
+> {
+    let mut ready_read = [0_u64; LINUX_SELECT_WORD_LIMIT];
+    let mut ready_write = [0_u64; LINUX_SELECT_WORD_LIMIT];
+    let mut ready_count = 0_u64;
     for descriptor in 0..snapshot.input.descriptor_count {
-        let bit = 1_u64 << descriptor;
-        if (snapshot.requested_read | snapshot.requested_write | snapshot.requested_exception) & bit
+        let word = descriptor as usize / u64::BITS as usize;
+        let bit = 1_u64 << (descriptor % u64::BITS as u64);
+        if (snapshot.requested_read[word]
+            | snapshot.requested_write[word]
+            | snapshot.requested_exception[word])
+            & bit
             != 0
             && !linux_descriptor_open(descriptor)
         {
             return Err(LINUX_EBADF);
         }
-        if snapshot.requested_read & bit != 0
+        let mut descriptor_ready = false;
+        if snapshot.requested_read[word] & bit != 0
             && linux_descriptor_poll_events(descriptor as i32, LINUX_POLLIN) & LINUX_POLLIN != 0
         {
-            ready_read |= bit;
+            ready_read[word] |= bit;
+            descriptor_ready = true;
         }
-        if snapshot.requested_write & bit != 0
+        if snapshot.requested_write[word] & bit != 0
             && linux_descriptor_poll_events(descriptor as i32, LINUX_POLLOUT) & LINUX_POLLOUT != 0
         {
-            ready_write |= bit;
+            ready_write[word] |= bit;
+            descriptor_ready = true;
+        }
+        if descriptor_ready {
+            ready_count += 1;
         }
     }
-    Ok((
-        ready_read,
-        ready_write,
-        u64::from((ready_read | ready_write).count_ones()),
-    ))
+    Ok((ready_read, ready_write, ready_count))
 }
 
 fn linux_select_copy_result(
     snapshot: LinuxSelectSnapshot,
-    ready_read: u64,
-    ready_write: u64,
+    ready_read: [u64; LINUX_SELECT_WORD_LIMIT],
+    ready_write: [u64; LINUX_SELECT_WORD_LIMIT],
     copy_to: fn(u64, &[u8]) -> bool,
 ) -> u64 {
-    for (address, value) in [
+    let word_count = snapshot.input.descriptor_count.div_ceil(u64::BITS as u64) as usize;
+    let byte_count = word_count * size_of::<u64>();
+    let empty = [0_u64; LINUX_SELECT_WORD_LIMIT];
+    for (address, values) in [
         (snapshot.input.read_address, ready_read),
         (snapshot.input.write_address, ready_write),
-        (snapshot.input.exception_address, 0),
+        (snapshot.input.exception_address, empty),
     ] {
-        if address != 0 && !copy_to(address, &value.to_ne_bytes()) {
-            return LINUX_EFAULT;
+        if address != 0 && byte_count != 0 {
+            let mut bytes = [0_u8; LINUX_SELECT_WORD_LIMIT * size_of::<u64>()];
+            for (value, bytes) in values[..word_count]
+                .iter()
+                .zip(bytes[..byte_count].as_chunks_mut::<8>().0)
+            {
+                bytes.copy_from_slice(&value.to_ne_bytes());
+            }
+            if !copy_to(address, &bytes[..byte_count]) {
+                return LINUX_EFAULT;
+            }
         }
     }
-    u64::from((ready_read | ready_write).count_ones())
+    (0..snapshot.input.descriptor_count)
+        .filter(|descriptor| {
+            let word = *descriptor as usize / u64::BITS as usize;
+            let bit = 1_u64 << (*descriptor % u64::BITS as u64);
+            (ready_read[word] | ready_write[word]) & bit != 0
+        })
+        .count() as u64
 }
 
 fn linux_select_with_copy(
@@ -23660,9 +23712,14 @@ fn store_linux_select_snapshot(slot: usize, snapshot: LinuxSelectSnapshot) {
         .store(snapshot.input.exception_address, Ordering::SeqCst);
     LINUX_THREAD_SELECT_TIMEOUT_ADDRESSES[slot]
         .store(snapshot.input.timeout_address, Ordering::SeqCst);
-    LINUX_THREAD_SELECT_READ_SETS[slot].store(snapshot.requested_read, Ordering::SeqCst);
-    LINUX_THREAD_SELECT_WRITE_SETS[slot].store(snapshot.requested_write, Ordering::SeqCst);
-    LINUX_THREAD_SELECT_EXCEPTION_SETS[slot].store(snapshot.requested_exception, Ordering::SeqCst);
+    for index in 0..LINUX_SELECT_WORD_LIMIT {
+        LINUX_THREAD_SELECT_READ_SETS[slot][index]
+            .store(snapshot.requested_read[index], Ordering::SeqCst);
+        LINUX_THREAD_SELECT_WRITE_SETS[slot][index]
+            .store(snapshot.requested_write[index], Ordering::SeqCst);
+        LINUX_THREAD_SELECT_EXCEPTION_SETS[slot][index]
+            .store(snapshot.requested_exception[index], Ordering::SeqCst);
+    }
 }
 
 fn load_linux_select_snapshot(slot: usize, descriptor_count: u64) -> LinuxSelectSnapshot {
@@ -23675,9 +23732,15 @@ fn load_linux_select_snapshot(slot: usize, descriptor_count: u64) -> LinuxSelect
             timeout_address: LINUX_THREAD_SELECT_TIMEOUT_ADDRESSES[slot].load(Ordering::SeqCst),
             signal_mask_address: 0,
         },
-        requested_read: LINUX_THREAD_SELECT_READ_SETS[slot].load(Ordering::SeqCst),
-        requested_write: LINUX_THREAD_SELECT_WRITE_SETS[slot].load(Ordering::SeqCst),
-        requested_exception: LINUX_THREAD_SELECT_EXCEPTION_SETS[slot].load(Ordering::SeqCst),
+        requested_read: core::array::from_fn(|index| {
+            LINUX_THREAD_SELECT_READ_SETS[slot][index].load(Ordering::SeqCst)
+        }),
+        requested_write: core::array::from_fn(|index| {
+            LINUX_THREAD_SELECT_WRITE_SETS[slot][index].load(Ordering::SeqCst)
+        }),
+        requested_exception: core::array::from_fn(|index| {
+            LINUX_THREAD_SELECT_EXCEPTION_SETS[slot][index].load(Ordering::SeqCst)
+        }),
     }
 }
 
@@ -23708,7 +23771,7 @@ fn complete_linux_select_wait(slot: usize, timed_out: bool) -> bool {
         return false;
     }
     let descriptor_count = LINUX_THREAD_WAIT_OUTPUTS[slot].load(Ordering::SeqCst);
-    if descriptor_count > 64 {
+    if descriptor_count > LINUX_AUX_DESCRIPTOR_LIMIT {
         return false;
     }
     let snapshot = load_linux_select_snapshot(slot, descriptor_count);
@@ -23721,8 +23784,16 @@ fn complete_linux_select_wait(slot: usize, timed_out: bool) -> bool {
         Ok((ready_read, ready_write, _)) => {
             let result = linux_select_copy_result(
                 snapshot,
-                if timed_out { 0 } else { ready_read },
-                if timed_out { 0 } else { ready_write },
+                if timed_out {
+                    [0; LINUX_SELECT_WORD_LIMIT]
+                } else {
+                    ready_read
+                },
+                if timed_out {
+                    [0; LINUX_SELECT_WORD_LIMIT]
+                } else {
+                    ready_write
+                },
                 copy_to_linux_user,
             );
             if result != LINUX_EFAULT
@@ -23770,12 +23841,18 @@ fn linux_select_live_return(
         Ok(parsed) => parsed,
         Err(error) => return error,
     };
+    let set_size = parsed
+        .snapshot
+        .input
+        .descriptor_count
+        .div_ceil(u64::BITS as u64) as usize
+        * size_of::<u64>();
     for address in [
         parsed.snapshot.input.read_address,
         parsed.snapshot.input.write_address,
         parsed.snapshot.input.exception_address,
     ] {
-        if address != 0 && !linux_writable_user_range_contains(address, 8) {
+        if address != 0 && set_size != 0 && !linux_writable_user_range_contains(address, set_size) {
             return LINUX_EFAULT;
         }
     }
