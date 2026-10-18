@@ -8676,10 +8676,11 @@ extern "sysv64" fn linux_syscall_handler(
             let Some(credentials) = current_linux_credentials() else {
                 return LINUX_ESRCH;
             };
-            if (first_argument as i32) < 0 {
+            let size = first_argument as i32;
+            if size < 0 {
                 return LINUX_EINVAL;
             }
-            if first_argument == 0 {
+            if size == 0 {
                 return 1;
             }
             if !copy_to_linux_user(buffer, &credentials.supplementary_gid.to_ne_bytes()) {
@@ -9502,7 +9503,8 @@ fn linux_socket_pipe_descriptor(descriptor: u64, access: u16) -> bool {
 }
 
 fn linux_controller_getgroups(size: u64, output: u64) -> u64 {
-    if (size as i32) < 0 {
+    let size = size as i32;
+    if size < 0 {
         return LINUX_EINVAL;
     }
     if size == 0 {

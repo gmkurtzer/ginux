@@ -2742,9 +2742,10 @@ fn linux_identity_contract(console: u64) -> bool {
         && linux_syscall(LINUX_GETSID_SYSCALL, 2, 0, 0) == LINUX_ESRCH;
     let mut group = u32::MAX;
     let groups = linux_syscall(LINUX_GETGROUPS_SYSCALL, 0, 1, 0) == 1
+        && linux_syscall(LINUX_GETGROUPS_SYSCALL, 1_u64 << 32, 1, 0) == 1
         && linux_syscall(
             LINUX_GETGROUPS_SYSCALL,
-            1,
+            (1_u64 << 32) | 1,
             (&mut group as *mut u32) as u64,
             0,
         ) == 1
