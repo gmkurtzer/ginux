@@ -530,8 +530,10 @@ const LINUX_XATTR_SIZE_MAX: usize = 65_536;
 const LINUX_UTIME_NOW: i64 = 1_073_741_823;
 const LINUX_UTIME_OMIT: i64 = 1_073_741_822;
 const LINUX_RLIMIT_STACK: u64 = 3;
+const LINUX_RLIMIT_NPROC: u64 = 6;
 const LINUX_RLIMIT_NOFILE: u64 = 7;
 const LINUX_RLIMIT_NLIMITS: u64 = 16;
+const LINUX_RLIMIT_WORDS: usize = LINUX_RLIMIT_NLIMITS as usize * 2;
 const LINUX_WNOHANG: u64 = 1;
 const LINUX_WUNTRACED: u64 = 2;
 const LINUX_WEXITED: u64 = 4;
@@ -1381,6 +1383,8 @@ static ELF_PROBE_EXITED_CLEAR_CHILD_TID: BankedAtomicU64 = BankedAtomicU64::new(
 static ELF_PROBE_EXITED_ROBUST_LIST: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_READ_ONLY_DATA_PAGE: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_UMASK: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_RLIMITS: [BankedAtomicU64; LINUX_RLIMIT_WORDS] =
+    [const { BankedAtomicU64::new(0) }; LINUX_RLIMIT_WORDS];
 static ELF_PROBE_CONSOLE_DESCRIPTORS: BankedAtomicU8 = BankedAtomicU8::new(0);
 static ELF_PROBE_STDERR_OPEN: BankedAtomicBool = BankedAtomicBool::new(false);
 static ELF_PROBE_CONSOLE_CLOEXEC: [BankedAtomicU64; LINUX_DESCRIPTOR_FLAG_WORD_COUNT] =
@@ -6016,6 +6020,14 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
     ELF_PROBE_EXITED_ROBUST_LIST.store(0, Ordering::SeqCst);
     ELF_PROBE_READ_ONLY_DATA_PAGE.store(0, Ordering::SeqCst);
     ELF_PROBE_UMASK.store(0o022, Ordering::SeqCst);
+    for resource in 0..LINUX_RLIMIT_NLIMITS {
+        let Some(limit) = linux_default_resource_limit(resource, execution.runtime) else {
+            return LinuxElfResult::FAILED;
+        };
+        let index = resource as usize * 2;
+        ELF_PROBE_RLIMITS[index].store(limit[0], Ordering::SeqCst);
+        ELF_PROBE_RLIMITS[index + 1].store(limit[1], Ordering::SeqCst);
+    }
     ELF_PROBE_CONSOLE_DESCRIPTORS.store(
         (LINUX_DESCRIPTOR_INPUT | (LINUX_DESCRIPTOR_OUTPUT << 2)) as u8,
         Ordering::SeqCst,
@@ -8943,7 +8955,8 @@ extern "sysv64" fn linux_syscall_handler(
         }
         LINUX_USERFAULTFD_SYSCALL => linux_userfaultfd(first_argument),
         LINUX_PRLIMIT64_SYSCALL => {
-            if !matches!(first_argument, 0 | 1) {
+            let current_pid = u64::from(current_linux_process_pid());
+            if first_argument != 0 && first_argument != current_pid {
                 return LINUX_ESRCH;
             }
             let Some(limit) =
@@ -8952,7 +8965,10 @@ extern "sysv64" fn linux_syscall_handler(
                 return LINUX_EINVAL;
             };
             if count != 0 {
-                return LINUX_EPERM;
+                let result = linux_setrlimit(buffer, count);
+                if result != 0 {
+                    return result;
+                }
             }
             let old_limit = register(0);
             if old_limit != 0 && !copy_to_linux_user(old_limit, &limit) {
@@ -9426,6 +9442,7 @@ fn linux_deny_privileged_operation(number: u64) -> u64 {
 fn linux_request_process_fork(_runtime_mode: bool, caller: LinuxUserContext) -> u64 {
     if current_linux_tid() != Some(current_linux_process_pid())
         || !refresh_live_linux_process_registry(caller)
+        || linux_nproc_limit_reached()
         || LINUX_FORK_REQUESTED
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .is_err()
@@ -9504,6 +9521,9 @@ fn linux_clone_thread_request(
 ) -> u64 {
     let runtime = LINUX_RUNTIME_MODE.load(Ordering::SeqCst);
     if current_linux_tid() != Some(current_linux_process_pid()) {
+        return LINUX_EAGAIN;
+    }
+    if linux_nproc_limit_reached() {
         return LINUX_EAGAIN;
     }
     if !runtime && ready_linux_thread_handle().is_some() {
@@ -11121,6 +11141,7 @@ struct LinuxProcessRuntimeState {
     stack_low: u64,
     cwd: u16,
     umask: u64,
+    rlimits: [u64; LINUX_RLIMIT_WORDS],
     process_name: [u64; 2],
     nice: u8,
     ioprio: u16,
@@ -11159,6 +11180,7 @@ impl LinuxProcessRuntimeState {
         stack_low: 0,
         cwd: LINUX_ROOT_DIRECTORY,
         umask: 0o022,
+        rlimits: [0; LINUX_RLIMIT_WORDS],
         process_name: [0; 2],
         nice: 20,
         ioprio: 0,
@@ -11219,6 +11241,7 @@ fn capture_linux_process_runtime_state() -> Option<LinuxProcessRuntimeState> {
         stack_low: ELF_PROBE_STACK_LOW.load(Ordering::SeqCst),
         cwd: ELF_PROBE_CWD.load(Ordering::SeqCst),
         umask: ELF_PROBE_UMASK.load(Ordering::SeqCst),
+        rlimits: core::array::from_fn(|index| ELF_PROBE_RLIMITS[index].load(Ordering::SeqCst)),
         process_name: [
             ELF_PROBE_PROCESS_NAME_LOW.load(Ordering::SeqCst),
             ELF_PROBE_PROCESS_NAME_HIGH.load(Ordering::SeqCst),
@@ -11274,6 +11297,9 @@ fn restore_linux_process_runtime_state(state: LinuxProcessRuntimeState) {
     ELF_PROBE_STACK_LOW.store(state.stack_low, Ordering::SeqCst);
     ELF_PROBE_CWD.store(state.cwd, Ordering::SeqCst);
     ELF_PROBE_UMASK.store(state.umask, Ordering::SeqCst);
+    for (limit, value) in ELF_PROBE_RLIMITS.iter().zip(state.rlimits) {
+        limit.store(value, Ordering::SeqCst);
+    }
     ELF_PROBE_PROCESS_NAME_LOW.store(state.process_name[0], Ordering::SeqCst);
     ELF_PROBE_PROCESS_NAME_HIGH.store(state.process_name[1], Ordering::SeqCst);
     ELF_PROBE_NICE.store(state.nice, Ordering::SeqCst);
@@ -24627,7 +24653,7 @@ fn linux_pipe_descriptor(descriptor: u64) -> bool {
 }
 
 fn linux_aux_descriptor_free(descriptor: u64) -> bool {
-    (2..LINUX_AUX_DESCRIPTOR_LIMIT).contains(&descriptor)
+    (2..linux_nofile_soft_limit()).contains(&descriptor)
         && !linux_console_descriptor_open(descriptor)
         && !(descriptor == 2 && ELF_PROBE_STDERR_OPEN.load(Ordering::SeqCst))
         && linux_device_descriptor(descriptor) == 0
@@ -26648,12 +26674,11 @@ fn linux_console_dup_at_least(descriptor: u64, minimum: u64, close_on_exec: bool
     if linux_console_descriptor(descriptor) == 0 {
         return LINUX_EBADF;
     }
-    if minimum >= LINUX_DESCRIPTOR_TABLE_LIMIT {
+    let limit = linux_nofile_soft_limit();
+    if minimum >= limit {
         return LINUX_EINVAL;
     }
-    let Some(target) =
-        (minimum..LINUX_DESCRIPTOR_TABLE_LIMIT).find(|target| !linux_descriptor_open(*target))
-    else {
+    let Some(target) = (minimum..limit).find(|target| !linux_descriptor_open(*target)) else {
         return LINUX_EMFILE;
     };
     let result = linux_console_dup2(descriptor, target);
@@ -26667,11 +26692,11 @@ fn linux_console_dup_at_least(descriptor: u64, minimum: u64, close_on_exec: bool
 fn linux_console_dup2(source: u64, target: u64) -> u64 {
     let device = linux_device_descriptor(source);
     if device != 0 {
-        if target >= LINUX_DESCRIPTOR_TABLE_LIMIT {
-            return LINUX_EBADF;
-        }
         if source == target {
             return target;
+        }
+        if target >= linux_nofile_soft_limit() {
+            return LINUX_EBADF;
         }
         if linux_descriptor_open(target) && linux_descriptor_close(target) != 0 {
             return LINUX_EBADF;
@@ -26763,11 +26788,14 @@ fn linux_console_dup2(source: u64, target: u64) -> u64 {
         return target;
     }
     let state = linux_console_descriptor(source);
-    if state == 0 || target >= LINUX_DESCRIPTOR_TABLE_LIMIT {
+    if state == 0 {
         return LINUX_EBADF;
     }
     if source == target {
         return target;
+    }
+    if target >= linux_nofile_soft_limit() {
+        return LINUX_EBADF;
     }
     if linux_descriptor_open(target) && linux_descriptor_close(target) != 0 {
         return LINUX_EBADF;
@@ -26808,14 +26836,15 @@ fn linux_console_dup2(source: u64, target: u64) -> u64 {
 
 fn linux_device_dup_at_least(source: u64, minimum: u64, close_on_exec: bool) -> u64 {
     let state = linux_device_descriptor(source);
-    if state == 0 || minimum >= LINUX_DESCRIPTOR_TABLE_LIMIT {
+    let limit = linux_nofile_soft_limit();
+    if state == 0 || minimum >= limit {
         return if state == 0 {
             LINUX_EBADF
         } else {
             LINUX_EINVAL
         };
     }
-    let Some(target) = (minimum.max(LINUX_AUX_DESCRIPTOR_FIRST)..LINUX_DESCRIPTOR_TABLE_LIMIT)
+    let Some(target) = (minimum.max(LINUX_AUX_DESCRIPTOR_FIRST)..limit)
         .find(|descriptor| !linux_descriptor_open(*descriptor))
     else {
         return LINUX_EMFILE;
@@ -27510,22 +27539,67 @@ fn append_linux_dirent(
     true
 }
 
-fn linux_resource_limit(resource: u64, runtime: bool) -> Option<[u8; 16]> {
+fn linux_default_resource_limit(resource: u64, runtime: bool) -> Option<[u64; 2]> {
     let value = match resource {
         LINUX_RLIMIT_STACK if runtime => u64::MAX,
         LINUX_RLIMIT_STACK => PAGE_SIZE as u64,
         LINUX_RLIMIT_NOFILE if runtime => LINUX_DESCRIPTOR_TABLE_LIMIT,
         LINUX_RLIMIT_NOFILE => LINUX_AUX_DESCRIPTOR_LIMIT,
-        6 => linux_process::PROCESS_LIMIT as u64,
+        LINUX_RLIMIT_NPROC => linux_process::PROCESS_LIMIT as u64,
         11 => LINUX_SIGNAL_COUNT as u64,
         13 | 14 => 0,
         resource if resource < LINUX_RLIMIT_NLIMITS => u64::MAX,
         _ => return None,
     };
+    Some([value, value])
+}
+
+fn linux_resource_limit_values(resource: u64, runtime: bool) -> Option<[u64; 2]> {
+    let defaults = linux_default_resource_limit(resource, runtime)?;
+    if !ELF_PROBE_ACTIVE.load(Ordering::SeqCst) {
+        return Some(defaults);
+    }
+    let index = resource as usize * 2;
+    Some([
+        ELF_PROBE_RLIMITS[index].load(Ordering::SeqCst),
+        ELF_PROBE_RLIMITS[index + 1].load(Ordering::SeqCst),
+    ])
+}
+
+fn linux_resource_limit(resource: u64, runtime: bool) -> Option<[u8; 16]> {
+    let values = linux_resource_limit_values(resource, runtime)?;
     let mut limit = [0_u8; 16];
-    limit[..8].copy_from_slice(&value.to_ne_bytes());
-    limit[8..].copy_from_slice(&value.to_ne_bytes());
+    limit[..8].copy_from_slice(&values[0].to_ne_bytes());
+    limit[8..].copy_from_slice(&values[1].to_ne_bytes());
     Some(limit)
+}
+
+fn linux_nofile_soft_limit() -> u64 {
+    linux_resource_limit_values(
+        LINUX_RLIMIT_NOFILE,
+        LINUX_RUNTIME_MODE.load(Ordering::SeqCst),
+    )
+    .map_or(0, |limit| limit[0].min(LINUX_DESCRIPTOR_TABLE_LIMIT))
+}
+
+fn linux_nproc_limit_reached() -> bool {
+    let Some(limit) = linux_resource_limit_values(
+        LINUX_RLIMIT_NPROC,
+        LINUX_RUNTIME_MODE.load(Ordering::SeqCst),
+    ) else {
+        return true;
+    };
+    if limit[0] == u64::MAX {
+        return false;
+    }
+    let Some(processes) = linux_process::live_process_count() else {
+        return true;
+    };
+    let threads = LINUX_THREAD_STATES
+        .iter()
+        .filter(|state| state.load(Ordering::SeqCst) != LINUX_THREAD_FREE)
+        .count() as u64;
+    u64::from(processes).saturating_add(threads.saturating_sub(1)) >= limit[0]
 }
 
 fn linux_getrlimit(
@@ -27545,19 +27619,31 @@ fn linux_getrlimit(
 }
 
 fn linux_setrlimit(resource: u64, address: u64) -> u64 {
-    let Some(current) = linux_resource_limit(resource, LINUX_RUNTIME_MODE.load(Ordering::SeqCst))
-    else {
+    let runtime = LINUX_RUNTIME_MODE.load(Ordering::SeqCst);
+    let Some(current) = linux_resource_limit_values(resource, runtime) else {
         return LINUX_EINVAL;
     };
     let mut requested = [0_u8; 16];
     if !copy_from_linux_user(address, &mut requested) {
         return LINUX_EFAULT;
     }
-    if requested == current {
-        0
-    } else {
-        LINUX_EPERM
+    let requested = [
+        u64::from_ne_bytes(requested[..8].try_into().unwrap()),
+        u64::from_ne_bytes(requested[8..].try_into().unwrap()),
+    ];
+    if requested[0] > requested[1] {
+        return LINUX_EINVAL;
     }
+    if requested[1] > current[1] {
+        return LINUX_EPERM;
+    }
+    if !matches!(resource, LINUX_RLIMIT_NPROC | LINUX_RLIMIT_NOFILE) {
+        return if requested == current { 0 } else { LINUX_EPERM };
+    }
+    let index = resource as usize * 2;
+    ELF_PROBE_RLIMITS[index].store(requested[0], Ordering::SeqCst);
+    ELF_PROBE_RLIMITS[index + 1].store(requested[1], Ordering::SeqCst);
+    0
 }
 
 fn linux_scheduler_priority_range(policy: u64, maximum: bool) -> u64 {

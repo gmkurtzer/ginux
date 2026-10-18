@@ -3272,8 +3272,8 @@ if ! grep -q '^ginux: Linux empty capability boundary validated' "$output_file";
     exit 1
 fi
 
-if ! grep -q '^ginux: Linux immutable resource limits validated' "$output_file"; then
-    echo "Boot test failed: Linux immutable resource limits were not validated." >&2
+if ! grep -q '^ginux: Linux mutable resource limits enforced' "$output_file"; then
+    echo "Boot test failed: Linux mutable resource limits were not enforced." >&2
     exit 1
 fi
 

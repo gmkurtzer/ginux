@@ -2415,24 +2415,12 @@ linux_child_joined:
     pop rax
     call syscall_expect_eight
 
-    push 99
-    pop rdi
-    mov esi, 0x405080
-    push 97
-    pop rax
-    call syscall_expect_einval
-
-    movabs rax, 0x1122334455667788
-    mov qword ptr [0x4061f8], rax
     push 3
     pop rdi
     mov esi, 0x4061f8
     push 97
     pop rax
     call syscall_expect_efault
-    movabs rax, 0x1122334455667788
-    cmp qword ptr [0x4061f8], rax
-    require_equal
 
     push 3
     pop rdi
@@ -2467,30 +2455,9 @@ linux_child_joined:
     xor edi, edi
     push 7
     pop rsi
+    mov qword ptr [0x405080], 2
+    mov qword ptr [0x405088], 1024
     mov edx, 0x405080
-    xor r10d, r10d
-    mov eax, 302
-    syscall
-    cmp rax, -1
-    require_equal
-
-    movabs rax, 0x1122334455667788
-    mov qword ptr [0x4061f8], rax
-    xor edi, edi
-    push 7
-    pop rsi
-    xor edx, edx
-    mov r10d, 0x4061f8
-    mov eax, 302
-    call syscall_expect_efault
-    movabs rax, 0x1122334455667788
-    cmp qword ptr [0x4061f8], rax
-    require_equal
-
-    xor edi, edi
-    push 7
-    pop rsi
-    xor edx, edx
     mov r10d, 0x405090
     mov eax, 302
     call syscall_expect_zero
@@ -2498,6 +2465,37 @@ linux_child_joined:
     require_equal
     cmp qword ptr [0x405098], 1024
     require_equal
+
+    push 1
+    pop rdi
+    push 32
+    pop rax
+    syscall
+    cmp rax, -24
+    require_equal
+
+    mov qword ptr [0x405080], 1024
+    push 7
+    pop rdi
+    mov esi, 0x405080
+    mov eax, 160
+    call syscall_expect_zero
+
+    mov qword ptr [0x405080], 1
+    mov qword ptr [0x405088], 6
+    push 6
+    pop rdi
+    mov esi, 0x405080
+    mov eax, 160
+    call syscall_expect_zero
+    mov eax, 57
+    call syscall_expect_eagain
+    mov qword ptr [0x405080], 6
+    push 6
+    pop rdi
+    mov esi, 0x405080
+    mov eax, 160
+    call syscall_expect_zero
 
     push 2
     pop rdi

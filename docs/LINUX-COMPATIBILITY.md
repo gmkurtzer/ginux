@@ -106,8 +106,14 @@ remain pending, so the syscall remains Partial.
 `RLIMIT_RTTIME`. Finite limits reflect Ginux's actual process, descriptor,
 signal, nice, and realtime-priority boundaries; resources without a present
 quota report infinity. The ring-3 controller verifies the full query range,
-ordering, and error behavior. Mutable soft/hard limits and complete `prlimit64`
-target semantics remain pending, so the resource-limit family remains Partial.
+ordering, and error behavior. Linux programs can lower and restore the soft
+`RLIMIT_NOFILE` and `RLIMIT_NPROC` limits within the existing hard limit;
+descriptor allocation then fails with `EMFILE`, while `fork` and thread
+creation fail with `EAGAIN`. These limits survive fork and exec, and the linked
+ring-3 probe exercises mutation, enforcement, and restoration. Mutation of the
+remaining resources, cross-process `prlimit64`, privileged hard-limit raises,
+and `RLIMIT_NOFILE` accounting for descriptors in flight over UNIX sockets
+remain pending, so the resource-limit family remains Partial.
 
 System V shared memory now uses domain-owned, dynamically allocated frame
 objects whose lifetime is independent of any one mapping. `shmget`, `shmat`,
