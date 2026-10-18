@@ -13571,6 +13571,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let timer_argument_widths = verify_linux_timer_argument_widths();
     let signal_argument_widths = verify_linux_signal_argument_widths();
     let descriptor_argument_widths = verify_linux_descriptor_argument_widths();
+    let process_selector_widths = verify_linux_process_selector_widths();
     let process_advice = verify_linux_process_madvise_syscall();
     let posix_queues = verify_linux_posix_message_queue_syscalls();
     let unix_inflight_rights = verify_linux_unix_inflight_rights();
@@ -13617,6 +13618,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         timer_argument_widths,
         signal_argument_widths,
         descriptor_argument_widths,
+        process_selector_widths,
         process_advice,
         posix_queues,
         unix_inflight_rights,
@@ -13666,6 +13668,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && timer_argument_widths
         && signal_argument_widths
         && descriptor_argument_widths
+        && process_selector_widths
         && process_advice
         && posix_queues
         && unix_inflight_rights
@@ -15703,6 +15706,20 @@ fn verify_linux_descriptor_argument_widths() -> bool {
     first_closed && second_closed && third_closed
 }
 
+fn verify_linux_process_selector_widths() -> bool {
+    const UPPER_REGISTER_BITS: u64 = 1_u64 << 32;
+    let pid = u64::from(current_linux_process_pid());
+    linux_process_vm_iov(UPPER_REGISTER_BITS | pid, 0, 0, 0, 0, 0, false) == 0
+        && linux_kcmp(
+            UPPER_REGISTER_BITS | pid,
+            UPPER_REGISTER_BITS | pid,
+            UPPER_REGISTER_BITS | 1,
+            0,
+            0,
+        ) == 0
+        && linux_move_pages(UPPER_REGISTER_BITS | pid, 0, 0, 0, 0, UPPER_REGISTER_BITS) == 0
+}
+
 fn verify_linux_sysv_semaphore_syscalls() -> bool {
     const IPC_SET: u64 = 1;
     const IPC_STAT: u64 = 2;
@@ -16340,10 +16357,11 @@ fn linux_process_vm_iov(
     flags: u64,
     write_remote: bool,
 ) -> u64 {
+    let pid = pid as i32;
     if flags != 0 {
         return LINUX_EINVAL;
     }
-    if pid != u64::from(current_linux_process_pid()) {
+    if pid <= 0 || pid as u32 != current_linux_process_pid() {
         return LINUX_ESRCH;
     }
     let (local, local_count) =
@@ -16507,7 +16525,8 @@ fn linux_mbind(
 }
 
 fn linux_migrate_pages(pid: u64, maximum_node: u64, old_nodes: u64, new_nodes: u64) -> u64 {
-    if pid != 0 && pid != u64::from(current_linux_process_pid()) {
+    let pid = pid as i32;
+    if pid < 0 || pid != 0 && pid as u32 != current_linux_process_pid() {
         return LINUX_ESRCH;
     }
     match (
@@ -16521,7 +16540,9 @@ fn linux_migrate_pages(pid: u64, maximum_node: u64, old_nodes: u64, new_nodes: u
 }
 
 fn linux_move_pages(pid: u64, count: u64, pages: u64, nodes: u64, status: u64, flags: u64) -> u64 {
-    if pid != 0 && pid != u64::from(current_linux_process_pid()) {
+    let pid = pid as i32;
+    let flags = u64::from(flags as u32);
+    if pid < 0 || pid != 0 && pid as u32 != current_linux_process_pid() {
         return LINUX_ESRCH;
     }
     if flags != 0 {
@@ -16585,8 +16606,11 @@ fn linux_set_mempolicy_home_node(address: u64, length: u64, home_node: u64, flag
 fn linux_kcmp(first_pid: u64, second_pid: u64, kind: u64, first: u64, second: u64) -> u64 {
     const KCMP_FILE: u64 = 0;
     const KCMP_SYSVSEM: u64 = 6;
-    let pid = u64::from(current_linux_process_pid());
-    if first_pid != pid || second_pid != pid {
+    let first_pid = first_pid as i32;
+    let second_pid = second_pid as i32;
+    let kind = u64::from(kind as u32);
+    let pid = current_linux_process_pid();
+    if first_pid <= 0 || second_pid <= 0 || first_pid as u32 != pid || second_pid as u32 != pid {
         return LINUX_ESRCH;
     }
     if (1..=KCMP_SYSVSEM).contains(&kind) {
@@ -17639,6 +17663,7 @@ fn linux_process_madvise(
 }
 
 fn linux_process_mrelease(pid_descriptor: u64, flags: u64) -> u64 {
+    let flags = u64::from(flags as u32);
     if flags != 0 {
         return LINUX_EINVAL;
     }
