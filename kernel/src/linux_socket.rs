@@ -1017,8 +1017,8 @@ pub(crate) fn readiness(slot: u8) -> Option<(bool, bool, bool)> {
                 )
             } else {
                 (
-                    socket.can_recv() || !socket.may_recv(),
-                    socket.can_send(),
+                    state.read_shutdown || socket.can_recv() || !socket.may_recv(),
+                    !state.write_shutdown && socket.can_send(),
                     !socket.is_open() && state.remote.is_some(),
                 )
             }
@@ -1075,6 +1075,27 @@ fn poll() {
         &mut runtime.device,
         &mut runtime.sockets,
     );
+    drain_shutdown_tcp_receivers(runtime);
+}
+
+fn drain_shutdown_tcp_receivers(runtime: &mut Runtime) {
+    for state in unsafe { SLOTS.iter() }.filter(|state| {
+        state.occupied
+            && state.kind == Kind::Tcp
+            && !state.listening
+            && state.peer.is_none()
+            && state.read_shutdown
+    }) {
+        let Some(handle) = state.handle else {
+            continue;
+        };
+        let socket = runtime.sockets.get_mut::<tcp::Socket>(handle);
+        while socket.can_recv() {
+            if socket.recv(|bytes| (bytes.len(), ())).is_err() {
+                break;
+            }
+        }
+    }
 }
 
 fn runtime() -> Result<&'static mut Runtime, Error> {

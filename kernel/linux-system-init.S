@@ -363,6 +363,20 @@ ginux_linux_system_init:
     test rax, rax
     jne .Lfailure
 
+    mov eax, dword ptr [rip + .Lsocket_pair]
+    mov dword ptr [rip + .Lstatus], eax
+    mov word ptr [rip + .Lstatus + 4], 5
+    mov word ptr [rip + .Lstatus + 6], 0
+    lea rdi, [rip + .Lstatus]
+    mov esi, 1
+    xor edx, edx
+    mov eax, 7
+    syscall
+    cmp rax, 1
+    jne .Lfailure
+    cmp word ptr [rip + .Lstatus + 6], 1
+    jne .Lfailure
+
     # A broken stream send raises SIGPIPE unless MSG_NOSIGNAL is present.
     mov qword ptr [rip + .Lsignal_action], 0
     mov qword ptr [rip + .Lsignal_action + 8], 0
@@ -759,6 +773,19 @@ ginux_linux_system_init:
     syscall
     test rax, rax
     jne .Lfailure
+    mov eax, dword ptr [rip + .Ltcp_client]
+    mov dword ptr [rip + .Lstatus], eax
+    mov word ptr [rip + .Lstatus + 4], 4
+    mov word ptr [rip + .Lstatus + 6], 0
+    lea rdi, [rip + .Lstatus]
+    mov esi, 1
+    xor edx, edx
+    mov eax, 7
+    syscall
+    test rax, rax
+    jne .Lfailure
+    cmp word ptr [rip + .Lstatus + 6], 0
+    jne .Lfailure
     mov edi, dword ptr [rip + .Ltcp_client]
     lea rsi, [rip + .Ltcp_payload]
     mov edx, 4
@@ -778,6 +805,19 @@ ginux_linux_system_init:
     mov eax, 45
     syscall
     test rax, rax
+    jne .Lfailure
+    mov eax, dword ptr [rip + .Ltcp_accepted]
+    mov dword ptr [rip + .Lstatus], eax
+    mov word ptr [rip + .Lstatus + 4], 1
+    mov word ptr [rip + .Lstatus + 6], 0
+    lea rdi, [rip + .Lstatus]
+    mov esi, 1
+    xor edx, edx
+    mov eax, 7
+    syscall
+    cmp rax, 1
+    jne .Lfailure
+    cmp word ptr [rip + .Lstatus + 6], 1
     jne .Lfailure
     mov edi, dword ptr [rip + .Ltcp_accepted]
     lea rsi, [rip + .Ltcp_payload]

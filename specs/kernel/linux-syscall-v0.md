@@ -932,13 +932,17 @@ subsequent reads return EOF; write shutdown makes subsequent sends return
 direction remains usable after a one-sided write shutdown. External TCP write
 shutdown emits a FIN through the network stack, and all socket kinds implement
 Linux descriptor-width, `ENOTSOCK`, `EBADF`, `ENOTCONN`, and invalid-`how`
-errors. A failed `sendto`, `sendmsg`, or `sendmmsg` on a write-shut stream
+errors. External TCP read shutdown drains and discards transport data after
+each network poll so the peer continues to receive acknowledgements while
+userspace consistently observes EOF. `poll` reports that EOF as readable and
+suppresses writability after write shutdown; the booted AF_UNIX and local-TCP
+proofs cover both transitions. A failed `sendto`, `sendmsg`, or `sendmmsg` on a write-shut stream
 generates kernel-origin `SIGPIPE` while returning `-EPIPE`; `MSG_NOSIGNAL`
 suppresses the signal without changing that error. The booted proof blocks and
 consumes each generated signal, verifies its `SI_KERNEL` source, and verifies
-that all three suppression paths leave no pending signal. Complete external
-read-side shutdown and concurrent half-close races remain pending, so syscall
-48 is classified Partial rather than Complete.
+that all three suppression paths leave no pending signal. External transport
+shutdown under concurrent traffic and concurrent half-close races remain
+pending, so syscall 48 is classified Partial rather than Complete.
 `openat2` accepts the 24-byte version-zero `open_how` structure and delegates
 zero-resolve requests to the same per-domain VFS path as `openat`. Larger
 structures up to one page are accepted only when every extension byte is zero;
