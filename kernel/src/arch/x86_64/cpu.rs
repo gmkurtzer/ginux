@@ -13695,6 +13695,8 @@ fn verify_linux_scheduler_priority_ranges() -> bool {
         linux_scheduler_priority_range(policy, false) == minimum
             && linux_scheduler_priority_range(policy, true) == maximum
     }) && linux_scheduler_priority_range(4, false) == LINUX_EINVAL
+        && linux_scheduler_priority_range(1_u64 << 32, false) == 0
+        && linux_scheduler_priority_range((1_u64 << 32) | 1, true) == 99
         && linux_scheduler_priority_range(u64::MAX, true) == LINUX_EINVAL
 }
 
@@ -13724,15 +13726,16 @@ fn verify_linux_scheduler_queries() -> bool {
             let mut value = [0_u8; 4];
             copy_from_linux_user(mapping, &mut value) && u32::from_ne_bytes(value) == 0
         }
-        && linux_sched_getparam(0, 0) == LINUX_EINVAL
+        && linux_sched_getparam(0, 0) == LINUX_EFAULT
         && linux_sched_getparam(u64::MAX, mapping) == LINUX_EINVAL
-        && linux_sched_getparam(2, 0) == LINUX_EINVAL
+        && linux_sched_getparam(2, 0) == LINUX_ESRCH
         && linux_sched_getparam(2, 1) == LINUX_ESRCH
         && linux_sched_getparam(current, 1) == LINUX_EFAULT;
     let setters = parameter
         && copy_to_linux_user(mapping, &0_u32.to_ne_bytes())
         && linux_set_scheduler(0, 0, mapping) == 0
         && linux_set_scheduler(current, 0, mapping) == 0
+        && linux_set_scheduler(0, 1_u64 << 32, mapping) == 0
         && linux_set_scheduler(2, 0, mapping) == LINUX_ESRCH
         && linux_set_scheduler(u64::MAX, 0, mapping) == LINUX_EINVAL
         && linux_set_scheduler(0, 4, mapping) == LINUX_EINVAL
@@ -13768,13 +13771,14 @@ fn verify_linux_scheduler_affinity() -> bool {
         && observed[8..] == sentinel[8..]
         && linux_sched_getaffinity(current, 16, mapping) == 8
         && linux_sched_getaffinity(2, 7, mapping) == LINUX_EINVAL
-        && linux_sched_getaffinity(current, 0x2000_0000, mapping) == LINUX_EINVAL
+        && linux_sched_getaffinity(current, 0x2000_0000, mapping) == 8
         && linux_sched_getaffinity(2, 8, mapping) == LINUX_ESRCH
         && linux_sched_getaffinity(u64::MAX, 8, mapping) == LINUX_ESRCH
         && linux_sched_getaffinity(current, 8, 1) == LINUX_EFAULT;
     let set = copy_to_linux_user(mapping, &1_u64.to_ne_bytes())
         && linux_sched_setaffinity(0, 8, mapping) == 0
         && linux_sched_setaffinity(current, 1, mapping) == 0
+        && linux_sched_setaffinity(current, 1_u64 << 32, mapping) == 0
         && copy_to_linux_user(mapping, &3_u64.to_ne_bytes())
         && linux_sched_setaffinity(current, 8, mapping) == 0
         && copy_to_linux_user(mapping, &2_u64.to_ne_bytes())
@@ -29443,6 +29447,7 @@ fn linux_setrlimit(resource: u64, address: u64) -> u64 {
 }
 
 fn linux_scheduler_priority_range(policy: u64, maximum: bool) -> u64 {
+    let policy = u64::from(policy as u32);
     match policy {
         1 | 2 if maximum => 99,
         1 | 2 => 1,
@@ -29614,7 +29619,7 @@ fn linux_sched_getscheduler(pid: u64) -> u64 {
 }
 
 fn linux_sched_getparam(pid: u64, address: u64) -> u64 {
-    if address == 0 || (pid as i32) < 0 {
+    if (pid as i32) < 0 {
         return LINUX_EINVAL;
     }
     if let Err(error) = linux_scheduler_process(pid) {
@@ -29655,8 +29660,7 @@ fn linux_affinity_process(pid: u64) -> Result<u32, u64> {
 }
 
 fn linux_sched_getaffinity(pid: u64, length: u64, address: u64) -> u64 {
-    let length = length as u32;
-    if length.wrapping_mul(8) < 1 || length & (size_of::<u64>() as u32 - 1) != 0 {
+    if length < size_of::<u64>() as u64 || !length.is_multiple_of(size_of::<u64>() as u64) {
         return LINUX_EINVAL;
     }
     if let Err(error) = linux_affinity_process(pid) {
@@ -29670,7 +29674,7 @@ fn linux_sched_getaffinity(pid: u64, length: u64, address: u64) -> u64 {
 }
 
 fn linux_sched_setaffinity(pid: u64, length: u64, address: u64) -> u64 {
-    let length = (length as u32).min(size_of::<u64>() as u32) as usize;
+    let length = length.min(size_of::<u64>() as u64) as usize;
     let mut mask = [0_u8; size_of::<u64>()];
     if length != 0 && !copy_from_linux_user(address, &mut mask[..length]) {
         return LINUX_EFAULT;
@@ -30669,6 +30673,7 @@ fn linux_capset(header_address: u64, data_address: u64) -> u64 {
 }
 
 fn linux_set_scheduler(pid: u64, policy: u64, parameter_address: u64) -> u64 {
+    let policy = u64::from(policy as u32);
     if let Err(error) = linux_scheduler_process(pid) {
         return error;
     }
