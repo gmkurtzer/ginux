@@ -29079,10 +29079,13 @@ fn linux_set_process_resource_limit(pid: u32, resource: u64, requested: [u64; 2]
 }
 
 fn linux_prlimit_target(pid: u64) -> Result<u32, u64> {
+    let pid = pid as u32 as i32;
     let pid = if pid == 0 {
         current_linux_process_pid()
+    } else if pid > 0 {
+        pid as u32
     } else {
-        u32::try_from(pid).map_err(|_| LINUX_ESRCH)?
+        return Err(LINUX_ESRCH);
     };
     linux_process::live_process_status(pid)
         .map(|_| pid)
@@ -29122,7 +29125,15 @@ fn verify_linux_cross_process_prlimit(pid: u32) -> bool {
         && linux_process_resource_limit_values(pid, LINUX_RLIMIT_NOFILE) == Some(original);
     let errors = linux_process_resource_limit_values(u32::MAX, LINUX_RLIMIT_NOFILE).is_none()
         && linux_set_process_resource_limit(u32::MAX, LINUX_RLIMIT_NOFILE, original) == LINUX_ESRCH;
-    let valid = changed && restored && errors;
+    let widths = linux_prlimit_target((1_u64 << 32) | u64::from(pid)) == Ok(pid)
+        && linux_prlimit_target(u64::MAX) == Err(LINUX_ESRCH)
+        && linux_prlimit64(
+            (1_u64 << 32) | u64::from(pid),
+            (1_u64 << 32) | LINUX_RLIMIT_NOFILE,
+            0,
+            0,
+        ) == 0;
+    let valid = changed && restored && errors && widths;
     if valid {
         LINUX_CROSS_PROCESS_PRLIMIT_VALIDATED.store(true, Ordering::SeqCst);
         serial_write("ginux: Linux cross-process resource limits validated\r\n");
@@ -29131,6 +29142,7 @@ fn verify_linux_cross_process_prlimit(pid: u32) -> bool {
 }
 
 fn linux_prlimit64(pid: u64, resource: u64, new_limit: u64, old_limit: u64) -> u64 {
+    let resource = u64::from(resource as u32);
     if resource >= LINUX_RLIMIT_NLIMITS {
         return LINUX_EINVAL;
     }
@@ -29275,6 +29287,7 @@ fn linux_getrlimit(
 }
 
 fn linux_setrlimit(resource: u64, address: u64) -> u64 {
+    let resource = u64::from(resource as u32);
     if resource >= LINUX_RLIMIT_NLIMITS {
         return LINUX_EINVAL;
     }

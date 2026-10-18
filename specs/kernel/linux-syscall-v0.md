@@ -769,13 +769,16 @@ uses the same table. The probe retains its one-page stack and bounded
 descriptor profile. Runtime domains report an unlimited stack because their
 initially mapped page grows downward on demand, and report the runtime
 descriptor-table limit.
-`prlimit64` accepts PID 0 or 1 and an optional old-limit destination. Other
-PIDs return `-ESRCH`, unsupported resources return `-EINVAL`, and any non-null
-new-limit pointer returns `-EPERM`. Output is copied only after the full
-16-byte `rlimit` range passes writable-VMA validation, so a range crossing the
-declared ELF extent returns `-EFAULT` without a partial write. The syscall
-entry uses an internal value outside Linux's `-1..-4095` errno range to return
-to the kernel, keeping Linux `-EPERM` observable in ring 3.
+`setrlimit` and `prlimit64` use Linux's unsigned 32-bit resource conversion;
+`prlimit64` also applies signed 32-bit PID conversion, with PID zero selecting
+the caller. It can inspect or lower limits for a permitted live process, while
+unknown PIDs return `-ESRCH`, unsupported resources return `-EINVAL`, an
+inverted soft/hard pair returns `-EINVAL`, and raising a hard limit returns
+`-EPERM`. Output is copied only after the full 16-byte `rlimit` range passes
+writable-VMA validation, so a range crossing the declared ELF extent returns
+`-EFAULT` without a partial write. The syscall entry uses an internal value
+outside Linux's `-1..-4095` errno range to return to the kernel, keeping Linux
+`-EPERM` observable in ring 3.
 `rax = 204` (`__NR_sched_getaffinity`) accepts any live process visible in the
 domain, requires a nonzero, eight-byte-aligned caller size large enough for the
 single active CPU, writes the one-bit CPU 0 mask, and returns 8. An unknown or
