@@ -1471,6 +1471,91 @@ ginux_linux_system_init:
     cmp dword ptr [rip + .Lrseq_area + 4], -1
     jne .Lfailure
 
+    mov edi, 1
+    xor esi, esi
+    mov eax, 252
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov edi, 1
+    xor esi, esi
+    mov edx, 0x4004
+    mov eax, 251
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov edi, 1
+    mov esi, 1
+    mov eax, 252
+    syscall
+    cmp rax, 0x4004
+    jne .Lfailure
+    mov edi, 2
+    xor esi, esi
+    mov eax, 252
+    syscall
+    cmp rax, 0x4004
+    jne .Lfailure
+    mov edi, 3
+    xor esi, esi
+    mov eax, 252
+    syscall
+    cmp rax, 0x4004
+    jne .Lfailure
+    mov edi, 1
+    xor esi, esi
+    mov edx, 1
+    mov eax, 251
+    syscall
+    cmp rax, -22
+    jne .Lfailure
+    mov edi, 1
+    xor esi, esi
+    mov edx, 0x4008
+    mov eax, 251
+    syscall
+    cmp rax, -22
+    jne .Lfailure
+    mov edi, 1
+    xor esi, esi
+    mov edx, 0x8000
+    mov eax, 251
+    syscall
+    cmp rax, -22
+    jne .Lfailure
+    xor edi, edi
+    xor esi, esi
+    mov eax, 252
+    syscall
+    cmp rax, -22
+    jne .Lfailure
+    mov edi, 1
+    mov esi, 9999
+    mov eax, 252
+    syscall
+    cmp rax, -3
+    jne .Lfailure
+    mov rdi, 0x100000001
+    mov rsi, 0x100000000
+    mov rdx, 0x100004003
+    mov eax, 251
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov edi, 1
+    xor esi, esi
+    mov eax, 252
+    syscall
+    cmp rax, 0x4003
+    jne .Lfailure
+    mov edi, 1
+    xor esi, esi
+    xor edx, edx
+    mov eax, 251
+    syscall
+    test rax, rax
+    jne .Lfailure
+
     xor edi, edi
     xor esi, esi
     mov eax, 140
@@ -2137,6 +2222,13 @@ ginux_linux_system_init:
     syscall
     test rax, rax
     jne .Lfailure
+    mov edi, 1
+    xor esi, esi
+    mov edx, 0x4002
+    mov eax, 251
+    syscall
+    test rax, rax
+    jne .Lfailure
 
     mov eax, 57
     syscall
@@ -2265,6 +2357,13 @@ ginux_linux_system_init:
     syscall
     test rax, rax
     jne .Lfailure
+    mov edi, 1
+    xor esi, esi
+    xor edx, edx
+    mov eax, 251
+    syscall
+    test rax, rax
+    jne .Lfailure
 
     mov edi, -100
     lea rsi, [rip + .Lpid2_status_path]
@@ -2284,6 +2383,12 @@ ginux_linux_system_init:
     jmp .Lfork_complete
 
 .Lfork_child:
+    mov edi, 1
+    xor esi, esi
+    mov eax, 252
+    syscall
+    cmp rax, 0x4002
+    jne .Lfailure
     xor edi, edi
     xor esi, esi
     mov eax, 140

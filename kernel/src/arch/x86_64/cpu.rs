@@ -1434,6 +1434,7 @@ static ELF_PROBE_PROCESS_NAME_HIGH: BankedAtomicU64 = BankedAtomicU64::new(0);
 // the per-domain bank can use the same compact atomic machinery as other
 // process runtime state.
 static ELF_PROBE_NICE: BankedAtomicU8 = BankedAtomicU8::new(20);
+static ELF_PROBE_IOPRIO: BankedAtomicU16 = BankedAtomicU16::new(0);
 static LINUX_RUNTIME_EXIT_STATUS: BankedAtomicU64 = BankedAtomicU64::new(u64::MAX);
 static LINUX_RUNTIME_FIRST_UNSUPPORTED_SYSCALL: BankedAtomicU64 = BankedAtomicU64::new(u64::MAX);
 const LINUX_RUNTIME_SYSCALL_TRACE_LIMIT: usize = 128;
@@ -6010,6 +6011,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     ELF_PROBE_PROCESS_NAME_LOW.store(LINUX_INITIAL_PROCESS_NAME, Ordering::SeqCst);
     ELF_PROBE_PROCESS_NAME_HIGH.store(0, Ordering::SeqCst);
     ELF_PROBE_NICE.store(20, Ordering::SeqCst);
+    ELF_PROBE_IOPRIO.store(0, Ordering::SeqCst);
     LINUX_RUNTIME_EXIT_STATUS.store(u64::MAX, Ordering::SeqCst);
     LINUX_RUNTIME_FIRST_UNSUPPORTED_SYSCALL.store(u64::MAX, Ordering::SeqCst);
     LINUX_RUNTIME_SYSCALL_TRACE_COUNT.store(0, Ordering::SeqCst);
@@ -10916,6 +10918,7 @@ struct LinuxProcessRuntimeState {
     umask: u64,
     process_name: [u64; 2],
     nice: u8,
+    ioprio: u16,
     no_new_privileges: bool,
     seccomp_strict: bool,
     membarrier_registrations: u32,
@@ -10953,6 +10956,7 @@ impl LinuxProcessRuntimeState {
         umask: 0o022,
         process_name: [0; 2],
         nice: 20,
+        ioprio: 0,
         no_new_privileges: false,
         seccomp_strict: false,
         membarrier_registrations: 0,
@@ -11015,6 +11019,7 @@ fn capture_linux_process_runtime_state() -> Option<LinuxProcessRuntimeState> {
             ELF_PROBE_PROCESS_NAME_HIGH.load(Ordering::SeqCst),
         ],
         nice: ELF_PROBE_NICE.load(Ordering::SeqCst),
+        ioprio: ELF_PROBE_IOPRIO.load(Ordering::SeqCst),
         no_new_privileges: ELF_PROBE_NO_NEW_PRIVS.load(Ordering::SeqCst),
         seccomp_strict: ELF_PROBE_SECCOMP_STRICT.load(Ordering::SeqCst),
         membarrier_registrations: ELF_PROBE_MEMBARRIER_REGISTRATIONS.load(Ordering::SeqCst),
@@ -11067,6 +11072,7 @@ fn restore_linux_process_runtime_state(state: LinuxProcessRuntimeState) {
     ELF_PROBE_PROCESS_NAME_LOW.store(state.process_name[0], Ordering::SeqCst);
     ELF_PROBE_PROCESS_NAME_HIGH.store(state.process_name[1], Ordering::SeqCst);
     ELF_PROBE_NICE.store(state.nice, Ordering::SeqCst);
+    ELF_PROBE_IOPRIO.store(state.ioprio, Ordering::SeqCst);
     ELF_PROBE_NO_NEW_PRIVS.store(state.no_new_privileges, Ordering::SeqCst);
     ELF_PROBE_SECCOMP_STRICT.store(state.seccomp_strict, Ordering::SeqCst);
     ELF_PROBE_MEMBARRIER_REGISTRATIONS.store(state.membarrier_registrations, Ordering::SeqCst);
@@ -26758,6 +26764,28 @@ fn linux_set_process_nice(pid: u32, nice: u8) -> bool {
     }
 }
 
+fn linux_process_ioprio(pid: u32) -> Option<u16> {
+    if pid == current_linux_process_pid() {
+        Some(ELF_PROBE_IOPRIO.load(Ordering::SeqCst))
+    } else {
+        linux_process_runtime_state(pid)
+            .filter(|state| state.valid)
+            .map(|state| state.ioprio)
+    }
+}
+
+fn linux_set_process_ioprio(pid: u32, priority: u16) -> bool {
+    if pid == current_linux_process_pid() {
+        ELF_PROBE_IOPRIO.store(priority, Ordering::SeqCst);
+        true
+    } else if let Some(state) = linux_process_runtime_state(pid).filter(|state| state.valid) {
+        state.ioprio = priority;
+        true
+    } else {
+        false
+    }
+}
+
 fn linux_getpriority(which: u64, who: u64) -> u64 {
     let (targets, count) = match linux_priority_targets(which, who) {
         Ok(targets) => targets,
@@ -26983,28 +27011,67 @@ fn linux_fadvise64(descriptor: u64, offset: u64, length: u64, advice: u64) -> u6
 }
 
 fn linux_ioprio_get(which: u64, who: u64) -> u64 {
+    let which = which as u32;
     if !matches!(which, 1..=3) {
         return LINUX_EINVAL;
     }
-    if who == 0 || who == 1 {
-        0
-    } else {
-        LINUX_ESRCH
+    let (targets, count) = match linux_priority_targets(u64::from(which - 1), who) {
+        Ok(targets) => targets,
+        Err(error) => return error,
+    };
+    let mut best = 0_u16;
+    for pid in targets[..count].iter().copied() {
+        let Some(priority) = linux_process_ioprio(pid) else {
+            return LINUX_ESRCH;
+        };
+        if best == 0
+            || priority != 0 && ((priority >> 13, priority & 0x1fff) < (best >> 13, best & 0x1fff))
+        {
+            best = priority;
+        }
     }
+    u64::from(best)
 }
 
 fn linux_ioprio_set(which: u64, who: u64, priority: u64) -> u64 {
+    let which = which as u32;
+    let priority = priority as u32;
     if !matches!(which, 1..=3) {
         return LINUX_EINVAL;
     }
-    if !matches!(who, 0 | 1) {
+    let class = priority >> 13;
+    let data = priority & 0x1fff;
+    if priority > u16::MAX as u32
+        || class > 3
+        || class == 0 && data != 0
+        || matches!(class, 1 | 2) && data >= 8
+    {
+        return LINUX_EINVAL;
+    }
+    let (targets, count) = match linux_priority_targets(u64::from(which - 1), who) {
+        Ok(targets) => targets,
+        Err(error) => return error,
+    };
+    let Some(caller) = current_linux_credentials() else {
         return LINUX_ESRCH;
+    };
+    for pid in targets[..count].iter().copied() {
+        let Some(namespace) = linux_process::live_process_user_namespace(pid) else {
+            return LINUX_ESRCH;
+        };
+        let Some(target) = linux_user::credentials(namespace) else {
+            return LINUX_ESRCH;
+        };
+        if caller.euid != 0 && caller.euid != target.uid || caller.euid != 0 && class == 1 {
+            return LINUX_EPERM;
+        }
     }
-    if priority == 0 {
-        0
-    } else {
-        LINUX_EPERM
+    for pid in targets[..count].iter().copied() {
+        if !linux_set_process_ioprio(pid, priority as u16) {
+            return LINUX_ESRCH;
+        }
     }
+    0
 }
 
 const MEMBARRIER_CMD_QUERY: u32 = 0;

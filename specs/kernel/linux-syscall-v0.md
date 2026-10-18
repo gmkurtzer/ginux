@@ -721,6 +721,21 @@ signed range clamping, 32-bit argument narrowing, and invalid/empty selectors.
 The fork proof also covers inheritance and a child-local priority change.
 Competing live multi-process selector results and non-root permission paths
 remain to be exercised before these calls are classified Complete.
+`rax = 251` (`__NR_ioprio_set`) and `rax = 252` (`__NR_ioprio_get`) maintain
+per-process Linux I/O-priority class/data values. Process, process-group, and
+real-UID selectors share the same visibility rules as `getpriority`; zero
+selects the caller's corresponding identity. The default `IOPRIO_CLASS_NONE`
+value is zero. `IOPRIO_CLASS_RT` and `IOPRIO_CLASS_BE` accept data values
+0 through 7, `IOPRIO_CLASS_IDLE` is admitted, invalid class/data encodings
+return `-EINVAL`, and an empty selection returns `-ESRCH`. Group and user reads
+return the best explicit class/data value, ignoring default members when an
+explicit member exists. Updates validate the complete selection before
+mutation, enforce ownership and real-time-class privilege, persist across
+process switches, and are inherited by fork. The booted proof covers the three
+selector classes, default and explicit values, invalid encodings, empty
+selection, Linux 32-bit argument narrowing, reset, and fork inheritance.
+Non-root permission paths, competing simultaneously live aggregate members,
+and influence on physical I/O scheduling remain pending.
 `rax = 228` (`__NR_clock_gettime`) exposes `CLOCK_REALTIME`,
 `CLOCK_MONOTONIC`, and `CLOCK_MONOTONIC_RAW` from an ordered
 bootstrap-processor TSC. The conversion
