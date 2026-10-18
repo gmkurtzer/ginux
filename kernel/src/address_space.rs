@@ -3883,7 +3883,7 @@ pub(crate) fn complete_current_linux_process_snapshot(
 
             let frame_address = value & ADDRESS_MASK;
             if let Some(existing) = mappings[..initial_mapping_count]
-                .iter()
+                .iter_mut()
                 .find(|mapping| mapping.address as u64 == address)
             {
                 if existing.frame.address() != frame_address
@@ -3892,6 +3892,8 @@ pub(crate) fn complete_current_linux_process_snapshot(
                 {
                     return false;
                 }
+                existing.shared = value & LINUX_RUNTIME_SHARED != 0;
+                existing.dontfork = value & LINUX_RUNTIME_DONTFORK != 0;
                 continue;
             }
             let Some(frame) = live_mapping_frame(frame_address) else {

@@ -15632,6 +15632,14 @@ fn verify_linux_process_madvise_syscall() -> bool {
         && !address_space::current_linux_runtime_page(first).dontfork
         && linux_madvise(second, PAGE_SIZE as u64, LINUX_MADV_DONTFORK) == 0
         && address_space::current_linux_runtime_page(second).dontfork;
+    let stack_page = ELF_PROBE_STACK.load(Ordering::SeqCst) & !(PAGE_SIZE as u64 - 1);
+    let general_inheritance = inheritance
+        && stack_page != 0
+        && stack_page < LINUX_RUNTIME_DYNAMIC_MMAP_BASE
+        && linux_madvise(stack_page, PAGE_SIZE as u64, LINUX_MADV_DONTFORK) == 0
+        && address_space::current_linux_runtime_page(stack_page).dontfork
+        && linux_madvise(stack_page, PAGE_SIZE as u64, LINUX_MADV_DOFORK) == 0
+        && !address_space::current_linux_runtime_page(stack_page).dontfork;
     let mut vectors = [0_u8; 32];
     vectors[..8].copy_from_slice(&first.to_ne_bytes());
     vectors[8..16].copy_from_slice(&(PAGE_SIZE as u64).to_ne_bytes());
@@ -15641,7 +15649,7 @@ fn verify_linux_process_madvise_syscall() -> bool {
         (1_u64 << 32) | u64::from(current_linux_process_pid()),
         1_u64 << 32,
     );
-    let advised = inheritance
+    let advised = general_inheritance
         && descriptor < LINUX_AUX_DESCRIPTOR_LIMIT
         && copy_to_linux_user(mapping, &vectors)
         && linux_process_madvise(
@@ -17091,24 +17099,6 @@ fn linux_runtime_madvise(address: u64, length: u64, advice: u64) -> u64 {
             LINUX_ENOMEM
         };
     }
-    if matches!(advice, LINUX_MADV_DONTFORK | LINUX_MADV_DOFORK) {
-        if (0..pages).any(|page| {
-            !address_space::current_linux_runtime_page(address + (page * PAGE_SIZE) as u64).occupied
-        }) {
-            return LINUX_ENOMEM;
-        }
-        let enabled = advice == LINUX_MADV_DONTFORK;
-        return if (0..pages).all(|page| {
-            address_space::set_current_linux_runtime_page_dontfork(
-                address + (page * PAGE_SIZE) as u64,
-                enabled,
-            )
-        }) {
-            0
-        } else {
-            LINUX_EINVAL
-        };
-    }
     if advice != LINUX_MADV_DONTNEED {
         return LINUX_EINVAL;
     }
@@ -17146,6 +17136,42 @@ fn linux_runtime_madvise(address: u64, length: u64, advice: u64) -> u64 {
         }
     }
     0
+}
+
+fn linux_madvise_inheritance(address: u64, length: u64, enabled: bool) -> u64 {
+    if length == 0 || !address.is_multiple_of(PAGE_SIZE as u64) {
+        return LINUX_EINVAL;
+    }
+    let Some(pages) = length
+        .checked_add(PAGE_SIZE as u64 - 1)
+        .and_then(|rounded| usize::try_from(rounded / PAGE_SIZE as u64).ok())
+    else {
+        return LINUX_EINVAL;
+    };
+    let Some(last) = pages
+        .checked_sub(1)
+        .and_then(|page| page.checked_mul(PAGE_SIZE))
+        .and_then(|offset| address.checked_add(offset as u64))
+    else {
+        return LINUX_ENOMEM;
+    };
+    if last >= 1 << 47
+        || (0..pages).any(|page| {
+            !address_space::current_linux_runtime_page(address + (page * PAGE_SIZE) as u64).occupied
+        })
+    {
+        return LINUX_ENOMEM;
+    }
+    if (0..pages).all(|page| {
+        address_space::set_current_linux_runtime_page_dontfork(
+            address + (page * PAGE_SIZE) as u64,
+            enabled,
+        )
+    }) {
+        0
+    } else {
+        LINUX_EINVAL
+    }
 }
 
 fn linux_runtime_mincore(address: u64, length: u64, vector: u64) -> u64 {
@@ -17925,6 +17951,11 @@ fn linux_munmap(address: u64, length: u64) -> u64 {
 
 fn linux_madvise(address: u64, length: u64, advice: u64) -> u64 {
     let advice = u64::from(advice as u32);
+    if LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
+        && matches!(advice, LINUX_MADV_DONTFORK | LINUX_MADV_DOFORK)
+    {
+        return linux_madvise_inheritance(address, length, advice == LINUX_MADV_DONTFORK);
+    }
     if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) && address >= LINUX_RUNTIME_DYNAMIC_MMAP_BASE {
         return linux_runtime_madvise(address, length, advice);
     }

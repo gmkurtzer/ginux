@@ -104,8 +104,10 @@ implement `MADV_DONTFORK` and `MADV_DOFORK` with explicit leaf-PTE inheritance
 metadata. The bit survives protection changes, demand materialization,
 `MADV_DONTNEED`, and `mremap`; process cloning omits marked pages and restores
 normal inheritance after `MADV_DOFORK`. Boot verification covers advice
-toggle/persistence and a child hierarchy in which the marked parent page is
-absent.
+toggle/persistence on both dynamic mmap storage and the pre-seeded process
+stack, plus a child hierarchy in which the marked parent page is absent.
+Snapshot completion imports the inheritance bit from every leaf PTE, including
+stack, heap, executable-image, and dynamically allocated mappings.
 Descriptor-control verification also covers Linux 32-bit descriptor and
 command conversion for `fcntl` and `flock`. `flock` now uses the same explicit,
 directly tested syscall handler in both normal execution and conformance tests
