@@ -1312,9 +1312,9 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
     wrong_permission[0].executable = false;
     let mut wrong_address = first_mappings;
     wrong_address[0].address += 2 * PAGE_SIZE;
-    if ProcessAddressSpace::new(1, &frames[6..10], &wrong_permission)
+    if ProcessAddressSpace::new(4, &frames[6..10], &wrong_permission)
         .is_some_and(|space| space.is_valid())
-        || ProcessAddressSpace::new(1, &frames[6..10], &wrong_address)
+        || ProcessAddressSpace::new(5, &frames[6..10], &wrong_address)
             .is_some_and(|space| space.is_valid())
     {
         return false;
