@@ -18,7 +18,9 @@ options shared by duplicated descriptors; accepted TCP sockets inherit their
 listener's settings. Keepalive and no-delay also configure the underlying TCP
 engine. The booted proof sets and reads back each option, while short or
 unreadable values and unknown options produce `EINVAL`, `EFAULT`, and
-`ENOPROTOOPT` respectively. Connected AF_INET datagram and AF_UNIX stream sockets expose their
+`ENOPROTOOPT` respectively. `SO_TYPE`, `SO_PROTOCOL`, `SO_DOMAIN`, and
+`SO_ACCEPTCONN` report live socket state, including the distinct UDP type and
+protocol. Connected AF_INET datagram and AF_UNIX stream sockets expose their
 peer names through `getpeername`, including Linux address truncation and actual
 length reporting, 32-bit descriptor narrowing, `ENOTCONN`, `ENOTSOCK`, `EBADF`,
 and `EFAULT` paths. It also proves bidirectional AF_UNIX `socketpair` transport

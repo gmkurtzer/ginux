@@ -21027,7 +21027,11 @@ fn linux_socket_getsockopt(
             Ok(value) => value,
             Err(error) => return error,
         },
-        (1, 3) => 1_i32,
+        (1, 3) => match crate::linux_socket::kind(slot) {
+            Some(crate::linux_socket::Kind::Tcp | crate::linux_socket::Kind::Unix) => 1,
+            Some(crate::linux_socket::Kind::Udp) => 2,
+            None => return LINUX_EBADF,
+        },
         (1, 4) => {
             crate::linux_socket::readiness(slot).is_some_and(|(_, _, error)| error) as i32 * 111
         }
@@ -21035,6 +21039,18 @@ fn linux_socket_getsockopt(
         (1, 9) => match read_boolean(crate::linux_socket::BooleanOption::KeepAlive) {
             Ok(value) => value,
             Err(error) => return error,
+        },
+        (1, 30) => i32::from(crate::linux_socket::is_listening(slot)),
+        (1, 38) => match crate::linux_socket::kind(slot) {
+            Some(crate::linux_socket::Kind::Tcp) => 6,
+            Some(crate::linux_socket::Kind::Udp) => 17,
+            Some(crate::linux_socket::Kind::Unix) => 0,
+            None => return LINUX_EBADF,
+        },
+        (1, 39) => match crate::linux_socket::kind(slot) {
+            Some(crate::linux_socket::Kind::Tcp | crate::linux_socket::Kind::Udp) => 2,
+            Some(crate::linux_socket::Kind::Unix) => 1,
+            None => return LINUX_EBADF,
         },
         (6, 1) => {
             if crate::linux_socket::kind(slot) != Some(crate::linux_socket::Kind::Tcp) {

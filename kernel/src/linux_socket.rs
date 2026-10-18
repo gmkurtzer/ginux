@@ -491,6 +491,10 @@ pub(crate) fn kind(slot: u8) -> Option<Kind> {
         .map(|state| state.kind)
 }
 
+pub(crate) fn is_listening(slot: u8) -> bool {
+    unsafe { SLOTS.get(usize::from(slot)) }.is_some_and(|state| state.occupied && state.listening)
+}
+
 pub(crate) fn set_boolean_option(
     slot: u8,
     option: BooleanOption,

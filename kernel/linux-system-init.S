@@ -1464,6 +1464,71 @@ ginux_linux_system_init:
     jne .Lfailure
     cmp dword ptr [rip + .Lstatus + 16], 4
     jne .Lfailure
+    mov dword ptr [rip + .Lstatus], -1
+    mov dword ptr [rip + .Lstatus + 16], 4
+    mov edi, 4
+    mov esi, 1
+    mov edx, 30
+    lea r10, [rip + .Lstatus]
+    lea r8, [rip + .Lstatus + 16]
+    mov eax, 55
+    syscall
+    test rax, rax
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus], 0
+    jne .Lfailure
+    mov dword ptr [rip + .Lstatus], 0
+    mov dword ptr [rip + .Lstatus + 16], 4
+    mov edi, 4
+    mov esi, 1
+    mov edx, 38
+    lea r10, [rip + .Lstatus]
+    lea r8, [rip + .Lstatus + 16]
+    mov eax, 55
+    syscall
+    test rax, rax
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus], 6
+    jne .Lfailure
+    mov dword ptr [rip + .Lstatus], 0
+    mov dword ptr [rip + .Lstatus + 16], 4
+    mov edi, 4
+    mov esi, 1
+    mov edx, 39
+    lea r10, [rip + .Lstatus]
+    lea r8, [rip + .Lstatus + 16]
+    mov eax, 55
+    syscall
+    test rax, rax
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus], 2
+    jne .Lfailure
+    mov edi, 2
+    mov esi, 2
+    xor edx, edx
+    mov eax, 41
+    syscall
+    test rax, rax
+    js .Lfailure
+    mov dword ptr [rip + .Lstatus + 20], eax
+    mov dword ptr [rip + .Lstatus], 0
+    mov dword ptr [rip + .Lstatus + 16], 4
+    mov edi, eax
+    mov esi, 1
+    mov edx, 3
+    lea r10, [rip + .Lstatus]
+    lea r8, [rip + .Lstatus + 16]
+    mov eax, 55
+    syscall
+    test rax, rax
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus], 2
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Lstatus + 20]
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Lfailure
     mov edi, 4
     mov esi, 1
     mov edx, 99
