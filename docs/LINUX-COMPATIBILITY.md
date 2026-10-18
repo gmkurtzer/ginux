@@ -121,6 +121,9 @@ the charge only when an unlinked queue's final descriptor closes.
 `prlimit64` can query or lower limits for another live process in the same
 domain when Linux real/effective/saved UID and GID permission checks permit it;
 the fork-child lifecycle probe verifies mutation, observation, and restoration.
+`RLIMIT_AS` accounts the live user page tables and rejects `mmap` and `mremap`
+growth that would exceed the soft byte limit while permitting fixed mappings
+that only replace already-accounted pages.
 Resource-specific enforcement not listed above, privileged hard-limit raises,
 and unimplemented resource families remain pending, so the resource-limit
 family remains Partial. `RLIMIT_NOFILE` now also accounts for descriptors in

@@ -3292,6 +3292,10 @@ if ! grep -q '^ginux: Linux UNIX in-flight descriptor limit enforced' "$output_f
     echo "Boot test failed: Linux UNIX in-flight descriptor limits were not enforced." >&2
     exit 1
 fi
+if ! grep -q '^ginux: Linux address-space resource limit enforced' "$output_file"; then
+    echo "Boot test failed: Linux address-space resource limits were not enforced." >&2
+    exit 1
+fi
 
 if ! grep -q '^ginux: Linux single-CPU topology queries validated' "$output_file"; then
     echo "Boot test failed: Linux single-CPU topology queries were not validated." >&2

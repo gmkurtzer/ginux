@@ -534,6 +534,7 @@ const LINUX_RLIMIT_FSIZE: u64 = 1;
 const LINUX_RLIMIT_STACK: u64 = 3;
 const LINUX_RLIMIT_NPROC: u64 = 6;
 const LINUX_RLIMIT_NOFILE: u64 = 7;
+const LINUX_RLIMIT_AS: u64 = 9;
 const LINUX_RLIMIT_MSGQUEUE: u64 = 12;
 const LINUX_RLIMIT_NLIMITS: u64 = 16;
 const LINUX_RLIMIT_WORDS: usize = LINUX_RLIMIT_NLIMITS as usize * 2;
@@ -11649,6 +11650,15 @@ fn linux_runtime_brk(requested: u64) -> u64 {
     if new_end > old_end {
         let start = old_end.max(initial_limit);
         let pages = ((new_end - start) / PAGE_SIZE as u64) as usize;
+        let additional_pages = (0..pages)
+            .filter(|page| {
+                !address_space::current_linux_runtime_page(start + (*page * PAGE_SIZE) as u64)
+                    .occupied
+            })
+            .count();
+        if !linux_address_space_limit_allows(additional_pages) {
+            return current;
+        }
         for page in 0..pages {
             let address = start + (page * PAGE_SIZE) as u64;
             if address_space::reserve_current_linux_runtime_page(address, 3, false, false)
@@ -13083,6 +13093,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let membarrier = verify_linux_membarrier_syscall();
     let readahead = verify_linux_readahead_syscall();
     let memory_locking = verify_linux_memory_locking_syscalls();
+    let address_space_limit = verify_linux_address_space_limit();
     let fadvise = verify_linux_fadvise64_syscall();
     let mappings_released =
         address_space::release_current_linux_runtime_mappings(LINUX_RUNTIME_DYNAMIC_MMAP_BASE);
@@ -13121,6 +13132,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         membarrier,
         readahead,
         memory_locking,
+        address_space_limit,
         fadvise,
         mappings_released,
     ]
@@ -13165,6 +13177,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && membarrier
         && readahead
         && memory_locking
+        && address_space_limit
         && fadvise
         && mappings_released
 }
@@ -13586,6 +13599,73 @@ fn verify_linux_memory_locking_syscalls() -> bool {
         && linux_mlockall((1_u64 << 32) | 1) == 0;
     let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64 * 2) == 0;
     all && unmapped
+}
+
+fn verify_linux_address_space_limit() -> bool {
+    let Some(original_limit) =
+        linux_resource_limit_values(LINUX_RLIMIT_AS, LINUX_RUNTIME_MODE.load(Ordering::SeqCst))
+    else {
+        return false;
+    };
+    let mapping = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    if !(LINUX_RUNTIME_DYNAMIC_MMAP_BASE..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
+        .contains(&mapping)
+    {
+        return false;
+    }
+    let Some(current_bytes) = address_space::current_linux_user_page_count()
+        .and_then(|pages| pages.checked_mul(PAGE_SIZE))
+        .and_then(|bytes| u64::try_from(bytes).ok())
+    else {
+        let _ = linux_runtime_munmap(mapping, PAGE_SIZE as u64);
+        return false;
+    };
+    let limited = linux_set_process_resource_limit(
+        current_linux_process_pid(),
+        LINUX_RLIMIT_AS,
+        [current_bytes, original_limit[1]],
+    ) == 0;
+    let rejected = limited
+        && linux_runtime_mmap(
+            0,
+            PAGE_SIZE as u64,
+            LINUX_PROT_READ | LINUX_PROT_WRITE,
+            LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+            u64::MAX,
+            0,
+        ) == LINUX_ENOMEM
+        && linux_mremap(mapping, PAGE_SIZE as u64, PAGE_SIZE as u64 * 2, 1, 0) == LINUX_ENOMEM;
+    let replaced = rejected
+        && linux_runtime_mmap(
+            mapping,
+            PAGE_SIZE as u64,
+            LINUX_PROT_READ | LINUX_PROT_WRITE,
+            LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS | LINUX_MAP_FIXED,
+            u64::MAX,
+            0,
+        ) == mapping
+        && address_space::current_linux_user_page_count()
+            .and_then(|pages| pages.checked_mul(PAGE_SIZE))
+            .and_then(|bytes| u64::try_from(bytes).ok())
+            == Some(current_bytes);
+    let restored = linux_set_process_resource_limit(
+        current_linux_process_pid(),
+        LINUX_RLIMIT_AS,
+        original_limit,
+    ) == 0;
+    let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
+    let valid = limited && rejected && replaced && restored && unmapped;
+    if valid {
+        serial_write("ginux: Linux address-space resource limit enforced\r\n");
+    }
+    valid
 }
 
 fn verify_linux_fadvise64_syscall() -> bool {
@@ -15061,6 +15141,15 @@ fn linux_runtime_mmap(
     if no_replace && !linux_runtime_range_available(mapping, pages) {
         return LINUX_EEXIST;
     }
+    let additional_pages = (0..pages)
+        .filter(|page| {
+            !address_space::current_linux_runtime_page(mapping + (*page * PAGE_SIZE) as u64)
+                .occupied
+        })
+        .count();
+    if !linux_address_space_limit_allows(additional_pages) {
+        return LINUX_ENOMEM;
+    }
     let mut overlay_file = None;
     let mut secret = false;
     let file = if anonymous {
@@ -15301,6 +15390,9 @@ fn linux_mremap(
 
     let template = address_space::current_linux_runtime_page(old_address);
     let extension_pages = new_pages - old_pages;
+    if !linux_address_space_limit_allows(extension_pages) {
+        return LINUX_ENOMEM;
+    }
     if template.file {
         return LINUX_ENOMEM;
     }
@@ -28020,6 +28112,25 @@ fn linux_file_extension_limit(size: usize) -> Result<(), u64> {
         LINUX_FSIZE_LIMIT_HIT.store(true, Ordering::SeqCst);
         Err(LINUX_EFBIG)
     }
+}
+
+fn linux_address_space_limit_allows(additional_pages: usize) -> bool {
+    let Some(limit) =
+        linux_resource_limit_values(LINUX_RLIMIT_AS, LINUX_RUNTIME_MODE.load(Ordering::SeqCst))
+    else {
+        return false;
+    };
+    if limit[0] == u64::MAX {
+        return true;
+    }
+    let Some(current_pages) = address_space::current_linux_user_page_count() else {
+        return false;
+    };
+    current_pages
+        .checked_add(additional_pages)
+        .and_then(|pages| pages.checked_mul(PAGE_SIZE))
+        .and_then(|bytes| u64::try_from(bytes).ok())
+        .is_some_and(|bytes| bytes <= limit[0])
 }
 
 fn linux_nproc_limit_reached() -> bool {

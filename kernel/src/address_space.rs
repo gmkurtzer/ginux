@@ -4884,6 +4884,67 @@ pub(crate) fn current_linux_runtime_page(address: u64) -> LinuxRuntimePage {
     })
 }
 
+pub(crate) fn current_linux_user_page_count() -> Option<usize> {
+    let root = mapped_frame::<u64>(current_root())?;
+    let mut pages = 0_usize;
+    for root_index in 0..ENTRY_COUNT / 2 {
+        let root_value = unsafe { root.add(root_index).read() };
+        if root_value == 0 {
+            continue;
+        }
+        if root_value & USER == 0 {
+            continue;
+        }
+        if root_value & (PRESENT | LARGE_PAGE) != PRESENT {
+            return None;
+        }
+        let pdpt = mapped_frame::<u64>(root_value & ADDRESS_MASK)?;
+        for pdpt_index in 0..ENTRY_COUNT {
+            let pdpt_value = unsafe { pdpt.add(pdpt_index).read() };
+            if pdpt_value == 0 {
+                continue;
+            }
+            if pdpt_value & USER == 0 {
+                continue;
+            }
+            if pdpt_value & PRESENT == 0 {
+                return None;
+            }
+            if pdpt_value & LARGE_PAGE != 0 {
+                pages = pages.checked_add(ENTRY_COUNT * ENTRY_COUNT)?;
+                continue;
+            }
+            let directory = mapped_frame::<u64>(pdpt_value & ADDRESS_MASK)?;
+            for directory_index in 0..ENTRY_COUNT {
+                let directory_value = unsafe { directory.add(directory_index).read() };
+                if directory_value == 0 {
+                    continue;
+                }
+                if directory_value & USER == 0 {
+                    continue;
+                }
+                if directory_value & PRESENT == 0 {
+                    return None;
+                }
+                if directory_value & LARGE_PAGE != 0 {
+                    pages = pages.checked_add(ENTRY_COUNT)?;
+                    continue;
+                }
+                let table = mapped_frame::<u64>(directory_value & ADDRESS_MASK)?;
+                for leaf_index in 0..ENTRY_COUNT {
+                    let leaf_value = unsafe { table.add(leaf_index).read() };
+                    if leaf_value & USER != 0
+                        && leaf_value & (PRESENT | LINUX_RUNTIME_RESERVED) != 0
+                    {
+                        pages = pages.checked_add(1)?;
+                    }
+                }
+            }
+        }
+    }
+    Some(pages)
+}
+
 pub(crate) fn install_current_linux_runtime_page(
     address: u64,
     frame: memory::FrameLease,
