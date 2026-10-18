@@ -133,7 +133,7 @@ const LINUX_PLATFORM: [u8; 7] = [b'x', b'8', b'6', b'_', b'6', b'4', 0];
 const LINUX_FIXTURE_RANDOM: [u8; 16] = [
     0x47, 0x69, 0x6e, 0x75, 0x78, 0x2d, 0x41, 0x42, 0x49, 0x2d, 0x76, 0x30, 0x2d, 0x30, 0x30, 0x31,
 ];
-const LINUX_TLS_THREAD_POINTER_OFFSET: usize = PAGE_SIZE - 64;
+pub(crate) const LINUX_TLS_THREAD_POINTER_OFFSET: usize = PAGE_SIZE - 64;
 const LINUX_TLS_TCB_SIZE: usize = 16;
 pub(crate) const USER_ADDRESS_SPACE_FRAMES: usize = 7;
 const PAGE_ATTRIBUTE_TABLE: u64 = 1 << 12;
@@ -483,8 +483,7 @@ pub(crate) fn run_oci_process(init: &[u8]) -> OciProcessOutcome {
             dependency_mappings: [[cpu::LinuxRelativeFileMapping::EMPTY; 8]; 2],
             exec_expected: false,
             system_init: false,
-            initial_image_count,
-            initial_image_mappings,
+            initial_image_mappings: &initial_image_mappings[..initial_image_count],
         });
         unsafe { activate(kernel_root) };
         stage = 7;
@@ -583,12 +582,14 @@ fn map_linux_leaf_in_root(
     true
 }
 
+#[inline(never)]
 pub(crate) fn verify_linux_elf_mapping(
     plan: &crate::linux_elf::LoadPlan<'_>,
     protected_start: u64,
     protected_size: usize,
     exec_name: &[u8],
 ) -> bool {
+    crate::serial_write("ginux: beginning Linux ELF mapping verification\r\n");
     let Some(kernel_frames_before) = memory::owner_live_frame_count(memory::FrameOwner::KERNEL)
     else {
         return false;
@@ -612,7 +613,7 @@ pub(crate) fn verify_linux_elf_mapping(
     let first = plan.executable;
     let header = plan.read_only;
     let second = plan.writable;
-    let mut initial_image_addresses = [0_usize; cpu::LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
+    let mut initial_image_addresses = [0_usize; 8];
     let mut initial_image_count = 0;
     for segment in [header, Some(first), Some(second)].into_iter().flatten() {
         for page in 0..segment.page_count {
@@ -1141,8 +1142,7 @@ pub(crate) fn verify_linux_elf_mapping(
 
             activate(root);
             let activated = current_root() == root;
-            let mut initial_image_mappings =
-                [cpu::LinuxActiveImageMapping::EMPTY; cpu::LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
+            let mut initial_image_mappings = [cpu::LinuxActiveImageMapping::EMPTY; 8];
             for (index, address) in initial_image_addresses[..initial_image_count]
                 .iter()
                 .enumerate()
@@ -1192,6 +1192,7 @@ pub(crate) fn verify_linux_elf_mapping(
                     })
             });
             let execution_result = if exec_rollback_valid && observed {
+                crate::serial_write("ginux: entering Linux ELF verification process\r\n");
                 cpu::verify_linux_elf_entry(&cpu::LinuxElfExecution {
                     runtime: false,
                     entry: startup.initial_entry as usize,
@@ -1232,13 +1233,12 @@ pub(crate) fn verify_linux_elf_mapping(
                     dependency_mappings: [[cpu::LinuxRelativeFileMapping::EMPTY; 8]; 2],
                     exec_expected: true,
                     system_init: exec_name == b"sbin/init",
-                    initial_image_count,
-                    initial_image_mappings,
+                    initial_image_mappings: &initial_image_mappings[..initial_image_count],
                 })
             } else {
                 cpu::LinuxElfResult::FAILED
             };
-            if !cpu::finalize_linux_exec_page_table_frames(
+            let page_table_frames_valid = cpu::finalize_linux_exec_page_table_frames(
                 [
                     frames[0],
                     frames[1],
@@ -1249,22 +1249,22 @@ pub(crate) fn verify_linux_elf_mapping(
                 ],
                 5,
                 true,
-            ) {
-                return None;
-            }
+            );
             exec_page_table_frames = cpu::take_linux_exec_page_table_frames();
-            if exec_page_table_frames[..5].iter().any(Option::is_none)
-                || exec_page_table_frames[5].is_some()
-            {
-                return None;
-            }
-            table_entries = mapped_frame::<u64>(exec_page_table_frames[3]?.address())?;
             exec_frames = execution_result.exec_frames;
             if execution_result.exec_mapping_count < cpu::LINUX_EXEC_MAPPING_LIMIT {
                 exec_stack_frame = exec_frames[execution_result.exec_mapping_count];
                 exec_frames[execution_result.exec_mapping_count] = None;
             }
             exec_heap_frame = cpu::take_linux_exec_heap_frame();
+            if exec_page_table_frames[..5].iter().any(Option::is_none)
+                || exec_page_table_frames[5].is_some()
+                || !page_table_frames_valid
+            {
+                activate(kernel_root_physical);
+                return Some(false);
+            }
+            table_entries = mapped_frame::<u64>(exec_page_table_frames[3]?.address())?;
             let retired_image_frames = execution_result.retired_image_frames;
             let retired_image_valid = execution_result.retired_image_count == initial_image_count
                 && retired_image_frames[..initial_image_count]
@@ -1393,6 +1393,7 @@ pub(crate) fn verify_linux_elf_mapping(
         && memory::owner_live_frame_count(memory::FrameOwner::KERNEL) == Some(kernel_frames_before)
 }
 
+#[inline(never)]
 pub(crate) fn verify_interpreted_elf_mapping(
     dependency_plan: &crate::linux_elf::DependencyGraphLoadPlan<'_, '_, '_>,
     protected_start: u64,
@@ -2207,7 +2208,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
                 file_mapping(main_rw, 0)?,
                 file_mapping(main_rw, 1)?,
             ];
-            let mut initial_image_addresses = [0_usize; cpu::LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
+            let mut initial_image_addresses = [0_usize; 8];
             let mut initial_image_count = 0;
             for segment in [
                 plan.interpreter.read_only,
@@ -2227,8 +2228,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
                     initial_image_count += 1;
                 }
             }
-            let mut initial_image_mappings =
-                [cpu::LinuxActiveImageMapping::EMPTY; cpu::LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
+            let mut initial_image_mappings = [cpu::LinuxActiveImageMapping::EMPTY; 8];
             for (index, address) in initial_image_addresses[..initial_image_count]
                 .iter()
                 .enumerate()
@@ -2290,8 +2290,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
                     dependency_mappings,
                     exec_expected: true,
                     system_init: false,
-                    initial_image_count,
-                    initial_image_mappings,
+                    initial_image_mappings: &initial_image_mappings[..initial_image_count],
                 })
             } else {
                 cpu::LinuxElfResult::FAILED
@@ -3279,11 +3278,53 @@ fn current_linux_tls_frames<'main, 'interpreter, 'dependency>(
     Some((layout, main, dependencies, frames))
 }
 
+pub(crate) fn linux_exec_tls_context(
+    dependency_plan: &crate::linux_elf::DependencyGraphLoadPlan<'_, '_, '_>,
+    page: u64,
+) -> Option<(usize, usize, usize)> {
+    let main = dependency_plan.process.main.tls?;
+    let dependencies = [
+        dependency_plan.dependencies[0].tls?,
+        dependency_plan.dependencies[1].tls?,
+    ];
+    let layout = crate::linux_elf::plan_static_tls_layout(
+        main,
+        dependencies,
+        LINUX_TLS_THREAD_POINTER_OFFSET,
+        LINUX_TLS_TCB_SIZE,
+        PAGE_SIZE,
+    )?;
+    let page = usize::try_from(page).ok()?;
+    Some((
+        page.checked_add(layout.thread_pointer_offset)?,
+        page.checked_add(layout.extent_start)?,
+        layout.extent_size,
+    ))
+}
+
 pub(crate) fn current_linux_tls_rematerializable(
     dependency_plan: &crate::linux_elf::DependencyGraphLoadPlan<'_, '_, '_>,
     thread_pointers: [u64; 2],
 ) -> bool {
-    current_linux_tls_frames(dependency_plan, thread_pointers).is_some()
+    let valid = current_linux_tls_frames(dependency_plan, thread_pointers).is_some();
+    if !valid {
+        crate::serial_write("ginux: TLS page diagnostics:");
+        for thread_pointer in thread_pointers {
+            let page = thread_pointer & !(PAGE_SIZE as u64 - 1);
+            let entry = unsafe { current_linux_leaf(page).map_or(0, |leaf| leaf.read()) };
+            crate::serial_write(" ");
+            crate::serial_write_u64(thread_pointer);
+            crate::serial_write("/");
+            crate::serial_write_u64(entry);
+            crate::serial_write("/");
+            crate::serial_write_u64(u64::from(memory::frame_addresses_owned_by(
+                memory::FrameOwner::KERNEL,
+                &[entry & ADDRESS_MASK],
+            )));
+        }
+        crate::serial_write("\r\n");
+    }
+    valid
 }
 
 pub(crate) fn materialize_linux_exec_tls_frames(
@@ -3741,31 +3782,47 @@ pub(crate) fn complete_current_linux_process_snapshot(
         })
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn walk(
-        table: u64,
-        level: usize,
-        prefix: u64,
-        user_path: bool,
+        root: u64,
         hierarchy: &mut [memory::FrameLease; cpu::LINUX_PROCESS_HIERARCHY_LIMIT],
         hierarchy_count: &mut usize,
         mappings: &mut [cpu::LinuxActiveImageMapping; cpu::LINUX_PROCESS_MAPPING_LIMIT],
         mapping_count: &mut usize,
         initial_mapping_count: usize,
     ) -> bool {
-        if level > 3 {
-            return false;
+        #[derive(Clone, Copy)]
+        struct Cursor {
+            table: u64,
+            prefix: u64,
+            next_index: usize,
         }
-        let Some(entries) = mapped_frame::<u64>(table) else {
-            return false;
+
+        const EMPTY_CURSOR: Cursor = Cursor {
+            table: 0,
+            prefix: 0,
+            next_index: 0,
         };
-        let shift = [39_u32, 30, 21, 12][level];
-        for index in 0..ENTRY_COUNT {
+        let mut cursors = [EMPTY_CURSOR; 4];
+        cursors[0].table = root;
+        let mut level = 0_usize;
+        loop {
+            if cursors[level].next_index == ENTRY_COUNT {
+                if level == 0 {
+                    return true;
+                }
+                level -= 1;
+                continue;
+            }
+            let index = cursors[level].next_index;
+            cursors[level].next_index += 1;
+            let Some(entries) = mapped_frame::<u64>(cursors[level].table) else {
+                return false;
+            };
             let value = unsafe { entries.add(index).read() };
             if value & PRESENT == 0 {
                 continue;
             }
-            let child_user_path = user_path && value & USER != 0;
+            let child_user_path = value & USER != 0;
             if level == 0 && index >= 256 {
                 if child_user_path {
                     return false;
@@ -3775,7 +3832,7 @@ pub(crate) fn complete_current_linux_process_snapshot(
             if !child_user_path {
                 continue;
             }
-            let address = prefix | (index as u64) << shift;
+            let address = cursors[level].prefix | (index as u64) << [39_u32, 30, 21, 12][level];
             if level < 3 {
                 if value & LARGE_PAGE != 0 {
                     return false;
@@ -3794,19 +3851,12 @@ pub(crate) fn complete_current_linux_process_snapshot(
                     *slot = frame;
                     *hierarchy_count += 1;
                 }
-                if !walk(
-                    child,
-                    level + 1,
-                    address,
-                    child_user_path,
-                    hierarchy,
-                    hierarchy_count,
-                    mappings,
-                    mapping_count,
-                    initial_mapping_count,
-                ) {
-                    return false;
-                }
+                level += 1;
+                cursors[level] = Cursor {
+                    table: child,
+                    prefix: address,
+                    next_index: 0,
+                };
                 continue;
             }
 
@@ -3838,7 +3888,6 @@ pub(crate) fn complete_current_linux_process_snapshot(
             };
             *mapping_count += 1;
         }
-        true
     }
 
     if *hierarchy_count == 0
@@ -3851,9 +3900,6 @@ pub(crate) fn complete_current_linux_process_snapshot(
     let initial_mapping_count = *mapping_count;
     walk(
         current_root(),
-        0,
-        0,
-        true,
         hierarchy,
         hierarchy_count,
         mappings,

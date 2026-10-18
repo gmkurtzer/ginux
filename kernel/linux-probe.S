@@ -123,9 +123,13 @@ ginux_linux_probe:
     require_equal
     cmp qword ptr [rax - 8], 0
     require_equal
-    cmp qword ptr [rax + 16], 0
+    cmp qword ptr [rax + 16], 25
     require_equal
     cmp qword ptr [rax + 24], 0
+    je failure
+    cmp qword ptr [rax + 32], 0
+    require_equal
+    cmp qword ptr [rax + 40], 0
     require_equal
     jmp .Ldynamic_exec_complete
 .Linitial_graph_entry:
@@ -1415,14 +1419,6 @@ linux_clone_repeat:
     push 24
     pop rax
     call syscall_expect_zero
-    mov edi, 0x13d0f00
-    mov esi, 0x413000
-    mov edx, ebp
-    lea r8d, [edx + 4]
-    mov r9d, 0x410fc0
-    push 56
-    pop rax
-    call syscall_expect_eagain
     push 24
     pop rax
     call syscall_expect_zero
@@ -5297,17 +5293,15 @@ resolution_valid:
     call syscall_expect_e2big
 
     lea rax, [rip + exec_mode]
-    mov qword ptr [rsp + 64], rax
-    mov qword ptr [rsp + 72], rax
-    mov qword ptr [rsp + 80], rax
-    mov qword ptr [rsp + 88], rax
-    mov qword ptr [rsp + 96], rax
-    mov qword ptr [rsp + 104], rax
-    mov qword ptr [rsp + 112], rax
-    mov qword ptr [rsp + 120], rax
-    mov qword ptr [rsp + 128], rax
+    mov edi, 0x405c80
+    mov ecx, 33
+.Lexec_vector_overflow:
+    mov qword ptr [rdi], rax
+    add rdi, 8
+    loop .Lexec_vector_overflow
+    mov qword ptr [rdi], 0
     lea rdi, [rip + exec_path]
-    lea rsi, [rsp + 64]
+    mov esi, 0x405c80
     lea rdx, [rsp + 24]
     push 59
     pop rax

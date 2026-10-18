@@ -35,7 +35,7 @@ ginux_linux_system_init:
     js .Lfailure
     mov r12, rax
     mov rdi, rax
-    mov rsi, r8
+    mov rsi, r15
     xor edx, edx
     mov eax, 438
     syscall

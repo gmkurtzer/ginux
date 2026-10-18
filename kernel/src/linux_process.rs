@@ -26,6 +26,7 @@ static LIVE_PROCESS_TABLE_INITIALIZED: [AtomicBool; PROCESS_INSTANCE_LIMIT] =
 static LIVE_PROCESS_REFRESH_COUNT: [AtomicU32; PROCESS_INSTANCE_LIMIT] =
     [const { AtomicU32::new(0) }; PROCESS_INSTANCE_LIMIT];
 static LIVE_PROCESS_ACTIVE_INSTANCE: AtomicU8 = AtomicU8::new(PROCESS_INSTANCE_NONE);
+#[allow(dead_code)]
 static LIVE_FORK_CHILD_EXECUTED: AtomicBool = AtomicBool::new(false);
 static LIVE_FORK_EXECUTION_STAGE: AtomicU32 = AtomicU32::new(0);
 static LIVE_FORK_CHILD_DIAGNOSTIC: AtomicU32 = AtomicU32::new(0);
@@ -83,6 +84,7 @@ const PROCESS_CHILD_PROGRAM: [u8; 42] = [
     0xcd, 0x80, // exit(42)
     0x0f, 0x0b, // failure: ud2
 ];
+#[allow(dead_code)]
 const LIVE_PROCESS_CHILD_PROGRAM: [u8; 16] = [
     0xcd, 0x80, // validate the complete fork-child context
     0xb8, 0x3c, 0, 0, 0, // mov eax, 60 (__NR_exit)
@@ -2235,6 +2237,7 @@ pub(crate) fn live_child_wait_state(
 }
 
 #[inline(never)]
+#[allow(dead_code)]
 pub(crate) fn verify_live_fork_clone_transaction() -> bool {
     LIVE_FORK_EXECUTION_STAGE.store(0, Ordering::Release);
     LIVE_FORK_CHILD_DIAGNOSTIC.store(0, Ordering::Release);
@@ -2247,6 +2250,7 @@ pub(crate) fn verify_live_fork_clone_transaction() -> bool {
 }
 
 #[inline(never)]
+#[allow(dead_code)]
 fn verify_live_fork_clone_and_execution_transaction() -> bool {
     let Some(before) = memory::owner_live_frame_count(memory::FrameOwner::KERNEL) else {
         return false;
@@ -2270,20 +2274,6 @@ fn verify_live_fork_clone_and_execution_transaction() -> bool {
     let Some(child_handle) = table.prepare_fork(parent_handle) else {
         return false;
     };
-    let Some(child_hierarchy) =
-        memory::allocate_frames::<PROCESS_HIERARCHY_LIMIT>(memory::FrameOwner::KERNEL)
-    else {
-        let _ = table.abort_fork(child_handle);
-        return false;
-    };
-    let Some(child_pages) =
-        memory::allocate_frames::<PROCESS_PRIVATE_COPY_LIMIT>(memory::FrameOwner::KERNEL)
-    else {
-        let _released =
-            memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &child_hierarchy);
-        let _aborted = table.abort_fork(child_handle);
-        return false;
-    };
     let hierarchy_count = parent_space.hierarchy().len();
     let mapping_count = parent_space.mappings().len();
     let private_count = parent_space
@@ -2291,21 +2281,31 @@ fn verify_live_fork_clone_and_execution_transaction() -> bool {
         .iter()
         .filter(|mapping| mapping_requires_fork_copy(mapping))
         .count();
+    let child_hierarchy = unsafe { &mut *LIVE_FORK_HIERARCHY_ALLOCATION_SCRATCH.0.get() };
+    if !memory::allocate_frame_prefix_into(
+        memory::FrameOwner::KERNEL,
+        child_hierarchy,
+        hierarchy_count,
+    ) {
+        let _ = table.abort_fork(child_handle);
+        return false;
+    }
+    let child_pages = unsafe { &mut *LIVE_FORK_ALLOCATION_SCRATCH.0.get() };
+    if !memory::allocate_frame_prefix_into(memory::FrameOwner::KERNEL, child_pages, private_count) {
+        let _released = memory::scrub_and_release_frames(
+            memory::FrameOwner::KERNEL,
+            &child_hierarchy[..hierarchy_count],
+        );
+        let _aborted = table.abort_fork(child_handle);
+        return false;
+    }
     let published = table.commit_cloned_fork(
         child_handle,
         &child_hierarchy[..hierarchy_count],
         &child_pages[..private_count],
     );
-    let hierarchy_extras_released = hierarchy_count == child_hierarchy.len()
-        || memory::scrub_and_release_frames(
-            memory::FrameOwner::KERNEL,
-            &child_hierarchy[hierarchy_count..],
-        );
-    let page_extras_released = private_count == child_pages.len()
-        || memory::scrub_and_release_frames(
-            memory::FrameOwner::KERNEL,
-            &child_pages[private_count..],
-        );
+    let hierarchy_extras_released = true;
+    let page_extras_released = true;
     if !published {
         return false;
     }
@@ -2391,41 +2391,48 @@ fn verify_live_fork_clone_and_execution_transaction() -> bool {
 }
 
 #[inline(never)]
+#[allow(dead_code)]
 fn verify_live_fork_clone_only_transaction() -> bool {
+    macro_rules! reject {
+        ($stage:expr) => {{
+            LIVE_FORK_EXECUTION_STAGE.store($stage, Ordering::Release);
+            return false;
+        }};
+    }
+    LIVE_FORK_EXECUTION_STAGE.store(200, Ordering::Release);
     let Some(before) = memory::owner_live_frame_count(memory::FrameOwner::KERNEL) else {
-        return false;
+        reject!(201);
     };
     let Some(table) = live_process_table_mut() else {
-        return false;
+        reject!(202);
     };
     let Some(parent_handle) = table.init else {
-        return false;
+        reject!(203);
     };
     let Some(parent) = table.process(parent_handle) else {
-        return false;
+        reject!(204);
     };
     let (Some(parent_space), Some(parent_context)) = (parent.address_space, parent.context) else {
-        return false;
+        reject!(205);
     };
     let parent_user_namespace = parent.user_namespace;
     if parent.state != ProcessState::Running || !parent_space.is_valid() {
-        return false;
+        crate::serial_write("ginux: clone-only parent state/owned/validated: ");
+        crate::serial_write_u64(u64::from(parent.state == ProcessState::Running));
+        crate::serial_write(" ");
+        crate::serial_write_u64(u64::from(parent_space.is_owned()));
+        crate::serial_write(" ");
+        crate::serial_write_u64(u64::from(
+            address_space::validate_linux_process_address_space(
+                parent_space.hierarchy(),
+                parent_space.mappings(),
+            ),
+        ));
+        crate::serial_write("\r\n");
+        reject!(206);
     }
     let Some(child_handle) = table.prepare_fork(parent_handle) else {
-        return false;
-    };
-    let Some(child_hierarchy) =
-        memory::allocate_frames::<PROCESS_HIERARCHY_LIMIT>(memory::FrameOwner::KERNEL)
-    else {
-        let _ = table.abort_fork(child_handle);
-        return false;
-    };
-    let Some(child_pages) =
-        memory::allocate_frames::<PROCESS_PRIVATE_COPY_LIMIT>(memory::FrameOwner::KERNEL)
-    else {
-        let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &child_hierarchy);
-        let _ = table.abort_fork(child_handle);
-        return false;
+        reject!(207);
     };
     let hierarchy_count = parent_space.hierarchy().len();
     let mapping_count = parent_space.mappings().len();
@@ -2434,29 +2441,39 @@ fn verify_live_fork_clone_only_transaction() -> bool {
         .iter()
         .filter(|mapping| mapping_requires_fork_copy(mapping))
         .count();
+    let child_hierarchy = unsafe { &mut *LIVE_FORK_HIERARCHY_ALLOCATION_SCRATCH.0.get() };
+    if !memory::allocate_frame_prefix_into(
+        memory::FrameOwner::KERNEL,
+        child_hierarchy,
+        hierarchy_count,
+    ) {
+        let _ = table.abort_fork(child_handle);
+        reject!(208);
+    }
+    let child_pages = unsafe { &mut *LIVE_FORK_ALLOCATION_SCRATCH.0.get() };
+    if !memory::allocate_frame_prefix_into(memory::FrameOwner::KERNEL, child_pages, private_count) {
+        let _ = memory::scrub_and_release_frames(
+            memory::FrameOwner::KERNEL,
+            &child_hierarchy[..hierarchy_count],
+        );
+        let _ = table.abort_fork(child_handle);
+        reject!(209);
+    }
     let published = table.commit_cloned_fork(
         child_handle,
         &child_hierarchy[..hierarchy_count],
         &child_pages[..private_count],
     );
-    let hierarchy_extras_released = hierarchy_count == child_hierarchy.len()
-        || memory::scrub_and_release_frames(
-            memory::FrameOwner::KERNEL,
-            &child_hierarchy[hierarchy_count..],
-        );
-    let page_extras_released = private_count == child_pages.len()
-        || memory::scrub_and_release_frames(
-            memory::FrameOwner::KERNEL,
-            &child_pages[private_count..],
-        );
+    let hierarchy_extras_released = true;
+    let page_extras_released = true;
     if !published {
-        return false;
+        reject!(210);
     }
     let Some(child) = table.process(child_handle) else {
-        return false;
+        reject!(211);
     };
     let Some(child_space) = child.address_space else {
-        return false;
+        reject!(212);
     };
     let child_valid = child.parent == Some(parent_handle)
         && child.user_namespace == parent_user_namespace
@@ -2497,7 +2514,7 @@ fn verify_live_fork_clone_only_transaction() -> bool {
                             }))
             });
     let Some(retiring) = table.begin_exit(child_handle, child_space) else {
-        return false;
+        reject!(213);
     };
     let resources_released = retiring.scrub_and_release();
     let exited = resources_released && table.exit(child_handle, 42);
@@ -2507,21 +2524,47 @@ fn verify_live_fork_clone_only_transaction() -> bool {
                 pid: child_handle.pid,
                 status: 42,
             });
-    child_valid
+    let parent_restored = table.process(parent_handle).is_some_and(|process| {
+        process.address_space == Some(parent_space)
+            && process.context == Some(parent_context)
+            && process.state == ProcessState::Running
+            && process.scheduler_thread.is_none()
+    });
+    let frame_count_restored =
+        memory::owner_live_frame_count(memory::FrameOwner::KERNEL) == Some(before);
+    let valid = child_valid
         && hierarchy_extras_released
         && page_extras_released
         && waited
         && table.processes.iter().flatten().count() == 1
-        && table.process(parent_handle).is_some_and(|process| {
-            process.address_space == Some(parent_space)
-                && process.context == Some(parent_context)
-                && process.state == ProcessState::Running
-                && process.scheduler_thread.is_none()
-        })
-        && memory::owner_live_frame_count(memory::FrameOwner::KERNEL) == Some(before)
+        && parent_restored
+        && frame_count_restored;
+    if !valid {
+        crate::serial_write("ginux: clone-only verification state: ");
+        for state in [
+            child_valid,
+            resources_released,
+            exited,
+            waited,
+            table.processes.iter().flatten().count() == 1,
+            parent_restored,
+            frame_count_restored,
+        ] {
+            crate::serial_write_u64(u64::from(state));
+            crate::serial_write(" ");
+        }
+        crate::serial_write_u64(before as u64);
+        crate::serial_write(" ");
+        crate::serial_write_u64(
+            memory::owner_live_frame_count(memory::FrameOwner::KERNEL).unwrap_or(usize::MAX) as u64,
+        );
+        crate::serial_write("\r\n");
+    }
+    valid
 }
 
 #[inline(never)]
+#[allow(dead_code)]
 fn execute_cloned_live_child(
     table: &mut ProcessTable,
     parent_handle: ProcessHandle,

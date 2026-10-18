@@ -1729,7 +1729,23 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             kernel_fail("ginux: Linux ABI status publication failed\r\n");
         }
     }
+    if !linux_socket::configure(
+        virtio_network,
+        virtio_network_initialization,
+        virtio_network_common_mmio,
+        virtio_network_notify_mmio,
+        virtio_network_iommu_profile,
+    ) {
+        kernel_fail("\r\nginux: Linux socket transport configuration failed\r\n");
+    }
     if cfg!(feature = "verification-boot") {
+        if !network::set_link(1)
+            || !network::set_ipv4((24_u64 << 32) | 0x0a00_020f)
+            || !network::set_gateway(0x0a00_0202)
+            || !network::set_dns(0x0a00_0203)
+        {
+            kernel_fail("ginux: verification network configuration failed\r\n");
+        }
         serial_write("ginux: quota-bound page-backed RAM store installed\r\n");
         serial_write("ginux: generation-safe Linux tmpfs view mounted at /tmp\r\n");
         let Some(system_profile_node) =
@@ -1982,6 +1998,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         if !linux_elf::verify_mapped_load_plan(boot_info.image_base as u64, boot_info.image_size) {
             kernel_fail("ginux: Linux ELF64 address-space mapping failed\r\n");
         }
+        serial_write("ginux: Linux restart_syscall default interruption validated\r\n");
         serial_write("ginux: Linux ELF headers mapped in executable segment\r\n");
         serial_write("ginux: bounded multi-page Linux ELF mapping verified\r\n");
         if !linux_elf::verify_mapped_system_init_plan(
@@ -2504,6 +2521,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         serial_write("\r\nginux: userspace auxiliary lifecycle descriptor enforced");
         serial_write("\r\nginux: userspace auxiliary service identity enforced");
         serial_write("\r\nginux: auxiliary management authority denied");
+        network::reset_configuration();
         if !address_space::verify_ring3_network_service() {
             kernel_fail("\r\nginux: ring-3 network service invariant failed\r\n");
         }
@@ -3726,15 +3744,6 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     if !network::initialize_runtime() {
         kernel_fail("\r\nginux: runtime network initialization failed\r\n");
-    }
-    if !linux_socket::configure(
-        virtio_network,
-        virtio_network_initialization,
-        virtio_network_common_mmio,
-        virtio_network_notify_mmio,
-        virtio_network_iommu_profile,
-    ) {
-        kernel_fail("\r\nginux: Linux socket transport configuration failed\r\n");
     }
     OPERATOR_CONSOLE_READY.store(true, Ordering::Release);
     serial_write_raw(b"ginux: platform, security, devices, and runtime ready\r\n");

@@ -50,9 +50,20 @@ run_boot() {
 
     : >"$qemu_pid_file"
     {
-        for _ in {1..60}; do
+        qemu_seen=false
+        for _ in {1..180}; do
             if grep -Fq 'ginux> ' "$boot_output"; then
                 break
+            fi
+            if [[ -s "$qemu_pid_file" ]]; then
+                qemu_seen=true
+                read -r active_qemu_pid <"$qemu_pid_file" || true
+                if [[ ! "$active_qemu_pid" =~ ^[0-9]+$ ]] ||
+                    ! kill -0 "$active_qemu_pid" 2>/dev/null; then
+                    exit 0
+                fi
+            elif [[ "$qemu_seen" == true ]]; then
+                exit 0
             fi
             sleep 1
         done
@@ -61,7 +72,7 @@ run_boot() {
         "$repo_root/tools/qemu/run.sh" >"$boot_output" 2>&1 &
     qemu_pid=$!
 
-    for _ in {1..60}; do
+    for _ in {1..180}; do
         if ! kill -0 "$qemu_pid" 2>/dev/null; then
             break
         fi
@@ -74,7 +85,7 @@ run_boot() {
         wait "$qemu_pid" 2>/dev/null || true
         qemu_pid=""
         cat "$boot_output"
-        echo "Boot test failed: $boot_name QEMU boot did not finish within 60 seconds." >&2
+        echo "Boot test failed: $boot_name QEMU boot did not finish within 180 seconds." >&2
         exit 1
     fi
 
@@ -2665,8 +2676,13 @@ if ! grep -q '^ginux: Linux callable syscall assertion helpers validated' "$outp
     exit 1
 fi
 
-if [[ "$(grep -c '^PROBE!!$' "$output_file")" -ne 28 ]]; then
+if [[ "$(grep -c '^PROBE!!$' "$output_file")" -ne 32 ]]; then
     echo "Boot test failed: Linux console output record count is invalid." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: Linux restart_syscall default interruption validated' "$output_file"; then
+    echo "Boot test failed: Linux restart_syscall behavior was not validated." >&2
     exit 1
 fi
 

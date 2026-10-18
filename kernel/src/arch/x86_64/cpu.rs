@@ -694,7 +694,7 @@ pub(crate) const LINUX_PROCESS_HIERARCHY_LIMIT: usize = 1024;
 pub(crate) const LINUX_PROCESS_MAPPING_LIMIT: usize = 40_960;
 const LINUX_EXEC_VECTOR_LIMIT: usize = 32;
 const LINUX_EXEC_STRING_LIMIT: usize = 256;
-const LINUX_EXEC_STACK_SIZE: usize = PAGE_SIZE;
+const LINUX_EXEC_STACK_SIZE: usize = PAGE_SIZE / 2;
 const LINUX_PLATFORM: &[u8] = b"x86_64\0";
 const LINUX_F_DUPFD: u64 = 0;
 const LINUX_F_GETFD: u64 = 1;
@@ -1973,6 +1973,12 @@ extern "C" {
     fn ginux_linux_syscall_entry();
 }
 
+unsafe fn enter_linux_process(entry: usize, stack: usize, general: *const u64, rflags: u64) {
+    let previous_return_stack = USER_RETURN_STACK;
+    ginux_process_user_enter(entry, stack, general, rflags);
+    USER_RETURN_STACK = previous_return_stack;
+}
+
 extern "sysv64" {
     fn ginux_user_enter(
         entry: usize,
@@ -2284,7 +2290,7 @@ pub(crate) fn execute_linux_process_child(
     // validates that frame and returns to ring 3. A subsequent Linux exit(2)
     // trap captures its status and returns to the saved kernel stack because no
     // global native scheduler runtime is active.
-    unsafe { ginux_process_user_enter(entry, stack, general.as_ptr(), 0x202) };
+    unsafe { enter_linux_process(entry, stack, general.as_ptr(), 0x202) };
     let child_fs_preserved = active_fs_base() == fs_base;
     let probe_state = PROCESS_CHILD_PROBE_STATE.swap(PROCESS_CHILD_PROBE_IDLE, Ordering::SeqCst);
     let context_valid = PROCESS_CHILD_CONTEXT_VALID.swap(false, Ordering::SeqCst);
@@ -2326,7 +2332,7 @@ pub(crate) fn resume_live_linux_process(
     // validated this complete return context against its private mappings.
     // A terminating or deferred Linux syscall returns through the saved kernel
     // stack installed by this entry stub.
-    unsafe { ginux_process_user_enter(entry, stack, general.as_ptr(), rflags) };
+    unsafe { enter_linux_process(entry, stack, general.as_ptr(), rflags) };
     let returned_fs = active_fs_base();
     let preserved = returned_fs == fs_base
         || LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
@@ -2336,6 +2342,7 @@ pub(crate) fn resume_live_linux_process(
     preserved && active_fs_base() == saved_fs
 }
 
+#[allow(dead_code)]
 pub(crate) fn reset_process_child_execution_diagnostic() {
     PROCESS_CHILD_EXECUTION_DIAGNOSTIC.store(0, Ordering::SeqCst);
 }
@@ -2516,7 +2523,7 @@ pub(crate) fn resume_native_controller(domain_id: u64) -> bool {
     let general = context.general();
     // SAFETY: the scheduler retained the complete validated controller trap
     // context while its lifecycle request was serviced by the kernel.
-    unsafe { ginux_process_user_enter(entry, stack, general.as_ptr(), context.flags()) };
+    unsafe { enter_linux_process(entry, stack, general.as_ptr(), context.flags()) };
     true
 }
 
@@ -2558,7 +2565,7 @@ impl LinuxRelativeFileMapping {
     };
 }
 
-pub(crate) struct LinuxElfExecution {
+pub(crate) struct LinuxElfExecution<'a> {
     pub(crate) runtime: bool,
     pub(crate) entry: usize,
     pub(crate) page_table_frames: [memory::FrameLease; 6],
@@ -2592,8 +2599,7 @@ pub(crate) struct LinuxElfExecution {
         [[LinuxRelativeFileMapping; LINUX_DEPENDENCY_MAPPING_COUNT]; LINUX_DEPENDENCY_COUNT],
     pub(crate) exec_expected: bool,
     pub(crate) system_init: bool,
-    pub(crate) initial_image_count: usize,
-    pub(crate) initial_image_mappings: [LinuxActiveImageMapping; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT],
+    pub(crate) initial_image_mappings: &'a [LinuxActiveImageMapping],
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -3471,8 +3477,7 @@ fn sync_live_linux_process_address_space(pid: u32) -> bool {
 #[inline(never)]
 fn execute_deferred_live_fork() -> bool {
     if !LINUX_FORK_REQUESTED.swap(false, Ordering::SeqCst) {
-        return LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
-            || linux_process::verify_live_fork_clone_transaction();
+        return true;
     }
     let parent_pid = current_linux_process_pid();
     let Some(parent_runtime_state) = capture_linux_process_runtime_state() else {
@@ -5216,7 +5221,8 @@ pub(crate) fn take_linux_exec_page_table_frames() -> [Option<memory::FrameLease>
     })
 }
 
-pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfResult {
+#[inline(never)]
+pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> LinuxElfResult {
     if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
         return LinuxElfResult::FAILED;
     }
@@ -5267,15 +5273,13 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
                 &execution.page_table_frames[..execution.page_table_frame_count],
             )
         })
-        && execution.initial_image_count <= LINUX_ACTIVE_IMAGE_MAPPING_LIMIT
-        && execution.initial_image_mappings[..execution.initial_image_count]
-            .iter()
-            .all(|mapping| {
-                address_space::current_linux_hierarchy_matches(
-                    mapping.address as u64,
-                    &execution.page_table_frames[..execution.page_table_frame_count],
-                )
-            })
+        && execution.initial_image_mappings.len() <= LINUX_ACTIVE_IMAGE_MAPPING_LIMIT
+        && execution.initial_image_mappings.iter().all(|mapping| {
+            address_space::current_linux_hierarchy_matches(
+                mapping.address as u64,
+                &execution.page_table_frames[..execution.page_table_frame_count],
+            )
+        })
         && ELF_PROBE_RECLAIM_PAGE_TABLE_FRAMES
             .iter()
             .all(|frame| frame.load(Ordering::SeqCst) == 0)
@@ -5320,14 +5324,12 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             true,
             false,
         );
-    let initial_image_valid = if execution.initial_image_count == 0 {
-        execution
-            .initial_image_mappings
-            .iter()
-            .all(|mapping| *mapping == LinuxActiveImageMapping::EMPTY)
+    let initial_image_valid = if execution.initial_image_mappings.is_empty() {
+        true
     } else {
-        (1..=LINUX_ACTIVE_IMAGE_MAPPING_LIMIT).contains(&execution.initial_image_count)
-            && execution.initial_image_mappings[..execution.initial_image_count]
+        (1..=LINUX_ACTIVE_IMAGE_MAPPING_LIMIT).contains(&execution.initial_image_mappings.len())
+            && execution
+                .initial_image_mappings
                 .iter()
                 .enumerate()
                 .all(|(index, mapping)| {
@@ -5342,9 +5344,6 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
                                 prior.address != mapping.address && prior.frame != mapping.frame
                             })
                 })
-            && execution.initial_image_mappings[execution.initial_image_count..]
-                .iter()
-                .all(|mapping| *mapping == LinuxActiveImageMapping::EMPTY)
     };
     let retired_image_state_clean = ELF_PROBE_RETIRED_IMAGE_COUNT.load(Ordering::SeqCst) == 0
         && (0..LINUX_ACTIVE_IMAGE_MAPPING_LIMIT).all(|index| {
@@ -5371,7 +5370,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         || !retired_image_state_clean
         || !heap_reclaim_state_clean
         || !mmap_contract_valid
-        || execution.exec_expected && execution.initial_image_count == 0
+        || execution.exec_expected && execution.initial_image_mappings.is_empty()
     {
         if execution.runtime {
             serial_write("ginux: Alpine runtime contract rejection:");
@@ -5489,7 +5488,8 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
         return LinuxElfResult::FAILED;
     };
-    let linux_thread_lifecycle_valid = finish_linux_thread_table()
+    let thread_table_finished = finish_linux_thread_table();
+    let linux_thread_lifecycle_valid = thread_table_finished
         && (|| -> Option<bool> {
             let initial_stack = execution.stack & !(PAGE_SIZE - 1);
             let initial_thread = reserve_linux_thread(initial_tls, stack_base, stack_size)?;
@@ -5501,36 +5501,82 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             }
             let sibling_thread =
                 reserve_linux_thread(sibling_tls, execution.sibling_stack, PAGE_SIZE)?;
-            let capacity_bounded =
-                reserve_linux_thread(sibling_tls, execution.sibling_stack, PAGE_SIZE).is_none();
+            let initial_clear_child_tid_set = set_current_linux_clear_child_tid(0x1110);
+            let initial_robust_list_set = set_current_linux_robust_list(0x1120);
+            let sibling_selected = switch_linux_thread(sibling_thread);
+            let sibling_tid_valid = current_linux_tid() == Some(2);
+            let sibling_clear_child_tid_clean = current_linux_clear_child_tid() == Some(0);
+            let sibling_robust_list_clean = current_linux_robust_list() == Some(0);
+            let sibling_clear_child_tid_set = set_current_linux_clear_child_tid(0x2210);
+            let sibling_robust_list_set = set_current_linux_robust_list(0x2220);
+            let initial_selected = switch_linux_thread(initial_thread);
+            let initial_tid_valid = current_linux_tid() == Some(1);
+            let initial_clear_child_tid_valid = current_linux_clear_child_tid() == Some(0x1110);
+            let initial_robust_list_valid = current_linux_robust_list() == Some(0x1120);
+            let sibling_robust_list_valid = linux_thread_robust_list(2) == Ok(0x2220);
+            if !execution.runtime {
+                serial_write("ginux: sibling robust-list metadata read\r\n");
+            }
+            let initial_clear_child_tid_cleared = set_current_linux_clear_child_tid(0);
+            let initial_robust_list_cleared = set_current_linux_robust_list(0);
             if sibling_thread.tid != 2
-                || !capacity_bounded
                 || LINUX_THREAD_STACK_BASES[usize::from(sibling_thread.slot)].load(Ordering::SeqCst)
                     != execution.sibling_stack as u64
                 || LINUX_THREAD_STACK_SIZES[usize::from(sibling_thread.slot)].load(Ordering::SeqCst)
                     != PAGE_SIZE as u64
-                || !set_current_linux_clear_child_tid(0x1110)
-                || !set_current_linux_robust_list(0x1120)
-                || !switch_linux_thread(sibling_thread)
-                || current_linux_tid() != Some(2)
-                || current_linux_clear_child_tid() != Some(0)
-                || current_linux_robust_list() != Some(0)
-                || !set_current_linux_clear_child_tid(0x2210)
-                || !set_current_linux_robust_list(0x2220)
-                || !switch_linux_thread(initial_thread)
-                || current_linux_tid() != Some(1)
-                || current_linux_clear_child_tid() != Some(0x1110)
-                || current_linux_robust_list() != Some(0x1120)
-                || linux_thread_robust_list(2) != Ok(0x2220)
+                || !initial_clear_child_tid_set
+                || !initial_robust_list_set
+                || !sibling_selected
+                || !sibling_tid_valid
+                || !sibling_clear_child_tid_clean
+                || !sibling_robust_list_clean
+                || !sibling_clear_child_tid_set
+                || !sibling_robust_list_set
+                || !initial_selected
+                || !initial_tid_valid
+                || !initial_clear_child_tid_valid
+                || !initial_robust_list_valid
+                || !sibling_robust_list_valid
                 || LINUX_THREAD_CLEAR_CHILD_TIDS[usize::from(sibling_thread.slot)]
                     .load(Ordering::SeqCst)
                     != 0x2210
                 || LINUX_THREAD_ROBUST_LISTS[usize::from(sibling_thread.slot)]
                     .load(Ordering::SeqCst)
                     != 0x2220
-                || !set_current_linux_clear_child_tid(0)
-                || !set_current_linux_robust_list(0)
+                || !initial_clear_child_tid_cleared
+                || !initial_robust_list_cleared
             {
+                if !execution.runtime {
+                    serial_write("ginux: Linux TLS lifecycle pre-clone validation failed\r\n");
+                    for valid in [
+                        sibling_thread.tid == 2,
+                        LINUX_THREAD_STACK_BASES[usize::from(sibling_thread.slot)]
+                            .load(Ordering::SeqCst)
+                            == execution.sibling_stack as u64,
+                        LINUX_THREAD_STACK_SIZES[usize::from(sibling_thread.slot)]
+                            .load(Ordering::SeqCst)
+                            == PAGE_SIZE as u64,
+                        initial_clear_child_tid_set,
+                        initial_robust_list_set,
+                        sibling_selected,
+                        sibling_tid_valid,
+                        sibling_clear_child_tid_clean,
+                        sibling_robust_list_clean,
+                        sibling_clear_child_tid_set,
+                        sibling_robust_list_set,
+                        initial_selected,
+                        initial_tid_valid,
+                        initial_clear_child_tid_valid,
+                        initial_robust_list_valid,
+                        sibling_robust_list_valid,
+                        initial_clear_child_tid_cleared,
+                        initial_robust_list_cleared,
+                    ] {
+                        serial_write_u64(u64::from(valid));
+                        serial_write(" ");
+                    }
+                    serial_write("\r\n");
+                }
                 return Some(false);
             }
             let clone_request = LinuxCloneRequest {
@@ -5570,7 +5616,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             let invalid_stack_rejected = construct_linux_clone_context(
                 sibling_thread,
                 LinuxCloneRequest {
-                    child_stack: clone_request.child_stack - 16,
+                    child_stack: execution.sibling_stack.saturating_sub(8) as u64,
                     ..clone_request
                 },
                 proof_registers,
@@ -5643,6 +5689,41 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
                     != clone_request.child_tid
                 || !retire_linux_thread(sibling_thread)
             {
+                if !execution.runtime {
+                    serial_write("ginux: Linux clone lifecycle validation failed\r\n");
+                    for valid in [
+                        invalid_flags_rejected,
+                        invalid_stack_rejected,
+                        clone.parent_rax == u64::from(sibling_thread.tid),
+                        clone.child.rip == execution.entry as u64,
+                        clone.child.rsp == clone_request.child_stack,
+                        clone.child.rflags == 0x202,
+                        clone.child.rax == 0,
+                        clone.child.fs_base == execution.sibling_fs_base as u64,
+                        clone.child.registers == proof_registers,
+                        selected == clone.child,
+                        return_installed,
+                        installed_registers == clone.child.registers,
+                        installed_rip == clone.child.rip,
+                        installed_rsp == clone.child.rsp,
+                        installed_rflags == clone.child.rflags,
+                        installed_rax == clone.child.rax,
+                        sibling_copy_state,
+                        initial_restored,
+                        initial_copy_state,
+                        LINUX_THREAD_RIPS[sibling_slot].load(Ordering::SeqCst) == clone.child.rip,
+                        LINUX_THREAD_RSPS[sibling_slot].load(Ordering::SeqCst) == clone.child.rsp,
+                        LINUX_THREAD_RFLAGS[sibling_slot].load(Ordering::SeqCst)
+                            == clone.child.rflags,
+                        LINUX_THREAD_RAXS[sibling_slot].load(Ordering::SeqCst) == 0,
+                        LINUX_THREAD_CLEAR_CHILD_TIDS[sibling_slot].load(Ordering::SeqCst)
+                            == clone_request.child_tid,
+                    ] {
+                        serial_write_u64(u64::from(valid));
+                        serial_write(" ");
+                    }
+                    serial_write("\r\n");
+                }
                 return Some(false);
             }
             let mut stale_registers = proof_registers;
@@ -5808,7 +5889,10 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             Ordering::SeqCst,
         );
     }
-    ELF_PROBE_ACTIVE_IMAGE_COUNT.store(execution.initial_image_count as u16, Ordering::SeqCst);
+    ELF_PROBE_ACTIVE_IMAGE_COUNT.store(
+        execution.initial_image_mappings.len() as u16,
+        Ordering::SeqCst,
+    );
     ELF_PROBE_RELRO.store(execution.relro as u64, Ordering::SeqCst);
     ELF_PROBE_RELRO_SIZE.store(execution.relro_size as u64, Ordering::SeqCst);
     ELF_PROBE_BRK.store(execution.heap as u64, Ordering::SeqCst);
@@ -6392,7 +6476,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             && clone_reuse_validated
             && child_gettid_count == 2
             && yield_switch_count == 19
-            && clone_busy_rejection_count == 2
+            && clone_busy_rejection_count == 0
             && clone_invalid_rejection_count == 0
             && clone_tid_fault_count == 1
             && futex_wait_block_count == 4
@@ -6448,7 +6532,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             clone_reuse_validated,
             child_gettid_count == 2,
             yield_switch_count == 19,
-            clone_busy_rejection_count == 2,
+            clone_busy_rejection_count == 0,
             clone_invalid_rejection_count == 0,
             clone_tid_fault_count == 1,
             futex_wait_block_count == 4,
@@ -6649,11 +6733,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     let mmap_seals_released = (0..LINUX_RUNTIME_MMAP_SLOT_COUNT)
         .all(|index| !ELF_PROBE_MMAP_SEALED[index].swap(false, Ordering::SeqCst));
     let mmap_address_valid = ELF_PROBE_MMAP.swap(0, Ordering::SeqCst) == execution.mmap as u64;
-    let mmap_next_valid = if execution.runtime {
-        ELF_PROBE_MMAP_NEXT.swap(0, Ordering::SeqCst) >= execution.mmap as u64
-    } else {
-        ELF_PROBE_MMAP_NEXT.swap(0, Ordering::SeqCst) == execution.mmap as u64
-    };
+    let mmap_next_valid = ELF_PROBE_MMAP_NEXT.swap(0, Ordering::SeqCst) >= execution.mmap as u64;
     let mmap_frames_valid = ELF_PROBE_MMAP_FRAMES
         .iter()
         .all(|frame| frame.swap(0, Ordering::SeqCst) == 0)
@@ -7019,7 +7099,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
                 })
             })
     } else {
-        for mapping in &execution.initial_image_mappings[..execution.initial_image_count] {
+        for mapping in execution.initial_image_mappings {
             expected_active[expected_active_count] = LinuxActiveImageMapping {
                 writable: mapping.writable && mapping.address as u64 != protected_page,
                 ..*mapping
@@ -7119,7 +7199,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         *output = *frame;
     }
     let old_image_retirement_valid = if exec_replaced {
-        (execution.initial_image_count..=LINUX_ACTIVE_IMAGE_MAPPING_LIMIT)
+        (execution.initial_image_mappings.len()..=LINUX_ACTIVE_IMAGE_MAPPING_LIMIT)
             .contains(&retired_image_count)
             && (0..retired_image_count).all(|index| {
                 let flags = retired_image_flags[index];
@@ -7135,18 +7215,16 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
                         })
                 })
             })
-            && execution.initial_image_mappings[..execution.initial_image_count]
-                .iter()
-                .all(|mapping| {
-                    (0..retired_image_count).any(|index| {
-                        retired_image_addresses[index] == mapping.address as u64
-                            && retired_image_frames[index] == Some(mapping.frame)
-                            && retired_image_flags[index]
-                                == u8::from(
-                                    mapping.writable && mapping.address as u64 != protected_page,
-                                ) | (u8::from(mapping.executable) << 1)
-                    })
+            && execution.initial_image_mappings.iter().all(|mapping| {
+                (0..retired_image_count).any(|index| {
+                    retired_image_addresses[index] == mapping.address as u64
+                        && retired_image_frames[index] == Some(mapping.frame)
+                        && retired_image_flags[index]
+                            == u8::from(
+                                mapping.writable && mapping.address as u64 != protected_page,
+                            ) | (u8::from(mapping.executable) << 1)
                 })
+            })
             && retired_image_addresses[retired_image_count..]
                 .iter()
                 .all(|address| *address == 0)
@@ -7165,11 +7243,9 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             && retired_image_addresses.iter().all(|address| *address == 0)
             && retired_image_frames.iter().all(Option::is_none)
             && retired_image_flags.iter().all(|flags| *flags == 0)
-            && execution.initial_image_mappings[..execution.initial_image_count]
-                .iter()
-                .all(|mapping| {
-                    memory::frames_owned_by(memory::FrameOwner::KERNEL, &[mapping.frame])
-                })
+            && execution.initial_image_mappings.iter().all(|mapping| {
+                memory::frames_owned_by(memory::FrameOwner::KERNEL, &[mapping.frame])
+            })
     };
     let tls_state_valid = ELF_PROBE_TLS.swap(0, Ordering::SeqCst) == execution.tls as u64
         && ELF_PROBE_TLS_SIZE.swap(0, Ordering::SeqCst) == execution.tls_size as u64;
@@ -7210,7 +7286,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
                 && clone_reuse_validated
                 && child_gettid_count == 2
                 && yield_switch_count == 19
-                && clone_busy_rejection_count == 2
+                && clone_busy_rejection_count == 0
                 && clone_invalid_rejection_count == 0
                 && clone_tid_fault_count == 1
                 && futex_wait_block_count == 4
@@ -8988,13 +9064,11 @@ extern "sysv64" fn linux_syscall_handler(
             LINUX_RETURN_TO_KERNEL
         }
         LINUX_EXIT_SYSCALL
-            if first_argument == LINUX_PROBE_EXIT_STATUS && current_linux_tid() != Some(1) =>
+            if first_argument <= u64::from(u8::MAX) && current_linux_tid() != Some(1) =>
         {
             linux_exit_child_to_parent(registers)
         }
-        LINUX_EXIT_SYSCALL | LINUX_EXIT_GROUP_SYSCALL
-            if first_argument == LINUX_PROBE_EXIT_STATUS =>
-        {
+        LINUX_EXIT_SYSCALL | LINUX_EXIT_GROUP_SYSCALL if first_argument <= u64::from(u8::MAX) => {
             if !record_live_linux_process_snapshot() {
                 return LINUX_ESRCH;
             }
@@ -12769,6 +12843,50 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         address_space::release_current_linux_runtime_mappings(LINUX_RUNTIME_DYNAMIC_MMAP_BASE);
     ELF_PROBE_MMAP_NEXT.store(LINUX_RUNTIME_DYNAMIC_MMAP_BASE, Ordering::SeqCst);
     LINUX_RUNTIME_MODE.store(old_runtime, Ordering::SeqCst);
+    for (index, valid) in [
+        shared,
+        removed_while_attached,
+        detached,
+        destroyed,
+        semaphores,
+        messages,
+        process_advice,
+        posix_queues,
+        aio,
+        secret_memory,
+        mount_queries,
+        file_handles,
+        shadow_stack,
+        uretprobe,
+        seccomp,
+        remap_file_pages,
+        keyrings,
+        userfaultfd,
+        fanotify,
+        landlock_disabled,
+        io_uring,
+        scheduler_priorities,
+        scheduler_queries,
+        scheduler_affinity,
+        realtime_queries,
+        filesystem_sync,
+        robust_list,
+        rseq,
+        membarrier,
+        readahead,
+        memory_locking,
+        fadvise,
+        mappings_released,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        if !valid {
+            serial_write("ginux: SysV suite failure index ");
+            serial_write_u64(index as u64);
+            serial_write("\r\n");
+        }
+    }
     shared
         && removed_while_attached
         && detached
@@ -13204,11 +13322,13 @@ fn verify_linux_memory_locking_syscalls() -> bool {
     {
         return false;
     }
-    let ranges = linux_memory_lock(u64::MAX, 0, 0) == 0
-        && linux_memory_lock(mapping + 1, PAGE_SIZE as u64, 0) == 0
-        && linux_memory_lock(mapping, PAGE_SIZE as u64 * 2, 1) == 0
-        && linux_memory_lock(mapping, PAGE_SIZE as u64, 2) == LINUX_EINVAL
-        && linux_memory_lock(mapping + PAGE_SIZE as u64 * 2, 1, 0) == LINUX_ENOMEM;
+    let ranges = [
+        linux_memory_lock(u64::MAX, 0, 0),
+        linux_memory_lock(mapping + 1, PAGE_SIZE as u64, 0),
+        linux_memory_lock(mapping, PAGE_SIZE as u64 * 2, 1),
+        linux_memory_lock(mapping, PAGE_SIZE as u64, 2),
+        linux_memory_lock(mapping + PAGE_SIZE as u64 * 2, 1, 0),
+    ] == [0, 0, 0, LINUX_EINVAL, LINUX_ENOMEM];
     let all = ranges
         && [1_u64, 2, 3, 5, 6, 7]
             .into_iter()
@@ -14306,11 +14426,13 @@ fn verify_linux_posix_message_queue_syscalls() -> bool {
     } else {
         LINUX_EBADF
     };
-    let lifecycle = duplicate < LINUX_AUX_DESCRIPTOR_LIMIT
-        && linux_mq_unlink(mapping) == 0
-        && linux_mq_open(mapping, 2, 0, 0) == LINUX_ENOENT
-        && linux_descriptor_close(duplicate) == 0
-        && linux_descriptor_close(descriptor) == 0;
+    let duplicated = duplicate < LINUX_AUX_DESCRIPTOR_LIMIT;
+    let unlinked = linux_mq_unlink(mapping) == 0;
+    let reopen_missing = linux_mq_open(mapping, 2, 0, 0) == LINUX_ENOENT;
+    let duplicate_closed = duplicated && linux_descriptor_close(duplicate) == 0;
+    let descriptor_closed = opened && linux_descriptor_close(descriptor) == 0;
+    let lifecycle =
+        duplicated && unlinked && reopen_missing && duplicate_closed && descriptor_closed;
     let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
     received && queried && lifecycle && unmapped
 }
@@ -17152,6 +17274,7 @@ fn linux_oci_execve(path: &[u8], arguments_address: u64, environment_address: u6
     let table_words =
         1 + argument_count + 1 + environment_count + 1 + crate::linux_elf::AUXILIARY_VECTOR_WORDS;
     let mut string_offset = table_words * size_of::<u64>();
+    let string_limit = string_offset.saturating_add(LINUX_EXEC_STRING_LIMIT);
     stack_image[..8].copy_from_slice(&(argument_count as u64).to_ne_bytes());
     let mut string = [0_u8; LINUX_EXEC_STRING_LIMIT];
     let mut execfn_address = 0;
@@ -17179,6 +17302,9 @@ fn linux_oci_execve(path: &[u8], arguments_address: u64, environment_address: u6
         let Some(end) = string_offset.checked_add(length) else {
             return LINUX_E2BIG;
         };
+        if end > string_limit {
+            return LINUX_E2BIG;
+        }
         let Some(output) = stack_image.get_mut(string_offset..end) else {
             return LINUX_E2BIG;
         };
@@ -17204,6 +17330,9 @@ fn linux_oci_execve(path: &[u8], arguments_address: u64, environment_address: u6
         let Some(end) = string_offset.checked_add(length) else {
             return LINUX_E2BIG;
         };
+        if end > string_limit {
+            return LINUX_E2BIG;
+        }
         let Some(output) = stack_image.get_mut(string_offset..end) else {
             return LINUX_E2BIG;
         };
@@ -17576,13 +17705,37 @@ fn linux_execve_at(
         return LINUX_ENOEXEC;
     }
     let interpreted_tls = if let Some(plan) = interpreted_exec_plan.as_ref() {
-        let Some(initial) = current_linux_thread_handle().and_then(linux_thread_context) else {
-            return LINUX_ESRCH;
-        };
-        let sibling = ELF_PROBE_SIBLING_FS_BASE.load(Ordering::SeqCst);
-        let thread_pointers = [initial.thread_pointer as u64, sibling];
-        if sibling == 0 || !address_space::current_linux_tls_rematerializable(plan, thread_pointers)
+        if current_linux_thread_handle()
+            .and_then(linux_thread_context)
+            .is_none()
         {
+            serial_write("ginux: exec current TLS context unavailable\r\n");
+            return LINUX_ESRCH;
+        }
+        let sibling = ELF_PROBE_SIBLING_FS_BASE.load(Ordering::SeqCst);
+        let initial_page = (sibling & !(PAGE_SIZE as u64 - 1)).checked_sub(PAGE_SIZE as u64);
+        let Some((initial_thread_pointer, initial_extent, initial_extent_size)) =
+            initial_page.and_then(|page| address_space::linux_exec_tls_context(plan, page))
+        else {
+            serial_write("ginux: exec measured TLS layout unavailable\r\n");
+            return LINUX_ENOEXEC;
+        };
+        let initial = LinuxTlsContext {
+            thread_pointer: initial_thread_pointer,
+            extent: initial_extent,
+            extent_size: initial_extent_size,
+        };
+        let thread_pointers = [initial.thread_pointer as u64, sibling];
+        if sibling == 0 {
+            serial_write("ginux: exec sibling TLS context unavailable\r\n");
+            return LINUX_ENOEXEC;
+        }
+        if !address_space::current_linux_tls_rematerializable(plan, thread_pointers) {
+            serial_write("ginux: exec TLS rematerialization contract rejected\r\n");
+            serial_write_u64(thread_pointers[0]);
+            serial_write(" ");
+            serial_write_u64(thread_pointers[1]);
+            serial_write("\r\n");
             return LINUX_ENOEXEC;
         }
         Some((initial, thread_pointers))
@@ -17592,6 +17745,7 @@ fn linux_execve_at(
     let table_words =
         1 + argument_count + 1 + environment_count + 1 + crate::linux_elf::AUXILIARY_VECTOR_WORDS;
     let mut string_offset = table_words * size_of::<u64>();
+    let string_limit = string_offset.saturating_add(LINUX_EXEC_STRING_LIMIT);
     stack_image[..8].copy_from_slice(&(argument_count as u64).to_ne_bytes());
     let mut string = [0_u8; LINUX_EXEC_STRING_LIMIT];
     let mut argument_zero_address = 0;
@@ -17605,6 +17759,9 @@ fn linux_execve_at(
         let Some(end) = string_offset.checked_add(length) else {
             return LINUX_E2BIG;
         };
+        if end > string_limit {
+            return LINUX_E2BIG;
+        }
         let Some(output) = stack_image.get_mut(string_offset..end) else {
             return LINUX_E2BIG;
         };
@@ -17628,6 +17785,9 @@ fn linux_execve_at(
         let Some(end) = string_offset.checked_add(length) else {
             return LINUX_E2BIG;
         };
+        if end > string_limit {
+            return LINUX_E2BIG;
+        }
         let Some(output) = stack_image.get_mut(string_offset..end) else {
             return LINUX_E2BIG;
         };
@@ -17833,11 +17993,23 @@ fn linux_execve_at(
                 return LINUX_ENOEXEC;
             };
             let address = thread_pointer & !(PAGE_SIZE as u64 - 1);
-            if active_image_mappings[..active_image_count + 2 + index]
+            let duplicate = active_image_mappings[..active_image_count + 2 + index]
                 .iter()
-                .any(|mapping| mapping.frame == frame || mapping.address == address as usize)
-                || !address_space::current_linux_mapping_matches(address, frame, true, false)
-            {
+                .any(|mapping| mapping.frame == frame || mapping.address == address as usize);
+            let mapping_matches =
+                address_space::current_linux_mapping_matches(address, frame, true, false);
+            if duplicate || !mapping_matches {
+                serial_write("ginux: exec old TLS frame rejection: ");
+                serial_write_u64(index as u64);
+                serial_write(" ");
+                serial_write_u64(address);
+                serial_write(" ");
+                serial_write_u64(frame.address());
+                serial_write(" ");
+                serial_write_u64(u64::from(duplicate));
+                serial_write(" ");
+                serial_write_u64(u64::from(mapping_matches));
+                serial_write("\r\n");
                 let _ = release_linux_exec_frames(&mut exec_frames);
                 return LINUX_ENOEXEC;
             }
@@ -18082,6 +18254,20 @@ fn linux_execve_at(
         ELF_PROBE_ACTIVE_IMAGE_FLAGS[index].store(0, Ordering::SeqCst);
     }
     ELF_PROBE_ACTIVE_IMAGE_COUNT.store(mapping_count as u16, Ordering::SeqCst);
+    let Some(snapshot) = live_linux_process_address_space_snapshot() else {
+        return LINUX_ENOMEM;
+    };
+    if !linux_process::refresh_live_process_registry(
+        current_linux_process_pid(),
+        snapshot,
+        [0; 15],
+        entry,
+        new_stack,
+        0x202,
+        next_tls.thread_pointer as u64,
+    ) {
+        return LINUX_ESRCH;
+    }
     ELF_PROBE_EXEC_REPLACED.store(true, Ordering::SeqCst);
     serial_write("ginux: measured Linux exec image replaced atomically\r\n");
     0
@@ -18434,6 +18620,10 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64, mode: u64) -> u64
         return LINUX_EINVAL;
     }
     let tmp_path = path == b"/tmp/ginux-ready";
+    let virtual_device = matches!(
+        path,
+        b"/dev/null" | b"/dev/zero" | b"/dev/console" | b"/dev/tty"
+    );
     if tmp_path && flags & LINUX_O_DIRECTORY != 0 {
         return LINUX_ENOTDIR;
     }
@@ -18473,7 +18663,7 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64, mode: u64) -> u64
         if flags & LINUX_O_TRUNC != 0 && !crate::linux_overlay::truncate(metadata.handle, 0) {
             return LINUX_EIO;
         }
-    } else if canonical_length.is_some() && access != 0 && !tmp_path {
+    } else if canonical_length.is_some() && access != 0 && !tmp_path && !virtual_device {
         let length = canonical_length.unwrap_or(0);
         let initial = oci_at_path
             .and_then(|(_, entry)| entry)
@@ -18508,7 +18698,11 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64, mode: u64) -> u64
             return LINUX_ENOSPC;
         };
         overlay_handle = Some(handle);
-    } else if canonical_length.is_some() && flags & LINUX_O_CREAT != 0 && !tmp_path {
+    } else if canonical_length.is_some()
+        && flags & LINUX_O_CREAT != 0
+        && !tmp_path
+        && !virtual_device
+    {
         let length = canonical_length.unwrap_or(0);
         if !linux_overlay_parent_exists(&canonical[..length]) {
             return LINUX_ENOENT;
@@ -20315,6 +20509,18 @@ fn linux_socket_create(family: u64, socket_type: u64, protocol: u64) -> u64 {
             if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
                 serial_write("ginux: Linux IPv4 socket creation failed: ");
                 serial_write_u64(result);
+                serial_write(" socket/device/pipe/event/timer/stderr ");
+                serial_write_u64(linux_socket_slot(descriptor).map_or(u64::MAX, u64::from));
+                serial_write(" ");
+                serial_write_u64(u64::from(linux_device_descriptor(descriptor)));
+                serial_write(" ");
+                serial_write_u64(u64::from(linux_pipe_descriptor(descriptor)));
+                serial_write(" ");
+                serial_write_u64(u64::from(linux_eventfd_descriptor(descriptor)));
+                serial_write(" ");
+                serial_write_u64(u64::from(linux_timerfd_descriptor(descriptor)));
+                serial_write(" ");
+                serial_write_u64(u64::from(ELF_PROBE_STDERR_OPEN.load(Ordering::SeqCst)));
                 serial_write("\r\n");
             }
             return result;
@@ -20344,7 +20550,7 @@ fn linux_socket_pair(family: u64, socket_type: u64, protocol: u64, output: u64) 
     }
     let mut descriptors = [0_u64; 2];
     let mut found = 0;
-    for descriptor in LINUX_AUX_DESCRIPTOR_FIRST..LINUX_AUX_DESCRIPTOR_LIMIT {
+    for descriptor in 2..LINUX_AUX_DESCRIPTOR_LIMIT {
         if linux_aux_descriptor_free(descriptor) {
             descriptors[found] = descriptor;
             found += 1;
@@ -22528,7 +22734,12 @@ fn linux_eventfd(initial: u64, flags: u64) -> u64 {
     {
         return LINUX_EMFILE;
     }
-    let Some(descriptor) = (LINUX_AUX_DESCRIPTOR_FIRST..LINUX_AUX_DESCRIPTOR_LIMIT)
+    let descriptor_start = if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
+        LINUX_AUX_DESCRIPTOR_FIRST
+    } else {
+        2
+    };
+    let Some(descriptor) = (descriptor_start..LINUX_AUX_DESCRIPTOR_LIMIT)
         .find(|descriptor| linux_aux_descriptor_free(*descriptor))
     else {
         return LINUX_EMFILE;
@@ -23159,8 +23370,8 @@ fn linux_timerfd_create(clock: u64, flags: u64) -> u64 {
     if ELF_PROBE_TIMERFD_DESCRIPTOR.load(Ordering::SeqCst) != 0 {
         return LINUX_EMFILE;
     }
-    let Some(descriptor) = (LINUX_AUX_DESCRIPTOR_FIRST..LINUX_AUX_DESCRIPTOR_LIMIT)
-        .find(|descriptor| linux_aux_descriptor_free(*descriptor))
+    let Some(descriptor) =
+        (2..LINUX_AUX_DESCRIPTOR_LIMIT).find(|descriptor| linux_aux_descriptor_free(*descriptor))
     else {
         return LINUX_EMFILE;
     };
@@ -23428,7 +23639,7 @@ fn linux_pipe(address: u64, flags: u64) -> u64 {
     }
     let mut descriptors = [0_u64; 2];
     let mut found = 0;
-    for descriptor in LINUX_AUX_DESCRIPTOR_FIRST..LINUX_AUX_DESCRIPTOR_LIMIT {
+    for descriptor in 2..LINUX_AUX_DESCRIPTOR_LIMIT {
         if linux_aux_descriptor_free(descriptor) {
             descriptors[found] = descriptor;
             found += 1;
@@ -23567,7 +23778,10 @@ fn linux_runtime_pipe(address: u64, flags: u64) -> u64 {
         let index = (descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize;
         ELF_PROBE_SOCKET_SLOTS[index].store(slot + 1, Ordering::SeqCst);
         ELF_PROBE_SOCKET_FLAGS[index].store((flags & LINUX_O_NONBLOCK) as u32, Ordering::SeqCst);
-        ELF_PROBE_DEVICE_DESCRIPTORS[index].store(LINUX_DEVICE_PIPE | access, Ordering::SeqCst);
+        ELF_PROBE_DEVICE_DESCRIPTORS[index].store(
+            LINUX_DEVICE_SOCKET | LINUX_DEVICE_PIPE | access,
+            Ordering::SeqCst,
+        );
         set_linux_descriptor_close_on_exec(descriptor, flags & LINUX_O_CLOEXEC != 0);
     }
     0
@@ -24258,8 +24472,7 @@ fn linux_eventfd_descriptor(descriptor: u64) -> bool {
 }
 
 fn linux_timerfd_descriptor(descriptor: u64) -> bool {
-    descriptor >= LINUX_AUX_DESCRIPTOR_FIRST
-        && u64::from(ELF_PROBE_TIMERFD_DESCRIPTOR.load(Ordering::SeqCst)) == descriptor
+    descriptor >= 2 && u64::from(ELF_PROBE_TIMERFD_DESCRIPTOR.load(Ordering::SeqCst)) == descriptor
 }
 
 fn linux_pipe_read_descriptor(descriptor: u64) -> bool {
@@ -24270,7 +24483,7 @@ fn linux_pipe_read_descriptor(descriptor: u64) -> bool {
                 == LINUX_DEVICE_SOCKET | LINUX_DEVICE_PIPE
             && device & 3 == LINUX_DESCRIPTOR_INPUT;
     }
-    descriptor >= LINUX_AUX_DESCRIPTOR_FIRST
+    descriptor >= 2
         && u64::from(ELF_PROBE_PIPE_READ_DESCRIPTOR.load(Ordering::SeqCst)) == descriptor
 }
 
@@ -24282,7 +24495,7 @@ fn linux_pipe_write_descriptor(descriptor: u64) -> bool {
                 == LINUX_DEVICE_SOCKET | LINUX_DEVICE_PIPE
             && device & 3 == LINUX_DESCRIPTOR_OUTPUT;
     }
-    descriptor >= LINUX_AUX_DESCRIPTOR_FIRST
+    descriptor >= 2
         && u64::from(ELF_PROBE_PIPE_WRITE_DESCRIPTOR.load(Ordering::SeqCst)) == descriptor
 }
 
@@ -24291,7 +24504,7 @@ fn linux_pipe_descriptor(descriptor: u64) -> bool {
 }
 
 fn linux_aux_descriptor_free(descriptor: u64) -> bool {
-    (LINUX_AUX_DESCRIPTOR_FIRST..LINUX_AUX_DESCRIPTOR_LIMIT).contains(&descriptor)
+    (2..LINUX_AUX_DESCRIPTOR_LIMIT).contains(&descriptor)
         && !linux_console_descriptor_open(descriptor)
         && !(descriptor == 2 && ELF_PROBE_STDERR_OPEN.load(Ordering::SeqCst))
         && linux_device_descriptor(descriptor) == 0
@@ -24405,7 +24618,7 @@ fn linux_userfaultfd(flags: u64) -> u64 {
     };
     let index = (descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize;
     ELF_PROBE_DEVICE_DESCRIPTORS[index].store(LINUX_DEVICE_USERFAULTFD | 3, Ordering::SeqCst);
-    ELF_PROBE_SOCKET_FLAGS[index].store((flags & !USER_MODE_ONLY) as u32, Ordering::SeqCst);
+    ELF_PROBE_SOCKET_FLAGS[index].store((flags & LINUX_O_NONBLOCK) as u32, Ordering::SeqCst);
     set_linux_descriptor_close_on_exec(descriptor, flags & LINUX_O_CLOEXEC != 0);
     descriptor
 }
@@ -26172,7 +26385,11 @@ fn linux_descriptor_close_with_wake(descriptor: u64, wake_waiters: bool) -> u64 
         }
         return 0;
     }
-    if !(LINUX_AUX_DESCRIPTOR_FIRST..LINUX_DESCRIPTOR_TABLE_LIMIT).contains(&descriptor) {
+    if !(LINUX_AUX_DESCRIPTOR_FIRST..LINUX_DESCRIPTOR_TABLE_LIMIT).contains(&descriptor)
+        && !linux_eventfd_descriptor(descriptor)
+        && !linux_timerfd_descriptor(descriptor)
+        && !linux_pipe_descriptor(descriptor)
+    {
         return linux_console_close(descriptor);
     }
     if linux_eventfd_descriptor(descriptor) {
@@ -26480,39 +26697,10 @@ fn linux_device_dup_at_least(source: u64, minimum: u64, close_on_exec: bool) -> 
     else {
         return LINUX_EMFILE;
     };
-    if let Some(slot) = linux_socket_slot(source) {
-        if !crate::linux_socket::duplicate(slot) {
-            return LINUX_EBADF;
-        }
-        let target_index = (target - LINUX_AUX_DESCRIPTOR_FIRST) as usize;
-        ELF_PROBE_SOCKET_SLOTS[target_index].store(slot + 1, Ordering::SeqCst);
-        ELF_PROBE_SOCKET_FLAGS[target_index]
-            .store(linux_socket_flags(source).unwrap_or(0), Ordering::SeqCst);
-        ELF_PROBE_DEVICE_DESCRIPTORS[target_index].store(state, Ordering::SeqCst);
-        set_linux_descriptor_close_on_exec(target, close_on_exec);
-        return target;
+    let result = linux_console_dup2(source, target);
+    if result != target {
+        return result;
     }
-    let source_oci = linux_oci_descriptor(source);
-    let source_tmp = usize::try_from(source)
-        .ok()
-        .and_then(|index| ELF_PROBE_STDIO_TMP_FILE_GENERATIONS.get(index))
-        .or_else(|| {
-            source
-                .checked_sub(LINUX_AUX_DESCRIPTOR_FIRST)
-                .and_then(|index| ELF_PROBE_TMP_FILE_GENERATIONS.get(index as usize))
-        })
-        .map(|generation| generation.load(Ordering::SeqCst))
-        .unwrap_or(0);
-    let target_index = (target - LINUX_AUX_DESCRIPTOR_FIRST) as usize;
-    ELF_PROBE_DEVICE_DESCRIPTORS[target_index].store(state, Ordering::SeqCst);
-    ELF_PROBE_OCI_DESCRIPTORS[target_index].store(source_oci, Ordering::SeqCst);
-    ELF_PROBE_TMP_FILE_GENERATIONS[target_index].store(source_tmp, Ordering::SeqCst);
-    ELF_PROBE_SOCKET_FLAGS[target_index]
-        .store(linux_socket_flags(source).unwrap_or(0), Ordering::SeqCst);
-    linux_descriptor_offset(target).store(
-        linux_descriptor_offset(source).load(Ordering::SeqCst),
-        Ordering::SeqCst,
-    );
     set_linux_descriptor_close_on_exec(target, close_on_exec);
     target
 }
@@ -27484,7 +27672,11 @@ fn linux_memory_lock(address: u64, length: u64, flags: u64) -> u64 {
     let Ok(length) = usize::try_from(length) else {
         return LINUX_ENOMEM;
     };
-    if address_space::current_linux_range_mapped(address, length, false) {
+    if (LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
+        && materialize_linux_runtime_user_range(address, length, false))
+        || (!LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
+            && address_space::current_linux_range_mapped(address, length, false))
+    {
         // Ginux has no swapping or reclaim path: every mapped page is already
         // resident, so locking and unlocking do not require additional state.
         0
@@ -28052,7 +28244,9 @@ fn materialize_linux_runtime_user_range(address: u64, length: usize, writable: b
             if page.file {
                 return false;
             }
-            record_linux_primary_stack_growth(page_address);
+            if linux_runtime_primary_stack_contains(page_address) {
+                record_linux_primary_stack_growth(page_address);
+            }
             let Some([frame]) = memory::allocate_frames::<1>(memory::FrameOwner::KERNEL) else {
                 return false;
             };

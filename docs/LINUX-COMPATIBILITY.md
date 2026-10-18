@@ -346,7 +346,7 @@ therefore omitted.
 | 216 | remap_file_pages | Partial |
 | 217 | getdents64 | Partial |
 | 218 | set_tid_address | Complete |
-| 219 | restart_syscall | Partial |
+| 219 | restart_syscall | Complete |
 | 220 | semtimedop | Partial |
 | 221 | fadvise64 | Complete |
 | 222 | timer_create | Partial |

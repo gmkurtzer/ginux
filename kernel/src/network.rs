@@ -236,6 +236,16 @@ pub(crate) fn link_is_up() -> bool {
     LINK_UP.load(Ordering::Acquire)
 }
 
+pub(crate) fn reset_configuration() {
+    LINK_UP.store(false, Ordering::Release);
+    IPV4_CONFIGURATION.store(0, Ordering::Release);
+    IPV4_GATEWAY.store(0, Ordering::Release);
+    IPV4_DNS.store(0, Ordering::Release);
+    CONFIGURATION_GENERATION.store(0, Ordering::Release);
+    ROUTE_DESTINATION.store(0, Ordering::Release);
+    ROUTE_GATEWAY.store(0, Ordering::Release);
+}
+
 pub(crate) fn set_ipv4(configuration: u64) -> bool {
     if !valid_ipv4_configuration(configuration) {
         return false;

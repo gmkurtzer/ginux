@@ -3797,16 +3797,8 @@ fn verify_page_aliasing_plan_rejected() -> bool {
     static_rejected && dynamic_rejected
 }
 
-pub(crate) fn verify_linked_probe() -> bool {
-    let Some(image) = parse(LINKED_PROBE) else {
-        return false;
-    };
-    let Some(plan) = plan(&image) else {
-        return false;
-    };
-    let Some(read_only) = plan.read_only else {
-        return false;
-    };
+#[inline(never)]
+fn verify_linked_probe_materialization(plan: &LoadPlan<'_>, read_only: PlannedSegment<'_>) -> bool {
     let mut page = [0xa5_u8; PAGE_SIZE];
     let mut executable_tail_page = [0xa5_u8; PAGE_SIZE];
     let mut executable_third_page = [0xa5_u8; PAGE_SIZE];
@@ -3859,6 +3851,21 @@ pub(crate) fn verify_linked_probe() -> bool {
         && page[8..].iter().all(|byte| *byte == 0)
         && materialize_page(plan.writable, 1, &mut page)
         && page.iter().all(|byte| *byte == 0);
+    read_only_valid && executable_valid && writable_valid
+}
+
+#[inline(never)]
+pub(crate) fn verify_linked_probe() -> bool {
+    let Some(image) = parse(LINKED_PROBE) else {
+        return false;
+    };
+    let Some(plan) = plan(&image) else {
+        return false;
+    };
+    let Some(read_only) = plan.read_only else {
+        return false;
+    };
+    let materialization_valid = verify_linked_probe_materialization(&plan, read_only);
     image.entry == 0x40_0100
         && image.program_headers == 0x3f_f040
         && image.program_header_count == 6
@@ -3886,9 +3893,7 @@ pub(crate) fn verify_linked_probe() -> bool {
         && plan.executable.page_count == 5
         && read_only.virtual_page == 0x3f_f000
         && plan.writable.page_count == 2
-        && read_only_valid
-        && executable_valid
-        && writable_valid
+        && materialization_valid
         && crate::address_space::verify_linux_elf_mapping(&plan, 1, 1, b"bin/signal-probe")
 }
 
@@ -3924,7 +3929,8 @@ pub(crate) fn verify_mapped_system_init_plan(protected_start: u64, protected_siz
     )
 }
 
-pub(crate) fn verify_mapped_interpreted_plan(protected_start: u64, protected_size: usize) -> bool {
+#[inline(never)]
+fn verify_interpreted_fixture_inputs() -> bool {
     const PATH: &[u8] = b"/lib64/ld-ginux.so";
     const DEPENDENCY: &[u8] = b"libginux.so";
     const AUXILIARY: &[u8] = b"libginux-aux.so";
@@ -3980,6 +3986,14 @@ pub(crate) fn verify_mapped_interpreted_plan(protected_start: u64, protected_siz
         crate::serial_write_bytes(b"\r\nginux: linked DSO planning failed");
         return false;
     }
+    true
+}
+
+pub(crate) fn verify_mapped_interpreted_plan(protected_start: u64, protected_size: usize) -> bool {
+    if !verify_interpreted_fixture_inputs() {
+        return false;
+    }
+    let interpreter_bytes = LINKED_DYNAMIC_INTERPRETER;
     let Some(plan) = measured_interpreted_exec_plan(
         LINKED_DYNAMIC_GRAPH_MAIN,
         interpreter_bytes,

@@ -141,10 +141,10 @@ ginux_linux_exec_target:
     jne .Lfailure
     cmp qword ptr [rsp + 312], 0
     jne .Lfailure
-    cmp qword ptr [rsp + 320], 0
+    cmp qword ptr [rsp + 320], 25
     jne .Lfailure
     cmp qword ptr [rsp + 328], 0
-    jne .Lfailure
+    je .Lfailure
 
     mov edi, 2
     mov esi, 1
