@@ -603,7 +603,7 @@ valid_interpreter_base:
     pop rdx
     push 28
     pop rax
-    call syscall_expect_einval
+    call syscall_expect_zero
     cmp qword ptr [0x40b000], 2
     require_equal
     push 4

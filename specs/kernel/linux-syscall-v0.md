@@ -1340,8 +1340,10 @@ with `-EPERM`. `MADV_DONTNEED` is rejected for sealed read-only anonymous pages
 and remains permitted for sealed writable pages, following Linux 6.12's
 destructive-advice rule. Sealing executable-image, stack, heap, and other
 non-`mmap` VMAs is not yet supported.
-`rax = 28` (`__NR_madvise`) accepts only `MADV_DONTNEED` for a fully mapped
-nonzero range rounding to one through four anonymous pages. The range may cross adjacent registry
+`rax = 28` (`__NR_madvise`) accepts the non-destructive `MADV_NORMAL`,
+`MADV_RANDOM`, `MADV_SEQUENTIAL`, and `MADV_WILLNEED` hints without changing
+mapped contents, plus `MADV_DONTNEED` for a fully mapped nonzero range. Advice
+uses Linux's 32-bit argument conversion. The range may cross adjacent registry
 records. Immutable-file mappings and `PROT_NONE` reservations reject advice
 with `-EINVAL`. For an anonymous
 range it validates that every leaf still maps its allocator-owned frame, then
@@ -1350,7 +1352,8 @@ present, user, NX, or writable state. The proof also discards a protected one-pa
 read-only mapping, observes zeroes from ring 3, and unmaps it normally. Other
 advice, ranges, or inactive mappings return `-EINVAL` without changing the
 contents. There is no paging policy, reclamation queue, or lazy refill.
-`rax = 440` (`__NR_process_madvise`) accepts up to Linux's `IOV_MAX=1024`
+`rax = 440` (`__NR_process_madvise`) accepts the same four hints and
+`MADV_DONTNEED` across up to Linux's `IOV_MAX=1024`
 native iovecs through a live pidfd for the calling process. It applies the same
 `MADV_DONTNEED` operation to each nonempty range and returns the total advised
 byte count. A later failing vector returns the successfully processed prefix,

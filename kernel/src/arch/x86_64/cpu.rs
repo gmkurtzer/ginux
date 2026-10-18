@@ -563,6 +563,10 @@ const LINUX_DEPENDENCY_MAPPING_COUNT: usize = 8;
 const LINUX_DEPENDENCY_COUNT: usize = 2;
 const LINUX_DEPENDENCY_STATE_COUNT: usize = LINUX_DEPENDENCY_COUNT * LINUX_DEPENDENCY_MAPPING_COUNT;
 const LINUX_MADV_DONTNEED: u64 = 4;
+const LINUX_MADV_NORMAL: u64 = 0;
+const LINUX_MADV_RANDOM: u64 = 1;
+const LINUX_MADV_SEQUENTIAL: u64 = 2;
+const LINUX_MADV_WILLNEED: u64 = 3;
 const LINUX_STAT_SIZE: usize = 144;
 const LINUX_STAT_CHARACTER_DEVICE_MODE: u32 = 0o020600;
 const LINUX_STAT_DIRECTORY_MODE: u32 = 0o040555;
@@ -15456,13 +15460,24 @@ fn verify_linux_process_madvise_syscall() -> bool {
     let first = mapping + PAGE_SIZE as u64;
     let second = first + PAGE_SIZE as u64;
     let initialized = copy_to_linux_user(first, &[0xa5]) && copy_to_linux_user(second, &[0x5a]);
+    let hints = initialized
+        && [
+            LINUX_MADV_NORMAL,
+            LINUX_MADV_RANDOM,
+            LINUX_MADV_SEQUENTIAL,
+            LINUX_MADV_WILLNEED,
+        ]
+        .into_iter()
+        .all(|advice| linux_madvise(first, PAGE_SIZE as u64, advice) == 0)
+        && linux_madvise(first, PAGE_SIZE as u64, 1_u64 << 32) == 0
+        && linux_madvise(first, PAGE_SIZE as u64, 24) == LINUX_EINVAL;
     let mut vectors = [0_u8; 32];
     vectors[..8].copy_from_slice(&first.to_ne_bytes());
     vectors[8..16].copy_from_slice(&(PAGE_SIZE as u64).to_ne_bytes());
     vectors[16..24].copy_from_slice(&second.to_ne_bytes());
     vectors[24..].copy_from_slice(&(PAGE_SIZE as u64).to_ne_bytes());
     let descriptor = linux_pidfd_open(u64::from(current_linux_process_pid()), 0);
-    let advised = initialized
+    let advised = hints
         && descriptor < LINUX_AUX_DESCRIPTOR_LIMIT
         && copy_to_linux_user(mapping, &vectors)
         && linux_process_madvise(descriptor, mapping, 2, LINUX_MADV_DONTNEED, 0)
@@ -16480,6 +16495,18 @@ fn linux_runtime_madvise(address: u64, length: u64, advice: u64) -> u64 {
     let Some((_, pages)) = linux_runtime_mapping_range(address, length) else {
         return LINUX_EINVAL;
     };
+    if matches!(
+        advice,
+        LINUX_MADV_NORMAL | LINUX_MADV_RANDOM | LINUX_MADV_SEQUENTIAL | LINUX_MADV_WILLNEED
+    ) {
+        return if (0..pages).all(|page| {
+            address_space::current_linux_runtime_page(address + (page * PAGE_SIZE) as u64).occupied
+        }) {
+            0
+        } else {
+            LINUX_ENOMEM
+        };
+    }
     if advice != LINUX_MADV_DONTNEED {
         return LINUX_EINVAL;
     }
@@ -17291,6 +17318,7 @@ fn linux_munmap(address: u64, length: u64) -> u64 {
 }
 
 fn linux_madvise(address: u64, length: u64, advice: u64) -> u64 {
+    let advice = u64::from(advice as u32);
     if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) && address >= LINUX_RUNTIME_DYNAMIC_MMAP_BASE {
         return linux_runtime_madvise(address, length, advice);
     }
@@ -17302,6 +17330,16 @@ fn linux_madvise(address: u64, length: u64, advice: u64) -> u64 {
             .then(|| linux_mmap_slot_area_index(start_slot + offset))
             .flatten()
     });
+    if matches!(
+        advice,
+        LINUX_MADV_NORMAL | LINUX_MADV_RANDOM | LINUX_MADV_SEQUENTIAL | LINUX_MADV_WILLNEED
+    ) {
+        return if areas[..range_pages].iter().all(Option::is_some) {
+            0
+        } else {
+            LINUX_ENOMEM
+        };
+    }
     if advice == LINUX_MADV_DONTNEED
         && (0..range_pages).any(|offset| {
             let slot = start_slot + offset;
@@ -17342,7 +17380,18 @@ fn linux_process_madvise(
     flags: u64,
 ) -> u64 {
     const IOV_MAX: u64 = 1024;
-    if flags != 0 || vector_count > IOV_MAX || advice != LINUX_MADV_DONTNEED {
+    let advice = u64::from(advice as u32);
+    if flags != 0
+        || vector_count > IOV_MAX
+        || !matches!(
+            advice,
+            LINUX_MADV_NORMAL
+                | LINUX_MADV_RANDOM
+                | LINUX_MADV_SEQUENTIAL
+                | LINUX_MADV_WILLNEED
+                | LINUX_MADV_DONTNEED
+        )
+    {
         return LINUX_EINVAL;
     }
     if !linux_pidfd_descriptor(pid_descriptor) {
