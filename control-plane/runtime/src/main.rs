@@ -2431,6 +2431,55 @@ fn linux_pipe_fionread_contract(console: u64) -> bool {
         0,
         0,
     );
+    let invalid_timeval = [-1_i64, 0];
+    let select_bad_time = linux_syscall6(
+        LINUX_SELECT_SYSCALL,
+        select_limit,
+        0,
+        (&mut selected_write as *mut u64) as u64,
+        0,
+        invalid_timeval.as_ptr() as u64,
+        0,
+    );
+    let select_bad_time_address = linux_syscall6(
+        LINUX_SELECT_SYSCALL,
+        select_limit,
+        0,
+        (&mut selected_write as *mut u64) as u64,
+        0,
+        1,
+        0,
+    );
+    let invalid_timespec = [0_i64, 1_000_000_000];
+    let pselect_bad_time = linux_syscall6(
+        LINUX_PSELECT6_SYSCALL,
+        select_limit,
+        0,
+        (&mut pselected_write as *mut u64) as u64,
+        0,
+        invalid_timespec.as_ptr() as u64,
+        0,
+    );
+    let invalid_mask_size = [0_u64, 7];
+    let pselect_bad_mask_size = linux_syscall6(
+        LINUX_PSELECT6_SYSCALL,
+        select_limit,
+        0,
+        (&mut pselected_write as *mut u64) as u64,
+        0,
+        0,
+        invalid_mask_size.as_ptr() as u64,
+    );
+    let invalid_mask_address = [1_u64, 8];
+    let pselect_bad_mask_address = linux_syscall6(
+        LINUX_PSELECT6_SYSCALL,
+        select_limit,
+        0,
+        (&mut pselected_write as *mut u64) as u64,
+        0,
+        0,
+        invalid_mask_address.as_ptr() as u64,
+    );
     let wrong_read = linux_syscall(LINUX_READ_SYSCALL, writer, 1, 1);
     let wrong_write = linux_syscall(LINUX_WRITE_SYSCALL, reader, b"x".as_ptr() as u64, 1);
     let reader_closed = linux_syscall(LINUX_CLOSE_SYSCALL, reader, 0, 0);
@@ -2539,6 +2588,11 @@ fn linux_pipe_fionread_contract(console: u64) -> bool {
         && selected_exception == 0
         && pselected_ready == 1
         && pselected_write == 1_u64 << writer
+        && select_bad_time == LINUX_EINVAL
+        && select_bad_time_address == LINUX_EFAULT
+        && pselect_bad_time == LINUX_EINVAL
+        && pselect_bad_mask_size == LINUX_EINVAL
+        && pselect_bad_mask_address == LINUX_EFAULT
         && wrong_read == LINUX_EBADF
         && wrong_write == LINUX_EBADF
         && reader_closed == 0

@@ -802,6 +802,7 @@ const LINUX_CLOCK_REALTIME_ALARM: u64 = 8;
 const LINUX_CLOCK_BOOTTIME_ALARM: u64 = 9;
 const LINUX_CLOCK_TAI: u64 = 11;
 const NANOSECONDS_PER_SECOND: u64 = 1_000_000_000;
+const MICROSECONDS_PER_SECOND: u64 = 1_000_000;
 const LINUX_CLOCK_TICKS_PER_SECOND: u64 = 100;
 
 #[repr(C, packed)]
@@ -8053,13 +8054,23 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_POLL_SYSCALL => {
             linux_poll_live_return(registers, syscall_return, first_argument, buffer, count)
         }
-        LINUX_SELECT_SYSCALL | LINUX_PSELECT6_SYSCALL => linux_select(
+        LINUX_SELECT_SYSCALL => linux_select(
             first_argument,
             buffer,
             count,
             register(0),
             register(2),
             register(1),
+            false,
+        ),
+        LINUX_PSELECT6_SYSCALL => linux_select(
+            first_argument,
+            buffer,
+            count,
+            register(0),
+            register(2),
+            register(1),
+            true,
         ),
         LINUX_FSTAT_SYSCALL => {
             let Some(stat) = linux_descriptor_stat(first_argument) else {
@@ -9335,10 +9346,15 @@ fn linux_controller_syscall(
         )),
         LINUX_POLL_SYSCALL => Some(linux_controller_poll(first, second, third)),
         LINUX_SELECT_SYSCALL | LINUX_PSELECT6_SYSCALL => Some(linux_select_with_copy(
-            first,
-            second,
-            third,
-            registers.r10,
+            LinuxSelectInput {
+                descriptor_count: first,
+                read_address: second,
+                write_address: third,
+                exception_address: registers.r10,
+                timeout_address: registers.r8,
+                signal_mask_address: registers.r9,
+            },
+            number == LINUX_PSELECT6_SYSCALL,
             address_space::copy_from_current_user,
             address_space::copy_to_current_user,
         )),
@@ -23407,29 +23423,83 @@ fn linux_select(
     read_address: u64,
     write_address: u64,
     exception_address: u64,
-    _timeout_address: u64,
-    _signal_mask_address: u64,
+    timeout_address: u64,
+    signal_mask_address: u64,
+    pselect: bool,
 ) -> u64 {
     linux_select_with_copy(
-        descriptor_count,
-        read_address,
-        write_address,
-        exception_address,
+        LinuxSelectInput {
+            descriptor_count,
+            read_address,
+            write_address,
+            exception_address,
+            timeout_address,
+            signal_mask_address,
+        },
+        pselect,
         copy_from_linux_user,
         copy_to_linux_user,
     )
 }
 
-fn linux_select_with_copy(
+struct LinuxSelectInput {
     descriptor_count: u64,
     read_address: u64,
     write_address: u64,
     exception_address: u64,
+    timeout_address: u64,
+    signal_mask_address: u64,
+}
+
+fn linux_select_with_copy(
+    input: LinuxSelectInput,
+    pselect: bool,
     copy_from: fn(u64, &mut [u8]) -> bool,
     copy_to: fn(u64, &[u8]) -> bool,
 ) -> u64 {
+    let LinuxSelectInput {
+        descriptor_count,
+        read_address,
+        write_address,
+        exception_address,
+        timeout_address,
+        signal_mask_address,
+    } = input;
     if descriptor_count > u64::BITS as u64 {
         return LINUX_EINVAL;
+    }
+    if timeout_address != 0 {
+        let mut timeout = [0_u8; 16];
+        if !copy_from(timeout_address, &mut timeout) {
+            return LINUX_EFAULT;
+        }
+        let seconds = i64::from_ne_bytes(timeout[..8].try_into().unwrap());
+        let fraction = i64::from_ne_bytes(timeout[8..].try_into().unwrap());
+        let fraction_limit = if pselect {
+            NANOSECONDS_PER_SECOND as i64
+        } else {
+            MICROSECONDS_PER_SECOND as i64
+        };
+        if seconds < 0 || !(0..fraction_limit).contains(&fraction) {
+            return LINUX_EINVAL;
+        }
+    }
+    if pselect && signal_mask_address != 0 {
+        let mut argument = [0_u8; 16];
+        if !copy_from(signal_mask_address, &mut argument) {
+            return LINUX_EFAULT;
+        }
+        let mask_address = u64::from_ne_bytes(argument[..8].try_into().unwrap());
+        let mask_size = u64::from_ne_bytes(argument[8..].try_into().unwrap());
+        if mask_size != 8 {
+            return LINUX_EINVAL;
+        }
+        if mask_address != 0 {
+            let mut mask = [0_u8; 8];
+            if !copy_from(mask_address, &mut mask) {
+                return LINUX_EFAULT;
+            }
+        }
     }
     let mut requested_read = 0_u64;
     let mut requested_write = 0_u64;

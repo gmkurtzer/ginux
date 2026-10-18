@@ -151,9 +151,12 @@ not open, and clear exception sets because the current descriptor profile has
 no `POLLPRI` source. Read and write readiness use the same live descriptor
 state as `poll`, and each ready descriptor is counted once. The ring-3
 controller proves pipe read/write readiness, exception clearing, `pselect6`
-dispatch, invalid descriptor rejection, and invalid-address handling. Timeout
-waiting, temporary `pselect6` signal masks, descriptor sets wider than one
-machine word, and Linux timeout write-back remain pending.
+dispatch, invalid descriptor rejection, and invalid-address handling. Select
+validates signed `timeval` seconds and normalized microseconds; `pselect6`
+validates the signed `timespec`, packed mask pointer, exact eight-byte mask
+size, and referenced mask range. Timeout waiting, atomic temporary signal-mask
+installation, descriptor sets wider than one machine word, and Linux timeout
+write-back remain pending.
 `rax = 271` (`__NR_ppoll`) uses the same bounded readiness engine. A null
 timeout means an infinite wait request; otherwise the complete 16-byte x86-64
 `timespec` must contain nonnegative seconds and normalized nanoseconds. An
