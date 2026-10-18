@@ -77,9 +77,11 @@ struct Node {
     active: bool,
     linked: bool,
     whiteout: bool,
+    memfd: bool,
     kind: NodeKind,
     path_length: u16,
     mode: u32,
+    seals: u32,
     handle: Handle,
     size: usize,
     first_page: FrameLease,
@@ -99,9 +101,11 @@ impl Node {
         active: false,
         linked: false,
         whiteout: false,
+        memfd: false,
         kind: NodeKind::File,
         path_length: 0,
         mode: 0,
+        seals: 0,
         handle: Handle {
             generation: 0,
             inode: 0,
@@ -204,6 +208,36 @@ pub(crate) fn metadata(handle: Handle) -> Option<Metadata> {
     })
 }
 
+pub(crate) fn configure_memfd(handle: Handle, allow_sealing: bool) -> bool {
+    let Some(node) = node_mut(handle) else {
+        return false;
+    };
+    if node.kind != NodeKind::File {
+        return false;
+    }
+    node.memfd = true;
+    node.seals = if allow_sealing { 0 } else { 1 };
+    true
+}
+
+pub(crate) fn file_seals(handle: Handle) -> Option<u32> {
+    let node = node(handle)?;
+    node.memfd.then_some(node.seals)
+}
+
+pub(crate) fn add_file_seals(handle: Handle, seals: u32) -> Option<bool> {
+    let node = node_mut(handle)?;
+    if !node.memfd {
+        return None;
+    }
+    let added = seals & !node.seals;
+    if added != 0 && node.seals & 1 != 0 {
+        return Some(false);
+    }
+    node.seals |= seals;
+    Some(true)
+}
+
 pub(crate) fn copy_path(handle: Handle, output: &mut [u8]) -> Option<usize> {
     let overlay = live()?;
     for_each_node(overlay, |node| {
@@ -297,9 +331,11 @@ fn create(path: &[u8], kind: NodeKind, mode: u32, initial: &[u8]) -> Option<Hand
         active: true,
         linked: true,
         whiteout: false,
+        memfd: false,
         kind,
         path_length: path.len() as u16,
         mode: mode & 0o7777,
+        seals: 0,
         handle,
         size: 0,
         first_page: FrameLease::EMPTY,
@@ -362,9 +398,11 @@ pub(crate) fn whiteout(path: &[u8]) -> bool {
         active: true,
         linked: true,
         whiteout: true,
+        memfd: false,
         kind: NodeKind::File,
         path_length: path.len() as u16,
         mode: 0,
+        seals: 0,
         handle: Handle { generation, inode },
         size: 0,
         first_page: FrameLease::EMPTY,

@@ -715,6 +715,20 @@ const LINUX_F_OFD_GETLK: u64 = 36;
 const LINUX_F_OFD_SETLK: u64 = 37;
 const LINUX_F_OFD_SETLKW: u64 = 38;
 const LINUX_F_DUPFD_CLOEXEC: u64 = 1030;
+const LINUX_F_ADD_SEALS: u64 = 1033;
+const LINUX_F_GET_SEALS: u64 = 1034;
+const LINUX_F_SEAL_SEAL: u32 = 0x0001;
+const LINUX_F_SEAL_SHRINK: u32 = 0x0002;
+const LINUX_F_SEAL_GROW: u32 = 0x0004;
+const LINUX_F_SEAL_WRITE: u32 = 0x0008;
+const LINUX_F_SEAL_FUTURE_WRITE: u32 = 0x0010;
+const LINUX_F_SEAL_EXEC: u32 = 0x0020;
+const LINUX_F_SEAL_MASK: u32 = LINUX_F_SEAL_SEAL
+    | LINUX_F_SEAL_SHRINK
+    | LINUX_F_SEAL_GROW
+    | LINUX_F_SEAL_WRITE
+    | LINUX_F_SEAL_FUTURE_WRITE
+    | LINUX_F_SEAL_EXEC;
 const LINUX_FD_CLOEXEC: u8 = 1;
 const LINUX_CLOSE_RANGE_CLOEXEC: u64 = 1 << 2;
 const LINUX_CLOSE_RANGE_UNSHARE: u64 = 1 << 1;
@@ -13068,6 +13082,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let posix_queues = verify_linux_posix_message_queue_syscalls();
     let unix_inflight_rights = verify_linux_unix_inflight_rights();
     let aio = verify_linux_aio_syscalls();
+    let memfd_seals = verify_linux_memfd_seals();
     let secret_memory = verify_linux_memfd_secret_syscall();
     let mount_queries = verify_linux_mount_query_syscalls();
     let file_handles = verify_linux_file_handle_syscalls();
@@ -13110,6 +13125,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         posix_queues,
         unix_inflight_rights,
         aio,
+        memfd_seals,
         secret_memory,
         mount_queries,
         file_handles,
@@ -13155,6 +13171,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && posix_queues
         && unix_inflight_rights
         && aio
+        && memfd_seals
         && secret_memory
         && mount_queries
         && file_handles
@@ -14573,6 +14590,79 @@ fn verify_linux_mount_query_syscalls() -> bool {
     rejected && unmapped
 }
 
+fn verify_linux_memfd_seals() -> bool {
+    let mapping = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    if !(LINUX_RUNTIME_DYNAMIC_MMAP_BASE..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
+        .contains(&mapping)
+        || !copy_to_linux_user(mapping, b"ginux-seals\0")
+        || !copy_to_linux_user(mapping + 64, b"data")
+    {
+        return false;
+    }
+    let descriptor = linux_memfd_create(mapping, 2);
+    let duplicated = if descriptor < LINUX_DESCRIPTOR_TABLE_LIMIT {
+        linux_device_dup_at_least(descriptor, LINUX_AUX_DESCRIPTOR_FIRST, false)
+    } else {
+        LINUX_EBADF
+    };
+    let initial = descriptor < LINUX_DESCRIPTOR_TABLE_LIMIT
+        && duplicated < LINUX_DESCRIPTOR_TABLE_LIMIT
+        && linux_descriptor_fcntl(descriptor, LINUX_F_GET_SEALS, 0) == 0
+        && linux_regular_file_write_at(descriptor, mapping + 64, 4, 0) == 4;
+    let shared = initial
+        && linux_descriptor_fcntl(duplicated, LINUX_F_ADD_SEALS, LINUX_F_SEAL_GROW.into()) == 0
+        && linux_descriptor_fcntl(descriptor, LINUX_F_GET_SEALS, 0) == u64::from(LINUX_F_SEAL_GROW)
+        && linux_regular_file_write_at(descriptor, mapping + 64, 4, 0) == 4
+        && linux_regular_file_write_at(descriptor, mapping + 64, 1, 4) == LINUX_EPERM
+        && linux_ftruncate(descriptor, 2) == 0
+        && linux_ftruncate(descriptor, 5) == LINUX_EPERM;
+    let immutable = shared
+        && linux_descriptor_fcntl(
+            descriptor,
+            LINUX_F_ADD_SEALS,
+            u64::from(LINUX_F_SEAL_SHRINK | LINUX_F_SEAL_WRITE | LINUX_F_SEAL_EXEC),
+        ) == 0
+        && linux_ftruncate(descriptor, 1) == LINUX_EPERM
+        && linux_regular_file_write_at(descriptor, mapping + 64, 1, 0) == LINUX_EPERM
+        && linux_fchmod(descriptor, 0o666) == LINUX_EPERM
+        && linux_descriptor_fcntl(descriptor, LINUX_F_ADD_SEALS, u64::from(LINUX_F_SEAL_SEAL)) == 0
+        && linux_descriptor_fcntl(
+            descriptor,
+            LINUX_F_ADD_SEALS,
+            u64::from(LINUX_F_SEAL_FUTURE_WRITE),
+        ) == LINUX_EPERM
+        && linux_descriptor_fcntl(descriptor, LINUX_F_ADD_SEALS, 1 << 31) == LINUX_EINVAL;
+    let closed = duplicated < LINUX_DESCRIPTOR_TABLE_LIMIT
+        && linux_descriptor_close(duplicated) == 0
+        && descriptor < LINUX_DESCRIPTOR_TABLE_LIMIT
+        && linux_descriptor_close(descriptor) == 0;
+    let sealed_descriptor = linux_memfd_create(mapping, 0);
+    let default_seal = sealed_descriptor < LINUX_DESCRIPTOR_TABLE_LIMIT
+        && linux_descriptor_fcntl(sealed_descriptor, LINUX_F_GET_SEALS, 0)
+            == u64::from(LINUX_F_SEAL_SEAL)
+        && linux_descriptor_fcntl(
+            sealed_descriptor,
+            LINUX_F_ADD_SEALS,
+            u64::from(LINUX_F_SEAL_GROW),
+        ) == LINUX_EPERM;
+    let sealed_closed = sealed_descriptor < LINUX_DESCRIPTOR_TABLE_LIMIT
+        && linux_descriptor_close(sealed_descriptor) == 0;
+    let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
+    let valid =
+        initial && shared && immutable && closed && default_seal && sealed_closed && unmapped;
+    if valid {
+        serial_write("ginux: Linux memfd sealing enforced across descriptors\r\n");
+    }
+    valid
+}
+
 fn verify_linux_memfd_secret_syscall() -> bool {
     let descriptor = linux_memfd_secret(1);
     if descriptor >= LINUX_AUX_DESCRIPTOR_LIMIT {
@@ -15167,6 +15257,20 @@ fn linux_runtime_mmap(
             let Some(metadata) = crate::linux_overlay::metadata(handle) else {
                 return LINUX_EBADF;
             };
+            if sharing == LINUX_MAP_SHARED
+                && protection & LINUX_PROT_WRITE != 0
+                && crate::linux_overlay::file_seals(handle).is_some_and(|seals| {
+                    seals & (LINUX_F_SEAL_WRITE | LINUX_F_SEAL_FUTURE_WRITE) != 0
+                })
+            {
+                return LINUX_EPERM;
+            }
+            if protection & LINUX_PROT_EXEC != 0
+                && crate::linux_overlay::file_seals(handle)
+                    .is_some_and(|seals| seals & LINUX_F_SEAL_EXEC != 0)
+            {
+                return LINUX_EPERM;
+            }
             if metadata.kind != crate::linux_overlay::NodeKind::File
                 || !matches!(state & 3, LINUX_DESCRIPTOR_INPUT | 3)
                 || !offset.is_multiple_of(PAGE_SIZE as u64)
@@ -19336,7 +19440,9 @@ fn linux_memfd_create(name_address: u64, flags: u64) -> u64 {
     let Some(handle) = crate::linux_overlay::create_file(b"tmp/.ginux-memfd", 0o777, &[]) else {
         return LINUX_ENOSPC;
     };
-    if !crate::linux_overlay::unlink(handle) {
+    if !crate::linux_overlay::configure_memfd(handle, flags & MFD_ALLOW_SEALING != 0)
+        || !crate::linux_overlay::unlink(handle)
+    {
         return LINUX_EIO;
     }
     let index = (descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize;
@@ -19986,6 +20092,14 @@ fn linux_ftruncate(descriptor: u64, length: u64) -> u64 {
     let Some(metadata) = crate::linux_overlay::metadata(handle) else {
         return LINUX_EIO;
     };
+    if let Some(seals) = crate::linux_overlay::file_seals(handle) {
+        if seals & (LINUX_F_SEAL_WRITE | LINUX_F_SEAL_FUTURE_WRITE) != 0
+            || length < metadata.size && seals & LINUX_F_SEAL_SHRINK != 0
+            || length > metadata.size && seals & LINUX_F_SEAL_GROW != 0
+        {
+            return LINUX_EPERM;
+        }
+    }
     if length > metadata.size && linux_file_extension_limit(length).is_err() {
         return LINUX_EFBIG;
     }
@@ -20023,6 +20137,13 @@ fn linux_fallocate(descriptor: u64, mode: u64, offset: u64, length: u64) -> u64 
     if metadata.kind != crate::linux_overlay::NodeKind::File {
         return LINUX_EISDIR;
     }
+    if let Some(seals) = crate::linux_overlay::file_seals(handle) {
+        if seals & (LINUX_F_SEAL_WRITE | LINUX_F_SEAL_FUTURE_WRITE) != 0
+            || end as usize > metadata.size && seals & LINUX_F_SEAL_GROW != 0
+        {
+            return LINUX_EPERM;
+        }
+    }
     if metadata.size < end as usize && linux_file_extension_limit(end as usize).is_err() {
         return LINUX_EFBIG;
     }
@@ -20038,6 +20159,13 @@ fn linux_fchmod(descriptor: u64, mode: u64) -> u64 {
         Ok(handle) => handle,
         Err(error) => return error,
     };
+    if crate::linux_overlay::file_seals(handle).is_some_and(|seals| {
+        seals & LINUX_F_SEAL_EXEC != 0
+            && crate::linux_overlay::metadata(handle)
+                .is_some_and(|metadata| (metadata.mode ^ mode as u32) & 0o111 != 0)
+    }) {
+        return LINUX_EPERM;
+    }
     if crate::linux_overlay::set_mode(handle, mode as u32) {
         0
     } else {
@@ -26672,6 +26800,22 @@ fn linux_overlay_copy_from_user(
     let Ok(requested) = usize::try_from(count) else {
         return LINUX_EINVAL;
     };
+    if requested == 0 {
+        return 0;
+    }
+    if let Some(seals) = crate::linux_overlay::file_seals(handle) {
+        if seals & (LINUX_F_SEAL_WRITE | LINUX_F_SEAL_FUTURE_WRITE) != 0 {
+            return LINUX_EPERM;
+        }
+        let Some(end) = start.checked_add(requested) else {
+            return LINUX_EFBIG;
+        };
+        if seals & LINUX_F_SEAL_GROW != 0
+            && crate::linux_overlay::metadata(handle).is_none_or(|metadata| end > metadata.size)
+        {
+            return LINUX_EPERM;
+        }
+    }
     let requested = match linux_file_write_limit(start, requested) {
         Ok(length) => length,
         Err(error) => return error,
@@ -27259,6 +27403,29 @@ fn linux_fcntl_descriptor_flags(descriptor: u64, command: u64, argument: u64) ->
     }
 }
 
+fn linux_memfd_fcntl(descriptor: u64, command: u64, argument: u64) -> u64 {
+    let Some(handle) = linux_overlay_descriptor_handle(descriptor) else {
+        return LINUX_EINVAL;
+    };
+    let Some(current) = crate::linux_overlay::file_seals(handle) else {
+        return LINUX_EINVAL;
+    };
+    if command == LINUX_F_GET_SEALS {
+        return u64::from(current);
+    }
+    let Ok(requested) = u32::try_from(argument) else {
+        return LINUX_EINVAL;
+    };
+    if requested & !LINUX_F_SEAL_MASK != 0 {
+        return LINUX_EINVAL;
+    }
+    match crate::linux_overlay::add_file_seals(handle, requested) {
+        Some(true) => 0,
+        Some(false) => LINUX_EPERM,
+        None => LINUX_EINVAL,
+    }
+}
+
 fn linux_descriptor_fcntl(descriptor: u64, command: u64, argument: u64) -> u64 {
     let state = linux_device_descriptor(descriptor);
     if descriptor == 2 && ELF_PROBE_STDERR_OPEN.load(Ordering::SeqCst) {
@@ -27377,6 +27544,7 @@ fn linux_descriptor_fcntl(descriptor: u64, command: u64, argument: u64) -> u64 {
         LINUX_F_SETLK | LINUX_F_SETLKW | LINUX_F_OFD_SETLK | LINUX_F_OFD_SETLKW => {
             linux_fcntl_lock(command, argument)
         }
+        LINUX_F_ADD_SEALS | LINUX_F_GET_SEALS => linux_memfd_fcntl(descriptor, command, argument),
         LINUX_F_GETFL => {
             u64::from((state & 3) - 1)
                 | u64::from(
