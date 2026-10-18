@@ -13791,6 +13791,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let scheduler_affinity = verify_linux_scheduler_affinity();
     let realtime_queries = verify_linux_realtime_queries();
     let resource_accounting = verify_linux_resource_accounting();
+    let filesystem_statistics = verify_linux_filesystem_statistics();
     let filesystem_sync = linux_syncfs(1) == 0 && linux_syncfs(99) == LINUX_EBADF;
     let robust_list = verify_linux_robust_list_syscalls();
     let rseq = verify_linux_rseq_syscall();
@@ -13838,6 +13839,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         scheduler_affinity,
         realtime_queries,
         resource_accounting,
+        filesystem_statistics,
         filesystem_sync,
         robust_list,
         rseq,
@@ -13891,6 +13893,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && scheduler_affinity
         && realtime_queries
         && resource_accounting
+        && filesystem_statistics
         && filesystem_sync
         && robust_list
         && rseq
@@ -14123,6 +14126,113 @@ fn verify_linux_resource_accounting() -> bool {
         && linux_sysinfo(1) == LINUX_EFAULT;
     let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
     sysinfo && unmapped
+}
+
+fn verify_linux_filesystem_statistics() -> bool {
+    const UPPER_REGISTER_BITS: u64 = 1_u64 << 32;
+    const RAMFS_MAGIC: u64 = 0x8584_58f6;
+    const PROC_SUPER_MAGIC: u64 = 0x9fa0;
+    const ANON_INODE_FS_MAGIC: u64 = 0x0904_1934;
+    const ROOT_FLAGS: u64 = 32 | 1 | 2 | 4;
+    const PROC_FLAGS: u64 = 32 | 2 | 4 | 8 | 4096;
+
+    let mapping = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    if !(LINUX_RUNTIME_DYNAMIC_MMAP_BASE..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
+        .contains(&mapping)
+    {
+        return false;
+    }
+    let paths = copy_to_linux_user(mapping, b"/\0")
+        && copy_to_linux_user(mapping + 16, b"/proc/cpuinfo\0")
+        && copy_to_linux_user(mapping + 40, b"/ginux-statfs-absent\0");
+    let mut stat = [0_u8; 120];
+    let root = paths
+        && linux_statfs(mapping, mapping + 128) == 0
+        && copy_from_linux_user(mapping + 128, &mut stat)
+        && u64::from_ne_bytes(stat[..8].try_into().unwrap()) == RAMFS_MAGIC
+        && u64::from_ne_bytes(stat[8..16].try_into().unwrap()) == PAGE_SIZE as u64
+        && stat[16..56] == [0; 40]
+        && u64::from_ne_bytes(stat[56..64].try_into().unwrap()) == 1
+        && u64::from_ne_bytes(stat[64..72].try_into().unwrap()) == 255
+        && u64::from_ne_bytes(stat[72..80].try_into().unwrap()) == PAGE_SIZE as u64
+        && u64::from_ne_bytes(stat[80..88].try_into().unwrap()) == ROOT_FLAGS
+        && stat[88..] == [0; 32];
+    let procfs = root
+        && linux_statfs(mapping + 16, mapping + 128) == 0
+        && copy_from_linux_user(mapping + 128, &mut stat)
+        && u64::from_ne_bytes(stat[..8].try_into().unwrap()) == PROC_SUPER_MAGIC
+        && u64::from_ne_bytes(stat[56..64].try_into().unwrap()) == 2
+        && u64::from_ne_bytes(stat[80..88].try_into().unwrap()) == PROC_FLAGS;
+    let ordered_errors = procfs
+        && linux_statfs(mapping + 40, 1) == LINUX_ENOENT
+        && linux_statfs(mapping, 1) == LINUX_EFAULT
+        && linux_fstatfs(UPPER_REGISTER_BITS | 2047, 1) == LINUX_EBADF;
+    let root_descriptor = if ordered_errors {
+        linux_openat(u64::from(LINUX_AT_FDCWD), mapping, LINUX_O_DIRECTORY, 0)
+    } else {
+        LINUX_RETURN_TO_KERNEL
+    };
+    let proc_descriptor = if root_descriptor < LINUX_RETURN_TO_KERNEL {
+        linux_openat(u64::from(LINUX_AT_FDCWD), mapping + 16, 0, 0)
+    } else {
+        LINUX_RETURN_TO_KERNEL
+    };
+    let descriptors = proc_descriptor < LINUX_RETURN_TO_KERNEL
+        && linux_fstatfs(UPPER_REGISTER_BITS | root_descriptor, mapping + 128) == 0
+        && copy_from_linux_user(mapping + 128, &mut stat)
+        && u64::from_ne_bytes(stat[..8].try_into().unwrap()) == RAMFS_MAGIC
+        && linux_fstatfs(UPPER_REGISTER_BITS | proc_descriptor, mapping + 128) == 0
+        && copy_from_linux_user(mapping + 128, &mut stat)
+        && u64::from_ne_bytes(stat[..8].try_into().unwrap()) == PROC_SUPER_MAGIC;
+    let event_descriptor = if descriptors {
+        linux_eventfd(0, 0)
+    } else {
+        LINUX_RETURN_TO_KERNEL
+    };
+    let anonymous = event_descriptor < LINUX_RETURN_TO_KERNEL
+        && linux_fstatfs(event_descriptor, mapping + 128) == 0
+        && copy_from_linux_user(mapping + 128, &mut stat)
+        && u64::from_ne_bytes(stat[..8].try_into().unwrap()) == ANON_INODE_FS_MAGIC;
+    let closed_event =
+        event_descriptor >= LINUX_RETURN_TO_KERNEL || linux_descriptor_close(event_descriptor) == 0;
+    let closed_proc =
+        proc_descriptor >= LINUX_RETURN_TO_KERNEL || linux_descriptor_close(proc_descriptor) == 0;
+    let closed_root =
+        root_descriptor >= LINUX_RETURN_TO_KERNEL || linux_descriptor_close(root_descriptor) == 0;
+    let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
+    let valid = anonymous && closed_event && closed_proc && closed_root && unmapped;
+    if !valid {
+        serial_write(
+            "ginux: statfs verifier paths/root/proc/errors/descriptors/anonymous/cleanup ",
+        );
+        for value in [
+            paths,
+            root,
+            procfs,
+            ordered_errors,
+            descriptors,
+            anonymous,
+            closed_event && closed_proc && closed_root && unmapped,
+        ] {
+            serial_write_u64(u64::from(value));
+            serial_write(" ");
+        }
+        serial_write("fds ");
+        serial_write_u64(root_descriptor);
+        serial_write(" ");
+        serial_write_u64(proc_descriptor);
+        serial_write(" ");
+        serial_write_u64(event_descriptor);
+        serial_write("\r\n");
+    }
+    valid
 }
 
 fn verify_linux_robust_list_syscalls() -> bool {
@@ -31403,18 +31513,78 @@ fn linux_stat(mode: u32, inode: u64) -> [u8; LINUX_STAT_SIZE] {
     stat
 }
 
-fn linux_statfs_data() -> [u8; 120] {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LinuxFilesystemKind {
+    Root,
+    Proc,
+    Pipe,
+    Socket,
+    Anonymous,
+}
+
+fn linux_statfs_data(kind: LinuxFilesystemKind) -> [u8; 120] {
+    const RAMFS_MAGIC: u64 = 0x8584_58f6;
+    const PROC_SUPER_MAGIC: u64 = 0x9fa0;
+    const PIPEFS_MAGIC: u64 = 0x5049_5045;
+    const SOCKFS_MAGIC: u64 = 0x534f_434b;
+    const ANON_INODE_FS_MAGIC: u64 = 0x0904_1934;
+    const ST_RDONLY: u64 = 1;
+    const ST_NOSUID: u64 = 2;
+    const ST_NODEV: u64 = 4;
+    const ST_NOEXEC: u64 = 8;
+    const ST_VALID: u64 = 32;
+    const ST_RELATIME: u64 = 4096;
+
+    let (magic, filesystem_id, flags): (u64, u64, u64) = match kind {
+        LinuxFilesystemKind::Root => (RAMFS_MAGIC, 1, ST_VALID | ST_RDONLY | ST_NOSUID | ST_NODEV),
+        LinuxFilesystemKind::Proc => (
+            PROC_SUPER_MAGIC,
+            2,
+            ST_VALID | ST_NOSUID | ST_NODEV | ST_NOEXEC | ST_RELATIME,
+        ),
+        LinuxFilesystemKind::Pipe => (PIPEFS_MAGIC, 0, ST_VALID),
+        LinuxFilesystemKind::Socket => (SOCKFS_MAGIC, 0, ST_VALID),
+        LinuxFilesystemKind::Anonymous => (ANON_INODE_FS_MAGIC, 0, ST_VALID),
+    };
     let mut stat = [0_u8; 120];
-    stat[0..8].copy_from_slice(&0x0102_1994_u64.to_ne_bytes());
+    stat[0..8].copy_from_slice(&magic.to_ne_bytes());
     stat[8..16].copy_from_slice(&(PAGE_SIZE as u64).to_ne_bytes());
-    stat[16..24].copy_from_slice(&1_048_576_u64.to_ne_bytes());
-    stat[24..32].copy_from_slice(&1_048_576_u64.to_ne_bytes());
-    stat[32..40].copy_from_slice(&1_048_576_u64.to_ne_bytes());
-    stat[40..48].copy_from_slice(&1_048_576_u64.to_ne_bytes());
-    stat[48..56].copy_from_slice(&1_048_576_u64.to_ne_bytes());
+    stat[56..64].copy_from_slice(&filesystem_id.to_ne_bytes());
     stat[64..72].copy_from_slice(&(crate::linux_overlay::PATH_CAPACITY as u64 - 1).to_ne_bytes());
     stat[72..80].copy_from_slice(&(PAGE_SIZE as u64).to_ne_bytes());
+    stat[80..88].copy_from_slice(&flags.to_ne_bytes());
     stat
+}
+
+fn linux_statfs_descriptor_kind(descriptor: u64) -> LinuxFilesystemKind {
+    let state = linux_device_descriptor(descriptor);
+    if linux_proc_file(state)
+        || linux_measured_directory_path(state)
+            .is_some_and(|path| path == b"proc" || path.starts_with(b"proc/"))
+    {
+        return LinuxFilesystemKind::Proc;
+    }
+    if state & LINUX_DEVICE_PIPE != 0 || linux_pipe_descriptor(descriptor) {
+        return LinuxFilesystemKind::Pipe;
+    }
+    if state & LINUX_DEVICE_SOCKET != 0 {
+        return LinuxFilesystemKind::Socket;
+    }
+    if linux_epoll_descriptor(descriptor)
+        || linux_eventfd_descriptor(descriptor)
+        || linux_timerfd_descriptor(descriptor)
+        || state
+            & (LINUX_DEVICE_USERFAULTFD
+                | LINUX_DEVICE_FANOTIFY
+                | LINUX_DEVICE_POSIX_MQ
+                | LINUX_DEVICE_INOTIFY
+                | LINUX_DEVICE_PIDFD
+                | LINUX_DEVICE_SIGNALFD)
+            != 0
+    {
+        return LinuxFilesystemKind::Anonymous;
+    }
+    LinuxFilesystemKind::Root
 }
 
 fn linux_ustat(device: u64, output_address: u64) -> u64 {
@@ -31440,17 +31610,27 @@ fn linux_statfs(path_address: u64, stat_address: u64) -> u64 {
     };
     let path = &path[..length];
     let mut canonical = [0_u8; crate::linux_overlay::PATH_CAPACITY];
-    let overlay = linux_canonical_path_at(u64::from(LINUX_AT_FDCWD), path, &mut canonical)
-        .ok()
-        .and_then(|length| crate::linux_overlay::lookup(&canonical[..length]));
+    let canonical_length =
+        linux_canonical_path_at(u64::from(LINUX_AT_FDCWD), path, &mut canonical).ok();
+    let overlay =
+        canonical_length.and_then(|length| crate::linux_overlay::lookup(&canonical[..length]));
+    let virtual_path = linux_virtual_mount_path_at(u64::from(LINUX_AT_FDCWD), path);
     if overlay.is_none()
         && linux_oci_path_at(u64::from(LINUX_AT_FDCWD), path).is_none()
-        && linux_virtual_mount_path_at(u64::from(LINUX_AT_FDCWD), path).is_none()
+        && virtual_path.is_none()
         && linux_root_directory_kind(path).is_none()
     {
         return LINUX_ENOENT;
     }
-    if copy_to_linux_user(stat_address, &linux_statfs_data()) {
+    let canonical_is_proc = canonical_length.is_some_and(|length| {
+        &canonical[..length] == b"proc" || canonical[..length].starts_with(b"proc/")
+    });
+    let kind = if virtual_path.is_some() || canonical_is_proc {
+        LinuxFilesystemKind::Proc
+    } else {
+        LinuxFilesystemKind::Root
+    };
+    if copy_to_linux_user(stat_address, &linux_statfs_data(kind)) {
         0
     } else {
         LINUX_EFAULT
@@ -31462,7 +31642,10 @@ fn linux_fstatfs(descriptor: u64, stat_address: u64) -> u64 {
     if !linux_descriptor_open(descriptor) {
         return LINUX_EBADF;
     }
-    if copy_to_linux_user(stat_address, &linux_statfs_data()) {
+    if copy_to_linux_user(
+        stat_address,
+        &linux_statfs_data(linux_statfs_descriptor_kind(descriptor)),
+    ) {
         0
     } else {
         LINUX_EFAULT

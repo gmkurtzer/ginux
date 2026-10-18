@@ -189,6 +189,18 @@ convert descriptors and xattr flags according to their Linux 32-bit types.
 The filesystem verifier now performs an overlay xattr set/get/list/remove
 lifecycle and root `getdents64` enumeration with dirty upper register bits,
 then proves descriptor and overlay cleanup.
+`statfs` and `fstatfs` now follow Linux `simple_statfs` semantics instead of
+publishing fabricated fixed capacity values. The domain root and automatic
+proc mount report their RAMFS/proc magic, page block and fragment sizes,
+stable mount-local filesystem IDs, 255-byte name limit, and exact read-only,
+nosuid, nodev, noexec, relatime, and `ST_VALID` flags. Open pipe, socket, and
+anonymous-inode descriptors report their Linux pseudo-filesystem magic.
+Undefined capacity and inode fields remain zero, which preserves the root's
+elastic, no-artificial-cap contract. Boot verification covers root and proc
+path queries, matching `fstatfs` descriptor results, anonymous descriptors,
+Linux 32-bit descriptor conversion, error ordering, and complete cleanup.
+Persistent block-filesystem capacity, quota reporting, and additional future
+mount types remain outside the current profile.
 Pipe and zero-copy boundaries convert `pipe2`, `splice`, `tee`, `vmsplice`, and
 `copy_file_range` descriptors and flag words from their Linux 32-bit types.
 Boot verification creates a close-on-exec pipe and exercises zero-length
