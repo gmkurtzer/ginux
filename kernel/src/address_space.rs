@@ -5089,7 +5089,8 @@ pub(crate) fn linux_mapping_wipe_on_fork(root: memory::FrameLease, address: usiz
     }
     linux_leaf_in_root(root.address(), address as u64).and_then(|entry| {
         let value = unsafe { entry.read() };
-        (value & PRESENT != 0).then_some(value & LINUX_RUNTIME_WIPEONFORK != 0)
+        let state = linux_runtime_page_from_value(value);
+        state.occupied.then_some(state.wipeonfork)
     })
 }
 
@@ -5108,7 +5109,7 @@ pub(crate) fn set_linux_mapping_wipe_on_fork(
         return false;
     };
     let value = unsafe { entry.read() };
-    if value & PRESENT == 0 {
+    if !linux_runtime_page_from_value(value).occupied {
         return false;
     }
     let replacement = if enabled {

@@ -137,9 +137,12 @@ anonymous mappings, a pre-seeded stack VMA, and a deliberately unmapped range.
 `mseal` prevents protection changes, unmapping, remapping, replacement, and
 backing discard. In particular, `MADV_DONTNEED`, `MADV_FREE`, and
 `MADV_DONTNEED_LOCKED` now return `EPERM` for sealed mappings regardless of
-their current write permission. Boot verification seals a writable anonymous
-mapping and exercises each prohibited mutation; sealed mappings remain owned
-until process teardown releases them.
+their current write permission. `MADV_DONTFORK` and `MADV_WIPEONFORK` are
+likewise denied, while their non-destructive reversal operations remain valid.
+Inheritance metadata can be updated on demand-reserved pages without forcing
+physical allocation. Boot verification seals a writable anonymous mapping and
+exercises each prohibited mutation; sealed mappings remain owned until process
+teardown releases them.
 `MADV_COLD` and `MADV_PAGEOUT` validate mapped ranges and are accepted through
 both `madvise` and `process_madvise`. They are best-effort no-ops while Ginux
 has neither swap nor a page-reclaim queue; secret mappings remain rejected and

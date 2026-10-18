@@ -15873,6 +15873,10 @@ fn verify_linux_process_madvise_syscall() -> bool {
         && linux_madvise(sealed_mapping, PAGE_SIZE as u64, LINUX_MADV_FREE) == LINUX_EPERM
         && linux_madvise(sealed_mapping, PAGE_SIZE as u64, LINUX_MADV_DONTNEED_LOCKED)
             == LINUX_EPERM
+        && linux_madvise(sealed_mapping, PAGE_SIZE as u64, LINUX_MADV_DONTFORK) == LINUX_EPERM
+        && linux_madvise(sealed_mapping, PAGE_SIZE as u64, LINUX_MADV_WIPEONFORK) == LINUX_EPERM
+        && linux_madvise(sealed_mapping, PAGE_SIZE as u64, LINUX_MADV_DOFORK) == 0
+        && linux_madvise(sealed_mapping, PAGE_SIZE as u64, LINUX_MADV_KEEPONFORK) == 0
         && linux_munmap(sealed_mapping, PAGE_SIZE as u64) == LINUX_EPERM
         && linux_mseal(sealed_mapping, PAGE_SIZE as u64, 1) == LINUX_EINVAL;
     if !discarded_locked {
@@ -17434,6 +17438,13 @@ fn linux_madvise_inheritance(address: u64, length: u64, enabled: bool) -> u64 {
     {
         return LINUX_ENOMEM;
     }
+    if enabled
+        && (0..pages).any(|page| {
+            address_space::current_linux_runtime_page(address + (page * PAGE_SIZE) as u64).sealed
+        })
+    {
+        return LINUX_EPERM;
+    }
     if (0..pages).all(|page| {
         address_space::set_current_linux_runtime_page_dontfork(
             address + (page * PAGE_SIZE) as u64,
@@ -17468,6 +17479,13 @@ fn linux_madvise_wipeonfork(address: u64, length: u64, enabled: bool) -> u64 {
         !state.occupied || state.file || state.shared
     }) {
         return LINUX_EINVAL;
+    }
+    if enabled
+        && (0..pages).any(|page| {
+            address_space::current_linux_runtime_page(address + (page * PAGE_SIZE) as u64).sealed
+        })
+    {
+        return LINUX_EPERM;
     }
     if (0..pages).all(|page| {
         address_space::set_current_linux_runtime_page_wipeonfork(
