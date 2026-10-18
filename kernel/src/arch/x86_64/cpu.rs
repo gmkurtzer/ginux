@@ -7827,14 +7827,18 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_BIND_SYSCALL => linux_socket_bind(first_argument, buffer, count),
         LINUX_LISTEN_SYSCALL => linux_socket_listen(first_argument, buffer),
         LINUX_ACCEPT4_SYSCALL => linux_socket_accept(first_argument, buffer, count, register(0)),
-        LINUX_SENDTO_SYSCALL => linux_socket_sendto(
-            first_argument,
-            buffer,
-            count,
-            register(0),
-            register(2),
-            register(1),
-        ),
+        LINUX_SENDTO_SYSCALL => {
+            let flags = register(0);
+            let result = linux_socket_sendto(
+                first_argument,
+                buffer,
+                count,
+                flags,
+                register(2),
+                register(1),
+            );
+            linux_socket_send_live_return(registers, syscall_return, result, flags, false)
+        }
         LINUX_RECVFROM_SYSCALL => linux_socket_recvfrom(
             first_argument,
             buffer,
@@ -7843,12 +7847,19 @@ extern "sysv64" fn linux_syscall_handler(
             register(2),
             register(1),
         ),
-        LINUX_SENDMSG_SYSCALL => linux_socket_sendmsg(first_argument, buffer, count),
+        LINUX_SENDMSG_SYSCALL => {
+            let result = linux_socket_sendmsg(first_argument, buffer, count);
+            linux_socket_send_live_return(registers, syscall_return, result, count, false)
+        }
         LINUX_RECVMSG_SYSCALL => linux_socket_recvmsg(first_argument, buffer, count),
         LINUX_RECVMMSG_SYSCALL => {
             linux_socket_recvmmsg(first_argument, buffer, count, register(0), register(2))
         }
-        LINUX_SENDMMSG_SYSCALL => linux_socket_sendmmsg(first_argument, buffer, count, register(0)),
+        LINUX_SENDMMSG_SYSCALL => {
+            let flags = register(0);
+            let (result, broken_pipe) = linux_socket_sendmmsg(first_argument, buffer, count, flags);
+            linux_socket_send_live_return(registers, syscall_return, result, flags, broken_pipe)
+        }
         LINUX_SHUTDOWN_SYSCALL => linux_socket_shutdown(first_argument, buffer),
         LINUX_GETSOCKNAME_SYSCALL => linux_socket_name(first_argument, buffer, count, false),
         LINUX_GETPEERNAME_SYSCALL => linux_socket_name(first_argument, buffer, count, true),
@@ -20700,44 +20711,71 @@ fn linux_socket_recvmsg(descriptor: u64, message: u64, flags: u64) -> u64 {
     received as u64
 }
 
-fn linux_socket_sendmmsg(descriptor: u64, messages: u64, count: u64, flags: u64) -> u64 {
+fn linux_socket_sendmmsg(descriptor: u64, messages: u64, count: u64, flags: u64) -> (u64, bool) {
     const MMSGHDR_SIZE: u64 = 64;
     let Ok(count) = usize::try_from(count) else {
-        return LINUX_EINVAL;
+        return (LINUX_EINVAL, false);
     };
     if count > LINUX_IOV_LIMIT {
-        return LINUX_EINVAL;
+        return (LINUX_EINVAL, false);
     }
     let mut completed = 0_u64;
     for index in 0..count {
         let Some(message) = messages.checked_add((index as u64) * MMSGHDR_SIZE) else {
-            return if completed == 0 {
-                LINUX_EFAULT
-            } else {
-                completed
-            };
+            return (
+                if completed == 0 {
+                    LINUX_EFAULT
+                } else {
+                    completed
+                },
+                false,
+            );
         };
         let result = linux_socket_sendmsg(descriptor, message, flags);
         if result >= u64::MAX - 4095 {
-            return if completed == 0 { result } else { completed };
+            return (
+                if completed == 0 { result } else { completed },
+                result == LINUX_EPIPE,
+            );
         }
         let Some(length) = u32::try_from(result).ok() else {
-            return if completed == 0 {
-                LINUX_EINVAL
-            } else {
-                completed
-            };
+            return (
+                if completed == 0 {
+                    LINUX_EINVAL
+                } else {
+                    completed
+                },
+                false,
+            );
         };
         if !copy_to_linux_user(message + 56, &length.to_ne_bytes()) {
-            return if completed == 0 {
-                LINUX_EFAULT
-            } else {
-                completed
-            };
+            return (
+                if completed == 0 {
+                    LINUX_EFAULT
+                } else {
+                    completed
+                },
+                false,
+            );
         }
         completed += 1;
     }
-    completed
+    (completed, false)
+}
+
+fn linux_socket_send_live_return(
+    output: *mut LinuxSyscallFrame,
+    caller: LinuxUserContext,
+    result: u64,
+    flags: u64,
+    broken_pipe: bool,
+) -> u64 {
+    const MSG_NOSIGNAL: u64 = 0x4000;
+    if (result == LINUX_EPIPE || broken_pipe) && flags & MSG_NOSIGNAL == 0 {
+        linux_broken_pipe_live_return(output, caller)
+    } else {
+        result
+    }
 }
 
 fn linux_socket_recvmmsg(

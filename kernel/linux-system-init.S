@@ -362,6 +362,64 @@ ginux_linux_system_init:
     syscall
     test rax, rax
     jne .Lfailure
+
+    # A broken stream send raises SIGPIPE unless MSG_NOSIGNAL is present.
+    mov qword ptr [rip + .Lsignal_action], 0
+    mov qword ptr [rip + .Lsignal_action + 8], 0
+    mov qword ptr [rip + .Lsignal_action + 16], 0
+    mov qword ptr [rip + .Lsignal_action + 24], 0
+    mov edi, 13
+    lea rsi, [rip + .Lsignal_action]
+    lea rdx, [rip + .Lsignal_old_pipe]
+    mov r10d, 8
+    mov eax, 13
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov qword ptr [rip + .Lsignal_set], 0x1000
+    xor edi, edi
+    lea rsi, [rip + .Lsignal_set]
+    xor edx, edx
+    mov r10d, 8
+    mov eax, 14
+    syscall
+    test rax, rax
+    jne .Lfailure
+
+    mov edi, dword ptr [rip + .Lsocket_pair]
+    lea rsi, [rip + .Lmmsg_payload]
+    mov edx, 5
+    mov r10d, 0x4000
+    xor r8d, r8d
+    xor r9d, r9d
+    mov eax, 44
+    syscall
+    cmp rax, -32
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Lsocket_pair]
+    lea rsi, [rip + .Lmmsg_send]
+    mov edx, 0x4000
+    mov eax, 46
+    syscall
+    cmp rax, -32
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Lsocket_pair]
+    lea rsi, [rip + .Lmmsg_send]
+    mov edx, 1
+    mov r10d, 0x4000
+    mov eax, 307
+    syscall
+    cmp rax, -32
+    jne .Lfailure
+    lea rdi, [rip + .Lstatus]
+    mov esi, 8
+    mov eax, 127
+    syscall
+    test rax, rax
+    jne .Lfailure
+    cmp qword ptr [rip + .Lstatus], 0
+    jne .Lfailure
+
     mov edi, dword ptr [rip + .Lsocket_pair]
     lea rsi, [rip + .Lmmsg_payload]
     mov edx, 5
@@ -372,6 +430,76 @@ ginux_linux_system_init:
     syscall
     cmp rax, -32
     jne .Lfailure
+    lea rdi, [rip + .Lsignal_set]
+    lea rsi, [rip + .Lstatus]
+    xor edx, edx
+    mov r10d, 8
+    mov eax, 128
+    syscall
+    cmp rax, 13
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus], 13
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus + 8], 0x80
+    jne .Lfailure
+
+    mov edi, dword ptr [rip + .Lsocket_pair]
+    lea rsi, [rip + .Lmmsg_send]
+    xor edx, edx
+    mov eax, 46
+    syscall
+    cmp rax, -32
+    jne .Lfailure
+    lea rdi, [rip + .Lsignal_set]
+    lea rsi, [rip + .Lstatus]
+    xor edx, edx
+    mov r10d, 8
+    mov eax, 128
+    syscall
+    cmp rax, 13
+    jne .Lfailure
+
+    mov edi, dword ptr [rip + .Lsocket_pair]
+    lea rsi, [rip + .Lmmsg_send]
+    mov edx, 1
+    xor r10d, r10d
+    mov eax, 307
+    syscall
+    cmp rax, -32
+    jne .Lfailure
+    lea rdi, [rip + .Lsignal_set]
+    lea rsi, [rip + .Lstatus]
+    xor edx, edx
+    mov r10d, 8
+    mov eax, 128
+    syscall
+    cmp rax, 13
+    jne .Lfailure
+    lea rdi, [rip + .Lstatus]
+    mov esi, 8
+    mov eax, 127
+    syscall
+    test rax, rax
+    jne .Lfailure
+    cmp qword ptr [rip + .Lstatus], 0
+    jne .Lfailure
+    mov edi, 1
+    lea rsi, [rip + .Lsignal_set]
+    xor edx, edx
+    mov r10d, 8
+    mov eax, 14
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov edi, 13
+    lea rsi, [rip + .Lsignal_old_pipe]
+    xor edx, edx
+    mov r10d, 8
+    mov eax, 13
+    syscall
+    test rax, rax
+    jne .Lfailure
+
     mov edi, dword ptr [rip + .Lsocket_pair]
     lea rsi, [rip + .Lmmsg_output]
     mov edx, 5
@@ -3206,6 +3334,8 @@ ginux_linux_system_init:
 .Lsignal_old_usr1:
     .space 32
 .Lsignal_old_usr2:
+    .space 32
+.Lsignal_old_pipe:
     .space 32
 .Lqueue_info:
     .space 128
