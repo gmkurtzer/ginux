@@ -529,6 +529,7 @@ const LINUX_XATTR_REPLACE: u64 = 2;
 const LINUX_XATTR_SIZE_MAX: usize = 65_536;
 const LINUX_UTIME_NOW: i64 = 1_073_741_823;
 const LINUX_UTIME_OMIT: i64 = 1_073_741_822;
+const LINUX_RLIMIT_FSIZE: u64 = 1;
 const LINUX_RLIMIT_STACK: u64 = 3;
 const LINUX_RLIMIT_NPROC: u64 = 6;
 const LINUX_RLIMIT_NOFILE: u64 = 7;
@@ -748,6 +749,7 @@ const LINUX_STANDARD_SIGNAL_COUNT: u64 = 31;
 const LINUX_SIGSEGV: u64 = 11;
 const LINUX_SIGPIPE: u64 = 13;
 const LINUX_SIGTERM: u64 = 15;
+const LINUX_SIGXFSZ: u64 = 25;
 const LINUX_SI_USER: i32 = 0;
 const LINUX_SI_QUEUE: i32 = -1;
 const LINUX_SI_TKILL: i32 = -6;
@@ -1385,6 +1387,7 @@ static ELF_PROBE_READ_ONLY_DATA_PAGE: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_UMASK: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_RLIMITS: [BankedAtomicU64; LINUX_RLIMIT_WORDS] =
     [const { BankedAtomicU64::new(0) }; LINUX_RLIMIT_WORDS];
+static LINUX_FSIZE_LIMIT_HIT: BankedAtomicBool = BankedAtomicBool::new(false);
 static ELF_PROBE_CONSOLE_DESCRIPTORS: BankedAtomicU8 = BankedAtomicU8::new(0);
 static ELF_PROBE_STDERR_OPEN: BankedAtomicBool = BankedAtomicBool::new(false);
 static ELF_PROBE_CONSOLE_CLOEXEC: [BankedAtomicU64; LINUX_DESCRIPTOR_FLAG_WORD_COUNT] =
@@ -6020,6 +6023,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
     ELF_PROBE_EXITED_ROBUST_LIST.store(0, Ordering::SeqCst);
     ELF_PROBE_READ_ONLY_DATA_PAGE.store(0, Ordering::SeqCst);
     ELF_PROBE_UMASK.store(0o022, Ordering::SeqCst);
+    LINUX_FSIZE_LIMIT_HIT.store(false, Ordering::SeqCst);
     for resource in 0..LINUX_RLIMIT_NLIMITS {
         let Some(limit) = linux_default_resource_limit(resource, execution.runtime) else {
             return LinuxElfResult::FAILED;
@@ -7923,6 +7927,7 @@ extern "sysv64" fn linux_syscall_handler(
         }
         return result;
     }
+    LINUX_FSIZE_LIMIT_HIT.store(false, Ordering::SeqCst);
     let result = match number {
         LINUX_READ_SYSCALL => linux_descriptor_read_live_return(
             registers,
@@ -9187,6 +9192,11 @@ extern "sysv64" fn linux_syscall_handler(
             );
             LINUX_ENOSYS
         }
+    };
+    let result = if LINUX_FSIZE_LIMIT_HIT.swap(false, Ordering::SeqCst) {
+        linux_file_size_limit_signal(registers, syscall_return, (user_rip, user_rflags), result)
+    } else {
+        result
     };
     if let Some(index) = trace_index {
         LINUX_RUNTIME_SYSCALL_RESULT_TRACE[index].store(result, Ordering::SeqCst);
@@ -19672,6 +19682,12 @@ fn linux_ftruncate(descriptor: u64, length: u64) -> u64 {
         Err(error) => return error,
     };
     let length = length as usize;
+    let Some(metadata) = crate::linux_overlay::metadata(handle) else {
+        return LINUX_EIO;
+    };
+    if length > metadata.size && linux_file_extension_limit(length).is_err() {
+        return LINUX_EFBIG;
+    }
     if crate::linux_overlay::truncate(handle, length) {
         0
     } else {
@@ -19705,6 +19721,9 @@ fn linux_fallocate(descriptor: u64, mode: u64, offset: u64, length: u64) -> u64 
     };
     if metadata.kind != crate::linux_overlay::NodeKind::File {
         return LINUX_EISDIR;
+    }
+    if metadata.size < end as usize && linux_file_extension_limit(end as usize).is_err() {
+        return LINUX_EFBIG;
     }
     if metadata.size >= end as usize || crate::linux_overlay::truncate(handle, end as usize) {
         0
@@ -22158,6 +22177,8 @@ fn linux_regular_file_write_kernel(
     if !matches!(state & 3, LINUX_DESCRIPTOR_OUTPUT | 3) {
         return Err(LINUX_EBADF);
     }
+    let length = linux_file_write_limit(offset, input.len())?;
+    let input = &input[..length];
     if linux_tmp_file(state) {
         let handle = linux_tmp_descriptor_handle(descriptor, state).ok_or(LINUX_EBADF)?;
         return linux_tmpfs::write(handle, offset, input).ok_or(LINUX_ENOSPC);
@@ -22306,7 +22327,7 @@ fn linux_copy_file_range(
         input_offset = input_offset.saturating_add(written);
         output_offset = output_offset.saturating_add(written);
         copied += written;
-        if written < read {
+        if written < read || output_offset as u64 >= linux_file_size_limit() {
             break;
         }
     }
@@ -22424,7 +22445,7 @@ fn linux_sendfile(output: u64, input: u64, offset_pointer: u64, count: u64) -> u
         input_offset = input_offset.saturating_add(written);
         output_offset = output_offset.saturating_add(written);
         copied += written;
-        if written < read {
+        if written < read || output_is_regular && output_offset as u64 >= linux_file_size_limit() {
             break;
         }
     }
@@ -23381,6 +23402,30 @@ fn linux_broken_pipe_live_return(
         0
     } else {
         LINUX_EPIPE
+    }
+}
+
+fn linux_file_size_limit_signal(
+    output: *mut LinuxSyscallFrame,
+    mut interrupted: LinuxUserContext,
+    return_registers: (u64, u64),
+    result: u64,
+) -> u64 {
+    debug_assert_eq!(result, LINUX_EFBIG);
+    interrupted.rax = result;
+    let delivered = linux_kill(
+        1,
+        (LINUX_SIGXFSZ, LINUX_SI_KERNEL, None),
+        output,
+        interrupted,
+        return_registers,
+    );
+    if delivered == LINUX_RETURN_TO_KERNEL || delivered != 0 {
+        delivered
+    } else if LINUX_SIGNAL_ACTIVE.load(Ordering::SeqCst) {
+        0
+    } else {
+        result
     }
 }
 
@@ -25620,7 +25665,7 @@ fn linux_positioned_iov(
             };
         };
         offset = next;
-        if result != length as u64 {
+        if result != length as u64 || write && offset >= linux_file_size_limit() {
             break;
         }
     }
@@ -25677,7 +25722,10 @@ fn linux_descriptor_writev(descriptor: u64, vectors: u64, count: u64) -> u64 {
                 return if total == 0 { result } else { total };
             }
             total = total.saturating_add(result);
-            if result != length as u64 {
+            if result != length as u64
+                || linux_descriptor_offset(descriptor).load(Ordering::SeqCst)
+                    >= linux_file_size_limit()
+            {
                 break;
             }
         }
@@ -26198,8 +26246,12 @@ fn linux_tmp_write(descriptor: u64, state: u16, address: u64, count: u64) -> u64
     else {
         return LINUX_EINVAL;
     };
-    let Ok(length) = usize::try_from(count) else {
+    let Ok(requested) = usize::try_from(count) else {
         return LINUX_EINVAL;
+    };
+    let length = match linux_file_write_limit(start, requested) {
+        Ok(length) => length,
+        Err(error) => return error,
     };
     let Some(end) = start.checked_add(length) else {
         return LINUX_EINVAL;
@@ -26221,7 +26273,7 @@ fn linux_tmp_write(descriptor: u64, state: u16, address: u64, count: u64) -> u64
         return LINUX_EBADF;
     }
     linux_descriptor_offset(descriptor).store(end as u64, Ordering::SeqCst);
-    count
+    length as u64
 }
 
 fn linux_overlay_write(descriptor: u64, state: u16, address: u64, count: u64) -> Option<u64> {
@@ -26311,6 +26363,10 @@ fn linux_overlay_copy_from_user(
 ) -> u64 {
     let Ok(requested) = usize::try_from(count) else {
         return LINUX_EINVAL;
+    };
+    let requested = match linux_file_write_limit(start, requested) {
+        Ok(length) => length,
+        Err(error) => return error,
     };
     let mut input = [0_u8; PAGE_SIZE];
     let mut total = 0_usize;
@@ -27582,6 +27638,39 @@ fn linux_nofile_soft_limit() -> u64 {
     .map_or(0, |limit| limit[0].min(LINUX_DESCRIPTOR_TABLE_LIMIT))
 }
 
+fn linux_file_size_limit() -> u64 {
+    linux_resource_limit_values(
+        LINUX_RLIMIT_FSIZE,
+        LINUX_RUNTIME_MODE.load(Ordering::SeqCst),
+    )
+    .map_or(0, |limit| limit[0])
+}
+
+fn linux_file_write_limit(start: usize, requested: usize) -> Result<usize, u64> {
+    if requested == 0 {
+        return Ok(0);
+    }
+    let limit = linux_file_size_limit();
+    if limit == u64::MAX {
+        return Ok(requested);
+    }
+    let start = start as u64;
+    if start >= limit {
+        LINUX_FSIZE_LIMIT_HIT.store(true, Ordering::SeqCst);
+        return Err(LINUX_EFBIG);
+    }
+    Ok(requested.min((limit - start) as usize))
+}
+
+fn linux_file_extension_limit(size: usize) -> Result<(), u64> {
+    if (size as u64) <= linux_file_size_limit() {
+        Ok(())
+    } else {
+        LINUX_FSIZE_LIMIT_HIT.store(true, Ordering::SeqCst);
+        Err(LINUX_EFBIG)
+    }
+}
+
 fn linux_nproc_limit_reached() -> bool {
     let Some(limit) = linux_resource_limit_values(
         LINUX_RLIMIT_NPROC,
@@ -27636,9 +27725,6 @@ fn linux_setrlimit(resource: u64, address: u64) -> u64 {
     }
     if requested[1] > current[1] {
         return LINUX_EPERM;
-    }
-    if !matches!(resource, LINUX_RLIMIT_NPROC | LINUX_RLIMIT_NOFILE) {
-        return if requested == current { 0 } else { LINUX_EPERM };
     }
     let index = resource as usize * 2;
     ELF_PROBE_RLIMITS[index].store(requested[0], Ordering::SeqCst);
@@ -29818,7 +29904,10 @@ fn linux_apply_delivered_signal_action(index: usize, signal_bit: u64, old_mask: 
 }
 
 fn linux_default_signal_terminates(signal: u64) -> bool {
-    matches!(signal, LINUX_SIGILL | LINUX_SIGKILL | LINUX_SIGPIPE)
+    matches!(
+        signal,
+        LINUX_SIGILL | LINUX_SIGKILL | LINUX_SIGPIPE | LINUX_SIGXFSZ
+    )
 }
 
 fn linux_terminate_by_default_signal(signal: u64) -> u64 {

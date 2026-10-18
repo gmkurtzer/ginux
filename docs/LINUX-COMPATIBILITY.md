@@ -107,13 +107,17 @@ remain pending, so the syscall remains Partial.
 signal, nice, and realtime-priority boundaries; resources without a present
 quota report infinity. The ring-3 controller verifies the full query range,
 ordering, and error behavior. Linux programs can lower and restore the soft
-`RLIMIT_NOFILE` and `RLIMIT_NPROC` limits within the existing hard limit;
-descriptor allocation then fails with `EMFILE`, while `fork` and thread
-creation fail with `EAGAIN`. These limits survive fork and exec, and the linked
-ring-3 probe exercises mutation, enforcement, and restoration. Mutation of the
-remaining resources, cross-process `prlimit64`, privileged hard-limit raises,
-and `RLIMIT_NOFILE` accounting for descriptors in flight over UNIX sockets
-remain pending, so the resource-limit family remains Partial.
+resource limits within the existing hard limit; hard-limit raises remain
+permission-denied. `RLIMIT_NOFILE` enforcement makes descriptor allocation
+fail with `EMFILE`, while `RLIMIT_NPROC` makes fork and thread creation fail
+with `EAGAIN`. `RLIMIT_FSIZE` shortens writes at the file-size boundary and
+enforces `EFBIG` plus `SIGXFSZ` for writes and file extensions beyond it across
+ordinary, positioned, vectored, `sendfile`, `copy_file_range`, `ftruncate`, and
+`fallocate` paths. Limits survive fork and exec, and the linked ring-3 probe
+exercises mutation, enforcement, and restoration. Resource-specific
+enforcement not listed above, cross-process `prlimit64`, privileged hard-limit
+raises, and `RLIMIT_NOFILE` accounting for descriptors in flight over UNIX
+sockets remain pending, so the resource-limit family remains Partial.
 
 System V shared memory now uses domain-owned, dynamically allocated frame
 objects whose lifetime is independent of any one mapping. `shmget`, `shmat`,

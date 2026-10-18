@@ -2015,6 +2015,14 @@ ginux_linux_system_init:
     js .Lfailure
     mov r9, rax
 
+    # Exercise RLIMIT_FSIZE on the tmpfs write that follows. Linux shortens
+    # a write that crosses the configured file-size boundary.
+    push 1
+    pop rdi
+    lea rsi, [rip + .Lfsize_limit]
+    mov eax, 160
+    syscall
+    call .Lrequire_zero
     mov edi, -100
     lea rsi, [rip + .Ltmp_file_path]
     mov edx, 0xc1
@@ -2025,11 +2033,19 @@ ginux_linux_system_init:
 
     mov rdi, r9
     lea rsi, [rip + .Ltmp_payload]
-    mov edx, 6
-    mov eax, 1
+    push 6
+    pop rdx
+    push 1
+    pop rax
     syscall
-    cmp rax, 6
+    cmp rax, 4
     jne .Lfailure
+    push 1
+    pop rdi
+    lea rsi, [rip + .Linfinite_limit]
+    mov eax, 160
+    syscall
+    call .Lrequire_zero
     mov rdi, r9
     call .Lclose_descriptor
 
@@ -2067,14 +2083,13 @@ ginux_linux_system_init:
     mov r9, rax
     mov rdi, rax
     lea rsi, [rip + .Lstatus]
-    mov edx, 6
+    push 4
+    pop rdx
     xor eax, eax
     syscall
-    cmp rax, 6
+    cmp rax, 4
     jne .Lfailure
     cmp dword ptr [rip + .Lstatus], 0x64616572
-    jne .Lfailure
-    cmp word ptr [rip + .Lstatus + 4], 0x0a79
     jne .Lfailure
 
     mov edi, -100
@@ -3499,6 +3514,10 @@ ginux_linux_system_init:
     .asciz "/tmp/ginux-ready"
 .Ltmp_payload:
     .ascii "ready\n"
+.Lfsize_limit:
+    .quad 4, -1
+.Linfinite_limit:
+    .quad -1, -1
 .Ltmp_marker:
     .ascii "TMPFS_READY\n"
 .Lmemfd_name:
