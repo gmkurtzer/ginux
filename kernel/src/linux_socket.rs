@@ -1173,6 +1173,13 @@ pub(crate) fn peek_local(slot: u8, output: &mut [u8]) -> Result<usize, Error> {
     }
 }
 
+pub(crate) fn local_queued_bytes(slot: u8) -> Result<usize, Error> {
+    unsafe { SLOTS.get(usize::from(slot)) }
+        .filter(|slot| slot.occupied && slot.kind == Kind::Unix)
+        .map(|slot| slot.local_length)
+        .ok_or(Error::Invalid)
+}
+
 pub(crate) fn peek(slot: u8, output: &mut [u8]) -> Result<(usize, Option<IpEndpoint>), Error> {
     if kind(slot) == Some(Kind::Udp) {
         return recv_message(slot, output, true)

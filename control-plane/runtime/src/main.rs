@@ -49,11 +49,14 @@ const GINUX_ROOT_FD: u64 = 4;
 const GINUX_NETWORK_FD: u64 = 5;
 const LINUX_READ_SYSCALL: u64 = 0;
 const LINUX_WRITE_SYSCALL: u64 = 1;
+const LINUX_CLOSE_SYSCALL: u64 = 3;
 const LINUX_IOCTL_SYSCALL: u64 = 16;
 const LINUX_EXIT_SYSCALL: u64 = 60;
 const LINUX_GETRLIMIT_SYSCALL: u64 = 97;
 const LINUX_SYSINFO_SYSCALL: u64 = 99;
 const LINUX_GETRANDOM_SYSCALL: u64 = 318;
+const LINUX_PIPE2_SYSCALL: u64 = 293;
+const LINUX_FIONREAD: u64 = 0x541b;
 const LINUX_EFAULT: u64 = u64::MAX - 13;
 const LINUX_EINVAL: u64 = u64::MAX - 21;
 static CONTROLLER_IDENTITY: &[u8] = b"GINUX_CONTROLLER_V0";
@@ -396,6 +399,13 @@ extern "C" fn ginux_controller_main() -> ! {
     write(
         console,
         b"ginux: Linux resource-limit queries validated\r\n",
+    );
+    if !linux_pipe_fionread_contract(console) {
+        exit(NATIVE_SERVICE_EXIT_REJECTED);
+    }
+    write(
+        console,
+        b"ginux: Linux runtime pipe accounting validated\r\n",
     );
     if network_snapshot(network).is_some_and(|snapshot| snapshot[3] == 0) {
         write(console, b"eth0: automatic DHCP configuration\r\n");
@@ -2261,6 +2271,58 @@ fn linux_getrlimit_contract(console: u64) -> bool {
         && linux_syscall(LINUX_GETRLIMIT_SYSCALL, 0, 1, 0) == LINUX_EFAULT;
     if !valid {
         write(console, b"ginux: resource-limit error semantics failed\r\n");
+    }
+    valid
+}
+
+fn linux_pipe_fionread_contract(console: u64) -> bool {
+    let mut descriptors = [0_i32; 2];
+    let created = linux_syscall(LINUX_PIPE2_SYSCALL, descriptors.as_mut_ptr() as u64, 0, 0);
+    if created != 0 {
+        write(console, b"ginux: runtime pipe creation failed: ");
+        write_decimal(console, created);
+        write(console, b"\r\n");
+        return false;
+    }
+    let reader = descriptors[0] as u64;
+    let writer = descriptors[1] as u64;
+    let mut available = 0_i32;
+    let written = linux_syscall(LINUX_WRITE_SYSCALL, writer, b"pipe!".as_ptr() as u64, 5);
+    let first = linux_syscall(
+        LINUX_IOCTL_SYSCALL,
+        reader,
+        LINUX_FIONREAD,
+        (&mut available as *mut i32) as u64,
+    );
+    let invalid = linux_syscall(LINUX_IOCTL_SYSCALL, reader, LINUX_FIONREAD, 1);
+    let mut bytes = [0_u8; 2];
+    let read = linux_syscall(
+        LINUX_READ_SYSCALL,
+        reader,
+        bytes.as_mut_ptr() as u64,
+        bytes.len() as u64,
+    );
+    let mut remaining = 0_i32;
+    let second = linux_syscall(
+        LINUX_IOCTL_SYSCALL,
+        reader,
+        LINUX_FIONREAD,
+        (&mut remaining as *mut i32) as u64,
+    );
+    let reader_closed = linux_syscall(LINUX_CLOSE_SYSCALL, reader, 0, 0);
+    let writer_closed = linux_syscall(LINUX_CLOSE_SYSCALL, writer, 0, 0);
+    let valid = written == 5
+        && first == 0
+        && available == 5
+        && invalid == LINUX_EFAULT
+        && read == 2
+        && bytes == *b"pi"
+        && second == 0
+        && remaining == 3
+        && reader_closed == 0
+        && writer_closed == 0;
+    if !valid {
+        write(console, b"ginux: runtime pipe accounting failed\r\n");
     }
     valid
 }

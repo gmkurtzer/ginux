@@ -8189,7 +8189,17 @@ extern "sysv64" fn linux_syscall_handler(
                 if buffer != LINUX_FIONREAD {
                     return LINUX_ENOTTY;
                 }
-                let available = ELF_PROBE_PIPE_LENGTH.load(Ordering::SeqCst);
+                let available = if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
+                    let Some(slot) = linux_socket_slot(first_argument) else {
+                        return LINUX_EBADF;
+                    };
+                    match crate::linux_socket::local_queued_bytes(slot) {
+                        Ok(available) => available.min(i32::MAX as usize) as u32,
+                        Err(error) => return linux_socket_error(error),
+                    }
+                } else {
+                    ELF_PROBE_PIPE_LENGTH.load(Ordering::SeqCst)
+                };
                 if !copy_to_linux_user(count, &available.to_ne_bytes()) {
                     return LINUX_EFAULT;
                 }
@@ -9240,6 +9250,9 @@ fn linux_controller_syscall(
     let second = registers.rsi;
     let third = registers.rdx;
     match number {
+        LINUX_READ_SYSCALL if linux_socket_pipe_descriptor(first, LINUX_DESCRIPTOR_INPUT) => {
+            Some(linux_controller_pipe_read(first, second, third))
+        }
         LINUX_READ_SYSCALL if first == 0 && third != 0 => {
             let capability = LINUX_CONTROLLER_CONSOLE.load(Ordering::Acquire);
             if !domain::handle_permits(domain_id, capability, 2, Rights::READ) {
@@ -9252,6 +9265,9 @@ fn linux_controller_syscall(
             Some(1)
         }
         LINUX_READ_SYSCALL => Some(if first == 0 { 0 } else { LINUX_EBADF }),
+        LINUX_WRITE_SYSCALL if linux_socket_pipe_descriptor(first, LINUX_DESCRIPTOR_OUTPUT) => {
+            Some(linux_controller_pipe_write(first, second, third))
+        }
         LINUX_WRITE_SYSCALL if matches!(first, 1 | 2) => {
             let Ok(length) = usize::try_from(third) else {
                 return Some(LINUX_EINVAL);
@@ -9309,7 +9325,25 @@ fn linux_controller_syscall(
                 LINUX_RETURN_TO_KERNEL
             })
         }
-        LINUX_IOCTL_SYSCALL => Some(LINUX_ENOTTY),
+        LINUX_IOCTL_SYSCALL if linux_socket_pipe_descriptor(first, LINUX_DESCRIPTOR_INPUT) => {
+            Some(linux_controller_pipe_ioctl(first, second, third))
+        }
+        LINUX_IOCTL_SYSCALL => Some(if linux_descriptor_open(first) {
+            LINUX_ENOTTY
+        } else {
+            LINUX_EBADF
+        }),
+        LINUX_PIPE_SYSCALL => Some(linux_socket_pipe(
+            first,
+            0,
+            address_space::copy_to_current_user,
+        )),
+        LINUX_PIPE2_SYSCALL => Some(linux_socket_pipe(
+            first,
+            second,
+            address_space::copy_to_current_user,
+        )),
+        LINUX_CLOSE_SYSCALL => Some(linux_descriptor_close(first)),
         LINUX_GETRLIMIT_SYSCALL => Some(linux_getrlimit(
             first,
             second,
@@ -9366,6 +9400,121 @@ fn linux_controller_syscall(
         }
         _ => Some(LINUX_ENOSYS),
     }
+}
+
+fn linux_socket_pipe_descriptor(descriptor: u64, access: u16) -> bool {
+    let device = linux_device_descriptor(descriptor);
+    linux_socket_slot(descriptor).is_some()
+        && device & (LINUX_DEVICE_SOCKET | LINUX_DEVICE_PIPE)
+            == LINUX_DEVICE_SOCKET | LINUX_DEVICE_PIPE
+        && device & 3 == access
+}
+
+fn linux_controller_pipe_read(descriptor: u64, address: u64, count: u64) -> u64 {
+    let Some(slot) = linux_socket_slot(descriptor) else {
+        return LINUX_EBADF;
+    };
+    let Ok(requested) = usize::try_from(count) else {
+        return LINUX_EINVAL;
+    };
+    if requested == 0 {
+        return 0;
+    }
+    let mut bytes = [0_u8; PAGE_SIZE];
+    let mut total = 0_usize;
+    while total < requested {
+        let chunk = (requested - total).min(bytes.len());
+        let result = if linux_socket_nonblocking(descriptor) {
+            crate::linux_socket::recv(slot, &mut bytes[..chunk])
+        } else {
+            crate::linux_socket::recv_blocking(slot, &mut bytes[..chunk])
+        };
+        let received = match result {
+            Ok((received, _)) => received,
+            Err(error) => {
+                return if total == 0 {
+                    linux_socket_error(error)
+                } else {
+                    total as u64
+                };
+            }
+        };
+        if received != 0
+            && !address_space::copy_to_current_user(address + total as u64, &bytes[..received])
+        {
+            return if total == 0 {
+                LINUX_EFAULT
+            } else {
+                total as u64
+            };
+        }
+        total += received;
+        if received < chunk {
+            break;
+        }
+    }
+    total as u64
+}
+
+fn linux_controller_pipe_write(descriptor: u64, address: u64, count: u64) -> u64 {
+    let Some(slot) = linux_socket_slot(descriptor) else {
+        return LINUX_EBADF;
+    };
+    let Ok(requested) = usize::try_from(count) else {
+        return LINUX_EINVAL;
+    };
+    if requested == 0 {
+        return 0;
+    }
+    let mut bytes = [0_u8; PAGE_SIZE];
+    let mut total = 0_usize;
+    while total < requested {
+        let chunk = (requested - total).min(bytes.len());
+        if !address_space::copy_from_current_user(address + total as u64, &mut bytes[..chunk]) {
+            return if total == 0 {
+                LINUX_EFAULT
+            } else {
+                total as u64
+            };
+        }
+        let result = if linux_socket_nonblocking(descriptor) {
+            crate::linux_socket::send(slot, &bytes[..chunk], None)
+        } else {
+            crate::linux_socket::send_blocking(slot, &bytes[..chunk], None)
+        };
+        let sent = match result {
+            Ok(sent) => sent,
+            Err(error) => {
+                return if total == 0 {
+                    linux_socket_error(error)
+                } else {
+                    total as u64
+                };
+            }
+        };
+        total += sent;
+        if sent < chunk {
+            break;
+        }
+    }
+    total as u64
+}
+
+fn linux_controller_pipe_ioctl(descriptor: u64, request: u64, output: u64) -> u64 {
+    if request != LINUX_FIONREAD {
+        return LINUX_ENOTTY;
+    }
+    let Some(slot) = linux_socket_slot(descriptor) else {
+        return LINUX_EBADF;
+    };
+    let available = match crate::linux_socket::local_queued_bytes(slot) {
+        Ok(available) => available.min(i32::MAX as usize) as u32,
+        Err(error) => return linux_socket_error(error),
+    };
+    if !address_space::copy_to_current_user(output, &available.to_ne_bytes()) {
+        return LINUX_EFAULT;
+    }
+    0
 }
 
 fn linux_setpgid(pid: u64, process_group: u64) -> u64 {
@@ -24392,6 +24541,13 @@ fn linux_splice_pipes(input: u64, output: u64, length: u64, flags: u64, consume:
 }
 
 fn linux_runtime_pipe(address: u64, flags: u64) -> u64 {
+    linux_socket_pipe(address, flags, copy_to_linux_user)
+}
+
+fn linux_socket_pipe(address: u64, flags: u64, copy: impl FnOnce(u64, &[u8]) -> bool) -> u64 {
+    if flags & !(LINUX_O_NONBLOCK | LINUX_O_CLOEXEC) != 0 {
+        return LINUX_EINVAL;
+    }
     let mut descriptors = [0_u64; 2];
     let mut found = 0;
     for descriptor in LINUX_AUX_DESCRIPTOR_FIRST..LINUX_AUX_DESCRIPTOR_LIMIT {
@@ -24413,7 +24569,7 @@ fn linux_runtime_pipe(address: u64, flags: u64) -> u64 {
     let mut output = [0_u8; 8];
     output[..4].copy_from_slice(&(descriptors[0] as u32).to_ne_bytes());
     output[4..].copy_from_slice(&(descriptors[1] as u32).to_ne_bytes());
-    if !copy_to_linux_user(address, &output) {
+    if !copy(address, &output) {
         let _ = crate::linux_socket::close(reader);
         let _ = crate::linux_socket::close(writer);
         return LINUX_EFAULT;
@@ -25124,11 +25280,7 @@ fn linux_timerfd_descriptor(descriptor: u64) -> bool {
 
 fn linux_pipe_read_descriptor(descriptor: u64) -> bool {
     if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
-        let device = linux_device_descriptor(descriptor);
-        return linux_socket_slot(descriptor).is_some()
-            && device & (LINUX_DEVICE_SOCKET | LINUX_DEVICE_PIPE)
-                == LINUX_DEVICE_SOCKET | LINUX_DEVICE_PIPE
-            && device & 3 == LINUX_DESCRIPTOR_INPUT;
+        return linux_socket_pipe_descriptor(descriptor, LINUX_DESCRIPTOR_INPUT);
     }
     descriptor >= 2
         && u64::from(ELF_PROBE_PIPE_READ_DESCRIPTOR.load(Ordering::SeqCst)) == descriptor
@@ -25136,11 +25288,7 @@ fn linux_pipe_read_descriptor(descriptor: u64) -> bool {
 
 fn linux_pipe_write_descriptor(descriptor: u64) -> bool {
     if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
-        let device = linux_device_descriptor(descriptor);
-        return linux_socket_slot(descriptor).is_some()
-            && device & (LINUX_DEVICE_SOCKET | LINUX_DEVICE_PIPE)
-                == LINUX_DEVICE_SOCKET | LINUX_DEVICE_PIPE
-            && device & 3 == LINUX_DESCRIPTOR_OUTPUT;
+        return linux_socket_pipe_descriptor(descriptor, LINUX_DESCRIPTOR_OUTPUT);
     }
     descriptor >= 2
         && u64::from(ELF_PROBE_PIPE_WRITE_DESCRIPTOR.load(Ordering::SeqCst)) == descriptor
