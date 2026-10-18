@@ -179,9 +179,9 @@ ginux_linux_system_init:
     mov eax, 136
     syscall
     call .Lrequire_zero
-    cmp qword ptr [rip + .Lustat], 1048576
+    cmp qword ptr [rip + .Lustat], 0
     jne .Lfailure
-    cmp qword ptr [rip + .Lustat + 8], 1048576
+    cmp qword ptr [rip + .Lustat + 8], 0
     jne .Lfailure
     cmp qword ptr [rip + .Lustat + 16], 0
     jne .Lfailure

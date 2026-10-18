@@ -14174,7 +14174,30 @@ fn verify_linux_filesystem_statistics() -> bool {
         && linux_statfs(mapping + 40, 1) == LINUX_ENOENT
         && linux_statfs(mapping, 1) == LINUX_EFAULT
         && linux_fstatfs(UPPER_REGISTER_BITS | 2047, 1) == LINUX_EBADF;
-    let root_descriptor = if ordered_errors {
+    let mut legacy_output = [0xa5_u8; 32];
+    let legacy_queries = ordered_errors
+        && copy_to_linux_user(mapping + 64, b"proc\0")
+        && copy_to_linux_user(mapping + 96, &[0xa5; 9])
+        && copy_to_linux_user(mapping + 256, &legacy_output)
+        && linux_ustat(UPPER_REGISTER_BITS | 1, mapping + 256) == 0
+        && copy_from_linux_user(mapping + 256, &mut legacy_output)
+        && legacy_output == [0; 32]
+        && linux_ustat(UPPER_REGISTER_BITS | 2, 1) == LINUX_EINVAL
+        && linux_ustat(1, 1) == LINUX_EFAULT
+        && linux_sysfs(UPPER_REGISTER_BITS | 1, mapping + 64, 0) == 1
+        && linux_sysfs(UPPER_REGISTER_BITS | 2, 1, mapping + 96) == 0
+        && {
+            let mut name = [0_u8; 9];
+            copy_from_linux_user(mapping + 96, &mut name)
+                && name[..5] == *b"proc\0"
+                && name[5..] == [0xa5; 4]
+        }
+        && linux_sysfs(UPPER_REGISTER_BITS | 3, 0, 0) == 4
+        && linux_sysfs(1, 1, 0) == LINUX_EFAULT
+        && linux_sysfs(2, UPPER_REGISTER_BITS | 1, 1) == LINUX_EINVAL
+        && linux_sysfs(2, 99, 1) == LINUX_EINVAL
+        && linux_sysfs(4, 0, 0) == LINUX_EINVAL;
+    let root_descriptor = if legacy_queries {
         linux_openat(u64::from(LINUX_AT_FDCWD), mapping, LINUX_O_DIRECTORY, 0)
     } else {
         LINUX_RETURN_TO_KERNEL
@@ -14210,13 +14233,13 @@ fn verify_linux_filesystem_statistics() -> bool {
     let valid = anonymous && closed_event && closed_proc && closed_root && unmapped;
     if !valid {
         serial_write(
-            "ginux: statfs verifier paths/root/proc/errors/descriptors/anonymous/cleanup ",
+            "ginux: statfs verifier paths/root/proc/legacy/descriptors/anonymous/cleanup ",
         );
         for value in [
             paths,
             root,
             procfs,
-            ordered_errors,
+            legacy_queries,
             descriptors,
             anonymous,
             closed_event && closed_proc && closed_root && unmapped,
@@ -31589,12 +31612,12 @@ fn linux_statfs_descriptor_kind(descriptor: u64) -> LinuxFilesystemKind {
 
 fn linux_ustat(device: u64, output_address: u64) -> u64 {
     // The initial Linux mount namespace publishes rootfs as device 0:1.
-    if device != 1 {
+    if u64::from(device as u32) != 1 {
         return LINUX_EINVAL;
     }
-    let mut output = [0_u8; 32];
-    output[..8].copy_from_slice(&1_048_576_i64.to_ne_bytes());
-    output[8..16].copy_from_slice(&1_048_576_u64.to_ne_bytes());
+    // Linux simple_statfs leaves capacity and inode counts undefined (zero)
+    // for ramfs. Keep the deprecated ustat view consistent with it.
+    let output = [0_u8; 32];
     if copy_to_linux_user(output_address, &output) {
         0
     } else {
@@ -31655,7 +31678,7 @@ fn linux_fstatfs(descriptor: u64, stat_address: u64) -> u64 {
 fn linux_sysfs(option: u64, first: u64, second: u64) -> u64 {
     const FILE_SYSTEMS: [&[u8]; 4] = [b"rootfs", b"proc", b"tmpfs", b"devtmpfs"];
 
-    match option {
+    match u64::from(option as u32) {
         1 => {
             let mut name = [0_u8; 32];
             let length = match copy_linux_c_string(first, &mut name) {

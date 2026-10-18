@@ -201,6 +201,12 @@ path queries, matching `fstatfs` descriptor results, anonymous descriptors,
 Linux 32-bit descriptor conversion, error ordering, and complete cleanup.
 Persistent block-filesystem capacity, quota reporting, and additional future
 mount types remain outside the current profile.
+The deprecated `ustat` view of the root device now derives the same undefined
+zero capacity and inode counts instead of exposing a contradictory fixed-size
+placeholder. `ustat` device IDs and `sysfs` option selectors follow their
+Linux 32-bit UAPI types; the verifier covers dirty upper register bits,
+zero-based filesystem indexes, complete output contents, invalid selectors,
+bad pointers, and Linux error ordering.
 Pipe and zero-copy boundaries convert `pipe2`, `splice`, `tee`, `vmsplice`, and
 `copy_file_range` descriptors and flag words from their Linux 32-bit types.
 Boot verification creates a close-on-exec pipe and exercises zero-length
