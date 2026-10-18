@@ -1787,7 +1787,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         if !address_space::verify_linux_process_hierarchy_clone() {
             kernel_fail("ginux: bounded Linux child hierarchy clone invalid\r\n");
         }
-        serial_write("ginux: bounded Linux child hierarchy clone validated\r\n");
+        serial_write("ginux: Linux child hierarchy and copy-on-write isolation validated\r\n");
         if !linux_sysv_ipc::verify_shared_memory_lifecycle() {
             kernel_fail("ginux: Linux SysV shared memory lifecycle invalid\r\n");
         }

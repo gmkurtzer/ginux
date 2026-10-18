@@ -1820,6 +1820,17 @@ ginux_fatal_exception_common:
     push r15
     test qword ptr [rsp + 144], 3
     jnz ginux_user_fault_common
+    cmp qword ptr [rsp + 120], 14
+    jne ginux_fatal_exception_call
+    mov r12, rsp
+    mov rdi, [rsp + 128]
+    mov rsi, cr2
+    and rsp, -16
+    call {kernel_linux_cow_fault_handler}
+    test rax, rax
+    jnz ginux_fault_return
+    mov rsp, r12
+ginux_fatal_exception_call:
     mov rdi, [rsp + 120]
     mov rsi, [rsp + 128]
     mov rdx, cr2
@@ -1835,6 +1846,7 @@ ginux_user_fault_common:
     call {user_fault_handler}
     cmp rax, -1
     je ginux_user_return_kernel
+ginux_fault_return:
     mov rsp, r12
     pop r15
     pop r14
@@ -2075,6 +2087,7 @@ ginux_user_return_kernel:
 "#,
     breakpoint_handler = sym breakpoint_handler,
     fatal_exception_handler = sym fatal_exception_handler,
+    kernel_linux_cow_fault_handler = sym kernel_linux_cow_fault_handler,
     user_fault_handler = sym user_fault_handler,
     syscall_handler = sym syscall_handler,
     linux_syscall_handler = sym linux_syscall_handler,
@@ -2465,7 +2478,19 @@ pub(crate) fn resume_live_linux_process(
             && LINUX_PROCESS_CHILD_EXITED.load(Ordering::SeqCst)
             && returned_fs < 1 << 47;
     unsafe { write_msr(FS_BASE_MSR, saved_fs) };
-    preserved && active_fs_base() == saved_fs
+    let restored = active_fs_base() == saved_fs;
+    if cfg!(feature = "verification-boot")
+        && !LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
+        && !preserved
+    {
+        serial_write("ginux: Linux resume FS mismatch expected/returned/saved/restored: ");
+        for value in [fs_base, returned_fs, saved_fs, u64::from(restored)] {
+            serial_write_u64(value);
+            serial_write(" ");
+        }
+        serial_write("\r\n");
+    }
+    preserved && restored
 }
 
 #[allow(dead_code)]
@@ -3616,9 +3641,13 @@ fn execute_deferred_live_fork() -> bool {
         return true;
     }
     let parent_pid = current_linux_process_pid();
-    let Some(parent_runtime_state) = capture_linux_process_runtime_state() else {
+    let Some(mut parent_runtime_state) = capture_linux_process_runtime_state() else {
         return false;
     };
+    parent_runtime_state.active = true;
+    parent_runtime_state.completed = false;
+    parent_runtime_state.exit_status = 0;
+    parent_runtime_state.termination_signal = 0;
     let parent_descriptor_state = parent_runtime_state.descriptors;
     if !retain_linux_descriptor_runtime_state(&parent_descriptor_state) {
         return false;
@@ -3637,7 +3666,10 @@ fn execute_deferred_live_fork() -> bool {
             LINUX_THREAD_STACK_SIZES[slot].load(Ordering::SeqCst),
         )
     });
-    let Some(child) = linux_process::begin_live_fork(parent_pid) else {
+    let Some(child) = linux_process::begin_live_fork(
+        parent_pid,
+        cfg!(feature = "verification-boot") && !LINUX_RUNTIME_MODE.load(Ordering::SeqCst),
+    ) else {
         release_linux_descriptor_runtime_state(&parent_descriptor_state);
         LINUX_FORK_CHILD_TID_ADDRESS.store(0, Ordering::SeqCst);
         if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
@@ -3656,6 +3688,10 @@ fn execute_deferred_live_fork() -> bool {
     let mut child_runtime_state = parent_runtime_state;
     child_runtime_state.tid = child.pid;
     child_runtime_state.next_tid = child.pid.saturating_add(1);
+    child_runtime_state.active = true;
+    child_runtime_state.completed = false;
+    child_runtime_state.exit_status = 0;
+    child_runtime_state.termination_signal = 0;
     child_runtime_state.real_timer_interval = 0;
     child_runtime_state.real_timer_deadline = 0;
     child_runtime_state.pending_signals = 0;
@@ -3824,6 +3860,23 @@ fn resume_linux_system_supervisor() -> bool {
                 state: linux_process::LiveProcessState::Running,
             })
     {
+        if cfg!(feature = "verification-boot") {
+            serial_write(
+                "ginux: Linux supervisor resume preconditions wait/shutdown/thread/status: ",
+            );
+            serial_write_u64(u64::from(
+                LINUX_SYSTEM_SUPERVISOR_WAIT_COUNT.load(Ordering::SeqCst),
+            ));
+            serial_write(" ");
+            serial_write_u64(u64::from(
+                LINUX_SYSTEM_SUPERVISOR_SHUTDOWN_COUNT.load(Ordering::SeqCst),
+            ));
+            serial_write(" ");
+            serial_write_u64(u64::from(current_linux_thread_handle().is_some()));
+            serial_write(" ");
+            serial_write_u64(u64::from(linux_process::live_process_status(1).is_some()));
+            serial_write("\r\n");
+        }
         return false;
     }
     if !CONTAINER_MANAGEMENT_ENABLED.load(Ordering::SeqCst) {
@@ -8120,7 +8173,7 @@ extern "sysv64" fn linux_syscall_handler(
             && !address_space::current_linux_address_executable(user_rip))
         || user_rflags & ((3 << 12) | (1 << 17)) != 0
     {
-        if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
+        if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) || cfg!(feature = "verification-boot") {
             serial_write("ginux: Linux runtime invalid syscall context:");
             for value in [number, user_stack, user_rip, user_rflags] {
                 serial_write(" ");
@@ -11915,6 +11968,10 @@ impl LinuxDescriptorRuntimeState {
 #[derive(Clone, Copy)]
 struct LinuxProcessRuntimeState {
     valid: bool,
+    active: bool,
+    completed: bool,
+    exit_status: u64,
+    termination_signal: u32,
     mmap: LinuxMmapRuntimeState,
     descriptors: LinuxDescriptorRuntimeState,
     brk: u64,
@@ -11959,6 +12016,10 @@ struct LinuxProcessRuntimeState {
 impl LinuxProcessRuntimeState {
     const EMPTY: Self = Self {
         valid: false,
+        active: false,
+        completed: false,
+        exit_status: 0,
+        termination_signal: 0,
         mmap: LinuxMmapRuntimeState::EMPTY,
         descriptors: LinuxDescriptorRuntimeState::EMPTY,
         brk: 0,
@@ -12025,6 +12086,10 @@ fn capture_linux_process_runtime_state() -> Option<LinuxProcessRuntimeState> {
     let thread_slot = current_linux_thread_slot()?;
     Some(LinuxProcessRuntimeState {
         valid: true,
+        active: ELF_PROBE_ACTIVE.load(Ordering::SeqCst),
+        completed: ELF_PROBE_COMPLETED.load(Ordering::SeqCst),
+        exit_status: ELF_PROBE_EXIT_STATUS.load(Ordering::SeqCst),
+        termination_signal: ELF_PROBE_TERMINATION_SIGNAL.load(Ordering::SeqCst),
         mmap: capture_linux_mmap_runtime_state(),
         descriptors: capture_linux_descriptor_runtime_state(),
         brk: ELF_PROBE_BRK.load(Ordering::SeqCst),
@@ -12086,6 +12151,10 @@ fn capture_linux_process_runtime_state() -> Option<LinuxProcessRuntimeState> {
 }
 
 fn restore_linux_process_runtime_state(state: LinuxProcessRuntimeState) {
+    ELF_PROBE_ACTIVE.store(state.active, Ordering::SeqCst);
+    ELF_PROBE_COMPLETED.store(state.completed, Ordering::SeqCst);
+    ELF_PROBE_EXIT_STATUS.store(state.exit_status, Ordering::SeqCst);
+    ELF_PROBE_TERMINATION_SIGNAL.store(state.termination_signal, Ordering::SeqCst);
     restore_linux_mmap_runtime_state(state.mmap);
     restore_linux_descriptor_runtime_state(state.descriptors);
     ELF_PROBE_BRK.store(state.brk, Ordering::SeqCst);
@@ -36099,7 +36168,9 @@ fn abort_linux_signal() {
 }
 
 fn copy_to_linux_user(address: u64, input: &[u8]) -> bool {
-    if !linux_writable_user_range_contains(address, input.len()) {
+    if !linux_writable_user_range_contains(address, input.len())
+        || !materialize_linux_cow_range(address, input.len())
+    {
         return false;
     }
     // SAFETY: every byte is covered by a contiguous chain of declared writable
@@ -38949,6 +39020,9 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
         0
     };
     let fault_metadata = frame.metadata(fault_address);
+    if fault_domain.is_none() && materialize_linux_cow_page(fault_metadata) {
+        return 0;
+    }
     if fault_domain.is_none()
         && ELF_PROBE_ACTIVE.load(Ordering::SeqCst)
         && (materialize_linux_runtime_mapping(fault_metadata)
@@ -39129,6 +39203,101 @@ fn grow_linux_runtime_stack(fault: domain::FaultMetadata) -> bool {
             .saturating_add(PAGE_SIZE as u64);
         LINUX_THREAD_STACK_BASES[slot].store(page, Ordering::SeqCst);
         LINUX_THREAD_STACK_SIZES[slot].store(end.saturating_sub(page), Ordering::SeqCst);
+    }
+    true
+}
+
+fn materialize_linux_cow_page(fault: domain::FaultMetadata) -> bool {
+    if fault.vector != 14 || fault.error & 3 != 3 || fault.address >= 1 << 47 {
+        return false;
+    }
+    materialize_linux_cow_address(fault.address & !(PAGE_SIZE as u64 - 1))
+}
+
+extern "sysv64" fn kernel_linux_cow_fault_handler(error: u64, address: u64) -> u64 {
+    let page = address & !(PAGE_SIZE as u64 - 1);
+    let eligible = error & 3 == 3 && address < 1 << 47;
+    let cow = eligible && address_space::current_linux_cow_page(page).is_some();
+    let materialized = cow && materialize_linux_cow_address(page);
+    if eligible && !materialized {
+        serial_write("ginux: kernel Linux COW recovery failed address/cow/pid: ");
+        serial_write_u64(address);
+        serial_write(" ");
+        serial_write_u64(u64::from(cow));
+        serial_write(" ");
+        serial_write_u64(u64::from(current_linux_process_pid()));
+        serial_write("\r\n");
+    }
+    u64::from(materialized)
+}
+
+fn materialize_linux_cow_range(address: u64, length: usize) -> bool {
+    let Some(end) = address.checked_add(length as u64) else {
+        return false;
+    };
+    if length == 0 || address >= 1 << 47 || end > 1 << 47 {
+        return false;
+    }
+    let mut page = address & !(PAGE_SIZE as u64 - 1);
+    let last = (end - 1) & !(PAGE_SIZE as u64 - 1);
+    loop {
+        if address_space::current_linux_cow_page(page).is_some()
+            && !materialize_linux_cow_address(page)
+        {
+            return false;
+        }
+        if page == last {
+            return true;
+        }
+        page += PAGE_SIZE as u64;
+    }
+}
+
+fn materialize_linux_cow_address(address: u64) -> bool {
+    let Some(source) = address_space::current_linux_cow_page(address) else {
+        return false;
+    };
+    let pid = current_linux_process_pid();
+    let Some(mapping) = linux_process::live_process_mapping(pid, address as usize)
+        .filter(|mapping| mapping.frame == source && mapping.writable && !mapping.shared)
+    else {
+        return false;
+    };
+    let Some([replacement]) = memory::allocate_frames::<1>(memory::FrameOwner::KERNEL) else {
+        return false;
+    };
+    if !address_space::copy_linux_frame(source, replacement)
+        || !linux_process::replace_live_process_mapping(
+            pid,
+            address as usize,
+            source,
+            replacement,
+            true,
+            mapping.executable,
+        )
+        || !address_space::replace_current_linux_cow_page(
+            address,
+            source,
+            replacement,
+            mapping.executable,
+        )
+    {
+        let _ = linux_process::replace_live_process_mapping(
+            pid,
+            address as usize,
+            replacement,
+            source,
+            true,
+            mapping.executable,
+        );
+        let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[replacement]);
+        return false;
+    }
+    if !linux_process::live_mapping_referenced_by_other_process(pid, source)
+        && !memory::frame_lease_is_runtime(source)
+        && !memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[source])
+    {
+        return false;
     }
     true
 }

@@ -1622,8 +1622,8 @@ if ! grep -q '^ginux: bounded Linux private page copy validated' "$output_file";
     exit 1
 fi
 
-if ! grep -q '^ginux: bounded Linux child hierarchy clone validated' "$output_file"; then
-    echo "Boot test failed: the bounded Linux child hierarchy was not cloned." >&2
+if ! grep -q '^ginux: Linux child hierarchy and copy-on-write isolation validated' "$output_file"; then
+    echo "Boot test failed: Linux fork copy-on-write isolation was not validated." >&2
     exit 1
 fi
 
