@@ -1822,6 +1822,15 @@ pub(crate) fn live_process_slot(pid: u32) -> Option<usize> {
     Some(usize::from(handle.slot))
 }
 
+pub(crate) fn live_process_pid_at(slot: usize) -> Option<u32> {
+    let table = live_process_table_mut()?;
+    table
+        .processes
+        .get(slot)?
+        .as_ref()
+        .map(|process| process.handle.pid)
+}
+
 pub(crate) fn live_process_mapping(
     pid: u32,
     address: usize,

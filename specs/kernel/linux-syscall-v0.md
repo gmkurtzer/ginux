@@ -708,11 +708,18 @@ policies return `-EINVAL`. Unknown PIDs return `-ESRCH`, and an invalid output
 returns `-EFAULT`. `sched_setparam` and `sched_setscheduler` accept only an
 idempotent priority-zero `SCHED_OTHER` request; invalid pointers return
 `-EFAULT`, and other policies return `-EPERM`. `rax = 140`
-(`__NR_getpriority`) reports nice value zero for the sole process by returning
-the raw Linux syscall value 20. It accepts only `PRIO_PROCESS` and PID 0 or 1;
-other selectors return `-EINVAL` and an unknown PID returns `-ESRCH`.
-`setpriority` accepts only an idempotent request for nice value zero; an actual
-priority change returns `-EPERM`.
+(`__NR_getpriority`) returns Linux's raw `20 - nice` value for the
+highest-priority process selected by `PRIO_PROCESS`, `PRIO_PGRP`, or
+`PRIO_USER`. A zero selector means the calling process, process group, or real
+UID respectively. Nice state is per process, is preserved across context
+switches, and is inherited by fork. `setpriority` stores values in Linux's
+`-20..=19` range, silently clamps requests outside that range, applies
+group/user selections only after permission validation, and enforces Linux
+ownership and privilege rules. Unknown selectors return `-EINVAL`; an empty
+selection returns `-ESRCH`. The booted proof covers all three selector classes,
+signed range clamping, 32-bit argument narrowing, and invalid/empty selectors.
+Competing multi-process selector results and non-root permission paths remain
+to be exercised before these calls are classified Complete.
 `rax = 228` (`__NR_clock_gettime`) exposes `CLOCK_REALTIME`,
 `CLOCK_MONOTONIC`, and `CLOCK_MONOTONIC_RAW` from an ordered
 bootstrap-processor TSC. The conversion

@@ -1430,6 +1430,10 @@ static ELF_PROBE_CLOCK_EPOCH: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_CLOCK_FREQUENCY: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_PROCESS_NAME_LOW: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_PROCESS_NAME_HIGH: BankedAtomicU64 = BankedAtomicU64::new(0);
+// Linux exposes nice values in the signed range -20..=19. Store nice + 20 so
+// the per-domain bank can use the same compact atomic machinery as other
+// process runtime state.
+static ELF_PROBE_NICE: BankedAtomicU8 = BankedAtomicU8::new(20);
 static LINUX_RUNTIME_EXIT_STATUS: BankedAtomicU64 = BankedAtomicU64::new(u64::MAX);
 static LINUX_RUNTIME_FIRST_UNSUPPORTED_SYSCALL: BankedAtomicU64 = BankedAtomicU64::new(u64::MAX);
 const LINUX_RUNTIME_SYSCALL_TRACE_LIMIT: usize = 128;
@@ -6005,6 +6009,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     ELF_PROBE_CLOCK_EPOCH.store(timer::timestamp_counter(), Ordering::SeqCst);
     ELF_PROBE_PROCESS_NAME_LOW.store(LINUX_INITIAL_PROCESS_NAME, Ordering::SeqCst);
     ELF_PROBE_PROCESS_NAME_HIGH.store(0, Ordering::SeqCst);
+    ELF_PROBE_NICE.store(20, Ordering::SeqCst);
     LINUX_RUNTIME_EXIT_STATUS.store(u64::MAX, Ordering::SeqCst);
     LINUX_RUNTIME_FIRST_UNSUPPORTED_SYSCALL.store(u64::MAX, Ordering::SeqCst);
     LINUX_RUNTIME_SYSCALL_TRACE_COUNT.store(0, Ordering::SeqCst);
@@ -8453,28 +8458,8 @@ extern "sysv64" fn linux_syscall_handler(
         },
         LINUX_CAPGET_SYSCALL => linux_capget(first_argument, buffer),
         LINUX_CAPSET_SYSCALL => linux_capset(first_argument, buffer),
-        LINUX_GETPRIORITY_SYSCALL => {
-            if first_argument != 0 {
-                return LINUX_EINVAL;
-            }
-            if !matches!(buffer, 0 | 1) {
-                return LINUX_ESRCH;
-            }
-            20
-        }
-        LINUX_SETPRIORITY_SYSCALL => {
-            if first_argument != 0 {
-                return LINUX_EINVAL;
-            }
-            if !matches!(buffer, 0 | 1) {
-                return LINUX_ESRCH;
-            }
-            if count == 0 {
-                0
-            } else {
-                LINUX_EPERM
-            }
-        }
+        LINUX_GETPRIORITY_SYSCALL => linux_getpriority(first_argument, buffer),
+        LINUX_SETPRIORITY_SYSCALL => linux_setpriority(first_argument, buffer, count),
         LINUX_SCHED_SETPARAM_SYSCALL => linux_set_scheduler(first_argument, 0, buffer),
         LINUX_SCHED_SETSCHEDULER_SYSCALL => linux_set_scheduler(first_argument, buffer, count),
         LINUX_SCHED_GETPARAM_SYSCALL => linux_sched_getparam(first_argument, buffer),
@@ -10930,6 +10915,7 @@ struct LinuxProcessRuntimeState {
     cwd: u16,
     umask: u64,
     process_name: [u64; 2],
+    nice: u8,
     no_new_privileges: bool,
     seccomp_strict: bool,
     membarrier_registrations: u32,
@@ -10966,6 +10952,7 @@ impl LinuxProcessRuntimeState {
         cwd: LINUX_ROOT_DIRECTORY,
         umask: 0o022,
         process_name: [0; 2],
+        nice: 20,
         no_new_privileges: false,
         seccomp_strict: false,
         membarrier_registrations: 0,
@@ -11027,6 +11014,7 @@ fn capture_linux_process_runtime_state() -> Option<LinuxProcessRuntimeState> {
             ELF_PROBE_PROCESS_NAME_LOW.load(Ordering::SeqCst),
             ELF_PROBE_PROCESS_NAME_HIGH.load(Ordering::SeqCst),
         ],
+        nice: ELF_PROBE_NICE.load(Ordering::SeqCst),
         no_new_privileges: ELF_PROBE_NO_NEW_PRIVS.load(Ordering::SeqCst),
         seccomp_strict: ELF_PROBE_SECCOMP_STRICT.load(Ordering::SeqCst),
         membarrier_registrations: ELF_PROBE_MEMBARRIER_REGISTRATIONS.load(Ordering::SeqCst),
@@ -11078,6 +11066,7 @@ fn restore_linux_process_runtime_state(state: LinuxProcessRuntimeState) {
     ELF_PROBE_UMASK.store(state.umask, Ordering::SeqCst);
     ELF_PROBE_PROCESS_NAME_LOW.store(state.process_name[0], Ordering::SeqCst);
     ELF_PROBE_PROCESS_NAME_HIGH.store(state.process_name[1], Ordering::SeqCst);
+    ELF_PROBE_NICE.store(state.nice, Ordering::SeqCst);
     ELF_PROBE_NO_NEW_PRIVS.store(state.no_new_privileges, Ordering::SeqCst);
     ELF_PROBE_SECCOMP_STRICT.store(state.seccomp_strict, Ordering::SeqCst);
     ELF_PROBE_MEMBARRIER_REGISTRATIONS.store(state.membarrier_registrations, Ordering::SeqCst);
@@ -26696,6 +26685,127 @@ fn linux_scheduler_priority_range(policy: u64, maximum: bool) -> u64 {
         0 | 3 | 5 | 6 => 0,
         _ => LINUX_EINVAL,
     }
+}
+
+const LINUX_PRIO_PROCESS: u32 = 0;
+const LINUX_PRIO_PGRP: u32 = 1;
+const LINUX_PRIO_USER: u32 = 2;
+
+fn linux_priority_targets(
+    which: u64,
+    who: u64,
+) -> Result<([u32; linux_process::PROCESS_LIMIT], usize), u64> {
+    let which = which as u32;
+    let who = who as u32;
+    if which > LINUX_PRIO_USER {
+        return Err(LINUX_EINVAL);
+    }
+    let current_pid = current_linux_process_pid();
+    let current_credentials = current_linux_credentials().ok_or(LINUX_ESRCH)?;
+    let selector = match which {
+        LINUX_PRIO_PROCESS => who,
+        LINUX_PRIO_PGRP if who == 0 => {
+            linux_process::live_process_group(current_pid).ok_or(LINUX_ESRCH)?
+        }
+        LINUX_PRIO_USER if who == 0 => current_credentials.uid,
+        _ => who,
+    };
+    let mut targets = [0_u32; linux_process::PROCESS_LIMIT];
+    let mut count = 0;
+    for slot in 0..linux_process::PROCESS_LIMIT {
+        let Some(pid) = linux_process::live_process_pid_at(slot) else {
+            continue;
+        };
+        let selected = match which {
+            LINUX_PRIO_PROCESS => pid == if selector == 0 { current_pid } else { selector },
+            LINUX_PRIO_PGRP => linux_process::live_process_group(pid) == Some(selector),
+            LINUX_PRIO_USER => linux_process::live_process_user_namespace(pid)
+                .and_then(linux_user::credentials)
+                .is_some_and(|credentials| credentials.uid == selector),
+            _ => false,
+        };
+        if selected {
+            targets[count] = pid;
+            count += 1;
+        }
+    }
+    if count == 0 {
+        Err(LINUX_ESRCH)
+    } else {
+        Ok((targets, count))
+    }
+}
+
+fn linux_process_nice(pid: u32) -> Option<u8> {
+    if pid == current_linux_process_pid() {
+        Some(ELF_PROBE_NICE.load(Ordering::SeqCst))
+    } else {
+        linux_process_runtime_state(pid)
+            .filter(|state| state.valid)
+            .map(|state| state.nice)
+    }
+}
+
+fn linux_set_process_nice(pid: u32, nice: u8) -> bool {
+    if pid == current_linux_process_pid() {
+        ELF_PROBE_NICE.store(nice, Ordering::SeqCst);
+        true
+    } else if let Some(state) = linux_process_runtime_state(pid).filter(|state| state.valid) {
+        state.nice = nice;
+        true
+    } else {
+        false
+    }
+}
+
+fn linux_getpriority(which: u64, who: u64) -> u64 {
+    let (targets, count) = match linux_priority_targets(which, who) {
+        Ok(targets) => targets,
+        Err(error) => return error,
+    };
+    let mut best = 39_u8;
+    for pid in targets[..count].iter().copied() {
+        let Some(nice) = linux_process_nice(pid) else {
+            return LINUX_ESRCH;
+        };
+        best = best.min(nice);
+    }
+    u64::from(40 - best)
+}
+
+fn linux_setpriority(which: u64, who: u64, priority: u64) -> u64 {
+    let (targets, count) = match linux_priority_targets(which, who) {
+        Ok(targets) => targets,
+        Err(error) => return error,
+    };
+    let requested = (priority as u32 as i32).clamp(-20, 19);
+    let encoded = (requested + 20) as u8;
+    let Some(caller) = current_linux_credentials() else {
+        return LINUX_ESRCH;
+    };
+    for pid in targets[..count].iter().copied() {
+        let Some(namespace) = linux_process::live_process_user_namespace(pid) else {
+            return LINUX_ESRCH;
+        };
+        let Some(target) = linux_user::credentials(namespace) else {
+            return LINUX_ESRCH;
+        };
+        let Some(current) = linux_process_nice(pid) else {
+            return LINUX_ESRCH;
+        };
+        if caller.euid != 0 && caller.euid != target.uid {
+            return LINUX_EPERM;
+        }
+        if caller.euid != 0 && encoded < current {
+            return LINUX_EACCES;
+        }
+    }
+    for pid in targets[..count].iter().copied() {
+        if !linux_set_process_nice(pid, encoded) {
+            return LINUX_ESRCH;
+        }
+    }
+    0
 }
 
 fn linux_scheduler_process(pid: u64) -> Result<u32, u64> {

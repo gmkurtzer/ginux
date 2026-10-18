@@ -1471,6 +1471,77 @@ ginux_linux_system_init:
     cmp dword ptr [rip + .Lrseq_area + 4], -1
     jne .Lfailure
 
+    xor edi, edi
+    xor esi, esi
+    mov eax, 140
+    syscall
+    cmp rax, 20
+    jne .Lfailure
+    xor edi, edi
+    xor esi, esi
+    mov edx, 5
+    mov eax, 141
+    syscall
+    test rax, rax
+    jne .Lfailure
+    xor edi, edi
+    mov esi, 1
+    mov eax, 140
+    syscall
+    cmp rax, 15
+    jne .Lfailure
+    xor edi, edi
+    xor esi, esi
+    mov edx, -25
+    mov eax, 141
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov edi, 1
+    xor esi, esi
+    mov eax, 140
+    syscall
+    cmp rax, 40
+    jne .Lfailure
+    mov edi, 2
+    xor esi, esi
+    mov eax, 140
+    syscall
+    cmp rax, 40
+    jne .Lfailure
+    xor edi, edi
+    xor esi, esi
+    mov edx, 30
+    mov eax, 141
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov rdi, 0x100000000
+    mov rsi, 0x100000000
+    mov eax, 140
+    syscall
+    cmp rax, 1
+    jne .Lfailure
+    mov edi, 3
+    xor esi, esi
+    mov eax, 140
+    syscall
+    cmp rax, -22
+    jne .Lfailure
+    xor edi, edi
+    mov esi, 9999
+    mov eax, 140
+    syscall
+    cmp rax, -3
+    jne .Lfailure
+    xor edi, edi
+    xor esi, esi
+    xor edx, edx
+    mov eax, 141
+    syscall
+    test rax, rax
+    jne .Lfailure
+
     mov dword ptr [rip + .Lstatus], 0
     xor edi, edi
     lea rsi, [rip + .Lstatus]
