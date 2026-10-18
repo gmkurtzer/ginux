@@ -3669,10 +3669,10 @@ fn execute_deferred_live_fork() -> bool {
             LINUX_THREAD_STACK_SIZES[slot].load(Ordering::SeqCst),
         )
     });
-    let Some(child) = linux_process::begin_live_fork(
-        parent_pid,
-        cfg!(feature = "verification-boot") && !LINUX_RUNTIME_MODE.load(Ordering::SeqCst),
-    ) else {
+    // Runtime COW remains available to the process/address-space layer, but
+    // repeated OCI fork/exec cycles must use private copies until COW
+    // retirement and re-fork bookkeeping are validated end to end.
+    let Some(child) = linux_process::begin_live_fork(parent_pid, true) else {
         release_linux_descriptor_runtime_state(&parent_descriptor_state);
         LINUX_FORK_CHILD_TID_ADDRESS.store(0, Ordering::SeqCst);
         if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
@@ -20880,8 +20880,11 @@ fn linux_oci_execve(path: &[u8], arguments_address: u64, environment_address: u6
     let heap_base =
         ELF_PROBE_BRK_LIMIT.load(Ordering::SeqCst) as usize - LINUX_RUNTIME_HEAP_PAGES * PAGE_SIZE;
     for page in 0..LINUX_RUNTIME_HEAP_PAGES {
-        let Some(mapping) = linux_process::live_process_mapping(pid, heap_base + page * PAGE_SIZE)
-        else {
+        let address = heap_base + page * PAGE_SIZE;
+        if !linux_process::prepare_live_process_write(pid, address) {
+            return LINUX_ENOMEM;
+        }
+        let Some(mapping) = linux_process::live_process_mapping(pid, address) else {
             return LINUX_ENOEXEC;
         };
         if !address_space::prepare_linux_frame(mapping.frame.address(), &[]) {
@@ -20895,6 +20898,9 @@ fn linux_oci_execve(path: &[u8], arguments_address: u64, environment_address: u6
     let stack_pages = (stack_page as usize - stack_low) / PAGE_SIZE + 1;
     for page in 0..stack_pages {
         let address = stack_page as usize - page * PAGE_SIZE;
+        if !linux_process::prepare_live_process_write(pid, address) {
+            return LINUX_ENOMEM;
+        }
         let Some(mapping) = linux_process::live_process_mapping(pid, address) else {
             return LINUX_ENOEXEC;
         };
@@ -20955,7 +20961,10 @@ fn linux_oci_execve(path: &[u8], arguments_address: u64, environment_address: u6
     }
     let _ = set_current_linux_clear_child_tid(0);
     let _ = set_current_linux_robust_list(0);
-    if !address_space::release_current_linux_runtime_mappings(LINUX_RUNTIME_DYNAMIC_MMAP_BASE) {
+    if !address_space::release_current_linux_runtime_mappings_preserving(
+        LINUX_RUNTIME_DYNAMIC_MMAP_BASE,
+        |frame| linux_process::live_mapping_referenced_by_other_process(pid, frame),
+    ) {
         return LINUX_ENOMEM;
     }
     ELF_PROBE_MMAP_NEXT.store(LINUX_RUNTIME_DYNAMIC_MMAP_BASE, Ordering::SeqCst);
@@ -39329,30 +39338,34 @@ fn materialize_linux_cow_address(address: u64) -> bool {
     let Some([replacement]) = memory::allocate_frames::<1>(memory::FrameOwner::KERNEL) else {
         return false;
     };
-    if !address_space::copy_linux_frame(source, replacement)
-        || !linux_process::replace_live_process_mapping(
+    let copied = address_space::copy_linux_frame(source, replacement);
+    let mapping_replaced = copied
+        && linux_process::replace_live_process_mapping(
             pid,
             address as usize,
             source,
             replacement,
             true,
             mapping.executable,
-        )
-        || !address_space::replace_current_linux_cow_page(
+        );
+    let page_replaced = mapping_replaced
+        && address_space::replace_current_linux_cow_page(
             address,
             source,
             replacement,
             mapping.executable,
-        )
-    {
-        let _ = linux_process::replace_live_process_mapping(
-            pid,
-            address as usize,
-            replacement,
-            source,
-            true,
-            mapping.executable,
         );
+    if !page_replaced {
+        if mapping_replaced {
+            let _ = linux_process::replace_live_process_mapping(
+                pid,
+                address as usize,
+                replacement,
+                source,
+                true,
+                mapping.executable,
+            );
+        }
         let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[replacement]);
         return false;
     }

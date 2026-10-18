@@ -335,9 +335,12 @@ Full controlling-terminal and session semantics are still incomplete. Rocky
 Linux 10 now starts an unmodified glibc `/bin/sh`; shell builtins, file status,
 dynamic `cat`, and root-directory `ls` pass the QEMU lifecycle gate. This is a
 meaningful ABI checkpoint, not a claim of general Linux or systemd
-compatibility. Writable private fork mappings now use generation-checked
-copy-on-write, while read-only mappings are safely shared. Process metadata
-remains bounded, and major surfaces such as cgroups, sysfs, broad
+compatibility. The process layer contains generation-checked copy-on-write,
+but OCI runtime forks currently use eager private copies: repeated Rocky
+fork/exec/exit cycles exposed incomplete COW retirement bookkeeping, so the
+optimization is disabled on the production path until that lifecycle is
+validated end to end. Process metadata remains bounded, and major surfaces
+such as cgroups, sysfs, broad
 `ioctl` families, and systemd's remaining contracts still need implementation.
 
 Useful development gates:

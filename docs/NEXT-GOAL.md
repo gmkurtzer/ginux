@@ -23,7 +23,7 @@ Gate: `make check` and the complete QEMU verification boot pass. Commit
 
 ## Stage 2: Copy-on-write and concurrent scheduling
 
-Status: **Copy-on-write/lifecycle checkpoint complete; awaiting operator review**
+Status: **Lifecycle checkpoint complete; runtime COW paused after regression review**
 
 Delivered in this checkpoint:
 
@@ -38,6 +38,10 @@ Delivered in this checkpoint:
 - Multiple admitted processes remain runnable, and nice values now influence
   ready-process priority selection. Cleanup, process-limit, round-robin, and
   priority-selection invariants are covered by the verification boot.
+- OCI runtime forks temporarily use eager private copies. Rocky's repeated
+  fork/exec/exit path found incomplete COW re-fork bookkeeping; COW remains in
+  the process layer but must not return to the runtime path until that sequence
+  has its own passing regression gate.
 
 Remaining before Stage 2 is complete:
 

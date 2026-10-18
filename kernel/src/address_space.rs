@@ -4841,7 +4841,11 @@ pub(crate) fn linux_cow_page_in_root(
     {
         return None;
     }
-    memory::live_frame_lease(memory::FrameOwner::KERNEL, value & ADDRESS_MASK)
+    let frame_address = value & ADDRESS_MASK;
+    memory::live_frame_lease(memory::FrameOwner::KERNEL, frame_address).or_else(|| {
+        memory::FrameLease::from_parts(frame_address, 1)
+            .filter(|frame| memory::frame_lease_is_runtime(*frame))
+    })
 }
 
 pub(crate) fn copy_linux_frame(
@@ -4849,7 +4853,9 @@ pub(crate) fn copy_linux_frame(
     destination: memory::FrameLease,
 ) -> bool {
     if source == destination
-        || !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[source, destination])
+        || !(memory::frames_owned_by(memory::FrameOwner::KERNEL, &[source])
+            || memory::frame_lease_is_runtime(source))
+        || !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[destination])
     {
         return false;
     }
@@ -4887,7 +4893,9 @@ pub(crate) fn replace_linux_cow_page_in_root(
     if address >= 1 << 47
         || !address.is_multiple_of(PAGE_SIZE as u64)
         || expected == replacement
-        || !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[expected, replacement])
+        || !(memory::frames_owned_by(memory::FrameOwner::KERNEL, &[expected])
+            || memory::frame_lease_is_runtime(expected))
+        || !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[replacement])
     {
         return false;
     }
@@ -5538,6 +5546,13 @@ pub(crate) fn materialize_current_linux_runtime_page(
 }
 
 pub(crate) fn release_current_linux_runtime_mappings(base: u64) -> bool {
+    release_current_linux_runtime_mappings_preserving(base, |_| false)
+}
+
+pub(crate) fn release_current_linux_runtime_mappings_preserving(
+    base: u64,
+    preserve: impl Fn(memory::FrameLease) -> bool,
+) -> bool {
     if !base.is_multiple_of(1 << 39) || base == 0 || base >= 1 << 47 {
         return false;
     }
@@ -5590,7 +5605,9 @@ pub(crate) fn release_current_linux_runtime_mappings(base: u64) -> bool {
                 let page = linux_runtime_page_from_value(value);
                 if page.occupied {
                     unsafe { leaf.write(0) };
-                    if let Some(frame) = page.frame.filter(|_| !page.shared) {
+                    if let Some(frame) = page.frame.filter(|frame| {
+                        !page.shared && !memory::frame_lease_is_runtime(*frame) && !preserve(*frame)
+                    }) {
                         if !memory::scrub_and_release_frames(
                             memory::FrameOwner::KERNEL,
                             core::slice::from_ref(&frame),
@@ -5715,19 +5732,10 @@ pub(crate) fn retire_linux_child_address_space(root: memory::FrameLease) -> bool
                 continue;
             }
             unsafe { entry.write(0) };
-            let address = value & ADDRESS_MASK;
-            if address != 0 && value & LINUX_RUNTIME_SHARED == 0 {
-                if let Some(frame) = memory::live_frame_lease(memory::FrameOwner::KERNEL, address) {
-                    if !memory::scrub_and_release_frames(
-                        memory::FrameOwner::KERNEL,
-                        core::slice::from_ref(&frame),
-                    ) {
-                        return false;
-                    }
-                } else if !memory::frame_address_is_runtime(address) {
-                    return false;
-                }
-            }
+            // Leaf-frame ownership is process-table metadata, not a page-table
+            // property. The caller releases each unreferenced private mapping
+            // after this hierarchy is detached; doing it here would free COW
+            // frames that are still mapped by the parent.
         }
         true
     }
