@@ -518,6 +518,7 @@ const LINUX_ENOTCONN: u64 = u64::MAX - 106;
 const LINUX_EINPROGRESS: u64 = u64::MAX - 114;
 const LINUX_EAFNOSUPPORT: u64 = u64::MAX - 96;
 const LINUX_EPROTONOSUPPORT: u64 = u64::MAX - 92;
+const LINUX_ENOPROTOOPT: u64 = u64::MAX - 91;
 const LINUX_ENETUNREACH: u64 = u64::MAX - 100;
 const LINUX_ENFILE: u64 = u64::MAX - 22;
 const LINUX_EADDRINUSE: u64 = u64::MAX - 97;
@@ -20969,20 +20970,34 @@ fn linux_socket_setsockopt(
     value: u64,
     length: u64,
 ) -> u64 {
-    if linux_socket_slot(descriptor).is_none() {
+    let Some(slot) = linux_socket_slot(descriptor) else {
         return LINUX_EBADF;
+    };
+    let boolean_option = match (level, option) {
+        (0, 11) => Some(crate::linux_socket::BooleanOption::ReceiveErrors),
+        (1, 2) => Some(crate::linux_socket::BooleanOption::ReuseAddress),
+        (1, 9) => Some(crate::linux_socket::BooleanOption::KeepAlive),
+        (6, 1) => {
+            if crate::linux_socket::kind(slot) != Some(crate::linux_socket::Kind::Tcp) {
+                return LINUX_EOPNOTSUPP;
+            }
+            Some(crate::linux_socket::BooleanOption::NoDelay)
+        }
+        (1, 7 | 8 | 20 | 21) => None,
+        _ => return LINUX_ENOPROTOOPT,
+    };
+    if length < 4 {
+        return LINUX_EINVAL;
     }
-    if value == 0 || length < 4 {
+    let mut supplied = [0_u8; 4];
+    if !copy_from_linux_user(value, &mut supplied) {
         return LINUX_EFAULT;
     }
-    if matches!(
-        (level, option),
-        (0, 11) | (1, 2 | 7 | 8 | 9 | 20 | 21) | (6, 1)
-    ) {
-        0
-    } else {
-        LINUX_EINVAL
-    }
+    let enabled = i32::from_ne_bytes(supplied) != 0;
+    boolean_option.map_or(0, |option| {
+        crate::linux_socket::set_boolean_option(slot, option, enabled)
+            .map_or_else(linux_socket_error, |()| 0)
+    })
 }
 
 fn linux_socket_getsockopt(
@@ -20999,14 +21014,38 @@ fn linux_socket_getsockopt(
     if !copy_from_linux_user(length, &mut supplied) || u32::from_ne_bytes(supplied) < 4 {
         return LINUX_EFAULT;
     }
+    let read_boolean = |option| match crate::linux_socket::boolean_option(slot, option) {
+        Ok(value) => Ok(i32::from(value)),
+        Err(error) => Err(linux_socket_error(error)),
+    };
     let result = match (level, option) {
+        (0, 11) => match read_boolean(crate::linux_socket::BooleanOption::ReceiveErrors) {
+            Ok(value) => value,
+            Err(error) => return error,
+        },
+        (1, 2) => match read_boolean(crate::linux_socket::BooleanOption::ReuseAddress) {
+            Ok(value) => value,
+            Err(error) => return error,
+        },
         (1, 3) => 1_i32,
         (1, 4) => {
             crate::linux_socket::readiness(slot).is_some_and(|(_, _, error)| error) as i32 * 111
         }
         (1, 7 | 8) => 64 * 1024,
-        (6, 1) => 1,
-        _ => return LINUX_EINVAL,
+        (1, 9) => match read_boolean(crate::linux_socket::BooleanOption::KeepAlive) {
+            Ok(value) => value,
+            Err(error) => return error,
+        },
+        (6, 1) => {
+            if crate::linux_socket::kind(slot) != Some(crate::linux_socket::Kind::Tcp) {
+                return LINUX_EOPNOTSUPP;
+            }
+            match read_boolean(crate::linux_socket::BooleanOption::NoDelay) {
+                Ok(value) => value,
+                Err(error) => return error,
+            }
+        }
+        _ => return LINUX_ENOPROTOOPT,
     };
     if !copy_to_linux_user(value, &result.to_ne_bytes())
         || !copy_to_linux_user(length, &4_u32.to_ne_bytes())

@@ -9,7 +9,7 @@ use smoltcp::{
     iface::{Config as InterfaceConfig, Interface, SocketHandle, SocketSet, SocketStorage},
     phy::{Device, DeviceCapabilities, Medium, PacketMeta, RxToken, TxToken},
     socket::{tcp, udp},
-    time::Instant,
+    time::{Duration, Instant},
     wire::{EthernetAddress, IpAddress, IpCidr, IpEndpoint, Ipv4Address},
 };
 
@@ -82,6 +82,14 @@ pub(crate) enum Error {
 }
 
 #[derive(Clone, Copy)]
+pub(crate) enum BooleanOption {
+    ReuseAddress,
+    KeepAlive,
+    ReceiveErrors,
+    NoDelay,
+}
+
+#[derive(Clone, Copy)]
 struct Slot {
     occupied: bool,
     references: u16,
@@ -94,6 +102,10 @@ struct Slot {
     peer: Option<u8>,
     read_shutdown: bool,
     write_shutdown: bool,
+    reuse_address: bool,
+    keep_alive: bool,
+    receive_errors: bool,
+    no_delay: bool,
     local_first: memory::FrameLease,
     local_last: memory::FrameLease,
     local_head: usize,
@@ -113,6 +125,10 @@ impl Slot {
         peer: None,
         read_shutdown: false,
         write_shutdown: false,
+        reuse_address: false,
+        keep_alive: false,
+        receive_errors: false,
+        no_delay: false,
         local_first: memory::FrameLease::EMPTY,
         local_last: memory::FrameLease::EMPTY,
         local_head: 0,
@@ -286,6 +302,10 @@ pub(crate) fn open(kind: Kind) -> Result<u8, Error> {
             peer: None,
             read_shutdown: false,
             write_shutdown: false,
+            reuse_address: false,
+            keep_alive: false,
+            receive_errors: false,
+            no_delay: false,
             local_first: memory::FrameLease::EMPTY,
             local_last: memory::FrameLease::EMPTY,
             local_head: 0,
@@ -318,6 +338,10 @@ pub(crate) fn open_pair() -> Result<(u8, u8), Error> {
             peer: Some(second as u8),
             read_shutdown: false,
             write_shutdown: false,
+            reuse_address: false,
+            keep_alive: false,
+            receive_errors: false,
+            no_delay: false,
             local_first: memory::FrameLease::EMPTY,
             local_last: memory::FrameLease::EMPTY,
             local_head: 0,
@@ -335,6 +359,10 @@ pub(crate) fn open_pair() -> Result<(u8, u8), Error> {
             peer: Some(first as u8),
             read_shutdown: false,
             write_shutdown: false,
+            reuse_address: false,
+            keep_alive: false,
+            receive_errors: false,
+            no_delay: false,
             local_first: memory::FrameLease::EMPTY,
             local_last: memory::FrameLease::EMPTY,
             local_head: 0,
@@ -463,6 +491,48 @@ pub(crate) fn kind(slot: u8) -> Option<Kind> {
         .map(|state| state.kind)
 }
 
+pub(crate) fn set_boolean_option(
+    slot: u8,
+    option: BooleanOption,
+    enabled: bool,
+) -> Result<(), Error> {
+    let state = unsafe { SLOTS.get_mut(usize::from(slot)) }
+        .filter(|state| state.occupied)
+        .ok_or(Error::Invalid)?;
+    match option {
+        BooleanOption::ReuseAddress => state.reuse_address = enabled,
+        BooleanOption::KeepAlive => state.keep_alive = enabled,
+        BooleanOption::ReceiveErrors => state.receive_errors = enabled,
+        BooleanOption::NoDelay => state.no_delay = enabled,
+    }
+    if state.kind == Kind::Tcp {
+        if let Some(handle) = state.handle {
+            let runtime = runtime_existing().ok_or(Error::Unavailable)?;
+            let socket = runtime.sockets.get_mut::<tcp::Socket>(handle);
+            match option {
+                BooleanOption::KeepAlive => {
+                    socket.set_keep_alive(enabled.then_some(Duration::from_secs(75)))
+                }
+                BooleanOption::NoDelay => socket.set_nagle_enabled(!enabled),
+                BooleanOption::ReuseAddress | BooleanOption::ReceiveErrors => {}
+            }
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn boolean_option(slot: u8, option: BooleanOption) -> Result<bool, Error> {
+    let state = unsafe { SLOTS.get(usize::from(slot)) }
+        .filter(|state| state.occupied)
+        .ok_or(Error::Invalid)?;
+    Ok(match option {
+        BooleanOption::ReuseAddress => state.reuse_address,
+        BooleanOption::KeepAlive => state.keep_alive,
+        BooleanOption::ReceiveErrors => state.receive_errors,
+        BooleanOption::NoDelay => state.no_delay,
+    })
+}
+
 pub(crate) fn bind(slot: u8, address: u32, requested_port: u16) -> Result<u16, Error> {
     poll();
     let runtime = runtime()?;
@@ -562,6 +632,10 @@ pub(crate) fn accept(slot: u8) -> Result<(u8, IpEndpoint), Error> {
                 peer: Some(client_slot),
                 read_shutdown: false,
                 write_shutdown: false,
+                reuse_address: listener.reuse_address,
+                keep_alive: listener.keep_alive,
+                receive_errors: listener.receive_errors,
+                no_delay: listener.no_delay,
                 local_first: memory::FrameLease::EMPTY,
                 local_last: memory::FrameLease::EMPTY,
                 local_head: 0,
@@ -594,6 +668,11 @@ pub(crate) fn accept(slot: u8) -> Result<(u8, IpEndpoint), Error> {
         runtime.sockets.remove(replacement);
         return Err(Error::Invalid);
     }
+    {
+        let accepted_socket = runtime.sockets.get_mut::<tcp::Socket>(handle);
+        accepted_socket.set_nagle_enabled(!listener.no_delay);
+        accepted_socket.set_keep_alive(listener.keep_alive.then_some(Duration::from_secs(75)));
+    }
     unsafe {
         SLOTS[accepted_index] = Slot {
             occupied: true,
@@ -607,6 +686,10 @@ pub(crate) fn accept(slot: u8) -> Result<(u8, IpEndpoint), Error> {
             peer: None,
             read_shutdown: false,
             write_shutdown: false,
+            reuse_address: listener.reuse_address,
+            keep_alive: listener.keep_alive,
+            receive_errors: listener.receive_errors,
+            no_delay: listener.no_delay,
             local_first: memory::FrameLease::EMPTY,
             local_last: memory::FrameLease::EMPTY,
             local_head: 0,

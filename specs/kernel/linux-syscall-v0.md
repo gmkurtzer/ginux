@@ -12,8 +12,13 @@ complete readable VMA range, enables supervisor access only around the bounded
 copy-in, emits the exact bytes to the pinned console, and returns the requested
 length. A zero-length request or one above the limit returns `-EINVAL`.
 The socket profile proves AF_INET TCP creation, ephemeral bind, listen,
-`getsockname`, selected integer socket options, and Linux argument/error
-precedence. Connected AF_INET datagram and AF_UNIX stream sockets expose their
+`getsockname`, and Linux argument/error precedence. `SO_REUSEADDR`,
+`SO_KEEPALIVE`, `IP_RECVERR`, and `TCP_NODELAY` are mutable per-socket boolean
+options shared by duplicated descriptors; accepted TCP sockets inherit their
+listener's settings. Keepalive and no-delay also configure the underlying TCP
+engine. The booted proof sets and reads back each option, while short or
+unreadable values and unknown options produce `EINVAL`, `EFAULT`, and
+`ENOPROTOOPT` respectively. Connected AF_INET datagram and AF_UNIX stream sockets expose their
 peer names through `getpeername`, including Linux address truncation and actual
 length reporting, 32-bit descriptor narrowing, `ENOTCONN`, `ENOTSOCK`, `EBADF`,
 and `EFAULT` paths. It also proves bidirectional AF_UNIX `socketpair` transport
