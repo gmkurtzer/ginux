@@ -13463,11 +13463,12 @@ fn linux_io_cancel(_context: u64, _control: u64, _result: u64) -> u64 {
 }
 
 fn linux_lsm_attribute_valid(attribute: u64) -> bool {
-    (100..=105).contains(&attribute)
+    (100..=105).contains(&u64::from(attribute as u32))
 }
 
 fn linux_lsm_get_self_attr(attribute: u64, context: u64, size: u64, flags: u64) -> u64 {
     const LSM_FLAG_SINGLE: u64 = 1;
+    let flags = u64::from(flags as u32);
     if !linux_lsm_attribute_valid(attribute)
         || flags & !LSM_FLAG_SINGLE != 0
         || flags == LSM_FLAG_SINGLE && context == 0
@@ -13480,10 +13481,15 @@ fn linux_lsm_get_self_attr(attribute: u64, context: u64, size: u64, flags: u64) 
     {
         return LINUX_EFAULT;
     }
-    LINUX_EOPNOTSUPP
+    if flags == LSM_FLAG_SINGLE {
+        LINUX_EOPNOTSUPP
+    } else {
+        0
+    }
 }
 
 fn linux_lsm_set_self_attr(attribute: u64, _context: u64, _size: u64, flags: u64) -> u64 {
+    let flags = u64::from(flags as u32);
     if !linux_lsm_attribute_valid(attribute) || flags != 0 {
         LINUX_EINVAL
     } else {
@@ -13492,6 +13498,7 @@ fn linux_lsm_set_self_attr(attribute: u64, _context: u64, _size: u64, flags: u64
 }
 
 fn linux_lsm_list_modules(_identifiers: u64, size: u64, flags: u64) -> u64 {
+    let flags = u64::from(flags as u32);
     if flags != 0 {
         return LINUX_EINVAL;
     }
@@ -15520,16 +15527,42 @@ fn verify_linux_aio_syscalls() -> bool {
     let destroyed = context != 0
         && linux_io_cancel(context, mapping + 128, mapping + 256) == LINUX_EINVAL
         && linux_io_destroy(context) == 0;
+    const UPPER_REGISTER_BITS: u64 = 1_u64 << 32;
     let lsm = copy_to_linux_user(mapping + 512, &8_u32.to_ne_bytes())
-        && linux_lsm_list_modules(mapping + 544, mapping + 512, 0) == 0
+        && linux_lsm_list_modules(mapping + 544, mapping + 512, UPPER_REGISTER_BITS) == 0
         && {
             let mut size = [1_u8; 4];
             copy_from_linux_user(mapping + 512, &mut size) && u32::from_ne_bytes(size) == 0
         }
+        && (100..=105).all(|attribute| {
+            copy_to_linux_user(mapping + 512, &16_u32.to_ne_bytes())
+                && linux_lsm_get_self_attr(
+                    UPPER_REGISTER_BITS | attribute,
+                    0,
+                    mapping + 512,
+                    UPPER_REGISTER_BITS,
+                ) == 0
+                && {
+                    let mut size = [1_u8; 4];
+                    copy_from_linux_user(mapping + 512, &mut size) && u32::from_ne_bytes(size) == 0
+                }
+                && linux_lsm_set_self_attr(
+                    UPPER_REGISTER_BITS | attribute,
+                    0,
+                    UPPER_REGISTER_BITS,
+                    UPPER_REGISTER_BITS,
+                ) == LINUX_EOPNOTSUPP
+        })
         && copy_to_linux_user(mapping + 512, &16_u32.to_ne_bytes())
-        && linux_lsm_get_self_attr(100, 0, mapping + 512, 0) == LINUX_EOPNOTSUPP
-        && linux_lsm_set_self_attr(100, 0, 0, 0) == LINUX_EOPNOTSUPP
-        && linux_lsm_list_modules(0, mapping + 512, 1) == LINUX_EINVAL;
+        && linux_lsm_get_self_attr(100, mapping + 544, mapping + 512, 1) == LINUX_EOPNOTSUPP
+        && linux_lsm_get_self_attr(100, 0, mapping + 512, 1) == LINUX_EINVAL
+        && linux_lsm_get_self_attr(99, 0, mapping + 512, 0) == LINUX_EINVAL
+        && linux_lsm_get_self_attr(106, 0, mapping + 512, 0) == LINUX_EINVAL
+        && linux_lsm_get_self_attr(100, 0, 1, 0) == LINUX_EFAULT
+        && linux_lsm_set_self_attr(99, 0, 0, 0) == LINUX_EINVAL
+        && linux_lsm_set_self_attr(100, 0, 0, 1) == LINUX_EINVAL
+        && linux_lsm_list_modules(0, mapping + 512, 1) == LINUX_EINVAL
+        && linux_lsm_list_modules(0, 1, 0) == LINUX_EFAULT;
     let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
     empty && destroyed && lsm && unmapped
 }
