@@ -50,6 +50,7 @@ const GINUX_NETWORK_FD: u64 = 5;
 const LINUX_READ_SYSCALL: u64 = 0;
 const LINUX_WRITE_SYSCALL: u64 = 1;
 const LINUX_CLOSE_SYSCALL: u64 = 3;
+const LINUX_POLL_SYSCALL: u64 = 7;
 const LINUX_IOCTL_SYSCALL: u64 = 16;
 const LINUX_SCHED_YIELD_SYSCALL: u64 = 24;
 const LINUX_DUP_SYSCALL: u64 = 32;
@@ -80,6 +81,10 @@ const LINUX_FIONREAD: u64 = 0x541b;
 const LINUX_F_GETFL: u64 = 3;
 const LINUX_F_SETFL: u64 = 4;
 const LINUX_O_NONBLOCK: u64 = 0x800;
+const LINUX_POLLIN: i16 = 1;
+const LINUX_POLLOUT: i16 = 4;
+const LINUX_POLLHUP: i16 = 0x10;
+const LINUX_POLLNVAL: i16 = 0x20;
 const LINUX_EBADF: u64 = u64::MAX - 8;
 const LINUX_EAGAIN: u64 = u64::MAX - 10;
 const LINUX_EFAULT: u64 = u64::MAX - 13;
@@ -88,6 +93,14 @@ const LINUX_ESRCH: u64 = u64::MAX - 2;
 const LINUX_CLOCK_REALTIME: u64 = 0;
 const LINUX_CLOCK_MONOTONIC: u64 = 1;
 static CONTROLLER_IDENTITY: &[u8] = b"GINUX_CONTROLLER_V0";
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct LinuxPollFd {
+    descriptor: i32,
+    events: i16,
+    returned: i16,
+}
 const COMMAND_STATUS: u16 = 1;
 const COMMAND_COMPONENTS: u16 = 2;
 const COMMAND_LS: u16 = 3;
@@ -2337,11 +2350,50 @@ fn linux_pipe_fionread_contract(console: u64) -> bool {
     let read_flags = linux_syscall(LINUX_FCNTL_SYSCALL, reader, LINUX_F_GETFL, 0);
     let write_flags = linux_syscall(LINUX_FCNTL_SYSCALL, writer, LINUX_F_GETFL, 0);
     let duplicate = linux_syscall(LINUX_DUP_SYSCALL, reader, 0, 0);
+    let mut initial_poll = [
+        LinuxPollFd {
+            descriptor: duplicate as i32,
+            events: LINUX_POLLIN,
+            returned: 0,
+        },
+        LinuxPollFd {
+            descriptor: writer as i32,
+            events: LINUX_POLLOUT,
+            returned: 0,
+        },
+        LinuxPollFd {
+            descriptor: 999,
+            events: LINUX_POLLIN,
+            returned: 0,
+        },
+        LinuxPollFd {
+            descriptor: -1,
+            events: LINUX_POLLIN | LINUX_POLLOUT,
+            returned: -1,
+        },
+    ];
+    let initial_ready = linux_syscall(
+        LINUX_POLL_SYSCALL,
+        initial_poll.as_mut_ptr() as u64,
+        initial_poll.len() as u64,
+        0,
+    );
     let wrong_read = linux_syscall(LINUX_READ_SYSCALL, writer, 1, 1);
     let wrong_write = linux_syscall(LINUX_WRITE_SYSCALL, reader, b"x".as_ptr() as u64, 1);
     let reader_closed = linux_syscall(LINUX_CLOSE_SYSCALL, reader, 0, 0);
     let mut available = 0_i32;
     let written = linux_syscall(LINUX_WRITE_SYSCALL, writer, b"pipe!".as_ptr() as u64, 5);
+    let mut readable_poll = [LinuxPollFd {
+        descriptor: duplicate as i32,
+        events: LINUX_POLLIN,
+        returned: 0,
+    }];
+    let readable_ready = linux_syscall(
+        LINUX_POLL_SYSCALL,
+        readable_poll.as_mut_ptr() as u64,
+        readable_poll.len() as u64,
+        0,
+    );
     let first = linux_syscall(
         LINUX_IOCTL_SYSCALL,
         duplicate,
@@ -2381,6 +2433,20 @@ fn linux_pipe_fionread_contract(console: u64) -> bool {
     let empty = linux_syscall(LINUX_READ_SYSCALL, duplicate, tail.as_mut_ptr() as u64, 1);
     let writer_closed = linux_syscall(LINUX_CLOSE_SYSCALL, writer, 0, 0);
     let eof = linux_syscall(LINUX_READ_SYSCALL, duplicate, tail.as_mut_ptr() as u64, 1);
+    let mut hangup_poll = [LinuxPollFd {
+        descriptor: duplicate as i32,
+        events: 0,
+        returned: 0,
+    }];
+    let hangup_ready = linux_syscall(
+        LINUX_POLL_SYSCALL,
+        hangup_poll.as_mut_ptr() as u64,
+        hangup_poll.len() as u64,
+        0,
+    );
+    let poll_fault = linux_syscall(LINUX_POLL_SYSCALL, 1, 1, 0);
+    let poll_limit = linux_syscall(LINUX_POLL_SYSCALL, 1, 65, 0);
+    let empty_poll = linux_syscall(LINUX_POLL_SYSCALL, 1, 0, 0);
     let duplicate_closed = linux_syscall(LINUX_CLOSE_SYSCALL, duplicate, 0, 0);
     let double_close = linux_syscall(LINUX_CLOSE_SYSCALL, duplicate, 0, 0);
     let valid = invalid_flags == LINUX_EINVAL
@@ -2388,10 +2454,17 @@ fn linux_pipe_fionread_contract(console: u64) -> bool {
         && read_flags == LINUX_O_NONBLOCK
         && write_flags == (1 | LINUX_O_NONBLOCK)
         && duplicate >= 6
+        && initial_ready == 2
+        && initial_poll[0].returned == 0
+        && initial_poll[1].returned == LINUX_POLLOUT
+        && initial_poll[2].returned == LINUX_POLLNVAL
+        && initial_poll[3].returned == 0
         && wrong_read == LINUX_EBADF
         && wrong_write == LINUX_EBADF
         && reader_closed == 0
         && written == 5
+        && readable_ready == 1
+        && readable_poll[0].returned == LINUX_POLLIN
         && first == 0
         && available == 5
         && invalid == LINUX_EFAULT
@@ -2407,6 +2480,11 @@ fn linux_pipe_fionread_contract(console: u64) -> bool {
         && empty == LINUX_EAGAIN
         && writer_closed == 0
         && eof == 0
+        && hangup_ready == 1
+        && hangup_poll[0].returned == LINUX_POLLHUP
+        && poll_fault == LINUX_EFAULT
+        && poll_limit == LINUX_EINVAL
+        && empty_poll == 0
         && duplicate_closed == 0
         && double_close == LINUX_EBADF;
     if !valid {

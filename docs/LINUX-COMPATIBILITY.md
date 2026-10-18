@@ -84,6 +84,13 @@ It also directly exercises realtime and monotonic `clock_gettime`,
 `clock_getres`, `gettimeofday`, `time`, and `times`, including invalid clock
 and userspace-address behavior.
 
+The ring-3 controller also exercises `poll` against its live nonblocking pipe
+descriptors. The probe covers empty and readable input, writable output,
+ignored negative descriptors, `POLLNVAL`, writer-close `POLLHUP`, invalid
+userspace addresses, the descriptor-count bound, and zero-descriptor polling.
+Blocking poll remains bounded by the controller's single-thread execution
+model, so `poll` remains Partial.
+
 `clock_gettime` and `clock_getres` accept every Linux static clock ID that is
 readable without changing system time: realtime, monotonic, process/thread CPU,
 monotonic raw, realtime/monotonic coarse, boottime, realtime/boottime alarm,

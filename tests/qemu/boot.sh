@@ -2722,7 +2722,7 @@ if ! grep -q '^ginux: Linux timekeeping validated' "$output_file"; then
 fi
 
 if ! grep -q '^ginux: Linux runtime pipe accounting validated' "$output_file"; then
-    echo "Boot test failed: runtime pipe FIONREAD accounting was not validated." >&2
+    echo "Boot test failed: runtime pipe accounting and poll readiness were not validated." >&2
     exit 1
 fi
 

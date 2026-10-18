@@ -9333,6 +9333,7 @@ fn linux_controller_syscall(
             6,
             address_space::copy_to_current_user,
         )),
+        LINUX_POLL_SYSCALL => Some(linux_controller_poll(first, second, third)),
         LINUX_DUP_SYSCALL => Some(linux_device_dup_at_least(first, 6, false)),
         LINUX_FCNTL_SYSCALL => Some(linux_descriptor_fcntl(first, second, third)),
         LINUX_CLOSE_SYSCALL => Some(linux_descriptor_close(first)),
@@ -9435,6 +9436,60 @@ fn linux_controller_getgroups(size: u64, output: u64) -> u64 {
         return LINUX_EFAULT;
     }
     1
+}
+
+fn linux_controller_poll(address: u64, count: u64, timeout: u64) -> u64 {
+    let Ok(descriptor_count) = usize::try_from(count) else {
+        return LINUX_EINVAL;
+    };
+    if descriptor_count > LINUX_POLLFD_LIMIT {
+        return LINUX_EINVAL;
+    }
+    let timeout = timeout as u32 as i32;
+    let duration = if timeout < 0 {
+        None
+    } else {
+        Some((timeout as u64).saturating_mul(1_000_000))
+    };
+    let deadline = match duration {
+        Some(0) | None => None,
+        Some(duration) => {
+            let Some(deadline) =
+                linux_elapsed_nanoseconds().and_then(|now| now.checked_add(duration))
+            else {
+                return LINUX_EINVAL;
+            };
+            Some(deadline)
+        }
+    };
+    let mut pollfds = [0_u8; LINUX_POLLFD_LIMIT * 8];
+    let active = &mut pollfds[..descriptor_count * 8];
+    if descriptor_count != 0 && !address_space::copy_from_current_user(address, active) {
+        return LINUX_EFAULT;
+    }
+    loop {
+        let mut ready = 0_u64;
+        for pollfd in active.as_chunks_mut::<8>().0 {
+            let descriptor = i32::from_ne_bytes(pollfd[..4].try_into().unwrap());
+            let events = u16::from_ne_bytes(pollfd[4..6].try_into().unwrap());
+            let returned = linux_descriptor_poll_events(descriptor, events);
+            pollfd[6..8].copy_from_slice(&returned.to_ne_bytes());
+            ready += u64::from(returned != 0);
+        }
+        let timed_out = duration == Some(0)
+            || deadline.is_some_and(|deadline| {
+                linux_elapsed_nanoseconds().is_some_and(|now| now >= deadline)
+            });
+        if ready != 0 || timed_out {
+            return if descriptor_count == 0 || address_space::copy_to_current_user(address, active)
+            {
+                ready
+            } else {
+                LINUX_EFAULT
+            };
+        }
+        core::hint::spin_loop();
+    }
 }
 
 fn linux_controller_clock_value(clock: u64) -> Option<(u64, u64)> {
@@ -26161,6 +26216,8 @@ fn linux_descriptor_poll_events(descriptor: i32, requested: u16) -> u16 {
         let Some((readable, writable, error)) = crate::linux_socket::readiness(slot) else {
             return LINUX_POLLNVAL;
         };
+        let hangup = linux_device_descriptor(descriptor) & LINUX_DEVICE_PIPE != 0
+            && crate::linux_socket::local_peer_write_closed(slot) == Some(true);
         return (if readable {
             requested & LINUX_POLLIN
         } else {
@@ -26169,7 +26226,8 @@ fn linux_descriptor_poll_events(descriptor: i32, requested: u16) -> u16 {
             requested & LINUX_POLLOUT
         } else {
             0
-        }) | if error { LINUX_POLLERR } else { 0 };
+        }) | if error { LINUX_POLLERR } else { 0 }
+            | if hangup { LINUX_POLLHUP } else { 0 };
     }
     match u16::from(linux_console_descriptor(descriptor)) {
         LINUX_DESCRIPTOR_INPUT => {

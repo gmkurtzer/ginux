@@ -117,15 +117,15 @@ bounded staging buffer before emitting anything, so an invalid later vector
 returns `-EFAULT` without exposing an earlier prefix. Invalid descriptors return
 `-EBADF`; zero-length vectors, excessive vector counts, and excessive aggregate
 lengths return `-EINVAL`.
-`rax = 7` (`__NR_poll`) accepts zero through four x86-64 `pollfd` records and
+`rax = 7` (`__NR_poll`) accepts zero through 64 x86-64 `pollfd` records and
 atomically replaces every `revents` field after validating the complete table.
 The disconnected input console reports `POLLHUP`, writable console or device
 endpoints report requested `POLLOUT`, readable devices report requested
 `POLLIN`, unknown nonnegative descriptors report `POLLNVAL`, and negative
-descriptors are ignored. An invalid table returns `-EFAULT`, and more than four
+descriptors are ignored. An invalid table returns `-EFAULT`, and more than 64
 records returns `-EINVAL`. A zero timeout performs an immediate query; any
 ready descriptor also returns immediately regardless of timeout. With one
-through four descriptors, no immediate readiness, and another runnable thread,
+through 64 descriptors, no immediate readiness, and another runnable thread,
 a positive signed 32-bit millisecond timeout or negative infinite timeout
 blocks the caller in its generation-tagged scheduler slot. The wait snapshots
 only each descriptor number and requested-event word; descriptor state remains
