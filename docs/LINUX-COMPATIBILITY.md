@@ -243,6 +243,17 @@ parent-death signals, subreapers, capability controls, securebits, timer
 slack, speculation controls, and the remaining Linux option families are not
 implemented, so `prctl` remains Partial.
 
+`arch_prctl(ARCH_SET_FS/ARCH_GET_FS)` treats the FS base as opaque architectural
+thread state rather than requiring it to identify a mapped kernel-owned TLS
+extent. Any address in Ginux's x86-64 userspace range, including zero and an
+unmapped address, is accepted; an address at or above the task boundary is
+rejected with `EPERM`. Optional owned TLS allocation metadata remains separate
+and survives an FS-base change. The option follows its Linux `int` width, and
+boot verification covers dirty upper bits, zero, an unmapped base, the highest
+valid base, the task boundary, output faults, and state restoration. GS-base,
+CPUID-faulting, extended-state permission, LAM, and shadow-stack operations
+remain unsupported, so `arch_prctl` remains Partial.
+
 The ring-3 controller directly verifies its Linux PID/TID, parent,
 process-group, session, UID/GID, supplementary-group, scheduler-yield, and
 `uname` contracts, including invalid PID, count, and userspace-address errors.

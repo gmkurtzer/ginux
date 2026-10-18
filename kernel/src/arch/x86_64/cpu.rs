@@ -4391,22 +4391,17 @@ impl LinuxUserContext {
 
 impl LinuxTlsContext {
     fn is_valid(self) -> bool {
-        if self.extent_size == 0 {
-            return self.thread_pointer == 0 && self.extent == 0;
+        if self.thread_pointer >= 1 << 47 {
+            return false;
         }
-        self.thread_pointer != 0
-            && self.extent != 0
-            && self.thread_pointer >= self.extent
+        if self.extent_size == 0 {
+            return self.extent == 0;
+        }
+        self.extent != 0
             && self
                 .extent
                 .checked_add(self.extent_size)
-                .is_some_and(|end| {
-                    end <= 1 << 47
-                        && self
-                            .thread_pointer
-                            .checked_add(16)
-                            .is_some_and(|tcb_end| tcb_end <= end)
-                })
+                .is_some_and(|end| end <= 1 << 47)
     }
 }
 
@@ -4423,25 +4418,25 @@ pub(crate) fn verify_linux_tls_context_contract() -> bool {
             extent_size: 0x40,
         }
         .is_valid()
-        && !LinuxTlsContext {
+        && LinuxTlsContext {
             thread_pointer: 0x1030,
             extent: 0,
             extent_size: 0,
         }
         .is_valid()
-        && !LinuxTlsContext {
+        && LinuxTlsContext {
             thread_pointer: 0,
             extent: 0x1000,
             extent_size: 0x40,
         }
         .is_valid()
-        && !LinuxTlsContext {
+        && LinuxTlsContext {
             thread_pointer: 0x0ff8,
             extent: 0x1000,
             extent_size: 0x40,
         }
         .is_valid()
-        && !LinuxTlsContext {
+        && LinuxTlsContext {
             thread_pointer: 0x1038,
             extent: 0x1000,
             extent_size: 0x40,
@@ -7645,18 +7640,14 @@ fn install_linux_tls_context(context: LinuxTlsContext) -> bool {
     if !context.is_valid() {
         return false;
     }
-    if context.extent_size == 0 {
-        unsafe { write_msr(FS_BASE_MSR, 0) };
-        if unsafe { read_msr(FS_BASE_MSR) } != 0 {
-            return false;
-        }
-        ELF_PROBE_TLS.store(0, Ordering::SeqCst);
-        ELF_PROBE_TLS_SIZE.store(0, Ordering::SeqCst);
-        return true;
-    }
     unsafe { write_msr(FS_BASE_MSR, context.thread_pointer as u64) };
     if unsafe { read_msr(FS_BASE_MSR) } != context.thread_pointer as u64 {
         return false;
+    }
+    if context.extent_size == 0 {
+        ELF_PROBE_TLS.store(0, Ordering::SeqCst);
+        ELF_PROBE_TLS_SIZE.store(0, Ordering::SeqCst);
+        return true;
     }
     ELF_PROBE_TLS.store(context.extent as u64, Ordering::SeqCst);
     ELF_PROBE_TLS_SIZE.store(context.extent_size as u64, Ordering::SeqCst);
@@ -7698,6 +7689,21 @@ fn update_current_linux_tls(thread_pointer: u64) -> bool {
     LINUX_THREAD_POINTERS[slot].store(context.thread_pointer as u64, Ordering::SeqCst);
     LINUX_THREAD_TLS_EXTENTS[slot].store(context.extent as u64, Ordering::SeqCst);
     LINUX_THREAD_TLS_SIZES[slot].store(context.extent_size as u64, Ordering::SeqCst);
+    true
+}
+
+fn update_current_linux_fs_base(thread_pointer: u64) -> bool {
+    if thread_pointer >= 1 << 47 {
+        return false;
+    }
+    let Some(slot) = current_linux_thread_slot() else {
+        return false;
+    };
+    unsafe { write_msr(FS_BASE_MSR, thread_pointer) };
+    if active_fs_base() != thread_pointer {
+        return false;
+    }
+    LINUX_THREAD_POINTERS[slot].store(thread_pointer, Ordering::SeqCst);
     true
 }
 
@@ -8783,32 +8789,7 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_MLOCKALL_SYSCALL => linux_mlockall(first_argument),
         LINUX_MUNLOCKALL_SYSCALL => 0,
         LINUX_PRCTL_SYSCALL => linux_prctl(first_argument, buffer, count, register(0), register(2)),
-        LINUX_ARCH_PRCTL_SYSCALL
-            if first_argument == LINUX_ARCH_SET_FS
-                && (buffer == ELF_PROBE_DATA.load(Ordering::SeqCst)
-                    || LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
-                        && address_space::current_linux_range_mapped(
-                            buffer,
-                            size_of::<u64>(),
-                            true,
-                        )) =>
-        {
-            if update_current_linux_tls(buffer) {
-                0
-            } else {
-                LINUX_EINVAL
-            }
-        }
-        LINUX_ARCH_PRCTL_SYSCALL if first_argument == LINUX_ARCH_GET_FS => {
-            // SAFETY: FS base is the active thread-local value programmed by
-            // this bounded proof and restored before returning to the kernel.
-            let fs_base = unsafe { read_msr(FS_BASE_MSR) }.to_ne_bytes();
-            if !copy_to_linux_user(buffer, &fs_base) {
-                return LINUX_EFAULT;
-            }
-            0
-        }
-        LINUX_ARCH_PRCTL_SYSCALL => LINUX_EINVAL,
+        LINUX_ARCH_PRCTL_SYSCALL => linux_arch_prctl(first_argument, buffer),
         LINUX_MODIFY_LDT_SYSCALL => linux_modify_ldt(first_argument, buffer, count),
         LINUX_UNAME_SYSCALL => linux_uname_with_copy(first_argument, copy_to_linux_user),
         LINUX_STATFS_SYSCALL => linux_statfs(first_argument, buffer),
@@ -13786,6 +13767,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let process_priorities = verify_linux_process_priorities();
     let modify_ldt = verify_linux_modify_ldt_syscall();
     let process_controls = verify_linux_prctl_syscall();
+    let architecture_controls = verify_linux_arch_prctl_syscall();
     let scheduler_queries = verify_linux_scheduler_queries();
     let scheduler_affinity = verify_linux_scheduler_affinity();
     let realtime_queries = verify_linux_realtime_queries();
@@ -13837,6 +13819,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         process_priorities,
         modify_ldt,
         process_controls,
+        architecture_controls,
         scheduler_queries,
         scheduler_affinity,
         realtime_queries,
@@ -13894,6 +13877,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && process_priorities
         && modify_ldt
         && process_controls
+        && architecture_controls
         && scheduler_queries
         && scheduler_affinity
         && realtime_queries
@@ -14073,6 +14057,51 @@ fn verify_linux_prctl_syscall() -> bool {
         && ELF_PROBE_SECCOMP_STRICT.load(Ordering::SeqCst) == saved_seccomp_strict;
     let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
     privileges && restored && unmapped
+}
+
+fn verify_linux_arch_prctl_syscall() -> bool {
+    const UPPER_REGISTER_BITS: u64 = 1_u64 << 32;
+    let mapping = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    if !(LINUX_RUNTIME_DYNAMIC_MMAP_BASE..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
+        .contains(&mapping)
+    {
+        return false;
+    }
+    let saved_fs_base = active_fs_base();
+    let saved_extent = ELF_PROBE_TLS.load(Ordering::SeqCst);
+    let saved_extent_size = ELF_PROBE_TLS_SIZE.load(Ordering::SeqCst);
+    let arbitrary_unmapped = 0x1234_5678_u64;
+    let mut returned = [0_u8; 8];
+    let set_get = linux_arch_prctl(UPPER_REGISTER_BITS | LINUX_ARCH_SET_FS, arbitrary_unmapped)
+        == 0
+        && active_fs_base() == arbitrary_unmapped
+        && ELF_PROBE_TLS.load(Ordering::SeqCst) == saved_extent
+        && ELF_PROBE_TLS_SIZE.load(Ordering::SeqCst) == saved_extent_size
+        && linux_arch_prctl(LINUX_ARCH_GET_FS, mapping) == 0
+        && copy_from_linux_user(mapping, &mut returned)
+        && u64::from_ne_bytes(returned) == arbitrary_unmapped;
+    let boundaries = set_get
+        && linux_arch_prctl(LINUX_ARCH_SET_FS, 0) == 0
+        && linux_arch_prctl(LINUX_ARCH_GET_FS, mapping) == 0
+        && copy_from_linux_user(mapping, &mut returned)
+        && u64::from_ne_bytes(returned) == 0
+        && linux_arch_prctl(LINUX_ARCH_SET_FS, (1 << 47) - 1) == 0
+        && linux_arch_prctl(LINUX_ARCH_SET_FS, 1 << 47) == LINUX_EPERM
+        && linux_arch_prctl(LINUX_ARCH_GET_FS, 1) == LINUX_EFAULT
+        && linux_arch_prctl(0xffff_ffff, 0) == LINUX_EINVAL;
+    let restored = update_current_linux_fs_base(saved_fs_base)
+        && active_fs_base() == saved_fs_base
+        && ELF_PROBE_TLS.load(Ordering::SeqCst) == saved_extent
+        && ELF_PROBE_TLS_SIZE.load(Ordering::SeqCst) == saved_extent_size;
+    let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
+    boundaries && restored && unmapped
 }
 
 fn verify_linux_scheduler_queries() -> bool {
@@ -32596,6 +32625,27 @@ fn linux_sched_getattr(pid: u64, attribute_address: u64, size: u64, flags: u64) 
         extension_offset += length;
     }
     0
+}
+
+fn linux_arch_prctl(option: u64, argument: u64) -> u64 {
+    match u64::from(option as u32) {
+        LINUX_ARCH_SET_FS if argument >= 1 << 47 => LINUX_EPERM,
+        LINUX_ARCH_SET_FS => {
+            if update_current_linux_fs_base(argument) {
+                0
+            } else {
+                LINUX_ESRCH
+            }
+        }
+        LINUX_ARCH_GET_FS => {
+            if copy_to_linux_user(argument, &active_fs_base().to_ne_bytes()) {
+                0
+            } else {
+                LINUX_EFAULT
+            }
+        }
+        _ => LINUX_EINVAL,
+    }
 }
 
 fn linux_prctl(option: u64, argument2: u64, argument3: u64, argument4: u64, argument5: u64) -> u64 {
