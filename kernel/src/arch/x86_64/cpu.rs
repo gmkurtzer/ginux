@@ -506,6 +506,7 @@ const LINUX_ENOKEY: u64 = u64::MAX - 125;
 const LINUX_EKEYREVOKED: u64 = u64::MAX - 127;
 const LINUX_ENODATA: u64 = u64::MAX - 60;
 const LINUX_EMSGSIZE: u64 = u64::MAX - 89;
+const LINUX_ENOTSOCK: u64 = u64::MAX - 87;
 const LINUX_EOPNOTSUPP: u64 = u64::MAX - 94;
 const LINUX_ENAMETOOLONG: u64 = u64::MAX - 35;
 const LINUX_ENOSYS: u64 = u64::MAX - 37;
@@ -20847,8 +20848,13 @@ fn linux_socket_shutdown(descriptor: u64, how: u64) -> u64 {
 }
 
 fn linux_socket_name(descriptor: u64, address: u64, length: u64, peer: bool) -> u64 {
+    let descriptor = u64::from(descriptor as u32);
     let Some(slot) = linux_socket_slot(descriptor) else {
-        return LINUX_EBADF;
+        return if linux_descriptor_open(descriptor) {
+            LINUX_ENOTSOCK
+        } else {
+            LINUX_EBADF
+        };
     };
     if crate::linux_socket::kind(slot) == Some(crate::linux_socket::Kind::Unix) {
         if peer && !crate::linux_socket::unix_peer_connected(slot) {

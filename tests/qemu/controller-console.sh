@@ -118,7 +118,7 @@ for expected in \
     'Test a userspace compatibility environment' \
     'Linux userspace runtime conformance summary:' \
     'Interfaces: 17 passed, 6 failed, 23 total' \
-    'Syscalls: 79 passed, 248 unverified, 48 policy-denied, 0 unsupported, 375 total' \
+    'Syscalls: 80 passed, 247 unverified, 48 policy-denied, 0 unsupported, 375 total' \
     "Run 'test linux all' for every result." \
     'Linux userspace interface runtime tests (bounded profile):' \
     'PASS syscall-entry' \
@@ -152,6 +152,7 @@ for expected in \
     'PASS 39 getpid' \
     'PASS 41 socket' \
     'PASS 44 sendto' \
+    'PASS 52 getpeername' \
     'PASS 53 socketpair' \
     'PASS 55 getsockopt' \
     'PASS 63 uname' \
@@ -188,7 +189,7 @@ for expected in \
     'UNVERIFIED 43 accept' \
     'POLICY-DENIED 105 setuid' \
     'UNVERIFIED 462 mseal' \
-    'Summary: 79 passed, 248 unverified, 48 policy-denied, 0 unsupported, 375 total' \
+    'Summary: 80 passed, 247 unverified, 48 policy-denied, 0 unsupported, 375 total' \
     'PASS requires a runtime conformance probe; dispatch alone remains UNVERIFIED.' \
     'FAIL unknown Linux syscall' \
     'network list' \

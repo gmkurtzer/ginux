@@ -42,7 +42,7 @@ Detailed bounded behavior for implemented calls lives in
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **79 Complete**, **248 Partial**, **48 Policy-denied**, **0 Missing**.
+Current totals: **80 Complete**, **247 Partial**, **48 Policy-denied**, **0 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -179,7 +179,7 @@ therefore omitted.
 | 49 | bind | Complete |
 | 50 | listen | Complete |
 | 51 | getsockname | Complete |
-| 52 | getpeername | Partial |
+| 52 | getpeername | Complete |
 | 53 | socketpair | Complete |
 | 54 | setsockopt | Complete |
 | 55 | getsockopt | Complete |

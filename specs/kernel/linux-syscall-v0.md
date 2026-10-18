@@ -13,13 +13,16 @@ copy-in, emits the exact bytes to the pinned console, and returns the requested
 length. A zero-length request or one above the limit returns `-EINVAL`.
 The socket profile proves AF_INET TCP creation, ephemeral bind, listen,
 `getsockname`, selected integer socket options, and Linux argument/error
-precedence. It also proves bidirectional AF_UNIX stream `socketpair` transport
+precedence. Connected AF_INET datagram and AF_UNIX stream sockets expose their
+peer names through `getpeername`, including Linux address truncation and actual
+length reporting, 32-bit descriptor narrowing, `ENOTCONN`, `ENOTSOCK`, `EBADF`,
+and `EFAULT` paths. It also proves bidirectional AF_UNIX `socketpair` transport
 through `sendto`/`recvfrom`, `sendmsg`/`recvmsg`, and
 `sendmmsg`/`recvmmsg`, plus local shutdown and descriptor cleanup. Unsupported
 families, types, protocols, flags, options, pointers, and oversized message
-vectors are rejected with their documented Linux errno. Connection setup,
-successful accept, peer-name reporting, IPv6, ancillary data, and the broader
-option surface remain Partial and are not promoted by this proof.
+vectors are rejected with their documented Linux errno. Successful TCP accept,
+IPv6, ancillary data, and the broader option surface remain Partial and are not
+promoted by this proof.
 The Linux v6.12 x86-64 table deliberately maps `uselib`, `_sysctl`,
 `create_module`, `get_kernel_syms`, `query_module`, `nfsservctl`, `getpmsg`,
 `putpmsg`, `afs_syscall`, `tuxcall`, `security`, `set_thread_area`,

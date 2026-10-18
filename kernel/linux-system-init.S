@@ -379,6 +379,94 @@ ginux_linux_system_init:
     test rax, rax
     jne .Lfailure
 
+    mov edi, 2
+    mov esi, 2
+    xor edx, edx
+    mov eax, 41
+    syscall
+    test rax, rax
+    js .Lfailure
+    mov dword ptr [rip + .Lipv4_socket], eax
+    mov dword ptr [rip + .Lstatus + 16], 16
+    mov edi, eax
+    lea rsi, [rip + .Lstatus]
+    lea rdx, [rip + .Lstatus + 16]
+    mov eax, 52
+    syscall
+    cmp rax, -107
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Lipv4_socket]
+    lea rsi, [rip + .Lipv4_peer]
+    mov edx, 16
+    mov eax, 42
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov dword ptr [rip + .Lstatus + 16], 1
+    mov edi, dword ptr [rip + .Lipv4_socket]
+    lea rsi, [rip + .Lstatus]
+    lea rdx, [rip + .Lstatus + 16]
+    mov eax, 52
+    syscall
+    test rax, rax
+    jne .Lfailure
+    cmp byte ptr [rip + .Lstatus], 2
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus + 16], 16
+    jne .Lfailure
+    mov dword ptr [rip + .Lstatus + 16], 16
+    mov edi, dword ptr [rip + .Lipv4_socket]
+    mov rax, 0x100000000
+    or rdi, rax
+    lea rsi, [rip + .Lstatus]
+    lea rdx, [rip + .Lstatus + 16]
+    mov eax, 52
+    syscall
+    test rax, rax
+    jne .Lfailure
+    cmp word ptr [rip + .Lstatus], 2
+    jne .Lfailure
+    cmp word ptr [rip + .Lstatus + 2], 0x3500
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus + 4], 0x0202000a
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus + 16], 16
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Lipv4_socket]
+    lea rsi, [rip + .Lstatus]
+    xor edx, edx
+    mov eax, 52
+    syscall
+    cmp rax, -14
+    jne .Lfailure
+    mov dword ptr [rip + .Lstatus + 16], 16
+    mov edi, dword ptr [rip + .Lipv4_socket]
+    mov esi, 1
+    lea rdx, [rip + .Lstatus + 16]
+    mov eax, 52
+    syscall
+    cmp rax, -14
+    jne .Lfailure
+    mov edi, 1
+    lea rsi, [rip + .Lstatus]
+    lea rdx, [rip + .Lstatus + 16]
+    mov eax, 52
+    syscall
+    cmp rax, -88
+    jne .Lfailure
+    mov edi, 9999
+    lea rsi, [rip + .Lstatus]
+    lea rdx, [rip + .Lstatus + 16]
+    mov eax, 52
+    syscall
+    cmp rax, -9
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Lipv4_socket]
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Lfailure
+
     xor edi, edi
     mov esi, 4096
     mov edx, 3
@@ -2696,6 +2784,14 @@ ginux_linux_system_init:
     .space 32
 .align 8
 .Lsocket_pair:
+    .space 8
+.Lipv4_socket:
+    .long 0
+.align 2
+.Lipv4_peer:
+    .word 2
+    .byte 0, 53
+    .byte 10, 0, 2, 2
     .space 8
 .Lmmsg_payload:
     .ascii "mmsg!"
