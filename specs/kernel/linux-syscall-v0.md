@@ -1353,21 +1353,22 @@ read-only mapping, observes zeroes from ring 3, and unmaps it normally. Other
 advice, ranges, or inactive mappings return `-EINVAL` without changing the
 contents. There is no paging policy, reclamation queue, or lazy refill.
 `rax = 440` (`__NR_process_madvise`) accepts the same four hints and
-`MADV_DONTNEED` across up to Linux's `IOV_MAX=1024`
-native iovecs through a live pidfd for the calling process. It applies the same
+`MADV_DONTNEED` across up to Linux's `IOV_MAX=1024` native iovecs through a
+generation-bound live pidfd for the calling process. It applies the same
 `MADV_DONTNEED` operation to each nonempty range and returns the total advised
 byte count. A later failing vector returns the successfully processed prefix,
 matching the syscall's partial-progress contract. Unknown flags or advice
-return `-EINVAL`, invalid vector memory returns `-EFAULT`, and a closed or
-foreign pidfd returns `-EBADF` or `-ESRCH`. Advising another process and all
-other advice values remain unsupported.
+return `-EINVAL`, invalid vector memory returns `-EFAULT`, a closed descriptor
+returns `-EBADF`, a stale pidfd returns `-ESRCH`, and a live cross-process
+pidfd returns `-EPERM` until the ptrace access-mode model is available.
+Advising another process and all other advice values remain unsupported.
 `rax = 448` (`__NR_process_mrelease`) validates flags and a live pidfd using
-the same generation-bound descriptor contract. Every pidfd currently creatable
-by `pidfd_open` names the live caller, for which Linux requires `-EINVAL`
-because memory release is permitted only after exit begins. Closed descriptors
-return `-EBADF`, foreign generations return `-ESRCH`, and nonzero flags return
-`-EINVAL`. Reclaiming an exiting child remains pending until pidfds can retain
-zombie process identities.
+the same generation-bound descriptor contract. A pidfd naming the live caller
+returns `-EINVAL` because memory release is permitted only after exit begins.
+Closed descriptors return `-EBADF`, stale generations return `-ESRCH`, live
+cross-process pidfds return `-EPERM`, and nonzero flags return `-EINVAL`.
+Reclaiming an exiting child remains pending until the ptrace permission and
+remote-address-space release paths are implemented.
 `rax = 27` (`__NR_mincore`) accepts any fully occupied nonzero scratch range
 rounding to one through four pages, including a range crossing adjacent
 registry records, and atomically
@@ -1882,14 +1883,19 @@ active address space is released. `wait4` accepts only the exact positive child
 PID, zero options, and a null rusage pointer. It validates a non-null four-byte
 status output before reaping, writes `42 << 8`, and returns PID 2. Invalid
 options return `-EINVAL`, an invalid status pointer returns `-EFAULT`, and a
-missing or already reaped child returns `-ECHILD`. `waitid` admits `P_ALL` and
-positive `P_PID` with `WEXITED`, optionally combined with `WNOHANG` and
-`WNOWAIT`. It produces a fully initialized `SIGCHLD`/`CLD_EXITED` `siginfo_t`,
-supports non-consuming observation, zeroes the result for a running child under
-`WNOHANG`, and validates optional zeroed rusage before consuming a zombie.
-Blocking on a running child, group and pidfd selectors, stopped/continued
-states, nonzero accounting, general process-style `clone`, and concurrent
-parent/child execution remain unsupported.
+missing or already reaped child returns `-ECHILD`. `waitid` admits `P_ALL`,
+positive `P_PID`, and a generation-bound child `P_PIDFD` with `WEXITED`,
+optionally combined with `WNOHANG` and `WNOWAIT`. Its selector, identifier,
+and option words follow Linux's 32-bit UAPI conversion. It produces a fully
+initialized `SIGCHLD`/`CLD_EXITED` `siginfo_t`, including the child's real UID,
+supports repeatable non-consuming observation, zeroes the result for a running
+child under `WNOHANG`, and validates optional zeroed rusage before consuming a
+zombie. Waiting without `WNOHANG` on a running child through a nonblocking
+pidfd returns `-EAGAIN`; a non-child pidfd returns `-ECHILD`, and a non-pidfd
+descriptor returns `-EBADF`. Blocking on a running child through a blocking
+selector, process-group selectors, stopped/continued states, nonzero
+accounting, general process-style `clone`, and concurrent parent/child
+execution remain unsupported.
 Immediately before entry, the kernel:
 
 - saves `EFER`, `STAR`, `LSTAR`, and `FMASK`;

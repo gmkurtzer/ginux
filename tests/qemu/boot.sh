@@ -3308,6 +3308,14 @@ if ! grep -q '^ginux: Linux cross-process resource limits validated' "$output_fi
     echo "Boot test failed: Linux cross-process resource limits were not validated." >&2
     exit 1
 fi
+if ! grep -q '^ginux: Linux nonblocking pidfd wait validated' "$output_file"; then
+    echo "Boot test failed: Linux nonblocking pidfd wait was not validated." >&2
+    exit 1
+fi
+if ! grep -q '^ginux: Linux generation-bound pidfds validated' "$output_file"; then
+    echo "Boot test failed: Linux generation-bound pidfd lifecycle was not validated." >&2
+    exit 1
+fi
 if ! grep -q '^ginux: Linux UNIX in-flight descriptor limit enforced' "$output_file"; then
     echo "Boot test failed: Linux UNIX in-flight descriptor limits were not enforced." >&2
     exit 1

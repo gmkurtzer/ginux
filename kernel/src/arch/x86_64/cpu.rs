@@ -545,6 +545,7 @@ const LINUX_WCONTINUED: u64 = 8;
 const LINUX_WNOWAIT: u64 = 0x0100_0000;
 const LINUX_P_ALL: u64 = 0;
 const LINUX_P_PID: u64 = 1;
+const LINUX_P_PIDFD: u64 = 3;
 const LINUX_CLD_EXITED: i32 = 1;
 const LINUX_RUSAGE_SIZE: usize = 144;
 const LINUX_PROT_READ: u64 = 1;
@@ -3671,6 +3672,13 @@ fn execute_deferred_live_fork() -> bool {
             serial_write_u64(child.general[0]);
             serial_write("\r\n");
         }
+        return false;
+    }
+    if cfg!(feature = "verification-boot")
+        && !LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
+        && !LINUX_CROSS_PROCESS_PRLIMIT_VALIDATED.load(Ordering::SeqCst)
+        && !verify_linux_running_child_pidfd(child.pid)
+    {
         return false;
     }
     LINUX_PROCESS_CHILD_EXITED.store(false, Ordering::SeqCst);
@@ -10354,15 +10362,31 @@ fn linux_waitid(id_type: u64, id: u64, information: u64, options: u64, rusage: u
     if current_linux_tid() != Some(current_linux_process_pid()) {
         return LINUX_ECHILD;
     }
+    let id_type = u64::from(id_type as u32);
+    let id = u64::from(id as u32);
+    let options = u64::from(options as u32);
     if options & !(LINUX_WEXITED | LINUX_WNOHANG | LINUX_WNOWAIT) != 0
         || options & LINUX_WEXITED == 0
     {
         return LINUX_EINVAL;
     }
-    let child = match id_type {
-        LINUX_P_ALL => None,
-        LINUX_P_PID if (1..=i32::MAX as u64).contains(&id) => Some(id as u32),
+    let (child, nonblocking_pidfd) = match id_type {
+        LINUX_P_ALL => (None, false),
+        LINUX_P_PID if (1..=i32::MAX as u64).contains(&id) => (Some(id as u32), false),
         LINUX_P_PID => return LINUX_EINVAL,
+        LINUX_P_PIDFD if id <= i32::MAX as u64 => {
+            if !linux_pidfd_descriptor(id) {
+                return LINUX_EBADF;
+            }
+            let Some(process) = linux_pidfd_process(id) else {
+                return LINUX_ECHILD;
+            };
+            (
+                Some(process),
+                linux_socket_flags(id).is_some_and(|flags| flags & LINUX_O_NONBLOCK as u32 != 0),
+            )
+        }
+        LINUX_P_PIDFD => return LINUX_EBADF,
         _ => return LINUX_EINVAL,
     };
     if information != 0 && !linux_writable_user_range_contains(information, SIGNAL_INFORMATION_SIZE)
@@ -10378,7 +10402,11 @@ fn linux_waitid(id_type: u64, id: u64, information: u64, options: u64, rusage: u
     };
     let linux_process::ChildWaitState::Exited { pid, status } = state else {
         if options & LINUX_WNOHANG == 0 {
-            return LINUX_ENOSYS;
+            return if nonblocking_pidfd {
+                LINUX_EAGAIN
+            } else {
+                LINUX_ENOSYS
+            };
         }
         if information != 0 && !copy_to_linux_user(information, &[0_u8; SIGNAL_INFORMATION_SIZE]) {
             return LINUX_EFAULT;
@@ -10392,6 +10420,10 @@ fn linux_waitid(id_type: u64, id: u64, information: u64, options: u64, rusage: u
     result[..4].copy_from_slice(&(LINUX_SIGCHLD as i32).to_ne_bytes());
     result[8..12].copy_from_slice(&LINUX_CLD_EXITED.to_ne_bytes());
     result[16..20].copy_from_slice(&pid.to_ne_bytes());
+    let uid = linux_process::live_process_user_namespace(pid)
+        .and_then(linux_user::credentials)
+        .map_or(0, |credentials| credentials.uid);
+    result[20..24].copy_from_slice(&uid.to_ne_bytes());
     result[24..28].copy_from_slice(&u32::from(status).to_ne_bytes());
     if information != 0 && !copy_to_linux_user(information, &result) {
         return LINUX_EFAULT;
@@ -10399,12 +10431,12 @@ fn linux_waitid(id_type: u64, id: u64, information: u64, options: u64, rusage: u
     if rusage != 0 && !copy_to_linux_user(rusage, &[0_u8; LINUX_RUSAGE_SIZE]) {
         return LINUX_EFAULT;
     }
-    if options & LINUX_WNOWAIT == 0
-        && linux_process::wait_live_child(parent, pid) != Some((pid, status))
-    {
-        return LINUX_ECHILD;
+    if options & LINUX_WNOWAIT == 0 {
+        if linux_process::wait_live_child(parent, pid) != Some((pid, status)) {
+            return LINUX_ECHILD;
+        }
+        LINUX_PROCESS_WAIT_COUNT.fetch_add(1, Ordering::SeqCst);
     }
-    LINUX_PROCESS_WAIT_COUNT.fetch_add(1, Ordering::SeqCst);
     0
 }
 
@@ -31416,12 +31448,27 @@ fn verify_linux_cross_process_prlimit(pid: u32) -> bool {
             },
             (0, 0),
         ) == 0;
+    let pidfd_wait = pidfd_opened
+        && linux_waitid(
+            (1_u64 << 32) | LINUX_P_PIDFD,
+            (1_u64 << 32) | pidfd,
+            0,
+            (1_u64 << 32) | LINUX_WEXITED | LINUX_WNOWAIT,
+            0,
+        ) == 0
+        && linux_waitid(LINUX_P_PIDFD, pidfd, 0, LINUX_WEXITED | LINUX_WNOWAIT, 0) == 0
+        && linux_process::live_child_wait_state(current_linux_process_pid(), Some(pid))
+            == Some(linux_process::ChildWaitState::Exited {
+                pid,
+                status: LINUX_PROBE_EXIT_STATUS as u8,
+            });
     let pidfd_getfd = pidfd_opened && linux_pidfd_getfd(pidfd, 1, 0) == LINUX_EPERM;
     let pidfd_closed = !pidfd_opened || linux_descriptor_close(pidfd) == 0;
     let pidfd_valid = pidfd_opened
         && pidfd_identity
         && pidfd_ready
         && pidfd_signal
+        && pidfd_wait
         && pidfd_getfd
         && pidfd_closed;
     let valid = changed && restored && errors && widths && pidfd_valid;
@@ -31440,6 +31487,7 @@ fn verify_linux_cross_process_prlimit(pid: u32) -> bool {
             pidfd_identity,
             pidfd_ready,
             pidfd_signal,
+            pidfd_wait,
             pidfd_getfd,
             pidfd_closed,
         ] {
@@ -31447,6 +31495,39 @@ fn verify_linux_cross_process_prlimit(pid: u32) -> bool {
             serial_write_u64(u64::from(value));
         }
         serial_write("\r\n");
+    }
+    valid
+}
+
+fn verify_linux_running_child_pidfd(pid: u32) -> bool {
+    let child_pidfd = linux_pidfd_open(u64::from(pid), LINUX_O_NONBLOCK);
+    let child_opened = child_pidfd < LINUX_AUX_DESCRIPTOR_LIMIT;
+    let running = child_opened
+        && linux_waitid(
+            (1_u64 << 32) | LINUX_P_PIDFD,
+            (1_u64 << 32) | child_pidfd,
+            0,
+            (1_u64 << 32) | LINUX_WEXITED,
+            0,
+        ) == LINUX_EAGAIN
+        && linux_waitid(
+            LINUX_P_PIDFD,
+            child_pidfd,
+            0,
+            LINUX_WEXITED | LINUX_WNOHANG,
+            0,
+        ) == 0;
+    let parent_pidfd = linux_pidfd_open(u64::from(current_linux_process_pid()), 0);
+    let parent_opened = parent_pidfd < LINUX_AUX_DESCRIPTOR_LIMIT;
+    let errors = parent_opened
+        && linux_waitid(LINUX_P_PIDFD, parent_pidfd, 0, LINUX_WEXITED, 0) == LINUX_ECHILD
+        && linux_waitid(LINUX_P_PIDFD, 1, 0, LINUX_WEXITED, 0) == LINUX_EBADF
+        && linux_waitid(LINUX_P_PIDFD, u64::from(u32::MAX), 0, LINUX_WEXITED, 0) == LINUX_EBADF;
+    let parent_closed = !parent_opened || linux_descriptor_close(parent_pidfd) == 0;
+    let child_closed = !child_opened || linux_descriptor_close(child_pidfd) == 0;
+    let valid = child_opened && running && parent_opened && errors && parent_closed && child_closed;
+    if valid {
+        serial_write("ginux: Linux nonblocking pidfd wait validated\r\n");
     }
     valid
 }
