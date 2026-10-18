@@ -20,7 +20,7 @@ until every invariant has an automated end-to-end test.
    heap, mmap state, TLS, descriptors, CWD, signals, threads, process table,
    mount namespace, tmpfs, and console continuation cannot be selected through
    a host-wide singleton.
-2. **A running domain owns its memory until it exits.** OCI runtimes cannot
+2. **A running domain owns its memory until it exits.** Linux runtimes cannot
    share the reusable bootstrap runtime extent.
 3. **Detach is a scheduler operation.** It must save a resumable process context
    and return to the resident controller. It must not recursively invoke a new
@@ -105,7 +105,7 @@ The domain-first control-plane iteration was verified on 2026-10-15:
 
 ## Stabilization progress
 
-- OCI runtime extents are now allocated per domain slot. Starting another
+- Linux runtime extents are now allocated per domain slot. Starting another
   domain can no longer reuse the first domain's runtime pages.
 - Mutable Linux/ELF ABI state is now banked by the executing domain,
   with a separate host/proof instance. Controller handoff temporarily selects

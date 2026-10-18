@@ -331,12 +331,17 @@ personality domain. `shutdown` stops the host.
 
 OCI layers are downloaded and verified in manifest order, then assembled with
 replacement, whiteout, and opaque-directory semantics before publication.
+OCI ends at that publication boundary. The resulting immutable root filesystem
+is source-neutral: the domain's Linux personality owns VFS lookup, ELF loading,
+process creation, scheduling, and init lifecycle. Domain execution therefore
+does not depend on OCI state and uses the same path for root filesystems
+published by future transports or local storage.
 Full controlling-terminal and session semantics are still incomplete. Rocky
 Linux 10 now starts an unmodified glibc `/bin/sh`; shell builtins, file status,
 dynamic `cat`, and root-directory `ls` pass the QEMU lifecycle gate. This is a
 meaningful ABI checkpoint, not a claim of general Linux or systemd
 compatibility. The process layer contains generation-checked copy-on-write,
-but OCI runtime forks currently use eager private copies: repeated Rocky
+but Linux personality forks currently use eager private copies: repeated Rocky
 fork/exec/exit cycles exposed incomplete COW retirement bookkeeping, so the
 optimization is disabled on the production path until that lifecycle is
 validated end to end. Process metadata remains bounded, and major surfaces

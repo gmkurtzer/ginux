@@ -149,26 +149,26 @@ static LAST_UNSAFE_DEVICE_QUIESCE_WAS_ACTIVE: AtomicBool = AtomicBool::new(false
 static INTERACTIVE_CONTROLLER_IMAGE: AtomicUsize = AtomicUsize::new(0);
 static INTERACTIVE_CONTROLLER_IMAGE_SIZE: AtomicUsize = AtomicUsize::new(0);
 static INTERACTIVE_CONTROLLER_DOMAIN: AtomicU64 = AtomicU64::new(0);
-const OCI_RUNTIME_FRAME_CAPACITY: usize = 440;
-const OCI_OWNED_FRAME_COUNT: usize = 8;
-static OCI_RUNTIME_ACTIVE: [AtomicBool; crate::control_abi::DOMAIN_LIMIT] =
+const LINUX_RUNTIME_FRAME_CAPACITY: usize = 440;
+const LINUX_OWNED_FRAME_COUNT: usize = 8;
+static LINUX_RUNTIME_ACTIVE: [AtomicBool; crate::control_abi::DOMAIN_LIMIT] =
     [const { AtomicBool::new(false) }; crate::control_abi::DOMAIN_LIMIT];
-static mut OCI_RUNTIME_OWNED_FRAMES: [[memory::FrameLease; OCI_OWNED_FRAME_COUNT];
+static mut LINUX_RUNTIME_OWNED_FRAMES: [[memory::FrameLease; LINUX_OWNED_FRAME_COUNT];
     crate::control_abi::DOMAIN_LIMIT] =
-    [[memory::FrameLease::EMPTY; OCI_OWNED_FRAME_COUNT]; crate::control_abi::DOMAIN_LIMIT];
-static mut OCI_RUNTIME_FRAMES: [[memory::FrameLease; OCI_RUNTIME_FRAME_CAPACITY];
+    [[memory::FrameLease::EMPTY; LINUX_OWNED_FRAME_COUNT]; crate::control_abi::DOMAIN_LIMIT];
+static mut LINUX_RUNTIME_FRAMES: [[memory::FrameLease; LINUX_RUNTIME_FRAME_CAPACITY];
     crate::control_abi::DOMAIN_LIMIT] =
-    [[memory::FrameLease::EMPTY; OCI_RUNTIME_FRAME_CAPACITY]; crate::control_abi::DOMAIN_LIMIT];
+    [[memory::FrameLease::EMPTY; LINUX_RUNTIME_FRAME_CAPACITY]; crate::control_abi::DOMAIN_LIMIT];
 
 #[derive(Clone, Copy, Eq, PartialEq)]
-pub(crate) enum OciProcessOutcome {
+pub(crate) enum LinuxProcessOutcome {
     Exited(u8),
     Suspended,
     Failed,
 }
 
-pub(crate) fn oci_runtime_is_suspended(slot: usize) -> bool {
-    OCI_RUNTIME_ACTIVE
+pub(crate) fn linux_runtime_is_suspended(slot: usize) -> bool {
+    LINUX_RUNTIME_ACTIVE
         .get(slot)
         .is_some_and(|active| active.load(Ordering::Acquire))
 }
@@ -211,33 +211,34 @@ pub(crate) fn run_installed_interactive_controller() -> bool {
     valid && current_root() == linux_root
 }
 
-pub(crate) fn run_oci_process(init: &[u8]) -> OciProcessOutcome {
+pub(crate) fn run_linux_init(init: &[u8]) -> LinuxProcessOutcome {
     const HIERARCHY_FRAMES: usize = 6;
     const HEAP_ADDRESS: u64 = 0x80_0000;
     const STACK_ADDRESS: u64 = 0x88_0000;
     const MMAP_ADDRESS: u64 = 0x90_0000;
 
     let Some(slot) = cpu::current_container_slot() else {
-        return OciProcessOutcome::Failed;
+        return LinuxProcessOutcome::Failed;
     };
-    if OCI_RUNTIME_ACTIVE[slot].load(Ordering::Acquire) {
-        return resume_oci_process(slot, MMAP_ADDRESS);
+    if LINUX_RUNTIME_ACTIVE[slot].load(Ordering::Acquire) {
+        return resume_linux_init(slot, MMAP_ADDRESS);
     }
-    let Some(plan) = crate::oci_image::process_plan(init) else {
-        crate::serial_write_bytes(b"ginux: OCI init load plan unavailable\r\n");
-        return OciProcessOutcome::Failed;
+    let Some(plan) = crate::published_rootfs::process_plan(init) else {
+        crate::serial_write_bytes(b"ginux: Linux init load plan unavailable\r\n");
+        return LinuxProcessOutcome::Failed;
     };
     let startup = crate::linux_elf::relocatable_startup(&plan);
-    let Some(frames) = memory::allocate_frames::<OCI_OWNED_FRAME_COUNT>(memory::FrameOwner::KERNEL)
+    let Some(frames) =
+        memory::allocate_frames::<LINUX_OWNED_FRAME_COUNT>(memory::FrameOwner::KERNEL)
     else {
-        crate::serial_write_bytes(b"ginux: OCI init hierarchy allocation failed\r\n");
-        return OciProcessOutcome::Failed;
+        crate::serial_write_bytes(b"ginux: Linux init hierarchy allocation failed\r\n");
+        return LinuxProcessOutcome::Failed;
     };
-    let Some(runtime_frames) = memory::allocate_runtime_extent::<OCI_RUNTIME_FRAME_CAPACITY>()
+    let Some(runtime_frames) = memory::allocate_runtime_extent::<LINUX_RUNTIME_FRAME_CAPACITY>()
     else {
-        crate::serial_write_bytes(b"ginux: OCI init image allocation failed\r\n");
+        crate::serial_write_bytes(b"ginux: Linux init image allocation failed\r\n");
         let _ = memory::release_frames(memory::FrameOwner::KERNEL, frames);
-        return OciProcessOutcome::Failed;
+        return LinuxProcessOutcome::Failed;
     };
     let kernel_root = current_root();
     let mut stage = 0_u8;
@@ -371,7 +372,7 @@ pub(crate) fn run_oci_process(init: &[u8]) -> OciProcessOutcome {
 
         let stack =
             unsafe { &mut *(mapped_frame::<u8>(stack_frame.address())? as *mut [u8; PAGE_SIZE]) };
-        let arguments = crate::oci_image::launch_arguments(init)?;
+        let arguments = crate::published_rootfs::launch_arguments(init)?;
         let path_environment = b"PATH=/bin:/usr/bin:/sbin:/usr/sbin\0";
         let pwd_environment = b"PWD=/\0";
         let mut argument_offsets = [0_usize; 3];
@@ -500,22 +501,22 @@ pub(crate) fn run_oci_process(init: &[u8]) -> OciProcessOutcome {
     }
     if valid && result.suspended {
         unsafe {
-            OCI_RUNTIME_OWNED_FRAMES[slot] = frames;
-            OCI_RUNTIME_FRAMES[slot] = runtime_frames;
+            LINUX_RUNTIME_OWNED_FRAMES[slot] = frames;
+            LINUX_RUNTIME_FRAMES[slot] = runtime_frames;
         }
-        OCI_RUNTIME_ACTIVE[slot].store(true, Ordering::Release);
-        return OciProcessOutcome::Suspended;
+        LINUX_RUNTIME_ACTIVE[slot].store(true, Ordering::Release);
+        return LinuxProcessOutcome::Suspended;
     }
     let runtime_scrubbed = memory::scrub_runtime_extent(runtime_frames);
     if !valid {
-        crate::serial_write_bytes(b"ginux: OCI init setup failed at stage ");
+        crate::serial_write_bytes(b"ginux: Linux init setup failed at stage ");
         crate::serial_write_u64(u64::from(stage));
         crate::serial_write_bytes(b"\r\n");
     }
     if valid && runtime_scrubbed && memory::release_frames(memory::FrameOwner::KERNEL, frames) {
         let (status, syscall) = cpu::linux_runtime_diagnostics();
         if status.is_some_and(|status| status != 0) || syscall.is_some() {
-            crate::serial_write_bytes(b"ginux: OCI init diagnostics: exit=");
+            crate::serial_write_bytes(b"ginux: Linux init diagnostics: exit=");
             status.map_or_else(
                 || crate::serial_write_bytes(b"signal"),
                 |status| crate::serial_write_u64(u64::from(status)),
@@ -528,33 +529,33 @@ pub(crate) fn run_oci_process(init: &[u8]) -> OciProcessOutcome {
             crate::serial_write_bytes(b"\r\n");
             cpu::write_linux_runtime_syscall_trace();
         }
-        OciProcessOutcome::Exited(status.unwrap_or(u8::MAX))
+        LinuxProcessOutcome::Exited(status.unwrap_or(u8::MAX))
     } else {
-        OciProcessOutcome::Failed
+        LinuxProcessOutcome::Failed
     }
 }
 
-fn resume_oci_process(slot: usize, mmap: u64) -> OciProcessOutcome {
+fn resume_linux_init(slot: usize, mmap: u64) -> LinuxProcessOutcome {
     let (frames, runtime_frames) =
-        unsafe { (OCI_RUNTIME_OWNED_FRAMES[slot], OCI_RUNTIME_FRAMES[slot]) };
+        unsafe { (LINUX_RUNTIME_OWNED_FRAMES[slot], LINUX_RUNTIME_FRAMES[slot]) };
     let kernel_root = current_root();
     unsafe { activate(frames[0].address()) };
     let result = cpu::resume_suspended_linux_runtime(mmap);
     unsafe { activate(kernel_root) };
     if result.valid && result.suspended {
-        return OciProcessOutcome::Suspended;
+        return LinuxProcessOutcome::Suspended;
     }
-    OCI_RUNTIME_ACTIVE[slot].store(false, Ordering::Release);
+    LINUX_RUNTIME_ACTIVE[slot].store(false, Ordering::Release);
     unsafe {
-        OCI_RUNTIME_OWNED_FRAMES[slot] = [memory::FrameLease::EMPTY; OCI_OWNED_FRAME_COUNT];
-        OCI_RUNTIME_FRAMES[slot] = [memory::FrameLease::EMPTY; OCI_RUNTIME_FRAME_CAPACITY];
+        LINUX_RUNTIME_OWNED_FRAMES[slot] = [memory::FrameLease::EMPTY; LINUX_OWNED_FRAME_COUNT];
+        LINUX_RUNTIME_FRAMES[slot] = [memory::FrameLease::EMPTY; LINUX_RUNTIME_FRAME_CAPACITY];
     }
     let released = memory::scrub_runtime_extent(runtime_frames)
         && memory::release_frames(memory::FrameOwner::KERNEL, frames);
     if result.valid && released {
-        OciProcessOutcome::Exited(cpu::linux_runtime_diagnostics().0.unwrap_or(u8::MAX))
+        LinuxProcessOutcome::Exited(cpu::linux_runtime_diagnostics().0.unwrap_or(u8::MAX))
     } else {
-        OciProcessOutcome::Failed
+        LinuxProcessOutcome::Failed
     }
 }
 

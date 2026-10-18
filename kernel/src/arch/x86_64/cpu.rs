@@ -1474,7 +1474,7 @@ static ELF_PROBE_CONSOLE_CLOEXEC: [BankedAtomicU64; LINUX_DESCRIPTOR_FLAG_WORD_C
     [const { BankedAtomicU64::new(0) }; LINUX_DESCRIPTOR_FLAG_WORD_COUNT];
 static ELF_PROBE_DEVICE_DESCRIPTORS: [BankedAtomicU16; LINUX_DEVICE_DESCRIPTOR_COUNT] =
     [const { BankedAtomicU16::new(0) }; LINUX_DEVICE_DESCRIPTOR_COUNT];
-static ELF_PROBE_OCI_DESCRIPTORS: [BankedAtomicU16; LINUX_DEVICE_DESCRIPTOR_COUNT] =
+static ELF_PROBE_ROOTFS_DESCRIPTORS: [BankedAtomicU16; LINUX_DEVICE_DESCRIPTOR_COUNT] =
     [const { BankedAtomicU16::new(0) }; LINUX_DEVICE_DESCRIPTOR_COUNT];
 static ELF_PROBE_SOCKET_SLOTS: [BankedAtomicU8; LINUX_DEVICE_DESCRIPTOR_COUNT] =
     [const { BankedAtomicU8::new(0) }; LINUX_DEVICE_DESCRIPTOR_COUNT];
@@ -1513,7 +1513,7 @@ static LINUX_IO_URING_CQ_RING: BankedAtomicU64 = BankedAtomicU64::new(0);
 static LINUX_IO_URING_SQES: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_STDIO_DEVICE_DESCRIPTORS: [BankedAtomicU16; 3] =
     [const { BankedAtomicU16::new(0) }; 3];
-static ELF_PROBE_STDIO_OCI_DESCRIPTORS: [BankedAtomicU16; 3] =
+static ELF_PROBE_STDIO_ROOTFS_DESCRIPTORS: [BankedAtomicU16; 3] =
     [const { BankedAtomicU16::new(0) }; 3];
 static ELF_PROBE_STDIO_TMP_FILE_GENERATIONS: [BankedAtomicU32; 3] =
     [const { BankedAtomicU32::new(0) }; 3];
@@ -1523,7 +1523,8 @@ static ELF_PROBE_OPEN_FILE_IDS: [BankedAtomicU64; LINUX_DEVICE_DESCRIPTOR_COUNT]
     [const { BankedAtomicU64::new(0) }; LINUX_DEVICE_DESCRIPTOR_COUNT];
 static LINUX_NEXT_OPEN_FILE_ID: BankedAtomicU64 = BankedAtomicU64::new(1);
 static ELF_PROBE_CWD: BankedAtomicU16 = BankedAtomicU16::new(LINUX_ROOT_DIRECTORY);
-static ELF_PROBE_OCI_CWD: BankedAtomicU16 = BankedAtomicU16::new(crate::oci_image::ROOT_HANDLE);
+static ELF_PROBE_ROOTFS_CWD: BankedAtomicU16 =
+    BankedAtomicU16::new(crate::published_rootfs::ROOT_HANDLE);
 static ELF_PROBE_OVERLAY_CWD: BankedAtomicU32 = BankedAtomicU32::new(0);
 static ELF_PROBE_EPOLL_DESCRIPTOR: BankedAtomicU16 = BankedAtomicU16::new(0);
 static ELF_PROBE_EPOLL_TARGET: BankedAtomicU64 = BankedAtomicU64::new(u64::MAX);
@@ -6284,7 +6285,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
     for descriptor in &ELF_PROBE_DEVICE_DESCRIPTORS {
         descriptor.store(0, Ordering::SeqCst);
     }
-    for descriptor in &ELF_PROBE_OCI_DESCRIPTORS {
+    for descriptor in &ELF_PROBE_ROOTFS_DESCRIPTORS {
         descriptor.store(0, Ordering::SeqCst);
     }
     for slot in &ELF_PROBE_SOCKET_SLOTS {
@@ -6340,7 +6341,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
     for descriptor in &ELF_PROBE_STDIO_DEVICE_DESCRIPTORS {
         descriptor.store(0, Ordering::SeqCst);
     }
-    for descriptor in &ELF_PROBE_STDIO_OCI_DESCRIPTORS {
+    for descriptor in &ELF_PROBE_STDIO_ROOTFS_DESCRIPTORS {
         descriptor.store(0, Ordering::SeqCst);
     }
     for generation in &ELF_PROBE_STDIO_TMP_FILE_GENERATIONS {
@@ -6357,7 +6358,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
     }
     LINUX_NEXT_OPEN_FILE_ID.store(1, Ordering::SeqCst);
     ELF_PROBE_CWD.store(LINUX_ROOT_DIRECTORY, Ordering::SeqCst);
-    ELF_PROBE_OCI_CWD.store(crate::oci_image::ROOT_HANDLE, Ordering::SeqCst);
+    ELF_PROBE_ROOTFS_CWD.store(crate::published_rootfs::ROOT_HANDLE, Ordering::SeqCst);
     ELF_PROBE_OVERLAY_CWD.store(0, Ordering::SeqCst);
     ELF_PROBE_EPOLL_DESCRIPTOR.store(0, Ordering::SeqCst);
     ELF_PROBE_EPOLL_TARGET.store(u64::MAX, Ordering::SeqCst);
@@ -6555,7 +6556,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
     let linux_wait_timer_armed = timer::arm_linux_wait_timer();
     if !linux_wait_timer_armed {
         if execution.runtime {
-            serial_write("ginux: OCI wait timer setup failed\r\n");
+            serial_write("ginux: Linux wait timer setup failed\r\n");
         }
         let _ = restore_linux_syscall(saved_msrs);
         let _ = finish_linux_thread_table();
@@ -6564,7 +6565,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
     }
     if !linux_mount::activate_initial() {
         if execution.runtime {
-            serial_write("ginux: OCI mount setup failed\r\n");
+            serial_write("ginux: Linux mount setup failed\r\n");
         }
         let _ = timer::finish_linux_wait_timer();
         let _ = restore_linux_syscall(saved_msrs);
@@ -6986,9 +6987,9 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
     for descriptor in &ELF_PROBE_DEVICE_DESCRIPTORS {
         devices_closed &= descriptor.swap(0, Ordering::SeqCst) == 0;
     }
-    let mut oci_descriptors_closed = true;
-    for descriptor in &ELF_PROBE_OCI_DESCRIPTORS {
-        oci_descriptors_closed &= descriptor.swap(0, Ordering::SeqCst) == 0;
+    let mut rootfs_descriptors_closed = true;
+    for descriptor in &ELF_PROBE_ROOTFS_DESCRIPTORS {
+        rootfs_descriptors_closed &= descriptor.swap(0, Ordering::SeqCst) == 0;
     }
     let mut sockets_closed = true;
     for slot in &ELF_PROBE_SOCKET_SLOTS {
@@ -7001,11 +7002,11 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
     let descriptor_state_valid = ELF_PROBE_CONSOLE_DESCRIPTORS.swap(0, Ordering::SeqCst) == 0
         && clear_linux_descriptor_close_on_exec()
         && ELF_PROBE_CWD.swap(LINUX_ROOT_DIRECTORY, Ordering::SeqCst) == LINUX_ROOT_DIRECTORY
-        && ELF_PROBE_OCI_CWD.swap(crate::oci_image::ROOT_HANDLE, Ordering::SeqCst)
-            == crate::oci_image::ROOT_HANDLE
+        && ELF_PROBE_ROOTFS_CWD.swap(crate::published_rootfs::ROOT_HANDLE, Ordering::SeqCst)
+            == crate::published_rootfs::ROOT_HANDLE
         && ELF_PROBE_OVERLAY_CWD.swap(0, Ordering::SeqCst) == 0
         && devices_closed
-        && oci_descriptors_closed
+        && rootfs_descriptors_closed
         && sockets_closed
         && ELF_PROBE_EPOLL_DESCRIPTOR.swap(0, Ordering::SeqCst) == 0
         && ELF_PROBE_EPOLL_TARGET.swap(u64::MAX, Ordering::SeqCst) == u64::MAX
@@ -8345,7 +8346,7 @@ extern "sysv64" fn linux_syscall_handler(
             let device = linux_device_descriptor(first_argument);
             if device & LINUX_DEVICE_CONSOLE != 0 {
                 LINUX_ESPIPE
-            } else if linux_oci_entry(first_argument).is_some()
+            } else if linux_rootfs_entry(first_argument).is_some()
                 || linux_regular_file(device).is_some()
                 || linux_tmp_file(device)
             {
@@ -9978,7 +9979,7 @@ pub(crate) fn write_linux_runtime_syscall_trace() {
     let count = LINUX_RUNTIME_SYSCALL_TRACE_COUNT.load(Ordering::SeqCst) as usize;
     let retained = count.min(LINUX_RUNTIME_SYSCALL_TRACE_LIMIT);
     let start = count.saturating_sub(retained);
-    crate::serial_write_bytes(b"ginux: OCI init recent syscall/result pairs:");
+    crate::serial_write_bytes(b"ginux: Linux init recent syscall/result pairs:");
     for offset in 0..retained {
         let index = (start + offset) % LINUX_RUNTIME_SYSCALL_TRACE_LIMIT;
         crate::serial_write_bytes(b" ");
@@ -10868,7 +10869,7 @@ fn finish_linux_runtime(mmap: u64, saved_msrs: [u64; 5]) -> LinuxElfResult {
         && threads_released
         && inactive;
     if !valid {
-        serial_write("ginux: OCI runtime cleanup failed\r\n");
+        serial_write("ginux: Linux runtime cleanup failed\r\n");
         write_linux_runtime_syscall_trace();
     }
     LinuxElfResult {
@@ -11969,7 +11970,7 @@ struct LinuxDescriptorRuntimeState {
     stderr_open: bool,
     close_on_exec: [u64; LINUX_DESCRIPTOR_FLAG_WORD_COUNT],
     devices: [u16; LINUX_DEVICE_DESCRIPTOR_COUNT],
-    oci: [u16; LINUX_DEVICE_DESCRIPTOR_COUNT],
+    rootfs: [u16; LINUX_DEVICE_DESCRIPTOR_COUNT],
     sockets: [u8; LINUX_DEVICE_DESCRIPTOR_COUNT],
     socket_flags: [u32; LINUX_DEVICE_DESCRIPTOR_COUNT],
     stdio_sockets: [u8; 3],
@@ -11977,7 +11978,7 @@ struct LinuxDescriptorRuntimeState {
     tmp_generations: [u32; LINUX_DEVICE_DESCRIPTOR_COUNT],
     offsets: [u64; LINUX_DEVICE_DESCRIPTOR_COUNT],
     stdio_devices: [u16; 3],
-    stdio_oci: [u16; 3],
+    stdio_rootfs: [u16; 3],
     stdio_tmp_generations: [u32; 3],
     stdio_offsets: [u64; 3],
     open_file_ids: [u64; LINUX_DEVICE_DESCRIPTOR_COUNT],
@@ -12003,7 +12004,7 @@ impl LinuxDescriptorRuntimeState {
         stderr_open: false,
         close_on_exec: [0; LINUX_DESCRIPTOR_FLAG_WORD_COUNT],
         devices: [0; LINUX_DEVICE_DESCRIPTOR_COUNT],
-        oci: [0; LINUX_DEVICE_DESCRIPTOR_COUNT],
+        rootfs: [0; LINUX_DEVICE_DESCRIPTOR_COUNT],
         sockets: [0; LINUX_DEVICE_DESCRIPTOR_COUNT],
         socket_flags: [0; LINUX_DEVICE_DESCRIPTOR_COUNT],
         stdio_sockets: [0; 3],
@@ -12011,7 +12012,7 @@ impl LinuxDescriptorRuntimeState {
         tmp_generations: [0; LINUX_DEVICE_DESCRIPTOR_COUNT],
         offsets: [0; LINUX_DEVICE_DESCRIPTOR_COUNT],
         stdio_devices: [0; 3],
-        stdio_oci: [0; 3],
+        stdio_rootfs: [0; 3],
         stdio_tmp_generations: [0; 3],
         stdio_offsets: [0; 3],
         open_file_ids: [0; LINUX_DEVICE_DESCRIPTOR_COUNT],
@@ -12276,7 +12277,9 @@ fn capture_linux_descriptor_runtime_state() -> LinuxDescriptorRuntimeState {
         devices: core::array::from_fn(|index| {
             ELF_PROBE_DEVICE_DESCRIPTORS[index].load(Ordering::SeqCst)
         }),
-        oci: core::array::from_fn(|index| ELF_PROBE_OCI_DESCRIPTORS[index].load(Ordering::SeqCst)),
+        rootfs: core::array::from_fn(|index| {
+            ELF_PROBE_ROOTFS_DESCRIPTORS[index].load(Ordering::SeqCst)
+        }),
         sockets: core::array::from_fn(|index| ELF_PROBE_SOCKET_SLOTS[index].load(Ordering::SeqCst)),
         socket_flags: core::array::from_fn(|index| {
             ELF_PROBE_SOCKET_FLAGS[index].load(Ordering::SeqCst)
@@ -12296,8 +12299,8 @@ fn capture_linux_descriptor_runtime_state() -> LinuxDescriptorRuntimeState {
         stdio_devices: core::array::from_fn(|index| {
             ELF_PROBE_STDIO_DEVICE_DESCRIPTORS[index].load(Ordering::SeqCst)
         }),
-        stdio_oci: core::array::from_fn(|index| {
-            ELF_PROBE_STDIO_OCI_DESCRIPTORS[index].load(Ordering::SeqCst)
+        stdio_rootfs: core::array::from_fn(|index| {
+            ELF_PROBE_STDIO_ROOTFS_DESCRIPTORS[index].load(Ordering::SeqCst)
         }),
         stdio_tmp_generations: core::array::from_fn(|index| {
             ELF_PROBE_STDIO_TMP_FILE_GENERATIONS[index].load(Ordering::SeqCst)
@@ -12424,7 +12427,7 @@ fn install_linux_descriptor_runtime_state(state: LinuxDescriptorRuntimeState) {
     }
     for index in 0..LINUX_DEVICE_DESCRIPTOR_COUNT {
         ELF_PROBE_DEVICE_DESCRIPTORS[index].store(state.devices[index], Ordering::SeqCst);
-        ELF_PROBE_OCI_DESCRIPTORS[index].store(state.oci[index], Ordering::SeqCst);
+        ELF_PROBE_ROOTFS_DESCRIPTORS[index].store(state.rootfs[index], Ordering::SeqCst);
         ELF_PROBE_SOCKET_SLOTS[index].store(state.sockets[index], Ordering::SeqCst);
         ELF_PROBE_SOCKET_FLAGS[index].store(state.socket_flags[index], Ordering::SeqCst);
         ELF_PROBE_TMP_FILE_GENERATIONS[index].store(state.tmp_generations[index], Ordering::SeqCst);
@@ -12434,7 +12437,8 @@ fn install_linux_descriptor_runtime_state(state: LinuxDescriptorRuntimeState) {
     for index in 0..state.stdio_devices.len() {
         ELF_PROBE_STDIO_DEVICE_DESCRIPTORS[index]
             .store(state.stdio_devices[index], Ordering::SeqCst);
-        ELF_PROBE_STDIO_OCI_DESCRIPTORS[index].store(state.stdio_oci[index], Ordering::SeqCst);
+        ELF_PROBE_STDIO_ROOTFS_DESCRIPTORS[index]
+            .store(state.stdio_rootfs[index], Ordering::SeqCst);
         ELF_PROBE_STDIO_TMP_FILE_GENERATIONS[index]
             .store(state.stdio_tmp_generations[index], Ordering::SeqCst);
         ELF_PROBE_STDIO_OFFSETS[index].store(state.stdio_offsets[index], Ordering::SeqCst);
@@ -17662,7 +17666,7 @@ fn linux_runtime_mmap(
             overlay_file = Some((handle, start));
             None
         } else {
-            let Some(file) = linux_oci_entry(fd)
+            let Some(file) = linux_rootfs_entry(fd)
                 .map(|entry| entry.data)
                 .or_else(|| linux_regular_file(state))
             else {
@@ -18044,7 +18048,7 @@ fn linux_fsync(descriptor: u64) -> u64 {
         return LINUX_EBADF;
     }
     if linux_overlay_descriptor_handle(descriptor).is_some()
-        || linux_oci_entry(descriptor).is_some()
+        || linux_rootfs_entry(descriptor).is_some()
     {
         // Immutable OCI objects and RAM-backed overlay objects have no dirty
         // data outside their authoritative backing store.
@@ -18479,7 +18483,7 @@ fn linux_cachestat(descriptor: u64, range_address: u64, output_address: u64, fla
         linux_overlay_descriptor_handle(descriptor).and_then(crate::linux_overlay::metadata)
     {
         metadata.size as u64
-    } else if let Some(entry) = linux_oci_entry(descriptor) {
+    } else if let Some(entry) = linux_rootfs_entry(descriptor) {
         entry.data.len() as u64
     } else {
         return LINUX_EBADF;
@@ -19134,7 +19138,7 @@ fn linux_mmap(address: u64, length: u64, protection: u64, flags: u64, fd: u64, o
                 return LINUX_EINVAL;
             }
             let state = linux_device_descriptor(fd);
-            let Some(file) = linux_oci_entry(fd)
+            let Some(file) = linux_rootfs_entry(fd)
                 .map(|entry| entry.data)
                 .or_else(|| linux_regular_file(state))
             else {
@@ -19944,7 +19948,7 @@ fn linux_readlink_at(
     };
     let path = &path[..path_length];
     if directory as u32 != LINUX_AT_FDCWD
-        && linux_oci_descriptor(directory) == 0
+        && linux_rootfs_descriptor(directory) == 0
         && linux_overlay_descriptor_handle(directory).is_none()
     {
         return LINUX_EBADF;
@@ -19972,11 +19976,11 @@ fn linux_readlink_at(
                 LINUX_EFAULT
             };
         }
-        if let Some((_, entry)) = linux_oci_metadata_path_at(directory, path) {
+        if let Some((_, entry)) = linux_rootfs_metadata_path_at(directory, path) {
             let Some(entry) = entry else {
                 return LINUX_EINVAL;
             };
-            if entry.kind != ginux_oci::EntryKind::Symlink {
+            if entry.kind != crate::published_rootfs::EntryKind::Symlink {
                 return LINUX_EINVAL;
             }
             let output_length = usize::try_from(output_size)
@@ -20217,14 +20221,14 @@ fn linux_virtual_mount_path_at(directory: u64, path: &[u8]) -> Option<u16> {
         || if directory as u32 == LINUX_AT_FDCWD {
             ELF_PROBE_CWD.load(Ordering::SeqCst) == LINUX_ROOT_DIRECTORY
                 && matches!(
-                    ELF_PROBE_OCI_CWD.load(Ordering::SeqCst),
-                    0 | crate::oci_image::ROOT_HANDLE
+                    ELF_PROBE_ROOTFS_CWD.load(Ordering::SeqCst),
+                    0 | crate::published_rootfs::ROOT_HANDLE
                 )
         } else {
             linux_device_descriptor(directory) & !3 == LINUX_ROOT_DIRECTORY
                 && matches!(
-                    linux_oci_descriptor(directory),
-                    0 | crate::oci_image::ROOT_HANDLE
+                    linux_rootfs_descriptor(directory),
+                    0 | crate::published_rootfs::ROOT_HANDLE
                 )
         };
     from_root
@@ -20243,7 +20247,7 @@ fn linux_getcwd(address: u64, capacity: u64) -> u64 {
     let state = ELF_PROBE_CWD.load(Ordering::SeqCst);
     let mut output = [0_u8; crate::linux_overlay::PATH_CAPACITY + 1];
     output[0] = b'/';
-    let oci_cwd = ELF_PROBE_OCI_CWD.load(Ordering::SeqCst);
+    let rootfs_cwd = ELF_PROBE_ROOTFS_CWD.load(Ordering::SeqCst);
     let overlay_cwd = ELF_PROBE_OVERLAY_CWD.load(Ordering::SeqCst);
     let length = if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) && overlay_cwd != 0 {
         let Some(handle) = crate::linux_overlay::from_generation(overlay_cwd) else {
@@ -20253,8 +20257,9 @@ fn linux_getcwd(address: u64, capacity: u64) -> u64 {
             return LINUX_ENOENT;
         };
         1 + path_length
-    } else if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) && oci_cwd != 0 {
-        let Some(path_length) = crate::oci_image::copy_path(oci_cwd, &mut output[1..]) else {
+    } else if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) && rootfs_cwd != 0 {
+        let Some(path_length) = crate::published_rootfs::copy_path(rootfs_cwd, &mut output[1..])
+        else {
             return LINUX_ENOENT;
         };
         1 + path_length
@@ -20302,7 +20307,7 @@ fn linux_chdir(path_address: u64) -> u64 {
                     crate::linux_overlay::generation(metadata.handle),
                     Ordering::SeqCst,
                 );
-                ELF_PROBE_OCI_CWD.store(0, Ordering::SeqCst);
+                ELF_PROBE_ROOTFS_CWD.store(0, Ordering::SeqCst);
                 ELF_PROBE_CWD.store(LINUX_ROOT_MEASURED_DIRECTORY, Ordering::SeqCst);
                 return 0;
             }
@@ -20311,18 +20316,18 @@ fn linux_chdir(path_address: u64) -> u64 {
             if kind & LINUX_DEVICE_DIRECTORY == 0 {
                 return LINUX_ENOTDIR;
             }
-            ELF_PROBE_OCI_CWD.store(0, Ordering::SeqCst);
+            ELF_PROBE_ROOTFS_CWD.store(0, Ordering::SeqCst);
             ELF_PROBE_OVERLAY_CWD.store(0, Ordering::SeqCst);
             ELF_PROBE_CWD.store(kind & !3, Ordering::SeqCst);
             return 0;
         }
-        let Some((handle, entry)) = linux_oci_path_at(u64::from(LINUX_AT_FDCWD), path) else {
+        let Some((handle, entry)) = linux_rootfs_path_at(u64::from(LINUX_AT_FDCWD), path) else {
             return LINUX_ENOENT;
         };
-        if entry.is_some_and(|entry| entry.kind != ginux_oci::EntryKind::Directory) {
+        if entry.is_some_and(|entry| entry.kind != crate::published_rootfs::EntryKind::Directory) {
             return LINUX_ENOTDIR;
         }
-        ELF_PROBE_OCI_CWD.store(handle, Ordering::SeqCst);
+        ELF_PROBE_ROOTFS_CWD.store(handle, Ordering::SeqCst);
         ELF_PROBE_OVERLAY_CWD.store(0, Ordering::SeqCst);
         ELF_PROBE_CWD.store(LINUX_ROOT_DIRECTORY, Ordering::SeqCst);
         return 0;
@@ -20363,15 +20368,15 @@ fn linux_fchdir(descriptor: u64) -> u64 {
                 return LINUX_ENOTDIR;
             }
             ELF_PROBE_OVERLAY_CWD.store(crate::linux_overlay::generation(handle), Ordering::SeqCst);
-            ELF_PROBE_OCI_CWD.store(0, Ordering::SeqCst);
+            ELF_PROBE_ROOTFS_CWD.store(0, Ordering::SeqCst);
             ELF_PROBE_CWD.store(state & !3, Ordering::SeqCst);
             return 0;
         }
-        let handle = linux_oci_descriptor(descriptor);
+        let handle = linux_rootfs_descriptor(descriptor);
         if handle == 0 {
             return LINUX_ENOENT;
         }
-        ELF_PROBE_OCI_CWD.store(handle, Ordering::SeqCst);
+        ELF_PROBE_ROOTFS_CWD.store(handle, Ordering::SeqCst);
         ELF_PROBE_OVERLAY_CWD.store(0, Ordering::SeqCst);
     }
     ELF_PROBE_CWD.store(state & !3, Ordering::SeqCst);
@@ -20640,11 +20645,11 @@ fn linux_execveat(
     )
 }
 
-fn linux_oci_execve(path: &[u8], arguments_address: u64, environment_address: u64) -> u64 {
-    let Some(plan) = crate::oci_image::process_plan(path) else {
+fn linux_rootfs_execve(path: &[u8], arguments_address: u64, environment_address: u64) -> u64 {
+    let Some(plan) = crate::published_rootfs::process_plan(path) else {
         return LINUX_ENOEXEC;
     };
-    let Some(launch_arguments) = crate::oci_image::launch_arguments(path) else {
+    let Some(launch_arguments) = crate::published_rootfs::launch_arguments(path) else {
         return LINUX_ENOEXEC;
     };
     let startup = crate::linux_elf::relocatable_startup(&plan);
@@ -20994,7 +20999,7 @@ fn linux_execve_at(
             != 1
     {
         if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) && current_linux_process_pid() != 1 {
-            serial_write("ginux: OCI child exec precondition rejected\r\n");
+            serial_write("ginux: Linux child exec precondition rejected\r\n");
         }
         return LINUX_EAGAIN;
     }
@@ -21004,9 +21009,10 @@ fn linux_execve_at(
         Err(error) => return error,
     };
     if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) && current_linux_process_pid() != 1 {
-        let result = linux_oci_execve(&path[..path_length], arguments_address, environment_address);
+        let result =
+            linux_rootfs_execve(&path[..path_length], arguments_address, environment_address);
         if result != 0 {
-            serial_write("ginux: OCI child exec rejected path/error ");
+            serial_write("ginux: Linux child exec rejected path/error ");
             crate::serial_write_bytes(&path[..path_length]);
             serial_write(" ");
             serial_write_u64(result);
@@ -21769,29 +21775,29 @@ fn linux_relative_path_kind(directory: u64, path: &[u8]) -> Result<Option<u16>, 
         .ok_or(LINUX_ENOENT)
 }
 
-fn linux_oci_path_at(
+fn linux_rootfs_path_at(
     directory: u64,
     path: &[u8],
-) -> Option<(u16, Option<ginux_oci::Entry<'static>>)> {
+) -> Option<(u16, Option<crate::published_rootfs::Entry<'static>>)> {
     if !LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
         return None;
     }
     let directory = if path.starts_with(b"/") {
-        crate::oci_image::ROOT_HANDLE
+        crate::published_rootfs::ROOT_HANDLE
     } else if directory as u32 == LINUX_AT_FDCWD {
-        ELF_PROBE_OCI_CWD.load(Ordering::SeqCst)
+        ELF_PROBE_ROOTFS_CWD.load(Ordering::SeqCst)
     } else {
-        linux_oci_descriptor(directory)
+        linux_rootfs_descriptor(directory)
     };
     (directory != 0)
-        .then(|| crate::oci_image::lookup_at(directory, path))
+        .then(|| crate::published_rootfs::lookup_at(directory, path))
         .flatten()
-        .filter(|(handle, _)| !linux_oci_handle_hidden(*handle))
+        .filter(|(handle, _)| !linux_rootfs_handle_hidden(*handle))
 }
 
-fn linux_oci_handle_hidden(handle: u16) -> bool {
+fn linux_rootfs_handle_hidden(handle: u16) -> bool {
     let mut path = [0_u8; crate::linux_overlay::PATH_CAPACITY];
-    crate::oci_image::copy_path(handle, &mut path)
+    crate::published_rootfs::copy_path(handle, &mut path)
         .is_some_and(|length| crate::linux_overlay::hidden(&path[..length]))
 }
 
@@ -21817,22 +21823,23 @@ fn linux_copy_up_descriptor(descriptor: u64) -> Result<crate::linux_overlay::Han
     if !linux_descriptor_open(descriptor) {
         return Err(LINUX_EBADF);
     }
-    let oci_handle = linux_oci_descriptor(descriptor);
-    let entry = crate::oci_image::entry(oci_handle).ok_or(LINUX_EROFS)?;
+    let rootfs_handle = linux_rootfs_descriptor(descriptor);
+    let entry = crate::published_rootfs::entry(rootfs_handle).ok_or(LINUX_EROFS)?;
     let mut path = [0_u8; crate::linux_overlay::PATH_CAPACITY];
-    let length = crate::oci_image::copy_path(oci_handle, &mut path).ok_or(LINUX_EROFS)?;
+    let length = crate::published_rootfs::copy_path(rootfs_handle, &mut path).ok_or(LINUX_EROFS)?;
     let handle = if let Some(metadata) = crate::linux_overlay::lookup(&path[..length]) {
         metadata.handle
     } else {
-        let mode = linux_oci_mode(entry) & 0o7777;
+        let mode = linux_rootfs_mode(entry) & 0o7777;
         match entry.kind {
-            ginux_oci::EntryKind::File | ginux_oci::EntryKind::Hardlink => {
+            crate::published_rootfs::EntryKind::File
+            | crate::published_rootfs::EntryKind::Hardlink => {
                 crate::linux_overlay::create_file(&path[..length], mode, entry.data)
             }
-            ginux_oci::EntryKind::Directory => {
+            crate::published_rootfs::EntryKind::Directory => {
                 crate::linux_overlay::create_directory(&path[..length], mode)
             }
-            ginux_oci::EntryKind::Symlink => None,
+            crate::published_rootfs::EntryKind::Symlink => None,
         }
         .ok_or(LINUX_ENOSPC)?
     };
@@ -21868,7 +21875,7 @@ fn linux_canonical_path_at(
             let handle = crate::linux_overlay::from_generation(overlay).ok_or(LINUX_ENOENT)?;
             crate::linux_overlay::copy_path(handle, output).ok_or(LINUX_ENOENT)?
         } else {
-            crate::oci_image::copy_path(ELF_PROBE_OCI_CWD.load(Ordering::SeqCst), output)
+            crate::published_rootfs::copy_path(ELF_PROBE_ROOTFS_CWD.load(Ordering::SeqCst), output)
                 .ok_or(LINUX_ENOENT)?
         }
     } else if let Some(handle) = linux_overlay_descriptor_handle(directory) {
@@ -21878,11 +21885,11 @@ fn linux_canonical_path_at(
         }
         crate::linux_overlay::copy_path(handle, output).ok_or(LINUX_EBADF)?
     } else {
-        let handle = linux_oci_descriptor(directory);
+        let handle = linux_rootfs_descriptor(directory);
         if handle == 0 {
             return Err(LINUX_EBADF);
         }
-        crate::oci_image::copy_path(handle, output).ok_or(LINUX_ENOTDIR)?
+        crate::published_rootfs::copy_path(handle, output).ok_or(LINUX_ENOTDIR)?
     };
     for component in path.split(|byte| *byte == b'/') {
         if component.is_empty() || component == b"." {
@@ -21922,66 +21929,71 @@ fn linux_overlay_parent_exists(path: &[u8]) -> bool {
     let parent = &path[..separator];
     crate::linux_overlay::lookup(parent)
         .is_some_and(|metadata| metadata.kind == crate::linux_overlay::NodeKind::Directory)
-        || crate::oci_image::lookup_at(crate::oci_image::ROOT_HANDLE, parent).is_some_and(
-            |(_, entry)| entry.is_none_or(|entry| entry.kind == ginux_oci::EntryKind::Directory),
-        )
+        || crate::published_rootfs::lookup_at(crate::published_rootfs::ROOT_HANDLE, parent)
+            .is_some_and(|(_, entry)| {
+                entry
+                    .is_none_or(|entry| entry.kind == crate::published_rootfs::EntryKind::Directory)
+            })
 }
 
-fn linux_oci_metadata_path_at(
+fn linux_rootfs_metadata_path_at(
     directory: u64,
     path: &[u8],
-) -> Option<(u16, Option<ginux_oci::Entry<'static>>)> {
+) -> Option<(u16, Option<crate::published_rootfs::Entry<'static>>)> {
     if !LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
         return None;
     }
     let directory = if path.starts_with(b"/") {
-        crate::oci_image::ROOT_HANDLE
+        crate::published_rootfs::ROOT_HANDLE
     } else if directory as u32 == LINUX_AT_FDCWD {
-        ELF_PROBE_OCI_CWD.load(Ordering::SeqCst)
+        ELF_PROBE_ROOTFS_CWD.load(Ordering::SeqCst)
     } else {
-        linux_oci_descriptor(directory)
+        linux_rootfs_descriptor(directory)
     };
     (directory != 0)
-        .then(|| crate::oci_image::lookup_metadata_at(directory, path))
+        .then(|| crate::published_rootfs::lookup_metadata_at(directory, path))
         .flatten()
-        .filter(|(handle, _)| !linux_oci_handle_hidden(*handle))
+        .filter(|(handle, _)| !linux_rootfs_handle_hidden(*handle))
 }
 
-fn linux_oci_descriptor(descriptor: u64) -> u16 {
+fn linux_rootfs_descriptor(descriptor: u64) -> u16 {
     if let Some(handle) = usize::try_from(descriptor)
         .ok()
-        .and_then(|index| ELF_PROBE_STDIO_OCI_DESCRIPTORS.get(index))
+        .and_then(|index| ELF_PROBE_STDIO_ROOTFS_DESCRIPTORS.get(index))
     {
         return handle.load(Ordering::SeqCst);
     }
     descriptor
         .checked_sub(LINUX_AUX_DESCRIPTOR_FIRST)
-        .and_then(|index| ELF_PROBE_OCI_DESCRIPTORS.get(index as usize))
+        .and_then(|index| ELF_PROBE_ROOTFS_DESCRIPTORS.get(index as usize))
         .map(|handle| handle.load(Ordering::SeqCst))
         .unwrap_or(0)
 }
 
-fn linux_oci_entry(descriptor: u64) -> Option<ginux_oci::Entry<'static>> {
-    crate::oci_image::entry(linux_oci_descriptor(descriptor))
+fn linux_rootfs_entry(descriptor: u64) -> Option<crate::published_rootfs::Entry<'static>> {
+    crate::published_rootfs::entry(linux_rootfs_descriptor(descriptor))
 }
 
-fn linux_oci_inode(handle: u16) -> u64 {
+fn linux_rootfs_inode(handle: u16) -> u64 {
     1024 + u64::from(handle)
 }
 
-fn linux_oci_mode(entry: ginux_oci::Entry<'_>) -> u32 {
+fn linux_rootfs_mode(entry: crate::published_rootfs::Entry<'_>) -> u32 {
     let kind = match entry.kind {
-        ginux_oci::EntryKind::File => 0o100000,
-        ginux_oci::EntryKind::Hardlink => 0o100000,
-        ginux_oci::EntryKind::Directory => 0o040000,
-        ginux_oci::EntryKind::Symlink => 0o120000,
+        crate::published_rootfs::EntryKind::File => 0o100000,
+        crate::published_rootfs::EntryKind::Hardlink => 0o100000,
+        crate::published_rootfs::EntryKind::Directory => 0o040000,
+        crate::published_rootfs::EntryKind::Symlink => 0o120000,
     };
     kind | entry.mode & 0o7777
 }
 
-fn linux_oci_stat(handle: u16, entry: Option<ginux_oci::Entry<'_>>) -> [u8; LINUX_STAT_SIZE] {
-    let mode = entry.map_or(LINUX_STAT_DIRECTORY_MODE, linux_oci_mode);
-    let mut stat = linux_stat(mode, linux_oci_inode(handle));
+fn linux_rootfs_stat(
+    handle: u16,
+    entry: Option<crate::published_rootfs::Entry<'_>>,
+) -> [u8; LINUX_STAT_SIZE] {
+    let mode = entry.map_or(LINUX_STAT_DIRECTORY_MODE, linux_rootfs_mode);
+    let mut stat = linux_stat(mode, linux_rootfs_inode(handle));
     let size = entry.map_or(0, |entry| entry.data.len() as u64);
     stat[48..56].copy_from_slice(&size.to_ne_bytes());
     stat[64..72].copy_from_slice(&size.div_ceil(512).to_ne_bytes());
@@ -22047,7 +22059,7 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64, mode: u64) -> u64
     let mut tmp_handle = None;
     let mut tmp_created = false;
     let mut overlay_handle = None;
-    let mut oci_handle = 0;
+    let mut rootfs_handle = 0;
     let mut canonical = [0_u8; crate::linux_overlay::PATH_CAPACITY];
     let canonical_length = if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
         match linux_canonical_path_at(directory, path, &mut canonical) {
@@ -22060,9 +22072,9 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64, mode: u64) -> u64
     };
     let overlay_metadata =
         canonical_length.and_then(|length| crate::linux_overlay::lookup(&canonical[..length]));
-    let oci_at_path = linux_oci_path_at(directory, path);
+    let rootfs_at_path = linux_rootfs_path_at(directory, path);
     if flags & (LINUX_O_CREAT | LINUX_O_EXCL) == (LINUX_O_CREAT | LINUX_O_EXCL)
-        && (overlay_metadata.is_some() || oci_at_path.is_some())
+        && (overlay_metadata.is_some() || rootfs_at_path.is_some())
     {
         return LINUX_EEXIST;
     }
@@ -22082,22 +22094,23 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64, mode: u64) -> u64
         }
     } else if canonical_length.is_some() && access != 0 && !tmp_path && !virtual_device {
         let length = canonical_length.unwrap_or(0);
-        let initial = oci_at_path
+        let initial = rootfs_at_path
             .and_then(|(_, entry)| entry)
             .filter(|entry| {
                 matches!(
                     entry.kind,
-                    ginux_oci::EntryKind::File | ginux_oci::EntryKind::Hardlink
+                    crate::published_rootfs::EntryKind::File
+                        | crate::published_rootfs::EntryKind::Hardlink
                 )
             })
             .map_or(&[][..], |entry| entry.data);
-        if oci_at_path
+        if rootfs_at_path
             .and_then(|(_, entry)| entry)
-            .is_some_and(|entry| entry.kind == ginux_oci::EntryKind::Directory)
+            .is_some_and(|entry| entry.kind == crate::published_rootfs::EntryKind::Directory)
         {
             return LINUX_EISDIR;
         }
-        if oci_at_path.is_none() && flags & LINUX_O_CREAT == 0 {
+        if rootfs_at_path.is_none() && flags & LINUX_O_CREAT == 0 {
             return LINUX_ENOENT;
         }
         if !linux_overlay_parent_exists(&canonical[..length]) {
@@ -22163,13 +22176,15 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64, mode: u64) -> u64
         LINUX_FILE_TMP_SCRATCH
     } else if let Some(kind) = linux_virtual_mount_path_at(directory, path) {
         kind
-    } else if let Some((handle, entry)) = oci_at_path {
-        oci_handle = handle;
+    } else if let Some((handle, entry)) = rootfs_at_path {
+        rootfs_handle = handle;
         match entry.map(|entry| entry.kind) {
-            None | Some(ginux_oci::EntryKind::Directory) => LINUX_ROOT_MEASURED_DIRECTORY,
-            Some(ginux_oci::EntryKind::File) => LINUX_FILE_ROOT_GENERIC,
-            Some(ginux_oci::EntryKind::Hardlink) => LINUX_FILE_ROOT_GENERIC,
-            Some(ginux_oci::EntryKind::Symlink) => return LINUX_EINVAL,
+            None | Some(crate::published_rootfs::EntryKind::Directory) => {
+                LINUX_ROOT_MEASURED_DIRECTORY
+            }
+            Some(crate::published_rootfs::EntryKind::File) => LINUX_FILE_ROOT_GENERIC,
+            Some(crate::published_rootfs::EntryKind::Hardlink) => LINUX_FILE_ROOT_GENERIC,
+            Some(crate::published_rootfs::EntryKind::Symlink) => return LINUX_EINVAL,
         }
     } else {
         match linux_relative_path_kind(directory, path) {
@@ -22214,13 +22229,13 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64, mode: u64) -> u64
     if descriptor < LINUX_AUX_DESCRIPTOR_FIRST {
         let index = descriptor as usize;
         ELF_PROBE_STDIO_DEVICE_DESCRIPTORS[index].store(state, Ordering::SeqCst);
-        ELF_PROBE_STDIO_OCI_DESCRIPTORS[index].store(oci_handle, Ordering::SeqCst);
+        ELF_PROBE_STDIO_ROOTFS_DESCRIPTORS[index].store(rootfs_handle, Ordering::SeqCst);
         ELF_PROBE_STDIO_TMP_FILE_GENERATIONS[index].store(tmp_generation, Ordering::SeqCst);
         ELF_PROBE_STDIO_SOCKET_FLAGS[index].store(descriptor_flags, Ordering::SeqCst);
     } else {
         let index = (descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize;
         ELF_PROBE_DEVICE_DESCRIPTORS[index].store(state, Ordering::SeqCst);
-        ELF_PROBE_OCI_DESCRIPTORS[index].store(oci_handle, Ordering::SeqCst);
+        ELF_PROBE_ROOTFS_DESCRIPTORS[index].store(rootfs_handle, Ordering::SeqCst);
         ELF_PROBE_TMP_FILE_GENERATIONS[index].store(tmp_generation, Ordering::SeqCst);
         ELF_PROBE_SOCKET_FLAGS[index].store(descriptor_flags, Ordering::SeqCst);
     }
@@ -22301,7 +22316,7 @@ fn linux_memfd_create(name_address: u64, flags: u64) -> u64 {
     }
     let index = (descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize;
     ELF_PROBE_DEVICE_DESCRIPTORS[index].store(LINUX_FILE_TMP_SCRATCH | 3, Ordering::SeqCst);
-    ELF_PROBE_OCI_DESCRIPTORS[index].store(0, Ordering::SeqCst);
+    ELF_PROBE_ROOTFS_DESCRIPTORS[index].store(0, Ordering::SeqCst);
     ELF_PROBE_TMP_FILE_GENERATIONS[index]
         .store(crate::linux_overlay::generation(handle), Ordering::SeqCst);
     ELF_PROBE_SOCKET_FLAGS[index].store(0, Ordering::SeqCst);
@@ -22328,7 +22343,7 @@ fn linux_memfd_secret(flags: u64) -> u64 {
     }
     let index = (descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize;
     ELF_PROBE_DEVICE_DESCRIPTORS[index].store(LINUX_FILE_TMP_SCRATCH | 3, Ordering::SeqCst);
-    ELF_PROBE_OCI_DESCRIPTORS[index].store(0, Ordering::SeqCst);
+    ELF_PROBE_ROOTFS_DESCRIPTORS[index].store(0, Ordering::SeqCst);
     ELF_PROBE_TMP_FILE_GENERATIONS[index]
         .store(crate::linux_overlay::generation(handle), Ordering::SeqCst);
     ELF_PROBE_SOCKET_FLAGS[index].store(LINUX_PRIVATE_SECRET_DESCRIPTOR, Ordering::SeqCst);
@@ -22387,12 +22402,12 @@ fn linux_name_to_handle_at(
             if overlay != 0 {
                 Some((1_u32, overlay))
             } else {
-                Some((2, u32::from(ELF_PROBE_OCI_CWD.load(Ordering::SeqCst))))
+                Some((2, u32::from(ELF_PROBE_ROOTFS_CWD.load(Ordering::SeqCst))))
             }
         } else if let Some(handle) = linux_overlay_descriptor_handle(directory) {
             Some((1, crate::linux_overlay::generation(handle)))
         } else {
-            let handle = linux_oci_descriptor(directory);
+            let handle = linux_rootfs_descriptor(directory);
             (handle != 0).then_some((2, u32::from(handle)))
         }
     } else {
@@ -22401,7 +22416,7 @@ fn linux_name_to_handle_at(
             Ok(canonical_length) => crate::linux_overlay::lookup(&canonical[..canonical_length])
                 .map(|metadata| (1_u32, crate::linux_overlay::generation(metadata.handle)))
                 .or_else(|| {
-                    linux_oci_path_at(directory, &path[..length])
+                    linux_rootfs_path_at(directory, &path[..length])
                         .map(|(handle, _)| (2_u32, u32::from(handle)))
                 }),
             Err(error) => return error,
@@ -22509,23 +22524,26 @@ fn linux_open_by_handle_at(mount_descriptor: u64, handle_address: u64, flags: u6
             let Ok(handle) = u16::try_from(identifier) else {
                 return LINUX_ESTALE;
             };
-            let entry = if handle == crate::oci_image::ROOT_HANDLE {
+            let entry = if handle == crate::published_rootfs::ROOT_HANDLE {
                 None
             } else {
-                let Some(entry) = crate::oci_image::entry(handle) else {
+                let Some(entry) = crate::published_rootfs::entry(handle) else {
                     return LINUX_ESTALE;
                 };
                 Some(entry)
             };
             oci = handle;
             match entry.map(|entry| entry.kind) {
-                None | Some(ginux_oci::EntryKind::Directory) => {
+                None | Some(crate::published_rootfs::EntryKind::Directory) => {
                     crate::linux_overlay::NodeKind::Directory
                 }
-                Some(ginux_oci::EntryKind::File | ginux_oci::EntryKind::Hardlink) => {
-                    crate::linux_overlay::NodeKind::File
+                Some(
+                    crate::published_rootfs::EntryKind::File
+                    | crate::published_rootfs::EntryKind::Hardlink,
+                ) => crate::linux_overlay::NodeKind::File,
+                Some(crate::published_rootfs::EntryKind::Symlink) => {
+                    crate::linux_overlay::NodeKind::Symlink
                 }
-                Some(ginux_oci::EntryKind::Symlink) => crate::linux_overlay::NodeKind::Symlink,
             }
         }
         _ => return LINUX_ESTALE,
@@ -22556,7 +22574,7 @@ fn linux_open_by_handle_at(mount_descriptor: u64, handle_address: u64, flags: u6
     };
     let index = (descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize;
     ELF_PROBE_DEVICE_DESCRIPTORS[index].store(state_kind | (access + 1) as u16, Ordering::SeqCst);
-    ELF_PROBE_OCI_DESCRIPTORS[index].store(oci, Ordering::SeqCst);
+    ELF_PROBE_ROOTFS_DESCRIPTORS[index].store(oci, Ordering::SeqCst);
     ELF_PROBE_TMP_FILE_GENERATIONS[index].store(
         overlay.map_or(0, crate::linux_overlay::generation),
         Ordering::SeqCst,
@@ -22610,12 +22628,12 @@ fn linux_newfstatat(directory: u64, path_address: u64, stat_address: u64, flags:
     }
     {
         let oci = if flags & LINUX_AT_SYMLINK_NOFOLLOW != 0 {
-            linux_oci_metadata_path_at(directory, path)
+            linux_rootfs_metadata_path_at(directory, path)
         } else {
-            linux_oci_path_at(directory, path)
+            linux_rootfs_path_at(directory, path)
         };
         if let Some((handle, entry)) = oci {
-            let stat = linux_oci_stat(handle, entry);
+            let stat = linux_rootfs_stat(handle, entry);
             return if copy_to_linux_user(stat_address, &stat) {
                 0
             } else {
@@ -22667,7 +22685,7 @@ fn linux_mkdirat(directory: u64, path_address: u64, mode: u64) -> u64 {
     };
     let path = &canonical[..length];
     if crate::linux_overlay::lookup(path).is_some()
-        || linux_oci_metadata_path_at(directory, requested_path).is_some()
+        || linux_rootfs_metadata_path_at(directory, requested_path).is_some()
     {
         return LINUX_EEXIST;
     }
@@ -22711,7 +22729,7 @@ fn linux_mknodat(directory: u64, path_address: u64, mode: u64, device: u64) -> u
     };
     let path = &canonical[..length];
     if crate::linux_overlay::lookup(path).is_some()
-        || linux_oci_metadata_path_at(directory, requested_path).is_some()
+        || linux_rootfs_metadata_path_at(directory, requested_path).is_some()
     {
         return LINUX_EEXIST;
     }
@@ -22748,7 +22766,7 @@ fn linux_symlinkat(target_address: u64, directory: u64, path_address: u64) -> u6
     };
     let path = &canonical[..length];
     if crate::linux_overlay::lookup(path).is_some()
-        || linux_oci_metadata_path_at(directory, requested_path).is_some()
+        || linux_rootfs_metadata_path_at(directory, requested_path).is_some()
     {
         return LINUX_EEXIST;
     }
@@ -22801,7 +22819,7 @@ fn linux_linkat(
     };
     let destination = &new_canonical[..new_length];
     if crate::linux_overlay::lookup(destination).is_some()
-        || linux_oci_metadata_path_at(new_directory, &new_path[..new_path_length]).is_some()
+        || linux_rootfs_metadata_path_at(new_directory, &new_path[..new_path_length]).is_some()
     {
         return LINUX_EEXIST;
     }
@@ -22849,22 +22867,22 @@ fn linux_linkat(
         return 0;
     }
     let Some((_, Some(entry))) =
-        linux_oci_metadata_path_at(old_directory, &old_path[..old_path_length])
+        linux_rootfs_metadata_path_at(old_directory, &old_path[..old_path_length])
     else {
         return LINUX_ENOENT;
     };
     match entry.kind {
-        ginux_oci::EntryKind::File | ginux_oci::EntryKind::Hardlink => {
+        crate::published_rootfs::EntryKind::File | crate::published_rootfs::EntryKind::Hardlink => {
             crate::linux_overlay::create_file(
                 destination,
-                linux_oci_mode(entry) & 0o7777,
+                linux_rootfs_mode(entry) & 0o7777,
                 entry.data,
             )
         }
-        ginux_oci::EntryKind::Symlink => {
+        crate::published_rootfs::EntryKind::Symlink => {
             crate::linux_overlay::create_symlink(destination, entry.link)
         }
-        ginux_oci::EntryKind::Directory => return LINUX_EPERM,
+        crate::published_rootfs::EntryKind::Directory => return LINUX_EPERM,
     }
     .map_or(LINUX_ENOSPC, |_| 0)
 }
@@ -22912,8 +22930,11 @@ fn linux_unlinkat(directory: u64, path_address: u64, flags: u64) -> u64 {
     let Some(metadata) = crate::linux_overlay::lookup(&canonical[..length]) else {
         return if crate::linux_overlay::hidden(&canonical[..length]) {
             LINUX_ENOENT
-        } else if crate::oci_image::lookup_at(crate::oci_image::ROOT_HANDLE, &canonical[..length])
-            .is_some()
+        } else if crate::published_rootfs::lookup_at(
+            crate::published_rootfs::ROOT_HANDLE,
+            &canonical[..length],
+        )
+        .is_some()
         {
             if crate::linux_overlay::whiteout(&canonical[..length]) {
                 0
@@ -22930,8 +22951,11 @@ fn linux_unlinkat(directory: u64, path_address: u64, flags: u64) -> u64 {
     if flags == 0 && metadata.kind == crate::linux_overlay::NodeKind::Directory {
         return LINUX_EISDIR;
     }
-    let lower_exists =
-        crate::oci_image::lookup_at(crate::oci_image::ROOT_HANDLE, &canonical[..length]).is_some();
+    let lower_exists = crate::published_rootfs::lookup_at(
+        crate::published_rootfs::ROOT_HANDLE,
+        &canonical[..length],
+    )
+    .is_some();
     if crate::linux_overlay::unlink(metadata.handle) {
         if !lower_exists || crate::linux_overlay::whiteout(&canonical[..length]) {
             0
@@ -23071,7 +23095,12 @@ fn linux_fchmodat(directory: u64, path_address: u64, mode: u64, flags: u64) -> u
             LINUX_EIO
         };
     }
-    if crate::oci_image::lookup_at(crate::oci_image::ROOT_HANDLE, &canonical[..length]).is_some() {
+    if crate::published_rootfs::lookup_at(
+        crate::published_rootfs::ROOT_HANDLE,
+        &canonical[..length],
+    )
+    .is_some()
+    {
         LINUX_EROFS
     } else {
         LINUX_ENOENT
@@ -23109,7 +23138,12 @@ fn linux_fchownat(directory: u64, path_address: u64, uid: u64, gid: u64, flags: 
     if crate::linux_overlay::lookup(&canonical[..length]).is_some() {
         return 0;
     }
-    if crate::oci_image::lookup_at(crate::oci_image::ROOT_HANDLE, &canonical[..length]).is_some() {
+    if crate::published_rootfs::lookup_at(
+        crate::published_rootfs::ROOT_HANDLE,
+        &canonical[..length],
+    )
+    .is_some()
+    {
         LINUX_EROFS
     } else {
         LINUX_ENOENT
@@ -23137,7 +23171,12 @@ fn linux_xattr_path_handle(path_address: u64) -> Result<crate::linux_overlay::Ha
     if let Some(metadata) = crate::linux_overlay::lookup(&canonical[..length]) {
         return Ok(metadata.handle);
     }
-    if crate::oci_image::lookup_at(crate::oci_image::ROOT_HANDLE, &canonical[..length]).is_some() {
+    if crate::published_rootfs::lookup_at(
+        crate::published_rootfs::ROOT_HANDLE,
+        &canonical[..length],
+    )
+    .is_some()
+    {
         Err(LINUX_EROFS)
     } else {
         Err(LINUX_ENOENT)
@@ -23478,26 +23517,29 @@ fn linux_timestamp_handle(
                 metadata.handle
             } else {
                 let Some((_, Some(entry))) =
-                    linux_oci_metadata_path_at(directory, &path[..path_length])
+                    linux_rootfs_metadata_path_at(directory, &path[..path_length])
                 else {
                     return Err(LINUX_ENOENT);
                 };
-                let mode = linux_oci_mode(entry) & 0o7777;
+                let mode = linux_rootfs_mode(entry) & 0o7777;
                 let created = match entry.kind {
-                    ginux_oci::EntryKind::File | ginux_oci::EntryKind::Hardlink => {
+                    crate::published_rootfs::EntryKind::File
+                    | crate::published_rootfs::EntryKind::Hardlink => {
                         crate::linux_overlay::create_file(&canonical[..length], mode, entry.data)
                     }
-                    ginux_oci::EntryKind::Directory => {
+                    crate::published_rootfs::EntryKind::Directory => {
                         crate::linux_overlay::create_directory(&canonical[..length], mode)
                     }
-                    ginux_oci::EntryKind::Symlink => None,
+                    crate::published_rootfs::EntryKind::Symlink => None,
                 };
                 let Some(handle) = created else {
-                    return Err(if entry.kind == ginux_oci::EntryKind::Symlink {
-                        LINUX_EROFS
-                    } else {
-                        LINUX_ENOSPC
-                    });
+                    return Err(
+                        if entry.kind == crate::published_rootfs::EntryKind::Symlink {
+                            LINUX_EROFS
+                        } else {
+                            LINUX_ENOSPC
+                        },
+                    );
                 };
                 handle
             }
@@ -23665,8 +23707,8 @@ fn linux_renameat(
     let target = crate::linux_overlay::lookup(&new_canonical[..new_length]);
     if flags == RENAME_NOREPLACE
         && (target.is_some()
-            || crate::oci_image::lookup_at(
-                crate::oci_image::ROOT_HANDLE,
+            || crate::published_rootfs::lookup_at(
+                crate::published_rootfs::ROOT_HANDLE,
                 &new_canonical[..new_length],
             )
             .is_some())
@@ -23717,7 +23759,7 @@ fn linux_faccessat(directory: u64, path_address: u64, mode: u64, flags: u64) -> 
         }
     }
     {
-        if let Some((_, entry)) = linux_oci_path_at(directory, path) {
+        if let Some((_, entry)) = linux_rootfs_path_at(directory, path) {
             let permissions = entry.map_or(0o555, |entry| entry.mode);
             let denied = mode & 4 != 0 && permissions & 0o444 == 0
                 || mode & 2 != 0 && permissions & 0o222 == 0
@@ -23840,19 +23882,19 @@ fn linux_statx(directory: u64, path_address: u64, flags: u64, mask: u64, stat_ad
     }
     {
         let oci = if flags & LINUX_AT_SYMLINK_NOFOLLOW != 0 {
-            linux_oci_metadata_path_at(directory, path)
+            linux_rootfs_metadata_path_at(directory, path)
         } else {
-            linux_oci_path_at(directory, path)
+            linux_rootfs_path_at(directory, path)
         };
         if let Some((handle, entry)) = oci {
-            let mode = entry.map_or(LINUX_STAT_DIRECTORY_MODE, linux_oci_mode);
+            let mode = entry.map_or(LINUX_STAT_DIRECTORY_MODE, linux_rootfs_mode);
             let size = entry.map_or(0, |entry| entry.data.len() as u64);
             let mut stat = [0_u8; 256];
             stat[..4].copy_from_slice(&LINUX_STATX_BASIC_STATS.to_ne_bytes());
             stat[4..8].copy_from_slice(&(PAGE_SIZE as u32).to_ne_bytes());
             stat[16..20].copy_from_slice(&1_u32.to_ne_bytes());
             stat[28..30].copy_from_slice(&(mode as u16).to_ne_bytes());
-            stat[32..40].copy_from_slice(&linux_oci_inode(handle).to_ne_bytes());
+            stat[32..40].copy_from_slice(&linux_rootfs_inode(handle).to_ne_bytes());
             stat[40..48].copy_from_slice(&size.to_ne_bytes());
             stat[48..56].copy_from_slice(&size.div_ceil(512).to_ne_bytes());
             return if copy_to_linux_user(stat_address, &stat) {
@@ -25276,8 +25318,8 @@ fn linux_descriptor_read(descriptor: u64, address: u64, count: u64) -> u64 {
         }
         return 1;
     }
-    if let Some(entry) = linux_oci_entry(descriptor) {
-        if entry.kind == ginux_oci::EntryKind::Directory {
+    if let Some(entry) = linux_rootfs_entry(descriptor) {
+        if entry.kind == crate::published_rootfs::EntryKind::Directory {
             return LINUX_EISDIR;
         }
         let state = linux_device_descriptor(descriptor);
@@ -25412,7 +25454,7 @@ fn linux_regular_file_read_at(descriptor: u64, address: u64, count: u64, offset:
         };
         return linux_overlay_copy_to_user(handle, start, address, count);
     }
-    if let Some(entry) = linux_oci_entry(descriptor) {
+    if let Some(entry) = linux_rootfs_entry(descriptor) {
         if state & 3 != LINUX_DESCRIPTOR_INPUT {
             return LINUX_EBADF;
         }
@@ -25503,8 +25545,8 @@ fn linux_regular_file_read_kernel(
         }
         return crate::linux_overlay::read(handle, offset, output).ok_or(LINUX_EIO);
     }
-    if let Some(entry) = linux_oci_entry(descriptor) {
-        if entry.kind == ginux_oci::EntryKind::Directory {
+    if let Some(entry) = linux_rootfs_entry(descriptor) {
+        if entry.kind == crate::published_rootfs::EntryKind::Directory {
             return Err(LINUX_EISDIR);
         }
         if offset >= entry.data.len() {
@@ -25602,8 +25644,8 @@ fn linux_descriptors_same_file(
         || linux_overlay_descriptor_handle(first)
             .zip(linux_overlay_descriptor_handle(second))
             .is_some_and(|(first, second)| first == second)
-        || (linux_oci_descriptor(first) != 0
-            && linux_oci_descriptor(first) == linux_oci_descriptor(second))
+        || (linux_rootfs_descriptor(first) != 0
+            && linux_rootfs_descriptor(first) == linux_rootfs_descriptor(second))
         || linux_tmp_descriptor_handle(first, first_state)
             .zip(linux_tmp_descriptor_handle(second, second_state))
             .is_some_and(|(first, second)| first == second)
@@ -25637,10 +25679,10 @@ fn linux_copy_file_range(
         return LINUX_EBADF;
     }
     let input_is_regular = linux_overlay_descriptor_handle(input).is_some()
-        || linux_oci_descriptor(input) != 0
+        || linux_rootfs_descriptor(input) != 0
         || linux_tmp_descriptor_handle(input, input_state).is_some();
     let output_is_regular = linux_overlay_descriptor_handle(output).is_some()
-        || linux_oci_descriptor(output) != 0
+        || linux_rootfs_descriptor(output) != 0
         || linux_tmp_descriptor_handle(output, output_state).is_some();
     if !input_is_regular || !output_is_regular {
         return LINUX_EINVAL;
@@ -25729,7 +25771,7 @@ fn linux_sendfile(output: u64, input: u64, offset_pointer: u64, count: u64) -> u
         return LINUX_EBADF;
     }
     let input_is_regular = linux_overlay_descriptor_handle(input).is_some()
-        || linux_oci_descriptor(input) != 0
+        || linux_rootfs_descriptor(input) != 0
         || linux_tmp_descriptor_handle(input, input_state).is_some();
     if !input_is_regular {
         return LINUX_EINVAL;
@@ -25737,7 +25779,7 @@ fn linux_sendfile(output: u64, input: u64, offset_pointer: u64, count: u64) -> u
     let output_state = linux_device_descriptor(output);
     let output_socket = linux_socket_slot(output);
     let output_is_regular = linux_overlay_descriptor_handle(output).is_some()
-        || linux_oci_descriptor(output) != 0
+        || linux_rootfs_descriptor(output) != 0
         || linux_tmp_descriptor_handle(output, output_state).is_some();
     if output_socket.is_none() && !output_is_regular {
         return LINUX_EINVAL;
@@ -28827,8 +28869,10 @@ fn linux_fanotify_mark(
         Err(error) => return error,
     };
     let overlay = crate::linux_overlay::lookup(&canonical[..length]);
-    let oci =
-        crate::oci_image::lookup_metadata_at(crate::oci_image::ROOT_HANDLE, &canonical[..length]);
+    let oci = crate::published_rootfs::lookup_metadata_at(
+        crate::published_rootfs::ROOT_HANDLE,
+        &canonical[..length],
+    );
     if overlay.is_none() && oci.is_none() {
         return LINUX_ENOENT;
     }
@@ -29025,15 +29069,17 @@ fn linux_inotify_add_watch(descriptor: u64, path_address: u64, mask: u64) -> u64
         }
     };
     let overlay = crate::linux_overlay::lookup(&canonical[..length]);
-    let oci =
-        crate::oci_image::lookup_metadata_at(crate::oci_image::ROOT_HANDLE, &canonical[..length]);
+    let oci = crate::published_rootfs::lookup_metadata_at(
+        crate::published_rootfs::ROOT_HANDLE,
+        &canonical[..length],
+    );
     if overlay.is_none() && oci.is_none() {
         return LINUX_ENOENT;
     }
     let directory = overlay
         .is_some_and(|metadata| metadata.kind == crate::linux_overlay::NodeKind::Directory)
         || oci.is_some_and(|(_, entry)| {
-            entry.is_none_or(|entry| entry.kind == ginux_oci::EntryKind::Directory)
+            entry.is_none_or(|entry| entry.kind == crate::published_rootfs::EntryKind::Directory)
         });
     if mask & IN_ONLYDIR != 0 && !directory {
         return LINUX_ENOTDIR;
@@ -29259,7 +29305,7 @@ fn linux_pidfd_getfd(pid_descriptor: u64, target: u64, flags: u64) -> u64 {
     };
     let index = (descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize;
     ELF_PROBE_DEVICE_DESCRIPTORS[index].store(device, Ordering::SeqCst);
-    ELF_PROBE_OCI_DESCRIPTORS[index].store(oci, Ordering::SeqCst);
+    ELF_PROBE_ROOTFS_DESCRIPTORS[index].store(oci, Ordering::SeqCst);
     ELF_PROBE_SOCKET_SLOTS[index].store(0, Ordering::SeqCst);
     ELF_PROBE_SOCKET_FLAGS[index].store(socket_flags, Ordering::SeqCst);
     ELF_PROBE_TMP_FILE_GENERATIONS[index].store(tmp_generation, Ordering::SeqCst);
@@ -29296,7 +29342,7 @@ fn linux_saved_descriptor(
         };
         return (id != 0).then_some((
             device,
-            state.stdio_oci[index],
+            state.stdio_rootfs[index],
             state.stdio_sockets[index],
             state.stdio_socket_flags[index],
             state.stdio_tmp_generations[index],
@@ -29308,7 +29354,7 @@ fn linux_saved_descriptor(
     let id = state.open_file_ids[index];
     (id != 0).then_some((
         state.devices[index],
-        state.oci[index],
+        state.rootfs[index],
         state.sockets[index],
         state.socket_flags[index],
         state.tmp_generations[index],
@@ -30212,7 +30258,7 @@ fn linux_regular_file_seek(descriptor: u64, state: u16, offset: u64, whence: u64
                 .and_then(crate::linux_overlay::metadata)
                 .map_or_else(
                     || {
-                        linux_oci_entry(descriptor)
+                        linux_rootfs_entry(descriptor)
                             .map_or_else(|| linux_file_size(state), |entry| entry.data.len() as u64)
                     },
                     |metadata| metadata.size as u64,
@@ -30700,7 +30746,7 @@ fn linux_descriptor_close_with_wake_inner(descriptor: u64, wake_waiters: bool) -
             ELF_PROBE_STDIO_SOCKET_SLOTS[index].store(0, Ordering::SeqCst);
             ELF_PROBE_STDIO_SOCKET_FLAGS[index].store(0, Ordering::SeqCst);
             ELF_PROBE_STDIO_DEVICE_DESCRIPTORS[index].store(0, Ordering::SeqCst);
-            ELF_PROBE_STDIO_OCI_DESCRIPTORS[index].store(0, Ordering::SeqCst);
+            ELF_PROBE_STDIO_ROOTFS_DESCRIPTORS[index].store(0, Ordering::SeqCst);
             ELF_PROBE_STDIO_TMP_FILE_GENERATIONS[index].store(0, Ordering::SeqCst);
             ELF_PROBE_STDIO_OFFSETS[index].store(0, Ordering::SeqCst);
             if descriptor == 2 {
@@ -30744,7 +30790,7 @@ fn linux_descriptor_close_with_wake_inner(descriptor: u64, wake_waiters: bool) -
     if descriptor < LINUX_AUX_DESCRIPTOR_FIRST && linux_device_descriptor(descriptor) != 0 {
         let index = descriptor as usize;
         ELF_PROBE_STDIO_DEVICE_DESCRIPTORS[index].store(0, Ordering::SeqCst);
-        ELF_PROBE_STDIO_OCI_DESCRIPTORS[index].store(0, Ordering::SeqCst);
+        ELF_PROBE_STDIO_ROOTFS_DESCRIPTORS[index].store(0, Ordering::SeqCst);
         ELF_PROBE_STDIO_TMP_FILE_GENERATIONS[index].store(0, Ordering::SeqCst);
         ELF_PROBE_STDIO_OFFSETS[index].store(0, Ordering::SeqCst);
         set_linux_descriptor_close_on_exec(descriptor, false);
@@ -30827,7 +30873,7 @@ fn linux_descriptor_close_with_wake_inner(descriptor: u64, wake_waiters: bool) -
     {
         return LINUX_EBADF;
     }
-    ELF_PROBE_OCI_DESCRIPTORS[(descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize]
+    ELF_PROBE_ROOTFS_DESCRIPTORS[(descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize]
         .store(0, Ordering::SeqCst);
     ELF_PROBE_TMP_FILE_GENERATIONS[(descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize]
         .store(0, Ordering::SeqCst);
@@ -30964,7 +31010,7 @@ fn linux_console_dup2(source: u64, target: u64) -> u64 {
         }
         let source_offset = linux_descriptor_offset(source).load(Ordering::SeqCst);
         let source_flags = linux_socket_flags(source).unwrap_or(0);
-        let source_oci = linux_oci_descriptor(source);
+        let source_rootfs = linux_rootfs_descriptor(source);
         let source_tmp = usize::try_from(source)
             .ok()
             .and_then(|index| ELF_PROBE_STDIO_TMP_FILE_GENERATIONS.get(index))
@@ -30995,14 +31041,14 @@ fn linux_console_dup2(source: u64, target: u64) -> u64 {
         if target >= LINUX_AUX_DESCRIPTOR_FIRST {
             let index = (target - LINUX_AUX_DESCRIPTOR_FIRST) as usize;
             ELF_PROBE_DEVICE_DESCRIPTORS[index].store(device, Ordering::SeqCst);
-            ELF_PROBE_OCI_DESCRIPTORS[index].store(source_oci, Ordering::SeqCst);
+            ELF_PROBE_ROOTFS_DESCRIPTORS[index].store(source_rootfs, Ordering::SeqCst);
             ELF_PROBE_TMP_FILE_GENERATIONS[index].store(source_tmp, Ordering::SeqCst);
             ELF_PROBE_SOCKET_FLAGS[index].store(source_flags, Ordering::SeqCst);
             ELF_PROBE_DESCRIPTOR_OFFSETS[index].store(source_offset, Ordering::SeqCst);
         } else {
             let index = target as usize;
             ELF_PROBE_STDIO_DEVICE_DESCRIPTORS[index].store(device, Ordering::SeqCst);
-            ELF_PROBE_STDIO_OCI_DESCRIPTORS[index].store(source_oci, Ordering::SeqCst);
+            ELF_PROBE_STDIO_ROOTFS_DESCRIPTORS[index].store(source_rootfs, Ordering::SeqCst);
             ELF_PROBE_STDIO_TMP_FILE_GENERATIONS[index].store(source_tmp, Ordering::SeqCst);
             ELF_PROBE_STDIO_SOCKET_FLAGS[index].store(source_flags, Ordering::SeqCst);
             ELF_PROBE_STDIO_OFFSETS[index].store(source_offset, Ordering::SeqCst);
@@ -31372,7 +31418,7 @@ fn linux_getdents(descriptor: u64, address: u64, count: u64, legacy: bool) -> u6
     let output_capacity = capacity.min(entries.len());
     let mut used = 0_usize;
     let next_offset;
-    let oci_directory = linux_oci_descriptor(descriptor);
+    let rootfs_directory = linux_rootfs_descriptor(descriptor);
     if let Some(directory) = linux_overlay_descriptor_handle(descriptor) {
         let initial = offset == 0;
         let mut cursor = if initial {
@@ -31443,7 +31489,7 @@ fn linux_getdents(descriptor: u64, address: u64, count: u64, legacy: bool) -> u6
             return 0;
         }
         next_offset = (cursor + 2) as u64;
-    } else if oci_directory != 0 {
+    } else if rootfs_directory != 0 {
         let initial = offset == 0;
         let mut cursor = if initial {
             0
@@ -31458,9 +31504,9 @@ fn linux_getdents(descriptor: u64, address: u64, count: u64, legacy: bool) -> u6
         };
         if initial {
             for (inode, next, name) in [
-                (linux_oci_inode(oci_directory), 1_i64, &b"."[..]),
+                (linux_rootfs_inode(rootfs_directory), 1_i64, &b"."[..]),
                 (
-                    linux_oci_inode(crate::oci_image::ROOT_HANDLE),
+                    linux_rootfs_inode(crate::published_rootfs::ROOT_HANDLE),
                     2,
                     &b".."[..],
                 ),
@@ -31479,17 +31525,17 @@ fn linux_getdents(descriptor: u64, address: u64, count: u64, legacy: bool) -> u6
             }
         }
         loop {
-            let Some(child) = crate::oci_image::next_child(oci_directory, cursor) else {
+            let Some(child) = crate::published_rootfs::next_child(rootfs_directory, cursor) else {
                 return LINUX_EINVAL;
             };
             let Some(child) = child else {
                 break;
             };
             let kind = match child.entry.kind {
-                ginux_oci::EntryKind::Directory => 4,
-                ginux_oci::EntryKind::File => 8,
-                ginux_oci::EntryKind::Hardlink => 8,
-                ginux_oci::EntryKind::Symlink => 10,
+                crate::published_rootfs::EntryKind::Directory => 4,
+                crate::published_rootfs::EntryKind::File => 8,
+                crate::published_rootfs::EntryKind::Hardlink => 8,
+                crate::published_rootfs::EntryKind::Symlink => 10,
             };
             let Ok(next) = i64::try_from(child.next_cursor + 2) else {
                 return LINUX_EINVAL;
@@ -31498,7 +31544,7 @@ fn linux_getdents(descriptor: u64, address: u64, count: u64, legacy: bool) -> u6
                 &mut entries[..output_capacity],
                 &mut used,
                 legacy,
-                linux_oci_inode(child.handle),
+                linux_rootfs_inode(child.handle),
                 next,
                 kind,
                 child.name,
@@ -32813,7 +32859,7 @@ fn linux_readahead(descriptor: u64, offset: u64, _count: u64) -> u64 {
         return LINUX_EBADF;
     }
     if linux_overlay_descriptor_handle(descriptor).is_some()
-        || linux_oci_entry(descriptor).is_some()
+        || linux_rootfs_entry(descriptor).is_some()
         || linux_regular_file(state).is_some()
     {
         // File contents are already resident in the immutable image or the
@@ -32986,12 +33032,12 @@ fn linux_descriptor_stat(descriptor: u64) -> Option<[u8; LINUX_STAT_SIZE]> {
     {
         return Some(linux_overlay_stat(metadata));
     }
-    let oci_handle = linux_oci_descriptor(descriptor);
-    if oci_handle != 0 {
-        let entry = (oci_handle != crate::oci_image::ROOT_HANDLE)
-            .then(|| crate::oci_image::entry(oci_handle))
+    let rootfs_handle = linux_rootfs_descriptor(descriptor);
+    if rootfs_handle != 0 {
+        let entry = (rootfs_handle != crate::published_rootfs::ROOT_HANDLE)
+            .then(|| crate::published_rootfs::entry(rootfs_handle))
             .flatten();
-        return Some(linux_oci_stat(oci_handle, entry));
+        return Some(linux_rootfs_stat(rootfs_handle, entry));
     }
     let device = linux_device_descriptor(descriptor);
     (device != 0).then(|| {
@@ -33118,7 +33164,7 @@ fn linux_statfs(path_address: u64, stat_address: u64) -> u64 {
         canonical_length.and_then(|length| crate::linux_overlay::lookup(&canonical[..length]));
     let virtual_path = linux_virtual_mount_path_at(u64::from(LINUX_AT_FDCWD), path);
     if overlay.is_none()
-        && linux_oci_path_at(u64::from(LINUX_AT_FDCWD), path).is_none()
+        && linux_rootfs_path_at(u64::from(LINUX_AT_FDCWD), path).is_none()
         && virtual_path.is_none()
         && linux_root_directory_kind(path).is_none()
     {
@@ -38453,7 +38499,9 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
                 &CONTAINER_IMAGES[slot],
                 &CONTAINER_IMAGE_SIZES[slot],
             );
-            if crate::oci_image::is_installed(slot) && !crate::image_store::uninstall_rootfs(slot) {
+            if crate::published_rootfs::is_installed(slot)
+                && !crate::image_store::uninstall_rootfs(slot)
+            {
                 return u64::MAX - 2;
             }
             update_container_configuration(slot, control_abi::DOMAIN_CONFIG_IMAGE)
@@ -38475,10 +38523,10 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
                 && container_state(requested_slot.unwrap_or(0))
                     == control_abi::DOMAIN_STATE_RUNNING
                 && (active_container_slot() == requested_slot
-                    || address_space::oci_runtime_is_suspended(requested_slot.unwrap_or(0))) =>
+                    || address_space::linux_runtime_is_suspended(requested_slot.unwrap_or(0))) =>
         {
             let slot = requested_slot.unwrap_or(0);
-            if address_space::oci_runtime_is_suspended(slot) {
+            if address_space::linux_runtime_is_suspended(slot) {
                 CONTAINER_SELECTED_SLOT.store(slot as u8, Ordering::Release);
                 CONTAINER_STOP_REQUESTED[slot].store(true, Ordering::Release);
                 CONTAINER_RESTART_REQUESTED.store(true, Ordering::Release);
@@ -38505,7 +38553,7 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
             let slot = requested_slot.unwrap_or(0);
             CONTAINER_SELECTED_SLOT.store(slot as u8, Ordering::SeqCst);
             reset_container_console(slot, operation == control_abi::DOMAIN_START_ATTACHED);
-            if container_image_is_embedded(slot) || crate::oci_image::is_installed(slot) {
+            if container_image_is_embedded(slot) || crate::published_rootfs::is_installed(slot) {
                 CONTAINER_RESTART_REQUESTED.store(true, Ordering::SeqCst);
             } else {
                 CONTAINER_PULL_REQUESTED.store(true, Ordering::SeqCst);
@@ -38696,17 +38744,17 @@ fn container_image_is_embedded(slot: usize) -> bool {
             .all(|(stored, expected)| stored.load(Ordering::SeqCst) == *expected)
 }
 
-pub(crate) fn configured_container_uses_installed_oci_image() -> bool {
+pub(crate) fn configured_domain_uses_published_rootfs() -> bool {
     let Some(slot) = selected_container_slot() else {
         return false;
     };
-    !container_image_is_embedded(slot) && crate::oci_image::is_installed(slot)
+    !container_image_is_embedded(slot) && crate::published_rootfs::is_installed(slot)
 }
 
-pub(crate) fn container_uses_installed_oci_image(slot: usize) -> bool {
+pub(crate) fn domain_uses_published_rootfs(slot: usize) -> bool {
     slot < control_abi::DOMAIN_LIMIT
         && !container_image_is_embedded(slot)
-        && crate::oci_image::is_installed(slot)
+        && crate::published_rootfs::is_installed(slot)
 }
 
 pub(crate) fn configured_container_slot() -> Option<usize> {

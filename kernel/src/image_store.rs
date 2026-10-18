@@ -251,7 +251,7 @@ pub(crate) fn discard_published_layers() -> bool {
 }
 
 pub(crate) fn install_published_layers(slot: usize) -> bool {
-    if slot >= crate::control_abi::DOMAIN_LIMIT || crate::oci_image::is_installed(slot) {
+    if slot >= crate::control_abi::DOMAIN_LIMIT || crate::published_rootfs::is_installed(slot) {
         return false;
     }
     let layer_count = PUBLISHED_LAYER_COUNT.load(Ordering::Acquire);
@@ -389,8 +389,8 @@ pub(crate) fn install_published_layers(slot: usize) -> bool {
         }
         output[rootfs_length..rootfs_end].fill(0);
         let bytes = unsafe { core::slice::from_raw_parts(address as *const u8, rootfs_end) };
-        if !crate::oci_image::install_runtime_rootfs(slot, bytes) {
-            crate::serial_write_bytes(b"ginux: OCI rootfs index or init validation failed\r\n");
+        if !crate::published_rootfs::install_published_rootfs(slot, bytes) {
+            crate::serial_write_bytes(b"ginux: OCI rootfs publication failed\r\n");
             let _ = memory::scrub_and_release_contiguous_extent(
                 FrameOwner::KERNEL,
                 first_frame,
@@ -400,7 +400,7 @@ pub(crate) fn install_published_layers(slot: usize) -> bool {
         }
         for digest in &digests[..layer_count] {
             if store.remove(*digest).is_err() {
-                let _ = crate::oci_image::uninstall_runtime_rootfs(slot);
+                let _ = crate::published_rootfs::uninstall_published_rootfs(slot);
                 let _ = memory::scrub_and_release_contiguous_extent(
                     FrameOwner::KERNEL,
                     first_frame,
@@ -426,7 +426,8 @@ pub(crate) fn install_published_layers(slot: usize) -> bool {
 }
 
 pub(crate) fn uninstall_rootfs(slot: usize) -> bool {
-    if slot >= crate::control_abi::DOMAIN_LIMIT || !crate::oci_image::uninstall_runtime_rootfs(slot)
+    if slot >= crate::control_abi::DOMAIN_LIMIT
+        || !crate::published_rootfs::uninstall_published_rootfs(slot)
     {
         return false;
     }

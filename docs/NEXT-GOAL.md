@@ -38,7 +38,7 @@ Delivered in this checkpoint:
 - Multiple admitted processes remain runnable, and nice values now influence
   ready-process priority selection. Cleanup, process-limit, round-robin, and
   priority-selection invariants are covered by the verification boot.
-- OCI runtime forks temporarily use eager private copies. Rocky's repeated
+- Linux personality forks temporarily use eager private copies. Rocky's repeated
   fork/exec/exit path found incomplete COW re-fork bookkeeping; COW remains in
   the process layer but must not return to the runtime path until that sequence
   has its own passing regression gate.

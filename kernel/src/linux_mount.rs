@@ -7,7 +7,7 @@ use crate::{
     arch::x86_64::cpu,
     control_abi, domain,
     initramfs::{self, PublishedRootHandle},
-    oci_image,
+    published_rootfs,
 };
 
 const NAMESPACE_LIMIT: usize = control_abi::DOMAIN_LIMIT + 4;
@@ -43,7 +43,7 @@ struct MountNamespace {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum NamespaceRoot {
     Embedded(PublishedRootHandle),
-    Oci { container_slot: u8 },
+    Published { domain_slot: u8 },
 }
 
 struct MountNamespaceTable {
@@ -122,14 +122,16 @@ impl NamespaceRoot {
     fn is_valid(self) -> bool {
         match self {
             Self::Embedded(root) => root.generation != 0,
-            Self::Oci { container_slot } => usize::from(container_slot) < control_abi::DOMAIN_LIMIT,
+            Self::Published { domain_slot } => usize::from(domain_slot) < control_abi::DOMAIN_LIMIT,
         }
     }
 
     fn is_live(self) -> bool {
         match self {
             Self::Embedded(root) => initramfs::published_root_handle_is_live(root),
-            Self::Oci { container_slot } => oci_image::is_installed(usize::from(container_slot)),
+            Self::Published { domain_slot } => {
+                published_rootfs::is_installed(usize::from(domain_slot))
+            }
         }
     }
 }
@@ -205,17 +207,17 @@ pub(crate) fn activate_initial() -> bool {
             let Some(owner_domain) = cpu::container_domain_id(container_slot) else {
                 return false;
             };
-            if !cpu::container_uses_installed_oci_image(container_slot) {
+            if !cpu::domain_uses_published_rootfs(container_slot) {
                 let Some(root) = initramfs::published_root_handle().map(NamespaceRoot::Embedded)
                 else {
                     return false;
                 };
                 return activate_domain_root(owner_domain, root);
             }
-            let Ok(container_slot) = u8::try_from(container_slot) else {
+            let Ok(domain_slot) = u8::try_from(container_slot) else {
                 return false;
             };
-            (owner_domain, NamespaceRoot::Oci { container_slot })
+            (owner_domain, NamespaceRoot::Published { domain_slot })
         }
         None => {
             let Some(root) = initramfs::published_root_handle().map(NamespaceRoot::Embedded) else {

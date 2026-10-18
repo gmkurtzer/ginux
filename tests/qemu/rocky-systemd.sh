@@ -55,12 +55,12 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
         'domain set rocky image=rockylinux/rockylinux:10-ubi-init init=/sbin/init' \
         'domain start rocky --attach'
     wait_for 'ginux: OCI image ready' 240
-    wait_for 'ginux: entering configured OCI init' 30
+    wait_for 'ginux: entering configured Linux init' 30
     sleep 15
-    if grep -Fq 'ginux: OCI init diagnostics: exit=127 first-unsupported-syscall=none' "$output_file"; then
+    if grep -Fq 'ginux: Linux init diagnostics: exit=127 first-unsupported-syscall=none' "$output_file"; then
         printf '%s\n' 'shutdown'
     else
-        if grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC|OCI init (execution|setup) failed|OCI init exited with status|rocky: (failed|stopped)' "$output_file"; then
+        if grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC|Linux init (execution|setup) failed|Linux init exited with status|rocky: (failed|stopped)' "$output_file"; then
             fail 'systemd failed before the documented mmap boundary'
         fi
         printf '\035'
@@ -101,8 +101,8 @@ fi
 
 if grep -Fq 'rocky: running' "$output_file"; then
     echo 'Rocky systemd PID 1 smoke test passed.'
-elif grep -Fq 'ginux: OCI init recent syscalls:' "$output_file" \
-    && grep -Fq 'ginux: OCI init diagnostics: exit=127 first-unsupported-syscall=none' "$output_file"; then
+elif grep -Fq 'ginux: Linux init recent syscalls:' "$output_file" \
+    && grep -Fq 'ginux: Linux init diagnostics: exit=127 first-unsupported-syscall=none' "$output_file"; then
     echo 'Rocky systemd reached the documented dynamic-mmap compatibility boundary.'
 else
     fail 'systemd neither remained running nor reached the documented boundary'

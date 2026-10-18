@@ -80,7 +80,7 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
         'domain set rocky image=rockylinux/rockylinux:10 init=/usr/bin/true' \
         'domain start rocky'
     wait_for_count 'ginux: OCI image ready' 3 240
-    wait_for_count 'ginux: entering configured OCI init' 3 30
+    wait_for_count 'ginux: entering configured Linux init' 3 30
     wait_for 'rocky: stopped'
     printf '%s\n' 'domain list' 'ps'
     wait_for 'alpine          running     linux'

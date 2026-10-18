@@ -1,7 +1,12 @@
 use core::sync::atomic::{AtomicU16, AtomicU32, AtomicUsize, Ordering};
-use ginux_oci::{Entry, EntryKind, Rootfs, RootfsMetadata};
+pub(crate) use ginux_oci::{Entry, EntryKind};
+use ginux_oci::{Rootfs, RootfsMetadata};
 
 use crate::memory::{self, FrameLease, FrameOwner};
+
+// This module is the source-neutral, immutable root-filesystem boundary used
+// by Linux VFS and ELF execution. OCI ingestion may publish an artifact here,
+// but no registry, manifest, layer, or transport state crosses this boundary.
 
 pub(crate) const ROOT_HANDLE: u16 = 1;
 const ENTRY_HANDLE_BASE: usize = 2;
@@ -60,21 +65,17 @@ pub(crate) fn is_installed(slot: usize) -> bool {
     slot < crate::control_abi::DOMAIN_LIMIT && SIZES[slot].load(Ordering::Acquire) != 0
 }
 
-pub(crate) fn install_runtime_rootfs(slot: usize, bytes: &'static [u8]) -> bool {
+pub(crate) fn install_published_rootfs(slot: usize, bytes: &'static [u8]) -> bool {
     if slot >= crate::control_abi::DOMAIN_LIMIT || is_installed(slot) {
         return false;
     }
     let Some(rootfs) = Rootfs::parse(bytes) else {
-        crate::serial_write_bytes(b"ginux: OCI rootfs tar validation failed\r\n");
+        crate::serial_write_bytes(b"ginux: published rootfs validation failed\r\n");
         return false;
     };
-    if process_plan_in(&rootfs, b"/bin/sh").is_none() {
-        crate::serial_write_bytes(b"ginux: OCI rootfs /bin/sh execution plan failed\r\n");
-        return false;
-    }
     let metadata = rootfs.metadata();
     if !install_path_index(slot, &rootfs) {
-        crate::serial_write_bytes(b"ginux: OCI rootfs pathname index allocation failed\r\n");
+        crate::serial_write_bytes(b"ginux: published rootfs pathname index allocation failed\r\n");
         return false;
     }
     clear_entry_cache(slot);
@@ -85,7 +86,7 @@ pub(crate) fn install_runtime_rootfs(slot: usize, bytes: &'static [u8]) -> bool 
     true
 }
 
-pub(crate) fn uninstall_runtime_rootfs(slot: usize) -> bool {
+pub(crate) fn uninstall_published_rootfs(slot: usize) -> bool {
     let Some(size) = SIZES.get(slot) else {
         return false;
     };

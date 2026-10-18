@@ -25,9 +25,9 @@ mod manifest;
 mod memory;
 mod native_elf;
 mod network;
-mod oci_image;
 mod packet;
 mod pe;
+mod published_rootfs;
 mod scheduler;
 mod volume;
 
@@ -3896,40 +3896,42 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         }
         loop {
             let resuming = arch::x86_64::cpu::configured_container_slot()
-                .is_some_and(address_space::oci_runtime_is_suspended);
+                .is_some_and(address_space::linux_runtime_is_suspended);
             if !resuming {
                 serial_write("ginux: starting configured runtime domain\r\n");
             }
-            if arch::x86_64::cpu::configured_container_uses_installed_oci_image() {
+            if arch::x86_64::cpu::configured_domain_uses_published_rootfs() {
                 let mut init = [0_u8; control_abi::DOMAIN_MAX_INIT_SIZE];
                 let Some(init_size) = arch::x86_64::cpu::configured_container_init(&mut init)
                 else {
                     serial_write(
-                        "ginux: configured OCI init unavailable; domain marked failed\r\n",
+                        "ginux: configured Linux init unavailable; domain marked failed\r\n",
                     );
                     arch::x86_64::cpu::fail_configured_container();
                     break;
                 };
                 if !resuming {
-                    serial_write("ginux: entering configured OCI init\r\n");
+                    serial_write("ginux: entering configured Linux init\r\n");
                 }
                 arch::x86_64::cpu::begin_configured_container();
-                match address_space::run_oci_process(&init[..init_size]) {
-                    address_space::OciProcessOutcome::Suspended => {
+                match address_space::run_linux_init(&init[..init_size]) {
+                    address_space::LinuxProcessOutcome::Suspended => {
                         arch::x86_64::cpu::suspend_configured_container();
                         break;
                     }
-                    address_space::OciProcessOutcome::Failed => {
-                        serial_write("ginux: OCI init execution failed; domain marked failed\r\n");
+                    address_space::LinuxProcessOutcome::Failed => {
+                        serial_write(
+                            "ginux: Linux init execution failed; domain marked failed\r\n",
+                        );
                         arch::x86_64::cpu::fail_configured_container();
                         break;
                     }
-                    address_space::OciProcessOutcome::Exited(status) => {
+                    address_space::LinuxProcessOutcome::Exited(status) => {
                         arch::x86_64::cpu::stop_configured_container();
                         if status == 0 {
-                            serial_write("ginux: OCI init exited cleanly\r\n");
+                            serial_write("ginux: Linux init exited cleanly\r\n");
                         } else {
-                            serial_write("ginux: OCI init exited with status ");
+                            serial_write("ginux: Linux init exited with status ");
                             serial_write_u64(u64::from(status));
                             serial_write("\r\n");
                         }

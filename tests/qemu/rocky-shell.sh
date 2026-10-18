@@ -55,7 +55,7 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
         'domain set rocky image=rockylinux/rockylinux:10 init=/bin/sh' \
         'domain start rocky --attach'
     wait_for 'ginux: OCI image ready' 240
-    wait_for 'ginux: entering configured OCI init' 30
+    wait_for 'ginux: entering configured Linux init' 30
     printf '%s\n' \
         "printf 'ROCKY_GLIBC_SHELL_OK\\n'" \
         "test -f /etc/os-release && printf 'ROCKY_STAT_OK\\n'" \
@@ -92,7 +92,7 @@ wait "$qemu_pid" || true
 qemu_pid=""
 
 if ! grep -Fq 'GINUX_KERNEL_OK' "$output_file" \
-    || grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC|OCI init (execution|setup) failed|OCI init exited with status 127' "$output_file"; then
+    || grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC|Linux init (execution|setup) failed|Linux init exited with status 127' "$output_file"; then
     fail 'clean Rocky shell lifecycle was not observed'
 fi
 
