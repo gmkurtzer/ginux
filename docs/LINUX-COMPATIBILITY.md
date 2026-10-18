@@ -88,6 +88,15 @@ advancement, pending-signal delivery, and upper-register argument garbage.
 `ITIMER_VIRTUAL`, `ITIMER_PROF`, and interruption of an already blocked syscall
 at an asynchronous timer deadline remain pending.
 
+Resource-accounting verification covers `getrusage`, `times`, and `sysinfo`.
+`getrusage` follows Linux's signed 32-bit selector conversion for self,
+children, and thread queries, reports current resident user memory in KiB, and
+returns a zero child aggregate until child accounting is available. `times`
+uses 100 Hz ticks, while `sysinfo` reports live process and physical-frame
+counts. Per-process CPU accounting, child aggregation, page-fault/I/O/context
+switch counters, load averages, and resident-memory high-water tracking remain
+pending.
+
 Filesystem syscall boundaries convert Linux `int`, `unsigned int`, `mode_t`,
 `uid_t`, and `gid_t` arguments from the low 32 register bits before validating
 them. Boot verification covers dirty upper register bits for `openat`,

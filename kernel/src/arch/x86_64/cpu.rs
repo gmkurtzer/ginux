@@ -10910,8 +10910,9 @@ fn linux_sysinfo_information(processes: u16, (uptime, _): (u64, u64)) -> Result<
 }
 
 fn linux_getrusage(who: u64, output_address: u64) -> u64 {
-    let children = who == u32::MAX as u64 || who == u64::MAX;
-    if !matches!(who, 0 | 1) && !children {
+    let who = who as i32;
+    let children = who == -1;
+    if !matches!(who, -1..=1) {
         return LINUX_EINVAL;
     }
     let mut usage = [0_u8; 144];
@@ -10921,6 +10922,11 @@ fn linux_getrusage(who: u64, output_address: u64) -> u64 {
         };
         usage[..8].copy_from_slice(&seconds.to_ne_bytes());
         usage[8..16].copy_from_slice(&(nanoseconds / 1_000).to_ne_bytes());
+        let resident_kib = address_space::current_linux_user_page_count()
+            .and_then(|pages| pages.checked_mul(PAGE_SIZE / 1024))
+            .and_then(|kib| u64::try_from(kib).ok())
+            .unwrap_or(0);
+        usage[32..40].copy_from_slice(&resident_kib.to_ne_bytes());
     }
     if !copy_to_linux_user(output_address, &usage) {
         return LINUX_EFAULT;
@@ -13784,6 +13790,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let scheduler_queries = verify_linux_scheduler_queries();
     let scheduler_affinity = verify_linux_scheduler_affinity();
     let realtime_queries = verify_linux_realtime_queries();
+    let resource_accounting = verify_linux_resource_accounting();
     let filesystem_sync = linux_syncfs(1) == 0 && linux_syncfs(99) == LINUX_EBADF;
     let robust_list = verify_linux_robust_list_syscalls();
     let rseq = verify_linux_rseq_syscall();
@@ -13830,6 +13837,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         scheduler_queries,
         scheduler_affinity,
         realtime_queries,
+        resource_accounting,
         filesystem_sync,
         robust_list,
         rseq,
@@ -13882,6 +13890,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && scheduler_queries
         && scheduler_affinity
         && realtime_queries
+        && resource_accounting
         && filesystem_sync
         && robust_list
         && rseq
@@ -14057,6 +14066,63 @@ fn verify_linux_realtime_queries() -> bool {
         && timezone == sentinel[..8];
     let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
     ordered_faults && unmapped
+}
+
+fn verify_linux_resource_accounting() -> bool {
+    const UPPER_REGISTER_BITS: u64 = 1_u64 << 32;
+    let mapping = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    if !(LINUX_RUNTIME_DYNAMIC_MMAP_BASE..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
+        .contains(&mapping)
+    {
+        return false;
+    }
+    let self_usage = linux_getrusage(UPPER_REGISTER_BITS, mapping) == 0 && {
+        let mut usage = [0_u8; 144];
+        copy_from_linux_user(mapping, &mut usage)
+            && u64::from_ne_bytes(usage[8..16].try_into().unwrap()) < 1_000_000
+            && u64::from_ne_bytes(usage[32..40].try_into().unwrap()) != 0
+    };
+    let selectors = self_usage
+        && linux_getrusage(UPPER_REGISTER_BITS | 1, mapping) == 0
+        && linux_getrusage(UPPER_REGISTER_BITS | u64::from(u32::MAX), mapping) == 0
+        && {
+            let mut children = [1_u8; 144];
+            copy_from_linux_user(mapping, &mut children) && children == [0; 144]
+        }
+        && linux_getrusage(UPPER_REGISTER_BITS | 2, mapping) == LINUX_EINVAL
+        && linux_getrusage(0, 1) == LINUX_EFAULT;
+    let elapsed = linux_times(mapping + 160);
+    let times = selectors
+        && elapsed < LINUX_RETURN_TO_KERNEL
+        && {
+            let mut accounting = [0_u8; 32];
+            copy_from_linux_user(mapping + 160, &mut accounting)
+                && u64::from_ne_bytes(accounting[..8].try_into().unwrap()) <= elapsed
+                && accounting[8..] == [0; 24]
+        }
+        && linux_times(0) >= elapsed
+        && linux_times(1) == LINUX_EFAULT;
+    let sysinfo = times
+        && linux_sysinfo(mapping + 256) == 0
+        && {
+            let mut information = [0_u8; 112];
+            copy_from_linux_user(mapping + 256, &mut information)
+                && u64::from_ne_bytes(information[32..40].try_into().unwrap()) != 0
+                && u64::from_ne_bytes(information[40..48].try_into().unwrap())
+                    <= u64::from_ne_bytes(information[32..40].try_into().unwrap())
+                && u16::from_ne_bytes(information[80..82].try_into().unwrap()) != 0
+                && u32::from_ne_bytes(information[104..108].try_into().unwrap()) == 1
+        }
+        && linux_sysinfo(1) == LINUX_EFAULT;
+    let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
+    sysinfo && unmapped
 }
 
 fn verify_linux_robust_list_syscalls() -> bool {
