@@ -803,7 +803,6 @@ const LINUX_SIGALRM: u64 = 14;
 const LINUX_SIGTERM: u64 = 15;
 const LINUX_SIGXFSZ: u64 = 25;
 const LINUX_SI_USER: i32 = 0;
-const LINUX_SI_QUEUE: i32 = -1;
 const LINUX_SI_TKILL: i32 = -6;
 const LINUX_SI_KERNEL: i32 = 0x80;
 const LINUX_SEGV_MAPERR: i32 = 1;
@@ -16644,6 +16643,8 @@ fn verify_linux_signal_argument_widths() -> bool {
             interrupted,
             (0, 0),
         ) == 0;
+    let queued_self_signals =
+        verify_linux_queued_self_signals(mapping, current_pid, current_tid, interrupted);
     let pidfd = linux_pidfd_open(UPPER_REGISTER_BITS | current_pid, UPPER_REGISTER_BITS);
     let duplicate = if pidfd < LINUX_AUX_DESCRIPTOR_LIMIT {
         linux_pidfd_getfd(pidfd, UPPER_REGISTER_BITS | 1, UPPER_REGISTER_BITS)
@@ -16651,6 +16652,7 @@ fn verify_linux_signal_argument_widths() -> bool {
         LINUX_EBADF
     };
     let pidfd_valid = valid
+        && queued_self_signals
         && duplicate < LINUX_DESCRIPTOR_TABLE_LIMIT
         && linux_pidfd_send_signal(
             pidfd,
@@ -16671,6 +16673,90 @@ fn verify_linux_signal_argument_widths() -> bool {
     }
     let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
     pidfd_valid && unmapped
+}
+
+fn verify_linux_queued_self_signals(
+    mapping: u64,
+    current_pid: u64,
+    current_tid: u64,
+    interrupted: LinuxUserContext,
+) -> bool {
+    const SIGNAL: u64 = 10;
+    const SIGNAL_BIT: u64 = 1 << (SIGNAL - 1);
+    const VALUE: u64 = 0x4749_4e55_5851_5545;
+    const THREAD_VALUE: u64 = 0x5448_5245_4144_5349;
+    let index = SIGNAL as usize - 1;
+    let old_mask = ELF_PROBE_SIGNAL_MASK.load(Ordering::SeqCst);
+    let old_pending = ELF_PROBE_PENDING_SIGNALS.load(Ordering::SeqCst);
+    let old_code = ELF_PROBE_PENDING_SIGNAL_CODES[index].load(Ordering::SeqCst);
+    let old_value = ELF_PROBE_PENDING_SIGNAL_VALUES[index].load(Ordering::SeqCst);
+    store_current_linux_signal_mask(old_mask | SIGNAL_BIT);
+    ELF_PROBE_PENDING_SIGNALS.fetch_and(!SIGNAL_BIT, Ordering::SeqCst);
+
+    let information = mapping;
+    let pending_set = mapping + 128;
+    let wait_set = mapping + 136;
+    let returned_information = mapping + 144;
+    let write_information = |supplied_signal: i32, code: i32, value: u64| {
+        let mut bytes = [0_u8; size_of::<LinuxSignalInformation>()];
+        bytes[..4].copy_from_slice(&supplied_signal.to_ne_bytes());
+        bytes[8..12].copy_from_slice(&code.to_ne_bytes());
+        bytes[24..32].copy_from_slice(&value.to_ne_bytes());
+        copy_to_linux_user(information, &bytes)
+    };
+    let wait_for_signal = |expected_code: i32, expected_value: u64| {
+        let mut returned = [0_u8; size_of::<LinuxSignalInformation>()];
+        linux_rt_sigtimedwait(wait_set, returned_information, 0, LINUX_SIGNAL_SET_SIZE) == SIGNAL
+            && copy_from_linux_user(returned_information, &mut returned)
+            && i32::from_ne_bytes(returned[..4].try_into().unwrap()) == SIGNAL as i32
+            && i32::from_ne_bytes(returned[8..12].try_into().unwrap()) == expected_code
+            && u64::from_ne_bytes(returned[24..32].try_into().unwrap()) == expected_value
+    };
+    let queued = write_information(31, LINUX_SI_KERNEL, VALUE)
+        && copy_to_linux_user(wait_set, &SIGNAL_BIT.to_ne_bytes())
+        && linux_rt_sigqueueinfo(
+            current_pid,
+            None,
+            SIGNAL,
+            information,
+            core::ptr::null_mut(),
+            interrupted,
+            (0, 0),
+        ) == 0
+        && linux_rt_sigpending(pending_set, LINUX_SIGNAL_SET_SIZE) == 0;
+    let mut pending_bytes = [0_u8; LINUX_SIGNAL_SET_SIZE as usize];
+    let process_signal = queued
+        && copy_from_linux_user(pending_set, &mut pending_bytes)
+        && u64::from_ne_bytes(pending_bytes) & SIGNAL_BIT != 0
+        && wait_for_signal(LINUX_SI_KERNEL, VALUE);
+    let thread_signal = write_information(0, LINUX_SI_TKILL, THREAD_VALUE)
+        && linux_rt_sigqueueinfo(
+            current_pid,
+            Some(current_tid),
+            SIGNAL,
+            information,
+            core::ptr::null_mut(),
+            interrupted,
+            (0, 0),
+        ) == 0
+        && wait_for_signal(LINUX_SI_TKILL, THREAD_VALUE);
+    let errors = linux_rt_sigpending(pending_set, LINUX_SIGNAL_SET_SIZE - 1) == LINUX_EINVAL
+        && linux_rt_sigpending(1, LINUX_SIGNAL_SET_SIZE) == LINUX_EFAULT
+        && linux_rt_sigqueueinfo(
+            current_pid,
+            None,
+            LINUX_SIGNAL_COUNT as u64 + 1,
+            1,
+            core::ptr::null_mut(),
+            interrupted,
+            (0, 0),
+        ) == LINUX_EINVAL;
+
+    store_current_linux_signal_mask(old_mask);
+    ELF_PROBE_PENDING_SIGNALS.store(old_pending, Ordering::SeqCst);
+    ELF_PROBE_PENDING_SIGNAL_CODES[index].store(old_code, Ordering::SeqCst);
+    ELF_PROBE_PENDING_SIGNAL_VALUES[index].store(old_value, Ordering::SeqCst);
+    process_signal && thread_signal && errors
 }
 
 fn verify_linux_descriptor_argument_widths() -> bool {
@@ -33025,11 +33111,7 @@ fn linux_rt_sigqueueinfo(
     if !copy_from_linux_user(information, &mut bytes) {
         return LINUX_EFAULT;
     }
-    let supplied_signal = i32::from_ne_bytes(bytes[..4].try_into().unwrap());
     let code = i32::from_ne_bytes(bytes[8..12].try_into().unwrap());
-    if supplied_signal != signal as i32 || code != LINUX_SI_QUEUE {
-        return LINUX_EPERM;
-    }
     let value = u64::from_ne_bytes(bytes[24..32].try_into().unwrap());
     linux_kill(
         1,
