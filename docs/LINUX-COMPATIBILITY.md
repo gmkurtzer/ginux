@@ -271,6 +271,18 @@ rejection. Controlling terminals, orphaned-group signaling, and a concurrent
 ring-3 parent/child mutation proof remain pending, so `setpgid` and `setsid`
 remain Partial.
 
+`personality` now stores per-process Linux personality state, returns the
+previous value on a successful change, implements the `0xffffffff` query, and
+converts the request through Linux's 32-bit interface. `PER_LINUX` and the
+`UNAME26` flag are supported; `UNAME26` changes `uname` release reporting from
+`6.12.0-ginux.0.1` to `2.6.52.0-ginux.0.1`. State is inherited across fork,
+retained across exec, and restored across process switches. Boot verification
+covers transitions, dirty upper register bits, invalid personalities,
+observable uname output, and state restoration. Flags that require different
+memory layouts, executable-read mappings, page-zero mappings, timeout quirks,
+or non-Linux execution domains remain unsupported, so `personality` remains
+Partial.
+
 The ring-3 controller also exercises `poll` against its live nonblocking pipe
 descriptors. The probe covers empty and readable input, writable output,
 ignored negative descriptors, `POLLNVAL`, writer-close `POLLHUP`, invalid

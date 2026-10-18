@@ -781,6 +781,8 @@ const LINUX_PR_SET_SECCOMP: u64 = 22;
 const LINUX_PR_SET_NO_NEW_PRIVS: u64 = 38;
 const LINUX_PR_GET_NO_NEW_PRIVS: u64 = 39;
 const LINUX_PR_TIMING_STATISTICAL: u64 = 0;
+const LINUX_PERSONALITY_QUERY: u32 = u32::MAX;
+const LINUX_PERSONALITY_UNAME26: u32 = 0x0002_0000;
 const LINUX_PROCESS_NAME_SIZE: usize = 16;
 const LINUX_INITIAL_PROCESS_NAME: u64 = 0x7469_6e69;
 const LINUX_SIG_BLOCK: u64 = 0;
@@ -1550,6 +1552,7 @@ static ELF_PROBE_CLOCK_FREQUENCY: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_PROCESS_NAME_LOW: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_PROCESS_NAME_HIGH: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_DUMPABLE: BankedAtomicBool = BankedAtomicBool::new(true);
+static ELF_PROBE_PERSONALITY: BankedAtomicU32 = BankedAtomicU32::new(0);
 // Linux exposes nice values in the signed range -20..=19. Store nice + 20 so
 // the per-domain bank can use the same compact atomic machinery as other
 // process runtime state.
@@ -6270,6 +6273,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
     ELF_PROBE_PROCESS_NAME_LOW.store(LINUX_INITIAL_PROCESS_NAME, Ordering::SeqCst);
     ELF_PROBE_PROCESS_NAME_HIGH.store(0, Ordering::SeqCst);
     ELF_PROBE_DUMPABLE.store(true, Ordering::SeqCst);
+    ELF_PROBE_PERSONALITY.store(0, Ordering::SeqCst);
     ELF_PROBE_NICE.store(20, Ordering::SeqCst);
     ELF_PROBE_IOPRIO.store(0, Ordering::SeqCst);
     LINUX_RUNTIME_EXIT_STATUS.store(u64::MAX, Ordering::SeqCst);
@@ -8762,10 +8766,7 @@ extern "sysv64" fn linux_syscall_handler(
             };
             copy_linux_id_triple(first_argument, buffer, count, ids)
         }
-        LINUX_PERSONALITY_SYSCALL => match first_argument {
-            0 | 0xffff_ffff => 0,
-            _ => LINUX_EINVAL,
-        },
+        LINUX_PERSONALITY_SYSCALL => linux_personality(first_argument),
         LINUX_CAPGET_SYSCALL => linux_capget(first_argument, buffer),
         LINUX_CAPSET_SYSCALL => linux_capset(first_argument, buffer),
         LINUX_GETPRIORITY_SYSCALL => linux_getpriority(first_argument, buffer),
@@ -10745,7 +10746,12 @@ fn linux_uname_with_copy(address: u64, copy: impl FnOnce(u64, &[u8]) -> bool) ->
     let mut name = [0_u8; LINUX_UTSNAME_SIZE];
     name[..6].copy_from_slice(b"Linux\0");
     name[65..71].copy_from_slice(b"ginux\0");
-    name[130..147].copy_from_slice(b"6.12.0-ginux.0.1\0");
+    let release = if ELF_PROBE_PERSONALITY.load(Ordering::SeqCst) & LINUX_PERSONALITY_UNAME26 != 0 {
+        b"2.6.52.0-ginux.0.1\0".as_slice()
+    } else {
+        b"6.12.0-ginux.0.1\0".as_slice()
+    };
+    name[130..130 + release.len()].copy_from_slice(release);
     name[195..198].copy_from_slice(b"#1\0");
     name[260..267].copy_from_slice(b"x86_64\0");
     name[325..337].copy_from_slice(b"localdomain\0");
@@ -11777,6 +11783,7 @@ struct LinuxProcessRuntimeState {
     rlimits: [u64; LINUX_RLIMIT_WORDS],
     process_name: [u64; 2],
     dumpable: bool,
+    personality: u32,
     nice: u8,
     ioprio: u16,
     no_new_privileges: bool,
@@ -11819,6 +11826,7 @@ impl LinuxProcessRuntimeState {
         rlimits: [0; LINUX_RLIMIT_WORDS],
         process_name: [0; 2],
         dumpable: true,
+        personality: 0,
         nice: 20,
         ioprio: 0,
         no_new_privileges: false,
@@ -11886,6 +11894,7 @@ fn capture_linux_process_runtime_state() -> Option<LinuxProcessRuntimeState> {
             ELF_PROBE_PROCESS_NAME_HIGH.load(Ordering::SeqCst),
         ],
         dumpable: ELF_PROBE_DUMPABLE.load(Ordering::SeqCst),
+        personality: ELF_PROBE_PERSONALITY.load(Ordering::SeqCst),
         nice: ELF_PROBE_NICE.load(Ordering::SeqCst),
         ioprio: ELF_PROBE_IOPRIO.load(Ordering::SeqCst),
         no_new_privileges: ELF_PROBE_NO_NEW_PRIVS.load(Ordering::SeqCst),
@@ -11945,6 +11954,7 @@ fn restore_linux_process_runtime_state(state: LinuxProcessRuntimeState) {
     ELF_PROBE_PROCESS_NAME_LOW.store(state.process_name[0], Ordering::SeqCst);
     ELF_PROBE_PROCESS_NAME_HIGH.store(state.process_name[1], Ordering::SeqCst);
     ELF_PROBE_DUMPABLE.store(state.dumpable, Ordering::SeqCst);
+    ELF_PROBE_PERSONALITY.store(state.personality, Ordering::SeqCst);
     ELF_PROBE_NICE.store(state.nice, Ordering::SeqCst);
     ELF_PROBE_IOPRIO.store(state.ioprio, Ordering::SeqCst);
     ELF_PROBE_NO_NEW_PRIVS.store(state.no_new_privileges, Ordering::SeqCst);
@@ -13770,6 +13780,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let modify_ldt = verify_linux_modify_ldt_syscall();
     let process_controls = verify_linux_prctl_syscall();
     let architecture_controls = verify_linux_arch_prctl_syscall();
+    let personality = verify_linux_personality_syscall();
     let scheduler_queries = verify_linux_scheduler_queries();
     let scheduler_affinity = verify_linux_scheduler_affinity();
     let realtime_queries = verify_linux_realtime_queries();
@@ -13822,6 +13833,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         modify_ldt,
         process_controls,
         architecture_controls,
+        personality,
         scheduler_queries,
         scheduler_affinity,
         realtime_queries,
@@ -13880,6 +13892,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && modify_ldt
         && process_controls
         && architecture_controls
+        && personality
         && scheduler_queries
         && scheduler_affinity
         && realtime_queries
@@ -14104,6 +14117,43 @@ fn verify_linux_arch_prctl_syscall() -> bool {
         && ELF_PROBE_TLS_SIZE.load(Ordering::SeqCst) == saved_extent_size;
     let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
     boundaries && restored && unmapped
+}
+
+fn verify_linux_personality_syscall() -> bool {
+    const UPPER_REGISTER_BITS: u64 = 1_u64 << 32;
+    let mapping = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    if !(LINUX_RUNTIME_DYNAMIC_MMAP_BASE..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
+        .contains(&mapping)
+    {
+        return false;
+    }
+    let saved = ELF_PROBE_PERSONALITY.load(Ordering::SeqCst);
+    let initial = linux_personality(UPPER_REGISTER_BITS | u64::from(LINUX_PERSONALITY_QUERY))
+        == u64::from(saved);
+    let set = initial
+        && linux_personality(UPPER_REGISTER_BITS | u64::from(LINUX_PERSONALITY_UNAME26))
+            == u64::from(saved)
+        && linux_personality(u64::from(LINUX_PERSONALITY_QUERY))
+            == u64::from(LINUX_PERSONALITY_UNAME26)
+        && linux_uname_with_copy(mapping, copy_to_linux_user) == 0;
+    let mut name = [0_u8; LINUX_UTSNAME_SIZE];
+    let uname26 = set
+        && copy_from_linux_user(mapping, &mut name)
+        && name[130..].starts_with(b"2.6.52.0-ginux.0.1\0")
+        && linux_personality(1) == LINUX_EINVAL
+        && linux_personality(u64::from(LINUX_PERSONALITY_QUERY))
+            == u64::from(LINUX_PERSONALITY_UNAME26);
+    ELF_PROBE_PERSONALITY.store(saved, Ordering::SeqCst);
+    let restored = ELF_PROBE_PERSONALITY.load(Ordering::SeqCst) == saved;
+    let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
+    uname26 && restored && unmapped
 }
 
 fn verify_linux_scheduler_queries() -> bool {
@@ -32629,6 +32679,19 @@ fn linux_sched_getattr(pid: u64, attribute_address: u64, size: u64, flags: u64) 
         extension_offset += length;
     }
     0
+}
+
+fn linux_personality(requested: u64) -> u64 {
+    let requested = requested as u32;
+    let current = ELF_PROBE_PERSONALITY.load(Ordering::SeqCst);
+    if requested == LINUX_PERSONALITY_QUERY {
+        return u64::from(current);
+    }
+    if requested & !LINUX_PERSONALITY_UNAME26 != 0 {
+        return LINUX_EINVAL;
+    }
+    ELF_PROBE_PERSONALITY.store(requested, Ordering::SeqCst);
+    u64::from(current)
 }
 
 fn linux_arch_prctl(option: u64, argument: u64) -> u64 {
