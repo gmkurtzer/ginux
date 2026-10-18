@@ -1852,6 +1852,38 @@ pub(crate) fn live_process_pid_at(slot: usize) -> Option<u32> {
         .map(|process| process.handle.pid)
 }
 
+pub(crate) fn live_process_count() -> Option<u16> {
+    let table = live_process_table_mut()?;
+    table
+        .processes
+        .iter()
+        .filter(|process| process.is_some())
+        .count()
+        .try_into()
+        .ok()
+}
+
+pub(crate) fn host_live_process_count() -> Option<u16> {
+    let mut count = 0_usize;
+    for (instance, initialized) in LIVE_PROCESS_TABLE_INITIALIZED.iter().enumerate() {
+        if initialized.load(Ordering::Acquire) {
+            // Linux process-table mutation and host inspection are serialized
+            // on the current single-processor syscall path.
+            let table = unsafe {
+                &*core::ptr::addr_of!(LIVE_PROCESS_TABLES[instance]).cast::<ProcessTable>()
+            };
+            count = count.checked_add(
+                table
+                    .processes
+                    .iter()
+                    .filter(|process| process.is_some())
+                    .count(),
+            )?;
+        }
+    }
+    count.try_into().ok()
+}
+
 pub(crate) fn live_process_mapping(
     pid: u32,
     address: usize,

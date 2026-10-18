@@ -9236,6 +9236,27 @@ fn linux_controller_syscall(
             })
         }
         LINUX_IOCTL_SYSCALL => Some(LINUX_ENOTTY),
+        LINUX_SYSINFO_SYSCALL => {
+            let Some(processes) =
+                linux_process::host_live_process_count().and_then(|count| count.checked_add(1))
+            else {
+                return Some(LINUX_EOVERFLOW);
+            };
+            let Some(uptime) = linux_system_elapsed_time() else {
+                return Some(LINUX_ENOSYS);
+            };
+            let information = match linux_sysinfo_information(processes, uptime) {
+                Ok(information) => information,
+                Err(error) => return Some(error),
+            };
+            Some(
+                if address_space::copy_to_current_user(first, &information) {
+                    0
+                } else {
+                    LINUX_EFAULT
+                },
+            )
+        }
         LINUX_EXIT_SYSCALL | LINUX_EXIT_GROUP_SYSCALL => {
             let mut frame = UserTrapFrame::from_linux_syscall(
                 registers.into_array(),
@@ -10206,6 +10227,16 @@ fn linux_elapsed_nanoseconds() -> Option<u64> {
         .and_then(|value| value.checked_add(nanoseconds))
 }
 
+fn linux_system_elapsed_time() -> Option<(u64, u64)> {
+    let frequency = timer::monotonic_frequency()?;
+    let (_, epoch) = crate::linux_realtime_epoch()?;
+    let elapsed = timer::timestamp_counter().saturating_sub(epoch);
+    Some((
+        elapsed / frequency,
+        elapsed % frequency * NANOSECONDS_PER_SECOND / frequency,
+    ))
+}
+
 fn linux_clock_supported(clock: u64) -> bool {
     matches!(
         clock,
@@ -10243,20 +10274,40 @@ fn linux_times(output_address: u64) -> u64 {
 }
 
 fn linux_sysinfo(output_address: u64) -> u64 {
-    let Some((uptime, _)) = linux_elapsed_time() else {
+    let Some(processes) = linux_process::live_process_count() else {
+        return LINUX_ESRCH;
+    };
+    let Some(uptime) = linux_elapsed_time() else {
         return LINUX_ENOSYS;
     };
-    let mut information = [0_u8; 112];
-    information[..8].copy_from_slice(&uptime.to_ne_bytes());
-    information[32..40].copy_from_slice(&(1024_u64 * 1024 * 1024).to_ne_bytes());
-    information[40..48].copy_from_slice(&(768_u64 * 1024 * 1024).to_ne_bytes());
-    information[80..82].copy_from_slice(&1_u16.to_ne_bytes());
-    information[104..108].copy_from_slice(&1_u32.to_ne_bytes());
+    let information = match linux_sysinfo_information(processes, uptime) {
+        Ok(information) => information,
+        Err(error) => return error,
+    };
     if copy_to_linux_user(output_address, &information) {
         0
     } else {
         LINUX_EFAULT
     }
+}
+
+fn linux_sysinfo_information(processes: u16, (uptime, _): (u64, u64)) -> Result<[u8; 112], u64> {
+    let Some((total_frames, free_frames)) = memory::frame_counts() else {
+        return Err(LINUX_ENOSYS);
+    };
+    let Some(total_memory) = total_frames.checked_mul(PAGE_SIZE as u64) else {
+        return Err(LINUX_EOVERFLOW);
+    };
+    let Some(free_memory) = free_frames.checked_mul(PAGE_SIZE as u64) else {
+        return Err(LINUX_EOVERFLOW);
+    };
+    let mut information = [0_u8; 112];
+    information[..8].copy_from_slice(&uptime.to_ne_bytes());
+    information[32..40].copy_from_slice(&total_memory.to_ne_bytes());
+    information[40..48].copy_from_slice(&free_memory.to_ne_bytes());
+    information[80..82].copy_from_slice(&processes.to_ne_bytes());
+    information[104..108].copy_from_slice(&1_u32.to_ne_bytes());
+    Ok(information)
 }
 
 fn linux_getrusage(who: u64, output_address: u64) -> u64 {

@@ -2691,6 +2691,11 @@ if ! grep -q '^ginux: Linux static clock ID and resolution profile validated' "$
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux live sysinfo accounting validated' "$output_file"; then
+    echo "Boot test failed: Linux live sysinfo accounting was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux container-local root credentials verified' "$output_file"; then
     echo "Boot test failed: Linux container-local root credentials were not verified." >&2
     exit 1

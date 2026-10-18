@@ -86,6 +86,14 @@ realtime until a trusted time service supplies a TAI offset. Dynamic clock IDs
 and exact multi-process/thread CPU accounting remain pending, so both syscalls
 remain Partial.
 
+`sysinfo` reports live uptime, allocator-derived total and currently available
+RAM, and the visible process count (domain-local in a domain and host-wide in
+the control domain). Swap, high memory, load averages,
+and shared/buffer accounting are zero because those facilities do not yet
+exist; Linux-compatible structure layout, units, and invalid-address behavior
+are exercised from ring 3. The syscall remains Partial until accounting and
+process/thread semantics cover the complete Linux contract.
+
 System V shared memory now uses domain-owned, dynamically allocated frame
 objects whose lifetime is independent of any one mapping. `shmget`, `shmat`,
 `shmdt`, and `shmctl(IPC_STAT/IPC_RMID)` provide keyed creation, shared page

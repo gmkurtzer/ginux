@@ -51,6 +51,8 @@ const LINUX_READ_SYSCALL: u64 = 0;
 const LINUX_WRITE_SYSCALL: u64 = 1;
 const LINUX_IOCTL_SYSCALL: u64 = 16;
 const LINUX_EXIT_SYSCALL: u64 = 60;
+const LINUX_SYSINFO_SYSCALL: u64 = 99;
+const LINUX_EFAULT: u64 = u64::MAX - 13;
 static CONTROLLER_IDENTITY: &[u8] = b"GINUX_CONTROLLER_V0";
 const COMMAND_STATUS: u16 = 1;
 const COMMAND_COMPONENTS: u16 = 2;
@@ -374,6 +376,13 @@ extern "C" fn ginux_controller_main() -> ! {
 
     write(console, b"\r\nGinux controller v0 (ring 3)\r\n");
     write(console, b"Type 'help' for commands.\r\n");
+    if !linux_sysinfo_contract(console) {
+        exit(NATIVE_SERVICE_EXIT_REJECTED);
+    }
+    write(
+        console,
+        b"ginux: Linux live sysinfo accounting validated\r\n",
+    );
     if network_snapshot(network).is_some_and(|snapshot| snapshot[3] == 0) {
         write(console, b"eth0: automatic DHCP configuration\r\n");
         set_dhcp_network(console, network);
@@ -2154,6 +2163,36 @@ fn linux_syscall(number: u64, first: u64, second: u64, third: u64) -> u64 {
         );
     }
     result
+}
+
+fn linux_sysinfo_contract(console: u64) -> bool {
+    let mut information = [0_u8; 112];
+    let result = linux_syscall(LINUX_SYSINFO_SYSCALL, information.as_mut_ptr() as u64, 0, 0);
+    if result != 0 {
+        write(console, b"ginux: sysinfo conformance syscall result: ");
+        write_decimal(console, result);
+        write(console, b"\r\n");
+        return false;
+    }
+    let total = u64::from_ne_bytes(information[32..40].try_into().unwrap());
+    let free = u64::from_ne_bytes(information[40..48].try_into().unwrap());
+    let processes = u16::from_ne_bytes(information[80..82].try_into().unwrap());
+    let unit = u32::from_ne_bytes(information[104..108].try_into().unwrap());
+    let invalid = linux_syscall(LINUX_SYSINFO_SYSCALL, 1, 0, 0);
+    let valid =
+        total != 0 && free <= total && processes != 0 && unit == 1 && invalid == LINUX_EFAULT;
+    if !valid {
+        write(
+            console,
+            b"ginux: sysinfo conformance values total/free/procs/unit/error: ",
+        );
+        for value in [total, free, u64::from(processes), u64::from(unit), invalid] {
+            write_decimal(console, value);
+            write(console, b" ");
+        }
+        write(console, b"\r\n");
+    }
+    valid
 }
 
 const _: () = assert!(NATIVE_CALL_FAILED == u64::MAX - 2);

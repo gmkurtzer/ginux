@@ -1054,6 +1054,20 @@ pub(crate) fn owner_live_frame_count(owner: FrameOwner) -> Option<usize> {
     }
 }
 
+pub(crate) fn frame_counts() -> Option<(u64, u64)> {
+    if !INITIALIZED.load(Ordering::Acquire) {
+        return None;
+    }
+    unsafe {
+        let allocator = core::ptr::addr_of!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
+        let available = (*allocator)
+            .available_frames()
+            .checked_add((*allocator).recycled_count as u64)?;
+        let total = available.checked_add((*allocator).allocated_frames)?;
+        Some((total, available))
+    }
+}
+
 pub(crate) fn reclaimed_boot_service_frame_count() -> Option<u64> {
     if !INITIALIZED.load(Ordering::Acquire) {
         return None;
