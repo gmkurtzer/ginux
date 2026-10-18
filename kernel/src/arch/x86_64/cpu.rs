@@ -3640,6 +3640,12 @@ fn execute_deferred_live_fork() -> bool {
         }
         return false;
     };
+    let Some(child_process_slot) = linux_process::live_process_slot(child.pid) else {
+        return false;
+    };
+    if !clear_linux_signal_queues_for_process(linux_signal_instance(), child_process_slot) {
+        return false;
+    }
     let mut child_runtime_state = parent_runtime_state;
     child_runtime_state.tid = child.pid;
     child_runtime_state.next_tid = child.pid.saturating_add(1);
@@ -3725,6 +3731,12 @@ fn execute_deferred_live_fork() -> bool {
         serial_write(" ");
         serial_write_u64(u64::from(child_status));
         serial_write("\r\n");
+    }
+    if child_resumed
+        && child_exited
+        && !clear_linux_signal_queues_for_process(linux_signal_instance(), child_process_slot)
+    {
+        return false;
     }
     let parent = (child_resumed && child_exited)
         .then(|| linux_process::complete_live_child_exit(child.pid, child_status))
@@ -4772,6 +4784,13 @@ fn retire_all_linux_threads() {
 }
 
 fn clear_linux_thread_slot(slot: usize) {
+    if let Some(process) = linux_process::live_process_slot(current_linux_process_pid()) {
+        let _ = crate::linux_signal::clear(
+            linux_signal_instance(),
+            crate::linux_signal::Scope::Thread,
+            linux_thread_signal_queue_slot(process, slot),
+        );
+    }
     let stack_base = LINUX_THREAD_STACK_BASES[slot].load(Ordering::SeqCst);
     let stack_size = LINUX_THREAD_STACK_SIZES[slot].load(Ordering::SeqCst);
     if !LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
@@ -6638,7 +6657,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
             0
         };
     let expected_signal_count = if signal_probe_executed {
-        10
+        11
     } else if execution.tls_size != 0 {
         16
     } else {
@@ -7616,6 +7635,15 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
             serial_write(" ");
             serial_write_u64(u64::from(state));
         }
+        serial_write("\r\n");
+        serial_write("ginux: Linux exit/deliveries/returns/termination: ");
+        serial_write_u64(exit_status);
+        serial_write(" ");
+        serial_write_u64(signal_delivery_count);
+        serial_write(" ");
+        serial_write_u64(signal_return_count);
+        serial_write(" ");
+        serial_write_u64(u64::from(termination_signal));
         serial_write("\r\n");
     }
     let exec_mapping_count = selected_exec_mappings.map_or(0, |(_, count)| count);
@@ -8628,25 +8656,21 @@ extern "sysv64" fn linux_syscall_handler(
             (user_rip, user_rflags),
         ),
         LINUX_TGKILL_SYSCALL => match linux_tgkill_identity(first_argument, buffer) {
-            Ok(target) if current_linux_thread_handle() == Some(target) => linux_kill(
-                1,
-                (count, LINUX_SI_TKILL, None),
+            Ok(target) => linux_send_thread_signal(
+                target,
+                count,
+                LINUX_SI_TKILL,
                 registers,
                 syscall_return,
                 (user_rip, user_rflags),
             ),
-            Ok(target) => linux_interrupt_blocked_wait(
-                target,
-                (count, LINUX_SI_TKILL),
-                registers,
-                syscall_return,
-            ),
             Err(error) => error,
         },
         LINUX_TKILL_SYSCALL => match linux_tkill_identity(first_argument) {
-            Ok(()) => linux_kill(
-                1,
-                (buffer, LINUX_SI_TKILL, None),
+            Ok(target) => linux_send_thread_signal(
+                target,
+                buffer,
+                LINUX_SI_TKILL,
                 registers,
                 syscall_return,
                 (user_rip, user_rflags),
@@ -8833,7 +8857,7 @@ extern "sysv64" fn linux_syscall_handler(
         }
         LINUX_MAP_SHADOW_STACK_SYSCALL => linux_map_shadow_stack(first_argument, buffer, count),
         LINUX_URETPROBE_SYSCALL => linux_kill(
-            1,
+            u64::from(current_linux_process_pid()),
             (LINUX_SIGILL, LINUX_SI_KERNEL, None),
             registers,
             syscall_return,
@@ -9191,6 +9215,9 @@ extern "sysv64" fn linux_syscall_handler(
                 serial_write("\r\n");
                 write_linux_runtime_syscall_trace();
             }
+            if !clear_current_linux_process_signal_queues() {
+                return LINUX_EIO;
+            }
             LINUX_PROCESS_CHILD_STATUS.store(first_argument as u8, Ordering::SeqCst);
             LINUX_PROCESS_CHILD_EXITED.store(true, Ordering::SeqCst);
             LINUX_RETURN_TO_KERNEL
@@ -9201,6 +9228,9 @@ extern "sysv64" fn linux_syscall_handler(
         {
             LINUX_RUNTIME_EXIT_STATUS.store(first_argument, Ordering::SeqCst);
             if !linux_close_all_descriptors() {
+                return LINUX_EIO;
+            }
+            if !clear_current_linux_process_signal_queues() {
                 return LINUX_EIO;
             }
             retire_all_linux_threads();
@@ -9232,6 +9262,7 @@ extern "sysv64" fn linux_syscall_handler(
                     || !crate::linux_socket::shutdown()
                     || !linux_tmpfs::teardown()
                     || !crate::linux_overlay::teardown()
+                    || !clear_current_linux_process_signal_queues()
                     || !retire_current_linux_thread()
                 {
                     return LINUX_ESRCH;
@@ -9260,6 +9291,7 @@ extern "sysv64" fn linux_syscall_handler(
                 || !crate::linux_socket::shutdown()
                 || !linux_tmpfs::teardown()
                 || !crate::linux_overlay::teardown()
+                || !clear_current_linux_process_signal_queues()
             {
                 return LINUX_ESRCH;
             }
@@ -13750,6 +13782,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let messages = verify_linux_sysv_message_queue_syscalls();
     let timer_argument_widths = verify_linux_timer_argument_widths();
     let signal_argument_widths = verify_linux_signal_argument_widths();
+    let dynamic_signal_fifo = crate::linux_signal::verify_dynamic_fifo(linux_signal_instance());
     let descriptor_argument_widths = verify_linux_descriptor_argument_widths();
     let process_selector_widths = verify_linux_process_selector_widths();
     let filesystem_argument_widths = verify_linux_filesystem_argument_widths();
@@ -13805,6 +13838,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         messages,
         timer_argument_widths,
         signal_argument_widths,
+        dynamic_signal_fifo,
         descriptor_argument_widths,
         process_selector_widths,
         filesystem_argument_widths,
@@ -13864,6 +13898,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && messages
         && timer_argument_widths
         && signal_argument_widths
+        && dynamic_signal_fifo
         && descriptor_argument_widths
         && process_selector_widths
         && filesystem_argument_widths
@@ -16755,7 +16790,41 @@ fn verify_linux_queued_self_signals(
             interrupted,
             (0, 0),
         ) == 0
-        && wait_for_signal(REALTIME_SIGNAL, LINUX_SI_QUEUE, VALUE);
+        && write_information(0, LINUX_SI_QUEUE, THREAD_VALUE)
+        && linux_rt_sigqueueinfo(
+            current_pid,
+            None,
+            REALTIME_SIGNAL,
+            information,
+            core::ptr::null_mut(),
+            interrupted,
+            (0, 0),
+        ) == 0
+        && wait_for_signal(REALTIME_SIGNAL, LINUX_SI_QUEUE, VALUE)
+        && wait_for_signal(REALTIME_SIGNAL, LINUX_SI_QUEUE, THREAD_VALUE);
+    let separated_signals = copy_to_linux_user(wait_set, &SIGNAL_BIT.to_ne_bytes())
+        && write_information(0, LINUX_SI_QUEUE, VALUE)
+        && linux_rt_sigqueueinfo(
+            current_pid,
+            None,
+            SIGNAL,
+            information,
+            core::ptr::null_mut(),
+            interrupted,
+            (0, 0),
+        ) == 0
+        && write_information(0, LINUX_SI_TKILL, THREAD_VALUE)
+        && linux_rt_sigqueueinfo(
+            current_pid,
+            Some(current_tid),
+            SIGNAL,
+            information,
+            core::ptr::null_mut(),
+            interrupted,
+            (0, 0),
+        ) == 0
+        && wait_for_signal(SIGNAL, LINUX_SI_TKILL, THREAD_VALUE)
+        && wait_for_signal(SIGNAL, LINUX_SI_QUEUE, VALUE);
     let errors = linux_rt_sigpending(pending_set, LINUX_SIGNAL_SET_SIZE - 1) == LINUX_EINVAL
         && linux_rt_sigpending(1, LINUX_SIGNAL_SET_SIZE) == LINUX_EFAULT
         && linux_rt_sigqueueinfo(
@@ -16774,7 +16843,7 @@ fn verify_linux_queued_self_signals(
     ELF_PROBE_PENDING_SIGNAL_VALUES[index].store(old_value, Ordering::SeqCst);
     ELF_PROBE_PENDING_SIGNAL_CODES[realtime_index].store(old_realtime_code, Ordering::SeqCst);
     ELF_PROBE_PENDING_SIGNAL_VALUES[realtime_index].store(old_realtime_value, Ordering::SeqCst);
-    process_signal && thread_signal && realtime_signal && errors
+    process_signal && thread_signal && realtime_signal && separated_signals && errors
 }
 
 fn verify_linux_descriptor_argument_widths() -> bool {
@@ -26715,7 +26784,7 @@ fn linux_broken_pipe_live_return(
 ) -> u64 {
     interrupted.rax = LINUX_EPIPE;
     let result = linux_kill(
-        1,
+        u64::from(current_linux_process_pid()),
         (LINUX_SIGPIPE, LINUX_SI_KERNEL, None),
         output,
         interrupted,
@@ -26739,7 +26808,7 @@ fn linux_file_size_limit_signal(
     debug_assert_eq!(result, LINUX_EFBIG);
     interrupted.rax = result;
     let delivered = linux_kill(
-        1,
+        u64::from(current_linux_process_pid()),
         (LINUX_SIGXFSZ, LINUX_SI_KERNEL, None),
         output,
         interrupted,
@@ -28143,31 +28212,45 @@ fn linux_signalfd_read(descriptor: u64, address: u64, count: u64) -> Option<u64>
     }
     let mask = linux_descriptor_offset(descriptor).load(Ordering::SeqCst);
     let pending = ELF_PROBE_PENDING_SIGNALS.load(Ordering::SeqCst) & mask;
-    if pending == 0 {
+    let dynamic = linux_peek_dynamic_signal(mask);
+    if pending == 0 && dynamic.is_none() {
         return Some(LINUX_EAGAIN);
     }
-    let signal = u64::from(pending.trailing_zeros()) + 1;
+    let legacy_signal = (pending != 0).then(|| u64::from(pending.trailing_zeros()) + 1);
+    let use_dynamic = dynamic.is_some_and(|(scope, queued)| {
+        scope == crate::linux_signal::Scope::Thread
+            || legacy_signal.is_none_or(|legacy| u64::from(queued.signal) <= legacy)
+    });
+    let dynamic = use_dynamic.then_some(dynamic).flatten();
+    let signal = dynamic.map_or_else(
+        || legacy_signal.unwrap_or(0),
+        |(_, queued)| u64::from(queued.signal),
+    );
     let index = signal as usize - 1;
+    let code = dynamic.map_or_else(
+        || ELF_PROBE_PENDING_SIGNAL_CODES[index].load(Ordering::SeqCst) as i32,
+        |(_, queued)| queued.code,
+    );
+    let value = dynamic.map_or_else(
+        || ELF_PROBE_PENDING_SIGNAL_VALUES[index].load(Ordering::SeqCst),
+        |(_, queued)| queued.value,
+    );
     let mut information = [0_u8; 128];
     information[..4].copy_from_slice(&(signal as u32).to_ne_bytes());
-    information[8..12].copy_from_slice(
-        &ELF_PROBE_PENDING_SIGNAL_CODES[index]
-            .load(Ordering::SeqCst)
-            .to_ne_bytes(),
-    );
+    information[8..12].copy_from_slice(&code.to_ne_bytes());
     information[12..16].copy_from_slice(&current_linux_process_pid().to_ne_bytes());
-    information[56..64].copy_from_slice(
-        &ELF_PROBE_PENDING_SIGNAL_VALUES[index]
-            .load(Ordering::SeqCst)
-            .to_ne_bytes(),
-    );
+    information[56..64].copy_from_slice(&value.to_ne_bytes());
     if !copy_to_linux_user(address, &information) {
         return Some(LINUX_EFAULT);
     }
     let signal_bit = 1_u64 << (signal - 1);
-    ELF_PROBE_PENDING_SIGNALS.fetch_and(!signal_bit, Ordering::SeqCst);
-    ELF_PROBE_PENDING_SIGNAL_CODES[index].store(0, Ordering::SeqCst);
-    ELF_PROBE_PENDING_SIGNAL_VALUES[index].store(0, Ordering::SeqCst);
+    if let Some((scope, _)) = dynamic {
+        let _ = linux_dequeue_dynamic_signal(scope, signal_bit);
+    } else {
+        ELF_PROBE_PENDING_SIGNALS.fetch_and(!signal_bit, Ordering::SeqCst);
+        ELF_PROBE_PENDING_SIGNAL_CODES[index].store(0, Ordering::SeqCst);
+        ELF_PROBE_PENDING_SIGNAL_VALUES[index].store(0, Ordering::SeqCst);
+    }
     Some(128)
 }
 
@@ -28755,7 +28838,8 @@ fn linux_descriptor_poll_events(descriptor: i32, requested: u16) -> u16 {
     };
     if linux_signalfd_descriptor(descriptor) {
         let mask = linux_descriptor_offset(descriptor).load(Ordering::SeqCst);
-        return if ELF_PROBE_PENDING_SIGNALS.load(Ordering::SeqCst) & mask != 0 {
+        let dynamic = linux_dynamic_pending_masks().map_or(0, |(process, thread)| process | thread);
+        return if (ELF_PROBE_PENDING_SIGNALS.load(Ordering::SeqCst) | dynamic) & mask != 0 {
             requested & LINUX_POLLIN
         } else {
             0
@@ -33082,7 +33166,8 @@ fn linux_rt_sigpending(set: u64, set_size: u64) -> u64 {
     if set_size != LINUX_SIGNAL_SET_SIZE {
         return LINUX_EINVAL;
     }
-    let pending = ELF_PROBE_PENDING_SIGNALS.load(Ordering::SeqCst)
+    let dynamic = linux_dynamic_pending_masks().map_or(0, |(process, thread)| process | thread);
+    let pending = (ELF_PROBE_PENDING_SIGNALS.load(Ordering::SeqCst) | dynamic)
         & ELF_PROBE_SIGNAL_MASK.load(Ordering::SeqCst);
     if copy_to_linux_user(set, &pending.to_ne_bytes()) {
         0
@@ -33106,15 +33191,15 @@ fn linux_rt_sigqueueinfo(
     if process != u64::from(current_linux_process_pid()) {
         return LINUX_ESRCH;
     }
-    if let Some(thread) = thread {
+    let target_thread = if let Some(thread) = thread {
         let target = match linux_tgkill_identity(process, thread) {
             Ok(target) => target,
             Err(error) => return error,
         };
-        if current_linux_thread_handle() != Some(target) {
-            return LINUX_ENOSYS;
-        }
-    }
+        Some(target)
+    } else {
+        None
+    };
     if signal == 0 {
         return 0;
     }
@@ -33127,13 +33212,145 @@ fn linux_rt_sigqueueinfo(
     }
     let code = i32::from_ne_bytes(bytes[8..12].try_into().unwrap());
     let value = u64::from_ne_bytes(bytes[24..32].try_into().unwrap());
-    linux_kill(
-        1,
-        (signal, code, Some(value)),
-        output,
-        interrupted,
-        return_registers,
+    if wake_linux_signal_wait_target(target_thread, signal, code, Some(value)) {
+        return 0;
+    }
+    let handler = ELF_PROBE_SIGNAL_HANDLERS[signal as usize - 1].load(Ordering::SeqCst);
+    if handler == 1 || handler == 0 && linux_default_signal_ignored(signal) {
+        return 0;
+    }
+    let instance = linux_signal_instance();
+    let process_slot = match linux_process::live_process_slot(process as u32) {
+        Some(slot) => slot,
+        None => return LINUX_ESRCH,
+    };
+    let (scope, slot, target_is_current, target_mask) = if let Some(target) = target_thread {
+        let thread_slot = usize::from(target.slot);
+        (
+            crate::linux_signal::Scope::Thread,
+            linux_thread_signal_queue_slot(process_slot, thread_slot),
+            current_linux_thread_handle() == Some(target),
+            LINUX_THREAD_SIGNAL_MASKS[thread_slot].load(Ordering::SeqCst),
+        )
+    } else {
+        (
+            crate::linux_signal::Scope::Process,
+            process_slot,
+            true,
+            ELF_PROBE_SIGNAL_MASK.load(Ordering::SeqCst),
+        )
+    };
+    if target_is_current && target_mask & (1 << (signal - 1)) == 0 {
+        return linux_kill(
+            u64::from(current_linux_process_pid()),
+            (signal, code, Some(value)),
+            output,
+            interrupted,
+            return_registers,
+        );
+    }
+    match crate::linux_signal::enqueue(
+        instance,
+        scope,
+        slot,
+        crate::linux_signal::Pending {
+            signal: signal as u8,
+            code,
+            value,
+        },
+        signal >= 32,
+    ) {
+        Ok(_) => 0,
+        Err(crate::linux_signal::Error::NoMemory) => LINUX_EAGAIN,
+        Err(crate::linux_signal::Error::Invalid) => LINUX_EINVAL,
+    }
+}
+
+fn linux_signal_instance() -> usize {
+    current_container_slot().unwrap_or(control_abi::DOMAIN_LIMIT)
+}
+
+fn linux_thread_signal_queue_slot(process: usize, thread: usize) -> usize {
+    process * crate::linux_signal::THREAD_LIMIT + thread
+}
+
+fn clear_linux_signal_queues_for_process(instance: usize, process: usize) -> bool {
+    crate::linux_signal::clear(instance, crate::linux_signal::Scope::Process, process).is_ok()
+        && (0..crate::linux_signal::THREAD_LIMIT).all(|thread| {
+            crate::linux_signal::clear(
+                instance,
+                crate::linux_signal::Scope::Thread,
+                linux_thread_signal_queue_slot(process, thread),
+            )
+            .is_ok()
+        })
+}
+
+fn clear_current_linux_process_signal_queues() -> bool {
+    linux_process::live_process_slot(current_linux_process_pid()).is_some_and(|process| {
+        clear_linux_signal_queues_for_process(linux_signal_instance(), process)
+    })
+}
+
+fn linux_dynamic_pending_masks() -> Option<(u64, u64)> {
+    let instance = linux_signal_instance();
+    let process = linux_process::live_process_slot(current_linux_process_pid())?;
+    let thread = current_linux_thread_slot()?;
+    Some((
+        crate::linux_signal::pending_mask(instance, crate::linux_signal::Scope::Process, process)
+            .ok()?,
+        crate::linux_signal::pending_mask(
+            instance,
+            crate::linux_signal::Scope::Thread,
+            linux_thread_signal_queue_slot(process, thread),
+        )
+        .ok()?,
+    ))
+}
+
+fn linux_peek_dynamic_signal(
+    requested: u64,
+) -> Option<(crate::linux_signal::Scope, crate::linux_signal::Pending)> {
+    let instance = linux_signal_instance();
+    let process = linux_process::live_process_slot(current_linux_process_pid())?;
+    let thread = current_linux_thread_slot()?;
+    if let Some(pending) = crate::linux_signal::peek(
+        instance,
+        crate::linux_signal::Scope::Thread,
+        linux_thread_signal_queue_slot(process, thread),
+        requested,
     )
+    .ok()?
+    {
+        return Some((crate::linux_signal::Scope::Thread, pending));
+    }
+    crate::linux_signal::peek(
+        instance,
+        crate::linux_signal::Scope::Process,
+        process,
+        requested,
+    )
+    .ok()?
+    .map(|pending| (crate::linux_signal::Scope::Process, pending))
+}
+
+fn linux_dequeue_dynamic_signal(
+    scope: crate::linux_signal::Scope,
+    requested: u64,
+) -> Option<crate::linux_signal::Pending> {
+    let instance = linux_signal_instance();
+    let slot = match scope {
+        crate::linux_signal::Scope::Process => {
+            linux_process::live_process_slot(current_linux_process_pid())?
+        }
+        crate::linux_signal::Scope::Thread => linux_thread_signal_queue_slot(
+            linux_process::live_process_slot(current_linux_process_pid())?,
+            current_linux_thread_slot()?,
+        ),
+    };
+    crate::linux_signal::dequeue(instance, scope, slot, requested)
+        .ok()
+        .flatten()
 }
 
 fn linux_rt_sigtimedwait(set: u64, information: u64, timeout: u64, set_size: u64) -> u64 {
@@ -33159,7 +33376,8 @@ fn linux_rt_sigtimedwait(set: u64, information: u64, timeout: u64, set_size: u64
         }
         seconds == 0 && nanoseconds == 0
     };
-    let matching = ELF_PROBE_PENDING_SIGNALS.load(Ordering::SeqCst) & requested;
+    let dynamic = linux_dynamic_pending_masks().map_or(0, |(process, thread)| process | thread);
+    let matching = (ELF_PROBE_PENDING_SIGNALS.load(Ordering::SeqCst) | dynamic) & requested;
     if matching == 0 {
         return if polls { LINUX_EAGAIN } else { LINUX_ENOSYS };
     }
@@ -33168,13 +33386,26 @@ fn linux_rt_sigtimedwait(set: u64, information: u64, timeout: u64, set_size: u64
     {
         return LINUX_EFAULT;
     }
-    let signal = u64::from(matching.trailing_zeros()) + 1;
+    let dynamic_candidate = linux_peek_dynamic_signal(requested);
+    let legacy_signal = u64::from(matching.trailing_zeros()) + 1;
+    let use_dynamic = dynamic_candidate.is_some_and(|(scope, pending)| {
+        scope == crate::linux_signal::Scope::Thread || u64::from(pending.signal) <= legacy_signal
+    });
+    let dynamic_signal = use_dynamic.then_some(dynamic_candidate).flatten();
+    let signal =
+        dynamic_signal.map_or_else(|| legacy_signal, |(_, pending)| u64::from(pending.signal));
     let index = signal as usize - 1;
     let signal_bit = 1 << (signal - 1);
     let signal_information = LinuxSignalInformation::queued(
         signal,
-        ELF_PROBE_PENDING_SIGNAL_CODES[index].load(Ordering::SeqCst) as i32,
-        ELF_PROBE_PENDING_SIGNAL_VALUES[index].load(Ordering::SeqCst),
+        dynamic_signal.map_or_else(
+            || ELF_PROBE_PENDING_SIGNAL_CODES[index].load(Ordering::SeqCst) as i32,
+            |(_, pending)| pending.code,
+        ),
+        dynamic_signal.map_or_else(
+            || ELF_PROBE_PENDING_SIGNAL_VALUES[index].load(Ordering::SeqCst),
+            |(_, pending)| pending.value,
+        ),
     );
     if information != 0 {
         // SAFETY: every byte in this repr(C) value is initialized, including
@@ -33189,9 +33420,13 @@ fn linux_rt_sigtimedwait(set: u64, information: u64, timeout: u64, set_size: u64
             return LINUX_EFAULT;
         }
     }
-    ELF_PROBE_PENDING_SIGNALS.fetch_and(!signal_bit, Ordering::SeqCst);
-    ELF_PROBE_PENDING_SIGNAL_CODES[index].store(0, Ordering::SeqCst);
-    ELF_PROBE_PENDING_SIGNAL_VALUES[index].store(0, Ordering::SeqCst);
+    if let Some((scope, _)) = dynamic_signal {
+        let _ = linux_dequeue_dynamic_signal(scope, signal_bit);
+    } else {
+        ELF_PROBE_PENDING_SIGNALS.fetch_and(!signal_bit, Ordering::SeqCst);
+        ELF_PROBE_PENDING_SIGNAL_CODES[index].store(0, Ordering::SeqCst);
+        ELF_PROBE_PENDING_SIGNAL_VALUES[index].store(0, Ordering::SeqCst);
+    }
     signal
 }
 
@@ -33310,8 +33545,20 @@ fn linux_rt_sigtimedwait_live_return(
 }
 
 fn wake_linux_signal_wait(signal: u64, signal_code: i32, signal_value: Option<u64>) -> bool {
+    wake_linux_signal_wait_target(None, signal, signal_code, signal_value)
+}
+
+fn wake_linux_signal_wait_target(
+    target: Option<LinuxThreadHandle>,
+    signal: u64,
+    signal_code: i32,
+    signal_value: Option<u64>,
+) -> bool {
     let signal_bit = 1_u64 << (signal - 1);
     for slot in 0..LINUX_THREAD_LIMIT {
+        if target.is_some_and(|target| usize::from(target.slot) != slot) {
+            continue;
+        }
         if LINUX_THREAD_STATES[slot].load(Ordering::SeqCst) != LINUX_THREAD_BLOCKED
             || LINUX_THREAD_WAIT_KINDS[slot].load(Ordering::SeqCst) != LINUX_THREAD_WAIT_SIGNAL
             || LINUX_THREAD_WAIT_KEYS[slot].load(Ordering::SeqCst) & signal_bit == 0
@@ -33742,6 +33989,9 @@ fn linux_terminate_by_default_signal(signal: u64) -> u64 {
     {
         return LINUX_EIO;
     }
+    if !clear_current_linux_process_signal_queues() {
+        return LINUX_EIO;
+    }
     retire_all_linux_threads();
     ELF_PROBE_SIGNAL_MASK.store(0, Ordering::SeqCst);
     ELF_PROBE_PENDING_SIGNALS.store(0, Ordering::SeqCst);
@@ -33773,7 +34023,7 @@ fn linux_kill(
     let (signal, signal_code, signal_value) = generated;
     let pid = u64::from(pid as u32);
     let signal = u64::from(signal as u32);
-    if !matches!(pid, 0 | 1) {
+    if pid != 0 && pid != u64::from(current_linux_process_pid()) {
         return LINUX_ESRCH;
     }
     if signal == 0 {
@@ -33793,6 +34043,27 @@ fn linux_kill(
     }
     let old_mask = ELF_PROBE_SIGNAL_MASK.load(Ordering::SeqCst);
     if old_mask & signal_bit != 0 {
+        if signal >= 32 {
+            let Some(process) = linux_process::live_process_slot(current_linux_process_pid())
+            else {
+                return LINUX_ESRCH;
+            };
+            return match crate::linux_signal::enqueue(
+                linux_signal_instance(),
+                crate::linux_signal::Scope::Process,
+                process,
+                crate::linux_signal::Pending {
+                    signal: signal as u8,
+                    code: signal_code,
+                    value: signal_value.unwrap_or(0),
+                },
+                true,
+            ) {
+                Ok(_) => 0,
+                Err(crate::linux_signal::Error::NoMemory) => LINUX_EAGAIN,
+                Err(crate::linux_signal::Error::Invalid) => LINUX_EINVAL,
+            };
+        }
         if ELF_PROBE_PENDING_SIGNALS.load(Ordering::SeqCst) & signal_bit == 0 {
             ELF_PROBE_PENDING_SIGNAL_CODES[index].store(signal_code as u32, Ordering::SeqCst);
             ELF_PROBE_PENDING_SIGNAL_VALUES[index]
@@ -34223,21 +34494,79 @@ fn linux_tgkill_identity(thread_group: u64, thread: u64) -> Result<LinuxThreadHa
     if thread_group <= 0 || thread <= 0 {
         return Err(LINUX_EINVAL);
     }
-    if thread_group != 1 {
+    if thread_group as u32 != current_linux_process_pid() {
         return Err(LINUX_ESRCH);
     }
     linux_thread_handle_by_tid(thread as u64).ok_or(LINUX_ESRCH)
 }
 
-fn linux_tkill_identity(thread: u64) -> Result<(), u64> {
+fn linux_tkill_identity(thread: u64) -> Result<LinuxThreadHandle, u64> {
     let thread = thread as i32;
     if thread <= 0 {
         return Err(LINUX_EINVAL);
     }
-    if current_linux_tid() != Some(thread as u32) {
-        return Err(LINUX_ESRCH);
+    linux_thread_handle_by_tid(thread as u64).ok_or(LINUX_ESRCH)
+}
+
+fn linux_send_thread_signal(
+    target: LinuxThreadHandle,
+    signal: u64,
+    code: i32,
+    output: *mut LinuxSyscallFrame,
+    interrupted: LinuxUserContext,
+    return_registers: (u64, u64),
+) -> u64 {
+    let signal = u64::from(signal as u32);
+    if signal == 0 {
+        return 0;
     }
-    Ok(())
+    if !(1..=LINUX_SIGNAL_COUNT as u64).contains(&signal) {
+        return LINUX_EINVAL;
+    }
+    let handler = ELF_PROBE_SIGNAL_HANDLERS[signal as usize - 1].load(Ordering::SeqCst);
+    if handler == 1 || handler == 0 && linux_default_signal_ignored(signal) {
+        return 0;
+    }
+    let slot = usize::from(target.slot);
+    let target_is_current = current_linux_thread_handle() == Some(target);
+    if target_is_current
+        && LINUX_THREAD_SIGNAL_MASKS[slot].load(Ordering::SeqCst) & (1 << (signal - 1)) == 0
+    {
+        return linux_kill(
+            u64::from(current_linux_process_pid()),
+            (signal, code, None),
+            output,
+            interrupted,
+            return_registers,
+        );
+    }
+    if !target_is_current {
+        if wake_linux_signal_wait_target(Some(target), signal, code, None) {
+            return 0;
+        }
+        let result = linux_interrupt_blocked_wait(target, (signal, code), output, interrupted);
+        if result != LINUX_ENOSYS {
+            return result;
+        }
+    }
+    let Some(process) = linux_process::live_process_slot(current_linux_process_pid()) else {
+        return LINUX_ESRCH;
+    };
+    match crate::linux_signal::enqueue(
+        linux_signal_instance(),
+        crate::linux_signal::Scope::Thread,
+        linux_thread_signal_queue_slot(process, slot),
+        crate::linux_signal::Pending {
+            signal: signal as u8,
+            code,
+            value: 0,
+        },
+        signal >= 32,
+    ) {
+        Ok(_) => 0,
+        Err(crate::linux_signal::Error::NoMemory) => LINUX_EAGAIN,
+        Err(crate::linux_signal::Error::Invalid) => LINUX_EINVAL,
+    }
 }
 
 fn linux_deliver_pending_signal(
@@ -34248,29 +34577,47 @@ fn linux_deliver_pending_signal(
     if LINUX_SIGNAL_ACTIVE.load(Ordering::SeqCst) {
         return 0;
     }
-    let deliverable = ELF_PROBE_PENDING_SIGNALS.load(Ordering::SeqCst)
-        & !ELF_PROBE_SIGNAL_MASK.load(Ordering::SeqCst);
-    if deliverable == 0 {
+    let requested = !ELF_PROBE_SIGNAL_MASK.load(Ordering::SeqCst);
+    let deliverable = ELF_PROBE_PENDING_SIGNALS.load(Ordering::SeqCst) & requested;
+    let dynamic = linux_peek_dynamic_signal(requested);
+    if deliverable == 0 && dynamic.is_none() {
         return 0;
     }
-    let signal = u64::from(deliverable.trailing_zeros()) + 1;
+    let legacy_signal = (deliverable != 0).then(|| u64::from(deliverable.trailing_zeros()) + 1);
+    let use_dynamic = dynamic.is_some_and(|(scope, pending)| {
+        scope == crate::linux_signal::Scope::Thread
+            || legacy_signal.is_none_or(|legacy| u64::from(pending.signal) <= legacy)
+    });
+    let dynamic = use_dynamic.then_some(dynamic).flatten();
+    let signal = dynamic.map_or_else(
+        || legacy_signal.unwrap_or(0),
+        |(_, pending)| u64::from(pending.signal),
+    );
     let index = signal as usize - 1;
     let signal_bit = 1 << (signal - 1);
+    let code = dynamic.map_or_else(
+        || ELF_PROBE_PENDING_SIGNAL_CODES[index].load(Ordering::SeqCst) as i32,
+        |(_, pending)| pending.code,
+    );
+    let value = dynamic.map_or_else(
+        || ELF_PROBE_PENDING_SIGNAL_VALUES[index].load(Ordering::SeqCst),
+        |(_, pending)| pending.value,
+    );
     let result = linux_kill(
-        1,
-        (
-            signal,
-            ELF_PROBE_PENDING_SIGNAL_CODES[index].load(Ordering::SeqCst) as i32,
-            Some(ELF_PROBE_PENDING_SIGNAL_VALUES[index].load(Ordering::SeqCst)),
-        ),
+        u64::from(current_linux_process_pid()),
+        (signal, code, Some(value)),
         output,
         interrupted,
         return_registers,
     );
     if result == 0 {
-        ELF_PROBE_PENDING_SIGNALS.fetch_and(!signal_bit, Ordering::SeqCst);
-        ELF_PROBE_PENDING_SIGNAL_CODES[index].store(0, Ordering::SeqCst);
-        ELF_PROBE_PENDING_SIGNAL_VALUES[index].store(0, Ordering::SeqCst);
+        if let Some((scope, _)) = dynamic {
+            let _ = linux_dequeue_dynamic_signal(scope, signal_bit);
+        } else {
+            ELF_PROBE_PENDING_SIGNALS.fetch_and(!signal_bit, Ordering::SeqCst);
+            ELF_PROBE_PENDING_SIGNAL_CODES[index].store(0, Ordering::SeqCst);
+            ELF_PROBE_PENDING_SIGNAL_VALUES[index].store(0, Ordering::SeqCst);
+        }
     }
     result
 }

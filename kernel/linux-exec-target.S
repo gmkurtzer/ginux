@@ -538,7 +538,7 @@ ginux_linux_exec_target:
     cmp qword ptr [rip + .Lpending_mask], 0xa00
     jne .Lfailure
     mov qword ptr [rip + .Lexpected_signal], 10
-    mov qword ptr [rip + .Lexpected_signal_code], 0
+    mov qword ptr [rip + .Lexpected_signal_code], -6
     mov qword ptr [rip + .Lexpected_signal_mask], 0x200
     mov qword ptr [rip + .Lsignal_mask], 0xa00
     mov edi, 1
@@ -557,7 +557,7 @@ ginux_linux_exec_target:
     jne .Lfailure
     cmp qword ptr [rip + .Lpending_mask], 0
     jne .Lfailure
-    cmp qword ptr [rip + .Lsignal_count], 6
+    cmp qword ptr [rip + .Lsignal_count], 7
     jne .Lfailure
     mov qword ptr [rip + .Lsignal_mode], 0
     lea rdi, [rip + .Lsignal_action]
@@ -604,7 +604,7 @@ ginux_linux_exec_target:
     syscall
     test rax, rax
     jne .Lfailure
-    cmp qword ptr [rip + .Lsignal_count], 6
+    cmp qword ptr [rip + .Lsignal_count], 7
     jne .Lfailure
 
     lea rdi, [rip + .Lpending_mask]
@@ -636,7 +636,7 @@ ginux_linux_exec_target:
     syscall
     test rax, rax
     jne .Lfailure
-    cmp qword ptr [rip + .Lsignal_count], 7
+    cmp qword ptr [rip + .Lsignal_count], 8
     jne .Lfailure
     cmp qword ptr [rip + .Lold_signal_mask], 0x400
     jne .Lfailure
@@ -672,7 +672,7 @@ ginux_linux_exec_target:
     cmp rax, 0x1234
     jne .Lfailure
     mov qword ptr [rip + .Lsignal_mode], 0
-    cmp qword ptr [rip + .Lsignal_count], 8
+    cmp qword ptr [rip + .Lsignal_count], 9
     jne .Lfailure
 
     mov edi, 11
@@ -942,11 +942,18 @@ ginux_linux_exec_target:
     mov rax, qword ptr [rip + .Lexpected_signal_mask]
     cmp qword ptr [rip + .Lobserved_signal_mask], rax
     jne .Lfailure
-    cmp qword ptr [rip + .Lexpected_signal], 10
-    jne .Lsignal_handler_return
+    cmp qword ptr [rip + .Lsignal_count], 5
+    jne .Lsignal_generated_advance_second
     mov qword ptr [rip + .Lexpected_signal], 12
     mov qword ptr [rip + .Lexpected_signal_code], -6
     mov qword ptr [rip + .Lexpected_signal_mask], 0x800
+    jmp .Lsignal_handler_return
+.Lsignal_generated_advance_second:
+    cmp qword ptr [rip + .Lsignal_count], 6
+    jne .Lsignal_handler_return
+    mov qword ptr [rip + .Lexpected_signal], 10
+    mov qword ptr [rip + .Lexpected_signal_code], 0
+    mov qword ptr [rip + .Lexpected_signal_mask], 0x200
     jmp .Lsignal_handler_return
 .Lsignal_fault_handler:
     cmp rsp, 0x402800
