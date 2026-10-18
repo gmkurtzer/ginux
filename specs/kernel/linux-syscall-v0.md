@@ -1389,9 +1389,10 @@ dumpability access check to compare live processes. `KCMP_VM`, `KCMP_FILES`,
 process compared with itself and distinct identity across the current fork
 boundary. PID and comparison-type arguments follow their Linux 32-bit widths;
 missing processes return `-ESRCH` and denied inspection returns `-EPERM`.
-Cross-process `KCMP_FILE` returns `-EOPNOTSUPP` until descriptor snapshots carry
-a collision-proof open-file-description identity, rather than guessing from an
-inode or socket index. `KCMP_EPOLL_TFD` is also pending.
+`KCMP_FILE` compares monotonic open-file-description identities that are copied
+by `dup` and fork and cleared by close, so descriptor-number reuse cannot alias
+an older description. Missing descriptors return `-EBADF`. Shared post-fork
+file-position storage and `KCMP_EPOLL_TFD` remain pending.
 `rax = 27` (`__NR_mincore`) accepts any fully occupied nonzero scratch range
 rounding to one through four pages, including a range crossing adjacent
 registry records, and atomically

@@ -1515,6 +1515,10 @@ static ELF_PROBE_STDIO_OCI_DESCRIPTORS: [BankedAtomicU16; 3] =
 static ELF_PROBE_STDIO_TMP_FILE_GENERATIONS: [BankedAtomicU32; 3] =
     [const { BankedAtomicU32::new(0) }; 3];
 static ELF_PROBE_STDIO_OFFSETS: [BankedAtomicU64; 3] = [const { BankedAtomicU64::new(0) }; 3];
+static ELF_PROBE_STDIO_OPEN_FILE_IDS: [BankedAtomicU64; 3] = [const { BankedAtomicU64::new(0) }; 3];
+static ELF_PROBE_OPEN_FILE_IDS: [BankedAtomicU64; LINUX_DEVICE_DESCRIPTOR_COUNT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_DEVICE_DESCRIPTOR_COUNT];
+static LINUX_NEXT_OPEN_FILE_ID: BankedAtomicU64 = BankedAtomicU64::new(1);
 static ELF_PROBE_CWD: BankedAtomicU16 = BankedAtomicU16::new(LINUX_ROOT_DIRECTORY);
 static ELF_PROBE_OCI_CWD: BankedAtomicU16 = BankedAtomicU16::new(crate::oci_image::ROOT_HANDLE);
 static ELF_PROBE_OVERLAY_CWD: BankedAtomicU32 = BankedAtomicU32::new(0);
@@ -6284,6 +6288,13 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
     for offset in &ELF_PROBE_STDIO_OFFSETS {
         offset.store(0, Ordering::SeqCst);
     }
+    for id in &ELF_PROBE_STDIO_OPEN_FILE_IDS {
+        id.store(0, Ordering::SeqCst);
+    }
+    for id in &ELF_PROBE_OPEN_FILE_IDS {
+        id.store(0, Ordering::SeqCst);
+    }
+    LINUX_NEXT_OPEN_FILE_ID.store(1, Ordering::SeqCst);
     ELF_PROBE_CWD.store(LINUX_ROOT_DIRECTORY, Ordering::SeqCst);
     ELF_PROBE_OCI_CWD.store(crate::oci_image::ROOT_HANDLE, Ordering::SeqCst);
     ELF_PROBE_OVERLAY_CWD.store(0, Ordering::SeqCst);
@@ -11862,6 +11873,8 @@ struct LinuxDescriptorRuntimeState {
     stdio_oci: [u16; 3],
     stdio_tmp_generations: [u32; 3],
     stdio_offsets: [u64; 3],
+    open_file_ids: [u64; LINUX_DEVICE_DESCRIPTOR_COUNT],
+    stdio_open_file_ids: [u64; 3],
 }
 
 impl LinuxMmapRuntimeState {
@@ -11894,6 +11907,8 @@ impl LinuxDescriptorRuntimeState {
         stdio_oci: [0; 3],
         stdio_tmp_generations: [0; 3],
         stdio_offsets: [0; 3],
+        open_file_ids: [0; LINUX_DEVICE_DESCRIPTOR_COUNT],
+        stdio_open_file_ids: [0; 3],
     };
 }
 
@@ -12124,6 +12139,11 @@ fn restore_linux_process_runtime_state(state: LinuxProcessRuntimeState) {
 }
 
 fn capture_linux_descriptor_runtime_state() -> LinuxDescriptorRuntimeState {
+    for descriptor in 0..LINUX_DESCRIPTOR_TABLE_LIMIT {
+        if linux_descriptor_open(descriptor) {
+            let _ = linux_descriptor_open_file_id(descriptor);
+        }
+    }
     LinuxDescriptorRuntimeState {
         console: ELF_PROBE_CONSOLE_DESCRIPTORS.load(Ordering::SeqCst),
         stderr_open: ELF_PROBE_STDERR_OPEN.load(Ordering::SeqCst),
@@ -12161,6 +12181,12 @@ fn capture_linux_descriptor_runtime_state() -> LinuxDescriptorRuntimeState {
         }),
         stdio_offsets: core::array::from_fn(|index| {
             ELF_PROBE_STDIO_OFFSETS[index].load(Ordering::SeqCst)
+        }),
+        open_file_ids: core::array::from_fn(|index| {
+            ELF_PROBE_OPEN_FILE_IDS[index].load(Ordering::SeqCst)
+        }),
+        stdio_open_file_ids: core::array::from_fn(|index| {
+            ELF_PROBE_STDIO_OPEN_FILE_IDS[index].load(Ordering::SeqCst)
         }),
     }
 }
@@ -12280,6 +12306,7 @@ fn install_linux_descriptor_runtime_state(state: LinuxDescriptorRuntimeState) {
         ELF_PROBE_SOCKET_FLAGS[index].store(state.socket_flags[index], Ordering::SeqCst);
         ELF_PROBE_TMP_FILE_GENERATIONS[index].store(state.tmp_generations[index], Ordering::SeqCst);
         ELF_PROBE_DESCRIPTOR_OFFSETS[index].store(state.offsets[index], Ordering::SeqCst);
+        ELF_PROBE_OPEN_FILE_IDS[index].store(state.open_file_ids[index], Ordering::SeqCst);
     }
     for index in 0..state.stdio_devices.len() {
         ELF_PROBE_STDIO_DEVICE_DESCRIPTORS[index]
@@ -12288,6 +12315,8 @@ fn install_linux_descriptor_runtime_state(state: LinuxDescriptorRuntimeState) {
         ELF_PROBE_STDIO_TMP_FILE_GENERATIONS[index]
             .store(state.stdio_tmp_generations[index], Ordering::SeqCst);
         ELF_PROBE_STDIO_OFFSETS[index].store(state.stdio_offsets[index], Ordering::SeqCst);
+        ELF_PROBE_STDIO_OPEN_FILE_IDS[index]
+            .store(state.stdio_open_file_ids[index], Ordering::SeqCst);
     }
 }
 
@@ -16994,8 +17023,10 @@ fn verify_linux_descriptor_argument_widths() -> bool {
     if first >= LINUX_DESCRIPTOR_TABLE_LIMIT {
         return false;
     }
-    let first_closed =
-        linux_descriptor_close(UPPER_REGISTER_BITS | first) == 0 && !linux_descriptor_open(first);
+    let pid = u64::from(current_linux_process_pid());
+    let first_closed = linux_kcmp(pid, pid, 0, 1, first) == 0
+        && linux_descriptor_close(UPPER_REGISTER_BITS | first) == 0
+        && !linux_descriptor_open(first);
     let second = if first_closed {
         linux_console_dup2(UPPER_REGISTER_BITS | 1, UPPER_REGISTER_BITS | first)
     } else {
@@ -18285,34 +18316,31 @@ fn linux_kcmp(first_pid: u64, second_pid: u64, kind: u64, first: u64, second: u6
     if kind != KCMP_FILE {
         return LINUX_EINVAL;
     }
-    if first_pid != second_pid {
-        // Ordinary descriptor snapshots do not yet carry a collision-proof
-        // open-file-description identity. Do not infer equality from inode or
-        // socket numbers alone.
-        return LINUX_EOPNOTSUPP;
-    }
-    if !linux_descriptor_open(first) || !linux_descriptor_open(second) {
+    let Some(first_id) = linux_process_descriptor_open_file_id(first_pid, first) else {
         return LINUX_EBADF;
-    }
-    if first == second {
-        return 0;
-    }
-    let same_socket = linux_socket_slot(first)
-        .zip(linux_socket_slot(second))
-        .is_some_and(|(first, second)| first == second);
-    let same_overlay = linux_overlay_descriptor_handle(first)
-        .zip(linux_overlay_descriptor_handle(second))
-        .is_some_and(|(first, second)| first == second);
-    let same_oci = {
-        let first = linux_oci_descriptor(first);
-        let second = linux_oci_descriptor(second);
-        first != 0 && first == second
     };
-    if same_socket || same_overlay || same_oci {
-        0
-    } else {
-        1
+    let Some(second_id) = linux_process_descriptor_open_file_id(second_pid, second) else {
+        return LINUX_EBADF;
+    };
+    u64::from(first_id != second_id)
+}
+
+fn linux_process_descriptor_open_file_id(pid: u32, descriptor: u64) -> Option<u64> {
+    let descriptor = u64::from(descriptor as u32);
+    if descriptor >= LINUX_DESCRIPTOR_TABLE_LIMIT {
+        return None;
     }
+    let id = if pid == current_linux_process_pid() {
+        linux_descriptor_open_file_id(descriptor)?
+    } else {
+        let state = linux_process_runtime_state(pid).filter(|state| state.valid)?;
+        if descriptor < LINUX_AUX_DESCRIPTOR_FIRST {
+            state.descriptors.stdio_open_file_ids[descriptor as usize]
+        } else {
+            state.descriptors.open_file_ids[(descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize]
+        }
+    };
+    (id != 0).then_some(id)
 }
 
 fn linux_cachestat(descriptor: u64, range_address: u64, output_address: u64, flags: u64) -> u64 {
@@ -30214,11 +30242,52 @@ fn linux_overlay_copy_from_user(
     total as u64
 }
 
-fn linux_descriptor_offset(descriptor: u64) -> &'static BankedAtomicU64 {
+fn linux_legacy_descriptor_offset(descriptor: u64) -> &'static BankedAtomicU64 {
     if descriptor < LINUX_AUX_DESCRIPTOR_FIRST {
         return &ELF_PROBE_STDIO_OFFSETS[descriptor as usize];
     }
     &ELF_PROBE_DESCRIPTOR_OFFSETS[(descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize]
+}
+
+fn linux_descriptor_open_file_id_cell(descriptor: u64) -> Option<&'static BankedAtomicU64> {
+    if descriptor < LINUX_AUX_DESCRIPTOR_FIRST {
+        return ELF_PROBE_STDIO_OPEN_FILE_IDS.get(descriptor as usize);
+    }
+    ELF_PROBE_OPEN_FILE_IDS.get((descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize)
+}
+
+fn linux_descriptor_open_file_id(descriptor: u64) -> Option<u64> {
+    if !linux_descriptor_open(descriptor) {
+        return None;
+    }
+    let cell = linux_descriptor_open_file_id_cell(descriptor)?;
+    let current = cell.load(Ordering::SeqCst);
+    if current != 0 {
+        return Some(current);
+    }
+    let id = loop {
+        let id = LINUX_NEXT_OPEN_FILE_ID.fetch_add(1, Ordering::SeqCst);
+        if id != 0 {
+            break id;
+        }
+    };
+    cell.store(id, Ordering::SeqCst);
+    Some(id)
+}
+
+fn linux_copy_descriptor_open_file(source: u64, target: u64) -> bool {
+    let Some(id) = linux_descriptor_open_file_id(source) else {
+        return false;
+    };
+    let Some(target_cell) = linux_descriptor_open_file_id_cell(target) else {
+        return false;
+    };
+    target_cell.store(id, Ordering::SeqCst);
+    true
+}
+
+fn linux_descriptor_offset(descriptor: u64) -> &'static BankedAtomicU64 {
+    linux_legacy_descriptor_offset(descriptor)
 }
 
 fn linux_descriptor_close_on_exec(descriptor: u64) -> bool {
@@ -30336,6 +30405,17 @@ fn linux_close_range(first: u64, last: u64, flags: u64) -> u64 {
 }
 
 fn linux_descriptor_close_with_wake(descriptor: u64, wake_waiters: bool) -> u64 {
+    let result = linux_descriptor_close_with_wake_inner(descriptor, wake_waiters);
+    if result == 0 {
+        if let Some(cell) = linux_descriptor_open_file_id_cell(descriptor) {
+            cell.store(0, Ordering::SeqCst);
+        }
+        linux_legacy_descriptor_offset(descriptor).store(0, Ordering::SeqCst);
+    }
+    result
+}
+
+fn linux_descriptor_close_with_wake_inner(descriptor: u64, wake_waiters: bool) -> u64 {
     if let Some(slot) = linux_socket_slot(descriptor) {
         let closed = crate::linux_socket::close(slot);
         if let Some(index) = usize::try_from(descriptor)
@@ -30478,7 +30558,7 @@ fn linux_descriptor_close_with_wake(descriptor: u64, wake_waiters: bool) -> u64 
         .store(0, Ordering::SeqCst);
     ELF_PROBE_SOCKET_FLAGS[(descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize]
         .store(0, Ordering::SeqCst);
-    linux_descriptor_offset(descriptor).store(0, Ordering::SeqCst);
+    linux_legacy_descriptor_offset(descriptor).store(0, Ordering::SeqCst);
     set_linux_descriptor_close_on_exec(descriptor, false);
     0
 }
@@ -30557,6 +30637,15 @@ fn linux_console_dup_at_least(descriptor: u64, minimum: u64, close_on_exec: bool
     target
 }
 
+fn linux_finish_descriptor_dup(source: u64, target: u64) -> u64 {
+    if linux_copy_descriptor_open_file(source, target) {
+        target
+    } else {
+        let _ = linux_descriptor_close(target);
+        LINUX_EMFILE
+    }
+}
+
 fn linux_console_dup2(source: u64, target: u64) -> u64 {
     let source = u64::from(source as u32);
     let target = u64::from(target as u32);
@@ -30596,7 +30685,7 @@ fn linux_console_dup2(source: u64, target: u64) -> u64 {
                 ELF_PROBE_DEVICE_DESCRIPTORS[target_index].store(device, Ordering::SeqCst);
             }
             set_linux_descriptor_close_on_exec(target, false);
-            return target;
+            return linux_finish_descriptor_dup(source, target);
         }
         let source_offset = linux_descriptor_offset(source).load(Ordering::SeqCst);
         let source_flags = linux_socket_flags(source).unwrap_or(0);
@@ -30615,18 +30704,18 @@ fn linux_console_dup2(source: u64, target: u64) -> u64 {
             if target == 2 {
                 ELF_PROBE_STDERR_OPEN.store(true, Ordering::SeqCst);
                 set_linux_descriptor_close_on_exec(target, false);
-                return target;
+                return linux_finish_descriptor_dup(source, target);
             }
             if target >= LINUX_AUX_DESCRIPTOR_FIRST {
                 let index = (target - LINUX_AUX_DESCRIPTOR_FIRST) as usize;
                 ELF_PROBE_DEVICE_DESCRIPTORS[index].store(device, Ordering::SeqCst);
                 set_linux_descriptor_close_on_exec(target, false);
-                return target;
+                return linux_finish_descriptor_dup(source, target);
             }
             let shift = target * 2;
             ELF_PROBE_CONSOLE_DESCRIPTORS.fetch_or((device as u8 & 3) << shift, Ordering::SeqCst);
             set_linux_descriptor_close_on_exec(target, false);
-            return target;
+            return linux_finish_descriptor_dup(source, target);
         }
         if target >= LINUX_AUX_DESCRIPTOR_FIRST {
             let index = (target - LINUX_AUX_DESCRIPTOR_FIRST) as usize;
@@ -30655,7 +30744,7 @@ fn linux_console_dup2(source: u64, target: u64) -> u64 {
             LINUX_IO_URING_REFS.fetch_add(1, Ordering::SeqCst);
         }
         set_linux_descriptor_close_on_exec(target, false);
-        return target;
+        return linux_finish_descriptor_dup(source, target);
     }
     let state = linux_console_descriptor(source);
     if state == 0 {
@@ -30676,14 +30765,14 @@ fn linux_console_dup2(source: u64, target: u64) -> u64 {
         }
         ELF_PROBE_STDERR_OPEN.store(true, Ordering::SeqCst);
         set_linux_descriptor_close_on_exec(target, false);
-        return target;
+        return linux_finish_descriptor_dup(source, target);
     }
     if target >= LINUX_AUX_DESCRIPTOR_FIRST {
         let index = (target - LINUX_AUX_DESCRIPTOR_FIRST) as usize;
         ELF_PROBE_DEVICE_DESCRIPTORS[index]
             .store(LINUX_DEVICE_CONSOLE | u16::from(state), Ordering::SeqCst);
         set_linux_descriptor_close_on_exec(target, false);
-        return target;
+        return linux_finish_descriptor_dup(source, target);
     }
     loop {
         let current = ELF_PROBE_CONSOLE_DESCRIPTORS.load(Ordering::SeqCst);
@@ -30699,7 +30788,7 @@ fn linux_console_dup2(source: u64, target: u64) -> u64 {
             .is_ok()
         {
             set_linux_descriptor_close_on_exec(target, false);
-            return target;
+            return linux_finish_descriptor_dup(source, target);
         }
     }
 }
@@ -31764,7 +31853,15 @@ fn verify_linux_cross_process_kcmp(parent: u32, child: u32) -> bool {
     });
     let same =
         (1..=6).all(|kind| linux_kcmp(u64::from(parent), u64::from(parent), kind, 0, 0) == 0);
-    let bounded = linux_kcmp(u64::from(parent), u64::from(child), 0, 1, 1) == LINUX_EOPNOTSUPP
+    let files = linux_kcmp(u64::from(parent), u64::from(child), 0, 1, 1) == 0
+        && linux_kcmp(
+            u64::from(parent),
+            u64::from(child),
+            0,
+            LINUX_DESCRIPTOR_TABLE_LIMIT,
+            1,
+        ) == LINUX_EBADF;
+    let bounded = files
         && linux_kcmp(u64::from(u32::MAX), u64::from(child), 1, 0, 0) == LINUX_ESRCH
         && linux_kcmp(u64::from(parent), u64::from(child), 7, 0, 0) == LINUX_EINVAL;
     let permission = if let Some(dumpable) = linux_process_runtime_state(child)
