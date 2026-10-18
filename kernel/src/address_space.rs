@@ -128,6 +128,7 @@ const LINUX_RUNTIME_SEALED: u64 = 1 << 58;
 const LINUX_RUNTIME_SHARED: u64 = 1 << 57;
 const LINUX_RUNTIME_SECRET: u64 = 1 << 56;
 const LINUX_RUNTIME_DONTFORK: u64 = 1 << 55;
+const LINUX_RUNTIME_WIPEONFORK: u64 = 1 << 54;
 const LINUX_INIT_ARGUMENT: [u8; 6] = [b'/', b'i', b'n', b'i', b't', 0];
 const LINUX_INIT_ENVIRONMENT: [u8; 8] = [b'G', b'I', b'N', b'U', b'X', b'=', b'1', 0];
 const LINUX_PLATFORM: [u8; 7] = [b'x', b'8', b'6', b'_', b'6', b'4', 0];
@@ -3559,11 +3560,18 @@ fn prepare_linux_hierarchy_replacement(
             .iter()
             .find(|old| old.address == mapping.address)
             .is_some_and(|old| old.shared);
+        let wipeonfork = linux_leaf_in_root(old_hierarchy[0].address(), mapping.address as u64)
+            .is_some_and(|entry| unsafe { entry.read() & LINUX_RUNTIME_WIPEONFORK != 0 });
         let flags = PRESENT
             | USER
             | if mapping.writable { WRITABLE } else { 0 }
             | if mapping.executable { 0 } else { NO_EXECUTE }
-            | if shared { LINUX_RUNTIME_SHARED } else { 0 };
+            | if shared { LINUX_RUNTIME_SHARED } else { 0 }
+            | if wipeonfork {
+                LINUX_RUNTIME_WIPEONFORK
+            } else {
+                0
+            };
         unsafe { entry.write(mapping.frame | flags) };
     }
     !force_verification_failure
@@ -3572,11 +3580,18 @@ fn prepare_linux_hierarchy_replacement(
                 .iter()
                 .find(|old| old.address == mapping.address)
                 .is_some_and(|old| old.shared);
+            let wipeonfork = linux_leaf_in_root(old_hierarchy[0].address(), mapping.address as u64)
+                .is_some_and(|entry| unsafe { entry.read() & LINUX_RUNTIME_WIPEONFORK != 0 });
             let flags = PRESENT
                 | USER
                 | if mapping.writable { WRITABLE } else { 0 }
                 | if mapping.executable { 0 } else { NO_EXECUTE }
-                | if shared { LINUX_RUNTIME_SHARED } else { 0 };
+                | if shared { LINUX_RUNTIME_SHARED } else { 0 }
+                | if wipeonfork {
+                    LINUX_RUNTIME_WIPEONFORK
+                } else {
+                    0
+                };
             linux_leaf_in_root(new_hierarchy[0].address(), mapping.address as u64).is_some_and(
                 |entry| unsafe {
                     entry.read()
@@ -3585,7 +3600,8 @@ fn prepare_linux_hierarchy_replacement(
                             | WRITABLE
                             | USER
                             | NO_EXECUTE
-                            | LINUX_RUNTIME_SHARED)
+                            | LINUX_RUNTIME_SHARED
+                            | LINUX_RUNTIME_WIPEONFORK)
                         == mapping.frame | flags
                 },
             )
@@ -4822,6 +4838,7 @@ pub(crate) struct LinuxRuntimePage {
     pub(crate) shared: bool,
     pub(crate) secret: bool,
     pub(crate) dontfork: bool,
+    pub(crate) wipeonfork: bool,
 }
 
 impl LinuxRuntimePage {
@@ -4834,6 +4851,7 @@ impl LinuxRuntimePage {
         shared: false,
         secret: false,
         dontfork: false,
+        wipeonfork: false,
     };
 }
 
@@ -4859,6 +4877,7 @@ fn linux_runtime_page_from_value(value: u64) -> LinuxRuntimePage {
         shared: value & LINUX_RUNTIME_SHARED != 0,
         secret: value & LINUX_RUNTIME_SECRET != 0,
         dontfork: value & LINUX_RUNTIME_DONTFORK != 0,
+        wipeonfork: value & LINUX_RUNTIME_WIPEONFORK != 0,
     }
 }
 
@@ -5061,6 +5080,60 @@ pub(crate) fn set_current_linux_runtime_page_dontfork(address: u64, enabled: boo
     linux_runtime_page_from_value(unsafe { entry.read() }).dontfork == enabled
 }
 
+pub(crate) fn linux_mapping_wipe_on_fork(root: memory::FrameLease, address: usize) -> Option<bool> {
+    if !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[root])
+        || address == 0
+        || !address.is_multiple_of(PAGE_SIZE)
+    {
+        return None;
+    }
+    linux_leaf_in_root(root.address(), address as u64).and_then(|entry| {
+        let value = unsafe { entry.read() };
+        (value & PRESENT != 0).then_some(value & LINUX_RUNTIME_WIPEONFORK != 0)
+    })
+}
+
+pub(crate) fn set_linux_mapping_wipe_on_fork(
+    root: memory::FrameLease,
+    address: usize,
+    enabled: bool,
+) -> bool {
+    if !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[root])
+        || address == 0
+        || !address.is_multiple_of(PAGE_SIZE)
+    {
+        return false;
+    }
+    let Some(entry) = linux_leaf_in_root(root.address(), address as u64) else {
+        return false;
+    };
+    let value = unsafe { entry.read() };
+    if value & PRESENT == 0 {
+        return false;
+    }
+    let replacement = if enabled {
+        value | LINUX_RUNTIME_WIPEONFORK
+    } else {
+        value & !LINUX_RUNTIME_WIPEONFORK
+    };
+    unsafe { entry.write(replacement) };
+    linux_mapping_wipe_on_fork(root, address) == Some(enabled)
+}
+
+pub(crate) fn set_current_linux_runtime_page_wipeonfork(address: u64, enabled: bool) -> bool {
+    let Some(root) = memory::live_frame_lease(memory::FrameOwner::KERNEL, current_root()) else {
+        return false;
+    };
+    let Ok(address) = usize::try_from(address) else {
+        return false;
+    };
+    let updated = set_linux_mapping_wipe_on_fork(root, address, enabled);
+    if updated {
+        unsafe { asm!("invlpg [{}]", in(reg) address, options(nostack, preserves_flags)) };
+    }
+    updated
+}
+
 pub(crate) fn reserve_current_linux_runtime_page(
     address: u64,
     protection: u8,
@@ -5137,6 +5210,11 @@ pub(crate) fn protect_current_linux_runtime_page(address: u64, protection: u8) -
                 } else {
                     0
                 }
+                | if old.wipeonfork {
+                    LINUX_RUNTIME_WIPEONFORK
+                } else {
+                    0
+                }
         }
         Some(frame) if protection == 0 => {
             frame.address()
@@ -5148,6 +5226,11 @@ pub(crate) fn protect_current_linux_runtime_page(address: u64, protection: u8) -
                 | if old.secret { LINUX_RUNTIME_SECRET } else { 0 }
                 | if old.dontfork {
                     LINUX_RUNTIME_DONTFORK
+                } else {
+                    0
+                }
+                | if old.wipeonfork {
+                    LINUX_RUNTIME_WIPEONFORK
                 } else {
                     0
                 }
@@ -5163,6 +5246,11 @@ pub(crate) fn protect_current_linux_runtime_page(address: u64, protection: u8) -
                 | if old.secret { LINUX_RUNTIME_SECRET } else { 0 }
                 | if old.dontfork {
                     LINUX_RUNTIME_DONTFORK
+                } else {
+                    0
+                }
+                | if old.wipeonfork {
+                    LINUX_RUNTIME_WIPEONFORK
                 } else {
                     0
                 }
@@ -5221,6 +5309,11 @@ pub(crate) fn materialize_current_linux_runtime_page(
             LINUX_RUNTIME_DONTFORK
         } else {
             0
+        }
+        | if old.wipeonfork {
+            LINUX_RUNTIME_WIPEONFORK
+        } else {
+            0
         };
     unsafe {
         entry.write(value);
@@ -5234,6 +5327,7 @@ pub(crate) fn materialize_current_linux_runtime_page(
         && current.shared == old.shared
         && current.secret == old.secret
         && current.dontfork == old.dontfork
+        && current.wipeonfork == old.wipeonfork
 }
 
 pub(crate) fn release_current_linux_runtime_mappings(base: u64) -> bool {

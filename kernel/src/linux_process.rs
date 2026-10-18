@@ -733,7 +733,12 @@ impl ProcessTable {
         LIVE_FORK_EXECUTION_STAGE.store(1134, Ordering::Release);
         let published = private_index == child_pages.len()
             && parent_page_count == child_pages.len()
-            && copy_validated_private_pages(&parent_pages[..parent_page_count], child_pages);
+            && copy_validated_private_pages(
+                parent_space.mappings(),
+                parent_space.root(),
+                &parent_pages[..parent_page_count],
+                child_pages,
+            );
         LIVE_FORK_EXECUTION_STAGE.store(1135, Ordering::Release);
         let published = published
             && address_space::clone_validated_linux_process_hierarchy(
@@ -1235,10 +1240,22 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
         test_mapping(TEST_USER_ADDRESS, frames[4], false, true),
         test_mapping(TEST_USER_ADDRESS + PAGE_SIZE, frames[5], true, false),
     ];
-    if !write_test_hierarchy(&frames[0..4], &init_mappings)
-        || address_space::verify_linux_process_root_activation(frames[0])
+    if !write_test_hierarchy(&frames[0..4], &init_mappings) {
+        crate::serial_write("ginux: lifecycle stage hierarchy failed\r\n");
+        return false;
+    }
+    if !address_space::set_linux_mapping_wipe_on_fork(
+        frames[0],
+        TEST_USER_ADDRESS + PAGE_SIZE,
+        true,
+    ) {
+        crate::serial_write("ginux: lifecycle stage wipe policy failed\r\n");
+        return false;
+    }
+    if address_space::verify_linux_process_root_activation(frames[0])
         || !address_space::inherit_linux_process_kernel_mappings(frames[0])
     {
+        crate::serial_write("ginux: lifecycle stage kernel inheritance failed\r\n");
         return false;
     }
     let Some(init_space) = ProcessAddressSpace::new(0, &frames[0..4], &init_mappings) else {
@@ -1386,12 +1403,18 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
             PROCESS_CHILD_PROGRAM.len(),
         );
         (parent_page as *mut u8).add(PAGE_SIZE - 1).write(0x32);
+        (parent_stack as *mut u8).write(0x44);
     }
-    if first_child.pid != 3
-        || !table.commit_cloned_fork(first_child, &frames[6..10], &frames[10..12])
-        || unsafe {
-            core::slice::from_raw_parts(child_page as *const u8, PROCESS_CHILD_PROGRAM.len())
-        } != PROCESS_CHILD_PROGRAM
+    if first_child.pid != 3 {
+        crate::serial_write("ginux: lifecycle stage child identity failed\r\n");
+        return false;
+    }
+    if !table.commit_cloned_fork(first_child, &frames[6..10], &frames[10..12]) {
+        crate::serial_write("ginux: lifecycle stage cloned fork failed\r\n");
+        return false;
+    }
+    if unsafe { core::slice::from_raw_parts(child_page as *const u8, PROCESS_CHILD_PROGRAM.len()) }
+        != PROCESS_CHILD_PROGRAM
         || unsafe { (child_page as *const u8).add(PAGE_SIZE - 1).read() } != 0x32
         || table.commit_fork(first_child, second_space, init_context.fork_child())
         || table.wait(init, first_child.pid).is_some()
@@ -1399,6 +1422,11 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
         || table.begin_exit(first_child, second_space).is_some()
         || table.begin_exit(first_child, stale_expected).is_some()
     {
+        crate::serial_write("ginux: lifecycle stage cloned fork state failed\r\n");
+        return false;
+    }
+    if unsafe { (child_stack as *const u8).read() } != 0 {
+        crate::serial_write("ginux: lifecycle stage wipe contents failed\r\n");
         return false;
     }
     if table.process_group(first_child.pid) != Some((1, 1))
@@ -1467,8 +1495,9 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
     };
     if child_exit_status != 42
         || unsafe { (child_stack as *const u8).read() } != 0x5a
-        || unsafe { (parent_stack as *const u8).read() } != 0
+        || unsafe { (parent_stack as *const u8).read() } != 0x44
     {
+        crate::serial_write("ginux: lifecycle stage wipe execution failed\r\n");
         return false;
     }
     let Some(resumed_parent) = run_queue.yield_current(child_thread, child_scheduler_context)
@@ -2837,29 +2866,49 @@ pub(crate) fn copy_private_pages(
 }
 
 fn copy_validated_private_pages(
+    mappings: &[cpu::LinuxActiveImageMapping],
+    root: memory::FrameLease,
     source: &[memory::FrameLease],
     destination: &[memory::FrameLease],
 ) -> bool {
     if source.is_empty()
         || source.len() != destination.len()
         || source.len() > PROCESS_PRIVATE_PAGE_LIMIT
+        || mappings
+            .iter()
+            .filter(|mapping| mapping_requires_fork_copy(mapping))
+            .count()
+            != source.len()
         || !memory::frames_owned_by(memory::FrameOwner::KERNEL, destination)
     {
         return false;
     }
-    for (source_frame, destination_frame) in source.iter().zip(destination) {
+    for ((mapping, source_frame), destination_frame) in mappings
+        .iter()
+        .filter(|mapping| mapping_requires_fork_copy(mapping))
+        .zip(source)
+        .zip(destination)
+    {
         let (Some(source_address), Some(destination_address)) = (
             source_frame.direct_map_address(),
             destination_frame.direct_map_address(),
         ) else {
             return false;
         };
+        let Some(wipeonfork) = address_space::linux_mapping_wipe_on_fork(root, mapping.address)
+        else {
+            return false;
+        };
         unsafe {
-            core::ptr::copy_nonoverlapping(
-                source_address as *const u8,
-                destination_address as *mut u8,
-                PAGE_SIZE,
-            );
+            if wipeonfork {
+                core::ptr::write_bytes(destination_address as *mut u8, 0, PAGE_SIZE);
+            } else {
+                core::ptr::copy_nonoverlapping(
+                    source_address as *const u8,
+                    destination_address as *mut u8,
+                    PAGE_SIZE,
+                );
+            }
         }
     }
     true

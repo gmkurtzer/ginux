@@ -569,6 +569,8 @@ const LINUX_MADV_SEQUENTIAL: u64 = 2;
 const LINUX_MADV_WILLNEED: u64 = 3;
 const LINUX_MADV_DONTFORK: u64 = 10;
 const LINUX_MADV_DOFORK: u64 = 11;
+const LINUX_MADV_WIPEONFORK: u64 = 18;
+const LINUX_MADV_KEEPONFORK: u64 = 19;
 const LINUX_STAT_SIZE: usize = 144;
 const LINUX_STAT_CHARACTER_DEVICE_MODE: u32 = 0o020600;
 const LINUX_STAT_DIRECTORY_MODE: u32 = 0o040555;
@@ -15630,6 +15632,10 @@ fn verify_linux_process_madvise_syscall() -> bool {
         && address_space::current_linux_runtime_page(first).dontfork
         && linux_madvise(first, PAGE_SIZE as u64, LINUX_MADV_DOFORK) == 0
         && !address_space::current_linux_runtime_page(first).dontfork
+        && linux_madvise(first, PAGE_SIZE as u64, LINUX_MADV_WIPEONFORK) == 0
+        && address_space::current_linux_runtime_page(first).wipeonfork
+        && linux_madvise(first, PAGE_SIZE as u64, LINUX_MADV_KEEPONFORK) == 0
+        && !address_space::current_linux_runtime_page(first).wipeonfork
         && linux_madvise(second, PAGE_SIZE as u64, LINUX_MADV_DONTFORK) == 0
         && address_space::current_linux_runtime_page(second).dontfork;
     let stack_page = ELF_PROBE_STACK.load(Ordering::SeqCst) & !(PAGE_SIZE as u64 - 1);
@@ -15639,7 +15645,11 @@ fn verify_linux_process_madvise_syscall() -> bool {
         && linux_madvise(stack_page, PAGE_SIZE as u64, LINUX_MADV_DONTFORK) == 0
         && address_space::current_linux_runtime_page(stack_page).dontfork
         && linux_madvise(stack_page, PAGE_SIZE as u64, LINUX_MADV_DOFORK) == 0
-        && !address_space::current_linux_runtime_page(stack_page).dontfork;
+        && !address_space::current_linux_runtime_page(stack_page).dontfork
+        && linux_madvise(stack_page, PAGE_SIZE as u64, LINUX_MADV_WIPEONFORK) == 0
+        && address_space::current_linux_runtime_page(stack_page).wipeonfork
+        && linux_madvise(stack_page, PAGE_SIZE as u64, LINUX_MADV_KEEPONFORK) == 0
+        && !address_space::current_linux_runtime_page(stack_page).wipeonfork;
     let mut vectors = [0_u8; 32];
     vectors[..8].copy_from_slice(&first.to_ne_bytes());
     vectors[8..16].copy_from_slice(&(PAGE_SIZE as u64).to_ne_bytes());
@@ -16498,6 +16508,8 @@ fn install_linux_runtime_page(address: u64, page: address_space::LinuxRuntimePag
     };
     installed
         && (!page.dontfork || address_space::set_current_linux_runtime_page_dontfork(address, true))
+        && (!page.wipeonfork
+            || address_space::set_current_linux_runtime_page_wipeonfork(address, true))
 }
 
 fn linux_mremap(
@@ -16576,6 +16588,12 @@ fn linux_mremap(
                 let _ = rollback_linux_runtime_mapping(old_end, page + 1);
                 return LINUX_ENOMEM;
             }
+            if template.wipeonfork
+                && !address_space::set_current_linux_runtime_page_wipeonfork(address, true)
+            {
+                let _ = rollback_linux_runtime_mapping(old_end, page + 1);
+                return LINUX_ENOMEM;
+            }
         }
         return old_address;
     }
@@ -16639,6 +16657,11 @@ fn linux_mremap(
         }
         if template.dontfork
             && !address_space::set_current_linux_runtime_page_dontfork(target, true)
+        {
+            return LINUX_ENOMEM;
+        }
+        if template.wipeonfork
+            && !address_space::set_current_linux_runtime_page_wipeonfork(target, true)
         {
             return LINUX_ENOMEM;
         }
@@ -17122,6 +17145,8 @@ fn linux_runtime_madvise(address: u64, length: u64, advice: u64) -> u64 {
                 ) != Some(None)
                 || state.dontfork
                     && !address_space::set_current_linux_runtime_page_dontfork(page_address, true)
+                || state.wipeonfork
+                    && !address_space::set_current_linux_runtime_page_wipeonfork(page_address, true)
             {
                 return LINUX_EINVAL;
             }
@@ -17164,6 +17189,41 @@ fn linux_madvise_inheritance(address: u64, length: u64, enabled: bool) -> u64 {
     }
     if (0..pages).all(|page| {
         address_space::set_current_linux_runtime_page_dontfork(
+            address + (page * PAGE_SIZE) as u64,
+            enabled,
+        )
+    }) {
+        0
+    } else {
+        LINUX_EINVAL
+    }
+}
+
+fn linux_madvise_wipeonfork(address: u64, length: u64, enabled: bool) -> u64 {
+    if length == 0 || !address.is_multiple_of(PAGE_SIZE as u64) {
+        return LINUX_EINVAL;
+    }
+    let Some(pages) = length
+        .checked_add(PAGE_SIZE as u64 - 1)
+        .and_then(|rounded| usize::try_from(rounded / PAGE_SIZE as u64).ok())
+    else {
+        return LINUX_EINVAL;
+    };
+    if (0..pages).any(|page| {
+        let Some(page_address) = (page * PAGE_SIZE)
+            .try_into()
+            .ok()
+            .and_then(|offset: u64| address.checked_add(offset))
+        else {
+            return true;
+        };
+        let state = address_space::current_linux_runtime_page(page_address);
+        !state.occupied || state.file || state.shared
+    }) {
+        return LINUX_EINVAL;
+    }
+    if (0..pages).all(|page| {
+        address_space::set_current_linux_runtime_page_wipeonfork(
             address + (page * PAGE_SIZE) as u64,
             enabled,
         )
@@ -17955,6 +18015,11 @@ fn linux_madvise(address: u64, length: u64, advice: u64) -> u64 {
         && matches!(advice, LINUX_MADV_DONTFORK | LINUX_MADV_DOFORK)
     {
         return linux_madvise_inheritance(address, length, advice == LINUX_MADV_DONTFORK);
+    }
+    if LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
+        && matches!(advice, LINUX_MADV_WIPEONFORK | LINUX_MADV_KEEPONFORK)
+    {
+        return linux_madvise_wipeonfork(address, length, advice == LINUX_MADV_WIPEONFORK);
     }
     if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) && address >= LINUX_RUNTIME_DYNAMIC_MMAP_BASE {
         return linux_runtime_madvise(address, length, advice);

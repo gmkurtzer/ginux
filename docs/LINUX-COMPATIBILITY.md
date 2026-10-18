@@ -101,11 +101,15 @@ Memory-management boundary tests cover 32-bit `msync` flags and signed
 protection-key IDs, including Linux key `-1`, plus 32-bit pidfd descriptors for
 `process_madvise` and `process_mrelease`. Page-table-backed runtime mappings
 implement `MADV_DONTFORK` and `MADV_DOFORK` with explicit leaf-PTE inheritance
-metadata. The bit survives protection changes, demand materialization,
-`MADV_DONTNEED`, and `mremap`; process cloning omits marked pages and restores
-normal inheritance after `MADV_DOFORK`. Boot verification covers advice
-toggle/persistence on both dynamic mmap storage and the pre-seeded process
-stack, plus a child hierarchy in which the marked parent page is absent.
+metadata. `MADV_WIPEONFORK` and `MADV_KEEPONFORK` use independent leaf-PTE
+metadata for private anonymous mappings. Both policies survive protection
+changes, demand materialization, `MADV_DONTNEED`, and `mremap`; process cloning
+omits DONTFORK pages, zeroes WIPEONFORK pages in the child while preserving the
+parent, and restores ordinary inheritance after the corresponding reversal
+advice. Boot verification covers both advice pairs on dynamic mmap storage and
+the pre-seeded process stack, a child hierarchy in which a DONTFORK page is
+absent, and an executed child whose WIPEONFORK stack begins zeroed while the
+parent stack remains unchanged.
 Snapshot completion imports the inheritance bit from every leaf PTE, including
 stack, heap, executable-image, and dynamically allocated mappings.
 Descriptor-control verification also covers Linux 32-bit descriptor and
