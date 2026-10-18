@@ -29099,12 +29099,90 @@ fn linux_pidfd_getfd(pid_descriptor: u64, target: u64, flags: u64) -> u64 {
     let Some(process) = linux_pidfd_process(pid_descriptor) else {
         return LINUX_ESRCH;
     };
-    if process != current_linux_process_pid() {
-        // Cross-process descriptor duplication additionally requires the
-        // ptrace access-mode model, which is not yet exposed to domains.
+    if process == current_linux_process_pid() {
+        return linux_console_dup(target);
+    }
+    if linux_process::live_process_status(process)
+        .is_none_or(|status| status.state != linux_process::LiveProcessState::Running)
+    {
+        return LINUX_ESRCH;
+    }
+    if !linux_ptrace_access_permitted(process) {
         return LINUX_EPERM;
     }
-    linux_console_dup(target)
+    let Some((device, oci, socket, socket_flags, tmp_generation, offset, open_file_id)) =
+        linux_process_runtime_state(process)
+            .filter(|state| state.valid)
+            .and_then(|state| linux_saved_descriptor(&state.descriptors, target))
+    else {
+        return LINUX_EBADF;
+    };
+    if socket != 0 || device & (LINUX_FILE_MASK | LINUX_DEVICE_CONSOLE) == 0 {
+        return LINUX_EOPNOTSUPP;
+    }
+    let Some(descriptor) = (LINUX_AUX_DESCRIPTOR_FIRST..linux_nofile_soft_limit())
+        .find(|descriptor| linux_aux_descriptor_free(*descriptor))
+    else {
+        return LINUX_EMFILE;
+    };
+    let index = (descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize;
+    ELF_PROBE_DEVICE_DESCRIPTORS[index].store(device, Ordering::SeqCst);
+    ELF_PROBE_OCI_DESCRIPTORS[index].store(oci, Ordering::SeqCst);
+    ELF_PROBE_SOCKET_SLOTS[index].store(0, Ordering::SeqCst);
+    ELF_PROBE_SOCKET_FLAGS[index].store(socket_flags, Ordering::SeqCst);
+    ELF_PROBE_TMP_FILE_GENERATIONS[index].store(tmp_generation, Ordering::SeqCst);
+    ELF_PROBE_DESCRIPTOR_OFFSETS[index].store(offset, Ordering::SeqCst);
+    ELF_PROBE_OPEN_FILE_IDS[index].store(open_file_id, Ordering::SeqCst);
+    set_linux_descriptor_close_on_exec(descriptor, true);
+    descriptor
+}
+
+fn linux_saved_descriptor(
+    state: &LinuxDescriptorRuntimeState,
+    descriptor: u64,
+) -> Option<(u16, u16, u8, u32, u32, u64, u64)> {
+    if descriptor >= LINUX_DESCRIPTOR_TABLE_LIMIT {
+        return None;
+    }
+    if descriptor < LINUX_AUX_DESCRIPTOR_FIRST {
+        let index = descriptor as usize;
+        let id = state.stdio_open_file_ids[index];
+        let explicit_device = state.stdio_devices[index];
+        let console_access = if descriptor < 2 {
+            u16::from((state.console >> (descriptor * 2)) & 0b11)
+        } else if state.stderr_open {
+            LINUX_DESCRIPTOR_OUTPUT
+        } else {
+            0
+        };
+        let device = if explicit_device != 0 {
+            explicit_device
+        } else if console_access != 0 {
+            LINUX_DEVICE_CONSOLE | console_access
+        } else {
+            0
+        };
+        return (id != 0).then_some((
+            device,
+            state.stdio_oci[index],
+            state.stdio_sockets[index],
+            state.stdio_socket_flags[index],
+            state.stdio_tmp_generations[index],
+            state.stdio_offsets[index],
+            id,
+        ));
+    }
+    let index = (descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize;
+    let id = state.open_file_ids[index];
+    (id != 0).then_some((
+        state.devices[index],
+        state.oci[index],
+        state.sockets[index],
+        state.socket_flags[index],
+        state.tmp_generations[index],
+        state.offsets[index],
+        id,
+    ))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -31726,7 +31804,7 @@ fn verify_linux_cross_process_prlimit(pid: u32) -> bool {
         ) == 0
             && linux_waitid(LINUX_P_PGID, 0, 0, LINUX_WEXITED | LINUX_WNOWAIT, 0) == 0
     });
-    let pidfd_getfd = pidfd_opened && linux_pidfd_getfd(pidfd, 1, 0) == LINUX_EPERM;
+    let pidfd_getfd = pidfd_opened && linux_pidfd_getfd(pidfd, 1, 0) == LINUX_ESRCH;
     let process_vm_zombie =
         linux_process_vm_iov(u64::from(pid), 0, 0, 0, 0, 0, false) == LINUX_ESRCH;
     let pidfd_closed = !pidfd_opened || linux_descriptor_close(pidfd) == 0;
@@ -31813,6 +31891,19 @@ fn verify_linux_running_child_wait_selectors(pid: u32) -> bool {
         ) == 0;
     let process_vm = running && verify_linux_cross_process_vm(pid);
     let kcmp = process_vm && verify_linux_cross_process_kcmp(parent, pid);
+    let remote_descriptor = if kcmp {
+        linux_pidfd_getfd(child_pidfd, 1, 0)
+    } else {
+        LINUX_EBADF
+    };
+    let remote_opened = remote_descriptor < LINUX_DESCRIPTOR_TABLE_LIMIT
+        && linux_descriptor_open(remote_descriptor)
+        && linux_descriptor_close_on_exec(remote_descriptor)
+        && linux_kcmp(u64::from(parent), u64::from(pid), 0, remote_descriptor, 1) == 0;
+    let remote_errors = remote_opened
+        && linux_pidfd_getfd(child_pidfd, 1, 1) == LINUX_EINVAL
+        && linux_pidfd_getfd(child_pidfd, LINUX_DESCRIPTOR_TABLE_LIMIT, 0) == LINUX_EBADF;
+    let remote_closed = !remote_opened || linux_descriptor_close(remote_descriptor) == 0;
     let parent_pidfd = linux_pidfd_open(u64::from(parent), 0);
     let parent_opened = parent_pidfd < LINUX_AUX_DESCRIPTOR_LIMIT;
     let errors = parent_opened
@@ -31827,6 +31918,9 @@ fn verify_linux_running_child_wait_selectors(pid: u32) -> bool {
         && running
         && process_vm
         && kcmp
+        && remote_opened
+        && remote_errors
+        && remote_closed
         && parent_opened
         && errors
         && parent_closed
@@ -31836,6 +31930,7 @@ fn verify_linux_running_child_wait_selectors(pid: u32) -> bool {
         serial_write("ginux: Linux nonblocking pidfd wait validated\r\n");
         serial_write("ginux: Linux cross-process memory transfer validated\r\n");
         serial_write("ginux: Linux cross-process resource comparison validated\r\n");
+        serial_write("ginux: Linux cross-process pidfd descriptor duplication validated\r\n");
     }
     valid
 }

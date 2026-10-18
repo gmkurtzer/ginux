@@ -1393,6 +1393,13 @@ missing processes return `-ESRCH` and denied inspection returns `-EPERM`.
 by `dup` and fork and cleared by close, so descriptor-number reuse cannot alias
 an older description. Missing descriptors return `-EBADF`. Shared post-fork
 file-position storage and `KCMP_EPOLL_TFD` remain pending.
+`rax = 438` (`__NR_pidfd_getfd`) duplicates regular-file and console
+descriptors from a running generation-bound peer after the same ptrace-style
+namespace, credential, and dumpability check. The returned descriptor is
+close-on-exec and preserves the source open-file identity. Invalid flags return
+`-EINVAL`, missing source descriptors return `-EBADF`, exited targets return
+`-ESRCH`, and sockets or special event descriptors return `-EOPNOTSUPP` until
+their backing state is independently captured per process.
 `rax = 27` (`__NR_mincore`) accepts any fully occupied nonzero scratch range
 rounding to one through four pages, including a range crossing adjacent
 registry records, and atomically
