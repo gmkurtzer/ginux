@@ -102,6 +102,13 @@ controller. Ginux currently treats hardware RNG availability as its ready
 entropy source; a mixed, reseeding kernel CSPRNG and interruptible large reads
 remain pending, so the syscall remains Partial.
 
+`getrlimit` now accepts every Linux resource number from `RLIMIT_CPU` through
+`RLIMIT_RTTIME`. Finite limits reflect Ginux's actual process, descriptor,
+signal, nice, and realtime-priority boundaries; resources without a present
+quota report infinity. The ring-3 controller verifies the full query range,
+ordering, and error behavior. Mutable soft/hard limits and complete `prlimit64`
+target semantics remain pending, so the resource-limit family remains Partial.
+
 System V shared memory now uses domain-owned, dynamically allocated frame
 objects whose lifetime is independent of any one mapping. `shmget`, `shmat`,
 `shmdt`, and `shmctl(IPC_STAT/IPC_RMID)` provide keyed creation, shared page

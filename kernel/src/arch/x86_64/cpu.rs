@@ -531,6 +531,7 @@ const LINUX_UTIME_NOW: i64 = 1_073_741_823;
 const LINUX_UTIME_OMIT: i64 = 1_073_741_822;
 const LINUX_RLIMIT_STACK: u64 = 3;
 const LINUX_RLIMIT_NOFILE: u64 = 7;
+const LINUX_RLIMIT_NLIMITS: u64 = 16;
 const LINUX_WNOHANG: u64 = 1;
 const LINUX_WUNTRACED: u64 = 2;
 const LINUX_WEXITED: u64 = 4;
@@ -8863,15 +8864,12 @@ extern "sysv64" fn linux_syscall_handler(
         }
         LINUX_UMASK_SYSCALL => ELF_PROBE_UMASK.swap(first_argument & 0o777, Ordering::SeqCst),
         LINUX_GETTIMEOFDAY_SYSCALL => linux_gettimeofday(first_argument, buffer),
-        LINUX_GETRLIMIT_SYSCALL => {
-            let Some(limit) = linux_resource_limit(first_argument) else {
-                return LINUX_EINVAL;
-            };
-            if !copy_to_linux_user(buffer, &limit) {
-                return LINUX_EFAULT;
-            }
-            0
-        }
+        LINUX_GETRLIMIT_SYSCALL => linux_getrlimit(
+            first_argument,
+            buffer,
+            LINUX_RUNTIME_MODE.load(Ordering::SeqCst),
+            copy_to_linux_user,
+        ),
         LINUX_SETRLIMIT_SYSCALL => linux_setrlimit(first_argument, buffer),
         LINUX_SYNC_SYSCALL => 0,
         LINUX_GETRUSAGE_SYSCALL => linux_getrusage(first_argument, buffer),
@@ -8948,7 +8946,9 @@ extern "sysv64" fn linux_syscall_handler(
             if !matches!(first_argument, 0 | 1) {
                 return LINUX_ESRCH;
             }
-            let Some(limit) = linux_resource_limit(buffer) else {
+            let Some(limit) =
+                linux_resource_limit(buffer, LINUX_RUNTIME_MODE.load(Ordering::SeqCst))
+            else {
                 return LINUX_EINVAL;
             };
             if count != 0 {
@@ -9263,6 +9263,12 @@ fn linux_controller_syscall(
             })
         }
         LINUX_IOCTL_SYSCALL => Some(LINUX_ENOTTY),
+        LINUX_GETRLIMIT_SYSCALL => Some(linux_getrlimit(
+            first,
+            second,
+            true,
+            address_space::copy_to_current_user,
+        )),
         LINUX_SYSINFO_SYSCALL => {
             let Some(processes) =
                 linux_process::host_live_process_count().and_then(|count| count.checked_add(1))
@@ -27504,14 +27510,16 @@ fn append_linux_dirent(
     true
 }
 
-fn linux_resource_limit(resource: u64) -> Option<[u8; 16]> {
+fn linux_resource_limit(resource: u64, runtime: bool) -> Option<[u8; 16]> {
     let value = match resource {
-        LINUX_RLIMIT_STACK if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) => u64::MAX,
+        LINUX_RLIMIT_STACK if runtime => u64::MAX,
         LINUX_RLIMIT_STACK => PAGE_SIZE as u64,
-        LINUX_RLIMIT_NOFILE if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) => {
-            LINUX_DESCRIPTOR_TABLE_LIMIT
-        }
+        LINUX_RLIMIT_NOFILE if runtime => LINUX_DESCRIPTOR_TABLE_LIMIT,
         LINUX_RLIMIT_NOFILE => LINUX_AUX_DESCRIPTOR_LIMIT,
+        6 => linux_process::PROCESS_LIMIT as u64,
+        11 => LINUX_SIGNAL_COUNT as u64,
+        13 | 14 => 0,
+        resource if resource < LINUX_RLIMIT_NLIMITS => u64::MAX,
         _ => return None,
     };
     let mut limit = [0_u8; 16];
@@ -27520,8 +27528,25 @@ fn linux_resource_limit(resource: u64) -> Option<[u8; 16]> {
     Some(limit)
 }
 
+fn linux_getrlimit(
+    resource: u64,
+    address: u64,
+    runtime: bool,
+    copy: fn(u64, &[u8]) -> bool,
+) -> u64 {
+    let Some(limit) = linux_resource_limit(resource, runtime) else {
+        return LINUX_EINVAL;
+    };
+    if copy(address, &limit) {
+        0
+    } else {
+        LINUX_EFAULT
+    }
+}
+
 fn linux_setrlimit(resource: u64, address: u64) -> u64 {
-    let Some(current) = linux_resource_limit(resource) else {
+    let Some(current) = linux_resource_limit(resource, LINUX_RUNTIME_MODE.load(Ordering::SeqCst))
+    else {
         return LINUX_EINVAL;
     };
     let mut requested = [0_u8; 16];

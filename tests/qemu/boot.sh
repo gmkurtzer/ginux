@@ -2701,6 +2701,11 @@ if ! grep -q '^ginux: Linux getrandom contract validated' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux resource-limit queries validated' "$output_file"; then
+    echo "Boot test failed: Linux resource-limit queries were not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux container-local root credentials verified' "$output_file"; then
     echo "Boot test failed: Linux container-local root credentials were not verified." >&2
     exit 1

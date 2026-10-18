@@ -51,6 +51,7 @@ const LINUX_READ_SYSCALL: u64 = 0;
 const LINUX_WRITE_SYSCALL: u64 = 1;
 const LINUX_IOCTL_SYSCALL: u64 = 16;
 const LINUX_EXIT_SYSCALL: u64 = 60;
+const LINUX_GETRLIMIT_SYSCALL: u64 = 97;
 const LINUX_SYSINFO_SYSCALL: u64 = 99;
 const LINUX_GETRANDOM_SYSCALL: u64 = 318;
 const LINUX_EFAULT: u64 = u64::MAX - 13;
@@ -389,6 +390,13 @@ extern "C" fn ginux_controller_main() -> ! {
         exit(NATIVE_SERVICE_EXIT_REJECTED);
     }
     write(console, b"ginux: Linux getrandom contract validated\r\n");
+    if !linux_getrlimit_contract(console) {
+        exit(NATIVE_SERVICE_EXIT_REJECTED);
+    }
+    write(
+        console,
+        b"ginux: Linux resource-limit queries validated\r\n",
+    );
     if network_snapshot(network).is_some_and(|snapshot| snapshot[3] == 0) {
         write(console, b"eth0: automatic DHCP configuration\r\n");
         set_dhcp_network(console, network);
@@ -2225,6 +2233,34 @@ fn linux_getrandom_contract(console: u64) -> bool {
         });
     if !valid {
         write(console, b"ginux: getrandom conformance failed\r\n");
+    }
+    valid
+}
+
+fn linux_getrlimit_contract(console: u64) -> bool {
+    let mut limit = [0_u64; 2];
+    for resource in 0..16 {
+        if linux_syscall(
+            LINUX_GETRLIMIT_SYSCALL,
+            resource,
+            limit.as_mut_ptr() as u64,
+            0,
+        ) != 0
+            || limit[0] > limit[1]
+        {
+            write(console, b"ginux: resource-limit query failed\r\n");
+            return false;
+        }
+        if resource == 7 && limit[0] < 6 || matches!(resource, 13 | 14) && limit != [0, 0] {
+            write(console, b"ginux: resource-limit value rejected\r\n");
+            return false;
+        }
+    }
+    let valid = linux_syscall(LINUX_GETRLIMIT_SYSCALL, 16, limit.as_mut_ptr() as u64, 0)
+        == LINUX_EINVAL
+        && linux_syscall(LINUX_GETRLIMIT_SYSCALL, 0, 1, 0) == LINUX_EFAULT;
+    if !valid {
+        write(console, b"ginux: resource-limit error semantics failed\r\n");
     }
     valid
 }
