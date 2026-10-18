@@ -134,12 +134,10 @@ const COMMAND_DOMAIN_ATTACH: u16 = 24;
 const COMMAND_NETWORK_NEW: u16 = 25;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
-#[allow(dead_code)] // No syscall is Complete yet; the first conformance probe will construct Pass.
-enum LinuxSyscallStatus {
+enum LinuxTestResult {
     Pass,
-    Unverified,
-    PolicyDenied,
-    Unsupported,
+    Fail,
+    PolicyExempt,
 }
 
 #[derive(Clone, Copy)]
@@ -147,35 +145,110 @@ struct LinuxSyscallTest {
     number: u16,
     name_offset: u16,
     name_length: u8,
-    status: LinuxSyscallStatus,
+    result: LinuxTestResult,
 }
 
 include!(concat!(env!("OUT_DIR"), "/linux_syscall_catalog.rs"));
 
-const LINUX_ABI_TESTS: &[&[u8]] = &[
-    b"syscall-entry",
-    b"elf64-loader",
-    b"initial-stack-and-auxv",
-    b"dynamic-loader",
-    b"tls",
-    b"process-and-thread",
-    b"signals",
-    b"memory-management",
-    b"descriptors-and-events",
-    b"vfs-and-path-lookup",
-    b"procfs",
-    b"devfs-and-terminal",
-    b"tmpfs",
-    b"credentials-and-user-namespaces",
-    b"clocks-and-timers",
-    b"ioctl-profile",
-    b"sysfs",
-    b"mount-and-namespace-api",
-    b"socket-api",
-    b"cgroups",
-    b"seccomp-audit-and-lsm",
-    b"vdso-and-vvar",
-    b"linux-module-userspace-api",
+#[derive(Clone, Copy)]
+struct LinuxInterfaceTest {
+    name: &'static [u8],
+    policy_exempt: bool,
+}
+
+const LINUX_ABI_TESTS: &[LinuxInterfaceTest] = &[
+    LinuxInterfaceTest {
+        name: b"syscall-entry",
+        policy_exempt: false,
+    },
+    LinuxInterfaceTest {
+        name: b"elf64-loader",
+        policy_exempt: false,
+    },
+    LinuxInterfaceTest {
+        name: b"initial-stack-and-auxv",
+        policy_exempt: false,
+    },
+    LinuxInterfaceTest {
+        name: b"dynamic-loader",
+        policy_exempt: false,
+    },
+    LinuxInterfaceTest {
+        name: b"tls",
+        policy_exempt: false,
+    },
+    LinuxInterfaceTest {
+        name: b"process-and-thread",
+        policy_exempt: false,
+    },
+    LinuxInterfaceTest {
+        name: b"signals",
+        policy_exempt: false,
+    },
+    LinuxInterfaceTest {
+        name: b"memory-management",
+        policy_exempt: false,
+    },
+    LinuxInterfaceTest {
+        name: b"descriptors-and-events",
+        policy_exempt: false,
+    },
+    LinuxInterfaceTest {
+        name: b"vfs-and-path-lookup",
+        policy_exempt: false,
+    },
+    LinuxInterfaceTest {
+        name: b"procfs",
+        policy_exempt: false,
+    },
+    LinuxInterfaceTest {
+        name: b"devfs-and-terminal",
+        policy_exempt: false,
+    },
+    LinuxInterfaceTest {
+        name: b"tmpfs",
+        policy_exempt: false,
+    },
+    LinuxInterfaceTest {
+        name: b"credentials-and-user-namespaces",
+        policy_exempt: false,
+    },
+    LinuxInterfaceTest {
+        name: b"clocks-and-timers",
+        policy_exempt: false,
+    },
+    LinuxInterfaceTest {
+        name: b"ioctl-profile",
+        policy_exempt: false,
+    },
+    LinuxInterfaceTest {
+        name: b"sysfs",
+        policy_exempt: false,
+    },
+    LinuxInterfaceTest {
+        name: b"mount-and-namespace-api",
+        policy_exempt: false,
+    },
+    LinuxInterfaceTest {
+        name: b"socket-api",
+        policy_exempt: false,
+    },
+    LinuxInterfaceTest {
+        name: b"cgroups",
+        policy_exempt: false,
+    },
+    LinuxInterfaceTest {
+        name: b"seccomp-audit-and-lsm",
+        policy_exempt: false,
+    },
+    LinuxInterfaceTest {
+        name: b"vdso-and-vvar",
+        policy_exempt: false,
+    },
+    LinuxInterfaceTest {
+        name: b"linux-module-userspace-api",
+        policy_exempt: true,
+    },
 ];
 
 const TEST_COMMANDS: &[Command<'static>] = &[Command::leaf(
@@ -615,8 +688,7 @@ fn test_linux_userspace(console: u64, host: u64, arguments: Arguments<'_>) {
             write_linux_syscall_tests(console, None);
         }
         (b"all", 1) => {
-            write_linux_interface_tests(console, results);
-            write_linux_syscall_tests(console, None);
+            write_linux_all_tests(console, results);
         }
         (b"syscall", 2) => {
             write_linux_syscall_tests(console, arguments.get(1));
@@ -629,62 +701,44 @@ fn test_linux_userspace(console: u64, host: u64, arguments: Arguments<'_>) {
 }
 
 fn write_linux_test_summary(console: u64, results: u64) {
-    let interface_passed = (0..LINUX_ABI_TESTS.len())
-        .filter(|index| results & (1 << index) != 0)
-        .count() as u64;
-    let (passed, unverified, denied, unsupported) = linux_syscall_test_counts();
+    let interface_counts = linux_interface_test_counts(results);
+    let syscall_counts = linux_syscall_test_counts();
     let mut output = ConsoleHelpWriter::new(console);
     output.write(b"Linux userspace runtime conformance summary:\r\n");
-    output.write(b"Interfaces: ");
-    write_help_decimal(&mut output, interface_passed);
-    output.write(b" passed, ");
-    write_help_decimal(&mut output, LINUX_ABI_TESTS.len() as u64 - interface_passed);
-    output.write(b" failed, ");
-    write_help_decimal(&mut output, LINUX_ABI_TESTS.len() as u64);
-    output.write(b" total\r\nSyscalls: ");
-    write_help_decimal(&mut output, passed);
-    output.write(b" passed, ");
-    write_help_decimal(&mut output, unverified);
-    output.write(b" unverified, ");
-    write_help_decimal(&mut output, denied);
-    output.write(b" policy-denied, ");
-    write_help_decimal(&mut output, unsupported);
-    output.write(b" unsupported, ");
-    write_help_decimal(&mut output, LINUX_SYSCALL_TESTS.len() as u64);
-    output.write(b" total\r\n");
+    write_linux_result_summary(&mut output, b"Interfaces", interface_counts);
+    write_linux_result_summary(&mut output, b"Syscalls", syscall_counts);
     output.write(b"Run 'test linux all' for every result.\r\n");
     output.finish();
 }
 
 fn write_linux_interface_tests(console: u64, results: u64) {
-    let mut passed = 0_u64;
     let mut output = ConsoleHelpWriter::new(console);
-    output.write(b"Linux userspace interface runtime tests (bounded profile):\r\n");
-    for (index, name) in LINUX_ABI_TESTS.iter().enumerate() {
-        let pass = results & (1 << index) != 0;
-        output.write(if pass { b"PASS " } else { b"FAIL " });
-        output.write(name);
-        output.write(b"\r\n");
-        passed += u64::from(pass);
+    output.write(b"Linux userspace interface conformance:\r\n");
+    write_linux_table_header(&mut output);
+    for (index, test) in LINUX_ABI_TESTS.iter().enumerate() {
+        write_linux_table_row(
+            &mut output,
+            test.name,
+            b"interface",
+            Some(index as u64),
+            linux_interface_test_result(index, results),
+        );
     }
-    let total = LINUX_ABI_TESTS.len() as u64;
-    output.write(b"Summary: ");
-    write_help_decimal(&mut output, passed);
-    output.write(b" passed, ");
-    write_help_decimal(&mut output, total - passed);
-    output.write(b" failed, ");
-    write_help_decimal(&mut output, total);
-    output.write(b" total\r\n");
-    output.write(
-        b"PASS covers the current bounded Linux profile; FAIL is unsupported or unverified.\r\n",
+    write_linux_result_summary(
+        &mut output,
+        b"Summary",
+        linux_interface_test_counts(results),
     );
+    write_linux_result_legend(&mut output);
     output.finish();
 }
 
 fn write_linux_syscall_tests(console: u64, selector: Option<&[u8]>) {
     let mut output = ConsoleHelpWriter::new(console);
     output.write(b"Linux x86-64 syscall conformance ledger:\r\n");
+    write_linux_table_header(&mut output);
     let mut matched = false;
+    let mut counts = LinuxTestCounts::ZERO;
     for test in LINUX_SYSCALL_TESTS {
         let name = linux_syscall_test_name(*test);
         if selector.is_some_and(|selector| {
@@ -693,33 +747,62 @@ fn write_linux_syscall_tests(console: u64, selector: Option<&[u8]>) {
             continue;
         }
         matched = true;
-        output.write(linux_syscall_status_name(test.status));
-        output.write(b" ");
-        write_help_decimal(&mut output, u64::from(test.number));
-        output.write(b" ");
-        output.write(name);
-        output.write(b"\r\n");
+        write_linux_table_row(
+            &mut output,
+            name,
+            b"syscall",
+            Some(u64::from(test.number)),
+            test.result,
+        );
+        counts.add(test.result);
     }
     if !matched {
-        output.write(b"FAIL unknown Linux syscall\r\n");
+        write_linux_table_row(
+            &mut output,
+            selector.unwrap_or(b"unknown"),
+            b"syscall",
+            None,
+            LinuxTestResult::Fail,
+        );
+        counts.add(LinuxTestResult::Fail);
+        write_linux_result_summary(&mut output, b"Summary", counts);
+        write_linux_result_legend(&mut output);
         output.finish();
         return;
     }
-    let (passed, unverified, denied, unsupported) = linux_syscall_test_counts();
-    output.write(b"Summary: ");
-    write_help_decimal(&mut output, passed);
-    output.write(b" passed, ");
-    write_help_decimal(&mut output, unverified);
-    output.write(b" unverified, ");
-    write_help_decimal(&mut output, denied);
-    output.write(b" policy-denied, ");
-    write_help_decimal(&mut output, unsupported);
-    output.write(b" unsupported, ");
-    write_help_decimal(&mut output, LINUX_SYSCALL_TESTS.len() as u64);
-    output.write(b" total\r\n");
-    output.write(
-        b"PASS requires a runtime conformance probe; dispatch alone remains UNVERIFIED.\r\n",
-    );
+    write_linux_result_summary(&mut output, b"Summary", counts);
+    write_linux_result_legend(&mut output);
+    output.finish();
+}
+
+fn write_linux_all_tests(console: u64, results: u64) {
+    let mut output = ConsoleHelpWriter::new(console);
+    output.write(b"Linux userspace conformance results:\r\n");
+    write_linux_table_header(&mut output);
+    let mut counts = LinuxTestCounts::ZERO;
+    for (index, test) in LINUX_ABI_TESTS.iter().enumerate() {
+        let result = linux_interface_test_result(index, results);
+        write_linux_table_row(
+            &mut output,
+            test.name,
+            b"interface",
+            Some(index as u64),
+            result,
+        );
+        counts.add(result);
+    }
+    for test in LINUX_SYSCALL_TESTS {
+        write_linux_table_row(
+            &mut output,
+            linux_syscall_test_name(*test),
+            b"syscall",
+            Some(u64::from(test.number)),
+            test.result,
+        );
+        counts.add(test.result);
+    }
+    write_linux_result_summary(&mut output, b"Summary", counts);
+    write_linux_result_legend(&mut output);
     output.finish();
 }
 
@@ -728,26 +811,128 @@ fn linux_syscall_test_name(test: LinuxSyscallTest) -> &'static [u8] {
     &LINUX_SYSCALL_NAMES[start..start + usize::from(test.name_length)]
 }
 
-fn linux_syscall_status_name(status: LinuxSyscallStatus) -> &'static [u8] {
-    match status {
-        LinuxSyscallStatus::Pass => b"PASS",
-        LinuxSyscallStatus::Unverified => b"UNVERIFIED",
-        LinuxSyscallStatus::PolicyDenied => b"POLICY-DENIED",
-        LinuxSyscallStatus::Unsupported => b"UNSUPPORTED",
+fn linux_test_result_name(result: LinuxTestResult) -> &'static [u8] {
+    match result {
+        LinuxTestResult::Pass => b"PASS",
+        LinuxTestResult::Fail => b"FAIL",
+        LinuxTestResult::PolicyExempt => b"POLICY-EXEMPT",
     }
 }
 
-fn linux_syscall_test_counts() -> (u64, u64, u64, u64) {
-    let mut counts = (0, 0, 0, 0);
-    for test in LINUX_SYSCALL_TESTS {
-        match test.status {
-            LinuxSyscallStatus::Pass => counts.0 += 1,
-            LinuxSyscallStatus::Unverified => counts.1 += 1,
-            LinuxSyscallStatus::PolicyDenied => counts.2 += 1,
-            LinuxSyscallStatus::Unsupported => counts.3 += 1,
+#[derive(Clone, Copy)]
+struct LinuxTestCounts {
+    passed: u64,
+    failed: u64,
+    policy_exempt: u64,
+}
+
+impl LinuxTestCounts {
+    const ZERO: Self = Self {
+        passed: 0,
+        failed: 0,
+        policy_exempt: 0,
+    };
+
+    fn add(&mut self, result: LinuxTestResult) {
+        match result {
+            LinuxTestResult::Pass => self.passed += 1,
+            LinuxTestResult::Fail => self.failed += 1,
+            LinuxTestResult::PolicyExempt => self.policy_exempt += 1,
         }
     }
+
+    const fn total(self) -> u64 {
+        self.passed + self.failed + self.policy_exempt
+    }
+}
+
+fn linux_interface_test_result(index: usize, results: u64) -> LinuxTestResult {
+    if LINUX_ABI_TESTS[index].policy_exempt {
+        LinuxTestResult::PolicyExempt
+    } else if results & (1 << index) != 0 {
+        LinuxTestResult::Pass
+    } else {
+        LinuxTestResult::Fail
+    }
+}
+
+fn linux_interface_test_counts(results: u64) -> LinuxTestCounts {
+    let mut counts = LinuxTestCounts::ZERO;
+    for index in 0..LINUX_ABI_TESTS.len() {
+        counts.add(linux_interface_test_result(index, results));
+    }
     counts
+}
+
+fn linux_syscall_test_counts() -> LinuxTestCounts {
+    let mut counts = LinuxTestCounts::ZERO;
+    for test in LINUX_SYSCALL_TESTS {
+        counts.add(test.result);
+    }
+    counts
+}
+
+fn write_linux_table_header(output: &mut impl HelpWriter) {
+    write_linux_table_field(output, b"NAME/IDENTIFIER", 34);
+    write_linux_table_field(output, b"TYPE", 11);
+    write_linux_table_field(output, b"ID", 7);
+    output.write(b"RESULT\r\n");
+}
+
+fn write_linux_table_row(
+    output: &mut impl HelpWriter,
+    name: &[u8],
+    kind: &[u8],
+    id: Option<u64>,
+    result: LinuxTestResult,
+) {
+    write_linux_table_field(output, name, 34);
+    write_linux_table_field(output, kind, 11);
+    if let Some(id) = id {
+        write_linux_decimal_field(output, id, 7);
+    } else {
+        write_linux_table_field(output, b"-", 7);
+    }
+    output.write(linux_test_result_name(result));
+    output.write(b"\r\n");
+}
+
+fn write_linux_table_field(output: &mut impl HelpWriter, value: &[u8], width: usize) {
+    output.write(value);
+    for _ in value.len()..width {
+        output.write(b" ");
+    }
+}
+
+fn write_linux_decimal_field(output: &mut impl HelpWriter, value: u64, width: usize) {
+    let digits = if value == 0 {
+        1
+    } else {
+        value.ilog10() as usize + 1
+    };
+    write_help_decimal(output, value);
+    for _ in digits..width {
+        output.write(b" ");
+    }
+}
+
+fn write_linux_result_summary(output: &mut impl HelpWriter, label: &[u8], counts: LinuxTestCounts) {
+    output.write(label);
+    output.write(b": ");
+    write_help_decimal(output, counts.passed);
+    output.write(b" pass, ");
+    write_help_decimal(output, counts.failed);
+    output.write(b" fail, ");
+    write_help_decimal(output, counts.policy_exempt);
+    output.write(b" policy-exempt, ");
+    write_help_decimal(output, counts.total());
+    output.write(b" total\r\n");
+}
+
+fn write_linux_result_legend(output: &mut impl HelpWriter) {
+    output.write(
+        b"PASS = verified; FAIL = incomplete or unsupported; POLICY-EXEMPT = deliberately denied.\r\n",
+    );
 }
 
 fn write_help_decimal(output: &mut impl HelpWriter, mut value: u64) {

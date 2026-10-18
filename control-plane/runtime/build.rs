@@ -23,9 +23,8 @@ fn main() {
         };
         let status = match columns[3] {
             "Complete" => "Pass",
-            "Partial" => "Unverified",
-            "Policy-denied" => "PolicyDenied",
-            "Missing" => "Unsupported",
+            "Partial" | "Missing" => "Fail",
+            "Policy-denied" => "PolicyExempt",
             _ => continue,
         };
         assert!(
@@ -42,7 +41,7 @@ fn main() {
         names.push_str(columns[2]);
         writeln!(
             generated,
-            "    LinuxSyscallTest {{ number: {number}, name_offset: {name_offset}, name_length: {}, status: LinuxSyscallStatus::{status} }},",
+            "    LinuxSyscallTest {{ number: {number}, name_offset: {name_offset}, name_length: {}, result: LinuxTestResult::{status} }},",
             columns[2].len()
         )
         .unwrap();

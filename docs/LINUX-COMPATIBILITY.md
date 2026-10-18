@@ -846,7 +846,8 @@ independent tests and contracts.
 For grouped interfaces, PASS reports that the current bounded Ginux profile was
 verified during boot; it does not upgrade that interface to complete Linux
 compatibility. For individual syscalls, only a complete runtime conformance
-probe may print PASS. Partial dispatch prints UNVERIFIED, deliberate authority
-policy prints POLICY-DENIED, and absent dispatch prints UNSUPPORTED. The runtime
-catalog is generated from every syscall row in this file so documentation and
-the executable checklist cannot silently diverge.
+probe may print PASS. Partial or missing behavior prints FAIL, and deliberate
+authority policy prints POLICY-EXEMPT. Lack of verification is therefore an
+actionable failure rather than a separate outcome. The runtime catalog is
+generated from every syscall row in this file so documentation and the
+executable checklist cannot silently diverge.

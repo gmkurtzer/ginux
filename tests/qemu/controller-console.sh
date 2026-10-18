@@ -117,81 +117,13 @@ for expected in \
     'test ENVIRONMENT' \
     'Test a userspace compatibility environment' \
     'Linux userspace runtime conformance summary:' \
-    'Interfaces: 17 passed, 6 failed, 23 total' \
-    'Syscalls: 82 passed, 245 unverified, 48 policy-denied, 0 unsupported, 375 total' \
+    'Interfaces: 17 pass, 5 fail, 1 policy-exempt, 23 total' \
+    'Syscalls: 82 pass, 245 fail, 48 policy-exempt, 375 total' \
     "Run 'test linux all' for every result." \
-    'Linux userspace interface runtime tests (bounded profile):' \
-    'PASS syscall-entry' \
-    'PASS elf64-loader' \
-    'PASS initial-stack-and-auxv' \
-    'PASS dynamic-loader' \
-    'PASS tls' \
-    'PASS process-and-thread' \
-    'PASS signals' \
-    'PASS memory-management' \
-    'PASS descriptors-and-events' \
-    'PASS vfs-and-path-lookup' \
-    'PASS procfs' \
-    'PASS devfs-and-terminal' \
-    'PASS tmpfs' \
-    'PASS credentials-and-user-namespaces' \
-    'PASS clocks-and-timers' \
-    'PASS ioctl-profile' \
-    'PASS socket-api' \
-    'FAIL sysfs' \
-    'FAIL mount-and-namespace-api' \
-    'FAIL cgroups' \
-    'FAIL seccomp-audit-and-lsm' \
-    'FAIL vdso-and-vvar' \
-    'FAIL linux-module-userspace-api' \
-    'Summary: 17 passed, 6 failed, 23 total' \
-    'PASS covers the current bounded Linux profile; FAIL is unsupported or unverified.' \
-    'Linux x86-64 syscall conformance ledger:' \
-    'UNVERIFIED 0 read' \
-    'PASS 24 sched_yield' \
-    'PASS 39 getpid' \
-    'PASS 41 socket' \
-    'PASS 44 sendto' \
-    'PASS 52 getpeername' \
-    'PASS 53 socketpair' \
-    'PASS 55 getsockopt' \
-    'PASS 63 uname' \
-    'PASS 74 fsync' \
-    'PASS 75 fdatasync' \
-    'PASS 95 umask' \
-    'PASS 96 gettimeofday' \
-    'PASS 115 getgroups' \
-    'PASS 118 getresuid' \
-    'PASS 120 getresgid' \
-    'PASS 111 getpgrp' \
-    'PASS 121 getpgid' \
-    'PASS 124 getsid' \
-    'PASS 143 sched_getparam' \
-    'PASS 142 sched_setparam' \
-    'PASS 144 sched_setscheduler' \
-    'PASS 145 sched_getscheduler' \
-    'PASS 146 sched_get_priority_max' \
-    'PASS 147 sched_get_priority_min' \
-    'PASS 162 sync' \
-    'PASS 201 time' \
-    'PASS 203 sched_setaffinity' \
-    'PASS 204 sched_getaffinity' \
-    'PASS 218 set_tid_address' \
-    'PASS 274 get_robust_list' \
-    'PASS 277 sync_file_range' \
-    'PASS 299 recvmmsg' \
-    'PASS 306 syncfs' \
-    'PASS 307 sendmmsg' \
-    'PASS 309 getcpu' \
-    'PASS 314 sched_setattr' \
-    'PASS 315 sched_getattr' \
-    'PASS 436 close_range' \
-    'UNVERIFIED 43 accept' \
-    'POLICY-DENIED 105 setuid' \
-    'UNVERIFIED 462 mseal' \
-    'Summary: 82 passed, 245 unverified, 48 policy-denied, 0 unsupported, 375 total' \
-    'PASS requires a runtime conformance probe; dispatch alone remains UNVERIFIED.' \
-    'FAIL unknown Linux syscall' \
+    'Linux userspace conformance results:' \
+    'NAME/IDENTIFIER' \
+    'Summary: 99 pass, 250 fail, 49 policy-exempt, 398 total' \
+    'PASS = verified; FAIL = incomplete or unsupported; POLICY-EXEMPT = deliberately denied.' \
     'network list' \
     'List network devices and their state' \
     'network new NAME type=virtual [uplink=DEVICE]' \
@@ -280,6 +212,31 @@ for expected in \
     if ! grep -Fq -- "$expected" "$output_file"; then
         cat "$output_file"
         echo "Controller console test failed: missing '$expected'." >&2
+        exit 1
+    fi
+done
+
+for expected_regex in \
+    '^syscall-entry +interface +0 +PASS' \
+    '^sysfs +interface +16 +FAIL' \
+    '^linux-module-userspace-api +interface +22 +POLICY-EXEMPT' \
+    '^read +syscall +0 +FAIL' \
+    '^sched_yield +syscall +24 +PASS' \
+    '^accept +syscall +43 +FAIL' \
+    '^setuid +syscall +105 +POLICY-EXEMPT' \
+    '^mseal +syscall +462 +FAIL' \
+    '^9999 +syscall +- +FAIL'; do
+    if ! grep -Eq "$expected_regex" "$output_file"; then
+        cat "$output_file"
+        echo "Controller console test failed: missing Linux ABI row matching '$expected_regex'." >&2
+        exit 1
+    fi
+done
+
+for rejected in UNVERIFIED POLICY-DENIED UNSUPPORTED; do
+    if grep -Fq "$rejected" "$output_file"; then
+        cat "$output_file"
+        echo "Controller console test failed: ambiguous Linux ABI result '$rejected' was emitted." >&2
         exit 1
     fi
 done

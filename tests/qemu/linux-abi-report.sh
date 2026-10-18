@@ -72,81 +72,12 @@ qemu_pid=""
 
 for expected in \
     'Linux userspace runtime conformance summary:' \
-    'Interfaces: 17 passed, 6 failed, 23 total' \
-    'Syscalls: 82 passed, 245 unverified, 48 policy-denied, 0 unsupported, 375 total' \
-    'Linux userspace interface runtime tests (bounded profile):' \
-    'PASS syscall-entry' \
-    'PASS socket-api' \
-    'FAIL linux-module-userspace-api' \
-    'UNVERIFIED 0 read' \
-    'PASS 24 sched_yield' \
-    'UNVERIFIED 34 pause' \
-    'UNVERIFIED 37 alarm' \
-    'UNVERIFIED 40 sendfile' \
-    'PASS 39 getpid' \
-    'PASS 41 socket' \
-    'PASS 44 sendto' \
-    'PASS 52 getpeername' \
-    'PASS 53 socketpair' \
-    'PASS 55 getsockopt' \
-    'PASS 63 uname' \
-    'PASS 74 fsync' \
-    'PASS 75 fdatasync' \
-    'PASS 95 umask' \
-    'PASS 96 gettimeofday' \
-    'PASS 115 getgroups' \
-    'PASS 118 getresuid' \
-    'PASS 120 getresgid' \
-    'PASS 111 getpgrp' \
-    'PASS 121 getpgid' \
-    'PASS 124 getsid' \
-    'PASS 143 sched_getparam' \
-    'PASS 142 sched_setparam' \
-    'PASS 144 sched_setscheduler' \
-    'PASS 145 sched_getscheduler' \
-    'PASS 146 sched_get_priority_max' \
-    'PASS 147 sched_get_priority_min' \
-    'PASS 162 sync' \
-    'PASS 201 time' \
-    'PASS 203 sched_setaffinity' \
-    'PASS 204 sched_getaffinity' \
-    'PASS 218 set_tid_address' \
-    'PASS 274 get_robust_list' \
-    'PASS 277 sync_file_range' \
-    'PASS 299 recvmmsg' \
-    'PASS 306 syncfs' \
-    'PASS 307 sendmmsg' \
-    'PASS 309 getcpu' \
-    'PASS 314 sched_setattr' \
-    'PASS 315 sched_getattr' \
-    'PASS 436 close_range' \
-    'UNVERIFIED 43 accept' \
-    'UNVERIFIED 78 getdents' \
-    'PASS 49 bind' \
-    'PASS 50 listen' \
-    'UNVERIFIED 109 setpgid' \
-    'UNVERIFIED 112 setsid' \
-    'UNVERIFIED 130 rt_sigsuspend' \
-    'PASS 219 restart_syscall' \
-    'UNVERIFIED 247 waitid' \
-    'UNVERIFIED 285 fallocate' \
-    'UNVERIFIED 288 accept4' \
-    'UNVERIFIED 326 copy_file_range' \
-    'UNVERIFIED 437 openat2' \
-    'PASS 134 uselib' \
-    'PASS 136 ustat' \
-    'PASS 139 sysfs' \
-    'PASS 156 _sysctl' \
-    'PASS 174 create_module' \
-    'PASS 212 lookup_dcookie' \
-    'PASS 236 vserver' \
-    'POLICY-DENIED 105 setuid' \
-    'POLICY-DENIED 101 ptrace' \
-    'POLICY-DENIED 164 settimeofday' \
-    'POLICY-DENIED 305 clock_adjtime' \
-    'UNVERIFIED 462 mseal' \
-    'Summary: 82 passed, 245 unverified, 48 policy-denied, 0 unsupported, 375 total' \
-    'FAIL unknown Linux syscall' \
+    'Interfaces: 17 pass, 5 fail, 1 policy-exempt, 23 total' \
+    'Syscalls: 82 pass, 245 fail, 48 policy-exempt, 375 total' \
+    'Linux userspace conformance results:' \
+    'NAME/IDENTIFIER' \
+    'Summary: 99 pass, 250 fail, 49 policy-exempt, 398 total' \
+    'PASS = verified; FAIL = incomplete or unsupported; POLICY-EXEMPT = deliberately denied.' \
     '1      0      R      controller' \
     'Shutting down Ginux.'; do
     if ! grep -Fq "$expected" "$output_file"; then
@@ -156,7 +87,48 @@ for expected in \
     fi
 done
 
-for rejected in GINUX_KERNEL_PANIC 'controller failed; restarting control plane'; do
+for expected_regex in \
+    '^syscall-entry +interface +0 +PASS' \
+    '^sysfs +interface +16 +FAIL' \
+    '^linux-module-userspace-api +interface +22 +POLICY-EXEMPT' \
+    '^read +syscall +0 +FAIL' \
+    '^sched_yield +syscall +24 +PASS' \
+    '^accept +syscall +43 +FAIL' \
+    '^setuid +syscall +105 +POLICY-EXEMPT' \
+    '^mseal +syscall +462 +FAIL' \
+    '^9999 +syscall +- +FAIL'; do
+    if ! grep -Eq "$expected_regex" "$output_file"; then
+        cat "$output_file"
+        echo "Linux ABI report test failed: missing row matching: $expected_regex" >&2
+        exit 1
+    fi
+done
+
+read -r report_rows interface_rows syscall_rows pass_rows fail_rows exempt_rows < <(
+    awk '
+        /Linux userspace conformance results:/ { in_report = 1; next }
+        in_report && /^Summary:/ { exit }
+        in_report && ($2 == "interface" || $2 == "syscall") {
+            gsub(/\r/, "", $4)
+            total++
+            types[$2]++
+            results[$4]++
+        }
+        END {
+            print total + 0, types["interface"] + 0, types["syscall"] + 0,
+                results["PASS"] + 0, results["FAIL"] + 0,
+                results["POLICY-EXEMPT"] + 0
+        }
+    ' "$output_file"
+)
+if [[ "$report_rows $interface_rows $syscall_rows $pass_rows $fail_rows $exempt_rows" != \
+    '398 23 375 99 250 49' ]]; then
+    cat "$output_file"
+    echo "Linux ABI report test failed: incomplete or inconsistent result table." >&2
+    exit 1
+fi
+
+for rejected in GINUX_KERNEL_PANIC 'controller failed; restarting control plane' UNVERIFIED POLICY-DENIED UNSUPPORTED; do
     if grep -Fq "$rejected" "$output_file"; then
         cat "$output_file"
         echo "Linux ABI report test failed: observed: $rejected" >&2
