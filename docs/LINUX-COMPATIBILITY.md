@@ -99,8 +99,8 @@ scheduler waits, wakes them on descriptor changes, expires positive deadlines
 from the APIC timer, writes `select` remaining time, and atomically restores a
 temporary `pselect6` mask on every completion and interruption path. Their
 current descriptor sets stop at 64 entries, blocking still requires another
-runnable thread, and interrupted `select` does not yet write remaining time, so
-both calls remain Partial.
+runnable thread, and they do not yet support multiword descriptor sets, so both
+calls remain Partial.
 
 `clock_gettime` and `clock_getres` accept every Linux static clock ID that is
 readable without changing system time: realtime, monotonic, process/thread CPU,

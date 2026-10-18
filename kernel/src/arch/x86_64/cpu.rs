@@ -31719,7 +31719,7 @@ fn linux_deliver_signal_to_blocked_wait(
     if !context.user_context().is_valid() || !handler_context.is_valid() {
         return LINUX_EINVAL;
     }
-    let sleep_remaining = if wait_kind == LINUX_THREAD_WAIT_SLEEP {
+    let timeout_remaining = if wait_kind == LINUX_THREAD_WAIT_SLEEP {
         let address = LINUX_THREAD_WAIT_OUTPUTS[slot].load(Ordering::SeqCst);
         if address == 0 {
             None
@@ -31736,6 +31736,30 @@ fn linux_deliver_signal_to_blocked_wait(
             linux_store_timespec(&mut remaining, deadline.saturating_sub(now));
             Some((address, replaced, remaining))
         }
+    } else if wait_kind == LINUX_THREAD_WAIT_SELECT {
+        let descriptor_count = LINUX_THREAD_WAIT_OUTPUTS[slot].load(Ordering::SeqCst);
+        let snapshot = load_linux_select_snapshot(slot, descriptor_count);
+        let address = snapshot.input.timeout_address;
+        if address == 0 {
+            None
+        } else {
+            let Some(now) = linux_elapsed_nanoseconds() else {
+                return LINUX_ENOSYS;
+            };
+            let deadline = LINUX_THREAD_WAIT_DEADLINES[slot].load(Ordering::SeqCst);
+            let mut replaced = [0_u8; 16];
+            if deadline == 0 || !copy_from_linux_user(address, &mut replaced) {
+                return LINUX_EFAULT;
+            }
+            let remaining_nanoseconds = deadline.saturating_sub(now);
+            let mut remaining = [0_u8; 16];
+            remaining[..8]
+                .copy_from_slice(&(remaining_nanoseconds / NANOSECONDS_PER_SECOND).to_ne_bytes());
+            remaining[8..].copy_from_slice(
+                &(remaining_nanoseconds % NANOSECONDS_PER_SECOND / 1_000).to_ne_bytes(),
+            );
+            Some((address, replaced, remaining))
+        }
     } else {
         None
     };
@@ -31743,21 +31767,21 @@ fn linux_deliver_signal_to_blocked_wait(
     if !copy_from_linux_user(signal_stack, &mut replaced) {
         return LINUX_EFAULT;
     }
-    if let Some((address, _, remaining)) = &sleep_remaining {
+    if let Some((address, _, remaining)) = &timeout_remaining {
         if !copy_to_linux_user(*address, remaining) {
             return LINUX_EFAULT;
         }
     }
     if !copy_linux_signal_frame(signal_stack, &signal_frame) {
         let _ = copy_to_linux_user(signal_stack, &replaced);
-        if let Some((address, original, _)) = &sleep_remaining {
+        if let Some((address, original, _)) = &timeout_remaining {
             let _ = copy_to_linux_user(*address, original);
         }
         return LINUX_EFAULT;
     }
     if !save_linux_thread_return_context(sender, sender_return) {
         let _ = copy_to_linux_user(signal_stack, &replaced);
-        if let Some((address, original, _)) = &sleep_remaining {
+        if let Some((address, original, _)) = &timeout_remaining {
             let _ = copy_to_linux_user(*address, original);
         }
         return LINUX_EINVAL;
@@ -31765,7 +31789,7 @@ fn linux_deliver_signal_to_blocked_wait(
     if !save_linux_thread_return_context(target, interrupted) {
         restore_linux_thread_return_context(sender, saved_sender);
         let _ = copy_to_linux_user(signal_stack, &replaced);
-        if let Some((address, original, _)) = &sleep_remaining {
+        if let Some((address, original, _)) = &timeout_remaining {
             let _ = copy_to_linux_user(*address, original);
         }
         return LINUX_EINVAL;
@@ -31774,7 +31798,7 @@ fn linux_deliver_signal_to_blocked_wait(
         let _ = save_linux_thread_return_context(target, saved_interrupted);
         restore_linux_thread_return_context(sender, saved_sender);
         let _ = copy_to_linux_user(signal_stack, &replaced);
-        if let Some((address, original, _)) = &sleep_remaining {
+        if let Some((address, original, _)) = &timeout_remaining {
             let _ = copy_to_linux_user(*address, original);
         }
         return LINUX_EINVAL;
@@ -31789,7 +31813,7 @@ fn linux_deliver_signal_to_blocked_wait(
         let _ = install_linux_tls_context(sender_tls);
         let _ = write_linux_live_return(output, sender_return);
         let _ = copy_to_linux_user(signal_stack, &replaced);
-        if let Some((address, original, _)) = &sleep_remaining {
+        if let Some((address, original, _)) = &timeout_remaining {
             let _ = copy_to_linux_user(*address, original);
         }
         return LINUX_EINVAL;
