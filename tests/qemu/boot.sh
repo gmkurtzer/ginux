@@ -3312,6 +3312,10 @@ if ! grep -q '^ginux: Linux nonblocking pidfd wait validated' "$output_file"; th
     echo "Boot test failed: Linux nonblocking pidfd wait was not validated." >&2
     exit 1
 fi
+if ! grep -q '^ginux: Linux process-group wait selectors validated' "$output_file"; then
+    echo "Boot test failed: Linux process-group wait selectors were not validated." >&2
+    exit 1
+fi
 if ! grep -q '^ginux: Linux generation-bound pidfds validated' "$output_file"; then
     echo "Boot test failed: Linux generation-bound pidfd lifecycle was not validated." >&2
     exit 1

@@ -545,6 +545,7 @@ const LINUX_WCONTINUED: u64 = 8;
 const LINUX_WNOWAIT: u64 = 0x0100_0000;
 const LINUX_P_ALL: u64 = 0;
 const LINUX_P_PID: u64 = 1;
+const LINUX_P_PGID: u64 = 2;
 const LINUX_P_PIDFD: u64 = 3;
 const LINUX_CLD_EXITED: i32 = 1;
 const LINUX_RUSAGE_SIZE: usize = 144;
@@ -3677,7 +3678,7 @@ fn execute_deferred_live_fork() -> bool {
     if cfg!(feature = "verification-boot")
         && !LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
         && !LINUX_CROSS_PROCESS_PRLIMIT_VALIDATED.load(Ordering::SeqCst)
-        && !verify_linux_running_child_pidfd(child.pid)
+        && !verify_linux_running_child_wait_selectors(child.pid)
     {
         return false;
     }
@@ -10305,11 +10306,35 @@ fn current_linux_credentials() -> Option<linux_user::Credentials> {
     linux_user::credentials(current_linux_user_namespace()?)
 }
 
+#[derive(Clone, Copy)]
+enum LinuxChildWaitSelector {
+    Any,
+    Process(u32),
+    ProcessGroup(u32),
+}
+
+fn linux_child_wait_state(
+    parent: u32,
+    selector: LinuxChildWaitSelector,
+) -> Option<linux_process::ChildWaitState> {
+    match selector {
+        LinuxChildWaitSelector::Any => linux_process::live_child_wait_state(parent, None),
+        LinuxChildWaitSelector::Process(pid) => {
+            linux_process::live_child_wait_state(parent, Some(pid))
+        }
+        LinuxChildWaitSelector::ProcessGroup(group) => {
+            linux_process::live_child_group_wait_state(parent, group)
+        }
+    }
+}
+
 fn linux_wait4(pid: u64, status_address: u64, options: u64, rusage: u64) -> u64 {
     let parent_pid = current_linux_process_pid();
     if current_linux_tid() != Some(parent_pid) {
         return LINUX_ECHILD;
     }
+    let pid = pid as u32 as i32;
+    let options = u64::from(options as u32);
     if options & !(LINUX_WNOHANG | LINUX_WUNTRACED | LINUX_WCONTINUED) != 0 {
         return LINUX_EINVAL;
     }
@@ -10320,15 +10345,19 @@ fn linux_wait4(pid: u64, status_address: u64, options: u64, rusage: u64) -> u64 
     if rusage != 0 && !linux_writable_user_range_contains(rusage, LINUX_RUSAGE_SIZE) {
         return LINUX_EFAULT;
     }
-    let selector = if pid as u32 == u32::MAX {
-        None
-    } else {
-        let Ok(pid) = u32::try_from(pid) else {
-            return LINUX_ECHILD;
-        };
-        Some(pid)
+    let selector = match pid {
+        -1 => LinuxChildWaitSelector::Any,
+        0 => {
+            let Some(group) = linux_process::live_process_group(parent_pid) else {
+                return LINUX_ECHILD;
+            };
+            LinuxChildWaitSelector::ProcessGroup(group)
+        }
+        1..=i32::MAX => LinuxChildWaitSelector::Process(pid as u32),
+        i32::MIN => return LINUX_ESRCH,
+        _ => LinuxChildWaitSelector::ProcessGroup(pid.unsigned_abs()),
     };
-    let Some(state) = linux_process::live_child_wait_state(parent_pid, selector) else {
+    let Some(state) = linux_child_wait_state(parent_pid, selector) else {
         return LINUX_ECHILD;
     };
     let linux_process::ChildWaitState::Exited {
@@ -10370,10 +10399,25 @@ fn linux_waitid(id_type: u64, id: u64, information: u64, options: u64, rusage: u
     {
         return LINUX_EINVAL;
     }
-    let (child, nonblocking_pidfd) = match id_type {
-        LINUX_P_ALL => (None, false),
-        LINUX_P_PID if (1..=i32::MAX as u64).contains(&id) => (Some(id as u32), false),
+    let (selector, nonblocking_pidfd) = match id_type {
+        LINUX_P_ALL => (LinuxChildWaitSelector::Any, false),
+        LINUX_P_PID if (1..=i32::MAX as u64).contains(&id) => {
+            (LinuxChildWaitSelector::Process(id as u32), false)
+        }
         LINUX_P_PID => return LINUX_EINVAL,
+        LINUX_P_PGID if id <= i32::MAX as u64 => {
+            let group = if id == 0 {
+                let Some(group) = linux_process::live_process_group(current_linux_process_pid())
+                else {
+                    return LINUX_ECHILD;
+                };
+                group
+            } else {
+                id as u32
+            };
+            (LinuxChildWaitSelector::ProcessGroup(group), false)
+        }
+        LINUX_P_PGID => return LINUX_EINVAL,
         LINUX_P_PIDFD if id <= i32::MAX as u64 => {
             if !linux_pidfd_descriptor(id) {
                 return LINUX_EBADF;
@@ -10382,7 +10426,7 @@ fn linux_waitid(id_type: u64, id: u64, information: u64, options: u64, rusage: u
                 return LINUX_ECHILD;
             };
             (
-                Some(process),
+                LinuxChildWaitSelector::Process(process),
                 linux_socket_flags(id).is_some_and(|flags| flags & LINUX_O_NONBLOCK as u32 != 0),
             )
         }
@@ -10397,7 +10441,7 @@ fn linux_waitid(id_type: u64, id: u64, information: u64, options: u64, rusage: u
         return LINUX_EFAULT;
     }
     let parent = current_linux_process_pid();
-    let Some(state) = linux_process::live_child_wait_state(parent, child) else {
+    let Some(state) = linux_child_wait_state(parent, selector) else {
         return LINUX_ECHILD;
     };
     let linux_process::ChildWaitState::Exited { pid, status } = state else {
@@ -31462,6 +31506,17 @@ fn verify_linux_cross_process_prlimit(pid: u32) -> bool {
                 pid,
                 status: LINUX_PROBE_EXIT_STATUS as u8,
             });
+    let parent_group = linux_process::live_process_group(current_linux_process_pid());
+    let group_wait = parent_group.is_some_and(|group| {
+        linux_waitid(
+            (1_u64 << 32) | LINUX_P_PGID,
+            (1_u64 << 32) | u64::from(group),
+            0,
+            (1_u64 << 32) | LINUX_WEXITED | LINUX_WNOWAIT,
+            0,
+        ) == 0
+            && linux_waitid(LINUX_P_PGID, 0, 0, LINUX_WEXITED | LINUX_WNOWAIT, 0) == 0
+    });
     let pidfd_getfd = pidfd_opened && linux_pidfd_getfd(pidfd, 1, 0) == LINUX_EPERM;
     let pidfd_closed = !pidfd_opened || linux_descriptor_close(pidfd) == 0;
     let pidfd_valid = pidfd_opened
@@ -31469,6 +31524,7 @@ fn verify_linux_cross_process_prlimit(pid: u32) -> bool {
         && pidfd_ready
         && pidfd_signal
         && pidfd_wait
+        && group_wait
         && pidfd_getfd
         && pidfd_closed;
     let valid = changed && restored && errors && widths && pidfd_valid;
@@ -31488,6 +31544,7 @@ fn verify_linux_cross_process_prlimit(pid: u32) -> bool {
             pidfd_ready,
             pidfd_signal,
             pidfd_wait,
+            group_wait,
             pidfd_getfd,
             pidfd_closed,
         ] {
@@ -31499,7 +31556,31 @@ fn verify_linux_cross_process_prlimit(pid: u32) -> bool {
     valid
 }
 
-fn verify_linux_running_child_pidfd(pid: u32) -> bool {
+fn verify_linux_running_child_wait_selectors(pid: u32) -> bool {
+    let parent = current_linux_process_pid();
+    let Some(parent_group) = linux_process::live_process_group(parent) else {
+        return false;
+    };
+    let isolated = linux_process::set_live_process_group(parent, pid, pid) == Ok(());
+    let negative_group = u64::from((-(pid as i32)) as u32);
+    let group_wait = isolated
+        && linux_waitid(
+            (1_u64 << 32) | LINUX_P_PGID,
+            (1_u64 << 32) | u64::from(pid),
+            0,
+            (1_u64 << 32) | LINUX_WEXITED | LINUX_WNOHANG,
+            0,
+        ) == 0
+        && linux_wait4(
+            (1_u64 << 32) | negative_group,
+            0,
+            (1_u64 << 32) | LINUX_WNOHANG,
+            0,
+        ) == 0
+        && linux_waitid(LINUX_P_PGID, 0, 0, LINUX_WEXITED | LINUX_WNOHANG, 0) == LINUX_ECHILD
+        && linux_wait4(0, 0, LINUX_WNOHANG, 0) == LINUX_ECHILD;
+    let group_restored =
+        isolated && linux_process::set_live_process_group(parent, pid, parent_group) == Ok(());
     let child_pidfd = linux_pidfd_open(u64::from(pid), LINUX_O_NONBLOCK);
     let child_opened = child_pidfd < LINUX_AUX_DESCRIPTOR_LIMIT;
     let running = child_opened
@@ -31517,7 +31598,7 @@ fn verify_linux_running_child_pidfd(pid: u32) -> bool {
             LINUX_WEXITED | LINUX_WNOHANG,
             0,
         ) == 0;
-    let parent_pidfd = linux_pidfd_open(u64::from(current_linux_process_pid()), 0);
+    let parent_pidfd = linux_pidfd_open(u64::from(parent), 0);
     let parent_opened = parent_pidfd < LINUX_AUX_DESCRIPTOR_LIMIT;
     let errors = parent_opened
         && linux_waitid(LINUX_P_PIDFD, parent_pidfd, 0, LINUX_WEXITED, 0) == LINUX_ECHILD
@@ -31525,8 +31606,16 @@ fn verify_linux_running_child_pidfd(pid: u32) -> bool {
         && linux_waitid(LINUX_P_PIDFD, u64::from(u32::MAX), 0, LINUX_WEXITED, 0) == LINUX_EBADF;
     let parent_closed = !parent_opened || linux_descriptor_close(parent_pidfd) == 0;
     let child_closed = !child_opened || linux_descriptor_close(child_pidfd) == 0;
-    let valid = child_opened && running && parent_opened && errors && parent_closed && child_closed;
+    let valid = group_wait
+        && group_restored
+        && child_opened
+        && running
+        && parent_opened
+        && errors
+        && parent_closed
+        && child_closed;
     if valid {
+        serial_write("ginux: Linux process-group wait selectors validated\r\n");
         serial_write("ginux: Linux nonblocking pidfd wait validated\r\n");
     }
     valid

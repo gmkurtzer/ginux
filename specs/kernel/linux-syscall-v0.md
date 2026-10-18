@@ -1879,23 +1879,28 @@ selected through the native scheduler and resumes the real post-syscall RIP
 under its private CR3 with `RAX = 0`; PID 1 later resumes with the child PID.
 The bounded child observes process identity 2 and parent identity 1, then
 `exit(42)` records its eight-bit status and returns to the kernel before its
-active address space is released. `wait4` accepts only the exact positive child
-PID, zero options, and a null rusage pointer. It validates a non-null four-byte
-status output before reaping, writes `42 << 8`, and returns PID 2. Invalid
-options return `-EINVAL`, an invalid status pointer returns `-EFAULT`, and a
+active address space is released. `wait4` accepts an exact positive child PID,
+`-1` for any child, zero for the caller's process group, and values below `-1`
+for an exact child process group. It accepts `WNOHANG`, `WUNTRACED`, and
+`WCONTINUED`; only running and exited states currently exist. It validates a
+non-null four-byte status output before reaping, writes `42 << 8`, returns the
+selected PID, and zeroes optional rusage. Invalid options return `-EINVAL`, an
+invalid status pointer returns `-EFAULT`, `INT_MIN` returns `-ESRCH`, and a
 missing or already reaped child returns `-ECHILD`. `waitid` admits `P_ALL`,
-positive `P_PID`, and a generation-bound child `P_PIDFD` with `WEXITED`,
-optionally combined with `WNOHANG` and `WNOWAIT`. Its selector, identifier,
-and option words follow Linux's 32-bit UAPI conversion. It produces a fully
+positive `P_PID`, zero or positive `P_PGID`, and a generation-bound child
+`P_PIDFD` with `WEXITED`, optionally combined with `WNOHANG` and `WNOWAIT`.
+Its selector, identifier, and option words follow Linux's 32-bit UAPI
+conversion. It produces a fully
 initialized `SIGCHLD`/`CLD_EXITED` `siginfo_t`, including the child's real UID,
 supports repeatable non-consuming observation, zeroes the result for a running
 child under `WNOHANG`, and validates optional zeroed rusage before consuming a
 zombie. Waiting without `WNOHANG` on a running child through a nonblocking
 pidfd returns `-EAGAIN`; a non-child pidfd returns `-ECHILD`, and a non-pidfd
-descriptor returns `-EBADF`. Blocking on a running child through a blocking
-selector, process-group selectors, stopped/continued states, nonzero
-accounting, general process-style `clone`, and concurrent parent/child
-execution remain unsupported.
+descriptor returns `-EBADF`. Matching process-group selection is verified for
+both running and exited children, including the zero/current-group forms.
+Blocking on a running child through a blocking selector, stopped/continued
+states, nonzero accounting, general process-style `clone`, and concurrent
+parent/child execution remain unsupported.
 Immediately before entry, the kernel:
 
 - saves `EFER`, `STAR`, `LSTAR`, and `FMASK`;

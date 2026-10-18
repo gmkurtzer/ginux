@@ -912,6 +912,24 @@ impl ProcessTable {
     }
 
     fn child_wait_state(&self, parent: ProcessHandle, pid: Option<u32>) -> Option<ChildWaitState> {
+        self.child_wait_state_matching(parent, |process| {
+            pid.is_none_or(|pid| process.handle.pid == pid)
+        })
+    }
+
+    fn child_group_wait_state(
+        &self,
+        parent: ProcessHandle,
+        process_group: u32,
+    ) -> Option<ChildWaitState> {
+        self.child_wait_state_matching(parent, |process| process.process_group == process_group)
+    }
+
+    fn child_wait_state_matching(
+        &self,
+        parent: ProcessHandle,
+        matches: impl Fn(&Process) -> bool,
+    ) -> Option<ChildWaitState> {
         if self.process(parent)?.state != ProcessState::Running {
             return None;
         }
@@ -919,15 +937,11 @@ impl ProcessTable {
             .processes
             .iter()
             .flatten()
-            .filter(|process| process.parent == Some(parent));
-        let child = if let Some(pid) = pid {
-            children.find(|process| process.handle.pid == pid)
-        } else {
-            children
-                .clone()
-                .find(|process| matches!(process.state, ProcessState::Zombie { .. }))
-                .or_else(|| children.next())
-        }?;
+            .filter(|process| process.parent == Some(parent) && matches(process));
+        let child = children
+            .clone()
+            .find(|process| matches!(process.state, ProcessState::Zombie { .. }))
+            .or_else(|| children.next())?;
         match child.state {
             ProcessState::Running | ProcessState::Preparing | ProcessState::Exiting => {
                 Some(ChildWaitState::Running)
@@ -1453,6 +1467,8 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
         || table.child_wait_state(init, Some(first_child.pid)) != Some(ChildWaitState::Running)
         || table.set_process_group(init.pid, first_child.pid, first_child.pid) != Ok(())
         || table.process_group(first_child.pid) != Some((3, 1))
+        || table.child_group_wait_state(init, first_child.pid) != Some(ChildWaitState::Running)
+        || table.child_group_wait_state(init, init.pid).is_some()
         || table.set_process_group(init.pid, first_child.pid, init.pid) != Ok(())
         || !table.mark_executed(first_child.pid)
         || table.set_process_group(init.pid, first_child.pid, first_child.pid)
@@ -1560,6 +1576,11 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
         })
         || !table.exit(first_child, child_exit_status)
         || table.child_wait_state(init, Some(first_child.pid))
+            != Some(ChildWaitState::Exited {
+                pid: first_child.pid,
+                status: child_exit_status,
+            })
+        || table.child_group_wait_state(init, first_child.pid)
             != Some(ChildWaitState::Exited {
                 pid: first_child.pid,
                 status: child_exit_status,
@@ -2335,6 +2356,15 @@ pub(crate) fn live_child_wait_state(
     let table = live_process_table_mut()?;
     let parent = table.handle_by_pid(parent_pid)?;
     table.child_wait_state(parent, child_pid)
+}
+
+pub(crate) fn live_child_group_wait_state(
+    parent_pid: u32,
+    process_group: u32,
+) -> Option<ChildWaitState> {
+    let table = live_process_table_mut()?;
+    let parent = table.handle_by_pid(parent_pid)?;
+    table.child_group_wait_state(parent, process_group)
 }
 
 #[inline(never)]
