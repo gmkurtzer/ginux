@@ -2711,6 +2711,11 @@ if ! grep -q '^ginux: Linux resource-limit queries validated' "$output_file"; th
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux process identity validated' "$output_file"; then
+    echo "Boot test failed: controller Linux identity syscalls were not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux runtime pipe accounting validated' "$output_file"; then
     echo "Boot test failed: runtime pipe FIONREAD accounting was not validated." >&2
     exit 1

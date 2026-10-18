@@ -8719,19 +8719,7 @@ extern "sysv64" fn linux_syscall_handler(
         }
         LINUX_ARCH_PRCTL_SYSCALL => LINUX_EINVAL,
         LINUX_MODIFY_LDT_SYSCALL => linux_modify_ldt(first_argument, buffer, count),
-        LINUX_UNAME_SYSCALL => {
-            let mut name = [0_u8; LINUX_UTSNAME_SIZE];
-            name[..6].copy_from_slice(b"Linux\0");
-            name[65..71].copy_from_slice(b"ginux\0");
-            name[130..147].copy_from_slice(b"6.12.0-ginux.0.1\0");
-            name[195..198].copy_from_slice(b"#1\0");
-            name[260..267].copy_from_slice(b"x86_64\0");
-            name[325..337].copy_from_slice(b"localdomain\0");
-            if !copy_to_linux_user(first_argument, &name) {
-                return LINUX_EFAULT;
-            }
-            0
-        }
+        LINUX_UNAME_SYSCALL => linux_uname_with_copy(first_argument, copy_to_linux_user),
         LINUX_STATFS_SYSCALL => linux_statfs(first_argument, buffer),
         LINUX_FSTATFS_SYSCALL => linux_fstatfs(first_argument, buffer),
         LINUX_SYSFS_SYSCALL => linux_sysfs(first_argument, buffer, count),
@@ -9348,6 +9336,23 @@ fn linux_controller_syscall(
         LINUX_DUP_SYSCALL => Some(linux_device_dup_at_least(first, 6, false)),
         LINUX_FCNTL_SYSCALL => Some(linux_descriptor_fcntl(first, second, third)),
         LINUX_CLOSE_SYSCALL => Some(linux_descriptor_close(first)),
+        LINUX_SCHED_YIELD_SYSCALL => Some(0),
+        LINUX_GETPID_SYSCALL | LINUX_GETTID_SYSCALL | LINUX_GETPGRP_SYSCALL => Some(1),
+        LINUX_GETPPID_SYSCALL => Some(0),
+        LINUX_GETUID_SYSCALL
+        | LINUX_GETGID_SYSCALL
+        | LINUX_GETEUID_SYSCALL
+        | LINUX_GETEGID_SYSCALL => Some(0),
+        LINUX_GETPGID_SYSCALL | LINUX_GETSID_SYSCALL => Some(if matches!(first, 0 | 1) {
+            1
+        } else {
+            LINUX_ESRCH
+        }),
+        LINUX_GETGROUPS_SYSCALL => Some(linux_controller_getgroups(first, second)),
+        LINUX_UNAME_SYSCALL => Some(linux_uname_with_copy(
+            first,
+            address_space::copy_to_current_user,
+        )),
         LINUX_GETRLIMIT_SYSCALL => Some(linux_getrlimit(
             first,
             second,
@@ -9412,6 +9417,19 @@ fn linux_socket_pipe_descriptor(descriptor: u64, access: u16) -> bool {
         && device & (LINUX_DEVICE_SOCKET | LINUX_DEVICE_PIPE)
             == LINUX_DEVICE_SOCKET | LINUX_DEVICE_PIPE
         && device & 3 == access
+}
+
+fn linux_controller_getgroups(size: u64, output: u64) -> u64 {
+    if (size as i32) < 0 {
+        return LINUX_EINVAL;
+    }
+    if size == 0 {
+        return 1;
+    }
+    if !address_space::copy_to_current_user(output, &0_u32.to_ne_bytes()) {
+        return LINUX_EFAULT;
+    }
+    1
 }
 
 fn linux_controller_pipe_read(descriptor: u64, address: u64, count: u64) -> u64 {
@@ -10439,6 +10457,21 @@ fn linux_time(output_address: u64) -> u64 {
         return LINUX_EFAULT;
     }
     seconds
+}
+
+fn linux_uname_with_copy(address: u64, copy: impl FnOnce(u64, &[u8]) -> bool) -> u64 {
+    let mut name = [0_u8; LINUX_UTSNAME_SIZE];
+    name[..6].copy_from_slice(b"Linux\0");
+    name[65..71].copy_from_slice(b"ginux\0");
+    name[130..147].copy_from_slice(b"6.12.0-ginux.0.1\0");
+    name[195..198].copy_from_slice(b"#1\0");
+    name[260..267].copy_from_slice(b"x86_64\0");
+    name[325..337].copy_from_slice(b"localdomain\0");
+    if copy(address, &name) {
+        0
+    } else {
+        LINUX_EFAULT
+    }
 }
 
 fn linux_elapsed_time() -> Option<(u64, u64)> {

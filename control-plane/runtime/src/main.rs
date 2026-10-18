@@ -51,11 +51,24 @@ const LINUX_READ_SYSCALL: u64 = 0;
 const LINUX_WRITE_SYSCALL: u64 = 1;
 const LINUX_CLOSE_SYSCALL: u64 = 3;
 const LINUX_IOCTL_SYSCALL: u64 = 16;
+const LINUX_SCHED_YIELD_SYSCALL: u64 = 24;
 const LINUX_DUP_SYSCALL: u64 = 32;
+const LINUX_GETPID_SYSCALL: u64 = 39;
 const LINUX_EXIT_SYSCALL: u64 = 60;
+const LINUX_UNAME_SYSCALL: u64 = 63;
 const LINUX_FCNTL_SYSCALL: u64 = 72;
 const LINUX_GETRLIMIT_SYSCALL: u64 = 97;
 const LINUX_SYSINFO_SYSCALL: u64 = 99;
+const LINUX_GETUID_SYSCALL: u64 = 102;
+const LINUX_GETGID_SYSCALL: u64 = 104;
+const LINUX_GETEUID_SYSCALL: u64 = 107;
+const LINUX_GETEGID_SYSCALL: u64 = 108;
+const LINUX_GETPPID_SYSCALL: u64 = 110;
+const LINUX_GETPGRP_SYSCALL: u64 = 111;
+const LINUX_GETGROUPS_SYSCALL: u64 = 115;
+const LINUX_GETPGID_SYSCALL: u64 = 121;
+const LINUX_GETSID_SYSCALL: u64 = 124;
+const LINUX_GETTID_SYSCALL: u64 = 186;
 const LINUX_GETRANDOM_SYSCALL: u64 = 318;
 const LINUX_PIPE2_SYSCALL: u64 = 293;
 const LINUX_FIONREAD: u64 = 0x541b;
@@ -66,6 +79,7 @@ const LINUX_EBADF: u64 = u64::MAX - 8;
 const LINUX_EAGAIN: u64 = u64::MAX - 10;
 const LINUX_EFAULT: u64 = u64::MAX - 13;
 const LINUX_EINVAL: u64 = u64::MAX - 21;
+const LINUX_ESRCH: u64 = u64::MAX - 2;
 static CONTROLLER_IDENTITY: &[u8] = b"GINUX_CONTROLLER_V0";
 const COMMAND_STATUS: u16 = 1;
 const COMMAND_COMPONENTS: u16 = 2;
@@ -407,6 +421,10 @@ extern "C" fn ginux_controller_main() -> ! {
         console,
         b"ginux: Linux resource-limit queries validated\r\n",
     );
+    if !linux_identity_contract(console) {
+        exit(NATIVE_SERVICE_EXIT_REJECTED);
+    }
+    write(console, b"ginux: Linux process identity validated\r\n");
     if !linux_pipe_fionread_contract(console) {
         exit(NATIVE_SERVICE_EXIT_REJECTED);
     }
@@ -2414,6 +2432,53 @@ fn linux_pipe_fionread_contract(console: u64) -> bool {
             write_decimal(console, value);
         }
         write(console, b"\r\n");
+    }
+    valid
+}
+
+fn linux_identity_contract(console: u64) -> bool {
+    let identity = [
+        (LINUX_GETPID_SYSCALL, 1),
+        (LINUX_GETTID_SYSCALL, 1),
+        (LINUX_GETPPID_SYSCALL, 0),
+        (LINUX_GETPGRP_SYSCALL, 1),
+        (LINUX_GETUID_SYSCALL, 0),
+        (LINUX_GETGID_SYSCALL, 0),
+        (LINUX_GETEUID_SYSCALL, 0),
+        (LINUX_GETEGID_SYSCALL, 0),
+    ]
+    .into_iter()
+    .all(|(syscall, expected)| linux_syscall(syscall, 0, 0, 0) == expected);
+    let process_groups = linux_syscall(LINUX_GETPGID_SYSCALL, 0, 0, 0) == 1
+        && linux_syscall(LINUX_GETPGID_SYSCALL, 1, 0, 0) == 1
+        && linux_syscall(LINUX_GETPGID_SYSCALL, 2, 0, 0) == LINUX_ESRCH
+        && linux_syscall(LINUX_GETSID_SYSCALL, 0, 0, 0) == 1
+        && linux_syscall(LINUX_GETSID_SYSCALL, 1, 0, 0) == 1
+        && linux_syscall(LINUX_GETSID_SYSCALL, 2, 0, 0) == LINUX_ESRCH;
+    let mut group = u32::MAX;
+    let groups = linux_syscall(LINUX_GETGROUPS_SYSCALL, 0, 1, 0) == 1
+        && linux_syscall(
+            LINUX_GETGROUPS_SYSCALL,
+            1,
+            (&mut group as *mut u32) as u64,
+            0,
+        ) == 1
+        && group == 0
+        && linux_syscall(LINUX_GETGROUPS_SYSCALL, u64::MAX, 0, 0) == LINUX_EINVAL
+        && linux_syscall(LINUX_GETGROUPS_SYSCALL, 1, 1, 0) == LINUX_EFAULT;
+    let mut name = [0_u8; 390];
+    let uname = linux_syscall(LINUX_UNAME_SYSCALL, name.as_mut_ptr() as u64, 0, 0) == 0
+        && &name[..6] == b"Linux\0"
+        && &name[65..71] == b"ginux\0"
+        && &name[260..267] == b"x86_64\0"
+        && linux_syscall(LINUX_UNAME_SYSCALL, 1, 0, 0) == LINUX_EFAULT;
+    let valid = identity
+        && process_groups
+        && groups
+        && uname
+        && linux_syscall(LINUX_SCHED_YIELD_SYSCALL, 0, 0, 0) == 0;
+    if !valid {
+        write(console, b"ginux: Linux process identity failed\r\n");
     }
     valid
 }
