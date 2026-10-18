@@ -109,6 +109,7 @@ struct Slot {
     keep_alive: bool,
     receive_errors: bool,
     no_delay: bool,
+    pending_right: Option<(u8, u32)>,
     local_first: memory::FrameLease,
     local_last: memory::FrameLease,
     local_head: usize,
@@ -135,6 +136,7 @@ impl Slot {
         keep_alive: false,
         receive_errors: false,
         no_delay: false,
+        pending_right: None,
         local_first: memory::FrameLease::EMPTY,
         local_last: memory::FrameLease::EMPTY,
         local_head: 0,
@@ -315,6 +317,7 @@ pub(crate) fn open(kind: Kind) -> Result<u8, Error> {
             keep_alive: false,
             receive_errors: false,
             no_delay: false,
+            pending_right: None,
             local_first: memory::FrameLease::EMPTY,
             local_last: memory::FrameLease::EMPTY,
             local_head: 0,
@@ -354,6 +357,7 @@ pub(crate) fn open_pair() -> Result<(u8, u8), Error> {
             keep_alive: false,
             receive_errors: false,
             no_delay: false,
+            pending_right: None,
             local_first: memory::FrameLease::EMPTY,
             local_last: memory::FrameLease::EMPTY,
             local_head: 0,
@@ -378,6 +382,7 @@ pub(crate) fn open_pair() -> Result<(u8, u8), Error> {
             keep_alive: false,
             receive_errors: false,
             no_delay: false,
+            pending_right: None,
             local_first: memory::FrameLease::EMPTY,
             local_last: memory::FrameLease::EMPTY,
             local_head: 0,
@@ -408,7 +413,11 @@ pub(crate) fn close(slot: u8) -> bool {
                 runtime.sockets.remove(handle);
             }
         }
+        let pending_right = state.pending_right.take();
         *state = Slot::EMPTY;
+        if let Some((right, _)) = pending_right {
+            let _ = close(right);
+        }
         return true;
     }
     let Some(runtime) = runtime_existing() else {
@@ -660,6 +669,7 @@ pub(crate) fn accept(slot: u8) -> Result<(u8, IpEndpoint), Error> {
                 keep_alive: listener.keep_alive,
                 receive_errors: listener.receive_errors,
                 no_delay: listener.no_delay,
+                pending_right: None,
                 local_first: memory::FrameLease::EMPTY,
                 local_last: memory::FrameLease::EMPTY,
                 local_head: 0,
@@ -720,6 +730,7 @@ pub(crate) fn accept(slot: u8) -> Result<(u8, IpEndpoint), Error> {
             keep_alive: listener.keep_alive,
             receive_errors: listener.receive_errors,
             no_delay: listener.no_delay,
+            pending_right: None,
             local_first: memory::FrameLease::EMPTY,
             local_last: memory::FrameLease::EMPTY,
             local_head: 0,
@@ -1320,6 +1331,77 @@ pub(crate) fn unix_peer_connected(slot: u8) -> bool {
         unsafe { SLOTS.get(usize::from(peer)).copied() }
             .is_some_and(|peer| peer.occupied && peer.kind == Kind::Unix)
     })
+}
+
+pub(crate) fn queue_unix_right(sender: u8, right: u8, flags: u32) -> Result<(), Error> {
+    let sender_state = unsafe { SLOTS.get(usize::from(sender)).copied() }
+        .filter(|state| state.occupied && state.kind == Kind::Unix)
+        .ok_or(Error::Invalid)?;
+    let peer = sender_state.peer.ok_or(Error::NotConnected)?;
+    if peer == right {
+        return Err(Error::Invalid);
+    }
+    let peer_state = unsafe { SLOTS.get_mut(usize::from(peer)) }
+        .filter(|state| state.occupied && state.kind == Kind::Unix)
+        .ok_or(Error::NotConnected)?;
+    if peer_state.pending_right.is_some() {
+        return Err(Error::WouldBlock);
+    }
+    peer_state.pending_right = Some((right, flags));
+    Ok(())
+}
+
+pub(crate) fn unix_right_queue_available(sender: u8, right: u8) -> Result<(), Error> {
+    let sender_state = unsafe { SLOTS.get(usize::from(sender)).copied() }
+        .filter(|state| state.occupied && state.kind == Kind::Unix)
+        .ok_or(Error::Invalid)?;
+    let peer = sender_state.peer.ok_or(Error::NotConnected)?;
+    if peer == right {
+        return Err(Error::Invalid);
+    }
+    let peer_state = unsafe { SLOTS.get(usize::from(peer)) }
+        .filter(|state| state.occupied && state.kind == Kind::Unix)
+        .ok_or(Error::NotConnected)?;
+    if peer_state.pending_right.is_some() || peer_state.local_length != 0 {
+        return Err(Error::WouldBlock);
+    }
+    Ok(())
+}
+
+pub(crate) fn receive_unix_right(
+    receiver: u8,
+    peek_only: bool,
+) -> Result<Option<(u8, u32)>, Error> {
+    let state = unsafe { SLOTS.get_mut(usize::from(receiver)) }
+        .filter(|state| state.occupied && state.kind == Kind::Unix)
+        .ok_or(Error::Invalid)?;
+    let Some(right) = state.pending_right else {
+        return Ok(None);
+    };
+    if peek_only {
+        if !duplicate(right.0) {
+            return Err(Error::Exhausted);
+        }
+    } else {
+        state.pending_right = None;
+    }
+    Ok(Some(right))
+}
+
+pub(crate) fn unix_right_pending(receiver: u8) -> bool {
+    unsafe { SLOTS.get(usize::from(receiver)) }.is_some_and(|state| {
+        state.occupied && state.kind == Kind::Unix && state.pending_right.is_some()
+    })
+}
+
+pub(crate) fn discard_unix_right(receiver: u8) -> Result<bool, Error> {
+    let state = unsafe { SLOTS.get_mut(usize::from(receiver)) }
+        .filter(|state| state.occupied && state.kind == Kind::Unix)
+        .ok_or(Error::Invalid)?;
+    let Some((right, _)) = state.pending_right.take() else {
+        return Ok(false);
+    };
+    Ok(close(right))
 }
 
 pub(crate) fn endpoint(address: u32, port: u16) -> IpEndpoint {

@@ -20584,6 +20584,12 @@ fn linux_socket_recvfrom(
             return LINUX_EFAULT;
         }
     }
+    if received != 0
+        && !peek_only
+        && crate::linux_socket::kind(slot) == Some(crate::linux_socket::Kind::Unix)
+    {
+        let _ = crate::linux_socket::discard_unix_right(slot);
+    }
     if flags & MSG_TRUNC != 0
         && crate::linux_socket::kind(slot) == Some(crate::linux_socket::Kind::Udp)
     {
@@ -20609,6 +20615,8 @@ fn linux_socket_sendmsg(descriptor: u64, message: u64, flags: u64) -> u64 {
     let name_length = u32::from_ne_bytes(header[8..12].try_into().unwrap()) as u64;
     let iov_address = u64::from_ne_bytes(header[16..24].try_into().unwrap());
     let iov_count = u64::from_ne_bytes(header[24..32].try_into().unwrap());
+    let control = u64::from_ne_bytes(header[32..40].try_into().unwrap());
+    let control_length = u64::from_ne_bytes(header[40..48].try_into().unwrap());
     let Ok(iov_count) = usize::try_from(iov_count) else {
         return LINUX_EINVAL;
     };
@@ -20622,6 +20630,40 @@ fn linux_socket_sendmsg(descriptor: u64, message: u64, flags: u64) -> u64 {
             Ok(endpoint) => Some(endpoint),
             Err(error) => return error,
         }
+    };
+    let passed_right = if control_length == 0 {
+        None
+    } else {
+        if crate::linux_socket::kind(slot) != Some(crate::linux_socket::Kind::Unix) {
+            return LINUX_EINVAL;
+        }
+        if !(20..=24).contains(&control_length) {
+            return LINUX_EINVAL;
+        }
+        let mut ancillary = [0_u8; 20];
+        if !copy_from_linux_user(control, &mut ancillary) {
+            return LINUX_EFAULT;
+        }
+        if u64::from_ne_bytes(ancillary[..8].try_into().unwrap()) != 20
+            || i32::from_ne_bytes(ancillary[8..12].try_into().unwrap()) != 1
+            || i32::from_ne_bytes(ancillary[12..16].try_into().unwrap()) != 1
+        {
+            return LINUX_EINVAL;
+        }
+        let passed_descriptor = i32::from_ne_bytes(ancillary[16..20].try_into().unwrap());
+        let Ok(passed_descriptor) = u64::try_from(passed_descriptor) else {
+            return LINUX_EBADF;
+        };
+        let Some(passed_slot) = linux_socket_slot(passed_descriptor) else {
+            return LINUX_EBADF;
+        };
+        let Some(passed_flags) = linux_socket_flags(passed_descriptor) else {
+            return LINUX_EBADF;
+        };
+        if let Err(error) = crate::linux_socket::unix_right_queue_available(slot, passed_slot) {
+            return linux_socket_error(error);
+        }
+        Some((passed_slot, passed_flags))
     };
     let mut bytes = [0_u8; PAGE_SIZE];
     let mut used = 0_usize;
@@ -20645,12 +20687,49 @@ fn linux_socket_sendmsg(descriptor: u64, message: u64, flags: u64) -> u64 {
             break;
         }
     }
+    if passed_right.is_some() && used == 0 {
+        return LINUX_EINVAL;
+    }
+    if let Some((passed_slot, _)) = passed_right {
+        if !crate::linux_socket::duplicate(passed_slot) {
+            return LINUX_ENFILE;
+        }
+    }
     let result = if flags & 0x40 != 0 || linux_socket_nonblocking(descriptor) {
         crate::linux_socket::send(slot, &bytes[..used], remote)
     } else {
         crate::linux_socket::send_blocking(slot, &bytes[..used], remote)
     };
-    result.map_or_else(linux_socket_error, |written| written as u64)
+    match result {
+        Ok(written) => {
+            if let Some((passed_slot, passed_flags)) = passed_right {
+                if let Err(error) =
+                    crate::linux_socket::queue_unix_right(slot, passed_slot, passed_flags)
+                {
+                    let _ = crate::linux_socket::close(passed_slot);
+                    return linux_socket_error(error);
+                }
+            }
+            written as u64
+        }
+        Err(error) => {
+            if let Some((passed_slot, _)) = passed_right {
+                let _ = crate::linux_socket::close(passed_slot);
+            }
+            linux_socket_error(error)
+        }
+    }
+}
+
+fn linux_install_received_socket(slot: u8, flags: u32, close_on_exec: bool) -> Option<u64> {
+    let descriptor = (LINUX_AUX_DESCRIPTOR_FIRST..LINUX_AUX_DESCRIPTOR_LIMIT)
+        .find(|descriptor| linux_aux_descriptor_free(*descriptor))?;
+    let index = (descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize;
+    ELF_PROBE_SOCKET_SLOTS[index].store(slot + 1, Ordering::SeqCst);
+    ELF_PROBE_SOCKET_FLAGS[index].store(flags, Ordering::SeqCst);
+    ELF_PROBE_DEVICE_DESCRIPTORS[index].store(LINUX_DEVICE_SOCKET | 3, Ordering::SeqCst);
+    set_linux_descriptor_close_on_exec(descriptor, close_on_exec);
+    Some(descriptor)
 }
 
 fn linux_socket_recvmsg(descriptor: u64, message: u64, flags: u64) -> u64 {
@@ -20658,7 +20737,10 @@ fn linux_socket_recvmsg(descriptor: u64, message: u64, flags: u64) -> u64 {
     const MSG_TRUNC: u64 = 0x20;
     const MSG_DONTWAIT: u64 = 0x40;
     const MSG_WAITALL: u64 = 0x100;
-    const SUPPORTED_FLAGS: u64 = MSG_PEEK | MSG_TRUNC | MSG_DONTWAIT | MSG_WAITALL;
+    const MSG_CTRUNC: u32 = 0x8;
+    const MSG_CMSG_CLOEXEC: u64 = 0x4000_0000;
+    const SUPPORTED_FLAGS: u64 =
+        MSG_PEEK | MSG_TRUNC | MSG_DONTWAIT | MSG_WAITALL | MSG_CMSG_CLOEXEC;
     let Some(slot) = linux_socket_slot(descriptor) else {
         return LINUX_EBADF;
     };
@@ -20673,8 +20755,16 @@ fn linux_socket_recvmsg(descriptor: u64, message: u64, flags: u64) -> u64 {
     let iov_address = u64::from_ne_bytes(header[16..24].try_into().unwrap());
     let iov_count = usize::try_from(u64::from_ne_bytes(header[24..32].try_into().unwrap()))
         .unwrap_or(usize::MAX);
+    let control = u64::from_ne_bytes(header[32..40].try_into().unwrap());
+    let control_capacity = u64::from_ne_bytes(header[40..48].try_into().unwrap());
     if iov_count > LINUX_IOV_LIMIT {
         return LINUX_EINVAL;
+    }
+    if crate::linux_socket::unix_right_pending(slot)
+        && control_capacity >= 24
+        && (control == 0 || !linux_writable_user_range_contains(control, 24))
+    {
+        return LINUX_EFAULT;
     }
     let mut capacity = 0_usize;
     let mut iovs = [(0_u64, 0_usize); LINUX_IOV_LIMIT];
@@ -20730,11 +20820,44 @@ fn linux_socket_recvmsg(descriptor: u64, message: u64, flags: u64) -> u64 {
             header[8..12].copy_from_slice(&16_u32.to_ne_bytes());
         }
     }
-    let output_flags = if message_length > received {
+    let mut output_flags = if message_length > received {
         MSG_TRUNC as u32
     } else {
         0
     };
+    let mut control_length = 0_u64;
+    if crate::linux_socket::unix_right_pending(slot) {
+        if control_capacity < 24 {
+            output_flags |= MSG_CTRUNC;
+            if !peek_only {
+                let _ = crate::linux_socket::discard_unix_right(slot);
+            }
+        } else {
+            let right = match crate::linux_socket::receive_unix_right(slot, peek_only) {
+                Ok(Some(right)) => right,
+                Ok(None) => return LINUX_EINVAL,
+                Err(error) => return linux_socket_error(error),
+            };
+            if let Some(received_descriptor) =
+                linux_install_received_socket(right.0, right.1, flags & MSG_CMSG_CLOEXEC != 0)
+            {
+                let mut ancillary = [0_u8; 24];
+                ancillary[..8].copy_from_slice(&20_u64.to_ne_bytes());
+                ancillary[8..12].copy_from_slice(&1_i32.to_ne_bytes());
+                ancillary[12..16].copy_from_slice(&1_i32.to_ne_bytes());
+                ancillary[16..20].copy_from_slice(&(received_descriptor as i32).to_ne_bytes());
+                if !copy_to_linux_user(control, &ancillary) {
+                    let _ = linux_descriptor_close(received_descriptor);
+                    return LINUX_EFAULT;
+                }
+                control_length = 24;
+            } else {
+                let _ = crate::linux_socket::close(right.0);
+                output_flags |= MSG_CTRUNC;
+            }
+        }
+    }
+    header[40..48].copy_from_slice(&control_length.to_ne_bytes());
     header[48..52].copy_from_slice(&output_flags.to_ne_bytes());
     if !copy_to_linux_user(message, &header) {
         return LINUX_EFAULT;

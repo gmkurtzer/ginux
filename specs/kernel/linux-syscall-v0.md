@@ -20,7 +20,21 @@ engine. The booted proof sets and reads back each option, while short or
 unreadable values and unknown options produce `EINVAL`, `EFAULT`, and
 `ENOPROTOOPT` respectively. `SO_TYPE`, `SO_PROTOCOL`, `SO_DOMAIN`, and
 `SO_ACCEPTCONN` report live socket state, including the distinct UDP type and
-protocol. Connected AF_INET datagram and AF_UNIX stream sockets expose their
+protocol. AF_UNIX `sendmsg` accepts one `SCM_RIGHTS` socket descriptor per
+message, retains the underlying open-file reference even if the sender closes
+its descriptor, and transfers the retained status flags through `recvmsg`.
+`MSG_CMSG_CLOEXEC` marks the received descriptor close-on-exec. A short or
+absent receive control buffer consumes the right and reports `MSG_CTRUNC`;
+consuming the associated byte through `read` or `recvfrom` discards the right
+rather than leaking it into a later message. Malformed control headers and
+invalid passed descriptors fail before payload
+delivery. The booted proof passes a UDP socket, closes the sender descriptor,
+reads the received socket type, verifies close-on-exec, and separately verifies
+control truncation. This bounded first profile admits the control record only
+when the peer's receive queue is empty. Multiple rights, non-socket
+descriptors, `SCM_CREDENTIALS`, and more than one queued ancillary record
+remain unsupported. Connected AF_INET datagram and AF_UNIX stream sockets
+expose their
 peer names through `getpeername`, including Linux address truncation and actual
 length reporting, 32-bit descriptor narrowing, `ENOTCONN`, `ENOTSOCK`, `EBADF`,
 and `EFAULT` paths. It also proves bidirectional AF_UNIX `socketpair` transport
@@ -41,8 +55,9 @@ transport; a link-down boot skips only that external assertion without a
 blocking timeout. Unsupported
 families, types, protocols, flags, options, pointers, and oversized message
 vectors are rejected with their documented Linux errno. Successful TCP accept,
-IPv6, ancillary data, interruptible blocking socket waits, and the broader
-option surface remain Partial and are not promoted by this proof.
+IPv6, the remaining ancillary-data surface, interruptible blocking socket
+waits, and the broader option surface remain Partial and are not promoted by
+this proof.
 The Linux v6.12 x86-64 table deliberately maps `uselib`, `_sysctl`,
 `create_module`, `get_kernel_syms`, `query_module`, `nfsservctl`, `getpmsg`,
 `putpmsg`, `afs_syscall`, `tuxcall`, `security`, `set_thread_area`,
