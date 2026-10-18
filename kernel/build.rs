@@ -665,6 +665,39 @@ fn main() {
         status.success(),
         "LLD failed to link Linux dependency-graph main probe"
     );
+    assert_linux_elf_fixture(&linked_main, "Linux PIE main", 3, true, true, true);
+    assert_linux_elf_fixture(
+        &linked_graph_main,
+        "Linux dependency-graph PIE main",
+        3,
+        true,
+        true,
+        true,
+    );
+    assert_linux_elf_fixture(
+        &linked_dependency,
+        "Linux shared dependency",
+        3,
+        false,
+        true,
+        true,
+    );
+    assert_linux_elf_fixture(
+        &linked_auxiliary,
+        "Linux auxiliary shared dependency",
+        3,
+        false,
+        true,
+        true,
+    );
+    assert_linux_elf_fixture(
+        &linked_interpreter,
+        "Linux dynamic interpreter",
+        3,
+        false,
+        true,
+        false,
+    );
     if let Some(directory) = env::var_os("GINUX_LINUX_DYNAMIC_EXPORT_DIR") {
         let directory = PathBuf::from(directory);
         fs::create_dir_all(&directory).expect("failed to create Linux dynamic export directory");
@@ -719,9 +752,101 @@ fn main() {
     }
     let status = link.status().expect("failed to run LLD for Linux probe");
     assert!(status.success(), "LLD failed to link Linux probe");
+    assert_linux_elf_fixture(&linked, "static Linux probe", 2, false, false, false);
     if let Some(destination) = env::var_os("GINUX_LINUX_PROBE_EXPORT") {
         fs::copy(&linked, destination).expect("failed to export linked Linux probe");
     }
+}
+
+fn assert_linux_elf_fixture(
+    path: &PathBuf,
+    label: &str,
+    expected_type: u16,
+    expects_interpreter: bool,
+    expects_dynamic: bool,
+    expects_tls: bool,
+) {
+    const PT_LOAD: u32 = 1;
+    const PT_DYNAMIC: u32 = 2;
+    const PT_INTERP: u32 = 3;
+    const PT_TLS: u32 = 7;
+    const PT_GNU_STACK: u32 = 0x6474_e551;
+    const PF_X: u32 = 1;
+    const PF_W: u32 = 2;
+
+    let elf = fs::read(path).unwrap_or_else(|error| panic!("failed to read {label}: {error}"));
+    assert_eq!(
+        elf.get(..6),
+        Some(&b"\x7fELF\x02\x01"[..]),
+        "{label} is not ELF64 little-endian"
+    );
+    assert_eq!(
+        read_u16(&elf, 16),
+        Some(expected_type),
+        "{label} has the wrong ELF type"
+    );
+    assert_eq!(read_u16(&elf, 18), Some(62), "{label} is not x86-64");
+
+    let program_offset = usize::try_from(read_u64(&elf, 32).expect("ELF program offset"))
+        .expect("ELF program offset fits usize");
+    let entry_size = usize::from(read_u16(&elf, 54).expect("ELF program entry size"));
+    let count = usize::from(read_u16(&elf, 56).expect("ELF program entry count"));
+    assert!(
+        entry_size >= 56 && count != 0,
+        "{label} has no valid program-header table"
+    );
+
+    let mut load_count = 0;
+    let mut has_interpreter = false;
+    let mut has_dynamic = false;
+    let mut has_tls = false;
+    let mut stack_flags = None;
+    for index in 0..count {
+        let header = program_offset
+            .checked_add(index.checked_mul(entry_size).expect("program-header index"))
+            .expect("program-header offset");
+        assert!(
+            elf.get(header..header + 56).is_some(),
+            "{label} has a truncated program header"
+        );
+        let program_type = read_u32(&elf, header).expect("ELF program type");
+        let flags = read_u32(&elf, header + 4).expect("ELF program flags");
+        match program_type {
+            PT_LOAD => {
+                load_count += 1;
+                assert_ne!(
+                    flags & (PF_W | PF_X),
+                    PF_W | PF_X,
+                    "{label} contains a writable executable load segment"
+                );
+            }
+            PT_DYNAMIC => has_dynamic = true,
+            PT_INTERP => has_interpreter = true,
+            PT_TLS => has_tls = true,
+            PT_GNU_STACK => stack_flags = Some(flags),
+            _ => {}
+        }
+    }
+
+    assert!(load_count != 0, "{label} has no loadable segments");
+    assert_eq!(
+        has_interpreter, expects_interpreter,
+        "{label} has an unexpected PT_INTERP shape"
+    );
+    assert_eq!(
+        has_dynamic, expects_dynamic,
+        "{label} has an unexpected PT_DYNAMIC shape"
+    );
+    assert_eq!(
+        has_tls, expects_tls,
+        "{label} has an unexpected PT_TLS shape"
+    );
+    let stack_flags = stack_flags.unwrap_or_else(|| panic!("{label} has no PT_GNU_STACK policy"));
+    assert_eq!(
+        stack_flags & PF_X,
+        0,
+        "{label} requests an executable stack"
+    );
 }
 
 fn configure_linker_library_path(command: &mut Command, directory: Option<&PathBuf>) {

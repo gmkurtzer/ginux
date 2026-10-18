@@ -286,7 +286,9 @@ The Linux layer is intentionally tracked as a compatibility contract, not as a
 binary yes/no claim. Many interfaces are partial, and major surfaces including
 general sockets, cgroups, sysfs, and broad device `ioctl` compatibility remain.
 See the [Linux compatibility matrix](docs/LINUX-COMPATIBILITY.md) for the
-current ledger.
+current ledger and the
+[ELF/runtime regression contract](docs/LINUX-RUNTIME-COMPATIBILITY.md) for the
+executable-loading, dynamic-linking, TLS, heap, and virtual-memory gates.
 
 The current validated development target is QEMU's x86-64 Q35 machine with
 OVMF, Intel IOMMU, and virtio devices. QEMU uses KVM on a suitable x86-64 Linux
@@ -342,6 +344,7 @@ Useful development gates:
 ```sh
 make build          # build the unified EFI image
 make test           # run the core QEMU boot gate
+make test-linux-runtime # verify ELF, loader, PIE, TLS, heap, and memory behavior
 make test-c2        # verify configured domain lifecycle
 make test-alpine    # verify runtime OCI download and the Alpine shell
 make test-rocky-shell # verify Rocky glibc shell, fork/exec, cat, and ls
