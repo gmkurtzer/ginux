@@ -120,6 +120,11 @@ Socket descriptor lookup and descriptor-local status flags now convert the
 Linux `int` descriptor from its low 32 register bits for the complete socket
 operation family. The live system-init TCP/AF_UNIX lifecycle includes dirty
 upper-bit `getpeername` and `shutdown` calls through that shared lookup path.
+The implemented `io_uring` profile converts setup entry counts, ring
+descriptors, enter submission/completion counts and flags, and register
+opcodes/counts from their Linux 32-bit types. Its full setup/map/submit/probe/
+close verifier now supplies dirty upper register bits at each boundary.
+`cachestat` likewise converts its descriptor and flags before validation.
 
 The ring-3 controller directly verifies its Linux PID/TID, parent,
 process-group, session, UID/GID, supplementary-group, scheduler-yield, and

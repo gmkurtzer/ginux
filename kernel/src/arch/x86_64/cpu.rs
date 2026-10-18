@@ -14315,7 +14315,7 @@ fn verify_linux_io_uring_syscalls() -> bool {
         return false;
     }
     let descriptor = if copy_to_linux_user(parameters, &[0_u8; 120]) {
-        linux_io_uring_setup(3, parameters)
+        linux_io_uring_setup((1_u64 << 32) | 3, parameters)
     } else {
         LINUX_EBADF
     };
@@ -14352,7 +14352,15 @@ fn verify_linux_io_uring_syscalls() -> bool {
         && copy_to_linux_user(sq + 24, &0_u32.to_ne_bytes())
         && copy_to_linux_user(sq + 4, &1_u32.to_ne_bytes())
         && copy_to_linux_user(sqes + 32, &0x4749_4e55_5852_494f_u64.to_ne_bytes());
-    let submitted = rings && linux_io_uring_enter(descriptor, 1, 1, 1, 0, 0) == 1;
+    let submitted = rings
+        && linux_io_uring_enter(
+            (1_u64 << 32) | descriptor,
+            (1_u64 << 32) | 1,
+            (1_u64 << 32) | 1,
+            (1_u64 << 32) | 1,
+            0,
+            0,
+        ) == 1;
     let completed = submitted && {
         let mut tail = [0_u8; 4];
         let mut completion = [0_u8; 16];
@@ -14409,8 +14417,14 @@ fn verify_linux_io_uring_syscalls() -> bool {
             && i32::from_ne_bytes(completion[8..12].try_into().unwrap()) == 16
             && linux_descriptor_close(io_descriptor) == 0
     };
-    let probe =
-        io_completed && linux_io_uring_register(descriptor, 8, parameters + 256, 24) == 0 && {
+    let probe = io_completed
+        && linux_io_uring_register(
+            (1_u64 << 32) | descriptor,
+            (1_u64 << 32) | 8,
+            parameters + 256,
+            (1_u64 << 32) | 24,
+        ) == 0
+        && {
             let mut output = [0_u8; 16 + 24 * 8];
             copy_from_linux_user(parameters + 256, &mut output)
                 && output[0] == 23
@@ -14457,6 +14471,7 @@ fn linux_io_uring_descriptor(descriptor: u64) -> bool {
 }
 
 fn linux_io_uring_setup(entries: u64, parameters: u64) -> u64 {
+    let entries = u64::from(entries as u32);
     if entries == 0 || entries > 64 || LINUX_IO_URING_REFS.load(Ordering::SeqCst) != 0 {
         return if entries == 0 || entries > 64 {
             LINUX_EINVAL
@@ -14574,6 +14589,10 @@ fn linux_io_uring_enter(
     signal_size: u64,
 ) -> u64 {
     const GETEVENTS: u64 = 1;
+    let descriptor = u64::from(descriptor as u32);
+    let to_submit = u64::from(to_submit as u32);
+    let minimum_complete = u64::from(minimum_complete as u32);
+    let flags = u64::from(flags as u32);
     if !linux_io_uring_descriptor(descriptor) {
         return LINUX_EBADF;
     }
@@ -14674,6 +14693,9 @@ fn linux_io_uring_enter(
 
 fn linux_io_uring_register(descriptor: u64, opcode: u64, argument: u64, count: u64) -> u64 {
     const REGISTER_PROBE: u64 = 8;
+    let descriptor = u64::from(descriptor as u32);
+    let opcode = u64::from(opcode as u32);
+    let count = u64::from(count as u32);
     if !linux_io_uring_descriptor(descriptor) {
         return LINUX_EBADF;
     }
@@ -16938,6 +16960,8 @@ fn linux_kcmp(first_pid: u64, second_pid: u64, kind: u64, first: u64, second: u6
 }
 
 fn linux_cachestat(descriptor: u64, range_address: u64, output_address: u64, flags: u64) -> u64 {
+    let descriptor = u64::from(descriptor as u32);
+    let flags = u64::from(flags as u32);
     if flags != 0 {
         return LINUX_EINVAL;
     }
