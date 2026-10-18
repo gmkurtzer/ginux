@@ -122,6 +122,11 @@ backing in the current swapless memory model; a later access receives a fresh
 zero-filled page. File-backed, shared, and secret mappings are rejected with
 `EINVAL`. Boot verification writes, frees, confirms physical reclamation, and
 then confirms zero-fill-on-demand.
+`MADV_DONTNEED_LOCKED` is supported by both `madvise` and `process_madvise`.
+Because Ginux currently has no separate `mlock` or reclaim state, it follows
+the same immediate discard and zero-fill-on-demand path as `MADV_DONTNEED`.
+Boot verification covers direct advice and a multi-vector process operation,
+including release of physical backing and the subsequent zero-filled read.
 `MADV_COLD` and `MADV_PAGEOUT` validate mapped ranges and are accepted through
 both `madvise` and `process_madvise`. They are best-effort no-ops while Ginux
 has neither swap nor a page-reclaim queue; secret mappings remain rejected and

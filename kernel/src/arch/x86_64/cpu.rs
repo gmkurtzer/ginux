@@ -580,6 +580,7 @@ const LINUX_MADV_COLD: u64 = 20;
 const LINUX_MADV_PAGEOUT: u64 = 21;
 const LINUX_MADV_POPULATE_READ: u64 = 22;
 const LINUX_MADV_POPULATE_WRITE: u64 = 23;
+const LINUX_MADV_DONTNEED_LOCKED: u64 = 24;
 const LINUX_STAT_SIZE: usize = 144;
 const LINUX_STAT_CHARACTER_DEVICE_MODE: u32 = 0o020600;
 const LINUX_STAT_DIRECTORY_MODE: u32 = 0o040555;
@@ -15635,7 +15636,7 @@ fn verify_linux_process_madvise_syscall() -> bool {
         .into_iter()
         .all(|advice| linux_madvise(first, PAGE_SIZE as u64, advice) == 0)
         && linux_madvise(first, PAGE_SIZE as u64, 1_u64 << 32) == 0
-        && linux_madvise(first, PAGE_SIZE as u64, 24) == LINUX_EINVAL;
+        && linux_madvise(first, PAGE_SIZE as u64, u64::from(u32::MAX)) == LINUX_EINVAL;
     let inheritance = hints
         && linux_madvise(first, PAGE_SIZE as u64, LINUX_MADV_DONTFORK) == 0
         && address_space::current_linux_runtime_page(first).dontfork
@@ -15737,6 +15738,26 @@ fn verify_linux_process_madvise_syscall() -> bool {
             PAGE_SIZE as u64,
             LINUX_MADV_COLD,
         ) == LINUX_ENOMEM;
+    let locked_written = reclaim_hints && copy_to_linux_user(first, &[0x5a]);
+    let locked_discarded = locked_written
+        && linux_madvise(first, PAGE_SIZE as u64, LINUX_MADV_DONTNEED_LOCKED) == 0
+        && address_space::current_linux_runtime_page(first)
+            .frame
+            .is_none();
+    let locked_zeroed = locked_discarded && {
+        let mut byte = [1_u8];
+        copy_from_linux_user(first, &mut byte) && byte == [0]
+    };
+    let process_locked_discarded = locked_zeroed
+        && linux_process_madvise(descriptor, mapping, 2, LINUX_MADV_DONTNEED_LOCKED, 0)
+            == (2 * PAGE_SIZE) as u64;
+    let discarded_locked = process_locked_discarded
+        && address_space::current_linux_runtime_page(first)
+            .frame
+            .is_none()
+        && address_space::current_linux_runtime_page(second)
+            .frame
+            .is_none();
     let errors = descriptor < LINUX_AUX_DESCRIPTOR_LIMIT
         && linux_pidfd_open(0, 0) == LINUX_EINVAL
         && linux_process_madvise(descriptor, mapping, 2, LINUX_MADV_DONTNEED, 1) == LINUX_EINVAL
@@ -15810,7 +15831,13 @@ fn verify_linux_process_madvise_syscall() -> bool {
             .frame
             .is_some()
         && linux_runtime_munmap(compatibility_mapping, PAGE_SIZE as u64) == 0;
-    reclaim_hints && errors && closed && unmapped && population_unmapped && compatibility_flags
+    if !discarded_locked {
+        serial_write("ginux: Linux DONTNEED_LOCKED verification failed\r\n");
+    }
+    if !errors || !closed || !unmapped || !population_unmapped || !compatibility_flags {
+        serial_write("ginux: Linux process advice cleanup verification failed\r\n");
+    }
+    discarded_locked && errors && closed && unmapped && population_unmapped && compatibility_flags
 }
 
 fn verify_linux_timer_argument_widths() -> bool {
@@ -17263,7 +17290,10 @@ fn linux_runtime_madvise(address: u64, length: u64, advice: u64) -> u64 {
             LINUX_ENOMEM
         };
     }
-    if !matches!(advice, LINUX_MADV_DONTNEED | LINUX_MADV_FREE) {
+    if !matches!(
+        advice,
+        LINUX_MADV_DONTNEED | LINUX_MADV_FREE | LINUX_MADV_DONTNEED_LOCKED
+    ) {
         return LINUX_EINVAL;
     }
     let free = advice == LINUX_MADV_FREE;
@@ -18278,7 +18308,7 @@ fn linux_madvise(address: u64, length: u64, advice: u64) -> u64 {
             LINUX_ENOMEM
         };
     }
-    if advice == LINUX_MADV_DONTNEED
+    if matches!(advice, LINUX_MADV_DONTNEED | LINUX_MADV_DONTNEED_LOCKED)
         && (0..range_pages).any(|offset| {
             let slot = start_slot + offset;
             let read_only = areas[offset].is_some_and(|area| {
@@ -18289,7 +18319,7 @@ fn linux_madvise(address: u64, length: u64, advice: u64) -> u64 {
     {
         return LINUX_EPERM;
     }
-    if advice != LINUX_MADV_DONTNEED
+    if !matches!(advice, LINUX_MADV_DONTNEED | LINUX_MADV_DONTNEED_LOCKED)
         || areas[..range_pages].iter().any(|area| {
             area.is_none_or(|index| {
                 ELF_PROBE_MMAP_FILE[index].load(Ordering::SeqCst) != 0
@@ -18331,6 +18361,7 @@ fn linux_process_madvise(
                 | LINUX_MADV_DONTNEED
                 | LINUX_MADV_COLD
                 | LINUX_MADV_PAGEOUT
+                | LINUX_MADV_DONTNEED_LOCKED
         )
     {
         return LINUX_EINVAL;
