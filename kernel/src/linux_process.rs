@@ -1907,6 +1907,11 @@ pub(crate) fn live_process_slot(pid: u32) -> Option<usize> {
     Some(usize::from(handle.slot))
 }
 
+pub(crate) fn live_process_generation(pid: u32) -> Option<u32> {
+    let table = live_process_table_mut()?;
+    Some(table.handle_by_pid(pid)?.generation)
+}
+
 pub(crate) fn live_process_pid_at(slot: usize) -> Option<u32> {
     let table = live_process_table_mut()?;
     table

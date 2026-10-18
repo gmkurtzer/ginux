@@ -3713,13 +3713,6 @@ fn execute_deferred_live_fork() -> bool {
         .filter(|state| state.valid)
         .unwrap_or(parent_runtime_state);
     restore_linux_process_runtime_state(parent_runtime_state);
-    if cfg!(feature = "verification-boot")
-        && !LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
-        && !LINUX_CROSS_PROCESS_PRLIMIT_VALIDATED.load(Ordering::SeqCst)
-        && !verify_linux_cross_process_prlimit(child.pid)
-    {
-        return false;
-    }
     if let Some((slot, base, size)) = parent_thread_stack {
         LINUX_THREAD_STACK_BASES[slot].store(base, Ordering::SeqCst);
         LINUX_THREAD_STACK_SIZES[slot].store(size, Ordering::SeqCst);
@@ -3750,13 +3743,20 @@ fn execute_deferred_live_fork() -> bool {
         }
         return false;
     };
+    LINUX_CURRENT_PROCESS_PID.store(parent_pid, Ordering::SeqCst);
+    if cfg!(feature = "verification-boot")
+        && !LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
+        && !LINUX_CROSS_PROCESS_PRLIMIT_VALIDATED.load(Ordering::SeqCst)
+        && !verify_linux_cross_process_prlimit(child.pid)
+    {
+        return false;
+    }
     if let Some(child_state_slot) = linux_process_runtime_state(child.pid) {
         *child_state_slot = LinuxProcessRuntimeState::EMPTY;
     }
     if parent.pid != parent_pid || parent.general[0] != u64::from(child.pid) {
         return false;
     }
-    LINUX_CURRENT_PROCESS_PID.store(parent_pid, Ordering::SeqCst);
     LIVE_FORK_PUBLIC_DIAGNOSTIC.store(0x20, Ordering::SeqCst);
     let parent_synced = !LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
         || sync_live_linux_process_address_space(parent_pid);
@@ -16707,9 +16707,37 @@ fn verify_linux_signal_argument_widths() -> bool {
     } else {
         LINUX_EBADF
     };
+    let mut queued_information = [0_u8; size_of::<LinuxSignalInformation>()];
+    queued_information[8..12].copy_from_slice(&LINUX_SI_QUEUE.to_ne_bytes());
+    queued_information[24..32].copy_from_slice(&0x5049_4446_4453_4947_u64.to_ne_bytes());
+    let queued_information_valid = copy_to_linux_user(mapping, &queued_information)
+        && linux_pidfd_send_signal(
+            pidfd,
+            0,
+            mapping,
+            0,
+            core::ptr::null_mut(),
+            interrupted,
+            (0, 0),
+        ) == 0;
+    queued_information[8..12].copy_from_slice(&LINUX_SI_KERNEL.to_ne_bytes());
+    let information_errors = copy_to_linux_user(mapping, &queued_information)
+        && linux_pidfd_send_signal(
+            pidfd,
+            0,
+            mapping,
+            0,
+            core::ptr::null_mut(),
+            interrupted,
+            (0, 0),
+        ) == LINUX_EPERM
+        && linux_pidfd_send_signal(pidfd, 0, 1, 0, core::ptr::null_mut(), interrupted, (0, 0))
+            == LINUX_EFAULT;
     let pidfd_valid = valid
         && queued_self_signals
         && duplicate < LINUX_DESCRIPTOR_TABLE_LIMIT
+        && queued_information_valid
+        && information_errors
         && linux_pidfd_send_signal(
             pidfd,
             UPPER_REGISTER_BITS,
@@ -16773,7 +16801,7 @@ fn verify_linux_queued_self_signals(
             && i32::from_ne_bytes(returned[8..12].try_into().unwrap()) == expected_code
             && u64::from_ne_bytes(returned[24..32].try_into().unwrap()) == expected_value
     };
-    let queued = write_information(31, LINUX_SI_KERNEL, VALUE)
+    let queued = write_information(31, LINUX_SI_QUEUE, VALUE)
         && copy_to_linux_user(wait_set, &SIGNAL_BIT.to_ne_bytes())
         && linux_rt_sigqueueinfo(
             current_pid,
@@ -16789,7 +16817,7 @@ fn verify_linux_queued_self_signals(
     let process_signal = queued
         && copy_from_linux_user(pending_set, &mut pending_bytes)
         && u64::from_ne_bytes(pending_bytes) & SIGNAL_BIT != 0
-        && wait_for_signal(SIGNAL, LINUX_SI_KERNEL, VALUE);
+        && wait_for_signal(SIGNAL, LINUX_SI_QUEUE, VALUE);
     let thread_signal = write_information(0, LINUX_SI_TKILL, THREAD_VALUE)
         && linux_rt_sigqueueinfo(
             current_pid,
@@ -16847,7 +16875,17 @@ fn verify_linux_queued_self_signals(
         ) == 0
         && wait_for_signal(SIGNAL, LINUX_SI_TKILL, THREAD_VALUE)
         && wait_for_signal(SIGNAL, LINUX_SI_QUEUE, VALUE);
-    let errors = linux_rt_sigpending(pending_set, LINUX_SIGNAL_SET_SIZE - 1) == LINUX_EINVAL
+    let errors = write_information(0, LINUX_SI_KERNEL, VALUE)
+        && linux_rt_sigqueueinfo(
+            current_pid,
+            None,
+            SIGNAL,
+            information,
+            core::ptr::null_mut(),
+            interrupted,
+            (0, 0),
+        ) == LINUX_EPERM
+        && linux_rt_sigpending(pending_set, LINUX_SIGNAL_SET_SIZE - 1) == LINUX_EINVAL
         && linux_rt_sigpending(1, LINUX_SIGNAL_SET_SIZE) == LINUX_EFAULT
         && linux_rt_sigqueueinfo(
             current_pid,
@@ -19319,10 +19357,11 @@ fn linux_process_madvise(
     if !linux_pidfd_descriptor(pid_descriptor) {
         return LINUX_EBADF;
     }
-    if linux_descriptor_offset(pid_descriptor).load(Ordering::SeqCst)
-        != u64::from(current_linux_process_pid())
-    {
+    let Some(process) = linux_pidfd_process(pid_descriptor) else {
         return LINUX_ESRCH;
+    };
+    if process != current_linux_process_pid() {
+        return LINUX_EPERM;
     }
     let mut advised = 0_u64;
     for index in 0..vector_count {
@@ -19365,14 +19404,14 @@ fn linux_process_mrelease(pid_descriptor: u64, flags: u64) -> u64 {
     if !linux_pidfd_descriptor(pid_descriptor) {
         return LINUX_EBADF;
     }
-    if linux_descriptor_offset(pid_descriptor).load(Ordering::SeqCst)
-        != u64::from(current_linux_process_pid())
-    {
+    let Some(process) = linux_pidfd_process(pid_descriptor) else {
         return LINUX_ESRCH;
+    };
+    if process != current_linux_process_pid() {
+        return LINUX_EPERM;
     }
-    // pidfd_open currently admits only the live caller. Linux permits release
-    // only after the target has entered exit and therefore returns EINVAL for
-    // every pidfd that can reach this implementation today.
+    // Linux permits release only after the target has entered exit; the live
+    // caller therefore cannot be released through its own pidfd.
     LINUX_EINVAL
 }
 
@@ -28188,6 +28227,16 @@ fn linux_pidfd_descriptor(descriptor: u64) -> bool {
     linux_device_descriptor(descriptor) & !3 == LINUX_DEVICE_PIDFD
 }
 
+fn linux_pidfd_process(descriptor: u64) -> Option<u32> {
+    if !linux_pidfd_descriptor(descriptor) {
+        return None;
+    }
+    let identity = linux_descriptor_offset(descriptor).load(Ordering::SeqCst);
+    let pid = identity as u32;
+    let generation = (identity >> 32) as u32;
+    (pid != 0 && linux_process::live_process_generation(pid) == Some(generation)).then_some(pid)
+}
+
 fn linux_signalfd_descriptor(descriptor: u64) -> bool {
     linux_device_descriptor(descriptor) & !3 == LINUX_DEVICE_SIGNALFD
 }
@@ -28794,9 +28843,10 @@ fn linux_pidfd_open(process: u64, flags: u64) -> u64 {
     if process <= 0 {
         return LINUX_EINVAL;
     }
-    if process as u32 != current_linux_process_pid() {
+    let process = process as u32;
+    let Some(generation) = linux_process::live_process_generation(process) else {
         return LINUX_ESRCH;
-    }
+    };
     let Some(descriptor) = (LINUX_AUX_DESCRIPTOR_FIRST..LINUX_AUX_DESCRIPTOR_LIMIT)
         .find(|descriptor| linux_aux_descriptor_free(*descriptor))
     else {
@@ -28805,7 +28855,10 @@ fn linux_pidfd_open(process: u64, flags: u64) -> u64 {
     let index = (descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize;
     ELF_PROBE_DEVICE_DESCRIPTORS[index].store(LINUX_DEVICE_PIDFD, Ordering::SeqCst);
     ELF_PROBE_SOCKET_FLAGS[index].store(flags as u32, Ordering::SeqCst);
-    ELF_PROBE_DESCRIPTOR_OFFSETS[index].store(process as u64, Ordering::SeqCst);
+    ELF_PROBE_DESCRIPTOR_OFFSETS[index].store(
+        u64::from(process) | (u64::from(generation) << 32),
+        Ordering::SeqCst,
+    );
     set_linux_descriptor_close_on_exec(descriptor, true);
     descriptor
 }
@@ -28819,10 +28872,13 @@ fn linux_pidfd_getfd(pid_descriptor: u64, target: u64, flags: u64) -> u64 {
     if !linux_pidfd_descriptor(pid_descriptor) {
         return LINUX_EBADF;
     }
-    if linux_descriptor_offset(pid_descriptor).load(Ordering::SeqCst)
-        != u64::from(current_linux_process_pid())
-    {
+    let Some(process) = linux_pidfd_process(pid_descriptor) else {
         return LINUX_ESRCH;
+    };
+    if process != current_linux_process_pid() {
+        // Cross-process descriptor duplication additionally requires the
+        // ptrace access-mode model, which is not yet exposed to domains.
+        return LINUX_EPERM;
     }
     linux_console_dup(target)
 }
@@ -28845,13 +28901,29 @@ fn linux_pidfd_send_signal(
     if !linux_pidfd_descriptor(descriptor) {
         return LINUX_EBADF;
     }
-    let process = linux_descriptor_offset(descriptor).load(Ordering::SeqCst);
-    if information != 0 {
-        return LINUX_ENOSYS;
-    }
+    let Some(process) = linux_pidfd_process(descriptor) else {
+        return LINUX_ESRCH;
+    };
+    let generated = if information == 0 {
+        (signal, LINUX_SI_USER, None)
+    } else {
+        let mut bytes = [0_u8; size_of::<LinuxSignalInformation>()];
+        if !copy_from_linux_user(information, &mut bytes) {
+            return LINUX_EFAULT;
+        }
+        let code = i32::from_ne_bytes(bytes[8..12].try_into().unwrap());
+        if code >= 0 {
+            return LINUX_EPERM;
+        }
+        (
+            signal,
+            code,
+            Some(u64::from_ne_bytes(bytes[24..32].try_into().unwrap())),
+        )
+    };
     linux_kill(
-        process,
-        (signal, LINUX_SI_USER, None),
+        u64::from(process),
+        generated,
         output,
         interrupted,
         return_registers,
@@ -28862,6 +28934,18 @@ fn linux_descriptor_poll_events(descriptor: i32, requested: u16) -> u16 {
     let Ok(descriptor) = u64::try_from(descriptor) else {
         return 0;
     };
+    if linux_pidfd_descriptor(descriptor) {
+        let Some(process) = linux_pidfd_process(descriptor) else {
+            return LINUX_POLLHUP;
+        };
+        return if linux_process::live_process_status(process)
+            .is_some_and(|status| status.state == linux_process::LiveProcessState::Zombie)
+        {
+            requested & LINUX_POLLIN
+        } else {
+            0
+        };
+    }
     if linux_signalfd_descriptor(descriptor) {
         let mask = linux_descriptor_offset(descriptor).load(Ordering::SeqCst);
         let dynamic = linux_dynamic_pending_masks().map_or(0, |(process, thread)| process | thread);
@@ -31310,10 +31394,59 @@ fn verify_linux_cross_process_prlimit(pid: u32) -> bool {
             0,
             0,
         ) == 0;
-    let valid = changed && restored && errors && widths;
+    let pidfd = linux_pidfd_open(u64::from(pid), 0x800);
+    let pidfd_opened = pidfd < LINUX_AUX_DESCRIPTOR_LIMIT;
+    let pidfd_identity = pidfd_opened && linux_pidfd_process(pidfd) == Some(pid);
+    let pidfd_ready =
+        pidfd_opened && linux_descriptor_poll_events(pidfd as i32, LINUX_POLLIN) == LINUX_POLLIN;
+    let pidfd_signal = pidfd_opened
+        && linux_pidfd_send_signal(
+            pidfd,
+            0,
+            0,
+            0,
+            core::ptr::null_mut(),
+            LinuxUserContext {
+                registers: LinuxSyscallFrame::ZERO,
+                rip: 0,
+                rsp: 0,
+                rflags: 0,
+                rax: 0,
+                fs_base: 0,
+            },
+            (0, 0),
+        ) == 0;
+    let pidfd_getfd = pidfd_opened && linux_pidfd_getfd(pidfd, 1, 0) == LINUX_EPERM;
+    let pidfd_closed = !pidfd_opened || linux_descriptor_close(pidfd) == 0;
+    let pidfd_valid = pidfd_opened
+        && pidfd_identity
+        && pidfd_ready
+        && pidfd_signal
+        && pidfd_getfd
+        && pidfd_closed;
+    let valid = changed && restored && errors && widths && pidfd_valid;
     if valid {
         LINUX_CROSS_PROCESS_PRLIMIT_VALIDATED.store(true, Ordering::SeqCst);
         serial_write("ginux: Linux cross-process resource limits validated\r\n");
+        serial_write("ginux: Linux generation-bound pidfds validated\r\n");
+    } else {
+        serial_write("ginux: Linux cross-process resource/pidfd validation failed:");
+        for value in [
+            changed,
+            restored,
+            errors,
+            widths,
+            pidfd_opened,
+            pidfd_identity,
+            pidfd_ready,
+            pidfd_signal,
+            pidfd_getfd,
+            pidfd_closed,
+        ] {
+            serial_write(" ");
+            serial_write_u64(u64::from(value));
+        }
+        serial_write("\r\n");
     }
     valid
 }
@@ -33250,6 +33383,9 @@ fn linux_rt_sigqueueinfo(
         return LINUX_EFAULT;
     }
     let code = i32::from_ne_bytes(bytes[8..12].try_into().unwrap());
+    if code >= 0 {
+        return LINUX_EPERM;
+    }
     let value = u64::from_ne_bytes(bytes[24..32].try_into().unwrap());
     let (sender_pid, sender_uid) = linux_signal_sender();
     if let Some(LinuxThreadSignalTarget::Saved {
