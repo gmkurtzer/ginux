@@ -85,6 +85,7 @@ pub(crate) struct PosixQueueInfo {
     pub(crate) max_messages: u64,
     pub(crate) max_message_size: u64,
     pub(crate) messages: u64,
+    pub(crate) created: bool,
 }
 
 #[repr(C)]
@@ -1192,12 +1193,13 @@ pub(crate) fn message_get_or_create(
     Ok(id)
 }
 
-fn posix_info(queue: &MessageQueue) -> PosixQueueInfo {
+fn posix_info(queue: &MessageQueue, created: bool) -> PosixQueueInfo {
     PosixQueueInfo {
         id: queue.id,
         max_messages: u64::from(queue.max_messages),
         max_message_size: u64::from(queue.max_message_size),
         messages: queue.messages,
+        created,
     }
 }
 
@@ -1233,7 +1235,7 @@ pub(crate) fn posix_queue_open(
                 .open_references
                 .checked_add(1)
                 .ok_or(Error::NoMemory)?;
-            return Ok(posix_info(queue));
+            return Ok(posix_info(queue, false));
         }
         current = (queue.next_queue != memory::FrameLease::EMPTY).then_some(queue.next_queue);
     }
@@ -1263,7 +1265,7 @@ pub(crate) fn posix_queue_open(
     queue.max_message_size = max_message_size;
     queue.open_references = 1;
     queue.name[..name.len()].copy_from_slice(name);
-    let info = posix_info(queue);
+    let info = posix_info(queue, true);
     publish_root(
         &MESSAGE_ROOT_ADDRESSES,
         &MESSAGE_ROOT_GENERATIONS,
@@ -1278,7 +1280,7 @@ pub(crate) fn posix_queue_info(id: u32) -> Result<PosixQueueInfo, Error> {
     let (frame, _) = find_message_queue(guard.instance, id).ok_or(Error::Invalid)?;
     let queue = message_queue(frame).ok_or(Error::Invalid)?;
     (queue.posix != 0)
-        .then(|| posix_info(queue))
+        .then(|| posix_info(queue, false))
         .ok_or(Error::Invalid)
 }
 
@@ -1296,7 +1298,7 @@ pub(crate) fn posix_queue_duplicate(id: u32) -> Result<(), Error> {
     Ok(())
 }
 
-pub(crate) fn posix_queue_close(id: u32) -> Result<(), Error> {
+pub(crate) fn posix_queue_close(id: u32) -> Result<Option<PosixQueueInfo>, Error> {
     let guard = Guard::acquire().ok_or(Error::Invalid)?;
     let (frame, previous) = find_message_queue(guard.instance, id).ok_or(Error::Invalid)?;
     let queue = message_queue_mut(frame).ok_or(Error::Invalid)?;
@@ -1305,13 +1307,14 @@ pub(crate) fn posix_queue_close(id: u32) -> Result<(), Error> {
     }
     queue.open_references -= 1;
     if queue.open_references == 0 && queue.linked == 0 {
-        remove_message_queue_locked(guard.instance, frame, previous)
+        let info = posix_info(queue, false);
+        remove_message_queue_locked(guard.instance, frame, previous).map(|()| Some(info))
     } else {
-        Ok(())
+        Ok(None)
     }
 }
 
-pub(crate) fn posix_queue_unlink(name: &[u8]) -> Result<(), Error> {
+pub(crate) fn posix_queue_unlink(name: &[u8]) -> Result<Option<PosixQueueInfo>, Error> {
     let guard = Guard::acquire().ok_or(Error::Invalid)?;
     let mut current = root(
         &MESSAGE_ROOT_ADDRESSES,
@@ -1331,9 +1334,10 @@ pub(crate) fn posix_queue_unlink(name: &[u8]) -> Result<(), Error> {
             queue.name_length = 0;
             queue.name.fill(0);
             return if queue.open_references == 0 {
-                remove_message_queue_locked(guard.instance, frame, previous)
+                let info = posix_info(queue, false);
+                remove_message_queue_locked(guard.instance, frame, previous).map(|()| Some(info))
             } else {
-                Ok(())
+                Ok(None)
             };
         }
         previous = Some(frame);

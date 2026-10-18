@@ -533,6 +533,7 @@ const LINUX_RLIMIT_FSIZE: u64 = 1;
 const LINUX_RLIMIT_STACK: u64 = 3;
 const LINUX_RLIMIT_NPROC: u64 = 6;
 const LINUX_RLIMIT_NOFILE: u64 = 7;
+const LINUX_RLIMIT_MSGQUEUE: u64 = 12;
 const LINUX_RLIMIT_NLIMITS: u64 = 16;
 const LINUX_RLIMIT_WORDS: usize = LINUX_RLIMIT_NLIMITS as usize * 2;
 const LINUX_WNOHANG: u64 = 1;
@@ -1387,6 +1388,7 @@ static ELF_PROBE_READ_ONLY_DATA_PAGE: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_UMASK: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_RLIMITS: [BankedAtomicU64; LINUX_RLIMIT_WORDS] =
     [const { BankedAtomicU64::new(0) }; LINUX_RLIMIT_WORDS];
+static ELF_PROBE_POSIX_MQ_BYTES: BankedAtomicU64 = BankedAtomicU64::new(0);
 static LINUX_FSIZE_LIMIT_HIT: BankedAtomicBool = BankedAtomicBool::new(false);
 static ELF_PROBE_CONSOLE_DESCRIPTORS: BankedAtomicU8 = BankedAtomicU8::new(0);
 static ELF_PROBE_STDERR_OPEN: BankedAtomicBool = BankedAtomicBool::new(false);
@@ -6024,6 +6026,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
     ELF_PROBE_READ_ONLY_DATA_PAGE.store(0, Ordering::SeqCst);
     ELF_PROBE_UMASK.store(0o022, Ordering::SeqCst);
     LINUX_FSIZE_LIMIT_HIT.store(false, Ordering::SeqCst);
+    ELF_PROBE_POSIX_MQ_BYTES.store(0, Ordering::SeqCst);
     for resource in 0..LINUX_RLIMIT_NLIMITS {
         let Some(limit) = linux_default_resource_limit(resource, execution.runtime) else {
             return LinuxElfResult::FAILED;
@@ -10123,6 +10126,9 @@ fn finish_linux_runtime(mmap: u64, saved_msrs: [u64; 5]) -> LinuxElfResult {
     let registry_finished = linux_process::finish_runtime_process_registry();
     let aio_released = registry_finished && crate::linux_aio::teardown();
     let sysv_ipc_released = aio_released && crate::linux_sysv_ipc::teardown();
+    if sysv_ipc_released {
+        ELF_PROBE_POSIX_MQ_BYTES.store(0, Ordering::SeqCst);
+    }
     let keyrings_released = sysv_ipc_released && crate::linux_keyring::teardown();
     let mount_deactivated = linux_mount::deactivate_initial();
     let timer_finished = timer::finish_linux_wait_timer();
@@ -11431,7 +11437,9 @@ fn retain_linux_descriptor_runtime_state(state: &LinuxDescriptorRuntimeState) ->
                 .map(|(_, id)| id)
                 .take(mq_retained)
             {
-                let _ = crate::linux_sysv_ipc::posix_queue_close(prior_id as u32);
+                if let Ok(destroyed) = crate::linux_sysv_ipc::posix_queue_close(prior_id as u32) {
+                    let _ = linux_release_posix_queue_charge(destroyed);
+                }
             }
             return false;
         }
@@ -11457,7 +11465,9 @@ fn release_linux_descriptor_runtime_state(state: &LinuxDescriptorRuntimeState) {
         .zip(state.stdio_offsets.iter().chain(&state.offsets).copied())
     {
         if device & !3 == LINUX_DEVICE_POSIX_MQ {
-            let _ = crate::linux_sysv_ipc::posix_queue_close(id as u32);
+            if let Ok(destroyed) = crate::linux_sysv_ipc::posix_queue_close(id as u32) {
+                let _ = linux_release_posix_queue_charge(destroyed);
+            }
         }
     }
 }
@@ -12213,6 +12223,73 @@ fn linux_mq_descriptor_id(descriptor: u64) -> Option<u32> {
         .flatten()
 }
 
+const LINUX_MQ_PRIO_MAX: u64 = 32_768;
+const LINUX_MSG_MSG_SIZE: u64 = 48;
+const LINUX_POSIX_MSG_TREE_NODE_SIZE: u64 = 48;
+
+fn linux_posix_queue_charge(info: crate::linux_sysv_ipc::PosixQueueInfo) -> Option<u64> {
+    info.max_messages
+        .checked_mul(info.max_message_size)?
+        .checked_add(info.max_messages.checked_mul(LINUX_MSG_MSG_SIZE)?)?
+        .checked_add(
+            info.max_messages
+                .min(LINUX_MQ_PRIO_MAX)
+                .checked_mul(LINUX_POSIX_MSG_TREE_NODE_SIZE)?,
+        )
+}
+
+fn linux_reserve_posix_queue_charge(info: crate::linux_sysv_ipc::PosixQueueInfo) -> bool {
+    let Some(charge) = linux_posix_queue_charge(info) else {
+        return false;
+    };
+    let limit = linux_resource_limit_values(
+        LINUX_RLIMIT_MSGQUEUE,
+        LINUX_RUNTIME_MODE.load(Ordering::SeqCst),
+    )
+    .map_or(0, |values| values[0]);
+    let mut used = ELF_PROBE_POSIX_MQ_BYTES.load(Ordering::Acquire);
+    loop {
+        let Some(next) = used.checked_add(charge).filter(|next| *next <= limit) else {
+            return false;
+        };
+        match ELF_PROBE_POSIX_MQ_BYTES.compare_exchange(
+            used,
+            next,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => return true,
+            Err(current) => used = current,
+        }
+    }
+}
+
+fn linux_release_posix_queue_charge(
+    destroyed: Option<crate::linux_sysv_ipc::PosixQueueInfo>,
+) -> bool {
+    let Some(info) = destroyed else {
+        return true;
+    };
+    let Some(charge) = linux_posix_queue_charge(info) else {
+        return false;
+    };
+    let mut used = ELF_PROBE_POSIX_MQ_BYTES.load(Ordering::Acquire);
+    loop {
+        let Some(next) = used.checked_sub(charge) else {
+            return false;
+        };
+        match ELF_PROBE_POSIX_MQ_BYTES.compare_exchange(
+            used,
+            next,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => return true,
+            Err(current) => used = current,
+        }
+    }
+}
+
 fn linux_mq_open(name_address: u64, flags: u64, mode: u64, attributes: u64) -> u64 {
     let valid = 3 | LINUX_O_CREAT | LINUX_O_EXCL | LINUX_O_NONBLOCK | LINUX_O_CLOEXEC;
     if flags & !valid != 0
@@ -12255,10 +12332,33 @@ fn linux_mq_open(name_address: u64, flags: u64, mode: u64, attributes: u64) -> u
         Ok(info) => info,
         Err(error) => return linux_sysv_ipc_error(error),
     };
+    if info.created && !linux_reserve_posix_queue_charge(info) {
+        let unlinked = matches!(
+            crate::linux_sysv_ipc::posix_queue_unlink(&name[..length]),
+            Ok(None)
+        );
+        let destroyed = matches!(
+            crate::linux_sysv_ipc::posix_queue_close(info.id),
+            Ok(Some(_))
+        );
+        return if unlinked && destroyed {
+            LINUX_EMFILE
+        } else {
+            LINUX_EIO
+        };
+    }
     let Some(descriptor) = (LINUX_AUX_DESCRIPTOR_FIRST..LINUX_AUX_DESCRIPTOR_LIMIT)
         .find(|descriptor| linux_aux_descriptor_free(*descriptor))
     else {
-        let _ = crate::linux_sysv_ipc::posix_queue_close(info.id);
+        if info.created {
+            let _ = crate::linux_sysv_ipc::posix_queue_unlink(&name[..length]);
+        }
+        let closed = crate::linux_sysv_ipc::posix_queue_close(info.id)
+            .ok()
+            .is_some_and(linux_release_posix_queue_charge);
+        if info.created && !closed {
+            return LINUX_EIO;
+        }
         return LINUX_EMFILE;
     };
     let index = (descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize;
@@ -12276,8 +12376,11 @@ fn linux_mq_unlink(name_address: u64) -> u64 {
         Ok(length) => length,
         Err(error) => return error,
     };
-    crate::linux_sysv_ipc::posix_queue_unlink(&name[..length])
-        .map_or_else(linux_sysv_ipc_error, |()| 0)
+    match crate::linux_sysv_ipc::posix_queue_unlink(&name[..length]) {
+        Ok(destroyed) if linux_release_posix_queue_charge(destroyed) => 0,
+        Ok(_) => LINUX_EIO,
+        Err(error) => linux_sysv_ipc_error(error),
+    }
 }
 
 fn linux_mq_timeout(address: u64) -> Result<(), u64> {
@@ -14540,13 +14643,28 @@ fn verify_linux_posix_message_queue_syscalls() -> bool {
     let mut attr = [0_u8; 64];
     attr[8..16].copy_from_slice(&4_u64.to_ne_bytes());
     attr[16..24].copy_from_slice(&32_u64.to_ne_bytes());
-    let prepared = copy_to_linux_user(mapping, name) && copy_to_linux_user(mapping + 64, &attr);
-    let descriptor = if prepared {
+    let charge = 4 * 32 + 4 * LINUX_MSG_MSG_SIZE + 4 * LINUX_POSIX_MSG_TREE_NODE_SIZE;
+    let mut limit = [0_u8; 16];
+    limit[..8].copy_from_slice(&(charge - 1).to_ne_bytes());
+    limit[8..].copy_from_slice(&u64::MAX.to_ne_bytes());
+    let prepared = copy_to_linux_user(mapping, name)
+        && copy_to_linux_user(mapping + 64, &attr)
+        && copy_to_linux_user(mapping + 128, &limit);
+    let rejected = prepared
+        && linux_setrlimit(LINUX_RLIMIT_MSGQUEUE, mapping + 128) == 0
+        && linux_mq_open(mapping, LINUX_O_CREAT | 2, 0o600, mapping + 64) == LINUX_EMFILE
+        && ELF_PROBE_POSIX_MQ_BYTES.load(Ordering::SeqCst) == 0;
+    limit[..8].copy_from_slice(&charge.to_ne_bytes());
+    let exact_limit = rejected
+        && copy_to_linux_user(mapping + 128, &limit)
+        && linux_setrlimit(LINUX_RLIMIT_MSGQUEUE, mapping + 128) == 0;
+    let descriptor = if exact_limit {
         linux_mq_open(mapping, LINUX_O_CREAT | 2, 0o600, mapping + 64)
     } else {
         LINUX_EFAULT
     };
-    let opened = descriptor < LINUX_AUX_DESCRIPTOR_LIMIT;
+    let opened = descriptor < LINUX_AUX_DESCRIPTOR_LIMIT
+        && ELF_PROBE_POSIX_MQ_BYTES.load(Ordering::SeqCst) == charge;
     let sent = opened
         && copy_to_linux_user(mapping + 256, b"low")
         && linux_mq_timedsend(descriptor, mapping + 256, 3, 3, 0) == 0
@@ -14579,14 +14697,39 @@ fn verify_linux_posix_message_queue_syscalls() -> bool {
         LINUX_EBADF
     };
     let duplicated = duplicate < LINUX_AUX_DESCRIPTOR_LIMIT;
-    let unlinked = linux_mq_unlink(mapping) == 0;
+    let unlinked =
+        linux_mq_unlink(mapping) == 0 && ELF_PROBE_POSIX_MQ_BYTES.load(Ordering::SeqCst) == charge;
     let reopen_missing = linux_mq_open(mapping, 2, 0, 0) == LINUX_ENOENT;
-    let duplicate_closed = duplicated && linux_descriptor_close(duplicate) == 0;
-    let descriptor_closed = opened && linux_descriptor_close(descriptor) == 0;
+    let duplicate_closed = duplicated
+        && linux_descriptor_close(duplicate) == 0
+        && ELF_PROBE_POSIX_MQ_BYTES.load(Ordering::SeqCst) == charge;
+    let descriptor_closed = opened
+        && linux_descriptor_close(descriptor) == 0
+        && ELF_PROBE_POSIX_MQ_BYTES.load(Ordering::SeqCst) == 0;
     let lifecycle =
         duplicated && unlinked && reopen_missing && duplicate_closed && descriptor_closed;
+    let linked_descriptor = if lifecycle {
+        linux_mq_open(mapping, LINUX_O_CREAT | 2, 0o600, mapping + 64)
+    } else {
+        LINUX_EFAULT
+    };
+    let linked_opened = linked_descriptor < LINUX_AUX_DESCRIPTOR_LIMIT
+        && ELF_PROBE_POSIX_MQ_BYTES.load(Ordering::SeqCst) == charge;
+    let linked_closed = linked_opened
+        && linux_descriptor_close(linked_descriptor) == 0
+        && ELF_PROBE_POSIX_MQ_BYTES.load(Ordering::SeqCst) == charge;
+    let linked_unlinked = linked_closed
+        && linux_mq_unlink(mapping) == 0
+        && ELF_PROBE_POSIX_MQ_BYTES.load(Ordering::SeqCst) == 0;
+    limit[..8].copy_from_slice(&u64::MAX.to_ne_bytes());
+    let restored = copy_to_linux_user(mapping + 128, &limit)
+        && linux_setrlimit(LINUX_RLIMIT_MSGQUEUE, mapping + 128) == 0;
     let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
-    received && queried && lifecycle && unmapped
+    let valid = received && queried && lifecycle && linked_unlinked && restored && unmapped;
+    if valid {
+        serial_write("ginux: Linux POSIX message queue resource limit enforced\r\n");
+    }
+    valid
 }
 
 fn verify_linux_process_madvise_syscall() -> bool {
@@ -26566,8 +26709,10 @@ fn linux_descriptor_close_with_wake(descriptor: u64, wake_waiters: bool) -> u64 
         linux_io_uring_release();
     }
     if let Some(id) = linux_mq_descriptor_id(descriptor) {
-        if crate::linux_sysv_ipc::posix_queue_close(id).is_err() {
-            return LINUX_EBADF;
+        match crate::linux_sysv_ipc::posix_queue_close(id) {
+            Ok(destroyed) if linux_release_posix_queue_charge(destroyed) => {}
+            Ok(_) => return LINUX_EIO,
+            Err(_) => return LINUX_EBADF,
         }
     }
     if descriptor < LINUX_AUX_DESCRIPTOR_FIRST && linux_device_descriptor(descriptor) != 0 {

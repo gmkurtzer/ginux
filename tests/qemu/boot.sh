@@ -3280,6 +3280,10 @@ if ! grep -q '^ginux: Linux file-size resource limit enforced' "$output_file"; t
     echo "Boot test failed: Linux file-size resource limits were not enforced." >&2
     exit 1
 fi
+if ! grep -q '^ginux: Linux POSIX message queue resource limit enforced' "$output_file"; then
+    echo "Boot test failed: Linux POSIX message queue resource limits were not enforced." >&2
+    exit 1
+fi
 
 if ! grep -q '^ginux: Linux single-CPU topology queries validated' "$output_file"; then
     echo "Boot test failed: Linux single-CPU topology queries were not validated." >&2

@@ -114,10 +114,14 @@ with `EAGAIN`. `RLIMIT_FSIZE` shortens writes at the file-size boundary and
 enforces `EFBIG` plus `SIGXFSZ` for writes and file extensions beyond it across
 ordinary, positioned, vectored, `sendfile`, `copy_file_range`, `ftruncate`, and
 `fallocate` paths. Limits survive fork and exec, and the linked ring-3 probe
-exercises mutation, enforcement, and restoration. Resource-specific
-enforcement not listed above, cross-process `prlimit64`, privileged hard-limit
-raises, and `RLIMIT_NOFILE` accounting for descriptors in flight over UNIX
-sockets remain pending, so the resource-limit family remains Partial.
+exercises mutation, enforcement, and restoration. `RLIMIT_MSGQUEUE` applies
+Linux's payload and kernel-object charge formula to each newly created POSIX
+message queue, rejects creation with `EMFILE` at the soft limit, and releases
+the charge only when an unlinked queue's final descriptor closes.
+Resource-specific enforcement not listed above, cross-process `prlimit64`,
+privileged hard-limit raises, and `RLIMIT_NOFILE` accounting for descriptors in
+flight over UNIX sockets remain pending, so the resource-limit family remains
+Partial.
 
 System V shared memory now uses domain-owned, dynamically allocated frame
 objects whose lifetime is independent of any one mapping. `shmget`, `shmat`,
@@ -151,8 +155,11 @@ POSIX message queues use named per-domain objects backed by the same dynamic
 page allocator. `mq_open`, `mq_unlink`, `mq_timedsend`, `mq_timedreceive`,
 `mq_notify`, and `mq_getsetattr` cover create/exclusive lookup, descriptor
 duplication and close, unlink lifetime, priority ordering, attributes,
-`O_NONBLOCK`, and `SIGEV_NONE`. Blocking deadline waits and signal/thread
-notification delivery remain pending, so this family remains Partial.
+`O_NONBLOCK`, and `SIGEV_NONE`. Creation also observes the calling domain's
+Linux-compatible `RLIMIT_MSGQUEUE` byte charge, including queue bookkeeping,
+with the charge retained across unlink until final close. Blocking deadline
+waits and signal/thread notification delivery remain pending, so this family
+remains Partial.
 
 Legacy Linux AIO uses dynamically allocated per-domain contexts and completion
 records. `io_setup`, `io_submit`, `io_getevents`, `io_pgetevents`,
