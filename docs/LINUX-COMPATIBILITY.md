@@ -116,6 +116,10 @@ Pipe and zero-copy boundaries convert `pipe2`, `splice`, `tee`, `vmsplice`, and
 Boot verification creates a close-on-exec pipe and exercises zero-length
 `tee`/`vmsplice` operations with dirty upper register bits before closing both
 ends.
+Socket descriptor lookup and descriptor-local status flags now convert the
+Linux `int` descriptor from its low 32 register bits for the complete socket
+operation family. The live system-init TCP/AF_UNIX lifecycle includes dirty
+upper-bit `getpeername` and `shutdown` calls through that shared lookup path.
 
 The ring-3 controller directly verifies its Linux PID/TID, parent,
 process-group, session, UID/GID, supplementary-group, scheduler-yield, and

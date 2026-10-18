@@ -22120,6 +22120,7 @@ fn linux_statx(directory: u64, path_address: u64, flags: u64, mask: u64, stat_ad
 }
 
 fn linux_socket_slot(descriptor: u64) -> Option<u8> {
+    let descriptor = u64::from(descriptor as u32);
     if let Some(slot) = usize::try_from(descriptor)
         .ok()
         .and_then(|index| ELF_PROBE_STDIO_SOCKET_SLOTS.get(index))
@@ -22152,11 +22153,13 @@ fn linux_socket_error(error: crate::linux_socket::Error) -> u64 {
 }
 
 fn linux_socket_descriptor_index(descriptor: u64) -> Option<usize> {
+    let descriptor = u64::from(descriptor as u32);
     let index = descriptor.checked_sub(LINUX_AUX_DESCRIPTOR_FIRST)? as usize;
     (index < LINUX_DEVICE_DESCRIPTOR_COUNT).then_some(index)
 }
 
 fn linux_socket_nonblocking(descriptor: u64) -> bool {
+    let descriptor = u64::from(descriptor as u32);
     if let Some(flags) = usize::try_from(descriptor)
         .ok()
         .and_then(|index| ELF_PROBE_STDIO_SOCKET_FLAGS.get(index))
@@ -22169,6 +22172,7 @@ fn linux_socket_nonblocking(descriptor: u64) -> bool {
 }
 
 fn linux_socket_flags(descriptor: u64) -> Option<u32> {
+    let descriptor = u64::from(descriptor as u32);
     if let Some(flags) = usize::try_from(descriptor)
         .ok()
         .and_then(|index| ELF_PROBE_STDIO_SOCKET_FLAGS.get(index))
@@ -23162,9 +23166,9 @@ fn linux_write_socket_address(
 }
 
 fn linux_socket_shutdown(descriptor: u64, how: u64) -> u64 {
-    let descriptor = u64::from(descriptor as u32);
     let how = u64::from(how as u32);
     let Some(slot) = linux_socket_slot(descriptor) else {
+        let descriptor = u64::from(descriptor as u32);
         return if linux_descriptor_open(descriptor) {
             LINUX_ENOTSOCK
         } else {
@@ -23178,8 +23182,8 @@ fn linux_socket_shutdown(descriptor: u64, how: u64) -> u64 {
 }
 
 fn linux_socket_name(descriptor: u64, address: u64, length: u64, peer: bool) -> u64 {
-    let descriptor = u64::from(descriptor as u32);
     let Some(slot) = linux_socket_slot(descriptor) else {
+        let descriptor = u64::from(descriptor as u32);
         return if linux_descriptor_open(descriptor) {
             LINUX_ENOTSOCK
         } else {
