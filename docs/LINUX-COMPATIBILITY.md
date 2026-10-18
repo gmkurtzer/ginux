@@ -70,7 +70,7 @@ Current totals: **80 Complete**, **247 Partial**, **48 Policy-denied**, **0 Miss
 | seccomp, audit, LSM ABI | Partial | Strict seccomp mode and the Linux LSM query API are implemented; BPF seccomp filters, audit, and active Linux security modules remain missing. |
 | vDSO/vvar | Missing | Time calls currently cross the syscall boundary. |
 | Linux module userspace ABI | Policy-denied | Module management is owned by the trusted control plane. |
-| ioctl families | Partial | Explicitly admitted console, pipe, and device requests. Runtime pipes report descriptor-local queued bytes through `FIONREAD`; ioctl remains a family of ABIs rather than one completed interface. |
+| ioctl families | Partial | Explicitly admitted console, pipe, and device requests. Runtime pipes report descriptor-local queued bytes through `FIONREAD`; duplicated pipe descriptors preserve their shared queue while `F_GETFL` reports Linux-correct directional access and mutable `O_NONBLOCK` state. ioctl remains a family of ABIs rather than one completed interface. |
 
 The current POSIX timer profile provides one monotonic `SIGEV_NONE` timer per
 domain, including relative/absolute arm, query, overrun, and

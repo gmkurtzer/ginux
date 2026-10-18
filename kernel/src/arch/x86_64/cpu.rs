@@ -9336,13 +9336,17 @@ fn linux_controller_syscall(
         LINUX_PIPE_SYSCALL => Some(linux_socket_pipe(
             first,
             0,
+            6,
             address_space::copy_to_current_user,
         )),
         LINUX_PIPE2_SYSCALL => Some(linux_socket_pipe(
             first,
             second,
+            6,
             address_space::copy_to_current_user,
         )),
+        LINUX_DUP_SYSCALL => Some(linux_device_dup_at_least(first, 6, false)),
+        LINUX_FCNTL_SYSCALL => Some(linux_descriptor_fcntl(first, second, third)),
         LINUX_CLOSE_SYSCALL => Some(linux_descriptor_close(first)),
         LINUX_GETRLIMIT_SYSCALL => Some(linux_getrlimit(
             first,
@@ -24541,16 +24545,26 @@ fn linux_splice_pipes(input: u64, output: u64, length: u64, flags: u64, consume:
 }
 
 fn linux_runtime_pipe(address: u64, flags: u64) -> u64 {
-    linux_socket_pipe(address, flags, copy_to_linux_user)
+    linux_socket_pipe(
+        address,
+        flags,
+        LINUX_AUX_DESCRIPTOR_FIRST,
+        copy_to_linux_user,
+    )
 }
 
-fn linux_socket_pipe(address: u64, flags: u64, copy: impl FnOnce(u64, &[u8]) -> bool) -> u64 {
+fn linux_socket_pipe(
+    address: u64,
+    flags: u64,
+    first_descriptor: u64,
+    copy: impl FnOnce(u64, &[u8]) -> bool,
+) -> u64 {
     if flags & !(LINUX_O_NONBLOCK | LINUX_O_CLOEXEC) != 0 {
         return LINUX_EINVAL;
     }
     let mut descriptors = [0_u64; 2];
     let mut found = 0;
-    for descriptor in LINUX_AUX_DESCRIPTOR_FIRST..LINUX_AUX_DESCRIPTOR_LIMIT {
+    for descriptor in first_descriptor..LINUX_AUX_DESCRIPTOR_LIMIT {
         if linux_aux_descriptor_free(descriptor) {
             descriptors[found] = descriptor;
             found += 1;
@@ -27610,6 +27624,11 @@ fn linux_descriptor_fcntl(descriptor: u64, command: u64, argument: u64) -> u64 {
         };
     }
     if linux_socket_slot(descriptor).is_some() {
+        let pipe_access = if state & LINUX_DEVICE_PIPE != 0 {
+            u64::from(state & 3 == LINUX_DESCRIPTOR_OUTPUT)
+        } else {
+            2
+        };
         let flags = usize::try_from(descriptor)
             .ok()
             .and_then(|index| ELF_PROBE_STDIO_SOCKET_FLAGS.get(index))
@@ -27622,7 +27641,7 @@ fn linux_descriptor_fcntl(descriptor: u64, command: u64, argument: u64) -> u64 {
             LINUX_F_GETFD | LINUX_F_SETFD => {
                 linux_fcntl_descriptor_flags(descriptor, command, argument)
             }
-            LINUX_F_GETFL => 2 | u64::from(flags.load(Ordering::SeqCst)),
+            LINUX_F_GETFL => pipe_access | u64::from(flags.load(Ordering::SeqCst)),
             LINUX_F_SETFL => linux_descriptor_set_nonblocking(flags, argument),
             _ => LINUX_EINVAL,
         };
