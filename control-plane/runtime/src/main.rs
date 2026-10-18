@@ -52,7 +52,9 @@ const LINUX_WRITE_SYSCALL: u64 = 1;
 const LINUX_IOCTL_SYSCALL: u64 = 16;
 const LINUX_EXIT_SYSCALL: u64 = 60;
 const LINUX_SYSINFO_SYSCALL: u64 = 99;
+const LINUX_GETRANDOM_SYSCALL: u64 = 318;
 const LINUX_EFAULT: u64 = u64::MAX - 13;
+const LINUX_EINVAL: u64 = u64::MAX - 21;
 static CONTROLLER_IDENTITY: &[u8] = b"GINUX_CONTROLLER_V0";
 const COMMAND_STATUS: u16 = 1;
 const COMMAND_COMPONENTS: u16 = 2;
@@ -383,6 +385,10 @@ extern "C" fn ginux_controller_main() -> ! {
         console,
         b"ginux: Linux live sysinfo accounting validated\r\n",
     );
+    if !linux_getrandom_contract(console) {
+        exit(NATIVE_SERVICE_EXIT_REJECTED);
+    }
+    write(console, b"ginux: Linux getrandom contract validated\r\n");
     if network_snapshot(network).is_some_and(|snapshot| snapshot[3] == 0) {
         write(console, b"eth0: automatic DHCP configuration\r\n");
         set_dhcp_network(console, network);
@@ -2191,6 +2197,34 @@ fn linux_sysinfo_contract(console: u64) -> bool {
             write(console, b" ");
         }
         write(console, b"\r\n");
+    }
+    valid
+}
+
+fn linux_getrandom_contract(console: u64) -> bool {
+    let mut output = [0_u8; 32];
+    let generated = linux_syscall(
+        LINUX_GETRANDOM_SYSCALL,
+        output.as_mut_ptr() as u64,
+        output.len() as u64,
+        0,
+    );
+    let valid = generated == output.len() as u64
+        && output[..16] != output[16..]
+        && linux_syscall(LINUX_GETRANDOM_SYSCALL, 1, 0, 0) == 0
+        && linux_syscall(LINUX_GETRANDOM_SYSCALL, output.as_mut_ptr() as u64, 1, 8) == LINUX_EINVAL
+        && linux_syscall(LINUX_GETRANDOM_SYSCALL, output.as_mut_ptr() as u64, 1, 6) == LINUX_EINVAL
+        && linux_syscall(LINUX_GETRANDOM_SYSCALL, 1, 1, 0) == LINUX_EFAULT
+        && [1_u64, 2, 4].into_iter().all(|flags| {
+            linux_syscall(
+                LINUX_GETRANDOM_SYSCALL,
+                output.as_mut_ptr() as u64,
+                1,
+                flags,
+            ) == 1
+        });
+    if !valid {
+        write(console, b"ginux: getrandom conformance failed\r\n");
     }
     valid
 }

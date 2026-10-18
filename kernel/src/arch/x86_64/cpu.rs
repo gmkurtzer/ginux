@@ -1044,8 +1044,23 @@ pub(crate) fn linux_startup_random() -> Option<[u8; 16]> {
 }
 
 fn linux_getrandom(address: u64, length: u64, flags: u64) -> u64 {
-    const LINUX_GRND_SUPPORTED: u64 = 0x7;
-    if flags & !LINUX_GRND_SUPPORTED != 0 {
+    linux_getrandom_with_copy(address, length, flags, copy_to_linux_user)
+}
+
+fn linux_getrandom_with_copy(
+    address: u64,
+    length: u64,
+    flags: u64,
+    copy: fn(u64, &[u8]) -> bool,
+) -> u64 {
+    const LINUX_GRND_NONBLOCK: u64 = 1;
+    const LINUX_GRND_RANDOM: u64 = 2;
+    const LINUX_GRND_INSECURE: u64 = 4;
+    const LINUX_GRND_SUPPORTED: u64 = LINUX_GRND_NONBLOCK | LINUX_GRND_RANDOM | LINUX_GRND_INSECURE;
+    if flags & !LINUX_GRND_SUPPORTED != 0
+        || flags & (LINUX_GRND_RANDOM | LINUX_GRND_INSECURE)
+            == LINUX_GRND_RANDOM | LINUX_GRND_INSECURE
+    {
         return LINUX_EINVAL;
     }
     let Ok(length) = usize::try_from(length) else {
@@ -1055,17 +1070,29 @@ fn linux_getrandom(address: u64, length: u64, flags: u64) -> u64 {
     while written < length {
         let Some(random) = linux_startup_random() else {
             return if written == 0 {
-                LINUX_EIO
+                if flags & LINUX_GRND_NONBLOCK != 0 {
+                    LINUX_EAGAIN
+                } else {
+                    LINUX_EIO
+                }
             } else {
                 written as u64
             };
         };
         let count = (length - written).min(random.len());
         let Some(destination) = address.checked_add(written as u64) else {
-            return LINUX_EFAULT;
+            return if written == 0 {
+                LINUX_EFAULT
+            } else {
+                written as u64
+            };
         };
-        if !copy_to_linux_user(destination, &random[..count]) {
-            return LINUX_EFAULT;
+        if !copy(destination, &random[..count]) {
+            return if written == 0 {
+                LINUX_EFAULT
+            } else {
+                written as u64
+            };
         }
         written += count;
     }
@@ -9257,6 +9284,12 @@ fn linux_controller_syscall(
                 },
             )
         }
+        LINUX_GETRANDOM_SYSCALL => Some(linux_getrandom_with_copy(
+            first,
+            second,
+            third,
+            address_space::copy_to_current_user,
+        )),
         LINUX_EXIT_SYSCALL | LINUX_EXIT_GROUP_SYSCALL => {
             let mut frame = UserTrapFrame::from_linux_syscall(
                 registers.into_array(),

@@ -94,6 +94,14 @@ exist; Linux-compatible structure layout, units, and invalid-address behavior
 are exercised from ring 3. The syscall remains Partial until accounting and
 process/thread semantics cover the complete Linux contract.
 
+`getrandom` accepts Linux `GRND_NONBLOCK`, `GRND_RANDOM`, and
+`GRND_INSECURE`, rejects unknown flags and the invalid
+`GRND_RANDOM|GRND_INSECURE` combination, preserves a successful partial copy
+when a later user range faults, and is directly exercised by the ring-3
+controller. Ginux currently treats hardware RNG availability as its ready
+entropy source; a mixed, reseeding kernel CSPRNG and interruptible large reads
+remain pending, so the syscall remains Partial.
+
 System V shared memory now uses domain-owned, dynamically allocated frame
 objects whose lifetime is independent of any one mapping. `shmget`, `shmat`,
 `shmdt`, and `shmctl(IPC_STAT/IPC_RMID)` provide keyed creation, shared page

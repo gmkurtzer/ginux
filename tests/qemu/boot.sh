@@ -2696,6 +2696,11 @@ if ! grep -q '^ginux: Linux live sysinfo accounting validated' "$output_file"; t
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux getrandom contract validated' "$output_file"; then
+    echo "Boot test failed: Linux getrandom behavior was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux container-local root credentials verified' "$output_file"; then
     echo "Boot test failed: Linux container-local root credentials were not verified." >&2
     exit 1
