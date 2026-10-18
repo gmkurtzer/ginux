@@ -790,6 +790,7 @@ const LINUX_UNBLOCKABLE_SIGNALS: u64 = (1 << (9 - 1)) | (1 << (19 - 1));
 const LINUX_STANDARD_SIGNAL_COUNT: u64 = 31;
 const LINUX_SIGSEGV: u64 = 11;
 const LINUX_SIGPIPE: u64 = 13;
+const LINUX_SIGALRM: u64 = 14;
 const LINUX_SIGTERM: u64 = 15;
 const LINUX_SIGXFSZ: u64 = 25;
 const LINUX_SI_USER: i32 = 0;
@@ -1526,6 +1527,8 @@ static ELF_PROBE_TIMERFD_DEADLINE: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_POSIX_TIMER_ACTIVE: BankedAtomicBool = BankedAtomicBool::new(false);
 static ELF_PROBE_POSIX_TIMER_INTERVAL: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_POSIX_TIMER_DEADLINE: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_REAL_TIMER_INTERVAL: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_REAL_TIMER_DEADLINE: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_PIPE_READ_DESCRIPTOR: BankedAtomicU16 = BankedAtomicU16::new(0);
 static ELF_PROBE_PIPE_WRITE_DESCRIPTOR: BankedAtomicU16 = BankedAtomicU16::new(0);
 static ELF_PROBE_PIPE_READ_FLAGS: BankedAtomicU32 = BankedAtomicU32::new(0);
@@ -3630,6 +3633,11 @@ fn execute_deferred_live_fork() -> bool {
     let mut child_runtime_state = parent_runtime_state;
     child_runtime_state.tid = child.pid;
     child_runtime_state.next_tid = child.pid.saturating_add(1);
+    child_runtime_state.real_timer_interval = 0;
+    child_runtime_state.real_timer_deadline = 0;
+    child_runtime_state.pending_signals = 0;
+    child_runtime_state.pending_signal_codes = [0; LINUX_SIGNAL_COUNT];
+    child_runtime_state.pending_signal_values = [0; LINUX_SIGNAL_COUNT];
     let Some(parent_state_slot) = linux_process_runtime_state(parent_pid) else {
         return false;
     };
@@ -6239,6 +6247,8 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
     ELF_PROBE_POSIX_TIMER_ACTIVE.store(false, Ordering::SeqCst);
     ELF_PROBE_POSIX_TIMER_INTERVAL.store(0, Ordering::SeqCst);
     ELF_PROBE_POSIX_TIMER_DEADLINE.store(0, Ordering::SeqCst);
+    ELF_PROBE_REAL_TIMER_INTERVAL.store(0, Ordering::SeqCst);
+    ELF_PROBE_REAL_TIMER_DEADLINE.store(0, Ordering::SeqCst);
     ELF_PROBE_PIPE_READ_DESCRIPTOR.store(0, Ordering::SeqCst);
     ELF_PROBE_PIPE_WRITE_DESCRIPTOR.store(0, Ordering::SeqCst);
     ELF_PROBE_PIPE_READ_FLAGS.store(0, Ordering::SeqCst);
@@ -8042,6 +8052,7 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_PARENT_RESUMED.store(true, Ordering::SeqCst);
     }
     expire_linux_waits();
+    let real_timer_expired = refresh_linux_real_timer();
     if ELF_PROBE_SECCOMP_STRICT.load(Ordering::SeqCst)
         && !linux_seccomp_strict_syscall_allowed(number)
     {
@@ -9302,6 +9313,11 @@ extern "sysv64" fn linux_syscall_handler(
     };
     let result = if LINUX_FSIZE_LIMIT_HIT.swap(false, Ordering::SeqCst) {
         linux_file_size_limit_signal(registers, syscall_return, (user_rip, user_rflags), result)
+    } else {
+        result
+    };
+    let result = if real_timer_expired {
+        linux_real_timer_signal(registers, syscall_return, (user_rip, user_rflags), result)
     } else {
         result
     };
@@ -10917,18 +10933,67 @@ fn linux_getitimer(which: u64, output_address: u64) -> u64 {
     if which > 2 {
         return LINUX_EINVAL;
     }
-    if !copy_to_linux_user(output_address, &[0_u8; 32]) {
+    let specification = if which == 0 {
+        let Some(now) = linux_elapsed_nanoseconds() else {
+            return LINUX_ENOSYS;
+        };
+        linux_interval_timer_specification(
+            ELF_PROBE_REAL_TIMER_INTERVAL.load(Ordering::SeqCst),
+            ELF_PROBE_REAL_TIMER_DEADLINE.load(Ordering::SeqCst),
+            now,
+        )
+    } else {
+        [0_u8; 32]
+    };
+    if !copy_to_linux_user(output_address, &specification) {
         return LINUX_EFAULT;
     }
     0
 }
 
 fn linux_alarm(seconds: u64) -> u64 {
-    if u64::from(seconds as u32) == 0 {
+    let seconds = u64::from(seconds as u32);
+    let Some(now) = linux_elapsed_nanoseconds() else {
+        return 0;
+    };
+    let old_deadline = ELF_PROBE_REAL_TIMER_DEADLINE.load(Ordering::SeqCst);
+    let remaining = old_deadline
+        .saturating_sub(now)
+        .div_ceil(NANOSECONDS_PER_SECOND);
+    let deadline = if seconds == 0 {
         0
     } else {
-        LINUX_ENOSYS
+        now.saturating_add(seconds.saturating_mul(NANOSECONDS_PER_SECOND))
+    };
+    ELF_PROBE_REAL_TIMER_INTERVAL.store(0, Ordering::SeqCst);
+    ELF_PROBE_REAL_TIMER_DEADLINE.store(deadline, Ordering::SeqCst);
+    remaining.min(u64::from(u32::MAX))
+}
+
+fn refresh_linux_real_timer() -> bool {
+    let deadline = ELF_PROBE_REAL_TIMER_DEADLINE.load(Ordering::SeqCst);
+    if deadline == 0 {
+        return false;
     }
+    let Some(now) = linux_elapsed_nanoseconds() else {
+        return false;
+    };
+    if now < deadline {
+        return false;
+    }
+    let interval = ELF_PROBE_REAL_TIMER_INTERVAL.load(Ordering::SeqCst);
+    let next = now
+        .saturating_sub(deadline)
+        .checked_div(interval)
+        .map_or(0, |elapsed| {
+            deadline.saturating_add((elapsed + 1).saturating_mul(interval))
+        });
+    ELF_PROBE_REAL_TIMER_DEADLINE.store(next, Ordering::SeqCst);
+    let index = LINUX_SIGALRM as usize - 1;
+    ELF_PROBE_PENDING_SIGNAL_CODES[index].store(LINUX_SI_KERNEL as u32, Ordering::SeqCst);
+    ELF_PROBE_PENDING_SIGNAL_VALUES[index].store(0, Ordering::SeqCst);
+    ELF_PROBE_PENDING_SIGNALS.fetch_or(1 << index, Ordering::SeqCst);
+    true
 }
 
 fn linux_nanosleep_live_return(
@@ -11055,22 +11120,73 @@ fn linux_setitimer(which: u64, input_address: u64, old_output_address: u64) -> u
     if which > 2 {
         return LINUX_EINVAL;
     }
-    if !linux_readable_user_range_contains(input_address, 32)
-        || (old_output_address != 0 && !linux_writable_user_range_contains(old_output_address, 32))
-    {
+    if old_output_address != 0 && !linux_writable_user_range_contains(old_output_address, 32) {
         return LINUX_EFAULT;
     }
     let mut requested = [0_u8; 32];
-    if !copy_from_linux_user(input_address, &mut requested) {
+    if input_address != 0 && !copy_from_linux_user(input_address, &mut requested) {
         return LINUX_EFAULT;
     }
-    if requested != [0_u8; 32] {
+    let Some(interval) = linux_timeval_nanoseconds(&requested[..16]) else {
+        return LINUX_EINVAL;
+    };
+    let Some(value) = linux_timeval_nanoseconds(&requested[16..]) else {
+        return LINUX_EINVAL;
+    };
+    if which != 0 && (interval != 0 || value != 0) {
         return LINUX_ENOSYS;
     }
-    if old_output_address != 0 && !copy_to_linux_user(old_output_address, &[0_u8; 32]) {
+    let Some(now) = linux_elapsed_nanoseconds() else {
+        return LINUX_ENOSYS;
+    };
+    let old = if which == 0 {
+        linux_interval_timer_specification(
+            ELF_PROBE_REAL_TIMER_INTERVAL.load(Ordering::SeqCst),
+            ELF_PROBE_REAL_TIMER_DEADLINE.load(Ordering::SeqCst),
+            now,
+        )
+    } else {
+        [0_u8; 32]
+    };
+    let deadline = if value == 0 {
+        0
+    } else {
+        let Some(deadline) = now.checked_add(value) else {
+            return LINUX_EINVAL;
+        };
+        deadline
+    };
+    if old_output_address != 0 && !copy_to_linux_user(old_output_address, &old) {
         return LINUX_EFAULT;
     }
+    if which == 0 {
+        ELF_PROBE_REAL_TIMER_INTERVAL.store(interval, Ordering::SeqCst);
+        ELF_PROBE_REAL_TIMER_DEADLINE.store(deadline, Ordering::SeqCst);
+    }
     0
+}
+
+fn linux_timeval_nanoseconds(value: &[u8]) -> Option<u64> {
+    let seconds = i64::from_ne_bytes(value.get(..8)?.try_into().ok()?);
+    let microseconds = i64::from_ne_bytes(value.get(8..16)?.try_into().ok()?);
+    if seconds < 0 || !(0..1_000_000).contains(&microseconds) {
+        return None;
+    }
+    (seconds as u64)
+        .checked_mul(NANOSECONDS_PER_SECOND)
+        .and_then(|seconds| seconds.checked_add((microseconds as u64) * 1_000))
+}
+
+fn linux_interval_timer_specification(interval: u64, deadline: u64, now: u64) -> [u8; 32] {
+    let remaining = deadline.saturating_sub(now);
+    let mut specification = [0_u8; 32];
+    for (offset, value) in [(0, interval), (16, remaining)] {
+        specification[offset..offset + 8]
+            .copy_from_slice(&(value / NANOSECONDS_PER_SECOND).to_ne_bytes());
+        specification[offset + 8..offset + 16]
+            .copy_from_slice(&((value % NANOSECONDS_PER_SECOND) / 1_000).to_ne_bytes());
+    }
+    specification
 }
 
 fn linux_futex_live_return(
@@ -11684,6 +11800,8 @@ struct LinuxProcessRuntimeState {
     no_new_privileges: bool,
     seccomp_strict: bool,
     membarrier_registrations: u32,
+    real_timer_interval: u64,
+    real_timer_deadline: u64,
     pending_signals: u64,
     pending_signal_codes: [u32; LINUX_SIGNAL_COUNT],
     pending_signal_values: [u64; LINUX_SIGNAL_COUNT],
@@ -11723,6 +11841,8 @@ impl LinuxProcessRuntimeState {
         no_new_privileges: false,
         seccomp_strict: false,
         membarrier_registrations: 0,
+        real_timer_interval: 0,
+        real_timer_deadline: 0,
         pending_signals: 0,
         pending_signal_codes: [0; LINUX_SIGNAL_COUNT],
         pending_signal_values: [0; LINUX_SIGNAL_COUNT],
@@ -11787,6 +11907,8 @@ fn capture_linux_process_runtime_state() -> Option<LinuxProcessRuntimeState> {
         no_new_privileges: ELF_PROBE_NO_NEW_PRIVS.load(Ordering::SeqCst),
         seccomp_strict: ELF_PROBE_SECCOMP_STRICT.load(Ordering::SeqCst),
         membarrier_registrations: ELF_PROBE_MEMBARRIER_REGISTRATIONS.load(Ordering::SeqCst),
+        real_timer_interval: ELF_PROBE_REAL_TIMER_INTERVAL.load(Ordering::SeqCst),
+        real_timer_deadline: ELF_PROBE_REAL_TIMER_DEADLINE.load(Ordering::SeqCst),
         pending_signals: ELF_PROBE_PENDING_SIGNALS.load(Ordering::SeqCst),
         pending_signal_codes: core::array::from_fn(|signal| {
             ELF_PROBE_PENDING_SIGNAL_CODES[signal].load(Ordering::SeqCst)
@@ -11843,6 +11965,8 @@ fn restore_linux_process_runtime_state(state: LinuxProcessRuntimeState) {
     ELF_PROBE_NO_NEW_PRIVS.store(state.no_new_privileges, Ordering::SeqCst);
     ELF_PROBE_SECCOMP_STRICT.store(state.seccomp_strict, Ordering::SeqCst);
     ELF_PROBE_MEMBARRIER_REGISTRATIONS.store(state.membarrier_registrations, Ordering::SeqCst);
+    ELF_PROBE_REAL_TIMER_INTERVAL.store(state.real_timer_interval, Ordering::SeqCst);
+    ELF_PROBE_REAL_TIMER_DEADLINE.store(state.real_timer_deadline, Ordering::SeqCst);
     ELF_PROBE_PENDING_SIGNALS.store(state.pending_signals, Ordering::SeqCst);
     ELF_PROBE_EXEC_IGNORED_SIGNALS.store(state.exec_ignored_signals, Ordering::SeqCst);
     ELF_PROBE_ALT_STACK_POINTER.store(state.alternate_signal_stack[0], Ordering::SeqCst);
@@ -15910,7 +16034,61 @@ fn verify_linux_timer_argument_widths() -> bool {
     event[12..16].copy_from_slice(&SIGEV_NONE.to_ne_bytes());
     let prepared =
         copy_to_linux_user(mapping, &[0_u8; 32]) && copy_to_linux_user(event_address, &event);
-    let interval_timers = prepared
+    let mut real_timer = [0_u8; 32];
+    real_timer[..8].copy_from_slice(&1_i64.to_ne_bytes());
+    real_timer[8..16].copy_from_slice(&250_000_i64.to_ne_bytes());
+    real_timer[16..24].copy_from_slice(&2_i64.to_ne_bytes());
+    real_timer[24..].copy_from_slice(&500_000_i64.to_ne_bytes());
+    let real_timer_state = prepared
+        && copy_to_linux_user(mapping, &real_timer)
+        && linux_setitimer(UPPER_REGISTER_BITS, mapping, timer_address) == 0
+        && ELF_PROBE_REAL_TIMER_INTERVAL.load(Ordering::SeqCst)
+            == NANOSECONDS_PER_SECOND + 250_000_000
+        && ELF_PROBE_REAL_TIMER_DEADLINE.load(Ordering::SeqCst) != 0
+        && linux_getitimer(UPPER_REGISTER_BITS, timer_address) == 0
+        && {
+            let mut current = [0_u8; 32];
+            copy_from_linux_user(timer_address, &mut current)
+                && i64::from_ne_bytes(current[..8].try_into().unwrap()) == 1
+                && i64::from_ne_bytes(current[8..16].try_into().unwrap()) == 250_000
+                && i64::from_ne_bytes(current[16..24].try_into().unwrap()) >= 0
+                && (0..1_000_000).contains(&i64::from_ne_bytes(current[24..].try_into().unwrap()))
+        }
+        && linux_alarm(UPPER_REGISTER_BITS | 3) == 3
+        && ELF_PROBE_REAL_TIMER_INTERVAL.load(Ordering::SeqCst) == 0
+        && linux_alarm(UPPER_REGISTER_BITS) == 3
+        && ELF_PROBE_REAL_TIMER_DEADLINE.load(Ordering::SeqCst) == 0;
+    real_timer[24..].copy_from_slice(&1_000_000_i64.to_ne_bytes());
+    let invalid_timeval = real_timer_state
+        && copy_to_linux_user(mapping, &real_timer)
+        && linux_setitimer(0, mapping, 0) == LINUX_EINVAL;
+    ELF_PROBE_REAL_TIMER_INTERVAL.store(NANOSECONDS_PER_SECOND, Ordering::SeqCst);
+    ELF_PROBE_REAL_TIMER_DEADLINE.store(1, Ordering::SeqCst);
+    let interval_expiry = invalid_timeval
+        && refresh_linux_real_timer()
+        && ELF_PROBE_REAL_TIMER_DEADLINE.load(Ordering::SeqCst) > 1
+        && ELF_PROBE_PENDING_SIGNALS.load(Ordering::SeqCst) & (1 << (LINUX_SIGALRM - 1)) != 0;
+    ELF_PROBE_SIGNAL_HANDLERS[LINUX_SIGALRM as usize - 1].store(1, Ordering::SeqCst);
+    let expiration_delivered = interval_expiry
+        && linux_real_timer_signal(
+            core::ptr::null_mut(),
+            LinuxUserContext {
+                registers: LinuxSyscallFrame::ZERO,
+                rip: 0,
+                rsp: 0,
+                rflags: 0,
+                rax: 0,
+                fs_base: 0,
+            },
+            (0, 0),
+            37,
+        ) == 37
+        && ELF_PROBE_PENDING_SIGNALS.load(Ordering::SeqCst) & (1 << (LINUX_SIGALRM - 1)) == 0;
+    ELF_PROBE_SIGNAL_HANDLERS[LINUX_SIGALRM as usize - 1].store(0, Ordering::SeqCst);
+    ELF_PROBE_REAL_TIMER_INTERVAL.store(0, Ordering::SeqCst);
+    ELF_PROBE_REAL_TIMER_DEADLINE.store(0, Ordering::SeqCst);
+    let interval_timers = expiration_delivered
+        && copy_to_linux_user(mapping, &[0_u8; 32])
         && linux_getitimer(UPPER_REGISTER_BITS, mapping) == 0
         && linux_setitimer(UPPER_REGISTER_BITS, mapping, 0) == 0
         && linux_alarm(UPPER_REGISTER_BITS) == 0;
@@ -25997,6 +26175,23 @@ fn linux_file_size_limit_signal(
         interrupted,
         return_registers,
     );
+    if delivered == LINUX_RETURN_TO_KERNEL || delivered != 0 {
+        delivered
+    } else if LINUX_SIGNAL_ACTIVE.load(Ordering::SeqCst) {
+        0
+    } else {
+        result
+    }
+}
+
+fn linux_real_timer_signal(
+    output: *mut LinuxSyscallFrame,
+    mut interrupted: LinuxUserContext,
+    return_registers: (u64, u64),
+    result: u64,
+) -> u64 {
+    interrupted.rax = result;
+    let delivered = linux_deliver_pending_signal(output, interrupted, return_registers);
     if delivered == LINUX_RETURN_TO_KERNEL || delivered != 0 {
         delivered
     } else if LINUX_SIGNAL_ACTIVE.load(Ordering::SeqCst) {

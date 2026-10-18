@@ -5055,9 +5055,10 @@ resolution_valid:
     mov edx, 0x405c00
     push 38
     pop rax
-    call syscall_expect_enosys
-    movabs rax, 0x1122334455667788
-    cmp qword ptr [0x405c00], rax
+    call syscall_expect_zero
+    cmp qword ptr [0x405c00], 0
+    require_equal
+    cmp qword ptr [0x405c18], 0
     require_equal
 
     mov qword ptr [0x405be0], 0
@@ -5067,7 +5068,7 @@ resolution_valid:
     push 38
     pop rax
     call syscall_expect_zero
-    cmp qword ptr [0x405c00], 0
+    cmp qword ptr [0x405c00], 1
     require_equal
     cmp qword ptr [0x405c18], 0
     require_equal

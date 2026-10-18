@@ -79,6 +79,15 @@ Linux's 32-bit UAPI conversion rules even when the unused upper register bits
 are nonzero. Signal/thread notification, realtime clocks, multiple timer
 objects, and overrun accumulation remain pending.
 
+`ITIMER_REAL` is shared by `setitimer`, `getitimer`, and `alarm`, with Linux
+`timeval` validation, old-value reporting, rounded remaining seconds from
+`alarm`, one-shot and periodic deadlines, and `SIGALRM` publication at syscall
+boundaries. The state survives `exec` and is cleared for a fork child. Runtime
+verification covers arm/query/disarm, invalid microseconds, periodic deadline
+advancement, pending-signal delivery, and upper-register argument garbage.
+`ITIMER_VIRTUAL`, `ITIMER_PROF`, and interruption of an already blocked syscall
+at an asynchronous timer deadline remain pending.
+
 Filesystem syscall boundaries convert Linux `int`, `unsigned int`, `mode_t`,
 `uid_t`, and `gid_t` arguments from the low 32 register bits before validating
 them. Boot verification covers dirty upper register bits for `openat`,
