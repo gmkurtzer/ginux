@@ -180,6 +180,7 @@ struct Runtime {
 static mut PLATFORM: Option<Platform> = None;
 static mut RUNTIME: Option<Runtime> = None;
 static mut SLOTS: [Slot; SLOT_COUNT] = [Slot::EMPTY; SLOT_COUNT];
+static mut UNIX_INFLIGHT_RIGHTS: usize = 0;
 static mut SOCKET_STORAGE: [SocketStorage<'static>; SLOT_COUNT] =
     [SocketStorage::EMPTY; SLOT_COUNT];
 static mut TCP_RX: [[u8; TCP_BUFFER_SIZE]; SLOT_COUNT] = [[0; TCP_BUFFER_SIZE]; SLOT_COUNT];
@@ -445,6 +446,10 @@ pub(crate) fn close(slot: u8) -> bool {
         return true;
     }
     if state.kind == Kind::Unix || state.peer.is_some() && !state.listening {
+        let pending_right_count = usize::from(state.pending_right_count);
+        if pending_right_count > unsafe { UNIX_INFLIGHT_RIGHTS } {
+            return false;
+        }
         if !release_local_pages(state.local_first) {
             return false;
         }
@@ -456,9 +461,9 @@ pub(crate) fn close(slot: u8) -> bool {
                 runtime.sockets.remove(handle);
             }
         }
-        let pending_right_count = usize::from(state.pending_right_count);
         let pending_rights = state.pending_right_slots;
         *state = Slot::EMPTY;
+        unsafe { UNIX_INFLIGHT_RIGHTS -= pending_right_count };
         for right in pending_rights.into_iter().take(pending_right_count) {
             let _ = close(right);
         }
@@ -514,6 +519,7 @@ pub(crate) fn shutdown() -> bool {
     if unsafe { SLOTS.iter().any(|slot| slot.occupied) } {
         return false;
     }
+    unsafe { UNIX_INFLIGHT_RIGHTS = 0 };
     if unsafe { RUNTIME.is_none() } {
         return true;
     }
@@ -1490,12 +1496,20 @@ pub(crate) fn queue_unix_rights(sender: u8, rights: &[(u8, u32)]) -> Result<(), 
     if peer_state.pending_right_count != 0 {
         return Err(Error::WouldBlock);
     }
+    let next_inflight = unsafe { UNIX_INFLIGHT_RIGHTS }
+        .checked_add(rights.len())
+        .ok_or(Error::Exhausted)?;
     for (index, (right, flags)) in rights.iter().copied().enumerate() {
         peer_state.pending_right_slots[index] = right;
         peer_state.pending_right_flags[index] = flags;
     }
     peer_state.pending_right_count = rights.len() as u8;
+    unsafe { UNIX_INFLIGHT_RIGHTS = next_inflight };
     Ok(())
+}
+
+pub(crate) fn unix_inflight_rights() -> usize {
+    unsafe { UNIX_INFLIGHT_RIGHTS }
 }
 
 pub(crate) fn unix_right_queue_available(sender: u8, rights: &[u8]) -> Result<(), Error> {
@@ -1559,7 +1573,11 @@ pub(crate) fn receive_unix_rights(
             }
         }
     } else {
+        if count > unsafe { UNIX_INFLIGHT_RIGHTS } {
+            return Err(Error::Invalid);
+        }
         state.pending_right_count = 0;
+        unsafe { UNIX_INFLIGHT_RIGHTS -= count };
     }
     for (index, entry) in output.iter_mut().enumerate().take(count) {
         *entry = (
@@ -1630,7 +1648,12 @@ pub(crate) fn discard_unix_ancillary(receiver: u8) -> Result<bool, Error> {
         .filter(|state| state.occupied && state.kind == Kind::Unix)
         .ok_or(Error::Invalid)?;
     state.pending_credentials = None;
-    let count = usize::from(core::mem::take(&mut state.pending_right_count));
+    let count = usize::from(state.pending_right_count);
+    if count > unsafe { UNIX_INFLIGHT_RIGHTS } {
+        return Err(Error::Invalid);
+    }
+    state.pending_right_count = 0;
+    unsafe { UNIX_INFLIGHT_RIGHTS -= count };
     let rights = state.pending_right_slots;
     let mut closed = count != 0;
     for right in rights.into_iter().take(count) {
@@ -1650,7 +1673,12 @@ pub(crate) fn discard_unix_rights(receiver: u8) -> Result<bool, Error> {
     let state = unsafe { SLOTS.get_mut(usize::from(receiver)) }
         .filter(|state| state.occupied && state.kind == Kind::Unix)
         .ok_or(Error::Invalid)?;
-    let count = usize::from(core::mem::take(&mut state.pending_right_count));
+    let count = usize::from(state.pending_right_count);
+    if count > unsafe { UNIX_INFLIGHT_RIGHTS } {
+        return Err(Error::Invalid);
+    }
+    state.pending_right_count = 0;
+    unsafe { UNIX_INFLIGHT_RIGHTS -= count };
     let rights = state.pending_right_slots;
     let mut closed = count != 0;
     for right in rights.into_iter().take(count) {

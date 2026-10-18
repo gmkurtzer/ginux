@@ -514,6 +514,7 @@ const LINUX_ENOSYS: u64 = u64::MAX - 37;
 const LINUX_ENOTEMPTY: u64 = u64::MAX - 38;
 const LINUX_EROFS: u64 = u64::MAX - 29;
 const LINUX_ETIMEDOUT: u64 = u64::MAX - 109;
+const LINUX_ETOOMANYREFS: u64 = u64::MAX - 108;
 const LINUX_ECONNRESET: u64 = u64::MAX - 103;
 const LINUX_ENOTCONN: u64 = u64::MAX - 106;
 const LINUX_EINPROGRESS: u64 = u64::MAX - 114;
@@ -13055,6 +13056,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let messages = verify_linux_sysv_message_queue_syscalls();
     let process_advice = verify_linux_process_madvise_syscall();
     let posix_queues = verify_linux_posix_message_queue_syscalls();
+    let unix_inflight_rights = verify_linux_unix_inflight_rights();
     let aio = verify_linux_aio_syscalls();
     let secret_memory = verify_linux_memfd_secret_syscall();
     let mount_queries = verify_linux_mount_query_syscalls();
@@ -13095,6 +13097,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         messages,
         process_advice,
         posix_queues,
+        unix_inflight_rights,
         aio,
         secret_memory,
         mount_queries,
@@ -13138,6 +13141,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && messages
         && process_advice
         && posix_queues
+        && unix_inflight_rights
         && aio
         && secret_memory
         && mount_queries
@@ -14716,6 +14720,80 @@ fn verify_linux_posix_message_queue_syscalls() -> bool {
     let valid = received && queried && lifecycle && linked_unlinked && restored && unmapped;
     if valid {
         serial_write("ginux: Linux POSIX message queue resource limit enforced\r\n");
+    }
+    valid
+}
+
+fn verify_linux_unix_inflight_rights() -> bool {
+    if crate::linux_socket::unix_inflight_rights() != 0 {
+        return false;
+    }
+    let Some(original_limit) = linux_resource_limit_values(
+        LINUX_RLIMIT_NOFILE,
+        LINUX_RUNTIME_MODE.load(Ordering::SeqCst),
+    ) else {
+        return false;
+    };
+    let Ok((sender, receiver)) = crate::linux_socket::open_pair() else {
+        return false;
+    };
+    let first_retained = crate::linux_socket::duplicate(sender);
+    let first_queued = if first_retained {
+        if crate::linux_socket::queue_unix_rights(sender, &[(sender, 0)]).is_ok() {
+            crate::linux_socket::unix_inflight_rights() == 1
+        } else {
+            let _ = crate::linux_socket::close(sender);
+            false
+        }
+    } else {
+        false
+    };
+    let limit_enforced = first_queued
+        && linux_set_process_resource_limit(
+            current_linux_process_pid(),
+            LINUX_RLIMIT_NOFILE,
+            [0, original_limit[1]],
+        ) == 0
+        && linux_unix_inflight_limit_exceeded();
+    let limit_restored = linux_set_process_resource_limit(
+        current_linux_process_pid(),
+        LINUX_RLIMIT_NOFILE,
+        original_limit,
+    ) == 0;
+    let mut received = [(0_u8, 0_u32); crate::linux_socket::PASSED_RIGHT_LIMIT];
+    let first_received = first_queued
+        && crate::linux_socket::receive_unix_rights(receiver, &mut received, false) == Ok(1)
+        && received[0].0 == sender
+        && crate::linux_socket::unix_inflight_rights() == 0
+        && crate::linux_socket::close(received[0].0);
+    let second_retained = first_received && crate::linux_socket::duplicate(sender);
+    let second_queued = if second_retained {
+        if crate::linux_socket::queue_unix_rights(sender, &[(sender, 0)]).is_ok() {
+            crate::linux_socket::unix_inflight_rights() == 1
+        } else {
+            let _ = crate::linux_socket::close(sender);
+            false
+        }
+    } else {
+        false
+    };
+    let receiver_closed = second_queued
+        && crate::linux_socket::close(receiver)
+        && crate::linux_socket::unix_inflight_rights() == 0;
+    if !receiver_closed {
+        let _ = crate::linux_socket::discard_unix_rights(receiver);
+        let _ = crate::linux_socket::close(receiver);
+    }
+    let sender_closed = crate::linux_socket::close(sender);
+    let valid = limit_enforced
+        && limit_restored
+        && first_received
+        && second_queued
+        && receiver_closed
+        && sender_closed
+        && crate::linux_socket::unix_inflight_rights() == 0;
+    if valid {
+        serial_write("ginux: Linux UNIX in-flight descriptor limit enforced\r\n");
     }
     valid
 }
@@ -21245,6 +21323,9 @@ fn linux_socket_sendmsg(descriptor: u64, message: u64, flags: u64) -> u64 {
                 ) {
                     return linux_socket_error(error);
                 }
+                if linux_unix_inflight_limit_exceeded() {
+                    return LINUX_ETOOMANYREFS;
+                }
             }
             2 if ancillary_length == 28 && (28..=32).contains(&control_length) => {
                 let pid = i32::from_ne_bytes(ancillary[16..20].try_into().unwrap());
@@ -21358,7 +21439,7 @@ fn linux_socket_sendmsg(descriptor: u64, message: u64, flags: u64) -> u64 {
 }
 
 fn linux_install_received_socket(slot: u8, flags: u32, close_on_exec: bool) -> Option<u64> {
-    let descriptor = (LINUX_AUX_DESCRIPTOR_FIRST..LINUX_AUX_DESCRIPTOR_LIMIT)
+    let descriptor = (LINUX_AUX_DESCRIPTOR_FIRST..linux_nofile_soft_limit())
         .find(|descriptor| linux_aux_descriptor_free(*descriptor))?;
     let index = (descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize;
     ELF_PROBE_SOCKET_SLOTS[index].store(slot + 1, Ordering::SeqCst);
@@ -21366,6 +21447,10 @@ fn linux_install_received_socket(slot: u8, flags: u32, close_on_exec: bool) -> O
     ELF_PROBE_DEVICE_DESCRIPTORS[index].store(LINUX_DEVICE_SOCKET | 3, Ordering::SeqCst);
     set_linux_descriptor_close_on_exec(descriptor, close_on_exec);
     Some(descriptor)
+}
+
+fn linux_unix_inflight_limit_exceeded() -> bool {
+    crate::linux_socket::unix_inflight_rights() > linux_nofile_soft_limit() as usize
 }
 
 fn linux_socket_recvmsg(descriptor: u64, message: u64, flags: u64) -> u64 {

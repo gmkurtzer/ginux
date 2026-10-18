@@ -122,8 +122,11 @@ the charge only when an unlinked queue's final descriptor closes.
 domain when Linux real/effective/saved UID and GID permission checks permit it;
 the fork-child lifecycle probe verifies mutation, observation, and restoration.
 Resource-specific enforcement not listed above, privileged hard-limit raises,
-and `RLIMIT_NOFILE` accounting for descriptors in flight over UNIX sockets
-remain pending, so the resource-limit family remains Partial.
+and unimplemented resource families remain pending, so the resource-limit
+family remains Partial. `RLIMIT_NOFILE` now also accounts for descriptors in
+flight over UNIX sockets, returns `ETOOMANYREFS` using Linux's current-count
+rule, releases charges on receive/discard/close, and closes received excess
+when the destination descriptor table reaches its soft limit.
 
 System V shared memory now uses domain-owned, dynamically allocated frame
 objects whose lifetime is independent of any one mapping. `shmget`, `shmat`,
