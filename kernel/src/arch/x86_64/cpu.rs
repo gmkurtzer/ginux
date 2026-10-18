@@ -13564,6 +13564,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let semaphores = verify_linux_sysv_semaphore_syscalls();
     let messages = verify_linux_sysv_message_queue_syscalls();
     let timer_argument_widths = verify_linux_timer_argument_widths();
+    let signal_argument_widths = verify_linux_signal_argument_widths();
     let process_advice = verify_linux_process_madvise_syscall();
     let posix_queues = verify_linux_posix_message_queue_syscalls();
     let unix_inflight_rights = verify_linux_unix_inflight_rights();
@@ -13608,6 +13609,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         semaphores,
         messages,
         timer_argument_widths,
+        signal_argument_widths,
         process_advice,
         posix_queues,
         unix_inflight_rights,
@@ -13655,6 +13657,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && semaphores
         && messages
         && timer_argument_widths
+        && signal_argument_widths
         && process_advice
         && posix_queues
         && unix_inflight_rights
@@ -15568,6 +15571,64 @@ fn verify_linux_timer_argument_widths() -> bool {
     }
     let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
     timerfd_valid && unmapped
+}
+
+fn verify_linux_signal_argument_widths() -> bool {
+    const UPPER_REGISTER_BITS: u64 = 1_u64 << 32;
+    let mapping = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    if !(LINUX_RUNTIME_DYNAMIC_MMAP_BASE..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
+        .contains(&mapping)
+    {
+        return false;
+    }
+    let current_pid = u64::from(current_linux_process_pid());
+    let current_tid = current_linux_tid().map(u64::from).unwrap_or(0);
+    let interrupted = LinuxUserContext {
+        registers: LinuxSyscallFrame::ZERO,
+        rip: 0,
+        rsp: 0,
+        rflags: 0,
+        rax: 0,
+        fs_base: 0,
+    };
+    let valid = linux_rt_sigaction(UPPER_REGISTER_BITS | 1, 0, mapping, LINUX_SIGNAL_SET_SIZE) == 0
+        && linux_rt_sigprocmask(
+            UPPER_REGISTER_BITS | LINUX_SIG_BLOCK,
+            0,
+            mapping,
+            LINUX_SIGNAL_SET_SIZE,
+        ) == 0
+        && linux_kill(
+            UPPER_REGISTER_BITS | current_pid,
+            (UPPER_REGISTER_BITS, LINUX_SI_USER, None),
+            core::ptr::null_mut(),
+            interrupted,
+            (0, 0),
+        ) == 0
+        && linux_tgkill_identity(
+            UPPER_REGISTER_BITS | current_pid,
+            UPPER_REGISTER_BITS | current_tid,
+        )
+        .is_ok()
+        && linux_tkill_identity(UPPER_REGISTER_BITS | current_tid).is_ok()
+        && linux_rt_sigqueueinfo(
+            UPPER_REGISTER_BITS | current_pid,
+            Some(UPPER_REGISTER_BITS | current_tid),
+            UPPER_REGISTER_BITS,
+            0,
+            core::ptr::null_mut(),
+            interrupted,
+            (0, 0),
+        ) == 0;
+    let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
+    valid && unmapped
 }
 
 fn verify_linux_sysv_semaphore_syscalls() -> bool {
@@ -30843,6 +30904,7 @@ fn linux_get_process_name(address: u64) -> u64 {
 }
 
 fn linux_rt_sigaction(signal: u64, action: u64, old_action: u64, set_size: u64) -> u64 {
+    let signal = u64::from(signal as u32);
     if set_size != LINUX_SIGNAL_SET_SIZE || !(1..=LINUX_SIGNAL_COUNT as u64).contains(&signal) {
         return LINUX_EINVAL;
     }
@@ -30965,6 +31027,7 @@ fn linux_sigaltstack(new_stack: u64, old_stack: u64) -> u64 {
 }
 
 fn linux_rt_sigprocmask(how: u64, set: u64, old_set: u64, set_size: u64) -> u64 {
+    let how = u64::from(how as u32);
     if set_size != LINUX_SIGNAL_SET_SIZE {
         return LINUX_EINVAL;
     }
@@ -31018,6 +31081,9 @@ fn linux_rt_sigqueueinfo(
     interrupted: LinuxUserContext,
     return_registers: (u64, u64),
 ) -> u64 {
+    let process = u64::from(process as u32);
+    let thread = thread.map(|thread| u64::from(thread as u32));
+    let signal = u64::from(signal as u32);
     if process != u64::from(current_linux_process_pid()) {
         return LINUX_ESRCH;
     }
@@ -31683,6 +31749,8 @@ fn linux_kill(
     return_registers: (u64, u64),
 ) -> u64 {
     let (signal, signal_code, signal_value) = generated;
+    let pid = u64::from(pid as u32);
+    let signal = u64::from(signal as u32);
     if !matches!(pid, 0 | 1) {
         return LINUX_ESRCH;
     }
@@ -32132,24 +32200,23 @@ fn linux_deliver_signal_to_blocked_wait(
 }
 
 fn linux_tgkill_identity(thread_group: u64, thread: u64) -> Result<LinuxThreadHandle, u64> {
-    if thread_group == 0
-        || thread == 0
-        || thread_group > i32::MAX as u64
-        || thread > i32::MAX as u64
-    {
+    let thread_group = thread_group as i32;
+    let thread = thread as i32;
+    if thread_group <= 0 || thread <= 0 {
         return Err(LINUX_EINVAL);
     }
     if thread_group != 1 {
         return Err(LINUX_ESRCH);
     }
-    linux_thread_handle_by_tid(thread).ok_or(LINUX_ESRCH)
+    linux_thread_handle_by_tid(thread as u64).ok_or(LINUX_ESRCH)
 }
 
 fn linux_tkill_identity(thread: u64) -> Result<(), u64> {
-    if thread == 0 || thread > i32::MAX as u64 {
+    let thread = thread as i32;
+    if thread <= 0 {
         return Err(LINUX_EINVAL);
     }
-    if current_linux_tid().map(u64::from) != Some(thread) {
+    if current_linux_tid() != Some(thread as u32) {
         return Err(LINUX_ESRCH);
     }
     Ok(())
