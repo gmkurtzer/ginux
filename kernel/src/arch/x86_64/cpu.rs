@@ -12269,6 +12269,7 @@ fn linux_sysv_ipc_error(error: crate::linux_sysv_ipc::Error) -> u64 {
 fn linux_shmget(key: u64, size: u64, flags: u64) -> u64 {
     const IPC_CREAT: u64 = 0o1000;
     const IPC_EXCL: u64 = 0o2000;
+    let flags = u64::from(flags as u32);
     if flags & !(0o777 | IPC_CREAT | IPC_EXCL) != 0 {
         return LINUX_EINVAL;
     }
@@ -12290,10 +12291,12 @@ fn linux_shmat(id: u64, requested: u64, flags: u64) -> u64 {
     const SHM_REMAP: u64 = 0o40_000;
     const SHM_EXEC: u64 = 0o100_000;
     const SHMLBA: u64 = PAGE_SIZE as u64;
+    let id = id as i32;
+    let flags = u64::from(flags as u32);
     if !LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
         return LINUX_ENOSYS;
     }
-    if id > u64::from(u32::MAX)
+    if id < 0
         || flags & !(SHM_RDONLY | SHM_RND | SHM_REMAP | SHM_EXEC) != 0
         || flags & SHM_REMAP != 0
     {
@@ -12374,7 +12377,9 @@ fn linux_shmctl(id: u64, command: u64, address: u64) -> u64 {
     const IPC_SET: u64 = 1;
     const IPC_STAT: u64 = 2;
     const IPC_64: u64 = 0x100;
-    if id > u64::from(u32::MAX) || command & !(IPC_64 | 0xff) != 0 {
+    let id = id as i32;
+    let command = u64::from(command as u32);
+    if id < 0 || command & !(IPC_64 | 0xff) != 0 {
         return LINUX_EINVAL;
     }
     match command & !IPC_64 {
@@ -12417,13 +12422,15 @@ fn linux_semget(key: u64, count: u64, flags: u64) -> u64 {
     const IPC_CREAT: u64 = 0o1000;
     const IPC_EXCL: u64 = 0o2000;
     const LINUX_SEMMSL: u64 = 32_000;
-    if flags & !(0o777 | IPC_CREAT | IPC_EXCL) != 0 || count > LINUX_SEMMSL {
+    let count = count as i32;
+    let flags = u64::from(flags as u32);
+    if count < 0 || flags & !(0o777 | IPC_CREAT | IPC_EXCL) != 0 || count as u64 > LINUX_SEMMSL {
         return LINUX_EINVAL;
     }
     let key = key as u32 as i32;
     crate::linux_sysv_ipc::semaphore_get_or_create(
         key,
-        count,
+        count as u64,
         flags as u16,
         key == 0 || flags & IPC_CREAT != 0,
         flags & IPC_EXCL != 0,
@@ -12447,7 +12454,8 @@ fn linux_semaphore_operation(
 
 fn linux_semop(id: u64, operations: u64, count: u64, timeout: u64) -> u64 {
     const LINUX_SEMOPM: usize = 500;
-    if id > i32::MAX as u64 {
+    let id = id as i32;
+    if id < 0 {
         return LINUX_EINVAL;
     }
     let Ok(count) = usize::try_from(count) else {
@@ -12489,13 +12497,14 @@ fn linux_semctl(id: u64, number: u64, command: u64, argument: u64) -> u64 {
     const GETZCNT: u64 = 15;
     const SETVAL: u64 = 16;
     const SETALL: u64 = 17;
-    if id > i32::MAX as u64 || command & !(IPC_64 | 0xff) != 0 {
+    let id = id as i32;
+    let number = number as i32;
+    let command = u64::from(command as u32);
+    if id < 0 || number < 0 || command & !(IPC_64 | 0xff) != 0 {
         return LINUX_EINVAL;
     }
     let id = id as u32;
-    let Ok(number) = usize::try_from(number) else {
-        return LINUX_EINVAL;
-    };
+    let number = number as usize;
     match command & !IPC_64 {
         IPC_RMID => {
             crate::linux_sysv_ipc::semaphore_remove(id).map_or_else(linux_sysv_ipc_error, |()| 0)
@@ -12587,6 +12596,7 @@ fn linux_semctl(id: u64, number: u64, command: u64, argument: u64) -> u64 {
 fn linux_msgget(key: u64, flags: u64) -> u64 {
     const IPC_CREAT: u64 = 0o1000;
     const IPC_EXCL: u64 = 0o2000;
+    let flags = u64::from(flags as u32);
     if flags & !(0o777 | IPC_CREAT | IPC_EXCL) != 0 {
         return LINUX_EINVAL;
     }
@@ -12603,7 +12613,9 @@ fn linux_msgget(key: u64, flags: u64) -> u64 {
 fn linux_msgsnd(id: u64, message: u64, size: u64, flags: u64) -> u64 {
     const IPC_NOWAIT: u64 = 0o4000;
     const LINUX_MSGMAX: usize = 8192;
-    if id > i32::MAX as u64 || flags & !IPC_NOWAIT != 0 {
+    let id = id as i32;
+    let flags = u64::from(flags as u32);
+    if id < 0 || flags & !IPC_NOWAIT != 0 {
         return LINUX_EINVAL;
     }
     let Ok(size) = usize::try_from(size) else {
@@ -12636,7 +12648,9 @@ fn linux_msgrcv(id: u64, message: u64, size: u64, selector: u64, flags: u64) -> 
     const MSG_NOERROR: u64 = 0o10_000;
     const MSG_EXCEPT: u64 = 0o20_000;
     const MSG_COPY: u64 = 0o40_000;
-    if id > i32::MAX as u64
+    let id = id as i32;
+    let flags = u64::from(flags as u32);
+    if id < 0
         || flags & !(IPC_NOWAIT | MSG_NOERROR | MSG_EXCEPT | MSG_COPY) != 0
         || flags & MSG_COPY != 0
             && (flags & IPC_NOWAIT == 0 || flags & MSG_EXCEPT != 0 || (selector as i64) < 0)
@@ -12671,7 +12685,9 @@ fn linux_msgctl(id: u64, command: u64, address: u64) -> u64 {
     const IPC_SET: u64 = 1;
     const IPC_STAT: u64 = 2;
     const IPC_64: u64 = 0x100;
-    if id > i32::MAX as u64 || command & !(IPC_64 | 0xff) != 0 {
+    let id = id as i32;
+    let command = u64::from(command as u32);
+    if id < 0 || command & !(IPC_64 | 0xff) != 0 {
         return LINUX_EINVAL;
     }
     let id = id as u32;
@@ -12794,6 +12810,8 @@ fn linux_release_posix_queue_charge(
 }
 
 fn linux_mq_open(name_address: u64, flags: u64, mode: u64, attributes: u64) -> u64 {
+    let flags = u64::from(flags as u32);
+    let mode = u64::from(mode as u32);
     let valid = 3 | LINUX_O_CREAT | LINUX_O_EXCL | LINUX_O_NONBLOCK | LINUX_O_CLOEXEC;
     if flags & !valid != 0
         || flags & 3 == 3
@@ -12906,6 +12924,8 @@ fn linux_mq_timedsend(
     priority: u64,
     timeout: u64,
 ) -> u64 {
+    let descriptor = u64::from(descriptor as u32);
+    let priority = u64::from(priority as u32);
     let Some(id) = linux_mq_descriptor_id(descriptor) else {
         return LINUX_EBADF;
     };
@@ -12952,6 +12972,7 @@ fn linux_mq_timedreceive(
     priority: u64,
     timeout: u64,
 ) -> u64 {
+    let descriptor = u64::from(descriptor as u32);
     let Some(id) = linux_mq_descriptor_id(descriptor) else {
         return LINUX_EBADF;
     };
@@ -12992,6 +13013,7 @@ fn linux_mq_timedreceive(
 }
 
 fn linux_mq_notify(descriptor: u64, event: u64) -> u64 {
+    let descriptor = u64::from(descriptor as u32);
     if linux_mq_descriptor_id(descriptor).is_none() {
         return LINUX_EBADF;
     }
@@ -13010,6 +13032,7 @@ fn linux_mq_notify(descriptor: u64, event: u64) -> u64 {
 }
 
 fn linux_mq_getsetattr(descriptor: u64, new: u64, old: u64) -> u64 {
+    let descriptor = u64::from(descriptor as u32);
     let Some(id) = linux_mq_descriptor_id(descriptor) else {
         return LINUX_EBADF;
     };
@@ -13533,12 +13556,18 @@ fn linux_listmount(request_address: u64, output_address: u64, count: u64, flags:
 }
 
 fn verify_linux_sysv_shared_memory_syscalls() -> bool {
+    const UPPER_REGISTER_BITS: u64 = 1_u64 << 32;
     let old_runtime = LINUX_RUNTIME_MODE.swap(true, Ordering::SeqCst);
-    let id = linux_shmget(0, 2 * PAGE_SIZE as u64, 0o600);
-    let first = (id <= i32::MAX as u64).then(|| linux_shmat(id, 0, 0));
+    let id = linux_shmget(
+        UPPER_REGISTER_BITS,
+        2 * PAGE_SIZE as u64,
+        UPPER_REGISTER_BITS | 0o600,
+    );
+    let first = (id <= i32::MAX as u64)
+        .then(|| linux_shmat(UPPER_REGISTER_BITS | id, 0, UPPER_REGISTER_BITS));
     let second = first
         .filter(|address| *address < LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
-        .map(|_| linux_shmat(id, 0, 0));
+        .map(|_| linux_shmat(UPPER_REGISTER_BITS | id, 0, UPPER_REGISTER_BITS));
     let mapped = first.zip(second).filter(|(first, second)| {
         *first >= LINUX_RUNTIME_DYNAMIC_MMAP_BASE
             && *first < LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39)
@@ -13553,7 +13582,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         })
     });
     let removed_while_attached = mapped.is_some()
-        && linux_shmctl(id, 0, 0) == 0
+        && linux_shmctl(UPPER_REGISTER_BITS | id, UPPER_REGISTER_BITS, 0) == 0
         && crate::linux_sysv_ipc::segment(id as u32).is_ok();
     let detached = mapped.is_some_and(|(first, second)| {
         linux_shmdt(first) == 0
@@ -15297,6 +15326,7 @@ fn verify_linux_aio_syscalls() -> bool {
 }
 
 fn verify_linux_posix_message_queue_syscalls() -> bool {
+    const UPPER_REGISTER_BITS: u64 = 1_u64 << 32;
     let mapping = linux_runtime_mmap(
         0,
         PAGE_SIZE as u64,
@@ -15323,14 +15353,24 @@ fn verify_linux_posix_message_queue_syscalls() -> bool {
         && copy_to_linux_user(mapping + 128, &limit);
     let rejected = prepared
         && linux_setrlimit(LINUX_RLIMIT_MSGQUEUE, mapping + 128) == 0
-        && linux_mq_open(mapping, LINUX_O_CREAT | 2, 0o600, mapping + 64) == LINUX_EMFILE
+        && linux_mq_open(
+            mapping,
+            UPPER_REGISTER_BITS | LINUX_O_CREAT | 2,
+            UPPER_REGISTER_BITS | 0o600,
+            mapping + 64,
+        ) == LINUX_EMFILE
         && ELF_PROBE_POSIX_MQ_BYTES.load(Ordering::SeqCst) == 0;
     limit[..8].copy_from_slice(&charge.to_ne_bytes());
     let exact_limit = rejected
         && copy_to_linux_user(mapping + 128, &limit)
         && linux_setrlimit(LINUX_RLIMIT_MSGQUEUE, mapping + 128) == 0;
     let descriptor = if exact_limit {
-        linux_mq_open(mapping, LINUX_O_CREAT | 2, 0o600, mapping + 64)
+        linux_mq_open(
+            mapping,
+            UPPER_REGISTER_BITS | LINUX_O_CREAT | 2,
+            UPPER_REGISTER_BITS | 0o600,
+            mapping + 64,
+        )
     } else {
         LINUX_EFAULT
     };
@@ -15338,11 +15378,24 @@ fn verify_linux_posix_message_queue_syscalls() -> bool {
         && ELF_PROBE_POSIX_MQ_BYTES.load(Ordering::SeqCst) == charge;
     let sent = opened
         && copy_to_linux_user(mapping + 256, b"low")
-        && linux_mq_timedsend(descriptor, mapping + 256, 3, 3, 0) == 0
+        && linux_mq_timedsend(
+            UPPER_REGISTER_BITS | descriptor,
+            mapping + 256,
+            3,
+            UPPER_REGISTER_BITS | 3,
+            0,
+        ) == 0
         && copy_to_linux_user(mapping + 256, b"high")
         && linux_mq_timedsend(descriptor, mapping + 256, 4, 9, 0) == 0;
-    let received =
-        sent && linux_mq_timedreceive(descriptor, mapping + 512, 32, mapping + 600, 0) == 4 && {
+    let received = sent
+        && linux_mq_timedreceive(
+            UPPER_REGISTER_BITS | descriptor,
+            mapping + 512,
+            32,
+            mapping + 600,
+            0,
+        ) == 4
+        && {
             let mut message = [0_u8; 4];
             let mut priority = [0_u8; 4];
             copy_from_linux_user(mapping + 512, &mut message)
@@ -15353,8 +15406,8 @@ fn verify_linux_posix_message_queue_syscalls() -> bool {
     let mut event = [0_u8; 16];
     event[12..].copy_from_slice(&1_i32.to_ne_bytes());
     let queried = copy_to_linux_user(mapping + 640, &event)
-        && linux_mq_notify(descriptor, mapping + 640) == 0
-        && linux_mq_getsetattr(descriptor, 0, mapping + 704) == 0
+        && linux_mq_notify(UPPER_REGISTER_BITS | descriptor, mapping + 640) == 0
+        && linux_mq_getsetattr(UPPER_REGISTER_BITS | descriptor, 0, mapping + 704) == 0
         && {
             let mut current = [0_u8; 64];
             copy_from_linux_user(mapping + 704, &mut current)
@@ -15763,6 +15816,7 @@ fn verify_linux_filesystem_argument_widths() -> bool {
 }
 
 fn verify_linux_sysv_semaphore_syscalls() -> bool {
+    const UPPER_REGISTER_BITS: u64 = 1_u64 << 32;
     const IPC_SET: u64 = 1;
     const IPC_STAT: u64 = 2;
     const GETVAL: u64 = 12;
@@ -15782,10 +15836,20 @@ fn verify_linux_sysv_semaphore_syscalls() -> bool {
     {
         return false;
     }
-    let id = linux_semget(0, 2, 0o600);
+    let id = linux_semget(
+        UPPER_REGISTER_BITS,
+        UPPER_REGISTER_BITS | 2,
+        UPPER_REGISTER_BITS | 0o600,
+    );
     let valid_id = id <= i32::MAX as u64;
-    let initialized =
-        valid_id && linux_semctl(id, 0, SETVAL, 2) == 0 && linux_semctl(id, 1, SETVAL, 0) == 0;
+    let initialized = valid_id
+        && linux_semctl(
+            UPPER_REGISTER_BITS | id,
+            UPPER_REGISTER_BITS,
+            UPPER_REGISTER_BITS | SETVAL,
+            2,
+        ) == 0
+        && linux_semctl(id, 1, SETVAL, 0) == 0;
     let operations = [0_u8, 0, 0xff, 0xff, 0, 0, 1, 0, 3, 0, 0, 0];
     let operations_written = copy_to_linux_user(mapping, &operations);
     let applied = initialized
@@ -15830,6 +15894,7 @@ fn verify_linux_sysv_semaphore_syscalls() -> bool {
 }
 
 fn verify_linux_sysv_message_queue_syscalls() -> bool {
+    const UPPER_REGISTER_BITS: u64 = 1_u64 << 32;
     const IPC_SET: u64 = 1;
     const IPC_STAT: u64 = 2;
     const IPC_NOWAIT: u64 = 0o4000;
@@ -15848,7 +15913,7 @@ fn verify_linux_sysv_message_queue_syscalls() -> bool {
     {
         return false;
     }
-    let id = linux_msgget(0, 0o600);
+    let id = linux_msgget(UPPER_REGISTER_BITS, UPPER_REGISTER_BITS | 0o600);
     let mut first = [0_u8; 15];
     first[..8].copy_from_slice(&7_i64.to_ne_bytes());
     first[8..].copy_from_slice(b"message");
@@ -15857,7 +15922,7 @@ fn verify_linux_sysv_message_queue_syscalls() -> bool {
     second[8..].copy_from_slice(b"two");
     let sent = id <= i32::MAX as u64
         && copy_to_linux_user(mapping, &first)
-        && linux_msgsnd(id, mapping, 7, 0) == 0
+        && linux_msgsnd(UPPER_REGISTER_BITS | id, mapping, 7, UPPER_REGISTER_BITS) == 0
         && copy_to_linux_user(mapping, &second)
         && linux_msgsnd(id, mapping, 3, 0) == 0;
     let stat_address = mapping + 256;

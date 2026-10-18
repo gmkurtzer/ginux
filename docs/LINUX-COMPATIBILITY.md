@@ -84,6 +84,11 @@ Filesystem syscall boundaries convert Linux `int`, `unsigned int`, `mode_t`,
 them. Boot verification covers dirty upper register bits for `openat`,
 `newfstatat`, `faccessat`, and `statx`; the same conversion is applied across
 the implemented `*at`, ownership, permission, truncate, and allocation paths.
+SysV shared-memory, semaphore, and message-queue IDs, keys, commands, counts,
+and flags likewise follow their declared signed or unsigned 32-bit Linux
+types. POSIX message-queue descriptors, open flags, modes, and priorities use
+the same conversion rules; their full lifecycle tests include nonzero unused
+upper register bits.
 
 The ring-3 controller directly verifies its Linux PID/TID, parent,
 process-group, session, UID/GID, supplementary-group, scheduler-yield, and
