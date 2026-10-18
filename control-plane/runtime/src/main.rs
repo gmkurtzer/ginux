@@ -57,8 +57,10 @@ const LINUX_GETPID_SYSCALL: u64 = 39;
 const LINUX_EXIT_SYSCALL: u64 = 60;
 const LINUX_UNAME_SYSCALL: u64 = 63;
 const LINUX_FCNTL_SYSCALL: u64 = 72;
+const LINUX_GETTIMEOFDAY_SYSCALL: u64 = 96;
 const LINUX_GETRLIMIT_SYSCALL: u64 = 97;
 const LINUX_SYSINFO_SYSCALL: u64 = 99;
+const LINUX_TIMES_SYSCALL: u64 = 100;
 const LINUX_GETUID_SYSCALL: u64 = 102;
 const LINUX_GETGID_SYSCALL: u64 = 104;
 const LINUX_GETEUID_SYSCALL: u64 = 107;
@@ -69,6 +71,9 @@ const LINUX_GETGROUPS_SYSCALL: u64 = 115;
 const LINUX_GETPGID_SYSCALL: u64 = 121;
 const LINUX_GETSID_SYSCALL: u64 = 124;
 const LINUX_GETTID_SYSCALL: u64 = 186;
+const LINUX_TIME_SYSCALL: u64 = 201;
+const LINUX_CLOCK_GETTIME_SYSCALL: u64 = 228;
+const LINUX_CLOCK_GETRES_SYSCALL: u64 = 229;
 const LINUX_GETRANDOM_SYSCALL: u64 = 318;
 const LINUX_PIPE2_SYSCALL: u64 = 293;
 const LINUX_FIONREAD: u64 = 0x541b;
@@ -80,6 +85,8 @@ const LINUX_EAGAIN: u64 = u64::MAX - 10;
 const LINUX_EFAULT: u64 = u64::MAX - 13;
 const LINUX_EINVAL: u64 = u64::MAX - 21;
 const LINUX_ESRCH: u64 = u64::MAX - 2;
+const LINUX_CLOCK_REALTIME: u64 = 0;
+const LINUX_CLOCK_MONOTONIC: u64 = 1;
 static CONTROLLER_IDENTITY: &[u8] = b"GINUX_CONTROLLER_V0";
 const COMMAND_STATUS: u16 = 1;
 const COMMAND_COMPONENTS: u16 = 2;
@@ -425,6 +432,10 @@ extern "C" fn ginux_controller_main() -> ! {
         exit(NATIVE_SERVICE_EXIT_REJECTED);
     }
     write(console, b"ginux: Linux process identity validated\r\n");
+    if !linux_timekeeping_contract(console) {
+        exit(NATIVE_SERVICE_EXIT_REJECTED);
+    }
+    write(console, b"ginux: Linux timekeeping validated\r\n");
     if !linux_pipe_fionread_contract(console) {
         exit(NATIVE_SERVICE_EXIT_REJECTED);
     }
@@ -2479,6 +2490,58 @@ fn linux_identity_contract(console: u64) -> bool {
         && linux_syscall(LINUX_SCHED_YIELD_SYSCALL, 0, 0, 0) == 0;
     if !valid {
         write(console, b"ginux: Linux process identity failed\r\n");
+    }
+    valid
+}
+
+fn linux_timekeeping_contract(console: u64) -> bool {
+    let mut realtime = [0_u64; 2];
+    let mut monotonic = [0_u64; 2];
+    let mut resolution = [0_u64; 2];
+    let mut timeval = [0_u64; 2];
+    let mut epoch = 0_u64;
+    let mut accounting = [u64::MAX; 4];
+    let valid = linux_syscall(
+        LINUX_CLOCK_GETTIME_SYSCALL,
+        LINUX_CLOCK_REALTIME,
+        realtime.as_mut_ptr() as u64,
+        0,
+    ) == 0
+        && realtime[0] != 0
+        && realtime[1] < 1_000_000_000
+        && linux_syscall(
+            LINUX_CLOCK_GETTIME_SYSCALL,
+            LINUX_CLOCK_MONOTONIC,
+            monotonic.as_mut_ptr() as u64,
+            0,
+        ) == 0
+        && monotonic[1] < 1_000_000_000
+        && linux_syscall(
+            LINUX_CLOCK_GETRES_SYSCALL,
+            LINUX_CLOCK_MONOTONIC,
+            resolution.as_mut_ptr() as u64,
+            0,
+        ) == 0
+        && resolution[0] == 0
+        && (1..1_000_000_000).contains(&resolution[1])
+        && linux_syscall(LINUX_CLOCK_GETTIME_SYSCALL, 10, 1, 0) == LINUX_EINVAL
+        && linux_syscall(LINUX_CLOCK_GETTIME_SYSCALL, LINUX_CLOCK_MONOTONIC, 1, 0) == LINUX_EFAULT
+        && linux_syscall(
+            LINUX_GETTIMEOFDAY_SYSCALL,
+            timeval.as_mut_ptr() as u64,
+            0,
+            0,
+        ) == 0
+        && (realtime[0]..=realtime[0].saturating_add(1)).contains(&timeval[0])
+        && timeval[1] < 1_000_000
+        && linux_syscall(LINUX_TIME_SYSCALL, (&mut epoch as *mut u64) as u64, 0, 0) == epoch
+        && epoch >= realtime[0]
+        && linux_syscall(LINUX_TIMES_SYSCALL, accounting.as_mut_ptr() as u64, 0, 0)
+            < u64::MAX - 4095
+        && accounting[0] != u64::MAX
+        && accounting[1..] == [0, 0, 0];
+    if !valid {
+        write(console, b"ginux: Linux timekeeping failed\r\n");
     }
     valid
 }

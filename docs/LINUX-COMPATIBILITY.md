@@ -80,6 +80,9 @@ objects, and overrun accumulation remain pending.
 The ring-3 controller directly verifies its Linux PID/TID, parent,
 process-group, session, UID/GID, supplementary-group, scheduler-yield, and
 `uname` contracts, including invalid PID, count, and userspace-address errors.
+It also directly exercises realtime and monotonic `clock_gettime`,
+`clock_getres`, `gettimeofday`, `time`, and `times`, including invalid clock
+and userspace-address behavior.
 
 `clock_gettime` and `clock_getres` accept every Linux static clock ID that is
 readable without changing system time: realtime, monotonic, process/thread CPU,

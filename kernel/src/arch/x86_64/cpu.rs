@@ -9353,6 +9353,11 @@ fn linux_controller_syscall(
             first,
             address_space::copy_to_current_user,
         )),
+        LINUX_CLOCK_GETTIME_SYSCALL => Some(linux_controller_clock_gettime(first, second)),
+        LINUX_CLOCK_GETRES_SYSCALL => Some(linux_controller_clock_getres(first, second)),
+        LINUX_GETTIMEOFDAY_SYSCALL => Some(linux_controller_gettimeofday(first, second)),
+        LINUX_TIME_SYSCALL => Some(linux_controller_time(first)),
+        LINUX_TIMES_SYSCALL => Some(linux_controller_times(first)),
         LINUX_GETRLIMIT_SYSCALL => Some(linux_getrlimit(
             first,
             second,
@@ -9430,6 +9435,128 @@ fn linux_controller_getgroups(size: u64, output: u64) -> u64 {
         return LINUX_EFAULT;
     }
     1
+}
+
+fn linux_controller_clock_value(clock: u64) -> Option<(u64, u64)> {
+    let mut value = if matches!(
+        clock,
+        LINUX_CLOCK_REALTIME
+            | LINUX_CLOCK_REALTIME_COARSE
+            | LINUX_CLOCK_REALTIME_ALARM
+            | LINUX_CLOCK_TAI
+    ) {
+        linux_host_realtime_time()
+    } else if matches!(
+        clock,
+        LINUX_CLOCK_MONOTONIC
+            | LINUX_CLOCK_PROCESS_CPUTIME_ID
+            | LINUX_CLOCK_THREAD_CPUTIME_ID
+            | LINUX_CLOCK_MONOTONIC_RAW
+            | LINUX_CLOCK_MONOTONIC_COARSE
+            | LINUX_CLOCK_BOOTTIME
+            | LINUX_CLOCK_BOOTTIME_ALARM
+    ) {
+        linux_system_elapsed_time()
+    } else {
+        None
+    }?;
+    if matches!(
+        clock,
+        LINUX_CLOCK_REALTIME_COARSE | LINUX_CLOCK_MONOTONIC_COARSE
+    ) {
+        let resolution = NANOSECONDS_PER_SECOND / LINUX_CLOCK_TICKS_PER_SECOND;
+        value.1 -= value.1 % resolution;
+    }
+    Some(value)
+}
+
+fn linux_controller_clock_gettime(clock: u64, output: u64) -> u64 {
+    let Some((seconds, nanoseconds)) = linux_controller_clock_value(clock) else {
+        return LINUX_EINVAL;
+    };
+    let mut timespec = [0_u8; 16];
+    timespec[..8].copy_from_slice(&seconds.to_ne_bytes());
+    timespec[8..].copy_from_slice(&nanoseconds.to_ne_bytes());
+    if address_space::copy_to_current_user(output, &timespec) {
+        0
+    } else {
+        LINUX_EFAULT
+    }
+}
+
+fn linux_controller_clock_getres(clock: u64, output: u64) -> u64 {
+    if !linux_clock_supported(clock) {
+        return LINUX_EINVAL;
+    }
+    if output == 0 {
+        return 0;
+    }
+    let nanoseconds = if matches!(
+        clock,
+        LINUX_CLOCK_REALTIME_COARSE | LINUX_CLOCK_MONOTONIC_COARSE
+    ) {
+        NANOSECONDS_PER_SECOND / LINUX_CLOCK_TICKS_PER_SECOND
+    } else {
+        let Some(frequency) = timer::monotonic_frequency() else {
+            return LINUX_ENOSYS;
+        };
+        NANOSECONDS_PER_SECOND.div_ceil(frequency).max(1)
+    };
+    let mut timespec = [0_u8; 16];
+    timespec[8..].copy_from_slice(&nanoseconds.to_ne_bytes());
+    if address_space::copy_to_current_user(output, &timespec) {
+        0
+    } else {
+        LINUX_EFAULT
+    }
+}
+
+fn linux_controller_gettimeofday(timeval: u64, timezone: u64) -> u64 {
+    if timeval == 0 && timezone == 0 {
+        return 0;
+    }
+    let Some((seconds, nanoseconds)) = linux_host_realtime_time() else {
+        return LINUX_ENOSYS;
+    };
+    let mut output = [0_u8; 16];
+    output[..8].copy_from_slice(&seconds.to_ne_bytes());
+    output[8..].copy_from_slice(&(nanoseconds / 1_000).to_ne_bytes());
+    if timeval != 0 && !address_space::copy_to_current_user(timeval, &output) {
+        return LINUX_EFAULT;
+    }
+    if timezone != 0 && !address_space::copy_to_current_user(timezone, &[0; 8]) {
+        return LINUX_EFAULT;
+    }
+    0
+}
+
+fn linux_controller_time(output: u64) -> u64 {
+    let Some((seconds, _)) = linux_host_realtime_time() else {
+        return LINUX_ENOSYS;
+    };
+    if output != 0 && !address_space::copy_to_current_user(output, &seconds.to_ne_bytes()) {
+        return LINUX_EFAULT;
+    }
+    seconds
+}
+
+fn linux_controller_times(output: u64) -> u64 {
+    let Some((seconds, nanoseconds)) = linux_system_elapsed_time() else {
+        return LINUX_ENOSYS;
+    };
+    let ticks = seconds
+        .saturating_mul(LINUX_CLOCK_TICKS_PER_SECOND)
+        .saturating_add(
+            nanoseconds.saturating_mul(LINUX_CLOCK_TICKS_PER_SECOND) / NANOSECONDS_PER_SECOND,
+        );
+    if output != 0 {
+        let mut accounting = [0_u8; 32];
+        accounting[..8].copy_from_slice(&ticks.to_ne_bytes());
+        if !address_space::copy_to_current_user(output, &accounting) {
+            return LINUX_EFAULT;
+        }
+    }
+    ticks
 }
 
 fn linux_controller_pipe_read(descriptor: u64, address: u64, count: u64) -> u64 {
@@ -10489,6 +10616,18 @@ fn linux_elapsed_time() -> Option<(u64, u64)> {
 
 fn linux_realtime_time() -> Option<(u64, u64)> {
     let frequency = ELF_PROBE_CLOCK_FREQUENCY.load(Ordering::SeqCst);
+    let (epoch_seconds, epoch_counter) = crate::linux_realtime_epoch()?;
+    let ticks = timer::timestamp_counter().checked_sub(epoch_counter)?;
+    let elapsed_seconds = ticks.checked_div(frequency)?;
+    let remainder = ticks.checked_rem(frequency)?;
+    let nanoseconds = remainder
+        .checked_mul(NANOSECONDS_PER_SECOND)?
+        .checked_div(frequency)?;
+    Some((epoch_seconds.checked_add(elapsed_seconds)?, nanoseconds))
+}
+
+fn linux_host_realtime_time() -> Option<(u64, u64)> {
+    let frequency = timer::monotonic_frequency()?;
     let (epoch_seconds, epoch_counter) = crate::linux_realtime_epoch()?;
     let ticks = timer::timestamp_counter().checked_sub(epoch_counter)?;
     let elapsed_seconds = ticks.checked_div(frequency)?;

@@ -2716,6 +2716,11 @@ if ! grep -q '^ginux: Linux process identity validated' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux timekeeping validated' "$output_file"; then
+    echo "Boot test failed: controller Linux timekeeping syscalls were not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux runtime pipe accounting validated' "$output_file"; then
     echo "Boot test failed: runtime pipe FIONREAD accounting was not validated." >&2
     exit 1
