@@ -8357,8 +8357,7 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_PROCESS_MRELEASE_SYSCALL => linux_process_mrelease(first_argument, buffer),
         LINUX_DUP_SYSCALL => linux_console_dup(first_argument),
         LINUX_DUP2_SYSCALL => linux_console_dup2(first_argument, buffer),
-        LINUX_DUP3_SYSCALL if count == 0 => linux_console_dup2(first_argument, buffer),
-        LINUX_DUP3_SYSCALL => LINUX_EINVAL,
+        LINUX_DUP3_SYSCALL => linux_dup3(first_argument, buffer, count),
         LINUX_NANOSLEEP_SYSCALL => {
             linux_nanosleep_live_return(registers, syscall_return, first_argument, buffer)
         }
@@ -9411,6 +9410,8 @@ fn linux_controller_syscall(
             address_space::copy_to_current_user,
         )),
         LINUX_DUP_SYSCALL => Some(linux_device_dup_at_least(first, 6, false)),
+        LINUX_DUP2_SYSCALL => Some(linux_console_dup2(first, second)),
+        LINUX_DUP3_SYSCALL => Some(linux_dup3(first, second, third)),
         LINUX_FCNTL_SYSCALL => Some(linux_descriptor_fcntl(first, second, third)),
         LINUX_CLOSE_SYSCALL => Some(linux_descriptor_close(first)),
         LINUX_SCHED_YIELD_SYSCALL => Some(0),
@@ -28266,6 +28267,17 @@ fn linux_console_dup2(source: u64, target: u64) -> u64 {
             return target;
         }
     }
+}
+
+fn linux_dup3(source: u64, target: u64, flags: u64) -> u64 {
+    if flags & !LINUX_O_CLOEXEC != 0 || source == target {
+        return LINUX_EINVAL;
+    }
+    let result = linux_console_dup2(source, target);
+    if result == target {
+        set_linux_descriptor_close_on_exec(target, flags & LINUX_O_CLOEXEC != 0);
+    }
+    result
 }
 
 fn linux_device_dup_at_least(source: u64, minimum: u64, close_on_exec: bool) -> u64 {

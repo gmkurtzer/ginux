@@ -77,11 +77,15 @@ const LINUX_TIME_SYSCALL: u64 = 201;
 const LINUX_CLOCK_GETTIME_SYSCALL: u64 = 228;
 const LINUX_CLOCK_GETRES_SYSCALL: u64 = 229;
 const LINUX_PSELECT6_SYSCALL: u64 = 270;
+const LINUX_DUP3_SYSCALL: u64 = 292;
 const LINUX_GETRANDOM_SYSCALL: u64 = 318;
 const LINUX_PIPE2_SYSCALL: u64 = 293;
 const LINUX_FIONREAD: u64 = 0x541b;
+const LINUX_F_GETFD: u64 = 1;
 const LINUX_F_GETFL: u64 = 3;
 const LINUX_F_SETFL: u64 = 4;
+const LINUX_FD_CLOEXEC: u64 = 1;
+const LINUX_O_CLOEXEC: u64 = 0x80000;
 const LINUX_O_NONBLOCK: u64 = 0x800;
 const LINUX_POLLIN: i16 = 1;
 const LINUX_POLLOUT: i16 = 4;
@@ -2380,6 +2384,10 @@ fn linux_pipe_fionread_contract(console: u64) -> bool {
     let read_flags = linux_syscall(LINUX_FCNTL_SYSCALL, reader, LINUX_F_GETFL, 0);
     let write_flags = linux_syscall(LINUX_FCNTL_SYSCALL, writer, LINUX_F_GETFL, 0);
     let duplicate = linux_syscall(LINUX_DUP_SYSCALL, reader, 0, 0);
+    let dup3 = linux_syscall(LINUX_DUP3_SYSCALL, reader, 100, LINUX_O_CLOEXEC);
+    let dup3_flags = linux_syscall(LINUX_FCNTL_SYSCALL, dup3, LINUX_F_GETFD, 0);
+    let dup3_equal = linux_syscall(LINUX_DUP3_SYSCALL, reader, reader, 0);
+    let dup3_bad_flags = linux_syscall(LINUX_DUP3_SYSCALL, reader, 101, 1);
     let mut initial_poll = [
         LinuxPollFd {
             descriptor: duplicate as i32,
@@ -2589,6 +2597,7 @@ fn linux_pipe_fionread_contract(console: u64) -> bool {
         0,
     );
     let select_fault = linux_syscall6(LINUX_SELECT_SYSCALL, 1, 1, 0, 0, 0, 0);
+    let dup3_closed = linux_syscall(LINUX_CLOSE_SYSCALL, dup3, 0, 0);
     let duplicate_closed = linux_syscall(LINUX_CLOSE_SYSCALL, duplicate, 0, 0);
     let double_close = linux_syscall(LINUX_CLOSE_SYSCALL, duplicate, 0, 0);
     let valid = invalid_flags == LINUX_EINVAL
@@ -2596,6 +2605,10 @@ fn linux_pipe_fionread_contract(console: u64) -> bool {
         && read_flags == LINUX_O_NONBLOCK
         && write_flags == (1 | LINUX_O_NONBLOCK)
         && duplicate >= 6
+        && dup3 == 100
+        && dup3_flags == LINUX_FD_CLOEXEC
+        && dup3_equal == LINUX_EINVAL
+        && dup3_bad_flags == LINUX_EINVAL
         && initial_ready == 2
         && initial_poll[0].returned == 0
         && initial_poll[1].returned == LINUX_POLLOUT
@@ -2645,6 +2658,7 @@ fn linux_pipe_fionread_contract(console: u64) -> bool {
         && empty_poll == 0
         && select_bad_descriptor == LINUX_EBADF
         && select_fault == LINUX_EFAULT
+        && dup3_closed == 0
         && duplicate_closed == 0
         && double_close == LINUX_EBADF;
     if !valid {

@@ -431,15 +431,21 @@ The bounded console is a stream and never claims a mutable file position.
 process-local console table or closes an auxiliary descriptor. Closing an unknown or already closed descriptor
 returns `-EBADF`; subsequent `fstat` and `ioctl` calls observe the closure. No
 file, pipe, or socket allocation, inheritance, or general table exists yet.
-`rax = 32` (`__NR_dup`) copies an open console descriptor into the lowest of
-the same two slots, preserving whether it is the input or output endpoint. An
-invalid source returns `-EBADF`; no free slot returns `-EMFILE`. The probe
-closes fd 0, duplicates fd 1 into it, writes through the new fd 0, and closes
-both slots. There is still no general allocation or inherited table.
-`rax = 33` (`__NR_dup2`) atomically replaces either bounded target slot with an
-open source's endpoint type. Equal source and target descriptors return the
-target unchanged. A closed source or a descriptor outside the two-slot limit
-returns `-EBADF`.
+`rax = 32` (`__NR_dup`) copies an open descriptor into the lowest free slot
+below the process `RLIMIT_NOFILE`, sharing its open-file state and clearing
+`FD_CLOEXEC`. An invalid source returns `-EBADF`; no free slot returns
+`-EMFILE`.
+`rax = 33` (`__NR_dup2`) atomically replaces any target below the process soft
+limit with the open source's descriptor state and clears `FD_CLOEXEC`. Equal
+source and target descriptors return the target unchanged. A closed source or
+target outside the limit returns `-EBADF`.
+`rax = 292` (`__NR_dup3`) uses the full process descriptor table, rejects equal
+source and target descriptors and unknown flags with `-EINVAL`, atomically
+replaces the target, and accepts only Linux `O_CLOEXEC`. A successful duplicate
+shares the underlying open-file state while installing the requested
+close-on-exec bit on the new descriptor. The ring-3 controller proves explicit
+target replacement, `FD_CLOEXEC`, equal-descriptor rejection, invalid-flag
+rejection without target publication, and cleanup.
 `rax = 72` (`__NR_fcntl`) supports `F_DUPFD`, `F_DUPFD_CLOEXEC`, `F_GETFD`,
 `F_SETFD`, and `F_GETFL`. The duplication commands copy an open endpoint into
 the lowest available slot at or above their nonnegative minimum; a minimum

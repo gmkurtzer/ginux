@@ -42,7 +42,7 @@ Detailed bounded behavior for implemented calls lives in
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **80 Complete**, **247 Partial**, **48 Policy-denied**, **0 Missing**.
+Current totals: **81 Complete**, **246 Partial**, **48 Policy-denied**, **0 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -502,7 +502,7 @@ therefore omitted.
 | 289 | signalfd4 | Partial |
 | 290 | eventfd2 | Partial |
 | 291 | epoll_create1 | Partial |
-| 292 | dup3 | Partial |
+| 292 | dup3 | Complete |
 | 293 | pipe2 | Partial |
 | 294 | inotify_init1 | Partial |
 | 295 | preadv | Partial |
