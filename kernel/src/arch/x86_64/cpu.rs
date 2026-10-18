@@ -8628,10 +8628,11 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_GETPGRP_SYSCALL => linux_process::live_process_group(current_linux_process_pid())
             .map_or(LINUX_ESRCH, u64::from),
         LINUX_GETPGID_SYSCALL | LINUX_GETSID_SYSCALL => {
-            let pid = if first_argument == 0 {
+            let requested = first_argument as i32;
+            let pid = if requested == 0 {
                 current_linux_process_pid()
-            } else if first_argument <= i32::MAX as u64 {
-                first_argument as u32
+            } else if requested > 0 {
+                requested as u32
             } else {
                 return LINUX_ESRCH;
             };
@@ -9419,7 +9420,7 @@ fn linux_controller_syscall(
         | LINUX_GETGID_SYSCALL
         | LINUX_GETEUID_SYSCALL
         | LINUX_GETEGID_SYSCALL => Some(0),
-        LINUX_GETPGID_SYSCALL | LINUX_GETSID_SYSCALL => Some(if matches!(first, 0 | 1) {
+        LINUX_GETPGID_SYSCALL | LINUX_GETSID_SYSCALL => Some(if matches!(first as i32, 0 | 1) {
             1
         } else {
             LINUX_ESRCH
@@ -9799,7 +9800,9 @@ fn linux_controller_pipe_ioctl(descriptor: u64, request: u64, output: u64) -> u6
 }
 
 fn linux_setpgid(pid: u64, process_group: u64) -> u64 {
-    if pid > i32::MAX as u64 || process_group > i32::MAX as u64 {
+    let pid = pid as i32;
+    let process_group = process_group as i32;
+    if pid < 0 || process_group < 0 {
         return LINUX_EINVAL;
     }
     let caller = current_linux_process_pid();
@@ -15496,7 +15499,10 @@ fn verify_linux_process_madvise_syscall() -> bool {
     vectors[8..16].copy_from_slice(&(PAGE_SIZE as u64).to_ne_bytes());
     vectors[16..24].copy_from_slice(&second.to_ne_bytes());
     vectors[24..].copy_from_slice(&(PAGE_SIZE as u64).to_ne_bytes());
-    let descriptor = linux_pidfd_open(u64::from(current_linux_process_pid()), 0);
+    let descriptor = linux_pidfd_open(
+        (1_u64 << 32) | u64::from(current_linux_process_pid()),
+        1_u64 << 32,
+    );
     let advised = hints
         && descriptor < LINUX_AUX_DESCRIPTOR_LIMIT
         && copy_to_linux_user(mapping, &vectors)
@@ -15509,6 +15515,7 @@ fn verify_linux_process_madvise_syscall() -> bool {
             && bytes == [0, 0]
     };
     let errors = descriptor < LINUX_AUX_DESCRIPTOR_LIMIT
+        && linux_pidfd_open(0, 0) == LINUX_EINVAL
         && linux_process_madvise(descriptor, mapping, 2, LINUX_MADV_DONTNEED, 1) == LINUX_EINVAL
         && linux_process_madvise(descriptor, mapping, 1025, LINUX_MADV_DONTNEED, 0) == LINUX_EINVAL
         && linux_process_mrelease(descriptor, 0) == LINUX_EINVAL
@@ -15627,8 +15634,33 @@ fn verify_linux_signal_argument_widths() -> bool {
             interrupted,
             (0, 0),
         ) == 0;
+    let pidfd = linux_pidfd_open(UPPER_REGISTER_BITS | current_pid, UPPER_REGISTER_BITS);
+    let duplicate = if pidfd < LINUX_AUX_DESCRIPTOR_LIMIT {
+        linux_pidfd_getfd(pidfd, UPPER_REGISTER_BITS | 1, UPPER_REGISTER_BITS)
+    } else {
+        LINUX_EBADF
+    };
+    let pidfd_valid = valid
+        && duplicate < LINUX_DESCRIPTOR_TABLE_LIMIT
+        && linux_pidfd_send_signal(
+            pidfd,
+            UPPER_REGISTER_BITS,
+            0,
+            UPPER_REGISTER_BITS,
+            core::ptr::null_mut(),
+            interrupted,
+            (0, 0),
+        ) == 0
+        && linux_descriptor_close(duplicate) == 0
+        && linux_descriptor_close(pidfd) == 0;
+    if duplicate < LINUX_DESCRIPTOR_TABLE_LIMIT && linux_descriptor_open(duplicate) {
+        let _ = linux_descriptor_close(duplicate);
+    }
+    if pidfd < LINUX_AUX_DESCRIPTOR_LIMIT && linux_pidfd_descriptor(pidfd) {
+        let _ = linux_descriptor_close(pidfd);
+    }
     let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
-    valid && unmapped
+    pidfd_valid && unmapped
 }
 
 fn verify_linux_sysv_semaphore_syscalls() -> bool {
@@ -26851,10 +26883,15 @@ fn linux_inotify_release(descriptor: u64) {
 
 fn linux_pidfd_open(process: u64, flags: u64) -> u64 {
     const PIDFD_NONBLOCK: u64 = 0x800;
+    let process = process as i32;
+    let flags = u64::from(flags as u32);
     if flags & !PIDFD_NONBLOCK != 0 {
         return LINUX_EINVAL;
     }
-    if process != u64::from(current_linux_process_pid()) {
+    if process <= 0 {
+        return LINUX_EINVAL;
+    }
+    if process as u32 != current_linux_process_pid() {
         return LINUX_ESRCH;
     }
     let Some(descriptor) = (LINUX_AUX_DESCRIPTOR_FIRST..LINUX_AUX_DESCRIPTOR_LIMIT)
@@ -26865,12 +26902,14 @@ fn linux_pidfd_open(process: u64, flags: u64) -> u64 {
     let index = (descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize;
     ELF_PROBE_DEVICE_DESCRIPTORS[index].store(LINUX_DEVICE_PIDFD, Ordering::SeqCst);
     ELF_PROBE_SOCKET_FLAGS[index].store(flags as u32, Ordering::SeqCst);
-    ELF_PROBE_DESCRIPTOR_OFFSETS[index].store(process, Ordering::SeqCst);
+    ELF_PROBE_DESCRIPTOR_OFFSETS[index].store(process as u64, Ordering::SeqCst);
     set_linux_descriptor_close_on_exec(descriptor, true);
     descriptor
 }
 
 fn linux_pidfd_getfd(pid_descriptor: u64, target: u64, flags: u64) -> u64 {
+    let target = u64::from(target as u32);
+    let flags = u64::from(flags as u32);
     if flags != 0 {
         return LINUX_EINVAL;
     }
@@ -26895,6 +26934,8 @@ fn linux_pidfd_send_signal(
     interrupted: LinuxUserContext,
     return_registers: (u64, u64),
 ) -> u64 {
+    let signal = u64::from(signal as u32);
+    let flags = u64::from(flags as u32);
     if flags != 0 {
         return LINUX_EINVAL;
     }

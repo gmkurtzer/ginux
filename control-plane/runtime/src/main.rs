@@ -2734,9 +2734,11 @@ fn linux_identity_contract(console: u64) -> bool {
     .all(|(syscall, expected)| linux_syscall(syscall, 0, 0, 0) == expected);
     let process_groups = linux_syscall(LINUX_GETPGID_SYSCALL, 0, 0, 0) == 1
         && linux_syscall(LINUX_GETPGID_SYSCALL, 1, 0, 0) == 1
+        && linux_syscall(LINUX_GETPGID_SYSCALL, (1_u64 << 32) | 1, 0, 0) == 1
         && linux_syscall(LINUX_GETPGID_SYSCALL, 2, 0, 0) == LINUX_ESRCH
         && linux_syscall(LINUX_GETSID_SYSCALL, 0, 0, 0) == 1
         && linux_syscall(LINUX_GETSID_SYSCALL, 1, 0, 0) == 1
+        && linux_syscall(LINUX_GETSID_SYSCALL, (1_u64 << 32) | 1, 0, 0) == 1
         && linux_syscall(LINUX_GETSID_SYSCALL, 2, 0, 0) == LINUX_ESRCH;
     let mut group = u32::MAX;
     let groups = linux_syscall(LINUX_GETGROUPS_SYSCALL, 0, 1, 0) == 1
