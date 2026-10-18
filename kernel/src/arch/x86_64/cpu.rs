@@ -571,6 +571,8 @@ const LINUX_MADV_DONTFORK: u64 = 10;
 const LINUX_MADV_DOFORK: u64 = 11;
 const LINUX_MADV_WIPEONFORK: u64 = 18;
 const LINUX_MADV_KEEPONFORK: u64 = 19;
+const LINUX_MADV_POPULATE_READ: u64 = 22;
+const LINUX_MADV_POPULATE_WRITE: u64 = 23;
 const LINUX_STAT_SIZE: usize = 144;
 const LINUX_STAT_CHARACTER_DEVICE_MODE: u32 = 0o020600;
 const LINUX_STAT_DIRECTORY_MODE: u32 = 0o040555;
@@ -15677,6 +15679,30 @@ fn verify_linux_process_madvise_syscall() -> bool {
             && !address_space::current_linux_runtime_page(first).dontfork
             && address_space::current_linux_runtime_page(second).dontfork
     };
+    let populated = cleared
+        && linux_madvise(first, (2 * PAGE_SIZE) as u64, LINUX_MADV_DONTNEED) == 0
+        && address_space::current_linux_runtime_page(first)
+            .frame
+            .is_none()
+        && address_space::current_linux_runtime_page(second)
+            .frame
+            .is_none()
+        && linux_madvise(first, PAGE_SIZE as u64, LINUX_MADV_POPULATE_READ) == 0
+        && address_space::current_linux_runtime_page(first)
+            .frame
+            .is_some()
+        && linux_madvise(second, PAGE_SIZE as u64, LINUX_MADV_POPULATE_WRITE) == 0
+        && address_space::current_linux_runtime_page(second)
+            .frame
+            .is_some()
+        && linux_runtime_mprotect(first, PAGE_SIZE as u64, LINUX_PROT_READ) == 0
+        && linux_madvise(first, PAGE_SIZE as u64, LINUX_MADV_POPULATE_WRITE) == LINUX_EINVAL
+        && linux_runtime_mprotect(first, PAGE_SIZE as u64, LINUX_PROT_READ | LINUX_PROT_WRITE) == 0
+        && linux_madvise(
+            mapping + 3 * PAGE_SIZE as u64,
+            PAGE_SIZE as u64,
+            LINUX_MADV_POPULATE_READ,
+        ) == LINUX_ENOMEM;
     let errors = descriptor < LINUX_AUX_DESCRIPTOR_LIMIT
         && linux_pidfd_open(0, 0) == LINUX_EINVAL
         && linux_process_madvise(descriptor, mapping, 2, LINUX_MADV_DONTNEED, 1) == LINUX_EINVAL
@@ -15686,7 +15712,7 @@ fn verify_linux_process_madvise_syscall() -> bool {
         && linux_process_mrelease(LINUX_DESCRIPTOR_TABLE_LIMIT, 0) == LINUX_EBADF;
     let closed = descriptor < LINUX_AUX_DESCRIPTOR_LIMIT && linux_descriptor_close(descriptor) == 0;
     let unmapped = linux_runtime_munmap(mapping, (3 * PAGE_SIZE) as u64) == 0;
-    cleared && errors && closed && unmapped
+    populated && errors && closed && unmapped
 }
 
 fn verify_linux_timer_argument_widths() -> bool {
@@ -17234,6 +17260,46 @@ fn linux_madvise_wipeonfork(address: u64, length: u64, enabled: bool) -> u64 {
     }
 }
 
+fn linux_madvise_populate(address: u64, length: u64, writable: bool) -> u64 {
+    if length == 0 || !address.is_multiple_of(PAGE_SIZE as u64) {
+        return LINUX_EINVAL;
+    }
+    let Some(pages) = length
+        .checked_add(PAGE_SIZE as u64 - 1)
+        .and_then(|rounded| usize::try_from(rounded / PAGE_SIZE as u64).ok())
+    else {
+        return LINUX_ENOMEM;
+    };
+    let Some(mapped_length) = pages.checked_mul(PAGE_SIZE) else {
+        return LINUX_ENOMEM;
+    };
+    let required = if writable {
+        LINUX_PROT_WRITE
+    } else {
+        LINUX_PROT_READ
+    } as u8;
+    for page in 0..pages {
+        let Some(page_address) = page
+            .checked_mul(PAGE_SIZE)
+            .and_then(|offset| address.checked_add(offset as u64))
+        else {
+            return LINUX_ENOMEM;
+        };
+        let state = address_space::current_linux_runtime_page(page_address);
+        if !state.occupied {
+            return LINUX_ENOMEM;
+        }
+        if state.secret || state.protection & required == 0 {
+            return LINUX_EINVAL;
+        }
+    }
+    if materialize_linux_runtime_user_range(address, mapped_length, writable) {
+        0
+    } else {
+        LINUX_ENOMEM
+    }
+}
+
 fn linux_runtime_mincore(address: u64, length: u64, vector: u64) -> u64 {
     let Some((_, pages)) = linux_runtime_mapping_range(address, length) else {
         return LINUX_EINVAL;
@@ -18020,6 +18086,11 @@ fn linux_madvise(address: u64, length: u64, advice: u64) -> u64 {
         && matches!(advice, LINUX_MADV_WIPEONFORK | LINUX_MADV_KEEPONFORK)
     {
         return linux_madvise_wipeonfork(address, length, advice == LINUX_MADV_WIPEONFORK);
+    }
+    if LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
+        && matches!(advice, LINUX_MADV_POPULATE_READ | LINUX_MADV_POPULATE_WRITE)
+    {
+        return linux_madvise_populate(address, length, advice == LINUX_MADV_POPULATE_WRITE);
     }
     if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) && address >= LINUX_RUNTIME_DYNAMIC_MMAP_BASE {
         return linux_runtime_madvise(address, length, advice);

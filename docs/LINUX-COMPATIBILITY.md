@@ -110,6 +110,13 @@ advice. Boot verification covers both advice pairs on dynamic mmap storage and
 the pre-seeded process stack, a child hierarchy in which a DONTFORK page is
 absent, and an executed child whose WIPEONFORK stack begins zeroed while the
 parent stack remains unchanged.
+`MADV_POPULATE_READ` and `MADV_POPULATE_WRITE` prefault every page in a mapped
+range with the requested access, including demand-backed anonymous pages.
+They reject insufficient permissions and secret mappings with `EINVAL`, report
+unmapped ranges or allocation failure with `ENOMEM`, and may leave an earlier
+part of the range populated when a later page fails, matching Linux's partial
+progress contract. Boot verification proves physical backing is installed,
+write population rejects a read-only mapping, and unmapped ranges fail.
 Snapshot completion imports the inheritance bit from every leaf PTE, including
 stack, heap, executable-image, and dynamically allocated mappings.
 Descriptor-control verification also covers Linux 32-bit descriptor and
