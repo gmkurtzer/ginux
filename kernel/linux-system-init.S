@@ -531,6 +531,39 @@ ginux_linux_system_init:
     cmp dword ptr [rip + .Lmmsg_recv + 48], 0
     jne .Lfailure
 
+    # SO_PASSCRED attaches the sending Linux process identity to local data.
+    mov edi, dword ptr [rip + .Lsocket_pair + 4]
+    mov esi, 1
+    mov edx, 16
+    call .Lset_socket_boolean
+    mov edi, dword ptr [rip + .Lsocket_pair]
+    lea rsi, [rip + .Lright_payload]
+    mov edx, 1
+    mov eax, 1
+    syscall
+    call .Lrequire_one
+    lea rax, [rip + .Lright_output_control]
+    mov qword ptr [rip + .Lmmsg_recv + 32], rax
+    mov qword ptr [rip + .Lmmsg_recv + 40], 32
+    mov edi, dword ptr [rip + .Lsocket_pair + 4]
+    lea rsi, [rip + .Lmmsg_recv]
+    xor edx, edx
+    mov eax, 47
+    syscall
+    call .Lrequire_one
+    cmp qword ptr [rip + .Lmmsg_recv + 40], 32
+    jne .Lfailure
+    cmp qword ptr [rip + .Lright_output_control], 28
+    jne .Lfailure
+    cmp dword ptr [rip + .Lright_output_control + 12], 2
+    jne .Lfailure
+    mov eax, 39
+    syscall
+    cmp dword ptr [rip + .Lright_output_control + 16], eax
+    jne .Lfailure
+    cmp qword ptr [rip + .Lright_output_control + 20], 0
+    jne .Lfailure
+
     mov edi, dword ptr [rip + .Lsocket_pair]
     mov esi, 2
     mov eax, 48
@@ -1414,15 +1447,10 @@ ginux_linux_system_init:
     syscall
     cmp rax, 4
     jne .Lfailure
-    mov dword ptr [rip + .Lstatus], 1
     mov edi, 4
     mov esi, 1
     mov edx, 2
-    lea r10, [rip + .Lstatus]
-    mov r8d, 4
-    mov eax, 54
-    syscall
-    call .Lrequire_zero
+    call .Lset_socket_boolean
     mov dword ptr [rip + .Lstatus], 0
     mov dword ptr [rip + .Lstatus + 16], 4
     mov edi, 4
@@ -1435,15 +1463,10 @@ ginux_linux_system_init:
     call .Lrequire_zero
     cmp dword ptr [rip + .Lstatus], 1
     jne .Lfailure
-    mov dword ptr [rip + .Lstatus], 1
     mov edi, 4
     mov esi, 6
     mov edx, 1
-    lea r10, [rip + .Lstatus]
-    mov r8d, 4
-    mov eax, 54
-    syscall
-    call .Lrequire_zero
+    call .Lset_socket_boolean
     mov dword ptr [rip + .Lstatus], 0
     mov dword ptr [rip + .Lstatus + 16], 4
     mov edi, 4
@@ -1456,15 +1479,10 @@ ginux_linux_system_init:
     call .Lrequire_zero
     cmp dword ptr [rip + .Lstatus], 1
     jne .Lfailure
-    mov dword ptr [rip + .Lstatus], 1
     mov edi, 4
     mov esi, 1
     mov edx, 9
-    lea r10, [rip + .Lstatus]
-    mov r8d, 4
-    mov eax, 54
-    syscall
-    call .Lrequire_zero
+    call .Lset_socket_boolean
     mov dword ptr [rip + .Lstatus], 0
     mov dword ptr [rip + .Lstatus + 16], 4
     mov edi, 4
@@ -1477,15 +1495,10 @@ ginux_linux_system_init:
     call .Lrequire_zero
     cmp dword ptr [rip + .Lstatus], 1
     jne .Lfailure
-    mov dword ptr [rip + .Lstatus], 1
     mov edi, 4
     xor esi, esi
     mov edx, 11
-    lea r10, [rip + .Lstatus]
-    mov r8d, 4
-    mov eax, 54
-    syscall
-    call .Lrequire_zero
+    call .Lset_socket_boolean
     mov dword ptr [rip + .Lstatus], 0
     mov dword ptr [rip + .Lstatus + 16], 4
     mov edi, 4
@@ -3407,6 +3420,14 @@ ginux_linux_system_init:
     mov eax, 231
     syscall
 
+.Lset_socket_boolean:
+    mov dword ptr [rip + .Lstatus], 1
+    lea r10, [rip + .Lstatus]
+    mov r8d, 4
+    mov eax, 54
+    syscall
+    jmp .Lrequire_zero
+
 .Lrequire_zero:
     test rax, rax
     jne .Lfailure
@@ -3571,7 +3592,7 @@ ginux_linux_system_init:
 .Lright_control:
     .space 24
 .Lright_output_control:
-    .space 24
+    .space 56
 .align 8
 .Lpipe_pair:
     .space 8

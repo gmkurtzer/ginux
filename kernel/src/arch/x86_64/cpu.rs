@@ -20532,12 +20532,40 @@ fn linux_socket_sendto(
     if !copy_from_linux_user(address, &mut bytes[..length]) {
         return LINUX_EFAULT;
     }
+    let automatic_credentials = if crate::linux_socket::kind(slot)
+        == Some(crate::linux_socket::Kind::Unix)
+        && crate::linux_socket::unix_peer_passes_credentials(slot).unwrap_or(false)
+    {
+        let Some(credentials) = current_linux_credentials() else {
+            return LINUX_ESRCH;
+        };
+        if let Err(error) = crate::linux_socket::unix_credentials_queue_available(slot) {
+            return linux_socket_error(error);
+        }
+        Some((
+            current_linux_process_pid(),
+            credentials.uid,
+            credentials.gid,
+        ))
+    } else {
+        None
+    };
     let result = if flags & 0x40 != 0 || linux_socket_nonblocking(descriptor) {
         crate::linux_socket::send(slot, &bytes[..length], remote)
     } else {
         crate::linux_socket::send_blocking(slot, &bytes[..length], remote)
     };
-    result.map_or_else(linux_socket_error, |written| written as u64)
+    match result {
+        Ok(written) => {
+            if let Some(credentials) = automatic_credentials {
+                if let Err(error) = crate::linux_socket::queue_unix_credentials(slot, credentials) {
+                    return linux_socket_error(error);
+                }
+            }
+            written as u64
+        }
+        Err(error) => linux_socket_error(error),
+    }
 }
 
 fn linux_socket_recvfrom(
@@ -20588,7 +20616,7 @@ fn linux_socket_recvfrom(
         && !peek_only
         && crate::linux_socket::kind(slot) == Some(crate::linux_socket::Kind::Unix)
     {
-        let _ = crate::linux_socket::discard_unix_right(slot);
+        let _ = crate::linux_socket::discard_unix_ancillary(slot);
     }
     if flags & MSG_TRUNC != 0
         && crate::linux_socket::kind(slot) == Some(crate::linux_socket::Kind::Udp)
@@ -20631,40 +20659,85 @@ fn linux_socket_sendmsg(descriptor: u64, message: u64, flags: u64) -> u64 {
             Err(error) => return error,
         }
     };
-    let passed_right = if control_length == 0 {
-        None
-    } else {
+    let mut passed_right = None;
+    let mut passed_credentials = None;
+    if control_length != 0 {
         if crate::linux_socket::kind(slot) != Some(crate::linux_socket::Kind::Unix) {
             return LINUX_EINVAL;
         }
-        if !(20..=24).contains(&control_length) {
+        if !(20..=32).contains(&control_length) {
             return LINUX_EINVAL;
         }
-        let mut ancillary = [0_u8; 20];
-        if !copy_from_linux_user(control, &mut ancillary) {
+        let mut ancillary = [0_u8; 28];
+        let copied = usize::try_from(control_length)
+            .unwrap_or(usize::MAX)
+            .min(ancillary.len());
+        if !copy_from_linux_user(control, &mut ancillary[..copied]) {
             return LINUX_EFAULT;
         }
-        if u64::from_ne_bytes(ancillary[..8].try_into().unwrap()) != 20
-            || i32::from_ne_bytes(ancillary[8..12].try_into().unwrap()) != 1
-            || i32::from_ne_bytes(ancillary[12..16].try_into().unwrap()) != 1
-        {
+        let ancillary_length = u64::from_ne_bytes(ancillary[..8].try_into().unwrap());
+        let level = i32::from_ne_bytes(ancillary[8..12].try_into().unwrap());
+        let kind = i32::from_ne_bytes(ancillary[12..16].try_into().unwrap());
+        if level != 1 {
             return LINUX_EINVAL;
         }
-        let passed_descriptor = i32::from_ne_bytes(ancillary[16..20].try_into().unwrap());
-        let Ok(passed_descriptor) = u64::try_from(passed_descriptor) else {
-            return LINUX_EBADF;
+        match (kind, ancillary_length, control_length) {
+            (1, 20, 20..=24) => {
+                let descriptor = i32::from_ne_bytes(ancillary[16..20].try_into().unwrap());
+                let Ok(descriptor) = u64::try_from(descriptor) else {
+                    return LINUX_EBADF;
+                };
+                let Some(right_slot) = linux_socket_slot(descriptor) else {
+                    return LINUX_EBADF;
+                };
+                let Some(right_flags) = linux_socket_flags(descriptor) else {
+                    return LINUX_EBADF;
+                };
+                if let Err(error) =
+                    crate::linux_socket::unix_right_queue_available(slot, right_slot)
+                {
+                    return linux_socket_error(error);
+                }
+                passed_right = Some((right_slot, right_flags));
+            }
+            (2, 28, 28..=32) => {
+                let pid = i32::from_ne_bytes(ancillary[16..20].try_into().unwrap());
+                let uid = u32::from_ne_bytes(ancillary[20..24].try_into().unwrap());
+                let gid = u32::from_ne_bytes(ancillary[24..28].try_into().unwrap());
+                let Some(credentials) = current_linux_credentials() else {
+                    return LINUX_ESRCH;
+                };
+                if pid < 0
+                    || pid as u32 != current_linux_process_pid()
+                    || uid != credentials.uid
+                    || gid != credentials.gid
+                {
+                    return LINUX_EPERM;
+                }
+                if let Err(error) = crate::linux_socket::unix_credentials_queue_available(slot) {
+                    return linux_socket_error(error);
+                }
+                passed_credentials = Some((pid as u32, uid, gid));
+            }
+            _ => return LINUX_EINVAL,
+        }
+    }
+    if passed_credentials.is_none()
+        && crate::linux_socket::kind(slot) == Some(crate::linux_socket::Kind::Unix)
+        && crate::linux_socket::unix_peer_passes_credentials(slot).unwrap_or(false)
+    {
+        let Some(credentials) = current_linux_credentials() else {
+            return LINUX_ESRCH;
         };
-        let Some(passed_slot) = linux_socket_slot(passed_descriptor) else {
-            return LINUX_EBADF;
-        };
-        let Some(passed_flags) = linux_socket_flags(passed_descriptor) else {
-            return LINUX_EBADF;
-        };
-        if let Err(error) = crate::linux_socket::unix_right_queue_available(slot, passed_slot) {
+        if let Err(error) = crate::linux_socket::unix_credentials_queue_available(slot) {
             return linux_socket_error(error);
         }
-        Some((passed_slot, passed_flags))
-    };
+        passed_credentials = Some((
+            current_linux_process_pid(),
+            credentials.uid,
+            credentials.gid,
+        ));
+    }
     let mut bytes = [0_u8; PAGE_SIZE];
     let mut used = 0_usize;
     for index in 0..iov_count {
@@ -20687,7 +20760,7 @@ fn linux_socket_sendmsg(descriptor: u64, message: u64, flags: u64) -> u64 {
             break;
         }
     }
-    if passed_right.is_some() && used == 0 {
+    if (passed_right.is_some() || passed_credentials.is_some()) && used == 0 {
         return LINUX_EINVAL;
     }
     if let Some((passed_slot, _)) = passed_right {
@@ -20707,6 +20780,12 @@ fn linux_socket_sendmsg(descriptor: u64, message: u64, flags: u64) -> u64 {
                     crate::linux_socket::queue_unix_right(slot, passed_slot, passed_flags)
                 {
                     let _ = crate::linux_socket::close(passed_slot);
+                    return linux_socket_error(error);
+                }
+            }
+            if let Some(credentials) = passed_credentials {
+                if let Err(error) = crate::linux_socket::queue_unix_credentials(slot, credentials) {
+                    let _ = crate::linux_socket::discard_unix_peer_ancillary(slot);
                     return linux_socket_error(error);
                 }
             }
@@ -20760,9 +20839,21 @@ fn linux_socket_recvmsg(descriptor: u64, message: u64, flags: u64) -> u64 {
     if iov_count > LINUX_IOV_LIMIT {
         return LINUX_EINVAL;
     }
-    if crate::linux_socket::unix_right_pending(slot)
-        && control_capacity >= 24
-        && (control == 0 || !linux_writable_user_range_contains(control, 24))
+    let right_pending = crate::linux_socket::unix_right_pending(slot);
+    let credentials_pending = crate::linux_socket::unix_credentials_pending(slot);
+    let writable_control = if right_pending && control_capacity >= 24 {
+        if credentials_pending && control_capacity >= 56 {
+            56
+        } else {
+            24
+        }
+    } else if credentials_pending && control_capacity >= 32 {
+        32
+    } else {
+        0
+    };
+    if writable_control != 0
+        && (control == 0 || !linux_writable_user_range_contains(control, writable_control))
     {
         return LINUX_EFAULT;
     }
@@ -20826,7 +20917,7 @@ fn linux_socket_recvmsg(descriptor: u64, message: u64, flags: u64) -> u64 {
         0
     };
     let mut control_length = 0_u64;
-    if crate::linux_socket::unix_right_pending(slot) {
+    if right_pending {
         if control_capacity < 24 {
             output_flags |= MSG_CTRUNC;
             if !peek_only {
@@ -20855,6 +20946,32 @@ fn linux_socket_recvmsg(descriptor: u64, message: u64, flags: u64) -> u64 {
                 let _ = crate::linux_socket::close(right.0);
                 output_flags |= MSG_CTRUNC;
             }
+        }
+    }
+    if credentials_pending {
+        let remaining = control_capacity.saturating_sub(control_length);
+        if remaining < 32 {
+            output_flags |= MSG_CTRUNC;
+            if !peek_only {
+                let _ = crate::linux_socket::receive_unix_credentials(slot, false);
+            }
+        } else {
+            let credentials = match crate::linux_socket::receive_unix_credentials(slot, peek_only) {
+                Ok(Some(credentials)) => credentials,
+                Ok(None) => return LINUX_EINVAL,
+                Err(error) => return linux_socket_error(error),
+            };
+            let mut ancillary = [0_u8; 32];
+            ancillary[..8].copy_from_slice(&28_u64.to_ne_bytes());
+            ancillary[8..12].copy_from_slice(&1_i32.to_ne_bytes());
+            ancillary[12..16].copy_from_slice(&2_i32.to_ne_bytes());
+            ancillary[16..20].copy_from_slice(&(credentials.0 as i32).to_ne_bytes());
+            ancillary[20..24].copy_from_slice(&credentials.1.to_ne_bytes());
+            ancillary[24..28].copy_from_slice(&credentials.2.to_ne_bytes());
+            if !copy_to_linux_user(control + control_length, &ancillary) {
+                return LINUX_EFAULT;
+            }
+            control_length += 32;
         }
     }
     header[40..48].copy_from_slice(&control_length.to_ne_bytes());
@@ -21100,6 +21217,7 @@ fn linux_socket_setsockopt(
         (0, 11) => Some(crate::linux_socket::BooleanOption::ReceiveErrors),
         (1, 2) => Some(crate::linux_socket::BooleanOption::ReuseAddress),
         (1, 9) => Some(crate::linux_socket::BooleanOption::KeepAlive),
+        (1, 16) => Some(crate::linux_socket::BooleanOption::PassCredentials),
         (6, 1) => {
             if crate::linux_socket::kind(slot) != Some(crate::linux_socket::Kind::Tcp) {
                 return LINUX_EOPNOTSUPP;
@@ -21160,6 +21278,10 @@ fn linux_socket_getsockopt(
         }
         (1, 7 | 8) => 64 * 1024,
         (1, 9) => match read_boolean(crate::linux_socket::BooleanOption::KeepAlive) {
+            Ok(value) => value,
+            Err(error) => return error,
+        },
+        (1, 16) => match read_boolean(crate::linux_socket::BooleanOption::PassCredentials) {
             Ok(value) => value,
             Err(error) => return error,
         },
