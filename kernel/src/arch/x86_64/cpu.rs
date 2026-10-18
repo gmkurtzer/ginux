@@ -1136,6 +1136,7 @@ static PROCESS_CHILD_EXPECTED_FS_BASE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_ACTIVE: BankedAtomicBool = BankedAtomicBool::new(false);
 static LINUX_RUNTIME_MODE: BankedAtomicBool = BankedAtomicBool::new(false);
 static ELF_PROBE_COMPLETED: BankedAtomicBool = BankedAtomicBool::new(false);
+static ELF_PROBE_EXIT_STATUS: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_TERMINATION_SIGNAL: BankedAtomicU32 = BankedAtomicU32::new(0);
 static ELF_PROBE_EXEC_REPLACED: BankedAtomicBool = BankedAtomicBool::new(false);
 static ELF_PROBE_EXEC_NODE: BankedAtomicU8 = BankedAtomicU8::new(0);
@@ -5849,6 +5850,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
         return LinuxElfResult::FAILED;
     }
     ELF_PROBE_COMPLETED.store(false, Ordering::SeqCst);
+    ELF_PROBE_EXIT_STATUS.store(0, Ordering::SeqCst);
     ELF_PROBE_TERMINATION_SIGNAL.store(0, Ordering::SeqCst);
     ELF_PROBE_EXEC_REPLACED.store(false, Ordering::SeqCst);
     ELF_PROBE_EXEC_NODE.store(0, Ordering::SeqCst);
@@ -6428,6 +6430,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
     let linux_thread_table_released = finish_linux_thread_table();
     let inactive = !ELF_PROBE_ACTIVE.swap(false, Ordering::SeqCst);
     let completed = ELF_PROBE_COMPLETED.load(Ordering::SeqCst);
+    let exit_status = ELF_PROBE_EXIT_STATUS.swap(0, Ordering::SeqCst);
     let termination_signal = ELF_PROBE_TERMINATION_SIGNAL.swap(0, Ordering::SeqCst);
     let exec_replaced = ELF_PROBE_EXEC_REPLACED.swap(false, Ordering::SeqCst);
     let exec_node = ELF_PROBE_EXEC_NODE.swap(0, Ordering::SeqCst);
@@ -6524,6 +6527,14 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
     let system_init = ELF_PROBE_SYSTEM_INIT.swap(false, Ordering::SeqCst);
     let signal_probe_executed = exec_replaced
         && initramfs::published_file_name_by_node(exec_node) == Some(b"bin/signal-probe");
+    let conformance_probe_executed = exec_replaced
+        && initramfs::published_file_name_by_node(exec_node) == Some(b"bin/linux-conformance");
+    let exit_status_valid = exit_status
+        == if conformance_probe_executed || termination_signal != 0 {
+            0
+        } else {
+            42
+        };
     let termination_signal_valid = termination_signal
         == if signal_probe_executed {
             LINUX_SIGPIPE as u32
@@ -7352,6 +7363,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
         linux_mount::current_root_is_read_only() && linux_mount::deactivate_initial();
     let valid = inactive
         && completed
+        && exit_status_valid
         && exec_replaced == execution.exec_expected
         && live_return_validated
         && process_snapshot_validated
@@ -7455,6 +7467,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
         for state in [
             inactive,
             completed,
+            exit_status_valid,
             exec_replaced == execution.exec_expected,
             live_return_validated,
             process_snapshot_validated,
@@ -9130,6 +9143,7 @@ extern "sysv64" fn linux_syscall_handler(
             linux_exit_child_to_parent(registers)
         }
         LINUX_EXIT_SYSCALL | LINUX_EXIT_GROUP_SYSCALL if first_argument <= u64::from(u8::MAX) => {
+            ELF_PROBE_EXIT_STATUS.store(first_argument, Ordering::SeqCst);
             if !record_live_linux_process_snapshot() {
                 return LINUX_ESRCH;
             }
@@ -17672,11 +17686,12 @@ fn linux_exec_descriptor_node(descriptor: u64) -> Result<u8, u64> {
 fn linux_exec_process_name(node: u8) -> Option<[u64; 2]> {
     let name = initramfs::published_file_name_by_node(node)?;
     let basename = name.rsplit(|byte| *byte == b'/').next()?;
-    if basename.is_empty() || basename.len() > 15 {
+    if basename.is_empty() {
         return None;
     }
     let mut bytes = [0_u8; 16];
-    bytes[..basename.len()].copy_from_slice(basename);
+    let length = basename.len().min(bytes.len() - 1);
+    bytes[..length].copy_from_slice(&basename[..length]);
     Some([
         u64::from_ne_bytes(bytes[..8].try_into().ok()?),
         u64::from_ne_bytes(bytes[8..].try_into().ok()?),
@@ -18149,7 +18164,6 @@ fn linux_execve_at(
             .filter(|state| state.load(Ordering::SeqCst) != LINUX_THREAD_FREE)
             .count()
             != 1
-        || ELF_PROBE_EXEC_REPLACED.load(Ordering::SeqCst)
     {
         if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) && current_linux_process_pid() != 1 {
             serial_write("ginux: OCI child exec precondition rejected\r\n");
@@ -18616,10 +18630,9 @@ fn linux_execve_at(
     let clear_child_tid = current_linux_clear_child_tid().unwrap_or(0);
     let robust_list = current_linux_robust_list().unwrap_or(0);
     let mut previous_tid = [0_u8; size_of::<u32>()];
-    if clear_child_tid == 0
-        || robust_list == 0
-        || !copy_from_linux_user(clear_child_tid, &mut previous_tid)
-        || !copy_to_linux_user(clear_child_tid, &0_u32.to_ne_bytes())
+    if clear_child_tid != 0
+        && (!copy_from_linux_user(clear_child_tid, &mut previous_tid)
+            || !copy_to_linux_user(clear_child_tid, &0_u32.to_ne_bytes()))
     {
         let _ = release_linux_exec_frames(&mut exec_frames);
         return LINUX_EFAULT;
@@ -18627,7 +18640,9 @@ fn linux_execve_at(
     if !set_current_linux_clear_child_tid(0) || !set_current_linux_robust_list(0) {
         let _ = set_current_linux_clear_child_tid(clear_child_tid);
         let _ = set_current_linux_robust_list(robust_list);
-        let _ = copy_to_linux_user(clear_child_tid, &previous_tid);
+        if clear_child_tid != 0 {
+            let _ = copy_to_linux_user(clear_child_tid, &previous_tid);
+        }
         let _ = release_linux_exec_frames(&mut exec_frames);
         return LINUX_ESRCH;
     }
@@ -18647,7 +18662,9 @@ fn linux_execve_at(
     if !image_replaced {
         let _ = set_current_linux_clear_child_tid(clear_child_tid);
         let _ = set_current_linux_robust_list(robust_list);
-        let _ = copy_to_linux_user(clear_child_tid, &previous_tid);
+        if clear_child_tid != 0 {
+            let _ = copy_to_linux_user(clear_child_tid, &previous_tid);
+        }
         let _ = release_linux_exec_frames(&mut exec_frames);
         return LINUX_ENOMEM;
     }

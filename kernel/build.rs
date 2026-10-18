@@ -17,6 +17,7 @@ fn main() {
     println!("cargo:rerun-if-changed=linux-dependency.S");
     println!("cargo:rerun-if-changed=linux-auxiliary-dependency.S");
     println!("cargo:rerun-if-changed=linux-exec-target.S");
+    println!("cargo:rerun-if-changed=linux-conformance.S");
     println!("cargo:rerun-if-changed=linux-system-init.S");
     println!("cargo:rerun-if-changed=linux-probe.ld");
     println!("cargo:rerun-if-changed=linux-linked-main.ld");
@@ -24,6 +25,7 @@ fn main() {
     println!("cargo:rerun-if-changed=linux-linked-auxiliary.ld");
     println!("cargo:rerun-if-changed=linux-linked-interpreter.ld");
     println!("cargo:rerun-if-changed=linux-signal-probe.ld");
+    println!("cargo:rerun-if-changed=linux-conformance.ld");
     println!("cargo:rerun-if-changed=linux-exec-second.ld");
     println!("cargo:rerun-if-changed=linux-system-init.ld");
     println!("cargo:rerun-if-env-changed=CLANG");
@@ -84,6 +86,37 @@ fn main() {
     );
     fs::write(output.join("linux-probe-second.bin"), second_probe_text)
         .expect("failed to write second Linux probe bytes");
+
+    let conformance_probe_object = output.join("linux-probe-conformance.o");
+    let status = Command::new(&clang)
+        .args([
+            "-target",
+            "x86_64-none-elf",
+            "-DGINUX_CONFORMANCE_EXEC",
+            "-c",
+            "linux-probe.S",
+            "-o",
+        ])
+        .arg(&conformance_probe_object)
+        .status()
+        .expect("failed to run clang for Linux conformance exec probe");
+    assert!(
+        status.success(),
+        "clang failed to assemble Linux conformance exec probe"
+    );
+    let conformance_probe_elf = fs::read(&conformance_probe_object)
+        .expect("failed to read Linux conformance exec probe object");
+    let conformance_probe_text = elf_section(&conformance_probe_elf, b".text")
+        .expect("Linux conformance exec probe object has no .text section");
+    assert!(
+        conformance_probe_text.len() <= LINUX_PROBE_MAX_TEXT_SIZE,
+        "Linux conformance exec probe exceeds the five-page executable profile"
+    );
+    fs::write(
+        output.join("linux-probe-conformance.bin"),
+        conformance_probe_text,
+    )
+    .expect("failed to write Linux conformance exec probe bytes");
 
     let system_init_probe_object = output.join("linux-probe-system-init.o");
     let status = Command::new(&clang)
@@ -336,6 +369,22 @@ fn main() {
         status.success(),
         "clang failed to assemble Linux signal probe"
     );
+    let conformance_object = output.join("linux-conformance.o");
+    let status = Command::new(&clang)
+        .args([
+            "-target",
+            "x86_64-none-elf",
+            "-c",
+            "linux-conformance.S",
+            "-o",
+        ])
+        .arg(&conformance_object)
+        .status()
+        .expect("failed to assemble Linux conformance probe");
+    assert!(
+        status.success(),
+        "clang failed to assemble Linux conformance probe"
+    );
     let system_init_object = output.join("linux-system-init.o");
     let status = Command::new(&clang)
         .args([
@@ -498,6 +547,36 @@ fn main() {
         .expect("failed to link Linux signal probe");
     assert!(status.success(), "LLD failed to link Linux signal probe");
 
+    let conformance = output.join("linux-conformance.elf");
+    let conformance_script =
+        PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("manifest directory"))
+            .join("linux-conformance.ld");
+    let mut conformance_link = Command::new(&lld);
+    conformance_link
+        .args([
+            "-flavor",
+            "gnu",
+            "-m",
+            "elf_x86_64",
+            "-static",
+            "-nostdlib",
+            "-e",
+            "ginux_linux_conformance",
+            "-T",
+        ])
+        .arg(&conformance_script)
+        .arg(&conformance_object)
+        .arg("-o")
+        .arg(&conformance);
+    configure_linker_library_path(&mut conformance_link, toolchain_library.as_ref());
+    let status = conformance_link
+        .status()
+        .expect("failed to link Linux conformance probe");
+    assert!(
+        status.success(),
+        "LLD failed to link Linux conformance probe"
+    );
+
     let system_init = output.join("linux-system-init.elf");
     let system_init_script =
         PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("manifest directory"))
@@ -606,6 +685,8 @@ fn main() {
             .expect("failed to export second Linux exec target");
         fs::copy(&signal_probe, directory.join("linux-signal-probe.elf"))
             .expect("failed to export Linux signal probe");
+        fs::copy(&conformance, directory.join("linux-conformance.elf"))
+            .expect("failed to export Linux conformance probe");
         fs::copy(&system_init, directory.join("linux-system-init.elf"))
             .expect("failed to export minimal Linux system init");
     }

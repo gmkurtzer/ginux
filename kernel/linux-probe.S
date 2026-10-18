@@ -5895,6 +5895,8 @@ exec_path:
 #elif defined(GINUX_SYSTEM_INIT_EXEC)
     .asciz "/sbin/init"
     .space 7
+#elif defined(GINUX_CONFORMANCE_EXEC)
+    .asciz "/bin/linux-conformance"
 #else
     .asciz "/bin/signal-probe"
 #endif
@@ -5904,6 +5906,8 @@ exec_mode:
 #elif defined(GINUX_SYSTEM_INIT_EXEC)
     .asciz "system-init"
     .space 1
+#elif defined(GINUX_CONFORMANCE_EXEC)
+    .asciz "linux-conformance"
 #else
     .asciz "signal-probe"
 #endif

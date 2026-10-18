@@ -55,6 +55,10 @@ run_boot() {
             if grep -Fq 'ginux> ' "$boot_output"; then
                 break
             fi
+            if grep -Fq 'GINUX_KERNEL_PANIC' "$boot_output"; then
+                stop_qemu
+                exit 0
+            fi
             if [[ -s "$qemu_pid_file" ]]; then
                 qemu_seen=true
                 read -r active_qemu_pid <"$qemu_pid_file" || true
@@ -1806,14 +1810,15 @@ if ! grep -q '^ginux: toolchain-linked static Linux ELF executed' "$output_file"
     exit 1
 fi
 
-if [[ "$(grep -c '^ginux: measured Linux exec image replaced atomically' "$output_file")" -ne 4 ]]; then
-    echo "Boot test failed: measured Linux exec replacement did not complete four times." >&2
+if [[ "$(grep -c '^ginux: measured Linux exec image replaced atomically' "$output_file")" -ne 5 ]]; then
+    echo "Boot test failed: measured Linux exec replacement did not complete five times." >&2
     exit 1
 fi
 
 if [[ "$(grep -c '^SIGNAL!' "$output_file")" -ne 1 ]] ||
     [[ "$(grep -c '^SECOND!' "$output_file")" -ne 1 ]] ||
-    [[ "$(grep -c '^DYNEXEC' "$output_file")" -ne 1 ]]; then
+    [[ "$(grep -c '^DYNEXEC' "$output_file")" -ne 1 ]] ||
+    [[ "$(grep -c '^ABI_OK!' "$output_file")" -ne 1 ]]; then
     echo "Boot test failed: all measured replacement Linux images did not execute." >&2
     exit 1
 fi
@@ -2676,7 +2681,7 @@ if ! grep -q '^ginux: Linux callable syscall assertion helpers validated' "$outp
     exit 1
 fi
 
-if [[ "$(grep -c '^PROBE!!$' "$output_file")" -ne 32 ]]; then
+if [[ "$(grep -c '^PROBE!!$' "$output_file")" -ne 40 ]]; then
     echo "Boot test failed: Linux console output record count is invalid." >&2
     exit 1
 fi

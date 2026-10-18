@@ -76,6 +76,8 @@ const R_X86_64_TPOFF64: u32 = 18;
 const PROBE_CODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-probe.bin"));
 const SECOND_PROBE_CODE: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/linux-probe-second.bin"));
+const CONFORMANCE_PROBE_CODE: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/linux-probe-conformance.bin"));
 const SYSTEM_INIT_PROBE_CODE: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/linux-probe-system-init.bin"));
 const INTERPRETER_CODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-interpreter.bin"));
@@ -3895,6 +3897,18 @@ pub(crate) fn verify_linked_probe() -> bool {
         && plan.writable.page_count == 2
         && materialization_valid
         && crate::address_space::verify_linux_elf_mapping(&plan, 1, 1, b"bin/signal-probe")
+}
+
+#[inline(never)]
+pub(crate) fn verify_linux_conformance_probe() -> bool {
+    let image = fixture_with_code(CONFORMANCE_PROBE_CODE);
+    let Some(image) = parse(&image) else {
+        return false;
+    };
+    let Some(plan) = plan(&image) else {
+        return false;
+    };
+    crate::address_space::verify_linux_elf_mapping(&plan, 1, 1, b"bin/linux-conformance")
 }
 
 pub(crate) fn verify_mapped_load_plan(protected_start: u64, protected_size: usize) -> bool {

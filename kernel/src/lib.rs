@@ -1833,11 +1833,22 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         let Some(signal_probe) = initramfs::published_file_by_node(signal_probe_node) else {
             kernel_fail("ginux: measured Linux signal probe unreadable\r\n");
         };
+        let Some(conformance_node) =
+            initramfs::published_regular_file_node(b"bin/linux-conformance")
+        else {
+            kernel_fail("ginux: measured Linux conformance probe missing\r\n");
+        };
+        let Some(conformance) = initramfs::published_file_by_node(conformance_node) else {
+            kernel_fail("ginux: measured Linux conformance probe unreadable\r\n");
+        };
         let Some(exec_second_plan) = linux_elf::measured_static_exec_plan(exec_second) else {
             kernel_fail("ginux: second measured Linux exec target invalid\r\n");
         };
         let Some(signal_probe_plan) = linux_elf::measured_static_exec_plan(signal_probe) else {
             kernel_fail("ginux: measured Linux signal probe invalid\r\n");
+        };
+        let Some(conformance_plan) = linux_elf::measured_static_exec_plan(conformance) else {
+            kernel_fail("ginux: measured Linux conformance probe invalid\r\n");
         };
         let measured_file = |name: &[u8]| {
             initramfs::published_regular_file_node(name).and_then(initramfs::published_file_by_node)
@@ -1894,7 +1905,19 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         {
             kernel_fail("ginux: measured Linux exec target invalid\r\n");
         }
+        if conformance_plan.entry != 0x40_0100
+            || conformance_plan.executable.page_count == 0
+            || conformance_plan.executable.page_count > 5
+            || conformance_plan.writable.page_count != 1
+            || conformance_plan.executable.writable
+            || !conformance_plan.executable.executable
+            || !conformance_plan.writable.writable
+            || conformance_plan.writable.executable
+        {
+            kernel_fail("ginux: measured Linux conformance probe outside profile\r\n");
+        }
         serial_write("ginux: dedicated measured Linux signal runtime planned\r\n");
+        serial_write("ginux: expandable measured Linux conformance runtime planned\r\n");
         serial_write("ginux: multiple measured Linux exec targets planned\r\n");
         if !linux_elf::verify_parser() {
             kernel_fail("ginux: Linux ELF64 parser invariant failed\r\n");
@@ -1908,6 +1931,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         if !linux_elf::verify_linked_probe() {
             kernel_fail("ginux: linked Linux ELF64 probe invariant failed\r\n");
         }
+        if !linux_elf::verify_linux_conformance_probe() {
+            kernel_fail("ginux: ring-3 Linux conformance probe invariant failed\r\n");
+        }
+        serial_write("ginux: ring-3 Linux conformance suite passed\r\n");
         serial_write("ginux: live Linux process address-space snapshot validated\r\n");
         serial_write("ginux: incomplete Linux process snapshots rejected\r\n");
         serial_write("ginux: live Linux PID 1 context admitted to process model\r\n");

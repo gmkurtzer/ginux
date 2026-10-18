@@ -577,6 +577,10 @@ The practical compatibility gate remains workload-driven:
 
 The controller exposes the complete compiled ledger through `test linux all`;
 see [Linux Userspace Interface Test v0](../specs/kernel/linux-abi-test-v0.md).
+Boot verification also executes `/bin/linux-conformance` as a separate measured
+ring-3 ELF with its own five-page executable profile. New syscall-level
+tests belong there instead of expanding the tightly bounded bootstrap probe;
+the first suite covers inode-wide memfd seals through real Linux syscalls.
 `test linux` prints its summary, while `interfaces`, `syscalls`, and `syscall
 NAME|NUMBER` select detailed results. The command name is intentionally
 environment-specific so future compatibility profiles, such as BSD, can have

@@ -79,6 +79,7 @@ linux-probe:
 	@test -f "$(LINUX_DYNAMIC_DIR)/ld-ginux.so"
 	@test -f "$(LINUX_DYNAMIC_DIR)/linux-exec-second.elf"
 	@test -f "$(LINUX_DYNAMIC_DIR)/linux-signal-probe.elf"
+	@test -f "$(LINUX_DYNAMIC_DIR)/linux-conformance.elf"
 	@test -f "$(LINUX_DYNAMIC_DIR)/linux-system-init.elf"
 	@echo "Built $(LINUX_PROBE) and $(LINUX_DYNAMIC_DIR)"
 

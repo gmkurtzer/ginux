@@ -144,6 +144,7 @@ fn build_initramfs(
     let linux_auxiliary = read_root_artifact(&artifacts.join("libginux-aux.so"));
     let linux_exec_second = read_root_artifact(&artifacts.join("linux-exec-second.elf"));
     let linux_signal_probe = read_root_artifact(&artifacts.join("linux-signal-probe.elf"));
+    let linux_conformance = read_root_artifact(&artifacts.join("linux-conformance.elf"));
     let linux_system_init = read_root_artifact(&artifacts.join("linux-system-init.elf"));
     let mut archive = Vec::new();
     for (inode, mode, name, data) in [
@@ -176,6 +177,7 @@ fn build_initramfs(
         (15, "linux/libginux.so", linux_dependency.as_slice()),
         (16, "linux/libginux-aux.so", linux_auxiliary.as_slice()),
         (18, "bin/signal-probe", linux_signal_probe.as_slice()),
+        (29, "bin/linux-conformance", linux_conformance.as_slice()),
         (20, "bin/exec-second", linux_exec_second.as_slice()),
         (24, "sbin/init", linux_system_init.as_slice()),
         (25, "native/volume", volume_service),
@@ -185,7 +187,7 @@ fn build_initramfs(
         append_newc_entry(&mut archive, inode, 0o100555, name, data);
     }
     append_newc_entry(&mut archive, 17, 0o100555, "var/lib/version", b"0\n");
-    append_newc_entry(&mut archive, 28, 0, "TRAILER!!!", &[]);
+    append_newc_entry(&mut archive, 30, 0, "TRAILER!!!", &[]);
     archive
 }
 
