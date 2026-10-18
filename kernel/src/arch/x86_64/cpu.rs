@@ -1389,6 +1389,7 @@ static ELF_PROBE_UMASK: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_RLIMITS: [BankedAtomicU64; LINUX_RLIMIT_WORDS] =
     [const { BankedAtomicU64::new(0) }; LINUX_RLIMIT_WORDS];
 static ELF_PROBE_POSIX_MQ_BYTES: BankedAtomicU64 = BankedAtomicU64::new(0);
+static LINUX_CROSS_PROCESS_PRLIMIT_VALIDATED: BankedAtomicBool = BankedAtomicBool::new(false);
 static LINUX_FSIZE_LIMIT_HIT: BankedAtomicBool = BankedAtomicBool::new(false);
 static ELF_PROBE_CONSOLE_DESCRIPTORS: BankedAtomicU8 = BankedAtomicU8::new(0);
 static ELF_PROBE_STDERR_OPEN: BankedAtomicBool = BankedAtomicBool::new(false);
@@ -3615,6 +3616,13 @@ fn execute_deferred_live_fork() -> bool {
         .filter(|state| state.valid)
         .unwrap_or(parent_runtime_state);
     restore_linux_process_runtime_state(parent_runtime_state);
+    if cfg!(feature = "verification-boot")
+        && !LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
+        && !LINUX_CROSS_PROCESS_PRLIMIT_VALIDATED.load(Ordering::SeqCst)
+        && !verify_linux_cross_process_prlimit(child.pid)
+    {
+        return false;
+    }
     if let Some((slot, base, size)) = parent_thread_stack {
         LINUX_THREAD_STACK_BASES[slot].store(base, Ordering::SeqCst);
         LINUX_THREAD_STACK_SIZES[slot].store(size, Ordering::SeqCst);
@@ -6027,6 +6035,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
     ELF_PROBE_UMASK.store(0o022, Ordering::SeqCst);
     LINUX_FSIZE_LIMIT_HIT.store(false, Ordering::SeqCst);
     ELF_PROBE_POSIX_MQ_BYTES.store(0, Ordering::SeqCst);
+    LINUX_CROSS_PROCESS_PRLIMIT_VALIDATED.store(false, Ordering::SeqCst);
     for resource in 0..LINUX_RLIMIT_NLIMITS {
         let Some(limit) = linux_default_resource_limit(resource, execution.runtime) else {
             return LinuxElfResult::FAILED;
@@ -8962,28 +8971,7 @@ extern "sysv64" fn linux_syscall_handler(
             linux_keyctl(first_argument, buffer, count, register(0), register(2))
         }
         LINUX_USERFAULTFD_SYSCALL => linux_userfaultfd(first_argument),
-        LINUX_PRLIMIT64_SYSCALL => {
-            let current_pid = u64::from(current_linux_process_pid());
-            if first_argument != 0 && first_argument != current_pid {
-                return LINUX_ESRCH;
-            }
-            let Some(limit) =
-                linux_resource_limit(buffer, LINUX_RUNTIME_MODE.load(Ordering::SeqCst))
-            else {
-                return LINUX_EINVAL;
-            };
-            if count != 0 {
-                let result = linux_setrlimit(buffer, count);
-                if result != 0 {
-                    return result;
-                }
-            }
-            let old_limit = register(0);
-            if old_limit != 0 && !copy_to_linux_user(old_limit, &limit) {
-                return LINUX_EFAULT;
-            }
-            0
-        }
+        LINUX_PRLIMIT64_SYSCALL => linux_prlimit64(first_argument, buffer, count, register(0)),
         LINUX_SCHED_SETAFFINITY_SYSCALL => linux_sched_setaffinity(first_argument, buffer, count),
         LINUX_SCHED_GETAFFINITY_SYSCALL => linux_sched_getaffinity(first_argument, buffer, count),
         LINUX_GETCPU_SYSCALL => {
@@ -27775,6 +27763,139 @@ fn linux_resource_limit(resource: u64, runtime: bool) -> Option<[u8; 16]> {
     Some(limit)
 }
 
+fn linux_process_resource_limit_values(pid: u32, resource: u64) -> Option<[u64; 2]> {
+    linux_default_resource_limit(resource, LINUX_RUNTIME_MODE.load(Ordering::SeqCst))?;
+    if pid == current_linux_process_pid() {
+        return linux_resource_limit_values(resource, LINUX_RUNTIME_MODE.load(Ordering::SeqCst));
+    }
+    let state = linux_process_runtime_state(pid).filter(|state| state.valid)?;
+    let index = resource as usize * 2;
+    Some([state.rlimits[index], state.rlimits[index + 1]])
+}
+
+fn linux_set_process_resource_limit(pid: u32, resource: u64, requested: [u64; 2]) -> u64 {
+    let Some(current) = linux_process_resource_limit_values(pid, resource) else {
+        return LINUX_ESRCH;
+    };
+    if requested[0] > requested[1] {
+        return LINUX_EINVAL;
+    }
+    if requested[1] > current[1] {
+        return LINUX_EPERM;
+    }
+    let index = resource as usize * 2;
+    if pid == current_linux_process_pid() {
+        ELF_PROBE_RLIMITS[index].store(requested[0], Ordering::SeqCst);
+        ELF_PROBE_RLIMITS[index + 1].store(requested[1], Ordering::SeqCst);
+        return 0;
+    }
+    let Some(state) = linux_process_runtime_state(pid).filter(|state| state.valid) else {
+        return LINUX_ESRCH;
+    };
+    state.rlimits[index] = requested[0];
+    state.rlimits[index + 1] = requested[1];
+    0
+}
+
+fn linux_prlimit_target(pid: u64) -> Result<u32, u64> {
+    let pid = if pid == 0 {
+        current_linux_process_pid()
+    } else {
+        u32::try_from(pid).map_err(|_| LINUX_ESRCH)?
+    };
+    linux_process::live_process_status(pid)
+        .map(|_| pid)
+        .ok_or(LINUX_ESRCH)
+}
+
+fn linux_prlimit_permitted(pid: u32) -> bool {
+    if pid == current_linux_process_pid() {
+        return true;
+    }
+    let Some(caller) = current_linux_credentials() else {
+        return false;
+    };
+    let Some(target) =
+        linux_process::live_process_user_namespace(pid).and_then(linux_user::credentials)
+    else {
+        return false;
+    };
+    [caller.uid, caller.euid, caller.suid]
+        .into_iter()
+        .all(|caller_id| caller_id == target.uid)
+        && [caller.gid, caller.egid, caller.sgid]
+            .into_iter()
+            .all(|caller_id| caller_id == target.gid)
+}
+
+fn verify_linux_cross_process_prlimit(pid: u32) -> bool {
+    let Some(original) = linux_process_resource_limit_values(pid, LINUX_RLIMIT_NOFILE) else {
+        return false;
+    };
+    let lowered = [original[0].saturating_sub(1), original[1]];
+    let changed = linux_prlimit_permitted(pid)
+        && linux_set_process_resource_limit(pid, LINUX_RLIMIT_NOFILE, lowered) == 0
+        && linux_process_resource_limit_values(pid, LINUX_RLIMIT_NOFILE) == Some(lowered)
+        && lowered[0] < original[0];
+    let restored = linux_set_process_resource_limit(pid, LINUX_RLIMIT_NOFILE, original) == 0
+        && linux_process_resource_limit_values(pid, LINUX_RLIMIT_NOFILE) == Some(original);
+    let errors = linux_process_resource_limit_values(u32::MAX, LINUX_RLIMIT_NOFILE).is_none()
+        && linux_set_process_resource_limit(u32::MAX, LINUX_RLIMIT_NOFILE, original) == LINUX_ESRCH;
+    let valid = changed && restored && errors;
+    if valid {
+        LINUX_CROSS_PROCESS_PRLIMIT_VALIDATED.store(true, Ordering::SeqCst);
+        serial_write("ginux: Linux cross-process resource limits validated\r\n");
+    }
+    valid
+}
+
+fn linux_prlimit64(pid: u64, resource: u64, new_limit: u64, old_limit: u64) -> u64 {
+    if resource >= LINUX_RLIMIT_NLIMITS {
+        return LINUX_EINVAL;
+    }
+    let requested = if new_limit == 0 {
+        None
+    } else {
+        let mut bytes = [0_u8; 16];
+        if !copy_from_linux_user(new_limit, &mut bytes) {
+            return LINUX_EFAULT;
+        }
+        let values = [
+            u64::from_ne_bytes(bytes[..8].try_into().unwrap()),
+            u64::from_ne_bytes(bytes[8..].try_into().unwrap()),
+        ];
+        if values[0] > values[1] {
+            return LINUX_EINVAL;
+        }
+        Some(values)
+    };
+    let pid = match linux_prlimit_target(pid) {
+        Ok(pid) => pid,
+        Err(error) => return error,
+    };
+    if !linux_prlimit_permitted(pid) {
+        return LINUX_EPERM;
+    }
+    let Some(previous) = linux_process_resource_limit_values(pid, resource) else {
+        return LINUX_ESRCH;
+    };
+    if let Some(requested) = requested {
+        let result = linux_set_process_resource_limit(pid, resource, requested);
+        if result != 0 {
+            return result;
+        }
+    }
+    if old_limit != 0 {
+        let mut bytes = [0_u8; 16];
+        bytes[..8].copy_from_slice(&previous[0].to_ne_bytes());
+        bytes[8..].copy_from_slice(&previous[1].to_ne_bytes());
+        if !copy_to_linux_user(old_limit, &bytes) {
+            return LINUX_EFAULT;
+        }
+    }
+    0
+}
+
 fn linux_nofile_soft_limit() -> u64 {
     linux_resource_limit_values(
         LINUX_RLIMIT_NOFILE,
@@ -27853,10 +27974,9 @@ fn linux_getrlimit(
 }
 
 fn linux_setrlimit(resource: u64, address: u64) -> u64 {
-    let runtime = LINUX_RUNTIME_MODE.load(Ordering::SeqCst);
-    let Some(current) = linux_resource_limit_values(resource, runtime) else {
+    if resource >= LINUX_RLIMIT_NLIMITS {
         return LINUX_EINVAL;
-    };
+    }
     let mut requested = [0_u8; 16];
     if !copy_from_linux_user(address, &mut requested) {
         return LINUX_EFAULT;
@@ -27865,16 +27985,7 @@ fn linux_setrlimit(resource: u64, address: u64) -> u64 {
         u64::from_ne_bytes(requested[..8].try_into().unwrap()),
         u64::from_ne_bytes(requested[8..].try_into().unwrap()),
     ];
-    if requested[0] > requested[1] {
-        return LINUX_EINVAL;
-    }
-    if requested[1] > current[1] {
-        return LINUX_EPERM;
-    }
-    let index = resource as usize * 2;
-    ELF_PROBE_RLIMITS[index].store(requested[0], Ordering::SeqCst);
-    ELF_PROBE_RLIMITS[index + 1].store(requested[1], Ordering::SeqCst);
-    0
+    linux_set_process_resource_limit(current_linux_process_pid(), resource, requested)
 }
 
 fn linux_scheduler_priority_range(policy: u64, maximum: bool) -> u64 {

@@ -118,10 +118,12 @@ exercises mutation, enforcement, and restoration. `RLIMIT_MSGQUEUE` applies
 Linux's payload and kernel-object charge formula to each newly created POSIX
 message queue, rejects creation with `EMFILE` at the soft limit, and releases
 the charge only when an unlinked queue's final descriptor closes.
-Resource-specific enforcement not listed above, cross-process `prlimit64`,
-privileged hard-limit raises, and `RLIMIT_NOFILE` accounting for descriptors in
-flight over UNIX sockets remain pending, so the resource-limit family remains
-Partial.
+`prlimit64` can query or lower limits for another live process in the same
+domain when Linux real/effective/saved UID and GID permission checks permit it;
+the fork-child lifecycle probe verifies mutation, observation, and restoration.
+Resource-specific enforcement not listed above, privileged hard-limit raises,
+and `RLIMIT_NOFILE` accounting for descriptors in flight over UNIX sockets
+remain pending, so the resource-limit family remains Partial.
 
 System V shared memory now uses domain-owned, dynamically allocated frame
 objects whose lifetime is independent of any one mapping. `shmget`, `shmat`,
