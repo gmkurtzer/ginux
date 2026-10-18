@@ -3054,6 +3054,17 @@ ginux_linux_system_init:
     syscall
     call .Lrequire_zero
 
+    # Block SIGUSR1 before fork so the child can queue it to the parent and
+    # the parent can inspect both the pending bit and sender identity.
+    mov qword ptr [rip + .Lsignal_set], 0x200
+    xor edi, edi
+    lea rsi, [rip + .Lsignal_set]
+    xor edx, edx
+    mov r10d, 8
+    mov eax, 14
+    syscall
+    call .Lrequire_zero
+
     mov eax, 57
     syscall
     test rax, rax
@@ -3061,6 +3072,39 @@ ginux_linux_system_init:
     jz .Lfork_child
 
     mov r12, rax
+
+    lea rdi, [rip + .Lstatus]
+    mov esi, 8
+    mov eax, 127
+    syscall
+    call .Lrequire_zero
+    cmp qword ptr [rip + .Lstatus], 0x200
+    jne .Lfailure
+
+    lea rdi, [rip + .Lsignal_set]
+    lea rsi, [rip + .Lstatus]
+    xor edx, edx
+    mov r10d, 8
+    mov eax, 128
+    syscall
+    cmp rax, 10
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus], 10
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus + 8], 0
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus + 16], 2
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus + 20], 0
+    jne .Lfailure
+
+    mov edi, 1
+    lea rsi, [rip + .Lsignal_set]
+    xor edx, edx
+    mov r10d, 8
+    mov eax, 14
+    syscall
+    call .Lrequire_zero
 
     mov edi, -100
     lea rsi, [rip + .Lproc_path]
@@ -3194,6 +3238,18 @@ ginux_linux_system_init:
     jmp .Lfork_complete
 
 .Lfork_child:
+    mov edi, 99
+    xor esi, esi
+    mov eax, 62
+    syscall
+    cmp rax, -3
+    jne .Lfailure
+    mov edi, 1
+    mov esi, 10
+    mov eax, 62
+    syscall
+    call .Lrequire_zero
+
     mov edi, 1
     xor esi, esi
     mov eax, 252

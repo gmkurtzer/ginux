@@ -291,7 +291,9 @@ pub(crate) fn measured_static_exec_plan(bytes: &[u8]) -> Option<LoadPlan<'_>> {
         && (1..=5).contains(&plan.executable.page_count)
         && !plan.executable.writable
         && plan.executable.executable
-        && plan.entry == plan.executable.virtual_page + 0x100
+        && (plan.executable.virtual_page
+            ..plan.executable.virtual_page + plan.executable.page_count as u64 * PAGE_SIZE as u64)
+            .contains(&plan.entry)
         && plan.writable.virtual_page
             == plan.executable.virtual_page + plan.executable.page_count as u64 * PAGE_SIZE as u64
         && (1..=2).contains(&plan.writable.page_count)

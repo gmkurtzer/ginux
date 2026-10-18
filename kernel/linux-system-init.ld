@@ -14,9 +14,9 @@ SECTIONS
     . = 0x414000 + SIZEOF_HEADERS;
     .headers : { BYTE(0) } :headers
 
-    . = 0x415100;
+    . = 0x415000;
     .text : { *(.text) *(.text.*) } :text
-    ASSERT(SIZEOF(.text) <= 0x3f00, "Minimal system init exceeds its four-page RX profile")
+    ASSERT(SIZEOF(.text) <= 0x4000, "Minimal system init exceeds its four-page RX profile")
 
     . = 0x419000;
     .data : { *(.data) } :data

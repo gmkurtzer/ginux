@@ -1809,7 +1809,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         let Some(system_init_plan) = linux_elf::measured_static_exec_plan(system_init) else {
             kernel_fail("ginux: minimal system init invalid\r\n");
         };
-        if system_init_plan.entry != 0x41_5100
+        if system_init_plan.entry != 0x41_5000
             || system_init_plan.executable.page_count != 4
             || system_init_plan.writable.page_count != 1
             || system_init_plan.executable.writable

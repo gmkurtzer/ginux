@@ -6,8 +6,13 @@ pub(crate) const THREAD_LIMIT: usize = 16;
 const INSTANCE_LIMIT: usize = control_abi::DOMAIN_LIMIT + 1;
 const THREAD_QUEUE_LIMIT: usize = linux_process::PROCESS_LIMIT * THREAD_LIMIT;
 const PAGE_SIZE: usize = 4096;
-const ENTRIES_PER_PAGE: usize =
-    (PAGE_SIZE - core::mem::size_of::<PageHeader>()) / core::mem::size_of::<Entry>();
+const ENTRY_ALIGNMENT: usize = core::mem::align_of::<Entry>();
+const ENTRIES_OFFSET: usize =
+    (core::mem::size_of::<PageHeader>() + ENTRY_ALIGNMENT - 1) & !(ENTRY_ALIGNMENT - 1);
+const HEADER_PADDING: usize = ENTRIES_OFFSET - core::mem::size_of::<PageHeader>();
+const ENTRIES_PER_PAGE: usize = (PAGE_SIZE - ENTRIES_OFFSET) / core::mem::size_of::<Entry>();
+const PAGE_PADDING: usize =
+    PAGE_SIZE - ENTRIES_OFFSET - ENTRIES_PER_PAGE * core::mem::size_of::<Entry>();
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Scope {
@@ -26,6 +31,8 @@ pub(crate) struct Pending {
     pub(crate) signal: u8,
     pub(crate) code: i32,
     pub(crate) value: u64,
+    pub(crate) sender_pid: u32,
+    pub(crate) sender_uid: u32,
 }
 
 #[derive(Clone, Copy)]
@@ -56,6 +63,8 @@ struct Entry {
     sequence: u64,
     value: u64,
     code: i32,
+    sender_pid: u32,
+    sender_uid: u32,
     signal: u8,
     occupied: u8,
     reserved: [u8; 2],
@@ -66,6 +75,8 @@ impl Entry {
         sequence: 0,
         value: 0,
         code: 0,
+        sender_pid: 0,
+        sender_uid: 0,
         signal: 0,
         occupied: 0,
         reserved: [0; 2],
@@ -75,7 +86,9 @@ impl Entry {
 #[repr(C)]
 struct Page {
     header: PageHeader,
+    header_padding: [u8; HEADER_PADDING],
     entries: [Entry; ENTRIES_PER_PAGE],
+    padding: [u8; PAGE_PADDING],
 }
 
 const _: [(); PAGE_SIZE] = [(); core::mem::size_of::<Page>()];
@@ -146,7 +159,9 @@ fn allocate_page(next: memory::FrameLease) -> Result<memory::FrameLease, Error> 
             address as *mut Page,
             Page {
                 header: PageHeader { next },
+                header_padding: [0; HEADER_PADDING],
                 entries: [Entry::EMPTY; ENTRIES_PER_PAGE],
+                padding: [0; PAGE_PADDING],
             },
         );
     }
@@ -248,6 +263,8 @@ pub(crate) fn enqueue(
         sequence,
         value: pending.value,
         code: pending.code,
+        sender_pid: pending.sender_pid,
+        sender_uid: pending.sender_uid,
         signal: pending.signal,
         occupied: 1,
         reserved: [0; 2],
@@ -298,6 +315,8 @@ pub(crate) fn peek(
         signal: entry.signal,
         code: entry.code,
         value: entry.value,
+        sender_pid: entry.sender_pid,
+        sender_uid: entry.sender_uid,
     }))
 }
 
@@ -337,6 +356,8 @@ pub(crate) fn dequeue(
         signal: entry.signal,
         code: entry.code,
         value: entry.value,
+        sender_pid: entry.sender_pid,
+        sender_uid: entry.sender_uid,
     }))
 }
 
@@ -370,6 +391,8 @@ pub(crate) fn verify_dynamic_fifo(instance: usize) -> bool {
         signal: 10,
         code: 0,
         value: 1,
+        sender_pid: 1,
+        sender_uid: 0,
     };
     let standard_coalesced = enqueue(instance, Scope::Process, process, standard, false)
         == Ok(true)
@@ -392,6 +415,8 @@ pub(crate) fn verify_dynamic_fifo(instance: usize) -> bool {
             signal: 34,
             code: -1,
             value: 3,
+            sender_pid: 1,
+            sender_uid: 0,
         },
         true,
     ) == Ok(true)
@@ -403,6 +428,8 @@ pub(crate) fn verify_dynamic_fifo(instance: usize) -> bool {
                 signal: 34,
                 code: -6,
                 value: 4,
+                sender_pid: 1,
+                sender_uid: 0,
             },
             true,
         ) == Ok(true)
@@ -413,12 +440,16 @@ pub(crate) fn verify_dynamic_fifo(instance: usize) -> bool {
                 signal: 34,
                 code: -6,
                 value: 4,
+                sender_pid: 1,
+                sender_uid: 0,
             }))
         && dequeue(instance, Scope::Process, process, u64::MAX)
             == Ok(Some(Pending {
                 signal: 34,
                 code: -1,
                 value: 3,
+                sender_pid: 1,
+                sender_uid: 0,
             }));
     let mut filled = standard_coalesced && isolated;
     for value in 0..=ENTRIES_PER_PAGE as u64 {
@@ -430,6 +461,8 @@ pub(crate) fn verify_dynamic_fifo(instance: usize) -> bool {
                 signal: 34,
                 code: -1,
                 value,
+                sender_pid: 1,
+                sender_uid: 0,
             },
             true,
         ) == Ok(true);
@@ -449,6 +482,8 @@ pub(crate) fn verify_dynamic_fifo(instance: usize) -> bool {
                 signal: 34,
                 code: -1,
                 value,
+                sender_pid: 1,
+                sender_uid: 0,
             }));
     }
     let released = Guard::acquire(instance)
