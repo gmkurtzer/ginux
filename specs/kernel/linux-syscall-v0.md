@@ -718,8 +718,9 @@ group/user selections only after permission validation, and enforces Linux
 ownership and privilege rules. Unknown selectors return `-EINVAL`; an empty
 selection returns `-ESRCH`. The booted proof covers all three selector classes,
 signed range clamping, 32-bit argument narrowing, and invalid/empty selectors.
-Competing multi-process selector results and non-root permission paths remain
-to be exercised before these calls are classified Complete.
+The fork proof also covers inheritance and a child-local priority change.
+Competing live multi-process selector results and non-root permission paths
+remain to be exercised before these calls are classified Complete.
 `rax = 228` (`__NR_clock_gettime`) exposes `CLOCK_REALTIME`,
 `CLOCK_MONOTONIC`, and `CLOCK_MONOTONIC_RAW` from an ordered
 bootstrap-processor TSC. The conversion

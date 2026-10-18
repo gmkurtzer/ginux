@@ -2130,6 +2130,14 @@ ginux_linux_system_init:
     cmp rax, 12
     jne .Lfailure
 
+    xor edi, edi
+    xor esi, esi
+    mov edx, 5
+    mov eax, 141
+    syscall
+    test rax, rax
+    jne .Lfailure
+
     mov eax, 57
     syscall
     test rax, rax
@@ -2250,6 +2258,14 @@ ginux_linux_system_init:
     cmp rax, -10
     jne .Lfailure
 
+    xor edi, edi
+    xor esi, esi
+    xor edx, edx
+    mov eax, 141
+    syscall
+    test rax, rax
+    jne .Lfailure
+
     mov edi, -100
     lea rsi, [rip + .Lpid2_status_path]
     xor edx, edx
@@ -2268,6 +2284,19 @@ ginux_linux_system_init:
     jmp .Lfork_complete
 
 .Lfork_child:
+    xor edi, edi
+    xor esi, esi
+    mov eax, 140
+    syscall
+    cmp rax, 15
+    jne .Lfailure
+    xor edi, edi
+    xor esi, esi
+    mov edx, 10
+    mov eax, 141
+    syscall
+    test rax, rax
+    jne .Lfailure
     mov eax, 39
     syscall
     cmp rax, 2
