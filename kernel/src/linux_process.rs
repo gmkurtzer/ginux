@@ -2066,6 +2066,82 @@ pub(crate) fn write_live_process_u32(pid: u32, address: u64, value: u32) -> bool
     true
 }
 
+pub(crate) fn copy_from_live_process(pid: u32, address: u64, output: &mut [u8]) -> bool {
+    copy_live_process_bytes(pid, address, output.as_mut_ptr(), output.len(), false)
+}
+
+pub(crate) fn copy_to_live_process(pid: u32, address: u64, input: &[u8]) -> bool {
+    copy_live_process_bytes(pid, address, input.as_ptr().cast_mut(), input.len(), true)
+}
+
+pub(crate) fn live_process_range_mapped(
+    pid: u32,
+    address: u64,
+    length: usize,
+    writable: bool,
+) -> bool {
+    let Ok(address) = usize::try_from(address) else {
+        return false;
+    };
+    let Some(end) = address.checked_add(length) else {
+        return false;
+    };
+    if length == 0 {
+        return true;
+    }
+    let mut page = address & !(PAGE_SIZE - 1);
+    while page < end {
+        if live_process_mapping(pid, page).is_none_or(|mapping| writable && !mapping.writable) {
+            return false;
+        }
+        let Some(next) = page.checked_add(PAGE_SIZE) else {
+            return false;
+        };
+        page = next;
+    }
+    true
+}
+
+fn copy_live_process_bytes(
+    pid: u32,
+    address: u64,
+    buffer: *mut u8,
+    buffer_length: usize,
+    write: bool,
+) -> bool {
+    let Ok(mut address) = usize::try_from(address) else {
+        return false;
+    };
+    let mut copied = 0;
+    while copied < buffer_length {
+        let page = address & !(PAGE_SIZE - 1);
+        let offset = address & (PAGE_SIZE - 1);
+        let length = (buffer_length - copied).min(PAGE_SIZE - offset);
+        let Some(mapping) =
+            live_process_mapping(pid, page).filter(|mapping| !write || mapping.writable)
+        else {
+            return false;
+        };
+        let Some(frame) = mapping.frame.direct_map_address() else {
+            return false;
+        };
+        // SAFETY: the generation-bound process mapping owns a live page. The
+        // bounds above keep each copy within that page, and syscall execution
+        // serializes live-process table access on the current CPU.
+        unsafe {
+            let process = (frame as *mut u8).add(offset);
+            if write {
+                core::ptr::copy_nonoverlapping(buffer.add(copied), process, length);
+            } else {
+                core::ptr::copy_nonoverlapping(process, buffer.add(copied), length);
+            }
+        }
+        copied += length;
+        address += length;
+    }
+    true
+}
+
 pub(crate) fn dispatch_live_init_with_return(value: u64) -> Option<LiveProcessDispatch> {
     let table = live_process_table_mut()?;
     let init = table.init?;

@@ -3318,6 +3318,10 @@ if ! grep -q '^ginux: Linux process-group wait selectors validated' "$output_fil
     echo "Boot test failed: Linux process-group wait selectors were not validated." >&2
     exit 1
 fi
+if ! grep -q '^ginux: Linux cross-process memory transfer validated' "$output_file"; then
+    echo "Boot test failed: Linux cross-process memory transfer was not validated." >&2
+    exit 1
+fi
 if ! grep -q '^ginux: Linux generation-bound pidfds validated' "$output_file"; then
     echo "Boot test failed: Linux generation-bound pidfd lifecycle was not validated." >&2
     exit 1

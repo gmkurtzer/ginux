@@ -1369,6 +1369,20 @@ Closed descriptors return `-EBADF`, stale generations return `-ESRCH`, live
 cross-process pidfds return `-EPERM`, and nonzero flags return `-EINVAL`.
 Reclaiming an exiting child remains pending until the ptrace permission and
 remote-address-space release paths are implemented.
+`rax = 310` (`__NR_process_vm_readv`) and `rax = 311`
+(`__NR_process_vm_writev`) transfer bytes between the caller and a live process
+in the same domain. The target must share the caller's user namespace, remain
+dumpable, and have real/effective/saved IDs matching the caller's real UID and
+GID; Ginux currently exposes no capability override. Remote ranges are resolved
+against the target's generation-bound page mappings and write operations require
+writable target mappings. Every remote iovec is validated before that element is
+modified, while a failure in a later element preserves the successfully copied
+prefix. Zero-length vectors, vector-count bounds, flag validation, stale PIDs,
+unmapped ranges, and dumpability denial follow their Linux error classes. The
+verification fork transfers a pattern into a live child, reads it back, proves
+the parent's private page was unchanged, restores the child bytes, and exercises
+permission and address failures. Cross-domain access and `CAP_SYS_PTRACE`
+override semantics remain unsupported.
 `rax = 27` (`__NR_mincore`) accepts any fully occupied nonzero scratch range
 rounding to one through four pages, including a range crossing adjacent
 registry records, and atomically

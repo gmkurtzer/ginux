@@ -17913,19 +17913,38 @@ fn linux_process_vm_iov(
     if flags != 0 {
         return LINUX_EINVAL;
     }
-    if pid <= 0 || pid as u32 != current_linux_process_pid() {
+    if pid <= 0 {
         return LINUX_ESRCH;
+    }
+    let pid = pid as u32;
+    let current = pid == current_linux_process_pid();
+    if !current {
+        let Some(status) = linux_process::live_process_status(pid) else {
+            return LINUX_ESRCH;
+        };
+        if status.state != linux_process::LiveProcessState::Running {
+            return LINUX_ESRCH;
+        }
+        if !linux_process_vm_access_permitted(pid) {
+            return LINUX_EPERM;
+        }
     }
     let (local, local_count) =
         match linux_socket_iov_ranges(local_vectors, local_count, !write_remote) {
             Ok(value) => value,
             Err(error) => return error,
         };
-    let (remote, remote_count) =
+    let (remote, remote_count) = if current {
         match linux_socket_iov_ranges(remote_vectors, remote_count, write_remote) {
             Ok(value) => value,
             Err(error) => return error,
-        };
+        }
+    } else {
+        match linux_process_vm_remote_iov_ranges(remote_vectors, remote_count) {
+            Ok(value) => value,
+            Err(error) => return error,
+        }
+    };
     let mut local_index = 0;
     let mut remote_index = 0;
     let mut local_offset = 0;
@@ -17945,17 +17964,40 @@ fn linux_process_vm_iov(
             remote_offset = 0;
             continue;
         }
+        if !current
+            && remote_offset == 0
+            && !linux_process::live_process_range_mapped(
+                pid,
+                remote[remote_index].0,
+                remote[remote_index].1,
+                write_remote,
+            )
+        {
+            return if transferred == 0 {
+                LINUX_EFAULT
+            } else {
+                transferred
+            };
+        }
         let length = local_remaining.min(remote_remaining).min(bytes.len());
         let local_address = local[local_index].0 + local_offset as u64;
         let remote_address = remote[remote_index].0 + remote_offset as u64;
-        let (source, destination) = if write_remote {
-            (local_address, remote_address)
+        let copied = if current {
+            let (source, destination) = if write_remote {
+                (local_address, remote_address)
+            } else {
+                (remote_address, local_address)
+            };
+            copy_from_linux_user(source, &mut bytes[..length])
+                && copy_to_linux_user(destination, &bytes[..length])
+        } else if write_remote {
+            copy_from_linux_user(local_address, &mut bytes[..length])
+                && linux_process::copy_to_live_process(pid, remote_address, &bytes[..length])
         } else {
-            (remote_address, local_address)
+            linux_process::copy_from_live_process(pid, remote_address, &mut bytes[..length])
+                && copy_to_linux_user(local_address, &bytes[..length])
         };
-        if !copy_from_linux_user(source, &mut bytes[..length])
-            || !copy_to_linux_user(destination, &bytes[..length])
-        {
+        if !copied {
             return if transferred == 0 {
                 LINUX_EFAULT
             } else {
@@ -17967,6 +18009,66 @@ fn linux_process_vm_iov(
         transferred += length as u64;
     }
     transferred
+}
+
+fn linux_process_vm_access_permitted(pid: u32) -> bool {
+    if pid == current_linux_process_pid() {
+        return true;
+    }
+    let Some(target_state) = linux_process_runtime_state(pid).filter(|state| state.valid) else {
+        return false;
+    };
+    let Some(caller_namespace) = current_linux_user_namespace() else {
+        return false;
+    };
+    let Some(target_namespace) = linux_process::live_process_user_namespace(pid) else {
+        return false;
+    };
+    let (Some(caller), Some(target)) = (
+        linux_user::credentials(caller_namespace),
+        linux_user::credentials(target_namespace),
+    ) else {
+        return false;
+    };
+    target_state.dumpable
+        && caller_namespace == target_namespace
+        && [target.uid, target.euid, target.suid]
+            .into_iter()
+            .all(|uid| uid == caller.uid)
+        && [target.gid, target.egid, target.sgid]
+            .into_iter()
+            .all(|gid| gid == caller.gid)
+}
+
+fn linux_process_vm_remote_iov_ranges(
+    vectors: u64,
+    count: u64,
+) -> Result<([(u64, usize); LINUX_IOV_LIMIT], usize), u64> {
+    let Ok(vector_count) = usize::try_from(count) else {
+        return Err(LINUX_EINVAL);
+    };
+    if vector_count > LINUX_IOV_LIMIT {
+        return Err(LINUX_EINVAL);
+    }
+    let mut table = [0_u8; LINUX_IOV_LIMIT * 16];
+    if vector_count != 0 && !copy_from_linux_user(vectors, &mut table[..vector_count * 16]) {
+        return Err(LINUX_EFAULT);
+    }
+    let mut ranges = [(0_u64, 0_usize); LINUX_IOV_LIMIT];
+    let mut total = 0_usize;
+    for (index, vector) in table[..vector_count * 16]
+        .as_chunks::<16>()
+        .0
+        .iter()
+        .enumerate()
+    {
+        let address = u64::from_ne_bytes(vector[..8].try_into().unwrap());
+        let length = usize::try_from(u64::from_ne_bytes(vector[8..].try_into().unwrap()))
+            .map_err(|_| LINUX_EINVAL)?;
+        total = total.checked_add(length).ok_or(LINUX_EINVAL)?;
+        ranges[index] = (address, length);
+    }
+    Ok((ranges, vector_count))
 }
 
 fn linux_node_zero_mask(address: u64, maximum_node: u64) -> Result<bool, u64> {
@@ -31518,6 +31620,8 @@ fn verify_linux_cross_process_prlimit(pid: u32) -> bool {
             && linux_waitid(LINUX_P_PGID, 0, 0, LINUX_WEXITED | LINUX_WNOWAIT, 0) == 0
     });
     let pidfd_getfd = pidfd_opened && linux_pidfd_getfd(pidfd, 1, 0) == LINUX_EPERM;
+    let process_vm_zombie =
+        linux_process_vm_iov(u64::from(pid), 0, 0, 0, 0, 0, false) == LINUX_ESRCH;
     let pidfd_closed = !pidfd_opened || linux_descriptor_close(pidfd) == 0;
     let pidfd_valid = pidfd_opened
         && pidfd_identity
@@ -31526,6 +31630,7 @@ fn verify_linux_cross_process_prlimit(pid: u32) -> bool {
         && pidfd_wait
         && group_wait
         && pidfd_getfd
+        && process_vm_zombie
         && pidfd_closed;
     let valid = changed && restored && errors && widths && pidfd_valid;
     if valid {
@@ -31546,6 +31651,7 @@ fn verify_linux_cross_process_prlimit(pid: u32) -> bool {
             pidfd_wait,
             group_wait,
             pidfd_getfd,
+            process_vm_zombie,
             pidfd_closed,
         ] {
             serial_write(" ");
@@ -31598,6 +31704,7 @@ fn verify_linux_running_child_wait_selectors(pid: u32) -> bool {
             LINUX_WEXITED | LINUX_WNOHANG,
             0,
         ) == 0;
+    let process_vm = running && verify_linux_cross_process_vm(pid);
     let parent_pidfd = linux_pidfd_open(u64::from(parent), 0);
     let parent_opened = parent_pidfd < LINUX_AUX_DESCRIPTOR_LIMIT;
     let errors = parent_opened
@@ -31610,6 +31717,7 @@ fn verify_linux_running_child_wait_selectors(pid: u32) -> bool {
         && group_restored
         && child_opened
         && running
+        && process_vm
         && parent_opened
         && errors
         && parent_closed
@@ -31617,6 +31725,153 @@ fn verify_linux_running_child_wait_selectors(pid: u32) -> bool {
     if valid {
         serial_write("ginux: Linux process-group wait selectors validated\r\n");
         serial_write("ginux: Linux nonblocking pidfd wait validated\r\n");
+        serial_write("ginux: Linux cross-process memory transfer validated\r\n");
+    }
+    valid
+}
+
+fn verify_linux_cross_process_vm(pid: u32) -> bool {
+    const LENGTH: usize = 16;
+    const INPUT_OFFSET: u64 = 128;
+    const OUTPUT_OFFSET: u64 = 160;
+    let mapping = ELF_PROBE_DATA.load(Ordering::SeqCst);
+    let target = ELF_PROBE_STACK.load(Ordering::SeqCst) & !(PAGE_SIZE as u64 - 1);
+    let mut workspace = [0_u8; 192];
+    let mut original = [0_u8; LENGTH];
+    let mut parent = [0_u8; LENGTH];
+    let pattern = *b"GINUX-PROCESS-VM";
+    let mut local_write = [0_u8; 16];
+    local_write[..8].copy_from_slice(&(mapping + INPUT_OFFSET).to_ne_bytes());
+    local_write[8..].copy_from_slice(&(LENGTH as u64).to_ne_bytes());
+    let mut local_read = [0_u8; 16];
+    local_read[..8].copy_from_slice(&(mapping + OUTPUT_OFFSET).to_ne_bytes());
+    local_read[8..].copy_from_slice(&(LENGTH as u64).to_ne_bytes());
+    let mut remote = [0_u8; 16];
+    remote[..8].copy_from_slice(&target.to_ne_bytes());
+    remote[8..].copy_from_slice(&(LENGTH as u64).to_ne_bytes());
+
+    let workspace_saved = copy_from_linux_user(mapping, &mut workspace);
+    let child_saved = linux_process::copy_from_live_process(pid, target, &mut original);
+    let parent_saved = copy_from_linux_user(target, &mut parent);
+    let local_write_ready = copy_to_linux_user(mapping, &local_write);
+    let remote_ready = copy_to_linux_user(mapping + 16, &remote);
+    let local_read_ready = copy_to_linux_user(mapping + 32, &local_read);
+    let input_ready = copy_to_linux_user(mapping + INPUT_OFFSET, &pattern);
+    let output_ready = copy_to_linux_user(mapping + OUTPUT_OFFSET, &[0_u8; LENGTH]);
+    let prepared = workspace_saved
+        && child_saved
+        && parent_saved
+        && local_write_ready
+        && remote_ready
+        && local_read_ready
+        && input_ready
+        && output_ready;
+    let written = prepared
+        && linux_process_vm_iov(u64::from(pid), mapping, 1, mapping + 16, 1, 0, true)
+            == LENGTH as u64;
+    let read = written
+        && linux_process_vm_iov(u64::from(pid), mapping + 32, 1, mapping + 16, 1, 0, false)
+            == LENGTH as u64;
+    let mut observed = [0_u8; LENGTH];
+    let isolated = read
+        && copy_from_linux_user(mapping + OUTPUT_OFFSET, &mut observed)
+        && observed == pattern
+        && copy_from_linux_user(target, &mut parent)
+        && parent == original;
+    let mut partial_remote = [0_u8; 32];
+    partial_remote[..8].copy_from_slice(&target.to_ne_bytes());
+    partial_remote[8..16].copy_from_slice(&8_u64.to_ne_bytes());
+    partial_remote[16..24].copy_from_slice(&1_u64.to_ne_bytes());
+    partial_remote[24..].copy_from_slice(&8_u64.to_ne_bytes());
+    let partial = isolated
+        && copy_to_linux_user(mapping + 48, &partial_remote)
+        && linux_process_vm_iov(u64::from(pid), mapping, 1, mapping + 48, 2, 0, true) == 8;
+
+    let permission = if let Some(dumpable) = partial
+        .then(|| linux_process_runtime_state(pid))
+        .flatten()
+        .filter(|state| state.valid)
+        .map(|state| {
+            let dumpable = state.dumpable;
+            state.dumpable = false;
+            dumpable
+        }) {
+        let denied =
+            linux_process_vm_iov(u64::from(pid), mapping + 32, 1, mapping + 16, 1, 0, false)
+                == LINUX_EPERM;
+        linux_process_runtime_state(pid)
+            .filter(|state| state.valid)
+            .is_some_and(|state| {
+                state.dumpable = dumpable;
+                denied
+            })
+    } else {
+        false
+    };
+    let errors = linux_process_vm_iov(
+        u64::from(u32::MAX),
+        mapping + 32,
+        1,
+        mapping + 16,
+        1,
+        0,
+        false,
+    ) == LINUX_ESRCH
+        && linux_process_vm_iov(u64::from(pid), mapping + 32, 1, mapping + 16, 1, 1, false)
+            == LINUX_EINVAL
+        && {
+            remote[..8].copy_from_slice(&1_u64.to_ne_bytes());
+            copy_to_linux_user(mapping + 16, &remote)
+                && linux_process_vm_iov(u64::from(pid), mapping + 32, 1, mapping + 16, 1, 0, false)
+                    == LINUX_EFAULT
+        };
+    let restored = linux_process::copy_to_live_process(pid, target, &original);
+    let workspace_restored = copy_to_linux_user(mapping, &workspace);
+    let valid = partial && permission && errors && restored && workspace_restored;
+    if !valid {
+        serial_write("ginux: Linux cross-process memory validation failed:");
+        for value in [
+            prepared,
+            written,
+            read,
+            isolated,
+            partial,
+            permission,
+            errors,
+            restored,
+            workspace_restored,
+        ] {
+            serial_write(" ");
+            serial_write_u64(u64::from(value));
+        }
+        serial_write(" target/mapped/writable/access ");
+        serial_write_u64(target);
+        let target_mapping = usize::try_from(target)
+            .ok()
+            .and_then(|target| linux_process::live_process_mapping(pid, target));
+        serial_write(" ");
+        serial_write_u64(u64::from(target_mapping.is_some()));
+        serial_write(" ");
+        serial_write_u64(u64::from(
+            target_mapping.is_some_and(|mapping| mapping.writable),
+        ));
+        serial_write(" ");
+        serial_write_u64(u64::from(linux_process_vm_access_permitted(pid)));
+        serial_write(" prepare ");
+        for value in [
+            child_saved,
+            parent_saved,
+            workspace_saved,
+            local_write_ready,
+            remote_ready,
+            local_read_ready,
+            input_ready,
+            output_ready,
+        ] {
+            serial_write(" ");
+            serial_write_u64(u64::from(value));
+        }
+        serial_write("\r\n");
     }
     valid
 }
