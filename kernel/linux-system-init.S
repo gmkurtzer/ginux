@@ -467,6 +467,167 @@ ginux_linux_system_init:
     test rax, rax
     jne .Lfailure
 
+    mov edi, 2
+    mov esi, 1
+    xor edx, edx
+    mov eax, 41
+    syscall
+    test rax, rax
+    js .Lfailure
+    mov dword ptr [rip + .Ltcp_listener], eax
+    mov edi, eax
+    lea rsi, [rip + .Ltcp_bind]
+    mov edx, 16
+    mov eax, 49
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Ltcp_listener]
+    mov esi, 1
+    mov eax, 50
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov dword ptr [rip + .Ltcp_address_length], 16
+    mov edi, dword ptr [rip + .Ltcp_listener]
+    lea rsi, [rip + .Ltcp_address]
+    lea rdx, [rip + .Ltcp_address_length]
+    mov eax, 51
+    syscall
+    test rax, rax
+    jne .Lfailure
+    cmp word ptr [rip + .Ltcp_address], 2
+    jne .Lfailure
+    cmp word ptr [rip + .Ltcp_address + 2], 0xa046
+    jne .Lfailure
+    mov edi, 2
+    mov esi, 1
+    xor edx, edx
+    mov eax, 41
+    syscall
+    test rax, rax
+    js .Lfailure
+    mov dword ptr [rip + .Ltcp_client], eax
+    mov edi, eax
+    lea rsi, [rip + .Ltcp_address]
+    mov edx, 16
+    mov eax, 42
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov dword ptr [rip + .Ltcp_peer_length], 16
+    mov edi, dword ptr [rip + .Ltcp_listener]
+    lea rsi, [rip + .Ltcp_peer]
+    lea rdx, [rip + .Ltcp_peer_length]
+    mov r10d, 0x80800
+    mov eax, 288
+    syscall
+    test rax, rax
+    js .Lfailure
+    mov dword ptr [rip + .Ltcp_accepted], eax
+    cmp word ptr [rip + .Ltcp_peer], 2
+    jne .Lfailure
+    cmp dword ptr [rip + .Ltcp_peer_length], 16
+    jne .Lfailure
+    mov edi, eax
+    mov esi, 1
+    xor edx, edx
+    mov eax, 72
+    syscall
+    cmp rax, 1
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Ltcp_accepted]
+    mov esi, 3
+    xor edx, edx
+    mov eax, 72
+    syscall
+    test rax, 0x800
+    jz .Lfailure
+    mov edi, dword ptr [rip + .Ltcp_client]
+    lea rsi, [rip + .Ltcp_payload]
+    mov edx, 4
+    xor r10d, r10d
+    xor r8d, r8d
+    xor r9d, r9d
+    mov eax, 44
+    syscall
+    cmp rax, 4
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Ltcp_accepted]
+    lea rsi, [rip + .Ltcp_output]
+    mov edx, 4
+    xor r10d, r10d
+    xor r8d, r8d
+    xor r9d, r9d
+    mov eax, 45
+    syscall
+    cmp rax, 4
+    jne .Lfailure
+    cmp dword ptr [rip + .Ltcp_output], 0x21706374
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Ltcp_client]
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Ltcp_accepted]
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov edi, 2
+    mov esi, 1
+    xor edx, edx
+    mov eax, 41
+    syscall
+    test rax, rax
+    js .Lfailure
+    mov dword ptr [rip + .Ltcp_client], eax
+    mov edi, eax
+    lea rsi, [rip + .Ltcp_address]
+    mov edx, 16
+    mov eax, 42
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Ltcp_listener]
+    xor esi, esi
+    xor edx, edx
+    mov eax, 43
+    syscall
+    test rax, rax
+    js .Lfailure
+    mov dword ptr [rip + .Ltcp_accepted], eax
+    mov edi, eax
+    mov esi, 1
+    xor edx, edx
+    mov eax, 72
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Ltcp_accepted]
+    mov esi, 3
+    xor edx, edx
+    mov eax, 72
+    syscall
+    test rax, 0x800
+    jnz .Lfailure
+    mov edi, dword ptr [rip + .Ltcp_client]
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Ltcp_accepted]
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Ltcp_listener]
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Lfailure
+
     xor edi, edi
     mov esi, 4096
     mov edx, 3
@@ -2793,6 +2954,30 @@ ginux_linux_system_init:
     .byte 0, 53
     .byte 10, 0, 2, 2
     .space 8
+.align 4
+.Ltcp_listener:
+    .long 0
+.Ltcp_client:
+    .long 0
+.Ltcp_accepted:
+    .long 0
+.Ltcp_address_length:
+    .long 16
+.Ltcp_peer_length:
+    .long 16
+.align 2
+.Ltcp_bind:
+    .word 2
+    .byte 0x46, 0xa0
+    .space 12
+.Ltcp_address:
+    .space 16
+.Ltcp_peer:
+    .space 16
+.Ltcp_payload:
+    .ascii "tcp!"
+.Ltcp_output:
+    .space 4
 .Lmmsg_payload:
     .ascii "mmsg!"
 .Lmmsg_output:

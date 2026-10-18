@@ -342,9 +342,17 @@ pub(crate) fn close(slot: u8) -> bool {
         state.references -= 1;
         return true;
     }
-    if state.kind == Kind::Unix {
+    if state.kind == Kind::Unix || state.peer.is_some() && !state.listening {
         if !release_local_pages(state.local_first) {
             return false;
+        }
+        if state.kind == Kind::Tcp {
+            if let Some(handle) = state.handle.take() {
+                let Some(runtime) = runtime_existing() else {
+                    return false;
+                };
+                runtime.sockets.remove(handle);
+            }
         }
         *state = Slot::EMPTY;
         return true;
@@ -487,6 +495,35 @@ pub(crate) fn accept(slot: u8) -> Result<(u8, IpEndpoint), Error> {
     let listener = unsafe { SLOTS.get(listener_index).copied() }
         .filter(|state| state.occupied && state.kind == Kind::Tcp && state.listening)
         .ok_or(Error::Invalid)?;
+    if let Some(client_slot) = listener.peer {
+        let client_index = usize::from(client_slot);
+        let client = unsafe { SLOTS.get(client_index).copied() }
+            .filter(|state| state.occupied && state.kind == Kind::Tcp && !state.listening)
+            .ok_or(Error::Invalid)?;
+        let accepted_index =
+            unsafe { SLOTS.iter().position(|state| !state.occupied) }.ok_or(Error::Exhausted)?;
+        let remote = endpoint(runtime.local_address, client.local_port);
+        unsafe {
+            SLOTS[accepted_index] = Slot {
+                occupied: true,
+                references: 1,
+                kind: Kind::Tcp,
+                handle: None,
+                remote: Some(remote),
+                local_port: listener.local_port,
+                tcp_buffer: None,
+                listening: false,
+                peer: Some(client_slot),
+                local_first: memory::FrameLease::EMPTY,
+                local_last: memory::FrameLease::EMPTY,
+                local_head: 0,
+                local_length: 0,
+            };
+            SLOTS[client_index].peer = Some(accepted_index as u8);
+            SLOTS[listener_index].peer = None;
+        }
+        return Ok((accepted_index as u8, remote));
+    }
     let handle = listener.handle.ok_or(Error::Invalid)?;
     let socket = runtime.sockets.get::<tcp::Socket>(handle);
     if !matches!(
@@ -570,6 +607,31 @@ pub(crate) fn connect(slot: u8, remote: IpEndpoint) -> Result<(), Error> {
     } else {
         state.local_port
     };
+    if state.kind == Kind::Tcp
+        && remote.addr
+            == IpAddress::Ipv4(Ipv4Address::from_octets(
+                runtime.local_address.to_be_bytes(),
+            ))
+    {
+        let listener = unsafe {
+            SLOTS.iter().position(|candidate| {
+                candidate.occupied
+                    && candidate.kind == Kind::Tcp
+                    && candidate.listening
+                    && candidate.local_port == remote.port
+                    && candidate.peer.is_none()
+            })
+        };
+        if let Some(listener) = listener {
+            unsafe {
+                SLOTS[index].local_port = local_port;
+                SLOTS[index].remote = Some(remote);
+                SLOTS[index].peer = Some(listener as u8);
+                SLOTS[listener].peer = Some(slot);
+            }
+            return Ok(());
+        }
+    }
     match state.kind {
         Kind::Tcp => {
             let socket = runtime.sockets.get_mut::<tcp::Socket>(handle);
@@ -609,13 +671,13 @@ pub(crate) fn send(slot: u8, input: &[u8], remote: Option<IpEndpoint>) -> Result
     let state = unsafe { SLOTS.get(usize::from(slot)) }
         .filter(|slot| slot.occupied)
         .ok_or(Error::Invalid)?;
-    if state.kind == Kind::Unix {
+    if state.kind == Kind::Unix || state.peer.is_some() && !state.listening {
         if remote.is_some() {
             return Err(Error::Invalid);
         }
         let peer = usize::from(state.peer.ok_or(Error::NotConnected)?);
         let Some(peer_state) = (unsafe { SLOTS.get_mut(peer) })
-            .filter(|slot| slot.occupied && slot.kind == Kind::Unix)
+            .filter(|slot| slot.occupied && slot.kind == state.kind && !slot.listening)
         else {
             crate::serial_write(
                 "ginux: local socket peer unavailable slot/peer/occupied/references ",
@@ -696,7 +758,7 @@ pub(crate) fn recv(slot: u8, output: &mut [u8]) -> Result<(usize, Option<IpEndpo
     let state = unsafe { SLOTS.get_mut(usize::from(slot)) }
         .filter(|slot| slot.occupied)
         .ok_or(Error::Invalid)?;
-    if state.kind == Kind::Unix {
+    if state.kind == Kind::Unix || state.peer.is_some() && !state.listening {
         let received = output.len().min(state.local_length);
         let mut copied = 0_usize;
         while copied < received {
@@ -771,7 +833,9 @@ pub(crate) fn recv(slot: u8, output: &mut [u8]) -> Result<(usize, Option<IpEndpo
 
 pub(crate) fn peek_local(slot: u8, output: &mut [u8]) -> Result<usize, Error> {
     let state = unsafe { SLOTS.get(usize::from(slot)) }
-        .filter(|slot| slot.occupied && slot.kind == Kind::Unix)
+        .filter(|slot| {
+            slot.occupied && (slot.kind == Kind::Unix || slot.peer.is_some() && !slot.listening)
+        })
         .ok_or(Error::Invalid)?;
     let returned = output.len().min(state.local_length);
     let mut page = state.local_first;
@@ -866,7 +930,10 @@ pub(crate) fn readiness(slot: u8) -> Option<(bool, bool, bool)> {
     let state = unsafe { SLOTS.get(usize::from(slot)) }?
         .occupied
         .then(|| unsafe { SLOTS[usize::from(slot)] })?;
-    if state.kind == Kind::Unix {
+    if state.listening && state.peer.is_some() {
+        return Some((true, false, false));
+    }
+    if state.kind == Kind::Unix || state.peer.is_some() {
         let peer = state
             .peer
             .and_then(|peer| unsafe { SLOTS.get(usize::from(peer)) });
