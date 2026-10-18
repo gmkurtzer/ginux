@@ -24,7 +24,10 @@ and reads back the boolean options and a non-integral receive timeout, while
 short or unreadable values and unknown options produce `EINVAL`, `EFAULT`, and
 `ENOPROTOOPT` respectively. `SO_TYPE`, `SO_PROTOCOL`, `SO_DOMAIN`, and
 `SO_ACCEPTCONN` report live socket state, including the distinct UDP type and
-protocol. AF_UNIX `sendmsg` accepts up to twelve socket descriptors in one
+protocol. Connected AF_UNIX sockets report the peer identity captured when the
+pair was created through the Linux 12-byte `SO_PEERCRED` `ucred`; the booted
+probe compares its PID with `getpid` and verifies the domain-local root UID and
+GID. AF_UNIX `sendmsg` accepts up to twelve socket descriptors in one
 `SCM_RIGHTS` record, retains every underlying open-file reference even if the
 sender closes its descriptors, and transfers the retained status flags through
 `recvmsg`.

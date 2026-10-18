@@ -43,9 +43,7 @@ ginux_linux_system_init:
     js .Lfailure
     mov r13, rax
     mov rdi, rax
-    mov eax, 3
-    syscall
-    call .Lrequire_zero
+    call .Lclose_descriptor
     mov rdi, r12
     xor esi, esi
     xor edx, edx
@@ -54,9 +52,7 @@ ginux_linux_system_init:
     syscall
     call .Lrequire_zero
     mov rdi, r12
-    mov eax, 3
-    syscall
-    call .Lrequire_zero
+    call .Lclose_descriptor
 
     mov edi, -100
     lea rsi, [rip + .Ldev_path]
@@ -84,9 +80,7 @@ ginux_linux_system_init:
     cmp dword ptr [rip + .Lstatus + 147], 0x00797474
     jne .Lfailure
     mov rdi, r9
-    mov eax, 3
-    syscall
-    call .Lrequire_zero
+    call .Lclose_descriptor
 
     mov edi, 3
     xor esi, esi
@@ -186,6 +180,21 @@ ginux_linux_system_init:
     mov eax, 53
     syscall
     call .Lrequire_efault
+    mov dword ptr [rip + .Lstatus + 16], 12
+    mov edi, dword ptr [rip + .Lsocket_pair]
+    mov esi, 1
+    mov edx, 17
+    lea r10, [rip + .Lstatus]
+    lea r8, [rip + .Lstatus + 16]
+    mov eax, 55
+    syscall
+    call .Lrequire_zero
+    mov eax, 39
+    syscall
+    cmp dword ptr [rip + .Lstatus], eax
+    jne .Lfailure
+    cmp qword ptr [rip + .Lstatus + 4], 0
+    jne .Lfailure
     mov dword ptr [rip + .Lstatus + 16], 16
     mov edi, dword ptr [rip + .Lsocket_pair]
     lea rsi, [rip + .Lstatus]
@@ -396,9 +405,7 @@ ginux_linux_system_init:
     syscall
     call .Lrequire_one
     mov edi, dword ptr [rip + .Lright_source]
-    mov eax, 3
-    syscall
-    call .Lrequire_zero
+    call .Lclose_descriptor
     lea rax, [rip + .Lright_output]
     mov qword ptr [rip + .Lmmsg_recv_iov], rax
     mov qword ptr [rip + .Lmmsg_recv_iov + 8], 1
@@ -442,15 +449,11 @@ ginux_linux_system_init:
     cmp dword ptr [rip + .Lstatus], 2
     jne .Lfailure
     mov edi, dword ptr [rip + .Lright_output_control + 16]
-    mov eax, 3
-    syscall
-    call .Lrequire_zero
+    call .Lclose_descriptor
     mov edi, dword ptr [rip + .Lright_output_control + 20]
     cmp edi, dword ptr [rip + .Lright_output_control + 16]
     je .Lfailure
-    mov eax, 3
-    syscall
-    call .Lrequire_zero
+    call .Lclose_descriptor
 
     # A short control buffer consumes the rights and reports MSG_CTRUNC.
     mov qword ptr [rip + .Lright_control], 20
@@ -775,13 +778,9 @@ ginux_linux_system_init:
     cmp rax, -9
     jne .Lfailure
     mov edi, dword ptr [rip + .Lsocket_pair]
-    mov eax, 3
-    syscall
-    call .Lrequire_zero
+    call .Lclose_descriptor
     mov edi, dword ptr [rip + .Lsocket_pair + 4]
-    mov eax, 3
-    syscall
-    call .Lrequire_zero
+    call .Lclose_descriptor
 
     # UDP truncation copies the available prefix, reports the full datagram
     # length under MSG_TRUNC, and preserves a peeked DNS response.
@@ -868,9 +867,7 @@ ginux_linux_system_init:
     jne .Lfailure
 .Ldns_close:
     mov edi, dword ptr [rip + .Ldns_socket]
-    mov eax, 3
-    syscall
-    call .Lrequire_zero
+    call .Lclose_descriptor
 
     mov edi, 2
     mov esi, 2
@@ -950,9 +947,7 @@ ginux_linux_system_init:
     cmp rax, -9
     jne .Lfailure
     mov edi, dword ptr [rip + .Lipv4_socket]
-    mov eax, 3
-    syscall
-    call .Lrequire_zero
+    call .Lclose_descriptor
 
     mov edi, 2
     mov esi, 1
@@ -1166,13 +1161,9 @@ ginux_linux_system_init:
     syscall
     call .Lrequire_zero
     mov edi, dword ptr [rip + .Ltcp_client]
-    mov eax, 3
-    syscall
-    call .Lrequire_zero
+    call .Lclose_descriptor
     mov edi, dword ptr [rip + .Ltcp_accepted]
-    mov eax, 3
-    syscall
-    call .Lrequire_zero
+    call .Lclose_descriptor
     mov eax, dword ptr [rip + .Ltcp_client_second]
     mov dword ptr [rip + .Ltcp_client], eax
     mov edi, dword ptr [rip + .Ltcp_listener]
@@ -1197,17 +1188,11 @@ ginux_linux_system_init:
     test rax, 0x800
     jnz .Lfailure
     mov edi, dword ptr [rip + .Ltcp_client]
-    mov eax, 3
-    syscall
-    call .Lrequire_zero
+    call .Lclose_descriptor
     mov edi, dword ptr [rip + .Ltcp_accepted]
-    mov eax, 3
-    syscall
-    call .Lrequire_zero
+    call .Lclose_descriptor
     mov edi, dword ptr [rip + .Ltcp_listener]
-    mov eax, 3
-    syscall
-    call .Lrequire_zero
+    call .Lclose_descriptor
 
     xor edi, edi
     mov esi, 4096
@@ -1352,13 +1337,9 @@ ginux_linux_system_init:
     cmp qword ptr [rip + .Lvmsplice_output], rax
     jne .Lfailure
     mov edi, dword ptr [rip + .Lpipe_pair]
-    mov eax, 3
-    syscall
-    call .Lrequire_zero
+    call .Lclose_descriptor
     mov edi, dword ptr [rip + .Lpipe_pair + 4]
-    mov eax, 3
-    syscall
-    call .Lrequire_zero
+    call .Lclose_descriptor
 
     mov edi, -100
     lea rsi, [rip + .Lnull_path]
@@ -1382,9 +1363,7 @@ ginux_linux_system_init:
     syscall
     call .Lrequire_zero
     mov rdi, r9
-    mov eax, 3
-    syscall
-    call .Lrequire_zero
+    call .Lclose_descriptor
 
     mov dword ptr [rip + .Lstatus], -1
     mov edi, -100
@@ -1405,9 +1384,7 @@ ginux_linux_system_init:
     cmp dword ptr [rip + .Lstatus], 0
     jne .Lfailure
     mov rdi, r9
-    mov eax, 3
-    syscall
-    call .Lrequire_zero
+    call .Lclose_descriptor
 
     mov edi, -100
     lea rsi, [rip + .Ltty_path]
@@ -1424,9 +1401,7 @@ ginux_linux_system_init:
     syscall
     call .Lrequire_zero
     mov rdi, r9
-    mov eax, 3
-    syscall
-    call .Lrequire_zero
+    call .Lclose_descriptor
 
     mov edi, 1
     mov esi, 1
@@ -1608,9 +1583,7 @@ ginux_linux_system_init:
     cmp dword ptr [rip + .Lstatus], 2
     jne .Lfailure
     mov edi, dword ptr [rip + .Lstatus + 20]
-    mov eax, 3
-    syscall
-    call .Lrequire_zero
+    call .Lclose_descriptor
     mov edi, 4
     mov esi, 1
     mov edx, 99
@@ -1688,9 +1661,7 @@ ginux_linux_system_init:
     syscall
     call .Lrequire_einval
     mov edi, 4
-    mov eax, 3
-    syscall
-    call .Lrequire_zero
+    call .Lclose_descriptor
 
     mov rdi, r15
     lea rsi, [rip + .Ldevfs_marker]
@@ -1722,9 +1693,7 @@ ginux_linux_system_init:
     cmp byte ptr [rip + .Lstatus + 283], '1'
     jne .Lfailure
     mov rdi, r9
-    mov eax, 3
-    syscall
-    call .Lrequire_zero
+    call .Lclose_descriptor
 
     mov edi, -100
     lea rsi, [rip + .Lpid1_path]
@@ -1762,9 +1731,7 @@ ginux_linux_system_init:
     cmp byte ptr [rip + .Lstatus + 255], 'm'
     jne .Lfailure
     mov rdi, r9
-    mov eax, 3
-    syscall
-    call .Lrequire_zero
+    call .Lclose_descriptor
 
     mov edi, -100
     lea rsi, [rip + .Luid_map_path]
@@ -1790,9 +1757,7 @@ ginux_linux_system_init:
     cmp word ptr [rip + .Lstatus + 9], 0x0a31
     jne .Lfailure
     mov rdi, r9
-    mov eax, 3
-    syscall
-    call .Lrequire_zero
+    call .Lclose_descriptor
 
     mov edi, -100
     lea rsi, [rip + .Lgid_map_path]
@@ -1818,9 +1783,7 @@ ginux_linux_system_init:
     cmp word ptr [rip + .Lstatus + 9], 0x0a31
     jne .Lfailure
     mov rdi, r9
-    mov eax, 3
-    syscall
-    call .Lrequire_zero
+    call .Lclose_descriptor
 
     mov edi, -100
     lea rsi, [rip + .Lsetgroups_path]
@@ -1842,9 +1805,7 @@ ginux_linux_system_init:
     cmp byte ptr [rip + .Lstatus + 4], 0x0a
     jne .Lfailure
     mov rdi, r9
-    mov eax, 3
-    syscall
-    call .Lrequire_zero
+    call .Lclose_descriptor
 
     mov rdi, r15
     lea rsi, [rip + .Luserns_marker]
@@ -1952,9 +1913,7 @@ ginux_linux_system_init:
     cmp rax, 45
     jne .Lfailure
     mov rdi, r9
-    mov eax, 3
-    syscall
-    call .Lrequire_zero
+    call .Lclose_descriptor
 
     mov edi, -100
     lea rsi, [rip + .Lmountinfo_path]
@@ -1979,9 +1938,7 @@ ginux_linux_system_init:
     cmp rax, 51
     jne .Lfailure
     mov rdi, r9
-    mov eax, 3
-    syscall
-    call .Lrequire_zero
+    call .Lclose_descriptor
 
     mov edi, -100
     lea rsi, [rip + .Ltmp_path]
@@ -1999,9 +1956,7 @@ ginux_linux_system_init:
     cmp rax, 48
     jne .Lfailure
     mov rdi, r9
-    mov eax, 3
-    syscall
-    call .Lrequire_zero
+    call .Lclose_descriptor
 
     mov edi, -100
     lea rsi, [rip + .Ltmp_file_path]
@@ -2028,9 +1983,7 @@ ginux_linux_system_init:
     cmp rax, 6
     jne .Lfailure
     mov rdi, r9
-    mov eax, 3
-    syscall
-    call .Lrequire_zero
+    call .Lclose_descriptor
 
     mov edi, -100
     lea rsi, [rip + .Ltmp_path]
@@ -2054,9 +2007,7 @@ ginux_linux_system_init:
     cmp dword ptr [rip + .Lstatus + 75], 0x00796461
     jne .Lfailure
     mov rdi, r9
-    mov eax, 3
-    syscall
-    call .Lrequire_zero
+    call .Lclose_descriptor
 
     mov edi, -100
     lea rsi, [rip + .Ltmp_file_path]
@@ -2087,9 +2038,7 @@ ginux_linux_system_init:
     jne .Lfailure
 
     mov rdi, r9
-    mov eax, 3
-    syscall
-    call .Lrequire_zero
+    call .Lclose_descriptor
 
     mov edi, -100
     lea rsi, [rip + .Ltmp_file_path]
@@ -2122,9 +2071,7 @@ ginux_linux_system_init:
     cmp rax, 48
     jne .Lfailure
     mov rdi, r9
-    mov eax, 3
-    syscall
-    call .Lrequire_zero
+    call .Lclose_descriptor
 
     mov rdi, r15
     lea rsi, [rip + .Ltmp_marker]
@@ -2286,13 +2233,9 @@ ginux_linux_system_init:
     syscall
     call .Lrequire_einval
     mov edi, dword ptr [rip + .Lpipe_pair]
-    mov eax, 3
-    syscall
-    call .Lrequire_zero
+    call .Lclose_descriptor
     mov edi, dword ptr [rip + .Lpipe_pair + 4]
-    mov eax, 3
-    syscall
-    call .Lrequire_zero
+    call .Lclose_descriptor
     mov edi, 1
     mov esi, 1
     xor edx, edx
@@ -2319,9 +2262,7 @@ ginux_linux_system_init:
     cmp qword ptr [rip + .Lcachestat_result], 1
     jne .Lfailure
     mov rdi, r9
-    mov eax, 3
-    syscall
-    call .Lrequire_zero
+    call .Lclose_descriptor
 
     lea rdi, [rip + .Lrseq_area]
     mov esi, 32
@@ -2922,9 +2863,7 @@ ginux_linux_system_init:
     cmp dword ptr [rip + .Lsignalfd_info], 10
     jne .Lfailure
     mov rdi, r12
-    mov eax, 3
-    syscall
-    call .Lrequire_zero
+    call .Lclose_descriptor
 
     mov edi, 1
     lea rsi, [rip + .Lsignal_set]
@@ -3078,9 +3017,7 @@ ginux_linux_system_init:
     cmp byte ptr [rip + .Lstatus + 307], '2'
     jne .Lfailure
     mov rdi, r9
-    mov eax, 3
-    syscall
-    call .Lrequire_zero
+    call .Lclose_descriptor
 
     mov edi, -100
     lea rsi, [rip + .Lpid2_path]
@@ -3100,9 +3037,7 @@ ginux_linux_system_init:
     cmp dword ptr [rip + .Lstatus + 67], 0x74617473
     jne .Lfailure
     mov rdi, r9
-    mov eax, 3
-    syscall
-    call .Lrequire_zero
+    call .Lclose_descriptor
 
     mov edi, -100
     lea rsi, [rip + .Lpid2_status_path]
@@ -3126,9 +3061,7 @@ ginux_linux_system_init:
     cmp byte ptr [rip + .Lstatus + 42], '1'
     jne .Lfailure
     mov rdi, r9
-    mov eax, 3
-    syscall
-    call .Lrequire_zero
+    call .Lclose_descriptor
 
     mov rdi, r12
     xor esi, esi
@@ -3362,9 +3295,7 @@ ginux_linux_system_init:
     syscall
     call .Lrequire_one
     mov rdi, r9
-    mov eax, 3
-    syscall
-    call .Lrequire_zero
+    call .Lclose_descriptor
 
     mov qword ptr [rip + .Lsignal_set], 0x4000
     xor edi, edi
@@ -3413,9 +3344,7 @@ ginux_linux_system_init:
     call .Lrequire_zero
 
     mov rdi, r15
-    mov eax, 3
-    syscall
-    call .Lrequire_zero
+    call .Lclose_descriptor
 
     mov edi, 42
     mov eax, 231
@@ -3441,6 +3370,11 @@ ginux_linux_system_init:
     cmp dword ptr [rip + .Lstatus], 1
     jne .Lfailure
     ret
+
+.Lclose_descriptor:
+    mov eax, 3
+    syscall
+    jmp .Lrequire_zero
 
 .Lrequire_zero:
     test rax, rax

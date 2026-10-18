@@ -124,6 +124,7 @@ struct Slot {
     pending_right_slots: [u8; SLOT_COUNT],
     pending_right_flags: [u32; SLOT_COUNT],
     pending_credentials: Option<(u32, u32, u32)>,
+    peer_credentials: Option<(u32, u32, u32)>,
     local_first: memory::FrameLease,
     local_last: memory::FrameLease,
     local_head: usize,
@@ -157,6 +158,7 @@ impl Slot {
         pending_right_slots: [0; SLOT_COUNT],
         pending_right_flags: [0; SLOT_COUNT],
         pending_credentials: None,
+        peer_credentials: None,
         local_first: memory::FrameLease::EMPTY,
         local_last: memory::FrameLease::EMPTY,
         local_head: 0,
@@ -344,6 +346,7 @@ pub(crate) fn open(kind: Kind) -> Result<u8, Error> {
             pending_right_slots: [0; SLOT_COUNT],
             pending_right_flags: [0; SLOT_COUNT],
             pending_credentials: None,
+            peer_credentials: None,
             local_first: memory::FrameLease::EMPTY,
             local_last: memory::FrameLease::EMPTY,
             local_head: 0,
@@ -390,6 +393,7 @@ pub(crate) fn open_pair() -> Result<(u8, u8), Error> {
             pending_right_slots: [0; SLOT_COUNT],
             pending_right_flags: [0; SLOT_COUNT],
             pending_credentials: None,
+            peer_credentials: None,
             local_first: memory::FrameLease::EMPTY,
             local_last: memory::FrameLease::EMPTY,
             local_head: 0,
@@ -421,6 +425,7 @@ pub(crate) fn open_pair() -> Result<(u8, u8), Error> {
             pending_right_slots: [0; SLOT_COUNT],
             pending_right_flags: [0; SLOT_COUNT],
             pending_credentials: None,
+            peer_credentials: None,
             local_first: memory::FrameLease::EMPTY,
             local_last: memory::FrameLease::EMPTY,
             local_head: 0,
@@ -755,6 +760,7 @@ pub(crate) fn accept(slot: u8) -> Result<(u8, IpEndpoint), Error> {
                 pending_right_slots: [0; SLOT_COUNT],
                 pending_right_flags: [0; SLOT_COUNT],
                 pending_credentials: None,
+                peer_credentials: None,
                 local_first: memory::FrameLease::EMPTY,
                 local_last: memory::FrameLease::EMPTY,
                 local_head: 0,
@@ -822,6 +828,7 @@ pub(crate) fn accept(slot: u8) -> Result<(u8, IpEndpoint), Error> {
             pending_right_slots: [0; SLOT_COUNT],
             pending_right_flags: [0; SLOT_COUNT],
             pending_credentials: None,
+            peer_credentials: None,
             local_first: memory::FrameLease::EMPTY,
             local_last: memory::FrameLease::EMPTY,
             local_head: 0,
@@ -1437,6 +1444,33 @@ pub(crate) fn unix_peer_connected(slot: u8) -> bool {
         unsafe { SLOTS.get(usize::from(peer)).copied() }
             .is_some_and(|peer| peer.occupied && peer.kind == Kind::Unix)
     })
+}
+
+pub(crate) fn set_unix_pair_credentials(
+    first: u8,
+    second: u8,
+    credentials: (u32, u32, u32),
+) -> bool {
+    let first_valid = unsafe { SLOTS.get(usize::from(first)) }.is_some_and(|state| {
+        state.occupied && state.kind == Kind::Unix && state.peer == Some(second)
+    });
+    let second_valid = unsafe { SLOTS.get(usize::from(second)) }.is_some_and(|state| {
+        state.occupied && state.kind == Kind::Unix && state.peer == Some(first)
+    });
+    if !first_valid || !second_valid {
+        return false;
+    }
+    unsafe {
+        SLOTS[usize::from(first)].peer_credentials = Some(credentials);
+        SLOTS[usize::from(second)].peer_credentials = Some(credentials);
+    }
+    true
+}
+
+pub(crate) fn unix_peer_credentials(slot: u8) -> Option<(u32, u32, u32)> {
+    unsafe { SLOTS.get(usize::from(slot)) }
+        .filter(|state| state.occupied && state.kind == Kind::Unix)
+        .and_then(|state| state.peer_credentials)
 }
 
 pub(crate) fn queue_unix_rights(sender: u8, rights: &[(u8, u32)]) -> Result<(), Error> {

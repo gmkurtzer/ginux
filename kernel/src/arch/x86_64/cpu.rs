@@ -20359,6 +20359,24 @@ fn linux_socket_pair(family: u64, socket_type: u64, protocol: u64, output: u64) 
         Ok(pair) => pair,
         Err(error) => return linux_socket_error(error),
     };
+    let Some(credentials) = current_linux_credentials() else {
+        let _ = crate::linux_socket::close(first);
+        let _ = crate::linux_socket::close(second);
+        return LINUX_ESRCH;
+    };
+    if !crate::linux_socket::set_unix_pair_credentials(
+        first,
+        second,
+        (
+            current_linux_process_pid(),
+            credentials.uid,
+            credentials.gid,
+        ),
+    ) {
+        let _ = crate::linux_socket::close(first);
+        let _ = crate::linux_socket::close(second);
+        return LINUX_EINVAL;
+    }
     let mut bytes = [0_u8; 8];
     bytes[..4].copy_from_slice(&(descriptors[0] as u32).to_ne_bytes());
     bytes[4..].copy_from_slice(&(descriptors[1] as u32).to_ne_bytes());
@@ -21348,6 +21366,32 @@ fn linux_socket_getsockopt(
     let Some(slot) = linux_socket_slot(descriptor) else {
         return LINUX_EBADF;
     };
+    if level == 1 && option == 17 {
+        if crate::linux_socket::kind(slot) != Some(crate::linux_socket::Kind::Unix) {
+            return LINUX_ENOPROTOOPT;
+        }
+        let mut supplied = [0_u8; 4];
+        if !copy_from_linux_user(length, &mut supplied) {
+            return LINUX_EFAULT;
+        }
+        if u32::from_ne_bytes(supplied) < 12 {
+            return LINUX_EINVAL;
+        }
+        let Some(credentials) = crate::linux_socket::unix_peer_credentials(slot) else {
+            return LINUX_ENOTCONN;
+        };
+        let mut output = [0_u8; 12];
+        output[..4].copy_from_slice(&(credentials.0 as i32).to_ne_bytes());
+        output[4..8].copy_from_slice(&credentials.1.to_ne_bytes());
+        output[8..].copy_from_slice(&credentials.2.to_ne_bytes());
+        return if copy_to_linux_user(value, &output)
+            && copy_to_linux_user(length, &12_u32.to_ne_bytes())
+        {
+            0
+        } else {
+            LINUX_EFAULT
+        };
+    }
     if level == 1 && matches!(option, 20 | 21) {
         let mut supplied = [0_u8; 4];
         if !copy_from_linux_user(length, &mut supplied) {
