@@ -8374,13 +8374,7 @@ extern "sysv64" fn linux_syscall_handler(
             register(0),
         ),
         LINUX_GETITIMER_SYSCALL => linux_getitimer(first_argument, buffer),
-        LINUX_ALARM_SYSCALL => {
-            if first_argument == 0 {
-                0
-            } else {
-                LINUX_ENOSYS
-            }
-        }
+        LINUX_ALARM_SYSCALL => linux_alarm(first_argument),
         LINUX_SETITIMER_SYSCALL => linux_setitimer(first_argument, buffer, count),
         LINUX_TIMER_CREATE_SYSCALL => linux_timer_create(first_argument, buffer, count),
         LINUX_TIMER_SETTIME_SYSCALL => {
@@ -10884,6 +10878,7 @@ fn linux_getrusage(who: u64, output_address: u64) -> u64 {
 }
 
 fn linux_getitimer(which: u64, output_address: u64) -> u64 {
+    let which = u64::from(which as u32);
     if which > 2 {
         return LINUX_EINVAL;
     }
@@ -10891,6 +10886,14 @@ fn linux_getitimer(which: u64, output_address: u64) -> u64 {
         return LINUX_EFAULT;
     }
     0
+}
+
+fn linux_alarm(seconds: u64) -> u64 {
+    if u64::from(seconds as u32) == 0 {
+        0
+    } else {
+        LINUX_ENOSYS
+    }
 }
 
 fn linux_nanosleep_live_return(
@@ -11011,6 +11014,7 @@ fn linux_clock_nanosleep_live_return(
 }
 
 fn linux_setitimer(which: u64, input_address: u64, old_output_address: u64) -> u64 {
+    let which = u64::from(which as u32);
     if which > 2 {
         return LINUX_EINVAL;
     }
@@ -13553,6 +13557,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         );
     let semaphores = verify_linux_sysv_semaphore_syscalls();
     let messages = verify_linux_sysv_message_queue_syscalls();
+    let timer_argument_widths = verify_linux_timer_argument_widths();
     let process_advice = verify_linux_process_madvise_syscall();
     let posix_queues = verify_linux_posix_message_queue_syscalls();
     let unix_inflight_rights = verify_linux_unix_inflight_rights();
@@ -13596,6 +13601,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         destroyed,
         semaphores,
         messages,
+        timer_argument_widths,
         process_advice,
         posix_queues,
         unix_inflight_rights,
@@ -13642,6 +13648,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && destroyed
         && semaphores
         && messages
+        && timer_argument_widths
         && process_advice
         && posix_queues
         && unix_inflight_rights
@@ -15497,6 +15504,60 @@ fn verify_linux_process_madvise_syscall() -> bool {
     let closed = descriptor < LINUX_AUX_DESCRIPTOR_LIMIT && linux_descriptor_close(descriptor) == 0;
     let unmapped = linux_runtime_munmap(mapping, (3 * PAGE_SIZE) as u64) == 0;
     cleared && errors && closed && unmapped
+}
+
+fn verify_linux_timer_argument_widths() -> bool {
+    const UPPER_REGISTER_BITS: u64 = 1_u64 << 32;
+    const SIGEV_NONE: u32 = 1;
+    let mapping = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    if !(LINUX_RUNTIME_DYNAMIC_MMAP_BASE..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
+        .contains(&mapping)
+    {
+        return false;
+    }
+    let event_address = mapping + 64;
+    let timer_address = mapping + 128;
+    let mut event = [0_u8; 64];
+    event[12..16].copy_from_slice(&SIGEV_NONE.to_ne_bytes());
+    let prepared =
+        copy_to_linux_user(mapping, &[0_u8; 32]) && copy_to_linux_user(event_address, &event);
+    let interval_timers = prepared
+        && linux_getitimer(UPPER_REGISTER_BITS, mapping) == 0
+        && linux_setitimer(UPPER_REGISTER_BITS, mapping, 0) == 0
+        && linux_alarm(UPPER_REGISTER_BITS) == 0;
+    let posix_timer = interval_timers
+        && linux_timer_create(
+            UPPER_REGISTER_BITS | LINUX_CLOCK_MONOTONIC,
+            event_address,
+            timer_address,
+        ) == 0
+        && linux_timer_settime(UPPER_REGISTER_BITS | 1, UPPER_REGISTER_BITS, mapping, 0) == 0
+        && linux_timer_gettime(UPPER_REGISTER_BITS | 1, mapping) == 0
+        && linux_timer_getoverrun(UPPER_REGISTER_BITS | 1) == 0
+        && linux_timer_delete(UPPER_REGISTER_BITS | 1) == 0;
+    let timerfd = linux_timerfd_create(
+        UPPER_REGISTER_BITS | LINUX_CLOCK_MONOTONIC,
+        UPPER_REGISTER_BITS | LINUX_TFD_NONBLOCK,
+    );
+    let timerfd_valid = posix_timer
+        && timerfd < LINUX_AUX_DESCRIPTOR_LIMIT
+        && linux_timerfd_settime(timerfd, UPPER_REGISTER_BITS, mapping, 0) == 0
+        && linux_descriptor_close(timerfd) == 0;
+    if ELF_PROBE_POSIX_TIMER_ACTIVE.load(Ordering::SeqCst) {
+        let _ = linux_timer_delete(1);
+    }
+    if timerfd < LINUX_AUX_DESCRIPTOR_LIMIT && linux_timerfd_descriptor(timerfd) {
+        let _ = linux_descriptor_close(timerfd);
+    }
+    let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
+    timerfd_valid && unmapped
 }
 
 fn verify_linux_sysv_semaphore_syscalls() -> bool {
@@ -24976,6 +25037,8 @@ fn linux_eventfd_write_value(descriptor: u64, increment: u64, wake: bool) -> Opt
 }
 
 fn linux_timerfd_create(clock: u64, flags: u64) -> u64 {
+    let clock = u64::from(clock as u32);
+    let flags = u64::from(flags as u32);
     if clock != LINUX_CLOCK_MONOTONIC || flags & !(LINUX_TFD_NONBLOCK | LINUX_O_CLOEXEC) != 0 {
         return LINUX_EINVAL;
     }
@@ -24997,6 +25060,7 @@ fn linux_timerfd_create(clock: u64, flags: u64) -> u64 {
 
 fn linux_timer_create(clock: u64, event_address: u64, timer_address: u64) -> u64 {
     const SIGEV_NONE: u32 = 1;
+    let clock = u64::from(clock as u32);
     if clock != LINUX_CLOCK_MONOTONIC {
         return LINUX_EINVAL;
     }
@@ -25024,6 +25088,8 @@ fn linux_timer_create(clock: u64, event_address: u64, timer_address: u64) -> u64
 
 fn linux_timer_settime(timer: u64, flags: u64, new_address: u64, old_address: u64) -> u64 {
     const TIMER_ABSTIME: u64 = 1;
+    let timer = u64::from(timer as u32);
+    let flags = u64::from(flags as u32);
     if timer != 1 || !ELF_PROBE_POSIX_TIMER_ACTIVE.load(Ordering::SeqCst) {
         return LINUX_EINVAL;
     }
@@ -25070,6 +25136,7 @@ fn linux_timer_settime(timer: u64, flags: u64, new_address: u64, old_address: u6
 }
 
 fn linux_timer_gettime(timer: u64, address: u64) -> u64 {
+    let timer = u64::from(timer as u32);
     if timer != 1 || !ELF_PROBE_POSIX_TIMER_ACTIVE.load(Ordering::SeqCst) {
         return LINUX_EINVAL;
     }
@@ -25089,6 +25156,7 @@ fn linux_timer_gettime(timer: u64, address: u64) -> u64 {
 }
 
 fn linux_timer_getoverrun(timer: u64) -> u64 {
+    let timer = u64::from(timer as u32);
     if timer == 1 && ELF_PROBE_POSIX_TIMER_ACTIVE.load(Ordering::SeqCst) {
         0
     } else {
@@ -25097,6 +25165,7 @@ fn linux_timer_getoverrun(timer: u64) -> u64 {
 }
 
 fn linux_timer_delete(timer: u64) -> u64 {
+    let timer = u64::from(timer as u32);
     if timer != 1 || !ELF_PROBE_POSIX_TIMER_ACTIVE.swap(false, Ordering::SeqCst) {
         return LINUX_EINVAL;
     }
@@ -25106,6 +25175,7 @@ fn linux_timer_delete(timer: u64) -> u64 {
 }
 
 fn linux_timerfd_settime(descriptor: u64, flags: u64, new_address: u64, old_address: u64) -> u64 {
+    let flags = u64::from(flags as u32);
     if !linux_timerfd_descriptor(descriptor) {
         return LINUX_EBADF;
     }

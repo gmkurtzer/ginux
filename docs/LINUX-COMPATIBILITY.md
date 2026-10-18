@@ -74,7 +74,9 @@ Current totals: **82 Complete**, **245 Partial**, **48 Policy-denied**, **0 Miss
 
 The current POSIX timer profile provides one monotonic `SIGEV_NONE` timer per
 domain, including relative/absolute arm, query, overrun, and
-delete operations. Signal/thread notification, realtime clocks, multiple timer
+delete operations. Timer selectors, clock IDs, timer IDs, and flag words follow
+Linux's 32-bit UAPI conversion rules even when the unused upper register bits
+are nonzero. Signal/thread notification, realtime clocks, multiple timer
 objects, and overrun accumulation remain pending.
 
 The ring-3 controller directly verifies its Linux PID/TID, parent,
