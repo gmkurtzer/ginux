@@ -924,6 +924,16 @@ when no connection is pending. A blocking accept polls the network until a
 connection arrives or the listener becomes invalid. IPv6, Unix pathname
 listeners, signal-interruptible scheduler wait queues, and multi-entry listen
 backlogs remain outside this profile.
+`shutdown` tracks independent read and write closure for AF_UNIX and
+kernel-local TCP streams. Read shutdown discards queued local data and makes
+subsequent reads return EOF; write shutdown makes subsequent sends return
+`-EPIPE`, while the peer drains queued data and then observes EOF. The reverse
+direction remains usable after a one-sided write shutdown. External TCP write
+shutdown emits a FIN through the network stack, and all socket kinds implement
+Linux descriptor-width, `ENOTSOCK`, `EBADF`, `ENOTCONN`, and invalid-`how`
+errors. Automatic `SIGPIPE` generation, complete external read-side shutdown,
+and concurrent half-close races remain pending, so syscall 48 is classified
+Partial rather than Complete.
 `openat2` accepts the 24-byte version-zero `open_how` structure and delegates
 zero-resolve requests to the same per-domain VFS path as `openat`. Larger
 structures up to one page are accepted only when every extension byte is zero;

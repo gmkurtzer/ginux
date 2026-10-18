@@ -77,6 +77,7 @@ pub(crate) enum Error {
     InProgress,
     WouldBlock,
     NotConnected,
+    BrokenPipe,
     Reset,
 }
 
@@ -91,6 +92,8 @@ struct Slot {
     tcp_buffer: Option<u8>,
     listening: bool,
     peer: Option<u8>,
+    read_shutdown: bool,
+    write_shutdown: bool,
     local_first: memory::FrameLease,
     local_last: memory::FrameLease,
     local_head: usize,
@@ -108,6 +111,8 @@ impl Slot {
         tcp_buffer: None,
         listening: false,
         peer: None,
+        read_shutdown: false,
+        write_shutdown: false,
         local_first: memory::FrameLease::EMPTY,
         local_last: memory::FrameLease::EMPTY,
         local_head: 0,
@@ -279,6 +284,8 @@ pub(crate) fn open(kind: Kind) -> Result<u8, Error> {
             tcp_buffer,
             listening: false,
             peer: None,
+            read_shutdown: false,
+            write_shutdown: false,
             local_first: memory::FrameLease::EMPTY,
             local_last: memory::FrameLease::EMPTY,
             local_head: 0,
@@ -309,6 +316,8 @@ pub(crate) fn open_pair() -> Result<(u8, u8), Error> {
             tcp_buffer: None,
             listening: false,
             peer: Some(second as u8),
+            read_shutdown: false,
+            write_shutdown: false,
             local_first: memory::FrameLease::EMPTY,
             local_last: memory::FrameLease::EMPTY,
             local_head: 0,
@@ -324,6 +333,8 @@ pub(crate) fn open_pair() -> Result<(u8, u8), Error> {
             tcp_buffer: None,
             listening: false,
             peer: Some(first as u8),
+            read_shutdown: false,
+            write_shutdown: false,
             local_first: memory::FrameLease::EMPTY,
             local_last: memory::FrameLease::EMPTY,
             local_head: 0,
@@ -366,6 +377,41 @@ pub(crate) fn close(slot: u8) -> bool {
     runtime.sockets.remove(handle);
     *state = Slot::EMPTY;
     true
+}
+
+pub(crate) fn shutdown_socket(slot: u8, how: u8) -> Result<(), Error> {
+    if how > 2 {
+        return Err(Error::Invalid);
+    }
+    let index = usize::from(slot);
+    let state = unsafe { SLOTS.get_mut(index) }
+        .filter(|state| state.occupied && !state.listening)
+        .ok_or(Error::NotConnected)?;
+    let peer_connected = state.peer.is_some_and(|peer| {
+        unsafe { SLOTS.get(usize::from(peer)) }.is_some_and(|peer| peer.occupied)
+    });
+    if state.remote.is_none() && !peer_connected {
+        return Err(Error::NotConnected);
+    }
+    if matches!(how, 0 | 2) {
+        if !release_local_pages(state.local_first) {
+            return Err(Error::Invalid);
+        }
+        state.local_first = memory::FrameLease::EMPTY;
+        state.local_last = memory::FrameLease::EMPTY;
+        state.local_head = 0;
+        state.local_length = 0;
+        state.read_shutdown = true;
+    }
+    if matches!(how, 1 | 2) {
+        state.write_shutdown = true;
+        if state.kind == Kind::Tcp && state.peer.is_none() {
+            let runtime = runtime_existing().ok_or(Error::Unavailable)?;
+            let handle = state.handle.ok_or(Error::Invalid)?;
+            runtime.sockets.get_mut::<tcp::Socket>(handle).close();
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn shutdown() -> bool {
@@ -514,6 +560,8 @@ pub(crate) fn accept(slot: u8) -> Result<(u8, IpEndpoint), Error> {
                 tcp_buffer: None,
                 listening: false,
                 peer: Some(client_slot),
+                read_shutdown: false,
+                write_shutdown: false,
                 local_first: memory::FrameLease::EMPTY,
                 local_last: memory::FrameLease::EMPTY,
                 local_head: 0,
@@ -557,6 +605,8 @@ pub(crate) fn accept(slot: u8) -> Result<(u8, IpEndpoint), Error> {
             tcp_buffer: listener.tcp_buffer,
             listening: false,
             peer: None,
+            read_shutdown: false,
+            write_shutdown: false,
             local_first: memory::FrameLease::EMPTY,
             local_last: memory::FrameLease::EMPTY,
             local_head: 0,
@@ -671,6 +721,9 @@ pub(crate) fn send(slot: u8, input: &[u8], remote: Option<IpEndpoint>) -> Result
     let state = unsafe { SLOTS.get(usize::from(slot)) }
         .filter(|slot| slot.occupied)
         .ok_or(Error::Invalid)?;
+    if state.write_shutdown {
+        return Err(Error::BrokenPipe);
+    }
     if state.kind == Kind::Unix || state.peer.is_some() && !state.listening {
         if remote.is_some() {
             return Err(Error::Invalid);
@@ -758,6 +811,9 @@ pub(crate) fn recv(slot: u8, output: &mut [u8]) -> Result<(usize, Option<IpEndpo
     let state = unsafe { SLOTS.get_mut(usize::from(slot)) }
         .filter(|slot| slot.occupied)
         .ok_or(Error::Invalid)?;
+    if state.read_shutdown {
+        return Ok((0, None));
+    }
     if state.kind == Kind::Unix || state.peer.is_some() && !state.listening {
         let received = output.len().min(state.local_length);
         let mut copied = 0_usize;
@@ -795,11 +851,11 @@ pub(crate) fn recv(slot: u8, output: &mut [u8]) -> Result<(usize, Option<IpEndpo
         if received != 0 {
             return Ok((received, None));
         }
-        let peer_open = state
+        let peer = state
             .peer
-            .and_then(|peer| unsafe { SLOTS.get(usize::from(peer)) })
-            .is_some_and(|peer| peer.occupied);
-        return if peer_open {
+            .and_then(|peer| unsafe { SLOTS.get(usize::from(peer)) });
+        let peer_open = peer.is_some_and(|peer| peer.occupied);
+        return if peer_open && !peer.is_some_and(|peer| peer.write_shutdown) {
             Err(Error::WouldBlock)
         } else {
             Ok((0, None))
@@ -862,11 +918,11 @@ pub(crate) fn peek_local(slot: u8, output: &mut [u8]) -> Result<usize, Error> {
     if returned != 0 {
         return Ok(returned);
     }
-    let peer_open = state
+    let peer = state
         .peer
-        .and_then(|peer| unsafe { SLOTS.get(usize::from(peer)) })
-        .is_some_and(|peer| peer.occupied);
-    if peer_open {
+        .and_then(|peer| unsafe { SLOTS.get(usize::from(peer)) });
+    let peer_open = peer.is_some_and(|peer| peer.occupied);
+    if peer_open && !peer.is_some_and(|peer| peer.write_shutdown) {
         Err(Error::WouldBlock)
     } else {
         Ok(0)
@@ -938,8 +994,12 @@ pub(crate) fn readiness(slot: u8) -> Option<(bool, bool, bool)> {
             .peer
             .and_then(|peer| unsafe { SLOTS.get(usize::from(peer)) });
         let peer_open = peer.is_some_and(|peer| peer.occupied);
-        let writable = peer.is_some_and(|peer| peer.occupied);
-        return Some((state.local_length != 0 || !peer_open, writable, false));
+        let writable = !state.write_shutdown && peer.is_some_and(|peer| peer.occupied);
+        let readable = state.read_shutdown
+            || state.local_length != 0
+            || !peer_open
+            || peer.is_some_and(|peer| peer.write_shutdown);
+        return Some((readable, writable, false));
     }
     let runtime = runtime_existing()?;
     let handle = state.handle?;

@@ -20237,6 +20237,7 @@ fn linux_socket_error(error: crate::linux_socket::Error) -> u64 {
         crate::linux_socket::Error::InProgress => LINUX_EINPROGRESS,
         crate::linux_socket::Error::WouldBlock => LINUX_EAGAIN,
         crate::linux_socket::Error::NotConnected => LINUX_ENOTCONN,
+        crate::linux_socket::Error::BrokenPipe => LINUX_EPIPE,
         crate::linux_socket::Error::Reset => LINUX_ECONNRESET,
     }
 }
@@ -20828,23 +20829,18 @@ fn linux_write_socket_address(
 }
 
 fn linux_socket_shutdown(descriptor: u64, how: u64) -> u64 {
+    let descriptor = u64::from(descriptor as u32);
     let Some(slot) = linux_socket_slot(descriptor) else {
-        return LINUX_EBADF;
+        return if linux_descriptor_open(descriptor) {
+            LINUX_ENOTSOCK
+        } else {
+            LINUX_EBADF
+        };
     };
     if how > 2 {
         return LINUX_EINVAL;
     }
-    match crate::linux_socket::kind(slot) {
-        Some(crate::linux_socket::Kind::Unix) => 0,
-        Some(crate::linux_socket::Kind::Tcp | crate::linux_socket::Kind::Udp) => {
-            if crate::linux_socket::names(slot).is_some_and(|(_, remote)| remote.is_some()) {
-                0
-            } else {
-                LINUX_ENOTCONN
-            }
-        }
-        None => LINUX_EBADF,
-    }
+    crate::linux_socket::shutdown_socket(slot, how as u8).map_or_else(linux_socket_error, |()| 0)
 }
 
 fn linux_socket_name(descriptor: u64, address: u64, length: u64, peer: bool) -> u64 {

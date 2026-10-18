@@ -363,10 +363,70 @@ ginux_linux_system_init:
     test rax, rax
     jne .Lfailure
     mov edi, dword ptr [rip + .Lsocket_pair]
+    lea rsi, [rip + .Lmmsg_payload]
+    mov edx, 5
+    xor r10d, r10d
+    xor r8d, r8d
+    xor r9d, r9d
+    mov eax, 44
+    syscall
+    cmp rax, -32
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Lsocket_pair]
+    lea rsi, [rip + .Lmmsg_output]
+    mov edx, 5
+    xor r10d, r10d
+    xor r8d, r8d
+    xor r9d, r9d
+    mov eax, 45
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Lsocket_pair + 4]
+    lea rsi, [rip + .Lmmsg_output]
+    mov edx, 5
+    xor r10d, r10d
+    xor r8d, r8d
+    xor r9d, r9d
+    mov eax, 45
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Lsocket_pair + 4]
+    mov rax, 0x100000000
+    or rdi, rax
+    mov esi, 1
+    mov eax, 48
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Lsocket_pair + 4]
+    lea rsi, [rip + .Lmmsg_payload]
+    mov edx, 5
+    xor r10d, r10d
+    xor r8d, r8d
+    xor r9d, r9d
+    mov eax, 44
+    syscall
+    cmp rax, -32
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Lsocket_pair]
     mov esi, 3
     mov eax, 48
     syscall
     cmp rax, -22
+    jne .Lfailure
+    mov edi, 1
+    xor esi, esi
+    mov eax, 48
+    syscall
+    cmp rax, -88
+    jne .Lfailure
+    mov edi, 9999
+    xor esi, esi
+    mov eax, 48
+    syscall
+    cmp rax, -9
     jne .Lfailure
     mov edi, dword ptr [rip + .Lsocket_pair]
     mov eax, 3
@@ -564,6 +624,68 @@ ginux_linux_system_init:
     cmp rax, 4
     jne .Lfailure
     cmp dword ptr [rip + .Ltcp_output], 0x21706374
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Ltcp_client]
+    mov esi, 1
+    mov eax, 48
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Ltcp_client]
+    lea rsi, [rip + .Ltcp_payload]
+    mov edx, 4
+    xor r10d, r10d
+    xor r8d, r8d
+    xor r9d, r9d
+    mov eax, 44
+    syscall
+    cmp rax, -32
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Ltcp_accepted]
+    lea rsi, [rip + .Ltcp_output]
+    mov edx, 4
+    xor r10d, r10d
+    xor r8d, r8d
+    xor r9d, r9d
+    mov eax, 45
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Ltcp_accepted]
+    lea rsi, [rip + .Ltcp_payload]
+    mov edx, 4
+    xor r10d, r10d
+    xor r8d, r8d
+    xor r9d, r9d
+    mov eax, 44
+    syscall
+    cmp rax, 4
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Ltcp_client]
+    lea rsi, [rip + .Ltcp_output]
+    mov edx, 4
+    xor r10d, r10d
+    xor r8d, r8d
+    xor r9d, r9d
+    mov eax, 45
+    syscall
+    cmp rax, 4
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Ltcp_client]
+    xor esi, esi
+    mov eax, 48
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Ltcp_client]
+    lea rsi, [rip + .Ltcp_output]
+    mov edx, 4
+    xor r10d, r10d
+    xor r8d, r8d
+    xor r9d, r9d
+    mov eax, 45
+    syscall
+    test rax, rax
     jne .Lfailure
     mov edi, dword ptr [rip + .Ltcp_client]
     mov eax, 3
