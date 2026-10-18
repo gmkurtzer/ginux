@@ -2939,7 +2939,7 @@ fn linux_identity_contract(console: u64) -> bool {
         && linux_syscall(LINUX_GETGROUPS_SYSCALL, 1, 1, 0) == LINUX_EFAULT;
     let mut name = [0_u8; 390];
     let uname = linux_syscall(LINUX_UNAME_SYSCALL, name.as_mut_ptr() as u64, 0, 0) == 0
-        && &name[..6] == b"Linux\0"
+        && &name[..6] == b"Ginux\0"
         && &name[65..71] == b"ginux\0"
         && &name[260..267] == b"x86_64\0"
         && linux_syscall(LINUX_UNAME_SYSCALL, 1, 0, 0) == LINUX_EFAULT;

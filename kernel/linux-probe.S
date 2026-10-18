@@ -493,7 +493,7 @@ valid_interpreter_base:
     push 63
     pop rax
     call syscall_expect_zero
-    cmp dword ptr [0x40b000], 0x756e694c
+    cmp dword ptr [0x40b000], 0x756e6947
     require_equal
 
     xor edi, edi
@@ -695,7 +695,7 @@ valid_interpreter_base:
     push 63
     pop rax
     call syscall_expect_zero
-    cmp dword ptr [0x40bf80], 0x756e694c
+    cmp dword ptr [0x40bf80], 0x756e6947
     require_equal
     cmp word ptr [0x40c000], 0
     require_equal
@@ -848,7 +848,7 @@ valid_interpreter_base:
     push 63
     pop rax
     call syscall_expect_zero
-    cmp dword ptr [0x40c000], 0x756e694c
+    cmp dword ptr [0x40c000], 0x756e6947
     require_equal
     mov edi, 0x40c000
     mov esi, 4096
@@ -896,7 +896,7 @@ valid_interpreter_base:
     push 63
     pop rax
     call syscall_expect_zero
-    cmp dword ptr [0x40b000], 0x756e694c
+    cmp dword ptr [0x40b000], 0x756e6947
     require_equal
     mov edi, 0x40c000
     push 63
@@ -2277,7 +2277,7 @@ linux_child_joined:
     push 63
     pop rax
     call syscall_expect_zero
-    cmp dword ptr [rdi], 0x756e694c
+    cmp dword ptr [rdi], 0x756e6947
     require_equal
 
     push 2

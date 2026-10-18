@@ -277,6 +277,10 @@ remain unsupported, so `arch_prctl` remains Partial.
 The ring-3 controller directly verifies its Linux PID/TID, parent,
 process-group, session, UID/GID, supplementary-group, scheduler-yield, and
 `uname` contracts, including invalid PID, count, and userspace-address errors.
+The Linux-compatible `uname` syscall identifies the kernel as `Ginux`; it does
+not claim that Ginux is Linux. Programs may separately append a compile-time
+operating-system label (for example, Alpine BusyBox prints `Linux` for `-o`),
+which is userspace output rather than a field supplied by the kernel.
 It also directly exercises realtime and monotonic `clock_gettime`,
 `clock_getres`, `gettimeofday`, `time`, and `times`, including invalid clock
 and userspace-address behavior.

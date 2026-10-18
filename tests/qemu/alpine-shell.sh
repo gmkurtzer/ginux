@@ -135,6 +135,11 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
     wait_for 'Usage: apk'
     printf 'q'
     printf '%s\n' \
+        "test \"\$(uname -s)\" = Ginux && printf 'UNAME_SYSNAME_OK\\n'" \
+        "case \"\$(uname -a)\" in Ginux\\ *) printf 'UNAME_ALL_PREFIX_OK\\n';; esac"
+    wait_for_line 'UNAME_SYSNAME_OK'
+    wait_for_line 'UNAME_ALL_PREFIX_OK'
+    printf '%s\n' \
         "printf 'PIPE_LESS_EXIT_OK\\n'" \
         "printf 'SERVER_SOCKET_READY_1\\n'" \
         'nc -l -p 8080 -e /bin/uname' \
@@ -145,7 +150,7 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
     wait_for_line 'PIPE_LESS_EXIT_OK'
     wait_for_line 'SERVER_SOCKET_READY_1'
     socket_response=$(nc -w 5 127.0.0.1 "$host_socket_port")
-    [[ "$socket_response" == "Linux" ]]
+    [[ "$socket_response" == "Ginux" ]]
     wait_for_line 'SERVER_SOCKET_ACCEPTED_1'
     printf '%s\n' \
         "printf 'SERVER_SOCKET_RESPONSE_1_OK\\n'" \
@@ -155,7 +160,7 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
     wait_for_line 'SERVER_SOCKET_RESPONSE_1_OK'
     wait_for_line 'SERVER_SOCKET_READY_2'
     socket_response=$(nc -w 5 127.0.0.1 "$host_socket_port")
-    [[ "$socket_response" == "Linux" ]]
+    [[ "$socket_response" == "Ginux" ]]
     wait_for_line 'SERVER_SOCKET_ACCEPTED_2'
     printf '%s\n' "printf 'SERVER_SOCKET_RESPONSE_2_OK\\n'"
     wait_for_line 'SERVER_SOCKET_RESPONSE_2_OK'
