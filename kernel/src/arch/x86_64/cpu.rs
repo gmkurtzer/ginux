@@ -20433,7 +20433,7 @@ fn linux_socket_listen(descriptor: u64, backlog: u64) -> u64 {
     if crate::linux_socket::kind(slot) != Some(crate::linux_socket::Kind::Tcp) {
         return LINUX_EOPNOTSUPP;
     }
-    crate::linux_socket::listen(slot).map_or_else(linux_socket_error, |()| 0)
+    crate::linux_socket::listen(slot, backlog as usize).map_or_else(linux_socket_error, |()| 0)
 }
 
 fn linux_socket_accept_address_valid(address: u64, length: u64) -> bool {

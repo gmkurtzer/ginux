@@ -99,6 +99,9 @@ struct Slot {
     local_port: u16,
     tcp_buffer: Option<u8>,
     listening: bool,
+    backlog: u8,
+    pending_length: u8,
+    pending: [u8; SLOT_COUNT],
     peer: Option<u8>,
     read_shutdown: bool,
     write_shutdown: bool,
@@ -122,6 +125,9 @@ impl Slot {
         local_port: 0,
         tcp_buffer: None,
         listening: false,
+        backlog: 0,
+        pending_length: 0,
+        pending: [0; SLOT_COUNT],
         peer: None,
         read_shutdown: false,
         write_shutdown: false,
@@ -299,6 +305,9 @@ pub(crate) fn open(kind: Kind) -> Result<u8, Error> {
             local_port: 0,
             tcp_buffer,
             listening: false,
+            backlog: 0,
+            pending_length: 0,
+            pending: [0; SLOT_COUNT],
             peer: None,
             read_shutdown: false,
             write_shutdown: false,
@@ -335,6 +344,9 @@ pub(crate) fn open_pair() -> Result<(u8, u8), Error> {
             local_port: 0,
             tcp_buffer: None,
             listening: false,
+            backlog: 0,
+            pending_length: 0,
+            pending: [0; SLOT_COUNT],
             peer: Some(second as u8),
             read_shutdown: false,
             write_shutdown: false,
@@ -356,6 +368,9 @@ pub(crate) fn open_pair() -> Result<(u8, u8), Error> {
             local_port: 0,
             tcp_buffer: None,
             listening: false,
+            backlog: 0,
+            pending_length: 0,
+            pending: [0; SLOT_COUNT],
             peer: Some(first as u8),
             read_shutdown: false,
             write_shutdown: false,
@@ -570,7 +585,7 @@ pub(crate) fn bind(slot: u8, address: u32, requested_port: u16) -> Result<u16, E
     Ok(port)
 }
 
-pub(crate) fn listen(slot: u8) -> Result<(), Error> {
+pub(crate) fn listen(slot: u8, requested_backlog: usize) -> Result<(), Error> {
     poll();
     let runtime = runtime()?;
     let index = usize::from(slot);
@@ -594,6 +609,7 @@ pub(crate) fn listen(slot: u8) -> Result<(), Error> {
     unsafe {
         SLOTS[index].local_port = local_port;
         SLOTS[index].listening = true;
+        SLOTS[index].backlog = requested_backlog.clamp(1, SLOT_COUNT) as u8;
     }
     Ok(())
 }
@@ -615,7 +631,8 @@ pub(crate) fn accept(slot: u8) -> Result<(u8, IpEndpoint), Error> {
     let listener = unsafe { SLOTS.get(listener_index).copied() }
         .filter(|state| state.occupied && state.kind == Kind::Tcp && state.listening)
         .ok_or(Error::Invalid)?;
-    if let Some(client_slot) = listener.peer {
+    if listener.pending_length != 0 {
+        let client_slot = listener.pending[0];
         let client_index = usize::from(client_slot);
         let client = unsafe { SLOTS.get(client_index).copied() }
             .filter(|state| state.occupied && state.kind == Kind::Tcp && !state.listening)
@@ -633,6 +650,9 @@ pub(crate) fn accept(slot: u8) -> Result<(u8, IpEndpoint), Error> {
                 local_port: listener.local_port,
                 tcp_buffer: None,
                 listening: false,
+                backlog: 0,
+                pending_length: 0,
+                pending: [0; SLOT_COUNT],
                 peer: Some(client_slot),
                 read_shutdown: false,
                 write_shutdown: false,
@@ -646,7 +666,10 @@ pub(crate) fn accept(slot: u8) -> Result<(u8, IpEndpoint), Error> {
                 local_length: 0,
             };
             SLOTS[client_index].peer = Some(accepted_index as u8);
-            SLOTS[listener_index].peer = None;
+            SLOTS[listener_index]
+                .pending
+                .copy_within(1..usize::from(listener.pending_length), 0);
+            SLOTS[listener_index].pending_length -= 1;
         }
         return Ok((accepted_index as u8, remote));
     }
@@ -687,6 +710,9 @@ pub(crate) fn accept(slot: u8) -> Result<(u8, IpEndpoint), Error> {
             local_port: listener.local_port,
             tcp_buffer: listener.tcp_buffer,
             listening: false,
+            backlog: 0,
+            pending_length: 0,
+            pending: [0; SLOT_COUNT],
             peer: None,
             read_shutdown: false,
             write_shutdown: false,
@@ -756,7 +782,7 @@ pub(crate) fn connect(slot: u8, remote: IpEndpoint) -> Result<(), Error> {
                     && candidate.kind == Kind::Tcp
                     && candidate.listening
                     && candidate.local_port == remote.port
-                    && candidate.peer.is_none()
+                    && candidate.pending_length < candidate.backlog
             })
         };
         if let Some(listener) = listener {
@@ -764,7 +790,9 @@ pub(crate) fn connect(slot: u8, remote: IpEndpoint) -> Result<(), Error> {
                 SLOTS[index].local_port = local_port;
                 SLOTS[index].remote = Some(remote);
                 SLOTS[index].peer = Some(listener as u8);
-                SLOTS[listener].peer = Some(slot);
+                let pending = usize::from(SLOTS[listener].pending_length);
+                SLOTS[listener].pending[pending] = slot;
+                SLOTS[listener].pending_length += 1;
             }
             return Ok(());
         }
@@ -1225,7 +1253,7 @@ pub(crate) fn readiness(slot: u8) -> Option<(bool, bool, bool)> {
     let state = unsafe { SLOTS.get(usize::from(slot)) }?
         .occupied
         .then(|| unsafe { SLOTS[usize::from(slot)] })?;
-    if state.listening && state.peer.is_some() {
+    if state.listening && state.pending_length != 0 {
         return Some((true, false, false));
     }
     if state.kind == Kind::Unix || state.peer.is_some() {

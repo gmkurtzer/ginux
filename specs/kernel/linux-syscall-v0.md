@@ -936,14 +936,16 @@ original descriptor with a fresh TCP socket and buffer so it can accept again.
 Connections to a listener on the domain's own IPv4 address are paired inside
 the kernel without traversing the physical NIC; they retain TCP endpoint names,
 stream ordering, readiness, EOF, duplication, and descriptor cleanup behavior.
-The booted proof performs two sequential local connections, accepts one with
-`accept4` and one with `accept`, verifies peer addressing and descriptor flags,
-and transfers a payload through the accepted stream. `accept4` supports
+The listener keeps a pending local-connection queue capped by its requested
+backlog and the available socket slots. The booted proof queues two local
+clients before accepting one with `accept4` and one with `accept`, verifies
+peer addressing and descriptor flags, and transfers a payload through the
+accepted stream. `accept4` supports
 `SOCK_CLOEXEC` and `SOCK_NONBLOCK`; a nonblocking listener returns `-EAGAIN`
 when no connection is pending. A blocking accept polls the network until a
 connection arrives or the listener becomes invalid. IPv6, Unix pathname
-listeners, signal-interruptible scheduler wait queues, and multi-entry listen
-backlogs remain outside this profile.
+listeners, signal-interruptible scheduler wait queues, and multi-entry external
+network listen backlogs remain outside this profile.
 `shutdown` tracks independent read and write closure for AF_UNIX and
 kernel-local TCP streams. Read shutdown discards queued local data and makes
 subsequent reads return EOF; write shutdown makes subsequent sends return

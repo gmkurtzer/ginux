@@ -811,7 +811,7 @@ ginux_linux_system_init:
     test rax, rax
     jne .Lfailure
     mov edi, dword ptr [rip + .Ltcp_listener]
-    mov esi, 1
+    mov esi, 2
     mov eax, 50
     syscall
     test rax, rax
@@ -836,6 +836,21 @@ ginux_linux_system_init:
     test rax, rax
     js .Lfailure
     mov dword ptr [rip + .Ltcp_client], eax
+    mov edi, eax
+    lea rsi, [rip + .Ltcp_address]
+    mov edx, 16
+    mov eax, 42
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov edi, 2
+    mov esi, 1
+    xor edx, edx
+    mov eax, 41
+    syscall
+    test rax, rax
+    js .Lfailure
+    mov dword ptr [rip + .Ltcp_client_second], eax
     mov edi, eax
     lea rsi, [rip + .Ltcp_address]
     mov edx, 16
@@ -1013,21 +1028,8 @@ ginux_linux_system_init:
     syscall
     test rax, rax
     jne .Lfailure
-    mov edi, 2
-    mov esi, 1
-    xor edx, edx
-    mov eax, 41
-    syscall
-    test rax, rax
-    js .Lfailure
+    mov eax, dword ptr [rip + .Ltcp_client_second]
     mov dword ptr [rip + .Ltcp_client], eax
-    mov edi, eax
-    lea rsi, [rip + .Ltcp_address]
-    mov edx, 16
-    mov eax, 42
-    syscall
-    test rax, rax
-    jne .Lfailure
     mov edi, dword ptr [rip + .Ltcp_listener]
     xor esi, esi
     xor edx, edx
@@ -3577,6 +3579,8 @@ ginux_linux_system_init:
 .Ltcp_listener:
     .long 0
 .Ltcp_client:
+    .long 0
+.Ltcp_client_second:
     .long 0
 .Ltcp_accepted:
     .long 0
