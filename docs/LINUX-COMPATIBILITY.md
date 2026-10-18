@@ -102,6 +102,10 @@ protection-key IDs, including Linux key `-1`, plus 32-bit pidfd descriptors for
 `process_madvise` and `process_mrelease`. The remaining `MADV_DONTFORK` and
 `MADV_DOFORK` gap requires VMA inheritance metadata and is not treated as a
 no-op.
+Descriptor-control verification also covers Linux 32-bit descriptor and
+command conversion for `fcntl` and `flock`. `flock` now uses the same explicit,
+directly tested syscall handler in both normal execution and conformance tests
+instead of inline dispatcher logic.
 
 The ring-3 controller directly verifies its Linux PID/TID, parent,
 process-group, session, UID/GID, supplementary-group, scheduler-yield, and

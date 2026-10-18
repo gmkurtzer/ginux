@@ -8396,15 +8396,7 @@ extern "sysv64" fn linux_syscall_handler(
         ),
         LINUX_EPOLL_CTL_SYSCALL => linux_epoll_ctl(first_argument, buffer, count, register(0)),
         LINUX_FCNTL_SYSCALL => linux_descriptor_fcntl(first_argument, buffer, count),
-        LINUX_FLOCK_SYSCALL => {
-            if linux_descriptor_open(first_argument) && buffer <= 6 {
-                0
-            } else if !linux_descriptor_open(first_argument) {
-                LINUX_EBADF
-            } else {
-                LINUX_EINVAL
-            }
-        }
+        LINUX_FLOCK_SYSCALL => linux_flock(first_argument, buffer),
         LINUX_FSYNC_SYSCALL | LINUX_FDATASYNC_SYSCALL => linux_fsync(first_argument),
         LINUX_FADVISE64_SYSCALL => linux_fadvise64(first_argument, buffer, count, register(0)),
         LINUX_TRUNCATE_SYSCALL => linux_truncate(first_argument, buffer),
@@ -15768,6 +15760,12 @@ fn verify_linux_signal_argument_widths() -> bool {
 
 fn verify_linux_descriptor_argument_widths() -> bool {
     const UPPER_REGISTER_BITS: u64 = 1_u64 << 32;
+    let control = linux_descriptor_fcntl(
+        UPPER_REGISTER_BITS | 1,
+        UPPER_REGISTER_BITS | LINUX_F_GETFD,
+        0,
+    ) == 0
+        && linux_flock(UPPER_REGISTER_BITS | 1, UPPER_REGISTER_BITS | 1) == 0;
     let first = linux_console_dup(UPPER_REGISTER_BITS | 1);
     if first >= LINUX_DESCRIPTOR_TABLE_LIMIT {
         return false;
@@ -15798,7 +15796,7 @@ fn verify_linux_descriptor_argument_widths() -> bool {
     if first < LINUX_DESCRIPTOR_TABLE_LIMIT && linux_descriptor_open(first) {
         let _ = linux_descriptor_close(first);
     }
-    first_closed && second_closed && third_closed
+    control && first_closed && second_closed && third_closed
 }
 
 fn verify_linux_process_selector_widths() -> bool {
@@ -28998,6 +28996,8 @@ fn linux_memfd_fcntl(descriptor: u64, command: u64, argument: u64) -> u64 {
 }
 
 fn linux_descriptor_fcntl(descriptor: u64, command: u64, argument: u64) -> u64 {
+    let descriptor = u64::from(descriptor as u32);
+    let command = u64::from(command as u32);
     let state = linux_device_descriptor(descriptor);
     if descriptor == 2 && ELF_PROBE_STDERR_OPEN.load(Ordering::SeqCst) {
         return match command {
@@ -29137,6 +29137,18 @@ fn linux_descriptor_fcntl(descriptor: u64, command: u64, argument: u64) -> u64 {
             linux_descriptor_set_status_flags(flags, argument, LINUX_O_APPEND | LINUX_O_NONBLOCK)
         }
         _ => LINUX_EINVAL,
+    }
+}
+
+fn linux_flock(descriptor: u64, operation: u64) -> u64 {
+    let descriptor = u64::from(descriptor as u32);
+    let operation = u64::from(operation as u32);
+    if !linux_descriptor_open(descriptor) {
+        LINUX_EBADF
+    } else if operation <= 6 {
+        0
+    } else {
+        LINUX_EINVAL
     }
 }
 
