@@ -7,6 +7,7 @@ use crate::{
 const PAGE_SIZE: usize = 4096;
 pub(crate) const PATH_CAPACITY: usize = 256;
 const NODE_COUNT: usize = 10;
+const MAPPING_COUNT: usize = 100;
 const DATA_CAPACITY: usize = PAGE_SIZE - core::mem::size_of::<FrameLease>();
 const XATTR_NAME_CAPACITY: usize = 255;
 const HOST_INSTANCE: usize = control_abi::DOMAIN_LIMIT;
@@ -70,6 +71,34 @@ struct XattrPage {
     name_length: u16,
     removed: bool,
     name: [u8; XATTR_NAME_CAPACITY],
+}
+
+#[derive(Clone, Copy)]
+struct SharedMapping {
+    active: bool,
+    pid: u32,
+    address: u64,
+    handle: Handle,
+    offset: usize,
+}
+
+impl SharedMapping {
+    const EMPTY: Self = Self {
+        active: false,
+        pid: 0,
+        address: 0,
+        handle: Handle {
+            generation: 0,
+            inode: 0,
+        },
+        offset: 0,
+    };
+}
+
+#[repr(C)]
+struct MappingPage {
+    next: FrameLease,
+    mappings: [SharedMapping; MAPPING_COUNT],
 }
 
 #[derive(Clone, Copy)]
@@ -151,10 +180,12 @@ struct NodePage {
 const _: () = assert!(core::mem::size_of::<DataPage>() == PAGE_SIZE);
 const _: () = assert!(core::mem::size_of::<XattrPage>() <= PAGE_SIZE);
 const _: () = assert!(core::mem::size_of::<NodePage>() <= PAGE_SIZE);
+const _: () = assert!(core::mem::size_of::<MappingPage>() <= PAGE_SIZE);
 
 #[derive(Clone, Copy)]
 struct Overlay {
     first_node_page: FrameLease,
+    first_mapping_page: FrameLease,
     next_generation: u32,
     next_inode: u64,
 }
@@ -162,9 +193,194 @@ struct Overlay {
 impl Overlay {
     const EMPTY: Self = Self {
         first_node_page: FrameLease::EMPTY,
+        first_mapping_page: FrameLease::EMPTY,
         next_generation: 0x8000_0000,
         next_inode: 0x10_000,
     };
+}
+
+pub(crate) fn register_shared_mapping(
+    pid: u32,
+    address: u64,
+    handle: Handle,
+    offset: usize,
+) -> bool {
+    if pid == 0 || !address.is_multiple_of(PAGE_SIZE as u64) || metadata(handle).is_none() {
+        return false;
+    }
+    let overlay = live_mut();
+    let mut page = overlay.first_mapping_page;
+    let mut last = FrameLease::EMPTY;
+    while page != FrameLease::EMPTY {
+        let Some(mappings) = mapping_page_mut(page) else {
+            return false;
+        };
+        if mappings
+            .mappings
+            .iter()
+            .any(|mapping| mapping.active && mapping.pid == pid && mapping.address == address)
+        {
+            return false;
+        }
+        if let Some(mapping) = mappings.mappings.iter_mut().find(|mapping| !mapping.active) {
+            *mapping = SharedMapping {
+                active: true,
+                pid,
+                address,
+                handle,
+                offset,
+            };
+            return true;
+        }
+        last = page;
+        page = mappings.next;
+    }
+    let Some(page) = allocate_mapping_page() else {
+        return false;
+    };
+    if last == FrameLease::EMPTY {
+        overlay.first_mapping_page = page;
+    } else {
+        let Some(previous) = mapping_page_mut(last) else {
+            let _ = memory::scrub_and_release_frames(FrameOwner::KERNEL, &[page]);
+            return false;
+        };
+        previous.next = page;
+    }
+    let Some(mapping) = mapping_page_mut(page).and_then(|page| page.mappings.first_mut()) else {
+        return false;
+    };
+    *mapping = SharedMapping {
+        active: true,
+        pid,
+        address,
+        handle,
+        offset,
+    };
+    true
+}
+
+pub(crate) fn shared_mapping(pid: u32, address: u64) -> Option<(Handle, usize)> {
+    let overlay = live()?;
+    let mut page = overlay.first_mapping_page;
+    while page != FrameLease::EMPTY {
+        let mappings = mapping_page(page)?;
+        if let Some(mapping) = mappings
+            .mappings
+            .iter()
+            .find(|mapping| mapping.active && mapping.pid == pid && mapping.address == address)
+        {
+            return Some((mapping.handle, mapping.offset));
+        }
+        page = mappings.next;
+    }
+    None
+}
+
+pub(crate) fn next_shared_mapping(pid: u32, after: Option<u64>) -> Option<(u64, Handle, usize)> {
+    let overlay = live()?;
+    let mut selected: Option<(u64, Handle, usize)> = None;
+    let mut page = overlay.first_mapping_page;
+    while page != FrameLease::EMPTY {
+        let mappings = mapping_page(page)?;
+        for mapping in &mappings.mappings {
+            if mapping.active
+                && mapping.pid == pid
+                && after.is_none_or(|after| mapping.address > after)
+                && selected.is_none_or(|selected| mapping.address < selected.0)
+            {
+                selected = Some((mapping.address, mapping.handle, mapping.offset));
+            }
+        }
+        page = mappings.next;
+    }
+    selected
+}
+
+pub(crate) fn remove_shared_mapping(pid: u32, address: u64) -> bool {
+    let overlay = live_mut();
+    let mut page = overlay.first_mapping_page;
+    while page != FrameLease::EMPTY {
+        let Some(mappings) = mapping_page_mut(page) else {
+            return false;
+        };
+        if let Some(mapping) = mappings
+            .mappings
+            .iter_mut()
+            .find(|mapping| mapping.active && mapping.pid == pid && mapping.address == address)
+        {
+            *mapping = SharedMapping::EMPTY;
+            return true;
+        }
+        page = mappings.next;
+    }
+    false
+}
+
+pub(crate) fn clone_shared_mappings(parent: u32, child: u32) -> bool {
+    let mut count = 0;
+    let Some(overlay) = live() else {
+        return false;
+    };
+    let mut page = overlay.first_mapping_page;
+    while page != FrameLease::EMPTY {
+        let Some(mappings) = mapping_page(page) else {
+            return false;
+        };
+        count += mappings
+            .mappings
+            .iter()
+            .filter(|mapping| mapping.active && mapping.pid == parent)
+            .count();
+        page = mappings.next;
+    }
+    for wanted in 0..count {
+        let mut found = 0;
+        let mut selected = None;
+        let Some(overlay) = live() else {
+            return false;
+        };
+        let mut page = overlay.first_mapping_page;
+        while page != FrameLease::EMPTY && selected.is_none() {
+            let Some(mappings) = mapping_page(page) else {
+                return false;
+            };
+            for mapping in &mappings.mappings {
+                if mapping.active && mapping.pid == parent {
+                    if found == wanted {
+                        selected = Some(*mapping);
+                        break;
+                    }
+                    found += 1;
+                }
+            }
+            page = mappings.next;
+        }
+        let Some(mapping) = selected else {
+            return false;
+        };
+        if !register_shared_mapping(child, mapping.address, mapping.handle, mapping.offset) {
+            remove_process_shared_mappings(child);
+            return false;
+        }
+    }
+    true
+}
+
+pub(crate) fn remove_process_shared_mappings(pid: u32) {
+    let overlay = live_mut();
+    let mut page = overlay.first_mapping_page;
+    while page != FrameLease::EMPTY {
+        let Some(mappings) = mapping_page_mut(page) else {
+            return;
+        };
+        for mapping in &mut mappings.mappings {
+            if mapping.active && mapping.pid == pid {
+                *mapping = SharedMapping::EMPTY;
+            }
+        }
+        page = mappings.next;
+    }
 }
 
 static mut OVERLAYS: [Overlay; INSTANCE_LIMIT] = [Overlay::EMPTY; INSTANCE_LIMIT];
@@ -794,6 +1010,17 @@ pub(crate) fn teardown() -> bool {
         }
         page = next;
     }
+    let mut page = core::mem::replace(&mut overlay.first_mapping_page, FrameLease::EMPTY);
+    while page != FrameLease::EMPTY {
+        let Some(mappings) = mapping_page(page) else {
+            return false;
+        };
+        let next = mappings.next;
+        if !memory::scrub_and_release_frames(FrameOwner::KERNEL, core::slice::from_ref(&page)) {
+            return false;
+        }
+        page = next;
+    }
     overlay.next_generation = 0x8000_0000;
     overlay.next_inode = 0x10_000;
     true
@@ -859,6 +1086,22 @@ fn allocate_node_page() -> Option<FrameLease> {
             NodePage {
                 next: FrameLease::EMPTY,
                 nodes: [Node::EMPTY; NODE_COUNT],
+            },
+        );
+    }
+    Some(page)
+}
+
+fn allocate_mapping_page() -> Option<FrameLease> {
+    let [page] = memory::allocate_frames::<1>(FrameOwner::KERNEL)?;
+    let address = page.direct_map_address()?;
+    unsafe {
+        core::ptr::write_bytes(address as *mut u8, 0, PAGE_SIZE);
+        core::ptr::write(
+            address as *mut MappingPage,
+            MappingPage {
+                next: FrameLease::EMPTY,
+                mappings: [SharedMapping::EMPTY; MAPPING_COUNT],
             },
         );
     }
@@ -1108,6 +1351,18 @@ fn node_page(page: FrameLease) -> Option<&'static NodePage> {
 fn node_page_mut(page: FrameLease) -> Option<&'static mut NodePage> {
     let address = page.direct_map_address()?;
     Some(unsafe { &mut *(address as *mut NodePage) })
+}
+
+fn mapping_page(page: FrameLease) -> Option<&'static MappingPage> {
+    (page != FrameLease::EMPTY).then_some(())?;
+    let address = page.direct_map_address()?;
+    Some(unsafe { &*(address as *const MappingPage) })
+}
+
+fn mapping_page_mut(page: FrameLease) -> Option<&'static mut MappingPage> {
+    (page != FrameLease::EMPTY).then_some(())?;
+    let address = page.direct_map_address()?;
+    Some(unsafe { &mut *(address as *mut MappingPage) })
 }
 
 fn data_page(page: FrameLease) -> Option<&'static DataPage> {

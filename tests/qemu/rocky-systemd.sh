@@ -97,6 +97,12 @@ fi
     init_started_at=$(date +%s)
     wait_for ' running in system mode (' 30
     wait_for_login
+    if ! grep -Eq '\[.*OK.*\].*Listening on .*systemd-initctl' "$output_file"; then
+        fail 'systemd initctl named FIFO did not become active'
+    fi
+    if grep -Eq 'Unexpected error while writing to journal file|Failed to replace specifiers.*%b' "$output_file"; then
+        fail 'systemd boot ID or journal file contract regressed'
+    fi
     if [[ "${GINUX_VERIFY_LOGIN_SHELL:-0}" == 1 ]]; then
         if ! grep -Eq '\[root@ginux[^]]*\]#|bash-[0-9.]+#' "$output_file"; then
             printf '%s\n' root

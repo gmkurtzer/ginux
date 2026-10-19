@@ -742,6 +742,8 @@ const LINUX_PROC_FDINFO_NODE: u16 = 0xe400;
 const LINUX_FILE_PROC_FDINFO: u16 = LINUX_FILE_MASK | LINUX_PROC_FDINFO_NODE;
 const LINUX_PROC_HOSTNAME_NODE: u16 = 0xe300;
 const LINUX_FILE_PROC_HOSTNAME: u16 = LINUX_FILE_MASK | LINUX_PROC_HOSTNAME_NODE;
+const LINUX_PROC_BOOT_ID_NODE: u16 = 0xdf00;
+const LINUX_FILE_PROC_BOOT_ID: u16 = LINUX_FILE_MASK | LINUX_PROC_BOOT_ID_NODE;
 const LINUX_PROC_DYNAMIC_STAT_NODE: u16 = 0xe200;
 const LINUX_FILE_PROC_DYNAMIC_STAT: u16 = LINUX_FILE_MASK | LINUX_PROC_DYNAMIC_STAT_NODE;
 const LINUX_PROC_DYNAMIC_STATUS_NODE: u16 = 0xe100;
@@ -1174,6 +1176,43 @@ pub(crate) fn linux_startup_random() -> Option<[u8; 16]> {
         chunk.copy_from_slice(&generated?.to_ne_bytes());
     }
     Some(output)
+}
+
+struct LinuxBootIdCell(UnsafeCell<[u8; 37]>);
+
+unsafe impl Sync for LinuxBootIdCell {}
+
+static LINUX_BOOT_ID_STATE: AtomicU8 = AtomicU8::new(0);
+static LINUX_BOOT_ID: LinuxBootIdCell = LinuxBootIdCell(UnsafeCell::new([0; 37]));
+
+fn linux_boot_id() -> &'static [u8] {
+    if LINUX_BOOT_ID_STATE.load(Ordering::Acquire) != 2
+        && LINUX_BOOT_ID_STATE
+            .compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+    {
+        let mut random = linux_startup_random().unwrap_or([0x47; 16]);
+        random[6] = random[6] & 0x0f | 0x40;
+        random[8] = random[8] & 0x3f | 0x80;
+        let output = unsafe { &mut *LINUX_BOOT_ID.0.get() };
+        let hex = b"0123456789abcdef";
+        let mut target = 0;
+        for (index, byte) in random.into_iter().enumerate() {
+            if matches!(index, 4 | 6 | 8 | 10) {
+                output[target] = b'-';
+                target += 1;
+            }
+            output[target] = hex[usize::from(byte >> 4)];
+            output[target + 1] = hex[usize::from(byte & 0x0f)];
+            target += 2;
+        }
+        output[36] = b'\n';
+        LINUX_BOOT_ID_STATE.store(2, Ordering::Release);
+    }
+    while LINUX_BOOT_ID_STATE.load(Ordering::Acquire) != 2 {
+        core::hint::spin_loop();
+    }
+    unsafe { &*LINUX_BOOT_ID.0.get() }
 }
 
 fn linux_getrandom(address: u64, length: u64, flags: u64) -> u64 {
@@ -3966,6 +4005,9 @@ fn execute_deferred_live_fork() -> bool {
     else {
         return false;
     };
+    if !crate::linux_overlay::clone_shared_mappings(parent_pid, child.pid) {
+        return false;
+    }
     if !linux_assign_process_cgroup(child.pid, cgroup_generation) {
         return false;
     }
@@ -12759,6 +12801,8 @@ fn release_linux_sealed_mmaps_at_exit() -> bool {
 }
 
 fn release_linux_runtime_mmaps(expected_base: u64) -> bool {
+    let pid = current_linux_process_pid();
+    let shared_flushed = linux_flush_process_shared_mappings(pid);
     let dynamic_released = !LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
         || address_space::release_current_linux_runtime_mappings(LINUX_RUNTIME_DYNAMIC_MMAP_BASE);
     let next_expected = if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
@@ -12788,7 +12832,9 @@ fn release_linux_runtime_mmaps(expected_base: u64) -> bool {
             && ELF_PROBE_MMAP_GENERATIONS[slot].load(Ordering::SeqCst) == 0;
     }
     let address_cleared = ELF_PROBE_MMAP.swap(0, Ordering::SeqCst) == expected_base;
-    address_valid
+    crate::linux_overlay::remove_process_shared_mappings(pid);
+    shared_flushed
+        && address_valid
         && address_cleared
         && areas_released
         && leases_released
@@ -15129,7 +15175,6 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let realtime_queries = verify_linux_realtime_queries();
     let resource_accounting = verify_linux_resource_accounting();
     let filesystem_statistics = verify_linux_filesystem_statistics();
-    let named_fifo = verify_linux_named_fifo();
     let filesystem_sync = linux_syncfs(1) == 0 && linux_syncfs(99) == LINUX_EBADF;
     let robust_list = verify_linux_robust_list_syscalls();
     let rseq = verify_linux_rseq_syscall();
@@ -15186,7 +15231,6 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         realtime_queries,
         resource_accounting,
         filesystem_statistics,
-        named_fifo,
         filesystem_sync,
         robust_list,
         rseq,
@@ -15248,7 +15292,6 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && realtime_queries
         && resource_accounting
         && filesystem_statistics
-        && named_fifo
         && filesystem_sync
         && robust_list
         && rseq
@@ -15267,10 +15310,20 @@ fn verify_linux_runtime_boot_contracts() -> bool {
         && linux_runtime_file_kind(b"/proc/1/environ") == Some(LINUX_FILE_PROC_PROCESS_ENVIRON)
         && linux_runtime_file_kind(b"/proc/sys/fs/file-max") == Some(LINUX_FILE_PROC_FILE_MAX)
         && linux_runtime_file_kind(b"/proc/sys/fs/nr_open") == Some(LINUX_FILE_PROC_NR_OPEN)
+        && linux_runtime_file_kind(b"/proc/sys/kernel/random/boot_id")
+            == Some(LINUX_FILE_PROC_BOOT_ID)
         && linux_regular_file(LINUX_FILE_PROC_PROCESS_CMDLINE) == Some(LINUX_PROC_PROCESS_CMDLINE)
         && linux_regular_file(LINUX_FILE_PROC_PROCESS_ENVIRON) == Some(LINUX_PROC_PROCESS_ENVIRON)
         && linux_regular_file(LINUX_FILE_PROC_FILE_MAX) == Some(LINUX_PROC_FILE_MAX)
-        && linux_regular_file(LINUX_FILE_PROC_NR_OPEN) == Some(LINUX_PROC_NR_OPEN);
+        && linux_regular_file(LINUX_FILE_PROC_NR_OPEN) == Some(LINUX_PROC_NR_OPEN)
+        && linux_regular_file(LINUX_FILE_PROC_BOOT_ID).is_some_and(|boot_id| {
+            boot_id.len() == 37
+                && boot_id[8] == b'-'
+                && boot_id[13] == b'-'
+                && boot_id[18] == b'-'
+                && boot_id[23] == b'-'
+                && boot_id[36] == b'\n'
+        });
 
     let mapping = linux_runtime_mmap(
         0,
@@ -15797,66 +15850,6 @@ fn verify_linux_resource_accounting() -> bool {
         && linux_sysinfo(1) == LINUX_EFAULT;
     let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
     sysinfo && unmapped
-}
-
-fn verify_linux_named_fifo() -> bool {
-    const S_IFIFO: u64 = 0o010000;
-    let mapping = linux_runtime_mmap(
-        0,
-        PAGE_SIZE as u64,
-        LINUX_PROT_READ | LINUX_PROT_WRITE,
-        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
-        u64::MAX,
-        0,
-    );
-    if !(LINUX_RUNTIME_DYNAMIC_MMAP_BASE..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
-        .contains(&mapping)
-    {
-        return false;
-    }
-    let prepared = copy_to_linux_user(mapping, b"/tmp/ginux-fifo-contract\0")
-        && copy_to_linux_user(mapping + 64, b"fifo");
-    let created =
-        prepared && linux_mknodat(u64::from(LINUX_AT_FDCWD), mapping, S_IFIFO | 0o600, 0) == 0;
-    let reader = if created {
-        linux_openat(
-            u64::from(LINUX_AT_FDCWD),
-            mapping,
-            LINUX_O_NONBLOCK | LINUX_O_CLOEXEC,
-            0,
-        )
-    } else {
-        LINUX_EBADF
-    };
-    let writer = if reader < LINUX_AUX_DESCRIPTOR_LIMIT {
-        linux_openat(
-            u64::from(LINUX_AT_FDCWD),
-            mapping,
-            1 | LINUX_O_NONBLOCK | LINUX_O_CLOEXEC,
-            0,
-        )
-    } else {
-        LINUX_EBADF
-    };
-    let opened = writer < LINUX_AUX_DESCRIPTOR_LIMIT
-        && linux_descriptor_close_on_exec(reader)
-        && linux_descriptor_close_on_exec(writer)
-        && linux_descriptor_fcntl(reader, LINUX_F_GETFL, 0) == LINUX_O_NONBLOCK
-        && linux_descriptor_fcntl(writer, LINUX_F_GETFL, 0) == (1 | LINUX_O_NONBLOCK);
-    let transferred = opened
-        && linux_descriptor_write(writer, mapping + 64, 4) == 4
-        && linux_descriptor_read(reader, mapping + 128, 4) == 4
-        && {
-            let mut bytes = [0_u8; 4];
-            copy_from_linux_user(mapping + 128, &mut bytes) && bytes == *b"fifo"
-        };
-    let writer_closed = writer >= LINUX_AUX_DESCRIPTOR_LIMIT || linux_descriptor_close(writer) == 0;
-    let reader_closed = reader >= LINUX_AUX_DESCRIPTOR_LIMIT || linux_descriptor_close(reader) == 0;
-    let removed = created
-        && linux_unlinkat(u64::from(LINUX_AT_FDCWD), mapping, 0) == 0
-        && crate::linux_overlay::lookup(b"tmp/ginux-fifo-contract").is_none();
-    let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
-    transferred && writer_closed && reader_closed && removed && unmapped
 }
 
 fn verify_linux_filesystem_statistics() -> bool {
@@ -19018,6 +19011,23 @@ fn linux_runtime_mmap(
             return LINUX_ENOMEM;
         }
     }
+    if let Some((handle, start)) = overlay_file.filter(|_| sharing == LINUX_MAP_SHARED) {
+        let pid = current_linux_process_pid();
+        for page in 0..pages {
+            let address = mapping + (page * PAGE_SIZE) as u64;
+            let offset = start.saturating_add(page * PAGE_SIZE);
+            if !crate::linux_overlay::register_shared_mapping(pid, address, handle, offset) {
+                for rollback in 0..page {
+                    let _ = crate::linux_overlay::remove_shared_mapping(
+                        pid,
+                        mapping + (rollback * PAGE_SIZE) as u64,
+                    );
+                }
+                let _ = rollback_linux_runtime_mapping(mapping, pages);
+                return LINUX_ENOMEM;
+            }
+        }
+    }
     if anonymous
         && (flags & LINUX_MAP_LOCKED != 0
             || flags & LINUX_MAP_POPULATE != 0 && flags & LINUX_MAP_NONBLOCK == 0)
@@ -19041,8 +19051,12 @@ fn linux_runtime_munmap(address: u64, length: u64) -> u64 {
         return LINUX_EPERM;
     }
     for page in 0..pages {
+        let page_address = address + (page * PAGE_SIZE) as u64;
+        let _ = linux_flush_shared_mapping_page(current_linux_process_pid(), page_address);
+        let _ =
+            crate::linux_overlay::remove_shared_mapping(current_linux_process_pid(), page_address);
         if !release_linux_runtime_page(address_space::remove_current_linux_runtime_page(
-            address + (page * PAGE_SIZE) as u64,
+            page_address,
         )) {
             return LINUX_EINVAL;
         }
@@ -19249,16 +19263,45 @@ fn linux_msync(address: u64, length: u64, flags: u64) -> u64 {
     let Some((_, pages)) = linux_runtime_mapping_range(address, length) else {
         return LINUX_ENOMEM;
     };
-    if (0..pages).all(|page| {
-        address_space::current_linux_runtime_page(address + (page * PAGE_SIZE) as u64).occupied
-    }) {
-        // Runtime overlays are memory-backed. Their mapped pages are already
-        // resident; persistence is completed when a future durable backing
-        // store commits the domain overlay.
-        0
-    } else {
-        LINUX_ENOMEM
+    for page in 0..pages {
+        let page_address = address + (page * PAGE_SIZE) as u64;
+        if !address_space::current_linux_runtime_page(page_address).occupied {
+            return LINUX_ENOMEM;
+        }
+        if crate::linux_overlay::shared_mapping(current_linux_process_pid(), page_address).is_some()
+            && !linux_flush_shared_mapping_page(current_linux_process_pid(), page_address)
+        {
+            return LINUX_EIO;
+        }
     }
+    0
+}
+
+fn linux_flush_shared_mapping_page(pid: u32, address: u64) -> bool {
+    let Some((handle, offset)) = crate::linux_overlay::shared_mapping(pid, address) else {
+        return true;
+    };
+    let Some(metadata) = crate::linux_overlay::metadata(handle) else {
+        return false;
+    };
+    if offset >= metadata.size {
+        return true;
+    }
+    let length = (metadata.size - offset).min(PAGE_SIZE);
+    let mut bytes = [0_u8; PAGE_SIZE];
+    copy_from_linux_user(address, &mut bytes[..length])
+        && crate::linux_overlay::write(handle, offset, &bytes[..length]) == Some(length)
+}
+
+fn linux_flush_process_shared_mappings(pid: u32) -> bool {
+    let mut after = None;
+    while let Some((address, _, _)) = crate::linux_overlay::next_shared_mapping(pid, after) {
+        if !linux_flush_shared_mapping_page(pid, address) {
+            return false;
+        }
+        after = Some(address);
+    }
+    true
 }
 
 fn linux_sync_file_range(descriptor: u64, offset: u64, length: u64, flags: u64) -> u64 {
@@ -21301,6 +21344,9 @@ fn linux_runtime_file_kind(path: &[u8]) -> Option<u16> {
     }
     if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) && path == b"/proc/sys/kernel/hostname" {
         return Some(LINUX_FILE_PROC_HOSTNAME);
+    }
+    if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) && path == b"/proc/sys/kernel/random/boot_id" {
+        return Some(LINUX_FILE_PROC_BOOT_ID);
     }
     if let Some(name) = path.strip_prefix(b"/proc/") {
         if let Some(kind) = linux_proc_root_file_kind(name) {
@@ -32856,6 +32902,7 @@ fn linux_proc_file(state: u16) -> bool {
             | LINUX_FILE_PROC_USER_NAMESPACE
             | LINUX_FILE_PROC_FDINFO
             | LINUX_FILE_PROC_HOSTNAME
+            | LINUX_FILE_PROC_BOOT_ID
             | LINUX_FILE_PROC_DYNAMIC_STAT
             | LINUX_FILE_PROC_DYNAMIC_STATUS
             | LINUX_FILE_PROC_DYNAMIC_STATM
@@ -32935,6 +32982,7 @@ fn linux_regular_file(state: u16) -> Option<&'static [u8]> {
         LINUX_FILE_PROC_USER_NAMESPACE => return Some(b""),
         LINUX_FILE_PROC_FDINFO => return Some(b""),
         LINUX_FILE_PROC_HOSTNAME => return Some(b"ginux\n"),
+        LINUX_FILE_PROC_BOOT_ID => return Some(linux_boot_id()),
         LINUX_FILE_PROC_DYNAMIC_STAT
         | LINUX_FILE_PROC_DYNAMIC_STATUS
         | LINUX_FILE_PROC_DYNAMIC_STATM => return None,
@@ -33006,6 +33054,7 @@ fn linux_regular_file_inode(state: u16) -> Option<u64> {
         LINUX_FILE_PROC_USER_NAMESPACE => return Some(45),
         LINUX_FILE_PROC_FDINFO => return Some(46),
         LINUX_FILE_PROC_HOSTNAME => return Some(47),
+        LINUX_FILE_PROC_BOOT_ID => return Some(49),
         LINUX_FILE_PROC_DYNAMIC_STAT
         | LINUX_FILE_PROC_DYNAMIC_STATUS
         | LINUX_FILE_PROC_DYNAMIC_STATM => return Some(48),

@@ -104,7 +104,7 @@ ordinary boot. Verification images retain that diagnostic coverage.
 
 The console uses Bash's direct blocking input mode until serial readiness can
 wake a readline `pselect` wait. Current nonfatal gaps include os-release
-propagation, netlink, journal file I/O, parts of
+propagation, netlink, journal transport, parts of
 inotify/epoll, timezone-change events, and some
 bind-remount behavior. Long-running PID 1 also confirms why general control
 must come from an independent exec path rather than its attached console.
@@ -186,6 +186,13 @@ Current probe: Rocky 10 UBI-init is downloaded, published, and `/sbin/init`
 reaches `multi-user.target`; the attached root shell executes a verification
 command. The remaining API-filesystem, netlink, cgroup, journal, event, and
 console-readiness warnings are the next diagnostic and compatibility gate.
+
+The domain procfs now publishes a boot-unique Linux `boot_id`, eliminating
+systemd's journal-file write errors and `%b` tmpfiles failures. Writable
+overlay-file `MAP_SHARED` mappings also write back through `msync` and unmap.
+The journal flush unit still fails because the remaining varlink/UNIX-socket
+transport semantics reset its request; that transport failure is the next
+journal-specific gate.
 
 ## Stage 9: Persistence and production architecture
 

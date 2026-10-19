@@ -375,7 +375,7 @@ controller-attach console service that runs an interactive root shell; the
 QEMU gate executes a command in that shell rather than accepting a prompt as
 proof. Bash line editing is disabled until console readiness wakes are
 complete, so the service uses the verified blocking TTY read path. This is not
-yet a clean Linux boot: netlink, journal file I/O, named FIFOs, cgroup IDs,
+yet a clean Linux boot: netlink, journal transport, complete FIFO semantics,
 parts of inotify/epoll, procfs mount identification, and broader API-filesystem
 behavior remain visible gaps. The process layer contains generation-checked copy-on-write,
 but Linux personality forks currently use eager private copies: repeated Rocky
