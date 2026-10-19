@@ -221,7 +221,8 @@ nosuid, nodev, noexec, relatime, and `ST_VALID` flags. Open pipe, socket, and
 anonymous-inode descriptors report their Linux pseudo-filesystem magic.
 Undefined capacity and inode fields remain zero, which preserves the root's
 elastic, no-artificial-cap contract. Boot verification covers root and proc
-path queries, matching `fstatfs` descriptor results, anonymous descriptors,
+path queries (including systemd's trailing-slash `/proc/` probe), matching
+`fstatfs` results for `O_PATH` mount-root descriptors, anonymous descriptors,
 Linux 32-bit descriptor conversion, error ordering, and complete cleanup.
 Persistent block-filesystem capacity, quota reporting, and additional future
 mount types remain outside the current profile.

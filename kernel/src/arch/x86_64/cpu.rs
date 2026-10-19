@@ -603,6 +603,7 @@ const LINUX_STAT_FIFO_MODE: u32 = 0o010600;
 const LINUX_STAT_SOCKET_MODE: u32 = 0o140600;
 const LINUX_STAT_ANONYMOUS_MODE: u32 = 0o600;
 const LINUX_STATX_BASIC_STATS: u32 = 0x7ff;
+const LINUX_STATX_MNT_ID: u32 = 0x1000;
 const LINUX_STATX_RESERVED: u32 = 0x8000_0000;
 const LINUX_WRITE_LIMIT: usize = PAGE_SIZE;
 const LINUX_IOV_LIMIT: usize = 64;
@@ -15836,7 +15837,11 @@ fn verify_linux_filesystem_statistics() -> bool {
         && copy_from_linux_user(mapping + 128, &mut stat)
         && u64::from_ne_bytes(stat[..8].try_into().unwrap()) == PROC_SUPER_MAGIC
         && u64::from_ne_bytes(stat[56..64].try_into().unwrap()) == 2
-        && u64::from_ne_bytes(stat[80..88].try_into().unwrap()) == PROC_FLAGS;
+        && u64::from_ne_bytes(stat[80..88].try_into().unwrap()) == PROC_FLAGS
+        && copy_to_linux_user(mapping + 320, b"/proc/\0")
+        && linux_statfs(mapping + 320, mapping + 128) == 0
+        && copy_from_linux_user(mapping + 128, &mut stat)
+        && u64::from_ne_bytes(stat[..8].try_into().unwrap()) == PROC_SUPER_MAGIC;
     let ordered_errors = procfs
         && linux_statfs(mapping + 40, 1) == LINUX_ENOENT
         && linux_statfs(mapping, 1) == LINUX_EFAULT
@@ -15870,7 +15875,12 @@ fn verify_linux_filesystem_statistics() -> bool {
         LINUX_RETURN_TO_KERNEL
     };
     let proc_descriptor = if root_descriptor < LINUX_RETURN_TO_KERNEL {
-        linux_openat(u64::from(LINUX_AT_FDCWD), mapping + 16, 0, 0)
+        linux_openat(
+            u64::from(LINUX_AT_FDCWD),
+            mapping + 320,
+            LINUX_O_PATH | LINUX_O_CLOEXEC,
+            0,
+        )
     } else {
         LINUX_RETURN_TO_KERNEL
     };
@@ -21476,6 +21486,11 @@ fn linux_measured_path_kind(path: &[u8]) -> Option<u16> {
 
 fn linux_virtual_mount_path_at(directory: u64, path: &[u8]) -> Option<u16> {
     let relative = path.strip_prefix(b"/").unwrap_or(path);
+    let relative = if relative == b"proc/" {
+        b"proc"
+    } else {
+        relative
+    };
     if relative != b"proc" && !relative.starts_with(b"proc/") && relative != b"sys/fs/cgroup" {
         return None;
     }
@@ -25567,7 +25582,15 @@ fn linux_statx(directory: u64, path_address: u64, flags: u64, mask: u64, stat_ad
             )
         };
         let mut stat = [0_u8; 256];
-        stat[..4].copy_from_slice(&LINUX_STATX_BASIC_STATS.to_ne_bytes());
+        let relative = path.strip_prefix(b"/").unwrap_or(path);
+        linux_statx_set_mount(
+            &mut stat,
+            if relative == b"sys/fs/cgroup" || relative.starts_with(b"sys/fs/cgroup/") {
+                LinuxFilesystemKind::Cgroup2
+            } else {
+                LinuxFilesystemKind::Proc
+            },
+        );
         stat[4..8].copy_from_slice(&(PAGE_SIZE as u32).to_ne_bytes());
         stat[16..20].copy_from_slice(&1_u32.to_ne_bytes());
         stat[28..30].copy_from_slice(&(mode as u16).to_ne_bytes());
@@ -25591,7 +25614,7 @@ fn linux_statx(directory: u64, path_address: u64, flags: u64, mask: u64, stat_ad
             } | metadata.mode;
             let size = metadata.size as u64;
             let mut stat = [0_u8; 256];
-            stat[..4].copy_from_slice(&LINUX_STATX_BASIC_STATS.to_ne_bytes());
+            linux_statx_set_mount(&mut stat, LinuxFilesystemKind::Root);
             stat[4..8].copy_from_slice(&(PAGE_SIZE as u32).to_ne_bytes());
             stat[16..20].copy_from_slice(&1_u32.to_ne_bytes());
             stat[28..30].copy_from_slice(&(mode as u16).to_ne_bytes());
@@ -25615,7 +25638,7 @@ fn linux_statx(directory: u64, path_address: u64, flags: u64, mask: u64, stat_ad
             let mode = entry.map_or(LINUX_STAT_DIRECTORY_MODE, linux_rootfs_mode);
             let size = entry.map_or(0, |entry| entry.data.len() as u64);
             let mut stat = [0_u8; 256];
-            stat[..4].copy_from_slice(&LINUX_STATX_BASIC_STATS.to_ne_bytes());
+            linux_statx_set_mount(&mut stat, LinuxFilesystemKind::Root);
             stat[4..8].copy_from_slice(&(PAGE_SIZE as u32).to_ne_bytes());
             stat[16..20].copy_from_slice(&1_u32.to_ne_bytes());
             stat[28..30].copy_from_slice(&(mode as u16).to_ne_bytes());
@@ -25667,7 +25690,14 @@ fn linux_statx(directory: u64, path_address: u64, flags: u64, mask: u64, stat_ad
         },
     };
     let mut stat = [0_u8; 256];
-    stat[..4].copy_from_slice(&LINUX_STATX_BASIC_STATS.to_ne_bytes());
+    let filesystem = if path == b"/proc" || path.starts_with(b"/proc/") {
+        LinuxFilesystemKind::Proc
+    } else if path == b"/sys/fs/cgroup" || path.starts_with(b"/sys/fs/cgroup/") {
+        LinuxFilesystemKind::Cgroup2
+    } else {
+        LinuxFilesystemKind::Root
+    };
+    linux_statx_set_mount(&mut stat, filesystem);
     stat[4..8].copy_from_slice(&(PAGE_SIZE as u32).to_ne_bytes());
     stat[16..20].copy_from_slice(&1_u32.to_ne_bytes());
     stat[28..30].copy_from_slice(&(mode as u16).to_ne_bytes());
@@ -25682,6 +25712,20 @@ fn linux_statx(directory: u64, path_address: u64, flags: u64, mask: u64, stat_ad
         return LINUX_EFAULT;
     }
     0
+}
+
+fn linux_statx_set_mount(stat: &mut [u8; 256], filesystem: LinuxFilesystemKind) {
+    let (device_minor, mount_id) = match filesystem {
+        LinuxFilesystemKind::Root => (1_u32, 1_u64),
+        LinuxFilesystemKind::Proc => (2, 2),
+        LinuxFilesystemKind::Cgroup2 => (3, 3),
+        LinuxFilesystemKind::Pipe
+        | LinuxFilesystemKind::Socket
+        | LinuxFilesystemKind::Anonymous => (0, 0),
+    };
+    stat[..4].copy_from_slice(&(LINUX_STATX_BASIC_STATS | LINUX_STATX_MNT_ID).to_ne_bytes());
+    stat[140..144].copy_from_slice(&device_minor.to_ne_bytes());
+    stat[144..152].copy_from_slice(&mount_id.to_ne_bytes());
 }
 
 fn linux_socket_slot(descriptor: u64) -> Option<u8> {
@@ -35878,16 +35922,6 @@ fn linux_statfs(path_address: u64, stat_address: u64) -> u64 {
     let mut canonical = [0_u8; crate::linux_overlay::PATH_CAPACITY];
     let canonical_length =
         linux_canonical_path_at(u64::from(LINUX_AT_FDCWD), path, &mut canonical).ok();
-    let overlay =
-        canonical_length.and_then(|length| crate::linux_overlay::lookup(&canonical[..length]));
-    let virtual_path = linux_virtual_mount_path_at(u64::from(LINUX_AT_FDCWD), path);
-    if overlay.is_none()
-        && linux_rootfs_path_at(u64::from(LINUX_AT_FDCWD), path).is_none()
-        && virtual_path.is_none()
-        && linux_root_directory_kind(path).is_none()
-    {
-        return LINUX_ENOENT;
-    }
     let canonical_is_proc = canonical_length.is_some_and(|length| {
         &canonical[..length] == b"proc" || canonical[..length].starts_with(b"proc/")
     });
@@ -35895,6 +35929,18 @@ fn linux_statfs(path_address: u64, stat_address: u64) -> u64 {
         &canonical[..length] == b"sys/fs/cgroup"
             || canonical[..length].starts_with(b"sys/fs/cgroup/")
     });
+    let overlay =
+        canonical_length.and_then(|length| crate::linux_overlay::lookup(&canonical[..length]));
+    let virtual_path = linux_virtual_mount_path_at(u64::from(LINUX_AT_FDCWD), path);
+    if overlay.is_none()
+        && linux_rootfs_path_at(u64::from(LINUX_AT_FDCWD), path).is_none()
+        && virtual_path.is_none()
+        && linux_root_directory_kind(path).is_none()
+        && !canonical_is_proc
+        && !canonical_is_cgroup
+    {
+        return LINUX_ENOENT;
+    }
     let kind = if virtual_path.is_some() || canonical_is_proc {
         LinuxFilesystemKind::Proc
     } else if canonical_is_cgroup {
