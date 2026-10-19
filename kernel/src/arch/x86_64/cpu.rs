@@ -8205,7 +8205,9 @@ extern "sysv64" fn linux_syscall_handler(
         return LINUX_RETURN_TO_KERNEL;
     }
     let runtime_mode = LINUX_RUNTIME_MODE.load(Ordering::SeqCst);
-    let trace_index = if runtime_mode || ELF_PROBE_SYSTEM_INIT.load(Ordering::SeqCst) {
+    let trace_index = if cfg!(feature = "verification-boot")
+        && (runtime_mode || ELF_PROBE_SYSTEM_INIT.load(Ordering::SeqCst))
+    {
         let index = LINUX_RUNTIME_SYSCALL_TRACE_COUNT.fetch_add(1, Ordering::SeqCst) as usize
             % LINUX_RUNTIME_SYSCALL_TRACE_LIMIT;
         LINUX_RUNTIME_SYSCALL_TRACE[index].store(number, Ordering::SeqCst);
@@ -9330,7 +9332,9 @@ extern "sysv64" fn linux_syscall_handler(
                 serial_write("ginux: Linux child exited with status ");
                 serial_write_u64(first_argument);
                 serial_write("\r\n");
-                write_linux_runtime_syscall_trace();
+                if cfg!(feature = "verification-boot") {
+                    write_linux_runtime_syscall_trace();
+                }
             }
             if !clear_current_linux_process_signal_queues() {
                 return LINUX_EIO;
@@ -21161,7 +21165,7 @@ fn linux_execve_at(
         }
         return LINUX_EAGAIN;
     }
-    let mut path = [0_u8; 64];
+    let mut path = [0_u8; crate::linux_overlay::PATH_CAPACITY];
     let path_length = match copy_linux_c_string(path_address, &mut path) {
         Ok(length) => length,
         Err(error) => return error,

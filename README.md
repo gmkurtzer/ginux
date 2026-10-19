@@ -341,10 +341,21 @@ Full controlling-terminal and session semantics are still incomplete. Rocky
 Linux 10 now starts an unmodified glibc `/bin/sh`; shell builtins, file status,
 dynamic `cat`, and root-directory `ls` pass the QEMU lifecycle gate. This is a
 meaningful ABI checkpoint, not a claim of general Linux compatibility. Rocky
-Linux 10 systemd now launches as PID 1, executes its generators, and remains
-alive through the systemd smoke-test window. It does not yet reach a complete
-boot target; missing netlink, event, sysctl, and broader API-filesystem behavior
-remain visible. The process layer contains generation-checked copy-on-write,
+Linux 10 systemd must use the init-bearing image and an explicit init path:
+
+```text
+domain new rocky
+domain set rocky image=rockylinux/rockylinux:10-ubi-init init=/sbin/init
+domain start rocky --attach
+```
+
+The base `rockylinux/rockylinux:10` image declares `/bin/bash` and does not
+contain systemd; configuring `/sbin/init` against that tag is an image/content
+error, which Ginux reports explicitly. The UBI-init image launches systemd as
+PID 1, executes its generators, and remains alive through the smoke-test
+window. It does not yet reach a complete boot target or start a verified getty;
+missing netlink, event, sysctl, and broader API-filesystem behavior remain
+visible. The process layer contains generation-checked copy-on-write,
 but Linux personality forks currently use eager private copies: repeated Rocky
 fork/exec/exit cycles exposed incomplete COW retirement bookkeeping, so the
 optimization is disabled on the production path until that lifecycle is
@@ -370,6 +381,11 @@ make gate           # run the clean reproducible project gate
 The EFI filesystem is written to
 `build/esp/EFI/BOOT/BOOTX64.EFI`. Run `make help` for all supported targets and
 environment overrides.
+
+On Apple Silicon, this x86-64 target runs under QEMU TCG rather than hardware
+virtualization. Large systemd workloads are therefore substantially slower than
+Alpine or the controller; KVM acceleration becomes available on an x86-64 Linux
+host.
 
 ## Repository guide
 

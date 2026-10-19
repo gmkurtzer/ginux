@@ -62,10 +62,23 @@ detects QEMU and x86-64, executes its generator fork/exec paths, and remains
 alive through the smoke-test stability window. The gate is
 `make probe-rocky-systemd`.
 
-This is a launch checkpoint, not a complete system boot. Current nonfatal gaps
-include os-release propagation, netlink, sysctl files, timezone-change events,
-and some bind-remount behavior. Long-running PID 1 also confirms why control
-must come from an independent exec path rather than its attached console.
+The init image is `rockylinux/rockylinux:10-ubi-init`. The standard `:10` image
+declares `/bin/bash` and contains no systemd executable, so it cannot satisfy an
+explicit `/sbin/init` configuration. Init planning now distinguishes a missing
+file, permissions, interpreter, loader, executable format, and load-layout
+failure instead of reporting one opaque load-plan error.
+
+The systemd generator path exceeded an obsolete 64-byte `execve` pathname
+buffer; Linux exec now uses the filesystem path capacity. Production runtime
+builds also omit the verification syscall ring trace, removing three atomic
+trace operations from every syscall and suppressing full trace dumps during
+ordinary boot. Verification images retain that diagnostic coverage.
+
+This is a launch checkpoint, not a complete system boot or a verified getty.
+Current nonfatal gaps include os-release propagation, netlink, sysctl files,
+timezone-change events, and some bind-remount behavior. Long-running PID 1 also
+confirms why control must come from an independent exec path rather than its
+attached console.
 
 ### Next bounded checkpoint: domain process dispatch and exec
 

@@ -7,6 +7,7 @@ volume_image=$(mktemp "${TMPDIR:-/tmp}/ginux-rocky-systemd-volume.XXXXXX")
 qemu_pid_file=$(mktemp "${TMPDIR:-/tmp}/ginux-rocky-systemd-pid.XXXXXX")
 success_file=$(mktemp "${TMPDIR:-/tmp}/ginux-rocky-systemd-success.XXXXXX")
 qemu_pid=""
+rocky_image="${GINUX_ROCKY_IMAGE:-rockylinux/rockylinux:10-ubi-init}"
 
 stop_qemu() {
     local pid=""
@@ -53,7 +54,7 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
     wait_for 'ginux> '
     printf '%s\n' \
         'domain new rocky' \
-        'domain set rocky image=rockylinux/rockylinux:10-ubi-init init=/sbin/init' \
+        "domain set rocky image=$rocky_image init=/sbin/init" \
         'domain start rocky --attach'
     wait_for 'ginux: OCI image ready' 240
     wait_for 'ginux: entering configured Linux init' 30
@@ -62,7 +63,7 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
     if grep -Fq 'ginux: Linux init diagnostics: exit=127 first-unsupported-syscall=none' "$output_file"; then
         printf '%s\n' 'shutdown'
     else
-        if grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC|Linux init (execution|setup) failed|Linux init exited with status|rocky: (failed|stopped)' "$output_file"; then
+        if grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC|Linux init (execution|setup) failed|Linux init exited with status|Linux child exec rejected|systemd-system-update-generator failed|rocky: (failed|stopped)' "$output_file"; then
             fail 'systemd failed before the documented mmap boundary'
         fi
         printf '%s\n' ok >"$success_file"
@@ -94,7 +95,7 @@ wait "$qemu_pid" || true
 qemu_pid=""
 
 if [[ -s "$success_file" ]] \
-    && ! grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC|Linux init (execution|setup) failed|Linux init exited with status|rocky: (failed|stopped)' "$output_file"; then
+    && ! grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC|Linux init (execution|setup) failed|Linux init exited with status|Linux child exec rejected|systemd-system-update-generator failed|rocky: (failed|stopped)' "$output_file"; then
     echo 'Rocky systemd PID 1 smoke test passed.'
     exit 0
 fi

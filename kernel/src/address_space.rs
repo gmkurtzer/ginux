@@ -224,7 +224,47 @@ pub(crate) fn run_linux_init(init: &[u8]) -> LinuxProcessOutcome {
         return resume_linux_init(slot, MMAP_ADDRESS);
     }
     let Some(plan) = crate::published_rootfs::process_plan(init) else {
-        crate::serial_write_bytes(b"ginux: Linux init load plan unavailable\r\n");
+        use crate::published_rootfs::ProcessPlanFailure;
+        crate::serial_write_bytes(b"ginux: cannot launch Linux init ");
+        crate::serial_write_bytes(init);
+        crate::serial_write_bytes(b": ");
+        match crate::published_rootfs::process_plan_failure(init) {
+            ProcessPlanFailure::RootfsUnavailable => {
+                crate::serial_write_bytes(b"domain root filesystem is unavailable")
+            }
+            ProcessPlanFailure::ExecutableNotFound => {
+                crate::serial_write_bytes(b"file not found in domain root filesystem")
+            }
+            ProcessPlanFailure::NotRegularFile => {
+                crate::serial_write_bytes(b"path is not a regular file")
+            }
+            ProcessPlanFailure::NotExecutable => {
+                crate::serial_write_bytes(b"file is not executable")
+            }
+            ProcessPlanFailure::ScriptInterpreterNotFound(path) => {
+                crate::serial_write_bytes(b"script interpreter not found: ");
+                crate::serial_write_bytes(path);
+            }
+            ProcessPlanFailure::ScriptInterpreterNotExecutable(path) => {
+                crate::serial_write_bytes(b"script interpreter is not executable: ");
+                crate::serial_write_bytes(path);
+            }
+            ProcessPlanFailure::UnsupportedExecutable => {
+                crate::serial_write_bytes(b"unsupported ELF or executable format")
+            }
+            ProcessPlanFailure::DynamicLoaderNotFound(path) => {
+                crate::serial_write_bytes(b"dynamic loader not found: ");
+                crate::serial_write_bytes(path);
+            }
+            ProcessPlanFailure::DynamicLoaderNotExecutable(path) => {
+                crate::serial_write_bytes(b"dynamic loader is not executable: ");
+                crate::serial_write_bytes(path);
+            }
+            ProcessPlanFailure::UnsupportedLoadLayout => {
+                crate::serial_write_bytes(b"unsupported ELF load layout")
+            }
+        }
+        crate::serial_write_bytes(b"\r\n");
         return LinuxProcessOutcome::Failed;
     };
     let startup = crate::linux_elf::relocatable_startup(&plan);
@@ -527,7 +567,9 @@ pub(crate) fn run_linux_init(init: &[u8]) -> LinuxProcessOutcome {
                 crate::serial_write_u64,
             );
             crate::serial_write_bytes(b"\r\n");
-            cpu::write_linux_runtime_syscall_trace();
+            if cfg!(feature = "verification-boot") {
+                cpu::write_linux_runtime_syscall_trace();
+            }
         }
         LinuxProcessOutcome::Exited(status.unwrap_or(u8::MAX))
     } else {

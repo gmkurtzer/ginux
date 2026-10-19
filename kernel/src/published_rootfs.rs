@@ -37,6 +37,20 @@ pub(crate) struct LaunchArguments<'a> {
     pub(crate) execfn: usize,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ProcessPlanFailure<'a> {
+    RootfsUnavailable,
+    ExecutableNotFound,
+    NotRegularFile,
+    NotExecutable,
+    ScriptInterpreterNotFound(&'a [u8]),
+    ScriptInterpreterNotExecutable(&'a [u8]),
+    UnsupportedExecutable,
+    DynamicLoaderNotFound(&'a [u8]),
+    DynamicLoaderNotExecutable(&'a [u8]),
+    UnsupportedLoadLayout,
+}
+
 static ADDRESSES: [AtomicUsize; crate::control_abi::DOMAIN_LIMIT] =
     [const { AtomicUsize::new(0) }; crate::control_abi::DOMAIN_LIMIT];
 static SIZES: [AtomicUsize; crate::control_abi::DOMAIN_LIMIT] =
@@ -648,6 +662,40 @@ pub(crate) fn process_plan(
     init: &[u8],
 ) -> Option<crate::linux_elf::RelocatableProcessPlan<'static, 'static>> {
     process_plan_in(&rootfs()?, init)
+}
+
+pub(crate) fn process_plan_failure(init: &[u8]) -> ProcessPlanFailure<'static> {
+    let Some(rootfs) = rootfs() else {
+        return ProcessPlanFailure::RootfsUnavailable;
+    };
+    let Some((_, mut executable)) = lookup_in(&rootfs, init) else {
+        return ProcessPlanFailure::ExecutableNotFound;
+    };
+    if executable.kind != EntryKind::File {
+        return ProcessPlanFailure::NotRegularFile;
+    }
+    if executable.mode & 0o111 == 0 {
+        return ProcessPlanFailure::NotExecutable;
+    }
+    if let Some((interpreter, _)) = shebang_command(executable.data) {
+        let Some((_, script_interpreter)) = lookup_in(&rootfs, interpreter) else {
+            return ProcessPlanFailure::ScriptInterpreterNotFound(interpreter);
+        };
+        if script_interpreter.kind != EntryKind::File || script_interpreter.mode & 0o111 == 0 {
+            return ProcessPlanFailure::ScriptInterpreterNotExecutable(interpreter);
+        }
+        executable = script_interpreter;
+    }
+    let Some(interpreter_path) = crate::linux_elf::relocatable_interpreter(executable.data) else {
+        return ProcessPlanFailure::UnsupportedExecutable;
+    };
+    let Some((_, interpreter)) = lookup_in(&rootfs, interpreter_path) else {
+        return ProcessPlanFailure::DynamicLoaderNotFound(interpreter_path);
+    };
+    if interpreter.kind != EntryKind::File || interpreter.mode & 0o111 == 0 {
+        return ProcessPlanFailure::DynamicLoaderNotExecutable(interpreter_path);
+    }
+    ProcessPlanFailure::UnsupportedLoadLayout
 }
 
 pub(crate) fn launch_arguments<'a>(init: &'a [u8]) -> Option<LaunchArguments<'a>> {
