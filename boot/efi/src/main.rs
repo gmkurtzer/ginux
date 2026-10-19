@@ -399,10 +399,37 @@ unsafe fn loaded_image_bounds(
 }
 
 #[panic_handler]
-fn panic(_info: &PanicInfo<'_>) -> ! {
+fn panic(info: &PanicInfo<'_>) -> ! {
     serial_write("GINUX_BOOT_PANIC\r\n");
+    if let Some(location) = info.location() {
+        serial_write(location.file());
+        serial_write(":");
+        serial_write_u64(u64::from(location.line()));
+        serial_write(":");
+        serial_write_u64(u64::from(location.column()));
+        serial_write("\r\n");
+    }
     loop {
         core::hint::spin_loop();
+    }
+}
+
+fn serial_write_u64(mut value: u64) {
+    let mut digits = [0_u8; 20];
+    let mut index = digits.len();
+    loop {
+        index -= 1;
+        digits[index] = b'0' + (value % 10) as u8;
+        value /= 10;
+        if value == 0 {
+            break;
+        }
+    }
+    for byte in &digits[index..] {
+        while unsafe { inb(COM1 + 5) } & 0x20 == 0 {
+            core::hint::spin_loop();
+        }
+        unsafe { outb(COM1, *byte) };
     }
 }
 

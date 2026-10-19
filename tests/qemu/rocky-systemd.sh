@@ -54,6 +54,32 @@ wait_for() {
     fail "timed out waiting for '$marker'"
 }
 
+diagnose_login_timeout() {
+    printf '\035'
+    if wait_for "[detached from domain; use 'domain attach NAME' to return]" 10; then
+        printf '%s\n' \
+            'domain status rocky' \
+            'domain list' \
+            'ps'
+        sleep 2
+        printf '%s\n' shutdown
+        wait_for 'GINUX_KERNEL_OK' 15 || true
+    fi
+    fail "timed out waiting for 'login:'"
+}
+
+wait_for_login() {
+    local limit=${GINUX_ROCKY_LOGIN_TIMEOUT:-180}
+    for ((attempt = 0; attempt < limit; attempt++)); do
+        grep -Eq 'login:|\[root@ginux[^]]*\]#|bash-[0-9.]+#' "$output_file" && return 0
+        if grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC|Linux init (execution|setup) failed|Linux init exited with status|rocky: (failed|stopped)' "$output_file"; then
+            break
+        fi
+        sleep 1
+    done
+    diagnose_login_timeout
+}
+
 mkdir -p "$(dirname "$volume_image")"
 : >"$output_file"
 if [[ ! -f "$volume_image" ]]; then
@@ -70,7 +96,18 @@ fi
     wait_for 'ginux: entering configured Linux init' 30
     init_started_at=$(date +%s)
     wait_for ' running in system mode (' 30
-    wait_for 'login:' 180
+    wait_for_login
+    if [[ "${GINUX_VERIFY_LOGIN_SHELL:-0}" == 1 ]]; then
+        if ! grep -Eq '\[root@ginux[^]]*\]#|bash-[0-9.]+#' "$output_file"; then
+            printf '%s\n' root
+            sleep 2
+            if grep -Fq 'Password:' "$output_file"; then
+                fail 'Rocky root account requires a console password'
+            fi
+        fi
+        printf '%s\n' "printf 'GINUX_LOGIN_%s\\n' SHELL_READY"
+        wait_for 'GINUX_LOGIN_SHELL_READY' 15
+    fi
     login_reached_at=$(date +%s)
     echo "Rocky timing domain-start-to-login: $((login_reached_at - domain_started_at)) s" >&2
     echo "Rocky timing Linux-init-to-login: $((login_reached_at - init_started_at)) s" >&2
@@ -109,7 +146,7 @@ wait "$qemu_pid" || true
 qemu_pid=""
 
 if [[ -s "$success_file" ]] \
-    && grep -Fq 'login:' "$output_file" \
+    && grep -Eq 'login:|\[root@ginux[^]]*\]#|bash-[0-9.]+#' "$output_file" \
     && ! grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC|Linux init (execution|setup) failed|Linux init exited with status|Linux child exec rejected|systemd-system-update-generator failed|rocky: (failed|stopped)' "$output_file"; then
     echo 'Rocky systemd console login target passed.'
     exit 0

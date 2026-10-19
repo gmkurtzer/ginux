@@ -140,11 +140,11 @@ test-multi-domain: build
 	@tests/qemu/multi-domain.sh
 
 probe-rocky-systemd: build
-	@tests/qemu/rocky-systemd.sh
+	@GINUX_VERIFY_LOGIN_SHELL=1 tests/qemu/rocky-systemd.sh
 
 test-rocky-systemd: build
-	@tests/qemu/rocky-systemd.sh
-	@GINUX_REQUIRE_OCI_CACHE_HIT=1 tests/qemu/rocky-systemd.sh
+	@GINUX_VERIFY_LOGIN_SHELL=1 tests/qemu/rocky-systemd.sh
+	@GINUX_VERIFY_LOGIN_SHELL=1 GINUX_REQUIRE_OCI_CACHE_HIT=1 tests/qemu/rocky-systemd.sh
 
 run: build
 	@tools/qemu/run.sh

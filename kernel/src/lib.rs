@@ -4355,10 +4355,14 @@ fn serial_write_raw(bytes: &[u8]) {
 }
 
 pub(crate) fn serial_read_byte_blocking() -> u8 {
-    while unsafe { inb(COM1 + 5) } & 0x01 == 0 {
+    while !serial_input_ready() {
         core::hint::spin_loop();
     }
     unsafe { inb(COM1) }
+}
+
+pub(crate) fn serial_input_ready() -> bool {
+    (unsafe { inb(COM1 + 5) } & 0x01) != 0
 }
 
 fn serial_write_usize(value: usize) {
@@ -4470,15 +4474,14 @@ fn restore_cached_oci_layers(
                 return Some(OciCacheRestore::Invalid);
             };
             let mut offset = 0_usize;
-            let mut sector = [0_u8; ginux_volume_format::SECTOR_SIZE];
+            let mut sectors = [0_u8; 2048];
             while offset < length {
                 let sector_index = offset / ginux_volume_format::SECTOR_SIZE;
-                let copied = (length - offset).min(ginux_volume_format::SECTOR_SIZE);
-                if !volume::BlockDevice::read_sector(
-                    backend,
-                    start_sector + sector_index,
-                    &mut sector,
-                ) || image_store::append(handle, &sector[..copied]).is_err()
+                let copied = (length - offset).min(sectors.len());
+                let transfer = copied.div_ceil(ginux_volume_format::SECTOR_SIZE)
+                    * ginux_volume_format::SECTOR_SIZE;
+                if !backend.read_sectors(start_sector + sector_index, &mut sectors[..transfer])
+                    || image_store::append(handle, &sectors[..copied]).is_err()
                 {
                     let _ = image_store::abort(handle);
                     let _ = image_store::discard_published_layers();

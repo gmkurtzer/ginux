@@ -61,6 +61,12 @@ static CONTENT_LENGTHS: [AtomicUsize; crate::control_abi::DOMAIN_LIMIT] =
     [const { AtomicUsize::new(0) }; crate::control_abi::DOMAIN_LIMIT];
 static INDEX_STARTS: [AtomicUsize; crate::control_abi::DOMAIN_LIMIT] =
     [const { AtomicUsize::new(0) }; crate::control_abi::DOMAIN_LIMIT];
+static ENTRY_OFFSET_STARTS: [AtomicUsize; crate::control_abi::DOMAIN_LIMIT] =
+    [const { AtomicUsize::new(0) }; crate::control_abi::DOMAIN_LIMIT];
+static CHILD_HEAD_STARTS: [AtomicUsize; crate::control_abi::DOMAIN_LIMIT] =
+    [const { AtomicUsize::new(0) }; crate::control_abi::DOMAIN_LIMIT];
+static CHILD_NEXT_STARTS: [AtomicUsize; crate::control_abi::DOMAIN_LIMIT] =
+    [const { AtomicUsize::new(0) }; crate::control_abi::DOMAIN_LIMIT];
 static INDEX_FRAME_STARTS: [AtomicUsize; crate::control_abi::DOMAIN_LIMIT] =
     [const { AtomicUsize::new(0) }; crate::control_abi::DOMAIN_LIMIT];
 static INDEX_GENERATIONS: [AtomicU32; crate::control_abi::DOMAIN_LIMIT] =
@@ -122,7 +128,28 @@ fn install_path_index(slot: usize, rootfs: &Rootfs<'_>) -> bool {
     else {
         return false;
     };
-    let Some(bytes) = capacity.checked_mul(core::mem::size_of::<PathIndexEntry>()) else {
+    let Some(index_bytes) = capacity.checked_mul(core::mem::size_of::<PathIndexEntry>()) else {
+        return false;
+    };
+    let Some(offset_bytes) = rootfs
+        .entry_count()
+        .checked_mul(core::mem::size_of::<usize>())
+    else {
+        return false;
+    };
+    let Some(child_head_bytes) = rootfs
+        .entry_count()
+        .checked_add(1)
+        .and_then(|count| count.checked_mul(core::mem::size_of::<usize>()))
+    else {
+        return false;
+    };
+    let child_next_bytes = offset_bytes;
+    let Some(bytes) = index_bytes
+        .checked_add(offset_bytes)
+        .and_then(|bytes| bytes.checked_add(child_head_bytes))
+        .and_then(|bytes| bytes.checked_add(child_next_bytes))
+    else {
         return false;
     };
     let frame_count = bytes.div_ceil(PAGE_SIZE);
@@ -137,15 +164,39 @@ fn install_path_index(slot: usize, rootfs: &Rootfs<'_>) -> bool {
     };
     let table =
         unsafe { core::slice::from_raw_parts_mut(address as *mut PathIndexEntry, capacity) };
+    let Some(offset_address) = address.checked_add(index_bytes) else {
+        let _ = memory::scrub_and_release_contiguous_extent(FrameOwner::KERNEL, first, allocated);
+        return false;
+    };
+    let offsets = unsafe {
+        core::slice::from_raw_parts_mut(offset_address as *mut usize, rootfs.entry_count())
+    };
+    let Some(child_head_address) = offset_address.checked_add(offset_bytes) else {
+        let _ = memory::scrub_and_release_contiguous_extent(FrameOwner::KERNEL, first, allocated);
+        return false;
+    };
+    let child_heads = unsafe {
+        core::slice::from_raw_parts_mut(child_head_address as *mut usize, rootfs.entry_count() + 1)
+    };
+    let Some(child_next_address) = child_head_address.checked_add(child_head_bytes) else {
+        let _ = memory::scrub_and_release_contiguous_extent(FrameOwner::KERNEL, first, allocated);
+        return false;
+    };
+    let child_next = unsafe {
+        core::slice::from_raw_parts_mut(child_next_address as *mut usize, rootfs.entry_count())
+    };
     table.fill(PathIndexEntry {
         hash: INDEX_EMPTY,
         offset: 0,
         index: 0,
     });
+    child_heads.fill(usize::MAX);
+    child_next.fill(usize::MAX);
     let mut path = [0_u8; PATH_CAPACITY];
     let mut offset = 0_usize;
-    for index in 0..rootfs.entry_count() {
+    for (index, stored_offset) in offsets.iter_mut().enumerate().take(rootfs.entry_count()) {
         let entry_offset = offset;
+        *stored_offset = entry_offset;
         let Some((entry, next)) = rootfs.entry_and_next_at_offset(entry_offset) else {
             let _ =
                 memory::scrub_and_release_contiguous_extent(FrameOwner::KERNEL, first, allocated);
@@ -200,7 +251,40 @@ fn install_path_index(slot: usize, rootfs: &Rootfs<'_>) -> bool {
             return false;
         }
     }
+    for index in (0..rootfs.entry_count()).rev() {
+        let Some(entry) = rootfs.entry_at_offset(offsets[index]) else {
+            let _ =
+                memory::scrub_and_release_contiguous_extent(FrameOwner::KERNEL, first, allocated);
+            return false;
+        };
+        let Some(length) = copy_entry_path(entry, &mut path) else {
+            continue;
+        };
+        let visible = &path[..length];
+        if find_indexed_in(rootfs, table, visible)
+            .is_none_or(|(visible_index, _)| visible_index != index)
+        {
+            continue;
+        }
+        let parent = if let Some(separator) = visible.iter().rposition(|byte| *byte == b'/') {
+            let Some((parent, entry)) = find_indexed_in(rootfs, table, &visible[..separator])
+            else {
+                continue;
+            };
+            if entry.kind != EntryKind::Directory {
+                continue;
+            }
+            parent
+        } else {
+            rootfs.entry_count()
+        };
+        child_next[index] = child_heads[parent];
+        child_heads[parent] = index;
+    }
     INDEX_STARTS[slot].store(address, Ordering::Relaxed);
+    ENTRY_OFFSET_STARTS[slot].store(address + index_bytes, Ordering::Relaxed);
+    CHILD_HEAD_STARTS[slot].store(child_head_address, Ordering::Relaxed);
+    CHILD_NEXT_STARTS[slot].store(child_next_address, Ordering::Relaxed);
     INDEX_FRAME_STARTS[slot].store(first.address() as usize, Ordering::Relaxed);
     INDEX_GENERATIONS[slot].store(first.generation(), Ordering::Relaxed);
     INDEX_FRAME_COUNTS[slot].store(allocated, Ordering::Relaxed);
@@ -214,6 +298,9 @@ fn release_path_index(slot: usize) -> bool {
         return true;
     }
     INDEX_STARTS[slot].store(0, Ordering::Release);
+    ENTRY_OFFSET_STARTS[slot].store(0, Ordering::Release);
+    CHILD_HEAD_STARTS[slot].store(0, Ordering::Release);
+    CHILD_NEXT_STARTS[slot].store(0, Ordering::Release);
     let start = INDEX_FRAME_STARTS[slot].swap(0, Ordering::AcqRel) as u64;
     let generation = INDEX_GENERATIONS[slot].swap(0, Ordering::AcqRel);
     let count = INDEX_FRAME_COUNTS[slot].swap(0, Ordering::AcqRel);
@@ -250,8 +337,27 @@ fn index_table(slot: usize) -> Option<&'static [PathIndexEntry]> {
         .then(|| unsafe { core::slice::from_raw_parts(start as *const PathIndexEntry, capacity) })
 }
 
+fn entry_offsets(slot: usize) -> Option<&'static [usize]> {
+    let count = ENTRY_COUNTS.get(slot)?.load(Ordering::Acquire);
+    let start = ENTRY_OFFSET_STARTS.get(slot)?.load(Ordering::Relaxed);
+    (count != 0 && start != 0)
+        .then(|| unsafe { core::slice::from_raw_parts(start as *const usize, count) })
+}
+
+fn entry_offset(slot: usize, index: usize) -> Option<usize> {
+    entry_offsets(slot)?.get(index).copied()
+}
+
 fn find_indexed<'a>(slot: usize, rootfs: &Rootfs<'a>, path: &[u8]) -> Option<(usize, Entry<'a>)> {
     let table = index_table(slot)?;
+    find_indexed_in(rootfs, table, path)
+}
+
+fn find_indexed_in<'a>(
+    rootfs: &Rootfs<'a>,
+    table: &[PathIndexEntry],
+    path: &[u8],
+) -> Option<(usize, Entry<'a>)> {
     let hash = path_hash(path);
     for probe in 0..table.len() {
         let indexed = table[(hash as usize + probe) & (table.len() - 1)];
@@ -464,11 +570,12 @@ fn resolve_at_in(
         0
     } else {
         let index = usize::from(directory).checked_sub(ENTRY_HANDLE_BASE)?;
-        let entry = rootfs.entry(index)?;
+        let slot = crate::arch::x86_64::cpu::current_container_slot()?;
+        let entry = rootfs.entry_at_offset(entry_offset(slot, index)?)?;
         if entry.kind != EntryKind::Directory {
             return None;
         }
-        rootfs.copy_path(index, &mut resolved)?
+        copy_entry_path(entry, &mut resolved)?
     };
     for component in path.split(|byte| *byte == b'/') {
         if component.is_empty() || component == b"." {
@@ -498,7 +605,9 @@ pub(crate) fn copy_path(handle: u16, output: &mut [u8]) -> Option<usize> {
         return Some(0);
     }
     let index = usize::from(handle).checked_sub(ENTRY_HANDLE_BASE)?;
-    rootfs()?.copy_path(index, output)
+    let slot = crate::arch::x86_64::cpu::current_container_slot()?;
+    let entry = rootfs_for(slot)?.entry_at_offset(entry_offset(slot, index)?)?;
+    copy_entry_path(entry, output)
 }
 
 fn lookup_in<'a>(rootfs: &Rootfs<'a>, path: &[u8]) -> Option<(usize, Entry<'a>)> {
@@ -593,7 +702,8 @@ pub(crate) fn entry(handle: u16) -> Option<Entry<'static>> {
         let offset = ENTRY_CACHE_OFFSETS[slot][cache].load(Ordering::Relaxed);
         return rootfs.entry_at_offset(offset);
     }
-    let (offset, entry) = rootfs.entry_indexed(index)?;
+    let offset = entry_offset(slot, index)?;
+    let entry = rootfs.entry_at_offset(offset)?;
     ENTRY_CACHE_OFFSETS[slot][cache].store(offset, Ordering::Relaxed);
     ENTRY_CACHE_HANDLES[slot][cache].store(handle, Ordering::Release);
     Some(entry)
@@ -606,24 +716,65 @@ fn clear_entry_cache(slot: usize) {
 }
 
 pub(crate) fn next_child(directory: u16, cursor: usize) -> Option<Option<Child>> {
+    let slot = crate::arch::x86_64::cpu::current_container_slot()?;
     let rootfs = rootfs()?;
-    let mut parent = [0_u8; PATH_CAPACITY];
-    let parent_length = if directory == ROOT_HANDLE {
-        0
+    let parent_index = if directory == ROOT_HANDLE {
+        rootfs.entry_count()
     } else {
         let index = usize::from(directory).checked_sub(ENTRY_HANDLE_BASE)?;
-        rootfs.copy_path(index, &mut parent)?
+        let entry = rootfs.entry_at_offset(entry_offset(slot, index)?)?;
+        if entry.kind != EntryKind::Directory {
+            return None;
+        }
+        index
     };
-    let child = rootfs.next_child(&parent[..parent_length], cursor)?;
-    Some(child.and_then(|child| {
-        let handle = u16::try_from(child.index.checked_add(ENTRY_HANDLE_BASE)?).ok()?;
-        Some(Child {
-            next_cursor: child.next_cursor,
-            handle,
-            entry: child.entry,
-            name: child.name,
-        })
+    let offsets = entry_offsets(slot)?;
+    let head_start = CHILD_HEAD_STARTS.get(slot)?.load(Ordering::Acquire);
+    let next_start = CHILD_NEXT_STARTS.get(slot)?.load(Ordering::Acquire);
+    if head_start == 0 || next_start == 0 {
+        return None;
+    }
+    let end_cursor = offsets.len().checked_add(1)?;
+    if cursor == end_cursor {
+        return Some(None);
+    }
+    let heads = unsafe {
+        core::slice::from_raw_parts(head_start as *const usize, offsets.len().checked_add(1)?)
+    };
+    let next = unsafe { core::slice::from_raw_parts(next_start as *const usize, offsets.len()) };
+    let index = if cursor == 0 {
+        *heads.get(parent_index)?
+    } else {
+        cursor.checked_sub(1)?
+    };
+    if index == usize::MAX {
+        return Some(None);
+    }
+    let entry = rootfs.entry_at_offset(*offsets.get(index)?)?;
+    let handle = u16::try_from(index.checked_add(ENTRY_HANDLE_BASE)?).ok()?;
+    let name = entry.path.rsplit(|byte| *byte == b'/').next()?;
+    Some(Some(Child {
+        next_cursor: next[index].checked_add(1).unwrap_or(end_cursor),
+        handle,
+        entry,
+        name,
     }))
+}
+
+fn copy_entry_path(entry: Entry<'_>, output: &mut [u8]) -> Option<usize> {
+    let length = entry.prefix.len() + usize::from(!entry.prefix.is_empty()) + entry.path.len();
+    if length > output.len() {
+        return None;
+    }
+    let mut used = 0;
+    if !entry.prefix.is_empty() {
+        output[..entry.prefix.len()].copy_from_slice(entry.prefix);
+        used = entry.prefix.len();
+        output[used] = b'/';
+        used += 1;
+    }
+    output[used..length].copy_from_slice(entry.path);
+    Some(length)
 }
 
 fn resolve_link(path: &[u8], link: &[u8], output: &mut [u8]) -> Option<usize> {
@@ -660,7 +811,7 @@ fn resolve_link(path: &[u8], link: &[u8], output: &mut [u8]) -> Option<usize> {
 
 pub(crate) fn process_plan(
     init: &[u8],
-) -> Option<crate::linux_elf::RelocatableProcessPlan<'static, 'static>> {
+) -> Option<crate::linux_elf::RelocatableExecutablePlan<'static, 'static>> {
     process_plan_in(&rootfs()?, init)
 }
 
@@ -698,6 +849,40 @@ pub(crate) fn process_plan_failure(init: &[u8]) -> ProcessPlanFailure<'static> {
     ProcessPlanFailure::UnsupportedLoadLayout
 }
 
+pub(crate) fn executable_diagnostic(init: &[u8]) -> Option<(usize, u64, u16, u16)> {
+    let rootfs = rootfs()?;
+    let (_, executable) = lookup_in(&rootfs, init)?;
+    let head = u64::from_le_bytes(executable.data.get(..8)?.try_into().ok()?);
+    let kind = u16::from_le_bytes(executable.data.get(16..18)?.try_into().ok()?);
+    let headers = u16::from_le_bytes(executable.data.get(56..58)?.try_into().ok()?);
+    Some((executable.data.len(), head, kind, headers))
+}
+
+pub(crate) fn executable_program_headers(init: &[u8]) -> Option<([u64; 16], usize)> {
+    let rootfs = rootfs()?;
+    let (_, executable) = lookup_in(&rootfs, init)?;
+    let count = usize::from(u16::from_le_bytes(
+        executable.data.get(56..58)?.try_into().ok()?,
+    ));
+    if count > 16 {
+        return None;
+    }
+    let mut headers = [0_u64; 16];
+    for (index, output) in headers[..count].iter_mut().enumerate() {
+        let offset = 64 + index * 56;
+        let kind = u32::from_le_bytes(executable.data.get(offset..offset + 4)?.try_into().ok()?);
+        let flags = u32::from_le_bytes(
+            executable
+                .data
+                .get(offset + 4..offset + 8)?
+                .try_into()
+                .ok()?,
+        );
+        *output = u64::from(kind) | (u64::from(flags) << 32);
+    }
+    Some((headers, count))
+}
+
 pub(crate) fn launch_arguments<'a>(init: &'a [u8]) -> Option<LaunchArguments<'a>> {
     let rootfs = rootfs()?;
     let (_, executable) = lookup_in(&rootfs, init)?;
@@ -729,7 +914,7 @@ pub(crate) fn launch_arguments<'a>(init: &'a [u8]) -> Option<LaunchArguments<'a>
 fn process_plan_in<'a>(
     rootfs: &Rootfs<'a>,
     init: &[u8],
-) -> Option<crate::linux_elf::RelocatableProcessPlan<'a, 'a>> {
+) -> Option<crate::linux_elf::RelocatableExecutablePlan<'a, 'a>> {
     let (_, mut executable) = lookup_in(rootfs, init)?;
     if executable.kind != EntryKind::File || executable.mode & 0o111 == 0 {
         return None;
@@ -741,7 +926,14 @@ fn process_plan_in<'a>(
         }
         executable = script_interpreter;
     }
-    let interpreter_path = crate::linux_elf::relocatable_interpreter(executable.data)?;
+    let Some(interpreter_path) = crate::linux_elf::relocatable_interpreter(executable.data) else {
+        return crate::linux_elf::plan_relocatable_static(executable.data, 0x40_0000)
+            .map(crate::linux_elf::RelocatableExecutablePlan::Static)
+            .or_else(|| {
+                crate::linux_elf::plan_static_exec(executable.data)
+                    .map(crate::linux_elf::RelocatableExecutablePlan::Fixed)
+            });
+    };
     let (_, interpreter) = lookup_in(rootfs, interpreter_path)?;
     if interpreter.kind != EntryKind::File || interpreter.mode & 0o111 == 0 {
         return None;
@@ -753,6 +945,7 @@ fn process_plan_in<'a>(
         interpreter.data,
         0x60_0000,
     )
+    .map(crate::linux_elf::RelocatableExecutablePlan::Interpreted)
 }
 
 fn shebang_command(bytes: &[u8]) -> Option<(&[u8], Option<&[u8]>)> {

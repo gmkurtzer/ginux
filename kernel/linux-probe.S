@@ -2400,7 +2400,7 @@ linux_child_joined:
     push 1
     pop rdi
     mov esi, 0x405300
-    push 5
+    push 65
     pop rdx
     push 20
     pop rax

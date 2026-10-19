@@ -19,6 +19,7 @@ const PT_GNU_EH_FRAME: u32 = 0x6474_e550;
 const PT_GNU_STACK: u32 = 0x6474_e551;
 const PT_GNU_RELRO: u32 = 0x6474_e552;
 const PT_GNU_PROPERTY: u32 = 0x6474_e553;
+const PT_GNU_SFRAME: u32 = 0x6474_e554;
 const ET_EXEC: u16 = 2;
 const ET_DYN: u16 = 3;
 const EM_X86_64: u16 = 62;
@@ -773,6 +774,93 @@ pub(crate) struct RelocatableProcessPlan<'main, 'interpreter> {
     pub(crate) initial_entry: u64,
 }
 
+pub(crate) enum RelocatableExecutablePlan<'main, 'interpreter> {
+    Interpreted(RelocatableProcessPlan<'main, 'interpreter>),
+    Static(RelocatableLoadPlan<'main>),
+    Fixed(LoadPlan<'main>),
+}
+
+impl<'main, 'interpreter> RelocatableExecutablePlan<'main, 'interpreter> {
+    pub(crate) fn startup(&self) -> ProcessStartup {
+        match self {
+            Self::Interpreted(plan) => relocatable_startup(plan),
+            Self::Static(plan) => ProcessStartup {
+                initial_entry: plan.entry,
+                program_headers: plan.program_headers,
+                program_header_count: plan.program_header_count,
+                interpreter_base: 0,
+                main_entry: plan.entry,
+            },
+            Self::Fixed(plan) => static_startup(plan),
+        }
+    }
+
+    pub(crate) fn segment_count(&self) -> usize {
+        match self {
+            Self::Interpreted(plan) => plan.main.segment_count + plan.interpreter.segment_count,
+            Self::Static(plan) => plan.segment_count,
+            Self::Fixed(plan) => 2 + usize::from(plan.read_only.is_some()),
+        }
+    }
+
+    pub(crate) fn segment(&self, index: usize) -> Option<PlannedSegment<'_>> {
+        match self {
+            Self::Interpreted(plan) if index < plan.main.segment_count => plan.main.segments[index],
+            Self::Interpreted(plan) => plan
+                .interpreter
+                .segments
+                .get(index.checked_sub(plan.main.segment_count)?)
+                .copied()
+                .flatten(),
+            Self::Static(plan) => plan.segments.get(index).copied().flatten(),
+            Self::Fixed(plan) => match (index, plan.read_only) {
+                (0, Some(segment)) => Some(segment),
+                (0, None) | (1, Some(_)) => Some(plan.executable),
+                (1, None) | (2, Some(_)) => Some(plan.writable),
+                _ => None,
+            },
+        }
+    }
+
+    pub(crate) fn main_executable(&self) -> Option<PlannedSegment<'_>> {
+        let main = match self {
+            Self::Interpreted(plan) => &plan.main,
+            Self::Static(plan) => plan,
+            Self::Fixed(plan) => return Some(plan.executable),
+        };
+        main.segments[..main.segment_count]
+            .iter()
+            .flatten()
+            .find(|segment| segment.executable)
+            .copied()
+    }
+
+    pub(crate) fn main_writable(&self) -> Option<PlannedSegment<'_>> {
+        let main = match self {
+            Self::Interpreted(plan) => &plan.main,
+            Self::Static(plan) => plan,
+            Self::Fixed(plan) => return Some(plan.writable),
+        };
+        main.segments[..main.segment_count]
+            .iter()
+            .flatten()
+            .find(|segment| segment.writable)
+            .copied()
+    }
+
+    pub(crate) fn loader_executable(&self) -> Option<PlannedSegment<'_>> {
+        match self {
+            Self::Interpreted(plan) => plan.interpreter.segments[..plan.interpreter.segment_count]
+                .iter()
+                .flatten()
+                .find(|segment| segment.executable)
+                .copied(),
+            Self::Static(_) => self.main_executable(),
+            Self::Fixed(plan) => Some(plan.executable),
+        }
+    }
+}
+
 struct RelocatableImage<'a> {
     entry: u64,
     program_headers: u64,
@@ -1037,6 +1125,21 @@ pub(crate) fn plan_relocatable_process<'main, 'interpreter>(
     })
 }
 
+pub(crate) fn plan_relocatable_static(
+    bytes: &[u8],
+    load_bias: u64,
+) -> Option<RelocatableLoadPlan<'_>> {
+    let image = parse_relocatable(bytes)?;
+    image.interpreter.is_none().then_some(())?;
+    plan_relocatable(&image, load_bias)
+}
+
+pub(crate) fn plan_static_exec(bytes: &[u8]) -> Option<LoadPlan<'_>> {
+    let image = parse(bytes)?;
+    image.interpreter.is_none().then_some(())?;
+    plan(&image)
+}
+
 pub(crate) fn relocatable_interpreter(bytes: &[u8]) -> Option<&[u8]> {
     parse_relocatable(bytes)?.interpreter
 }
@@ -1099,7 +1202,7 @@ fn parse_relocatable(bytes: &[u8]) -> Option<RelocatableImage<'_>> {
             PT_GNU_RELRO if !relro_seen && valid_auxiliary_header(bytes, header, Some(PF_READ)) => {
                 relro_seen = true;
             }
-            PT_NOTE | PT_GNU_EH_FRAME | PT_GNU_PROPERTY
+            PT_NOTE | PT_TLS | PT_GNU_EH_FRAME | PT_GNU_PROPERTY | PT_GNU_SFRAME
                 if valid_auxiliary_header(bytes, header, Some(PF_READ)) => {}
             _ => return None,
         }

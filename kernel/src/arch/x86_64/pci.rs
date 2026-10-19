@@ -91,7 +91,8 @@ const USED_OFFSET: usize = 0x200;
 const REQUEST_OFFSET: usize = 0x400;
 const DATA_OFFSET: usize = 0x600;
 const DATA_LENGTH: usize = 512;
-const STATUS_OFFSET: usize = 0x900;
+const BLOCK_TRANSFER_LENGTH: usize = 2048;
+const STATUS_OFFSET: usize = 0xff0;
 const NET_RX_DESC_OFFSET: usize = 0x000;
 const NET_RX_AVAIL_OFFSET: usize = 0x080;
 const NET_RX_USED_OFFSET: usize = 0x100;
@@ -497,7 +498,7 @@ pub(crate) struct VirtioBlockBackend {
 enum BlockOperation<'a> {
     Read {
         sector: u64,
-        output: &'a mut [u8; DATA_LENGTH],
+        output: &'a mut [u8],
     },
     Write {
         sector: u64,
@@ -3071,6 +3072,19 @@ impl VirtioBlockBackend {
         safe
     }
 
+    pub(crate) fn read_sectors(&mut self, sector: usize, output: &mut [u8]) -> bool {
+        if output.is_empty()
+            || output.len() > BLOCK_TRANSFER_LENGTH
+            || !output.len().is_multiple_of(DATA_LENGTH)
+        {
+            return false;
+        }
+        let Ok(sector) = u64::try_from(sector) else {
+            return false;
+        };
+        self.submit(BlockOperation::Read { sector, output })
+    }
+
     /// Submits one read whose data descriptor names a page outside the active
     /// DMA domain. QEMU may publish an ordinary successful virtio completion
     /// even when VT-d drops the payload write, so this records transport state
@@ -3153,11 +3167,18 @@ impl VirtioBlockBackend {
             return false;
         }
         let (request_type, sector, data_length, device_writes, expected_used) = match &operation {
-            BlockOperation::Read { sector, .. } => (0_u32, *sector, DATA_LENGTH, true, 513_u32),
+            BlockOperation::Read { sector, output } => {
+                (0_u32, *sector, output.len(), true, output.len() as u32 + 1)
+            }
             BlockOperation::Write { sector, .. } => (1_u32, *sector, DATA_LENGTH, false, 1_u32),
             BlockOperation::Flush => (4_u32, 0, 0, false, 1_u32),
         };
-        if data_length != 0 && sector >= self.capacity_sectors {
+        if data_length != 0
+            && (sector >= self.capacity_sectors
+                || sector
+                    .checked_add((data_length / DATA_LENGTH) as u64)
+                    .is_none_or(|end| end > self.capacity_sectors))
+        {
             return false;
         }
         prepare_operation(
@@ -3212,7 +3233,7 @@ impl VirtioBlockBackend {
             || read_dma_u8(self.dma_virtual + STATUS_OFFSET) != 0
             || (data_length != 0
                 && (read_dma_u8(self.dma_virtual + DATA_OFFSET - 1) != 0x3c
-                    || read_dma_u8(self.dma_virtual + DATA_OFFSET + DATA_LENGTH) != 0xc3))
+                    || read_dma_u8(self.dma_virtual + DATA_OFFSET + data_length) != 0xc3))
         {
             return false;
         }
@@ -3485,7 +3506,7 @@ pub(crate) fn verify_queue_rejections() -> bool {
         && AVAIL_OFFSET + 4 + usize::from(QUEUE_SIZE) * 2 + 2 <= USED_OFFSET
         && USED_OFFSET + 4 + usize::from(QUEUE_SIZE) * 8 + 2 <= REQUEST_OFFSET
         && REQUEST_OFFSET + 16 < DATA_OFFSET
-        && DATA_OFFSET + DATA_LENGTH < STATUS_OFFSET
+        && DATA_OFFSET + BLOCK_TRANSFER_LENGTH < STATUS_OFFSET
         && STATUS_OFFSET < DMA_PAGE_SIZE
 }
 
@@ -3936,7 +3957,7 @@ fn prepare_operation(
     sector: u64,
     data_length: usize,
     device_writes: bool,
-    input: Option<&[u8; DATA_LENGTH]>,
+    input: Option<&[u8]>,
 ) {
     unsafe {
         core::ptr::write_bytes((dma_virtual + DESC_OFFSET) as *mut u8, 0, 3 * 16);
@@ -3975,11 +3996,11 @@ fn prepare_operation(
             }
         } else {
             unsafe {
-                core::ptr::write_bytes((dma_virtual + DATA_OFFSET) as *mut u8, 0xa5, DATA_LENGTH);
+                core::ptr::write_bytes((dma_virtual + DATA_OFFSET) as *mut u8, 0xa5, data_length);
             }
         }
         write_dma_u8(dma_virtual + DATA_OFFSET - 1, 0x3c);
-        write_dma_u8(dma_virtual + DATA_OFFSET + DATA_LENGTH, 0xc3);
+        write_dma_u8(dma_virtual + DATA_OFFSET + data_length, 0xc3);
         write_dma_u8(dma_virtual + STATUS_OFFSET, 0xff);
     } else {
         write_dma_u64(

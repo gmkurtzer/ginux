@@ -86,6 +86,7 @@ impl IdMap {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct UserNamespace {
     handle: UserNamespaceHandle,
+    parent: Option<UserNamespaceHandle>,
     uid_map: IdMap,
     gid_map: IdMap,
     setgroups_allowed: bool,
@@ -112,7 +113,12 @@ impl UserNamespaceTable {
         }
     }
 
-    fn create(&mut self, uid_map: IdMap, gid_map: IdMap) -> Option<UserNamespaceHandle> {
+    fn create(
+        &mut self,
+        uid_map: IdMap,
+        gid_map: IdMap,
+        parent: Option<UserNamespaceHandle>,
+    ) -> Option<UserNamespaceHandle> {
         if uid_map != IdMap::ROOT || gid_map != IdMap::ROOT {
             return None;
         }
@@ -129,6 +135,7 @@ impl UserNamespaceTable {
         self.generations[slot] = generation;
         self.namespaces[slot] = Some(UserNamespace {
             handle,
+            parent,
             uid_map,
             gid_map,
             setgroups_allowed: false,
@@ -160,10 +167,10 @@ pub(crate) fn verify_contract() -> bool {
         inside: 1,
         ..IdMap::ROOT
     };
-    if table.create(invalid, IdMap::ROOT).is_some() {
+    if table.create(invalid, IdMap::ROOT, None).is_some() {
         return false;
     }
-    let Some(first) = table.create(IdMap::ROOT, IdMap::ROOT) else {
+    let Some(first) = table.create(IdMap::ROOT, IdMap::ROOT, None) else {
         return false;
     };
     table.initial = Some(first);
@@ -205,16 +212,19 @@ pub(crate) fn verify_contract() -> bool {
     }
     let mut disposable = [None; NAMESPACE_LIMIT - 1];
     for handle in &mut disposable {
-        *handle = table.create(IdMap::ROOT, IdMap::ROOT);
+        *handle = table.create(IdMap::ROOT, IdMap::ROOT, Some(first));
         if handle.is_none() {
             return false;
         }
     }
-    if table.create(IdMap::ROOT, IdMap::ROOT).is_some() {
+    if table
+        .create(IdMap::ROOT, IdMap::ROOT, Some(first))
+        .is_some()
+    {
         return false;
     }
     let retired = disposable[0].is_some_and(|handle| table.retire(handle));
-    let Some(replacement) = table.create(IdMap::ROOT, IdMap::ROOT) else {
+    let Some(replacement) = table.create(IdMap::ROOT, IdMap::ROOT, Some(first)) else {
         return false;
     };
     retired
@@ -238,7 +248,7 @@ pub(crate) fn install_initial() -> bool {
     let Some(table) = live_table_mut_at(HOST_INSTANCE) else {
         return false;
     };
-    let Some(handle) = table.create(IdMap::ROOT, IdMap::ROOT) else {
+    let Some(handle) = table.create(IdMap::ROOT, IdMap::ROOT, None) else {
         return false;
     };
     table.initial = Some(handle);
@@ -251,12 +261,59 @@ pub(crate) fn initial() -> Option<UserNamespaceHandle> {
     let table = live_table_mut_at(index)?;
     if table.initial.is_none() {
         table.owner_domain = owner_domain;
-        let handle = table.create(IdMap::ROOT, IdMap::ROOT)?;
+        let handle = table.create(IdMap::ROOT, IdMap::ROOT, None)?;
         table.initial = Some(handle);
     }
     (table.owner_domain == owner_domain)
         .then_some(table.initial)
         .flatten()
+}
+
+pub(crate) fn clone_namespace(parent: UserNamespaceHandle) -> Option<UserNamespaceHandle> {
+    let namespace = *live_table_for_handle(parent)?.namespace(parent)?;
+    let (index, owner_domain) = current_instance_and_owner()?;
+    if namespace.handle.owner_domain != owner_domain {
+        return None;
+    }
+    let table = live_table_mut_at(index)?;
+    if table.owner_domain != owner_domain {
+        return None;
+    }
+    table.create(namespace.uid_map, namespace.gid_map, Some(parent))
+}
+
+pub(crate) fn may_signal(sender: UserNamespaceHandle, mut target: UserNamespaceHandle) -> bool {
+    if sender.owner_domain != target.owner_domain {
+        return false;
+    }
+    let Some(table) = live_table_for_handle(sender) else {
+        return false;
+    };
+    for _ in 0..NAMESPACE_LIMIT {
+        if target == sender {
+            return true;
+        }
+        let Some(parent) = table
+            .namespace(target)
+            .and_then(|namespace| namespace.parent)
+        else {
+            return false;
+        };
+        target = parent;
+    }
+    false
+}
+
+pub(crate) fn retire(handle: UserNamespaceHandle) -> bool {
+    let index = if handle.owner_domain == 0 {
+        HOST_INSTANCE
+    } else {
+        let Some(index) = domain::container_slot_for_domain(handle.owner_domain) else {
+            return false;
+        };
+        index
+    };
+    live_table_mut_at(index).is_some_and(|table| table.retire(handle))
 }
 
 pub(crate) fn credentials(handle: UserNamespaceHandle) -> Option<Credentials> {

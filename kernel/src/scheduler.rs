@@ -989,11 +989,24 @@ impl Scheduler {
 
     fn retire_process(&mut self, id: ThreadId) -> bool {
         let Some(thread) = self.thread(id).copied() else {
+            crate::serial_write("ginux: scheduler retire missing thread slot/generation: ");
+            crate::serial_write_u64(u64::from(id.slot));
+            crate::serial_write(" ");
+            crate::serial_write_u64(u64::from(id.generation));
+            crate::serial_write("\r\n");
             return false;
         };
-        if !matches!(thread.state, State::Ready | State::Running)
-            || thread.state == State::Running && self.current != Some(id)
-        {
+        if thread.state == State::Running && self.current != Some(id) {
+            crate::serial_write(
+                "ginux: scheduler retire running non-current thread slot/current: ",
+            );
+            crate::serial_write_u64(u64::from(id.slot));
+            crate::serial_write(" ");
+            crate::serial_write_u64(
+                self.current
+                    .map_or(u64::MAX, |current| u64::from(current.slot)),
+            );
+            crate::serial_write("\r\n");
             return false;
         }
         self.threads[usize::from(id.slot)] = None;

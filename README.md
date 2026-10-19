@@ -28,9 +28,9 @@ mechanisms.
 Ginux is currently a research and engineering prototype. It boots, runs its
 statically linked Linux-ABI controller and isolated native services, executes
 an unmodified Alpine Linux userspace, and launches Rocky Linux 10 systemd as
-domain PID 1 under QEMU. It does not yet provide complete Linux compatibility,
-carry Rocky through a complete systemd target, or implement a second userspace
-personality.
+domain PID 1 under QEMU. Rocky reaches `multi-user.target` and exposes a
+controller-attached root shell. Ginux does not yet provide complete Linux
+compatibility, a clean systemd boot, or a second userspace personality.
 
 ## Why Ginux?
 
@@ -281,7 +281,7 @@ simulation is not sufficient.
 | Native services | Measured ring-3 network, protocol, and volume services with bounded ABIs and restart proofs | Production service supervision and broader device support |
 | Storage | Self-initializing host volume with transactional configuration recovery and a persistent, digest-verified OCI layer cache | Add writable domain layers, explicit volumes, cache refresh/garbage collection, and logs |
 | Devices | Virtio block/network paths, MSI-X, and VT-d DMA confinement in the QEMU profile | NVMe, high-speed networking, GPU support, and selected real servers |
-| Linux personality | Bounded x86-64 ELF/dynamic-linker support, a growing syscall/VFS/process/signal ABI, per-domain procfs, Alpine musl/BusyBox, Rocky glibc/coreutils, and Rocky systemd launched as PID 1 | Add `domain exec`, then advance systemd through its remaining filesystem, netlink, and event interfaces |
+| Linux personality | Bounded x86-64 ELF/dynamic-linker support, a growing syscall/VFS/process/signal ABI, per-domain procfs, Alpine musl/BusyBox, Rocky glibc/coreutils, and Rocky systemd through `multi-user.target` with an attached shell | Close systemd's remaining filesystem, netlink, event, journal, and cgroup gaps, then add `domain exec` |
 | Other personalities | Domain and kernel mechanisms are designed for reuse | No BSD or other non-Linux personality is implemented yet |
 
 The Linux layer is intentionally tracked as a compatibility contract, not as a
@@ -370,10 +370,14 @@ domain start rocky --attach
 The base `rockylinux/rockylinux:10` image declares `/bin/bash` and does not
 contain systemd; configuring `/sbin/init` against that tag is an image/content
 error, which Ginux reports explicitly. The UBI-init image launches systemd as
-PID 1, executes its generators, and remains alive through the smoke-test
-window. It does not yet reach a complete boot target or start a verified getty;
-missing netlink, event, sysctl, and broader API-filesystem behavior remain
-visible. The process layer contains generation-checked copy-on-write,
+PID 1 and reaches `multi-user.target`. Ginux installs a trusted
+controller-attach console service that runs an interactive root shell; the
+QEMU gate executes a command in that shell rather than accepting a prompt as
+proof. Bash line editing is disabled until console readiness wakes are
+complete, so the service uses the verified blocking TTY read path. This is not
+yet a clean Linux boot: netlink, journal file I/O, named FIFOs, cgroup IDs,
+parts of inotify/epoll, procfs mount identification, and broader API-filesystem
+behavior remain visible gaps. The process layer contains generation-checked copy-on-write,
 but Linux personality forks currently use eager private copies: repeated Rocky
 fork/exec/exit cycles exposed incomplete COW retirement bookkeeping, so the
 optimization is disabled on the production path until that lifecycle is
@@ -391,7 +395,8 @@ make test-c2        # verify configured domain lifecycle
 make test-alpine    # verify runtime OCI download and the Alpine shell
 make test-rocky-shell # verify Rocky glibc shell, fork/exec, cat, and ls
 make test-multi-domain # verify concurrent Alpine domains and Rocky ingestion
-make probe-rocky-systemd # probe the remaining Rocky systemd boundary
+make probe-rocky-systemd # boot Rocky systemd and execute a console-shell probe
+make test-rocky-systemd # verify cold and cached warm Rocky console boots
 make test-storage    # verify volume initialization, recovery, and reset
 make check          # run architecture, ABI, format, lint, and unit checks
 make gate           # run the clean reproducible project gate

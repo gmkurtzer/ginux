@@ -1456,14 +1456,10 @@ ginux_linux_system_init:
     xor edx, edx
     mov eax, 41
     syscall
-    cmp rax, -97
+    cmp rax, 4
     jne .Lfailure
-    mov edi, 2
-    mov esi, 3
-    xor edx, edx
-    mov eax, 41
-    syscall
-    call .Lrequire_einval
+    mov rdi, rax
+    call .Lclose_descriptor
     mov edi, 2
     mov esi, 1
     mov edx, 17

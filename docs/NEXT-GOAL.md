@@ -8,7 +8,7 @@ begin until the operator accepts the completed stage.
 
 ## Operator-prioritized checkpoint: persistent host volume foundation
 
-Status: **Configuration and verified OCI layer persistence complete; awaiting operator review**
+Status: **Configuration and verified OCI layer persistence complete**
 
 The QEMU development host now uses a sparse, self-initializing persistent
 volume with a versioned, geometry-bound header committed through the existing
@@ -83,12 +83,12 @@ Remaining before Stage 2 is complete:
 Gate passed for this checkpoint: `make test`. The next review cycle should
 complete the dispatcher and blocking-wait portion of Stage 2, then stop again.
 
-### Completed checkpoint: Rocky systemd launch
+### Completed checkpoint: Rocky systemd operational target and console
 
-Rocky Linux 10 UBI-init now launches `/sbin/init` as domain PID 1. Systemd
-detects QEMU and x86-64, executes its generator fork/exec paths, and remains
-alive through the smoke-test stability window. The gate is
-`make probe-rocky-systemd`.
+Rocky Linux 10 UBI-init launches `/sbin/init` as domain PID 1, reaches
+`multi-user.target`, and starts a trusted controller-attach root console. The
+gate executes a command in that shell, so a printed prompt alone cannot pass.
+Cold and cached warm runs are covered by `make test-rocky-systemd`.
 
 The init image is `rockylinux/rockylinux:10-ubi-init`. The standard `:10` image
 declares `/bin/bash` and contains no systemd executable, so it cannot satisfy an
@@ -102,11 +102,19 @@ builds also omit the verification syscall ring trace, removing three atomic
 trace operations from every syscall and suppressing full trace dumps during
 ordinary boot. Verification images retain that diagnostic coverage.
 
-This is a launch checkpoint, not a complete system boot or a verified getty.
-Current nonfatal gaps include os-release propagation, netlink, sysctl files,
-timezone-change events, and some bind-remount behavior. Long-running PID 1 also
-confirms why control must come from an independent exec path rather than its
-attached console.
+The console uses Bash's direct blocking input mode until serial readiness can
+wake a readline `pselect` wait. Current nonfatal gaps include os-release
+propagation, netlink, journal file I/O, named FIFOs, cgroup IDs, parts of
+inotify/epoll, procfs mount identification, timezone-change events, and some
+bind-remount behavior. Long-running PID 1 also confirms why general control
+must come from an independent exec path rather than its attached console.
+
+On the Apple Silicon development host, x86-64 QEMU provides TCG only. The
+measured cached run reaches the verified shell in about 25 seconds, with about
+18 seconds spent after Linux init. Kernel boot-to-controller is under 200 ms
+and cached OCI restore plus root publication is about 6.5 seconds. Native KVM
+timing remains the required performance gate; the current TCG result does not
+satisfy the eventual couple-second target.
 
 ### Next bounded checkpoint: domain process dispatch and exec
 
@@ -175,10 +183,9 @@ clocks, timers, process supervision, sockets, service activation, console
 login, and `dnf update`.
 
 Current probe: Rocky 10 UBI-init is downloaded, published, and `/sbin/init`
-launches as systemd PID 1. Generator fork/exec succeeds and PID 1 survives the
-stability window. After `domain exec` exists, a non-interactive systemd status
-command and the remaining API-filesystem warnings become the next diagnostic
-and compatibility gate; launching PID 1 alone is not a complete system boot.
+reaches `multi-user.target`; the attached root shell executes a verification
+command. The remaining API-filesystem, netlink, cgroup, journal, event, and
+console-readiness warnings are the next diagnostic and compatibility gate.
 
 ## Stage 9: Persistence and production architecture
 

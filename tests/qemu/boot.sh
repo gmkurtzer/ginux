@@ -55,7 +55,7 @@ run_boot() {
             if grep -Fq 'ginux> ' "$boot_output"; then
                 break
             fi
-            if grep -Fq 'GINUX_KERNEL_PANIC' "$boot_output"; then
+            if grep -Eq 'GINUX_(KERNEL|BOOT)_PANIC' "$boot_output"; then
                 stop_qemu
                 exit 0
             fi
