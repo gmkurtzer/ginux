@@ -583,6 +583,20 @@ pub(crate) fn open_pair(socket_type: u8) -> Result<(u8, u8), Error> {
     Ok((first as u8, second as u8))
 }
 
+pub(crate) fn open_loopback(socket_type: u8) -> Result<u8, Error> {
+    let (slot, peer) = open_pair(socket_type)?;
+    if !close(peer) {
+        let _ = close(slot);
+        return Err(Error::Invalid);
+    }
+    let Some(state) = (unsafe { SLOTS.get_mut(usize::from(slot)) }).filter(|state| state.occupied)
+    else {
+        return Err(Error::Invalid);
+    };
+    state.peer = Some(slot);
+    Ok(slot)
+}
+
 pub(crate) fn close(slot: u8) -> bool {
     let index = usize::from(slot);
     let Some(state) = (unsafe { SLOTS.get_mut(index) }).filter(|slot| slot.occupied) else {
@@ -1170,6 +1184,38 @@ pub(crate) fn connect(slot: u8, remote: IpEndpoint) -> Result<(), Error> {
 
 pub(crate) fn send(slot: u8, input: &[u8], remote: Option<IpEndpoint>) -> Result<usize, Error> {
     poll();
+    let index = usize::from(slot);
+    let loopback = unsafe { SLOTS.get(index) }
+        .filter(|state| state.occupied && state.peer == Some(slot))
+        .is_some();
+    if loopback {
+        if remote.is_some() {
+            return Err(Error::Invalid);
+        }
+        let state = unsafe { SLOTS.get_mut(index) }.ok_or(Error::Invalid)?;
+        if state.write_shutdown {
+            return Err(Error::BrokenPipe);
+        }
+        if input.is_empty() {
+            return Ok(0);
+        }
+        let new_length = state
+            .local_length
+            .checked_add(input.len())
+            .ok_or(Error::Exhausted)?;
+        let (first, last) = allocate_local_pages(input).ok_or(Error::Exhausted)?;
+        if state.local_last == memory::FrameLease::EMPTY {
+            state.local_first = first;
+        } else if let Some(tail) = local_page_mut(state.local_last) {
+            tail.next = first;
+        } else {
+            let _ = release_local_pages(first);
+            return Err(Error::Invalid);
+        }
+        state.local_last = last;
+        state.local_length = new_length;
+        return Ok(input.len());
+    }
     let state = unsafe { SLOTS.get(usize::from(slot)) }
         .filter(|slot| slot.occupied)
         .ok_or(Error::Invalid)?;

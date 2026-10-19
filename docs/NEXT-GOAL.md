@@ -104,7 +104,7 @@ ordinary boot. Verification images retain that diagnostic coverage.
 
 The console uses Bash's direct blocking input mode until serial readiness can
 wake a readline `pselect` wait. Current nonfatal gaps include os-release
-propagation, netlink, journal file I/O, named FIFOs, cgroup IDs, parts of
+propagation, netlink, journal file I/O, cgroup IDs, parts of
 inotify/epoll, timezone-change events, and some
 bind-remount behavior. Long-running PID 1 also confirms why general control
 must come from an independent exec path rather than its attached console.

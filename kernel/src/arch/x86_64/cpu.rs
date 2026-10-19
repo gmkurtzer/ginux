@@ -10273,7 +10273,7 @@ fn linux_socket_pipe_descriptor(descriptor: u64, access: u16) -> bool {
     linux_socket_slot(descriptor).is_some()
         && device & (LINUX_DEVICE_SOCKET | LINUX_DEVICE_PIPE)
             == LINUX_DEVICE_SOCKET | LINUX_DEVICE_PIPE
-        && device & 3 == access
+        && device & 3 & access == access
 }
 
 fn linux_controller_getgroups(size: u64, output: u64) -> u64 {
@@ -15129,6 +15129,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let realtime_queries = verify_linux_realtime_queries();
     let resource_accounting = verify_linux_resource_accounting();
     let filesystem_statistics = verify_linux_filesystem_statistics();
+    let named_fifo = verify_linux_named_fifo();
     let filesystem_sync = linux_syncfs(1) == 0 && linux_syncfs(99) == LINUX_EBADF;
     let robust_list = verify_linux_robust_list_syscalls();
     let rseq = verify_linux_rseq_syscall();
@@ -15185,6 +15186,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         realtime_queries,
         resource_accounting,
         filesystem_statistics,
+        named_fifo,
         filesystem_sync,
         robust_list,
         rseq,
@@ -15246,6 +15248,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && realtime_queries
         && resource_accounting
         && filesystem_statistics
+        && named_fifo
         && filesystem_sync
         && robust_list
         && rseq
@@ -15794,6 +15797,66 @@ fn verify_linux_resource_accounting() -> bool {
         && linux_sysinfo(1) == LINUX_EFAULT;
     let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
     sysinfo && unmapped
+}
+
+fn verify_linux_named_fifo() -> bool {
+    const S_IFIFO: u64 = 0o010000;
+    let mapping = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    if !(LINUX_RUNTIME_DYNAMIC_MMAP_BASE..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
+        .contains(&mapping)
+    {
+        return false;
+    }
+    let prepared = copy_to_linux_user(mapping, b"/tmp/ginux-fifo-contract\0")
+        && copy_to_linux_user(mapping + 64, b"fifo");
+    let created =
+        prepared && linux_mknodat(u64::from(LINUX_AT_FDCWD), mapping, S_IFIFO | 0o600, 0) == 0;
+    let reader = if created {
+        linux_openat(
+            u64::from(LINUX_AT_FDCWD),
+            mapping,
+            LINUX_O_NONBLOCK | LINUX_O_CLOEXEC,
+            0,
+        )
+    } else {
+        LINUX_EBADF
+    };
+    let writer = if reader < LINUX_AUX_DESCRIPTOR_LIMIT {
+        linux_openat(
+            u64::from(LINUX_AT_FDCWD),
+            mapping,
+            1 | LINUX_O_NONBLOCK | LINUX_O_CLOEXEC,
+            0,
+        )
+    } else {
+        LINUX_EBADF
+    };
+    let opened = writer < LINUX_AUX_DESCRIPTOR_LIMIT
+        && linux_descriptor_close_on_exec(reader)
+        && linux_descriptor_close_on_exec(writer)
+        && linux_descriptor_fcntl(reader, LINUX_F_GETFL, 0) == LINUX_O_NONBLOCK
+        && linux_descriptor_fcntl(writer, LINUX_F_GETFL, 0) == (1 | LINUX_O_NONBLOCK);
+    let transferred = opened
+        && linux_descriptor_write(writer, mapping + 64, 4) == 4
+        && linux_descriptor_read(reader, mapping + 128, 4) == 4
+        && {
+            let mut bytes = [0_u8; 4];
+            copy_from_linux_user(mapping + 128, &mut bytes) && bytes == *b"fifo"
+        };
+    let writer_closed = writer >= LINUX_AUX_DESCRIPTOR_LIMIT || linux_descriptor_close(writer) == 0;
+    let reader_closed = reader >= LINUX_AUX_DESCRIPTOR_LIMIT || linux_descriptor_close(reader) == 0;
+    let removed = created
+        && linux_unlinkat(u64::from(LINUX_AT_FDCWD), mapping, 0) == 0
+        && crate::linux_overlay::lookup(b"tmp/ginux-fifo-contract").is_none();
+    let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
+    transferred && writer_closed && reader_closed && removed && unmapped
 }
 
 fn verify_linux_filesystem_statistics() -> bool {
@@ -23704,7 +23767,12 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64, mode: u64) -> u64
             Some(crate::linux_overlay::NodeKind::File) => LINUX_FILE_TMP_SCRATCH,
             Some(crate::linux_overlay::NodeKind::Directory) => LINUX_ROOT_MEASURED_DIRECTORY,
             Some(crate::linux_overlay::NodeKind::Symlink) => return LINUX_EINVAL,
-            Some(crate::linux_overlay::NodeKind::Fifo) => return LINUX_EOPNOTSUPP,
+            Some(crate::linux_overlay::NodeKind::Fifo) if flags & LINUX_O_PATH != 0 => {
+                LINUX_FILE_TMP_SCRATCH
+            }
+            Some(crate::linux_overlay::NodeKind::Fifo) => {
+                return linux_open_named_fifo(flags, handle);
+            }
             None => return LINUX_ENOENT,
         }
     } else if path == b"/etc/resolv.conf" {
@@ -27131,7 +27199,7 @@ fn linux_descriptor_read(descriptor: u64, address: u64, count: u64) -> u64 {
     }
     if linux_socket_slot(descriptor).is_some() {
         let device = linux_device_descriptor(descriptor);
-        if device & LINUX_DEVICE_PIPE != 0 && device & 3 != LINUX_DESCRIPTOR_INPUT {
+        if device & LINUX_DEVICE_PIPE != 0 && device & 3 & LINUX_DESCRIPTOR_INPUT == 0 {
             return LINUX_EBADF;
         }
         return linux_socket_recvfrom(descriptor, address, count, 0, 0, 0);
@@ -29866,6 +29934,35 @@ fn linux_pipe(address: u64, flags: u64) -> u64 {
     0
 }
 
+fn linux_open_named_fifo(flags: u64, handle: crate::linux_overlay::Handle) -> u64 {
+    let access = flags & 3;
+    let Some(descriptor) = (LINUX_AUX_DESCRIPTOR_FIRST..LINUX_AUX_DESCRIPTOR_LIMIT)
+        .find(|descriptor| linux_aux_descriptor_free(*descriptor))
+    else {
+        return LINUX_EMFILE;
+    };
+    let slot = match crate::linux_overlay::fifo_socket(handle) {
+        Some(slot) if crate::linux_socket::duplicate(slot) => slot,
+        _ => match crate::linux_socket::open_loopback(1) {
+            Ok(slot) if crate::linux_overlay::set_fifo_socket(handle, slot) => slot,
+            Ok(slot) => {
+                let _ = crate::linux_socket::close(slot);
+                return LINUX_EIO;
+            }
+            Err(error) => return linux_socket_error(error),
+        },
+    };
+    let index = (descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize;
+    ELF_PROBE_SOCKET_SLOTS[index].store(slot + 1, Ordering::SeqCst);
+    ELF_PROBE_SOCKET_FLAGS[index].store((flags & LINUX_O_NONBLOCK) as u32, Ordering::SeqCst);
+    ELF_PROBE_DEVICE_DESCRIPTORS[index].store(
+        LINUX_DEVICE_SOCKET | LINUX_DEVICE_PIPE | (access + 1) as u16,
+        Ordering::SeqCst,
+    );
+    set_linux_descriptor_close_on_exec(descriptor, flags & LINUX_O_CLOEXEC != 0);
+    descriptor
+}
+
 fn linux_vmsplice(descriptor: u64, vectors: u64, count: u64, flags: u64) -> u64 {
     const SPLICE_F_MORE: u64 = 4;
     const SPLICE_F_GIFT: u64 = 8;
@@ -31994,7 +32091,7 @@ fn linux_descriptor_write(descriptor: u64, address: u64, count: u64) -> u64 {
     }
     if linux_socket_slot(descriptor).is_some() {
         let device = linux_device_descriptor(descriptor);
-        if device & LINUX_DEVICE_PIPE != 0 && device & 3 != LINUX_DESCRIPTOR_OUTPUT {
+        if device & LINUX_DEVICE_PIPE != 0 && device & 3 & LINUX_DESCRIPTOR_OUTPUT == 0 {
             return LINUX_EBADF;
         }
         return linux_socket_sendto(descriptor, address, count, 0, 0, 0);
@@ -32351,7 +32448,7 @@ fn linux_socket_iov_ranges(
 fn linux_socket_writev(descriptor: u64, vectors: u64, count: u64) -> Option<u64> {
     let slot = linux_socket_slot(descriptor)?;
     let device = linux_device_descriptor(descriptor);
-    if device & LINUX_DEVICE_PIPE != 0 && device & 3 != LINUX_DESCRIPTOR_OUTPUT {
+    if device & LINUX_DEVICE_PIPE != 0 && device & 3 & LINUX_DESCRIPTOR_OUTPUT == 0 {
         return Some(LINUX_EBADF);
     }
     let (ranges, vector_count) = match linux_socket_iov_ranges(vectors, count, false) {
@@ -32399,7 +32496,7 @@ fn linux_socket_writev(descriptor: u64, vectors: u64, count: u64) -> Option<u64>
 fn linux_socket_readv(descriptor: u64, vectors: u64, count: u64) -> Option<u64> {
     let slot = linux_socket_slot(descriptor)?;
     let device = linux_device_descriptor(descriptor);
-    if device & LINUX_DEVICE_PIPE != 0 && device & 3 != LINUX_DESCRIPTOR_INPUT {
+    if device & LINUX_DEVICE_PIPE != 0 && device & 3 & LINUX_DESCRIPTOR_INPUT == 0 {
         return Some(LINUX_EBADF);
     }
     let (ranges, vector_count) = match linux_socket_iov_ranges(vectors, count, true) {
@@ -33938,7 +34035,7 @@ fn linux_descriptor_fcntl(descriptor: u64, command: u64, argument: u64) -> u64 {
     }
     if linux_socket_slot(descriptor).is_some() {
         let pipe_access = if state & LINUX_DEVICE_PIPE != 0 {
-            u64::from(state & 3 == LINUX_DESCRIPTOR_OUTPUT)
+            u64::from(state & 3) - 1
         } else {
             2
         };

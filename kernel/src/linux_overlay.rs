@@ -82,6 +82,7 @@ struct Node {
     path_length: u16,
     mode: u32,
     seals: u32,
+    fifo_socket: u8,
     handle: Handle,
     size: usize,
     first_page: FrameLease,
@@ -106,6 +107,7 @@ impl Node {
         path_length: 0,
         mode: 0,
         seals: 0,
+        fifo_socket: 0,
         handle: Handle {
             generation: 0,
             inode: 0,
@@ -310,6 +312,22 @@ pub(crate) fn create_fifo(path: &[u8], mode: u32) -> Option<Handle> {
     create(path, NodeKind::Fifo, mode, &[])
 }
 
+pub(crate) fn fifo_socket(handle: Handle) -> Option<u8> {
+    let node = node(handle)?;
+    (node.kind == NodeKind::Fifo && node.fifo_socket != 0).then_some(node.fifo_socket - 1)
+}
+
+pub(crate) fn set_fifo_socket(handle: Handle, slot: u8) -> bool {
+    let Some(node) = node_mut(handle).filter(|node| node.kind == NodeKind::Fifo) else {
+        return false;
+    };
+    let Some(encoded) = slot.checked_add(1) else {
+        return false;
+    };
+    node.fifo_socket = encoded;
+    true
+}
+
 fn create(path: &[u8], kind: NodeKind, mode: u32, initial: &[u8]) -> Option<Handle> {
     valid_path(path)?;
     if lookup(path).is_some() {
@@ -336,6 +354,7 @@ fn create(path: &[u8], kind: NodeKind, mode: u32, initial: &[u8]) -> Option<Hand
         path_length: path.len() as u16,
         mode: mode & 0o7777,
         seals: 0,
+        fifo_socket: 0,
         handle,
         size: 0,
         first_page: FrameLease::EMPTY,
@@ -403,6 +422,7 @@ pub(crate) fn whiteout(path: &[u8]) -> bool {
         path_length: path.len() as u16,
         mode: 0,
         seals: 0,
+        fifo_socket: 0,
         handle: Handle { generation, inode },
         size: 0,
         first_page: FrameLease::EMPTY,
