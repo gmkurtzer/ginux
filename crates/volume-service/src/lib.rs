@@ -66,16 +66,50 @@ pub const LOCAL_CONFIG_SLOT_STARTS: [usize; 2] = [8, 40];
 pub const LOCAL_CONFIG_HEADER_SIZE: usize = 80;
 pub const LOCAL_CONFIG_PAYLOAD_CAPACITY: usize =
     LOCAL_CONFIG_SLOT_SECTORS * SECTOR_SIZE - LOCAL_CONFIG_HEADER_SIZE;
+pub const OCI_CATALOG_SLOT_SECTORS: usize = 64;
+pub const OCI_CATALOG_SLOT_STARTS: [usize; 2] = [72, 136];
+pub const OCI_CATALOG_PAYLOAD_CAPACITY: usize =
+    OCI_CATALOG_SLOT_SECTORS * SECTOR_SIZE - LOCAL_CONFIG_HEADER_SIZE;
+pub const OCI_OBJECT_START_SECTOR: usize = 256;
 
 const LOCAL_CONFIG_MAGIC: &[u8; 8] = b"GINUXLC1";
 const LOCAL_CONFIG_VERSION: u32 = 1;
 const LOCAL_CONFIG_COMMIT_MARKER: u64 = 0x3147_4643_4c58_5547;
+const OCI_CATALOG_MAGIC: &[u8; 8] = b"GINUXOC1";
+const OCI_CATALOG_COMMIT_MARKER: u64 = 0x3147_434f_5855_4e47;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LocalConfigRecord {
     pub generation: u64,
     pub length: usize,
 }
+
+pub type OciCatalogRecord = LocalConfigRecord;
+
+#[derive(Clone, Copy)]
+struct ExtentLayout {
+    magic: &'static [u8; 8],
+    marker: u64,
+    slot_sectors: usize,
+    slot_starts: [usize; 2],
+    payload_capacity: usize,
+}
+
+const LOCAL_CONFIG_LAYOUT: ExtentLayout = ExtentLayout {
+    magic: LOCAL_CONFIG_MAGIC,
+    marker: LOCAL_CONFIG_COMMIT_MARKER,
+    slot_sectors: LOCAL_CONFIG_SLOT_SECTORS,
+    slot_starts: LOCAL_CONFIG_SLOT_STARTS,
+    payload_capacity: LOCAL_CONFIG_PAYLOAD_CAPACITY,
+};
+
+const OCI_CATALOG_LAYOUT: ExtentLayout = ExtentLayout {
+    magic: OCI_CATALOG_MAGIC,
+    marker: OCI_CATALOG_COMMIT_MARKER,
+    slot_sectors: OCI_CATALOG_SLOT_SECTORS,
+    slot_starts: OCI_CATALOG_SLOT_STARTS,
+    payload_capacity: OCI_CATALOG_PAYLOAD_CAPACITY,
+};
 
 pub fn open_host_volume<D: BlockDevice>(
     device: &mut D,
@@ -113,10 +147,25 @@ pub fn recover_local_config<D: BlockDevice>(
     device: &mut D,
     output: &mut [u8],
 ) -> Result<Option<LocalConfigRecord>, ScanError> {
+    recover_extent(device, output, LOCAL_CONFIG_LAYOUT)
+}
+
+pub fn recover_oci_catalog<D: BlockDevice>(
+    device: &mut D,
+    output: &mut [u8],
+) -> Result<Option<OciCatalogRecord>, ScanError> {
+    recover_extent(device, output, OCI_CATALOG_LAYOUT)
+}
+
+fn recover_extent<D: BlockDevice>(
+    device: &mut D,
+    output: &mut [u8],
+    layout: ExtentLayout,
+) -> Result<Option<LocalConfigRecord>, ScanError> {
     let mut selected: Option<(usize, LocalConfigRecord)> = None;
     let mut corrupt = false;
-    for (slot, start) in LOCAL_CONFIG_SLOT_STARTS.iter().copied().enumerate() {
-        match inspect_local_config_slot(device, start, output)? {
+    for (slot, start) in layout.slot_starts.iter().copied().enumerate() {
+        match inspect_extent_slot(device, start, output, layout)? {
             LocalConfigSlot::Empty | LocalConfigSlot::Prepared => {}
             LocalConfigSlot::Corrupt => corrupt = true,
             LocalConfigSlot::Committed(record) => match selected {
@@ -132,11 +181,12 @@ pub fn recover_local_config<D: BlockDevice>(
         }
     }
     if let Some((slot, record)) = selected {
-        read_local_config_payload(
+        read_extent_payload(
             device,
-            LOCAL_CONFIG_SLOT_STARTS[slot],
+            layout.slot_starts[slot],
             record.length,
             output,
+            layout,
         )?;
         Ok(Some(record))
     } else if corrupt {
@@ -150,11 +200,28 @@ pub fn commit_local_config<D: BlockDevice>(
     device: &mut D,
     payload: &[u8],
 ) -> Result<LocalConfigRecord, CommitError> {
-    if payload.is_empty() || payload.len() > LOCAL_CONFIG_PAYLOAD_CAPACITY {
+    let mut recovery = [0_u8; LOCAL_CONFIG_PAYLOAD_CAPACITY];
+    commit_extent(device, payload, &mut recovery, LOCAL_CONFIG_LAYOUT)
+}
+
+pub fn commit_oci_catalog<D: BlockDevice>(
+    device: &mut D,
+    payload: &[u8],
+) -> Result<OciCatalogRecord, CommitError> {
+    let mut recovery = [0_u8; OCI_CATALOG_PAYLOAD_CAPACITY];
+    commit_extent(device, payload, &mut recovery, OCI_CATALOG_LAYOUT)
+}
+
+fn commit_extent<D: BlockDevice>(
+    device: &mut D,
+    payload: &[u8],
+    recovery: &mut [u8],
+    layout: ExtentLayout,
+) -> Result<LocalConfigRecord, CommitError> {
+    if payload.is_empty() || payload.len() > layout.payload_capacity {
         return Err(CommitError::PayloadTooLarge);
     }
-    let mut recovery = [0_u8; LOCAL_CONFIG_PAYLOAD_CAPACITY];
-    let current = recover_local_config(device, &mut recovery).map_err(scan_error)?;
+    let current = recover_extent(device, recovery, layout).map_err(scan_error)?;
     if let Some(record) = current {
         if &recovery[..record.length] == payload {
             return Ok(record);
@@ -164,10 +231,10 @@ pub fn commit_local_config<D: BlockDevice>(
         .map_or(Some(1), |record| record.generation.checked_add(1))
         .ok_or(CommitError::GenerationExhausted)?;
     let target = current.map_or(0, |record| (record.generation as usize) & 1);
-    let start = LOCAL_CONFIG_SLOT_STARTS[target];
-    let prepared = local_config_header(generation, payload, false);
-    let committed = local_config_header(generation, payload, true);
-    write_local_config_slot(device, start, payload, &prepared)?;
+    let start = layout.slot_starts[target];
+    let prepared = extent_header(generation, payload, false, layout);
+    let committed = extent_header(generation, payload, true, layout);
+    write_extent_slot(device, start, payload, &prepared, layout)?;
     if !device.flush() || !device.write_sector(start, &committed) || !device.flush() {
         return Err(CommitError::Device);
     }
@@ -184,10 +251,11 @@ enum LocalConfigSlot {
     Corrupt,
 }
 
-fn inspect_local_config_slot<D: BlockDevice>(
+fn inspect_extent_slot<D: BlockDevice>(
     device: &mut D,
     start: usize,
     scratch: &mut [u8],
+    layout: ExtentLayout,
 ) -> Result<LocalConfigSlot, ScanError> {
     let mut header = [0_u8; SECTOR_SIZE];
     if !device.read_sector(start, &mut header) {
@@ -196,7 +264,7 @@ fn inspect_local_config_slot<D: BlockDevice>(
     if header.iter().all(|byte| *byte == 0) {
         return Ok(LocalConfigSlot::Empty);
     }
-    if &header[..8] != LOCAL_CONFIG_MAGIC
+    if &header[..8] != layout.magic
         || u32::from_le_bytes(header[8..12].try_into().unwrap_or([0; 4])) != LOCAL_CONFIG_VERSION
         || usize::from(u16::from_le_bytes(
             header[12..14].try_into().unwrap_or([0; 2]),
@@ -210,20 +278,17 @@ fn inspect_local_config_slot<D: BlockDevice>(
     let length = u32::from_le_bytes(header[16..20].try_into().unwrap_or([0; 4])) as usize;
     let generation = u64::from_le_bytes(header[24..32].try_into().unwrap_or([0; 8]));
     let marker = u64::from_le_bytes(header[32..40].try_into().unwrap_or([0; 8]));
-    if length == 0
-        || length > LOCAL_CONFIG_PAYLOAD_CAPACITY
-        || length > scratch.len()
-        || generation == 0
+    if length == 0 || length > layout.payload_capacity || length > scratch.len() || generation == 0
     {
         return Ok(LocalConfigSlot::Corrupt);
     }
     if marker == 0 {
         return Ok(LocalConfigSlot::Prepared);
     }
-    if marker != LOCAL_CONFIG_COMMIT_MARKER {
+    if marker != layout.marker {
         return Ok(LocalConfigSlot::Corrupt);
     }
-    read_local_config_payload(device, start, length, scratch)?;
+    read_extent_payload(device, start, length, scratch, layout)?;
     let expected: [u8; 32] = Sha256::digest(&scratch[..length]).into();
     if header[40..72] != expected {
         return Ok(LocalConfigSlot::Corrupt);
@@ -234,15 +299,20 @@ fn inspect_local_config_slot<D: BlockDevice>(
     }))
 }
 
-fn local_config_header(generation: u64, payload: &[u8], committed: bool) -> [u8; SECTOR_SIZE] {
+fn extent_header(
+    generation: u64,
+    payload: &[u8],
+    committed: bool,
+    layout: ExtentLayout,
+) -> [u8; SECTOR_SIZE] {
     let mut header = [0_u8; SECTOR_SIZE];
-    header[..8].copy_from_slice(LOCAL_CONFIG_MAGIC);
+    header[..8].copy_from_slice(layout.magic);
     header[8..12].copy_from_slice(&LOCAL_CONFIG_VERSION.to_le_bytes());
     header[12..14].copy_from_slice(&(LOCAL_CONFIG_HEADER_SIZE as u16).to_le_bytes());
     header[16..20].copy_from_slice(&(payload.len() as u32).to_le_bytes());
     header[24..32].copy_from_slice(&generation.to_le_bytes());
     if committed {
-        header[32..40].copy_from_slice(&LOCAL_CONFIG_COMMIT_MARKER.to_le_bytes());
+        header[32..40].copy_from_slice(&layout.marker.to_le_bytes());
     }
     let digest: [u8; 32] = Sha256::digest(payload).into();
     header[40..72].copy_from_slice(&digest);
@@ -252,18 +322,19 @@ fn local_config_header(generation: u64, payload: &[u8], committed: bool) -> [u8;
     header
 }
 
-fn write_local_config_slot<D: BlockDevice>(
+fn write_extent_slot<D: BlockDevice>(
     device: &mut D,
     start: usize,
     payload: &[u8],
     header: &[u8; SECTOR_SIZE],
+    layout: ExtentLayout,
 ) -> Result<(), CommitError> {
     if !device.write_sector(start, header) {
         return Err(CommitError::Device);
     }
     let first = payload.len().min(SECTOR_SIZE - LOCAL_CONFIG_HEADER_SIZE);
     let mut offset = first;
-    for sector in 1..LOCAL_CONFIG_SLOT_SECTORS {
+    for sector in 1..layout.slot_sectors {
         let mut bytes = [0_u8; SECTOR_SIZE];
         let length = (payload.len() - offset).min(SECTOR_SIZE);
         bytes[..length].copy_from_slice(&payload[offset..offset + length]);
@@ -275,11 +346,12 @@ fn write_local_config_slot<D: BlockDevice>(
     Ok(())
 }
 
-fn read_local_config_payload<D: BlockDevice>(
+fn read_extent_payload<D: BlockDevice>(
     device: &mut D,
     start: usize,
     length: usize,
     output: &mut [u8],
+    layout: ExtentLayout,
 ) -> Result<(), ScanError> {
     if length > output.len() {
         return Err(ScanError::Corrupt);
@@ -292,7 +364,7 @@ fn read_local_config_payload<D: BlockDevice>(
     output[..first]
         .copy_from_slice(&sector[LOCAL_CONFIG_HEADER_SIZE..LOCAL_CONFIG_HEADER_SIZE + first]);
     let mut offset = first;
-    for index in 1..LOCAL_CONFIG_SLOT_SECTORS {
+    for index in 1..layout.slot_sectors {
         if offset == length {
             break;
         }
@@ -475,8 +547,8 @@ mod tests {
     impl LargeMemoryDevice {
         fn new() -> Self {
             Self {
-                durable: vec![[0; SECTOR_SIZE]; 72],
-                pending: vec![[0; SECTOR_SIZE]; 72],
+                durable: vec![[0; SECTOR_SIZE]; 200],
+                pending: vec![[0; SECTOR_SIZE]; 200],
             }
         }
     }
@@ -610,5 +682,25 @@ mod tests {
             Err(ScanError::Corrupt)
         );
         assert_eq!(device.pending, before);
+    }
+
+    #[test]
+    fn oci_catalog_is_independent_and_transactional() {
+        let mut device = LargeMemoryDevice::new();
+        open_host_volume(&mut device, 131_072).expect("host volume");
+        commit_local_config(&mut device, b"domain configuration").expect("local config");
+        let catalog = [0x5a; 28_944];
+        let committed = commit_oci_catalog(&mut device, &catalog).expect("catalog commit");
+        assert_eq!(committed.generation, 1);
+        let mut recovered = [0; OCI_CATALOG_PAYLOAD_CAPACITY];
+        let record = recover_oci_catalog(&mut device, &mut recovered)
+            .expect("catalog recovery")
+            .expect("catalog record");
+        assert_eq!(&recovered[..record.length], &catalog);
+        let mut local = [0; LOCAL_CONFIG_PAYLOAD_CAPACITY];
+        let local_record = recover_local_config(&mut device, &mut local)
+            .expect("local recovery")
+            .expect("local record");
+        assert_eq!(&local[..local_record.length], b"domain configuration");
     }
 }

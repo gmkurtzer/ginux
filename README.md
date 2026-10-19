@@ -279,7 +279,7 @@ simulation is not sufficient.
 | Controller | Persistent ring-3 command console with command-name completion, aligned status tables, and component, process, network, and domain lifecycle control | Dynamic argument completion and remote authenticated management |
 | Domains | Default-Linux domains with concurrent isolated address spaces, root/mount and process views, retained CPU state, IPC, scheduling, lifecycle events, fault containment, and generation-safe cleanup | Broader per-domain resource accounting and policy enforcement |
 | Native services | Measured ring-3 network, protocol, and volume services with bounded ABIs and restart proofs | Production service supervision and broader device support |
-| Storage | Self-initializing host volume with transactional domain, network-topology, attachment, and host-network configuration recovery | Persist verified OCI objects, writable layers, and logs in the data region |
+| Storage | Self-initializing host volume with transactional configuration recovery and a persistent, digest-verified OCI layer cache | Add writable domain layers, explicit volumes, cache refresh/garbage collection, and logs |
 | Devices | Virtio block/network paths, MSI-X, and VT-d DMA confinement in the QEMU profile | NVMe, high-speed networking, GPU support, and selected real servers |
 | Linux personality | Bounded x86-64 ELF/dynamic-linker support, a growing syscall/VFS/process/signal ABI, per-domain procfs, Alpine musl/BusyBox, Rocky glibc/coreutils, and Rocky systemd launched as PID 1 | Add `domain exec`, then advance systemd through its remaining filesystem, netlink, and event interfaces |
 | Other personalities | Domain and kernel mechanisms are designed for reuse | No BSD or other non-Linux personality is implemented yet |
@@ -320,8 +320,10 @@ size, or run `make reset-storage` to delete the development volume; the next
 boot recreates a clean one. This checkpoint establishes and validates the
 durable volume format. Domain definitions, resource settings, autostart flags,
 virtual-network topology, attachments, and static/DHCP host-network policy are
-recovered from it after a clean shutdown. OCI cache objects are the next
-storage consumer and are not persistent yet. See
+recovered from it after a clean shutdown. Verified compressed OCI layers are
+stored content-addressed in the same volume and reused after reboot without a
+registry transfer. `make test-oci-cache` validates the cold-pull and warm-hit
+lifecycle. See
 [the storage architecture](docs/STORAGE.md).
 
 At the `ginux>` prompt:
@@ -349,6 +351,10 @@ is source-neutral: the domain's Linux personality owns VFS lookup, ELF loading,
 process creation, scheduling, and init lifecycle. Domain execution therefore
 does not depend on OCI state and uses the same path for root filesystems
 published by future transports or local storage.
+The requested canonical image reference and `linux/amd64` platform select the
+persistent cache entry. Layer data is flushed before its transactional catalog
+generation is committed; corrupt objects fail digest verification and are
+never published as a domain root.
 Full controlling-terminal and session semantics are still incomplete. Rocky
 Linux 10 now starts an unmodified glibc `/bin/sh`; shell builtins, file status,
 dynamic `cat`, and root-directory `ls` pass the QEMU lifecycle gate. This is a

@@ -8,7 +8,7 @@ begin until the operator accepts the completed stage.
 
 ## Operator-prioritized checkpoint: persistent host volume foundation
 
-Status: **Configuration persistence complete; awaiting operator review**
+Status: **Configuration and verified OCI layer persistence complete; awaiting operator review**
 
 The QEMU development host now uses a sparse, self-initializing persistent
 volume with a versioned, geometry-bound header committed through the existing
@@ -23,10 +23,16 @@ topology and attachments, and host static/DHCP network policy. Boot recreates
 configured kernel domain and network objects; deleting the volume resets them.
 Running process state is never resumed across a host reboot.
 
-The next storage checkpoint is an indexed, digest-addressed OCI object cache,
-written only after registry/network device teardown and restored before making
-a registry request. Boot and OCI transfer/unpack timing markers provide the
-measurements for that performance checkpoint.
+The indexed, digest-addressed OCI layer cache is now implemented. Registry
+transport is fully quiesced before verified layers are written; layer bytes
+are flushed before the independent catalog transaction commits. A reboot
+restores and re-verifies cached layers before deciding whether registry access
+is necessary. `make test-oci-cache` proves a real cold Alpine pull followed by
+a warm boot with no registry authentication or layer transfer.
+
+The next storage checkpoint is deliberately not started. Remaining work is
+cache refresh/garbage collection, writable domain layers, explicit volumes,
+and logs.
 
 ## Stage 1: Shared open-file state
 

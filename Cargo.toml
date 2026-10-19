@@ -6,6 +6,7 @@ members = [
     "crates/image-store",
     "crates/native-abi",
     "crates/oci",
+    "crates/oci-cache",
     "crates/protocol-state",
     "crates/runtime-memory",
     "crates/volume-format",

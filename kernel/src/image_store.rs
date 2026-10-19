@@ -207,6 +207,50 @@ pub(crate) fn abort(handle: StagingHandle) -> Result<(), StoreError> {
     with_store(|store| store.abort(handle)).unwrap_or(Err(StoreError::Backend))
 }
 
+pub(crate) fn published_layer_count() -> usize {
+    PUBLISHED_LAYER_COUNT.load(Ordering::Acquire)
+}
+
+pub(crate) fn published_layer_info(index: usize) -> Option<([u8; 32], usize)> {
+    if index >= PUBLISHED_LAYER_COUNT.load(Ordering::Acquire) {
+        return None;
+    }
+    let digest = unsafe {
+        core::ptr::addr_of!(PUBLISHED_LAYERS)
+            .cast::<Digest>()
+            .add(index)
+            .read()
+    };
+    with_store(|store| {
+        store
+            .published_object(digest)
+            .map(|(_, length)| (digest.0, length))
+    })?
+}
+
+pub(crate) fn read_published_layer(index: usize, offset: usize, output: &mut [u8]) -> bool {
+    if index >= PUBLISHED_LAYER_COUNT.load(Ordering::Acquire) {
+        return false;
+    }
+    let digest = unsafe {
+        core::ptr::addr_of!(PUBLISHED_LAYERS)
+            .cast::<Digest>()
+            .add(index)
+            .read()
+    };
+    with_store(|store| {
+        store
+            .published_object(digest)
+            .is_some_and(|(object, length)| {
+                offset
+                    .checked_add(output.len())
+                    .is_some_and(|end| end <= length)
+                    && store.backend().read(object, offset, output)
+            })
+    })
+    .unwrap_or(false)
+}
+
 fn with_store<T>(
     operation: impl FnOnce(&mut ImageStore<RamBackend, OBJECT_LIMIT>) -> T,
 ) -> Option<T> {

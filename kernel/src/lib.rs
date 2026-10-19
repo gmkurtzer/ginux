@@ -40,6 +40,8 @@ const COM1: u16 = 0x3f8;
 static OPERATOR_CONSOLE_READY: AtomicBool = AtomicBool::new(false);
 static LINUX_REALTIME_EPOCH_SECONDS: AtomicU64 = AtomicU64::new(0);
 static LINUX_REALTIME_EPOCH_TSC: AtomicU64 = AtomicU64::new(0);
+static mut PERSISTED_OCI_CATALOG: [u8; ginux_oci_cache::ENCODED_SIZE] =
+    [0; ginux_oci_cache::ENCODED_SIZE];
 const EFI_RESET_SHUTDOWN: u32 = 2;
 const EFI_SUCCESS: usize = 0;
 pub(crate) const EFI_LOADER_CODE: u32 = 1;
@@ -1244,6 +1246,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     let mut persisted_local_configuration = [0_u8; PERSISTENT_LOCAL_CONFIG_SIZE];
     let mut persisted_local_record = None;
     let mut persisted_local_configuration_valid = true;
+    let persisted_oci_catalog = &mut *core::ptr::addr_of_mut!(PERSISTED_OCI_CATALOG);
+    let mut persisted_oci_catalog_valid = false;
+    let mut persisted_oci_catalog_corrupt = false;
     let disk_volume = (|| {
         let capacity_sectors = persistent_block.capacity_sectors();
         let state = volume::open_host_volume(&mut persistent_block, capacity_sectors).ok()?;
@@ -1261,6 +1266,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             Ok(record) => persisted_local_record = record,
             Err(_) => persisted_local_configuration_valid = false,
         }
+        (persisted_oci_catalog_valid, persisted_oci_catalog_corrupt) =
+            recover_oci_catalog_snapshot(&mut persistent_block, persisted_oci_catalog);
         (verified.generation == state.generation
             && ginux_volume_format::HostVolumeHeader::decode(verified.payload())
                 == Some(state.header))
@@ -3839,6 +3846,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             "ginux: local configuration rejected; continuing without persisted settings\r\n",
         );
     }
+    if persisted_oci_catalog_corrupt {
+        serial_write("ginux: OCI cache catalog rejected; cached layers will not be trusted\r\n");
+    }
     serial_write_elapsed("ginux: timing boot-to-controller: ", kernel_boot_started);
     let mut controller_recovery_attempts = 0_u8;
     let mut controller_launch_announced = false;
@@ -3849,7 +3859,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         }
         let controller_completed = address_space::run_installed_interactive_controller();
         let shutdown_requested = arch::x86_64::cpu::take_container_host_shutdown_request();
-        if controller_completed && !cfg!(feature = "verification-boot") {
+        if shutdown_requested && controller_completed && !cfg!(feature = "verification-boot") {
             match persist_domain_configuration(virtio_block, virtio_mmio, virtio_iommu_profile) {
                 Some(record) => {
                     serial_write("ginux: local configuration committed (generation ");
@@ -3919,11 +3929,50 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             }
             let mut image = [0_u8; control_abi::DOMAIN_MAX_IMAGE_SIZE];
             let image_size = arch::x86_64::cpu::configured_container_image(&mut image).unwrap_or(0);
-            serial_write("ginux: pulling OCI image ");
-            serial_write_bytes(&image[..image_size]);
-            serial_write("\r\n");
             let mut downloaded = false;
+            let mut cache_hit = false;
+            let mut cache_repair = false;
             if image_size != 0 {
+                serial_write("ginux: checking OCI cache ");
+                serial_write_bytes(&image[..image_size]);
+                serial_write("\r\n");
+                let catalog_contains_image = persisted_oci_catalog_valid
+                    && oci_catalog_contains(persisted_oci_catalog, &image[..image_size]);
+                match if catalog_contains_image {
+                    restore_cached_oci_layers(
+                        virtio_block,
+                        virtio_mmio,
+                        virtio_iommu_profile,
+                        &image[..image_size],
+                    )
+                } else {
+                    OciCacheRestore::Miss
+                } {
+                    OciCacheRestore::Hit(layers) => {
+                        serial_write("ginux: OCI cache hit (");
+                        serial_write_usize(layers);
+                        serial_write(if layers == 1 {
+                            " layer)\r\n"
+                        } else {
+                            " layers)\r\n"
+                        });
+                        downloaded = true;
+                        cache_hit = true;
+                    }
+                    OciCacheRestore::Miss => {
+                        serial_write("ginux: OCI cache miss; pulling image\r\n");
+                    }
+                    OciCacheRestore::Invalid => {
+                        serial_write("ginux: OCI cache invalid; pulling verified replacement\r\n");
+                        let _ = image_store::discard_published_layers();
+                        cache_repair = true;
+                    }
+                }
+            }
+            if image_size != 0 && !cache_hit {
+                serial_write("ginux: pulling OCI image ");
+                serial_write_bytes(&image[..image_size]);
+                serial_write("\r\n");
                 for attempt in 0..3 {
                     if attempt != 0 {
                         serial_write("ginux: retrying OCI registry pull (");
@@ -3949,10 +3998,36 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             }
             let transfer_finished = arch::x86_64::timer::timestamp_counter();
             serial_write_elapsed_at(
-                "ginux: timing OCI transfer: ",
+                if cache_hit {
+                    "ginux: timing OCI cache restore: "
+                } else {
+                    "ginux: timing OCI transfer: "
+                },
                 pull_started,
                 transfer_finished,
             );
+            if downloaded && !cache_hit {
+                match persist_oci_layers(
+                    virtio_block,
+                    virtio_mmio,
+                    virtio_iommu_profile,
+                    &image[..image_size],
+                    persisted_oci_catalog,
+                    !cache_repair,
+                ) {
+                    Some((layers, bytes)) => {
+                        serial_write("ginux: OCI cache stored ");
+                        serial_write_usize(layers);
+                        serial_write(if layers == 1 { " layer (" } else { " layers (" });
+                        serial_write_u64(bytes);
+                        serial_write(" bytes)\r\n");
+                        persisted_oci_catalog_valid = true;
+                    }
+                    None => serial_write(
+                        "ginux: OCI cache write unavailable; continuing with verified image\r\n",
+                    ),
+                }
+            }
             if downloaded {
                 serial_write("ginux: OCI unpacking image filesystem\r\n");
             }
@@ -3972,6 +4047,18 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             });
             if !success {
                 continue 'managed;
+            }
+        }
+        if controller_completed && !cfg!(feature = "verification-boot") {
+            match persist_domain_configuration(virtio_block, virtio_mmio, virtio_iommu_profile) {
+                Some(record) => {
+                    serial_write("ginux: local configuration committed (generation ");
+                    serial_write_u64(record.generation);
+                    serial_write(")\r\n");
+                }
+                None => serial_write(
+                    "ginux: local configuration unavailable; runtime state remains active\r\n",
+                ),
             }
         }
         if !arch::x86_64::cpu::take_container_restart_request() {
@@ -4281,6 +4368,7 @@ fn serial_write_elapsed(label: &str, started: u64) {
     serial_write_elapsed_at(label, started, arch::x86_64::timer::timestamp_counter());
 }
 
+#[inline(never)]
 fn persist_domain_configuration(
     device: arch::x86_64::pci::VirtioBlockDevice,
     mapping: arch::x86_64::paging::MmioMapping,
@@ -4295,6 +4383,18 @@ fn persist_domain_configuration(
         return None;
     }
     network::export_persistent_configuration(network_configuration);
+    with_runtime_volume(device, mapping, iommu_profile, |backend| {
+        volume::commit_local_config(backend, &configuration).ok()
+    })
+}
+
+#[inline(never)]
+fn with_runtime_volume<T>(
+    device: arch::x86_64::pci::VirtioBlockDevice,
+    mapping: arch::x86_64::paging::MmioMapping,
+    iommu_profile: arch::x86_64::iommu::DeviceTranslationProfile,
+    operation: impl FnOnce(&mut arch::x86_64::pci::VirtioBlockBackend) -> Option<T>,
+) -> Option<T> {
     let [dma_frame] = memory::allocate_frames::<1>(memory::FrameOwner::KERNEL)?;
     let Some(dma_virtual) = dma_frame.direct_map_address() else {
         let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[dma_frame]);
@@ -4316,14 +4416,186 @@ fn persist_domain_configuration(
         let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[dma_frame]);
         return None;
     };
-    let committed = volume::commit_local_config(&mut backend, &configuration).ok();
+    let result = operation(&mut backend);
     let device_quiesced = backend.finish();
     let translation_retired = translation.finish();
     let dma_retired = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[dma_frame])
         && !memory::any_frame_lease_live(&[dma_frame]);
     (device_quiesced && translation_retired && dma_retired)
-        .then_some(committed)
+        .then_some(result)
         .flatten()
+}
+
+enum OciCacheRestore {
+    Hit(usize),
+    Miss,
+    Invalid,
+}
+
+#[inline(never)]
+fn restore_cached_oci_layers(
+    device: arch::x86_64::pci::VirtioBlockDevice,
+    mapping: arch::x86_64::paging::MmioMapping,
+    iommu_profile: arch::x86_64::iommu::DeviceTranslationProfile,
+    reference: &[u8],
+) -> OciCacheRestore {
+    with_runtime_volume(device, mapping, iommu_profile, |backend| {
+        let mut encoded = [0_u8; ginux_oci_cache::ENCODED_SIZE];
+        let record = match volume::recover_oci_catalog(backend, &mut encoded) {
+            Ok(Some(record)) if record.length == encoded.len() => record,
+            Ok(None) => return Some(OciCacheRestore::Miss),
+            _ => return Some(OciCacheRestore::Invalid),
+        };
+        let Some(catalog) = ginux_oci_cache::Catalog::decode(&encoded[..record.length]) else {
+            return Some(OciCacheRestore::Invalid);
+        };
+        let Some(entry) = catalog.find(reference, ginux_oci_cache::Platform::LinuxAmd64) else {
+            return Some(OciCacheRestore::Miss);
+        };
+        let mut layers = [ginux_oci_cache::Layer::EMPTY; ginux_oci_cache::LAYER_LIMIT];
+        let layer_count = entry.layers().len();
+        layers[..layer_count].copy_from_slice(entry.layers());
+        for layer in &layers[..layer_count] {
+            let Ok(length) = usize::try_from(layer.length) else {
+                let _ = image_store::discard_published_layers();
+                return Some(OciCacheRestore::Invalid);
+            };
+            let Ok(start_sector) = usize::try_from(layer.start_sector) else {
+                let _ = image_store::discard_published_layers();
+                return Some(OciCacheRestore::Invalid);
+            };
+            let Ok(handle) = image_store::stage(layer.digest, length) else {
+                let _ = image_store::discard_published_layers();
+                return Some(OciCacheRestore::Invalid);
+            };
+            let mut offset = 0_usize;
+            let mut sector = [0_u8; ginux_volume_format::SECTOR_SIZE];
+            while offset < length {
+                let sector_index = offset / ginux_volume_format::SECTOR_SIZE;
+                let copied = (length - offset).min(ginux_volume_format::SECTOR_SIZE);
+                if !volume::BlockDevice::read_sector(
+                    backend,
+                    start_sector + sector_index,
+                    &mut sector,
+                ) || image_store::append(handle, &sector[..copied]).is_err()
+                {
+                    let _ = image_store::abort(handle);
+                    let _ = image_store::discard_published_layers();
+                    return Some(OciCacheRestore::Invalid);
+                }
+                offset += copied;
+            }
+            if image_store::publish(handle).is_err() {
+                let _ = image_store::discard_published_layers();
+                return Some(OciCacheRestore::Invalid);
+            }
+        }
+        Some(OciCacheRestore::Hit(layer_count))
+    })
+    .unwrap_or(OciCacheRestore::Invalid)
+}
+
+#[inline(never)]
+fn persist_oci_layers(
+    device: arch::x86_64::pci::VirtioBlockDevice,
+    mapping: arch::x86_64::paging::MmioMapping,
+    iommu_profile: arch::x86_64::iommu::DeviceTranslationProfile,
+    reference: &[u8],
+    encoded: &mut [u8; ginux_oci_cache::ENCODED_SIZE],
+    reuse_existing_layers: bool,
+) -> Option<(usize, u64)> {
+    with_runtime_volume(device, mapping, iommu_profile, |backend| {
+        let mut catalog = match volume::recover_oci_catalog(backend, encoded) {
+            Ok(Some(record)) if record.length == encoded.len() => {
+                ginux_oci_cache::Catalog::decode(&encoded[..record.length])?
+            }
+            Ok(None) => ginux_oci_cache::Catalog::new(),
+            _ => return None,
+        };
+        let layer_count = image_store::published_layer_count();
+        if layer_count == 0 || layer_count > ginux_oci_cache::LAYER_LIMIT {
+            return None;
+        }
+        let mut layers = [ginux_oci_cache::Layer::EMPTY; ginux_oci_cache::LAYER_LIMIT];
+        let mut next_sector = catalog.next_object_sector()?;
+        let capacity = backend.capacity_sectors();
+        let mut stored_bytes = 0_u64;
+        for (index, layer) in layers[..layer_count].iter_mut().enumerate() {
+            let (digest, length) = image_store::published_layer_info(index)?;
+            let length = u64::try_from(length).ok()?;
+            if reuse_existing_layers {
+                if let Some(existing) = catalog.find_layer(digest, length) {
+                    *layer = existing;
+                    continue;
+                }
+            }
+            let sectors = length.checked_add(511)?.checked_div(512)?;
+            if next_sector.checked_add(sectors)? > capacity {
+                return None;
+            }
+            *layer = ginux_oci_cache::Layer {
+                digest,
+                start_sector: next_sector,
+                length,
+            };
+            let mut offset = 0_usize;
+            while offset < usize::try_from(length).ok()? {
+                let mut sector = [0_u8; ginux_volume_format::SECTOR_SIZE];
+                let copied =
+                    (usize::try_from(length).ok()? - offset).min(ginux_volume_format::SECTOR_SIZE);
+                if !image_store::read_published_layer(index, offset, &mut sector[..copied])
+                    || !volume::BlockDevice::write_sector(
+                        backend,
+                        usize::try_from(next_sector).ok()?,
+                        &sector,
+                    )
+                {
+                    return None;
+                }
+                offset += copied;
+                next_sector = next_sector.checked_add(1)?;
+            }
+            stored_bytes = stored_bytes.checked_add(length)?;
+        }
+        if !volume::BlockDevice::flush(backend)
+            || !catalog.upsert(
+                reference,
+                ginux_oci_cache::Platform::LinuxAmd64,
+                &layers[..layer_count],
+            )
+            || !catalog.encode(encoded)
+            || volume::commit_oci_catalog(backend, encoded).is_err()
+        {
+            return None;
+        }
+        Some((layer_count, stored_bytes))
+    })
+}
+
+#[inline(never)]
+fn recover_oci_catalog_snapshot<D: volume::BlockDevice>(
+    device: &mut D,
+    encoded: &mut [u8; ginux_oci_cache::ENCODED_SIZE],
+) -> (bool, bool) {
+    match volume::recover_oci_catalog(device, encoded) {
+        Ok(Some(record))
+            if record.length == encoded.len()
+                && ginux_oci_cache::Catalog::decode(&encoded[..record.length]).is_some() =>
+        {
+            (true, false)
+        }
+        Ok(None) => (false, false),
+        _ => (false, true),
+    }
+}
+
+#[inline(never)]
+fn oci_catalog_contains(encoded: &[u8; ginux_oci_cache::ENCODED_SIZE], reference: &[u8]) -> bool {
+    ginux_oci_cache::Catalog::decode(encoded).is_some_and(|catalog| {
+        catalog
+            .find(reference, ginux_oci_cache::Platform::LinuxAmd64)
+            .is_some()
+    })
 }
 
 fn serial_write_elapsed_at(label: &str, started: u64, finished: u64) {

@@ -19,6 +19,19 @@ virtual-network topology and attachments, and host static/DHCP network policy.
 Runtime and failed/running process state is deliberately not restored; domains
 return as configured objects after reboot.
 
+The OCI cache catalog uses independent 64-sector transactional slots at
+sectors 72-135 and 136-199. Cached layer extents begin at sector 256 and grow
+on demand to the volume geometry; there is no fixed byte quota below the
+volume size. Catalog entries bind a canonical image reference and platform to
+an ordered layer list. Layers are keyed by SHA-256 digest and shared between
+images when their digest and length match.
+
+New layer bytes are written and flushed before a new catalog generation is
+prepared and committed. A crash before catalog commit can leave only
+unreachable sectors. Recovery never exposes them. Restoring a layer streams
+it through the normal image-store digest verifier before publication, so disk
+corruption fails closed and falls back to a registry pull.
+
 A metadata update follows prepare, flush, commit, flush. Recovery accepts only
 the newest unambiguous committed generation with a valid SHA-256 digest. Empty
 media is initialized. The earlier development marker is migrated
@@ -33,9 +46,10 @@ not silently reformatted.
 - The next `make run` recreates a clean volume.
 - `make test-storage` proves initialization, reboot recovery, deletion,
   recreation, and process cleanup across three QEMU boots.
+- `make test-oci-cache` performs a real cold registry pull, interrupts the
+  host after durable commit, reboots the same volume, and proves the image is
+  restored without registry authentication or layer transfer.
 
-The remainder of the durable data region is reserved for OCI
-content-addressed objects, assembled image metadata, writable layers, and
-logs. Those require separate transactional schemas and lifecycle policy and
-will be added in bounded review checkpoints rather than coupled to the
-superblock or configuration format.
+The remaining work is cache refresh and garbage collection, assembled-image
+metadata, writable domain layers, explicit persistent volumes, and logs. Each
+requires its own lifecycle policy and bounded review checkpoint.
