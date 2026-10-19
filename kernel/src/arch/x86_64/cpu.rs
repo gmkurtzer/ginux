@@ -17174,7 +17174,7 @@ fn verify_linux_file_handle_syscalls() -> bool {
             let mut mount = [0_u8; 4];
             copy_from_linux_user(mapping + 64, &mut size)
                 && copy_from_linux_user(mapping + 128, &mut mount)
-                && u32::from_ne_bytes(size) == 12
+                && u32::from_ne_bytes(size) == 8
                 && i32::from_ne_bytes(mount) == 1
         };
     let named = sized
@@ -24002,7 +24002,7 @@ fn linux_name_to_handle_at(
     const AT_HANDLE_MNT_ID_UNIQUE: u64 = 1;
     const AT_HANDLE_FID: u64 = 0x200;
     const AT_SYMLINK_FOLLOW: u64 = 0x400;
-    const HANDLE_SIZE: u32 = 12;
+    const HANDLE_SIZE: u32 = 8;
     const HANDLE_TYPE: i32 = 0x474e;
     if flags & !(AT_HANDLE_MNT_ID_UNIQUE | AT_HANDLE_FID | AT_SYMLINK_FOLLOW | LINUX_AT_EMPTY_PATH)
         != 0
@@ -24081,11 +24081,9 @@ fn linux_name_to_handle_at(
             LINUX_EFAULT
         };
     }
-    let mut output = [0_u8; 20];
+    let mut output = [0_u8; 16];
     output[..8].copy_from_slice(&header);
-    output[8..12].copy_from_slice(&0x5848_4647_u32.to_ne_bytes());
-    output[12..16].copy_from_slice(&kind.to_ne_bytes());
-    output[16..20].copy_from_slice(&identifier.to_ne_bytes());
+    output[8..16].copy_from_slice(&(u64::from(kind) << 32 | u64::from(identifier)).to_ne_bytes());
     if copy_to_linux_user(handle_address, &output) {
         0
     } else {
@@ -24120,7 +24118,7 @@ fn linux_open_by_handle_at(mount_descriptor: u64, handle_address: u64, flags: u6
     {
         return LINUX_EBADF;
     }
-    let mut handle = [0_u8; 20];
+    let mut handle = [0_u8; 16];
     if !copy_from_linux_user(handle_address, &mut handle[..8]) {
         return LINUX_EFAULT;
     }
@@ -24129,17 +24127,15 @@ fn linux_open_by_handle_at(mount_descriptor: u64, handle_address: u64, flags: u6
     if size == 0 || size > 128 {
         return LINUX_EINVAL;
     }
-    if size != 12 || handle_type != HANDLE_TYPE {
+    if size != 8 || handle_type != HANDLE_TYPE {
         return LINUX_ESTALE;
     }
     if !copy_from_linux_user(handle_address + 8, &mut handle[8..]) {
         return LINUX_EFAULT;
     }
-    if u32::from_ne_bytes(handle[8..12].try_into().unwrap()) != 0x5848_4647 {
-        return LINUX_ESTALE;
-    }
-    let kind = u32::from_ne_bytes(handle[12..16].try_into().unwrap());
-    let identifier = u32::from_ne_bytes(handle[16..20].try_into().unwrap());
+    let identity = u64::from_ne_bytes(handle[8..16].try_into().unwrap());
+    let kind = (identity >> 32) as u32;
+    let identifier = identity as u32;
     let mut overlay = None;
     let mut oci = 0_u16;
     let node_kind = match kind {

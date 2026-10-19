@@ -213,6 +213,9 @@ convert descriptors and xattr flags according to their Linux 32-bit types.
 The filesystem verifier now performs an overlay xattr set/get/list/remove
 lifecycle and root `getdents64` enumeration with dirty upper register bits,
 then proves descriptor and overlay cleanup.
+Opaque file handles use an eight-byte generation-stable identity, allowing
+systemd to derive cgroup IDs without a size-discovery retry while retaining
+rename-stable `open_by_handle_at` behavior.
 `statfs` and `fstatfs` now follow Linux `simple_statfs` semantics instead of
 publishing fabricated fixed capacity values. The domain root and automatic
 proc mount report their RAMFS/proc magic, page block and fragment sizes,
