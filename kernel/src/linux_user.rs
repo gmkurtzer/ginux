@@ -295,6 +295,12 @@ pub(crate) fn privileged_operation_denied(
     handle: UserNamespaceHandle,
     operation: PrivilegedOperation,
 ) -> bool {
+    // A domain's root user may administer only that domain's mount namespace.
+    // The syscall implementation independently requires a live domain context,
+    // so this authority can never mutate the control domain or another domain.
+    if operation == PrivilegedOperation::ManageMounts && handle.owner_domain != 0 {
+        return false;
+    }
     live_table_for_handle(handle)
         .and_then(|table| table.namespace(handle))
         .is_some_and(|namespace| privileged_operation_denied_in(namespace, operation))

@@ -6,7 +6,8 @@ use core::{
 
 use crate::{address_space, arch::x86_64::cpu, control_abi, linux_user, memory, scheduler};
 
-pub(crate) const PROCESS_LIMIT: usize = 6;
+pub(crate) const PROCESS_LIMIT: usize = 16;
+pub(crate) const PROCESS_RUNTIME_LIMIT: usize = 6;
 const PROCESS_HIERARCHY_LIMIT: usize = cpu::LINUX_PROCESS_HIERARCHY_LIMIT;
 const PROCESS_PRIVATE_PAGE_LIMIT: usize = cpu::LINUX_PROCESS_MAPPING_LIMIT;
 const PROCESS_PRIVATE_COPY_LIMIT: usize = cpu::LINUX_PROCESS_MAPPING_LIMIT;
@@ -208,9 +209,9 @@ impl ProcessAddressSpaceStorage {
     };
 }
 
-static mut PROCESS_ADDRESS_SPACE_STORAGE: [[ProcessAddressSpaceStorage; PROCESS_LIMIT];
+static mut PROCESS_ADDRESS_SPACE_STORAGE: [[ProcessAddressSpaceStorage; PROCESS_RUNTIME_LIMIT];
     PROCESS_INSTANCE_LIMIT] =
-    [[ProcessAddressSpaceStorage::EMPTY; PROCESS_LIMIT]; PROCESS_INSTANCE_LIMIT];
+    [[ProcessAddressSpaceStorage::EMPTY; PROCESS_RUNTIME_LIMIT]; PROCESS_INSTANCE_LIMIT];
 
 impl ProcessAddressSpace {
     fn new(
@@ -218,7 +219,7 @@ impl ProcessAddressSpace {
         hierarchy: &[memory::FrameLease],
         mappings: &[cpu::LinuxActiveImageMapping],
     ) -> Option<Self> {
-        if storage_slot >= PROCESS_LIMIT
+        if storage_slot >= PROCESS_RUNTIME_LIMIT
             || !(4..=PROCESS_HIERARCHY_LIMIT).contains(&hierarchy.len())
             || mappings.is_empty()
             || mappings.len() > PROCESS_PRIVATE_PAGE_LIMIT
@@ -246,7 +247,7 @@ impl ProcessAddressSpace {
         let storage = unsafe {
             &mut *core::ptr::addr_of_mut!(PROCESS_ADDRESS_SPACE_STORAGE)
                 .cast::<ProcessAddressSpaceStorage>()
-                .add(current_process_instance() * PROCESS_LIMIT + storage_slot)
+                .add(current_process_instance() * PROCESS_RUNTIME_LIMIT + storage_slot)
         };
         storage.hierarchy.fill(memory::FrameLease::EMPTY);
         storage.mappings.fill(cpu::LinuxActiveImageMapping::EMPTY);
@@ -264,7 +265,7 @@ impl ProcessAddressSpace {
         hierarchy: &[memory::FrameLease],
         mappings: &[cpu::LinuxActiveImageMapping],
     ) -> Option<Self> {
-        if storage_slot >= PROCESS_LIMIT
+        if storage_slot >= PROCESS_RUNTIME_LIMIT
             || !(4..=PROCESS_HIERARCHY_LIMIT).contains(&hierarchy.len())
             || mappings.is_empty()
             || mappings.len() > PROCESS_PRIVATE_PAGE_LIMIT
@@ -274,7 +275,7 @@ impl ProcessAddressSpace {
         let storage = unsafe {
             &mut *core::ptr::addr_of_mut!(PROCESS_ADDRESS_SPACE_STORAGE)
                 .cast::<ProcessAddressSpaceStorage>()
-                .add(current_process_instance() * PROCESS_LIMIT + storage_slot)
+                .add(current_process_instance() * PROCESS_RUNTIME_LIMIT + storage_slot)
         };
         storage.hierarchy.fill(memory::FrameLease::EMPTY);
         storage.mappings.fill(cpu::LinuxActiveImageMapping::EMPTY);
@@ -291,7 +292,10 @@ impl ProcessAddressSpace {
         unsafe {
             &*core::ptr::addr_of!(PROCESS_ADDRESS_SPACE_STORAGE)
                 .cast::<ProcessAddressSpaceStorage>()
-                .add(current_process_instance() * PROCESS_LIMIT + usize::from(self.storage_slot))
+                .add(
+                    current_process_instance() * PROCESS_RUNTIME_LIMIT
+                        + usize::from(self.storage_slot),
+                )
         }
     }
 
@@ -393,6 +397,7 @@ struct Process {
     session: u32,
     executed: bool,
     user_namespace: linux_user::UserNamespaceHandle,
+    runtime_slot: Option<u8>,
     address_space: Option<ProcessAddressSpace>,
     retiring_address_space: Option<ProcessAddressSpace>,
     context: Option<ProcessExecutionContext>,
@@ -523,6 +528,15 @@ impl ProcessTable {
         })
     }
 
+    fn free_runtime_slot(&self) -> Option<usize> {
+        (0..PROCESS_RUNTIME_LIMIT).find(|slot| {
+            self.processes
+                .iter()
+                .flatten()
+                .all(|process| process.runtime_slot != u8::try_from(*slot).ok())
+        })
+    }
+
     fn prepare_fork(&mut self, parent: ProcessHandle) -> Option<ProcessHandle> {
         let parent_process = self.process(parent)?;
         if parent_process.state != ProcessState::Running
@@ -563,6 +577,7 @@ impl ProcessTable {
             return false;
         }
         process.address_space = Some(address_space);
+        process.runtime_slot = Some(address_space.storage_slot);
         process.context = Some(context);
         true
     }
@@ -609,6 +624,7 @@ impl ProcessTable {
             return false;
         }
         process.address_space = Some(address_space);
+        process.runtime_slot = Some(address_space.storage_slot);
         process.context = Some(context);
         process.state = ProcessState::Running;
         true
@@ -783,8 +799,13 @@ impl ProcessTable {
         LIVE_FORK_EXECUTION_STAGE.store(1136, Ordering::Release);
         let child_space = if published {
             LIVE_FORK_EXECUTION_STAGE.store(11361, Ordering::Release);
+            let Some(storage_slot) = self.free_runtime_slot() else {
+                let _ = scrub_candidate_resources(child_hierarchy, child_pages);
+                let _ = self.abort_fork(handle);
+                return false;
+            };
             ProcessAddressSpace::from_validated_snapshot(
-                usize::from(handle.slot),
+                storage_slot,
                 child_hierarchy,
                 &child_mappings[..child_mapping_count],
             )
@@ -1173,6 +1194,7 @@ impl ProcessTable {
             session,
             executed: false,
             user_namespace,
+            runtime_slot: address_space.map(|space| space.storage_slot),
             address_space,
             retiring_address_space: None,
             context,
@@ -1864,15 +1886,19 @@ fn refresh_live_process_registry_inner(
         crate::serial_write("ginux: live registry refresh has no process\r\n");
         return false;
     };
+    let Some(storage_slot) = table
+        .process(handle)
+        .and_then(|process| process.address_space)
+        .map(|space| usize::from(space.storage_slot))
+    else {
+        crate::serial_write("ginux: live registry refresh has no address space\r\n");
+        return false;
+    };
     let address_space = if validate_address_space {
-        ProcessAddressSpace::new(
-            usize::from(handle.slot),
-            snapshot.hierarchy(),
-            snapshot.mappings(),
-        )
+        ProcessAddressSpace::new(storage_slot, snapshot.hierarchy(), snapshot.mappings())
     } else {
         ProcessAddressSpace::from_validated_snapshot(
-            usize::from(handle.slot),
+            storage_slot,
             snapshot.hierarchy(),
             snapshot.mappings(),
         )
@@ -2086,6 +2112,29 @@ pub(crate) fn live_process_slot(pid: u32) -> Option<usize> {
     Some(usize::from(handle.slot))
 }
 
+pub(crate) fn live_process_runtime_slot(pid: u32) -> Option<usize> {
+    let table = live_process_table_mut()?;
+    let handle = table.handle_by_pid(pid)?;
+    table.process(handle)?.runtime_slot.map(usize::from)
+}
+
+pub(crate) fn release_live_process_runtime_slot(pid: u32) -> bool {
+    let Some(table) = live_process_table_mut() else {
+        return false;
+    };
+    let Some(handle) = table.handle_by_pid(pid) else {
+        return false;
+    };
+    let Some(process) = table.process_mut(handle) else {
+        return false;
+    };
+    if !matches!(process.state, ProcessState::Zombie { .. }) || process.runtime_slot.is_none() {
+        return false;
+    }
+    process.runtime_slot = None;
+    true
+}
+
 pub(crate) fn live_process_generation(pid: u32) -> Option<u32> {
     let table = live_process_table_mut()?;
     Some(table.handle_by_pid(pid)?.generation)
@@ -2188,7 +2237,10 @@ pub(crate) fn replace_live_process_mapping(
     let storage = unsafe {
         &mut *core::ptr::addr_of_mut!(PROCESS_ADDRESS_SPACE_STORAGE)
             .cast::<ProcessAddressSpaceStorage>()
-            .add(current_process_instance() * PROCESS_LIMIT + usize::from(space.storage_slot))
+            .add(
+                current_process_instance() * PROCESS_RUNTIME_LIMIT
+                    + usize::from(space.storage_slot),
+            )
     };
     let Some(mapping) = storage.mappings[..usize::from(space.mapping_count)]
         .iter_mut()

@@ -134,6 +134,7 @@ const LINUX_CLONE_VM: u64 = 0x0000_0100;
 const LINUX_CLONE_FS: u64 = 0x0000_0200;
 const LINUX_CLONE_FILES: u64 = 0x0000_0400;
 const LINUX_CLONE_SIGHAND: u64 = 0x0000_0800;
+const LINUX_CLONE_NEWNS: u64 = 0x0002_0000;
 const LINUX_CLONE_THREAD: u64 = 0x0001_0000;
 const LINUX_CLONE_SYSVSEM: u64 = 0x0004_0000;
 const LINUX_CLONE_SETTLS: u64 = 0x0008_0000;
@@ -608,7 +609,6 @@ const LINUX_DEVICE_DESCRIPTOR_COUNT: usize =
     LINUX_DESCRIPTOR_TABLE_LIMIT as usize - LINUX_AUX_DESCRIPTOR_FIRST as usize;
 const LINUX_INOTIFY_WATCH_LIMIT: usize = 16;
 const LINUX_FANOTIFY_MARK_LIMIT: usize = 16;
-const LINUX_INOTIFY_INSTANCE_SLOT_COUNT: usize = LINUX_RUNTIME_INSTANCE_LIMIT;
 const LINUX_INOTIFY_WATCH_SLOT_COUNT: usize =
     LINUX_RUNTIME_INSTANCE_LIMIT * LINUX_INOTIFY_WATCH_LIMIT;
 const LINUX_DESCRIPTOR_FLAG_WORD_COUNT: usize =
@@ -621,7 +621,19 @@ const LINUX_POLLNVAL: u16 = 0x20;
 const LINUX_EPOLL_CTL_ADD: u64 = 1;
 const LINUX_EPOLL_CTL_DEL: u64 = 2;
 const LINUX_EPOLL_CTL_MOD: u64 = 3;
-const LINUX_EPOLL_SUPPORTED_EVENTS: u32 = (LINUX_POLLIN | LINUX_POLLOUT) as u32;
+const LINUX_EPOLL_SUPPORTED_EVENTS: u32 =
+    (LINUX_POLLIN | LINUX_POLLOUT | LINUX_POLLERR | LINUX_POLLHUP) as u32
+        | 0x0000_0002
+        | 0x0000_0040
+        | 0x0000_0080
+        | 0x0000_0100
+        | 0x0000_0200
+        | 0x0000_0400
+        | 0x0000_2000
+        | 0x1000_0000
+        | 0x2000_0000
+        | 0x4000_0000
+        | 0x8000_0000;
 const LINUX_EFD_SEMAPHORE: u64 = 1;
 const LINUX_EFD_NONBLOCK: u64 = 0x800;
 const LINUX_TFD_TIMER_ABSTIME: u64 = 1;
@@ -666,6 +678,9 @@ const LINUX_PROC_PID1_DIRECTORY: u16 = LINUX_DEVICE_DIRECTORY | LINUX_FILE_PROC_
 const LINUX_PROC_PID2_DIRECTORY_NODE: u16 = 0xfa00;
 const LINUX_PROC_PID2_DIRECTORY: u16 =
     LINUX_DEVICE_DIRECTORY | LINUX_FILE_PROC_STATUS | LINUX_PROC_PID2_DIRECTORY_NODE;
+const LINUX_PROC_FD_DIRECTORY_NODE: u16 = 0xed00;
+const LINUX_PROC_FD_DIRECTORY: u16 =
+    LINUX_DEVICE_DIRECTORY | LINUX_FILE_PROC_STATUS | LINUX_PROC_FD_DIRECTORY_NODE;
 const LINUX_PROC_PID2_STATUS_NODE: u16 = 0xf900;
 const LINUX_FILE_PROC_PID2_STATUS: u16 = LINUX_FILE_MASK | LINUX_PROC_PID2_STATUS_NODE;
 const LINUX_PROC_CPUINFO_NODE: u16 = 0xf800;
@@ -692,6 +707,11 @@ const LINUX_PROC_PID2_STAT_NODE: u16 = 0xef00;
 const LINUX_FILE_PROC_PID2_STAT: u16 = LINUX_FILE_MASK | LINUX_PROC_PID2_STAT_NODE;
 const LINUX_PROC_PID2_STATM_NODE: u16 = 0xee00;
 const LINUX_FILE_PROC_PID2_STATM: u16 = LINUX_FILE_MASK | LINUX_PROC_PID2_STATM_NODE;
+const LINUX_PROC_CGROUP_NODE: u16 = 0xec00;
+const LINUX_FILE_PROC_CGROUP: u16 = LINUX_FILE_MASK | LINUX_PROC_CGROUP_NODE;
+const LINUX_CGROUP_DIRECTORY_NODE: u16 = 0xeb00;
+const LINUX_CGROUP_DIRECTORY: u16 =
+    LINUX_DEVICE_DIRECTORY | LINUX_FILE_PROC_STATUS | LINUX_CGROUP_DIRECTORY_NODE;
 const LINUX_ROOT_NODE_SHIFT: u32 = 8;
 const LINUX_ROOT_NODE_MASK: u16 = 0xff00;
 const LINUX_MOUNTINFO_FILE_NODE: u16 = 0xfe00;
@@ -719,6 +739,7 @@ const LINUX_PROC_LOADAVG: &[u8] = b"0.00 0.00 0.00 1/1 1\n";
 const LINUX_PROC_FILESYSTEMS: &[u8] =
     b"nodev\tproc\nnodev\ttmpfs\nnodev\tdevtmpfs\n\text2\n\text3\n\text4\n\txfs\n";
 const LINUX_PROC_CMDLINE: &[u8] = b"ginux immutable=1\n";
+const LINUX_PROC_CGROUP: &[u8] = b"0::/\n";
 const LINUX_PROC_PID1_STAT: &[u8] = b"1 (init) S 0 1 1 0 -1 4194560 0 0 0 0 0 0 0 0 20 0 1 0 1 1048576 256 0 0 0 0 0 0 0 0 0 0 0 0 0 17 0 0 0 0 0 0 0 0 0 0 0 0 0\n";
 const LINUX_PROC_PID1_STATM: &[u8] = b"256 64 32 16 0 32 0\n";
 const LINUX_PROC_PID2_RUNNING_STAT: &[u8] = b"2 (init) R 1 1 1 0 -1 4194560 0 0 0 0 0 0 0 0 20 0 1 0 1 1048576 256 0 0 0 0 0 0 0 0 0 0 0 0 0 17 0 0 0 0 0 0 0 0 0 0 0 0 0\n";
@@ -730,7 +751,6 @@ pub(crate) const LINUX_ACTIVE_IMAGE_MAPPING_LIMIT: usize = 440;
 pub(crate) const LINUX_PROCESS_HIERARCHY_LIMIT: usize = 1024;
 pub(crate) const LINUX_PROCESS_MAPPING_LIMIT: usize = 40_960;
 const LINUX_EXEC_VECTOR_LIMIT: usize = 32;
-const LINUX_EXEC_STRING_LIMIT: usize = 256;
 const LINUX_EXEC_STACK_SIZE: usize = PAGE_SIZE / 2;
 const LINUX_PLATFORM: &[u8] = b"x86_64\0";
 const LINUX_F_DUPFD: u64 = 0;
@@ -777,6 +797,8 @@ const LINUX_O_NOFOLLOW: u64 = 0x20000;
 const LINUX_O_PATH: u64 = 0x20_0000;
 const LINUX_PR_SET_DUMPABLE: u64 = 4;
 const LINUX_PR_GET_DUMPABLE: u64 = 3;
+const LINUX_PR_SET_PDEATHSIG: u64 = 1;
+const LINUX_PR_GET_PDEATHSIG: u64 = 2;
 const LINUX_PR_GET_TIMING: u64 = 13;
 const LINUX_PR_SET_TIMING: u64 = 14;
 const LINUX_PR_SET_NAME: u64 = 15;
@@ -1179,12 +1201,14 @@ static LINUX_RUNTIME_MODE: BankedAtomicBool = BankedAtomicBool::new(false);
 static ELF_PROBE_COMPLETED: BankedAtomicBool = BankedAtomicBool::new(false);
 static ELF_PROBE_EXIT_STATUS: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_TERMINATION_SIGNAL: BankedAtomicU32 = BankedAtomicU32::new(0);
+static ELF_PROBE_PARENT_DEATH_SIGNAL: BankedAtomicU32 = BankedAtomicU32::new(0);
 static ELF_PROBE_EXEC_REPLACED: BankedAtomicBool = BankedAtomicBool::new(false);
 static ELF_PROBE_EXEC_NODE: BankedAtomicU8 = BankedAtomicU8::new(0);
 static LINUX_LIVE_RETURN_VALIDATED: BankedAtomicBool = BankedAtomicBool::new(false);
 static LINUX_CHILD_EXIT_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
 static LINUX_PARENT_RESUMED: BankedAtomicBool = BankedAtomicBool::new(false);
 static LINUX_FORK_REQUESTED: BankedAtomicBool = BankedAtomicBool::new(false);
+static LINUX_FORK_NEW_MOUNT_NAMESPACE: BankedAtomicBool = BankedAtomicBool::new(false);
 static LINUX_FORK_CHILD_TID_ADDRESS: BankedAtomicU64 = BankedAtomicU64::new(0);
 static LINUX_PROCESS_CHILD_EXITED: BankedAtomicBool = BankedAtomicBool::new(false);
 static LINUX_PROCESS_CHILD_STATUS: BankedAtomicU8 = BankedAtomicU8::new(0);
@@ -1484,10 +1508,6 @@ static ELF_PROBE_STDIO_SOCKET_SLOTS: [BankedAtomicU8; 3] = [const { BankedAtomic
 static ELF_PROBE_STDIO_SOCKET_FLAGS: [BankedAtomicU32; 3] = [const { BankedAtomicU32::new(0) }; 3];
 static ELF_PROBE_TMP_FILE_GENERATIONS: [BankedAtomicU32; LINUX_DEVICE_DESCRIPTOR_COUNT] =
     [const { BankedAtomicU32::new(0) }; LINUX_DEVICE_DESCRIPTOR_COUNT];
-static LINUX_INOTIFY_INSTANCE_REFS: [AtomicU16; LINUX_INOTIFY_INSTANCE_SLOT_COUNT] =
-    [const { AtomicU16::new(0) }; LINUX_INOTIFY_INSTANCE_SLOT_COUNT];
-static LINUX_INOTIFY_NEXT_WD: [AtomicU32; LINUX_INOTIFY_INSTANCE_SLOT_COUNT] =
-    [const { AtomicU32::new(1) }; LINUX_INOTIFY_INSTANCE_SLOT_COUNT];
 static LINUX_INOTIFY_WATCH_OWNERS: [AtomicU16; LINUX_INOTIFY_WATCH_SLOT_COUNT] =
     [const { AtomicU16::new(0) }; LINUX_INOTIFY_WATCH_SLOT_COUNT];
 static LINUX_INOTIFY_WATCH_PATHS: [AtomicU64; LINUX_INOTIFY_WATCH_SLOT_COUNT] =
@@ -1527,9 +1547,10 @@ static ELF_PROBE_ROOTFS_CWD: BankedAtomicU16 =
     BankedAtomicU16::new(crate::published_rootfs::ROOT_HANDLE);
 static ELF_PROBE_OVERLAY_CWD: BankedAtomicU32 = BankedAtomicU32::new(0);
 static ELF_PROBE_EPOLL_DESCRIPTOR: BankedAtomicU16 = BankedAtomicU16::new(0);
-static ELF_PROBE_EPOLL_TARGET: BankedAtomicU64 = BankedAtomicU64::new(u64::MAX);
-static ELF_PROBE_EPOLL_EVENTS: BankedAtomicU32 = BankedAtomicU32::new(0);
-static ELF_PROBE_EPOLL_DATA: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_EPOLL_EVENTS: [BankedAtomicU32; LINUX_DESCRIPTOR_TABLE_LIMIT as usize] =
+    [const { BankedAtomicU32::new(0) }; LINUX_DESCRIPTOR_TABLE_LIMIT as usize];
+static ELF_PROBE_EPOLL_DATA: [BankedAtomicU64; LINUX_DESCRIPTOR_TABLE_LIMIT as usize] =
+    [const { BankedAtomicU64::new(0) }; LINUX_DESCRIPTOR_TABLE_LIMIT as usize];
 static ELF_PROBE_EVENTFD_DESCRIPTOR: BankedAtomicU16 = BankedAtomicU16::new(0);
 static ELF_PROBE_EVENTFD_COUNTER: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_EVENTFD_FLAGS: BankedAtomicU32 = BankedAtomicU32::new(0);
@@ -1540,9 +1561,20 @@ static LINUX_RUNTIME_EVENTFD_COUNTERS: [BankedAtomicU64; LINUX_DEVICE_DESCRIPTOR
 static LINUX_RUNTIME_EVENTFD_FLAGS: [BankedAtomicU32; LINUX_DEVICE_DESCRIPTOR_COUNT] =
     [const { BankedAtomicU32::new(0) }; LINUX_DEVICE_DESCRIPTOR_COUNT];
 static ELF_PROBE_TIMERFD_DESCRIPTOR: BankedAtomicU16 = BankedAtomicU16::new(0);
+static ELF_PROBE_TIMERFD_CLOCK: BankedAtomicU8 = BankedAtomicU8::new(0);
 static ELF_PROBE_TIMERFD_FLAGS: BankedAtomicU32 = BankedAtomicU32::new(0);
 static ELF_PROBE_TIMERFD_INTERVAL: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_TIMERFD_DEADLINE: BankedAtomicU64 = BankedAtomicU64::new(0);
+static LINUX_RUNTIME_TIMERFD_ACTIVE: [BankedAtomicU8; LINUX_DEVICE_DESCRIPTOR_COUNT] =
+    [const { BankedAtomicU8::new(0) }; LINUX_DEVICE_DESCRIPTOR_COUNT];
+static LINUX_RUNTIME_TIMERFD_CLOCKS: [BankedAtomicU8; LINUX_DEVICE_DESCRIPTOR_COUNT] =
+    [const { BankedAtomicU8::new(0) }; LINUX_DEVICE_DESCRIPTOR_COUNT];
+static LINUX_RUNTIME_TIMERFD_FLAGS: [BankedAtomicU32; LINUX_DEVICE_DESCRIPTOR_COUNT] =
+    [const { BankedAtomicU32::new(0) }; LINUX_DEVICE_DESCRIPTOR_COUNT];
+static LINUX_RUNTIME_TIMERFD_INTERVALS: [BankedAtomicU64; LINUX_DEVICE_DESCRIPTOR_COUNT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_DEVICE_DESCRIPTOR_COUNT];
+static LINUX_RUNTIME_TIMERFD_DEADLINES: [BankedAtomicU64; LINUX_DEVICE_DESCRIPTOR_COUNT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_DEVICE_DESCRIPTOR_COUNT];
 static ELF_PROBE_POSIX_TIMER_ACTIVE: BankedAtomicBool = BankedAtomicBool::new(false);
 static ELF_PROBE_POSIX_TIMER_INTERVAL: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_POSIX_TIMER_DEADLINE: BankedAtomicU64 = BankedAtomicU64::new(0);
@@ -3644,37 +3676,16 @@ fn execute_deferred_live_fork() -> bool {
     if !LINUX_FORK_REQUESTED.swap(false, Ordering::SeqCst) {
         return true;
     }
+    let new_mount_namespace = LINUX_FORK_NEW_MOUNT_NAMESPACE.swap(false, Ordering::SeqCst);
     let parent_pid = current_linux_process_pid();
-    let Some(mut parent_runtime_state) = capture_linux_process_runtime_state() else {
+    let Some(parent_runtime) = stage_linux_fork_parent_runtime_state(parent_pid) else {
         return false;
     };
-    parent_runtime_state.active = true;
-    parent_runtime_state.completed = false;
-    parent_runtime_state.exit_status = 0;
-    parent_runtime_state.termination_signal = 0;
-    let parent_descriptor_state = parent_runtime_state.descriptors;
-    if !retain_linux_descriptor_runtime_state(&parent_descriptor_state) {
-        return false;
-    }
-    let parent_tid = current_linux_thread_slot().map(|slot| {
-        (
-            slot,
-            LINUX_THREAD_TIDS[slot].load(Ordering::SeqCst),
-            LINUX_NEXT_TID.load(Ordering::SeqCst),
-        )
-    });
-    let parent_thread_stack = current_linux_thread_slot().map(|slot| {
-        (
-            slot,
-            LINUX_THREAD_STACK_BASES[slot].load(Ordering::SeqCst),
-            LINUX_THREAD_STACK_SIZES[slot].load(Ordering::SeqCst),
-        )
-    });
     // Runtime COW remains available to the process/address-space layer, but
     // repeated OCI fork/exec cycles must use private copies until COW
     // retirement and re-fork bookkeeping are validated end to end.
     let Some(child) = linux_process::begin_live_fork(parent_pid, true) else {
-        release_linux_descriptor_runtime_state(&parent_descriptor_state);
+        release_staged_linux_fork_descriptors(parent_pid);
         LINUX_FORK_CHILD_TID_ADDRESS.store(0, Ordering::SeqCst);
         if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
             serial_write("ginux: runtime fork preparation failed at stage ");
@@ -3689,28 +3700,13 @@ fn execute_deferred_live_fork() -> bool {
     if !clear_linux_signal_queues_for_process(linux_signal_instance(), child_process_slot) {
         return false;
     }
-    let mut child_runtime_state = parent_runtime_state;
-    child_runtime_state.tid = child.pid;
-    child_runtime_state.next_tid = child.pid.saturating_add(1);
-    child_runtime_state.active = true;
-    child_runtime_state.completed = false;
-    child_runtime_state.exit_status = 0;
-    child_runtime_state.termination_signal = 0;
-    child_runtime_state.real_timer_interval = 0;
-    child_runtime_state.real_timer_deadline = 0;
-    child_runtime_state.pending_signals = 0;
-    child_runtime_state.pending_signal_codes = [0; LINUX_SIGNAL_COUNT];
-    child_runtime_state.pending_signal_values = [0; LINUX_SIGNAL_COUNT];
-    let Some(parent_state_slot) = linux_process_runtime_state(parent_pid) else {
+    let Some(child_mount_namespace) =
+        stage_linux_fork_child_runtime_state(parent_pid, child.pid, new_mount_namespace)
+    else {
         return false;
     };
-    *parent_state_slot = parent_runtime_state;
-    let Some(child_state_slot) = linux_process_runtime_state(child.pid) else {
-        return false;
-    };
-    *child_state_slot = child_runtime_state;
-    if !linux_process::set_live_process_scheduler_nice(parent_pid, parent_runtime_state.nice)
-        || !linux_process::set_live_process_scheduler_nice(child.pid, child_runtime_state.nice)
+    if !linux_process::set_live_process_scheduler_nice(parent_pid, parent_runtime.nice)
+        || !linux_process::set_live_process_scheduler_nice(child.pid, parent_runtime.nice)
     {
         return false;
     }
@@ -3734,7 +3730,10 @@ fn execute_deferred_live_fork() -> bool {
     LINUX_PROCESS_CHILD_EXITED.store(false, Ordering::SeqCst);
     LINUX_PROCESS_CHILD_STATUS.store(0, Ordering::SeqCst);
     LINUX_CURRENT_PROCESS_PID.store(child.pid, Ordering::SeqCst);
-    if let Some((slot, _, _)) = parent_tid {
+    if !linux_mount::switch_to(child_mount_namespace) {
+        return false;
+    }
+    if let Some((slot, _, _)) = parent_runtime.tid {
         LINUX_THREAD_TIDS[slot].store(child.pid, Ordering::SeqCst);
         LINUX_NEXT_TID.store(child.pid.saturating_add(1), Ordering::SeqCst);
     }
@@ -3760,18 +3759,14 @@ fn execute_deferred_live_fork() -> bool {
     }
     let child_exited = LINUX_PROCESS_CHILD_EXITED.swap(false, Ordering::SeqCst);
     let child_status = LINUX_PROCESS_CHILD_STATUS.swap(0, Ordering::SeqCst);
-    if let (Some(latest_child), Some(child_state_slot)) = (
-        capture_linux_process_runtime_state(),
-        linux_process_runtime_state(child.pid),
-    ) {
-        *child_state_slot = latest_child;
+    save_current_linux_process_runtime_state(child.pid);
+    if !restore_saved_linux_process_runtime_state(parent_pid) {
+        return false;
     }
-    let parent_runtime_state = linux_process_runtime_state(parent_pid)
-        .copied()
-        .filter(|state| state.valid)
-        .unwrap_or(parent_runtime_state);
-    restore_linux_process_runtime_state(parent_runtime_state);
-    if let Some((slot, base, size)) = parent_thread_stack {
+    if new_mount_namespace && !linux_mount::retire(child_mount_namespace) {
+        return false;
+    }
+    if let Some((slot, base, size)) = parent_runtime.stack {
         LINUX_THREAD_STACK_BASES[slot].store(base, Ordering::SeqCst);
         LINUX_THREAD_STACK_SIZES[slot].store(size, Ordering::SeqCst);
     }
@@ -3811,6 +3806,9 @@ fn execute_deferred_live_fork() -> bool {
     }
     if let Some(child_state_slot) = linux_process_runtime_state(child.pid) {
         *child_state_slot = LinuxProcessRuntimeState::EMPTY;
+    }
+    if !linux_process::release_live_process_runtime_slot(child.pid) {
+        return false;
     }
     if parent.pid != parent_pid || parent.general[0] != u64::from(child.pid) {
         return false;
@@ -6064,12 +6062,14 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
     ELF_PROBE_COMPLETED.store(false, Ordering::SeqCst);
     ELF_PROBE_EXIT_STATUS.store(0, Ordering::SeqCst);
     ELF_PROBE_TERMINATION_SIGNAL.store(0, Ordering::SeqCst);
+    ELF_PROBE_PARENT_DEATH_SIGNAL.store(0, Ordering::SeqCst);
     ELF_PROBE_EXEC_REPLACED.store(false, Ordering::SeqCst);
     ELF_PROBE_EXEC_NODE.store(0, Ordering::SeqCst);
     LINUX_LIVE_RETURN_VALIDATED.store(false, Ordering::SeqCst);
     LINUX_CHILD_EXIT_COUNT.store(0, Ordering::SeqCst);
     LINUX_PARENT_RESUMED.store(false, Ordering::SeqCst);
     LINUX_FORK_REQUESTED.store(false, Ordering::SeqCst);
+    LINUX_FORK_NEW_MOUNT_NAMESPACE.store(false, Ordering::SeqCst);
     LINUX_PROCESS_CHILD_EXITED.store(false, Ordering::SeqCst);
     LINUX_PROCESS_CHILD_STATUS.store(0, Ordering::SeqCst);
     LINUX_CURRENT_PROCESS_PID.store(1, Ordering::SeqCst);
@@ -6304,8 +6304,6 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
         generation.store(0, Ordering::SeqCst);
     }
     let inotify_instance = linux_execution_instance();
-    LINUX_INOTIFY_INSTANCE_REFS[inotify_instance].store(0, Ordering::SeqCst);
-    LINUX_INOTIFY_NEXT_WD[inotify_instance].store(1, Ordering::SeqCst);
     let inotify_watch_start = inotify_instance * LINUX_INOTIFY_WATCH_LIMIT;
     let inotify_watch_end = inotify_watch_start + LINUX_INOTIFY_WATCH_LIMIT;
     for owner in &LINUX_INOTIFY_WATCH_OWNERS[inotify_watch_start..inotify_watch_end] {
@@ -6361,9 +6359,10 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
     ELF_PROBE_ROOTFS_CWD.store(crate::published_rootfs::ROOT_HANDLE, Ordering::SeqCst);
     ELF_PROBE_OVERLAY_CWD.store(0, Ordering::SeqCst);
     ELF_PROBE_EPOLL_DESCRIPTOR.store(0, Ordering::SeqCst);
-    ELF_PROBE_EPOLL_TARGET.store(u64::MAX, Ordering::SeqCst);
-    ELF_PROBE_EPOLL_EVENTS.store(0, Ordering::SeqCst);
-    ELF_PROBE_EPOLL_DATA.store(0, Ordering::SeqCst);
+    for descriptor in 0..LINUX_DESCRIPTOR_TABLE_LIMIT as usize {
+        ELF_PROBE_EPOLL_EVENTS[descriptor].store(0, Ordering::SeqCst);
+        ELF_PROBE_EPOLL_DATA[descriptor].store(0, Ordering::SeqCst);
+    }
     ELF_PROBE_EVENTFD_DESCRIPTOR.store(0, Ordering::SeqCst);
     ELF_PROBE_EVENTFD_COUNTER.store(0, Ordering::SeqCst);
     ELF_PROBE_EVENTFD_FLAGS.store(0, Ordering::SeqCst);
@@ -6373,9 +6372,17 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
         LINUX_RUNTIME_EVENTFD_FLAGS[index].store(0, Ordering::SeqCst);
     }
     ELF_PROBE_TIMERFD_DESCRIPTOR.store(0, Ordering::SeqCst);
+    ELF_PROBE_TIMERFD_CLOCK.store(0, Ordering::SeqCst);
     ELF_PROBE_TIMERFD_FLAGS.store(0, Ordering::SeqCst);
     ELF_PROBE_TIMERFD_INTERVAL.store(0, Ordering::SeqCst);
     ELF_PROBE_TIMERFD_DEADLINE.store(0, Ordering::SeqCst);
+    for index in 0..LINUX_DEVICE_DESCRIPTOR_COUNT {
+        LINUX_RUNTIME_TIMERFD_ACTIVE[index].store(0, Ordering::SeqCst);
+        LINUX_RUNTIME_TIMERFD_CLOCKS[index].store(0, Ordering::SeqCst);
+        LINUX_RUNTIME_TIMERFD_FLAGS[index].store(0, Ordering::SeqCst);
+        LINUX_RUNTIME_TIMERFD_INTERVALS[index].store(0, Ordering::SeqCst);
+        LINUX_RUNTIME_TIMERFD_DEADLINES[index].store(0, Ordering::SeqCst);
+    }
     ELF_PROBE_POSIX_TIMER_ACTIVE.store(false, Ordering::SeqCst);
     ELF_PROBE_POSIX_TIMER_INTERVAL.store(0, Ordering::SeqCst);
     ELF_PROBE_POSIX_TIMER_DEADLINE.store(0, Ordering::SeqCst);
@@ -6963,9 +6970,8 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
         u64::from(ELF_PROBE_DEVICE_DESCRIPTORS[2].load(Ordering::SeqCst)),
         u64::from(ELF_PROBE_DEVICE_DESCRIPTORS[3].load(Ordering::SeqCst)),
         u64::from(ELF_PROBE_EPOLL_DESCRIPTOR.load(Ordering::SeqCst)),
-        ELF_PROBE_EPOLL_TARGET.load(Ordering::SeqCst),
-        u64::from(ELF_PROBE_EPOLL_EVENTS.load(Ordering::SeqCst)),
-        ELF_PROBE_EPOLL_DATA.load(Ordering::SeqCst),
+        u64::from(ELF_PROBE_EPOLL_EVENTS[0].load(Ordering::SeqCst)),
+        ELF_PROBE_EPOLL_DATA[0].load(Ordering::SeqCst),
         ELF_PROBE_DESCRIPTOR_OFFSETS[0].load(Ordering::SeqCst),
         ELF_PROBE_DESCRIPTOR_OFFSETS[1].load(Ordering::SeqCst),
         ELF_PROBE_DESCRIPTOR_OFFSETS[2].load(Ordering::SeqCst),
@@ -6974,6 +6980,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
         ELF_PROBE_EVENTFD_COUNTER.load(Ordering::SeqCst),
         u64::from(ELF_PROBE_EVENTFD_FLAGS.load(Ordering::SeqCst)),
         u64::from(ELF_PROBE_TIMERFD_DESCRIPTOR.load(Ordering::SeqCst)),
+        u64::from(ELF_PROBE_TIMERFD_CLOCK.load(Ordering::SeqCst)),
         u64::from(ELF_PROBE_TIMERFD_FLAGS.load(Ordering::SeqCst)),
         ELF_PROBE_TIMERFD_INTERVAL.load(Ordering::SeqCst),
         ELF_PROBE_TIMERFD_DEADLINE.load(Ordering::SeqCst),
@@ -6999,6 +7006,11 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
     for offset in &ELF_PROBE_DESCRIPTOR_OFFSETS {
         offsets_reset &= offset.swap(0, Ordering::SeqCst) == 0;
     }
+    let mut epoll_watches_reset = true;
+    for descriptor in 0..LINUX_DESCRIPTOR_TABLE_LIMIT as usize {
+        epoll_watches_reset &= ELF_PROBE_EPOLL_EVENTS[descriptor].swap(0, Ordering::SeqCst) == 0;
+        epoll_watches_reset &= ELF_PROBE_EPOLL_DATA[descriptor].swap(0, Ordering::SeqCst) == 0;
+    }
     let descriptor_state_valid = ELF_PROBE_CONSOLE_DESCRIPTORS.swap(0, Ordering::SeqCst) == 0
         && clear_linux_descriptor_close_on_exec()
         && ELF_PROBE_CWD.swap(LINUX_ROOT_DIRECTORY, Ordering::SeqCst) == LINUX_ROOT_DIRECTORY
@@ -7009,13 +7021,12 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
         && rootfs_descriptors_closed
         && sockets_closed
         && ELF_PROBE_EPOLL_DESCRIPTOR.swap(0, Ordering::SeqCst) == 0
-        && ELF_PROBE_EPOLL_TARGET.swap(u64::MAX, Ordering::SeqCst) == u64::MAX
-        && ELF_PROBE_EPOLL_EVENTS.swap(0, Ordering::SeqCst) == 0
-        && ELF_PROBE_EPOLL_DATA.swap(0, Ordering::SeqCst) == 0
+        && epoll_watches_reset
         && ELF_PROBE_EVENTFD_DESCRIPTOR.swap(0, Ordering::SeqCst) == 0
         && ELF_PROBE_EVENTFD_COUNTER.swap(0, Ordering::SeqCst) == 0
         && ELF_PROBE_EVENTFD_FLAGS.swap(0, Ordering::SeqCst) == 0
         && ELF_PROBE_TIMERFD_DESCRIPTOR.swap(0, Ordering::SeqCst) == 0
+        && ELF_PROBE_TIMERFD_CLOCK.swap(0, Ordering::SeqCst) == 0
         && ELF_PROBE_TIMERFD_FLAGS.swap(0, Ordering::SeqCst) == 0
         && ELF_PROBE_TIMERFD_INTERVAL.swap(0, Ordering::SeqCst) == 0
         && ELF_PROBE_TIMERFD_DEADLINE.swap(0, Ordering::SeqCst) == 0
@@ -8687,12 +8698,10 @@ extern "sysv64" fn linux_syscall_handler(
             )
         }
         LINUX_CLONE_SYSCALL
-            if (saved_registers.rdi == LINUX_SIGCHLD
-                || saved_registers.rdi
+            if (saved_registers.rdi & !LINUX_CLONE_NEWNS == LINUX_SIGCHLD
+                || saved_registers.rdi & !LINUX_CLONE_NEWNS
                     == LINUX_SIGCHLD | LINUX_CLONE_CHILD_SETTID | LINUX_CLONE_CHILD_CLEARTID)
-                && saved_registers.rsi == 0
-                && saved_registers.rdx == 0
-                && saved_registers.r8 == 0 =>
+                && saved_registers.rsi == 0 =>
         {
             let child_tid = if saved_registers.rdi & LINUX_CLONE_CHILD_SETTID != 0 {
                 saved_registers.r10
@@ -8702,7 +8711,11 @@ extern "sysv64" fn linux_syscall_handler(
             if child_tid != 0 && !linux_writable_user_range_contains(child_tid, size_of::<u32>()) {
                 LINUX_EFAULT
             } else {
-                let result = linux_request_process_fork(runtime_mode, syscall_return);
+                let result = linux_request_process_fork(
+                    runtime_mode,
+                    syscall_return,
+                    saved_registers.rdi & LINUX_CLONE_NEWNS != 0,
+                );
                 if result == LINUX_RETURN_TO_KERNEL {
                     LINUX_FORK_CHILD_TID_ADDRESS.store(child_tid, Ordering::SeqCst);
                 }
@@ -8753,7 +8766,7 @@ extern "sysv64" fn linux_syscall_handler(
             )
         }
         LINUX_FORK_SYSCALL | LINUX_VFORK_SYSCALL => {
-            linux_request_process_fork(runtime_mode, syscall_return)
+            linux_request_process_fork(runtime_mode, syscall_return, false)
         }
         LINUX_EXECVE_SYSCALL => linux_execve(first_argument, buffer, count),
         LINUX_KILL_SYSCALL => linux_kill(
@@ -8920,6 +8933,9 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_UNAME_SYSCALL => linux_uname_with_copy(first_argument, copy_to_linux_user),
         LINUX_STATFS_SYSCALL => linux_statfs(first_argument, buffer),
         LINUX_FSTATFS_SYSCALL => linux_fstatfs(first_argument, buffer),
+        LINUX_MOUNT_SYSCALL => {
+            linux_mount_filesystem(first_argument, buffer, count, register(0), register(2))
+        }
         LINUX_SYSFS_SYSCALL => linux_sysfs(first_argument, buffer, count),
         LINUX_USTAT_SYSCALL => linux_ustat(first_argument, buffer),
         LINUX_GETCWD_SYSCALL => linux_getcwd(first_argument, buffer),
@@ -10055,7 +10071,11 @@ fn linux_deny_privileged_operation(number: u64) -> u64 {
     }
 }
 
-fn linux_request_process_fork(_runtime_mode: bool, caller: LinuxUserContext) -> u64 {
+fn linux_request_process_fork(
+    _runtime_mode: bool,
+    caller: LinuxUserContext,
+    new_mount_namespace: bool,
+) -> u64 {
     if current_linux_tid() != Some(current_linux_process_pid())
         || !refresh_live_linux_process_registry(caller)
         || linux_nproc_limit_reached()
@@ -10065,6 +10085,7 @@ fn linux_request_process_fork(_runtime_mode: bool, caller: LinuxUserContext) -> 
     {
         LINUX_EAGAIN
     } else {
+        LINUX_FORK_NEW_MOUNT_NAMESPACE.store(new_mount_namespace, Ordering::SeqCst);
         LINUX_RETURN_TO_KERNEL
     }
 }
@@ -12027,6 +12048,8 @@ struct LinuxProcessRuntimeState {
     completed: bool,
     exit_status: u64,
     termination_signal: u32,
+    parent_death_signal: u32,
+    mount_namespace: Option<linux_mount::MountNamespaceHandle>,
     mmap: LinuxMmapRuntimeState,
     descriptors: LinuxDescriptorRuntimeState,
     brk: u64,
@@ -12075,6 +12098,8 @@ impl LinuxProcessRuntimeState {
         completed: false,
         exit_status: 0,
         termination_signal: 0,
+        parent_death_signal: 0,
+        mount_namespace: None,
         mmap: LinuxMmapRuntimeState::EMPTY,
         descriptors: LinuxDescriptorRuntimeState::EMPTY,
         brk: 0,
@@ -12119,22 +12144,117 @@ impl LinuxProcessRuntimeState {
 
 const LINUX_PROCESS_RUNTIME_INSTANCE_LIMIT: usize = control_abi::DOMAIN_LIMIT + 1;
 static mut LINUX_PROCESS_RUNTIME_STATES: [[LinuxProcessRuntimeState;
-    linux_process::PROCESS_LIMIT];
+    linux_process::PROCESS_RUNTIME_LIMIT];
     LINUX_PROCESS_RUNTIME_INSTANCE_LIMIT] = [[LinuxProcessRuntimeState::EMPTY;
-    linux_process::PROCESS_LIMIT];
+    linux_process::PROCESS_RUNTIME_LIMIT];
     LINUX_PROCESS_RUNTIME_INSTANCE_LIMIT];
 
 fn linux_process_runtime_state(pid: u32) -> Option<&'static mut LinuxProcessRuntimeState> {
     let instance = current_container_slot().unwrap_or(control_abi::DOMAIN_LIMIT);
-    let slot = linux_process::live_process_slot(pid)?;
-    if instance >= LINUX_PROCESS_RUNTIME_INSTANCE_LIMIT || slot >= linux_process::PROCESS_LIMIT {
+    let slot = linux_process::live_process_runtime_slot(pid)?;
+    if instance >= LINUX_PROCESS_RUNTIME_INSTANCE_LIMIT
+        || slot >= linux_process::PROCESS_RUNTIME_LIMIT
+    {
         return None;
     }
     Some(unsafe {
         &mut *core::ptr::addr_of_mut!(LINUX_PROCESS_RUNTIME_STATES)
             .cast::<LinuxProcessRuntimeState>()
-            .add(instance * linux_process::PROCESS_LIMIT + slot)
+            .add(instance * linux_process::PROCESS_RUNTIME_LIMIT + slot)
     })
+}
+
+struct LinuxForkParentRuntime {
+    tid: Option<(usize, u32, u32)>,
+    stack: Option<(usize, u64, u64)>,
+    nice: u8,
+}
+
+fn stage_linux_fork_parent_runtime_state(parent_pid: u32) -> Option<LinuxForkParentRuntime> {
+    let mut state = capture_linux_process_runtime_state()?;
+    state.active = true;
+    state.completed = false;
+    state.exit_status = 0;
+    state.termination_signal = 0;
+    if !retain_linux_descriptor_runtime_state(&state.descriptors) {
+        return None;
+    }
+    let parent_tid = current_linux_thread_slot().map(|slot| {
+        (
+            slot,
+            LINUX_THREAD_TIDS[slot].load(Ordering::SeqCst),
+            LINUX_NEXT_TID.load(Ordering::SeqCst),
+        )
+    });
+    let parent_stack = current_linux_thread_slot().map(|slot| {
+        (
+            slot,
+            LINUX_THREAD_STACK_BASES[slot].load(Ordering::SeqCst),
+            LINUX_THREAD_STACK_SIZES[slot].load(Ordering::SeqCst),
+        )
+    });
+    let nice = state.nice;
+    *linux_process_runtime_state(parent_pid)? = state;
+    Some(LinuxForkParentRuntime {
+        tid: parent_tid,
+        stack: parent_stack,
+        nice,
+    })
+}
+
+fn release_staged_linux_fork_descriptors(parent_pid: u32) {
+    if let Some(state) = linux_process_runtime_state(parent_pid).filter(|state| state.valid) {
+        release_linux_descriptor_runtime_state(&state.descriptors);
+    }
+}
+
+fn stage_linux_fork_child_runtime_state(
+    parent_pid: u32,
+    child_pid: u32,
+    new_mount_namespace: bool,
+) -> Option<linux_mount::MountNamespaceHandle> {
+    let parent: *const LinuxProcessRuntimeState =
+        linux_process_runtime_state(parent_pid).filter(|state| state.valid)?;
+    let child = linux_process_runtime_state(child_pid)? as *mut LinuxProcessRuntimeState;
+    let mount_namespace = if new_mount_namespace {
+        linux_mount::clone_current()?
+    } else {
+        unsafe { (*parent).mount_namespace? }
+    };
+    unsafe {
+        core::ptr::copy_nonoverlapping(parent, child, 1);
+        (*child).tid = child_pid;
+        (*child).next_tid = child_pid.saturating_add(1);
+        (*child).active = true;
+        (*child).completed = false;
+        (*child).exit_status = 0;
+        (*child).termination_signal = 0;
+        (*child).real_timer_interval = 0;
+        (*child).real_timer_deadline = 0;
+        (*child).pending_signals = 0;
+        (*child).pending_signal_codes.fill(0);
+        (*child).pending_signal_values.fill(0);
+        (*child).parent_death_signal = 0;
+        (*child).mount_namespace = Some(mount_namespace);
+    }
+    Some(mount_namespace)
+}
+
+fn save_current_linux_process_runtime_state(pid: u32) {
+    if let (Some(state), Some(destination)) = (
+        capture_linux_process_runtime_state(),
+        linux_process_runtime_state(pid),
+    ) {
+        *destination = state;
+    }
+}
+
+fn restore_saved_linux_process_runtime_state(pid: u32) -> bool {
+    let Some(state) = linux_process_runtime_state(pid).filter(|state| state.valid) else {
+        return false;
+    };
+    restore_linux_process_runtime_state(state);
+    true
 }
 
 fn capture_linux_process_runtime_state() -> Option<LinuxProcessRuntimeState> {
@@ -12145,6 +12265,8 @@ fn capture_linux_process_runtime_state() -> Option<LinuxProcessRuntimeState> {
         completed: ELF_PROBE_COMPLETED.load(Ordering::SeqCst),
         exit_status: ELF_PROBE_EXIT_STATUS.load(Ordering::SeqCst),
         termination_signal: ELF_PROBE_TERMINATION_SIGNAL.load(Ordering::SeqCst),
+        parent_death_signal: ELF_PROBE_PARENT_DEATH_SIGNAL.load(Ordering::SeqCst),
+        mount_namespace: linux_mount::current_handle(),
         mmap: capture_linux_mmap_runtime_state(),
         descriptors: capture_linux_descriptor_runtime_state(),
         brk: ELF_PROBE_BRK.load(Ordering::SeqCst),
@@ -12205,18 +12327,22 @@ fn capture_linux_process_runtime_state() -> Option<LinuxProcessRuntimeState> {
     })
 }
 
-fn restore_linux_process_runtime_state(state: LinuxProcessRuntimeState) {
+fn restore_linux_process_runtime_state(state: &LinuxProcessRuntimeState) {
+    if let Some(namespace) = state.mount_namespace {
+        let _ = linux_mount::switch_to(namespace);
+    }
     ELF_PROBE_ACTIVE.store(state.active, Ordering::SeqCst);
     ELF_PROBE_COMPLETED.store(state.completed, Ordering::SeqCst);
     ELF_PROBE_EXIT_STATUS.store(state.exit_status, Ordering::SeqCst);
     ELF_PROBE_TERMINATION_SIGNAL.store(state.termination_signal, Ordering::SeqCst);
+    ELF_PROBE_PARENT_DEATH_SIGNAL.store(state.parent_death_signal, Ordering::SeqCst);
     restore_linux_mmap_runtime_state(state.mmap);
-    restore_linux_descriptor_runtime_state(state.descriptors);
+    restore_linux_descriptor_runtime_state(&state.descriptors);
     ELF_PROBE_BRK.store(state.brk, Ordering::SeqCst);
     ELF_PROBE_STACK_LOW.store(state.stack_low, Ordering::SeqCst);
     ELF_PROBE_CWD.store(state.cwd, Ordering::SeqCst);
     ELF_PROBE_UMASK.store(state.umask, Ordering::SeqCst);
-    for (limit, value) in ELF_PROBE_RLIMITS.iter().zip(state.rlimits) {
+    for (limit, value) in ELF_PROBE_RLIMITS.iter().zip(state.rlimits.iter().copied()) {
         limit.store(value, Ordering::SeqCst);
     }
     ELF_PROBE_PROCESS_NAME_LOW.store(state.process_name[0], Ordering::SeqCst);
@@ -12392,7 +12518,7 @@ fn release_linux_descriptor_runtime_state(state: &LinuxDescriptorRuntimeState) {
     }
 }
 
-fn restore_linux_descriptor_runtime_state(state: LinuxDescriptorRuntimeState) {
+fn restore_linux_descriptor_runtime_state(state: &LinuxDescriptorRuntimeState) {
     for socket in ELF_PROBE_STDIO_SOCKET_SLOTS
         .iter()
         .take(state.stdio_sockets.len())
@@ -12414,10 +12540,13 @@ fn restore_linux_descriptor_runtime_state(state: LinuxDescriptorRuntimeState) {
     install_linux_descriptor_runtime_state(state);
 }
 
-fn install_linux_descriptor_runtime_state(state: LinuxDescriptorRuntimeState) {
+fn install_linux_descriptor_runtime_state(state: &LinuxDescriptorRuntimeState) {
     ELF_PROBE_CONSOLE_DESCRIPTORS.store(state.console, Ordering::SeqCst);
     ELF_PROBE_STDERR_OPEN.store(state.stderr_open, Ordering::SeqCst);
-    for (word, value) in ELF_PROBE_CONSOLE_CLOEXEC.iter().zip(state.close_on_exec) {
+    for (word, value) in ELF_PROBE_CONSOLE_CLOEXEC
+        .iter()
+        .zip(state.close_on_exec.iter().copied())
+    {
         word.store(value, Ordering::SeqCst);
     }
     for index in 0..state.stdio_sockets.len() {
@@ -17362,6 +17491,22 @@ fn verify_linux_filesystem_argument_widths() -> bool {
         ) > 0;
     let directory_closed = directory_descriptor < LINUX_AUX_DESCRIPTOR_LIMIT
         && linux_descriptor_close(directory_descriptor) == 0;
+    let path_descriptor = if directory_closed {
+        linux_openat(
+            directory,
+            mapping + 960,
+            LINUX_O_PATH | LINUX_O_CLOEXEC | LINUX_O_DIRECTORY | LINUX_O_NOCTTY,
+            0,
+        )
+    } else {
+        LINUX_EFAULT
+    };
+    let path_only = path_descriptor < LINUX_AUX_DESCRIPTOR_LIMIT
+        && linux_path_descriptor(path_descriptor)
+        && linux_descriptor_close_on_exec(path_descriptor)
+        && linux_descriptor_read(path_descriptor, mapping + 1024, 1) == LINUX_EBADF;
+    let path_closed = path_descriptor < LINUX_AUX_DESCRIPTOR_LIMIT
+        && linux_descriptor_close(path_descriptor) == 0;
     let xattr_removed = xattr_node.is_some_and(crate::linux_overlay::unlink);
     let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
     valid
@@ -17370,6 +17515,8 @@ fn verify_linux_filesystem_argument_widths() -> bool {
         && xattr_closed
         && enumerated
         && directory_closed
+        && path_only
+        && path_closed
         && xattr_removed
         && unmapped
 }
@@ -20110,6 +20257,8 @@ fn linux_proc_root_file_kind(name: &[u8]) -> Option<u16> {
 fn linux_proc_pid_file_kind(pid: u32, name: &[u8]) -> Option<u16> {
     linux_process::live_process_status(pid)?;
     match (pid, name) {
+        (pid, b"fd") if pid == current_linux_process_pid() => Some(LINUX_PROC_FD_DIRECTORY),
+        (_, b"cgroup") => Some(LINUX_FILE_PROC_CGROUP),
         (1, b"status") => Some(LINUX_FILE_PROC_STATUS),
         (1, b"stat") => Some(LINUX_FILE_PROC_PID1_STAT),
         (1, b"statm") => Some(LINUX_FILE_PROC_PID1_STATM),
@@ -20140,6 +20289,7 @@ fn linux_root_directory_kind(path: &[u8]) -> Option<u16> {
         b"/proc/2" if linux_process::live_process_status(2).is_some() => {
             Some(LINUX_PROC_PID2_DIRECTORY)
         }
+        b"/sys/fs/cgroup" => Some(LINUX_CGROUP_DIRECTORY),
         _ => {
             let name = path.strip_prefix(b"/")?;
             let node = initramfs::published_directory_node(name)?;
@@ -20155,6 +20305,9 @@ fn linux_measured_path_kind(path: &[u8]) -> Option<u16> {
     if path == b"dev" {
         return Some(LINUX_DEVICE_DIRECTORY);
     }
+    if path == b"sys/fs/cgroup" {
+        return Some(LINUX_CGROUP_DIRECTORY);
+    }
     if let Some(name) = path.strip_prefix(b"proc/") {
         if let Some(kind) = linux_proc_root_file_kind(name) {
             return Some(kind);
@@ -20169,6 +20322,9 @@ fn linux_measured_path_kind(path: &[u8]) -> Option<u16> {
             2 if linux_process::live_process_status(2).is_some() => Some(LINUX_PROC_PID2_DIRECTORY),
             _ => None,
         };
+    }
+    if path == b"proc/self/fd" {
+        return Some(LINUX_PROC_FD_DIRECTORY);
     }
     if path == b"proc/1" {
         return Some(LINUX_PROC_PID1_DIRECTORY);
@@ -20214,7 +20370,7 @@ fn linux_measured_path_kind(path: &[u8]) -> Option<u16> {
 
 fn linux_virtual_mount_path_at(directory: u64, path: &[u8]) -> Option<u16> {
     let relative = path.strip_prefix(b"/").unwrap_or(path);
-    if relative != b"proc" && !relative.starts_with(b"proc/") {
+    if relative != b"proc" && !relative.starts_with(b"proc/") && relative != b"sys/fs/cgroup" {
         return None;
     }
     let from_root = path.starts_with(b"/")
@@ -20676,9 +20832,8 @@ fn linux_rootfs_execve(path: &[u8], arguments_address: u64, environment_address:
     let table_words =
         1 + argument_count + 1 + environment_count + 1 + crate::linux_elf::AUXILIARY_VECTOR_WORDS;
     let mut string_offset = table_words * size_of::<u64>();
-    let string_limit = string_offset.saturating_add(LINUX_EXEC_STRING_LIMIT);
+    let string_limit = stack_image.len().saturating_sub(LINUX_PLATFORM.len() + 16);
     stack_image[..8].copy_from_slice(&(argument_count as u64).to_ne_bytes());
-    let mut string = [0_u8; LINUX_EXEC_STRING_LIMIT];
     let mut execfn_address = 0;
     for index in 0..argument_count {
         let length = if index < launch_arguments.count {
@@ -20686,17 +20841,25 @@ fn linux_rootfs_execve(path: &[u8], arguments_address: u64, environment_address:
             let Some(length) = value.len().checked_add(1) else {
                 return LINUX_E2BIG;
             };
-            let Some(output) = string.get_mut(..length) else {
+            let Some(end) = string_offset
+                .checked_add(length)
+                .filter(|end| *end <= string_limit)
+            else {
+                return LINUX_E2BIG;
+            };
+            let Some(output) = stack_image.get_mut(string_offset..end) else {
                 return LINUX_E2BIG;
             };
             output[..value.len()].copy_from_slice(value);
             output[value.len()] = 0;
             length
         } else {
-            string.fill(0);
             let original_index = 1 + index - launch_arguments.count;
-            match copy_linux_c_string(argument_pointers[original_index], &mut string) {
-                Ok(length) => length + 1,
+            let Some(remaining) = stack_image.get_mut(string_offset..string_limit) else {
+                return LINUX_E2BIG;
+            };
+            match copy_linux_c_string(argument_pointers[original_index], remaining) {
+                Ok(length) => length.saturating_add(1),
                 Err(LINUX_ENAMETOOLONG) => return LINUX_E2BIG,
                 Err(error) => return error,
             }
@@ -20707,10 +20870,6 @@ fn linux_rootfs_execve(path: &[u8], arguments_address: u64, environment_address:
         if end > string_limit {
             return LINUX_E2BIG;
         }
-        let Some(output) = stack_image.get_mut(string_offset..end) else {
-            return LINUX_E2BIG;
-        };
-        output.copy_from_slice(&string[..length]);
         let address = new_stack + string_offset as u64;
         stack_image[(1 + index) * 8..(2 + index) * 8].copy_from_slice(&address.to_ne_bytes());
         if index == launch_arguments.execfn {
@@ -20723,9 +20882,11 @@ fn linux_rootfs_execve(path: &[u8], arguments_address: u64, environment_address:
     }
     let environment_word = 1 + argument_count + 1;
     for (index, pointer) in environment_pointers[..environment_count].iter().enumerate() {
-        string.fill(0);
-        let length = match copy_linux_c_string(*pointer, &mut string) {
-            Ok(length) => length + 1,
+        let Some(remaining) = stack_image.get_mut(string_offset..string_limit) else {
+            return LINUX_E2BIG;
+        };
+        let length = match copy_linux_c_string(*pointer, remaining) {
+            Ok(length) => length.saturating_add(1),
             Err(LINUX_ENAMETOOLONG) => return LINUX_E2BIG,
             Err(error) => return error,
         };
@@ -20735,10 +20896,6 @@ fn linux_rootfs_execve(path: &[u8], arguments_address: u64, environment_address:
         if end > string_limit {
             return LINUX_E2BIG;
         }
-        let Some(output) = stack_image.get_mut(string_offset..end) else {
-            return LINUX_E2BIG;
-        };
-        output.copy_from_slice(&string[..length]);
         stack_image[(environment_word + index) * 8..(environment_word + index + 1) * 8]
             .copy_from_slice(&(new_stack + string_offset as u64).to_ne_bytes());
         string_offset = end;
@@ -20924,9 +21081,10 @@ fn linux_rootfs_execve(path: &[u8], arguments_address: u64, environment_address:
         return LINUX_ENOMEM;
     }
     let process_name = path.rsplit(|byte| *byte == b'/').next().unwrap_or(path);
-    if process_name.is_empty() || process_name.len() > 15 {
+    if process_name.is_empty() {
         return LINUX_ENOEXEC;
     }
+    let process_name = &process_name[..process_name.len().min(15)];
     let mut name = [0_u8; 16];
     name[..process_name.len()].copy_from_slice(process_name);
     ELF_PROBE_PROCESS_NAME_LOW.store(
@@ -21157,14 +21315,15 @@ fn linux_execve_at(
     let table_words =
         1 + argument_count + 1 + environment_count + 1 + crate::linux_elf::AUXILIARY_VECTOR_WORDS;
     let mut string_offset = table_words * size_of::<u64>();
-    let string_limit = string_offset.saturating_add(LINUX_EXEC_STRING_LIMIT);
+    let string_limit = stack_image.len().saturating_sub(LINUX_PLATFORM.len() + 16);
     stack_image[..8].copy_from_slice(&(argument_count as u64).to_ne_bytes());
-    let mut string = [0_u8; LINUX_EXEC_STRING_LIMIT];
     let mut argument_zero_address = 0;
     for (index, pointer) in argument_pointers[..argument_count].iter().enumerate() {
-        string.fill(0);
-        let length = match copy_linux_c_string(*pointer, &mut string) {
-            Ok(length) => length + 1,
+        let Some(remaining) = stack_image.get_mut(string_offset..string_limit) else {
+            return LINUX_E2BIG;
+        };
+        let length = match copy_linux_c_string(*pointer, remaining) {
+            Ok(length) => length.saturating_add(1),
             Err(LINUX_ENAMETOOLONG) => return LINUX_E2BIG,
             Err(error) => return error,
         };
@@ -21174,10 +21333,6 @@ fn linux_execve_at(
         if end > string_limit {
             return LINUX_E2BIG;
         }
-        let Some(output) = stack_image.get_mut(string_offset..end) else {
-            return LINUX_E2BIG;
-        };
-        output.copy_from_slice(&string[..length]);
         let word = 1 + index;
         stack_image[word * 8..word * 8 + 8]
             .copy_from_slice(&(new_stack + string_offset as u64).to_ne_bytes());
@@ -21188,9 +21343,11 @@ fn linux_execve_at(
     }
     let environment_word = 1 + argument_count + 1;
     for (index, pointer) in environment_pointers[..environment_count].iter().enumerate() {
-        string.fill(0);
-        let length = match copy_linux_c_string(*pointer, &mut string) {
-            Ok(length) => length + 1,
+        let Some(remaining) = stack_image.get_mut(string_offset..string_limit) else {
+            return LINUX_E2BIG;
+        };
+        let length = match copy_linux_c_string(*pointer, remaining) {
+            Ok(length) => length.saturating_add(1),
             Err(LINUX_ENAMETOOLONG) => return LINUX_E2BIG,
             Err(error) => return error,
         };
@@ -21200,10 +21357,6 @@ fn linux_execve_at(
         if end > string_limit {
             return LINUX_E2BIG;
         }
-        let Some(output) = stack_image.get_mut(string_offset..end) else {
-            return LINUX_E2BIG;
-        };
-        output.copy_from_slice(&string[..length]);
         let word = environment_word + index;
         stack_image[word * 8..word * 8 + 8]
             .copy_from_slice(&(new_stack + string_offset as u64).to_ne_bytes());
@@ -21705,6 +21858,8 @@ fn linux_root_directory_inode(kind: u16) -> Option<u64> {
         return match kind & LINUX_ROOT_NODE_MASK {
             0 => Some(16),
             LINUX_PROC_PID2_DIRECTORY_NODE => Some(23),
+            LINUX_PROC_FD_DIRECTORY_NODE => Some(36),
+            LINUX_CGROUP_DIRECTORY_NODE => Some(39),
             _ => None,
         };
     }
@@ -21724,6 +21879,8 @@ fn linux_measured_directory_path(kind: u16) -> Option<&'static [u8]> {
         return match kind & LINUX_ROOT_NODE_MASK {
             0 => Some(b"proc/1"),
             LINUX_PROC_PID2_DIRECTORY_NODE => Some(b"proc/2"),
+            LINUX_PROC_FD_DIRECTORY_NODE => Some(b"proc/self/fd"),
+            LINUX_CGROUP_DIRECTORY_NODE => Some(b"sys/fs/cgroup"),
             _ => None,
         };
     }
@@ -21927,7 +22084,20 @@ fn linux_overlay_parent_exists(path: &[u8]) -> bool {
         return true;
     };
     let parent = &path[..separator];
-    crate::linux_overlay::lookup(parent)
+    matches!(
+        parent,
+        b"dev/shm"
+            | b"dev/pts"
+            | b"proc"
+            | b"run"
+            | b"sys"
+            | b"sys/fs/cgroup"
+            | b"sys/fs/bpf"
+            | b"sys/kernel/debug"
+            | b"sys/kernel/tracing"
+            | b"sys/kernel/security"
+            | b"sys/fs/pstore"
+    ) || crate::linux_overlay::lookup(parent)
         .is_some_and(|metadata| metadata.kind == crate::linux_overlay::NodeKind::Directory)
         || crate::published_rootfs::lookup_at(crate::published_rootfs::ROOT_HANDLE, parent)
             .is_some_and(|(_, entry)| {
@@ -22042,7 +22212,8 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64, mode: u64) -> u64
                 | LINUX_O_APPEND
                 | LINUX_O_NONBLOCK
                 | LINUX_O_LARGEFILE
-                | LINUX_O_NOFOLLOW)
+                | LINUX_O_NOFOLLOW
+                | LINUX_O_PATH)
             != 0
         || flags & LINUX_O_EXCL != 0 && flags & LINUX_O_CREAT == 0
     {
@@ -22225,7 +22396,7 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64, mode: u64) -> u64
         || tmp_handle.map_or(0, linux_tmpfs::generation),
         crate::linux_overlay::generation,
     );
-    let descriptor_flags = (flags & (LINUX_O_APPEND | LINUX_O_NONBLOCK)) as u32;
+    let descriptor_flags = (flags & (LINUX_O_APPEND | LINUX_O_NONBLOCK | LINUX_O_PATH)) as u32;
     if descriptor < LINUX_AUX_DESCRIPTOR_FIRST {
         let index = descriptor as usize;
         ELF_PROBE_STDIO_DEVICE_DESCRIPTORS[index].store(state, Ordering::SeqCst);
@@ -22692,11 +22863,30 @@ fn linux_mkdirat(directory: u64, path_address: u64, mode: u64) -> u64 {
     if !linux_overlay_parent_exists(path) {
         return LINUX_ENOENT;
     }
-    crate::linux_overlay::create_directory(
+    let Some(directory_handle) = crate::linux_overlay::create_directory(
         path,
         (mode as u32) & !(ELF_PROBE_UMASK.load(Ordering::SeqCst) as u32),
-    )
-    .map_or(LINUX_ENOSPC, |_| 0)
+    ) else {
+        return LINUX_ENOSPC;
+    };
+    if path.starts_with(b"sys/fs/cgroup/") {
+        let mut control = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+        let Some(end) = path.len().checked_add(b"/cgroup.procs".len()) else {
+            let _ = crate::linux_overlay::unlink(directory_handle);
+            return LINUX_ENAMETOOLONG;
+        };
+        let Some(output) = control.get_mut(..end) else {
+            let _ = crate::linux_overlay::unlink(directory_handle);
+            return LINUX_ENAMETOOLONG;
+        };
+        output[..path.len()].copy_from_slice(path);
+        output[path.len()..].copy_from_slice(b"/cgroup.procs");
+        if crate::linux_overlay::create_file(output, 0o644, &[]).is_none() {
+            let _ = crate::linux_overlay::unlink(directory_handle);
+            return LINUX_ENOSPC;
+        }
+    }
+    0
 }
 
 fn linux_mknodat(directory: u64, path_address: u64, mode: u64, device: u64) -> u64 {
@@ -26740,9 +26930,10 @@ fn linux_epoll_create1(flags: u64) -> u64 {
         return LINUX_EMFILE;
     };
     ELF_PROBE_EPOLL_DESCRIPTOR.store(descriptor as u16 + 1, Ordering::SeqCst);
-    ELF_PROBE_EPOLL_TARGET.store(u64::MAX, Ordering::SeqCst);
-    ELF_PROBE_EPOLL_EVENTS.store(0, Ordering::SeqCst);
-    ELF_PROBE_EPOLL_DATA.store(0, Ordering::SeqCst);
+    for target in 0..LINUX_DESCRIPTOR_TABLE_LIMIT as usize {
+        ELF_PROBE_EPOLL_EVENTS[target].store(0, Ordering::SeqCst);
+        ELF_PROBE_EPOLL_DATA[target].store(0, Ordering::SeqCst);
+    }
     set_linux_descriptor_close_on_exec(descriptor, flags & LINUX_O_CLOEXEC != 0);
     descriptor
 }
@@ -27021,7 +27212,9 @@ fn complete_linux_timerfd_read_wait(slot: usize) -> bool {
     let result = linux_timerfd_read(descriptor, address, 8).unwrap_or(LINUX_EBADF);
     if result == LINUX_ENOSYS {
         LINUX_THREAD_WAIT_DEADLINES[slot].store(
-            ELF_PROBE_TIMERFD_DEADLINE.load(Ordering::SeqCst),
+            linux_timerfd_state(descriptor)
+                .map(|state| state.deadline.load(Ordering::SeqCst))
+                .unwrap_or(0),
             Ordering::SeqCst,
         );
         return false;
@@ -27099,7 +27292,9 @@ fn linux_descriptor_read_live_return(
         address,
         wait_output,
         if kind == LINUX_THREAD_WAIT_TIMERFD_READ {
-            ELF_PROBE_TIMERFD_DEADLINE.load(Ordering::SeqCst)
+            linux_timerfd_state(descriptor)
+                .map(|state| state.deadline.load(Ordering::SeqCst))
+                .unwrap_or(0)
         } else {
             0
         },
@@ -27430,21 +27625,45 @@ fn linux_eventfd_write_value(descriptor: u64, increment: u64, wake: bool) -> Opt
 fn linux_timerfd_create(clock: u64, flags: u64) -> u64 {
     let clock = u64::from(clock as u32);
     let flags = u64::from(flags as u32);
-    if clock != LINUX_CLOCK_MONOTONIC || flags & !(LINUX_TFD_NONBLOCK | LINUX_O_CLOEXEC) != 0 {
+    if !matches!(
+        clock,
+        LINUX_CLOCK_REALTIME
+            | LINUX_CLOCK_MONOTONIC
+            | LINUX_CLOCK_BOOTTIME
+            | LINUX_CLOCK_REALTIME_ALARM
+            | LINUX_CLOCK_BOOTTIME_ALARM
+    ) || flags & !(LINUX_TFD_NONBLOCK | LINUX_O_CLOEXEC) != 0
+    {
         return LINUX_EINVAL;
     }
-    if ELF_PROBE_TIMERFD_DESCRIPTOR.load(Ordering::SeqCst) != 0 {
+    let runtime = LINUX_RUNTIME_MODE.load(Ordering::SeqCst);
+    if !runtime && ELF_PROBE_TIMERFD_DESCRIPTOR.load(Ordering::SeqCst) != 0 {
         return LINUX_EMFILE;
     }
-    let Some(descriptor) =
-        (2..LINUX_AUX_DESCRIPTOR_LIMIT).find(|descriptor| linux_aux_descriptor_free(*descriptor))
+    let start = if runtime {
+        LINUX_AUX_DESCRIPTOR_FIRST
+    } else {
+        2
+    };
+    let Some(descriptor) = (start..LINUX_AUX_DESCRIPTOR_LIMIT)
+        .find(|descriptor| linux_aux_descriptor_free(*descriptor))
     else {
         return LINUX_EMFILE;
     };
-    ELF_PROBE_TIMERFD_FLAGS.store(flags as u32, Ordering::SeqCst);
-    ELF_PROBE_TIMERFD_INTERVAL.store(0, Ordering::SeqCst);
-    ELF_PROBE_TIMERFD_DEADLINE.store(0, Ordering::SeqCst);
-    ELF_PROBE_TIMERFD_DESCRIPTOR.store(descriptor as u16, Ordering::SeqCst);
+    if runtime {
+        let index = (descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize;
+        LINUX_RUNTIME_TIMERFD_CLOCKS[index].store(clock as u8, Ordering::SeqCst);
+        LINUX_RUNTIME_TIMERFD_FLAGS[index].store(flags as u32, Ordering::SeqCst);
+        LINUX_RUNTIME_TIMERFD_INTERVALS[index].store(0, Ordering::SeqCst);
+        LINUX_RUNTIME_TIMERFD_DEADLINES[index].store(0, Ordering::SeqCst);
+        LINUX_RUNTIME_TIMERFD_ACTIVE[index].store(1, Ordering::SeqCst);
+    } else {
+        ELF_PROBE_TIMERFD_CLOCK.store(clock as u8, Ordering::SeqCst);
+        ELF_PROBE_TIMERFD_FLAGS.store(flags as u32, Ordering::SeqCst);
+        ELF_PROBE_TIMERFD_INTERVAL.store(0, Ordering::SeqCst);
+        ELF_PROBE_TIMERFD_DEADLINE.store(0, Ordering::SeqCst);
+        ELF_PROBE_TIMERFD_DESCRIPTOR.store(descriptor as u16, Ordering::SeqCst);
+    }
     set_linux_descriptor_close_on_exec(descriptor, flags & LINUX_O_CLOEXEC != 0);
     descriptor
 }
@@ -27566,12 +27785,18 @@ fn linux_timer_delete(timer: u64) -> u64 {
 }
 
 fn linux_timerfd_settime(descriptor: u64, flags: u64, new_address: u64, old_address: u64) -> u64 {
+    const TFD_TIMER_CANCEL_ON_SET: u64 = 2;
     let descriptor = u64::from(descriptor as u32);
     let flags = u64::from(flags as u32);
-    if !linux_timerfd_descriptor(descriptor) {
+    let Some(state) = linux_timerfd_state(descriptor) else {
         return LINUX_EBADF;
-    }
-    if flags & !LINUX_TFD_TIMER_ABSTIME != 0 {
+    };
+    let clock = u64::from(state.clock.load(Ordering::SeqCst));
+    if flags & !(LINUX_TFD_TIMER_ABSTIME | TFD_TIMER_CANCEL_ON_SET) != 0
+        || flags & TFD_TIMER_CANCEL_ON_SET != 0
+            && (flags & LINUX_TFD_TIMER_ABSTIME == 0
+                || !matches!(clock, LINUX_CLOCK_REALTIME | LINUX_CLOCK_REALTIME_ALARM))
+    {
         return LINUX_EINVAL;
     }
     if old_address != 0 && !linux_writable_user_range_contains(old_address, 32) {
@@ -27581,18 +27806,35 @@ fn linux_timerfd_settime(descriptor: u64, flags: u64, new_address: u64, old_addr
     if !copy_from_linux_user(new_address, &mut specification) {
         return LINUX_EFAULT;
     }
-    let Some(interval) = linux_timespec_nanoseconds(&specification[..16]) else {
+    let Some(interval) = linux_timespec_nanoseconds_saturating(&specification[..16]) else {
         return LINUX_EINVAL;
     };
-    let Some(value) = linux_timespec_nanoseconds(&specification[16..]) else {
+    let Some(value) = linux_timespec_nanoseconds_saturating(&specification[16..]) else {
         return LINUX_EINVAL;
     };
     let Some(now) = linux_elapsed_nanoseconds() else {
         return LINUX_ENOSYS;
     };
-    let old = linux_timerfd_specification(now);
+    let old = linux_timer_specification(
+        state.interval.load(Ordering::SeqCst),
+        state.deadline.load(Ordering::SeqCst),
+        now,
+    );
     let deadline = if value == 0 {
         0
+    } else if flags & LINUX_TFD_TIMER_ABSTIME != 0
+        && matches!(clock, LINUX_CLOCK_REALTIME | LINUX_CLOCK_REALTIME_ALARM)
+    {
+        let Some((seconds, nanoseconds)) = linux_realtime_time() else {
+            return LINUX_ENOSYS;
+        };
+        let Some(realtime_now) = seconds
+            .checked_mul(NANOSECONDS_PER_SECOND)
+            .and_then(|seconds| seconds.checked_add(nanoseconds))
+        else {
+            return LINUX_EINVAL;
+        };
+        now.saturating_add(value.saturating_sub(realtime_now))
     } else if flags & LINUX_TFD_TIMER_ABSTIME != 0 {
         value
     } else {
@@ -27604,21 +27846,25 @@ fn linux_timerfd_settime(descriptor: u64, flags: u64, new_address: u64, old_addr
     if old_address != 0 && !copy_to_linux_user(old_address, &old) {
         return LINUX_EFAULT;
     }
-    ELF_PROBE_TIMERFD_INTERVAL.store(interval, Ordering::SeqCst);
-    ELF_PROBE_TIMERFD_DEADLINE.store(deadline, Ordering::SeqCst);
+    state.interval.store(interval, Ordering::SeqCst);
+    state.deadline.store(deadline, Ordering::SeqCst);
     wake_linux_descriptor_waits();
     0
 }
 
 fn linux_timerfd_gettime(descriptor: u64, address: u64) -> u64 {
     let descriptor = u64::from(descriptor as u32);
-    if !linux_timerfd_descriptor(descriptor) {
+    let Some(state) = linux_timerfd_state(descriptor) else {
         return LINUX_EBADF;
-    }
+    };
     let Some(now) = linux_elapsed_nanoseconds() else {
         return LINUX_ENOSYS;
     };
-    let specification = linux_timerfd_specification(now);
+    let specification = linux_timer_specification(
+        state.interval.load(Ordering::SeqCst),
+        state.deadline.load(Ordering::SeqCst),
+        now,
+    );
     if !copy_to_linux_user(address, &specification) {
         return LINUX_EFAULT;
     }
@@ -27626,26 +27872,24 @@ fn linux_timerfd_gettime(descriptor: u64, address: u64) -> u64 {
 }
 
 fn linux_timerfd_read(descriptor: u64, address: u64, count: u64) -> Option<u64> {
-    if !linux_timerfd_descriptor(descriptor) {
-        return None;
-    }
+    let state = linux_timerfd_state(descriptor)?;
     if count != 8 {
         return Some(LINUX_EINVAL);
     }
     let Some(now) = linux_elapsed_nanoseconds() else {
         return Some(LINUX_ENOSYS);
     };
-    let deadline = ELF_PROBE_TIMERFD_DEADLINE.load(Ordering::SeqCst);
+    let deadline = state.deadline.load(Ordering::SeqCst);
     if deadline == 0 || now < deadline {
         return Some(
-            if ELF_PROBE_TIMERFD_FLAGS.load(Ordering::SeqCst) & LINUX_TFD_NONBLOCK as u32 != 0 {
+            if state.flags.load(Ordering::SeqCst) & LINUX_TFD_NONBLOCK as u32 != 0 {
                 LINUX_EAGAIN
             } else {
                 LINUX_ENOSYS
             },
         );
     }
-    let interval = ELF_PROBE_TIMERFD_INTERVAL.load(Ordering::SeqCst);
+    let interval = state.interval.load(Ordering::SeqCst);
     let expirations = now
         .saturating_sub(deadline)
         .checked_div(interval)
@@ -27658,7 +27902,7 @@ fn linux_timerfd_read(descriptor: u64, address: u64, count: u64) -> Option<u64> 
     } else {
         deadline.saturating_add(expirations.saturating_mul(interval))
     };
-    ELF_PROBE_TIMERFD_DEADLINE.store(next, Ordering::SeqCst);
+    state.deadline.store(next, Ordering::SeqCst);
     Some(8)
 }
 
@@ -27673,10 +27917,17 @@ fn linux_timespec_nanoseconds(timespec: &[u8]) -> Option<u64> {
         .and_then(|value| value.checked_add(nanoseconds as u64))
 }
 
-fn linux_timerfd_specification(now: u64) -> [u8; 32] {
-    let interval = ELF_PROBE_TIMERFD_INTERVAL.load(Ordering::SeqCst);
-    let deadline = ELF_PROBE_TIMERFD_DEADLINE.load(Ordering::SeqCst);
-    linux_timer_specification(interval, deadline, now)
+fn linux_timespec_nanoseconds_saturating(timespec: &[u8]) -> Option<u64> {
+    let seconds = i64::from_ne_bytes(timespec.get(..8)?.try_into().ok()?);
+    let nanoseconds = i64::from_ne_bytes(timespec.get(8..16)?.try_into().ok()?);
+    if seconds < 0 || !(0..NANOSECONDS_PER_SECOND as i64).contains(&nanoseconds) {
+        return None;
+    }
+    Some(
+        (seconds as u64)
+            .saturating_mul(NANOSECONDS_PER_SECOND)
+            .saturating_add(nanoseconds as u64),
+    )
 }
 
 fn linux_timer_specification(interval: u64, deadline: u64, now: u64) -> [u8; 32] {
@@ -28205,23 +28456,23 @@ fn linux_epoll_ctl(epoll: u64, operation: u64, descriptor: u64, event_address: u
     if !linux_descriptor_open(descriptor) {
         return LINUX_EBADF;
     }
-    let current = ELF_PROBE_EPOLL_TARGET.load(Ordering::SeqCst);
+    let target = descriptor as usize;
+    let current = ELF_PROBE_EPOLL_EVENTS[target].load(Ordering::SeqCst);
     if operation == LINUX_EPOLL_CTL_DEL {
-        if current != descriptor {
+        if current == 0 {
             return LINUX_ENOENT;
         }
-        ELF_PROBE_EPOLL_TARGET.store(u64::MAX, Ordering::SeqCst);
-        ELF_PROBE_EPOLL_EVENTS.store(0, Ordering::SeqCst);
-        ELF_PROBE_EPOLL_DATA.store(0, Ordering::SeqCst);
+        ELF_PROBE_EPOLL_EVENTS[target].store(0, Ordering::SeqCst);
+        ELF_PROBE_EPOLL_DATA[target].store(0, Ordering::SeqCst);
         return 0;
     }
     if !matches!(operation, LINUX_EPOLL_CTL_ADD | LINUX_EPOLL_CTL_MOD) {
         return LINUX_EINVAL;
     }
-    if operation == LINUX_EPOLL_CTL_ADD && current != u64::MAX {
+    if operation == LINUX_EPOLL_CTL_ADD && current != 0 {
         return LINUX_EEXIST;
     }
-    if operation == LINUX_EPOLL_CTL_MOD && current != descriptor {
+    if operation == LINUX_EPOLL_CTL_MOD && current == 0 {
         return LINUX_ENOENT;
     }
     let mut event = [0_u8; 12];
@@ -28233,9 +28484,8 @@ fn linux_epoll_ctl(epoll: u64, operation: u64, descriptor: u64, event_address: u
         return LINUX_EINVAL;
     }
     let data = u64::from_ne_bytes(event[4..].try_into().unwrap());
-    ELF_PROBE_EPOLL_EVENTS.store(events, Ordering::SeqCst);
-    ELF_PROBE_EPOLL_DATA.store(data, Ordering::SeqCst);
-    ELF_PROBE_EPOLL_TARGET.store(descriptor, Ordering::SeqCst);
+    ELF_PROBE_EPOLL_EVENTS[target].store(events, Ordering::SeqCst);
+    ELF_PROBE_EPOLL_DATA[target].store(data, Ordering::SeqCst);
     wake_linux_descriptor_waits();
     0
 }
@@ -28244,21 +28494,32 @@ fn linux_epoll_event(epoll: u64) -> Result<Option<[u8; 12]>, u64> {
     if !linux_epoll_descriptor(epoll) {
         return Err(LINUX_EBADF);
     }
-    let target = ELF_PROBE_EPOLL_TARGET.load(Ordering::SeqCst);
-    let requested = ELF_PROBE_EPOLL_EVENTS.load(Ordering::SeqCst) as u16;
-    let ready = if target == u64::MAX {
-        0
-    } else {
-        linux_descriptor_poll_events(target as i32, requested)
-            & (LINUX_POLLIN | LINUX_POLLOUT | LINUX_POLLERR | LINUX_POLLHUP)
-    };
-    if ready == 0 {
-        return Ok(None);
+    for target in 0..LINUX_DESCRIPTOR_TABLE_LIMIT as usize {
+        let requested = ELF_PROBE_EPOLL_EVENTS[target].load(Ordering::SeqCst) as u16;
+        if requested == 0 {
+            continue;
+        }
+        let ready = linux_descriptor_poll_events(target as i32, requested)
+            & (LINUX_POLLIN | LINUX_POLLOUT | LINUX_POLLERR | LINUX_POLLHUP);
+        if ready != 0 {
+            let mut event = [0_u8; 12];
+            event[..4].copy_from_slice(&u32::from(ready).to_ne_bytes());
+            event[4..].copy_from_slice(
+                &ELF_PROBE_EPOLL_DATA[target]
+                    .load(Ordering::SeqCst)
+                    .to_ne_bytes(),
+            );
+            return Ok(Some(event));
+        }
     }
-    let mut event = [0_u8; 12];
-    event[..4].copy_from_slice(&u32::from(ready).to_ne_bytes());
-    event[4..].copy_from_slice(&ELF_PROBE_EPOLL_DATA.load(Ordering::SeqCst).to_ne_bytes());
-    Ok(Some(event))
+    Ok(None)
+}
+
+fn linux_epoll_forget_descriptor(descriptor: u64) {
+    if descriptor < LINUX_DESCRIPTOR_TABLE_LIMIT {
+        ELF_PROBE_EPOLL_EVENTS[descriptor as usize].store(0, Ordering::SeqCst);
+        ELF_PROBE_EPOLL_DATA[descriptor as usize].store(0, Ordering::SeqCst);
+    }
 }
 
 fn complete_linux_epoll_wait(slot: usize, timed_out: bool) -> bool {
@@ -28585,8 +28846,44 @@ fn linux_eventfd_descriptor(descriptor: u64) -> bool {
     linux_eventfd_state(descriptor).is_some()
 }
 
+struct LinuxTimerfdState {
+    clock: &'static BankedAtomicU8,
+    flags: &'static BankedAtomicU32,
+    interval: &'static BankedAtomicU64,
+    deadline: &'static BankedAtomicU64,
+}
+
+fn linux_timerfd_state(descriptor: u64) -> Option<LinuxTimerfdState> {
+    if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
+        let index = descriptor
+            .checked_sub(LINUX_AUX_DESCRIPTOR_FIRST)
+            .and_then(|index| usize::try_from(index).ok())?;
+        if LINUX_RUNTIME_TIMERFD_ACTIVE
+            .get(index)?
+            .load(Ordering::SeqCst)
+            == 0
+        {
+            return None;
+        }
+        return Some(LinuxTimerfdState {
+            clock: &LINUX_RUNTIME_TIMERFD_CLOCKS[index],
+            flags: &LINUX_RUNTIME_TIMERFD_FLAGS[index],
+            interval: &LINUX_RUNTIME_TIMERFD_INTERVALS[index],
+            deadline: &LINUX_RUNTIME_TIMERFD_DEADLINES[index],
+        });
+    }
+    (descriptor >= 2
+        && u64::from(ELF_PROBE_TIMERFD_DESCRIPTOR.load(Ordering::SeqCst)) == descriptor)
+        .then_some(LinuxTimerfdState {
+            clock: &ELF_PROBE_TIMERFD_CLOCK,
+            flags: &ELF_PROBE_TIMERFD_FLAGS,
+            interval: &ELF_PROBE_TIMERFD_INTERVAL,
+            deadline: &ELF_PROBE_TIMERFD_DEADLINE,
+        })
+}
+
 fn linux_timerfd_descriptor(descriptor: u64) -> bool {
-    descriptor >= 2 && u64::from(ELF_PROBE_TIMERFD_DESCRIPTOR.load(Ordering::SeqCst)) == descriptor
+    linux_timerfd_state(descriptor).is_some()
 }
 
 fn linux_pipe_read_descriptor(descriptor: u64) -> bool {
@@ -28973,11 +29270,6 @@ fn linux_fanotify_release() {
     }
 }
 
-fn linux_inotify_instance_range() -> core::ops::Range<usize> {
-    let instance = linux_execution_instance();
-    instance..instance + 1
-}
-
 fn linux_inotify_watch_range() -> core::ops::Range<usize> {
     let start = linux_execution_instance() * LINUX_INOTIFY_WATCH_LIMIT;
     start..start + LINUX_INOTIFY_WATCH_LIMIT
@@ -28988,13 +29280,10 @@ fn linux_inotify_instance(descriptor: u64) -> Option<usize> {
         return None;
     }
     let instance = linux_descriptor_offset(descriptor).load(Ordering::SeqCst);
-    let instance = instance
+    instance
         .checked_sub(1)
         .and_then(|index| usize::try_from(index).ok())
-        .filter(|index| *index < LINUX_INOTIFY_INSTANCE_SLOT_COUNT)?;
-    linux_inotify_instance_range()
-        .contains(&instance)
-        .then_some(instance)
+        .filter(|index| *index < LINUX_DESCRIPTOR_TABLE_LIMIT as usize)
 }
 
 fn linux_inotify_init(flags: u64) -> u64 {
@@ -29004,21 +29293,12 @@ fn linux_inotify_init(flags: u64) -> u64 {
     if flags & !(IN_NONBLOCK | IN_CLOEXEC) != 0 {
         return LINUX_EINVAL;
     }
-    let instances = linux_inotify_instance_range();
-    let Some(instance) = LINUX_INOTIFY_INSTANCE_REFS[instances.clone()]
-        .iter()
-        .position(|references| references.load(Ordering::SeqCst) == 0)
-        .map(|index| instances.start + index)
-    else {
-        return LINUX_EMFILE;
-    };
     let Some(descriptor) = (LINUX_AUX_DESCRIPTOR_FIRST..LINUX_AUX_DESCRIPTOR_LIMIT)
         .find(|descriptor| linux_aux_descriptor_free(*descriptor))
     else {
         return LINUX_EMFILE;
     };
-    LINUX_INOTIFY_INSTANCE_REFS[instance].store(1, Ordering::SeqCst);
-    LINUX_INOTIFY_NEXT_WD[instance].store(1, Ordering::SeqCst);
+    let instance = descriptor as usize;
     let index = (descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize;
     ELF_PROBE_DEVICE_DESCRIPTORS[index].store(LINUX_DEVICE_INOTIFY, Ordering::SeqCst);
     ELF_PROBE_SOCKET_FLAGS[index].store(flags as u32, Ordering::SeqCst);
@@ -29114,8 +29394,12 @@ fn linux_inotify_add_watch(descriptor: u64, path_address: u64, mask: u64) -> u64
     else {
         return LINUX_ENOSPC;
     };
-    let wd = LINUX_INOTIFY_NEXT_WD[instance]
-        .fetch_add(1, Ordering::SeqCst)
+    let wd = linux_inotify_watch_range()
+        .filter(|index| LINUX_INOTIFY_WATCH_OWNERS[*index].load(Ordering::SeqCst) == owner)
+        .map(|index| LINUX_INOTIFY_WATCH_DESCRIPTORS[index].load(Ordering::SeqCst))
+        .max()
+        .unwrap_or(0)
+        .saturating_add(1)
         .max(1);
     LINUX_INOTIFY_WATCH_PATHS[index].store(path_hash, Ordering::SeqCst);
     LINUX_INOTIFY_WATCH_MASKS[index].store(mask & IN_ALL_EVENTS, Ordering::SeqCst);
@@ -29220,7 +29504,12 @@ fn linux_inotify_release(descriptor: u64) {
     let Some(instance) = linux_inotify_instance(descriptor) else {
         return;
     };
-    if LINUX_INOTIFY_INSTANCE_REFS[instance].fetch_add(u16::MAX, Ordering::SeqCst) != 1 {
+    let identity = instance as u64 + 1;
+    if (0..LINUX_DESCRIPTOR_TABLE_LIMIT).any(|candidate| {
+        candidate != descriptor
+            && linux_inotify_descriptor(candidate)
+            && linux_descriptor_offset(candidate).load(Ordering::SeqCst) == identity
+    }) {
         return;
     }
     let owner = instance as u16 + 1;
@@ -29478,9 +29767,7 @@ fn linux_descriptor_poll_events(descriptor: i32, requested: u16) -> u16 {
         _ => {}
     }
     if linux_epoll_descriptor(descriptor) {
-        let target = ELF_PROBE_EPOLL_TARGET.load(Ordering::SeqCst);
-        let events = ELF_PROBE_EPOLL_EVENTS.load(Ordering::SeqCst) as u16;
-        return if target != u64::MAX && linux_descriptor_poll_events(target as i32, events) != 0 {
+        return if linux_epoll_event(descriptor).ok().flatten().is_some() {
             requested & LINUX_POLLIN
         } else {
             0
@@ -29499,8 +29786,8 @@ fn linux_descriptor_poll_events(descriptor: i32, requested: u16) -> u16 {
         }
         return returned;
     }
-    if linux_timerfd_descriptor(descriptor) {
-        let deadline = ELF_PROBE_TIMERFD_DEADLINE.load(Ordering::SeqCst);
+    if let Some(state) = linux_timerfd_state(descriptor) {
+        let deadline = state.deadline.load(Ordering::SeqCst);
         let ready = deadline != 0 && linux_elapsed_nanoseconds().is_some_and(|now| now >= deadline);
         return if ready { requested & LINUX_POLLIN } else { 0 };
     }
@@ -30116,6 +30403,7 @@ fn linux_proc_file(state: u16) -> bool {
             | LINUX_FILE_PROC_PID1_STATM
             | LINUX_FILE_PROC_PID2_STAT
             | LINUX_FILE_PROC_PID2_STATM
+            | LINUX_FILE_PROC_CGROUP
     )
 }
 
@@ -30171,6 +30459,7 @@ fn linux_regular_file(state: u16) -> Option<&'static [u8]> {
         LINUX_FILE_PROC_LOADAVG => return Some(LINUX_PROC_LOADAVG),
         LINUX_FILE_PROC_FILESYSTEMS => return Some(LINUX_PROC_FILESYSTEMS),
         LINUX_FILE_PROC_CMDLINE => return Some(LINUX_PROC_CMDLINE),
+        LINUX_FILE_PROC_CGROUP => return Some(LINUX_PROC_CGROUP),
         LINUX_FILE_PROC_PID1_STAT => return Some(LINUX_PROC_PID1_STAT),
         LINUX_FILE_PROC_PID1_STATM => return Some(LINUX_PROC_PID1_STATM),
         LINUX_FILE_PROC_PID2_STATM => {
@@ -30230,6 +30519,7 @@ fn linux_regular_file_inode(state: u16) -> Option<u64> {
         LINUX_FILE_PROC_PID1_STATM => return Some(33),
         LINUX_FILE_PROC_PID2_STAT => return linux_process::live_process_status(2).map(|_| 34),
         LINUX_FILE_PROC_PID2_STATM => return linux_process::live_process_status(2).map(|_| 35),
+        LINUX_FILE_PROC_CGROUP => return Some(37),
         _ => {}
     }
     if linux_tmp_file(state) {
@@ -30585,11 +30875,11 @@ fn sync_saved_linux_open_file_offset(id: u64, value: u64) {
     if instance >= LINUX_PROCESS_RUNTIME_INSTANCE_LIMIT {
         return;
     }
-    for process in 0..linux_process::PROCESS_LIMIT {
+    for process in 0..linux_process::PROCESS_RUNTIME_LIMIT {
         let state = unsafe {
             &mut *core::ptr::addr_of_mut!(LINUX_PROCESS_RUNTIME_STATES)
                 .cast::<LinuxProcessRuntimeState>()
-                .add(instance * linux_process::PROCESS_LIMIT + process)
+                .add(instance * linux_process::PROCESS_RUNTIME_LIMIT + process)
         };
         if !state.valid {
             continue;
@@ -30737,6 +31027,7 @@ fn linux_descriptor_close_with_wake(descriptor: u64, wake_waiters: bool) -> u64 
 }
 
 fn linux_descriptor_close_with_wake_inner(descriptor: u64, wake_waiters: bool) -> u64 {
+    linux_epoll_forget_descriptor(descriptor);
     if let Some(slot) = linux_socket_slot(descriptor) {
         let closed = crate::linux_socket::close(slot);
         if let Some(index) = usize::try_from(descriptor)
@@ -30798,9 +31089,10 @@ fn linux_descriptor_close_with_wake_inner(descriptor: u64, wake_waiters: bool) -
     }
     if linux_epoll_descriptor(descriptor) {
         ELF_PROBE_EPOLL_DESCRIPTOR.store(0, Ordering::SeqCst);
-        ELF_PROBE_EPOLL_TARGET.store(u64::MAX, Ordering::SeqCst);
-        ELF_PROBE_EPOLL_EVENTS.store(0, Ordering::SeqCst);
-        ELF_PROBE_EPOLL_DATA.store(0, Ordering::SeqCst);
+        for target in 0..LINUX_DESCRIPTOR_TABLE_LIMIT as usize {
+            ELF_PROBE_EPOLL_EVENTS[target].store(0, Ordering::SeqCst);
+            ELF_PROBE_EPOLL_DATA[target].store(0, Ordering::SeqCst);
+        }
         set_linux_descriptor_close_on_exec(descriptor, false);
         if wake_waiters {
             wake_linux_descriptor_waits();
@@ -30832,10 +31124,20 @@ fn linux_descriptor_close_with_wake_inner(descriptor: u64, wake_waiters: bool) -
         return 0;
     }
     if linux_timerfd_descriptor(descriptor) {
-        ELF_PROBE_TIMERFD_DESCRIPTOR.store(0, Ordering::SeqCst);
-        ELF_PROBE_TIMERFD_FLAGS.store(0, Ordering::SeqCst);
-        ELF_PROBE_TIMERFD_INTERVAL.store(0, Ordering::SeqCst);
-        ELF_PROBE_TIMERFD_DEADLINE.store(0, Ordering::SeqCst);
+        if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
+            let index = (descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize;
+            LINUX_RUNTIME_TIMERFD_ACTIVE[index].store(0, Ordering::SeqCst);
+            LINUX_RUNTIME_TIMERFD_CLOCKS[index].store(0, Ordering::SeqCst);
+            LINUX_RUNTIME_TIMERFD_FLAGS[index].store(0, Ordering::SeqCst);
+            LINUX_RUNTIME_TIMERFD_INTERVALS[index].store(0, Ordering::SeqCst);
+            LINUX_RUNTIME_TIMERFD_DEADLINES[index].store(0, Ordering::SeqCst);
+        } else {
+            ELF_PROBE_TIMERFD_DESCRIPTOR.store(0, Ordering::SeqCst);
+            ELF_PROBE_TIMERFD_CLOCK.store(0, Ordering::SeqCst);
+            ELF_PROBE_TIMERFD_FLAGS.store(0, Ordering::SeqCst);
+            ELF_PROBE_TIMERFD_INTERVAL.store(0, Ordering::SeqCst);
+            ELF_PROBE_TIMERFD_DEADLINE.store(0, Ordering::SeqCst);
+        }
         set_linux_descriptor_close_on_exec(descriptor, false);
         if wake_waiters {
             wake_linux_descriptor_waits();
@@ -31052,11 +31354,6 @@ fn linux_console_dup2(source: u64, target: u64) -> u64 {
             ELF_PROBE_STDIO_TMP_FILE_GENERATIONS[index].store(source_tmp, Ordering::SeqCst);
             ELF_PROBE_STDIO_SOCKET_FLAGS[index].store(source_flags, Ordering::SeqCst);
             ELF_PROBE_STDIO_OFFSETS[index].store(source_offset, Ordering::SeqCst);
-        }
-        if linux_inotify_descriptor(source) {
-            if let Some(instance) = linux_inotify_instance(source) {
-                LINUX_INOTIFY_INSTANCE_REFS[instance].fetch_add(1, Ordering::SeqCst);
-            }
         }
         if linux_fanotify_descriptor(source) {
             LINUX_FANOTIFY_REFS.fetch_add(1, Ordering::SeqCst);
@@ -31277,19 +31574,15 @@ fn linux_descriptor_fcntl(descriptor: u64, command: u64, argument: u64) -> u64 {
                 _ => LINUX_EINVAL,
             };
         }
-        if linux_timerfd_descriptor(descriptor) {
+        if let Some(state) = linux_timerfd_state(descriptor) {
             return match command {
                 LINUX_F_GETFD | LINUX_F_SETFD => {
                     linux_fcntl_descriptor_flags(descriptor, command, argument)
                 }
                 LINUX_F_GETFL => {
-                    2 | u64::from(
-                        ELF_PROBE_TIMERFD_FLAGS.load(Ordering::SeqCst) & LINUX_TFD_NONBLOCK as u32,
-                    )
+                    2 | u64::from(state.flags.load(Ordering::SeqCst) & LINUX_TFD_NONBLOCK as u32)
                 }
-                LINUX_F_SETFL => {
-                    linux_descriptor_set_nonblocking(&ELF_PROBE_TIMERFD_FLAGS, argument)
-                }
+                LINUX_F_SETFL => linux_descriptor_set_nonblocking(state.flags, argument),
                 _ => LINUX_EINVAL,
             };
         }
@@ -31601,8 +31894,46 @@ fn linux_getdents(descriptor: u64, address: u64, count: u64, legacy: bool) -> u6
                 }
             }
         }
-        if directory == b"proc/1" {
-            if cursor > 7 {
+        if directory == b"proc/self/fd" {
+            if cursor > LINUX_AUX_DESCRIPTOR_LIMIT as usize {
+                return LINUX_EINVAL;
+            }
+            while cursor < LINUX_AUX_DESCRIPTOR_LIMIT as usize {
+                let descriptor = cursor as u64;
+                cursor += 1;
+                if !linux_descriptor_open(descriptor) {
+                    continue;
+                }
+                let mut name = [0_u8; 20];
+                let mut value = descriptor;
+                let mut digits = 1_usize;
+                while value >= 10 {
+                    value /= 10;
+                    digits += 1;
+                }
+                value = descriptor;
+                for index in (0..digits).rev() {
+                    name[index] = b'0' + (value % 10) as u8;
+                    value /= 10;
+                }
+                if !append_linux_dirent(
+                    &mut entries[..output_capacity],
+                    &mut used,
+                    legacy,
+                    1_000 + descriptor,
+                    (cursor + 2) as i64,
+                    10,
+                    &name[..digits],
+                ) {
+                    if used == 0 {
+                        return LINUX_EINVAL;
+                    }
+                    cursor -= 1;
+                    break;
+                }
+            }
+        } else if directory == b"proc/1" {
+            if cursor > 8 {
                 return LINUX_EINVAL;
             }
             for (index, inode, name) in [
@@ -31613,6 +31944,7 @@ fn linux_getdents(descriptor: u64, address: u64, count: u64, legacy: bool) -> u6
                 (4_usize, 22_u64, &b"setgroups"[..]),
                 (5_usize, 32_u64, &b"stat"[..]),
                 (6_usize, 33_u64, &b"statm"[..]),
+                (7_usize, 37_u64, &b"cgroup"[..]),
             ] {
                 if cursor == index {
                     if !append_linux_dirent(
@@ -31633,7 +31965,7 @@ fn linux_getdents(descriptor: u64, address: u64, count: u64, legacy: bool) -> u6
                 }
             }
         } else if directory == b"proc/2" {
-            if cursor > 3 {
+            if cursor > 4 {
                 return LINUX_EINVAL;
             }
             if linux_process::live_process_status(2).is_none() {
@@ -31643,6 +31975,7 @@ fn linux_getdents(descriptor: u64, address: u64, count: u64, legacy: bool) -> u6
                 (0_usize, 24_u64, &b"status"[..]),
                 (1_usize, 34_u64, &b"stat"[..]),
                 (2_usize, 35_u64, &b"statm"[..]),
+                (3_usize, 38_u64, &b"cgroup"[..]),
             ] {
                 if cursor == index {
                     if !append_linux_dirent(
@@ -33065,6 +33398,7 @@ fn linux_stat(mode: u32, inode: u64) -> [u8; LINUX_STAT_SIZE] {
 enum LinuxFilesystemKind {
     Root,
     Proc,
+    Cgroup2,
     Pipe,
     Socket,
     Anonymous,
@@ -33073,6 +33407,7 @@ enum LinuxFilesystemKind {
 fn linux_statfs_data(kind: LinuxFilesystemKind) -> [u8; 120] {
     const RAMFS_MAGIC: u64 = 0x8584_58f6;
     const PROC_SUPER_MAGIC: u64 = 0x9fa0;
+    const CGROUP2_SUPER_MAGIC: u64 = 0x6367_7270;
     const PIPEFS_MAGIC: u64 = 0x5049_5045;
     const SOCKFS_MAGIC: u64 = 0x534f_434b;
     const ANON_INODE_FS_MAGIC: u64 = 0x0904_1934;
@@ -33088,6 +33423,11 @@ fn linux_statfs_data(kind: LinuxFilesystemKind) -> [u8; 120] {
         LinuxFilesystemKind::Proc => (
             PROC_SUPER_MAGIC,
             2,
+            ST_VALID | ST_NOSUID | ST_NODEV | ST_NOEXEC | ST_RELATIME,
+        ),
+        LinuxFilesystemKind::Cgroup2 => (
+            CGROUP2_SUPER_MAGIC,
+            3,
             ST_VALID | ST_NOSUID | ST_NODEV | ST_NOEXEC | ST_RELATIME,
         ),
         LinuxFilesystemKind::Pipe => (PIPEFS_MAGIC, 0, ST_VALID),
@@ -33173,8 +33513,14 @@ fn linux_statfs(path_address: u64, stat_address: u64) -> u64 {
     let canonical_is_proc = canonical_length.is_some_and(|length| {
         &canonical[..length] == b"proc" || canonical[..length].starts_with(b"proc/")
     });
+    let canonical_is_cgroup = canonical_length.is_some_and(|length| {
+        &canonical[..length] == b"sys/fs/cgroup"
+            || canonical[..length].starts_with(b"sys/fs/cgroup/")
+    });
     let kind = if virtual_path.is_some() || canonical_is_proc {
         LinuxFilesystemKind::Proc
+    } else if canonical_is_cgroup {
+        LinuxFilesystemKind::Cgroup2
     } else {
         LinuxFilesystemKind::Root
     };
@@ -33183,6 +33529,211 @@ fn linux_statfs(path_address: u64, stat_address: u64) -> u64 {
     } else {
         LINUX_EFAULT
     }
+}
+
+fn linux_mount_filesystem(
+    source_address: u64,
+    target_address: u64,
+    filesystem_address: u64,
+    flags: u64,
+    _data_address: u64,
+) -> u64 {
+    const MS_RDONLY: u64 = 1;
+    const MS_NOSUID: u64 = 2;
+    const MS_NODEV: u64 = 4;
+    const MS_NOEXEC: u64 = 8;
+    const MS_SYNCHRONOUS: u64 = 16;
+    const MS_REMOUNT: u64 = 32;
+    const MS_MANDLOCK: u64 = 64;
+    const MS_DIRSYNC: u64 = 128;
+    const MS_NOSYMFOLLOW: u64 = 256;
+    const MS_NOATIME: u64 = 1024;
+    const MS_NODIRATIME: u64 = 2048;
+    const MS_BIND: u64 = 4096;
+    const MS_MOVE: u64 = 8192;
+    const MS_REC: u64 = 16384;
+    const MS_SILENT: u64 = 32768;
+    const MS_POSIXACL: u64 = 1 << 16;
+    const MS_UNBINDABLE: u64 = 1 << 17;
+    const MS_PRIVATE: u64 = 1 << 18;
+    const MS_SLAVE: u64 = 1 << 19;
+    const MS_SHARED: u64 = 1 << 20;
+    const MS_RELATIME: u64 = 1 << 21;
+    const MS_KERNMOUNT: u64 = 1 << 22;
+    const MS_I_VERSION: u64 = 1 << 23;
+    const MS_STRICTATIME: u64 = 1 << 24;
+    const MS_LAZYTIME: u64 = 1 << 25;
+    const VALID_FLAGS: u64 = MS_RDONLY
+        | MS_NOSUID
+        | MS_NODEV
+        | MS_NOEXEC
+        | MS_SYNCHRONOUS
+        | MS_REMOUNT
+        | MS_MANDLOCK
+        | MS_DIRSYNC
+        | MS_NOSYMFOLLOW
+        | MS_NOATIME
+        | MS_NODIRATIME
+        | MS_BIND
+        | MS_MOVE
+        | MS_REC
+        | MS_SILENT
+        | MS_POSIXACL
+        | MS_UNBINDABLE
+        | MS_PRIVATE
+        | MS_SLAVE
+        | MS_SHARED
+        | MS_RELATIME
+        | MS_KERNMOUNT
+        | MS_I_VERSION
+        | MS_STRICTATIME
+        | MS_LAZYTIME;
+
+    let Some(namespace) = current_linux_user_namespace() else {
+        return LINUX_ESRCH;
+    };
+    if current_container_slot().is_none()
+        || linux_user::privileged_operation_denied(
+            namespace,
+            linux_user::PrivilegedOperation::ManageMounts,
+        )
+        || current_linux_credentials().is_none_or(|credentials| credentials.euid != 0)
+    {
+        return LINUX_EPERM;
+    }
+    if flags & !VALID_FLAGS != 0 {
+        return LINUX_EINVAL;
+    }
+
+    let mut target = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+    let mut target_length = match copy_linux_c_string(target_address, &mut target) {
+        Ok(length) => length,
+        Err(error) => return error,
+    };
+    while target_length > 1 && target[target_length - 1] == b'/' {
+        target_length -= 1;
+    }
+    let mut resolved_target = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+    let target =
+        if let Some(descriptor_bytes) = target[..target_length].strip_prefix(b"/proc/self/fd/") {
+            let Some(descriptor) = descriptor_bytes.iter().try_fold(0_u64, |value, byte| {
+                byte.is_ascii_digit()
+                    .then_some(value.checked_mul(10)?.checked_add(u64::from(byte - b'0'))?)
+            }) else {
+                return LINUX_ENOENT;
+            };
+            let Some(length) = linux_descriptor_path(descriptor, &mut resolved_target) else {
+                return LINUX_ENOENT;
+            };
+            &resolved_target[..length]
+        } else {
+            &target[..target_length]
+        };
+    let target_is_api_directory = matches!(
+        target,
+        b"/dev/shm"
+            | b"/dev/pts"
+            | b"/proc"
+            | b"/run"
+            | b"/sys"
+            | b"/sys/fs/cgroup"
+            | b"/sys/fs/bpf"
+            | b"/sys/kernel/debug"
+            | b"/sys/kernel/tracing"
+            | b"/sys/kernel/security"
+            | b"/sys/fs/pstore"
+    );
+    let target_is_directory = target_is_api_directory
+        || linux_rootfs_path_at(u64::from(LINUX_AT_FDCWD), target).is_some_and(|(_, entry)| {
+            entry.is_none_or(|entry| entry.kind == crate::published_rootfs::EntryKind::Directory)
+        })
+        || linux_virtual_mount_path_at(u64::from(LINUX_AT_FDCWD), target)
+            .is_some_and(|kind| kind & LINUX_DEVICE_DIRECTORY != 0)
+        || {
+            let mut canonical = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+            linux_canonical_path_at(u64::from(LINUX_AT_FDCWD), target, &mut canonical)
+                .ok()
+                .and_then(|length| crate::linux_overlay::lookup(&canonical[..length]))
+                .is_some_and(|metadata| metadata.kind == crate::linux_overlay::NodeKind::Directory)
+        };
+    if !target_is_directory {
+        return LINUX_ENOENT;
+    }
+
+    let propagation = flags & (MS_SHARED | MS_PRIVATE | MS_SLAVE | MS_UNBINDABLE) != 0;
+    if propagation || flags & (MS_REMOUNT | MS_BIND | MS_MOVE) != 0 {
+        return 0;
+    }
+    if filesystem_address == 0 {
+        return LINUX_EINVAL;
+    }
+    let mut filesystem = [0_u8; 32];
+    let filesystem_length = match copy_linux_c_string(filesystem_address, &mut filesystem) {
+        Ok(length) => length,
+        Err(error) => return error,
+    };
+    let filesystem = &filesystem[..filesystem_length];
+    if !matches!(
+        filesystem,
+        b"tmpfs"
+            | b"proc"
+            | b"sysfs"
+            | b"devtmpfs"
+            | b"devpts"
+            | b"cgroup2"
+            | b"securityfs"
+            | b"pstore"
+            | b"bpf"
+            | b"tracefs"
+            | b"debugfs"
+            | b"hugetlbfs"
+            | b"mqueue"
+    ) {
+        return LINUX_ENODEV;
+    }
+    if filesystem == b"cgroup2" {
+        for (path, contents) in [
+            (&b"sys/fs/cgroup/cgroup.procs"[..], &b""[..]),
+            (&b"sys/fs/cgroup/cgroup.controllers"[..], &b""[..]),
+            (&b"sys/fs/cgroup/cgroup.subtree_control"[..], &b""[..]),
+        ] {
+            if crate::linux_overlay::lookup(path).is_none()
+                && crate::linux_overlay::create_file(path, 0o644, contents).is_none()
+            {
+                return LINUX_ENOSPC;
+            }
+        }
+    }
+    if source_address != 0 {
+        let mut source = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+        if let Err(error) = copy_linux_c_string(source_address, &mut source) {
+            return error;
+        }
+    }
+    0
+}
+
+fn linux_descriptor_path(
+    descriptor: u64,
+    output: &mut [u8; crate::linux_overlay::PATH_CAPACITY],
+) -> Option<usize> {
+    if !linux_descriptor_open(descriptor) {
+        return None;
+    }
+    output[0] = b'/';
+    if let Some(handle) = linux_overlay_descriptor_handle(descriptor) {
+        return crate::linux_overlay::copy_path(handle, &mut output[1..]).map(|length| length + 1);
+    }
+    let rootfs = linux_rootfs_descriptor(descriptor);
+    if rootfs != 0 {
+        return crate::published_rootfs::copy_path(rootfs, &mut output[1..])
+            .map(|length| length + 1);
+    }
+    let state = linux_device_descriptor(descriptor);
+    linux_measured_directory_path(state).and_then(|path| {
+        output.get_mut(1..1 + path.len())?.copy_from_slice(path);
+        Some(path.len() + 1)
+    })
 }
 
 fn linux_fstatfs(descriptor: u64, stat_address: u64) -> u64 {
@@ -34007,6 +34558,19 @@ fn linux_arch_prctl(option: u64, argument: u64) -> u64 {
 
 fn linux_prctl(option: u64, argument2: u64, argument3: u64, argument4: u64, argument5: u64) -> u64 {
     match u64::from(option as u32) {
+        LINUX_PR_SET_PDEATHSIG if argument2 <= LINUX_SIGNAL_COUNT as u64 => {
+            ELF_PROBE_PARENT_DEATH_SIGNAL.store(argument2 as u32, Ordering::SeqCst);
+            0
+        }
+        LINUX_PR_SET_PDEATHSIG => LINUX_EINVAL,
+        LINUX_PR_GET_PDEATHSIG => {
+            let signal = ELF_PROBE_PARENT_DEATH_SIGNAL.load(Ordering::SeqCst);
+            if copy_to_linux_user(argument2, &signal.to_ne_bytes()) {
+                0
+            } else {
+                LINUX_EFAULT
+            }
+        }
         LINUX_PR_GET_DUMPABLE => u64::from(ELF_PROBE_DUMPABLE.load(Ordering::SeqCst)),
         LINUX_PR_SET_DUMPABLE if argument2 <= 1 => {
             ELF_PROBE_DUMPABLE.store(argument2 != 0, Ordering::SeqCst);

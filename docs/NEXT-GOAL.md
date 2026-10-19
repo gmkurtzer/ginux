@@ -55,6 +55,18 @@ Remaining before Stage 2 is complete:
 Gate passed for this checkpoint: `make test`. The next review cycle should
 complete the dispatcher and blocking-wait portion of Stage 2, then stop again.
 
+### Completed checkpoint: Rocky systemd launch
+
+Rocky Linux 10 UBI-init now launches `/sbin/init` as domain PID 1. Systemd
+detects QEMU and x86-64, executes its generator fork/exec paths, and remains
+alive through the smoke-test stability window. The gate is
+`make probe-rocky-systemd`.
+
+This is a launch checkpoint, not a complete system boot. Current nonfatal gaps
+include os-release propagation, netlink, sysctl files, timezone-change events,
+and some bind-remount behavior. Long-running PID 1 also confirms why control
+must come from an independent exec path rather than its attached console.
+
 ### Next bounded checkpoint: domain process dispatch and exec
 
 `domain exec` is not a controller-side shell shortcut. It must create a new
@@ -121,13 +133,11 @@ Proposed scope: systemd as domain PID 1, mounts, devices, credentials, cgroups,
 clocks, timers, process supervision, sockets, service activation, console
 login, and `dnf update`.
 
-Current probe: Rocky 10 UBI-init is downloaded, published, and `/sbin/init` is
-executed by the Linux personality. Systemd then reports `EINVAL` while checking
-whether `/proc`, `/sys`, and `/dev` are mount points, fails its early API
-filesystem setup, and freezes. After `domain exec` exists, a non-interactive
-systemd status command and these mount checks become the next diagnostic and
-compatibility gate; a successful exec alone must not be mistaken for a
-successful system boot.
+Current probe: Rocky 10 UBI-init is downloaded, published, and `/sbin/init`
+launches as systemd PID 1. Generator fork/exec succeeds and PID 1 survives the
+stability window. After `domain exec` exists, a non-interactive systemd status
+command and the remaining API-filesystem warnings become the next diagnostic
+and compatibility gate; launching PID 1 alone is not a complete system boot.
 
 ## Stage 9: Persistence and production architecture
 

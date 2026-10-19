@@ -1756,7 +1756,7 @@ ginux_linux_system_init:
     mov edx, 512
     mov eax, 217
     syscall
-    cmp rax, 264
+    cmp rax, 296
     jne .Lfailure
     cmp dword ptr [rip + .Lstatus + 67], 0x74617473
     jne .Lfailure
@@ -3140,7 +3140,7 @@ ginux_linux_system_init:
     mov edx, 512
     mov eax, 217
     syscall
-    cmp rax, 136
+    cmp rax, 168
     jne .Lfailure
     cmp dword ptr [rip + .Lstatus + 67], 0x74617473
     jne .Lfailure

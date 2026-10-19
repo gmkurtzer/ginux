@@ -16,7 +16,7 @@ pub(crate) const ROOT_READ_ONLY: u32 = 1 << 0;
 pub(crate) const ROOT_NOSUID: u32 = 1 << 1;
 pub(crate) const ROOT_NODEV: u32 = 1 << 2;
 const ROOT_FLAGS: u32 = ROOT_READ_ONLY | ROOT_NOSUID | ROOT_NODEV;
-pub(crate) const MOUNTINFO: &[u8] = b"1 0 0:1 / / ro,nosuid,nodev - ginux-root rootfs ro\n2 1 0:2 / /proc rw,nosuid,nodev,noexec,relatime - proc proc rw\n";
+pub(crate) const MOUNTINFO: &[u8] = b"1 0 0:1 / / ro,nosuid,nodev - ginux-root rootfs ro\n2 1 0:2 / /proc rw,nosuid,nodev,noexec,relatime - proc proc rw\n3 1 0:3 / /sys/fs/cgroup rw,nosuid,nodev,noexec,relatime - cgroup2 cgroup2 rw\n";
 
 static TABLE_INSTALLED: AtomicBool = AtomicBool::new(false);
 static CURRENT_SLOT: AtomicU8 = AtomicU8::new(EMPTY_SLOT);
@@ -275,10 +275,41 @@ pub(crate) fn current_root_is_read_only() -> bool {
                     || domain::container_domain_limits(namespace.owner_domain).is_some()
             },
             |expected| namespace.owner_domain == expected,
-        ) && namespace.domain_root
-            && namespace.root_flags == ROOT_FLAGS
+        ) && namespace.root_flags == ROOT_FLAGS
             && namespace.root.is_live()
     })
+}
+
+pub(crate) fn current_handle() -> Option<MountNamespaceHandle> {
+    current().filter(|handle| live_namespace(*handle).is_some())
+}
+
+pub(crate) fn clone_current() -> Option<MountNamespaceHandle> {
+    let active = current()?;
+    let namespace = *live_namespace(active)?;
+    live_table_mut()?.create(
+        namespace.owner_domain,
+        namespace.root,
+        namespace.root_flags,
+        false,
+    )
+}
+
+pub(crate) fn switch_to(handle: MountNamespaceHandle) -> bool {
+    if live_namespace(handle).is_none() {
+        return false;
+    }
+    CURRENT_SLOT.store(handle.slot, Ordering::Release);
+    CURRENT_GENERATION.store(handle.generation, Ordering::Release);
+    CURRENT_ID.store(handle.id, Ordering::Release);
+    current() == Some(handle)
+}
+
+pub(crate) fn retire(handle: MountNamespaceHandle) -> bool {
+    if current() == Some(handle) {
+        return false;
+    }
+    live_table_mut().is_some_and(|table| table.retire(handle))
 }
 
 pub(crate) fn current_mountinfo() -> Option<&'static [u8]> {

@@ -26,10 +26,11 @@ sharing the same underlying isolation, scheduling, storage, and device
 mechanisms.
 
 Ginux is currently a research and engineering prototype. It boots, runs its
-statically linked Linux-ABI controller and isolated native services, and
-executes an unmodified Alpine Linux userspace in a domain under QEMU. It does
-not yet provide complete Linux compatibility, boot Rocky Linux with systemd,
-or implement a second userspace personality.
+statically linked Linux-ABI controller and isolated native services, executes
+an unmodified Alpine Linux userspace, and launches Rocky Linux 10 systemd as
+domain PID 1 under QEMU. It does not yet provide complete Linux compatibility,
+carry Rocky through a complete systemd target, or implement a second userspace
+personality.
 
 ## Why Ginux?
 
@@ -279,7 +280,7 @@ simulation is not sufficient.
 | Domains | Default-Linux domains with concurrent isolated address spaces, root/mount and process views, retained CPU state, IPC, scheduling, lifecycle events, fault containment, and generation-safe cleanup | Broader per-domain resource accounting and policy enforcement |
 | Native services | Measured ring-3 network, protocol, and volume services with bounded ABIs and restart proofs | Production service supervision and broader device support |
 | Devices | Virtio block/network paths, MSI-X, and VT-d DMA confinement in the QEMU profile | NVMe, high-speed networking, GPU support, and selected real servers |
-| Linux personality | Bounded x86-64 ELF/dynamic-linker support, a growing syscall/VFS/process/signal ABI, an automatically mounted per-domain procfs, an unmodified Alpine musl/BusyBox shell, and a Rocky 10 glibc shell that can fork/exec dynamic coreutils | Expand the general Linux ABI, then boot Rocky Linux 10 with systemd |
+| Linux personality | Bounded x86-64 ELF/dynamic-linker support, a growing syscall/VFS/process/signal ABI, per-domain procfs, Alpine musl/BusyBox, Rocky glibc/coreutils, and Rocky systemd launched as PID 1 | Add `domain exec`, then advance systemd through its remaining filesystem, netlink, and event interfaces |
 | Other personalities | Domain and kernel mechanisms are designed for reuse | No BSD or other non-Linux personality is implemented yet |
 
 The Linux layer is intentionally tracked as a compatibility contract, not as a
@@ -339,8 +340,11 @@ published by future transports or local storage.
 Full controlling-terminal and session semantics are still incomplete. Rocky
 Linux 10 now starts an unmodified glibc `/bin/sh`; shell builtins, file status,
 dynamic `cat`, and root-directory `ls` pass the QEMU lifecycle gate. This is a
-meaningful ABI checkpoint, not a claim of general Linux or systemd
-compatibility. The process layer contains generation-checked copy-on-write,
+meaningful ABI checkpoint, not a claim of general Linux compatibility. Rocky
+Linux 10 systemd now launches as PID 1, executes its generators, and remains
+alive through the systemd smoke-test window. It does not yet reach a complete
+boot target; missing netlink, event, sysctl, and broader API-filesystem behavior
+remain visible. The process layer contains generation-checked copy-on-write,
 but Linux personality forks currently use eager private copies: repeated Rocky
 fork/exec/exit cycles exposed incomplete COW retirement bookkeeping, so the
 optimization is disabled on the production path until that lifecycle is

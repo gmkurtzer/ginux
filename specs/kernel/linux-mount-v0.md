@@ -1,37 +1,33 @@
 # Linux Mount Namespace v0
 
-**Status:** Bounded immutable-root namespace exercised by measured PID 1.
+**Status:** Per-domain immutable-root namespace with bounded Linux mount support.
 
-The kernel installs one initial Linux mount namespace only after publishing the
-authenticated initramfs root in kernel-owned memory. The namespace table has
-four fixed slots. Each identity contains its table slot, a monotonically
-increasing per-slot generation, and a monotonically increasing namespace ID.
-Exact-handle lookup rejects stale generations and IDs. The initial namespace
-cannot be retired.
+The kernel installs a Linux mount namespace only after publishing the
+authenticated domain root in kernel-owned memory. Namespace identities are
+generation checked; stale handles and root generations fail closed.
 
-The namespace contains exactly one root mount. It binds the exact published
-root generation and fixed `read-only`, `nosuid`, and `nodev` flags. A root
-lookup succeeds only while the namespace handle and the referenced root
-generation are both live. Linux pathname, measured-directory, regular-file,
-and exec-root resolution all require that live binding; absence or staleness
-fails closed.
+Every domain namespace starts with an immutable root mount using `read-only`,
+`nosuid`, and `nodev`. Linux pathname, regular-file, and executable lookup all
+require a live namespace binding. Fork inherits the current namespace unless
+`CLONE_NEWNS` requests a generation-distinct copy. Process switches restore
+the process's namespace.
 
-The current proof runtime serially activates the initial namespace before
-admitting the live Linux process registry and deactivates it after process
-teardown. It verifies the namespace is still live and read-only at teardown.
-The bounded PID 1 view exposes the root as inode 19 at
-`/proc/1/mountinfo`, with exact contents:
+Domain root may call Linux mount operations. That authority is confined to the
+domain; the control domain cannot use it to mutate a workload domain. The PID
+1 view currently exposes the root, procfs, and cgroup2 API mounts through
+`/proc/1/mountinfo`:
 
 ```text
 1 0 0:1 / / ro,nosuid,nodev - ginux-root rootfs ro
+2 1 0:2 / /proc rw,nosuid,nodev,noexec,relatime - proc proc rw
+3 1 0:3 / /sys/fs/cgroup rw,nosuid,nodev,noexec,relatime - cgroup2 cgroup2 rw
 ```
 
-PID 1 enumerates that record, reads all 51 bytes, writes them to its measured
-console, and closes the descriptor before readiness. The QEMU gate requires
-both the installation markers and the exact userspace-visible line.
+The current implementation accepts the mount flags and API-filesystem targets
+needed by the systemd launch path. The root remains immutable. Complete mount
+mutation, propagation, `umount`, pivot-root, chroot, writable filesystems, and
+the remaining namespace syscalls are still compatibility work.
 
-This contract does not implement `mount`, `umount`, remount, bind mounts,
-propagation, pivot-root, chroot, namespace cloning, per-process namespace
-selection, a writable root, or a general VFS. The additional table slots and
-retirement rules are construction and stale-handle proofs, not public support
-for creating namespaces.
+Mount is not intended to be policy-denied inside a domain. Linux root must be
+able to construct nested Linux namespaces and run container stacks while the
+enclosing Ginux domain remains the stronger security and resource boundary.

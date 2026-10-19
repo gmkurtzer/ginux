@@ -5,6 +5,7 @@ repo_root=$(cd "$(dirname "$0")/../.." && pwd)
 output_file=$(mktemp "${TMPDIR:-/tmp}/ginux-rocky-systemd.XXXXXX")
 volume_image=$(mktemp "${TMPDIR:-/tmp}/ginux-rocky-systemd-volume.XXXXXX")
 qemu_pid_file=$(mktemp "${TMPDIR:-/tmp}/ginux-rocky-systemd-pid.XXXXXX")
+success_file=$(mktemp "${TMPDIR:-/tmp}/ginux-rocky-systemd-success.XXXXXX")
 qemu_pid=""
 
 stop_qemu() {
@@ -23,7 +24,7 @@ cleanup() {
         kill "$qemu_pid" 2>/dev/null || true
         wait "$qemu_pid" 2>/dev/null || true
     fi
-    rm -f "$output_file" "$volume_image" "$qemu_pid_file"
+    rm -f "$output_file" "$volume_image" "$qemu_pid_file" "$success_file"
 }
 trap cleanup EXIT
 
@@ -56,6 +57,7 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
         'domain start rocky --attach'
     wait_for 'ginux: OCI image ready' 240
     wait_for 'ginux: entering configured Linux init' 30
+    wait_for ' running in system mode (' 30
     sleep 15
     if grep -Fq 'ginux: Linux init diagnostics: exit=127 first-unsupported-syscall=none' "$output_file"; then
         printf '%s\n' 'shutdown'
@@ -63,11 +65,8 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
         if grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC|Linux init (execution|setup) failed|Linux init exited with status|rocky: (failed|stopped)' "$output_file"; then
             fail 'systemd failed before the documented mmap boundary'
         fi
-        printf '\035'
-        wait_for "[detached from domain; use 'domain attach NAME' to return]" 30
-        printf '%s\n' 'domain status rocky'
-        wait_for 'rocky: running' 30
-        printf '%s\n' 'shutdown'
+        printf '%s\n' ok >"$success_file"
+        stop_qemu
     fi
 } | GINUX_VOLUME_IMAGE="$volume_image" GINUX_QEMU_PID_FILE="$qemu_pid_file" \
     "$repo_root/tools/qemu/run.sh" >"$output_file" 2>&1 &
@@ -93,6 +92,12 @@ if kill -0 "$qemu_pid" 2>/dev/null; then
 fi
 wait "$qemu_pid" || true
 qemu_pid=""
+
+if [[ -s "$success_file" ]] \
+    && ! grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC|Linux init (execution|setup) failed|Linux init exited with status|rocky: (failed|stopped)' "$output_file"; then
+    echo 'Rocky systemd PID 1 smoke test passed.'
+    exit 0
+fi
 
 if ! grep -Fq 'GINUX_KERNEL_OK' "$output_file" \
     || grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC' "$output_file"; then

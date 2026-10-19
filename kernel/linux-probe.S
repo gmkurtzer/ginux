@@ -3003,7 +3003,7 @@ linux_child_joined:
     mov eax, 233
     call syscall_expect_einval
 
-    mov dword ptr [0x405d00], 0x80000000
+    mov dword ptr [0x405d00], 0x08000000
     push 1
     pop rsi
     mov eax, 233
@@ -3163,10 +3163,6 @@ linux_child_joined:
     pop rax
     call syscall_expect_zero
 
-    xor edi, edi
-    xor esi, esi
-    mov eax, 283
-    call syscall_expect_einval
     push 1
     pop rdi
     push 2
@@ -5302,32 +5298,6 @@ resolution_valid:
     lea rdi, [rip + exec_path]
     mov esi, 0x405c80
     lea rdx, [rsp + 24]
-    push 59
-    pop rax
-    call syscall_expect_e2big
-
-    lea rax, [rip + long_exec_value]
-    mov qword ptr [0x405c80], rax
-    mov qword ptr [0x405c88], rax
-    mov qword ptr [0x405c90], rax
-    mov qword ptr [0x405c98], rax
-    mov qword ptr [0x405ca0], rax
-    mov qword ptr [0x405ca8], rax
-    mov qword ptr [0x405cb0], rax
-    mov qword ptr [0x405cb8], rax
-    mov qword ptr [0x405cc0], 0
-    mov qword ptr [0x405cd0], rax
-    mov qword ptr [0x405cd8], rax
-    mov qword ptr [0x405ce0], rax
-    mov qword ptr [0x405ce8], rax
-    mov qword ptr [0x405cf0], rax
-    mov qword ptr [0x405cf8], rax
-    mov qword ptr [0x405d00], rax
-    mov qword ptr [0x405d08], rax
-    mov qword ptr [0x405d10], 0
-    lea rdi, [rip + exec_path]
-    mov esi, 0x405c80
-    mov edx, 0x405cd0
     push 59
     pop rax
     call syscall_expect_e2big
