@@ -1641,6 +1641,10 @@ static LINUX_RUNTIME_SYSCALL_TRACE: [BankedAtomicU64; LINUX_RUNTIME_SYSCALL_TRAC
 static LINUX_RUNTIME_SYSCALL_RESULT_TRACE: [BankedAtomicU64; LINUX_RUNTIME_SYSCALL_TRACE_LIMIT] =
     [const { BankedAtomicU64::new(0) }; LINUX_RUNTIME_SYSCALL_TRACE_LIMIT];
 static LINUX_RUNTIME_SYSCALL_TRACE_COUNT: BankedAtomicU64 = BankedAtomicU64::new(0);
+static LINUX_RUNTIME_SLOW_DIAGNOSTIC_WRITTEN: BankedAtomicBool = BankedAtomicBool::new(false);
+const LINUX_RUNTIME_UNSUPPORTED_WORDS: usize = 8;
+static LINUX_RUNTIME_UNSUPPORTED_SYSCALLS: [BankedAtomicU64; LINUX_RUNTIME_UNSUPPORTED_WORDS] =
+    [const { BankedAtomicU64::new(0) }; LINUX_RUNTIME_UNSUPPORTED_WORDS];
 static ELF_PROBE_NO_NEW_PRIVS: BankedAtomicBool = BankedAtomicBool::new(false);
 static ELF_PROBE_SECCOMP_STRICT: BankedAtomicBool = BankedAtomicBool::new(false);
 static ELF_PROBE_MEMBARRIER_REGISTRATIONS: BankedAtomicU32 = BankedAtomicU32::new(0);
@@ -3185,6 +3189,15 @@ pub(crate) fn live_linux_process_address_space_snapshot(
     if !(5..=6).contains(&hierarchy_count)
         || hierarchy[0].address() != address_space::current_root_address()
     {
+        if cfg!(feature = "verification-boot") {
+            serial_write("ginux: snapshot hierarchy count/root/current ");
+            serial_write_u64(hierarchy_count as u64);
+            serial_write(" ");
+            serial_write_u64(hierarchy[0].address());
+            serial_write(" ");
+            serial_write_u64(address_space::current_root_address());
+            serial_write("\r\n");
+        }
         return None;
     }
     LINUX_PROCESS_SNAPSHOT_STAGE.store(2, Ordering::SeqCst);
@@ -3566,6 +3579,14 @@ fn record_live_linux_process_snapshot() -> bool {
 
 #[inline(never)]
 fn refresh_nonruntime_linux_process_registry(context: LinuxUserContext) -> bool {
+    // A private page may have been materialized after fork by either a user
+    // write fault or a kernel copy-to-user operation.  The process table is
+    // authoritative for those COW replacements; refresh the legacy execution
+    // cache before using it to construct the verification snapshot.
+    if !sync_live_linux_process_address_space(current_linux_process_pid()) {
+        serial_write("ginux: live registry refresh address-space sync failed\r\n");
+        return false;
+    }
     let Some(snapshot) = live_linux_process_address_space_snapshot() else {
         serial_write("ginux: live registry refresh snapshot failed at stage ");
         serial_write_u64(u64::from(
@@ -3685,6 +3706,21 @@ fn sync_live_linux_process_address_space(pid: u32) -> bool {
         ELF_PROBE_ACTIVE_IMAGE_GENERATIONS[index]
             .store(mapping.frame.generation(), Ordering::SeqCst);
     }
+    for index in 0..LINUX_EXEC_MAPPING_LIMIT {
+        let address = ELF_PROBE_EXEC_MAPPING_ADDRESSES[index].load(Ordering::SeqCst) as usize;
+        if address == 0 {
+            continue;
+        }
+        let Some(mapping) = linux_process::live_process_mapping(pid, address) else {
+            serial_write("ginux: process address-space sync missing exec mapping ");
+            serial_write_u64(index as u64);
+            serial_write("\r\n");
+            return false;
+        };
+        ELF_PROBE_EXEC_MAPPING_FRAMES[index].store(mapping.frame.address(), Ordering::SeqCst);
+        ELF_PROBE_EXEC_MAPPING_GENERATIONS[index]
+            .store(mapping.frame.generation(), Ordering::SeqCst);
+    }
     let stack_address = (ELF_PROBE_STACK.load(Ordering::SeqCst) as usize) & !(PAGE_SIZE - 1);
     let heap_address = ELF_PROBE_BRK_LIMIT.load(Ordering::SeqCst) as usize
         - if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
@@ -3716,10 +3752,7 @@ fn execute_deferred_live_fork() -> bool {
     let Some(parent_runtime) = stage_linux_fork_parent_runtime_state(parent_pid) else {
         return false;
     };
-    // Runtime COW remains available to the process/address-space layer, but
-    // repeated Linux fork/exec cycles keep private copies until COW
-    // retirement and re-fork bookkeeping are validated end to end.
-    let Some(child) = linux_process::begin_live_fork(parent_pid, true) else {
+    let Some(child) = linux_process::begin_live_fork(parent_pid, false) else {
         release_staged_linux_fork_descriptors(parent_pid);
         LINUX_FORK_CHILD_TID_ADDRESS.store(0, Ordering::SeqCst);
         if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
@@ -3849,8 +3882,7 @@ fn execute_deferred_live_fork() -> bool {
         return false;
     }
     LIVE_FORK_PUBLIC_DIAGNOSTIC.store(0x20, Ordering::SeqCst);
-    let parent_synced = !LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
-        || sync_live_linux_process_address_space(parent_pid);
+    let parent_synced = sync_live_linux_process_address_space(parent_pid);
     let parent_resumed = parent_synced
         && address_space::resume_live_linux_process(
             parent.root,
@@ -6569,11 +6601,15 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
     LINUX_RUNTIME_EXIT_STATUS.store(u64::MAX, Ordering::SeqCst);
     LINUX_RUNTIME_FIRST_UNSUPPORTED_SYSCALL.store(u64::MAX, Ordering::SeqCst);
     LINUX_RUNTIME_SYSCALL_TRACE_COUNT.store(0, Ordering::SeqCst);
+    LINUX_RUNTIME_SLOW_DIAGNOSTIC_WRITTEN.store(false, Ordering::SeqCst);
     for syscall in &LINUX_RUNTIME_SYSCALL_TRACE {
         syscall.store(u64::MAX, Ordering::SeqCst);
     }
     for result in &LINUX_RUNTIME_SYSCALL_RESULT_TRACE {
         result.store(0, Ordering::SeqCst);
+    }
+    for unsupported in &LINUX_RUNTIME_UNSUPPORTED_SYSCALLS {
+        unsupported.store(0, Ordering::SeqCst);
     }
     ELF_PROBE_NO_NEW_PRIVS.store(false, Ordering::SeqCst);
     ELF_PROBE_SECCOMP_STRICT.store(false, Ordering::SeqCst);
@@ -8362,8 +8398,8 @@ extern "sysv64" fn linux_syscall_handler(
         return LINUX_RETURN_TO_KERNEL;
     }
     let runtime_mode = LINUX_RUNTIME_MODE.load(Ordering::SeqCst);
-    let trace_index = if cfg!(feature = "verification-boot")
-        && (runtime_mode || ELF_PROBE_SYSTEM_INIT.load(Ordering::SeqCst))
+    let trace_index = if runtime_mode
+        || cfg!(feature = "verification-boot") && ELF_PROBE_SYSTEM_INIT.load(Ordering::SeqCst)
     {
         let index = LINUX_RUNTIME_SYSCALL_TRACE_COUNT.fetch_add(1, Ordering::SeqCst) as usize
             % LINUX_RUNTIME_SYSCALL_TRACE_LIMIT;
@@ -9568,15 +9604,7 @@ extern "sysv64" fn linux_syscall_handler(
         number if linux_privileged_operation(number).is_some() => {
             linux_deny_privileged_operation(number)
         }
-        _ => {
-            let _ = LINUX_RUNTIME_FIRST_UNSUPPORTED_SYSCALL.compare_exchange(
-                u64::MAX,
-                number,
-                Ordering::SeqCst,
-                Ordering::SeqCst,
-            );
-            LINUX_ENOSYS
-        }
+        _ => LINUX_ENOSYS,
     };
     let result = if LINUX_FSIZE_LIMIT_HIT.swap(false, Ordering::SeqCst) {
         linux_file_size_limit_signal(registers, syscall_return, (user_rip, user_rflags), result)
@@ -9590,6 +9618,25 @@ extern "sysv64" fn linux_syscall_handler(
     };
     if let Some(index) = trace_index {
         LINUX_RUNTIME_SYSCALL_RESULT_TRACE[index].store(result, Ordering::SeqCst);
+    }
+    if runtime_mode && result == LINUX_ENOSYS {
+        let _ = LINUX_RUNTIME_FIRST_UNSUPPORTED_SYSCALL.compare_exchange(
+            u64::MAX,
+            number,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        );
+        if let Some(word) = usize::try_from(number / 64)
+            .ok()
+            .filter(|word| *word < LINUX_RUNTIME_UNSUPPORTED_WORDS)
+        {
+            let bit = 1_u64 << (number % 64);
+            if LINUX_RUNTIME_UNSUPPORTED_SYSCALLS[word].fetch_or(bit, Ordering::SeqCst) & bit == 0 {
+                serial_write("ginux: Linux ABI missing syscall ID ");
+                serial_write_u64(number);
+                serial_write("\r\n");
+            }
+        }
     }
     result
 }
@@ -35902,6 +35949,14 @@ fn linux_interrupt_context(handle: LinuxThreadHandle) -> Option<UserFaultContext
 }
 
 pub(crate) fn expire_linux_waits_from_timer(frame: &mut UserInterruptFrame) {
+    if LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
+        && !LINUX_RUNTIME_SLOW_DIAGNOSTIC_WRITTEN.load(Ordering::SeqCst)
+        && linux_elapsed_nanoseconds().is_some_and(|elapsed| elapsed >= 5_000_000_000)
+        && !LINUX_RUNTIME_SLOW_DIAGNOSTIC_WRITTEN.swap(true, Ordering::SeqCst)
+    {
+        serial_write("ginux: Linux runtime exceeded five seconds; diagnostic snapshot follows\r\n");
+        write_linux_runtime_syscall_trace();
+    }
     let descriptor_wakes = wake_linux_descriptor_waits();
     let expired = expire_linux_waits();
     // A Linux runtime thread can wait in a userspace spin lock without making

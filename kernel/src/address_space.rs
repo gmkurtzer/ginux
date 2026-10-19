@@ -4962,6 +4962,39 @@ pub(crate) fn replace_linux_cow_page_in_root(
     }
 }
 
+pub(crate) fn promote_linux_cow_page_in_root(
+    root: memory::FrameLease,
+    address: u64,
+    expected: memory::FrameLease,
+    executable: bool,
+) -> bool {
+    if address >= 1 << 47
+        || !address.is_multiple_of(PAGE_SIZE as u64)
+        || !(memory::frames_owned_by(memory::FrameOwner::KERNEL, &[expected])
+            || memory::frame_lease_is_runtime(expected))
+    {
+        return false;
+    }
+    let Some(entry) = linux_leaf_in_root(root.address(), address) else {
+        return false;
+    };
+    let value = unsafe { entry.read() };
+    if value & (ADDRESS_MASK | PRESENT | USER | WRITABLE | LINUX_RUNTIME_COW)
+        != expected.address() | PRESENT | USER | LINUX_RUNTIME_COW
+    {
+        return false;
+    }
+    let flags = PRESENT | USER | WRITABLE | if executable { 0 } else { NO_EXECUTE };
+    unsafe {
+        entry.write(expected.address() | flags);
+        if root.address() == current_root() {
+            asm!("invlpg [{}]", in(reg) address, options(nostack, preserves_flags));
+        }
+        entry.read() & (ADDRESS_MASK | PRESENT | USER | WRITABLE | NO_EXECUTE | LINUX_RUNTIME_COW)
+            == expected.address() | flags
+    }
+}
+
 pub(crate) fn current_linux_address_executable(address: u64) -> bool {
     if address >= 1 << 47 {
         return false;
