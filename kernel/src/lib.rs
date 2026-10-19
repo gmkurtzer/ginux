@@ -53,6 +53,8 @@ const PAGE_SIZE: usize = 4096;
 const Q35_IOMMU_REGISTER_BASE: u64 = 0xfed9_0000;
 const KERNEL_STACK_SIZE: usize = 512 * 1024;
 const KERNEL_STACK_STORAGE_SIZE: usize = PAGE_SIZE + KERNEL_STACK_SIZE + PAGE_SIZE;
+const PERSISTENT_LOCAL_CONFIG_SIZE: usize =
+    arch::x86_64::cpu::PERSISTENT_DOMAIN_CONFIG_SIZE + network::PERSISTENT_NETWORK_CONFIG_SIZE;
 const KERNEL_STACK_TOP_OFFSET: usize = PAGE_SIZE + KERNEL_STACK_SIZE;
 pub const BOOT_INFO_MAGIC: u64 = 0x0049_4258_554e_4947;
 pub const BOOT_INFO_VERSION: u32 = 7;
@@ -1239,10 +1241,26 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }) else {
         kernel_fail("\r\nginux: persistent virtio backend activation failed\r\n");
     };
+    let mut persisted_local_configuration = [0_u8; PERSISTENT_LOCAL_CONFIG_SIZE];
+    let mut persisted_local_record = None;
+    let mut persisted_local_configuration_valid = true;
     let disk_volume = (|| {
         let capacity_sectors = persistent_block.capacity_sectors();
         let state = volume::open_host_volume(&mut persistent_block, capacity_sectors).ok()?;
         let verified = volume::recover(&mut persistent_block)?;
+        if verified.generation != state.generation
+            || ginux_volume_format::HostVolumeHeader::decode(verified.payload())
+                != Some(state.header)
+        {
+            return None;
+        }
+        match volume::recover_local_config(
+            &mut persistent_block,
+            &mut persisted_local_configuration,
+        ) {
+            Ok(record) => persisted_local_record = record,
+            Err(_) => persisted_local_configuration_valid = false,
+        }
         (verified.generation == state.generation
             && ginux_volume_format::HostVolumeHeader::decode(verified.payload())
                 == Some(state.header))
@@ -3782,6 +3800,22 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     if !network::initialize_runtime() {
         kernel_fail("\r\nginux: runtime network initialization failed\r\n");
     }
+    if let Some(record) = persisted_local_record {
+        let (domain_bytes, network_bytes) = persisted_local_configuration
+            .split_at(arch::x86_64::cpu::PERSISTENT_DOMAIN_CONFIG_SIZE);
+        let domain_configuration = domain_bytes.try_into().ok();
+        let network_configuration = network_bytes.try_into().ok();
+        if record.length != PERSISTENT_LOCAL_CONFIG_SIZE
+            || domain_configuration.is_none_or(|configuration| {
+                !arch::x86_64::cpu::import_persistent_domain_configuration(configuration)
+            })
+            || network_configuration.is_none_or(|configuration| {
+                !network::import_persistent_configuration(configuration)
+            })
+        {
+            kernel_fail("\r\nginux: persistent local configuration invalid\r\n");
+        }
+    }
     OPERATOR_CONSOLE_READY.store(true, Ordering::Release);
     serial_write_raw(b"ginux: platform, security, devices, and runtime ready\r\n");
     serial_write("ginux: persistent storage ");
@@ -3795,6 +3829,16 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write(", ");
     serial_write_u64(host_volume.header.data_sectors);
     serial_write(" data sectors)\r\n");
+    if let Some(record) = persisted_local_record {
+        serial_write("ginux: local configuration recovered (generation ");
+        serial_write_u64(record.generation);
+        serial_write(")\r\n");
+    }
+    if !persisted_local_configuration_valid {
+        serial_write(
+            "ginux: local configuration rejected; continuing without persisted settings\r\n",
+        );
+    }
     serial_write_elapsed("ginux: timing boot-to-controller: ", kernel_boot_started);
     let mut controller_recovery_attempts = 0_u8;
     let mut controller_launch_announced = false;
@@ -3805,6 +3849,18 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         }
         let controller_completed = address_space::run_installed_interactive_controller();
         let shutdown_requested = arch::x86_64::cpu::take_container_host_shutdown_request();
+        if controller_completed && !cfg!(feature = "verification-boot") {
+            match persist_domain_configuration(virtio_block, virtio_mmio, virtio_iommu_profile) {
+                Some(record) => {
+                    serial_write("ginux: local configuration committed (generation ");
+                    serial_write_u64(record.generation);
+                    serial_write(")\r\n");
+                }
+                None => serial_write(
+                    "ginux: local configuration unavailable; runtime state remains active\r\n",
+                ),
+            }
+        }
         if shutdown_requested {
             if !controller_completed {
                 serial_write(
@@ -4223,6 +4279,51 @@ fn serial_write_usize(value: usize) {
 
 fn serial_write_elapsed(label: &str, started: u64) {
     serial_write_elapsed_at(label, started, arch::x86_64::timer::timestamp_counter());
+}
+
+fn persist_domain_configuration(
+    device: arch::x86_64::pci::VirtioBlockDevice,
+    mapping: arch::x86_64::paging::MmioMapping,
+    iommu_profile: arch::x86_64::iommu::DeviceTranslationProfile,
+) -> Option<volume::LocalConfigRecord> {
+    let mut configuration = [0_u8; PERSISTENT_LOCAL_CONFIG_SIZE];
+    let (domain_bytes, network_bytes) =
+        configuration.split_at_mut(arch::x86_64::cpu::PERSISTENT_DOMAIN_CONFIG_SIZE);
+    let domain_configuration = domain_bytes.try_into().ok()?;
+    let network_configuration = network_bytes.try_into().ok()?;
+    if !arch::x86_64::cpu::export_persistent_domain_configuration(domain_configuration) {
+        return None;
+    }
+    network::export_persistent_configuration(network_configuration);
+    let [dma_frame] = memory::allocate_frames::<1>(memory::FrameOwner::KERNEL)?;
+    let Some(dma_virtual) = dma_frame.direct_map_address() else {
+        let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[dma_frame]);
+        return None;
+    };
+    let Some(translation) = iommu_profile.activate(dma_frame) else {
+        let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[dma_frame]);
+        return None;
+    };
+    let Some(mut backend) = (unsafe {
+        arch::x86_64::pci::VirtioBlockBackend::start(
+            device,
+            mapping,
+            dma_frame.address(),
+            dma_virtual,
+        )
+    }) else {
+        let _ = translation.finish();
+        let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[dma_frame]);
+        return None;
+    };
+    let committed = volume::commit_local_config(&mut backend, &configuration).ok();
+    let device_quiesced = backend.finish();
+    let translation_retired = translation.finish();
+    let dma_retired = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[dma_frame])
+        && !memory::any_frame_lease_live(&[dma_frame]);
+    (device_quiesced && translation_retired && dma_retired)
+        .then_some(committed)
+        .flatten()
 }
 
 fn serial_write_elapsed_at(label: &str, started: u64, finished: u64) {

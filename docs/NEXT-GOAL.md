@@ -8,7 +8,7 @@ begin until the operator accepts the completed stage.
 
 ## Operator-prioritized checkpoint: persistent host volume foundation
 
-Status: **Complete; awaiting operator review**
+Status: **Configuration persistence complete; awaiting operator review**
 
 The QEMU development host now uses a sparse, self-initializing persistent
 volume with a versioned, geometry-bound header committed through the existing
@@ -17,11 +17,16 @@ generation without rewriting it. Deleting it and running Ginux again creates a
 clean volume. `make test-storage` verifies all three boots and guarantees QEMU
 cleanup. `make reset-storage` performs the explicit development reset.
 
-This checkpoint reserves a durable data region but does not yet store OCI
-layers or controller configuration in it. The next storage checkpoint is an
-indexed, digest-addressed OCI object cache followed by transactional domain and
-system configuration. Boot and OCI transfer/unpack timing markers were added
-so performance work can begin from measured phases after this review stop.
+The local configuration record now persists domain definitions, resource
+settings, images, init paths, personalities, autostart flags, virtual-network
+topology and attachments, and host static/DHCP network policy. Boot recreates
+configured kernel domain and network objects; deleting the volume resets them.
+Running process state is never resumed across a host reboot.
+
+The next storage checkpoint is an indexed, digest-addressed OCI object cache,
+written only after registry/network device teardown and restored before making
+a registry request. Boot and OCI transfer/unpack timing markers provide the
+measurements for that performance checkpoint.
 
 ## Stage 1: Shared open-file state
 

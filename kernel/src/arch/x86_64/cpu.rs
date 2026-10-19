@@ -1638,6 +1638,8 @@ static LINUX_SIGNAL_WAIT_TIMEOUT_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0
 static LINUX_SYSTEM_SUPERVISOR_WAIT_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
 static LINUX_SYSTEM_SUPERVISOR_SHUTDOWN_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
 const CONTAINER_SLOT_NONE: u8 = u8::MAX;
+pub(crate) const PERSISTENT_DOMAIN_CONFIG_SIZE: usize =
+    16 + control_abi::DOMAIN_LIMIT * control_abi::DOMAIN_REQUEST_SIZE;
 static CONTAINER_CONTROL_STATES: [AtomicU8; control_abi::DOMAIN_LIMIT] =
     [const { AtomicU8::new(0) }; control_abi::DOMAIN_LIMIT];
 static CONTAINER_DOMAIN_IDS: [AtomicU64; control_abi::DOMAIN_LIMIT] =
@@ -4087,6 +4089,113 @@ pub(crate) fn enable_container_management() -> bool {
     CONTAINER_MANAGEMENT_ENABLED
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_ok()
+}
+
+pub(crate) fn export_persistent_domain_configuration(
+    output: &mut [u8; PERSISTENT_DOMAIN_CONFIG_SIZE],
+) -> bool {
+    if !CONTAINER_MANAGEMENT_ENABLED.load(Ordering::Acquire) {
+        return false;
+    }
+    output.fill(0);
+    output[..8].copy_from_slice(b"GINUXDC1");
+    output[8..12].copy_from_slice(&1_u32.to_le_bytes());
+    output[12..14].copy_from_slice(&(control_abi::DOMAIN_LIMIT as u16).to_le_bytes());
+    for slot in 0..control_abi::DOMAIN_LIMIT {
+        if container_state(slot) == 0 {
+            continue;
+        }
+        let mut request = [0_u8; control_abi::DOMAIN_REQUEST_SIZE];
+        write_container_request(&mut request, slot, control_abi::DOMAIN_CURSOR_END);
+        let start = 16 + slot * control_abi::DOMAIN_REQUEST_SIZE;
+        output[start..start + control_abi::DOMAIN_REQUEST_SIZE].copy_from_slice(&request);
+    }
+    true
+}
+
+pub(crate) fn import_persistent_domain_configuration(
+    input: &[u8; PERSISTENT_DOMAIN_CONFIG_SIZE],
+) -> bool {
+    if !CONTAINER_MANAGEMENT_ENABLED.load(Ordering::Acquire)
+        || &input[..8] != b"GINUXDC1"
+        || u32::from_le_bytes(input[8..12].try_into().unwrap_or([0; 4])) != 1
+        || usize::from(u16::from_le_bytes(
+            input[12..14].try_into().unwrap_or([0; 2]),
+        )) != control_abi::DOMAIN_LIMIT
+        || input[14..16].iter().any(|byte| *byte != 0)
+        || (0..control_abi::DOMAIN_LIMIT).any(|slot| container_state(slot) != 0)
+    {
+        return false;
+    }
+    let Some(supervisor) = domain::control_plane_id() else {
+        return false;
+    };
+    for slot in 0..control_abi::DOMAIN_LIMIT {
+        let start = 16 + slot * control_abi::DOMAIN_REQUEST_SIZE;
+        let request: &[u8; control_abi::DOMAIN_REQUEST_SIZE] =
+            match input[start..start + control_abi::DOMAIN_REQUEST_SIZE].try_into() {
+                Ok(request) => request,
+                Err(_) => return false,
+            };
+        if request.iter().all(|byte| *byte == 0) {
+            continue;
+        }
+        let name = container_request_name(request);
+        let init = container_request_init(request);
+        let image = container_request_image(request);
+        let personality = domain_request_personality(request);
+        let flags = read_u16_at(request, 34);
+        let cpu_count = read_u16_at(request, 70);
+        let memory_mib = read_u64_at(request, 200);
+        if read_u32_at(request, 0) != control_abi::DOMAIN_REQUEST_SIZE as u32
+            || read_u16_at(request, 4) != control_abi::DOMAIN_REQUEST_VERSION
+            || !valid_container_name(name)
+            || container_slot_by_name(name).is_some()
+            || !valid_container_init(init)
+            || !valid_container_image(image)
+            || !valid_domain_personality(personality)
+            || cpu_count == 0
+            || memory_mib == 0
+            || flags & !(control_abi::DOMAIN_CONFIG_COMPLETE | control_abi::DOMAIN_CONFIG_AUTOSTART)
+                != 0
+            || flags
+                & (control_abi::DOMAIN_CONFIG_INIT
+                    | control_abi::DOMAIN_CONFIG_CPU
+                    | control_abi::DOMAIN_CONFIG_MEMORY
+                    | control_abi::DOMAIN_CONFIG_PERSONALITY)
+                != control_abi::DOMAIN_CONFIG_INIT
+                    | control_abi::DOMAIN_CONFIG_CPU
+                    | control_abi::DOMAIN_CONFIG_MEMORY
+                    | control_abi::DOMAIN_CONFIG_PERSONALITY
+        {
+            return false;
+        }
+        let Some(container_domain) =
+            domain::create_container_domain(supervisor, slot, cpu_count, memory_mib)
+        else {
+            return false;
+        };
+        CONTAINER_DOMAIN_IDS[slot].store(container_domain, Ordering::Release);
+        CONTAINER_CPU_COUNTS[slot].store(cpu_count, Ordering::Release);
+        CONTAINER_MEMORY_MIB[slot].store(memory_mib, Ordering::Release);
+        store_container_name(slot, name);
+        store_container_value(init, &CONTAINER_INITS[slot], &CONTAINER_INIT_SIZES[slot]);
+        store_container_value(image, &CONTAINER_IMAGES[slot], &CONTAINER_IMAGE_SIZES[slot]);
+        store_container_value(
+            personality,
+            &DOMAIN_PERSONALITIES[slot],
+            &DOMAIN_PERSONALITY_SIZES[slot],
+        );
+        CONTAINER_CONFIG_FLAGS[slot].store(flags, Ordering::Release);
+        let state =
+            if flags & control_abi::DOMAIN_CONFIG_COMPLETE == control_abi::DOMAIN_CONFIG_COMPLETE {
+                control_abi::DOMAIN_STATE_CONFIGURED
+            } else {
+                control_abi::DOMAIN_STATE_CREATED
+            };
+        CONTAINER_CONTROL_STATES[slot].store(state as u8, Ordering::Release);
+    }
+    true
 }
 
 fn linux_active_image_writable_index(address: u64) -> Option<usize> {
@@ -38306,6 +38415,9 @@ pub(crate) fn take_network_dhcp_request() -> bool {
 }
 
 pub(crate) fn complete_network_dhcp(success: bool) {
+    if success {
+        network::set_dhcp_configuration(true);
+    }
     NETWORK_DHCP_RESULT.store(if success { 1 } else { 2 }, Ordering::Release);
 }
 

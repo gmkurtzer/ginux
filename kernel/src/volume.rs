@@ -7,7 +7,8 @@ use ginux_volume_format::{encode, PAYLOAD_CAPACITY, SECTOR_SIZE, SLOT_COUNT};
 use ginux_volume_service::{commit_through, recover_with_slot, CommitStage, ScanError};
 
 pub(crate) use ginux_volume_service::{
-    commit, open_host_volume, recover, BlockDevice, CommitError, HostVolumeDisposition,
+    commit, commit_local_config, open_host_volume, recover, recover_local_config, BlockDevice,
+    CommitError, HostVolumeDisposition, LocalConfigRecord,
 };
 
 const VERSION_OFFSET: usize = 8;

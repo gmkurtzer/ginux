@@ -30,11 +30,12 @@ trap cleanup EXIT
 
 run_boot() {
     local output_file="$1"
+    local commands="$2"
     : >"$qemu_pid_file"
     {
         for _ in {1..120}; do
             if grep -aFq 'ginux> ' "$output_file"; then
-                printf 'shutdown\n'
+                printf '%s' "$commands"
                 exit 0
             fi
             if grep -aFq 'GINUX_KERNEL_PANIC' "$output_file"; then
@@ -76,15 +77,24 @@ first_output="$test_dir/first.log"
 second_output="$test_dir/second.log"
 reset_output="$test_dir/reset.log"
 
-run_boot "$first_output"
+run_boot "$first_output" $'network new gnet0 type=virtual\ndomain new persisted\ndomain set persisted image=alpine:latest init=/bin/sh cpu=2 memory-mib=256 autostart=true network=gnet0\nshutdown\n'
 grep -aFq 'ginux: persistent storage initialized (generation 1, 131064 data sectors)' "$first_output"
 grep -aEq '^ginux: timing boot-to-controller: [0-9]+ ms' "$first_output"
+grep -aFq 'ginux: local configuration committed (generation 1)' "$first_output"
 
-run_boot "$second_output"
+run_boot "$second_output" $'domain list\nnetwork list\nshutdown\n'
 grep -aFq 'ginux: persistent storage recovered (generation 1, 131064 data sectors)' "$second_output"
+grep -aFq 'persisted       configured' "$second_output"
+grep -aFq '/bin/sh' "$second_output"
+grep -aFq 'docker.io/library/alpine:latest' "$second_output"
+grep -aFq 'gnet0' "$second_output"
 
 rm -f "$volume_image"
-run_boot "$reset_output"
+run_boot "$reset_output" $'domain list\nshutdown\n'
 grep -aFq 'ginux: persistent storage initialized (generation 1, 131064 data sectors)' "$reset_output"
+if grep -aFq 'persisted       configured' "$reset_output"; then
+    echo "Persistent storage reset retained a deleted domain configuration." >&2
+    exit 1
+fi
 
-echo "Persistent storage fresh, recovery, and deletion-recreation boots passed."
+echo "Persistent storage and local configuration recovery/reset boots passed."

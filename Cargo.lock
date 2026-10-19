@@ -505,6 +505,7 @@ name = "ginux-volume-service"
 version = "0.1.0"
 dependencies = [
  "ginux-volume-format",
+ "sha2 0.11.0",
 ]
 
 [[package]]

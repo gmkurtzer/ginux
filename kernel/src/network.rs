@@ -4,6 +4,10 @@ pub(crate) const NETWORK_NAME_SIZE: usize = 16;
 const NETWORK_CAPACITY: usize = 64;
 const VIRTUAL_NETWORK_CAPACITY: usize = NETWORK_CAPACITY - 1;
 const ATTACHMENT_CAPACITY: usize = crate::control_abi::DOMAIN_LIMIT * 8;
+pub(crate) const PERSISTENT_NETWORK_CONFIG_SIZE: usize = 2048;
+const PERSISTENT_VIRTUAL_OFFSET: usize = 80;
+const PERSISTENT_VIRTUAL_RECORD_SIZE: usize = 20;
+const PERSISTENT_ATTACHMENT_OFFSET: usize = 1344;
 
 static VIRTUAL_NETWORK_NAME_SIZES: [AtomicU8; VIRTUAL_NETWORK_CAPACITY] =
     [const { AtomicU8::new(0) }; VIRTUAL_NETWORK_CAPACITY];
@@ -205,6 +209,7 @@ static LINK_UP: AtomicBool = AtomicBool::new(false);
 static IPV4_CONFIGURATION: AtomicU64 = AtomicU64::new(0);
 static IPV4_GATEWAY: AtomicU64 = AtomicU64::new(0);
 static IPV4_DNS: AtomicU64 = AtomicU64::new(0);
+static DHCP_CONFIGURATION: AtomicBool = AtomicBool::new(false);
 static CONFIGURATION_GENERATION: AtomicU64 = AtomicU64::new(0);
 static ROUTE_DESTINATION: AtomicU64 = AtomicU64::new(0);
 static ROUTE_GATEWAY: AtomicU64 = AtomicU64::new(0);
@@ -241,6 +246,7 @@ pub(crate) fn reset_configuration() {
     IPV4_CONFIGURATION.store(0, Ordering::Release);
     IPV4_GATEWAY.store(0, Ordering::Release);
     IPV4_DNS.store(0, Ordering::Release);
+    DHCP_CONFIGURATION.store(false, Ordering::Release);
     CONFIGURATION_GENERATION.store(0, Ordering::Release);
     ROUTE_DESTINATION.store(0, Ordering::Release);
     ROUTE_GATEWAY.store(0, Ordering::Release);
@@ -320,6 +326,168 @@ pub(crate) fn initialize_runtime() -> bool {
     cleared && set_dns(0)
 }
 
+pub(crate) fn set_dhcp_configuration(enabled: bool) {
+    DHCP_CONFIGURATION.store(enabled, Ordering::Release);
+}
+
+pub(crate) fn export_persistent_configuration(output: &mut [u8; PERSISTENT_NETWORK_CONFIG_SIZE]) {
+    output.fill(0);
+    output[..8].copy_from_slice(b"GINUXNW1");
+    output[8..12].copy_from_slice(&1_u32.to_le_bytes());
+    output[12..14].copy_from_slice(&(VIRTUAL_NETWORK_CAPACITY as u16).to_le_bytes());
+    output[16] = u8::from(DHCP_CONFIGURATION.load(Ordering::Acquire));
+    let snapshot = snapshot();
+    for (index, value) in snapshot.iter().enumerate() {
+        let offset = 24 + index * 8;
+        output[offset..offset + 8].copy_from_slice(&value.to_le_bytes());
+    }
+    output[72..80].copy_from_slice(&dns().to_le_bytes());
+    for slot in 0..VIRTUAL_NETWORK_CAPACITY {
+        let offset = PERSISTENT_VIRTUAL_OFFSET + slot * PERSISTENT_VIRTUAL_RECORD_SIZE;
+        let name_size = VIRTUAL_NETWORK_NAME_SIZES[slot].load(Ordering::Acquire);
+        output[offset] = name_size;
+        output[offset + 1] = VIRTUAL_NETWORK_UPLINKS[slot].load(Ordering::Acquire);
+        output[offset + 2] = u8::from(VIRTUAL_NETWORK_LINKS[slot].load(Ordering::Acquire));
+        for (destination, source) in output[offset + 4..offset + 20]
+            .iter_mut()
+            .zip(&VIRTUAL_NETWORK_NAMES[slot])
+        {
+            *destination = source.load(Ordering::Acquire);
+        }
+    }
+    for (index, attachment) in NETWORK_ATTACHMENTS.iter().enumerate() {
+        let offset = PERSISTENT_ATTACHMENT_OFFSET + index * 2;
+        output[offset..offset + 2]
+            .copy_from_slice(&attachment.load(Ordering::Acquire).to_le_bytes());
+    }
+}
+
+pub(crate) fn import_persistent_configuration(
+    input: &[u8; PERSISTENT_NETWORK_CONFIG_SIZE],
+) -> bool {
+    if &input[..8] != b"GINUXNW1"
+        || u32::from_le_bytes(input[8..12].try_into().unwrap_or([0; 4])) != 1
+        || usize::from(u16::from_le_bytes(
+            input[12..14].try_into().unwrap_or([0; 2]),
+        )) != VIRTUAL_NETWORK_CAPACITY
+        || input[14..16].iter().any(|byte| *byte != 0)
+        || input[16] > 1
+        || input[17..24].iter().any(|byte| *byte != 0)
+        || VIRTUAL_NETWORK_NAME_SIZES
+            .iter()
+            .any(|size| size.load(Ordering::Acquire) != 0)
+        || NETWORK_ATTACHMENTS
+            .iter()
+            .any(|attachment| attachment.load(Ordering::Acquire) != 0)
+    {
+        return false;
+    }
+    let mut virtual_present = [false; VIRTUAL_NETWORK_CAPACITY];
+    for (slot, present) in virtual_present.iter_mut().enumerate() {
+        let offset = PERSISTENT_VIRTUAL_OFFSET + slot * PERSISTENT_VIRTUAL_RECORD_SIZE;
+        let size = usize::from(input[offset]);
+        let uplink = usize::from(input[offset + 1]);
+        let link = input[offset + 2];
+        let name = &input[offset + 4..offset + 20];
+        if size == 0 {
+            if uplink != 0 || link != 0 || name.iter().any(|byte| *byte != 0) {
+                return false;
+            }
+            continue;
+        }
+        if size > NETWORK_NAME_SIZE
+            || link > 1
+            || !(1..=NETWORK_CAPACITY).contains(&uplink)
+            || !valid_network_name(&name[..size])
+            || matches!(&name[..size], b"lo" | b"eth0")
+            || name[size..].iter().any(|byte| *byte != 0)
+        {
+            return false;
+        }
+        *present = true;
+    }
+    for slot in 0..VIRTUAL_NETWORK_CAPACITY {
+        if !virtual_present[slot] {
+            continue;
+        }
+        let offset = PERSISTENT_VIRTUAL_OFFSET + slot * PERSISTENT_VIRTUAL_RECORD_SIZE;
+        let uplink = usize::from(input[offset + 1]);
+        if uplink > 1 && !virtual_present[uplink - 2] {
+            return false;
+        }
+        for (other, other_present) in virtual_present.iter().enumerate().take(slot) {
+            if *other_present {
+                let other_offset =
+                    PERSISTENT_VIRTUAL_OFFSET + other * PERSISTENT_VIRTUAL_RECORD_SIZE;
+                if input[other_offset] == input[offset]
+                    && input[other_offset + 4..other_offset + 20] == input[offset + 4..offset + 20]
+                {
+                    return false;
+                }
+            }
+        }
+    }
+    for index in 0..ATTACHMENT_CAPACITY {
+        let offset = PERSISTENT_ATTACHMENT_OFFSET + index * 2;
+        let encoded = u16::from_le_bytes(input[offset..offset + 2].try_into().unwrap_or([0; 2]));
+        if encoded == 0 {
+            continue;
+        }
+        let domain = usize::from(encoded >> 8);
+        let network = usize::from(encoded & 0xff);
+        if !(1..=crate::control_abi::DOMAIN_LIMIT).contains(&domain)
+            || !(1..=NETWORK_CAPACITY).contains(&network)
+            || (network > 1 && !virtual_present[network - 2])
+        {
+            return false;
+        }
+    }
+    reset_configuration();
+    let dhcp = input[16] == 1;
+    if !dhcp {
+        let value = |index: usize| {
+            let offset = 24 + index * 8;
+            u64::from_le_bytes(input[offset..offset + 8].try_into().unwrap_or([0; 8]))
+        };
+        if !set_ipv4(value(2))
+            || !set_gateway(value(3))
+            || !set_dns(u64::from_le_bytes(
+                input[72..80].try_into().unwrap_or([0; 8]),
+            ))
+            || !set_route(value(4) as u32, (value(4) >> 32) as u8, value(5) as u32)
+            || !set_link(value(1))
+        {
+            reset_configuration();
+            return false;
+        }
+    }
+    DHCP_CONFIGURATION.store(dhcp, Ordering::Release);
+    for slot in 0..VIRTUAL_NETWORK_CAPACITY {
+        if !virtual_present[slot] {
+            continue;
+        }
+        let offset = PERSISTENT_VIRTUAL_OFFSET + slot * PERSISTENT_VIRTUAL_RECORD_SIZE;
+        let size = input[offset];
+        VIRTUAL_NETWORK_NAME_SIZES[slot].store(size, Ordering::Release);
+        VIRTUAL_NETWORK_UPLINKS[slot].store(input[offset + 1], Ordering::Release);
+        VIRTUAL_NETWORK_LINKS[slot].store(input[offset + 2] == 1, Ordering::Release);
+        for (destination, source) in VIRTUAL_NETWORK_NAMES[slot]
+            .iter()
+            .zip(&input[offset + 4..offset + 20])
+        {
+            destination.store(*source, Ordering::Release);
+        }
+    }
+    for (index, attachment) in NETWORK_ATTACHMENTS.iter().enumerate() {
+        let offset = PERSISTENT_ATTACHMENT_OFFSET + index * 2;
+        attachment.store(
+            u16::from_le_bytes(input[offset..offset + 2].try_into().unwrap_or([0; 2])),
+            Ordering::Release,
+        );
+    }
+    true
+}
+
 pub(crate) fn generation() -> u64 {
     CONFIGURATION_GENERATION.load(Ordering::Acquire)
 }
@@ -391,6 +559,7 @@ pub(crate) fn apply(
     ) {
         return Err(ApplyError::Invalid);
     }
+    DHCP_CONFIGURATION.store(false, Ordering::Release);
     let changed = LINK_UP.load(Ordering::Acquire) != (configuration.link != 0)
         || IPV4_CONFIGURATION.load(Ordering::Acquire) != configuration.ipv4
         || IPV4_GATEWAY.load(Ordering::Acquire) != configuration.gateway
