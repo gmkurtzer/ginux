@@ -17,7 +17,7 @@ SYSTEM_PROFILE := profiles/minimal-system-v0/profile.tsv
 
 .DEFAULT_GOAL := help
 
-.PHONY: help doctor manifest system-image test-alpine test-rocky-shell test-rocky-dnf test-multi-domain test-linux-abi test-linux-runtime probe-rocky-systemd rocky-image rocky-image-check linux-probe controller-runtime network-service protocol-service volume-service abi-conformance architecture-check linux-compat-check build build-verification run test test-c1 test-c2 fmt gate clean
+.PHONY: help doctor manifest system-image test-alpine test-rocky-shell test-rocky-dnf test-multi-domain test-linux-abi test-linux-runtime test-storage probe-rocky-systemd rocky-image rocky-image-check linux-probe controller-runtime network-service protocol-service volume-service abi-conformance architecture-check linux-compat-check build build-verification run reset-storage test test-c1 test-c2 fmt gate clean
 
 help:
 	@echo "Ginux development targets"
@@ -44,6 +44,8 @@ help:
 	@echo "  make test-linux-runtime Verify ELF, loader, PIE, TLS, heap, and memory behavior"
 	@echo "  make build   Build the x86-64 UEFI image"
 	@echo "  make run     Build Ginux and boot it in headless QEMU"
+	@echo "  make reset-storage Delete the default persistent volume"
+	@echo "  make test-storage Verify fresh, recovered, and reset persistent boots"
 	@echo "  make test    Build and verify the automated QEMU boot test"
 	@echo "  make test-c1 Build and verify the interactive controller console"
 	@echo "  make test-c2 Verify configured domain lifecycle management"
@@ -140,6 +142,13 @@ probe-rocky-systemd: build
 
 run: build
 	@tools/qemu/run.sh
+
+reset-storage:
+	@rm -f build/qemu/volume.raw
+	@echo "Removed build/qemu/volume.raw; the next make run starts clean."
+
+test-storage: build
+	@tests/qemu/persistent-storage.sh
 
 test: build-verification
 	@tests/qemu/boot.sh

@@ -6,6 +6,23 @@ is tested and committed, this document and the compatibility ledger are
 updated, and work stops for operator evaluation. The following stage does not
 begin until the operator accepts the completed stage.
 
+## Operator-prioritized checkpoint: persistent host volume foundation
+
+Status: **Complete; awaiting operator review**
+
+The QEMU development host now uses a sparse, self-initializing persistent
+volume with a versioned, geometry-bound header committed through the existing
+two-slot transactional format. Reopening the same volume recovers its committed
+generation without rewriting it. Deleting it and running Ginux again creates a
+clean volume. `make test-storage` verifies all three boots and guarantees QEMU
+cleanup. `make reset-storage` performs the explicit development reset.
+
+This checkpoint reserves a durable data region but does not yet store OCI
+layers or controller configuration in it. The next storage checkpoint is an
+indexed, digest-addressed OCI object cache followed by transactional domain and
+system configuration. Boot and OCI transfer/unpack timing markers were added
+so performance work can begin from measured phases after this review stop.
+
 ## Stage 1: Shared open-file state
 
 Status: **Complete; accepted**

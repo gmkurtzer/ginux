@@ -161,6 +161,7 @@ pub unsafe extern "sysv64" fn kernel_entry(boot_info: *const BootInfo) -> ! {
 }
 
 unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
+    let kernel_boot_started = arch::x86_64::timer::timestamp_counter();
     serial_init();
     serial_write_raw(b"ginux: booting\r\n");
     serial_write("ginux: kernel entered after ExitBootServices\r\n");
@@ -1220,7 +1221,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: exactly one virtio completion interrupt handled");
     serial_write("\r\nginux: virtio MSI-X masked and disabled after completion");
     serial_write("\r\nginux: temporary virtio interrupt gate retired");
-    if virtio_read.capacity_sectors != 2048 || virtio_read.used_length != 513 {
+    if virtio_read.capacity_sectors < ginux_volume_format::HOST_VOLUME_MINIMUM_SECTORS
+        || virtio_read.used_length != 513
+    {
         kernel_fail("\r\nginux: deterministic virtio block geometry invalid\r\n");
     }
     // SAFETY: The one-shot probe returned only after reset and bus-master
@@ -1236,22 +1239,14 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }) else {
         kernel_fail("\r\nginux: persistent virtio backend activation failed\r\n");
     };
-    const DISK_VOLUME_PAYLOAD: &[u8] = b"ginux-reboot-persistent\n";
     let disk_volume = (|| {
-        if persistent_block.capacity_sectors() != 2048 {
-            return None;
-        }
-        let initial = volume::recover(&mut persistent_block);
-        let recovered_after_reboot = initial.is_some();
-        let record = match initial {
-            Some(record) => record,
-            None => volume::commit(&mut persistent_block, DISK_VOLUME_PAYLOAD).ok()?,
-        };
-        if record.generation != 1 || record.payload() != DISK_VOLUME_PAYLOAD {
-            return None;
-        }
+        let capacity_sectors = persistent_block.capacity_sectors();
+        let state = volume::open_host_volume(&mut persistent_block, capacity_sectors).ok()?;
         let verified = volume::recover(&mut persistent_block)?;
-        (verified == record).then_some((verified, recovered_after_reboot))
+        (verified.generation == state.generation
+            && ginux_volume_format::HostVolumeHeader::decode(verified.payload())
+                == Some(state.header))
+        .then_some(state)
     })();
     if !persistent_block.finish() {
         kernel_fail("\r\nginux: persistent virtio backend teardown failed\r\n");
@@ -1507,7 +1502,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("\r\nginux: virtio-net DMA frame retirement failed\r\n");
     }
     serial_write("\r\nginux: virtio-net DMA confinement retired cleanly");
-    let Some((disk_record, recovered_after_reboot)) = disk_volume else {
+    let Some(host_volume) = disk_volume else {
         kernel_fail("\r\nginux: persistent virtio volume transaction failed\r\n");
     };
     if !cfg!(feature = "verification-boot") {
@@ -1523,12 +1518,22 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: virtio bus mastering revoked after read");
     serial_write("\r\nginux: bounded virtio volume transaction completed");
     serial_write("\r\nginux: disk-backed volume generation: ");
-    serial_write_u64(disk_record.generation);
-    serial_write(if recovered_after_reboot {
-        "\r\nginux: disk-backed volume recovered after reboot"
-    } else {
-        "\r\nginux: disk-backed volume initialized and flushed"
-    });
+    serial_write_u64(host_volume.generation);
+    serial_write("\r\nginux: host volume sectors: ");
+    serial_write_u64(host_volume.header.volume_sectors);
+    serial_write("\r\nginux: host volume data sectors: ");
+    serial_write_u64(host_volume.header.data_sectors);
+    match host_volume.disposition {
+        volume::HostVolumeDisposition::Initialized => {
+            serial_write("\r\nginux: disk-backed volume initialized and flushed")
+        }
+        volume::HostVolumeDisposition::Migrated => {
+            serial_write("\r\nginux: legacy disk-backed volume migrated and flushed")
+        }
+        volume::HostVolumeDisposition::Recovered => {
+            serial_write("\r\nginux: disk-backed volume recovered after reboot")
+        }
+    }
     if !address_space::verify_isolated_user_mapping() {
         kernel_fail("\r\nginux: isolated address-space test failed\r\n");
     }
@@ -3779,6 +3784,18 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     OPERATOR_CONSOLE_READY.store(true, Ordering::Release);
     serial_write_raw(b"ginux: platform, security, devices, and runtime ready\r\n");
+    serial_write("ginux: persistent storage ");
+    serial_write(match host_volume.disposition {
+        volume::HostVolumeDisposition::Initialized => "initialized",
+        volume::HostVolumeDisposition::Migrated => "migrated",
+        volume::HostVolumeDisposition::Recovered => "recovered",
+    });
+    serial_write(" (generation ");
+    serial_write_u64(host_volume.generation);
+    serial_write(", ");
+    serial_write_u64(host_volume.header.data_sectors);
+    serial_write(" data sectors)\r\n");
+    serial_write_elapsed("ginux: timing boot-to-controller: ", kernel_boot_started);
     let mut controller_recovery_attempts = 0_u8;
     let mut controller_launch_announced = false;
     'managed: loop {
@@ -3838,6 +3855,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             continue 'managed;
         }
         if arch::x86_64::cpu::take_container_pull_request() {
+            let pull_started = arch::x86_64::timer::timestamp_counter();
             if !image_store::begin_layer_pull() {
                 serial_write("ginux: OCI image staging reset failed\r\n");
                 arch::x86_64::cpu::complete_container_pull(false);
@@ -3873,11 +3891,20 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
                     }
                 }
             }
+            let transfer_finished = arch::x86_64::timer::timestamp_counter();
+            serial_write_elapsed_at(
+                "ginux: timing OCI transfer: ",
+                pull_started,
+                transfer_finished,
+            );
             if downloaded {
                 serial_write("ginux: OCI unpacking image filesystem\r\n");
             }
+            let unpack_started = arch::x86_64::timer::timestamp_counter();
             let success = arch::x86_64::cpu::configured_container_slot()
                 .is_some_and(|slot| downloaded && image_store::install_published_layers(slot));
+            serial_write_elapsed("ginux: timing OCI unpack/publish: ", unpack_started);
+            serial_write_elapsed("ginux: timing OCI total: ", pull_started);
             if !success {
                 let _ = image_store::discard_published_layers();
             }
@@ -3912,6 +3939,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
                 };
                 if !resuming {
                     serial_write("ginux: entering configured Linux init\r\n");
+                    serial_write_elapsed(
+                        "ginux: timing boot-to-Linux-init-entry: ",
+                        kernel_boot_started,
+                    );
                 }
                 arch::x86_64::cpu::begin_configured_container();
                 match address_space::run_linux_init(&init[..init_size]) {
@@ -4188,6 +4219,27 @@ pub(crate) fn serial_read_byte_blocking() -> u8 {
 
 fn serial_write_usize(value: usize) {
     serial_write_u64(value as u64);
+}
+
+fn serial_write_elapsed(label: &str, started: u64) {
+    serial_write_elapsed_at(label, started, arch::x86_64::timer::timestamp_counter());
+}
+
+fn serial_write_elapsed_at(label: &str, started: u64, finished: u64) {
+    let Some(frequency) = arch::x86_64::timer::monotonic_frequency() else {
+        return;
+    };
+    if frequency == 0 || finished < started {
+        return;
+    }
+    let milliseconds = u128::from(finished - started)
+        .saturating_mul(1_000)
+        .checked_div(u128::from(frequency))
+        .unwrap_or(0)
+        .min(u128::from(u64::MAX)) as u64;
+    serial_write(label);
+    serial_write_u64(milliseconds);
+    serial_write(" ms\r\n");
 }
 
 pub(crate) fn serial_write_u64(mut value: u64) {

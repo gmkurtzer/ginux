@@ -1,6 +1,8 @@
 #![no_std]
 
-use ginux_volume_format::{decode, encode, PAYLOAD_CAPACITY, SECTOR_SIZE, SLOT_COUNT};
+use ginux_volume_format::{
+    decode, encode, HostVolumeHeader, PAYLOAD_CAPACITY, SECTOR_SIZE, SLOT_COUNT,
+};
 
 pub use ginux_volume_format::Record;
 
@@ -32,6 +34,63 @@ pub enum ScanError {
     Ambiguous,
     Corrupt,
     Device,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HostVolumeDisposition {
+    Initialized,
+    Migrated,
+    Recovered,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct HostVolumeState {
+    pub header: HostVolumeHeader,
+    pub generation: u64,
+    pub disposition: HostVolumeDisposition,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HostVolumeError {
+    Corrupt,
+    Device,
+    GenerationExhausted,
+    Incompatible,
+    TooSmall,
+}
+
+pub const LEGACY_HOST_VOLUME_PAYLOAD: &[u8] = b"ginux-reboot-persistent\n";
+
+pub fn open_host_volume<D: BlockDevice>(
+    device: &mut D,
+    volume_sectors: u64,
+) -> Result<HostVolumeState, HostVolumeError> {
+    let header = HostVolumeHeader::new(volume_sectors).ok_or(HostVolumeError::TooSmall)?;
+    let current = recover_with_slot(device).map_err(host_scan_error)?;
+    let (record, disposition) = match current {
+        None => (
+            commit(device, &header.encode()).map_err(host_commit_error)?,
+            HostVolumeDisposition::Initialized,
+        ),
+        Some((_, record)) if record.payload() == LEGACY_HOST_VOLUME_PAYLOAD => (
+            commit(device, &header.encode()).map_err(host_commit_error)?,
+            HostVolumeDisposition::Migrated,
+        ),
+        Some((_, record)) => {
+            let Some(recovered) = HostVolumeHeader::decode(record.payload()) else {
+                return Err(HostVolumeError::Incompatible);
+            };
+            if recovered != header {
+                return Err(HostVolumeError::Incompatible);
+            }
+            (record, HostVolumeDisposition::Recovered)
+        }
+    };
+    Ok(HostVolumeState {
+        header,
+        generation: record.generation,
+        disposition,
+    })
 }
 
 pub fn commit<D: BlockDevice>(device: &mut D, payload: &[u8]) -> Result<Record, CommitError> {
@@ -130,6 +189,22 @@ fn scan_error(error: ScanError) -> CommitError {
     }
 }
 
+fn host_scan_error(error: ScanError) -> HostVolumeError {
+    match error {
+        ScanError::Ambiguous | ScanError::Corrupt => HostVolumeError::Corrupt,
+        ScanError::Device => HostVolumeError::Device,
+    }
+}
+
+fn host_commit_error(error: CommitError) -> HostVolumeError {
+    match error {
+        CommitError::Corrupt => HostVolumeError::Corrupt,
+        CommitError::Device => HostVolumeError::Device,
+        CommitError::GenerationExhausted => HostVolumeError::GenerationExhausted,
+        CommitError::PayloadTooLarge => HostVolumeError::Incompatible,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -204,5 +279,44 @@ mod tests {
         assert!(device.flush());
         assert_eq!(recover_with_slot(&mut device), Err(ScanError::Corrupt));
         assert_eq!(commit(&mut device, b"no"), Err(CommitError::Corrupt));
+    }
+
+    #[test]
+    fn host_volume_initializes_recovers_and_migrates_transactionally() {
+        let mut fresh = MemoryDevice::new();
+        let initialized = open_host_volume(&mut fresh, 131_072).expect("initialize host volume");
+        assert_eq!(initialized.disposition, HostVolumeDisposition::Initialized);
+        assert_eq!(initialized.generation, 1);
+        let recovered = open_host_volume(&mut fresh, 131_072).expect("recover host volume");
+        assert_eq!(recovered.disposition, HostVolumeDisposition::Recovered);
+        assert_eq!(recovered.generation, 1);
+        assert_eq!(recovered.header, initialized.header);
+
+        let mut legacy = MemoryDevice::new();
+        commit(&mut legacy, LEGACY_HOST_VOLUME_PAYLOAD).expect("legacy marker");
+        let migrated = open_host_volume(&mut legacy, 131_072).expect("migrate host volume");
+        assert_eq!(migrated.disposition, HostVolumeDisposition::Migrated);
+        assert_eq!(migrated.generation, 2);
+        assert_eq!(
+            HostVolumeHeader::decode(migrated.header.encode().as_slice()),
+            Some(migrated.header)
+        );
+    }
+
+    #[test]
+    fn host_volume_rejects_geometry_changes_and_foreign_records() {
+        let mut device = MemoryDevice::new();
+        open_host_volume(&mut device, 131_072).expect("initialize host volume");
+        assert_eq!(
+            open_host_volume(&mut device, 65_536),
+            Err(HostVolumeError::Incompatible)
+        );
+
+        let mut foreign = MemoryDevice::new();
+        commit(&mut foreign, b"not-a-host-volume").expect("foreign record");
+        assert_eq!(
+            open_host_volume(&mut foreign, 131_072),
+            Err(HostVolumeError::Incompatible)
+        );
     }
 }

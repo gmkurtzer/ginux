@@ -279,6 +279,7 @@ simulation is not sufficient.
 | Controller | Persistent ring-3 command console with command-name completion, aligned status tables, and component, process, network, and domain lifecycle control | Dynamic argument completion, remote authenticated management, and persistent configuration |
 | Domains | Default-Linux domains with concurrent isolated address spaces, root/mount and process views, retained CPU state, IPC, scheduling, lifecycle events, fault containment, and generation-safe cleanup | Broader per-domain resource accounting and policy enforcement |
 | Native services | Measured ring-3 network, protocol, and volume services with bounded ABIs and restart proofs | Production service supervision and broader device support |
+| Storage | Self-initializing, transactionally committed host volume that survives QEMU boots and can be reset explicitly | Persist OCI objects, domain configuration, writable layers, and logs in the data region |
 | Devices | Virtio block/network paths, MSI-X, and VT-d DMA confinement in the QEMU profile | NVMe, high-speed networking, GPU support, and selected real servers |
 | Linux personality | Bounded x86-64 ELF/dynamic-linker support, a growing syscall/VFS/process/signal ABI, per-domain procfs, Alpine musl/BusyBox, Rocky glibc/coreutils, and Rocky systemd launched as PID 1 | Add `domain exec`, then advance systemd through its remaining filesystem, netlink, and event interfaces |
 | Other personalities | Domain and kernel mechanisms are designed for reuse | No BSD or other non-Linux personality is implemented yet |
@@ -311,6 +312,15 @@ Check the host, build Ginux, and boot it:
 make doctor
 make run
 ```
+
+`make run` keeps a sparse 64 GiB host volume at `build/qemu/volume.raw`. The
+volume is initialized on its first boot and transactionally recovered on later
+boots. Set `GINUX_VOLUME_SIZE` before the first boot to choose another sparse
+size, or run `make reset-storage` to delete the development volume; the next
+boot recreates a clean one. This checkpoint establishes and validates the
+durable volume format. OCI cache objects and domain/system configuration are
+the next storage consumers and are not persistent yet. See
+[the storage architecture](docs/STORAGE.md).
 
 At the `ginux>` prompt:
 
@@ -374,6 +384,7 @@ make test-alpine    # verify runtime OCI download and the Alpine shell
 make test-rocky-shell # verify Rocky glibc shell, fork/exec, cat, and ls
 make test-multi-domain # verify concurrent Alpine domains and Rocky ingestion
 make probe-rocky-systemd # probe the remaining Rocky systemd boundary
+make test-storage    # verify volume initialization, recovery, and reset
 make check          # run architecture, ABI, format, lint, and unit checks
 make gate           # run the clean reproducible project gate
 ```

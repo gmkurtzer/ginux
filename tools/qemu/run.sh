@@ -18,6 +18,8 @@ esp_dir="${GINUX_ESP_DIR:-$repo_root/build/esp}"
 runtime_dir="$repo_root/build/qemu"
 ovmf_vars="$runtime_dir/ovmf-vars.fd"
 volume_image="${GINUX_VOLUME_IMAGE:-$runtime_dir/volume.raw}"
+volume_size="${GINUX_VOLUME_SIZE:-64G}"
+default_volume_bytes=68719476736
 
 if [[ ! -f "$esp_dir/EFI/BOOT/BOOTX64.EFI" ]]; then
     echo "Missing $esp_dir/EFI/BOOT/BOOTX64.EFI; run 'make build' first." >&2
@@ -27,7 +29,15 @@ fi
 mkdir -p "$runtime_dir"
 cp "$ovmf_vars_template" "$ovmf_vars"
 if [[ ! -f "$volume_image" ]]; then
-    dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
+    truncate -s "$volume_size" "$volume_image"
+elif [[ -z "${GINUX_VOLUME_IMAGE:-}" && -z "${GINUX_VOLUME_SIZE:-}" ]]; then
+    if current_volume_bytes=$(stat -f '%z' "$volume_image" 2>/dev/null) ||
+        current_volume_bytes=$(stat -c '%s' "$volume_image" 2>/dev/null); then
+        if [[ "$current_volume_bytes" =~ ^[0-9]+$ ]] &&
+            ((current_volume_bytes < default_volume_bytes)); then
+            truncate -s "$default_volume_bytes" "$volume_image"
+        fi
+    fi
 fi
 
 echo "Booting x86-64 Ginux with QEMU/$accelerator using CPU $cpu_model"

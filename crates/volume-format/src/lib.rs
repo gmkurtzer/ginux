@@ -9,6 +9,11 @@ pub const VERSION: u32 = 1;
 pub const HEADER_SIZE: usize = 72;
 pub const PAYLOAD_CAPACITY: usize = SECTOR_SIZE - HEADER_SIZE;
 pub const COMMIT_MARKER: u64 = 0x3144_4554_5449_4d43;
+pub const HOST_VOLUME_MAGIC: &[u8; 8] = b"GINUXHV1";
+pub const HOST_VOLUME_VERSION: u32 = 1;
+pub const HOST_VOLUME_HEADER_SIZE: usize = 48;
+pub const HOST_VOLUME_DATA_START_SECTOR: u64 = 8;
+pub const HOST_VOLUME_MINIMUM_SECTORS: u64 = HOST_VOLUME_DATA_START_SECTOR + 1;
 
 const VERSION_OFFSET: usize = 8;
 const HEADER_SIZE_OFFSET: usize = 12;
@@ -18,6 +23,65 @@ const COMMIT_OFFSET: usize = 24;
 const DIGEST_OFFSET: usize = 32;
 const DIGEST_SIZE: usize = 32;
 const RESERVED_OFFSET: usize = 64;
+
+const HOST_VERSION_OFFSET: usize = 8;
+const HOST_HEADER_SIZE_OFFSET: usize = 12;
+const HOST_SECTOR_SIZE_OFFSET: usize = 16;
+const HOST_VOLUME_SECTORS_OFFSET: usize = 24;
+const HOST_DATA_START_OFFSET: usize = 32;
+const HOST_DATA_SECTORS_OFFSET: usize = 40;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct HostVolumeHeader {
+    pub volume_sectors: u64,
+    pub data_start_sector: u64,
+    pub data_sectors: u64,
+}
+
+impl HostVolumeHeader {
+    pub fn new(volume_sectors: u64) -> Option<Self> {
+        let data_sectors = volume_sectors.checked_sub(HOST_VOLUME_DATA_START_SECTOR)?;
+        (volume_sectors >= HOST_VOLUME_MINIMUM_SECTORS).then_some(Self {
+            volume_sectors,
+            data_start_sector: HOST_VOLUME_DATA_START_SECTOR,
+            data_sectors,
+        })
+    }
+
+    pub fn encode(self) -> [u8; HOST_VOLUME_HEADER_SIZE] {
+        let mut bytes = [0_u8; HOST_VOLUME_HEADER_SIZE];
+        bytes[..HOST_VOLUME_MAGIC.len()].copy_from_slice(HOST_VOLUME_MAGIC);
+        write_u32(&mut bytes, HOST_VERSION_OFFSET, HOST_VOLUME_VERSION);
+        write_u32(
+            &mut bytes,
+            HOST_HEADER_SIZE_OFFSET,
+            HOST_VOLUME_HEADER_SIZE as u32,
+        );
+        write_u32(&mut bytes, HOST_SECTOR_SIZE_OFFSET, SECTOR_SIZE as u32);
+        write_u64(&mut bytes, HOST_VOLUME_SECTORS_OFFSET, self.volume_sectors);
+        write_u64(&mut bytes, HOST_DATA_START_OFFSET, self.data_start_sector);
+        write_u64(&mut bytes, HOST_DATA_SECTORS_OFFSET, self.data_sectors);
+        bytes
+    }
+
+    pub fn decode(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() != HOST_VOLUME_HEADER_SIZE
+            || &bytes[..HOST_VOLUME_MAGIC.len()] != HOST_VOLUME_MAGIC
+            || read_u32(bytes, HOST_VERSION_OFFSET) != HOST_VOLUME_VERSION
+            || read_u32(bytes, HOST_HEADER_SIZE_OFFSET) as usize != HOST_VOLUME_HEADER_SIZE
+            || read_u32(bytes, HOST_SECTOR_SIZE_OFFSET) as usize != SECTOR_SIZE
+        {
+            return None;
+        }
+        let header = Self {
+            volume_sectors: read_u64(bytes, HOST_VOLUME_SECTORS_OFFSET),
+            data_start_sector: read_u64(bytes, HOST_DATA_START_OFFSET),
+            data_sectors: read_u64(bytes, HOST_DATA_SECTORS_OFFSET),
+        };
+        let expected = Self::new(header.volume_sectors)?;
+        (header == expected && bytes == expected.encode()).then_some(header)
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Record {
@@ -138,5 +202,26 @@ mod tests {
         let (_, mut committed) = encode(1, b"digest").expect("valid record");
         committed[HEADER_SIZE] ^= 1;
         assert_eq!(decode(&committed), None);
+    }
+
+    #[test]
+    fn host_volume_header_round_trips_exact_geometry() {
+        let header = HostVolumeHeader::new(131_072).expect("valid sparse volume");
+        let encoded = header.encode();
+        assert_eq!(HostVolumeHeader::decode(&encoded), Some(header));
+        assert_eq!(header.data_start_sector, 8);
+        assert_eq!(header.data_sectors, 131_064);
+    }
+
+    #[test]
+    fn host_volume_header_rejects_small_mismatched_and_trailing_layouts() {
+        assert_eq!(HostVolumeHeader::new(8), None);
+        let mut encoded = HostVolumeHeader::new(16).expect("valid volume").encode();
+        encoded[HOST_SECTOR_SIZE_OFFSET] ^= 1;
+        assert_eq!(HostVolumeHeader::decode(&encoded), None);
+        assert_eq!(
+            HostVolumeHeader::decode(&[0; HOST_VOLUME_HEADER_SIZE + 1]),
+            None
+        );
     }
 }

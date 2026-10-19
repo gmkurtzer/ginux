@@ -6,7 +6,9 @@ use core::{
 use ginux_volume_format::{encode, PAYLOAD_CAPACITY, SECTOR_SIZE, SLOT_COUNT};
 use ginux_volume_service::{commit_through, recover_with_slot, CommitStage, ScanError};
 
-pub(crate) use ginux_volume_service::{commit, recover, BlockDevice, CommitError};
+pub(crate) use ginux_volume_service::{
+    commit, open_host_volume, recover, BlockDevice, CommitError, HostVolumeDisposition,
+};
 
 const VERSION_OFFSET: usize = 8;
 const HEADER_SIZE_OFFSET: usize = 12;
