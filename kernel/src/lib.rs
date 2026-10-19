@@ -4064,6 +4064,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         if !arch::x86_64::cpu::take_container_restart_request() {
             kernel_fail("ginux: controller exited without a lifecycle request\r\n");
         }
+        let domain_started = arch::x86_64::timer::timestamp_counter();
         loop {
             let resuming = arch::x86_64::cpu::configured_container_slot()
                 .is_some_and(address_space::linux_runtime_is_suspended);
@@ -4083,8 +4084,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
                 if !resuming {
                     serial_write("ginux: entering configured Linux init\r\n");
                     serial_write_elapsed(
-                        "ginux: timing boot-to-Linux-init-entry: ",
-                        kernel_boot_started,
+                        "ginux: timing domain-start-to-Linux-init-entry: ",
+                        domain_started,
                     );
                 }
                 arch::x86_64::cpu::begin_configured_container();

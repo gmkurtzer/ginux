@@ -2,8 +2,8 @@
 set -euo pipefail
 
 repo_root=$(cd "$(dirname "$0")/../.." && pwd)
-output_file=$(mktemp "${TMPDIR:-/tmp}/ginux-rocky-systemd.XXXXXX")
-volume_image=$(mktemp "${TMPDIR:-/tmp}/ginux-rocky-systemd-volume.XXXXXX")
+output_file="${GINUX_ROCKY_LOG:-$repo_root/build/qemu/rocky-systemd.log}"
+volume_image="${GINUX_VOLUME_IMAGE:-$repo_root/build/qemu/rocky-systemd-volume.raw}"
 qemu_pid_file=$(mktemp "${TMPDIR:-/tmp}/ginux-rocky-systemd-pid.XXXXXX")
 success_file=$(mktemp "${TMPDIR:-/tmp}/ginux-rocky-systemd-success.XXXXXX")
 qemu_pid=""
@@ -16,6 +16,11 @@ stop_qemu() {
     fi
     if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
         kill "$pid" 2>/dev/null || true
+        for _ in {1..20}; do
+            ! kill -0 "$pid" 2>/dev/null && return 0
+            sleep 0.1
+        done
+        kill -KILL "$pid" 2>/dev/null || true
     fi
 }
 
@@ -25,7 +30,7 @@ cleanup() {
         kill "$qemu_pid" 2>/dev/null || true
         wait "$qemu_pid" 2>/dev/null || true
     fi
-    rm -f "$output_file" "$volume_image" "$qemu_pid_file" "$success_file"
+    rm -f "$qemu_pid_file" "$success_file"
 }
 trap cleanup EXIT
 
@@ -33,7 +38,7 @@ fail() {
     tail -n 160 "$output_file" >&2
     echo "Rocky systemd smoke test failed: $1" >&2
     stop_qemu
-    return 1
+    exit 1
 }
 
 wait_for() {
@@ -49,26 +54,35 @@ wait_for() {
     fail "timed out waiting for '$marker'"
 }
 
-dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
+mkdir -p "$(dirname "$volume_image")"
+: >"$output_file"
+if [[ ! -f "$volume_image" ]]; then
+    truncate -s "${GINUX_ROCKY_VOLUME_SIZE:-64G}" "$volume_image"
+fi
 {
     wait_for 'ginux> '
+    domain_started_at=$(date +%s)
     printf '%s\n' \
         'domain new rocky' \
         "domain set rocky image=$rocky_image init=/sbin/init" \
         'domain start rocky --attach'
     wait_for 'ginux: OCI image ready' 240
     wait_for 'ginux: entering configured Linux init' 30
+    init_started_at=$(date +%s)
     wait_for ' running in system mode (' 30
-    sleep 15
-    if grep -Fq 'ginux: Linux init diagnostics: exit=127 first-unsupported-syscall=none' "$output_file"; then
-        printf '%s\n' 'shutdown'
-    else
-        if grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC|Linux init (execution|setup) failed|Linux init exited with status|Linux child exec rejected|systemd-system-update-generator failed|rocky: (failed|stopped)' "$output_file"; then
-            fail 'systemd failed before the documented mmap boundary'
-        fi
-        printf '%s\n' ok >"$success_file"
-        stop_qemu
+    wait_for 'login:' 180
+    login_reached_at=$(date +%s)
+    echo "Rocky timing domain-start-to-login: $((login_reached_at - domain_started_at)) s" >&2
+    echo "Rocky timing Linux-init-to-login: $((login_reached_at - init_started_at)) s" >&2
+    if [[ "${GINUX_REQUIRE_OCI_CACHE_HIT:-0}" == 1 ]] \
+        && ! grep -Fq 'ginux: OCI cache hit (' "$output_file"; then
+        fail 'warm boot did not restore the image from the OCI cache'
     fi
+    if grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC|Linux init (execution|setup) failed|Linux init exited with status|Linux child exec rejected|systemd-system-update-generator failed|rocky: (failed|stopped)' "$output_file"; then
+        fail 'systemd failed before the console login target'
+    fi
+    printf '%s\n' ok >"$success_file"
+    stop_qemu
 } | GINUX_VOLUME_IMAGE="$volume_image" GINUX_QEMU_PID_FILE="$qemu_pid_file" \
     "$repo_root/tools/qemu/run.sh" >"$output_file" 2>&1 &
 qemu_pid=$!
@@ -95,8 +109,9 @@ wait "$qemu_pid" || true
 qemu_pid=""
 
 if [[ -s "$success_file" ]] \
+    && grep -Fq 'login:' "$output_file" \
     && ! grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC|Linux init (execution|setup) failed|Linux init exited with status|Linux child exec rejected|systemd-system-update-generator failed|rocky: (failed|stopped)' "$output_file"; then
-    echo 'Rocky systemd PID 1 smoke test passed.'
+    echo 'Rocky systemd console login target passed.'
     exit 0
 fi
 
@@ -105,11 +120,4 @@ if ! grep -Fq 'GINUX_KERNEL_OK' "$output_file" \
     fail 'clean-shutdown marker was not observed'
 fi
 
-if grep -Fq 'rocky: running' "$output_file"; then
-    echo 'Rocky systemd PID 1 smoke test passed.'
-elif grep -Fq 'ginux: Linux init recent syscalls:' "$output_file" \
-    && grep -Fq 'ginux: Linux init diagnostics: exit=127 first-unsupported-syscall=none' "$output_file"; then
-    echo 'Rocky systemd reached the documented dynamic-mmap compatibility boundary.'
-else
-    fail 'systemd neither remained running nor reached the documented boundary'
-fi
+fail 'systemd did not reach the console login target'

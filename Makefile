@@ -17,7 +17,7 @@ SYSTEM_PROFILE := profiles/minimal-system-v0/profile.tsv
 
 .DEFAULT_GOAL := help
 
-.PHONY: help doctor manifest system-image test-alpine test-rocky-shell test-rocky-dnf test-multi-domain test-linux-abi test-linux-runtime test-storage test-oci-cache probe-rocky-systemd rocky-image rocky-image-check linux-probe controller-runtime network-service protocol-service volume-service abi-conformance architecture-check linux-compat-check build build-verification run reset-storage test test-c1 test-c2 fmt gate clean
+.PHONY: help doctor manifest system-image test-alpine test-rocky-shell test-rocky-dnf test-multi-domain test-linux-abi test-linux-runtime test-storage test-oci-cache probe-rocky-systemd test-rocky-systemd rocky-image rocky-image-check linux-probe controller-runtime network-service protocol-service volume-service abi-conformance architecture-check linux-compat-check build build-verification run reset-storage test test-c1 test-c2 fmt gate clean
 
 help:
 	@echo "Ginux development targets"
@@ -30,6 +30,7 @@ help:
 	@echo "  make test-rocky-dnf   Download Rocky and verify a real dnf update in QEMU"
 	@echo "  make test-multi-domain Run concurrent Alpine and Rocky domains in QEMU"
 	@echo "  make probe-rocky-systemd Probe Rocky systemd and verify the documented next blocker"
+	@echo "  make test-rocky-systemd  Verify cold and cached warm Rocky systemd login boots"
 	@echo "  make rocky-image Fetch and export the pinned Rocky 10 x86-64 system image"
 	@echo "  make rocky-image-check Verify the prepared Rocky image without downloading"
 	@echo "  make linux-probe Build the static probe and dynamic Linux ELF fixtures"
@@ -140,6 +141,10 @@ test-multi-domain: build
 
 probe-rocky-systemd: build
 	@tests/qemu/rocky-systemd.sh
+
+test-rocky-systemd: build
+	@tests/qemu/rocky-systemd.sh
+	@GINUX_REQUIRE_OCI_CACHE_HIT=1 tests/qemu/rocky-systemd.sh
 
 run: build
 	@tools/qemu/run.sh

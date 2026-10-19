@@ -649,7 +649,15 @@ const LINUX_AT_NO_AUTOMOUNT: u64 = 0x800;
 const LINUX_AT_EMPTY_PATH: u64 = 0x1000;
 const LINUX_AT_STATX_SYNC_TYPE: u64 = 0x6000;
 const LINUX_TCGETS: u64 = 0x5401;
+const LINUX_TCSETS: u64 = 0x5402;
+const LINUX_TCSETSW: u64 = 0x5403;
+const LINUX_TCSETSF: u64 = 0x5404;
+const LINUX_TIOCSCTTY: u64 = 0x540e;
+const LINUX_TIOCGPGRP: u64 = 0x540f;
+const LINUX_TIOCSPGRP: u64 = 0x5410;
 const LINUX_TIOCGWINSZ: u64 = 0x5413;
+const LINUX_TIOCNOTTY: u64 = 0x5422;
+const LINUX_TIOCGSID: u64 = 0x5429;
 const LINUX_FIONREAD: u64 = 0x541b;
 const LINUX_DESCRIPTOR_INPUT: u16 = 1;
 const LINUX_DESCRIPTOR_OUTPUT: u16 = 2;
@@ -709,6 +717,14 @@ const LINUX_PROC_PID2_STATM_NODE: u16 = 0xee00;
 const LINUX_FILE_PROC_PID2_STATM: u16 = LINUX_FILE_MASK | LINUX_PROC_PID2_STATM_NODE;
 const LINUX_PROC_CGROUP_NODE: u16 = 0xec00;
 const LINUX_FILE_PROC_CGROUP: u16 = LINUX_FILE_MASK | LINUX_PROC_CGROUP_NODE;
+const LINUX_PROC_PROCESS_CMDLINE_NODE: u16 = 0xea00;
+const LINUX_FILE_PROC_PROCESS_CMDLINE: u16 = LINUX_FILE_MASK | LINUX_PROC_PROCESS_CMDLINE_NODE;
+const LINUX_PROC_PROCESS_ENVIRON_NODE: u16 = 0xe900;
+const LINUX_FILE_PROC_PROCESS_ENVIRON: u16 = LINUX_FILE_MASK | LINUX_PROC_PROCESS_ENVIRON_NODE;
+const LINUX_PROC_FILE_MAX_NODE: u16 = 0xe800;
+const LINUX_FILE_PROC_FILE_MAX: u16 = LINUX_FILE_MASK | LINUX_PROC_FILE_MAX_NODE;
+const LINUX_PROC_NR_OPEN_NODE: u16 = 0xe700;
+const LINUX_FILE_PROC_NR_OPEN: u16 = LINUX_FILE_MASK | LINUX_PROC_NR_OPEN_NODE;
 const LINUX_CGROUP_DIRECTORY_NODE: u16 = 0xeb00;
 const LINUX_CGROUP_DIRECTORY: u16 =
     LINUX_DEVICE_DIRECTORY | LINUX_FILE_PROC_STATUS | LINUX_CGROUP_DIRECTORY_NODE;
@@ -740,6 +756,10 @@ const LINUX_PROC_FILESYSTEMS: &[u8] =
     b"nodev\tproc\nnodev\ttmpfs\nnodev\tdevtmpfs\n\text2\n\text3\n\text4\n\txfs\n";
 const LINUX_PROC_CMDLINE: &[u8] = b"ginux immutable=1\n";
 const LINUX_PROC_CGROUP: &[u8] = b"0::/\n";
+const LINUX_PROC_PROCESS_CMDLINE: &[u8] = b"/sbin/init\0";
+const LINUX_PROC_PROCESS_ENVIRON: &[u8] = b"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\0PWD=/\0TERM=linux\0container=ginux\0SYSTEMD_GETTY_AUTO=1\0";
+const LINUX_PROC_FILE_MAX: &[u8] = b"9223372036854775807\n";
+const LINUX_PROC_NR_OPEN: &[u8] = b"1048576\n";
 const LINUX_PROC_PID1_STAT: &[u8] = b"1 (init) S 0 1 1 0 -1 4194560 0 0 0 0 0 0 0 0 20 0 1 0 1 1048576 256 0 0 0 0 0 0 0 0 0 0 0 0 0 17 0 0 0 0 0 0 0 0 0 0 0 0 0\n";
 const LINUX_PROC_PID1_STATM: &[u8] = b"256 64 32 16 0 32 0\n";
 const LINUX_PROC_PID2_RUNNING_STAT: &[u8] = b"2 (init) R 1 1 1 0 -1 4194560 0 0 0 0 0 0 0 0 20 0 1 0 1 1048576 256 0 0 0 0 0 0 0 0 0 0 0 0 0 17 0 0 0 0 0 0 0 0 0 0 0 0 0\n";
@@ -1214,6 +1234,19 @@ static LINUX_PROCESS_CHILD_EXITED: BankedAtomicBool = BankedAtomicBool::new(fals
 static LINUX_PROCESS_CHILD_STATUS: BankedAtomicU8 = BankedAtomicU8::new(0);
 static LINUX_CURRENT_PROCESS_PID: BankedAtomicU32 = BankedAtomicU32::new(1);
 static LINUX_PROCESS_WAIT_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_TTY_SESSION: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_TTY_FOREGROUND_GROUP: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_TTY_TERMIOS_FLAGS: [BankedAtomicU32; 4] = [
+    BankedAtomicU32::new(0x500),
+    BankedAtomicU32::new(0x5),
+    BankedAtomicU32::new(0xbf),
+    BankedAtomicU32::new(0x8a3b),
+];
+static LINUX_TTY_LINE: BankedAtomicU8 = BankedAtomicU8::new(0);
+static LINUX_TTY_CONTROL_CHARACTERS: [BankedAtomicU8; 19] = [const { BankedAtomicU8::new(0) }; 19];
+const LINUX_TTY_DEFAULT_CONTROL_CHARACTERS: [u8; 19] = [
+    3, 28, 127, 21, 4, 0, 1, 0, 17, 19, 26, 0, 18, 15, 23, 22, 0, 0, 0,
+];
 static LIVE_FORK_PUBLIC_DIAGNOSTIC: BankedAtomicU8 = BankedAtomicU8::new(0);
 static LINUX_PROCESS_SNAPSHOT_VALIDATED: BankedAtomicBool = BankedAtomicBool::new(false);
 static LINUX_PROCESS_SNAPSHOT_STAGE: BankedAtomicU8 = BankedAtomicU8::new(0);
@@ -3684,7 +3717,7 @@ fn execute_deferred_live_fork() -> bool {
         return false;
     };
     // Runtime COW remains available to the process/address-space layer, but
-    // repeated OCI fork/exec cycles must use private copies until COW
+    // repeated Linux fork/exec cycles keep private copies until COW
     // retirement and re-fork bookkeeping are validated end to end.
     let Some(child) = linux_process::begin_live_fork(parent_pid, true) else {
         release_staged_linux_fork_descriptors(parent_pid);
@@ -6183,6 +6216,21 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
     LINUX_PROCESS_CHILD_STATUS.store(0, Ordering::SeqCst);
     LINUX_CURRENT_PROCESS_PID.store(1, Ordering::SeqCst);
     LINUX_PROCESS_WAIT_COUNT.store(0, Ordering::SeqCst);
+    LINUX_TTY_SESSION.store(0, Ordering::SeqCst);
+    LINUX_TTY_FOREGROUND_GROUP.store(0, Ordering::SeqCst);
+    for (flag, value) in LINUX_TTY_TERMIOS_FLAGS
+        .iter()
+        .zip([0x500, 0x5, 0xbf, 0x8a3b])
+    {
+        flag.store(value, Ordering::SeqCst);
+    }
+    LINUX_TTY_LINE.store(0, Ordering::SeqCst);
+    for (character, value) in LINUX_TTY_CONTROL_CHARACTERS
+        .iter()
+        .zip(LINUX_TTY_DEFAULT_CONTROL_CHARACTERS)
+    {
+        character.store(value, Ordering::SeqCst);
+    }
     LIVE_FORK_PUBLIC_DIAGNOSTIC.store(0, Ordering::SeqCst);
     LINUX_PROCESS_SNAPSHOT_VALIDATED.store(false, Ordering::SeqCst);
     LINUX_CLONE_DISPATCH_COUNT.store(0, Ordering::SeqCst);
@@ -8604,24 +8652,7 @@ extern "sysv64" fn linux_syscall_handler(
                     LINUX_EBADF
                 };
             }
-            match buffer {
-                LINUX_TCGETS => {
-                    let termios = [0_u8; 36];
-                    if !copy_to_linux_user(count, &termios) {
-                        return LINUX_EFAULT;
-                    }
-                }
-                LINUX_TIOCGWINSZ => {
-                    let mut window = [0_u8; 8];
-                    window[..2].copy_from_slice(&24_u16.to_ne_bytes());
-                    window[2..4].copy_from_slice(&80_u16.to_ne_bytes());
-                    if !copy_to_linux_user(count, &window) {
-                        return LINUX_EFAULT;
-                    }
-                }
-                _ => return LINUX_ENOTTY,
-            }
-            0
+            linux_tty_ioctl(buffer, count)
         }
         LINUX_READV_SYSCALL => linux_descriptor_readv_live_return(
             registers,
@@ -20294,6 +20325,12 @@ fn linux_runtime_file_kind(path: &[u8]) -> Option<u16> {
     if path == b"/etc/resolv.conf" {
         return Some(LINUX_FILE_RESOLV_CONF);
     }
+    if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) && path == b"/proc/sys/fs/file-max" {
+        return Some(LINUX_FILE_PROC_FILE_MAX);
+    }
+    if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) && path == b"/proc/sys/fs/nr_open" {
+        return Some(LINUX_FILE_PROC_NR_OPEN);
+    }
     if let Some(name) = path.strip_prefix(b"/proc/") {
         if let Some(kind) = linux_proc_root_file_kind(name) {
             return Some(kind);
@@ -20372,6 +20409,12 @@ fn linux_proc_pid_file_kind(pid: u32, name: &[u8]) -> Option<u16> {
     match (pid, name) {
         (pid, b"fd") if pid == current_linux_process_pid() => Some(LINUX_PROC_FD_DIRECTORY),
         (_, b"cgroup") => Some(LINUX_FILE_PROC_CGROUP),
+        (1, b"cmdline") if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) => {
+            Some(LINUX_FILE_PROC_PROCESS_CMDLINE)
+        }
+        (1, b"environ") if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) => {
+            Some(LINUX_FILE_PROC_PROCESS_ENVIRON)
+        }
         (1, b"status") => Some(LINUX_FILE_PROC_STATUS),
         (1, b"stat") => Some(LINUX_FILE_PROC_PID1_STAT),
         (1, b"statm") => Some(LINUX_FILE_PROC_PID1_STATM),
@@ -20420,6 +20463,12 @@ fn linux_measured_path_kind(path: &[u8]) -> Option<u16> {
     }
     if path == b"sys/fs/cgroup" {
         return Some(LINUX_CGROUP_DIRECTORY);
+    }
+    if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) && path == b"proc/sys/fs/file-max" {
+        return Some(LINUX_FILE_PROC_FILE_MAX);
+    }
+    if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) && path == b"proc/sys/fs/nr_open" {
+        return Some(LINUX_FILE_PROC_NR_OPEN);
     }
     if let Some(name) = path.strip_prefix(b"proc/") {
         if let Some(kind) = linux_proc_root_file_kind(name) {
@@ -22337,6 +22386,7 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64, mode: u64) -> u64
         path,
         b"/dev/null" | b"/dev/zero" | b"/dev/console" | b"/dev/tty"
     );
+    let writable_proc_path = matches!(path, b"/proc/sys/fs/file-max" | b"/proc/sys/fs/nr_open");
     if tmp_path && flags & LINUX_O_DIRECTORY != 0 {
         return LINUX_ENOTDIR;
     }
@@ -22376,7 +22426,12 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64, mode: u64) -> u64
         if flags & LINUX_O_TRUNC != 0 && !crate::linux_overlay::truncate(metadata.handle, 0) {
             return LINUX_EIO;
         }
-    } else if canonical_length.is_some() && access != 0 && !tmp_path && !virtual_device {
+    } else if canonical_length.is_some()
+        && access != 0
+        && !tmp_path
+        && !virtual_device
+        && !writable_proc_path
+    {
         let length = canonical_length.unwrap_or(0);
         let initial = rootfs_at_path
             .and_then(|(_, entry)| entry)
@@ -22416,6 +22471,7 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64, mode: u64) -> u64
         && flags & LINUX_O_CREAT != 0
         && !tmp_path
         && !virtual_device
+        && !writable_proc_path
     {
         let length = canonical_length.unwrap_or(0);
         if !linux_overlay_parent_exists(&canonical[..length]) {
@@ -22493,7 +22549,11 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64, mode: u64) -> u64
     if kind & LINUX_DEVICE_DIRECTORY == 0 && flags & LINUX_O_DIRECTORY != 0 {
         return LINUX_ENOTDIR;
     }
-    if kind & LINUX_FILE_MASK != 0 && access != 0 && !linux_tmp_file(kind) {
+    if kind & LINUX_FILE_MASK != 0
+        && access != 0
+        && !linux_tmp_file(kind)
+        && !linux_writable_proc_file(kind)
+    {
         return LINUX_EACCES;
     }
     let state = kind | (access + 1) as u16;
@@ -24078,7 +24138,7 @@ fn linux_faccessat(directory: u64, path_address: u64, mode: u64, flags: u64) -> 
         let denied = if linux_tmp_file(kind) {
             mode & 1 != 0
         } else if linux_proc_file(kind) {
-            mode & 3 != 0
+            mode & 1 != 0 || mode & 2 != 0 && !linux_writable_proc_file(kind)
         } else {
             mode & 2 != 0
         };
@@ -24092,7 +24152,7 @@ fn linux_faccessat(directory: u64, path_address: u64, mode: u64, flags: u64) -> 
             let denied = if linux_tmp_file(kind) {
                 mode & 1 != 0
             } else if linux_proc_file(kind) {
-                mode & 3 != 0
+                mode & 1 != 0 || mode & 2 != 0 && !linux_writable_proc_file(kind)
             } else {
                 mode & 2 != 0
             };
@@ -30457,6 +30517,153 @@ fn linux_console_descriptor_open(descriptor: u64) -> bool {
     linux_console_descriptor(descriptor) != 0
 }
 
+fn linux_tty_get_termios(address: u64) -> u64 {
+    let mut termios = [0_u8; 36];
+    if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
+        for (index, flag) in LINUX_TTY_TERMIOS_FLAGS.iter().enumerate() {
+            termios[index * 4..index * 4 + 4]
+                .copy_from_slice(&flag.load(Ordering::SeqCst).to_ne_bytes());
+        }
+        termios[16] = LINUX_TTY_LINE.load(Ordering::SeqCst);
+        for (index, character) in LINUX_TTY_CONTROL_CHARACTERS.iter().enumerate() {
+            termios[17 + index] = character.load(Ordering::SeqCst);
+        }
+    }
+    if copy_to_linux_user(address, &termios) {
+        0
+    } else {
+        LINUX_EFAULT
+    }
+}
+
+fn linux_tty_set_termios(address: u64) -> u64 {
+    let mut termios = [0_u8; 36];
+    if !copy_from_linux_user(address, &mut termios) {
+        return LINUX_EFAULT;
+    }
+    for (index, flag) in LINUX_TTY_TERMIOS_FLAGS.iter().enumerate() {
+        flag.store(
+            u32::from_ne_bytes(termios[index * 4..index * 4 + 4].try_into().unwrap()),
+            Ordering::SeqCst,
+        );
+    }
+    LINUX_TTY_LINE.store(termios[16], Ordering::SeqCst);
+    for (index, character) in LINUX_TTY_CONTROL_CHARACTERS.iter().enumerate() {
+        character.store(termios[17 + index], Ordering::SeqCst);
+    }
+    0
+}
+
+fn linux_tty_ioctl(request: u64, argument: u64) -> u64 {
+    let pid = current_linux_process_pid();
+    match request {
+        LINUX_TCGETS => linux_tty_get_termios(argument),
+        LINUX_TCSETS | LINUX_TCSETSW | LINUX_TCSETSF => {
+            if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
+                linux_tty_set_termios(argument)
+            } else {
+                LINUX_ENOTTY
+            }
+        }
+        LINUX_TIOCSCTTY => {
+            let Some(session) = linux_process::live_process_session(pid) else {
+                return LINUX_ESRCH;
+            };
+            if session != pid {
+                return LINUX_EPERM;
+            }
+            let owner = LINUX_TTY_SESSION.load(Ordering::SeqCst);
+            let privileged_force = argument == 1
+                && current_linux_credentials().is_some_and(|credentials| credentials.euid == 0);
+            if owner != 0 && owner != session && !privileged_force {
+                return LINUX_EPERM;
+            }
+            LINUX_TTY_SESSION.store(session, Ordering::SeqCst);
+            LINUX_TTY_FOREGROUND_GROUP.store(
+                linux_process::live_process_group(pid).unwrap_or(pid),
+                Ordering::SeqCst,
+            );
+            0
+        }
+        LINUX_TIOCGPGRP => {
+            let Some(session) = linux_process::live_process_session(pid) else {
+                return LINUX_ESRCH;
+            };
+            if LINUX_TTY_SESSION.load(Ordering::SeqCst) != session {
+                return LINUX_ENOTTY;
+            }
+            let group = LINUX_TTY_FOREGROUND_GROUP.load(Ordering::SeqCst);
+            if copy_to_linux_user(argument, &(group as i32).to_ne_bytes()) {
+                0
+            } else {
+                LINUX_EFAULT
+            }
+        }
+        LINUX_TIOCSPGRP => {
+            let Some(session) = linux_process::live_process_session(pid) else {
+                return LINUX_ESRCH;
+            };
+            if LINUX_TTY_SESSION.load(Ordering::SeqCst) != session {
+                return LINUX_ENOTTY;
+            }
+            let mut bytes = [0_u8; 4];
+            if !copy_from_linux_user(argument, &mut bytes) {
+                return LINUX_EFAULT;
+            }
+            let group = i32::from_ne_bytes(bytes);
+            if group <= 0
+                || !(0..linux_process::PROCESS_LIMIT).any(|slot| {
+                    linux_process::live_process_pid_at(slot).is_some_and(|candidate| {
+                        linux_process::live_process_group(candidate) == Some(group as u32)
+                            && linux_process::live_process_session(candidate) == Some(session)
+                    })
+                })
+            {
+                return LINUX_EPERM;
+            }
+            LINUX_TTY_FOREGROUND_GROUP.store(group as u32, Ordering::SeqCst);
+            0
+        }
+        LINUX_TIOCNOTTY => {
+            let Some(session) = linux_process::live_process_session(pid) else {
+                return LINUX_ESRCH;
+            };
+            if LINUX_TTY_SESSION.load(Ordering::SeqCst) != session {
+                return LINUX_ENOTTY;
+            }
+            if session == pid {
+                LINUX_TTY_SESSION.store(0, Ordering::SeqCst);
+                LINUX_TTY_FOREGROUND_GROUP.store(0, Ordering::SeqCst);
+            }
+            0
+        }
+        LINUX_TIOCGSID => {
+            let Some(session) = linux_process::live_process_session(pid) else {
+                return LINUX_ESRCH;
+            };
+            if LINUX_TTY_SESSION.load(Ordering::SeqCst) != session {
+                return LINUX_ENOTTY;
+            }
+            if copy_to_linux_user(argument, &(session as i32).to_ne_bytes()) {
+                0
+            } else {
+                LINUX_EFAULT
+            }
+        }
+        LINUX_TIOCGWINSZ => {
+            let mut window = [0_u8; 8];
+            window[..2].copy_from_slice(&24_u16.to_ne_bytes());
+            window[2..4].copy_from_slice(&80_u16.to_ne_bytes());
+            if copy_to_linux_user(argument, &window) {
+                0
+            } else {
+                LINUX_EFAULT
+            }
+        }
+        _ => LINUX_ENOTTY,
+    }
+}
+
 fn linux_device_descriptor(descriptor: u64) -> u16 {
     if let Some(state) = usize::try_from(descriptor)
         .ok()
@@ -30517,11 +30724,22 @@ fn linux_proc_file(state: u16) -> bool {
             | LINUX_FILE_PROC_PID2_STAT
             | LINUX_FILE_PROC_PID2_STATM
             | LINUX_FILE_PROC_CGROUP
+            | LINUX_FILE_PROC_PROCESS_CMDLINE
+            | LINUX_FILE_PROC_PROCESS_ENVIRON
+            | LINUX_FILE_PROC_FILE_MAX
+            | LINUX_FILE_PROC_NR_OPEN
     )
 }
 
 fn linux_mountinfo_file(state: u16) -> bool {
     state & !3 == LINUX_FILE_PROC_MOUNTINFO
+}
+
+fn linux_writable_proc_file(state: u16) -> bool {
+    matches!(
+        state & !3,
+        LINUX_FILE_PROC_FILE_MAX | LINUX_FILE_PROC_NR_OPEN
+    )
 }
 
 fn linux_user_namespace_file(state: u16) -> Option<&'static [u8]> {
@@ -30573,6 +30791,10 @@ fn linux_regular_file(state: u16) -> Option<&'static [u8]> {
         LINUX_FILE_PROC_FILESYSTEMS => return Some(LINUX_PROC_FILESYSTEMS),
         LINUX_FILE_PROC_CMDLINE => return Some(LINUX_PROC_CMDLINE),
         LINUX_FILE_PROC_CGROUP => return Some(LINUX_PROC_CGROUP),
+        LINUX_FILE_PROC_PROCESS_CMDLINE => return Some(LINUX_PROC_PROCESS_CMDLINE),
+        LINUX_FILE_PROC_PROCESS_ENVIRON => return Some(LINUX_PROC_PROCESS_ENVIRON),
+        LINUX_FILE_PROC_FILE_MAX => return Some(LINUX_PROC_FILE_MAX),
+        LINUX_FILE_PROC_NR_OPEN => return Some(LINUX_PROC_NR_OPEN),
         LINUX_FILE_PROC_PID1_STAT => return Some(LINUX_PROC_PID1_STAT),
         LINUX_FILE_PROC_PID1_STATM => return Some(LINUX_PROC_PID1_STATM),
         LINUX_FILE_PROC_PID2_STATM => {
@@ -30633,6 +30855,10 @@ fn linux_regular_file_inode(state: u16) -> Option<u64> {
         LINUX_FILE_PROC_PID2_STAT => return linux_process::live_process_status(2).map(|_| 34),
         LINUX_FILE_PROC_PID2_STATM => return linux_process::live_process_status(2).map(|_| 35),
         LINUX_FILE_PROC_CGROUP => return Some(37),
+        LINUX_FILE_PROC_PROCESS_CMDLINE => return Some(40),
+        LINUX_FILE_PROC_PROCESS_ENVIRON => return Some(41),
+        LINUX_FILE_PROC_FILE_MAX => return Some(42),
+        LINUX_FILE_PROC_NR_OPEN => return Some(43),
         _ => {}
     }
     if linux_tmp_file(state) {
@@ -32046,7 +32272,12 @@ fn linux_getdents(descriptor: u64, address: u64, count: u64, legacy: bool) -> u6
                 }
             }
         } else if directory == b"proc/1" {
-            if cursor > 8 {
+            let entry_count = if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
+                10
+            } else {
+                8
+            };
+            if cursor > entry_count {
                 return LINUX_EINVAL;
             }
             for (index, inode, name) in [
@@ -32058,7 +32289,12 @@ fn linux_getdents(descriptor: u64, address: u64, count: u64, legacy: bool) -> u6
                 (5_usize, 32_u64, &b"stat"[..]),
                 (6_usize, 33_u64, &b"statm"[..]),
                 (7_usize, 37_u64, &b"cgroup"[..]),
-            ] {
+                (8_usize, 40_u64, &b"cmdline"[..]),
+                (9_usize, 41_u64, &b"environ"[..]),
+            ]
+            .into_iter()
+            .take(entry_count)
+            {
                 if cursor == index {
                     if !append_linux_dirent(
                         &mut entries[..output_capacity],
@@ -33913,6 +34149,8 @@ fn linux_regular_file_stat(state: u16) -> [u8; LINUX_STAT_SIZE] {
 fn linux_regular_file_mode(state: u16) -> u32 {
     if linux_tmp_file(state) {
         0o100600
+    } else if linux_writable_proc_file(state) {
+        0o100644
     } else if linux_proc_file(state) {
         0o100444
     } else {
