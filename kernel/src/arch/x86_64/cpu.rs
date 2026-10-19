@@ -14352,6 +14352,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let memory_locking = verify_linux_memory_locking_syscalls();
     let address_space_limit = verify_linux_address_space_limit();
     let fadvise = verify_linux_fadvise64_syscall();
+    let runtime_boot_contracts = verify_linux_runtime_boot_contracts();
     let mappings_released =
         address_space::release_current_linux_runtime_mappings(LINUX_RUNTIME_DYNAMIC_MMAP_BASE);
     ELF_PROBE_MMAP_NEXT.store(LINUX_RUNTIME_DYNAMIC_MMAP_BASE, Ordering::SeqCst);
@@ -14406,6 +14407,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         memory_locking,
         address_space_limit,
         fadvise,
+        runtime_boot_contracts,
         mappings_released,
     ]
     .into_iter()
@@ -14466,7 +14468,95 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && memory_locking
         && address_space_limit
         && fadvise
+        && runtime_boot_contracts
         && mappings_released
+}
+
+fn verify_linux_runtime_boot_contracts() -> bool {
+    let procfs = linux_runtime_file_kind(b"/proc/1/cmdline")
+        == Some(LINUX_FILE_PROC_PROCESS_CMDLINE)
+        && linux_runtime_file_kind(b"/proc/1/environ") == Some(LINUX_FILE_PROC_PROCESS_ENVIRON)
+        && linux_runtime_file_kind(b"/proc/sys/fs/file-max") == Some(LINUX_FILE_PROC_FILE_MAX)
+        && linux_runtime_file_kind(b"/proc/sys/fs/nr_open") == Some(LINUX_FILE_PROC_NR_OPEN)
+        && linux_regular_file(LINUX_FILE_PROC_PROCESS_CMDLINE) == Some(LINUX_PROC_PROCESS_CMDLINE)
+        && linux_regular_file(LINUX_FILE_PROC_PROCESS_ENVIRON) == Some(LINUX_PROC_PROCESS_ENVIRON)
+        && linux_regular_file(LINUX_FILE_PROC_FILE_MAX) == Some(LINUX_PROC_FILE_MAX)
+        && linux_regular_file(LINUX_FILE_PROC_NR_OPEN) == Some(LINUX_PROC_NR_OPEN);
+
+    let mapping = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    if !(LINUX_RUNTIME_DYNAMIC_MMAP_BASE..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
+        .contains(&mapping)
+    {
+        return false;
+    }
+
+    let saved_flags = core::array::from_fn::<_, 4, _>(|index| {
+        LINUX_TTY_TERMIOS_FLAGS[index].load(Ordering::SeqCst)
+    });
+    let saved_line = LINUX_TTY_LINE.load(Ordering::SeqCst);
+    let saved_characters = core::array::from_fn::<_, 19, _>(|index| {
+        LINUX_TTY_CONTROL_CHARACTERS[index].load(Ordering::SeqCst)
+    });
+    let saved_session = LINUX_TTY_SESSION.load(Ordering::SeqCst);
+    let saved_group = LINUX_TTY_FOREGROUND_GROUP.load(Ordering::SeqCst);
+
+    let mut requested = [0_u8; 36];
+    for (index, flag) in [0x500_u32, 0x5, 0xbf, 0x8a3b].into_iter().enumerate() {
+        requested[index * 4..index * 4 + 4].copy_from_slice(&flag.to_ne_bytes());
+    }
+    requested[16] = 0;
+    requested[17..].copy_from_slice(&[
+        3, 28, 127, 21, 4, 0, 1, 0, 17, 19, 26, 0, 18, 15, 23, 22, 0, 0, 0,
+    ]);
+    let mut returned = [0_u8; 36];
+    let termios = copy_to_linux_user(mapping, &requested)
+        && linux_tty_ioctl(LINUX_TCSETS, mapping) == 0
+        && linux_tty_ioctl(LINUX_TCGETS, mapping) == 0
+        && copy_from_linux_user(mapping, &mut returned)
+        && returned == requested;
+
+    let mut window = [0_u8; 8];
+    let window_size = linux_tty_ioctl(LINUX_TIOCGWINSZ, mapping) == 0
+        && copy_from_linux_user(mapping, &mut window)
+        && u16::from_ne_bytes(window[..2].try_into().unwrap()) == 24
+        && u16::from_ne_bytes(window[2..4].try_into().unwrap()) == 80;
+
+    let pid = current_linux_process_pid();
+    let session = linux_process::live_process_session(pid);
+    let process_group = linux_process::live_process_group(pid);
+    let controlling_terminal = if session == Some(pid) && process_group == Some(pid) {
+        let mut returned_group = [0_u8; 4];
+        let mut returned_session = [0_u8; 4];
+        linux_tty_ioctl(LINUX_TIOCSCTTY, 0) == 0
+            && linux_tty_ioctl(LINUX_TIOCGPGRP, mapping) == 0
+            && copy_from_linux_user(mapping, &mut returned_group)
+            && u32::from_ne_bytes(returned_group) == pid
+            && linux_tty_ioctl(LINUX_TIOCGSID, mapping) == 0
+            && copy_from_linux_user(mapping, &mut returned_session)
+            && u32::from_ne_bytes(returned_session) == pid
+    } else {
+        false
+    };
+
+    for (index, flag) in saved_flags.into_iter().enumerate() {
+        LINUX_TTY_TERMIOS_FLAGS[index].store(flag, Ordering::SeqCst);
+    }
+    LINUX_TTY_LINE.store(saved_line, Ordering::SeqCst);
+    for (index, character) in saved_characters.into_iter().enumerate() {
+        LINUX_TTY_CONTROL_CHARACTERS[index].store(character, Ordering::SeqCst);
+    }
+    LINUX_TTY_SESSION.store(saved_session, Ordering::SeqCst);
+    LINUX_TTY_FOREGROUND_GROUP.store(saved_group, Ordering::SeqCst);
+    let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
+
+    procfs && termios && window_size && controlling_terminal && unmapped
 }
 
 fn verify_linux_scheduler_priority_ranges() -> bool {
