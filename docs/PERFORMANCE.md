@@ -24,6 +24,8 @@ Host: Apple Silicon macOS, QEMU `x86_64` TCG. Image:
 | Optimized repeated runs | 9,495 / 9,810 / 9,953 ms |
 | Optimized median | 9,810 ms |
 | Median reduction | 36.1% |
+| Final repeated runs | 9,935 / 10,226 / 10,226 ms |
+| Final median | 10,226 ms |
 | Warm compressed-layer restore | about 2,700 ms |
 | Layer unpack and rootfs publication | about 3,500 ms |
 
@@ -45,7 +47,10 @@ about six seconds without weakening general poll timeout behavior.
   kernel to a more aggressive optimization level both caused verification or
   embedded-service regressions. Those speculative changes were reverted. The
   retained timed-wait fast path avoids inactive scans without changing memory
-  ordering contracts.
+  ordering contracts. Bank selection now uses an acquire-load fast path after
+  one-time initialization, avoiding a redundant locked compare-and-swap on
+  every per-domain atomic access. Its 9,935 / 10,226 / 10,226 ms TCG result is
+  within run-to-run variance, so no speedup is claimed.
 - A cached 299,590,656-byte published Rocky rootfs restored directly in 8,363
   ms. Restoring its 109,755,585 compressed bytes and unpacking them took about
   6,200 ms. The v2 cache can publish a digest-verified rootfs directly, but
@@ -54,10 +59,33 @@ about six seconds without weakening general poll timeout behavior.
   demand-paged disk-backed rootfs is required to remove both full restore and
   full unpack without increasing startup time.
 
+## Optimization-plan disposition
+
+| Item | Disposition |
+|---|---|
+| Filesystem/descriptor syscall paths | Indexed lookup retained; measured total `openat` cost is about 0.3 seconds. |
+| Excessive global synchronization | Redundant bank-initialization CAS removed while preserving acquire/release publication. |
+| Full process-switch snapshots | Replacement rejected at this checkpoint: measured total cost is about 65 ms and the current ownership rewrite has materially higher lifecycle risk. |
+| Native x86-64 KVM | Gate implemented; execution remains pending on a KVM-capable host. |
+| Direct cached OCI reuse | Implemented with digest verification and adaptive selection; Rocky layers remain faster than its 299 MB direct image. |
+| Selective hot compilation | Kernel release package uses `opt-level = 3`; size-sensitive embedded controller remains `opt-level = "z"`. |
+
 ## Platform interpretation
 
 The TCG result measures translated x86 execution on an ARM host; it is not a
 native-kernel performance result. The repository configures KVM automatically
 and enforces the native three-second gate, but KVM cannot be executed on this
-host. That gate must be run on the planned x86-64 Linux system before claiming
-the couple-second target is met.
+host. The installed QEMU binary reports only the `tcg` accelerator. That gate
+must be run on the planned x86-64 Linux system before claiming the couple-second
+target is met.
+
+## Verification status
+
+`make check` passes, including the architecture check, the Linux compatibility
+matrix, the native service ABI check, and all host-side unit tests. The Rocky
+systemd benchmark reaches its verified console login on every measured run.
+
+The verification boot now advances past its formerly stale epoll and `statx`
+assertions, but still fails in the post-exec system-supervisor lifecycle probe.
+That is a separate correctness item; it is not counted as a successful full
+`make test` result in this checkpoint.
