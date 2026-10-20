@@ -3931,6 +3931,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             let image_size = arch::x86_64::cpu::configured_container_image(&mut image).unwrap_or(0);
             let mut downloaded = false;
             let mut cache_hit = false;
+            let mut cached_rootfs = false;
             let mut cache_repair = false;
             if image_size != 0 {
                 serial_write("ginux: checking OCI cache ");
@@ -3944,11 +3945,18 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
                         virtio_mmio,
                         virtio_iommu_profile,
                         &image[..image_size],
+                        arch::x86_64::cpu::configured_container_slot(),
                     )
                 } else {
                     OciCacheRestore::Miss
                 } {
-                    OciCacheRestore::Hit(layers) => {
+                    OciCacheRestore::RootfsHit => {
+                        serial_write("ginux: OCI cache hit (published root filesystem)\r\n");
+                        downloaded = true;
+                        cache_hit = true;
+                        cached_rootfs = true;
+                    }
+                    OciCacheRestore::LayerHit(layers) => {
                         serial_write("ginux: OCI cache hit (");
                         serial_write_usize(layers);
                         serial_write(if layers == 1 {
@@ -4028,13 +4036,33 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
                     ),
                 }
             }
-            if downloaded {
+            if downloaded && !cached_rootfs {
                 serial_write("ginux: OCI unpacking image filesystem\r\n");
             }
             let unpack_started = arch::x86_64::timer::timestamp_counter();
             let success = arch::x86_64::cpu::configured_container_slot()
-                .is_some_and(|slot| downloaded && image_store::install_published_layers(slot));
+                .is_some_and(|slot| {
+                    downloaded && (cached_rootfs || image_store::install_published_layers(slot))
+                });
             serial_write_elapsed("ginux: timing OCI unpack/publish: ", unpack_started);
+            if success && !cached_rootfs {
+                if let Some((bytes, newly_stored)) = persist_oci_rootfs(
+                    virtio_block,
+                    virtio_mmio,
+                    virtio_iommu_profile,
+                    &image[..image_size],
+                    persisted_oci_catalog,
+                    arch::x86_64::cpu::configured_container_slot().unwrap_or(usize::MAX),
+                ) {
+                    serial_write(if newly_stored {
+                        "ginux: OCI cache stored published root filesystem ("
+                    } else {
+                        "ginux: OCI cache retained published root filesystem ("
+                    });
+                    serial_write_u64(bytes);
+                    serial_write(" bytes)\r\n");
+                }
+            }
             serial_write_elapsed("ginux: timing OCI total: ", pull_started);
             if !success {
                 let _ = image_store::discard_published_layers();
@@ -4432,7 +4460,8 @@ fn with_runtime_volume<T>(
 }
 
 enum OciCacheRestore {
-    Hit(usize),
+    RootfsHit,
+    LayerHit(usize),
     Miss,
     Invalid,
 }
@@ -4443,11 +4472,12 @@ fn restore_cached_oci_layers(
     mapping: arch::x86_64::paging::MmioMapping,
     iommu_profile: arch::x86_64::iommu::DeviceTranslationProfile,
     reference: &[u8],
+    slot: Option<usize>,
 ) -> OciCacheRestore {
     with_runtime_volume(device, mapping, iommu_profile, |backend| {
         let mut encoded = [0_u8; ginux_oci_cache::ENCODED_SIZE];
         let record = match volume::recover_oci_catalog(backend, &mut encoded) {
-            Ok(Some(record)) if record.length == encoded.len() => record,
+            Ok(Some(record)) => record,
             Ok(None) => return Some(OciCacheRestore::Miss),
             _ => return Some(OciCacheRestore::Invalid),
         };
@@ -4457,6 +4487,71 @@ fn restore_cached_oci_layers(
         let Some(entry) = catalog.find(reference, ginux_oci_cache::Platform::LinuxAmd64) else {
             return Some(OciCacheRestore::Miss);
         };
+        let compressed_length = entry
+            .layers()
+            .iter()
+            .try_fold(0_u64, |total, layer| total.checked_add(layer.length));
+        let direct_rootfs = entry.rootfs().filter(|rootfs| {
+            compressed_length.is_some_and(|compressed| {
+                rootfs.length <= compressed.saturating_mul(2)
+            })
+        });
+        if let (Some(slot), Some(rootfs)) = (slot, direct_rootfs) {
+            let Ok(length) = usize::try_from(rootfs.length) else {
+                return Some(OciCacheRestore::Invalid);
+            };
+            let page_count = length.div_ceil(4096);
+            let Some((first_frame, allocated)) =
+                memory::allocate_contiguous_extent(memory::FrameOwner::KERNEL, page_count)
+            else {
+                return Some(OciCacheRestore::Invalid);
+            };
+            let Some(address) = first_frame.direct_map_address() else {
+                let _ = memory::scrub_and_release_contiguous_extent(
+                    memory::FrameOwner::KERNEL,
+                    first_frame,
+                    allocated,
+                );
+                return Some(OciCacheRestore::Invalid);
+            };
+            let output = unsafe {
+                core::slice::from_raw_parts_mut(address as *mut u8, allocated.saturating_mul(4096))
+            };
+            output.fill(0);
+            let Ok(start_sector) = usize::try_from(rootfs.start_sector) else {
+                let _ = memory::scrub_and_release_contiguous_extent(
+                    memory::FrameOwner::KERNEL,
+                    first_frame,
+                    allocated,
+                );
+                return Some(OciCacheRestore::Invalid);
+            };
+            let mut offset = 0_usize;
+            let mut valid = true;
+            while offset < length {
+                let copied = (length - offset).min(2048);
+                let transfer = copied.div_ceil(ginux_volume_format::SECTOR_SIZE)
+                    * ginux_volume_format::SECTOR_SIZE;
+                if !backend.read_sectors(
+                    start_sector + offset / ginux_volume_format::SECTOR_SIZE,
+                    &mut output[offset..offset + transfer],
+                ) {
+                    valid = false;
+                    break;
+                }
+                offset += copied;
+            }
+            valid &= crate::crypto::sha256(&output[..length]) == rootfs.digest;
+            if valid && image_store::install_cached_rootfs(slot, first_frame, allocated, length) {
+                return Some(OciCacheRestore::RootfsHit);
+            }
+            let _ = memory::scrub_and_release_contiguous_extent(
+                memory::FrameOwner::KERNEL,
+                first_frame,
+                allocated,
+            );
+            return Some(OciCacheRestore::Invalid);
+        }
         let mut layers = [ginux_oci_cache::Layer::EMPTY; ginux_oci_cache::LAYER_LIMIT];
         let layer_count = entry.layers().len();
         layers[..layer_count].copy_from_slice(entry.layers());
@@ -4494,7 +4589,7 @@ fn restore_cached_oci_layers(
                 return Some(OciCacheRestore::Invalid);
             }
         }
-        Some(OciCacheRestore::Hit(layer_count))
+        Some(OciCacheRestore::LayerHit(layer_count))
     })
     .unwrap_or(OciCacheRestore::Invalid)
 }
@@ -4510,11 +4605,12 @@ fn persist_oci_layers(
 ) -> Option<(usize, u64)> {
     with_runtime_volume(device, mapping, iommu_profile, |backend| {
         let mut catalog = match volume::recover_oci_catalog(backend, encoded) {
-            Ok(Some(record)) if record.length == encoded.len() => {
-                ginux_oci_cache::Catalog::decode(&encoded[..record.length])?
+            Ok(Some(record)) => {
+                ginux_oci_cache::Catalog::decode(&encoded[..record.length])
+                    .unwrap_or_default()
             }
             Ok(None) => ginux_oci_cache::Catalog::new(),
-            _ => return None,
+            Err(_) => return None,
         };
         let layer_count = image_store::published_layer_count();
         if layer_count == 0 || layer_count > ginux_oci_cache::LAYER_LIMIT {
@@ -4577,14 +4673,89 @@ fn persist_oci_layers(
 }
 
 #[inline(never)]
+fn persist_oci_rootfs(
+    device: arch::x86_64::pci::VirtioBlockDevice,
+    mapping: arch::x86_64::paging::MmioMapping,
+    iommu_profile: arch::x86_64::iommu::DeviceTranslationProfile,
+    reference: &[u8],
+    encoded: &mut [u8; ginux_oci_cache::ENCODED_SIZE],
+    slot: usize,
+) -> Option<(u64, bool)> {
+    let rootfs = image_store::installed_rootfs(slot)?;
+    let length = u64::try_from(rootfs.len()).ok()?;
+    with_runtime_volume(device, mapping, iommu_profile, |backend| {
+        let mut catalog = match volume::recover_oci_catalog(backend, encoded) {
+            Ok(Some(record)) => {
+                ginux_oci_cache::Catalog::decode(&encoded[..record.length])?
+            }
+            _ => return None,
+        };
+        let entry = catalog.find(reference, ginux_oci_cache::Platform::LinuxAmd64)?;
+        let compressed_length = entry
+            .layers()
+            .iter()
+            .try_fold(0_u64, |total, layer| total.checked_add(layer.length))?;
+        if length > compressed_length.saturating_mul(2) {
+            return None;
+        }
+        let digest = crypto::sha256(rootfs);
+        if entry
+            .rootfs()
+            .is_some_and(|cached| cached.digest == digest && cached.length == length)
+        {
+            return Some((length, false));
+        }
+        let start_sector = catalog.next_object_sector()?;
+        let sectors = length
+            .checked_add((ginux_volume_format::SECTOR_SIZE - 1) as u64)?
+            .checked_div(ginux_volume_format::SECTOR_SIZE as u64)?;
+        if start_sector.checked_add(sectors)? > backend.capacity_sectors() {
+            return None;
+        }
+        let mut sector_index = start_sector;
+        let mut offset = 0_usize;
+        while offset < rootfs.len() {
+            let mut sector = [0_u8; ginux_volume_format::SECTOR_SIZE];
+            let copied = (rootfs.len() - offset).min(sector.len());
+            sector[..copied].copy_from_slice(&rootfs[offset..offset + copied]);
+            if !volume::BlockDevice::write_sector(
+                backend,
+                usize::try_from(sector_index).ok()?,
+                &sector,
+            ) {
+                return None;
+            }
+            offset += copied;
+            sector_index = sector_index.checked_add(1)?;
+        }
+        let cached = ginux_oci_cache::Rootfs {
+            digest,
+            start_sector,
+            length,
+        };
+        if !volume::BlockDevice::flush(backend)
+            || !catalog.set_rootfs(
+                reference,
+                ginux_oci_cache::Platform::LinuxAmd64,
+                cached,
+            )
+            || !catalog.encode(encoded)
+            || volume::commit_oci_catalog(backend, encoded).is_err()
+        {
+            return None;
+        }
+        Some((length, true))
+    })
+}
+
+#[inline(never)]
 fn recover_oci_catalog_snapshot<D: volume::BlockDevice>(
     device: &mut D,
     encoded: &mut [u8; ginux_oci_cache::ENCODED_SIZE],
 ) -> (bool, bool) {
     match volume::recover_oci_catalog(device, encoded) {
         Ok(Some(record))
-            if record.length == encoded.len()
-                && ginux_oci_cache::Catalog::decode(&encoded[..record.length]).is_some() =>
+            if ginux_oci_cache::Catalog::decode(&encoded[..record.length]).is_some() =>
         {
             (true, false)
         }

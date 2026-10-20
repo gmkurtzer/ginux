@@ -20,6 +20,8 @@ static ROOTFS_FRAME_STARTS: [AtomicU64; crate::control_abi::DOMAIN_LIMIT] =
     [const { AtomicU64::new(0) }; crate::control_abi::DOMAIN_LIMIT];
 static ROOTFS_FRAME_COUNTS: [AtomicUsize; crate::control_abi::DOMAIN_LIMIT] =
     [const { AtomicUsize::new(0) }; crate::control_abi::DOMAIN_LIMIT];
+static ROOTFS_LENGTHS: [AtomicUsize; crate::control_abi::DOMAIN_LIMIT] =
+    [const { AtomicUsize::new(0) }; crate::control_abi::DOMAIN_LIMIT];
 
 #[derive(Clone, Copy)]
 struct RamObject {
@@ -455,6 +457,7 @@ pub(crate) fn install_published_layers(slot: usize) -> bool {
         }
         ROOTFS_FRAME_STARTS[slot].store(first_frame.address(), Ordering::Release);
         ROOTFS_FRAME_COUNTS[slot].store(page_count, Ordering::Release);
+        ROOTFS_LENGTHS[slot].store(rootfs_end, Ordering::Release);
         for index in 0..layer_count {
             unsafe {
                 core::ptr::addr_of_mut!(PUBLISHED_LAYERS)
@@ -467,6 +470,41 @@ pub(crate) fn install_published_layers(slot: usize) -> bool {
         true
     })
     .unwrap_or(false)
+}
+
+pub(crate) fn install_cached_rootfs(
+    slot: usize,
+    first_frame: FrameLease,
+    page_count: usize,
+    length: usize,
+) -> bool {
+    if slot >= crate::control_abi::DOMAIN_LIMIT
+        || page_count == 0
+        || length == 0
+        || length > page_count.saturating_mul(PAGE_SIZE)
+        || crate::published_rootfs::is_installed(slot)
+    {
+        return false;
+    }
+    let Some(address) = first_frame.direct_map_address() else {
+        return false;
+    };
+    let bytes = unsafe { core::slice::from_raw_parts(address as *const u8, length) };
+    if !crate::published_rootfs::install_published_rootfs(slot, bytes) {
+        return false;
+    }
+    ROOTFS_FRAME_STARTS[slot].store(first_frame.address(), Ordering::Release);
+    ROOTFS_FRAME_COUNTS[slot].store(page_count, Ordering::Release);
+    ROOTFS_LENGTHS[slot].store(length, Ordering::Release);
+    true
+}
+
+pub(crate) fn installed_rootfs(slot: usize) -> Option<&'static [u8]> {
+    let start = ROOTFS_FRAME_STARTS.get(slot)?.load(Ordering::Acquire);
+    let length = ROOTFS_LENGTHS.get(slot)?.load(Ordering::Acquire);
+    let frame = FrameLease::from_parts(start, 1)?;
+    let address = frame.direct_map_address()?;
+    (length != 0).then(|| unsafe { core::slice::from_raw_parts(address as *const u8, length) })
 }
 
 pub(crate) fn uninstall_rootfs(slot: usize) -> bool {
@@ -488,6 +526,7 @@ pub(crate) fn uninstall_rootfs(slot: usize) -> bool {
     if released {
         ROOTFS_FRAME_STARTS[slot].store(0, Ordering::Release);
         ROOTFS_FRAME_COUNTS[slot].store(0, Ordering::Release);
+        ROOTFS_LENGTHS[slot].store(0, Ordering::Release);
     }
     released
 }
