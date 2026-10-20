@@ -28732,7 +28732,38 @@ fn linux_poll_wait_live_return(
             LINUX_EFAULT
         };
     }
-    if active.as_chunks::<8>().0.iter().any(|pollfd| {
+    // The current nested executor suspends a parent while its child runs. If
+    // that child blocks on the parent's Unix-socket endpoint, spinning until
+    // timeout prevents the only process that can make the descriptor ready
+    // from running. Yield this narrow dependency back to the parent.
+    let current_pid = current_linux_process_pid();
+    let parent_pid = linux_process::live_process_parent_pid(current_pid);
+    let waits_for_parent_unix_peer = parent_pid.is_some_and(|parent_pid| {
+        active.as_chunks::<8>().0.iter().any(|pollfd| {
+            let descriptor = i32::from_ne_bytes(pollfd[..4].try_into().unwrap());
+            let Some(peer) = (descriptor >= 0)
+                .then(|| linux_socket_slot(descriptor as u64))
+                .flatten()
+                .filter(|slot| {
+                    crate::linux_socket::kind(*slot) == Some(crate::linux_socket::Kind::Unix)
+                })
+                .and_then(crate::linux_socket::local_peer_slot)
+            else {
+                return false;
+            };
+            linux_process_runtime_state(parent_pid)
+                .filter(|state| state.valid)
+                .is_some_and(|state| {
+                    state
+                        .descriptors
+                        .stdio_sockets
+                        .iter()
+                        .chain(&state.descriptors.sockets)
+                        .any(|stored| *stored == peer + 1)
+                })
+        })
+    });
+    if !waits_for_parent_unix_peer && active.as_chunks::<8>().0.iter().any(|pollfd| {
         let descriptor = i32::from_ne_bytes(pollfd[..4].try_into().unwrap());
         descriptor >= 0 && linux_socket_slot(descriptor as u64).is_some()
     }) {
@@ -28771,6 +28802,12 @@ fn linux_poll_wait_live_return(
         return LINUX_ESRCH;
     };
     let Some(target) = ready_linux_thread_handle() else {
+        if waits_for_parent_unix_peer
+            && LINUX_PROCESS_SCHEDULER_NESTING.load(Ordering::SeqCst) != 0
+            && yield_current_linux_process(caller, 0)
+        {
+            return LINUX_RETURN_TO_KERNEL;
+        }
         if matches!(
             wait_kind,
             LINUX_THREAD_WAIT_PAUSE | LINUX_THREAD_WAIT_SIGSUSPEND

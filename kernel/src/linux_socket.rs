@@ -1775,6 +1775,12 @@ pub(crate) fn local_peer_write_closed(slot: u8) -> Option<bool> {
     Some(!peer.is_some_and(|peer| peer.occupied && !peer.write_shutdown))
 }
 
+pub(crate) fn local_peer_slot(slot: u8) -> Option<u8> {
+    unsafe { SLOTS.get(usize::from(slot)) }
+        .filter(|state| state.occupied && state.kind == Kind::Unix)?
+        .peer
+}
+
 pub(crate) fn names(slot: u8) -> Option<(IpEndpoint, Option<IpEndpoint>)> {
     let state = unsafe { *SLOTS.get(usize::from(slot))? };
     if !state.occupied || state.kind == Kind::Unix {
