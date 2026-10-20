@@ -5563,6 +5563,51 @@ pub(crate) fn protect_current_linux_runtime_page(address: u64, protection: u8) -
     linux_runtime_page_from_value(unsafe { entry.read() }).protection == protection
 }
 
+pub(crate) fn replace_current_linux_runtime_page(
+    address: u64,
+    frame: memory::FrameLease,
+    protection: u8,
+) -> Option<memory::FrameLease> {
+    if !matches!(protection, 1 | 3 | 5)
+        || !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[frame])
+    {
+        return None;
+    }
+    let entry = current_linux_leaf(address)?;
+    let old = linux_runtime_page_from_value(unsafe { entry.read() });
+    let old_frame = old.frame?;
+    if old.sealed || old.shared || old.secret {
+        return None;
+    }
+    let value = frame.address()
+        | PRESENT
+        | USER
+        | if protection & 2 != 0 { WRITABLE } else { 0 }
+        | if protection & 4 != 0 { 0 } else { NO_EXECUTE }
+        | if old.file { LINUX_RUNTIME_FILE } else { 0 }
+        | if old.dontfork {
+            LINUX_RUNTIME_DONTFORK
+        } else {
+            0
+        }
+        | if old.wipeonfork {
+            LINUX_RUNTIME_WIPEONFORK
+        } else {
+            0
+        };
+    unsafe {
+        entry.write(value);
+        asm!("invlpg [{}]", in(reg) address, options(nostack, preserves_flags));
+    }
+    let current = linux_runtime_page_from_value(unsafe { entry.read() });
+    (current.frame == Some(frame)
+        && current.protection == protection
+        && current.file == old.file
+        && current.dontfork == old.dontfork
+        && current.wipeonfork == old.wipeonfork)
+        .then_some(old_frame)
+}
+
 pub(crate) fn seal_current_linux_runtime_page(address: u64) -> bool {
     let Some(entry) = current_linux_leaf(address) else {
         return false;

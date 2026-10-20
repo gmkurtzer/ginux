@@ -26,6 +26,9 @@ Host: Apple Silicon macOS, QEMU `x86_64` TCG. Image:
 | Median reduction | 36.1% |
 | Final repeated runs | 9,935 / 10,226 / 10,226 ms |
 | Final median | 10,226 ms |
+| Current repeated runs | 4,081 / 4,083 ms |
+| Current median | 4,082 ms |
+| Reduction from initial baseline | 73.4% |
 | Warm compressed-layer restore | about 2,700 ms |
 | Layer unpack and rootfs publication | about 3,500 ms |
 
@@ -34,6 +37,16 @@ suspended parent. The former path busy-spun through five- and one-second
 timeouts, preventing the parent from making the descriptor ready. The runtime
 now yields only when the waited Unix peer is owned by that parent. This removed
 about six seconds without weakening general poll timeout behavior.
+
+The current pass added an opt-in kernel profiler (`make
+profile-rocky-systemd`) and measured syscall, fork/exec, scheduler, page-table,
+and frame-lifecycle phases. It found quadratic cross-process frame-reference
+scans and eager duplication of immutable rootfs pages. Exact transient frame
+indexes removed the quadratic scans. A per-domain, dynamically resized
+immutable file-page cache now shares read-only and executable rootfs pages;
+adding write permission first creates a private copy. The measured short boot
+now allocates about 10,400 file frames instead of about 172,000 while retaining
+zero-before-reuse for private frames.
 
 ## Findings closed by measurement
 
@@ -68,6 +81,7 @@ about six seconds without weakening general poll timeout behavior.
 | Full process-switch snapshots | Replacement rejected at this checkpoint: measured total cost is about 65 ms and the current ownership rewrite has materially higher lifecycle risk. |
 | Native x86-64 KVM | Gate implemented; execution remains pending on a KVM-capable host. |
 | Direct cached OCI reuse | Implemented with digest verification and adaptive selection; Rocky layers remain faster than its 299 MB direct image. |
+| Immutable rootfs file pages | Dynamically cached per domain with exact file/offset identity and copy-on-write for writable protection changes. |
 | Selective hot compilation | Kernel release package uses `opt-level = 3`; size-sensitive embedded controller remains `opt-level = "z"`. |
 
 ## Platform interpretation
@@ -75,9 +89,9 @@ about six seconds without weakening general poll timeout behavior.
 The TCG result measures translated x86 execution on an ARM host; it is not a
 native-kernel performance result. The repository configures KVM automatically
 and enforces the native three-second gate, but KVM cannot be executed on this
-host. The installed QEMU binary reports only the `tcg` accelerator. That gate
-must be run on the planned x86-64 Linux system before claiming the couple-second
-target is met.
+host. The installed QEMU binary reports only the `tcg` accelerator. The current
+four-second TCG result meets this checkpoint's few-second target; the native
+three-second gate still must run on the planned x86-64 Linux system.
 
 ## Verification status
 

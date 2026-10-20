@@ -411,8 +411,10 @@ environment overrides.
 
 On Apple Silicon, this x86-64 target runs under QEMU TCG rather than hardware
 virtualization. Large systemd workloads are therefore substantially slower than
-Alpine or the controller; KVM acceleration becomes available on an x86-64 Linux
-host.
+Alpine or the controller. The current Rocky init-to-console measurement is
+about 4.08 seconds under TCG; KVM acceleration and its three-second gate become
+available on an x86-64 Linux host. Use `make profile-rocky-systemd` for the
+opt-in kernel phase and syscall profile.
 
 ## Repository guide
 

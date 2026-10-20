@@ -6996,7 +6996,8 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
     for byte in &ELF_PROBE_PIPE_BUFFER {
         byte.store(0, Ordering::SeqCst);
     }
-    if !linux_tmpfs::teardown()
+    if !crate::linux_file_cache::reset_current()
+        || !linux_tmpfs::teardown()
         || !crate::linux_overlay::teardown()
         || execution.runtime && !prepare_configured_linux_system_domain()
     {
@@ -14092,13 +14093,15 @@ fn linux_runtime_select_mapping(address: u64, pages: usize, fixed: bool) -> Opti
 }
 
 fn release_linux_runtime_page(page: address_space::LinuxRuntimePage) -> bool {
-    page.shared
-        || page.frame.is_none_or(|frame| {
-            memory::scrub_and_release_frames(
-                memory::FrameOwner::KERNEL,
-                core::slice::from_ref(&frame),
-            )
-        })
+    page.shared || page.frame.is_none_or(release_linux_runtime_frame)
+}
+
+fn release_linux_runtime_frame(frame: memory::FrameLease) -> bool {
+    crate::linux_file_cache::contains(frame)
+        || memory::scrub_and_release_frames(
+            memory::FrameOwner::KERNEL,
+            core::slice::from_ref(&frame),
+        )
 }
 
 fn rollback_linux_runtime_mapping(address: u64, pages: usize) -> bool {
@@ -19176,6 +19179,7 @@ fn linux_runtime_mmap(
         return LINUX_ENOMEM;
     }
     let mut overlay_file = None;
+    let mut immutable_rootfs_file = None;
     let mut secret = false;
     let file = if anonymous {
         None
@@ -19221,7 +19225,8 @@ fn linux_runtime_mmap(
             overlay_file = Some((handle, start));
             None
         } else {
-            let Some(file) = linux_rootfs_entry(fd)
+            let rootfs_entry = linux_rootfs_entry(fd);
+            let Some(file) = rootfs_entry
                 .map(|entry| entry.data)
                 .or_else(|| linux_regular_file(state))
             else {
@@ -19250,6 +19255,7 @@ fn linux_runtime_mmap(
                 }
                 return LINUX_EINVAL;
             }
+            immutable_rootfs_file = rootfs_entry.map(|entry| entry.data);
             Some((file, start))
         }
     };
@@ -19269,13 +19275,27 @@ fn linux_runtime_mmap(
             linux_boot_profile_lifecycle_phase(14, install_started);
             reserved
         } else {
-            let allocate_started =
-                cfg!(feature = "linux-boot-profile").then(timer::timestamp_counter);
-            let Some([frame]) = memory::allocate_frames::<1>(memory::FrameOwner::KERNEL) else {
-                let _ = rollback_linux_runtime_mapping(mapping, installed);
-                return LINUX_ENOMEM;
+            let cache_source = immutable_rootfs_file
+                .filter(|_| sharing == LINUX_MAP_PRIVATE && protection & LINUX_PROT_WRITE == 0)
+                .and_then(|file| {
+                    let page_offset = page.checked_mul(PAGE_SIZE)? as u64;
+                    Some((file.as_ptr() as u64, offset.checked_add(page_offset)?))
+                });
+            let cached = cache_source.and_then(|(source_base, source_offset)| {
+                crate::linux_file_cache::lookup(source_base, source_offset)
+            });
+            let (frame, cache_pinned) = if let Some(frame) = cached {
+                (frame, true)
+            } else {
+                let allocate_started =
+                    cfg!(feature = "linux-boot-profile").then(timer::timestamp_counter);
+                let Some([frame]) = memory::allocate_frames::<1>(memory::FrameOwner::KERNEL) else {
+                    let _ = rollback_linux_runtime_mapping(mapping, installed);
+                    return LINUX_ENOMEM;
+                };
+                linux_boot_profile_lifecycle_phase(12, allocate_started);
+                (frame, false)
             };
-            linux_boot_profile_lifecycle_phase(12, allocate_started);
             let mut overlay_bytes = [0_u8; PAGE_SIZE];
             let bytes = if let Some((handle, start)) = overlay_file {
                 let page_start = start + page * PAGE_SIZE;
@@ -19291,7 +19311,8 @@ fn linux_runtime_mmap(
             };
             let prepare_started =
                 cfg!(feature = "linux-boot-profile").then(timer::timestamp_counter);
-            let prepared = address_space::prepare_linux_frame(frame.address(), bytes);
+            let prepared =
+                cache_pinned || address_space::prepare_linux_frame(frame.address(), bytes);
             linux_boot_profile_lifecycle_phase(13, prepare_started);
             if !prepared {
                 let _ = memory::scrub_and_release_frames(
@@ -19301,6 +19322,10 @@ fn linux_runtime_mmap(
                 let _ = rollback_linux_runtime_mapping(mapping, installed);
                 return LINUX_ENOMEM;
             }
+            let cache_pinned = cache_pinned
+                || cache_source.is_some_and(|(source_base, source_offset)| {
+                    crate::linux_file_cache::insert(source_base, source_offset, frame)
+                });
             let install_started =
                 cfg!(feature = "linux-boot-profile").then(timer::timestamp_counter);
             let installed_page = address_space::install_current_linux_runtime_page(
@@ -19314,10 +19339,12 @@ fn linux_runtime_mmap(
             match installed_page {
                 Some(old) => Some(old),
                 None => {
-                    let _ = memory::scrub_and_release_frames(
-                        memory::FrameOwner::KERNEL,
-                        core::slice::from_ref(&frame),
-                    );
+                    if !cache_pinned {
+                        let _ = memory::scrub_and_release_frames(
+                            memory::FrameOwner::KERNEL,
+                            core::slice::from_ref(&frame),
+                        );
+                    }
                     let _ = rollback_linux_runtime_mapping(mapping, installed);
                     return if no_replace {
                         LINUX_EEXIST
@@ -19335,12 +19362,7 @@ fn linux_runtime_mmap(
                 LINUX_ENOMEM
             };
         };
-        if old_frame.is_some_and(|frame| {
-            !memory::scrub_and_release_frames(
-                memory::FrameOwner::KERNEL,
-                core::slice::from_ref(&frame),
-            )
-        }) {
+        if old_frame.is_some_and(|frame| !release_linux_runtime_frame(frame)) {
             let _ = rollback_linux_runtime_mapping(mapping, installed + 1);
             return LINUX_ENOMEM;
         }
@@ -20156,6 +20178,33 @@ fn linux_runtime_mprotect(address: u64, length: u64, protection: u64) -> u64 {
             LINUX_ENOMEM
         };
     }
+    if protection & LINUX_PROT_WRITE != 0 {
+        for page in 0..pages {
+            let page_address = address + (page * PAGE_SIZE) as u64;
+            let state = address_space::current_linux_runtime_page(page_address);
+            let Some(source) = state
+                .frame
+                .filter(|frame| crate::linux_file_cache::contains(*frame))
+            else {
+                continue;
+            };
+            let Some([replacement]) = memory::allocate_frames::<1>(memory::FrameOwner::KERNEL)
+            else {
+                return LINUX_ENOMEM;
+            };
+            if !address_space::copy_linux_frame(source, replacement)
+                || address_space::replace_current_linux_runtime_page(
+                    page_address,
+                    replacement,
+                    protection as u8,
+                ) != Some(source)
+            {
+                let _ =
+                    memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[replacement]);
+                return LINUX_ENOMEM;
+            }
+        }
+    }
     if (0..pages).all(|page| {
         address_space::protect_current_linux_runtime_page(
             address + (page * PAGE_SIZE) as u64,
@@ -20247,10 +20296,7 @@ fn linux_runtime_madvise(address: u64, length: u64, advice: u64) -> u64 {
             {
                 return LINUX_EINVAL;
             }
-            if !memory::scrub_and_release_frames(
-                memory::FrameOwner::KERNEL,
-                core::slice::from_ref(&removed.frame.unwrap()),
-            ) {
+            if !release_linux_runtime_frame(removed.frame.unwrap()) {
                 return LINUX_EINVAL;
             }
         } else if !address_space::current_linux_runtime_page(page_address).occupied {
@@ -22824,11 +22870,12 @@ fn linux_rootfs_execve(path: &[u8], arguments_address: u64, environment_address:
     if !address_space::release_current_linux_runtime_mappings_preserving(
         LINUX_RUNTIME_DYNAMIC_MMAP_BASE,
         |frame| {
-            if prepared_frame_references {
-                linux_process::prepared_live_frame_referenced_by_other_process(frame)
-            } else {
-                linux_process::live_mapping_referenced_by_other_process(pid, frame)
-            }
+            crate::linux_file_cache::contains(frame)
+                || if prepared_frame_references {
+                    linux_process::prepared_live_frame_referenced_by_other_process(frame)
+                } else {
+                    linux_process::live_mapping_referenced_by_other_process(pid, frame)
+                }
         },
         |frame| replacements[..replacement_count].contains(&frame),
     ) {

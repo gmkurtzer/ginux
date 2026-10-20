@@ -3072,9 +3072,14 @@ fn release_live_process_address_space(
                 );
             }
             if referenced {
+                if crate::linux_file_cache::contains(mapping.frame) {
+                    continue;
+                }
                 if !table.promote_exclusive_cow_reference(excluded, mapping.frame) {
                     return false;
                 }
+            } else if crate::linux_file_cache::contains(mapping.frame) {
+                continue;
             } else {
                 let ownership_started = crate::arch::x86_64::timer::timestamp_counter();
                 let owned = memory::frames_owned_by(
