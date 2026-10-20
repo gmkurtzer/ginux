@@ -1849,6 +1849,8 @@ static LINUX_RUNTIME_SUSPEND_RIP: BankedAtomicU64 = BankedAtomicU64::new(0);
 static LINUX_RUNTIME_SUSPEND_RSP: BankedAtomicU64 = BankedAtomicU64::new(0);
 static LINUX_RUNTIME_SUSPEND_RFLAGS: BankedAtomicU64 = BankedAtomicU64::new(0);
 static LINUX_RUNTIME_SUSPEND_FS_BASE: BankedAtomicU64 = BankedAtomicU64::new(0);
+static LINUX_RUNTIME_SUSPEND_RESULT: BankedAtomicU64 = BankedAtomicU64::new(0);
+static LINUX_RUNTIME_SUSPEND_PID: BankedAtomicU32 = BankedAtomicU32::new(0);
 static LINUX_RUNTIME_SUSPEND_REGISTERS: [BankedAtomicU64; LINUX_SYSCALL_FRAME_REGISTERS] =
     [const { BankedAtomicU64::new(0) }; LINUX_SYSCALL_FRAME_REGISTERS];
 const CONTAINER_CONSOLE_CAPACITY: usize = 4096;
@@ -1858,6 +1860,8 @@ static CONTAINER_CONSOLE_ATTACHED: [AtomicBool; control_abi::DOMAIN_LIMIT] =
 static CONTAINER_STOP_REQUESTED: [AtomicBool; control_abi::DOMAIN_LIMIT] =
     [const { AtomicBool::new(false) }; control_abi::DOMAIN_LIMIT];
 static CONTAINER_BACKGROUND_SUSPENDED: [AtomicBool; control_abi::DOMAIN_LIMIT] =
+    [const { AtomicBool::new(false) }; control_abi::DOMAIN_LIMIT];
+static CONTAINER_BACKGROUND_STARTED: [AtomicBool; control_abi::DOMAIN_LIMIT] =
     [const { AtomicBool::new(false) }; control_abi::DOMAIN_LIMIT];
 
 const EXTENDED_STATE_SIZE: usize = 1024;
@@ -2767,7 +2771,8 @@ pub(crate) fn resume_live_linux_process(
             && returned_fs < 1 << 47
             && (LINUX_PROCESS_CHILD_EXITED.load(Ordering::SeqCst)
                 || LINUX_PROCESS_CHILD_EXECUTED.load(Ordering::SeqCst)
-                || LINUX_FORK_REQUESTED.load(Ordering::SeqCst));
+                || LINUX_FORK_REQUESTED.load(Ordering::SeqCst)
+                || LINUX_RUNTIME_BACKGROUND_SUSPENDED.load(Ordering::Acquire));
     unsafe { write_msr(FS_BASE_MSR, saved_fs) };
     let restored = active_fs_base() == saved_fs;
     if !preserved
@@ -4512,7 +4517,10 @@ pub(crate) fn begin_configured_container() {
 
 pub(crate) fn mark_configured_container_booting() {
     if let Some(slot) = selected_container_slot() {
-        if !container_image_is_embedded(slot) && crate::published_rootfs::is_installed(slot) {
+        if container_state(slot) == control_abi::DOMAIN_STATE_STARTING
+            && !container_image_is_embedded(slot)
+            && crate::published_rootfs::is_installed(slot)
+        {
             CONTAINER_CONTROL_STATES[slot]
                 .store(control_abi::DOMAIN_STATE_BOOTING as u8, Ordering::Release);
         }
@@ -4521,9 +4529,10 @@ pub(crate) fn mark_configured_container_booting() {
 
 pub(crate) fn stop_configured_container() {
     if let Some(slot) = active_container_slot() {
-        if CONTAINER_CONTROL_STATES[slot].load(Ordering::SeqCst)
-            == control_abi::DOMAIN_STATE_RUNNING as u8
-        {
+        if matches!(
+            u64::from(CONTAINER_CONTROL_STATES[slot].load(Ordering::SeqCst)),
+            control_abi::DOMAIN_STATE_BOOTING | control_abi::DOMAIN_STATE_RUNNING
+        ) {
             CONTAINER_CONTROL_STATES[slot]
                 .store(control_abi::DOMAIN_STATE_STOPPED as u8, Ordering::SeqCst);
         }
@@ -11958,9 +11967,14 @@ fn save_suspended_linux_runtime(
     LINUX_RUNTIME_SUSPEND_RSP.store(context.rsp, Ordering::Release);
     LINUX_RUNTIME_SUSPEND_RFLAGS.store(context.rflags, Ordering::Release);
     LINUX_RUNTIME_SUSPEND_FS_BASE.store(context.fs_base, Ordering::Release);
+    LINUX_RUNTIME_SUSPEND_RESULT.store(context.rax, Ordering::Release);
+    LINUX_RUNTIME_SUSPEND_PID.store(current_linux_process_pid(), Ordering::Release);
     LINUX_RUNTIME_BACKGROUND_SUSPENDED.store(background, Ordering::Release);
     if let Some(slot) = active_container_slot() {
         CONTAINER_BACKGROUND_SUSPENDED[slot].store(background, Ordering::Release);
+        if background {
+            CONTAINER_BACKGROUND_STARTED[slot].store(true, Ordering::Release);
+        }
     }
     true
 }
@@ -11982,12 +11996,6 @@ pub(crate) fn resume_suspended_linux_runtime(mmap: u64) -> LinuxElfResult {
     if !background && (address == 0 || count == 0) {
         return LinuxElfResult::FAILED;
     }
-    if !stopping && !background {
-        let byte = crate::serial_read_byte_blocking();
-        if !copy_to_linux_user(address, &[byte]) {
-            return LinuxElfResult::FAILED;
-        }
-    }
     let registers = LinuxSyscallFrame::from_array(core::array::from_fn(|index| {
         LINUX_RUNTIME_SUSPEND_REGISTERS[index].load(Ordering::Acquire)
     }));
@@ -11996,50 +12004,118 @@ pub(crate) fn resume_suspended_linux_runtime(mmap: u64) -> LinuxElfResult {
         rip: LINUX_RUNTIME_SUSPEND_RIP.load(Ordering::Acquire),
         rsp: LINUX_RUNTIME_SUSPEND_RSP.load(Ordering::Acquire),
         rflags: LINUX_RUNTIME_SUSPEND_RFLAGS.load(Ordering::Acquire),
-        rax: u64::from(!stopping),
+        rax: if stopping {
+            0
+        } else if background {
+            LINUX_RUNTIME_SUSPEND_RESULT.load(Ordering::Acquire)
+        } else {
+            1
+        },
         fs_base: LINUX_RUNTIME_SUSPEND_FS_BASE.load(Ordering::Acquire),
     };
     if !context.is_valid() {
         return LinuxElfResult::FAILED;
     }
     if !linux_mount::activate_initial() {
+        serial_write("ginux: suspended Linux resume could not activate mounts\r\n");
         return LinuxElfResult::FAILED;
     }
     if !linux_process::resume_runtime_process_registry() {
+        serial_write("ginux: suspended Linux resume could not restore process registry\r\n");
         let _ = linux_mount::deactivate_initial();
         return LinuxElfResult::FAILED;
     }
     let Some(saved_msrs) = configure_linux_syscall() else {
+        serial_write("ginux: suspended Linux resume could not configure syscall state\r\n");
         let _ = linux_process::suspend_runtime_process_registry();
         let _ = linux_mount::deactivate_initial();
         return LinuxElfResult::FAILED;
     };
     if !restore_container_extended_state() {
+        serial_write("ginux: suspended Linux resume could not restore extended state\r\n");
         let _ = linux_process::finish_runtime_process_registry();
         let _ = linux_mount::deactivate_initial();
         let _ = restore_linux_syscall(saved_msrs);
         return LinuxElfResult::FAILED;
+    }
+    let suspended_pid = LINUX_RUNTIME_SUSPEND_PID.load(Ordering::Acquire);
+    let Some(process) = linux_process::dispatch_live_process(suspended_pid) else {
+        serial_write("ginux: suspended Linux resume process is unavailable\r\n");
+        let _ = linux_process::finish_runtime_process_registry();
+        let _ = linux_mount::deactivate_initial();
+        let _ = restore_linux_syscall(saved_msrs);
+        return LinuxElfResult::FAILED;
+    };
+    if !sync_live_linux_process_address_space(process.pid) {
+        serial_write("ginux: suspended Linux resume address space is unavailable\r\n");
+        let _ = linux_process::finish_runtime_process_registry();
+        let _ = linux_mount::deactivate_initial();
+        let _ = restore_linux_syscall(saved_msrs);
+        return LinuxElfResult::FAILED;
+    }
+    LINUX_CURRENT_PROCESS_PID.store(process.pid, Ordering::Release);
+    if !background
+        && (!restore_saved_linux_process_runtime_state(process.pid)
+            || !restore_linux_process_extended_state(process.pid))
+    {
+        serial_write("ginux: suspended Linux resume process state is unavailable\r\n");
+        let _ = linux_process::finish_runtime_process_registry();
+        let _ = linux_mount::deactivate_initial();
+        let _ = restore_linux_syscall(saved_msrs);
+        return LinuxElfResult::FAILED;
+    }
+    if !stopping && !background {
+        let byte = crate::serial_read_byte_blocking();
+        if !address_space::copy_to_linux_process(process.pid, process.root, address, &[byte]) {
+            serial_write("ginux: suspended Linux resume could not deliver console input\r\n");
+            serial_write("ginux: console input pid/root/address/count: ");
+            for value in [
+                u64::from(process.pid),
+                process.root.address(),
+                address,
+                count,
+            ] {
+                serial_write_u64(value);
+                serial_write(" ");
+            }
+            serial_write("\r\n");
+            let _ = linux_process::finish_runtime_process_registry();
+            let _ = linux_mount::deactivate_initial();
+            let _ = restore_linux_syscall(saved_msrs);
+            return LinuxElfResult::FAILED;
+        }
     }
     LINUX_RUNTIME_SUSPENDED.store(false, Ordering::Release);
     LINUX_RUNTIME_BACKGROUND_SUSPENDED.store(false, Ordering::Release);
     CONTAINER_BACKGROUND_SUSPENDED[slot].store(false, Ordering::Release);
     LINUX_RUNTIME_MODE.store(true, Ordering::Release);
     if !timer::arm_linux_wait_timer() {
+        serial_write("ginux: suspended Linux resume could not arm timer\r\n");
         let _ = linux_process::finish_runtime_process_registry();
         let _ = linux_mount::deactivate_initial();
         let _ = restore_linux_syscall(saved_msrs);
         LINUX_RUNTIME_MODE.store(false, Ordering::Release);
         return LinuxElfResult::FAILED;
     }
-    let resumed = resume_live_linux_process(
-        context.rip as usize,
-        context.rsp as usize,
+    let resumed = address_space::resume_live_linux_process(
+        process.root,
+        context.rip,
+        context.rsp,
         context.fs_base,
         context
             .registers
             .process_general(context.rax, context.rip, context.rflags),
         context.rflags,
     );
+    if !resumed {
+        serial_write("ginux: suspended Linux process resume rejected pid/root/rip: ");
+        serial_write_u64(u64::from(current_linux_process_pid()));
+        serial_write(" ");
+        serial_write_u64(process.root.address());
+        serial_write(" ");
+        serial_write_u64(context.rip);
+        serial_write("\r\n");
+    }
     if LINUX_RUNTIME_SUSPENDED.load(Ordering::Acquire) {
         let state_saved = save_container_extended_state();
         let registry_suspended = state_saved && linux_process::suspend_runtime_process_registry();
@@ -33145,6 +33221,7 @@ fn container_console_write(bytes: &[u8]) {
 fn reset_container_console(slot: usize, attached: bool) {
     CONTAINER_CONSOLE_CURSOR[slot].store(0, Ordering::Release);
     CONTAINER_CONSOLE_ATTACHED[slot].store(attached, Ordering::Release);
+    CONTAINER_BACKGROUND_STARTED[slot].store(false, Ordering::Release);
 }
 
 fn redraw_container_console(slot: usize) {
@@ -38731,6 +38808,7 @@ pub(crate) fn expire_linux_waits_from_timer(frame: &mut UserInterruptFrame) {
         && active_container_slot().is_some_and(|slot| {
             container_state(slot) == control_abi::DOMAIN_STATE_BOOTING
                 && !CONTAINER_CONSOLE_ATTACHED[slot].load(Ordering::Acquire)
+                && !CONTAINER_BACKGROUND_STARTED[slot].load(Ordering::Acquire)
         })
         && LINUX_RUNTIME_BACKGROUND_TICKS.fetch_add(1, Ordering::AcqRel) + 1 >= 5
     {

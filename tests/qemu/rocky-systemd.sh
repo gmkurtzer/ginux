@@ -166,6 +166,8 @@ fi
             printf '\035'
             wait_for '[detached from domain; use '\''domain attach NAME'\'' to return]' 10
             wait_for_count 'ginux> ' 3 10
+            printf '%s\n' 'domain status rocky'
+            sleep 1
             printf '%s\n' 'domain attach rocky'
             wait_for_count 'GINUX_LOGIN_SHELL_READY' 1 10
             printf '%s\n' "printf 'GINUX_REATTACH_%s\\n' SHELL_READY"

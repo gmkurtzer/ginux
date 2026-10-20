@@ -4250,6 +4250,62 @@ pub(crate) fn resume_live_linux_process(
     resumed && current_root() == previous
 }
 
+pub(crate) fn copy_to_linux_process(
+    pid: u32,
+    root: memory::FrameLease,
+    address: u64,
+    input: &[u8],
+) -> bool {
+    let Ok(mut address) = usize::try_from(address) else {
+        return false;
+    };
+    if input.is_empty() || address >= 1 << 47 {
+        return false;
+    }
+    let mut copied = 0;
+    while copied < input.len() {
+        let page = address & !(PAGE_SIZE - 1);
+        let offset = address & (PAGE_SIZE - 1);
+        let length = (input.len() - copied).min(PAGE_SIZE - offset);
+        let Some(leaf) = linux_leaf_in_root(root.address(), page as u64) else {
+            crate::serial_write("ginux: console input page-table leaf unavailable\r\n");
+            return false;
+        };
+        let mut value = unsafe { leaf.read() };
+        if value & (PRESENT | USER | WRITABLE) == PRESENT | USER
+            && crate::linux_process::prepare_live_process_write(pid, page)
+        {
+            value = unsafe { leaf.read() };
+        }
+        if value & (PRESENT | USER | WRITABLE) != PRESENT | USER | WRITABLE {
+            crate::serial_write("ginux: console input page is not writable, flags: ");
+            crate::serial_write_u64(value & 0xfff);
+            crate::serial_write("\r\n");
+            return false;
+        }
+        let frame_address = value & ADDRESS_MASK;
+        let frame =
+            memory::live_frame_lease(memory::FrameOwner::KERNEL, frame_address).or_else(|| {
+                memory::FrameLease::from_parts(frame_address, 1)
+                    .filter(|frame| memory::frame_lease_is_runtime(*frame))
+            });
+        let Some(target) = frame.and_then(memory::FrameLease::direct_map_address) else {
+            crate::serial_write("ginux: console input frame is unavailable\r\n");
+            return false;
+        };
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                input.as_ptr().add(copied),
+                (target as *mut u8).add(offset),
+                length,
+            );
+        }
+        copied += length;
+        address += length;
+    }
+    true
+}
+
 fn validate_complete_linux_process_user_tree(
     table: u64,
     level: usize,
