@@ -746,8 +746,18 @@ pub(crate) fn shutdown_socket(slot: u8, how: u8) -> Result<(), Error> {
 }
 
 pub(crate) fn shutdown() -> bool {
-    if unsafe { SLOTS.iter().any(|slot| slot.occupied) } {
-        return false;
+    // A domain teardown owns every remaining socket reference, including
+    // duplicated descriptors and SCM_RIGHTS references that no live process
+    // can release after its process tree has been retired.
+    let mut index = 0;
+    while index < SLOT_COUNT {
+        if unsafe { SLOTS[index].occupied } {
+            unsafe { SLOTS[index].references = 1 };
+            if !close(index as u8) {
+                return false;
+            }
+        }
+        index += 1;
     }
     unsafe { UNIX_INFLIGHT_RIGHTS = 0 };
     if unsafe { RUNTIME.is_none() } {

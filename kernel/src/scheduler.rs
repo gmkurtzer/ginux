@@ -1129,6 +1129,11 @@ impl ProcessScheduler {
         self.scheduler.retire_process(handle.0)
     }
 
+    pub(crate) fn retire_all(&mut self) {
+        self.scheduler.threads.fill(None);
+        self.scheduler.current = None;
+    }
+
     pub(crate) fn set_priority(&mut self, handle: ProcessThreadHandle, priority: i8) -> bool {
         let Some(thread) = self.scheduler.thread_mut(handle.0) else {
             return false;

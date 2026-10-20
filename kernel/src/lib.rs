@@ -4077,7 +4077,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
                 continue 'managed;
             }
         }
-        if controller_completed && !cfg!(feature = "verification-boot") {
+        let runtime_suspended = arch::x86_64::cpu::configured_container_slot()
+            .is_some_and(address_space::linux_runtime_is_suspended);
+        if controller_completed && !runtime_suspended && !cfg!(feature = "verification-boot") {
             match persist_domain_configuration(virtio_block, virtio_mmio, virtio_iommu_profile) {
                 Some(record) => {
                     serial_write("ginux: local configuration committed (generation ");

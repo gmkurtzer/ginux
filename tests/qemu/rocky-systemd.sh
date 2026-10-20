@@ -108,7 +108,7 @@ fi
     printf '%s\n' \
         'domain new rocky' \
         "domain set rocky image=$rocky_image init=/sbin/init"
-    if [[ "$start_mode" == detached || "$start_mode" == detached-return ]]; then
+    if [[ "$start_mode" == detached || "$start_mode" == detached-return || "$start_mode" == stop-restart ]]; then
         printf '%s\n' 'domain start rocky'
     else
         printf '%s\n' 'domain start rocky --attach'
@@ -127,6 +127,29 @@ fi
         printf '%s\n' ok >"$success_file"
         stop_qemu
         exit 0
+    elif [[ "$start_mode" == stop-restart ]]; then
+        for _ in {1..90}; do
+            printf '%s\n' 'domain status rocky'
+            sleep 1
+            grep -Fq 'State:       running' "$output_file" && break
+        done
+        wait_for 'State:       running' 1
+        printf '%s\n' 'domain stop rocky'
+        wait_for 'rocky: stopped' 30
+        sleep 1
+        printf '%s\n' 'domain start rocky --attach'
+        for _ in {1..30}; do
+            (( $(grep -Fc 'ginux: entering configured Linux init' "$output_file" || true) >= 2 )) && break
+            sleep 1
+        done
+        if (( $(grep -Fc 'ginux: entering configured Linux init' "$output_file" || true) < 2 )); then
+            fail "restart did not enter Linux init"
+        fi
+        for _ in {1..90}; do
+            grep -Fq 'ginux login:' "$output_file" && break
+            sleep 1
+        done
+        grep -Fq 'ginux login:' "$output_file" || fail "restart did not reach login prompt"
     elif [[ "$start_mode" == detached ]]; then
         for _ in {1..90}; do
             printf '%s\n' 'domain status rocky'
@@ -183,7 +206,9 @@ fi
         && ! grep -Fq 'ginux: OCI cache hit (' "$output_file"; then
         fail 'warm boot did not restore the image from the OCI cache'
     fi
-    if grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC|Linux init (execution|setup) failed|Linux init exited with status|Linux child exec rejected|systemd-system-update-generator failed|rocky: (failed|stopped)' "$output_file"; then
+    lifecycle_failure='rocky: (failed|stopped)'
+    [[ "$start_mode" == stop-restart ]] && lifecycle_failure='rocky: failed'
+    if grep -Eq "^GINUX_(BOOT|KERNEL)_PANIC|Linux init (execution|setup) failed|Linux init exited with status|Linux child exec rejected|systemd-system-update-generator failed|$lifecycle_failure" "$output_file"; then
         fail 'systemd failed before the console login target'
     fi
     printf '%s\n' ok >"$success_file"
@@ -222,9 +247,11 @@ if [[ "$start_mode" == detached-return && -s "$success_file" ]] \
     exit 0
 fi
 
+final_lifecycle_failure='rocky: (failed|stopped)'
+[[ "$start_mode" == stop-restart ]] && final_lifecycle_failure='rocky: failed'
 if [[ -s "$success_file" ]] \
     && grep -Fq 'ginux login:' "$output_file" \
-    && ! grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC|Linux init (execution|setup) failed|Linux init exited with status|Linux child exec rejected|systemd-system-update-generator failed|rocky: (failed|stopped)' "$output_file"; then
+    && ! grep -Eq "^GINUX_(BOOT|KERNEL)_PANIC|Linux init (execution|setup) failed|Linux init exited with status|Linux child exec rejected|systemd-system-update-generator failed|$final_lifecycle_failure" "$output_file"; then
     echo 'Rocky systemd console login target passed.'
     exit 0
 fi

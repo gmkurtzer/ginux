@@ -581,7 +581,14 @@ fn resume_linux_init(slot: usize, mmap: u64) -> LinuxProcessOutcome {
         LINUX_RUNTIME_FRAMES[slot] = [memory::FrameLease::EMPTY; LINUX_RUNTIME_FRAME_CAPACITY];
     }
     let released = memory::scrub_runtime_extent(runtime_frames)
-        && memory::release_frames(memory::FrameOwner::KERNEL, frames);
+        && memory::release_frames(
+            memory::FrameOwner::KERNEL,
+            // Runtime teardown already releases the stack and heap leases;
+            // only the six page-table hierarchy leases remain here.
+            [
+                frames[0], frames[1], frames[2], frames[3], frames[4], frames[5],
+            ],
+        );
     if result.valid && released {
         LinuxProcessOutcome::Exited(cpu::linux_runtime_diagnostics().0.unwrap_or(u8::MAX))
     } else {

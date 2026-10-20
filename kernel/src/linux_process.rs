@@ -2090,6 +2090,71 @@ pub(crate) fn finish_runtime_process_registry() -> bool {
     finish_live_process_registry_with_refresh_floor(0)
 }
 
+pub(crate) fn force_stop_runtime_process_registry() -> bool {
+    let Some(instance) = active_process_instance() else {
+        return true;
+    };
+    if !LIVE_PROCESS_TABLE_INITIALIZED[instance].load(Ordering::Acquire) {
+        return false;
+    }
+    let Some(table) = live_process_table_mut() else {
+        return false;
+    };
+    let Some(init) = table.init else {
+        return false;
+    };
+    let Some(run_queue) = scheduler::active_process_scheduler_workspace() else {
+        return false;
+    };
+    run_queue.retire_all();
+    for process in table.processes.iter_mut().flatten() {
+        process.scheduler_thread = None;
+    }
+    if !scheduler::release_process_scheduler_workspace() {
+        return false;
+    }
+
+    for slot in 0..PROCESS_LIMIT {
+        let Some(process) = table.processes[slot] else {
+            continue;
+        };
+        if process.handle == init {
+            continue;
+        }
+        if let Some(space) = process.address_space {
+            if !release_live_process_address_space(table, process.handle, space) {
+                return false;
+            }
+        }
+        if let Some(space) = process.retiring_address_space {
+            if !release_live_process_address_space(table, process.handle, space) {
+                return false;
+            }
+        }
+        if crate::linux_sysv_ipc::drop_process_attachments(process.handle.pid).is_err() {
+            return false;
+        }
+        table.processes[slot] = None;
+        if table
+            .processes
+            .iter()
+            .flatten()
+            .all(|candidate| candidate.user_namespace != process.user_namespace)
+        {
+            let _ = linux_user::retire(process.user_namespace);
+        }
+    }
+    let Some(process) = table.process_mut(init) else {
+        return false;
+    };
+    process.parent = None;
+    process.retiring_address_space = None;
+    process.scheduler_thread = None;
+    process.state = ProcessState::Running;
+    process.wait_event = None;
+    true
+}
+
 pub(crate) fn suspend_runtime_process_registry() -> bool {
     let Some(instance) = active_process_instance() else {
         return false;

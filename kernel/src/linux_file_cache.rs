@@ -293,6 +293,13 @@ pub(crate) fn reset_current() -> bool {
         else {
             return false;
         };
+        // Teardown may already have retired an aliased mapping lease. The
+        // cache table is authoritative only for leases that remain live.
+        if !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[frame])
+            || batch[..count].contains(&frame)
+        {
+            continue;
+        }
         batch[count] = frame;
         count += 1;
         if count == batch.len() {

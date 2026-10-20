@@ -12075,6 +12075,31 @@ pub(crate) fn resume_suspended_linux_runtime(mmap: u64) -> LinuxElfResult {
         let _ = restore_linux_syscall(saved_msrs);
         return LinuxElfResult::FAILED;
     }
+    if stopping {
+        LINUX_RUNTIME_SUSPENDED.store(false, Ordering::Release);
+        LINUX_RUNTIME_BACKGROUND_SUSPENDED.store(false, Ordering::Release);
+        CONTAINER_BACKGROUND_SUSPENDED[slot].store(false, Ordering::Release);
+        LINUX_RUNTIME_MODE.store(true, Ordering::Release);
+        if !timer::arm_linux_wait_timer() {
+            let _ = linux_process::finish_runtime_process_registry();
+            let _ = linux_mount::deactivate_initial();
+            let _ = restore_linux_syscall(saved_msrs);
+            LINUX_RUNTIME_MODE.store(false, Ordering::Release);
+            return LinuxElfResult::FAILED;
+        }
+        retire_all_linux_threads();
+        if !linux_process::force_stop_runtime_process_registry() {
+            let _ = linux_mount::deactivate_initial();
+            let _ = timer::finish_linux_wait_timer();
+            let _ = restore_linux_syscall(saved_msrs);
+            LINUX_RUNTIME_MODE.store(false, Ordering::Release);
+            return LinuxElfResult::FAILED;
+        }
+        ELF_PROBE_COMPLETED.store(true, Ordering::Release);
+        ELF_PROBE_ACTIVE.store(false, Ordering::Release);
+        LINUX_RUNTIME_EXIT_STATUS.store(0, Ordering::Release);
+        return finish_linux_runtime(mmap, saved_msrs);
+    }
     let suspended_pid = LINUX_RUNTIME_SUSPEND_PID.load(Ordering::Acquire);
     let Some(process) = linux_process::dispatch_live_process(suspended_pid) else {
         serial_write("ginux: suspended Linux resume process is unavailable\r\n");
@@ -12101,7 +12126,7 @@ pub(crate) fn resume_suspended_linux_runtime(mmap: u64) -> LinuxElfResult {
         let _ = restore_linux_syscall(saved_msrs);
         return LinuxElfResult::FAILED;
     }
-    if !stopping && !background {
+    if !background {
         let byte = crate::serial_read_byte_blocking();
         if !address_space::copy_to_linux_process(process.pid, process.root, address, &[byte]) {
             serial_write("ginux: suspended Linux resume could not deliver console input\r\n");
@@ -13219,9 +13244,12 @@ fn linux_mmap_unmap_and_release_slots(start_slot: usize, pages: usize) -> bool {
         };
         let slot = start_slot + offset;
         let address = base + (slot * PAGE_SIZE) as u64;
-        if !address_space::unmap_current_linux_page(address, lease.address())
-            || !address_space::prepare_linux_frame(lease.address(), &[])
-            || !memory::release_frames(memory::FrameOwner::KERNEL, [lease])
+        if !address_space::unmap_current_linux_page(address, lease.address()) {
+            return false;
+        }
+        if !crate::linux_file_cache::contains(lease)
+            && (!address_space::prepare_linux_frame(lease.address(), &[])
+                || !memory::release_frames(memory::FrameOwner::KERNEL, [lease]))
         {
             return false;
         }
