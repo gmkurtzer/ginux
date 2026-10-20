@@ -4093,6 +4093,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             kernel_fail("ginux: controller exited without a lifecycle request\r\n");
         }
         let domain_started = arch::x86_64::timer::timestamp_counter();
+        arch::x86_64::cpu::mark_configured_container_booting();
         loop {
             let resuming = arch::x86_64::cpu::configured_container_slot()
                 .is_some_and(address_space::linux_runtime_is_suspended);

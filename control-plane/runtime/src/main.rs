@@ -16,12 +16,15 @@ use ginux_native_abi::{
     NATIVE_DOMAIN_CONFIG_IMAGE, NATIVE_DOMAIN_CONFIG_INIT, NATIVE_DOMAIN_CONFIG_MEMORY,
     NATIVE_DOMAIN_CONFIG_PERSONALITY, NATIVE_DOMAIN_CONTROL_OPERATION, NATIVE_DOMAIN_CREATE,
     NATIVE_DOMAIN_CURSOR_END, NATIVE_DOMAIN_HOST_SHUTDOWN, NATIVE_DOMAIN_INJECT_FAILURE,
-    NATIVE_DOMAIN_LIMIT, NATIVE_DOMAIN_MAX_NAME_SIZE, NATIVE_DOMAIN_QUERY, NATIVE_DOMAIN_RESTART,
+    NATIVE_DOMAIN_LIMIT, NATIVE_DOMAIN_MAX_NAME_SIZE, NATIVE_DOMAIN_POLL_BACKGROUND,
+    NATIVE_DOMAIN_QUERY, NATIVE_DOMAIN_RESTART, NATIVE_DOMAIN_RUNTIME_CONSOLE_ATTACHED,
+    NATIVE_DOMAIN_RUNTIME_ROOTFS_READY, NATIVE_DOMAIN_RUNTIME_SUSPENDED,
     NATIVE_DOMAIN_SET_AUTOSTART, NATIVE_DOMAIN_SET_CPU, NATIVE_DOMAIN_SET_IMAGE,
     NATIVE_DOMAIN_SET_INIT, NATIVE_DOMAIN_SET_MEMORY_MIB, NATIVE_DOMAIN_SET_PERSONALITY,
-    NATIVE_DOMAIN_START_ATTACHED, NATIVE_DOMAIN_STATE_CONFIGURED, NATIVE_DOMAIN_STATE_CREATED,
-    NATIVE_DOMAIN_STATE_FAILED, NATIVE_DOMAIN_STATE_RUNNING, NATIVE_DOMAIN_STATE_STOPPED,
-    NATIVE_DOMAIN_STOP, NATIVE_HOST_INSPECT_OPERATION, NATIVE_HOST_INSPECT_RECORD_SIZE,
+    NATIVE_DOMAIN_START_ATTACHED, NATIVE_DOMAIN_STATE_BOOTING, NATIVE_DOMAIN_STATE_CONFIGURED,
+    NATIVE_DOMAIN_STATE_CREATED, NATIVE_DOMAIN_STATE_FAILED, NATIVE_DOMAIN_STATE_RUNNING,
+    NATIVE_DOMAIN_STATE_STARTING, NATIVE_DOMAIN_STATE_STOPPED, NATIVE_DOMAIN_STOP,
+    NATIVE_HOST_INSPECT_OPERATION, NATIVE_HOST_INSPECT_RECORD_SIZE,
     NATIVE_HOST_INSPECT_REQUEST_SIZE, NATIVE_HOST_INSPECT_STATE_READY,
     NATIVE_HOST_INSPECT_STATE_STOPPING, NATIVE_HOST_INSPECT_VERSION,
     NATIVE_HOST_PROCESS_KIND_CONTROLLER, NATIVE_HOST_PROCESS_KIND_DOMAIN_INIT,
@@ -350,7 +353,7 @@ const DOMAIN_COMMANDS: &[Command<'static>] = &[
     Command::leaf(
         b"status",
         b"domain status NAME",
-        b"Show domain state",
+        b"Show detailed domain state and configuration",
         COMMAND_DOMAIN_STATUS,
         Arity::exact(1),
     ),
@@ -542,6 +545,8 @@ extern "C" fn ginux_controller_main() -> ! {
     }
     loop {
         write(console, b"ginux> ");
+        let mut background = NativeDomainRequestV3::zeroed();
+        let _ = domain_call(host, NATIVE_DOMAIN_POLL_BACKGROUND, &mut background);
         let length = read_line(console, &mut line);
         let Some(command) = line.get(..length) else {
             exit(NATIVE_SERVICE_EXIT_REJECTED);
@@ -1570,6 +1575,8 @@ fn domain_state_name(state: u64) -> &'static [u8] {
         NATIVE_DOMAIN_STATE_FAILED => b"failed",
         NATIVE_DOMAIN_STATE_CREATED => b"created",
         NATIVE_DOMAIN_STATE_CONFIGURED => b"configured",
+        NATIVE_DOMAIN_STATE_STARTING => b"starting",
+        NATIVE_DOMAIN_STATE_BOOTING => b"booting",
         _ => b"unknown",
     }
 }
@@ -1599,6 +1606,110 @@ fn show_domain_list(console: u64, host: u64) {
         }
         cursor = request.value;
     }
+}
+
+fn show_domain_status(console: u64, host: u64, state: u64, request: &NativeDomainRequestV3) {
+    let configured = |flag| request.config_flags & flag != 0;
+    write(console, b"Name:        ");
+    write(console, request_name(request));
+    write(console, b"\r\nState:       ");
+    write(console, domain_state_name(state));
+    write(console, b"\r\nPersonality: ");
+    write(
+        console,
+        if configured(NATIVE_DOMAIN_CONFIG_PERSONALITY) {
+            request
+                .personality
+                .get(..usize::from(request.personality_size))
+                .unwrap_or_default()
+        } else {
+            b"-"
+        },
+    );
+    write(console, b"\r\nInit:        ");
+    write(
+        console,
+        if configured(NATIVE_DOMAIN_CONFIG_INIT) {
+            request
+                .init
+                .get(..usize::from(request.init_size))
+                .unwrap_or_default()
+        } else {
+            b"-"
+        },
+    );
+    write(console, b"\r\nCPU:         ");
+    if configured(NATIVE_DOMAIN_CONFIG_CPU) {
+        write_decimal(console, u64::from(request.cpu_count));
+    } else {
+        write(console, b"-");
+    }
+    write(console, b"\r\nMemory MiB:  ");
+    if configured(NATIVE_DOMAIN_CONFIG_MEMORY) {
+        write_decimal(console, request.memory_mib);
+    } else {
+        write(console, b"-");
+    }
+    write(console, b"\r\nAutostart:   ");
+    write(
+        console,
+        if configured(NATIVE_DOMAIN_CONFIG_AUTOSTART) {
+            b"true"
+        } else {
+            b"false"
+        },
+    );
+    write(console, b"\r\nNetworks:    ");
+    let mut networks = OutputLine::new();
+    append_domain_networks(&mut networks, host, request_name(request));
+    networks.write(console);
+    write(console, b"\r\nImage:       ");
+    write(
+        console,
+        if configured(NATIVE_DOMAIN_CONFIG_IMAGE) {
+            request
+                .image
+                .get(..usize::from(request.image_size))
+                .unwrap_or_default()
+        } else {
+            b"-"
+        },
+    );
+    write(console, b"\r\nConsole:     ");
+    write(
+        console,
+        if request.reserved[0] & NATIVE_DOMAIN_RUNTIME_CONSOLE_ATTACHED != 0 {
+            b"attached"
+        } else {
+            b"detached"
+        },
+    );
+    write(console, b"\r\nRootfs:      ");
+    write(
+        console,
+        if request.reserved[0] & NATIVE_DOMAIN_RUNTIME_ROOTFS_READY != 0 {
+            b"ready"
+        } else {
+            b"pending"
+        },
+    );
+    write(console, b"\r\nExecution:   ");
+    write(
+        console,
+        if request.reserved[0] & NATIVE_DOMAIN_RUNTIME_SUSPENDED != 0 {
+            b"idle"
+        } else if matches!(
+            state,
+            NATIVE_DOMAIN_STATE_STARTING | NATIVE_DOMAIN_STATE_BOOTING
+        ) {
+            b"booting"
+        } else if state == NATIVE_DOMAIN_STATE_RUNNING {
+            b"active"
+        } else {
+            b"inactive"
+        },
+    );
+    write(console, b"\r\n");
 }
 
 fn next_domain(host: u64, cursor: u64) -> Option<(u64, NativeDomainRequestV3)> {
@@ -1716,9 +1827,7 @@ fn handle_domain_command(console: u64, host: u64, command: u16, arguments: Argum
             if state == NATIVE_CALL_FAILED {
                 write(console, b"domain: not found\r\n");
             } else {
-                write(console, name);
-                write(console, b": ");
-                write_domain_state(console, state);
+                show_domain_status(console, host, state, &request);
             }
         }
         COMMAND_DOMAIN_START | COMMAND_DOMAIN_RESTART => {
@@ -1733,7 +1842,9 @@ fn handle_domain_command(console: u64, host: u64, command: u16, arguments: Argum
                 return;
             }
             let state = domain_call(host, NATIVE_DOMAIN_QUERY, &mut request);
-            if state == NATIVE_DOMAIN_STATE_RUNNING {
+            if state == NATIVE_DOMAIN_STATE_STARTING || state == NATIVE_DOMAIN_STATE_BOOTING {
+                write_name_state(console, name, b"starting (detached)\r\n");
+            } else if state == NATIVE_DOMAIN_STATE_RUNNING {
                 write_name_state(console, name, b"running (detached)\r\n");
             } else if state == NATIVE_DOMAIN_STATE_STOPPED {
                 write_name_state(console, name, b"stopped\r\n");

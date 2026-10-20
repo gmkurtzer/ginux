@@ -116,19 +116,24 @@ fi
     wait_for 'ginux: OCI image ready' 240
     wait_for 'ginux: entering configured Linux init' 30
     init_started_at=$(date +%s)
-    if [[ "$start_mode" == detached || "$start_mode" == detached-return ]]; then
-        wait_for 'rocky: running (detached)' 90
-        wait_for_count 'ginux> ' 2 10
-        if [[ "$start_mode" == detached-return ]]; then
-            printf '%s\n' 'domain list'
-            wait_for 'rocky           running' 10
-            if grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC|^ginux: Linux user fault|Linux init (execution|setup) failed|rocky: (failed|stopped)' "$output_file"; then
-                fail 'detached domain did not return cleanly to the controller'
-            fi
-            printf '%s\n' ok >"$success_file"
-            stop_qemu
-            exit 0
+    if [[ "$start_mode" == detached-return ]]; then
+        printf '%s\n' 'domain list' 'domain status rocky'
+        wait_for 'rocky           booting' 30
+        wait_for 'State:       booting' 10
+        wait_for 'Execution:   idle' 10
+        if grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC|^ginux: Linux user fault|Linux init (execution|setup) failed|rocky: (failed|stopped)' "$output_file"; then
+            fail 'background domain did not return cleanly to the controller'
         fi
+        printf '%s\n' ok >"$success_file"
+        stop_qemu
+        exit 0
+    elif [[ "$start_mode" == detached ]]; then
+        for _ in {1..90}; do
+            printf '%s\n' 'domain status rocky'
+            sleep 1
+            grep -Fq 'State:       running' "$output_file" && break
+        done
+        wait_for 'State:       running' 1
         printf '%s\n' 'domain attach rocky'
     else
         wait_for ' running in system mode (' 30
@@ -211,9 +216,11 @@ wait "$qemu_pid" || true
 qemu_pid=""
 
 if [[ "$start_mode" == detached-return && -s "$success_file" ]] \
-    && grep -Fq 'rocky: running (detached)' "$output_file" \
+    && grep -Fq 'rocky: starting (detached)' "$output_file" \
+    && grep -Fq 'rocky           booting' "$output_file" \
+    && grep -Fq 'State:       booting' "$output_file" \
     && ! grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC|^ginux: Linux user fault|Linux init (execution|setup) failed|rocky: (failed|stopped)' "$output_file"; then
-    echo 'Rocky detached start returned to the controller.'
+    echo 'Rocky background start returned to the controller with observable boot state.'
     exit 0
 fi
 

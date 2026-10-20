@@ -336,11 +336,19 @@ status
 network new gnet0 type=virtual
 domain new alpine
 domain set alpine image=alpine:latest init=/bin/sh network=gnet0
-domain start alpine --attach
+domain start alpine
+domain list
+domain status alpine
+domain attach alpine
 ```
 
-The final command resolves and downloads Alpine from Docker Hub, verifies and
-unpacks its layer, then enters the unmodified Alpine shell. Multiple domains
+`domain start NAME` queues startup and returns immediately. `domain list`
+reports transitional `starting` and `booting` states while the work proceeds;
+`domain status NAME` adds root-filesystem, execution, console, resource, image,
+and network details. Use `domain start NAME --attach` when the initial console
+should remain in the foreground. The example resolves and downloads Alpine
+from Docker Hub, verifies and unpacks its layer, then attaches to the unmodified
+Alpine shell. Multiple domains
 can run concurrently; each keeps its own address space, root/mount view,
 process view, and suspended execution state. Press Control-] to detach, use
 `domain attach NAME` to return, and use `exit` to stop the attached Linux

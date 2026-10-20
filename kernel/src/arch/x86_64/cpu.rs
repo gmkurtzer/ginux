@@ -1839,6 +1839,9 @@ static NETWORK_DHCP_REQUESTED: AtomicBool = AtomicBool::new(false);
 static NETWORK_DHCP_RESULT: AtomicU8 = AtomicU8::new(0);
 static CONTAINER_PULL_REQUESTED: AtomicBool = AtomicBool::new(false);
 static LINUX_RUNTIME_SUSPEND_REQUESTED: BankedAtomicBool = BankedAtomicBool::new(false);
+static LINUX_RUNTIME_BACKGROUND_YIELD_REQUESTED: BankedAtomicBool = BankedAtomicBool::new(false);
+static LINUX_RUNTIME_BACKGROUND_SUSPENDED: BankedAtomicBool = BankedAtomicBool::new(false);
+static LINUX_RUNTIME_BACKGROUND_TICKS: BankedAtomicU32 = BankedAtomicU32::new(0);
 static LINUX_RUNTIME_SUSPENDED: BankedAtomicBool = BankedAtomicBool::new(false);
 static LINUX_RUNTIME_SUSPEND_ADDRESS: BankedAtomicU64 = BankedAtomicU64::new(0);
 static LINUX_RUNTIME_SUSPEND_COUNT: BankedAtomicU64 = BankedAtomicU64::new(0);
@@ -1853,6 +1856,8 @@ const CONTAINER_CONSOLE_DETACH: u8 = 0x1d;
 static CONTAINER_CONSOLE_ATTACHED: [AtomicBool; control_abi::DOMAIN_LIMIT] =
     [const { AtomicBool::new(false) }; control_abi::DOMAIN_LIMIT];
 static CONTAINER_STOP_REQUESTED: [AtomicBool; control_abi::DOMAIN_LIMIT] =
+    [const { AtomicBool::new(false) }; control_abi::DOMAIN_LIMIT];
+static CONTAINER_BACKGROUND_SUSPENDED: [AtomicBool; control_abi::DOMAIN_LIMIT] =
     [const { AtomicBool::new(false) }; control_abi::DOMAIN_LIMIT];
 
 const EXTENDED_STATE_SIZE: usize = 1024;
@@ -4498,8 +4503,19 @@ pub(crate) fn begin_configured_container() {
         }
         CONTAINER_ACTIVE_SLOT.store(slot as u8, Ordering::SeqCst);
         LINUX_EXECUTION_INSTANCE.store(slot as u8, Ordering::SeqCst);
-        CONTAINER_CONTROL_STATES[slot]
-            .store(control_abi::DOMAIN_STATE_RUNNING as u8, Ordering::SeqCst);
+        if container_state(slot) != control_abi::DOMAIN_STATE_BOOTING {
+            CONTAINER_CONTROL_STATES[slot]
+                .store(control_abi::DOMAIN_STATE_RUNNING as u8, Ordering::SeqCst);
+        }
+    }
+}
+
+pub(crate) fn mark_configured_container_booting() {
+    if let Some(slot) = selected_container_slot() {
+        if !container_image_is_embedded(slot) && crate::published_rootfs::is_installed(slot) {
+            CONTAINER_CONTROL_STATES[slot]
+                .store(control_abi::DOMAIN_STATE_BOOTING as u8, Ordering::Release);
+        }
     }
 }
 
@@ -10208,6 +10224,18 @@ extern "sysv64" fn linux_syscall_handler(
             LINUX_RUNTIME_EINVAL_SYSCALLS[word].fetch_or(bit, Ordering::SeqCst);
         }
     }
+    if runtime_mode
+        && result != LINUX_RETURN_TO_KERNEL
+        && result != LINUX_RETURN_FROM_SIGNAL
+        && !LINUX_SIGNAL_ACTIVE.load(Ordering::Acquire)
+        && LINUX_RUNTIME_BACKGROUND_YIELD_REQUESTED.swap(false, Ordering::AcqRel)
+    {
+        let mut context = syscall_return;
+        context.rax = result;
+        if save_suspended_linux_runtime(context, 0, 0, true) {
+            return LINUX_RETURN_TO_KERNEL;
+        }
+    }
     result
 }
 
@@ -11905,10 +11933,14 @@ fn restore_linux_process_live_return(output: *mut LinuxSyscallFrame, pid: u32) -
     )
 }
 
-fn save_suspended_linux_runtime(context: LinuxUserContext, address: u64, count: u64) -> bool {
+fn save_suspended_linux_runtime(
+    context: LinuxUserContext,
+    address: u64,
+    count: u64,
+    background: bool,
+) -> bool {
     if !context.is_valid()
-        || address == 0
-        || count == 0
+        || !background && (address == 0 || count == 0)
         || !refresh_live_linux_process_registry(context)
         || LINUX_RUNTIME_SUSPENDED.swap(true, Ordering::AcqRel)
     {
@@ -11926,6 +11958,10 @@ fn save_suspended_linux_runtime(context: LinuxUserContext, address: u64, count: 
     LINUX_RUNTIME_SUSPEND_RSP.store(context.rsp, Ordering::Release);
     LINUX_RUNTIME_SUSPEND_RFLAGS.store(context.rflags, Ordering::Release);
     LINUX_RUNTIME_SUSPEND_FS_BASE.store(context.fs_base, Ordering::Release);
+    LINUX_RUNTIME_BACKGROUND_SUSPENDED.store(background, Ordering::Release);
+    if let Some(slot) = active_container_slot() {
+        CONTAINER_BACKGROUND_SUSPENDED[slot].store(background, Ordering::Release);
+    }
     true
 }
 
@@ -11937,15 +11973,16 @@ pub(crate) fn resume_suspended_linux_runtime(mmap: u64) -> LinuxElfResult {
         return LinuxElfResult::FAILED;
     };
     let stopping = CONTAINER_STOP_REQUESTED[slot].swap(false, Ordering::AcqRel);
-    if !stopping && !CONTAINER_CONSOLE_ATTACHED[slot].load(Ordering::Acquire) {
+    let background = LINUX_RUNTIME_BACKGROUND_SUSPENDED.load(Ordering::Acquire);
+    if !stopping && !background && !CONTAINER_CONSOLE_ATTACHED[slot].load(Ordering::Acquire) {
         return LinuxElfResult::FAILED;
     }
     let address = LINUX_RUNTIME_SUSPEND_ADDRESS.load(Ordering::Acquire);
     let count = LINUX_RUNTIME_SUSPEND_COUNT.load(Ordering::Acquire);
-    if address == 0 || count == 0 {
+    if !background && (address == 0 || count == 0) {
         return LinuxElfResult::FAILED;
     }
-    if !stopping {
+    if !stopping && !background {
         let byte = crate::serial_read_byte_blocking();
         if !copy_to_linux_user(address, &[byte]) {
             return LinuxElfResult::FAILED;
@@ -11984,6 +12021,8 @@ pub(crate) fn resume_suspended_linux_runtime(mmap: u64) -> LinuxElfResult {
         return LinuxElfResult::FAILED;
     }
     LINUX_RUNTIME_SUSPENDED.store(false, Ordering::Release);
+    LINUX_RUNTIME_BACKGROUND_SUSPENDED.store(false, Ordering::Release);
+    CONTAINER_BACKGROUND_SUSPENDED[slot].store(false, Ordering::Release);
     LINUX_RUNTIME_MODE.store(true, Ordering::Release);
     if !timer::arm_linux_wait_timer() {
         let _ = linux_process::finish_runtime_process_registry();
@@ -29687,7 +29726,7 @@ fn linux_descriptor_read_live_return(
                 ))
         && LINUX_RUNTIME_SUSPEND_REQUESTED.swap(false, Ordering::AcqRel)
     {
-        if count == 0 || !save_suspended_linux_runtime(caller, address, count) {
+        if count == 0 || !save_suspended_linux_runtime(caller, address, count, false) {
             return LINUX_EINVAL;
         }
         return LINUX_RETURN_TO_KERNEL;
@@ -29761,7 +29800,7 @@ fn linux_descriptor_readv_live_return(
             Ok(snapshot) => snapshot,
             Err(error) => return error,
         };
-        if vector_count == 0 || !save_suspended_linux_runtime(caller, ranges[0].0, 1) {
+        if vector_count == 0 || !save_suspended_linux_runtime(caller, ranges[0].0, 1, false) {
             return LINUX_EINVAL;
         }
         return LINUX_RETURN_TO_KERNEL;
@@ -33064,6 +33103,9 @@ fn linux_socket_readv(descriptor: u64, vectors: u64, count: u64) -> Option<u64> 
 fn container_console_read_byte() -> Option<u8> {
     let slot = active_container_slot()?;
     if !CONTAINER_CONSOLE_ATTACHED[slot].load(Ordering::Acquire) {
+        CONTAINER_CONTROL_STATES[slot]
+            .store(control_abi::DOMAIN_STATE_RUNNING as u8, Ordering::Release);
+        CONTAINER_BACKGROUND_SUSPENDED[slot].store(false, Ordering::Release);
         LINUX_RUNTIME_SUSPEND_REQUESTED.store(true, Ordering::Release);
         return None;
     }
@@ -38685,6 +38727,16 @@ pub(crate) fn expire_linux_waits_from_timer(frame: &mut UserInterruptFrame) {
     }
     let descriptor_wakes = wake_linux_descriptor_waits();
     let expired = expire_linux_waits();
+    if LINUX_RUNTIME_MODE.load(Ordering::Acquire)
+        && active_container_slot().is_some_and(|slot| {
+            container_state(slot) == control_abi::DOMAIN_STATE_BOOTING
+                && !CONTAINER_CONSOLE_ATTACHED[slot].load(Ordering::Acquire)
+        })
+        && LINUX_RUNTIME_BACKGROUND_TICKS.fetch_add(1, Ordering::AcqRel) + 1 >= 5
+    {
+        LINUX_RUNTIME_BACKGROUND_TICKS.store(0, Ordering::Release);
+        LINUX_RUNTIME_BACKGROUND_YIELD_REQUESTED.store(true, Ordering::Release);
+    }
     // A Linux runtime thread can wait in a userspace spin lock without making
     // another syscall. Give a runnable sibling a bounded time slice so such a
     // lock cannot deadlock merely because the current thread never yields.
@@ -42215,6 +42267,9 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
             }
             u64::from(CONTAINER_CONTROL_STATES[slot].load(Ordering::SeqCst))
         }
+        control_abi::DOMAIN_POLL_BACKGROUND => {
+            u64::from(!crate::serial_input_ready() && queue_background_container_work())
+        }
         control_abi::DOMAIN_QUERY if requested_slot.is_some() => {
             let slot = requested_slot.unwrap_or(0);
             write_container_request(&mut request, slot, control_abi::DOMAIN_CURSOR_END);
@@ -42372,14 +42427,23 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
                 ) =>
         {
             let slot = requested_slot.unwrap_or(0);
+            let embedded = container_image_is_embedded(slot);
             CONTAINER_SELECTED_SLOT.store(slot as u8, Ordering::SeqCst);
             reset_container_console(slot, operation == control_abi::DOMAIN_START_ATTACHED);
-            if container_image_is_embedded(slot) || crate::published_rootfs::is_installed(slot) {
+            if !embedded {
+                CONTAINER_CONTROL_STATES[slot]
+                    .store(control_abi::DOMAIN_STATE_STARTING as u8, Ordering::Release);
+            }
+            if embedded || crate::published_rootfs::is_installed(slot) {
                 CONTAINER_RESTART_REQUESTED.store(true, Ordering::SeqCst);
             } else {
                 CONTAINER_PULL_REQUESTED.store(true, Ordering::SeqCst);
             }
-            control_abi::DOMAIN_STATE_STOPPED
+            if embedded {
+                control_abi::DOMAIN_STATE_STOPPED
+            } else {
+                control_abi::DOMAIN_STATE_STARTING
+            }
         }
         control_abi::DOMAIN_ATTACH
             if requested_slot.is_some()
@@ -42413,11 +42477,13 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
         if matches!(
             operation,
             control_abi::DOMAIN_STOP
-                | control_abi::DOMAIN_RESTART
                 | control_abi::DOMAIN_START_ATTACHED
                 | control_abi::DOMAIN_ATTACH
                 | control_abi::DOMAIN_INJECT_FAILURE
-        ) {
+        ) || operation == control_abi::DOMAIN_POLL_BACKGROUND && result == 1
+            || operation == control_abi::DOMAIN_RESTART
+                && result == control_abi::DOMAIN_STATE_STOPPED
+        {
             if !scheduler::suspend_container_lifecycle(
                 frame,
                 USER_CODE_SELECTOR,
@@ -42531,6 +42597,24 @@ fn next_running_container_slot(cursor: usize) -> Option<usize> {
         .find(|slot| container_state(*slot) == control_abi::DOMAIN_STATE_RUNNING)
 }
 
+fn queue_background_container_work() -> bool {
+    if CONTAINER_PULL_REQUESTED.load(Ordering::Acquire)
+        || CONTAINER_RESTART_REQUESTED.load(Ordering::Acquire)
+    {
+        return true;
+    }
+    let Some(slot) = (0..control_abi::DOMAIN_LIMIT).find(|slot| {
+        container_state(*slot) == control_abi::DOMAIN_STATE_BOOTING
+            && CONTAINER_BACKGROUND_SUSPENDED[*slot].load(Ordering::Acquire)
+            && address_space::linux_runtime_is_suspended(*slot)
+    }) else {
+        return false;
+    };
+    CONTAINER_SELECTED_SLOT.store(slot as u8, Ordering::Release);
+    CONTAINER_RESTART_REQUESTED.store(true, Ordering::Release);
+    true
+}
+
 fn next_container_cursor(cursor: usize) -> u64 {
     next_container_slot(cursor)
         .map(|slot| slot as u64)
@@ -42623,6 +42707,8 @@ pub(crate) fn complete_container_pull(success: bool) {
         return;
     };
     if success {
+        CONTAINER_CONTROL_STATES[slot]
+            .store(control_abi::DOMAIN_STATE_BOOTING as u8, Ordering::Release);
         CONTAINER_RESTART_REQUESTED.store(true, Ordering::Release);
     } else {
         CONTAINER_CONTROL_STATES[slot]
@@ -42696,6 +42782,17 @@ fn write_container_request(
         *output = stored.load(Ordering::SeqCst);
     }
     request[4..6].copy_from_slice(&control_abi::DOMAIN_REQUEST_VERSION.to_le_bytes());
+    let mut runtime_flags = 0;
+    if CONTAINER_CONSOLE_ATTACHED[slot].load(Ordering::Acquire) {
+        runtime_flags |= control_abi::DOMAIN_RUNTIME_CONSOLE_ATTACHED;
+    }
+    if crate::published_rootfs::is_installed(slot) {
+        runtime_flags |= control_abi::DOMAIN_RUNTIME_ROOTFS_READY;
+    }
+    if address_space::linux_runtime_is_suspended(slot) {
+        runtime_flags |= control_abi::DOMAIN_RUNTIME_SUSPENDED;
+    }
+    request[210] = runtime_flags;
     request[24..32].copy_from_slice(&next_cursor.to_le_bytes());
     let init_size = usize::from(CONTAINER_INIT_SIZES[slot].load(Ordering::SeqCst));
     request[32..34].copy_from_slice(&(init_size as u16).to_le_bytes());
