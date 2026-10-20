@@ -55,6 +55,16 @@ wait_for() {
     fail "timed out waiting for '$marker'"
 }
 
+wait_for_line() {
+    local marker=$1
+    local limit=${2:-30}
+    for ((attempt = 0; attempt < limit; attempt++)); do
+        grep -Eq "^${marker}\r?$" "$output_file" && return 0
+        sleep 1
+    done
+    fail "timed out waiting for output line '$marker'"
+}
+
 wait_for_count() {
     local marker=$1
     local expected=$2
@@ -183,6 +193,22 @@ fi
     fi
     if grep -Fq 'ginux: Linux child exited with status' "$output_file"; then
         fail 'kernel leaked an anonymous userspace child exit'
+    fi
+    if [[ "${GINUX_TEST_DOMAIN_EXEC:-0}" == 1 ]]; then
+        printf '\035'
+        wait_for "[detached from domain; use 'domain attach NAME' to return]" 10
+        wait_for_count 'ginux> ' 2 10
+        printf '%s\n' 'domain exec rocky /bin/echo DOMAIN_EXEC_OK'
+        wait_for 'DOMAIN_EXEC_OK' 30
+        wait_for 'rocky: command completed' 30
+        printf '%s\n' 'domain status rocky'
+        wait_for 'State:       running' 10
+        printf '%s\n' 'domain exec rocky --interactive /bin/sh'
+        wait_for '# ' 30
+        printf '%s\n' "printf '\\nDOMAIN_EXEC_INTERACTIVE_OK\\n'"
+        wait_for_line 'DOMAIN_EXEC_INTERACTIVE_OK' 30
+        printf '%s\n' 'exit'
+        wait_for_count 'ginux> ' 3 30
     fi
     if [[ "$start_mode" == detached ]]; then
         printf '\035'

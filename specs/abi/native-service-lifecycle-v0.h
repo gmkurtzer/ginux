@@ -79,6 +79,11 @@
 #define GINUX_NATIVE_DOMAIN_ATTACH UINT64_C(12)
 #define GINUX_NATIVE_DOMAIN_SET_PERSONALITY UINT64_C(13)
 #define GINUX_NATIVE_DOMAIN_POLL_BACKGROUND UINT64_C(14)
+#define GINUX_NATIVE_DOMAIN_EXEC UINT64_C(15)
+#define GINUX_NATIVE_DOMAIN_EXEC_REQUEST_SIZE UINT32_C(40)
+#define GINUX_NATIVE_DOMAIN_EXEC_REQUEST_VERSION UINT16_C(0)
+#define GINUX_NATIVE_DOMAIN_EXEC_INTERACTIVE UINT16_C(1)
+#define GINUX_NATIVE_DOMAIN_EXEC_MAX_ARGUMENTS UINT16_C(16)
 #define GINUX_NATIVE_DOMAIN_REQUEST_SIZE UINT32_C(232)
 #define GINUX_NATIVE_DOMAIN_REQUEST_VERSION UINT16_C(3)
 #define GINUX_NATIVE_DOMAIN_MAX_NAME_SIZE UINT16_C(16)
@@ -136,6 +141,27 @@ struct ginux_native_domain_request_v3 {
 
 _Static_assert(sizeof(struct ginux_native_domain_request_v3) == 232,
                "ginux native domain request v3 size");
+
+struct ginux_native_domain_exec_argument_v0 {
+    uint64_t address;
+    uint64_t length;
+};
+
+struct ginux_native_domain_exec_request_v0 {
+    uint32_t size;
+    uint16_t version;
+    uint16_t flags;
+    uint16_t name_size;
+    uint16_t argument_count;
+    uint32_t reserved;
+    uint8_t name[GINUX_NATIVE_DOMAIN_MAX_NAME_SIZE];
+    uint64_t arguments_address;
+};
+
+_Static_assert(sizeof(struct ginux_native_domain_exec_argument_v0) == 16,
+               "ginux native domain exec argument v0 size");
+_Static_assert(sizeof(struct ginux_native_domain_exec_request_v0) == 40,
+               "ginux native domain exec request v0 size");
 
 struct ginux_native_network_inventory_request_v0 {
     uint32_t size;

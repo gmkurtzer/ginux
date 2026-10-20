@@ -119,21 +119,21 @@ window. Native x86-64 KVM automatically enforces a three-second gate; it cannot
 be executed on this host. Detailed measurements are recorded in
 [PERFORMANCE.md](PERFORMANCE.md).
 
-### Next bounded checkpoint: domain process dispatch and exec
+### Completed checkpoint: domain process dispatch and exec
 
-`domain exec` is not a controller-side shell shortcut. It must create a new
-Linux process inside an already-running domain while PID 1 remains alive. That
-requires the general process dispatcher above and is the next implementation
-checkpoint.
+`domain exec` is not a controller-side shell shortcut. It creates a new Linux
+process inside an already-running domain while PID 1 remains alive, using an
+explicit argument vector passed through the native control ABI.
 
 The interface contract for that checkpoint is:
 
 - `domain exec NAME COMMAND [ARG...]` runs a non-interactive process, streams
   its standard output and error to the controller, waits for it, and returns
   its exit status without changing domain state.
-- `domain exec --interactive NAME COMMAND [ARG...]` allocates a fresh PTY,
-  makes it the process's controlling terminal, attaches the controller to it,
-  and supports the same detach sequence as `domain attach`.
+- `domain exec NAME --interactive COMMAND [ARG...]` attaches the child to the
+  domain console and returns to the controller when the command exits. A fresh
+  per-exec PTY and independently detachable exec sessions remain follow-up
+  work.
 - Each exec process receives the target domain's Linux personality, root and
   mount namespace, PID namespace, credentials, environment baseline, resource
   policy, and network view. It does not inherit host/control-domain authority.
@@ -142,10 +142,11 @@ The interface contract for that checkpoint is:
 - The control ABI carries an argument vector and explicit interactive flag;
   command text is never reparsed by the kernel as a shell command.
 
-Acceptance gate: boot an Alpine `/sbin/init`, execute `/bin/echo` both ways,
-detach and reattach an interactive `/bin/sh`, verify independent PIDs in the
-domain's `/proc`, and confirm a failed exec leaves PID 1 running. Test and
-commit this checkpoint, then stop for operator review.
+The QEMU acceptance gate boots Rocky systemd to its authenticated login prompt,
+detaches, executes `/bin/echo`, starts an interactive `/bin/sh`, exits it, and
+confirms PID 1 and the domain remain running. Independent exec-session PTYs,
+exit-status transport, failed-exec reporting, and explicit `/proc` PID checks
+remain the next process-dispatch refinements.
 
 ## Stage 3: Complete signal semantics
 

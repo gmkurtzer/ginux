@@ -2195,6 +2195,22 @@ pub(crate) fn resume_runtime_process_registry() -> bool {
     valid
 }
 
+pub(crate) fn reset_runtime_scheduler_bindings() -> bool {
+    if let Some(run_queue) = scheduler::active_process_scheduler_workspace() {
+        run_queue.retire_all();
+        if !scheduler::release_process_scheduler_workspace() {
+            return false;
+        }
+    }
+    let Some(table) = live_process_table_mut() else {
+        return false;
+    };
+    for process in table.processes.iter_mut().flatten() {
+        process.scheduler_thread = None;
+    }
+    true
+}
+
 fn finish_live_process_registry_with_refresh_floor(refresh_floor: u32) -> bool {
     let Some(instance) = active_process_instance() else {
         return true;

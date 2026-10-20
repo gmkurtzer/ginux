@@ -7,15 +7,17 @@ use ginux_command::{
 };
 use ginux_native_abi::{
     native_control_abi_is_compatible, GinuxControlIoctlV0, NativeControlDescriptorV4,
-    NativeDomainRequestV3, NativeHostInspectRecordV0, NativeHostInspectRequestV0,
-    NativeNetworkInventoryRequestV0, NativeRootDirectoryRequestV4, GINUX_CONTROL_IOCTL,
-    NATIVE_CALL_FAILED, NATIVE_CONSOLE_MAX_LINE_BYTES, NATIVE_CONSOLE_READ_BYTE_OPERATION,
+    NativeDomainExecArgumentV0, NativeDomainExecRequestV0, NativeDomainRequestV3,
+    NativeHostInspectRecordV0, NativeHostInspectRequestV0, NativeNetworkInventoryRequestV0,
+    NativeRootDirectoryRequestV4, GINUX_CONTROL_IOCTL, NATIVE_CALL_FAILED,
+    NATIVE_CONSOLE_MAX_LINE_BYTES, NATIVE_CONSOLE_READ_BYTE_OPERATION,
     NATIVE_CONTROL_DESCRIPTOR_OPERATION, NATIVE_CONTROL_DESCRIPTOR_SIZE,
     NATIVE_CONTROL_DISCOVERY_OPERATION, NATIVE_CONTROL_MAX_BUFFERED_CONSOLE_BYTES,
     NATIVE_DOMAIN_ATTACH, NATIVE_DOMAIN_CONFIG_AUTOSTART, NATIVE_DOMAIN_CONFIG_CPU,
     NATIVE_DOMAIN_CONFIG_IMAGE, NATIVE_DOMAIN_CONFIG_INIT, NATIVE_DOMAIN_CONFIG_MEMORY,
     NATIVE_DOMAIN_CONFIG_PERSONALITY, NATIVE_DOMAIN_CONTROL_OPERATION, NATIVE_DOMAIN_CREATE,
-    NATIVE_DOMAIN_CURSOR_END, NATIVE_DOMAIN_HOST_SHUTDOWN, NATIVE_DOMAIN_INJECT_FAILURE,
+    NATIVE_DOMAIN_CURSOR_END, NATIVE_DOMAIN_EXEC, NATIVE_DOMAIN_EXEC_INTERACTIVE,
+    NATIVE_DOMAIN_EXEC_MAX_ARGUMENTS, NATIVE_DOMAIN_HOST_SHUTDOWN, NATIVE_DOMAIN_INJECT_FAILURE,
     NATIVE_DOMAIN_LIMIT, NATIVE_DOMAIN_MAX_NAME_SIZE, NATIVE_DOMAIN_POLL_BACKGROUND,
     NATIVE_DOMAIN_QUERY, NATIVE_DOMAIN_RESTART, NATIVE_DOMAIN_RUNTIME_CONSOLE_ATTACHED,
     NATIVE_DOMAIN_RUNTIME_ROOTFS_READY, NATIVE_DOMAIN_RUNTIME_SUSPENDED,
@@ -134,6 +136,7 @@ const COMMAND_NETWORK_STOP: u16 = 21;
 const COMMAND_NETWORK_RESTART: u16 = 22;
 const COMMAND_TEST_LINUX: u16 = 23;
 const COMMAND_DOMAIN_ATTACH: u16 = 24;
+const COMMAND_DOMAIN_EXEC: u16 = 26;
 const COMMAND_NETWORK_NEW: u16 = 25;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -370,6 +373,13 @@ const DOMAIN_COMMANDS: &[Command<'static>] = &[
         b"Attach to a running domain; Ctrl-] detaches",
         COMMAND_DOMAIN_ATTACH,
         Arity::exact(1),
+    ),
+    Command::leaf(
+        b"exec",
+        b"domain exec NAME [--interactive] COMMAND [ARG...]",
+        b"Execute a command in a running domain",
+        COMMAND_DOMAIN_EXEC,
+        Arity::at_least(2),
     ),
     Command::leaf(
         b"stop",
@@ -611,6 +621,7 @@ extern "C" fn ginux_controller_main() -> ! {
             COMMAND_DOMAIN_ATTACH => {
                 handle_domain_command(console, host, invocation.id(), invocation.arguments())
             }
+            COMMAND_DOMAIN_EXEC => handle_domain_exec(console, host, invocation.arguments()),
             COMMAND_NETWORK_LIST => show_network_list(console, host, network),
             COMMAND_NETWORK_NEW => create_virtual_network(console, host, invocation.arguments()),
             COMMAND_NETWORK_STATUS => {
@@ -1888,6 +1899,58 @@ fn handle_domain_command(console: u64, host: u64, command: u16, arguments: Argum
             }
         }
         _ => exit(NATIVE_SERVICE_EXIT_REJECTED),
+    }
+}
+
+fn handle_domain_exec(console: u64, host: u64, arguments: Arguments<'_>) {
+    let leading_interactive = arguments.first() == Some(b"--interactive");
+    let name_index = usize::from(leading_interactive);
+    let Some(name) = arguments.get(name_index) else {
+        write(console, b"domain: invalid exec request\r\n");
+        return;
+    };
+    let trailing_interactive = arguments.get(name_index + 1) == Some(b"--interactive");
+    let command_index = name_index + 1 + usize::from(trailing_interactive);
+    if !valid_domain_name(name) || arguments.get(command_index).is_none() {
+        write(console, b"domain: invalid exec request\r\n");
+        return;
+    }
+    let argument_count = arguments.len().saturating_sub(command_index);
+    if argument_count == 0 || argument_count > NATIVE_DOMAIN_EXEC_MAX_ARGUMENTS {
+        write(console, b"domain: too many exec arguments\r\n");
+        return;
+    }
+    let mut descriptors = [NativeDomainExecArgumentV0 {
+        address: 0,
+        length: 0,
+    }; NATIVE_DOMAIN_EXEC_MAX_ARGUMENTS];
+    for (descriptor, argument) in descriptors.iter_mut().zip(arguments.skip(command_index)) {
+        descriptor.address = argument.as_ptr() as u64;
+        descriptor.length = argument.len() as u64;
+    }
+    let mut request = NativeDomainExecRequestV0::zeroed();
+    request.flags = if leading_interactive || trailing_interactive {
+        NATIVE_DOMAIN_EXEC_INTERACTIVE
+    } else {
+        0
+    };
+    request.name_size = name.len() as u16;
+    request.argument_count = argument_count as u16;
+    request.name[..name.len()].copy_from_slice(name);
+    request.arguments_address = descriptors.as_ptr() as u64;
+    let result = call(
+        NATIVE_DOMAIN_CONTROL_OPERATION,
+        host,
+        NATIVE_DOMAIN_EXEC,
+        (&mut request as *mut NativeDomainExecRequestV0) as u64,
+    );
+    if result == NATIVE_CALL_FAILED {
+        write(
+            console,
+            b"domain: exec rejected (domain is not running)\r\n",
+        );
+    } else if request.flags & NATIVE_DOMAIN_EXEC_INTERACTIVE == 0 {
+        write_name_state(console, name, b"command completed\r\n");
     }
 }
 

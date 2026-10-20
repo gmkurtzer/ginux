@@ -277,11 +277,11 @@ simulation is not sufficient.
 |---|---|---|
 | Boot | Direct x86-64 UEFI boot as one EFI application under Q35/OVMF | Production signing, recovery, and physical hardware profiles |
 | Controller | Persistent ring-3 command console with command-name completion, aligned status tables, and component, process, network, and domain lifecycle control | Dynamic argument completion and remote authenticated management |
-| Domains | Default-Linux domains with concurrent isolated address spaces, root/mount and process views, retained CPU state, IPC, scheduling, lifecycle events, fault containment, and generation-safe cleanup | Broader per-domain resource accounting and policy enforcement |
+| Domains | Default-Linux domains with concurrent isolated address spaces, root/mount and process views, retained CPU state, IPC, scheduling, lifecycle events, fault containment, generation-safe cleanup, and command execution in a running domain | Fresh per-exec PTYs, asynchronous exec sessions, and broader per-domain resource accounting and policy enforcement |
 | Native services | Measured ring-3 network, protocol, and volume services with bounded ABIs and restart proofs | Production service supervision and broader device support |
 | Storage | Self-initializing host volume with transactional configuration recovery and a persistent, digest-verified OCI layer cache | Add writable domain layers, explicit volumes, cache refresh/garbage collection, and logs |
 | Devices | Virtio block/network paths, MSI-X, and VT-d DMA confinement in the QEMU profile | NVMe, high-speed networking, GPU support, and selected real servers |
-| Linux personality | Bounded x86-64 ELF/dynamic-linker support, a growing syscall/VFS/process/signal ABI, per-domain procfs, Alpine musl/BusyBox, Rocky glibc/coreutils, and Rocky systemd through `multi-user.target` with an attached shell | Close systemd's remaining filesystem, netlink, event, journal, and cgroup gaps, then add `domain exec` |
+| Linux personality | Bounded x86-64 ELF/dynamic-linker support, a growing syscall/VFS/process/signal ABI, per-domain procfs, Alpine musl/BusyBox, Rocky glibc/coreutils, Rocky systemd through `multi-user.target`, authenticated console login, and `domain exec` | Close systemd's remaining netlink, event, journal, cgroup, and masked-unit/symlink gaps |
 | Other personalities | Domain and kernel mechanisms are designed for reuse | No BSD or other non-Linux personality is implemented yet |
 
 The Linux layer is intentionally tracked as a compatibility contract, not as a
@@ -340,6 +340,8 @@ domain start alpine
 domain list
 domain status alpine
 domain attach alpine
+domain exec alpine /bin/echo hello
+domain exec alpine --interactive /bin/sh
 ```
 
 `domain start NAME` queues startup and returns immediately. `domain list`
@@ -353,6 +355,13 @@ can run concurrently; each keeps its own address space, root/mount view,
 process view, and suspended execution state. Press Control-] to detach, use
 `domain attach NAME` to return, and use `exit` to stop the attached Linux
 personality domain. `shutdown` stops the host.
+
+`domain exec NAME COMMAND [ARG...]` starts a child process in an already-running
+domain without replacing or stopping PID 1. Add `--interactive` after the
+domain name to attach the command to the domain console; exiting that command
+returns to the controller and leaves the domain running. For example,
+`domain exec rocky /usr/bin/passwd -d root` changes the root account inside
+the domain while preserving the authenticated console-login path itself.
 
 OCI layers are downloaded and verified in manifest order, then assembled with
 replacement, whiteout, and opaque-directory semantics before publication.

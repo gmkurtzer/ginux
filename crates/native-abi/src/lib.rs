@@ -165,6 +165,11 @@ pub const NATIVE_DOMAIN_START_ATTACHED: u64 = 11;
 pub const NATIVE_DOMAIN_ATTACH: u64 = 12;
 pub const NATIVE_DOMAIN_SET_PERSONALITY: u64 = 13;
 pub const NATIVE_DOMAIN_POLL_BACKGROUND: u64 = 14;
+pub const NATIVE_DOMAIN_EXEC: u64 = 15;
+pub const NATIVE_DOMAIN_EXEC_REQUEST_SIZE: u32 = 40;
+pub const NATIVE_DOMAIN_EXEC_REQUEST_VERSION: u16 = 0;
+pub const NATIVE_DOMAIN_EXEC_INTERACTIVE: u16 = 1 << 0;
+pub const NATIVE_DOMAIN_EXEC_MAX_ARGUMENTS: usize = 16;
 pub const NATIVE_DOMAIN_REQUEST_SIZE: u32 = 232;
 pub const NATIVE_DOMAIN_REQUEST_VERSION: u16 = 3;
 pub const NATIVE_DOMAIN_MAX_NAME_SIZE: usize = 16;
@@ -483,6 +488,41 @@ impl NativeDomainRequestV3 {
     }
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct NativeDomainExecArgumentV0 {
+    pub address: u64,
+    pub length: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct NativeDomainExecRequestV0 {
+    pub size: u32,
+    pub version: u16,
+    pub flags: u16,
+    pub name_size: u16,
+    pub argument_count: u16,
+    pub reserved: u32,
+    pub name: [u8; NATIVE_DOMAIN_MAX_NAME_SIZE],
+    pub arguments_address: u64,
+}
+
+impl NativeDomainExecRequestV0 {
+    pub const fn zeroed() -> Self {
+        Self {
+            size: NATIVE_DOMAIN_EXEC_REQUEST_SIZE,
+            version: NATIVE_DOMAIN_EXEC_REQUEST_VERSION,
+            flags: 0,
+            name_size: 0,
+            argument_count: 0,
+            reserved: 0,
+            name: [0; NATIVE_DOMAIN_MAX_NAME_SIZE],
+            arguments_address: 0,
+        }
+    }
+}
+
 impl NativeHostInspectRecordV0 {
     pub const fn zeroed() -> Self {
         Self {
@@ -503,6 +543,8 @@ const _: () = assert!(core::mem::size_of::<NativeRootDirectoryRequestV4>() == 48
 const _: () = assert!(core::mem::size_of::<NativeHostInspectRequestV0>() == 32);
 const _: () = assert!(core::mem::size_of::<NativeHostInspectRecordV0>() == 40);
 const _: () = assert!(core::mem::size_of::<NativeDomainRequestV3>() == 232);
+const _: () = assert!(core::mem::size_of::<NativeDomainExecArgumentV0>() == 16);
+const _: () = assert!(core::mem::size_of::<NativeDomainExecRequestV0>() == 40);
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

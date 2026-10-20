@@ -4257,6 +4257,27 @@ pub(crate) fn resume_live_linux_process(
     resumed && current_root() == previous
 }
 
+pub(crate) fn with_live_linux_process_root<T>(
+    root: memory::FrameLease,
+    operation: impl FnOnce() -> T,
+) -> Option<T> {
+    let previous = current_root();
+    if root.address() == previous {
+        return memory::frames_owned_by(memory::FrameOwner::KERNEL, &[root]).then(operation);
+    }
+    if !verify_linux_process_root_activation(root) || current_root() != previous {
+        return None;
+    }
+    unsafe { activate(root.address()) };
+    if current_root() != root.address() {
+        unsafe { activate(previous) };
+        return None;
+    }
+    let result = operation();
+    unsafe { activate(previous) };
+    (current_root() == previous).then_some(result)
+}
+
 pub(crate) fn copy_to_linux_process(
     pid: u32,
     root: memory::FrameLease,
