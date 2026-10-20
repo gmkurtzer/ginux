@@ -1733,6 +1733,7 @@ static LINUX_RUNTIME_SYSCALL_RESULT_TRACE: [BankedAtomicU64; LINUX_RUNTIME_SYSCA
     [const { BankedAtomicU64::new(0) }; LINUX_RUNTIME_SYSCALL_TRACE_LIMIT];
 static LINUX_RUNTIME_SYSCALL_TRACE_COUNT: BankedAtomicU64 = BankedAtomicU64::new(0);
 static LINUX_RUNTIME_CONSOLE_TIMING_WRITTEN: BankedAtomicBool = BankedAtomicBool::new(false);
+static LINUX_TIMED_WAITS_ACTIVE: BankedAtomicBool = BankedAtomicBool::new(false);
 static LINUX_RUNTIME_SLOW_DIAGNOSTIC_WRITTEN: BankedAtomicBool = BankedAtomicBool::new(false);
 static LINUX_RUNTIME_LATE_DIAGNOSTIC_WRITTEN: BankedAtomicBool = BankedAtomicBool::new(false);
 static LINUX_RUNTIME_STALLED_DIAGNOSTIC_WRITTEN: BankedAtomicBool = BankedAtomicBool::new(false);
@@ -5552,6 +5553,9 @@ fn block_current_linux_thread(kind: u8, key: u64, output: u64, deadline: u64) ->
     LINUX_THREAD_WAIT_KEYS[slot].store(key, Ordering::SeqCst);
     LINUX_THREAD_WAIT_OUTPUTS[slot].store(output, Ordering::SeqCst);
     LINUX_THREAD_WAIT_DEADLINES[slot].store(deadline, Ordering::SeqCst);
+    if deadline != 0 {
+        LINUX_TIMED_WAITS_ACTIVE.store(true, Ordering::Release);
+    }
     LINUX_THREAD_WAIT_KINDS[slot].store(kind, Ordering::SeqCst);
     LINUX_THREAD_STATES[slot].store(LINUX_THREAD_BLOCKED, Ordering::SeqCst);
     LINUX_CURRENT_THREAD_SLOT.store(LINUX_THREAD_SLOT_NONE, Ordering::SeqCst);
@@ -6979,6 +6983,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
     LINUX_RUNTIME_FIRST_UNSUPPORTED_SYSCALL.store(u64::MAX, Ordering::SeqCst);
     LINUX_RUNTIME_SYSCALL_TRACE_COUNT.store(0, Ordering::SeqCst);
     LINUX_RUNTIME_CONSOLE_TIMING_WRITTEN.store(false, Ordering::SeqCst);
+    LINUX_TIMED_WAITS_ACTIVE.store(false, Ordering::SeqCst);
     LINUX_RUNTIME_SLOW_DIAGNOSTIC_WRITTEN.store(false, Ordering::SeqCst);
     LINUX_RUNTIME_LATE_DIAGNOSTIC_WRITTEN.store(false, Ordering::SeqCst);
     LINUX_RUNTIME_STALLED_DIAGNOSTIC_WRITTEN.store(false, Ordering::SeqCst);
@@ -29225,6 +29230,9 @@ fn complete_linux_timerfd_read_wait(slot: usize) -> bool {
                 .unwrap_or(0),
             Ordering::SeqCst,
         );
+        if LINUX_THREAD_WAIT_DEADLINES[slot].load(Ordering::SeqCst) != 0 {
+            LINUX_TIMED_WAITS_ACTIVE.store(true, Ordering::Release);
+        }
         return false;
     }
     LINUX_THREAD_RAXS[slot].store(result, Ordering::SeqCst);
@@ -38065,6 +38073,9 @@ fn wake_linux_signal_wait_target(
 }
 
 fn expire_linux_waits() -> u32 {
+    if !LINUX_TIMED_WAITS_ACTIVE.load(Ordering::Acquire) {
+        return 0;
+    }
     let Some(now) = linux_elapsed_nanoseconds() else {
         return 0;
     };
@@ -38125,6 +38136,11 @@ fn expire_linux_waits() -> u32 {
         counter.fetch_add(1, Ordering::SeqCst);
         expired += 1;
     }
+    let active = (0..LINUX_THREAD_LIMIT).any(|slot| {
+        LINUX_THREAD_WAIT_DEADLINES[slot].load(Ordering::SeqCst) != 0
+            && LINUX_THREAD_STATES[slot].load(Ordering::SeqCst) == LINUX_THREAD_BLOCKED
+    });
+    LINUX_TIMED_WAITS_ACTIVE.store(active, Ordering::Release);
     expired
 }
 
