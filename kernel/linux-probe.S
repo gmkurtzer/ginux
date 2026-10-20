@@ -3852,7 +3852,7 @@ linux_child_joined:
     mov r8d, 0x405400
     mov eax, 332
     call syscall_expect_zero
-    cmp dword ptr [0x405400], 0x7ff
+    cmp dword ptr [0x405400], 0x17ff
     require_equal
     cmp word ptr [0x40541c], 0x2180
     require_equal

@@ -5553,11 +5553,14 @@ fn block_current_linux_thread(kind: u8, key: u64, output: u64, deadline: u64) ->
     LINUX_THREAD_WAIT_KEYS[slot].store(key, Ordering::SeqCst);
     LINUX_THREAD_WAIT_OUTPUTS[slot].store(output, Ordering::SeqCst);
     LINUX_THREAD_WAIT_DEADLINES[slot].store(deadline, Ordering::SeqCst);
-    if deadline != 0 {
-        LINUX_TIMED_WAITS_ACTIVE.store(true, Ordering::Release);
-    }
     LINUX_THREAD_WAIT_KINDS[slot].store(kind, Ordering::SeqCst);
     LINUX_THREAD_STATES[slot].store(LINUX_THREAD_BLOCKED, Ordering::SeqCst);
+    if deadline != 0 {
+        // Publish the scan hint only after the blocked state and deadline are
+        // both visible. Otherwise a timer interrupt can scan the partially
+        // published wait, clear the hint, and leave this thread unwakeable.
+        LINUX_TIMED_WAITS_ACTIVE.store(true, Ordering::Release);
+    }
     LINUX_CURRENT_THREAD_SLOT.store(LINUX_THREAD_SLOT_NONE, Ordering::SeqCst);
     true
 }
@@ -31015,7 +31018,14 @@ fn linux_epoll_wait_duration_live_return(
                 };
             }
         }
-        return 0;
+        // The static verification executor has no peer thread to advance a
+        // blocking wait. Report that harness limitation deterministically;
+        // runtime domains continue through the scheduler-backed path above.
+        return if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
+            0
+        } else {
+            LINUX_ENOSYS
+        };
     };
     let Some(tls) = linux_thread_context(current) else {
         return LINUX_ESRCH;
@@ -38564,8 +38574,8 @@ fn linux_terminate_by_default_signal(signal: u64) -> u64 {
     if !record_live_linux_process_snapshot() {
         return LINUX_ESRCH;
     }
-    for descriptor in 0..LINUX_AUX_DESCRIPTOR_LIMIT {
-        let _ = linux_descriptor_close(descriptor);
+    if !linux_close_all_descriptors() {
+        return LINUX_EIO;
     }
     if !crate::linux_socket::shutdown()
         || !linux_tmpfs::teardown()
