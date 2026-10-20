@@ -22,6 +22,7 @@ const PROCESS_RAX_INDEX: usize = 0;
 const HOST_PROCESS_INSTANCE: usize = control_abi::DOMAIN_LIMIT;
 const PROCESS_INSTANCE_LIMIT: usize = control_abi::DOMAIN_LIMIT + 1;
 const PROCESS_INSTANCE_NONE: u8 = u8::MAX;
+const LIVE_FRAME_REFERENCE_SET_CAPACITY: usize = 32_768;
 static LIVE_PROCESS_TABLE_INITIALIZED: [AtomicBool; PROCESS_INSTANCE_LIMIT] =
     [const { AtomicBool::new(false) }; PROCESS_INSTANCE_LIMIT];
 static LIVE_PROCESS_REFRESH_COUNT: [AtomicU32; PROCESS_INSTANCE_LIMIT] =
@@ -33,6 +34,11 @@ static LIVE_FORK_EXECUTION_STAGE: AtomicU32 = AtomicU32::new(0);
 static LIVE_FORK_CHILD_DIAGNOSTIC: AtomicU32 = AtomicU32::new(0);
 static mut LIVE_PROCESS_TABLES: [ProcessTable; PROCESS_INSTANCE_LIMIT] =
     [const { ProcessTable::new() }; PROCESS_INSTANCE_LIMIT];
+// Process teardown is serialized by the current single-processor runtime.
+// This exact transient set avoids quadratic frame-reference scans without
+// becoming persistent process state or weakening the final ownership check.
+static mut LIVE_FRAME_REFERENCE_SET: [u64; LIVE_FRAME_REFERENCE_SET_CAPACITY] =
+    [0; LIVE_FRAME_REFERENCE_SET_CAPACITY];
 
 struct LiveForkScratch {
     child_mappings: [cpu::LinuxActiveImageMapping; PROCESS_PRIVATE_PAGE_LIMIT],
@@ -249,8 +255,9 @@ impl ProcessAddressSpace {
                 .cast::<ProcessAddressSpaceStorage>()
                 .add(current_process_instance() * PROCESS_RUNTIME_LIMIT + storage_slot)
         };
-        storage.hierarchy.fill(memory::FrameLease::EMPTY);
-        storage.mappings.fill(cpu::LinuxActiveImageMapping::EMPTY);
+        // The published counts bound every reader. Overwrite only the live
+        // prefixes instead of clearing the full elastic capacity on every
+        // registry refresh.
         storage.hierarchy[..hierarchy.len()].copy_from_slice(hierarchy);
         storage.mappings[..mappings.len()].copy_from_slice(mappings);
         Some(Self {
@@ -277,8 +284,7 @@ impl ProcessAddressSpace {
                 .cast::<ProcessAddressSpaceStorage>()
                 .add(current_process_instance() * PROCESS_RUNTIME_LIMIT + storage_slot)
         };
-        storage.hierarchy.fill(memory::FrameLease::EMPTY);
-        storage.mappings.fill(cpu::LinuxActiveImageMapping::EMPTY);
+        // Stale tail entries are unreachable because access is count-bounded.
         storage.hierarchy[..hierarchy.len()].copy_from_slice(hierarchy);
         storage.mappings[..mappings.len()].copy_from_slice(mappings);
         Some(Self {
@@ -792,8 +798,6 @@ impl ProcessTable {
         LIVE_FORK_EXECUTION_STAGE.store(1133, Ordering::Release);
         let child_mappings = &mut scratch.child_mappings;
         let parent_pages = &mut scratch.parent_pages;
-        child_mappings.fill(cpu::LinuxActiveImageMapping::EMPTY);
-        parent_pages.fill(memory::FrameLease::EMPTY);
         let mut private_index = 0;
         let mut child_mapping_count = 0;
         for parent in parent_space.mappings() {
@@ -2397,6 +2401,20 @@ pub(crate) fn live_mapping_referenced_by_other_process(
     table.frame_referenced_by_other_process(excluded, frame)
 }
 
+pub(crate) fn prepare_live_other_process_frame_references(pid: u32) -> bool {
+    let Some(table) = live_process_table_mut() else {
+        return false;
+    };
+    let Some(excluded) = table.handle_by_pid(pid) else {
+        return false;
+    };
+    build_live_frame_reference_set(table, excluded)
+}
+
+pub(crate) fn prepared_live_frame_referenced_by_other_process(frame: memory::FrameLease) -> bool {
+    live_frame_reference_set_contains(frame)
+}
+
 pub(crate) fn replace_live_process_mapping(
     pid: u32,
     address: usize,
@@ -2960,41 +2978,181 @@ fn discard_live_fork(
             })
 }
 
+fn live_frame_reference_set_slot(address: u64) -> usize {
+    ((address >> 12).wrapping_mul(0x9e37_79b9_7f4a_7c15) as usize)
+        & (LIVE_FRAME_REFERENCE_SET_CAPACITY - 1)
+}
+
+fn build_live_frame_reference_set(table: &ProcessTable, excluded: ProcessHandle) -> bool {
+    let set = core::ptr::addr_of_mut!(LIVE_FRAME_REFERENCE_SET).cast::<u64>();
+    for index in 0..LIVE_FRAME_REFERENCE_SET_CAPACITY {
+        unsafe { set.add(index).write(0) };
+    }
+    for process in &table.processes {
+        let Some(process) = process
+            .as_ref()
+            .filter(|process| process.handle != excluded)
+        else {
+            continue;
+        };
+        let Some(address_space) = process.address_space else {
+            continue;
+        };
+        for mapping in address_space.mappings() {
+            let address = mapping.frame.address();
+            let mut slot = live_frame_reference_set_slot(address);
+            let mut inserted = false;
+            for _ in 0..LIVE_FRAME_REFERENCE_SET_CAPACITY {
+                let entry = unsafe { set.add(slot).read() };
+                if entry == address {
+                    inserted = true;
+                    break;
+                }
+                if entry == 0 {
+                    unsafe { set.add(slot).write(address) };
+                    inserted = true;
+                    break;
+                }
+                slot = (slot + 1) & (LIVE_FRAME_REFERENCE_SET_CAPACITY - 1);
+            }
+            if !inserted {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn live_frame_reference_set_contains(frame: memory::FrameLease) -> bool {
+    let set = core::ptr::addr_of!(LIVE_FRAME_REFERENCE_SET).cast::<u64>();
+    let address = frame.address();
+    let mut slot = live_frame_reference_set_slot(address);
+    for _ in 0..LIVE_FRAME_REFERENCE_SET_CAPACITY {
+        let entry = unsafe { set.add(slot).read() };
+        if entry == address {
+            return true;
+        }
+        if entry == 0 {
+            return false;
+        }
+        slot = (slot + 1) & (LIVE_FRAME_REFERENCE_SET_CAPACITY - 1);
+    }
+    false
+}
+
 fn release_live_process_address_space(
     table: &ProcessTable,
     excluded: ProcessHandle,
     space: ProcessAddressSpace,
 ) -> bool {
+    const RELEASE_BATCH_SIZE: usize = 64;
+    let page_table_started = crate::arch::x86_64::timer::timestamp_counter();
     if !address_space::retire_linux_child_address_space(space.root()) {
         return false;
     }
+    if cfg!(feature = "linux-boot-profile") {
+        crate::arch::x86_64::cpu::linux_boot_profile_record_lifecycle_phase(7, page_table_started);
+    }
+    let frame_release_started = crate::arch::x86_64::timer::timestamp_counter();
+    let reference_set_ready = build_live_frame_reference_set(table, excluded);
+    let mut release_batch = [memory::FrameLease::EMPTY; RELEASE_BATCH_SIZE];
+    let mut release_count = 0;
     for mapping in space.mappings() {
         if !mapping.shared {
-            if table.frame_referenced_by_other_process(excluded, mapping.frame) {
+            let reference_started = crate::arch::x86_64::timer::timestamp_counter();
+            let referenced = if reference_set_ready {
+                live_frame_reference_set_contains(mapping.frame)
+            } else {
+                table.frame_referenced_by_other_process(excluded, mapping.frame)
+            };
+            if cfg!(feature = "linux-boot-profile") {
+                crate::arch::x86_64::cpu::linux_boot_profile_record_lifecycle_phase(
+                    9,
+                    reference_started,
+                );
+            }
+            if referenced {
                 if !table.promote_exclusive_cow_reference(excluded, mapping.frame) {
                     return false;
                 }
-            } else if memory::frames_owned_by(memory::FrameOwner::KERNEL, &[mapping.frame])
-                && !memory::scrub_and_release_frames(
+            } else {
+                let ownership_started = crate::arch::x86_64::timer::timestamp_counter();
+                let owned = memory::frames_owned_by(
                     memory::FrameOwner::KERNEL,
                     core::slice::from_ref(&mapping.frame),
-                )
-            {
-                return false;
+                );
+                if cfg!(feature = "linux-boot-profile") {
+                    crate::arch::x86_64::cpu::linux_boot_profile_record_lifecycle_phase(
+                        10,
+                        ownership_started,
+                    );
+                }
+                if owned && !release_batch[..release_count].contains(&mapping.frame) {
+                    release_batch[release_count] = mapping.frame;
+                    release_count += 1;
+                    if release_count == release_batch.len() {
+                        let scrub_started = crate::arch::x86_64::timer::timestamp_counter();
+                        if !memory::scrub_and_release_frames(
+                            memory::FrameOwner::KERNEL,
+                            &release_batch,
+                        ) {
+                            return false;
+                        }
+                        if cfg!(feature = "linux-boot-profile") {
+                            crate::arch::x86_64::cpu::linux_boot_profile_record_lifecycle_phase(
+                                11,
+                                scrub_started,
+                            );
+                        }
+                        release_count = 0;
+                    }
+                }
             }
         }
     }
     for frame in space.hierarchy() {
-        if memory::frames_owned_by(memory::FrameOwner::KERNEL, &[*frame])
-            && !memory::scrub_and_release_frames(
-                memory::FrameOwner::KERNEL,
-                core::slice::from_ref(frame),
-            )
-        {
-            return false;
+        let ownership_started = crate::arch::x86_64::timer::timestamp_counter();
+        let owned = memory::frames_owned_by(memory::FrameOwner::KERNEL, &[*frame]);
+        if cfg!(feature = "linux-boot-profile") {
+            crate::arch::x86_64::cpu::linux_boot_profile_record_lifecycle_phase(
+                10,
+                ownership_started,
+            );
+        }
+        if owned && !release_batch[..release_count].contains(frame) {
+            release_batch[release_count] = *frame;
+            release_count += 1;
+            if release_count == release_batch.len() {
+                let scrub_started = crate::arch::x86_64::timer::timestamp_counter();
+                if !memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &release_batch) {
+                    return false;
+                }
+                if cfg!(feature = "linux-boot-profile") {
+                    crate::arch::x86_64::cpu::linux_boot_profile_record_lifecycle_phase(
+                        11,
+                        scrub_started,
+                    );
+                }
+                release_count = 0;
+            }
         }
     }
-    true
+    let scrub_started = crate::arch::x86_64::timer::timestamp_counter();
+    let released = release_count == 0
+        || memory::scrub_and_release_frames(
+            memory::FrameOwner::KERNEL,
+            &release_batch[..release_count],
+        );
+    if cfg!(feature = "linux-boot-profile") && release_count != 0 {
+        crate::arch::x86_64::cpu::linux_boot_profile_record_lifecycle_phase(11, scrub_started);
+    }
+    if cfg!(feature = "linux-boot-profile") {
+        crate::arch::x86_64::cpu::linux_boot_profile_record_lifecycle_phase(
+            8,
+            frame_release_started,
+        );
+    }
+    released
 }
 
 #[inline(never)]

@@ -1731,11 +1731,25 @@ static ELF_PROBE_IOPRIO: BankedAtomicU16 = BankedAtomicU16::new(0);
 static LINUX_RUNTIME_EXIT_STATUS: BankedAtomicU64 = BankedAtomicU64::new(u64::MAX);
 static LINUX_RUNTIME_FIRST_UNSUPPORTED_SYSCALL: BankedAtomicU64 = BankedAtomicU64::new(u64::MAX);
 const LINUX_RUNTIME_SYSCALL_TRACE_LIMIT: usize = 128;
+const LINUX_BOOT_PROFILE_SYSCALL_LIMIT: usize = 512;
+const LINUX_BOOT_PROFILE_LIFECYCLE_PHASES: usize = 15;
 static LINUX_RUNTIME_SYSCALL_TRACE: [BankedAtomicU64; LINUX_RUNTIME_SYSCALL_TRACE_LIMIT] =
     [const { BankedAtomicU64::new(u64::MAX) }; LINUX_RUNTIME_SYSCALL_TRACE_LIMIT];
 static LINUX_RUNTIME_SYSCALL_RESULT_TRACE: [BankedAtomicU64; LINUX_RUNTIME_SYSCALL_TRACE_LIMIT] =
     [const { BankedAtomicU64::new(0) }; LINUX_RUNTIME_SYSCALL_TRACE_LIMIT];
 static LINUX_RUNTIME_SYSCALL_TRACE_COUNT: BankedAtomicU64 = BankedAtomicU64::new(0);
+static LINUX_BOOT_PROFILE_SYSCALL_COUNTS: [BankedAtomicU64; LINUX_BOOT_PROFILE_SYSCALL_LIMIT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_BOOT_PROFILE_SYSCALL_LIMIT];
+static LINUX_BOOT_PROFILE_SYSCALL_TICKS: [BankedAtomicU64; LINUX_BOOT_PROFILE_SYSCALL_LIMIT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_BOOT_PROFILE_SYSCALL_LIMIT];
+static LINUX_BOOT_PROFILE_SAVE_COUNT: BankedAtomicU64 = BankedAtomicU64::new(0);
+static LINUX_BOOT_PROFILE_SAVE_TICKS: BankedAtomicU64 = BankedAtomicU64::new(0);
+static LINUX_BOOT_PROFILE_RESTORE_COUNT: BankedAtomicU64 = BankedAtomicU64::new(0);
+static LINUX_BOOT_PROFILE_RESTORE_TICKS: BankedAtomicU64 = BankedAtomicU64::new(0);
+static LINUX_BOOT_PROFILE_LIFECYCLE_COUNTS: [BankedAtomicU64; LINUX_BOOT_PROFILE_LIFECYCLE_PHASES] =
+    [const { BankedAtomicU64::new(0) }; LINUX_BOOT_PROFILE_LIFECYCLE_PHASES];
+static LINUX_BOOT_PROFILE_LIFECYCLE_TICKS: [BankedAtomicU64; LINUX_BOOT_PROFILE_LIFECYCLE_PHASES] =
+    [const { BankedAtomicU64::new(0) }; LINUX_BOOT_PROFILE_LIFECYCLE_PHASES];
 static LINUX_RUNTIME_CONSOLE_TIMING_WRITTEN: BankedAtomicBool = BankedAtomicBool::new(false);
 static LINUX_TIMED_WAITS_ACTIVE: BankedAtomicBool = BankedAtomicBool::new(false);
 static LINUX_RUNTIME_SLOW_DIAGNOSTIC_WRITTEN: BankedAtomicBool = BankedAtomicBool::new(false);
@@ -3943,6 +3957,7 @@ fn execute_deferred_live_fork() -> bool {
     if !LINUX_FORK_REQUESTED.swap(false, Ordering::SeqCst) {
         return true;
     }
+    let profile_started = cfg!(feature = "linux-boot-profile").then(timer::timestamp_counter);
     let new_mount_namespace = LINUX_FORK_NEW_MOUNT_NAMESPACE.swap(false, Ordering::SeqCst);
     let new_user_namespace = LINUX_FORK_NEW_USER_NAMESPACE.swap(false, Ordering::SeqCst);
     let parent_pid = current_linux_process_pid();
@@ -4079,6 +4094,8 @@ fn execute_deferred_live_fork() -> bool {
     let child_tid_address = LINUX_FORK_CHILD_TID_ADDRESS.swap(0, Ordering::SeqCst);
     let child_tid_ready = child_tid_address == 0
         || linux_process::write_live_process_u32(child.pid, child_tid_address, child.pid);
+    linux_boot_profile_lifecycle_phase(0, profile_started);
+    let profile_run_started = cfg!(feature = "linux-boot-profile").then(timer::timestamp_counter);
     let mut child_resumed = child_tid_ready
         && (!LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
             || sync_live_linux_process_address_space(child.pid))
@@ -4130,6 +4147,8 @@ fn execute_deferred_live_fork() -> bool {
     let child_exit = take_linux_child_exit(child.pid);
     let child_exited = child_exit.is_some();
     let child_status = child_exit.unwrap_or(0);
+    linux_boot_profile_lifecycle_phase(1, profile_run_started);
+    let profile_state_started = cfg!(feature = "linux-boot-profile").then(timer::timestamp_counter);
     save_current_linux_process_runtime_state(child.pid);
     if !save_linux_process_extended_state(child.pid) {
         return false;
@@ -4147,6 +4166,7 @@ fn execute_deferred_live_fork() -> bool {
         LINUX_THREAD_STACK_BASES[slot].store(base, Ordering::SeqCst);
         LINUX_THREAD_STACK_SIZES[slot].store(size, Ordering::SeqCst);
     }
+    linux_boot_profile_lifecycle_phase(2, profile_state_started);
     if (child_executed || child_yielded) && !child_exited {
         let Some(parent) = linux_process::resume_live_parent_after_child_exec(child.pid) else {
             return false;
@@ -4181,6 +4201,8 @@ fn execute_deferred_live_fork() -> bool {
     {
         return false;
     }
+    let profile_retire_started =
+        cfg!(feature = "linux-boot-profile").then(timer::timestamp_counter);
     let parent = (child_resumed && child_exited)
         .then(|| {
             (linux_queue_process_signal(
@@ -4201,6 +4223,9 @@ fn execute_deferred_live_fork() -> bool {
         }
         return false;
     };
+    linux_boot_profile_lifecycle_phase(3, profile_retire_started);
+    let profile_cleanup_started =
+        cfg!(feature = "linux-boot-profile").then(timer::timestamp_counter);
     LINUX_CURRENT_PROCESS_PID.store(parent_pid, Ordering::SeqCst);
     if cfg!(feature = "verification-boot")
         && !LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
@@ -4219,10 +4244,13 @@ fn execute_deferred_live_fork() -> bool {
         return false;
     }
     wake_linux_descriptor_waits();
+    linux_boot_profile_lifecycle_phase(4, profile_cleanup_started);
     if parent.pid != parent_pid || parent.general[0] != u64::from(child.pid) {
         return false;
     }
     LIVE_FORK_PUBLIC_DIAGNOSTIC.store(0x20, Ordering::SeqCst);
+    let profile_parent_started =
+        cfg!(feature = "linux-boot-profile").then(timer::timestamp_counter);
     let parent_synced = sync_live_linux_process_address_space(parent_pid);
     let parent_resumed = parent_synced
         && address_space::resume_live_linux_process(
@@ -4245,6 +4273,7 @@ fn execute_deferred_live_fork() -> bool {
         if parent_resumed {
             save_current_linux_process_runtime_state(parent_pid);
         }
+        linux_boot_profile_lifecycle_phase(5, profile_parent_started);
         return parent_resumed;
     }
     let wait_count = LINUX_PROCESS_WAIT_COUNT.load(Ordering::SeqCst);
@@ -6989,6 +7018,24 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
     LINUX_RUNTIME_EXIT_STATUS.store(u64::MAX, Ordering::SeqCst);
     LINUX_RUNTIME_FIRST_UNSUPPORTED_SYSCALL.store(u64::MAX, Ordering::SeqCst);
     LINUX_RUNTIME_SYSCALL_TRACE_COUNT.store(0, Ordering::SeqCst);
+    if cfg!(feature = "linux-boot-profile") {
+        for count in &LINUX_BOOT_PROFILE_SYSCALL_COUNTS {
+            count.store(0, Ordering::Relaxed);
+        }
+        for ticks in &LINUX_BOOT_PROFILE_SYSCALL_TICKS {
+            ticks.store(0, Ordering::Relaxed);
+        }
+        LINUX_BOOT_PROFILE_SAVE_COUNT.store(0, Ordering::Relaxed);
+        LINUX_BOOT_PROFILE_SAVE_TICKS.store(0, Ordering::Relaxed);
+        LINUX_BOOT_PROFILE_RESTORE_COUNT.store(0, Ordering::Relaxed);
+        LINUX_BOOT_PROFILE_RESTORE_TICKS.store(0, Ordering::Relaxed);
+        for count in &LINUX_BOOT_PROFILE_LIFECYCLE_COUNTS {
+            count.store(0, Ordering::Relaxed);
+        }
+        for ticks in &LINUX_BOOT_PROFILE_LIFECYCLE_TICKS {
+            ticks.store(0, Ordering::Relaxed);
+        }
+    }
     LINUX_RUNTIME_CONSOLE_TIMING_WRITTEN.store(false, Ordering::SeqCst);
     LINUX_TIMED_WAITS_ACTIVE.store(false, Ordering::SeqCst);
     LINUX_RUNTIME_SLOW_DIAGNOSTIC_WRITTEN.store(false, Ordering::SeqCst);
@@ -8747,6 +8794,32 @@ extern "sysv64" fn syscall_handler(number: u64, capability: u64, frame: *mut Use
     result
 }
 
+struct LinuxBootSyscallProfile {
+    number: usize,
+    started: u64,
+}
+
+impl LinuxBootSyscallProfile {
+    fn start(number: u64, runtime: bool) -> Option<Self> {
+        (cfg!(feature = "linux-boot-profile") && runtime)
+            .then(|| usize::try_from(number).ok())
+            .flatten()
+            .filter(|number| *number < LINUX_BOOT_PROFILE_SYSCALL_LIMIT)
+            .map(|number| Self {
+                number,
+                started: timer::timestamp_counter(),
+            })
+    }
+}
+
+impl Drop for LinuxBootSyscallProfile {
+    fn drop(&mut self) {
+        let elapsed = timer::timestamp_counter().saturating_sub(self.started);
+        LINUX_BOOT_PROFILE_SYSCALL_COUNTS[self.number].fetch_add(1, Ordering::Relaxed);
+        LINUX_BOOT_PROFILE_SYSCALL_TICKS[self.number].fetch_add(elapsed, Ordering::Relaxed);
+    }
+}
+
 extern "sysv64" fn linux_syscall_handler(
     number: u64,
     registers: *mut LinuxSyscallFrame,
@@ -8801,6 +8874,7 @@ extern "sysv64" fn linux_syscall_handler(
         return LINUX_RETURN_TO_KERNEL;
     }
     let runtime_mode = LINUX_RUNTIME_MODE.load(Ordering::SeqCst);
+    let _profile = LinuxBootSyscallProfile::start(number, runtime_mode);
     let trace_index = if runtime_mode
         || cfg!(feature = "verification-boot") && ELF_PROBE_SYSTEM_INIT.load(Ordering::SeqCst)
     {
@@ -10737,6 +10811,204 @@ pub(crate) fn write_linux_runtime_syscall_trace() {
         crate::serial_write_u64(LINUX_RUNTIME_SYSCALL_RESULT_TRACE[index].load(Ordering::SeqCst));
     }
     crate::serial_write_bytes(b"\r\n");
+}
+
+fn linux_profile_syscall_name(number: u64) -> &'static str {
+    match number {
+        LINUX_READ_SYSCALL => "read",
+        LINUX_WRITE_SYSCALL => "write",
+        LINUX_CLOSE_SYSCALL => "close",
+        LINUX_STAT_SYSCALL => "stat",
+        LINUX_FSTAT_SYSCALL => "fstat",
+        LINUX_LSTAT_SYSCALL => "lstat",
+        LINUX_POLL_SYSCALL => "poll",
+        LINUX_LSEEK_SYSCALL => "lseek",
+        LINUX_MMAP_SYSCALL => "mmap",
+        LINUX_MPROTECT_SYSCALL => "mprotect",
+        LINUX_MUNMAP_SYSCALL => "munmap",
+        LINUX_BRK_SYSCALL => "brk",
+        LINUX_RT_SIGACTION_SYSCALL => "rt_sigaction",
+        LINUX_RT_SIGPROCMASK_SYSCALL => "rt_sigprocmask",
+        LINUX_IOCTL_SYSCALL => "ioctl",
+        LINUX_PREAD64_SYSCALL => "pread64",
+        LINUX_READV_SYSCALL => "readv",
+        LINUX_WRITEV_SYSCALL => "writev",
+        LINUX_ACCESS_SYSCALL => "access",
+        LINUX_PIPE2_SYSCALL => "pipe2",
+        LINUX_SELECT_SYSCALL => "select",
+        LINUX_SCHED_YIELD_SYSCALL => "sched_yield",
+        LINUX_NANOSLEEP_SYSCALL => "nanosleep",
+        LINUX_GETPID_SYSCALL => "getpid",
+        LINUX_SOCKET_SYSCALL => "socket",
+        LINUX_CONNECT_SYSCALL => "connect",
+        LINUX_ACCEPT_SYSCALL => "accept",
+        LINUX_SENDTO_SYSCALL => "sendto",
+        LINUX_RECVFROM_SYSCALL => "recvfrom",
+        LINUX_SENDMSG_SYSCALL => "sendmsg",
+        LINUX_RECVMSG_SYSCALL => "recvmsg",
+        LINUX_SHUTDOWN_SYSCALL => "shutdown",
+        LINUX_BIND_SYSCALL => "bind",
+        LINUX_LISTEN_SYSCALL => "listen",
+        LINUX_GETSOCKNAME_SYSCALL => "getsockname",
+        LINUX_GETPEERNAME_SYSCALL => "getpeername",
+        LINUX_SOCKETPAIR_SYSCALL => "socketpair",
+        LINUX_SETSOCKOPT_SYSCALL => "setsockopt",
+        LINUX_GETSOCKOPT_SYSCALL => "getsockopt",
+        LINUX_CLONE_SYSCALL => "clone",
+        LINUX_FORK_SYSCALL => "fork",
+        LINUX_VFORK_SYSCALL => "vfork",
+        LINUX_EXECVE_SYSCALL => "execve",
+        LINUX_EXIT_SYSCALL => "exit",
+        LINUX_WAIT4_SYSCALL => "wait4",
+        LINUX_KILL_SYSCALL => "kill",
+        LINUX_UNAME_SYSCALL => "uname",
+        LINUX_FCNTL_SYSCALL => "fcntl",
+        LINUX_FSYNC_SYSCALL => "fsync",
+        LINUX_GETCWD_SYSCALL => "getcwd",
+        LINUX_CHDIR_SYSCALL => "chdir",
+        LINUX_READLINK_SYSCALL => "readlink",
+        LINUX_GETDENTS64_SYSCALL => "getdents64",
+        LINUX_GETTID_SYSCALL => "gettid",
+        LINUX_FUTEX_SYSCALL => "futex",
+        LINUX_EPOLL_WAIT_SYSCALL => "epoll_wait",
+        LINUX_EPOLL_CTL_SYSCALL => "epoll_ctl",
+        LINUX_OPENAT_SYSCALL => "openat",
+        LINUX_NEWFSTATAT_SYSCALL => "newfstatat",
+        LINUX_UNLINKAT_SYSCALL => "unlinkat",
+        LINUX_READLINKAT_SYSCALL => "readlinkat",
+        LINUX_EPOLL_PWAIT_SYSCALL => "epoll_pwait",
+        LINUX_ACCEPT4_SYSCALL => "accept4",
+        LINUX_DUP3_SYSCALL => "dup3",
+        LINUX_PIPE_SYSCALL => "pipe",
+        LINUX_GETRANDOM_SYSCALL => "getrandom",
+        LINUX_STATX_SYSCALL => "statx",
+        LINUX_CLONE3_SYSCALL => "clone3",
+        _ => "unknown",
+    }
+}
+
+fn write_linux_boot_profile() {
+    if !cfg!(feature = "linux-boot-profile") {
+        return;
+    }
+    let frequency = ELF_PROBE_CLOCK_FREQUENCY.load(Ordering::Relaxed).max(1);
+    let to_microseconds = |ticks: u64| ticks.saturating_mul(1_000_000) / frequency;
+    let mut total_count = 0_u64;
+    let mut total_ticks = 0_u64;
+    for number in 0..LINUX_BOOT_PROFILE_SYSCALL_LIMIT {
+        total_count = total_count
+            .saturating_add(LINUX_BOOT_PROFILE_SYSCALL_COUNTS[number].load(Ordering::Relaxed));
+        total_ticks = total_ticks
+            .saturating_add(LINUX_BOOT_PROFILE_SYSCALL_TICKS[number].load(Ordering::Relaxed));
+    }
+    serial_write("ginux: profile syscalls calls/total-us: ");
+    serial_write_u64(total_count);
+    serial_write("/");
+    serial_write_u64(to_microseconds(total_ticks));
+    serial_write("\r\n");
+    serial_write("ginux: profile syscall name/id calls total-us avg-us\r\n");
+    let mut emitted = [0_u64; LINUX_BOOT_PROFILE_SYSCALL_LIMIT / 64];
+    for _ in 0..24 {
+        let mut selected = None;
+        let mut selected_ticks = 0_u64;
+        for number in 0..LINUX_BOOT_PROFILE_SYSCALL_LIMIT {
+            if emitted[number / 64] & (1_u64 << (number % 64)) != 0 {
+                continue;
+            }
+            let ticks = LINUX_BOOT_PROFILE_SYSCALL_TICKS[number].load(Ordering::Relaxed);
+            if ticks > selected_ticks {
+                selected = Some(number);
+                selected_ticks = ticks;
+            }
+        }
+        let Some(number) = selected else {
+            break;
+        };
+        emitted[number / 64] |= 1_u64 << (number % 64);
+        let count = LINUX_BOOT_PROFILE_SYSCALL_COUNTS[number].load(Ordering::Relaxed);
+        let microseconds = to_microseconds(selected_ticks);
+        serial_write("ginux: profile syscall ");
+        serial_write(linux_profile_syscall_name(number as u64));
+        serial_write("/");
+        serial_write_u64(number as u64);
+        serial_write(" ");
+        serial_write_u64(count);
+        serial_write(" ");
+        serial_write_u64(microseconds);
+        serial_write(" ");
+        serial_write_u64(microseconds / count.max(1));
+        serial_write("\r\n");
+    }
+    for (name, count, ticks) in [
+        (
+            "state-save",
+            LINUX_BOOT_PROFILE_SAVE_COUNT.load(Ordering::Relaxed),
+            LINUX_BOOT_PROFILE_SAVE_TICKS.load(Ordering::Relaxed),
+        ),
+        (
+            "state-restore",
+            LINUX_BOOT_PROFILE_RESTORE_COUNT.load(Ordering::Relaxed),
+            LINUX_BOOT_PROFILE_RESTORE_TICKS.load(Ordering::Relaxed),
+        ),
+    ] {
+        let microseconds = to_microseconds(ticks);
+        serial_write("ginux: profile ");
+        serial_write(name);
+        serial_write(" calls/total-us/avg-us: ");
+        serial_write_u64(count);
+        serial_write("/");
+        serial_write_u64(microseconds);
+        serial_write("/");
+        serial_write_u64(microseconds / count.max(1));
+        serial_write("\r\n");
+    }
+    for (index, name) in [
+        "fork-prepare",
+        "child-run",
+        "state-switch",
+        "address-space-retire",
+        "child-cleanup",
+        "parent-resume",
+        "scheduled-run",
+        "page-table-retire",
+        "frame-release",
+        "frame-reference-check",
+        "frame-ownership-check",
+        "frame-scrub-release",
+        "mmap-frame-allocate",
+        "mmap-frame-prepare",
+        "mmap-page-install",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let count = LINUX_BOOT_PROFILE_LIFECYCLE_COUNTS[index].load(Ordering::Relaxed);
+        let microseconds =
+            to_microseconds(LINUX_BOOT_PROFILE_LIFECYCLE_TICKS[index].load(Ordering::Relaxed));
+        serial_write("ginux: profile ");
+        serial_write(name);
+        serial_write(" calls/total-us/avg-us: ");
+        serial_write_u64(count);
+        serial_write("/");
+        serial_write_u64(microseconds);
+        serial_write("/");
+        serial_write_u64(microseconds / count.max(1));
+        serial_write("\r\n");
+    }
+}
+
+fn linux_boot_profile_lifecycle_phase(index: usize, started: Option<u64>) {
+    if let Some(started) = started {
+        LINUX_BOOT_PROFILE_LIFECYCLE_COUNTS[index].fetch_add(1, Ordering::Relaxed);
+        LINUX_BOOT_PROFILE_LIFECYCLE_TICKS[index].fetch_add(
+            timer::timestamp_counter().saturating_sub(started),
+            Ordering::Relaxed,
+        );
+    }
+}
+
+pub(crate) fn linux_boot_profile_record_lifecycle_phase(index: usize, started: u64) {
+    linux_boot_profile_lifecycle_phase(index, Some(started));
 }
 
 fn linux_privileged_operation(number: u64) -> Option<linux_user::PrivilegedOperation> {
@@ -13194,19 +13466,35 @@ fn stage_linux_fork_child_runtime_state(
 }
 
 fn save_current_linux_process_runtime_state(pid: u32) {
+    let started = cfg!(feature = "linux-boot-profile").then(timer::timestamp_counter);
     if let (Some(state), Some(destination)) = (
         capture_linux_process_runtime_state(),
         linux_process_runtime_state(pid),
     ) {
         *destination = state;
     }
+    if let Some(started) = started {
+        LINUX_BOOT_PROFILE_SAVE_COUNT.fetch_add(1, Ordering::Relaxed);
+        LINUX_BOOT_PROFILE_SAVE_TICKS.fetch_add(
+            timer::timestamp_counter().saturating_sub(started),
+            Ordering::Relaxed,
+        );
+    }
 }
 
 fn restore_saved_linux_process_runtime_state(pid: u32) -> bool {
+    let started = cfg!(feature = "linux-boot-profile").then(timer::timestamp_counter);
     let Some(state) = linux_process_runtime_state(pid).filter(|state| state.valid) else {
         return false;
     };
     restore_linux_process_runtime_state(state);
+    if let Some(started) = started {
+        LINUX_BOOT_PROFILE_RESTORE_COUNT.fetch_add(1, Ordering::Relaxed);
+        LINUX_BOOT_PROFILE_RESTORE_TICKS.fetch_add(
+            timer::timestamp_counter().saturating_sub(started),
+            Ordering::Relaxed,
+        );
+    }
     true
 }
 
@@ -18970,17 +19258,24 @@ fn linux_runtime_mmap(
     for (installed, page) in (0..pages).enumerate() {
         let page_address = mapping + (page * PAGE_SIZE) as u64;
         let old_frame = if anonymous {
-            address_space::reserve_current_linux_runtime_page(
+            let install_started =
+                cfg!(feature = "linux-boot-profile").then(timer::timestamp_counter);
+            let reserved = address_space::reserve_current_linux_runtime_page(
                 page_address,
                 protection as u8,
                 false,
                 replace,
-            )
+            );
+            linux_boot_profile_lifecycle_phase(14, install_started);
+            reserved
         } else {
+            let allocate_started =
+                cfg!(feature = "linux-boot-profile").then(timer::timestamp_counter);
             let Some([frame]) = memory::allocate_frames::<1>(memory::FrameOwner::KERNEL) else {
                 let _ = rollback_linux_runtime_mapping(mapping, installed);
                 return LINUX_ENOMEM;
             };
+            linux_boot_profile_lifecycle_phase(12, allocate_started);
             let mut overlay_bytes = [0_u8; PAGE_SIZE];
             let bytes = if let Some((handle, start)) = overlay_file {
                 let page_start = start + page * PAGE_SIZE;
@@ -18994,7 +19289,11 @@ fn linux_runtime_mmap(
                         .unwrap_or(&[])
                 })
             };
-            if !address_space::prepare_linux_frame(frame.address(), bytes) {
+            let prepare_started =
+                cfg!(feature = "linux-boot-profile").then(timer::timestamp_counter);
+            let prepared = address_space::prepare_linux_frame(frame.address(), bytes);
+            linux_boot_profile_lifecycle_phase(13, prepare_started);
+            if !prepared {
                 let _ = memory::scrub_and_release_frames(
                     memory::FrameOwner::KERNEL,
                     core::slice::from_ref(&frame),
@@ -19002,13 +19301,17 @@ fn linux_runtime_mmap(
                 let _ = rollback_linux_runtime_mapping(mapping, installed);
                 return LINUX_ENOMEM;
             }
-            match address_space::install_current_linux_runtime_page(
+            let install_started =
+                cfg!(feature = "linux-boot-profile").then(timer::timestamp_counter);
+            let installed_page = address_space::install_current_linux_runtime_page(
                 page_address,
                 frame,
                 protection as u8,
                 file_backed,
                 replace,
-            ) {
+            );
+            linux_boot_profile_lifecycle_phase(14, install_started);
+            match installed_page {
                 Some(old) => Some(old),
                 None => {
                     let _ = memory::scrub_and_release_frames(
@@ -22067,6 +22370,13 @@ fn linux_execveat(
 }
 
 fn linux_rootfs_execve(path: &[u8], arguments_address: u64, environment_address: u64) -> u64 {
+    if cfg!(feature = "linux-boot-profile") && LINUX_RUNTIME_MODE.load(Ordering::Relaxed) {
+        serial_write("ginux: profile exec elapsed-ms/path: ");
+        serial_write_u64(linux_elapsed_nanoseconds().unwrap_or(0) / 1_000_000);
+        serial_write(" ");
+        crate::serial_write_bytes(path);
+        serial_write("\r\n");
+    }
     if LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
         && matches!(path, b"/bin/bash" | b"bin/bash")
         && !LINUX_RUNTIME_CONSOLE_TIMING_WRITTEN.swap(true, Ordering::SeqCst)
@@ -22074,6 +22384,7 @@ fn linux_rootfs_execve(path: &[u8], arguments_address: u64, environment_address:
         serial_write("ginux: timing Linux-init-to-console: ");
         serial_write_u64(linux_elapsed_nanoseconds().unwrap_or(0) / 1_000_000);
         serial_write(" ms\r\n");
+        write_linux_boot_profile();
     }
     let Some(plan) = crate::published_rootfs::process_plan(path) else {
         use crate::published_rootfs::ProcessPlanFailure;
@@ -22278,6 +22589,7 @@ fn linux_rootfs_execve(path: &[u8], arguments_address: u64, environment_address:
     };
     let mut replacement_index = 0;
     let pid = current_linux_process_pid();
+    let prepared_frame_references = linux_process::prepare_live_other_process_frame_references(pid);
     for segment_index in 0..plan.segment_count() {
         let Some(segment) = plan.segment(segment_index) else {
             return LINUX_ENOEXEC;
@@ -22382,7 +22694,12 @@ fn linux_rootfs_execve(path: &[u8], arguments_address: u64, environment_address:
                 );
             }
             if let Some(mapping) = mapping {
-                if !linux_process::live_mapping_referenced_by_other_process(pid, mapping.frame)
+                let referenced = if prepared_frame_references {
+                    linux_process::prepared_live_frame_referenced_by_other_process(mapping.frame)
+                } else {
+                    linux_process::live_mapping_referenced_by_other_process(pid, mapping.frame)
+                };
+                if !referenced
                     && memory::frame_leases_releasable(memory::FrameOwner::KERNEL, &[mapping.frame])
                     && !memory::scrub_and_release_frames(
                         memory::FrameOwner::KERNEL,
@@ -22506,7 +22823,13 @@ fn linux_rootfs_execve(path: &[u8], arguments_address: u64, environment_address:
     let _ = set_current_linux_robust_list(0);
     if !address_space::release_current_linux_runtime_mappings_preserving(
         LINUX_RUNTIME_DYNAMIC_MMAP_BASE,
-        |frame| linux_process::live_mapping_referenced_by_other_process(pid, frame),
+        |frame| {
+            if prepared_frame_references {
+                linux_process::prepared_live_frame_referenced_by_other_process(frame)
+            } else {
+                linux_process::live_mapping_referenced_by_other_process(pid, frame)
+            }
+        },
         |frame| replacements[..replacement_count].contains(&frame),
     ) {
         serial_write("ginux: Linux exec mmap release failed\r\n");
@@ -30817,6 +31140,7 @@ struct LinuxSignalMaskInput {
 }
 
 fn run_scheduled_linux_process(parent_pid: u32, target_pid: Option<u32>) -> bool {
+    let profile_started = cfg!(feature = "linux-boot-profile").then(timer::timestamp_counter);
     save_current_linux_process_runtime_state(parent_pid);
     if !save_linux_process_extended_state(parent_pid) {
         return false;
@@ -30913,9 +31237,11 @@ fn run_scheduled_linux_process(parent_pid: u32, target_pid: Option<u32>) -> bool
         parent.is_some_and(|dispatch| dispatch.pid == parent_pid)
     };
     LINUX_CURRENT_PROCESS_PID.store(parent_pid, Ordering::SeqCst);
-    restore_saved_linux_process_runtime_state(parent_pid)
+    let restored = restore_saved_linux_process_runtime_state(parent_pid)
         && restore_linux_process_extended_state(parent_pid)
-        && returned
+        && returned;
+    linux_boot_profile_lifecycle_phase(6, profile_started);
+    restored
 }
 
 fn run_next_scheduled_linux_process(parent_pid: u32) -> bool {

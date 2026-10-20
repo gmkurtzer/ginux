@@ -8,6 +8,7 @@ publish = false
 [features]
 default = []
 verification-boot = ["ginux-kernel/verification-boot"]
+linux-boot-profile = ["ginux-kernel/linux-boot-profile"]
 
 [[bin]]
 name = "ginux-boot"

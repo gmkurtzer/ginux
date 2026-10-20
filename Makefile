@@ -17,7 +17,7 @@ SYSTEM_PROFILE := profiles/minimal-system-v0/profile.tsv
 
 .DEFAULT_GOAL := help
 
-.PHONY: help doctor manifest system-image test-alpine test-rocky-shell test-rocky-dnf test-multi-domain test-linux-abi test-linux-runtime test-storage test-oci-cache probe-rocky-systemd test-rocky-systemd benchmark-rocky-systemd rocky-image rocky-image-check linux-probe controller-runtime network-service protocol-service volume-service abi-conformance architecture-check linux-compat-check build build-verification run reset-storage test test-c1 test-c2 fmt gate clean
+.PHONY: help doctor manifest system-image test-alpine test-rocky-shell test-rocky-dnf test-multi-domain test-linux-abi test-linux-runtime test-storage test-oci-cache probe-rocky-systemd test-rocky-systemd benchmark-rocky-systemd profile-rocky-systemd rocky-image rocky-image-check linux-probe controller-runtime network-service protocol-service volume-service abi-conformance architecture-check linux-compat-check build build-verification build-linux-profile run reset-storage test test-c1 test-c2 fmt gate clean
 
 help:
 	@echo "Ginux development targets"
@@ -32,6 +32,7 @@ help:
 	@echo "  make probe-rocky-systemd Probe Rocky systemd and verify the documented next blocker"
 	@echo "  make test-rocky-systemd  Verify cold and cached warm Rocky systemd login boots"
 	@echo "  make benchmark-rocky-systemd Benchmark warm Rocky init (3 s gate on KVM)"
+	@echo "  make profile-rocky-systemd   Profile Rocky init inside the Ginux kernel"
 	@echo "  make rocky-image Fetch and export the pinned Rocky 10 x86-64 system image"
 	@echo "  make rocky-image-check Verify the prepared Rocky image without downloading"
 	@echo "  make linux-probe Build the static probe and dynamic Linux ELF fixtures"
@@ -128,6 +129,13 @@ build-verification: manifest
 	@cp "$(EFI_SOURCE)" "$(EFI_DESTINATION)"
 	@echo "Built verification image $(EFI_DESTINATION)"
 
+build-linux-profile: manifest
+	@echo "Building Ginux Linux boot profiler for $(TARGET) ($(PROFILE))"
+	@GINUX_LINUX_PROBE_EXPORT="$(abspath $(LINUX_PROBE))" GINUX_LINUX_DYNAMIC_EXPORT_DIR="$(abspath $(LINUX_DYNAMIC_DIR))" cargo build --package ginux-boot --features linux-boot-profile --target $(TARGET) $(CARGO_PROFILE_FLAG)
+	@mkdir -p "$(dir $(EFI_DESTINATION))"
+	@cp "$(EFI_SOURCE)" "$(EFI_DESTINATION)"
+	@echo "Built profiling image $(EFI_DESTINATION)"
+
 test-alpine: build
 	@tests/qemu/alpine-shell.sh
 
@@ -153,6 +161,9 @@ benchmark-rocky-systemd: build
 	echo "Benchmarking Rocky systemd with QEMU/$$accelerator$${budget:+ (budget: $${budget} ms)}"; \
 	GINUX_VERIFY_LOGIN_SHELL=1 GINUX_REQUIRE_OCI_CACHE_HIT=1 \
 	GINUX_MAX_LINUX_INIT_MS="$$budget" tests/qemu/rocky-systemd.sh
+
+profile-rocky-systemd: build-linux-profile
+	@GINUX_VERIFY_LOGIN_SHELL=1 GINUX_REQUIRE_OCI_CACHE_HIT=1 tests/qemu/rocky-systemd.sh
 
 run: build
 	@tools/qemu/run.sh
