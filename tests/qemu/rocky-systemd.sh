@@ -125,6 +125,10 @@ fi
     echo "Rocky timing Linux-init-to-console: ${init_to_console_ms} ms" >&2
     echo "Rocky timing domain-start-to-login: $((login_reached_at - domain_started_at)) s" >&2
     echo "Rocky timing Linux-init-to-login: $((login_reached_at - init_started_at)) s" >&2
+    if [[ -n "${GINUX_MAX_LINUX_INIT_MS:-}" ]] \
+        && ((init_to_console_ms > GINUX_MAX_LINUX_INIT_MS)); then
+        fail "Linux init exceeded ${GINUX_MAX_LINUX_INIT_MS} ms budget (${init_to_console_ms} ms)"
+    fi
     if [[ "${GINUX_REQUIRE_OCI_CACHE_HIT:-0}" == 1 ]] \
         && ! grep -Fq 'ginux: OCI cache hit (' "$output_file"; then
         fail 'warm boot did not restore the image from the OCI cache'
