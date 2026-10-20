@@ -10076,13 +10076,18 @@ extern "sysv64" fn linux_syscall_handler(
                 // process after libc has committed to termination.
                 serial_write("ginux: child exit using last validated process snapshot\r\n");
             }
-            if first_argument != 0 && LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
+            // The service manager owns reporting ordinary userspace process
+            // failures. Keep the raw exit trace available to verification
+            // builds without leaking anonymous helper exits onto the domain
+            // console during a normal boot.
+            if first_argument != 0
+                && LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
+                && cfg!(feature = "verification-boot")
+            {
                 serial_write("ginux: Linux child exited with status ");
                 serial_write_u64(first_argument);
                 serial_write("\r\n");
-                if cfg!(feature = "verification-boot") {
-                    write_linux_runtime_syscall_trace();
-                }
+                write_linux_runtime_syscall_trace();
             }
             if !clear_current_linux_process_signal_queues() {
                 return LINUX_EIO;
@@ -10819,16 +10824,48 @@ fn prepare_linux_system_domain(init: &[u8]) -> bool {
             return false;
         }
     }
-    // Attaching to a domain console already crosses the trusted controller
-    // boundary. Start the image's own login shell directly so locked OCI root
-    // passwords do not turn an authorized attach into an unusable console.
-    let contents = b"[Unit]\nDescription=Ginux Domain Console\nAfter=systemd-user-sessions.service\n\n[Service]\nExecStart=-/bin/bash --noediting --noprofile --norc -i\nType=idle\nRestart=always\nStandardInput=tty-force\nStandardOutput=tty\nStandardError=tty\nTTYPath=/dev/console\nTTYReset=yes\nEnvironment=TERM=linux\n\n[Install]\nWantedBy=getty.target\n";
-    for console_unit in [
-        &b"etc/systemd/system/console-getty.service"[..],
-        &b"usr/lib/systemd/system/console-getty.service"[..],
+    // Domain attachment grants access to the console, not an authenticated
+    // root session. Use the distribution's login stack so the console has the
+    // same authentication boundary as a physical Linux console.
+    let contents = b"[Unit]\nDescription=Ginux Domain Console Login\nAfter=systemd-user-sessions.service\n\n[Service]\nExecStart=-/sbin/agetty --noclear --keep-baud 115200,57600,38400,9600 - linux\nType=idle\nRestart=always\nStandardInput=tty-force\nStandardOutput=tty\nStandardError=tty\nTTYPath=/dev/console\nTTYReset=yes\nTTYVHangup=yes\nEnvironment=TERM=linux\n\n[Install]\nWantedBy=getty.target\n";
+    let vendor_console = &b"usr/lib/systemd/system/console-getty.service"[..];
+    if crate::linux_overlay::lookup(vendor_console).is_none()
+        && crate::linux_overlay::create_file(vendor_console, 0o644, contents).is_none()
+    {
+        return false;
+    }
+    let configured_console = &b"etc/systemd/system/console-getty.service"[..];
+    if crate::linux_overlay::lookup(configured_console).is_none()
+        && crate::linux_overlay::create_symlink(
+            configured_console,
+            b"/usr/lib/systemd/system/console-getty.service",
+        )
+        .is_none()
+    {
+        return false;
+    }
+    // The OCI root is ephemeral today, so journald must remain volatile; a
+    // persistent flush has no valid destination. configfs is implemented by
+    // the Ginux kernel directly and does not require a domain-side module.
+    for (unit, description) in [
+        (
+            &b"usr/lib/systemd/system/systemd-journal-flush.service"[..],
+            &b"Ginux Volatile Journal"[..],
+        ),
+        (
+            &b"usr/lib/systemd/system/modprobe@.service"[..],
+            &b"Ginux Built-in Kernel Facility"[..],
+        ),
     ] {
-        if crate::linux_overlay::lookup(console_unit).is_none()
-            && crate::linux_overlay::create_file(console_unit, 0o644, contents).is_none()
+        let mut replacement = [0_u8; 192];
+        let prefix = b"[Unit]\nDescription=";
+        let suffix = b"\nDefaultDependencies=no\n\n[Service]\nType=oneshot\nExecStart=/bin/true\nRemainAfterExit=yes\n";
+        let length = prefix.len() + description.len() + suffix.len();
+        replacement[..prefix.len()].copy_from_slice(prefix);
+        replacement[prefix.len()..prefix.len() + description.len()].copy_from_slice(description);
+        replacement[prefix.len() + description.len()..length].copy_from_slice(suffix);
+        if crate::linux_overlay::lookup(unit).is_none()
+            && crate::linux_overlay::create_file(unit, 0o644, &replacement[..length]).is_none()
         {
             return false;
         }
@@ -22540,7 +22577,10 @@ fn linux_rootfs_execve(path: &[u8], arguments_address: u64, environment_address:
         serial_write("\r\n");
     }
     if LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
-        && matches!(path, b"/bin/bash" | b"bin/bash")
+        && matches!(
+            path,
+            b"/bin/bash" | b"bin/bash" | b"/sbin/agetty" | b"sbin/agetty"
+        )
         && !LINUX_RUNTIME_CONSOLE_TIMING_WRITTEN.swap(true, Ordering::SeqCst)
     {
         serial_write("ginux: timing Linux-init-to-console: ");

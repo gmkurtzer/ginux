@@ -88,7 +88,7 @@ diagnose_login_timeout() {
 wait_for_login() {
     local limit=${GINUX_ROCKY_LOGIN_TIMEOUT:-180}
     for ((attempt = 0; attempt < limit; attempt++)); do
-        grep -Eq 'login:|\[root@ginux[^]]*\]#|bash-[0-9.]+#' "$output_file" && return 0
+        grep -Eq 'ginux login:' "$output_file" && return 0
         if grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC|Linux init (execution|setup) failed|Linux init exited with status|rocky: (failed|stopped)' "$output_file"; then
             break
         fi
@@ -152,27 +152,23 @@ fi
     if grep -Fq 'FlushToVar() varlink call: Connection reset by peer' "$output_file"; then
         fail 'systemd journal varlink transport regressed'
     fi
-    if [[ "${GINUX_VERIFY_LOGIN_SHELL:-0}" == 1 ]]; then
-        if ! grep -Eq '\[root@ginux[^]]*\]#|bash-[0-9.]+#' "$output_file"; then
-            printf '%s\n' root
-            sleep 2
-            if grep -Fq 'Password:' "$output_file"; then
-                fail 'Rocky root account requires a console password'
-            fi
-        fi
-        printf '%s\n' "printf 'GINUX_LOGIN_%s\\n' SHELL_READY"
-        wait_for 'GINUX_LOGIN_SHELL_READY' 15
-        if [[ "$start_mode" == detached ]]; then
-            printf '\035'
-            wait_for '[detached from domain; use '\''domain attach NAME'\'' to return]' 10
-            wait_for_count 'ginux> ' 3 10
-            printf '%s\n' 'domain status rocky'
-            sleep 1
-            printf '%s\n' 'domain attach rocky'
-            wait_for_count 'GINUX_LOGIN_SHELL_READY' 1 10
-            printf '%s\n' "printf 'GINUX_REATTACH_%s\\n' SHELL_READY"
-            wait_for 'GINUX_REATTACH_SHELL_READY' 15
-        fi
+    if grep -Eq '\[root@ginux[^]]*\]#|bash-[0-9.]+#' "$output_file"; then
+        fail 'domain console bypassed login authentication'
+    fi
+    if grep -q 'FAILED.*Failed to start' "$output_file"; then
+        fail 'systemd reported a failed boot unit'
+    fi
+    if grep -Fq 'ginux: Linux child exited with status' "$output_file"; then
+        fail 'kernel leaked an anonymous userspace child exit'
+    fi
+    if [[ "$start_mode" == detached ]]; then
+        printf '\035'
+        wait_for '[detached from domain; use '\''domain attach NAME'\'' to return]' 10
+        wait_for_count 'ginux> ' 3 10
+        printf '%s\n' 'domain status rocky'
+        sleep 1
+        printf '%s\n' 'domain attach rocky'
+        wait_for_count 'ginux login:' 1 10
     fi
     login_reached_at=$(date +%s)
     init_to_console_ms=$(grep -E '^ginux: timing Linux-init-to-console: [0-9]+ ms' "$output_file" | tail -n 1 | awk '{print $4}')
@@ -227,7 +223,7 @@ if [[ "$start_mode" == detached-return && -s "$success_file" ]] \
 fi
 
 if [[ -s "$success_file" ]] \
-    && grep -Eq 'login:|\[root@ginux[^]]*\]#|bash-[0-9.]+#' "$output_file" \
+    && grep -Fq 'ginux login:' "$output_file" \
     && ! grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC|Linux init (execution|setup) failed|Linux init exited with status|Linux child exec rejected|systemd-system-update-generator failed|rocky: (failed|stopped)' "$output_file"; then
     echo 'Rocky systemd console login target passed.'
     exit 0

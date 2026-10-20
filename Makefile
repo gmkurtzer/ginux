@@ -150,11 +150,11 @@ test-multi-domain: build
 	@tests/qemu/multi-domain.sh
 
 probe-rocky-systemd: build
-	@GINUX_VERIFY_LOGIN_SHELL=1 tests/qemu/rocky-systemd.sh
+	@tests/qemu/rocky-systemd.sh
 
 test-rocky-systemd: build
-	@GINUX_VERIFY_LOGIN_SHELL=1 tests/qemu/rocky-systemd.sh
-	@GINUX_VERIFY_LOGIN_SHELL=1 GINUX_REQUIRE_OCI_CACHE_HIT=1 tests/qemu/rocky-systemd.sh
+	@tests/qemu/rocky-systemd.sh
+	@GINUX_REQUIRE_OCI_CACHE_HIT=1 tests/qemu/rocky-systemd.sh
 	@GINUX_ROCKY_START_MODE=detached-return GINUX_REQUIRE_OCI_CACHE_HIT=1 tests/qemu/rocky-systemd.sh
 
 test-rocky-detached: build
@@ -168,7 +168,7 @@ benchmark-rocky-systemd: build
 	GINUX_MAX_LINUX_INIT_MS="$$budget" tests/qemu/rocky-systemd.sh
 
 profile-rocky-systemd: build-linux-profile
-	@GINUX_VERIFY_LOGIN_SHELL=1 GINUX_REQUIRE_OCI_CACHE_HIT=1 tests/qemu/rocky-systemd.sh
+	@GINUX_REQUIRE_OCI_CACHE_HIT=1 tests/qemu/rocky-systemd.sh
 
 run: build
 	@tools/qemu/run.sh

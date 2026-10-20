@@ -405,8 +405,8 @@ make test-c2        # verify configured domain lifecycle
 make test-alpine    # verify runtime OCI download and the Alpine shell
 make test-rocky-shell # verify Rocky glibc shell, fork/exec, cat, and ls
 make test-multi-domain # verify concurrent Alpine domains and Rocky ingestion
-make probe-rocky-systemd # boot Rocky systemd and execute a console-shell probe
-make test-rocky-systemd # verify cold and cached warm Rocky console boots
+make probe-rocky-systemd # boot Rocky systemd and require its console login prompt
+make test-rocky-systemd # verify cold and cached warm authenticated console boots
 make benchmark-rocky-systemd # measure init; enforce the 3 s KVM budget
 make test-storage    # verify volume initialization, recovery, and reset
 make check          # run architecture, ABI, format, lint, and unit checks
