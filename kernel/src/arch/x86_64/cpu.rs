@@ -1028,15 +1028,17 @@ macro_rules! banked_atomic_integer {
 
             fn current(&self) -> &$atomic {
                 let instance = linux_execution_instance();
-                if self.states[instance]
-                    .compare_exchange(0, 1, Ordering::Acquire, Ordering::Acquire)
-                    .is_ok()
-                {
-                    self.values[instance].store(self.initial, Ordering::Relaxed);
-                    self.states[instance].store(2, Ordering::Release);
-                } else {
-                    while self.states[instance].load(Ordering::Acquire) != 2 {
-                        core::hint::spin_loop();
+                if self.states[instance].load(Ordering::Acquire) != 2 {
+                    if self.states[instance]
+                        .compare_exchange(0, 1, Ordering::Acquire, Ordering::Acquire)
+                        .is_ok()
+                    {
+                        self.values[instance].store(self.initial, Ordering::Relaxed);
+                        self.states[instance].store(2, Ordering::Release);
+                    } else {
+                        while self.states[instance].load(Ordering::Acquire) != 2 {
+                            core::hint::spin_loop();
+                        }
                     }
                 }
                 &self.values[instance]
@@ -1098,15 +1100,17 @@ impl BankedAtomicBool {
 
     fn current(&self) -> &AtomicBool {
         let instance = linux_execution_instance();
-        if self.states[instance]
-            .compare_exchange(0, 1, Ordering::Acquire, Ordering::Acquire)
-            .is_ok()
-        {
-            self.values[instance].store(self.initial, Ordering::Relaxed);
-            self.states[instance].store(2, Ordering::Release);
-        } else {
-            while self.states[instance].load(Ordering::Acquire) != 2 {
-                core::hint::spin_loop();
+        if self.states[instance].load(Ordering::Acquire) != 2 {
+            if self.states[instance]
+                .compare_exchange(0, 1, Ordering::Acquire, Ordering::Acquire)
+                .is_ok()
+            {
+                self.values[instance].store(self.initial, Ordering::Relaxed);
+                self.states[instance].store(2, Ordering::Release);
+            } else {
+                while self.states[instance].load(Ordering::Acquire) != 2 {
+                    core::hint::spin_loop();
+                }
             }
         }
         &self.values[instance]
