@@ -110,11 +110,12 @@ bind-remount behavior. Long-running PID 1 also confirms why general control
 must come from an independent exec path rather than its attached console.
 
 On the Apple Silicon development host, x86-64 QEMU provides TCG only. The
-measured cached run reaches the verified shell in about 25 seconds, with about
-18 seconds spent after Linux init. Kernel boot-to-controller is under 200 ms
-and cached OCI restore plus root publication is about 6.5 seconds. Native KVM
-timing remains the required performance gate; the current TCG result does not
-satisfy the eventual couple-second target.
+October 19 performance checkpoint reduced Linux init to verified console from
+15.3 seconds to a 9.8-second three-run median by yielding a nested Unix-socket
+wait to its suspended parent. Cached OCI restore plus root publication remains
+about 6.2 seconds. Native x86-64 KVM automatically enforces a three-second gate;
+it cannot be executed on this host. Detailed measurements and rejected
+speculative optimizations are recorded in [PERFORMANCE.md](PERFORMANCE.md).
 
 ### Next bounded checkpoint: domain process dispatch and exec
 

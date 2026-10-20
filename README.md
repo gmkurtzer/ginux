@@ -323,7 +323,9 @@ virtual-network topology, attachments, and static/DHCP host-network policy are
 recovered from it after a clean shutdown. Verified compressed OCI layers are
 stored content-addressed in the same volume and reused after reboot without a
 registry transfer. `make test-oci-cache` validates the cold-pull and warm-hit
-lifecycle. See
+lifecycle. Cache catalog v2 can also store and directly publish a complete,
+digest-verified immutable root filesystem. Ginux selects it only when measured
+size predicts it will beat restoring and unpacking the compressed layers. See
 [the storage architecture](docs/STORAGE.md).
 
 At the `ginux>` prompt:
@@ -397,6 +399,7 @@ make test-rocky-shell # verify Rocky glibc shell, fork/exec, cat, and ls
 make test-multi-domain # verify concurrent Alpine domains and Rocky ingestion
 make probe-rocky-systemd # boot Rocky systemd and execute a console-shell probe
 make test-rocky-systemd # verify cold and cached warm Rocky console boots
+make benchmark-rocky-systemd # measure init; enforce the 3 s KVM budget
 make test-storage    # verify volume initialization, recovery, and reset
 make check          # run architecture, ABI, format, lint, and unit checks
 make gate           # run the clean reproducible project gate
@@ -434,6 +437,8 @@ host.
   coverage and omissions.
 - [Runtime use cases](docs/USE-CASES.md) — observable acceptance scenarios,
   current gates, and the next end-to-end tests.
+- [Performance baseline](docs/PERFORMANCE.md) — benchmark definitions, current
+  results, and accelerator-specific gates.
 - [Native domains and authority](docs/decisions/0001-native-domains-and-authority.md)
   — the isolation and delegation model.
 - [Unified image and driver boundary](docs/decisions/0002-unified-image-and-driver-boundary.md)

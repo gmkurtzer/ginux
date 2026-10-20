@@ -4040,10 +4040,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
                 serial_write("ginux: OCI unpacking image filesystem\r\n");
             }
             let unpack_started = arch::x86_64::timer::timestamp_counter();
-            let success = arch::x86_64::cpu::configured_container_slot()
-                .is_some_and(|slot| {
-                    downloaded && (cached_rootfs || image_store::install_published_layers(slot))
-                });
+            let success = arch::x86_64::cpu::configured_container_slot().is_some_and(|slot| {
+                downloaded && (cached_rootfs || image_store::install_published_layers(slot))
+            });
             serial_write_elapsed("ginux: timing OCI unpack/publish: ", unpack_started);
             if success && !cached_rootfs {
                 if let Some((bytes, newly_stored)) = persist_oci_rootfs(
@@ -4492,9 +4491,8 @@ fn restore_cached_oci_layers(
             .iter()
             .try_fold(0_u64, |total, layer| total.checked_add(layer.length));
         let direct_rootfs = entry.rootfs().filter(|rootfs| {
-            compressed_length.is_some_and(|compressed| {
-                rootfs.length <= compressed.saturating_mul(2)
-            })
+            compressed_length
+                .is_some_and(|compressed| rootfs.length <= compressed.saturating_mul(2))
         });
         if let (Some(slot), Some(rootfs)) = (slot, direct_rootfs) {
             let Ok(length) = usize::try_from(rootfs.length) else {
@@ -4606,8 +4604,7 @@ fn persist_oci_layers(
     with_runtime_volume(device, mapping, iommu_profile, |backend| {
         let mut catalog = match volume::recover_oci_catalog(backend, encoded) {
             Ok(Some(record)) => {
-                ginux_oci_cache::Catalog::decode(&encoded[..record.length])
-                    .unwrap_or_default()
+                ginux_oci_cache::Catalog::decode(&encoded[..record.length]).unwrap_or_default()
             }
             Ok(None) => ginux_oci_cache::Catalog::new(),
             Err(_) => return None,
@@ -4685,9 +4682,7 @@ fn persist_oci_rootfs(
     let length = u64::try_from(rootfs.len()).ok()?;
     with_runtime_volume(device, mapping, iommu_profile, |backend| {
         let mut catalog = match volume::recover_oci_catalog(backend, encoded) {
-            Ok(Some(record)) => {
-                ginux_oci_cache::Catalog::decode(&encoded[..record.length])?
-            }
+            Ok(Some(record)) => ginux_oci_cache::Catalog::decode(&encoded[..record.length])?,
             _ => return None,
         };
         let entry = catalog.find(reference, ginux_oci_cache::Platform::LinuxAmd64)?;
@@ -4734,11 +4729,7 @@ fn persist_oci_rootfs(
             length,
         };
         if !volume::BlockDevice::flush(backend)
-            || !catalog.set_rootfs(
-                reference,
-                ginux_oci_cache::Platform::LinuxAmd64,
-                cached,
-            )
+            || !catalog.set_rootfs(reference, ginux_oci_cache::Platform::LinuxAmd64, cached)
             || !catalog.encode(encoded)
             || volume::commit_oci_catalog(backend, encoded).is_err()
         {

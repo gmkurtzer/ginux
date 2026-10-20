@@ -114,7 +114,11 @@ impl Catalog {
         } else {
             input
         };
-        let entry_size = if legacy { LEGACY_ENTRY_SIZE } else { ENTRY_SIZE };
+        let entry_size = if legacy {
+            LEGACY_ENTRY_SIZE
+        } else {
+            ENTRY_SIZE
+        };
         let mut catalog = Self::new();
         for index in 0..ENTRY_LIMIT {
             let start = HEADER_SIZE + index * entry_size;
@@ -310,12 +314,7 @@ impl Catalog {
         true
     }
 
-    pub fn set_rootfs(
-        &mut self,
-        reference: &[u8],
-        platform: Platform,
-        rootfs: Rootfs,
-    ) -> bool {
+    pub fn set_rootfs(&mut self, reference: &[u8], platform: Platform, rootfs: Rootfs) -> bool {
         if rootfs.digest == [0; 32]
             || rootfs.start_sector < OBJECT_START_SECTOR
             || rootfs.length == 0
