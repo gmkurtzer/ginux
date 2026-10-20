@@ -103,6 +103,9 @@ fi
     if grep -Eq 'Unexpected error while writing to journal file|Failed to replace specifiers.*%b' "$output_file"; then
         fail 'systemd boot ID or journal file contract regressed'
     fi
+    if grep -Fq 'FlushToVar() varlink call: Connection reset by peer' "$output_file"; then
+        fail 'systemd journal varlink transport regressed'
+    fi
     if [[ "${GINUX_VERIFY_LOGIN_SHELL:-0}" == 1 ]]; then
         if ! grep -Eq '\[root@ginux[^]]*\]#|bash-[0-9.]+#' "$output_file"; then
             printf '%s\n' root

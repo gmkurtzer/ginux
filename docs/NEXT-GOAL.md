@@ -190,9 +190,14 @@ console-readiness warnings are the next diagnostic and compatibility gate.
 The domain procfs now publishes a boot-unique Linux `boot_id`, eliminating
 systemd's journal-file write errors and `%b` tmpfiles failures. Writable
 overlay-file `MAP_SHARED` mappings also write back through `msync` and unmap.
-The journal flush unit still fails because the remaining varlink/UNIX-socket
-transport semantics reset its request; that transport failure is the next
-journal-specific gate.
+Connected UNIX stream sockets now queue a server endpoint during `connect`, so
+clients can send before the server calls `accept`, as Linux permits. Successful
+local IPC writes also yield a cooperative process turn, preventing a synchronous
+client from starving its server. This removes the journal varlink connection
+reset and preserves boot progress. The journal flush unit still exits
+unsuccessfully because accepted-socket peer credentials and the remaining
+request/response semantics are incomplete; that is the next journal-specific
+gate.
 
 ## Stage 9: Persistence and production architecture
 

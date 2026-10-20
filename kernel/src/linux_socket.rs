@@ -470,8 +470,46 @@ pub(crate) fn connect_unix(slot: u8, path: &[u8]) -> Result<(), Error> {
     {
         return Err(Error::WouldBlock);
     }
+    let accepted =
+        unsafe { SLOTS.iter().position(|state| !state.occupied) }.ok_or(Error::Exhausted)?;
     unsafe {
-        SLOTS[peer].pending[usize::from(listener.pending_length)] = slot;
+        SLOTS[accepted] = Slot {
+            occupied: true,
+            references: 1,
+            kind: Kind::Unix,
+            handle: None,
+            remote: None,
+            local_port: 0,
+            tcp_buffer: None,
+            listening: false,
+            backlog: 0,
+            pending_length: 0,
+            pending: [0; SLOT_COUNT],
+            peer: Some(slot),
+            read_shutdown: false,
+            write_shutdown: false,
+            reuse_address: listener.reuse_address,
+            keep_alive: listener.keep_alive,
+            receive_errors: listener.receive_errors,
+            no_delay: listener.no_delay,
+            pass_credentials: listener.pass_credentials,
+            timestamp: listener.timestamp,
+            receive_timeout_us: listener.receive_timeout_us,
+            send_timeout_us: listener.send_timeout_us,
+            pending_right_count: 0,
+            pending_right_slots: [0; SLOT_COUNT],
+            pending_right_flags: [0; SLOT_COUNT],
+            pending_credential_count: 0,
+            pending_credentials: [(0, 0, 0); SLOT_COUNT],
+            peer_credentials: None,
+            local_first: memory::FrameLease::EMPTY,
+            local_last: memory::FrameLease::EMPTY,
+            local_head: 0,
+            local_length: 0,
+        };
+        SLOTS[index].peer = Some(accepted as u8);
+        UNIX_SOCKET_TYPES[accepted] = UNIX_SOCKET_TYPES[peer];
+        SLOTS[peer].pending[usize::from(listener.pending_length)] = accepted as u8;
         SLOTS[peer].pending_length += 1;
     }
     Ok(())
@@ -608,6 +646,8 @@ pub(crate) fn close(slot: u8) -> bool {
     }
     if state.kind == Kind::Unix || state.peer.is_some() && !state.listening {
         let pending_right_count = usize::from(state.pending_right_count);
+        let pending_connection_count = usize::from(state.pending_length);
+        let pending_connections = state.pending;
         if pending_right_count > unsafe { UNIX_INFLIGHT_RIGHTS } {
             return false;
         }
@@ -650,6 +690,12 @@ pub(crate) fn close(slot: u8) -> bool {
         unsafe { UNIX_INFLIGHT_RIGHTS -= pending_right_count };
         for right in pending_rights.into_iter().take(pending_right_count) {
             let _ = close(right);
+        }
+        for connection in pending_connections
+            .into_iter()
+            .take(pending_connection_count)
+        {
+            let _ = close(connection);
         }
         return true;
     }
@@ -953,6 +999,15 @@ pub(crate) fn accept(slot: u8) -> Result<(u8, IpEndpoint), Error> {
         let client = unsafe { SLOTS.get(client_index).copied() }
             .filter(|state| state.occupied && state.kind == listener.kind && !state.listening)
             .ok_or(Error::Invalid)?;
+        if listener.kind == Kind::Unix {
+            unsafe {
+                SLOTS[listener_index]
+                    .pending
+                    .copy_within(1..usize::from(listener.pending_length), 0);
+                SLOTS[listener_index].pending_length -= 1;
+            }
+            return Ok((client_slot, endpoint(runtime.local_address, 0)));
+        }
         let accepted_index =
             unsafe { SLOTS.iter().position(|state| !state.occupied) }.ok_or(Error::Exhausted)?;
         let remote = endpoint(runtime.local_address, client.local_port);

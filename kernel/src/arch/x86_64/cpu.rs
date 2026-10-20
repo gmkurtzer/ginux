@@ -8851,7 +8851,14 @@ extern "sysv64" fn linux_syscall_handler(
                 register(2),
                 register(1),
             );
-            linux_socket_send_live_return(registers, syscall_return, result, flags, false)
+            linux_socket_send_live_return(
+                registers,
+                syscall_return,
+                first_argument,
+                result,
+                flags,
+                false,
+            )
         }
         LINUX_RECVFROM_SYSCALL => linux_socket_recvfrom(
             first_argument,
@@ -8863,7 +8870,14 @@ extern "sysv64" fn linux_syscall_handler(
         ),
         LINUX_SENDMSG_SYSCALL => {
             let result = linux_socket_sendmsg(first_argument, buffer, count);
-            linux_socket_send_live_return(registers, syscall_return, result, count, false)
+            linux_socket_send_live_return(
+                registers,
+                syscall_return,
+                first_argument,
+                result,
+                count,
+                false,
+            )
         }
         LINUX_RECVMSG_SYSCALL => linux_socket_recvmsg(first_argument, buffer, count),
         LINUX_RECVMMSG_SYSCALL => {
@@ -8872,7 +8886,14 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_SENDMMSG_SYSCALL => {
             let flags = register(0);
             let (result, broken_pipe) = linux_socket_sendmmsg(first_argument, buffer, count, flags);
-            linux_socket_send_live_return(registers, syscall_return, result, flags, broken_pipe)
+            linux_socket_send_live_return(
+                registers,
+                syscall_return,
+                first_argument,
+                result,
+                flags,
+                broken_pipe,
+            )
         }
         LINUX_SHUTDOWN_SYSCALL => linux_socket_shutdown(first_argument, buffer),
         LINUX_GETSOCKNAME_SYSCALL => linux_socket_name(first_argument, buffer, count, false),
@@ -26847,6 +26868,7 @@ fn linux_socket_sendmmsg(descriptor: u64, messages: u64, count: u64, flags: u64)
 fn linux_socket_send_live_return(
     output: *mut LinuxSyscallFrame,
     caller: LinuxUserContext,
+    descriptor: u64,
     result: u64,
     flags: u64,
     broken_pipe: bool,
@@ -26854,6 +26876,14 @@ fn linux_socket_send_live_return(
     const MSG_NOSIGNAL: u64 = 0x4000;
     if (result == LINUX_EPIPE || broken_pipe) && flags & MSG_NOSIGNAL == 0 {
         linux_broken_pipe_live_return(output, caller)
+    } else if result < u64::MAX - 4095
+        && LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
+        && crate::linux_socket::kind(linux_socket_slot(descriptor).unwrap_or(u8::MAX))
+            == Some(crate::linux_socket::Kind::Unix)
+        && LINUX_PROCESS_SCHEDULER_NESTING.load(Ordering::SeqCst) != 0
+        && yield_current_linux_process(caller, result)
+    {
+        LINUX_RETURN_TO_KERNEL
     } else {
         result
     }
