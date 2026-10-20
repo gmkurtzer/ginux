@@ -1732,6 +1732,7 @@ static LINUX_RUNTIME_SYSCALL_TRACE: [BankedAtomicU64; LINUX_RUNTIME_SYSCALL_TRAC
 static LINUX_RUNTIME_SYSCALL_RESULT_TRACE: [BankedAtomicU64; LINUX_RUNTIME_SYSCALL_TRACE_LIMIT] =
     [const { BankedAtomicU64::new(0) }; LINUX_RUNTIME_SYSCALL_TRACE_LIMIT];
 static LINUX_RUNTIME_SYSCALL_TRACE_COUNT: BankedAtomicU64 = BankedAtomicU64::new(0);
+static LINUX_RUNTIME_CONSOLE_TIMING_WRITTEN: BankedAtomicBool = BankedAtomicBool::new(false);
 static LINUX_RUNTIME_SLOW_DIAGNOSTIC_WRITTEN: BankedAtomicBool = BankedAtomicBool::new(false);
 static LINUX_RUNTIME_LATE_DIAGNOSTIC_WRITTEN: BankedAtomicBool = BankedAtomicBool::new(false);
 static LINUX_RUNTIME_STALLED_DIAGNOSTIC_WRITTEN: BankedAtomicBool = BankedAtomicBool::new(false);
@@ -6977,6 +6978,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
     LINUX_RUNTIME_EXIT_STATUS.store(u64::MAX, Ordering::SeqCst);
     LINUX_RUNTIME_FIRST_UNSUPPORTED_SYSCALL.store(u64::MAX, Ordering::SeqCst);
     LINUX_RUNTIME_SYSCALL_TRACE_COUNT.store(0, Ordering::SeqCst);
+    LINUX_RUNTIME_CONSOLE_TIMING_WRITTEN.store(false, Ordering::SeqCst);
     LINUX_RUNTIME_SLOW_DIAGNOSTIC_WRITTEN.store(false, Ordering::SeqCst);
     LINUX_RUNTIME_LATE_DIAGNOSTIC_WRITTEN.store(false, Ordering::SeqCst);
     LINUX_RUNTIME_STALLED_DIAGNOSTIC_WRITTEN.store(false, Ordering::SeqCst);
@@ -22053,6 +22055,14 @@ fn linux_execveat(
 }
 
 fn linux_rootfs_execve(path: &[u8], arguments_address: u64, environment_address: u64) -> u64 {
+    if LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
+        && matches!(path, b"/bin/bash" | b"bin/bash")
+        && !LINUX_RUNTIME_CONSOLE_TIMING_WRITTEN.swap(true, Ordering::SeqCst)
+    {
+        serial_write("ginux: timing Linux-init-to-console: ");
+        serial_write_u64(linux_elapsed_nanoseconds().unwrap_or(0) / 1_000_000);
+        serial_write(" ms\r\n");
+    }
     let Some(plan) = crate::published_rootfs::process_plan(path) else {
         use crate::published_rootfs::ProcessPlanFailure;
         let failure = match crate::published_rootfs::process_plan_failure(path) {

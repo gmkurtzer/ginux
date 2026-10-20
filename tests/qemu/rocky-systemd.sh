@@ -97,6 +97,9 @@ fi
     init_started_at=$(date +%s)
     wait_for ' running in system mode (' 30
     wait_for_login
+    if ! grep -Eq '^ginux: timing Linux-init-to-console: [0-9]+ ms' "$output_file"; then
+        fail 'kernel did not report Linux init timing'
+    fi
     if ! grep -Eq '\[.*OK.*\].*Listening on .*systemd-initctl' "$output_file"; then
         fail 'systemd initctl named FIFO did not become active'
     fi
@@ -118,6 +121,8 @@ fi
         wait_for 'GINUX_LOGIN_SHELL_READY' 15
     fi
     login_reached_at=$(date +%s)
+    init_to_console_ms=$(grep -E '^ginux: timing Linux-init-to-console: [0-9]+ ms' "$output_file" | tail -n 1 | awk '{print $4}')
+    echo "Rocky timing Linux-init-to-console: ${init_to_console_ms} ms" >&2
     echo "Rocky timing domain-start-to-login: $((login_reached_at - domain_started_at)) s" >&2
     echo "Rocky timing Linux-init-to-login: $((login_reached_at - init_started_at)) s" >&2
     if [[ "${GINUX_REQUIRE_OCI_CACHE_HIT:-0}" == 1 ]] \
