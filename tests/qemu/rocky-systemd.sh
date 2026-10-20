@@ -8,6 +8,7 @@ qemu_pid_file=$(mktemp "${TMPDIR:-/tmp}/ginux-rocky-systemd-pid.XXXXXX")
 success_file=$(mktemp "${TMPDIR:-/tmp}/ginux-rocky-systemd-success.XXXXXX")
 qemu_pid=""
 rocky_image="${GINUX_ROCKY_IMAGE:-rockylinux/rockylinux:10-ubi-init}"
+start_mode="${GINUX_ROCKY_START_MODE:-attached}"
 
 stop_qemu() {
     local pid=""
@@ -46,12 +47,28 @@ wait_for() {
     local limit=${2:-120}
     for ((attempt = 0; attempt < limit; attempt++)); do
         grep -Fq "$marker" "$output_file" && return 0
-        if grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC' "$output_file"; then
+        if grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC|^ginux: Linux user fault|Linux init (execution|setup) failed|rocky: (failed|stopped)' "$output_file"; then
             break
         fi
         sleep 1
     done
     fail "timed out waiting for '$marker'"
+}
+
+wait_for_count() {
+    local marker=$1
+    local expected=$2
+    local limit=${3:-30}
+    for ((attempt = 0; attempt < limit; attempt++)); do
+        if (( $(grep -Fc "$marker" "$output_file" || true) >= expected )); then
+            return 0
+        fi
+        if grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC|^ginux: Linux user fault|Linux init (execution|setup) failed|rocky: (failed|stopped)' "$output_file"; then
+            break
+        fi
+        sleep 1
+    done
+    fail "timed out waiting for occurrence $expected of '$marker'"
 }
 
 diagnose_login_timeout() {
@@ -90,17 +107,38 @@ fi
     domain_started_at=$(date +%s)
     printf '%s\n' \
         'domain new rocky' \
-        "domain set rocky image=$rocky_image init=/sbin/init" \
-        'domain start rocky --attach'
+        "domain set rocky image=$rocky_image init=/sbin/init"
+    if [[ "$start_mode" == detached || "$start_mode" == detached-return ]]; then
+        printf '%s\n' 'domain start rocky'
+    else
+        printf '%s\n' 'domain start rocky --attach'
+    fi
     wait_for 'ginux: OCI image ready' 240
     wait_for 'ginux: entering configured Linux init' 30
     init_started_at=$(date +%s)
-    wait_for ' running in system mode (' 30
+    if [[ "$start_mode" == detached || "$start_mode" == detached-return ]]; then
+        wait_for 'rocky: running (detached)' 90
+        wait_for_count 'ginux> ' 2 10
+        if [[ "$start_mode" == detached-return ]]; then
+            printf '%s\n' 'domain list'
+            wait_for 'rocky           running' 10
+            if grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC|^ginux: Linux user fault|Linux init (execution|setup) failed|rocky: (failed|stopped)' "$output_file"; then
+                fail 'detached domain did not return cleanly to the controller'
+            fi
+            printf '%s\n' ok >"$success_file"
+            stop_qemu
+            exit 0
+        fi
+        printf '%s\n' 'domain attach rocky'
+    else
+        wait_for ' running in system mode (' 30
+    fi
     wait_for_login
     if ! grep -Eq '^ginux: timing Linux-init-to-console: [0-9]+ ms' "$output_file"; then
         fail 'kernel did not report Linux init timing'
     fi
-    if ! grep -Eq '\[.*OK.*\].*Listening on .*systemd-initctl' "$output_file"; then
+    if [[ "$start_mode" != detached ]] \
+        && ! grep -Eq '\[.*OK.*\].*Listening on .*systemd-initctl' "$output_file"; then
         fail 'systemd initctl named FIFO did not become active'
     fi
     if grep -Eq 'Unexpected error while writing to journal file|Failed to replace specifiers.*%b' "$output_file"; then
@@ -119,6 +157,15 @@ fi
         fi
         printf '%s\n' "printf 'GINUX_LOGIN_%s\\n' SHELL_READY"
         wait_for 'GINUX_LOGIN_SHELL_READY' 15
+        if [[ "$start_mode" == detached ]]; then
+            printf '\035'
+            wait_for '[detached from domain; use '\''domain attach NAME'\'' to return]' 10
+            wait_for_count 'ginux> ' 3 10
+            printf '%s\n' 'domain attach rocky'
+            wait_for_count 'GINUX_LOGIN_SHELL_READY' 1 10
+            printf '%s\n' "printf 'GINUX_REATTACH_%s\\n' SHELL_READY"
+            wait_for 'GINUX_REATTACH_SHELL_READY' 15
+        fi
     fi
     login_reached_at=$(date +%s)
     init_to_console_ms=$(grep -E '^ginux: timing Linux-init-to-console: [0-9]+ ms' "$output_file" | tail -n 1 | awk '{print $4}')
@@ -162,6 +209,13 @@ if kill -0 "$qemu_pid" 2>/dev/null; then
 fi
 wait "$qemu_pid" || true
 qemu_pid=""
+
+if [[ "$start_mode" == detached-return && -s "$success_file" ]] \
+    && grep -Fq 'rocky: running (detached)' "$output_file" \
+    && ! grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC|^ginux: Linux user fault|Linux init (execution|setup) failed|rocky: (failed|stopped)' "$output_file"; then
+    echo 'Rocky detached start returned to the controller.'
+    exit 0
+fi
 
 if [[ -s "$success_file" ]] \
     && grep -Eq 'login:|\[root@ginux[^]]*\]#|bash-[0-9.]+#' "$output_file" \

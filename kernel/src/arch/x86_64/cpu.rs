@@ -11909,6 +11909,7 @@ fn save_suspended_linux_runtime(context: LinuxUserContext, address: u64, count: 
     if !context.is_valid()
         || address == 0
         || count == 0
+        || !refresh_live_linux_process_registry(context)
         || LINUX_RUNTIME_SUSPENDED.swap(true, Ordering::AcqRel)
     {
         return false;
@@ -31368,6 +31369,9 @@ fn linux_epoll_wait_duration_live_return(
             if refresh_live_linux_process_registry(caller)
                 && run_next_scheduled_linux_process(parent_pid)
             {
+                if LINUX_RUNTIME_SUSPENDED.load(Ordering::Acquire) {
+                    return LINUX_RETURN_TO_KERNEL;
+                }
                 let result = match linux_epoll_event(input.epoll) {
                     Ok(Some(event)) => {
                         if copy_to_linux_user(input.address, &event) {
