@@ -1028,17 +1028,15 @@ macro_rules! banked_atomic_integer {
 
             fn current(&self) -> &$atomic {
                 let instance = linux_execution_instance();
-                if self.states[instance].load(Ordering::Acquire) != 2 {
-                    if self.states[instance]
-                        .compare_exchange(0, 1, Ordering::Acquire, Ordering::Acquire)
-                        .is_ok()
-                    {
-                        self.values[instance].store(self.initial, Ordering::Relaxed);
-                        self.states[instance].store(2, Ordering::Release);
-                    } else {
-                        while self.states[instance].load(Ordering::Acquire) != 2 {
-                            core::hint::spin_loop();
-                        }
+                if self.states[instance]
+                    .compare_exchange(0, 1, Ordering::Acquire, Ordering::Acquire)
+                    .is_ok()
+                {
+                    self.values[instance].store(self.initial, Ordering::Relaxed);
+                    self.states[instance].store(2, Ordering::Release);
+                } else {
+                    while self.states[instance].load(Ordering::Acquire) != 2 {
+                        core::hint::spin_loop();
                     }
                 }
                 &self.values[instance]
@@ -1100,17 +1098,15 @@ impl BankedAtomicBool {
 
     fn current(&self) -> &AtomicBool {
         let instance = linux_execution_instance();
-        if self.states[instance].load(Ordering::Acquire) != 2 {
-            if self.states[instance]
-                .compare_exchange(0, 1, Ordering::Acquire, Ordering::Acquire)
-                .is_ok()
-            {
-                self.values[instance].store(self.initial, Ordering::Relaxed);
-                self.states[instance].store(2, Ordering::Release);
-            } else {
-                while self.states[instance].load(Ordering::Acquire) != 2 {
-                    core::hint::spin_loop();
-                }
+        if self.states[instance]
+            .compare_exchange(0, 1, Ordering::Acquire, Ordering::Acquire)
+            .is_ok()
+        {
+            self.values[instance].store(self.initial, Ordering::Relaxed);
+            self.states[instance].store(2, Ordering::Release);
+        } else {
+            while self.states[instance].load(Ordering::Acquire) != 2 {
+                core::hint::spin_loop();
             }
         }
         &self.values[instance]
@@ -1737,8 +1733,6 @@ static LINUX_RUNTIME_SYSCALL_RESULT_TRACE: [BankedAtomicU64; LINUX_RUNTIME_SYSCA
     [const { BankedAtomicU64::new(0) }; LINUX_RUNTIME_SYSCALL_TRACE_LIMIT];
 static LINUX_RUNTIME_SYSCALL_TRACE_COUNT: BankedAtomicU64 = BankedAtomicU64::new(0);
 static LINUX_RUNTIME_CONSOLE_TIMING_WRITTEN: BankedAtomicBool = BankedAtomicBool::new(false);
-static LINUX_SYSCALL_EXECUTABLE_PAGE: BankedAtomicU64 = BankedAtomicU64::new(0);
-static LINUX_SYSCALL_EXECUTABLE_PID: BankedAtomicU32 = BankedAtomicU32::new(0);
 static LINUX_RUNTIME_SLOW_DIAGNOSTIC_WRITTEN: BankedAtomicBool = BankedAtomicBool::new(false);
 static LINUX_RUNTIME_LATE_DIAGNOSTIC_WRITTEN: BankedAtomicBool = BankedAtomicBool::new(false);
 static LINUX_RUNTIME_STALLED_DIAGNOSTIC_WRITTEN: BankedAtomicBool = BankedAtomicBool::new(false);
@@ -6985,8 +6979,6 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
     LINUX_RUNTIME_FIRST_UNSUPPORTED_SYSCALL.store(u64::MAX, Ordering::SeqCst);
     LINUX_RUNTIME_SYSCALL_TRACE_COUNT.store(0, Ordering::SeqCst);
     LINUX_RUNTIME_CONSOLE_TIMING_WRITTEN.store(false, Ordering::SeqCst);
-    LINUX_SYSCALL_EXECUTABLE_PAGE.store(0, Ordering::SeqCst);
-    LINUX_SYSCALL_EXECUTABLE_PID.store(0, Ordering::SeqCst);
     LINUX_RUNTIME_SLOW_DIAGNOSTIC_WRITTEN.store(false, Ordering::SeqCst);
     LINUX_RUNTIME_LATE_DIAGNOSTIC_WRITTEN.store(false, Ordering::SeqCst);
     LINUX_RUNTIME_STALLED_DIAGNOSTIC_WRITTEN.store(false, Ordering::SeqCst);
@@ -8768,7 +8760,7 @@ extern "sysv64" fn linux_syscall_handler(
         rsp: user_stack,
         rflags: user_rflags,
         rax: 0,
-        fs_base: current_linux_fs_base(),
+        fs_base: active_fs_base(),
     };
     let register = |index: usize| saved_registers.argument(index).unwrap_or(0);
     let count = register(3);
@@ -8778,21 +8770,11 @@ extern "sysv64" fn linux_syscall_handler(
     let code_end = code_start.saturating_add(ELF_PROBE_CODE_SIZE.load(Ordering::SeqCst));
     let loader_start = ELF_PROBE_LOADER_CODE_BASE.load(Ordering::SeqCst);
     let loader_end = loader_start.saturating_add(ELF_PROBE_LOADER_CODE_SIZE.load(Ordering::SeqCst));
-    let executable_page = user_rip & !(PAGE_SIZE as u64 - 1);
-    let executable_pid = current_linux_process_pid();
-    let executable_cached = LINUX_SYSCALL_EXECUTABLE_PID.load(Ordering::Relaxed) == executable_pid
-        && LINUX_SYSCALL_EXECUTABLE_PAGE.load(Ordering::Relaxed) == executable_page;
-    let executable = (code_start..code_end).contains(&user_rip)
-        || (loader_start..loader_end).contains(&user_rip)
-        || executable_cached
-        || address_space::current_linux_address_executable(user_rip);
-    if executable && !executable_cached {
-        LINUX_SYSCALL_EXECUTABLE_PAGE.store(executable_page, Ordering::Relaxed);
-        LINUX_SYSCALL_EXECUTABLE_PID.store(executable_pid, Ordering::Relaxed);
-    }
     if !ELF_PROBE_ACTIVE.load(Ordering::SeqCst)
         || !linux_user_stack_pointer_valid(user_stack)
-        || !executable
+        || (!(code_start..code_end).contains(&user_rip)
+            && !(loader_start..loader_end).contains(&user_rip)
+            && !address_space::current_linux_address_executable(user_rip))
         || user_rflags & ((3 << 12) | (1 << 17)) != 0
     {
         if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) || cfg!(feature = "verification-boot") {
@@ -10138,19 +10120,6 @@ extern "sysv64" fn linux_syscall_handler(
             let bit = 1_u64 << (number % 64);
             LINUX_RUNTIME_EINVAL_SYSCALLS[word].fetch_or(bit, Ordering::SeqCst);
         }
-    }
-    if matches!(
-        number,
-        LINUX_MMAP_SYSCALL
-            | LINUX_MPROTECT_SYSCALL
-            | LINUX_MUNMAP_SYSCALL
-            | LINUX_MREMAP_SYSCALL
-            | LINUX_REMAP_FILE_PAGES_SYSCALL
-            | LINUX_EXECVE_SYSCALL
-            | LINUX_EXECVEAT_SYSCALL
-    ) {
-        LINUX_SYSCALL_EXECUTABLE_PAGE.store(0, Ordering::Relaxed);
-        LINUX_SYSCALL_EXECUTABLE_PID.store(0, Ordering::Relaxed);
     }
     result
 }
@@ -36830,47 +36799,29 @@ fn copy_from_linux_user(address: u64, output: &mut [u8]) -> bool {
     if !linux_readable_user_range_contains(address, output.len()) {
         return false;
     }
-    // SAFETY: the complete range was validated above and Linux execution is
-    // serialized on this CPU, so the mapping remains stable for the copy.
+    // SAFETY: every byte is covered by a contiguous chain of declared readable
+    // areas that remain mapped in the current root for the whole call.
     unsafe {
         with_supervisor_user_access(|| {
-            core::ptr::copy_nonoverlapping(address as *const u8, output.as_mut_ptr(), output.len());
+            for (offset, byte) in output.iter_mut().enumerate() {
+                *byte = (address as *const u8).add(offset).read_volatile();
+            }
         });
     }
     true
 }
 
 fn copy_linux_c_string(address: u64, output: &mut [u8]) -> Result<usize, u64> {
-    let mut offset = 0;
-    while offset < output.len() {
-        let Some(source) = address.checked_add(offset as u64) else {
+    for index in 0..output.len() {
+        let Some(source) = address.checked_add(index as u64) else {
             return Err(LINUX_EFAULT);
         };
-        if !linux_readable_user_range_contains(source, 1) {
+        if !copy_from_linux_user(source, &mut output[index..=index]) {
             return Err(LINUX_EFAULT);
         }
-        let page_remaining = PAGE_SIZE - (source as usize & (PAGE_SIZE - 1));
-        let chunk = page_remaining.min(output.len() - offset);
-        let mut found = None;
-        // SAFETY: validating the first byte materializes and verifies this
-        // user page. The chunk never crosses its boundary, and execution is
-        // serialized until the copy completes.
-        unsafe {
-            with_supervisor_user_access(|| {
-                for index in 0..chunk {
-                    let byte = (source as *const u8).add(index).read();
-                    output[offset + index] = byte;
-                    if byte == 0 {
-                        found = Some(offset + index);
-                        break;
-                    }
-                }
-            });
+        if output[index] == 0 {
+            return Ok(index);
         }
-        if let Some(length) = found {
-            return Ok(length);
-        }
-        offset += chunk;
     }
     Err(LINUX_ENAMETOOLONG)
 }
@@ -39712,11 +39663,13 @@ fn copy_to_linux_user(address: u64, input: &[u8]) -> bool {
     {
         return false;
     }
-    // SAFETY: the complete range was validated and made private above. Linux
-    // execution is serialized on this CPU, so the mapping remains stable.
+    // SAFETY: every byte is covered by a contiguous chain of declared writable
+    // areas that remain mapped in the current root for the whole call.
     unsafe {
         with_supervisor_user_access(|| {
-            core::ptr::copy_nonoverlapping(input.as_ptr(), address as *mut u8, input.len());
+            for (offset, byte) in input.iter().enumerate() {
+                (address as *mut u8).add(offset).write_volatile(*byte);
+            }
         });
     }
     true
@@ -43071,12 +43024,6 @@ fn resume_action(action: RuntimeAction) -> u64 {
 
 pub(crate) fn active_fs_base() -> u64 {
     unsafe { read_msr(FS_BASE_MSR) }
-}
-
-fn current_linux_fs_base() -> u64 {
-    current_linux_thread_slot()
-        .map(|slot| LINUX_THREAD_POINTERS[slot].load(Ordering::Relaxed))
-        .unwrap_or_else(active_fs_base)
 }
 
 pub(crate) fn verify_user_fs_base_installation() -> bool {

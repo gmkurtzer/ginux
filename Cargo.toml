@@ -32,8 +32,5 @@ opt-level = "s"
 panic = "abort"
 strip = true
 
-[profile.release.package.ginux-kernel]
-opt-level = 3
-
 [profile.release.package.ginux-controller-runtime]
 opt-level = "z"
