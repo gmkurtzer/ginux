@@ -123,21 +123,31 @@ fi
     else
         printf '%s\n' 'domain start rocky --attach'
     fi
-    wait_for 'ginux: OCI image ready' 240
-    wait_for 'ginux: entering configured Linux init' 30
-    init_started_at=$(date +%s)
     if [[ "$start_mode" == detached-return ]]; then
+        wait_for 'rocky: starting (detached)' 10
+        wait_for_count 'ginux> ' 2 10
+        printf '%s\n' 'domain status rocky'
+        wait_for 'State:       starting' 240
         printf '%s\n' 'domain list' 'domain status rocky'
-        wait_for 'rocky           booting' 30
+        wait_for 'rocky           booting' 120
         wait_for 'State:       booting' 10
-        wait_for 'Execution:   idle' 10
+        wait_for 'Execution:   booting' 10
+        if grep -Eq 'ginux: (checking OCI cache|OCI cache hit|OCI unpacking image|starting configured runtime domain|entering configured Linux init)' "$output_file"; then
+            fail 'detached lifecycle output leaked onto the controller console'
+        fi
         if grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC|^ginux: Linux user fault|Linux init (execution|setup) failed|rocky: (failed|stopped)' "$output_file"; then
             fail 'background domain did not return cleanly to the controller'
         fi
         printf '%s\n' ok >"$success_file"
         stop_qemu
         exit 0
-    elif [[ "$start_mode" == stop-restart ]]; then
+    fi
+    if [[ "$start_mode" != detached && "$start_mode" != stop-restart ]]; then
+        wait_for 'ginux: OCI image ready' 240
+        wait_for 'ginux: entering configured Linux init' 30
+    fi
+    init_started_at=$(date +%s)
+    if [[ "$start_mode" == stop-restart ]]; then
         for _ in {1..90}; do
             printf '%s\n' 'domain status rocky'
             sleep 1

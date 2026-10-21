@@ -1838,6 +1838,7 @@ static NETWORK_PING_RESULT: AtomicU8 = AtomicU8::new(0);
 static NETWORK_DHCP_REQUESTED: AtomicBool = AtomicBool::new(false);
 static NETWORK_DHCP_RESULT: AtomicU8 = AtomicU8::new(0);
 static CONTAINER_PULL_REQUESTED: AtomicBool = AtomicBool::new(false);
+static CONTAINER_INSTALL_REQUESTED: AtomicBool = AtomicBool::new(false);
 const DOMAIN_EXEC_ARGUMENT_CAPACITY: usize = 256;
 static CONTAINER_EXEC_REQUESTED: [AtomicBool; control_abi::DOMAIN_LIMIT] =
     [const { AtomicBool::new(false) }; control_abi::DOMAIN_LIMIT];
@@ -33508,6 +33509,19 @@ fn container_console_write(bytes: &[u8]) {
     }
 }
 
+pub(crate) fn buffer_configured_container_console(bytes: &[u8]) -> bool {
+    let Some(slot) = selected_or_active_container_slot() else {
+        return false;
+    };
+    let start = CONTAINER_CONSOLE_CURSOR[slot].load(Ordering::Relaxed);
+    for (offset, byte) in bytes.iter().copied().enumerate() {
+        let index = start.wrapping_add(offset as u64) as usize % CONTAINER_CONSOLE_CAPACITY;
+        CONTAINER_CONSOLE_BYTES[slot][index].store(byte, Ordering::Relaxed);
+    }
+    CONTAINER_CONSOLE_CURSOR[slot].store(start.wrapping_add(bytes.len() as u64), Ordering::Release);
+    true
+}
+
 fn reset_container_console(slot: usize, attached: bool) {
     CONTAINER_CONSOLE_CURSOR[slot].store(0, Ordering::Release);
     CONTAINER_CONSOLE_ATTACHED[slot].store(attached, Ordering::Release);
@@ -42328,8 +42342,8 @@ fn console_read_line(domain_id: u64, capability: u64, frame: *const UserTrapFram
     length as u64
 }
 
-fn console_read_byte(domain_id: u64, capability: u64, frame: *const UserTrapFrame) -> u64 {
-    let Some(frame) = (unsafe { frame.as_ref() }) else {
+fn console_read_byte(domain_id: u64, capability: u64, frame: *mut UserTrapFrame) -> u64 {
+    let Some(frame) = (unsafe { frame.as_mut() }) else {
         return u64::MAX - 2;
     };
     if !domain::handle_permits(domain_id, capability, 2, Rights::READ)
@@ -42338,6 +42352,18 @@ fn console_read_byte(domain_id: u64, capability: u64, frame: *const UserTrapFram
         || !domain::renew_auxiliary_call_epoch(domain_id)
     {
         return u64::MAX - 2;
+    }
+    if !crate::serial_input_ready() && queue_background_container_work() {
+        if !scheduler::suspend_container_lifecycle(
+            frame,
+            USER_CODE_SELECTOR,
+            USER_DATA_SELECTOR,
+            0,
+            active_fs_base(),
+        ) {
+            return u64::MAX - 2;
+        }
+        return u64::MAX;
     }
     u64::from(crate::serial_read_byte_blocking())
 }
@@ -43057,6 +43083,7 @@ fn next_running_container_slot(cursor: usize) -> Option<usize> {
 
 fn queue_background_container_work() -> bool {
     if CONTAINER_PULL_REQUESTED.load(Ordering::Acquire)
+        || CONTAINER_INSTALL_REQUESTED.load(Ordering::Acquire)
         || CONTAINER_RESTART_REQUESTED.load(Ordering::Acquire)
     {
         return true;
@@ -43158,6 +43185,28 @@ pub(crate) fn configured_container_image(output: &mut [u8]) -> Option<usize> {
 
 pub(crate) fn take_container_pull_request() -> bool {
     CONTAINER_PULL_REQUESTED.swap(false, Ordering::AcqRel)
+}
+
+pub(crate) fn request_container_install() {
+    CONTAINER_INSTALL_REQUESTED.store(true, Ordering::Release);
+}
+
+pub(crate) fn take_container_install_request() -> bool {
+    CONTAINER_INSTALL_REQUESTED.swap(false, Ordering::AcqRel)
+}
+
+pub(crate) fn configured_container_console_attached() -> bool {
+    selected_container_slot()
+        .is_some_and(|slot| CONTAINER_CONSOLE_ATTACHED[slot].load(Ordering::Acquire))
+}
+
+pub(crate) fn detached_container_lifecycle_pending() -> bool {
+    selected_container_slot().is_some_and(|slot| {
+        !CONTAINER_CONSOLE_ATTACHED[slot].load(Ordering::Acquire)
+            && (CONTAINER_PULL_REQUESTED.load(Ordering::Acquire)
+                || CONTAINER_INSTALL_REQUESTED.load(Ordering::Acquire)
+                || CONTAINER_RESTART_REQUESTED.load(Ordering::Acquire))
+    })
 }
 
 pub(crate) fn complete_container_pull(success: bool) {

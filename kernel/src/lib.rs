@@ -39,8 +39,10 @@ use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 const COM1: u16 = 0x3f8;
 static OPERATOR_CONSOLE_READY: AtomicBool = AtomicBool::new(false);
+static BACKGROUND_DOMAIN_OUTPUT: AtomicBool = AtomicBool::new(false);
 static LINUX_REALTIME_EPOCH_SECONDS: AtomicU64 = AtomicU64::new(0);
 static LINUX_REALTIME_EPOCH_TSC: AtomicU64 = AtomicU64::new(0);
+static OCI_PULL_STARTED: AtomicU64 = AtomicU64::new(0);
 static mut PERSISTED_OCI_CATALOG: [u8; ginux_oci_cache::ENCODED_SIZE] =
     [0; ginux_oci_cache::ENCODED_SIZE];
 const EFI_RESET_SHUTDOWN: u32 = 2;
@@ -3854,11 +3856,16 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     let mut controller_recovery_attempts = 0_u8;
     let mut controller_launch_announced = false;
     'managed: loop {
+        BACKGROUND_DOMAIN_OUTPUT.store(false, Ordering::Release);
         if !controller_launch_announced {
             serial_write("\r\nginux: launching embedded controller in ring 3\r\n");
             controller_launch_announced = true;
         }
         let controller_completed = address_space::run_installed_interactive_controller();
+        BACKGROUND_DOMAIN_OUTPUT.store(
+            arch::x86_64::cpu::detached_container_lifecycle_pending(),
+            Ordering::Release,
+        );
         let shutdown_requested = arch::x86_64::cpu::take_container_host_shutdown_request();
         if shutdown_requested && controller_completed && !cfg!(feature = "verification-boot") {
             match persist_domain_configuration(virtio_block, virtio_mmio, virtio_iommu_profile) {
@@ -3923,6 +3930,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         }
         if arch::x86_64::cpu::take_container_pull_request() {
             let pull_started = arch::x86_64::timer::timestamp_counter();
+            OCI_PULL_STARTED.store(pull_started, Ordering::Release);
             if !image_store::begin_layer_pull() {
                 serial_write("ginux: OCI image staging reset failed\r\n");
                 arch::x86_64::cpu::complete_container_pull(false);
@@ -3932,7 +3940,6 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             let image_size = arch::x86_64::cpu::configured_container_image(&mut image).unwrap_or(0);
             let mut downloaded = false;
             let mut cache_hit = false;
-            let mut cached_rootfs = false;
             let mut cache_repair = false;
             if image_size != 0 {
                 serial_write("ginux: checking OCI cache ");
@@ -3955,7 +3962,6 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
                         serial_write("ginux: OCI cache hit (published root filesystem)\r\n");
                         downloaded = true;
                         cache_hit = true;
-                        cached_rootfs = true;
                     }
                     OciCacheRestore::LayerHit(layers) => {
                         serial_write("ginux: OCI cache hit (");
@@ -4037,12 +4043,28 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
                     ),
                 }
             }
-            if downloaded && !cached_rootfs {
+            if downloaded {
+                arch::x86_64::cpu::request_container_install();
+            } else {
+                let _ = image_store::discard_published_layers();
+                arch::x86_64::cpu::complete_container_pull(false);
+                serial_write("ginux: OCI image pull failed; partial objects discarded\r\n");
+            }
+            if !downloaded || !arch::x86_64::cpu::configured_container_console_attached() {
+                continue 'managed;
+            }
+        }
+        if arch::x86_64::cpu::take_container_install_request() {
+            let mut image = [0_u8; control_abi::DOMAIN_MAX_IMAGE_SIZE];
+            let image_size = arch::x86_64::cpu::configured_container_image(&mut image).unwrap_or(0);
+            let slot = arch::x86_64::cpu::configured_container_slot();
+            let cached_rootfs = slot.is_some_and(published_rootfs::is_installed);
+            if !cached_rootfs {
                 serial_write("ginux: OCI unpacking image filesystem\r\n");
             }
             let unpack_started = arch::x86_64::timer::timestamp_counter();
-            let success = arch::x86_64::cpu::configured_container_slot().is_some_and(|slot| {
-                downloaded && (cached_rootfs || image_store::install_published_layers(slot))
+            let success = slot.is_some_and(|slot| {
+                image_size != 0 && (cached_rootfs || image_store::install_published_layers(slot))
             });
             serial_write_elapsed("ginux: timing OCI unpack/publish: ", unpack_started);
             if success && !cached_rootfs {
@@ -4052,7 +4074,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
                     virtio_iommu_profile,
                     &image[..image_size],
                     persisted_oci_catalog,
-                    arch::x86_64::cpu::configured_container_slot().unwrap_or(usize::MAX),
+                    slot.unwrap_or(usize::MAX),
                 ) {
                     serial_write(if newly_stored {
                         "ginux: OCI cache stored published root filesystem ("
@@ -4063,7 +4085,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
                     serial_write(" bytes)\r\n");
                 }
             }
-            serial_write_elapsed("ginux: timing OCI total: ", pull_started);
+            let pull_started = OCI_PULL_STARTED.swap(0, Ordering::AcqRel);
+            if pull_started != 0 {
+                serial_write_elapsed("ginux: timing OCI total: ", pull_started);
+            }
             if !success {
                 let _ = image_store::discard_published_layers();
             }
@@ -4071,9 +4096,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             serial_write(if success {
                 "ginux: OCI image ready\r\n"
             } else {
-                "ginux: OCI image pull failed; partial objects discarded\r\n"
+                "ginux: OCI image unpack failed; partial objects discarded\r\n"
             });
-            if !success {
+            if !success || !arch::x86_64::cpu::configured_container_console_attached() {
                 continue 'managed;
             }
         }
@@ -4369,6 +4394,11 @@ fn serial_write(message: &str) {
 
 pub(crate) fn serial_write_bytes(bytes: &[u8]) {
     if !cfg!(feature = "verification-boot") && !OPERATOR_CONSOLE_READY.load(Ordering::Acquire) {
+        return;
+    }
+    if BACKGROUND_DOMAIN_OUTPUT.load(Ordering::Acquire)
+        && arch::x86_64::cpu::buffer_configured_container_console(bytes)
+    {
         return;
     }
     serial_write_raw(bytes);
