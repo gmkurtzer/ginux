@@ -11,7 +11,7 @@
 
 \newcommand{\project}{Ginux}
 \newcommand{\modelname}{OpenAI Codex with GPT-5.6 Sol}
-\newcommand{\evaluatedcommit}{\texttt{9afa61762a66a20855ea3a23e3e04221b54a5a22}}
+\newcommand{\evaluatedcommit}{\texttt{9afa61762a66a208\allowbreak{}55ea3a23e3e04221\allowbreak{}b54a5a22}}
 \newcommand{\shortcommit}{\texttt{9afa617}}
 \newcommand{\estimatedcost}{approximately USD~8,000}
 
@@ -194,7 +194,7 @@ The operative method was benchmark-driven:
 Human architectural intent $\rightarrow$ concrete milestone $\rightarrow$
 observable acceptance benchmark $\rightarrow$ Codex implementation
 $\rightarrow$ build and automated tests $\rightarrow$ QEMU boot/runtime test
-$\rightarrow$ log analysis and revision $\circlearrowleft$ $\rightarrow$
+$\rightarrow$ log analysis and revision $\rightarrow$ repeat as needed $\rightarrow$
 human acceptance $\rightarrow$ signed commit and stopping-point review.
 }}
 \end{center}
@@ -376,9 +376,9 @@ families remain absent or partial. General mount and namespace calls were still
 policy-denied at the evaluated commit despite the intended domain model
 eventually allowing such operations inside the outer boundary.
 
-The strongest workload evidence is practical rather than comprehensive:
-unmodified Alpine/musl shells execute; Rocky/glibc shells and dynamic
-utilities execute; and a Rocky Linux 10 UBI-init image can launch systemd,
+Practical workload evidence is stronger than comprehensive conformance
+evidence. Unmodified Alpine/musl shells execute; Rocky/glibc shells and dynamic
+utilities execute; and a Rocky Linux 10 image configured for UBI init can launch systemd,
 reach multi-user targets, and present a console login in selected paths.
 Arbitrary Linux programs are not guaranteed to work.
 
@@ -635,7 +635,7 @@ silently alter the reported result.
 Before publication, the following evidence should accompany the report:
 
 \begin{enumerate}
-  \item a public repository URL and immutable tag for \evaluatedcommit;
+  \item a public repository URL and immutable tag for commit \shortcommit;
   \item an exported prompt/task history sufficient to substantiate the
         single-agent development description;
   \item provider billing evidence supporting the API-cost estimate;

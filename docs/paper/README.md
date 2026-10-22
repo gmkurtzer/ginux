@@ -10,7 +10,15 @@ approximately 99 percent single-agent development share are author-reported
 estimates; active human hours and provider-exported token totals were not
 instrumented and must not be inferred from repository history.
 
-Build with a standard LaTeX distribution:
+The simplest build uses Tectonic:
+
+```sh
+cd docs/paper
+tectonic ginux-ai-systems-report.tex
+```
+
+The resulting `ginux-ai-systems-report.pdf` is ready to open in any PDF
+viewer. A standard LaTeX distribution also works:
 
 ```sh
 cd docs/paper
