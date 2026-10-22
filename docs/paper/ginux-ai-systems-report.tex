@@ -358,6 +358,40 @@ control plane 3,262, reusable crates 6,868, native services 4,284, tests 6,224,
 and tools 894. These categories include low-level probes and assembly fixtures;
 they should not be interpreted as equivalent units of effort.
 
+A later whole-workspace scan, taken after the evaluated commit, reported
+188,958 lines classified as code across 1,459 files: 149,249 Rust, 13,370
+assembly, 11,536 Markdown, 6,809 D, 5,535 shell, and smaller categories. That
+headline is useful evidence of the scale accumulated in roughly two weeks, but
+it has a different counting boundary from Table~\ref{tab:artifact}. In
+particular, the scan includes the 35,946-line generated boot-payload source and
+appears to include ignored compiler metadata: 573 D files and 631 JSON files
+are present in the scan but absent from the Git index. The frozen,
+non-generated implementation/test count therefore remains the more defensible
+measure of retained authored surface. Both measurements and the counting
+script should be published; neither should be silently substituted for the
+other.
+
+\subsection{Code volume as assurance load}
+
+LOC is not a quality or productivity score, but code volume is security
+relevant because every retained parser, state transition, unsafe operation,
+ABI emulation, and cleanup path enlarges the surface that must be understood.
+The notable result is not that an agent typed approximately 139,000
+non-generated implementation/test lines. It is that candidate implementation
+grew faster than a single human could plausibly inspect line by line during
+the same interval. Generation throughput can therefore create \emph{assurance
+debt}: review, threat modeling, fuzzing, compatibility validation, provenance,
+and maintenance obligations that lag behind construction.
+
+The ratio is especially consequential for privileged systems code. A defect
+in an application may compromise one service; a defect in syscall dispatch,
+memory ownership, executable loading, a device path, or a domain transition
+may invalidate the isolation argument for every workload. Rapid generation
+does not merely save implementation time. Unless assurance capacity scales
+with it, rapid generation also increases the amount of security-critical code
+whose behavior is inferred from agent-authored tests rather than independently
+established.
+
 \subsection{Linux compatibility}
 
 The compatibility ledger covers all 375 native Linux 6.12 x86-64 syscall
@@ -411,6 +445,41 @@ threat-model validation, or formal proof. Driver compatibility, including
 NVIDIA GPU operation and unmodified Linux \texttt{.ko} modules, is not
 implemented. The system therefore cannot support claims about GPU workloads,
 stable kABI, or production isolation.
+
+\subsection{Security discovery and supply-chain asymmetry}
+
+The security implications are not limited to defects introduced by generated
+code. The same model family used to construct \project{} can search mature
+human-written systems for defects at a pace that changes the economics of
+vulnerability discovery. In October 2026, coordinated research involving
+GPT-5.6 Sol helped identify the critical impact of a long-standing PHP engine
+state-lifecycle flaw. The published advisory describes stale request-owned
+global state producing use-after-free and unauthenticated remote code
+execution, with a CVSS score of 9.2~\cite{phpStaleState2026}. OpenAI reported
+that a Calif researcher used GPT-5.6 Sol to find a critical flaw and described
+the episode as both a defender opportunity and a warning that similar
+capabilities can accelerate offensive tooling~\cite{openaiPatchPlanet2026}.
+
+The PHP Foundation's account is important because it resists a simplistic
+``AI found what humans could not'' narrative. The underlying out-of-memory
+problem had been recognized in 2024, but remediation stalled amid compatibility
+trade-offs, denial-of-service risk, third-party extension impact, consensus
+process, and scarce maintainer capacity. AI-assisted reports in 2026 clarified
+the path to remote code execution and raised its priority. At the same time,
+the team processed more than 100 reports that were invalid, duplicate, or not
+reproducible; humans made every disposition and worked on every patch
+~\cite{phpFoundation2026}. Discovery scaled faster than triage, design judgment,
+compatibility analysis, coordinated disclosure, and deployment.
+
+This is the same asymmetry visible in \project{}. AI can rapidly create a large
+new trusted-computing surface, and it can rapidly search old trusted-computing
+surfaces for latent human errors. Attackers and defenders may both obtain that
+leverage, while maintainers still bear the serial work of validating findings,
+choosing compatible repairs, coordinating embargoes, shipping updates, and
+supporting old deployments. The software-supply-chain risk is therefore not
+``AI code'' as a distinct material. It is a throughput mismatch: code and
+findings can be produced at machine speed while trustworthy review,
+integration, disclosure, and stewardship remain institutionally constrained.
 
 \section{What the Experiment Says About AI}
 
@@ -626,8 +695,11 @@ source manifest, compatibility ledger, raw benchmark logs, and development
 transcript should be preserved together so that later project changes do not
 silently alter the reported result.
 
+\begingroup
+\raggedright
 \bibliographystyle{plain}
 \bibliography{references}
+\endgroup
 
 \appendix
 \section{Reproduction and Publication Checklist}
