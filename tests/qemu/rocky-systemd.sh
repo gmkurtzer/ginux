@@ -81,6 +81,31 @@ wait_for_count() {
     fail "timed out waiting for occurrence $expected of '$marker'"
 }
 
+now_ms() {
+    perl -MTime::HiRes=time -e 'printf "%.0f\n", time() * 1000'
+}
+
+wait_for_count_ms() {
+    local marker=$1
+    local expected=$2
+    local limit_ms=$3
+    local started
+    local now
+    started=$(now_ms)
+    while true; do
+        if (( $(grep -Fc "$marker" "$output_file" || true) >= expected )); then
+            now=$(now_ms)
+            printf '%s\n' "$((now - started))"
+            return 0
+        fi
+        now=$(now_ms)
+        if ((now - started >= limit_ms)); then
+            return 1
+        fi
+        sleep 0.02
+    done
+}
+
 diagnose_login_timeout() {
     printf '\035'
     if wait_for "[detached from domain; use 'domain attach NAME' to return]" 10; then
@@ -118,7 +143,7 @@ fi
     printf '%s\n' \
         'domain new rocky' \
         "domain set rocky image=$rocky_image init=/sbin/init"
-    if [[ "$start_mode" == detached || "$start_mode" == detached-return || "$start_mode" == stop-restart ]]; then
+    if [[ "$start_mode" == detached || "$start_mode" == detached-return || "$start_mode" == responsive || "$start_mode" == stop-restart ]]; then
         printf '%s\n' 'domain start rocky'
     else
         printf '%s\n' 'domain start rocky --attach'
@@ -139,6 +164,34 @@ fi
             fail 'background domain did not return cleanly to the controller'
         fi
         printf '%s\n' ok >"$success_file"
+        stop_qemu
+        exit 0
+    fi
+    if [[ "$start_mode" == responsive ]]; then
+        wait_for 'rocky: starting (detached)' 10
+        wait_for_count 'ginux> ' 2 10
+        # Advance cache restore and publication as separate background stages.
+        sleep 1
+        printf '%s\n' 'domain status rocky'
+        wait_for 'State:       starting' 240
+        sleep 0.1
+        printf '%s\n' 'domain status rocky'
+        wait_for 'State:       booting' 120
+        # The first Linux timer handoff existed before this regression test.
+        # Consume it, resume Linux, and measure the required recurring handoff.
+        local_catalog_count=$(grep -Fc 'GINUX.EFI component catalog v0:' "$output_file" || true)
+        sleep 0.1
+        printf '%s\n' components
+        wait_for_count 'GINUX.EFI component catalog v0:' "$((local_catalog_count + 1))" 10
+        local_catalog_count=$((local_catalog_count + 1))
+        sleep 0.1
+        printf '%s\n' components
+        if ! boot_response_ms=$(wait_for_count_ms 'GINUX.EFI component catalog v0:' "$((local_catalog_count + 1))" 1000); then
+            fail 'controller did not respond within 1000 ms while detached Linux work was running'
+        fi
+        printf '%s\n' shutdown
+        wait_for 'GINUX_KERNEL_OK' 15
+        printf '%s\n' "$boot_response_ms" >"$success_file"
         stop_qemu
         exit 0
     fi
@@ -280,6 +333,14 @@ if [[ "$start_mode" == detached-return && -s "$success_file" ]] \
     && grep -Fq 'State:       booting' "$output_file" \
     && ! grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC|^ginux: Linux user fault|Linux init (execution|setup) failed|rocky: (failed|stopped)' "$output_file"; then
     echo 'Rocky background start returned to the controller with observable boot state.'
+    exit 0
+fi
+
+if [[ "$start_mode" == responsive && -s "$success_file" ]] \
+    && grep -Fq 'GINUX_KERNEL_OK' "$output_file" \
+    && ! grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC|^ginux: Linux user fault|Linux init (execution|setup) failed|rocky: (failed|stopped)' "$output_file"; then
+    read -r boot_response_ms <"$success_file"
+    echo "Controller remained responsive while detached Linux work was running (${boot_response_ms} ms)."
     exit 0
 fi
 

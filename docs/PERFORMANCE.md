@@ -48,6 +48,24 @@ adding write permission first creates a private copy. The measured short boot
 now allocates about 10,400 file frames instead of about 172,000 while retaining
 zero-before-reuse for private frames.
 
+### Detached-domain controller latency
+
+Detached Linux execution previously handed control back to the controller only
+once. After the domain resumed, later input could remain unanswered while that
+domain continued to run. The timer path now checks for console input every five
+milliseconds and requests another handoff at the next safe Linux syscall
+boundary. With no pending input, it performs no runtime serialization or
+controller switch.
+
+`make test-domain-responsiveness` reproduces two consecutive handoffs while a
+detached Rocky domain is executing. The pre-fix kernel exceeded the 1,000 ms
+test deadline; the corrected path responded in 7 ms under x86-64 TCG.
+
+This validates concurrent, preemptively scheduled Linux threads and responsive
+controller/domain time sharing on the current single-vCPU target. It does not
+claim multicore SMP execution: the QEMU development configuration still boots
+one virtual CPU.
+
 ## Findings closed by measurement
 
 - Rootfs lookup already uses a pathname index. Measured `openat` work was about

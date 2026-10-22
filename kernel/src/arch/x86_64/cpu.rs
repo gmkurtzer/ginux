@@ -1880,8 +1880,6 @@ static CONTAINER_STOP_REQUESTED: [AtomicBool; control_abi::DOMAIN_LIMIT] =
     [const { AtomicBool::new(false) }; control_abi::DOMAIN_LIMIT];
 static CONTAINER_BACKGROUND_SUSPENDED: [AtomicBool; control_abi::DOMAIN_LIMIT] =
     [const { AtomicBool::new(false) }; control_abi::DOMAIN_LIMIT];
-static CONTAINER_BACKGROUND_STARTED: [AtomicBool; control_abi::DOMAIN_LIMIT] =
-    [const { AtomicBool::new(false) }; control_abi::DOMAIN_LIMIT];
 
 const EXTENDED_STATE_SIZE: usize = 1024;
 
@@ -12127,9 +12125,6 @@ fn save_suspended_linux_runtime(
     LINUX_RUNTIME_BACKGROUND_SUSPENDED.store(background, Ordering::Release);
     if let Some(slot) = active_container_slot() {
         CONTAINER_BACKGROUND_SUSPENDED[slot].store(background, Ordering::Release);
-        if background {
-            CONTAINER_BACKGROUND_STARTED[slot].store(true, Ordering::Release);
-        }
     }
     true
 }
@@ -33525,7 +33520,6 @@ pub(crate) fn buffer_configured_container_console(bytes: &[u8]) -> bool {
 fn reset_container_console(slot: usize, attached: bool) {
     CONTAINER_CONSOLE_CURSOR[slot].store(0, Ordering::Release);
     CONTAINER_CONSOLE_ATTACHED[slot].store(attached, Ordering::Release);
-    CONTAINER_BACKGROUND_STARTED[slot].store(false, Ordering::Release);
 }
 
 fn redraw_container_console(slot: usize) {
@@ -39119,16 +39113,22 @@ pub(crate) fn expire_linux_waits_from_timer(frame: &mut UserInterruptFrame) {
     }
     let descriptor_wakes = wake_linux_descriptor_waits();
     let expired = expire_linux_waits();
+    // Detached domains keep the CPU until the operator has input. Polling at
+    // 200 Hz bounds console latency without serializing an idle runtime on
+    // every timer interrupt.
     if LINUX_RUNTIME_MODE.load(Ordering::Acquire)
         && active_container_slot().is_some_and(|slot| {
-            container_state(slot) == control_abi::DOMAIN_STATE_BOOTING
-                && !CONTAINER_CONSOLE_ATTACHED[slot].load(Ordering::Acquire)
-                && !CONTAINER_BACKGROUND_STARTED[slot].load(Ordering::Acquire)
+            matches!(
+                container_state(slot),
+                control_abi::DOMAIN_STATE_BOOTING | control_abi::DOMAIN_STATE_RUNNING
+            ) && !CONTAINER_CONSOLE_ATTACHED[slot].load(Ordering::Acquire)
         })
         && LINUX_RUNTIME_BACKGROUND_TICKS.fetch_add(1, Ordering::AcqRel) + 1 >= 5
     {
         LINUX_RUNTIME_BACKGROUND_TICKS.store(0, Ordering::Release);
-        LINUX_RUNTIME_BACKGROUND_YIELD_REQUESTED.store(true, Ordering::Release);
+        if crate::serial_input_ready() {
+            LINUX_RUNTIME_BACKGROUND_YIELD_REQUESTED.store(true, Ordering::Release);
+        }
     }
     // A Linux runtime thread can wait in a userspace spin lock without making
     // another syscall. Give a runnable sibling a bounded time slice so such a
@@ -43089,8 +43089,10 @@ fn queue_background_container_work() -> bool {
         return true;
     }
     let Some(slot) = (0..control_abi::DOMAIN_LIMIT).find(|slot| {
-        container_state(*slot) == control_abi::DOMAIN_STATE_BOOTING
-            && CONTAINER_BACKGROUND_SUSPENDED[*slot].load(Ordering::Acquire)
+        matches!(
+            container_state(*slot),
+            control_abi::DOMAIN_STATE_BOOTING | control_abi::DOMAIN_STATE_RUNNING
+        ) && CONTAINER_BACKGROUND_SUSPENDED[*slot].load(Ordering::Acquire)
             && address_space::linux_runtime_is_suspended(*slot)
     }) else {
         return false;

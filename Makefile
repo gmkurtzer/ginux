@@ -17,7 +17,7 @@ SYSTEM_PROFILE := profiles/minimal-system-v0/profile.tsv
 
 .DEFAULT_GOAL := help
 
-.PHONY: help doctor manifest system-image test-alpine test-rocky-shell test-rocky-dnf test-multi-domain test-linux-abi test-linux-runtime test-storage test-oci-cache probe-rocky-systemd test-rocky-systemd test-rocky-detached benchmark-rocky-systemd profile-rocky-systemd rocky-image rocky-image-check linux-probe controller-runtime network-service protocol-service volume-service abi-conformance architecture-check linux-compat-check build build-verification build-linux-profile run reset-storage test test-c1 test-c2 fmt gate clean
+.PHONY: help doctor manifest system-image test-alpine test-rocky-shell test-rocky-dnf test-multi-domain test-linux-abi test-linux-runtime test-storage test-oci-cache probe-rocky-systemd test-rocky-systemd test-rocky-detached test-domain-responsiveness benchmark-rocky-systemd profile-rocky-systemd rocky-image rocky-image-check linux-probe controller-runtime network-service protocol-service volume-service abi-conformance architecture-check linux-compat-check build build-verification build-linux-profile run reset-storage test test-c1 test-c2 fmt gate clean
 
 help:
 	@echo "Ginux development targets"
@@ -32,6 +32,7 @@ help:
 	@echo "  make probe-rocky-systemd Probe Rocky systemd and verify the documented next blocker"
 	@echo "  make test-rocky-systemd  Verify cold and cached warm Rocky systemd login boots"
 	@echo "  make test-rocky-detached Verify detached Rocky start returns to the controller"
+	@echo "  make test-domain-responsiveness Verify controller latency under detached Linux work"
 	@echo "  make benchmark-rocky-systemd Benchmark warm Rocky init (3 s gate on KVM)"
 	@echo "  make profile-rocky-systemd   Profile Rocky init inside the Ginux kernel"
 	@echo "  make rocky-image Fetch and export the pinned Rocky 10 x86-64 system image"
@@ -159,6 +160,9 @@ test-rocky-systemd: build
 
 test-rocky-detached: build
 	@GINUX_ROCKY_START_MODE=detached-return GINUX_REQUIRE_OCI_CACHE_HIT=1 tests/qemu/rocky-systemd.sh
+
+test-domain-responsiveness: build
+	@GINUX_ROCKY_START_MODE=responsive GINUX_REQUIRE_OCI_CACHE_HIT=1 tests/qemu/rocky-systemd.sh
 
 benchmark-rocky-systemd: build
 	@accelerator="$${QEMU_ACCEL:-$$(source tools/qemu/common.sh; default_accelerator)}"; \
