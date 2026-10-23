@@ -23,28 +23,32 @@
 \maketitle
 
 \begin{abstract}
-An AI coding agent built a new Linux-compatible kernel. It boots directly
-through UEFI, runs a controller outside ring~0, ingests OCI images, executes an
-unmodified Alpine userspace, and launches Rocky Linux 10 systemd as PID~1. The
-kernel is not Linux: it is an independent, Rust-first implementation of the
-kernel mechanisms and Linux userspace contract exercised by those workloads.
-In eleven days, the project reached roughly 139,000 retained, non-generated
-lines of implementation and test code across 1,037 commits.
+This research asked two questions: can an AI coding agent, under expert
+direction, build a new kernel capable of running an existing Linux userspace;
+and can a kernel-native domain serve as a useful isolation and resource-policy
+boundary above individual processes? In eleven days, the experiment produced
+an independent, Rust-first kernel that boots through UEFI, runs a controller
+outside ring~0, ingests OCI images, executes an unmodified Alpine userspace,
+and launches Rocky Linux 10 systemd as PID~1. It also produced kernel-owned
+domains with distinct identities, resources, process trees, filesystems, and
+scheduling policy. The evaluated artifact contains roughly 139,000 retained,
+non-generated lines of implementation and test code across 1,037 commits.
 
-This report describes what was built, the expert-directed agent loop that
-produced it, and the limits of the result. \project{} is a research prototype,
-not a production kernel or a proposed replacement for Linux. That distinction
-is the main finding. AI can reproduce a surprising amount of complex software
-at low cost. It cannot generate decades of compatibility, standards, hardware
-enablement, community trust, vendor relationships, or operational ownership on
-the same schedule.
+The result is evidence of technical feasibility, not production readiness or
+complete Linux compatibility. This report describes the artifact, a reusable
+expert-directed development method based on written architecture and
+executable milestone gates, and the limits exposed by the experiment. AI can
+reproduce a surprising amount of complex systems software at low cost. It
+cannot manufacture decades of compatibility, standards, hardware enablement,
+community trust, vendor relationships, or operational ownership on the same
+schedule.
 \end{abstract}
 
 \section{AI Built a Linux-Compatible Kernel. It Did Not Build Linux}
 
-We began with an ambitious research question: could an AI agent build a
-kernel capable of running an existing Linux userspace? The answer, within a
-bounded research profile, is yes. \project{} boots from firmware under QEMU,
+The experiment began with an ambitious research question: could an AI agent
+build a kernel capable of running an existing Linux userspace? The answer,
+within a bounded research profile, is yes. \project{} boots from firmware under QEMU,
 provides its own memory manager, scheduler, process model, ELF loader, virtual
 filesystems, networking, IPC, device paths, and Linux syscall translation, and
 runs real Alpine and Rocky Linux components.
@@ -56,9 +60,9 @@ Linux. ``Linux-compatible'' here means that selected unmodified Linux programs
 observe enough of their expected ABI to run. It does not mean complete Linux
 behavior.
 
-The name is a deliberate joke in the same family as Linux. ``Linux'' combines Linus
-and Unix; ``Ginux'' riffs on Linux, GPT, and Greg. We will say the ``G'' stands
-for GPT so the author's head does not get any bigger.
+The name is a deliberate joke in the same family as Linux. ``Linux'' combines
+Linus and Unix; ``Ginux'' riffs on Linux, GPT, and Greg. For purposes of
+authorial restraint, the ``G'' is treated as GPT.
 
 The scope must be explicit: this was never an attempt to compete with Linux. The Linux
 kernel community has spent decades doing the difficult work of supporting
@@ -345,23 +349,72 @@ layers from the host-owned volume. Writable domain overlays remain boot-local
 at the evaluated checkpoint, so configuration and image caching are persistent
 without implying that every workload mutation is durable.
 
-\section{How We Built It}
+\section{Methods}
 
-The work began as collaborative architecture, not code generation. The
-versioned \repolink{ARCHITECTURE.md}{ARCHITECTURE.md} defined the boot model,
+\subsection{From an idea to an executable plan}
+
+The method began with questions rather than code. An initial concept was
+interrogated through sustained question-and-answer with the agent: what belonged
+in ring~0, what Linux compatibility meant, how domains differed from
+namespaces, which privileges a controller required, and what observable result
+would count as success. Corrections were incorporated into written artifacts
+before they became implementation assumptions.
+
+The first artifact was a collaborative architectural overview. The versioned
+\repolink{ARCHITECTURE.md}{ARCHITECTURE.md} then developed the boot model,
 kernel/userspace boundary, domains, authority, storage, devices, and acceptance
-criteria. The \repolink{docs/LINUX-COMPATIBILITY.md}{Linux compatibility
-ledger} recorded syscall and non-syscall behavior. The
+criteria in greater detail. The
+\repolink{docs/LINUX-COMPATIBILITY.md}{Linux compatibility ledger} recorded
+syscall and non-syscall behavior. The
 \repolink{docs/NEXT-GOAL.md}{working goal},
 \repolink{docs/USE-CASES.md}{use cases}, and
 \repolink{docs/decisions/0001-native-domains-and-authority.md}{domain decision
-record} kept the plan outside the chat transcript.
+record} kept both plan and rationale outside the chat transcript. These files
+provided durable state for a long-running agent session and made architectural
+drift visible.
 
-From those documents we created milestones with observable gates: boot the EFI
-image, enter a ring-3 controller, create a named domain, execute an Alpine
-shell, pull an OCI image over the network, run Rocky binaries, launch systemd,
-and reach a console. The agent received a goal and iterated until each gate met
-its acceptance behavior. The loop was:
+\subsection{Staged construction}
+
+Repository history and the project plans show six broad, overlapping stages:
+
+\begin{enumerate}[leftmargin=*,label=\arabic*.]
+\item \textbf{Boot and architecture.} Define the trust and domain model, build
+  a unified x86-64 EFI image, exit UEFI boot services, establish a kernel stack,
+  and inventory memory and ACPI state.
+\item \textbf{Kernel mechanisms and hardware.} Add paging, frame ownership,
+  exceptions, interrupts, the APIC timer, preemptive scheduling, capabilities,
+  IPC, domain address spaces, PCI discovery, virtio paths, and IOMMU-mediated
+  DMA confinement.
+\item \textbf{Userspace control.} Enter ring~3, execute an embedded static
+  controller as an ordinary userspace process, and expose versioned management
+  operations for domains, networks, storage, and lifecycle.
+\item \textbf{Linux execution.} Build an x86-64 ELF interpreter, PIE and dynamic
+  loader support, process and signal semantics, virtual filesystems, terminals,
+  sockets, and a growing Linux syscall surface.
+\item \textbf{Distribution ingestion.} Add DHCP, DNS, TCP/TLS, OCI manifest and
+  architecture selection, digest verification, layer unpacking, caching, and
+  domain-local roots; then run Alpine and progressively larger Rocky Linux
+  programs.
+\item \textbf{Compatibility and system boot.} Turn discovered behavior into a
+  Linux ABI test matrix, add persistence and multi-domain lifecycle tests, and
+  use Rocky Linux systemd, service startup, and an interactive console as the
+  compound integration gate.
+\end{enumerate}
+
+The order was intentionally progressive: firmware entry preceded hardware
+control; a bounded ELF executable preceded a general Linux process; synthetic
+ABI probes preceded Alpine; Alpine preceded glibc-based Rocky Linux; and Rocky
+programs preceded systemd. Each stage converted its failures into requirements
+for the next revision rather than treating a boot message as proof of
+correctness.
+
+\subsection{The closed-loop agent procedure}
+
+Every milestone had an observable gate: boot the EFI image, enter a ring-3
+controller, create a named domain, execute an Alpine shell, pull an OCI image
+over the network, run Rocky binaries, launch systemd, and reach a console. The
+agent received a goal and iterated until the acceptance behavior was observed.
+The reusable loop was:
 
 \begin{center}
 \fbox{\parbox{0.91\linewidth}{
@@ -375,21 +428,25 @@ evaluation $\rightarrow$ signed commit.
 Codex selected implementations, edited the repository, compiled the system,
 booted QEMU, read logs, wrote tests, updated documentation, profiled failures,
 and continued to the next gate. It also drafted much of the documentation and
-report prose, which the author reviewed and revised. The human role was
-direction and judgment, not dictating individual edits. This matters: the agent
-was given outcomes and room to solve them, but the plan, architecture,
-compatibility target, and definition of acceptable behavior came from someone
-who understood Linux and operating-system design.
+report prose, which received editorial review. Human direction supplied the
+architecture, priorities, compatibility target, stopping decisions, and
+skepticism about false success; it did not prescribe individual edits. The
+agent was given outcomes and room to solve them, while executable gates
+prevented console output alone from satisfying a milestone.
 
 The tests became progressively less synthetic. Small probes established entry
 paths and syscall mechanics. Alpine exposed filesystem, working-directory,
 fork, and exec errors. Rocky exercised glibc, dynamic loading, and larger
 mappings. systemd combined scheduling, epoll, signals, procfs, sockets,
-mounts, credentials, timers, and console lifecycle. Human interactive tests
+mounts, credentials, timers, and console lifecycle. Interactive operator tests
 found workflow failures that adjacent automated tests had missed. The result
-was a productive loop, not an autonomous proof of correctness.
+was a productive, repeatable loop, not an autonomous proof of correctness. A
+comparable project can apply the same procedure: refine the idea through
+Q\&A, write progressively detailed architecture, externalize the plan, define
+executable gates, permit bounded agent iteration, review the evidence, and
+record both decisions and remaining gaps before advancing.
 
-\section{What If We Had Started with Linux?}
+\section{Alternative: Starting with Linux}
 
 A practical product effort would have had strong reasons to begin with Linux.
 Namespaces, cgroups, KVM, device drivers, filesystems, security modules, and a
@@ -418,13 +475,16 @@ transport from runtime isolation, recognizing broken fork/exec behavior,
 defining domain ownership, interpreting systemd failures, and rejecting false
 success all required domain knowledge.
 
-The author brought experience from Caos Linux, CentOS, and Rocky Linux, as well
-as operating production software infrastructure
-~\cite{rockyAbout2026,ciqKurtzer2026}. That experience changed the prompts, the
-architecture, the acceptance gates, and the decision to stop. An inexperienced
-operator may obtain a large codebase and convincing console output without
-recognizing that the underlying semantics are wrong. In systems software, a
-plausible result can be more dangerous than an obvious failure.
+The project direction drew on experience from Caos Linux, CentOS, and Rocky
+Linux; the Singularity/Apptainer container ecosystem; the Warewulf and Perceus
+cluster-provisioning ecosystems; and production infrastructure operations
+~\cite{rockyAbout2026,ciqKurtzer2026}. That background shaped the distinction
+between OCI transport and runtime isolation, the controller workflow,
+persistent image caching, domain boot semantics, provisioning requirements,
+the acceptance gates, and the decision to stop. An inexperienced operator may
+obtain a large codebase and convincing console output without recognizing that
+the underlying semantics are wrong. In systems software, a plausible result
+can be more dangerous than an obvious failure.
 
 AI nevertheless lowers the barrier for junior engineers to contribute. They
 can explore unfamiliar code, generate tests, compare interfaces, and implement
@@ -481,6 +541,10 @@ same contracts.
 
 \subsection{AI accelerates both sides of open-source security}
 
+The following episode is external context, not evidence produced by the Ginux
+experiment. It illustrates why the operational consequences of AI-assisted
+software work extend well beyond the team generating code.
+
 The capability that generates new software can also audit old software at a
 scale human teams could not previously sustain. In 2026, AI-assisted research
 helped expose critical PHP flaws capable of unauthenticated remote code
@@ -488,7 +552,7 @@ execution. The underlying out-of-memory problem had been recognized in 2024,
 but its full impact emerged through later reports involving Calif, OpenAI, and
 Wiz~\cite{phpStaleState2026,openaiPatchPlanet2026,phpFoundation2026}. AWS later
 reported an exploitation attempt four days before public disclosure
-~\cite{awsPhp2026}. We cannot assume defenders always discover the bug first.
+~\cite{awsPhp2026}. Defenders cannot assume that they discover the bug first.
 
 Discovery was only the beginning. The PHP Foundation reports that its team
 handled more than 100 invalid, duplicate, or irreproducible submissions while
@@ -497,20 +561,31 @@ Chainguard published fixed images more than six hours before the coordinated
 release, making the change available for comparison while much of the
 ecosystem was still preparing~\cite{phpFoundation2026}. Chainguard's chief
 executive said the decision responded to reports of active exploitation
-~\cite{techtargetPhp2026}. Whatever judgment one makes about that decision,
-the episode shows that security depends on trusted
-coordination among maintainers, researchers, distributors, vendors, and
-operators. Faster vulnerability discovery compresses the time available for
-all of them.
+~\cite{techtargetPhp2026}. The decision to publish ahead of the coordinated
+release is not part of this research and is not adjudicated here. It is
+nevertheless an important data point: faster discovery and evidence of
+exploitation compress disclosure and deployment windows for maintainers,
+distributors, vendors, and operators.
 
 Open source already contains vulnerabilities missed during human review. AI
 will find more of them, and attackers can use it too. The near
 term may therefore get worse before it gets better: report volume rises,
 maintainers must separate real exploits from plausible noise, disclosure
-windows shrink, and organizations must deploy fixes faster. Code generation
-does not solve this coordination problem. It makes durable maintainership,
-funded security work, reproducible validation, package provenance, rapid
-patching, and trusted distribution more important.
+windows shrink, and organizations must deploy fixes faster. Much of the pain
+falls on operations and security teams at large organizations: they must map
+affected packages to fleets, evaluate provenance, prioritize exposure, test
+updates, and safely deploy them under an increasingly compressed deadline.
+
+A categorical prohibition on AI-assisted open-source contributions is the
+wrong response to that pressure. Projects should accept and actively encourage
+AI-assisted reports, tests, and fixes, particularly when AI is also increasing
+the rate at which defects are found. The standard should attach to the
+evidence, not the tool: reproducible reports, focused patches, regression
+tests, provenance, accountable review, coordinated disclosure, and the same or
+higher bar for correctness. Evidence-free automated submissions and automatic
+merging remain harmful. Excluding a valid fix solely because AI participated
+would discard useful defensive capacity precisely when maintainers and
+operators need it most.
 
 \section{Conclusion}
 
@@ -534,6 +609,7 @@ That ecosystem is the moat, and no prompt can conjure it overnight.
 
 \begingroup
 \small
+\setlength{\baselineskip}{10pt}
 \raggedright
 \bibliographystyle{plain}
 \bibliography{references}
