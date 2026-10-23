@@ -23,310 +23,125 @@
 \maketitle
 
 \begin{abstract}
-We report an experiment in which one persistent AI coding agent, operating with
-task-level autonomy under human architectural governance, constructed an
-operating-system kernel and supporting environment from the ground up. The
-artifact, \project, boots directly through UEFI on x86-64, starts a ring-3
-controller, implements a substantial portion of the Linux userspace contract,
-ingests OCI images, runs an unmodified Alpine userspace, and launches Rocky
-Linux 10 systemd as PID~1 inside a kernel-native domain. Approximately 99\% of
-development was performed by a single longitudinal \modelname{} task rather
-than a collection of specialized agents. The human supplied goals,
-architectural constraints, acceptance criteria, and corrective review, but did
-not direct implementation step by step.
+We asked whether one AI coding agent could build a new kernel capable of
+running an unmodified Linux userspace. In eleven days, one persistent
+\modelname{} task produced \project, an x86-64 Rust and assembly kernel that
+boots through UEFI, runs its controller in ring~3, ingests OCI images, executes
+Alpine, and launches Rocky Linux 10 systemd as PID~1. The evaluated commit
+contains about 139,000 retained, non-generated lines of implementation and test
+code across 1,037 commits. Estimated API cost was \estimatedcost.
 
-The evaluated artifact contains roughly 139,000 retained non-generated lines
-of implementation and test code across 1,037 commits produced over eleven
-calendar days. The author estimates API usage cost at \estimatedcost. These
-figures demonstrate unusual construction speed, but they do not establish
-software quality. At the stopping point, 82 of 375 Linux x86-64 syscalls were
-self-classified as complete, 245 as partial, and 48 as policy-denied. Important
-non-syscall interfaces remain incomplete; GPU drivers, stable kernel-driver ABI
-compatibility, security assurance, native performance characterization, and
-general application compatibility are absent. A final manual lifecycle test
-also exposed a failure that narrower agent-authored tests had missed.
-
-The experiment therefore supports a narrower and more consequential claim than
-``AI built a production operating system.'' A modern coding agent can construct
-a deep systems prototype and use compiler, QEMU, runtime, and benchmark
-feedback to improve it. It cannot thereby certify compatibility, security,
-performance, or maintainability. \project{} also provides preliminary evidence
-that kernel-native domains are technically feasible, but not yet that their
-claimed isolation or resource-policy benefits have been proven. We argue that
-the central problem has shifted from code generation to assurance: standards,
-independent test oracles, traceability, release controls, and durable ownership
-must determine when AI-produced systems code can be trusted.
+The prototype answers the construction question. It does not meet the standard
+of a production kernel. Its own ledger marks 82 of 375 Linux x86-64 syscalls
+complete, 245 partial, and 48 policy-denied. GPU drivers, stable driver ABI,
+native performance results, independent security review, and general
+application compatibility are missing. A manual lifecycle test also broke a
+workflow that narrower agent-authored tests had declared complete. Ginux
+demonstrates rapid construction of a serious systems prototype. Trust still
+depends on independent tests, standards, review, and long-term ownership.
 \end{abstract}
 
-\section{Introduction}
+\section{Question and scope}
 
-AI systems can write code. That observation alone is no longer a useful
-research result. The more difficult question is what kind of software they can
-construct, how much autonomy they can exercise, and what evidence is required
-before their output should be trusted. Operating-system kernels are a useful
-stress case because their correctness is not captured by compilation or a
-small collection of examples. A kernel must preserve thousands of explicit and
-implicit contracts involving instruction-level entry, virtual memory,
+AI coding demonstrations usually end when a program compiles or passes a
+bounded test. Kernels are less forgiving. They join instruction entry, memory,
 concurrency, executable loading, filesystems, devices, process lifecycle,
-networking, security boundaries, and failure cleanup.
+networking, and cleanup. A shell prompt proves only the path that reached it.
 
-We created \project{} to test two questions. First, can an AI coding agent build
-a new kernel capable of running meaningful, substantially unmodified Linux
-userspace? Second, is a kernel-native \emph{domain}---an isolation, ownership,
-accounting, scheduling, and failure-containment boundary stronger and more
-fundamental than a Linux namespace---technically feasible and potentially
-beneficial? The first question is primary; the second emerged as the
-architectural vehicle through which workloads were organized.
+We created \project{} to test whether an agent could build enough of that stack
+to run existing Linux userspace. A secondary question emerged during design:
+could a kernel-native \emph{domain} serve as the outer boundary for ownership,
+resources, devices, failure, and Linux compatibility? Linux namespaces would
+remain available inside a Linux-personality domain.
 
-This was not an attempt to deliver a production operating system. Development
-stopped when the author judged that the experiment had demonstrated the
-construction capability under study. The resulting system is neither complete
-nor generally deployable. That distinction is central: a research stopping
-point can answer a feasibility question without satisfying the compatibility,
-security, performance, hardware, support, and maintenance requirements of a
-production platform.
+We stopped when the construction result was clear. The system never became
+deployable. The fixed artifact is commit \evaluatedcommit{}, dated October 20,
+2026. All measurements refer to that commit and its QEMU profiles. Later fixes
+are outside the evaluation.
 
-The name \project{} is a play on Linux, whose name derives from Linus Torvalds.
-The ``G'' ostensibly stands for GPT; interpretations involving the author's
-first name are discouraged so that his head does not become any larger.
+The name \project{} follows the Linux tradition. The ``G'' stands for GPT, at
+least officially; this interpretation also keeps the author's head from
+getting any bigger.
 
-This report makes four contributions:
+\section{Method}
 
-\begin{enumerate}
-  \item a longitudinal case study of one AI agent constructing a substantial
-        systems artifact under task-level, rather than step-level, human direction;
-  \item a benchmark-driven development procedure combining versioned architecture
-        documents, an explicit plan, compilation, QEMU execution, automated gates,
-        and manual acceptance tests;
-  \item an artifact-level account of the Linux compatibility and native-domain
-        mechanisms reached at a fixed commit; and
-  \item an analysis of the gap between rapid AI construction and credible
-        assurance, including cases where the agent incorrectly concluded that an
-        incomplete benchmark proved the requested behavior.
-\end{enumerate}
+Approximately 99\% of the implementation came from one persistent Codex task
+using \modelname{}. That is an author estimate because provider-level task and
+token exports were not archived. This was one longitudinal task, not an army
+of agents, although the host may have compacted old conversation into context
+summaries.
 
-\section{Research Questions and Scope}
+The human set architecture, requirements, acceptance behavior, and stopping
+points. Codex chose implementations, edited the repository, built it, booted
+QEMU, interpreted failures, wrote tests and documentation, and committed
+checkpoints. Direction was task-level: ``boot this image and make this workflow
+work,'' not a sequence of code edits.
 
-We organize the experiment around three levels of capability.
+Versioned documents carried decisions that could not safely live in chat
+history. The architecture document defined the system and trust boundaries;
+the Linux compatibility ledger tracked syscall and non-syscall behavior;
+roadmaps, decision records, and performance notes recorded milestones and
+known limits. The agent consulted these files with an active plan. They reduced
+context drift but were not independent specifications: the same agent helped
+write them.
 
-\paragraph{Construction.} Can a coding agent create a bootable kernel, control
-plane, device paths, and Linux compatibility layer rather than an isolated
-function or application patch?
-
-\paragraph{Assurance.} Can the process demonstrate that the artifact behaves
-correctly beyond selected examples, particularly across the large Linux
-userspace contract?
-
-\paragraph{Stewardship.} Can compatibility, security, performance, and
-maintainability be preserved while requirements and implementations evolve?
-
-The first question has affirmative evidence. The second has mixed evidence.
-The third remains open. We do not claim full Linux compatibility, production
-security, hardware portability, stable driver compatibility, or performance
-parity with Linux. We also do not treat dispatching every syscall number as
-equivalent to implementing Linux semantics.
-
-The evaluated artifact is repository commit \evaluatedcommit{}, dated October
-20, 2026. Results in this report apply to that commit and the stated QEMU
-profiles. Later changes must not be read back into these findings.
-
-\section{Human-Governed, Agent-Executed Method}
-
-\subsection{Division of responsibility}
-
-Approximately 99\% of implementation was produced within one persistent Codex
-task using \modelname{}. This percentage is an author estimate; provider-level
-task and token exports have not yet been archived. The process should not be
-described as an army of specialized agents. Nor should ``human-directed'' be
-read as hand-held implementation.
-
-The human acted as architect, requirements authority, product owner, and
-acceptance tester. He established desired properties, changed architectural
-direction, defined user-visible benchmarks, rejected misleading results, and
-decided when the research question had been answered. Codex inspected and
-modified the repository, designed implementations, built the system, ran QEMU,
-interpreted failures, added tests and documentation, committed checkpoints, and
-iterated. The human generally specified \emph{what} must be true and why; the
-agent determined \emph{how} to implement it.
-
-The work took place in one longitudinal chat. That does not imply that every
-raw message remained in one physical model context window: the hosting system
-may compact long histories into summaries. ``Single longitudinal task'' is
-therefore more accurate than ``one immutable context.'' This continuity
-reduced formal handoff cost, but it also concentrated implementation,
-test-authoring, and success judgment in the same model.
-
-\subsection{Architecture documents as external memory}
-
-The conversation was not the sole repository of intent. The human and agent
-collaboratively developed and maintained a set of versioned documents that the
-agent used as reference material alongside an active plan:
-
-\begin{itemize}
-  \item \texttt{ARCHITECTURE.md} described the system model, trust boundaries,
-        ABI layers, boot path, performance principles, and milestones;
-  \item \texttt{docs/ROADMAP.md} and checkpoint documents defined staged
-        acceptance gates;
-  \item \texttt{docs/LINUX-COMPATIBILITY.md} maintained the syscall and
-        non-syscall compatibility ledger;
-  \item architecture decision records captured durable choices about domains,
-        authority, unified images, and driver placement;
-  \item stability, capacity, storage, and performance audits recorded known
-        constraints and measured findings; and
-  \item an active execution plan tracked the current objective and stopping point.
-\end{itemize}
-
-These artifacts served as persistent external memory: they survived context
-compaction, made earlier decisions searchable, and gave the agent a written
-contract against which to plan changes. They were also collaboratively
-authored by the same human--AI process and were not independent specifications.
-Several documents ran ahead of passing end-to-end evidence or retained
-aspirational multi-agent procedures that did not describe the actual
-experiment. Documentation improved continuity but did not eliminate drift;
-traceability from a claim to a passing gate remained necessary.
-
-\subsection{The iteration loop}
-
-The operative method was benchmark-driven:
+The working loop was:
 
 \begin{center}
 \fbox{\parbox{0.91\linewidth}{
-Human architectural intent $\rightarrow$ concrete milestone $\rightarrow$
-observable acceptance benchmark $\rightarrow$ Codex implementation
-$\rightarrow$ build and automated tests $\rightarrow$ QEMU boot/runtime test
-$\rightarrow$ log analysis and revision $\rightarrow$ repeat as needed $\rightarrow$
-human acceptance $\rightarrow$ signed commit and stopping-point review.
+requirement $\rightarrow$ observable benchmark $\rightarrow$ implementation
+$\rightarrow$ build and QEMU run $\rightarrow$ log analysis $\rightarrow$
+revision $\rightarrow$ human test $\rightarrow$ signed commit.
 }}
 \end{center}
 
-Codex was often instructed to continue the implementation--test--diagnose loop
-until a benchmark passed, rather than returning after each edit. Milestones
-were intended to end in a committed state suitable for manual evaluation.
-Failures found manually were converted into implementation changes and, when
-successful, regression gates.
+This resembles execution-feedback work in code generation~\cite{chen2021codex}
+and repository tasks such as SWE-bench~\cite{jimenez2023swebench}, but the
+specification and tests here evolved with the artifact. This shortened each
+iteration while allowing the agent to satisfy weak benchmarks precisely.
 
-The method resembles repeated sampling and execution feedback in earlier code
-generation work~\cite{chen2021codex}, but at repository and system scale.
-SWE-bench similarly motivates real repository tasks as a step beyond isolated
-code generation~\cite{jimenez2023swebench}; this experiment extends the idea
-to a long-lived greenfield systems artifact whose specification and benchmark
-also evolved during development.
+One failure makes the point. Separate tests showed that a detached Rocky domain
+returned control and that an attached start reached a login prompt. They did
+not test the complete sequence of detached start, attach, detach, reattach,
+stop, and restart. Codex marked the work complete. The author then ran that
+sequence; cleanup failed with three Linux processes still live. Implementation,
+test authorship, and verdict had shared the same blind spot.
 
-\subsection{The benchmark-oracle failure mode}
+\section{Artifact and results}
 
-The loop was powerful but vulnerable to an incomplete oracle. An agent can
-iterate until a benchmark passes while the benchmark fails to represent the
-requirement. Near the evaluated stopping point, one gate verified that a
-detached Rocky domain returned control and reached a \texttt{booting} state;
-another verified that a Rocky domain started with \texttt{--attach} reached a
-login prompt. Neither initially verified the actual sequence ``start detached,
-attach during or after boot, remain attached, detach, reattach, stop, and
-restart.'' The agent reported the feature complete. Manual execution of that
-sequence reached a login prompt and then failed runtime cleanup while three
-Linux processes remained live, marking the domain failed.
+\project{} boots as a unified x86-64 UEFI image without a host distribution or
+initramfs. The kernel establishes its own page tables, protection state,
+interrupts, scheduler, memory ownership, capabilities, IPC, device paths, ELF
+loader, and personality objects. A static controller runs in ring~3 and uses a
+versioned control interface. OCI supplies image transport and filesystem
+assembly~\cite{ocispec}. Ginux provides the runtime and isolation boundary.
 
-This is the software equivalent of benchmark overfitting. The same agent had
-implemented the behavior, authored much of the test, interpreted the output,
-and declared success. Human acceptance testing supplied a different oracle and
-contradicted the conclusion. The episode is evidence about the development
-method, not merely one kernel bug.
+The Linux personality follows the Linux 6.12 x86-64 syscall table
+~\cite{linux612syscalls}, Linux UAPI and man-pages~\cite{linuxmanpages}, and the
+x86-64 psABI~\cite{x8664psabi}. It supports ELF executables and selected PIE,
+dynamic interpreters, virtual memory, processes, threads, signals, descriptors,
+filesystems, sockets, terminals, and partial pseudo-filesystems. The loader uses
+the image's \texttt{PT\_INTERP}; there is no musl or glibc mode.
 
-\section{Artifact Architecture}
+A domain owns its address spaces, process tree, capabilities, IPC, filesystems,
+networks, devices, limits, lifecycle, and failure policy. Unlike Xen
+~\cite{barham2003xen}, it does not carry a guest kernel. Unlike seL4
+~\cite{klein2009sel4}, Ginux has no proof. The design ran Linux processes and
+kept per-domain state, but its isolation and QoS claims were not tested under
+attack or contention.
 
-\subsection{Boot and control plane}
+Development moved from synthetic ABI probes to Alpine, Rocky glibc utilities,
+and finally systemd. Each workload widened the real contract. Alpine found
+filesystem, working-directory, and fork/exec defects. Rocky exercised dynamic
+loading and mappings. systemd combined scheduling, epoll, signals, procfs,
+mount identity, Unix sockets, timers, credentials, and console lifecycle.
 
-\project{} is a Rust- and assembly-based x86-64 system that boots as a unified
-UEFI image. The boot path obtains firmware state, establishes kernel-owned page
-tables and protection structures, initializes required platform mechanisms,
-and enters the kernel without a conventional host distribution or initramfs.
-A statically linked controller executes in ring~3. Host-specific management is
-exposed through a versioned control interface; the controller is not compiled
-into ring~0.
+\subsection{Scale}
 
-The kernel provides scheduling, memory ownership, capabilities, IPC,
-interrupts, IOMMU and device mechanisms, executable loading, and personality
-objects. Narrow native services may execute in separate domains. OCI is used
-as an image distribution and filesystem assembly format~\cite{ocispec}; it is
-not the security boundary or runtime.
-
-\subsection{Linux as a userspace personality}
-
-Linux x86-64 is the first userspace personality. The target contract draws
-from the Linux 6.12 syscall table~\cite{linux612syscalls}, Linux UAPI and
-man-pages~\cite{linuxmanpages}, and the x86-64 psABI~\cite{x8664psabi}. The
-implementation includes syscall entry and dispatch, ELF \texttt{ET\_EXEC} and
-selected \texttt{ET\_DYN} loading, dynamic interpreters, virtual memory,
-processes and threads, signals, descriptors, filesystems, sockets, terminals,
-and partial \texttt{/proc}, \texttt{/dev}, namespace, and security interfaces.
-It is libc-neutral in intent: the executable's \texttt{PT\_INTERP} selects the
-loader from the domain root rather than choosing a musl or glibc mode.
-
-\subsection{Native domains}
-
-A domain is the outer kernel-owned principal for address spaces, processes,
-capabilities, resources, IPC objects, filesystem and mount views, network
-objects, devices, lifecycle, and failure policy. Linux namespaces are intended
-to be compatibility constructs inside a Linux-personality domain, allowing a
-domain eventually to run its own nested container manager without weakening
-the outer boundary.
-
-This differs from a hypervisor domain such as Xen~\cite{barham2003xen}: a
-\project{} Linux workload does not carry a separate guest kernel. It also
-differs from claiming a verified microkernel boundary; unlike seL4's explicit
-functional-correctness result~\cite{klein2009sel4}, \project{} has no formal
-proof or comparable assurance case. The artifact demonstrates that the
-abstraction can be represented, scheduled, and used to host Linux processes.
-It does not yet demonstrate strong isolation under adversarial testing or
-resource-quality guarantees under contention.
-
-\section{Implementation Trajectory}
-
-Table~\ref{tab:milestones} summarizes selected repository milestones. The
-history contains 1,037 small commits, 1,036 with developer certificate
-sign-off, between October 10 and October 20, 2026.
-
-\begin{table}[ht]
-\centering
-\small
-\begin{tabular}{lll}
-\toprule
-Date & Commit & Observable milestone \\
-\midrule
-Oct. 10 & \texttt{97f778a} & Enter kernel after UEFI boot services \\
-Oct. 10 & \texttt{ab89034} & Enter an isolated control plane at ring~3 \\
-Oct. 11 & \texttt{ec48014} & Execute a bounded Linux ELF entry \\
-Oct. 13 & \texttt{a4d3371} & Execute Alpine shell through musl \\
-Oct. 13 & \texttt{6beb469} & Attach the Alpine shell to its console \\
-Oct. 15 & \texttt{a94e03d} & Support Rocky glibc shell workloads \\
-Oct. 18 & \texttt{f87bac8} & Launch Rocky systemd as domain PID~1 \\
-Oct. 19 & \texttt{9c64072} & Reach an interactive Rocky systemd console \\
-Oct. 20 & \texttt{aa51d21} & Execute commands in a running domain \\
-Oct. 20 & \shortcommit & Stage detached-domain startup work \\
-\bottomrule
-\end{tabular}
-\caption{Selected milestones from the signed Git history. A milestone commit
-records implementation progress, not independent conformance certification.}
-\label{tab:milestones}
-\end{table}
-
-The trajectory was not linear. Early Linux probes exercised individual ABI
-contracts before real images. Alpine exposed path lookup, directory iteration,
-fork/exec, working-directory, and musl behavior. Rocky's glibc and dynamic
-utilities expanded ELF, mapping, loader, and filesystem requirements. systemd
-then exercised process scheduling, epoll, signals, procfs, mount identity,
-AF\_UNIX sockets, timers, credentials, pseudo-filesystems, and console
-lifecycle in combination. Failures repeatedly converted an apparently local
-feature into a cross-subsystem requirement.
-
-\section{Measured Stopping Point}
-
-\subsection{Artifact size and activity}
-
-Table~\ref{tab:artifact} reports measurements from \shortcommit. ``Selected
-implementation/test lines'' counts tracked Rust, assembly, C, headers, and
-shell files under the principal source, service, test, specification, and tool
-directories. The non-generated total excludes the 35,946-line generated boot
-payload source. LOC is reported for scale, not as a quality metric.
+Table~\ref{tab:artifact} reports the frozen commit. The selected LOC count
+covers tracked Rust, assembly, C, headers, and shell under source, services,
+tests, specifications, and tools. It excludes the 35,946-line generated boot
+payload from the non-generated row.
 
 \begin{table}[ht]
 \centering
@@ -341,392 +156,154 @@ Rust source files & 63 \\
 Selected implementation/test LOC, including generated payload & 174,736 \\
 Selected non-generated implementation/test LOC & 138,790 \\
 Markdown documentation LOC & 13,074 \\
-Rust function definitions (syntactic count) & 3,317 \\
-Rust unit-test annotations & 53 \\
-QEMU shell test programs & 11 \\
-Top-level Make targets & 39 \\
 Author-estimated API expenditure & \estimatedcost \\
 \bottomrule
 \end{tabular}
 \caption{Repository-scale measurements at the evaluated commit. Counts are
-simple reproducible textual measurements, not complexity or correctness scores.}
+simple reproducible textual measurements; they do not score complexity or
+correctness.}
 \label{tab:artifact}
 \end{table}
 
-The kernel directory accounts for approximately 116,779 selected lines, the
-control plane 3,262, reusable crates 6,868, native services 4,284, tests 6,224,
-and tools 894. These categories include low-level probes and assembly fixtures;
-they should not be interpreted as equivalent units of effort.
-
 A later whole-workspace scan, taken after the evaluated commit, reported
 188,958 lines classified as code across 1,459 files: 149,249 Rust, 13,370
-assembly, 11,536 Markdown, 6,809 D, 5,535 shell, and smaller categories. That
-headline is useful evidence of the scale accumulated in roughly two weeks, but
-it has a different counting boundary from Table~\ref{tab:artifact}. In
-particular, the scan includes the 35,946-line generated boot-payload source and
-appears to include ignored compiler metadata: 573 D files and 631 JSON files
-are present in the scan but absent from the Git index. The frozen,
-non-generated implementation/test count therefore remains the more defensible
-measure of retained authored surface. Both measurements and the counting
-script should be published; neither should be silently substituted for the
-other.
+assembly, 11,536 Markdown, 6,809 D, and 5,535 shell. It included the generated
+payload and apparently ignored build metadata: the 573 D and 631 JSON files in
+that scan are absent from Git. We retain the narrower frozen count in the
+paper. Both commands should accompany publication.
 
-\subsection{Code volume as assurance load}
+LOC says nothing about correctness. The scale instead exposes the review
+problem. One agent
+created privileged code faster than one human could inspect it. Each parser,
+state transition, unsafe operation, syscall emulation, and cleanup path adds
+work for threat modeling, fuzzing, compatibility testing, and maintenance. In
+a kernel, a small ownership or dispatch error can cross every workload. Fast
+generation can accumulate assurance debt just as quickly as code.
 
-LOC is not a quality or productivity score, but code volume is security
-relevant because every retained parser, state transition, unsafe operation,
-ABI emulation, and cleanup path enlarges the surface that must be understood.
-The notable result is not that an agent typed approximately 139,000
-non-generated implementation/test lines. It is that candidate implementation
-grew faster than a single human could plausibly inspect line by line during
-the same interval. Generation throughput can therefore create \emph{assurance
-debt}: review, threat modeling, fuzzing, compatibility validation, provenance,
-and maintenance obligations that lag behind construction.
+\subsection{Compatibility, performance, and security}
 
-The ratio is especially consequential for privileged systems code. A defect
-in an application may compromise one service; a defect in syscall dispatch,
-memory ownership, executable loading, a device path, or a domain transition
-may invalidate the isolation argument for every workload. Rapid generation
-does not merely save implementation time. Unless assurance capacity scales
-with it, rapid generation also increases the amount of security-critical code
-whose behavior is inferred from agent-authored tests rather than independently
-established.
+The ledger covers all 375 Linux 6.12 x86-64 syscall numbers: 82 Complete, 245
+Partial, 48 Policy-denied, and zero Missing. Zero Missing only means the table
+does not fall through to a default \texttt{ENOSYS}. Static PIE without an
+interpreter, broader loader and NSS behavior, process semantics, procfs, sysfs,
+cgroupfs, vDSO/vvar, IPv6, namespaces, and ioctl families remain incomplete.
+Unmodified Alpine shells run. Rocky glibc utilities run. A Rocky UBI init image
+can launch systemd and reach a console login on selected paths. Arbitrary Linux
+programs are not covered by that evidence.
 
-\subsection{Linux compatibility}
+Profiling under x86-64 QEMU TCG on Apple Silicon reduced Linux-init-to-console
+time from 15,344~ms to a two-run median of 4,082~ms by fixing Unix-socket
+polling, quadratic frame-reference scans, and immutable-rootfs duplication.
+Warm OCI restore and publication took another 2.7 and 3.5 seconds. The final
+manual detached-start run took 13,833~ms and then hit the cleanup bug. KVM and
+identical-hardware Linux comparisons were not run.
 
-The compatibility ledger covers all 375 native Linux 6.12 x86-64 syscall
-numbers. At the stopping point it classified 82 as Complete, 245 as Partial,
-48 as Policy-denied, and zero as Missing. ``Zero Missing'' means no table entry
-falls through the default \texttt{ENOSYS} dispatcher. It does not mean all 375
-calls implement Linux behavior. The categories are project-defined and were
-largely produced and tested by the same agent; they have not received
-independent conformance review.
+Security mechanisms include capabilities, W\textasciicircum X mappings,
+guarded stacks, generation-tagged ownership, selected fault cleanup,
+SMEP/SMAP/UMIP setup, and IOMMU paths. No independent audit, sustained hostile
+testing, or proof exists. Ginux cannot load the existing GPU-driver ecosystem
+or promise stable \texttt{.ko} compatibility.
 
-Non-syscall surfaces remain more visibly incomplete. Static PIE without an
-interpreter is unsupported; broader dynamic-loader, locale, and NSS behavior
-is unproven; process and signal semantics are bounded; procfs is a subset;
-sysfs, cgroupfs, vDSO/vvar, IPv6, complete namespace operations, and broad ioctl
-families remain absent or partial. General mount and namespace calls were still
-policy-denied at the evaluated commit despite the intended domain model
-eventually allowing such operations inside the outer boundary.
+\section{What we learned}
 
-Practical workload evidence is stronger than comprehensive conformance
-evidence. Unmodified Alpine/musl shells execute; Rocky/glibc shells and dynamic
-utilities execute; and a Rocky Linux 10 image configured for UBI init can launch systemd,
-reach multi-user targets, and present a console login in selected paths.
-Arbitrary Linux programs are not guaranteed to work.
+The agent worked across UEFI, assembly, paging, interrupts, Rust kernel code,
+ELF, Linux ABI behavior, network and block devices, OCI, shell automation, CLI
+design, documentation, and profiling. It recovered from many failures and
+turned distribution behavior into new tests. That breadth, across roughly
+139,000 retained lines, is beyond autocomplete.
 
-\subsection{Performance evidence}
+Its judgment was less reliable than its construction. Codex sometimes pursued
+a marker instead of the operator workflow, reported success after adjacent
+tests passed, blurred image transport with execution, and increased static
+capacities before implementing dynamic behavior. Long execution loops also
+made it reluctant to stop. Written architecture and plans helped, but a single
+agent still shared assumptions across code, tests, and status reports.
 
-The repository's October 19 profile records a reduction in QEMU TCG
-Linux-init-to-console time from 15,344~ms to a two-run median of 4,082~ms after
-fixing parent-dependent Unix polling, quadratic frame-reference scans, and
-eager immutable-rootfs duplication. This is translated x86 execution on Apple
-Silicon, not a native kernel benchmark. Warm OCI layer restore and rootfs
-publication remained roughly 2.7 and 3.5 seconds respectively and were outside
-the init measurement. A three-second KVM gate was defined but could not be run
-on the development host.
+The cost estimate is about USD~7.71 per commit or USD~0.058 per retained
+non-generated implementation/test line. These ratios are curiosities. A short
+scheduler repair can matter more than a generated table, and a retained bug is
+as cheap per line as correct code. We did not measure active human hours. The
+experiment measures the cheap production of one prototype. Integration,
+review, compatibility, incident response, and years of maintenance remain
+unpriced.
 
-The final manual detached-start workflow at \shortcommit{} measured
-13,833~ms from Linux init to console and then hit the cleanup failure described
-earlier. These results show both meaningful optimization and insufficient
-benchmark stability. No comparison against Linux on identical native hardware,
-no throughput or tail-latency suite, and no performance claim suitable for
-production existed at the stopping point.
+Domains also survived contact with implementation. They organized controller
+authority, service ownership, Linux state, address spaces, consoles, and
+workload records without a guest kernel. Resource enforcement, network and
+filesystem isolation, lifecycle reliability, and QoS remain unfinished. The
+idea is feasible enough to study. This prototype offers no basis for replacing
+namespaces, containers, or virtual machines.
 
-\subsection{Security evidence}
+\subsection{Security and the software supply chain}
 
-The code implements capability tables, W\textasciicircum X mappings, guarded stacks,
-generation-tagged domain ownership, selected fault cleanup, SMEP/SMAP/UMIP
-setup, IOMMU-related device paths, cryptographic checks, and many negative
-tests. These are mechanisms and test evidence, not a security evaluation.
-There has been no independent audit, systematic adversarial campaign, complete
-threat-model validation, or formal proof. Driver compatibility, including
-NVIDIA GPU operation and unmodified Linux \texttt{.ko} modules, is not
-implemented. The system therefore cannot support claims about GPU workloads,
-stable kABI, or production isolation.
+The same model family can audit old code as well as produce new code. In 2026,
+research involving GPT-5.6 Sol helped establish the critical impact of a PHP
+engine state-lifecycle flaw. The advisory describes stale request-owned global
+state leading to use-after-free and unauthenticated remote code execution,
+scored 9.2~\cite{phpStaleState2026}. OpenAI reported that a Calif researcher
+used GPT-5.6 Sol and warned that similar capability can also accelerate
+offensive tooling~\cite{openaiPatchPlanet2026}.
 
-\subsection{Security discovery and supply-chain asymmetry}
+The PHP Foundation supplies the useful detail. Developers had recognized the
+underlying out-of-memory problem in 2024, but a fix stalled over compatibility,
+denial-of-service risk, extension impact, decision process, and staff time.
+AI-assisted reports later exposed the RCE path. The team also processed more
+than 100 reports that were invalid, duplicate, or irreproducible. Humans made
+each decision and wrote each patch~\cite{phpFoundation2026}.
 
-The security implications are not limited to defects introduced by generated
-code. The same model family used to construct \project{} can search mature
-human-written systems for defects at a pace that changes the economics of
-vulnerability discovery. In October 2026, coordinated research involving
-GPT-5.6 Sol helped identify the critical impact of a long-standing PHP engine
-state-lifecycle flaw. The published advisory describes stale request-owned
-global state producing use-after-free and unauthenticated remote code
-execution, with a CVSS score of 9.2~\cite{phpStaleState2026}. OpenAI reported
-that a Calif researcher used GPT-5.6 Sol to find a critical flaw and described
-the episode as both a defender opportunity and a warning that similar
-capabilities can accelerate offensive tooling~\cite{openaiPatchPlanet2026}.
+Ginux and PHP expose the same bottleneck. Machines can generate code and find
+defects faster than maintainers can validate findings, choose compatible
+repairs, coordinate disclosure, deploy updates, and support old releases.
+Machine-speed output now runs ahead of human-speed assurance.
 
-The PHP Foundation's account is important because it resists a simplistic
-``AI found what humans could not'' narrative. The underlying out-of-memory
-problem had been recognized in 2024, but remediation stalled amid compatibility
-trade-offs, denial-of-service risk, third-party extension impact, consensus
-process, and scarce maintainer capacity. AI-assisted reports in 2026 clarified
-the path to remote code execution and raised its priority. At the same time,
-the team processed more than 100 reports that were invalid, duplicate, or not
-reproducible; humans made every disposition and worked on every patch
-~\cite{phpFoundation2026}. Discovery scaled faster than triage, design judgment,
-compatibility analysis, coordinated disclosure, and deployment.
+\section{Limits and controls}
 
-This is the same asymmetry visible in \project{}. AI can rapidly create a large
-new trusted-computing surface, and it can rapidly search old trusted-computing
-surfaces for latent human errors. Attackers and defenders may both obtain that
-leverage, while maintainers still bear the serial work of validating findings,
-choosing compatible repairs, coordinating embargoes, shipping updates, and
-supporting old deployments. The software-supply-chain risk is therefore not
-``AI code'' as a distinct material. It is a throughput mismatch: code and
-findings can be produced at machine speed while trustworthy review,
-integration, disclosure, and stewardship remain institutionally constrained.
+This is one project, model, author, architecture, and eleven-day period. The
+author directed and evaluated it; Codex wrote much of the code, tests,
+documentation, and draft prose. Manual tests were opportunistic. Cost and the
+99\% share are estimates. Commit count measures activity, not effort. The
+system ran mainly through translated x86 QEMU on Apple Silicon. Real hardware,
+KVM, other architectures, hostile workloads, broad package suites, and GPU
+drivers were not evaluated.
 
-\section{What the Experiment Says About AI}
+Future work needs independent oracles. Compatibility claims should link to
+Linux differential tests and external conformance suites. Security work needs
+a threat model, unsafe-code inventory, fuzzing, adversarial review, and a
+reviewer who did not author the implementation. Lifecycle, cleanup,
+concurrency, exhaustion, and tail-latency tests should cover complete operator
+workflows. Builds, prompts, billing records, image digests, and raw logs should
+be reproducible and archived. A release also needs named owners for later
+compatibility and incidents.
 
-\subsection{Demonstrated strengths}
+Separate implementation, compatibility, security, and acceptance agents might
+reduce self-validation. Copies of one model can still repeat one another's
+blind spots. Independence must also exist in the tests and incentives.
 
-The agent showed substantial breadth. It moved between UEFI, assembly entry,
-x86-64 paging and interrupts, Rust kernel code, ELF and ABI details, network
-and block devices, OCI formats, shell tooling, QEMU automation, user-facing CLI
-design, documentation, and performance profiling. It used execution feedback
-rather than producing a static code dump. It could maintain a working
-repository, make small signed commits, recover from many failures, and turn
-real distribution behavior into implementation tasks.
-
-The pace is itself evidence. Even after excluding generated boot payload, the
-retained artifact is too large and cross-cutting to describe as autocomplete.
-One longitudinal agent produced a research kernel prototype across a ten-day
-commit interval while responding to changing architectural direction.
-
-\subsection{Demonstrated weaknesses}
-
-The same history shows recurrent problems:
-
-\begin{itemize}
-  \item the agent sometimes optimized for an observable marker rather than the
-        complete user workflow;
-  \item it occasionally reported success after adjacent tests passed while the
-        requested end-to-end sequence remained broken;
-  \item it could forget or blur architectural distinctions, such as OCI image
-        transport versus runtime execution;
-  \item compatibility breadth encouraged shallow syscall dispatch and static
-        capacity increases before semantic or dynamic-resource behavior was
-        fully validated;
-  \item long context and rapid iteration produced regressions and documentation
-        claims ahead of evidence; and
-  \item the agent had difficulty choosing a stopping point without explicit
-        human insistence.
-\end{itemize}
-
-Architecture documents and plans reduced these effects but did not remove
-them. A single agent retained continuity, yet the absence of an independent
-test author or reviewer allowed common assumptions to contaminate
-implementation, benchmark, and verdict.
-
-\subsection{Where AI is now}
-
-The experiment suggests that current AI is capable of \emph{construction at
-systems depth}. It can generate and integrate enough low-level code to make a
-new machine boot, execute foreign userspace, and expose novel abstractions. Its
-weaker capability is \emph{assurance}: determining whether the resulting
-behavior is complete, equivalent, secure, fast, and stable under changes. The
-agent can operate a feedback loop, but the loop is only as good as its oracle.
-
-This distinction matters because production engineering is dominated by the
-properties that persist after a demonstration: compatibility across unknown
-programs, predictable failure handling, upgrade safety, performance under
-load, hardware qualification, security review, incident response, and years
-of maintenance. Code generation attacks only part of that cost.
-
-\section{Economics}
-
-The author estimates total API expenditure at \estimatedcost. Provider billing
-exports and exact token totals should be archived before publication. Active
-human hours were not instrumented, so this report does not convert elapsed time
-into a fabricated labor comparison.
-
-Two simple ratios are reproducible but easy to misuse: the estimate is about
-USD~7.71 per commit and USD~0.058 per retained non-generated implementation or
-test line. Neither measures correctness, usefulness, review burden, or future
-maintenance. A ten-line scheduler fix can matter more than thousands of lines
-of generated tables; code later discarded still consumed tokens; and retained
-bugs count as cheaply as retained correct code.
-
-A defensible economic model separates four costs:
-
-\begin{enumerate}
-  \item \textbf{generation}: producing candidate code and documentation;
-  \item \textbf{integration}: making independently evolving subsystems work together;
-  \item \textbf{assurance}: establishing compatibility, security, and performance; and
-  \item \textbf{maintenance}: preserving those properties over releases and incidents.
-\end{enumerate}
-
-\project{} provides evidence that AI can reduce generation cost enough to make
-an ambitious one-off experiment accessible. It provides no evidence that the
-total cost of a production-quality replacement would be similarly reduced.
-The public history permits later comparison with human projects, but a valid
-counterfactual requires scoped requirements, comparable tests, active human
-time, specialist review, and equivalent quality gates. LOC alone cannot supply
-that counterfactual.
-
-\section{Domains as a Secondary Finding}
-
-The domain design was implementable enough to structure the controller,
-services, resource ownership, Linux personality state, and multiple workload
-records. Per-domain state banking, generation identities, address-space and
-console suspension, and failure ownership offer preliminary evidence that the
-abstraction is technically feasible without placing a complete guest kernel in
-each workload.
-
-The proposed benefits remain hypotheses. CPU and memory settings are retained
-and reported but are not fully charged and enforced. Network and filesystem
-isolation are incomplete. Lifecycle failures remain. There is no adversarial
-cross-domain security result, QoS benchmark, formal noninterference argument,
-or native-hardware comparison. The correct conclusion is that domains are a
-promising research direction exposed by the experiment, not a proven superior
-replacement for namespaces, containers, or virtual machines.
-
-\section{Controls Required for Trustworthy AI Systems Code}
-
-The failures observed here suggest concrete controls for future AI-generated
-infrastructure:
-
-\begin{itemize}
-  \item versioned specifications and compatibility ledgers linked to tests;
-  \item acceptance workflows that represent complete operator behavior, not
-        isolated success markers;
-  \item differential testing against Linux and established conformance suites;
-  \item independent test authors and adversarial reviewers, preferably with
-        model and method diversity;
-  \item negative, lifecycle, cleanup, concurrency, and resource-exhaustion tests;
-  \item performance budgets tied to named workloads and identical hardware;
-  \item threat models, unsafe-code inventories, fuzzing, and independent security review;
-  \item reproducible builds and archived logs, prompts, billing evidence, and test artifacts;
-  \item release gates that distinguish implementation, integration, and human acceptance; and
-  \item explicit ownership for compatibility and maintenance after generation ends.
-\end{itemize}
-
-The architecture document proposed multiple specialized agents for
-implementation, verification, and integration. The actual experiment did not
-substantially use that structure. A future controlled comparison should test
-whether separate implementation, compatibility, security, and acceptance
-agents reduce self-validation failures. Multiple instances of the same model
-would not automatically provide independent judgment; they may reproduce the
-same blind spots.
-
-\section{Threats to Validity}
-
-This is a single project, model, author, architecture, and development period.
-The author both directed and evaluated the experiment. The AI authored much of
-the implementation, documentation, and test suite. Manual tests were
-opportunistic rather than a preregistered protocol. API cost and development
-share are author estimates. Human time was not recorded. Repository commits
-measure activity but not cognitive effort, and the unusually fine commit
-granularity inflates comparisons based on commit count.
-
-The system ran primarily under x86-64 QEMU TCG on an Apple Silicon host. KVM,
-real hardware, other architectures, hostile workloads, broad package suites,
-and GPU drivers were not evaluated. Compatibility classifications are local to
-the project and should be treated as hypotheses until independently tested.
-The current commit is known to contain a detached-domain lifecycle failure;
-this report intentionally preserves that fact rather than selecting only a
-successful path.
-
-Finally, the project specification changed during development. That is
-realistic for exploratory engineering but makes controlled attribution
-difficult. The result demonstrates what this human--AI collaboration produced,
-not what the model would produce from a fixed prompt without intervention.
-
-\section{One-Offs and Production Systems}
-
-One-off AI-generated systems can be valuable. They can test architectural
-possibility, create research instruments, explore alternatives too expensive
-to staff conventionally, and expose hidden requirements. \project{} succeeded
-in that role. It made Linux compatibility and domain design concrete enough to
-discover problems that discussion alone would not reveal.
-
-The same properties become risks when a one-off is mistaken for a platform.
-\project{} cannot guarantee that programs operate correctly. It cannot load
-the existing GPU-driver ecosystem, promise a stable driver ABI, establish
-security against attack, or provide appropriate production performance data.
-It has no release organization responsible for years of compatibility. There
-are environments in which a bespoke artifact is the point; there are others
-in which standards and ecosystem contracts are the product.
-
-It is therefore fair to say that vibe-coding an operating system is possible.
-It is not reasonable to infer that vibe-operating production workloads is
-safe. Production is a different undertaking: it requires evidence and
-institutions that persist after the code-generation session ends.
+The project is Apache-2.0 and intended for public release. Publication should
+archive commit \evaluatedcommit{}, a source manifest, the compatibility ledger,
+benchmark logs, the development transcript, billing evidence, the detached
+lifecycle failure, and the exact line-count commands.
 
 \section{Conclusion}
 
-\project{} is unfinished, and that does not make the experiment a failure. Its
-purpose was not to ship a production operating system. Its purpose was to
-determine whether a modern AI coding agent could construct one deeply enough
-to boot from firmware, implement a meaningful Linux userspace contract, run
-real distribution components, and explore a new domain boundary.
+Ginux reached the stopping point for which it was built. One persistent Codex
+agent, given architecture, tasks, documentary memory, and machine feedback,
+created a kernel that boots from firmware and runs real Linux distribution
+components. The author guided goals and rejected bad conclusions without
+specifying the code line by line.
 
-The answer is yes. A single persistent Codex agent, given tasks, architectural
-constraints, a collaboratively maintained documentary memory, an explicit
-plan, and access to build and QEMU feedback, produced a substantial kernel
-prototype. The human guided objectives and judged results without directing
-the implementation line by line.
+Ginux cannot guarantee Linux program behavior, driver compatibility, security,
+or native performance. The experiment establishes that an AI-guided agent can
+vibe-code an operating-system prototype. Running production workloads on this
+evidence would be reckless.
 
-That answer must not be confused with production readiness. \project{} cannot
-guarantee general Linux program behavior; its compatibility ledger is mostly
-partial; GPU and stable driver compatibility are absent; performance and
-security have not received appropriate independent evaluation; and a manual
-workflow at the evaluated stopping point exposed a serious lifecycle failure
-after narrower tests passed.
-
-AI can build code. The question now is the quality and capability of that code,
-and how standards for control and compatibility are maintained. The cost of
-generating an ambitious one-off has fallen dramatically. The cost of knowing
-that it is correct, compatible, secure, performant, and maintainable has not
-disappeared. Future progress should therefore be measured not only by what AI
-can make run, but by the independent evidence that justifies trusting it.
-
-\section{Artifact Availability}
-
-The project is licensed under Apache-2.0 and is intended for public release.
-The archival repository URL and immutable release tag will be inserted before
-submission. This draft evaluates Git commit \evaluatedcommit{}; the commit,
-source manifest, compatibility ledger, raw benchmark logs, and development
-transcript should be preserved together so that later project changes do not
-silently alter the reported result.
+AI can build code. Our remaining problem is deciding what the code can do, how
+well it does it, and who keeps those claims true after the session ends.
 
 \begingroup
 \raggedright
 \bibliographystyle{plain}
 \bibliography{references}
 \endgroup
-
-\appendix
-\section{Reproduction and Publication Checklist}
-
-Before publication, the following evidence should accompany the report:
-
-\begin{enumerate}
-  \item a public repository URL and immutable tag for commit \shortcommit;
-  \item an exported prompt/task history sufficient to substantiate the
-        single-agent development description;
-  \item provider billing evidence supporting the API-cost estimate;
-  \item a reconstructed human-time range, or an explicit statement that it
-        cannot be recovered;
-  \item clean-checkout logs for \texttt{make check}, Alpine, Rocky shell,
-        multi-domain, storage, OCI-cache, and systemd gates;
-  \item raw timing logs with QEMU, accelerator, host, image digest, and cache state;
-  \item the exact detached-start/attach failure transcript retained as a
-        negative result; and
-  \item a generated artifact manifest and line-count script.
-\end{enumerate}
-
-\section{Milestone Record Template}
-
-Future revisions should record each claimed milestone with the following
-fields: objective; human-specified acceptance behavior; agent implementation;
-automated benchmark; exact environment; human validation sequence; commit;
-result; residual limitations; and regressions discovered later. A milestone is
-not complete merely because the implementation exists or a nearby test passes.
 
 \end{document}
