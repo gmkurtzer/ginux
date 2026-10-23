@@ -32,6 +32,11 @@ Host: Apple Silicon macOS, QEMU `x86_64` TCG. Image:
 | Warm compressed-layer restore | about 2,700 ms |
 | Layer unpack and rootfs publication | about 3,500 ms |
 
+An October 23 paper-validation rerun on the same Apple Silicon/QEMU TCG
+profile reached the verified Rocky login target in 4,384 ms from Linux init.
+This is consistent with the checkpoint range but is not a native or
+Linux-comparative result.
+
 The material init delay was a nested child polling a Unix socket owned by its
 suspended parent. The former path busy-spun through five- and one-second
 timeouts, preventing the parent from making the descriptor ready. The runtime

@@ -118,6 +118,43 @@ measured as one artifact before execution. A production system would still
 need a mature update, rollback, signing, recovery, and firmware-compatibility
 story.
 
+\subsection{Implementation anatomy}
+
+Ring~0 contains the mechanisms that must enforce a system-wide invariant:
+page tables and address spaces, scheduling, capabilities, IPC, interrupt and
+timer handling, domain ownership, the Linux personality boundary, and the
+trusted side of device and DMA control. The x86-64 implementation does not use
+rings~1 or~2. Ring~3 contains the controller, Linux workloads, and isolated
+native services. Consequently, embedding a program in \texttt{GINUX.EFI}
+describes how its bytes arrive, not the privilege at which they execute.
+
+The controller is a freestanding, statically linked Rust program using the
+Linux ABI for ordinary process behavior and a versioned device/\texttt{ioctl}
+interface for Ginux management. It parses commands, maintains domain and
+network configuration, starts and observes workloads, and manages persistent
+configuration and the OCI cache. It is the initial administrative authority,
+but it cannot rewrite the kernel or manufacture rights outside the sealed boot
+authority envelope.
+
+Device support is deliberately split. The kernel discovers PCI devices and
+retains interrupt-controller, MSI-X, IOMMU, and capability enforcement. The
+prototype includes virtio block and network paths and demonstrates measured
+Rust driver/protocol services in separate ring-3 domains with bounded MMIO,
+DMA, queue, and packet authority. Capabilities and resources are tagged with a
+domain generation so a crashed service can be quiesced, revoked, and replaced
+without treating its successor as the same security identity. This is a
+demonstrated direction, not yet a general driver framework or hardware matrix.
+
+The filesystem side is similarly purpose-built. Kernel VFS and mount behavior
+present domain-local roots assembled from verified OCI layers, a writable
+overlay, and selected \texttt{tmpfs}, \texttt{procfs}, and \texttt{devfs}
+semantics. A host-owned block volume preserves controller configuration and a
+content-addressed image cache. Immutable file pages are shared within a domain
+and copied when made writable. Small assembly boundaries enter and leave UEFI,
+install exception, interrupt, and syscall entries, switch privilege and
+address-space state, and provide ABI probes; policy and most mechanisms remain
+in Rust.
+
 \subsection{Controller, domains, and personalities}
 
 The controller configures the host and creates workload domains. It manages
@@ -160,6 +197,39 @@ content-addressed OCI layer cache, so a reboot need not redownload every image
 or forget every domain. It currently provides selected tmpfs, overlay, procfs,
 devfs, and persistent-volume behavior. It does not provide Linux's broad
 filesystem ecosystem or production storage guarantees.
+
+\subsection{Optimization and security hypotheses}
+
+The architecture places authorization on the control path while permitting an
+approved data path to use shared pages, hardware queues, batching, and direct
+interrupt delivery. Domains are scheduling and accounting principals, so CPU
+service class and, eventually, memory, storage, and network policy can be
+applied above individual processes. The intended advantage is less duplicated
+host machinery and fewer crossings on steady-state I/O, not an assumption that
+new code is inherently faster.
+
+There is one narrow performance result. On the Apple Silicon development host,
+QEMU translated x86-64 execution reached the verified Rocky console in
+4,081--4,083~ms from Linux init at the evaluated checkpoint; a rerun for this
+revision measured 4,384~ms. Profiling had reduced the original 15,344~ms path
+by removing a polling stall, quadratic frame scans, and eager duplication of
+immutable root-filesystem pages. These are regression measurements under TCG,
+not comparisons with Linux or evidence of native performance. The repository
+defines a three-second KVM gate, but it still requires execution on an x86-64
+Linux host. Broader CPU, memory, IPC, network, storage, and application
+benchmarks remain necessary before publication of any competitive claim; the
+method and limitations are recorded in the
+\repolink{docs/PERFORMANCE.md}{performance record}.
+
+The security hypothesis is that explicit capabilities, per-domain address
+spaces, W\textasciicircum X mappings, immutable executable pages,
+generation-safe revocation, and IOMMU-confined DMA reduce ambient authority
+and contain component failure. The prototype exercises several positive and
+negative paths, including stale-generation rejection and driver teardown.
+It has not received an independent audit, side-channel analysis, formal
+verification of the whole kernel, or adversarial production testing. These
+mechanisms are reasons to investigate the design, not evidence that Ginux is
+more secure than Linux.
 
 \subsection{Implemented result and research boundary}
 
@@ -294,6 +364,26 @@ mappings. systemd combined scheduling, epoll, signals, procfs, sockets,
 mounts, credentials, timers, and console lifecycle. Human interactive tests
 found workflow failures that adjacent automated tests had missed. The result
 was a productive loop, not an autonomous proof of correctness.
+
+\section{What If We Had Started with Linux?}
+
+A practical product effort would have had strong reasons to begin with Linux.
+Namespaces, cgroups, KVM, device drivers, filesystems, security modules, and a
+vast compatibility suite already exist. A Ginux-like controller could manage
+an immutable Linux host, while a domain experiment could initially combine
+those mechanisms and add scheduler, device, and resource-policy changes where
+the existing abstractions proved insufficient. That route would have produced
+broader hardware and application support much sooner.
+
+It would also answer a different question. This experiment deliberately
+removed Linux from the kernel side to test whether an expert-directed AI could
+construct the machinery itself and discover a distinct outer isolation object.
+Starting with Linux would shift the work from reimplementation toward
+integration, hardening, measurement, and upstream-quality design. That may be
+the more valuable implication: if AI can traverse the from-scratch path, an
+expert can instead aim it at bounded improvements to a mature system, where
+the ecosystem remains intact and the novel idea must survive existing review,
+compatibility, and performance standards.
 
 \section{Expertise Still Drives the Agent}
 
