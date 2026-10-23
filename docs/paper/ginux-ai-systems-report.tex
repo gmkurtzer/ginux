@@ -1,6 +1,6 @@
 \documentclass[11pt]{article}
 
-\usepackage[margin=1in]{geometry}
+\usepackage[margin=0.9in]{geometry}
 \usepackage{booktabs}
 \usepackage{enumitem}
 \usepackage{hyperref}
@@ -198,6 +198,29 @@ or forget every domain. It currently provides selected tmpfs, overlay, procfs,
 devfs, and persistent-volume behavior. It does not provide Linux's broad
 filesystem ecosystem or production storage guarantees.
 
+\subsection{POSIX surface, identities, and permissions}
+
+Linux syscall-number coverage is not a measure of POSIX conformance. POSIX is
+primarily a source and behavioral contract across libc, processes, files,
+signals, terminals, clocks, synchronization, and IPC. The evaluated musl and
+glibc userspaces exercise fork/exec/wait, path and descriptor operations,
+pipes and FIFOs, signals, clocks, termios, sockets, futex-based threading, and
+selected POSIX and System~V IPC. Coverage is partial: Ginux has not run a
+complete POSIX conformance suite and makes no certification claim.
+
+Each Linux domain begins with its own user-namespace and credential context.
+The evaluated profile maps domain UID/GID~0 to kernel-side ID~100000, denies
+\texttt{setgroups}, and records real, effective, and saved UID/GID plus a
+supplementary group. Those identities participate in signal, cross-process,
+and file-access decisions; the VFS implements mode, ownership, \texttt{umask},
+and access operations needed by the package-manager path. Native capabilities
+separately prevent domain root from controlling the host or another domain.
+The current profile has one mapped identity, no Linux capabilities, and denies
+many credential mutations; ACL and permission edge cases remain incomplete.
+No SELinux or other active Linux security module enforces labels. Password and
+account policy may run in domain userspace, while the kernel enforces numeric
+credentials, file modes, and native authority.
+
 \subsection{Optimization and security hypotheses}
 
 The architecture places authorization on the control path while permitting an
@@ -260,7 +283,6 @@ They use implemented controller commands but omit lengthy registry, systemd,
 and timing output. They are illustrative pseudo-screenshots rather than raw
 benchmark logs.
 
-\pagebreak
 \begin{samepage}
 \noindent\textbf{Example 1: boot a conventional Linux userspace.}\par\nopagebreak
 \begin{quote}\small\hrule\vspace{4pt}
@@ -274,7 +296,6 @@ ginux> domain start rocky --attach
 ginux: OCI cache hit (2 layers)
 ginux: starting Linux personality domain
 systemd: Reached target Multi-User System.
-
 Rocky Linux 10
 rocky login:
 \end{verbatim}
@@ -296,19 +317,16 @@ alpine-a: settings accepted; configured
 ginux> domain start alpine-a
 ginux: OCI cache miss; pulling 1 layer
 alpine-a: running (detached)
-
 ginux> domain new alpine-b
 ginux> domain set alpine-b image=alpine:latest init=/bin/sh
 ginux> domain start alpine-b
 ginux: OCI cache hit (1 layer)
 alpine-b: running (detached)
-
 ginux> domain list
 NAME       STATE    PERSONALITY  INIT       NETWORK
 rocky      running  linux        /sbin/init host(shared)
 alpine-a   running  linux        /bin/sh    host(shared)
 alpine-b   running  linux        /bin/sh    host(shared)
-
 ginux> shutdown
 ginux: local configuration committed
 \end{verbatim}
@@ -509,6 +527,7 @@ can secure and maintain it, and who remains accountable after the agent stops.
 That ecosystem is the moat, and no prompt can conjure it overnight.
 
 \begingroup
+\small
 \raggedright
 \bibliographystyle{plain}
 \bibliography{references}
