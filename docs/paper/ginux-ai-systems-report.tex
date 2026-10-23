@@ -358,12 +358,22 @@ without implying that every workload mutation is durable.
 
 \subsection{From an idea to an executable plan}
 
-The method began with questions rather than code. An initial concept was
-interrogated through sustained question-and-answer with the agent: what belonged
-in ring~0, what Linux compatibility meant, how domains differed from
-namespaces, which privileges a controller required, and what observable result
-would count as success. Corrections were incorporated into written artifacts
-before they became implementation assumptions.
+The method began with a technical vision, not simply the instruction ``build a
+kernel.'' The intended result was an independently implemented kernel with a
+normal Linux userspace, a small host, strong privilege boundaries, recoverable
+services, and an operator experience that behaved like a system rather than a
+demonstration. Sustained Q\&A examined what belonged in ring~0, what Linux
+compatibility meant, how domains differed from namespaces, and what observable
+result would count as success.
+
+Substantial expertise and continuing intervention were required. Partial
+implementations exposed decisions that no initial prompt could completely
+anticipate. The project lead repeatedly identified category errors, rejected
+operationally incorrect successes, supplied Linux and provisioning context,
+changed priorities, and defined the next useful endpoint. Those corrections
+became written architecture before becoming implementation assumptions.
+Without that steering, the same generation capacity could have produced an
+impressive boot transcript while converging on the wrong system.
 
 The first artifact was a collaborative architectural overview. The versioned
 \repolink{ARCHITECTURE.md}{ARCHITECTURE.md} then developed the boot model,
@@ -415,92 +425,95 @@ correctness.
 
 \subsection{The closed-loop agent procedure}
 
-Every milestone had an observable gate: boot the EFI image, enter a ring-3
-controller, create a named domain, execute an Alpine shell, pull an OCI image
-over the network, run Rocky binaries, launch systemd, and reach a console. The
-agent received a goal and iterated until the acceptance behavior was observed.
-The reusable loop was:
+Every milestone had an observable gate, progressing from EFI boot and a ring-3
+controller through Alpine, OCI ingestion, Rocky binaries, systemd, and a
+console. The agent iterated within a bounded goal, while expert control defined
+the gate and interpreted the result. The method contained two coupled loops:
 
 \begin{center}
 \fbox{\parbox{0.91\linewidth}{
-architecture $\rightarrow$ milestone $\rightarrow$ executable gate
-$\rightarrow$ implementation $\rightarrow$ build and QEMU run
-$\rightarrow$ failure analysis $\rightarrow$ revision $\rightarrow$ human
-evaluation $\rightarrow$ signed commit.
+\textbf{Outer steering loop:} technical vision $\rightarrow$ architecture and
+constraints $\rightarrow$ milestone and acceptance gate $\rightarrow$ expert
+review of real behavior $\rightarrow$ correction, reprioritization, or
+acceptance.\\[3pt]
+\textbf{Inner agent loop:} implementation $\rightarrow$ build and QEMU run
+$\rightarrow$ measurement and failure analysis $\rightarrow$ revision
+$\rightarrow$ regression test.
 }}
 \end{center}
 
-Codex selected implementations, edited the repository, compiled the system,
-booted QEMU, read logs, wrote tests, updated documentation, profiled failures,
-and continued to the next gate. It also drafted much of the documentation and
-report prose, which received editorial review. Human direction supplied the
-architecture, priorities, compatibility target, stopping decisions, and
-skepticism about false success; it did not prescribe individual edits. The
-agent was given outcomes and room to solve them, while executable gates
-prevented console output alone from satisfying a milestone.
+Codex selected implementations, edited the repository, compiled and booted the
+system, analyzed logs, wrote tests, profiled failures, and revised within the
+current gate. It also drafted documentation under review. This broad
+implementation autonomy was not light supervision. Human direction supplied
+the architecture, priorities, compatibility target, operator model, definition
+of normal behavior, course corrections, and stopping decision. Individual
+edits were delegated; the system-level reasoning used to evaluate them was not.
 
-The tests became progressively less synthetic. Small probes established entry
-paths and syscall mechanics. Alpine exposed filesystem, working-directory,
-fork, and exec errors. Rocky exercised glibc, dynamic loading, and larger
-mappings. systemd combined scheduling, epoll, signals, procfs, sockets,
-mounts, credentials, timers, and console lifecycle. Interactive operator tests
-found workflow failures that adjacent automated tests had missed. The result
-was a productive, repeatable loop, not an autonomous proof of correctness. A
-comparable project can apply the same procedure: refine the idea through
-Q\&A, write progressively detailed architecture, externalize the plan, define
-executable gates, permit bounded agent iteration, review the evidence, and
-record both decisions and remaining gaps before advancing.
+Tests became progressively less synthetic: probes established mechanics;
+Alpine exposed filesystem and process errors; Rocky exercised glibc and larger
+mappings; systemd combined scheduling, epoll, signals, procfs, sockets, mounts,
+credentials, timers, and consoles. Interactive testing reopened apparently
+completed milestones when observed behavior was wrong. A useful endpoint
+required both rapid agent iteration and repeated expert refusal to accept a
+plausible but incomplete result.
+
+The mechanics---written architecture, external plans, executable gates,
+bounded iteration, evidence review, and recorded gaps---are reusable, but they
+do not replace a controlling vision. The reviewer must know what to ask, which
+output to distrust, how the target normally behaves, and which endpoint is
+valuable. The method reduces implementation cost; it does not remove the need
+for experienced technical leadership.
 
 \subsection{Human steering and agent autonomy}
 
-The agent was not given a finished specification or instructed to reproduce a
-known kernel design. The collaboration alternated between architectural
-steering and delegated implementation. Domain expertise supplied the research
-objective, operating constraints, compatibility standard, and acceptance
-judgment. Codex proposed concrete mechanisms, selected implementation details,
-wrote and revised the code, ran the system, interpreted failures, and updated
-the working documents. Important choices frequently emerged through several
-rounds rather than from either participant in isolation.
+The agent had neither a finished specification nor independent authority with
+occasional approval. Intensive steering continued across major architectural
+and compatibility transitions. Domain expertise supplied the objective,
+coherent system vision, constraints, compatibility standard, failure
+interpretation, and acceptance judgment. Codex proposed mechanisms, selected
+implementation details, wrote and tested the code, and updated the working
+documents. Reaching a usable result depended on the project lead recognizing
+when an answer was incomplete, conceptually wrong, or aimed at an unhelpful
+endpoint.
 
-The distinction is visible in the conversation record. The requirement for a
-small container-native system evolved into a ring-3 controller after explicit
-discussion of whether initial userspace could be embedded in the EFI image.
-Embedding was retained as a packaging property; a proposal that risked placing
-the controller in privileged or private kernel machinery was rejected in favor
-of an ordinary static process using the Linux ABI plus a narrow Ginux
-management interface. Domains were explicitly required to be kernel-native
-boundaries, not renamed namespaces, and later gained requirements for
-independent process, mount, network, credential, capability, and resource
-state. OCI terminology was corrected during development: OCI provides image
-transport and filesystem content, while the kernel domain is the runtime and
-isolation boundary.
+The conversation record makes the distinction concrete. An embedded initial
+userspace became an ordinary ring-3 static process using the Linux ABI plus a
+narrow management interface; embedding remained only a packaging property.
+Domains were required to be kernel-native boundaries rather than renamed
+namespaces, with independent process, mount, network, credential, capability,
+and resource state. OCI was corrected from runtime language to its actual role
+as image transport and filesystem content. These expert corrections prevented
+the implementation from solidifying around the wrong abstractions.
 
-Operator testing was also steering. Empty directory listings exposed missing
-fork/exec and filesystem behavior; a second domain exposed singleton runtime
-state; systemd output exposed missing mount, procfs, socket, terminal, and
-event semantics; controller latency exposed scheduling defects. These were not
-treated as peripheral bugs. Each observation changed the next acceptance gate
-and often the architecture or compatibility ledger. Conversely, low-level
-choices such as generation-tagged capabilities, bounded control calls,
-copy-on-write page handling, and fast paths using pre-authorized shared pages
-were primarily agent-proposed mechanisms within the stated requirements for
-speed, security, fault containment, and domain ownership. The shared-page
-example in Section~2.5 therefore originated as an agent-derived optimization,
-then became part of the reviewed architecture; it was not a verbatim human
-instruction.
+Operator testing was steering. Empty directory listings exposed process and
+filesystem defects; a second domain exposed singleton state; systemd exposed
+missing mount, procfs, socket, terminal, and event semantics; controller
+latency exposed scheduling defects. Interpreting each symptom against normal
+Linux behavior changed acceptance gates and often the architecture. Repeated
+direction to test real workflows, stop at reviewable milestones, remove
+regressions, and distinguish output from correct semantics materially shaped
+the result.
 
-Table~\ref{tab:provenance} summarizes representative decisions. ``Origin''
-identifies the source of the governing requirement, not authorship of every
-line implementing it. The complete user-visible conversation is the most
-detailed record; repository history, architecture documents, decision records,
-and executable tests provide independently inspectable corroboration. A
+Conversely, generation-tagged capabilities, bounded control calls,
+copy-on-write handling, and pre-authorized shared-page fast paths were mainly
+agent-proposed mechanisms within human requirements for speed, security, fault
+containment, and ownership. The Section~2.5 shared-page example was therefore
+an agent-derived optimization retained through architectural review, not a
+verbatim human instruction.
+
+Table~\ref{tab:provenance} identifies the source of governing requirements,
+not authorship of every implementation line. The user-visible conversation is
+the most detailed record; repository history, design documents, and tests
+provide corroboration. A
 \href{https://github.com/gmkurtzer/ginux/blob/main/docs/paper/STEERING-PROVENANCE.md}{curated
 steering chronology} accompanies the paper and distinguishes direct steering,
 agent proposals, collaborative refinement, and corrections triggered by
 observed behavior.
 
-\begin{table}[htbp]
-\centering
+\begin{center}
+\refstepcounter{table}
+\label{tab:provenance}
 \small
 \setlength{\baselineskip}{9.5pt}
 \begin{tabular}{p{0.15\linewidth}p{0.15\linewidth}p{0.40\linewidth}p{0.18\linewidth}}
@@ -508,18 +521,18 @@ observed behavior.
 \tcell{Decision} & \tcell{Origin} & \tcell{Division of work} & \tcell{Validation record} \\
 \midrule
 \tcell{Linux userspace compatibility} & \tcell{Human-specified} & \tcell{Rocky Linux 10 and normal system behavior defined the target; Codex implemented and expanded the ABI.} & \tcell{Compatibility ledger; Alpine, Rocky, and systemd gates.} \\
-\tcell{Ring-3 controller} & \tcell{Collaborative refinement} & \tcell{Embedded initial userspace was proposed during Q\&A; human steering required an ordinary static userspace process and Linux ABI; Codex designed the boot packaging and control interface.} & \tcell{Architecture and controller boot/lifecycle tests.} \\
+\tcell{Ring-3 controller} & \tcell{Human-directed refinement} & \tcell{Embedded initial userspace was explored during Q\&A; human steering required an ordinary static userspace process and Linux ABI; Codex designed the boot packaging and control interface.} & \tcell{Architecture and controller boot/lifecycle tests.} \\
 \tcell{Native domains} & \tcell{Human-specified} & \tcell{Human steering defined a stronger-than-namespace kernel boundary and metascheduling principal; Codex designed generation-bound objects, capabilities, cleanup, and scheduling machinery.} & \tcell{Domain ADR and multi-domain tests.} \\
 \tcell{OCI boundary} & \tcell{Human correction} & \tcell{Human steering corrected runtime-oriented language: OCI is transport and initial filesystem content, not the domain runtime. Codex revised implementation and messages accordingly.} & \tcell{OCI pull/cache tests and domain lifecycle behavior.} \\
 \tcell{Domain privilege} & \tcell{Human-specified and corrected} & \tcell{Mounts, nested namespaces, systemd, Docker/Kubernetes-class behavior, and eventual KVM access were required inside the domain; Codex implemented the exercised subset.} & \tcell{Rocky systemd and Linux ABI tests; remaining gaps documented.} \\
 \tcell{Authorized shared-page fast path} & \tcell{Agent-proposed} & \tcell{Codex derived a control-path authorization/data-path sharing mechanism from speed, isolation, and revocation requirements; the design was reviewed and retained.} & \tcell{Domain authority ADR and memory-isolation tests.} \\
-\tcell{Acceptance gates} & \tcell{Collaborative} & \tcell{Human testing supplied real workflows and rejected false success; Codex automated reproducible QEMU and ABI gates and iterated against them.} & \tcell{Use cases, working goals, test scripts, and commits.} \\
+\tcell{Acceptance gates} & \tcell{Human-led} & \tcell{Human testing supplied real workflows, interpreted expected behavior, and repeatedly rejected false success; Codex automated reproducible QEMU and ABI gates and iterated against them.} & \tcell{Use cases, working goals, test scripts, and commits.} \\
 \tcell{Stopping point} & \tcell{Human decision} & \tcell{Codex documented remaining work; human judgment determined that research feasibility had been demonstrated without claiming production readiness.} & \tcell{Frozen evaluated commit and compatibility gaps.} \\
 \bottomrule
 \end{tabular}
-\caption{Representative provenance of architectural and methodological decisions.}
-\label{tab:provenance}
-\end{table}
+\par\smallskip
+Table~\thetable: Representative provenance of architectural and methodological decisions.
+\end{center}
 
 \section{Alternative: Starting with Linux}
 
