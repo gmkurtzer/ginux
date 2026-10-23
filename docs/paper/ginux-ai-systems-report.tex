@@ -14,6 +14,7 @@
 \newcommand{\evaluatedcommit}{\texttt{9afa61762a66a208\allowbreak{}55ea3a23e3e04221\allowbreak{}b54a5a22}}
 \newcommand{\estimatedcost}{approximately USD~8,000}
 \newcommand{\repolink}[2]{\href{https://github.com/gmkurtzer/ginux/blob/9afa61762a66a20855ea3a23e3e04221b54a5a22/#1}{\texttt{#2}}}
+\newcommand{\tcell}[1]{{\raggedright #1\par}}
 
 \title{\textbf{Ginux: AI Can Build a Kernel, but It Cannot Manufacture an Ecosystem}}
 \author{Gregory M. Kurtzer}
@@ -445,6 +446,76 @@ comparable project can apply the same procedure: refine the idea through
 Q\&A, write progressively detailed architecture, externalize the plan, define
 executable gates, permit bounded agent iteration, review the evidence, and
 record both decisions and remaining gaps before advancing.
+
+\subsection{Human steering and agent autonomy}
+
+The agent was not given a finished specification or instructed to reproduce a
+known kernel design. The collaboration alternated between architectural
+steering and delegated implementation. Domain expertise supplied the research
+objective, operating constraints, compatibility standard, and acceptance
+judgment. Codex proposed concrete mechanisms, selected implementation details,
+wrote and revised the code, ran the system, interpreted failures, and updated
+the working documents. Important choices frequently emerged through several
+rounds rather than from either participant in isolation.
+
+The distinction is visible in the conversation record. The requirement for a
+small container-native system evolved into a ring-3 controller after explicit
+discussion of whether initial userspace could be embedded in the EFI image.
+Embedding was retained as a packaging property; a proposal that risked placing
+the controller in privileged or private kernel machinery was rejected in favor
+of an ordinary static process using the Linux ABI plus a narrow Ginux
+management interface. Domains were explicitly required to be kernel-native
+boundaries, not renamed namespaces, and later gained requirements for
+independent process, mount, network, credential, capability, and resource
+state. OCI terminology was corrected during development: OCI provides image
+transport and filesystem content, while the kernel domain is the runtime and
+isolation boundary.
+
+Operator testing was also steering. Empty directory listings exposed missing
+fork/exec and filesystem behavior; a second domain exposed singleton runtime
+state; systemd output exposed missing mount, procfs, socket, terminal, and
+event semantics; controller latency exposed scheduling defects. These were not
+treated as peripheral bugs. Each observation changed the next acceptance gate
+and often the architecture or compatibility ledger. Conversely, low-level
+choices such as generation-tagged capabilities, bounded control calls,
+copy-on-write page handling, and fast paths using pre-authorized shared pages
+were primarily agent-proposed mechanisms within the stated requirements for
+speed, security, fault containment, and domain ownership. The shared-page
+example in Section~2.5 therefore originated as an agent-derived optimization,
+then became part of the reviewed architecture; it was not a verbatim human
+instruction.
+
+Table~\ref{tab:provenance} summarizes representative decisions. ``Origin''
+identifies the source of the governing requirement, not authorship of every
+line implementing it. The complete user-visible conversation is the most
+detailed record; repository history, architecture documents, decision records,
+and executable tests provide independently inspectable corroboration. A
+\href{https://github.com/gmkurtzer/ginux/blob/main/docs/paper/STEERING-PROVENANCE.md}{curated
+steering chronology} accompanies the paper and distinguishes direct steering,
+agent proposals, collaborative refinement, and corrections triggered by
+observed behavior.
+
+\begin{table}[htbp]
+\centering
+\small
+\setlength{\baselineskip}{9.5pt}
+\begin{tabular}{p{0.15\linewidth}p{0.15\linewidth}p{0.40\linewidth}p{0.18\linewidth}}
+\toprule
+\tcell{Decision} & \tcell{Origin} & \tcell{Division of work} & \tcell{Validation record} \\
+\midrule
+\tcell{Linux userspace compatibility} & \tcell{Human-specified} & \tcell{Rocky Linux 10 and normal system behavior defined the target; Codex implemented and expanded the ABI.} & \tcell{Compatibility ledger; Alpine, Rocky, and systemd gates.} \\
+\tcell{Ring-3 controller} & \tcell{Collaborative refinement} & \tcell{Embedded initial userspace was proposed during Q\&A; human steering required an ordinary static userspace process and Linux ABI; Codex designed the boot packaging and control interface.} & \tcell{Architecture and controller boot/lifecycle tests.} \\
+\tcell{Native domains} & \tcell{Human-specified} & \tcell{Human steering defined a stronger-than-namespace kernel boundary and metascheduling principal; Codex designed generation-bound objects, capabilities, cleanup, and scheduling machinery.} & \tcell{Domain ADR and multi-domain tests.} \\
+\tcell{OCI boundary} & \tcell{Human correction} & \tcell{Human steering corrected runtime-oriented language: OCI is transport and initial filesystem content, not the domain runtime. Codex revised implementation and messages accordingly.} & \tcell{OCI pull/cache tests and domain lifecycle behavior.} \\
+\tcell{Domain privilege} & \tcell{Human-specified and corrected} & \tcell{Mounts, nested namespaces, systemd, Docker/Kubernetes-class behavior, and eventual KVM access were required inside the domain; Codex implemented the exercised subset.} & \tcell{Rocky systemd and Linux ABI tests; remaining gaps documented.} \\
+\tcell{Authorized shared-page fast path} & \tcell{Agent-proposed} & \tcell{Codex derived a control-path authorization/data-path sharing mechanism from speed, isolation, and revocation requirements; the design was reviewed and retained.} & \tcell{Domain authority ADR and memory-isolation tests.} \\
+\tcell{Acceptance gates} & \tcell{Collaborative} & \tcell{Human testing supplied real workflows and rejected false success; Codex automated reproducible QEMU and ABI gates and iterated against them.} & \tcell{Use cases, working goals, test scripts, and commits.} \\
+\tcell{Stopping point} & \tcell{Human decision} & \tcell{Codex documented remaining work; human judgment determined that research feasibility had been demonstrated without claiming production readiness.} & \tcell{Frozen evaluated commit and compatibility gaps.} \\
+\bottomrule
+\end{tabular}
+\caption{Representative provenance of architectural and methodological decisions.}
+\label{tab:provenance}
+\end{table}
 
 \section{Alternative: Starting with Linux}
 
