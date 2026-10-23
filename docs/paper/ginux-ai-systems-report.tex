@@ -42,7 +42,7 @@ the same schedule.
 
 \section{AI Built a Linux-Compatible Kernel. It Did Not Build Linux}
 
-We began with a deliberately unreasonable question: could an AI agent build a
+We began with an ambitious research question: could an AI agent build a
 kernel capable of running an existing Linux userspace? The answer, within a
 bounded research profile, is yes. \project{} boots from firmware under QEMU,
 provides its own memory manager, scheduler, process model, ELF loader, virtual
@@ -56,16 +56,15 @@ Linux. ``Linux-compatible'' here means that selected unmodified Linux programs
 observe enough of their expected ABI to run. It does not mean complete Linux
 behavior.
 
-The name is a small joke in the same family as Linux. ``Linux'' combines Linus
+The name is a deliberate joke in the same family as Linux. ``Linux'' combines Linus
 and Unix; ``Ginux'' riffs on Linux, GPT, and Greg. We will say the ``G'' stands
 for GPT so the author's head does not get any bigger.
 
-Eyes wide open: this was never an attempt to compete with Linux. The Linux
+The scope must be explicit: this was never an attempt to compete with Linux. The Linux
 kernel community has spent decades doing the difficult work of supporting
 hardware, preserving interfaces, reviewing security-sensitive changes, and
 maintaining software people actually depend on. Eleven days of enthusiastic
-AI-assisted kernel hacking does not put \project{} in that category. Kernel
-maintainers may safely postpone their panic.
+AI-assisted kernel development does not put \project{} in that category.
 
 The frozen artifact is commit \evaluatedcommit{}, dated October 20, 2026.
 Table~\ref{tab:scale} describes its scale. These are textual repository counts,
@@ -164,31 +163,93 @@ filesystem ecosystem or production storage guarantees.
 
 \subsection{Implemented result and research boundary}
 
-The current prototype boots a unified x86-64 EFI image; runs its static
-Linux-ABI controller in ring~3; acquires networking under QEMU; pulls,
-verifies, caches, and publishes OCI filesystems; runs Alpine musl/BusyBox and
-Rocky glibc programs; and launches Rocky Linux 10 UBI systemd as domain PID~1
-through \texttt{multi-user.target}. Multiple domains retain independent
-process, address-space, root, mount, and lifecycle state. Controller commands
-can start, stop, inspect, attach to, and execute a process inside a running
-domain.
+The prototype boots a unified x86-64 EFI image, runs its controller in ring~3,
+acquires networking under QEMU, and pulls and caches OCI filesystems. It runs
+Alpine musl/BusyBox and Rocky glibc programs, launches Rocky systemd through
+\texttt{multi-user.target}, and retains independent process, address-space,
+root, mount, and lifecycle state across multiple domains.
 
-The compatibility ledger covers all 375 Linux 6.12 x86-64 syscall numbers,
-classifying 82 Complete, 245 Partial, and 48 Policy-denied. Coverage is not
-completeness. Loader behavior, process semantics, procfs, sysfs, cgroups,
+The ledger classifies all 375 Linux 6.12 x86-64 syscall numbers: 82 Complete,
+245 Partial, and 48 Policy-denied. These counts provide coverage, not
+completeness. Loader and process behavior, pseudo-filesystems, cgroups,
 namespaces, IPv6, ioctl families, filesystems, and devices remain incomplete.
-Hardware support is limited to what the experiment implemented and exercised,
-mostly through QEMU. There is no GPU ecosystem, broad physical-device support,
-stable third-party driver ABI, independent security audit, native-hardware
-performance baseline, or general assurance that Linux applications behave
-correctly.
+There is no GPU ecosystem, broad hardware support, stable third-party driver
+ABI, independent security audit, native performance baseline, or general Linux
+application guarantee.
 
-Those omissions do not spoil the experiment; they define it. The question was
-whether AI could construct a new kernel and carry a real Linux userspace across
-the boundary. It was not whether eleven days of research could replace thirty
-years of Linux engineering. Features that prove useful---perhaps the domain
-model itself---may be more valuable as ideas to explore in Linux or other
-established systems than as reasons to deploy Ginux.
+Those omissions define the research boundary. The question was whether AI
+could construct a kernel and carry a real Linux userspace across it, not
+whether eleven days could replace decades of Linux engineering. Useful ideas,
+including domains, may ultimately belong in established systems rather than a
+Ginux deployment.
+
+\subsection{Illustrative operator workflows}
+
+The following condensed transcripts show the intended operator experience.
+They use implemented controller commands but omit lengthy registry, systemd,
+and timing output. They are illustrative pseudo-screenshots rather than raw
+benchmark logs.
+
+\pagebreak
+\begin{samepage}
+\noindent\textbf{Example 1: boot a conventional Linux userspace.}\par\nopagebreak
+\begin{quote}\small\hrule\vspace{4pt}
+\begin{verbatim}
+ginux> domain new rocky
+rocky: created (image required)
+ginux> domain set rocky image=rockylinux/rockylinux:10-ubi-init
+ginux> domain set rocky init=/sbin/init memory-mib=2048
+rocky: settings accepted; configured
+ginux> domain start rocky --attach
+ginux: OCI cache hit (2 layers)
+ginux: starting Linux personality domain
+systemd: Reached target Multi-User System.
+
+Rocky Linux 10
+rocky login:
+\end{verbatim}
+\vspace{2pt}\hrule
+\end{quote}
+\end{samepage}
+
+This single-domain case selects a Linux userspace image and init process while
+Ginux remains the kernel. The controller can also manage several domains
+without treating any one workload as the host operating system.
+
+\begin{samepage}
+\noindent\textbf{Example 2: reuse content across several domains.}\par\nopagebreak
+\begin{quote}\small\hrule\vspace{4pt}
+\begin{verbatim}
+ginux> domain new alpine-a
+ginux> domain set alpine-a image=alpine:latest init=/bin/sh
+alpine-a: settings accepted; configured
+ginux> domain start alpine-a
+ginux: OCI cache miss; pulling 1 layer
+alpine-a: running (detached)
+
+ginux> domain new alpine-b
+ginux> domain set alpine-b image=alpine:latest init=/bin/sh
+ginux> domain start alpine-b
+ginux: OCI cache hit (1 layer)
+alpine-b: running (detached)
+
+ginux> domain list
+NAME       STATE    PERSONALITY  INIT       NETWORK
+rocky      running  linux        /sbin/init host(shared)
+alpine-a   running  linux        /bin/sh    host(shared)
+alpine-b   running  linux        /bin/sh    host(shared)
+
+ginux> shutdown
+ginux: local configuration committed
+\end{verbatim}
+\vspace{2pt}\hrule
+\end{quote}
+\end{samepage}
+
+After reboot, the controller recovers the domain definitions and cached OCI
+layers from the host-owned volume. Writable domain overlays remain boot-local
+at the evaluated checkpoint, so configuration and image caching are persistent
+without implying that every workload mutation is durable.
 
 \section{How We Built It}
 
@@ -236,9 +297,9 @@ was a productive loop, not an autonomous proof of correctness.
 
 \section{Expertise Still Drives the Agent}
 
-This result should not be read as ``anyone can ask for a kernel before lunch.''
-AI compressed the time required to turn decisions into code. It did not supply
-all of the decisions. Choosing a Linux userspace contract, distinguishing OCI
+This result does not imply that domain expertise is optional. AI compressed
+the time required to turn decisions into code. It did not supply all of the
+decisions. Choosing a Linux userspace contract, distinguishing OCI
 transport from runtime isolation, recognizing broken fork/exec behavior,
 defining domain ownership, interpreting systemd failures, and rejecting false
 success all required domain knowledge.
@@ -345,9 +406,9 @@ the Linux userspace contract to run real distributions, and explore a new
 kernel-native domain architecture in days. The result deserves genuine
 excitement.
 
-It also deserves restraint. Ginux is a research artifact with an excellent
-demo and a very long list of ways to ruin someone's weekend. It should not run
-production infrastructure, and it does not threaten Linux. If domains or any
+It also deserves restraint. Ginux is a research artifact, not a production
+kernel. It should not run production infrastructure, and it does not threaten
+Linux. If domains or any
 other idea prove useful, success may mean contributing the idea to established
 systems rather than asking the world to adopt another kernel.
 
