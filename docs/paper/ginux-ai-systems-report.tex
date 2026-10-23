@@ -24,16 +24,20 @@
 \maketitle
 
 \begin{abstract}
-This research asked two questions: can an AI coding agent, under expert
-direction, build a new kernel capable of running an existing Linux userspace;
-and can a kernel-native domain serve as a useful isolation and resource-policy
-boundary above individual processes? In eleven days, the experiment produced
-an independent, Rust-first kernel that boots through UEFI, runs a controller
-outside ring~0, ingests OCI images, executes an unmodified Alpine userspace,
-and launches Rocky Linux 10 systemd as PID~1. It also produced kernel-owned
-domains with distinct identities, resources, process trees, filesystems, and
-scheduling policy. The evaluated artifact contains roughly 139,000 retained,
-non-generated lines of implementation and test code across 1,037 commits.
+This research asked one primary question: what is possible when an
+expert-directed AI coding agent is aimed at one of software engineering's
+hardest gaps---building a new kernel capable of running an existing Linux
+userspace? Once that path became credible, the kernel became a platform for a
+more playful architectural question: what useful or unusual ideas become
+practical when the cost of implementing them falls sharply? Kernel-native
+domains emerged from that exploration; they were an outcome, not a co-equal
+premise. In eleven days, the experiment produced an independent, Rust-first
+kernel that boots through UEFI, runs a controller outside ring~0, ingests OCI
+images, executes an unmodified Alpine userspace, launches Rocky Linux 10
+systemd as PID~1, and provides domains with distinct identities, resources,
+process trees, filesystems, and scheduling policy. The evaluated artifact
+contains roughly 139,000 retained, non-generated lines of implementation and
+test code across 1,037 commits.
 
 The result is evidence of technical feasibility, not production readiness or
 complete Linux compatibility. This report describes the artifact, a reusable
