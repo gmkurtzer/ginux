@@ -12,10 +12,10 @@
 \newcommand{\project}{Ginux}
 \newcommand{\modelname}{OpenAI Codex with GPT-5.6 Sol}
 \newcommand{\evaluatedcommit}{\texttt{9afa61762a66a208\allowbreak{}55ea3a23e3e04221\allowbreak{}b54a5a22}}
-\newcommand{\shortcommit}{\texttt{9afa617}}
 \newcommand{\estimatedcost}{approximately USD~8,000}
+\newcommand{\repolink}[2]{\href{https://github.com/gmkurtzer/ginux/blob/9afa61762a66a20855ea3a23e3e04221b54a5a22/#1}{\texttt{#2}}}
 
-\title{\textbf{Ginux: What an AI-Built Linux-Compatible Kernel Reveals About the State of AI Systems Engineering}}
+\title{\textbf{Ginux: AI Can Build a Kernel, but It Cannot Manufacture an Ecosystem}}
 \author{Gregory M. Kurtzer}
 \date{Draft technical report --- October 2026}
 
@@ -23,125 +23,53 @@
 \maketitle
 
 \begin{abstract}
-We asked whether one AI coding agent could build a new kernel capable of
-running an unmodified Linux userspace. In eleven days, one persistent
-\modelname{} task produced \project, an x86-64 Rust and assembly kernel that
-boots through UEFI, runs its controller in ring~3, ingests OCI images, executes
-Alpine, and launches Rocky Linux 10 systemd as PID~1. The evaluated commit
-contains about 139,000 retained, non-generated lines of implementation and test
-code across 1,037 commits. Estimated API cost was \estimatedcost.
+An AI coding agent built a new Linux-compatible kernel. It boots directly
+through UEFI, runs a controller outside ring~0, ingests OCI images, executes an
+unmodified Alpine userspace, and launches Rocky Linux 10 systemd as PID~1. The
+kernel is not Linux: it is an independent, Rust-first implementation of the
+kernel mechanisms and Linux userspace contract exercised by those workloads.
+In eleven days, the project reached roughly 139,000 retained, non-generated
+lines of implementation and test code across 1,037 commits.
 
-The prototype answers the construction question. It does not meet the standard
-of a production kernel. Its own ledger marks 82 of 375 Linux x86-64 syscalls
-complete, 245 partial, and 48 policy-denied. GPU drivers, stable driver ABI,
-native performance results, independent security review, and general
-application compatibility are missing. A manual lifecycle test also broke a
-workflow that narrower agent-authored tests had declared complete. Ginux
-demonstrates rapid construction of a serious systems prototype. Trust still
-depends on independent tests, standards, review, and long-term ownership.
+This report describes what was built, the expert-directed agent loop that
+produced it, and the limits of the result. \project{} is a research prototype,
+not a production kernel or a proposed replacement for Linux. That distinction
+is the main finding. AI can reproduce a surprising amount of complex software
+at low cost. It cannot generate decades of compatibility, standards, hardware
+enablement, community trust, vendor relationships, or operational ownership on
+the same schedule.
 \end{abstract}
 
-\section{Question and scope}
+\section{AI Built a Linux-Compatible Kernel. It Did Not Build Linux}
 
-AI coding demonstrations usually end when a program compiles or passes a
-bounded test. Kernels are less forgiving. They join instruction entry, memory,
-concurrency, executable loading, filesystems, devices, process lifecycle,
-networking, and cleanup. A shell prompt proves only the path that reached it.
+We began with a deliberately unreasonable question: could an AI agent build a
+kernel capable of running an existing Linux userspace? The answer, within a
+bounded research profile, is yes. \project{} boots from firmware under QEMU,
+provides its own memory manager, scheduler, process model, ELF loader, virtual
+filesystems, networking, IPC, device paths, and Linux syscall translation, and
+runs real Alpine and Rocky Linux components.
 
-We created \project{} to test whether an agent could build enough of that stack
-to run existing Linux userspace. A secondary question emerged during design:
-could a kernel-native \emph{domain} serve as the outer boundary for ownership,
-resources, devices, failure, and Linux compatibility? Linux namespaces would
-remain available inside a Linux-personality domain.
+\project{} contains no Linux kernel. Linux is the userspace compatibility
+target. The distinction is visible in \texttt{uname}: a Linux-personality
+domain reports \project{}, rather than claiming that the kernel itself is
+Linux. ``Linux-compatible'' here means that selected unmodified Linux programs
+observe enough of their expected ABI to run. It does not mean complete Linux
+behavior.
 
-We stopped when the construction result was clear. The system never became
-deployable. The fixed artifact is commit \evaluatedcommit{}, dated October 20,
-2026. All measurements refer to that commit and its QEMU profiles. Later fixes
-are outside the evaluation.
+The name is a small joke in the same family as Linux. ``Linux'' combines Linus
+and Unix; ``Ginux'' riffs on Linux, GPT, and Greg. We will say the ``G'' stands
+for GPT so the author's head does not get any bigger.
 
-The name \project{} follows the Linux tradition. The ``G'' stands for GPT, at
-least officially; this interpretation also keeps the author's head from
-getting any bigger.
+Eyes wide open: this was never an attempt to compete with Linux. The Linux
+kernel community has spent decades doing the difficult work of supporting
+hardware, preserving interfaces, reviewing security-sensitive changes, and
+maintaining software people actually depend on. Eleven days of enthusiastic
+AI-assisted kernel hacking does not put \project{} in that category. Kernel
+maintainers may safely postpone their panic.
 
-\section{Method}
-
-Approximately 99\% of the implementation came from one persistent Codex task
-using \modelname{}. That is an author estimate because provider-level task and
-token exports were not archived. This was one longitudinal task, not an army
-of agents, although the host may have compacted old conversation into context
-summaries.
-
-The human set architecture, requirements, acceptance behavior, and stopping
-points. Codex chose implementations, edited the repository, built it, booted
-QEMU, interpreted failures, wrote tests and documentation, and committed
-checkpoints. Direction was task-level: ``boot this image and make this workflow
-work,'' not a sequence of code edits.
-
-Versioned documents carried decisions that could not safely live in chat
-history. The architecture document defined the system and trust boundaries;
-the Linux compatibility ledger tracked syscall and non-syscall behavior;
-roadmaps, decision records, and performance notes recorded milestones and
-known limits. The agent consulted these files with an active plan. They reduced
-context drift but were not independent specifications: the same agent helped
-write them.
-
-The working loop was:
-
-\begin{center}
-\fbox{\parbox{0.91\linewidth}{
-requirement $\rightarrow$ observable benchmark $\rightarrow$ implementation
-$\rightarrow$ build and QEMU run $\rightarrow$ log analysis $\rightarrow$
-revision $\rightarrow$ human test $\rightarrow$ signed commit.
-}}
-\end{center}
-
-This resembles execution-feedback work in code generation~\cite{chen2021codex}
-and repository tasks such as SWE-bench~\cite{jimenez2023swebench}, but the
-specification and tests here evolved with the artifact. This shortened each
-iteration while allowing the agent to satisfy weak benchmarks precisely.
-
-One failure makes the point. Separate tests showed that a detached Rocky domain
-returned control and that an attached start reached a login prompt. They did
-not test the complete sequence of detached start, attach, detach, reattach,
-stop, and restart. Codex marked the work complete. The author then ran that
-sequence; cleanup failed with three Linux processes still live. Implementation,
-test authorship, and verdict had shared the same blind spot.
-
-\section{Artifact and results}
-
-\project{} boots as a unified x86-64 UEFI image without a host distribution or
-initramfs. The kernel establishes its own page tables, protection state,
-interrupts, scheduler, memory ownership, capabilities, IPC, device paths, ELF
-loader, and personality objects. A static controller runs in ring~3 and uses a
-versioned control interface. OCI supplies image transport and filesystem
-assembly~\cite{ocispec}. Ginux provides the runtime and isolation boundary.
-
-The Linux personality follows the Linux 6.12 x86-64 syscall table
-~\cite{linux612syscalls}, Linux UAPI and man-pages~\cite{linuxmanpages}, and the
-x86-64 psABI~\cite{x8664psabi}. It supports ELF executables and selected PIE,
-dynamic interpreters, virtual memory, processes, threads, signals, descriptors,
-filesystems, sockets, terminals, and partial pseudo-filesystems. The loader uses
-the image's \texttt{PT\_INTERP}; there is no musl or glibc mode.
-
-A domain owns its address spaces, process tree, capabilities, IPC, filesystems,
-networks, devices, limits, lifecycle, and failure policy. Unlike Xen
-~\cite{barham2003xen}, it does not carry a guest kernel. Unlike seL4
-~\cite{klein2009sel4}, Ginux has no proof. The design ran Linux processes and
-kept per-domain state, but its isolation and QoS claims were not tested under
-attack or contention.
-
-Development moved from synthetic ABI probes to Alpine, Rocky glibc utilities,
-and finally systemd. Each workload widened the real contract. Alpine found
-filesystem, working-directory, and fork/exec defects. Rocky exercised dynamic
-loading and mappings. systemd combined scheduling, epoll, signals, procfs,
-mount identity, Unix sockets, timers, credentials, and console lifecycle.
-
-\subsection{Scale}
-
-Table~\ref{tab:artifact} reports the frozen commit. The selected LOC count
-covers tracked Rust, assembly, C, headers, and shell under source, services,
-tests, specifications, and tools. It excludes the 35,946-line generated boot
-payload from the non-generated row.
+The frozen artifact is commit \evaluatedcommit{}, dated October 20, 2026.
+Table~\ref{tab:scale} describes its scale. These are textual repository counts,
+not measures of correctness or engineering value.
 
 \begin{table}[ht]
 \centering
@@ -153,152 +81,281 @@ Development interval & 11 calendar days \\
 Commits & 1,037 \\
 Tracked files & 261 \\
 Rust source files & 63 \\
-Selected implementation/test LOC, including generated payload & 174,736 \\
-Selected non-generated implementation/test LOC & 138,790 \\
+Implementation/test LOC, including generated payload & 174,736 \\
+Retained non-generated implementation/test LOC & 138,790 \\
 Markdown documentation LOC & 13,074 \\
-Author-estimated API expenditure & \estimatedcost \\
 \bottomrule
 \end{tabular}
-\caption{Repository-scale measurements at the evaluated commit. Counts are
-simple reproducible textual measurements; they do not score complexity or
-correctness.}
-\label{tab:artifact}
+\caption{Repository scale at the evaluated commit.}
+\label{tab:scale}
 \end{table}
 
-A later whole-workspace scan, taken after the evaluated commit, reported
-188,958 lines classified as code across 1,459 files: 149,249 Rust, 13,370
-assembly, 11,536 Markdown, 6,809 D, and 5,535 shell. It included the generated
-payload and apparently ignored build metadata: the 573 D and 631 JSON files in
-that scan are absent from Git. We retain the narrower frozen count in the
-paper. Both commands should accompany publication.
+\section{What Ginux Is}
 
-LOC says nothing about correctness. The scale instead exposes the review
-problem. One agent
-created privileged code faster than one human could inspect it. Each parser,
-state transition, unsafe operation, syscall emulation, and cleanup path adds
-work for threat modeling, fuzzing, compatibility testing, and maintenance. In
-a kernel, a small ownership or dispatch error can cross every workload. Fast
-generation can accumulate assurance debt just as quickly as code.
+\subsection{A simplified boot architecture}
 
-\subsection{Compatibility, performance, and security}
+UEFI changes the assumptions inherited from the BIOS era. Firmware loads a
+PE32+ application into memory, including all of its sections, through
+\texttt{LoadImage()}~\cite{uefi211}. It does not require an operating system to
+fit inside a 512-byte boot sector or walk through a chain of progressively
+larger bootstrap loaders. Firmware quality, available memory, filesystem
+support, and PE/COFF representation remain practical constraints; the payload
+is not literally unlimited.
 
-The ledger covers all 375 Linux 6.12 x86-64 syscall numbers: 82 Complete, 245
-Partial, 48 Policy-denied, and zero Missing. Zero Missing only means the table
-does not fall through to a default \texttt{ENOSYS}. Static PIE without an
-interpreter, broader loader and NSS behavior, process semantics, procfs, sysfs,
-cgroupfs, vDSO/vvar, IPv6, namespaces, and ioctl families remain incomplete.
-Unmodified Alpine shells run. Rocky glibc utilities run. A Rocky UBI init image
-can launch systemd and reach a console login on selected paths. Arbitrary Linux
-programs are not covered by that evidence.
+Ginux uses that freedom to boot one \texttt{GINUX.EFI} image containing its
+Rust-first kernel, required x86-64 assembly, embedded controller payload,
+component catalog, and recovery metadata. There is no required host
+distribution, separate bootloader, or separate initramfs. After leaving UEFI
+boot services, the kernel establishes paging, interrupts, protection,
+scheduling, capabilities, storage, and networking, then launches the embedded
+controller as a normal ring-3 process. Embedding the controller in the image
+does not place it in kernel space.
 
-Profiling under x86-64 QEMU TCG on Apple Silicon reduced Linux-init-to-console
-time from 15,344~ms to a two-run median of 4,082~ms by fixing Unix-socket
-polling, quadratic frame-reference scans, and immutable-rootfs duplication.
-Warm OCI restore and publication took another 2.7 and 3.5 seconds. The final
-manual detached-start run took 13,833~ms and then hit the cleanup bug. KVM and
-identical-hardware Linux comparisons were not run.
+This packaging simplified an experiment that otherwise would have needed to
+coordinate a bootloader, kernel image, initramfs, host root filesystem, and
+userspace versioning. It also supported the project's immutability model: the
+kernel, controller, initial authority, and boot-required components can be
+measured as one artifact before execution. A production system would still
+need a mature update, rollback, signing, recovery, and firmware-compatibility
+story.
 
-Security mechanisms include capabilities, W\textasciicircum X mappings,
-guarded stacks, generation-tagged ownership, selected fault cleanup,
-SMEP/SMAP/UMIP setup, and IOMMU paths. No independent audit, sustained hostile
-testing, or proof exists. Ginux cannot load the existing GPU-driver ecosystem
-or promise stable \texttt{.ko} compatibility.
+\subsection{Controller, domains, and personalities}
 
-\section{What we learned}
+The controller configures the host and creates workload domains. It manages
+domain lifecycle, images, resources, networks, persistent configuration, and
+the local OCI cache through a versioned control interface. Host administration
+therefore remains in userspace even though the controller arrives inside the
+boot image.
 
-The agent worked across UEFI, assembly, paging, interrupts, Rust kernel code,
-ELF, Linux ABI behavior, network and block devices, OCI, shell automation, CLI
-design, documentation, and profiling. It recovered from many failures and
-turned distribution behavior into new tests. That breadth, across roughly
-139,000 retained lines, is beyond autocomplete.
+A \emph{domain} is a native Ginux kernel object, not an OCI container or a
+renamed Linux namespace. It owns or is granted address spaces, a process tree,
+capabilities, IPC objects, filesystem and mount views, networks, devices,
+limits, lifecycle, and failure policy. OCI supplies a domain's initial
+filesystem; Ginux supplies its isolation and execution. A single domain can
+look like a conventional computer, with systemd as PID~1 and a distribution
+userspace above it. Multiple domains share one kernel while retaining separate
+kernel-owned identities and resources.
 
-Its judgment was less reliable than its construction. Codex sometimes pursued
-a marker instead of the operator workflow, reported success after adjacent
-tests passed, blurred image transport with execution, and increased static
-capacities before implementing dynamic behavior. Long execution loops also
-made it reluctant to stop. Written architecture and plans helped, but a single
-agent still shared assumptions across code, tests, and status reports.
+Domains are also scheduling principals. The implemented CPU scheduler chooses
+the highest ready domain service class and schedules processes within that
+class. The architecture extends that model to independent CPU, memory,
+storage-I/O, and network-I/O classes, allowing one domain to receive
+latency-sensitive service while another scavenges spare capacity. Complete
+cross-resource QoS enforcement remains future work. The experiment establishes
+the architectural boundary and part of the scheduling model, not the final
+policy system.
 
-The cost estimate is about USD~7.71 per commit or USD~0.058 per retained
-non-generated implementation/test line. These ratios are curiosities. A short
-scheduler repair can matter more than a generated table, and a retained bug is
-as cheap per line as correct code. We did not measure active human hours. The
-experiment measures the cheap production of one prototype. Integration,
-review, compatibility, incident response, and years of maintenance remain
-unpriced.
+A \emph{personality} defines the userspace contract visible inside a domain:
+executable format, syscalls, process and signal behavior, VFS semantics,
+devices, terminals, clocks, networking, and namespace expectations. Linux
+x86-64 is the only implemented personality. BSD is a plausible experiment
+because it could reuse the same domain, memory, scheduling, and device
+mechanisms, but no BSD ABI was built or tested. Linux namespaces may eventually
+subdivide a Linux domain; they would remain inside the stronger outer domain
+boundary.
 
-Domains also survived contact with implementation. They organized controller
-authority, service ownership, Linux state, address spaces, consoles, and
-workload records without a guest kernel. Resource enforcement, network and
-filesystem isolation, lifecycle reliability, and QoS remain unfinished. The
-idea is feasible enough to study. This prototype offers no basis for replacing
-namespaces, containers, or virtual machines.
+Storage follows this separation. Domain roots may be assembled from
+verified OCI layers and receive a boot-local writable overlay. Ginux also has
+a persistent host-owned volume for controller configuration and a
+content-addressed OCI layer cache, so a reboot need not redownload every image
+or forget every domain. It currently provides selected tmpfs, overlay, procfs,
+devfs, and persistent-volume behavior. It does not provide Linux's broad
+filesystem ecosystem or production storage guarantees.
 
-\subsection{Security and the software supply chain}
+\subsection{Implemented result and research boundary}
 
-The same model family can audit old code as well as produce new code. In 2026,
-research involving GPT-5.6 Sol helped establish the critical impact of a PHP
-engine state-lifecycle flaw. The advisory describes stale request-owned global
-state leading to use-after-free and unauthenticated remote code execution,
-scored 9.2~\cite{phpStaleState2026}. OpenAI reported that a Calif researcher
-used GPT-5.6 Sol and warned that similar capability can also accelerate
-offensive tooling~\cite{openaiPatchPlanet2026}.
+The current prototype boots a unified x86-64 EFI image; runs its static
+Linux-ABI controller in ring~3; acquires networking under QEMU; pulls,
+verifies, caches, and publishes OCI filesystems; runs Alpine musl/BusyBox and
+Rocky glibc programs; and launches Rocky Linux 10 UBI systemd as domain PID~1
+through \texttt{multi-user.target}. Multiple domains retain independent
+process, address-space, root, mount, and lifecycle state. Controller commands
+can start, stop, inspect, attach to, and execute a process inside a running
+domain.
 
-The PHP Foundation supplies the useful detail. Developers had recognized the
-underlying out-of-memory problem in 2024, but a fix stalled over compatibility,
-denial-of-service risk, extension impact, decision process, and staff time.
-AI-assisted reports later exposed the RCE path. The team also processed more
-than 100 reports that were invalid, duplicate, or irreproducible. Humans made
-each decision and wrote each patch~\cite{phpFoundation2026}.
+The compatibility ledger covers all 375 Linux 6.12 x86-64 syscall numbers,
+classifying 82 Complete, 245 Partial, and 48 Policy-denied. Coverage is not
+completeness. Loader behavior, process semantics, procfs, sysfs, cgroups,
+namespaces, IPv6, ioctl families, filesystems, and devices remain incomplete.
+Hardware support is limited to what the experiment implemented and exercised,
+mostly through QEMU. There is no GPU ecosystem, broad physical-device support,
+stable third-party driver ABI, independent security audit, native-hardware
+performance baseline, or general assurance that Linux applications behave
+correctly.
 
-Ginux and PHP expose the same bottleneck. Machines can generate code and find
-defects faster than maintainers can validate findings, choose compatible
-repairs, coordinate disclosure, deploy updates, and support old releases.
-Machine-speed output now runs ahead of human-speed assurance.
+Those omissions do not spoil the experiment; they define it. The question was
+whether AI could construct a new kernel and carry a real Linux userspace across
+the boundary. It was not whether eleven days of research could replace thirty
+years of Linux engineering. Features that prove useful---perhaps the domain
+model itself---may be more valuable as ideas to explore in Linux or other
+established systems than as reasons to deploy Ginux.
 
-\section{Limits and controls}
+\section{How We Built It}
 
-This is one project, model, author, architecture, and eleven-day period. The
-author directed and evaluated it; Codex wrote much of the code, tests,
-documentation, and draft prose. Manual tests were opportunistic. Cost and the
-99\% share are estimates. Commit count measures activity, not effort. The
-system ran mainly through translated x86 QEMU on Apple Silicon. Real hardware,
-KVM, other architectures, hostile workloads, broad package suites, and GPU
-drivers were not evaluated.
+The work began as collaborative architecture, not code generation. The
+versioned \repolink{ARCHITECTURE.md}{ARCHITECTURE.md} defined the boot model,
+kernel/userspace boundary, domains, authority, storage, devices, and acceptance
+criteria. The \repolink{docs/LINUX-COMPATIBILITY.md}{Linux compatibility
+ledger} recorded syscall and non-syscall behavior. The
+\repolink{docs/NEXT-GOAL.md}{working goal},
+\repolink{docs/USE-CASES.md}{use cases}, and
+\repolink{docs/decisions/0001-native-domains-and-authority.md}{domain decision
+record} kept the plan outside the chat transcript.
 
-Future work needs independent oracles. Compatibility claims should link to
-Linux differential tests and external conformance suites. Security work needs
-a threat model, unsafe-code inventory, fuzzing, adversarial review, and a
-reviewer who did not author the implementation. Lifecycle, cleanup,
-concurrency, exhaustion, and tail-latency tests should cover complete operator
-workflows. Builds, prompts, billing records, image digests, and raw logs should
-be reproducible and archived. A release also needs named owners for later
-compatibility and incidents.
+From those documents we created milestones with observable gates: boot the EFI
+image, enter a ring-3 controller, create a named domain, execute an Alpine
+shell, pull an OCI image over the network, run Rocky binaries, launch systemd,
+and reach a console. The agent received a goal and iterated until each gate met
+its acceptance behavior. The loop was:
 
-Separate implementation, compatibility, security, and acceptance agents might
-reduce self-validation. Copies of one model can still repeat one another's
-blind spots. Independence must also exist in the tests and incentives.
+\begin{center}
+\fbox{\parbox{0.91\linewidth}{
+architecture $\rightarrow$ milestone $\rightarrow$ executable gate
+$\rightarrow$ implementation $\rightarrow$ build and QEMU run
+$\rightarrow$ failure analysis $\rightarrow$ revision $\rightarrow$ human
+evaluation $\rightarrow$ signed commit.
+}}
+\end{center}
 
-The project is Apache-2.0 and intended for public release. Publication should
-archive commit \evaluatedcommit{}, a source manifest, the compatibility ledger,
-benchmark logs, the development transcript, billing evidence, the detached
-lifecycle failure, and the exact line-count commands.
+Codex selected implementations, edited the repository, compiled the system,
+booted QEMU, read logs, wrote tests, updated documentation, profiled failures,
+and continued to the next gate. It also drafted much of the documentation and
+report prose, which the author reviewed and revised. The human role was
+direction and judgment, not dictating individual edits. This matters: the agent
+was given outcomes and room to solve them, but the plan, architecture,
+compatibility target, and definition of acceptable behavior came from someone
+who understood Linux and operating-system design.
+
+The tests became progressively less synthetic. Small probes established entry
+paths and syscall mechanics. Alpine exposed filesystem, working-directory,
+fork, and exec errors. Rocky exercised glibc, dynamic loading, and larger
+mappings. systemd combined scheduling, epoll, signals, procfs, sockets,
+mounts, credentials, timers, and console lifecycle. Human interactive tests
+found workflow failures that adjacent automated tests had missed. The result
+was a productive loop, not an autonomous proof of correctness.
+
+\section{Expertise Still Drives the Agent}
+
+This result should not be read as ``anyone can ask for a kernel before lunch.''
+AI compressed the time required to turn decisions into code. It did not supply
+all of the decisions. Choosing a Linux userspace contract, distinguishing OCI
+transport from runtime isolation, recognizing broken fork/exec behavior,
+defining domain ownership, interpreting systemd failures, and rejecting false
+success all required domain knowledge.
+
+The author brought experience from Caos Linux, CentOS, and Rocky Linux, as well
+as operating production software infrastructure
+~\cite{rockyAbout2026,ciqKurtzer2026}. That experience changed the prompts, the
+architecture, the acceptance gates, and the decision to stop. An inexperienced
+operator may obtain a large codebase and convincing console output without
+recognizing that the underlying semantics are wrong. In systems software, a
+plausible result can be more dangerous than an obvious failure.
+
+AI nevertheless lowers the barrier for junior engineers to contribute. They
+can explore unfamiliar code, generate tests, compare interfaces, and implement
+bounded work at a speed that previously required much more experience. The
+remaining gap is judgment: knowing which abstraction to choose, which result
+to distrust, what compatibility means, and when a local success creates a
+system-wide liability. Senior engineers who adopt an AI-first workflow have
+the strongest combination today because they can pair generation speed with a
+well-developed model of how the system should behave.
+
+This also argues for better controls. Architecture must be written down. Gates
+must exercise operator workflows rather than convenient markers. Compatibility
+claims need external references and differential tests. Security review should
+not be performed solely by the same agent that wrote the code. AI expands who
+can build; it does not remove responsibility for what gets built.
+
+\section{Code Is Not the Moat}
+
+The author-estimated API cost of Ginux was \estimatedcost---about USD~7.71 per
+commit or USD~0.058 per retained, non-generated implementation/test line.
+Those ratios are intentionally crude. A line can be generated cheaply while
+its compatibility burden lasts for years. The experiment measured the cost of
+producing a prototype, not the cost of making it trustworthy, integrating it
+with an industry, or maintaining it.
+
+AI is already applying similar pressure to application software. In October
+2026, ArtCraft published early Rust implementations modeled on seven Adobe
+Creative Cloud applications, developed with heavy use of Claude
+~\cite{artcraft2026}. Independent hands-on testing found recognizable tools
+and striking development speed, along with missing features and basic failures
+that prevented production replacement~\cite{creativebloqArtcraft2026}. That is
+the Ginux lesson at application scale: reproducing a visible capability has
+become dramatically cheaper; reproducing its full behavior, integrations,
+workflows, support, and trust has not.
+
+The resulting replication pressure is likely to be strongest above middleware
+and orchestration, where organizations can replace or customize applications
+without persuading an entire hardware and software ecosystem to move with
+them. Foundational software can also be reimplemented---Ginux proves the
+point---but enterprise infrastructure is selected through standards,
+interfaces, certification, hardware enablement, community continuity, and a
+commercial support matrix. A technically interesting replacement that nobody
+else supports is usually a liability.
+
+Linux is the clearest example. Its value is not reducible to the source needed
+to boot a shell. It includes stable expectations across processors,
+filesystems, devices, hypervisors, distributions, security teams, silicon
+vendors, cloud providers, and application developers. Ginux has none of that.
+It has no vendor-supported GPU stack, almost no physical-hardware matrix, no
+broad filesystem support, no standards body, and no community obligated to
+keep yesterday's programs working tomorrow. AI may help build each missing
+piece, but it cannot unilaterally make independent organizations adopt the
+same contracts.
+
+\subsection{AI accelerates both sides of open-source security}
+
+The capability that generates new software can also audit old software at a
+scale human teams could not previously sustain. In 2026, AI-assisted research
+helped expose critical PHP flaws capable of unauthenticated remote code
+execution. The underlying out-of-memory problem had been recognized in 2024,
+but its full impact emerged through later reports involving Calif, OpenAI, and
+Wiz~\cite{phpStaleState2026,openaiPatchPlanet2026,phpFoundation2026}. AWS later
+reported an exploitation attempt four days before public disclosure
+~\cite{awsPhp2026}. We cannot assume defenders always discover the bug first.
+
+Discovery was only the beginning. The PHP Foundation reports that its team
+handled more than 100 invalid, duplicate, or irreproducible submissions while
+people validated every finding and wrote every patch. The Foundation also says
+Chainguard published fixed images more than six hours before the coordinated
+release, making the change available for comparison while much of the
+ecosystem was still preparing~\cite{phpFoundation2026}. Chainguard's chief
+executive said the decision responded to reports of active exploitation
+~\cite{techtargetPhp2026}. Whatever judgment one makes about that decision,
+the episode shows that security depends on trusted
+coordination among maintainers, researchers, distributors, vendors, and
+operators. Faster vulnerability discovery compresses the time available for
+all of them.
+
+Open source already contains vulnerabilities missed during human review. AI
+will find more of them, and attackers can use it too. The near
+term may therefore get worse before it gets better: report volume rises,
+maintainers must separate real exploits from plausible noise, disclosure
+windows shrink, and organizations must deploy fixes faster. Code generation
+does not solve this coordination problem. It makes durable maintainership,
+funded security work, reproducible validation, package provenance, rapid
+patching, and trusted distribution more important.
 
 \section{Conclusion}
 
-Ginux reached the stopping point for which it was built. One persistent Codex
-agent, given architecture, tasks, documentary memory, and machine feedback,
-created a kernel that boots from firmware and runs real Linux distribution
-components. The author guided goals and rejected bad conclusions without
-specifying the code line by line.
+Ginux demonstrates something that would have sounded absurd not long ago: an
+expert can direct an AI coding agent to build a new kernel, implement enough of
+the Linux userspace contract to run real distributions, and explore a new
+kernel-native domain architecture in days. The result deserves genuine
+excitement.
 
-Ginux cannot guarantee Linux program behavior, driver compatibility, security,
-or native performance. The experiment establishes that an AI-guided agent can
-vibe-code an operating-system prototype. Running production workloads on this
-evidence would be reckless.
+It also deserves restraint. Ginux is a research artifact with an excellent
+demo and a very long list of ways to ruin someone's weekend. It should not run
+production infrastructure, and it does not threaten Linux. If domains or any
+other idea prove useful, success may mean contributing the idea to established
+systems rather than asking the world to adopt another kernel.
 
-AI can build code. Our remaining problem is deciding what the code can do, how
-well it does it, and who keeps those claims true after the session ends.
+AI can build code. Ginux shows that the boundary now reaches deep systems
+software. The durable questions are whether that code honors existing
+contracts, whether independent organizations will support it, whether people
+can secure and maintain it, and who remains accountable after the agent stops.
+That ecosystem is the moat, and no prompt can conjure it overnight.
 
 \begingroup
 \raggedright

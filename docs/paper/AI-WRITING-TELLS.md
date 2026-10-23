@@ -138,6 +138,14 @@ ratios as curiosities, and the conclusion that production use would be
 reckless. Provenance is explicit: the report states that Codex wrote much of
 the code, tests, documentation, and draft prose.
 
+The later thesis rewrite was checked again after its substantive edits. It
+retains one deliberate negative contrast in the opening section title---the
+kernel is Linux-compatible but is not Linux---because that distinction is the
+paper's subject, not a stylistic flourish. Repeated uses of `the same` in the
+architecture and security sections were replaced with concrete subjects. The
+rewrite continues to disclose AI involvement in both implementation and draft
+prose.
+
 ## Editing rule
 
 The goal is not to disguise provenance. The report openly studies an AI-built
