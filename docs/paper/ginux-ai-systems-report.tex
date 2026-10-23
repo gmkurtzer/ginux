@@ -1,6 +1,6 @@
 \documentclass[11pt]{article}
 
-\usepackage[margin=0.9in]{geometry}
+\usepackage[margin=0.85in]{geometry}
 \usepackage{booktabs}
 \usepackage{enumitem}
 \usepackage{hyperref}
@@ -208,18 +208,24 @@ pipes and FIFOs, signals, clocks, termios, sockets, futex-based threading, and
 selected POSIX and System~V IPC. Coverage is partial: Ginux has not run a
 complete POSIX conformance suite and makes no certification claim.
 
-Each Linux domain begins with its own user-namespace and credential context.
-The evaluated profile maps domain UID/GID~0 to kernel-side ID~100000, denies
-\texttt{setgroups}, and records real, effective, and saved UID/GID plus a
-supplementary group. Those identities participate in signal, cross-process,
-and file-access decisions; the VFS implements mode, ownership, \texttt{umask},
-and access operations needed by the package-manager path. Native capabilities
-separately prevent domain root from controlling the host or another domain.
-The current profile has one mapped identity, no Linux capabilities, and denies
-many credential mutations; ACL and permission edge cases remain incomplete.
-No SELinux or other active Linux security module enforces labels. Password and
-account policy may run in domain userspace, while the kernel enforces numeric
-credentials, file modes, and native authority.
+Each domain owns a sealed native capability table. A capability names one
+kernel object and grants some combination of read, write, manage, and execute.
+Initial authority comes only from the boot envelope; delegation can attenuate
+but not expand it; handles are generation tagged, and root revocation removes
+derived rights. Devices, DMA pages, queues, volumes, and management operations
+can therefore be granted independently. A domain also owns its configured CPU
+and memory budgets, address spaces, processes, IPC, filesystem/mount views,
+networks, devices, lifecycle, and failure policy. CPU service classes are
+scheduled today; complete memory and I/O contention enforcement is unfinished.
+
+Inside that boundary, the Linux personality applies domain-local credentials
+and permissions. The evaluated profile maps UID/GID~0 to kernel ID~100000 and
+uses real/effective/saved IDs in signal, cross-process, and file-access checks.
+The VFS implements mode, ownership, \texttt{umask}, and access operations used
+by the package-manager path. The profile has one mapped identity, no Linux
+capabilities, and denies many credential mutations. POSIX ACLs and permission
+edge cases remain incomplete; no SELinux or other active Linux security module
+enforces labels. Linux UID~0 cannot bypass the native capability table.
 
 \subsection{Optimization and security hypotheses}
 
