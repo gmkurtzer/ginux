@@ -16,7 +16,7 @@
 \newcommand{\repolink}[2]{\href{https://github.com/gmkurtzer/ginux/blob/9afa61762a66a20855ea3a23e3e04221b54a5a22/#1}{\texttt{#2}}}
 \newcommand{\tcell}[1]{{\raggedright #1\par}}
 
-\title{\textbf{Ginux: AI Can Build a Kernel, but It Cannot Manufacture an Ecosystem}}
+\title{\textbf{Ginux: Methods and Outcomes of Building a Linux Userspace-Compatible Kernel with Expert-Directed AI}}
 \author{Gregory M. Kurtzer}
 \date{Draft technical report --- October 2026}
 
@@ -24,27 +24,41 @@
 \maketitle
 
 \begin{abstract}
-This project asked one primary question: what can an expert-directed AI coding
-agent accomplish when given one of software engineering's hardest
-tasks---building a new kernel capable of running an existing Linux userspace?
-Once the kernel began to work, it opened a more playful question: what useful
-or unusual ideas become practical when implementation gets dramatically
-cheaper? Kernel-native domains grew out of that exploration. In eleven days,
-the project produced an independent, Rust-first
-kernel that boots through UEFI, runs a controller outside ring~0, ingests OCI
-images, executes an unmodified Alpine userspace, launches Rocky Linux 10
-systemd as PID~1, and provides domains with distinct identities, resources,
-process trees, filesystems, and scheduling policy. The evaluated artifact
-contains roughly 139,000 retained, non-generated lines of implementation and
-test code across 1,037 commits.
+Can an expert-directed AI coding agent build a new kernel capable of running an
+existing Linux userspace? Ginux demonstrates that, within a focused research
+scope, the answer is yes. Over eleven days, OpenAI Codex with GPT-5.6 Sol
+produced an independent, Rust-first x86-64 kernel containing approximately
+139,000 retained lines of implementation and test code across 1,037 commits.
+Ginux boots through UEFI, provides its own memory management, scheduler,
+process model, filesystems, networking, devices, and Linux userspace
+compatibility layer, and runs its controller as an ordinary ring-3 process.
 
-Ginux is a research prototype: it demonstrates technical feasibility while
-leaving large compatibility and production-readiness gaps. This report
-describes the system, the expert-directed development method behind it, and
-the limits the work uncovered. AI can reproduce a surprising amount of
-complex systems software at low cost. Compatibility, standards, hardware
-enablement, community trust, vendor relationships, and operational ownership
-still take years to build.
+The resulting system executes unmodified Alpine programs and completes a Rocky
+Linux 10 systemd boot through \texttt{multi-user.target}, with systemd running
+as PID~1 and an interactive console. It also executes the same sysbench binary
+used on a stock Rocky Linux comparison system. Initial measurements exposed
+severe performance defects. A short benchmark-driven optimization exercise
+allowed Codex to profile the system, revise kernel hot paths, and bring the
+tested CPU, memory, threading, and mutex workloads into broadly comparable
+territory. Performance parity was not a primary goal, and the project devoted
+only a small portion of its development time to optimization.
+
+Once Linux userspace execution became practical, Ginux also provided a
+platform for experimenting with kernel-native domains: isolated resource and
+scheduling principals capable of booting their own distribution userspaces.
+These domains were an outcome of the experiment rather than its original
+purpose.
+
+The larger result is both exciting and cautionary. An expert working with AI
+can now build software as complicated as a Linux-compatible kernel in a
+remarkably short time. That capability does not make a one-off kernel a
+sensible foundation for production infrastructure. Linux represents decades
+of human engineering across compatibility, hardware enablement, security,
+standards, review, vendor support, community governance, and operational
+experience. Ginux benefited from the luxury of a narrow research scope and
+remains far from those requirements. For core infrastructure, the ability to
+build something is only the beginning; shared standards and a durable
+ecosystem matter more than the code alone.
 \end{abstract}
 
 \section{AI Built a Linux-Compatible Kernel. It Did Not Build Linux}
@@ -592,7 +606,7 @@ retained the shared-page fast path as an agent-derived optimization.
 
 In practical terms, the division of work was:
 
-\begin{enumerate}[leftmargin=*]
+\begin{enumerate}[leftmargin=*,topsep=0.5em,itemsep=0.45em,parsep=0pt]
 \item Human direction set the Linux compatibility target, the stronger-than-
   namespace domain model, expected operator behavior, acceptance standard, and
   stopping point.
@@ -604,6 +618,7 @@ In practical terms, the division of work was:
   real behavior, while Codex converted those workflows into repeatable QEMU,
   ABI, lifecycle, and performance gates.
 \end{enumerate}
+\smallskip
 
 The user-visible conversation is the most detailed record; repository history,
 design documents, and tests provide corroboration. A
@@ -765,11 +780,14 @@ infrastructure. Linux remains in a different league. If domains or another
 idea prove useful, the best outcome may be to carry the idea into established
 systems rather than ask the world to adopt another kernel.
 
-AI can build code. Ginux shows that the boundary now reaches deep systems
-software. The durable questions are whether that code honors existing
-contracts, whether independent organizations will support it, whether people
-can secure and maintain it, and who remains accountable after the agent stops.
-That ecosystem is the moat, and no prompt can conjure it overnight.
+AI can build code, including code deep in the systems stack. Ginux demonstrates
+how far that capability has advanced, but it also demonstrates where code
+generation stops being the central problem. Core infrastructure derives its
+value from compatibility, standards, hardware support, security practice,
+community trust, and long-term operational ownership. Linux earned those
+qualities through decades of human engineering. AI may dramatically reduce
+the cost of implementation, but the ability to build a new foundation is not,
+by itself, a reason to replace the one an ecosystem already trusts.
 
 \begingroup
 \small
