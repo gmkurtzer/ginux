@@ -262,7 +262,8 @@ method and limitations are recorded in the
 A matched single-vCPU harness now pins an official Rocky Linux 10.2 cloud
 image, fixes QEMU machine, memory, CPU, and accelerator settings, and verifies
 the SHA-256 identity of the sysbench executable before accepting workload
-results. The Linux side completed its preliminary TCG baseline. Ginux did not:
+results. Table~\ref{tab:benchmark-checkpoint} reports the resulting checkpoint.
+The Linux side completed its preliminary TCG baseline. Ginux did not:
 the post-boot interactive domain-exec path failed to deliver a PTY, while a
 repeated non-interactive path made the domain unavailable. The harness rejects
 the comparison at that gate. This negative result is more informative than a
@@ -270,6 +271,36 @@ number produced with different binaries or execution paths; no Linux-versus-
 Ginux performance claim is made. The reproducible method and raw-result
 requirements are recorded in
 \repolink{docs/BENCHMARKING.md}{the comparative benchmark protocol}.
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{Single-vCPU Rocky Linux benchmark checkpoint under x86-64 QEMU TCG
+on an Apple Silicon host. The Linux and Ginux boot timings use different
+boundaries and are not an operating-system speed comparison.}
+\label{tab:benchmark-checkpoint}
+\begin{tabular}{@{}p{0.40\linewidth}p{0.31\linewidth}p{0.21\linewidth}@{}}
+\toprule
+Measurement & Observed results & Summary or status \\
+\midrule
+Linux: QEMU launch to multi-user readiness
+  & 42.807, 41.901, 42.666~s
+  & Median: 42.666~s \\
+Linux: kernel uptime to multi-user readiness
+  & 34.68, 33.85, 34.64~s
+  & Median: 34.64~s \\
+Linux: sysbench CPU, memory, threads, and mutex
+  & 3 boots $\times$ 4 workloads $\times$ 3 repetitions
+  & 36/36 completed \\
+Ginux: Linux-init entry to verified console
+  & 4.45~s at this checkpoint
+  & Diagnostic timing only \\
+Ginux: matched sysbench execution
+  & No accepted samples
+  & Blocked at domain-exec PTY/lifecycle gate \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 The security hypothesis is that explicit capabilities, per-domain address
 spaces, W\textasciicircum X mappings, immutable executable pages,
