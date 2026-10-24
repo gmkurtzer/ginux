@@ -590,37 +590,27 @@ pre-authorized shared-page fast paths. They fit the human requirements for
 speed, security, fault containment, and ownership. Architectural review
 retained the shared-page fast path as an agent-derived optimization.
 
-Table~\ref{tab:provenance} identifies where the governing requirements came
-from. The user-visible conversation is
-the most detailed record; repository history, design documents, and tests
-provide corroboration. A
-\href{https://github.com/gmkurtzer/ginux/blob/main/docs/paper/STEERING-PROVENANCE.md}{curated
-steering chronology} accompanies the paper and distinguishes direct steering,
-agent proposals, collaborative refinement, and corrections triggered by
-observed behavior.
+In practical terms, the division of work was:
 
-\begin{center}
-\refstepcounter{table}
-\label{tab:provenance}
-\small
-\setlength{\baselineskip}{9.5pt}
-\begin{tabular}{p{0.15\linewidth}p{0.15\linewidth}p{0.40\linewidth}p{0.18\linewidth}}
-\toprule
-\tcell{Decision} & \tcell{Origin} & \tcell{Division of work} & \tcell{Validation record} \\
-\midrule
-\tcell{Linux userspace compatibility} & \tcell{Human-specified} & \tcell{Rocky Linux 10 and normal system behavior defined the target; Codex implemented and expanded the ABI.} & \tcell{Compatibility ledger; Alpine, Rocky, and systemd gates.} \\
-\tcell{Ring-3 controller} & \tcell{Human-directed refinement} & \tcell{Embedded initial userspace was explored during Q\&A; human steering required an ordinary static userspace process and Linux ABI; Codex designed the boot packaging and control interface.} & \tcell{Architecture and controller boot/lifecycle tests.} \\
-\tcell{Native domains} & \tcell{Human-specified} & \tcell{Human steering defined a stronger-than-namespace kernel boundary and metascheduling principal; Codex designed generation-bound objects, capabilities, cleanup, and scheduling machinery.} & \tcell{Domain ADR and multi-domain tests.} \\
-\tcell{OCI boundary} & \tcell{Human correction} & \tcell{Human steering corrected runtime-oriented language: OCI is transport and initial filesystem content, not the domain runtime. Codex revised implementation and messages accordingly.} & \tcell{OCI pull/cache tests and domain lifecycle behavior.} \\
-\tcell{Domain privilege} & \tcell{Human-specified and corrected} & \tcell{Mounts, nested namespaces, systemd, Docker/Kubernetes-class behavior, and eventual KVM access were required inside the domain; Codex implemented the exercised subset.} & \tcell{Rocky systemd and Linux ABI tests; remaining gaps documented.} \\
-\tcell{Authorized shared-page fast path} & \tcell{Agent-proposed} & \tcell{Codex derived a control-path authorization/data-path sharing mechanism from speed, isolation, and revocation requirements; the design was reviewed and retained.} & \tcell{Domain authority ADR and memory-isolation tests.} \\
-\tcell{Acceptance gates} & \tcell{Human-led} & \tcell{Human testing supplied real workflows, interpreted expected behavior, and repeatedly rejected false success; Codex automated reproducible QEMU and ABI gates and iterated against them.} & \tcell{Use cases, working goals, test scripts, and commits.} \\
-\tcell{Stopping point} & \tcell{Human decision} & \tcell{Codex documented remaining work; human judgment determined that research feasibility had been demonstrated without claiming production readiness.} & \tcell{Frozen evaluated commit and compatibility gaps.} \\
-\bottomrule
-\end{tabular}
-\par\smallskip
-Table~\thetable: Representative provenance of architectural and methodological decisions.
-\end{center}
+\begin{enumerate}[leftmargin=*]
+\item Human direction set the Linux compatibility target, the stronger-than-
+  namespace domain model, expected operator behavior, acceptance standard, and
+  stopping point.
+\item Codex designed and implemented the system within those requirements. It
+  also proposed mechanisms such as generation-bound capabilities and the
+  authorized shared-page fast path, which remained subject to architectural
+  review.
+\item Q\&A and hands-on testing refined the architecture. Human testing judged
+  real behavior, while Codex converted those workflows into repeatable QEMU,
+  ABI, lifecycle, and performance gates.
+\end{enumerate}
+
+The user-visible conversation is the most detailed record; repository history,
+design documents, and tests provide corroboration. A
+\href{https://github.com/gmkurtzer/ginux/blob/main/docs/paper/STEERING-PROVENANCE.md}{curated
+steering chronology} accompanies the paper and records direct steering, agent
+proposals, collaborative refinement, and corrections triggered by observed
+behavior.
 
 \section{Alternative: Starting with Linux}
 
