@@ -104,16 +104,21 @@ per workload and system.
 |---|---|---:|---:|---:|
 | CPU | events/s | 232.360 | 267.410 | Ginux 1.151x Linux |
 | Memory | MiB/s | 679.510 | 48.390 | Ginux 14.042x slower |
-| Threads | events/s | 306.129 | 0.078 | Ginux 3911x slower |
+| Threads | events/s | 306.129 | 175.905 | Ginux 1.740x slower |
 | Mutex | seconds/event | 1.550 | 1.445 | Ginux 1.073x Linux |
 
 The CPU workload is almost entirely userspace computation; its 15.1% Ginux
 lead is preliminary and may include TCG variation or different background
 work. The memory result exposes a serious unoptimized mapping, fault, or copy
-path. The threads test is a functional performance failure: each Ginux sample
-completed one event in roughly 12.8 seconds, rather than Linux's hundreds of
-events in roughly three seconds. The single-thread mutex workload completed
-one event on both kernels and carries little weight.
+path. The original threads checkpoint exposed a scheduler defect: every
+worker `sched_yield()` selected a just-preempted busy supervisory thread, so
+the worker waited for another timer interrupt on each of the workload's 1,000
+yields per event. Tracking the last preempted thread and excluding it from an
+immediate voluntary-yield selection raised the Ginux median from 0.078 to
+175.905 events/s. Ginux remains 1.740 times slower than Linux on this test,
+but the pathological 3,911-fold gap was a correctable scheduling-policy bug.
+The single-thread mutex workload completed one event on both kernels and
+carries little weight.
 
 Ginux samples use a fresh QEMU boot for isolation because the current shell
 child-lifecycle path does not reliably support several sequential sysbench
@@ -125,7 +130,7 @@ in `rocky-linux-run-*-results.log`, `ginux-sysbench-*.log`, and
 
 Before treating these checkpoint results as general performance evidence:
 
-1. Fix the memory and thread-path regressions identified above.
+1. Fix the memory regression and continue optimizing the remaining thread gap.
 2. Make `domain exec --interactive` retain the running systemd domain and
    deliver its PTY and output.
 3. Repeat both sides on the same x86-64 Linux host with KVM.

@@ -326,7 +326,7 @@ Workload & Metric & Rocky Linux & Ginux & Ginux result \\
 \midrule
 CPU & events/s & 232.360 & 267.410 & 1.15$\times$ Linux \\
 Memory & MiB/s & 679.510 & 48.390 & 14.04$\times$ slower \\
-Threads & events/s & 306.129 & 0.078 & 3911$\times$ slower \\
+Threads & events/s & 306.129 & 175.905 & 1.74$\times$ slower \\
 Mutex & s/event & 1.550 & 1.445 & 1.07$\times$ Linux \\
 \bottomrule
 \end{tabular}
@@ -337,16 +337,17 @@ spends most of its time in userspace and ran 15.1\% faster under Ginux in this
 sample. That difference may reflect TCG variation, background Linux work, or
 different kernel entry costs; it is not sufficient evidence of a generally
 faster CPU path. The memory test was 14 times slower, consistent with the
-prototype's unoptimized mapping, fault, and memory-copy paths. The threads
-test exposed a much larger defect: a Ginux observation completed one event in
-roughly 12.8 seconds, while Linux completed hundreds of events in about three
-seconds. That result points to immature scheduling, futex, or timing behavior,
-not ordinary benchmark noise. The single-thread mutex test completed only one
-event on both systems and is correspondingly weak evidence despite its similar
-median. Network, IPC, storage, multicore, and security performance remain
-unmeasured. The benchmark therefore demonstrates that Ginux can execute the
-same nontrivial Linux binary, while also showing why functional compatibility
-cannot be treated as performance parity.
+prototype's unoptimized mapping, fault, and memory-copy paths. An initial
+threads result was 3,911 times slower because every worker
+\texttt{sched\_yield()} selected a just-preempted busy supervisory thread and
+then waited for another timer interrupt. A scheduler-policy correction raised
+the Ginux median from 0.078 to 175.905 events/s. The remaining 1.74-fold gap is
+material, but it is no longer pathological. The single-thread mutex test
+completed only one event on both systems and is correspondingly weak evidence
+despite its similar median. Network, IPC, storage, multicore, and security
+performance remain unmeasured. The benchmark therefore demonstrates that
+Ginux can execute the same nontrivial Linux binary, while also showing why
+functional compatibility cannot be treated as performance parity.
 
 The security hypothesis is that explicit capabilities, per-domain address
 spaces, W\textasciicircum X mappings, immutable executable pages,

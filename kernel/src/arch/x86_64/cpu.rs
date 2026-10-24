@@ -1343,6 +1343,8 @@ static LINUX_FIRST_CHILD_TID: BankedAtomicU32 = BankedAtomicU32::new(0);
 static LINUX_CLONE_REUSE_VALIDATED: BankedAtomicBool = BankedAtomicBool::new(false);
 static LINUX_CHILD_GETTID_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
 static LINUX_YIELD_SWITCH_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_LAST_PREEMPTED_THREAD_SLOT: BankedAtomicU8 =
+    BankedAtomicU8::new(LINUX_THREAD_SLOT_NONE);
 static LINUX_CLONE_BUSY_REJECTION_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
 static LINUX_CLONE_INVALID_REJECTION_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
 static LINUX_CLONE_TID_FAULT_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
@@ -5683,6 +5685,20 @@ fn ready_linux_thread_handle() -> Option<LinuxThreadHandle> {
     })
 }
 
+fn yield_ready_linux_thread_handle() -> Option<LinuxThreadHandle> {
+    // A timer-preempted thread has already consumed its current quantum.
+    // Do not let a sibling's voluntary yield immediately hand the CPU back;
+    // the next timer quantum will make it eligible through preemption.
+    let last_preempted = LINUX_LAST_PREEMPTED_THREAD_SLOT.load(Ordering::Acquire);
+    (0..LINUX_THREAD_LIMIT).find_map(|slot| {
+        (slot != usize::from(last_preempted)
+            && LINUX_THREAD_STATES[slot].load(Ordering::Acquire) == LINUX_THREAD_READY)
+            .then(|| linux_thread_handle(slot))
+            .flatten()
+            .filter(|handle| linux_thread_return_context(*handle).is_some())
+    })
+}
+
 fn block_current_linux_thread(kind: u8, key: u64, output: u64, deadline: u64) -> bool {
     let Some(slot) = current_linux_thread_slot() else {
         return false;
@@ -6806,6 +6822,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
     LINUX_CLONE_REUSE_VALIDATED.store(false, Ordering::SeqCst);
     LINUX_CHILD_GETTID_COUNT.store(0, Ordering::SeqCst);
     LINUX_YIELD_SWITCH_COUNT.store(0, Ordering::SeqCst);
+    LINUX_LAST_PREEMPTED_THREAD_SLOT.store(LINUX_THREAD_SLOT_NONE, Ordering::Release);
     LINUX_CLONE_BUSY_REJECTION_COUNT.store(0, Ordering::SeqCst);
     LINUX_CLONE_INVALID_REJECTION_COUNT.store(0, Ordering::SeqCst);
     LINUX_CLONE_TID_FAULT_COUNT.store(0, Ordering::SeqCst);
@@ -11997,7 +12014,7 @@ fn linux_sched_yield_live_return(
     if !save_linux_thread_return_context(current, caller) {
         return LINUX_EINVAL;
     }
-    let target = ready_linux_thread_handle().unwrap_or(current);
+    let target = yield_ready_linux_thread_handle().unwrap_or(current);
     let mut target_registers = LinuxSyscallFrame::ZERO;
     let mut target_rip = 0;
     let mut target_rsp = 0;
@@ -39165,6 +39182,7 @@ pub(crate) fn expire_linux_waits_from_timer(frame: &mut UserInterruptFrame) {
             return;
         }
         *frame = restored;
+        LINUX_LAST_PREEMPTED_THREAD_SLOT.store(current.slot, Ordering::Release);
         LINUX_TIMER_WAIT_PREEMPTION_COUNT.fetch_add(1, Ordering::SeqCst);
     }
 }
