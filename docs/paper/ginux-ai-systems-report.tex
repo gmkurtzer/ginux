@@ -659,14 +659,15 @@ expert can instead aim it at bounded improvements to a mature system, where
 the ecosystem remains intact and the novel idea must survive existing review,
 compatibility, and performance standards.
 
-\section{Expertise Still Drives the Agent}
+\section{Human Experts Are Critical for Great Outcomes}
 
-This result does not imply that domain expertise is optional. AI compressed
-the time required to turn decisions into code. It did not supply all of the
-decisions. Choosing a Linux userspace contract, distinguishing OCI
+Human expertise made Ginux possible. Codex dramatically shortened the path
+from a technical decision to working code, while human direction supplied the
+vision, priorities, and standard for success. Practical systems knowledge was
+needed at every turn: choosing a Linux userspace contract, separating OCI
 transport from runtime isolation, recognizing broken fork/exec behavior,
-defining domain ownership, interpreting systemd failures, and rejecting false
-success all required domain knowledge.
+defining domain ownership, interpreting systemd failures, and distinguishing
+convincing output from correct behavior.
 
 The project direction drew on experience from Caos Linux, CentOS, and Rocky
 Linux; the Singularity/Apptainer container ecosystem; the Warewulf and Perceus
@@ -674,25 +675,27 @@ cluster-provisioning ecosystems; and production infrastructure operations
 ~\cite{rockyAbout2026,ciqKurtzer2026}. That background shaped the distinction
 between OCI transport and runtime isolation, the controller workflow,
 persistent image caching, domain boot semantics, provisioning requirements,
-the acceptance gates, and the decision to stop. An inexperienced operator may
-obtain a large codebase and convincing console output without recognizing that
-the underlying semantics are wrong. In systems software, a plausible result
-can be more dangerous than an obvious failure.
+the acceptance gates, and the decision to stop. It also made apparently
+successful but semantically incorrect results easier to recognize. Each such
+failure became a better test or an architectural correction. In systems
+software, this judgment is as important as the ability to produce code.
 
-AI nevertheless lowers the barrier for junior engineers to contribute. They
-can explore unfamiliar code, generate tests, compare interfaces, and implement
-bounded work at a speed that previously required much more experience. The
-remaining gap is judgment: knowing which abstraction to choose, which result
-to distrust, what compatibility means, and when a local success creates a
-system-wide liability. Senior engineers who adopt an AI-first workflow have
-the strongest combination today because they can pair generation speed with a
-well-developed model of how the system should behave.
+AI also gives junior engineers a much shorter path to meaningful contribution.
+They can explore unfamiliar code, generate tests, compare interfaces, and
+implement bounded work at a speed that previously required much more
+experience. Experienced engineers know which abstraction fits, which result
+deserves another test, what compatibility means in practice, and when a local
+success creates a system-wide liability. The best results pair AI's
+implementation speed with an expert's ability to keep the work pointed at the
+right problem.
 
-This also argues for better controls. Architecture must be written down. Gates
-must exercise operator workflows rather than convenient markers. Compatibility
-claims need external references and differential tests. Security review should
-not be performed solely by the same agent that wrote the code. AI expands who
-can build; it does not remove responsibility for what gets built.
+The same lesson applies to project controls. Written architecture gives the
+agent a stable target. Workflow-based gates measure behavior that operators
+actually depend on, while external references and differential tests keep
+compatibility claims grounded. Independent security review adds a separate
+line of judgment. Together, these practices turn generation speed into
+accountable engineering. AI expands who can build; human ownership determines
+what deserves trust.
 
 \section{Code Is Not the Moat}
 
