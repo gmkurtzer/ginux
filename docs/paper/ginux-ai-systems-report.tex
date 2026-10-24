@@ -730,10 +730,13 @@ to keeping yesterday's programs working tomorrow. AI may help build the
 technical pieces. Adoption still requires independent organizations to agree
 on and support the same contracts.
 
-\subsection{AI accelerates both sides of open-source security}
+\subsection{Security note: keeping pace with AI-accelerated CVEs}
 
-The following episode provides outside context for the operational effects of
-AI-assisted software work. It was separate from the Ginux experiment.
+Security testing was outside the scope of the Ginux experiment. The project
+did not conduct a kernel audit, threat-model validation, penetration test, or
+production hardening exercise, and it makes no security claim. Security still
+deserves a notable mention because the same AI capability demonstrated here
+is changing how quickly vulnerabilities are discovered, evaluated, and used.
 
 The same capability that generates new software can audit old software at a
 scale beyond what human teams could previously sustain. In 2026, AI-assisted research
@@ -765,6 +768,22 @@ windows shrink, and organizations must deploy fixes faster. Much of the pain
 falls on operations and security teams at large organizations: they must map
 affected packages to fleets, evaluate provenance, prioritize exposure, test
 updates, and safely deploy them under an increasingly compressed deadline.
+
+Experience operating Linux distributions for critical enterprise and
+datacenter infrastructure suggests a practical response. Dedicated experts
+continuously monitor upstream advisories, releases, and credible exploitation
+reports; reproduce findings and reject invalid or duplicate reports; map each
+confirmed flaw to affected packages, products, and deployed systems; prepare
+and regression-test fixes; deliver those fixes rapidly to users; and
+contribute the corrections upstream so the wider ecosystem benefits. This is
+not a one-time emergency process. It is a standing operational loop that
+combines distribution engineering, security analysis, release management,
+customer communication, and fleet operations. AI can accelerate discovery,
+code review, test creation, and patch development within that loop, while
+experienced people remain accountable for evidence, prioritization,
+disclosure, and release decisions. In practice, this model has produced early
+customer fixes followed by upstream contributions, reducing exposure for the
+organizations being protected while improving the shared software base.
 
 Open-source projects should welcome well-supported AI-assisted reports, tests,
 and fixes, especially as AI increases the rate of discovery. The standard
