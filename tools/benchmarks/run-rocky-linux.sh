@@ -24,7 +24,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-printf 'run\tqemu_start_to_ready_ms\taccelerator\tcpu\tvcpus\tmemory\n' >"$summary"
+printf 'run\tqemu_start_to_multi_user_ms\taccelerator\tcpu\tvcpus\tmemory\n' >"$summary"
 
 for ((run = 1; run <= BENCHMARK_BOOT_RUNS; run++)); do
     overlay="$benchmark_dir/rocky-linux-run-$run.qcow2"
@@ -51,20 +51,29 @@ for ((run = 1; run <= BENCHMARK_BOOT_RUNS; run++)); do
         -net none >"$log" 2>&1 &
     qemu_pid=$!
     ready=""
-    for _ in {1..1800}; do
-        if grep -Fq GINUX_BENCH_READY "$results"; then
+    for _ in {1..9000}; do
+        if grep -Eq 'Reached target .*multi-user\.target' "$log"; then
             ready=$(now_ms)
             break
         fi
         kill -0 "$qemu_pid" 2>/dev/null || break
-        sleep 0.1
+        sleep 0.02
     done
     if [[ -z "$ready" ]]; then
         stop_process "$qemu_pid"
         wait "$qemu_pid" 2>/dev/null || true
         tail -n 120 "$log" >&2
-        echo "benchmark: Linux run $run did not reach the ready marker" >&2
+        echo "benchmark: Linux run $run did not reach multi-user.target" >&2
         exit 1
+    fi
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$run" "$((ready - started))" "$accelerator" "$cpu_model" \
+        "$BENCHMARK_VCPUS" "$BENCHMARK_MEMORY" >>"$summary"
+    if [[ "${BENCHMARK_BOOT_ONLY:-0}" == 1 ]]; then
+        stop_process "$qemu_pid"
+        wait "$qemu_pid" 2>/dev/null || true
+        qemu_pid=""
+        continue
     fi
     for _ in {1..900}; do
         grep -Fq GINUX_BENCH_COMPLETE "$results" && break
@@ -79,9 +88,6 @@ for ((run = 1; run <= BENCHMARK_BOOT_RUNS; run++)); do
         echo "benchmark: Linux workload run $run did not complete" >&2
         exit 1
     }
-    printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
-        "$run" "$((ready - started))" "$accelerator" "$cpu_model" \
-        "$BENCHMARK_VCPUS" "$BENCHMARK_MEMORY" >>"$summary"
 done
 
 echo "Rocky Linux benchmark completed: $summary"

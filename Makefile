@@ -17,7 +17,7 @@ SYSTEM_PROFILE := profiles/minimal-system-v0/profile.tsv
 
 .DEFAULT_GOAL := help
 
-.PHONY: help doctor manifest system-image test-alpine test-rocky-shell test-rocky-dnf test-multi-domain test-linux-abi test-linux-runtime test-storage test-oci-cache probe-rocky-systemd test-rocky-systemd test-rocky-detached test-domain-responsiveness benchmark-rocky-systemd benchmark-prepare-linux benchmark-linux-comparison benchmark-ginux-sysbench benchmark-compare profile-rocky-systemd rocky-image rocky-image-check linux-probe controller-runtime network-service protocol-service volume-service abi-conformance architecture-check linux-compat-check build build-verification build-linux-profile run reset-storage test test-c1 test-c2 fmt gate clean
+.PHONY: help doctor manifest system-image test-alpine test-rocky-shell test-rocky-dnf test-multi-domain test-linux-abi test-linux-runtime test-storage test-oci-cache probe-rocky-systemd test-rocky-systemd test-rocky-detached test-domain-responsiveness benchmark-rocky-systemd benchmark-prepare-linux benchmark-linux-comparison benchmark-ginux-boot benchmark-boot-comparison benchmark-ginux-sysbench benchmark-compare profile-rocky-systemd rocky-image rocky-image-check linux-probe controller-runtime network-service protocol-service volume-service abi-conformance architecture-check linux-compat-check build build-verification build-linux-profile run reset-storage test test-c1 test-c2 fmt gate clean
 
 help:
 	@echo "Ginux development targets"
@@ -34,6 +34,7 @@ help:
 	@echo "  make test-rocky-detached Verify detached Rocky start returns to the controller"
 	@echo "  make test-domain-responsiveness Verify controller latency under detached Linux work"
 	@echo "  make benchmark-rocky-systemd Benchmark warm Rocky init (3 s gate on KVM)"
+	@echo "  make benchmark-boot-comparison Compare matched QEMU-to-multi-user boot times"
 	@echo "  make benchmark-prepare-linux Prepare the pinned Rocky Linux comparison image"
 	@echo "  make benchmark-linux-comparison Run Rocky Linux boot and sysbench measurements"
 	@echo "  make benchmark-ginux-sysbench Run the matching workload under Ginux"
@@ -180,6 +181,14 @@ benchmark-prepare-linux:
 
 benchmark-linux-comparison:
 	@tools/benchmarks/run-rocky-linux.sh
+
+benchmark-ginux-boot: build
+	@tools/benchmarks/run-ginux-boot.sh
+
+benchmark-boot-comparison: build benchmark-prepare-linux
+	@BENCHMARK_BOOT_ONLY=1 tools/benchmarks/run-rocky-linux.sh
+	@tools/benchmarks/run-ginux-boot.sh
+	@tools/benchmarks/summarize-boot.sh
 
 benchmark-ginux-sysbench: build
 	@tools/benchmarks/run-ginux.sh

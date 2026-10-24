@@ -1,8 +1,8 @@
 # Linux and Ginux Comparative Benchmark
 
-This harness tests a deliberately narrow question: how does the current Ginux
-Linux personality compare with Linux when both execute the same x86-64
-userspace workload in closely matched QEMU virtual machines?
+This harness tests two deliberately narrow questions: how long do Linux and
+Ginux take to reach the same systemd readiness marker from QEMU process launch,
+and how do they execute the same x86-64 userspace workload?
 
 It does not establish general operating-system performance. Ginux is currently
 single-vCPU, the macOS development host can only use QEMU TCG for x86-64, and
@@ -39,7 +39,7 @@ separate from the login and boot console.
 
 ```sh
 make benchmark-prepare-linux
-make benchmark-linux-comparison
+make benchmark-boot-comparison
 make benchmark-ginux-sysbench
 make benchmark-compare
 ```
@@ -56,50 +56,51 @@ BENCHMARK_BOOT_RUNS=1 BENCHMARK_WORKLOAD_RUNS=1 \
   BENCHMARK_WORKLOAD_SECONDS=1 make benchmark-linux-comparison
 ```
 
-## October 23, 2026 TCG checkpoint
+## October 23, 2026 matched boot checkpoint
 
 Host: Apple Silicon macOS. Guest ISA: x86-64. Accelerator: QEMU TCG.
 
-| Measurement boundary | Linux time | Ginux time |
-|---|---:|---:|
-| Full guest boot: QEMU process launch to multi-user/login readiness | 42.666 s median (42.807 / 41.901 / 42.666) | Not measured |
-| Userspace init: PID 1 entry to verified console/login | Not measured | 4.452 s (one run) |
-| Warm workload launch: domain start request to login | Not applicable | About 10.957 s, derived (one run) |
-| Matched sysbench: same binary; CPU, memory, threads, and mutex | 36/36 runs completed | No accepted runs |
+Every value below starts immediately before QEMU process launch and ends at the
+first systemd `multi-user.target` marker. Both use `q35`, one vCPU, 2 GiB RAM,
+the `max,+smep,+smap,+umip` CPU model, TCG, and warm local image data.
 
-The separately observed 34.64-second Linux uptime at readiness includes both
-kernel and userspace execution, so it is not presented as a userspace-init
-comparison. The warm Ginux domain figure adds the measured
-6.505 seconds for cached OCI restoration, unpacking, and publication to the
-4.452-second init-to-console segment. It excludes Ginux firmware, kernel, and
-controller startup because those components were already running when the
-domain start command was issued.
+| System | Run 1 | Run 2 | Run 3 | Median | Mean | Range |
+|---|---:|---:|---:|---:|---:|---:|
+| Rocky Linux | 41.596 s | 46.472 s | 42.579 s | 42.579 s | 43.549 s | 4.876 s |
+| Ginux with Rocky domain | 12.910 s | 12.820 s | 12.860 s | 12.860 s | 12.863 s | 0.090 s |
+
+Ginux reached the matched marker 3.31 times sooner, corresponding to 69.8%
+less median elapsed time in this configuration. Linux varied materially across
+the three TCG runs (an 11.5% range relative to its median), while Ginux's range
+was 0.7%. This is a preliminary operational full-guest startup comparison, not
+a general kernel-performance result.
+
+The likely explanation is structural. Ginux boots a compact EFI kernel and
+controller, restores a cached OCI filesystem, and launches the Rocky domain
+without booting a second kernel or initramfs. Rocky Linux follows its
+general-purpose UEFI, kernel, initramfs, device discovery, and GenericCloud
+path. Ginux also implements less hardware and service machinery, so omitted
+work may appear as lower latency. The Linux GenericCloud and Ginux UBI profiles
+do not enable identical services; their qcow2 and OCI/raw storage paths also
+differ. TCG can affect their instruction paths differently. A stronger claim
+requires an identical userspace profile, more runs, equivalent storage paths,
+and execution on the same x86-64 KVM host.
+
+Raw boot results are written to `rocky-linux-summary.tsv`,
+`ginux-boot-summary.tsv`, and `boot-comparison.tsv` under the benchmark build
+directory.
 
 All 36 Linux workload executions completed successfully. Their sysbench binary
 digest was
 `7cf6b71521436bd32a8ab197851035ff1632bee383fec5a35468d61969e7c18d`.
 The raw logs preserve the complete sysbench output.
 
-The Ginux Rocky domain continued to reach its verified console in 4.45 seconds
-from Linux-init entry. This does **not** mean that Ginux booted approximately
-ten times faster than Linux: 42.666 seconds covers a complete Linux VM launch,
-while 4.45 seconds covers only the final systemd segment inside Ginux. A
-comparative sysbench result is **not yet available**:
+A comparative sysbench result is **not yet available**:
 the current domain-exec path does not deliver an interactive PTY after systemd
 has reached multi-user, and repeated non-interactive exec caused the running
 domain to become unavailable. The comparison gate therefore fails rather than
 publishing unmatched or fabricated numbers. This is now a concrete Linux ABI
 and domain-lifecycle test requirement.
-
-The apparent timing difference is most plausibly explained by the mismatched
-boundaries. Ginux reuses an already-running kernel and controller and starts a
-cached, narrower UBI userspace. The Linux path includes UEFI, kernel and device
-initialization, and a GenericCloud userspace. Ginux also implements less
-hardware and service machinery, so some omitted work appears as lower latency.
-TCG translation and the different Rocky image profiles add further confounders.
-No relative boot-performance claim is supported until both measurements start
-at QEMU launch and end at the same readiness marker under the same cache and
-userspace policy.
 
 ## Publication requirements
 

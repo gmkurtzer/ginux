@@ -9,6 +9,7 @@ success_file=$(mktemp "${TMPDIR:-/tmp}/ginux-rocky-systemd-success.XXXXXX")
 qemu_pid=""
 rocky_image="${GINUX_ROCKY_IMAGE:-rockylinux/rockylinux:10-ubi-init}"
 start_mode="${GINUX_ROCKY_START_MODE:-attached}"
+metrics_file="${GINUX_ROCKY_METRICS_FILE:-}"
 
 stop_qemu() {
     local pid=""
@@ -106,6 +107,28 @@ wait_for_count_ms() {
     done
 }
 
+wait_for_pattern_ms() {
+    local pattern=$1
+    local limit_ms=$(( ${2:-120} * 1000 ))
+    local started
+    local now
+    started=$(now_ms)
+    while true; do
+        if grep -Eq "$pattern" "$output_file"; then
+            now_ms
+            return 0
+        fi
+        if grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC|^ginux: Linux user fault|Linux init (execution|setup) failed|rocky: (failed|stopped)' "$output_file"; then
+            return 1
+        fi
+        now=$(now_ms)
+        if ((now - started >= limit_ms)); then
+            return 1
+        fi
+        sleep 0.02
+    done
+}
+
 diagnose_login_timeout() {
     printf '\035'
     if wait_for "[detached from domain; use 'domain attach NAME' to return]" 10; then
@@ -137,6 +160,7 @@ mkdir -p "$(dirname "$volume_image")"
 if [[ ! -f "$volume_image" ]]; then
     truncate -s "${GINUX_ROCKY_VOLUME_SIZE:-64G}" "$volume_image"
 fi
+qemu_started_at_ms=$(now_ms)
 {
     wait_for 'ginux> '
     domain_started_at=$(date +%s)
@@ -233,6 +257,14 @@ fi
         printf '%s\n' 'domain attach rocky'
     else
         wait_for ' running in system mode (' 30
+    fi
+    if ! multi_user_reached_at_ms=$(wait_for_pattern_ms 'Reached target .*multi-user\.target' 180); then
+        fail 'timed out waiting for multi-user.target'
+    fi
+    qemu_to_multi_user_ms=$((multi_user_reached_at_ms - qemu_started_at_ms))
+    echo "Rocky timing QEMU-start-to-multi-user: ${qemu_to_multi_user_ms} ms" >&2
+    if [[ -n "$metrics_file" ]]; then
+        printf 'qemu_start_to_multi_user_ms\t%s\n' "$qemu_to_multi_user_ms" >"$metrics_file"
     fi
     wait_for_login
     if ! grep -Eq '^ginux: timing Linux-init-to-console: [0-9]+ ms' "$output_file"; then

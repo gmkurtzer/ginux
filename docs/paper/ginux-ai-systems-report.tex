@@ -256,72 +256,57 @@ revisions, not performance relative to Linux. The method and optimization
 history are recorded in the
 \repolink{docs/PERFORMANCE.md}{performance record}.
 
-A matched single-vCPU harness now pins an official Rocky Linux 10.2 cloud
-image, fixes QEMU machine, memory, CPU, and accelerator settings, and verifies
-the SHA-256 identity of the sysbench executable before accepting workload
-results. Table~\ref{tab:benchmark-checkpoint} states the measurement boundaries
-and missing results explicitly. The Linux side completed its preliminary TCG
-baseline. Ginux did not:
-the post-boot interactive domain-exec path failed to deliver a PTY, while a
-repeated non-interactive path made the domain unavailable. The harness rejects
-the comparison at that gate. This negative result is more informative than a
-number produced with different binaries or execution paths; no Linux-versus-
-Ginux performance claim is made. The reproducible method and raw-result
+A matched single-vCPU boot harness fixes the QEMU machine, memory, CPU,
+accelerator, start marker, and readiness marker. Both measurements begin
+immediately before QEMU process launch and end when systemd reports
+\texttt{multi-user.target}; both use warm local inputs. Table~\ref{tab:benchmark-checkpoint}
+reports three runs per system. The Linux guest uses the official Rocky Linux
+10.2 GenericCloud image; Ginux boots its EFI image and then launches the Rocky
+10 UBI init image as a domain. The profiles are therefore functionally similar
+but not byte-for-byte identical. The reproducible method and raw-result
 requirements are recorded in
 \repolink{docs/BENCHMARKING.md}{the comparative benchmark protocol}.
 
 \begin{table}[htbp]
 \centering
 \small
-\caption{What the single-vCPU Rocky benchmark actually measured under x86-64
-QEMU TCG on an Apple Silicon host. Unmeasured results are stated explicitly.}
+\caption{Matched full-guest startup under x86-64 QEMU TCG on an Apple Silicon
+host. Every value measures QEMU process launch to
+\texttt{multi-user.target}; lower is better.}
 \label{tab:benchmark-checkpoint}
-\begin{tabular}{@{}p{0.50\linewidth}p{0.21\linewidth}p{0.21\linewidth}@{}}
+\begin{tabular}{@{}lrrrr@{}}
 \toprule
-Measurement boundary & Linux time & Ginux time \\
+System & Run 1 & Run 2 & Run 3 & Median \\
 \midrule
-\tcell{Full guest boot: QEMU process launch to multi-user/login readiness}
-  & \tcell{42.666~s median (three runs)}
-  & \tcell{Not measured} \\
-\tcell{Userspace init: PID~1 entry to verified console/login}
-  & \tcell{Not measured}
-  & \tcell{4.452~s (one run)} \\
-\tcell{Warm workload launch: domain start request to login}
-  & \tcell{Not applicable}
-  & \tcell{about 10.957~s, derived (one run)} \\
-\tcell{Matched sysbench: same binary; CPU, memory, threads, and mutex}
-  & \tcell{36/36 runs completed}
-  & \tcell{No accepted runs} \\
+Rocky Linux & 41.596~s & 46.472~s & 42.579~s & 42.579~s \\
+Ginux/Rocky domain & 12.910~s & 12.820~s & 12.860~s & 12.860~s \\
 \bottomrule
 \end{tabular}
-\vspace{3pt}
-
-\parbox{0.95\linewidth}{The separately observed 34.64~s Linux uptime at
-readiness includes kernel and userspace execution, so it is omitted as a
-userspace-init comparison. The 10.957~s Ginux figure is the sum of 6.505~s for cached OCI restoration,
-unpacking, and publication plus 4.452~s from PID~1 entry to console. It excludes
-the already completed Ginux firmware, kernel, and controller boot.}
 \end{table}
 
-These data do not show that Ginux boots ten times faster than Linux. Dividing
-42.666 by 4.45 would compare a complete Linux VM launch with only the final
-systemd segment of a Ginux domain launch. Even the approximately 10.96~s warm
-domain figure is an operational comparison between a domain on an already
-running host and a newly launched VM, not a kernel-to-kernel boot comparison.
-The apparent difference is plausibly dominated by that boundary choice: Ginux
-reuses its running kernel and controller, restores a cached OCI image, and
-initializes a narrower UBI userspace, whereas the Linux measurement includes
-UEFI, kernel and device initialization, and a GenericCloud userspace. Ginux
-also implements less hardware and service machinery; omitted work can reduce
-time without representing a superior implementation. TCG translation and the
-different Rocky image profiles add further confounders.
+Under this precise configuration, Ginux reached the common readiness marker
+3.31 times sooner, a 69.8\% reduction in median elapsed time. The three Ginux
+runs were tightly grouped (12.820--12.910~s); Linux showed material TCG
+variation (41.596--46.472~s). The small sample and 11.5\% Linux range make this
+a preliminary operational result, not evidence that Ginux is a generally
+faster kernel. The likely explanations are architectural. Ginux
+boots a compact, purpose-built EFI kernel and controller, restores a locally
+cached OCI filesystem, and launches a domain without another kernel or
+initramfs. Rocky Linux follows its general-purpose UEFI, kernel, initramfs,
+device-discovery, and GenericCloud startup path. Ginux also implements less
+hardware and service machinery; omitted work can reduce boot time without
+representing a superior implementation. The different Rocky image profiles
+and enabled units remain confounders, as do the qcow2-versus-OCI/raw storage
+paths and translated execution under TCG.
 
-A defensible comparison requires both systems to start at QEMU process launch,
-end at the same authenticated login or multi-user marker, use equivalent Rocky
-userspaces and warm-cache policy, and complete repeated runs on the same
-x86-64 KVM host. The current workload result is simpler: Linux completed its
-baseline, while Ginux produced no accepted sysbench samples. No relative boot
-or workload-performance claim follows from this checkpoint.
+The result therefore supports a narrow claim: the prototype's full boot plus
+domain-launch path has low startup overhead in this test. A stronger claim
+requires the same userspace profile on both kernels, more repetitions,
+x86-64 KVM measurements, equivalent storage paths, and separate CPU, memory,
+IPC, network, and storage benchmarks. The existing sysbench attempt is not
+reported as a comparison:
+Linux completed its baseline, but Ginux produced no accepted samples after
+the domain-exec PTY/lifecycle gate failed.
 
 The security hypothesis is that explicit capabilities, per-domain address
 spaces, W\textasciicircum X mappings, immutable executable pages,
