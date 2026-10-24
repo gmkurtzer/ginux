@@ -1,4 +1,4 @@
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use crate::{control_abi, linux_process, memory};
 
@@ -94,6 +94,7 @@ struct Page {
 const _: [(); PAGE_SIZE] = [(); core::mem::size_of::<Page>()];
 
 static LOCKS: [AtomicBool; INSTANCE_LIMIT] = [const { AtomicBool::new(false) }; INSTANCE_LIMIT];
+static PENDING_COUNTS: [AtomicU64; INSTANCE_LIMIT] = [const { AtomicU64::new(0) }; INSTANCE_LIMIT];
 static mut PROCESS_QUEUES: [[Queue; linux_process::PROCESS_LIMIT]; INSTANCE_LIMIT] =
     [[Queue::EMPTY; linux_process::PROCESS_LIMIT]; INSTANCE_LIMIT];
 static mut THREAD_QUEUES: [[Queue; THREAD_QUEUE_LIMIT]; INSTANCE_LIMIT] =
@@ -270,7 +271,14 @@ pub(crate) fn enqueue(
         reserved: [0; 2],
     };
     queue.pending = queue.pending.checked_add(1).ok_or(Error::NoMemory)?;
+    PENDING_COUNTS[instance].fetch_add(1, Ordering::Release);
     Ok(true)
+}
+
+pub(crate) fn any_pending(instance: usize) -> bool {
+    PENDING_COUNTS
+        .get(instance)
+        .is_some_and(|count| count.load(Ordering::Acquire) != 0)
 }
 
 pub(crate) fn pending_mask(instance: usize, scope: Scope, slot: usize) -> Result<u64, Error> {
@@ -349,6 +357,7 @@ pub(crate) fn dequeue(
     };
     page_mut(frame).ok_or(Error::Invalid)?.entries[index] = Entry::EMPTY;
     queue.pending = queue.pending.checked_sub(1).ok_or(Error::Invalid)?;
+    PENDING_COUNTS[instance].fetch_sub(1, Ordering::AcqRel);
     if !release_empty_pages(queue) {
         return Err(Error::Invalid);
     }
@@ -375,7 +384,11 @@ pub(crate) fn clear(instance: usize, scope: Scope, slot: usize) -> Result<(), Er
     if current != memory::FrameLease::EMPTY {
         return Err(Error::Invalid);
     }
+    let pending = queue.pending;
     *queue = Queue::EMPTY;
+    if pending != 0 {
+        PENDING_COUNTS[instance].fetch_sub(pending, Ordering::AcqRel);
+    }
     Ok(())
 }
 
@@ -406,7 +419,9 @@ pub(crate) fn verify_dynamic_fifo(instance: usize) -> bool {
             },
             false,
         ) == Ok(false)
-        && dequeue(instance, Scope::Process, process, u64::MAX) == Ok(Some(standard));
+        && any_pending(instance)
+        && dequeue(instance, Scope::Process, process, u64::MAX) == Ok(Some(standard))
+        && !any_pending(instance);
     let isolated = enqueue(
         instance,
         Scope::Process,
@@ -433,6 +448,7 @@ pub(crate) fn verify_dynamic_fifo(instance: usize) -> bool {
             },
             true,
         ) == Ok(true)
+        && any_pending(instance)
         && pending_mask(instance, Scope::Process, process) == Ok(1 << 33)
         && pending_mask(instance, Scope::Thread, thread) == Ok(1 << 33)
         && dequeue(instance, Scope::Thread, thread, u64::MAX)
@@ -450,7 +466,8 @@ pub(crate) fn verify_dynamic_fifo(instance: usize) -> bool {
                 value: 3,
                 sender_pid: 1,
                 sender_uid: 0,
-            }));
+            }))
+        && !any_pending(instance);
     let mut filled = standard_coalesced && isolated;
     for value in 0..=ENTRIES_PER_PAGE as u64 {
         filled &= enqueue(
@@ -491,7 +508,7 @@ pub(crate) fn verify_dynamic_fifo(instance: usize) -> bool {
         .and_then(|guard| {
             guard
                 .queue(Scope::Process, process)
-                .map(|queue| queue.pages == 0 && queue.pending == 0)
+                .map(|queue| queue.pages == 0 && queue.pending == 0 && !any_pending(instance))
         })
         .unwrap_or(false);
     let clean = clear(instance, Scope::Process, process).is_ok()

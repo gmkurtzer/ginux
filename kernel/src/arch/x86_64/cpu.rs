@@ -8983,6 +8983,23 @@ extern "sysv64" fn linux_syscall_handler(
     // SAFETY: the assembly entry stub passes the aligned base of the exact
     // twelve-register frame represented by LinuxSyscallFrame.
     let saved_registers = unsafe { registers.read() };
+    // Linux normally satisfies this hot path through vDSO. Until Ginux maps a
+    // vDSO, avoid the general syscall bookkeeping when no kernel event needs
+    // observing. SYSCALL already establishes ring-3 provenance, the kernel
+    // owns the active page tables, and the result copy still validates the
+    // destination leaf permissions.
+    if number == LINUX_CLOCK_GETTIME_SYSCALL
+        && LINUX_RUNTIME_MODE.load(Ordering::Acquire)
+        && ELF_PROBE_ACTIVE.load(Ordering::Acquire)
+        && !ELF_PROBE_SECCOMP_STRICT.load(Ordering::Acquire)
+        && !LINUX_SIGNAL_ACTIVE.load(Ordering::Acquire)
+        && ELF_PROBE_PENDING_SIGNALS.load(Ordering::Acquire) == 0
+        && current_container_slot().is_some_and(|slot| !crate::linux_signal::any_pending(slot))
+        && ELF_PROBE_REAL_TIMER_DEADLINE.load(Ordering::Acquire) == 0
+        && !LINUX_RUNTIME_BACKGROUND_YIELD_REQUESTED.load(Ordering::Acquire)
+    {
+        return linux_clock_gettime(saved_registers.rdi, saved_registers.rsi);
+    }
     if let Some(result) =
         linux_controller_syscall(number, saved_registers, user_stack, user_rip, user_rflags)
     {
@@ -9024,8 +9041,9 @@ extern "sysv64" fn linux_syscall_handler(
     }
     let runtime_mode = LINUX_RUNTIME_MODE.load(Ordering::SeqCst);
     let _profile = LinuxBootSyscallProfile::start(number, runtime_mode);
-    let trace_index = if runtime_mode
-        || cfg!(feature = "verification-boot") && ELF_PROBE_SYSTEM_INIT.load(Ordering::SeqCst)
+    let trace_index = if number != LINUX_CLOCK_GETTIME_SYSCALL
+        && (runtime_mode
+            || cfg!(feature = "verification-boot") && ELF_PROBE_SYSTEM_INIT.load(Ordering::SeqCst))
     {
         let index = LINUX_RUNTIME_SYSCALL_TRACE_COUNT.fetch_add(1, Ordering::SeqCst) as usize
             % LINUX_RUNTIME_SYSCALL_TRACE_LIMIT;
@@ -12481,7 +12499,7 @@ fn linux_clock_gettime(clock: u64, output_address: u64) -> u64 {
     let mut timespec = [0_u8; 16];
     timespec[..8].copy_from_slice(&seconds.to_ne_bytes());
     timespec[8..].copy_from_slice(&nanoseconds.to_ne_bytes());
-    if !copy_to_linux_user(output_address, &timespec) {
+    if !address_space::copy_to_current_linux_user_fast(output_address, &timespec) {
         return LINUX_EFAULT;
     }
     0
@@ -12549,21 +12567,30 @@ fn linux_elapsed_time() -> Option<(u64, u64)> {
         return None;
     }
     let ticks = timer::timestamp_counter().saturating_sub(epoch);
-    Some((
-        ticks / frequency,
-        ticks % frequency * NANOSECONDS_PER_SECOND / frequency,
-    ))
+    linux_ticks_to_time(ticks, frequency)
+}
+
+fn linux_ticks_to_time(ticks: u64, frequency: u64) -> Option<(u64, u64)> {
+    if frequency == 0 {
+        return None;
+    }
+    let seconds = ticks / frequency;
+    let remainder = ticks % frequency;
+    let nanoseconds = if frequency == NANOSECONDS_PER_SECOND {
+        remainder
+    } else {
+        remainder
+            .checked_mul(NANOSECONDS_PER_SECOND)?
+            .checked_div(frequency)?
+    };
+    Some((seconds, nanoseconds))
 }
 
 fn linux_realtime_time() -> Option<(u64, u64)> {
     let frequency = ELF_PROBE_CLOCK_FREQUENCY.load(Ordering::SeqCst);
     let (epoch_seconds, epoch_counter) = crate::linux_realtime_epoch()?;
     let ticks = timer::timestamp_counter().checked_sub(epoch_counter)?;
-    let elapsed_seconds = ticks.checked_div(frequency)?;
-    let remainder = ticks.checked_rem(frequency)?;
-    let nanoseconds = remainder
-        .checked_mul(NANOSECONDS_PER_SECOND)?
-        .checked_div(frequency)?;
+    let (elapsed_seconds, nanoseconds) = linux_ticks_to_time(ticks, frequency)?;
     Some((epoch_seconds.checked_add(elapsed_seconds)?, nanoseconds))
 }
 

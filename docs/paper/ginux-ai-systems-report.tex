@@ -276,13 +276,13 @@ workloads favor higher values.}
 \label{tab:benchmark-checkpoint}
 \begin{tabular}{@{}lllrrl@{}}
 \toprule
-Test & Metric & Samples & Rocky Linux & Ginux & Relative result \\
+Test & Metric & Samples & Rocky Linux & Ginux & Ginux vs. Rocky \\
 \midrule
-Boot & s to target & 3 & 42.579 & 12.860 & 69.8\% lower \\
-CPU & events/s & 9 & 232.360 & 267.410 & 15.1\% higher \\
-Memory & MiB/s & 9 & 679.510 & 48.390 & 14.04$\times$ slower \\
-Threads & events/s & 9 & 306.129 & 175.905 & 1.74$\times$ slower \\
-Mutex & s/event & 9 & 1.550 & 1.445 & 6.8\% lower \\
+Boot & s to target & 3 & 42.579 & 12.860 & 3.31$\times$ faster \\
+CPU & events/s & 9 & 232.360 & 262.190 & 1.13$\times$ faster \\
+Memory & MiB/s & 9 & 679.510 & 233.210 & 2.91$\times$ slower \\
+Threads & events/s & 9 & 306.129 & 181.915 & 1.68$\times$ slower \\
+Mutex & s/event & 9 & 1.550 & 1.443 & 1.07$\times$ faster \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -295,17 +295,20 @@ enabled services, and storage paths are not identical, and Ginux implements
 less hardware machinery, so this is a startup-path result rather than evidence
 of a generally faster kernel.
 
-The userspace measurements sharpen that boundary. CPU throughput was 15.1\%
-higher and mutex time was similar, while thread throughput remained 1.74 times
+The userspace measurements sharpen that boundary. CPU throughput was 12.8\%
+higher and mutex time was similar, while thread throughput remained 1.68 times
 slower. The thread result had initially been 3,911 times slower; correcting a
 \texttt{sched\_yield()} policy defect raised the Ginux median from 0.078 to
-175.905 events/s. Memory throughput remains the clearest deficit at 14.04 times
-slower, pointing to the prototype's mapping, fault, and copy paths. These TCG
-measurements show that Ginux can run the same nontrivial Linux executable, but
-they do not establish performance parity. Stronger claims require identical
-userspace profiles, equivalent storage, more repetitions, and x86-64 KVM
-measurements; network, IPC, multicore, and security performance remain
-unmeasured.
+181.915 events/s. The memory workload times one-kibibyte events, making its
+original 48.390 MiB/s result primarily a clock-call benchmark. Removing
+redundant page-table ownership checks and diagnostic tracing from the guarded
+clock path raised its median to 233.210 MiB/s, a 4.82-fold improvement. It
+remains 2.91 times slower because Ginux has no vDSO and crosses into the kernel
+for each timestamp. These TCG measurements show that Ginux can run the same
+nontrivial Linux executable, but they do not establish performance parity.
+Stronger claims require identical userspace profiles, equivalent storage, more
+repetitions, and x86-64 KVM measurements; network, IPC, multicore, and security
+performance remain unmeasured.
 
 The security hypothesis is that explicit capabilities, per-domain address
 spaces, W\textasciicircum X mappings, immutable executable pages,

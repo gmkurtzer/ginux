@@ -2974,6 +2974,48 @@ pub(crate) fn copy_to_current_user(address: u64, input: &[u8]) -> bool {
     true
 }
 
+/// Copy a small result into the active Linux address space without repeating
+/// ownership validation for every page-table level. The kernel creates and
+/// exclusively owns Linux page tables, validates the root before entering
+/// userspace, and does not expose CR3 or page-table mutation to a domain. The
+/// leaf permission checks remain mandatory here.
+pub(crate) fn copy_to_current_linux_user_fast(address: u64, input: &[u8]) -> bool {
+    if input.is_empty() {
+        return false;
+    }
+    let Some(end) = address.checked_add(input.len() as u64) else {
+        return false;
+    };
+    if address >= 1 << 47 || end > 1 << 47 {
+        return false;
+    }
+    let page_mask = !(PAGE_SIZE as u64 - 1);
+    let mut page = address & page_mask;
+    let last = (end - 1) & page_mask;
+    loop {
+        let Some(entry) = current_linux_leaf_trusted(page) else {
+            return false;
+        };
+        let value = unsafe { entry.read() };
+        if value & (PRESENT | USER | WRITABLE) != PRESENT | USER | WRITABLE {
+            return false;
+        }
+        if page == last {
+            break;
+        }
+        page = match page.checked_add(PAGE_SIZE as u64) {
+            Some(next) => next,
+            None => return false,
+        };
+    }
+    unsafe {
+        cpu::with_supervisor_user_access(|| {
+            core::ptr::copy_nonoverlapping(input.as_ptr(), address as *mut u8, input.len());
+        });
+    }
+    true
+}
+
 pub(crate) fn protect_current_user_page_read_only(address: u64) -> bool {
     if address >= 1 << 47 || !address.is_multiple_of(PAGE_SIZE as u64) {
         return false;
@@ -5088,7 +5130,7 @@ pub(crate) fn current_linux_address_executable(address: u64) -> bool {
     if address >= 1 << 47 {
         return false;
     }
-    current_linux_leaf(address & !(PAGE_SIZE as u64 - 1)).is_some_and(|entry| {
+    current_linux_leaf_trusted(address & !(PAGE_SIZE as u64 - 1)).is_some_and(|entry| {
         let value = unsafe { entry.read() };
         value & (PRESENT | USER | NO_EXECUTE) == PRESENT | USER
     })
@@ -5205,6 +5247,30 @@ pub(crate) fn zero_current_linux_page(address: u64, frame: u64) -> bool {
 
 fn current_linux_leaf(address: u64) -> Option<*mut u64> {
     linux_leaf_in_root(current_root(), address)
+}
+
+fn current_linux_leaf_trusted(address: u64) -> Option<*mut u64> {
+    let indexes = [
+        ((address >> 39) & 0x1ff) as usize,
+        ((address >> 30) & 0x1ff) as usize,
+        ((address >> 21) & 0x1ff) as usize,
+        ((address >> 12) & 0x1ff) as usize,
+    ];
+    let mut table = current_root();
+    for (level, index) in indexes.into_iter().enumerate() {
+        let entries = mapped_frame::<u64>(table & ADDRESS_MASK)?;
+        if level == 3 {
+            return Some(unsafe { entries.add(index) });
+        }
+        let entry = unsafe { entries.add(index).read() };
+        if entry & (PRESENT | USER) != PRESENT | USER
+            || (level == 1 || level == 2) && entry & LARGE_PAGE != 0
+        {
+            return None;
+        }
+        table = entry & ADDRESS_MASK;
+    }
+    None
 }
 
 #[derive(Clone, Copy)]

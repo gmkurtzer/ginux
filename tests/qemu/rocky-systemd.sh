@@ -242,7 +242,7 @@ qemu_started_at_ms=$(now_ms)
                         command="/usr/bin/sysbench cpu --threads=1 --time=${GINUX_BENCHMARK_WORKLOAD_SECONDS:-3} --cpu-max-prime=20000 run"
                         ;;
                     memory)
-                        command="/usr/bin/sysbench memory --threads=1 --time=${GINUX_BENCHMARK_WORKLOAD_SECONDS:-3} --memory-total-size=100G run"
+                        command="/usr/bin/sysbench memory --threads=1 --time=${GINUX_BENCHMARK_WORKLOAD_SECONDS:-3} --memory-block-size=${GINUX_BENCHMARK_MEMORY_BLOCK_SIZE:-1K} --memory-total-size=100G run"
                         ;;
                     threads)
                         command="/usr/bin/sysbench threads --threads=1 --time=${GINUX_BENCHMARK_WORKLOAD_SECONDS:-3} run"

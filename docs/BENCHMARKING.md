@@ -102,20 +102,27 @@ per workload and system.
 
 | Workload | Metric | Linux median | Ginux median | Relative result |
 |---|---|---:|---:|---:|
-| CPU | events/s | 232.360 | 267.410 | Ginux 1.151x Linux |
-| Memory | MiB/s | 679.510 | 48.390 | Ginux 14.042x slower |
-| Threads | events/s | 306.129 | 175.905 | Ginux 1.740x slower |
-| Mutex | seconds/event | 1.550 | 1.445 | Ginux 1.073x Linux |
+| CPU | events/s | 232.360 | 262.190 | Ginux 1.128x faster |
+| Memory | MiB/s | 679.510 | 233.210 | Ginux 2.914x slower |
+| Threads | events/s | 306.129 | 181.915 | Ginux 1.683x slower |
+| Mutex | seconds/event | 1.550 | 1.443 | Ginux 1.074x faster |
 
-The CPU workload is almost entirely userspace computation; its 15.1% Ginux
+The CPU workload is almost entirely userspace computation; its 12.8% Ginux
 lead is preliminary and may include TCG variation or different background
-work. The memory result exposes a serious unoptimized mapping, fault, or copy
-path. The original threads checkpoint exposed a scheduler defect: every
+work. The memory workload uses one-kibibyte events and times each event. A
+block-size sweep reached 2.76 GiB/s with one-mebibyte events, showing that the
+original 48.390 MiB/s result measured repeated `clock_gettime` overhead rather
+than raw memory bandwidth. A trusted-copy path, removal of clock calls from
+the diagnostic syscall ring, and a guarded clock fast path raised the matched
+median to 233.210 MiB/s. Ginux remains 2.914 times slower because it has no
+vDSO and still crosses the privilege boundary for each timestamp.
+
+The original threads checkpoint exposed a scheduler defect: every
 worker `sched_yield()` selected a just-preempted busy supervisory thread, so
 the worker waited for another timer interrupt on each of the workload's 1,000
 yields per event. Tracking the last preempted thread and excluding it from an
 immediate voluntary-yield selection raised the Ginux median from 0.078 to
-175.905 events/s. Ginux remains 1.740 times slower than Linux on this test,
+181.915 events/s. Ginux remains 1.683 times slower than Linux on this test,
 but the pathological 3,911-fold gap was a correctable scheduling-policy bug.
 The single-thread mutex workload completed one event on both kernels and
 carries little weight.
@@ -130,7 +137,7 @@ in `rocky-linux-run-*-results.log`, `ginux-sysbench-*.log`, and
 
 Before treating these checkpoint results as general performance evidence:
 
-1. Fix the memory regression and continue optimizing the remaining thread gap.
+1. Add vDSO/vvar timekeeping and continue optimizing the memory and thread gaps.
 2. Make `domain exec --interactive` retain the running systemd domain and
    deliver its PTY and output.
 3. Repeat both sides on the same x86-64 Linux host with KVM.

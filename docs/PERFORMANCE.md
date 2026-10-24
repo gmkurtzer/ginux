@@ -130,7 +130,7 @@ That is a separate correctness item; it is not counted as a successful full
 ## Linux comparison harness
 
 The reproducible single-vCPU Linux comparison method, pinned Rocky cloud image,
-preliminary TCG baseline, and current Ginux execution blocker are documented in
-[`BENCHMARKING.md`](BENCHMARKING.md). No Ginux-versus-Linux sysbench claim is
-made until the same binary completes on both systems and the comparison is
+matched sysbench executable, and preliminary TCG results are documented in
+[`BENCHMARKING.md`](BENCHMARKING.md). These translated-execution results are a
+checkpoint, not a native performance claim; the comparison still needs to be
 repeated under x86-64 KVM.
