@@ -26,8 +26,10 @@
 \begin{abstract}
 Can an expert-directed AI coding agent build a new kernel capable of running an
 existing Linux userspace? Ginux demonstrates that, within a focused research
-scope, the answer is yes. Over eleven days, OpenAI Codex with GPT-5.6 Sol
-produced an independent, Rust-first x86-64 kernel containing approximately
+scope, the answer is yes. Kernel construction is well documented; the
+experiment tests how quickly expert-directed AI can integrate established
+mechanisms into a runnable system. Over eleven days, OpenAI Codex with GPT-5.6
+Sol produced an independent, Rust-first x86-64 kernel containing approximately
 139,000 retained lines of implementation and test code across 1,037 commits.
 Ginux boots through UEFI, provides its own memory management, scheduler,
 process model, filesystems, networking, devices, and Linux userspace
@@ -69,6 +71,12 @@ research boundary described here, the answer was yes. \project{} boots from firm
 provides its own memory manager, scheduler, process model, ELF loader, virtual
 filesystems, networking, IPC, device paths, and Linux syscall translation, and
 runs real Alpine and Rocky Linux components.
+
+Textbooks, teaching kernels, production source, standards, and implementation
+discussions document kernel construction extensively. This experiment does
+not show first-principles invention; it tests whether expert-directed AI can
+synthesize those mechanisms into a distinct architecture, diagnose failures,
+and pass increasingly demanding behavioral gates.
 
 \project{} is an independent kernel; Linux is its userspace compatibility
 target. The distinction is visible in \texttt{uname}: a Linux-personality
@@ -695,6 +703,12 @@ what deserves trust.
 
 \section{Code Is Not the Moat}
 
+Building a small working kernel is bounded. Sustaining a production kernel
+means supporting diverse hardware and workloads, preserving interfaces,
+repairing defects, coordinating contributors and vendors, and maintaining a
+dependable release cadence. Code is comparatively easy; workflows,
+compatibility, maintenance, and community are hard.
+
 Ginux used \estimatedcost{} in API calls---about USD~7.71 per commit or
 USD~0.058 per retained, non-generated implementation/test line. Those are
 rough comparisons, but the contrast matters: code can now be generated
@@ -706,19 +720,17 @@ AI is already applying similar pressure to application software. In October
 2026, ArtCraft published early Rust implementations modeled on seven Adobe
 Creative Cloud applications, developed with heavy use of Claude
 ~\cite{artcraft2026}. Independent hands-on testing found recognizable tools
-and striking development speed, alongside missing features and basic failures
-that kept them from replacing the originals~\cite{creativebloqArtcraft2026}.
-That is the Ginux lesson at application scale: visible capabilities have
-become dramatically cheaper to reproduce. Full behavior, integrations,
-workflows, support, and trust remain the hard part.
+and striking development speed, but missing features and basic failures kept
+them from replacing the originals~\cite{creativebloqArtcraft2026}. Visible
+capabilities are cheaper to reproduce; full behavior, integrations, support,
+and trust remain hard.
 
 This pressure will likely be strongest above middleware and orchestration,
-where organizations can replace or customize applications without moving an
-entire hardware and software ecosystem. Ginux shows that foundational software
-can also be reimplemented. Enterprise infrastructure, however, is selected
-through standards, interfaces, certification, hardware enablement, community
-continuity, and commercial support. Technical novelty has limited value when
-the surrounding ecosystem cannot support it.
+where applications can be replaced without moving an entire hardware and
+software ecosystem. Foundational software can also be reimplemented, but
+enterprise infrastructure is selected through standards, interfaces,
+certification, hardware enablement, community continuity, and commercial
+support. Novelty has limited value without that ecosystem.
 
 Linux is the clearest example. Its value extends far beyond the source needed
 to boot a shell. It includes stable expectations across processors,
@@ -732,30 +744,30 @@ on and support the same contracts.
 
 \section{Conclusion}
 
-Ginux demonstrates something that sounded absurd not long ago: an
-expert can direct an AI coding agent to build a new kernel, implement enough of
-the Linux userspace contract to run real distributions, and explore a new
-kernel-native domain architecture in days. The result deserves genuine
-excitement.
+Ginux shows how dramatically expert-directed AI can compress a substantial
+systems project. In days, it produced a new kernel, ran real distribution
+userspaces, and explored kernel-native domains: rapid integration, not the
+invention of kernel engineering itself.
 
-That excitement belongs beside clear limits. Ginux is a research artifact,
-with neither the maturity nor the ecosystem required for production
-infrastructure. Linux remains in a different league. If domains or another
-idea prove useful, the best outcome may be to carry the idea into established
-systems rather than ask the world to adopt another kernel.
+That result belongs beside clear limits. Ginux lacks the maturity and ecosystem
+required for production infrastructure; Linux remains in a different league.
+Useful ideas may be better carried into established systems than used to ask
+the world to adopt another kernel.
 
 AI can build code, including code deep in the systems stack. Ginux demonstrates
 how far that capability has advanced, but it also demonstrates where code
 generation stops being the central problem. Core infrastructure derives its
 value from compatibility, standards, hardware support, security practice,
 community trust, and long-term operational ownership. Linux earned those
-qualities through decades of human engineering. AI may dramatically reduce
+qualities through decades of human engineering and continuous releases across
+an enormous hardware and workload surface. Ginux reproduced a narrow portion
+of the code; it did not reproduce that institution. AI may dramatically reduce
 the cost of implementation, but the ability to build a new foundation is not,
 by itself, a reason to replace the one an ecosystem already trusts.
 
 \begingroup
 \small
-\setlength{\baselineskip}{10pt}
+\setlength{\baselineskip}{8.5pt}
 \raggedright
 \bibliographystyle{plain}
 \bibliography{references}
