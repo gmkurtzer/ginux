@@ -374,33 +374,39 @@ that question without pretending to replace decades of Linux engineering.
 Useful ideas, including domains, may ultimately belong in established systems
 rather than a Ginux deployment.
 
-\subsection{Security implications}
+\subsection{A bounded security review}
 
-Ginux and Linux expose compatible userspace interfaces through unrelated
-kernel implementations. Their kernel-specific vulnerabilities and exploits
-will generally differ. Exceptions may exist where a flaw arises
-from shared hardware behavior, protocol semantics, executable formats, or an
-ABI-level design rather than a kernel-specific implementation.
+Prompted by external review, the same agent that produced the code performed a
+bounded security pass over boot trust, memory and domain boundaries, user
+copies, parsers, OCI and registry TLS, dependencies, and automated gates. This
+was code review, not an independent audit or penetration test. The
+\href{https://github.com/gmkurtzer/ginux/blob/main/docs/SECURITY-ASSESSMENT.md}{initial
+security assessment} records the complete findings.
 
-Userspace vulnerabilities are largely unaffected: the same vulnerable
-application running inside a Ginux domain may still be exploited in the same
-way. What changes is the boundary reached after exploitation. Domain policy
-could deliberately restrict selected Linux or POSIX-compatible behavior. For
-example, a domain could enforce an immutable privilege ceiling under which no
-process can acquire more authority than the domain received at creation,
-regardless of set-user-ID executables, capabilities, namespaces, or a
-compromised privileged service.
+QEMU negative tests exercise NX, W\textasciicircum X, supervisor write
+protection, SMEP, SMAP, UMIP, guard pages, capability revocation, cross-domain
+rejection, and IOMMU-mediated DMA confinement. The boot path verifies a signed
+manifest and component measurements; OCI publication requires HTTPS, matching
+platform metadata, and matching layer digests. User copies validate canonical
+addresses, ownership, mappings, and permissions.
 
-The broader security idea is straightforward: explicit capabilities, per-domain
-address spaces, W\textasciicircum X mappings, immutable executable pages,
-generation-safe revocation, and IOMMU-confined DMA reduce ambient authority
-and contain component failure. The prototype exercises several positive and
-negative paths, including stale-generation rejection and driver teardown, but
-it has not received an independent audit, side-channel analysis, whole-kernel
-formal verification, or adversarial production testing. Follow-up research
-should test whether the independent implementation and stronger domain
-constraints reduce practical exploitation enough to outweigh the risks in a
-new and comparatively immature codebase.
+The pass also found immediate blockers. Registry TLS seeds its pseudorandom
+generator from predictable boot time; the manifest uses a published development
+signing key; and Linux processes have fixed addresses rather than ASLR. A
+RustSec scan of 118 dependencies found timing-side-channel advisories in
+\texttt{crypto-bigint 0.5.5}
+(\href{https://github.com/RustCrypto/crypto-bigint/pull/1365}{RUSTSEC-2026-0387})
+and \texttt{rsa 0.9.10}
+(\href{https://rustsec.org/advisories/RUSTSEC-2023-0071}{RUSTSEC-2023-0071}),
+both entering through the registry TLS library. A large, hardware-facing unsafe
+surface and bespoke certificate-name parsing lack systematic fuzzing.
+
+The hosted checks passed, but two full QEMU verification runs failed at the
+linked Linux ELF invariant, leaving the end-to-end gate red. This result is the
+important one: AI can assemble functionality quickly, while justified trust
+still requires threat modeling, adversarial tests, dependency maintenance,
+independent review, and repeated correction. A new kernel begins without the
+decades of hardening already invested in Linux.
 
 \subsection{Illustrative operator workflows}
 
@@ -711,19 +717,17 @@ compatibility, maintenance, and community are hard.
 
 Ginux used \estimatedcost{} in API calls---about USD~7.71 per commit or
 USD~0.058 per retained, non-generated implementation/test line. Those are
-rough comparisons, but the contrast matters: code can now be generated
-cheaply, while its compatibility and maintenance burden can last for years.
-The USD~8,000 produced a prototype. Trust, industry integration, and long-term
-maintenance would cost far more.
+rough comparisons, but the contrast matters: USD~8,000 produced a prototype.
+Compatibility, trust, industry integration, and maintenance remain the far
+larger investment.
 
 AI is already applying similar pressure to application software. In October
 2026, ArtCraft published early Rust implementations modeled on seven Adobe
 Creative Cloud applications, developed with heavy use of Claude
 ~\cite{artcraft2026}. Independent hands-on testing found recognizable tools
-and striking development speed, but missing features and basic failures kept
-them from replacing the originals~\cite{creativebloqArtcraft2026}. Visible
-capabilities are cheaper to reproduce; full behavior, integrations, support,
-and trust remain hard.
+but also missing features and basic failures~\cite{creativebloqArtcraft2026}.
+Visible capabilities are cheaper to reproduce; complete behavior, integration,
+support, and trust remain hard.
 
 This pressure will likely be strongest above middleware and orchestration,
 where applications can be replaced without moving an entire hardware and
@@ -733,14 +737,12 @@ certification, hardware enablement, community continuity, and commercial
 support. Novelty has limited value without that ecosystem.
 
 Linux is the clearest example. Its value extends far beyond the source needed
-to boot a shell. It includes stable expectations across processors,
-filesystems, devices, hypervisors, distributions, security teams, silicon
-vendors, cloud providers, and application developers. Ginux starts without
-that foundation: it lacks a vendor-supported GPU stack, a physical-hardware
-matrix, broad filesystem support, a standards body, and a community committed
-to keeping yesterday's programs working tomorrow. AI may help build the
-technical pieces. Adoption still requires independent organizations to agree
-on and support the same contracts.
+to boot a shell. It provides stable expectations across processors, devices,
+filesystems, hypervisors, distributions, vendors, and applications. Ginux has
+no comparable hardware matrix, standards body, or community committed to
+keeping yesterday's programs working tomorrow. AI may build technical pieces;
+adoption still requires independent organizations to support the same
+contracts.
 
 \section{Conclusion}
 
@@ -754,16 +756,13 @@ required for production infrastructure; Linux remains in a different league.
 Useful ideas may be better carried into established systems than used to ask
 the world to adopt another kernel.
 
-AI can build code, including code deep in the systems stack. Ginux demonstrates
-how far that capability has advanced, but it also demonstrates where code
-generation stops being the central problem. Core infrastructure derives its
-value from compatibility, standards, hardware support, security practice,
-community trust, and long-term operational ownership. Linux earned those
-qualities through decades of human engineering and continuous releases across
-an enormous hardware and workload surface. Ginux reproduced a narrow portion
-of the code; it did not reproduce that institution. AI may dramatically reduce
-the cost of implementation, but the ability to build a new foundation is not,
-by itself, a reason to replace the one an ecosystem already trusts.
+AI can build code deep in the systems stack. Core infrastructure, however,
+derives its value from compatibility, standards, hardware support, security,
+community trust, and long-term ownership. Linux earned those qualities through
+decades of human engineering across an enormous hardware and workload surface.
+Ginux reproduced a narrow portion of the code, not that institution. Cheaper
+implementation is not, by itself, a reason to replace a foundation an
+ecosystem already trusts.
 
 \begingroup
 \small
