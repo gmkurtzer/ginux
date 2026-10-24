@@ -165,8 +165,8 @@ and memory limits.
 
 Proposed scope: general coherent writable file-backed `MAP_SHARED`, remaining
 `mremap` behavior, complete `memfd_secret`, named FIFOs and filesystem socket
-nodes, broader overlay behavior, useful sysfs and cgroup filesystems, and
-vDSO/vvar.
+nodes, broader overlay behavior, useful sysfs and cgroup filesystems, and live
+vvar updates plus the wider Linux vDSO symbol surface.
 
 ## Stage 6: Network compatibility
 
@@ -177,7 +177,7 @@ domain dataplanes.
 ## Stage 7: ELF and libc compatibility
 
 Proposed scope: static PIE without `PT_INTERP`, broader dynamic relocations and
-dependencies, NSS, locale, resolver, vDSO, and independent musl/glibc
+dependencies, NSS, locale, resolver, wider vDSO coverage, and independent musl/glibc
 regression coverage.
 
 ## Stage 8: Operational Rocky with systemd

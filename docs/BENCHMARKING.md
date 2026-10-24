@@ -67,8 +67,8 @@ the `max,+smep,+smap,+umip` CPU model, TCG, and warm local image data.
 
 | System | Run 1 | Run 2 | Run 3 | Median | Mean | Range |
 |---|---:|---:|---:|---:|---:|---:|
-| Rocky Linux | 41.596 s | 46.472 s | 42.579 s | 42.579 s | 43.549 s | 4.876 s |
-| Ginux with Rocky domain | 12.910 s | 12.820 s | 12.860 s | 12.860 s | 12.863 s | 0.090 s |
+| Rocky on Linux | 41.596 s | 46.472 s | 42.579 s | 42.579 s | 43.549 s | 4.876 s |
+| Rocky on Ginux | 12.910 s | 12.820 s | 12.860 s | 12.860 s | 12.863 s | 0.090 s |
 
 Ginux reached the matched marker 3.31 times sooner, corresponding to 69.8%
 less median elapsed time in this configuration. Linux varied materially across
@@ -93,17 +93,20 @@ directory.
 
 ## October 23, 2026 matched sysbench checkpoint
 
-Both guests ran the same Rocky Linux 10 x86-64 sysbench executable, verified
+Rocky on Linux used the official Rocky Linux 10.2 GenericCloud image and its
+stock `6.12.0-211.16.1.el10_2.0.1.x86_64` kernel. Rocky on Ginux used the Rocky
+Linux 10 UBI init image as a domain. Both guests ran the same Rocky Linux 10
+x86-64 sysbench executable, verified
 by SHA-256
 `7cf6b71521436bd32a8ab197851035ff1632bee383fec5a35468d61969e7c18d`.
 Commands, QEMU machine, CPU count, memory size, CPU model, accelerator, and
 three-second workload duration matched. The table reports nine observations
 per workload and system.
 
-| Workload | Metric | Linux median | Ginux median | Relative result |
+| Workload | Metric | Rocky on Linux | Rocky on Ginux | Relative result |
 |---|---|---:|---:|---:|
 | CPU | events/s | 232.360 | 262.190 | Ginux 1.128x faster |
-| Memory | MiB/s | 679.510 | 233.210 | Ginux 2.914x slower |
+| Memory | MiB/s | 679.510 | 584.540 | Ginux 1.162x slower |
 | Threads | events/s | 306.129 | 311.147 | Ginux 1.016x faster |
 | Mutex | seconds/event | 1.550 | 1.443 | Ginux 1.074x faster |
 
@@ -114,8 +117,11 @@ block-size sweep reached 2.76 GiB/s with one-mebibyte events, showing that the
 original 48.390 MiB/s result measured repeated `clock_gettime` overhead rather
 than raw memory bandwidth. A trusted-copy path, removal of clock calls from
 the diagnostic syscall ring, and a guarded clock fast path raised the matched
-median to 233.210 MiB/s. Ginux remains 2.914 times slower because it has no
-vDSO and still crosses the privilege boundary for each timestamp.
+median to 233.210 MiB/s. A Linux-compatible vDSO and adjacent read-only vvar
+page then removed the remaining privilege crossings and raised the median to
+584.540 MiB/s. Rocky on Ginux is 1.162 times slower in this one-kibibyte test;
+the remaining TCG gap is too small to assign to one kernel mechanism without
+native KVM profiling.
 
 The original threads checkpoint exposed a scheduler defect: every
 worker `sched_yield()` selected a just-preempted busy supervisory thread, so
@@ -140,7 +146,7 @@ in `rocky-linux-run-*-results.log`, `ginux-sysbench-*.log`, and
 
 Before treating these checkpoint results as general performance evidence:
 
-1. Add vDSO/vvar timekeeping to address the remaining memory-test clock gap.
+1. Profile the remaining 1.162x memory-test gap under native x86-64 KVM.
 2. Make `domain exec --interactive` retain the running systemd domain and
    deliver its PTY and output.
 3. Repeat both sides on the same x86-64 Linux host with KVM.

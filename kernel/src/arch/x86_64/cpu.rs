@@ -8983,11 +8983,10 @@ extern "sysv64" fn linux_syscall_handler(
     // SAFETY: the assembly entry stub passes the aligned base of the exact
     // twelve-register frame represented by LinuxSyscallFrame.
     let saved_registers = unsafe { registers.read() };
-    // Linux normally satisfies this hot path through vDSO. Until Ginux maps a
-    // vDSO, avoid the general syscall bookkeeping when no kernel event needs
-    // observing. SYSCALL already establishes ring-3 provenance, the kernel
-    // owns the active page tables, and the result copy still validates the
-    // destination leaf permissions.
+    // Linux normally satisfies supported wall and monotonic clocks through
+    // vDSO. Retain a guarded fast syscall fallback for CPU-time clocks and
+    // callers that deliberately issue SYSCALL. The result copy still validates
+    // the destination leaf permissions.
     if number == LINUX_CLOCK_GETTIME_SYSCALL
         && LINUX_RUNTIME_MODE.load(Ordering::Acquire)
         && ELF_PROBE_ACTIVE.load(Ordering::Acquire)
@@ -22999,6 +22998,7 @@ fn linux_rootfs_execve_source(
         execfn_address,
         new_stack + platform_offset as u64,
         new_stack + random_offset as u64,
+        crate::linux_elf::VDSO_ADDRESS,
     )
     .into_iter()
     .enumerate()
@@ -23573,6 +23573,7 @@ fn linux_execve_at(
         argument_zero_address,
         new_stack + platform_offset as u64,
         new_stack + random_offset as u64,
+        0,
     );
     if interpreted {
         auxiliary[33] = 1;

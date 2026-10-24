@@ -88,6 +88,7 @@ const LINKED_DYNAMIC_DEPENDENCY: &[u8] = include_bytes!(concat!(env!("OUT_DIR"),
 const LINKED_DYNAMIC_AUXILIARY: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/libginux-aux.so"));
 const LINKED_DYNAMIC_INTERPRETER: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/ld-ginux.so"));
+const LINUX_VDSO: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-vdso.so"));
 pub(crate) fn verify_dependency_list_metadata() -> bool {
     const INTERPRETER_PATH: &[u8] = b"/lib64/ld-ginux.so";
     const PRIMARY: &[u8] = b"libginux.so";
@@ -909,7 +910,13 @@ pub(crate) struct ProcessStartup {
     pub(crate) main_entry: u64,
 }
 
-pub(crate) const AUXILIARY_VECTOR_WORDS: usize = 38;
+pub(crate) const AUXILIARY_VECTOR_WORDS: usize = 40;
+pub(crate) const VVAR_ADDRESS: u64 = 0x9e_0000;
+pub(crate) const VDSO_ADDRESS: u64 = VVAR_ADDRESS + PAGE_SIZE as u64;
+
+pub(crate) fn vdso_image() -> &'static [u8] {
+    LINUX_VDSO
+}
 
 pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
     if bytes.len() < ELF_HEADER_SIZE + PROGRAM_HEADER_SIZE * MIN_LOAD_SEGMENT_COUNT
@@ -1710,6 +1717,7 @@ pub(crate) fn auxiliary_vector(
     executable_name: u64,
     platform: u64,
     random: u64,
+    vdso_ehdr: u64,
 ) -> [u64; AUXILIARY_VECTOR_WORDS] {
     [
         3,
@@ -1748,6 +1756,8 @@ pub(crate) fn auxiliary_vector(
         0,
         25,
         random,
+        33,
+        vdso_ehdr,
         0,
         0,
     ]
@@ -3474,7 +3484,7 @@ pub(crate) fn verify_interpreted_plan() -> bool {
     };
     let combined = &combined_plan.process;
     let startup = interpreted_startup(combined);
-    let auxiliary = auxiliary_vector(startup, 0x70_1000, 0x70_2000, 0x70_3000);
+    let auxiliary = auxiliary_vector(startup, 0x70_1000, 0x70_2000, 0x70_3000, 0);
     if combined_plan.dependency.entry != 0x61_0100 {
         crate::serial_write_bytes(b"\r\nginux: dependency entry plan mismatch");
     }

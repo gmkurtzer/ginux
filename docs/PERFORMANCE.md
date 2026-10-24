@@ -93,12 +93,11 @@ one virtual CPU.
   scheduling hint raised the nine-sample median from 181.915 to 311.147
   events/s, versus Rocky Linux at 306.129. Actual thread switches retain the
   full save, validation, TLS, and restore path.
-- The memory workload remains 2.914 times slower at its one-kibibyte block
-  size. Its dominant remaining difference is architectural: Rocky services
-  `clock_gettime` through vDSO/vvar, while Ginux crosses ring 3 to ring 0 for
-  each timestamp. The retained guarded syscall path is already stripped of
-  general tracing and repeated page-table ownership checks. Further material
-  improvement should implement vDSO/vvar rather than weaken syscall safety.
+- The one-kibibyte memory workload originally reached 48.390 MiB/s. A guarded
+  syscall path raised it to 233.210 MiB/s, then a Linux-compatible vDSO and
+  read-only vvar page raised the nine-sample median to 584.540 MiB/s. Rocky on
+  Linux measured 679.510 MiB/s, leaving Rocky on Ginux 1.162 times slower. The
+  remaining TCG gap needs native KVM profiling; syscall safety was not weakened.
 - A cached 299,590,656-byte published Rocky rootfs restored directly in 8,363
   ms. Restoring its 109,755,585 compressed bytes and unpacking them took about
   6,200 ms. The v2 cache can publish a digest-verified rootfs directly, but

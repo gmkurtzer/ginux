@@ -1,4 +1,10 @@
-use std::{env, ffi::OsString, fs, path::PathBuf, process::Command};
+use std::{
+    env,
+    ffi::OsString,
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 const PAGE_SIZE: usize = 4096;
 const LINUX_PROBE_ENTRY_OFFSET: usize = 0x100;
@@ -28,12 +34,16 @@ fn main() {
     println!("cargo:rerun-if-changed=linux-conformance.ld");
     println!("cargo:rerun-if-changed=linux-exec-second.ld");
     println!("cargo:rerun-if-changed=linux-system-init.ld");
+    println!("cargo:rerun-if-changed=linux-vdso.S");
+    println!("cargo:rerun-if-changed=linux-vdso.ld");
+    println!("cargo:rerun-if-changed=linux-vdso.map");
     println!("cargo:rerun-if-env-changed=CLANG");
     println!("cargo:rerun-if-env-changed=LLD");
     println!("cargo:rerun-if-env-changed=GINUX_LINUX_PROBE_EXPORT");
     println!("cargo:rerun-if-env-changed=GINUX_LINUX_DYNAMIC_EXPORT_DIR");
 
     let output = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR is set"));
+    build_linux_vdso(&output);
     let object = output.join("linux-probe.o");
     let clang = env::var_os("CLANG").unwrap_or_else(|| "clang".into());
     let status = Command::new(&clang)
@@ -756,6 +766,65 @@ fn main() {
     if let Some(destination) = env::var_os("GINUX_LINUX_PROBE_EXPORT") {
         fs::copy(&linked, destination).expect("failed to export linked Linux probe");
     }
+}
+
+fn build_linux_vdso(output: &Path) {
+    let object = output.join("linux-vdso.o");
+    let image = output.join("linux-vdso.so");
+    let clang = env::var_os("CLANG").unwrap_or_else(|| "clang".into());
+    let status = Command::new(&clang)
+        .args([
+            "-target",
+            "x86_64-none-elf",
+            "-fPIC",
+            "-c",
+            "linux-vdso.S",
+            "-o",
+        ])
+        .arg(&object)
+        .status()
+        .expect("failed to run clang for Linux vDSO");
+    assert!(status.success(), "clang failed to assemble Linux vDSO");
+
+    let (linker, library_path) = linker();
+    let mut command = Command::new(linker);
+    configure_linker_library_path(&mut command, library_path.as_ref());
+    let status = command
+        .args([
+            "-flavor",
+            "gnu",
+            "-shared",
+            "--hash-style=both",
+            "--soname=linux-vdso.so.1",
+            "--version-script=linux-vdso.map",
+            "-T",
+            "linux-vdso.ld",
+            "-o",
+        ])
+        .arg(&image)
+        .arg(&object)
+        .status()
+        .expect("failed to link Linux vDSO");
+    assert!(status.success(), "LLD failed to link Linux vDSO");
+    let bytes = fs::read(&image).expect("failed to read Linux vDSO");
+    assert!(
+        bytes.len() <= PAGE_SIZE,
+        "Linux vDSO is {} bytes; the fixed mapping permits one page",
+        bytes.len()
+    );
+    assert_eq!(read_u16(&bytes, 16), Some(3), "Linux vDSO is not ET_DYN");
+    assert!(
+        bytes
+            .windows(b"__vdso_clock_gettime".len())
+            .any(|value| value == b"__vdso_clock_gettime"),
+        "Linux vDSO does not export __vdso_clock_gettime"
+    );
+    assert!(
+        bytes
+            .windows(b"LINUX_2.6".len())
+            .any(|value| value == b"LINUX_2.6"),
+        "Linux vDSO does not publish the LINUX_2.6 symbol version"
+    );
 }
 
 fn assert_linux_elf_fixture(

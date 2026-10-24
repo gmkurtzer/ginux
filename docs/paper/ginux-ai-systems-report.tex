@@ -247,9 +247,11 @@ boundaries. Boot timing ran from QEMU launch until systemd reported
 verified Rocky Linux 10 x86-64 executable in both systems: prime calculation
 for CPU throughput, one-kibibyte memory transfers, repeated
 \texttt{sched\_yield()} operations for thread scheduling, and mutex
-contention. Workload timing excluded boot and image preparation. Rocky used
-its official 10.2 GenericCloud image; Ginux launched the Rocky 10 UBI init
-image as a domain. The protocol and raw-result requirements are recorded in
+contention. Workload timing excluded boot and image preparation. Rocky on
+Linux used the official Rocky Linux 10.2 GenericCloud image and its stock
+\texttt{6.12.0-211.16.1.el10\_2.0.1.x86\_64} kernel; Rocky on Ginux used the
+Rocky Linux 10 UBI init image as a domain. The protocol and raw-result
+requirements are recorded in
 \repolink{docs/BENCHMARKING.md}{the comparative benchmark protocol}.
 
 The first results were funny only because they were so bad. CPU and mutex were
@@ -272,9 +274,11 @@ context even when no other thread could run. The memory test was dominated by
 timestamp overhead: its one-kibibyte operations repeatedly crossed into the
 kernel because Ginux had no vDSO. Scheduler selection, no-op yields, diagnostic
 tracing, page-table validation, and the guarded clock path were tightened one
-at a time, with regressions rejected by the existing verification suite. The
-thread median rose from 0.078 to 311.147 events/s, and memory throughput rose
-from 48.390 to 233.210~MiB/s. An earlier profiling loop had also reduced
+at a time, with regressions rejected by the existing verification suite. A
+Linux-compatible vDSO and read-only vvar page then carried fast timekeeping
+through the initial process and subsequent \texttt{execve()}. The thread
+median rose from 0.078 to 311.147 events/s, and memory throughput rose from
+48.390 to 584.540~MiB/s. An earlier profiling loop had also reduced
 Ginux's internal Linux-init-to-console path from 15.344~s to a 4.08--4.45~s
 range by removing a polling stall, quadratic frame scans, and eager copying of
 immutable root-filesystem pages. The optimization history is recorded in the
@@ -289,11 +293,11 @@ Table~\ref{tab:benchmark-checkpoint} reports the final checkpoint medians.
 \small
 \begin{tabular}{@{}lllrrl@{}}
 \toprule
-Test & Metric & Samples & Rocky Linux & Ginux & Ginux vs. Rocky \\
+Test & Metric & Samples & \shortstack{Rocky on\\Linux} & \shortstack{Rocky on\\Ginux} & Relative result \\
 \midrule
 Boot & s to target & 3 & 42.579 & 12.860 & 3.31$\times$ faster \\
 CPU & events/s & 9 & 232.360 & 262.190 & 1.13$\times$ faster \\
-Memory & MiB/s & 9 & 679.510 & 233.210 & 2.91$\times$ slower \\
+Memory & MiB/s & 9 & 679.510 & 584.540 & 1.16$\times$ slower \\
 Threads & events/s & 9 & 306.129 & 311.147 & 1.02$\times$ faster \\
 Mutex & s/event & 9 & 1.550 & 1.443 & 1.07$\times$ faster \\
 \bottomrule
@@ -308,11 +312,12 @@ The results say three different things. First, the CPU and single-thread yield
 tests reached approximate parity under this translated environment, and the
 mutex result was similar. That does not make Ginux faster than Linux; it shows
 that the worst gaps were implementation defects that a benchmark-driven agent
-loop could find and substantially close. Second, memory remains 2.91 times
-slower because the benchmark is partly a clock-interface test. Linux answers
-\texttt{clock\_gettime()} through vDSO/vvar without entering the kernel, while
-Ginux still crosses from ring~3 for every timestamp. Closing that gap requires
-the missing Linux mechanism, not another unsafe shortcut. Third, the boot
+loop could find and substantially close. Second, adding Linux-compatible
+vDSO/vvar timekeeping raised memory throughput from 48.390 to 584.540~MiB/s,
+leaving Rocky on Ginux 1.16 times slower than Rocky on Linux for the
+one-kibibyte test. This confirms that most of the original gap was timestamp
+overhead rather than raw copying; the remaining difference is small enough
+that these TCG results do not isolate one cause. Third, the boot
 number measures two different startup paths. Ginux restores a cached
 filesystem and launches a domain without a second kernel or initramfs; Rocky
 follows a general-purpose UEFI, kernel, initramfs, device-discovery, and cloud

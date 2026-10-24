@@ -150,7 +150,7 @@ static INTERACTIVE_CONTROLLER_IMAGE: AtomicUsize = AtomicUsize::new(0);
 static INTERACTIVE_CONTROLLER_IMAGE_SIZE: AtomicUsize = AtomicUsize::new(0);
 static INTERACTIVE_CONTROLLER_DOMAIN: AtomicU64 = AtomicU64::new(0);
 const LINUX_RUNTIME_FRAME_CAPACITY: usize = 440;
-const LINUX_OWNED_FRAME_COUNT: usize = 8;
+const LINUX_OWNED_FRAME_COUNT: usize = 10;
 static LINUX_RUNTIME_ACTIVE: [AtomicBool; crate::control_abi::DOMAIN_LIMIT] =
     [const { AtomicBool::new(false) }; crate::control_abi::DOMAIN_LIMIT];
 static mut LINUX_RUNTIME_OWNED_FRAMES: [[memory::FrameLease; LINUX_OWNED_FRAME_COUNT];
@@ -368,6 +368,8 @@ pub(crate) fn run_linux_init(init: &[u8]) -> LinuxProcessOutcome {
 
         let heap_frame = frames[HIERARCHY_FRAMES];
         let stack_frame = frames[HIERARCHY_FRAMES + 1];
+        let vvar_frame = frames[HIERARCHY_FRAMES + 2];
+        let vdso_frame = frames[HIERARCHY_FRAMES + 3];
         if !map_linux_leaf_in_root(
             root.address(),
             HEAP_ADDRESS,
@@ -406,6 +408,58 @@ pub(crate) fn run_linux_init(init: &[u8]) -> LinuxProcessOutcome {
             page += 1;
         }
         stage = 4;
+
+        let vdso = crate::linux_elf::vdso_image();
+        let vvar =
+            unsafe { &mut *(mapped_frame::<u8>(vvar_frame.address())? as *mut [u8; PAGE_SIZE]) };
+        let vdso_page =
+            unsafe { &mut *(mapped_frame::<u8>(vdso_frame.address())? as *mut [u8; PAGE_SIZE]) };
+        vvar.fill(0);
+        vdso_page.fill(0);
+        vdso_page.get_mut(..vdso.len())?.copy_from_slice(vdso);
+        let frequency = crate::arch::x86_64::timer::monotonic_frequency()?;
+        let monotonic_epoch = crate::arch::x86_64::timer::timestamp_counter();
+        let (realtime_seconds, realtime_epoch) = crate::linux_realtime_epoch()?;
+        vvar[8..16].copy_from_slice(&frequency.to_ne_bytes());
+        vvar[16..24].copy_from_slice(&monotonic_epoch.to_ne_bytes());
+        vvar[24..32].copy_from_slice(&realtime_seconds.to_ne_bytes());
+        vvar[32..40].copy_from_slice(&realtime_epoch.to_ne_bytes());
+        if !map_linux_leaf_in_root(
+            root.address(),
+            crate::linux_elf::VVAR_ADDRESS,
+            vvar_frame.address(),
+            false,
+            false,
+        ) || !map_linux_leaf_in_root(
+            root.address(),
+            crate::linux_elf::VDSO_ADDRESS,
+            vdso_frame.address(),
+            false,
+            true,
+        ) {
+            return None;
+        }
+        for mapping in [
+            cpu::LinuxActiveImageMapping {
+                address: crate::linux_elf::VVAR_ADDRESS as usize,
+                frame: vvar_frame,
+                writable: false,
+                executable: false,
+                shared: false,
+                dontfork: false,
+            },
+            cpu::LinuxActiveImageMapping {
+                address: crate::linux_elf::VDSO_ADDRESS as usize,
+                frame: vdso_frame,
+                writable: false,
+                executable: true,
+                shared: false,
+                dontfork: false,
+            },
+        ] {
+            *initial_image_mappings.get_mut(initial_image_count)? = mapping;
+            initial_image_count += 1;
+        }
 
         let stack =
             unsafe { &mut *(mapped_frame::<u8>(stack_frame.address())? as *mut [u8; PAGE_SIZE]) };
@@ -462,6 +516,7 @@ pub(crate) fn run_linux_init(init: &[u8]) -> LinuxProcessOutcome {
             argument_address,
             platform_address,
             random_address,
+            crate::linux_elf::VDSO_ADDRESS,
         )
         .into_iter()
         .enumerate()
@@ -998,6 +1053,7 @@ pub(crate) fn verify_linux_elf_mapping(
                 argument_address,
                 platform_address,
                 random_address,
+                0,
             )
             .into_iter()
             .enumerate()
@@ -2090,10 +2146,15 @@ pub(crate) fn verify_interpreted_elf_mapping(
             {
                 stack_words.add(index).write(value);
             }
-            for (index, value) in
-                crate::linux_elf::auxiliary_vector(startup, argument_address, platform_address, 0)
-                    .into_iter()
-                    .enumerate()
+            for (index, value) in crate::linux_elf::auxiliary_vector(
+                startup,
+                argument_address,
+                platform_address,
+                0,
+                0,
+            )
+            .into_iter()
+            .enumerate()
             {
                 stack_words.add(5 + index).write(value);
             }
