@@ -298,6 +298,7 @@ immutable root-filesystem pages. The optimization history is recorded in the
 
 Table~\ref{tab:benchmark-checkpoint} reports the final checkpoint medians.
 
+\medskip
 \begin{center}
 \refstepcounter{table}
 \label{tab:benchmark-checkpoint}
@@ -314,11 +315,12 @@ Threads & events/s & 9 & 306.129 & 309.732 & 1.01$\times$ faster \\
 Mutex & s/event & 9 & 1.550 & 1.423 & 1.09$\times$ faster \\
 \bottomrule
 \end{tabular}
-\par\smallskip
+\par\medskip
 Table~\thetable: Matched boot and userspace benchmark medians under x86-64
 QEMU TCG on an Apple Silicon host. Boot and mutex favor lower values; the
 other workloads favor higher values.
 \end{center}
+\medskip
 
 The results tell three different stories. First, the CPU, single-thread yield,
 and mutex tests reached approximate parity in this translated environment.
@@ -399,8 +401,9 @@ They use implemented controller commands but omit lengthy registry, systemd,
 and timing output. They are illustrative pseudo-screenshots rather than raw
 benchmark logs.
 
+\medskip
 \begin{samepage}
-\noindent\textbf{Example 1: boot a conventional Linux userspace.}\par\nopagebreak
+\noindent\textbf{Example 1: boot a conventional Linux userspace.}\par\nopagebreak\smallskip
 \begin{quote}\small\hrule\vspace{4pt}
 \begin{verbatim}
 ginux> domain new rocky
@@ -418,13 +421,15 @@ rocky login:
 \vspace{2pt}\hrule
 \end{quote}
 \end{samepage}
+\medskip
 
 This single-domain case selects a Linux userspace image and init process while
 Ginux remains the kernel. The controller can also manage several domains
 without treating any one workload as the host operating system.
 
+\medskip
 \begin{samepage}
-\noindent\textbf{Example 2: reuse content across several domains.}\par\nopagebreak
+\noindent\textbf{Example 2: reuse content across several domains.}\par\nopagebreak\smallskip
 \begin{quote}\small\hrule\vspace{4pt}
 \begin{verbatim}
 ginux> domain new alpine-a
@@ -449,6 +454,7 @@ ginux: local configuration committed
 \vspace{2pt}\hrule
 \end{quote}
 \end{samepage}
+\medskip
 
 After reboot, the controller recovers the domain definitions and cached OCI
 layers from the host-owned volume. Writable domain overlays remain boot-local
@@ -490,11 +496,12 @@ record} kept both plan and rationale outside the chat transcript. These files
 provided durable state for a long-running agent session and made architectural
 drift visible.
 
+\begin{samepage}
 \subsection{Staged construction}
 
 Repository history and the project plans show six broad, overlapping stages:
 
-\begin{enumerate}[leftmargin=*,label=\arabic*.]
+\begin{enumerate}[leftmargin=*,label=\arabic*.,topsep=0.5em,itemsep=0.4em,parsep=0pt]
 \item \textbf{Boot and architecture.} Define the trust and domain model, build
   a unified x86-64 EFI image, exit UEFI boot services, establish a kernel stack,
   and inventory memory and ACPI state.
@@ -517,6 +524,7 @@ Repository history and the project plans show six broad, overlapping stages:
   use Rocky Linux systemd, service startup, and an interactive console as the
   compound integration gate.
 \end{enumerate}
+\end{samepage}
 
 The stages built on one another: firmware entry preceded hardware
 control; a bounded ELF executable preceded a general Linux process; synthetic
