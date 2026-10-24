@@ -351,21 +351,40 @@ There is no GPU ecosystem, broad hardware support, stable third-party driver
 ABI, independent security audit, native performance baseline, or general Linux
 application guarantee.
 
-The security hypothesis is that explicit capabilities, per-domain address
-spaces, W\textasciicircum X mappings, immutable executable pages,
-generation-safe revocation, and IOMMU-confined DMA reduce ambient authority
-and contain component failure. The prototype exercises several positive and
-negative paths, including stale-generation rejection and driver teardown, but
-it has not received an independent audit, side-channel analysis, whole-kernel
-formal verification, or adversarial production testing. These mechanisms are
-reasons to investigate the design, not evidence that Ginux is more secure than
-Linux.
-
 Those omissions define the research boundary. The question was whether AI
 could construct a kernel and carry a real Linux userspace across it, not
 whether eleven days could replace decades of Linux engineering. Useful ideas,
 including domains, may ultimately belong in established systems rather than a
 Ginux deployment.
+
+\subsection{Security implications}
+
+Ginux and Linux expose compatible userspace interfaces, but they are unrelated
+kernel implementations. Linux kernel vulnerabilities and their exploits will
+generally not apply to Ginux; conversely, vulnerabilities discovered in Ginux
+will generally not apply to Linux. Exceptions may exist where a flaw arises
+from shared hardware behavior, protocol semantics, executable formats, or an
+ABI-level design rather than a kernel-specific implementation.
+
+Userspace vulnerabilities are largely unaffected: the same vulnerable
+application running inside a Ginux domain may still be exploited in the same
+way. What changes is the boundary reached after exploitation. Domain policy
+could deliberately restrict selected Linux or POSIX-compatible behavior. For
+example, a domain could enforce an immutable privilege ceiling under which no
+process can acquire more authority than the domain received at creation,
+regardless of set-user-ID executables, capabilities, namespaces, or a
+compromised privileged service.
+
+The broader security hypothesis is that explicit capabilities, per-domain
+address spaces, W\textasciicircum X mappings, immutable executable pages,
+generation-safe revocation, and IOMMU-confined DMA reduce ambient authority
+and contain component failure. The prototype exercises several positive and
+negative paths, including stale-generation rejection and driver teardown, but
+it has not received an independent audit, side-channel analysis, whole-kernel
+formal verification, or adversarial production testing. Whether an independent
+implementation and stronger domain constraints reduce practical exploitation
+more than Ginux's new and comparatively immature code introduces risk remains
+an important subject for follow-up research.
 
 \subsection{Illustrative operator workflows}
 
