@@ -300,13 +300,53 @@ and enabled units remain confounders, as do the qcow2-versus-OCI/raw storage
 paths and translated execution under TCG.
 
 The result therefore supports a narrow claim: the prototype's full boot plus
-domain-launch path has low startup overhead in this test. A stronger claim
-requires the same userspace profile on both kernels, more repetitions,
-x86-64 KVM measurements, equivalent storage paths, and separate CPU, memory,
-IPC, network, and storage benchmarks. The existing sysbench attempt is not
-reported as a comparison:
-Linux completed its baseline, but Ginux produced no accepted samples after
-the domain-exec PTY/lifecycle gate failed.
+domain-launch path has low startup overhead in this test. A stronger boot
+claim requires the same userspace profile on both kernels, more repetitions,
+x86-64 KVM measurements, and equivalent storage paths.
+
+The same experiment also ran four sysbench workloads. Both guests used the
+same Rocky Linux 10 x86-64 sysbench executable, whose SHA-256 was:
+\begin{center}
+\texttt{7cf6b71521436bd32a8ab197851035ff}\\
+\texttt{1632bee383fec5a35468d61969e7c18d}
+\end{center}
+The command arguments, one vCPU, 2~GiB of RAM, QEMU q35, and TCG also matched.
+Table~\ref{tab:sysbench-checkpoint} reports the median of nine successful
+observations per system.
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{Matched sysbench execution under x86-64 QEMU TCG. Higher is better
+except mutex seconds per event, where lower is better.}
+\label{tab:sysbench-checkpoint}
+\begin{tabular}{@{}llrrl@{}}
+\toprule
+Workload & Metric & Rocky Linux & Ginux & Ginux result \\
+\midrule
+CPU & events/s & 232.360 & 267.410 & 1.15$\times$ Linux \\
+Memory & MiB/s & 679.510 & 48.390 & 14.04$\times$ slower \\
+Threads & events/s & 306.129 & 0.078 & 3911$\times$ slower \\
+Mutex & s/event & 1.550 & 1.445 & 1.07$\times$ Linux \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+These results are more informative than the boot number alone. The CPU test
+spends most of its time in userspace and ran 15.1\% faster under Ginux in this
+sample. That difference may reflect TCG variation, background Linux work, or
+different kernel entry costs; it is not sufficient evidence of a generally
+faster CPU path. The memory test was 14 times slower, consistent with the
+prototype's unoptimized mapping, fault, and memory-copy paths. The threads
+test exposed a much larger defect: a Ginux observation completed one event in
+roughly 12.8 seconds, while Linux completed hundreds of events in about three
+seconds. That result points to immature scheduling, futex, or timing behavior,
+not ordinary benchmark noise. The single-thread mutex test completed only one
+event on both systems and is correspondingly weak evidence despite its similar
+median. Network, IPC, storage, multicore, and security performance remain
+unmeasured. The benchmark therefore demonstrates that Ginux can execute the
+same nontrivial Linux binary, while also showing why functional compatibility
+cannot be treated as performance parity.
 
 The security hypothesis is that explicit capabilities, per-domain address
 spaces, W\textasciicircum X mappings, immutable executable pages,

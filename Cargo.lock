@@ -445,6 +445,10 @@ name = "ginux-manifest-tool"
 version = "0.1.0"
 dependencies = [
  "ed25519-dalek",
+ "ginux-oci",
+ "ginux-oci-cache",
+ "ginux-volume-format",
+ "ginux-volume-service",
  "sha2 0.11.0",
 ]
 

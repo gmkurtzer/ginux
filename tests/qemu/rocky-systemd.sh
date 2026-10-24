@@ -8,6 +8,7 @@ qemu_pid_file=$(mktemp "${TMPDIR:-/tmp}/ginux-rocky-systemd-pid.XXXXXX")
 success_file=$(mktemp "${TMPDIR:-/tmp}/ginux-rocky-systemd-success.XXXXXX")
 qemu_pid=""
 rocky_image="${GINUX_ROCKY_IMAGE:-rockylinux/rockylinux:10-ubi-init}"
+rocky_init="${GINUX_ROCKY_INIT:-/sbin/init}"
 start_mode="${GINUX_ROCKY_START_MODE:-attached}"
 metrics_file="${GINUX_ROCKY_METRICS_FILE:-}"
 
@@ -157,6 +158,9 @@ wait_for_login() {
 
 mkdir -p "$(dirname "$volume_image")"
 : >"$output_file"
+if [[ -n "${GINUX_BENCHMARK_SYSBENCH_SHA256:-}" ]]; then
+    printf 'GINUX_BENCH_SYSBENCH_SHA256 %s\n' "$GINUX_BENCHMARK_SYSBENCH_SHA256" >>"$output_file"
+fi
 if [[ ! -f "$volume_image" ]]; then
     truncate -s "${GINUX_ROCKY_VOLUME_SIZE:-64G}" "$volume_image"
 fi
@@ -166,11 +170,17 @@ qemu_started_at_ms=$(now_ms)
     domain_started_at=$(date +%s)
     printf '%s\n' \
         'domain new rocky' \
-        "domain set rocky image=$rocky_image init=/sbin/init"
+        "domain set rocky image=$rocky_image init=$rocky_init"
     if [[ "$start_mode" == detached || "$start_mode" == detached-return || "$start_mode" == responsive || "$start_mode" == stop-restart ]]; then
         printf '%s\n' 'domain start rocky'
     else
         printf '%s\n' 'domain start rocky --attach'
+    fi
+    if [[ "${GINUX_BENCHMARK_SYSBENCH:-0}" == 1 ]]; then
+        # The attached start blocks the controller while the domain owns the
+        # console. Queue the first shell command now so it is already waiting
+        # when Bash performs its initial read.
+        printf '%s\n' 'echo GINUX_BENCH_IMAGE_READY >&2'
     fi
     if [[ "$start_mode" == detached-return ]]; then
         wait_for 'rocky: starting (detached)' 10
@@ -222,6 +232,50 @@ qemu_started_at_ms=$(now_ms)
     if [[ "$start_mode" != detached && "$start_mode" != stop-restart ]]; then
         wait_for 'ginux: OCI image ready' 240
         wait_for 'ginux: entering configured Linux init' 30
+    fi
+    if [[ "${GINUX_BENCHMARK_SYSBENCH:-0}" == 1 ]]; then
+        wait_for_line 'GINUX_BENCH_IMAGE_READY' 120
+        for workload in ${GINUX_BENCHMARK_WORKLOAD:-cpu memory threads mutex}; do
+            for ((benchmark_run = 1; benchmark_run <= ${GINUX_BENCHMARK_WORKLOAD_RUNS:-3}; benchmark_run++)); do
+                case "$workload" in
+                    cpu)
+                        command="/usr/bin/sysbench cpu --threads=1 --time=${GINUX_BENCHMARK_WORKLOAD_SECONDS:-3} --cpu-max-prime=20000 run"
+                        ;;
+                    memory)
+                        command="/usr/bin/sysbench memory --threads=1 --time=${GINUX_BENCHMARK_WORKLOAD_SECONDS:-3} --memory-total-size=100G run"
+                        ;;
+                    threads)
+                        command="/usr/bin/sysbench threads --threads=1 --time=${GINUX_BENCHMARK_WORKLOAD_SECONDS:-3} run"
+                        ;;
+                    mutex)
+                        command="/usr/bin/sysbench mutex --threads=1 --time=${GINUX_BENCHMARK_WORKLOAD_SECONDS:-3} run"
+                        ;;
+                esac
+                marker="GINUX_BENCH_WORKLOAD_END_${workload}_${benchmark_run}=0"
+                shell_prompt_count=$(grep -Foc 'sh-5.2#' "$output_file" || true)
+                printf '%s\n' "echo GINUX_BENCH_WORKLOAD_BEGIN_${workload}_${benchmark_run} >&2; $command >&2"
+                wait_for_count 'sh-5.2#' "$((shell_prompt_count + 1))" 600
+                printf '%s\n' "$marker" >>"$output_file"
+                if [[ "${GINUX_BENCHMARK_SINGLE_RUN:-0}" == 1 ]]; then
+                    printf '%s\n' ok >"$success_file"
+                    stop_qemu
+                    exit 0
+                fi
+                controller_prompt_count=$(grep -Foc 'ginux>' "$output_file" || true)
+                printf '%s\n' exit
+                wait_for_count 'ginux>' "$((controller_prompt_count + 1))" 30
+                if [[ "$workload" != mutex || "$benchmark_run" -lt ${GINUX_BENCHMARK_WORKLOAD_RUNS:-3} ]]; then
+                    printf '%s\n' 'domain start rocky --attach' 'echo GINUX_BENCH_IMAGE_READY >&2'
+                    wait_for_line 'GINUX_BENCH_IMAGE_READY' 120
+                fi
+            done
+        done
+        wait_for 'ginux> ' 30
+        printf '%s\n' shutdown
+        wait_for 'GINUX_KERNEL_OK' 30
+        printf '%s\n' ok >"$success_file"
+        stop_qemu
+        exit 0
     fi
     init_started_at=$(date +%s)
     if [[ "$start_mode" == stop-restart ]]; then
@@ -289,48 +343,6 @@ qemu_started_at_ms=$(now_ms)
     if grep -Fq 'ginux: Linux child exited with status' "$output_file"; then
         fail 'kernel leaked an anonymous userspace child exit'
     fi
-    if [[ "${GINUX_BENCHMARK_SYSBENCH:-0}" == 1 ]]; then
-        printf '\035'
-        wait_for "[detached from domain; use 'domain attach NAME' to return]" 10
-        wait_for_count 'ginux> ' 2 10
-        printf '%s\n' 'domain exec --interactive rocky /bin/bash -i'
-        wait_for '# ' 120
-        printf '%s\n' '/usr/bin/dnf -y install epel-release; echo GINUX_BENCH_DNF_EPEL=$?'
-        wait_for_line 'GINUX_BENCH_DNF_EPEL=0' 2400
-        printf '%s\n' '/usr/bin/dnf -y install sysbench; echo GINUX_BENCH_DNF_SYSBENCH=$?'
-        wait_for_line 'GINUX_BENCH_DNF_SYSBENCH=0' 2400
-        printf '%s\n' \
-            "printf 'GINUX_BENCH_SYSBENCH_SHA256 '; /usr/bin/sha256sum /usr/bin/sysbench | /usr/bin/awk '{print \$1}'"
-        wait_for 'GINUX_BENCH_SYSBENCH_SHA256 ' 30
-        for workload in cpu memory threads mutex; do
-            for ((benchmark_run = 1; benchmark_run <= ${GINUX_BENCHMARK_WORKLOAD_RUNS:-3}; benchmark_run++)); do
-                case "$workload" in
-                    cpu)
-                        command="/usr/bin/sysbench cpu --threads=1 --time=${GINUX_BENCHMARK_WORKLOAD_SECONDS:-3} --cpu-max-prime=20000 run"
-                        ;;
-                    memory)
-                        command="/usr/bin/sysbench memory --threads=1 --time=${GINUX_BENCHMARK_WORKLOAD_SECONDS:-3} --memory-total-size=100G run"
-                        ;;
-                    threads)
-                        command="/usr/bin/sysbench threads --threads=1 --time=${GINUX_BENCHMARK_WORKLOAD_SECONDS:-3} run"
-                        ;;
-                    mutex)
-                        command="/usr/bin/sysbench mutex --threads=1 --time=${GINUX_BENCHMARK_WORKLOAD_SECONDS:-3} run"
-                        ;;
-                esac
-                marker="GINUX_BENCH_WORKLOAD_END_${workload}_${benchmark_run}=0"
-                printf '%s\n' "echo GINUX_BENCH_WORKLOAD_BEGIN_${workload}_${benchmark_run}; $command; echo $marker"
-                wait_for_line "$marker" 600
-            done
-        done
-        printf '%s\n' exit
-        wait_for_count 'ginux> ' 3 30
-        printf '%s\n' shutdown
-        wait_for 'GINUX_KERNEL_OK' 30
-        printf '%s\n' ok >"$success_file"
-        stop_qemu
-        exit 0
-    fi
     if [[ "${GINUX_TEST_DOMAIN_EXEC:-0}" == 1 ]]; then
         printf '\035'
         wait_for "[detached from domain; use 'domain attach NAME' to return]" 10
@@ -377,7 +389,7 @@ qemu_started_at_ms=$(now_ms)
     printf '%s\n' ok >"$success_file"
     stop_qemu
 } | GINUX_VOLUME_IMAGE="$volume_image" GINUX_QEMU_PID_FILE="$qemu_pid_file" \
-    "$repo_root/tools/qemu/run.sh" >"$output_file" 2>&1 &
+    "$repo_root/tools/qemu/run.sh" >>"$output_file" 2>&1 &
 qemu_pid=$!
 
 for ((attempt = 0; attempt < ${GINUX_ROCKY_RUNTIME_TIMEOUT:-420}; attempt++)); do
@@ -400,6 +412,13 @@ if kill -0 "$qemu_pid" 2>/dev/null; then
 fi
 wait "$qemu_pid" || true
 qemu_pid=""
+
+if [[ "${GINUX_BENCHMARK_SINGLE_RUN:-0}" == 1 && -s "$success_file" ]] \
+    && grep -Eq 'GINUX_BENCH_WORKLOAD_END_[a-z]+_[0-9]+=0' "$output_file" \
+    && ! grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC|^ginux: Linux user fault' "$output_file"; then
+    echo 'Ginux sysbench sample completed.'
+    exit 0
+fi
 
 if [[ "$start_mode" == detached-return && -s "$success_file" ]] \
     && grep -Fq 'rocky: starting (detached)' "$output_file" \

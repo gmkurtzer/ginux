@@ -39,6 +39,7 @@ separate from the login and boot console.
 
 ```sh
 make benchmark-prepare-linux
+make benchmark-prepare-ginux
 make benchmark-boot-comparison
 make benchmark-ginux-sysbench
 make benchmark-compare
@@ -90,28 +91,46 @@ Raw boot results are written to `rocky-linux-summary.tsv`,
 `ginux-boot-summary.tsv`, and `boot-comparison.tsv` under the benchmark build
 directory.
 
-All 36 Linux workload executions completed successfully. Their sysbench binary
-digest was
-`7cf6b71521436bd32a8ab197851035ff1632bee383fec5a35468d61969e7c18d`.
-The raw logs preserve the complete sysbench output.
+## October 23, 2026 matched sysbench checkpoint
 
-A comparative sysbench result is **not yet available**:
-the current domain-exec path does not deliver an interactive PTY after systemd
-has reached multi-user, and repeated non-interactive exec caused the running
-domain to become unavailable. The comparison gate therefore fails rather than
-publishing unmatched or fabricated numbers. This is now a concrete Linux ABI
-and domain-lifecycle test requirement.
+Both guests ran the same Rocky Linux 10 x86-64 sysbench executable, verified
+by SHA-256
+`7cf6b71521436bd32a8ab197851035ff1632bee383fec5a35468d61969e7c18d`.
+Commands, QEMU machine, CPU count, memory size, CPU model, accelerator, and
+three-second workload duration matched. The table reports nine observations
+per workload and system.
+
+| Workload | Metric | Linux median | Ginux median | Relative result |
+|---|---|---:|---:|---:|
+| CPU | events/s | 232.360 | 267.410 | Ginux 1.151x Linux |
+| Memory | MiB/s | 679.510 | 48.390 | Ginux 14.042x slower |
+| Threads | events/s | 306.129 | 0.078 | Ginux 3911x slower |
+| Mutex | seconds/event | 1.550 | 1.445 | Ginux 1.073x Linux |
+
+The CPU workload is almost entirely userspace computation; its 15.1% Ginux
+lead is preliminary and may include TCG variation or different background
+work. The memory result exposes a serious unoptimized mapping, fault, or copy
+path. The threads test is a functional performance failure: each Ginux sample
+completed one event in roughly 12.8 seconds, rather than Linux's hundreds of
+events in roughly three seconds. The single-thread mutex workload completed
+one event on both kernels and carries little weight.
+
+Ginux samples use a fresh QEMU boot for isolation because the current shell
+child-lifecycle path does not reliably support several sequential sysbench
+children. Workload timing excludes those boots. Complete output is preserved
+in `rocky-linux-run-*-results.log`, `ginux-sysbench-*.log`, and
+`sysbench-comparison.tsv`.
 
 ## Publication requirements
 
-Before citing comparative workload results:
+Before treating these checkpoint results as general performance evidence:
 
-1. Make `domain exec --interactive` retain the running systemd domain and
+1. Fix the memory and thread-path regressions identified above.
+2. Make `domain exec --interactive` retain the running systemd domain and
    deliver its PTY and output.
-2. Complete every Ginux workload repetition without a domain failure.
-3. Pass `make benchmark-compare`, including exact sysbench binary identity.
-4. Repeat both sides on the same x86-64 Linux host with KVM.
-5. Report medians and dispersion; do not mix TCG and KVM results.
+3. Repeat both sides on the same x86-64 Linux host with KVM.
+4. Add dispersion and confidence intervals; do not mix TCG and KVM results.
+5. Add equivalent IPC, network, and storage tests.
 
 File-I/O tests are intentionally deferred until equivalent storage paths can be
 defined. Multicore tests are deferred until Ginux has SMP support.

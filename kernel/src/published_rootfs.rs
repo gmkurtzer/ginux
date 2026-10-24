@@ -938,12 +938,11 @@ fn process_plan_in<'a>(
     if interpreter.kind != EntryKind::File || interpreter.mode & 0o111 == 0 {
         return None;
     }
-    crate::linux_elf::plan_relocatable_process(
+    crate::linux_elf::plan_relocatable_process_auto(
         executable.data,
         0x40_0000,
         interpreter_path,
         interpreter.data,
-        0x60_0000,
     )
     .map(crate::linux_elf::RelocatableExecutablePlan::Interpreted)
 }

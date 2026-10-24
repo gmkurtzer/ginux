@@ -7,8 +7,6 @@ const MAX_LOAD_SEGMENT_COUNT: usize = 3;
 const MAX_PROGRAM_HEADER_COUNT: usize = 9;
 const MAX_RELOCATABLE_LOAD_SEGMENT_COUNT: usize = 4;
 const MAX_RELOCATABLE_PROGRAM_HEADER_COUNT: usize = 16;
-const MAX_RELOCATABLE_SEGMENT_PAGES: usize = 256;
-const MAX_RELOCATABLE_IMAGE_PAGES: usize = 512;
 const PT_LOAD: u32 = 1;
 const PT_DYNAMIC: u32 = 2;
 const PT_INTERP: u32 = 3;
@@ -1125,6 +1123,45 @@ pub(crate) fn plan_relocatable_process<'main, 'interpreter>(
     })
 }
 
+pub(crate) fn plan_relocatable_process_auto<'main, 'interpreter>(
+    main_bytes: &'main [u8],
+    main_base: u64,
+    interpreter_path: &[u8],
+    interpreter_bytes: &'interpreter [u8],
+) -> Option<RelocatableProcessPlan<'main, 'interpreter>> {
+    const LOAD_ALIGNMENT: u64 = PAGE_SIZE as u64;
+    let main_image = parse_relocatable(main_bytes)?;
+    let interpreter_image = parse_relocatable(interpreter_bytes)?;
+    if main_image.interpreter != Some(interpreter_path) || interpreter_image.interpreter.is_some() {
+        return None;
+    }
+    let main = plan_relocatable(&main_image, main_base)?;
+    let main_end = main.segments[..main.segment_count]
+        .iter()
+        .flatten()
+        .try_fold(0_u64, |end, segment| {
+            segment
+                .virtual_page
+                .checked_add(
+                    u64::try_from(segment.page_count)
+                        .ok()?
+                        .checked_mul(PAGE_SIZE as u64)?,
+                )
+                .map(|segment_end| end.max(segment_end))
+        })?;
+    let interpreter_base = main_end
+        .checked_add(LOAD_ALIGNMENT - 1)?
+        .checked_div(LOAD_ALIGNMENT)?
+        .checked_mul(LOAD_ALIGNMENT)?;
+    plan_relocatable_process(
+        main_bytes,
+        main_base,
+        interpreter_path,
+        interpreter_bytes,
+        interpreter_base,
+    )
+}
+
 pub(crate) fn plan_relocatable_static(
     bytes: &[u8],
     load_bias: u64,
@@ -1318,7 +1355,6 @@ fn plan_relocatable<'a>(
         return None;
     }
     let mut segments = [None; MAX_RELOCATABLE_LOAD_SEGMENT_COUNT];
-    let mut total_pages = 0_usize;
     for (index, segment) in image.segments[..image.segment_count]
         .iter()
         .flatten()
@@ -1326,11 +1362,7 @@ fn plan_relocatable<'a>(
     {
         let relocated = relocate_segment(*segment, load_bias)?;
         let planned = plan_relocatable_segment(relocated)?;
-        total_pages = total_pages.checked_add(planned.page_count)?;
         segments[index] = Some(planned);
-    }
-    if total_pages > MAX_RELOCATABLE_IMAGE_PAGES {
-        return None;
     }
     let plan = RelocatableLoadPlan {
         entry: image.entry.checked_add(load_bias)?,
@@ -1351,18 +1383,16 @@ fn plan_relocatable_segment(segment: Segment<'_>) -> Option<PlannedSegment<'_>> 
         .checked_add(memory_size)?
         .checked_add(PAGE_SIZE - 1)?
         / PAGE_SIZE;
-    ((1..=MAX_RELOCATABLE_SEGMENT_PAGES).contains(&page_count)
-        && segment.bytes.len() <= memory_size)
-        .then_some(PlannedSegment {
-            bytes: segment.bytes,
-            file_page: segment.file_offset & !(PAGE_SIZE as u64 - 1),
-            virtual_address: segment.virtual_address,
-            virtual_page,
-            memory_size,
-            page_count,
-            writable: segment.flags & PF_WRITE != 0,
-            executable: segment.flags & PF_EXECUTE != 0,
-        })
+    (page_count != 0 && segment.bytes.len() <= memory_size).then_some(PlannedSegment {
+        bytes: segment.bytes,
+        file_page: segment.file_offset & !(PAGE_SIZE as u64 - 1),
+        virtual_address: segment.virtual_address,
+        virtual_page,
+        memory_size,
+        page_count,
+        writable: segment.flags & PF_WRITE != 0,
+        executable: segment.flags & PF_EXECUTE != 0,
+    })
 }
 
 fn relocatable_plan_valid(plan: &RelocatableLoadPlan<'_>) -> bool {

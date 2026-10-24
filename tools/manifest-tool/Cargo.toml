@@ -4,7 +4,12 @@ version = "0.1.0"
 edition = "2021"
 license.workspace = true
 publish = false
+default-run = "ginux-manifest-tool"
 
 [dependencies]
 ed25519-dalek = "=3.0.0"
+ginux-oci-cache = { path = "../../crates/oci-cache" }
+ginux-oci = { path = "../../crates/oci" }
+ginux-volume-format = { path = "../../crates/volume-format" }
+ginux-volume-service = { path = "../../crates/volume-service" }
 sha2 = "=0.11.0"

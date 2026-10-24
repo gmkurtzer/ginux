@@ -6,7 +6,7 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 
 linux_log="$benchmark_dir/rocky-linux-run-1-results.log"
-ginux_log="$benchmark_dir/ginux-sysbench.log"
+ginux_log="$benchmark_dir/ginux-sysbench-cpu-1.log"
 
 [[ -s "$linux_log" ]] || {
     echo "benchmark: missing Linux results; run 'make benchmark-linux-comparison'" >&2
@@ -18,7 +18,7 @@ ginux_log="$benchmark_dir/ginux-sysbench.log"
 }
 
 linux_hash=$(sed -n 's/^GINUX_BENCH_SYSBENCH_SHA256 //p' "$linux_log" | tail -n 1 | tr -d '\r' || true)
-ginux_hash=$(grep -Eo '[[:xdigit:]]{64}[[:space:]]+/usr/bin/sysbench' "$ginux_log" | tail -n 1 | awk '{print $1}' || true)
+ginux_hash=$(sed -n 's/^GINUX_BENCH_SYSBENCH_SHA256 //p' "$ginux_log" | tail -n 1 | tr -d '\r' || true)
 
 [[ "$linux_hash" =~ ^[[:xdigit:]]{64}$ ]] || {
     echo "benchmark: Linux sysbench hash was not recorded" >&2
@@ -35,6 +35,8 @@ ginux_hash=$(grep -Eo '[[:xdigit:]]{64}[[:space:]]+/usr/bin/sysbench' "$ginux_lo
     exit 1
 }
 
+python3 "$benchmark_root/tools/benchmarks/summarize-sysbench.py" "$benchmark_dir"
+
 cat <<EOF
 Benchmark inputs match:
   platform: linux/amd64
@@ -45,6 +47,7 @@ Benchmark inputs match:
 
 Raw results:
   $benchmark_dir/rocky-linux-summary.tsv
-  $linux_log
-  $ginux_log
+  $benchmark_dir/rocky-linux-run-*-results.log
+  $benchmark_dir/ginux-sysbench-*.log
+  $benchmark_dir/sysbench-comparison.tsv
 EOF
