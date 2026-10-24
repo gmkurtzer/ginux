@@ -281,7 +281,7 @@ Test & Metric & Samples & Rocky Linux & Ginux & Ginux vs. Rocky \\
 Boot & s to target & 3 & 42.579 & 12.860 & 3.31$\times$ faster \\
 CPU & events/s & 9 & 232.360 & 262.190 & 1.13$\times$ faster \\
 Memory & MiB/s & 9 & 679.510 & 233.210 & 2.91$\times$ slower \\
-Threads & events/s & 9 & 306.129 & 181.915 & 1.68$\times$ slower \\
+Threads & events/s & 9 & 306.129 & 311.147 & 1.02$\times$ faster \\
 Mutex & s/event & 9 & 1.550 & 1.443 & 1.07$\times$ faster \\
 \bottomrule
 \end{tabular}
@@ -296,10 +296,12 @@ less hardware machinery, so this is a startup-path result rather than evidence
 of a generally faster kernel.
 
 The userspace measurements sharpen that boundary. CPU throughput was 12.8\%
-higher and mutex time was similar, while thread throughput remained 1.68 times
-slower. The thread result had initially been 3,911 times slower; correcting a
-\texttt{sched\_yield()} policy defect raised the Ginux median from 0.078 to
-181.915 events/s. The memory workload times one-kibibyte events, making its
+higher and mutex time was similar. The thread result had initially been 3,911
+times slower. Correcting a \texttt{sched\_yield()} policy defect and avoiding
+a redundant full context save when no other thread was runnable raised the
+Ginux median from 0.078 to 311.147 events/s, 1.02 times the Rocky result. This
+is a single-thread yield measurement, not an SMP result. The memory workload
+times one-kibibyte events, making its
 original 48.390 MiB/s result primarily a clock-call benchmark. Removing
 redundant page-table ownership checks and diagnostic tracing from the guarded
 clock path raised its median to 233.210 MiB/s, a 4.82-fold improvement. It

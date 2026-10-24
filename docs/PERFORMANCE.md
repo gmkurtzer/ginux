@@ -87,6 +87,18 @@ one virtual CPU.
   one-time initialization, avoiding a redundant locked compare-and-swap on
   every per-domain atomic access. Its 9,935 / 10,226 / 10,226 ms TCG result is
   within run-to-run variance, so no speedup is claimed.
+- The single-thread sysbench threads workload issued 1,000 `sched_yield()`
+  calls per event. Ginux serialized and restored its full user context even
+  when no other thread was runnable. Returning directly for that Linux-defined
+  scheduling hint raised the nine-sample median from 181.915 to 311.147
+  events/s, versus Rocky Linux at 306.129. Actual thread switches retain the
+  full save, validation, TLS, and restore path.
+- The memory workload remains 2.914 times slower at its one-kibibyte block
+  size. Its dominant remaining difference is architectural: Rocky services
+  `clock_gettime` through vDSO/vvar, while Ginux crosses ring 3 to ring 0 for
+  each timestamp. The retained guarded syscall path is already stripped of
+  general tracing and repeated page-table ownership checks. Further material
+  improvement should implement vDSO/vvar rather than weaken syscall safety.
 - A cached 299,590,656-byte published Rocky rootfs restored directly in 8,363
   ms. Restoring its 109,755,585 compressed bytes and unpacking them took about
   6,200 ms. The v2 cache can publish a digest-verified rootfs directly, but

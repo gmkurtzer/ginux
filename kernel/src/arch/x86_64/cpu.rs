@@ -9041,9 +9041,11 @@ extern "sysv64" fn linux_syscall_handler(
     }
     let runtime_mode = LINUX_RUNTIME_MODE.load(Ordering::SeqCst);
     let _profile = LinuxBootSyscallProfile::start(number, runtime_mode);
-    let trace_index = if number != LINUX_CLOCK_GETTIME_SYSCALL
-        && (runtime_mode
-            || cfg!(feature = "verification-boot") && ELF_PROBE_SYSTEM_INIT.load(Ordering::SeqCst))
+    let trace_index = if !matches!(
+        number,
+        LINUX_CLOCK_GETTIME_SYSCALL | LINUX_SCHED_YIELD_SYSCALL
+    ) && (runtime_mode
+        || cfg!(feature = "verification-boot") && ELF_PROBE_SYSTEM_INIT.load(Ordering::SeqCst))
     {
         let index = LINUX_RUNTIME_SYSCALL_TRACE_COUNT.fetch_add(1, Ordering::SeqCst) as usize
             % LINUX_RUNTIME_SYSCALL_TRACE_LIMIT;
@@ -12018,6 +12020,14 @@ fn linux_sched_yield_live_return(
     let Some(current) = current_linux_thread_handle() else {
         return LINUX_ESRCH;
     };
+    let target = yield_ready_linux_thread_handle().unwrap_or(current);
+    // Linux makes sched_yield() a scheduling hint. If this is the only
+    // runnable thread, returning directly is equivalent to selecting it
+    // again and avoids serializing and restoring an unchanged user context.
+    if target == current {
+        LINUX_LIVE_RETURN_VALIDATED.store(true, Ordering::Relaxed);
+        return 0;
+    }
     let Some(tls) = linux_thread_context(current) else {
         return LINUX_ESRCH;
     };
@@ -12032,22 +12042,12 @@ fn linux_sched_yield_live_return(
     if !save_linux_thread_return_context(current, caller) {
         return LINUX_EINVAL;
     }
-    let target = yield_ready_linux_thread_handle().unwrap_or(current);
     let mut target_registers = LinuxSyscallFrame::ZERO;
     let mut target_rip = 0;
     let mut target_rsp = 0;
     let mut target_rflags = 0;
     let mut target_rax = 0;
-    if target == current {
-        if !install_linux_tls_context(tls) {
-            return LINUX_EINVAL;
-        }
-        target_registers = caller.registers;
-        target_rip = caller.rip;
-        target_rsp = caller.rsp;
-        target_rflags = caller.rflags;
-        target_rax = caller.rax;
-    } else if !install_linux_thread_return(
+    if !install_linux_thread_return(
         target,
         &mut target_registers,
         &mut target_rip,

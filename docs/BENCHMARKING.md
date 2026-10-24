@@ -104,7 +104,7 @@ per workload and system.
 |---|---|---:|---:|---:|
 | CPU | events/s | 232.360 | 262.190 | Ginux 1.128x faster |
 | Memory | MiB/s | 679.510 | 233.210 | Ginux 2.914x slower |
-| Threads | events/s | 306.129 | 181.915 | Ginux 1.683x slower |
+| Threads | events/s | 306.129 | 311.147 | Ginux 1.016x faster |
 | Mutex | seconds/event | 1.550 | 1.443 | Ginux 1.074x faster |
 
 The CPU workload is almost entirely userspace computation; its 12.8% Ginux
@@ -122,8 +122,11 @@ worker `sched_yield()` selected a just-preempted busy supervisory thread, so
 the worker waited for another timer interrupt on each of the workload's 1,000
 yields per event. Tracking the last preempted thread and excluding it from an
 immediate voluntary-yield selection raised the Ginux median from 0.078 to
-181.915 events/s. Ginux remains 1.683 times slower than Linux on this test,
-but the pathological 3,911-fold gap was a correctable scheduling-policy bug.
+181.915 events/s. A second pass found that a yield with no other runnable
+thread still serialized and restored the unchanged user context. Treating
+that Linux scheduling hint as a no-op raised the median to 311.147 events/s,
+1.016 times the Rocky result. This closes the measured single-thread yield
+gap; it does not measure parallel execution or SMP scheduling.
 The single-thread mutex workload completed one event on both kernels and
 carries little weight.
 
@@ -137,7 +140,7 @@ in `rocky-linux-run-*-results.log`, `ginux-sysbench-*.log`, and
 
 Before treating these checkpoint results as general performance evidence:
 
-1. Add vDSO/vvar timekeeping and continue optimizing the memory and thread gaps.
+1. Add vDSO/vvar timekeeping to address the remaining memory-test clock gap.
 2. Make `domain exec --interactive` retain the running systemd domain and
    deliver its PTY and output.
 3. Repeat both sides on the same x86-64 Linux host with KVM.

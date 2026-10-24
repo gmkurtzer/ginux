@@ -67,7 +67,7 @@ def main() -> int:
         linux_median = statistics.median(linux)
         ginux_median = statistics.median(ginux)
         ratio = ginux_median / linux_median if higher_is_better else linux_median / ginux_median
-        result = f"{ratio:.3f}x" if ratio >= 1 else f"{1 / ratio:.3f}x slower"
+        result = f"{ratio:.3f}x faster" if ratio >= 1 else f"{1 / ratio:.3f}x slower"
         rows.append(
             f"{label}\t{metric}\t{len(linux)}\t{linux_median:.3f}\t"
             f"{len(ginux)}\t{ginux_median:.3f}\t{result}"
