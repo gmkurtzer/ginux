@@ -257,6 +257,48 @@ fi
     if grep -Fq 'ginux: Linux child exited with status' "$output_file"; then
         fail 'kernel leaked an anonymous userspace child exit'
     fi
+    if [[ "${GINUX_BENCHMARK_SYSBENCH:-0}" == 1 ]]; then
+        printf '\035'
+        wait_for "[detached from domain; use 'domain attach NAME' to return]" 10
+        wait_for_count 'ginux> ' 2 10
+        printf '%s\n' 'domain exec --interactive rocky /bin/bash -i'
+        wait_for '# ' 120
+        printf '%s\n' '/usr/bin/dnf -y install epel-release; echo GINUX_BENCH_DNF_EPEL=$?'
+        wait_for_line 'GINUX_BENCH_DNF_EPEL=0' 2400
+        printf '%s\n' '/usr/bin/dnf -y install sysbench; echo GINUX_BENCH_DNF_SYSBENCH=$?'
+        wait_for_line 'GINUX_BENCH_DNF_SYSBENCH=0' 2400
+        printf '%s\n' \
+            "printf 'GINUX_BENCH_SYSBENCH_SHA256 '; /usr/bin/sha256sum /usr/bin/sysbench | /usr/bin/awk '{print \$1}'"
+        wait_for 'GINUX_BENCH_SYSBENCH_SHA256 ' 30
+        for workload in cpu memory threads mutex; do
+            for ((benchmark_run = 1; benchmark_run <= ${GINUX_BENCHMARK_WORKLOAD_RUNS:-3}; benchmark_run++)); do
+                case "$workload" in
+                    cpu)
+                        command="/usr/bin/sysbench cpu --threads=1 --time=${GINUX_BENCHMARK_WORKLOAD_SECONDS:-3} --cpu-max-prime=20000 run"
+                        ;;
+                    memory)
+                        command="/usr/bin/sysbench memory --threads=1 --time=${GINUX_BENCHMARK_WORKLOAD_SECONDS:-3} --memory-total-size=100G run"
+                        ;;
+                    threads)
+                        command="/usr/bin/sysbench threads --threads=1 --time=${GINUX_BENCHMARK_WORKLOAD_SECONDS:-3} run"
+                        ;;
+                    mutex)
+                        command="/usr/bin/sysbench mutex --threads=1 --time=${GINUX_BENCHMARK_WORKLOAD_SECONDS:-3} run"
+                        ;;
+                esac
+                marker="GINUX_BENCH_WORKLOAD_END_${workload}_${benchmark_run}=0"
+                printf '%s\n' "echo GINUX_BENCH_WORKLOAD_BEGIN_${workload}_${benchmark_run}; $command; echo $marker"
+                wait_for_line "$marker" 600
+            done
+        done
+        printf '%s\n' exit
+        wait_for_count 'ginux> ' 3 30
+        printf '%s\n' shutdown
+        wait_for 'GINUX_KERNEL_OK' 30
+        printf '%s\n' ok >"$success_file"
+        stop_qemu
+        exit 0
+    fi
     if [[ "${GINUX_TEST_DOMAIN_EXEC:-0}" == 1 ]]; then
         printf '\035'
         wait_for "[detached from domain; use 'domain attach NAME' to return]" 10
@@ -306,7 +348,7 @@ fi
     "$repo_root/tools/qemu/run.sh" >"$output_file" 2>&1 &
 qemu_pid=$!
 
-for _ in {1..420}; do
+for ((attempt = 0; attempt < ${GINUX_ROCKY_RUNTIME_TIMEOUT:-420}; attempt++)); do
     if grep -Fq 'GINUX_KERNEL_OK' "$output_file" || grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC' "$output_file"; then
         break
     fi

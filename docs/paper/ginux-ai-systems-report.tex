@@ -259,6 +259,18 @@ benchmarks remain necessary before publication of any competitive claim; the
 method and limitations are recorded in the
 \repolink{docs/PERFORMANCE.md}{performance record}.
 
+A matched single-vCPU harness now pins an official Rocky Linux 10.2 cloud
+image, fixes QEMU machine, memory, CPU, and accelerator settings, and verifies
+the SHA-256 identity of the sysbench executable before accepting workload
+results. The Linux side completed its preliminary TCG baseline. Ginux did not:
+the post-boot interactive domain-exec path failed to deliver a PTY, while a
+repeated non-interactive path made the domain unavailable. The harness rejects
+the comparison at that gate. This negative result is more informative than a
+number produced with different binaries or execution paths; no Linux-versus-
+Ginux performance claim is made. The reproducible method and raw-result
+requirements are recorded in
+\repolink{docs/BENCHMARKING.md}{the comparative benchmark protocol}.
+
 The security hypothesis is that explicit capabilities, per-domain address
 spaces, W\textasciicircum X mappings, immutable executable pages,
 generation-safe revocation, and IOMMU-confined DMA reduce ambient authority

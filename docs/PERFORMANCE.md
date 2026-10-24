@@ -126,3 +126,11 @@ The verification boot now advances past its formerly stale epoll and `statx`
 assertions, but still fails in the post-exec system-supervisor lifecycle probe.
 That is a separate correctness item; it is not counted as a successful full
 `make test` result in this checkpoint.
+
+## Linux comparison harness
+
+The reproducible single-vCPU Linux comparison method, pinned Rocky cloud image,
+preliminary TCG baseline, and current Ginux execution blocker are documented in
+[`BENCHMARKING.md`](BENCHMARKING.md). No Ginux-versus-Linux sysbench claim is
+made until the same binary completes on both systems and the comparison is
+repeated under x86-64 KVM.
