@@ -246,24 +246,22 @@ applied above individual processes. The intended advantage is less duplicated
 host machinery and fewer crossings on steady-state I/O, not an assumption that
 new code is inherently faster.
 
-There is one narrow performance result. On the Apple Silicon development host,
-QEMU translated x86-64 execution reached the verified Rocky console in
-4,081--4,083~ms from Linux init at the evaluated checkpoint; a rerun for this
-revision measured 4,384~ms. Profiling had reduced the original 15,344~ms path
-by removing a polling stall, quadratic frame scans, and eager duplication of
-immutable root-filesystem pages. These are regression measurements under TCG,
-not comparisons with Linux or evidence of native performance. The repository
-defines a three-second KVM gate, but it still requires execution on an x86-64
-Linux host. Broader CPU, memory, IPC, network, storage, and application
-benchmarks remain necessary before publication of any competitive claim; the
-method and limitations are recorded in the
+Ginux has one useful internal regression result. On the Apple Silicon
+development host, translated x86-64 execution reduced Rocky's Linux-init to
+verified-console path from 15.344~s to a recent 4.08--4.45~s range. Profiling
+identified a polling stall, quadratic frame scans, and eager duplication of
+immutable root-filesystem pages. Removing those costs made domain startup
+materially faster. This establishes improvement relative to earlier Ginux
+revisions, not performance relative to Linux. The method and optimization
+history are recorded in the
 \repolink{docs/PERFORMANCE.md}{performance record}.
 
 A matched single-vCPU harness now pins an official Rocky Linux 10.2 cloud
 image, fixes QEMU machine, memory, CPU, and accelerator settings, and verifies
 the SHA-256 identity of the sysbench executable before accepting workload
-results. Table~\ref{tab:benchmark-checkpoint} reports the resulting checkpoint.
-The Linux side completed its preliminary TCG baseline. Ginux did not:
+results. Table~\ref{tab:benchmark-checkpoint} states the measurement boundaries
+and missing results explicitly. The Linux side completed its preliminary TCG
+baseline. Ginux did not:
 the post-boot interactive domain-exec path failed to deliver a PTY, while a
 repeated non-interactive path made the domain unavailable. The harness rejects
 the comparison at that gate. This negative result is more informative than a
@@ -275,32 +273,55 @@ requirements are recorded in
 \begin{table}[htbp]
 \centering
 \small
-\caption{Single-vCPU Rocky Linux benchmark checkpoint under x86-64 QEMU TCG
-on an Apple Silicon host. The Linux and Ginux boot timings use different
-boundaries and are not an operating-system speed comparison.}
+\caption{What the single-vCPU Rocky benchmark actually measured under x86-64
+QEMU TCG on an Apple Silicon host. Unmeasured results are stated explicitly.}
 \label{tab:benchmark-checkpoint}
-\begin{tabular}{@{}p{0.40\linewidth}p{0.31\linewidth}p{0.21\linewidth}@{}}
+\begin{tabular}{@{}p{0.50\linewidth}p{0.21\linewidth}p{0.21\linewidth}@{}}
 \toprule
-Measurement & Observed results & Summary or status \\
+Measurement boundary & Linux time & Ginux time \\
 \midrule
-Linux: QEMU launch to multi-user readiness
-  & 42.807, 41.901, 42.666~s
-  & Median: 42.666~s \\
-Linux: kernel uptime to multi-user readiness
-  & 34.68, 33.85, 34.64~s
-  & Median: 34.64~s \\
-Linux: sysbench CPU, memory, threads, and mutex
-  & 3 boots $\times$ 4 workloads $\times$ 3 repetitions
-  & 36/36 completed \\
-Ginux: Linux-init entry to verified console
-  & 4.45~s at this checkpoint
-  & Diagnostic timing only \\
-Ginux: matched sysbench execution
-  & No accepted samples
-  & Blocked at domain-exec PTY/lifecycle gate \\
+\tcell{Full guest boot: QEMU process launch to multi-user/login readiness}
+  & \tcell{42.666~s median (three runs)}
+  & \tcell{Not measured} \\
+\tcell{Userspace init: PID~1 entry to verified console/login}
+  & \tcell{Not measured}
+  & \tcell{4.452~s (one run)} \\
+\tcell{Warm workload launch: domain start request to login}
+  & \tcell{Not applicable}
+  & \tcell{about 10.957~s, derived (one run)} \\
+\tcell{Matched sysbench: same binary; CPU, memory, threads, and mutex}
+  & \tcell{36/36 runs completed}
+  & \tcell{No accepted runs} \\
 \bottomrule
 \end{tabular}
+\vspace{3pt}
+
+\parbox{0.95\linewidth}{The separately observed 34.64~s Linux uptime at
+readiness includes kernel and userspace execution, so it is omitted as a
+userspace-init comparison. The 10.957~s Ginux figure is the sum of 6.505~s for cached OCI restoration,
+unpacking, and publication plus 4.452~s from PID~1 entry to console. It excludes
+the already completed Ginux firmware, kernel, and controller boot.}
 \end{table}
+
+These data do not show that Ginux boots ten times faster than Linux. Dividing
+42.666 by 4.45 would compare a complete Linux VM launch with only the final
+systemd segment of a Ginux domain launch. Even the approximately 10.96~s warm
+domain figure is an operational comparison between a domain on an already
+running host and a newly launched VM, not a kernel-to-kernel boot comparison.
+The apparent difference is plausibly dominated by that boundary choice: Ginux
+reuses its running kernel and controller, restores a cached OCI image, and
+initializes a narrower UBI userspace, whereas the Linux measurement includes
+UEFI, kernel and device initialization, and a GenericCloud userspace. Ginux
+also implements less hardware and service machinery; omitted work can reduce
+time without representing a superior implementation. TCG translation and the
+different Rocky image profiles add further confounders.
+
+A defensible comparison requires both systems to start at QEMU process launch,
+end at the same authenticated login or multi-user marker, use equivalent Rocky
+userspaces and warm-cache policy, and complete repeated runs on the same
+x86-64 KVM host. The current workload result is simpler: Linux completed its
+baseline, while Ginux produced no accepted sysbench samples. No relative boot
+or workload-performance claim follows from this checkpoint.
 
 The security hypothesis is that explicit capabilities, per-domain address
 spaces, W\textasciicircum X mappings, immutable executable pages,

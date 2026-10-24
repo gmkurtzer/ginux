@@ -60,10 +60,20 @@ BENCHMARK_BOOT_RUNS=1 BENCHMARK_WORKLOAD_RUNS=1 \
 
 Host: Apple Silicon macOS. Guest ISA: x86-64. Accelerator: QEMU TCG.
 
-| Linux measurement | Run 1 | Run 2 | Run 3 | Median |
-|---|---:|---:|---:|---:|
-| QEMU launch to multi-user benchmark readiness | 42.807 s | 41.901 s | 42.666 s | 42.666 s |
-| Linux kernel uptime at multi-user readiness | 34.68 s | 33.85 s | 34.64 s | 34.64 s |
+| Measurement boundary | Linux time | Ginux time |
+|---|---:|---:|
+| Full guest boot: QEMU process launch to multi-user/login readiness | 42.666 s median (42.807 / 41.901 / 42.666) | Not measured |
+| Userspace init: PID 1 entry to verified console/login | Not measured | 4.452 s (one run) |
+| Warm workload launch: domain start request to login | Not applicable | About 10.957 s, derived (one run) |
+| Matched sysbench: same binary; CPU, memory, threads, and mutex | 36/36 runs completed | No accepted runs |
+
+The separately observed 34.64-second Linux uptime at readiness includes both
+kernel and userspace execution, so it is not presented as a userspace-init
+comparison. The warm Ginux domain figure adds the measured
+6.505 seconds for cached OCI restoration, unpacking, and publication to the
+4.452-second init-to-console segment. It excludes Ginux firmware, kernel, and
+controller startup because those components were already running when the
+domain start command was issued.
 
 All 36 Linux workload executions completed successfully. Their sysbench binary
 digest was
@@ -71,12 +81,25 @@ digest was
 The raw logs preserve the complete sysbench output.
 
 The Ginux Rocky domain continued to reach its verified console in 4.45 seconds
-from Linux-init entry. A comparative sysbench result is **not yet available**:
+from Linux-init entry. This does **not** mean that Ginux booted approximately
+ten times faster than Linux: 42.666 seconds covers a complete Linux VM launch,
+while 4.45 seconds covers only the final systemd segment inside Ginux. A
+comparative sysbench result is **not yet available**:
 the current domain-exec path does not deliver an interactive PTY after systemd
 has reached multi-user, and repeated non-interactive exec caused the running
 domain to become unavailable. The comparison gate therefore fails rather than
 publishing unmatched or fabricated numbers. This is now a concrete Linux ABI
 and domain-lifecycle test requirement.
+
+The apparent timing difference is most plausibly explained by the mismatched
+boundaries. Ginux reuses an already-running kernel and controller and starts a
+cached, narrower UBI userspace. The Linux path includes UEFI, kernel and device
+initialization, and a GenericCloud userspace. Ginux also implements less
+hardware and service machinery, so some omitted work appears as lower latency.
+TCG translation and the different Rocky image profiles add further confounders.
+No relative boot-performance claim is supported until both measurements start
+at QEMU launch and end at the same readiness marker under the same cache and
+userspace policy.
 
 ## Publication requirements
 
