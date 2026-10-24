@@ -143,7 +143,7 @@ That is a separate correctness item; it is not counted as a successful full
 
 ## Linux comparison harness
 
-The reproducible single-vCPU Linux comparison method, pinned Rocky cloud image,
+The reproducible single-vCPU Linux comparison method, pinned upstream Rocky disk image,
 matched sysbench executable, and preliminary TCG results are documented in
 [`BENCHMARKING.md`](BENCHMARKING.md). These translated-execution results are a
 checkpoint, not a native performance claim; the comparison still needs to be

@@ -248,7 +248,8 @@ verified Rocky Linux 10 x86-64 executable in both systems: prime calculation
 for CPU throughput, one-kibibyte memory transfers, repeated
 \texttt{sched\_yield()} operations for thread scheduling, and mutex
 contention. Workload timing excluded boot and image preparation. Rocky on
-Linux used the official Rocky Linux 10.2 GenericCloud image and its stock
+Linux used the official Rocky Linux 10.2 GenericCloud image from the upstream
+Rocky project, prepared and booted locally as a qcow2 disk, with its stock
 \texttt{6.12.0-211.16.1.el10\_2.0.1.x86\_64} kernel; Rocky on Ginux used the
 Rocky Linux 10 UBI init image as a domain. The protocol and raw-result
 requirements are recorded in
@@ -322,8 +323,8 @@ overhead rather than raw copying; the remaining difference is small enough
 that these TCG results do not isolate one cause. Third, the boot
 number measures two different startup paths. Ginux restores a cached
 filesystem and launches a domain without a second kernel or initramfs; Rocky
-follows a general-purpose UEFI, kernel, initramfs, device-discovery, and cloud
-image path. The 3.31-fold result is useful startup-path evidence, not proof of
+boots from a local qcow2 disk through its general-purpose UEFI, kernel,
+initramfs, and device-discovery path. The 3.31-fold result is useful startup-path evidence, not proof of
 a generally faster kernel.
 
 These TCG measurements demonstrate that Ginux can execute the same nontrivial

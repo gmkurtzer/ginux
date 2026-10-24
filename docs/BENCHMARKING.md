@@ -78,9 +78,9 @@ a general kernel-performance result.
 
 The likely explanation is structural. Ginux boots a compact EFI kernel and
 controller, restores a cached OCI filesystem, and launches the Rocky domain
-without booting a second kernel or initramfs. Rocky Linux follows its
-general-purpose UEFI, kernel, initramfs, device discovery, and GenericCloud
-path. Ginux also implements less hardware and service machinery, so omitted
+without booting a second kernel or initramfs. Rocky Linux boots from a local
+qcow2 disk through its general-purpose UEFI, kernel, initramfs, and device
+discovery path. Ginux also implements less hardware and service machinery, so omitted
 work may appear as lower latency. The Linux GenericCloud and Ginux UBI profiles
 do not enable identical services; their qcow2 and OCI/raw storage paths also
 differ. TCG can affect their instruction paths differently. A stronger claim
