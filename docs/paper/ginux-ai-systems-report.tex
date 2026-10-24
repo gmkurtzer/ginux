@@ -236,44 +236,57 @@ capabilities, and denies many credential mutations. POSIX ACLs and permission
 edge cases remain incomplete; no SELinux or other active Linux security module
 enforces labels. Linux UID~0 cannot bypass the native capability table.
 
-\subsection{Optimization and security hypotheses}
+\subsection{Performance and benchmarking}
+\label{sec:performance}
 
-The architecture places authorization on the control path while permitting an
-approved data path to use shared pages, hardware queues, batching, and direct
-interrupt delivery. Domains are scheduling and accounting principals, so CPU
-service class and, eventually, memory, storage, and network policy can be
-applied above individual processes. The intended advantage is less duplicated
-host machinery and fewer crossings on steady-state I/O, not an assumption that
-new code is inherently faster.
+Performance testing began as a reality check, not an attempt to prove that an
+eleven-day kernel was faster than Linux. A matched single-vCPU harness fixed
+the QEMU machine, memory, CPU, accelerator, commands, and measurement
+boundaries. Boot timing ran from QEMU launch until systemd reported
+\texttt{multi-user.target}. Four sysbench workloads then exercised the same
+verified Rocky Linux 10 x86-64 executable in both systems: prime calculation
+for CPU throughput, one-kibibyte memory transfers, repeated
+\texttt{sched\_yield()} operations for thread scheduling, and mutex
+contention. Workload timing excluded boot and image preparation. Rocky used
+its official 10.2 GenericCloud image; Ginux launched the Rocky 10 UBI init
+image as a domain. The protocol and raw-result requirements are recorded in
+\repolink{docs/BENCHMARKING.md}{the comparative benchmark protocol}.
 
-Ginux has one useful internal regression result. On the Apple Silicon
-development host, translated x86-64 execution reduced Rocky's Linux-init to
-verified-console path from 15.344~s to a recent 4.08--4.45~s range. Profiling
-identified a polling stall, quadratic frame scans, and eager duplication of
-immutable root-filesystem pages. Removing those costs made domain startup
-materially faster. This establishes improvement relative to earlier Ginux
-revisions, not performance relative to Linux. The method and optimization
-history are recorded in the
+The first results were funny only because they were so bad. CPU and mutex were
+already near or above the Rocky result, but memory reached only 48.390~MiB/s
+against Rocky's 679.510~MiB/s, and the thread test managed 0.078 events/s
+against 306.129---roughly 14 times and 3,900 times slower, respectively. The
+benchmark was then turned into an acceptance gate. The project lead required
+matched inputs, clarified the single-vCPU scope, and directed Codex to profile,
+change the kernel, rerun the measurements, and keep only verified
+improvements. Within that boundary, Codex selected the instrumentation and
+implementation changes and iterated against repeated QEMU runs. This was the
+same outer-steering and inner-agent procedure described in
+Section~\ref{sec:methods}, applied to a performance problem rather than a
+feature milestone.
+
+Over the next few hours, the measurements exposed specific defects rather
+than a single generally slow kernel. The thread path repeatedly selected a
+just-preempted supervisory thread and later saved and restored a complete user
+context even when no other thread could run. The memory test was dominated by
+timestamp overhead: its one-kibibyte operations repeatedly crossed into the
+kernel because Ginux had no vDSO. Scheduler selection, no-op yields, diagnostic
+tracing, page-table validation, and the guarded clock path were tightened one
+at a time, with regressions rejected by the existing verification suite. The
+thread median rose from 0.078 to 311.147 events/s, and memory throughput rose
+from 48.390 to 233.210~MiB/s. An earlier profiling loop had also reduced
+Ginux's internal Linux-init-to-console path from 15.344~s to a 4.08--4.45~s
+range by removing a polling stall, quadratic frame scans, and eager copying of
+immutable root-filesystem pages. The optimization history is recorded in the
 \repolink{docs/PERFORMANCE.md}{performance record}.
 
-A matched single-vCPU harness fixes the QEMU machine, memory, CPU,
-accelerator, command arguments, and measurement boundaries. Boot timing begins
-immediately before QEMU process launch and ends when systemd reports
-\texttt{multi-user.target}; workload timing excludes boot and image
-preparation. Both guests use warm local inputs and the same verified Rocky
-Linux 10 x86-64 sysbench executable. The Linux guest boots the official Rocky
-Linux 10.2 GenericCloud image, while Ginux launches the Rocky 10 UBI init image
-as a domain. The reproducible method and raw-result requirements are recorded
-in \repolink{docs/BENCHMARKING.md}{the comparative benchmark protocol}.
-Table~\ref{tab:benchmark-checkpoint} reports the resulting medians.
+Table~\ref{tab:benchmark-checkpoint} reports the final checkpoint medians.
 
-\begin{table}[htbp]
+\begin{center}
+\refstepcounter{table}
+\label{tab:benchmark-checkpoint}
 \centering
 \small
-\caption{Matched boot and userspace benchmark medians under x86-64 QEMU TCG
-on an Apple Silicon host. Boot and mutex favor lower values; the other
-workloads favor higher values.}
-\label{tab:benchmark-checkpoint}
 \begin{tabular}{@{}lllrrl@{}}
 \toprule
 Test & Metric & Samples & Rocky Linux & Ginux & Ginux vs. Rocky \\
@@ -285,42 +298,33 @@ Threads & events/s & 9 & 306.129 & 311.147 & 1.02$\times$ faster \\
 Mutex & s/event & 9 & 1.550 & 1.443 & 1.07$\times$ faster \\
 \bottomrule
 \end{tabular}
-\end{table}
+\par\smallskip
+Table~\thetable: Matched boot and userspace benchmark medians under x86-64
+QEMU TCG on an Apple Silicon host. Boot and mutex favor lower values; the
+other workloads favor higher values.
+\end{center}
 
-The combined result is mixed. Ginux reached the common boot target 3.31 times
-sooner because its compact EFI path restores a cached filesystem and launches
-a domain without a second kernel or initramfs. Rocky follows a general-purpose
-UEFI, kernel, initramfs, device-discovery, and GenericCloud path. The images,
-enabled services, and storage paths are not identical, and Ginux implements
-less hardware machinery, so this is a startup-path result rather than evidence
-of a generally faster kernel.
+The results say three different things. First, the CPU and single-thread yield
+tests reached approximate parity under this translated environment, and the
+mutex result was similar. That does not make Ginux faster than Linux; it shows
+that the worst gaps were implementation defects that a benchmark-driven agent
+loop could find and substantially close. Second, memory remains 2.91 times
+slower because the benchmark is partly a clock-interface test. Linux answers
+\texttt{clock\_gettime()} through vDSO/vvar without entering the kernel, while
+Ginux still crosses from ring~3 for every timestamp. Closing that gap requires
+the missing Linux mechanism, not another unsafe shortcut. Third, the boot
+number measures two different startup paths. Ginux restores a cached
+filesystem and launches a domain without a second kernel or initramfs; Rocky
+follows a general-purpose UEFI, kernel, initramfs, device-discovery, and cloud
+image path. The 3.31-fold result is useful startup-path evidence, not proof of
+a generally faster kernel.
 
-The userspace measurements sharpen that boundary. CPU throughput was 12.8\%
-higher and mutex time was similar. The thread result had initially been 3,911
-times slower. Correcting a \texttt{sched\_yield()} policy defect and avoiding
-a redundant full context save when no other thread was runnable raised the
-Ginux median from 0.078 to 311.147 events/s, 1.02 times the Rocky result. This
-is a single-thread yield measurement, not an SMP result. The memory workload
-times one-kibibyte events, making its
-original 48.390 MiB/s result primarily a clock-call benchmark. Removing
-redundant page-table ownership checks and diagnostic tracing from the guarded
-clock path raised its median to 233.210 MiB/s, a 4.82-fold improvement. It
-remains 2.91 times slower because Ginux has no vDSO and crosses into the kernel
-for each timestamp. These TCG measurements show that Ginux can run the same
-nontrivial Linux executable, but they do not establish performance parity.
-Stronger claims require identical userspace profiles, equivalent storage, more
-repetitions, and x86-64 KVM measurements; network, IPC, multicore, and security
-performance remain unmeasured.
-
-The security hypothesis is that explicit capabilities, per-domain address
-spaces, W\textasciicircum X mappings, immutable executable pages,
-generation-safe revocation, and IOMMU-confined DMA reduce ambient authority
-and contain component failure. The prototype exercises several positive and
-negative paths, including stale-generation rejection and driver teardown.
-It has not received an independent audit, side-channel analysis, formal
-verification of the whole kernel, or adversarial production testing. These
-mechanisms are reasons to investigate the design, not evidence that Ginux is
-more secure than Linux.
+These TCG measurements demonstrate that Ginux can execute the same nontrivial
+Linux benchmark and that guided autonomous iteration can turn catastrophic
+results into useful ones. They do not establish performance parity. Stronger
+claims require identical userspace profiles, equivalent storage, dispersion
+and confidence intervals, and x86-64 KVM measurements. Network, IPC,
+multicore, storage, and security performance remain unmeasured.
 
 \subsection{Implemented result and research boundary}
 
@@ -337,6 +341,16 @@ namespaces, IPv6, ioctl families, filesystems, and devices remain incomplete.
 There is no GPU ecosystem, broad hardware support, stable third-party driver
 ABI, independent security audit, native performance baseline, or general Linux
 application guarantee.
+
+The security hypothesis is that explicit capabilities, per-domain address
+spaces, W\textasciicircum X mappings, immutable executable pages,
+generation-safe revocation, and IOMMU-confined DMA reduce ambient authority
+and contain component failure. The prototype exercises several positive and
+negative paths, including stale-generation rejection and driver teardown, but
+it has not received an independent audit, side-channel analysis, whole-kernel
+formal verification, or adversarial production testing. These mechanisms are
+reasons to investigate the design, not evidence that Ginux is more secure than
+Linux.
 
 Those omissions define the research boundary. The question was whether AI
 could construct a kernel and carry a real Linux userspace across it, not
@@ -408,6 +422,7 @@ at the evaluated checkpoint, so configuration and image caching are persistent
 without implying that every workload mutation is durable.
 
 \section{Methods}
+\label{sec:methods}
 
 \subsection{From an idea to an executable plan}
 
@@ -495,6 +510,15 @@ $\rightarrow$ regression test.
 }}
 \end{center}
 
+The performance work in Section~\ref{sec:performance} is a compact example of
+both loops. Human steering defined a fair comparison, rejected mismatched
+measurements, fixed the single-vCPU boundary, and set ``close the gap without
+weakening correctness'' as the gate. The agent then profiled, changed one hot
+path at a time, rebuilt, ran QEMU, compared repeated samples, and either kept
+or reverted each change. The resulting thread improvement was not specified
+line by line; it emerged from autonomous iteration inside an expert-defined
+test and acceptance boundary.
+
 Codex selected implementations, edited the repository, compiled and booted the
 system, analyzed logs, wrote tests, profiled failures, and revised within the
 current gate. It also drafted documentation under review. This broad
@@ -551,9 +575,9 @@ the result.
 Conversely, generation-tagged capabilities, bounded control calls,
 copy-on-write handling, and pre-authorized shared-page fast paths were mainly
 agent-proposed mechanisms within human requirements for speed, security, fault
-containment, and ownership. The Section~2.5 shared-page example was therefore
-an agent-derived optimization retained through architectural review, not a
-verbatim human instruction.
+containment, and ownership. The shared-page mechanism was an agent-derived
+optimization retained through architectural review, not a verbatim human
+instruction.
 
 Table~\ref{tab:provenance} identifies the source of governing requirements,
 not authorship of every implementation line. The user-visible conversation is
