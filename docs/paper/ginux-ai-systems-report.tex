@@ -276,9 +276,11 @@ kernel because Ginux had no vDSO. Scheduler selection, no-op yields, diagnostic
 tracing, page-table validation, and the guarded clock path were tightened one
 at a time, with regressions rejected by the existing verification suite. A
 Linux-compatible vDSO and read-only vvar page then carried fast timekeeping
-through the initial process and subsequent \texttt{execve()}. The thread
-median rose from 0.078 to 311.147 events/s, and memory throughput rose from
-48.390 to 584.540~MiB/s. An earlier profiling loop had also reduced
+through the initial process and subsequent \texttt{execve()}. A second pass
+made the vvar snapshot immutable for each execution image and replaced clock
+division with fixed-point conversion and constant-time reciprocal
+normalization. The thread median rose from 0.078 to 309.732 events/s, and
+memory throughput rose from 48.390 to 620.580~MiB/s. An earlier profiling loop had also reduced
 Ginux's internal Linux-init-to-console path from 15.344~s to a 4.08--4.45~s
 range by removing a polling stall, quadratic frame scans, and eager copying of
 immutable root-filesystem pages. The optimization history is recorded in the
@@ -296,10 +298,10 @@ Table~\ref{tab:benchmark-checkpoint} reports the final checkpoint medians.
 Test & Metric & Samples & \shortstack{Rocky on\\Linux} & \shortstack{Rocky on\\Ginux} & Relative result \\
 \midrule
 Boot & s to target & 3 & 42.579 & 12.860 & 3.31$\times$ faster \\
-CPU & events/s & 9 & 232.360 & 262.190 & 1.13$\times$ faster \\
-Memory & MiB/s & 9 & 679.510 & 584.540 & 1.16$\times$ slower \\
-Threads & events/s & 9 & 306.129 & 311.147 & 1.02$\times$ faster \\
-Mutex & s/event & 9 & 1.550 & 1.443 & 1.07$\times$ faster \\
+CPU & events/s & 9 & 232.360 & 267.650 & 1.15$\times$ faster \\
+Memory & MiB/s & 9 & 679.510 & 620.580 & 1.10$\times$ slower \\
+Threads & events/s & 9 & 306.129 & 309.732 & 1.01$\times$ faster \\
+Mutex & s/event & 9 & 1.550 & 1.423 & 1.09$\times$ faster \\
 \bottomrule
 \end{tabular}
 \par\smallskip
@@ -313,8 +315,8 @@ tests reached approximate parity under this translated environment, and the
 mutex result was similar. That does not make Ginux faster than Linux; it shows
 that the worst gaps were implementation defects that a benchmark-driven agent
 loop could find and substantially close. Second, adding Linux-compatible
-vDSO/vvar timekeeping raised memory throughput from 48.390 to 584.540~MiB/s,
-leaving Rocky on Ginux 1.16 times slower than Rocky on Linux for the
+vDSO/vvar timekeeping raised memory throughput from 48.390 to 620.580~MiB/s,
+leaving Rocky on Ginux 1.095 times slower than Rocky on Linux for the
 one-kibibyte test. This confirms that most of the original gap was timestamp
 overhead rather than raw copying; the remaining difference is small enough
 that these TCG results do not isolate one cause. Third, the boot
@@ -326,7 +328,8 @@ a generally faster kernel.
 
 These TCG measurements demonstrate that Ginux can execute the same nontrivial
 Linux benchmark and that guided autonomous iteration can turn catastrophic
-results into useful ones. They do not establish performance parity. Stronger
+results into broadly comparable ones for this narrow suite. They do not
+establish general performance parity. Stronger
 claims require identical userspace profiles, equivalent storage, dispersion
 and confidence intervals, and x86-64 KVM measurements. Network, IPC,
 multicore, storage, and security performance remain unmeasured.

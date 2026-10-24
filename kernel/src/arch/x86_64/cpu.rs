@@ -1754,6 +1754,7 @@ static LINUX_BOOT_PROFILE_LIFECYCLE_TICKS: [BankedAtomicU64; LINUX_BOOT_PROFILE_
     [const { BankedAtomicU64::new(0) }; LINUX_BOOT_PROFILE_LIFECYCLE_PHASES];
 static LINUX_RUNTIME_CONSOLE_TIMING_WRITTEN: BankedAtomicBool = BankedAtomicBool::new(false);
 static LINUX_TIMED_WAITS_ACTIVE: BankedAtomicBool = BankedAtomicBool::new(false);
+static LINUX_DESCRIPTOR_WAITS_ACTIVE: BankedAtomicBool = BankedAtomicBool::new(false);
 static LINUX_RUNTIME_SLOW_DIAGNOSTIC_WRITTEN: BankedAtomicBool = BankedAtomicBool::new(false);
 static LINUX_RUNTIME_LATE_DIAGNOSTIC_WRITTEN: BankedAtomicBool = BankedAtomicBool::new(false);
 static LINUX_RUNTIME_STALLED_DIAGNOSTIC_WRITTEN: BankedAtomicBool = BankedAtomicBool::new(false);
@@ -5741,6 +5742,22 @@ fn block_current_linux_thread(kind: u8, key: u64, output: u64, deadline: u64) ->
         // published wait, clear the hint, and leave this thread unwakeable.
         LINUX_TIMED_WAITS_ACTIVE.store(true, Ordering::Release);
     }
+    if matches!(
+        kind,
+        LINUX_THREAD_WAIT_POLL
+            | LINUX_THREAD_WAIT_PPOLL
+            | LINUX_THREAD_WAIT_EPOLL
+            | LINUX_THREAD_WAIT_EPOLL_PWAIT
+            | LINUX_THREAD_WAIT_SELECT
+            | LINUX_THREAD_WAIT_PSELECT
+            | LINUX_THREAD_WAIT_EVENTFD_READ
+            | LINUX_THREAD_WAIT_EVENTFD_WRITE
+            | LINUX_THREAD_WAIT_PIPE_READ
+            | LINUX_THREAD_WAIT_PIPE_WRITE
+            | LINUX_THREAD_WAIT_TIMERFD_READ
+    ) {
+        LINUX_DESCRIPTOR_WAITS_ACTIVE.store(true, Ordering::Release);
+    }
     LINUX_CURRENT_THREAD_SLOT.store(LINUX_THREAD_SLOT_NONE, Ordering::SeqCst);
     true
 }
@@ -7187,6 +7204,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
     }
     LINUX_RUNTIME_CONSOLE_TIMING_WRITTEN.store(false, Ordering::SeqCst);
     LINUX_TIMED_WAITS_ACTIVE.store(false, Ordering::SeqCst);
+    LINUX_DESCRIPTOR_WAITS_ACTIVE.store(false, Ordering::SeqCst);
     LINUX_RUNTIME_SLOW_DIAGNOSTIC_WRITTEN.store(false, Ordering::SeqCst);
     LINUX_RUNTIME_LATE_DIAGNOSTIC_WRITTEN.store(false, Ordering::SeqCst);
     LINUX_RUNTIME_STALLED_DIAGNOSTIC_WRITTEN.store(false, Ordering::SeqCst);
@@ -12567,6 +12585,64 @@ fn linux_elapsed_time() -> Option<(u64, u64)> {
     }
     let ticks = timer::timestamp_counter().saturating_sub(epoch);
     linux_ticks_to_time(ticks, frequency)
+}
+
+pub(crate) fn refresh_linux_vvar() -> bool {
+    if !LINUX_RUNTIME_MODE.load(Ordering::Acquire) || !ELF_PROBE_ACTIVE.load(Ordering::Acquire) {
+        return true;
+    }
+    let frequency = ELF_PROBE_CLOCK_FREQUENCY.load(Ordering::Relaxed);
+    let monotonic_epoch = ELF_PROBE_CLOCK_EPOCH.load(Ordering::Relaxed);
+    let now = timer::timestamp_counter();
+    let multiplier = (NANOSECONDS_PER_SECOND << 32).checked_div(frequency);
+    let monotonic = now
+        .checked_sub(monotonic_epoch)
+        .and_then(|ticks| linux_ticks_to_time(ticks, frequency));
+    let realtime = crate::linux_realtime_epoch().and_then(|(seconds, epoch)| {
+        now.checked_sub(epoch)
+            .and_then(|ticks| linux_ticks_to_time(ticks, frequency))
+            .and_then(|(elapsed, nanoseconds)| {
+                seconds
+                    .checked_add(elapsed)
+                    .map(|seconds| (seconds, nanoseconds))
+            })
+    });
+    let frame = (0..usize::from(ELF_PROBE_ACTIVE_IMAGE_COUNT.load(Ordering::Acquire)))
+        .find(|index| {
+            ELF_PROBE_ACTIVE_IMAGE_ADDRESSES[*index].load(Ordering::Acquire)
+                == crate::linux_elf::VVAR_ADDRESS
+        })
+        .and_then(|index| {
+            memory::FrameLease::from_parts(
+                ELF_PROBE_ACTIVE_IMAGE_FRAMES[index].load(Ordering::Acquire),
+                ELF_PROBE_ACTIVE_IMAGE_GENERATIONS[index].load(Ordering::Acquire),
+            )
+        });
+    multiplier
+        .zip(monotonic)
+        .zip(realtime)
+        .zip(frame)
+        .is_some_and(
+            |(
+                (
+                    (multiplier, (monotonic_seconds, monotonic_nanoseconds)),
+                    (realtime_seconds, realtime_nanoseconds),
+                ),
+                frame,
+            )| {
+                address_space::update_linux_vvar(
+                    frame,
+                    [
+                        multiplier,
+                        now,
+                        monotonic_seconds,
+                        monotonic_nanoseconds,
+                        realtime_seconds,
+                        realtime_nanoseconds,
+                    ],
+                )
+            },
+        )
 }
 
 fn linux_ticks_to_time(ticks: u64, frequency: u64) -> Option<(u64, u64)> {
@@ -23300,6 +23376,9 @@ fn linux_rootfs_execve_source(
         LINUX_PROCESS_CHILD_EXEC_PID.store(pid, Ordering::SeqCst);
         LINUX_PROCESS_CHILD_EXECUTED.store(true, Ordering::SeqCst);
     }
+    if !refresh_linux_vvar() {
+        return LINUX_ENOMEM;
+    }
     0
 }
 
@@ -31607,14 +31686,36 @@ fn wake_linux_epoll_waits() -> u32 {
 }
 
 fn wake_linux_descriptor_waits() -> u32 {
-    wake_linux_poll_waits()
+    if !LINUX_DESCRIPTOR_WAITS_ACTIVE.load(Ordering::Acquire) {
+        return 0;
+    }
+    let woken = wake_linux_poll_waits()
         + wake_linux_select_waits()
         + wake_linux_epoll_waits()
         + wake_linux_eventfd_read_waits()
         + wake_linux_eventfd_write_waits()
         + wake_linux_pipe_read_waits()
         + wake_linux_pipe_write_waits()
-        + wake_linux_timerfd_read_waits()
+        + wake_linux_timerfd_read_waits();
+    let active = (0..LINUX_THREAD_LIMIT).any(|slot| {
+        LINUX_THREAD_STATES[slot].load(Ordering::Relaxed) == LINUX_THREAD_BLOCKED
+            && matches!(
+                LINUX_THREAD_WAIT_KINDS[slot].load(Ordering::Relaxed),
+                LINUX_THREAD_WAIT_POLL
+                    | LINUX_THREAD_WAIT_PPOLL
+                    | LINUX_THREAD_WAIT_EPOLL
+                    | LINUX_THREAD_WAIT_EPOLL_PWAIT
+                    | LINUX_THREAD_WAIT_SELECT
+                    | LINUX_THREAD_WAIT_PSELECT
+                    | LINUX_THREAD_WAIT_EVENTFD_READ
+                    | LINUX_THREAD_WAIT_EVENTFD_WRITE
+                    | LINUX_THREAD_WAIT_PIPE_READ
+                    | LINUX_THREAD_WAIT_PIPE_WRITE
+                    | LINUX_THREAD_WAIT_TIMERFD_READ
+            )
+    });
+    LINUX_DESCRIPTOR_WAITS_ACTIVE.store(active, Ordering::Release);
+    woken
 }
 
 #[derive(Clone, Copy)]

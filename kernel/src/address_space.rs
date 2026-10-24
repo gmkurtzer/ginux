@@ -418,12 +418,22 @@ pub(crate) fn run_linux_init(init: &[u8]) -> LinuxProcessOutcome {
         vdso_page.fill(0);
         vdso_page.get_mut(..vdso.len())?.copy_from_slice(vdso);
         let frequency = crate::arch::x86_64::timer::monotonic_frequency()?;
+        let multiplier = (1_000_000_000_u64 << 32).checked_div(frequency)?;
+        if multiplier == 0 {
+            return None;
+        }
         let monotonic_epoch = crate::arch::x86_64::timer::timestamp_counter();
         let (realtime_seconds, realtime_epoch) = crate::linux_realtime_epoch()?;
-        vvar[8..16].copy_from_slice(&frequency.to_ne_bytes());
+        vvar[8..16].copy_from_slice(&multiplier.to_ne_bytes());
         vvar[16..24].copy_from_slice(&monotonic_epoch.to_ne_bytes());
-        vvar[24..32].copy_from_slice(&realtime_seconds.to_ne_bytes());
-        vvar[32..40].copy_from_slice(&realtime_epoch.to_ne_bytes());
+        let realtime_ticks = monotonic_epoch.checked_sub(realtime_epoch)?;
+        let realtime_nanoseconds =
+            u64::try_from(u128::from(realtime_ticks) * 1_000_000_000_u128 / u128::from(frequency))
+                .ok()?;
+        let realtime_seconds =
+            realtime_seconds.checked_add(realtime_nanoseconds / 1_000_000_000)?;
+        vvar[40..48].copy_from_slice(&realtime_seconds.to_ne_bytes());
+        vvar[48..56].copy_from_slice(&(realtime_nanoseconds % 1_000_000_000).to_ne_bytes());
         if !map_linux_leaf_in_root(
             root.address(),
             crate::linux_elf::VVAR_ADDRESS,
@@ -4983,6 +4993,26 @@ pub(crate) fn prepare_linux_frame(frame: u64, bytes: &[u8]) -> bool {
             return false;
         };
         core::ptr::copy_nonoverlapping(bytes.as_ptr(), output, bytes.len());
+    }
+    true
+}
+
+pub(crate) fn update_linux_vvar(frame: memory::FrameLease, time: [u64; 6]) -> bool {
+    if !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[frame]) {
+        return false;
+    }
+    let Some(address) = frame.direct_map_address() else {
+        return false;
+    };
+    // SAFETY: the generation-tagged frame is live, remains kernel-owned, and
+    // the vvar mapping is read-only in userspace. This refresh runs while exec
+    // owns the address space, before the replacement image returns to ring 3;
+    // the resulting time base is immutable for that execution image.
+    unsafe {
+        let fields = (address as *mut u64).add(1);
+        for (index, value) in time.into_iter().enumerate() {
+            fields.add(index).write_volatile(value);
+        }
     }
     true
 }

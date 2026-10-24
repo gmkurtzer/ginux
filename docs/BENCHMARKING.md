@@ -105,10 +105,10 @@ per workload and system.
 
 | Workload | Metric | Rocky on Linux | Rocky on Ginux | Relative result |
 |---|---|---:|---:|---:|
-| CPU | events/s | 232.360 | 262.190 | Ginux 1.128x faster |
-| Memory | MiB/s | 679.510 | 584.540 | Ginux 1.162x slower |
-| Threads | events/s | 306.129 | 311.147 | Ginux 1.016x faster |
-| Mutex | seconds/event | 1.550 | 1.443 | Ginux 1.074x faster |
+| CPU | events/s | 232.360 | 267.650 | Ginux 1.152x faster |
+| Memory | MiB/s | 679.510 | 620.580 | Ginux 1.095x slower |
+| Threads | events/s | 306.129 | 309.732 | Ginux 1.012x faster |
+| Mutex | seconds/event | 1.550 | 1.423 | Ginux 1.089x faster |
 
 The CPU workload is almost entirely userspace computation; its 12.8% Ginux
 lead is preliminary and may include TCG variation or different background
@@ -119,7 +119,10 @@ than raw memory bandwidth. A trusted-copy path, removal of clock calls from
 the diagnostic syscall ring, and a guarded clock fast path raised the matched
 median to 233.210 MiB/s. A Linux-compatible vDSO and adjacent read-only vvar
 page then removed the remaining privilege crossings and raised the median to
-584.540 MiB/s. Rocky on Ginux is 1.162 times slower in this one-kibibyte test;
+584.540 MiB/s. A second vDSO pass replaced per-read division and synchronized
+live snapshots with an immutable per-exec time base, fixed-point TSC
+conversion, and constant-time reciprocal normalization. The final median is
+620.580 MiB/s. Rocky on Ginux is 1.095 times slower in this one-kibibyte test;
 the remaining TCG gap is too small to assign to one kernel mechanism without
 native KVM profiling.
 
@@ -130,8 +133,8 @@ yields per event. Tracking the last preempted thread and excluding it from an
 immediate voluntary-yield selection raised the Ginux median from 0.078 to
 181.915 events/s. A second pass found that a yield with no other runnable
 thread still serialized and restored the unchanged user context. Treating
-that Linux scheduling hint as a no-op raised the median to 311.147 events/s,
-1.016 times the Rocky result. This closes the measured single-thread yield
+that Linux scheduling hint as a no-op raised the median to 309.732 events/s,
+1.012 times the Rocky result. This closes the measured single-thread yield
 gap; it does not measure parallel execution or SMP scheduling.
 The single-thread mutex workload completed one event on both kernels and
 carries little weight.
@@ -146,7 +149,7 @@ in `rocky-linux-run-*-results.log`, `ginux-sysbench-*.log`, and
 
 Before treating these checkpoint results as general performance evidence:
 
-1. Profile the remaining 1.162x memory-test gap under native x86-64 KVM.
+1. Profile the remaining 1.095x memory-test gap under native x86-64 KVM.
 2. Make `domain exec --interactive` retain the running systemd domain and
    deliver its PTY and output.
 3. Repeat both sides on the same x86-64 Linux host with KVM.

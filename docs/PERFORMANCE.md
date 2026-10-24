@@ -95,9 +95,12 @@ one virtual CPU.
   full save, validation, TLS, and restore path.
 - The one-kibibyte memory workload originally reached 48.390 MiB/s. A guarded
   syscall path raised it to 233.210 MiB/s, then a Linux-compatible vDSO and
-  read-only vvar page raised the nine-sample median to 584.540 MiB/s. Rocky on
-  Linux measured 679.510 MiB/s, leaving Rocky on Ginux 1.162 times slower. The
-  remaining TCG gap needs native KVM profiling; syscall safety was not weakened.
+  read-only vvar page raised the nine-sample median to 584.540 MiB/s. Replacing
+  per-read division and synchronization with an immutable per-exec time base,
+  fixed-point TSC conversion, and constant-time reciprocal normalization raised
+  it again to 620.580 MiB/s. Rocky on Linux measured 679.510 MiB/s, leaving
+  Rocky on Ginux 1.095 times slower. The remaining TCG gap needs native KVM
+  profiling; syscall safety was not weakened.
 - A cached 299,590,656-byte published Rocky rootfs restored directly in 8,363
   ms. Restoring its 109,755,585 compressed bytes and unpacking them took about
   6,200 ms. The v2 cache can publish a digest-verified rootfs directly, but

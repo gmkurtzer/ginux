@@ -9,6 +9,8 @@ __vdso_clock_gettime:
     # Fast-path the wall and monotonic clocks used by glibc and sysbench.
     # CPU-time clocks retain the syscall fallback because their accounting is
     # process specific rather than derivable from the invariant TSC.
+    cmpl $1, %edi
+    je .Lmonotonic_fast
     cmpl $0, %edi
     je .Lrealtime
     cmpl $5, %edi
@@ -17,8 +19,6 @@ __vdso_clock_gettime:
     je .Lrealtime
     cmpl $11, %edi
     je .Lrealtime
-    cmpl $1, %edi
-    je .Lmonotonic
     cmpl $4, %edi
     je .Lmonotonic
     cmpl $6, %edi
@@ -39,6 +39,40 @@ __vdso_clock_gettime:
     jmp .Lread_clock
 .Lrealtime_coarse:
     movl $3, %r8d
+    jmp .Lread_clock
+
+.Lmonotonic_fast:
+    # sysbench and most elapsed-time measurements use CLOCK_MONOTONIC. QEMU's
+    # invariant 1 GHz TSC maps ticks directly to nanoseconds, so keep that
+    # overwhelmingly common case free of generic clock classification and
+    # fixed-point multiplication. Other TSC ratios use the generic path.
+    leaq .Lmonotonic_fast(%rip), %r9
+    andq $-4096, %r9
+    subq $4096, %r9
+.Lmonotonic_fast_retry:
+    movq 8(%r9), %rcx
+    movabsq $4294967296, %rdx
+    cmpq %rdx, %rcx
+    jne .Lmonotonic
+    rdtsc
+    shlq $32, %rdx
+    orq %rdx, %rax
+    subq 16(%r9), %rax
+    movq 24(%r9), %r10
+    movq 32(%r9), %rdi
+    addq %rax, %rdi
+    movq %rdi, %rax
+    shrq $9, %rax
+    movabsq $19342813113834067, %rdx
+    mulq %rdx
+    shrq $11, %rdx
+    addq %rdx, %r10
+    imulq $1000000000, %rdx, %rax
+    subq %rax, %rdi
+    movq %r10, (%rsi)
+    movq %rdi, 8(%rsi)
+    xorl %eax, %eax
+    ret
 
 .Lread_clock:
     # AT_SYSINFO_EHDR is page aligned and this image occupies one page. The
@@ -46,37 +80,51 @@ __vdso_clock_gettime:
     leaq .Lread_clock(%rip), %r9
     andq $-4096, %r9
     subq $4096, %r9
+.Lretry:
     movq 8(%r9), %rcx
     testq %rcx, %rcx
     je .Lfallback
     rdtsc
     shlq $32, %rdx
     orq %rdx, %rax
+    subq 16(%r9), %rax
     testb $2, %r8b
     jnz .Lwall_epoch
-    subq 16(%r9), %rax
-    xorl %r10d, %r10d
+    movq 24(%r9), %r10
+    movq 32(%r9), %rdi
     jmp .Lscale
 .Lwall_epoch:
-    subq 32(%r9), %rax
-    movq 24(%r9), %r10
+    movq 40(%r9), %r10
+    movq 48(%r9), %rdi
 .Lscale:
-    xorl %edx, %edx
-    divq %rcx
-    addq %r10, %rax
-    movq %rax, (%rsi)
-    movq %rdx, %rax
-    movl $1000000000, %r10d
-    mulq %r10
-    divq %rcx
+    # Convert TSC ticks to nanoseconds with the Q32 multiplier prepared by
+    # the kernel. Unlike the syscall-compatible prototype, the common path
+    # contains no hardware division.
+    movabsq $4294967296, %rdx
+    cmpq %rdx, %rcx
+    je .Lnanoseconds_ready
+    mulq %rcx
+    shrdq $32, %rdx, %rax
+.Lnanoseconds_ready:
+    addq %rax, %rdi
+    movq %rdi, %rax
+    shrq $9, %rax
+    movabsq $19342813113834067, %rdx
+    mulq %rdx
+    shrq $11, %rdx
+    addq %rdx, %r10
+    imulq $1000000000, %rdx, %rax
+    subq %rax, %rdi
+    movq %rdi, %rax
     testb $1, %r8b
     jz .Lstore_nsec
     # Linux coarse clocks advance in 10 ms ticks for AT_CLKTCK=100.
     xorl %edx, %edx
-    movl $10000000, %r10d
-    divq %r10
-    imulq %r10, %rax
+    movl $10000000, %ecx
+    divq %rcx
+    imulq %rcx, %rax
 .Lstore_nsec:
+    movq %r10, (%rsi)
     movq %rax, 8(%rsi)
     xorl %eax, %eax
     ret
