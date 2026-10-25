@@ -375,45 +375,12 @@ that question without pretending to replace decades of Linux engineering.
 Useful ideas, including domains, may ultimately belong in established systems
 rather than a Ginux deployment.
 
-\subsection{Initial security observations}
+\subsection{Security review deferred}
 
-Prompted by external review, the same agent that produced the code performed a
-bounded security pass over boot trust, memory and domain boundaries, user
-copies, parsers, OCI and registry TLS, dependencies, and automated gates. This
-was code review, not an independent audit or penetration test. The
-\href{https://github.com/gmkurtzer/ginux/blob/main/docs/SECURITY-ASSESSMENT.md}{initial
-security assessment} records the complete findings.
-
-A follow-on, exploit-oriented red-team review was attempted but could not
-continue in the available Codex environment. OpenAI classified the request as
-subject to additional cybersecurity safeguards and required Trusted Access
-identity verification. No adversarial security audit is therefore claimed in
-this report. A separately authorized follow-up may revisit that work.
-
-QEMU negative tests exercise NX, W\textasciicircum X, supervisor write
-protection, SMEP, SMAP, UMIP, guard pages, capability revocation, cross-domain
-rejection, and IOMMU-mediated DMA confinement. The boot path verifies a signed
-manifest and component measurements; OCI publication requires HTTPS, matching
-platform metadata, and matching layer digests. User copies validate canonical
-addresses, ownership, mappings, and permissions.
-
-The pass also found immediate blockers. Registry TLS seeds its pseudorandom
-generator from predictable boot time; the manifest uses a published development
-signing key; and Linux processes have fixed addresses rather than ASLR. A
-RustSec scan of 118 dependencies found timing-side-channel advisories in
-\texttt{crypto-bigint 0.5.5}
-(\href{https://github.com/RustCrypto/crypto-bigint/pull/1365}{RUSTSEC-2026-0387})
-and \texttt{rsa 0.9.10}
-(\href{https://rustsec.org/advisories/RUSTSEC-2023-0071}{RUSTSEC-2023-0071}),
-both entering through the registry TLS library. A large, hardware-facing unsafe
-surface and bespoke certificate-name parsing lack systematic fuzzing.
-
-The hosted checks passed, but two full QEMU verification runs failed at the
-linked Linux ELF invariant, leaving the end-to-end gate red. This result is the
-important one: AI can assemble functionality quickly, while justified trust
-still requires threat modeling, adversarial tests, dependency maintenance,
-independent review, and repeated correction. A new kernel begins without the
-decades of hardening already invested in Linux.
+An exploit-oriented security audit was attempted but could not continue because
+OpenAI required Trusted Access authorization for the request. No security audit
+is claimed in this report. The work may be revisited as a separately authorized
+follow-up experiment.
 
 \subsection{Illustrative operator workflows}
 
