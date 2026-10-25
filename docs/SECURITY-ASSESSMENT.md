@@ -11,6 +11,13 @@ assessment. It examined the boot trust path, memory and domain boundaries,
 userspace copying, executable loading, OCI ingestion, registry TLS, dependency
 advisories, and the automated verification gates.
 
+An exploit-oriented red-team follow-up was attempted but could not continue in
+the available Codex environment. OpenAI classified the request as subject to
+additional cybersecurity safeguards and required Trusted Access identity
+verification. This document therefore records only the bounded review described
+above; it does not claim an adversarial security audit. A separately authorized
+follow-up may revisit that work.
+
 ## What was run
 
 - `make check` passed formatting, architecture consistency, Linux compatibility

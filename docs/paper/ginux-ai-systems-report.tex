@@ -375,7 +375,7 @@ that question without pretending to replace decades of Linux engineering.
 Useful ideas, including domains, may ultimately belong in established systems
 rather than a Ginux deployment.
 
-\subsection{A bounded security review}
+\subsection{Initial security observations}
 
 Prompted by external review, the same agent that produced the code performed a
 bounded security pass over boot trust, memory and domain boundaries, user
@@ -383,6 +383,12 @@ copies, parsers, OCI and registry TLS, dependencies, and automated gates. This
 was code review, not an independent audit or penetration test. The
 \href{https://github.com/gmkurtzer/ginux/blob/main/docs/SECURITY-ASSESSMENT.md}{initial
 security assessment} records the complete findings.
+
+A follow-on, exploit-oriented red-team review was attempted but could not
+continue in the available Codex environment. OpenAI classified the request as
+subject to additional cybersecurity safeguards and required Trusted Access
+identity verification. No adversarial security audit is therefore claimed in
+this report. A separately authorized follow-up may revisit that work.
 
 QEMU negative tests exercise NX, W\textasciicircum X, supervisor write
 protection, SMEP, SMAP, UMIP, guard pages, capability revocation, cross-domain
