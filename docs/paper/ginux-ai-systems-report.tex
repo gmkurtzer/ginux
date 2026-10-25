@@ -1,17 +1,18 @@
 \documentclass[11pt]{article}
 
-\usepackage[margin=0.85in]{geometry}
+\usepackage[margin=0.8in]{geometry}
 \usepackage{booktabs}
 \usepackage{enumitem}
 \usepackage{hyperref}
 \usepackage{microtype}
+\setlength{\emergencystretch}{1em}
 
 \hypersetup{colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue}
 \setlist{nosep}
 
 \newcommand{\project}{Ginux}
 \newcommand{\modelname}{OpenAI Codex with GPT-5.6 Sol}
-\newcommand{\evaluatedcommit}{\texttt{d11c126a048a51fe\allowbreak{}7eb9c4105f31760a\allowbreak{}dd1027ea}}
+\newcommand{\evaluatedcommit}{\texttt{d11c126a048a\allowbreak{}51fe7eb9c410\allowbreak{}5f31760add10\allowbreak{}27ea}}
 \newcommand{\estimatedcost}{approximately USD~8,000}
 \newcommand{\repolink}[2]{\href{https://github.com/gmkurtzer/ginux/blob/d11c126a048a51fe7eb9c4105f31760add1027ea/#1}{\texttt{#2}}}
 \newcommand{\tcell}[1]{{\raggedright #1\par}}
@@ -509,6 +510,27 @@ syscall and non-syscall behavior. The
 record} kept both plan and rationale outside the chat transcript. These files
 provided durable state for a long-running agent session and made architectural
 drift visible.
+
+\subsection{Why Codex and GPT-5.6 Sol}
+
+The project used \modelname{} in the Codex desktop environment. At the final
+documentation checkpoint, the environment reported desktop version
+\texttt{26.825.51511} (build \texttt{7377}) and bundled
+\texttt{codex-cli 0.151.0-alpha.7.2}. The continuously updated client may have
+changed during the eleven-day project, so these identify the final checkpoint;
+GPT-5.6 Sol was the development model.
+
+Selection was practical, not a controlled comparison. In prior work, the author
+found advanced Claude models more likely to spend substantial context and token
+budget on technically interesting side paths, often requiring work to be undone
+and the active goal restated. For this project, Codex stayed closer to each
+milestone and more consistently completed the edit, build, QEMU, inspect, and
+revise loop. Nearly all development occurred in one long-running Codex task,
+which preserved the architecture, plan, repository state, failures, and gates in
+shared context. This is an author-reported workflow observation, not a model
+benchmark: matched prompts, blinded grading, and provider token measurements
+were not collected. Expert correction remained essential whenever a plausible
+result violated Linux semantics, operator expectations, or the architecture.
 
 \begin{samepage}
 \subsection{Staged construction}
