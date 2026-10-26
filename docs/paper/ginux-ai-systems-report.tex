@@ -324,7 +324,7 @@ service plane, and workload domains. OCI supplies initial filesystem content;
 it is not the runtime or isolation mechanism. This section describes boot,
 privilege boundaries, domain management, and Linux compatibility.
 
-\subsection{Boot and system packaging}
+\subsection{Initial boot architecture}
 
 UEFI removes several assumptions inherited from the BIOS era. Firmware loads a
 PE32+ application into memory, including all of its sections, through
@@ -350,7 +350,7 @@ measured as one artifact before execution. A production system would still
 need a mature update, rollback, signing, recovery, and firmware-compatibility
 story.
 
-\subsection{Kernel, controller, and service boundaries}
+\subsection{Kernel and service boundaries}
 
 Ring~0 contains the mechanisms that must enforce a system-wide invariant:
 page tables and address spaces, scheduling, capabilities, IPC, interrupt and
@@ -359,14 +359,6 @@ trusted side of device and DMA control. The x86-64 implementation does not use
 rings~1 or~2. Ring~3 contains the controller, Linux workloads, and isolated
 native services. Embedding a program in \texttt{GINUX.EFI} controls how its
 bytes arrive; the processor ring still controls its privilege.
-
-The controller is a freestanding, statically linked Rust program using the
-Linux ABI for ordinary process behavior and a versioned device/\texttt{ioctl}
-interface for Ginux management. It parses commands, maintains domain and
-network configuration, starts and observes workloads, and manages persistent
-configuration and the OCI cache. It begins with administrative authority
-defined by the sealed boot envelope, which also sets the outer limit on the
-rights it can delegate.
 
 Device support is deliberately split. The kernel discovers PCI devices and
 retains interrupt-controller, MSI-X, IOMMU, and capability enforcement. The
@@ -390,11 +382,22 @@ in Rust.
 
 \subsection{Controller, domains, and personalities}
 
-The controller configures the host and creates workload domains. It manages
-domain lifecycle, images, resources, networks, persistent configuration, and
-the local OCI cache through a versioned control interface. Host administration
+The controller is the primary system configuration and administration tool. It
+is a freestanding, statically linked Rust program that uses the Linux ABI for
+ordinary process behavior and a versioned device/\texttt{ioctl} interface for
+Ginux management. Its local command interface discovers host state and devices;
+configures networking, storage, persistence, and the OCI cache; defines domain
+images, init processes, resources, attachments, autostart, and lifecycle; and
+reports process, domain, device, and readiness state. Host administration
 therefore remains in userspace even though the controller arrives inside the
 boot image.
+
+The controller does not bypass the kernel to perform privileged work. It sends
+versioned management requests through the control interface described above;
+the kernel validates capability and ownership before performing the protected
+operation. Configuration is committed to the host-owned volume for later
+boots. The controller can delegate or revoke subsets of its sealed boot
+authority, but cannot expand it.
 
 Physical interfaces are kernel-owned resources. The controller configures host
 DHCP and DNS, creates virtual links, and attaches one or more links to a domain
