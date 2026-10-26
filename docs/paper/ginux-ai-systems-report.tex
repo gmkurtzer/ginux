@@ -17,7 +17,7 @@
 \newcommand{\repolink}[2]{\href{https://github.com/gmkurtzer/ginux/blob/d11c126a048a51fe7eb9c4105f31760add1027ea/#1}{\texttt{#2}}}
 \newcommand{\tcell}[1]{{\raggedright #1\par}}
 
-\title{\textbf{Ginux: Methods and Outcomes of Building a Linux Userspace-Compatible Kernel with Expert-Directed AI}}
+\title{\textbf{Ginux: Methods and Outcomes of Building a Linux Userspace-Compatible Kernel with Human-Directed AI}}
 \author{Gregory M. Kurtzer}
 \date{Draft technical report --- October 2026}
 
@@ -25,12 +25,12 @@
 \maketitle
 
 \begin{abstract}
-This paper reports a case study in expert-directed, long-horizon agentic
+This paper reports a case study in human-directed, long-horizon agentic
 software engineering: constructing an independent kernel capable of running an
 existing Linux userspace. Over eleven days, one persistent OpenAI Codex task
 using GPT-5.6 Sol produced Ginux, a Rust-first x86-64 research kernel containing
 approximately 139,000 retained lines of implementation and test code. Written
-architecture, staged acceptance gates, QEMU execution, and repeated expert
+architecture, staged acceptance gates, QEMU execution, and repeated human
 review constrained the agent's implementation loop.
 
 Ginux boots through UEFI, supplies its own memory management, scheduler,
@@ -49,15 +49,15 @@ The result demonstrates rapid integration of established systems mechanisms,
 not the invention of kernel engineering or a production alternative to Linux.
 Compatibility remains partial, the experiment has no matched control or
 independent reproduction, and hardware, security, and application coverage are
-narrow. The case study therefore supports a bounded conclusion: expert-directed
-AI can construct surprisingly deep systems software, while expert judgment,
+narrow. The case study therefore supports a bounded conclusion: human-directed
+AI can construct surprisingly deep systems software, while domain knowledge,
 executable validation, shared standards, and a durable ecosystem remain more
 important than code-generation speed alone.
 \end{abstract}
 
 \section{Introduction}
 
-Can an expert direct a coding agent through the construction of a new kernel
+Can human direction guide a coding agent to build a new kernel
 that runs an existing Linux userspace? Kernel mechanisms are extensively
 documented, but integrating them into a coherent system is a long-horizon task:
 architecture, implementation, diagnosis, compatibility, and evaluation must
@@ -72,7 +72,7 @@ questions:
   itemsep=0.45em,
   topsep=0.45em
 ]
-\item[\textbf{RQ1}] \textbf{Capability.} Can an expert-directed agent construct
+\item[\textbf{RQ1}] \textbf{Capability.} Can a human-directed agent construct
   an independent kernel that executes unmodified Linux distribution userspaces?
 \item[\textbf{RQ2}] \textbf{Method.} What documentation, steering, executable
   gates, and feedback loops are needed to sustain the work?
@@ -125,17 +125,18 @@ SWE-bench evaluates issue resolution against repository tests
 evolution~\cite{thai2025sweevo}. NL2Repo-Bench instead begins with requirements
 and an empty workspace, and reports persistent failures in planning, cross-file
 coherence, and completion over long trajectories~\cite{ding2026nl2repo}. METR's
-time-horizon work similarly measures how task success changes with the time an
-expert would need, rather than treating all programming tasks as equivalent
-~\cite{kwa2025timehorizon}. Ginux is not a benchmark submission to any of these
-suites; it is a longitudinal case study with an evolving expert-defined target.
+time-horizon work similarly measures how task success changes with the time a
+skilled practitioner would need, rather than treating all programming tasks as
+equivalent~\cite{kwa2025timehorizon}. Ginux is not a benchmark submission to any
+of these suites; it is a longitudinal case study with an evolving human-defined
+target.
 
 The closest public whole-project experiment is Carlini's C compiler built by 16
 parallel Claude agents~\cite{carlini2026compiler}. Nearly 2,000 sessions and
 approximately USD~20,000 produced about 100,000 lines of Rust capable of
 compiling substantial software, including most of a Linux kernel build. Its
 compiler test suites and reference tools supplied unusually strong oracles.
-Ginux differs in using one persistent task, continuous expert steering, and
+Ginux differs in using one persistent task, continuous human steering, and
 behavioral gates that had to be created alongside the kernel. Both experiments
 make the harness and acceptance criteria part of the result rather than mere
 supporting machinery.
@@ -162,8 +163,9 @@ technical vision more specific than ``build a kernel'': construct an independent
 normal Linux userspace, a small host, strong privilege boundaries, recoverable
 services, and an operator experience that behaved like a system rather than a
 demonstration. The evaluated interval covered eleven calendar days. Nearly all
-implementation occurred in one long-running Codex task, with the author acting
-as system architect, domain expert, operator, and final evaluator.
+implementation occurred in one long-running Codex task, with the author setting
+the architecture, operating the system, interpreting results, and making the
+final acceptance decisions.
 
 The project used \modelname{} in the Codex desktop environment. At the final
 documentation checkpoint, the environment reported desktop version
@@ -226,7 +228,7 @@ Each stage used two coupled loops:
 \begin{center}
 \fbox{\parbox{0.91\linewidth}{
 \textbf{Outer steering loop:} vision $\rightarrow$ architecture and constraints
-$\rightarrow$ acceptance gate $\rightarrow$ expert review of observed behavior
+$\rightarrow$ acceptance gate $\rightarrow$ human review of observed behavior
 $\rightarrow$ correction, reprioritization, or acceptance.\\[3pt]
 \textbf{Inner agent loop:} implementation $\rightarrow$ build and QEMU run
 $\rightarrow$ measurement and failure analysis $\rightarrow$ revision
@@ -245,8 +247,8 @@ shared-page paths, which remained subject to architectural review.
 Hands-on use repeatedly changed the plan. Empty directory listings exposed
 filesystem and process defects; a second domain exposed singleton state;
 systemd exposed missing mount, procfs, socket, terminal, event, and credential
-semantics; controller latency exposed scheduler defects. The expert interpreted
-those symptoms against expected Linux and operator behavior, while the agent
+semantics; controller latency exposed scheduler defects. Those symptoms were
+interpreted against expected Linux and operator behavior, while the agent
 converted them into repeatable QEMU, ABI, lifecycle, and performance tests.
 
 The performance work in Section~\ref{sec:performance} is a compact example.
@@ -606,11 +608,11 @@ compatibility or performance claim.
 \section{Threats to Validity}
 
 This is one successful case study, not a controlled estimate of coding-agent
-reliability. The project used one model trajectory, one expert, and one evolving
-repository. There was no matched human-only project, alternative-model run, or
+reliability. The project used one model trajectory and one evolving repository.
+There was no matched human-only project, alternative-model run, or
 independent reconstruction from the original requirements. The author supplied
-the architecture and also judged whether observed behavior was acceptable,
-creating both expertise and evaluator bias.
+the architecture and also judged whether observed behavior was acceptable. This
+provided informed judgment but also introduced evaluator bias.
 
 Repository size, commits, elapsed days, and API cost describe the artifact but
 do not measure equivalent human labor or code quality. The client may have
@@ -646,18 +648,18 @@ the existing abstractions proved insufficient. That route would have produced
 broader hardware and application support much sooner.
 
 It would also answer a different question. This experiment deliberately
-removed Linux from the kernel side to test whether an expert-directed AI could
+removed Linux from the kernel side to test whether a human-directed AI could
 construct the machinery itself and discover a distinct outer isolation object.
 Starting with Linux would shift the work from reimplementation toward
 integration, hardening, measurement, and upstream-quality design. That may be
 the more valuable implication: if AI can traverse the from-scratch path, an
-expert can instead aim it at bounded improvements to a mature system, where
+a team can instead aim it at bounded improvements to a mature system, where
 the ecosystem remains intact and the novel idea must survive existing review,
 compatibility, and performance standards.
 
-\subsection{Human experts are critical for great outcomes}
+\subsection{Domain knowledge and human judgment shape outcomes}
 
-Human expertise made Ginux possible. Codex dramatically shortened the path
+Domain knowledge made Ginux possible. Codex dramatically shortened the path
 from a technical decision to working code, while human direction supplied the
 vision, priorities, and standard for success. Practical systems knowledge was
 needed at every turn: choosing a Linux userspace contract, separating OCI
@@ -679,10 +681,10 @@ software, this judgment is as important as the ability to produce code.
 AI also gives junior engineers a much shorter path to meaningful contribution.
 They can explore unfamiliar code, generate tests, compare interfaces, and
 implement bounded work at a speed that previously required much more
-experience. Experienced engineers know which abstraction fits, which result
+experience. Engineers with relevant experience know which abstraction fits, which result
 deserves another test, what compatibility means in practice, and when a local
 success creates a system-wide liability. The best results pair AI's
-implementation speed with an expert's ability to keep the work pointed at the
+implementation speed with informed human judgment that keeps the work pointed at the
 right problem.
 
 The same lesson applies to project controls. Written architecture gives the
@@ -732,7 +734,7 @@ contracts.
 
 \section{Conclusion}
 
-For RQ1, Ginux provides a bounded but concrete result: one expert-directed
+For RQ1, Ginux provides a bounded but concrete result: one human-directed
 coding agent produced an independent kernel that boots unmodified Alpine
 programs and a Rocky Linux systemd userspace. The artifact also supports
 kernel-native domains and ran the same sysbench executable used on a stock
@@ -741,7 +743,7 @@ not the invention of kernel engineering itself.
 
 For RQ2, the decisive method was neither a single prompt nor unconstrained
 autonomy. Written architecture, staged behavioral gates, a persistent task,
-real workloads, and expert interpretation kept the inner implementation loop
+real workloads, and informed human interpretation kept the inner implementation loop
 aligned with the system objective. For RQ3, the result remains narrow: Linux
 compatibility is partial, performance evidence is limited, and production
 hardware, security, standards, and maintenance requirements were not met.

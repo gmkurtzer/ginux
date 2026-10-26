@@ -225,7 +225,7 @@ The collaboration can be summarized as follows:
 | Production-readiness judgment and stopping point | Human direction |
 
 This was neither autonomous kernel generation nor line-by-line human
-programming. It was expert-directed agentic engineering: the agent received
+programming. It was domain-informed agentic engineering: the agent received
 real authority over implementation and iteration, while an experienced system
 designer supplied the model of correctness and repeatedly tested whether the
 artifact matched it.
