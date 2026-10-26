@@ -319,10 +319,11 @@ behavior was wrong, and setting the next verifiable boundary.
 
 \section{System Design and Implementation}
 
-Ginux comprises a UEFI boot envelope, a privileged kernel, a ring-3 control and
-service plane, and workload domains. OCI supplies initial filesystem content;
-it is not the runtime or isolation mechanism. This section describes boot,
-privilege boundaries, domain management, and Linux compatibility.
+Ginux is a monolithic EFI boot artifact containing the privileged kernel,
+boot-critical facilities, and an embedded ring-3 controller. It provides
+workload domains; OCI supplies their initial filesystem content, not runtime
+isolation. This section describes boot, boundaries, management, and Linux
+compatibility.
 
 \subsection{Initial boot architecture}
 
@@ -333,14 +334,14 @@ as a much larger payload instead of growing through a chain of bootstrap
 loaders from a 512-byte boot sector. Firmware quality, available memory,
 filesystem support, and PE/COFF representation still impose practical limits.
 
-Ginux uses that freedom to boot a single \texttt{GINUX.EFI} image containing its
-Rust-first kernel, required x86-64 assembly, embedded controller payload,
-component catalog, and recovery metadata. There is no required host
-distribution, separate bootloader, or separate initramfs. After leaving UEFI
-boot services, the kernel establishes paging, interrupts, protection,
-scheduling, capabilities, storage, and networking, then launches the embedded
-controller as a normal ring-3 process. The controller is packaged with the
-kernel but executes in userspace.
+Ginux uses that freedom for a monolithic boot architecture: one
+\texttt{GINUX.EFI} image contains its Rust-first kernel, required x86-64
+assembly, boot-critical facilities, embedded controller, component catalog,
+and recovery metadata. No host distribution, separate bootloader, or separate
+initramfs is required. After leaving UEFI boot services, the kernel initializes
+the system and maps the controller as a normal ring-3 process. The controller
+therefore lives inside the kernel image for packaging and lifecycle, but not
+for processor privilege.
 
 This packaging simplified an experiment that otherwise would have needed to
 coordinate a bootloader, kernel image, initramfs, host root filesystem, and
@@ -382,15 +383,16 @@ in Rust.
 
 \subsection{Controller, domains, and personalities}
 
-The controller is the primary system configuration and administration tool. It
-is a freestanding, statically linked Rust program that uses the Linux ABI for
-ordinary process behavior and a versioned device/\texttt{ioctl} interface for
-Ginux management. Its local command interface discovers host state and devices;
-configures networking, storage, persistence, and the OCI cache; defines domain
-images, init processes, resources, attachments, autostart, and lifecycle; and
-reports process, domain, device, and readiness state. Host administration
-therefore remains in userspace even though the controller arrives inside the
-boot image.
+The controller is compiled into \texttt{GINUX.EFI}, not installed as a separate
+host service. At boot, the kernel maps this authenticated, statically linked
+Rust payload into ring~3. It is the primary configuration and administration
+tool for the kernel, devices, and domains, using the Linux ABI for ordinary
+process behavior and a versioned device/\texttt{ioctl} management interface.
+Its command interface discovers host state and devices; configures networking,
+storage, persistence, and the OCI cache; defines domain images, init processes,
+resources, attachments, autostart, and lifecycle; and reports process, domain,
+device, and readiness state. The controller thus belongs to the single kernel
+image and release unit while administration executes with userspace privilege.
 
 The controller does not bypass the kernel to perform privileged work. It sends
 versioned management requests through the control interface described above;
