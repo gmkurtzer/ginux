@@ -317,9 +317,14 @@ often dismissed as AI slop. The important human contribution was not typing
 each implementation step; it was defining the system, recognizing when observed
 behavior was wrong, and setting the next verifiable boundary.
 
-\section{The Ginux Artifact}
+\section{System Design and Implementation}
 
-\subsection{A simplified boot architecture}
+Ginux comprises a UEFI boot envelope, a privileged kernel, a ring-3 control and
+service plane, and workload domains. OCI supplies initial filesystem content;
+it is not the runtime or isolation mechanism. This section describes boot,
+privilege boundaries, domain management, and Linux compatibility.
+
+\subsection{Boot and system packaging}
 
 UEFI removes several assumptions inherited from the BIOS era. Firmware loads a
 PE32+ application into memory, including all of its sections, through
@@ -345,7 +350,7 @@ measured as one artifact before execution. A production system would still
 need a mature update, rollback, signing, recovery, and firmware-compatibility
 story.
 
-\subsection{Implementation anatomy}
+\subsection{Kernel, controller, and service boundaries}
 
 Ring~0 contains the mechanisms that must enforce a system-wide invariant:
 page tables and address spaces, scheduling, capabilities, IPC, interrupt and
@@ -391,6 +396,12 @@ the local OCI cache through a versioned control interface. Host administration
 therefore remains in userspace even though the controller arrives inside the
 boot image.
 
+Physical interfaces are kernel-owned resources. The controller configures host
+DHCP and DNS, creates virtual links, and attaches one or more links to a domain
+without renaming them. A domain with no explicit attachment can share the host
+network, and every domain receives loopback. Host networking and link lifecycle
+are tested; independent per-domain packet paths and leases remain unfinished.
+
 A \emph{domain} is a native Ginux kernel object with a broader role than an OCI
 container or Linux namespace. It owns or is granted address spaces, a process tree,
 capabilities, IPC objects, filesystem and mount views, networks, devices,
@@ -417,15 +428,14 @@ mechanisms, but no BSD ABI was built or tested. Linux namespaces may eventually
 subdivide a Linux domain; they would remain inside the stronger outer domain
 boundary.
 
-Storage follows the same separation. Domain roots may be assembled from
-verified OCI layers and receive a boot-local writable overlay. Ginux also has
-a persistent host-owned volume for controller configuration and a
-content-addressed OCI layer cache, so a reboot need not redownload every image
-or forget every domain. It currently provides selected tmpfs, overlay, procfs,
-devfs, and persistent-volume behavior. Linux's broad filesystem ecosystem and
-production storage guarantees remain outside the prototype.
+Domain roots combine verified OCI layers with a boot-local writable overlay. A
+persistent host-owned volume retains controller configuration and a
+content-addressed OCI cache across reboots. Selected tmpfs, overlay, procfs,
+devfs, and persistent-volume behavior are implemented; Linux's broad
+filesystem ecosystem and production storage guarantees remain outside the
+prototype.
 
-\subsection{POSIX surface, identities, and permissions}
+\subsection{Linux compatibility, identities, and authority}
 
 Linux syscall-number coverage alone says little about POSIX conformance. POSIX is
 primarily a source and behavioral contract across libc, processes, files,
@@ -454,7 +464,7 @@ capabilities, and denies many credential mutations. POSIX ACLs and permission
 edge cases remain incomplete; no SELinux or other active Linux security module
 enforces labels. Linux UID~0 cannot bypass the native capability table.
 
-This architecture is the artifact-level answer to RQ1: the agent integrated
+This system design is the implementation-level answer to RQ1: the agent integrated
 enough independent kernel machinery to host a recognizable Linux environment.
 Whether that environment behaves correctly, broadly, or efficiently is a
 separate empirical question addressed next.
