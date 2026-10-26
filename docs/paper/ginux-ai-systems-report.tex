@@ -17,7 +17,7 @@
 \newcommand{\repolink}[2]{\href{https://github.com/gmkurtzer/ginux/blob/d11c126a048a51fe7eb9c4105f31760add1027ea/#1}{\texttt{#2}}}
 \newcommand{\tcell}[1]{{\raggedright #1\par}}
 
-\title{\textbf{Ginux: Methods and Outcomes of Building a Linux Userspace-Compatible Kernel through Human-Directed Agentic Engineering}}
+\title{\textbf{Ginux: Building an Independent Kernel That Runs Linux Userspace through Human-Directed Agentic Engineering}}
 \author{Gregory M. Kurtzer}
 \date{Draft technical report --- October 2026}
 
@@ -34,13 +34,14 @@ produced Ginux, a Rust-first x86-64 research kernel containing approximately
 
 Ginux boots through UEFI, supplies its own memory management, scheduler,
 process model, filesystems, networking, devices, and Linux compatibility layer,
-and runs its controller in ring~3. The evaluated system executes unmodified
-Alpine programs and completes a Rocky Linux 10 systemd boot through
-\texttt{multi-user.target}. It also runs the same sysbench binary used on a
-stock Rocky Linux comparison system. A short benchmark-driven iteration reduced
-initial memory and thread slowdowns from approximately 14 and 3,900 times to
-within 10 percent and 1 percent, respectively, on the tested workloads. The
-system also explores kernel-native domains as isolation and scheduling
+and runs its controller in ring~3. The evaluated system executes selected
+unmodified Alpine programs and completes a Rocky Linux 10 systemd boot through
+\texttt{multi-user.target}. It also executes the same sysbench binary used on a
+stock Rocky Linux comparison system. Exploratory benchmark-driven iteration
+reduced severe memory and thread-path defects to approximate parity on three
+narrow, single-vCPU workloads under cross-architecture QEMU translation. These
+measurements are diagnostic evidence, not general kernel-performance results.
+The system also explores kernel-native domains as isolation and scheduling
 principals, although domains were an outcome rather than the original research
 objective.
 
@@ -56,7 +57,7 @@ than code-generation speed alone.
 \section{Introduction}
 
 Can Human-Directed Agentic Engineering (HDAE) guide a coding agent to build a
-new kernel that runs an existing Linux userspace? Kernel mechanisms are extensively
+new kernel that runs selected existing Linux userspace workloads? Kernel mechanisms are extensively
 documented, but integrating them into a coherent system is a long-horizon task:
 architecture, implementation, diagnosis, compatibility, and evaluation must
 remain aligned across thousands of changes. Ginux uses that task to study three
@@ -71,7 +72,7 @@ questions:
   topsep=0.45em
 ]
 \item[\textbf{RQ1}] \textbf{Capability.} Can HDAE produce an independent kernel
-  that executes unmodified Linux distribution userspaces?
+  that boots and executes selected unmodified Linux distribution workloads?
 \item[\textbf{RQ2}] \textbf{Method.} What documentation, steering, executable
   gates, and feedback loops are needed to sustain the work?
 \item[\textbf{RQ3}] \textbf{Outcome quality.} What compatibility and performance
@@ -81,9 +82,10 @@ questions:
 The paper contributes the resulting system, the documented HDAE method,
 and an evidence-based account of its capabilities and limits. Ginux is
 an independent kernel; Linux is its userspace compatibility target. A
-Linux-personality domain reports Ginux as its kernel, and ``compatible'' means
-only that the tested unmodified programs observe enough of their expected ABI
-to run. The work does not claim complete Linux compatibility.
+Linux-personality domain reports Ginux as its kernel. In this paper,
+``runs Linux userspace'' means only that the named, tested programs observe
+enough of their expected ABI to execute. It does not imply distribution-wide
+support, full syscall conformance, or complete Linux compatibility.
 
 The name is a deliberate joke in the same family as Linux. ``Linux'' combines
 Linus and Unix; ``Ginux'' riffs on Linux, GPT, and Greg. For purposes of
@@ -150,6 +152,13 @@ likewise treated prototyping and test generation as promising uses while
 focusing on review cost, contributor understanding, and maintainability
 ~\cite{corbet2026summit}. Those concerns frame the interpretation here: rapid
 construction is evidence of capability, not a substitute for stewardship.
+
+This paper uses \emph{Human-Directed Agentic Engineering} as a descriptive
+label for the two-loop process evaluated here, not as a claim to originate the
+general idea or phrase. Related public usage also describes agentic engineering
+as work directed by human intent, constraints, and review
+~\cite{niftHDAE2026,agentbubbleHDAE2026}. The contribution here is the concrete
+method, provenance, and whole-system case study rather than the label itself.
 
 \section{Methods}
 \label{sec:methods}
@@ -251,6 +260,8 @@ booted the system, analyzed logs, wrote tests, profiled failures, and revised
 within the current gate. It also proposed mechanisms such as
 generation-tagged capabilities, copy-on-write handling, and pre-authorized
 shared-page paths, which remained subject to architectural review.
+The named human author retains responsibility for the claims, release decision,
+and resulting code; Codex is not listed as an author.
 
 The HDAE inner loop was executable by the agent rather than dependent on manual
 observation. Repository scripts launched headless x86-64 QEMU on the Mac,
@@ -470,7 +481,8 @@ how much Linux behavior it supports.
 
 Evaluation combined four forms of evidence: progressively less synthetic Linux
 workloads, a syscall and interface ledger, compound systemd boot and operator
-workflows, and a matched single-vCPU performance harness. These measures answer
+workflows, and a controlled but non-equivalent single-vCPU performance harness.
+These measures answer
 different questions. A successful boot demonstrates integration, the ledger
 records breadth and gaps, interactive workflows expose lifecycle behavior, and
 the benchmark identifies performance defects; none alone establishes general
@@ -485,37 +497,48 @@ Alpine musl/BusyBox and Rocky glibc programs, launches Rocky systemd through
 root, mount, and lifecycle state across multiple domains.
 
 The ledger classifies all 375 Linux 6.12 x86-64 syscall numbers: 82 Complete,
-245 Partial, and 48 Policy-denied. The counts show breadth rather than
-completeness. Loader and process behavior, pseudo-filesystems, cgroups,
+245 Partial, and 48 Policy-denied. Every number is classified, but only 82 are
+recorded as complete; ``none missing'' in the ledger means dispatch coverage,
+not conformance. The counts show breadth rather than completeness. Loader and
+process behavior, pseudo-filesystems, cgroups,
 namespaces, IPv6, ioctl families, filesystems, and devices remain incomplete.
 There is no GPU ecosystem, broad hardware support, stable third-party driver
 ABI, independent security audit, native performance baseline, or general Linux
 application guarantee.
 
 These gaps define the research boundary. The result demonstrates that AI can
-construct enough of a kernel to carry a real Linux userspace, not that Ginux can
+construct enough of a kernel to carry the tested Linux workloads, not that an
+arbitrary Linux application or distribution will run, and not that Ginux can
 replace decades of Linux engineering.
 
 \subsection{Performance and benchmarking}
 \label{sec:performance}
 
-Performance testing began as a reality check. A matched single-vCPU harness fixed
-the QEMU machine, memory, CPU, accelerator, commands, and measurement
-boundaries. Boot timing ran from QEMU launch until systemd reported
-\texttt{multi-user.target}. Four sysbench workloads then exercised the same
-verified Rocky Linux 10 x86-64 executable in both systems: prime calculation
-for CPU throughput, one-kibibyte memory transfers, repeated
-\texttt{sched\_yield()} operations for thread scheduling, and mutex
-contention. Workload timing excluded boot and image preparation. Rocky on
-Linux used the official Rocky Linux 10.2 GenericCloud image from the upstream
-Rocky project, prepared and booted locally as a qcow2 disk, with its stock
-\texttt{6.12.0-211.16.1.el10\_2.0.1.x86\_64} kernel; Rocky on Ginux used the
-Rocky Linux 10 UBI init image as a domain. The protocol and raw-result
-requirements are recorded in
+Performance testing began as a diagnostic reality check, not as a claim of
+equivalence. The single-vCPU harness fixed the QEMU machine, memory, CPU model,
+accelerator, workload commands, and timing boundaries. Two distinct experiments
+were run and are reported separately below.
+
+The startup experiment measured elapsed time from QEMU launch until systemd
+reported that it had reached the multi-user target. Rocky on Linux used the official Rocky
+Linux 10.2 GenericCloud image, booted locally from qcow2 with its stock Rocky
+kernel, version \texttt{6.12.0-211.16.1.el10\_2.0.1} for x86-64. Rocky on Ginux used the
+Rocky Linux 10 UBI-init OCI image. These are different userspace, storage, and
+boot profiles. Their common endpoint makes the result operationally
+interesting, but it is not a controlled comparison of kernel boot performance.
+
+The workload experiment ran the same digest-verified Rocky Linux 10 x86-64
+\texttt{sysbench} executable in both guests. The Linux side used the prepared
+GenericCloud system. The Ginux side used a deliberately minimal Rocky 10 root
+containing \texttt{/bin/sh}, \texttt{/usr/bin/sysbench}, and their runtime
+dependencies; it did not use the UBI-init systemd root. Workload timing excluded
+guest boot and image preparation. Matching the executable, commands, and QEMU
+settings reduces important variation, but the surrounding userspace, services,
+storage paths, and kernels remain different. The protocol is recorded in
 \repolink{docs/BENCHMARKING.md}{the comparative benchmark protocol}.
 
-The first results were funny only because they were so bad. CPU and mutex were
-already near or above the Rocky result, but memory reached only 48.390~MiB/s
+The first results were strikingly poor. CPU was already near the Rocky result,
+but memory reached only 48.390~MiB/s
 against Rocky's 679.510~MiB/s, and the thread test managed 0.078 events/s
 against 306.129---roughly 14 times and 3,900 times slower, respectively. The
 benchmark was then turned into an acceptance gate. The project lead required
@@ -546,53 +569,111 @@ range by removing a polling stall, quadratic frame scans, and eager copying of
 immutable root-filesystem pages. The optimization history is recorded in the
 \repolink{docs/PERFORMANCE.md}{performance record}.
 
-Table~\ref{tab:benchmark-checkpoint} reports the final checkpoint medians.
+Table~\ref{tab:boot-checkpoint} reports the non-equivalent startup-path
+measurement. Table~\ref{tab:sysbench-checkpoint} reports the three informative
+sysbench workload medians. The mutex workload completed only one event on each
+system; it is excluded because that result carries too little information for a
+meaningful comparison.
 
 \medskip
 \begin{center}
 \refstepcounter{table}
-\label{tab:benchmark-checkpoint}
+\label{tab:boot-checkpoint}
 \centering
 \small
-\begin{tabular}{@{}lllrrl@{}}
+\begin{tabular}{@{}lrrr@{}}
 \toprule
-Test & Metric & Samples & \shortstack{Rocky on\\Linux} & \shortstack{Rocky on\\Ginux} & Relative result \\
+Startup path & Samples & Median to target & Observed ratio \\
 \midrule
-Boot & s to target & 3 & 42.579 & 12.860 & 3.31$\times$ faster \\
-CPU & events/s & 9 & 232.360 & 267.650 & 1.15$\times$ faster \\
-Memory & MiB/s & 9 & 679.510 & 620.580 & 1.10$\times$ slower \\
-Threads & events/s & 9 & 306.129 & 309.732 & 1.01$\times$ faster \\
-Mutex & s/event & 9 & 1.550 & 1.423 & 1.09$\times$ faster \\
+GenericCloud on Linux & 3 & 42.579 s & 3.31$\times$ Ginux time \\
+UBI-init on Ginux & 3 & 12.860 s & baseline \\
 \bottomrule
 \end{tabular}
 \par\medskip
-Table~\thetable: Matched boot and userspace benchmark medians under x86-64
-QEMU TCG on an Apple Silicon host. Boot and mutex favor lower values; the
-other workloads favor higher values.
+Table~\thetable: Exploratory time to \texttt{multi-user.target} under x86-64
+QEMU TCG on an Apple Silicon host. The startup paths are not equivalent.
 \end{center}
 \medskip
 
-The results tell three different stories. First, the CPU, single-thread yield,
-and mutex tests reached approximate parity in this translated environment.
-Read narrowly, those numbers show that the worst gaps came from implementation
-defects that a benchmark-driven HDAE loop could find and substantially close.
-Second, adding Linux-compatible
+\begin{center}
+\refstepcounter{table}
+\label{tab:sysbench-checkpoint}
+\centering
+\small
+\begin{tabular}{@{}llrrl@{}}
+\toprule
+Workload & Metric & \shortstack{Rocky on\\Linux} & \shortstack{Rocky on\\Ginux} & Observed difference \\
+\midrule
+CPU & events/s & 232.360 & 267.650 & Ginux 15.2\% higher \\
+Memory & MiB/s & 679.510 & 620.580 & Ginux 8.7\% lower \\
+Threads & events/s & 306.129 & 309.732 & Ginux 1.2\% higher \\
+\bottomrule
+\end{tabular}
+\par\medskip
+Table~\thetable: Median of nine observations per system for three-second
+sysbench workloads under x86-64 QEMU TCG. Higher is better. The executable and
+commands match; the complete execution environments do not.
+\end{center}
+\medskip
+
+The workload results tell two bounded stories. First, CPU and single-thread
+yield reached approximate parity in this translated environment. Read narrowly,
+those numbers show that the worst gaps came from implementation defects that a
+benchmark-driven HDAE loop could find and substantially close. The 15.2 percent
+CPU difference may reflect TCG variation or different background work and is
+not evidence that Ginux generally executes CPU workloads faster. Second, adding Linux-compatible
 vDSO/vvar timekeeping raised memory throughput from 48.390 to 620.580~MiB/s,
-leaving Rocky on Ginux 1.095 times slower than Rocky on Linux for the
+leaving Rocky on Ginux 8.7 percent below Rocky on Linux for the
 one-kibibyte test. Most of the original gap was timestamp overhead rather than
 raw copying; this TCG experiment cannot isolate the cause of the smaller
-remaining difference. Third, the boot result compares two startup paths.
+remaining difference. Separately, the startup result compares two startup paths.
 Ginux restores a cached filesystem and launches a domain directly. Rocky boots
 from a local qcow2 disk through its general-purpose UEFI, kernel, initramfs,
-and device-discovery path. The 3.31-fold result describes those paths rather
-than overall kernel performance.
+and device-discovery path. The measured ratio describes those complete paths,
+including work one path omits, rather than overall kernel performance.
 
 These TCG measurements show that Ginux can execute the same nontrivial Linux
-benchmark and that HDAE iteration can turn catastrophic results
-into broadly comparable ones for this narrow suite. A broader performance
-claim would require identical userspace profiles, equivalent storage,
-dispersion and confidence intervals, and x86-64 KVM measurements. Network,
-IPC, multicore, storage, and security performance remain unmeasured.
+benchmark and that HDAE iteration can turn catastrophic defects into roughly
+similar medians for this narrow suite. They do not establish comparative kernel
+performance. A stronger experiment would require identical userspace profiles,
+equivalent storage and service state, longer runs, dispersion and confidence
+intervals, and x86-64 KVM measurements. Network, IPC, multicore, storage, and
+security performance remain unmeasured.
+
+\subsection{Artifact, verification, and reproducibility}
+
+The evaluated source is identified by commit \evaluatedcommit{}. The repository
+contains the architecture and decision records, compatibility ledger, QEMU test
+harnesses, benchmark profile, pinned Rocky image URL and digest, Ginux sysbench
+root builder, and Make targets used for the reported gates. The principal
+commands fall into three groups:
+
+\begin{itemize}[leftmargin=*,topsep=0.3em,itemsep=0.15em,parsep=0pt]
+\item verification: \texttt{make check} and \texttt{make test-rocky-systemd};
+\item preparation: \texttt{make benchmark-prepare-linux} and
+  \texttt{make benchmark-prepare-ginux}; and
+\item measurement: \texttt{make benchmark-boot-comparison},
+  \texttt{make benchmark-ginux-sysbench}, and \texttt{make benchmark-compare}.
+\end{itemize}
+
+At the evaluated checkpoint, \texttt{make check} passed and the Rocky systemd
+harness repeatedly reached its verified login target. The aggregate
+\texttt{make test} target did not pass completely: its verification boot still
+failed in a post-\texttt{execve()} system-supervisor lifecycle probe. That known
+failure is part of the checkpoint and prevents describing the repository as
+having a fully passing test suite.
+
+Reproduction is also limited by evidence not preserved in the evaluated
+commit. The surviving raw benchmark logs and result tables were subsequently
+archived under
+\href{https://github.com/gmkurtzer/ginux/tree/main/docs/paper/artifact/benchmark-2026-10-23}{the paper artifact},
+with checksums and a scope statement. Exact host model, macOS build, QEMU
+version, provider-exported token use, and a verbatim conversation export were
+not archived. The checked-in scripts and raw outputs permit inspection and
+rerunning, but they cannot reconstruct the original trajectory. A publication
+release should pair the evaluated commit with these results, exact tool and
+host versions where recoverable, complete command output, and a
+machine-readable pass/fail manifest.
 
 \subsection{Illustrative operator workflows}
 
@@ -663,15 +744,16 @@ without implying that every workload mutation is durable.
 
 Taken together, the compound boot, compatibility ledger, workflows, and narrow
 benchmark answer RQ1 and RQ3 only within the evaluated boundary. Ginux executes
-a real distribution userspace and demonstrates that several severe performance
+the evaluated distribution workloads and demonstrates that several severe performance
 defects were correctable through the same HDAE loop. The partial ledger and
 limited measurements prevent either result from becoming a general Linux
 compatibility or performance claim.
 
 \section{Threats to Validity}
 
-This is one successful case study, not a controlled estimate of coding-agent
-reliability. The project used one model trajectory and one evolving repository.
+This is one successful, observational case study, not a controlled estimate of
+coding-agent reliability or a validation of HDAE as a generally superior
+method. The project used one model trajectory and one evolving repository.
 There was no matched human-only project, alternative-model run, or
 independent reconstruction from the original requirements. The author supplied
 the architecture and also judged whether observed behavior was acceptable. This
@@ -686,9 +768,11 @@ trajectory exactly reproducible.
 
 The functional gates are compound but incomplete. Booting Rocky systemd and
 running selected applications establish more than syscall stubs, but not
-general Linux or POSIX conformance. Performance results come from a narrow
-single-vCPU QEMU TCG setup with different boot paths and small sample counts;
-they do not support a general performance claim.
+general Linux or POSIX conformance. The complete \texttt{make test} gate also
+retained the post-\texttt{execve()} supervisor failure described above.
+Performance results come from a narrow single-vCPU QEMU TCG setup with
+different boot and userspace profiles, short workloads, small sample counts,
+and no archived raw results; they do not support a general performance claim.
 
 No independent security audit was completed. Security properties beyond the
 tested mechanisms remain outside the evidence reported here.
@@ -749,11 +833,11 @@ repairing defects, coordinating contributors and vendors, and maintaining a
 dependable release cadence. Code is comparatively easy; workflows,
 compatibility, maintenance, and community are hard.
 
-Ginux used \estimatedcost{} in API calls---about USD~7.71 per commit or
-USD~0.058 per retained, non-generated implementation/test line. Those are
-rough comparisons, but the contrast matters: USD~8,000 produced a prototype.
-Compatibility, trust, industry integration, and maintenance remain the far
-larger investment.
+Ginux used an author-estimated \estimatedcost{} in API calls. That figure
+describes the experiment but does not measure productivity, equivalent human
+labor, or code quality. The relevant contrast is narrower: a modest direct API
+cost produced a substantial prototype, while compatibility, trust, industry
+integration, and maintenance remain the far larger investment.
 
 This pressure will likely be strongest above middleware and orchestration,
 where software can be replaced without moving an entire hardware and systems
@@ -773,9 +857,9 @@ contracts.
 \section{Conclusion}
 
 For RQ1, Ginux provides a bounded result: an HDAE process centered on one
-persistent coding agent produced an independent kernel that boots unmodified
-Alpine programs and a
-Rocky Linux systemd userspace. It also supports kernel-native domains and ran
+persistent coding agent produced an independent kernel that boots selected
+unmodified Alpine programs and the evaluated Rocky Linux systemd userspace. It
+also supports kernel-native domains and ran
 the same sysbench executable used on a stock Rocky comparison system. This is
 rapid integration of established mechanisms, not the invention of kernel
 engineering itself.
@@ -783,8 +867,10 @@ engineering itself.
 For RQ2, the decisive method was neither a single prompt nor unconstrained
 autonomy. Written architecture, staged behavioral gates, a persistent task,
 real workloads, and informed human interpretation kept the HDAE implementation loop
-aligned with the system objective. For RQ3, the result remains narrow: Linux
-compatibility is partial, performance evidence is limited, and production
+aligned with the system objective. This single case motivates the method; it
+does not validate HDAE against alternative processes. For RQ3, the result
+remains narrow: Linux compatibility is partial, performance evidence is
+exploratory, the full test target retains a known failure, and production
 hardware, security, standards, and maintenance requirements were not met.
 
 AI can build code deep in the systems stack. Core infrastructure derives its

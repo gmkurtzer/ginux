@@ -1,0 +1,4 @@
+run	qemu_start_to_multi_user_ms	accelerator	cpu	vcpus	memory
+1	43143	tcg	max,+smep,+smap,+umip	1	2G
+2	42335	tcg	max,+smep,+smap,+umip	1	2G
+3	43334	tcg	max,+smep,+smap,+umip	1	2G

@@ -31,3 +31,10 @@ Before publication, update the commands near the top of the TeX source,
 replace the draft repository URL, record active human time if it can be
 reconstructed defensibly, archive raw API billing evidence, and rerun every
 reported acceptance test from a clean checkout of the evaluated commit.
+
+The surviving raw benchmark logs and TSV files are archived in
+`artifact/benchmark-2026-10-23/`; they were not part of the evaluated code
+commit. Exact host/macOS/QEMU/toolchain versions, a tagged publication release,
+full clean-checkout command output, and a machine-readable pass/fail manifest
+should still accompany publication. The report treats its performance results
+as exploratory and discloses the remaining aggregate `make test` failure.

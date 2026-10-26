@@ -25,10 +25,14 @@ The Linux baseline is the official Rocky Linux 10.2 GenericCloud image
 The source URL and all other fixed settings are in
 `profiles/benchmarks/rocky10-single-vcpu.env`.
 
-The Ginux guest uses `rockylinux/rockylinux:10-ubi-init`. GenericCloud and UBI
-are different Rocky image profiles, so a systemd boot result is not a
-byte-for-byte userspace comparison. Workload results are accepted only when
-both guests report the same SHA-256 digest for `/usr/bin/sysbench`.
+The Ginux systemd boot guest uses `rockylinux/rockylinux:10-ubi-init`.
+GenericCloud and UBI are different Rocky image profiles, so the boot result is
+not a byte-for-byte userspace comparison. The Ginux sysbench workload instead
+uses a minimal root assembled from a Rocky Linux 10 image with `/bin/sh`,
+`/usr/bin/sysbench`, and their runtime dependencies. Workload results are
+accepted only when both guests report the same SHA-256 digest for
+`/usr/bin/sysbench`; the surrounding userspace and storage paths are not
+equivalent.
 
 Image download, OCI transfer, package installation, and one-time cloud-image
 preparation are excluded from workload timing. Linux measurement runs use
@@ -94,9 +98,10 @@ directory.
 ## October 23, 2026 matched sysbench checkpoint
 
 Rocky on Linux used the official Rocky Linux 10.2 GenericCloud image and its
-stock `6.12.0-211.16.1.el10_2.0.1.x86_64` kernel. Rocky on Ginux used the Rocky
-Linux 10 UBI init image as a domain. Both guests ran the same Rocky Linux 10
-x86-64 sysbench executable, verified
+stock `6.12.0-211.16.1.el10_2.0.1.x86_64` kernel. Rocky on Ginux used the
+minimal Rocky Linux 10 sysbench root built by
+`tools/benchmarks/prepare-ginux-sysbench.sh`. Both guests ran the same Rocky
+Linux 10 x86-64 sysbench executable, verified
 by SHA-256
 `7cf6b71521436bd32a8ab197851035ff1632bee383fec5a35468d61969e7c18d`.
 Commands, QEMU machine, CPU count, memory size, CPU model, accelerator, and

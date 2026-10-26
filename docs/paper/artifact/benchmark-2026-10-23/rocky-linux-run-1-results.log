@@ -1,0 +1,394 @@
+GINUX_BENCH_READY
+GINUX_BENCH_KERNEL_TO_MULTI_USER_SECONDS 35.34
+GINUX_BENCH_SYSBENCH_SHA256 7cf6b71521436bd32a8ab197851035ff1632bee383fec5a35468d61969e7c18d
+GINUX_BENCH_WORKLOAD_BEGIN cpu 1
+sysbench 1.0.20 (using system LuaJIT 2.1.1720049189)
+
+Running the test with following options:
+Number of threads: 1
+Initializing random number generator from current time
+
+
+Prime numbers limit: 20000
+
+Initializing worker threads...
+
+Threads started!
+
+CPU speed:
+    events per second:   215.70
+
+General statistics:
+    total time:                          3.0045s
+    total number of events:              649
+
+Latency (ms):
+         min:                                    1.98
+         avg:                                    4.60
+         max:                                    9.52
+         95th percentile:                        7.43
+         sum:                                 2984.42
+
+Threads fairness:
+    events (avg/stddev):           649.0000/0.00
+    execution time (avg/stddev):   2.9844/0.00
+
+GINUX_BENCH_WORKLOAD_END cpu 1 0
+GINUX_BENCH_WORKLOAD_BEGIN cpu 2
+sysbench 1.0.20 (using system LuaJIT 2.1.1720049189)
+
+Running the test with following options:
+Number of threads: 1
+Initializing random number generator from current time
+
+
+Prime numbers limit: 20000
+
+Initializing worker threads...
+
+Threads started!
+
+CPU speed:
+    events per second:   214.12
+
+General statistics:
+    total time:                          3.0025s
+    total number of events:              644
+
+Latency (ms):
+         min:                                    1.88
+         avg:                                    4.64
+         max:                                   16.96
+         95th percentile:                        7.30
+         sum:                                 2986.95
+
+Threads fairness:
+    events (avg/stddev):           644.0000/0.00
+    execution time (avg/stddev):   2.9869/0.00
+
+GINUX_BENCH_WORKLOAD_END cpu 2 0
+GINUX_BENCH_WORKLOAD_BEGIN cpu 3
+sysbench 1.0.20 (using system LuaJIT 2.1.1720049189)
+
+Running the test with following options:
+Number of threads: 1
+Initializing random number generator from current time
+
+
+Prime numbers limit: 20000
+
+Initializing worker threads...
+
+Threads started!
+
+CPU speed:
+    events per second:   232.08
+
+General statistics:
+    total time:                          3.0022s
+    total number of events:              698
+
+Latency (ms):
+         min:                                    1.95
+         avg:                                    4.28
+         max:                                   13.82
+         95th percentile:                        5.88
+         sum:                                 2990.04
+
+Threads fairness:
+    events (avg/stddev):           698.0000/0.00
+    execution time (avg/stddev):   2.9900/0.00
+
+GINUX_BENCH_WORKLOAD_END cpu 3 0
+GINUX_BENCH_WORKLOAD_BEGIN memory 1
+sysbench 1.0.20 (using system LuaJIT 2.1.1720049189)
+
+Running the test with following options:
+Number of threads: 1
+Initializing random number generator from current time
+
+
+Running memory speed test with the following options:
+  block size: 1KiB
+  total size: 102400MiB
+  operation: write
+  scope: global
+
+Initializing worker threads...
+
+Threads started!
+
+Total operations: 2087818 (694809.18 per second)
+
+2038.88 MiB transferred (678.52 MiB/sec)
+
+
+General statistics:
+    total time:                          3.0017s
+    total number of events:              2087818
+
+Latency (ms):
+         min:                                    0.00
+         avg:                                    0.00
+         max:                                    4.80
+         95th percentile:                        0.00
+         sum:                                 1184.29
+
+Threads fairness:
+    events (avg/stddev):           2087818.0000/0.00
+    execution time (avg/stddev):   1.1843/0.00
+
+GINUX_BENCH_WORKLOAD_END memory 1 0
+GINUX_BENCH_WORKLOAD_BEGIN memory 2
+sysbench 1.0.20 (using system LuaJIT 2.1.1720049189)
+
+Running the test with following options:
+Number of threads: 1
+Initializing random number generator from current time
+
+
+Running memory speed test with the following options:
+  block size: 1KiB
+  total size: 102400MiB
+  operation: write
+  scope: global
+
+Initializing worker threads...
+
+Threads started!
+
+Total operations: 2081618 (692381.11 per second)
+
+2032.83 MiB transferred (676.15 MiB/sec)
+
+
+General statistics:
+    total time:                          3.0014s
+    total number of events:              2081618
+
+Latency (ms):
+         min:                                    0.00
+         avg:                                    0.00
+         max:                                    2.67
+         95th percentile:                        0.00
+         sum:                                 1223.66
+
+Threads fairness:
+    events (avg/stddev):           2081618.0000/0.00
+    execution time (avg/stddev):   1.2237/0.00
+
+GINUX_BENCH_WORKLOAD_END memory 2 0
+GINUX_BENCH_WORKLOAD_BEGIN memory 3
+sysbench 1.0.20 (using system LuaJIT 2.1.1720049189)
+
+Running the test with following options:
+Number of threads: 1
+Initializing random number generator from current time
+
+
+Running memory speed test with the following options:
+  block size: 1KiB
+  total size: 102400MiB
+  operation: write
+  scope: global
+
+Initializing worker threads...
+
+Threads started!
+
+Total operations: 2101519 (699309.18 per second)
+
+2052.26 MiB transferred (682.92 MiB/sec)
+
+
+General statistics:
+    total time:                          3.0002s
+    total number of events:              2101519
+
+Latency (ms):
+         min:                                    0.00
+         avg:                                    0.00
+         max:                                    5.45
+         95th percentile:                        0.00
+         sum:                                 1209.43
+
+Threads fairness:
+    events (avg/stddev):           2101519.0000/0.00
+    execution time (avg/stddev):   1.2094/0.00
+
+GINUX_BENCH_WORKLOAD_END memory 3 0
+GINUX_BENCH_WORKLOAD_BEGIN threads 1
+sysbench 1.0.20 (using system LuaJIT 2.1.1720049189)
+
+Running the test with following options:
+Number of threads: 1
+Initializing random number generator from current time
+
+
+Initializing worker threads...
+
+Threads started!
+
+
+General statistics:
+    total time:                          3.0035s
+    total number of events:              894
+
+Latency (ms):
+         min:                                    1.55
+         avg:                                    3.35
+         max:                                    6.76
+         95th percentile:                        4.41
+         sum:                                 2994.33
+
+Threads fairness:
+    events (avg/stddev):           894.0000/0.00
+    execution time (avg/stddev):   2.9943/0.00
+
+GINUX_BENCH_WORKLOAD_END threads 1 0
+GINUX_BENCH_WORKLOAD_BEGIN threads 2
+sysbench 1.0.20 (using system LuaJIT 2.1.1720049189)
+
+Running the test with following options:
+Number of threads: 1
+Initializing random number generator from current time
+
+
+Initializing worker threads...
+
+Threads started!
+
+
+General statistics:
+    total time:                          3.0031s
+    total number of events:              858
+
+Latency (ms):
+         min:                                    1.61
+         avg:                                    3.49
+         max:                                    8.41
+         95th percentile:                        4.49
+         sum:                                 2995.71
+
+Threads fairness:
+    events (avg/stddev):           858.0000/0.00
+    execution time (avg/stddev):   2.9957/0.00
+
+GINUX_BENCH_WORKLOAD_END threads 2 0
+GINUX_BENCH_WORKLOAD_BEGIN threads 3
+sysbench 1.0.20 (using system LuaJIT 2.1.1720049189)
+
+Running the test with following options:
+Number of threads: 1
+Initializing random number generator from current time
+
+
+Initializing worker threads...
+
+Threads started!
+
+
+General statistics:
+    total time:                          3.0125s
+    total number of events:              850
+
+Latency (ms):
+         min:                                    1.56
+         avg:                                    3.53
+         max:                                   14.42
+         95th percentile:                        4.57
+         sum:                                 3001.55
+
+Threads fairness:
+    events (avg/stddev):           850.0000/0.00
+    execution time (avg/stddev):   3.0016/0.00
+
+GINUX_BENCH_WORKLOAD_END threads 3 0
+GINUX_BENCH_WORKLOAD_BEGIN mutex 1
+sysbench 1.0.20 (using system LuaJIT 2.1.1720049189)
+
+Running the test with following options:
+Number of threads: 1
+Initializing random number generator from current time
+
+
+Initializing worker threads...
+
+Threads started!
+
+
+General statistics:
+    total time:                          1.5846s
+    total number of events:              1
+
+Latency (ms):
+         min:                                 1584.14
+         avg:                                 1584.14
+         max:                                 1584.14
+         95th percentile:                     1589.90
+         sum:                                 1584.14
+
+Threads fairness:
+    events (avg/stddev):           1.0000/0.00
+    execution time (avg/stddev):   1.5841/0.00
+
+GINUX_BENCH_WORKLOAD_END mutex 1 0
+GINUX_BENCH_WORKLOAD_BEGIN mutex 2
+sysbench 1.0.20 (using system LuaJIT 2.1.1720049189)
+
+Running the test with following options:
+Number of threads: 1
+Initializing random number generator from current time
+
+
+Initializing worker threads...
+
+Threads started!
+
+
+General statistics:
+    total time:                          1.0730s
+    total number of events:              1
+
+Latency (ms):
+         min:                                 1071.18
+         avg:                                 1071.18
+         max:                                 1071.18
+         95th percentile:                     1069.86
+         sum:                                 1071.18
+
+Threads fairness:
+    events (avg/stddev):           1.0000/0.00
+    execution time (avg/stddev):   1.0712/0.00
+
+GINUX_BENCH_WORKLOAD_END mutex 2 0
+GINUX_BENCH_WORKLOAD_BEGIN mutex 3
+sysbench 1.0.20 (using system LuaJIT 2.1.1720049189)
+
+Running the test with following options:
+Number of threads: 1
+Initializing random number generator from current time
+
+
+Initializing worker threads...
+
+Threads started!
+
+
+General statistics:
+    total time:                          1.1682s
+    total number of events:              1
+
+Latency (ms):
+         min:                                 1166.25
+         avg:                                 1166.25
+         max:                                 1166.25
+         95th percentile:                     1170.65
+         sum:                                 1166.25
+
+Threads fairness:
+    events (avg/stddev):           1.0000/0.00
+    execution time (avg/stddev):   1.1663/0.00
+
+GINUX_BENCH_WORKLOAD_END mutex 3 0
+GINUX_BENCH_COMPLETE
