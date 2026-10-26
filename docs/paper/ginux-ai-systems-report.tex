@@ -64,14 +64,21 @@ architecture, implementation, diagnosis, compatibility, and evaluation must
 remain aligned across thousands of changes. Ginux uses that task to study three
 questions:
 
-\begin{enumerate}[leftmargin=*,label=\textbf{RQ\arabic*:},itemsep=0.25em]
-\item \textbf{Capability.} Can an expert-directed agent construct an
-  independent kernel that executes unmodified Linux distribution userspaces?
-\item \textbf{Method.} What documentation, steering, executable gates, and
-  feedback loops are needed to sustain the work?
-\item \textbf{Outcome quality.} What compatibility and performance does the
-  resulting artifact demonstrate, and where do its claims stop?
-\end{enumerate}
+\begin{description}[
+  style=multiline,
+  leftmargin=0.82in,
+  labelwidth=0.62in,
+  labelsep=0.20in,
+  itemsep=0.45em,
+  topsep=0.45em
+]
+\item[\textbf{RQ1}] \textbf{Capability.} Can an expert-directed agent construct
+  an independent kernel that executes unmodified Linux distribution userspaces?
+\item[\textbf{RQ2}] \textbf{Method.} What documentation, steering, executable
+  gates, and feedback loops are needed to sustain the work?
+\item[\textbf{RQ3}] \textbf{Outcome quality.} What compatibility and performance
+  does the resulting artifact demonstrate, and where do its claims stop?
+\end{description}
 
 The paper contributes the resulting artifact, a documented human-agent method,
 and an evidence-based account of what the artifact can and cannot do. Ginux is
