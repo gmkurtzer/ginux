@@ -17,7 +17,7 @@
 \newcommand{\repolink}[2]{\href{https://github.com/gmkurtzer/ginux/blob/d11c126a048a51fe7eb9c4105f31760add1027ea/#1}{\texttt{#2}}}
 \newcommand{\tcell}[1]{{\raggedright #1\par}}
 
-\title{\textbf{Ginux: Methods and Outcomes of Building a Linux Userspace-Compatible Kernel with Human-Directed AI}}
+\title{\textbf{Ginux: Methods and Outcomes of Building a Linux Userspace-Compatible Kernel through Human-Directed Agentic Engineering}}
 \author{Gregory M. Kurtzer}
 \date{Draft technical report --- October 2026}
 
@@ -25,13 +25,12 @@
 \maketitle
 
 \begin{abstract}
-This paper reports a case study in human-directed, long-horizon agentic
-software engineering: constructing an independent kernel capable of running an
-existing Linux userspace. Over eleven days, one persistent OpenAI Codex task
-using GPT-5.6 Sol produced Ginux, a Rust-first x86-64 research kernel containing
-approximately 139,000 retained lines of implementation and test code. Written
-architecture, staged acceptance gates, QEMU execution, and repeated human
-review constrained the agent's implementation loop.
+This paper reports a case study in Human-Directed Agentic Engineering (HDAE):
+combining human-defined architecture, constraints, milestones, and acceptance
+criteria with an autonomous implementation, execution, diagnosis, and revision
+loop. Over eleven days, one persistent OpenAI Codex task using GPT-5.6 Sol
+produced Ginux, a Rust-first x86-64 research kernel containing approximately
+139,000 retained lines of implementation and test code.
 
 Ginux boots through UEFI, supplies its own memory management, scheduler,
 process model, filesystems, networking, devices, and Linux compatibility layer,
@@ -49,15 +48,15 @@ The result demonstrates rapid integration of established systems mechanisms,
 not a production alternative to Linux. Compatibility remains partial, the
 experiment has no matched control or independent reproduction, and hardware,
 security, and application coverage are narrow. The bounded conclusion is that
-human-directed AI can construct deep systems software, while domain knowledge,
-executable validation, shared standards, and a durable ecosystem remain more
-important than code-generation speed alone.
+HDAE can produce deep systems software, while domain knowledge, executable
+validation, shared standards, and a durable ecosystem remain more important
+than code-generation speed alone.
 \end{abstract}
 
 \section{Introduction}
 
-Can human direction guide a coding agent to build a new kernel
-that runs an existing Linux userspace? Kernel mechanisms are extensively
+Can Human-Directed Agentic Engineering (HDAE) guide a coding agent to build a
+new kernel that runs an existing Linux userspace? Kernel mechanisms are extensively
 documented, but integrating them into a coherent system is a long-horizon task:
 architecture, implementation, diagnosis, compatibility, and evaluation must
 remain aligned across thousands of changes. Ginux uses that task to study three
@@ -71,15 +70,15 @@ questions:
   itemsep=0.45em,
   topsep=0.45em
 ]
-\item[\textbf{RQ1}] \textbf{Capability.} Can a human-directed agent construct
-  an independent kernel that executes unmodified Linux distribution userspaces?
+\item[\textbf{RQ1}] \textbf{Capability.} Can HDAE produce an independent kernel
+  that executes unmodified Linux distribution userspaces?
 \item[\textbf{RQ2}] \textbf{Method.} What documentation, steering, executable
   gates, and feedback loops are needed to sustain the work?
 \item[\textbf{RQ3}] \textbf{Outcome quality.} What compatibility and performance
   does the resulting system demonstrate, and where do its claims stop?
 \end{description}
 
-The paper contributes the resulting system, a documented human-agent method,
+The paper contributes the resulting system, the documented HDAE method,
 and an evidence-based account of its capabilities and limits. Ginux is
 an independent kernel; Linux is its userspace compatibility target. A
 Linux-personality domain reports Ginux as its kernel, and ``compatible'' means
@@ -135,7 +134,7 @@ parallel Claude agents~\cite{carlini2026compiler}. Nearly 2,000 sessions and
 approximately USD~20,000 produced about 100,000 lines of Rust capable of
 compiling substantial software, including most of a Linux kernel build. Its
 compiler test suites and reference tools supplied unusually strong oracles.
-Ginux differs in using one persistent task, continuous human steering, and
+Ginux differs in using one persistent task within an HDAE process and
 behavioral gates that had to be created alongside the kernel. Both experiments
 make the harness and acceptance criteria part of the result rather than mere
 supporting machinery.
@@ -229,22 +228,23 @@ preceded glibc-based Rocky Linux; and Rocky programs preceded systemd. A printed
 success message never completed a stage by itself. The next gate exercised the
 previous work in a less synthetic context.
 
-\subsection{A closed-loop model for AI-assisted software development}
+\subsection{The HDAE closed-loop model}
 
 Each stage used two coupled loops:
 
 \begin{center}
 \fbox{\parbox{0.91\linewidth}{
-\textbf{Outer steering loop:} vision $\rightarrow$ architecture and constraints
+\textbf{HDAE outer steering loop:} vision $\rightarrow$ architecture and constraints
 $\rightarrow$ acceptance gate $\rightarrow$ human review of observed behavior
 $\rightarrow$ correction, reprioritization, or acceptance.\\[3pt]
-\textbf{Inner agent loop:} implementation $\rightarrow$ build and QEMU run
+\textbf{HDAE inner agent loop:} implementation $\rightarrow$ build and QEMU run
 $\rightarrow$ measurement and failure analysis $\rightarrow$ revision
 $\rightarrow$ regression test.
 }}
 \end{center}
 
-Human direction supplied the objective, architecture, Linux compatibility
+HDAE joins these two loops. Human direction supplied the objective,
+architecture, Linux compatibility
 target, operator model, interpretation of failures, and stopping decision.
 Codex selected implementation details, edited the repository, compiled and
 booted the system, analyzed logs, wrote tests, profiled failures, and revised
@@ -252,15 +252,15 @@ within the current gate. It also proposed mechanisms such as
 generation-tagged capabilities, copy-on-write handling, and pre-authorized
 shared-page paths, which remained subject to architectural review.
 
-The inner loop was executable by the agent rather than dependent on manual
+The HDAE inner loop was executable by the agent rather than dependent on manual
 observation. Repository scripts launched headless x86-64 QEMU on the Mac,
 injected controller commands, captured serial output, enforced timeouts, checked
 expected markers and failure conditions, and shut down the emulator. Codex
 could invoke those scripts, inspect the resulting logs, modify the system, and
-repeat the same test. This allowed implementation loops to continue until an
+repeat the same test. This allowed HDAE implementation cycles to continue until an
 acceptance gate passed or a result required a human architectural decision.
 
-This division of labor suggests a practical model for AI-assisted prototyping,
+This division of labor makes HDAE a practical model for prototyping,
 construction, and maintenance across both greenfield and established projects.
 Operationally, the loop followed five steps:
 
@@ -286,7 +286,7 @@ interpreted against expected Linux and operator behavior, while the agent
 converted them into repeatable QEMU, ABI, lifecycle, and performance tests.
 
 The performance work in Section~\ref{sec:performance} is a compact example.
-Human steering rejected mismatched measurements, fixed the single-vCPU scope,
+The HDAE outer loop rejected mismatched measurements, fixed the single-vCPU scope,
 and defined the gate as closing the gap without weakening correctness. Codex
 then instrumented hot paths, changed one mechanism at a time, rebuilt, reran
 QEMU, compared repeated samples, and retained or reverted each change. Work
@@ -523,7 +523,7 @@ matched inputs, clarified the single-vCPU scope, and directed Codex to profile,
 change the kernel, rerun the measurements, and keep only verified
 improvements. Within that boundary, Codex selected the instrumentation and
 implementation changes and iterated against repeated QEMU runs. This was the
-same outer-steering and inner-agent procedure described in
+same HDAE procedure described in
 Section~\ref{sec:methods}, applied to a performance problem rather than a
 feature milestone.
 
@@ -575,7 +575,7 @@ other workloads favor higher values.
 The results tell three different stories. First, the CPU, single-thread yield,
 and mutex tests reached approximate parity in this translated environment.
 Read narrowly, those numbers show that the worst gaps came from implementation
-defects that a benchmark-driven agent loop could find and substantially close.
+defects that a benchmark-driven HDAE loop could find and substantially close.
 Second, adding Linux-compatible
 vDSO/vvar timekeeping raised memory throughput from 48.390 to 620.580~MiB/s,
 leaving Rocky on Ginux 1.095 times slower than Rocky on Linux for the
@@ -588,7 +588,7 @@ and device-discovery path. The 3.31-fold result describes those paths rather
 than overall kernel performance.
 
 These TCG measurements show that Ginux can execute the same nontrivial Linux
-benchmark and that guided autonomous iteration can turn catastrophic results
+benchmark and that HDAE iteration can turn catastrophic results
 into broadly comparable ones for this narrow suite. A broader performance
 claim would require identical userspace profiles, equivalent storage,
 dispersion and confidence intervals, and x86-64 KVM measurements. Network,
@@ -664,7 +664,7 @@ without implying that every workload mutation is durable.
 Taken together, the compound boot, compatibility ledger, workflows, and narrow
 benchmark answer RQ1 and RQ3 only within the evaluated boundary. Ginux executes
 a real distribution userspace and demonstrates that several severe performance
-defects were correctable through the same agent loop. The partial ledger and
+defects were correctable through the same HDAE loop. The partial ledger and
 limited measurements prevent either result from becoming a general Linux
 compatibility or performance claim.
 
@@ -706,7 +706,7 @@ the existing abstractions proved insufficient. That route would have produced
 broader hardware and application support much sooner.
 
 It would also answer a different question. This experiment deliberately
-removed Linux from the kernel side to test whether a human-directed AI could
+removed Linux from the kernel side to test whether HDAE could
 construct the machinery itself and discover a distinct outer isolation object.
 Starting with Linux would shift the work from reimplementation toward
 integration, hardening, measurement, and upstream-quality design. That may be
@@ -772,8 +772,9 @@ contracts.
 
 \section{Conclusion}
 
-For RQ1, Ginux provides a bounded result: one human-directed coding agent
-produced an independent kernel that boots unmodified Alpine programs and a
+For RQ1, Ginux provides a bounded result: an HDAE process centered on one
+persistent coding agent produced an independent kernel that boots unmodified
+Alpine programs and a
 Rocky Linux systemd userspace. It also supports kernel-native domains and ran
 the same sysbench executable used on a stock Rocky comparison system. This is
 rapid integration of established mechanisms, not the invention of kernel
@@ -781,7 +782,7 @@ engineering itself.
 
 For RQ2, the decisive method was neither a single prompt nor unconstrained
 autonomy. Written architecture, staged behavioral gates, a persistent task,
-real workloads, and informed human interpretation kept the implementation loop
+real workloads, and informed human interpretation kept the HDAE implementation loop
 aligned with the system objective. For RQ3, the result remains narrow: Linux
 compatibility is partial, performance evidence is limited, and production
 hardware, security, standards, and maintenance requirements were not met.
