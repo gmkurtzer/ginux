@@ -174,10 +174,13 @@ documentation checkpoint, the environment reported desktop version
 changed during the experiment, so these versions identify the final checkpoint
 rather than every turn. Model selection was practical, not controlled. In the
 author's prior work, advanced Claude models more often spent context and token
-budget on technically interesting side paths that later had to be undone;
-Codex stayed closer to the active milestone and repeated the build-and-test
-loop with less intervention. No matched prompts, blinded grading, or
-provider-level token measurements were collected.
+budget on technically interesting side paths that later had to be undone. In
+this project, Codex stayed closer to the active milestone, its task and goal
+structure kept the current boundary visible, and its working loop repeatedly
+supported edit, build, boot, diagnose, and revise cycles with less intervention.
+No matched prompts, blinded grading, or provider-level token measurements were
+collected; this explains the selection rather than establishing a comparative
+model result.
 
 Architecture and plans persisted outside the conversation. The versioned
 \repolink{ARCHITECTURE.md}{architecture} defined the boot model,
@@ -259,6 +262,44 @@ QEMU, compared repeated samples, and retained or reverted each change. Work
 stopped when the stated research questions had a demonstrable artifact,
 documented evidence, and explicit remaining gaps---not when the prototype
 became production-ready.
+
+\subsection{A reusable model for large AI-assisted projects}
+
+The process suggests a practical model for prototyping, building, and
+maintaining large software systems with AI. It changes the division of labor;
+it does not remove the need for domain experts. The reusable sequence is:
+
+\begin{enumerate}[leftmargin=*,label=\arabic*.,topsep=0.4em,itemsep=0.25em,parsep=0pt]
+\item Domain experts define the product outcome, operating model, non-goals,
+  and standards that determine whether the result is actually useful.
+\item Architecture and product-design documents turn that knowledge into
+  persistent constraints, interfaces, ownership rules, and expected behavior.
+\item The work is divided into milestones with explicit acceptance gates and
+  bounded stopping points that the agent can execute and measure itself.
+\item Within each boundary, the agent implements, tests, diagnoses, and revises
+  until the gate passes or a decision must return to human review.
+\item Human evaluation checks semantics, usability, and system-wide effects;
+  accepted decisions and newly discovered requirements are written back into
+  the documents, plan, and regression suite before the next milestone begins.
+\end{enumerate}
+
+The same structure applies after initial construction. A maintenance gate can
+be a bug reproduction, compatibility test, performance threshold, or security
+property, while the accumulated architecture and regression suite preserve the
+project's contract across later agent sessions. This makes the method useful
+beyond one prototype: the durable product is not only generated code, but also
+the specifications, executable gates, and decision history that constrain
+future changes.
+
+Unguided ``vibe coding'' would have been poorly matched to this project. Many
+failures produced convincing output while violating Linux semantics, isolation,
+or lifecycle behavior. Without enough domain knowledge to recognize those
+failures, plausible demonstrations could easily have been accepted as finished
+work, producing the kind of superficially functional but structurally weak code
+often dismissed as AI slop. The important human contribution was not typing
+each implementation step; it was defining the system, recognizing when observed
+behavior was wrong, and setting the next verifiable boundary.
+
 \section{The Ginux Artifact}
 
 \subsection{A simplified boot architecture}
