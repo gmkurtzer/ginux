@@ -25,75 +25,67 @@
 \maketitle
 
 \begin{abstract}
-Can an expert-directed AI coding agent build a new kernel capable of running an
-existing Linux userspace? Ginux demonstrates that, within a focused research
-scope, the answer is yes. Kernel construction is well documented; the
-experiment tests how quickly expert-directed AI can integrate established
-mechanisms into a runnable system. Over eleven days, OpenAI Codex with GPT-5.6
-Sol produced an independent, Rust-first x86-64 kernel containing approximately
-139,000 retained lines of implementation and test code across 1,037 commits.
-Ginux boots through UEFI, provides its own memory management, scheduler,
-process model, filesystems, networking, devices, and Linux userspace
-compatibility layer, and runs its controller as an ordinary ring-3 process.
+This paper reports a case study in expert-directed, long-horizon agentic
+software engineering: constructing an independent kernel capable of running an
+existing Linux userspace. Over eleven days, one persistent OpenAI Codex task
+using GPT-5.6 Sol produced Ginux, a Rust-first x86-64 research kernel containing
+approximately 139,000 retained lines of implementation and test code. Written
+architecture, staged acceptance gates, QEMU execution, and repeated expert
+review constrained the agent's implementation loop.
 
-The resulting system executes unmodified Alpine programs and completes a Rocky
-Linux 10 systemd boot through \texttt{multi-user.target}, with systemd running
-as PID~1 and an interactive console. It also executes the same sysbench binary
-used on a stock Rocky Linux comparison system. Initial measurements exposed
-severe performance defects. A short benchmark-driven optimization exercise
-allowed Codex to profile the system, revise kernel hot paths, and bring the
-tested CPU, memory, threading, and mutex workloads into broadly comparable
-territory. Performance parity was not a primary goal, and the project devoted
-only a small portion of its development time to optimization.
+Ginux boots through UEFI, supplies its own memory management, scheduler,
+process model, filesystems, networking, devices, and Linux compatibility layer,
+and runs its controller in ring~3. The evaluated artifact executes unmodified
+Alpine programs and completes a Rocky Linux 10 systemd boot through
+\texttt{multi-user.target}. It also runs the same sysbench binary used on a
+stock Rocky Linux comparison system. A short benchmark-driven iteration reduced
+initial memory and thread slowdowns from approximately 14 and 3,900 times to
+within 10 percent and 1 percent, respectively, on the tested workloads. The
+artifact also explores kernel-native domains as isolation and scheduling
+principals, although domains were an outcome rather than the original research
+objective.
 
-Once Linux userspace execution became practical, Ginux also provided a
-platform for experimenting with kernel-native domains: isolated resource and
-scheduling principals capable of booting their own distribution userspaces.
-These domains were an outcome of the experiment rather than its original
-purpose.
-
-The larger result is both exciting and cautionary. An expert working with AI
-can now build software as complicated as a Linux-compatible kernel in a
-remarkably short time. That capability does not make a one-off kernel a
-sensible foundation for production infrastructure. Linux represents decades
-of human engineering across compatibility, hardware enablement, security,
-standards, review, vendor support, community governance, and operational
-experience. Ginux benefited from the luxury of a narrow research scope and
-remains far from those requirements. For core infrastructure, the ability to
-build something is only the beginning; shared standards and a durable
-ecosystem matter more than the code alone.
+The result demonstrates rapid integration of established systems mechanisms,
+not the invention of kernel engineering or a production alternative to Linux.
+Compatibility remains partial, the experiment has no matched control or
+independent reproduction, and hardware, security, and application coverage are
+narrow. The case study therefore supports a bounded conclusion: expert-directed
+AI can construct surprisingly deep systems software, while expert judgment,
+executable validation, shared standards, and a durable ecosystem remain more
+important than code-generation speed alone.
 \end{abstract}
 
-\section{AI Built a Linux-Compatible Kernel. It Did Not Build Linux}
+\section{Introduction}
 
-The experiment began with an ambitious research question: could an AI agent
-build a kernel capable of running an existing Linux userspace? Within the
-research boundary described here, the answer was yes. \project{} boots from firmware under QEMU,
-provides its own memory manager, scheduler, process model, ELF loader, virtual
-filesystems, networking, IPC, device paths, and Linux syscall translation, and
-runs real Alpine and Rocky Linux components.
+Can an expert direct a coding agent through the construction of a new kernel
+that runs an existing Linux userspace? Kernel mechanisms are extensively
+documented, but integrating them into a coherent system is a long-horizon task:
+architecture, implementation, diagnosis, compatibility, and evaluation must
+remain aligned across thousands of changes. Ginux uses that task to study three
+questions:
 
-Textbooks, teaching kernels, production source, standards, and implementation
-discussions document kernel construction extensively. This experiment does
-not show first-principles invention; it tests whether expert-directed AI can
-synthesize those mechanisms into a distinct architecture, diagnose failures,
-and pass increasingly demanding behavioral gates.
+\begin{enumerate}[leftmargin=*,label=\textbf{RQ\arabic*:},itemsep=0.25em]
+\item \textbf{Capability.} Can an expert-directed agent construct an
+  independent kernel that executes unmodified Linux distribution userspaces?
+\item \textbf{Method.} What documentation, steering, executable gates, and
+  feedback loops are needed to sustain the work?
+\item \textbf{Outcome quality.} What compatibility and performance does the
+  resulting artifact demonstrate, and where do its claims stop?
+\end{enumerate}
 
-\project{} is an independent kernel; Linux is its userspace compatibility
-target. The distinction is visible in \texttt{uname}: a Linux-personality
-domain reports \project{} as the kernel. ``Linux-compatible'' means that
-selected unmodified Linux programs see enough of their expected ABI to run.
-Compatibility is still partial.
+The paper contributes the resulting artifact, a documented human-agent method,
+and an evidence-based account of what the artifact can and cannot do. Ginux is
+an independent kernel; Linux is its userspace compatibility target. A
+Linux-personality domain reports Ginux as its kernel, and ``compatible'' means
+only that the tested unmodified programs observe enough of their expected ABI
+to run. The work does not claim complete Linux compatibility.
 
 The name is a deliberate joke in the same family as Linux. ``Linux'' combines
 Linus and Unix; ``Ginux'' riffs on Linux, GPT, and Greg. For purposes of
-authorial restraint, the ``G'' is treated as GPT.
-
-The goal was research, not competition with Linux. The Linux kernel community
-has spent decades doing the difficult work of supporting
-hardware, preserving interfaces, reviewing security-sensitive changes, and
-maintaining software people actually depend on. Eleven days of enthusiastic
-AI-assisted development belongs in a very different category.
+authorial restraint, the ``G'' is treated as GPT. The experiment is equally
+deliberate about its boundary: it studies whether AI can construct a focused
+research kernel, not whether eleven days of generated code can rival decades of
+Linux engineering.
 
 This paper evaluates commit \evaluatedcommit{}, dated October 23, 2026.
 Table~\ref{tab:scale} describes its scale. The figures count repository text;
@@ -118,7 +110,147 @@ Markdown documentation LOC & 13,074 \\
 \label{tab:scale}
 \end{table}
 
-\section{What Ginux Is}
+\section{Related Work}
+
+Most coding-agent evaluations study bounded changes to existing repositories.
+SWE-bench evaluates issue resolution against repository tests
+~\cite{jimenez2023swebench}; SWE-EVO extends that model to coordinated software
+evolution~\cite{thai2025sweevo}. NL2Repo-Bench instead begins with requirements
+and an empty workspace, and reports persistent failures in planning, cross-file
+coherence, and completion over long trajectories~\cite{ding2026nl2repo}. METR's
+time-horizon work similarly measures how task success changes with the time an
+expert would need, rather than treating all programming tasks as equivalent
+~\cite{kwa2025timehorizon}. Ginux is not a benchmark submission to any of these
+suites; it is a longitudinal case study with an evolving expert-defined target.
+
+The closest public whole-project experiment is Carlini's C compiler built by 16
+parallel Claude agents~\cite{carlini2026compiler}. Nearly 2,000 sessions and
+approximately USD~20,000 produced about 100,000 lines of Rust capable of
+compiling substantial software, including most of a Linux kernel build. Its
+compiler test suites and reference tools supplied unusually strong oracles.
+Ginux differs in using one persistent task, continuous expert steering, and
+behavioral gates that had to be created alongside the kernel. Both experiments
+make the harness and acceptance criteria part of the result rather than mere
+supporting machinery.
+
+LLMs have also been applied within operating-system development. CrashFixer,
+for example, evaluates an agent for Linux-kernel crash repair at repository
+scale~\cite{mathai2025crashfixer}. That work improves an established kernel;
+Ginux asks whether an agent can integrate a narrow kernel from an empty starting
+point. The Linux community's guidance for generated contributions emphasizes
+that submitters must understand, review, test, and accept responsibility for the
+result~\cite{linuxGeneratedContent}. Discussion at the 2026 Maintainers Summit
+likewise treated prototyping and test generation as promising uses while
+focusing on review cost, contributor understanding, and maintainability
+~\cite{corbet2026summit}. Those concerns frame the interpretation here: rapid
+construction is evidence of capability, not a substitute for stewardship.
+
+\section{Methods}
+\label{sec:methods}
+
+\subsection{Experimental setting and provenance}
+
+The work began with an architecture draft but no kernel implementation, and a
+technical vision more specific than ``build a kernel'': construct an independent kernel with a
+normal Linux userspace, a small host, strong privilege boundaries, recoverable
+services, and an operator experience that behaved like a system rather than a
+demonstration. The evaluated interval covered eleven calendar days. Nearly all
+implementation occurred in one long-running Codex task, with the author acting
+as system architect, domain expert, operator, and final evaluator.
+
+The project used \modelname{} in the Codex desktop environment. At the final
+documentation checkpoint, the environment reported desktop version
+\texttt{26.825.51511} (build \texttt{7377}) and bundled
+\texttt{codex-cli 0.151.0-alpha.7.2}. The continuously updated client may have
+changed during the experiment, so these versions identify the final checkpoint
+rather than every turn. Model selection was practical, not controlled. In the
+author's prior work, advanced Claude models more often spent context and token
+budget on technically interesting side paths that later had to be undone;
+Codex stayed closer to the active milestone and repeated the build-and-test
+loop with less intervention. No matched prompts, blinded grading, or
+provider-level token measurements were collected.
+
+Architecture and plans persisted outside the conversation. The versioned
+\repolink{ARCHITECTURE.md}{architecture} defined the boot model,
+kernel/userspace boundary, domains, authority, storage, devices, and acceptance
+criteria. The \repolink{docs/LINUX-COMPATIBILITY.md}{compatibility ledger}
+recorded syscall and non-syscall behavior. A
+\repolink{docs/NEXT-GOAL.md}{working goal},
+\repolink{docs/USE-CASES.md}{use cases}, and
+\repolink{docs/decisions/0001-native-domains-and-authority.md}{decision record}
+kept the current plan and rationale visible. The conversation, Git history,
+tests, and a
+\href{https://github.com/gmkurtzer/ginux/blob/main/docs/paper/STEERING-PROVENANCE.md}{curated
+steering chronology} provide the provenance record.
+
+\subsection{Staged construction}
+
+Construction proceeded through six overlapping stages, each ending in an
+observable gate:
+
+\begin{enumerate}[leftmargin=*,label=\arabic*.,topsep=0.4em,itemsep=0.3em,parsep=0pt]
+\item \textbf{Boot and architecture:} produce a unified x86-64 EFI image, exit
+  boot services, establish a kernel stack, and inventory memory and ACPI state.
+\item \textbf{Kernel mechanisms and hardware:} add paging, exceptions,
+  interrupts, scheduling, capabilities, IPC, PCI, virtio paths, and DMA
+  confinement.
+\item \textbf{Userspace control:} enter ring~3, execute the embedded static
+  controller as an ordinary process, and expose versioned management operations.
+\item \textbf{Linux execution:} add ELF, PIE and dynamic loading, process and
+  signal semantics, virtual filesystems, terminals, sockets, and syscalls.
+\item \textbf{Distribution ingestion:} add networking and OCI transport,
+  verification, unpacking, caching, and domain-local roots; then run Alpine and
+  progressively larger Rocky Linux programs.
+\item \textbf{Compound system boot:} turn failures into a compatibility matrix
+  and require persistence, multi-domain lifecycle, Rocky systemd service
+  startup, and an interactive console.
+\end{enumerate}
+
+Firmware entry therefore preceded hardware control; a bounded ELF probe
+preceded a general Linux process; synthetic ABI probes preceded Alpine; Alpine
+preceded glibc-based Rocky Linux; and Rocky programs preceded systemd. A printed
+success message never completed a stage by itself. The next gate exercised the
+previous work in a less synthetic context.
+
+\subsection{Closed-loop procedure and division of work}
+
+Each stage used two coupled loops:
+
+\begin{center}
+\fbox{\parbox{0.91\linewidth}{
+\textbf{Outer steering loop:} vision $\rightarrow$ architecture and constraints
+$\rightarrow$ acceptance gate $\rightarrow$ expert review of observed behavior
+$\rightarrow$ correction, reprioritization, or acceptance.\\[3pt]
+\textbf{Inner agent loop:} implementation $\rightarrow$ build and QEMU run
+$\rightarrow$ measurement and failure analysis $\rightarrow$ revision
+$\rightarrow$ regression test.
+}}
+\end{center}
+
+Human direction supplied the objective, architecture, Linux compatibility
+target, operator model, interpretation of failures, and stopping decision.
+Codex selected implementation details, edited the repository, compiled and
+booted the system, analyzed logs, wrote tests, profiled failures, and revised
+within the current gate. It also proposed mechanisms such as
+generation-tagged capabilities, copy-on-write handling, and pre-authorized
+shared-page paths, which remained subject to architectural review.
+
+Hands-on use repeatedly changed the plan. Empty directory listings exposed
+filesystem and process defects; a second domain exposed singleton state;
+systemd exposed missing mount, procfs, socket, terminal, event, and credential
+semantics; controller latency exposed scheduler defects. The expert interpreted
+those symptoms against expected Linux and operator behavior, while the agent
+converted them into repeatable QEMU, ABI, lifecycle, and performance tests.
+
+The performance work in Section~\ref{sec:performance} is a compact example.
+Human steering rejected mismatched measurements, fixed the single-vCPU scope,
+and defined the gate as closing the gap without weakening correctness. Codex
+then instrumented hot paths, changed one mechanism at a time, rebuilt, reran
+QEMU, compared repeated samples, and retained or reverted each change. Work
+stopped when the stated research questions had a demonstrable artifact,
+documented evidence, and explicit remaining gaps---not when the prototype
+became production-ready.
+\section{The Ginux Artifact}
 
 \subsection{A simplified boot architecture}
 
@@ -255,6 +387,43 @@ capabilities, and denies many credential mutations. POSIX ACLs and permission
 edge cases remain incomplete; no SELinux or other active Linux security module
 enforces labels. Linux UID~0 cannot bypass the native capability table.
 
+This architecture is the artifact-level answer to RQ1: the agent integrated
+enough independent kernel machinery to host a recognizable Linux environment.
+Whether that environment behaves correctly, broadly, or efficiently is a
+separate empirical question addressed next.
+
+\section{Evaluation}
+
+Evaluation combined four forms of evidence: progressively less synthetic Linux
+workloads, a syscall and interface ledger, compound systemd boot and operator
+workflows, and a matched single-vCPU performance harness. These measures answer
+different questions. A successful boot demonstrates integration, the ledger
+records breadth and gaps, interactive workflows expose lifecycle behavior, and
+the benchmark identifies performance defects; none alone establishes general
+Linux compatibility.
+
+\subsection{Functional result and research boundary}
+
+The prototype boots a unified x86-64 EFI image, runs its controller in ring~3,
+acquires networking under QEMU, and pulls and caches OCI filesystems. It runs
+Alpine musl/BusyBox and Rocky glibc programs, launches Rocky systemd through
+\texttt{multi-user.target}, and retains independent process, address-space,
+root, mount, and lifecycle state across multiple domains.
+
+The ledger classifies all 375 Linux 6.12 x86-64 syscall numbers: 82 Complete,
+245 Partial, and 48 Policy-denied. The counts show breadth rather than
+completeness. Loader and process behavior, pseudo-filesystems, cgroups,
+namespaces, IPv6, ioctl families, filesystems, and devices remain incomplete.
+There is no GPU ecosystem, broad hardware support, stable third-party driver
+ABI, independent security audit, native performance baseline, or general Linux
+application guarantee.
+
+These gaps define the research boundary. The project asked whether AI could
+construct a kernel and carry a real Linux userspace across it. It answered
+that question without pretending to replace decades of Linux engineering.
+Useful ideas, including domains, may ultimately belong in established systems
+rather than a Ginux deployment.
+
 \subsection{Performance and benchmarking}
 \label{sec:performance}
 
@@ -353,35 +522,6 @@ claim would require identical userspace profiles, equivalent storage,
 dispersion and confidence intervals, and x86-64 KVM measurements. Network,
 IPC, multicore, storage, and security performance remain unmeasured.
 
-\subsection{Implemented result and research boundary}
-
-The prototype boots a unified x86-64 EFI image, runs its controller in ring~3,
-acquires networking under QEMU, and pulls and caches OCI filesystems. It runs
-Alpine musl/BusyBox and Rocky glibc programs, launches Rocky systemd through
-\texttt{multi-user.target}, and retains independent process, address-space,
-root, mount, and lifecycle state across multiple domains.
-
-The ledger classifies all 375 Linux 6.12 x86-64 syscall numbers: 82 Complete,
-245 Partial, and 48 Policy-denied. The counts show breadth rather than
-completeness. Loader and process behavior, pseudo-filesystems, cgroups,
-namespaces, IPv6, ioctl families, filesystems, and devices remain incomplete.
-There is no GPU ecosystem, broad hardware support, stable third-party driver
-ABI, independent security audit, native performance baseline, or general Linux
-application guarantee.
-
-These gaps define the research boundary. The project asked whether AI could
-construct a kernel and carry a real Linux userspace across it. It answered
-that question without pretending to replace decades of Linux engineering.
-Useful ideas, including domains, may ultimately belong in established systems
-rather than a Ginux deployment.
-
-\subsection{Security review deferred}
-
-An exploit-oriented security audit was attempted but could not continue because
-OpenAI required Trusted Access authorization for the request. No security audit
-is claimed in this report. The work may be revisited as a separately authorized
-follow-up experiment.
-
 \subsection{Illustrative operator workflows}
 
 The following condensed transcripts show the intended operator experience.
@@ -449,202 +589,46 @@ layers from the host-owned volume. Writable domain overlays remain boot-local
 at the evaluated checkpoint, so configuration and image caching are persistent
 without implying that every workload mutation is durable.
 
-\section{Methods}
-\label{sec:methods}
+Taken together, the compound boot, compatibility ledger, workflows, and narrow
+benchmark answer RQ1 and RQ3 only within the evaluated boundary. Ginux executes
+a real distribution userspace and demonstrates that several severe performance
+defects were correctable through the same agent loop. The partial ledger and
+limited measurements prevent either result from becoming a general Linux
+compatibility or performance claim.
 
-\subsection{From an idea to an executable plan}
+\section{Threats to Validity}
 
-The work began with a technical vision far more specific than ``build a
-kernel.'' The target was an independently implemented kernel with a
-normal Linux userspace, a small host, strong privilege boundaries, recoverable
-services, and an operator experience that behaved like a system rather than a
-demonstration. Sustained Q\&A examined what belonged in ring~0, what Linux
-compatibility meant, how domains differed from namespaces, and what observable
-result would count as success.
+This is one successful case study, not a controlled estimate of coding-agent
+reliability. The project used one model trajectory, one expert, and one evolving
+repository. There was no matched human-only project, alternative-model run, or
+independent reconstruction from the original requirements. The author supplied
+the architecture and also judged whether observed behavior was acceptable,
+creating both expertise and evaluator bias.
 
-Expert steering continued throughout the project. Partial implementations
-exposed decisions that the opening prompt could never have anticipated. The
-project lead identified category errors, rejected results that looked
-successful but behaved incorrectly, supplied Linux and provisioning context,
-changed priorities, and defined the next useful endpoint. Those corrections
-first became written architecture and then implementation requirements. This
-kept the project focused on a working system instead of an impressive boot
-transcript.
+Repository size, commits, elapsed days, and API cost describe the artifact but
+do not measure equivalent human labor or code quality. The client may have
+updated during the study, provider-exported token totals were not archived, and
+the approximately USD~8,000 cost is author reported. The conversation, plans,
+Git history, and tests preserve substantial provenance, but they cannot make the
+trajectory exactly reproducible.
 
-The first artifact was a collaborative architectural overview. The versioned
-\repolink{ARCHITECTURE.md}{ARCHITECTURE.md} then developed the boot model,
-kernel/userspace boundary, domains, authority, storage, devices, and acceptance
-criteria in greater detail. The
-\repolink{docs/LINUX-COMPATIBILITY.md}{Linux compatibility ledger} recorded
-syscall and non-syscall behavior. The
-\repolink{docs/NEXT-GOAL.md}{working goal},
-\repolink{docs/USE-CASES.md}{use cases}, and
-\repolink{docs/decisions/0001-native-domains-and-authority.md}{domain decision
-record} kept both plan and rationale outside the chat transcript. These files
-provided durable state for a long-running agent session and made architectural
-drift visible.
+The functional gates are intentionally compound but incomplete. Booting Rocky
+systemd and running selected applications establish more than syscall stubs;
+they do not establish general Linux or POSIX conformance. The syscall ledger
+contains partial implementations, and the artifact lacks broad hardware,
+filesystem, application, multicore, and driver coverage. Performance results
+come from a narrow single-vCPU QEMU TCG setup. The boot paths differ, sample
+counts are small, and the sysbench results do not support a general performance
+claim.
 
-\subsection{Why Codex and GPT-5.6 Sol}
+No independent security audit was completed. An exploit-oriented follow-up was
+attempted but deferred because OpenAI required Trusted Access authorization for
+the request. Security properties beyond the tested mechanisms remain outside
+the evidence reported here.
 
-The project used \modelname{} in the Codex desktop environment. At the final
-documentation checkpoint, the environment reported desktop version
-\texttt{26.825.51511} (build \texttt{7377}) and bundled
-\texttt{codex-cli 0.151.0-alpha.7.2}. The continuously updated client may have
-changed during the eleven-day project, so these identify the final checkpoint;
-GPT-5.6 Sol was the development model.
+\section{Discussion}
 
-Selection was practical, not a controlled comparison. In prior work, the author
-found advanced Claude models more likely to spend substantial context and token
-budget on technically interesting side paths, often requiring work to be undone
-and the active goal restated. For this project, Codex stayed closer to each
-milestone and more consistently completed the edit, build, QEMU, inspect, and
-revise loop. Nearly all development occurred in one long-running Codex task,
-which preserved the architecture, plan, repository state, failures, and gates in
-shared context. This is an author-reported workflow observation, not a model
-benchmark: matched prompts, blinded grading, and provider token measurements
-were not collected. Expert correction remained essential whenever a plausible
-result violated Linux semantics, operator expectations, or the architecture.
-
-\begin{samepage}
-\subsection{Staged construction}
-
-Repository history and the project plans show six broad, overlapping stages:
-
-\begin{enumerate}[leftmargin=*,label=\arabic*.,topsep=0.5em,itemsep=0.4em,parsep=0pt]
-\item \textbf{Boot and architecture.} Define the trust and domain model, build
-  a unified x86-64 EFI image, exit UEFI boot services, establish a kernel stack,
-  and inventory memory and ACPI state.
-\item \textbf{Kernel mechanisms and hardware.} Add paging, frame ownership,
-  exceptions, interrupts, the APIC timer, preemptive scheduling, capabilities,
-  IPC, domain address spaces, PCI discovery, virtio paths, and IOMMU-mediated
-  DMA confinement.
-\item \textbf{Userspace control.} Enter ring~3, execute an embedded static
-  controller as an ordinary userspace process, and expose versioned management
-  operations for domains, networks, storage, and lifecycle.
-\item \textbf{Linux execution.} Build an x86-64 ELF interpreter, PIE and dynamic
-  loader support, process and signal semantics, virtual filesystems, terminals,
-  sockets, and a growing Linux syscall surface.
-\item \textbf{Distribution ingestion.} Add DHCP, DNS, TCP/TLS, OCI manifest and
-  architecture selection, digest verification, layer unpacking, caching, and
-  domain-local roots; then run Alpine and progressively larger Rocky Linux
-  programs.
-\item \textbf{Compatibility and system boot.} Turn discovered behavior into a
-  Linux ABI test matrix, add persistence and multi-domain lifecycle tests, and
-  use Rocky Linux systemd, service startup, and an interactive console as the
-  compound integration gate.
-\end{enumerate}
-\end{samepage}
-
-The stages built on one another: firmware entry preceded hardware
-control; a bounded ELF executable preceded a general Linux process; synthetic
-ABI probes preceded Alpine; Alpine preceded glibc-based Rocky Linux; and Rocky
-programs preceded systemd. Each stage converted its failures into requirements
-for the next revision. A boot message was only the beginning of a test.
-
-\subsection{The closed-loop agent procedure}
-
-Every milestone had an observable gate, progressing from EFI boot and a ring-3
-controller through Alpine, OCI ingestion, Rocky binaries, systemd, and a
-console. The agent iterated within a bounded goal, while expert control defined
-the gate and interpreted the result. The method contained two coupled loops:
-
-\begin{center}
-\fbox{\parbox{0.91\linewidth}{
-\textbf{Outer steering loop:} technical vision $\rightarrow$ architecture and
-constraints $\rightarrow$ milestone and acceptance gate $\rightarrow$ expert
-review of real behavior $\rightarrow$ correction, reprioritization, or
-acceptance.\\[3pt]
-\textbf{Inner agent loop:} implementation $\rightarrow$ build and QEMU run
-$\rightarrow$ measurement and failure analysis $\rightarrow$ revision
-$\rightarrow$ regression test.
-}}
-\end{center}
-
-The performance work in Section~\ref{sec:performance} shows both loops in
-practice. Human steering defined a fair comparison, rejected mismatched
-measurements, fixed the single-vCPU boundary, and set ``close the gap without
-weakening correctness'' as the gate. The agent then profiled, changed one hot
-path at a time, rebuilt, ran QEMU, compared repeated samples, and either kept
-or reverted each change. The large thread improvement emerged from autonomous
-iteration inside that expert-defined test and acceptance boundary.
-
-Codex selected implementations, edited the repository, compiled and booted the
-system, analyzed logs, wrote tests, profiled failures, and revised within the
-current gate. It also drafted documentation for review. Human direction
-supplied the architecture, priorities, compatibility target, operator model,
-definition of normal behavior, course corrections, and stopping decision.
-Codex had broad implementation autonomy inside those boundaries.
-
-Tests became progressively less synthetic: probes established mechanics;
-Alpine exposed filesystem and process errors; Rocky exercised glibc and larger
-mappings; systemd combined scheduling, epoll, signals, procfs, sockets, mounts,
-credentials, timers, and consoles. Interactive testing reopened apparently
-completed milestones whenever observed behavior was wrong. Rapid agent
-iteration produced code; expert review decided when the result was useful.
-
-The mechanics---written architecture, external plans, executable gates,
-bounded iteration, evidence review, and recorded gaps---are reusable. They work
-best when an experienced reviewer knows what to ask, which output to distrust,
-how the target normally behaves, and which endpoint is valuable. The method
-reduces implementation cost while keeping technical leadership central.
-
-\subsection{Human steering and agent autonomy}
-
-The project combined continuous human steering with broad agent autonomy.
-Domain expertise supplied the objective, system vision, constraints,
-compatibility standard, interpretation of failures, and acceptance judgment.
-Codex proposed mechanisms, selected implementation details, wrote and tested
-the code, and updated the working documents. The project lead kept the work on
-course by recognizing incomplete answers, conceptual errors, and unhelpful
-endpoints.
-
-The conversation record makes the distinction concrete. An embedded initial
-userspace became an ordinary ring-3 static process using the Linux ABI plus a
-narrow management interface; embedding remained only a packaging property.
-Domains became kernel-native boundaries with independent process, mount,
-network, credential, capability, and resource state. OCI returned to its
-actual role as image transport and filesystem content. These corrections
-established the abstractions that shaped the rest of the implementation.
-
-Operator testing was steering. Empty directory listings exposed process and
-filesystem defects; a second domain exposed singleton state; systemd exposed
-missing mount, procfs, socket, terminal, and event semantics; controller
-latency exposed scheduling defects. Interpreting each symptom against normal
-Linux behavior changed acceptance gates and often the architecture. Repeated
-direction to test real workflows, stop at reviewable milestones, remove
-regressions, and distinguish output from correct semantics materially shaped
-the result.
-
-Codex proposed other important mechanisms, including generation-tagged
-capabilities, bounded control calls, copy-on-write handling, and
-pre-authorized shared-page fast paths. They fit the human requirements for
-speed, security, fault containment, and ownership. Architectural review
-retained the shared-page fast path as an agent-derived optimization.
-
-In practical terms, the division of work was:
-
-\begin{enumerate}[leftmargin=*,topsep=0.5em,itemsep=0.45em,parsep=0pt]
-\item Human direction set the Linux compatibility target, the stronger-than-
-  namespace domain model, expected operator behavior, acceptance standard, and
-  stopping point.
-\item Codex designed and implemented the system within those requirements. It
-  also proposed mechanisms such as generation-bound capabilities and the
-  authorized shared-page fast path, which remained subject to architectural
-  review.
-\item Q\&A and hands-on testing refined the architecture. Human testing judged
-  real behavior, while Codex converted those workflows into repeatable QEMU,
-  ABI, lifecycle, and performance gates.
-\end{enumerate}
-\smallskip
-
-The user-visible conversation is the most detailed record; repository history,
-design documents, and tests provide corroboration. A
-\href{https://github.com/gmkurtzer/ginux/blob/main/docs/paper/STEERING-PROVENANCE.md}{curated
-steering chronology} accompanies the paper and records direct steering, agent
-proposals, collaborative refinement, and corrections triggered by observed
-behavior.
-
-\section{Alternative: Starting with Linux}
+\subsection{Alternative: starting with Linux}
 
 A practical product effort would have had strong reasons to begin with Linux.
 Namespaces, cgroups, KVM, device drivers, filesystems, security modules, and a
@@ -664,7 +648,7 @@ expert can instead aim it at bounded improvements to a mature system, where
 the ecosystem remains intact and the novel idea must survive existing review,
 compatibility, and performance standards.
 
-\section{Human Experts Are Critical for Great Outcomes}
+\subsection{Human experts are critical for great outcomes}
 
 Human expertise made Ginux possible. Codex dramatically shortened the path
 from a technical decision to working code, while human direction supplied the
@@ -697,12 +681,12 @@ right problem.
 The same lesson applies to project controls. Written architecture gives the
 agent a stable target. Workflow-based gates measure behavior that operators
 actually depend on, while external references and differential tests keep
-compatibility claims grounded. Independent security review adds a separate
-line of judgment. Together, these practices turn generation speed into
+compatibility claims grounded. Independent review would add a separate line of
+judgment. Together, these practices turn generation speed into
 accountable engineering. AI expands who can build; human ownership determines
 what deserves trust.
 
-\section{Code Is Not the Moat}
+\subsection{Code is not the moat}
 
 Building a small working kernel is bounded. Sustaining a production kernel
 means supporting diverse hardware and workloads, preserving interfaces,
@@ -741,23 +725,26 @@ contracts.
 
 \section{Conclusion}
 
-Ginux shows how dramatically expert-directed AI can compress a substantial
-systems project. In days, it produced a new kernel, ran real distribution
-userspaces, and explored kernel-native domains: rapid integration, not the
-invention of kernel engineering itself.
+For RQ1, Ginux provides a bounded but concrete result: one expert-directed
+coding agent produced an independent kernel that boots unmodified Alpine
+programs and a Rocky Linux systemd userspace. The artifact also supports
+kernel-native domains and ran the same sysbench executable used on a stock
+Rocky comparison system. This is rapid integration of established mechanisms,
+not the invention of kernel engineering itself.
 
-That result belongs beside clear limits. Ginux lacks the maturity and ecosystem
-required for production infrastructure; Linux remains in a different league.
-Useful ideas may be better carried into established systems than used to ask
-the world to adopt another kernel.
+For RQ2, the decisive method was neither a single prompt nor unconstrained
+autonomy. Written architecture, staged behavioral gates, a persistent task,
+real workloads, and expert interpretation kept the inner implementation loop
+aligned with the system objective. For RQ3, the result remains narrow: Linux
+compatibility is partial, performance evidence is limited, and production
+hardware, security, standards, and maintenance requirements were not met.
 
-AI can build code deep in the systems stack. Core infrastructure, however,
-derives its value from compatibility, standards, hardware support, security,
-community trust, and long-term ownership. Linux earned those qualities through
-decades of human engineering across an enormous hardware and workload surface.
-Ginux reproduced a narrow portion of the code, not that institution. Cheaper
-implementation is not, by itself, a reason to replace a foundation an
-ecosystem already trusts.
+AI can build code deep in the systems stack. Core infrastructure derives its
+value from compatibility, hardware support, review, community trust, and
+long-term ownership. Linux earned those qualities through decades of human
+engineering across an enormous workload surface. Ginux reproduced a narrow
+portion of the code, not that institution. Cheaper implementation is not, by
+itself, a reason to replace a foundation an ecosystem already trusts.
 
 \begingroup
 \small

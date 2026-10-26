@@ -1,7 +1,7 @@
 # Ginux AI Systems Engineering Report
 
 This directory contains the arXiv-style technical-report draft describing the
-Ginux experiment at commit `9afa61762a66a20855ea3a23e3e04221b54a5a22`.
+Ginux experiment at commit `d11c126a048a51fe7eb9c4105f31760add1027ea`.
 `AI-WRITING-TELLS.md` records the sourced style checklist and the before-and-
 after audit used to edit the draft.
 
