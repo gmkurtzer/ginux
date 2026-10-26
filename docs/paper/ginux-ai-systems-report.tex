@@ -167,6 +167,12 @@ implementation occurred in one long-running Codex task, with the author setting
 the architecture, operating the system, interpreting results, and making the
 final acceptance decisions.
 
+Development ran on an Apple Silicon Mac under macOS. Ginux targeted x86-64, so
+builds were booted with \texttt{qemu-system-x86\_64} using QEMU's Tiny Code
+Generator rather than native hardware acceleration. This made the complete
+machine reproducible from the development host while also making clear that the
+reported timings include cross-architecture emulation overhead.
+
 The project used \modelname{} in the Codex desktop environment. At the final
 documentation checkpoint, the environment reported desktop version
 \texttt{26.825.51511} (build \texttt{7377}) and bundled
@@ -246,6 +252,14 @@ booted the system, analyzed logs, wrote tests, profiled failures, and revised
 within the current gate. It also proposed mechanisms such as
 generation-tagged capabilities, copy-on-write handling, and pre-authorized
 shared-page paths, which remained subject to architectural review.
+
+The inner loop was executable by the agent rather than dependent on manual
+observation. Repository scripts launched headless x86-64 QEMU on the Mac,
+injected controller commands, captured serial output, enforced timeouts, checked
+expected markers and failure conditions, and shut down the emulator. Codex
+could invoke those scripts, inspect the resulting logs, modify the system, and
+repeat the same test. This allowed implementation loops to continue until an
+acceptance gate passed or a result required a human architectural decision.
 
 This division of labor suggests a practical model for prototyping, building,
 and maintaining large software systems with AI. It does not remove the need for
