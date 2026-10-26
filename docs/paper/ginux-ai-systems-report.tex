@@ -230,7 +230,7 @@ preceded glibc-based Rocky Linux; and Rocky programs preceded systemd. A printed
 success message never completed a stage by itself. The next gate exercised the
 previous work in a less synthetic context.
 
-\subsection{Closed-loop development model}
+\subsection{A closed-loop model for AI-assisted software development}
 
 Each stage used two coupled loops:
 
@@ -261,9 +261,11 @@ could invoke those scripts, inspect the resulting logs, modify the system, and
 repeat the same test. This allowed implementation loops to continue until an
 acceptance gate passed or a result required a human architectural decision.
 
-This division of labor suggests a practical model for prototyping, building,
-and maintaining large software systems with AI. It does not remove the need for
-domain experts. Operationally, the loop followed five steps:
+This division of labor suggests a practical model for AI-assisted software
+development across projects large and small, including both greenfield systems
+and changes to established codebases. It can support prototyping, construction,
+and maintenance, but does not remove the need for domain experts.
+Operationally, the loop followed five steps:
 
 \begin{enumerate}[leftmargin=*,label=\arabic*.,topsep=0.4em,itemsep=0.25em,parsep=0pt]
 \item Domain experts define the product outcome, operating model, non-goals,
@@ -295,13 +297,16 @@ stopped when the stated research questions had a demonstrable artifact,
 documented evidence, and explicit remaining gaps---not when the prototype
 became production-ready.
 
-The same structure applies after initial construction. A maintenance gate can
-be a bug reproduction, compatibility test, performance threshold, or security
-property, while the accumulated architecture and regression suite preserve the
-project's contract across later agent sessions. This makes the method useful
-beyond one prototype: the durable product is not only generated code, but also
-the specifications, executable gates, and decision history that constrain
-future changes.
+Scale changes the size and number of gates, not the loop itself. A small change
+may fit within one bounded issue and regression test; a large program may need
+many architectural milestones like those used for Ginux. A greenfield project
+must create its specifications and harness alongside the implementation. An
+existing project can begin with its established interfaces, tests, and review
+practices, then add gates for a bug reproduction, compatibility requirement,
+performance threshold, security property, or new feature. In either case, the
+durable product is not only generated code, but also the specifications,
+executable gates, and decision history that constrain future changes and later
+agent sessions.
 
 Unguided ``vibe coding'' would have been poorly matched to this project. Many
 failures produced convincing output while violating Linux semantics, isolation,
