@@ -1,109 +1,60 @@
 # Ginux
 
-**An independent Rust-first kernel that runs selected Linux userspace workloads,
-built as a case study in Human-Directed Agentic Engineering (HDAE).**
+**A Rust-first x86-64 operating system built around native domains and Linux
+userspace compatibility.**
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23682548.svg)](https://doi.org/10.5281/zenodo.23682548)
 
-Ginux asks a deliberately difficult question: can a human-directed coding agent
-build a new kernel that runs an existing Linux userspace?
+Ginux is an independent kernel and operating-system prototype. It boots directly
+through UEFI without a Linux host kernel, provides its own memory management,
+scheduler, process model, VFS, networking, device support, and Linux ABI, and
+runs an embedded administration controller in ring 3. Its primary workload is
+an unmodified Linux userspace running inside a kernel-native **domain**.
 
-Over eleven days, one persistent OpenAI Codex task using GPT-5.6 Sol produced a
-focused x86-64 research kernel containing approximately 139,000 retained lines
-of implementation and test code. Ginux boots through UEFI, provides its own
-memory management, scheduler, process model, filesystems, networking, devices,
-and Linux compatibility layer, and runs its controller in ring 3. The evaluated
-system executes selected unmodified Alpine programs and completes a Rocky Linux
-10 systemd boot through `multi-user.target`.
+The repository contains the complete bootable system, controller, native
+services, Linux compatibility implementation, hardware paths, build tools,
+architecture specifications, and QEMU test harnesses. The current development
+target is an x86-64 Q35 virtual machine with OVMF, Intel IOMMU, and virtio
+devices. It runs through KVM on an x86-64 Linux host and QEMU TCG on Apple
+Silicon.
 
-This is a research prototype, not a production kernel or a proposed replacement
-for Linux. Compatibility is partial, hardware coverage is narrow, the full test
-target retains a known failure, and the project has not received an independent
-security audit. Ginux demonstrates that AI can rapidly integrate established
-systems mechanisms under informed human direction. It does not reproduce the
-hardware support, compatibility, review, community, or long-term maintenance
-that Linux has earned over decades.
+Today, Ginux can:
+
+- build as one bootable `GINUX.EFI` image;
+- start its embedded controller as an ordinary ring-3 process;
+- configure devices, networking, storage, and persistent domain definitions;
+- pull, verify, cache, and assemble OCI images into domain-local roots;
+- create and run multiple domains with separate process, address-space,
+  filesystem, mount, capability, and lifecycle state;
+- execute selected unmodified Alpine musl/BusyBox and Rocky Linux glibc
+  programs; and
+- boot Rocky Linux 10 systemd through `multi-user.target`.
+
+Ginux is experimental. Linux ABI coverage, device support, filesystems,
+networking, resource enforcement, security validation, and real-hardware
+coverage are incomplete. It is useful for research, architecture experiments,
+and testing—not production workloads or as a replacement for Linux.
 
 The name is a joke in the same family as Linux: **Ginux** combines Linux, GPT,
 and Greg. To keep the author's ego within its configured resource limit, the
 `G` officially stands for GPT.
 
-## Paper
+## Design goals
 
-The technical report describes the research questions, HDAE method, system
-architecture, evaluation, limitations, and implications:
-
-- [DOI: 10.5281/zenodo.23682548](https://doi.org/10.5281/zenodo.23682548)
-- [LaTeX source](docs/paper/ginux-ai-systems-report.tex)
-- [Steering chronology](docs/paper/STEERING-PROVENANCE.md)
-- [Benchmark artifacts](docs/paper/artifact/benchmark-2026-10-23)
-
-The paper evaluates commit
-`d11c126a048a51fe7eb9c4105f31760add1027ea`, dated October 23, 2026. Later
-repository changes, including publication materials, are not silently treated
-as part of that experimental checkpoint.
-
-## Research questions and result
-
-Ginux studies three questions:
-
-1. **Capability:** Can HDAE produce an independent kernel that boots and
-   executes selected unmodified Linux distribution workloads?
-2. **Method:** What documentation, steering, executable gates, and feedback
-   loops sustain a long-running agentic systems project?
-3. **Outcome quality:** What compatibility and performance does the resulting
-   system demonstrate, and where do its claims stop?
-
-The bounded result is **yes** for the tested workloads. Ginux runs selected
-Alpine musl/BusyBox and Rocky Linux glibc programs, boots Rocky systemd through
-`multi-user.target`, and executes the same sysbench binary used on a stock Rocky
-Linux comparison system. Benchmark-guided iteration corrected severe memory
-and thread-path defects and reached approximate parity in three narrow,
-single-vCPU workloads under cross-architecture QEMU translation. Those results
-are diagnostic evidence, not a general performance claim.
-
-The Linux 6.12 x86-64 syscall ledger classifies all 375 syscall numbers:
-
-- 82 complete;
-- 245 partial; and
-- 48 policy-denied.
-
-Classification is not conformance. General Linux and POSIX compatibility,
-complete cgroups and namespaces, broad device `ioctl` support, GPU support,
-real-hardware coverage, and arbitrary application compatibility remain outside
-the demonstrated result. See the
-[Linux compatibility matrix](docs/LINUX-COMPATIBILITY.md) for the detailed
-ledger.
-
-## Human-Directed Agentic Engineering
-
-HDAE combines human-defined architecture, constraints, milestones, and
-acceptance criteria with an agent that implements, executes, diagnoses, and
-revises its work. The Ginux process was not a single prompt and was not
-unconstrained "vibe coding."
-
-The working loop was:
-
-1. establish the research objective and interrogate it through Q&A;
-2. write and continuously refine architecture and decision documents;
-3. divide construction into observable milestones;
-4. define executable acceptance gates before expanding scope;
-5. let the agent implement, boot, test, diagnose, and iterate against those
-   gates;
-6. use real userspaces to expose behavior that synthetic tests missed; and
-7. stop when the evidence answered the research question, not when the project
-   resembled a production operating system.
-
-Domain knowledge was essential. Human direction selected the Linux userspace
-contract, separated OCI transport from runtime isolation, recognized incorrect
-fork/exec and systemd behavior, established domain ownership semantics, and
-decided which apparent successes were real. The agent supplied implementation
-velocity and a persistent execution loop; written architecture and executable
-evidence kept that loop aligned.
-
-This method can be applied to new or existing projects of different sizes. Its
-important ingredients are informed ownership, explicit design, bounded goals,
-repeatable tests, and stopping criteria—not the size or novelty of Ginux.
+- **Linux userspace without Linux underneath.** Linux is a personality exposed
+  by Ginux, not the host kernel.
+- **Domains as the native system boundary.** Domains own processes, address
+  spaces, filesystems, devices, resources, authority, and lifecycle.
+- **A self-contained boot image.** The kernel, controller, and core boot
+  requirements ship in one EFI release unit.
+- **A small userspace control plane.** The embedded controller configures and
+  observes the kernel without executing in ring 0.
+- **Explicit, revocable authority.** Kernel capabilities grant access to named
+  objects and are tied to domain generations for cleanup after failure.
+- **OCI as transport, not runtime.** OCI delivers and assembles filesystems;
+  Ginux domains provide execution and isolation.
+- **Compatibility as an observable contract.** Real Alpine and Rocky Linux
+  workloads supplement synthetic ABI tests.
 
 ## System description
 
@@ -196,6 +147,21 @@ coverage, and a physical-hardware matrix remain future work.
 The validated development target is QEMU's x86-64 Q35 machine with OVMF,
 Intel IOMMU, and virtio devices. QEMU uses KVM on a suitable x86-64 Linux host
 and TCG on Apple Silicon Macs.
+
+### Linux compatibility status
+
+The Linux 6.12 x86-64 ledger classifies all 375 syscall numbers: 82 complete,
+245 partial, and 48 policy-denied. Classification means every syscall number has
+an explicit disposition; it does not mean complete Linux conformance. Loader,
+process, VFS, terminal, socket, IPC, namespace, cgroup, pseudo-filesystem, and
+device behavior is implemented only to the extent recorded in the
+[compatibility matrix](docs/LINUX-COMPATIBILITY.md).
+
+The project uses real workloads as compound integration tests. Alpine exercises
+the musl/BusyBox path. Rocky exercises glibc, dynamic linking, fork/exec, systemd,
+services, procfs, terminals, and related kernel interfaces. A successful tested
+workflow is evidence for that workflow only; it is not a guarantee that an
+arbitrary Linux binary or distribution will run.
 
 ## Build and run
 
@@ -298,6 +264,39 @@ for the full target and environment-variable list.
 - [Stability audit](docs/STABILITY-AUDIT.md)
 - [Native domains and authority](docs/decisions/0001-native-domains-and-authority.md)
 - [Unified image and driver boundary](docs/decisions/0002-unified-image-and-driver-boundary.md)
+
+## Research background
+
+Ginux was built to test whether a coding agent, directed by someone with the
+relevant systems experience, could construct an independent kernel that runs
+existing Linux userspace. Over eleven days, one persistent OpenAI Codex task
+using GPT-5.6 Sol produced approximately 139,000 retained lines of
+implementation and test code.
+
+The development method is called **Human-Directed Agentic Engineering (HDAE)**.
+Human direction established the architecture, constraints, milestones,
+acceptance criteria, and stopping point. The agent implemented, booted, tested,
+diagnosed, and revised the system against executable gates. Architecture and
+decision documents kept the work aligned; real userspaces exposed failures that
+synthetic tests missed.
+
+The result demonstrates rapid construction of deep systems software, not a
+production alternative to Linux. The project does not reproduce Linux's broad
+compatibility, hardware enablement, review, vendor ecosystem, community, or
+long-term maintenance.
+
+The technical report documents the method, architecture, evaluation, and
+limitations:
+
+- [DOI: 10.5281/zenodo.23682548](https://doi.org/10.5281/zenodo.23682548)
+- [LaTeX source](docs/paper/ginux-ai-systems-report.tex)
+- [Steering chronology](docs/paper/STEERING-PROVENANCE.md)
+- [Benchmark artifacts](docs/paper/artifact/benchmark-2026-10-23)
+
+The paper evaluates commit
+`d11c126a048a51fe7eb9c4105f31760add1027ea`, dated October 23, 2026. Later
+repository changes are not silently treated as part of that experimental
+checkpoint.
 
 ## Citation
 
