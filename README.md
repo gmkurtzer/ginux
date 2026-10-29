@@ -272,27 +272,68 @@ inside each approved gate. It stops at gate boundaries for human direction.
 In Codex, start with:
 
 ```text
-Use $hdae-development to turn <PROJECT GOAL> into a Human-Directed Agentic
-Engineering process. Begin with focused Q&A and repository inspection. Propose
-a complete gate map with acceptance evidence and stopping points, perform the
-gate coverage review, and ask me what is missing or incorrectly scoped. Do not
-implement anything until I approve a specific gate, and stop for my review at
-every gate boundary.
+Use $hdae-development for this project.
+
+Project brief:
+- Outcome: <Describe the concrete system behavior or result to create.>
+- Purpose and users: <Explain who needs it and why it matters.>
+- Constraints and non-goals: <State architectural, operational, schedule, or
+  scope boundaries.>
+- Existing behavior to preserve: <Name compatibility, interfaces, data,
+  workflows, or performance that must not regress.>
+- Success evidence: <Describe the tests, demonstrations, measurements, or
+  review results that would prove the outcome.>
+
+Begin with focused Q&A and repository inspection. Help me correct or complete
+the project brief before planning. Propose a complete gate map with acceptance
+evidence and stopping points, perform the gate coverage review, and ask me what
+is missing or incorrectly scoped. Do not implement anything until I approve a
+specific gate, and stop for my review at every gate boundary.
 ```
 
 In Claude Code, use the same request with the Claude skill command:
 
 ```text
-/hdae-development Turn <PROJECT GOAL> into a Human-Directed Agentic Engineering
-process. Begin with focused Q&A and repository inspection. Propose a complete
-gate map with acceptance evidence and stopping points, perform the gate coverage
-review, and ask me what is missing or incorrectly scoped. Do not implement
-anything until I approve a specific gate, and stop for my review at every gate
-boundary.
+/hdae-development Use this project brief:
+
+- Outcome: <Describe the concrete system behavior or result to create.>
+- Purpose and users: <Explain who needs it and why it matters.>
+- Constraints and non-goals: <State architectural, operational, schedule, or
+  scope boundaries.>
+- Existing behavior to preserve: <Name compatibility, interfaces, data,
+  workflows, or performance that must not regress.>
+- Success evidence: <Describe the tests, demonstrations, measurements, or
+  review results that would prove the outcome.>
+
+Begin with focused Q&A and repository inspection. Help me correct or complete
+the project brief before planning. Propose a complete gate map with acceptance
+evidence and stopping points, perform the gate coverage review, and ask me what
+is missing or incorrectly scoped. Do not implement anything until I approve a
+specific gate, and stop for my review at every gate boundary.
 ```
 
-Replace `<PROJECT GOAL>` with the desired outcome. After approving a gate, tell
-the agent to implement that named gate using the same skill.
+The project brief is a structured starting point, not a keyword substitution.
+Write complete statements where possible; unknown fields may say `unknown` so
+the agent knows to resolve them through Q&A. For example, the Ginux hardening
+experiment could begin with:
+
+```text
+- Outcome: Turn external technical feedback into an evidence-driven kernel
+  hardening iteration covering syscall-entry stack safety, recoverable
+  userspace memory access, mutable global state, synchronization, SMP readiness,
+  and code decomposition.
+- Purpose and users: Determine whether HDAE can convert expert review into a
+  coherent second research iteration rather than isolated patches.
+- Constraints and non-goals: Preserve the native-domain architecture; do not
+  claim production security or complete Linux compatibility.
+- Existing behavior to preserve: Rocky Linux systemd boot, Linux userspace ABI
+  gates, multi-domain behavior, and recorded performance checkpoints.
+- Success evidence: Each approved hardening gate passes its positive, negative,
+  regression, documentation, and end-to-end QEMU acceptance checks.
+```
+
+After approving a gate, tell the agent to implement that named gate using the
+same skill.
 
 ### Recurring PR and issue review
 
