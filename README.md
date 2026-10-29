@@ -254,6 +254,79 @@ for the full target and environment-variable list.
 - [`skills`](skills) contains portable HDAE development and scheduled PR/issue
   review Agent Skills shared by Codex and Claude Code.
 
+## Using the agent skills
+
+The canonical skills live under [`skills/`](skills). Git-tracked relative
+symlinks expose the same files to Codex under `.agents/skills/` and to Claude
+Code under `.claude/skills/`. Start a new agent session from this repository
+after checking out the branch that contains those links so the agent discovers
+them at startup.
+
+### HDAE development
+
+Use this skill when starting or restructuring substantial work. It begins with
+focused Q&A, helps the human establish product intent and architecture, creates
+milestones with executable gates, and gives the agent autonomy to iterate
+inside each approved gate. It stops at gate boundaries for human direction.
+
+In Codex, start with:
+
+```text
+Use $hdae-development to turn <PROJECT GOAL> into a Human-Directed Agentic
+Engineering process. Begin with focused Q&A, inspect the existing repository,
+and draft the product intent, architecture, milestones, and executable gates.
+Do not begin implementation until I approve the plan, and stop for my review at
+every gate boundary.
+```
+
+In Claude Code, use the same request with the Claude skill command:
+
+```text
+/hdae-development Turn <PROJECT GOAL> into a Human-Directed Agentic Engineering
+process. Begin with focused Q&A, inspect the existing repository, and draft the
+product intent, architecture, milestones, and executable gates. Do not begin
+implementation until I approve the plan, and stop for my review at every gate
+boundary.
+```
+
+Replace `<PROJECT GOAL>` with the desired outcome. After approving a gate, tell
+the agent to implement that named gate using the same skill.
+
+### Recurring PR and issue review
+
+Use this skill to establish read-only reviews of new or updated GitHub issues
+and pull requests. The agent discovers the repository, checks for a connected
+GitHub account or authenticated `gh` CLI, guides installation or interactive
+login when needed, and asks for the frequency, time/day anchor, timezone,
+scope, report destination, and notification preference. It validates access
+with a review before creating the schedule.
+
+In Codex, start with:
+
+```text
+Use $pr-issue-review to set up recurring, read-only reviews of new or updated
+issues and pull requests for this repository. Discover and validate the GitHub
+repository and authentication, then ask me how often and when the review should
+run. Preview one review before creating the schedule. Do not post, label, close,
+approve, merge, commit, or push anything.
+```
+
+In Claude Code, use:
+
+```text
+/pr-issue-review Set up recurring, read-only reviews of new or updated issues
+and pull requests for this repository. Discover and validate the GitHub
+repository and authentication, then ask me how often and when the review should
+run. Preview one review before creating the schedule. Do not post, label, close,
+approve, merge, commit, or push anything.
+```
+
+Codex can use its native recurring automation when available. Claude Code uses
+an available native scheduler or proposes an explicit repository workflow or
+host scheduler for approval. In either environment, the skill verifies that
+the unattended runtime can access the repository before creating the task; it
+never asks for a token to be pasted into the conversation.
+
 ## Design and evidence
 
 - [Architecture](ARCHITECTURE.md)
