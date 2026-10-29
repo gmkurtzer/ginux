@@ -39,40 +39,18 @@ containing the discovery links.
 Codex:
 
 ```text
-Use $hdae-development to help me develop this project using Human-Directed
-Agentic Engineering. Start by interviewing me about the idea, users, desired
-outcomes, architecture, constraints, non-goals, existing behavior, risks, and
-proof of success. Ask focused follow-up questions in small rounds until the
-project is clear; do not fill gaps with assumptions.
-
-Summarize the resulting project brief for my correction, then persist the
-confirmed brief, architecture, decisions, gate plan, and current status in the
-repository so a later context or agent can resume safely. Propose a complete
-gate map, perform the gate coverage review, and ask what is missing or
-incorrectly scoped. Do not implement anything until I approve a specific gate.
-Update the persisted status and stop for my review at every gate boundary.
+Use $hdae-development to help me develop this project.
 ```
 
 Claude Code:
 
 ```text
-/hdae-development Help me develop this project using Human-Directed Agentic
-Engineering. Start by interviewing me about the idea, users, desired outcomes,
-architecture, constraints, non-goals, existing behavior, risks, and proof of
-success. Ask focused follow-up questions in small rounds until the project is
-clear; do not fill gaps with assumptions.
-
-Summarize the resulting project brief for my correction, then persist the
-confirmed brief, architecture, decisions, gate plan, and current status in the
-repository so a later context or agent can resume safely. Propose a complete
-gate map, perform the gate coverage review, and ask what is missing or
-incorrectly scoped. Do not implement anything until I approve a specific gate.
-Update the persisted status and stop for my review at every gate boundary.
+/hdae-development Help me develop this project.
 ```
 
 The user may begin with only an idea. The skill makes the agent responsible for
-eliciting, confirming, and persisting the structured project state before
-implementation.
+eliciting and confirming the structured project state, persisting it before
+implementation, proposing complete gates, and stopping for human direction.
 
 ### Recurring PR and issue review
 

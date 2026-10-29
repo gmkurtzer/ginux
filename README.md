@@ -272,41 +272,22 @@ inside each approved gate. It stops at gate boundaries for human direction.
 In Codex, start with:
 
 ```text
-Use $hdae-development to help me develop this project using Human-Directed
-Agentic Engineering. Start by interviewing me about the idea, users, desired
-outcomes, architecture, constraints, non-goals, existing behavior, risks, and
-proof of success. Ask focused follow-up questions in small rounds until the
-project is clear; do not fill gaps with assumptions.
-
-Summarize the resulting project brief for my correction, then persist the
-confirmed brief, architecture, decisions, gate plan, and current status in the
-repository so a later context or agent can resume safely. Propose a complete
-gate map, perform the gate coverage review, and ask what is missing or
-incorrectly scoped. Do not implement anything until I approve a specific gate.
-Update the persisted status and stop for my review at every gate boundary.
+Use $hdae-development to help me develop this project.
 ```
 
 In Claude Code, use the same request with the Claude skill command:
 
 ```text
-/hdae-development Help me develop this project using Human-Directed Agentic
-Engineering. Start by interviewing me about the idea, users, desired outcomes,
-architecture, constraints, non-goals, existing behavior, risks, and proof of
-success. Ask focused follow-up questions in small rounds until the project is
-clear; do not fill gaps with assumptions.
-
-Summarize the resulting project brief for my correction, then persist the
-confirmed brief, architecture, decisions, gate plan, and current status in the
-repository so a later context or agent can resume safely. Propose a complete
-gate map, perform the gate coverage review, and ask what is missing or
-incorrectly scoped. Do not implement anything until I approve a specific gate.
-Update the persisted status and stop for my review at every gate boundary.
+/hdae-development Help me develop this project.
 ```
 
 The user may begin with only an idea. The agent is responsible for eliciting the
-structured project brief, confirming it, and writing it into durable project
-state before implementation. After approving a gate, tell the agent to implement
-that named gate using the same skill.
+structured project brief through focused follow-up questions, confirming it,
+and writing it into durable project state before implementation. The skill also
+requires the agent to propose complete gates, ask what is missing, wait for
+approval, and update the persisted status at every stopping point. After
+approving a gate, tell the agent to implement that named gate using the same
+skill.
 
 ### Recurring PR and issue review
 
