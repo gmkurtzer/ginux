@@ -24,6 +24,10 @@ Available skills:
 - `maintainer-triage`: monitors and triages issues and pull requests, then
   drafts evidence-based maintainer responses without external mutation by
   default.
+- `hdae-review-scheduler`: applies HDAE gates to the design, dry run, creation,
+  and first-run verification of recurring read-only issue and pull-request
+  reviews.
 
-The skills define repeatable procedures. Persistent monitoring still requires
-a scheduler or GitHub event workflow to invoke `maintainer-triage`.
+The skills define repeatable procedures. `hdae-review-scheduler` configures a
+supported scheduler or GitHub event workflow to invoke the triage procedure;
+it does not grant that automation maintainer mutation authority.
