@@ -1,6 +1,6 @@
 ---
 name: hdae-development
-description: Apply Human-Directed Agentic Engineering to plan, build, verify, or maintain software through human-owned architecture and acceptance decisions plus agent-executed implementation loops. Use when a user wants to structure substantial new or existing engineering work with explicit documents, milestones, gates, evidence, and stopping points.
+description: Apply Human-Directed Agentic Engineering by interviewing the human until the project is clear, persisting shared context, and planning, building, verifying, or maintaining software through human-approved gates and agent-executed loops. Use for substantial new or existing engineering work that needs durable architecture, milestones, evidence, and stopping points.
 ---
 
 # HDAE Development
@@ -33,6 +33,26 @@ records rather than creating parallel documents.
 If the operation or current gate is unclear, establish it with the human before
 making substantial changes.
 
+## Discovery interview
+
+Start Establish mode by interviewing the human. Do not require the human to
+arrive with a completed brief or fill out a template.
+
+1. Ask a small first round of the highest-value questions about the problem,
+   intended outcome, users, and why it matters.
+2. Use each answer to ask focused follow-ups about architecture, constraints,
+   non-goals, risks, existing behavior, and proof of success.
+3. Inspect the repository between question rounds so questions reflect the
+   actual system rather than generic assumptions.
+4. Continue until the answers and repository evidence are sufficient to propose
+   a coherent project brief and gate map. Do not stop questioning merely because
+   every topic has been mentioned once.
+5. Summarize the resulting understanding in plain language and ask the human to
+   correct it before treating it as authoritative.
+
+Prefer one to three related questions at a time. Explain why a question changes
+the architecture, scope, or acceptance criteria when that is not obvious.
+
 ## Mandatory gate alignment
 
 Before implementation, align the gates with the human. Skip this only when the
@@ -60,14 +80,46 @@ When the human adds or changes a requirement, update the affected gate map and
 acceptance criteria. If the change is material, obtain approval before
 continuing implementation.
 
+## Persist shared understanding
+
+Do not rely on chat history as the project record. During Establish mode,
+identify the repository's existing authoritative documents and propose where
+the HDAE state will live. After the human confirms the summarized understanding,
+write or update durable repository files covering:
+
+- project intent, users, outcomes, scope, and non-goals;
+- architecture, constraints, invariants, and important decisions;
+- milestone and gate map with status, dependencies, and acceptance criteria;
+- the active checkpoint: current gate, evidence, limitations, open questions,
+  required human decisions, and exact next action.
+
+Use existing project conventions when possible. For a small project, one
+`docs/HDAE.md` may be sufficient. For a substantial project without an existing
+structure, propose `docs/hdae/PROJECT.md`, `ARCHITECTURE.md`, `PLAN.md`, and
+`STATUS.md`. Create only the files the project needs and link them rather than
+duplicating content.
+
+At the beginning of every resumed task or after a context shift, read the
+repository instructions and these authoritative HDAE files before proposing or
+executing work. At every gate boundary and before handing off, update the active
+checkpoint so another agent can continue without reconstructing decisions from
+conversation history. If chat and persisted state disagree, surface the conflict
+to the human instead of choosing silently.
+
+When version control is available, include the state update with the related
+gate commit when authorized and consistent with repository practice. Otherwise,
+report the uncommitted state files explicitly; never imply that chat alone is a
+durable handoff.
+
 ## Establish the project
 
-1. Use focused Q&A to understand the desired outcome, users, non-goals,
-   constraints, domain assumptions, and definition of success.
+1. Run the discovery interview until the desired outcome, users, non-goals,
+   constraints, domain assumptions, and definition of success are clear enough
+   for human confirmation.
 2. Inspect the repository or intended environment and identify existing
    behavior, architecture, tests, and unresolved risks.
-3. Collaboratively record only the documents the work needs: typically product
-   intent, architecture and invariants, a phased plan, and acceptance gates.
+3. Persist the confirmed understanding and active checkpoint using the smallest
+   useful set of authoritative repository documents.
 4. Establish a reproducible baseline. Use a branch, tag, or checkpoint when it
    materially improves comparison or recovery and the human authorizes it.
 5. Divide the work into reviewable milestones. Each gate must name deliverables,
@@ -93,7 +145,8 @@ assessing the project process.
 7. Reconcile every deliverable and acceptance criterion against fresh evidence,
    including documentation and user-facing behavior. Do not declare the gate
    complete because its main code path works.
-8. Stop at the gate boundary and let the human accept, reject, redirect, or
+8. Update the persisted gate status, evidence, open questions, and next action.
+9. Stop at the gate boundary and let the human accept, reject, redirect, or
    reprioritize the next work.
 
 Return immediately for human direction when work would change the architecture,

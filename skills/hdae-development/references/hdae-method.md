@@ -26,6 +26,22 @@ observed behavior, and deciding what evidence is sufficient. Agent proposals do
 not become architecture merely because they are plausible; human preferences do
 not make a gate pass without evidence.
 
+## Iterative discovery
+
+The initial prompt may contain only an idea. The agent is responsible for
+turning that idea into a reviewable brief through conversation and repository
+inspection.
+
+Ask questions in small rounds. Begin with the outcome, users, and motivation;
+then follow the answers into constraints, non-goals, architecture, compatibility,
+operations, risks, and evidence. Continue until remaining uncertainty is either
+resolved or explicitly recorded as an open decision. Summarize the complete
+understanding and obtain correction or confirmation before planning gates.
+
+Do not present a long questionnaire when adaptive follow-up would produce better
+answers. Do not fill gaps with plausible assumptions simply to reach coding
+faster.
+
 ## Minimal artifact model
 
 Use existing repository conventions. Keep these responsibilities distinct when
@@ -39,6 +55,37 @@ the project needs them, but do not create documents for ceremony:
 - **Decision record:** a durable explanation for consequential choices.
 
 Link to authoritative material rather than duplicating it.
+
+## Durable context and continuation
+
+Chat context is temporary. The repository must contain enough authoritative
+state for a new agent or later session to resume safely.
+
+Prefer existing product, architecture, planning, decision, and status files. If
+none exist, use one compact `docs/HDAE.md` for small work or propose a split
+under `docs/hdae/` for substantial work:
+
+- `PROJECT.md`: intent, users, outcomes, scope, and non-goals;
+- `ARCHITECTURE.md`: boundaries, invariants, constraints, and decisions;
+- `PLAN.md`: milestone and gate ledger with acceptance criteria;
+- `STATUS.md`: current gate, last verified evidence, limitations, open
+  questions, required decisions, and next action.
+
+Keep one source of truth for each fact. Link evidence and decision records rather
+than copying them into every file.
+
+At session start, reload repository instructions and the authoritative HDAE
+state. Before a context shift, handoff, or gate stop, update `STATUS.md` or its
+equivalent. It must answer:
+
+1. What outcome and invariants govern the work?
+2. Which gate is active and what is its exact status?
+3. What changed and what evidence actually ran?
+4. What remains incomplete, failed, blocked, or unverified?
+5. Which human decision or exact next action is required?
+
+Persisted state never overrides a newer explicit human decision. Reconcile the
+difference and update the record.
 
 ## Gate quality
 
