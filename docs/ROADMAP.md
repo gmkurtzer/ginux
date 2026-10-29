@@ -2,6 +2,17 @@
 
 This roadmap converts the current architecture into user-verifiable stopping points. Each checkpoint is implemented, tested, committed with sign-off, and then stopped for review. Work on the following checkpoint does not begin until the current checkpoint is accepted.
 
+## Secondary research track: feedback-driven hardening
+
+The published initial artifact is preserved by the `research-v1-baseline` tag.
+The `codex/feedback-hardening` branch runs a separate experiment in converting
+external kernel-engineering review into reproducible failures, explicit
+invariants, implementation changes, and review-gated evidence. Its security,
+global-state ownership, synchronization, decomposition, and SMP gates are
+defined in [Feedback-Driven Hardening Research](FEEDBACK-HARDENING-RESEARCH.md).
+This track does not silently rewrite the historical results or bypass the
+functional checkpoints below.
+
 The active post-syscall-dispatch compatibility work is divided into the
 mandatory review-gated stages in [Next Goal: Linux Compatibility to Operational
 Rocky](NEXT-GOAL.md). Those stages refine the work needed to close C3 and reach

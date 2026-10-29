@@ -256,6 +256,7 @@ for the full target and environment-variable list.
 
 - [Architecture](ARCHITECTURE.md)
 - [Verification roadmap](docs/ROADMAP.md)
+- [Feedback-driven hardening research](docs/FEEDBACK-HARDENING-RESEARCH.md)
 - [Linux compatibility matrix](docs/LINUX-COMPATIBILITY.md)
 - [Linux runtime compatibility](docs/LINUX-RUNTIME-COMPATIBILITY.md)
 - [Runtime use cases](docs/USE-CASES.md)
