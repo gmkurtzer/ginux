@@ -1,4 +1,0 @@
-interface:
-  display_name: "HDAE Gated Development"
-  short_description: "Plan and execute review-gated engineering work"
-  default_prompt: "Use $hdae-gated-development to turn this goal into a gated engineering plan."

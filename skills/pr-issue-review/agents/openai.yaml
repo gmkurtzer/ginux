@@ -1,0 +1,4 @@
+interface:
+  display_name: "PR and Issue Review"
+  short_description: "Schedule and run repository activity reviews"
+  default_prompt: "Use $pr-issue-review to set up recurring pull-request and issue reviews for this repository."

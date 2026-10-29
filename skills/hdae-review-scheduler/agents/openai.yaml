@@ -1,4 +1,0 @@
-interface:
-  display_name: "HDAE Review Scheduler"
-  short_description: "Gate recurring issue and pull-request reviews"
-  default_prompt: "Use $hdae-review-scheduler to design and safely configure recurring issue and pull-request reviews for this repository."

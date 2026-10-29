@@ -1,0 +1,4 @@
+interface:
+  display_name: "HDAE Development"
+  short_description: "Guide human-directed agentic engineering work"
+  default_prompt: "Use $hdae-development to structure this project with human direction, architecture, milestones, executable gates, and evidence."

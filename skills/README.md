@@ -19,15 +19,12 @@ modify agent-specific versions.
 
 Available skills:
 
-- `hdae-gated-development`: creates and executes architecture-led plans with
-  explicit acceptance gates and review stopping points.
-- `maintainer-triage`: monitors and triages issues and pull requests, then
-  drafts evidence-based maintainer responses without external mutation by
-  default.
-- `hdae-review-scheduler`: applies HDAE gates to the design, dry run, creation,
-  and first-run verification of recurring read-only issue and pull-request
-  reviews.
+- `hdae-development`: teaches and applies the complete HDAE method for new or
+  existing projects: human direction, architecture, milestones, executable
+  gates, autonomous implementation loops, evidence, and stopping points.
+- `pr-issue-review`: discovers repository access, asks for cadence and scope,
+  creates a recurring review schedule, and performs evidence-based PR and issue
+  review runs without repository mutation by default.
 
-The skills define repeatable procedures. `hdae-review-scheduler` configures a
-supported scheduler or GitHub event workflow to invoke the triage procedure;
-it does not grant that automation maintainer mutation authority.
+Both skills are repository-agnostic and may be copied with their complete
+directories into another project's skill discovery path.
