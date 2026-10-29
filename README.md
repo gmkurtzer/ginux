@@ -273,9 +273,10 @@ In Codex, start with:
 
 ```text
 Use $hdae-development to turn <PROJECT GOAL> into a Human-Directed Agentic
-Engineering process. Begin with focused Q&A, inspect the existing repository,
-and draft the product intent, architecture, milestones, and executable gates.
-Do not begin implementation until I approve the plan, and stop for my review at
+Engineering process. Begin with focused Q&A and repository inspection. Propose
+a complete gate map with acceptance evidence and stopping points, perform the
+gate coverage review, and ask me what is missing or incorrectly scoped. Do not
+implement anything until I approve a specific gate, and stop for my review at
 every gate boundary.
 ```
 
@@ -283,9 +284,10 @@ In Claude Code, use the same request with the Claude skill command:
 
 ```text
 /hdae-development Turn <PROJECT GOAL> into a Human-Directed Agentic Engineering
-process. Begin with focused Q&A, inspect the existing repository, and draft the
-product intent, architecture, milestones, and executable gates. Do not begin
-implementation until I approve the plan, and stop for my review at every gate
+process. Begin with focused Q&A and repository inspection. Propose a complete
+gate map with acceptance evidence and stopping points, perform the gate coverage
+review, and ask me what is missing or incorrectly scoped. Do not implement
+anything until I approve a specific gate, and stop for my review at every gate
 boundary.
 ```
 

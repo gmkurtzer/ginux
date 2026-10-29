@@ -33,6 +33,33 @@ records rather than creating parallel documents.
 If the operation or current gate is unclear, establish it with the human before
 making substantial changes.
 
+## Mandatory gate alignment
+
+Before implementation, align the gates with the human. Skip this only when the
+current conversation already contains an explicit approval of the exact active
+gate and its acceptance criteria.
+
+1. Restate the outcome and important constraints in plain language.
+2. Ask focused questions about missing product behavior, architecture,
+   compatibility, operations, user experience, documentation, tests, and
+   acceptance. Ask only questions that could change scope or a gate.
+3. Inspect the relevant repository and existing evidence before finalizing the
+   plan.
+4. Present a proposed gate map. For every gate show its outcome, included and
+   excluded work, dependencies, acceptance evidence, and stopping point.
+5. Perform a coverage review across functionality, failure behavior,
+   regression testing, user workflow, documentation, compatibility or
+   migration, and operational or security concerns when relevant. Mark a
+   category not applicable rather than silently omitting it.
+6. Explicitly ask the human: “What is missing or incorrectly scoped, and which
+   gate may begin?”
+7. Wait for approval. Do not treat silence, general enthusiasm, or approval of
+   the overall idea as approval to implement every gate.
+
+When the human adds or changes a requirement, update the affected gate map and
+acceptance criteria. If the change is material, obtain approval before
+continuing implementation.
+
 ## Establish the project
 
 1. Use focused Q&A to understand the desired outcome, users, non-goals,
@@ -46,15 +73,16 @@ making substantial changes.
 5. Divide the work into reviewable milestones. Each gate must name deliverables,
    positive and negative acceptance criteria, regression checks, evidence, and
    a stopping point.
-6. Present architectural choices, assumptions, and the plan for human review.
-   Planning alone does not authorize implementation.
+6. Complete the mandatory gate-alignment conversation. Planning alone does not
+   authorize implementation.
 
 Read [references/hdae-method.md](references/hdae-method.md) when designing or
 assessing the project process.
 
 ## Implement an approved gate
 
-1. Restate the active gate, scope, invariants, and acceptance commands.
+1. Restate the human-approved active gate, scope, invariants, and acceptance
+   commands. If any of those are missing, return to gate alignment.
 2. Reproduce the current behavior or missing capability when practical.
 3. Implement the narrowest coherent change that can satisfy the gate.
 4. Iterate autonomously within that boundary: build, run, observe, diagnose,
@@ -62,7 +90,10 @@ assessing the project process.
 5. Turn discovered regressions into repeatable tests rather than fixing only
    the visible symptom.
 6. Preserve failures, limitations, commands, and material decisions as evidence.
-7. Stop at the gate boundary and let the human accept, reject, redirect, or
+7. Reconcile every deliverable and acceptance criterion against fresh evidence,
+   including documentation and user-facing behavior. Do not declare the gate
+   complete because its main code path works.
+8. Stop at the gate boundary and let the human accept, reject, redirect, or
    reprioritize the next work.
 
 Return immediately for human direction when work would change the architecture,

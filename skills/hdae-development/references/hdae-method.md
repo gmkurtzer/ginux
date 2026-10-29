@@ -55,6 +55,37 @@ A useful gate is:
 Avoid gates such as “improve quality,” “finish compatibility,” or “make it
 secure.” Replace them with specific properties and limitations.
 
+## Human gate-alignment conversation
+
+The agent must make the proposed work visible enough for the human to find
+omissions before implementation. Use this sequence:
+
+1. summarize the intended outcome and constraints;
+2. ask focused questions whose answers could change architecture, scope, or
+   acceptance;
+3. present the complete proposed gate map and dependencies;
+4. show the coverage review below;
+5. ask what is missing or incorrectly scoped; and
+6. ask which specific gate is approved to begin.
+
+The coverage review considers each relevant surface:
+
+- functional behavior and failure paths;
+- automated tests, regression checks, and required evidence;
+- user workflows, interfaces, and discoverability;
+- documentation and examples;
+- compatibility, migration, persistence, and rollback;
+- deployment, monitoring, maintenance, and recovery; and
+- performance, security, privacy, and other nonfunctional constraints.
+
+Not every project needs a gate for every surface. The agent must either include
+the relevant work or state why it is not applicable. This is a completeness
+check, not permission to expand the user's goal.
+
+At gate completion, repeat the coverage review against the approved scope and
+show evidence for every acceptance criterion. Missing or unverified work keeps
+the gate partial.
+
 ## Gate template
 
 ```markdown

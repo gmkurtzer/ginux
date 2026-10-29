@@ -28,3 +28,54 @@ Available skills:
 
 Both skills are repository-agnostic and may be copied with their complete
 directories into another project's skill discovery path.
+
+## Copy-paste prompts
+
+Start a new agent session from the repository after checking out the branch
+containing the discovery links.
+
+### HDAE development
+
+Codex:
+
+```text
+Use $hdae-development to turn <PROJECT GOAL> into a Human-Directed Agentic
+Engineering process. Begin with focused Q&A and repository inspection. Propose
+a complete gate map with acceptance evidence and stopping points, perform the
+gate coverage review, and ask me what is missing or incorrectly scoped. Do not
+implement anything until I approve a specific gate, and stop for my review at
+every gate boundary.
+```
+
+Claude Code:
+
+```text
+/hdae-development Turn <PROJECT GOAL> into a Human-Directed Agentic Engineering
+process. Begin with focused Q&A and repository inspection. Propose a complete
+gate map with acceptance evidence and stopping points, perform the gate coverage
+review, and ask me what is missing or incorrectly scoped. Do not implement
+anything until I approve a specific gate, and stop for my review at every gate
+boundary.
+```
+
+### Recurring PR and issue review
+
+Codex:
+
+```text
+Use $pr-issue-review to set up recurring, read-only reviews of new or updated
+issues and pull requests for this repository. Discover and validate the GitHub
+repository and authentication, then ask me how often and when the review should
+run. Preview one review before creating the schedule. Do not post, label, close,
+approve, merge, commit, or push anything.
+```
+
+Claude Code:
+
+```text
+/pr-issue-review Set up recurring, read-only reviews of new or updated issues
+and pull requests for this repository. Discover and validate the GitHub
+repository and authentication, then ask me how often and when the review should
+run. Preview one review before creating the schedule. Do not post, label, close,
+approve, merge, commit, or push anything.
+```
