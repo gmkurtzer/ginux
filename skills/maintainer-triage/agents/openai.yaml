@@ -1,0 +1,4 @@
+interface:
+  display_name: "Maintainer Triage"
+  short_description: "Triage repository issues and pull requests safely"
+  default_prompt: "Use $maintainer-triage to assess these repository issues and pull requests."

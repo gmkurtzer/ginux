@@ -251,6 +251,8 @@ for the full target and environment-variable list.
   service contracts.
 - [`tests`](tests) contains ABI, lifecycle, and end-to-end QEMU gates.
 - [`tools`](tools) contains image, manifest, architecture, and QEMU tooling.
+- [`skills`](skills) contains the canonical HDAE planning and maintainer-triage
+  Agent Skills shared by Codex and Claude Code.
 
 ## Design and evidence
 
