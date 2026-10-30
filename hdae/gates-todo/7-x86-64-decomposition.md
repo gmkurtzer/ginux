@@ -27,6 +27,10 @@ boundaries established by earlier gates without changing behavior.
 - [x] Extracted Linux syscall identifiers, ABI constants, and clone-flag policy
   into `cpu/linux_abi.rs`, leaving hardware constants in the x86 mechanism
   module and preserving the public compatibility-limit exports.
+- [x] Moved entry-state installation, descriptor-table construction,
+  interrupt-gate management, and guarded-stack accessors into
+  `cpu/architecture.rs`; updated the privilege-entry architecture check to
+  inspect the extracted mechanism at its authoritative location.
 
 ## Remaining work
 
@@ -50,6 +54,10 @@ boundaries established by earlier gates without changing behavior.
   inventory remained stable at 450 and QEMU shut down cleanly.
 - The Linux ABI extraction passed the same architecture, repository, and full
   deterministic QEMU verification sequence without changing the inventory.
+- The descriptor and entry-state extraction passed formatting,
+  `make architecture-check`, `make check`, and
+  `make build-verification && bash tests/qemu/boot.sh`; the inventory remained
+  at 450 classified globals and QEMU reached `GINUX_KERNEL_OK` and shut down.
 
 ## Decisions and limitations
 
@@ -64,8 +72,8 @@ file size alone is not.
 - Planned commits: dependency contract followed by one behavior-preserving
   responsibility extraction per commit.
 - Actual commits: `1adacc47` defines the dependency and invariant contract;
-  `072d1339` extracts architecture ownership; Linux ABI constant extraction
-  pending commit.
+  `072d1339` extracts architecture ownership; `c88cc875` extracts Linux ABI
+  definitions; descriptor and entry-state mechanism extraction pending commit.
 
 ## Review policy and outcome
 

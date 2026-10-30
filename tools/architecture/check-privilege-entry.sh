@@ -4,6 +4,7 @@ set -euo pipefail
 
 root=$(git rev-parse --show-toplevel)
 cpu="$root/kernel/src/arch/x86_64/cpu.rs"
+architecture="$root/kernel/src/arch/x86_64/cpu/architecture.rs"
 address_space="$root/kernel/src/address_space.rs"
 
 fail() {
@@ -22,6 +23,13 @@ if awk -v start="$entry" -v stop="$switch" \
 fi
 
 for required in \
+    'ginux_nmi_entry:' \
+    'lock inc byte ptr [rip + {entry_nmi_probe_hits}]' \
+    'jne ginux_invalid_user_return'; do
+    rg -Fq "$required" "$cpu" || fail "missing required invariant: $required"
+done
+
+for required in \
     'write_msr(GS_BASE_MSR, entry_state as u64)' \
     '2 => NMI_IST' \
     '8 => DOUBLE_FAULT_IST' \
@@ -29,11 +37,8 @@ for required in \
     'nmi_guard_page()' \
     'nmi_upper_guard_page()' \
     'machine_check_guard_page()' \
-    'machine_check_upper_guard_page()' \
-    'ginux_nmi_entry:' \
-    'lock inc byte ptr [rip + {entry_nmi_probe_hits}]' \
-    'jne ginux_invalid_user_return'; do
-    rg -Fq "$required" "$cpu" || fail "missing required invariant: $required"
+    'machine_check_upper_guard_page()'; do
+    rg -Fq "$required" "$architecture" || fail "missing required invariant: $required"
 done
 
 stages=$(rg -F 'lock btr qword ptr [rip + {entry_nmi_probe_mask}]' "$cpu" | wc -l | tr -d ' ')

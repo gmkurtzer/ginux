@@ -64,3 +64,19 @@ Every extraction runs formatting, architecture checks, the repository test
 suite, Linux ABI coverage, and the deterministic QEMU verification boot before
 the next boundary moves. The final gate reruns compatibility and performance
 baselines and compares them with the Gate 1 record.
+
+## Extraction record
+
+- Architecture ownership moved first, establishing `CPU_ARCHITECTURE` as the
+  single owner of per-CPU entry slots, descriptor tables, and guarded stacks.
+- Linux syscall identifiers and ABI constants moved independently so policy
+  definitions no longer obscure architecture mechanisms.
+- Entry-state installation, GDT/TSS/IDT construction, interrupt-gate mutation,
+  and guarded-stack accessors then moved beside their owner. The static
+  privilege-entry check follows these mechanisms into `cpu/architecture.rs`
+  while continuing to inspect entry assembly in `cpu.rs`.
+
+After these extractions, `cpu.rs` contains 47,252 lines,
+`cpu/architecture.rs` contains 423 lines, and `cpu/linux_abi.rs` contains 868
+lines. These measurements record progress only; cohesive responsibility and
+dependency direction remain the gate criteria.

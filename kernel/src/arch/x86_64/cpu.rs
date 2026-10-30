@@ -10,9 +10,15 @@ use super::{paging, timer};
 
 mod architecture;
 mod linux_abi;
-use architecture::{
-    CpuEntryState, DescriptorTablePointer, IdtEntry, TaskStateSegment, CPU_ARCHITECTURE,
+pub(crate) use architecture::{
+    clear_interrupt_gate, double_fault_guard_page, double_fault_stack_top,
+    double_fault_upper_guard_page, install, install_interrupt_gate, machine_check_guard_page,
+    machine_check_stack_top, machine_check_upper_guard_page, nmi_guard_page, nmi_stack_top,
+    nmi_upper_guard_page, privilege_stack_guard_page, privilege_stack_top,
+    privilege_stack_upper_guard_page, task_register_denies_user_io,
+    user_interrupt_surface_is_minimal,
 };
+use architecture::{current_entry_state, install_user_interrupt_gate, CPU_ARCHITECTURE};
 pub(crate) use linux_abi::*;
 
 use crate::{
@@ -2782,77 +2788,6 @@ pub(crate) fn verify_user_copy_fault_fixups(mapped_end: u64, unmapped: u64) -> b
         && rejected_from == output.len()
         && rejected_to == input.len()
         && flags & (1 << 18) == 0
-}
-
-pub(crate) fn install() -> bool {
-    // SAFETY: Initialization runs once with interrupts disabled and before any
-    // other CPU can observe these tables.
-    unsafe {
-        let entry_state = CPU_ARCHITECTURE
-            .entry_states
-            .get()
-            .cast::<CpuEntryState>()
-            .add(BOOT_CPU_INDEX);
-        entry_state.write(CpuEntryState::EMPTY);
-        write_msr(GS_BASE_MSR, entry_state as u64);
-        install_gdt_and_tss();
-        install_idt();
-    }
-    entry_state_is_installed() && exception_gates_are_valid()
-}
-
-fn current_entry_state() -> *mut CpuEntryState {
-    // SAFETY: `install` assigns GS_BASE to this CPU's entry-state slot before
-    // userspace or interrupts can use the privilege-entry paths.
-    unsafe { read_msr(GS_BASE_MSR) as *mut CpuEntryState }
-}
-
-fn entry_state_is_installed() -> bool {
-    let base = current_entry_state() as usize;
-    let states = CPU_ARCHITECTURE
-        .entry_states
-        .get()
-        .cast_const()
-        .cast::<CpuEntryState>() as usize;
-    base >= states
-        && base < states + size_of::<[CpuEntryState; CPU_ENTRY_STATE_LIMIT]>()
-        && (base - states).is_multiple_of(size_of::<CpuEntryState>())
-}
-
-pub(crate) fn task_register_denies_user_io() -> bool {
-    let selector: u16;
-    unsafe {
-        asm!("str {selector:x}", selector = out(reg) selector, options(nomem, nostack, preserves_flags));
-    }
-    let low = unsafe {
-        CPU_ARCHITECTURE
-            .gdt
-            .get()
-            .cast_const()
-            .cast::<u64>()
-            .add(3)
-            .read()
-    };
-    let high = unsafe {
-        CPU_ARCHITECTURE
-            .gdt
-            .get()
-            .cast_const()
-            .cast::<u64>()
-            .add(4)
-            .read()
-    };
-    let limit = (low & 0xffff) | ((low >> 32) & 0x000f_0000);
-    let base =
-        ((low >> 16) & 0x00ff_ffff) | ((low >> 32) & 0xff00_0000) | ((high & 0xffff_ffff) << 32);
-    let io_map_base =
-        unsafe { core::ptr::addr_of!((*CPU_ARCHITECTURE.tss.get()).io_map_base).read_unaligned() };
-    selector == TSS_SELECTOR
-        && low & (1 << 47) != 0
-        && (low >> 40) & 0x0f == 0x0b
-        && limit == (size_of::<TaskStateSegment>() - 1) as u64
-        && base == CPU_ARCHITECTURE.tss.get().cast_const() as u64
-        && u64::from(io_map_base) > limit
 }
 
 pub(crate) fn enable_supervisor_execution_prevention() -> bool {
@@ -10292,220 +10227,12 @@ fn restore_linux_syscall(saved: [u64; 5]) -> bool {
     }
 }
 
-pub(crate) fn user_interrupt_surface_is_minimal() -> bool {
-    let idt = CPU_ARCHITECTURE.idt.get().cast_const().cast::<IdtEntry>();
-    for vector in 0..256 {
-        let entry = unsafe { idt.add(vector).read() };
-        let expected = if vector <= 32 || vector == 255 {
-            Some(0x8e)
-        } else if vector == usize::from(SYSCALL_VECTOR) {
-            Some(0xee)
-        } else {
-            None
-        };
-        match expected {
-            Some(attributes)
-                if entry.selector == KERNEL_CODE_SELECTOR
-                    && entry.attributes == attributes
-                    && entry.ist == exception_ist(vector)
-                    && entry.reserved == 0
-                    && entry.has_handler() => {}
-            None if entry.is_missing() => {}
-            _ => return false,
-        }
-    }
-    true
-}
-
 pub(crate) fn verify_breakpoint() -> bool {
     BREAKPOINT_HANDLED.store(false, Ordering::SeqCst);
     // SAFETY: Vector 3 is installed as a present interrupt gate and its handler
     // preserves the interrupted register state before returning with IRETQ.
     unsafe { asm!("int3", options(nomem, nostack)) };
     BREAKPOINT_HANDLED.load(Ordering::SeqCst)
-}
-
-pub(crate) fn double_fault_guard_page() -> usize {
-    CPU_ARCHITECTURE.double_fault_stack.get().cast_const() as usize
-}
-
-pub(crate) fn double_fault_upper_guard_page() -> usize {
-    CPU_ARCHITECTURE.double_fault_stack.get().cast_const() as usize + IST_STACK_TOP_OFFSET
-}
-
-pub(crate) fn double_fault_stack_top() -> usize {
-    CPU_ARCHITECTURE.double_fault_stack.get().cast_const() as usize + IST_STACK_TOP_OFFSET
-}
-
-pub(crate) fn nmi_guard_page() -> usize {
-    CPU_ARCHITECTURE.nmi_stack.get().cast_const() as usize
-}
-
-pub(crate) fn nmi_upper_guard_page() -> usize {
-    CPU_ARCHITECTURE.nmi_stack.get().cast_const() as usize + IST_STACK_TOP_OFFSET
-}
-
-pub(crate) fn nmi_stack_top() -> usize {
-    CPU_ARCHITECTURE.nmi_stack.get().cast_const() as usize + IST_STACK_TOP_OFFSET
-}
-
-pub(crate) fn machine_check_guard_page() -> usize {
-    CPU_ARCHITECTURE.machine_check_stack.get().cast_const() as usize
-}
-
-pub(crate) fn machine_check_upper_guard_page() -> usize {
-    CPU_ARCHITECTURE.machine_check_stack.get().cast_const() as usize + IST_STACK_TOP_OFFSET
-}
-
-pub(crate) fn machine_check_stack_top() -> usize {
-    CPU_ARCHITECTURE.machine_check_stack.get().cast_const() as usize + IST_STACK_TOP_OFFSET
-}
-
-pub(crate) fn privilege_stack_guard_page() -> usize {
-    CPU_ARCHITECTURE.privilege_stack.get().cast_const() as usize
-}
-
-pub(crate) fn privilege_stack_upper_guard_page() -> usize {
-    CPU_ARCHITECTURE.privilege_stack.get().cast_const() as usize + EXCEPTION_STACK_TOP_OFFSET
-}
-
-pub(crate) fn privilege_stack_top() -> usize {
-    CPU_ARCHITECTURE.privilege_stack.get().cast_const() as usize + EXCEPTION_STACK_TOP_OFFSET
-}
-
-/// Installs a non-exception interrupt gate while interrupts are disabled.
-pub(crate) fn install_interrupt_gate(vector: u8, handler: usize) -> bool {
-    if vector < 32 || handler == 0 {
-        return false;
-    }
-    let idt = CPU_ARCHITECTURE.idt.get().cast::<IdtEntry>();
-    // SAFETY: Bootstrap remains single-threaded with interrupts disabled. The
-    // loaded IDT is writable and the vector is outside the exception range.
-    unsafe {
-        idt.add(usize::from(vector))
-            .write(IdtEntry::interrupt(handler, 0));
-        let entry = idt.add(usize::from(vector)).read();
-        entry.selector == KERNEL_CODE_SELECTOR && entry.attributes == 0x8e && entry.ist == 0
-    }
-}
-
-/// Removes a temporary kernel interrupt gate while interrupts are disabled.
-pub(crate) fn clear_interrupt_gate(vector: u8) -> bool {
-    if vector <= 32 || vector == SYSCALL_VECTOR || vector == u8::MAX {
-        return false;
-    }
-    let idt = CPU_ARCHITECTURE.idt.get().cast::<IdtEntry>();
-    // SAFETY: The caller has quiesced the interrupt source and keeps
-    // interrupts disabled while replacing this non-reserved gate.
-    unsafe {
-        idt.add(usize::from(vector)).write(IdtEntry::MISSING);
-        idt.add(usize::from(vector)).read().is_missing()
-    }
-}
-
-fn install_user_interrupt_gate(vector: u8, handler: usize) -> bool {
-    if vector < 32 || handler == 0 {
-        return false;
-    }
-    let idt = CPU_ARCHITECTURE.idt.get().cast::<IdtEntry>();
-    unsafe {
-        let mut entry = IdtEntry::interrupt(handler, 0);
-        entry.attributes = 0xee;
-        idt.add(usize::from(vector)).write(entry);
-        idt.add(usize::from(vector)).read().attributes == 0xee
-    }
-}
-
-unsafe fn install_gdt_and_tss() {
-    let tss = &mut *CPU_ARCHITECTURE.tss.get();
-    let gdt = &mut *CPU_ARCHITECTURE.gdt.get();
-    let tss_address = core::ptr::from_ref(tss) as u64;
-    let privilege_stack_end = privilege_stack_top() as u64;
-    tss.interrupt_stacks[usize::from(DOUBLE_FAULT_IST - 1)] = double_fault_stack_top() as u64;
-    tss.interrupt_stacks[usize::from(NMI_IST - 1)] = nmi_stack_top() as u64;
-    tss.interrupt_stacks[usize::from(MACHINE_CHECK_IST - 1)] = machine_check_stack_top() as u64;
-    tss.privilege_stacks[0] = privilege_stack_end;
-
-    gdt[0] = 0;
-    gdt[1] = 0x00af_9a00_0000_ffff;
-    gdt[2] = 0x00af_9200_0000_ffff;
-    let limit = (size_of::<TaskStateSegment>() - 1) as u64;
-    gdt[3] = limit
-        | ((tss_address & 0x00ff_ffff) << 16)
-        | (0x89_u64 << 40)
-        | (((limit >> 16) & 0x0f) << 48)
-        | (((tss_address >> 24) & 0xff) << 56);
-    gdt[4] = tss_address >> 32;
-    gdt[5] = 0x00cf_f200_0000_ffff;
-    gdt[6] = 0x00af_fa00_0000_ffff;
-
-    let pointer = DescriptorTablePointer {
-        limit: (size_of::<[u64; 7]>() - 1) as u16,
-        base: CPU_ARCHITECTURE.gdt.get().cast_const() as u64,
-    };
-
-    asm!(
-        "lgdt [{}]",
-        "mov ax, {data}",
-        "mov ds, ax",
-        "mov es, ax",
-        "mov ss, ax",
-        "push {code}",
-        "lea rax, [rip + 2f]",
-        "push rax",
-        "retfq",
-        "2:",
-        "mov ax, {tss}",
-        "ltr ax",
-        in(reg) &pointer,
-        data = const KERNEL_DATA_SELECTOR,
-        code = const KERNEL_CODE_SELECTOR as u64,
-        tss = const TSS_SELECTOR,
-        out("rax") _,
-    );
-}
-
-unsafe fn install_idt() {
-    let entries = core::ptr::addr_of!(ginux_exception_entries).cast::<usize>();
-    let idt = CPU_ARCHITECTURE.idt.get().cast::<IdtEntry>();
-    for vector in 0..32 {
-        let ist = exception_ist(vector);
-        idt.add(vector)
-            .write(IdtEntry::interrupt(entries.add(vector).read(), ist));
-    }
-
-    let pointer = DescriptorTablePointer {
-        limit: (size_of::<[IdtEntry; 256]>() - 1) as u16,
-        base: CPU_ARCHITECTURE.idt.get().cast_const() as u64,
-    };
-    asm!("lidt [{}]", in(reg) &pointer, options(readonly, nostack, preserves_flags));
-}
-
-fn exception_gates_are_valid() -> bool {
-    let idt = CPU_ARCHITECTURE.idt.get().cast_const().cast::<IdtEntry>();
-    for vector in 0..32 {
-        // SAFETY: IDT is initialized before this verifier runs and is never
-        // subsequently mutated on the bootstrap processor.
-        let entry = unsafe { idt.add(vector).read() };
-        let expected_ist = exception_ist(vector);
-        if entry.selector != KERNEL_CODE_SELECTOR
-            || entry.attributes != 0x8e
-            || entry.ist != expected_ist
-            || (entry.offset_low == 0 && entry.offset_middle == 0 && entry.offset_high == 0)
-        {
-            return false;
-        }
-    }
-    true
-}
-
-const fn exception_ist(vector: usize) -> u8 {
-    match vector {
-        2 => NMI_IST,
-        8 => DOUBLE_FAULT_IST,
-        18 => MACHINE_CHECK_IST,
-        _ => 0,
-    }
 }
 
 extern "sysv64" fn breakpoint_handler() {

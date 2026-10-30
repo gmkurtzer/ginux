@@ -7,19 +7,20 @@
 - Active project: feedback-driven kernel hardening
 - Branch: `codex/feedback-hardening`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 7, x86-64 decomposition, ready to start
+- Active gate: Gate 7, x86-64 decomposition, in progress
 - Last completed action: Gate 6 moved all classified platform, service,
   controller, device, timer, paging, physical-memory, and per-CPU architecture
   state behind explicit owner roots and passed fresh static, unit, ABI,
   service-failure, isolation, lifecycle, and full verification-QEMU evidence
-- Next action: commit the Gate 7 dependency contract, then extract per-CPU
-  architecture storage and descriptor mechanisms into `cpu/architecture.rs`
+- Next action: extract fault-recovering raw userspace-copy mechanisms and their
+  SMAP/fixup assembly into `cpu/user_access.rs`, then run the complete
+  per-extraction regression set
 
 ## Current repository state
 
-Local and remote `main` identify commit `1852455`. Gates 1 through 5 passed and
-closed under delegated review. Gate 6 has zero remaining migration rows and is
-ready for delegated closure. Gate 7 is next.
+Local and remote `main` identify commit `1852455`. Gates 1 through 6 passed and
+closed under delegated review. Gate 7 is in progress on the shared hardening
+branch.
 
 ## Open decisions
 
