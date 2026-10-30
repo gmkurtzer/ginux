@@ -10,27 +10,35 @@ const MESSAGE_CAPACITY: usize = 4048;
 const WALK_LIMIT: usize = 262_144;
 pub(crate) const SEM_VALUE_MAX: u16 = 32_767;
 
-static LOCKS: [AtomicBool; INSTANCE_LIMIT] = [const { AtomicBool::new(false) }; INSTANCE_LIMIT];
-static ROOT_ADDRESSES: [AtomicU64; INSTANCE_LIMIT] = [const { AtomicU64::new(0) }; INSTANCE_LIMIT];
-static ROOT_GENERATIONS: [AtomicU32; INSTANCE_LIMIT] =
-    [const { AtomicU32::new(0) }; INSTANCE_LIMIT];
-static ATTACHMENT_ROOT_ADDRESSES: [AtomicU64; INSTANCE_LIMIT] =
-    [const { AtomicU64::new(0) }; INSTANCE_LIMIT];
-static ATTACHMENT_ROOT_GENERATIONS: [AtomicU32; INSTANCE_LIMIT] =
-    [const { AtomicU32::new(0) }; INSTANCE_LIMIT];
-static NEXT_IDS: [AtomicU32; INSTANCE_LIMIT] = [const { AtomicU32::new(1) }; INSTANCE_LIMIT];
-static SEMAPHORE_ROOT_ADDRESSES: [AtomicU64; INSTANCE_LIMIT] =
-    [const { AtomicU64::new(0) }; INSTANCE_LIMIT];
-static SEMAPHORE_ROOT_GENERATIONS: [AtomicU32; INSTANCE_LIMIT] =
-    [const { AtomicU32::new(0) }; INSTANCE_LIMIT];
-static NEXT_SEMAPHORE_IDS: [AtomicU32; INSTANCE_LIMIT] =
-    [const { AtomicU32::new(1) }; INSTANCE_LIMIT];
-static MESSAGE_ROOT_ADDRESSES: [AtomicU64; INSTANCE_LIMIT] =
-    [const { AtomicU64::new(0) }; INSTANCE_LIMIT];
-static MESSAGE_ROOT_GENERATIONS: [AtomicU32; INSTANCE_LIMIT] =
-    [const { AtomicU32::new(0) }; INSTANCE_LIMIT];
-static NEXT_MESSAGE_IDS: [AtomicU32; INSTANCE_LIMIT] =
-    [const { AtomicU32::new(1) }; INSTANCE_LIMIT];
+struct SysvIpcRuntimeOwner {
+    locks: [AtomicBool; INSTANCE_LIMIT],
+    root_addresses: [AtomicU64; INSTANCE_LIMIT],
+    root_generations: [AtomicU32; INSTANCE_LIMIT],
+    attachment_root_addresses: [AtomicU64; INSTANCE_LIMIT],
+    attachment_root_generations: [AtomicU32; INSTANCE_LIMIT],
+    next_ids: [AtomicU32; INSTANCE_LIMIT],
+    semaphore_root_addresses: [AtomicU64; INSTANCE_LIMIT],
+    semaphore_root_generations: [AtomicU32; INSTANCE_LIMIT],
+    next_semaphore_ids: [AtomicU32; INSTANCE_LIMIT],
+    message_root_addresses: [AtomicU64; INSTANCE_LIMIT],
+    message_root_generations: [AtomicU32; INSTANCE_LIMIT],
+    next_message_ids: [AtomicU32; INSTANCE_LIMIT],
+}
+
+static SYSV_IPC_RUNTIME: SysvIpcRuntimeOwner = SysvIpcRuntimeOwner {
+    locks: [const { AtomicBool::new(false) }; INSTANCE_LIMIT],
+    root_addresses: [const { AtomicU64::new(0) }; INSTANCE_LIMIT],
+    root_generations: [const { AtomicU32::new(0) }; INSTANCE_LIMIT],
+    attachment_root_addresses: [const { AtomicU64::new(0) }; INSTANCE_LIMIT],
+    attachment_root_generations: [const { AtomicU32::new(0) }; INSTANCE_LIMIT],
+    next_ids: [const { AtomicU32::new(1) }; INSTANCE_LIMIT],
+    semaphore_root_addresses: [const { AtomicU64::new(0) }; INSTANCE_LIMIT],
+    semaphore_root_generations: [const { AtomicU32::new(0) }; INSTANCE_LIMIT],
+    next_semaphore_ids: [const { AtomicU32::new(1) }; INSTANCE_LIMIT],
+    message_root_addresses: [const { AtomicU64::new(0) }; INSTANCE_LIMIT],
+    message_root_generations: [const { AtomicU32::new(0) }; INSTANCE_LIMIT],
+    next_message_ids: [const { AtomicU32::new(1) }; INSTANCE_LIMIT],
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Error {
@@ -187,7 +195,7 @@ struct Guard {
 impl Guard {
     fn acquire() -> Option<Self> {
         let instance = linux_process::current_ipc_instance();
-        let lock = LOCKS.get(instance)?;
+        let lock = SYSV_IPC_RUNTIME.locks.get(instance)?;
         while lock
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
             .is_err()
@@ -200,7 +208,7 @@ impl Guard {
 
 impl Drop for Guard {
     fn drop(&mut self) {
-        LOCKS[self.instance].store(false, Ordering::Release);
+        SYSV_IPC_RUNTIME.locks[self.instance].store(false, Ordering::Release);
     }
 }
 
@@ -280,7 +288,11 @@ fn find_segment(
     instance: usize,
     id: u32,
 ) -> Option<(memory::FrameLease, Option<memory::FrameLease>)> {
-    let mut current = root(&ROOT_ADDRESSES, &ROOT_GENERATIONS, instance);
+    let mut current = root(
+        &SYSV_IPC_RUNTIME.root_addresses,
+        &SYSV_IPC_RUNTIME.root_generations,
+        instance,
+    );
     let mut previous = None;
     for _ in 0..WALK_LIMIT {
         let frame = current?;
@@ -295,7 +307,11 @@ fn find_segment(
 }
 
 fn find_key(instance: usize, key: i32) -> Option<memory::FrameLease> {
-    let mut current = root(&ROOT_ADDRESSES, &ROOT_GENERATIONS, instance);
+    let mut current = root(
+        &SYSV_IPC_RUNTIME.root_addresses,
+        &SYSV_IPC_RUNTIME.root_generations,
+        instance,
+    );
     for _ in 0..WALK_LIMIT {
         let frame = current?;
         let page = segment_page(frame)?;
@@ -354,7 +370,12 @@ fn unlink_and_release(
         };
         previous.next_segment = next.unwrap_or(memory::FrameLease::EMPTY);
     } else {
-        publish_root(&ROOT_ADDRESSES, &ROOT_GENERATIONS, instance, next);
+        publish_root(
+            &SYSV_IPC_RUNTIME.root_addresses,
+            &SYSV_IPC_RUNTIME.root_generations,
+            instance,
+            next,
+        );
     }
     release_segment_chain(frame)
 }
@@ -388,7 +409,7 @@ pub(crate) fn get_or_create(
     }
     let pages = usize::try_from(size.div_ceil(PAGE_SIZE as u64)).map_err(|_| Error::Invalid)?;
     let first = allocate_zeroed().ok_or(Error::NoMemory)?;
-    let id = NEXT_IDS[guard.instance].fetch_add(1, Ordering::AcqRel);
+    let id = SYSV_IPC_RUNTIME.next_ids[guard.instance].fetch_add(1, Ordering::AcqRel);
     if id == 0 {
         let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[first]);
         return Err(Error::NoMemory);
@@ -430,12 +451,16 @@ pub(crate) fn get_or_create(
         page.frames[slot] = data;
         page.frames_used += 1;
     }
-    let old_root = root(&ROOT_ADDRESSES, &ROOT_GENERATIONS, guard.instance);
+    let old_root = root(
+        &SYSV_IPC_RUNTIME.root_addresses,
+        &SYSV_IPC_RUNTIME.root_generations,
+        guard.instance,
+    );
     segment_page_mut(first).ok_or(Error::NoMemory)?.next_segment =
         old_root.unwrap_or(memory::FrameLease::EMPTY);
     publish_root(
-        &ROOT_ADDRESSES,
-        &ROOT_GENERATIONS,
+        &SYSV_IPC_RUNTIME.root_addresses,
+        &SYSV_IPC_RUNTIME.root_generations,
         guard.instance,
         Some(first),
     );
@@ -475,8 +500,8 @@ pub(crate) fn attach(id: u32, address: u64, pid: u32) -> Result<(), Error> {
     let record = allocate_zeroed().ok_or(Error::NoMemory)?;
     let length = segment_page(segment).ok_or(Error::Invalid)?.size;
     let old_root = root(
-        &ATTACHMENT_ROOT_ADDRESSES,
-        &ATTACHMENT_ROOT_GENERATIONS,
+        &SYSV_IPC_RUNTIME.attachment_root_addresses,
+        &SYSV_IPC_RUNTIME.attachment_root_generations,
         guard.instance,
     );
     let entry = attachment_mut(record).ok_or(Error::NoMemory)?;
@@ -489,8 +514,8 @@ pub(crate) fn attach(id: u32, address: u64, pid: u32) -> Result<(), Error> {
     page.attachments = page.attachments.checked_add(1).ok_or(Error::NoMemory)?;
     page.last_pid = pid;
     publish_root(
-        &ATTACHMENT_ROOT_ADDRESSES,
-        &ATTACHMENT_ROOT_GENERATIONS,
+        &SYSV_IPC_RUNTIME.attachment_root_addresses,
+        &SYSV_IPC_RUNTIME.attachment_root_generations,
         guard.instance,
         Some(record),
     );
@@ -500,8 +525,8 @@ pub(crate) fn attach(id: u32, address: u64, pid: u32) -> Result<(), Error> {
 pub(crate) fn attachment_at(address: u64, pid: u32) -> Result<(u32, u64), Error> {
     let guard = Guard::acquire().ok_or(Error::Invalid)?;
     let mut current = root(
-        &ATTACHMENT_ROOT_ADDRESSES,
-        &ATTACHMENT_ROOT_GENERATIONS,
+        &SYSV_IPC_RUNTIME.attachment_root_addresses,
+        &SYSV_IPC_RUNTIME.attachment_root_generations,
         guard.instance,
     );
     for _ in 0..WALK_LIMIT {
@@ -518,8 +543,8 @@ pub(crate) fn attachment_at(address: u64, pid: u32) -> Result<(u32, u64), Error>
 
 fn detach_matching(instance: usize, pid: u32, address: Option<u64>) -> Result<usize, Error> {
     let mut current = root(
-        &ATTACHMENT_ROOT_ADDRESSES,
-        &ATTACHMENT_ROOT_GENERATIONS,
+        &SYSV_IPC_RUNTIME.attachment_root_addresses,
+        &SYSV_IPC_RUNTIME.attachment_root_generations,
         instance,
     );
     let mut previous = None;
@@ -537,8 +562,8 @@ fn detach_matching(instance: usize, pid: u32, address: Option<u64>) -> Result<us
                     next.unwrap_or(memory::FrameLease::EMPTY);
             } else {
                 publish_root(
-                    &ATTACHMENT_ROOT_ADDRESSES,
-                    &ATTACHMENT_ROOT_GENERATIONS,
+                    &SYSV_IPC_RUNTIME.attachment_root_addresses,
+                    &SYSV_IPC_RUNTIME.attachment_root_generations,
                     instance,
                     next,
                 );
@@ -584,8 +609,8 @@ pub(crate) fn inherit_process_attachments(parent: u32, child: u32) -> Result<(),
         return Err(Error::Invalid);
     }
     let mut current = root(
-        &ATTACHMENT_ROOT_ADDRESSES,
-        &ATTACHMENT_ROOT_GENERATIONS,
+        &SYSV_IPC_RUNTIME.attachment_root_addresses,
+        &SYSV_IPC_RUNTIME.attachment_root_generations,
         guard.instance,
     );
     for _ in 0..WALK_LIMIT {
@@ -602,8 +627,8 @@ pub(crate) fn inherit_process_attachments(parent: u32, child: u32) -> Result<(),
                 return Err(Error::NoMemory);
             };
             let root = root(
-                &ATTACHMENT_ROOT_ADDRESSES,
-                &ATTACHMENT_ROOT_GENERATIONS,
+                &SYSV_IPC_RUNTIME.attachment_root_addresses,
+                &SYSV_IPC_RUNTIME.attachment_root_generations,
                 guard.instance,
             );
             let Some(entry) = attachment_mut(clone) else {
@@ -629,8 +654,8 @@ pub(crate) fn inherit_process_attachments(parent: u32, child: u32) -> Result<(),
             segment.attachments = attachments;
             segment.last_pid = child;
             publish_root(
-                &ATTACHMENT_ROOT_ADDRESSES,
-                &ATTACHMENT_ROOT_GENERATIONS,
+                &SYSV_IPC_RUNTIME.attachment_root_addresses,
+                &SYSV_IPC_RUNTIME.attachment_root_generations,
                 guard.instance,
                 Some(clone),
             );
@@ -651,8 +676,8 @@ pub(crate) fn teardown() -> bool {
         return false;
     };
     let mut attachments = root(
-        &ATTACHMENT_ROOT_ADDRESSES,
-        &ATTACHMENT_ROOT_GENERATIONS,
+        &SYSV_IPC_RUNTIME.attachment_root_addresses,
+        &SYSV_IPC_RUNTIME.attachment_root_generations,
         guard.instance,
     );
     for _ in 0..WALK_LIMIT {
@@ -669,13 +694,22 @@ pub(crate) fn teardown() -> bool {
         return false;
     }
     publish_root(
-        &ATTACHMENT_ROOT_ADDRESSES,
-        &ATTACHMENT_ROOT_GENERATIONS,
+        &SYSV_IPC_RUNTIME.attachment_root_addresses,
+        &SYSV_IPC_RUNTIME.attachment_root_generations,
         guard.instance,
         None,
     );
-    let mut segments = root(&ROOT_ADDRESSES, &ROOT_GENERATIONS, guard.instance);
-    publish_root(&ROOT_ADDRESSES, &ROOT_GENERATIONS, guard.instance, None);
+    let mut segments = root(
+        &SYSV_IPC_RUNTIME.root_addresses,
+        &SYSV_IPC_RUNTIME.root_generations,
+        guard.instance,
+    );
+    publish_root(
+        &SYSV_IPC_RUNTIME.root_addresses,
+        &SYSV_IPC_RUNTIME.root_generations,
+        guard.instance,
+        None,
+    );
     for _ in 0..WALK_LIMIT {
         let Some(segment) = segments else { break };
         let Some(page) = segment_page(segment) else {
@@ -690,13 +724,13 @@ pub(crate) fn teardown() -> bool {
         return false;
     }
     let mut sets = root(
-        &SEMAPHORE_ROOT_ADDRESSES,
-        &SEMAPHORE_ROOT_GENERATIONS,
+        &SYSV_IPC_RUNTIME.semaphore_root_addresses,
+        &SYSV_IPC_RUNTIME.semaphore_root_generations,
         guard.instance,
     );
     publish_root(
-        &SEMAPHORE_ROOT_ADDRESSES,
-        &SEMAPHORE_ROOT_GENERATIONS,
+        &SYSV_IPC_RUNTIME.semaphore_root_addresses,
+        &SYSV_IPC_RUNTIME.semaphore_root_generations,
         guard.instance,
         None,
     );
@@ -714,13 +748,13 @@ pub(crate) fn teardown() -> bool {
         return false;
     }
     let mut queues = root(
-        &MESSAGE_ROOT_ADDRESSES,
-        &MESSAGE_ROOT_GENERATIONS,
+        &SYSV_IPC_RUNTIME.message_root_addresses,
+        &SYSV_IPC_RUNTIME.message_root_generations,
         guard.instance,
     );
     publish_root(
-        &MESSAGE_ROOT_ADDRESSES,
-        &MESSAGE_ROOT_GENERATIONS,
+        &SYSV_IPC_RUNTIME.message_root_addresses,
+        &SYSV_IPC_RUNTIME.message_root_generations,
         guard.instance,
         None,
     );
@@ -768,8 +802,8 @@ fn find_semaphore_set(
     id: u32,
 ) -> Option<(memory::FrameLease, Option<memory::FrameLease>)> {
     let mut current = root(
-        &SEMAPHORE_ROOT_ADDRESSES,
-        &SEMAPHORE_ROOT_GENERATIONS,
+        &SYSV_IPC_RUNTIME.semaphore_root_addresses,
+        &SYSV_IPC_RUNTIME.semaphore_root_generations,
         instance,
     );
     let mut previous = None;
@@ -787,8 +821,8 @@ fn find_semaphore_set(
 
 fn find_semaphore_key(instance: usize, key: i32) -> Option<memory::FrameLease> {
     let mut current = root(
-        &SEMAPHORE_ROOT_ADDRESSES,
-        &SEMAPHORE_ROOT_GENERATIONS,
+        &SYSV_IPC_RUNTIME.semaphore_root_addresses,
+        &SYSV_IPC_RUNTIME.semaphore_root_generations,
         instance,
     );
     for _ in 0..WALK_LIMIT {
@@ -864,7 +898,7 @@ pub(crate) fn semaphore_get_or_create(
         return Err(Error::Invalid);
     }
     let first = allocate_zeroed().ok_or(Error::NoMemory)?;
-    let id = NEXT_SEMAPHORE_IDS[guard.instance].fetch_add(1, Ordering::AcqRel);
+    let id = SYSV_IPC_RUNTIME.next_semaphore_ids[guard.instance].fetch_add(1, Ordering::AcqRel);
     if id == 0 || id > i32::MAX as u32 {
         let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[first]);
         return Err(Error::NoMemory);
@@ -904,15 +938,15 @@ pub(crate) fn semaphore_get_or_create(
         }
     }
     let old_root = root(
-        &SEMAPHORE_ROOT_ADDRESSES,
-        &SEMAPHORE_ROOT_GENERATIONS,
+        &SYSV_IPC_RUNTIME.semaphore_root_addresses,
+        &SYSV_IPC_RUNTIME.semaphore_root_generations,
         guard.instance,
     );
     semaphore_page_mut(first).ok_or(Error::NoMemory)?.next_set =
         old_root.unwrap_or(memory::FrameLease::EMPTY);
     publish_root(
-        &SEMAPHORE_ROOT_ADDRESSES,
-        &SEMAPHORE_ROOT_GENERATIONS,
+        &SYSV_IPC_RUNTIME.semaphore_root_addresses,
+        &SYSV_IPC_RUNTIME.semaphore_root_generations,
         guard.instance,
         Some(first),
     );
@@ -1073,8 +1107,8 @@ pub(crate) fn semaphore_remove(id: u32) -> Result<(), Error> {
             next.unwrap_or(memory::FrameLease::EMPTY);
     } else {
         publish_root(
-            &SEMAPHORE_ROOT_ADDRESSES,
-            &SEMAPHORE_ROOT_GENERATIONS,
+            &SYSV_IPC_RUNTIME.semaphore_root_addresses,
+            &SYSV_IPC_RUNTIME.semaphore_root_generations,
             guard.instance,
             next,
         );
@@ -1088,7 +1122,11 @@ fn find_message_queue(
     instance: usize,
     id: u32,
 ) -> Option<(memory::FrameLease, Option<memory::FrameLease>)> {
-    let mut current = root(&MESSAGE_ROOT_ADDRESSES, &MESSAGE_ROOT_GENERATIONS, instance);
+    let mut current = root(
+        &SYSV_IPC_RUNTIME.message_root_addresses,
+        &SYSV_IPC_RUNTIME.message_root_generations,
+        instance,
+    );
     let mut previous = None;
     for _ in 0..WALK_LIMIT {
         let frame = current?;
@@ -1103,7 +1141,11 @@ fn find_message_queue(
 }
 
 fn find_message_key(instance: usize, key: i32) -> Option<memory::FrameLease> {
-    let mut current = root(&MESSAGE_ROOT_ADDRESSES, &MESSAGE_ROOT_GENERATIONS, instance);
+    let mut current = root(
+        &SYSV_IPC_RUNTIME.message_root_addresses,
+        &SYSV_IPC_RUNTIME.message_root_generations,
+        instance,
+    );
     for _ in 0..WALK_LIMIT {
         let frame = current?;
         let queue = message_queue(frame)?;
@@ -1165,14 +1207,14 @@ pub(crate) fn message_get_or_create(
         }
     }
     let frame = allocate_zeroed().ok_or(Error::NoMemory)?;
-    let id = NEXT_MESSAGE_IDS[guard.instance].fetch_add(1, Ordering::AcqRel);
+    let id = SYSV_IPC_RUNTIME.next_message_ids[guard.instance].fetch_add(1, Ordering::AcqRel);
     if id == 0 || id > i32::MAX as u32 {
         let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[frame]);
         return Err(Error::NoMemory);
     }
     let old_root = root(
-        &MESSAGE_ROOT_ADDRESSES,
-        &MESSAGE_ROOT_GENERATIONS,
+        &SYSV_IPC_RUNTIME.message_root_addresses,
+        &SYSV_IPC_RUNTIME.message_root_generations,
         guard.instance,
     );
     let Some(queue) = message_queue_mut(frame) else {
@@ -1185,8 +1227,8 @@ pub(crate) fn message_get_or_create(
     queue.mode = mode & 0o777;
     queue.byte_limit = DEFAULT_BYTE_LIMIT;
     publish_root(
-        &MESSAGE_ROOT_ADDRESSES,
-        &MESSAGE_ROOT_GENERATIONS,
+        &SYSV_IPC_RUNTIME.message_root_addresses,
+        &SYSV_IPC_RUNTIME.message_root_generations,
         guard.instance,
         Some(frame),
     );
@@ -1216,8 +1258,8 @@ pub(crate) fn posix_queue_open(
     }
     let guard = Guard::acquire().ok_or(Error::Invalid)?;
     let mut current = root(
-        &MESSAGE_ROOT_ADDRESSES,
-        &MESSAGE_ROOT_GENERATIONS,
+        &SYSV_IPC_RUNTIME.message_root_addresses,
+        &SYSV_IPC_RUNTIME.message_root_generations,
         guard.instance,
     );
     for _ in 0..WALK_LIMIT {
@@ -1243,14 +1285,14 @@ pub(crate) fn posix_queue_open(
         return Err(Error::NoEntry);
     }
     let frame = allocate_zeroed().ok_or(Error::NoMemory)?;
-    let id = NEXT_MESSAGE_IDS[guard.instance].fetch_add(1, Ordering::AcqRel);
+    let id = SYSV_IPC_RUNTIME.next_message_ids[guard.instance].fetch_add(1, Ordering::AcqRel);
     if id == 0 || id > i32::MAX as u32 {
         let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[frame]);
         return Err(Error::NoMemory);
     }
     let old_root = root(
-        &MESSAGE_ROOT_ADDRESSES,
-        &MESSAGE_ROOT_GENERATIONS,
+        &SYSV_IPC_RUNTIME.message_root_addresses,
+        &SYSV_IPC_RUNTIME.message_root_generations,
         guard.instance,
     );
     let queue = message_queue_mut(frame).ok_or(Error::NoMemory)?;
@@ -1267,8 +1309,8 @@ pub(crate) fn posix_queue_open(
     queue.name[..name.len()].copy_from_slice(name);
     let info = posix_info(queue, true);
     publish_root(
-        &MESSAGE_ROOT_ADDRESSES,
-        &MESSAGE_ROOT_GENERATIONS,
+        &SYSV_IPC_RUNTIME.message_root_addresses,
+        &SYSV_IPC_RUNTIME.message_root_generations,
         guard.instance,
         Some(frame),
     );
@@ -1317,8 +1359,8 @@ pub(crate) fn posix_queue_close(id: u32) -> Result<Option<PosixQueueInfo>, Error
 pub(crate) fn posix_queue_unlink(name: &[u8]) -> Result<Option<PosixQueueInfo>, Error> {
     let guard = Guard::acquire().ok_or(Error::Invalid)?;
     let mut current = root(
-        &MESSAGE_ROOT_ADDRESSES,
-        &MESSAGE_ROOT_GENERATIONS,
+        &SYSV_IPC_RUNTIME.message_root_addresses,
+        &SYSV_IPC_RUNTIME.message_root_generations,
         guard.instance,
     );
     let mut previous = None;
@@ -1360,8 +1402,8 @@ fn remove_message_queue_locked(
             .next_queue = next.unwrap_or(memory::FrameLease::EMPTY);
     } else {
         publish_root(
-            &MESSAGE_ROOT_ADDRESSES,
-            &MESSAGE_ROOT_GENERATIONS,
+            &SYSV_IPC_RUNTIME.message_root_addresses,
+            &SYSV_IPC_RUNTIME.message_root_generations,
             instance,
             next,
         );
@@ -1584,8 +1626,8 @@ pub(crate) fn message_queue_remove(id: u32) -> Result<(), Error> {
             .next_queue = next.unwrap_or(memory::FrameLease::EMPTY);
     } else {
         publish_root(
-            &MESSAGE_ROOT_ADDRESSES,
-            &MESSAGE_ROOT_GENERATIONS,
+            &SYSV_IPC_RUNTIME.message_root_addresses,
+            &SYSV_IPC_RUNTIME.message_root_generations,
             guard.instance,
             next,
         );

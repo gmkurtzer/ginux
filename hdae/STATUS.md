@@ -8,17 +8,18 @@
 - Branch: `codex/feedback-hardening`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 5, runtime state ownership, in progress
-- Last completed action: consolidated mount namespaces, user namespaces, and
-  tmpfs instances into explicit domain-runtime owners; architecture checks,
-  Linux ABI coverage, and the complete verification QEMU sequence passed
-- Next action: consolidate overlay, file-cache, SysV IPC, and address-space
-  runtime roots before migrating the 408-entry x86-64 execution-state bank
+- Last completed action: consolidated the remaining non-x86 Gate 5 runtime
+  state under explicit SysV IPC, overlay, file-cache, Linux process scratch,
+  and suspended-runtime owner roots; all static, ABI, and verification-QEMU
+  layers passed
+- Next action: migrate the 408-entry x86-64 execution-state bank into explicit
+  per-CPU, per-domain, per-process, or bounded diagnostic owner roots
 
 ## Current repository state
 
 Local and remote `main` identify commit `1852455`. Gates 1 through 4 passed and
-closed under delegated review. Gate 5 is active; 427 classified runtime
-globals remain assigned to it after the mount/user/tmpfs consolidation.
+closed under delegated review. Gate 5 is active; its only remaining classified
+runtime globals are the 408 entries in the x86-64 execution-state bank.
 
 ## Open decisions
 

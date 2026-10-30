@@ -17,22 +17,20 @@ const EMPTY_LINUX_EXEC_MAPPING: cpu::LinuxExecMapping = cpu::LinuxExecMapping {
     executable: false,
 };
 
-struct LinuxProcessCloneScratchCell(UnsafeCell<LinuxProcessCloneScratch>);
+struct LinuxProcessScratchOwner {
+    clone: UnsafeCell<LinuxProcessCloneScratch>,
+    validation: UnsafeCell<[bool; cpu::LINUX_PROCESS_MAPPING_LIMIT]>,
+}
 
-unsafe impl Sync for LinuxProcessCloneScratchCell {}
+unsafe impl Sync for LinuxProcessScratchOwner {}
 
-static LINUX_PROCESS_CLONE_SCRATCH: LinuxProcessCloneScratchCell =
-    LinuxProcessCloneScratchCell(UnsafeCell::new(LinuxProcessCloneScratch {
+static LINUX_PROCESS_SCRATCH: LinuxProcessScratchOwner = LinuxProcessScratchOwner {
+    clone: UnsafeCell::new(LinuxProcessCloneScratch {
         visited_mappings: [false; cpu::LINUX_PROCESS_MAPPING_LIMIT],
         child_mappings: [EMPTY_LINUX_EXEC_MAPPING; cpu::LINUX_PROCESS_MAPPING_LIMIT],
-    }));
-
-struct LinuxProcessValidationScratch(UnsafeCell<[bool; cpu::LINUX_PROCESS_MAPPING_LIMIT]>);
-
-unsafe impl Sync for LinuxProcessValidationScratch {}
-
-static LINUX_PROCESS_VALIDATION_SCRATCH: LinuxProcessValidationScratch =
-    LinuxProcessValidationScratch(UnsafeCell::new([false; cpu::LINUX_PROCESS_MAPPING_LIMIT]));
+    }),
+    validation: UnsafeCell::new([false; cpu::LINUX_PROCESS_MAPPING_LIMIT]),
+};
 
 use crate::{
     arch::x86_64::{
@@ -151,14 +149,28 @@ static INTERACTIVE_CONTROLLER_IMAGE_SIZE: AtomicUsize = AtomicUsize::new(0);
 static INTERACTIVE_CONTROLLER_DOMAIN: AtomicU64 = AtomicU64::new(0);
 const LINUX_RUNTIME_FRAME_CAPACITY: usize = 440;
 const LINUX_OWNED_FRAME_COUNT: usize = 10;
-static LINUX_RUNTIME_ACTIVE: [AtomicBool; crate::control_abi::DOMAIN_LIMIT] =
-    [const { AtomicBool::new(false) }; crate::control_abi::DOMAIN_LIMIT];
-static mut LINUX_RUNTIME_OWNED_FRAMES: [[memory::FrameLease; LINUX_OWNED_FRAME_COUNT];
-    crate::control_abi::DOMAIN_LIMIT] =
-    [[memory::FrameLease::EMPTY; LINUX_OWNED_FRAME_COUNT]; crate::control_abi::DOMAIN_LIMIT];
-static mut LINUX_RUNTIME_FRAMES: [[memory::FrameLease; LINUX_RUNTIME_FRAME_CAPACITY];
-    crate::control_abi::DOMAIN_LIMIT] =
-    [[memory::FrameLease::EMPTY; LINUX_RUNTIME_FRAME_CAPACITY]; crate::control_abi::DOMAIN_LIMIT];
+struct LinuxRuntimeOwner {
+    active: [AtomicBool; crate::control_abi::DOMAIN_LIMIT],
+    owned_frames: UnsafeCell<
+        [[memory::FrameLease; LINUX_OWNED_FRAME_COUNT]; crate::control_abi::DOMAIN_LIMIT],
+    >,
+    runtime_frames: UnsafeCell<
+        [[memory::FrameLease; LINUX_RUNTIME_FRAME_CAPACITY]; crate::control_abi::DOMAIN_LIMIT],
+    >,
+}
+
+unsafe impl Sync for LinuxRuntimeOwner {}
+
+static LINUX_RUNTIME: LinuxRuntimeOwner = LinuxRuntimeOwner {
+    active: [const { AtomicBool::new(false) }; crate::control_abi::DOMAIN_LIMIT],
+    owned_frames: UnsafeCell::new(
+        [[memory::FrameLease::EMPTY; LINUX_OWNED_FRAME_COUNT]; crate::control_abi::DOMAIN_LIMIT],
+    ),
+    runtime_frames: UnsafeCell::new(
+        [[memory::FrameLease::EMPTY; LINUX_RUNTIME_FRAME_CAPACITY];
+            crate::control_abi::DOMAIN_LIMIT],
+    ),
+};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum LinuxProcessOutcome {
@@ -168,7 +180,8 @@ pub(crate) enum LinuxProcessOutcome {
 }
 
 pub(crate) fn linux_runtime_is_suspended(slot: usize) -> bool {
-    LINUX_RUNTIME_ACTIVE
+    LINUX_RUNTIME
+        .active
         .get(slot)
         .is_some_and(|active| active.load(Ordering::Acquire))
 }
@@ -220,7 +233,7 @@ pub(crate) fn run_linux_init(init: &[u8]) -> LinuxProcessOutcome {
     let Some(slot) = cpu::current_container_slot() else {
         return LinuxProcessOutcome::Failed;
     };
-    if LINUX_RUNTIME_ACTIVE[slot].load(Ordering::Acquire) {
+    if LINUX_RUNTIME.active[slot].load(Ordering::Acquire) {
         return resume_linux_init(slot, MMAP_ADDRESS);
     }
     let Some(plan) = crate::published_rootfs::process_plan(init) else {
@@ -594,10 +607,10 @@ pub(crate) fn run_linux_init(init: &[u8]) -> LinuxProcessOutcome {
     }
     if valid && result.suspended {
         unsafe {
-            LINUX_RUNTIME_OWNED_FRAMES[slot] = frames;
-            LINUX_RUNTIME_FRAMES[slot] = runtime_frames;
+            (*LINUX_RUNTIME.owned_frames.get())[slot] = frames;
+            (*LINUX_RUNTIME.runtime_frames.get())[slot] = runtime_frames;
         }
-        LINUX_RUNTIME_ACTIVE[slot].store(true, Ordering::Release);
+        LINUX_RUNTIME.active[slot].store(true, Ordering::Release);
         return LinuxProcessOutcome::Suspended;
     }
     let runtime_scrubbed = memory::scrub_runtime_extent(runtime_frames);
@@ -631,8 +644,12 @@ pub(crate) fn run_linux_init(init: &[u8]) -> LinuxProcessOutcome {
 }
 
 fn resume_linux_init(slot: usize, mmap: u64) -> LinuxProcessOutcome {
-    let (frames, runtime_frames) =
-        unsafe { (LINUX_RUNTIME_OWNED_FRAMES[slot], LINUX_RUNTIME_FRAMES[slot]) };
+    let (frames, runtime_frames) = unsafe {
+        (
+            (*LINUX_RUNTIME.owned_frames.get())[slot],
+            (*LINUX_RUNTIME.runtime_frames.get())[slot],
+        )
+    };
     let kernel_root = current_root();
     unsafe { activate(frames[0].address()) };
     let result = cpu::resume_suspended_linux_runtime(mmap);
@@ -640,10 +657,12 @@ fn resume_linux_init(slot: usize, mmap: u64) -> LinuxProcessOutcome {
     if result.valid && result.suspended {
         return LinuxProcessOutcome::Suspended;
     }
-    LINUX_RUNTIME_ACTIVE[slot].store(false, Ordering::Release);
+    LINUX_RUNTIME.active[slot].store(false, Ordering::Release);
     unsafe {
-        LINUX_RUNTIME_OWNED_FRAMES[slot] = [memory::FrameLease::EMPTY; LINUX_OWNED_FRAME_COUNT];
-        LINUX_RUNTIME_FRAMES[slot] = [memory::FrameLease::EMPTY; LINUX_RUNTIME_FRAME_CAPACITY];
+        (*LINUX_RUNTIME.owned_frames.get())[slot] =
+            [memory::FrameLease::EMPTY; LINUX_OWNED_FRAME_COUNT];
+        (*LINUX_RUNTIME.runtime_frames.get())[slot] =
+            [memory::FrameLease::EMPTY; LINUX_RUNTIME_FRAME_CAPACITY];
     }
     let released = memory::scrub_runtime_extent(runtime_frames)
         && memory::release_frames(
@@ -3854,7 +3873,7 @@ fn clone_linux_process_hierarchy_inner(
         return false;
     }
     let mut visited_hierarchy = [false; cpu::LINUX_PROCESS_HIERARCHY_LIMIT];
-    let scratch = unsafe { &mut *LINUX_PROCESS_CLONE_SCRATCH.0.get() };
+    let scratch = unsafe { &mut *LINUX_PROCESS_SCRATCH.clone.get() };
     scratch.visited_mappings.fill(false);
     scratch.child_mappings.fill(EMPTY_LINUX_EXEC_MAPPING);
     let visited_mappings = &mut scratch.visited_mappings;
@@ -3981,7 +4000,7 @@ pub(crate) fn validate_linux_process_address_space(
         return false;
     }
     let mut visited_hierarchy = [false; cpu::LINUX_PROCESS_HIERARCHY_LIMIT];
-    let visited_mappings = unsafe { &mut *LINUX_PROCESS_VALIDATION_SCRATCH.0.get() };
+    let visited_mappings = unsafe { &mut *LINUX_PROCESS_SCRATCH.validation.get() };
     visited_mappings.fill(false);
     validate_complete_linux_process_user_tree(
         hierarchy[0].address(),
