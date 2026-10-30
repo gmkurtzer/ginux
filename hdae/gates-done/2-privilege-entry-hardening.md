@@ -32,12 +32,17 @@ can use a stack or execute Rust code.
 - [x] Diagnosed the late interpreted-thread failure as stale scheduler identity
   after thread-slot reuse, cleared that identity during retirement, and retained
   the corrected real-switch count in the verification workload.
+- [x] Added a leaf NMI handler on the dedicated IST and injected vector 2 at six
+  syscall transition stages, including before the trusted stack switch.
+- [x] Added hardware page-table validation for kernel-created ring-3 entry
+  contexts and negative coverage for zero, noncanonical, unmapped, and guard
+  stacks, plus a userspace syscall executed with a guard-page RSP.
 
 ## Remaining work
 
 - Specify and test nested-NMI behavior at each instrumented entry stage.
 - Add adversarial stack and exception-injection tests.
-- Add the final hostile-stack and exception-injection runtime coverage.
+None.
 
 ## Acceptance criteria
 
@@ -63,15 +68,23 @@ can use a stack or execute Rust code.
   `LINUX_LAST_PREEMPTED_THREAD_SLOT`; the previously excluded replacement child
   now reaches its futex wait, all ELF/runtime categories pass, and QEMU exits
   cleanly with `GINUX_KERNEL_OK`.
+- `make check` -> passed with the static privilege-entry verifier requiring the
+  leaf NMI handler, six injection sites, guarded IST policy, canonical return
+  validation, and hostile-entry validator.
+- `make test` -> passed with all six NMI injections consumed, the static probe
+  completing a syscall while RSP addressed the lower stack guard, all
+  ELF/runtime categories passing, and clean QEMU shutdown.
 - An experimental all-IRET syscall return was rejected: it stalled the same
   later interpreted workload instead of preserving Linux syscall behavior.
 
 ## Decisions and limitations
 
 The approved per-CPU layout uses a CPU-indexable entry-state array and GS-based
-selection. Only the bootstrap CPU slot is active until Gate 9 starts APs.
-Nested-NMI injection and hostile-stack runtime tests remain incomplete, so this
-gate is partial and open.
+selection. Only the bootstrap CPU slot is active until Gate 9 starts APs. The
+NMI path is deliberately a leaf: x86 NMI blocking remains active until its sole
+`IRETQ`, and the handler makes no call or intermediate return that could open a
+nested-NMI window. Demand-faulted Linux resume stacks remain legal; strict
+hardware mapping validation applies to kernel-created initial entry contexts.
 
 ## Delivery strategy
 
@@ -81,9 +94,11 @@ gate is partial and open.
 - Planned commits: reproductions retained from Gate 1, entry-state/IST
   mechanism, syscall entry transition, and integration evidence.
 - Actual commits: `bc39ec2` (entry state, trusted stack transition, guarded ISTs,
-  static verifier); scheduler regression commit pending.
+  static verifier); `36f4330` (thread-slot reuse regression); final NMI and
+  hostile-stack commit pending.
 
 ## Review policy and outcome
 
 Delegated closure authorized after all criteria pass with fresh assembly,
-fault-injection, and regression evidence. Outcome: pending.
+fault-injection, and regression evidence. Outcome: passed and closed under the
+approved batch delegation.

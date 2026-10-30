@@ -6210,6 +6210,17 @@ fn user_range_has_permissions(root: u64, start: u64, end: u64, required: u64) ->
     }
 }
 
+pub(crate) fn current_user_entry_context_is_valid(entry: u64, stack: u64) -> bool {
+    entry != 0
+        && entry < 1 << 47
+        && stack != 0
+        && stack < 1 << 47
+        && entry
+            .checked_add(1)
+            .is_some_and(|end| user_range_has_permissions(current_root(), entry, end, 0))
+        && user_range_has_permissions(current_root(), stack - 1, stack, WRITABLE)
+}
+
 fn user_address_has_permissions(root: u64, address: u64, required: u64) -> bool {
     let indexes = [
         ((address >> 39) & 0x1ff) as usize,
@@ -11935,6 +11946,22 @@ pub(crate) fn verify_ring3_control_plane(
             return false;
         }
         activate(first_space.root);
+        let hostile_entry_contexts_rejected = current_user_entry_context_is_valid(
+            (USER_TEST_ADDRESS + control_entry_offset) as u64,
+            (USER_TEST_ADDRESS + 3 * PAGE_SIZE) as u64,
+        ) && !current_user_entry_context_is_valid(
+            (USER_TEST_ADDRESS + control_entry_offset) as u64,
+            0,
+        ) && !current_user_entry_context_is_valid(
+            (USER_TEST_ADDRESS + control_entry_offset) as u64,
+            1 << 47,
+        ) && !current_user_entry_context_is_valid(
+            (USER_TEST_ADDRESS + control_entry_offset) as u64,
+            (USER_TEST_ADDRESS + 2 * PAGE_SIZE) as u64,
+        ) && !current_user_entry_context_is_valid(
+            (USER_TEST_ADDRESS + control_entry_offset) as u64,
+            (USER_TEST_ADDRESS + 6 * PAGE_SIZE) as u64,
+        );
         let handled = cpu::verify_user_syscall(
             USER_TEST_ADDRESS + control_entry_offset,
             USER_TEST_ADDRESS + 3 * PAGE_SIZE,
@@ -11964,8 +11991,12 @@ pub(crate) fn verify_ring3_control_plane(
         if !preemption_complete {
             crate::serial_write_bytes(b"\r\nginux: control proof APIC preemption incomplete");
         }
-        let valid =
-            handled && runtime_complete && ipc_empty && root_restored && preemption_complete;
+        let valid = hostile_entry_contexts_rejected
+            && handled
+            && runtime_complete
+            && ipc_empty
+            && root_restored
+            && preemption_complete;
         let Some(service_owner_domain) = scheduler::service_address_space_owner() else {
             return false;
         };

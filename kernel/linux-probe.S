@@ -173,6 +173,17 @@ ginux_linux_probe:
 #endif
     cmp qword ptr [rsp], 1
     require_equal
+#ifndef GINUX_LINKED
+    mov r15, rsp
+    push 39
+    pop rax
+    mov rsp, 0x409000
+    syscall
+    cmp eax, 1
+    require_equal
+    mov rsp, r15
+    xor r15d, r15d
+#endif
     mov rax, qword ptr [rsp + 8]
     cmp byte ptr [rax], '/'
     require_equal

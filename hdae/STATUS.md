@@ -7,18 +7,17 @@
 - Active project: feedback-driven kernel hardening
 - Branch: `codex/feedback-hardening`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 2, x86-64 privilege-entry hardening, in progress
-- Last completed action: Gate 2 diagnosed the late interpreted-thread failure
-  as stale last-preempted identity after slot reuse, fixed retirement cleanup,
-  and passed the complete `make test` boot and Linux runtime suite
-- Next action: add nested-NMI and adversarial-stack runtime coverage, then rerun
-  the complete Gate 2 suite
+- Active gate: Gate 3, fault-recovering userspace access, ready to begin
+- Last completed action: Gate 2 passed six-stage NMI injection, hostile initial
+  stack validation, `make check`, and the complete `make test` QEMU boot suite
+- Next action: inventory direct userspace dereferences and define the Gate 3
+  fault-fixup representation before migrating audited copy primitives
 
 ## Current repository state
 
-Local and remote `main` identify commit `1852455`. Gate 2 is partial. Its static
-entry audit, `make check`, and complete `make test` boot suite pass. Nested-NMI
-and hostile-stack runtime evidence remain outstanding.
+Local and remote `main` identify commit `1852455`. Gate 2 passed and closed
+under delegated review. Gate 3 is open; its first step is a complete direct
+userspace-access inventory tied to a fault-recovery design.
 
 ## Open decisions
 

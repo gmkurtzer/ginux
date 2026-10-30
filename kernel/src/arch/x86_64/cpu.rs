@@ -1954,6 +1954,10 @@ static CONTAINER_CONSOLE_BYTES: [[AtomicU8; CONTAINER_CONSOLE_CAPACITY];
 static ELF_PROBE_SYSTEM_INIT: AtomicBool = AtomicBool::new(false);
 static SERVICE_STACK_SCRUBBED: AtomicBool = AtomicBool::new(false);
 static SERVICE_FRAMES_TRANSFERRED: AtomicBool = AtomicBool::new(false);
+const PRIVILEGE_ENTRY_NMI_STAGE_COUNT: u8 = 6;
+const PRIVILEGE_ENTRY_NMI_STAGE_MASK: u64 = (1 << PRIVILEGE_ENTRY_NMI_STAGE_COUNT) - 1;
+static PRIVILEGE_ENTRY_NMI_PROBE_MASK: AtomicU64 = AtomicU64::new(0);
+static PRIVILEGE_ENTRY_NMI_PROBE_HITS: AtomicU8 = AtomicU8::new(0);
 static mut CPU_ENTRY_STATES: [CpuEntryState; CPU_ENTRY_STATE_LIMIT] =
     [CpuEntryState::EMPTY; CPU_ENTRY_STATE_LIMIT];
 static mut LINUX_SIGNAL_CONTEXT: LinuxSignalContext = LinuxSignalContext::ZERO;
@@ -2033,7 +2037,12 @@ ginux_exception_\vector:
 
     GINUX_EXCEPTION_NO_ERROR 0
     GINUX_EXCEPTION_NO_ERROR 1
-    GINUX_EXCEPTION_NO_ERROR 2
+    .global ginux_nmi_entry
+ginux_nmi_entry:
+    clac
+    cld
+    lock inc byte ptr [rip + {entry_nmi_probe_hits}]
+    iretq
     GINUX_EXCEPTION_NO_ERROR 4
     GINUX_EXCEPTION_NO_ERROR 5
     GINUX_EXCEPTION_NO_ERROR 6
@@ -2139,7 +2148,7 @@ ginux_fault_return:
 ginux_exception_entries:
     .quad ginux_exception_0
     .quad ginux_exception_1
-    .quad ginux_exception_2
+    .quad ginux_nmi_entry
     .quad ginux_breakpoint_entry
     .quad ginux_exception_4
     .quad ginux_exception_5
@@ -2272,10 +2281,22 @@ ginux_linux_syscall_entry:
     cli
     clac
     cld
+    lock btr qword ptr [rip + {entry_nmi_probe_mask}], 0
+    jnc 1f
+    int 2
+1:
     mov gs:[{entry_user_rsp}], rsp
     mov gs:[{entry_user_rip}], rcx
     mov gs:[{entry_user_rflags}], r11
+    lock btr qword ptr [rip + {entry_nmi_probe_mask}], 1
+    jnc 2f
+    int 2
+2:
     mov rsp, gs:[{entry_return_stack}]
+    lock btr qword ptr [rip + {entry_nmi_probe_mask}], 2
+    jnc 3f
+    int 2
+3:
     push rdi
     push rsi
     push rdx
@@ -2289,6 +2310,10 @@ ginux_linux_syscall_entry:
     push r14
     push r15
     mov gs:[{entry_kernel_frame}], rsp
+    lock btr qword ptr [rip + {entry_nmi_probe_mask}], 3
+    jnc 4f
+    int 2
+4:
     mov rdi, rax
     mov rsi, rsp
     mov rdx, gs:[{entry_user_rsp}]
@@ -2296,6 +2321,10 @@ ginux_linux_syscall_entry:
     mov r8, gs:[{entry_user_rflags}]
     and rsp, -16
     call {linux_syscall_handler}
+    lock btr qword ptr [rip + {entry_nmi_probe_mask}], 4
+    jnc 5f
+    int 2
+5:
     cmp rax, {linux_return_to_kernel}
     je ginux_user_return_kernel
     cmp rax, {linux_return_from_signal}
@@ -2323,6 +2352,10 @@ ginux_linux_syscall_entry:
     jne ginux_invalid_user_return
     mov rcx, gs:[{entry_user_rip}]
     mov r11, gs:[{entry_user_rflags}]
+    lock btr qword ptr [rip + {entry_nmi_probe_mask}], 5
+    jnc 6f
+    int 2
+6:
     mov rsp, gs:[{entry_user_rsp}]
     sysretq
 ginux_invalid_user_return:
@@ -2382,6 +2415,8 @@ ginux_user_return_kernel:
     entry_signal_rax = const 48,
     entry_signal_rcx = const 56,
     entry_signal_r11 = const 64,
+    entry_nmi_probe_mask = sym PRIVILEGE_ENTRY_NMI_PROBE_MASK,
+    entry_nmi_probe_hits = sym PRIVILEGE_ENTRY_NMI_PROBE_HITS,
     linux_return_to_kernel = const LINUX_RETURN_TO_KERNEL as i64,
     linux_return_from_signal = const LINUX_RETURN_FROM_SIGNAL as i64,
     user_data = const USER_DATA_SELECTOR as u64,
@@ -2399,6 +2434,35 @@ unsafe fn enter_linux_process(entry: usize, stack: usize, general: *const u64, r
     let previous_return_stack = (*entry_state).return_stack;
     ginux_process_user_enter(entry, stack, general, rflags);
     (*entry_state).return_stack = previous_return_stack;
+}
+
+#[allow(clippy::too_many_arguments)]
+unsafe fn enter_user(
+    entry: usize,
+    stack: usize,
+    host_handle: u64,
+    console_handle: u64,
+    ipc_handle: u64,
+    identity: u64,
+    service_domain: u64,
+    service_identity: u64,
+    root_handle: u64,
+) -> bool {
+    if !address_space::current_user_entry_context_is_valid(entry as u64, stack as u64) {
+        return false;
+    }
+    ginux_user_enter(
+        entry,
+        stack,
+        host_handle,
+        console_handle,
+        ipc_handle,
+        identity,
+        service_domain,
+        service_identity,
+        root_handle,
+    );
+    true
 }
 
 extern "sysv64" {
@@ -2911,7 +2975,7 @@ pub(crate) fn verify_user_syscall(
     // syscall gate abandons the user frame and returns on the saved kernel
     // stack, with interrupts disabled throughout.
     unsafe {
-        ginux_user_enter(
+        if !enter_user(
             entry,
             stack,
             host_handle,
@@ -2921,7 +2985,9 @@ pub(crate) fn verify_user_syscall(
             service_domain,
             service_identity,
             root_handle,
-        )
+        ) {
+            return false;
+        }
     };
     SYSCALL_STATE.load(Ordering::SeqCst) == 31
 }
@@ -2937,7 +3003,7 @@ pub(crate) fn execute_auxiliary(
         return;
     }
     unsafe {
-        ginux_user_enter(
+        let _ = enter_user(
             entry,
             stack,
             0,
@@ -2947,7 +3013,7 @@ pub(crate) fn execute_auxiliary(
             domain_id,
             service_identity,
             0,
-        )
+        );
     };
 }
 
@@ -2964,7 +3030,7 @@ pub(crate) fn execute_packet_consumer(
         return;
     }
     unsafe {
-        ginux_user_enter(
+        let _ = enter_user(
             entry,
             stack,
             expected_sequence,
@@ -2974,7 +3040,7 @@ pub(crate) fn execute_packet_consumer(
             domain_id,
             service_identity,
             0,
-        )
+        );
     };
 }
 
@@ -2990,7 +3056,7 @@ pub(crate) fn execute_native_auxiliary(
         return;
     }
     unsafe {
-        ginux_user_enter(
+        let _ = enter_user(
             entry,
             stack,
             boot_info,
@@ -3000,7 +3066,7 @@ pub(crate) fn execute_native_auxiliary(
             domain_id,
             service_identity,
             0,
-        )
+        );
     };
 }
 
@@ -3031,7 +3097,7 @@ pub(crate) fn execute_native_controller(
         return;
     }
     unsafe {
-        ginux_user_enter(
+        let _ = enter_user(
             entry,
             stack,
             console_handle,
@@ -3041,7 +3107,7 @@ pub(crate) fn execute_native_controller(
             domain_id,
             service_identity,
             root_handle,
-        )
+        );
     };
 }
 
@@ -7495,7 +7561,31 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
         ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
         return LinuxElfResult::FAILED;
     }
-    unsafe { ginux_user_enter(execution.entry, execution.stack, 0, 0, 0, 0, 0, 0, 0) };
+    let privilege_entry_nmi_probe = cfg!(feature = "verification-boot") && !execution.runtime;
+    if privilege_entry_nmi_probe {
+        PRIVILEGE_ENTRY_NMI_PROBE_HITS.store(0, Ordering::SeqCst);
+        PRIVILEGE_ENTRY_NMI_PROBE_MASK.store(PRIVILEGE_ENTRY_NMI_STAGE_MASK, Ordering::SeqCst);
+    }
+    let user_entered = unsafe { enter_user(execution.entry, execution.stack, 0, 0, 0, 0, 0, 0, 0) };
+    if !user_entered {
+        if execution.runtime {
+            let _ = linux_process::finish_runtime_process_registry();
+        } else {
+            let _ = linux_process::finish_live_process_registry(0);
+        }
+        LINUX_RUNTIME_MODE.store(false, Ordering::Release);
+        let _ = linux_mount::deactivate_initial();
+        let _ = timer::finish_linux_wait_timer();
+        let _ = restore_linux_syscall(saved_msrs);
+        let _ = finish_linux_thread_table();
+        ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
+        PRIVILEGE_ENTRY_NMI_PROBE_MASK.store(0, Ordering::SeqCst);
+        return LinuxElfResult::FAILED;
+    }
+    let privilege_entry_nmi_valid = !privilege_entry_nmi_probe
+        || PRIVILEGE_ENTRY_NMI_PROBE_MASK.swap(0, Ordering::SeqCst) == 0
+            && PRIVILEGE_ENTRY_NMI_PROBE_HITS.swap(0, Ordering::SeqCst)
+                == PRIVILEGE_ENTRY_NMI_STAGE_COUNT;
     if execution.runtime {
         if LINUX_RUNTIME_SUSPENDED.load(Ordering::Acquire) {
             let state_saved = save_container_extended_state();
@@ -8482,6 +8572,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
         linux_mount::current_root_is_read_only() && linux_mount::deactivate_initial();
     let valid = inactive
         && completed
+        && privilege_entry_nmi_valid
         && exit_status_valid
         && exec_replaced == execution.exec_expected
         && live_return_validated
@@ -8586,6 +8677,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
         for state in [
             inactive,
             completed,
+            privilege_entry_nmi_valid,
             exit_status_valid,
             exec_replaced == execution.exec_expected,
             live_return_validated,
