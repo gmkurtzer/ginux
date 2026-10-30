@@ -6448,7 +6448,15 @@ fn linux_thread_handle_by_tid(tid: u64) -> Option<LinuxThreadHandle> {
 }
 
 fn ready_linux_thread_handle() -> Option<LinuxThreadHandle> {
-    (0..LINUX_THREAD_LIMIT).find_map(|slot| {
+    let after = current_linux_thread_slot().unwrap_or_else(|| {
+        usize::from(
+            X86_RUNTIME
+                .LINUX_LAST_PREEMPTED_THREAD_SLOT
+                .load(Ordering::Acquire),
+        )
+    });
+    (1..=LINUX_THREAD_LIMIT).find_map(|offset| {
+        let slot = after.wrapping_add(offset) % LINUX_THREAD_LIMIT;
         (X86_RUNTIME.LINUX_THREAD_STATES[slot].load(Ordering::SeqCst) == LINUX_THREAD_READY)
             .then(|| linux_thread_handle(slot))
             .flatten()

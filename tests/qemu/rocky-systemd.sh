@@ -251,11 +251,13 @@ qemu_started_at_ms=$(now_ms)
                         command="/usr/bin/sysbench mutex --threads=${GINUX_BENCHMARK_THREADS:-1} --time=${GINUX_BENCHMARK_WORKLOAD_SECONDS:-3} run"
                         ;;
                 esac
-                marker="GINUX_BENCH_WORKLOAD_END_${workload}_${benchmark_run}=0"
+                marker="GINUX_BENCH_WORKLOAD_END_${workload}_${benchmark_run}="
                 shell_prompt_count=$(grep -Foc 'sh-5.2#' "$output_file" || true)
-                printf '%s\n' "echo GINUX_BENCH_WORKLOAD_BEGIN_${workload}_${benchmark_run} >&2; $command >&2"
+                printf '%s\n' "echo GINUX_BENCH_WORKLOAD_BEGIN_${workload}_${benchmark_run} >&2; $command >&2; status=\$?; echo ${marker}\$status >&2"
                 wait_for_count 'sh-5.2#' "$((shell_prompt_count + 1))" 600
-                printf '%s\n' "$marker" >>"$output_file"
+                if ! grep -Fq "${marker}0" "$output_file"; then
+                    fail "sysbench workload $workload run $benchmark_run failed"
+                fi
                 if [[ "${GINUX_BENCHMARK_SINGLE_RUN:-0}" == 1 ]]; then
                     printf '%s\n' ok >"$success_file"
                     stop_qemu
