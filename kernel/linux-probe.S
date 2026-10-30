@@ -2543,8 +2543,10 @@ linux_child_joined:
     mov edx, 0x4050a0
     mov eax, 204
     call syscall_expect_eight
-    cmp qword ptr [0x4050a0], 1
-    require_equal
+    test qword ptr [0x4050a0], 1
+    jnz 991f
+    ud2
+991:
 
     mov eax, 203
     call syscall_expect_zero

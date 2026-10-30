@@ -15732,12 +15732,13 @@ fn verify_linux_scheduler_affinity() -> bool {
         return false;
     }
     let current = u64::from(current_linux_process_pid());
+    let available = linux_available_cpu_mask();
     let sentinel = [0xa5_u8; 16];
     let mut observed = [0_u8; 16];
     let get = copy_to_linux_user(mapping, &sentinel)
         && linux_sched_getaffinity(0, 8, mapping) == 8
         && copy_from_linux_user(mapping, &mut observed)
-        && observed[..8] == 1_u64.to_ne_bytes()
+        && observed[..8] == available.to_ne_bytes()
         && observed[8..] == sentinel[8..]
         && linux_sched_getaffinity(current, 16, mapping) == 8
         && linux_sched_getaffinity(2, 7, mapping) == LINUX_EINVAL
@@ -15749,10 +15750,11 @@ fn verify_linux_scheduler_affinity() -> bool {
         && linux_sched_setaffinity(0, 8, mapping) == 0
         && linux_sched_setaffinity(current, 1, mapping) == 0
         && linux_sched_setaffinity(current, 1_u64 << 32, mapping) == 0
-        && copy_to_linux_user(mapping, &3_u64.to_ne_bytes())
+        && copy_to_linux_user(mapping, &(available | 1_u64 << 63).to_ne_bytes())
         && linux_sched_setaffinity(current, 8, mapping) == 0
         && copy_to_linux_user(mapping, &2_u64.to_ne_bytes())
-        && linux_sched_setaffinity(current, 8, mapping) == LINUX_EINVAL
+        && linux_sched_setaffinity(current, 8, mapping)
+            == if available & 2 != 0 { 0 } else { LINUX_EINVAL }
         && linux_sched_setaffinity(current, 8, 1) == LINUX_EFAULT
         && linux_sched_setaffinity(2, 8, 1) == LINUX_EFAULT
         && linux_sched_setaffinity(2, 8, mapping) == LINUX_ESRCH
@@ -15762,8 +15764,10 @@ fn verify_linux_scheduler_affinity() -> bool {
         && linux_sched_rr_get_interval(2, 1) == LINUX_ESRCH
         && linux_sched_rr_get_interval(u64::MAX, mapping) == LINUX_EINVAL
         && linux_sched_rr_get_interval(current, 1) == LINUX_EFAULT;
+    let restored = copy_to_linux_user(mapping, &available.to_ne_bytes())
+        && linux_sched_setaffinity(current, 8, mapping) == 0;
     let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
-    get && set && interval && unmapped
+    get && set && interval && restored && unmapped
 }
 
 fn verify_linux_realtime_queries() -> bool {
@@ -35736,10 +35740,17 @@ fn linux_sched_getaffinity(pid: u64, length: u64, address: u64) -> u64 {
     if length < size_of::<u64>() as u64 || !length.is_multiple_of(size_of::<u64>() as u64) {
         return LINUX_EINVAL;
     }
-    if let Err(error) = linux_affinity_process(pid) {
-        return error;
-    }
-    if copy_to_linux_user(address, &1_u64.to_ne_bytes()) {
+    let pid = match linux_affinity_process(pid) {
+        Ok(pid) => pid,
+        Err(error) => return error,
+    };
+    let Some(mask) = linux_process::live_process_cpu_affinity(pid)
+        .map(|mask| mask & linux_available_cpu_mask())
+        .filter(|mask| *mask != 0)
+    else {
+        return LINUX_ESRCH;
+    };
+    if copy_to_linux_user(address, &mask.to_ne_bytes()) {
         size_of::<u64>() as u64
     } else {
         LINUX_EFAULT
@@ -35752,13 +35763,28 @@ fn linux_sched_setaffinity(pid: u64, length: u64, address: u64) -> u64 {
     if length != 0 && !copy_from_linux_user(address, &mut mask[..length]) {
         return LINUX_EFAULT;
     }
-    if let Err(error) = linux_affinity_process(pid) {
-        return error;
-    }
-    if u64::from_ne_bytes(mask) & 1 == 1 {
+    let pid = match linux_affinity_process(pid) {
+        Ok(pid) => pid,
+        Err(error) => return error,
+    };
+    let mask = u64::from_ne_bytes(mask) & linux_available_cpu_mask();
+    if linux_process::set_live_process_cpu_affinity(pid, mask) {
         0
     } else {
         LINUX_EINVAL
+    }
+}
+
+fn linux_available_cpu_mask() -> u64 {
+    let online = crate::arch::x86_64::smp::online_count();
+    let domain_limit = current_container_slot()
+        .map(|slot| usize::from(X86_RUNTIME.CONTAINER_CPU_COUNTS[slot].load(Ordering::Acquire)))
+        .unwrap_or(online);
+    let count = online.min(domain_limit).min(u64::BITS as usize);
+    if count == u64::BITS as usize {
+        u64::MAX
+    } else {
+        (1_u64 << count).saturating_sub(1)
     }
 }
 

@@ -432,6 +432,7 @@ struct Process {
     retiring_address_space: Option<ProcessAddressSpace>,
     context: Option<ProcessExecutionContext>,
     scheduler_thread: Option<scheduler::ProcessThreadHandle>,
+    cpu_affinity: u64,
     state: ProcessState,
     wait_event: Option<ProcessWaitEvent>,
 }
@@ -1352,9 +1353,11 @@ impl ProcessTable {
             generation,
             pid,
         };
-        let (process_group, session) = parent
+        let (process_group, session, cpu_affinity) = parent
             .and_then(|parent| self.process(parent))
-            .map_or((pid, pid), |parent| (parent.process_group, parent.session));
+            .map_or((pid, pid, u64::MAX), |parent| {
+                (parent.process_group, parent.session, parent.cpu_affinity)
+            });
         self.generations[slot] = generation;
         self.processes[slot] = Some(Process {
             handle,
@@ -1368,6 +1371,7 @@ impl ProcessTable {
             retiring_address_space: None,
             context,
             scheduler_thread: None,
+            cpu_affinity,
             state,
             wait_event: None,
         });
@@ -2457,6 +2461,40 @@ pub(crate) fn live_process_status(pid: u32) -> Option<LiveProcessStatus> {
         parent_pid: process.parent.map_or(0, |parent| parent.pid),
         state,
     })
+}
+
+pub(crate) fn live_process_cpu_affinity(pid: u32) -> Option<u64> {
+    let table = live_process_table_mut()?;
+    let handle = table.handle_by_pid(pid)?;
+    let process = table.process(handle)?;
+    matches!(
+        process.state,
+        ProcessState::Running | ProcessState::Stopped { .. } | ProcessState::Zombie { .. }
+    )
+    .then_some(process.cpu_affinity)
+}
+
+pub(crate) fn set_live_process_cpu_affinity(pid: u32, mask: u64) -> bool {
+    if mask == 0 {
+        return false;
+    }
+    let Some(table) = live_process_table_mut() else {
+        return false;
+    };
+    let Some(handle) = table.handle_by_pid(pid) else {
+        return false;
+    };
+    let Some(process) = table.process_mut(handle) else {
+        return false;
+    };
+    if !matches!(
+        process.state,
+        ProcessState::Running | ProcessState::Stopped { .. }
+    ) {
+        return false;
+    }
+    process.cpu_affinity = mask;
+    true
 }
 
 pub(crate) fn set_live_process_scheduler_nice(pid: u32, nice: u8) -> bool {

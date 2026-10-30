@@ -38,6 +38,12 @@ exercise SMP by making two vCPUs the ordinary QEMU test default.
 - [x] Give application processors separate guarded kernel and privilege-entry
   stacks, make the Linux child trap state per CPU, and execute a scheduled
   Linux ring-3 child through an application processor.
+- [x] Execute two independent Linux ring-3 address spaces simultaneously on
+  the BSP and an application processor, using a bounded shared-page rendezvous
+  that cannot pass through sequential placement.
+- [x] Track inherited per-process CPU affinity, enforce the intersection of
+  process and domain-visible online processors, and expose that mask through
+  the Linux affinity syscalls.
 
 ## Remaining work
 
@@ -103,6 +109,26 @@ multi-domain policy results, QEMU harness diffs, and repeated stress runs.
   bash tests/qemu/boot.sh` executes the lifecycle child in ring 3 on CPU 1,
   validates its complete register and FS context and exit status, completes
   all boot phases, and ends with `Boot test passed`.
+- The first simultaneous-process proof encoded runtime shared-page metadata in
+  a synthetic leaf mapping; both address spaces validated, but the AP faulted
+  before reaching the rendezvous. The final proof temporarily aliases an
+  already validated writable test page, bounds AP arrival, restores the
+  original mapping before teardown, and fails closed if either participant is
+  absent.
+- Fresh `cargo fmt --all`, `make architecture-check`, `make check`, and
+  `make build-verification && GINUX_CPUS=2 bash tests/qemu/boot.sh` pass after
+  temporary diagnostics are removed. The transcript reports `concurrent Linux
+  processes executed across processors`, validates lifecycle cleanup, and ends
+  with `Boot test passed`.
+- The first Linux-visible affinity run reached the linked userspace probe but
+  failed because its regression assertion hard-coded the historical one-CPU
+  mask. The probe now validates that CPU 0 remains available without assuming
+  a fixed topology; the kernel verifier also restores the process mask after
+  its mutation tests.
+- Fresh `cargo fmt --all`, `make architecture-check`, `make check`, and
+  `make build-verification && GINUX_CPUS=2 bash tests/qemu/boot.sh` pass with
+  inherited process affinity and domain/online CPU-mask enforcement. The full
+  three-phase transcript ends with `Boot test passed`.
 
 ## Decisions and limitations
 
@@ -117,8 +143,9 @@ though two vCPUs become the ordinary development default.
 - Planned commits: discovery/AP startup, per-CPU state, IPIs/shootdowns,
   scheduler concurrency, domain policy, QEMU defaults, and integration evidence.
 - Actual commits: `2ad2c72a` (topology identities), `beafc0f0` (per-CPU
-  architecture state), `e0489201` (AP startup), and cross-CPU mechanism commit
-  pending.
+  architecture state), `e0489201` (AP startup), `e0651591` (IPIs and remote
+  invalidation), `a34b93c3` (AP Linux execution), and `7759bca7` (simultaneous
+  Linux execution); CPU-affinity commit pending.
 
 ## Review policy and outcome
 
