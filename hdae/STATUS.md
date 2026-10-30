@@ -7,26 +7,24 @@
 - Active project: feedback-driven kernel hardening
 - Branch: `codex/feedback-hardening`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 9, SMP operation and 2-vCPU test default, in progress
-- Last completed action: Gate 8 closed after adding ranked locks, synchronizing
-  physical allocation and scrubbing, enforcing a recursive cross-CPU-exclusive
-  kernel-entry boundary, auditing direct interrupt masking, and passing the
-  complete deterministic QEMU suite
-- Next action: extend the proven simultaneous execution into cross-CPU signal,
-  futex, pipe, socket, process-exit, and mapping-change tests
+- Active gate: Gate 10, qualification and comparison, ready to begin
+- Last completed action: Gate 9 closed after implementing AP startup, per-CPU
+  architecture and scheduler state, cross-CPU runtime mechanisms, domain-aware
+  scheduling, explicit one/two/four-vCPU qualification, repeated stress, and a
+  two-vCPU ordinary QEMU default
+- Next action: freeze the Gate 10 qualification matrix and tolerances against
+  the published `research-v1-baseline`
 
 ## Current repository state
 
-Local and remote `main` identify commit `1852455`. Gates 1 through 8 passed and
-closed under delegated review. Gate 9 is active on the shared hardening branch.
-The discovered AP set starts through a W^X low-memory trampoline. Kernel-only
-IPIs, remote invalidation, concurrent processor execution, AP Linux execution,
-simultaneous Linux address spaces across the BSP and CPU 1, and per-process
-domain-bounded affinity pass the full two-vCPU deterministic QEMU suite.
-Linux `/proc/cpuinfo` and `/proc/stat` are generated from the domain-visible
-online processor set. Cross-CPU lifecycle and IPC semantics, domain
-placement/accounting, topology stress, and the two-vCPU harness default remain
-open Gate 9 work.
+Local and remote `main` identify commit `1852455`. Gates 1 through 9 passed and
+closed under delegated review. Gate 10 is ready on the shared hardening branch.
+The ordinary QEMU path now defaults to two vCPUs; the complete one/two/four-vCPU
+matrix and two repeated stress passes succeed. Cross-CPU runtime, process
+scheduling, affinity, caps, priority, QoS selection, accounting, process exit,
+and mapping invalidation have deterministic evidence. Gate 10 must now rerun
+the complete compatibility and workload matrix and compare it with the
+published baseline without widening the security claims.
 
 ## Open decisions
 

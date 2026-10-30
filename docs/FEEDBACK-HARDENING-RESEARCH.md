@@ -13,7 +13,9 @@ userspace. This secondary experiment asks a different question:
 This is not a general cleanup or security-audit exercise. Each criticism is
 checked against the current implementation, translated into an explicit
 invariant, reproduced by a negative test where possible, corrected, and retained
-as a regression gate. Work stops after every gate for human review.
+as a regression gate. The approved batch uses delegated closure after objective
+acceptance evidence; implementation stops for failed dependencies or decisions
+that would change architecture, scope, or risk.
 
 ## Demarcation
 

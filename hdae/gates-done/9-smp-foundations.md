@@ -46,12 +46,18 @@ exercise SMP by making two vCPUs the ordinary QEMU test default.
   the Linux affinity syscalls.
 - [x] Generate `/proc/cpuinfo` and `/proc/stat` on demand from the
   domain-visible online CPU set, including exact file sizes and vectored reads.
+- [x] Exercise signal delivery, futex wakeup, pipe and Unix-socket transport,
+  process exit, and translation invalidation across processors.
+- [x] Schedule Linux process threads independently per CPU while enforcing
+  affinity, CPU caps, thread priority, domain CPU service class, and per-CPU
+  dispatch accounting.
+- [x] Add an explicit one/two/four-vCPU topology and repeated two-vCPU stress
+  matrix, assert that all configured CPUs become online, and make two vCPUs the
+  ordinary QEMU default.
 
 ## Remaining work
 
-- Implement cross-CPU mechanisms and scheduler integration.
-- Add deterministic and stress coverage for one, two, and four vCPUs.
-- Change ordinary QEMU tests to two vCPUs only after SMP criteria pass.
+None.
 
 ## Acceptance criteria
 
@@ -139,6 +145,22 @@ multi-domain policy results, QEMU harness diffs, and repeated stress runs.
   on-demand topology generation, partial and vectored reads, and internal
   content/size assertions. The full three-phase transcript ends with `Boot
   test passed`.
+- A fresh two-vCPU deterministic boot executes bounded signal enqueue/dequeue,
+  futex wakeup, pipe and Unix-socket transport across processors. The existing
+  AP lifecycle test exits a Linux process on CPU 1, and remote invalidation
+  changes mappings with acknowledged TLB shootdown. The complete suite ends
+  with `Boot test passed`.
+- The process scheduler selects independently per CPU, rejects disallowed
+  affinity, accounts dispatches per CPU, honors thread priority and domain CPU
+  service class, and selects an eligible lower service class when the preferred
+  domain has reached its CPU cap. `cargo fmt --all`, `make architecture-check`,
+  `make check`, and the complete two-vCPU QEMU suite pass.
+- `make test-smp` passes complete boot/reboot/corruption suites with one, two,
+  and four vCPUs followed by two additional two-vCPU stress passes. Every run
+  reports `Boot test passed`, and the harness reports `SMP topology and stress
+  matrix passed`.
+- `make test` passes without `GINUX_CPUS` set and reports two enabled and two
+  online processors, proving the ordinary QEMU default is now two vCPUs.
 
 ## Decisions and limitations
 
@@ -155,10 +177,12 @@ though two vCPUs become the ordinary development default.
 - Actual commits: `2ad2c72a` (topology identities), `beafc0f0` (per-CPU
   architecture state), `e0489201` (AP startup), `e0651591` (IPIs and remote
   invalidation), `a34b93c3` (AP Linux execution), and `7759bca7` (simultaneous
-  Linux execution), and `fd319f57` (domain CPU affinity); proc topology commit
-  pending.
+  Linux execution), `fd319f57` (domain CPU affinity), `31ca0a81` (proc
+  topology), `c53c6c69` (cross-CPU runtime mechanisms), `5bccb967` (SMP process
+  scheduling), and `17011318` (topology matrix and two-vCPU default).
 
 ## Review policy and outcome
 
 Delegated closure authorized after all 1/2/4-vCPU functionality, policy, stress,
-and QEMU-default criteria pass. Outcome: pending.
+and QEMU-default criteria pass. Outcome: passed and closed under the confirmed
+batch delegation.
