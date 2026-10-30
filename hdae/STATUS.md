@@ -7,24 +7,20 @@
 - Active project: feedback-driven kernel hardening
 - Branch: `codex/feedback-hardening`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 10, qualification and comparison, in progress
-- Last completed action: Gate 9 closed after implementing AP startup, per-CPU
-  architecture and scheduler state, cross-CPU runtime mechanisms, domain-aware
-  scheduling, explicit one/two/four-vCPU qualification, repeated stress, and a
-  two-vCPU ordinary QEMU default
-- Next action: run the frozen functional and adversarial qualification matrix,
-  preserving exact failures and raw evidence before performance measurement
+- Active gate: none; Gates 1 through 10 are closed
+- Last completed action: Gate 10 passed its frozen functional, adversarial,
+  lifecycle, ABI, performance, and SMP-scaling matrix and closed under the
+  delegated batch policy
+- Next action: human review of the completed branch and pull request; push the
+  local branch when ready
 
 ## Current repository state
 
-Local and remote `main` identify commit `1852455`. Gates 1 through 9 passed and
-closed under delegated review. Gate 10 is ready on the shared hardening branch.
-The ordinary QEMU path now defaults to two vCPUs; the complete one/two/four-vCPU
-matrix and two repeated stress passes succeed. Cross-CPU runtime, process
-scheduling, affinity, caps, priority, QoS selection, accounting, process exit,
-and mapping invalidation have deterministic evidence. Gate 10 must now rerun
-the complete compatibility and workload matrix and compare it with the
-published baseline without widening the security claims.
+Local and remote `main` identify commit `1852455`. All ten feedback-hardening
+gates passed and closed under delegated review on `codex/feedback-hardening`.
+The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
+matrix and repeated stress pass. The final qualification report and raw/reduced
+evidence are under `docs/feedback-hardening/`. No push or merge was performed.
 
 ## Open decisions
 
@@ -50,3 +46,5 @@ Gate 1 evidence is in
 [`docs/feedback-hardening/GATE-1-BASELINE.md`](../docs/feedback-hardening/GATE-1-BASELINE.md).
 The authoritative execution state and gate outcomes are the files under this
 `hdae/` directory.
+Gate 10 evidence and final limits are in
+[`docs/feedback-hardening/GATE-10-QUALIFICATION.md`](../docs/feedback-hardening/GATE-10-QUALIFICATION.md).

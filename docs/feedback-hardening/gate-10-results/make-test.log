@@ -1,0 +1,1337 @@
+   Compiling ginux-kernel v0.1.0 (/Users/gmk/git/ginux/kernel)
+    Finished `release` profile [optimized] target(s) in 21.25s
+Built build/linux-probe.elf and build/linux-dynamic
+    Finished `release` profile [optimized] target(s) in 0.01s
+Built target/x86_64-unknown-none/release/ginux-controller-runtime
+    Finished `release` profile [optimized] target(s) in 0.03s
+Built target/x86_64-unknown-none/release/ginux-network-service-runtime
+    Finished `release` profile [optimized] target(s) in 0.01s
+Built target/x86_64-unknown-none/release/ginux-protocol-service-runtime
+    Finished `release` profile [optimized] target(s) in 0.01s
+Built target/x86_64-unknown-none/release/ginux-volume-service-runtime
+Generated boot/efi/src/generated_boot.rs from control-plane/bootstrap.hex signed by the development-only RFC test key
+Building Ginux verification boot for x86_64-unknown-uefi (release)
+   Compiling ginux-kernel v0.1.0 (/Users/gmk/git/ginux/kernel)
+   Compiling ginux-boot v0.1.0 (/Users/gmk/git/ginux/boot/efi)
+    Finished `release` profile [optimized] target(s) in 29.80s
+Built verification image build/esp/EFI/BOOT/BOOTX64.EFI
+Booting x86-64 Ginux with QEMU/tcg using CPU max,+smep,+smap,+umip
+[2J[01;01H[=3h[2J[01;01H[2J[01;01H[=3h[2J[01;01H[2J[01;01H[=3h[2J[01;01HBdsDxe: loading Boot0001 "UEFI QEMU HARDDISK QM00011 " from PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x5,0xFFFF,0x0)
+BdsDxe: starting Boot0001 "UEFI QEMU HARDDISK QM00011 " from PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x5,0xFFFF,0x0)
+[2J[01;01HGinux booted
+ginux: booting
+ginux: kernel entered after ExitBootServices
+ginux: ranked synchronization primitives ready
+ginux: kernel stack active
+ginux: versioned boot handoff accepted
+ginux: loaded EFI PE image accepted
+ginux: PE sections: 7
+ginux: executable PE sections: 2
+ginux: writable PE sections: 2
+ginux: ACPI root pointer validated
+ginux: signed boot manifest accepted
+ginux: manifest sequence: 1
+ginux: manifest authority grants: 10
+ginux: manifest signature rejection verified
+ginux: malformed boot manifests rejected
+ginux: control-plane bundle measurement accepted
+ginux: embedded controller runtime measurement accepted
+ginux: root-image measurement accepted
+ginux: root-image measurement rejection verified
+ginux: OCI images require runtime registry ingestion
+ginux: kernel page tables active
+ginux: NX-by-default identity map active
+ginux: supervisor-only higher-half direct map active
+ginux: bounded direct-map translation verified
+ginux: PE executable identity pages read-only
+ginux: PE image section permissions enforced
+ginux: boot policy inputs immutable and non-executable
+ginux: supervisor write protection active
+ginux: static kernel page tables sealed read-only
+ginux: supervisor execution prevention active
+ginux: supervisor access prevention active
+ginux: user-mode instruction prevention active
+ginux: null and bidirectional stack guard pages active
+ginux: ACPI MADT validated
+ginux: enabled processors: 2
+ginux: processor APIC IDs: 0 1
+ginux: I/O APICs: 1
+ginux: MADT local APIC address: 4276092928
+ginux: first I/O APIC address: 4273995776
+ginux: first I/O APIC GSI base: 0
+ginux: ACPI DMAR validated
+ginux: remapping hardware units: 1
+ginux: DMA address width: 48
+ginux: first remapping register base: 4275634176
+ginux: first remapping unit includes all PCI devices: 0
+ginux: malformed DMAR structures rejected
+ginux: bounded writable uncached IOMMU mapping active
+ginux: IOMMU version: 1.0
+ginux: IOMMU capability: 59110346978166278
+ginux: IOMMU extended capability: 3906
+ginux: IOMMU translation remained disabled
+ginux: ACPI tables use higher-half direct map
+ginux: GDT/TSS/IDT active
+ginux: user I/O-port access denied
+ginux: architectural exception gates active
+ginux: breakpoint exception handled
+ginux: local APIC discovered
+ginux: local APIC ID: 0
+ginux: local APIC mode: xAPIC
+ginux: local APIC physical base: 4276092928
+ginux: local APIC uses higher-half direct map
+ginux: online processors: 2
+ginux: cross-CPU interrupts and invalidation verified
+ginux: concurrent processor execution verified
+ginux: timer capabilities discovered
+ginux: invariant TSC: not-advertised
+ginux: TSC deadline timer: unsupported
+ginux: TSC frequency source: unavailable
+ginux: local APIC timer calibrated
+ginux: APIC timer divider: 16
+ginux: APIC timer counter Hz: 62786552
+ginux: calibrated TSC Hz: 1000984899
+ginux: local APIC timer interrupt handled
+ginux: bounded PCI bus 0 enumerated
+ginux: modern virtio block function: 0:2.0
+ginux: first IOMMU device scopes: 8
+ginux: virtio IOMMU endpoint scope resolved exactly
+ginux: modern virtio network function: 0:3.0
+ginux: virtio-net common BAR address: 824633737216
+ginux: virtio-net common configuration offset: 0
+ginux: virtio-net common configuration length: 4096
+ginux: virtio-net notification multiplier: 4
+ginux: virtio-net PCI capabilities: 6
+ginux: virtio-net MSI-X vectors: 4
+ginux: modern virtio-net PCI capabilities validated
+ginux: malformed virtio-net PCI configurations rejected
+ginux: firmware virtio-net DMA authority revoked
+ginux: virtio-net PCI decoding and bus mastering disabled
+ginux: virtio-net IOMMU endpoint scope resolved exactly
+ginux: virtio common BAR address: 824633720832
+ginux: virtio common configuration offset: 0
+ginux: virtio common configuration length: 4096
+ginux: virtio notification multiplier: 4
+ginux: virtio PCI capabilities: 6
+ginux: modern virtio-blk PCI capabilities validated
+ginux: malformed virtio PCI configurations rejected
+ginux: virtio MSI-X capability offset: 152
+ginux: virtio MSI-X vectors: 3
+ginux: virtio MSI-X table address/length: 2164531200/48
+ginux: virtio MSI-X PBA address/length: 2164533248/8
+ginux: virtio MSI-X function mask: unmasked
+ginux: disabled virtio MSI-X capability validated
+ginux: bounded uncached virtio MMIO mapping active
+ginux: virtio MMIO translation bounds verified
+ginux: bounded uncached MSI-X mapping active
+ginux: MSI-X cacheable aliases removed
+ginux: bounded uncached virtio-net common mapping active
+ginux: bounded read-only uncached virtio-net device mapping active
+ginux: bounded uncached virtio-net notification mapping active
+ginux: bounded uncached virtio-net MSI-X mapping active
+ginux: virtio-net cacheable alias absent
+ginux: virtio-net offered features: 1113214386212
+ginux: virtio-net accepted features: 12884934688
+ginux: virtio-net queues available: 3
+ginux: virtio-net receive queue size: 256
+ginux: virtio-net transmit queue size: 256
+ginux: virtio-net receive notification address: 824633749504
+ginux: virtio-net transmit notification address: 824633749508
+ginux: virtio-net queues remain disabled and DMA-unbound
+ginux: invalid virtio-net queue geometry rejected
+ginux: virtio-net MSI-X remained disabled
+ginux: virtio-net stable MAC validated: 90520731923542
+ginux: virtio-net platform DMA negotiation validated
+ginux: invalid virtio-net feature sets rejected
+ginux: virtio-net returned to reset with PCI decoding disabled
+ginux: invalid virtio-net MSI-X programming rejected atomically
+ginux: masked virtio-net RX/TX MSI-X vectors programmed
+ginux: virtio-net MSI-X remained globally disabled
+ginux: virtio-net remained reset and DMA-disabled after MSI-X setup
+ginux: invalid MSI-X programming rejected atomically
+ginux: kernel-owned MSI-X vector programmed masked
+ginux: MSI-X function remained disabled
+ginux: virtio block offered features: 1113201868372
+ginux: virtio block accepted features: 12884902400
+ginux: virtio block queues available: 2
+ginux: virtio block reset and feature negotiation validated
+ginux: virtio bus mastering remained disabled
+ginux: virtio block returned to reset state
+ginux: bounded persistent volume format validated
+ginux: interrupted volume commits recovered
+ginux: corrupt persistent volume records rejected
+ginux: capability derivation and revocation verified
+ginux: exhaustive capability attenuation verified
+ginux: cross-domain capability revocation verified
+ginux: per-root delegation provenance verified
+ginux: exhaustive delegated attenuation verified
+ginux: independent delegation roots verified
+ginux: domain lifecycle ancestry verified
+ginux: Linux domain boundaries verified
+ginux: exhausted generational slots skipped
+ginux: per-service frame quarantines isolated
+ginux: bounded auxiliary service registry verified
+ginux: service lifecycle roles separated
+ginux: service failure policies separated
+ginux: domain resource admission policies verified
+ginux: auxiliary service quiescence enforced
+ginux: auxiliary supervision authority enforced
+ginux: auxiliary retirement events sequenced
+ginux: auxiliary retirement publication atomic
+ginux: auxiliary call epoch renewal constrained
+ginux: auxiliary stop authority revoked
+ginux: auxiliary retirement overflow summarized
+ginux: stop-only auxiliary faults contained
+ginux: auxiliary fault authority revoked before publication
+ginux: bounded service restart policy verified
+ginux: clean service exit publication atomic
+ginux: bounded lifecycle event queue verified
+ginux: lifecycle event overflow notification verified
+ginux: persistent control-plane domain sealed
+ginux: control-plane domain ID: 65536
+ginux: IPC-only service domain ID: 65537
+ginux: memory descriptors: 130
+ginux: usable memory MiB: 594
+ginux: reclaimable boot-service pages: 10567
+ginux: reserved loader pages: 97855
+ginux: physical frame allocator active
+ginux: reclaimed boot-service frames: 10566
+ginux: atomic frame reservations verified
+ginux: contiguous frame reservations verified
+ginux: physical frames zeroed before allocation
+ginux: tracked frame release ownership verified
+ginux: stale frame leases rejected
+ginux: per-domain physical frame budgets enforced
+ginux: IOMMU root/context hierarchy constructed
+ginux: IOMMU root table address: 1056768
+ginux: one-page identity DMA translation encoded exactly
+ginux: invalid IOMMU table inputs rejected
+ginux: IOMMU hardware state unchanged after table construction
+ginux: IOMMU root table installed
+ginux: IOMMU translation enabled for virtio DMAqemu-system-x86_64: vtd_iova_to_slpte: detected slpte permission error (iova=0x101000, level=0x1, slpte=0x0, write=1, pasid=0xffffffff)
+qemu-system-x86_64: Interrupt Mask set, irq is not generated
+qemu-system-x86_64: vtd_iommu_translate: detected translation failure (dev=00:02:00, iova=0x101000)
+qemu-system-x86_64: New fault is not recorded due to compression of faults
+
+ginux: unauthorized virtio DMA payload blocked
+ginux: faulting virtio transport outcome bounded
+ginux: unmapped DMA guard frame remained unchanged
+ginux: faulting virtio device reset and bus mastering revoked
+ginux: IOMMU fault source and address validated
+ginux: IOMMU write-permission fault reason validated
+ginux: IOMMU fault record cleared and translation recovered
+ginux: kernel-owned virtio MSI-X interrupt delivered
+ginux: exactly one virtio completion interrupt handled
+ginux: virtio MSI-X masked and disabled after completion
+ginux: temporary virtio interrupt gate retired
+ginux: persistent virtio device reset and bus mastering revoked
+ginux: IOMMU translation disabled after device quiescence
+ginux: IOMMU root table cleared
+ginux: IOMMU fault status clear after recovery
+ginux: IOMMU translation frames scrubbed and released
+ginux: IOMMU guard frame scrubbed and released
+ginux: virtio DMA frame scrubbed and released
+ginux: generation-owned virtio-net DMA page allocated
+ginux: bounded virtio-net RX/TX DMA layout validated
+ginux: malformed virtio-net DMA layouts rejected
+ginux: dedicated virtio-net IOMMU hierarchy constructed
+ginux: virtio-net IOMMU source and DMA page encoded exactly
+ginux: virtio-net DMA and IOMMU leases are generation-fresh
+ginux: virtio-net IOMMU hardware remained inactive
+ginux: virtio-net bus mastering remained disabled
+ginux: virtio-net IOMMU activated before queue authority
+ginux: empty virtio-net RX/TX queues bound to confined DMA
+ginux: virtio-net DRIVER_OK established with empty rings
+ginux: virtio-net bus mastering enabled last
+ginux: empty virtio-net queues quiesced without notification
+ginux: virtio-net bus mastering revoked before IOMMU teardown
+ginux: confined virtio-net TX descriptor published
+ginux: virtio-net TX queue notified
+ginux: exactly one virtio-net TX interrupt delivered
+ginux: virtio-net TX used-ring completion validated
+ginux: virtio-net TX payload and guards preserved
+ginux: bounded Ethernet probe transmitted
+ginux: virtio-net TX route retired before DMA release
+ginux: unauthorized virtio-net RX DMA payload blocked
+ginux: faulting virtio-net transport outcome bounded
+ginux: virtio-net unmapped guard page remained unchanged
+ginux: faulting virtio-net device quiesced before recovery
+ginux: virtio-net IOMMU fault source and address validated
+ginux: virtio-net IOMMU write fault cleared and translation recovered
+ginux: confined virtio-net RX descriptor published
+ginux: bounded ARP request transmitted
+ginux: exactly one virtio-net RX interrupt delivered
+ginux: virtio-net RX used-ring completion validated
+ginux: QEMU gateway ARP reply validated
+ginux: virtio-net RX payload bounds preserved
+ginux: virtio-net RX/TX routes retired before DMA release
+ginux: virtio-net unmapped guard page scrubbed and released
+ginux: virtio-net DMA confinement retired cleanly
+ginux: generation-owned virtio DMA frame allocated
+ginux: malformed virtio queue geometry rejected
+ginux: bounded blank virtio sector read completed
+ginux: virtio read guard bytes preserved
+ginux: virtio used-ring completion validated
+ginux: deterministic virtio capacity sectors: 2048
+ginux: virtio bus mastering revoked after read
+ginux: bounded virtio volume transaction completed
+ginux: disk-backed volume generation: 1
+ginux: host volume sectors: 2048
+ginux: host volume data sectors: 2040
+ginux: disk-backed volume initialized and flushed
+ginux: isolated address space active
+ginux: control-plane W^X mappings active
+ginux: address-space frames use higher-half direct map
+ginux: auxiliary address-space transaction verified
+ginux: concurrent auxiliary address spaces isolated
+ginux: auxiliary scheduler admission resource-gated
+ginux: auxiliary address-space ownership retained
+ginux: auxiliary runtime teardown path connected
+ginux: auxiliary teardown restores kernel page tables
+ginux: bounded executable container accepted
+ginux: authenticated executable entry points accepted
+ginux: malformed executable containers rejected
+ginux: deterministic initramfs image accepted
+ginux: bounded newc archive paths validated
+ginux: executable init entry discovered
+ginux: malformed initramfs archives rejected
+ginux: measured root image copied into owned memory
+ginux: owned root image remained source-independent
+ginux: owned root frames scrubbed and released
+ginux: bounded read-only root index constructed
+ginux: root lookups resolved only owned image bytes
+ginux: invalid root lookup paths denied
+ginux: indexed root frames scrubbed and released
+ginux: measured root published in kernel-owned memory
+ginux: measured isolated volume service discovered
+ginux: bounded native PIE load plan accepted
+ginux: relative-only service relocations accepted
+ginux: native service segments materialized in owned frames
+ginux: native service relative relocations applied
+ginux: native service W^X address space verified
+ginux: native service guard pages verified
+ginux: measured isolated network service discovered
+ginux: bounded native network PIE load plan accepted
+ginux: native network service relative relocations accepted
+ginux: native network service segments materialized in owned frames
+ginux: native network service relative relocations applied
+ginux: native network service W^X address space verified
+ginux: native network service guard pages verified
+ginux: measured isolated protocol service discovered
+ginux: bounded native protocol PIE load plan accepted
+ginux: native protocol service relative relocations accepted
+ginux: native protocol service segments materialized in owned frames
+ginux: native protocol service relative relocations applied
+ginux: native protocol service W^X address space verified
+ginux: native protocol service guard pages verified
+ginux: generation-safe Linux mount namespace installed
+ginux: immutable measured root mounted read-only
+ginux: generation-safe Linux user namespace installed
+ginux: Linux domain root mapped outside native authority
+ginux: Linux privilege policy sealed fail-closed
+ginux: quota-bound page-backed RAM store installed
+ginux: generation-safe Linux tmpfs view mounted at /tmp
+ginux: pinned minimal system profile accepted
+ginux: scheduled Linux child executed on application processor
+ginux: concurrent Linux processes executed across processors
+ginux: process withdraw missing scheduler thread pid/slot/generation: 3 1 2
+ginux: cross-CPU Linux signals, futexes, pipes, and sockets validated
+ginux: bounded Linux process lifecycle contract validated
+ginux: Linux stopped and continued child wait states validated
+ginux: generation-bound Linux process roots validated
+ginux: bounded Linux process resource bundles validated
+ginux: Linux process mapping inventory validated
+ginux: transactional Linux child publication validated
+ginux: cloned Linux child resources published atomically
+ginux: address-space-bound Linux process contexts validated
+ginux: Linux fork child return context derived
+ginux: Linux process contexts staged on native scheduler
+ginux: scheduled Linux process roots matched ownership
+ginux: stale Linux process scheduler bindings rejected
+ginux: Linux process roots inherited kernel mappings
+ginux: scheduled Linux child CR3 activated and restored
+ginux: scheduled Linux child returned from ring 3
+ginux: Linux fork child RAX zero executed
+ginux: Linux process child FS isolation executed
+ginux: complete Linux process register frame executed
+ginux: Linux process child exit captured from ring 3
+ginux: Linux process child exit drove zombie wait status
+ginux: bounded Linux private page copy validated
+ginux: Linux child hierarchy and copy-on-write isolation validated
+ginux: Linux SysV shared memory lifecycle validated
+ginux: Linux SysV semaphore lifecycle validated
+ginux: Linux SysV message queue lifecycle validated
+ginux: measured minimal system init planned
+ginux: measured-root Linux interpreted exec graph planned
+ginux: measured-root Linux graph substitution rejected
+ginux: dedicated measured Linux signal runtime planned
+ginux: expandable measured Linux conformance runtime planned
+ginux: multiple measured Linux exec targets planned
+ginux: non-executable Linux GNU stack enforced
+ginux: bounded Linux ELF metadata headers validated
+ginux: bounded Linux interpreter metadata validated
+ginux: bounded Linux ELF verifier stack usage validated
+ginux: bounded Linux GNU RELRO metadata validated
+ginux: three-load Linux ELF runtime mapping verified
+ginux: beginning Linux ELF mapping verification
+ginux: entering Linux ELF verification process
+ginux: Linux POSIX message queue resource limit enforced
+ginux: Linux UNIX in-flight descriptor limit enforced
+ginux: Linux memfd sealing enforced across descriptors
+ginux: Linux address-space resource limit enforced
+PROBE!!
+PROBE!!
+PROBE!!
+PROBE!!
+                                                                                                                                                                                                                                                         ginux: Linux user fault vector/error/address/rip:14 4 4239360 4199748
+ginux: Linux fault pid/page/stack-low/stack-top/brk-limit/occupied/frame/file/protection/registry-frame: 1 4239360 4231168 4234848 4227072 0 0 0 0 0 
+ginux: Linux fault tid/fs: 1 0
+ginux: Linux fault instruction bytes: 72 131 60 37 0 176 64 0 0 116 2 15 11 72 131 60
+ginux: Linux user fault rax/rbx/rcx/rdx/rdi/rsi/rsp/rbp/r12/r13/r14/r15: 0 0 4212237 4215072 4215104 0 4234848 611814120 608550432 609991408 0 0
+ginux: Linux user fault stack return address: 1
+ginux: Linux init recent syscall/result pairs:
+PROBE!!
+PROBE!!
+DEVICE!!
+PROBE!!
+PROBE!!
+ginux: measured Linux exec image replaced atomically
+ginux: Linux user fault vector/error/address/rip:14 4 4239360 4195752
+ginux: Linux fault pid/page/stack-low/stack-top/brk-limit/occupied/frame/file/protection/registry-frame: 1 4239360 4231168 4234848 4227072 0 0 0 0 0 
+ginux: Linux fault tid/fs: 1 0
+ginux: Linux fault instruction bytes: 72 131 60 37 0 176 64 0 0 15 133 219 10 0 0 72
+ginux: Linux user fault rax/rbx/rcx/rdx/rdi/rsi/rsp/rbp/r12/r13/r14/r15: 0 729901195959685712 4195732 0 11 4202520 4233216 611814120 608550432 609991408 0 0
+ginux: Linux user fault stack return address: 2
+ginux: Linux init recent syscall/result pairs:
+SIGNAL!
+ginux: beginning Linux ELF mapping verification
+ginux: entering Linux ELF verification process
+ginux: Linux POSIX message queue resource limit enforced
+ginux: Linux UNIX in-flight descriptor limit enforced
+ginux: Linux memfd sealing enforced across descriptors
+ginux: Linux address-space resource limit enforced
+PROBE!!
+PROBE!!
+PROBE!!
+PROBE!!
+                                                                                                                                                                                                                                                         ginux: Linux user fault vector/error/address/rip:14 4 4239360 4199748
+ginux: Linux fault pid/page/stack-low/stack-top/brk-limit/occupied/frame/file/protection/registry-frame: 1 4239360 4231168 4234848 4227072 0 0 0 0 0 
+ginux: Linux fault tid/fs: 1 0
+ginux: Linux fault instruction bytes: 72 131 60 37 0 176 64 0 0 116 2 15 11 72 131 60
+ginux: Linux user fault rax/rbx/rcx/rdx/rdi/rsi/rsp/rbp/r12/r13/r14/r15: 0 0 4212237 4215072 4215104 0 4234848 611814120 608550432 609991408 0 0
+ginux: Linux user fault stack return address: 1
+ginux: Linux init recent syscall/result pairs:
+PROBE!!
+PROBE!!
+DEVICE!!
+PROBE!!
+PROBE!!
+ginux: measured Linux exec image replaced atomically
+ABI_OK!
+ginux: ring-3 Linux conformance suite passed
+ginux: live Linux process address-space snapshot validated
+ginux: incomplete Linux process snapshots rejected
+ginux: live Linux PID 1 context admitted to process model
+ginux: live Linux process registry persisted across syscalls
+ginux: live Linux child address space cloned transactionally
+ginux: live Linux cloned child executed in ring 3
+ginux: toolchain-linked static Linux ELF executed
+ginux: five-page Linux executable mapping validated
+ginux: bounded Linux exec rejection preserved live image
+ginux: Linux exec mapping rollback restored active image
+ginux: Linux exec argv and environment delivered
+ginux: bounded Linux exec vectors validated
+ginux: old Linux image pages removed after exec
+ginux: replaced Linux image retired cleanly
+ginux: Linux close-on-exec descriptors transitioned
+ginux: Linux exec signal state transitioned
+ginux: Linux exec process identity installed
+ginux: Linux executable link followed exec identity
+ginux: measured-root Linux exec selection validated
+ginux: measured-dirfd Linux execveat validated
+ginux: measured-fd Linux empty-path exec validated
+ginux: measured Linux exec selection is profile-driven
+ginux: independent measured Linux exec layouts validated
+ginux: runtime-selected Linux exec plans committed
+ginux: variable-page Linux exec images committed
+ginux: Linux active image ownership transitioned
+ginux: generation-bound Linux image ownership verified
+ginux: generation-bound Linux page-table hierarchy verified
+ginux: Linux RELRO ownership permissions synchronized
+ginux: stale Linux image retirement rejected
+ginux: old Linux image leases retired at exec commit
+ginux: Linux image lease double release rejected
+ginux: Linux replacement frames allocated on demand
+ginux: Linux replacement frame generations reclaimed
+ginux: bounded multi-page Linux ELF plan verified
+ginux: bounded Linux ET_DYN load bias validated
+ginux: bounded Linux interpreter resolution plan validated
+ginux: measured Linux interpreter bytes enforced
+ginux: authenticated Linux dependency bytes enforced
+ginux: Linux dependency SONAME identity bound
+ginux: bounded Linux relative relocation metadata validated
+ginux: bounded Linux symbol relocation metadata validated
+ginux: bounded Linux PLT relocation metadata validated
+ginux: split Linux PLT relocation table validated
+ginux: bounded Linux SysV hash metadata validated
+ginux: bounded Linux GNU hash metadata validated
+ginux: unresolved dynamic Linux static entry denied
+ginux: separate-header Linux interpreter plan validated
+ginux: Linux dynamic startup metadata validated
+ginux: Linux auxiliary vector encoding validated
+ginux: Linux page-aliasing ELF segments rejected
+ginux: Linux ELF entry metadata overlap rejected
+ginux: bounded Linux dependency list validated
+ginux: bounded Linux dependency authority graph validated
+ginux: bounded Linux dependency TLS metadata validated
+ginux: bounded Linux TPOFF64 relocation metadata validated
+ginux: bounded Linux static TLS layout plan validated
+ginux: reusable Linux TLS page materialization validated
+ginux: bounded Linux TLS execution context validated
+ginux: bounded Linux TLS template metadata validated
+ginux: beginning Linux ELF mapping verification
+ginux: entering Linux ELF verification process
+ginux: Linux POSIX message queue resource limit enforced
+ginux: Linux UNIX in-flight descriptor limit enforced
+ginux: Linux memfd sealing enforced across descriptors
+ginux: Linux address-space resource limit enforced
+PROBE!!
+PROBE!!
+PROBE!!
+PROBE!!
+                                                                                                                                                                                                                                                         ginux: Linux user fault vector/error/address/rip:14 4 4239360 4199748
+ginux: Linux fault pid/page/stack-low/stack-top/brk-limit/occupied/frame/file/protection/registry-frame: 1 4239360 4231168 4234848 4227072 0 0 0 0 0 
+ginux: Linux fault tid/fs: 1 0
+ginux: Linux fault instruction bytes: 72 131 60 37 0 176 64 0 0 116 2 15 11 72 131 60
+ginux: Linux user fault rax/rbx/rcx/rdx/rdi/rsi/rsp/rbp/r12/r13/r14/r15: 0 0 4212237 4215072 4215104 0 4234848 611814120 608550432 609991408 0 0
+ginux: Linux user fault stack return address: 1
+ginux: Linux init recent syscall/result pairs:
+PROBE!!
+PROBE!!
+DEVICE!!
+PROBE!!
+PROBE!!
+ginux: measured Linux exec image replaced atomically
+SECOND!
+ginux: Linux static clock ID and resolution profile validated
+ginux: Linux restart_syscall default interruption validated
+ginux: Linux ELF headers mapped in executable segment
+ginux: bounded multi-page Linux ELF mapping verified
+ginux: beginning Linux ELF mapping verification
+ginux: entering Linux ELF verification process
+ginux: Linux POSIX message queue resource limit enforced
+ginux: Linux UNIX in-flight descriptor limit enforced
+ginux: Linux memfd sealing enforced across descriptors
+ginux: Linux address-space resource limit enforced
+PROBE!!
+PROBE!!
+PROBE!!
+PROBE!!
+                                                                                                                                                                                                                                                         ginux: Linux user fault vector/error/address/rip:14 4 4239360 4199748
+ginux: Linux fault pid/page/stack-low/stack-top/brk-limit/occupied/frame/file/protection/registry-frame: 1 4239360 4231168 4234848 4227072 0 0 0 0 0 
+ginux: Linux fault tid/fs: 1 0
+ginux: Linux fault instruction bytes: 72 131 60 37 0 176 64 0 0 116 2 15 11 72 131 60
+ginux: Linux user fault rax/rbx/rcx/rdx/rdi/rsi/rsp/rbp/r12/r13/r14/r15: 0 0 4212237 4215072 4215104 0 4234848 611814120 608550432 609991408 0 0
+ginux: Linux user fault stack return address: 1
+ginux: Linux init recent syscall/result pairs: 63/0 9/4243456 27/0 11/0 1/18446744073709551602 11/0 11/0 1/18446744073709551602 9/4239360 10/0 10/0 63/18446744073709551602 14/0 14/0 28/0 28/0 11/0 9/4239360 27/18446744073709551594 27/18446744073709551602 27/0 63/0 11/0 27/18446744073709551604 11/0 9/4239360 63/0 27/0 28/0 10/0 10/0 63/18446744073709551602 11/0 1/18446744073709551602 27/0 11/0 9/4239360 11/0 1/18446744073709551602 27/0 11/0 9/4239360 10/0 10/0 63/18446744073709551602 63/0 10/0 63/18446744073709551602 11/0 11/0 9/4239360 10/0 63/0 63/18446744073709551602 11/0 11/0 9/4239360 9/4243456 27/0 28/0 10/0 63/18446744073709551602 63/18446744073709551602 11/0 11/0 1/18446744073709551602 1/18446744073709551602 9/4239360 10/0 11/0 11/0 9/4243456 9/18446744073709551604 9/4251648 9/4251648 63/18446744073709551602 9/18446744073709551599 9/18446744073709551594 9/4243456 27/0 10/0 11/0 1/18446744073709551602 1/18446744073709551602 1/18446744073709551602 1/18446744073709551602 9/4247552 11/0 9/4239360 11/0 1/18446744073709551602 9/4239360 27/0 10/0 11/0 9/18446744073709551594 9/4239360 1/18446744073709551602 27/0 10/0 27/0 10/0 63/18446744073709551602 10/0 10/18446744073709551594 11/0 145/0 143/0 146/0 147/0 142/0 144/0 140/20 141/0 1/18446744073709551607 1/257 14/18446744073709551594 14/0 14/0 14/0 14/18446744073709551602 14/0 14/0 14/0 14/18446744073709551602 13/18446744073709551594 13/0 131/0
+PROBE!!
+PROBE!!
+DEVICE!!
+PROBE!!
+PROBE!!
+ginux: measured Linux exec image replaced atomically
+DEVFS_READY
+USERNS_READY
+PRIVILEGE_BOUNDARY_READY
+Name:	init
+State:	R (running)
+Pid:	1
+PPid:	0
+1 0 0:1 / / ro,nosuid,nodev - ginux-root rootfs ro
+TMPFS_READY
+SIGNAL_READY
+FUTEX_READY
+ginux: Linux process-group wait selectors validated
+ginux: Linux nonblocking pidfd wait validated
+ginux: Linux cross-process memory transfer validated
+ginux: Linux cross-process resource comparison validated
+ginux: Linux shared open-file position validated
+ginux: Linux cross-process pidfd descriptor duplication validated
+ginux: Linux cross-process resource limits validated
+ginux: Linux generation-bound pidfds validated
+PROCFS_READY
+GINUX_SYSTEM_INIT_V0
+SUPERVISOR_SHUTDOWN
+ginux: Linux PID 1 fork and wait4 lifecycle completed
+ginux: Linux fork inherited user namespace
+ginux: measured minimal system init executed as PID 1
+ginux: persistent Linux PID 1 supervisor lifecycle validated
+ginux: bounded Linux standard signal lifecycle validated
+ginux: bounded Linux private futex lifecycle validated
+ginux: bounded Linux devfs profile validated
+ginux: lifecycle-aware bounded procfs validated
+ginux: transactional page-backed tmpfs lifecycle validated
+ginux: minimal system init exited cleanly
+ginux: sibling robust-list metadata read
+ginux: Linux POSIX message queue resource limit enforced
+ginux: Linux UNIX in-flight descriptor limit enforced
+ginux: Linux memfd sealing enforced across descriptors
+ginux: Linux address-space resource limit enforced
+PROBE!!
+PROBE!!
+PROBE!!
+PROBE!!
+INITMAIN°^@             °^@            ±^@            TLS_OK!
+                                                                                                                                                                                      Bginux: Linux user fault vector/error/address/rip:14 4 4239360 4201847
+ginux: Linux fault pid/page/stack-low/stack-top/brk-limit/occupied/frame/file/protection/registry-frame: 1 4239360 4231168 4234880 4227072 0 0 0 0 0 
+ginux: Linux fault tid/fs: 1 4259776
+ginux: Linux fault instruction bytes: 72 131 60 37 0 176 64 0 0 116 2 15 11 72 131 60
+ginux: Linux user fault rax/rbx/rcx/rdx/rdi/rsi/rsp/rbp/r12/r13/r14/r15: 0 6 4214083 0 4215104 0 4234880 4215188 6390016 4190872 0 4190208
+ginux: Linux user fault stack return address: 1
+ginux: Linux init recent syscall/result pairs:
+PROBE!!
+PROBE!!
+ginux: process address-space sync missing image mapping 3
+ginux: live registry refresh address-space sync failed
+DEVICE!!
+PROBE!!
+PROBE!!
+ginux: measured-root interpreted Linux exec admitted
+ginux: interpreted Linux exec image committed
+ginux: measured Linux exec image replaced atomically
+DYNEXEC
+ginux: measured-root interpreted Linux exec committed
+ginux: interpreted Linux exec graph remapped
+ginux: bounded Linux cross-area copy-in validated
+ginux: complete interpreted Linux graph retired at exec
+ginux: interpreted Linux exec stack replaced atomically
+ginux: old interpreted Linux stack lease retired at exec
+ginux: replacement Linux stack lease reclaimed
+ginux: static Linux exec stack replaced atomically
+ginux: old static Linux stack lease retired at exec
+ginux: replacement static Linux stack lease reclaimed
+ginux: interpreted Linux exec heap replaced atomically
+ginux: old interpreted Linux heap lease retired at exec
+ginux: replacement Linux heap lease reclaimed
+ginux: static Linux exec heap replaced atomically
+ginux: old static Linux heap lease retired at exec
+ginux: replacement static Linux heap lease reclaimed
+ginux: Linux exec process break reset
+ginux: interpreted Linux TLS state rematerialized
+ginux: interpreted Linux TLS leases replaced atomically
+ginux: old interpreted Linux TLS leases retired at exec
+ginux: replacement Linux TLS leases reclaimed
+ginux: interpreted Linux sibling stack replaced atomically
+ginux: old interpreted Linux sibling stack lease retired at exec
+ginux: replacement Linux sibling stack lease reclaimed
+ginux: interpreted Linux mmap registry empty across exec
+ginux: static Linux mmap registry empty across exec
+ginux: interpreted Linux page-table hierarchy replaced atomically
+ginux: old interpreted Linux page-table leases retired at exec
+ginux: replacement Linux page-table leases reclaimed
+ginux: static Linux page-table hierarchy replaced atomically
+ginux: old static Linux page-table leases retired at exec
+ginux: replacement static Linux page-table leases reclaimed
+ginux: static Linux exec auxiliary vector rebuilt
+ginux: interpreted Linux exec auxiliary vector rebuilt
+ginux: canonical interpreted Linux executable identity validated
+ginux: interpreted Linux exec vectors generalized
+ginux: combined Linux static TLS materialized
+ginux: ordered Linux dependency TLS layout materialized
+ginux: Linux TLS active before initializers
+ginux: Linux dependency TLS active before constructors
+ginux: toolchain-driven Linux dependency TLS relocation applied
+ginux: toolchain-driven Linux auxiliary TLS relocation applied
+ginux: linker-resolved Linux TLS symbols executed
+ginux: bounded Linux TLS syscall copies validated
+ginux: independent Linux sibling TLS materialized
+ginux: non-current Linux TLS syscall access denied
+ginux: Linux TLS execution context switched and restored
+ginux: guarded Linux sibling stack materialized
+ginux: non-current Linux stack syscall access denied
+ginux: bounded Linux clone contract validated
+ginux: Linux child return context constructed
+ginux: Linux child context cleared on slot reuse
+ginux: failed Linux clone publication rolled back
+ginux: Linux parent and child TID publication validated
+ginux: unpublished Linux child retired cleanly
+ginux: full Linux syscall register frame preserved
+ginux: typed Linux syscall frame validated
+ginux: complete Linux child context persisted
+ginux: stale Linux return contexts rejected
+ginux: Linux child return frame installed atomically
+ginux: Linux return ownership restored to parent
+ginux: stale Linux return installation left state unchanged
+ginux: live Linux syscall return frame round-trip validated
+ginux: guarded Linux child executed in ring 3
+ginux: Linux child exit restored suspended parent
+ginux: bounded Linux clone syscall dispatched
+ginux: sequential Linux clone slot reuse validated
+ginux: reused Linux child stack began scrubbed
+ginux: monotonic Linux clone TIDs validated
+ginux: live Linux child TIDs matched published words
+ginux: live Linux child FS self pointers validated
+ginux: per-thread Linux signal masks isolated
+ginux: bidirectional Linux sched_yield switching validated
+ginux: occupied Linux clone capacity rejected live
+ginux: live Linux clone failures rolled back transactionally
+ginux: Linux clone return values validated
+ginux: Linux clone child TID cleared on exit
+ginux: Linux clone parent TID preserved on child exit
+ginux: Linux parent and child futex waits blocked
+ginux: explicit Linux futex wake restored child
+ginux: Linux clear-child-TID wake restored parent
+ginux: Linux futex waiter state reclaimed
+ginux: per-thread Linux syscall stacks validated
+ginux: bounded Linux TID lifecycle validated
+ginux: stale Linux thread handles rejected
+ginux: Linux per-thread exit state isolated
+ginux: Linux thread exit registrations cleared
+ginux: Linux thread table reclaimed on exit
+ginux: sibling Linux TLS frame scrubbed and released
+ginux: Linux sibling stack scrubbed and released
+ginux: retired Linux thread stacks scrubbed
+ginux: Linux TLS frame scrubbed and released
+ginux: bounded interpreted Linux ELF mapping verified
+ginux: toolchain-linked Linux interpreter executed
+ginux: two-page Linux interpreter RX mapping verified
+ginux: userspace Linux interpreter metadata discovered
+ginux: userspace Linux runtime files discovered
+ginux: userspace Linux PT_LOAD mappings derived
+ginux: userspace Linux startup metadata consumed
+ginux: userspace Linux main segments mapped
+ginux: userspace Linux DT_NEEDED path resolved
+ginux: userspace Linux dependency segments mapped
+ginux: complete interpreted Linux image ownership tracked
+ginux: userspace Linux dependency bias selected
+ginux: Linux dependency frames allocated on demand
+ginux: Linux executable frames allocated on demand
+ginux: bounded Linux dependency page contracts applied
+ginux: bounded Linux dependency mapping slots isolated
+ginux: userspace Linux auxiliary dependency mapped
+ginux: Linux read-only dependency segment mapped
+ginux: toolchain-linked Linux PIE and shared object executed
+ginux: linker-emitted Linux dynamic tags validated
+ginux: separate-header interpreted Linux mapping verified
+ginux: Linux dependency W^X mapping verified
+ginux: interpreter-first Linux ring-3 entry verified
+ginux: userspace Linux interpreter self-relocation applied
+ginux: userspace Linux relocation table shapes validated
+ginux: userspace Linux relative relocation applied
+ginux: userspace Linux GLOB_DAT relocation applied
+ginux: userspace Linux JUMP_SLOT relocation applied
+ginux: userspace Linux hash bucket resolution applied
+ginux: userspace Linux symbol names matched
+ginux: userspace Linux cross-object symbol resolved
+ginux: userspace Linux two-provider symbols resolved
+ginux: Linux JUMP_SLOT dependency call executed
+ginux: Linux auxiliary JUMP_SLOT dependency call executed
+ginux: userspace Linux dependency self-relocations applied
+ginux: userspace Linux auxiliary dependency self-relocations applied
+ginux: bounded Linux main preinit array validated
+ginux: userspace Linux main preinit metadata consumed
+ginux: userspace Linux main preinit executed
+ginux: Linux preinit-before-dependency initialization ordered
+ginux: bounded Linux dependency init arrays validated
+ginux: userspace Linux init arrays bound to relocations
+ginux: userspace Linux dependency constructors executed
+ginux: bounded Linux main init array validated
+ginux: userspace Linux main constructor executed
+ginux: Linux dependency-before-main initialization ordered
+ginux: userspace Linux constructor startup context delivered
+ginux: bounded Linux DT_INIT functions validated
+ginux: userspace Linux DT_INIT functions executed
+ginux: Linux DT_INIT-before-init-array ordering enforced
+ginux: Linux auxiliary dependency entry executed
+ginux: metadata-driven Linux relative relocations applied
+ginux: Linux copy errors and overflow bounds verified
+ginux: Linux proof workload assembled from source
+ginux: Linux bounded console writes validated
+ginux: Linux atomic vectored console writes validated
+ginux: Linux bounded descriptor polling validated
+ginux: Linux bounded ppoll inputs validated
+ginux: Linux bounded epoll lifecycle validated
+ginux: Linux bounded epoll_pwait inputs validated
+ginux: Linux bounded epoll_pwait2 timeout validated
+ginux: Linux four-slot auxiliary descriptor table validated
+ginux: Linux bounded eventfd notification validated
+ginux: Linux bounded timerfd expiration validated
+ginux: Linux bounded pipe notification validated
+ginux: Linux atomic vectored pipe I/O validated
+ginux: Linux mutable descriptor status flags validated
+ginux: Linux bounded pipe introspection validated
+ginux: Linux anonymous descriptor metadata validated
+ginux: Linux bounded syscall stack movement validated
+ginux: Linux callable syscall assertion helpers validated
+ginux: Linux container-local root credentials verified
+ginux: Linux errno recovery verified in ring 3
+ginux: Linux single-thread signal mask validated
+ginux: Linux bounded signal actions validated
+ginux: Linux synchronous SIGSEGV lifecycle validated
+ginux: Linux self-directed signal delivery validated
+ginux: Linux thread-directed signal delivery validated
+ginux: Linux legacy thread signal delivery validated
+ginux: Linux pending signal delivery validated
+ginux: Linux standard signal queue ordering validated
+ginux: Linux chained pending signal delivery validated
+ginux: Linux scheduler-backed timed signal wait validated
+ginux: Linux signal-interrupted timed wait validated
+ginux: Linux one-shot signal action validated
+ginux: Linux rt signal frame ABI validated
+ginux: Linux mutable signal context validated
+ginux: Linux autodisarming alternate stack validated
+ginux: Linux alternate signal stack delivery validated
+ginux: Linux bounded alternate signal stack validated
+ginux: Linux single-thread process identity verified
+ginux: Linux initial environment vector validated
+ginux: Linux credential auxiliary vector validated
+ginux: Linux clock-tick auxiliary vector validated
+ginux: Linux platform auxiliary vector validated
+ginux: Linux conservative hardware capabilities validated
+ginux: Linux FS base query validated
+ginux: Linux clear-child-TID exit action validated
+ginux: Linux robust-list registration validated
+ginux: Linux scheduler-backed timed futex wait validated
+ginux: Linux read-only memory transition validated
+ginux: Linux initial process namespace identity validated
+ginux: Linux bounded process name state validated
+ginux: Linux no-new-privileges boundary validated
+ginux: Linux static executable metadata validated
+ginux: Linux bounded brk heap validated
+ginux: Linux bounded anonymous mapping lifecycle validated
+ginux: Linux two-page anonymous extent validated
+ginux: multiple bounded Linux mmap areas validated
+ginux: bounded Linux mmap area splitting validated
+ginux: Linux anonymous mapping write seal validated
+ginux: Linux atomic multi-page write seal validated
+ginux: bounded Linux mmap protection splitting validated
+ginux: idempotent Linux mmap protection validated
+ginux: adjacent Linux mmap range operations validated
+ginux: four-page fragmented Linux mmap window validated
+ginux: bounded anonymous fixed mmap placement validated
+ginux: bounded anonymous fixed mmap replacement validated
+ginux: bounded PROT_NONE fixed replacement validated
+ginux: bounded read-only anonymous mapping validated
+ginux: page-rounded Linux mmap lengths validated
+ginux: Linux PROT_NONE reservations validated
+ginux: Linux PROT_NONE activation validated
+ginux: Linux mmap frames allocated on demand
+ginux: Linux mmap frame leases reclaimed
+ginux: Linux parent mmap state restored after child execution
+ginux: Linux anonymous mapping discard validated
+ginux: Linux anonymous mapping residency validated
+ginux: Linux heap copy bounds validated
+ginux: Linux stack copy bounds validated
+ginux: Linux directional VMA copies validated
+ginux: indexed Linux working directory validated
+ginux: relative Linux directory changes validated
+ginux: Linux fchdir descriptor boundary validated
+ginux: Linux working-directory traversal rejected
+ginux: Linux proc self executable link validated
+ginux: Linux proc self executable link-at validated
+ginux: Linux process umask state validated
+ginux: Linux disconnected console input validated
+ginux: Linux console descriptor metadata validated
+ginux: Linux fixed console geometry validated
+ginux: Linux fixed console termios validated
+ginux: Linux non-seekable console validated
+ginux: Linux console descriptor close validated
+ginux: Linux console descriptor duplication validated
+ginux: Linux targeted descriptor duplication validated
+ginux: Linux console descriptor flags validated
+ginux: Linux minimum descriptor duplication validated
+ginux: Linux close-on-exec descriptor state validated
+ginux: Linux bounded null device validated
+ginux: Linux bounded null device metadata validated
+ginux: Linux bounded null device access validated
+ginux: Linux bounded zero device validated
+ginux: Linux bounded console device validated
+ginux: Linux bounded tty alias validated
+ginux: Linux bounded device statx validated
+ginux: Linux atomic zero-device readv validated
+ginux: Linux bounded device writev validated
+ginux: Linux immutable device directory validated
+ginux: Linux immutable runtime ELF files validated
+ginux: Linux auxiliary dependency runtime file validated
+ginux: Linux read-only runtime file mapping validated
+ginux: measured-root Linux executable graph validated
+ginux: measured-root Linux executable graph executed
+ginux: measured-root Linux file content validated
+ginux: measured-root Linux file metadata validated
+ginux: measured-root Linux file mutation denied
+ginux: measured-root Linux directory enumerated
+ginux: measured-root Linux directory cursor validated
+ginux: measured-root Linux root enumerated
+ginux: measured-root Linux root pagination validated
+ginux: measured-root Linux empty directory opened
+ginux: measured-root Linux dirfd lookup validated
+ginux: measured-root Linux relative metadata validated
+ginux: indexed measured-root file descriptors validated
+ginux: generic measured-root Linux file validated
+ginux: index-driven measured child lookup validated
+ginux: unlisted measured-root Linux file validated
+ginux: indexed measured-root directories validated
+ginux: unlisted measured-root directory opened
+ginux: nested measured-root dirfd traversal validated
+ginux: measured-root traversal components rejected
+ginux: expanded measured-root index capacity validated
+ginux: Linux saved credential queries validated
+ginux: Linux supplementary root group validated
+ginux: Linux fixed execution personality validated
+ginux: Linux empty capability boundary validated
+ginux: Linux mutable resource limits enforced
+ginux: Linux file-size resource limit enforced
+ginux: Linux single-CPU topology queries validated
+ginux: Linux single-thread scheduling yield validated
+ginux: Linux fixed scheduler policy validated
+ginux: Linux fixed process priority validated
+ginux: Linux bounded monotonic clocks validated
+ginux: Linux bounded clock resolution validated
+ginux: Linux scheduler-backed nanosleep validated
+ginux: Linux signal-interrupted nanosleep validated
+ginux: Linux monotonic clock_nanosleep validated
+ginux: Linux scheduler-backed poll waits validated
+ginux: Linux scheduler-backed ppoll waits validated
+ginux: Linux scheduler-backed epoll waits validated
+ginux: Linux scheduler-backed epoll masked waits validated
+ginux: Linux signal-interrupted masked waits validated
+ginux: Linux signal-interrupted epoll waits validated
+ginux: Linux signal-interrupted poll waits validated
+ginux: Linux signal-interrupted epoll_wait validated
+ginux: Linux zero-descriptor poll sleeps validated
+ginux: Linux scheduler-backed eventfd reads validated
+ginux: Linux signal-interrupted eventfd reads validated
+ginux: Linux scheduler-backed eventfd writes validated
+ginux: Linux signal-interrupted eventfd writes validated
+ginux: Linux eventfd write snapshot isolation validated
+ginux: Linux scheduler-backed pipe reads validated
+ginux: Linux scheduler-backed pipe readv validated
+ginux: Linux signal-interrupted pipe reads validated
+ginux: Linux scheduler-backed pipe writes validated
+ginux: Linux scheduler-backed pipe writev validated
+ginux: Linux pipe writev snapshot isolation validated
+ginux: Linux signal-interrupted pipe writes validated
+ginux: Linux scheduler-backed timerfd reads validated
+ginux: Linux signal-interrupted timerfd reads validated
+ginux: APIC-driven Linux wait expiry validated
+ginux: APIC-driven Linux wait preemption validated
+ginux: Linux single-task CPU time validated
+ginux: Linux bounded resource usage validated
+ginux: Linux disabled interval timers validated
+ginux: bounded packet handoff invariants verified
+ginux: generation-scoped IPC diagnostics verified
+ginux: monotonic sequence exhaustion contained
+BUFFER!
+USER_OK
+
+ginux: read-only root capability enforced
+ginux: ring-3 root metadata lookup completed
+ginux: ring-3 root file read completed
+ginux: ring-3 root directory enumeration completed
+ginux: non-directory enumeration denied
+ginux: invalid root userspace requests denied
+ginux: published root remains kernel-owned
+ginux: auxiliary exit status sequenced and retired
+ginux: userspace auxiliary creation authority enforced
+ginux: userspace auxiliary stop sequenced and retired
+ginux: failed auxiliary load rollback enforced
+ginux: queued auxiliary cancellation and teardown enforced
+ginux: ready auxiliary cancellation and teardown enforced
+ginux: yielded auxiliary cancellation and teardown enforced
+ginux: userspace auxiliary load and admission enforced
+ginux: private auxiliary payload initialization enforced
+ginux: auxiliary initialization state observable
+ginux: uninitialized auxiliary admission denied
+ginux: explicit auxiliary start authority enforced
+ginux: auxiliary runtime state query enforced
+ginux: userspace auxiliary lifecycle observation enforced
+ginux: userspace auxiliary lifecycle descriptor enforced
+ginux: userspace auxiliary service identity enforced
+ginux: auxiliary management authority denied
+ginux: isolated network device probe completed
+ginux: network device command validation enforced
+ginux: network link state configured
+ginux: network IPv4 configuration retained
+ginux: network default gateway validated
+ginux: network configuration generation tracked
+ginux: network gateway invalidated on address change
+ginux: bounded static network route retained
+ginux: coherent network state snapshot copied
+ginux: network device capability revoked on exit
+ginux: read-only network observer isolated
+ginux: network mutation denied to observer
+ginux: observer capability revoked on exit
+ginux: write-only network configurator isolated
+ginux: network observation denied to configurator
+ginux: denied network copy-out left memory unchanged
+ginux: stale network configuration apply rejected
+ginux: atomic network configuration apply completed
+ginux: configurator capability revoked on exitginux: auxiliary user fault vector/error/address/rip: 6 0 0 549755813888 
+
+ginux: faulted network service contained
+ginux: faulted network authority revoked
+ginux: network state survived service fault
+ginux: replacement network service observed retained state
+ginux: replacement network capability lifecycle isolatedginux: auxiliary user fault vector/error/address/rip: 6 0 0 549755814106 
+
+ginux: write-only volume service committed generation
+ginux: faulted volume service authority revoked
+ginux: persistent volume survived service fault
+ginux: read-only replacement recovered volume
+ginux: volume mutation denied to replacementginux: auxiliary user fault vector/error/address/rip: 6 0 0 549755813888 
+
+ginux: stop-only auxiliary fault executed and contained
+ginux: APIC device-wait timeout deliveredginux: auxiliary user fault vector/error/address/rip: 14 7 549755834388 549755813905 
+
+ginux: read-only virtio MMIO grant exercised in ring 3
+ginux: denied virtio MMIO write contained and revoked
+ginux: observed virtio device remained reset and DMA-disabled
+ginux: compiled native volume service executed in ring 3
+ginux: native service bootstrap ABI v0 validated in ring 3
+ginux: native service lifecycle ABI v0 clean exit validated in ring 3
+ginux: compiled native service negotiated control ABI v4
+ginux: compiled native service validated control descriptor v4
+ginux: native volume service owned virtio request sequence
+ginux: native volume record initialized and flushed
+ginux: isolated volume prepare flush commit sequence completed
+ginux: native volume service exited cleanly and device quiesced
+ginux: replacement native volume domain generation started
+ginux: native volume service identity survived replacement
+ginux: replacement native volume service recovered exact record
+ginux: replacement native volume resources retired cleanlyginux: auxiliary user fault vector/error/address/rip: 13 0 0 549755821071 
+
+ginux: incompatible native service ABI rejected before device activation
+ginux: incompatible native service generation retired cleanly
+ginux: compatible native service recovered after ABI rejectionginux: auxiliary user fault vector/error/address/rip: 13 0 0 549755821064 
+
+ginux: malformed native control descriptor rejected before device activation
+ginux: malformed descriptor service generation retired cleanly
+ginux: compatible native service recovered after descriptor rejectionginux: auxiliary user fault vector/error/address/rip: 13 0 0 549755821126 
+
+ginux: compiled native volume service fault contained
+ginux: faulted native device service authority revoked
+ginux: incomplete native DMA scrubbed after fault
+ginux: post-fault native volume generation started
+ginux: native volume identity survived actual driver fault
+ginux: post-fault native volume service recovered exact record
+ginux: post-fault native volume resources retired cleanly
+ginux: notified native volume timeout cancelled safely
+ginux: cancelled native volume request generation retired
+ginux: compiled native network service executed in ring 3
+ginux: native network service negotiated control ABI v4
+ginux: native network service validated control descriptor v4
+ginux: native network service started without boot capabilities
+ginux: native network service exited through lifecycle ABI v0
+ginux: native network service address space retired cleanly
+ginux: native network bootstrap ABI v0 validated in ring 3
+ginux: native network read capability exercised in ring 3
+ginux: native network DMA lease remained device-inaccessible
+ginux: native network MMIO remained PCI-disabled
+ginux: native network bootstrap resources retired cleanlyginux: auxiliary user fault vector/error/address/rip: 13 0 0 549755922254 
+
+ginux: malformed native network bootstrap rejected in ring 3
+ginux: malformed network generation fault contained
+ginux: malformed network capability revoked
+ginux: malformed network resources retired before device activation
+ginux: native network generation received exact VT-d domain
+ginux: native network VT-d activated before PCI authority
+ginux: native network bus mastering remained disabled
+ginux: native network VT-d retired before DMA release
+ginux: native network translation tables scrubbed cleanlyginux: auxiliary user fault vector/error/address/rip: 13 0 0 549755922254 
+
+ginux: faulted native network generation retired active VT-d
+ginux: faulted network translation disabled before DMA scrub
+ginux: faulted network VT-d tables released cleanly
+ginux: native network service configured empty RX/TX queues
+ginux: native network queue layout validated by kernel
+ginux: native network bus mastering authorized by capability
+ginux: native network bus mastering enabled last
+ginux: native network device quiesced before VT-d teardown
+ginux: native network empty-queue generation retired cleanlyginux: auxiliary user fault vector/error/address/rip: 13 0 0 549755922251 
+
+ginux: active native network driver fault injected at call boundary
+ginux: faulted native network queues were live before quiescence
+ginux: faulted native network bus mastering revoked
+ginux: faulted native network device reset before VT-d teardown
+ginux: active network fault retired translation before DMA
+ginux: active network fault contained without kernel panic
+ginux: native network service published bounded TX descriptor
+ginux: native network service notified transmit queue
+ginux: native network service blocked for TX interrupt
+ginux: native network TX replay rejected
+ginux: kernel validated native network TX descriptor and payload
+ginux: native network TX payload guards preserved
+ginux: native network service transmitted Ethernet probe
+ginux: native network TX interrupt route retired cleanly
+ginux: notified native network timeout cancelled safely
+ginux: ambiguous native network generation retired
+ginux: fresh native network generation recovered after timeout
+ginux: recovered network generation completed TX interrupt
+ginux: native network service published bounded RX descriptor
+ginux: native network service transmitted ARP request
+ginux: native network service blocked for RX interrupt
+ginux: native network RX replay rejected
+ginux: native network service validated gateway ARP reply
+ginux: kernel validated native network RX descriptor and ARP reply
+ginux: native network RX payload guards preserved
+ginux: native network TX and RX interrupt routes retired cleanly
+ginux: native network RX timeout followed completed TX
+ginux: ambiguous native network RX generation retired
+ginux: fresh native network generation recovered after RX timeout
+ginux: recovered network generation validated gateway ARP replyginux: auxiliary user fault vector/error/address/rip: 13 0 0 549755922503 
+
+ginux: malformed network ARP reply injected after RX completion
+ginux: native network service rejected malformed ARP reply
+ginux: malformed network receive generation retired safely
+ginux: fresh native network generation recovered after malformed reply
+ginux: post-malformation network generation validated ARP reply
+ginux: native network service replenished RX descriptor
+ginux: native network service completed second ARP exchange
+ginux: native network request generations one through four completed
+ginux: kernel validated both native network ARP exchanges
+ginux: native network ICMP gateway request transmitted
+ginux: native network ICMP gateway reply validated
+ginux: native network service copied validated frame out of DMA
+ginux: packet producer retained no read authority
+ginux: compiled Rust protocol service consumed Ethernet frame
+ginux: protocol service validated gateway ARP reply
+ginux: protocol service rejected malformed ARP metadata
+ginux: protocol consumer retained no device or write authority
+ginux: packet survived producer and device retirement
+ginux: protocol service address space retired cleanlyginux: auxiliary user fault vector/error/address/rip: 13 0 0 549755881356 
+
+ginux: network driver faulted after packet publication
+ginux: faulted packet producer authority revoked
+ginux: fault teardown preserved copied packet sequence two
+ginux: fresh ring-3 consumer received fault-surviving packet
+ginux: network producer queued two packets before retirement
+ginux: packet FIFO preserved sequence three before four
+ginux: separate ring-3 consumers drained packet FIFO in order
+ginux: bounded packet FIFO backpressure invariant verified
+ginux: empty packet consumer blocked on exact sequence
+ginux: write-only packet producer wait denied
+ginux: packet publication woke exactly one read-only consumer
+ginux: stale packet waits rejected without blocking
+ginux: woken packet consumer received exact frame
+ginux: blocked packet consumer stopped by control authority
+ginux: cancelled packet wait key released
+ginux: cancelled packet consumer frames and capability retired
+ginux: replacement packet consumer claimed cancelled sequence
+ginux: replacement packet consumer received exact frame
+ginux: bounded packet wait expired through APIC deadline
+ginux: packet timeout preempted non-cooperative peer
+ginux: timed-out packet wait key released
+ginux: replacement packet consumer claimed timed-out sequence
+ginux: replacement packet consumer received post-timeout frame
+ginux: packet publication cancelled pending wait deadline
+ginux: full packet FIFO blocked write-only producer
+ginux: packet consumption woke exactly one blocked producer
+ginux: woken packet producer retried exact next sequence
+ginux: packet FIFO ordering survived backpressure wakeup
+ginux: compiled protocol service waited on an empty packet FIFO
+ginux: resident protocol domain consumed two ordered packets
+ginux: protocol domain remained live between packet arrivals
+ginux: protocol service learned bounded ARP neighbor
+ginux: protocol service refreshed stable ARP neighbor
+ginux: conflicting ARP neighbor mapping rejected without mutation
+ginux: resident protocol wait keys and frames retired cleanly
+ginux: supervised protocol loop consumed multiple packets
+ginux: control plane stopped blocked protocol service
+ginux: supervised protocol wait and frames retired cleanly
+ginux: protocol service dispatched ARP then IPv4
+ginux: protocol service validated IPv4 header checksum
+ginux: malformed IPv4 header rejected in ring 3
+ginux: IPv4 protocol generation retired cleanly
+ginux: protocol service validated ICMP echo request
+ginux: ICMP type code identifier and sequence accepted
+ginux: malformed ICMP checksum rejected in ring 3
+ginux: ICMP protocol generation retired cleanly
+ginux: protocol service constructed exact ICMP echo reply
+ginux: protocol egress authority remained write only
+ginux: isolated egress consumer retained read-only authority
+ginux: egress packet survived protocol service retirement
+ginux: isolated egress consumer received exact echo reply
+ginux: protocol egress sequence consumed exactly once
+ginux: protocol service published second ICMP echo reply
+ginux: network service consumed read-only egress sequence
+ginux: network service copied echo reply into confined DMA
+ginux: network service transmitted protocol egress through virtio-net
+ginux: kernel validated egress descriptor and exact echo reply
+ginux: protocol-to-device egress retired cleanlyginux: auxiliary user fault vector/error/address/rip: 13 0 0 549755875623 
+
+ginux: network service claimed egress without consuming it
+ginux: premature egress acknowledgement rejected
+ginux: faulted network generation released egress claim
+ginux: claimed egress packet survived network driver fault
+ginux: replacement network generation transmitted preserved reply
+ginux: egress acknowledged only after TX completion
+ginux: reliable protocol egress retired cleanly
+ginux: network service blocked before egress publication
+ginux: egress publication woke exact object and sequence
+ginux: woken network service claimed exact egress sequence
+ginux: blocking egress transmitted and acknowledged through virtio-net
+ginux: blocking egress producer and network domains retired cleanly
+ginux: full egress FIFO blocked write-only producer
+ginux: egress delivery woke only object-9 space waiter
+ginux: woken egress producer retried exact next sequence
+ginux: egress FIFO ordering survived backpressure wakeup
+ginux: full egress FIFO remained full while head was claimed
+ginux: completed egress acknowledgement woke blocked producer
+ginux: post-ack producer published exact fifth sequence
+ginux: hardware-coupled egress backpressure retired cleanly
+ginux: resident network service transmitted two egress replies
+ginux: resident network service reused TX descriptor and DMA lease
+ginux: resident network interrupt generations advanced in order
+ginux: resident reliable egress retired cleanly
+ginux: resident network service drained full egress FIFO
+ginux: validated device progress renewed service call epochs
+ginux: four network interrupt generations advanced in order
+ginux: resident reliable egress batch retired cleanly
+ginux: resident network service blocked on fifth sequence
+ginux: control plane stopped resident network service
+ginux: resident stop quiesced device before DMA retirement
+ginux: resident egress wait and authority retired cleanly
+ginux: unauthorized resident drain requests rejected
+ginux: control plane requested resident network drain
+ginux: resident network drain preserved four egress replies
+ginux: drained resident network service exited normally
+ginux: resident drain quiesced device before DMA retirement
+ginux: stopped resident network service replaced cleanly
+ginux: replacement network domain generation was distinct
+ginux: replacement network DMA and VT-d leases were fresh
+ginux: replacement resident service resumed exact egress sequence
+ginux: replenished network buffer guards preserved
+ginux: replenished network interrupt routes retired cleanly
+ginux: post-cancellation native volume generation started
+ginux: post-cancellation native volume recovered exact record
+ginux: post-cancellation native resources retired cleanly
+ginux: every native volume generation used an active IOMMU domain
+ginux: native volume generations received fresh IOMMU leases
+ginux: native volume IOMMU retired after device quiescence
+ginux: fault and timeout paths retired native volume IOMMU state
+ginux: native volume write-only grant exercised in ring 3
+ginux: isolated virtio feature negotiation completed
+ginux: isolated virtio queue geometry configured with owned DMA
+ginux: isolated DMA lease initialized in ring 3
+ginux: isolated virtio queue bound to inactive DMA lease
+ginux: isolated virtio queue activated before publication
+ginux: isolated virtio read descriptors prepared in ring 3
+ginux: isolated virtio available entry published in ring 3
+ginux: stale isolated virtio wait generation rejected
+ginux: isolated virtio queue notified from ring 3
+ginux: isolated virtio service blocked on MSI-X
+ginux: kernel-owned MSI-X woke isolated virtio service
+ginux: isolated virtio timeout cancelled after MSI-X
+ginux: isolated virtio live timeout retried successfully
+ginux: duplicate isolated virtio wait rejected
+ginux: isolated volume slots scanned in ring 3
+ginux: isolated virtio request generation advanced and reused
+ginux: completed native volume service authority revoked
+ginux: virtio DMA validation followed hardware quiescence
+ginux: clean exit quiesced device before DMA release
+ginux: retired DMA lease scrubbed and released
+ginux: native volume device quiesced before release
+ginux: isolated virtio MSI-X route retired before DMA release
+ginux: opaque capability handles enforced at call gate
+ginux: control call ABI v4 negotiated
+ginux: userspace console capability enforced
+ginux: minimal user interrupt surface enforced
+ginux: bounded userspace read enforced
+ginux: user copies bound to owned mappings
+ginux: page-granular user range validation enforced
+ginux: structured userspace ABI result verified
+ginux: ring-3 fault survivor resumed and exited
+ginux: user page fault contained
+ginux: isolated scheduler address spaces switched
+ginux: scheduler CR3 roots validated
+ginux: bounded user page-table hierarchy validated
+ginux: address-space resource contract shared
+ginux: scheduler address-space ownership validated
+ginux: scheduler user mappings validated
+ginux: one-shot user preemption completed
+ginux: restarted service preemption completed
+ginux: completed address-space frames reclaimed
+ginux: retired domain frame ownership cleared
+ginux: retired service frame quarantine cleared
+ginux: capability-gated bounded IPC verified
+ginux: directional IPC endpoints isolated
+ginux: generation-bound IPC endpoints verified
+ginux: generation-tagged IPC messages verified
+ginux: monotonic queued IPC sequences verified
+ginux: structured IPC delivery provenance verified
+ginux: IPC diagnostic authority enforced
+ginux: blocking IPC direct wake completed
+ginux: direct IPC wake provenance verified
+ginux: sequenced direct IPC delivery verified
+ginux: IPC wait-key matching enforced
+ginux: blocked IPC peer-close cleanup verified
+ginux: sticky IPC peer closure delivered
+ginux: monotonic IPC peer closures verified
+ginux: isolated service request-reply completed
+ginux: service domain authority restricted to IPC
+ginux: faulted service domain authority retired
+ginux: service fault event delivered to control plane
+ginux: service fault event generation matched
+ginux: monotonic lifecycle events verified
+ginux: structured lifecycle event delivered
+ginux: structured lifecycle service identity delivered
+ginux: lifecycle diagnostic authority enforced
+ginux: service fault metadata matched
+ginux: structured service fault delivered
+ginux: service fault diagnostic authority enforced
+ginux: service domain generation reuse verified
+ginux: stable service identity survived restart
+ginux: service restart budget exhausted
+ginux: service restart rollback invariants verified
+ginux: failed service stack scrubbed before restart
+ginux: service frame ownership transferred to replacement
+ginux: replacement service context executed
+ginux: replacement service request-reply completed
+ginux: volatile storage service round-trip completed
+ginux: volatile storage invalid command rejected
+ginux: replacement service readiness delivered
+ginux: replacement service clean exit delivered
+ginux: per-domain syscall budgets enforced
+ginux: per-domain thread budgets enforced
+ginux: in-flight domain operations drained
+ginux: scheduler context lifecycle verified
+ginux: scheduler priority selection verified
+ginux: ingress and egress packet wait keys isolated
+ginux: ingress and egress space-wait keys isolated
+ginux: preemptible user context flags enforced
+ginux: per-thread FS base context preserved
+ginux: bootstrap SHA-256 known answers verifiedginux: platform, security, devices, and runtime ready
+ginux: persistent storage initialized (generation 1, 2040 data sectors)
+ginux: timing boot-to-controller: 11140 ms
+
+ginux: launching embedded controller in ring 3
+
+Ginux controller v0 (ring 3)
+Type 'help' for commands.
+ginux: Linux live sysinfo accounting validated
+ginux: Linux getrandom contract validated
+ginux: Linux resource-limit queries validated
+ginux: Linux process identity validated
+ginux: Linux timekeeping validated
+ginux: Linux runtime pipe accounting validated
+eth0: automatic DHCP configuration
+eth0: requesting DHCP lease
+eth0: DHCP configured 10.0.2.15/24 via 10.0.2.2 DNS 10.0.2.3
+ginux> shutdown
+Shutting down Ginux.
+
+ginux: controller requested clean shutdown
+GINUX_KERNEL_OK
+Linux ELF/runtime compatibility
+CATEGORY                 RESULT
+ELF64 executable forms   PASS
+PIE and process entry    PASS
+Dynamic loader           PASS
+Libraries and symbols    PASS
+TLS and initialization   PASS
+Heap and process break   PASS
+Virtual memory           PASS
+ELF hardening            PASS
+Exec lifecycle           PASS
+Linux ELF/runtime compatibility passed
+Boot test passed.

@@ -1,0 +1,52 @@
+   Compiling ginux-kernel v0.1.0 (/Users/gmk/git/ginux/kernel)
+    Finished `release` profile [optimized] target(s) in 14.76s
+Built build/linux-probe.elf and build/linux-dynamic
+    Finished `release` profile [optimized] target(s) in 0.01s
+Built target/x86_64-unknown-none/release/ginux-controller-runtime
+    Finished `release` profile [optimized] target(s) in 0.02s
+Built target/x86_64-unknown-none/release/ginux-network-service-runtime
+    Finished `release` profile [optimized] target(s) in 0.01s
+Built target/x86_64-unknown-none/release/ginux-protocol-service-runtime
+    Finished `release` profile [optimized] target(s) in 0.01s
+Built target/x86_64-unknown-none/release/ginux-volume-service-runtime
+Generated boot/efi/src/generated_boot.rs from control-plane/bootstrap.hex signed by the development-only RFC test key
+Building Ginux for x86_64-unknown-uefi (release)
+   Compiling ginux-boot v0.1.0 (/Users/gmk/git/ginux/boot/efi)
+    Finished `release` profile [optimized] target(s) in 5.02s
+Built build/esp/EFI/BOOT/BOOTX64.EFI
+Booting x86-64 Ginux with QEMU/tcg using CPU max,+smep,+smap,+umip
+[2J[01;01H[=3h[2J[01;01H[2J[01;01H[=3h[2J[01;01H[2J[01;01H[=3h[2J[01;01HBdsDxe: loading Boot0001 "UEFI QEMU HARDDISK QM00011 " from PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x5,0xFFFF,0x0)
+BdsDxe: starting Boot0001 "UEFI QEMU HARDDISK QM00011 " from PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x5,0xFFFF,0x0)
+[2J[01;01HGinux booted
+ginux: booting
+ginux: memory protections ready
+ginux: memory manager ready
+ginux: boot devices ready
+ginux: control runtime ready
+ginux: platform, security, devices, and runtime ready
+ginux: persistent storage initialized (generation 1, 131064 data sectors)
+ginux: timing boot-to-controller: 285 ms
+
+ginux: launching embedded controller in ring 3
+
+Ginux controller v0 (ring 3)
+Type 'help' for commands.
+ginux: Linux live sysinfo accounting validated
+ginux: Linux getrandom contract validated
+ginux: Linux resource-limit queries validated
+ginux: Linux process identity validated
+ginux: Linux timekeeping validated
+ginux: Linux runtime pipe accounting validated
+eth0: automatic DHCP configuration
+eth0: requesting DHCP lease
+eth0: DHCP configured 10.0.2.15/24 via 10.0.2.2 DNS 10.0.2.3
+ginux> domain new alpine
+alpine: created (image required)
+ginux> domain set alpine image=alpine:latest init=/bin/sh
+alpine: settings accepted; configured
+ginux> domain start alpine
+alpine: starting (detached)
+ginux> ginux: OCI image pull failed; partial objects discarded
+qemu-system-x86_64: terminating on signal 15 from pid 87591 (<unknown process>)
+OCI cache test missing expected output: ginux: OCI cache miss; pulling image
+make: *** [test-oci-cache] Error 1

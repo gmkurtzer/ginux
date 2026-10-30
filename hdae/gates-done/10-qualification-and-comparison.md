@@ -24,11 +24,16 @@ state its remaining limits without overstating the evidence.
 
 - [x] Freeze the qualification matrix, repetition counts, comparison sources,
   and pass/fail tolerances before running final measurements.
+- [x] Run the complete static, architecture, deterministic runtime, ABI,
+  storage, OCI, Rocky, package-network, and multi-domain matrix.
+- [x] Qualify one, two, and four vCPUs plus two repeated two-vCPU stress runs.
+- [x] Repeat the published single-CPU boot and sysbench comparison.
+- [x] Run matched one-vCPU/one-thread and two-vCPU/two-thread scaling samples.
+- [x] Preserve raw logs, reduced results, failures, environment, and limits.
 
 ## Remaining work
 
-- Run repeated measurements and publish raw evidence.
-- Document residual security, compatibility, hardware, and performance gaps.
+- None.
 
 ## Frozen qualification matrix
 
@@ -67,13 +72,37 @@ branch measurements.
 
 ## Evidence
 
-Raw logs, repetition counts, medians/variation, environment description,
-baseline comparison, topology matrix, and final limitations register.
+- `make check`, `make architecture-check`, and
+  `tools/architecture/reproduce-hardening-feedback.sh` passed.
+- `make test` and `make test-linux-abi` passed; the ABI report covered 23
+  interface groups and 375 syscall identifiers.
+- `make test-smp` passed the 1/2/4-vCPU matrix and two repeated 2-vCPU runs.
+- `make test-storage`, `make test-oci-cache`, `make test-rocky-systemd`,
+  `make test-domain-responsiveness`, `make test-rocky-dnf`, and
+  `make test-multi-domain` passed.
+- The single-CPU boot median was 14.702 seconds, 14.32% above the published
+  12.860-second baseline and within the 25% limit.
+- CPU, memory, threads, and mutex sysbench medians changed by -3.94%, -2.74%,
+  -11.36%, and +2.39% respectively, all within the 20% limits.
+- Two-vCPU CPU scaling reached 2.810x and memory scaling reached 2.352x,
+  exceeding the 1.500x and 1.250x requirements.
+- Exact-volume `lsof` checks found no QEMU process holding the tested volumes.
+- Raw and reduced evidence is under
+  `docs/feedback-hardening/gate-10-results/`; the final report is
+  `docs/feedback-hardening/GATE-10-QUALIFICATION.md`.
 
 ## Decisions and limitations
 
-Qualification supports only the tested hardware, workloads, and two explicit
-security findings.
+- Qualification supports only the tested hardware, workloads, ABI surface, and
+  two explicit security findings. It is not a general security audit or a
+  production-readiness claim.
+- Storage and networking were qualified through their frozen functional
+  integration tests; the frozen matrix contained no separate numerical
+  storage or networking baseline.
+- Restricted-host OCI attempts failed before network permission was granted.
+  Packet capture showed valid guest requests and host-backend unreachable
+  responses; the exact tests then passed with outbound network access.
+- The floating upstream Alpine integration image remains a separate follow-up.
 
 ## Delivery strategy
 
@@ -82,10 +111,13 @@ security findings.
 - Pull request: the shared ten-gate pull request.
 - Planned commits: frozen qualification harness, raw/reduced results, and final
   secondary research report.
-- Actual commits: pending.
+- Actual commits: `897dd771`, `6d9ef0d5`, `4277fac0`, `0d6ceb9e`, `722c113c`,
+  `10192950`, `d3f69f47`, `12e5f935`, `6de84b1c`, `fb8337bb`, `621b2b6f`,
+  `8842d4bc`, `e76a2863`, `a4374ec9`, `9f506172`, `112e6b1a`, `f841601f`,
+  and `94db6ccc`, followed by the final evidence/closure commit.
 
 ## Review policy and outcome
 
 Delegated technical closure authorized after the full qualification matrix and
 baseline comparison pass. Merge and publication remain human decisions.
-Outcome: pending.
+Outcome: passed and closed under the confirmed delegated batch policy.

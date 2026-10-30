@@ -1,0 +1,199 @@
+    Finished `release` profile [optimized] target(s) in 0.02s
+Built build/linux-probe.elf and build/linux-dynamic
+    Finished `release` profile [optimized] target(s) in 0.01s
+Built target/x86_64-unknown-none/release/ginux-controller-runtime
+    Finished `release` profile [optimized] target(s) in 0.03s
+Built target/x86_64-unknown-none/release/ginux-network-service-runtime
+    Finished `release` profile [optimized] target(s) in 0.01s
+Built target/x86_64-unknown-none/release/ginux-protocol-service-runtime
+    Finished `release` profile [optimized] target(s) in 0.01s
+Built target/x86_64-unknown-none/release/ginux-volume-service-runtime
+Generated boot/efi/src/generated_boot.rs from control-plane/bootstrap.hex signed by the development-only RFC test key
+Building Ginux for x86_64-unknown-uefi (release)
+   Compiling ginux-boot v0.1.0 (/Users/gmk/git/ginux/boot/efi)
+    Finished `release` profile [optimized] target(s) in 6.16s
+Built build/esp/EFI/BOOT/BOOTX64.EFI
+Booting x86-64 Ginux with QEMU/tcg using CPU max,+smep,+smap,+umip
+[2J[01;01H[=3h[2J[01;01H[2J[01;01H[=3h[2J[01;01H[2J[01;01H[=3h[2J[01;01HBdsDxe: loading Boot0001 "UEFI QEMU HARDDISK QM00011 " from PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x5,0xFFFF,0x0)
+BdsDxe: starting Boot0001 "UEFI QEMU HARDDISK QM00011 " from PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x5,0xFFFF,0x0)
+[2J[01;01HGinux booted
+ginux: booting
+ginux: memory protections ready
+ginux: memory manager ready
+ginux: boot devices ready
+ginux: control runtime ready
+ginux: platform, security, devices, and runtime ready
+ginux: persistent storage recovered (generation 1, 134217720 data sectors)
+ginux: local configuration recovered (generation 109)
+ginux: timing boot-to-controller: 364 ms
+
+ginux: launching embedded controller in ring 3
+
+Ginux controller v0 (ring 3)
+Type 'help' for commands.
+ginux: Linux live sysinfo accounting validated
+ginux: Linux getrandom contract validated
+ginux: Linux resource-limit queries validated
+ginux: Linux process identity validated
+ginux: Linux timekeeping validated
+ginux: Linux runtime pipe accounting validated
+eth0: automatic DHCP configuration
+eth0: requesting DHCP lease
+eth0: DHCP configured 10.0.2.15/24 via 10.0.2.2 DNS 10.0.2.3
+ginux> domain new rocky
+domain: create rejected
+ginux> domain set rocky image=rockylinux/rockylinux:10-ubi-init init=/sbin/init
+rocky: settings accepted; configured
+ginux> domain start rocky --attach
+ginux: checking OCI cache docker.io/rockylinux/rockylinux:10-ubi-init
+ginux: OCI cache hit (2 layers)
+ginux: timing OCI cache restore: 2865 ms
+ginux: OCI unpacking image filesystem
+ginux: timing OCI unpack/publish: 3626 ms
+ginux: timing OCI total: 6501 ms
+ginux: OCI image ready
+ginux: local configuration committed (generation 110)
+ginux: starting configured runtime domain
+ginux: entering configured Linux init
+ginux: timing domain-start-to-Linux-init-entry: 0 ms
+ginux: first unsupported syscall number/arguments: 166 549763426363 2 2048 8388624 8389280 7
+ginux: unsupported syscall number/arguments: 430 549761954095 1 0 8388624 8393680 4294967295
+[!p]104[?7hsystemd 257-23.el10_2.2.rocky.0.1-gb237c67 running in system mode (+PAM +AUDIT +SELINUX -APPARMOR +IMA +IPE +SMACK +SECCOMP -GCRYPT -GNUTLS +OPENSSL +ACL +BLKID +CURL +ELFUTILS +FIDO2 +IDN2 -IDN -IPTC +KMOD +LIBCRYPTSETUP +LIBCRYPTSETUP_PLUGINS +LIBFDISK +PCRE2 +PWQUALITY +P11KIT -QRENCODE +TPM2 +BZIP2 +LZ4 +XZ +ZLIB +ZSTD +BPF_FRAMEWORK +BTF +XKBCOMMON +UTMP +SYSVINIT +LIBARCHIVE)
+Detected virtualization qemu.
+Detected architecture x86-64.
+
+[0;1;39mWelcome to [0m[0;32mRocky Linux 10.2 (Red Quartz)[0m[0;1;39m![0m
+
+[0;1;38:5:185mFailed to open netlink, ignoring: Address family not supported by protocol[0m
+[0;1;31mFailed to create timezone change event source: Bad file descriptor[0m
+bpf-restrict-fs: BPF LSM hook not enabled in the kernel, BPF LSM not supported.
+[0;1;38:5:185mRead-only bind remount failed, ignoring: No such file or directory[0m
+/etc/rc.d/rc.local is not marked executable, skipping.
+[0;1;31mFailed to acquire watch file descriptor: Operation not permitted[0m
+[0;1;31mFailed to allocate device monitor: Address family not supported by protocol[0m
+-.mount: Deactivated successfully.
+[0;1;39msystemd-remount-fs.service: Failed to open /etc/systemd/system/systemd-remount-fs.service: No such file or directory[0m
+[0;1;39msystemd-udevd.service: Failed to open /etc/systemd/system/systemd-udevd.service: No such file or directory[0m
+[0;1;39msystemd-machine-id-commit.service: Failed to open /etc/systemd/system/systemd-machine-id-commit.service: No such file or directory[0m
+[0;1;39msys-fs-fuse-connections.mount: Failed to open /etc/systemd/system/sys-fs-fuse-connections.mount: No such file or directory[0m
+[0;1;39mdev-hugepages.mount: Failed to open /etc/systemd/system/dev-hugepages.mount: No such file or directory[0m
+[0;1;39msystemd-logind.service: Failed to open /etc/systemd/system/systemd-logind.service: No such file or directory[0m
+Queued start job for default target graphical.target.
+[[0;32m  OK  [0m] Created slice [0;1;39msystem-getty.slice[0m - Slice /system/getty.
+[[0;32m  OK  [0m] Created slice [0;1;39msystem-modprobe.slice[0m - Slice /system/modprobe.
+[[0;32m  OK  [0m] Started [0;1;39msystemd-ask-password-conso…[0mequests to Console Directory Watch.
+[[0;32m  OK  [0m] Started [0;1;39msystemd-ask-password-wall.…[0md Requests to Wall Directory Watch.
+[[0;32m  OK  [0m] Reached target [0;1;39mlocal-fs.target[0m - Local File Systems.
+[[0;32m  OK  [0m] Reached target [0;1;39mnetwork-online.target[0m - Network is Online.
+[[0;32m  OK  [0m] Reached target [0;1;39mpaths.target[0m - Path Units.
+[[0;32m  OK  [0m] Reached target [0;1;39mremote-fs.target[0m - Remote File Systems.
+[[0;32m  OK  [0m] Reached target [0;1;39mslices.target[0m - Slice Units.
+[[0;32m  OK  [0m] Reached target [0;1;39mswap.target[0m - Swaps.
+[[0;32m  OK  [0m] Listening on [0;1;39msystemd-creds.socket[0m - Credential Encryption/Decryption.
+[[0;32m  OK  [0m] Listening on [0;1;39msystemd-initctl.socke…[0m- initctl Compatibility Named Pipe.
+[[0;32m  OK  [0m] Listening on [0;1;39msystemd-journald-dev-…socket[0m - Journal Socket (/dev/log).
+[[0;32m  OK  [0m] Listening on [0;1;39msystemd-journald.socket[0m - Journal Sockets.
+[[0;32m  OK  [0m] Listening on [0;1;39msystemd-sysext.socket[0m… System Extension Image Management.
+[[0;32m  OK  [0m] Listening on [0;1;39msystemd-userdbd.socket[0m - User Database Manager Socket.
+ginux: fork child context validation error/rip/rsp/fs/mappings: 3 549764739885 549776510976 549774136576 4862
+ginux: runtime fork preparation failed at stage 127
+ginux: Linux runtime cleanup failed
+ginux: Linux init recent syscall/result pairs: 262/0 318/16 41/32 54/0 262/0 95/0 49/0 95/127 50/0 257/18446744073709551614 257/33 5/0 280/0 3/0 233/0 257/33 16/0 16/0 20/107 3/0 257/18446744073709551614 318/16 257/18446744073709551614 257/18446744073709551614 41/33 54/0 262/0 95/0 49/0 95/73 50/0 257/18446744073709551614 257/34 5/0 280/0 3/0 262/0 266/0 262/0 266/0 233/0 257/34 16/0 16/0 20/102 3/0 257/18446744073709551614 257/34 5/0 0/45 16/0 16/0 16/0 16/0 0/0 3/0 21/18446744073709551614 257/34 5/0 0/45 16/0 16/32 16/0 16/0 0/0 3/0 21/18446744073709551614 257/34 5/0 0/45 16/18446744073709551614 16/28 16/0 16/0 0/0 3/0 21/18446744073709551614 257/34 5/0 5/0 0/18 0/0 3/0 318/16 257/18446744073709551614 257/18446744073709551614 262/0 83/0 303/0 254/5 254/18446744073709551614 197/18446744073709551555 197/18446744073709551555 197/18446744073709551555 197/18446744073709551555 188/0 188/0 197/18446744073709551555 197/18446744073709551555 197/18446744073709551555 197/18446744073709551555 318/8 266/0 264/0 319/18446744073709551594 319/34 72/2 5/0 72/35 72/36 72/37 1/2784 8/0 72/1 72/0 72/1 72/0 72/1 72/0 72/1 72/0 267/33 137/0 257/38 247/18446744073709551607 9/549776474112 14/0 435/18446744073709547520
+ginux: Linux init setup failed at stage 7
+ginux: Linux init teardown valid/runtime-scrubbed/owned-released: 0/1/0
+ginux: Linux init execution failed; domain marked failed
+rocky: failed
+ginux> Rocky systemd smoke test failed: timed out waiting for multi-user.target
+Booting x86-64 Ginux with QEMU/tcg using CPU max,+smep,+smap,+umip
+[2J[01;01H[=3h[2J[01;01H[2J[01;01H[=3h[2J[01;01H[2J[01;01H[=3h[2J[01;01HBdsDxe: loading Boot0001 "UEFI QEMU HARDDISK QM00011 " from PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x5,0xFFFF,0x0)
+BdsDxe: starting Boot0001 "UEFI QEMU HARDDISK QM00011 " from PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x5,0xFFFF,0x0)
+[2J[01;01HGinux booted
+ginux: booting
+ginux: memory protections ready
+ginux: memory manager ready
+ginux: boot devices ready
+ginux: control runtime ready
+ginux: platform, security, devices, and runtime ready
+ginux: persistent storage recovered (generation 1, 134217720 data sectors)
+ginux: local configuration recovered (generation 109)
+ginux: timing boot-to-controller: 364 ms
+
+ginux: launching embedded controller in ring 3
+
+Ginux controller v0 (ring 3)
+Type 'help' for commands.
+ginux: Linux live sysinfo accounting validated
+ginux: Linux getrandom contract validated
+ginux: Linux resource-limit queries validated
+ginux: Linux process identity validated
+ginux: Linux timekeeping validated
+ginux: Linux runtime pipe accounting validated
+eth0: automatic DHCP configuration
+eth0: requesting DHCP lease
+eth0: DHCP configured 10.0.2.15/24 via 10.0.2.2 DNS 10.0.2.3
+ginux> domain new rocky
+domain: create rejected
+ginux> domain set rocky image=rockylinux/rockylinux:10-ubi-init init=/sbin/init
+rocky: settings accepted; configured
+ginux> domain start rocky --attach
+ginux: checking OCI cache docker.io/rockylinux/rockylinux:10-ubi-init
+ginux: OCI cache hit (2 layers)
+ginux: timing OCI cache restore: 2865 ms
+ginux: OCI unpacking image filesystem
+ginux: timing OCI unpack/publish: 3626 ms
+ginux: timing OCI total: 6501 ms
+ginux: OCI image ready
+ginux: local configuration committed (generation 110)
+ginux: starting configured runtime domain
+ginux: entering configured Linux init
+ginux: timing domain-start-to-Linux-init-entry: 0 ms
+ginux: first unsupported syscall number/arguments: 166 549763426363 2 2048 8388624 8389280 7
+ginux: unsupported syscall number/arguments: 430 549761954095 1 0 8388624 8393680 4294967295
+[!p]104[?7hsystemd 257-23.el10_2.2.rocky.0.1-gb237c67 running in system mode (+PAM +AUDIT +SELINUX -APPARMOR +IMA +IPE +SMACK +SECCOMP -GCRYPT -GNUTLS +OPENSSL +ACL +BLKID +CURL +ELFUTILS +FIDO2 +IDN2 -IDN -IPTC +KMOD +LIBCRYPTSETUP +LIBCRYPTSETUP_PLUGINS +LIBFDISK +PCRE2 +PWQUALITY +P11KIT -QRENCODE +TPM2 +BZIP2 +LZ4 +XZ +ZLIB +ZSTD +BPF_FRAMEWORK +BTF +XKBCOMMON +UTMP +SYSVINIT +LIBARCHIVE)
+Detected virtualization qemu.
+Detected architecture x86-64.
+
+[0;1;39mWelcome to [0m[0;32mRocky Linux 10.2 (Red Quartz)[0m[0;1;39m![0m
+
+[0;1;38:5:185mFailed to open netlink, ignoring: Address family not supported by protocol[0m
+[0;1;31mFailed to create timezone change event source: Bad file descriptor[0m
+bpf-restrict-fs: BPF LSM hook not enabled in the kernel, BPF LSM not supported.
+[0;1;38:5:185mRead-only bind remount failed, ignoring: No such file or directory[0m
+/etc/rc.d/rc.local is not marked executable, skipping.
+[0;1;31mFailed to acquire watch file descriptor: Operation not permitted[0m
+[0;1;31mFailed to allocate device monitor: Address family not supported by protocol[0m
+-.mount: Deactivated successfully.
+[0;1;39msystemd-remount-fs.service: Failed to open /etc/systemd/system/systemd-remount-fs.service: No such file or directory[0m
+[0;1;39msystemd-udevd.service: Failed to open /etc/systemd/system/systemd-udevd.service: No such file or directory[0m
+[0;1;39msystemd-machine-id-commit.service: Failed to open /etc/systemd/system/systemd-machine-id-commit.service: No such file or directory[0m
+[0;1;39msys-fs-fuse-connections.mount: Failed to open /etc/systemd/system/sys-fs-fuse-connections.mount: No such file or directory[0m
+[0;1;39mdev-hugepages.mount: Failed to open /etc/systemd/system/dev-hugepages.mount: No such file or directory[0m
+[0;1;39msystemd-logind.service: Failed to open /etc/systemd/system/systemd-logind.service: No such file or directory[0m
+Queued start job for default target graphical.target.
+[[0;32m  OK  [0m] Created slice [0;1;39msystem-getty.slice[0m - Slice /system/getty.
+[[0;32m  OK  [0m] Created slice [0;1;39msystem-modprobe.slice[0m - Slice /system/modprobe.
+[[0;32m  OK  [0m] Started [0;1;39msystemd-ask-password-conso…[0mequests to Console Directory Watch.
+[[0;32m  OK  [0m] Started [0;1;39msystemd-ask-password-wall.…[0md Requests to Wall Directory Watch.
+[[0;32m  OK  [0m] Reached target [0;1;39mlocal-fs.target[0m - Local File Systems.
+[[0;32m  OK  [0m] Reached target [0;1;39mnetwork-online.target[0m - Network is Online.
+[[0;32m  OK  [0m] Reached target [0;1;39mpaths.target[0m - Path Units.
+[[0;32m  OK  [0m] Reached target [0;1;39mremote-fs.target[0m - Remote File Systems.
+[[0;32m  OK  [0m] Reached target [0;1;39mslices.target[0m - Slice Units.
+[[0;32m  OK  [0m] Reached target [0;1;39mswap.target[0m - Swaps.
+[[0;32m  OK  [0m] Listening on [0;1;39msystemd-creds.socket[0m - Credential Encryption/Decryption.
+[[0;32m  OK  [0m] Listening on [0;1;39msystemd-initctl.socke…[0m- initctl Compatibility Named Pipe.
+[[0;32m  OK  [0m] Listening on [0;1;39msystemd-journald-dev-…socket[0m - Journal Socket (/dev/log).
+[[0;32m  OK  [0m] Listening on [0;1;39msystemd-journald.socket[0m - Journal Sockets.
+[[0;32m  OK  [0m] Listening on [0;1;39msystemd-sysext.socket[0m… System Extension Image Management.
+[[0;32m  OK  [0m] Listening on [0;1;39msystemd-userdbd.socket[0m - User Database Manager Socket.
+ginux: fork child context validation error/rip/rsp/fs/mappings: 3 549764739885 549776510976 549774136576 4862
+ginux: runtime fork preparation failed at stage 127
+ginux: Linux runtime cleanup failed
+ginux: Linux init recent syscall/result pairs: 262/0 318/16 41/32 54/0 262/0 95/0 49/0 95/127 50/0 257/18446744073709551614 257/33 5/0 280/0 3/0 233/0 257/33 16/0 16/0 20/107 3/0 257/18446744073709551614 318/16 257/18446744073709551614 257/18446744073709551614 41/33 54/0 262/0 95/0 49/0 95/73 50/0 257/18446744073709551614 257/34 5/0 280/0 3/0 262/0 266/0 262/0 266/0 233/0 257/34 16/0 16/0 20/102 3/0 257/18446744073709551614 257/34 5/0 0/45 16/0 16/0 16/0 16/0 0/0 3/0 21/18446744073709551614 257/34 5/0 0/45 16/0 16/32 16/0 16/0 0/0 3/0 21/18446744073709551614 257/34 5/0 0/45 16/18446744073709551614 16/28 16/0 16/0 0/0 3/0 21/18446744073709551614 257/34 5/0 5/0 0/18 0/0 3/0 318/16 257/18446744073709551614 257/18446744073709551614 262/0 83/0 303/0 254/5 254/18446744073709551614 197/18446744073709551555 197/18446744073709551555 197/18446744073709551555 197/18446744073709551555 188/0 188/0 197/18446744073709551555 197/18446744073709551555 197/18446744073709551555 197/18446744073709551555 318/8 266/0 264/0 319/18446744073709551594 319/34 72/2 5/0 72/35 72/36 72/37 1/2784 8/0 72/1 72/0 72/1 72/0 72/1 72/0 72/1 72/0 267/33 137/0 257/38 247/18446744073709551607 9/549776474112 14/0 435/18446744073709547520
+ginux: Linux init setup failed at stage 7
+ginux: Linux init teardown valid/runtime-scrubbed/owned-released: 0/1/0
+ginux: Linux init execution failed; domain marked failed
+rocky: failed
+ginux> qemu-system-x86_64: terminating on signal 15 from pid 47101 (<unknown process>)
+Rocky systemd smoke test failed: clean-shutdown marker was not observed
+make: *** [test-rocky-systemd] Error 1

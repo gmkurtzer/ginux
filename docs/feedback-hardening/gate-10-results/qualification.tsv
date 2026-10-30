@@ -1,0 +1,18 @@
+surface	command	result	evidence
+static-and-ledger	make check	PASS	final-make-check.log
+architecture	make architecture-check	PASS	final-architecture-check.log
+hardening-reproduction	tools/architecture/reproduce-hardening-feedback.sh	PASS	final-hardening-reproduction.log
+deterministic-runtime	make test	PASS	final-make-test.log
+linux-abi	make test-linux-abi	PASS	final-test-linux-abi.log
+smp-topology-and-stress	make test-smp	PASS	final-test-smp.log
+persistent-storage	make test-storage	PASS	final-test-storage.log
+oci-cache	make test-oci-cache	PASS	final-test-oci-cache.log
+rocky-systemd	make test-rocky-systemd	PASS	final-test-rocky-systemd.log
+controller-responsiveness	make test-domain-responsiveness	PASS	final-test-domain-responsiveness.log
+rocky-package-network	make test-rocky-dnf	PASS	final-test-rocky-dnf.log
+multiple-domains	make test-multi-domain	PASS	final-test-multi-domain.log
+single-cpu-boot	GINUX_CPUS=1 make benchmark-ginux-boot	PASS	final-benchmark-ginux-boot.log
+single-cpu-sysbench	GINUX_CPUS=1 make benchmark-ginux-sysbench	PASS	final-benchmark-ginux-sysbench.log
+baseline-comparison	make benchmark-compare	PASS	final-benchmark-compare.log
+smp-scaling	matched 1-vCPU/1-thread and 2-vCPU/2-thread runs	PASS	smp-scaling.tsv
+qemu-cleanup	exact-volume lsof checks	PASS	no process held the tested volumes

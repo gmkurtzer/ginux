@@ -1,0 +1,23 @@
+   Compiling ginux-kernel v0.1.0 (/Users/gmk/git/ginux/kernel)
+    Finished `release` profile [optimized] target(s) in 41.81s
+Built build/linux-probe.elf and build/linux-dynamic
+    Finished `release` profile [optimized] target(s) in 0.01s
+Built target/x86_64-unknown-none/release/ginux-controller-runtime
+    Finished `release` profile [optimized] target(s) in 0.03s
+Built target/x86_64-unknown-none/release/ginux-network-service-runtime
+    Finished `release` profile [optimized] target(s) in 0.01s
+Built target/x86_64-unknown-none/release/ginux-protocol-service-runtime
+    Finished `release` profile [optimized] target(s) in 0.01s
+Built target/x86_64-unknown-none/release/ginux-volume-service-runtime
+Generated boot/efi/src/generated_boot.rs from control-plane/bootstrap.hex signed by the development-only RFC test key
+Building Ginux for x86_64-unknown-uefi (release)
+   Compiling ginux-boot v0.1.0 (/Users/gmk/git/ginux/boot/efi)
+    Finished `release` profile [optimized] target(s) in 9.15s
+Built build/esp/EFI/BOOT/BOOTX64.EFI
+Booting x86-64 Ginux with QEMU/tcg using CPU max,+smep,+smap,+umip
+qemu-system-x86_64: -drive if=none,id=ginux-esp,format=raw,file=fat:rw:/Users/gmk/git/ginux/build/esp: Directory does not fit in FAT16 (capacity 516.06 MB)
+Rocky systemd smoke test failed: timed out waiting for 'ginux> '
+Booting x86-64 Ginux with QEMU/tcg using CPU max,+smep,+smap,+umip
+qemu-system-x86_64: -drive if=none,id=ginux-esp,format=raw,file=fat:rw:/Users/gmk/git/ginux/build/esp: Directory does not fit in FAT16 (capacity 516.06 MB)
+Rocky systemd smoke test failed: clean-shutdown marker was not observed
+make: *** [test-rocky-systemd] Error 1

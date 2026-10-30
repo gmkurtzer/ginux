@@ -1,0 +1,6 @@
+Privilege-entry architecture check passed
+User-access architecture check passed
+Writable-global classification check passed (478 globals)
+x86 runtime-owner check passed (404 managed backings)
+Synchronization architecture check passed
+Architecture consistency check passed

@@ -1,0 +1,360 @@
+   Compiling ginux-kernel v0.1.0 (/Users/gmk/git/ginux/kernel)
+    Finished `release` profile [optimized] target(s) in 20.26s
+Built build/linux-probe.elf and build/linux-dynamic
+    Finished `release` profile [optimized] target(s) in 0.01s
+Built target/x86_64-unknown-none/release/ginux-controller-runtime
+    Finished `release` profile [optimized] target(s) in 0.03s
+Built target/x86_64-unknown-none/release/ginux-network-service-runtime
+    Finished `release` profile [optimized] target(s) in 0.01s
+Built target/x86_64-unknown-none/release/ginux-protocol-service-runtime
+    Finished `release` profile [optimized] target(s) in 0.01s
+Built target/x86_64-unknown-none/release/ginux-volume-service-runtime
+Generated boot/efi/src/generated_boot.rs from control-plane/bootstrap.hex signed by the development-only RFC test key
+Building Ginux for x86_64-unknown-uefi (release)
+   Compiling ginux-boot v0.1.0 (/Users/gmk/git/ginux/boot/efi)
+    Finished `release` profile [optimized] target(s) in 5.99s
+Built build/esp/EFI/BOOT/BOOTX64.EFI
+sh-5.2# < rocky-gpg-keys; printf 'DNF_UPDATE_EXIT=%s\n' "$?"
+ginux: scheduled process return failed child/parent/resumed/dispatch: 1 9 0 0
+The downloaded packages were saved in cache until the next successful transaction.
+    base.do_transaction(display=displays)
+  File "/usr/lib/python3.12/site-packages/dnf/cli/cli.py", line 301, in do_transaction
+AttributeError: 'NoneType' object has no attribute 'split'
+ginux: runtime child completion failed at stage 153
+ginux: Linux runtime cleanup failed
+ginux: Linux init setup failed at stage 7
+ginux: Linux init execution failed; domain marked failed
+rocky: failed
+
+OVERLAY_RUNTIME_EXIT=0
+sh-5.2# 
+<gconv.cache; printf 'WRITEV_RUNTIME_EXIT=%s\n' "$?"
+ginux: wait4 no child parent/selector/options: 1/4294967295/1
+
+ginux: signal return pid/stack/expected/rip/rsp: 1/8913248/8913248/549756655996/8913824
+
+WRITEV_RUNTIME_EXIT=0
+sh-5.2# 
+< x86_64-linux; printf 'RPM_PLATFORM_EXIT=%s\n' "$?"
+ginux: wait4 no child parent/selector/options: 1/4294967295/1
+
+ginux: signal return pid/stack/expected/rip/rsp: 1/8912000/8912000/549756655996/8912576
+
+RPM_PLATFORM_EXIT=0
+sh-5.2# 
+< rocky-gpg-keys; printf 'DNF_UPDATE_EXIT=%s\n' "$?"
+Rocky Linux 10 - Bas     [===                 ] ---  B/s |   0  B     --:-- ETA
+Rocky Linux 10 - Bas     [===                 ] ---  B/s |   0  B     --:-- ETA
+Rocky Linux 10 - Bas 30% [======              ] 4.4 kB/s | 1.3 kB     00:00 ETA
+Rocky Linux 10 - Bas  0% [                    ]  69 kB/s | 324 kB     10:21 ETA
+Rocky Linux 10 - Bas  7% [=                   ] 621 kB/s | 3.0 MB     01:04 ETA
+Rocky Linux 10 - Bas 17% [===-                ] 1.5 MB/s | 7.5 MB     00:23 ETA
+Rocky Linux 10 - Bas 28% [=====-              ] 2.2 MB/s |  12 MB     00:13 ETA
+Rocky Linux 10 - Bas 37% [=======-            ] 2.9 MB/s |  16 MB     00:09 ETA
+Rocky Linux 10 - Bas 48% [=========-          ] 3.6 MB/s |  20 MB     00:05 ETA
+Rocky Linux 10 - Bas 59% [===========-        ] 4.3 MB/s |  25 MB     00:03 ETA
+Rocky Linux 10 - Bas 70% [==============      ] 5.0 MB/s |  30 MB     00:02 ETA
+Rocky Linux 10 - Bas 80% [================    ] 5.5 MB/s |  34 MB     00:01 ETA
+Rocky Linux 10 - Bas 88% [=================-  ] 5.9 MB/s |  37 MB     00:00 ETA
+Rocky Linux 10 - Bas 95% [=================== ] 6.1 MB/s |  40 MB     00:00 ETA
+Rocky Linux 10 - BaseOS                         7.4 MB/s |  42 MB     00:05    
+Rocky Linux 10 - App     [   ===              ] ---  B/s |   0  B     --:-- ETA
+Rocky Linux 10 - App     [      ===           ] ---  B/s |   0  B     --:-- ETA
+Rocky Linux 10 - App     [         ===        ] ---  B/s |   0  B     --:-- ETA
+Rocky Linux 10 - App 47% [=========-          ] 3.8 MB/s | 1.4 MB     00:00 ETA
+Rocky Linux 10 - AppStream                      2.1 MB/s | 2.9 MB     00:01    
+Rocky Linux 10 - Ext     [            ===     ] ---  B/s |   0  B     --:-- ETA
+Rocky Linux 10 - Ext     [               ===  ] ---  B/s |   0  B     --:-- ETA
+Rocky Linux 10 - Ext     [===                 ] ---  B/s |   0  B     --:-- ETA
+Rocky Linux 10 - Extras                         6.2 kB/s | 6.1 kB     00:00    
+Dependencies resolved.
+================================================================================
+ Package               Architecture  Version                Repository     Size
+================================================================================
+Upgrading:
+ rocky-gpg-keys        noarch        10.2-1.2.el10          baseos         25 k
+ rocky-release         noarch        10.2-1.2.el10          baseos         26 k
+ rocky-repos           noarch        10.2-1.2.el10          baseos         13 k
+
+Transaction Summary
+================================================================================
+Upgrade  3 Packages
+
+ginux: rpm open request directory/flags/path: 4294967196/0//var/cache/dnf/baseos-5b8a90704d474d3e/packages/rocky-gpg-keys-10.2-1.2.el10.noarch.rpm
+
+ginux: rpm open request directory/flags/path: 4294967196/0//var/cache/dnf/baseos-5b8a90704d474d3e/packages/rocky-release-10.2-1.2.el10.noarch.rpm
+
+ginux: rpm open request directory/flags/path: 4294967196/0//var/cache/dnf/baseos-5b8a90704d474d3e/packages/rocky-repos-10.2-1.2.el10.noarch.rpm
+
+Total download size: 64 k
+Downloading Packages:
+Rocky Linux 10 - Bas     [===                 ] ---  B/s |   0  B     --:-- ETA
+ginux: rpm open request directory/flags/path: 4294967196/66//var/cache/dnf/baseos-5b8a90704d474d3e/packages/rocky-gpg-keys-10.2-1.2.el10.noarch.rpm
+
+ginux: rpm open result descriptor/state/generation: 16/65507/2147483911
+
+ginux: rpm open request directory/flags/path: 4294967196/66//var/cache/dnf/baseos-5b8a90704d474d3e/packages/rocky-release-10.2-1.2.el10.noarch.rpm
+
+ginux: rpm open result descriptor/state/generation: 17/65507/2147483912
+
+ginux: rpm open request directory/flags/path: 4294967196/66//var/cache/dnf/baseos-5b8a90704d474d3e/packages/rocky-repos-10.2-1.2.el10.noarch.rpm
+
+ginux: rpm open result descriptor/state/generation: 18/65507/2147483913
+
+(1/3): rocky-gpg-key  0% [                    ] ---  B/s |   0  B     --:-- ETA
+ginux: rpm open request directory/flags/path: 4294967196/2//var/cache/dnf/baseos-5b8a90704d474d3e/packages/rocky-repos-10.2-1.2.el10.noarch.rpm
+
+ginux: rpm open result descriptor/state/generation: 18/65507/2147483913
+
+(1/3): rocky-repos-10.2-1.2.el10.noarch.rpm      84 kB/s |  13 kB     00:00    
+(2-3/3): rocky-relea 21% [====                ]  76 kB/s |  13 kB     00:00 ETA
+ginux: rpm open request directory/flags/path: 4294967196/2//var/cache/dnf/baseos-5b8a90704d474d3e/packages/rocky-gpg-keys-10.2-1.2.el10.noarch.rpm
+
+ginux: rpm open result descriptor/state/generation: 16/65507/2147483911
+
+(2/3): rocky-gpg-keys-10.2-1.2.el10.noarch.rpm  111 kB/s |  25 kB     00:00    
+(3/3): rocky-release 84% [================-   ]  83 kB/s |  54 kB     00:00 ETA
+ginux: rpm open request directory/flags/path: 4294967196/2//var/cache/dnf/baseos-5b8a90704d474d3e/packages/rocky-release-10.2-1.2.el10.noarch.rpm
+
+ginux: rpm open result descriptor/state/generation: 16/65507/2147483912
+
+(3/3): rocky-release-10.2-1.2.el10.noarch.rpm   115 kB/s |  26 kB     00:00    
+--------------------------------------------------------------------------------
+Total                                           118 kB/s |  64 kB     00:00     
+ginux: rpm open request directory/flags/path: 4294967196/524544//var/cache/dnf/baseos-5b8a90704d474d3e/packages/rocky-gpg-keys-10.2-1.2.el10.noarch.rpm
+
+ginux: rpm open result descriptor/state/generation: 15/65505/2147483911
+
+Error writing to log: Transport endpoint is not connected
+ginux: rpm open request directory/flags/path: 4294967196/524544//var/cache/dnf/baseos-5b8a90704d474d3e/packages/rocky-release-10.2-1.2.el10.noarch.rpm
+
+ginux: rpm open result descriptor/state/generation: 15/65505/2147483912
+
+ginux: rpm open request directory/flags/path: 4294967196/524544//var/cache/dnf/baseos-5b8a90704d474d3e/packages/rocky-repos-10.2-1.2.el10.noarch.rpm
+
+ginux: rpm open result descriptor/state/generation: 15/65505/2147483913
+
+ginux: scheduled process return failed child/parent/resumed/dispatch: 1 9 0 0
+
+The downloaded packages were saved in cache until the next successful transaction.
+You can remove cached packages by executing 'dnf clean packages'.
+Traceback (most recent call last):
+  File "/usr/bin/dnf", line 62, in <module>
+    main.user_main(sys.argv[1:], exit_code=True)
+  File "/usr/lib/python3.12/site-packages/dnf/cli/main.py", line 208, in user_main
+    errcode = main(args)
+              ^^^^^^^^^^
+  File "/usr/lib/python3.12/site-packages/dnf/cli/main.py", line 67, in main
+    return _main(base, args, cli_class, option_parser_class)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/site-packages/dnf/cli/main.py", line 106, in _main
+    return cli_run(cli, base)
+           ^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/site-packages/dnf/cli/main.py", line 130, in cli_run
+    ret = resolving(cli, base)
+          ^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/site-packages/dnf/cli/main.py", line 183, in resolving
+    base.do_transaction(display=displays)
+  File "/usr/lib/python3.12/site-packages/dnf/cli/cli.py", line 301, in do_transaction
+    self.gpgsigcheck(install_pkgs)
+  File "/usr/lib/python3.12/site-packages/dnf/cli/cli.py", line 341, in gpgsigcheck
+    result, errmsg = self._sig_check_pkg(po)
+                     ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/site-packages/dnf/base.py", line 1380, in _sig_check_pkg
+    sigresult = dnf.rpm.miscutils.checkSig(ts, po.localPkg())
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/site-packages/dnf/rpm/miscutils.py", line 110, in checkSig
+    value = _verifyPackageUsingRpmkeys(fdno, ts.ts.rootDir)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/site-packages/dnf/rpm/miscutils.py", line 95, in _verifyPackageUsingRpmkeys
+    ret = _process_rpm_output(data.split(b'\n'))
+                              ^^^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'split'
+ginux: runtime child completion failed at stage 153
+
+ginux: live process registry finish state: 1 33 3
+
+ginux: Linux runtime cleanup failed
+
+ginux: Linux init recent syscall/result pairs: 1/83 257/8 5/0 16/1793376940 8/0 72/12 72/0 5/0 0/4096 8/4096 8/847 3/0 8/0 0/6988 3/0 1/42 1/87 257/8 5/0 16/0 8/0 72/12 72/0 5/0 0/4096 8/4096 8/868 3/0 8/0 0/8192 0/8192 3/0 1/35 1/84 257/8 5/0 16/0 8/0 72/12 72/0 5/0 0/4096 8/4096 8/868 3/0 8/0 0/8192 0/8192 3/0 1/45 1/45 1/85 257/8 5/0 16/1054 8/0 72/12 72/0 5/0 0/4096 8/4096 8/821 3/0 8/0 0/8192 0/8192 0/8192 0/8192 0/8192 0/8192 0/8192 3/0 1/62 1/62 1/87 257/8 5/0 16/77 8/0 72/12 72/0 5/0 0/4096 8/4096 8/819 3/0 8/0 0/4165 3/0 1/60 1/60 1/104 257/8 5/0 16/79 8/0 72/12 72/0 5/0 0/4096 8/4096 8/819 3/0 8/0 0/4165 3/0 1/49 1/41 1/59 3/0 3/0 3/0 13/0 11/0 11/0 3/0 11/0 3/0 3/0 11/0 3/0 13/0 13/0 13/0 3/0 11/0 3/0 231/18446744073709547520
+
+ginux: Linux init setup failed at stage 7
+
+ginux: Linux init execution failed; domain marked failed
+
+rocky: failed
+
+ginux> Rocky dnf test failed: timed out waiting for 'DNF_UPDATE_EXIT=0'
+sh-5.2# < rocky-gpg-keys; printf 'DNF_UPDATE_EXIT=%s\n' "$?"
+ginux: scheduled process return failed child/parent/resumed/dispatch: 1 9 0 0
+The downloaded packages were saved in cache until the next successful transaction.
+    base.do_transaction(display=displays)
+  File "/usr/lib/python3.12/site-packages/dnf/cli/cli.py", line 301, in do_transaction
+AttributeError: 'NoneType' object has no attribute 'split'
+ginux: runtime child completion failed at stage 153
+ginux: Linux runtime cleanup failed
+ginux: Linux init setup failed at stage 7
+ginux: Linux init execution failed; domain marked failed
+rocky: failed
+
+OVERLAY_RUNTIME_EXIT=0
+sh-5.2# 
+<gconv.cache; printf 'WRITEV_RUNTIME_EXIT=%s\n' "$?"
+ginux: wait4 no child parent/selector/options: 1/4294967295/1
+
+ginux: signal return pid/stack/expected/rip/rsp: 1/8913248/8913248/549756655996/8913824
+
+WRITEV_RUNTIME_EXIT=0
+sh-5.2# 
+< x86_64-linux; printf 'RPM_PLATFORM_EXIT=%s\n' "$?"
+ginux: wait4 no child parent/selector/options: 1/4294967295/1
+
+ginux: signal return pid/stack/expected/rip/rsp: 1/8912000/8912000/549756655996/8912576
+
+RPM_PLATFORM_EXIT=0
+sh-5.2# 
+< rocky-gpg-keys; printf 'DNF_UPDATE_EXIT=%s\n' "$?"
+Rocky Linux 10 - Bas     [===                 ] ---  B/s |   0  B     --:-- ETA
+Rocky Linux 10 - Bas     [===                 ] ---  B/s |   0  B     --:-- ETA
+Rocky Linux 10 - Bas 30% [======              ] 4.4 kB/s | 1.3 kB     00:00 ETA
+Rocky Linux 10 - Bas  0% [                    ]  69 kB/s | 324 kB     10:21 ETA
+Rocky Linux 10 - Bas  7% [=                   ] 621 kB/s | 3.0 MB     01:04 ETA
+Rocky Linux 10 - Bas 17% [===-                ] 1.5 MB/s | 7.5 MB     00:23 ETA
+Rocky Linux 10 - Bas 28% [=====-              ] 2.2 MB/s |  12 MB     00:13 ETA
+Rocky Linux 10 - Bas 37% [=======-            ] 2.9 MB/s |  16 MB     00:09 ETA
+Rocky Linux 10 - Bas 48% [=========-          ] 3.6 MB/s |  20 MB     00:05 ETA
+Rocky Linux 10 - Bas 59% [===========-        ] 4.3 MB/s |  25 MB     00:03 ETA
+Rocky Linux 10 - Bas 70% [==============      ] 5.0 MB/s |  30 MB     00:02 ETA
+Rocky Linux 10 - Bas 80% [================    ] 5.5 MB/s |  34 MB     00:01 ETA
+Rocky Linux 10 - Bas 88% [=================-  ] 5.9 MB/s |  37 MB     00:00 ETA
+Rocky Linux 10 - Bas 95% [=================== ] 6.1 MB/s |  40 MB     00:00 ETA
+Rocky Linux 10 - BaseOS                         7.4 MB/s |  42 MB     00:05    
+Rocky Linux 10 - App     [   ===              ] ---  B/s |   0  B     --:-- ETA
+Rocky Linux 10 - App     [      ===           ] ---  B/s |   0  B     --:-- ETA
+Rocky Linux 10 - App     [         ===        ] ---  B/s |   0  B     --:-- ETA
+Rocky Linux 10 - App 47% [=========-          ] 3.8 MB/s | 1.4 MB     00:00 ETA
+Rocky Linux 10 - AppStream                      2.1 MB/s | 2.9 MB     00:01    
+Rocky Linux 10 - Ext     [            ===     ] ---  B/s |   0  B     --:-- ETA
+Rocky Linux 10 - Ext     [               ===  ] ---  B/s |   0  B     --:-- ETA
+Rocky Linux 10 - Ext     [===                 ] ---  B/s |   0  B     --:-- ETA
+Rocky Linux 10 - Extras                         6.2 kB/s | 6.1 kB     00:00    
+Dependencies resolved.
+================================================================================
+ Package               Architecture  Version                Repository     Size
+================================================================================
+Upgrading:
+ rocky-gpg-keys        noarch        10.2-1.2.el10          baseos         25 k
+ rocky-release         noarch        10.2-1.2.el10          baseos         26 k
+ rocky-repos           noarch        10.2-1.2.el10          baseos         13 k
+
+Transaction Summary
+================================================================================
+Upgrade  3 Packages
+
+ginux: rpm open request directory/flags/path: 4294967196/0//var/cache/dnf/baseos-5b8a90704d474d3e/packages/rocky-gpg-keys-10.2-1.2.el10.noarch.rpm
+
+ginux: rpm open request directory/flags/path: 4294967196/0//var/cache/dnf/baseos-5b8a90704d474d3e/packages/rocky-release-10.2-1.2.el10.noarch.rpm
+
+ginux: rpm open request directory/flags/path: 4294967196/0//var/cache/dnf/baseos-5b8a90704d474d3e/packages/rocky-repos-10.2-1.2.el10.noarch.rpm
+
+Total download size: 64 k
+Downloading Packages:
+Rocky Linux 10 - Bas     [===                 ] ---  B/s |   0  B     --:-- ETA
+ginux: rpm open request directory/flags/path: 4294967196/66//var/cache/dnf/baseos-5b8a90704d474d3e/packages/rocky-gpg-keys-10.2-1.2.el10.noarch.rpm
+
+ginux: rpm open result descriptor/state/generation: 16/65507/2147483911
+
+ginux: rpm open request directory/flags/path: 4294967196/66//var/cache/dnf/baseos-5b8a90704d474d3e/packages/rocky-release-10.2-1.2.el10.noarch.rpm
+
+ginux: rpm open result descriptor/state/generation: 17/65507/2147483912
+
+ginux: rpm open request directory/flags/path: 4294967196/66//var/cache/dnf/baseos-5b8a90704d474d3e/packages/rocky-repos-10.2-1.2.el10.noarch.rpm
+
+ginux: rpm open result descriptor/state/generation: 18/65507/2147483913
+
+(1/3): rocky-gpg-key  0% [                    ] ---  B/s |   0  B     --:-- ETA
+ginux: rpm open request directory/flags/path: 4294967196/2//var/cache/dnf/baseos-5b8a90704d474d3e/packages/rocky-repos-10.2-1.2.el10.noarch.rpm
+
+ginux: rpm open result descriptor/state/generation: 18/65507/2147483913
+
+(1/3): rocky-repos-10.2-1.2.el10.noarch.rpm      84 kB/s |  13 kB     00:00    
+(2-3/3): rocky-relea 21% [====                ]  76 kB/s |  13 kB     00:00 ETA
+ginux: rpm open request directory/flags/path: 4294967196/2//var/cache/dnf/baseos-5b8a90704d474d3e/packages/rocky-gpg-keys-10.2-1.2.el10.noarch.rpm
+
+ginux: rpm open result descriptor/state/generation: 16/65507/2147483911
+
+(2/3): rocky-gpg-keys-10.2-1.2.el10.noarch.rpm  111 kB/s |  25 kB     00:00    
+(3/3): rocky-release 84% [================-   ]  83 kB/s |  54 kB     00:00 ETA
+ginux: rpm open request directory/flags/path: 4294967196/2//var/cache/dnf/baseos-5b8a90704d474d3e/packages/rocky-release-10.2-1.2.el10.noarch.rpm
+
+ginux: rpm open result descriptor/state/generation: 16/65507/2147483912
+
+(3/3): rocky-release-10.2-1.2.el10.noarch.rpm   115 kB/s |  26 kB     00:00    
+--------------------------------------------------------------------------------
+Total                                           118 kB/s |  64 kB     00:00     
+ginux: rpm open request directory/flags/path: 4294967196/524544//var/cache/dnf/baseos-5b8a90704d474d3e/packages/rocky-gpg-keys-10.2-1.2.el10.noarch.rpm
+
+ginux: rpm open result descriptor/state/generation: 15/65505/2147483911
+
+Error writing to log: Transport endpoint is not connected
+ginux: rpm open request directory/flags/path: 4294967196/524544//var/cache/dnf/baseos-5b8a90704d474d3e/packages/rocky-release-10.2-1.2.el10.noarch.rpm
+
+ginux: rpm open result descriptor/state/generation: 15/65505/2147483912
+
+ginux: rpm open request directory/flags/path: 4294967196/524544//var/cache/dnf/baseos-5b8a90704d474d3e/packages/rocky-repos-10.2-1.2.el10.noarch.rpm
+
+ginux: rpm open result descriptor/state/generation: 15/65505/2147483913
+
+ginux: scheduled process return failed child/parent/resumed/dispatch: 1 9 0 0
+
+The downloaded packages were saved in cache until the next successful transaction.
+You can remove cached packages by executing 'dnf clean packages'.
+Traceback (most recent call last):
+  File "/usr/bin/dnf", line 62, in <module>
+    main.user_main(sys.argv[1:], exit_code=True)
+  File "/usr/lib/python3.12/site-packages/dnf/cli/main.py", line 208, in user_main
+    errcode = main(args)
+              ^^^^^^^^^^
+  File "/usr/lib/python3.12/site-packages/dnf/cli/main.py", line 67, in main
+    return _main(base, args, cli_class, option_parser_class)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/site-packages/dnf/cli/main.py", line 106, in _main
+    return cli_run(cli, base)
+           ^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/site-packages/dnf/cli/main.py", line 130, in cli_run
+    ret = resolving(cli, base)
+          ^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/site-packages/dnf/cli/main.py", line 183, in resolving
+    base.do_transaction(display=displays)
+  File "/usr/lib/python3.12/site-packages/dnf/cli/cli.py", line 301, in do_transaction
+    self.gpgsigcheck(install_pkgs)
+  File "/usr/lib/python3.12/site-packages/dnf/cli/cli.py", line 341, in gpgsigcheck
+    result, errmsg = self._sig_check_pkg(po)
+                     ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/site-packages/dnf/base.py", line 1380, in _sig_check_pkg
+    sigresult = dnf.rpm.miscutils.checkSig(ts, po.localPkg())
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/site-packages/dnf/rpm/miscutils.py", line 110, in checkSig
+    value = _verifyPackageUsingRpmkeys(fdno, ts.ts.rootDir)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/site-packages/dnf/rpm/miscutils.py", line 95, in _verifyPackageUsingRpmkeys
+    ret = _process_rpm_output(data.split(b'\n'))
+                              ^^^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'split'
+ginux: runtime child completion failed at stage 153
+
+ginux: live process registry finish state: 1 33 3
+
+ginux: Linux runtime cleanup failed
+
+ginux: Linux init recent syscall/result pairs: 1/83 257/8 5/0 16/1793376940 8/0 72/12 72/0 5/0 0/4096 8/4096 8/847 3/0 8/0 0/6988 3/0 1/42 1/87 257/8 5/0 16/0 8/0 72/12 72/0 5/0 0/4096 8/4096 8/868 3/0 8/0 0/8192 0/8192 3/0 1/35 1/84 257/8 5/0 16/0 8/0 72/12 72/0 5/0 0/4096 8/4096 8/868 3/0 8/0 0/8192 0/8192 3/0 1/45 1/45 1/85 257/8 5/0 16/1054 8/0 72/12 72/0 5/0 0/4096 8/4096 8/821 3/0 8/0 0/8192 0/8192 0/8192 0/8192 0/8192 0/8192 0/8192 3/0 1/62 1/62 1/87 257/8 5/0 16/77 8/0 72/12 72/0 5/0 0/4096 8/4096 8/819 3/0 8/0 0/4165 3/0 1/60 1/60 1/104 257/8 5/0 16/79 8/0 72/12 72/0 5/0 0/4096 8/4096 8/819 3/0 8/0 0/4165 3/0 1/49 1/41 1/59 3/0 3/0 3/0 13/0 11/0 11/0 3/0 11/0 3/0 3/0 11/0 3/0 13/0 13/0 13/0 3/0 11/0 3/0 231/18446744073709547520
+
+ginux: Linux init setup failed at stage 7
+
+ginux: Linux init execution failed; domain marked failed
+
+rocky: failed
+
+ginux> qemu-system-x86_64: terminating on signal 15 from pid 64461 (<unknown process>)
+Rocky dnf test failed: dnf update did not complete cleanly
+make: *** [test-rocky-dnf] Error 1
