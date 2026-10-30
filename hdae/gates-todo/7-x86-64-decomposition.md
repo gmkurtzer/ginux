@@ -20,11 +20,11 @@ boundaries established by earlier gates without changing behavior.
 
 ## Completed work
 
-None. Depends on Gate 6.
+- [x] Recorded the initial 48,510-line module size, dependency direction,
+  planned extraction boundaries, and unsafe/assembly invariants.
 
 ## Remaining work
 
-- Approve the module boundary and dependency graph.
 - Extract one responsibility at a time with fresh regression evidence.
 
 ## Acceptance criteria
@@ -37,8 +37,9 @@ None. Depends on Gate 6.
 
 ## Evidence
 
-Before/after dependency maps and line counts, per-extraction regressions,
-unsafe-boundary documentation, and benchmark comparisons.
+- [`docs/feedback-hardening/X86-DECOMPOSITION.md`](../../docs/feedback-hardening/X86-DECOMPOSITION.md)
+  records the pre-extraction size, dependency direction, module boundaries,
+  unsafe invariants, and per-extraction verification rule.
 
 ## Decisions and limitations
 

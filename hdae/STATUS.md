@@ -12,8 +12,8 @@
   controller, device, timer, paging, physical-memory, and per-CPU architecture
   state behind explicit owner roots and passed fresh static, unit, ABI,
   service-failure, isolation, lifecycle, and full verification-QEMU evidence
-- Next action: inventory `cpu.rs` responsibilities and extract the first
-  behavior-preserving module along a validated ownership boundary
+- Next action: commit the Gate 7 dependency contract, then extract per-CPU
+  architecture storage and descriptor mechanisms into `cpu/architecture.rs`
 
 ## Current repository state
 
