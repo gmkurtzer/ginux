@@ -35,9 +35,9 @@ thread counts scaled with available CPUs.
 - [x] Add reproducible matrix orchestration and summary generation.
 - [x] Correct the two-vCPU no-ready-peer private-futex result and add a
   deterministic Rocky regression.
-- [ ] Run the matched Linux and Ginux measurements. The 1-vCPU/1-thread cell
-  passed; Linux and boot measurements passed at 2-vCPU/1-thread, but Ginux
-  sysbench exposed an unsupported futex wait state before producing samples.
+- [ ] Run the matched Linux and Ginux measurements. Every fixed one-thread
+  cell passed at 1, 2, and 4 vCPUs. Scaled 2-vCPU/2-thread Linux passed and its
+  Ginux CPU samples passed, but the Ginux shared-memory workload faulted.
 - [ ] Verify raw samples, binary identity, results, and QEMU cleanup.
 - [ ] Publish the comparison and its limitations.
 
@@ -93,6 +93,13 @@ thread counts scaled with available CPUs.
   one-thread CPU workload completed under two vCPUs.
 - `make check && make architecture-check && make test-smp` -> passed after the
   fix, including 1/2/4-vCPU qualification and two repeated two-vCPU stress runs.
+- `make benchmark-topology-matrix` -> completed all fixed one-thread cells at
+  1, 2, and 4 vCPUs with nine samples per workload and three measured boot
+  samples. Scaled 2-vCPU/2-thread Linux completed; Ginux produced three CPU
+  samples around 809--825 events/s, then faulted during the first memory sample
+  on a locked write to mapped shared address `549771632656`.
+- The failed scaled run terminated QEMU and left the benchmark volume unopened
+  according to `lsof`; process enumeration was unavailable in the sandbox.
 
 ## Decisions and limitations
 
@@ -109,6 +116,9 @@ thread counts scaled with available CPUs.
 - Linux explicitly permits spurious futex wakeups. When CPU 0 has no local
   ready peer but an SMP worker is active, Ginux returns a successful spurious
   wake so libc rechecks the userspace futex word on the intact SYSRET path.
+- The scaled shared-memory fault is not a performance result. It is a separate
+  SMP shared-writable-page correctness gap and requires a scope decision before
+  implementation; fixed-thread measurements remain valid.
 
 ## Delivery strategy
 

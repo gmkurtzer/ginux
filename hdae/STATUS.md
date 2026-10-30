@@ -7,12 +7,13 @@
 - Active project: feedback-driven kernel hardening
 - Branch: `codex/feedback-hardening`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 11, matched UP and SMP benchmark matrix, in progress
-- Last completed action: corrected the two-vCPU no-ready-peer private-futex
-  path with a Linux-permitted spurious wake and added a deterministic Rocky
-  regression; static, architecture, focused futex, and 1/2/4-vCPU SMP tests pass
-- Next action: commit the narrow compatibility fix, then resume the saved
-  topology matrix from its first incomplete Ginux workload sample
+- Active gate: Gate 11, matched UP and SMP benchmark matrix, blocked on a
+  human scope decision
+- Last completed action: completed every fixed one-thread cell at 1, 2, and 4
+  vCPUs; scaled 2-vCPU/2-thread CPU samples passed, but its shared-memory
+  workload produced a Linux write page fault on a mapped shared page
+- Next action: decide whether Gate 11 may include the SMP shared-writable-page
+  compatibility work or must report scaled Ginux cells as unsupported
 
 ## Current repository state
 
@@ -26,9 +27,10 @@ evidence are under `docs/feedback-hardening/`. No push or merge was performed.
 
 ## Open decisions
 
-- None. The human authorized a narrow syscall 202/FUTEX_WAIT_PRIVATE fix for
-  the no-ready-peer state; unrelated scheduler work and performance tuning
-  remain outside Gate 11.
+- Completing the scaled 2- and 4-thread Ginux cells requires correcting shared
+  writable mappings across runtime CPUs. That is distinct from the authorized
+  futex correction and expands the current measurement gate. Human direction
+  is required before implementation.
 
 ## Limitations
 
