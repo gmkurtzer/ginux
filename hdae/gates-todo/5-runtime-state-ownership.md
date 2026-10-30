@@ -28,6 +28,9 @@ state out of ambient globals and into explicitly owned lifecycle objects.
 - [x] Added explicit teardown for the reusable process-scheduler workspace.
 - [x] Extended writable-global discovery to recognize generic custom
   `UnsafeCell` wrappers rather than letting owner roots escape the inventory.
+- [x] Consolidated 13 process-table, address-space, fork scratch, diagnostic,
+  and lifecycle globals into one explicit process-runtime owner while
+  retaining the existing per-domain instance banks and generation resets.
 
 ## Remaining work
 
@@ -54,6 +57,10 @@ state out of ambient globals and into explicitly owned lifecycle objects.
   returning a mutable reference directly from an immutable owner reference.
 - `make build-verification && bash tests/qemu/boot.sh` -> passed the full
   verification boot, reboot, corruption, lifecycle, and cleanup sequence.
+- After process-runtime consolidation, `make check`, `make test-linux-abi`
+  (23 interfaces and 375 syscalls), and the full verification QEMU sequence
+  all passed; the inventory decreased from 616 to 604 globals with 461 Gate 5
+  migrations remaining.
 - Direct `bash tests/qemu/boot.sh` after `make check` was an invalid first
   attempt because the normal image lacks verification-only markers; no QEMU
   process was left behind, and the test was rerun with its required image.
@@ -70,8 +77,9 @@ Shared objects may remain only when Gate 4 explicitly classified them and Gate
 - Pull request: the shared ten-gate pull request.
 - Planned commits: per-CPU/task state, process/thread/signal state, domain state,
   scheduler/process tables, and lifecycle evidence.
-- Actual commits: explicit shared runtime owner roots pending commit; remaining
-  runtime migrations pending.
+- Actual commits: `900d0d56` added explicit shared runtime owner roots;
+  process-runtime consolidation pending commit; remaining runtime migrations
+  pending.
 
 ## Review policy and outcome
 

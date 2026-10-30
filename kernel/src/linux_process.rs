@@ -23,55 +23,65 @@ const HOST_PROCESS_INSTANCE: usize = control_abi::DOMAIN_LIMIT;
 const PROCESS_INSTANCE_LIMIT: usize = control_abi::DOMAIN_LIMIT + 1;
 const PROCESS_INSTANCE_NONE: u8 = u8::MAX;
 const LIVE_FRAME_REFERENCE_SET_CAPACITY: usize = 32_768;
-static LIVE_PROCESS_TABLE_INITIALIZED: [AtomicBool; PROCESS_INSTANCE_LIMIT] =
-    [const { AtomicBool::new(false) }; PROCESS_INSTANCE_LIMIT];
-static LIVE_PROCESS_REFRESH_COUNT: [AtomicU32; PROCESS_INSTANCE_LIMIT] =
-    [const { AtomicU32::new(0) }; PROCESS_INSTANCE_LIMIT];
-static LIVE_PROCESS_ACTIVE_INSTANCE: AtomicU8 = AtomicU8::new(PROCESS_INSTANCE_NONE);
-#[allow(dead_code)]
-static LIVE_FORK_CHILD_EXECUTED: AtomicBool = AtomicBool::new(false);
-static LIVE_FORK_EXECUTION_STAGE: AtomicU32 = AtomicU32::new(0);
-static LIVE_FORK_CHILD_DIAGNOSTIC: AtomicU32 = AtomicU32::new(0);
-static mut LIVE_PROCESS_TABLES: [ProcessTable; PROCESS_INSTANCE_LIMIT] =
-    [const { ProcessTable::new() }; PROCESS_INSTANCE_LIMIT];
-// Process teardown is serialized by the current single-processor runtime.
-// This exact transient set avoids quadratic frame-reference scans without
-// becoming persistent process state or weakening the final ownership check.
-static mut LIVE_FRAME_REFERENCE_SET: [u64; LIVE_FRAME_REFERENCE_SET_CAPACITY] =
-    [0; LIVE_FRAME_REFERENCE_SET_CAPACITY];
 
 struct LiveForkScratch {
     child_mappings: [cpu::LinuxActiveImageMapping; PROCESS_PRIVATE_PAGE_LIMIT],
     parent_pages: [memory::FrameLease; PROCESS_PRIVATE_PAGE_LIMIT],
 }
 
-struct LiveForkScratchCell(UnsafeCell<LiveForkScratch>);
+struct ProcessRuntimeOwner(UnsafeCell<ProcessRuntimeState>);
 
-unsafe impl Sync for LiveForkScratchCell {}
+unsafe impl Sync for ProcessRuntimeOwner {}
 
-static LIVE_FORK_SCRATCH: LiveForkScratchCell =
-    LiveForkScratchCell(UnsafeCell::new(LiveForkScratch {
-        child_mappings: [cpu::LinuxActiveImageMapping::EMPTY; PROCESS_PRIVATE_PAGE_LIMIT],
-        parent_pages: [memory::FrameLease::EMPTY; PROCESS_PRIVATE_PAGE_LIMIT],
+struct ProcessRuntimeState {
+    table_initialized: [AtomicBool; PROCESS_INSTANCE_LIMIT],
+    refresh_count: [AtomicU32; PROCESS_INSTANCE_LIMIT],
+    active_instance: AtomicU8,
+    fork_child_executed: AtomicBool,
+    fork_execution_stage: AtomicU32,
+    fork_child_diagnostic: AtomicU32,
+    tables: UnsafeCell<[ProcessTable; PROCESS_INSTANCE_LIMIT]>,
+    frame_reference_set: UnsafeCell<[u64; LIVE_FRAME_REFERENCE_SET_CAPACITY]>,
+    fork_scratch: UnsafeCell<LiveForkScratch>,
+    fork_allocation_scratch: UnsafeCell<[memory::FrameLease; PROCESS_PRIVATE_COPY_LIMIT]>,
+    fork_hierarchy_allocation_scratch: UnsafeCell<[memory::FrameLease; PROCESS_HIERARCHY_LIMIT]>,
+    address_space_storage:
+        UnsafeCell<[[ProcessAddressSpaceStorage; PROCESS_RUNTIME_LIMIT]; PROCESS_INSTANCE_LIMIT]>,
+    test_table: UnsafeCell<MaybeUninit<ProcessTable>>,
+}
+
+static PROCESS_RUNTIME: ProcessRuntimeOwner =
+    ProcessRuntimeOwner(UnsafeCell::new(ProcessRuntimeState {
+        table_initialized: [const { AtomicBool::new(false) }; PROCESS_INSTANCE_LIMIT],
+        refresh_count: [const { AtomicU32::new(0) }; PROCESS_INSTANCE_LIMIT],
+        active_instance: AtomicU8::new(PROCESS_INSTANCE_NONE),
+        fork_child_executed: AtomicBool::new(false),
+        fork_execution_stage: AtomicU32::new(0),
+        fork_child_diagnostic: AtomicU32::new(0),
+        tables: UnsafeCell::new([const { ProcessTable::new() }; PROCESS_INSTANCE_LIMIT]),
+        frame_reference_set: UnsafeCell::new([0; LIVE_FRAME_REFERENCE_SET_CAPACITY]),
+        fork_scratch: UnsafeCell::new(LiveForkScratch {
+            child_mappings: [cpu::LinuxActiveImageMapping::EMPTY; PROCESS_PRIVATE_PAGE_LIMIT],
+            parent_pages: [memory::FrameLease::EMPTY; PROCESS_PRIVATE_PAGE_LIMIT],
+        }),
+        fork_allocation_scratch: UnsafeCell::new(
+            [memory::FrameLease::EMPTY; PROCESS_PRIVATE_COPY_LIMIT],
+        ),
+        fork_hierarchy_allocation_scratch: UnsafeCell::new(
+            [memory::FrameLease::EMPTY; PROCESS_HIERARCHY_LIMIT],
+        ),
+        address_space_storage: UnsafeCell::new(
+            [[ProcessAddressSpaceStorage::EMPTY; PROCESS_RUNTIME_LIMIT]; PROCESS_INSTANCE_LIMIT],
+        ),
+        test_table: UnsafeCell::new(MaybeUninit::uninit()),
     }));
-struct LiveForkAllocationScratch(UnsafeCell<[memory::FrameLease; PROCESS_PRIVATE_COPY_LIMIT]>);
 
-unsafe impl Sync for LiveForkAllocationScratch {}
-
-static LIVE_FORK_ALLOCATION_SCRATCH: LiveForkAllocationScratch = LiveForkAllocationScratch(
-    UnsafeCell::new([memory::FrameLease::EMPTY; PROCESS_PRIVATE_COPY_LIMIT]),
-);
-struct LiveForkHierarchyAllocationScratch(
-    UnsafeCell<[memory::FrameLease; PROCESS_HIERARCHY_LIMIT]>,
-);
-
-unsafe impl Sync for LiveForkHierarchyAllocationScratch {}
-
-static LIVE_FORK_HIERARCHY_ALLOCATION_SCRATCH: LiveForkHierarchyAllocationScratch =
-    LiveForkHierarchyAllocationScratch(UnsafeCell::new(
-        [memory::FrameLease::EMPTY; PROCESS_HIERARCHY_LIMIT],
-    ));
-static mut TEST_PROCESS_TABLE: MaybeUninit<ProcessTable> = MaybeUninit::uninit();
+fn process_runtime() -> &'static ProcessRuntimeState {
+    // SAFETY: The owner has boot lifetime. Mutable fields use atomics or
+    // UnsafeCell and retain their existing single-CPU lifecycle serialization
+    // until Gate 8 adds cross-CPU locking.
+    unsafe { &*PROCESS_RUNTIME.0.get() }
+}
 
 fn mapping_requires_fork_copy(mapping: &cpu::LinuxActiveImageMapping) -> bool {
     !mapping.dontfork
@@ -215,10 +225,6 @@ impl ProcessAddressSpaceStorage {
     };
 }
 
-static mut PROCESS_ADDRESS_SPACE_STORAGE: [[ProcessAddressSpaceStorage; PROCESS_RUNTIME_LIMIT];
-    PROCESS_INSTANCE_LIMIT] =
-    [[ProcessAddressSpaceStorage::EMPTY; PROCESS_RUNTIME_LIMIT]; PROCESS_INSTANCE_LIMIT];
-
 impl ProcessAddressSpace {
     fn new(
         storage_slot: usize,
@@ -251,7 +257,9 @@ impl ProcessAddressSpace {
             return None;
         }
         let storage = unsafe {
-            &mut *core::ptr::addr_of_mut!(PROCESS_ADDRESS_SPACE_STORAGE)
+            &mut *process_runtime()
+                .address_space_storage
+                .get()
                 .cast::<ProcessAddressSpaceStorage>()
                 .add(current_process_instance() * PROCESS_RUNTIME_LIMIT + storage_slot)
         };
@@ -280,7 +288,9 @@ impl ProcessAddressSpace {
             return None;
         }
         let storage = unsafe {
-            &mut *core::ptr::addr_of_mut!(PROCESS_ADDRESS_SPACE_STORAGE)
+            &mut *process_runtime()
+                .address_space_storage
+                .get()
                 .cast::<ProcessAddressSpaceStorage>()
                 .add(current_process_instance() * PROCESS_RUNTIME_LIMIT + storage_slot)
         };
@@ -296,7 +306,9 @@ impl ProcessAddressSpace {
 
     fn storage(&self) -> &'static ProcessAddressSpaceStorage {
         unsafe {
-            &*core::ptr::addr_of!(PROCESS_ADDRESS_SPACE_STORAGE)
+            &*process_runtime()
+                .address_space_storage
+                .get()
                 .cast::<ProcessAddressSpaceStorage>()
                 .add(
                     current_process_instance() * PROCESS_RUNTIME_LIMIT
@@ -751,7 +763,9 @@ impl ProcessTable {
         child_pages: &[memory::FrameLease],
         share_vm: bool,
     ) -> bool {
-        LIVE_FORK_EXECUTION_STAGE.store(1131, Ordering::Release);
+        process_runtime()
+            .fork_execution_stage
+            .store(1131, Ordering::Release);
         let Some(preparing) = self.process(handle) else {
             return false;
         };
@@ -777,7 +791,9 @@ impl ProcessTable {
             let _ = self.abort_fork(handle);
             return false;
         };
-        LIVE_FORK_EXECUTION_STAGE.store(1132, Ordering::Release);
+        process_runtime()
+            .fork_execution_stage
+            .store(1132, Ordering::Release);
         if parent.state != ProcessState::Running
             || !parent_space.is_owned()
             || child_hierarchy.len() != parent_space.hierarchy().len()
@@ -794,8 +810,10 @@ impl ProcessTable {
             return false;
         }
 
-        let scratch = unsafe { &mut *LIVE_FORK_SCRATCH.0.get() };
-        LIVE_FORK_EXECUTION_STAGE.store(1133, Ordering::Release);
+        let scratch = unsafe { &mut *process_runtime().fork_scratch.get() };
+        process_runtime()
+            .fork_execution_stage
+            .store(1133, Ordering::Release);
         let child_mappings = &mut scratch.child_mappings;
         let parent_pages = &mut scratch.parent_pages;
         let mut private_index = 0;
@@ -834,7 +852,9 @@ impl ProcessTable {
                 parent_page_count += 1;
             }
         }
-        LIVE_FORK_EXECUTION_STAGE.store(1134, Ordering::Release);
+        process_runtime()
+            .fork_execution_stage
+            .store(1134, Ordering::Release);
         let published = child_pages.is_empty()
             || private_index == child_pages.len()
                 && parent_page_count == child_pages.len()
@@ -844,7 +864,9 @@ impl ProcessTable {
                     &parent_pages[..parent_page_count],
                     child_pages,
                 );
-        LIVE_FORK_EXECUTION_STAGE.store(1135, Ordering::Release);
+        process_runtime()
+            .fork_execution_stage
+            .store(1135, Ordering::Release);
         let published = published
             && address_space::clone_validated_linux_process_hierarchy(
                 parent_space.mappings(),
@@ -853,9 +875,13 @@ impl ProcessTable {
                 child_pages,
                 share_vm,
             );
-        LIVE_FORK_EXECUTION_STAGE.store(1136, Ordering::Release);
+        process_runtime()
+            .fork_execution_stage
+            .store(1136, Ordering::Release);
         let child_space = if published {
-            LIVE_FORK_EXECUTION_STAGE.store(11361, Ordering::Release);
+            process_runtime()
+                .fork_execution_stage
+                .store(11361, Ordering::Release);
             let Some(storage_slot) = self.free_runtime_slot() else {
                 let _ = scrub_candidate_resources(child_hierarchy, child_pages);
                 let _ = self.abort_fork(handle);
@@ -869,7 +895,9 @@ impl ProcessTable {
         } else {
             None
         };
-        LIVE_FORK_EXECUTION_STAGE.store(1137, Ordering::Release);
+        process_runtime()
+            .fork_execution_stage
+            .store(1137, Ordering::Release);
         if child_space.is_none() {
             crate::serial_write("ginux: runtime fork clone state published/hierarchy/mappings: ");
             crate::serial_write_u64(u64::from(published));
@@ -880,14 +908,18 @@ impl ProcessTable {
             crate::serial_write("\r\n");
         }
         if let Some(child_space) = child_space {
-            LIVE_FORK_EXECUTION_STAGE.store(1138, Ordering::Release);
+            process_runtime()
+                .fork_execution_stage
+                .store(1138, Ordering::Release);
             let attachments_inherited =
                 crate::linux_sysv_ipc::inherit_process_attachments(parent_handle.pid, handle.pid)
                     .is_ok();
             if attachments_inherited
                 && self.commit_fork_inner(handle, child_space, parent_context.fork_child(), false)
             {
-                LIVE_FORK_EXECUTION_STAGE.store(1139, Ordering::Release);
+                process_runtime()
+                    .fork_execution_stage
+                    .store(1139, Ordering::Release);
                 return true;
             }
             if attachments_inherited {
@@ -1583,7 +1615,7 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
         return false;
     };
     let init_context = test_context();
-    let table = core::ptr::addr_of_mut!(TEST_PROCESS_TABLE).cast::<ProcessTable>();
+    let table = process_runtime().test_table.get().cast::<ProcessTable>();
     unsafe { table.write(ProcessTable::new()) };
     let table = unsafe { &mut *table };
     let mut invalid_context = init_context;
@@ -1945,8 +1977,8 @@ pub(crate) fn install_live_process_registry(
     fs_base: u64,
 ) -> bool {
     let instance = current_process_instance();
-    if LIVE_PROCESS_TABLE_INITIALIZED[instance].load(Ordering::Acquire)
-        || LIVE_PROCESS_ACTIVE_INSTANCE.load(Ordering::Acquire) != PROCESS_INSTANCE_NONE
+    if process_runtime().table_initialized[instance].load(Ordering::Acquire)
+        || process_runtime().active_instance.load(Ordering::Acquire) != PROCESS_INSTANCE_NONE
     {
         return false;
     }
@@ -1968,7 +2000,9 @@ pub(crate) fn install_live_process_registry(
         return false;
     }
     let table = unsafe {
-        core::ptr::addr_of_mut!(LIVE_PROCESS_TABLES)
+        process_runtime()
+            .tables
+            .get()
             .cast::<ProcessTable>()
             .add(instance)
     };
@@ -1991,9 +2025,11 @@ pub(crate) fn install_live_process_registry(
     if table.create_init(address_space, context).is_none() {
         return false;
     }
-    LIVE_PROCESS_REFRESH_COUNT[instance].store(0, Ordering::Release);
-    LIVE_PROCESS_TABLE_INITIALIZED[instance].store(true, Ordering::Release);
-    LIVE_PROCESS_ACTIVE_INSTANCE.store(instance as u8, Ordering::Release);
+    process_runtime().refresh_count[instance].store(0, Ordering::Release);
+    process_runtime().table_initialized[instance].store(true, Ordering::Release);
+    process_runtime()
+        .active_instance
+        .store(instance as u8, Ordering::Release);
     true
 }
 
@@ -2075,7 +2111,7 @@ fn refresh_live_process_registry_inner(
     );
     if refreshed {
         let instance = active_process_instance().unwrap_or(HOST_PROCESS_INSTANCE);
-        LIVE_PROCESS_REFRESH_COUNT[instance].fetch_add(1, Ordering::SeqCst);
+        process_runtime().refresh_count[instance].fetch_add(1, Ordering::SeqCst);
     } else {
         crate::serial_write("ginux: live registry refresh rejected process context\r\n");
     }
@@ -2094,7 +2130,7 @@ pub(crate) fn force_stop_runtime_process_registry() -> bool {
     let Some(instance) = active_process_instance() else {
         return true;
     };
-    if !LIVE_PROCESS_TABLE_INITIALIZED[instance].load(Ordering::Acquire) {
+    if !process_runtime().table_initialized[instance].load(Ordering::Acquire) {
         return false;
     }
     let Some(table) = live_process_table_mut() else {
@@ -2160,18 +2196,21 @@ pub(crate) fn suspend_runtime_process_registry() -> bool {
         return false;
     };
     if instance != current_process_instance()
-        || !LIVE_PROCESS_TABLE_INITIALIZED[instance].load(Ordering::Acquire)
+        || !process_runtime().table_initialized[instance].load(Ordering::Acquire)
     {
         return false;
     }
-    LIVE_PROCESS_ACTIVE_INSTANCE.store(PROCESS_INSTANCE_NONE, Ordering::Release);
+    process_runtime()
+        .active_instance
+        .store(PROCESS_INSTANCE_NONE, Ordering::Release);
     true
 }
 
 pub(crate) fn resume_runtime_process_registry() -> bool {
     let instance = current_process_instance();
-    if !LIVE_PROCESS_TABLE_INITIALIZED[instance].load(Ordering::Acquire)
-        || LIVE_PROCESS_ACTIVE_INSTANCE
+    if !process_runtime().table_initialized[instance].load(Ordering::Acquire)
+        || process_runtime()
+            .active_instance
             .compare_exchange(
                 PROCESS_INSTANCE_NONE,
                 instance as u8,
@@ -2190,7 +2229,9 @@ pub(crate) fn resume_runtime_process_registry() -> bool {
             && table.init.is_some()
     });
     if !valid {
-        LIVE_PROCESS_ACTIVE_INSTANCE.store(PROCESS_INSTANCE_NONE, Ordering::Release);
+        process_runtime()
+            .active_instance
+            .store(PROCESS_INSTANCE_NONE, Ordering::Release);
     }
     valid
 }
@@ -2215,7 +2256,7 @@ fn finish_live_process_registry_with_refresh_floor(refresh_floor: u32) -> bool {
     let Some(instance) = active_process_instance() else {
         return true;
     };
-    if !LIVE_PROCESS_TABLE_INITIALIZED[instance].load(Ordering::Acquire) {
+    if !process_runtime().table_initialized[instance].load(Ordering::Acquire) {
         return false;
     }
     let Some(table) = live_process_table_mut() else {
@@ -2224,7 +2265,7 @@ fn finish_live_process_registry_with_refresh_floor(refresh_floor: u32) -> bool {
     let valid = table.reap_init_zombies()
         && table.reap_all_zombies()
         && table.init.is_some()
-        && LIVE_PROCESS_REFRESH_COUNT[instance].load(Ordering::Acquire) >= refresh_floor
+        && process_runtime().refresh_count[instance].load(Ordering::Acquire) >= refresh_floor
         && table.processes.iter().flatten().count() == 1
         && table.processes.iter().flatten().all(|process| {
             process.parent.is_none()
@@ -2238,16 +2279,18 @@ fn finish_live_process_registry_with_refresh_floor(refresh_floor: u32) -> bool {
         crate::serial_write_u64(u64::from(table.init.is_some()));
         crate::serial_write(" ");
         crate::serial_write_u64(u64::from(
-            LIVE_PROCESS_REFRESH_COUNT[instance].load(Ordering::Acquire),
+            process_runtime().refresh_count[instance].load(Ordering::Acquire),
         ));
         crate::serial_write(" ");
         crate::serial_write_u64(table.processes.iter().flatten().count() as u64);
         crate::serial_write("\r\n");
         return false;
     }
-    LIVE_PROCESS_TABLE_INITIALIZED[instance].store(false, Ordering::Release);
-    LIVE_PROCESS_REFRESH_COUNT[instance].store(0, Ordering::Release);
-    LIVE_PROCESS_ACTIVE_INSTANCE.store(PROCESS_INSTANCE_NONE, Ordering::Release);
+    process_runtime().table_initialized[instance].store(false, Ordering::Release);
+    process_runtime().refresh_count[instance].store(0, Ordering::Release);
+    process_runtime()
+        .active_instance
+        .store(PROCESS_INSTANCE_NONE, Ordering::Release);
     true
 }
 
@@ -2435,12 +2478,16 @@ pub(crate) fn live_process_count() -> Option<u16> {
 
 pub(crate) fn host_live_process_count() -> Option<u16> {
     let mut count = 0_usize;
-    for (instance, initialized) in LIVE_PROCESS_TABLE_INITIALIZED.iter().enumerate() {
+    for (instance, initialized) in process_runtime().table_initialized.iter().enumerate() {
         if initialized.load(Ordering::Acquire) {
             // Linux process-table mutation and host inspection are serialized
             // on the current single-processor syscall path.
             let table = unsafe {
-                &*core::ptr::addr_of!(LIVE_PROCESS_TABLES[instance]).cast::<ProcessTable>()
+                &*process_runtime()
+                    .tables
+                    .get()
+                    .cast::<ProcessTable>()
+                    .add(instance)
             };
             count = count.checked_add(
                 table
@@ -2561,7 +2608,9 @@ fn replace_live_process_mapping_inner(
         return false;
     };
     let storage = unsafe {
-        &mut *core::ptr::addr_of_mut!(PROCESS_ADDRESS_SPACE_STORAGE)
+        &mut *process_runtime()
+            .address_space_storage
+            .get()
             .cast::<ProcessAddressSpaceStorage>()
             .add(
                 current_process_instance() * PROCESS_RUNTIME_LIMIT
@@ -2606,7 +2655,9 @@ pub(crate) fn add_live_process_mapping(pid: u32, mapping: cpu::LinuxActiveImageM
         return false;
     };
     let storage = unsafe {
-        &mut *core::ptr::addr_of_mut!(PROCESS_ADDRESS_SPACE_STORAGE)
+        &mut *process_runtime()
+            .address_space_storage
+            .get()
             .cast::<ProcessAddressSpaceStorage>()
             .add(
                 current_process_instance() * PROCESS_RUNTIME_LIMIT
@@ -2845,25 +2896,35 @@ pub(crate) fn begin_live_fork(
     share_vm: bool,
     child_stack: Option<u64>,
 ) -> Option<LiveProcessDispatch> {
-    LIVE_FORK_EXECUTION_STAGE.store(10, Ordering::Release);
+    process_runtime()
+        .fork_execution_stage
+        .store(10, Ordering::Release);
     let Some(table) = live_process_table_mut() else {
-        LIVE_FORK_EXECUTION_STAGE.store(101, Ordering::Release);
+        process_runtime()
+            .fork_execution_stage
+            .store(101, Ordering::Release);
         return None;
     };
     let Some(parent_handle) = table.handle_by_pid(parent_pid) else {
-        LIVE_FORK_EXECUTION_STAGE.store(102, Ordering::Release);
+        process_runtime()
+            .fork_execution_stage
+            .store(102, Ordering::Release);
         return None;
     };
     let Some(parent) = table.process(parent_handle) else {
-        LIVE_FORK_EXECUTION_STAGE.store(103, Ordering::Release);
+        process_runtime()
+            .fork_execution_stage
+            .store(103, Ordering::Release);
         return None;
     };
     let Some(parent_space) = parent.address_space.as_ref() else {
-        LIVE_FORK_EXECUTION_STAGE.store(104, Ordering::Release);
+        process_runtime()
+            .fork_execution_stage
+            .store(104, Ordering::Release);
         return None;
     };
     if parent.state != ProcessState::Running || !parent_space.is_owned() {
-        LIVE_FORK_EXECUTION_STAGE.store(
+        process_runtime().fork_execution_stage.store(
             if parent.state != ProcessState::Running {
                 105
             } else {
@@ -2881,10 +2942,15 @@ pub(crate) fn begin_live_fork(
             .filter(|mapping| !mapping.dontfork && mapping_requires_fork_copy(mapping))
             .count()
     });
-    LIVE_FORK_EXECUTION_STAGE.store(11, Ordering::Release);
+    process_runtime()
+        .fork_execution_stage
+        .store(11, Ordering::Release);
     let child_handle = table.prepare_fork(parent_handle)?;
-    LIVE_FORK_EXECUTION_STAGE.store(111, Ordering::Release);
-    let child_hierarchy = unsafe { &mut *LIVE_FORK_HIERARCHY_ALLOCATION_SCRATCH.0.get() };
+    process_runtime()
+        .fork_execution_stage
+        .store(111, Ordering::Release);
+    let child_hierarchy =
+        unsafe { &mut *process_runtime().fork_hierarchy_allocation_scratch.get() };
     if !memory::allocate_frame_prefix_into(
         memory::FrameOwner::KERNEL,
         child_hierarchy,
@@ -2893,8 +2959,10 @@ pub(crate) fn begin_live_fork(
         let _ = table.abort_fork(child_handle);
         return None;
     }
-    LIVE_FORK_EXECUTION_STAGE.store(112, Ordering::Release);
-    let child_pages = unsafe { &mut *LIVE_FORK_ALLOCATION_SCRATCH.0.get() };
+    process_runtime()
+        .fork_execution_stage
+        .store(112, Ordering::Release);
+    let child_pages = unsafe { &mut *process_runtime().fork_allocation_scratch.get() };
     let private_count = private_count.unwrap_or(0);
     if private_count != 0
         && !memory::allocate_frame_prefix_into(
@@ -2910,7 +2978,9 @@ pub(crate) fn begin_live_fork(
         let _ = table.abort_fork(child_handle);
         return None;
     }
-    LIVE_FORK_EXECUTION_STAGE.store(113, Ordering::Release);
+    process_runtime()
+        .fork_execution_stage
+        .store(113, Ordering::Release);
     let published = table.commit_cloned_fork(
         child_handle,
         &child_hierarchy[..hierarchy_count],
@@ -2920,14 +2990,20 @@ pub(crate) fn begin_live_fork(
     if !published {
         return None;
     }
-    LIVE_FORK_EXECUTION_STAGE.store(12, Ordering::Release);
+    process_runtime()
+        .fork_execution_stage
+        .store(12, Ordering::Release);
     if !table.set_return_value(parent_handle, u64::from(child_handle.pid)) {
-        LIVE_FORK_EXECUTION_STAGE.store(121, Ordering::Release);
+        process_runtime()
+            .fork_execution_stage
+            .store(121, Ordering::Release);
         let _ = discard_live_fork(table, parent_handle, child_handle);
         return None;
     }
     if child_stack.is_some_and(|stack| !table.set_stack_pointer(child_handle, stack)) {
-        LIVE_FORK_EXECUTION_STAGE.store(122, Ordering::Release);
+        process_runtime()
+            .fork_execution_stage
+            .store(122, Ordering::Release);
         let _ = discard_live_fork(table, parent_handle, child_handle);
         return None;
     }
@@ -2935,7 +3011,9 @@ pub(crate) fn begin_live_fork(
         .process(parent_handle)
         .and_then(|process| process.context)
     else {
-        LIVE_FORK_EXECUTION_STAGE.store(123, Ordering::Release);
+        process_runtime()
+            .fork_execution_stage
+            .store(123, Ordering::Release);
         let _ = discard_live_fork(table, parent_handle, child_handle);
         return None;
     };
@@ -2943,12 +3021,16 @@ pub(crate) fn begin_live_fork(
         .process(parent_handle)
         .and_then(|process| process.address_space.as_ref())
     else {
-        LIVE_FORK_EXECUTION_STAGE.store(124, Ordering::Release);
+        process_runtime()
+            .fork_execution_stage
+            .store(124, Ordering::Release);
         let _ = discard_live_fork(table, parent_handle, child_handle);
         return None;
     };
     let Some(parent_scheduler_context) = parent_context.scheduler_context(parent_space) else {
-        LIVE_FORK_EXECUTION_STAGE.store(125, Ordering::Release);
+        process_runtime()
+            .fork_execution_stage
+            .store(125, Ordering::Release);
         let _ = discard_live_fork(table, parent_handle, child_handle);
         return None;
     };
@@ -2958,12 +3040,16 @@ pub(crate) fn begin_live_fork(
     };
     let (Some(child_space), Some(child_context)) = (child.address_space.as_ref(), child.context)
     else {
-        LIVE_FORK_EXECUTION_STAGE.store(126, Ordering::Release);
+        process_runtime()
+            .fork_execution_stage
+            .store(126, Ordering::Release);
         let _ = discard_live_fork(table, parent_handle, child_handle);
         return None;
     };
     let Some(child_scheduler_context) = child_context.scheduler_context(child_space) else {
-        LIVE_FORK_EXECUTION_STAGE.store(127, Ordering::Release);
+        process_runtime()
+            .fork_execution_stage
+            .store(127, Ordering::Release);
         crate::serial_write("ginux: fork child context validation error/rip/rsp/fs/mappings: ");
         crate::serial_write_u64(u64::from(
             child_context.validation_error(child_space).unwrap_or(0),
@@ -2980,7 +3066,9 @@ pub(crate) fn begin_live_fork(
         let _ = discard_live_fork(table, parent_handle, child_handle);
         return None;
     };
-    LIVE_FORK_EXECUTION_STAGE.store(13, Ordering::Release);
+    process_runtime()
+        .fork_execution_stage
+        .store(13, Ordering::Release);
     let scheduler_domain = table.scheduler_domain();
     let nested = table
         .process(parent_handle)
@@ -3029,7 +3117,9 @@ pub(crate) fn begin_live_fork(
         let _ = discard_live_fork(table, parent_handle, child_handle);
         return None;
     }
-    LIVE_FORK_EXECUTION_STAGE.store(14, Ordering::Release);
+    process_runtime()
+        .fork_execution_stage
+        .store(14, Ordering::Release);
     table.dispatch(child_handle)
 }
 
@@ -3065,7 +3155,7 @@ fn live_frame_reference_set_slot(address: u64) -> usize {
 }
 
 fn build_live_frame_reference_set(table: &ProcessTable, excluded: ProcessHandle) -> bool {
-    let set = core::ptr::addr_of_mut!(LIVE_FRAME_REFERENCE_SET).cast::<u64>();
+    let set = process_runtime().frame_reference_set.get().cast::<u64>();
     for index in 0..LIVE_FRAME_REFERENCE_SET_CAPACITY {
         unsafe { set.add(index).write(0) };
     }
@@ -3105,7 +3195,7 @@ fn build_live_frame_reference_set(table: &ProcessTable, excluded: ProcessHandle)
 }
 
 fn live_frame_reference_set_contains(frame: memory::FrameLease) -> bool {
-    let set = core::ptr::addr_of!(LIVE_FRAME_REFERENCE_SET).cast::<u64>();
+    let set = process_runtime().frame_reference_set.get().cast::<u64>();
     let address = frame.address();
     let mut slot = live_frame_reference_set_slot(address);
     for _ in 0..LIVE_FRAME_REFERENCE_SET_CAPACITY {
@@ -3243,9 +3333,13 @@ fn release_live_process_address_space(
 
 #[inline(never)]
 pub(crate) fn complete_live_child_exit(pid: u32, status: u8) -> Option<LiveProcessDispatch> {
-    LIVE_FORK_EXECUTION_STAGE.store(15, Ordering::Release);
+    process_runtime()
+        .fork_execution_stage
+        .store(15, Ordering::Release);
     let table = live_process_table_mut()?;
-    LIVE_FORK_EXECUTION_STAGE.store(151, Ordering::Release);
+    process_runtime()
+        .fork_execution_stage
+        .store(151, Ordering::Release);
     let child_handle = table.handle_by_pid(pid)?;
     let child = table.process(child_handle)?;
     let parent_handle = child.parent?;
@@ -3257,19 +3351,27 @@ pub(crate) fn complete_live_child_exit(pid: u32, status: u8) -> Option<LiveProce
     let parent_context = parent.context?;
     let child_space = child.address_space?;
     let child_context = child.context?;
-    LIVE_FORK_EXECUTION_STAGE.store(152, Ordering::Release);
+    process_runtime()
+        .fork_execution_stage
+        .store(152, Ordering::Release);
     let parent_scheduler_context = parent_context.scheduler_context(parent_space)?;
     let child_scheduler_context = child_context.scheduler_context(&child_space)?;
     let parent_thread = parent.scheduler_thread?;
     let child_thread = child.scheduler_thread?;
     let run_queue = scheduler::active_process_scheduler_workspace()?;
-    LIVE_FORK_EXECUTION_STAGE.store(153, Ordering::Release);
+    process_runtime()
+        .fork_execution_stage
+        .store(153, Ordering::Release);
     let resumed = run_queue.switch_current(child_thread, child_scheduler_context, parent_thread)?;
-    LIVE_FORK_EXECUTION_STAGE.store(154, Ordering::Release);
+    process_runtime()
+        .fork_execution_stage
+        .store(154, Ordering::Release);
     if resumed.handle() != parent_thread || resumed.context() != parent_scheduler_context {
         return None;
     }
-    LIVE_FORK_EXECUTION_STAGE.store(16, Ordering::Release);
+    process_runtime()
+        .fork_execution_stage
+        .store(16, Ordering::Release);
     let nested = parent.parent.is_some();
     let standalone_transaction = table
         .processes
@@ -3288,19 +3390,29 @@ pub(crate) fn complete_live_child_exit(pid: u32, status: u8) -> Option<LiveProce
     {
         return None;
     }
-    LIVE_FORK_EXECUTION_STAGE.store(161, Ordering::Release);
+    process_runtime()
+        .fork_execution_stage
+        .store(161, Ordering::Release);
     if !release_live_process_address_space(table, child_handle, child_space) {
-        LIVE_FORK_EXECUTION_STAGE.store(162, Ordering::Release);
+        process_runtime()
+            .fork_execution_stage
+            .store(162, Ordering::Release);
         return None;
     }
-    LIVE_FORK_EXECUTION_STAGE.store(163, Ordering::Release);
+    process_runtime()
+        .fork_execution_stage
+        .store(163, Ordering::Release);
     if crate::linux_sysv_ipc::drop_process_attachments(pid).is_err()
         || !table.exit_after_current_address_space_retired(child_handle, status)
     {
-        LIVE_FORK_EXECUTION_STAGE.store(164, Ordering::Release);
+        process_runtime()
+            .fork_execution_stage
+            .store(164, Ordering::Release);
         return None;
     }
-    LIVE_FORK_EXECUTION_STAGE.store(17, Ordering::Release);
+    process_runtime()
+        .fork_execution_stage
+        .store(17, Ordering::Release);
     table.dispatch(parent_handle)
 }
 
@@ -3391,10 +3503,17 @@ pub(crate) fn consume_live_child_wait_event(parent_pid: u32, child_pid: u32) -> 
 #[inline(never)]
 #[allow(dead_code)]
 pub(crate) fn verify_live_fork_clone_transaction() -> bool {
-    LIVE_FORK_EXECUTION_STAGE.store(0, Ordering::Release);
-    LIVE_FORK_CHILD_DIAGNOSTIC.store(0, Ordering::Release);
+    process_runtime()
+        .fork_execution_stage
+        .store(0, Ordering::Release);
+    process_runtime()
+        .fork_child_diagnostic
+        .store(0, Ordering::Release);
     cpu::reset_process_child_execution_diagnostic();
-    if LIVE_FORK_CHILD_EXECUTED.load(Ordering::Acquire) {
+    if process_runtime()
+        .fork_child_executed
+        .load(Ordering::Acquire)
+    {
         verify_live_fork_clone_only_transaction()
     } else {
         verify_live_fork_clone_and_execution_transaction()
@@ -3433,7 +3552,8 @@ fn verify_live_fork_clone_and_execution_transaction() -> bool {
         .iter()
         .filter(|mapping| mapping_requires_fork_copy(mapping))
         .count();
-    let child_hierarchy = unsafe { &mut *LIVE_FORK_HIERARCHY_ALLOCATION_SCRATCH.0.get() };
+    let child_hierarchy =
+        unsafe { &mut *process_runtime().fork_hierarchy_allocation_scratch.get() };
     if !memory::allocate_frame_prefix_into(
         memory::FrameOwner::KERNEL,
         child_hierarchy,
@@ -3442,7 +3562,7 @@ fn verify_live_fork_clone_and_execution_transaction() -> bool {
         let _ = table.abort_fork(child_handle);
         return false;
     }
-    let child_pages = unsafe { &mut *LIVE_FORK_ALLOCATION_SCRATCH.0.get() };
+    let child_pages = unsafe { &mut *process_runtime().fork_allocation_scratch.get() };
     if !memory::allocate_frame_prefix_into(memory::FrameOwner::KERNEL, child_pages, private_count) {
         let _released = memory::scrub_and_release_frames(
             memory::FrameOwner::KERNEL,
@@ -3507,7 +3627,10 @@ fn verify_live_fork_clone_and_execution_transaction() -> bool {
                                 }
                             }))
             });
-    let execute_child = child_valid && !LIVE_FORK_CHILD_EXECUTED.load(Ordering::Acquire);
+    let execute_child = child_valid
+        && !process_runtime()
+            .fork_child_executed
+            .load(Ordering::Acquire);
     let exit_status = if execute_child {
         execute_cloned_live_child(table, parent_handle, child_handle)
     } else {
@@ -3538,7 +3661,9 @@ fn verify_live_fork_clone_and_execution_transaction() -> bool {
         })
         && memory::owner_live_frame_count(memory::FrameOwner::KERNEL) == Some(before);
     if valid && execute_child {
-        LIVE_FORK_CHILD_EXECUTED.store(true, Ordering::Release);
+        process_runtime()
+            .fork_child_executed
+            .store(true, Ordering::Release);
     }
     valid
 }
@@ -3548,11 +3673,15 @@ fn verify_live_fork_clone_and_execution_transaction() -> bool {
 fn verify_live_fork_clone_only_transaction() -> bool {
     macro_rules! reject {
         ($stage:expr) => {{
-            LIVE_FORK_EXECUTION_STAGE.store($stage, Ordering::Release);
+            process_runtime()
+                .fork_execution_stage
+                .store($stage, Ordering::Release);
             return false;
         }};
     }
-    LIVE_FORK_EXECUTION_STAGE.store(200, Ordering::Release);
+    process_runtime()
+        .fork_execution_stage
+        .store(200, Ordering::Release);
     let Some(before) = memory::owner_live_frame_count(memory::FrameOwner::KERNEL) else {
         reject!(201);
     };
@@ -3594,7 +3723,8 @@ fn verify_live_fork_clone_only_transaction() -> bool {
         .iter()
         .filter(|mapping| mapping_requires_fork_copy(mapping))
         .count();
-    let child_hierarchy = unsafe { &mut *LIVE_FORK_HIERARCHY_ALLOCATION_SCRATCH.0.get() };
+    let child_hierarchy =
+        unsafe { &mut *process_runtime().fork_hierarchy_allocation_scratch.get() };
     if !memory::allocate_frame_prefix_into(
         memory::FrameOwner::KERNEL,
         child_hierarchy,
@@ -3603,7 +3733,7 @@ fn verify_live_fork_clone_only_transaction() -> bool {
         let _ = table.abort_fork(child_handle);
         reject!(208);
     }
-    let child_pages = unsafe { &mut *LIVE_FORK_ALLOCATION_SCRATCH.0.get() };
+    let child_pages = unsafe { &mut *process_runtime().fork_allocation_scratch.get() };
     if !memory::allocate_frame_prefix_into(memory::FrameOwner::KERNEL, child_pages, private_count) {
         let _ = memory::scrub_and_release_frames(
             memory::FrameOwner::KERNEL,
@@ -3724,7 +3854,9 @@ fn execute_cloned_live_child(
     parent_handle: ProcessHandle,
     child_handle: ProcessHandle,
 ) -> Option<u8> {
-    LIVE_FORK_EXECUTION_STAGE.store(1, Ordering::Release);
+    process_runtime()
+        .fork_execution_stage
+        .store(1, Ordering::Release);
     let parent = table.process(parent_handle)?;
     let parent_space = parent.address_space.as_ref()?;
     let parent_context = parent.context?;
@@ -3768,7 +3900,9 @@ fn execute_cloned_live_child(
             LIVE_PROCESS_CHILD_PROGRAM.len(),
         );
     }
-    LIVE_FORK_EXECUTION_STAGE.store(2, Ordering::Release);
+    process_runtime()
+        .fork_execution_stage
+        .store(2, Ordering::Release);
     let run_queue = scheduler::acquire_process_scheduler_workspace()?;
     let scheduler_domain = table.scheduler_domain();
     if !table.admit_to_scheduler(parent_handle, run_queue, scheduler_domain) {
@@ -3780,7 +3914,9 @@ fn execute_cloned_live_child(
         let _ = scheduler::release_process_scheduler_workspace();
         return None;
     }
-    LIVE_FORK_EXECUTION_STAGE.store(3, Ordering::Release);
+    process_runtime()
+        .fork_execution_stage
+        .store(3, Ordering::Release);
     let parent_thread = table.process(parent_handle)?.scheduler_thread?;
     let child_thread = table.process(child_handle)?.scheduler_thread?;
     let initial = run_queue.schedule_next();
@@ -3794,7 +3930,9 @@ fn execute_cloned_live_child(
         selected.handle() == child_thread && selected.context() == child_scheduler_context
     });
     if selected {
-        LIVE_FORK_EXECUTION_STAGE.store(4, Ordering::Release);
+        process_runtime()
+            .fork_execution_stage
+            .store(4, Ordering::Release);
     }
     cpu::reset_process_child_execution_diagnostic();
     let exit_status = selected
@@ -3809,7 +3947,9 @@ fn execute_cloned_live_child(
         })
         .flatten();
     if exit_status == Some(42) {
-        LIVE_FORK_EXECUTION_STAGE.store(5, Ordering::Release);
+        process_runtime()
+            .fork_execution_stage
+            .store(5, Ordering::Release);
     }
     let resumed_parent =
         exit_status.and_then(|_| run_queue.yield_current(child_thread, child_scheduler_context));
@@ -3817,7 +3957,9 @@ fn execute_cloned_live_child(
         selected.handle() == parent_thread && selected.context() == parent_scheduler_context
     });
     if resumed {
-        LIVE_FORK_EXECUTION_STAGE.store(6, Ordering::Release);
+        process_runtime()
+            .fork_execution_stage
+            .store(6, Ordering::Release);
     }
     let child_withdrawn = table.withdraw_from_scheduler(child_handle, run_queue);
     let parent_withdrawn = table.withdraw_from_scheduler(parent_handle, run_queue);
@@ -3834,7 +3976,9 @@ fn execute_cloned_live_child(
             }
         });
     if child_withdrawn && parent_withdrawn && parent_unchanged {
-        LIVE_FORK_EXECUTION_STAGE.store(7, Ordering::Release);
+        process_runtime()
+            .fork_execution_stage
+            .store(7, Ordering::Release);
     }
     let valid = selected
         && resumed
@@ -3851,25 +3995,33 @@ fn execute_cloned_live_child(
         | (u32::from(parent_withdrawn) << 5)
         | (u32::from(parent_unchanged) << 6)
         | (u32::from(scheduler_released) << 7);
-    LIVE_FORK_CHILD_DIAGNOSTIC.store(diagnostic, Ordering::Release);
+    process_runtime()
+        .fork_child_diagnostic
+        .store(diagnostic, Ordering::Release);
     valid.then_some(42)
 }
 
 pub(crate) fn live_fork_execution_stage() -> u32 {
-    LIVE_FORK_EXECUTION_STAGE.load(Ordering::Acquire)
+    process_runtime()
+        .fork_execution_stage
+        .load(Ordering::Acquire)
 }
 
 pub(crate) fn live_fork_child_diagnostic() -> u32 {
-    LIVE_FORK_CHILD_DIAGNOSTIC.load(Ordering::Acquire)
+    process_runtime()
+        .fork_child_diagnostic
+        .load(Ordering::Acquire)
 }
 
 fn live_process_table_mut() -> Option<&'static mut ProcessTable> {
     let instance = active_process_instance()?;
-    if !LIVE_PROCESS_TABLE_INITIALIZED[instance].load(Ordering::Acquire) {
+    if !process_runtime().table_initialized[instance].load(Ordering::Acquire) {
         return None;
     }
     let table = unsafe {
-        core::ptr::addr_of_mut!(LIVE_PROCESS_TABLES)
+        process_runtime()
+            .tables
+            .get()
             .cast::<ProcessTable>()
             .add(instance)
     };
@@ -3885,7 +4037,7 @@ pub(crate) fn current_ipc_instance() -> usize {
 }
 
 fn active_process_instance() -> Option<usize> {
-    let instance = usize::from(LIVE_PROCESS_ACTIVE_INSTANCE.load(Ordering::Acquire));
+    let instance = usize::from(process_runtime().active_instance.load(Ordering::Acquire));
     (instance < PROCESS_INSTANCE_LIMIT).then_some(instance)
 }
 

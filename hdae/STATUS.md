@@ -8,19 +8,19 @@
 - Branch: `codex/feedback-hardening`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 5, runtime state ownership, in progress
-- Last completed action: consolidated domain management, IPC, scheduler
-  runtime, and process-workspace lifecycle state from eight ambient globals
-  into four explicit owner roots; `make check` and the complete verification
-  QEMU boot sequence passed
-- Next action: migrate the process/thread/signal runtime banks into explicit
-  generation-owned containers, starting with the smaller `linux_process` and
-  `linux_socket` roots before the large x86-64 execution-state bank
+- Last completed action: consolidated 13 Linux process-table, address-space,
+  fork scratch, and diagnostic globals into one per-instance process-runtime
+  owner; `make check`, `make test-linux-abi`, and the complete verification
+  QEMU sequence passed
+- Next action: design the domain-generation-owned socket runtime so its large
+  self-referential buffer/storage relationship is preserved without retaining
+  14 independent ambient globals, then migrate the x86-64 execution-state bank
 
 ## Current repository state
 
 Local and remote `main` identify commit `1852455`. Gates 1 through 4 passed and
-closed under delegated review. Gate 5 is active; 474 classified runtime
-globals remain assigned to it after the first ownership consolidation.
+closed under delegated review. Gate 5 is active; 461 classified runtime
+globals remain assigned to it after the process ownership consolidation.
 
 ## Open decisions
 
