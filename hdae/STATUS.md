@@ -7,18 +7,18 @@
 - Active project: feedback-driven kernel hardening
 - Branch: `codex/feedback-hardening`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 8, synchronization and SMP readiness, starting
-- Last completed action: Gate 8 added a per-CPU-recursive, cross-CPU-exclusive
-  kernel-entry boundary for syscall, fault, timer, and virtio entry after the
-  non-recursive version exposed a real nested auxiliary-fault path; the revised
-  boundary passed the complete deterministic QEMU suite
-- Next action: continue the scheduler/process, filesystem, socket, signal, IPC,
-  device, and interrupt-context synchronization audit behind that boundary
+- Active gate: Gate 9, SMP operation and 2-vCPU test default, starting
+- Last completed action: Gate 8 closed after adding ranked locks, synchronizing
+  physical allocation and scrubbing, enforcing a recursive cross-CPU-exclusive
+  kernel-entry boundary, auditing direct interrupt masking, and passing the
+  complete deterministic QEMU suite
+- Next action: specify and implement application-processor startup and per-CPU
+  architecture state, then prove the first two-vCPU boot
 
 ## Current repository state
 
-Local and remote `main` identify commit `1852455`. Gates 1 through 7 passed and
-closed under delegated review. Gate 8 is active on the shared hardening branch.
+Local and remote `main` identify commit `1852455`. Gates 1 through 8 passed and
+closed under delegated review. Gate 9 is active on the shared hardening branch.
 
 ## Open decisions
 
