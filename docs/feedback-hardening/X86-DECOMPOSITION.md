@@ -78,9 +78,12 @@ baselines and compares them with the Gate 1 record.
 - Extended-state enablement and container/process XSAVE lifecycle mechanisms
   moved to `cpu/execution.rs`, leaving Linux process policy outside the
   architecture mechanism while retaining explicit runtime ownership.
+- The 1,480-line Linux syscall dispatcher moved to `cpu/linux_syscall.rs` as a
+  policy-facing routing layer; the x86 `SYSCALL` entry and return assembly
+  remains separate from that Linux decision surface.
 
-After these extractions, `cpu.rs` contains 47,037 lines,
+After these extractions, `cpu.rs` contains 45,557 lines,
 `cpu/architecture.rs` contains 423 lines, `cpu/execution.rs` contains 238
-lines, and `cpu/linux_abi.rs` contains 868 lines. These measurements record
-progress only; cohesive responsibility and dependency direction remain the
-gate criteria.
+lines, `cpu/linux_abi.rs` contains 868 lines, and `cpu/linux_syscall.rs`
+contains 1,483 lines. These measurements record progress only; cohesive
+responsibility and dependency direction remain the gate criteria.

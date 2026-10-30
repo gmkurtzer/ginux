@@ -33,6 +33,9 @@ boundaries established by earlier gates without changing behavior.
   inspect the extracted mechanism at its authoritative location.
 - [x] Extracted extended user-state feature enablement and container/process
   save, restore, clone, reset, and discard mechanisms into `cpu/execution.rs`.
+- [x] Extracted the Linux syscall entry dispatcher into
+  `cpu/linux_syscall.rs`, leaving x86 entry assembly in the architecture
+  module and Linux subsystem implementations behind the dispatcher boundary.
 
 ## Remaining work
 
@@ -62,6 +65,8 @@ boundaries established by earlier gates without changing behavior.
   at 450 classified globals and QEMU reached `GINUX_KERNEL_OK` and shut down.
 - The extended execution-state extraction passed the same complete regression
   sequence, including Linux ELF/runtime compatibility and a clean QEMU boot.
+- The Linux syscall-dispatch extraction passed the same complete regression
+  sequence and preserved the 450-global ownership inventory.
 
 ## Decisions and limitations
 
