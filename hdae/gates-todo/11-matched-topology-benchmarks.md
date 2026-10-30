@@ -117,8 +117,9 @@ thread counts scaled with available CPUs.
   ready peer but an SMP worker is active, Ginux returns a successful spurious
   wake so libc rechecks the userspace futex word on the intact SYSRET path.
 - The scaled shared-memory fault is not a performance result. It is a separate
-  SMP shared-writable-page correctness gap and requires a scope decision before
-  implementation; fixed-thread measurements remain valid.
+  SMP shared-writable-page correctness gap assigned to proposed Gate 11.5;
+  fixed-thread measurements remain valid. Gate 11 resumes only after Gate 11.5
+  passes or the human decides to report scaled cells as unsupported.
 
 ## Delivery strategy
 

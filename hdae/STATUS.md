@@ -7,13 +7,13 @@
 - Active project: feedback-driven kernel hardening
 - Branch: `codex/feedback-hardening`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 11, matched UP and SMP benchmark matrix, blocked on a
-  human scope decision
+- Active gate: proposed Gate 11.5, SMP shared-writable-page correctness,
+  awaiting human alignment and execution approval
 - Last completed action: completed every fixed one-thread cell at 1, 2, and 4
   vCPUs; scaled 2-vCPU/2-thread CPU samples passed, but its shared-memory
   workload produced a Linux write page fault on a mapped shared page
-- Next action: decide whether Gate 11 may include the SMP shared-writable-page
-  compatibility work or must report scaled Ginux cells as unsupported
+- Next action: review Gate 11.5 scope, acceptance evidence, and checkpoint
+  policy; implementation has not started
 
 ## Current repository state
 
@@ -27,10 +27,9 @@ evidence are under `docs/feedback-hardening/`. No push or merge was performed.
 
 ## Open decisions
 
-- Completing the scaled 2- and 4-thread Ginux cells requires correcting shared
-  writable mappings across runtime CPUs. That is distinct from the authorized
-  futex correction and expands the current measurement gate. Human direction
-  is required before implementation.
+- Confirm whether proposed Gate 11.5 is correctly scoped, may run on the
+  current branch and PR, and should stop for human review after all objective
+  criteria pass. Gate 11 remains paused until that decision.
 
 ## Limitations
 

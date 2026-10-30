@@ -26,6 +26,12 @@
 | 8 | Add synchronization and SMP readiness | 7 |
 | 9 | Implement SMP and make 2-vCPU QEMU the default | 8 |
 | 10 | Qualify and compare the result | 9 |
+| 11 | Measure matched 1/2/4-vCPU Linux and Ginux topologies | 10 |
+| 11.5 | Correct shared writable Linux pages across runtime CPUs | Gate 11 fault reproduction |
+
+Gate 11 pauses after its fixed-thread measurements, runs Gate 11.5 as an
+inserted correctness dependency, and resumes its scaled measurements only
+after Gate 11.5 passes.
 
 Each gate's approved scope, evidence, acceptance criteria, planned commits, and
 stopping point live in its file under `gates-todo/`. Completed gates move to
