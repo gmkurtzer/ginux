@@ -12,7 +12,7 @@
   controller, device, timer, paging, physical-memory, and per-CPU architecture
   state behind explicit owner roots and passed fresh static, unit, ABI,
   service-failure, isolation, lifecycle, and full verification-QEMU evidence
-- Next action: reconcile remaining entry/exception, signal, diagnostic, and
+- Next action: reconcile remaining entry/exception, diagnostic, and
   epoll-helper boundaries against Gate 7 scope and extract the next cohesive
   low-coupling block before final Gate 7 qualification
 
@@ -20,7 +20,8 @@
 
 Local and remote `main` identify commit `1852455`. Gates 1 through 6 passed and
 closed under delegated review. Gate 7 is in progress on the shared hardening
-branch.
+branch. Signal handling is now isolated in `cpu/linux_signal.rs` and has passed
+the complete deterministic verification sequence.
 
 ## Open decisions
 

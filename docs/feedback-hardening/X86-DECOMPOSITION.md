@@ -87,11 +87,15 @@ baselines and compares them with the Gate 1 record.
   `cpu/linux_futex.rs`.
 - Linux select, poll, ppoll, wait completion, and epoll creation mechanisms
   moved to `cpu/linux_poll.rs`.
+- Linux signal actions, masks, pending queues, timed waits, delivery, frame
+  construction, return, process-directed signaling, and default dispositions
+  moved together to `cpu/linux_signal.rs`.
 
-After these extractions, `cpu.rs` contains 43,653 lines,
+After these extractions, `cpu.rs` contains 41,166 lines,
 `cpu/architecture.rs` contains 423 lines, `cpu/execution.rs` contains 238
 lines, `cpu/linux_abi.rs` contains 868 lines, and `cpu/linux_syscall.rs`
 contains 1,483 lines. `cpu/linux_time.rs` contains 630 lines. These
 measurements record progress only; `cpu/linux_futex.rs` contains 359 lines.
-`cpu/linux_poll.rs` contains 939 lines. Cohesive responsibility and dependency
-direction remain the gate criteria.
+`cpu/linux_poll.rs` contains 939 lines and `cpu/linux_signal.rs` contains 2,517
+lines. Cohesive responsibility and dependency direction remain the gate
+criteria.

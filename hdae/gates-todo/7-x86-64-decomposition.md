@@ -43,6 +43,9 @@ boundaries established by earlier gates without changing behavior.
   `cpu/linux_futex.rs`.
 - [x] Extracted Linux select, poll, ppoll, wait completion, scheduling-yield,
   and epoll creation mechanisms into `cpu/linux_poll.rs`.
+- [x] Extracted Linux signal actions, masks, pending queues, timed waits,
+  delivery, signal frames, return, process signaling, and default dispositions
+  into `cpu/linux_signal.rs`.
 
 ## Remaining work
 
@@ -78,6 +81,10 @@ boundaries established by earlier gates without changing behavior.
   sequence, including live timekeeping validation in the controller runtime.
 - The Linux futex extraction passed the same complete regression sequence.
 - The Linux polling extraction passed the same complete regression sequence.
+- The Linux signal extraction passed formatting, architecture checks,
+  `make check`, and the full deterministic QEMU verification boot, including
+  signal delivery, Linux ELF/runtime compatibility, clean shutdown,
+  `GINUX_KERNEL_OK`, and `Boot test passed`.
 
 ## Decisions and limitations
 
@@ -100,9 +107,9 @@ this gate will not trade verified behavior for file movement.
 - Pull request: the shared ten-gate pull request.
 - Planned commits: dependency contract followed by one behavior-preserving
   responsibility extraction per commit.
-- Actual commits: `1adacc47` defines the dependency and invariant contract;
-  `072d1339` extracts architecture ownership; `c88cc875` extracts Linux ABI
-  definitions; descriptor and entry-state mechanism extraction pending commit.
+- Actual commits: `1adacc47`, `072d1339`, `c88cc875`, `c807aba4`, `bb20c71b`,
+  `839961f5`, `d1ad424d`, `d7d1eafb`, `6d0971b6`, and `c25d0f28`; the signal
+  extraction is pending commit.
 
 ## Review policy and outcome
 
