@@ -29,13 +29,15 @@ can use a stack or execute Rust code.
   on the trusted kernel stack.
 - [x] Added a static privilege-entry architecture check and updated the original
   claim reproducer to distinguish fixed claims from remaining user-copy work.
+- [x] Diagnosed the late interpreted-thread failure as stale scheduler identity
+  after thread-slot reuse, cleared that identity during retirement, and retained
+  the corrected real-switch count in the verification workload.
 
 ## Remaining work
 
 - Specify and test nested-NMI behavior at each instrumented entry stage.
 - Add adversarial stack and exception-injection tests.
-- Diagnose the existing late interpreted-thread invalid return context and make
-  the full verification boot pass without weakening its assertions.
+- Add the final hostile-stack and exception-injection runtime coverage.
 
 ## Acceptance criteria
 
@@ -57,9 +59,10 @@ can use a stack or execute Rust code.
   missing NMI IST, and missing machine-check IST claims now report
   `resolved-or-not-reproduced`; the Gate 3 user-copy claim remains confirmed.
 - `make check` -> passed after the mechanism and verifier changes.
-- `make test` -> failed after completing PID 1 and reaching the later
-  interpreted workload: an existing invalid user return RIP `0x404d87` caused
-  vector 6, followed by a kernel page fault. The harness terminated QEMU.
+- `make test` -> passed after clearing a retired thread slot from
+  `LINUX_LAST_PREEMPTED_THREAD_SLOT`; the previously excluded replacement child
+  now reaches its futex wait, all ELF/runtime categories pass, and QEMU exits
+  cleanly with `GINUX_KERNEL_OK`.
 - An experimental all-IRET syscall return was rejected: it stalled the same
   later interpreted workload instead of preserving Linux syscall behavior.
 
@@ -67,8 +70,8 @@ can use a stack or execute Rust code.
 
 The approved per-CPU layout uses a CPU-indexable entry-state array and GS-based
 selection. Only the bootstrap CPU slot is active until Gate 9 starts APs.
-Nested-NMI injection and the full regression remain incomplete, so this gate is
-partial and open.
+Nested-NMI injection and hostile-stack runtime tests remain incomplete, so this
+gate is partial and open.
 
 ## Delivery strategy
 
@@ -77,7 +80,8 @@ partial and open.
 - Pull request: the shared ten-gate pull request.
 - Planned commits: reproductions retained from Gate 1, entry-state/IST
   mechanism, syscall entry transition, and integration evidence.
-- Actual commits: pending.
+- Actual commits: `bc39ec2` (entry state, trusted stack transition, guarded ISTs,
+  static verifier); scheduler regression commit pending.
 
 ## Review policy and outcome
 

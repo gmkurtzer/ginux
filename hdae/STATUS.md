@@ -8,19 +8,17 @@
 - Branch: `codex/feedback-hardening`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 2, x86-64 privilege-entry hardening, in progress
-- Last completed action: Gate 2 installed CPU-indexable GS entry state, switched
-  off the user RSP before stack use, assigned separately guarded NMI/DF/MCE
-  ISTs, and added static architecture verification; `make check` passes
-- Next action: isolate the late interpreted-thread return-context corruption,
-  retain it as a regression, then add nested-NMI and adversarial-stack runtime
-  coverage before rerunning the complete Gate 2 suite
+- Last completed action: Gate 2 diagnosed the late interpreted-thread failure
+  as stale last-preempted identity after slot reuse, fixed retirement cleanup,
+  and passed the complete `make test` boot and Linux runtime suite
+- Next action: add nested-NMI and adversarial-stack runtime coverage, then rerun
+  the complete Gate 2 suite
 
 ## Current repository state
 
 Local and remote `main` identify commit `1852455`. Gate 2 is partial. Its static
-entry audit and `make check` pass, but `make test` still fails at the known late
-interpreted-thread invalid return context (`RIP 0x404d87`) and then reaches a
-kernel page fault. The QEMU harness cleaned up the failed run.
+entry audit, `make check`, and complete `make test` boot suite pass. Nested-NMI
+and hostile-stack runtime evidence remain outstanding.
 
 ## Open decisions
 

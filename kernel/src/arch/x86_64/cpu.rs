@@ -924,6 +924,9 @@ const LINUX_CLOCK_TAI: u64 = 11;
 const NANOSECONDS_PER_SECOND: u64 = 1_000_000_000;
 const MICROSECONDS_PER_SECOND: u64 = 1_000_000;
 const LINUX_CLOCK_TICKS_PER_SECOND: u64 = 100;
+// The verification workload issues additional yield hints while no peer is
+// runnable. Only the fifteen calls that transfer execution are switches.
+const LINUX_VERIFICATION_YIELD_SWITCHES: u32 = 15;
 
 #[repr(C, packed)]
 #[derive(Clone, Copy)]
@@ -5642,6 +5645,12 @@ fn retire_all_linux_threads() {
 }
 
 fn clear_linux_thread_slot(slot: usize) {
+    let _ = LINUX_LAST_PREEMPTED_THREAD_SLOT.compare_exchange(
+        slot as u8,
+        LINUX_THREAD_SLOT_NONE,
+        Ordering::AcqRel,
+        Ordering::Acquire,
+    );
     if let Some(process) = linux_process::live_process_slot(current_linux_process_pid()) {
         let _ = crate::linux_signal::clear(
             linux_signal_instance(),
@@ -7666,7 +7675,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
             && first_child_tid != 0
             && clone_reuse_validated
             && child_gettid_count == 2
-            && yield_switch_count == 19
+            && yield_switch_count == LINUX_VERIFICATION_YIELD_SWITCHES
             && clone_busy_rejection_count == 0
             && clone_invalid_rejection_count == 0
             && clone_tid_fault_count == 1
@@ -7722,7 +7731,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
             first_child_tid != 0,
             clone_reuse_validated,
             child_gettid_count == 2,
-            yield_switch_count == 19,
+            yield_switch_count == LINUX_VERIFICATION_YIELD_SWITCHES,
             clone_busy_rejection_count == 0,
             clone_invalid_rejection_count == 0,
             clone_tid_fault_count == 1,
@@ -8485,7 +8494,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
                 && first_child_tid != 0
                 && clone_reuse_validated
                 && child_gettid_count == 2
-                && yield_switch_count == 19
+                && yield_switch_count == LINUX_VERIFICATION_YIELD_SWITCHES
                 && clone_busy_rejection_count == 0
                 && clone_invalid_rejection_count == 0
                 && clone_tid_fault_count == 1
@@ -43894,6 +43903,12 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
             serial_write_u64(value);
         }
         serial_write("\r\n");
+        let mut return_address = [0_u8; size_of::<u64>()];
+        if copy_from_linux_user(context.rsp, &mut return_address) {
+            serial_write("ginux: Linux user fault stack return address: ");
+            serial_write_u64(u64::from_ne_bytes(return_address));
+            serial_write("\r\n");
+        }
         write_linux_runtime_syscall_trace();
         if deliver_linux_sigsegv(frame, fault_metadata) {
             return 0;
