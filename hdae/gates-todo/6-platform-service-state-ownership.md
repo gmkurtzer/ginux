@@ -37,12 +37,13 @@ state into explicit host, device, service, or domain-owned structures.
 - [x] Consolidated PCI interrupt routing/completion state and APIC timer,
   preemption, Linux wait, and device timeout state into two explicit host
   device owner roots.
+- [x] Consolidated CPU entry slots, descriptor tables, TSS, IST/privilege
+  stacks, and extended-user-state publication into one explicit per-CPU
+  architecture owner root.
 
 ## Remaining work
 
-- Migrate every platform/service ownership group from Gate 4.
-- Eliminate hidden singleton service instances and implicit reset paths.
-- Add service-failure and multi-domain isolation tests.
+- Run final Gate 6 regression evidence and close the delegated gate.
 
 ## Acceptance criteria
 
@@ -84,6 +85,10 @@ state into explicit host, device, service, or domain-owned structures.
 - After the PCI/timer migration, `make architecture-check` passed with the
   inventory reduced from 487 to 458 objects, `make check` passed, and the full
   verification QEMU boot completed cleanly.
+- After the per-CPU architecture migration, `make architecture-check` passed
+  with the inventory reduced from 458 to 450 objects and zero Gate 6 migration
+  rows, `make check` passed, and the full verification QEMU boot completed
+  cleanly.
 
 ## Decisions and limitations
 
@@ -100,8 +105,8 @@ not itself prohibited when ownership and synchronization are concrete.
 - Actual commits: `5ba79480` owns isolated network-service state;
   `9bc3ca23` owns filesystem/storage publication state; `d6b88ade` owns host
   network configuration; `1d0f262f` owns core host platform state;
-  `f04ec028` owns host address-space service state; PCI/timer ownership pending
-  commit.
+  `f04ec028` owns host address-space service state; `7ac3b5aa` owns host
+  interrupt and timer state; per-CPU architecture ownership pending commit.
 
 ## Review policy and outcome
 
