@@ -15733,6 +15733,7 @@ fn verify_linux_scheduler_affinity() -> bool {
     }
     let current = u64::from(current_linux_process_pid());
     let available = linux_available_cpu_mask();
+    let topology = verify_linux_cpu_topology_files(mapping);
     let sentinel = [0xa5_u8; 16];
     let mut observed = [0_u8; 16];
     let get = copy_to_linux_user(mapping, &sentinel)
@@ -15767,7 +15768,45 @@ fn verify_linux_scheduler_affinity() -> bool {
     let restored = copy_to_linux_user(mapping, &available.to_ne_bytes())
         && linux_sched_setaffinity(current, 8, mapping) == 0;
     let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
-    get && set && interval && restored && unmapped
+    topology && get && set && interval && restored && unmapped
+}
+
+fn verify_linux_cpu_topology_files(mapping: u64) -> bool {
+    let cpu_count = linux_available_cpu_count();
+    let mut record = [0_u8; 768];
+    let mut cpuinfo_size = 0_usize;
+    let mut second_offset = 0_usize;
+    for cpu in 0..cpu_count {
+        let Some(size) = linux_cpuinfo_record(cpu, cpu_count, &mut record) else {
+            return false;
+        };
+        if cpu == 0 {
+            second_offset = size;
+        }
+        cpuinfo_size = cpuinfo_size.saturating_add(size);
+    }
+    let mut prefix = [0_u8; 16];
+    let first = linux_proc_cpuinfo_read(mapping, prefix.len() as u64, 0) == prefix.len() as u64
+        && copy_from_linux_user(mapping, &mut prefix)
+        && prefix.starts_with(b"processor\t: 0\n");
+    let second = cpu_count == 1
+        || linux_proc_cpuinfo_read(mapping, prefix.len() as u64, second_offset as u64)
+            == prefix.len() as u64
+            && copy_from_linux_user(mapping, &mut prefix)
+            && prefix.starts_with(b"processor\t: 1\n");
+    let mut expected_stat = [0_u8; 512];
+    let Some(stat_size) = linux_proc_stat_file(&mut expected_stat) else {
+        return false;
+    };
+    let mut observed_stat = [0_u8; 512];
+    let stat = linux_proc_stat_read(mapping, stat_size as u64, 0) == stat_size as u64
+        && copy_from_linux_user(mapping, &mut observed_stat[..stat_size])
+        && observed_stat[..stat_size] == expected_stat[..stat_size];
+    first
+        && second
+        && stat
+        && linux_file_size(LINUX_FILE_PROC_CPUINFO) == cpuinfo_size as u64
+        && linux_file_size(LINUX_FILE_PROC_STAT) == stat_size as u64
 }
 
 fn verify_linux_realtime_queries() -> bool {
@@ -27762,6 +27801,8 @@ fn linux_descriptor_read(descriptor: u64, address: u64, count: u64) -> u64 {
     if matches!(
         device & !3,
         LINUX_FILE_PROC_FDINFO
+            | LINUX_FILE_PROC_CPUINFO
+            | LINUX_FILE_PROC_STAT
             | LINUX_FILE_PROC_DYNAMIC_STAT
             | LINUX_FILE_PROC_DYNAMIC_STATUS
             | LINUX_FILE_PROC_DYNAMIC_STATM
@@ -27855,6 +27896,12 @@ fn linux_regular_file_read_at(descriptor: u64, address: u64, count: u64, offset:
     }
     if linux_secret_descriptor(descriptor) {
         return LINUX_EINVAL;
+    }
+    if state & !3 == LINUX_FILE_PROC_CPUINFO {
+        return linux_proc_cpuinfo_read(address, count, offset);
+    }
+    if state & !3 == LINUX_FILE_PROC_STAT {
+        return linux_proc_stat_read(address, count, offset);
     }
     if state & !3 == LINUX_FILE_PROC_FDINFO {
         let Some(target) = linux_proc_fdinfo_descriptor_target(descriptor) else {
@@ -28039,6 +28086,138 @@ fn append_linux_bytes(output: &mut [u8], used: &mut usize, bytes: &[u8]) -> bool
     destination.copy_from_slice(bytes);
     *used += bytes.len();
     true
+}
+
+fn linux_generated_chunk(
+    chunk: &[u8],
+    address: u64,
+    requested: usize,
+    offset: usize,
+    logical: &mut usize,
+    copied: &mut usize,
+) -> bool {
+    let start = *logical;
+    *logical = logical.saturating_add(chunk.len());
+    if *copied == requested || offset >= *logical || offset.saturating_add(requested) <= start {
+        return true;
+    }
+    let chunk_start = offset.saturating_sub(start);
+    let chunk_end = chunk
+        .len()
+        .min(offset.saturating_add(requested).saturating_sub(start));
+    if chunk_start >= chunk_end {
+        return true;
+    }
+    let Some(destination) = address.checked_add(*copied as u64) else {
+        return false;
+    };
+    if !copy_to_linux_user(destination, &chunk[chunk_start..chunk_end]) {
+        return false;
+    }
+    *copied += chunk_end - chunk_start;
+    true
+}
+
+fn linux_cpuinfo_record(cpu: usize, count: usize, output: &mut [u8]) -> Option<usize> {
+    let mut used = 0;
+    let prefix = b"processor\t: ";
+    let middle = b"\nvendor_id\t: GenuineIntel\ncpu family\t: 6\nmodel\t\t: 158\nmodel name\t: Ginux virtual x86-64 CPU\nstepping\t: 10\ncpu MHz\t\t: 1000.000\ncache size\t: 16384 KB\nphysical id\t: 0\nsiblings\t: ";
+    if !append_linux_bytes(output, &mut used, prefix)
+        || !append_linux_decimal(output, &mut used, cpu as u64)
+        || !append_linux_bytes(output, &mut used, middle)
+        || !append_linux_decimal(output, &mut used, count as u64)
+        || !append_linux_bytes(output, &mut used, b"\ncore id\t\t: ")
+        || !append_linux_decimal(output, &mut used, cpu as u64)
+        || !append_linux_bytes(output, &mut used, b"\ncpu cores\t: ")
+        || !append_linux_decimal(output, &mut used, count as u64)
+        || !append_linux_bytes(output, &mut used, b"\nfpu\t\t: yes\ncpuid level\t: 13\nflags\t\t: fpu tsc msr pae cx8 apic sep mtrr pge cmov pat clflush mmx fxsr sse sse2 syscall nx lm constant_tsc rep_good nopl xtopology cpuid tsc_known_freq pni ssse3 cx16 sse4_1 sse4_2 x2apic popcnt aes xsave avx rdrand hypervisor\nbogomips\t: 2000.00\nclflush size\t: 64\ncache_alignment\t: 64\naddress sizes\t: 46 bits physical, 48 bits virtual\n\n")
+    {
+        return None;
+    }
+    Some(used)
+}
+
+fn linux_proc_cpuinfo_read(address: u64, count: u64, offset: u64) -> u64 {
+    let Ok(requested) = usize::try_from(count) else {
+        return LINUX_EINVAL;
+    };
+    let Ok(offset) = usize::try_from(offset) else {
+        return 0;
+    };
+    let cpu_count = linux_available_cpu_count();
+    let mut logical = 0;
+    let mut copied = 0;
+    for cpu in 0..cpu_count {
+        let mut record = [0_u8; 768];
+        let Some(used) = linux_cpuinfo_record(cpu, cpu_count, &mut record) else {
+            return LINUX_EIO;
+        };
+        if !linux_generated_chunk(
+            &record[..used],
+            address,
+            requested,
+            offset,
+            &mut logical,
+            &mut copied,
+        ) {
+            return LINUX_EFAULT;
+        }
+    }
+    copied as u64
+}
+
+fn linux_proc_stat_file(output: &mut [u8]) -> Option<usize> {
+    let cpu_count = linux_available_cpu_count();
+    let mut used = 0;
+    let generated = append_linux_bytes(output, &mut used, b"cpu  ")
+        && append_linux_decimal(output, &mut used, cpu_count as u64)
+        && append_linux_bytes(output, &mut used, b" 0 ")
+        && append_linux_decimal(output, &mut used, cpu_count as u64)
+        && append_linux_bytes(output, &mut used, b" ")
+        && append_linux_decimal(output, &mut used, (cpu_count * 100) as u64)
+        && append_linux_bytes(output, &mut used, b" 0 0 0 0 0 0\n");
+    if !generated {
+        return None;
+    }
+    for cpu in 0..cpu_count {
+        if !append_linux_bytes(output, &mut used, b"cpu")
+            || !append_linux_decimal(output, &mut used, cpu as u64)
+            || !append_linux_bytes(output, &mut used, b" 1 0 1 100 0 0 0 0 0 0\n")
+        {
+            return None;
+        }
+    }
+    if !append_linux_bytes(output, &mut used, b"intr 0\nctxt 1\nbtime 0\nprocesses 1\nprocs_running 1\nprocs_blocked 0\nsoftirq 0 0 0 0 0 0 0 0 0 0 0\n") {
+        return None;
+    }
+    Some(used)
+}
+
+fn linux_proc_stat_read(address: u64, count: u64, offset: u64) -> u64 {
+    let Ok(requested) = usize::try_from(count) else {
+        return LINUX_EINVAL;
+    };
+    let Ok(offset) = usize::try_from(offset) else {
+        return 0;
+    };
+    let mut file = [0_u8; 512];
+    let Some(used) = linux_proc_stat_file(&mut file) else {
+        return LINUX_EIO;
+    };
+    let mut logical = 0;
+    let mut copied = 0;
+    if linux_generated_chunk(
+        &file[..used],
+        address,
+        requested,
+        offset,
+        &mut logical,
+        &mut copied,
+    ) {
+        copied as u64
+    } else {
+        LINUX_EFAULT
+    }
 }
 
 fn append_linux_decimal(output: &mut [u8], used: &mut usize, value: u64) -> bool {
@@ -32121,7 +32300,10 @@ fn linux_descriptor_readv(descriptor: u64, vectors: u64, count: u64) -> u64 {
         return result;
     }
     let device = linux_device_descriptor(descriptor);
-    if linux_overlay_descriptor_handle(descriptor).is_some() || linux_tmp_file(device) {
+    if linux_overlay_descriptor_handle(descriptor).is_some()
+        || linux_tmp_file(device)
+        || matches!(device & !3, LINUX_FILE_PROC_CPUINFO | LINUX_FILE_PROC_STAT)
+    {
         let (ranges, vector_count) = match linux_socket_iov_ranges(vectors, count, true) {
             Ok(ranges) => ranges,
             Err(error) => return error,
@@ -35776,16 +35958,20 @@ fn linux_sched_setaffinity(pid: u64, length: u64, address: u64) -> u64 {
 }
 
 fn linux_available_cpu_mask() -> u64 {
-    let online = crate::arch::x86_64::smp::online_count();
-    let domain_limit = current_container_slot()
-        .map(|slot| usize::from(X86_RUNTIME.CONTAINER_CPU_COUNTS[slot].load(Ordering::Acquire)))
-        .unwrap_or(online);
-    let count = online.min(domain_limit).min(u64::BITS as usize);
+    let count = linux_available_cpu_count();
     if count == u64::BITS as usize {
         u64::MAX
     } else {
         (1_u64 << count).saturating_sub(1)
     }
+}
+
+fn linux_available_cpu_count() -> usize {
+    let online = crate::arch::x86_64::smp::online_count().max(1);
+    let domain_limit = current_container_slot()
+        .map(|slot| usize::from(X86_RUNTIME.CONTAINER_CPU_COUNTS[slot].load(Ordering::Acquire)))
+        .unwrap_or(online);
+    online.min(domain_limit.max(1)).min(u64::BITS as usize)
 }
 
 fn linux_memory_lock(address: u64, length: u64, flags: u64) -> u64 {
@@ -36552,6 +36738,18 @@ fn linux_regular_file_mode(state: u16) -> u32 {
 fn linux_file_size(state: u16) -> u64 {
     if state & !3 == LINUX_FILE_RESOLV_CONF {
         linux_resolv_conf().1 as u64
+    } else if state & !3 == LINUX_FILE_PROC_CPUINFO {
+        let count = linux_available_cpu_count();
+        let mut record = [0_u8; 768];
+        let mut size = 0_u64;
+        for cpu in 0..count {
+            size = size
+                .saturating_add(linux_cpuinfo_record(cpu, count, &mut record).unwrap_or(0) as u64);
+        }
+        size
+    } else if state & !3 == LINUX_FILE_PROC_STAT {
+        let mut file = [0_u8; 512];
+        linux_proc_stat_file(&mut file).unwrap_or(0) as u64
     } else if state & !3 == LINUX_FILE_PROC_FDINFO {
         64
     } else if linux_tmp_file(state) {

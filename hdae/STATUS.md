@@ -12,8 +12,8 @@
   physical allocation and scrubbing, enforcing a recursive cross-CPU-exclusive
   kernel-entry boundary, auditing direct interrupt masking, and passing the
   complete deterministic QEMU suite
-- Next action: make Linux `/proc/cpuinfo` and `/proc/stat` report the
-  domain-visible online CPU set, then extend cross-CPU lifecycle and IPC tests
+- Next action: extend the proven simultaneous execution into cross-CPU signal,
+  futex, pipe, socket, process-exit, and mapping-change tests
 
 ## Current repository state
 
@@ -23,7 +23,8 @@ The discovered AP set starts through a W^X low-memory trampoline. Kernel-only
 IPIs, remote invalidation, concurrent processor execution, AP Linux execution,
 simultaneous Linux address spaces across the BSP and CPU 1, and per-process
 domain-bounded affinity pass the full two-vCPU deterministic QEMU suite.
-Linux-visible `/proc` topology, cross-CPU lifecycle and IPC semantics, domain
+Linux `/proc/cpuinfo` and `/proc/stat` are generated from the domain-visible
+online processor set. Cross-CPU lifecycle and IPC semantics, domain
 placement/accounting, topology stress, and the two-vCPU harness default remain
 open Gate 9 work.
 

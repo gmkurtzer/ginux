@@ -44,6 +44,8 @@ exercise SMP by making two vCPUs the ordinary QEMU test default.
 - [x] Track inherited per-process CPU affinity, enforce the intersection of
   process and domain-visible online processors, and expose that mask through
   the Linux affinity syscalls.
+- [x] Generate `/proc/cpuinfo` and `/proc/stat` on demand from the
+  domain-visible online CPU set, including exact file sizes and vectored reads.
 
 ## Remaining work
 
@@ -129,6 +131,14 @@ multi-domain policy results, QEMU harness diffs, and repeated stress runs.
   `make build-verification && GINUX_CPUS=2 bash tests/qemu/boot.sh` pass with
   inherited process affinity and domain/online CPU-mask enforcement. The full
   three-phase transcript ends with `Boot test passed`.
+- The first dynamic `/proc/stat` self-test found that its internal file node
+  collided with `/etc/resolv.conf`; the old static path had hidden the alias.
+  Assigning a distinct node made file identity and exact generated size agree.
+- Fresh `cargo fmt --all`, `make architecture-check`, `make check`, and
+  `make build-verification && GINUX_CPUS=2 bash tests/qemu/boot.sh` pass with
+  on-demand topology generation, partial and vectored reads, and internal
+  content/size assertions. The full three-phase transcript ends with `Boot
+  test passed`.
 
 ## Decisions and limitations
 
@@ -145,7 +155,8 @@ though two vCPUs become the ordinary development default.
 - Actual commits: `2ad2c72a` (topology identities), `beafc0f0` (per-CPU
   architecture state), `e0489201` (AP startup), `e0651591` (IPIs and remote
   invalidation), `a34b93c3` (AP Linux execution), and `7759bca7` (simultaneous
-  Linux execution); CPU-affinity commit pending.
+  Linux execution), and `fd319f57` (domain CPU affinity); proc topology commit
+  pending.
 
 ## Review policy and outcome
 
