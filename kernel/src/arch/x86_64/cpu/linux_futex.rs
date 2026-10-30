@@ -25,6 +25,18 @@ pub(super) fn linux_futex_live_return(
             };
             let target = ready_linux_thread_handle();
             if target.is_none() && current_linux_runtime_cpu_index() == 0 {
+                if crate::arch::x86_64::smp::linux_runtime_thread_slot().is_some() {
+                    // Linux futex callers must tolerate spurious wakeups and
+                    // recheck the userspace word. Keep the main CPU on its
+                    // normal SYSRET path while the remote worker runs;
+                    // returning through the kernel runner would discard the
+                    // live syscall frame.
+                    return 0;
+                }
+                // Preserve the single-CPU verification runtime's existing
+                // unsupported result when no local or remote peer can wake
+                // this thread. The SMP compatibility path above is the only
+                // behavior changed by this gate.
                 return LINUX_ENOSYS;
             }
             let Some(tls) = linux_thread_context(current) else {
