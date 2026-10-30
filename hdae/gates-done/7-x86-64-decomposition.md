@@ -49,7 +49,8 @@ boundaries established by earlier gates without changing behavior.
 
 ## Remaining work
 
-- Extract one responsibility at a time with fresh regression evidence.
+- None for this gate. Further Linux subsystem decomposition can continue only
+  behind the same per-extraction regression rule.
 
 ## Acceptance criteria
 
@@ -85,6 +86,10 @@ boundaries established by earlier gates without changing behavior.
   `make check`, and the full deterministic QEMU verification boot, including
   signal delivery, Linux ELF/runtime compatibility, clean shutdown,
   `GINUX_KERNEL_OK`, and `Boot test passed`.
+- `make benchmark-compare` confirmed the pinned single-vCPU comparison inputs
+  and preserved the recorded medians: CPU 1.152x faster, memory 1.095x slower,
+  threads 1.012x faster, and mutex 1.089x faster than the matched Rocky/Linux
+  data.
 
 ## Decisions and limitations
 
@@ -100,6 +105,13 @@ attempt was reverted completely. User-copy and exception-fixup code therefore
 remain together pending a later change with explicit emitted-code comparison;
 this gate will not trade verified behavior for file movement.
 
+The x86 `SYSCALL`, exception-entry, and return assembly remains in `cpu.rs` so
+its local labels, fixup ranges, and Rust entry symbols stay in one compilation
+unit. APIC, timer, paging, PCI, and IOMMU hardware mechanisms were already
+separate architecture modules. Verification probes that directly exercise
+private Linux runtime state remain with that state; moving them alone would
+broaden visibility without creating a new ownership boundary.
+
 ## Delivery strategy
 
 - Working branch: `codex/feedback-hardening`.
@@ -108,10 +120,10 @@ this gate will not trade verified behavior for file movement.
 - Planned commits: dependency contract followed by one behavior-preserving
   responsibility extraction per commit.
 - Actual commits: `1adacc47`, `072d1339`, `c88cc875`, `c807aba4`, `bb20c71b`,
-  `839961f5`, `d1ad424d`, `d7d1eafb`, `6d0971b6`, and `c25d0f28`; the signal
-  extraction is pending commit.
+  `839961f5`, `d1ad424d`, `d7d1eafb`, `6d0971b6`, `c25d0f28`, and `e692ddd4`.
 
 ## Review policy and outcome
 
 Delegated closure authorized after every extraction passes the full regression,
-dependency, invariant, and performance criteria. Outcome: pending.
+dependency, invariant, and performance criteria. Outcome: passed and closed
+under the approved batch delegation.

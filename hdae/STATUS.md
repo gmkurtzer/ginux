@@ -7,21 +7,19 @@
 - Active project: feedback-driven kernel hardening
 - Branch: `codex/feedback-hardening`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 7, x86-64 decomposition, in progress
-- Last completed action: Gate 6 moved all classified platform, service,
-  controller, device, timer, paging, physical-memory, and per-CPU architecture
-  state behind explicit owner roots and passed fresh static, unit, ABI,
-  service-failure, isolation, lifecycle, and full verification-QEMU evidence
-- Next action: reconcile remaining entry/exception, diagnostic, and
-  epoll-helper boundaries against Gate 7 scope and extract the next cohesive
-  low-coupling block before final Gate 7 qualification
+- Active gate: Gate 8, synchronization and SMP readiness, starting
+- Last completed action: Gate 7 extracted architecture ownership, descriptors,
+  execution state, Linux ABI definitions, syscall dispatch, time, futex,
+  polling, and signal mechanisms with fresh per-extraction regressions and a
+  final deterministic QEMU and benchmark-comparison pass
+- Next action: specify synchronization primitives, interrupt-context rules,
+  memory ordering, and the global lock order, then add enforceable primitives
+  before migrating shared subsystems
 
 ## Current repository state
 
-Local and remote `main` identify commit `1852455`. Gates 1 through 6 passed and
-closed under delegated review. Gate 7 is in progress on the shared hardening
-branch. Signal handling is now isolated in `cpu/linux_signal.rs` and has passed
-the complete deterministic verification sequence.
+Local and remote `main` identify commit `1852455`. Gates 1 through 7 passed and
+closed under delegated review. Gate 8 is active on the shared hardening branch.
 
 ## Open decisions
 
