@@ -7,26 +7,29 @@
 - Active project: feedback-driven kernel hardening
 - Branch: `codex/feedback-hardening`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 1, baseline and claim reproduction, in progress
-- Last completed action: the human delegated execution and closure of all ten
-  gates, conditional on complete fresh testing after every gate
-- Next action: freeze and run the Gate 1 baseline matrix, then add focused claim
-  reproductions and the writable-global inventory
+- Active gate: Gate 2, x86-64 privilege-entry hardening, in progress
+- Last completed action: Gate 1 passed and closed under the delegated batch
+  policy with baseline repairs, command evidence, claim reproductions, and a
+  writable-global inventory
+- Next action: specify the per-CPU entry-state and guarded IST layout, then
+  implement the minimal assembly stack transition and injection assertions
 
 ## Current repository state
 
-Local and remote `main` identify commit `1852455`. Local and remote
-`codex/feedback-hardening` identify the approved planning commit before this
-alignment update. The working branch contains no hardening implementation yet.
+Local and remote `main` identify commit `1852455`. The working branch contains
+Gate 1 commits `a458837` and `7e9fe82` in addition to the approved planning
+commits. Gate 2 has not changed privilege-entry behavior yet.
 
 ## Open decisions
 
-- None. The exact baseline command set is frozen in Gate 1 and may not be
-  silently reduced.
+- None. Per-CPU entry storage and distinct guarded NMI, double-fault, and
+  machine-check ISTs are already approved architectural requirements.
 
 ## Durable evidence
 
 The detailed rationale is in
 [`docs/FEEDBACK-HARDENING-RESEARCH.md`](../docs/FEEDBACK-HARDENING-RESEARCH.md).
+Gate 1 evidence is in
+[`docs/feedback-hardening/GATE-1-BASELINE.md`](../docs/feedback-hardening/GATE-1-BASELINE.md).
 The authoritative execution state and gate outcomes are the files under this
 `hdae/` directory.
