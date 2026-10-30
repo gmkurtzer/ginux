@@ -372,6 +372,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     let kernel_stack_upper_guard = stack_start + KERNEL_STACK_TOP_OFFSET;
     let double_fault_guard = arch::x86_64::cpu::double_fault_guard_page();
     let double_fault_upper_guard = arch::x86_64::cpu::double_fault_upper_guard_page();
+    let nmi_guard = arch::x86_64::cpu::nmi_guard_page();
+    let nmi_upper_guard = arch::x86_64::cpu::nmi_upper_guard_page();
+    let machine_check_guard = arch::x86_64::cpu::machine_check_guard_page();
+    let machine_check_upper_guard = arch::x86_64::cpu::machine_check_upper_guard_page();
     let privilege_stack_guard = arch::x86_64::cpu::privilege_stack_guard_page();
     let privilege_stack_upper_guard = arch::x86_64::cpu::privilege_stack_upper_guard_page();
     let required_addresses = [
@@ -398,6 +402,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         arch::x86_64::cpu::privilege_stack_top() - 1,
         double_fault_guard + PAGE_SIZE,
         arch::x86_64::cpu::double_fault_stack_top() - 1,
+        nmi_guard + PAGE_SIZE,
+        arch::x86_64::cpu::nmi_stack_top() - 1,
+        machine_check_guard + PAGE_SIZE,
+        arch::x86_64::cpu::machine_check_stack_top() - 1,
     ];
     let guard_pages = [
         0,
@@ -407,6 +415,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         privilege_stack_upper_guard,
         double_fault_guard,
         double_fault_upper_guard,
+        nmi_guard,
+        nmi_upper_guard,
+        machine_check_guard,
+        machine_check_upper_guard,
     ];
 
     if !arch::x86_64::cpu::enable_execute_disable() {

@@ -27,6 +27,10 @@ pub(crate) const USER_CODE_SELECTOR: u16 = 0x33;
 const SYSCALL_VECTOR: u8 = 0x80;
 const CALL_BUDGET_EXHAUSTED: u64 = u64::MAX - 3;
 const DOUBLE_FAULT_IST: u8 = 1;
+const NMI_IST: u8 = 2;
+const MACHINE_CHECK_IST: u8 = 3;
+const BOOT_CPU_INDEX: usize = 0;
+const CPU_ENTRY_STATE_LIMIT: usize = 4;
 const PAGE_SIZE: usize = 4096;
 pub(crate) const LINUX_MMAP_SLOT_COUNT: usize = 4;
 const LINUX_RUNTIME_MMAP_SLOT_COUNT: usize = 32;
@@ -36,6 +40,9 @@ pub(crate) const LINUX_RUNTIME_HEAP_PAGES: usize = 16;
 const EXCEPTION_STACK_SIZE: usize = 4 * 1024 * 1024;
 const EXCEPTION_STACK_STORAGE_SIZE: usize = PAGE_SIZE + EXCEPTION_STACK_SIZE + PAGE_SIZE;
 const EXCEPTION_STACK_TOP_OFFSET: usize = PAGE_SIZE + EXCEPTION_STACK_SIZE;
+const IST_STACK_SIZE: usize = 64 * 1024;
+const IST_STACK_STORAGE_SIZE: usize = PAGE_SIZE + IST_STACK_SIZE + PAGE_SIZE;
+const IST_STACK_TOP_OFFSET: usize = PAGE_SIZE + IST_STACK_SIZE;
 const CPUID_STRUCTURED_FEATURES: u32 = 7;
 const CPUID_EXTENDED_STATE: u32 = 0x0d;
 const CPUID_EXTENDED_MAX: u32 = 0x8000_0000;
@@ -61,6 +68,7 @@ const STAR_MSR: u32 = 0xc000_0081;
 const LSTAR_MSR: u32 = 0xc000_0082;
 const FMASK_MSR: u32 = 0xc000_0084;
 const FS_BASE_MSR: u32 = 0xc000_0100;
+const GS_BASE_MSR: u32 = 0xc000_0101;
 const EFER_SCE: u64 = 1;
 const EFER_NXE: u64 = 1 << 11;
 const LINUX_READ_SYSCALL: u64 = 0;
@@ -918,6 +926,7 @@ const MICROSECONDS_PER_SECOND: u64 = 1_000_000;
 const LINUX_CLOCK_TICKS_PER_SECOND: u64 = 100;
 
 #[repr(C, packed)]
+#[derive(Clone, Copy)]
 struct TaskStateSegment {
     reserved0: u32,
     privilege_stacks: [u64; 3],
@@ -986,6 +995,37 @@ struct DescriptorTablePointer {
 
 #[repr(C, align(4096))]
 struct ExceptionStack([u8; EXCEPTION_STACK_STORAGE_SIZE]);
+
+#[repr(C, align(4096))]
+struct IstStack([u8; IST_STACK_STORAGE_SIZE]);
+
+#[derive(Clone, Copy)]
+#[repr(C, align(64))]
+struct CpuEntryState {
+    return_stack: u64,
+    user_rsp: u64,
+    user_rip: u64,
+    user_rflags: u64,
+    kernel_frame: u64,
+    syscall_result: u64,
+    signal_rax: u64,
+    signal_rcx: u64,
+    signal_r11: u64,
+}
+
+impl CpuEntryState {
+    const EMPTY: Self = Self {
+        return_stack: 0,
+        user_rsp: 0,
+        user_rip: 0,
+        user_rflags: 0,
+        kernel_frame: 0,
+        syscall_result: 0,
+        signal_rax: 0,
+        signal_rcx: 0,
+        signal_r11: 0,
+    };
+}
 
 static BREAKPOINT_HANDLED: AtomicBool = AtomicBool::new(false);
 static SYSCALL_STATE: AtomicU8 = AtomicU8::new(0);
@@ -1911,15 +1951,8 @@ static CONTAINER_CONSOLE_BYTES: [[AtomicU8; CONTAINER_CONSOLE_CAPACITY];
 static ELF_PROBE_SYSTEM_INIT: AtomicBool = AtomicBool::new(false);
 static SERVICE_STACK_SCRUBBED: AtomicBool = AtomicBool::new(false);
 static SERVICE_FRAMES_TRANSFERRED: AtomicBool = AtomicBool::new(false);
-static mut USER_RETURN_STACK: u64 = 0;
-static mut LINUX_USER_RSP: u64 = 0;
-static mut LINUX_USER_RIP: u64 = 0;
-static mut LINUX_USER_RFLAGS: u64 = 0;
-static mut LINUX_KERNEL_FRAME: u64 = 0;
-static mut LINUX_SYSCALL_RESULT: u64 = 0;
-static mut LINUX_SIGNAL_RAX: u64 = 0;
-static mut LINUX_SIGNAL_RCX: u64 = 0;
-static mut LINUX_SIGNAL_R11: u64 = 0;
+static mut CPU_ENTRY_STATES: [CpuEntryState; CPU_ENTRY_STATE_LIMIT] =
+    [CpuEntryState::EMPTY; CPU_ENTRY_STATE_LIMIT];
 static mut LINUX_SIGNAL_CONTEXT: LinuxSignalContext = LinuxSignalContext::ZERO;
 static mut GDT: [u64; 7] = [0; 7];
 static mut TSS: TaskStateSegment = TaskStateSegment {
@@ -1933,7 +1966,9 @@ static mut TSS: TaskStateSegment = TaskStateSegment {
 };
 static mut IDT: [IdtEntry; 256] = [IdtEntry::MISSING; 256];
 static mut PRIVILEGE_STACK: ExceptionStack = ExceptionStack([0; EXCEPTION_STACK_STORAGE_SIZE]);
-static mut DOUBLE_FAULT_STACK: ExceptionStack = ExceptionStack([0; EXCEPTION_STACK_STORAGE_SIZE]);
+static mut DOUBLE_FAULT_STACK: IstStack = IstStack([0; IST_STACK_STORAGE_SIZE]);
+static mut NMI_STACK: IstStack = IstStack([0; IST_STACK_STORAGE_SIZE]);
+static mut MACHINE_CHECK_STACK: IstStack = IstStack([0; IST_STACK_STORAGE_SIZE]);
 
 global_asm!(
     r#"
@@ -2143,7 +2178,7 @@ ginux_user_enter:
     push r13
     push r14
     push r15
-    mov [rip + {user_return_stack}], rsp
+    mov gs:[{entry_return_stack}], rsp
     mov r14, [rsp + 72]
     mov rbx, rdx
     push {user_data}
@@ -2161,7 +2196,7 @@ ginux_process_user_enter:
     push r13
     push r14
     push r15
-    mov [rip + {user_return_stack}], rsp
+    mov gs:[{entry_return_stack}], rsp
     push {user_data}
     push rsi
     push rcx
@@ -2234,10 +2269,10 @@ ginux_linux_syscall_entry:
     cli
     clac
     cld
-    mov [rip + {linux_user_rsp}], rsp
-    mov [rip + {linux_user_rip}], rcx
-    mov [rip + {linux_user_rflags}], r11
-    mov rsp, [rip + {user_return_stack}]
+    mov gs:[{entry_user_rsp}], rsp
+    mov gs:[{entry_user_rip}], rcx
+    mov gs:[{entry_user_rflags}], r11
+    mov rsp, gs:[{entry_return_stack}]
     push rdi
     push rsi
     push rdx
@@ -2250,20 +2285,20 @@ ginux_linux_syscall_entry:
     push r13
     push r14
     push r15
-    mov [rip + {linux_kernel_frame}], rsp
+    mov gs:[{entry_kernel_frame}], rsp
     mov rdi, rax
     mov rsi, rsp
-    mov rdx, [rip + {linux_user_rsp}]
-    mov rcx, [rip + {linux_user_rip}]
-    mov r8, [rip + {linux_user_rflags}]
+    mov rdx, gs:[{entry_user_rsp}]
+    mov rcx, gs:[{entry_user_rip}]
+    mov r8, gs:[{entry_user_rflags}]
     and rsp, -16
     call {linux_syscall_handler}
     cmp rax, {linux_return_to_kernel}
     je ginux_user_return_kernel
     cmp rax, {linux_return_from_signal}
     je ginux_linux_signal_return
-    mov [rip + {linux_syscall_result}], rax
-    mov rsp, [rip + {linux_kernel_frame}]
+    mov gs:[{entry_syscall_result}], rax
+    mov rsp, gs:[{entry_kernel_frame}]
     pop r15
     pop r14
     pop r13
@@ -2276,13 +2311,28 @@ ginux_linux_syscall_entry:
     pop rdx
     pop rsi
     pop rdi
-    mov rax, [rip + {linux_syscall_result}]
-    mov rcx, [rip + {linux_user_rip}]
-    mov r11, [rip + {linux_user_rflags}]
-    mov rsp, [rip + {linux_user_rsp}]
+    mov rax, gs:[{entry_syscall_result}]
+    mov rcx, gs:[{entry_user_rip}]
+    shr rcx, 47
+    jne ginux_invalid_user_return
+    mov rcx, gs:[{entry_user_rsp}]
+    shr rcx, 47
+    jne ginux_invalid_user_return
+    mov rcx, gs:[{entry_user_rip}]
+    mov r11, gs:[{entry_user_rflags}]
+    mov rsp, gs:[{entry_user_rsp}]
     sysretq
+ginux_invalid_user_return:
+    mov rsp, gs:[{entry_return_stack}]
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbp
+    pop rbx
+    ret
 ginux_linux_signal_return:
-    mov rsp, [rip + {linux_kernel_frame}]
+    mov rsp, gs:[{entry_kernel_frame}]
     pop r15
     pop r14
     pop r13
@@ -2296,16 +2346,16 @@ ginux_linux_signal_return:
     pop rsi
     pop rdi
     push {user_data}
-    push [rip + {linux_user_rsp}]
-    push [rip + {linux_user_rflags}]
+    push gs:[{entry_user_rsp}]
+    push gs:[{entry_user_rflags}]
     push {user_code}
-    push [rip + {linux_user_rip}]
-    mov rax, [rip + {linux_signal_rax}]
-    mov rcx, [rip + {linux_signal_rcx}]
-    mov r11, [rip + {linux_signal_r11}]
+    push gs:[{entry_user_rip}]
+    mov rax, gs:[{entry_signal_rax}]
+    mov rcx, gs:[{entry_signal_rcx}]
+    mov r11, gs:[{entry_signal_r11}]
     iretq
 ginux_user_return_kernel:
-    mov rsp, [rip + {user_return_stack}]
+    mov rsp, gs:[{entry_return_stack}]
     pop r15
     pop r14
     pop r13
@@ -2320,15 +2370,15 @@ ginux_user_return_kernel:
     user_fault_handler = sym user_fault_handler,
     syscall_handler = sym syscall_handler,
     linux_syscall_handler = sym linux_syscall_handler,
-    user_return_stack = sym USER_RETURN_STACK,
-    linux_user_rsp = sym LINUX_USER_RSP,
-    linux_user_rip = sym LINUX_USER_RIP,
-    linux_user_rflags = sym LINUX_USER_RFLAGS,
-    linux_kernel_frame = sym LINUX_KERNEL_FRAME,
-    linux_syscall_result = sym LINUX_SYSCALL_RESULT,
-    linux_signal_rax = sym LINUX_SIGNAL_RAX,
-    linux_signal_rcx = sym LINUX_SIGNAL_RCX,
-    linux_signal_r11 = sym LINUX_SIGNAL_R11,
+    entry_return_stack = const 0,
+    entry_user_rsp = const 8,
+    entry_user_rip = const 16,
+    entry_user_rflags = const 24,
+    entry_kernel_frame = const 32,
+    entry_syscall_result = const 40,
+    entry_signal_rax = const 48,
+    entry_signal_rcx = const 56,
+    entry_signal_r11 = const 64,
     linux_return_to_kernel = const LINUX_RETURN_TO_KERNEL as i64,
     linux_return_from_signal = const LINUX_RETURN_FROM_SIGNAL as i64,
     user_data = const USER_DATA_SELECTOR as u64,
@@ -2342,9 +2392,10 @@ extern "C" {
 }
 
 unsafe fn enter_linux_process(entry: usize, stack: usize, general: *const u64, rflags: u64) {
-    let previous_return_stack = USER_RETURN_STACK;
+    let entry_state = current_entry_state();
+    let previous_return_stack = (*entry_state).return_stack;
     ginux_process_user_enter(entry, stack, general, rflags);
-    USER_RETURN_STACK = previous_return_stack;
+    (*entry_state).return_stack = previous_return_stack;
 }
 
 extern "sysv64" {
@@ -2366,10 +2417,29 @@ pub(crate) fn install() -> bool {
     // SAFETY: Initialization runs once with interrupts disabled and before any
     // other CPU can observe these tables.
     unsafe {
+        let entry_state = core::ptr::addr_of_mut!(CPU_ENTRY_STATES)
+            .cast::<CpuEntryState>()
+            .add(BOOT_CPU_INDEX);
+        entry_state.write(CpuEntryState::EMPTY);
+        write_msr(GS_BASE_MSR, entry_state as u64);
         install_gdt_and_tss();
         install_idt();
     }
-    exception_gates_are_valid()
+    entry_state_is_installed() && exception_gates_are_valid()
+}
+
+fn current_entry_state() -> *mut CpuEntryState {
+    // SAFETY: `install` assigns GS_BASE to this CPU's entry-state slot before
+    // userspace or interrupts can use the privilege-entry paths.
+    unsafe { read_msr(GS_BASE_MSR) as *mut CpuEntryState }
+}
+
+fn entry_state_is_installed() -> bool {
+    let base = current_entry_state() as usize;
+    let states = core::ptr::addr_of!(CPU_ENTRY_STATES).cast::<CpuEntryState>() as usize;
+    base >= states
+        && base < states + size_of::<[CpuEntryState; CPU_ENTRY_STATE_LIMIT]>()
+        && (base - states).is_multiple_of(size_of::<CpuEntryState>())
 }
 
 pub(crate) fn task_register_denies_user_io() -> bool {
@@ -8726,7 +8796,7 @@ pub(crate) fn user_interrupt_surface_is_minimal() -> bool {
             Some(attributes)
                 if entry.selector == KERNEL_CODE_SELECTOR
                     && entry.attributes == attributes
-                    && entry.ist == if vector == 8 { DOUBLE_FAULT_IST } else { 0 }
+                    && entry.ist == exception_ist(vector)
                     && entry.reserved == 0
                     && entry.has_handler() => {}
             None if entry.is_missing() => {}
@@ -8749,11 +8819,35 @@ pub(crate) fn double_fault_guard_page() -> usize {
 }
 
 pub(crate) fn double_fault_upper_guard_page() -> usize {
-    core::ptr::addr_of!(DOUBLE_FAULT_STACK) as usize + EXCEPTION_STACK_TOP_OFFSET
+    core::ptr::addr_of!(DOUBLE_FAULT_STACK) as usize + IST_STACK_TOP_OFFSET
 }
 
 pub(crate) fn double_fault_stack_top() -> usize {
-    core::ptr::addr_of!(DOUBLE_FAULT_STACK) as usize + EXCEPTION_STACK_TOP_OFFSET
+    core::ptr::addr_of!(DOUBLE_FAULT_STACK) as usize + IST_STACK_TOP_OFFSET
+}
+
+pub(crate) fn nmi_guard_page() -> usize {
+    core::ptr::addr_of!(NMI_STACK) as usize
+}
+
+pub(crate) fn nmi_upper_guard_page() -> usize {
+    core::ptr::addr_of!(NMI_STACK) as usize + IST_STACK_TOP_OFFSET
+}
+
+pub(crate) fn nmi_stack_top() -> usize {
+    core::ptr::addr_of!(NMI_STACK) as usize + IST_STACK_TOP_OFFSET
+}
+
+pub(crate) fn machine_check_guard_page() -> usize {
+    core::ptr::addr_of!(MACHINE_CHECK_STACK) as usize
+}
+
+pub(crate) fn machine_check_upper_guard_page() -> usize {
+    core::ptr::addr_of!(MACHINE_CHECK_STACK) as usize + IST_STACK_TOP_OFFSET
+}
+
+pub(crate) fn machine_check_stack_top() -> usize {
+    core::ptr::addr_of!(MACHINE_CHECK_STACK) as usize + IST_STACK_TOP_OFFSET
 }
 
 pub(crate) fn privilege_stack_guard_page() -> usize {
@@ -8814,8 +8908,9 @@ fn install_user_interrupt_gate(vector: u8, handler: usize) -> bool {
 unsafe fn install_gdt_and_tss() {
     let tss_address = core::ptr::addr_of!(TSS) as u64;
     let privilege_stack_end = privilege_stack_top() as u64;
-    let exception_stack_end = double_fault_stack_top() as u64;
-    TSS.interrupt_stacks[0] = exception_stack_end;
+    TSS.interrupt_stacks[usize::from(DOUBLE_FAULT_IST - 1)] = double_fault_stack_top() as u64;
+    TSS.interrupt_stacks[usize::from(NMI_IST - 1)] = nmi_stack_top() as u64;
+    TSS.interrupt_stacks[usize::from(MACHINE_CHECK_IST - 1)] = machine_check_stack_top() as u64;
     TSS.privilege_stacks[0] = privilege_stack_end;
 
     GDT[0] = 0;
@@ -8861,7 +8956,7 @@ unsafe fn install_idt() {
     let entries = core::ptr::addr_of!(ginux_exception_entries).cast::<usize>();
     let idt = core::ptr::addr_of_mut!(IDT).cast::<IdtEntry>();
     for vector in 0..32 {
-        let ist = if vector == 8 { DOUBLE_FAULT_IST } else { 0 };
+        let ist = exception_ist(vector);
         idt.add(vector)
             .write(IdtEntry::interrupt(entries.add(vector).read(), ist));
     }
@@ -8879,7 +8974,7 @@ fn exception_gates_are_valid() -> bool {
         // SAFETY: IDT is initialized before this verifier runs and is never
         // subsequently mutated on the bootstrap processor.
         let entry = unsafe { idt.add(vector).read() };
-        let expected_ist = if vector == 8 { DOUBLE_FAULT_IST } else { 0 };
+        let expected_ist = exception_ist(vector);
         if entry.selector != KERNEL_CODE_SELECTOR
             || entry.attributes != 0x8e
             || entry.ist != expected_ist
@@ -8889,6 +8984,15 @@ fn exception_gates_are_valid() -> bool {
         }
     }
     true
+}
+
+const fn exception_ist(vector: usize) -> u8 {
+    match vector {
+        2 => NMI_IST,
+        8 => DOUBLE_FAULT_IST,
+        18 => MACHINE_CHECK_IST,
+        _ => 0,
+    }
 }
 
 extern "sysv64" fn breakpoint_handler() {
@@ -12100,19 +12204,21 @@ fn write_linux_live_return(output: *mut LinuxSyscallFrame, context: LinuxUserCon
     // remain disabled for the serialized update.
     unsafe {
         output.write(context.registers);
-        LINUX_KERNEL_FRAME = output as u64;
-        LINUX_USER_RSP = context.rsp;
-        LINUX_USER_RIP = context.rip;
-        LINUX_USER_RFLAGS = context.rflags;
+        let entry_state = &mut *current_entry_state();
+        entry_state.kernel_frame = output as u64;
+        entry_state.user_rsp = context.rsp;
+        entry_state.user_rip = context.rip;
+        entry_state.user_rflags = context.rflags;
     }
     // SAFETY: the same serialized frame and globals remain exclusively owned
     // by this syscall entry until the handler returns.
     unsafe {
+        let entry_state = &*current_entry_state();
         output.read() == context.registers
-            && LINUX_KERNEL_FRAME == output as u64
-            && LINUX_USER_RSP == context.rsp
-            && LINUX_USER_RIP == context.rip
-            && LINUX_USER_RFLAGS == context.rflags
+            && entry_state.kernel_frame == output as u64
+            && entry_state.user_rsp == context.rsp
+            && entry_state.user_rip == context.rip
+            && entry_state.user_rflags == context.rflags
     }
 }
 
@@ -23361,8 +23467,9 @@ fn linux_rootfs_execve_source(
         return LINUX_ENOMEM;
     }
     unsafe {
-        LINUX_USER_RIP = startup.initial_entry;
-        LINUX_USER_RSP = new_stack;
+        let entry_state = &mut *current_entry_state();
+        entry_state.user_rip = startup.initial_entry;
+        entry_state.user_rsp = new_stack;
     }
     if !linux_process::set_live_process_exec_context(pid, startup.initial_entry, new_stack) {
         serial_write("ginux: Linux exec process context rejected entry/stack: ");
@@ -24081,8 +24188,9 @@ fn linux_execve_at(
         Ordering::SeqCst,
     );
     unsafe {
-        LINUX_USER_RIP = entry;
-        LINUX_USER_RSP = new_stack;
+        let entry_state = &mut *current_entry_state();
+        entry_state.user_rip = entry;
+        entry_state.user_rsp = new_stack;
     }
     ELF_PROBE_EXEC_NODE.store(exec_node, Ordering::SeqCst);
     ELF_PROBE_EXEC_ENTRY.store(entry, Ordering::SeqCst);
@@ -40675,9 +40783,10 @@ fn linux_rt_sigreturn(output: *mut LinuxSyscallFrame, user_stack: u64) -> u64 {
     // SAFETY: the dedicated IRETQ epilogue consumes these values before this
     // serialized syscall entry can be reused.
     unsafe {
-        LINUX_SIGNAL_RAX = restored.user.rax;
-        LINUX_SIGNAL_RCX = restored.rcx;
-        LINUX_SIGNAL_R11 = restored.r11;
+        let entry_state = &mut *current_entry_state();
+        entry_state.signal_rax = restored.user.rax;
+        entry_state.signal_rcx = restored.rcx;
+        entry_state.signal_r11 = restored.r11;
     }
     LINUX_RETURN_FROM_SIGNAL
 }

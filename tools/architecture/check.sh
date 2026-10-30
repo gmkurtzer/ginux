@@ -45,4 +45,6 @@ reject_text "$architecture" 'The first proof of concept may unpack a CPIO/initra
 reject_text "$architecture" 'A later isolated storage service should expose `virtio-blk`'
 reject_text "$controller" 'int 0x80'
 
+bash "${repo_root}/tools/architecture/check-privilege-entry.sh"
+
 echo "Architecture consistency check passed"
