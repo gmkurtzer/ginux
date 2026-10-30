@@ -31,6 +31,9 @@ state into explicit host, device, service, or domain-owned structures.
 - [x] Consolidated physical-memory allocation, host paging tables, controller
   publication state, and bootstrap kernel-stack storage into four explicit
   host or bootstrap owner roots.
+- [x] Consolidated auxiliary address-space registration, controller image
+  publication, native-volume completion, and unsafe-quiesce diagnostics into
+  one explicit host address-space service owner.
 
 ## Remaining work
 
@@ -72,6 +75,9 @@ state into explicit host, device, service, or domain-owned structures.
   writable-global inventory reduced from 507 to 493 objects, `make check`
   passed, and `make build-verification && bash tests/qemu/boot.sh` completed
   the full verification boot and clean QEMU shutdown.
+- After the address-space service migration, `make architecture-check` passed
+  with the inventory reduced from 493 to 487 objects, `make check` passed, and
+  the full verification QEMU boot completed cleanly.
 
 ## Decisions and limitations
 
@@ -87,7 +93,8 @@ not itself prohibited when ownership and synchronization are concrete.
   device/controller ownership, and failure/lifecycle evidence.
 - Actual commits: `5ba79480` owns isolated network-service state;
   `9bc3ca23` owns filesystem/storage publication state; `d6b88ade` owns host
-  network configuration; core-host ownership pending commit.
+  network configuration; `1d0f262f` owns core host platform state;
+  address-space service ownership pending commit.
 
 ## Review policy and outcome
 

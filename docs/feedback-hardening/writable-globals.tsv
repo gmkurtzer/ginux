@@ -1,14 +1,8 @@
 kind	file	symbol	ownership-group	disposition	migration-gate	contract
 static-mut	boot/efi/src/main.rs	MEMORY_MAP_STORAGE	bootstrap-init	allowlist	none	firmware-single-writer
-static-mut	kernel/src/address_space.rs	AUXILIARY_ADDRESS_SPACES	platform-device	migrate	6	device-or-host-service-owned
-interior-mutable	kernel/src/address_space.rs	INTERACTIVE_CONTROLLER_DOMAIN	platform-device	migrate	6	device-or-host-service-owned
-interior-mutable	kernel/src/address_space.rs	INTERACTIVE_CONTROLLER_IMAGE	platform-device	migrate	6	device-or-host-service-owned
-interior-mutable	kernel/src/address_space.rs	INTERACTIVE_CONTROLLER_IMAGE_SIZE	platform-device	migrate	6	device-or-host-service-owned
-interior-mutable	kernel/src/address_space.rs	LAST_UNSAFE_DEVICE_QUIESCE_DOMAIN	platform-device	migrate	6	device-or-host-service-owned
-interior-mutable	kernel/src/address_space.rs	LAST_UNSAFE_DEVICE_QUIESCE_WAS_ACTIVE	platform-device	migrate	6	device-or-host-service-owned
+interior-mutable	kernel/src/address_space.rs	ADDRESS_SPACE_SERVICES	platform-device	allowlist	none	explicit-host-address-space-service-owner-root
 interior-mutable	kernel/src/address_space.rs	LINUX_PROCESS_SCRATCH	process-runtime	allowlist	none	explicit-process-scratch-owner-root
 interior-mutable	kernel/src/address_space.rs	LINUX_RUNTIME	domain-runtime	allowlist	none	explicit-domain-linux-runtime-owner-root
-interior-mutable	kernel/src/address_space.rs	NATIVE_VOLUME_COMPLETION	platform-device	migrate	6	device-or-host-service-owned
 interior-mutable	kernel/src/arch/x86_64/cpu.rs	BREAKPOINT_HANDLED	verification-only	allowlist	none	verification-build-only
 interior-mutable	kernel/src/arch/x86_64/cpu.rs	CONTROL_DESCRIPTOR_OVERRIDE_DOMAIN	verification-only	allowlist	none	verification-build-only
 interior-mutable	kernel/src/arch/x86_64/cpu.rs	CONTROL_DISCOVERY_OVERRIDE_DOMAIN	verification-only	allowlist	none	verification-build-only

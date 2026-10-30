@@ -139,14 +139,28 @@ const LINUX_TLS_TCB_SIZE: usize = 16;
 pub(crate) const USER_ADDRESS_SPACE_FRAMES: usize = 7;
 const PAGE_ATTRIBUTE_TABLE: u64 = 1 << 12;
 
-static mut AUXILIARY_ADDRESS_SPACES: [Option<RegisteredAuxiliaryAddressSpace>;
-    domain::MAX_AUXILIARY_SERVICES] = [const { None }; domain::MAX_AUXILIARY_SERVICES];
-static NATIVE_VOLUME_COMPLETION: AtomicU8 = AtomicU8::new(0);
-static LAST_UNSAFE_DEVICE_QUIESCE_DOMAIN: AtomicU64 = AtomicU64::new(0);
-static LAST_UNSAFE_DEVICE_QUIESCE_WAS_ACTIVE: AtomicBool = AtomicBool::new(false);
-static INTERACTIVE_CONTROLLER_IMAGE: AtomicUsize = AtomicUsize::new(0);
-static INTERACTIVE_CONTROLLER_IMAGE_SIZE: AtomicUsize = AtomicUsize::new(0);
-static INTERACTIVE_CONTROLLER_DOMAIN: AtomicU64 = AtomicU64::new(0);
+struct AddressSpaceServicesOwner {
+    auxiliary_address_spaces:
+        UnsafeCell<[Option<RegisteredAuxiliaryAddressSpace>; domain::MAX_AUXILIARY_SERVICES]>,
+    native_volume_completion: AtomicU8,
+    last_unsafe_device_quiesce_domain: AtomicU64,
+    last_unsafe_device_quiesce_was_active: AtomicBool,
+    interactive_controller_image: AtomicUsize,
+    interactive_controller_image_size: AtomicUsize,
+    interactive_controller_domain: AtomicU64,
+}
+
+unsafe impl Sync for AddressSpaceServicesOwner {}
+
+static ADDRESS_SPACE_SERVICES: AddressSpaceServicesOwner = AddressSpaceServicesOwner {
+    auxiliary_address_spaces: UnsafeCell::new([const { None }; domain::MAX_AUXILIARY_SERVICES]),
+    native_volume_completion: AtomicU8::new(0),
+    last_unsafe_device_quiesce_domain: AtomicU64::new(0),
+    last_unsafe_device_quiesce_was_active: AtomicBool::new(false),
+    interactive_controller_image: AtomicUsize::new(0),
+    interactive_controller_image_size: AtomicUsize::new(0),
+    interactive_controller_domain: AtomicU64::new(0),
+};
 const LINUX_RUNTIME_FRAME_CAPACITY: usize = 440;
 const LINUX_OWNED_FRAME_COUNT: usize = 10;
 struct LinuxRuntimeOwner {
@@ -190,7 +204,8 @@ pub(crate) fn install_interactive_controller_image(
     image: &crate::native_elf::NativeImage<'_>,
 ) -> bool {
     if image.bytes.is_empty()
-        || INTERACTIVE_CONTROLLER_IMAGE
+        || ADDRESS_SPACE_SERVICES
+            .interactive_controller_image
             .compare_exchange(
                 0,
                 image.bytes.as_ptr() as usize,
@@ -201,13 +216,19 @@ pub(crate) fn install_interactive_controller_image(
     {
         return false;
     }
-    INTERACTIVE_CONTROLLER_IMAGE_SIZE.store(image.bytes.len(), Ordering::Release);
+    ADDRESS_SPACE_SERVICES
+        .interactive_controller_image_size
+        .store(image.bytes.len(), Ordering::Release);
     true
 }
 
 pub(crate) fn run_installed_interactive_controller() -> bool {
-    let address = INTERACTIVE_CONTROLLER_IMAGE.load(Ordering::Acquire);
-    let size = INTERACTIVE_CONTROLLER_IMAGE_SIZE.load(Ordering::Acquire);
+    let address = ADDRESS_SPACE_SERVICES
+        .interactive_controller_image
+        .load(Ordering::Acquire);
+    let size = ADDRESS_SPACE_SERVICES
+        .interactive_controller_image_size
+        .load(Ordering::Acquire);
     if address == 0 || size == 0 {
         return false;
     }
@@ -7006,7 +7027,9 @@ impl AuxiliaryAddressSpace {
                 let Some(recovered) = native_dma_completion_state(frame) else {
                     return false;
                 };
-                NATIVE_VOLUME_COMPLETION.store(if recovered { 2 } else { 1 }, Ordering::Release);
+                ADDRESS_SPACE_SERVICES
+                    .native_volume_completion
+                    .store(if recovered { 2 } else { 1 }, Ordering::Release);
                 true
             },
             Self::Network(_) => false,
@@ -7116,7 +7139,9 @@ fn verify_native_service_materialization_with_capacity<
 
 pub(crate) fn run_interactive_controller(image: &crate::native_elf::NativeImage<'_>) -> bool {
     let kernel_root = current_root();
-    let resident = INTERACTIVE_CONTROLLER_DOMAIN.load(Ordering::Acquire);
+    let resident = ADDRESS_SPACE_SERVICES
+        .interactive_controller_domain
+        .load(Ordering::Acquire);
     if resident != 0 {
         let (Some(identity), Some(owner)) = (
             domain::domain_service_identity(resident),
@@ -7223,7 +7248,8 @@ pub(crate) fn run_interactive_controller(image: &crate::native_elf::NativeImage<
         crate::serial_write("ginux: controller root activation failed\r\n");
         return false;
     }
-    if INTERACTIVE_CONTROLLER_DOMAIN
+    if ADDRESS_SPACE_SERVICES
+        .interactive_controller_domain
         .compare_exchange(0, controller, Ordering::AcqRel, Ordering::Acquire)
         .is_err()
     {
@@ -7258,7 +7284,8 @@ fn interactive_controller_return_is_valid(
     if no_current && blocked && one_space && owns_frames && live {
         return true;
     }
-    if INTERACTIVE_CONTROLLER_DOMAIN
+    if ADDRESS_SPACE_SERVICES
+        .interactive_controller_domain
         .compare_exchange(controller, 0, Ordering::AcqRel, Ordering::Acquire)
         .is_err()
     {
@@ -10860,7 +10887,10 @@ pub(crate) fn verify_auxiliary_address_space_lifecycle() -> bool {
 }
 
 fn registered_auxiliary_address_space_count() -> usize {
-    let registry = core::ptr::addr_of!(AUXILIARY_ADDRESS_SPACES);
+    let registry = ADDRESS_SPACE_SERVICES
+        .auxiliary_address_spaces
+        .get()
+        .cast_const();
     unsafe { (*registry).iter().flatten().count() }
 }
 
@@ -10937,7 +10967,7 @@ pub(crate) fn initialize_staged_auxiliary_from_current_user(
     if !(1..=PAGE_SIZE).contains(&length) || !scheduler::auxiliary_is_staged(domain_id) {
         return false;
     }
-    let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
+    let registry = ADDRESS_SPACE_SERVICES.auxiliary_address_spaces.get();
     let Some(registered) = (unsafe { (*registry).iter_mut().flatten() })
         .find(|registered| registered.domain == domain_id)
     else {
@@ -10983,7 +11013,7 @@ fn register_auxiliary_address_space(domain_id: u64, space: WxAddressSpace) -> bo
 }
 
 fn register_address_space(domain_id: u64, space: AuxiliaryAddressSpace) -> bool {
-    let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
+    let registry = ADDRESS_SPACE_SERVICES.auxiliary_address_spaces.get();
     let Some(slot) =
         (0..domain::MAX_AUXILIARY_SERVICES).find(|index| unsafe { (*registry)[*index].is_none() })
     else {
@@ -11025,7 +11055,7 @@ fn register_address_space(domain_id: u64, space: AuxiliaryAddressSpace) -> bool 
 }
 
 pub(crate) fn release_auxiliary_address_space(domain_id: u64) -> bool {
-    let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
+    let registry = ADDRESS_SPACE_SERVICES.auxiliary_address_spaces.get();
     let Some(slot) = (0..domain::MAX_AUXILIARY_SERVICES).find(|index| unsafe {
         (*registry)[*index]
             .as_ref()
@@ -11068,7 +11098,7 @@ pub(crate) fn bind_auxiliary_iommu_translation(
     domain_id: u64,
     profile: iommu::DeviceTranslationProfile,
 ) -> Option<iommu::TranslationEvidence> {
-    let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
+    let registry = ADDRESS_SPACE_SERVICES.auxiliary_address_spaces.get();
     let registered = (unsafe { (*registry).iter_mut().flatten() })
         .find(|registered| registered.domain == domain_id)?;
     let teardown = registered.device_teardown?;
@@ -11094,7 +11124,7 @@ fn bind_auxiliary_network_iommu_translation(
     profile: iommu::DeviceTranslationProfile,
     device: VirtioNetworkDevice,
 ) -> Option<iommu::TranslationEvidence> {
-    let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
+    let registry = ADDRESS_SPACE_SERVICES.auxiliary_address_spaces.get();
     let registered = (unsafe { (*registry).iter_mut().flatten() })
         .find(|registered| registered.domain == domain_id)?;
     let dma_frame = registered.space.dma_lease()?;
@@ -11120,7 +11150,7 @@ fn bind_auxiliary_network_teardown(
     mapping: paging::MmioMapping,
     msix_mapping: Option<paging::MmioMapping>,
 ) -> bool {
-    let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
+    let registry = ADDRESS_SPACE_SERVICES.auxiliary_address_spaces.get();
     let Some(registered) = (unsafe { (*registry).iter_mut().flatten() })
         .find(|registered| registered.domain == domain_id)
     else {
@@ -11144,7 +11174,7 @@ fn bind_auxiliary_network_teardown(
 }
 
 pub(crate) fn activate_auxiliary_network_empty_queues(domain_id: u64) -> bool {
-    let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
+    let registry = ADDRESS_SPACE_SERVICES.auxiliary_address_spaces.get();
     let Some(registered) = (unsafe { (*registry).iter_mut().flatten() })
         .find(|registered| registered.domain == domain_id)
     else {
@@ -11185,7 +11215,7 @@ pub(crate) fn activate_auxiliary_network_empty_queues(domain_id: u64) -> bool {
 }
 
 fn arm_auxiliary_network_activation_fault(domain_id: u64) -> bool {
-    let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
+    let registry = ADDRESS_SPACE_SERVICES.auxiliary_address_spaces.get();
     let Some(registered) = (unsafe { (*registry).iter_mut().flatten() })
         .find(|registered| registered.domain == domain_id)
     else {
@@ -11202,7 +11232,7 @@ fn arm_auxiliary_network_activation_fault(domain_id: u64) -> bool {
 }
 
 fn arm_auxiliary_network_transmit_expectation(domain_id: u64) -> bool {
-    let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
+    let registry = ADDRESS_SPACE_SERVICES.auxiliary_address_spaces.get();
     let Some(registered) = (unsafe { (*registry).iter_mut().flatten() })
         .find(|registered| registered.domain == domain_id)
     else {
@@ -11219,7 +11249,7 @@ fn arm_auxiliary_network_transmit_expectation(domain_id: u64) -> bool {
 }
 
 fn arm_auxiliary_network_receive_expectation(domain_id: u64) -> bool {
-    let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
+    let registry = ADDRESS_SPACE_SERVICES.auxiliary_address_spaces.get();
     let Some(registered) = (unsafe { (*registry).iter_mut().flatten() })
         .find(|registered| registered.domain == domain_id)
     else {
@@ -11237,7 +11267,7 @@ fn arm_auxiliary_network_receive_expectation(domain_id: u64) -> bool {
 }
 
 fn arm_auxiliary_network_egress_expectation(domain_id: u64, reliable: bool) -> bool {
-    let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
+    let registry = ADDRESS_SPACE_SERVICES.auxiliary_address_spaces.get();
     let Some(registered) = (unsafe { (*registry).iter_mut().flatten() })
         .find(|registered| registered.domain == domain_id)
     else {
@@ -11259,7 +11289,7 @@ fn arm_auxiliary_network_egress_expectation(domain_id: u64, reliable: bool) -> b
 }
 
 fn arm_auxiliary_network_egress_reuse_expectation(domain_id: u64, limit: u8) -> bool {
-    let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
+    let registry = ADDRESS_SPACE_SERVICES.auxiliary_address_spaces.get();
     let Some(registered) = (unsafe { (*registry).iter_mut().flatten() })
         .find(|registered| registered.domain == domain_id)
     else {
@@ -11279,7 +11309,7 @@ fn arm_auxiliary_network_egress_reuse_expectation(domain_id: u64, limit: u8) -> 
 }
 
 fn arm_auxiliary_network_receive_corruption(domain_id: u64) -> bool {
-    let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
+    let registry = ADDRESS_SPACE_SERVICES.auxiliary_address_spaces.get();
     let Some(registered) = (unsafe { (*registry).iter_mut().flatten() })
         .find(|registered| registered.domain == domain_id)
     else {
@@ -11296,7 +11326,7 @@ fn arm_auxiliary_network_receive_corruption(domain_id: u64) -> bool {
 }
 
 fn arm_auxiliary_network_reuse_expectation(domain_id: u64) -> bool {
-    let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
+    let registry = ADDRESS_SPACE_SERVICES.auxiliary_address_spaces.get();
     let Some(registered) = (unsafe { (*registry).iter_mut().flatten() })
         .find(|registered| registered.domain == domain_id)
     else {
@@ -11314,7 +11344,7 @@ fn arm_auxiliary_network_reuse_expectation(domain_id: u64) -> bool {
 }
 
 fn arm_auxiliary_network_dhcp_expectation(domain_id: u64) -> bool {
-    let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
+    let registry = ADDRESS_SPACE_SERVICES.auxiliary_address_spaces.get();
     let Some(registered) = (unsafe { (*registry).iter_mut().flatten() })
         .find(|registered| registered.domain == domain_id)
     else {
@@ -11332,7 +11362,10 @@ fn arm_auxiliary_network_dhcp_expectation(domain_id: u64) -> bool {
 }
 
 pub(crate) fn auxiliary_network_wait_ready(domain_id: u64, command: u64, request: u64) -> bool {
-    let registry = core::ptr::addr_of!(AUXILIARY_ADDRESS_SPACES);
+    let registry = ADDRESS_SPACE_SERVICES
+        .auxiliary_address_spaces
+        .get()
+        .cast_const();
     let Some(registered) =
         (unsafe { (*registry).iter().flatten() }).find(|registered| registered.domain == domain_id)
     else {
@@ -11389,7 +11422,10 @@ pub(crate) fn auxiliary_network_wait_ready(domain_id: u64, command: u64, request
 }
 
 pub(crate) fn auxiliary_network_egress_transmit_complete(domain_id: u64) -> bool {
-    let registry = core::ptr::addr_of!(AUXILIARY_ADDRESS_SPACES);
+    let registry = ADDRESS_SPACE_SERVICES
+        .auxiliary_address_spaces
+        .get()
+        .cast_const();
     let Some(registered) =
         (unsafe { (*registry).iter().flatten() }).find(|registered| registered.domain == domain_id)
     else {
@@ -11429,7 +11465,7 @@ pub(crate) fn auxiliary_network_egress_transmit_complete(domain_id: u64) -> bool
 }
 
 pub(crate) fn record_auxiliary_network_egress_ack(domain_id: u64) -> bool {
-    let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
+    let registry = ADDRESS_SPACE_SERVICES.auxiliary_address_spaces.get();
     let Some(registered) = (unsafe { (*registry).iter_mut().flatten() })
         .find(|registered| registered.domain == domain_id)
     else {
@@ -11452,7 +11488,7 @@ pub(crate) fn complete_auxiliary_network_wait(
     command: u64,
     request: u64,
 ) -> AuxiliaryDeviceWaitCompletion {
-    let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
+    let registry = ADDRESS_SPACE_SERVICES.auxiliary_address_spaces.get();
     let Some(registered) = (unsafe { (*registry).iter_mut().flatten() })
         .find(|registered| registered.domain == domain_id)
     else {
@@ -11560,7 +11596,7 @@ pub(crate) fn bind_auxiliary_device_teardown(
     notification_page: Option<u64>,
     interrupt_request: u64,
 ) -> bool {
-    let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
+    let registry = ADDRESS_SPACE_SERVICES.auxiliary_address_spaces.get();
     let Some(registered) = (unsafe { (*registry).iter_mut().flatten() })
         .find(|registered| registered.domain == domain_id)
     else {
@@ -11586,7 +11622,10 @@ pub(crate) fn bind_auxiliary_device_teardown(
 }
 
 pub(crate) fn auxiliary_device_wait_ready(domain_id: u64, request: u64) -> bool {
-    let registry = core::ptr::addr_of!(AUXILIARY_ADDRESS_SPACES);
+    let registry = ADDRESS_SPACE_SERVICES
+        .auxiliary_address_spaces
+        .get()
+        .cast_const();
     let Some(registered) =
         (unsafe { (*registry).iter().flatten() }).find(|registered| registered.domain == domain_id)
     else {
@@ -11626,7 +11665,7 @@ pub(crate) fn complete_auxiliary_device_wait(
     request: u64,
     notified: bool,
 ) -> AuxiliaryDeviceWaitCompletion {
-    let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
+    let registry = ADDRESS_SPACE_SERVICES.auxiliary_address_spaces.get();
     let Some(registered) = (unsafe { (*registry).iter_mut().flatten() })
         .find(|registered| registered.domain == domain_id)
     else {
@@ -11678,7 +11717,7 @@ pub(crate) fn quiesce_faulted_auxiliary_device(domain_id: u64) -> bool {
 }
 
 fn quiesce_auxiliary_device_for(domain_id: u64, require_completed_dma: bool) -> bool {
-    let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
+    let registry = ADDRESS_SPACE_SERVICES.auxiliary_address_spaces.get();
     let Some(registered) = (unsafe { (*registry).iter_mut().flatten() })
         .find(|registered| registered.domain == domain_id)
     else {
@@ -11738,8 +11777,12 @@ fn quiesce_auxiliary_device_for(domain_id: u64, require_completed_dma: bool) -> 
                 || pci::network_service_transmit_is_complete(dma.address(), dma_virtual)
         };
         if !require_completed_dma {
-            LAST_UNSAFE_DEVICE_QUIESCE_WAS_ACTIVE.store(active, Ordering::Release);
-            LAST_UNSAFE_DEVICE_QUIESCE_DOMAIN.store(domain_id, Ordering::Release);
+            ADDRESS_SPACE_SERVICES
+                .last_unsafe_device_quiesce_was_active
+                .store(active, Ordering::Release);
+            ADDRESS_SPACE_SERVICES
+                .last_unsafe_device_quiesce_domain
+                .store(domain_id, Ordering::Release);
         }
         let final_interrupt_request = if registered.expect_network_reuse {
             4
@@ -11793,11 +11836,15 @@ fn quiesce_auxiliary_device_for(domain_id: u64, require_completed_dma: bool) -> 
         return false;
     };
     if !require_completed_dma {
-        LAST_UNSAFE_DEVICE_QUIESCE_WAS_ACTIVE.store(
-            pci::device_active_queue_is_bound(device, mapping, dma_physical),
-            Ordering::Release,
-        );
-        LAST_UNSAFE_DEVICE_QUIESCE_DOMAIN.store(domain_id, Ordering::Release);
+        ADDRESS_SPACE_SERVICES
+            .last_unsafe_device_quiesce_was_active
+            .store(
+                pci::device_active_queue_is_bound(device, mapping, dma_physical),
+                Ordering::Release,
+            );
+        ADDRESS_SPACE_SERVICES
+            .last_unsafe_device_quiesce_domain
+            .store(domain_id, Ordering::Release);
     }
     if notification_page
         .is_some_and(|physical| !registered.space.notification_mapping_is_exact(physical))
@@ -11819,12 +11866,22 @@ fn quiesce_auxiliary_device_for(domain_id: u64, require_completed_dma: bool) -> 
 }
 
 fn unsafe_device_quiesce_was_active(domain_id: u64) -> Option<bool> {
-    (LAST_UNSAFE_DEVICE_QUIESCE_DOMAIN.load(Ordering::Acquire) == domain_id)
-        .then(|| LAST_UNSAFE_DEVICE_QUIESCE_WAS_ACTIVE.load(Ordering::Acquire))
+    (ADDRESS_SPACE_SERVICES
+        .last_unsafe_device_quiesce_domain
+        .load(Ordering::Acquire)
+        == domain_id)
+        .then(|| {
+            ADDRESS_SPACE_SERVICES
+                .last_unsafe_device_quiesce_was_active
+                .load(Ordering::Acquire)
+        })
 }
 
 pub(crate) fn activate_kernel_root_for_auxiliary(domain_id: u64) -> bool {
-    let registry = core::ptr::addr_of!(AUXILIARY_ADDRESS_SPACES);
+    let registry = ADDRESS_SPACE_SERVICES
+        .auxiliary_address_spaces
+        .get()
+        .cast_const();
     let Some(registered) =
         (unsafe { (*registry).iter().flatten() }).find(|registered| registered.domain == domain_id)
     else {
@@ -13105,7 +13162,9 @@ fn verify_native_volume_service_run(
         | NativeVolumeMode::Fault => 0,
         NativeVolumeMode::CancelNotified => 2,
     })?;
-    NATIVE_VOLUME_COMPLETION.store(0, Ordering::Release);
+    ADDRESS_SPACE_SERVICES
+        .native_volume_completion
+        .store(0, Ordering::Release);
     let root_frames = paging::validated_user_root_frames(root);
     if root_frames.as_ref().is_none_or(|frames| {
         frames.base_count() != 4 + space.image_pages + 3
@@ -13178,7 +13237,9 @@ fn verify_native_volume_service_run(
     }
     cpu::execute_native_auxiliary(entry, stack, boot_info as u64, handle, auxiliary, identity);
     let event = domain::take_lifecycle_event();
-    let completion = NATIVE_VOLUME_COMPLETION.swap(0, Ordering::AcqRel);
+    let completion = ADDRESS_SPACE_SERVICES
+        .native_volume_completion
+        .swap(0, Ordering::AcqRel);
     let exit_status = domain::last_lifecycle_event_detail();
     let fault = matches!(
         mode,
