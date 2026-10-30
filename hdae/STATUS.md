@@ -8,12 +8,12 @@
 - Branch: `codex/feedback-hardening`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 8, synchronization and SMP readiness, starting
-- Last completed action: Gate 8 established ranked ticket and IRQ-safe locks,
-  verified their boot contract, and migrated the physical frame allocator from
-  single-CPU `UnsafeCell` access to rank-20 cross-CPU serialization with the
-  complete deterministic QEMU suite passing
-- Next action: audit and migrate scheduler and process-table shared state,
-  then run focused lifecycle/concurrency and complete QEMU regressions
+- Last completed action: Gate 8 added a per-CPU-recursive, cross-CPU-exclusive
+  kernel-entry boundary for syscall, fault, timer, and virtio entry after the
+  non-recursive version exposed a real nested auxiliary-fault path; the revised
+  boundary passed the complete deterministic QEMU suite
+- Next action: continue the scheduler/process, filesystem, socket, signal, IPC,
+  device, and interrupt-context synchronization audit behind that boundary
 
 ## Current repository state
 

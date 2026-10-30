@@ -692,6 +692,7 @@ pub(crate) unsafe fn verify_device_wait_timeout_interrupt() -> bool {
 }
 
 extern "sysv64" fn timer_interrupt_handler(frame: *mut UserInterruptFrame) {
+    let _kernel_entry = crate::sync::kernel_entry_lock();
     TIMER.fired.store(true, Ordering::SeqCst);
     let mode = if TIMER.interrupt_apic_mode.load(Ordering::SeqCst) == 1 {
         Mode::X2Apic

@@ -447,6 +447,7 @@ interior-mutable	kernel/src/scheduler.rs	PROCESS_WORKSPACE	shared-runtime	allowl
 interior-mutable	kernel/src/scheduler.rs	SCHEDULER_RUNTIME	shared-runtime	allowlist	none	explicit-lifecycle-owner-root
 interior-mutable	kernel/src/sync.rs	HELD_RANKS	per-cpu-arch	allowlist	none	explicit-per-cpu-lock-order-tracker
 interior-mutable	kernel/src/sync.rs	HIGH	verification-only	allowlist	none	verification-build-only
+interior-mutable	kernel/src/sync.rs	KERNEL_ENTRY_LOCK	shared-runtime	allowlist	none	explicit-ranked-kernel-entry-lock
 interior-mutable	kernel/src/sync.rs	LOW	verification-only	allowlist	none	verification-build-only
 interior-mutable	kernel/src/sync.rs	PLAIN	verification-only	allowlist	none	verification-build-only
 interior-mutable	kernel/src/volume.rs	LIVE_VOLUME	platform-device	allowlist	none	explicit-host-live-volume-owner-root

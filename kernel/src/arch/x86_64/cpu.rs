@@ -10037,6 +10037,7 @@ extern "sysv64" fn breakpoint_handler() {
 }
 
 extern "sysv64" fn syscall_handler(number: u64, capability: u64, frame: *mut UserTrapFrame) -> u64 {
+    let _kernel_entry = crate::sync::kernel_entry_lock();
     match X86_RUNTIME.PROCESS_CHILD_PROBE_STATE.load(Ordering::SeqCst) {
         PROCESS_CHILD_PROBE_EXPECT_CONTEXT => {
             let valid = (!frame.is_null())
@@ -40522,6 +40523,7 @@ fn exit_result(caller_domain: u64, frame: *mut UserTrapFrame) -> u64 {
 }
 
 extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
+    let _kernel_entry = crate::sync::kernel_entry_lock();
     let Some(frame) = (unsafe { frame.as_mut() }) else {
         return u64::MAX;
     };

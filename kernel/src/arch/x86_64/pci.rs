@@ -1043,6 +1043,7 @@ fn retire_virtio_interrupt_at(apic: &LocalApic, vector: u8) -> bool {
 }
 
 extern "sysv64" fn virtio_interrupt_handler(_frame: *mut UserInterruptFrame) {
+    let _kernel_entry = crate::sync::kernel_entry_lock();
     PCI_INTERRUPTS.virtio_count.fetch_add(1, Ordering::SeqCst);
     if PCI_INTERRUPTS.virtio_active.load(Ordering::SeqCst) {
         let domain = PCI_INTERRUPTS.virtio_domain.load(Ordering::SeqCst);

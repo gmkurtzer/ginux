@@ -27,6 +27,7 @@ impl LockRank {
 }
 
 static HELD_RANKS: [AtomicU16; CPU_SLOT_LIMIT] = [const { AtomicU16::new(0) }; CPU_SLOT_LIMIT];
+static KERNEL_ENTRY_LOCK: KernelEntryLock = KernelEntryLock::new();
 
 pub(crate) struct SpinLock<T> {
     next: AtomicU32,
@@ -170,6 +171,85 @@ impl<T> Drop for IrqSpinLockGuard<'_, T> {
     fn drop(&mut self) {
         // Release the shared lock before reenabling local interrupts.
         unsafe { ManuallyDrop::drop(&mut self.guard) };
+        restore_interrupts(self.interrupt_state);
+    }
+}
+
+pub(crate) fn kernel_entry_lock() -> KernelEntryGuard {
+    KERNEL_ENTRY_LOCK.lock()
+}
+
+struct KernelEntryLock {
+    next: AtomicU32,
+    owner: AtomicU32,
+    cpu_owner: AtomicU16,
+    depths: [AtomicU32; CPU_SLOT_LIMIT],
+}
+
+impl KernelEntryLock {
+    const fn new() -> Self {
+        Self {
+            next: AtomicU32::new(0),
+            owner: AtomicU32::new(0),
+            cpu_owner: AtomicU16::new(0),
+            depths: [const { AtomicU32::new(0) }; CPU_SLOT_LIMIT],
+        }
+    }
+
+    fn lock(&'static self) -> KernelEntryGuard {
+        let interrupt_state = disable_interrupts();
+        let cpu = cpu_slot();
+        let encoded_cpu = cpu as u16 + 1;
+        if self.cpu_owner.load(Ordering::Acquire) == encoded_cpu {
+            let previous = self.depths[cpu].fetch_add(1, Ordering::AcqRel);
+            if previous == 0 {
+                crate::kernel_fail("ginux: invalid recursive kernel-entry depth\r\n");
+            }
+            return KernelEntryGuard {
+                lock: self,
+                cpu,
+                interrupt_state,
+                outermost: false,
+                previous_rank: 0,
+            };
+        }
+
+        let previous_rank = enter_rank(LockRank::ARCHITECTURE);
+        let ticket = self.next.fetch_add(1, Ordering::Relaxed);
+        while self.owner.load(Ordering::Acquire) != ticket {
+            spin_loop();
+        }
+        self.depths[cpu].store(1, Ordering::Release);
+        self.cpu_owner.store(encoded_cpu, Ordering::Release);
+        KernelEntryGuard {
+            lock: self,
+            cpu,
+            interrupt_state,
+            outermost: true,
+            previous_rank,
+        }
+    }
+}
+
+pub(crate) struct KernelEntryGuard {
+    lock: &'static KernelEntryLock,
+    cpu: usize,
+    interrupt_state: InterruptState,
+    outermost: bool,
+    previous_rank: u16,
+}
+
+impl Drop for KernelEntryGuard {
+    fn drop(&mut self) {
+        let previous = self.lock.depths[self.cpu].fetch_sub(1, Ordering::AcqRel);
+        if previous == 0 || self.outermost != (previous == 1) {
+            crate::kernel_fail("ginux: invalid kernel-entry release depth\r\n");
+        }
+        if self.outermost {
+            self.lock.cpu_owner.store(0, Ordering::Release);
+            leave_rank(LockRank::ARCHITECTURE, self.previous_rank);
+            self.lock.owner.fetch_add(1, Ordering::Release);
+        }
         restore_interrupts(self.interrupt_state);
     }
 }

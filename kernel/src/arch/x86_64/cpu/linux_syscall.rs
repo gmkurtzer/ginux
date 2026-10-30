@@ -7,6 +7,7 @@ pub(super) extern "sysv64" fn linux_syscall_handler(
     user_rip: u64,
     user_rflags: u64,
 ) -> u64 {
+    let _kernel_entry = crate::sync::kernel_entry_lock();
     if registers.is_null() {
         X86_RUNTIME.ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
         return LINUX_RETURN_TO_KERNEL;

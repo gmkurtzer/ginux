@@ -27,6 +27,8 @@ interrupt, and multi-CPU execution.
 - [x] Replaced the physical frame allocator's single-CPU `UnsafeCell` access
   with a rank-20 IRQ-safe lock across allocation, ownership, transfer,
   accounting, scrubbing, and release paths.
+- [x] Added a coarse rank-10 IRQ-safe serialization boundary to native and
+  Linux syscall, user-fault, timer-interrupt, and virtio-interrupt entry.
 
 ## Remaining work
 
@@ -61,6 +63,11 @@ audit, and full regressions.
   ownership checks, `make check`, and the complete deterministic QEMU suite;
   frame reservation, zeroing, ownership, stale-lease, and domain-budget
   invariants all remained successful.
+- The first coarse entry lock correctly failed the deterministic QEMU test at
+  a nested auxiliary user fault with a lock-order panic. This proved that a
+  syscall may retain its kernel frame while launched ring-3 work re-enters.
+  Replacing that boundary with per-CPU recursive depth plus cross-CPU ticket
+  exclusion passed the same complete QEMU suite and clean shutdown.
 
 ## Decisions and limitations
 
@@ -76,7 +83,8 @@ Any incompatible primitive or order change remains an architecture decision.
 - Planned commits: primitives/assertions followed by one synchronized
   subsystem per commit with focused and full-suite evidence.
 - Actual commits: `ff07cdd9` adds the synchronization contract and primitives;
-  physical allocator migration pending commit.
+  `360921a0` synchronizes physical allocation; recursive kernel-entry boundary
+  pending commit.
 
 ## Review policy and outcome
 

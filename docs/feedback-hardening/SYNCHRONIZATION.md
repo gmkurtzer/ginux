@@ -46,6 +46,13 @@ the bounded operation is required and safe.
 
 ## Migrated owners
 
+- Kernel runtime entry: native and Linux syscalls, user faults, timer
+  interrupts, and virtio interrupts enter through a rank-10 IRQ-safe boundary.
+  This is the initial coarse serialization rule for owner roots not yet given a
+  finer lock. The boundary is recursive only for the current CPU because a
+  syscall may launch ring-3 auxiliary work whose fault returns through a nested
+  entry before the outer frame unwinds; other CPUs still serialize through the
+  ticket. Boot initialization remains single-CPU by construction.
 - Physical frame allocator: all reservation, ownership, transfer, accounting,
   and release metadata is serialized by the rank-20 IRQ-safe lock. The
   `initialized` flag remains release/acquire publication for the fully
