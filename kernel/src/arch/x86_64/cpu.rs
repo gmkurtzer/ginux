@@ -6261,7 +6261,8 @@ fn switch_linux_thread(handle: LinuxThreadHandle) -> bool {
         let prior = usize::from(prior);
         if prior >= LINUX_THREAD_LIMIT
             || X86_RUNTIME.LINUX_THREAD_STATES[prior].load(Ordering::SeqCst) != LINUX_THREAD_RUNNING
-            || !switch_linux_thread_extended_state(prior, slot)
+            || X86_RUNTIME.LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
+                && !switch_linux_thread_extended_state(prior, slot)
         {
             return false;
         }
@@ -8738,6 +8739,10 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
         ));
         serial_write("\r\n");
     }
+    // Process exit closes every descriptor.  The deferred verification fork
+    // restores the parent's saved table while it runs, so perform the final
+    // close after that child has completed and the registry is quiescent.
+    let linux_descriptors_closed = linux_close_all_descriptors();
     let linux_wait_timer_finished = timer::finish_linux_wait_timer();
     let msrs_restored = restore_linux_syscall(saved_msrs);
     let linux_thread_table_released = finish_linux_thread_table();
@@ -10017,6 +10022,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
         && heap_frame_state_valid
         && heap_break_state_valid
         && umask_restored
+        && linux_descriptors_closed
         && descriptor_state_valid
         && clock_state_valid
         && mmap_state_valid
@@ -11983,6 +11989,12 @@ fn linux_set_current_identity(number: u64, first: u64, second: u64, third: u64) 
 }
 
 fn linux_set_current_groups(size: u64, address: u64) -> u64 {
+    let Some(namespace) = current_linux_user_namespace() else {
+        return LINUX_ESRCH;
+    };
+    if !linux_user::setgroups_allowed(namespace) {
+        return LINUX_EPERM;
+    }
     let Some(credentials) = current_linux_credentials() else {
         return LINUX_ESRCH;
     };
