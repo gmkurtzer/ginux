@@ -28,9 +28,11 @@ thread counts scaled with available CPUs.
 
 ## Completed work
 
-- [ ] Freeze the matrix, controls, repetitions, and output schema.
-- [ ] Add reproducible matrix orchestration and summary generation.
-- [ ] Run the matched Linux and Ginux measurements.
+- [x] Freeze the matrix, controls, repetitions, and output schema.
+- [x] Add reproducible matrix orchestration and summary generation.
+- [ ] Run the matched Linux and Ginux measurements. The 1-vCPU/1-thread cell
+  passed; Linux and boot measurements passed at 2-vCPU/1-thread, but Ginux
+  sysbench exposed an unsupported futex wait state before producing samples.
 - [ ] Verify raw samples, binary identity, results, and QEMU cleanup.
 - [ ] Publish the comparison and its limitations.
 
@@ -66,7 +68,17 @@ thread counts scaled with available CPUs.
 
 ## Evidence
 
-- Not run yet.
+- `make check && make architecture-check` -> passed before measurement.
+- Fixed 1-vCPU/1-thread -> nine successful samples per workload for both
+  systems and three successful boot samples per system.
+- Fixed 2-vCPU/1-thread Linux -> nine successful samples per workload and
+  three successful boot samples.
+- Fixed 2-vCPU/1-thread Ginux boot -> three successful boot samples.
+- Fixed 2-vCPU/1-thread Ginux sysbench -> failed before its first CPU sample:
+  futex syscall 202 with operation 128 reached the no-ready-peer path and
+  sysbench reported `The futex facility returned an unexpected error code.`
+- Interrupting the failed matrix left no QEMU process and no open benchmark
+  volume.
 
 ## Decisions and limitations
 
@@ -76,6 +88,9 @@ thread counts scaled with available CPUs.
   and Ginux follow different firmware, kernel, image, and userspace paths.
 - QEMU TCG on the macOS development host is the experiment environment; the
   results do not predict native hardware performance.
+- Completing the fixed-thread SMP measurements requires either a narrowly
+  authorized futex/scheduler compatibility fix or recording those Ginux cells
+  as unsupported. Performance tuning remains outside this gate.
 
 ## Delivery strategy
 

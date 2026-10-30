@@ -7,12 +7,13 @@
 - Active project: feedback-driven kernel hardening
 - Branch: `codex/feedback-hardening`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 11, matched UP and SMP benchmark matrix, approved and in
-  progress
-- Last completed action: froze the Gate 11 scope, controls, sample counts,
-  acceptance criteria, and delivery on existing PR #7
-- Next action: extend the existing benchmark harness for matched Linux/Ginux
-  fixed-thread and scaled-thread measurements at one, two, and four vCPUs
+- Active gate: Gate 11, matched UP and SMP benchmark matrix, blocked on a
+  human scope decision
+- Last completed action: completed the matched 1-vCPU/1-thread cell and the
+  Linux plus boot portions of 2-vCPU/1-thread; the Ginux workload exposed a
+  futex wait compatibility failure when no scheduler peer was ready
+- Next action: decide whether Gate 11 may include a narrow futex/scheduler
+  compatibility fix or must report fixed-thread SMP cells as unsupported
 
 ## Current repository state
 
@@ -26,8 +27,11 @@ evidence are under `docs/feedback-hardening/`. No push or merge was performed.
 
 ## Open decisions
 
-- None. Per-CPU entry storage and distinct guarded NMI, double-fault, and
-  machine-check ISTs are already approved architectural requirements.
+- Gate 11 is measurement-only as approved. Completing its fixed-thread SMP
+  cells requires a compatibility change: syscall 202/FUTEX_WAIT_PRIVATE must
+  block correctly when the current CPU has no ready scheduler peer. Human
+  authorization is required before expanding the gate to that implementation
+  work.
 
 ## Limitations
 
