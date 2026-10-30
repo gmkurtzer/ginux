@@ -7,13 +7,13 @@
 - Active project: feedback-driven kernel hardening
 - Branch: `codex/feedback-hardening`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 10, qualification and comparison, ready to begin
+- Active gate: Gate 10, qualification and comparison, in progress
 - Last completed action: Gate 9 closed after implementing AP startup, per-CPU
   architecture and scheduler state, cross-CPU runtime mechanisms, domain-aware
   scheduling, explicit one/two/four-vCPU qualification, repeated stress, and a
   two-vCPU ordinary QEMU default
-- Next action: freeze the Gate 10 qualification matrix and tolerances against
-  the published `research-v1-baseline`
+- Next action: run the frozen functional and adversarial qualification matrix,
+  preserving exact failures and raw evidence before performance measurement
 
 ## Current repository state
 
