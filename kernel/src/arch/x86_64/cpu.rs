@@ -6519,6 +6519,14 @@ fn linux_thread_handle_by_tid(tid: u64) -> Option<LinuxThreadHandle> {
 }
 
 fn ready_linux_thread_handle() -> Option<LinuxThreadHandle> {
+    if current_linux_runtime_cpu_index() != 0 {
+        let slot = crate::arch::x86_64::smp::linux_runtime_thread_slot()?;
+        return (X86_RUNTIME.LINUX_THREAD_STATES[slot].load(Ordering::SeqCst)
+            == LINUX_THREAD_READY)
+            .then(|| linux_thread_handle(slot))
+            .flatten()
+            .filter(|handle| linux_thread_return_context(*handle).is_some());
+    }
     let after = current_linux_thread_slot().unwrap_or_else(|| {
         usize::from(
             X86_RUNTIME
@@ -6529,8 +6537,7 @@ fn ready_linux_thread_handle() -> Option<LinuxThreadHandle> {
     (1..=LINUX_THREAD_LIMIT).find_map(|offset| {
         let slot = after.wrapping_add(offset) % LINUX_THREAD_LIMIT;
         (X86_RUNTIME.LINUX_THREAD_STATES[slot].load(Ordering::SeqCst) == LINUX_THREAD_READY
-            && (current_linux_runtime_cpu_index() != 0
-                || !crate::arch::x86_64::smp::linux_runtime_thread_is_remote(slot)))
+            && !crate::arch::x86_64::smp::linux_runtime_thread_is_remote(slot))
         .then(|| linux_thread_handle(slot))
         .flatten()
         .filter(|handle| linux_thread_return_context(*handle).is_some())
@@ -6538,6 +6545,14 @@ fn ready_linux_thread_handle() -> Option<LinuxThreadHandle> {
 }
 
 fn yield_ready_linux_thread_handle() -> Option<LinuxThreadHandle> {
+    if current_linux_runtime_cpu_index() != 0 {
+        let slot = crate::arch::x86_64::smp::linux_runtime_thread_slot()?;
+        return (X86_RUNTIME.LINUX_THREAD_STATES[slot].load(Ordering::Acquire)
+            == LINUX_THREAD_READY)
+            .then(|| linux_thread_handle(slot))
+            .flatten()
+            .filter(|handle| linux_thread_return_context(*handle).is_some());
+    }
     // A timer-preempted thread has already consumed its current quantum.
     // Do not let a sibling's voluntary yield immediately hand the CPU back;
     // the next timer quantum will make it eligible through preemption.

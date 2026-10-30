@@ -336,8 +336,15 @@ pub(crate) fn begin_linux_runtime_thread(
 }
 
 pub(crate) fn linux_runtime_thread_is_remote(slot: usize) -> bool {
-    LINUX_RUNTIME_THREAD_ACTIVE.load(Ordering::Acquire)
-        && usize::from(LINUX_RUNTIME_THREAD_SLOT.load(Ordering::Acquire)) == slot
+    linux_runtime_thread_slot() == Some(slot)
+}
+
+pub(crate) fn linux_runtime_thread_slot() -> Option<usize> {
+    if !LINUX_RUNTIME_THREAD_ACTIVE.load(Ordering::Acquire) {
+        return None;
+    }
+    let slot = usize::from(LINUX_RUNTIME_THREAD_SLOT.load(Ordering::Acquire));
+    (slot != usize::from(u8::MAX)).then_some(slot)
 }
 
 pub(crate) fn verify_cross_cpu_mechanisms() -> bool {
