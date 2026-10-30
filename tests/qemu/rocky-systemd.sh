@@ -263,6 +263,9 @@ qemu_started_at_ms=$(now_ms)
                     stop_qemu
                     exit 0
                 fi
+                if [[ "${GINUX_BENCHMARK_REUSE_DOMAIN:-0}" == 1 ]]; then
+                    continue
+                fi
                 controller_prompt_count=$(grep -Foc 'ginux>' "$output_file" || true)
                 printf '%s\n' exit
                 wait_for_count 'ginux>' "$((controller_prompt_count + 1))" 30
@@ -272,6 +275,14 @@ qemu_started_at_ms=$(now_ms)
                 fi
             done
         done
+        if [[ "${GINUX_BENCHMARK_REUSE_DOMAIN:-0}" == 1 ]]; then
+            controller_prompt_count=$(grep -Foc 'ginux>' "$output_file" || true)
+            printf '%s\n' exit
+            wait_for_count 'ginux>' "$((controller_prompt_count + 1))" 30
+            printf '%s\n' ok >"$success_file"
+            stop_qemu
+            exit 0
+        fi
         wait_for 'ginux> ' 30
         printf '%s\n' shutdown
         wait_for 'GINUX_KERNEL_OK' 30
@@ -419,6 +430,13 @@ if [[ "${GINUX_BENCHMARK_SINGLE_RUN:-0}" == 1 && -s "$success_file" ]] \
     && grep -Eq 'GINUX_BENCH_WORKLOAD_END_[a-z]+_[0-9]+=0' "$output_file" \
     && ! grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC|^ginux: Linux user fault' "$output_file"; then
     echo 'Ginux sysbench sample completed.'
+    exit 0
+fi
+
+if [[ "${GINUX_BENCHMARK_REUSE_DOMAIN:-0}" == 1 && -s "$success_file" ]] \
+    && grep -Eq 'GINUX_BENCH_WORKLOAD_END_[a-z]+_[0-9]+=0' "$output_file" \
+    && ! grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC|^ginux: Linux user fault' "$output_file"; then
+    echo 'Ginux batched sysbench samples completed.'
     exit 0
 fi
 

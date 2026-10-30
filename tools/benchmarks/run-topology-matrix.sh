@@ -40,12 +40,15 @@ run_configuration() {
     mkdir -p "$result_dir"
     echo "Benchmarking $mode mode: $cpus vCPU(s), $threads thread(s)"
 
-    GINUX_BENCHMARK_DIR="$result_dir" \
-    GINUX_BENCHMARK_ASSET_DIR="$asset_dir" \
-    BENCHMARK_VCPUS="$cpus" BENCHMARK_THREADS="$threads" \
-        "$benchmark_root/tools/benchmarks/run-rocky-linux.sh"
+    if [[ "$force" == 1 || ! -s "$result_dir/.linux-complete" ]]; then
+        GINUX_BENCHMARK_DIR="$result_dir" \
+        GINUX_BENCHMARK_ASSET_DIR="$asset_dir" \
+        BENCHMARK_VCPUS="$cpus" BENCHMARK_THREADS="$threads" \
+            "$benchmark_root/tools/benchmarks/run-rocky-linux.sh"
+        printf 'complete\n' >"$result_dir/.linux-complete"
+    fi
 
-    if [[ "$include_boot" == 1 ]]; then
+    if [[ "$include_boot" == 1 && ( "$force" == 1 || ! -s "$result_dir/.ginux-boot-complete" ) ]]; then
         GINUX_BENCHMARK_DIR="$result_dir" \
         GINUX_BENCHMARK_ASSET_DIR="$asset_dir" \
         BENCHMARK_VCPUS="$cpus" BENCHMARK_THREADS="$threads" \
@@ -54,13 +57,17 @@ run_configuration() {
         GINUX_BENCHMARK_ASSET_DIR="$asset_dir" \
         BENCHMARK_VCPUS="$cpus" BENCHMARK_THREADS="$threads" \
             "$benchmark_root/tools/benchmarks/summarize-boot.sh" >"$result_dir/boot-summary.txt"
+        printf 'complete\n' >"$result_dir/.ginux-boot-complete"
     fi
 
-    GINUX_BENCHMARK_DIR="$result_dir" \
-    GINUX_BENCHMARK_ASSET_DIR="$asset_dir" \
-    BENCHMARK_VCPUS="$cpus" BENCHMARK_THREADS="$threads" \
-    GINUX_BENCHMARK_BATCHED=1 \
-        "$benchmark_root/tools/benchmarks/run-ginux.sh"
+    if [[ "$force" == 1 || ! -s "$result_dir/.ginux-sysbench-complete" ]]; then
+        GINUX_BENCHMARK_DIR="$result_dir" \
+        GINUX_BENCHMARK_ASSET_DIR="$asset_dir" \
+        BENCHMARK_VCPUS="$cpus" BENCHMARK_THREADS="$threads" \
+        GINUX_BENCHMARK_BATCHED=1 \
+            "$benchmark_root/tools/benchmarks/run-ginux.sh"
+        printf 'complete\n' >"$result_dir/.ginux-sysbench-complete"
+    fi
 
     GINUX_BENCHMARK_DIR="$result_dir" \
     GINUX_BENCHMARK_ASSET_DIR="$asset_dir" \
