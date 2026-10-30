@@ -55,5 +55,23 @@ the bounded operation is required and safe.
   ticket. Boot initialization remains single-CPU by construction.
 - Physical frame allocator: all reservation, ownership, transfer, accounting,
   and release metadata is serialized by the rank-20 IRQ-safe lock. The
-  `initialized` flag remains release/acquire publication for the fully
+  allocator lock also covers contiguous-extent validation, security scrubbing,
+  and metadata release so another CPU cannot recycle a frame during scrubbing.
+  The `initialized` flag remains release/acquire publication for the fully
   constructed allocator.
+
+## Local interrupt audit
+
+Direct `cli`, `sti`, and `sti; hlt; cli` sequences are limited to local CPU
+semantics:
+
+- synchronization guards save, clear, and restore the local IF state;
+- APIC and virtio verification temporarily admit a local interrupt and then
+  mask it while device state is retired;
+- device waits use the x86 interrupt shadow around `sti; hlt` to avoid a lost
+  wakeup; and
+- timer calibration and timeout proofs temporarily admit their local vector.
+
+None of these sequences protects cross-CPU shared state. The architecture
+check rejects removal of the shared kernel-entry boundary, replacement of the
+locked physical allocator, and stale single-processor serialization claims.

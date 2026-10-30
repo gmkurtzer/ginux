@@ -78,8 +78,8 @@ static PROCESS_RUNTIME: ProcessRuntimeOwner =
 
 fn process_runtime() -> &'static ProcessRuntimeState {
     // SAFETY: The owner has boot lifetime. Mutable fields use atomics or
-    // UnsafeCell and retain their existing single-CPU lifecycle serialization
-    // until Gate 8 adds cross-CPU locking.
+    // UnsafeCell and are serialized by the recursive kernel-entry boundary.
+    // Gate 9 may replace that coarse rule with finer per-owner locks.
     unsafe { &*PROCESS_RUNTIME.0.get() }
 }
 
@@ -2481,7 +2481,7 @@ pub(crate) fn host_live_process_count() -> Option<u16> {
     for (instance, initialized) in process_runtime().table_initialized.iter().enumerate() {
         if initialized.load(Ordering::Acquire) {
             // Linux process-table mutation and host inspection are serialized
-            // on the current single-processor syscall path.
+            // by the recursive kernel-entry boundary.
             let table = unsafe {
                 &*process_runtime()
                     .tables

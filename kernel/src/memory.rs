@@ -301,36 +301,10 @@ impl<
         start: FrameLease,
         count: usize,
     ) -> bool {
-        let Some(end) = (count as u64)
-            .checked_mul(PAGE_SIZE)
-            .and_then(|size| start.address.checked_add(size))
-        else {
-            return false;
-        };
-        if count == 0
-            || start.address < LOW_MEMORY_LIMIT
-            || !start.address.is_multiple_of(PAGE_SIZE)
-            || start.generation == 0
-            || self
-                .recycled_count
-                .checked_add(count)
-                .is_none_or(|value| value > RECYCLED_LIMIT)
-            || self.allocated_frames < count as u64
-            || self.live_count < count
-            || self.live_frames[..self.live_count]
-                .iter()
-                .zip(&self.live_owners[..self.live_count])
-                .filter(|(frame, frame_owner)| {
-                    **frame_owner == owner
-                        && frame.generation == start.generation
-                        && (start.address..end).contains(&frame.address())
-                        && frame.address.is_multiple_of(PAGE_SIZE)
-                })
-                .count()
-                != count
-        {
+        if !self.can_release_contiguous_extent(owner, start, count) {
             return false;
         }
+        let end = start.address + count as u64 * PAGE_SIZE;
         let mut index = 0;
         while index < self.live_count {
             let frame = self.live_frames[index];
@@ -363,6 +337,41 @@ impl<
         }
         self.allocated_frames -= count as u64;
         true
+    }
+
+    fn can_release_contiguous_extent(
+        &self,
+        owner: FrameOwner,
+        start: FrameLease,
+        count: usize,
+    ) -> bool {
+        let Some(end) = (count as u64)
+            .checked_mul(PAGE_SIZE)
+            .and_then(|size| start.address.checked_add(size))
+        else {
+            return false;
+        };
+        !(count == 0
+            || start.address < LOW_MEMORY_LIMIT
+            || !start.address.is_multiple_of(PAGE_SIZE)
+            || start.generation == 0
+            || self
+                .recycled_count
+                .checked_add(count)
+                .is_none_or(|value| value > RECYCLED_LIMIT)
+            || self.allocated_frames < count as u64
+            || self.live_count < count
+            || self.live_frames[..self.live_count]
+                .iter()
+                .zip(&self.live_owners[..self.live_count])
+                .filter(|(frame, frame_owner)| {
+                    **frame_owner == owner
+                        && frame.generation == start.generation
+                        && (start.address..end).contains(&frame.address())
+                        && frame.address.is_multiple_of(PAGE_SIZE)
+                })
+                .count()
+                != count)
     }
 
     fn allocate_one(&mut self, owner: FrameOwner) -> Option<FrameLease> {
@@ -850,18 +859,22 @@ pub(crate) fn scrub_and_release_contiguous_extent(
     if !PHYSICAL_MEMORY.initialized.load(Ordering::Acquire) || count == 0 {
         return false;
     }
-    let Some(address) = first.direct_map_address() else {
-        return false;
-    };
-    let Some(length) = count.checked_mul(PAGE_SIZE as usize) else {
-        return false;
-    };
-    unsafe { core::ptr::write_bytes(address as *mut u8, 0, length) };
     let mut storage = PHYSICAL_MEMORY.allocator.lock();
     unsafe {
-        storage
-            .assume_init_mut()
-            .release_contiguous_extent(owner, first, count)
+        let allocator = storage.assume_init_mut();
+        if !allocator.can_release_contiguous_extent(owner, first, count) {
+            return false;
+        }
+        let Some(address) = first.direct_map_address() else {
+            return false;
+        };
+        let Some(length) = count.checked_mul(PAGE_SIZE as usize) else {
+            return false;
+        };
+        // The allocator lock prevents another CPU from recycling this extent
+        // until both the security scrub and metadata release are complete.
+        core::ptr::write_bytes(address as *mut u8, 0, length);
+        allocator.release_contiguous_extent(owner, first, count)
     }
 }
 
