@@ -7,20 +7,20 @@
 - Active project: feedback-driven kernel hardening
 - Branch: `codex/feedback-hardening`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 3, fault-recovering userspace access, ready to begin
-- Last completed action: Gate 3 added exception-fixup user-copy loops, partial
-  cross-page and unmapped runtime tests, and passed `make check` plus the full
-  `make test` QEMU boot suite
-- Next action: classify every remaining direct SMAP-open userspace access,
-  migrate untrusted syscall pointers to audited primitives, and enforce the
-  boundary with an architecture check
+- Active gate: Gate 4, global-state classification and ownership design, ready
+  to begin
+- Last completed action: Gate 3 migrated syscall-side userspace access to
+  fault-recovering primitives and passed `make check`, the full verification
+  boot, the 398-row Linux ABI report, and attached plus detached Rocky systemd
+  lifecycle tests
+- Next action: generate the complete writable-global inventory, classify every
+  item by owner and lifetime, and turn that classification into a checked
+  allowlist and migration map
 
 ## Current repository state
 
-Local and remote `main` identify commit `1852455`. Gate 2 passed and closed
-under delegated review. Gate 3 is partial: its fault-fixup mechanism and
-adversarial runtime proof pass, while the direct-access migration and audit
-remain open.
+Local and remote `main` identify commit `1852455`. Gates 1 through 3 passed and
+closed under delegated review. Gate 4 is active; its dependency is satisfied.
 
 ## Open decisions
 
