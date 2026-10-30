@@ -12,6 +12,14 @@ const APIC_BASE_MASK: u64 = 0x000f_ffff_ffff_f000;
 const APIC_IN_SERVICE_BASE: u32 = 0x100;
 const APIC_TRIGGER_MODE_BASE: u32 = 0x180;
 const APIC_INTERRUPT_REQUEST_BASE: u32 = 0x200;
+const APIC_INTERRUPT_COMMAND_LOW: u32 = 0x300;
+const APIC_INTERRUPT_COMMAND_HIGH: u32 = 0x310;
+const APIC_DELIVERY_PENDING: u32 = 1 << 12;
+const APIC_LEVEL_ASSERT: u32 = 1 << 14;
+const APIC_TRIGGER_LEVEL: u32 = 1 << 15;
+const APIC_DELIVERY_INIT: u32 = 5 << 8;
+const APIC_DELIVERY_STARTUP: u32 = 6 << 8;
+const X2APIC_INTERRUPT_COMMAND_MSR: u32 = 0x830;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Mode {
@@ -81,6 +89,64 @@ impl LocalApic {
                 && self.read(APIC_TRIGGER_MODE_BASE + bank) & bit == 0
                 && self.read(APIC_INTERRUPT_REQUEST_BASE + bank) & bit == 0
         }
+    }
+
+    pub(crate) unsafe fn start_processor(&self, target: u32, vector: u8) -> bool {
+        if target == u32::from(self.id) || vector == 0 {
+            return false;
+        }
+        if !self.send_ipi(
+            target,
+            APIC_DELIVERY_INIT | APIC_LEVEL_ASSERT | APIC_TRIGGER_LEVEL,
+        ) {
+            return false;
+        }
+        startup_delay(1_000_000);
+        for _ in 0..2 {
+            if !self.send_ipi(target, APIC_DELIVERY_STARTUP | u32::from(vector)) {
+                return false;
+            }
+            startup_delay(200_000);
+        }
+        true
+    }
+
+    unsafe fn send_ipi(&self, target: u32, command: u32) -> bool {
+        match self.mode {
+            Mode::XApic => {
+                let Ok(target) = u8::try_from(target) else {
+                    return false;
+                };
+                for _ in 0..1_000_000 {
+                    if self.read(APIC_INTERRUPT_COMMAND_LOW) & APIC_DELIVERY_PENDING == 0 {
+                        self.write(APIC_INTERRUPT_COMMAND_HIGH, u32::from(target) << 24);
+                        self.write(APIC_INTERRUPT_COMMAND_LOW, command);
+                        for _ in 0..1_000_000 {
+                            if self.read(APIC_INTERRUPT_COMMAND_LOW) & APIC_DELIVERY_PENDING == 0 {
+                                return true;
+                            }
+                            core::hint::spin_loop();
+                        }
+                        return false;
+                    }
+                    core::hint::spin_loop();
+                }
+                false
+            }
+            Mode::X2Apic => {
+                write_msr(
+                    X2APIC_INTERRUPT_COMMAND_MSR,
+                    (u64::from(target) << 32) | u64::from(command),
+                );
+                true
+            }
+        }
+    }
+}
+
+fn startup_delay(iterations: usize) {
+    for _ in 0..iterations {
+        core::hint::spin_loop();
     }
 }
 

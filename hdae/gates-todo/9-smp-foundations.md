@@ -29,10 +29,13 @@ exercise SMP by making two vCPUs the ordinary QEMU test default.
   interrupt-gate changes consistently to every CPU's private IDT.
 - [x] Replace the initial page-table builder's arbitrary 128-region fine-map
   cap with the complete bounded 4 GiB bootstrap-map geometry.
+- [x] Start each discovered application processor through a read-only,
+  executable low-memory trampoline, give it private guarded architecture
+  state, and publish its online state only after GDT/TSS/IDT and CPU
+  protections are active.
 
 ## Remaining work
 
-- Specify AP startup and per-CPU lifecycle.
 - Implement cross-CPU mechanisms and scheduler integration.
 - Add deterministic and stress coverage for one, two, and four vCPUs.
 - Change ordinary QEMU tests to two vCPUs only after SMP criteria pass.
@@ -67,6 +70,17 @@ multi-domain policy results, QEMU harness diffs, and repeated stress runs.
   the complete 2,048-region geometry passed `make check` and the same full
   two-vCPU QEMU regression, including all privilege-entry checks and clean
   shutdown.
+- Early AP-startup runs reached the SIPI trampoline but failed first at the
+  temporary GDT load and then at paging activation. Instruction-stage markers
+  and a QEMU exception trace identified an unintended segment-relative GDT
+  address, an extra CR3 mailbox dereference, and missing AP-side EFER.NXE.
+  Correcting those architectural transitions advanced the AP into the Rust
+  entry point without weakening W^X.
+- `cargo fmt --all`, `make architecture-check`, `make check`, and
+  `make build-verification && GINUX_CPUS=2 bash tests/qemu/boot.sh` pass after
+  removing the temporary diagnostics. The transcript reports
+  `ginux: online processors: 2`, completes the Linux runtime matrix, and ends
+  with `Boot test passed` across the initial, reboot, and corruption phases.
 
 ## Decisions and limitations
 
@@ -80,7 +94,8 @@ though two vCPUs become the ordinary development default.
 - Pull request: the shared ten-gate pull request.
 - Planned commits: discovery/AP startup, per-CPU state, IPIs/shootdowns,
   scheduler concurrency, domain policy, QEMU defaults, and integration evidence.
-- Actual commits: pending.
+- Actual commits: `2ad2c72a` (topology identities), `beafc0f0` (per-CPU
+  architecture state), and AP-startup commit pending.
 
 ## Review policy and outcome
 

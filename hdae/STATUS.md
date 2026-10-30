@@ -7,18 +7,20 @@
 - Active project: feedback-driven kernel hardening
 - Branch: `codex/feedback-hardening`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 9, SMP operation and 2-vCPU test default, starting
+- Active gate: Gate 9, SMP operation and 2-vCPU test default, in progress
 - Last completed action: Gate 8 closed after adding ranked locks, synchronizing
   physical allocation and scrubbing, enforcing a recursive cross-CPU-exclusive
   kernel-entry boundary, auditing direct interrupt masking, and passing the
   complete deterministic QEMU suite
-- Next action: specify and implement application-processor startup and per-CPU
-  architecture state, then prove the first two-vCPU boot
+- Next action: add cross-CPU interrupts, wakeups, and translation invalidation,
+  then integrate the scheduler so Linux work executes concurrently
 
 ## Current repository state
 
 Local and remote `main` identify commit `1852455`. Gates 1 through 8 passed and
 closed under delegated review. Gate 9 is active on the shared hardening branch.
+The discovered AP set now starts through a W^X low-memory trampoline and a
+fresh two-vCPU deterministic QEMU run reports both processors online.
 
 ## Open decisions
 

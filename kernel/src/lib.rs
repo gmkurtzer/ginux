@@ -437,6 +437,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     guard_pages[2] = kernel_stack_upper_guard;
     guard_pages[3..].copy_from_slice(&cpu_guard_pages);
 
+    if !arch::x86_64::smp::prepare_trampoline() {
+        kernel_fail("ginux: application-processor trampoline preparation failed\r\n");
+    }
+
     if !arch::x86_64::cpu::enable_execute_disable() {
         kernel_fail("ginux: execute-disable unavailable or inactive\r\n");
     }
@@ -665,6 +669,13 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write_u64(local_apic.physical_base);
     serial_write("\r\n");
     serial_write("ginux: local APIC uses higher-half direct map\r\n");
+
+    if !arch::x86_64::smp::start_application_processors(platform, &local_apic) {
+        kernel_fail("ginux: application-processor startup failed\r\n");
+    }
+    serial_write("ginux: online processors: ");
+    serial_write_usize(arch::x86_64::smp::online_count());
+    serial_write("\r\n");
 
     let timers = arch::x86_64::timer::discover();
     serial_write("ginux: timer capabilities discovered\r\nginux: invariant TSC: ");

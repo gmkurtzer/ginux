@@ -331,6 +331,10 @@ pub(crate) fn privilege_stack_top() -> usize {
     CPU_ARCHITECTURE.privilege_stack.get().cast_const() as usize + EXCEPTION_STACK_TOP_OFFSET
 }
 
+pub(crate) fn privilege_stack_top_for_cpu(cpu: usize) -> Option<usize> {
+    (cpu < CPU_ENTRY_STATE_LIMIT).then(|| exception_stack_address(cpu) + EXCEPTION_STACK_TOP_OFFSET)
+}
+
 pub(crate) fn stack_guard_pages() -> [usize; CPU_ENTRY_STATE_LIMIT * 8] {
     let mut pages = [0; CPU_ENTRY_STATE_LIMIT * 8];
     for cpu in 0..CPU_ENTRY_STATE_LIMIT {

@@ -1083,6 +1083,22 @@ pub(crate) unsafe fn install_initial_identity_map(
             )?;
         }
     }
+    let trampoline = super::smp::TRAMPOLINE_PHYSICAL;
+    let trampoline_region = trampoline / LARGE_PAGE_SIZE as usize;
+    let trampoline_fine_index = ensure_fine_region(
+        trampoline_region,
+        &mut fine_regions,
+        &mut fine_count,
+        fine_tables,
+        directories,
+    )?;
+    let trampoline_page = (trampoline % LARGE_PAGE_SIZE as usize) / PAGE_SIZE;
+    let trampoline_entries =
+        core::ptr::addr_of_mut!((*fine_tables.add(trampoline_fine_index)).0).cast::<u64>();
+    let trampoline_value = trampoline_entries.add(trampoline_page).read();
+    trampoline_entries
+        .add(trampoline_page)
+        .write(trampoline_value & !(NO_EXECUTE | WRITABLE));
 
     if auxiliary_mmio_page < INITIAL_IDENTITY_LIMIT as u64 {
         let auxiliary_end = auxiliary_mmio_mapped_end.ok_or(PagingError::MmioMapInvalid)?;
@@ -1667,6 +1683,7 @@ pub(crate) fn identity_map_obeys_wx(boot_info: &BootInfo, image: &ImageSummary) 
                     .any(|(start, end)| address < *end && *start < address + PAGE_SIZE);
                 let expected_writable = image_writable && !is_static_table_page(address);
                 let executable = image_code
+                    || address == super::smp::TRAMPOLINE_PHYSICAL
                     || range_contains_runtime_code(boot_info, address, address + PAGE_SIZE);
                 if executable == (leaf & NO_EXECUTE != 0)
                     || (image_page && expected_writable != (leaf & WRITABLE != 0))

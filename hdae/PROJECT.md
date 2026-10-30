@@ -8,7 +8,9 @@ hardening iteration using Human-Directed Agentic Engineering (HDAE).
 
 The published initial experiment remains identified by the
 `research-v1-baseline` tag. Work for this experiment is performed on
-`codex/feedback-hardening` and stops for human review at every gate.
+`codex/feedback-hardening`; the current ten-gate batch uses delegated closure
+after complete fresh evidence and stops only for a failed dependency or a
+genuine architecture or scope decision.
 
 ## Intended outcome
 
@@ -51,6 +53,6 @@ four virtual CPUs.
 ## Human direction
 
 The human approves the gate order, scope, acceptance criteria, architectural
-tradeoffs, and every transition between gates. The agent performs bounded
-implementation and verification loops inside the approved gate and reports
-failed approaches and limitations as evidence.
+tradeoffs, and review policy. The agent performs bounded implementation and
+verification loops inside the approved batch and reports failed approaches and
+limitations as evidence.
