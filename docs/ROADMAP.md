@@ -12,6 +12,8 @@ global-state ownership, synchronization, decomposition, and SMP gates are
 defined in [Feedback-Driven Hardening Research](FEEDBACK-HARDENING-RESEARCH.md).
 This track does not silently rewrite the historical results or bypass the
 functional checkpoints below.
+Its authoritative HDAE execution ledger and review gates are maintained under
+[`hdae/`](../hdae/).
 
 The active post-syscall-dispatch compatibility work is divided into the
 mandatory review-gated stages in [Next Goal: Linux Compatibility to Operational

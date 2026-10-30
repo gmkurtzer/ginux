@@ -15,6 +15,14 @@ the current implementation, translated into an explicit invariant, reproduced
 by a negative test where possible, corrected, and retained as a regression
 gate. Work stops after every gate for review before the next gate begins.
 
+## Authoritative execution ledger
+
+This document records the research rationale and gate design. The authoritative
+HDAE lifecycle state is maintained in [`hdae/`](../hdae/): project and
+architecture context, current status, the ordered plan, and one independently
+reviewable file per gate. If status text here and the lifecycle ledger ever
+diverge, the ledger controls execution and this document must be reconciled.
+
 ## Demarcation and evidence
 
 - `research-v1-baseline` identifies commit
