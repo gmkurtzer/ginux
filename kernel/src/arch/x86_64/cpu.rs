@@ -4596,10 +4596,9 @@ fn execute_deferred_live_fork() -> bool {
         {
             return false;
         }
-        let Some(parent_state) = linux_process_runtime_state(parent_pid) else {
+        if !capture_linux_descriptors_for_process(parent_pid) {
             return false;
-        };
-        parent_state.descriptors = capture_linux_descriptor_runtime_state();
+        }
     }
     let Some(child_process_slot) = linux_process::live_process_slot(child.pid) else {
         return false;
@@ -13067,6 +13066,10 @@ struct LinuxForkParentRuntime {
     nice: u8,
 }
 
+// Keep the large process-state snapshot in this bounded frame. Inlining this
+// function into the recursive fork executor retains roughly 50 KiB for every
+// live child and can exhaust the kernel stack during a systemd boot.
+#[inline(never)]
 fn stage_linux_fork_parent_runtime_state(parent_pid: u32) -> Option<LinuxForkParentRuntime> {
     let mut state = capture_linux_process_runtime_state()?;
     state.active = true;
@@ -13173,6 +13176,17 @@ fn restore_saved_linux_process_runtime_state(pid: u32) -> bool {
             Ordering::Relaxed,
         );
     }
+    true
+}
+
+// Isolate the large descriptor snapshot from callers that remain on the
+// kernel stack while a child process runs.
+#[inline(never)]
+fn capture_linux_descriptors_for_process(pid: u32) -> bool {
+    let Some(state) = linux_process_runtime_state(pid) else {
+        return false;
+    };
+    state.descriptors = capture_linux_descriptor_runtime_state();
     true
 }
 
