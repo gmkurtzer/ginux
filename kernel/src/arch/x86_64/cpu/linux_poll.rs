@@ -704,12 +704,17 @@ pub(super) fn linux_poll_wait_live_return(
                 })
         })
     });
-    if !waits_for_parent_unix_peer
-        && active.as_chunks::<8>().0.iter().any(|pollfd| {
-            let descriptor = i32::from_ne_bytes(pollfd[..4].try_into().unwrap());
-            descriptor >= 0 && linux_socket_slot(descriptor as u64).is_some()
-        })
-    {
+    let polls_socket = active.as_chunks::<8>().0.iter().any(|pollfd| {
+        let descriptor = i32::from_ne_bytes(pollfd[..4].try_into().unwrap());
+        descriptor >= 0 && linux_socket_slot(descriptor as u64).is_some()
+    });
+    // A lone Linux process has no peer thread to schedule while a bounded
+    // poll sleeps. Drive descriptor readiness until its deadline instead of
+    // leaking the scheduler's lack of a target as ENOSYS to userspace. Socket
+    // polls also need this path so network progress is made by the caller.
+    let bounded_without_scheduler_peer =
+        duration.is_some() && ready_linux_thread_handle().is_none();
+    if !waits_for_parent_unix_peer && (polls_socket || bounded_without_scheduler_peer) {
         let deadline = duration.and_then(|duration| {
             linux_elapsed_nanoseconds().and_then(|now| now.checked_add(duration))
         });
