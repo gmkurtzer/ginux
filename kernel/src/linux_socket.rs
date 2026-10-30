@@ -644,7 +644,7 @@ pub(crate) fn close(slot: u8) -> bool {
         state.references -= 1;
         return true;
     }
-    if state.kind == Kind::Unix || state.peer.is_some() && !state.listening {
+    if state.kind == Kind::Unix || state.handle.is_none() && !state.listening {
         let pending_right_count = usize::from(state.pending_right_count);
         let pending_connection_count = usize::from(state.pending_length);
         let pending_connections = state.pending;

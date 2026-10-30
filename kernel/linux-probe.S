@@ -127,7 +127,7 @@ ginux_linux_probe:
     require_equal
     cmp qword ptr [rax + 24], 0
     je failure
-    cmp qword ptr [rax + 32], 0
+    cmp qword ptr [rax + 32], 33
     require_equal
     cmp qword ptr [rax + 40], 0
     require_equal
@@ -237,7 +237,7 @@ valid_interpreter_base:
     require_equal
     cmp qword ptr [rsp + 312], 25
     require_equal
-    cmp qword ptr [rsp + 328], 0
+    cmp qword ptr [rsp + 328], 33
     require_equal
 
 #if !defined(GINUX_LINKED) || !defined(GINUX_GRAPH)

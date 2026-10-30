@@ -1042,7 +1042,7 @@ pub(crate) fn verify_linux_elf_mapping(
             }
 
             let stack_bytes = mapped_frame::<u8>(stack_page)?;
-            let stack_offset = PAGE_SIZE - 50 * size_of::<u64>();
+            let stack_offset = PAGE_SIZE - 52 * size_of::<u64>();
             let random_offset = PAGE_SIZE - 7 * size_of::<u64>();
             let platform_offset = PAGE_SIZE - 5 * size_of::<u64>();
             let environment_offset = PAGE_SIZE - 4 * size_of::<u64>();
@@ -1226,8 +1226,10 @@ pub(crate) fn verify_linux_elf_mapping(
                 && stack_words.add(38).read() == 0
                 && stack_words.add(39).read() == 25
                 && stack_words.add(40).read() == random_address
-                && stack_words.add(41).read() == 0
+                && stack_words.add(41).read() == 33
                 && stack_words.add(42).read() == 0
+                && stack_words.add(43).read() == 0
+                && stack_words.add(44).read() == 0
                 && core::slice::from_raw_parts(
                     stack_bytes.add(random_offset),
                     LINUX_FIXTURE_RANDOM.len(),
