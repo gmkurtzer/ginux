@@ -33,6 +33,8 @@ exercise SMP by making two vCPUs the ordinary QEMU test default.
   executable low-memory trampoline, give it private guarded architecture
   state, and publish its online state only after GDT/TSS/IDT and CPU
   protections are active.
+- [x] Add kernel-only fixed IPIs, remote translation invalidation, and a
+  deterministic proof that all online processors execute concurrently.
 
 ## Remaining work
 
@@ -81,6 +83,15 @@ multi-domain policy results, QEMU harness diffs, and repeated stress runs.
   removing the temporary diagnostics. The transcript reports
   `ginux: online processors: 2`, completes the Linux runtime matrix, and ends
   with `Boot test passed` across the initial, reboot, and corruption phases.
+- The first live-IPI regression failed the Linux child lifecycle precondition
+  with diagnostic bitmap 63. The user interrupt-surface verifier had treated
+  the new DPL0 IPI vector as an unexpected user gate. It now accepts present
+  kernel-only DPL0 gates while retaining `INT 0x80` as the sole DPL3 gate.
+- `cargo fmt --all`, `make architecture-check`, `make check`, and a fresh
+  `make build-verification && GINUX_CPUS=2 bash tests/qemu/boot.sh` pass after
+  removing diagnostics. The transcript reports cross-CPU interrupts,
+  invalidation, and concurrent execution verified, completes all three boot
+  phases, and ends with `Boot test passed`.
 
 ## Decisions and limitations
 
@@ -95,7 +106,8 @@ though two vCPUs become the ordinary development default.
 - Planned commits: discovery/AP startup, per-CPU state, IPIs/shootdowns,
   scheduler concurrency, domain policy, QEMU defaults, and integration evidence.
 - Actual commits: `2ad2c72a` (topology identities), `beafc0f0` (per-CPU
-  architecture state), and AP-startup commit pending.
+  architecture state), `e0489201` (AP startup), and cross-CPU mechanism commit
+  pending.
 
 ## Review policy and outcome
 

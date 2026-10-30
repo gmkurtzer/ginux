@@ -17,11 +17,11 @@ mod linux_signal;
 mod linux_syscall;
 mod linux_time;
 pub(crate) use architecture::{
-    clear_interrupt_gate, double_fault_guard_page, double_fault_stack_top, install,
-    install_for_cpu, install_interrupt_gate, machine_check_guard_page, machine_check_stack_top,
-    nmi_guard_page, nmi_stack_top, privilege_stack_guard_page, privilege_stack_top,
-    privilege_stack_top_for_cpu, stack_guard_pages, task_register_denies_user_io,
-    user_interrupt_surface_is_minimal,
+    clear_interrupt_gate, current_cpu_index, double_fault_guard_page, double_fault_stack_top,
+    install, install_for_cpu, install_interrupt_gate, machine_check_guard_page,
+    machine_check_stack_top, nmi_guard_page, nmi_stack_top, privilege_stack_guard_page,
+    privilege_stack_top, privilege_stack_top_for_cpu, stack_guard_pages,
+    task_register_denies_user_io, user_interrupt_surface_is_minimal,
 };
 use architecture::{current_entry_state, install_user_interrupt_gate, CPU_ARCHITECTURE};
 pub(crate) use execution::enable_extended_user_state;

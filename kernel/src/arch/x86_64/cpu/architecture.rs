@@ -197,7 +197,7 @@ fn entry_state_is_installed() -> bool {
         && (base - states).is_multiple_of(size_of::<CpuEntryState>())
 }
 
-fn current_cpu_index() -> usize {
+pub(crate) fn current_cpu_index() -> usize {
     let base = current_entry_state() as usize;
     let states = CPU_ARCHITECTURE
         .entry_states
@@ -256,22 +256,26 @@ pub(crate) fn user_interrupt_surface_is_minimal() -> bool {
     let idt = current_idt();
     for vector in 0..256 {
         let entry = unsafe { idt.add(vector).read() };
-        let expected = if vector <= 32 || vector == 255 {
-            Some(0x8e)
-        } else if vector == usize::from(SYSCALL_VECTOR) {
-            Some(0xee)
-        } else {
-            None
-        };
-        match expected {
-            Some(attributes)
-                if entry.selector == KERNEL_CODE_SELECTOR
-                    && entry.attributes == attributes
-                    && entry.ist == exception_ist(vector)
-                    && entry.reserved == 0
-                    && entry.has_handler() => {}
-            None if entry.is_missing() => {}
-            _ => return false,
+        if vector == usize::from(SYSCALL_VECTOR) {
+            if entry.selector != KERNEL_CODE_SELECTOR
+                || entry.attributes != 0xee
+                || entry.ist != 0
+                || entry.reserved != 0
+                || !entry.has_handler()
+            {
+                return false;
+            }
+        } else if vector <= 32 || vector == 255 || !entry.is_missing() {
+            // Kernel interrupt sources may populate additional vectors, but
+            // none may enlarge the user-callable surface beyond INT 0x80.
+            if entry.selector != KERNEL_CODE_SELECTOR
+                || entry.attributes != 0x8e
+                || entry.ist != exception_ist(vector)
+                || entry.reserved != 0
+                || !entry.has_handler()
+            {
+                return false;
+            }
         }
     }
     true

@@ -1,6 +1,6 @@
 use core::arch::{asm, global_asm};
 use core::ptr::copy_nonoverlapping;
-use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
 
 use super::{acpi::PlatformInfo, apic::LocalApic, cpu, paging};
 
@@ -8,6 +8,12 @@ const CPU_LIMIT: usize = 4;
 pub(crate) const TRAMPOLINE_PHYSICAL: usize = 0x8000;
 const TRAMPOLINE_VECTOR: u8 = (TRAMPOLINE_PHYSICAL >> 12) as u8;
 const STARTUP_WAIT_LIMIT: usize = 20_000_000;
+const IPI_WAIT_LIMIT: usize = 20_000_000;
+const IPI_VECTOR: u8 = 0xf1;
+const COMMAND_NONE: u8 = 0;
+const COMMAND_PING: u8 = 1;
+const COMMAND_INVALIDATE: u8 = 2;
+const COMMAND_HOLD: u8 = 3;
 
 static ONLINE: [AtomicBool; CPU_LIMIT] = [const { AtomicBool::new(false) }; CPU_LIMIT];
 static ONLINE_COUNT: AtomicU32 = AtomicU32::new(1);
@@ -15,6 +21,16 @@ static MAILBOX_CR3: AtomicU64 = AtomicU64::new(0);
 static MAILBOX_STACK: AtomicU64 = AtomicU64::new(0);
 static MAILBOX_ENTRY: AtomicU64 = AtomicU64::new(0);
 static MAILBOX_CPU: AtomicU32 = AtomicU32::new(0);
+static APIC_IDS: [AtomicU32; CPU_LIMIT] = [const { AtomicU32::new(u32::MAX) }; CPU_LIMIT];
+static APIC_BASE: AtomicU64 = AtomicU64::new(0);
+static APIC_MODE: AtomicU8 = AtomicU8::new(0);
+static IPI_COMMAND: [AtomicU8; CPU_LIMIT] = [const { AtomicU8::new(0) }; CPU_LIMIT];
+static IPI_ARGUMENT: [AtomicU64; CPU_LIMIT] = [const { AtomicU64::new(0) }; CPU_LIMIT];
+static IPI_GENERATION: [AtomicU32; CPU_LIMIT] = [const { AtomicU32::new(0) }; CPU_LIMIT];
+static IPI_ACKNOWLEDGED: [AtomicU32; CPU_LIMIT] = [const { AtomicU32::new(0) }; CPU_LIMIT];
+static IPI_ENTERED: [AtomicBool; CPU_LIMIT] = [const { AtomicBool::new(false) }; CPU_LIMIT];
+static IPI_RELEASE: AtomicBool = AtomicBool::new(false);
+static CONCURRENT_CPUS: AtomicU32 = AtomicU32::new(0);
 
 global_asm!(
     r#"
@@ -103,16 +119,59 @@ ginux_ap_trampoline_gdt_pointer:
 ginux_ap_trampoline_end:
     .code64
     .popsection
+
+    .text
+    .global ginux_ipi_entry
+ginux_ipi_entry:
+    clac
+    cld
+    push rax
+    push rbx
+    push rcx
+    push rdx
+    push rsi
+    push rdi
+    push rbp
+    push r8
+    push r9
+    push r10
+    push r11
+    push r12
+    push r13
+    push r14
+    push r15
+    mov r12, rsp
+    and rsp, -16
+    call {ipi_handler}
+    mov rsp, r12
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rbp
+    pop rdi
+    pop rsi
+    pop rdx
+    pop rcx
+    pop rbx
+    pop rax
+    iretq
 "#,
     mailbox_cr3 = sym MAILBOX_CR3,
     mailbox_stack = sym MAILBOX_STACK,
     mailbox_entry = sym MAILBOX_ENTRY,
     mailbox_cpu = sym MAILBOX_CPU,
+    ipi_handler = sym interprocessor_interrupt_handler,
 );
 
 unsafe extern "C" {
     static ginux_ap_trampoline_start: u8;
     static ginux_ap_trampoline_end: u8;
+    fn ginux_ipi_entry();
 }
 
 pub(crate) fn prepare_trampoline() -> bool {
@@ -133,6 +192,15 @@ pub(crate) fn start_application_processors(platform: PlatformInfo, apic: &LocalA
     if platform.enabled_processors == 0 || platform.enabled_processors > CPU_LIMIT {
         return false;
     }
+    if !cpu::install_interrupt_gate(IPI_VECTOR, ginux_ipi_entry as *const () as usize) {
+        return false;
+    }
+    APIC_BASE.store(apic.physical_base, Ordering::Release);
+    APIC_MODE.store(
+        u8::from(apic.mode == super::apic::Mode::X2Apic),
+        Ordering::Release,
+    );
+    APIC_IDS[0].store(u32::from(apic.id), Ordering::Release);
     ONLINE[0].store(true, Ordering::Release);
     for (cpu, target) in platform.processor_apic_ids[..platform.enabled_processors]
         .iter()
@@ -151,6 +219,7 @@ pub(crate) fn start_application_processors(platform: PlatformInfo, apic: &LocalA
             Ordering::Release,
         );
         MAILBOX_CPU.store(cpu as u32, Ordering::Release);
+        APIC_IDS[cpu].store(target, Ordering::Release);
         if unsafe { !apic.start_processor(target, TRAMPOLINE_VECTOR) } {
             return false;
         }
@@ -173,6 +242,120 @@ pub(crate) fn online_count() -> usize {
     ONLINE_COUNT.load(Ordering::Acquire) as usize
 }
 
+pub(crate) fn verify_cross_cpu_mechanisms() -> bool {
+    let count = online_count();
+    if count == 0 || count > CPU_LIMIT {
+        return false;
+    }
+    for cpu in 1..count {
+        if !dispatch_and_wait(cpu, COMMAND_PING, 0)
+            || !dispatch_and_wait(cpu, COMMAND_INVALIDATE, TRAMPOLINE_PHYSICAL as u64)
+        {
+            return false;
+        }
+    }
+    if count == 1 {
+        return true;
+    }
+
+    IPI_RELEASE.store(false, Ordering::Release);
+    for (cpu, entered) in IPI_ENTERED.iter().enumerate().take(count).skip(1) {
+        entered.store(false, Ordering::Release);
+        if dispatch(cpu, COMMAND_HOLD, 0).is_none() {
+            IPI_RELEASE.store(true, Ordering::Release);
+            return false;
+        }
+    }
+    for _ in 0..IPI_WAIT_LIMIT {
+        if (1..count).all(|cpu| IPI_ENTERED[cpu].load(Ordering::Acquire)) {
+            break;
+        }
+        core::hint::spin_loop();
+    }
+    if !(1..count).all(|cpu| IPI_ENTERED[cpu].load(Ordering::Acquire))
+        || CONCURRENT_CPUS.fetch_add(1, Ordering::AcqRel) as usize + 1 != count
+    {
+        IPI_RELEASE.store(true, Ordering::Release);
+        return false;
+    }
+    IPI_RELEASE.store(true, Ordering::Release);
+    CONCURRENT_CPUS.fetch_sub(1, Ordering::AcqRel);
+    for (cpu, generation) in IPI_GENERATION.iter().enumerate().take(count).skip(1) {
+        let generation = generation.load(Ordering::Acquire);
+        if !wait_for_ack(cpu, generation) {
+            return false;
+        }
+    }
+    CONCURRENT_CPUS.load(Ordering::Acquire) == 0
+}
+
+fn dispatch_and_wait(cpu: usize, command: u8, argument: u64) -> bool {
+    dispatch(cpu, command, argument).is_some_and(|generation| wait_for_ack(cpu, generation))
+}
+
+fn dispatch(cpu: usize, command: u8, argument: u64) -> Option<u32> {
+    if cpu == 0 || cpu >= online_count() || command == COMMAND_NONE {
+        return None;
+    }
+    let generation = IPI_GENERATION[cpu]
+        .fetch_add(1, Ordering::AcqRel)
+        .checked_add(1)?;
+    IPI_ARGUMENT[cpu].store(argument, Ordering::Release);
+    IPI_COMMAND[cpu].store(command, Ordering::Release);
+    let target = APIC_IDS[cpu].load(Ordering::Acquire);
+    let apic = saved_local_apic()?;
+    // SAFETY: this vector is installed in every online CPU's private IDT and
+    // the discovered APIC ID identifies the selected processor.
+    unsafe { apic.send_fixed(target, IPI_VECTOR) }.then_some(generation)
+}
+
+fn wait_for_ack(cpu: usize, generation: u32) -> bool {
+    for _ in 0..IPI_WAIT_LIMIT {
+        if IPI_ACKNOWLEDGED[cpu].load(Ordering::Acquire) == generation {
+            return true;
+        }
+        core::hint::spin_loop();
+    }
+    false
+}
+
+fn saved_local_apic() -> Option<LocalApic> {
+    let mode = if APIC_MODE.load(Ordering::Acquire) == 1 {
+        super::apic::Mode::X2Apic
+    } else {
+        super::apic::Mode::XApic
+    };
+    LocalApic::from_saved(0, mode, APIC_BASE.load(Ordering::Acquire))
+}
+
+extern "sysv64" fn interprocessor_interrupt_handler() {
+    let cpu = cpu::current_cpu_index();
+    if cpu >= CPU_LIMIT {
+        return;
+    }
+    let generation = IPI_GENERATION[cpu].load(Ordering::Acquire);
+    match IPI_COMMAND[cpu].swap(COMMAND_NONE, Ordering::AcqRel) {
+        COMMAND_PING => {}
+        COMMAND_INVALIDATE => {
+            let address = IPI_ARGUMENT[cpu].load(Ordering::Acquire);
+            unsafe { asm!("invlpg [{}]", in(reg) address, options(nostack, preserves_flags)) };
+        }
+        COMMAND_HOLD => {
+            CONCURRENT_CPUS.fetch_add(1, Ordering::AcqRel);
+            IPI_ENTERED[cpu].store(true, Ordering::Release);
+            while !IPI_RELEASE.load(Ordering::Acquire) {
+                core::hint::spin_loop();
+            }
+            CONCURRENT_CPUS.fetch_sub(1, Ordering::AcqRel);
+        }
+        _ => {}
+    }
+    IPI_ACKNOWLEDGED[cpu].store(generation, Ordering::Release);
+    if let Some(apic) = saved_local_apic() {
+        unsafe { apic.end_of_interrupt() };
+    }
+}
+
 extern "sysv64" fn application_processor_main(cpu_index: u32) -> ! {
     unsafe { asm!("cli", options(nomem, nostack)) };
     let cpu = cpu_index as usize;
@@ -189,9 +372,15 @@ extern "sysv64" fn application_processor_main(cpu_index: u32) -> ! {
         }
     }
     let _ = cpu::enable_extended_user_state();
+    let Some(apic) = saved_local_apic() else {
+        loop {
+            unsafe { asm!("hlt", options(nomem, nostack)) };
+        }
+    };
+    unsafe { apic.enable_software() };
     ONLINE[cpu].store(true, Ordering::Release);
     ONLINE_COUNT.fetch_add(1, Ordering::AcqRel);
     loop {
-        unsafe { asm!("hlt", options(nomem, nostack)) };
+        unsafe { asm!("sti; hlt", options(nomem, nostack)) };
     }
 }

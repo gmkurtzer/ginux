@@ -14,6 +14,9 @@ const APIC_TRIGGER_MODE_BASE: u32 = 0x180;
 const APIC_INTERRUPT_REQUEST_BASE: u32 = 0x200;
 const APIC_INTERRUPT_COMMAND_LOW: u32 = 0x300;
 const APIC_INTERRUPT_COMMAND_HIGH: u32 = 0x310;
+const APIC_END_OF_INTERRUPT: u32 = 0xb0;
+const APIC_SPURIOUS_VECTOR: u32 = 0xf0;
+const APIC_SOFTWARE_ENABLE: u32 = 1 << 8;
 const APIC_DELIVERY_PENDING: u32 = 1 << 12;
 const APIC_LEVEL_ASSERT: u32 = 1 << 14;
 const APIC_TRIGGER_LEVEL: u32 = 1 << 15;
@@ -109,6 +112,22 @@ impl LocalApic {
             startup_delay(200_000);
         }
         true
+    }
+
+    pub(crate) unsafe fn enable_software(&self) {
+        let value = self.read(APIC_SPURIOUS_VECTOR);
+        self.write(
+            APIC_SPURIOUS_VECTOR,
+            (value & !0xff) | 0xff | APIC_SOFTWARE_ENABLE,
+        );
+    }
+
+    pub(crate) unsafe fn send_fixed(&self, target: u32, vector: u8) -> bool {
+        vector >= 32 && self.send_ipi(target, u32::from(vector))
+    }
+
+    pub(crate) unsafe fn end_of_interrupt(&self) {
+        self.write(APIC_END_OF_INTERRUPT, 0);
     }
 
     unsafe fn send_ipi(&self, target: u32, command: u32) -> bool {

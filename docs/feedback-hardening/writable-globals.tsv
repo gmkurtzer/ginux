@@ -423,6 +423,16 @@ interior-mutable	kernel/src/arch/x86_64/paging.rs	PAGING	platform-device	allowli
 interior-mutable	kernel/src/arch/x86_64/pci.rs	PCI_INTERRUPTS	platform-device	allowlist	none	explicit-host-pci-interrupt-owner-root
 interior-mutable	kernel/src/arch/x86_64/smp.rs	ONLINE	per-cpu-arch	allowlist	none	per-cpu-online-publication
 interior-mutable	kernel/src/arch/x86_64/smp.rs	ONLINE_COUNT	per-cpu-arch	allowlist	none	acquire-release-online-count
+interior-mutable	kernel/src/arch/x86_64/smp.rs	APIC_BASE	per-cpu-arch	allowlist	none	immutable-after-smp-bootstrap
+interior-mutable	kernel/src/arch/x86_64/smp.rs	APIC_IDS	per-cpu-arch	allowlist	none	per-cpu-apic-identity
+interior-mutable	kernel/src/arch/x86_64/smp.rs	APIC_MODE	per-cpu-arch	allowlist	none	immutable-after-smp-bootstrap
+interior-mutable	kernel/src/arch/x86_64/smp.rs	CONCURRENT_CPUS	verification-only	allowlist	none	cross-cpu-concurrency-proof
+interior-mutable	kernel/src/arch/x86_64/smp.rs	IPI_ACKNOWLEDGED	per-cpu-arch	allowlist	none	per-cpu-ipi-acknowledgement
+interior-mutable	kernel/src/arch/x86_64/smp.rs	IPI_ARGUMENT	per-cpu-arch	allowlist	none	per-cpu-ipi-mailbox
+interior-mutable	kernel/src/arch/x86_64/smp.rs	IPI_COMMAND	per-cpu-arch	allowlist	none	per-cpu-ipi-mailbox
+interior-mutable	kernel/src/arch/x86_64/smp.rs	IPI_ENTERED	verification-only	allowlist	none	cross-cpu-concurrency-proof
+interior-mutable	kernel/src/arch/x86_64/smp.rs	IPI_GENERATION	per-cpu-arch	allowlist	none	per-cpu-ipi-generation
+interior-mutable	kernel/src/arch/x86_64/smp.rs	IPI_RELEASE	verification-only	allowlist	none	cross-cpu-concurrency-proof
 interior-mutable	kernel/src/arch/x86_64/smp.rs	MAILBOX_CPU	per-cpu-arch	allowlist	none	sequential-ap-startup-mailbox
 interior-mutable	kernel/src/arch/x86_64/smp.rs	MAILBOX_CR3	per-cpu-arch	allowlist	none	sequential-ap-startup-mailbox
 interior-mutable	kernel/src/arch/x86_64/smp.rs	MAILBOX_ENTRY	per-cpu-arch	allowlist	none	sequential-ap-startup-mailbox

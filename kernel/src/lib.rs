@@ -676,6 +676,11 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: online processors: ");
     serial_write_usize(arch::x86_64::smp::online_count());
     serial_write("\r\n");
+    if !arch::x86_64::smp::verify_cross_cpu_mechanisms() {
+        kernel_fail("ginux: cross-CPU interrupt mechanisms failed\r\n");
+    }
+    serial_write("ginux: cross-CPU interrupts and invalidation verified\r\n");
+    serial_write("ginux: concurrent processor execution verified\r\n");
 
     let timers = arch::x86_64::timer::discover();
     serial_write("ginux: timer capabilities discovered\r\nginux: invariant TSC: ");

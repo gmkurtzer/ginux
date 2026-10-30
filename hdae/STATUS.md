@@ -12,15 +12,17 @@
   physical allocation and scrubbing, enforcing a recursive cross-CPU-exclusive
   kernel-entry boundary, auditing direct interrupt masking, and passing the
   complete deterministic QEMU suite
-- Next action: add cross-CPU interrupts, wakeups, and translation invalidation,
-  then integrate the scheduler so Linux work executes concurrently
+- Next action: integrate the scheduler so Linux processes and threads execute
+  concurrently across the online processor set
 
 ## Current repository state
 
 Local and remote `main` identify commit `1852455`. Gates 1 through 8 passed and
 closed under delegated review. Gate 9 is active on the shared hardening branch.
-The discovered AP set now starts through a W^X low-memory trampoline and a
-fresh two-vCPU deterministic QEMU run reports both processors online.
+The discovered AP set starts through a W^X low-memory trampoline. Kernel-only
+IPIs, remote invalidation, and concurrent processor execution pass the full
+two-vCPU deterministic QEMU suite. Linux scheduler concurrency remains the
+active Gate 9 milestone.
 
 ## Open decisions
 
