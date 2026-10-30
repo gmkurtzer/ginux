@@ -12,8 +12,8 @@
   controller, device, timer, paging, physical-memory, and per-CPU architecture
   state behind explicit owner roots and passed fresh static, unit, ABI,
   service-failure, isolation, lifecycle, and full verification-QEMU evidence
-- Next action: extract the contiguous Linux futex mechanism block into
-  `cpu/linux_futex.rs`, then run the complete per-extraction regression set
+- Next action: extract Linux polling and epoll mechanisms into
+  `cpu/linux_poll.rs`, then run the complete per-extraction regression set
 
 ## Current repository state
 

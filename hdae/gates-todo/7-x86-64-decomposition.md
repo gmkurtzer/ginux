@@ -39,6 +39,8 @@ boundaries established by earlier gates without changing behavior.
 - [x] Extracted Linux clock, elapsed/realtime accounting, sleep, interval
   timer, rusage, times, sysinfo, and related system-information mechanisms
   into `cpu/linux_time.rs`.
+- [x] Extracted Linux futex wait, wake, wait-vector, and requeue mechanisms into
+  `cpu/linux_futex.rs`.
 
 ## Remaining work
 
@@ -72,6 +74,7 @@ boundaries established by earlier gates without changing behavior.
   sequence and preserved the 450-global ownership inventory.
 - The Linux time-mechanism extraction passed the same complete regression
   sequence, including live timekeeping validation in the controller runtime.
+- The Linux futex extraction passed the same complete regression sequence.
 
 ## Decisions and limitations
 
