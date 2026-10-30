@@ -5,13 +5,54 @@ set -euo pipefail
 root=$(git rev-parse --show-toplevel)
 cd "$root"
 
-printf 'kind\tfile\tline\tdeclaration\n'
-rg -n --glob '*.rs' '^\s*(pub\([^)]*\)\s+)?static\s+mut\s+' \
-    kernel control-plane services boot | while IFS=: read -r file line declaration; do
-        printf 'static-mut\t%s\t%s\t%s\n' "$file" "$line" "${declaration#${declaration%%[![:space:]]*}}"
-    done
-rg -n --glob '*.rs' '^\s*(pub\([^)]*\)\s+)?static\s+[A-Z0-9_]+\s*:\s*[^=]*(Atomic|Mutex|UnsafeCell|Once|Spin|Lock)' \
-    kernel control-plane services boot | while IFS=: read -r file line declaration; do
-        printf 'interior-mutable\t%s\t%s\t%s\n' "$file" "$line" "${declaration#${declaration%%[![:space:]]*}}"
-    done
+source_roots=(kernel control-plane services boot)
+scratch=$(mktemp "${TMPDIR:-/tmp}/ginux-writable-globals.XXXXXX")
+cell_types=$(mktemp "${TMPDIR:-/tmp}/ginux-interior-types.XXXXXX")
+trap 'rm -f "$scratch" "$cell_types"' EXIT
 
+emit_matches() {
+    local kind=$1
+    local pattern=$2
+    rg -n --glob '*.rs' "$pattern" "${source_roots[@]}" |
+        while IFS=: read -r file line declaration; do
+            local rest symbol
+            rest=${declaration#*static }
+            rest=${rest#mut }
+            symbol=${rest%%:*}
+            symbol=${symbol//[[:space:]]/}
+            printf '%s\t%s\t%s\t%s\t%s\n' \
+                "$kind" "$file" "$line" "$symbol" \
+                "${declaration#${declaration%%[![:space:]]*}}"
+        done
+}
+
+emit_matches static-mut '^\s*(pub(\([^)]*\))?\s+)?static\s+mut\s+' >"$scratch"
+emit_matches interior-mutable \
+    '^\s*(pub(\([^)]*\))?\s+)?static\s+[A-Z0-9_]+\s*:\s*[^=]*(Atomic|Mutex|RwLock|RefCell|UnsafeCell|Once|Spin|Lock)' \
+    >>"$scratch"
+
+# Custom Sync wrappers can hide UnsafeCell from the static declaration. Find
+# tuple-struct wrappers whose definition contains UnsafeCell, then include every
+# static declared with one of those types.
+find "${source_roots[@]}" -type f -name '*.rs' -print0 |
+    while IFS= read -r -d '' file; do
+        awk '
+            /^struct [A-Za-z_][A-Za-z0-9_]*/ {
+                name = $2
+                sub(/[(<{].*/, "", name)
+                remaining = 6
+            }
+            remaining > 0 && /UnsafeCell/ { print name; remaining = 0 }
+            remaining > 0 { remaining-- }
+        ' "$file"
+    done | sort -u >"$cell_types"
+
+while IFS= read -r wrapper; do
+    [[ -n "$wrapper" ]] || continue
+    emit_matches interior-mutable \
+        "^\\s*(pub(\\([^)]*\\))?\\s+)?static\\s+[A-Z0-9_]+\\s*:\\s*${wrapper}([[:space:]]|=)" \
+        >>"$scratch"
+done <"$cell_types"
+
+printf 'kind\tfile\tline\tsymbol\tdeclaration\n'
+LC_ALL=C sort -t $'\t' -k2,2 -k4,4 -k1,1 "$scratch" | awk -F '\t' '!seen[$2 FS $4]++'

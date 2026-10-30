@@ -47,5 +47,6 @@ reject_text "$controller" 'int 0x80'
 
 bash "${repo_root}/tools/architecture/check-privilege-entry.sh"
 bash "${repo_root}/tools/architecture/check-user-access.sh"
+bash "${repo_root}/tools/architecture/check-writable-globals.sh"
 
 echo "Architecture consistency check passed"
