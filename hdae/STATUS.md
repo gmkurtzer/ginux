@@ -8,16 +8,19 @@
 - Branch: `codex/feedback-hardening`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 3, fault-recovering userspace access, ready to begin
-- Last completed action: Gate 2 passed six-stage NMI injection, hostile initial
-  stack validation, `make check`, and the complete `make test` QEMU boot suite
-- Next action: inventory direct userspace dereferences and define the Gate 3
-  fault-fixup representation before migrating audited copy primitives
+- Last completed action: Gate 3 added exception-fixup user-copy loops, partial
+  cross-page and unmapped runtime tests, and passed `make check` plus the full
+  `make test` QEMU boot suite
+- Next action: classify every remaining direct SMAP-open userspace access,
+  migrate untrusted syscall pointers to audited primitives, and enforce the
+  boundary with an architecture check
 
 ## Current repository state
 
 Local and remote `main` identify commit `1852455`. Gate 2 passed and closed
-under delegated review. Gate 3 is open; its first step is a complete direct
-userspace-access inventory tied to a fault-recovery design.
+under delegated review. Gate 3 is partial: its fault-fixup mechanism and
+adversarial runtime proof pass, while the direct-access migration and audit
+remain open.
 
 ## Open decisions
 

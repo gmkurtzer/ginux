@@ -2994,57 +2994,49 @@ pub(crate) fn expected_service_fault_instruction(service_entry_offset: usize) ->
 }
 
 pub(crate) fn copy_from_current_user(address: u64, output: &mut [u8]) -> bool {
+    copy_from_current_user_partial(address, output) == output.len() && !output.is_empty()
+}
+
+pub(crate) fn copy_from_current_user_partial(address: u64, output: &mut [u8]) -> usize {
     if output.is_empty() {
-        return false;
+        return 0;
     }
     let Some(end) = address.checked_add(output.len() as u64) else {
-        return false;
+        return 0;
     };
     if address >= 1 << 47 || end > 1 << 47 {
-        return false;
+        return 0;
     }
     let root = current_root();
     if !current_user_root_is_owned(root) {
-        return false;
+        return 0;
     }
-    if !user_range_has_permissions(root, address, end, 0) {
-        return false;
-    }
-    unsafe {
-        cpu::with_supervisor_user_access(|| {
-            for (offset, byte) in output.iter_mut().enumerate() {
-                *byte = (address as *const u8).add(offset).read_volatile();
-            }
-        });
-    }
-    true
+    let remaining =
+        unsafe { cpu::raw_copy_from_user(output.as_mut_ptr(), address as *const u8, output.len()) };
+    output.len().saturating_sub(remaining)
 }
 
 pub(crate) fn copy_to_current_user(address: u64, input: &[u8]) -> bool {
+    copy_to_current_user_partial(address, input) == input.len() && !input.is_empty()
+}
+
+pub(crate) fn copy_to_current_user_partial(address: u64, input: &[u8]) -> usize {
     if input.is_empty() {
-        return false;
+        return 0;
     }
     let Some(end) = address.checked_add(input.len() as u64) else {
-        return false;
+        return 0;
     };
     if address >= 1 << 47 || end > 1 << 47 {
-        return false;
+        return 0;
     }
     let root = current_root();
     if !current_user_root_is_owned(root) {
-        return false;
+        return 0;
     }
-    if !user_range_has_permissions(root, address, end, WRITABLE) {
-        return false;
-    }
-    unsafe {
-        cpu::with_supervisor_user_access(|| {
-            for (offset, byte) in input.iter().enumerate() {
-                (address as *mut u8).add(offset).write_volatile(*byte);
-            }
-        });
-    }
-    true
+    let remaining =
+        unsafe { cpu::raw_copy_to_user(address as *mut u8, input.as_ptr(), input.len()) };
+    input.len().saturating_sub(remaining)
 }
 
 /// Copy a small result into the active Linux address space without repeating
@@ -3081,12 +3073,7 @@ pub(crate) fn copy_to_current_linux_user_fast(address: u64, input: &[u8]) -> boo
             None => return false,
         };
     }
-    unsafe {
-        cpu::with_supervisor_user_access(|| {
-            core::ptr::copy_nonoverlapping(input.as_ptr(), address as *mut u8, input.len());
-        });
-    }
-    true
+    unsafe { cpu::raw_copy_to_user(address as *mut u8, input.as_ptr(), input.len()) == 0 }
 }
 
 pub(crate) fn protect_current_user_page_read_only(address: u64) -> bool {
@@ -11946,6 +11933,10 @@ pub(crate) fn verify_ring3_control_plane(
             return false;
         }
         activate(first_space.root);
+        let user_copy_faults_recovered = cpu::verify_user_copy_fault_fixups(
+            (USER_TEST_ADDRESS + 3 * PAGE_SIZE) as u64,
+            (USER_TEST_ADDRESS + 6 * PAGE_SIZE) as u64,
+        );
         let hostile_entry_contexts_rejected = current_user_entry_context_is_valid(
             (USER_TEST_ADDRESS + control_entry_offset) as u64,
             (USER_TEST_ADDRESS + 3 * PAGE_SIZE) as u64,
@@ -11991,7 +11982,8 @@ pub(crate) fn verify_ring3_control_plane(
         if !preemption_complete {
             crate::serial_write_bytes(b"\r\nginux: control proof APIC preemption incomplete");
         }
-        let valid = hostile_entry_contexts_rejected
+        let valid = user_copy_faults_recovered
+            && hostile_entry_contexts_rejected
             && handled
             && runtime_complete
             && ipc_empty

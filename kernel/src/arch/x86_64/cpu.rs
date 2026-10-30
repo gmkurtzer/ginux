@@ -1980,6 +1980,56 @@ static mut MACHINE_CHECK_STACK: IstStack = IstStack([0; IST_STACK_STORAGE_SIZE])
 global_asm!(
     r#"
     .text
+    .global ginux_raw_copy_from_user
+    .global ginux_copy_from_user_fault_begin
+    .global ginux_copy_from_user_fault_end
+    .global ginux_copy_from_user_fixup
+ginux_raw_copy_from_user:
+    mov rax, rdx
+    test rax, rax
+    jz 2f
+    stac
+ginux_copy_from_user_fault_begin:
+1:
+    mov cl, byte ptr [rsi]
+    mov byte ptr [rdi], cl
+    inc rsi
+    inc rdi
+    dec rax
+    jnz 1b
+ginux_copy_from_user_fault_end:
+    clac
+2:
+    ret
+ginux_copy_from_user_fixup:
+    clac
+    ret
+
+    .global ginux_raw_copy_to_user
+    .global ginux_copy_to_user_fault_begin
+    .global ginux_copy_to_user_fault_end
+    .global ginux_copy_to_user_fixup
+ginux_raw_copy_to_user:
+    mov rax, rdx
+    test rax, rax
+    jz 4f
+    stac
+ginux_copy_to_user_fault_begin:
+3:
+    mov cl, byte ptr [rsi]
+    mov byte ptr [rdi], cl
+    inc rsi
+    inc rdi
+    dec rax
+    jnz 3b
+ginux_copy_to_user_fault_end:
+    clac
+4:
+    ret
+ginux_copy_to_user_fixup:
+    clac
+    ret
+
     .global ginux_breakpoint_entry
 ginux_breakpoint_entry:
     clac
@@ -2094,10 +2144,32 @@ ginux_fatal_exception_common:
     push r13
     push r14
     push r15
+    mov r12, rsp
     test qword ptr [rsp + 144], 3
     jnz ginux_user_fault_common
     cmp qword ptr [rsp + 120], 14
     jne ginux_fatal_exception_call
+    mov rax, [rsp + 136]
+    lea rbx, [rip + ginux_copy_from_user_fault_begin]
+    cmp rax, rbx
+    jb 1f
+    lea rbx, [rip + ginux_copy_from_user_fault_end]
+    cmp rax, rbx
+    jae 1f
+    lea rax, [rip + ginux_copy_from_user_fixup]
+    mov [rsp + 136], rax
+    jmp ginux_fault_return
+1:
+    lea rbx, [rip + ginux_copy_to_user_fault_begin]
+    cmp rax, rbx
+    jb 2f
+    lea rbx, [rip + ginux_copy_to_user_fault_end]
+    cmp rax, rbx
+    jae 2f
+    lea rax, [rip + ginux_copy_to_user_fixup]
+    mov [rsp + 136], rax
+    jmp ginux_fault_return
+2:
     mov r12, rsp
     mov rdi, [rsp + 128]
     mov rsi, cr2
@@ -2466,6 +2538,8 @@ unsafe fn enter_user(
 }
 
 extern "sysv64" {
+    fn ginux_raw_copy_from_user(output: *mut u8, input: *const u8, length: usize) -> usize;
+    fn ginux_raw_copy_to_user(output: *mut u8, input: *const u8, length: usize) -> usize;
     fn ginux_user_enter(
         entry: usize,
         stack: usize,
@@ -2478,6 +2552,38 @@ extern "sysv64" {
         root_handle: u64,
     );
     fn ginux_process_user_enter(entry: usize, stack: usize, general: *const u64, rflags: u64);
+}
+
+pub(crate) unsafe fn raw_copy_from_user(output: *mut u8, input: *const u8, length: usize) -> usize {
+    ginux_raw_copy_from_user(output, input, length)
+}
+
+pub(crate) unsafe fn raw_copy_to_user(output: *mut u8, input: *const u8, length: usize) -> usize {
+    ginux_raw_copy_to_user(output, input, length)
+}
+
+pub(crate) fn verify_user_copy_fault_fixups(mapped_end: u64, unmapped: u64) -> bool {
+    let mut output = [0_u8; 2];
+    let input = [0x5a_u8, 0xa5];
+    let partial_from = unsafe {
+        raw_copy_from_user(
+            output.as_mut_ptr(),
+            (mapped_end - 1) as *const u8,
+            output.len(),
+        )
+    };
+    let partial_to =
+        unsafe { raw_copy_to_user((mapped_end - 1) as *mut u8, input.as_ptr(), input.len()) };
+    let rejected_from =
+        unsafe { raw_copy_from_user(output.as_mut_ptr(), unmapped as *const u8, output.len()) };
+    let rejected_to = unsafe { raw_copy_to_user(unmapped as *mut u8, input.as_ptr(), input.len()) };
+    let flags: u64;
+    unsafe { asm!("pushfq", "pop {}", out(reg) flags, options(nomem)) };
+    partial_from == 1
+        && partial_to == 1
+        && rejected_from == output.len()
+        && rejected_to == input.len()
+        && flags & (1 << 18) == 0
 }
 
 pub(crate) fn install() -> bool {

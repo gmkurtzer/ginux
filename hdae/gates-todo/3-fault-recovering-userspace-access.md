@@ -20,13 +20,18 @@ hardware-authoritative.
 
 ## Completed work
 
-None. Depends on Gate 2.
+- [x] Added assembly copy-from-user and copy-to-user loops with page-fault
+  fixups, remaining-byte results, and balanced `STAC`/`CLAC` on success and
+  fault paths.
+- [x] Migrated the generic control-domain copies and Linux fast-copy path to
+  the recoverable primitive.
+- [x] Added runtime tests for partial cross-page copies, wholly unmapped copies,
+  and cleared AC state after every result.
 
 ## Remaining work
 
-- Define fault-recovery representation and exception interaction.
 - Inventory and migrate direct userspace dereferences.
-- Add races and cross-page adversarial tests.
+- Add the direct-access architecture audit and remaining Linux pointer cases.
 
 ## Acceptance criteria
 
@@ -40,12 +45,19 @@ None. Depends on Gate 2.
 
 ## Evidence
 
-User-pointer test matrix, direct-dereference audit, SMAP assertions, and full
-regression transcript.
+- `make check` -> passed after adding the fault-fixup mechanism and generic
+  copy migration.
+- `make test` -> passed; both copy directions recovered at the mapped/guard
+  boundary with one byte remaining, wholly unmapped copies returned the full
+  length, AC was clear afterward, and QEMU exited with `GINUX_KERNEL_OK`.
 
 ## Decisions and limitations
 
-Partial-copy semantics and fixup design must be documented before coding.
+Copy primitives return the number of bytes not copied, matching the kernel
+partial-copy convention. Public slice wrappers report bytes copied or complete
+success. The exception path recognizes only bounded assembly fault regions,
+rewrites the saved RIP to their local fixup, restores registers, clears AC, and
+returns without consulting software mapping metadata.
 
 ## Delivery strategy
 
@@ -54,7 +66,7 @@ Partial-copy semantics and fixup design must be documented before coding.
 - Pull request: the shared ten-gate pull request.
 - Planned commits: recovery mechanism, audited primitives, subsystem
   migrations, and negative/integration evidence.
-- Actual commits: pending.
+- Actual commits: fault-fixup mechanism commit pending.
 
 ## Review policy and outcome
 
