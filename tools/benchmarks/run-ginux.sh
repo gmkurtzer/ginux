@@ -18,10 +18,11 @@ sysbench_hash=$(tar -xOf "$rootfs" usr/bin/sysbench | {
 } | awk '{print $1}')
 sample_runs=$((BENCHMARK_BOOT_RUNS * BENCHMARK_WORKLOAD_RUNS))
 
-for workload in cpu memory threads mutex; do
+for workload in ${GINUX_BENCHMARK_WORKLOADS:-cpu memory threads mutex}; do
     for ((run = 1; run <= sample_runs; run++)); do
         log="$benchmark_dir/ginux-sysbench-${workload}-${run}.log"
-        if grep -Fq "GINUX_BENCH_WORKLOAD_END_${workload}_1=0" "$log" 2>/dev/null \
+        if [[ "${GINUX_BENCHMARK_FORCE:-0}" != 1 ]] \
+            && grep -Fq "GINUX_BENCH_WORKLOAD_END_${workload}_1=0" "$log" 2>/dev/null \
             && grep -Fq "GINUX_BENCH_SYSBENCH_SHA256 $sysbench_hash" "$log"; then
             continue
         fi
@@ -34,6 +35,7 @@ for workload in cpu memory threads mutex; do
         GINUX_BENCHMARK_SYSBENCH=1 \
         GINUX_BENCHMARK_SINGLE_RUN=1 \
         GINUX_BENCHMARK_WORKLOAD="$workload" \
+        GINUX_BENCHMARK_THREADS="${GINUX_BENCHMARK_THREADS:-1}" \
         GINUX_BENCHMARK_SYSBENCH_SHA256="$sysbench_hash" \
         GINUX_BENCHMARK_WORKLOAD_RUNS=1 \
         GINUX_BENCHMARK_WORKLOAD_SECONDS="$BENCHMARK_WORKLOAD_SECONDS" \

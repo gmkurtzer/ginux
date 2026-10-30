@@ -239,16 +239,16 @@ qemu_started_at_ms=$(now_ms)
             for ((benchmark_run = 1; benchmark_run <= ${GINUX_BENCHMARK_WORKLOAD_RUNS:-3}; benchmark_run++)); do
                 case "$workload" in
                     cpu)
-                        command="/usr/bin/sysbench cpu --threads=1 --time=${GINUX_BENCHMARK_WORKLOAD_SECONDS:-3} --cpu-max-prime=20000 run"
+                        command="/usr/bin/sysbench cpu --threads=${GINUX_BENCHMARK_THREADS:-1} --time=${GINUX_BENCHMARK_WORKLOAD_SECONDS:-3} --cpu-max-prime=20000 run"
                         ;;
                     memory)
-                        command="/usr/bin/sysbench memory --threads=1 --time=${GINUX_BENCHMARK_WORKLOAD_SECONDS:-3} --memory-block-size=${GINUX_BENCHMARK_MEMORY_BLOCK_SIZE:-1K} --memory-total-size=100G run"
+                        command="/usr/bin/sysbench memory --threads=${GINUX_BENCHMARK_THREADS:-1} --time=${GINUX_BENCHMARK_WORKLOAD_SECONDS:-3} --memory-block-size=${GINUX_BENCHMARK_MEMORY_BLOCK_SIZE:-1K} --memory-total-size=100G run"
                         ;;
                     threads)
-                        command="/usr/bin/sysbench threads --threads=1 --time=${GINUX_BENCHMARK_WORKLOAD_SECONDS:-3} run"
+                        command="/usr/bin/sysbench threads --threads=${GINUX_BENCHMARK_THREADS:-1} --time=${GINUX_BENCHMARK_WORKLOAD_SECONDS:-3} run"
                         ;;
                     mutex)
-                        command="/usr/bin/sysbench mutex --threads=1 --time=${GINUX_BENCHMARK_WORKLOAD_SECONDS:-3} run"
+                        command="/usr/bin/sysbench mutex --threads=${GINUX_BENCHMARK_THREADS:-1} --time=${GINUX_BENCHMARK_WORKLOAD_SECONDS:-3} run"
                         ;;
                 esac
                 marker="GINUX_BENCH_WORKLOAD_END_${workload}_${benchmark_run}=0"
