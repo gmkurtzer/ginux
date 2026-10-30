@@ -63,5 +63,5 @@ though two vCPUs become the ordinary development default.
 
 ## Review policy and outcome
 
-Checkpoint required. Stop for SMP functionality, scheduling policy, and test
-default review. Outcome: pending.
+Delegated closure authorized after all 1/2/4-vCPU functionality, policy, stress,
+and QEMU-default criteria pass. Outcome: pending.

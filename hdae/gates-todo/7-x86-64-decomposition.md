@@ -56,5 +56,5 @@ file size alone is not.
 
 ## Review policy and outcome
 
-Checkpoint required. Stop for architecture review before synchronization and
-SMP work. Outcome: pending.
+Delegated closure authorized after every extraction passes the full regression,
+dependency, invariant, and performance criteria. Outcome: pending.

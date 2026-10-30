@@ -69,5 +69,5 @@ QEMU injection limits and any untestable hardware behavior must be explicit.
 
 ## Review policy and outcome
 
-Checkpoint required. Stop for human review of evidence and approval of the
-hardening order. Outcome: pending.
+Delegated closure authorized for the approved ten-gate batch after all criteria
+pass with fresh evidence. Outcome: in progress.

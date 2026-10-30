@@ -61,5 +61,5 @@ perform migration and synchronization.
 
 ## Review policy and outcome
 
-Checkpoint required. Stop for ownership-map and allowlist approval. Outcome:
-pending.
+Delegated closure authorized after the inventory, ownership map, allowlist, and
+CI enforcement all pass their stated checks. Outcome: pending.

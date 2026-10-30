@@ -59,5 +59,5 @@ Primitive and memory-order choices require review before broad adoption.
 
 ## Review policy and outcome
 
-Checkpoint required. Stop for synchronization review before another CPU is
-enabled. Outcome: pending.
+Delegated closure authorized after synchronization, lock-order, interrupt, and
+stress criteria pass. Outcome: pending.

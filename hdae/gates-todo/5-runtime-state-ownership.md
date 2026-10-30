@@ -59,5 +59,5 @@ Shared objects may remain only when Gate 4 explicitly classified them and Gate
 
 ## Review policy and outcome
 
-Checkpoint required. Stop for runtime ownership and lifecycle review. Outcome:
-pending.
+Delegated closure authorized after runtime ownership, lifecycle, isolation, and
+regression criteria all pass. Outcome: pending.

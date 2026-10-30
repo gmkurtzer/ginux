@@ -5,7 +5,9 @@
 - Working branch: `codex/feedback-hardening`
 - Intended base: `main`
 - Historical baseline: `research-v1-baseline`
-- Review policy: stop for human approval after every gate
+- Review policy: delegated closure for all ten gates after complete fresh test
+  evidence; stop only for a failed dependency, architectural decision, scope
+  expansion, or consequential action outside the approved batch
 - Commit policy: small, signed-off commits associated with one gate
 - Pull request: one pull request from `codex/feedback-hardening` to `main` for
   the entire secondary experiment; verify its remote status before Gate 1 work
@@ -32,10 +34,12 @@ recorded reason. Gate numbers are stable.
 
 ## Execution rule
 
-Only one gate is active at a time. Before implementation, the human reviews
-and approves that gate's scope and criteria. The agent then iterates within the
-gate until the criteria pass or a decision is needed. Evidence and limitations
-are recorded before the gate moves to `gates-done/`.
+Only one gate is active at a time. The human approved the complete ten-gate
+batch and delegated closure of each gate after all its criteria pass with fresh
+test evidence. The agent advances automatically in order, but stops when a gate
+fails, a dependency is invalidated, or a new decision would change architecture,
+scope, risk, or an acceptance criterion. Evidence and limitations are recorded
+before each gate moves to `gates-done/`.
 
 ## Planned commit shape
 

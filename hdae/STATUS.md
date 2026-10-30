@@ -7,14 +7,11 @@
 - Active project: feedback-driven kernel hardening
 - Branch: `codex/feedback-hardening`
 - Baseline tag: `research-v1-baseline`
-- Active gate: none; the ten-gate map is approved and Gate 1 awaits execution
-  authorization
-- Last completed action: aligned the gate map with human direction: real SMP is
-  required, ordinary QEMU tests become 2-vCPU after SMP passes, security scope
-  is limited to the two reported defects, global state is comprehensively
-  addressed, and all gates use one branch and one pull request
-- Next action: authorize Gate 1 before adding reproductions or changing kernel
-  code
+- Active gate: Gate 1, baseline and claim reproduction, in progress
+- Last completed action: the human delegated execution and closure of all ten
+  gates, conditional on complete fresh testing after every gate
+- Next action: freeze and run the Gate 1 baseline matrix, then add focused claim
+  reproductions and the writable-global inventory
 
 ## Current repository state
 
@@ -24,9 +21,8 @@ alignment update. The working branch contains no hardening implementation yet.
 
 ## Open decisions
 
-- Authorize Gate 1 execution.
-- Freeze the exact baseline command set at the start of Gate 1; the proposed
-  minimum is recorded in that gate and may not be silently reduced.
+- None. The exact baseline command set is frozen in Gate 1 and may not be
+  silently reduced.
 
 ## Durable evidence
 

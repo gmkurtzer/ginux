@@ -57,5 +57,5 @@ not itself prohibited when ownership and synchronization are concrete.
 
 ## Review policy and outcome
 
-Checkpoint required. Stop for platform/service ownership review. Outcome:
-pending.
+Delegated closure authorized after platform/service ownership, failure,
+isolation, and regression criteria all pass. Outcome: pending.

@@ -58,5 +58,5 @@ Partial-copy semantics and fixup design must be documented before coding.
 
 ## Review policy and outcome
 
-Checkpoint required. Stop for adversarial pointer and API review. Outcome:
-pending.
+Delegated closure authorized after all criteria pass with fresh adversarial
+pointer, API audit, and regression evidence. Outcome: pending.

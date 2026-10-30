@@ -61,4 +61,6 @@ security findings.
 
 ## Review policy and outcome
 
-Checkpoint required. Stop for publication and merge decision. Outcome: pending.
+Delegated technical closure authorized after the full qualification matrix and
+baseline comparison pass. Merge and publication remain human decisions.
+Outcome: pending.

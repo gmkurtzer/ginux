@@ -58,5 +58,5 @@ Per-CPU layout and nested-NMI semantics require human architectural review.
 
 ## Review policy and outcome
 
-Checkpoint required. Stop for assembly and exception-entry review. Outcome:
-pending.
+Delegated closure authorized after all criteria pass with fresh assembly,
+fault-injection, and regression evidence. Outcome: pending.
