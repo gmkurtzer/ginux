@@ -22,6 +22,8 @@ boundaries established by earlier gates without changing behavior.
 
 - [x] Recorded the initial 48,510-line module size, dependency direction,
   planned extraction boundaries, and unsafe/assembly invariants.
+- [x] Extracted per-CPU entry state, GDT/TSS/IDT structures, guarded stacks,
+  and their explicit owner into `cpu/architecture.rs`.
 
 ## Remaining work
 
@@ -40,6 +42,9 @@ boundaries established by earlier gates without changing behavior.
 - [`docs/feedback-hardening/X86-DECOMPOSITION.md`](../../docs/feedback-hardening/X86-DECOMPOSITION.md)
   records the pre-extraction size, dependency direction, module boundaries,
   unsafe invariants, and per-extraction verification rule.
+- The first extraction passed `make architecture-check`, `make check`, and
+  `make build-verification && bash tests/qemu/boot.sh`; the writable-global
+  inventory remained stable at 450 and QEMU shut down cleanly.
 
 ## Decisions and limitations
 
@@ -53,7 +58,8 @@ file size alone is not.
 - Pull request: the shared ten-gate pull request.
 - Planned commits: dependency contract followed by one behavior-preserving
   responsibility extraction per commit.
-- Actual commits: pending.
+- Actual commits: `1adacc47` defines the dependency and invariant contract;
+  architecture-owner extraction pending commit.
 
 ## Review policy and outcome
 

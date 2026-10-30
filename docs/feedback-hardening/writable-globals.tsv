@@ -7,7 +7,7 @@ interior-mutable	kernel/src/arch/x86_64/cpu.rs	BREAKPOINT_HANDLED	verification-o
 interior-mutable	kernel/src/arch/x86_64/cpu.rs	CONTROL_DESCRIPTOR_OVERRIDE_DOMAIN	verification-only	allowlist	none	verification-build-only
 interior-mutable	kernel/src/arch/x86_64/cpu.rs	CONTROL_DISCOVERY_OVERRIDE_DOMAIN	verification-only	allowlist	none	verification-build-only
 interior-mutable	kernel/src/arch/x86_64/cpu.rs	CONTROL_DISCOVERY_OVERRIDE_WORD	verification-only	allowlist	none	verification-build-only
-interior-mutable	kernel/src/arch/x86_64/cpu.rs	CPU_ARCHITECTURE	per-cpu-arch	allowlist	none	explicit-per-cpu-architecture-owner-root
+interior-mutable	kernel/src/arch/x86_64/cpu/architecture.rs	CPU_ARCHITECTURE	per-cpu-arch	allowlist	none	explicit-per-cpu-architecture-owner-root
 interior-mutable	kernel/src/arch/x86_64/cpu.rs	LINUX_ABI_TEST_RESULTS	verification-only	allowlist	none	verification-build-only
 interior-mutable	kernel/src/arch/x86_64/cpu.rs	PRIVILEGE_ENTRY_NMI_PROBE_HITS	verification-only	allowlist	none	verification-build-only
 interior-mutable	kernel/src/arch/x86_64/cpu.rs	PRIVILEGE_ENTRY_NMI_PROBE_MASK	verification-only	allowlist	none	verification-build-only

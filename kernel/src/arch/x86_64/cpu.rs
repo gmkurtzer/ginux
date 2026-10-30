@@ -8,6 +8,11 @@ use core::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicU64, AtomicU8, 
 
 use super::{paging, timer};
 
+mod architecture;
+use architecture::{
+    CpuEntryState, DescriptorTablePointer, IdtEntry, TaskStateSegment, CPU_ARCHITECTURE,
+};
+
 use crate::{
     address_space,
     capability::Rights,
@@ -927,108 +932,6 @@ const LINUX_CLOCK_TICKS_PER_SECOND: u64 = 100;
 // The verification workload issues additional yield hints while no peer is
 // runnable. Only the fifteen calls that transfer execution are switches.
 const LINUX_VERIFICATION_YIELD_SWITCHES: u32 = 15;
-
-#[repr(C, packed)]
-#[derive(Clone, Copy)]
-struct TaskStateSegment {
-    reserved0: u32,
-    privilege_stacks: [u64; 3],
-    reserved1: u64,
-    interrupt_stacks: [u64; 7],
-    reserved2: u64,
-    reserved3: u16,
-    io_map_base: u16,
-}
-
-#[derive(Clone, Copy)]
-#[repr(C, packed)]
-struct IdtEntry {
-    offset_low: u16,
-    selector: u16,
-    ist: u8,
-    attributes: u8,
-    offset_middle: u16,
-    offset_high: u32,
-    reserved: u32,
-}
-
-impl IdtEntry {
-    const MISSING: Self = Self {
-        offset_low: 0,
-        selector: 0,
-        ist: 0,
-        attributes: 0,
-        offset_middle: 0,
-        offset_high: 0,
-        reserved: 0,
-    };
-
-    fn interrupt(handler: usize, ist: u8) -> Self {
-        Self {
-            offset_low: handler as u16,
-            selector: KERNEL_CODE_SELECTOR,
-            ist,
-            attributes: 0x8e,
-            offset_middle: (handler >> 16) as u16,
-            offset_high: (handler >> 32) as u32,
-            reserved: 0,
-        }
-    }
-
-    fn is_missing(self) -> bool {
-        self.offset_low == 0
-            && self.selector == 0
-            && self.ist == 0
-            && self.attributes == 0
-            && self.offset_middle == 0
-            && self.offset_high == 0
-            && self.reserved == 0
-    }
-
-    fn has_handler(self) -> bool {
-        self.offset_low != 0 || self.offset_middle != 0 || self.offset_high != 0
-    }
-}
-
-#[repr(C, packed)]
-struct DescriptorTablePointer {
-    limit: u16,
-    base: u64,
-}
-
-#[repr(C, align(4096))]
-struct ExceptionStack([u8; EXCEPTION_STACK_STORAGE_SIZE]);
-
-#[repr(C, align(4096))]
-struct IstStack([u8; IST_STACK_STORAGE_SIZE]);
-
-#[derive(Clone, Copy)]
-#[repr(C, align(64))]
-struct CpuEntryState {
-    return_stack: u64,
-    user_rsp: u64,
-    user_rip: u64,
-    user_rflags: u64,
-    kernel_frame: u64,
-    syscall_result: u64,
-    signal_rax: u64,
-    signal_rcx: u64,
-    signal_r11: u64,
-}
-
-impl CpuEntryState {
-    const EMPTY: Self = Self {
-        return_stack: 0,
-        user_rsp: 0,
-        user_rip: 0,
-        user_rflags: 0,
-        kernel_frame: 0,
-        syscall_result: 0,
-        signal_rax: 0,
-        signal_rcx: 0,
-        signal_r11: 0,
-    };
-}
 
 static BREAKPOINT_HANDLED: AtomicBool = AtomicBool::new(false);
 static SYSCALL_STATE: AtomicU8 = AtomicU8::new(0);
@@ -3126,40 +3029,6 @@ const PRIVILEGE_ENTRY_NMI_STAGE_COUNT: u8 = 6;
 const PRIVILEGE_ENTRY_NMI_STAGE_MASK: u64 = (1 << PRIVILEGE_ENTRY_NMI_STAGE_COUNT) - 1;
 static PRIVILEGE_ENTRY_NMI_PROBE_MASK: AtomicU64 = AtomicU64::new(0);
 static PRIVILEGE_ENTRY_NMI_PROBE_HITS: AtomicU8 = AtomicU8::new(0);
-struct CpuArchitectureOwner {
-    extended_user_state_enabled: AtomicBool,
-    entry_states: UnsafeCell<[CpuEntryState; CPU_ENTRY_STATE_LIMIT]>,
-    gdt: UnsafeCell<[u64; 7]>,
-    tss: UnsafeCell<TaskStateSegment>,
-    idt: UnsafeCell<[IdtEntry; 256]>,
-    privilege_stack: UnsafeCell<ExceptionStack>,
-    double_fault_stack: UnsafeCell<IstStack>,
-    nmi_stack: UnsafeCell<IstStack>,
-    machine_check_stack: UnsafeCell<IstStack>,
-}
-
-unsafe impl Sync for CpuArchitectureOwner {}
-
-static CPU_ARCHITECTURE: CpuArchitectureOwner = CpuArchitectureOwner {
-    extended_user_state_enabled: AtomicBool::new(false),
-    entry_states: UnsafeCell::new([CpuEntryState::EMPTY; CPU_ENTRY_STATE_LIMIT]),
-    gdt: UnsafeCell::new([0; 7]),
-    tss: UnsafeCell::new(TaskStateSegment {
-        reserved0: 0,
-        privilege_stacks: [0; 3],
-        reserved1: 0,
-        interrupt_stacks: [0; 7],
-        reserved2: 0,
-        reserved3: 0,
-        io_map_base: size_of::<TaskStateSegment>() as u16,
-    }),
-    idt: UnsafeCell::new([IdtEntry::MISSING; 256]),
-    privilege_stack: UnsafeCell::new(ExceptionStack([0; EXCEPTION_STACK_STORAGE_SIZE])),
-    double_fault_stack: UnsafeCell::new(IstStack([0; IST_STACK_STORAGE_SIZE])),
-    nmi_stack: UnsafeCell::new(IstStack([0; IST_STACK_STORAGE_SIZE])),
-    machine_check_stack: UnsafeCell::new(IstStack([0; IST_STACK_STORAGE_SIZE])),
-};
-
 global_asm!(
     r#"
     .text
