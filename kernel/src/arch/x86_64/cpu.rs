@@ -1444,6 +1444,7 @@ const CROSS_CPU_RUNTIME_SIGNAL: u64 = 1;
 const CROSS_CPU_RUNTIME_FUTEX_WAKE: u64 = 2;
 const CROSS_CPU_RUNTIME_SOCKET_SEND: u64 = 3;
 const CROSS_CPU_RUNTIME_PIPE_SEND: u64 = 4;
+const CROSS_CPU_RUNTIME_SCHEDULE: u64 = 5;
 const CROSS_CPU_RUNTIME_KEY: u64 = 0x4749_4e55_585f_534d;
 static X86_RUNTIME_BACKING_PROCESS_CHILD_PROBE_STATE: [AtomicU8; CPU_ENTRY_STATE_LIMIT] =
     [const { AtomicU8::new(PROCESS_CHILD_PROBE_IDLE) }; CPU_ENTRY_STATE_LIMIT];
@@ -3052,6 +3053,7 @@ pub(crate) fn execute_cross_cpu_runtime_operation(operation: u64) -> bool {
             crate::linux_socket::send(slot, b"socket-smp", None) == Ok(10)
         }
         CROSS_CPU_RUNTIME_PIPE_SEND => crate::linux_socket::send(slot, b"pipe-smp", None) == Ok(8),
+        CROSS_CPU_RUNTIME_SCHEDULE => scheduler::schedule_process_on_current_cpu_for_test(),
         _ => false,
     }
 }
@@ -3174,7 +3176,10 @@ pub(crate) fn verify_cross_cpu_linux_runtime_mechanisms() -> bool {
     );
     let pipe_closed =
         linux_descriptor_close(pipe_reader) == 0 && linux_descriptor_close(pipe_writer) == 0;
-    pipe_sent && pipe_received && pipe_closed
+    pipe_sent
+        && pipe_received
+        && pipe_closed
+        && scheduler::verify_smp_process_scheduler(CROSS_CPU_RUNTIME_SCHEDULE)
 }
 
 pub(crate) fn resume_live_linux_process(

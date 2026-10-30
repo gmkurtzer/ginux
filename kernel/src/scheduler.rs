@@ -2,6 +2,7 @@ use crate::domain;
 use crate::owned_state::OwnedState;
 
 const MAX_THREADS: usize = 8;
+const PROCESS_CPU_LIMIT: usize = 4;
 pub(crate) const IPC_PEER_CLOSED: u64 = u64::MAX - 4;
 
 static SCHEDULER_RUNTIME: OwnedState<Runtime> = OwnedState::empty();
@@ -638,6 +639,9 @@ impl ScheduledProcess {
 
 pub(crate) struct ProcessScheduler {
     scheduler: Scheduler,
+    current_by_cpu: [Option<ThreadId>; PROCESS_CPU_LIMIT],
+    affinities: [u64; MAX_THREADS],
+    dispatches: [u64; PROCESS_CPU_LIMIT],
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -778,34 +782,6 @@ impl Scheduler {
         thread.state = State::Ready;
         self.current = None;
         self.schedule_next()
-    }
-
-    fn switch_current(
-        &mut self,
-        id: ThreadId,
-        saved: UserContext,
-        target: ThreadId,
-    ) -> Option<Scheduled> {
-        if self.current != Some(id) || id == target || !saved.is_valid() {
-            return None;
-        }
-        let current = self.thread_mut(id)?;
-        if current.state != State::Running {
-            return None;
-        }
-        current.context = saved;
-        current.state = State::Ready;
-        let target_thread = self.thread_mut(target)?;
-        if target_thread.state != State::Ready {
-            return None;
-        }
-        target_thread.state = State::Running;
-        let context = target_thread.context;
-        self.current = Some(target);
-        Some(Scheduled {
-            id: target,
-            context,
-        })
     }
 
     fn block_current(
@@ -983,35 +959,6 @@ impl Scheduler {
         self.schedule_next()
     }
 
-    fn retire_process(&mut self, id: ThreadId) -> bool {
-        let Some(thread) = self.thread(id).copied() else {
-            crate::serial_write("ginux: scheduler retire missing thread slot/generation: ");
-            crate::serial_write_u64(u64::from(id.slot));
-            crate::serial_write(" ");
-            crate::serial_write_u64(u64::from(id.generation));
-            crate::serial_write("\r\n");
-            return false;
-        };
-        if thread.state == State::Running && self.current != Some(id) {
-            crate::serial_write(
-                "ginux: scheduler retire running non-current thread slot/current: ",
-            );
-            crate::serial_write_u64(u64::from(id.slot));
-            crate::serial_write(" ");
-            crate::serial_write_u64(
-                self.current
-                    .map_or(u64::MAX, |current| u64::from(current.slot)),
-            );
-            crate::serial_write("\r\n");
-            return false;
-        }
-        self.threads[usize::from(id.slot)] = None;
-        if self.current == Some(id) {
-            self.current = None;
-        }
-        true
-    }
-
     fn remove_cancellable_domain(&mut self, domain: u64) -> bool {
         let mut slot = None;
         for (index, thread) in self.threads.iter().enumerate() {
@@ -1072,7 +1019,96 @@ impl ProcessScheduler {
     pub(crate) const fn new() -> Self {
         Self {
             scheduler: Scheduler::new(),
+            current_by_cpu: [None; PROCESS_CPU_LIMIT],
+            affinities: [u64::MAX; MAX_THREADS],
+            dispatches: [0; PROCESS_CPU_LIMIT],
         }
+    }
+
+    fn schedule_next_on_with_policy<L, C>(
+        &mut self,
+        cpu: usize,
+        limit_for: L,
+        class_for: C,
+    ) -> Option<ScheduledProcess>
+    where
+        L: Fn(u64) -> usize,
+        C: Fn(u64) -> domain::ResourceServiceClass,
+    {
+        if cpu >= PROCESS_CPU_LIMIT {
+            return None;
+        }
+        if let Some(id) = self.current_by_cpu[cpu] {
+            return Some(ScheduledProcess {
+                handle: ProcessThreadHandle(id),
+                context: ProcessSchedulerContext(self.scheduler.thread(id)?.context),
+            });
+        }
+        let eligible = |thread: &Thread, scheduler: &Self| {
+            let domain_limit = limit_for(thread.domain).min(PROCESS_CPU_LIMIT);
+            let domain_running = scheduler
+                .current_by_cpu
+                .iter()
+                .flatten()
+                .filter(|id| {
+                    scheduler
+                        .scheduler
+                        .thread(**id)
+                        .is_some_and(|running| running.domain == thread.domain)
+                })
+                .count();
+            thread.state == State::Ready
+                && scheduler.affinities[usize::from(thread.id.slot)] & (1_u64 << cpu) != 0
+                && domain_running < domain_limit
+        };
+        let service_class = self
+            .scheduler
+            .threads
+            .iter()
+            .flatten()
+            .filter(|thread| eligible(thread, self))
+            .map(|thread| class_for(thread.domain))
+            .max()?;
+        let priority = self
+            .scheduler
+            .threads
+            .iter()
+            .flatten()
+            .filter(|thread| eligible(thread, self) && class_for(thread.domain) == service_class)
+            .map(|thread| thread.priority)
+            .max()?;
+        for offset in 0..MAX_THREADS {
+            let slot = (self.scheduler.next_slot + offset) % MAX_THREADS;
+            let Some(mut thread) = self.scheduler.threads[slot] else {
+                continue;
+            };
+            if eligible(&thread, self)
+                && class_for(thread.domain) == service_class
+                && thread.priority == priority
+            {
+                thread.state = State::Running;
+                self.scheduler.threads[slot] = Some(thread);
+                self.current_by_cpu[cpu] = Some(thread.id);
+                self.scheduler.next_slot = (slot + 1) % MAX_THREADS;
+                self.dispatches[cpu] = self.dispatches[cpu].saturating_add(1);
+                return Some(ScheduledProcess {
+                    handle: ProcessThreadHandle(thread.id),
+                    context: ProcessSchedulerContext(thread.context),
+                });
+            }
+        }
+        None
+    }
+
+    fn schedule_next_on(&mut self, cpu: usize) -> Option<ScheduledProcess> {
+        self.schedule_next_on_with_policy(
+            cpu,
+            |domain| {
+                domain::container_domain_limits(domain)
+                    .map_or(PROCESS_CPU_LIMIT, |(limit, _)| usize::from(limit))
+            },
+            domain::cpu_service_class,
+        )
     }
 
     pub(crate) fn admit(
@@ -1080,18 +1116,16 @@ impl ProcessScheduler {
         domain: u64,
         context: ProcessSchedulerContext,
     ) -> Option<ProcessThreadHandle> {
-        self.scheduler
+        let handle = self
+            .scheduler
             .create(domain, context.0)
-            .map(ProcessThreadHandle)
+            .map(ProcessThreadHandle)?;
+        self.affinities[usize::from(handle.0.slot)] = u64::MAX;
+        Some(handle)
     }
 
     pub(crate) fn schedule_next(&mut self) -> Option<ScheduledProcess> {
-        self.scheduler
-            .schedule_next()
-            .map(|scheduled| ScheduledProcess {
-                handle: ProcessThreadHandle(scheduled.id),
-                context: ProcessSchedulerContext(scheduled.context),
-            })
+        self.schedule_next_on(crate::arch::x86_64::cpu::current_cpu_index())
     }
 
     pub(crate) fn yield_current(
@@ -1099,12 +1133,21 @@ impl ProcessScheduler {
         handle: ProcessThreadHandle,
         context: ProcessSchedulerContext,
     ) -> Option<ScheduledProcess> {
-        self.scheduler
-            .yield_current(handle.0, context.0)
-            .map(|scheduled| ScheduledProcess {
-                handle: ProcessThreadHandle(scheduled.id),
-                context: ProcessSchedulerContext(scheduled.context),
-            })
+        let cpu = crate::arch::x86_64::cpu::current_cpu_index();
+        if cpu >= PROCESS_CPU_LIMIT
+            || self.current_by_cpu[cpu] != Some(handle.0)
+            || !context.0.is_valid()
+        {
+            return None;
+        }
+        let thread = self.scheduler.thread_mut(handle.0)?;
+        if thread.state != State::Running {
+            return None;
+        }
+        thread.context = context.0;
+        thread.state = State::Ready;
+        self.current_by_cpu[cpu] = None;
+        self.schedule_next_on(cpu)
     }
 
     pub(crate) fn switch_current(
@@ -1113,21 +1156,76 @@ impl ProcessScheduler {
         context: ProcessSchedulerContext,
         target: ProcessThreadHandle,
     ) -> Option<ScheduledProcess> {
-        self.scheduler
-            .switch_current(handle.0, context.0, target.0)
-            .map(|scheduled| ScheduledProcess {
-                handle: ProcessThreadHandle(scheduled.id),
-                context: ProcessSchedulerContext(scheduled.context),
-            })
+        let cpu = crate::arch::x86_64::cpu::current_cpu_index();
+        if cpu >= PROCESS_CPU_LIMIT
+            || self.current_by_cpu[cpu] != Some(handle.0)
+            || handle == target
+            || !context.0.is_valid()
+        {
+            return None;
+        }
+        let target_context = {
+            let target_thread = self.scheduler.thread(target.0)?;
+            if target_thread.state != State::Ready
+                || self.affinities[usize::from(target.0.slot)] & (1_u64 << cpu) == 0
+            {
+                return None;
+            }
+            target_thread.context
+        };
+        if self.scheduler.thread(handle.0)?.state != State::Running {
+            return None;
+        }
+        {
+            let current = self.scheduler.thread_mut(handle.0)?;
+            current.context = context.0;
+            current.state = State::Ready;
+        }
+        self.scheduler.thread_mut(target.0)?.state = State::Running;
+        let selected = ScheduledProcess {
+            handle: target,
+            context: ProcessSchedulerContext(target_context),
+        };
+        self.current_by_cpu[cpu] = Some(target.0);
+        self.dispatches[cpu] = self.dispatches[cpu].saturating_add(1);
+        Some(selected)
     }
 
     pub(crate) fn retire(&mut self, handle: ProcessThreadHandle) -> bool {
-        self.scheduler.retire_process(handle.0)
+        let Some(thread) = self.scheduler.thread(handle.0).copied() else {
+            return false;
+        };
+        if thread.state == State::Running && !self.current_by_cpu.contains(&Some(handle.0)) {
+            return false;
+        }
+        self.scheduler.threads[usize::from(handle.0.slot)] = None;
+        self.affinities[usize::from(handle.0.slot)] = u64::MAX;
+        for current in &mut self.current_by_cpu {
+            if *current == Some(handle.0) {
+                *current = None;
+            }
+        }
+        true
     }
 
     pub(crate) fn retire_all(&mut self) {
         self.scheduler.threads.fill(None);
         self.scheduler.current = None;
+        self.current_by_cpu.fill(None);
+        self.affinities.fill(u64::MAX);
+        self.dispatches.fill(0);
+    }
+
+    pub(crate) fn set_affinity(&mut self, handle: ProcessThreadHandle, mask: u64) -> bool {
+        if mask == 0 || self.scheduler.thread(handle.0).is_none() {
+            return false;
+        }
+        self.affinities[usize::from(handle.0.slot)] = mask;
+        true
+    }
+
+    pub(crate) fn dispatch_count(&self, cpu: usize) -> Option<u64> {
+        self.dispatches.get(cpu).copied()
     }
 
     pub(crate) fn set_priority(&mut self, handle: ProcessThreadHandle, priority: i8) -> bool {
@@ -1152,6 +1250,9 @@ pub(crate) fn acquire_process_scheduler_workspace() -> Option<&'static mut Proce
         }
         core::ptr::addr_of_mut!((*workspace).scheduler.current).write(None);
         core::ptr::addr_of_mut!((*workspace).scheduler.next_slot).write(0);
+        core::ptr::addr_of_mut!((*workspace).current_by_cpu).write([None; PROCESS_CPU_LIMIT]);
+        core::ptr::addr_of_mut!((*workspace).affinities).write([u64::MAX; MAX_THREADS]);
+        core::ptr::addr_of_mut!((*workspace).dispatches).write([0; PROCESS_CPU_LIMIT]);
     }
     claim.publish_initialized();
     // SAFETY: A successful claim gives this lifecycle exclusive workspace use.
@@ -1170,8 +1271,88 @@ pub(crate) fn release_process_scheduler_workspace() -> bool {
         };
         workspace.scheduler.threads.iter().all(Option::is_none)
             && workspace.scheduler.current.is_none()
+            && workspace.current_by_cpu.iter().all(Option::is_none)
     };
     clean && PROCESS_WORKSPACE.reset()
+}
+
+pub(crate) fn schedule_process_on_current_cpu_for_test() -> bool {
+    active_process_scheduler_workspace()
+        .and_then(ProcessScheduler::schedule_next)
+        .is_some()
+}
+
+pub(crate) fn verify_smp_process_scheduler(remote_operation: u64) -> bool {
+    if crate::arch::x86_64::smp::online_count() == 1 {
+        return true;
+    }
+    let Some(context) = process_user_context([0; 15], 0x1000, 0x2000, 0x202, 0x3000, 0) else {
+        return false;
+    };
+    let Some(run_queue) = acquire_process_scheduler_workspace() else {
+        return false;
+    };
+    let verified = (|| {
+        let first = run_queue.admit(1, context)?;
+        let second = run_queue.admit(1, context)?;
+        let fallback = run_queue.admit(1, context)?;
+        if !run_queue.set_affinity(first, 1)
+            || !run_queue.set_affinity(second, 2)
+            || !run_queue.set_affinity(fallback, 3)
+            || !run_queue.set_priority(first, 10)
+            || !run_queue.set_priority(second, 10)
+            || !run_queue.set_priority(fallback, 0)
+            || run_queue.schedule_next()?.handle() != first
+            || !crate::arch::x86_64::smp::execute_runtime_operation(1, remote_operation)
+            || run_queue.current_by_cpu[0] != Some(first.0)
+            || run_queue.current_by_cpu[1] != Some(second.0)
+            || run_queue.dispatch_count(0) != Some(1)
+            || run_queue.dispatch_count(1) != Some(1)
+            || run_queue.scheduler.thread(fallback.0)?.state != State::Ready
+        {
+            return None;
+        }
+        Some(())
+    })()
+    .is_some();
+    run_queue.retire_all();
+    let policy_verified = (|| {
+        const LIMITED_DOMAIN: u64 = 0x100;
+        const STANDARD_DOMAIN: u64 = 0x200;
+        let limited_first = run_queue.admit(LIMITED_DOMAIN, context)?;
+        let limited_second = run_queue.admit(LIMITED_DOMAIN, context)?;
+        let standard = run_queue.admit(STANDARD_DOMAIN, context)?;
+        let limit_for = |domain| {
+            if domain == LIMITED_DOMAIN {
+                1
+            } else {
+                2
+            }
+        };
+        let class_for = |domain| {
+            if domain == LIMITED_DOMAIN {
+                domain::ResourceServiceClass::LatencyCritical
+            } else {
+                domain::ResourceServiceClass::Standard
+            }
+        };
+        if run_queue
+            .schedule_next_on_with_policy(0, limit_for, class_for)?
+            .handle()
+            != limited_first
+            || run_queue
+                .schedule_next_on_with_policy(1, limit_for, class_for)?
+                .handle()
+                != standard
+            || run_queue.scheduler.thread(limited_second.0)?.state != State::Ready
+        {
+            return None;
+        }
+        Some(())
+    })()
+    .is_some();
+    run_queue.retire_all();
+    verified && policy_verified && release_process_scheduler_workspace()
 }
 
 pub(crate) fn initialize_runtime(

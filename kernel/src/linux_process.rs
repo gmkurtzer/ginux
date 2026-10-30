@@ -724,6 +724,10 @@ impl ProcessTable {
         let Some(thread) = run_queue.admit(domain, scheduler_context) else {
             return false;
         };
+        if !run_queue.set_affinity(thread, process.cpu_affinity) {
+            let _ = run_queue.retire(thread);
+            return false;
+        }
         let Some(process) = self.process_mut(handle) else {
             let _ = run_queue.retire(thread);
             return false;
@@ -2494,7 +2498,10 @@ pub(crate) fn set_live_process_cpu_affinity(pid: u32, mask: u64) -> bool {
         return false;
     }
     process.cpu_affinity = mask;
-    true
+    process.scheduler_thread.is_none_or(|thread| {
+        scheduler::active_process_scheduler_workspace()
+            .is_some_and(|run_queue| run_queue.set_affinity(thread, mask))
+    })
 }
 
 pub(crate) fn set_live_process_scheduler_nice(pid: u32, nice: u8) -> bool {
