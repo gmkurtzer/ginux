@@ -7,13 +7,13 @@
 - Active project: feedback-driven kernel hardening
 - Branch: `codex/feedback-hardening`
 - Baseline tag: `research-v1-baseline`
-- Active gate: proposed Gate 11.5, SMP shared-writable-page correctness,
-  awaiting human alignment and execution approval
+- Active gate: Gate 11.5, SMP shared-writable-page correctness, in progress
 - Last completed action: completed every fixed one-thread cell at 1, 2, and 4
   vCPUs; scaled 2-vCPU/2-thread CPU samples passed, but its shared-memory
   workload produced a Linux write page fault on a mapped shared page
-- Next action: review Gate 11.5 scope, acceptance evidence, and checkpoint
-  policy; implementation has not started
+- Next action: implement a permission-preserving local translation refresh for
+  non-present Linux faults whose authoritative page-table leaf is already
+  present and grants the attempted access, then rerun the focused stress
 
 ## Current repository state
 
@@ -27,9 +27,19 @@ evidence are under `docs/feedback-hardening/`. No push or merge was performed.
 
 ## Open decisions
 
-- Confirm whether proposed Gate 11.5 is correctly scoped, may run on the
-  current branch and PR, and should stop for human review after all objective
-  criteria pass. Gate 11 remains paused until that decision.
+- None. The human approved Gate 11.5 on October 30, 2026. Stop for review after
+  every objective criterion passes; Gate 11 remains paused meanwhile.
+
+## Active diagnosis
+
+- A fresh two-vCPU/two-thread run with one three-second CPU sample followed by
+  one three-second shared-memory sample deterministically reproduced the locked
+  write fault on its first boot.
+- The hardware reported a non-present write fault while a serialized walk of
+  the active root found an occupied, framed, writable leaf. The narrow current
+  diagnosis is a CPU-local stale non-present translation after another runtime
+  CPU publishes the shared page; the planned recovery invalidates only the
+  faulting CPU and only when the existing leaf already grants the exact access.
 
 ## Limitations
 
