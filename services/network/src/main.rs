@@ -6,6 +6,7 @@ extern crate alloc;
 use core::{
     alloc::{GlobalAlloc, Layout},
     arch::{asm, global_asm},
+    cell::UnsafeCell,
     ptr::{read_volatile, write_volatile},
     sync::atomic::{compiler_fence, AtomicUsize, Ordering},
 };
@@ -36,12 +37,21 @@ const TLS_HEAP_SIZE: usize = 128 * 1024;
 
 struct RegistryAllocator;
 
-static TLS_HEAP_NEXT: AtomicUsize = AtomicUsize::new(0);
-static mut TLS_HEAP: [u8; TLS_HEAP_SIZE] = [0; TLS_HEAP_SIZE];
+struct RegistryHeapOwner {
+    next: AtomicUsize,
+    bytes: UnsafeCell<[u8; TLS_HEAP_SIZE]>,
+}
+
+unsafe impl Sync for RegistryHeapOwner {}
+
+static REGISTRY_HEAP: RegistryHeapOwner = RegistryHeapOwner {
+    next: AtomicUsize::new(0),
+    bytes: UnsafeCell::new([0; TLS_HEAP_SIZE]),
+};
 
 unsafe impl GlobalAlloc for RegistryAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        let mut current = TLS_HEAP_NEXT.load(Ordering::Relaxed);
+        let mut current = REGISTRY_HEAP.next.load(Ordering::Relaxed);
         loop {
             let aligned = match current.checked_add(layout.align() - 1) {
                 Some(value) => value & !(layout.align() - 1),
@@ -53,13 +63,13 @@ unsafe impl GlobalAlloc for RegistryAllocator {
             if next > TLS_HEAP_SIZE {
                 return core::ptr::null_mut();
             }
-            match TLS_HEAP_NEXT.compare_exchange_weak(
+            match REGISTRY_HEAP.next.compare_exchange_weak(
                 current,
                 next,
                 Ordering::AcqRel,
                 Ordering::Relaxed,
             ) {
-                Ok(_) => return core::ptr::addr_of_mut!(TLS_HEAP).cast::<u8>().add(aligned),
+                Ok(_) => return REGISTRY_HEAP.bytes.get().cast::<u8>().add(aligned),
                 Err(observed) => current = observed,
             }
         }
@@ -72,7 +82,7 @@ unsafe impl GlobalAlloc for RegistryAllocator {
 static REGISTRY_ALLOCATOR: RegistryAllocator = RegistryAllocator;
 
 fn reset_registry_allocator() {
-    TLS_HEAP_NEXT.store(0, Ordering::Release);
+    REGISTRY_HEAP.next.store(0, Ordering::Release);
 }
 
 static SERVICE_IDENTITY: &[u8] = b"GINUX_NETWORK_SERVICE_V0";

@@ -7,12 +7,12 @@
 - Active project: feedback-driven kernel hardening
 - Branch: `codex/feedback-hardening`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 6, platform and service state ownership, ready to begin
+- Active gate: Gate 6, platform and service state ownership, in progress
 - Last completed action: Gate 5 consolidated the x86-64 execution bank behind
   explicit owner roots, removed every Gate 5 migration row, added enforcement,
   and passed static, ABI, and verification-QEMU evidence
-- Next action: classify the Gate 6 rows by platform/service lifecycle and move
-  the first coherent ownership group behind an explicit owner root
+- Next action: verify the isolated network-service generation owners, then
+  migrate the next coherent platform/service ownership group
 
 ## Current repository state
 

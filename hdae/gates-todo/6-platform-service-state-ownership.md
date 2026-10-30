@@ -19,7 +19,9 @@ state into explicit host, device, service, or domain-owned structures.
 
 ## Completed work
 
-None. Depends on Gate 5.
+- [x] Consolidated the isolated registry/network service heap, network buffers,
+  DNS state, TLS workspaces, pull metadata, and progress state from 20 ambient
+  globals into three explicit service-generation owner roots.
 
 ## Remaining work
 
@@ -38,8 +40,13 @@ None. Depends on Gate 5.
 
 ## Evidence
 
-Before/after inventory, owner API review, injected-failure tests, multi-domain
-isolation results, and complete regressions.
+- After the isolated network-service migration, `make architecture-check`
+  passed with the writable-global inventory reduced from 560 to 543 objects.
+- `cargo check -p ginux-network-service-runtime --target
+  x86_64-unknown-none` and `make check` passed.
+- `make build-verification && bash tests/qemu/boot.sh` passed the complete
+  service fault, replacement, network request-generation, ABI, lifecycle, and
+  cleanup sequence.
 
 ## Decisions and limitations
 
@@ -53,7 +60,7 @@ not itself prohibited when ownership and synchronization are concrete.
 - Pull request: the shared ten-gate pull request.
 - Planned commits: filesystem/storage ownership, network/socket ownership,
   device/controller ownership, and failure/lifecycle evidence.
-- Actual commits: pending.
+- Actual commits: isolated network-service ownership pending commit.
 
 ## Review policy and outcome
 

@@ -1,4 +1,5 @@
 use core::{
+    cell::UnsafeCell,
     fmt::Write as _,
     ptr::{read_volatile, write_volatile},
     sync::atomic::{compiler_fence, AtomicU32, AtomicU64, Ordering},
@@ -43,25 +44,47 @@ const CERTIFICATE_SIZE: usize = 4096;
 const HTTP_HEADER_SIZE: usize = 8192;
 const METADATA_BODY_SIZE: usize = 64 * 1024;
 
-static CLOCK: AtomicU64 = AtomicU64::new(0);
-static PROGRESS_CAPABILITY: AtomicU64 = AtomicU64::new(0);
-static DNS_FALLBACK_A: AtomicU32 = AtomicU32::new(0);
-static DNS_FALLBACK_STATE: AtomicU32 = AtomicU32::new(0);
-static DNS_QUERY_SENT: AtomicU32 = AtomicU32::new(0);
+struct RegistryServiceOwner {
+    clock: AtomicU64,
+    progress_capability: AtomicU64,
+    dns_fallback_a: AtomicU32,
+    dns_fallback_state: AtomicU32,
+    dns_query_sent: AtomicU32,
+    tcp_rx: UnsafeCell<[u8; TCP_BUFFER_SIZE]>,
+    tcp_tx: UnsafeCell<[u8; TCP_BUFFER_SIZE]>,
+    dns_queries: UnsafeCell<[Option<dns::DnsQuery>; 1]>,
+    socket_storage: UnsafeCell<[SocketStorage<'static>; 2]>,
+    tls_read: UnsafeCell<[u8; TLS_RECORD_SIZE]>,
+    tls_write: UnsafeCell<[u8; TLS_RECORD_SIZE]>,
+    root_der: UnsafeCell<[u8; 2048]>,
+    http_header: UnsafeCell<[u8; HTTP_HEADER_SIZE]>,
+    metadata_body: UnsafeCell<[u8; METADATA_BODY_SIZE]>,
+}
 
-static mut TCP_RX: [u8; TCP_BUFFER_SIZE] = [0; TCP_BUFFER_SIZE];
-static mut TCP_TX: [u8; TCP_BUFFER_SIZE] = [0; TCP_BUFFER_SIZE];
-static mut DNS_QUERIES: [Option<dns::DnsQuery>; 1] = [None];
-static mut SOCKET_STORAGE: [SocketStorage<'static>; 2] = [SocketStorage::EMPTY; 2];
-static mut TLS_READ: [u8; TLS_RECORD_SIZE] = [0; TLS_RECORD_SIZE];
-static mut TLS_WRITE: [u8; TLS_RECORD_SIZE] = [0; TLS_RECORD_SIZE];
-static mut ROOT_DER: [u8; 2048] = [0; 2048];
-static mut HTTP_HEADER: [u8; HTTP_HEADER_SIZE] = [0; HTTP_HEADER_SIZE];
-static mut METADATA_BODY: [u8; METADATA_BODY_SIZE] = [0; METADATA_BODY_SIZE];
+unsafe impl Sync for RegistryServiceOwner {}
+
+static REGISTRY_SERVICE: RegistryServiceOwner = RegistryServiceOwner {
+    clock: AtomicU64::new(0),
+    progress_capability: AtomicU64::new(0),
+    dns_fallback_a: AtomicU32::new(0),
+    dns_fallback_state: AtomicU32::new(0),
+    dns_query_sent: AtomicU32::new(0),
+    tcp_rx: UnsafeCell::new([0; TCP_BUFFER_SIZE]),
+    tcp_tx: UnsafeCell::new([0; TCP_BUFFER_SIZE]),
+    dns_queries: UnsafeCell::new([None]),
+    socket_storage: UnsafeCell::new([SocketStorage::EMPTY; 2]),
+    tls_read: UnsafeCell::new([0; TLS_RECORD_SIZE]),
+    tls_write: UnsafeCell::new([0; TLS_RECORD_SIZE]),
+    root_der: UnsafeCell::new([0; 2048]),
+    http_header: UnsafeCell::new([0; HTTP_HEADER_SIZE]),
+    metadata_body: UnsafeCell::new([0; METADATA_BODY_SIZE]),
+};
 
 #[inline(never)]
 pub(crate) unsafe fn pull(info: &NativeNetworkBootV8) -> bool {
-    CLOCK.store(info.unix_time, Ordering::Release);
+    REGISTRY_SERVICE
+        .clock
+        .store(info.unix_time, Ordering::Release);
     progress(b"initializing registry network stack");
     let Some(mut device) = VirtioNet::new(info) else {
         progress(b"registry network device initialization failed");
@@ -92,19 +115,19 @@ pub(crate) unsafe fn pull(info: &NativeNetworkBootV8) -> bool {
     let dns_servers = [IpAddress::Ipv4(Ipv4Address::from_octets(dns_address))];
     let dns_socket = dns::Socket::new(
         &dns_servers,
-        core::slice::from_raw_parts_mut(core::ptr::addr_of_mut!(DNS_QUERIES).cast(), 1),
+        core::slice::from_raw_parts_mut(REGISTRY_SERVICE.dns_queries.get().cast(), 1),
     );
     let tcp_rx = tcp::SocketBuffer::new(core::slice::from_raw_parts_mut(
-        core::ptr::addr_of_mut!(TCP_RX).cast(),
+        REGISTRY_SERVICE.tcp_rx.get().cast(),
         TCP_BUFFER_SIZE,
     ));
     let tcp_tx = tcp::SocketBuffer::new(core::slice::from_raw_parts_mut(
-        core::ptr::addr_of_mut!(TCP_TX).cast(),
+        REGISTRY_SERVICE.tcp_tx.get().cast(),
         TCP_BUFFER_SIZE,
     ));
     let tcp_socket = tcp::Socket::new(tcp_rx, tcp_tx);
     let mut sockets = SocketSet::new(core::slice::from_raw_parts_mut(
-        core::ptr::addr_of_mut!(SOCKET_STORAGE).cast(),
+        REGISTRY_SERVICE.socket_storage.get().cast(),
         2,
     ));
     let dns_handle = sockets.add(dns_socket);
@@ -122,7 +145,7 @@ pub(crate) unsafe fn pull(info: &NativeNetworkBootV8) -> bool {
         };
         host
     };
-    let path = &mut *core::ptr::addr_of_mut!(PULL_PATH);
+    let path = &mut *REGISTRY_PULL.path.get();
     path.clear();
     let mut path_bytes = [0; 384];
     let Ok(path_length) = reference.write_manifest_path(&mut path_bytes) else {
@@ -134,7 +157,7 @@ pub(crate) unsafe fn pull(info: &NativeNetworkBootV8) -> bool {
     if path.push_str(path_text).is_err() {
         return false;
     }
-    let response = &mut *core::ptr::addr_of_mut!(PULL_RESPONSE);
+    let response = &mut *REGISTRY_PULL.response.get();
     *response = HttpMetadata::empty();
     progress(b"connecting to registry");
     if !https_get(
@@ -153,7 +176,7 @@ pub(crate) unsafe fn pull(info: &NativeNetworkBootV8) -> bool {
     }
     sockets.get_mut::<tcp::Socket>(tcp_handle).abort();
     progress(b"registry endpoint reached");
-    let token = &mut *core::ptr::addr_of_mut!(PULL_TOKEN);
+    let token = &mut *REGISTRY_PULL.token.get();
     token.clear();
     if response.status == 401 {
         progress(b"authenticating with registry");
@@ -173,7 +196,7 @@ pub(crate) unsafe fn pull(info: &NativeNetworkBootV8) -> bool {
         let Some((auth_host, auth_path)) = split_https_url(realm.as_str()) else {
             return false;
         };
-        let token_path = &mut *core::ptr::addr_of_mut!(PULL_TOKEN_PATH);
+        let token_path = &mut *REGISTRY_PULL.token_path.get();
         token_path.clear();
         if write!(
             token_path,
@@ -453,7 +476,7 @@ pub(crate) fn progress(message: &[u8]) {
         core::arch::asm!(
             "int 0x80",
             inlateout("rax") result,
-            in("rdi") PROGRESS_CAPABILITY.load(Ordering::Acquire),
+            in("rdi") REGISTRY_SERVICE.progress_capability.load(Ordering::Acquire),
             in("rsi") message.as_ptr() as u64,
             in("rdx") message.len() as u64,
             options(nostack),
@@ -463,7 +486,9 @@ pub(crate) fn progress(message: &[u8]) {
 }
 
 pub(crate) fn set_progress_capability(capability: u64) {
-    PROGRESS_CAPABILITY.store(capability, Ordering::Release);
+    REGISTRY_SERVICE
+        .progress_capability
+        .store(capability, Ordering::Release);
 }
 
 fn progress_status(prefix: &[u8], status: u16) {
@@ -569,7 +594,7 @@ struct RegistryClock;
 
 impl TlsClock for RegistryClock {
     fn now() -> Option<u64> {
-        Some(CLOCK.load(Ordering::Acquire))
+        Some(REGISTRY_SERVICE.clock.load(Ordering::Acquire))
     }
 }
 
@@ -806,7 +831,7 @@ impl BufferSink {
     unsafe fn metadata() -> Self {
         Self {
             bytes: core::slice::from_raw_parts_mut(
-                core::ptr::addr_of_mut!(METADATA_BODY).cast(),
+                REGISTRY_SERVICE.metadata_body.get().cast(),
                 METADATA_BODY_SIZE,
             ),
             used: 0,
@@ -912,11 +937,6 @@ struct HttpMetadata {
     location: String<1536>,
 }
 
-static mut PULL_PATH: String<384> = String::new();
-static mut PULL_RESPONSE: HttpMetadata = HttpMetadata::empty();
-static mut PULL_TOKEN: String<4096> = String::new();
-static mut PULL_TOKEN_PATH: String<1536> = String::new();
-
 impl HttpMetadata {
     const fn empty() -> Self {
         Self {
@@ -928,6 +948,22 @@ impl HttpMetadata {
         }
     }
 }
+
+struct RegistryPullOwner {
+    path: UnsafeCell<String<384>>,
+    response: UnsafeCell<HttpMetadata>,
+    token: UnsafeCell<String<4096>>,
+    token_path: UnsafeCell<String<1536>>,
+}
+
+unsafe impl Sync for RegistryPullOwner {}
+
+static REGISTRY_PULL: RegistryPullOwner = RegistryPullOwner {
+    path: UnsafeCell::new(String::new()),
+    response: UnsafeCell::new(HttpMetadata::empty()),
+    token: UnsafeCell::new(String::new()),
+    token_path: UnsafeCell::new(String::new()),
+};
 
 #[allow(clippy::too_many_arguments)]
 #[inline(never)]
@@ -965,9 +1001,9 @@ unsafe fn https_get(
         return false;
     };
     let tls_read =
-        core::slice::from_raw_parts_mut(core::ptr::addr_of_mut!(TLS_READ).cast(), TLS_RECORD_SIZE);
+        core::slice::from_raw_parts_mut(REGISTRY_SERVICE.tls_read.get().cast(), TLS_RECORD_SIZE);
     let tls_write =
-        core::slice::from_raw_parts_mut(core::ptr::addr_of_mut!(TLS_WRITE).cast(), TLS_RECORD_SIZE);
+        core::slice::from_raw_parts_mut(REGISTRY_SERVICE.tls_write.get().cast(), TLS_RECORD_SIZE);
     let mut tls = TlsConnection::new(stream, tls_read, tls_write);
     let config = TlsConfig::new()
         .with_server_name(host)
@@ -1050,14 +1086,14 @@ unsafe fn decode_pem(pem: &str) -> Option<&'static [u8]> {
             encoded.push_str(line).ok()?;
         }
     }
-    let output = core::slice::from_raw_parts_mut(core::ptr::addr_of_mut!(ROOT_DER).cast(), 2048);
+    let output = core::slice::from_raw_parts_mut(REGISTRY_SERVICE.root_der.get().cast(), 2048);
     let decoded = Base64::decode(encoded.as_bytes(), output).ok()?;
     Some(core::slice::from_raw_parts(decoded.as_ptr(), decoded.len()))
 }
 
 fn seed() -> [u8; 32] {
     let mut output = [0; 32];
-    let time = CLOCK.load(Ordering::Acquire);
+    let time = REGISTRY_SERVICE.clock.load(Ordering::Acquire);
     for index in 0..4 {
         output[index * 8..index * 8 + 8]
             .copy_from_slice(&time.wrapping_mul((index + 1) as u64).to_le_bytes());
@@ -1071,10 +1107,7 @@ fn read_response(
     sink: &mut impl BodySink,
 ) -> bool {
     let header = unsafe {
-        core::slice::from_raw_parts_mut(
-            core::ptr::addr_of_mut!(HTTP_HEADER).cast(),
-            HTTP_HEADER_SIZE,
-        )
+        core::slice::from_raw_parts_mut(REGISTRY_SERVICE.http_header.get().cast(), HTTP_HEADER_SIZE)
     };
     let mut used = 0;
     let header_end = loop {
@@ -1276,9 +1309,11 @@ fn resolve(
 ) -> Option<IpAddress> {
     let mut elapsed_polls = 0_usize;
     for attempt in 0..3 {
-        DNS_FALLBACK_A.store(0, Ordering::Release);
-        DNS_FALLBACK_STATE.store(0, Ordering::Release);
-        DNS_QUERY_SENT.store(0, Ordering::Release);
+        REGISTRY_SERVICE.dns_fallback_a.store(0, Ordering::Release);
+        REGISTRY_SERVICE
+            .dns_fallback_state
+            .store(0, Ordering::Release);
+        REGISTRY_SERVICE.dns_query_sent.store(0, Ordering::Release);
         let query = match sockets.get_mut::<dns::Socket>(handle).start_query(
             interface.context(),
             host,
@@ -1298,7 +1333,7 @@ fn resolve(
                 device,
                 sockets,
             );
-            let fallback = DNS_FALLBACK_A.swap(0, Ordering::AcqRel);
+            let fallback = REGISTRY_SERVICE.dns_fallback_a.swap(0, Ordering::AcqRel);
             if fallback != 0 {
                 sockets.get_mut::<dns::Socket>(handle).cancel_query(query);
                 return Some(IpAddress::Ipv4(Ipv4Address::from_octets(
@@ -1331,8 +1366,8 @@ fn resolve(
             let _ = write!(
                 message,
                 "registry DNS response rejected (wire state {}, query sent {})",
-                DNS_FALLBACK_STATE.load(Ordering::Acquire),
-                DNS_QUERY_SENT.load(Ordering::Acquire),
+                REGISTRY_SERVICE.dns_fallback_state.load(Ordering::Acquire),
+                REGISTRY_SERVICE.dns_query_sent.load(Ordering::Acquire),
             );
             progress(message.as_bytes());
         }
@@ -1532,7 +1567,9 @@ impl RxToken for VirtioRxToken {
                 self.1,
             );
             if let Some(address) = first_dns_a_record(bytes) {
-                DNS_FALLBACK_A.store(address, Ordering::Release);
+                REGISTRY_SERVICE
+                    .dns_fallback_a
+                    .store(address, Ordering::Release);
             }
             let result = callback(bytes);
             device.rx_used = device.rx_used.wrapping_add(1);
@@ -1577,16 +1614,22 @@ fn first_dns_a_record(frame: &[u8]) -> Option<u32> {
     if u16::from_be_bytes(frame.get(udp..udp + 2)?.try_into().ok()?) != 53 {
         return None;
     }
-    DNS_FALLBACK_STATE.store(1, Ordering::Release);
+    REGISTRY_SERVICE
+        .dns_fallback_state
+        .store(1, Ordering::Release);
     let dns = udp.checked_add(8)?;
     let message = frame.get(dns..)?;
     let flags = u16::from_be_bytes(message.get(2..4)?.try_into().ok()?);
     if flags & 0x8000 == 0 {
         return None;
     }
-    DNS_FALLBACK_STATE.store(2, Ordering::Release);
+    REGISTRY_SERVICE
+        .dns_fallback_state
+        .store(2, Ordering::Release);
     if flags & 0x000f != 0 {
-        DNS_FALLBACK_STATE.store(10 + u32::from(flags & 0x000f), Ordering::Release);
+        REGISTRY_SERVICE
+            .dns_fallback_state
+            .store(10 + u32::from(flags & 0x000f), Ordering::Release);
         return None;
     }
     let questions = usize::from(u16::from_be_bytes(message.get(4..6)?.try_into().ok()?));
@@ -1613,7 +1656,9 @@ fn first_dns_a_record(frame: &[u8]) -> Option<u32> {
         }
         cursor = end;
     }
-    DNS_FALLBACK_STATE.store(4, Ordering::Release);
+    REGISTRY_SERVICE
+        .dns_fallback_state
+        .store(4, Ordering::Release);
     None
 }
 
@@ -1653,7 +1698,7 @@ impl TxToken for VirtioTxToken {
             );
             let result = callback(bytes);
             if is_dns_query(bytes) {
-                DNS_QUERY_SENT.store(1, Ordering::Release);
+                REGISTRY_SERVICE.dns_query_sent.store(1, Ordering::Release);
             }
             write_u64(
                 device.dma + TX_DESC_OFFSET as usize,
