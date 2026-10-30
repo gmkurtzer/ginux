@@ -12,8 +12,9 @@
   controller, device, timer, paging, physical-memory, and per-CPU architecture
   state behind explicit owner roots and passed fresh static, unit, ABI,
   service-failure, isolation, lifecycle, and full verification-QEMU evidence
-- Next action: extract Linux polling and epoll mechanisms into
-  `cpu/linux_poll.rs`, then run the complete per-extraction regression set
+- Next action: reconcile remaining entry/exception, signal, diagnostic, and
+  epoll-helper boundaries against Gate 7 scope and extract the next cohesive
+  low-coupling block before final Gate 7 qualification
 
 ## Current repository state
 

@@ -41,6 +41,8 @@ boundaries established by earlier gates without changing behavior.
   into `cpu/linux_time.rs`.
 - [x] Extracted Linux futex wait, wake, wait-vector, and requeue mechanisms into
   `cpu/linux_futex.rs`.
+- [x] Extracted Linux select, poll, ppoll, wait completion, scheduling-yield,
+  and epoll creation mechanisms into `cpu/linux_poll.rs`.
 
 ## Remaining work
 
@@ -75,6 +77,7 @@ boundaries established by earlier gates without changing behavior.
 - The Linux time-mechanism extraction passed the same complete regression
   sequence, including live timekeeping validation in the controller runtime.
 - The Linux futex extraction passed the same complete regression sequence.
+- The Linux polling extraction passed the same complete regression sequence.
 
 ## Decisions and limitations
 
