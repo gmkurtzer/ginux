@@ -477,8 +477,7 @@ interior-mutable	kernel/src/arch/x86_64/timer.rs	PREEMPTION_DEFERRED_RELOAD	plat
 interior-mutable	kernel/src/arch/x86_64/timer.rs	PREEMPTION_READY	platform-device	migrate	6	device-or-host-service-owned
 interior-mutable	kernel/src/arch/x86_64/timer.rs	PREEMPTION_RELOAD	platform-device	migrate	6	device-or-host-service-owned
 interior-mutable	kernel/src/arch/x86_64/timer.rs	TIMER_FIRED	platform-device	migrate	6	device-or-host-service-owned
-static-mut	kernel/src/domain.rs	GLOBAL_MANAGER	shared-runtime	migrate	5	kernel-runtime-manager-owned
-interior-mutable	kernel/src/domain.rs	INITIALIZED	shared-runtime	migrate	5	kernel-runtime-manager-owned
+interior-mutable	kernel/src/domain.rs	DOMAIN_RUNTIME	shared-runtime	allowlist	none	explicit-lifecycle-owner-root
 interior-mutable	kernel/src/image_store.rs	INSTALLED	platform-device	migrate	6	device-or-host-service-owned
 static-mut	kernel/src/image_store.rs	PUBLISHED_LAYERS	platform-device	migrate	6	device-or-host-service-owned
 interior-mutable	kernel/src/image_store.rs	PUBLISHED_LAYER_COUNT	platform-device	migrate	6	device-or-host-service-owned
@@ -489,8 +488,7 @@ static-mut	kernel/src/image_store.rs	STORE	platform-device	migrate	6	device-or-h
 static-mut	kernel/src/initramfs.rs	PUBLISHED_ROOT	platform-device	migrate	6	device-or-host-service-owned
 interior-mutable	kernel/src/initramfs.rs	ROOT_GENERATION	platform-device	migrate	6	device-or-host-service-owned
 interior-mutable	kernel/src/initramfs.rs	ROOT_PUBLISHED	platform-device	migrate	6	device-or-host-service-owned
-static-mut	kernel/src/ipc.rs	CONTROL_CHANNEL	shared-runtime	migrate	5	kernel-runtime-manager-owned
-interior-mutable	kernel/src/ipc.rs	INITIALIZED	shared-runtime	migrate	5	kernel-runtime-manager-owned
+interior-mutable	kernel/src/ipc.rs	CONTROL_CHANNEL	shared-runtime	allowlist	none	explicit-lifecycle-owner-root
 interior-mutable	kernel/src/lib.rs	BACKGROUND_DOMAIN_OUTPUT	platform-device	migrate	6	device-or-host-service-owned
 static-mut	kernel/src/lib.rs	KERNEL_STACK	platform-device	migrate	6	device-or-host-service-owned
 interior-mutable	kernel/src/lib.rs	LINUX_REALTIME_EPOCH_SECONDS	platform-device	migrate	6	device-or-host-service-owned
@@ -593,10 +591,8 @@ interior-mutable	kernel/src/published_rootfs.rs	INDEX_FRAME_STARTS	platform-devi
 interior-mutable	kernel/src/published_rootfs.rs	INDEX_GENERATIONS	platform-device	migrate	6	device-or-host-service-owned
 interior-mutable	kernel/src/published_rootfs.rs	INDEX_STARTS	platform-device	migrate	6	device-or-host-service-owned
 interior-mutable	kernel/src/published_rootfs.rs	SIZES	platform-device	migrate	6	device-or-host-service-owned
-static-mut	kernel/src/scheduler.rs	PROCESS_WORKSPACE	shared-runtime	migrate	5	kernel-runtime-manager-owned
-interior-mutable	kernel/src/scheduler.rs	PROCESS_WORKSPACE_ACTIVE	shared-runtime	migrate	5	kernel-runtime-manager-owned
-static-mut	kernel/src/scheduler.rs	RUNTIME	shared-runtime	migrate	5	kernel-runtime-manager-owned
-interior-mutable	kernel/src/scheduler.rs	RUNTIME_INITIALIZED	shared-runtime	migrate	5	kernel-runtime-manager-owned
+interior-mutable	kernel/src/scheduler.rs	PROCESS_WORKSPACE	shared-runtime	allowlist	none	explicit-lifecycle-owner-root
+interior-mutable	kernel/src/scheduler.rs	SCHEDULER_RUNTIME	shared-runtime	allowlist	none	explicit-lifecycle-owner-root
 static-mut	kernel/src/volume.rs	LIVE_DEVICE	platform-device	migrate	6	device-or-host-service-owned
 interior-mutable	kernel/src/volume.rs	LIVE_INSTALLED	platform-device	migrate	6	device-or-host-service-owned
 static-mut	services/network/src/main.rs	TLS_HEAP	service-runtime	migrate	6	isolated-service-generation-owned

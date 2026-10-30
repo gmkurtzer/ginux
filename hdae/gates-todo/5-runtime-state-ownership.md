@@ -20,7 +20,14 @@ state out of ambient globals and into explicitly owned lifecycle objects.
 
 ## Completed work
 
-None. Depends on Gate 4.
+- [x] Added one lifecycle-owner primitive that couples storage, publication,
+  and reset state without allocating large runtime objects on the kernel stack.
+- [x] Consolidated domain management, IPC, scheduler runtime, and reusable
+  process-scheduler workspace state from eight ambient globals into four
+  explicit owner roots.
+- [x] Added explicit teardown for the reusable process-scheduler workspace.
+- [x] Extended writable-global discovery to recognize generic custom
+  `UnsafeCell` wrappers rather than letting owner roots escape the inventory.
 
 ## Remaining work
 
@@ -40,8 +47,16 @@ None. Depends on Gate 4.
 
 ## Evidence
 
-Before/after inventory, ownership API review, lifecycle stress results,
-cross-domain negative tests, and full regression transcript.
+- `make architecture-check` -> passed; the enforced inventory decreased from
+  620 to 616 globals, with 474 Gate 5 migrations remaining and all four new
+  owner roots explicitly allowlisted.
+- `make check` -> passed after Clippy rejected and caused removal of an API
+  returning a mutable reference directly from an immutable owner reference.
+- `make build-verification && bash tests/qemu/boot.sh` -> passed the full
+  verification boot, reboot, corruption, lifecycle, and cleanup sequence.
+- Direct `bash tests/qemu/boot.sh` after `make check` was an invalid first
+  attempt because the normal image lacks verification-only markers; no QEMU
+  process was left behind, and the test was rerun with its required image.
 
 ## Decisions and limitations
 
@@ -55,7 +70,8 @@ Shared objects may remain only when Gate 4 explicitly classified them and Gate
 - Pull request: the shared ten-gate pull request.
 - Planned commits: per-CPU/task state, process/thread/signal state, domain state,
   scheduler/process tables, and lifecycle evidence.
-- Actual commits: pending.
+- Actual commits: explicit shared runtime owner roots pending commit; remaining
+  runtime migrations pending.
 
 ## Review policy and outcome
 

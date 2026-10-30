@@ -26,6 +26,7 @@ mod manifest;
 mod memory;
 mod native_elf;
 mod network;
+mod owned_state;
 mod packet;
 mod pe;
 mod published_rootfs;

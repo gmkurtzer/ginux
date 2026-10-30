@@ -1,10 +1,8 @@
-use core::mem::MaybeUninit;
-use core::sync::atomic::{AtomicBool, Ordering};
+use crate::owned_state::OwnedState;
 
 const CAPACITY: usize = 4;
 
-static INITIALIZED: AtomicBool = AtomicBool::new(false);
-static mut CONTROL_CHANNEL: MaybeUninit<Duplex> = MaybeUninit::uninit();
+static CONTROL_CHANNEL: OwnedState<Duplex> = OwnedState::empty();
 
 struct Duplex {
     control_domain: u64,
@@ -351,17 +349,13 @@ impl Channel {
 }
 
 pub(crate) fn initialize_control_channel(control_domain: u64, service_domain: u64) -> bool {
-    if INITIALIZED.load(Ordering::Acquire) {
+    if CONTROL_CHANNEL.get().is_some() {
         return false;
     }
     let Some(channel) = Duplex::new(control_domain, service_domain) else {
         return false;
     };
-    unsafe {
-        core::ptr::addr_of_mut!(CONTROL_CHANNEL).write(MaybeUninit::new(channel));
-    }
-    INITIALIZED.store(true, Ordering::Release);
-    true
+    CONTROL_CHANNEL.try_install(channel).is_ok()
 }
 
 pub(crate) fn send_or_wake(
@@ -605,8 +599,7 @@ pub(crate) fn verify_channel_invariants() -> bool {
 }
 
 fn channel_mut() -> Option<&'static mut Duplex> {
-    if !INITIALIZED.load(Ordering::Acquire) {
-        return None;
-    }
-    Some(unsafe { &mut *core::ptr::addr_of_mut!(CONTROL_CHANNEL).cast::<Duplex>() })
+    // SAFETY: IPC mutation is serialized on the bootstrap CPU until Gate 8
+    // supplies the runtime lock for this explicit owner root.
+    Some(unsafe { &mut *CONTROL_CHANNEL.get_mut_ptr()? })
 }

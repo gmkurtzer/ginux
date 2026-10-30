@@ -37,8 +37,9 @@ emit_matches interior-mutable \
 find "${source_roots[@]}" -type f -name '*.rs' -print0 |
     while IFS= read -r -d '' file; do
         awk '
-            /^struct [A-Za-z_][A-Za-z0-9_]*/ {
-                name = $2
+            /^(pub(\([^)]*\))? )?struct [A-Za-z_][A-Za-z0-9_]*/ {
+                name = $0
+                sub(/^.*struct /, "", name)
                 sub(/[(<{].*/, "", name)
                 remaining = 6
             }
@@ -50,7 +51,7 @@ find "${source_roots[@]}" -type f -name '*.rs' -print0 |
 while IFS= read -r wrapper; do
     [[ -n "$wrapper" ]] || continue
     emit_matches interior-mutable \
-        "^\\s*(pub(\\([^)]*\\))?\\s+)?static\\s+[A-Z0-9_]+\\s*:\\s*${wrapper}([[:space:]]|=)" \
+        "^\\s*(pub(\\([^)]*\\))?\\s+)?static\\s+[A-Z0-9_]+\\s*:\\s*${wrapper}([[:space:]<]|=)" \
         >>"$scratch"
 done <"$cell_types"
 

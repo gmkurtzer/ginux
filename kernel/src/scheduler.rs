@@ -1,15 +1,11 @@
-use core::mem::MaybeUninit;
-use core::sync::atomic::{AtomicBool, Ordering};
-
 use crate::domain;
+use crate::owned_state::OwnedState;
 
 const MAX_THREADS: usize = 8;
 pub(crate) const IPC_PEER_CLOSED: u64 = u64::MAX - 4;
 
-static RUNTIME_INITIALIZED: AtomicBool = AtomicBool::new(false);
-static mut RUNTIME: MaybeUninit<Runtime> = MaybeUninit::uninit();
-static PROCESS_WORKSPACE_ACTIVE: AtomicBool = AtomicBool::new(false);
-static mut PROCESS_WORKSPACE: MaybeUninit<ProcessScheduler> = MaybeUninit::uninit();
+static SCHEDULER_RUNTIME: OwnedState<Runtime> = OwnedState::empty();
+static PROCESS_WORKSPACE: OwnedState<ProcessScheduler> = OwnedState::empty();
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct ThreadId {
@@ -1144,52 +1140,38 @@ impl ProcessScheduler {
 }
 
 pub(crate) fn acquire_process_scheduler_workspace() -> Option<&'static mut ProcessScheduler> {
-    if PROCESS_WORKSPACE_ACTIVE
-        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-        .is_err()
-    {
-        return None;
-    }
-    // SAFETY: The active flag serializes the single bootstrap processor. Each
-    // field is initialized directly so the bounded kernel stack never holds a
-    // complete scheduler temporary.
+    let claim = PROCESS_WORKSPACE.try_claim()?;
+    // SAFETY: The owner claim serializes initialization. Each field is written
+    // directly so the bounded kernel stack never holds a complete scheduler
+    // temporary.
     unsafe {
-        let workspace = core::ptr::addr_of_mut!(PROCESS_WORKSPACE).cast::<ProcessScheduler>();
+        let workspace = claim.as_mut_ptr();
         for index in 0..MAX_THREADS {
             core::ptr::addr_of_mut!((*workspace).scheduler.threads[index]).write(None);
             core::ptr::addr_of_mut!((*workspace).scheduler.generations[index]).write(0);
         }
         core::ptr::addr_of_mut!((*workspace).scheduler.current).write(None);
         core::ptr::addr_of_mut!((*workspace).scheduler.next_slot).write(0);
-        Some(&mut *workspace)
     }
+    claim.publish_initialized();
+    // SAFETY: A successful claim gives this lifecycle exclusive workspace use.
+    Some(unsafe { &mut *PROCESS_WORKSPACE.get_mut_ptr()? })
 }
 
 pub(crate) fn active_process_scheduler_workspace() -> Option<&'static mut ProcessScheduler> {
-    if !PROCESS_WORKSPACE_ACTIVE.load(Ordering::Acquire) {
-        return None;
-    }
-    // SAFETY: Process execution is serialized on the bootstrap processor. The
-    // caller that acquired the workspace has returned its mutable reference
-    // before a later lifecycle phase resumes it through this accessor.
-    unsafe { Some(&mut *core::ptr::addr_of_mut!(PROCESS_WORKSPACE).cast::<ProcessScheduler>()) }
+    // SAFETY: The process lifecycle retains the exclusive workspace claim.
+    Some(unsafe { &mut *PROCESS_WORKSPACE.get_mut_ptr()? })
 }
 
 pub(crate) fn release_process_scheduler_workspace() -> bool {
-    if !PROCESS_WORKSPACE_ACTIVE.load(Ordering::Acquire) {
-        return false;
-    }
-    // SAFETY: The active workspace remains exclusively borrowed by the
-    // serialized process proof until every binding is retired.
-    let clean = unsafe {
-        let workspace = core::ptr::addr_of!(PROCESS_WORKSPACE).cast::<ProcessScheduler>();
-        (*workspace).scheduler.threads.iter().all(Option::is_none)
-            && (*workspace).scheduler.current.is_none()
+    let clean = {
+        let Some(workspace) = PROCESS_WORKSPACE.get() else {
+            return false;
+        };
+        workspace.scheduler.threads.iter().all(Option::is_none)
+            && workspace.scheduler.current.is_none()
     };
-    if clean {
-        PROCESS_WORKSPACE_ACTIVE.store(false, Ordering::Release);
-    }
-    clean
+    clean && PROCESS_WORKSPACE.reset()
 }
 
 pub(crate) fn initialize_runtime(
@@ -1206,9 +1188,7 @@ pub(crate) fn initialize_runtime(
     let [first_entry, second_entry] = entries;
     let [first_stack, second_stack] = stacks;
     let [first_handles, second_handles] = handles;
-    if RUNTIME_INITIALIZED.load(Ordering::Acquire)
-        || first_address_space_root == second_address_space_root
-    {
+    if SCHEDULER_RUNTIME.get().is_some() || first_address_space_root == second_address_space_root {
         return false;
     }
     let Some(service_identity) = domain::domain_service_identity(second_domain) else {
@@ -1265,10 +1245,8 @@ pub(crate) fn initialize_runtime(
         return false;
     }
 
-    // SAFETY: Bootstrap is single-core with interrupts disabled. Publication
-    // happens only after the complete runtime value has been written.
-    unsafe {
-        core::ptr::addr_of_mut!(RUNTIME).write(MaybeUninit::new(Runtime {
+    if SCHEDULER_RUNTIME
+        .try_install(Runtime {
             scheduler,
             control_domain: first_domain,
             yields: 0,
@@ -1285,18 +1263,20 @@ pub(crate) fn initialize_runtime(
             wakes: 0,
             last_wake_source: None,
             last_wake_sequence: None,
-        }));
+        })
+        .is_err()
+    {
+        return false;
     }
-    RUNTIME_INITIALIZED.store(true, Ordering::Release);
     true
 }
 
 pub(crate) fn initialize_control_runtime(control_domain: u64) -> bool {
-    if control_domain == 0 || RUNTIME_INITIALIZED.swap(true, Ordering::AcqRel) {
+    if control_domain == 0 {
         return false;
     }
-    unsafe {
-        core::ptr::addr_of_mut!(RUNTIME).write(MaybeUninit::new(Runtime {
+    SCHEDULER_RUNTIME
+        .try_install(Runtime {
             scheduler: Scheduler::new(),
             control_domain,
             yields: 0,
@@ -1313,9 +1293,8 @@ pub(crate) fn initialize_control_runtime(control_domain: u64) -> bool {
             wakes: 0,
             last_wake_source: None,
             last_wake_sequence: None,
-        }));
-    }
-    true
+        })
+        .is_ok()
 }
 
 pub(crate) fn queue_service_restart(domain: u64, ipc_handle: u64) -> bool {
@@ -2231,12 +2210,9 @@ pub(crate) fn verify_runtime_complete() -> bool {
 }
 
 fn runtime_mut() -> Option<&'static mut Runtime> {
-    if !RUNTIME_INITIALIZED.load(Ordering::Acquire) {
-        return None;
-    }
-    // SAFETY: Initialization publishes exactly once. Bootstrap remains
-    // single-core with interrupts disabled while the runtime is accessed.
-    Some(unsafe { &mut *core::ptr::addr_of_mut!(RUNTIME).cast::<Runtime>() })
+    // SAFETY: Scheduler mutation is serialized on the bootstrap CPU until
+    // Gate 8 supplies the runtime lock for this explicit owner root.
+    Some(unsafe { &mut *SCHEDULER_RUNTIME.get_mut_ptr()? })
 }
 
 fn initial_context(
