@@ -24,6 +24,9 @@ boundaries established by earlier gates without changing behavior.
   planned extraction boundaries, and unsafe/assembly invariants.
 - [x] Extracted per-CPU entry state, GDT/TSS/IDT structures, guarded stacks,
   and their explicit owner into `cpu/architecture.rs`.
+- [x] Extracted Linux syscall identifiers, ABI constants, and clone-flag policy
+  into `cpu/linux_abi.rs`, leaving hardware constants in the x86 mechanism
+  module and preserving the public compatibility-limit exports.
 
 ## Remaining work
 
@@ -45,6 +48,8 @@ boundaries established by earlier gates without changing behavior.
 - The first extraction passed `make architecture-check`, `make check`, and
   `make build-verification && bash tests/qemu/boot.sh`; the writable-global
   inventory remained stable at 450 and QEMU shut down cleanly.
+- The Linux ABI extraction passed the same architecture, repository, and full
+  deterministic QEMU verification sequence without changing the inventory.
 
 ## Decisions and limitations
 
@@ -59,7 +64,8 @@ file size alone is not.
 - Planned commits: dependency contract followed by one behavior-preserving
   responsibility extraction per commit.
 - Actual commits: `1adacc47` defines the dependency and invariant contract;
-  architecture-owner extraction pending commit.
+  `072d1339` extracts architecture ownership; Linux ABI constant extraction
+  pending commit.
 
 ## Review policy and outcome
 
