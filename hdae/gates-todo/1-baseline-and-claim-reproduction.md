@@ -28,7 +28,10 @@ claims are confirmed, partially confirmed, or rejected before changing code.
 
 ## Remaining work
 
-- Select and record the complete baseline command matrix.
+- Freeze the baseline command matrix, starting with `make check`, `make test`,
+  `make test-linux-abi`, `make test-linux-runtime`, `make test-multi-domain`,
+  `make test-rocky-systemd`, `make test-storage`, and
+  `make test-domain-responsiveness`, plus the existing matched benchmark suite.
 - Add deterministic negative reproductions and retain their initial outcomes.
 - Generate the writable-global inventory, including interior mutability.
 - Record confirmed, partial, rejected, and not-yet-reproducible findings.
@@ -40,7 +43,7 @@ claims are confirmed, partially confirmed, or rejected before changing code.
   documented reason it cannot be reproduced.
 - New tests describe current behavior without defining an insecure behavior as
   the desired final result.
-- The proposed order and dependencies for Gates 2 through 8 are revalidated
+- The proposed order and dependencies for Gates 2 through 10 are revalidated
   against the evidence.
 
 ## Evidence
@@ -57,8 +60,12 @@ QEMU injection limits and any untestable hardware behavior must be explicit.
 
 ## Delivery strategy
 
-Planned commits: baseline harness/evidence, negative reproductions, and
-inventory/reporting. All remain on `codex/feedback-hardening`.
+- Working branch: `codex/feedback-hardening`.
+- Intended base: `main`.
+- Pull request: one pull request for all ten gates.
+- Planned commits: baseline harness/evidence, negative reproductions, and
+  inventory/reporting.
+- Actual commits: pending.
 
 ## Review policy and outcome
 

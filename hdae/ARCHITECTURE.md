@@ -23,6 +23,9 @@ the repository's `docs/` design records.
 6. **Behavior-preserving decomposition.** Module extraction follows validated
    ownership boundaries and passes the full pre-extraction suite after every
    step.
+7. **SMP as normal operation.** Ginux must operate with one, two, and four
+   processors. Once the SMP gate passes, two processors become the default for
+   ordinary QEMU tests so concurrency remains exercised continuously.
 
 ## Current evidence anchors
 
@@ -45,6 +48,7 @@ must reproduce and characterize each claim before implementation begins.
 
 Privilege-entry and user-copy security defects are characterized and fixed
 before broad refactoring can erase their original evidence. State ownership is
-made explicit before synchronization is selected. Synchronization is validated
-before SMP activation. Decomposition then follows the ownership boundaries,
-and SMP is enabled only on that prepared foundation.
+first classified, then migrated in separate runtime and platform/service
+stages. Decomposition follows those ownership boundaries. Synchronization is
+validated before SMP activation, and SMP is enabled only on that prepared
+foundation.

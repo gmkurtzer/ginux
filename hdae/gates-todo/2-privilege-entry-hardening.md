@@ -49,8 +49,12 @@ Per-CPU layout and nested-NMI semantics require human architectural review.
 
 ## Delivery strategy
 
-Planned commits: reproductions retained from Gate 1, entry-state/IST mechanism,
-syscall entry transition, and integration evidence.
+- Working branch: `codex/feedback-hardening`.
+- Intended base: `main`.
+- Pull request: the shared ten-gate pull request.
+- Planned commits: reproductions retained from Gate 1, entry-state/IST
+  mechanism, syscall entry transition, and integration evidence.
+- Actual commits: pending.
 
 ## Review policy and outcome
 

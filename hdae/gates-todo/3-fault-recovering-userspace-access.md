@@ -49,8 +49,12 @@ Partial-copy semantics and fixup design must be documented before coding.
 
 ## Delivery strategy
 
-Planned commits: recovery mechanism, audited primitives, subsystem migrations,
-and negative/integration evidence.
+- Working branch: `codex/feedback-hardening`.
+- Intended base: `main`.
+- Pull request: the shared ten-gate pull request.
+- Planned commits: recovery mechanism, audited primitives, subsystem
+  migrations, and negative/integration evidence.
+- Actual commits: pending.
 
 ## Review policy and outcome
 

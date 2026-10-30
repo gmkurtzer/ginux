@@ -1,4 +1,4 @@
-# Gate 5: Synchronization and SMP Readiness
+# Gate 8: Synchronization and SMP Readiness
 
 ## Goal
 
@@ -7,7 +7,7 @@ interrupt, and multi-CPU execution.
 
 ## Approved scope
 
-- Audit atomics, spin locks, IRQ-safe locks, memory ordering, and lock order.
+- Audit atomics, spinlocks, IRQ-safe locks, memory ordering, and lock order.
 - Make allocators, scheduling, process tables, sockets, filesystems, domains,
   and device state SMP-safe.
 - Remove reliance on local interrupt masking as global exclusion.
@@ -15,17 +15,17 @@ interrupt, and multi-CPU execution.
 
 ## Non-goals
 
-- Starting application processors.
+- Starting application processors; that belongs to Gate 9.
 - CPU hotplug.
 
 ## Completed work
 
-None. Depends on Gate 4.
+None. Depends on Gate 7.
 
 ## Remaining work
 
 - Specify primitive selection and global lock order.
-- Audit interrupt-context acquisition.
+- Audit interrupt-context acquisition and memory ordering.
 - Implement and stress subsystem synchronization incrementally.
 
 ## Acceptance criteria
@@ -34,13 +34,15 @@ None. Depends on Gate 4.
 - Interrupt handlers cannot deadlock on locks held by interrupted code on the
   same CPU.
 - Verification builds fail closed on lock-order and ownership violations.
-- Concurrent lifecycle, signal, IPC, filesystem, and allocator stress
+- Local interrupt masking is used only for local interrupt semantics, never as
+  the sole protection for cross-CPU shared state.
+- Concurrent lifecycle, signal, IPC, filesystem, network, and allocator stress
   completes without corruption, deadlock, or leaked ownership.
 
 ## Evidence
 
 Synchronization map, lock-order document, model/stress results, interrupt
-audit, and regressions.
+audit, and full regressions.
 
 ## Decisions and limitations
 
@@ -48,8 +50,12 @@ Primitive and memory-order choices require review before broad adoption.
 
 ## Delivery strategy
 
-Planned commits: primitives/assertions, then one synchronized subsystem per
-commit with focused and full-suite evidence.
+- Working branch: `codex/feedback-hardening`.
+- Intended base: `main`.
+- Pull request: the shared ten-gate pull request.
+- Planned commits: primitives/assertions followed by one synchronized
+  subsystem per commit with focused and full-suite evidence.
+- Actual commits: pending.
 
 ## Review policy and outcome
 

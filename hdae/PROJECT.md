@@ -31,10 +31,17 @@ The experiment covers the five review themes recorded in
 privilege entry, recoverable userspace access, mutable global state,
 synchronization/SMP, and x86-64 code structure.
 
+SMP is a required delivered capability, not only a readiness exercise. After
+the SMP gate passes, ordinary QEMU regression commands default to two virtual
+CPUs, while dedicated topology qualification continues to cover one, two, and
+four virtual CPUs.
+
 ## Non-goals
 
 - Do not rewrite history or alter the published baseline tag.
 - Do not claim production security from passing the planned tests.
+- Do not expand this experiment into a general security audit; its security
+  scope is the reported privilege-entry and userspace-access defects.
 - Do not begin SMP before ownership and synchronization gates pass.
 - Do not combine structural refactoring with security fixes in a way that
   obscures their evidence.

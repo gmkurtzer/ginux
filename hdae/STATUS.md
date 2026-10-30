@@ -7,25 +7,26 @@
 - Active project: feedback-driven kernel hardening
 - Branch: `codex/feedback-hardening`
 - Baseline tag: `research-v1-baseline`
-- Active gate: none; Gate 1 awaits human approval
-- Last completed action: created the HDAE lifecycle ledger from the external
-  review and verified the concerns against current source at planning depth
-- Next action: review and approve Gate 1 before adding reproductions or changing
-  kernel code
+- Active gate: none; the ten-gate map is approved and Gate 1 awaits execution
+  authorization
+- Last completed action: aligned the gate map with human direction: real SMP is
+  required, ordinary QEMU tests become 2-vCPU after SMP passes, security scope
+  is limited to the two reported defects, global state is comprehensively
+  addressed, and all gates use one branch and one pull request
+- Next action: authorize Gate 1 before adding reproductions or changing kernel
+  code
 
 ## Current repository state
 
-Local `main` has been fast-forwarded to the completed pre-hardening work. The
-repository policy prohibits the agent from pushing; `origin/main` therefore
-still requires a human push. The working branch contains no hardening
-implementation yet.
+Local and remote `main` identify commit `1852455`. Local and remote
+`codex/feedback-hardening` identify the approved planning commit before this
+alignment update. The working branch contains no hardening implementation yet.
 
 ## Open decisions
 
-- Approve or amend the eight-gate sequence.
-- Approve Gate 1's reproduction matrix and evidence requirements.
-- Decide the accepted baseline command set during Gate 1 from the repository's
-  existing verification targets; do not silently select a smaller subset.
+- Authorize Gate 1 execution.
+- Freeze the exact baseline command set at the start of Gate 1; the proposed
+  minimum is recorded in that gate and may not be silently reduced.
 
 ## Durable evidence
 
