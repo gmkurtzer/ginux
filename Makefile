@@ -17,7 +17,7 @@ SYSTEM_PROFILE := profiles/minimal-system-v0/profile.tsv
 
 .DEFAULT_GOAL := help
 
-.PHONY: help doctor manifest system-image test-alpine test-rocky-shell test-rocky-dnf test-multi-domain test-linux-abi test-linux-runtime test-storage test-oci-cache probe-rocky-systemd test-rocky-systemd test-rocky-detached test-domain-responsiveness benchmark-rocky-systemd benchmark-prepare-linux benchmark-prepare-ginux benchmark-linux-comparison benchmark-ginux-boot benchmark-boot-comparison benchmark-ginux-sysbench benchmark-compare profile-rocky-systemd rocky-image rocky-image-check linux-probe controller-runtime network-service protocol-service volume-service abi-conformance architecture-check linux-compat-check build build-verification build-linux-profile run reset-storage test test-c1 test-c2 fmt gate clean
+.PHONY: help doctor manifest system-image test-alpine test-rocky-shell test-rocky-dnf test-multi-domain test-linux-abi test-linux-runtime test-storage test-oci-cache test-smp probe-rocky-systemd test-rocky-systemd test-rocky-detached test-domain-responsiveness benchmark-rocky-systemd benchmark-prepare-linux benchmark-prepare-ginux benchmark-linux-comparison benchmark-ginux-boot benchmark-boot-comparison benchmark-ginux-sysbench benchmark-compare profile-rocky-systemd rocky-image rocky-image-check linux-probe controller-runtime network-service protocol-service volume-service abi-conformance architecture-check linux-compat-check build build-verification build-linux-profile run reset-storage test test-c1 test-c2 fmt gate clean
 
 help:
 	@echo "Ginux development targets"
@@ -59,6 +59,7 @@ help:
 	@echo "  make test-storage Verify fresh, recovered, and reset persistent boots"
 	@echo "  make test-oci-cache Verify OCI layers are reused after reboot"
 	@echo "  make test    Build and verify the automated QEMU boot test"
+	@echo "  make test-smp Qualify 1/2/4 CPUs and repeat the two-CPU stress run"
 	@echo "  make test-c1 Build and verify the interactive controller console"
 	@echo "  make test-c2 Verify configured domain lifecycle management"
 	@echo "  make check   Run formatting and lint checks"
@@ -218,6 +219,9 @@ test-oci-cache: build
 
 test: build-verification
 	@tests/qemu/boot.sh
+
+test-smp: build-verification
+	@tests/qemu/smp-matrix.sh
 
 test-linux-runtime: test
 

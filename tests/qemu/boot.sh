@@ -122,8 +122,22 @@ assert_native_volume_iommu() {
     fi
 }
 
+assert_cpu_topology() {
+    local boot_output="$1"
+    local boot_name="$2"
+    local expected_cpus="${GINUX_CPUS:-2}"
+
+    if ! grep -q "^ginux: enabled processors: $expected_cpus" "$boot_output" ||
+        ! grep -q "^ginux: online processors: $expected_cpus" "$boot_output"; then
+        cat "$boot_output"
+        echo "Boot test failed: $boot_name did not bring all $expected_cpus configured CPUs online." >&2
+        exit 1
+    fi
+}
+
 run_boot "$output_file" "initial"
 assert_native_volume_iommu "$output_file" "initial boot"
+assert_cpu_topology "$output_file" "initial boot"
 
 cat "$output_file"
 

@@ -47,7 +47,7 @@ if [[ -n "${GINUX_QEMU_PID_FILE:-}" ]]; then
 fi
 
 memory="${GINUX_MEMORY:-1G}"
-cpus="${GINUX_CPUS:-1}"
+cpus="${GINUX_CPUS:-2}"
 case "$cpus" in
     1|2|4) ;;
     *) echo "GINUX_CPUS must be 1, 2, or 4" >&2; exit 2 ;;
