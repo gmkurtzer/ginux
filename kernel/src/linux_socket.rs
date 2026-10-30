@@ -841,7 +841,14 @@ pub(crate) fn shutdown() -> bool {
         }
         index += 1;
     }
-    true
+    if unsafe { socket_slots().iter().any(|slot| slot.occupied) } {
+        return true;
+    }
+    unsafe { *unix_inflight_rights_state() = 0 };
+    if unsafe { socket_runtime_state().is_none() } {
+        return true;
+    }
+    teardown()
 }
 
 pub(crate) fn duplicate(slot: u8) -> bool {
@@ -1237,6 +1244,18 @@ pub(crate) fn accept_blocking(slot: u8) -> Result<(u8, IpEndpoint), Error> {
             result => return result,
         }
     }
+}
+
+fn teardown() -> bool {
+    let Some(platform) = (unsafe { socket_platform() }) else {
+        return false;
+    };
+    let Some(runtime) = (unsafe { socket_runtime_state().take() }) else {
+        return false;
+    };
+    pci::quiesce_isolated_network(platform.device, platform.common)
+        && runtime._translation.finish()
+        && memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[runtime._dma])
 }
 
 pub(crate) fn connect(slot: u8, remote: IpEndpoint) -> Result<(), Error> {

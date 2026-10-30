@@ -1540,8 +1540,33 @@ pub(crate) fn verify_linux_elf_mapping(
         && exec_heap_released
         && exec_page_table_frames_released
         && original_frames_released;
-    released
-        && memory::owner_live_frame_count(memory::FrameOwner::KERNEL) == Some(kernel_frames_before)
+    let frame_count_restored =
+        memory::owner_live_frame_count(memory::FrameOwner::KERNEL) == Some(kernel_frames_before);
+    if cfg!(feature = "verification-boot") && (!released || !frame_count_restored) {
+        crate::serial_write("ginux: Linux mapping cleanup state:");
+        for state in [
+            valid,
+            cleared,
+            exec_released,
+            exec_stack_released,
+            exec_heap_released,
+            exec_page_table_frames_released,
+            original_frames_released,
+            frame_count_restored,
+        ] {
+            crate::serial_write(" ");
+            crate::serial_write_u64(u64::from(state));
+        }
+        crate::serial_write(" kernel-frames=");
+        crate::serial_write_u64(kernel_frames_before as u64);
+        crate::serial_write("/");
+        crate::serial_write_u64(
+            memory::owner_live_frame_count(memory::FrameOwner::KERNEL)
+                .map_or(u64::MAX, |count| count as u64),
+        );
+        crate::serial_write("\r\n");
+    }
+    released && frame_count_restored
 }
 
 #[inline(never)]

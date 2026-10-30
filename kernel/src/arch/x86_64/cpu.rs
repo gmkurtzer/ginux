@@ -1165,6 +1165,10 @@ fn linux_execution_instance() -> usize {
     }
 }
 
+pub(crate) fn current_linux_execution_instance() -> usize {
+    linux_execution_instance()
+}
+
 macro_rules! banked_atomic_integer {
     ($name:ident, $atomic:ty, $value:ty) => {
         struct $name {

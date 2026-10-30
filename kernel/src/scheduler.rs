@@ -1282,8 +1282,7 @@ pub(crate) fn release_process_scheduler_workspace() -> bool {
 }
 
 fn current_process_scheduler_workspace() -> &'static OwnedState<ProcessScheduler> {
-    let instance = crate::arch::x86_64::cpu::current_container_slot()
-        .unwrap_or(crate::control_abi::DOMAIN_LIMIT);
+    let instance = crate::arch::x86_64::cpu::current_linux_execution_instance();
     &PROCESS_WORKSPACES[instance]
 }
 
