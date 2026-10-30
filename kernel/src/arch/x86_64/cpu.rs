@@ -11408,7 +11408,7 @@ fn linux_request_process_fork(
         // `caller` is the hardware-captured context already accepted by the
         // syscall return path. It is authoritative even when the optional
         // process-registry mapping snapshot predates a newly mapped page.
-        hierarchy_refreshed
+        let context_refreshed = hierarchy_refreshed
             && linux_process::refresh_live_process_context_from_syscall_entry(
                 current_linux_process_pid(),
                 caller
@@ -11418,7 +11418,15 @@ fn linux_request_process_fork(
                 caller.rsp,
                 caller.rflags,
                 caller.fs_base,
-            )
+            );
+        let child_stack_refreshed = child_stack == 0
+            || child_stack.checked_sub(1).is_some_and(|address| {
+                linux_process::import_live_process_mapping_from_hardware(
+                    current_linux_process_pid(),
+                    address,
+                )
+            });
+        context_refreshed && child_stack_refreshed
     } else {
         refresh_live_linux_process_registry(caller)
     };
@@ -23522,6 +23530,7 @@ fn linux_rootfs_execve_source(
             let _ = linux_descriptor_close(descriptor);
         }
     }
+    reset_linux_signal_state_after_exec();
     let _ = set_current_linux_clear_child_tid(0);
     let _ = set_current_linux_robust_list(0);
     if !address_space::release_current_linux_runtime_mappings_preserving(
@@ -23682,7 +23691,7 @@ fn linux_execve_at(
             .map(|length| &resolved[..length])
             .unwrap_or(&path[..path_length]);
         let result = linux_rootfs_execve(exec_path, arguments_address, environment_address);
-        if result == 0 && linux_child_executed(current_linux_process_pid()) {
+        if result == 0 {
             return LINUX_RETURN_TO_KERNEL;
         }
         if result != 0 {
@@ -24306,31 +24315,7 @@ fn linux_execve_at(
             let _ = linux_descriptor_close(descriptor);
         }
     }
-    let ignored_signals = (0..LINUX_SIGNAL_COUNT).fold(0_u64, |mask, signal| {
-        mask | (u64::from(
-            X86_RUNTIME.ELF_PROBE_SIGNAL_HANDLERS[signal].load(Ordering::SeqCst) == 1,
-        ) << signal)
-    });
-    X86_RUNTIME
-        .ELF_PROBE_EXEC_IGNORED_SIGNALS
-        .store(ignored_signals, Ordering::SeqCst);
-    for signal in 0..LINUX_SIGNAL_COUNT {
-        if X86_RUNTIME.ELF_PROBE_SIGNAL_HANDLERS[signal].load(Ordering::SeqCst) != 1 {
-            X86_RUNTIME.ELF_PROBE_SIGNAL_HANDLERS[signal].store(0, Ordering::SeqCst);
-            X86_RUNTIME.ELF_PROBE_SIGNAL_FLAGS[signal].store(0, Ordering::SeqCst);
-            X86_RUNTIME.ELF_PROBE_SIGNAL_RESTORERS[signal].store(0, Ordering::SeqCst);
-            X86_RUNTIME.ELF_PROBE_SIGNAL_ACTION_MASKS[signal].store(0, Ordering::SeqCst);
-        }
-    }
-    X86_RUNTIME
-        .ELF_PROBE_ALT_STACK_POINTER
-        .store(0, Ordering::SeqCst);
-    X86_RUNTIME
-        .ELF_PROBE_ALT_STACK_SIZE
-        .store(0, Ordering::SeqCst);
-    X86_RUNTIME
-        .ELF_PROBE_ALT_STACK_FLAGS
-        .store(LINUX_SS_DISABLE, Ordering::SeqCst);
+    reset_linux_signal_state_after_exec();
     X86_RUNTIME
         .ELF_PROBE_MEMBARRIER_REGISTRATIONS
         .store(0, Ordering::SeqCst);
@@ -24452,6 +24437,43 @@ fn linux_execve_at(
     let _ = linux_process::mark_live_process_executed(current_linux_process_pid());
     serial_write("ginux: measured Linux exec image replaced atomically\r\n");
     0
+}
+
+fn reset_linux_signal_state_after_exec() {
+    let ignored_signals = (0..LINUX_SIGNAL_COUNT).fold(0_u64, |mask, signal| {
+        mask | (u64::from(
+            X86_RUNTIME.ELF_PROBE_SIGNAL_HANDLERS[signal].load(Ordering::SeqCst) == 1,
+        ) << signal)
+    });
+    X86_RUNTIME
+        .ELF_PROBE_EXEC_IGNORED_SIGNALS
+        .store(ignored_signals, Ordering::SeqCst);
+    for signal in 0..LINUX_SIGNAL_COUNT {
+        if X86_RUNTIME.ELF_PROBE_SIGNAL_HANDLERS[signal].load(Ordering::SeqCst) != 1 {
+            X86_RUNTIME.ELF_PROBE_SIGNAL_HANDLERS[signal].store(0, Ordering::SeqCst);
+            X86_RUNTIME.ELF_PROBE_SIGNAL_FLAGS[signal].store(0, Ordering::SeqCst);
+            X86_RUNTIME.ELF_PROBE_SIGNAL_RESTORERS[signal].store(0, Ordering::SeqCst);
+            X86_RUNTIME.ELF_PROBE_SIGNAL_ACTION_MASKS[signal].store(0, Ordering::SeqCst);
+        }
+    }
+    X86_RUNTIME
+        .ELF_PROBE_ALT_STACK_POINTER
+        .store(0, Ordering::SeqCst);
+    X86_RUNTIME
+        .ELF_PROBE_ALT_STACK_SIZE
+        .store(0, Ordering::SeqCst);
+    X86_RUNTIME
+        .ELF_PROBE_ALT_STACK_FLAGS
+        .store(LINUX_SS_DISABLE, Ordering::SeqCst);
+    X86_RUNTIME
+        .LINUX_SIGNAL_ACTIVE
+        .store(false, Ordering::SeqCst);
+    unsafe {
+        X86_MUTABLE_RUNTIME
+            .signal_context
+            .get()
+            .write(LinuxSignalContext::ZERO)
+    };
 }
 
 fn linux_root_directory_inode(kind: u16) -> Option<u64> {

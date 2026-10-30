@@ -7,7 +7,7 @@ use core::{
 use crate::{address_space, arch::x86_64::cpu, control_abi, linux_user, memory, scheduler};
 
 pub(crate) const PROCESS_LIMIT: usize = 16;
-pub(crate) const PROCESS_RUNTIME_LIMIT: usize = 6;
+pub(crate) const PROCESS_RUNTIME_LIMIT: usize = 7;
 const PROCESS_HIERARCHY_LIMIT: usize = cpu::LINUX_PROCESS_HIERARCHY_LIMIT;
 const PROCESS_PRIVATE_PAGE_LIMIT: usize = cpu::LINUX_PROCESS_MAPPING_LIMIT;
 const PROCESS_PRIVATE_COPY_LIMIT: usize = cpu::LINUX_PROCESS_MAPPING_LIMIT;
@@ -3018,6 +3018,18 @@ pub(crate) fn add_live_process_mapping(pid: u32, mapping: cpu::LinuxActiveImageM
     storage.mappings[count] = mapping;
     space.mapping_count += 1;
     true
+}
+
+pub(crate) fn import_live_process_mapping_from_hardware(pid: u32, address: u64) -> bool {
+    let Some(current) = address_space::current_linux_active_mapping(address) else {
+        return false;
+    };
+    if let Some(existing) = live_process_mapping(pid, current.address) {
+        return existing.frame == current.frame
+            && existing.writable == current.writable
+            && existing.executable == current.executable;
+    }
+    add_live_process_mapping(pid, current)
 }
 
 pub(crate) fn live_process_hierarchy_frame(pid: u32, index: usize) -> Option<memory::FrameLease> {
