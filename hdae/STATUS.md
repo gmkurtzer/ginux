@@ -8,19 +8,17 @@
 - Branch: `codex/feedback-hardening`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 5, runtime state ownership, in progress
-- Last completed action: consolidated Linux signal queues, keyring roots, and
-  AIO roots into explicit per-instance owners and taught the inventory to
-  recognize atomic owner structs; `make check`, `make test-linux-abi`, and the
-  complete verification QEMU sequence passed
-- Next action: consolidate the remaining mount, user, tmpfs, overlay,
-  file-cache, SysV IPC, and address-space runtime roots before migrating the
-  408-entry x86-64 execution-state bank
+- Last completed action: consolidated mount namespaces, user namespaces, and
+  tmpfs instances into explicit domain-runtime owners; architecture checks,
+  Linux ABI coverage, and the complete verification QEMU sequence passed
+- Next action: consolidate overlay, file-cache, SysV IPC, and address-space
+  runtime roots before migrating the 408-entry x86-64 execution-state bank
 
 ## Current repository state
 
 Local and remote `main` identify commit `1852455`. Gates 1 through 4 passed and
-closed under delegated review. Gate 5 is active; 436 classified runtime
-globals remain assigned to it after the signal/keyring/AIO consolidation.
+closed under delegated review. Gate 5 is active; 427 classified runtime
+globals remain assigned to it after the mount/user/tmpfs consolidation.
 
 ## Open decisions
 

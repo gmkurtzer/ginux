@@ -39,6 +39,8 @@ state out of ambient globals and into explicitly owned lifecycle objects.
 - [x] Extended the writable-global inventory to recognize custom owner structs
   containing atomic fields as well as `UnsafeCell`, including a no-match-safe
   discovery path.
+- [x] Consolidated mount namespaces, user namespaces, and tmpfs instances into
+  three explicit domain-runtime owner roots.
 
 ## Remaining work
 
@@ -76,6 +78,10 @@ state out of ambient globals and into explicitly owned lifecycle objects.
   `make test-linux-abi`, and the complete verification QEMU sequence passed;
   the inventory decreased from 591 to 583 globals with 436 Gate 5 migrations
   remaining.
+- After mount, user, and tmpfs consolidation, `make architecture-check`,
+  `make test-linux-abi` (23 interfaces and 375 syscalls), and
+  `make build-verification && bash tests/qemu/boot.sh` passed; the inventory
+  decreased from 583 to 577 globals with 427 Gate 5 migrations remaining.
 - Direct `bash tests/qemu/boot.sh` after `make check` was an invalid first
   attempt because the normal image lacks verification-only markers; no QEMU
   process was left behind, and the test was rerun with its required image.
@@ -94,8 +100,9 @@ Shared objects may remain only when Gate 4 explicitly classified them and Gate
   scheduler/process tables, and lifecycle evidence.
 - Actual commits: `900d0d56` added explicit shared runtime owner roots;
   `44a18062` consolidated process runtime ownership; socket-runtime
-  consolidation is `b6db50a7`; signal/keyring/AIO consolidation pending
-  commit; remaining runtime migrations pending.
+  consolidation is `b6db50a7`; `40f1b725` consolidated signal, keyring, and
+  AIO ownership; mount/user/tmpfs consolidation pending commit; remaining
+  runtime migrations pending.
 
 ## Review policy and outcome
 

@@ -499,11 +499,7 @@ static-mut	kernel/src/lib.rs	PERSISTED_OCI_CATALOG	platform-device	migrate	6	dev
 interior-mutable	kernel/src/linux_aio.rs	AIO_RUNTIME	domain-runtime	allowlist	none	explicit-domain-aio-runtime-owner-root
 static-mut	kernel/src/linux_file_cache.rs	CACHE_TABLES	domain-runtime	migrate	5	domain-generation-owned
 interior-mutable	kernel/src/linux_keyring.rs	KEYRING_RUNTIME	domain-runtime	allowlist	none	explicit-domain-keyring-runtime-owner-root
-interior-mutable	kernel/src/linux_mount.rs	CURRENT_GENERATION	domain-runtime	migrate	5	domain-generation-owned
-interior-mutable	kernel/src/linux_mount.rs	CURRENT_ID	domain-runtime	migrate	5	domain-generation-owned
-interior-mutable	kernel/src/linux_mount.rs	CURRENT_SLOT	domain-runtime	migrate	5	domain-generation-owned
-static-mut	kernel/src/linux_mount.rs	LIVE_TABLE	domain-runtime	migrate	5	domain-generation-owned
-interior-mutable	kernel/src/linux_mount.rs	TABLE_INSTALLED	domain-runtime	migrate	5	domain-generation-owned
+interior-mutable	kernel/src/linux_mount.rs	MOUNT_RUNTIME	domain-runtime	allowlist	none	explicit-domain-mount-runtime-owner-root
 static-mut	kernel/src/linux_overlay.rs	OVERLAYS	domain-runtime	migrate	5	domain-generation-owned
 interior-mutable	kernel/src/linux_process.rs	PROCESS_RUNTIME	process-runtime	allowlist	none	explicit-process-runtime-owner-root
 interior-mutable	kernel/src/linux_signal.rs	SIGNAL_RUNTIME	process-runtime	allowlist	none	explicit-process-signal-runtime-owner-root
@@ -520,10 +516,8 @@ interior-mutable	kernel/src/linux_sysv_ipc.rs	ROOT_ADDRESSES	domain-runtime	migr
 interior-mutable	kernel/src/linux_sysv_ipc.rs	ROOT_GENERATIONS	domain-runtime	migrate	5	domain-generation-owned
 interior-mutable	kernel/src/linux_sysv_ipc.rs	SEMAPHORE_ROOT_ADDRESSES	domain-runtime	migrate	5	domain-generation-owned
 interior-mutable	kernel/src/linux_sysv_ipc.rs	SEMAPHORE_ROOT_GENERATIONS	domain-runtime	migrate	5	domain-generation-owned
-interior-mutable	kernel/src/linux_tmpfs.rs	INSTALLED	domain-runtime	migrate	5	domain-generation-owned
-static-mut	kernel/src/linux_tmpfs.rs	LIVE_TMPFS	domain-runtime	migrate	5	domain-generation-owned
-static-mut	kernel/src/linux_user.rs	LIVE_TABLES	domain-runtime	migrate	5	domain-generation-owned
-interior-mutable	kernel/src/linux_user.rs	TABLE_INSTALLED	domain-runtime	migrate	5	domain-generation-owned
+interior-mutable	kernel/src/linux_tmpfs.rs	TMPFS_RUNTIME	domain-runtime	allowlist	none	explicit-domain-tmpfs-runtime-owner-root
+interior-mutable	kernel/src/linux_user.rs	USER_RUNTIME	domain-runtime	allowlist	none	explicit-domain-user-runtime-owner-root
 static-mut	kernel/src/memory.rs	GLOBAL_ALLOCATOR	platform-device	migrate	6	device-or-host-service-owned
 interior-mutable	kernel/src/memory.rs	INITIALIZED	platform-device	migrate	6	device-or-host-service-owned
 interior-mutable	kernel/src/memory.rs	RUNTIME_EXTENT_COUNTS	platform-device	migrate	6	device-or-host-service-owned

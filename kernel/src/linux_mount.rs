@@ -1,4 +1,5 @@
 use core::{
+    cell::UnsafeCell,
     mem::MaybeUninit,
     sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering},
 };
@@ -18,11 +19,23 @@ pub(crate) const ROOT_NODEV: u32 = 1 << 2;
 const ROOT_FLAGS: u32 = ROOT_READ_ONLY | ROOT_NOSUID | ROOT_NODEV;
 pub(crate) const MOUNTINFO: &[u8] = b"1 0 0:1 / / ro,nosuid,nodev - ginux-root rootfs ro\n2 1 0:2 / /proc rw,nosuid,nodev,noexec,relatime - proc proc rw\n3 1 0:3 / /sys/fs/cgroup rw,nosuid,nodev,noexec,relatime - cgroup2 cgroup2 rw\n";
 
-static TABLE_INSTALLED: AtomicBool = AtomicBool::new(false);
-static CURRENT_SLOT: AtomicU8 = AtomicU8::new(EMPTY_SLOT);
-static CURRENT_GENERATION: AtomicU32 = AtomicU32::new(0);
-static CURRENT_ID: AtomicU32 = AtomicU32::new(0);
-static mut LIVE_TABLE: MaybeUninit<MountNamespaceTable> = MaybeUninit::uninit();
+struct MountRuntimeOwner {
+    installed: AtomicBool,
+    current_slot: AtomicU8,
+    current_generation: AtomicU32,
+    current_id: AtomicU32,
+    table: UnsafeCell<MaybeUninit<MountNamespaceTable>>,
+}
+
+unsafe impl Sync for MountRuntimeOwner {}
+
+static MOUNT_RUNTIME: MountRuntimeOwner = MountRuntimeOwner {
+    installed: AtomicBool::new(false),
+    current_slot: AtomicU8::new(EMPTY_SLOT),
+    current_generation: AtomicU32::new(0),
+    current_id: AtomicU32::new(0),
+    table: UnsafeCell::new(MaybeUninit::uninit()),
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct MountNamespaceHandle {
@@ -184,20 +197,20 @@ pub(crate) fn verify_contract() -> bool {
 }
 
 pub(crate) fn install_initial() -> bool {
-    if TABLE_INSTALLED.load(Ordering::Acquire) {
+    if MOUNT_RUNTIME.installed.load(Ordering::Acquire) {
         return false;
     }
     let Some(root) = initramfs::published_root_handle().map(NamespaceRoot::Embedded) else {
         return false;
     };
-    let table = core::ptr::addr_of_mut!(LIVE_TABLE).cast::<MountNamespaceTable>();
+    let table = MOUNT_RUNTIME.table.get().cast::<MountNamespaceTable>();
     unsafe { table.write(MountNamespaceTable::new()) };
     let table = unsafe { &mut *table };
     let Some(handle) = table.create(0, root, ROOT_FLAGS, true) else {
         return false;
     };
     table.boot_initial = Some(handle);
-    TABLE_INSTALLED.store(true, Ordering::Release);
+    MOUNT_RUNTIME.installed.store(true, Ordering::Release);
     live_namespace(handle).is_some()
 }
 
@@ -242,14 +255,17 @@ fn activate_domain_root(owner_domain: u64, root: NamespaceRoot) -> bool {
         .or_else(|| (owner_domain == 0).then_some(table.boot_initial).flatten())
         .or_else(|| table.create(owner_domain, root, ROOT_FLAGS, true));
     let Some(handle) = handle else { return false };
-    if CURRENT_SLOT
+    if MOUNT_RUNTIME
+        .current_slot
         .compare_exchange(EMPTY_SLOT, handle.slot, Ordering::AcqRel, Ordering::Acquire)
         .is_err()
     {
         return false;
     }
-    CURRENT_GENERATION.store(handle.generation, Ordering::Release);
-    CURRENT_ID.store(handle.id, Ordering::Release);
+    MOUNT_RUNTIME
+        .current_generation
+        .store(handle.generation, Ordering::Release);
+    MOUNT_RUNTIME.current_id.store(handle.id, Ordering::Release);
     current().is_some()
 }
 
@@ -260,9 +276,11 @@ pub(crate) fn deactivate_initial() -> bool {
     if live_namespace(active).is_none_or(|namespace| !namespace.domain_root) {
         return false;
     }
-    CURRENT_ID.store(0, Ordering::Release);
-    CURRENT_GENERATION.store(0, Ordering::Release);
-    CURRENT_SLOT.store(EMPTY_SLOT, Ordering::Release);
+    MOUNT_RUNTIME.current_id.store(0, Ordering::Release);
+    MOUNT_RUNTIME.current_generation.store(0, Ordering::Release);
+    MOUNT_RUNTIME
+        .current_slot
+        .store(EMPTY_SLOT, Ordering::Release);
     current().is_none()
 }
 
@@ -299,9 +317,13 @@ pub(crate) fn switch_to(handle: MountNamespaceHandle) -> bool {
     if live_namespace(handle).is_none() {
         return false;
     }
-    CURRENT_SLOT.store(handle.slot, Ordering::Release);
-    CURRENT_GENERATION.store(handle.generation, Ordering::Release);
-    CURRENT_ID.store(handle.id, Ordering::Release);
+    MOUNT_RUNTIME
+        .current_slot
+        .store(handle.slot, Ordering::Release);
+    MOUNT_RUNTIME
+        .current_generation
+        .store(handle.generation, Ordering::Release);
+    MOUNT_RUNTIME.current_id.store(handle.id, Ordering::Release);
     current() == Some(handle)
 }
 
@@ -332,9 +354,9 @@ pub(crate) fn current_unique_mount_id(local_id: u64) -> Option<u64> {
 }
 
 fn current() -> Option<MountNamespaceHandle> {
-    let slot = CURRENT_SLOT.load(Ordering::Acquire);
-    let generation = CURRENT_GENERATION.load(Ordering::Acquire);
-    let id = CURRENT_ID.load(Ordering::Acquire);
+    let slot = MOUNT_RUNTIME.current_slot.load(Ordering::Acquire);
+    let generation = MOUNT_RUNTIME.current_generation.load(Ordering::Acquire);
+    let id = MOUNT_RUNTIME.current_id.load(Ordering::Acquire);
     if slot == EMPTY_SLOT || generation == 0 || id == 0 {
         return None;
     }
@@ -351,15 +373,15 @@ fn live_namespace(handle: MountNamespaceHandle) -> Option<&'static MountNamespac
 }
 
 fn live_table() -> Option<&'static MountNamespaceTable> {
-    if !TABLE_INSTALLED.load(Ordering::Acquire) {
+    if !MOUNT_RUNTIME.installed.load(Ordering::Acquire) {
         return None;
     }
-    Some(unsafe { &*core::ptr::addr_of!(LIVE_TABLE).cast::<MountNamespaceTable>() })
+    Some(unsafe { &*MOUNT_RUNTIME.table.get().cast::<MountNamespaceTable>() })
 }
 
 fn live_table_mut() -> Option<&'static mut MountNamespaceTable> {
-    if !TABLE_INSTALLED.load(Ordering::Acquire) {
+    if !MOUNT_RUNTIME.installed.load(Ordering::Acquire) {
         return None;
     }
-    Some(unsafe { &mut *core::ptr::addr_of_mut!(LIVE_TABLE).cast::<MountNamespaceTable>() })
+    Some(unsafe { &mut *MOUNT_RUNTIME.table.get().cast::<MountNamespaceTable>() })
 }

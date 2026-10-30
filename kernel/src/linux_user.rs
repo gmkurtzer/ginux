@@ -1,5 +1,8 @@
 use crate::{arch::x86_64::cpu, control_abi, domain};
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::{
+    cell::UnsafeCell,
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 const NAMESPACE_LIMIT: usize = 4;
 const ROOT_INSIDE_ID: u32 = 0;
@@ -12,9 +15,17 @@ pub(crate) const UID_MAP: &[u8] = b"0 100000 1\n";
 pub(crate) const GID_MAP: &[u8] = b"0 100000 1\n";
 pub(crate) const SETGROUPS: &[u8] = b"deny\n";
 
-static TABLE_INSTALLED: AtomicBool = AtomicBool::new(false);
-static mut LIVE_TABLES: [UserNamespaceTable; INSTANCE_LIMIT] =
-    [const { UserNamespaceTable::new() }; INSTANCE_LIMIT];
+struct UserRuntimeOwner {
+    installed: AtomicBool,
+    tables: UnsafeCell<[UserNamespaceTable; INSTANCE_LIMIT]>,
+}
+
+unsafe impl Sync for UserRuntimeOwner {}
+
+static USER_RUNTIME: UserRuntimeOwner = UserRuntimeOwner {
+    installed: AtomicBool::new(false),
+    tables: UnsafeCell::new([const { UserNamespaceTable::new() }; INSTANCE_LIMIT]),
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct UserNamespaceHandle {
@@ -235,13 +246,18 @@ pub(crate) fn verify_contract() -> bool {
 }
 
 pub(crate) fn install_initial() -> bool {
-    if TABLE_INSTALLED.load(Ordering::Acquire) {
+    if USER_RUNTIME.installed.load(Ordering::Acquire) {
         return false;
     }
     let mut index = 0;
     while index < INSTANCE_LIMIT {
         unsafe {
-            core::ptr::addr_of_mut!(LIVE_TABLES[index]).write(UserNamespaceTable::new());
+            USER_RUNTIME
+                .tables
+                .get()
+                .cast::<UserNamespaceTable>()
+                .add(index)
+                .write(UserNamespaceTable::new());
         }
         index += 1;
     }
@@ -252,7 +268,7 @@ pub(crate) fn install_initial() -> bool {
         return false;
     };
     table.initial = Some(handle);
-    TABLE_INSTALLED.store(true, Ordering::Release);
+    USER_RUNTIME.installed.store(true, Ordering::Release);
     credentials(handle).is_some()
 }
 
@@ -381,11 +397,13 @@ fn live_table_for_handle(handle: UserNamespaceHandle) -> Option<&'static UserNam
 }
 
 fn live_table_at(index: usize) -> Option<&'static UserNamespaceTable> {
-    if !TABLE_INSTALLED.load(Ordering::Acquire) {
+    if !USER_RUNTIME.installed.load(Ordering::Acquire) {
         return None;
     }
     let table = unsafe {
-        core::ptr::addr_of!(LIVE_TABLES)
+        USER_RUNTIME
+            .tables
+            .get()
             .cast::<UserNamespaceTable>()
             .add(index)
     };
@@ -393,11 +411,13 @@ fn live_table_at(index: usize) -> Option<&'static UserNamespaceTable> {
 }
 
 fn live_table_mut_at(index: usize) -> Option<&'static mut UserNamespaceTable> {
-    if !TABLE_INSTALLED.load(Ordering::Acquire) && index != HOST_INSTANCE {
+    if !USER_RUNTIME.installed.load(Ordering::Acquire) && index != HOST_INSTANCE {
         return None;
     }
     let table = unsafe {
-        core::ptr::addr_of_mut!(LIVE_TABLES)
+        USER_RUNTIME
+            .tables
+            .get()
             .cast::<UserNamespaceTable>()
             .add(index)
     };
