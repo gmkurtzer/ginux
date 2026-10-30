@@ -34,6 +34,11 @@ state out of ambient globals and into explicitly owned lifecycle objects.
 - [x] Consolidated 14 socket platform, runtime, slot, Unix-socket, and packet
   buffer globals under one explicit domain socket-runtime owner while keeping
   smoltcp's self-referential buffers at stable addresses.
+- [x] Consolidated signal queues, keyring roots, and AIO roots into explicit
+  per-instance runtime owners, including their lifecycle locks and counters.
+- [x] Extended the writable-global inventory to recognize custom owner structs
+  containing atomic fields as well as `UnsafeCell`, including a no-match-safe
+  discovery path.
 
 ## Remaining work
 
@@ -67,6 +72,10 @@ state out of ambient globals and into explicitly owned lifecycle objects.
 - After socket-runtime consolidation, the same three test layers passed; the
   inventory decreased from 604 to 591 globals with 447 Gate 5 migrations
   remaining.
+- After signal, keyring, and AIO consolidation, `make check`,
+  `make test-linux-abi`, and the complete verification QEMU sequence passed;
+  the inventory decreased from 591 to 583 globals with 436 Gate 5 migrations
+  remaining.
 - Direct `bash tests/qemu/boot.sh` after `make check` was an invalid first
   attempt because the normal image lacks verification-only markers; no QEMU
   process was left behind, and the test was rerun with its required image.
@@ -85,7 +94,8 @@ Shared objects may remain only when Gate 4 explicitly classified them and Gate
   scheduler/process tables, and lifecycle evidence.
 - Actual commits: `900d0d56` added explicit shared runtime owner roots;
   `44a18062` consolidated process runtime ownership; socket-runtime
-  consolidation pending commit; remaining runtime migrations pending.
+  consolidation is `b6db50a7`; signal/keyring/AIO consolidation pending
+  commit; remaining runtime migrations pending.
 
 ## Review policy and outcome
 

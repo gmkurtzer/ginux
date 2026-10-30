@@ -13,7 +13,7 @@ trap 'rm -f "$scratch" "$cell_types"' EXIT
 emit_matches() {
     local kind=$1
     local pattern=$2
-    rg -n --glob '*.rs' "$pattern" "${source_roots[@]}" |
+    { rg -n --glob '*.rs' "$pattern" "${source_roots[@]}" || true; } |
         while IFS=: read -r file line declaration; do
             local rest symbol
             rest=${declaration#*static }
@@ -31,9 +31,9 @@ emit_matches interior-mutable \
     '^\s*(pub(\([^)]*\))?\s+)?static\s+[A-Z0-9_]+\s*:\s*[^=]*(Atomic|Mutex|RwLock|RefCell|UnsafeCell|Once|Spin|Lock)' \
     >>"$scratch"
 
-# Custom Sync wrappers can hide UnsafeCell from the static declaration. Find
-# tuple-struct wrappers whose definition contains UnsafeCell, then include every
-# static declared with one of those types.
+# Custom owner wrappers can hide atomics or UnsafeCell from the static
+# declaration. Find structs whose definition contains either form of interior
+# mutability, then include every static declared with one of those types.
 find "${source_roots[@]}" -type f -name '*.rs' -print0 |
     while IFS= read -r -d '' file; do
         awk '
@@ -41,9 +41,10 @@ find "${source_roots[@]}" -type f -name '*.rs' -print0 |
                 name = $0
                 sub(/^.*struct /, "", name)
                 sub(/[(<{].*/, "", name)
+                gsub(/[[:space:]]/, "", name)
                 remaining = 6
             }
-            remaining > 0 && /UnsafeCell/ { print name; remaining = 0 }
+            remaining > 0 && /(UnsafeCell|Atomic)/ { print name; remaining = 0 }
             remaining > 0 { remaining-- }
         ' "$file"
     done | sort -u >"$cell_types"
