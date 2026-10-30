@@ -11,7 +11,7 @@ fail() {
 }
 
 declarations=$(rg -c '^static X86_RUNTIME_BACKING_' "$source_file")
-[[ "$declarations" == 403 ]] || fail "expected 403 backing declarations, found $declarations"
+[[ "$declarations" == 404 ]] || fail "expected 404 backing declarations, found $declarations"
 
 initializers=$(awk '
     /^static X86_RUNTIME: X86RuntimeOwner = X86RuntimeOwner \{/ { owner = 1; next }
@@ -19,7 +19,7 @@ initializers=$(awk '
     owner && /X86_RUNTIME_BACKING_/ { count++ }
     END { print count + 0 }
 ' "$source_file")
-[[ "$initializers" == 403 ]] || fail "expected 403 owner initializers, found $initializers"
+[[ "$initializers" == 404 ]] || fail "expected 404 owner initializers, found $initializers"
 
 bypass=$(awk '
     /^static X86_RUNTIME: X86RuntimeOwner = X86RuntimeOwner \{/ { owner = 1 }

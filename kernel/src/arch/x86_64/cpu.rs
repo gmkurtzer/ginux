@@ -27,10 +27,11 @@ use architecture::{current_entry_state, install_user_interrupt_gate, CPU_ARCHITE
 pub(crate) use execution::enable_extended_user_state;
 use execution::{
     clone_linux_process_extended_state, discard_container_extended_state,
-    discard_linux_process_extended_state, reset_extended_user_state,
+    discard_linux_process_extended_state, discard_linux_thread_extended_state,
+    initialize_linux_thread_extended_state, reset_extended_user_state,
     restore_container_extended_state, restore_linux_process_extended_state,
-    save_container_extended_state, save_linux_process_extended_state, ExtendedState,
-    EXTENDED_STATE_SIZE,
+    save_container_extended_state, save_linux_process_extended_state,
+    switch_linux_thread_extended_state, ExtendedState, EXTENDED_STATE_SIZE,
 };
 pub(crate) use linux_abi::*;
 use linux_futex::*;
@@ -104,6 +105,7 @@ const LSTAR_MSR: u32 = 0xc000_0082;
 const FMASK_MSR: u32 = 0xc000_0084;
 const FS_BASE_MSR: u32 = 0xc000_0100;
 const GS_BASE_MSR: u32 = 0xc000_0101;
+const KERNEL_GS_BASE_MSR: u32 = 0xc000_0102;
 const EFER_SCE: u64 = 1;
 const EFER_NXE: u64 = 1 << 11;
 
@@ -392,6 +394,7 @@ struct X86RuntimeOwner {
     LINUX_FIRST_CHILD_TID: RuntimeRef<BankedAtomicU32>,
     LINUX_FORK_CGROUP_GENERATION: RuntimeRef<BankedAtomicU32>,
     LINUX_FORK_CHILD_STACK: RuntimeRef<BankedAtomicU64>,
+    LINUX_FORK_SHARE_VM: RuntimeRef<BankedAtomicBool>,
     LINUX_FORK_CHILD_TID_ADDRESS: RuntimeRef<BankedAtomicU64>,
     LINUX_FORK_CLEAR_SIGHAND: RuntimeRef<BankedAtomicBool>,
     LINUX_FORK_NEW_MOUNT_NAMESPACE: RuntimeRef<BankedAtomicBool>,
@@ -895,6 +898,7 @@ static X86_RUNTIME: X86RuntimeOwner = X86RuntimeOwner {
     LINUX_FIRST_CHILD_TID: RuntimeRef(&X86_RUNTIME_BACKING_LINUX_FIRST_CHILD_TID),
     LINUX_FORK_CGROUP_GENERATION: RuntimeRef(&X86_RUNTIME_BACKING_LINUX_FORK_CGROUP_GENERATION),
     LINUX_FORK_CHILD_STACK: RuntimeRef(&X86_RUNTIME_BACKING_LINUX_FORK_CHILD_STACK),
+    LINUX_FORK_SHARE_VM: RuntimeRef(&X86_RUNTIME_BACKING_LINUX_FORK_SHARE_VM),
     LINUX_FORK_CHILD_TID_ADDRESS: RuntimeRef(&X86_RUNTIME_BACKING_LINUX_FORK_CHILD_TID_ADDRESS),
     LINUX_FORK_CLEAR_SIGHAND: RuntimeRef(&X86_RUNTIME_BACKING_LINUX_FORK_CLEAR_SIGHAND),
     LINUX_FORK_NEW_MOUNT_NAMESPACE: RuntimeRef(&X86_RUNTIME_BACKING_LINUX_FORK_NEW_MOUNT_NAMESPACE),
@@ -1484,6 +1488,7 @@ static X86_RUNTIME_BACKING_LINUX_FORK_NEW_USER_NAMESPACE: BankedAtomicBool =
     BankedAtomicBool::new(false);
 static X86_RUNTIME_BACKING_LINUX_FORK_CHILD_TID_ADDRESS: BankedAtomicU64 = BankedAtomicU64::new(0);
 static X86_RUNTIME_BACKING_LINUX_FORK_CHILD_STACK: BankedAtomicU64 = BankedAtomicU64::new(0);
+static X86_RUNTIME_BACKING_LINUX_FORK_SHARE_VM: BankedAtomicBool = BankedAtomicBool::new(false);
 static X86_RUNTIME_BACKING_LINUX_FORK_PIDFD_ADDRESS: BankedAtomicU64 = BankedAtomicU64::new(0);
 static X86_RUNTIME_BACKING_LINUX_FORK_CGROUP_GENERATION: BankedAtomicU32 = BankedAtomicU32::new(0);
 static X86_RUNTIME_BACKING_LINUX_FORK_CLEAR_SIGHAND: BankedAtomicBool =
@@ -2266,6 +2271,10 @@ ginux_copy_to_user_fixup:
 
     .global ginux_breakpoint_entry
 ginux_breakpoint_entry:
+    test qword ptr [rsp + 8], 3
+    jz 1f
+    swapgs
+1:
     clac
     cld
     push rax
@@ -2302,6 +2311,10 @@ ginux_breakpoint_entry:
     pop rcx
     pop rbx
     pop rax
+    test qword ptr [rsp + 8], 3
+    jz 2f
+    swapgs
+2:
     iretq
 
     .macro GINUX_EXCEPTION_NO_ERROR vector
@@ -2422,12 +2435,32 @@ ginux_fatal_exception_call:
     ud2
 
 ginux_user_fault_common:
+    swapgs
     mov r12, rsp
     mov rdi, rsp
     and rsp, -16
     call {user_fault_handler}
     cmp rax, -1
     je ginux_user_return_kernel
+    mov rsp, r12
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rbp
+    pop rdi
+    pop rsi
+    pop rdx
+    pop rcx
+    pop rbx
+    pop rax
+    add rsp, 16
+    swapgs
+    iretq
 ginux_fault_return:
     mov rsp, r12
     pop r15
@@ -2504,6 +2537,7 @@ ginux_user_enter:
     push 0x202
     push {user_code}
     push rdi
+    swapgs
     iretq
 
     .global ginux_process_user_enter
@@ -2536,11 +2570,13 @@ ginux_process_user_enter:
     mov r14, [rax + 104]
     mov r15, [rax + 112]
     mov rax, [rax]
+    swapgs
     iretq
 
     .global ginux_syscall_entry
 ginux_syscall_entry:
     cli
+    swapgs
     clac
     cld
     push rbx
@@ -2580,11 +2616,13 @@ ginux_syscall_entry:
     pop rdx
     pop rcx
     pop rbx
+    swapgs
     iretq
 
     .global ginux_linux_syscall_entry
 ginux_linux_syscall_entry:
     cli
+    swapgs
     clac
     cld
     lock btr qword ptr [rip + {entry_nmi_probe_mask}], 0
@@ -2663,6 +2701,7 @@ ginux_linux_syscall_entry:
     int 2
 6:
     mov rsp, gs:[{entry_user_rsp}]
+    swapgs
     sysretq
 ginux_invalid_user_return:
     mov rsp, gs:[{entry_return_stack}]
@@ -2695,6 +2734,7 @@ ginux_linux_signal_return:
     mov rax, gs:[{entry_signal_rax}]
     mov rcx, gs:[{entry_signal_rcx}]
     mov r11, gs:[{entry_signal_r11}]
+    swapgs
     iretq
 ginux_user_return_kernel:
     mov rsp, gs:[{entry_return_stack}]
@@ -3208,7 +3248,12 @@ pub(crate) fn resume_live_linux_process(
     // stack installed by this entry stub.
     unsafe { enter_linux_process(entry, stack, general.as_ptr(), rflags) };
     let returned_fs = active_fs_base();
+    let scheduled_thread_fs = current_linux_thread_handle()
+        .and_then(linux_thread_context)
+        .map(|context| context.thread_pointer as u64);
     let preserved = returned_fs == fs_base
+        || X86_RUNTIME.LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
+            && scheduled_thread_fs == Some(returned_fs)
         || X86_RUNTIME.LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
             && returned_fs < 1 << 47
             && (X86_RUNTIME
@@ -4527,6 +4572,9 @@ fn execute_deferred_live_fork() -> bool {
     {
         return true;
     }
+    // Fork execution is recursive: a child may fork before returning to its
+    // parent. Preserve the outer transaction's vfork/CLONE_VM exec policy.
+    let _exec_flag_guard = LinuxForkExecFlagGuard::capture();
     let domain_exec = X86_RUNTIME
         .LINUX_DOMAIN_EXEC_INJECT
         .swap(false, Ordering::AcqRel);
@@ -4549,13 +4597,16 @@ fn execute_deferred_live_fork() -> bool {
         return false;
     }
     let child_stack = X86_RUNTIME.LINUX_FORK_CHILD_STACK.swap(0, Ordering::SeqCst);
+    let share_vm = X86_RUNTIME
+        .LINUX_FORK_SHARE_VM
+        .swap(false, Ordering::SeqCst);
     let cgroup_generation = X86_RUNTIME
         .LINUX_FORK_CGROUP_GENERATION
         .swap(0, Ordering::SeqCst);
     let Some(child) = linux_process::begin_live_fork(
         parent_pid,
         false,
-        child_stack != 0,
+        share_vm,
         (child_stack != 0).then_some(child_stack),
     ) else {
         release_staged_linux_fork_descriptors(parent_pid);
@@ -4621,34 +4672,9 @@ fn execute_deferred_live_fork() -> bool {
     if !linux_assign_process_cgroup(child.pid, cgroup_generation) {
         return false;
     }
-    if X86_RUNTIME
+    let clear_sighand = X86_RUNTIME
         .LINUX_FORK_CLEAR_SIGHAND
-        .swap(false, Ordering::SeqCst)
-    {
-        X86_RUNTIME
-            .ELF_PROBE_SIGNAL_HANDLERS
-            .iter()
-            .for_each(|handler| handler.store(0, Ordering::SeqCst));
-        X86_RUNTIME
-            .ELF_PROBE_SIGNAL_FLAGS
-            .iter()
-            .for_each(|flags| flags.store(0, Ordering::SeqCst));
-        X86_RUNTIME
-            .ELF_PROBE_SIGNAL_RESTORERS
-            .iter()
-            .for_each(|restorer| restorer.store(0, Ordering::SeqCst));
-        X86_RUNTIME
-            .ELF_PROBE_SIGNAL_ACTION_MASKS
-            .iter()
-            .for_each(|mask| mask.store(0, Ordering::SeqCst));
-    }
-    if child_stack != 0 {
-        let stack_page = (child_stack - 1) & !(PAGE_SIZE as u64 - 1);
-        if let Some(slot) = current_linux_thread_slot() {
-            X86_RUNTIME.LINUX_THREAD_STACK_BASES[slot].store(stack_page, Ordering::SeqCst);
-            X86_RUNTIME.LINUX_THREAD_STACK_SIZES[slot].store(PAGE_SIZE as u64, Ordering::SeqCst);
-        }
-    }
+        .swap(false, Ordering::SeqCst);
     if !linux_process::set_live_process_scheduler_nice(parent_pid, parent_runtime.nice)
         || !linux_process::set_live_process_scheduler_nice(child.pid, parent_runtime.nice)
     {
@@ -4693,21 +4719,42 @@ fn execute_deferred_live_fork() -> bool {
         .store(child.pid, Ordering::SeqCst);
     X86_RUNTIME
         .LINUX_PROCESS_RELEASE_PARENT_ON_EXEC
-        .store(child_stack != 0, Ordering::SeqCst);
+        .store(share_vm, Ordering::SeqCst);
     X86_RUNTIME
         .LINUX_PROCESS_CHILD_STATUS
         .store(0, Ordering::SeqCst);
     X86_RUNTIME
         .LINUX_CURRENT_PROCESS_PID
         .store(child.pid, Ordering::SeqCst);
-    if !linux_mount::switch_to(child_mount_namespace) {
+    if !restore_saved_linux_process_runtime_state(child.pid)
+        || !linux_mount::switch_to(child_mount_namespace)
+    {
         return false;
     }
-    if let Some((slot, _, _)) = parent_runtime.tid {
-        X86_RUNTIME.LINUX_THREAD_TIDS[slot].store(child.pid, Ordering::SeqCst);
+    if clear_sighand {
         X86_RUNTIME
-            .LINUX_NEXT_TID
-            .store(child.pid.saturating_add(1), Ordering::SeqCst);
+            .ELF_PROBE_SIGNAL_HANDLERS
+            .iter()
+            .for_each(|handler| handler.store(0, Ordering::SeqCst));
+        X86_RUNTIME
+            .ELF_PROBE_SIGNAL_FLAGS
+            .iter()
+            .for_each(|flags| flags.store(0, Ordering::SeqCst));
+        X86_RUNTIME
+            .ELF_PROBE_SIGNAL_RESTORERS
+            .iter()
+            .for_each(|restorer| restorer.store(0, Ordering::SeqCst));
+        X86_RUNTIME
+            .ELF_PROBE_SIGNAL_ACTION_MASKS
+            .iter()
+            .for_each(|mask| mask.store(0, Ordering::SeqCst));
+    }
+    if child_stack != 0 {
+        let stack_page = (child_stack - 1) & !(PAGE_SIZE as u64 - 1);
+        if let Some(slot) = current_linux_thread_slot() {
+            X86_RUNTIME.LINUX_THREAD_STACK_BASES[slot].store(stack_page, Ordering::SeqCst);
+            X86_RUNTIME.LINUX_THREAD_STACK_SIZES[slot].store(PAGE_SIZE as u64, Ordering::SeqCst);
+        }
     }
     let child_tid_address = X86_RUNTIME
         .LINUX_FORK_CHILD_TID_ADDRESS
@@ -4928,6 +4975,9 @@ fn execute_deferred_live_fork() -> bool {
     if let Some(child_state_slot) = linux_process_runtime_state(child.pid) {
         release_linux_descriptor_runtime_state(&child_state_slot.descriptors);
         *child_state_slot = LinuxProcessRuntimeState::EMPTY;
+    }
+    if let Some(threads) = linux_process_thread_runtime_state(child.pid) {
+        *threads = [LinuxThreadRuntimeState::EMPTY; LINUX_THREAD_LIMIT];
     }
     discard_linux_process_extended_state(child.pid);
     if !linux_process::release_live_process_runtime_slot(child.pid) {
@@ -6203,9 +6253,7 @@ fn switch_linux_thread(handle: LinuxThreadHandle) -> bool {
     let Some(context) = linux_thread_context(handle) else {
         return false;
     };
-    if X86_RUNTIME.LINUX_THREAD_STATES[slot].load(Ordering::SeqCst) != LINUX_THREAD_READY
-        || !install_linux_tls_context(context)
-    {
+    if X86_RUNTIME.LINUX_THREAD_STATES[slot].load(Ordering::SeqCst) != LINUX_THREAD_READY {
         return false;
     }
     let prior = X86_RUNTIME.LINUX_CURRENT_THREAD_SLOT.load(Ordering::SeqCst);
@@ -6213,6 +6261,7 @@ fn switch_linux_thread(handle: LinuxThreadHandle) -> bool {
         let prior = usize::from(prior);
         if prior >= LINUX_THREAD_LIMIT
             || X86_RUNTIME.LINUX_THREAD_STATES[prior].load(Ordering::SeqCst) != LINUX_THREAD_RUNNING
+            || !switch_linux_thread_extended_state(prior, slot)
         {
             return false;
         }
@@ -6221,6 +6270,11 @@ fn switch_linux_thread(handle: LinuxThreadHandle) -> bool {
             Ordering::SeqCst,
         );
         X86_RUNTIME.LINUX_THREAD_STATES[prior].store(LINUX_THREAD_READY, Ordering::SeqCst);
+    } else if !reset_extended_user_state() {
+        return false;
+    }
+    if !install_linux_tls_context(context) {
+        return false;
     }
     X86_RUNTIME.ELF_PROBE_SIGNAL_MASK.store(
         X86_RUNTIME.LINUX_THREAD_SIGNAL_MASKS[slot].load(Ordering::SeqCst),
@@ -6269,6 +6323,7 @@ fn retire_all_linux_threads() {
 }
 
 fn clear_linux_thread_slot(slot: usize) {
+    discard_linux_thread_extended_state(slot);
     let _ = X86_RUNTIME
         .LINUX_LAST_PREEMPTED_THREAD_SLOT
         .compare_exchange(
@@ -7667,6 +7722,9 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
     X86_RUNTIME
         .LINUX_FORK_CHILD_STACK
         .store(0, Ordering::SeqCst);
+    X86_RUNTIME
+        .LINUX_FORK_SHARE_VM
+        .store(false, Ordering::SeqCst);
     X86_RUNTIME
         .LINUX_FORK_PIDFD_ADDRESS
         .store(0, Ordering::SeqCst);
@@ -10908,11 +10966,31 @@ pub(crate) fn linux_runtime_diagnostics() -> (Option<u8>, Option<u64>) {
 }
 
 fn prepare_configured_linux_system_domain() -> bool {
+    if !prepare_linux_package_platform() {
+        return false;
+    }
     let mut init = [0_u8; control_abi::DOMAIN_MAX_INIT_SIZE];
     let Some(init_size) = configured_container_init(&mut init) else {
         return false;
     };
     prepare_linux_system_domain(&init[..init_size])
+}
+
+fn prepare_linux_package_platform() -> bool {
+    let rpm = b"usr/bin/rpm";
+    let platform = b"etc/rpm/platform";
+    let lower_has_rpm =
+        crate::published_rootfs::lookup_metadata_at(crate::published_rootfs::ROOT_HANDLE, rpm)
+            .and_then(|(_, entry)| entry)
+            .is_some();
+    let lower_has_platform =
+        crate::published_rootfs::lookup_metadata_at(crate::published_rootfs::ROOT_HANDLE, platform)
+            .and_then(|(_, entry)| entry)
+            .is_some();
+    !lower_has_rpm
+        || lower_has_platform
+        || crate::linux_overlay::lookup(platform).is_some()
+        || crate::linux_overlay::create_file(platform, 0o644, b"x86_64-linux\n").is_some()
 }
 
 fn prepare_linux_system_domain(init: &[u8]) -> bool {
@@ -11297,24 +11375,67 @@ fn linux_deny_privileged_operation(number: u64) -> u64 {
 
 #[allow(clippy::too_many_arguments)]
 fn linux_request_process_fork(
-    _runtime_mode: bool,
+    runtime_mode: bool,
     caller: LinuxUserContext,
     new_mount_namespace: bool,
     new_user_namespace: bool,
     child_stack: u64,
+    share_vm: bool,
     pidfd_address: u64,
     cgroup_generation: u32,
     clear_sighand: bool,
 ) -> u64 {
-    let refreshed = refresh_live_linux_process_registry(caller);
-    if current_linux_tid() != Some(current_linux_process_pid())
-        || !refreshed
-        || linux_nproc_limit_reached()
-        || X86_RUNTIME
-            .LINUX_FORK_REQUESTED
-            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-            .is_err()
-    {
+    // vfork/CLONE_VM inherits the already-owned address space. Updating only
+    // the execution context avoids manufacturing a page-per-leaf snapshot for
+    // a child that will share the parent's mappings until exec or exit.
+    let refreshed = if share_vm {
+        let snapshot = unsafe { &mut *X86_RUNTIME.LINUX_PROCESS_SNAPSHOT_SCRATCH.0 .0.get() };
+        let hierarchy_refreshed = address_space::current_linux_process_hierarchy(
+            &mut snapshot.hierarchy,
+        )
+        .is_some_and(|count| {
+            linux_process::refresh_live_process_hierarchy(
+                current_linux_process_pid(),
+                &snapshot.hierarchy[..count],
+            )
+        });
+        // `caller` is the hardware-captured context already accepted by the
+        // syscall return path. It is authoritative even when the optional
+        // process-registry mapping snapshot predates a newly mapped page.
+        hierarchy_refreshed
+            && linux_process::refresh_live_process_context_from_syscall_entry(
+                current_linux_process_pid(),
+                caller
+                    .registers
+                    .process_general(caller.rax, caller.rip, caller.rflags),
+                caller.rip,
+                caller.rsp,
+                caller.rflags,
+                caller.fs_base,
+            )
+    } else {
+        refresh_live_linux_process_registry(caller)
+    };
+    let leader = current_linux_tid() == Some(current_linux_process_pid());
+    let nproc_reached = linux_nproc_limit_reached();
+    let requested = X86_RUNTIME
+        .LINUX_FORK_REQUESTED
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_ok();
+    if !leader || !refreshed || nproc_reached || !requested {
+        if requested {
+            X86_RUNTIME
+                .LINUX_FORK_REQUESTED
+                .store(false, Ordering::SeqCst);
+        }
+        if runtime_mode {
+            serial_write("ginux: fork rejected leader/refreshed/nproc/requested/share-vm: ");
+            for value in [leader, refreshed, nproc_reached, requested, share_vm] {
+                serial_write_u64(u64::from(value));
+                serial_write(" ");
+            }
+            serial_write("\r\n");
+        }
         LINUX_EAGAIN
     } else {
         X86_RUNTIME
@@ -11326,6 +11447,9 @@ fn linux_request_process_fork(
         X86_RUNTIME
             .LINUX_FORK_CHILD_STACK
             .store(child_stack, Ordering::SeqCst);
+        X86_RUNTIME
+            .LINUX_FORK_SHARE_VM
+            .store(share_vm, Ordering::SeqCst);
         X86_RUNTIME
             .LINUX_FORK_PIDFD_ADDRESS
             .store(pidfd_address, Ordering::SeqCst);
@@ -11421,6 +11545,7 @@ fn linux_clone3(
             false,
             flags & LINUX_CLONE_NEWUSER != 0,
             child_stack,
+            flags & LINUX_CLONE_VM != 0,
             if flags & LINUX_CLONE_PIDFD != 0 {
                 _pidfd
             } else {
@@ -11579,7 +11704,11 @@ fn linux_clone_thread_request(
         data_base,
         data_size,
     ) {
-        Ok(result) => result,
+        Ok(result) if initialize_linux_thread_extended_state(usize::from(child.slot)) => result,
+        Ok(_) => {
+            let _ = retire_linux_thread(child);
+            return LINUX_EAGAIN;
+        }
         Err(error) => {
             let _ = retire_linux_thread(child);
             return match error {
@@ -11803,6 +11932,76 @@ fn current_linux_credentials() -> Option<linux_user::Credentials> {
     linux_user::credentials(current_linux_user_namespace()?)
 }
 
+fn linux_set_current_identity(number: u64, first: u64, second: u64, third: u64) -> u64 {
+    let Some(credentials) = current_linux_credentials() else {
+        return LINUX_ESRCH;
+    };
+    let unchanged =
+        |requested: u64, current: u32| requested as u32 == u32::MAX || requested as u32 == current;
+    let accepted = match number {
+        LINUX_SETUID_SYSCALL => {
+            unchanged(first, credentials.uid)
+                && credentials.uid == credentials.euid
+                && credentials.uid == credentials.suid
+        }
+        LINUX_SETGID_SYSCALL => {
+            unchanged(first, credentials.gid)
+                && credentials.gid == credentials.egid
+                && credentials.gid == credentials.sgid
+        }
+        LINUX_SETREUID_SYSCALL => {
+            unchanged(first, credentials.uid) && unchanged(second, credentials.euid)
+        }
+        LINUX_SETREGID_SYSCALL => {
+            unchanged(first, credentials.gid) && unchanged(second, credentials.egid)
+        }
+        LINUX_SETRESUID_SYSCALL => {
+            unchanged(first, credentials.uid)
+                && unchanged(second, credentials.euid)
+                && unchanged(third, credentials.suid)
+        }
+        LINUX_SETRESGID_SYSCALL => {
+            unchanged(first, credentials.gid)
+                && unchanged(second, credentials.egid)
+                && unchanged(third, credentials.sgid)
+        }
+        LINUX_SETFSUID_SYSCALL => unchanged(first, credentials.euid),
+        LINUX_SETFSGID_SYSCALL => unchanged(first, credentials.egid),
+        _ => false,
+    };
+    if accepted {
+        if matches!(number, LINUX_SETFSUID_SYSCALL) {
+            u64::from(credentials.euid)
+        } else if matches!(number, LINUX_SETFSGID_SYSCALL) {
+            u64::from(credentials.egid)
+        } else {
+            0
+        }
+    } else {
+        LINUX_EPERM
+    }
+}
+
+fn linux_set_current_groups(size: u64, address: u64) -> u64 {
+    let Some(credentials) = current_linux_credentials() else {
+        return LINUX_ESRCH;
+    };
+    match size {
+        0 => 0,
+        1 => {
+            let mut gid = [0_u8; size_of::<u32>()];
+            if !copy_from_linux_user(address, &mut gid) {
+                LINUX_EFAULT
+            } else if u32::from_ne_bytes(gid) == credentials.supplementary_gid {
+                0
+            } else {
+                LINUX_EPERM
+            }
+        }
+        _ => LINUX_EPERM,
+    }
+}
+
 #[derive(Clone, Copy)]
 enum LinuxChildWaitSelector {
     Any,
@@ -11870,13 +12069,6 @@ fn linux_wait4(pid: u64, status_address: u64, options: u64, rusage: u64) -> u64 
         options & LINUX_WUNTRACED != 0,
         options & LINUX_WCONTINUED != 0,
     ) else {
-        serial_write("ginux: wait4 no child parent/selector/options: ");
-        serial_write_u64(u64::from(parent_pid));
-        serial_write("/");
-        serial_write_u64(pid as u32 as u64);
-        serial_write("/");
-        serial_write_u64(options);
-        serial_write("\r\n");
         return LINUX_ECHILD;
     };
     let (waited, encoded, reaped) = match state {
@@ -11914,6 +12106,39 @@ fn linux_wait4(pid: u64, status_address: u64, options: u64, rusage: u64) -> u64 
         .LINUX_PROCESS_WAIT_COUNT
         .fetch_add(1, Ordering::SeqCst);
     u64::from(waited)
+}
+
+fn linux_wait4_live(
+    output: *mut LinuxSyscallFrame,
+    pid: u64,
+    status_address: u64,
+    options: u64,
+    rusage: u64,
+    caller: LinuxUserContext,
+) -> u64 {
+    let parent = current_linux_process_pid();
+    let selector = pid as u32 as i32;
+    let mut refreshed = false;
+    loop {
+        let result = linux_wait4(pid, status_address, options, rusage);
+        if result != LINUX_ENOSYS || options as u32 as u64 & LINUX_WNOHANG != 0 {
+            return result;
+        }
+        let Some(child) = linux_process::live_running_child_wait_pid(parent, selector) else {
+            return LINUX_ECHILD;
+        };
+        if !refreshed {
+            if !refresh_live_linux_process_registry(caller) {
+                return LINUX_ECHILD;
+            }
+            refreshed = true;
+        }
+        if !run_scheduled_linux_process(parent, Some(child))
+            || !restore_linux_process_live_return(output, parent)
+        {
+            return LINUX_ECHILD;
+        }
+    }
 }
 
 fn linux_waitid(id_type: u64, id: u64, information: u64, options: u64, rusage: u64) -> u64 {
@@ -12903,6 +13128,89 @@ impl LinuxDescriptorRuntimeState {
 }
 
 #[derive(Clone, Copy)]
+struct LinuxThreadRuntimeState {
+    state: u8,
+    generation: u32,
+    tid: u32,
+    pointer: u64,
+    tls_extent: u64,
+    tls_size: u64,
+    stack_base: u64,
+    stack_size: u64,
+    registers: [u64; LINUX_SYSCALL_FRAME_REGISTERS],
+    rip: u64,
+    rsp: u64,
+    rflags: u64,
+    rax: u64,
+    rcx: u64,
+    r11: u64,
+    clear_child_tid: u64,
+    robust_list: u64,
+    rseq_pointer: u64,
+    rseq_length: u32,
+    rseq_signature: u32,
+    signal_mask: u64,
+    wait_kind: u8,
+    wait_key: u64,
+    wait_output: u64,
+    wait_deadline: u64,
+    wait_prior_signal_mask: u64,
+    poll_descriptors: [u32; LINUX_POLLFD_LIMIT],
+    poll_events: [u16; LINUX_POLLFD_LIMIT],
+    select_read_address: u64,
+    select_write_address: u64,
+    select_exception_address: u64,
+    select_timeout_address: u64,
+    select_read_set: [u64; LINUX_SELECT_WORD_LIMIT],
+    select_write_set: [u64; LINUX_SELECT_WORD_LIMIT],
+    select_exception_set: [u64; LINUX_SELECT_WORD_LIMIT],
+    iov_addresses: [u64; LINUX_IOV_LIMIT],
+    iov_lengths: [u64; LINUX_IOV_LIMIT],
+}
+
+impl LinuxThreadRuntimeState {
+    const EMPTY: Self = Self {
+        state: LINUX_THREAD_FREE,
+        generation: 0,
+        tid: 0,
+        pointer: 0,
+        tls_extent: 0,
+        tls_size: 0,
+        stack_base: 0,
+        stack_size: 0,
+        registers: [0; LINUX_SYSCALL_FRAME_REGISTERS],
+        rip: 0,
+        rsp: 0,
+        rflags: 0,
+        rax: 0,
+        rcx: 0,
+        r11: 0,
+        clear_child_tid: 0,
+        robust_list: 0,
+        rseq_pointer: 0,
+        rseq_length: 0,
+        rseq_signature: 0,
+        signal_mask: 0,
+        wait_kind: LINUX_THREAD_WAIT_NONE,
+        wait_key: 0,
+        wait_output: 0,
+        wait_deadline: 0,
+        wait_prior_signal_mask: 0,
+        poll_descriptors: [0; LINUX_POLLFD_LIMIT],
+        poll_events: [0; LINUX_POLLFD_LIMIT],
+        select_read_address: 0,
+        select_write_address: 0,
+        select_exception_address: 0,
+        select_timeout_address: 0,
+        select_read_set: [0; LINUX_SELECT_WORD_LIMIT],
+        select_write_set: [0; LINUX_SELECT_WORD_LIMIT],
+        select_exception_set: [0; LINUX_SELECT_WORD_LIMIT],
+        iov_addresses: [0; LINUX_IOV_LIMIT],
+        iov_lengths: [0; LINUX_IOV_LIMIT],
+    };
+}
+
+#[derive(Clone, Copy)]
 struct LinuxProcessRuntimeState {
     valid: bool,
     active: bool,
@@ -12913,9 +13221,12 @@ struct LinuxProcessRuntimeState {
     mount_namespace: Option<linux_mount::MountNamespaceHandle>,
     mmap: LinuxMmapRuntimeState,
     descriptors: LinuxDescriptorRuntimeState,
+    image_extents: [u64; 8],
     brk: u64,
     stack_low: u64,
     cwd: u16,
+    rootfs_cwd: u16,
+    overlay_cwd: u32,
     umask: u64,
     rlimits: [u64; LINUX_RLIMIT_WORDS],
     process_name: [u64; 2],
@@ -12941,17 +13252,8 @@ struct LinuxProcessRuntimeState {
     signal_action_masks: [u64; LINUX_SIGNAL_COUNT],
     alternate_signal_stack: [u64; 2],
     alternate_signal_stack_flags: u32,
-    thread_pointer: u64,
-    thread_tls_extent: u64,
-    thread_tls_size: u64,
-    clear_child_tid: u64,
-    robust_list: u64,
-    rseq_pointer: u64,
-    rseq_length: u32,
-    rseq_signature: u32,
-    thread_signal_mask: u64,
-    thread_slot: u8,
-    tid: u32,
+    current_thread_slot: u8,
+    last_preempted_thread_slot: u8,
     next_tid: u32,
 }
 
@@ -12966,9 +13268,12 @@ impl LinuxProcessRuntimeState {
         mount_namespace: None,
         mmap: LinuxMmapRuntimeState::EMPTY,
         descriptors: LinuxDescriptorRuntimeState::EMPTY,
+        image_extents: [0; 8],
         brk: 0,
         stack_low: 0,
         cwd: LINUX_ROOT_DIRECTORY,
+        rootfs_cwd: crate::published_rootfs::ROOT_HANDLE,
+        overlay_cwd: 0,
         umask: 0o022,
         rlimits: [0; LINUX_RLIMIT_WORDS],
         process_name: [0; 2],
@@ -12994,17 +13299,8 @@ impl LinuxProcessRuntimeState {
         signal_action_masks: [0; LINUX_SIGNAL_COUNT],
         alternate_signal_stack: [0; 2],
         alternate_signal_stack_flags: LINUX_SS_DISABLE,
-        thread_pointer: 0,
-        thread_tls_extent: 0,
-        thread_tls_size: 0,
-        clear_child_tid: 0,
-        robust_list: 0,
-        rseq_pointer: 0,
-        rseq_length: 0,
-        rseq_signature: 0,
-        thread_signal_mask: 0,
-        thread_slot: 0,
-        tid: 0,
+        current_thread_slot: LINUX_THREAD_SLOT_NONE,
+        last_preempted_thread_slot: LINUX_THREAD_SLOT_NONE,
         next_tid: 0,
     };
 }
@@ -13012,14 +13308,19 @@ impl LinuxProcessRuntimeState {
 struct X86MutableRuntimeOwner {
     container_extended_states: UnsafeCell<[ExtendedState; control_abi::DOMAIN_LIMIT]>,
     process_extended_states: UnsafeCell<
-        [[ExtendedState; linux_process::PROCESS_RUNTIME_LIMIT];
+        [[[ExtendedState; LINUX_THREAD_LIMIT]; linux_process::PROCESS_RUNTIME_LIMIT];
             LINUX_PROCESS_RUNTIME_INSTANCE_LIMIT],
     >,
     process_extended_state_valid: UnsafeCell<
-        [[bool; linux_process::PROCESS_RUNTIME_LIMIT]; LINUX_PROCESS_RUNTIME_INSTANCE_LIMIT],
+        [[[bool; LINUX_THREAD_LIMIT]; linux_process::PROCESS_RUNTIME_LIMIT];
+            LINUX_PROCESS_RUNTIME_INSTANCE_LIMIT],
     >,
     process_runtime_states: UnsafeCell<
         [[LinuxProcessRuntimeState; linux_process::PROCESS_RUNTIME_LIMIT];
+            LINUX_PROCESS_RUNTIME_INSTANCE_LIMIT],
+    >,
+    process_thread_runtime_states: UnsafeCell<
+        [[[LinuxThreadRuntimeState; LINUX_THREAD_LIMIT]; linux_process::PROCESS_RUNTIME_LIMIT];
             LINUX_PROCESS_RUNTIME_INSTANCE_LIMIT],
     >,
     signal_context: UnsafeCell<LinuxSignalContext>,
@@ -13034,15 +13335,20 @@ static X86_MUTABLE_RUNTIME: X86MutableRuntimeOwner = X86MutableRuntimeOwner {
         [ExtendedState([0; EXTENDED_STATE_SIZE]); control_abi::DOMAIN_LIMIT],
     ),
     process_extended_states: UnsafeCell::new(
-        [[ExtendedState([0; EXTENDED_STATE_SIZE]); linux_process::PROCESS_RUNTIME_LIMIT];
-            LINUX_PROCESS_RUNTIME_INSTANCE_LIMIT],
+        [[[ExtendedState([0; EXTENDED_STATE_SIZE]); LINUX_THREAD_LIMIT];
+            linux_process::PROCESS_RUNTIME_LIMIT]; LINUX_PROCESS_RUNTIME_INSTANCE_LIMIT],
     ),
     process_extended_state_valid: UnsafeCell::new(
-        [[false; linux_process::PROCESS_RUNTIME_LIMIT]; LINUX_PROCESS_RUNTIME_INSTANCE_LIMIT],
+        [[[false; LINUX_THREAD_LIMIT]; linux_process::PROCESS_RUNTIME_LIMIT];
+            LINUX_PROCESS_RUNTIME_INSTANCE_LIMIT],
     ),
     process_runtime_states: UnsafeCell::new(
         [[LinuxProcessRuntimeState::EMPTY; linux_process::PROCESS_RUNTIME_LIMIT];
             LINUX_PROCESS_RUNTIME_INSTANCE_LIMIT],
+    ),
+    process_thread_runtime_states: UnsafeCell::new(
+        [[[LinuxThreadRuntimeState::EMPTY; LINUX_THREAD_LIMIT];
+            linux_process::PROCESS_RUNTIME_LIMIT]; LINUX_PROCESS_RUNTIME_INSTANCE_LIMIT],
     ),
     signal_context: UnsafeCell::new(LinuxSignalContext::ZERO),
 };
@@ -13064,10 +13370,50 @@ fn linux_process_runtime_state(pid: u32) -> Option<&'static mut LinuxProcessRunt
     })
 }
 
+fn linux_process_thread_runtime_state(
+    pid: u32,
+) -> Option<&'static mut [LinuxThreadRuntimeState; LINUX_THREAD_LIMIT]> {
+    let instance = current_container_slot().unwrap_or(control_abi::DOMAIN_LIMIT);
+    let slot = linux_process::live_process_runtime_slot(pid)?;
+    if instance >= LINUX_PROCESS_RUNTIME_INSTANCE_LIMIT
+        || slot >= linux_process::PROCESS_RUNTIME_LIMIT
+    {
+        return None;
+    }
+    Some(unsafe {
+        &mut *X86_MUTABLE_RUNTIME
+            .process_thread_runtime_states
+            .get()
+            .cast::<[LinuxThreadRuntimeState; LINUX_THREAD_LIMIT]>()
+            .add(instance * linux_process::PROCESS_RUNTIME_LIMIT + slot)
+    })
+}
+
 struct LinuxForkParentRuntime {
-    tid: Option<(usize, u32, u32)>,
     stack: Option<(usize, u64, u64)>,
     nice: u8,
+}
+
+struct LinuxForkExecFlagGuard {
+    previous: bool,
+}
+
+impl LinuxForkExecFlagGuard {
+    fn capture() -> Self {
+        Self {
+            previous: X86_RUNTIME
+                .LINUX_PROCESS_RELEASE_PARENT_ON_EXEC
+                .load(Ordering::SeqCst),
+        }
+    }
+}
+
+impl Drop for LinuxForkExecFlagGuard {
+    fn drop(&mut self) {
+        X86_RUNTIME
+            .LINUX_PROCESS_RELEASE_PARENT_ON_EXEC
+            .store(self.previous, Ordering::SeqCst);
+    }
 }
 
 // Keep the large process-state snapshot in this bounded frame. Inlining this
@@ -13083,13 +13429,6 @@ fn stage_linux_fork_parent_runtime_state(parent_pid: u32) -> Option<LinuxForkPar
     if !retain_linux_descriptor_runtime_state(&state.descriptors) {
         return None;
     }
-    let parent_tid = current_linux_thread_slot().map(|slot| {
-        (
-            slot,
-            X86_RUNTIME.LINUX_THREAD_TIDS[slot].load(Ordering::SeqCst),
-            X86_RUNTIME.LINUX_NEXT_TID.load(Ordering::SeqCst),
-        )
-    });
     let parent_stack = current_linux_thread_slot().map(|slot| {
         (
             slot,
@@ -13100,7 +13439,6 @@ fn stage_linux_fork_parent_runtime_state(parent_pid: u32) -> Option<LinuxForkPar
     let nice = state.nice;
     *linux_process_runtime_state(parent_pid)? = state;
     Some(LinuxForkParentRuntime {
-        tid: parent_tid,
         stack: parent_stack,
         nice,
     })
@@ -13120,6 +13458,10 @@ fn stage_linux_fork_child_runtime_state(
     let parent: *const LinuxProcessRuntimeState =
         linux_process_runtime_state(parent_pid).filter(|state| state.valid)?;
     let child = linux_process_runtime_state(child_pid)? as *mut LinuxProcessRuntimeState;
+    let parent_threads: *const [LinuxThreadRuntimeState; LINUX_THREAD_LIMIT] =
+        linux_process_thread_runtime_state(parent_pid)?;
+    let child_threads: *mut [LinuxThreadRuntimeState; LINUX_THREAD_LIMIT] =
+        linux_process_thread_runtime_state(child_pid)?;
     let mount_namespace = if new_mount_namespace {
         linux_mount::clone_current()?
     } else {
@@ -13127,7 +13469,18 @@ fn stage_linux_fork_child_runtime_state(
     };
     unsafe {
         core::ptr::copy_nonoverlapping(parent, child, 1);
-        (*child).tid = child_pid;
+        core::ptr::copy_nonoverlapping(parent_threads, child_threads, 1);
+        let current = usize::from((*child).current_thread_slot);
+        for slot in 0..LINUX_THREAD_LIMIT {
+            if slot != current {
+                (*child_threads)[slot] = LinuxThreadRuntimeState::EMPTY;
+            }
+        }
+        if current < LINUX_THREAD_LIMIT {
+            (*child_threads)[current].tid = child_pid;
+            (*child_threads)[current].state = LINUX_THREAD_RUNNING;
+        }
+        (*child).last_preempted_thread_slot = LINUX_THREAD_SLOT_NONE;
         (*child).next_tid = child_pid.saturating_add(1);
         (*child).active = true;
         (*child).completed = false;
@@ -13171,6 +13524,20 @@ fn restore_saved_linux_process_runtime_state(pid: u32) -> bool {
         return false;
     };
     restore_linux_process_runtime_state(state);
+    let Some(threads) = linux_process_thread_runtime_state(pid) else {
+        return false;
+    };
+    restore_linux_thread_runtime_state(
+        threads,
+        state.current_thread_slot,
+        state.last_preempted_thread_slot,
+    );
+    let thread_signal_mask = threads
+        .get(usize::from(state.current_thread_slot))
+        .map_or(0, |thread| thread.signal_mask);
+    X86_RUNTIME
+        .ELF_PROBE_SIGNAL_MASK
+        .store(thread_signal_mask, Ordering::SeqCst);
     if let Some(started) = started {
         X86_RUNTIME
             .LINUX_BOOT_PROFILE_RESTORE_COUNT
@@ -13194,8 +13561,175 @@ fn capture_linux_descriptors_for_process(pid: u32) -> bool {
     true
 }
 
+fn capture_linux_thread_runtime_state(slot: usize) -> LinuxThreadRuntimeState {
+    LinuxThreadRuntimeState {
+        state: X86_RUNTIME.LINUX_THREAD_STATES[slot].load(Ordering::SeqCst),
+        generation: X86_RUNTIME.LINUX_THREAD_GENERATIONS[slot].load(Ordering::SeqCst),
+        tid: X86_RUNTIME.LINUX_THREAD_TIDS[slot].load(Ordering::SeqCst),
+        pointer: X86_RUNTIME.LINUX_THREAD_POINTERS[slot].load(Ordering::SeqCst),
+        tls_extent: X86_RUNTIME.LINUX_THREAD_TLS_EXTENTS[slot].load(Ordering::SeqCst),
+        tls_size: X86_RUNTIME.LINUX_THREAD_TLS_SIZES[slot].load(Ordering::SeqCst),
+        stack_base: X86_RUNTIME.LINUX_THREAD_STACK_BASES[slot].load(Ordering::SeqCst),
+        stack_size: X86_RUNTIME.LINUX_THREAD_STACK_SIZES[slot].load(Ordering::SeqCst),
+        registers: core::array::from_fn(|index| {
+            X86_RUNTIME.LINUX_THREAD_REGISTERS[slot][index].load(Ordering::SeqCst)
+        }),
+        rip: X86_RUNTIME.LINUX_THREAD_RIPS[slot].load(Ordering::SeqCst),
+        rsp: X86_RUNTIME.LINUX_THREAD_RSPS[slot].load(Ordering::SeqCst),
+        rflags: X86_RUNTIME.LINUX_THREAD_RFLAGS[slot].load(Ordering::SeqCst),
+        rax: X86_RUNTIME.LINUX_THREAD_RAXS[slot].load(Ordering::SeqCst),
+        rcx: X86_RUNTIME.LINUX_THREAD_RCXS[slot].load(Ordering::SeqCst),
+        r11: X86_RUNTIME.LINUX_THREAD_R11S[slot].load(Ordering::SeqCst),
+        clear_child_tid: X86_RUNTIME.LINUX_THREAD_CLEAR_CHILD_TIDS[slot].load(Ordering::SeqCst),
+        robust_list: X86_RUNTIME.LINUX_THREAD_ROBUST_LISTS[slot].load(Ordering::SeqCst),
+        rseq_pointer: X86_RUNTIME.LINUX_THREAD_RSEQ_POINTERS[slot].load(Ordering::SeqCst),
+        rseq_length: X86_RUNTIME.LINUX_THREAD_RSEQ_LENGTHS[slot].load(Ordering::SeqCst),
+        rseq_signature: X86_RUNTIME.LINUX_THREAD_RSEQ_SIGNATURES[slot].load(Ordering::SeqCst),
+        signal_mask: X86_RUNTIME.LINUX_THREAD_SIGNAL_MASKS[slot].load(Ordering::SeqCst),
+        wait_kind: X86_RUNTIME.LINUX_THREAD_WAIT_KINDS[slot].load(Ordering::SeqCst),
+        wait_key: X86_RUNTIME.LINUX_THREAD_WAIT_KEYS[slot].load(Ordering::SeqCst),
+        wait_output: X86_RUNTIME.LINUX_THREAD_WAIT_OUTPUTS[slot].load(Ordering::SeqCst),
+        wait_deadline: X86_RUNTIME.LINUX_THREAD_WAIT_DEADLINES[slot].load(Ordering::SeqCst),
+        wait_prior_signal_mask: X86_RUNTIME.LINUX_THREAD_WAIT_PRIOR_SIGNAL_MASKS[slot]
+            .load(Ordering::SeqCst),
+        poll_descriptors: core::array::from_fn(|index| {
+            X86_RUNTIME.LINUX_THREAD_POLL_DESCRIPTORS[slot][index].load(Ordering::SeqCst)
+        }),
+        poll_events: core::array::from_fn(|index| {
+            X86_RUNTIME.LINUX_THREAD_POLL_EVENTS[slot][index].load(Ordering::SeqCst)
+        }),
+        select_read_address: X86_RUNTIME.LINUX_THREAD_SELECT_READ_ADDRESSES[slot]
+            .load(Ordering::SeqCst),
+        select_write_address: X86_RUNTIME.LINUX_THREAD_SELECT_WRITE_ADDRESSES[slot]
+            .load(Ordering::SeqCst),
+        select_exception_address: X86_RUNTIME.LINUX_THREAD_SELECT_EXCEPTION_ADDRESSES[slot]
+            .load(Ordering::SeqCst),
+        select_timeout_address: X86_RUNTIME.LINUX_THREAD_SELECT_TIMEOUT_ADDRESSES[slot]
+            .load(Ordering::SeqCst),
+        select_read_set: core::array::from_fn(|index| {
+            X86_RUNTIME.LINUX_THREAD_SELECT_READ_SETS[slot][index].load(Ordering::SeqCst)
+        }),
+        select_write_set: core::array::from_fn(|index| {
+            X86_RUNTIME.LINUX_THREAD_SELECT_WRITE_SETS[slot][index].load(Ordering::SeqCst)
+        }),
+        select_exception_set: core::array::from_fn(|index| {
+            X86_RUNTIME.LINUX_THREAD_SELECT_EXCEPTION_SETS[slot][index].load(Ordering::SeqCst)
+        }),
+        iov_addresses: core::array::from_fn(|index| {
+            X86_RUNTIME.LINUX_THREAD_IOV_ADDRESSES[slot][index].load(Ordering::SeqCst)
+        }),
+        iov_lengths: core::array::from_fn(|index| {
+            X86_RUNTIME.LINUX_THREAD_IOV_LENGTHS[slot][index].load(Ordering::SeqCst)
+        }),
+    }
+}
+
+fn restore_linux_thread_runtime_state(
+    threads: &[LinuxThreadRuntimeState; LINUX_THREAD_LIMIT],
+    current: u8,
+    last_preempted: u8,
+) {
+    for (slot, state) in threads.iter().enumerate() {
+        X86_RUNTIME.LINUX_THREAD_STATES[slot].store(state.state, Ordering::SeqCst);
+        X86_RUNTIME.LINUX_THREAD_GENERATIONS[slot].store(state.generation, Ordering::SeqCst);
+        X86_RUNTIME.LINUX_THREAD_TIDS[slot].store(state.tid, Ordering::SeqCst);
+        X86_RUNTIME.LINUX_THREAD_POINTERS[slot].store(state.pointer, Ordering::SeqCst);
+        X86_RUNTIME.LINUX_THREAD_TLS_EXTENTS[slot].store(state.tls_extent, Ordering::SeqCst);
+        X86_RUNTIME.LINUX_THREAD_TLS_SIZES[slot].store(state.tls_size, Ordering::SeqCst);
+        X86_RUNTIME.LINUX_THREAD_STACK_BASES[slot].store(state.stack_base, Ordering::SeqCst);
+        X86_RUNTIME.LINUX_THREAD_STACK_SIZES[slot].store(state.stack_size, Ordering::SeqCst);
+        for (destination, value) in X86_RUNTIME.LINUX_THREAD_REGISTERS[slot]
+            .iter()
+            .zip(state.registers)
+        {
+            destination.store(value, Ordering::SeqCst);
+        }
+        X86_RUNTIME.LINUX_THREAD_RIPS[slot].store(state.rip, Ordering::SeqCst);
+        X86_RUNTIME.LINUX_THREAD_RSPS[slot].store(state.rsp, Ordering::SeqCst);
+        X86_RUNTIME.LINUX_THREAD_RFLAGS[slot].store(state.rflags, Ordering::SeqCst);
+        X86_RUNTIME.LINUX_THREAD_RAXS[slot].store(state.rax, Ordering::SeqCst);
+        X86_RUNTIME.LINUX_THREAD_RCXS[slot].store(state.rcx, Ordering::SeqCst);
+        X86_RUNTIME.LINUX_THREAD_R11S[slot].store(state.r11, Ordering::SeqCst);
+        X86_RUNTIME.LINUX_THREAD_CLEAR_CHILD_TIDS[slot]
+            .store(state.clear_child_tid, Ordering::SeqCst);
+        X86_RUNTIME.LINUX_THREAD_ROBUST_LISTS[slot].store(state.robust_list, Ordering::SeqCst);
+        X86_RUNTIME.LINUX_THREAD_RSEQ_POINTERS[slot].store(state.rseq_pointer, Ordering::SeqCst);
+        X86_RUNTIME.LINUX_THREAD_RSEQ_LENGTHS[slot].store(state.rseq_length, Ordering::SeqCst);
+        X86_RUNTIME.LINUX_THREAD_RSEQ_SIGNATURES[slot]
+            .store(state.rseq_signature, Ordering::SeqCst);
+        X86_RUNTIME.LINUX_THREAD_SIGNAL_MASKS[slot].store(state.signal_mask, Ordering::SeqCst);
+        X86_RUNTIME.LINUX_THREAD_WAIT_KINDS[slot].store(state.wait_kind, Ordering::SeqCst);
+        X86_RUNTIME.LINUX_THREAD_WAIT_KEYS[slot].store(state.wait_key, Ordering::SeqCst);
+        X86_RUNTIME.LINUX_THREAD_WAIT_OUTPUTS[slot].store(state.wait_output, Ordering::SeqCst);
+        X86_RUNTIME.LINUX_THREAD_WAIT_DEADLINES[slot].store(state.wait_deadline, Ordering::SeqCst);
+        X86_RUNTIME.LINUX_THREAD_WAIT_PRIOR_SIGNAL_MASKS[slot]
+            .store(state.wait_prior_signal_mask, Ordering::SeqCst);
+        for (destination, value) in X86_RUNTIME.LINUX_THREAD_POLL_DESCRIPTORS[slot]
+            .iter()
+            .zip(state.poll_descriptors)
+        {
+            destination.store(value, Ordering::SeqCst);
+        }
+        for (destination, value) in X86_RUNTIME.LINUX_THREAD_POLL_EVENTS[slot]
+            .iter()
+            .zip(state.poll_events)
+        {
+            destination.store(value, Ordering::SeqCst);
+        }
+        X86_RUNTIME.LINUX_THREAD_SELECT_READ_ADDRESSES[slot]
+            .store(state.select_read_address, Ordering::SeqCst);
+        X86_RUNTIME.LINUX_THREAD_SELECT_WRITE_ADDRESSES[slot]
+            .store(state.select_write_address, Ordering::SeqCst);
+        X86_RUNTIME.LINUX_THREAD_SELECT_EXCEPTION_ADDRESSES[slot]
+            .store(state.select_exception_address, Ordering::SeqCst);
+        X86_RUNTIME.LINUX_THREAD_SELECT_TIMEOUT_ADDRESSES[slot]
+            .store(state.select_timeout_address, Ordering::SeqCst);
+        for (destination, value) in X86_RUNTIME.LINUX_THREAD_SELECT_READ_SETS[slot]
+            .iter()
+            .zip(state.select_read_set)
+        {
+            destination.store(value, Ordering::SeqCst);
+        }
+        for (destination, value) in X86_RUNTIME.LINUX_THREAD_SELECT_WRITE_SETS[slot]
+            .iter()
+            .zip(state.select_write_set)
+        {
+            destination.store(value, Ordering::SeqCst);
+        }
+        for (destination, value) in X86_RUNTIME.LINUX_THREAD_SELECT_EXCEPTION_SETS[slot]
+            .iter()
+            .zip(state.select_exception_set)
+        {
+            destination.store(value, Ordering::SeqCst);
+        }
+        for (destination, value) in X86_RUNTIME.LINUX_THREAD_IOV_ADDRESSES[slot]
+            .iter()
+            .zip(state.iov_addresses)
+        {
+            destination.store(value, Ordering::SeqCst);
+        }
+        for (destination, value) in X86_RUNTIME.LINUX_THREAD_IOV_LENGTHS[slot]
+            .iter()
+            .zip(state.iov_lengths)
+        {
+            destination.store(value, Ordering::SeqCst);
+        }
+    }
+    X86_RUNTIME
+        .LINUX_CURRENT_THREAD_SLOT
+        .store(current, Ordering::SeqCst);
+    X86_RUNTIME
+        .LINUX_LAST_PREEMPTED_THREAD_SLOT
+        .store(last_preempted, Ordering::SeqCst);
+}
+
 fn capture_linux_process_runtime_state() -> Option<LinuxProcessRuntimeState> {
     let thread_slot = current_linux_thread_slot()?;
+    let pid = current_linux_process_pid();
+    let threads = linux_process_thread_runtime_state(pid)?;
+    for (slot, state) in threads.iter_mut().enumerate() {
+        *state = capture_linux_thread_runtime_state(slot);
+    }
     Some(LinuxProcessRuntimeState {
         valid: true,
         active: X86_RUNTIME.ELF_PROBE_ACTIVE.load(Ordering::SeqCst),
@@ -13210,9 +13744,25 @@ fn capture_linux_process_runtime_state() -> Option<LinuxProcessRuntimeState> {
         mount_namespace: linux_mount::current_handle(),
         mmap: capture_linux_mmap_runtime_state(),
         descriptors: capture_linux_descriptor_runtime_state(),
+        image_extents: [
+            X86_RUNTIME.ELF_PROBE_CODE_BASE.load(Ordering::SeqCst),
+            X86_RUNTIME.ELF_PROBE_CODE_SIZE.load(Ordering::SeqCst),
+            X86_RUNTIME
+                .ELF_PROBE_LOADER_CODE_BASE
+                .load(Ordering::SeqCst),
+            X86_RUNTIME
+                .ELF_PROBE_LOADER_CODE_SIZE
+                .load(Ordering::SeqCst),
+            X86_RUNTIME.ELF_PROBE_DATA.load(Ordering::SeqCst),
+            X86_RUNTIME.ELF_PROBE_DATA_SIZE.load(Ordering::SeqCst),
+            X86_RUNTIME.ELF_PROBE_RELRO.load(Ordering::SeqCst),
+            X86_RUNTIME.ELF_PROBE_RELRO_SIZE.load(Ordering::SeqCst),
+        ],
         brk: X86_RUNTIME.ELF_PROBE_BRK.load(Ordering::SeqCst),
         stack_low: X86_RUNTIME.ELF_PROBE_STACK_LOW.load(Ordering::SeqCst),
         cwd: X86_RUNTIME.ELF_PROBE_CWD.load(Ordering::SeqCst),
+        rootfs_cwd: X86_RUNTIME.ELF_PROBE_ROOTFS_CWD.load(Ordering::SeqCst),
+        overlay_cwd: X86_RUNTIME.ELF_PROBE_OVERLAY_CWD.load(Ordering::SeqCst),
         umask: X86_RUNTIME.ELF_PROBE_UMASK.load(Ordering::SeqCst),
         rlimits: core::array::from_fn(|index| {
             X86_RUNTIME.ELF_PROBE_RLIMITS[index].load(Ordering::SeqCst)
@@ -13272,20 +13822,10 @@ fn capture_linux_process_runtime_state() -> Option<LinuxProcessRuntimeState> {
             X86_RUNTIME.ELF_PROBE_ALT_STACK_SIZE.load(Ordering::SeqCst),
         ],
         alternate_signal_stack_flags: X86_RUNTIME.ELF_PROBE_ALT_STACK_FLAGS.load(Ordering::SeqCst),
-        thread_pointer: X86_RUNTIME.LINUX_THREAD_POINTERS[thread_slot].load(Ordering::SeqCst),
-        thread_tls_extent: X86_RUNTIME.LINUX_THREAD_TLS_EXTENTS[thread_slot].load(Ordering::SeqCst),
-        thread_tls_size: X86_RUNTIME.LINUX_THREAD_TLS_SIZES[thread_slot].load(Ordering::SeqCst),
-        clear_child_tid: X86_RUNTIME.LINUX_THREAD_CLEAR_CHILD_TIDS[thread_slot]
+        current_thread_slot: thread_slot as u8,
+        last_preempted_thread_slot: X86_RUNTIME
+            .LINUX_LAST_PREEMPTED_THREAD_SLOT
             .load(Ordering::SeqCst),
-        robust_list: X86_RUNTIME.LINUX_THREAD_ROBUST_LISTS[thread_slot].load(Ordering::SeqCst),
-        rseq_pointer: X86_RUNTIME.LINUX_THREAD_RSEQ_POINTERS[thread_slot].load(Ordering::SeqCst),
-        rseq_length: X86_RUNTIME.LINUX_THREAD_RSEQ_LENGTHS[thread_slot].load(Ordering::SeqCst),
-        rseq_signature: X86_RUNTIME.LINUX_THREAD_RSEQ_SIGNATURES[thread_slot]
-            .load(Ordering::SeqCst),
-        thread_signal_mask: X86_RUNTIME.LINUX_THREAD_SIGNAL_MASKS[thread_slot]
-            .load(Ordering::SeqCst),
-        thread_slot: thread_slot as u8,
-        tid: X86_RUNTIME.LINUX_THREAD_TIDS[thread_slot].load(Ordering::SeqCst),
         next_tid: X86_RUNTIME.LINUX_NEXT_TID.load(Ordering::SeqCst),
     })
 }
@@ -13311,11 +13851,32 @@ fn restore_linux_process_runtime_state(state: &LinuxProcessRuntimeState) {
         .store(state.parent_death_signal, Ordering::SeqCst);
     restore_linux_mmap_runtime_state(state.mmap);
     restore_linux_descriptor_runtime_state(&state.descriptors);
+    for (destination, value) in [
+        &X86_RUNTIME.ELF_PROBE_CODE_BASE,
+        &X86_RUNTIME.ELF_PROBE_CODE_SIZE,
+        &X86_RUNTIME.ELF_PROBE_LOADER_CODE_BASE,
+        &X86_RUNTIME.ELF_PROBE_LOADER_CODE_SIZE,
+        &X86_RUNTIME.ELF_PROBE_DATA,
+        &X86_RUNTIME.ELF_PROBE_DATA_SIZE,
+        &X86_RUNTIME.ELF_PROBE_RELRO,
+        &X86_RUNTIME.ELF_PROBE_RELRO_SIZE,
+    ]
+    .into_iter()
+    .zip(state.image_extents)
+    {
+        destination.store(value, Ordering::SeqCst);
+    }
     X86_RUNTIME.ELF_PROBE_BRK.store(state.brk, Ordering::SeqCst);
     X86_RUNTIME
         .ELF_PROBE_STACK_LOW
         .store(state.stack_low, Ordering::SeqCst);
     X86_RUNTIME.ELF_PROBE_CWD.store(state.cwd, Ordering::SeqCst);
+    X86_RUNTIME
+        .ELF_PROBE_ROOTFS_CWD
+        .store(state.rootfs_cwd, Ordering::SeqCst);
+    X86_RUNTIME
+        .ELF_PROBE_OVERLAY_CWD
+        .store(state.overlay_cwd, Ordering::SeqCst);
     X86_RUNTIME
         .ELF_PROBE_UMASK
         .store(state.umask, Ordering::SeqCst);
@@ -13400,25 +13961,6 @@ fn restore_linux_process_runtime_state(state: &LinuxProcessRuntimeState) {
         X86_RUNTIME.ELF_PROBE_SIGNAL_ACTION_MASKS[signal]
             .store(state.signal_action_masks[signal], Ordering::SeqCst);
     }
-    let slot = usize::from(state.thread_slot);
-    if slot < LINUX_THREAD_LIMIT {
-        X86_RUNTIME.LINUX_THREAD_POINTERS[slot].store(state.thread_pointer, Ordering::SeqCst);
-        X86_RUNTIME.LINUX_THREAD_TLS_EXTENTS[slot].store(state.thread_tls_extent, Ordering::SeqCst);
-        X86_RUNTIME.LINUX_THREAD_TLS_SIZES[slot].store(state.thread_tls_size, Ordering::SeqCst);
-        X86_RUNTIME.LINUX_THREAD_CLEAR_CHILD_TIDS[slot]
-            .store(state.clear_child_tid, Ordering::SeqCst);
-        X86_RUNTIME.LINUX_THREAD_ROBUST_LISTS[slot].store(state.robust_list, Ordering::SeqCst);
-        X86_RUNTIME.LINUX_THREAD_RSEQ_POINTERS[slot].store(state.rseq_pointer, Ordering::SeqCst);
-        X86_RUNTIME.LINUX_THREAD_RSEQ_LENGTHS[slot].store(state.rseq_length, Ordering::SeqCst);
-        X86_RUNTIME.LINUX_THREAD_RSEQ_SIGNATURES[slot]
-            .store(state.rseq_signature, Ordering::SeqCst);
-        X86_RUNTIME.LINUX_THREAD_SIGNAL_MASKS[slot]
-            .store(state.thread_signal_mask, Ordering::SeqCst);
-        X86_RUNTIME.LINUX_THREAD_TIDS[slot].store(state.tid, Ordering::SeqCst);
-    }
-    X86_RUNTIME
-        .ELF_PROBE_SIGNAL_MASK
-        .store(state.thread_signal_mask, Ordering::SeqCst);
     X86_RUNTIME
         .LINUX_NEXT_TID
         .store(state.next_tid, Ordering::SeqCst);
@@ -13833,7 +14375,7 @@ fn linux_runtime_brk(requested: u64) -> u64 {
     };
     if new_end > old_end {
         let start = old_end.max(initial_limit);
-        let pages = ((new_end - start) / PAGE_SIZE as u64) as usize;
+        let pages = (new_end.saturating_sub(start) / PAGE_SIZE as u64) as usize;
         let additional_pages = (0..pages)
             .filter(|page| {
                 !address_space::current_linux_runtime_page(start + (*page * PAGE_SIZE) as u64)
@@ -13854,7 +14396,7 @@ fn linux_runtime_brk(requested: u64) -> u64 {
         }
     } else if new_end < old_end {
         let start = new_end.max(initial_limit);
-        let pages = ((old_end - start) / PAGE_SIZE as u64) as usize;
+        let pages = (old_end.saturating_sub(start) / PAGE_SIZE as u64) as usize;
         for page in 0..pages {
             if !release_linux_runtime_page(address_space::remove_current_linux_runtime_page(
                 start + (page * PAGE_SIZE) as u64,
@@ -16097,7 +16639,7 @@ fn verify_linux_filesystem_statistics() -> bool {
     const RAMFS_MAGIC: u64 = 0x8584_58f6;
     const PROC_SUPER_MAGIC: u64 = 0x9fa0;
     const ANON_INODE_FS_MAGIC: u64 = 0x0904_1934;
-    const ROOT_FLAGS: u64 = 32 | 1 | 2 | 4;
+    const ROOT_FLAGS: u64 = 32 | 2 | 4;
     const PROC_FLAGS: u64 = 32 | 2 | 4 | 8 | 4096;
 
     let mapping = linux_runtime_mmap(
@@ -16122,7 +16664,11 @@ fn verify_linux_filesystem_statistics() -> bool {
         && copy_from_linux_user(mapping + 128, &mut stat)
         && u64::from_ne_bytes(stat[..8].try_into().unwrap()) == RAMFS_MAGIC
         && u64::from_ne_bytes(stat[8..16].try_into().unwrap()) == PAGE_SIZE as u64
-        && stat[16..56] == [0; 40]
+        && u64::from_ne_bytes(stat[16..24].try_into().unwrap()) != 0
+        && u64::from_ne_bytes(stat[24..32].try_into().unwrap())
+            <= u64::from_ne_bytes(stat[16..24].try_into().unwrap())
+        && stat[24..32] == stat[32..40]
+        && stat[40..56] == [0; 16]
         && u64::from_ne_bytes(stat[56..64].try_into().unwrap()) == 1
         && u64::from_ne_bytes(stat[64..72].try_into().unwrap()) == 255
         && u64::from_ne_bytes(stat[72..80].try_into().unwrap()) == PAGE_SIZE as u64
@@ -22717,6 +23263,9 @@ fn linux_rootfs_execve_source(
     };
     let mut replacement_index = 0;
     let pid = current_linux_process_pid();
+    let release_parent_on_exec = X86_RUNTIME
+        .LINUX_PROCESS_RELEASE_PARENT_ON_EXEC
+        .load(Ordering::SeqCst);
     let prepared_frame_references = linux_process::prepare_live_other_process_frame_references(pid);
     for segment_index in 0..plan.segment_count() {
         let Some(segment) = plan.segment(segment_index) else {
@@ -22825,11 +23374,14 @@ fn linux_rootfs_execve_source(
                 );
             }
             if let Some(mapping) = mapping {
-                let referenced = if prepared_frame_references {
-                    linux_process::prepared_live_frame_referenced_by_other_process(mapping.frame)
-                } else {
-                    linux_process::live_mapping_referenced_by_other_process(pid, mapping.frame)
-                };
+                let referenced = release_parent_on_exec
+                    || if prepared_frame_references {
+                        linux_process::prepared_live_frame_referenced_by_other_process(
+                            mapping.frame,
+                        )
+                    } else {
+                        linux_process::live_mapping_referenced_by_other_process(pid, mapping.frame)
+                    };
                 if !referenced
                     && memory::frame_leases_releasable(memory::FrameOwner::KERNEL, &[mapping.frame])
                     && !memory::scrub_and_release_frames(
@@ -22963,7 +23515,8 @@ fn linux_rootfs_execve_source(
     if !address_space::release_current_linux_runtime_mappings_preserving(
         LINUX_RUNTIME_DYNAMIC_MMAP_BASE,
         |frame| {
-            crate::linux_file_cache::contains(frame)
+            release_parent_on_exec
+                || crate::linux_file_cache::contains(frame)
                 || if prepared_frame_references {
                     linux_process::prepared_live_frame_referenced_by_other_process(frame)
                 } else {
@@ -22982,6 +23535,35 @@ fn linux_rootfs_execve_source(
         serial_write("ginux: Linux exec TLS reset failed\r\n");
         return LINUX_ENOMEM;
     }
+    let Some(thread) = current_linux_thread_handle() else {
+        return LINUX_ESRCH;
+    };
+    let thread_slot = usize::from(thread.slot);
+    let Some(stack_end) = stack_page.checked_add(PAGE_SIZE as u64) else {
+        return LINUX_ENOMEM;
+    };
+    let Some(stack_size) = stack_end.checked_sub(stack_low as u64) else {
+        return LINUX_ENOEXEC;
+    };
+    X86_RUNTIME.LINUX_THREAD_POINTERS[thread_slot].store(0, Ordering::SeqCst);
+    X86_RUNTIME.LINUX_THREAD_TLS_EXTENTS[thread_slot].store(0, Ordering::SeqCst);
+    X86_RUNTIME.LINUX_THREAD_TLS_SIZES[thread_slot].store(0, Ordering::SeqCst);
+    X86_RUNTIME.LINUX_THREAD_STACK_BASES[thread_slot].store(stack_low as u64, Ordering::SeqCst);
+    X86_RUNTIME.LINUX_THREAD_STACK_SIZES[thread_slot].store(stack_size, Ordering::SeqCst);
+    if !save_linux_thread_return_context(
+        thread,
+        LinuxUserContext {
+            registers: LinuxSyscallFrame::ZERO,
+            rip: startup.initial_entry,
+            rsp: new_stack,
+            rflags: 0x202,
+            rax: 0,
+            fs_base: 0,
+        },
+    ) {
+        serial_write("ginux: Linux exec thread context reset failed\r\n");
+        return LINUX_ENOEXEC;
+    }
     if !reset_extended_user_state() {
         return LINUX_ENOMEM;
     }
@@ -22998,19 +23580,41 @@ fn linux_rootfs_execve_source(
         serial_write("\r\n");
         return LINUX_ENOEXEC;
     }
+    // Every tracked fork child must return to the kernel scheduler after a
+    // successful exec so execution can resume from the replacement image.
+    // CLONE_VM/vfork separately controls when the parent may resume; it does
+    // not determine whether the exec transition is reported.
     if X86_RUNTIME
-        .LINUX_PROCESS_RELEASE_PARENT_ON_EXEC
+        .LINUX_PROCESS_CHILD_EXEC_PID
         .load(Ordering::SeqCst)
+        == pid
     {
-        X86_RUNTIME
-            .LINUX_PROCESS_CHILD_EXEC_PID
-            .store(pid, Ordering::SeqCst);
         X86_RUNTIME
             .LINUX_PROCESS_CHILD_EXECUTED
             .store(true, Ordering::SeqCst);
     }
     if !refresh_linux_vvar() {
         return LINUX_ENOMEM;
+    }
+    let entry_page = startup.initial_entry & !(PAGE_SIZE as u64 - 1);
+    let entry_mapping = address_space::current_linux_active_mapping(entry_page);
+    let registered_entry = linux_process::live_process_mapping(pid, entry_page as usize);
+    if entry_mapping.is_none()
+        || registered_entry.is_none()
+        || entry_mapping.map(|mapping| mapping.frame)
+            != registered_entry.map(|mapping| mapping.frame)
+        || entry_mapping.is_some_and(|mapping| !mapping.executable)
+    {
+        serial_write("ginux: Linux exec entry mapping mismatch pid/page/hardware/registry: ");
+        serial_write_u64(u64::from(pid));
+        serial_write("/");
+        serial_write_u64(entry_page);
+        serial_write("/");
+        serial_write_u64(entry_mapping.map_or(0, |mapping| mapping.frame.address()));
+        serial_write("/");
+        serial_write_u64(registered_entry.map_or(0, |mapping| mapping.frame.address()));
+        serial_write("\r\n");
+        return LINUX_ENOEXEC;
     }
     0
 }
@@ -24198,21 +24802,6 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64, mode: u64) -> u64
         Ok(length) => length,
         Err(error) => return error,
     };
-    if let Some(descriptor_bytes) = path[..path_length].strip_prefix(b"/proc/self/fd/") {
-        let Some(descriptor) = descriptor_bytes.iter().try_fold(0_u64, |value, byte| {
-            byte.is_ascii_digit()
-                .then_some(value.checked_mul(10)?.checked_add(u64::from(byte - b'0'))?)
-        }) else {
-            return LINUX_ENOENT;
-        };
-        let mut resolved = [0_u8; crate::linux_overlay::PATH_CAPACITY];
-        let Some(resolved_length) = linux_descriptor_path(descriptor, &mut resolved) else {
-            return LINUX_ENOENT;
-        };
-        path[..resolved_length].copy_from_slice(&resolved[..resolved_length]);
-        path_length = resolved_length;
-    }
-    let path = &path[..path_length];
     let access = flags & 3;
     if access == 3
         || flags
@@ -24234,6 +24823,54 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64, mode: u64) -> u64
     {
         return LINUX_EINVAL;
     }
+    if let Some(descriptor_bytes) = path[..path_length].strip_prefix(b"/proc/self/fd/") {
+        let Some(descriptor) = descriptor_bytes.iter().try_fold(0_u64, |value, byte| {
+            byte.is_ascii_digit()
+                .then_some(value.checked_mul(10)?.checked_add(u64::from(byte - b'0'))?)
+        }) else {
+            return LINUX_ENOENT;
+        };
+        if linux_overlay_descriptor_handle(descriptor).is_some() {
+            let reopened = linux_device_dup_at_least(descriptor, 0, flags & LINUX_O_CLOEXEC != 0);
+            if reopened >= LINUX_RETURN_TO_KERNEL {
+                return reopened;
+            }
+            let state = linux_device_descriptor(reopened);
+            let reopened_access = (access + 1) as u16;
+            if reopened < LINUX_AUX_DESCRIPTOR_FIRST {
+                X86_RUNTIME.ELF_PROBE_STDIO_DEVICE_DESCRIPTORS[reopened as usize]
+                    .store((state & !3) | reopened_access, Ordering::SeqCst);
+                X86_RUNTIME.ELF_PROBE_STDIO_SOCKET_FLAGS[reopened as usize].store(
+                    (flags & (LINUX_O_APPEND | LINUX_O_NONBLOCK | LINUX_O_PATH)) as u32,
+                    Ordering::SeqCst,
+                );
+            } else {
+                let index = (reopened - LINUX_AUX_DESCRIPTOR_FIRST) as usize;
+                X86_RUNTIME.ELF_PROBE_DEVICE_DESCRIPTORS[index]
+                    .store((state & !3) | reopened_access, Ordering::SeqCst);
+                X86_RUNTIME.ELF_PROBE_SOCKET_FLAGS[index].store(
+                    (flags & (LINUX_O_APPEND | LINUX_O_NONBLOCK | LINUX_O_PATH)) as u32,
+                    Ordering::SeqCst,
+                );
+            }
+            if let Some(id) = linux_descriptor_open_file_id_cell(reopened) {
+                id.store(0, Ordering::SeqCst);
+            }
+            linux_legacy_descriptor_offset(reopened).store(0, Ordering::SeqCst);
+            if linux_descriptor_open_file_id(reopened).is_none() {
+                let _ = linux_descriptor_close(reopened);
+                return LINUX_EMFILE;
+            }
+            return reopened;
+        }
+        let mut resolved = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+        let Some(resolved_length) = linux_descriptor_path(descriptor, &mut resolved) else {
+            return LINUX_ENOENT;
+        };
+        path[..resolved_length].copy_from_slice(&resolved[..resolved_length]);
+        path_length = resolved_length;
+    }
+    let path = &path[..path_length];
     let tmp_path = path == b"/tmp/ginux-ready";
     let proc_fdinfo_target = linux_proc_fdinfo_target(path);
     let proc_dynamic_pid = linux_proc_numeric_file(path, true)
@@ -25972,6 +26609,18 @@ fn linux_timestamp_handle(
         let path_length = copy_linux_c_string(path_address, &mut path)?;
         if path_length == 0 && flags & LINUX_AT_EMPTY_PATH != 0 {
             linux_copy_up_descriptor(directory)?
+        } else if flags & LINUX_AT_SYMLINK_NOFOLLOW == 0 {
+            // Resolve the final component through the normal open path before
+            // copy-up. RPM commonly timestamps paths such as /etc/os-release
+            // whose image entry is a symlink; treating the link as an
+            // immutable lower-layer object incorrectly surfaced EROFS/ENOENT.
+            let descriptor = linux_openat(directory, path_address, LINUX_O_PATH, 0);
+            if descriptor >= LINUX_RETURN_TO_KERNEL {
+                return Err(descriptor);
+            }
+            let copied = linux_copy_up_descriptor(descriptor);
+            let _ = linux_descriptor_close(descriptor);
+            copied?
         } else {
             let mut canonical = [0_u8; crate::linux_overlay::PATH_CAPACITY];
             let length = linux_canonical_path_at(directory, &path[..path_length], &mut canonical)?;
@@ -25992,16 +26641,12 @@ fn linux_timestamp_handle(
                     crate::published_rootfs::EntryKind::Directory => {
                         crate::linux_overlay::create_directory(&canonical[..length], mode)
                     }
-                    crate::published_rootfs::EntryKind::Symlink => None,
+                    crate::published_rootfs::EntryKind::Symlink => {
+                        crate::linux_overlay::create_symlink(&canonical[..length], entry.link)
+                    }
                 };
                 let Some(handle) = created else {
-                    return Err(
-                        if entry.kind == crate::published_rootfs::EntryKind::Symlink {
-                            LINUX_EROFS
-                        } else {
-                            LINUX_ENOSPC
-                        },
-                    );
+                    return Err(LINUX_ENOSPC);
                 };
                 handle
             }
@@ -26929,6 +27574,7 @@ fn linux_socket_sendto(
 }
 
 fn linux_socket_recvfrom(
+    live: Option<(*mut LinuxSyscallFrame, LinuxUserContext, u64)>,
     descriptor: u64,
     address: u64,
     count: u64,
@@ -26955,6 +27601,32 @@ fn linux_socket_recvfrom(
     let wait_all = flags & MSG_WAITALL != 0;
     let result = if nonblocking {
         crate::linux_socket::recv_message(slot, &mut bytes[..length], peek_only)
+    } else if crate::linux_socket::kind(slot) == Some(crate::linux_socket::Kind::Unix)
+        && X86_RUNTIME.LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
+        && live.is_some()
+    {
+        let (output, caller, syscall) = live.unwrap();
+        let parent_pid = current_linux_process_pid();
+        loop {
+            match crate::linux_socket::recv_message(slot, &mut bytes[..length], peek_only) {
+                Err(crate::linux_socket::Error::WouldBlock) => {
+                    if let Some(child) = linux_process::live_running_child_pid(parent_pid) {
+                        if !refresh_live_linux_process_registry(caller)
+                            || !run_scheduled_linux_process(parent_pid, Some(child))
+                            || !restore_linux_process_live_return(output, parent_pid)
+                        {
+                            break Err(crate::linux_socket::Error::WouldBlock);
+                        }
+                        continue;
+                    }
+                    if parent_pid != 1 && restart_current_linux_process_syscall(caller, syscall) {
+                        return LINUX_RETURN_TO_KERNEL;
+                    }
+                    break Err(crate::linux_socket::Error::WouldBlock);
+                }
+                result => break result,
+            }
+        }
     } else {
         crate::linux_socket::recv_message_blocking(slot, &mut bytes[..length], peek_only, wait_all)
     };
@@ -27213,7 +27885,12 @@ fn linux_unix_inflight_limit_exceeded() -> bool {
     crate::linux_socket::unix_inflight_rights() > linux_nofile_soft_limit() as usize
 }
 
-fn linux_socket_recvmsg(descriptor: u64, message: u64, flags: u64) -> u64 {
+fn linux_socket_recvmsg(
+    live: Option<(*mut LinuxSyscallFrame, LinuxUserContext, u64)>,
+    descriptor: u64,
+    message: u64,
+    flags: u64,
+) -> u64 {
     const MSG_PEEK: u64 = 0x2;
     const MSG_TRUNC: u64 = 0x20;
     const MSG_DONTWAIT: u64 = 0x40;
@@ -27287,6 +27964,32 @@ fn linux_socket_recvmsg(descriptor: u64, message: u64, flags: u64) -> u64 {
     let wait_all = flags & MSG_WAITALL != 0;
     let result = if nonblocking {
         crate::linux_socket::recv_message(slot, &mut bytes[..capacity], peek_only)
+    } else if crate::linux_socket::kind(slot) == Some(crate::linux_socket::Kind::Unix)
+        && X86_RUNTIME.LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
+        && live.is_some()
+    {
+        let (output, caller, syscall) = live.unwrap();
+        let parent_pid = current_linux_process_pid();
+        loop {
+            match crate::linux_socket::recv_message(slot, &mut bytes[..capacity], peek_only) {
+                Err(crate::linux_socket::Error::WouldBlock) => {
+                    if let Some(child) = linux_process::live_running_child_pid(parent_pid) {
+                        if !refresh_live_linux_process_registry(caller)
+                            || !run_scheduled_linux_process(parent_pid, Some(child))
+                            || !restore_linux_process_live_return(output, parent_pid)
+                        {
+                            break Err(crate::linux_socket::Error::WouldBlock);
+                        }
+                        continue;
+                    }
+                    if parent_pid != 1 && restart_current_linux_process_syscall(caller, syscall) {
+                        return LINUX_RETURN_TO_KERNEL;
+                    }
+                    break Err(crate::linux_socket::Error::WouldBlock);
+                }
+                result => break result,
+            }
+        }
     } else {
         crate::linux_socket::recv_message_blocking(
             slot,
@@ -27548,7 +28251,7 @@ fn linux_socket_recvmmsg(
         };
         let receive_flags = (flags & MSG_DONTWAIT)
             | (u64::from(flags & MSG_WAITFORONE != 0 && completed != 0) * MSG_DONTWAIT);
-        let result = linux_socket_recvmsg(descriptor, message, receive_flags);
+        let result = linux_socket_recvmsg(None, descriptor, message, receive_flags);
         if result >= u64::MAX - 4095 {
             return if completed == 0 { result } else { completed };
         }
@@ -27893,7 +28596,7 @@ fn linux_descriptor_read(descriptor: u64, address: u64, count: u64) -> u64 {
         if device & LINUX_DEVICE_PIPE != 0 && device & 3 & LINUX_DESCRIPTOR_INPUT == 0 {
             return LINUX_EBADF;
         }
-        return linux_socket_recvfrom(descriptor, address, count, 0, 0, 0);
+        return linux_socket_recvfrom(None, descriptor, address, count, 0, 0, 0);
     }
     if let Some(result) = linux_eventfd_read(descriptor, address, count) {
         return result;
@@ -29239,7 +29942,20 @@ fn linux_descriptor_read_live_return(
     address: u64,
     count: u64,
 ) -> u64 {
-    let immediate = linux_descriptor_read(descriptor, address, count);
+    let immediate =
+        if linux_socket_slot(descriptor).is_some() && !linux_socket_nonblocking(descriptor) {
+            linux_socket_recvfrom(
+                Some((output, caller, LINUX_READ_SYSCALL)),
+                descriptor,
+                address,
+                count,
+                0,
+                0,
+                0,
+            )
+        } else {
+            linux_descriptor_read(descriptor, address, count)
+        };
     if X86_RUNTIME.LINUX_RUNTIME_MODE.load(Ordering::Acquire)
         && (u16::from(linux_console_descriptor(descriptor)) & LINUX_DESCRIPTOR_INPUT != 0
             || linux_device_descriptor(descriptor) & LINUX_DEVICE_CONSOLE != 0
@@ -30982,6 +31698,9 @@ fn run_scheduled_linux_process(parent_pid: u32, target_pid: Option<u32>) -> bool
         if let Some(state) = linux_process_runtime_state(selected.pid) {
             release_linux_descriptor_runtime_state(&state.descriptors);
             *state = LinuxProcessRuntimeState::EMPTY;
+        }
+        if let Some(threads) = linux_process_thread_runtime_state(selected.pid) {
+            *threads = [LinuxThreadRuntimeState::EMPTY; LINUX_THREAD_LIMIT];
         }
         discard_linux_process_extended_state(selected.pid);
         let scheduler_restored = parent.is_some_and(|dispatch| {
@@ -36438,7 +37157,6 @@ fn linux_statfs_data(kind: LinuxFilesystemKind) -> [u8; 120] {
     const PIPEFS_MAGIC: u64 = 0x5049_5045;
     const SOCKFS_MAGIC: u64 = 0x534f_434b;
     const ANON_INODE_FS_MAGIC: u64 = 0x0904_1934;
-    const ST_RDONLY: u64 = 1;
     const ST_NOSUID: u64 = 2;
     const ST_NODEV: u64 = 4;
     const ST_NOEXEC: u64 = 8;
@@ -36446,7 +37164,7 @@ fn linux_statfs_data(kind: LinuxFilesystemKind) -> [u8; 120] {
     const ST_RELATIME: u64 = 4096;
 
     let (magic, filesystem_id, flags): (u64, u64, u64) = match kind {
-        LinuxFilesystemKind::Root => (RAMFS_MAGIC, 1, ST_VALID | ST_RDONLY | ST_NOSUID | ST_NODEV),
+        LinuxFilesystemKind::Root => (RAMFS_MAGIC, 1, ST_VALID | ST_NOSUID | ST_NODEV),
         LinuxFilesystemKind::Proc => (
             PROC_SUPER_MAGIC,
             2,
@@ -36464,6 +37182,12 @@ fn linux_statfs_data(kind: LinuxFilesystemKind) -> [u8; 120] {
     let mut stat = [0_u8; 120];
     stat[0..8].copy_from_slice(&magic.to_ne_bytes());
     stat[8..16].copy_from_slice(&(PAGE_SIZE as u64).to_ne_bytes());
+    if kind == LinuxFilesystemKind::Root {
+        let (total_frames, free_frames) = memory::frame_counts().unwrap_or((0, 0));
+        stat[16..24].copy_from_slice(&total_frames.to_ne_bytes());
+        stat[24..32].copy_from_slice(&free_frames.to_ne_bytes());
+        stat[32..40].copy_from_slice(&free_frames.to_ne_bytes());
+    }
     stat[56..64].copy_from_slice(&filesystem_id.to_ne_bytes());
     stat[64..72].copy_from_slice(&(crate::linux_overlay::PATH_CAPACITY as u64 - 1).to_ne_bytes());
     stat[72..80].copy_from_slice(&(PAGE_SIZE as u64).to_ne_bytes());
@@ -41034,8 +41758,35 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
                 serial_write(" ");
             }
             serial_write("\r\n");
+            if let Some(mapping) = process_mapping {
+                serial_write("ginux: Linux fault registry writable/executable/shared/dontfork: ");
+                for value in [
+                    mapping.writable,
+                    mapping.executable,
+                    mapping.shared,
+                    mapping.dontfork,
+                ] {
+                    serial_write_u64(u64::from(value));
+                    serial_write(" ");
+                }
+                serial_write("\r\n");
+            }
         }
         let context = frame.context();
+        serial_write("ginux: Linux fault tid/fs: ");
+        serial_write_u64(current_linux_tid().map_or(0, u64::from));
+        serial_write(" ");
+        serial_write_u64(active_fs_base());
+        serial_write("\r\n");
+        let mut instruction = [0_u8; 16];
+        if copy_from_linux_user(context.rip, &mut instruction) {
+            serial_write("ginux: Linux fault instruction bytes:");
+            for byte in instruction {
+                serial_write(" ");
+                serial_write_u64(u64::from(byte));
+            }
+            serial_write("\r\n");
+        }
         serial_write("ginux: Linux user fault rax/rbx/rcx/rdx/rdi/rsi/rsp/rbp/r12/r13/r14/r15:");
         for value in [
             context.rax,

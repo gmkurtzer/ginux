@@ -22,7 +22,10 @@ const PROCESS_RAX_INDEX: usize = 0;
 const HOST_PROCESS_INSTANCE: usize = control_abi::DOMAIN_LIMIT;
 const PROCESS_INSTANCE_LIMIT: usize = control_abi::DOMAIN_LIMIT + 1;
 const PROCESS_INSTANCE_NONE: u8 = u8::MAX;
-const LIVE_FRAME_REFERENCE_SET_CAPACITY: usize = 32_768;
+// Keep the open-addressed reference set below a 50% load for one maximally
+// populated peer address space.  The set stores distinct physical frames, so
+// fork siblings do not multiply its occupancy.
+const LIVE_FRAME_REFERENCE_SET_CAPACITY: usize = 131_072;
 
 struct LiveForkScratch {
     child_mappings: [cpu::LinuxActiveImageMapping; PROCESS_PRIVATE_PAGE_LIMIT],
@@ -355,6 +358,10 @@ impl ProcessAddressSpace {
                 memory::frame_lease_is_runtime(mapping.frame)
                     || memory::frames_owned_by(memory::FrameOwner::KERNEL, &[mapping.frame])
             })
+    }
+
+    fn hierarchy_is_owned(&self) -> bool {
+        memory::frames_owned_by(memory::FrameOwner::KERNEL, self.hierarchy())
     }
 
     fn is_live(&self) -> bool {
@@ -812,7 +819,11 @@ impl ProcessTable {
             .fork_execution_stage
             .store(1132, Ordering::Release);
         if parent.state != ProcessState::Running
-            || !parent_space.is_owned()
+            || if share_vm {
+                !parent_space.hierarchy_is_owned()
+            } else {
+                !parent_space.is_owned()
+            }
             || child_hierarchy.len() != parent_space.hierarchy().len()
             || (!child_pages.is_empty()
                 && child_pages.len()
@@ -931,6 +942,10 @@ impl ProcessTable {
             let attachments_inherited =
                 crate::linux_sysv_ipc::inherit_process_attachments(parent_handle.pid, handle.pid)
                     .is_ok();
+            process_runtime().fork_execution_stage.store(
+                if attachments_inherited { 11381 } else { 11380 },
+                Ordering::Release,
+            );
             if attachments_inherited
                 && self.commit_fork_inner(handle, child_space, parent_context.fork_child(), false)
             {
@@ -938,6 +953,19 @@ impl ProcessTable {
                     .fork_execution_stage
                     .store(1139, Ordering::Release);
                 return true;
+            }
+            if attachments_inherited {
+                process_runtime()
+                    .fork_execution_stage
+                    .store(11382, Ordering::Release);
+                crate::serial_write("ginux: runtime fork child context validation error: ");
+                crate::serial_write_u64(u64::from(
+                    parent_context
+                        .fork_child()
+                        .validation_error(&child_space)
+                        .unwrap_or(0),
+                ));
+                crate::serial_write("\r\n");
             }
             if attachments_inherited {
                 let _ = crate::linux_sysv_ipc::drop_process_attachments(handle.pid);
@@ -2184,6 +2212,136 @@ pub(crate) fn refresh_validated_runtime_process_registry(
 }
 
 #[allow(clippy::too_many_arguments)]
+pub(crate) fn refresh_live_process_context_from_syscall_entry(
+    pid: u32,
+    general: [u64; 15],
+    rip: u64,
+    rsp: u64,
+    rflags: u64,
+    fs_base: u64,
+) -> bool {
+    let Some(instruction_mapping) = address_space::current_linux_active_mapping(rip) else {
+        return false;
+    };
+    let Some(stack_address) = rsp.checked_sub(1) else {
+        return false;
+    };
+    let Some(stack_mapping) = address_space::current_linux_active_mapping(stack_address) else {
+        return false;
+    };
+    let Some(table) = live_process_table_mut() else {
+        return false;
+    };
+    let Some(handle) = table.handle_by_pid(pid) else {
+        return false;
+    };
+    let Some(process) = table.process_mut(handle) else {
+        return false;
+    };
+    let context = ProcessExecutionContext {
+        general,
+        rip,
+        rsp,
+        rflags,
+        fs_base,
+    };
+    if process.state != ProcessState::Running {
+        return false;
+    }
+    let Some(space) = process.address_space.as_mut() else {
+        return false;
+    };
+    let storage = unsafe {
+        &mut *process_runtime()
+            .address_space_storage
+            .get()
+            .cast::<ProcessAddressSpaceStorage>()
+            .add(
+                current_process_instance() * PROCESS_RUNTIME_LIMIT
+                    + usize::from(space.storage_slot),
+            )
+    };
+    let mut count = usize::from(space.mapping_count);
+    let context_mappings = [instruction_mapping, stack_mapping];
+    let missing = context_mappings
+        .iter()
+        .enumerate()
+        .filter(|(index, mapping)| {
+            context_mappings[..*index]
+                .iter()
+                .all(|prior| prior.address != mapping.address)
+                && storage.mappings[..count]
+                    .iter()
+                    .all(|existing| existing.address != mapping.address)
+        })
+        .count();
+    if count.saturating_add(missing) > storage.mappings.len() {
+        return false;
+    }
+    for mapping in context_mappings {
+        if let Some(existing) = storage.mappings[..count]
+            .iter_mut()
+            .find(|existing| existing.address == mapping.address)
+        {
+            let shared = existing.shared;
+            let dontfork = existing.dontfork;
+            *existing = mapping;
+            existing.shared = shared;
+            existing.dontfork = dontfork;
+        } else {
+            storage.mappings[count] = mapping;
+            count += 1;
+        }
+    }
+    space.mapping_count = count as u16;
+    if !context.is_valid(space) {
+        return false;
+    }
+    process.context = Some(context);
+    true
+}
+
+pub(crate) fn refresh_live_process_hierarchy(pid: u32, hierarchy: &[memory::FrameLease]) -> bool {
+    let Some(table) = live_process_table_mut() else {
+        return false;
+    };
+    let Some(handle) = table.handle_by_pid(pid) else {
+        return false;
+    };
+    let Some(space) = table
+        .process(handle)
+        .and_then(|process| process.address_space)
+    else {
+        return false;
+    };
+    if !(4..=PROCESS_HIERARCHY_LIMIT).contains(&hierarchy.len())
+        || !memory::frames_owned_by(memory::FrameOwner::KERNEL, hierarchy)
+    {
+        return false;
+    }
+    let storage = unsafe {
+        &mut *process_runtime()
+            .address_space_storage
+            .get()
+            .cast::<ProcessAddressSpaceStorage>()
+            .add(
+                current_process_instance() * PROCESS_RUNTIME_LIMIT
+                    + usize::from(space.storage_slot),
+            )
+    };
+    storage.hierarchy[..hierarchy.len()].copy_from_slice(hierarchy);
+    let Some(process) = table.process_mut(handle) else {
+        return false;
+    };
+    let Some(mut updated) = process.address_space else {
+        return false;
+    };
+    updated.hierarchy_count = hierarchy.len() as u16;
+    process.address_space = Some(updated);
+    true
+}
+
+#[allow(clippy::too_many_arguments)]
 fn refresh_live_process_registry_inner(
     pid: u32,
     snapshot: &cpu::LinuxProcessAddressSpaceSnapshot,
@@ -2546,6 +2704,28 @@ pub(crate) fn live_running_child_pid(parent_pid: u32) -> Option<u32> {
         .iter()
         .flatten()
         .find(|process| process.parent == Some(parent) && process.state == ProcessState::Running)
+        .map(|process| process.handle.pid)
+}
+
+pub(crate) fn live_running_child_wait_pid(parent_pid: u32, selector: i32) -> Option<u32> {
+    let table = live_process_table_mut()?;
+    let parent = table.handle_by_pid(parent_pid)?;
+    let parent_group = table.process(parent)?.process_group;
+    table
+        .processes
+        .iter()
+        .flatten()
+        .find(|process| {
+            process.parent == Some(parent)
+                && process.state == ProcessState::Running
+                && match selector {
+                    -1 => true,
+                    0 => process.process_group == parent_group,
+                    1..=i32::MAX => process.handle.pid == selector as u32,
+                    i32::MIN => false,
+                    _ => process.process_group == selector.unsigned_abs(),
+                }
+        })
         .map(|process| process.handle.pid)
 }
 
@@ -3086,7 +3266,38 @@ pub(crate) fn begin_live_fork(
             .store(104, Ordering::Release);
         return None;
     };
-    if parent.state != ProcessState::Running || !parent_space.is_owned() {
+    let parent_space_owned = if share_vm {
+        parent_space.hierarchy_is_owned()
+    } else {
+        parent_space.is_owned()
+    };
+    if parent.state != ProcessState::Running || !parent_space_owned {
+        crate::serial_write("ginux: fork parent ownership pid/state/hierarchy/mappings: ");
+        crate::serial_write_u64(u64::from(parent_pid));
+        crate::serial_write(" ");
+        crate::serial_write_u64(u64::from(parent.state == ProcessState::Running));
+        crate::serial_write(" ");
+        crate::serial_write_u64(u64::from(parent_space.hierarchy_is_owned()));
+        crate::serial_write(" ");
+        crate::serial_write_u64(parent_space.mappings().len() as u64);
+        crate::serial_write("\r\n");
+        for mapping in parent_space
+            .mappings()
+            .iter()
+            .filter(|mapping| {
+                !memory::frame_lease_is_runtime(mapping.frame)
+                    && !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[mapping.frame])
+            })
+            .take(4)
+        {
+            crate::serial_write("ginux: fork parent unowned mapping address/frame/generation: ");
+            crate::serial_write_u64(mapping.address as u64);
+            crate::serial_write(" ");
+            crate::serial_write_u64(mapping.frame.address());
+            crate::serial_write(" ");
+            crate::serial_write_u64(u64::from(mapping.frame.generation()));
+            crate::serial_write("\r\n");
+        }
         process_runtime().fork_execution_stage.store(
             if parent.state != ProcessState::Running {
                 105

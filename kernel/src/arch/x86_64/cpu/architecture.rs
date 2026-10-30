@@ -4,8 +4,8 @@ use super::{
     ginux_exception_entries, read_msr, write_msr, BOOT_CPU_INDEX, CPU_ENTRY_STATE_LIMIT,
     CPU_KERNEL_STACK_STORAGE_SIZE, CPU_KERNEL_STACK_TOP_OFFSET, DOUBLE_FAULT_IST,
     EXCEPTION_STACK_STORAGE_SIZE, EXCEPTION_STACK_TOP_OFFSET, GS_BASE_MSR, IST_STACK_STORAGE_SIZE,
-    IST_STACK_TOP_OFFSET, KERNEL_CODE_SELECTOR, KERNEL_DATA_SELECTOR, MACHINE_CHECK_IST, NMI_IST,
-    SYSCALL_VECTOR, TSS_SELECTOR,
+    IST_STACK_TOP_OFFSET, KERNEL_CODE_SELECTOR, KERNEL_DATA_SELECTOR, KERNEL_GS_BASE_MSR,
+    MACHINE_CHECK_IST, NMI_IST, SYSCALL_VECTOR, TSS_SELECTOR,
 };
 
 #[derive(Clone, Copy)]
@@ -181,6 +181,10 @@ pub(crate) fn install_for_cpu(cpu: usize) -> bool {
             .add(cpu);
         entry_state.write(CpuEntryState::EMPTY);
         write_msr(GS_BASE_MSR, entry_state as u64);
+        // Ring 3 begins with the architectural user GS base.  Linux syscall
+        // and user-fault entry use SWAPGS to recover this CPU's private entry
+        // state without exposing it through ordinary userspace GS accesses.
+        write_msr(KERNEL_GS_BASE_MSR, 0);
         install_gdt_and_tss(cpu);
         install_idt(cpu);
     }

@@ -7,9 +7,10 @@ use core::{
 };
 
 use super::{
-    active_container_slot, current_container_slot, CPUID_AVX, CPUID_EXTENDED_STATE, CPUID_SSE,
-    CPUID_XSAVE, CPU_ARCHITECTURE, CR0_EM, CR0_MP, CR0_NE, CR4_OSFXSR, CR4_OSXMMEXCPT, CR4_OSXSAVE,
-    LINUX_PROCESS_RUNTIME_INSTANCE_LIMIT, X86_MUTABLE_RUNTIME, X86_RUNTIME,
+    active_container_slot, current_container_slot, current_linux_thread_slot, CPUID_AVX,
+    CPUID_EXTENDED_STATE, CPUID_SSE, CPUID_XSAVE, CPU_ARCHITECTURE, CR0_EM, CR0_MP, CR0_NE,
+    CR4_OSFXSR, CR4_OSXMMEXCPT, CR4_OSXSAVE, LINUX_PROCESS_RUNTIME_INSTANCE_LIMIT,
+    LINUX_THREAD_LIMIT, X86_MUTABLE_RUNTIME, X86_RUNTIME,
 };
 use crate::{control_abi, linux_process};
 
@@ -147,22 +148,23 @@ fn linux_process_extended_state_index(pid: u32) -> Option<(usize, usize)> {
         .then_some((instance, slot))
 }
 
-pub(super) fn save_linux_process_extended_state(pid: u32) -> bool {
+fn linux_thread_extended_state_index(pid: u32, thread: usize) -> Option<(usize, usize, usize)> {
+    let (instance, process) = linux_process_extended_state_index(pid)?;
+    (thread < LINUX_THREAD_LIMIT).then_some((instance, process, thread))
+}
+
+fn save_linux_thread_extended_state(pid: u32, thread: usize) -> bool {
     if !CPU_ARCHITECTURE
         .extended_user_state_enabled
         .load(Ordering::Acquire)
     {
         return true;
     }
-    let Some((instance, slot)) = linux_process_extended_state_index(pid) else {
+    let Some((instance, process, thread)) = linux_thread_extended_state_index(pid, thread) else {
         return false;
     };
     let state = unsafe {
-        X86_MUTABLE_RUNTIME
-            .process_extended_states
-            .get()
-            .cast::<ExtendedState>()
-            .add(instance * linux_process::PROCESS_RUNTIME_LIMIT + slot)
+        &mut (*X86_MUTABLE_RUNTIME.process_extended_states.get())[instance][process][thread]
     };
     unsafe {
         asm!(
@@ -172,32 +174,28 @@ pub(super) fn save_linux_process_extended_state(pid: u32) -> bool {
             in("edx") 0_u32,
             options(nostack)
         );
-        (*X86_MUTABLE_RUNTIME.process_extended_state_valid.get())[instance][slot] = true;
+        (*X86_MUTABLE_RUNTIME.process_extended_state_valid.get())[instance][process][thread] = true;
     }
     true
 }
 
-pub(super) fn restore_linux_process_extended_state(pid: u32) -> bool {
+pub(super) fn restore_linux_thread_extended_state(pid: u32, thread: usize) -> bool {
     if !CPU_ARCHITECTURE
         .extended_user_state_enabled
         .load(Ordering::Acquire)
     {
         return true;
     }
-    let Some((instance, slot)) = linux_process_extended_state_index(pid) else {
+    let Some((instance, process, thread)) = linux_thread_extended_state_index(pid, thread) else {
         return false;
     };
-    if !unsafe { (*X86_MUTABLE_RUNTIME.process_extended_state_valid.get())[instance][slot] } {
+    if !unsafe {
+        (*X86_MUTABLE_RUNTIME.process_extended_state_valid.get())[instance][process][thread]
+    } {
         return reset_extended_user_state();
     }
-    let state = unsafe {
-        X86_MUTABLE_RUNTIME
-            .process_extended_states
-            .get()
-            .cast_const()
-            .cast::<ExtendedState>()
-            .add(instance * linux_process::PROCESS_RUNTIME_LIMIT + slot)
-    };
+    let state =
+        unsafe { &(*X86_MUTABLE_RUNTIME.process_extended_states.get())[instance][process][thread] };
     unsafe {
         asm!(
             "xrstor64 [{}]",
@@ -208,6 +206,72 @@ pub(super) fn restore_linux_process_extended_state(pid: u32) -> bool {
         );
     }
     true
+}
+
+pub(super) fn save_linux_process_extended_state(pid: u32) -> bool {
+    if !CPU_ARCHITECTURE
+        .extended_user_state_enabled
+        .load(Ordering::Acquire)
+    {
+        return true;
+    }
+    let Some(thread) = current_linux_thread_slot() else {
+        // A process that has retired its final thread has no live architectural
+        // state to preserve during terminal lifecycle cleanup.
+        return true;
+    };
+    save_linux_thread_extended_state(pid, thread)
+}
+
+pub(super) fn restore_linux_process_extended_state(pid: u32) -> bool {
+    if !CPU_ARCHITECTURE
+        .extended_user_state_enabled
+        .load(Ordering::Acquire)
+    {
+        return true;
+    }
+    let Some(thread) = current_linux_thread_slot() else {
+        return false;
+    };
+    restore_linux_thread_extended_state(pid, thread)
+}
+
+pub(super) fn switch_linux_thread_extended_state(from: usize, to: usize) -> bool {
+    let pid = super::current_linux_process_pid();
+    save_linux_thread_extended_state(pid, from) && restore_linux_thread_extended_state(pid, to)
+}
+
+pub(super) fn initialize_linux_thread_extended_state(thread: usize) -> bool {
+    let Some(parent) = current_linux_thread_slot() else {
+        return false;
+    };
+    let pid = super::current_linux_process_pid();
+    if !save_linux_thread_extended_state(pid, parent) {
+        return false;
+    }
+    let (Some((instance, process, parent)), Some((_, _, thread))) = (
+        linux_thread_extended_state_index(pid, parent),
+        linux_thread_extended_state_index(pid, thread),
+    ) else {
+        return false;
+    };
+    unsafe {
+        (*X86_MUTABLE_RUNTIME.process_extended_states.get())[instance][process][thread] =
+            (*X86_MUTABLE_RUNTIME.process_extended_states.get())[instance][process][parent];
+        (*X86_MUTABLE_RUNTIME.process_extended_state_valid.get())[instance][process][thread] =
+            (*X86_MUTABLE_RUNTIME.process_extended_state_valid.get())[instance][process][parent];
+    }
+    true
+}
+
+pub(super) fn discard_linux_thread_extended_state(thread: usize) {
+    let pid = super::current_linux_process_pid();
+    if let Some((instance, process, thread)) = linux_thread_extended_state_index(pid, thread) {
+        unsafe {
+            (*X86_MUTABLE_RUNTIME.process_extended_state_valid.get())[instance][process][thread] =
+                false;
+        }
+    }
 }
 
 pub(super) fn clone_linux_process_extended_state(parent: u32, child: u32) -> bool {
@@ -232,7 +296,8 @@ pub(super) fn clone_linux_process_extended_state(parent: u32, child: u32) -> boo
 pub(super) fn discard_linux_process_extended_state(pid: u32) {
     if let Some((instance, slot)) = linux_process_extended_state_index(pid) {
         unsafe {
-            (*X86_MUTABLE_RUNTIME.process_extended_state_valid.get())[instance][slot] = false
+            (*X86_MUTABLE_RUNTIME.process_extended_state_valid.get())[instance][slot] =
+                [false; LINUX_THREAD_LIMIT]
         };
     }
 }

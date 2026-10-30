@@ -640,7 +640,29 @@ pub(crate) fn run_linux_init(init: &[u8]) -> LinuxProcessOutcome {
         crate::serial_write_u64(u64::from(stage));
         crate::serial_write_bytes(b"\r\n");
     }
-    if valid && runtime_scrubbed && memory::release_frames(memory::FrameOwner::KERNEL, frames) {
+    let owned_released = valid
+        && runtime_scrubbed
+        && memory::release_frames(
+            memory::FrameOwner::KERNEL,
+            // Runtime teardown releases the initial stack, heap, vvar, and
+            // vDSO mappings.  The bootstrap page-table hierarchy remains
+            // owned by this launcher and is released here.
+            [
+                frames[0], frames[1], frames[2], frames[3], frames[4], frames[5],
+            ],
+        );
+    if !owned_released {
+        crate::serial_write_bytes(
+            b"ginux: Linux init teardown valid/runtime-scrubbed/owned-released: ",
+        );
+        crate::serial_write_u64(u64::from(valid));
+        crate::serial_write_bytes(b"/");
+        crate::serial_write_u64(u64::from(runtime_scrubbed));
+        crate::serial_write_bytes(b"/");
+        crate::serial_write_u64(u64::from(owned_released));
+        crate::serial_write_bytes(b"\r\n");
+    }
+    if owned_released {
         let (status, syscall) = cpu::linux_runtime_diagnostics();
         if status.is_some_and(|status| status != 0) || syscall.is_some() {
             crate::serial_write_bytes(b"ginux: Linux init diagnostics: exit=");
@@ -3832,6 +3854,50 @@ fn prepare_linux_hierarchy_replacement(
             }))
 }
 
+fn clone_shared_linux_hierarchy(
+    old_hierarchy: &[memory::FrameLease],
+    new_hierarchy: &[memory::FrameLease],
+) -> bool {
+    if old_hierarchy.len() != new_hierarchy.len() || old_hierarchy.is_empty() {
+        return false;
+    }
+    for (old, new) in old_hierarchy
+        .iter()
+        .copied()
+        .zip(new_hierarchy.iter().copied())
+    {
+        let (Some(source), Some(destination)) = (
+            mapped_frame::<u64>(old.address()),
+            mapped_frame::<u64>(new.address()),
+        ) else {
+            return false;
+        };
+        unsafe { core::ptr::copy_nonoverlapping(source, destination, ENTRY_COUNT) };
+    }
+    for frame in new_hierarchy.iter().copied() {
+        let Some(entries) = mapped_frame::<u64>(frame.address()) else {
+            return false;
+        };
+        for index in 0..ENTRY_COUNT {
+            let value = unsafe { entries.add(index).read() };
+            if value & PRESENT == 0 {
+                continue;
+            }
+            if let Some(position) = old_hierarchy
+                .iter()
+                .position(|old| old.address() == value & ADDRESS_MASK)
+            {
+                unsafe {
+                    entries
+                        .add(index)
+                        .write((value & !ADDRESS_MASK) | new_hierarchy[position].address());
+                }
+            }
+        }
+    }
+    true
+}
+
 pub(crate) fn clone_linux_process_hierarchy(
     parent_mappings: &[cpu::LinuxActiveImageMapping],
     parent_hierarchy: &[memory::FrameLease],
@@ -3974,14 +4040,18 @@ fn clone_linux_process_hierarchy_inner(
         child_mapping_count += 1;
     }
     private_index == child_pages.len()
-        && prepare_linux_hierarchy_replacement(
-            &child_mappings[..child_mapping_count],
-            parent_mappings,
-            parent_hierarchy,
-            child_hierarchy,
-            false,
-            validate_parent_tree,
-        )
+        && if share_vm {
+            clone_shared_linux_hierarchy(parent_hierarchy, child_hierarchy)
+        } else {
+            prepare_linux_hierarchy_replacement(
+                &child_mappings[..child_mapping_count],
+                parent_mappings,
+                parent_hierarchy,
+                child_hierarchy,
+                false,
+                validate_parent_tree,
+            )
+        }
         && (share_vm
             || !child_pages.is_empty()
             || install_linux_fork_cow(parent_mappings, parent_hierarchy[0], child_hierarchy[0]))
@@ -4208,6 +4278,63 @@ pub(crate) fn complete_current_linux_process_snapshot(
         mapping_count,
         initial_mapping_count,
     )
+}
+
+pub(crate) fn current_linux_process_hierarchy(
+    hierarchy: &mut [memory::FrameLease; cpu::LINUX_PROCESS_HIERARCHY_LIMIT],
+) -> Option<usize> {
+    #[derive(Clone, Copy)]
+    struct Cursor {
+        table: u64,
+        next_index: usize,
+    }
+    const EMPTY: Cursor = Cursor {
+        table: 0,
+        next_index: 0,
+    };
+    let root_address = current_root();
+    let root = memory::live_frame_lease(memory::FrameOwner::KERNEL, root_address)
+        .or_else(|| memory::FrameLease::from_parts(root_address, 1))?;
+    hierarchy.fill(memory::FrameLease::EMPTY);
+    hierarchy[0] = root;
+    let mut count = 1;
+    let mut cursors = [EMPTY; 4];
+    cursors[0].table = root_address;
+    let mut level = 0;
+    loop {
+        if cursors[level].next_index == ENTRY_COUNT {
+            if level == 0 {
+                return Some(count);
+            }
+            level -= 1;
+            continue;
+        }
+        let index = cursors[level].next_index;
+        cursors[level].next_index += 1;
+        let entries = mapped_frame::<u64>(cursors[level].table)?;
+        let value = unsafe { entries.add(index).read() };
+        if value & (PRESENT | USER) != PRESENT | USER || level == 3 {
+            continue;
+        }
+        if value & LARGE_PAGE != 0 {
+            return None;
+        }
+        let child = value & ADDRESS_MASK;
+        if !hierarchy[..count]
+            .iter()
+            .any(|frame| frame.address() == child)
+        {
+            let frame = memory::live_frame_lease(memory::FrameOwner::KERNEL, child)
+                .or_else(|| memory::FrameLease::from_parts(child, 1))?;
+            *hierarchy.get_mut(count)? = frame;
+            count += 1;
+        }
+        level += 1;
+        cursors[level] = Cursor {
+            table: child,
+            next_index: 0,
+        };
+    }
 }
 
 fn linux_process_hierarchy_frame_is_empty(frame: memory::FrameLease) -> bool {
@@ -5140,6 +5267,38 @@ pub(crate) fn current_linux_mapping_frame_address(address: u64) -> Option<u64> {
     let entry = current_linux_leaf(address)?;
     let value = unsafe { entry.read() };
     (value & (PRESENT | USER) == PRESENT | USER).then_some(value & ADDRESS_MASK)
+}
+
+pub(crate) fn current_linux_active_mapping(address: u64) -> Option<cpu::LinuxActiveImageMapping> {
+    let page = address & !(PAGE_SIZE as u64 - 1);
+    if address >= 1 << 47 {
+        return None;
+    }
+    let entry = current_linux_leaf(page)?;
+    let value = unsafe { entry.read() };
+    if value & (PRESENT | USER) != PRESENT | USER {
+        return None;
+    }
+    let writable = value & (WRITABLE | LINUX_RUNTIME_COW) != 0;
+    let executable = value & NO_EXECUTE == 0;
+    if writable && executable {
+        return None;
+    }
+    let frame_address = value & ADDRESS_MASK;
+    let frame =
+        memory::live_frame_lease(memory::FrameOwner::KERNEL, frame_address).or_else(|| {
+            memory::FrameLease::from_parts(frame_address, 1)
+                .filter(|frame| memory::frame_lease_is_runtime(*frame))
+        })?;
+    let runtime = current_linux_runtime_page(page);
+    Some(cpu::LinuxActiveImageMapping {
+        address: page as usize,
+        frame,
+        writable,
+        executable,
+        shared: runtime.shared,
+        dontfork: runtime.dontfork,
+    })
 }
 
 pub(crate) fn current_linux_cow_page(address: u64) -> Option<memory::FrameLease> {

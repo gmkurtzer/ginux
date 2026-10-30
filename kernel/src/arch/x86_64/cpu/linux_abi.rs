@@ -741,7 +741,10 @@ pub(super) const LINUX_PROC_PID2_STATM: &[u8] = b"256 64 32 16 0 32 0\n";
 pub(crate) const LINUX_EXEC_MAPPING_LIMIT: usize = 8;
 pub(crate) const LINUX_ACTIVE_IMAGE_MAPPING_LIMIT: usize = 640;
 pub(crate) const LINUX_PROCESS_HIERARCHY_LIMIT: usize = 1024;
-pub(crate) const LINUX_PROCESS_MAPPING_LIMIT: usize = 40_960;
+// Process address-space records use a u16 count today. Use the complete
+// representable range so a package transaction can fork after mapping a large
+// userspace; the configured domain memory remains the actual resource bound.
+pub(crate) const LINUX_PROCESS_MAPPING_LIMIT: usize = u16::MAX as usize;
 pub(super) const LINUX_EXEC_VECTOR_LIMIT: usize = 32;
 pub(super) const LINUX_EXEC_STACK_SIZE: usize = PAGE_SIZE / 2;
 pub(super) const LINUX_PLATFORM: &[u8] = b"x86_64\0";
@@ -832,6 +835,7 @@ pub(super) const LINUX_SI_KERNEL: i32 = 0x80;
 pub(super) const LINUX_SEGV_MAPERR: i32 = 1;
 pub(super) const LINUX_SEGV_ACCERR: i32 = 2;
 pub(super) const LINUX_SA_SIGINFO: u64 = 0x0000_0004;
+pub(super) const LINUX_SA_RESTART: u64 = 0x1000_0000;
 pub(super) const LINUX_SA_RESTORER: u64 = 0x0400_0000;
 pub(super) const LINUX_SA_ONSTACK: u64 = 0x0800_0000;
 pub(super) const LINUX_SA_NODEFER: u64 = 0x4000_0000;

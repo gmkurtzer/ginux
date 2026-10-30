@@ -990,22 +990,13 @@ pub(crate) fn expire_linux_waits_from_timer(frame: &mut UserInterruptFrame) {
 }
 
 pub(super) fn linux_executable_user_address(address: u64) -> bool {
-    let code = X86_RUNTIME.ELF_PROBE_CODE_BASE.load(Ordering::SeqCst);
-    let code_end = code.saturating_add(X86_RUNTIME.ELF_PROBE_CODE_SIZE.load(Ordering::SeqCst));
-    let loader = X86_RUNTIME
-        .ELF_PROBE_LOADER_CODE_BASE
-        .load(Ordering::SeqCst);
-    let loader_end = loader.saturating_add(
-        X86_RUNTIME
-            .ELF_PROBE_LOADER_CODE_SIZE
-            .load(Ordering::SeqCst),
-    );
-    (code..code_end).contains(&address) || (loader..loader_end).contains(&address)
+    address_space::current_linux_address_executable(address)
 }
 
 pub(super) fn linux_signal_action_deliverable(handler: u64, flags: u64, restorer: u64) -> bool {
     let supported = LINUX_SA_SIGINFO
         | LINUX_SA_RESTORER
+        | LINUX_SA_RESTART
         | LINUX_SA_ONSTACK
         | LINUX_SA_NODEFER
         | LINUX_SA_RESETHAND;
@@ -1362,7 +1353,10 @@ pub(super) fn linux_target_signal_ignored(target: u32, signal: u64) -> bool {
         linux_process_runtime_state(target)
             .filter(|state| state.valid)
             .map_or((0, 0), |state| {
-                (state.signal_handlers[index], state.thread_signal_mask)
+                let mask = linux_process_thread_runtime_state(target)
+                    .and_then(|threads| threads.get(usize::from(state.current_thread_slot)))
+                    .map_or(0, |thread| thread.signal_mask);
+                (state.signal_handlers[index], mask)
             })
     };
     handler == 1
@@ -2014,14 +2008,16 @@ pub(super) fn linux_saved_thread_target(pid: u32, tid: u32) -> Option<LinuxThrea
     }
     let process_slot = linux_process::live_process_slot(pid)?;
     let state = linux_process_runtime_state(pid)?;
-    let thread_slot = usize::from(state.thread_slot);
-    (state.valid && state.tid == tid && thread_slot < LINUX_THREAD_LIMIT).then_some(
-        LinuxThreadSignalTarget::Saved {
-            pid,
-            process_slot,
-            thread_slot,
-        },
-    )
+    let thread_slot = state.valid.then(|| {
+        linux_process_thread_runtime_state(pid)?
+            .iter()
+            .position(|thread| thread.tid == tid)
+    })??;
+    Some(LinuxThreadSignalTarget::Saved {
+        pid,
+        process_slot,
+        thread_slot,
+    })
 }
 
 pub(super) fn linux_tgkill_target(
@@ -2423,19 +2419,6 @@ pub(super) fn linux_rt_sigreturn(output: *mut LinuxSyscallFrame, user_stack: u64
     // SAFETY: signal delivery serializes this context while interrupts remain
     // disabled; active is cleared before another delivery can publish state.
     let context = unsafe { X86_MUTABLE_RUNTIME.signal_context.get().cast_const().read() };
-    if X86_RUNTIME.LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
-        serial_write("ginux: signal return pid/stack/expected/rip/rsp: ");
-        serial_write_u64(u64::from(current_linux_process_pid()));
-        serial_write("/");
-        serial_write_u64(user_stack);
-        serial_write("/");
-        serial_write_u64(context.signal_stack.saturating_add(8));
-        serial_write("/");
-        serial_write_u64(context.rip);
-        serial_write("/");
-        serial_write_u64(context.rsp);
-        serial_write("\r\n");
-    }
     if context.signal_stack.checked_add(8) != Some(user_stack) {
         return LINUX_EINVAL;
     }

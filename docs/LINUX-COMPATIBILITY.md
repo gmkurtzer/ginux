@@ -216,14 +216,14 @@ then proves descriptor and overlay cleanup.
 Opaque file handles use an eight-byte generation-stable identity, allowing
 systemd to derive cgroup IDs without a size-discovery retry while retaining
 rename-stable `open_by_handle_at` behavior.
-`statfs` and `fstatfs` now follow Linux `simple_statfs` semantics instead of
-publishing fabricated fixed capacity values. The domain root and automatic
-proc mount report their RAMFS/proc magic, page block and fragment sizes,
-stable mount-local filesystem IDs, 255-byte name limit, and exact read-only,
-nosuid, nodev, noexec, relatime, and `ST_VALID` flags. Open pipe, socket, and
-anonymous-inode descriptors report their Linux pseudo-filesystem magic.
-Undefined capacity and inode fields remain zero, which preserves the root's
-elastic, no-artificial-cap contract. Boot verification covers root and proc
+`statfs` and `fstatfs` avoid fabricated fixed capacity values. The writable,
+elastic domain root reports current physical frame capacity and availability,
+while proc and the other pseudo-filesystems retain Linux-style undefined zero
+capacity. The domain root and automatic proc mount report their RAMFS/proc
+magic, page block and fragment sizes, stable mount-local filesystem IDs,
+255-byte name limit, and appropriate nosuid, nodev, noexec, relatime, and
+`ST_VALID` flags. Open pipe, socket, and anonymous-inode descriptors report
+their Linux pseudo-filesystem magic. Boot verification covers root and proc
 path queries (including systemd's trailing-slash `/proc/` probe), matching
 `fstatfs` results for `O_PATH` mount-root descriptors, anonymous descriptors,
 Linux 32-bit descriptor conversion, error ordering, and complete cleanup.
@@ -235,6 +235,10 @@ placeholder. `ustat` device IDs and `sysfs` option selectors follow their
 Linux 32-bit UAPI types; the verifier covers dirty upper register bits,
 zero-based filesystem indexes, complete output contents, invalid selectors,
 bad pointers, and Linux error ordering.
+RPM-based images that omit `/etc/rpm/platform` receive the standard
+architecture/personality value `x86_64-linux` in their domain-local overlay.
+This lets RPM select Linux packages while `uname` continues to identify the
+actual kernel as Ginux; an image-provided platform file is never replaced.
 Pipe and zero-copy boundaries convert `pipe2`, `splice`, `tee`, `vmsplice`, and
 `copy_file_range` descriptors and flag words from their Linux 32-bit types.
 Boot verification creates a close-on-exec pipe and exercises zero-length

@@ -175,6 +175,7 @@ pub(super) extern "sysv64" fn linux_syscall_handler(
             )
         }
         LINUX_RECVFROM_SYSCALL => linux_socket_recvfrom(
+            Some((registers, syscall_return, LINUX_RECVFROM_SYSCALL)),
             first_argument,
             buffer,
             count,
@@ -193,7 +194,12 @@ pub(super) extern "sysv64" fn linux_syscall_handler(
                 false,
             )
         }
-        LINUX_RECVMSG_SYSCALL => linux_socket_recvmsg(first_argument, buffer, count),
+        LINUX_RECVMSG_SYSCALL => linux_socket_recvmsg(
+            Some((registers, syscall_return, LINUX_RECVMSG_SYSCALL)),
+            first_argument,
+            buffer,
+            count,
+        ),
         LINUX_RECVMMSG_SYSCALL => {
             linux_socket_recvmmsg(first_argument, buffer, count, register(0), register(2))
         }
@@ -647,6 +653,7 @@ pub(super) extern "sysv64" fn linux_syscall_handler(
                     saved_registers.rdi & LINUX_CLONE_NEWNS != 0,
                     saved_registers.rdi & LINUX_CLONE_NEWUSER != 0,
                     0,
+                    saved_registers.rdi & LINUX_CLONE_VM != 0,
                     0,
                     0,
                     false,
@@ -703,9 +710,28 @@ pub(super) extern "sysv64" fn linux_syscall_handler(
                 result,
             )
         }
-        LINUX_FORK_SYSCALL | LINUX_VFORK_SYSCALL => {
-            linux_request_process_fork(runtime_mode, syscall_return, false, false, 0, 0, 0, false)
-        }
+        LINUX_FORK_SYSCALL => linux_request_process_fork(
+            runtime_mode,
+            syscall_return,
+            false,
+            false,
+            0,
+            false,
+            0,
+            0,
+            false,
+        ),
+        LINUX_VFORK_SYSCALL => linux_request_process_fork(
+            runtime_mode,
+            syscall_return,
+            false,
+            false,
+            0,
+            true,
+            0,
+            0,
+            false,
+        ),
         LINUX_EXECVE_SYSCALL => {
             if runtime_mode && !refresh_live_linux_process_registry(syscall_return) {
                 LINUX_EIO
@@ -832,15 +858,16 @@ pub(super) extern "sysv64" fn linux_syscall_handler(
             }
             1
         }
-        LINUX_SETGROUPS_SYSCALL => {
-            let Some(namespace) = current_linux_user_namespace() else {
-                return LINUX_ESRCH;
-            };
-            if linux_user::setgroups_allowed(namespace) {
-                LINUX_ENOSYS
-            } else {
-                LINUX_EPERM
-            }
+        LINUX_SETGROUPS_SYSCALL => linux_set_current_groups(first_argument, buffer),
+        LINUX_SETUID_SYSCALL
+        | LINUX_SETGID_SYSCALL
+        | LINUX_SETREUID_SYSCALL
+        | LINUX_SETREGID_SYSCALL
+        | LINUX_SETRESUID_SYSCALL
+        | LINUX_SETRESGID_SYSCALL
+        | LINUX_SETFSUID_SYSCALL
+        | LINUX_SETFSGID_SYSCALL => {
+            linux_set_current_identity(number, first_argument, buffer, count)
         }
         LINUX_GETRESUID_SYSCALL | LINUX_GETRESGID_SYSCALL => {
             let Some(credentials) = current_linux_credentials() else {
@@ -1240,7 +1267,14 @@ pub(super) extern "sysv64" fn linux_syscall_handler(
         LINUX_KCMP_SYSCALL => linux_kcmp(first_argument, buffer, count, register(0), register(2)),
         LINUX_CACHESTAT_SYSCALL => linux_cachestat(first_argument, buffer, count, register(0)),
         LINUX_MEMBARRIER_SYSCALL => linux_membarrier(first_argument, buffer, count),
-        LINUX_WAIT4_SYSCALL => linux_wait4(first_argument, buffer, count, register(0)),
+        LINUX_WAIT4_SYSCALL => linux_wait4_live(
+            registers,
+            first_argument,
+            buffer,
+            count,
+            register(0),
+            syscall_return,
+        ),
         LINUX_WAITID_SYSCALL => linux_waitid_live(
             registers,
             first_argument,
@@ -1446,7 +1480,7 @@ pub(super) extern "sysv64" fn linux_syscall_handler(
         X86_RUNTIME.LINUX_RUNTIME_SYSCALL_RESULT_TRACE[index].store(result, Ordering::SeqCst);
     }
     if runtime_mode && result == LINUX_ENOSYS {
-        let _ = X86_RUNTIME
+        let first = X86_RUNTIME
             .LINUX_RUNTIME_FIRST_UNSUPPORTED_SYSCALL
             .compare_exchange(u64::MAX, number, Ordering::SeqCst, Ordering::SeqCst);
         if let Some(word) = usize::try_from(number / 64)
@@ -1454,7 +1488,30 @@ pub(super) extern "sysv64" fn linux_syscall_handler(
             .filter(|word| *word < LINUX_RUNTIME_UNSUPPORTED_WORDS)
         {
             let bit = 1_u64 << (number % 64);
-            X86_RUNTIME.LINUX_RUNTIME_UNSUPPORTED_SYSCALLS[word].fetch_or(bit, Ordering::SeqCst);
+            let first_observation = X86_RUNTIME.LINUX_RUNTIME_UNSUPPORTED_SYSCALLS[word]
+                .fetch_or(bit, Ordering::SeqCst)
+                & bit
+                == 0;
+            if first_observation {
+                serial_write(if first.is_ok() {
+                    "ginux: first unsupported syscall number/arguments: "
+                } else {
+                    "ginux: unsupported syscall number/arguments: "
+                });
+                serial_write_u64(number);
+                for value in [
+                    first_argument,
+                    buffer,
+                    count,
+                    register(0),
+                    register(1),
+                    register(2),
+                ] {
+                    serial_write(" ");
+                    serial_write_u64(value);
+                }
+                serial_write("\r\n");
+            }
         }
     }
     if runtime_mode && result == LINUX_EINVAL {
