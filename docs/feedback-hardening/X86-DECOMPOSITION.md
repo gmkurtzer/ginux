@@ -81,9 +81,12 @@ baselines and compares them with the Gate 1 record.
 - The 1,480-line Linux syscall dispatcher moved to `cpu/linux_syscall.rs` as a
   policy-facing routing layer; the x86 `SYSCALL` entry and return assembly
   remains separate from that Linux decision surface.
+- Linux clock, time accounting, sleep, interval-timer, rusage, and sysinfo
+  mechanisms moved together to `cpu/linux_time.rs`.
 
-After these extractions, `cpu.rs` contains 45,557 lines,
+After these extractions, `cpu.rs` contains 44,937 lines,
 `cpu/architecture.rs` contains 423 lines, `cpu/execution.rs` contains 238
 lines, `cpu/linux_abi.rs` contains 868 lines, and `cpu/linux_syscall.rs`
-contains 1,483 lines. These measurements record progress only; cohesive
-responsibility and dependency direction remain the gate criteria.
+contains 1,483 lines. `cpu/linux_time.rs` contains 630 lines. These
+measurements record progress only; cohesive responsibility and dependency
+direction remain the gate criteria.

@@ -12,10 +12,8 @@
   controller, device, timer, paging, physical-memory, and per-CPU architecture
   state behind explicit owner roots and passed fresh static, unit, ABI,
   service-failure, isolation, lifecycle, and full verification-QEMU evidence
-- Next action: reconcile Gate 7's completed architecture, execution, ABI, and
-  dispatch boundaries against every acceptance criterion; either close the
-  gate with documented retained boundaries or identify one final required
-  extraction before advancing to synchronization
+- Next action: extract the contiguous Linux futex mechanism block into
+  `cpu/linux_futex.rs`, then run the complete per-extraction regression set
 
 ## Current repository state
 

@@ -36,6 +36,9 @@ boundaries established by earlier gates without changing behavior.
 - [x] Extracted the Linux syscall entry dispatcher into
   `cpu/linux_syscall.rs`, leaving x86 entry assembly in the architecture
   module and Linux subsystem implementations behind the dispatcher boundary.
+- [x] Extracted Linux clock, elapsed/realtime accounting, sleep, interval
+  timer, rusage, times, sysinfo, and related system-information mechanisms
+  into `cpu/linux_time.rs`.
 
 ## Remaining work
 
@@ -67,6 +70,8 @@ boundaries established by earlier gates without changing behavior.
   sequence, including Linux ELF/runtime compatibility and a clean QEMU boot.
 - The Linux syscall-dispatch extraction passed the same complete regression
   sequence and preserved the 450-global ownership inventory.
+- The Linux time-mechanism extraction passed the same complete regression
+  sequence, including live timekeeping validation in the controller runtime.
 
 ## Decisions and limitations
 
