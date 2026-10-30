@@ -456,6 +456,7 @@ interior-mutable	kernel/src/linux_keyring.rs	KEYRING_RUNTIME	domain-runtime	allo
 interior-mutable	kernel/src/linux_mount.rs	MOUNT_RUNTIME	domain-runtime	allowlist	none	explicit-domain-mount-runtime-owner-root
 interior-mutable	kernel/src/linux_overlay.rs	OVERLAY_RUNTIME	domain-runtime	allowlist	none	explicit-domain-overlay-owner-root
 interior-mutable	kernel/src/linux_process.rs	PROCESS_RUNTIME	process-runtime	allowlist	none	explicit-process-runtime-owner-root
+interior-mutable	kernel/src/linux_process.rs	PROCESS_ADDRESS_SPACE_STORAGE	process-runtime	allowlist	none	demand-initialized-process-address-space-owner
 interior-mutable	kernel/src/linux_signal.rs	SIGNAL_RUNTIME	process-runtime	allowlist	none	explicit-process-signal-runtime-owner-root
 interior-mutable	kernel/src/linux_socket.rs	SOCKET_RUNTIME_OWNER	domain-runtime	allowlist	none	explicit-domain-socket-runtime-owner-root
 interior-mutable	kernel/src/linux_sysv_ipc.rs	SYSV_IPC_RUNTIME	domain-runtime	allowlist	none	explicit-domain-sysv-ipc-owner-root

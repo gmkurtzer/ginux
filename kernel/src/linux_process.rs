@@ -36,6 +36,14 @@ struct ProcessRuntimeOwner(UnsafeCell<ProcessRuntimeState>);
 
 unsafe impl Sync for ProcessRuntimeOwner {}
 
+struct ProcessAddressSpaceStorageOwner(
+    UnsafeCell<
+        MaybeUninit<[[ProcessAddressSpaceStorage; PROCESS_RUNTIME_LIMIT]; PROCESS_INSTANCE_LIMIT]>,
+    >,
+);
+
+unsafe impl Sync for ProcessAddressSpaceStorageOwner {}
+
 struct ProcessRuntimeState {
     table_initialized: [AtomicBool; PROCESS_INSTANCE_LIMIT],
     refresh_count: [AtomicU32; PROCESS_INSTANCE_LIMIT],
@@ -48,10 +56,15 @@ struct ProcessRuntimeState {
     fork_scratch: UnsafeCell<LiveForkScratch>,
     fork_allocation_scratch: UnsafeCell<[memory::FrameLease; PROCESS_PRIVATE_COPY_LIMIT]>,
     fork_hierarchy_allocation_scratch: UnsafeCell<[memory::FrameLease; PROCESS_HIERARCHY_LIMIT]>,
-    address_space_storage:
-        UnsafeCell<[[ProcessAddressSpaceStorage; PROCESS_RUNTIME_LIMIT]; PROCESS_INSTANCE_LIMIT]>,
     test_table: UnsafeCell<MaybeUninit<ProcessTable>>,
 }
+
+// Keep the elastic process address-space registry out of the initialized
+// runtime owner. Every reader is count-bounded and the live prefixes are
+// written before publication, so the unused capacity need not be materialized
+// in the EFI image or initialized at boot.
+static PROCESS_ADDRESS_SPACE_STORAGE: ProcessAddressSpaceStorageOwner =
+    ProcessAddressSpaceStorageOwner(UnsafeCell::new(MaybeUninit::uninit()));
 
 static PROCESS_RUNTIME: ProcessRuntimeOwner =
     ProcessRuntimeOwner(UnsafeCell::new(ProcessRuntimeState {
@@ -73,9 +86,6 @@ static PROCESS_RUNTIME: ProcessRuntimeOwner =
         fork_hierarchy_allocation_scratch: UnsafeCell::new(
             [memory::FrameLease::EMPTY; PROCESS_HIERARCHY_LIMIT],
         ),
-        address_space_storage: UnsafeCell::new(
-            [[ProcessAddressSpaceStorage::EMPTY; PROCESS_RUNTIME_LIMIT]; PROCESS_INSTANCE_LIMIT],
-        ),
         test_table: UnsafeCell::new(MaybeUninit::uninit()),
     }));
 
@@ -84,6 +94,15 @@ fn process_runtime() -> &'static ProcessRuntimeState {
     // UnsafeCell and are serialized by the recursive kernel-entry boundary.
     // Gate 9 may replace that coarse rule with finer per-owner locks.
     unsafe { &*PROCESS_RUNTIME.0.get() }
+}
+
+fn process_address_space_storage(slot: usize) -> *mut ProcessAddressSpaceStorage {
+    debug_assert!(slot < PROCESS_INSTANCE_LIMIT * PROCESS_RUNTIME_LIMIT);
+    PROCESS_ADDRESS_SPACE_STORAGE
+        .0
+        .get()
+        .cast::<ProcessAddressSpaceStorage>()
+        .wrapping_add(slot)
 }
 
 fn mapping_requires_fork_copy(mapping: &cpu::LinuxActiveImageMapping) -> bool {
@@ -233,13 +252,6 @@ struct ProcessAddressSpaceStorage {
     mappings: [cpu::LinuxActiveImageMapping; PROCESS_PRIVATE_PAGE_LIMIT],
 }
 
-impl ProcessAddressSpaceStorage {
-    const EMPTY: Self = Self {
-        hierarchy: [memory::FrameLease::EMPTY; PROCESS_HIERARCHY_LIMIT],
-        mappings: [cpu::LinuxActiveImageMapping::EMPTY; PROCESS_PRIVATE_PAGE_LIMIT],
-    };
-}
-
 impl ProcessAddressSpace {
     fn new(
         storage_slot: usize,
@@ -272,11 +284,9 @@ impl ProcessAddressSpace {
             return None;
         }
         let storage = unsafe {
-            &mut *process_runtime()
-                .address_space_storage
-                .get()
-                .cast::<ProcessAddressSpaceStorage>()
-                .add(current_process_instance() * PROCESS_RUNTIME_LIMIT + storage_slot)
+            &mut *process_address_space_storage(
+                current_process_instance() * PROCESS_RUNTIME_LIMIT + storage_slot,
+            )
         };
         // The published counts bound every reader. Overwrite only the live
         // prefixes instead of clearing the full elastic capacity on every
@@ -303,11 +313,9 @@ impl ProcessAddressSpace {
             return None;
         }
         let storage = unsafe {
-            &mut *process_runtime()
-                .address_space_storage
-                .get()
-                .cast::<ProcessAddressSpaceStorage>()
-                .add(current_process_instance() * PROCESS_RUNTIME_LIMIT + storage_slot)
+            &mut *process_address_space_storage(
+                current_process_instance() * PROCESS_RUNTIME_LIMIT + storage_slot,
+            )
         };
         // Stale tail entries are unreachable because access is count-bounded.
         storage.hierarchy[..hierarchy.len()].copy_from_slice(hierarchy);
@@ -321,14 +329,9 @@ impl ProcessAddressSpace {
 
     fn storage(&self) -> &'static ProcessAddressSpaceStorage {
         unsafe {
-            &*process_runtime()
-                .address_space_storage
-                .get()
-                .cast::<ProcessAddressSpaceStorage>()
-                .add(
-                    current_process_instance() * PROCESS_RUNTIME_LIMIT
-                        + usize::from(self.storage_slot),
-                )
+            &*process_address_space_storage(
+                current_process_instance() * PROCESS_RUNTIME_LIMIT + usize::from(self.storage_slot),
+            )
         }
     }
 
@@ -2252,14 +2255,9 @@ pub(crate) fn refresh_live_process_context_from_syscall_entry(
         return false;
     };
     let storage = unsafe {
-        &mut *process_runtime()
-            .address_space_storage
-            .get()
-            .cast::<ProcessAddressSpaceStorage>()
-            .add(
-                current_process_instance() * PROCESS_RUNTIME_LIMIT
-                    + usize::from(space.storage_slot),
-            )
+        &mut *process_address_space_storage(
+            current_process_instance() * PROCESS_RUNTIME_LIMIT + usize::from(space.storage_slot),
+        )
     };
     let mut count = usize::from(space.mapping_count);
     let context_mappings = [instruction_mapping, stack_mapping];
@@ -2320,14 +2318,9 @@ pub(crate) fn refresh_live_process_hierarchy(pid: u32, hierarchy: &[memory::Fram
         return false;
     }
     let storage = unsafe {
-        &mut *process_runtime()
-            .address_space_storage
-            .get()
-            .cast::<ProcessAddressSpaceStorage>()
-            .add(
-                current_process_instance() * PROCESS_RUNTIME_LIMIT
-                    + usize::from(space.storage_slot),
-            )
+        &mut *process_address_space_storage(
+            current_process_instance() * PROCESS_RUNTIME_LIMIT + usize::from(space.storage_slot),
+        )
     };
     storage.hierarchy[..hierarchy.len()].copy_from_slice(hierarchy);
     let Some(process) = table.process_mut(handle) else {
@@ -2951,14 +2944,9 @@ fn replace_live_process_mapping_inner(
         return false;
     };
     let storage = unsafe {
-        &mut *process_runtime()
-            .address_space_storage
-            .get()
-            .cast::<ProcessAddressSpaceStorage>()
-            .add(
-                current_process_instance() * PROCESS_RUNTIME_LIMIT
-                    + usize::from(space.storage_slot),
-            )
+        &mut *process_address_space_storage(
+            current_process_instance() * PROCESS_RUNTIME_LIMIT + usize::from(space.storage_slot),
+        )
     };
     let Some(mapping) = storage.mappings[..usize::from(space.mapping_count)]
         .iter_mut()
@@ -2998,14 +2986,9 @@ pub(crate) fn add_live_process_mapping(pid: u32, mapping: cpu::LinuxActiveImageM
         return false;
     };
     let storage = unsafe {
-        &mut *process_runtime()
-            .address_space_storage
-            .get()
-            .cast::<ProcessAddressSpaceStorage>()
-            .add(
-                current_process_instance() * PROCESS_RUNTIME_LIMIT
-                    + usize::from(space.storage_slot),
-            )
+        &mut *process_address_space_storage(
+            current_process_instance() * PROCESS_RUNTIME_LIMIT + usize::from(space.storage_slot),
+        )
     };
     let count = usize::from(space.mapping_count);
     if count >= storage.mappings.len()
