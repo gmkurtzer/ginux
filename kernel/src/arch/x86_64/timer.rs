@@ -50,25 +50,49 @@ const TIMER_VECTOR: u8 = 32;
 const SPURIOUS_VECTOR: u8 = 255;
 const INTERRUPT_POLL_LIMIT: usize = 100_000_000;
 
-static TIMER_FIRED: AtomicBool = AtomicBool::new(false);
-static PREEMPTION_ARMED: AtomicBool = AtomicBool::new(false);
-static PREEMPTION_READY: AtomicBool = AtomicBool::new(false);
-static PREEMPTION_COUNT: AtomicU8 = AtomicU8::new(0);
-static PREEMPTION_RELOAD: AtomicU32 = AtomicU32::new(0);
-static PREEMPTION_DEFERRED_RELOAD: AtomicU32 = AtomicU32::new(0);
-static LINUX_WAIT_TIMER_ARMED: AtomicBool = AtomicBool::new(false);
-static LINUX_WAIT_TIMER_RELOAD: AtomicU32 = AtomicU32::new(0);
-static DEVICE_WAIT_TIMER_ARMED: AtomicBool = AtomicBool::new(false);
-static DEVICE_WAIT_TIMED_OUT: AtomicBool = AtomicBool::new(false);
-static DEVICE_WAIT_DOMAIN: AtomicU64 = AtomicU64::new(0);
-static DEVICE_WAIT_REQUEST: AtomicU64 = AtomicU64::new(0);
-static DEVICE_WAIT_OBJECT: AtomicU64 = AtomicU64::new(0);
-static DEVICE_WAIT_TIMEOUT_COUNT: AtomicU64 = AtomicU64::new(0);
-static PACKET_WAIT_TIMEOUT_COUNT: AtomicU64 = AtomicU64::new(0);
-static INTERRUPT_APIC_BASE: AtomicU64 = AtomicU64::new(0);
-static INTERRUPT_APIC_MODE: AtomicU8 = AtomicU8::new(0);
-static INTERRUPT_COUNTER_HZ: AtomicU64 = AtomicU64::new(0);
-static CALIBRATED_TSC_HZ: AtomicU64 = AtomicU64::new(0);
+struct TimerOwner {
+    fired: AtomicBool,
+    preemption_armed: AtomicBool,
+    preemption_ready: AtomicBool,
+    preemption_count: AtomicU8,
+    preemption_reload: AtomicU32,
+    preemption_deferred_reload: AtomicU32,
+    linux_wait_armed: AtomicBool,
+    linux_wait_reload: AtomicU32,
+    device_wait_armed: AtomicBool,
+    device_wait_timed_out: AtomicBool,
+    device_wait_domain: AtomicU64,
+    device_wait_request: AtomicU64,
+    device_wait_object: AtomicU64,
+    device_wait_timeout_count: AtomicU64,
+    packet_wait_timeout_count: AtomicU64,
+    interrupt_apic_base: AtomicU64,
+    interrupt_apic_mode: AtomicU8,
+    interrupt_counter_hz: AtomicU64,
+    calibrated_tsc_hz: AtomicU64,
+}
+
+static TIMER: TimerOwner = TimerOwner {
+    fired: AtomicBool::new(false),
+    preemption_armed: AtomicBool::new(false),
+    preemption_ready: AtomicBool::new(false),
+    preemption_count: AtomicU8::new(0),
+    preemption_reload: AtomicU32::new(0),
+    preemption_deferred_reload: AtomicU32::new(0),
+    linux_wait_armed: AtomicBool::new(false),
+    linux_wait_reload: AtomicU32::new(0),
+    device_wait_armed: AtomicBool::new(false),
+    device_wait_timed_out: AtomicBool::new(false),
+    device_wait_domain: AtomicU64::new(0),
+    device_wait_request: AtomicU64::new(0),
+    device_wait_object: AtomicU64::new(0),
+    device_wait_timeout_count: AtomicU64::new(0),
+    packet_wait_timeout_count: AtomicU64::new(0),
+    interrupt_apic_base: AtomicU64::new(0),
+    interrupt_apic_mode: AtomicU8::new(0),
+    interrupt_counter_hz: AtomicU64::new(0),
+    calibrated_tsc_hz: AtomicU64::new(0),
+};
 
 global_asm!(
     r#"
@@ -218,7 +242,7 @@ pub(crate) fn timestamp_counter() -> u64 {
 pub(crate) fn monotonic_frequency() -> Option<u64> {
     discover()
         .frequency_hz
-        .or_else(|| match CALIBRATED_TSC_HZ.load(Ordering::SeqCst) {
+        .or_else(|| match TIMER.calibrated_tsc_hz.load(Ordering::SeqCst) {
             0 => None,
             frequency => Some(frequency),
         })
@@ -281,7 +305,7 @@ pub(crate) unsafe fn calibrate_local_apic(
     if counter_hz == 0 || tsc_hz == 0 {
         return None;
     }
-    CALIBRATED_TSC_HZ.store(tsc_hz, Ordering::SeqCst);
+    TIMER.calibrated_tsc_hz.store(tsc_hz, Ordering::SeqCst);
     Some(LocalApicCalibration {
         counter_hz,
         divider: 16,
@@ -306,13 +330,17 @@ pub(crate) unsafe fn verify_local_apic_interrupt(
         return false;
     }
 
-    INTERRUPT_APIC_BASE.store(apic.physical_base, Ordering::SeqCst);
-    INTERRUPT_APIC_MODE.store(
+    TIMER
+        .interrupt_apic_base
+        .store(apic.physical_base, Ordering::SeqCst);
+    TIMER.interrupt_apic_mode.store(
         if apic.mode == Mode::X2Apic { 1 } else { 0 },
         Ordering::SeqCst,
     );
-    INTERRUPT_COUNTER_HZ.store(calibration.counter_hz, Ordering::SeqCst);
-    TIMER_FIRED.store(false, Ordering::SeqCst);
+    TIMER
+        .interrupt_counter_hz
+        .store(calibration.counter_hz, Ordering::SeqCst);
+    TIMER.fired.store(false, Ordering::SeqCst);
 
     let spurious = apic.read(APIC_SPURIOUS_VECTOR);
     apic.write(
@@ -326,7 +354,7 @@ pub(crate) unsafe fn verify_local_apic_interrupt(
 
     asm!("sti", options(nomem, nostack));
     for _ in 0..INTERRUPT_POLL_LIMIT {
-        if TIMER_FIRED.load(Ordering::SeqCst) {
+        if TIMER.fired.load(Ordering::SeqCst) {
             break;
         }
         core::hint::spin_loop();
@@ -334,7 +362,7 @@ pub(crate) unsafe fn verify_local_apic_interrupt(
     asm!("cli", options(nomem, nostack));
     apic.write(APIC_LVT_TIMER, APIC_TIMER_MASKED | u32::from(TIMER_VECTOR));
     apic.write(APIC_INITIAL_COUNT, 0);
-    TIMER_FIRED.load(Ordering::SeqCst)
+    TIMER.fired.load(Ordering::SeqCst)
 }
 
 /// Arms one scheduler interrupt without enabling interrupts in kernel mode.
@@ -344,25 +372,29 @@ pub(crate) unsafe fn arm_scheduler_preemption(
     calibration: &LocalApicCalibration,
 ) -> bool {
     if calibration.counter_hz == 0
-        || PREEMPTION_ARMED.swap(true, Ordering::SeqCst)
-        || INTERRUPT_APIC_BASE.load(Ordering::SeqCst) != apic.physical_base
-        || INTERRUPT_APIC_MODE.load(Ordering::SeqCst)
+        || TIMER.preemption_armed.swap(true, Ordering::SeqCst)
+        || TIMER.interrupt_apic_base.load(Ordering::SeqCst) != apic.physical_base
+        || TIMER.interrupt_apic_mode.load(Ordering::SeqCst)
             != if apic.mode == Mode::X2Apic { 1 } else { 0 }
     {
-        PREEMPTION_ARMED.store(false, Ordering::SeqCst);
+        TIMER.preemption_armed.store(false, Ordering::SeqCst);
         return false;
     }
-    PREEMPTION_COUNT.store(0, Ordering::SeqCst);
-    PREEMPTION_READY.store(false, Ordering::SeqCst);
-    TIMER_FIRED.store(false, Ordering::SeqCst);
+    TIMER.preemption_count.store(0, Ordering::SeqCst);
+    TIMER.preemption_ready.store(false, Ordering::SeqCst);
+    TIMER.fired.store(false, Ordering::SeqCst);
     apic.write(APIC_DIVIDE_CONFIGURATION, APIC_DIVIDE_BY_16);
     apic.write(APIC_LVT_TIMER, u32::from(TIMER_VECTOR));
     let initial_count = (calibration.counter_hz / SCHEDULER_PROOF_INITIAL_PREEMPTIONS_PER_SECOND)
         .clamp(1, u64::from(u32::MAX)) as u32;
     let reload_count = (calibration.counter_hz / SCHEDULER_PROOF_RELOAD_PREEMPTIONS_PER_SECOND)
         .clamp(1, u64::from(u32::MAX)) as u32;
-    PREEMPTION_RELOAD.store(reload_count, Ordering::SeqCst);
-    PREEMPTION_DEFERRED_RELOAD.store(initial_count, Ordering::SeqCst);
+    TIMER
+        .preemption_reload
+        .store(reload_count, Ordering::SeqCst);
+    TIMER
+        .preemption_deferred_reload
+        .store(initial_count, Ordering::SeqCst);
     apic.write(APIC_INITIAL_COUNT, initial_count);
     true
 }
@@ -373,26 +405,29 @@ pub(crate) unsafe fn arm_scheduler_preemption(
 /// its ABI. Interrupt delivery is acknowledged in that case, but selection is
 /// deferred until the first IPC request makes the service useful to run.
 pub(crate) fn mark_scheduler_preemption_ready() {
-    if PREEMPTION_ARMED.load(Ordering::SeqCst) && PREEMPTION_COUNT.load(Ordering::SeqCst) == 0 {
-        PREEMPTION_READY.store(true, Ordering::SeqCst);
+    if TIMER.preemption_armed.load(Ordering::SeqCst)
+        && TIMER.preemption_count.load(Ordering::SeqCst) == 0
+    {
+        TIMER.preemption_ready.store(true, Ordering::SeqCst);
     }
 }
 
 pub(crate) fn rearm_scheduler_preemption() -> bool {
-    let reload = PREEMPTION_RELOAD.load(Ordering::SeqCst);
+    let reload = TIMER.preemption_reload.load(Ordering::SeqCst);
     if reload == 0
-        || PREEMPTION_COUNT.load(Ordering::SeqCst) != 1
-        || PREEMPTION_ARMED.swap(true, Ordering::SeqCst)
+        || TIMER.preemption_count.load(Ordering::SeqCst) != 1
+        || TIMER.preemption_armed.swap(true, Ordering::SeqCst)
     {
-        PREEMPTION_ARMED.store(false, Ordering::SeqCst);
+        TIMER.preemption_armed.store(false, Ordering::SeqCst);
         return false;
     }
-    let mode = if INTERRUPT_APIC_MODE.load(Ordering::SeqCst) == 1 {
+    let mode = if TIMER.interrupt_apic_mode.load(Ordering::SeqCst) == 1 {
         Mode::X2Apic
     } else {
         Mode::XApic
     };
-    let Some(apic) = LocalApic::from_saved(0, mode, INTERRUPT_APIC_BASE.load(Ordering::SeqCst))
+    let Some(apic) =
+        LocalApic::from_saved(0, mode, TIMER.interrupt_apic_base.load(Ordering::SeqCst))
     else {
         return false;
     };
@@ -406,38 +441,39 @@ pub(crate) fn rearm_scheduler_preemption() -> bool {
 pub(crate) unsafe fn finish_scheduler_preemption(apic: &LocalApic) -> bool {
     apic.write(APIC_LVT_TIMER, APIC_TIMER_MASKED | u32::from(TIMER_VECTOR));
     apic.write(APIC_INITIAL_COUNT, 0);
-    let complete = !PREEMPTION_ARMED.load(Ordering::SeqCst)
-        && TIMER_FIRED.load(Ordering::SeqCst)
-        && PREEMPTION_COUNT.load(Ordering::SeqCst) == 2;
-    PREEMPTION_READY.store(false, Ordering::SeqCst);
-    PREEMPTION_RELOAD.store(0, Ordering::SeqCst);
-    PREEMPTION_DEFERRED_RELOAD.store(0, Ordering::SeqCst);
+    let complete = !TIMER.preemption_armed.load(Ordering::SeqCst)
+        && TIMER.fired.load(Ordering::SeqCst)
+        && TIMER.preemption_count.load(Ordering::SeqCst) == 2;
+    TIMER.preemption_ready.store(false, Ordering::SeqCst);
+    TIMER.preemption_reload.store(0, Ordering::SeqCst);
+    TIMER.preemption_deferred_reload.store(0, Ordering::SeqCst);
     complete
 }
 
 /// Arms a periodic Linux deadline tick using the already-validated bootstrap
 /// local APIC. The service scheduler proof must have relinquished the timer.
 pub(crate) fn arm_linux_wait_timer() -> bool {
-    let counter_hz = INTERRUPT_COUNTER_HZ.load(Ordering::SeqCst);
+    let counter_hz = TIMER.interrupt_counter_hz.load(Ordering::SeqCst);
     if counter_hz == 0
-        || PREEMPTION_ARMED.load(Ordering::SeqCst)
-        || LINUX_WAIT_TIMER_ARMED.swap(true, Ordering::SeqCst)
+        || TIMER.preemption_armed.load(Ordering::SeqCst)
+        || TIMER.linux_wait_armed.swap(true, Ordering::SeqCst)
     {
-        LINUX_WAIT_TIMER_ARMED.store(false, Ordering::SeqCst);
+        TIMER.linux_wait_armed.store(false, Ordering::SeqCst);
         return false;
     }
     let reload = (counter_hz / LINUX_WAIT_TICKS_PER_SECOND).clamp(1, u64::from(u32::MAX)) as u32;
-    let mode = if INTERRUPT_APIC_MODE.load(Ordering::SeqCst) == 1 {
+    let mode = if TIMER.interrupt_apic_mode.load(Ordering::SeqCst) == 1 {
         Mode::X2Apic
     } else {
         Mode::XApic
     };
-    let Some(apic) = LocalApic::from_saved(0, mode, INTERRUPT_APIC_BASE.load(Ordering::SeqCst))
+    let Some(apic) =
+        LocalApic::from_saved(0, mode, TIMER.interrupt_apic_base.load(Ordering::SeqCst))
     else {
-        LINUX_WAIT_TIMER_ARMED.store(false, Ordering::SeqCst);
+        TIMER.linux_wait_armed.store(false, Ordering::SeqCst);
         return false;
     };
-    LINUX_WAIT_TIMER_RELOAD.store(reload, Ordering::SeqCst);
+    TIMER.linux_wait_reload.store(reload, Ordering::SeqCst);
     // SAFETY: discovery and the interrupt proof validated this saved APIC,
     // and Linux execution owns its timer after the scheduler proof finishes.
     unsafe {
@@ -450,15 +486,16 @@ pub(crate) fn arm_linux_wait_timer() -> bool {
 
 /// Stops the Linux deadline tick while kernel entry still has interrupts off.
 pub(crate) fn finish_linux_wait_timer() -> bool {
-    if !LINUX_WAIT_TIMER_ARMED.swap(false, Ordering::SeqCst) {
+    if !TIMER.linux_wait_armed.swap(false, Ordering::SeqCst) {
         return false;
     }
-    let mode = if INTERRUPT_APIC_MODE.load(Ordering::SeqCst) == 1 {
+    let mode = if TIMER.interrupt_apic_mode.load(Ordering::SeqCst) == 1 {
         Mode::X2Apic
     } else {
         Mode::XApic
     };
-    let Some(apic) = LocalApic::from_saved(0, mode, INTERRUPT_APIC_BASE.load(Ordering::SeqCst))
+    let Some(apic) =
+        LocalApic::from_saved(0, mode, TIMER.interrupt_apic_base.load(Ordering::SeqCst))
     else {
         return false;
     };
@@ -467,7 +504,7 @@ pub(crate) fn finish_linux_wait_timer() -> bool {
         apic.write(APIC_LVT_TIMER, APIC_TIMER_MASKED | u32::from(TIMER_VECTOR));
         apic.write(APIC_INITIAL_COUNT, 0);
     }
-    LINUX_WAIT_TIMER_RELOAD.store(0, Ordering::SeqCst);
+    TIMER.linux_wait_reload.store(0, Ordering::SeqCst);
     true
 }
 
@@ -482,14 +519,14 @@ pub(crate) fn arm_network_device_wait_timer(domain: u64, request: u64) -> bool {
 }
 
 fn arm_device_wait_timer_for(domain: u64, object: u64, request: u64) -> bool {
-    let counter_hz = INTERRUPT_COUNTER_HZ.load(Ordering::SeqCst);
+    let counter_hz = TIMER.interrupt_counter_hz.load(Ordering::SeqCst);
     let initial_count =
         (counter_hz / DEVICE_WAIT_TIMEOUTS_PER_SECOND).clamp(1, u64::from(u32::MAX)) as u32;
     arm_wait_timer_for(domain, object, request, initial_count)
 }
 
 pub(crate) fn arm_packet_wait_timer(domain: u64, sequence: u64, timeout_ms: u64) -> bool {
-    let counter_hz = INTERRUPT_COUNTER_HZ.load(Ordering::SeqCst);
+    let counter_hz = TIMER.interrupt_counter_hz.load(Ordering::SeqCst);
     let Some(initial_count) = counter_hz
         .checked_mul(timeout_ms)
         .map(|ticks| ticks / 1_000)
@@ -505,37 +542,39 @@ pub(crate) fn arm_packet_wait_timer(domain: u64, sequence: u64, timeout_ms: u64)
 }
 
 fn arm_wait_timer_for(domain: u64, object: u64, request: u64, initial_count: u32) -> bool {
-    let counter_hz = INTERRUPT_COUNTER_HZ.load(Ordering::SeqCst);
+    let counter_hz = TIMER.interrupt_counter_hz.load(Ordering::SeqCst);
     if domain == 0
         || object == 0
         || request == 0
         || initial_count == 0
         || counter_hz == 0
-        || PREEMPTION_ARMED.load(Ordering::SeqCst)
-        || LINUX_WAIT_TIMER_ARMED.load(Ordering::SeqCst)
+        || TIMER.preemption_armed.load(Ordering::SeqCst)
+        || TIMER.linux_wait_armed.load(Ordering::SeqCst)
     {
         return false;
     }
-    if DEVICE_WAIT_TIMER_ARMED
+    if TIMER
+        .device_wait_armed
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_err()
     {
         return false;
     }
-    let mode = if INTERRUPT_APIC_MODE.load(Ordering::SeqCst) == 1 {
+    let mode = if TIMER.interrupt_apic_mode.load(Ordering::SeqCst) == 1 {
         Mode::X2Apic
     } else {
         Mode::XApic
     };
-    let Some(apic) = LocalApic::from_saved(0, mode, INTERRUPT_APIC_BASE.load(Ordering::SeqCst))
+    let Some(apic) =
+        LocalApic::from_saved(0, mode, TIMER.interrupt_apic_base.load(Ordering::SeqCst))
     else {
-        DEVICE_WAIT_TIMER_ARMED.store(false, Ordering::SeqCst);
+        TIMER.device_wait_armed.store(false, Ordering::SeqCst);
         return false;
     };
-    DEVICE_WAIT_DOMAIN.store(domain, Ordering::SeqCst);
-    DEVICE_WAIT_REQUEST.store(request, Ordering::SeqCst);
-    DEVICE_WAIT_OBJECT.store(object, Ordering::SeqCst);
-    DEVICE_WAIT_TIMED_OUT.store(false, Ordering::SeqCst);
+    TIMER.device_wait_domain.store(domain, Ordering::SeqCst);
+    TIMER.device_wait_request.store(request, Ordering::SeqCst);
+    TIMER.device_wait_object.store(object, Ordering::SeqCst);
+    TIMER.device_wait_timed_out.store(false, Ordering::SeqCst);
     // SAFETY: the earlier timer proof validated this saved local APIC, and no
     // scheduler or Linux timer owns it during the isolated service proof.
     unsafe {
@@ -547,32 +586,32 @@ fn arm_wait_timer_for(domain: u64, object: u64, request: u64, initial_count: u32
 }
 
 pub(crate) fn device_wait_timed_out(domain: u64, request: u64) -> bool {
-    DEVICE_WAIT_DOMAIN.load(Ordering::SeqCst) == domain
-        && DEVICE_WAIT_REQUEST.load(Ordering::SeqCst) == request
-        && DEVICE_WAIT_TIMED_OUT.load(Ordering::SeqCst)
+    TIMER.device_wait_domain.load(Ordering::SeqCst) == domain
+        && TIMER.device_wait_request.load(Ordering::SeqCst) == request
+        && TIMER.device_wait_timed_out.load(Ordering::SeqCst)
 }
 
 pub(crate) fn device_wait_timeout_count() -> u64 {
-    DEVICE_WAIT_TIMEOUT_COUNT.load(Ordering::SeqCst)
+    TIMER.device_wait_timeout_count.load(Ordering::SeqCst)
 }
 
 pub(crate) fn packet_wait_timeout_count() -> u64 {
-    PACKET_WAIT_TIMEOUT_COUNT.load(Ordering::SeqCst)
+    TIMER.packet_wait_timeout_count.load(Ordering::SeqCst)
 }
 
 pub(crate) fn packet_wait_timer_is_clear() -> bool {
-    DEVICE_WAIT_OBJECT.load(Ordering::SeqCst) != control_abi::PACKET_OBJECT
+    TIMER.device_wait_object.load(Ordering::SeqCst) != control_abi::PACKET_OBJECT
 }
 
 pub(crate) fn packet_wait_timed_out(domain: u64, sequence: u64) -> bool {
-    DEVICE_WAIT_OBJECT.load(Ordering::SeqCst) == control_abi::PACKET_OBJECT
+    TIMER.device_wait_object.load(Ordering::SeqCst) == control_abi::PACKET_OBJECT
         && device_wait_timed_out(domain, sequence)
 }
 
 /// Stops the device timeout and reports whether it won the interrupt race.
 pub(crate) fn finish_device_wait_timer(domain: u64, request: u64) -> Option<bool> {
     if !matches!(
-        DEVICE_WAIT_OBJECT.load(Ordering::SeqCst),
+        TIMER.device_wait_object.load(Ordering::SeqCst),
         control_abi::BLOCK_DEVICE_OBJECT | control_abi::NETWORK_DEVICE_OBJECT
     ) {
         return None;
@@ -581,58 +620,58 @@ pub(crate) fn finish_device_wait_timer(domain: u64, request: u64) -> Option<bool
 }
 
 pub(crate) fn finish_packet_wait_timer(domain: u64, sequence: u64) -> Option<bool> {
-    if DEVICE_WAIT_OBJECT.load(Ordering::SeqCst) != control_abi::PACKET_OBJECT {
+    if TIMER.device_wait_object.load(Ordering::SeqCst) != control_abi::PACKET_OBJECT {
         return None;
     }
     finish_wait_timer(domain, sequence)
 }
 
 fn finish_wait_timer(domain: u64, request: u64) -> Option<bool> {
-    if DEVICE_WAIT_DOMAIN.load(Ordering::SeqCst) != domain
-        || DEVICE_WAIT_REQUEST.load(Ordering::SeqCst) != request
+    if TIMER.device_wait_domain.load(Ordering::SeqCst) != domain
+        || TIMER.device_wait_request.load(Ordering::SeqCst) != request
     {
         return None;
     }
-    let armed = DEVICE_WAIT_TIMER_ARMED.swap(false, Ordering::SeqCst);
-    let timed_out = DEVICE_WAIT_TIMED_OUT.swap(false, Ordering::SeqCst);
+    let armed = TIMER.device_wait_armed.swap(false, Ordering::SeqCst);
+    let timed_out = TIMER.device_wait_timed_out.swap(false, Ordering::SeqCst);
     if !armed && !timed_out {
         return None;
     }
-    let mode = if INTERRUPT_APIC_MODE.load(Ordering::SeqCst) == 1 {
+    let mode = if TIMER.interrupt_apic_mode.load(Ordering::SeqCst) == 1 {
         Mode::X2Apic
     } else {
         Mode::XApic
     };
-    let apic = LocalApic::from_saved(0, mode, INTERRUPT_APIC_BASE.load(Ordering::SeqCst))?;
+    let apic = LocalApic::from_saved(0, mode, TIMER.interrupt_apic_base.load(Ordering::SeqCst))?;
     // SAFETY: the exact device wait owns this one-shot until this call or its
     // interrupt handler consumes it.
     unsafe {
         apic.write(APIC_LVT_TIMER, APIC_TIMER_MASKED | u32::from(TIMER_VECTOR));
         apic.write(APIC_INITIAL_COUNT, 0);
     }
-    DEVICE_WAIT_DOMAIN.store(0, Ordering::SeqCst);
-    DEVICE_WAIT_REQUEST.store(0, Ordering::SeqCst);
-    DEVICE_WAIT_OBJECT.store(0, Ordering::SeqCst);
+    TIMER.device_wait_domain.store(0, Ordering::SeqCst);
+    TIMER.device_wait_request.store(0, Ordering::SeqCst);
+    TIMER.device_wait_object.store(0, Ordering::SeqCst);
     Some(timed_out)
 }
 
 pub(crate) fn cancel_packet_wait_timer_for_sequence(sequence: u64) -> bool {
-    if DEVICE_WAIT_OBJECT.load(Ordering::SeqCst) != control_abi::PACKET_OBJECT
-        || DEVICE_WAIT_REQUEST.load(Ordering::SeqCst) != sequence
+    if TIMER.device_wait_object.load(Ordering::SeqCst) != control_abi::PACKET_OBJECT
+        || TIMER.device_wait_request.load(Ordering::SeqCst) != sequence
     {
         return true;
     }
-    let domain = DEVICE_WAIT_DOMAIN.load(Ordering::SeqCst);
+    let domain = TIMER.device_wait_domain.load(Ordering::SeqCst);
     finish_packet_wait_timer(domain, sequence) == Some(false)
 }
 
 pub(crate) fn cancel_packet_wait_timer_for_domain(domain: u64) -> bool {
-    if DEVICE_WAIT_OBJECT.load(Ordering::SeqCst) != control_abi::PACKET_OBJECT
-        || DEVICE_WAIT_DOMAIN.load(Ordering::SeqCst) != domain
+    if TIMER.device_wait_object.load(Ordering::SeqCst) != control_abi::PACKET_OBJECT
+        || TIMER.device_wait_domain.load(Ordering::SeqCst) != domain
     {
         return true;
     }
-    let sequence = DEVICE_WAIT_REQUEST.load(Ordering::SeqCst);
+    let sequence = TIMER.device_wait_request.load(Ordering::SeqCst);
     finish_packet_wait_timer(domain, sequence).is_some()
 }
 
@@ -653,23 +692,24 @@ pub(crate) unsafe fn verify_device_wait_timeout_interrupt() -> bool {
 }
 
 extern "sysv64" fn timer_interrupt_handler(frame: *mut UserInterruptFrame) {
-    TIMER_FIRED.store(true, Ordering::SeqCst);
-    let mode = if INTERRUPT_APIC_MODE.load(Ordering::SeqCst) == 1 {
+    TIMER.fired.store(true, Ordering::SeqCst);
+    let mode = if TIMER.interrupt_apic_mode.load(Ordering::SeqCst) == 1 {
         Mode::X2Apic
     } else {
         Mode::XApic
     };
-    let Some(apic) = LocalApic::from_saved(0, mode, INTERRUPT_APIC_BASE.load(Ordering::SeqCst))
+    let Some(apic) =
+        LocalApic::from_saved(0, mode, TIMER.interrupt_apic_base.load(Ordering::SeqCst))
     else {
         return;
     };
     // SAFETY: The verifier initializes these values before unmasking the timer,
     // and the handler runs with exclusive bootstrap-processor APIC ownership.
     unsafe { apic.write(APIC_EOI, 0) };
-    if DEVICE_WAIT_TIMER_ARMED.swap(false, Ordering::SeqCst) {
-        let domain = DEVICE_WAIT_DOMAIN.load(Ordering::SeqCst);
-        let request = DEVICE_WAIT_REQUEST.load(Ordering::SeqCst);
-        let object = DEVICE_WAIT_OBJECT.load(Ordering::SeqCst);
+    if TIMER.device_wait_armed.swap(false, Ordering::SeqCst) {
+        let domain = TIMER.device_wait_domain.load(Ordering::SeqCst);
+        let request = TIMER.device_wait_request.load(Ordering::SeqCst);
+        let object = TIMER.device_wait_object.load(Ordering::SeqCst);
         // SAFETY: this one-shot has fired and must be masked before another
         // owner may program the local timer.
         unsafe {
@@ -677,11 +717,13 @@ extern "sysv64" fn timer_interrupt_handler(frame: *mut UserInterruptFrame) {
             apic.write(APIC_INITIAL_COUNT, 0);
         }
         if domain == DEVICE_WAIT_TEST_DOMAIN {
-            DEVICE_WAIT_TIMED_OUT.store(true, Ordering::SeqCst);
+            TIMER.device_wait_timed_out.store(true, Ordering::SeqCst);
         } else if object == control_abi::PACKET_OBJECT {
             if scheduler::timeout_packet_waiter(domain, request) {
-                PACKET_WAIT_TIMEOUT_COUNT.fetch_add(1, Ordering::SeqCst);
-                DEVICE_WAIT_TIMED_OUT.store(true, Ordering::SeqCst);
+                TIMER
+                    .packet_wait_timeout_count
+                    .fetch_add(1, Ordering::SeqCst);
+                TIMER.device_wait_timed_out.store(true, Ordering::SeqCst);
                 if scheduler::current_domain() != Some(domain) {
                     let Some(frame) = (unsafe { frame.as_mut() }) else {
                         return;
@@ -700,33 +742,35 @@ extern "sysv64" fn timer_interrupt_handler(frame: *mut UserInterruptFrame) {
                     }
                 }
             } else {
-                DEVICE_WAIT_DOMAIN.store(0, Ordering::SeqCst);
-                DEVICE_WAIT_REQUEST.store(0, Ordering::SeqCst);
-                DEVICE_WAIT_OBJECT.store(0, Ordering::SeqCst);
-                DEVICE_WAIT_TIMED_OUT.store(false, Ordering::SeqCst);
+                TIMER.device_wait_domain.store(0, Ordering::SeqCst);
+                TIMER.device_wait_request.store(0, Ordering::SeqCst);
+                TIMER.device_wait_object.store(0, Ordering::SeqCst);
+                TIMER.device_wait_timed_out.store(false, Ordering::SeqCst);
             }
         } else if scheduler::wake_device_completion(domain, object, request, u64::MAX - 2) {
-            DEVICE_WAIT_TIMEOUT_COUNT.fetch_add(1, Ordering::SeqCst);
-            DEVICE_WAIT_TIMED_OUT.store(true, Ordering::SeqCst);
+            TIMER
+                .device_wait_timeout_count
+                .fetch_add(1, Ordering::SeqCst);
+            TIMER.device_wait_timed_out.store(true, Ordering::SeqCst);
         }
         return;
     }
-    if LINUX_WAIT_TIMER_ARMED.load(Ordering::SeqCst) {
+    if TIMER.linux_wait_armed.load(Ordering::SeqCst) {
         if let Some(frame) = unsafe { frame.as_mut() } {
             cpu::expire_linux_waits_from_timer(frame);
         }
-        let reload = LINUX_WAIT_TIMER_RELOAD.load(Ordering::SeqCst);
-        if reload != 0 && LINUX_WAIT_TIMER_ARMED.load(Ordering::SeqCst) {
+        let reload = TIMER.linux_wait_reload.load(Ordering::SeqCst);
+        if reload != 0 && TIMER.linux_wait_armed.load(Ordering::SeqCst) {
             // SAFETY: the Linux execution phase owns this one-shot timer.
             unsafe { apic.write(APIC_INITIAL_COUNT, reload) };
         }
         return;
     }
-    if PREEMPTION_ARMED.load(Ordering::SeqCst)
-        && PREEMPTION_COUNT.load(Ordering::SeqCst) == 0
-        && !PREEMPTION_READY.load(Ordering::SeqCst)
+    if TIMER.preemption_armed.load(Ordering::SeqCst)
+        && TIMER.preemption_count.load(Ordering::SeqCst) == 0
+        && !TIMER.preemption_ready.load(Ordering::SeqCst)
     {
-        let reload = PREEMPTION_DEFERRED_RELOAD.load(Ordering::SeqCst);
+        let reload = TIMER.preemption_deferred_reload.load(Ordering::SeqCst);
         if reload != 0 {
             // SAFETY: This is the saved bootstrap APIC and the proof owns its
             // one-shot timer until finish_scheduler_preemption masks it.
@@ -734,7 +778,7 @@ extern "sysv64" fn timer_interrupt_handler(frame: *mut UserInterruptFrame) {
         }
         return;
     }
-    if !PREEMPTION_ARMED.swap(false, Ordering::SeqCst) {
+    if !TIMER.preemption_armed.swap(false, Ordering::SeqCst) {
         return;
     }
     let Some(frame) = (unsafe { frame.as_mut() }) else {
@@ -753,7 +797,7 @@ extern "sysv64" fn timer_interrupt_handler(frame: *mut UserInterruptFrame) {
     } = action
     {
         if cpu::activate_user_context(address_space_root, fs_base) {
-            PREEMPTION_COUNT.fetch_add(1, Ordering::SeqCst);
+            TIMER.preemption_count.fetch_add(1, Ordering::SeqCst);
         }
     }
 }

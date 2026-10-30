@@ -106,18 +106,35 @@ const NET_DESCRIPTOR_BYTES: usize = QUEUE_SIZE as usize * 16;
 const NET_AVAILABLE_BYTES: usize = 6 + QUEUE_SIZE as usize * 2;
 const NET_USED_BYTES: usize = 6 + QUEUE_SIZE as usize * 8;
 
-static VIRTIO_INTERRUPT_FIRED: AtomicBool = AtomicBool::new(false);
-static VIRTIO_INTERRUPT_ACTIVE: AtomicBool = AtomicBool::new(false);
-static VIRTIO_INTERRUPT_APIC_BASE: AtomicU64 = AtomicU64::new(0);
-static VIRTIO_INTERRUPT_APIC_MODE: AtomicU8 = AtomicU8::new(0);
-static VIRTIO_INTERRUPT_COUNT: AtomicU8 = AtomicU8::new(0);
-static VIRTIO_INTERRUPT_DOMAIN: AtomicU64 = AtomicU64::new(0);
-static VIRTIO_INTERRUPT_REQUEST: AtomicU64 = AtomicU64::new(0);
-static VIRTIO_INTERRUPT_OBJECT: AtomicU64 = AtomicU64::new(0);
-static VIRTIO_NETWORK_RX_ARMED: AtomicBool = AtomicBool::new(false);
-static FORCED_NOTIFIED_TIMEOUT_DOMAIN: AtomicU64 = AtomicU64::new(0);
-static FORCED_NOTIFIED_TIMEOUT_REQUEST: AtomicU64 = AtomicU64::new(0);
-static FORCED_NOTIFIED_TIMEOUT_OBJECT: AtomicU64 = AtomicU64::new(0);
+struct PciInterruptOwner {
+    virtio_fired: AtomicBool,
+    virtio_active: AtomicBool,
+    virtio_apic_base: AtomicU64,
+    virtio_apic_mode: AtomicU8,
+    virtio_count: AtomicU8,
+    virtio_domain: AtomicU64,
+    virtio_request: AtomicU64,
+    virtio_object: AtomicU64,
+    network_rx_armed: AtomicBool,
+    forced_timeout_domain: AtomicU64,
+    forced_timeout_request: AtomicU64,
+    forced_timeout_object: AtomicU64,
+}
+
+static PCI_INTERRUPTS: PciInterruptOwner = PciInterruptOwner {
+    virtio_fired: AtomicBool::new(false),
+    virtio_active: AtomicBool::new(false),
+    virtio_apic_base: AtomicU64::new(0),
+    virtio_apic_mode: AtomicU8::new(0),
+    virtio_count: AtomicU8::new(0),
+    virtio_domain: AtomicU64::new(0),
+    virtio_request: AtomicU64::new(0),
+    virtio_object: AtomicU64::new(0),
+    network_rx_armed: AtomicBool::new(false),
+    forced_timeout_domain: AtomicU64::new(0),
+    forced_timeout_request: AtomicU64::new(0),
+    forced_timeout_object: AtomicU64::new(0),
+};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum IsolatedInterruptCompletion {
@@ -972,20 +989,28 @@ fn install_virtio_interrupt(apic: &LocalApic) -> bool {
 }
 
 fn install_virtio_interrupt_at(apic: &LocalApic, vector: u8) -> bool {
-    VIRTIO_INTERRUPT_APIC_BASE.store(apic.physical_base, Ordering::SeqCst);
-    VIRTIO_INTERRUPT_APIC_MODE.store(
+    PCI_INTERRUPTS
+        .virtio_apic_base
+        .store(apic.physical_base, Ordering::SeqCst);
+    PCI_INTERRUPTS.virtio_apic_mode.store(
         if apic.mode == Mode::X2Apic { 1 } else { 0 },
         Ordering::SeqCst,
     );
-    VIRTIO_INTERRUPT_FIRED.store(false, Ordering::SeqCst);
-    VIRTIO_INTERRUPT_COUNT.store(0, Ordering::SeqCst);
-    VIRTIO_INTERRUPT_DOMAIN.store(0, Ordering::SeqCst);
-    VIRTIO_INTERRUPT_REQUEST.store(0, Ordering::SeqCst);
-    VIRTIO_INTERRUPT_OBJECT.store(0, Ordering::SeqCst);
-    VIRTIO_INTERRUPT_ACTIVE.store(false, Ordering::SeqCst);
-    FORCED_NOTIFIED_TIMEOUT_DOMAIN.store(0, Ordering::SeqCst);
-    FORCED_NOTIFIED_TIMEOUT_REQUEST.store(0, Ordering::SeqCst);
-    FORCED_NOTIFIED_TIMEOUT_OBJECT.store(0, Ordering::SeqCst);
+    PCI_INTERRUPTS.virtio_fired.store(false, Ordering::SeqCst);
+    PCI_INTERRUPTS.virtio_count.store(0, Ordering::SeqCst);
+    PCI_INTERRUPTS.virtio_domain.store(0, Ordering::SeqCst);
+    PCI_INTERRUPTS.virtio_request.store(0, Ordering::SeqCst);
+    PCI_INTERRUPTS.virtio_object.store(0, Ordering::SeqCst);
+    PCI_INTERRUPTS.virtio_active.store(false, Ordering::SeqCst);
+    PCI_INTERRUPTS
+        .forced_timeout_domain
+        .store(0, Ordering::SeqCst);
+    PCI_INTERRUPTS
+        .forced_timeout_request
+        .store(0, Ordering::SeqCst);
+    PCI_INTERRUPTS
+        .forced_timeout_object
+        .store(0, Ordering::SeqCst);
     cpu::install_interrupt_gate(vector, ginux_virtio_interrupt_entry as *const () as usize)
 }
 
@@ -994,44 +1019,52 @@ fn retire_virtio_interrupt(apic: &LocalApic) -> bool {
 }
 
 fn retire_virtio_interrupt_at(apic: &LocalApic, vector: u8) -> bool {
-    if VIRTIO_INTERRUPT_ACTIVE.load(Ordering::SeqCst) || !apic.vector_is_idle(vector) {
+    if PCI_INTERRUPTS.virtio_active.load(Ordering::SeqCst) || !apic.vector_is_idle(vector) {
         return false;
     }
     let cleared = cpu::clear_interrupt_gate(vector);
     if cleared {
-        VIRTIO_INTERRUPT_APIC_BASE.store(0, Ordering::SeqCst);
-        VIRTIO_INTERRUPT_APIC_MODE.store(0, Ordering::SeqCst);
-        VIRTIO_INTERRUPT_DOMAIN.store(0, Ordering::SeqCst);
-        VIRTIO_INTERRUPT_REQUEST.store(0, Ordering::SeqCst);
-        VIRTIO_INTERRUPT_OBJECT.store(0, Ordering::SeqCst);
-        FORCED_NOTIFIED_TIMEOUT_DOMAIN.store(0, Ordering::SeqCst);
-        FORCED_NOTIFIED_TIMEOUT_REQUEST.store(0, Ordering::SeqCst);
-        FORCED_NOTIFIED_TIMEOUT_OBJECT.store(0, Ordering::SeqCst);
+        PCI_INTERRUPTS.virtio_apic_base.store(0, Ordering::SeqCst);
+        PCI_INTERRUPTS.virtio_apic_mode.store(0, Ordering::SeqCst);
+        PCI_INTERRUPTS.virtio_domain.store(0, Ordering::SeqCst);
+        PCI_INTERRUPTS.virtio_request.store(0, Ordering::SeqCst);
+        PCI_INTERRUPTS.virtio_object.store(0, Ordering::SeqCst);
+        PCI_INTERRUPTS
+            .forced_timeout_domain
+            .store(0, Ordering::SeqCst);
+        PCI_INTERRUPTS
+            .forced_timeout_request
+            .store(0, Ordering::SeqCst);
+        PCI_INTERRUPTS
+            .forced_timeout_object
+            .store(0, Ordering::SeqCst);
     }
     cleared
 }
 
 extern "sysv64" fn virtio_interrupt_handler(_frame: *mut UserInterruptFrame) {
-    VIRTIO_INTERRUPT_COUNT.fetch_add(1, Ordering::SeqCst);
-    if VIRTIO_INTERRUPT_ACTIVE.load(Ordering::SeqCst) {
-        let domain = VIRTIO_INTERRUPT_DOMAIN.load(Ordering::SeqCst);
-        let request = VIRTIO_INTERRUPT_REQUEST.load(Ordering::SeqCst);
-        let object = VIRTIO_INTERRUPT_OBJECT.load(Ordering::SeqCst);
+    PCI_INTERRUPTS.virtio_count.fetch_add(1, Ordering::SeqCst);
+    if PCI_INTERRUPTS.virtio_active.load(Ordering::SeqCst) {
+        let domain = PCI_INTERRUPTS.virtio_domain.load(Ordering::SeqCst);
+        let request = PCI_INTERRUPTS.virtio_request.load(Ordering::SeqCst);
+        let object = PCI_INTERRUPTS.virtio_object.load(Ordering::SeqCst);
         if domain == 0
             || object == 0
             || scheduler::wake_device_completion(domain, object, request, 0)
         {
-            VIRTIO_INTERRUPT_FIRED.store(true, Ordering::SeqCst);
+            PCI_INTERRUPTS.virtio_fired.store(true, Ordering::SeqCst);
         }
     }
-    let mode = if VIRTIO_INTERRUPT_APIC_MODE.load(Ordering::SeqCst) == 1 {
+    let mode = if PCI_INTERRUPTS.virtio_apic_mode.load(Ordering::SeqCst) == 1 {
         Mode::X2Apic
     } else {
         Mode::XApic
     };
-    let Some(apic) =
-        LocalApic::from_saved(0, mode, VIRTIO_INTERRUPT_APIC_BASE.load(Ordering::SeqCst))
-    else {
+    let Some(apic) = LocalApic::from_saved(
+        0,
+        mode,
+        PCI_INTERRUPTS.virtio_apic_base.load(Ordering::SeqCst),
+    ) else {
         return;
     };
     // SAFETY: The interrupt proof owns this vector and stored the validated
@@ -1043,7 +1076,7 @@ unsafe fn wait_for_one_virtio_interrupt() -> bool {
     asm!("sti", options(nomem, nostack));
     let mut interrupted = false;
     for _ in 0..QUEUE_POLL_LIMIT {
-        if VIRTIO_INTERRUPT_FIRED.load(Ordering::SeqCst) {
+        if PCI_INTERRUPTS.virtio_fired.load(Ordering::SeqCst) {
             interrupted = true;
             break;
         }
@@ -1051,7 +1084,7 @@ unsafe fn wait_for_one_virtio_interrupt() -> bool {
     }
     asm!("cli", options(nomem, nostack));
     compiler_fence(Ordering::SeqCst);
-    interrupted && VIRTIO_INTERRUPT_COUNT.load(Ordering::SeqCst) == 1
+    interrupted && PCI_INTERRUPTS.virtio_count.load(Ordering::SeqCst) == 1
 }
 
 pub(crate) fn initialize_without_dma(
@@ -1454,10 +1487,16 @@ pub(crate) fn arm_isolated_network_tx_interrupt(
         let _ = retire_virtio_interrupt_at(apic, VIRTIO_NETWORK_TX_VECTOR);
         return false;
     }
-    VIRTIO_INTERRUPT_DOMAIN.store(domain, Ordering::SeqCst);
-    VIRTIO_INTERRUPT_REQUEST.store(request, Ordering::SeqCst);
-    VIRTIO_INTERRUPT_OBJECT.store(control_abi::NETWORK_DEVICE_OBJECT, Ordering::SeqCst);
-    VIRTIO_NETWORK_RX_ARMED.store(receive, Ordering::SeqCst);
+    PCI_INTERRUPTS.virtio_domain.store(domain, Ordering::SeqCst);
+    PCI_INTERRUPTS
+        .virtio_request
+        .store(request, Ordering::SeqCst);
+    PCI_INTERRUPTS
+        .virtio_object
+        .store(control_abi::NETWORK_DEVICE_OBJECT, Ordering::SeqCst);
+    PCI_INTERRUPTS
+        .network_rx_armed
+        .store(receive, Ordering::SeqCst);
     true
 }
 
@@ -1471,9 +1510,9 @@ pub(crate) fn activate_isolated_network_interrupt_queues(
 ) -> bool {
     if !dma_physical.is_multiple_of(DMA_PAGE_SIZE as u64)
         || !dma_virtual.is_multiple_of(DMA_PAGE_SIZE)
-        || VIRTIO_INTERRUPT_DOMAIN.load(Ordering::SeqCst) != domain
-        || VIRTIO_INTERRUPT_REQUEST.load(Ordering::SeqCst) != request
-        || VIRTIO_INTERRUPT_OBJECT.load(Ordering::SeqCst) != control_abi::NETWORK_DEVICE_OBJECT
+        || PCI_INTERRUPTS.virtio_domain.load(Ordering::SeqCst) != domain
+        || PCI_INTERRUPTS.virtio_request.load(Ordering::SeqCst) != request
+        || PCI_INTERRUPTS.virtio_object.load(Ordering::SeqCst) != control_abi::NETWORK_DEVICE_OBJECT
         || network_function_command(device)
             & (COMMAND_IO_SPACE | COMMAND_MEMORY_SPACE | COMMAND_BUS_MASTER)
             != COMMAND_MEMORY_SPACE
@@ -1483,7 +1522,7 @@ pub(crate) fn activate_isolated_network_interrupt_queues(
             common_mapping,
             dma_physical,
             false,
-            if VIRTIO_NETWORK_RX_ARMED.load(Ordering::SeqCst) {
+            if PCI_INTERRUPTS.network_rx_armed.load(Ordering::SeqCst) {
                 0
             } else {
                 u16::MAX
@@ -1510,7 +1549,7 @@ pub(crate) fn activate_isolated_network_interrupt_queues(
             common_mapping,
             dma_physical,
             true,
-            if VIRTIO_NETWORK_RX_ARMED.load(Ordering::SeqCst) {
+            if PCI_INTERRUPTS.network_rx_armed.load(Ordering::SeqCst) {
                 0
             } else {
                 u16::MAX
@@ -1546,7 +1585,7 @@ pub(crate) fn network_interrupt_queues_are_bound(
         common_mapping,
         dma_physical,
         require_bus_master,
-        if VIRTIO_NETWORK_RX_ARMED.load(Ordering::SeqCst) {
+        if PCI_INTERRUPTS.network_rx_armed.load(Ordering::SeqCst) {
             0
         } else {
             u16::MAX
@@ -1622,18 +1661,18 @@ pub(crate) fn isolated_network_interrupt_wait_ready(
 ) -> bool {
     domain != 0
         && request != 0
-        && VIRTIO_INTERRUPT_DOMAIN.load(Ordering::SeqCst) == domain
-        && VIRTIO_INTERRUPT_REQUEST.load(Ordering::SeqCst) == request
-        && VIRTIO_INTERRUPT_OBJECT.load(Ordering::SeqCst) == control_abi::NETWORK_DEVICE_OBJECT
-        && !VIRTIO_INTERRUPT_ACTIVE.load(Ordering::SeqCst)
-        && !VIRTIO_INTERRUPT_FIRED.load(Ordering::SeqCst)
-        && VIRTIO_INTERRUPT_COUNT.load(Ordering::SeqCst) == 0
+        && PCI_INTERRUPTS.virtio_domain.load(Ordering::SeqCst) == domain
+        && PCI_INTERRUPTS.virtio_request.load(Ordering::SeqCst) == request
+        && PCI_INTERRUPTS.virtio_object.load(Ordering::SeqCst) == control_abi::NETWORK_DEVICE_OBJECT
+        && !PCI_INTERRUPTS.virtio_active.load(Ordering::SeqCst)
+        && !PCI_INTERRUPTS.virtio_fired.load(Ordering::SeqCst)
+        && PCI_INTERRUPTS.virtio_count.load(Ordering::SeqCst) == 0
         && network_queues_are_bound(
             device,
             common_mapping,
             dma_physical,
             true,
-            if VIRTIO_NETWORK_RX_ARMED.load(Ordering::SeqCst) {
+            if PCI_INTERRUPTS.network_rx_armed.load(Ordering::SeqCst) {
                 0
             } else {
                 u16::MAX
@@ -1649,24 +1688,30 @@ pub(crate) fn complete_isolated_network_interrupt_wait(
     request: u64,
     queue: u16,
 ) -> IsolatedInterruptCompletion {
-    if VIRTIO_INTERRUPT_DOMAIN.load(Ordering::SeqCst) != domain
-        || VIRTIO_INTERRUPT_REQUEST.load(Ordering::SeqCst) != request
-        || VIRTIO_INTERRUPT_OBJECT.load(Ordering::SeqCst) != control_abi::NETWORK_DEVICE_OBJECT
+    if PCI_INTERRUPTS.virtio_domain.load(Ordering::SeqCst) != domain
+        || PCI_INTERRUPTS.virtio_request.load(Ordering::SeqCst) != request
+        || PCI_INTERRUPTS.virtio_object.load(Ordering::SeqCst) != control_abi::NETWORK_DEVICE_OBJECT
         || !matches!(queue, 0 | 1)
-        || queue == 0 && !VIRTIO_NETWORK_RX_ARMED.load(Ordering::SeqCst)
+        || queue == 0 && !PCI_INTERRUPTS.network_rx_armed.load(Ordering::SeqCst)
     {
         return IsolatedInterruptCompletion::Failed;
     }
-    let force_timeout = FORCED_NOTIFIED_TIMEOUT_DOMAIN.load(Ordering::SeqCst) == domain
-        && FORCED_NOTIFIED_TIMEOUT_REQUEST.load(Ordering::SeqCst) == request
-        && FORCED_NOTIFIED_TIMEOUT_OBJECT.load(Ordering::SeqCst)
+    let force_timeout = PCI_INTERRUPTS.forced_timeout_domain.load(Ordering::SeqCst) == domain
+        && PCI_INTERRUPTS.forced_timeout_request.load(Ordering::SeqCst) == request
+        && PCI_INTERRUPTS.forced_timeout_object.load(Ordering::SeqCst)
             == control_abi::NETWORK_DEVICE_OBJECT;
     if force_timeout {
-        FORCED_NOTIFIED_TIMEOUT_DOMAIN.store(0, Ordering::SeqCst);
-        FORCED_NOTIFIED_TIMEOUT_REQUEST.store(0, Ordering::SeqCst);
-        FORCED_NOTIFIED_TIMEOUT_OBJECT.store(0, Ordering::SeqCst);
+        PCI_INTERRUPTS
+            .forced_timeout_domain
+            .store(0, Ordering::SeqCst);
+        PCI_INTERRUPTS
+            .forced_timeout_request
+            .store(0, Ordering::SeqCst);
+        PCI_INTERRUPTS
+            .forced_timeout_object
+            .store(0, Ordering::SeqCst);
     }
-    VIRTIO_INTERRUPT_ACTIVE.store(true, Ordering::SeqCst);
+    PCI_INTERRUPTS.virtio_active.store(true, Ordering::SeqCst);
     let interrupt_configured = if force_timeout {
         set_msix_entry_mask_raw(device.msix_target(), msix_mapping, queue, true)
             && set_msix_control_raw(device.msix_target(), true, true)
@@ -1675,7 +1720,7 @@ pub(crate) fn complete_isolated_network_interrupt_wait(
             && set_msix_control_raw(device.msix_target(), true, false)
     };
     if !timer::arm_network_device_wait_timer(domain, request) || !interrupt_configured {
-        VIRTIO_INTERRUPT_ACTIVE.store(false, Ordering::SeqCst);
+        PCI_INTERRUPTS.virtio_active.store(false, Ordering::SeqCst);
         let _ = timer::finish_device_wait_timer(domain, request);
         let _ = scheduler::wake_device_completion(
             domain,
@@ -1685,14 +1730,14 @@ pub(crate) fn complete_isolated_network_interrupt_wait(
         );
         return IsolatedInterruptCompletion::Failed;
     }
-    while !VIRTIO_INTERRUPT_FIRED.load(Ordering::SeqCst)
+    while !PCI_INTERRUPTS.virtio_fired.load(Ordering::SeqCst)
         && !timer::device_wait_timed_out(domain, request)
     {
         unsafe { asm!("sti", "hlt", "cli", options(nomem, nostack)) };
     }
     let function_masked = set_msix_control_raw(device.msix_target(), true, true);
     let entry_masked = set_msix_entry_mask_raw(device.msix_target(), msix_mapping, queue, true);
-    VIRTIO_INTERRUPT_ACTIVE.store(false, Ordering::SeqCst);
+    PCI_INTERRUPTS.virtio_active.store(false, Ordering::SeqCst);
     let Some(timed_out) = timer::finish_device_wait_timer(domain, request) else {
         return IsolatedInterruptCompletion::Failed;
     };
@@ -1700,7 +1745,7 @@ pub(crate) fn complete_isolated_network_interrupt_wait(
         IsolatedInterruptCompletion::Failed
     } else if timed_out {
         IsolatedInterruptCompletion::TimedOut
-    } else if VIRTIO_INTERRUPT_COUNT.load(Ordering::SeqCst) == 1 {
+    } else if PCI_INTERRUPTS.virtio_count.load(Ordering::SeqCst) == 1 {
         IsolatedInterruptCompletion::Completed
     } else {
         IsolatedInterruptCompletion::Failed
@@ -1714,18 +1759,20 @@ pub(crate) fn advance_isolated_network_interrupt_wait(
 ) -> bool {
     if domain == 0
         || next_request != completed_request.checked_add(1).unwrap_or(0)
-        || VIRTIO_INTERRUPT_DOMAIN.load(Ordering::SeqCst) != domain
-        || VIRTIO_INTERRUPT_REQUEST.load(Ordering::SeqCst) != completed_request
-        || VIRTIO_INTERRUPT_OBJECT.load(Ordering::SeqCst) != control_abi::NETWORK_DEVICE_OBJECT
-        || VIRTIO_INTERRUPT_ACTIVE.load(Ordering::SeqCst)
-        || !VIRTIO_INTERRUPT_FIRED.load(Ordering::SeqCst)
-        || VIRTIO_INTERRUPT_COUNT.load(Ordering::SeqCst) != 1
+        || PCI_INTERRUPTS.virtio_domain.load(Ordering::SeqCst) != domain
+        || PCI_INTERRUPTS.virtio_request.load(Ordering::SeqCst) != completed_request
+        || PCI_INTERRUPTS.virtio_object.load(Ordering::SeqCst) != control_abi::NETWORK_DEVICE_OBJECT
+        || PCI_INTERRUPTS.virtio_active.load(Ordering::SeqCst)
+        || !PCI_INTERRUPTS.virtio_fired.load(Ordering::SeqCst)
+        || PCI_INTERRUPTS.virtio_count.load(Ordering::SeqCst) != 1
     {
         return false;
     }
-    VIRTIO_INTERRUPT_FIRED.store(false, Ordering::SeqCst);
-    VIRTIO_INTERRUPT_COUNT.store(0, Ordering::SeqCst);
-    VIRTIO_INTERRUPT_REQUEST.store(next_request, Ordering::SeqCst);
+    PCI_INTERRUPTS.virtio_fired.store(false, Ordering::SeqCst);
+    PCI_INTERRUPTS.virtio_count.store(0, Ordering::SeqCst);
+    PCI_INTERRUPTS
+        .virtio_request
+        .store(next_request, Ordering::SeqCst);
     true
 }
 
@@ -1736,31 +1783,35 @@ pub(crate) fn quiesce_isolated_network_interrupt(
     domain: u64,
     request: u64,
 ) -> bool {
-    if VIRTIO_INTERRUPT_DOMAIN.load(Ordering::SeqCst) != domain
-        || VIRTIO_INTERRUPT_REQUEST.load(Ordering::SeqCst) != request
-        || VIRTIO_INTERRUPT_OBJECT.load(Ordering::SeqCst) != control_abi::NETWORK_DEVICE_OBJECT
+    if PCI_INTERRUPTS.virtio_domain.load(Ordering::SeqCst) != domain
+        || PCI_INTERRUPTS.virtio_request.load(Ordering::SeqCst) != request
+        || PCI_INTERRUPTS.virtio_object.load(Ordering::SeqCst) != control_abi::NETWORK_DEVICE_OBJECT
     {
         return false;
     }
-    let mode = if VIRTIO_INTERRUPT_APIC_MODE.load(Ordering::SeqCst) == 1 {
+    let mode = if PCI_INTERRUPTS.virtio_apic_mode.load(Ordering::SeqCst) == 1 {
         Mode::X2Apic
     } else {
         Mode::XApic
     };
-    let Some(apic) =
-        LocalApic::from_saved(0, mode, VIRTIO_INTERRUPT_APIC_BASE.load(Ordering::SeqCst))
-    else {
+    let Some(apic) = LocalApic::from_saved(
+        0,
+        mode,
+        PCI_INTERRUPTS.virtio_apic_base.load(Ordering::SeqCst),
+    ) else {
         return false;
     };
     let function_masked = set_msix_control_raw(device.msix_target(), true, true);
-    let receive_masked = !VIRTIO_NETWORK_RX_ARMED.load(Ordering::SeqCst)
+    let receive_masked = !PCI_INTERRUPTS.network_rx_armed.load(Ordering::SeqCst)
         || set_msix_entry_mask_raw(device.msix_target(), msix_mapping, 0, true);
     let entry_masked = set_msix_entry_mask_raw(device.msix_target(), msix_mapping, 1, true);
     let msix_disabled = set_msix_control_raw(device.msix_target(), false, true);
     let device_quiesced = quiesce_isolated_network(device, common_mapping);
-    VIRTIO_INTERRUPT_ACTIVE.store(false, Ordering::SeqCst);
+    PCI_INTERRUPTS.virtio_active.store(false, Ordering::SeqCst);
     let transmit_retired = retire_virtio_interrupt_at(&apic, VIRTIO_NETWORK_TX_VECTOR);
-    let receive_retired = !VIRTIO_NETWORK_RX_ARMED.swap(false, Ordering::SeqCst)
+    let receive_retired = !PCI_INTERRUPTS
+        .network_rx_armed
+        .swap(false, Ordering::SeqCst)
         || retire_virtio_interrupt_at(&apic, VIRTIO_NETWORK_RX_VECTOR);
     function_masked
         && receive_masked
@@ -2276,9 +2327,9 @@ pub(crate) unsafe fn transmit_network_probe(
         if network_function_command(device) != COMMAND_MEMORY_SPACE | COMMAND_BUS_MASTER {
             return None;
         }
-        VIRTIO_INTERRUPT_FIRED.store(false, Ordering::SeqCst);
-        VIRTIO_INTERRUPT_COUNT.store(0, Ordering::SeqCst);
-        VIRTIO_INTERRUPT_ACTIVE.store(true, Ordering::SeqCst);
+        PCI_INTERRUPTS.virtio_fired.store(false, Ordering::SeqCst);
+        PCI_INTERRUPTS.virtio_count.store(0, Ordering::SeqCst);
+        PCI_INTERRUPTS.virtio_active.store(true, Ordering::SeqCst);
         if !set_msix_entry_mask_raw(device.msix_target(), msix_mapping, 1, false)
             || !set_msix_control_raw(device.msix_target(), true, false)
         {
@@ -2310,7 +2361,7 @@ pub(crate) unsafe fn transmit_network_probe(
     let function_masked = set_msix_control_raw(device.msix_target(), true, true);
     let entry_masked = set_msix_entry_mask_raw(device.msix_target(), msix_mapping, 1, true);
     let msix_disabled = set_msix_control_raw(device.msix_target(), false, true);
-    VIRTIO_INTERRUPT_ACTIVE.store(false, Ordering::SeqCst);
+    PCI_INTERRUPTS.virtio_active.store(false, Ordering::SeqCst);
     let current = network_function_command(device);
     write_config_u16(
         device.bus,
@@ -2621,9 +2672,9 @@ unsafe fn network_arp_exchange(
             return None;
         }
 
-        VIRTIO_INTERRUPT_FIRED.store(false, Ordering::SeqCst);
-        VIRTIO_INTERRUPT_COUNT.store(0, Ordering::SeqCst);
-        VIRTIO_INTERRUPT_ACTIVE.store(true, Ordering::SeqCst);
+        PCI_INTERRUPTS.virtio_fired.store(false, Ordering::SeqCst);
+        PCI_INTERRUPTS.virtio_count.store(0, Ordering::SeqCst);
+        PCI_INTERRUPTS.virtio_active.store(true, Ordering::SeqCst);
         if !set_msix_entry_mask_raw(device.msix_target(), msix_mapping, 1, false)
             || !set_msix_control_raw(device.msix_target(), true, false)
         {
@@ -2649,8 +2700,8 @@ unsafe fn network_arp_exchange(
             return None;
         }
 
-        VIRTIO_INTERRUPT_FIRED.store(false, Ordering::SeqCst);
-        VIRTIO_INTERRUPT_COUNT.store(0, Ordering::SeqCst);
+        PCI_INTERRUPTS.virtio_fired.store(false, Ordering::SeqCst);
+        PCI_INTERRUPTS.virtio_count.store(0, Ordering::SeqCst);
         if !set_msix_entry_mask_raw(device.msix_target(), msix_mapping, 0, false) {
             return None;
         }
@@ -2705,7 +2756,7 @@ unsafe fn network_arp_exchange(
     let receive_masked = set_msix_entry_mask_raw(device.msix_target(), msix_mapping, 0, true);
     let transmit_masked = set_msix_entry_mask_raw(device.msix_target(), msix_mapping, 1, true);
     let msix_disabled = set_msix_control_raw(device.msix_target(), false, true);
-    VIRTIO_INTERRUPT_ACTIVE.store(false, Ordering::SeqCst);
+    PCI_INTERRUPTS.virtio_active.store(false, Ordering::SeqCst);
     let current = network_function_command(device);
     write_config_u16(
         device.bus,
@@ -2882,8 +2933,8 @@ pub(crate) unsafe fn read_blank_sector_interrupt(
             return None;
         }
 
-        VIRTIO_INTERRUPT_FIRED.store(false, Ordering::SeqCst);
-        VIRTIO_INTERRUPT_ACTIVE.store(true, Ordering::SeqCst);
+        PCI_INTERRUPTS.virtio_fired.store(false, Ordering::SeqCst);
+        PCI_INTERRUPTS.virtio_active.store(true, Ordering::SeqCst);
         if !set_msix_entry_mask(device, msix_mapping, 0, false)
             || !set_msix_control(device, true, false)
         {
@@ -2895,7 +2946,7 @@ pub(crate) unsafe fn read_blank_sector_interrupt(
         asm!("sti", options(nomem, nostack));
         let mut interrupted = false;
         for _ in 0..QUEUE_POLL_LIMIT {
-            if VIRTIO_INTERRUPT_FIRED.load(Ordering::SeqCst) {
+            if PCI_INTERRUPTS.virtio_fired.load(Ordering::SeqCst) {
                 interrupted = true;
                 break;
             }
@@ -2928,7 +2979,7 @@ pub(crate) unsafe fn read_blank_sector_interrupt(
     let msix_disabled = set_msix_control(device, false, true);
     let bus_master_disabled = set_pci_command(device, false);
     let reset_complete = reset(common).is_some();
-    VIRTIO_INTERRUPT_ACTIVE.store(false, Ordering::SeqCst);
+    PCI_INTERRUPTS.virtio_active.store(false, Ordering::SeqCst);
     let interrupt_retired = retire_virtio_interrupt(apic);
     if !function_masked
         || !entry_masked
@@ -2937,8 +2988,8 @@ pub(crate) unsafe fn read_blank_sector_interrupt(
         || !reset_complete
         || !bus_master_is_disabled(device)
         || !interrupt_retired
-        || !VIRTIO_INTERRUPT_FIRED.load(Ordering::SeqCst)
-        || VIRTIO_INTERRUPT_COUNT.load(Ordering::SeqCst) != 1
+        || !PCI_INTERRUPTS.virtio_fired.load(Ordering::SeqCst)
+        || PCI_INTERRUPTS.virtio_count.load(Ordering::SeqCst) != 1
     {
         return None;
     }
@@ -3658,16 +3709,20 @@ pub(crate) fn arm_isolated_device_interrupt(
         && set_pci_command(device, true)
         && bus_master_is_enabled(device);
     if armed {
-        VIRTIO_INTERRUPT_DOMAIN.store(domain, Ordering::SeqCst);
-        VIRTIO_INTERRUPT_REQUEST.store(request, Ordering::SeqCst);
-        VIRTIO_INTERRUPT_OBJECT.store(control_abi::BLOCK_DEVICE_OBJECT, Ordering::SeqCst);
+        PCI_INTERRUPTS.virtio_domain.store(domain, Ordering::SeqCst);
+        PCI_INTERRUPTS
+            .virtio_request
+            .store(request, Ordering::SeqCst);
+        PCI_INTERRUPTS
+            .virtio_object
+            .store(control_abi::BLOCK_DEVICE_OBJECT, Ordering::SeqCst);
         return true;
     }
     let _ = set_msix_control(device, true, true);
     let _ = set_msix_entry_mask(device, msix_mapping, 0, true);
     let _ = set_msix_control(device, false, true);
     let _ = set_pci_command(device, false);
-    VIRTIO_INTERRUPT_ACTIVE.store(false, Ordering::SeqCst);
+    PCI_INTERRUPTS.virtio_active.store(false, Ordering::SeqCst);
     let _ = retire_virtio_interrupt(apic);
     false
 }
@@ -3687,12 +3742,12 @@ pub(crate) fn isolated_interrupt_wait_ready(
     };
     domain != 0
         && request != 0
-        && VIRTIO_INTERRUPT_DOMAIN.load(Ordering::SeqCst) == domain
-        && VIRTIO_INTERRUPT_REQUEST.load(Ordering::SeqCst) == request
-        && VIRTIO_INTERRUPT_OBJECT.load(Ordering::SeqCst) == control_abi::BLOCK_DEVICE_OBJECT
-        && !VIRTIO_INTERRUPT_ACTIVE.load(Ordering::SeqCst)
-        && !VIRTIO_INTERRUPT_FIRED.load(Ordering::SeqCst)
-        && VIRTIO_INTERRUPT_COUNT.load(Ordering::SeqCst) == 0
+        && PCI_INTERRUPTS.virtio_domain.load(Ordering::SeqCst) == domain
+        && PCI_INTERRUPTS.virtio_request.load(Ordering::SeqCst) == request
+        && PCI_INTERRUPTS.virtio_object.load(Ordering::SeqCst) == control_abi::BLOCK_DEVICE_OBJECT
+        && !PCI_INTERRUPTS.virtio_active.load(Ordering::SeqCst)
+        && !PCI_INTERRUPTS.virtio_fired.load(Ordering::SeqCst)
+        && PCI_INTERRUPTS.virtio_count.load(Ordering::SeqCst) == 0
         && read_common_u16(common, COMMON_QUEUE_MSIX_VECTOR) == 0
         && device_active_queue_is_bound(device, mapping, dma_physical)
 }
@@ -3704,30 +3759,36 @@ pub(crate) fn complete_isolated_interrupt_wait(
     request: u64,
     notified: bool,
 ) -> IsolatedInterruptCompletion {
-    if VIRTIO_INTERRUPT_DOMAIN.load(Ordering::SeqCst) != domain
-        || VIRTIO_INTERRUPT_REQUEST.load(Ordering::SeqCst) != request
-        || VIRTIO_INTERRUPT_OBJECT.load(Ordering::SeqCst) != control_abi::BLOCK_DEVICE_OBJECT
+    if PCI_INTERRUPTS.virtio_domain.load(Ordering::SeqCst) != domain
+        || PCI_INTERRUPTS.virtio_request.load(Ordering::SeqCst) != request
+        || PCI_INTERRUPTS.virtio_object.load(Ordering::SeqCst) != control_abi::BLOCK_DEVICE_OBJECT
     {
         return IsolatedInterruptCompletion::Failed;
     }
     let force_timeout = notified
-        && FORCED_NOTIFIED_TIMEOUT_DOMAIN.load(Ordering::SeqCst) == domain
-        && FORCED_NOTIFIED_TIMEOUT_REQUEST.load(Ordering::SeqCst) == request
-        && FORCED_NOTIFIED_TIMEOUT_OBJECT.load(Ordering::SeqCst)
+        && PCI_INTERRUPTS.forced_timeout_domain.load(Ordering::SeqCst) == domain
+        && PCI_INTERRUPTS.forced_timeout_request.load(Ordering::SeqCst) == request
+        && PCI_INTERRUPTS.forced_timeout_object.load(Ordering::SeqCst)
             == control_abi::BLOCK_DEVICE_OBJECT;
     if force_timeout {
-        FORCED_NOTIFIED_TIMEOUT_DOMAIN.store(0, Ordering::SeqCst);
-        FORCED_NOTIFIED_TIMEOUT_REQUEST.store(0, Ordering::SeqCst);
-        FORCED_NOTIFIED_TIMEOUT_OBJECT.store(0, Ordering::SeqCst);
+        PCI_INTERRUPTS
+            .forced_timeout_domain
+            .store(0, Ordering::SeqCst);
+        PCI_INTERRUPTS
+            .forced_timeout_request
+            .store(0, Ordering::SeqCst);
+        PCI_INTERRUPTS
+            .forced_timeout_object
+            .store(0, Ordering::SeqCst);
     }
-    VIRTIO_INTERRUPT_ACTIVE.store(true, Ordering::SeqCst);
+    PCI_INTERRUPTS.virtio_active.store(true, Ordering::SeqCst);
     let interrupt_configured = if force_timeout {
         set_msix_entry_mask(device, msix_mapping, 0, true) && set_msix_control(device, true, true)
     } else {
         set_msix_entry_mask(device, msix_mapping, 0, false) && set_msix_control(device, true, false)
     };
     if !timer::arm_device_wait_timer(domain, request) || !interrupt_configured {
-        VIRTIO_INTERRUPT_ACTIVE.store(false, Ordering::SeqCst);
+        PCI_INTERRUPTS.virtio_active.store(false, Ordering::SeqCst);
         let _ = timer::finish_device_wait_timer(domain, request);
         let _ = scheduler::wake_device_completion(
             domain,
@@ -3737,7 +3798,7 @@ pub(crate) fn complete_isolated_interrupt_wait(
         );
         return IsolatedInterruptCompletion::Failed;
     }
-    while !VIRTIO_INTERRUPT_FIRED.load(Ordering::SeqCst)
+    while !PCI_INTERRUPTS.virtio_fired.load(Ordering::SeqCst)
         && !timer::device_wait_timed_out(domain, request)
     {
         // STI's interrupt shadow covers the following HLT, so an interrupt
@@ -3746,7 +3807,7 @@ pub(crate) fn complete_isolated_interrupt_wait(
     }
     let function_masked = set_msix_control(device, true, true);
     let entry_masked = set_msix_entry_mask(device, msix_mapping, 0, true);
-    VIRTIO_INTERRUPT_ACTIVE.store(false, Ordering::SeqCst);
+    PCI_INTERRUPTS.virtio_active.store(false, Ordering::SeqCst);
     let Some(timed_out) = timer::finish_device_wait_timer(domain, request) else {
         return IsolatedInterruptCompletion::Failed;
     };
@@ -3754,7 +3815,7 @@ pub(crate) fn complete_isolated_interrupt_wait(
         IsolatedInterruptCompletion::Failed
     } else if timed_out {
         IsolatedInterruptCompletion::TimedOut
-    } else if VIRTIO_INTERRUPT_COUNT.load(Ordering::SeqCst) == 1 {
+    } else if PCI_INTERRUPTS.virtio_count.load(Ordering::SeqCst) == 1 {
         IsolatedInterruptCompletion::Completed
     } else {
         IsolatedInterruptCompletion::Failed
@@ -3770,21 +3831,27 @@ pub(crate) fn force_next_network_wait_timeout(domain: u64, request: u64) -> bool
 }
 
 pub(crate) fn force_next_network_receive_wait_timeout(domain: u64, request: u64) -> bool {
-    let current = VIRTIO_INTERRUPT_REQUEST.load(Ordering::SeqCst);
+    let current = PCI_INTERRUPTS.virtio_request.load(Ordering::SeqCst);
     if domain == 0
         || request != current.checked_add(1).unwrap_or(0)
-        || VIRTIO_INTERRUPT_DOMAIN.load(Ordering::SeqCst) != domain
-        || VIRTIO_INTERRUPT_OBJECT.load(Ordering::SeqCst) != control_abi::NETWORK_DEVICE_OBJECT
-        || !VIRTIO_NETWORK_RX_ARMED.load(Ordering::SeqCst)
-        || FORCED_NOTIFIED_TIMEOUT_DOMAIN.load(Ordering::SeqCst) != 0
-        || FORCED_NOTIFIED_TIMEOUT_REQUEST.load(Ordering::SeqCst) != 0
-        || FORCED_NOTIFIED_TIMEOUT_OBJECT.load(Ordering::SeqCst) != 0
+        || PCI_INTERRUPTS.virtio_domain.load(Ordering::SeqCst) != domain
+        || PCI_INTERRUPTS.virtio_object.load(Ordering::SeqCst) != control_abi::NETWORK_DEVICE_OBJECT
+        || !PCI_INTERRUPTS.network_rx_armed.load(Ordering::SeqCst)
+        || PCI_INTERRUPTS.forced_timeout_domain.load(Ordering::SeqCst) != 0
+        || PCI_INTERRUPTS.forced_timeout_request.load(Ordering::SeqCst) != 0
+        || PCI_INTERRUPTS.forced_timeout_object.load(Ordering::SeqCst) != 0
     {
         return false;
     }
-    FORCED_NOTIFIED_TIMEOUT_OBJECT.store(control_abi::NETWORK_DEVICE_OBJECT, Ordering::SeqCst);
-    FORCED_NOTIFIED_TIMEOUT_REQUEST.store(request, Ordering::SeqCst);
-    FORCED_NOTIFIED_TIMEOUT_DOMAIN.store(domain, Ordering::SeqCst);
+    PCI_INTERRUPTS
+        .forced_timeout_object
+        .store(control_abi::NETWORK_DEVICE_OBJECT, Ordering::SeqCst);
+    PCI_INTERRUPTS
+        .forced_timeout_request
+        .store(request, Ordering::SeqCst);
+    PCI_INTERRUPTS
+        .forced_timeout_domain
+        .store(domain, Ordering::SeqCst);
     true
 }
 
@@ -3792,18 +3859,24 @@ fn force_next_notified_wait_timeout_for(domain: u64, object: u64, request: u64) 
     if domain == 0
         || object == 0
         || request == 0
-        || VIRTIO_INTERRUPT_DOMAIN.load(Ordering::SeqCst) != domain
-        || VIRTIO_INTERRUPT_REQUEST.load(Ordering::SeqCst) != request
-        || VIRTIO_INTERRUPT_OBJECT.load(Ordering::SeqCst) != object
-        || FORCED_NOTIFIED_TIMEOUT_DOMAIN.load(Ordering::SeqCst) != 0
-        || FORCED_NOTIFIED_TIMEOUT_REQUEST.load(Ordering::SeqCst) != 0
-        || FORCED_NOTIFIED_TIMEOUT_OBJECT.load(Ordering::SeqCst) != 0
+        || PCI_INTERRUPTS.virtio_domain.load(Ordering::SeqCst) != domain
+        || PCI_INTERRUPTS.virtio_request.load(Ordering::SeqCst) != request
+        || PCI_INTERRUPTS.virtio_object.load(Ordering::SeqCst) != object
+        || PCI_INTERRUPTS.forced_timeout_domain.load(Ordering::SeqCst) != 0
+        || PCI_INTERRUPTS.forced_timeout_request.load(Ordering::SeqCst) != 0
+        || PCI_INTERRUPTS.forced_timeout_object.load(Ordering::SeqCst) != 0
     {
         return false;
     }
-    FORCED_NOTIFIED_TIMEOUT_OBJECT.store(object, Ordering::SeqCst);
-    FORCED_NOTIFIED_TIMEOUT_REQUEST.store(request, Ordering::SeqCst);
-    FORCED_NOTIFIED_TIMEOUT_DOMAIN.store(domain, Ordering::SeqCst);
+    PCI_INTERRUPTS
+        .forced_timeout_object
+        .store(object, Ordering::SeqCst);
+    PCI_INTERRUPTS
+        .forced_timeout_request
+        .store(request, Ordering::SeqCst);
+    PCI_INTERRUPTS
+        .forced_timeout_domain
+        .store(domain, Ordering::SeqCst);
     true
 }
 
@@ -3814,18 +3887,20 @@ pub(crate) fn advance_isolated_interrupt_wait(
 ) -> bool {
     if domain == 0
         || next_request != completed_request.checked_add(1).unwrap_or(0)
-        || VIRTIO_INTERRUPT_DOMAIN.load(Ordering::SeqCst) != domain
-        || VIRTIO_INTERRUPT_REQUEST.load(Ordering::SeqCst) != completed_request
-        || VIRTIO_INTERRUPT_OBJECT.load(Ordering::SeqCst) != control_abi::BLOCK_DEVICE_OBJECT
-        || VIRTIO_INTERRUPT_ACTIVE.load(Ordering::SeqCst)
-        || !VIRTIO_INTERRUPT_FIRED.load(Ordering::SeqCst)
-        || VIRTIO_INTERRUPT_COUNT.load(Ordering::SeqCst) != 1
+        || PCI_INTERRUPTS.virtio_domain.load(Ordering::SeqCst) != domain
+        || PCI_INTERRUPTS.virtio_request.load(Ordering::SeqCst) != completed_request
+        || PCI_INTERRUPTS.virtio_object.load(Ordering::SeqCst) != control_abi::BLOCK_DEVICE_OBJECT
+        || PCI_INTERRUPTS.virtio_active.load(Ordering::SeqCst)
+        || !PCI_INTERRUPTS.virtio_fired.load(Ordering::SeqCst)
+        || PCI_INTERRUPTS.virtio_count.load(Ordering::SeqCst) != 1
     {
         return false;
     }
-    VIRTIO_INTERRUPT_FIRED.store(false, Ordering::SeqCst);
-    VIRTIO_INTERRUPT_COUNT.store(0, Ordering::SeqCst);
-    VIRTIO_INTERRUPT_REQUEST.store(next_request, Ordering::SeqCst);
+    PCI_INTERRUPTS.virtio_fired.store(false, Ordering::SeqCst);
+    PCI_INTERRUPTS.virtio_count.store(0, Ordering::SeqCst);
+    PCI_INTERRUPTS
+        .virtio_request
+        .store(next_request, Ordering::SeqCst);
     true
 }
 
@@ -3836,27 +3911,29 @@ pub(crate) fn quiesce_isolated_interrupt(
     domain: u64,
     request: u64,
 ) -> bool {
-    if VIRTIO_INTERRUPT_DOMAIN.load(Ordering::SeqCst) != domain
-        || VIRTIO_INTERRUPT_REQUEST.load(Ordering::SeqCst) != request
-        || VIRTIO_INTERRUPT_OBJECT.load(Ordering::SeqCst) != control_abi::BLOCK_DEVICE_OBJECT
+    if PCI_INTERRUPTS.virtio_domain.load(Ordering::SeqCst) != domain
+        || PCI_INTERRUPTS.virtio_request.load(Ordering::SeqCst) != request
+        || PCI_INTERRUPTS.virtio_object.load(Ordering::SeqCst) != control_abi::BLOCK_DEVICE_OBJECT
     {
         return false;
     }
-    let mode = if VIRTIO_INTERRUPT_APIC_MODE.load(Ordering::SeqCst) == 1 {
+    let mode = if PCI_INTERRUPTS.virtio_apic_mode.load(Ordering::SeqCst) == 1 {
         Mode::X2Apic
     } else {
         Mode::XApic
     };
-    let Some(apic) =
-        LocalApic::from_saved(0, mode, VIRTIO_INTERRUPT_APIC_BASE.load(Ordering::SeqCst))
-    else {
+    let Some(apic) = LocalApic::from_saved(
+        0,
+        mode,
+        PCI_INTERRUPTS.virtio_apic_base.load(Ordering::SeqCst),
+    ) else {
         return false;
     };
     let function_masked = set_msix_control(device, true, true);
     let entry_masked = set_msix_entry_mask(device, msix_mapping, 0, true);
     let msix_disabled = set_msix_control(device, false, true);
     let device_quiesced = quiesce(device, mapping);
-    VIRTIO_INTERRUPT_ACTIVE.store(false, Ordering::SeqCst);
+    PCI_INTERRUPTS.virtio_active.store(false, Ordering::SeqCst);
     function_masked
         && entry_masked
         && msix_disabled

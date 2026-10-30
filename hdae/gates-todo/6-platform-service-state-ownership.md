@@ -34,6 +34,9 @@ state into explicit host, device, service, or domain-owned structures.
 - [x] Consolidated auxiliary address-space registration, controller image
   publication, native-volume completion, and unsafe-quiesce diagnostics into
   one explicit host address-space service owner.
+- [x] Consolidated PCI interrupt routing/completion state and APIC timer,
+  preemption, Linux wait, and device timeout state into two explicit host
+  device owner roots.
 
 ## Remaining work
 
@@ -78,6 +81,9 @@ state into explicit host, device, service, or domain-owned structures.
 - After the address-space service migration, `make architecture-check` passed
   with the inventory reduced from 493 to 487 objects, `make check` passed, and
   the full verification QEMU boot completed cleanly.
+- After the PCI/timer migration, `make architecture-check` passed with the
+  inventory reduced from 487 to 458 objects, `make check` passed, and the full
+  verification QEMU boot completed cleanly.
 
 ## Decisions and limitations
 
@@ -94,7 +100,8 @@ not itself prohibited when ownership and synchronization are concrete.
 - Actual commits: `5ba79480` owns isolated network-service state;
   `9bc3ca23` owns filesystem/storage publication state; `d6b88ade` owns host
   network configuration; `1d0f262f` owns core host platform state;
-  address-space service ownership pending commit.
+  `f04ec028` owns host address-space service state; PCI/timer ownership pending
+  commit.
 
 ## Review policy and outcome
 
