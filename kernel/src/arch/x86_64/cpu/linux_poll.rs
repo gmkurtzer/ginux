@@ -632,6 +632,38 @@ pub(super) fn yield_current_linux_process_wait(caller: LinuxUserContext) -> bool
     yield_current_linux_process(caller, LINUX_EINTR)
 }
 
+fn linux_poll_synchronously(address: u64, active: &mut [u8], duration: Option<u64>) -> u64 {
+    let deadline = duration
+        .and_then(|duration| linux_elapsed_nanoseconds().and_then(|now| now.checked_add(duration)));
+    loop {
+        let mut ready = 0;
+        for pollfd in active.as_chunks_mut::<8>().0 {
+            let descriptor = i32::from_ne_bytes(pollfd[..4].try_into().unwrap());
+            let events = u16::from_ne_bytes(pollfd[4..6].try_into().unwrap());
+            let returned = linux_descriptor_poll_events(descriptor, events);
+            pollfd[6..8].copy_from_slice(&returned.to_ne_bytes());
+            ready += u64::from(returned != 0);
+        }
+        if ready != 0 {
+            return if active.is_empty() || copy_to_linux_user(address, active) {
+                ready
+            } else {
+                LINUX_EFAULT
+            };
+        }
+        if deadline
+            .is_some_and(|deadline| linux_elapsed_nanoseconds().is_some_and(|now| now >= deadline))
+        {
+            return if active.is_empty() || copy_to_linux_user(address, active) {
+                0
+            } else {
+                LINUX_EFAULT
+            };
+        }
+        core::hint::spin_loop();
+    }
+}
+
 pub(super) fn linux_poll_wait_live_return(
     output: *mut LinuxSyscallFrame,
     caller: LinuxUserContext,
@@ -708,48 +740,19 @@ pub(super) fn linux_poll_wait_live_return(
         let descriptor = i32::from_ne_bytes(pollfd[..4].try_into().unwrap());
         descriptor >= 0 && linux_socket_slot(descriptor as u64).is_some()
     });
-    // A lone Linux process has no peer thread to schedule while a bounded
-    // poll sleeps. Drive descriptor readiness until its deadline instead of
-    // leaking the scheduler's lack of a target as ENOSYS to userspace. Socket
-    // polls also need this path so network progress is made by the caller.
-    let bounded_without_scheduler_peer =
-        duration.is_some() && ready_linux_thread_handle().is_none();
-    if !waits_for_parent_unix_peer && (polls_socket || bounded_without_scheduler_peer) {
-        let deadline = duration.and_then(|duration| {
-            linux_elapsed_nanoseconds().and_then(|now| now.checked_add(duration))
-        });
-        loop {
-            ready = 0;
-            for pollfd in active.as_chunks_mut::<8>().0 {
-                let descriptor = i32::from_ne_bytes(pollfd[..4].try_into().unwrap());
-                let events = u16::from_ne_bytes(pollfd[4..6].try_into().unwrap());
-                let returned = linux_descriptor_poll_events(descriptor, events);
-                pollfd[6..8].copy_from_slice(&returned.to_ne_bytes());
-                ready += u64::from(returned != 0);
-            }
-            if ready != 0 {
-                return if copy_to_linux_user(address, active) {
-                    ready
-                } else {
-                    LINUX_EFAULT
-                };
-            }
-            if deadline.is_some_and(|deadline| {
-                linux_elapsed_nanoseconds().is_some_and(|now| now >= deadline)
-            }) {
-                return if copy_to_linux_user(address, active) {
-                    0
-                } else {
-                    LINUX_EFAULT
-                };
-            }
-            core::hint::spin_loop();
-        }
+    if !waits_for_parent_unix_peer && polls_socket {
+        return linux_poll_synchronously(address, active, duration);
     }
     let Some(current) = current_linux_thread_handle() else {
         return LINUX_ESRCH;
     };
     let Some(target) = ready_linux_thread_handle() else {
+        // A lone Linux process has no peer thread to schedule while a bounded
+        // poll sleeps. Drive descriptor readiness until its deadline instead
+        // of leaking the scheduler's lack of a target as ENOSYS to userspace.
+        if !waits_for_parent_unix_peer && duration.is_some() {
+            return linux_poll_synchronously(address, active, duration);
+        }
         if waits_for_parent_unix_peer
             && X86_RUNTIME
                 .LINUX_PROCESS_SCHEDULER_NESTING

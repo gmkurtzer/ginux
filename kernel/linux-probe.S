@@ -319,7 +319,7 @@ valid_interpreter_base:
     pop rdx
     push 7
     pop rax
-    call syscall_expect_enosys
+    call syscall_expect_zero
 
     mov edi, 0x405c80
     push 65
@@ -380,8 +380,8 @@ valid_interpreter_base:
     pop rdx
     push 7
     pop rax
-    call syscall_expect_enosys
-    cmp word ptr [0x405ca6], 0x7777
+    call syscall_expect_zero
+    cmp word ptr [0x405ca6], 0
     require_equal
 
     xor edi, edi
@@ -410,8 +410,8 @@ valid_interpreter_base:
     mov qword ptr [0x405cc8], 1
     mov word ptr [0x405ca6], 0x7777
     mov eax, 271
-    call syscall_expect_enosys
-    cmp word ptr [0x405ca6], 0x7777
+    call syscall_expect_zero
+    cmp word ptr [0x405ca6], 0
     require_equal
 
     mov qword ptr [0x405cd0], 0
