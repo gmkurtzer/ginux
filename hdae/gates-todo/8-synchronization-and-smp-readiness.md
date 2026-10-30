@@ -24,6 +24,9 @@ interrupt, and multi-CPU execution.
   ordering, interrupt-context, and global lock-order rules.
 - [x] Added ranked `SpinLock<T>` and `IrqSpinLock<T>` primitives with
   fail-closed order checking and an in-kernel boot contract test.
+- [x] Replaced the physical frame allocator's single-CPU `UnsafeCell` access
+  with a rank-20 IRQ-safe lock across allocation, ownership, transfer,
+  accounting, scrubbing, and release paths.
 
 ## Remaining work
 
@@ -54,6 +57,10 @@ audit, and full regressions.
 - `make build-verification && bash tests/qemu/boot.sh` reports
   `ginux: ranked synchronization primitives ready`, completes all kernel and
   Linux runtime checks, shuts down cleanly, and ends with `Boot test passed`.
+- The physical allocator migration passed formatting, architecture and global
+  ownership checks, `make check`, and the complete deterministic QEMU suite;
+  frame reservation, zeroing, ownership, stale-lease, and domain-budget
+  invariants all remained successful.
 
 ## Decisions and limitations
 
@@ -68,7 +75,8 @@ Any incompatible primitive or order change remains an architecture decision.
 - Pull request: the shared ten-gate pull request.
 - Planned commits: primitives/assertions followed by one synchronized
   subsystem per commit with focused and full-suite evidence.
-- Actual commits: synchronization contract and primitives pending commit.
+- Actual commits: `ff07cdd9` adds the synchronization contract and primitives;
+  physical allocator migration pending commit.
 
 ## Review policy and outcome
 

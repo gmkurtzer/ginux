@@ -43,3 +43,10 @@ the bounded operation is required and safe.
 - Restoring interrupts happens only after the final IRQ-safe guard releases.
 - NMI and machine-check paths do not acquire ordinary locks.
 - Cross-CPU wakeups and TLB invalidation use explicit IPI protocols in Gate 9.
+
+## Migrated owners
+
+- Physical frame allocator: all reservation, ownership, transfer, accounting,
+  and release metadata is serialized by the rank-20 IRQ-safe lock. The
+  `initialized` flag remains release/acquire publication for the fully
+  constructed allocator.

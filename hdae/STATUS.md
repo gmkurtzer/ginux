@@ -8,12 +8,12 @@
 - Branch: `codex/feedback-hardening`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 8, synchronization and SMP readiness, starting
-- Last completed action: Gate 7 extracted architecture ownership, descriptors,
-  execution state, Linux ABI definitions, syscall dispatch, time, futex,
-  polling, and signal mechanisms with fresh per-extraction regressions and a
-  final deterministic QEMU and benchmark-comparison pass
-- Next action: verify the ranked ticket and IRQ-safe lock implementation, then
-  migrate the physical frame allocator as the first shared mutable subsystem
+- Last completed action: Gate 8 established ranked ticket and IRQ-safe locks,
+  verified their boot contract, and migrated the physical frame allocator from
+  single-CPU `UnsafeCell` access to rank-20 cross-CPU serialization with the
+  complete deterministic QEMU suite passing
+- Next action: audit and migrate scheduler and process-table shared state,
+  then run focused lifecycle/concurrency and complete QEMU regressions
 
 ## Current repository state
 
