@@ -35,6 +35,9 @@ exercise SMP by making two vCPUs the ordinary QEMU test default.
   protections are active.
 - [x] Add kernel-only fixed IPIs, remote translation invalidation, and a
   deterministic proof that all online processors execute concurrently.
+- [x] Give application processors separate guarded kernel and privilege-entry
+  stacks, make the Linux child trap state per CPU, and execute a scheduled
+  Linux ring-3 child through an application processor.
 
 ## Remaining work
 
@@ -92,6 +95,14 @@ multi-domain policy results, QEMU harness diffs, and repeated stress runs.
   removing diagnostics. The transcript reports cross-CPU interrupts,
   invalidation, and concurrent execution verified, completes all three boot
   phases, and ends with `Boot test passed`.
+- The first application-processor Linux child run faulted on return because
+  the AP's idle continuation and TSS privilege-entry stack shared storage.
+  Separating those guarded stacks removed the overwrite rather than masking
+  the fault.
+- A fresh two-vCPU `make build-verification && GINUX_CPUS=2
+  bash tests/qemu/boot.sh` executes the lifecycle child in ring 3 on CPU 1,
+  validates its complete register and FS context and exit status, completes
+  all boot phases, and ends with `Boot test passed`.
 
 ## Decisions and limitations
 

@@ -1,8 +1,12 @@
 use core::arch::{asm, global_asm};
 use core::ptr::copy_nonoverlapping;
-use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicU64, AtomicU8, Ordering};
 
 use super::{acpi::PlatformInfo, apic::LocalApic, cpu, paging};
+use crate::{
+    memory::FrameLease,
+    sync::{LockRank, SpinLock},
+};
 
 const CPU_LIMIT: usize = 4;
 pub(crate) const TRAMPOLINE_PHYSICAL: usize = 0x8000;
@@ -14,6 +18,18 @@ const COMMAND_NONE: u8 = 0;
 const COMMAND_PING: u8 = 1;
 const COMMAND_INVALIDATE: u8 = 2;
 const COMMAND_HOLD: u8 = 3;
+const COMMAND_LINUX_PROCESS: u8 = 4;
+const LINUX_RESULT_PENDING: u16 = u16::MAX;
+const LINUX_RESULT_FAILED: u16 = u16::MAX - 1;
+
+#[derive(Clone, Copy)]
+struct LinuxProcessJob {
+    root: FrameLease,
+    entry: u64,
+    stack: u64,
+    fs_base: u64,
+    general: [u64; 15],
+}
 
 static ONLINE: [AtomicBool; CPU_LIMIT] = [const { AtomicBool::new(false) }; CPU_LIMIT];
 static ONLINE_COUNT: AtomicU32 = AtomicU32::new(1);
@@ -31,6 +47,10 @@ static IPI_ACKNOWLEDGED: [AtomicU32; CPU_LIMIT] = [const { AtomicU32::new(0) }; 
 static IPI_ENTERED: [AtomicBool; CPU_LIMIT] = [const { AtomicBool::new(false) }; CPU_LIMIT];
 static IPI_RELEASE: AtomicBool = AtomicBool::new(false);
 static CONCURRENT_CPUS: AtomicU32 = AtomicU32::new(0);
+static LINUX_PROCESS_JOBS: SpinLock<[Option<LinuxProcessJob>; CPU_LIMIT]> =
+    SpinLock::new(LockRank::ARCHITECTURE, [None; CPU_LIMIT]);
+static LINUX_PROCESS_RESULTS: [AtomicU16; CPU_LIMIT] =
+    [const { AtomicU16::new(LINUX_RESULT_FAILED) }; CPU_LIMIT];
 
 global_asm!(
     r#"
@@ -209,7 +229,7 @@ pub(crate) fn start_application_processors(platform: PlatformInfo, apic: &LocalA
         .enumerate()
     {
         let cpu = cpu + 1;
-        let Some(stack) = cpu::privilege_stack_top_for_cpu(cpu) else {
+        let Some(stack) = cpu::kernel_stack_top_for_cpu(cpu) else {
             return false;
         };
         MAILBOX_CR3.store(paging::kernel_root_address(), Ordering::Release);
@@ -289,6 +309,39 @@ pub(crate) fn verify_cross_cpu_mechanisms() -> bool {
     CONCURRENT_CPUS.load(Ordering::Acquire) == 0
 }
 
+pub(crate) fn execute_linux_process(
+    cpu: usize,
+    root: FrameLease,
+    entry: u64,
+    stack: u64,
+    fs_base: u64,
+    general: [u64; 15],
+) -> Option<u8> {
+    if cpu == 0 || cpu >= online_count() {
+        return None;
+    }
+    {
+        let mut jobs = LINUX_PROCESS_JOBS.lock();
+        if jobs[cpu].is_some() {
+            return None;
+        }
+        jobs[cpu] = Some(LinuxProcessJob {
+            root,
+            entry,
+            stack,
+            fs_base,
+            general,
+        });
+    }
+    LINUX_PROCESS_RESULTS[cpu].store(LINUX_RESULT_PENDING, Ordering::Release);
+    if !dispatch_and_wait(cpu, COMMAND_LINUX_PROCESS, 0) {
+        LINUX_PROCESS_JOBS.lock()[cpu] = None;
+        return None;
+    }
+    let result = LINUX_PROCESS_RESULTS[cpu].swap(LINUX_RESULT_FAILED, Ordering::AcqRel);
+    (result <= u16::from(u8::MAX)).then_some(result as u8)
+}
+
 fn dispatch_and_wait(cpu: usize, command: u8, argument: u64) -> bool {
     dispatch(cpu, command, argument).is_some_and(|generation| wait_for_ack(cpu, generation))
 }
@@ -347,6 +400,21 @@ extern "sysv64" fn interprocessor_interrupt_handler() {
                 core::hint::spin_loop();
             }
             CONCURRENT_CPUS.fetch_sub(1, Ordering::AcqRel);
+        }
+        COMMAND_LINUX_PROCESS => {
+            let job = LINUX_PROCESS_JOBS.lock()[cpu].take();
+            let result = job
+                .and_then(|job| {
+                    crate::address_space::execute_linux_process_child(
+                        job.root,
+                        job.entry,
+                        job.stack,
+                        job.fs_base,
+                        job.general,
+                    )
+                })
+                .map_or(LINUX_RESULT_FAILED, u16::from);
+            LINUX_PROCESS_RESULTS[cpu].store(result, Ordering::Release);
         }
         _ => {}
     }

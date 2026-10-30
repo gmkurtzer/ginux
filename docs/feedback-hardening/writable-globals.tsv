@@ -433,6 +433,8 @@ interior-mutable	kernel/src/arch/x86_64/smp.rs	IPI_COMMAND	per-cpu-arch	allowlis
 interior-mutable	kernel/src/arch/x86_64/smp.rs	IPI_ENTERED	verification-only	allowlist	none	cross-cpu-concurrency-proof
 interior-mutable	kernel/src/arch/x86_64/smp.rs	IPI_GENERATION	per-cpu-arch	allowlist	none	per-cpu-ipi-generation
 interior-mutable	kernel/src/arch/x86_64/smp.rs	IPI_RELEASE	verification-only	allowlist	none	cross-cpu-concurrency-proof
+interior-mutable	kernel/src/arch/x86_64/smp.rs	LINUX_PROCESS_JOBS	process-runtime	allowlist	none	ranked-cross-cpu-dispatch-lock
+interior-mutable	kernel/src/arch/x86_64/smp.rs	LINUX_PROCESS_RESULTS	process-runtime	allowlist	none	per-cpu-process-result-publication
 interior-mutable	kernel/src/arch/x86_64/smp.rs	MAILBOX_CPU	per-cpu-arch	allowlist	none	sequential-ap-startup-mailbox
 interior-mutable	kernel/src/arch/x86_64/smp.rs	MAILBOX_CR3	per-cpu-arch	allowlist	none	sequential-ap-startup-mailbox
 interior-mutable	kernel/src/arch/x86_64/smp.rs	MAILBOX_ENTRY	per-cpu-arch	allowlist	none	sequential-ap-startup-mailbox

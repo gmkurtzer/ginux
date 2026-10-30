@@ -1866,15 +1866,30 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
     {
         return false;
     }
-    let Some(child_exit_status) = address_space::execute_linux_process_child(
-        first_space.root(),
-        child_context.rip,
-        child_context.rsp,
-        child_context.fs_base,
-        child_context.general,
-    ) else {
+    let child_exit_status = if crate::arch::x86_64::smp::online_count() > 1 {
+        crate::arch::x86_64::smp::execute_linux_process(
+            1,
+            first_space.root(),
+            child_context.rip,
+            child_context.rsp,
+            child_context.fs_base,
+            child_context.general,
+        )
+    } else {
+        address_space::execute_linux_process_child(
+            first_space.root(),
+            child_context.rip,
+            child_context.rsp,
+            child_context.fs_base,
+            child_context.general,
+        )
+    };
+    let Some(child_exit_status) = child_exit_status else {
         return false;
     };
+    if crate::arch::x86_64::smp::online_count() > 1 {
+        crate::serial_write("ginux: scheduled Linux child executed on application processor\r\n");
+    }
     if child_exit_status != 42
         || unsafe { (child_stack as *const u8).read() } != 0x5a
         || unsafe { (parent_stack as *const u8).read() } != 0x44

@@ -2,9 +2,10 @@ use core::{arch::asm, cell::UnsafeCell, mem::size_of, sync::atomic::AtomicBool};
 
 use super::{
     ginux_exception_entries, read_msr, write_msr, BOOT_CPU_INDEX, CPU_ENTRY_STATE_LIMIT,
-    DOUBLE_FAULT_IST, EXCEPTION_STACK_STORAGE_SIZE, EXCEPTION_STACK_TOP_OFFSET, GS_BASE_MSR,
-    IST_STACK_STORAGE_SIZE, IST_STACK_TOP_OFFSET, KERNEL_CODE_SELECTOR, KERNEL_DATA_SELECTOR,
-    MACHINE_CHECK_IST, NMI_IST, SYSCALL_VECTOR, TSS_SELECTOR,
+    CPU_KERNEL_STACK_STORAGE_SIZE, CPU_KERNEL_STACK_TOP_OFFSET, DOUBLE_FAULT_IST,
+    EXCEPTION_STACK_STORAGE_SIZE, EXCEPTION_STACK_TOP_OFFSET, GS_BASE_MSR, IST_STACK_STORAGE_SIZE,
+    IST_STACK_TOP_OFFSET, KERNEL_CODE_SELECTOR, KERNEL_DATA_SELECTOR, MACHINE_CHECK_IST, NMI_IST,
+    SYSCALL_VECTOR, TSS_SELECTOR,
 };
 
 #[derive(Clone, Copy)]
@@ -81,6 +82,9 @@ pub(super) struct ExceptionStack([u8; EXCEPTION_STACK_STORAGE_SIZE]);
 #[repr(C, align(4096))]
 pub(super) struct IstStack([u8; IST_STACK_STORAGE_SIZE]);
 
+#[repr(C, align(4096))]
+pub(super) struct CpuKernelStack([u8; CPU_KERNEL_STACK_STORAGE_SIZE]);
+
 #[derive(Clone, Copy)]
 #[repr(C, align(64))]
 pub(super) struct CpuEntryState {
@@ -116,6 +120,7 @@ pub(super) struct CpuArchitectureOwner {
     pub(super) tss: UnsafeCell<[TaskStateSegment; CPU_ENTRY_STATE_LIMIT]>,
     pub(super) idt: UnsafeCell<[[IdtEntry; 256]; CPU_ENTRY_STATE_LIMIT]>,
     pub(super) privilege_stack: UnsafeCell<[ExceptionStack; CPU_ENTRY_STATE_LIMIT]>,
+    pub(super) kernel_stack: UnsafeCell<[CpuKernelStack; CPU_ENTRY_STATE_LIMIT]>,
     pub(super) double_fault_stack: UnsafeCell<[IstStack; CPU_ENTRY_STATE_LIMIT]>,
     pub(super) nmi_stack: UnsafeCell<[IstStack; CPU_ENTRY_STATE_LIMIT]>,
     pub(super) machine_check_stack: UnsafeCell<[IstStack; CPU_ENTRY_STATE_LIMIT]>,
@@ -143,6 +148,9 @@ pub(super) static CPU_ARCHITECTURE: CpuArchitectureOwner = CpuArchitectureOwner 
     idt: UnsafeCell::new([[IdtEntry::MISSING; 256]; CPU_ENTRY_STATE_LIMIT]),
     privilege_stack: UnsafeCell::new(
         [const { ExceptionStack([0; EXCEPTION_STACK_STORAGE_SIZE]) }; CPU_ENTRY_STATE_LIMIT],
+    ),
+    kernel_stack: UnsafeCell::new(
+        [const { CpuKernelStack([0; CPU_KERNEL_STACK_STORAGE_SIZE]) }; CPU_ENTRY_STATE_LIMIT],
     ),
     double_fault_stack: UnsafeCell::new(
         [const { IstStack([0; IST_STACK_STORAGE_SIZE]) }; CPU_ENTRY_STATE_LIMIT],
@@ -335,28 +343,32 @@ pub(crate) fn privilege_stack_top() -> usize {
     CPU_ARCHITECTURE.privilege_stack.get().cast_const() as usize + EXCEPTION_STACK_TOP_OFFSET
 }
 
-pub(crate) fn privilege_stack_top_for_cpu(cpu: usize) -> Option<usize> {
-    (cpu < CPU_ENTRY_STATE_LIMIT).then(|| exception_stack_address(cpu) + EXCEPTION_STACK_TOP_OFFSET)
+pub(crate) fn kernel_stack_top_for_cpu(cpu: usize) -> Option<usize> {
+    (cpu < CPU_ENTRY_STATE_LIMIT).then(|| {
+        stack_address(CPU_ARCHITECTURE.kernel_stack.get(), cpu) + CPU_KERNEL_STACK_TOP_OFFSET
+    })
 }
 
-pub(crate) fn stack_guard_pages() -> [usize; CPU_ENTRY_STATE_LIMIT * 8] {
-    let mut pages = [0; CPU_ENTRY_STATE_LIMIT * 8];
+pub(crate) fn stack_guard_pages() -> [usize; CPU_ENTRY_STATE_LIMIT * 10] {
+    let mut pages = [0; CPU_ENTRY_STATE_LIMIT * 10];
     for cpu in 0..CPU_ENTRY_STATE_LIMIT {
         let bases = [
             exception_stack_address(cpu),
+            stack_address(CPU_ARCHITECTURE.kernel_stack.get(), cpu),
             stack_address(CPU_ARCHITECTURE.double_fault_stack.get(), cpu),
             stack_address(CPU_ARCHITECTURE.nmi_stack.get(), cpu),
             stack_address(CPU_ARCHITECTURE.machine_check_stack.get(), cpu),
         ];
         let sizes = [
             EXCEPTION_STACK_TOP_OFFSET,
+            CPU_KERNEL_STACK_TOP_OFFSET,
             IST_STACK_TOP_OFFSET,
             IST_STACK_TOP_OFFSET,
             IST_STACK_TOP_OFFSET,
         ];
-        for stack in 0..4 {
-            pages[cpu * 8 + stack * 2] = bases[stack];
-            pages[cpu * 8 + stack * 2 + 1] = bases[stack] + sizes[stack];
+        for stack in 0..5 {
+            pages[cpu * 10 + stack * 2] = bases[stack];
+            pages[cpu * 10 + stack * 2 + 1] = bases[stack] + sizes[stack];
         }
     }
     pages
@@ -372,8 +384,8 @@ fn exception_stack_address(cpu: usize) -> usize {
     }
 }
 
-fn stack_address(stacks: *mut [IstStack; CPU_ENTRY_STATE_LIMIT], cpu: usize) -> usize {
-    unsafe { stacks.cast::<IstStack>().add(cpu) as usize }
+fn stack_address<T>(stacks: *mut [T; CPU_ENTRY_STATE_LIMIT], cpu: usize) -> usize {
+    unsafe { stacks.cast::<T>().add(cpu) as usize }
 }
 
 /// Installs a non-exception interrupt gate while interrupts are disabled.

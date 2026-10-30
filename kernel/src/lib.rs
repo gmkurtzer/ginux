@@ -431,7 +431,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         arch::x86_64::cpu::machine_check_stack_top() - 1,
     ];
     let cpu_guard_pages = arch::x86_64::cpu::stack_guard_pages();
-    let mut guard_pages = [0; 3 + 4 * 8];
+    let mut guard_pages = [0; 3 + 4 * 10];
     guard_pages[0] = 0;
     guard_pages[1] = kernel_stack_guard;
     guard_pages[2] = kernel_stack_upper_guard;

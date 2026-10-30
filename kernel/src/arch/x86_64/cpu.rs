@@ -18,9 +18,9 @@ mod linux_syscall;
 mod linux_time;
 pub(crate) use architecture::{
     clear_interrupt_gate, current_cpu_index, double_fault_guard_page, double_fault_stack_top,
-    install, install_for_cpu, install_interrupt_gate, machine_check_guard_page,
-    machine_check_stack_top, nmi_guard_page, nmi_stack_top, privilege_stack_guard_page,
-    privilege_stack_top, privilege_stack_top_for_cpu, stack_guard_pages,
+    install, install_for_cpu, install_interrupt_gate, kernel_stack_top_for_cpu,
+    machine_check_guard_page, machine_check_stack_top, nmi_guard_page, nmi_stack_top,
+    privilege_stack_guard_page, privilege_stack_top, stack_guard_pages,
     task_register_denies_user_io, user_interrupt_surface_is_minimal,
 };
 use architecture::{current_entry_state, install_user_interrupt_gate, CPU_ARCHITECTURE};
@@ -72,6 +72,9 @@ pub(crate) const LINUX_RUNTIME_HEAP_PAGES: usize = 16;
 const EXCEPTION_STACK_SIZE: usize = 4 * 1024 * 1024;
 const EXCEPTION_STACK_STORAGE_SIZE: usize = PAGE_SIZE + EXCEPTION_STACK_SIZE + PAGE_SIZE;
 const EXCEPTION_STACK_TOP_OFFSET: usize = PAGE_SIZE + EXCEPTION_STACK_SIZE;
+const CPU_KERNEL_STACK_SIZE: usize = 256 * 1024;
+const CPU_KERNEL_STACK_STORAGE_SIZE: usize = PAGE_SIZE + CPU_KERNEL_STACK_SIZE + PAGE_SIZE;
+const CPU_KERNEL_STACK_TOP_OFFSET: usize = PAGE_SIZE + CPU_KERNEL_STACK_SIZE;
 const IST_STACK_SIZE: usize = 64 * 1024;
 const IST_STACK_STORAGE_SIZE: usize = PAGE_SIZE + IST_STACK_SIZE + PAGE_SIZE;
 const IST_STACK_TOP_OFFSET: usize = PAGE_SIZE + IST_STACK_SIZE;
@@ -561,12 +564,12 @@ struct X86RuntimeOwner {
     NETWORK_PING_ACTIVE: RuntimeRef<AtomicU64>,
     NETWORK_PING_REQUESTED: RuntimeRef<AtomicU64>,
     NETWORK_PING_RESULT: RuntimeRef<AtomicU8>,
-    PROCESS_CHILD_CONTEXT_VALID: RuntimeRef<AtomicBool>,
-    PROCESS_CHILD_EXECUTION_DIAGNOSTIC: RuntimeRef<AtomicU8>,
-    PROCESS_CHILD_EXIT_STATUS: RuntimeRef<AtomicU8>,
-    PROCESS_CHILD_EXPECTED_FS_BASE: RuntimeRef<AtomicU64>,
-    PROCESS_CHILD_EXPECTED_REGISTERS: RuntimeRef<[AtomicU64; 15]>,
-    PROCESS_CHILD_PROBE_STATE: RuntimeRef<AtomicU8>,
+    PROCESS_CHILD_CONTEXT_VALID: RuntimeRef<[AtomicBool; CPU_ENTRY_STATE_LIMIT]>,
+    PROCESS_CHILD_EXECUTION_DIAGNOSTIC: RuntimeRef<[AtomicU8; CPU_ENTRY_STATE_LIMIT]>,
+    PROCESS_CHILD_EXIT_STATUS: RuntimeRef<[AtomicU8; CPU_ENTRY_STATE_LIMIT]>,
+    PROCESS_CHILD_EXPECTED_FS_BASE: RuntimeRef<[AtomicU64; CPU_ENTRY_STATE_LIMIT]>,
+    PROCESS_CHILD_EXPECTED_REGISTERS: RuntimeRef<[[AtomicU64; 15]; CPU_ENTRY_STATE_LIMIT]>,
+    PROCESS_CHILD_PROBE_STATE: RuntimeRef<[AtomicU8; CPU_ENTRY_STATE_LIMIT]>,
 }
 
 #[allow(non_snake_case)]
@@ -1437,14 +1440,18 @@ const PROCESS_CHILD_PROBE_IDLE: u8 = 0;
 const PROCESS_CHILD_PROBE_EXPECT_CONTEXT: u8 = 1;
 const PROCESS_CHILD_PROBE_EXPECT_EXIT: u8 = 2;
 const PROCESS_CHILD_PROBE_COMPLETE: u8 = 3;
-static X86_RUNTIME_BACKING_PROCESS_CHILD_PROBE_STATE: AtomicU8 =
-    AtomicU8::new(PROCESS_CHILD_PROBE_IDLE);
-static X86_RUNTIME_BACKING_PROCESS_CHILD_CONTEXT_VALID: AtomicBool = AtomicBool::new(false);
-static X86_RUNTIME_BACKING_PROCESS_CHILD_EXECUTION_DIAGNOSTIC: AtomicU8 = AtomicU8::new(0);
-static X86_RUNTIME_BACKING_PROCESS_CHILD_EXIT_STATUS: AtomicU8 = AtomicU8::new(0);
-static X86_RUNTIME_BACKING_PROCESS_CHILD_EXPECTED_REGISTERS: [AtomicU64; 15] =
-    [const { AtomicU64::new(0) }; 15];
-static X86_RUNTIME_BACKING_PROCESS_CHILD_EXPECTED_FS_BASE: AtomicU64 = AtomicU64::new(0);
+static X86_RUNTIME_BACKING_PROCESS_CHILD_PROBE_STATE: [AtomicU8; CPU_ENTRY_STATE_LIMIT] =
+    [const { AtomicU8::new(PROCESS_CHILD_PROBE_IDLE) }; CPU_ENTRY_STATE_LIMIT];
+static X86_RUNTIME_BACKING_PROCESS_CHILD_CONTEXT_VALID: [AtomicBool; CPU_ENTRY_STATE_LIMIT] =
+    [const { AtomicBool::new(false) }; CPU_ENTRY_STATE_LIMIT];
+static X86_RUNTIME_BACKING_PROCESS_CHILD_EXECUTION_DIAGNOSTIC: [AtomicU8; CPU_ENTRY_STATE_LIMIT] =
+    [const { AtomicU8::new(0) }; CPU_ENTRY_STATE_LIMIT];
+static X86_RUNTIME_BACKING_PROCESS_CHILD_EXIT_STATUS: [AtomicU8; CPU_ENTRY_STATE_LIMIT] =
+    [const { AtomicU8::new(0) }; CPU_ENTRY_STATE_LIMIT];
+static X86_RUNTIME_BACKING_PROCESS_CHILD_EXPECTED_REGISTERS: [[AtomicU64; 15];
+    CPU_ENTRY_STATE_LIMIT] = [const { [const { AtomicU64::new(0) }; 15] }; CPU_ENTRY_STATE_LIMIT];
+static X86_RUNTIME_BACKING_PROCESS_CHILD_EXPECTED_FS_BASE: [AtomicU64; CPU_ENTRY_STATE_LIMIT] =
+    [const { AtomicU64::new(0) }; CPU_ENTRY_STATE_LIMIT];
 static X86_RUNTIME_BACKING_ELF_PROBE_ACTIVE: BankedAtomicBool = BankedAtomicBool::new(false);
 // Execution mode describes the currently running CPU context, not persistent
 // per-domain state. Keeping it in a domain bank can strand the temporary
@@ -2915,6 +2922,7 @@ pub(crate) fn execute_linux_process_child(
     fs_base: u64,
     general: [u64; 15],
 ) -> Option<u8> {
+    let cpu = current_cpu_index();
     let entry_valid = entry != 0 && entry < 1 << 47;
     let stack_valid = stack != 0 && stack < 1 << 47;
     let fs_valid = fs_base < 1 << 47;
@@ -2932,6 +2940,7 @@ pub(crate) fn execute_linux_process_child(
         | (u8::from(interrupt_surface_valid) << 6);
     X86_RUNTIME
         .PROCESS_CHILD_EXECUTION_DIAGNOSTIC
+        .get(cpu)?
         .store(preconditions, Ordering::SeqCst);
     if preconditions != 0x7f {
         return None;
@@ -2944,6 +2953,7 @@ pub(crate) fn execute_linux_process_child(
     }
     for (expected, value) in X86_RUNTIME
         .PROCESS_CHILD_EXPECTED_REGISTERS
+        .get(cpu)?
         .iter()
         .zip(general)
     {
@@ -2951,15 +2961,19 @@ pub(crate) fn execute_linux_process_child(
     }
     X86_RUNTIME
         .PROCESS_CHILD_EXPECTED_FS_BASE
+        .get(cpu)?
         .store(fs_base, Ordering::SeqCst);
     X86_RUNTIME
         .PROCESS_CHILD_CONTEXT_VALID
+        .get(cpu)?
         .store(false, Ordering::SeqCst);
     X86_RUNTIME
         .PROCESS_CHILD_EXIT_STATUS
+        .get(cpu)?
         .store(0, Ordering::SeqCst);
     if X86_RUNTIME
         .PROCESS_CHILD_PROBE_STATE
+        .get(cpu)?
         .compare_exchange(
             PROCESS_CHILD_PROBE_IDLE,
             PROCESS_CHILD_PROBE_EXPECT_CONTEXT,
@@ -2982,16 +2996,19 @@ pub(crate) fn execute_linux_process_child(
     let child_fs_preserved = active_fs_base() == fs_base;
     let probe_state = X86_RUNTIME
         .PROCESS_CHILD_PROBE_STATE
+        .get(cpu)?
         .swap(PROCESS_CHILD_PROBE_IDLE, Ordering::SeqCst);
     let context_valid = X86_RUNTIME
         .PROCESS_CHILD_CONTEXT_VALID
+        .get(cpu)?
         .swap(false, Ordering::SeqCst);
     let exit_status = X86_RUNTIME
         .PROCESS_CHILD_EXIT_STATUS
+        .get(cpu)?
         .swap(0, Ordering::SeqCst);
     unsafe { write_msr(FS_BASE_MSR, saved_fs) };
     let fs_restored = active_fs_base() == saved_fs;
-    X86_RUNTIME.PROCESS_CHILD_EXECUTION_DIAGNOSTIC.store(
+    X86_RUNTIME.PROCESS_CHILD_EXECUTION_DIAGNOSTIC[cpu].store(
         0x80 | u8::from(child_fs_preserved)
             | (u8::from(context_valid) << 1)
             | (u8::from(probe_state == PROCESS_CHILD_PROBE_COMPLETE) << 2)
@@ -3059,8 +3076,11 @@ pub(crate) fn resume_live_linux_process(
 
 #[allow(dead_code)]
 pub(crate) fn reset_process_child_execution_diagnostic() {
+    let cpu = current_cpu_index();
     X86_RUNTIME
         .PROCESS_CHILD_EXECUTION_DIAGNOSTIC
+        .get(cpu)
+        .expect("current processor index is bounded")
         .store(0, Ordering::SeqCst);
 }
 
@@ -8482,6 +8502,8 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
         serial_write_u64(u64::from(
             X86_RUNTIME
                 .PROCESS_CHILD_EXECUTION_DIAGNOSTIC
+                .get(current_cpu_index())
+                .expect("current processor index is bounded")
                 .load(Ordering::SeqCst),
         ));
         serial_write(" ");
@@ -10037,7 +10059,11 @@ extern "sysv64" fn breakpoint_handler() {
 
 extern "sysv64" fn syscall_handler(number: u64, capability: u64, frame: *mut UserTrapFrame) -> u64 {
     let _kernel_entry = crate::sync::kernel_entry_lock();
-    match X86_RUNTIME.PROCESS_CHILD_PROBE_STATE.load(Ordering::SeqCst) {
+    let cpu = current_cpu_index();
+    let Some(probe_state) = X86_RUNTIME.PROCESS_CHILD_PROBE_STATE.get(cpu) else {
+        return u64::MAX;
+    };
+    match probe_state.load(Ordering::SeqCst) {
         PROCESS_CHILD_PROBE_EXPECT_CONTEXT => {
             let valid = (!frame.is_null())
                 .then(|| unsafe { &*frame })
@@ -10045,17 +10071,21 @@ extern "sysv64" fn syscall_handler(number: u64, capability: u64, frame: *mut Use
                     frame
                         .process_general_registers(number)
                         .into_iter()
-                        .zip(&X86_RUNTIME.PROCESS_CHILD_EXPECTED_REGISTERS)
+                        .zip(&X86_RUNTIME.PROCESS_CHILD_EXPECTED_REGISTERS[cpu])
                         .all(|(observed, expected)| observed == expected.load(Ordering::SeqCst))
                         && active_fs_base()
                             == X86_RUNTIME
                                 .PROCESS_CHILD_EXPECTED_FS_BASE
+                                .get(cpu)
+                                .expect("current processor index is bounded")
                                 .load(Ordering::SeqCst)
                 });
             X86_RUNTIME
                 .PROCESS_CHILD_CONTEXT_VALID
+                .get(cpu)
+                .expect("current processor index is bounded")
                 .store(valid, Ordering::SeqCst);
-            X86_RUNTIME.PROCESS_CHILD_PROBE_STATE.store(
+            probe_state.store(
                 if valid {
                     PROCESS_CHILD_PROBE_EXPECT_EXIT
                 } else {
@@ -10073,20 +10103,20 @@ extern "sysv64" fn syscall_handler(number: u64, capability: u64, frame: *mut Use
                         && active_fs_base()
                             == X86_RUNTIME
                                 .PROCESS_CHILD_EXPECTED_FS_BASE
+                                .get(cpu)
+                                .expect("current processor index is bounded")
                                 .load(Ordering::SeqCst)
                 })
                 .and_then(|frame| u8::try_from(frame.process_general_registers(number)[5]).ok());
             if let Some(status) = exit_status {
                 X86_RUNTIME
                     .PROCESS_CHILD_EXIT_STATUS
+                    .get(cpu)
+                    .expect("current processor index is bounded")
                     .store(status, Ordering::SeqCst);
-                X86_RUNTIME
-                    .PROCESS_CHILD_PROBE_STATE
-                    .store(PROCESS_CHILD_PROBE_COMPLETE, Ordering::SeqCst);
+                probe_state.store(PROCESS_CHILD_PROBE_COMPLETE, Ordering::SeqCst);
             } else {
-                X86_RUNTIME
-                    .PROCESS_CHILD_PROBE_STATE
-                    .store(PROCESS_CHILD_PROBE_IDLE, Ordering::SeqCst);
+                probe_state.store(PROCESS_CHILD_PROBE_IDLE, Ordering::SeqCst);
             }
             return u64::MAX;
         }
