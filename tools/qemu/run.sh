@@ -56,6 +56,10 @@ network_capture=()
 if [[ -n "${GINUX_PCAP:-}" ]]; then
     network_capture=(-object "filter-dump,id=ginux-capture,netdev=ginux-net,file=$GINUX_PCAP")
 fi
+qemu_debug=()
+if [[ -n "${GINUX_QEMU_DEBUG_LOG:-}" ]]; then
+    qemu_debug=(-d "${GINUX_QEMU_DEBUG_FLAGS:-int}" -D "$GINUX_QEMU_DEBUG_LOG")
+fi
 qemu_netdev="user,id=ginux-net,restrict=off"
 if [[ -n "${GINUX_QEMU_DNS:-}" ]]; then
     qemu_netdev+=",dns=${GINUX_QEMU_DNS}"
@@ -78,6 +82,7 @@ exec "$qemu" \
     -device "virtio-blk-pci,drive=ginux-volume,disable-legacy=on,iommu_platform=on,serial=ginux-volume" \
     -netdev "$qemu_netdev" \
     ${network_capture[@]+"${network_capture[@]}"} \
+    ${qemu_debug[@]+"${qemu_debug[@]}"} \
     -device "virtio-net-pci,netdev=ginux-net,disable-legacy=on,iommu_platform=on,mac=52:54:00:12:34:56,addr=0x3" \
     -drive "if=none,id=ginux-volume,format=raw,file=$volume_image" \
     -drive "if=pflash,format=raw,readonly=on,file=$ovmf_code" \
