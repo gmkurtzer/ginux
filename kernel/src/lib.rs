@@ -556,6 +556,11 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     };
     serial_write("ginux: ACPI MADT validated\r\nginux: enabled processors: ");
     serial_write_usize(platform.enabled_processors);
+    serial_write("\r\nginux: processor APIC IDs:");
+    for apic_id in &platform.processor_apic_ids[..platform.enabled_processors] {
+        serial_write(" ");
+        serial_write_u64(u64::from(*apic_id));
+    }
     serial_write("\r\nginux: I/O APICs: ");
     serial_write_usize(platform.io_apics);
     serial_write("\r\nginux: MADT local APIC address: ");

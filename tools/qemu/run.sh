@@ -47,6 +47,11 @@ if [[ -n "${GINUX_QEMU_PID_FILE:-}" ]]; then
 fi
 
 memory="${GINUX_MEMORY:-1G}"
+cpus="${GINUX_CPUS:-1}"
+case "$cpus" in
+    1|2|4) ;;
+    *) echo "GINUX_CPUS must be 1, 2, or 4" >&2; exit 2 ;;
+esac
 network_capture=()
 if [[ -n "${GINUX_PCAP:-}" ]]; then
     network_capture=(-object "filter-dump,id=ginux-capture,netdev=ginux-net,file=$GINUX_PCAP")
@@ -62,7 +67,7 @@ fi
 exec "$qemu" \
     -machine "q35,accel=$accelerator" \
     -cpu "$cpu_model" \
-    -smp 1 \
+    -smp "$cpus" \
     -m "$memory" \
     -display none \
     -monitor none \

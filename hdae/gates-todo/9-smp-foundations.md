@@ -20,7 +20,10 @@ exercise SMP by making two vCPUs the ordinary QEMU test default.
 
 ## Completed work
 
-None. Depends on Gate 8.
+- [x] Preserve the bounded enabled-processor APIC-ID set from MADT local-APIC
+  and x2APIC entries, rejecting duplicates and unsupported topology sizes.
+- [x] Add an explicit `GINUX_CPUS=1|2|4` QEMU control while retaining one CPU
+  as the default until SMP qualification passes.
 
 ## Remaining work
 
@@ -46,6 +49,14 @@ None. Depends on Gate 8.
 
 CPU-topology transcripts, concurrency tests, scheduler and shootdown traces,
 multi-domain policy results, QEMU harness diffs, and repeated stress runs.
+
+- `cargo fmt --all`, `make architecture-check`, and `make check` pass after
+  preserving processor identities and adding bounded QEMU topology selection.
+- `make build-verification && GINUX_CPUS=2 bash tests/qemu/boot.sh` reports
+  `enabled processors: 2`, `processor APIC IDs: 0 1`, completes the complete
+  deterministic kernel and Linux-runtime suite, and ends with
+  `Boot test passed`. At this increment only the BSP executes; AP startup is
+  the next required milestone and no SMP claim is made from discovery alone.
 
 ## Decisions and limitations
 
