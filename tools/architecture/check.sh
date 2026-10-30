@@ -46,5 +46,6 @@ reject_text "$architecture" 'A later isolated storage service should expose `vir
 reject_text "$controller" 'int 0x80'
 
 bash "${repo_root}/tools/architecture/check-privilege-entry.sh"
+bash "${repo_root}/tools/architecture/check-user-access.sh"
 
 echo "Architecture consistency check passed"

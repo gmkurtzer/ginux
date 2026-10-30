@@ -5652,18 +5652,12 @@ fn publish_linux_clone(
         clear_linux_thread_execution(usize::from(handle.slot));
         return Err(LinuxClonePublishError::TidFault);
     }
-    // SAFETY: construction and the active current-thread copy boundary admit
-    // both aligned words before either write. Interrupts remain disabled, so
-    // their mappings cannot change between validation and publication.
-    unsafe {
-        with_supervisor_user_access(|| {
-            if parent_tid_requested {
-                (request.parent_tid as *mut u32).write_volatile(handle.tid);
-            }
-            if child_tid_requested {
-                (request.child_tid as *mut u32).write_volatile(handle.tid);
-            }
-        });
+    let tid = handle.tid.to_ne_bytes();
+    if parent_tid_requested && !copy_to_linux_user(request.parent_tid, &tid)
+        || child_tid_requested && !copy_to_linux_user(request.child_tid, &tid)
+    {
+        clear_linux_thread_execution(usize::from(handle.slot));
+        return Err(LinuxClonePublishError::TidFault);
     }
     Ok(result)
 }
@@ -5839,10 +5833,17 @@ fn clear_linux_thread_slot(slot: usize) {
         // The boot proof owns its fixed sibling stack and verifies scrubbing.
         // Runtime stacks belong to libc and remain mapped after thread exit so
         // userspace can inspect or recycle its thread-control allocation.
-        unsafe {
-            with_supervisor_user_access(|| {
-                (stack_base as *mut u8).write_bytes(0, PAGE_SIZE);
-            });
+        let zeroes = [0_u8; 128];
+        for offset in (0..PAGE_SIZE).step_by(zeroes.len()) {
+            if unsafe {
+                raw_copy_to_user(
+                    (stack_base + offset as u64) as *mut u8,
+                    zeroes.as_ptr(),
+                    zeroes.len(),
+                ) != 0
+            } {
+                break;
+            }
         }
     }
     LINUX_THREAD_TIDS[slot].store(0, Ordering::SeqCst);
@@ -7535,16 +7536,13 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
                 && LINUX_THREAD_REGISTERS[slot]
                     .iter()
                     .all(|register| register.load(Ordering::SeqCst) == 0);
-            // SAFETY: both words are inside the live initial stack mapping and
-            // SMAP is relaxed only for these bounded reads and writes.
-            let (saved_parent_tid, saved_child_tid) = unsafe {
-                with_supervisor_user_access(|| {
-                    (
-                        (parent_tid as *const u32).read_volatile(),
-                        (child_tid as *const u32).read_volatile(),
-                    )
-                })
-            };
+            let mut saved_parent_tid = [0_u8; size_of::<u32>()];
+            let mut saved_child_tid = [0_u8; size_of::<u32>()];
+            if !copy_from_linux_user(parent_tid, &mut saved_parent_tid)
+                || !copy_from_linux_user(child_tid, &mut saved_child_tid)
+            {
+                return None;
+            }
             let published = publish_linux_clone(
                 child,
                 request,
@@ -7556,17 +7554,14 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
             )
             .ok()?;
             let selected = linux_thread_return_context(child)?;
-            // SAFETY: the same two live, bounded stack words are inspected and
-            // restored before userspace receives its initial stack.
-            let publication_visible = unsafe {
-                with_supervisor_user_access(|| {
-                    let visible = (parent_tid as *const u32).read_volatile() == child.tid
-                        && (child_tid as *const u32).read_volatile() == child.tid;
-                    (parent_tid as *mut u32).write_volatile(saved_parent_tid);
-                    (child_tid as *mut u32).write_volatile(saved_child_tid);
-                    visible
-                })
-            };
+            let mut published_parent_tid = [0_u8; size_of::<u32>()];
+            let mut published_child_tid = [0_u8; size_of::<u32>()];
+            let publication_visible = copy_from_linux_user(parent_tid, &mut published_parent_tid)
+                && copy_from_linux_user(child_tid, &mut published_child_tid)
+                && u32::from_ne_bytes(published_parent_tid) == child.tid
+                && u32::from_ne_bytes(published_child_tid) == child.tid
+                && copy_to_linux_user(parent_tid, &saved_parent_tid)
+                && copy_to_linux_user(child_tid, &saved_child_tid);
             Some(
                 rollback_rejected
                     && rollback_clean
@@ -7603,11 +7598,10 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
         let sibling_valid = sibling_installed
             && linux_writable_user_range_contains(execution.sibling_tls as u64, execution.tls_size)
             && !linux_writable_user_range_contains(execution.tls as u64, execution.tls_size)
-            && unsafe {
-                with_supervisor_user_access(|| {
-                    (execution.sibling_fs_base as *const u64).read_volatile()
-                        == execution.sibling_fs_base as u64
-                })
+            && {
+                let mut value = [0_u8; size_of::<u64>()];
+                copy_from_linux_user(execution.sibling_fs_base as u64, &mut value)
+                    && u64::from_ne_bytes(value) == execution.sibling_fs_base as u64
             };
         let initial_restored = install_linux_tls_context(initial_tls);
         sibling_valid
@@ -8307,18 +8301,13 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
         && (exec_replaced
             || copy_from_linux_user(clear_child_tid, &mut cleared_tid)
                 && cleared_tid == [0; size_of::<u32>()]);
-    // SAFETY: the loader owns the mapped heap page through this verification,
-    // and SMAP access is enabled only around the bounded read.
-    let heap_contents_valid = unsafe {
-        with_supervisor_user_access(|| {
-            if exec_replaced {
-                core::slice::from_raw_parts(execution.heap as *const u8, PAGE_SIZE)
-                    .iter()
-                    .all(|byte| *byte == 0)
-            } else {
-                (execution.heap as *const u64).read_volatile() == 0x4845_4150_4252_4b21
-            }
-        })
+    let heap_contents_valid = if exec_replaced {
+        hardware_user_range_is_zero(execution.heap as u64, PAGE_SIZE)
+    } else {
+        let mut value = [0_u8; size_of::<u64>()];
+        (unsafe {
+            raw_copy_from_user(value.as_mut_ptr(), execution.heap as *const u8, value.len()) == 0
+        }) && u64::from_ne_bytes(value) == 0x4845_4150_4252_4b21
     };
     let observed_stack = ELF_PROBE_STACK.swap(0, Ordering::SeqCst);
     let observed_stack_low = ELF_PROBE_STACK_LOW.swap(0, Ordering::SeqCst);
@@ -11878,17 +11867,9 @@ fn linux_clone_thread_request(
         )
     };
     let prior_dispatch_count = LINUX_CLONE_DISPATCH_COUNT.load(Ordering::SeqCst);
-    // SAFETY: the authenticated sibling stack remains mapped RW/NX for this
-    // process, and SMAP is relaxed only for the bounded pre-reuse inspection.
     let reused_stack_scrubbed = !runtime
         && prior_dispatch_count == 1
-        && unsafe {
-            with_supervisor_user_access(|| {
-                core::slice::from_raw_parts(sibling_stack as *const u8, PAGE_SIZE)
-                    .iter()
-                    .all(|byte| *byte == 0)
-            })
-        };
+        && hardware_user_range_is_zero(sibling_stack, PAGE_SIZE);
     let Some(child) = reserve_linux_thread(sibling_context, stack_base, stack_size) else {
         return LINUX_EAGAIN;
     };
@@ -16182,11 +16163,12 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
             && *second < LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39)
             && first != second
     });
-    let shared = mapped.is_some_and(|(first, second)| unsafe {
-        with_supervisor_user_access(|| {
-            (first as *mut u64).write_volatile(0x4749_4e55_5853_5956);
-            (second as *const u64).read_volatile() == 0x4749_4e55_5853_5956
-        })
+    let shared = mapped.is_some_and(|(first, second)| {
+        let value = 0x4749_4e55_5853_5956_u64.to_ne_bytes();
+        let mut observed = [0_u8; size_of::<u64>()];
+        copy_to_linux_user(first, &value)
+            && copy_from_linux_user(second, &mut observed)
+            && observed == value
     });
     let removed_while_attached = mapped.is_some()
         && linux_shmctl(UPPER_REGISTER_BITS | id, UPPER_REGISTER_BITS, 0) == 0
@@ -18458,13 +18440,22 @@ fn verify_linux_memfd_secret_syscall() -> bool {
     let mapped = (LINUX_RUNTIME_DYNAMIC_MMAP_BASE..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
         .contains(&mapping)
         && address_space::current_linux_runtime_page(mapping).secret;
+    let secret_value = 0x5345_4352_4554_4d45_u64.to_ne_bytes();
+    let mut secret_observed = [0_u8; size_of::<u64>()];
     let userspace_accessible = mapped
         && unsafe {
-            with_supervisor_user_access(|| {
-                (mapping as *mut u64).write_volatile(0x5345_4352_4554_4d45);
-                (mapping as *const u64).read_volatile() == 0x5345_4352_4554_4d45
-            })
-        };
+            raw_copy_to_user(
+                mapping as *mut u8,
+                secret_value.as_ptr(),
+                secret_value.len(),
+            ) == 0
+                && raw_copy_from_user(
+                    secret_observed.as_mut_ptr(),
+                    mapping as *const u8,
+                    secret_observed.len(),
+                ) == 0
+        }
+        && secret_observed == secret_value;
     let kernel_copy_denied = userspace_accessible
         && !copy_from_linux_user(mapping, &mut [0_u8; 8])
         && !copy_to_linux_user(mapping, &[0_u8; 8])
@@ -38126,14 +38117,25 @@ fn copy_from_linux_user(address: u64, output: &mut [u8]) -> bool {
     if !linux_readable_user_range_contains(address, output.len()) {
         return false;
     }
-    // SAFETY: every byte is covered by a contiguous chain of declared readable
-    // areas that remain mapped in the current root for the whole call.
-    unsafe {
-        with_supervisor_user_access(|| {
-            for (offset, byte) in output.iter_mut().enumerate() {
-                *byte = (address as *const u8).add(offset).read_volatile();
-            }
-        });
+    unsafe { raw_copy_from_user(output.as_mut_ptr(), address as *const u8, output.len()) == 0 }
+}
+
+fn hardware_user_range_is_zero(address: u64, length: usize) -> bool {
+    let mut bytes = [0_u8; 128];
+    let mut offset = 0_usize;
+    while offset < length {
+        let count = core::cmp::min(bytes.len(), length - offset);
+        if unsafe {
+            raw_copy_from_user(
+                bytes.as_mut_ptr(),
+                (address + offset as u64) as *const u8,
+                count,
+            ) != 0
+        } || bytes[..count].iter().any(|byte| *byte != 0)
+        {
+            return false;
+        }
+        offset += count;
     }
     true
 }
@@ -41017,16 +41019,7 @@ fn copy_to_linux_user(address: u64, input: &[u8]) -> bool {
     {
         return false;
     }
-    // SAFETY: every byte is covered by a contiguous chain of declared writable
-    // areas that remain mapped in the current root for the whole call.
-    unsafe {
-        with_supervisor_user_access(|| {
-            for (offset, byte) in input.iter().enumerate() {
-                (address as *mut u8).add(offset).write_volatile(*byte);
-            }
-        });
-    }
-    true
+    unsafe { raw_copy_to_user(address as *mut u8, input.as_ptr(), input.len()) == 0 }
 }
 
 pub(crate) fn force_next_control_discovery(domain_id: u64, discovery_word: u64) -> bool {
@@ -44502,20 +44495,26 @@ fn scrub_service_restart_stack() -> bool {
     if active_root & ADDRESS_MASK != root || stack_top % PAGE_SIZE as u64 != 0 || stack_base == 0 {
         return false;
     }
-    let stack = stack_base as *mut u8;
-    let scrubbed = unsafe {
-        with_supervisor_user_access(|| {
-            for offset in 0..PAGE_SIZE {
-                stack.add(offset).write_volatile(0);
-            }
-            for offset in 0..PAGE_SIZE / size_of::<u64>() {
-                if stack.cast::<u64>().add(offset).read_volatile() != 0 {
-                    return false;
-                }
-            }
-            true
-        })
-    };
+    let zeroes = [0_u8; 128];
+    let mut observed = [0xff_u8; 128];
+    let mut scrubbed = true;
+    for offset in (0..PAGE_SIZE).step_by(zeroes.len()) {
+        scrubbed &= unsafe {
+            raw_copy_to_user(
+                (stack_base as usize + offset) as *mut u8,
+                zeroes.as_ptr(),
+                zeroes.len(),
+            ) == 0
+                && raw_copy_from_user(
+                    observed.as_mut_ptr(),
+                    (stack_base as usize + offset) as *const u8,
+                    observed.len(),
+                ) == 0
+        } && observed == zeroes;
+        if !scrubbed {
+            break;
+        }
+    }
     if !scrubbed {
         return false;
     }
