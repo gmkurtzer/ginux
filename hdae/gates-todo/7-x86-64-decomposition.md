@@ -64,6 +64,15 @@ boundaries established by earlier gates without changing behavior.
 Auditability, cohesive responsibility, and ownership are the success measures;
 file size alone is not.
 
+An attempted extraction of the raw user-copy wrappers, verifier, SMAP helper,
+and copy-loop assembly compiled and passed static and unit checks but failed the
+full deterministic QEMU boot twice with widespread Linux verification errors
+and `GINUX_KERNEL_PANIC`. Keeping the assembly co-located with exception entry
+did not restore behavior while the Rust wrappers lived in a child module. The
+attempt was reverted completely. User-copy and exception-fixup code therefore
+remain together pending a later change with explicit emitted-code comparison;
+this gate will not trade verified behavior for file movement.
+
 ## Delivery strategy
 
 - Working branch: `codex/feedback-hardening`.

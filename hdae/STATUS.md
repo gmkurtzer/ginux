@@ -12,9 +12,9 @@
   controller, device, timer, paging, physical-memory, and per-CPU architecture
   state behind explicit owner roots and passed fresh static, unit, ABI,
   service-failure, isolation, lifecycle, and full verification-QEMU evidence
-- Next action: extract fault-recovering raw userspace-copy mechanisms and their
-  SMAP/fixup assembly into `cpu/user_access.rs`, then run the complete
-  per-extraction regression set
+- Next action: extract extended user-state and ring-transition execution
+  mechanisms into `cpu/execution.rs`, retaining the current user-copy and
+  exception-fixup layout, then run the complete per-extraction regression set
 
 ## Current repository state
 
@@ -33,6 +33,10 @@ branch.
   user entry on both Gate 5 and pre-Gate-5 commits. Deterministic Linux ABI and
   verification-boot suites pass; external Alpine compatibility is separate
   follow-up work.
+- A Gate 7 user-access module extraction passed static and unit checks but
+  failed deterministic QEMU twice and was reverted. Its assembly and Rust
+  wrappers remain co-located with exception entry until emitted-code behavior
+  can be compared without weakening the gate.
 
 ## Durable evidence
 
