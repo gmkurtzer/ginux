@@ -288,9 +288,10 @@ pub fn complete(root: &Command<'_>, input: &[u8], output: &mut [u8]) -> usize {
         if match_count == 0 {
             common = child.name;
         } else {
+            // Explicitly use .iter() for safe and robust byte comparison across slices
             let length = common
                 .iter()
-                .zip(child.name)
+                .zip(child.name.iter())
                 .position(|(left, right)| left != right)
                 .unwrap_or(common.len().min(child.name.len()));
             common = &common[..length];
