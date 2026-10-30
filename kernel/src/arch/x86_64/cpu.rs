@@ -1440,6 +1440,11 @@ const PROCESS_CHILD_PROBE_IDLE: u8 = 0;
 const PROCESS_CHILD_PROBE_EXPECT_CONTEXT: u8 = 1;
 const PROCESS_CHILD_PROBE_EXPECT_EXIT: u8 = 2;
 const PROCESS_CHILD_PROBE_COMPLETE: u8 = 3;
+const CROSS_CPU_RUNTIME_SIGNAL: u64 = 1;
+const CROSS_CPU_RUNTIME_FUTEX_WAKE: u64 = 2;
+const CROSS_CPU_RUNTIME_SOCKET_SEND: u64 = 3;
+const CROSS_CPU_RUNTIME_PIPE_SEND: u64 = 4;
+const CROSS_CPU_RUNTIME_KEY: u64 = 0x4749_4e55_585f_534d;
 static X86_RUNTIME_BACKING_PROCESS_CHILD_PROBE_STATE: [AtomicU8; CPU_ENTRY_STATE_LIMIT] =
     [const { AtomicU8::new(PROCESS_CHILD_PROBE_IDLE) }; CPU_ENTRY_STATE_LIMIT];
 static X86_RUNTIME_BACKING_PROCESS_CHILD_CONTEXT_VALID: [AtomicBool; CPU_ENTRY_STATE_LIMIT] =
@@ -3023,6 +3028,153 @@ pub(crate) fn execute_linux_process_child(
         && probe_state == PROCESS_CHILD_PROBE_COMPLETE
         && fs_restored)
         .then_some(exit_status)
+}
+
+pub(crate) fn execute_cross_cpu_runtime_operation(operation: u64) -> bool {
+    let slot = (operation >> 8) as u8;
+    match operation & 0xff {
+        CROSS_CPU_RUNTIME_SIGNAL => crate::linux_signal::enqueue(
+            linux_process::current_ipc_instance(),
+            crate::linux_signal::Scope::Process,
+            linux_process::PROCESS_LIMIT - 1,
+            crate::linux_signal::Pending {
+                signal: 10,
+                code: -1,
+                value: CROSS_CPU_RUNTIME_KEY,
+                sender_pid: 2,
+                sender_uid: 0,
+            },
+            false,
+        )
+        .is_ok_and(|queued| queued),
+        CROSS_CPU_RUNTIME_FUTEX_WAKE => wake_linux_futex(CROSS_CPU_RUNTIME_KEY, 1) == 1,
+        CROSS_CPU_RUNTIME_SOCKET_SEND => {
+            crate::linux_socket::send(slot, b"socket-smp", None) == Ok(10)
+        }
+        CROSS_CPU_RUNTIME_PIPE_SEND => crate::linux_socket::send(slot, b"pipe-smp", None) == Ok(8),
+        _ => false,
+    }
+}
+
+pub(crate) fn verify_cross_cpu_linux_runtime_mechanisms() -> bool {
+    if crate::arch::x86_64::smp::online_count() == 1 {
+        return true;
+    }
+    let cpu = 1;
+    let instance = linux_process::current_ipc_instance();
+    let signal_slot = linux_process::PROCESS_LIMIT - 1;
+    if crate::linux_signal::clear(instance, crate::linux_signal::Scope::Process, signal_slot)
+        .is_err()
+        || !crate::arch::x86_64::smp::execute_runtime_operation(cpu, CROSS_CPU_RUNTIME_SIGNAL)
+    {
+        return false;
+    }
+    let signal = crate::linux_signal::dequeue(
+        instance,
+        crate::linux_signal::Scope::Process,
+        signal_slot,
+        1 << 9,
+    );
+    if !signal.is_ok_and(|pending| {
+        pending.is_some_and(|pending| {
+            pending.signal == 10
+                && pending.code == -1
+                && pending.value == CROSS_CPU_RUNTIME_KEY
+                && pending.sender_pid == 2
+                && pending.sender_uid == 0
+        })
+    }) {
+        return false;
+    }
+
+    let futex_slot = LINUX_THREAD_LIMIT - 1;
+    if X86_RUNTIME.LINUX_THREAD_STATES[futex_slot].load(Ordering::Acquire) != 0
+        || X86_RUNTIME.LINUX_THREAD_WAIT_KINDS[futex_slot].load(Ordering::Acquire)
+            != LINUX_THREAD_WAIT_NONE
+    {
+        return false;
+    }
+    X86_RUNTIME.LINUX_THREAD_WAIT_KEYS[futex_slot].store(CROSS_CPU_RUNTIME_KEY, Ordering::Release);
+    X86_RUNTIME.LINUX_THREAD_WAIT_OUTPUTS[futex_slot].store(u64::from(u32::MAX), Ordering::Release);
+    X86_RUNTIME.LINUX_THREAD_WAIT_KINDS[futex_slot]
+        .store(LINUX_THREAD_WAIT_FUTEX, Ordering::Release);
+    X86_RUNTIME.LINUX_THREAD_STATES[futex_slot].store(LINUX_THREAD_BLOCKED, Ordering::Release);
+    let futex_woke =
+        crate::arch::x86_64::smp::execute_runtime_operation(cpu, CROSS_CPU_RUNTIME_FUTEX_WAKE)
+            && X86_RUNTIME.LINUX_THREAD_STATES[futex_slot].load(Ordering::Acquire)
+                == LINUX_THREAD_READY
+            && X86_RUNTIME.LINUX_THREAD_WAIT_KINDS[futex_slot].load(Ordering::Acquire)
+                == LINUX_THREAD_WAIT_NONE
+            && X86_RUNTIME.LINUX_THREAD_WAIT_KEYS[futex_slot].load(Ordering::Acquire) == 0;
+    X86_RUNTIME.LINUX_THREAD_STATES[futex_slot].store(0, Ordering::Release);
+    X86_RUNTIME.LINUX_THREAD_WAIT_KINDS[futex_slot]
+        .store(LINUX_THREAD_WAIT_NONE, Ordering::Release);
+    X86_RUNTIME.LINUX_THREAD_WAIT_KEYS[futex_slot].store(0, Ordering::Release);
+    X86_RUNTIME.LINUX_THREAD_WAIT_OUTPUTS[futex_slot].store(0, Ordering::Release);
+    if !futex_woke {
+        return false;
+    }
+
+    let Ok((socket_sender, socket_receiver)) = crate::linux_socket::open_pair(1) else {
+        return false;
+    };
+    let socket_sent = crate::arch::x86_64::smp::execute_runtime_operation(
+        cpu,
+        CROSS_CPU_RUNTIME_SOCKET_SEND | (u64::from(socket_sender) << 8),
+    );
+    let mut socket_bytes = [0_u8; 10];
+    let socket_received = crate::linux_socket::recv(socket_receiver, &mut socket_bytes).is_ok_and(
+        |(length, endpoint)| {
+            length == socket_bytes.len() && endpoint.is_none() && socket_bytes == *b"socket-smp"
+        },
+    );
+    let socket_closed =
+        crate::linux_socket::close(socket_sender) && crate::linux_socket::close(socket_receiver);
+    if !socket_sent || !socket_received || !socket_closed {
+        return false;
+    }
+
+    let mut pipe_descriptors = [0_u8; 8];
+    if linux_socket_pipe(
+        0,
+        LINUX_O_NONBLOCK,
+        LINUX_AUX_DESCRIPTOR_FIRST,
+        |_, bytes| {
+            if bytes.len() != pipe_descriptors.len() {
+                return false;
+            }
+            pipe_descriptors.copy_from_slice(bytes);
+            true
+        },
+    ) != 0
+    {
+        return false;
+    }
+    let pipe_reader = u64::from(u32::from_ne_bytes(
+        pipe_descriptors[..4].try_into().unwrap(),
+    ));
+    let pipe_writer = u64::from(u32::from_ne_bytes(
+        pipe_descriptors[4..].try_into().unwrap(),
+    ));
+    let Some(pipe_sender) = linux_socket_slot(pipe_writer) else {
+        return false;
+    };
+    let Some(pipe_receiver) = linux_socket_slot(pipe_reader) else {
+        return false;
+    };
+    let pipe_sent = crate::arch::x86_64::smp::execute_runtime_operation(
+        cpu,
+        CROSS_CPU_RUNTIME_PIPE_SEND | (u64::from(pipe_sender) << 8),
+    );
+    let mut pipe_bytes = [0_u8; 8];
+    let pipe_received = crate::linux_socket::recv(pipe_receiver, &mut pipe_bytes).is_ok_and(
+        |(length, endpoint)| {
+            length == pipe_bytes.len() && endpoint.is_none() && pipe_bytes == *b"pipe-smp"
+        },
+    );
+    let pipe_closed =
+        linux_descriptor_close(pipe_reader) == 0 && linux_descriptor_close(pipe_writer) == 0;
+    pipe_sent && pipe_received && pipe_closed
 }
 
 pub(crate) fn resume_live_linux_process(

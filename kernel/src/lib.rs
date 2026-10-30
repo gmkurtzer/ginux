@@ -1843,6 +1843,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         if !linux_process::verify_lifecycle_contract() {
             kernel_fail("ginux: bounded Linux process lifecycle contract invalid\r\n");
         }
+        if !arch::x86_64::cpu::verify_cross_cpu_linux_runtime_mechanisms() {
+            kernel_fail("ginux: cross-CPU Linux runtime mechanisms invalid\r\n");
+        }
+        serial_write("ginux: cross-CPU Linux signals, futexes, pipes, and sockets validated\r\n");
         serial_write("ginux: bounded Linux process lifecycle contract validated\r\n");
         serial_write("ginux: Linux stopped and continued child wait states validated\r\n");
         serial_write("ginux: generation-bound Linux process roots validated\r\n");

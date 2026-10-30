@@ -19,6 +19,7 @@ const COMMAND_PING: u8 = 1;
 const COMMAND_INVALIDATE: u8 = 2;
 const COMMAND_HOLD: u8 = 3;
 const COMMAND_LINUX_PROCESS: u8 = 4;
+const COMMAND_RUNTIME_OPERATION: u8 = 5;
 const LINUX_RESULT_PENDING: u16 = u16::MAX;
 const LINUX_RESULT_FAILED: u16 = u16::MAX - 1;
 
@@ -267,6 +268,15 @@ pub(crate) fn online_count() -> usize {
     ONLINE_COUNT.load(Ordering::Acquire) as usize
 }
 
+pub(crate) fn execute_runtime_operation(cpu: usize, operation: u64) -> bool {
+    if cpu == 0 || cpu >= online_count() {
+        return false;
+    }
+    dispatch(cpu, COMMAND_RUNTIME_OPERATION, operation).is_some_and(|generation| {
+        wait_for_ack(cpu, generation) && IPI_ARGUMENT[cpu].load(Ordering::Acquire) == 1
+    })
+}
+
 pub(crate) fn verify_cross_cpu_mechanisms() -> bool {
     let count = online_count();
     if count == 0 || count > CPU_LIMIT {
@@ -439,6 +449,14 @@ extern "sysv64" fn interprocessor_interrupt_handler() {
                 })
                 .map_or(LINUX_RESULT_FAILED, u16::from);
             LINUX_PROCESS_RESULTS[cpu].store(result, Ordering::Release);
+        }
+        COMMAND_RUNTIME_OPERATION => {
+            let operation = IPI_ARGUMENT[cpu].load(Ordering::Acquire);
+            let result = {
+                let _kernel_entry = crate::sync::kernel_entry_lock();
+                cpu::execute_cross_cpu_runtime_operation(operation)
+            };
+            IPI_ARGUMENT[cpu].store(u64::from(result), Ordering::Release);
         }
         _ => {}
     }
