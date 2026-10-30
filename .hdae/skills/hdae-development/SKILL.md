@@ -122,6 +122,96 @@ procedure and shell commands in
 [references/hdae-method.md](references/hdae-method.md) before creating,
 inserting, selecting, deferring, completing, or migrating gates.
 
+## Update an installed HDAE copy
+
+When the human asks to update a copied HDAE installation, run the current
+canonical installer from GitHub `main`; never execute or expect
+`.hdae/install.sh`, and do not add Python. Determine the project root and run:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/gmkurtzer/hdae/main/install.sh |
+    sh -s -- --target "$project_root" --all --copy
+```
+
+The installer must stop on locally modified managed skills or recovery
+instructions. Do not add `--force` without explicit human authorization after
+showing what would be replaced. Every install or update must ensure both
+supported discovery roots, `.agents/skills/` and `.claude/skills/`, link to the
+same `.hdae/skills/` copies; `--codex` and `--claude` are compatibility aliases
+for `--all`, not selective installs.
+
+Afterward, verify every configured discovery link, `.hdae/manifest`, and skill
+contents; confirm the installer did not leave a managed `.hdae/install.sh`; if
+a manifest already declared `installer_copy=0` and a file existed there,
+confirm that user-owned file stayed unchanged. Immediately reload the complete
+newly installed `hdae-development/SKILL.md` through the active agent discovery
+path and read every reference it requires for the current operation before
+continuing. Do this in the current turn when the environment permits it. If the
+runtime cannot reload a changed skill, stop and give the human the exact command
+or restart action needed before claiming the update is active. Review the
+dependency diff and commit only when authorized by repository practice.
+
+A development-link installation is a source checkout rather than a managed
+copy: update that checkout with Git and rerun its source installer with `--all
+--link` instead of using this copy-update command, then perform the same reload.
+
+## Check HDAE for updates
+
+When the human asks to check HDAE for updates, perform a read-only comparison;
+do not install or replace anything. Confirm the project has `.hdae/skills`,
+clone GitHub `main` into a new temporary directory, compare its `skills/` tree
+with the installed tree using `diff -qr`, report whether changes are available
+and summarize changed paths, then remove the temporary directory. A difference
+may be an upstream update or an uncommitted local modification, so inspect the
+project manifest and repository diff before labeling it. If an update is
+available, offer the update workflow above; never combine checking and updating
+without the human's request.
+
+Use this portable shape, keeping the temporary path explicit and validated:
+
+```sh
+project_root=$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)
+hdae_check_dir=$(mktemp -d "${TMPDIR:-/tmp}/hdae-check.XXXXXX") || exit 2
+cleanup_hdae_check() {
+    [ -z "$hdae_check_dir" ] || rm -rf "$hdae_check_dir"
+}
+trap cleanup_hdae_check 0 HUP INT TERM
+git clone --quiet --depth 1 --branch main \
+    https://github.com/gmkurtzer/hdae.git "$hdae_check_dir/source" || exit 2
+diff -qr "$project_root/.hdae/skills" "$hdae_check_dir/source/skills"
+hdae_diff_status=$?
+case "$hdae_diff_status" in
+    0) printf '%s\n' 'HDAE is current with main.' ;;
+    1) printf '%s\n' 'HDAE content differences found.' ;;
+    *) printf '%s\n' 'HDAE update check failed.' >&2; exit "$hdae_diff_status" ;;
+esac
+```
+
+Capture `diff` status `0` as current and status `1` as content differences;
+other statuses mean the check failed. Remove only the validated directory made
+by `mktemp`, including on interruption or a failed comparison.
+
+For a development-link installation, also report the checkout's current branch
+and dirty state. Compare content to upstream `main`; do not fetch into, merge,
+or otherwise mutate that checkout merely to check.
+
+## Choose gate delivery strategy
+
+When creating each gate, ask whether its work belongs on the current branch or
+on a dedicated branch intended for a pull request. Do not ask again when the
+human has already made an explicit choice that covers that exact gate. Record
+the choice in the gate file before implementation, including the working
+branch, intended base branch when relevant, and whether a pull request is
+intended.
+
+Plan commits as part of the gate. A gate is large when it contains multiple
+independently reviewable changes, components, migrations, or risk boundaries.
+Use multiple coherent commits for such a gate so each commit has one clear
+purpose and is testable where practical. Do not split tightly coupled work into
+artificial commits. Record the planned commits before work and the actual
+commits or material deviations before closure. Follow repository signing and
+commit conventions, and never infer permission to push or open a pull request.
+
 ## Align batches and checkpoints
 
 When the human requests several gates, a range, or all todo gates, inspect them

@@ -157,6 +157,13 @@ The gate body owns substantive information, not routing metadata:
 ## Decisions and limitations
 - <Material decision, failure, limitation, or deferral condition.>
 
+## Delivery strategy
+- Working branch: <current branch or dedicated branch>
+- Intended base: <branch or not applicable>
+- Pull request: <intended or not intended>
+- Planned commits: <ordered coherent commits>
+- Actual commits: <commit identifiers or pending>
+
 ## Review policy and outcome
 <Checkpoint or delegated completion policy, its authorization, and outcome.>
 ```
@@ -287,6 +294,26 @@ A useful gate is:
 
 Avoid gates such as “improve quality,” “finish compatibility,” or “make it
 secure.” Replace them with specific properties and limitations.
+
+## Delivery strategy and commit structure
+
+Every newly created gate records how its work will be delivered. Ask the human
+whether the gate should use the current branch or a dedicated branch intended
+for a pull request, unless an explicit choice already covers that exact gate.
+Record:
+
+- working branch and intended base branch when relevant;
+- whether a pull request is intended;
+- a planned sequence of coherent commits; and
+- completed commit identifiers or material deviations from the plan.
+
+Treat a gate as large when it crosses multiple independently reviewable
+changes, components, migrations, or risk boundaries. Plan multiple commits for
+large gates. Each commit should have one understandable purpose and leave the
+tree testable when practical. Do not create noisy partial commits or split one
+tightly coupled behavior merely to increase commit count. Repository rules for
+sign-off, authorship, testing, and publication remain authoritative. A branch
+choice does not authorize pushing or opening a pull request.
 
 ## Human gate-alignment conversation
 

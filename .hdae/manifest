@@ -1,6 +1,7 @@
 version=0.1.1
 source=https://github.com/gmkurtzer/hdae.git@main
 mode=copy
-skills_digest=985c5d7f4980209b7ea6696ce132b2962ff435d810d65b4581c8d09aa40b2105
+installer_copy=0
+skills_digest=541e715faf85f5ade7b90e98a5ac7655889a998080efc5b752d064fee4c1f1d6
 agents_bootstrap=1
 agents_bootstrap_digest=8eda3e7d61cf97ab2a0394370968d52fa2214b02eb355a876b7f4c3992d1137c
