@@ -12,9 +12,8 @@
   execution state, Linux ABI definitions, syscall dispatch, time, futex,
   polling, and signal mechanisms with fresh per-extraction regressions and a
   final deterministic QEMU and benchmark-comparison pass
-- Next action: specify synchronization primitives, interrupt-context rules,
-  memory ordering, and the global lock order, then add enforceable primitives
-  before migrating shared subsystems
+- Next action: verify the ranked ticket and IRQ-safe lock implementation, then
+  migrate the physical frame allocator as the first shared mutable subsystem
 
 ## Current repository state
 

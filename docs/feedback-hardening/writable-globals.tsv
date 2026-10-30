@@ -445,6 +445,10 @@ interior-mutable	kernel/src/packet.rs	PACKETS	platform-device	allowlist	none	exp
 interior-mutable	kernel/src/published_rootfs.rs	PUBLISHED_ROOTFS	platform-device	allowlist	none	explicit-domain-rootfs-publication-owner-root
 interior-mutable	kernel/src/scheduler.rs	PROCESS_WORKSPACE	shared-runtime	allowlist	none	explicit-lifecycle-owner-root
 interior-mutable	kernel/src/scheduler.rs	SCHEDULER_RUNTIME	shared-runtime	allowlist	none	explicit-lifecycle-owner-root
+interior-mutable	kernel/src/sync.rs	HELD_RANKS	per-cpu-arch	allowlist	none	explicit-per-cpu-lock-order-tracker
+interior-mutable	kernel/src/sync.rs	HIGH	verification-only	allowlist	none	verification-build-only
+interior-mutable	kernel/src/sync.rs	LOW	verification-only	allowlist	none	verification-build-only
+interior-mutable	kernel/src/sync.rs	PLAIN	verification-only	allowlist	none	verification-build-only
 interior-mutable	kernel/src/volume.rs	LIVE_VOLUME	platform-device	allowlist	none	explicit-host-live-volume-owner-root
 interior-mutable	services/network/src/main.rs	REGISTRY_HEAP	service-runtime	allowlist	none	explicit-service-generation-heap-owner-root
 interior-mutable	services/network/src/registry.rs	REGISTRY_PULL	service-runtime	allowlist	none	explicit-service-generation-pull-owner-root

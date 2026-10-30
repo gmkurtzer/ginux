@@ -20,11 +20,13 @@ interrupt, and multi-CPU execution.
 
 ## Completed work
 
-None. Depends on Gate 7.
+- [x] Specified ticket-spinlock, IRQ-safe locking, atomic publication, memory
+  ordering, interrupt-context, and global lock-order rules.
+- [x] Added ranked `SpinLock<T>` and `IrqSpinLock<T>` primitives with
+  fail-closed order checking and an in-kernel boot contract test.
 
 ## Remaining work
 
-- Specify primitive selection and global lock order.
 - Audit interrupt-context acquisition and memory ordering.
 - Implement and stress subsystem synchronization incrementally.
 
@@ -44,9 +46,20 @@ None. Depends on Gate 7.
 Synchronization map, lock-order document, model/stress results, interrupt
 audit, and full regressions.
 
+- [`docs/feedback-hardening/SYNCHRONIZATION.md`](../../docs/feedback-hardening/SYNCHRONIZATION.md)
+  defines primitive selection, memory ordering, interrupt rules, and the
+  global rank order.
+- `cargo fmt --all`, `make architecture-check`, and `make check` pass with the
+  four new synchronization globals explicitly classified.
+- `make build-verification && bash tests/qemu/boot.sh` reports
+  `ginux: ranked synchronization primitives ready`, completes all kernel and
+  Linux runtime checks, shuts down cleanly, and ends with `Boot test passed`.
+
 ## Decisions and limitations
 
-Primitive and memory-order choices require review before broad adoption.
+The approved batch delegation authorizes the documented ticket-lock,
+IRQ-preserving wrapper, acquire/release publication, and ascending rank model.
+Any incompatible primitive or order change remains an architecture decision.
 
 ## Delivery strategy
 
@@ -55,7 +68,7 @@ Primitive and memory-order choices require review before broad adoption.
 - Pull request: the shared ten-gate pull request.
 - Planned commits: primitives/assertions followed by one synchronized
   subsystem per commit with focused and full-suite evidence.
-- Actual commits: pending.
+- Actual commits: synchronization contract and primitives pending commit.
 
 ## Review policy and outcome
 

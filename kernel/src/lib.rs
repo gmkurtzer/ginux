@@ -31,6 +31,7 @@ mod packet;
 mod pe;
 mod published_rootfs;
 mod scheduler;
+mod sync;
 mod volume;
 
 use core::arch::{asm, global_asm};
@@ -193,6 +194,11 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_init();
     serial_write_raw(b"ginux: booting\r\n");
     serial_write("ginux: kernel entered after ExitBootServices\r\n");
+
+    if !sync::verify_primitives() {
+        kernel_fail("ginux: synchronization primitive verification failed\r\n");
+    }
+    serial_write("ginux: ranked synchronization primitives ready\r\n");
 
     if !kernel_stack_is_active() {
         kernel_fail("ginux: kernel stack transition failed\r\n");
