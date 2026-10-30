@@ -6,7 +6,10 @@ const ENTRY_COUNT: usize = 512;
 const DIRECTORY_COUNT: usize = 4;
 const LARGE_PAGE_SIZE: u64 = 2 * 1024 * 1024;
 const PAGE_SIZE: usize = 4096;
-const MAX_FINE_TABLES: usize = 128;
+// Every 2 MiB region in the bounded 4 GiB bootstrap map may require a 4 KiB
+// leaf table. This is the architectural maximum for that map, not a workload
+// cap; guarded per-CPU stacks must never compete for a fixed subset.
+const MAX_FINE_TABLES: usize = DIRECTORY_COUNT * ENTRY_COUNT;
 const PRESENT: u64 = 1 << 0;
 const WRITABLE: u64 = 1 << 1;
 const USER: u64 = 1 << 2;

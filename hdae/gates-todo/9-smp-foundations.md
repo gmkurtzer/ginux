@@ -24,6 +24,11 @@ exercise SMP by making two vCPUs the ordinary QEMU test default.
   and x2APIC entries, rejecting duplicates and unsupported topology sizes.
 - [x] Add an explicit `GINUX_CPUS=1|2|4` QEMU control while retaining one CPU
   as the default until SMP qualification passes.
+- [x] Replace singleton GDT, TSS, IDT, privilege stack, and NMI, double-fault,
+  and machine-check IST stacks with four guarded per-CPU instances; publish
+  interrupt-gate changes consistently to every CPU's private IDT.
+- [x] Replace the initial page-table builder's arbitrary 128-region fine-map
+  cap with the complete bounded 4 GiB bootstrap-map geometry.
 
 ## Remaining work
 
@@ -57,6 +62,11 @@ multi-domain policy results, QEMU harness diffs, and repeated stress runs.
   deterministic kernel and Linux-runtime suite, and ends with
   `Boot test passed`. At this increment only the BSP executes; AP startup is
   the next required milestone and no SMP claim is made from discovery alone.
+- The first guarded per-CPU stack build failed closed with paging error 4
+  (`FineTableCapacity`) before CR3 activation. Replacing the arbitrary cap with
+  the complete 2,048-region geometry passed `make check` and the same full
+  two-vCPU QEMU regression, including all privilege-entry checks and clean
+  shutdown.
 
 ## Decisions and limitations
 
