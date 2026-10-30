@@ -7,17 +7,19 @@
 - Active project: feedback-driven kernel hardening
 - Branch: `codex/feedback-hardening`
 - Baseline tag: `research-v1-baseline`
-- Active gate: none; Gates 1 through 10 are closed
-- Last completed action: Gate 10 passed its frozen functional, adversarial,
-  lifecycle, ABI, performance, and SMP-scaling matrix and closed under the
-  delegated batch policy
-- Next action: human review of the completed branch and pull request; push the
-  local branch when ready
+- Active gate: Gate 11, matched UP and SMP benchmark matrix, approved and in
+  progress
+- Last completed action: froze the Gate 11 scope, controls, sample counts,
+  acceptance criteria, and delivery on existing PR #7
+- Next action: extend the existing benchmark harness for matched Linux/Ginux
+  fixed-thread and scaled-thread measurements at one, two, and four vCPUs
 
 ## Current repository state
 
-Local and remote `main` identify commit `1852455`. All ten feedback-hardening
-gates passed and closed under delegated review on `codex/feedback-hardening`.
+Local and remote `main` identify commit `1852455`. The first ten
+feedback-hardening gates passed and closed under delegated review on
+`codex/feedback-hardening`; Gate 11 adds measurement-only qualification to the
+same branch and PR.
 The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
 matrix and repeated stress pass. The final qualification report and raw/reduced
 evidence are under `docs/feedback-hardening/`. No push or merge was performed.

@@ -6,7 +6,7 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 
 mkdir -p "$benchmark_dir"
-volume="$benchmark_dir/ginux-volume.raw"
+volume="$benchmark_asset_dir/ginux-volume.raw"
 summary="$benchmark_dir/ginux-boot-summary.tsv"
 accelerator=$(benchmark_accelerator)
 cpu_model=$(benchmark_cpu "$accelerator")
@@ -22,6 +22,7 @@ run_boot() {
     GINUX_ROCKY_METRICS_FILE="$metrics" \
     GINUX_VOLUME_IMAGE="$volume" \
     GINUX_MEMORY="$BENCHMARK_MEMORY" \
+    GINUX_CPUS="$BENCHMARK_VCPUS" \
     GINUX_ROCKY_IMAGE="$ROCKY_GINUX_IMAGE" \
     GINUX_REQUIRE_OCI_CACHE_HIT="$require_cache" \
     GINUX_ROCKY_RUNTIME_TIMEOUT=600 \
@@ -36,7 +37,7 @@ run_boot() {
 # Populate and verify the persistent OCI cache outside the measured runs.
 run_boot warmup 0
 
-printf 'run\tqemu_start_to_multi_user_ms\taccelerator\tcpu\tvcpus\tmemory\n' >"$summary"
+printf 'run\tqemu_start_to_multi_user_ms\taccelerator\tcpu\tvcpus\tthreads\tmemory\n' >"$summary"
 for ((run = 1; run <= BENCHMARK_BOOT_RUNS; run++)); do
     run_boot "$run" 1
     value=$(awk -F '\t' '$1 == "qemu_start_to_multi_user_ms" { print $2 }' \
@@ -45,9 +46,9 @@ for ((run = 1; run <= BENCHMARK_BOOT_RUNS; run++)); do
         echo "benchmark: invalid Ginux boot metric for run $run" >&2
         exit 1
     }
-    printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
         "$run" "$value" "$accelerator" "$cpu_model" \
-        "$BENCHMARK_VCPUS" "$BENCHMARK_MEMORY" >>"$summary"
+        "$BENCHMARK_VCPUS" "$BENCHMARK_THREADS" "$BENCHMARK_MEMORY" >>"$summary"
 done
 
 echo "Ginux boot benchmark completed: $summary"

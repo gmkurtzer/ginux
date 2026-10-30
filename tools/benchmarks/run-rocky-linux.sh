@@ -12,7 +12,7 @@ ovmf_code=$(find_ovmf_code)
 ovmf_vars_template=$(find_ovmf_vars)
 accelerator=$(benchmark_accelerator)
 cpu_model=$(benchmark_cpu "$accelerator")
-prepared_image="$benchmark_dir/rocky-linux-prepared.qcow2"
+prepared_image="$benchmark_asset_dir/rocky-linux-prepared-v2.qcow2"
 summary="$benchmark_dir/rocky-linux-summary.tsv"
 qemu_pid=""
 
@@ -24,7 +24,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-printf 'run\tqemu_start_to_multi_user_ms\taccelerator\tcpu\tvcpus\tmemory\n' >"$summary"
+mkdir -p "$benchmark_dir"
+printf 'run\tqemu_start_to_multi_user_ms\taccelerator\tcpu\tvcpus\tthreads\tmemory\n' >"$summary"
 
 for ((run = 1; run <= BENCHMARK_BOOT_RUNS; run++)); do
     overlay="$benchmark_dir/rocky-linux-run-$run.qcow2"
@@ -48,6 +49,7 @@ for ((run = 1; run <= BENCHMARK_BOOT_RUNS; run++)); do
         -device virtio-serial \
         -chardev "file,id=benchmark-output,path=$results" \
         -device "virtserialport,chardev=benchmark-output,name=org.ginux.benchmark" \
+        -fw_cfg "name=opt/ginux/threads,string=$BENCHMARK_THREADS" \
         -net none >"$log" 2>&1 &
     qemu_pid=$!
     ready=""
@@ -66,9 +68,9 @@ for ((run = 1; run <= BENCHMARK_BOOT_RUNS; run++)); do
         echo "benchmark: Linux run $run did not reach multi-user.target" >&2
         exit 1
     fi
-    printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
         "$run" "$((ready - started))" "$accelerator" "$cpu_model" \
-        "$BENCHMARK_VCPUS" "$BENCHMARK_MEMORY" >>"$summary"
+        "$BENCHMARK_VCPUS" "$BENCHMARK_THREADS" "$BENCHMARK_MEMORY" >>"$summary"
     if [[ "${BENCHMARK_BOOT_ONLY:-0}" == 1 ]]; then
         stop_process "$qemu_pid"
         wait "$qemu_pid" 2>/dev/null || true
@@ -86,6 +88,11 @@ for ((run = 1; run <= BENCHMARK_BOOT_RUNS; run++)); do
         cat "$results" >&2
         tail -n 120 "$log" >&2
         echo "benchmark: Linux workload run $run did not complete" >&2
+        exit 1
+    }
+    grep -Fq "GINUX_BENCH_THREADS $BENCHMARK_THREADS" "$results" || {
+        cat "$results" >&2
+        echo "benchmark: Linux run $run did not use $BENCHMARK_THREADS threads" >&2
         exit 1
     }
 done
