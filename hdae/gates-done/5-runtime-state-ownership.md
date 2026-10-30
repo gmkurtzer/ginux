@@ -44,12 +44,18 @@ state out of ambient globals and into explicitly owned lifecycle objects.
 - [x] Consolidated SysV IPC roots, overlay state, file-cache tables, Linux
   process scratch space, and suspended Linux runtime frames into explicit
   process/domain owner roots.
+- [x] Consolidated the 403-object x86-64 execution-state bank behind one
+  explicit runtime owner and removed direct backing-object access.
+- [x] Consolidated the five remaining raw mutable x86-64 runtime banks behind
+  one explicit mutable owner pending Gate 8 synchronization.
+- [x] Added an architecture check and negative test that reject bypasses of the
+  x86-64 runtime owner.
+- [x] Allowed a controller blocked on input to yield to queued detached-domain
+  lifecycle work.
 
 ## Remaining work
 
-- Migrate each runtime ownership group defined by Gate 4.
-- Remove obsolete singleton scratch paths and raw mutable statics.
-- Add repeated lifecycle and cross-domain contamination tests.
+- None.
 
 ## Acceptance criteria
 
@@ -90,6 +96,18 @@ state out of ambient globals and into explicitly owned lifecycle objects.
   interfaces and 375 syscalls), and the complete verification QEMU sequence
   passed; the inventory decreased from 577 to 563 globals with only the
   408-entry x86-64 execution-state bank remaining in Gate 5.
+- After x86-64 consolidation, `make architecture-check` passed with 560
+  inventoried writable globals and zero rows assigned to migration Gate 5. The
+  dedicated x86 owner check verified 403 backing declarations and owner
+  initializers and passed its injected-bypass negative test.
+- `make check` and `make test-linux-abi` passed; the latter validated 23
+  interfaces and 375 syscall contracts.
+- `make build-verification && bash tests/qemu/boot.sh` passed the complete
+  verification boot, lifecycle, isolation, restart, and cleanup sequence.
+- `make test-multi-domain` remains limited by a floating upstream Alpine image
+  that stalls at Linux user entry. The same failure reproduces at pre-Gate-5
+  commits `0095ff55`, `900d0d56`, and `c345a0d3`; the interrupted run left no
+  QEMU process. See `docs/feedback-hardening/GATE-5-RUNTIME-OWNERSHIP.md`.
 - Direct `bash tests/qemu/boot.sh` after `make check` was an invalid first
   attempt because the normal image lacks verification-only markers; no QEMU
   process was left behind, and the test was rerun with its required image.
@@ -109,10 +127,13 @@ Shared objects may remain only when Gate 4 explicitly classified them and Gate
 - Actual commits: `900d0d56` added explicit shared runtime owner roots;
   `44a18062` consolidated process runtime ownership; socket-runtime
   consolidation is `b6db50a7`; `40f1b725` consolidated signal, keyring, and
-  AIO ownership; `d0d5faad` consolidated mount/user/tmpfs ownership; remaining
-  non-x86 runtime consolidation pending commit, followed by the x86-64 bank.
+  AIO ownership; `d0d5faad` consolidated mount/user/tmpfs ownership; `c345a0d3`
+  consolidated the remaining non-x86 runtime owners; x86-64 runtime
+  consolidation is pending this gate's final commit.
 
 ## Review policy and outcome
 
 Delegated closure authorized after runtime ownership, lifecycle, isolation, and
-regression criteria all pass. Outcome: pending.
+regression criteria all pass. Outcome: passed and closed under the approved
+batch delegation; the floating Alpine limitation is baseline-reproduced and
+does not invalidate the deterministic Gate 5 evidence.

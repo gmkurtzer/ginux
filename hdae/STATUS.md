@@ -7,24 +7,30 @@
 - Active project: feedback-driven kernel hardening
 - Branch: `codex/feedback-hardening`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 5, runtime state ownership, in progress
-- Last completed action: consolidated the remaining non-x86 Gate 5 runtime
-  state under explicit SysV IPC, overlay, file-cache, Linux process scratch,
-  and suspended-runtime owner roots; all static, ABI, and verification-QEMU
-  layers passed
-- Next action: migrate the 408-entry x86-64 execution-state bank into explicit
-  per-CPU, per-domain, per-process, or bounded diagnostic owner roots
+- Active gate: Gate 6, platform and service state ownership, ready to begin
+- Last completed action: Gate 5 consolidated the x86-64 execution bank behind
+  explicit owner roots, removed every Gate 5 migration row, added enforcement,
+  and passed static, ABI, and verification-QEMU evidence
+- Next action: classify the Gate 6 rows by platform/service lifecycle and move
+  the first coherent ownership group behind an explicit owner root
 
 ## Current repository state
 
-Local and remote `main` identify commit `1852455`. Gates 1 through 4 passed and
-closed under delegated review. Gate 5 is active; its only remaining classified
-runtime globals are the 408 entries in the x86-64 execution-state bank.
+Local and remote `main` identify commit `1852455`. Gates 1 through 5 passed and
+closed under delegated review. Gate 6 is next. The Gate 5 manifest has zero
+remaining migration rows; its final commit is pending.
 
 ## Open decisions
 
 - None. Per-CPU entry storage and distinct guarded NMI, double-fault, and
   machine-check ISTs are already approved architectural requirements.
+
+## Limitations
+
+- The floating upstream Alpine integration image currently stalls at Linux
+  user entry on both Gate 5 and pre-Gate-5 commits. Deterministic Linux ABI and
+  verification-boot suites pass; external Alpine compatibility is separate
+  follow-up work.
 
 ## Durable evidence
 
