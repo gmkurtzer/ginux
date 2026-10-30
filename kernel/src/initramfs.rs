@@ -1,4 +1,5 @@
 use crate::memory;
+use core::cell::UnsafeCell;
 use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
@@ -19,9 +20,19 @@ const REGULAR: u32 = 0o100000;
 const SYMLINK: u32 = 0o120000;
 const SYSTEM_PROFILE_HEADER: &[u8] = b"GINUX_SYSTEM_PROFILE_V0\n";
 
-static ROOT_PUBLISHED: AtomicBool = AtomicBool::new(false);
-static ROOT_GENERATION: AtomicU32 = AtomicU32::new(0);
-static mut PUBLISHED_ROOT: MaybeUninit<ReadOnlyRoot> = MaybeUninit::uninit();
+struct PublishedRootOwner {
+    published: AtomicBool,
+    generation: AtomicU32,
+    root: UnsafeCell<MaybeUninit<ReadOnlyRoot>>,
+}
+
+unsafe impl Sync for PublishedRootOwner {}
+
+static PUBLISHED_ROOT: PublishedRootOwner = PublishedRootOwner {
+    published: AtomicBool::new(false),
+    generation: AtomicU32::new(0),
+    root: UnsafeCell::new(MaybeUninit::uninit()),
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct PublishedRootHandle {
@@ -614,16 +625,22 @@ impl ReadOnlyRoot {
 }
 
 fn published_root() -> Option<&'static ReadOnlyRoot> {
-    if !ROOT_PUBLISHED.load(Ordering::Acquire) {
+    if !PUBLISHED_ROOT.published.load(Ordering::Acquire) {
         return None;
     }
     // SAFETY: publication writes the root exactly once before the release
     // store. Bootstrap is single-core and never mutates or releases it.
-    Some(unsafe { &*core::ptr::addr_of!(PUBLISHED_ROOT).cast::<ReadOnlyRoot>() })
+    Some(unsafe {
+        &*PUBLISHED_ROOT
+            .root
+            .get()
+            .cast_const()
+            .cast::<ReadOnlyRoot>()
+    })
 }
 
 pub(crate) fn publish_read_only_root(source: &[u8]) -> bool {
-    if ROOT_PUBLISHED.load(Ordering::Acquire) {
+    if PUBLISHED_ROOT.published.load(Ordering::Acquire) {
         return false;
     }
     let Some(image) = OwnedRoot::materialize(source) else {
@@ -638,21 +655,21 @@ pub(crate) fn publish_read_only_root(source: &[u8]) -> bool {
     }
     // SAFETY: the publication flag is still false and bootstrap is single-core.
     unsafe {
-        core::ptr::addr_of_mut!(PUBLISHED_ROOT).write(MaybeUninit::new(root));
+        PUBLISHED_ROOT.root.get().write(MaybeUninit::new(root));
     }
-    ROOT_GENERATION.store(1, Ordering::Release);
-    ROOT_PUBLISHED.store(true, Ordering::Release);
+    PUBLISHED_ROOT.generation.store(1, Ordering::Release);
+    PUBLISHED_ROOT.published.store(true, Ordering::Release);
     true
 }
 
 pub(crate) fn published_root_handle() -> Option<PublishedRootHandle> {
-    let generation = ROOT_GENERATION.load(Ordering::Acquire);
+    let generation = PUBLISHED_ROOT.generation.load(Ordering::Acquire);
     (generation != 0 && published_root_is_live()).then_some(PublishedRootHandle { generation })
 }
 
 pub(crate) fn published_root_handle_is_live(handle: PublishedRootHandle) -> bool {
     handle.generation != 0
-        && ROOT_GENERATION.load(Ordering::Acquire) == handle.generation
+        && PUBLISHED_ROOT.generation.load(Ordering::Acquire) == handle.generation
         && published_root_is_live()
 }
 

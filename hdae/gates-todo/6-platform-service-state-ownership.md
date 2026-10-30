@@ -22,6 +22,9 @@ state into explicit host, device, service, or domain-owned structures.
 - [x] Consolidated the isolated registry/network service heap, network buffers,
   DNS state, TLS workspaces, pull metadata, and progress state from 20 ambient
   globals into three explicit service-generation owner roots.
+- [x] Consolidated image-store state, initramfs publication, per-domain rootfs
+  indexes, packet mailboxes, and the live volume device from 29 ambient globals
+  into five explicit host or domain publication owner roots.
 
 ## Remaining work
 
@@ -47,6 +50,11 @@ state into explicit host, device, service, or domain-owned structures.
 - `make build-verification && bash tests/qemu/boot.sh` passed the complete
   service fault, replacement, network request-generation, ABI, lifecycle, and
   cleanup sequence.
+- After the filesystem/storage publication migration, `make
+  architecture-check` passed with the inventory reduced from 543 to 519
+  objects, `make check` passed, and the complete verification QEMU boot passed
+  image-store, root publication, packet fault/replacement, volume recovery,
+  lifecycle, and cleanup evidence.
 
 ## Decisions and limitations
 
@@ -60,7 +68,8 @@ not itself prohibited when ownership and synchronization are concrete.
 - Pull request: the shared ten-gate pull request.
 - Planned commits: filesystem/storage ownership, network/socket ownership,
   device/controller ownership, and failure/lifecycle evidence.
-- Actual commits: isolated network-service ownership pending commit.
+- Actual commits: `5ba79480` owns isolated network-service state;
+  filesystem/storage publication ownership pending commit.
 
 ## Review policy and outcome
 

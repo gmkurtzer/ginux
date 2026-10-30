@@ -1,4 +1,5 @@
 use core::{
+    cell::UnsafeCell,
     mem::MaybeUninit,
     sync::atomic::{AtomicBool, Ordering},
 };
@@ -27,8 +28,17 @@ struct MemoryBlockDevice {
     pending: [[u8; SECTOR_SIZE]; SLOT_COUNT],
 }
 
-static LIVE_INSTALLED: AtomicBool = AtomicBool::new(false);
-static mut LIVE_DEVICE: MaybeUninit<MemoryBlockDevice> = MaybeUninit::uninit();
+struct LiveVolumeOwner {
+    installed: AtomicBool,
+    device: UnsafeCell<MaybeUninit<MemoryBlockDevice>>,
+}
+
+unsafe impl Sync for LiveVolumeOwner {}
+
+static LIVE_VOLUME: LiveVolumeOwner = LiveVolumeOwner {
+    installed: AtomicBool::new(false),
+    device: UnsafeCell::new(MaybeUninit::uninit()),
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum LiveError {
@@ -40,11 +50,14 @@ pub(crate) enum LiveError {
 }
 
 pub(crate) fn install_live() -> bool {
-    if LIVE_INSTALLED.swap(true, Ordering::AcqRel) {
+    if LIVE_VOLUME.installed.swap(true, Ordering::AcqRel) {
         return false;
     }
     unsafe {
-        core::ptr::addr_of_mut!(LIVE_DEVICE).write(MaybeUninit::new(MemoryBlockDevice::new()));
+        LIVE_VOLUME
+            .device
+            .get()
+            .write(MaybeUninit::new(MemoryBlockDevice::new()));
     }
     live_device_mut().is_some_and(|device| recover(device).is_none())
 }
@@ -98,10 +111,10 @@ fn live_scan_error(error: ScanError) -> LiveError {
 }
 
 fn live_device_mut() -> Option<&'static mut MemoryBlockDevice> {
-    if !LIVE_INSTALLED.load(Ordering::Acquire) {
+    if !LIVE_VOLUME.installed.load(Ordering::Acquire) {
         return None;
     }
-    Some(unsafe { &mut *core::ptr::addr_of_mut!(LIVE_DEVICE).cast::<MemoryBlockDevice>() })
+    Some(unsafe { &mut *LIVE_VOLUME.device.get().cast::<MemoryBlockDevice>() })
 }
 
 impl MemoryBlockDevice {

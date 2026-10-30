@@ -1,4 +1,5 @@
 use core::{
+    cell::UnsafeCell,
     mem::MaybeUninit,
     sync::atomic::{AtomicBool, Ordering},
 };
@@ -235,17 +236,30 @@ impl Mailbox {
     }
 }
 
-static INSTALLED: AtomicBool = AtomicBool::new(false);
-static mut MAILBOX: MaybeUninit<Mailbox> = MaybeUninit::uninit();
-static mut EGRESS_MAILBOX: MaybeUninit<Mailbox> = MaybeUninit::uninit();
+struct PacketOwner {
+    installed: AtomicBool,
+    ingress: UnsafeCell<MaybeUninit<Mailbox>>,
+    egress: UnsafeCell<MaybeUninit<Mailbox>>,
+}
+
+unsafe impl Sync for PacketOwner {}
+
+static PACKETS: PacketOwner = PacketOwner {
+    installed: AtomicBool::new(false),
+    ingress: UnsafeCell::new(MaybeUninit::uninit()),
+    egress: UnsafeCell::new(MaybeUninit::uninit()),
+};
 
 pub(crate) fn install() -> bool {
-    if INSTALLED.swap(true, Ordering::AcqRel) {
+    if PACKETS.installed.swap(true, Ordering::AcqRel) {
         return false;
     }
     unsafe {
-        core::ptr::addr_of_mut!(MAILBOX).write(MaybeUninit::new(Mailbox::new()));
-        core::ptr::addr_of_mut!(EGRESS_MAILBOX).write(MaybeUninit::new(Mailbox::new()));
+        PACKETS
+            .ingress
+            .get()
+            .write(MaybeUninit::new(Mailbox::new()));
+        PACKETS.egress.get().write(MaybeUninit::new(Mailbox::new()));
     }
     true
 }
@@ -403,15 +417,17 @@ pub(crate) fn egress_producer_is_bound() -> bool {
 }
 
 fn mailbox_mut() -> Option<&'static mut Mailbox> {
-    INSTALLED
+    PACKETS
+        .installed
         .load(Ordering::Acquire)
-        .then(|| unsafe { &mut *core::ptr::addr_of_mut!(MAILBOX).cast::<Mailbox>() })
+        .then(|| unsafe { &mut *PACKETS.ingress.get().cast::<Mailbox>() })
 }
 
 fn egress_mailbox_mut() -> Option<&'static mut Mailbox> {
-    INSTALLED
+    PACKETS
+        .installed
         .load(Ordering::Acquire)
-        .then(|| unsafe { &mut *core::ptr::addr_of_mut!(EGRESS_MAILBOX).cast::<Mailbox>() })
+        .then(|| unsafe { &mut *PACKETS.egress.get().cast::<Mailbox>() })
 }
 
 pub(crate) fn verify_invariants() -> bool {
