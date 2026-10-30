@@ -31,6 +31,11 @@ struct LinuxProcessJob {
     general: [u64; 15],
 }
 
+pub(crate) struct LinuxProcessTicket {
+    cpu: usize,
+    generation: u32,
+}
+
 static ONLINE: [AtomicBool; CPU_LIMIT] = [const { AtomicBool::new(false) }; CPU_LIMIT];
 static ONLINE_COUNT: AtomicU32 = AtomicU32::new(1);
 static MAILBOX_CR3: AtomicU64 = AtomicU64::new(0);
@@ -317,6 +322,18 @@ pub(crate) fn execute_linux_process(
     fs_base: u64,
     general: [u64; 15],
 ) -> Option<u8> {
+    let ticket = begin_linux_process(cpu, root, entry, stack, fs_base, general)?;
+    finish_linux_process(ticket)
+}
+
+pub(crate) fn begin_linux_process(
+    cpu: usize,
+    root: FrameLease,
+    entry: u64,
+    stack: u64,
+    fs_base: u64,
+    general: [u64; 15],
+) -> Option<LinuxProcessTicket> {
     if cpu == 0 || cpu >= online_count() {
         return None;
     }
@@ -334,11 +351,18 @@ pub(crate) fn execute_linux_process(
         });
     }
     LINUX_PROCESS_RESULTS[cpu].store(LINUX_RESULT_PENDING, Ordering::Release);
-    if !dispatch_and_wait(cpu, COMMAND_LINUX_PROCESS, 0) {
+    let Some(generation) = dispatch(cpu, COMMAND_LINUX_PROCESS, 0) else {
         LINUX_PROCESS_JOBS.lock()[cpu] = None;
         return None;
+    };
+    Some(LinuxProcessTicket { cpu, generation })
+}
+
+pub(crate) fn finish_linux_process(ticket: LinuxProcessTicket) -> Option<u8> {
+    if !wait_for_ack(ticket.cpu, ticket.generation) {
+        return None;
     }
-    let result = LINUX_PROCESS_RESULTS[cpu].swap(LINUX_RESULT_FAILED, Ordering::AcqRel);
+    let result = LINUX_PROCESS_RESULTS[ticket.cpu].swap(LINUX_RESULT_FAILED, Ordering::AcqRel);
     (result <= u16::from(u8::MAX)).then_some(result as u8)
 }
 

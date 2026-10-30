@@ -2928,8 +2928,10 @@ pub(crate) fn execute_linux_process_child(
     let fs_valid = fs_base < 1 << 47;
     let fork_return_valid = general[0] == 0;
     let scheduler_idle = scheduler::current_domain().is_none();
-    let gate_installed =
-        install_user_interrupt_gate(SYSCALL_VECTOR, ginux_syscall_entry as *const () as usize);
+    // The gate is installed before APs enter userspace. Avoid rewriting every
+    // CPU's IDT while another CPU may already be executing the same path.
+    let gate_installed = user_interrupt_surface_is_minimal()
+        || install_user_interrupt_gate(SYSCALL_VECTOR, ginux_syscall_entry as *const () as usize);
     let interrupt_surface_valid = user_interrupt_surface_is_minimal();
     let preconditions = u8::from(entry_valid)
         | (u8::from(stack_valid) << 1)

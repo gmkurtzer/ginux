@@ -103,6 +103,18 @@ const PROCESS_CHILD_PROGRAM: [u8; 42] = [
     0xcd, 0x80, // exit(42)
     0x0f, 0x0b, // failure: ud2
 ];
+const CONCURRENT_PROCESS_PROGRAM: [u8; 36] = [
+    0x48, 0xb8, 0x00, 0x10, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00, // mov rax, 0x8000001000
+    0xf0, 0xff, 0x00, // lock inc dword ptr [rax]
+    0x83, 0x38, 0x02, // wait: cmp dword ptr [rax], 2
+    0x75, 0xfb, // jne wait
+    0x31, 0xc0, // xor eax, eax
+    0xcd, 0x80, // context-check trap
+    0xb8, 0x3c, 0, 0, 0, // mov eax, 60 (__NR_exit)
+    0xbf, 0x2a, 0, 0, 0, // mov edi, 42
+    0xcd, 0x80, // exit(42)
+    0x0f, 0x0b, // failure: ud2
+];
 #[allow(dead_code)]
 const LIVE_PROCESS_CHILD_PROGRAM: [u8; 16] = [
     0xcd, 0x80, // validate the complete fork-child context
@@ -1699,7 +1711,7 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
     {
         return false;
     }
-    let (Some(first_space), Some(second_space)) = (
+    let (Some(first_space), Some(mut second_space)) = (
         ProcessAddressSpace::new(1, &frames[6..10], &first_mappings),
         ProcessAddressSpace::new(2, &frames[12..16], &second_mappings),
     ) else {
@@ -1896,6 +1908,97 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
     {
         crate::serial_write("ginux: lifecycle stage wipe execution failed\r\n");
         return false;
+    }
+    if crate::arch::x86_64::smp::online_count() > 1 {
+        let (Some(second_page), Some(shared_page)) = (
+            frames[16].direct_map_address(),
+            frames[11].direct_map_address(),
+        ) else {
+            return false;
+        };
+        let concurrent_second_mappings = [
+            test_mapping(TEST_USER_ADDRESS, frames[16], false, true),
+            // Alias the first process's writable page only for this bounded
+            // rendezvous. Neither test program uses its user stack while the
+            // alias exists, and the original second mapping is restored before
+            // lifecycle teardown resumes.
+            test_mapping(TEST_USER_ADDRESS + PAGE_SIZE, frames[11], true, false),
+        ];
+        if !write_test_hierarchy(&frames[12..16], &concurrent_second_mappings)
+            || !address_space::inherit_linux_process_kernel_mappings(frames[12])
+        {
+            return false;
+        }
+        let Some(concurrent_second_space) =
+            ProcessAddressSpace::new(2, &frames[12..16], &concurrent_second_mappings)
+        else {
+            return false;
+        };
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                CONCURRENT_PROCESS_PROGRAM.as_ptr(),
+                child_page as *mut u8,
+                CONCURRENT_PROCESS_PROGRAM.len(),
+            );
+            core::ptr::copy_nonoverlapping(
+                CONCURRENT_PROCESS_PROGRAM.as_ptr(),
+                second_page as *mut u8,
+                CONCURRENT_PROCESS_PROGRAM.len(),
+            );
+            (shared_page as *mut u32).write(0);
+        }
+        let concurrent_context = init_context.fork_child();
+        let ticket = crate::arch::x86_64::smp::begin_linux_process(
+            1,
+            first_space.root(),
+            concurrent_context.rip,
+            concurrent_context.rsp,
+            concurrent_context.fs_base,
+            concurrent_context.general,
+        );
+        let Some(ticket) = ticket else {
+            crate::serial_write("ginux: concurrent Linux process dispatch failed\r\n");
+            return false;
+        };
+        let mut remote_entered = false;
+        for _ in 0..20_000_000 {
+            if unsafe { (shared_page as *const u32).read_volatile() } == 1 {
+                remote_entered = true;
+                break;
+            }
+            core::hint::spin_loop();
+        }
+        if !remote_entered {
+            let _ = crate::arch::x86_64::smp::finish_linux_process(ticket);
+            crate::serial_write("ginux: concurrent Linux process rendezvous failed\r\n");
+            return false;
+        }
+        let local_status = address_space::execute_linux_process_child(
+            concurrent_second_space.root(),
+            concurrent_context.rip,
+            concurrent_context.rsp,
+            concurrent_context.fs_base,
+            concurrent_context.general,
+        );
+        let remote_status = crate::arch::x86_64::smp::finish_linux_process(ticket);
+        if local_status != Some(42)
+            || remote_status != Some(42)
+            || unsafe { (shared_page as *const u32).read() } != 2
+        {
+            return false;
+        }
+        crate::serial_write("ginux: concurrent Linux processes executed across processors\r\n");
+        if !write_test_hierarchy(&frames[12..16], &second_mappings)
+            || !address_space::inherit_linux_process_kernel_mappings(frames[12])
+        {
+            return false;
+        }
+        let Some(restored_second_space) =
+            ProcessAddressSpace::new(2, &frames[12..16], &second_mappings)
+        else {
+            return false;
+        };
+        second_space = restored_second_space;
     }
     let Some(resumed_parent) = run_queue.yield_current(child_thread, child_scheduler_context)
     else {
