@@ -4,6 +4,7 @@ set -euo pipefail
 
 root=$(git rev-parse --show-toplevel)
 cpu="$root/kernel/src/arch/x86_64/cpu.rs"
+architecture="$root/kernel/src/arch/x86_64/cpu/architecture.rs"
 address_space="$root/kernel/src/address_space.rs"
 
 line_of() {
@@ -15,7 +16,7 @@ line_of() {
 syscall_entry=$(line_of '^ginux_linux_syscall_entry:' "$cpu")
 save_rsp=$(awk -v start="$syscall_entry" 'NR >= start && /mov gs:\[\{entry_user_rsp\}\], rsp/ { print NR; exit }' "$cpu")
 trusted_rsp=$(awk -v start="$syscall_entry" 'NR >= start && /mov rsp, gs:\[\{entry_return_stack\}\]/ { print NR; exit }' "$cpu")
-idt_policy=$(line_of '^const fn exception_ist' "$cpu")
+idt_policy=$(line_of '^const fn exception_ist' "$architecture")
 copy_validate=$(line_of 'if !user_range_has_permissions\(root, address, end, 0\)' "$address_space")
 copy_access=$(awk -v start="$copy_validate" 'NR >= start && /read_volatile\(\)/ { print NR; exit }' "$address_space")
 trusted_walk=$(line_of '^fn current_linux_leaf_trusted' "$address_space")
@@ -29,9 +30,9 @@ else
     printf 'SYSCALL entry initially uses user RSP\tconfirmed\tentry ordering still permits stack use before a trusted switch\n'
 fi
 
-if [[ -n "$idt_policy" ]] && rg -q '2 => NMI_IST' "$cpu" && rg -q '18 => MACHINE_CHECK_IST' "$cpu"; then
-    printf 'NMI lacks a dedicated IST\tresolved-or-not-reproduced\t%s:%s assigns the NMI IST explicitly\n' "$cpu" "$idt_policy"
-    printf 'machine check lacks a dedicated IST\tresolved-or-not-reproduced\t%s:%s assigns the machine-check IST explicitly\n' "$cpu" "$idt_policy"
+if [[ -n "$idt_policy" ]] && rg -q '2 => NMI_IST' "$architecture" && rg -q '18 => MACHINE_CHECK_IST' "$architecture"; then
+    printf 'NMI lacks a dedicated IST\tresolved-or-not-reproduced\t%s:%s assigns the NMI IST explicitly\n' "$architecture" "$idt_policy"
+    printf 'machine check lacks a dedicated IST\tresolved-or-not-reproduced\t%s:%s assigns the machine-check IST explicitly\n' "$architecture" "$idt_policy"
 else
     printf 'NMI lacks a dedicated IST\tconfirmed\tIDT policy has no explicit NMI IST\n'
     printf 'machine check lacks a dedicated IST\tconfirmed\tIDT policy has no explicit machine-check IST\n'
