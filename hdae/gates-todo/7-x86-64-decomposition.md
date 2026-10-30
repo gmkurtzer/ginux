@@ -31,6 +31,8 @@ boundaries established by earlier gates without changing behavior.
   interrupt-gate management, and guarded-stack accessors into
   `cpu/architecture.rs`; updated the privilege-entry architecture check to
   inspect the extracted mechanism at its authoritative location.
+- [x] Extracted extended user-state feature enablement and container/process
+  save, restore, clone, reset, and discard mechanisms into `cpu/execution.rs`.
 
 ## Remaining work
 
@@ -58,6 +60,8 @@ boundaries established by earlier gates without changing behavior.
   `make architecture-check`, `make check`, and
   `make build-verification && bash tests/qemu/boot.sh`; the inventory remained
   at 450 classified globals and QEMU reached `GINUX_KERNEL_OK` and shut down.
+- The extended execution-state extraction passed the same complete regression
+  sequence, including Linux ELF/runtime compatibility and a clean QEMU boot.
 
 ## Decisions and limitations
 

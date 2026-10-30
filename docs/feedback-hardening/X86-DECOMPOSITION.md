@@ -75,8 +75,12 @@ baselines and compares them with the Gate 1 record.
   and guarded-stack accessors then moved beside their owner. The static
   privilege-entry check follows these mechanisms into `cpu/architecture.rs`
   while continuing to inspect entry assembly in `cpu.rs`.
+- Extended-state enablement and container/process XSAVE lifecycle mechanisms
+  moved to `cpu/execution.rs`, leaving Linux process policy outside the
+  architecture mechanism while retaining explicit runtime ownership.
 
-After these extractions, `cpu.rs` contains 47,252 lines,
-`cpu/architecture.rs` contains 423 lines, and `cpu/linux_abi.rs` contains 868
-lines. These measurements record progress only; cohesive responsibility and
-dependency direction remain the gate criteria.
+After these extractions, `cpu.rs` contains 47,037 lines,
+`cpu/architecture.rs` contains 423 lines, `cpu/execution.rs` contains 238
+lines, and `cpu/linux_abi.rs` contains 868 lines. These measurements record
+progress only; cohesive responsibility and dependency direction remain the
+gate criteria.

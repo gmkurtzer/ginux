@@ -9,6 +9,7 @@ use core::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicU64, AtomicU8, 
 use super::{paging, timer};
 
 mod architecture;
+mod execution;
 mod linux_abi;
 pub(crate) use architecture::{
     clear_interrupt_gate, double_fault_guard_page, double_fault_stack_top,
@@ -19,6 +20,14 @@ pub(crate) use architecture::{
     user_interrupt_surface_is_minimal,
 };
 use architecture::{current_entry_state, install_user_interrupt_gate, CPU_ARCHITECTURE};
+pub(crate) use execution::enable_extended_user_state;
+use execution::{
+    clone_linux_process_extended_state, discard_container_extended_state,
+    discard_linux_process_extended_state, reset_extended_user_state,
+    restore_container_extended_state, restore_linux_process_extended_state,
+    save_container_extended_state, save_linux_process_extended_state, ExtendedState,
+    EXTENDED_STATE_SIZE,
+};
 pub(crate) use linux_abi::*;
 
 use crate::{
@@ -2160,12 +2169,6 @@ static X86_RUNTIME_BACKING_CONTAINER_STOP_REQUESTED: [AtomicBool; control_abi::D
 static X86_RUNTIME_BACKING_CONTAINER_BACKGROUND_SUSPENDED: [AtomicBool; control_abi::DOMAIN_LIMIT] =
     [const { AtomicBool::new(false) }; control_abi::DOMAIN_LIMIT];
 
-const EXTENDED_STATE_SIZE: usize = 1024;
-
-#[derive(Clone, Copy)]
-#[repr(C, align(64))]
-struct ExtendedState([u8; EXTENDED_STATE_SIZE]);
-
 static X86_RUNTIME_BACKING_CONTAINER_EXTENDED_STATE_VALID: [AtomicBool; control_abi::DOMAIN_LIMIT] =
     [const { AtomicBool::new(false) }; control_abi::DOMAIN_LIMIT];
 const LINUX_PROCESS_RUNTIME_INSTANCE_LIMIT: usize = control_abi::DOMAIN_LIMIT + 1;
@@ -2882,224 +2885,6 @@ pub(crate) fn user_mode_instruction_prevention_enabled() -> bool {
         asm!("mov {}, cr4", out(reg) cr4, options(nomem, nostack, preserves_flags));
     }
     cr4 & CR4_UMIP != 0
-}
-
-pub(crate) fn enable_extended_user_state() -> bool {
-    let features = __cpuid(1);
-    if features.edx & CPUID_SSE == 0
-        || features.ecx & (CPUID_XSAVE | CPUID_AVX) != CPUID_XSAVE | CPUID_AVX
-        || __cpuid(0).eax < CPUID_EXTENDED_STATE
-        || __cpuid_count(CPUID_EXTENDED_STATE, 0).eax & 7 != 7
-    {
-        return false;
-    }
-    let mut cr0: u64;
-    let mut cr4: u64;
-    unsafe {
-        asm!("mov {}, cr0", out(reg) cr0, options(nomem, nostack, preserves_flags));
-        cr0 = (cr0 | CR0_MP | CR0_NE) & !CR0_EM;
-        asm!("mov cr0, {}", in(reg) cr0, options(nomem, nostack, preserves_flags));
-        asm!("mov {}, cr4", out(reg) cr4, options(nomem, nostack, preserves_flags));
-        cr4 |= CR4_OSFXSR | CR4_OSXMMEXCPT | CR4_OSXSAVE;
-        asm!("mov cr4, {}", in(reg) cr4, options(nomem, nostack, preserves_flags));
-        asm!(
-            "xsetbv",
-            in("ecx") 0_u32,
-            in("eax") 7_u32,
-            in("edx") 0_u32,
-            options(nostack, preserves_flags)
-        );
-    }
-    let state = __cpuid_count(CPUID_EXTENDED_STATE, 0);
-    let enabled = state.ebx as usize <= EXTENDED_STATE_SIZE && reset_extended_user_state();
-    CPU_ARCHITECTURE
-        .extended_user_state_enabled
-        .store(enabled, Ordering::Release);
-    enabled
-}
-
-fn reset_extended_user_state() -> bool {
-    let default_mxcsr = 0x1f80_u32;
-    unsafe {
-        asm!("fninit", options(nostack));
-        asm!("ldmxcsr [{}]", in(reg) &default_mxcsr, options(nostack));
-        asm!("vzeroall", options(nostack));
-    }
-    true
-}
-
-fn restore_container_extended_state() -> bool {
-    if !CPU_ARCHITECTURE
-        .extended_user_state_enabled
-        .load(Ordering::Acquire)
-    {
-        return true;
-    }
-    let Some(slot) = active_container_slot() else {
-        return false;
-    };
-    if !X86_RUNTIME.CONTAINER_EXTENDED_STATE_VALID[slot].load(Ordering::Acquire) {
-        return reset_extended_user_state();
-    }
-    let state = unsafe {
-        X86_MUTABLE_RUNTIME
-            .container_extended_states
-            .get()
-            .cast_const()
-            .cast::<ExtendedState>()
-            .add(slot)
-    };
-    unsafe {
-        asm!(
-            "xrstor64 [{}]",
-            in(reg) state,
-            in("eax") 7_u32,
-            in("edx") 0_u32,
-            options(nostack)
-        );
-    }
-    true
-}
-
-fn save_container_extended_state() -> bool {
-    if !CPU_ARCHITECTURE
-        .extended_user_state_enabled
-        .load(Ordering::Acquire)
-    {
-        return true;
-    }
-    let Some(slot) = active_container_slot() else {
-        return false;
-    };
-    let state = unsafe {
-        X86_MUTABLE_RUNTIME
-            .container_extended_states
-            .get()
-            .cast::<ExtendedState>()
-            .add(slot)
-    };
-    unsafe {
-        asm!(
-            "xsave64 [{}]",
-            in(reg) state,
-            in("eax") 7_u32,
-            in("edx") 0_u32,
-            options(nostack)
-        );
-    }
-    X86_RUNTIME.CONTAINER_EXTENDED_STATE_VALID[slot].store(true, Ordering::Release);
-    reset_extended_user_state()
-}
-
-fn discard_container_extended_state() -> bool {
-    if !CPU_ARCHITECTURE
-        .extended_user_state_enabled
-        .load(Ordering::Acquire)
-    {
-        return true;
-    }
-    let Some(slot) = active_container_slot() else {
-        return false;
-    };
-    X86_RUNTIME.CONTAINER_EXTENDED_STATE_VALID[slot].store(false, Ordering::Release);
-    reset_extended_user_state()
-}
-
-fn linux_process_extended_state_index(pid: u32) -> Option<(usize, usize)> {
-    let instance = current_container_slot().unwrap_or(control_abi::DOMAIN_LIMIT);
-    let slot = linux_process::live_process_runtime_slot(pid)?;
-    (instance < LINUX_PROCESS_RUNTIME_INSTANCE_LIMIT && slot < linux_process::PROCESS_RUNTIME_LIMIT)
-        .then_some((instance, slot))
-}
-
-fn save_linux_process_extended_state(pid: u32) -> bool {
-    if !CPU_ARCHITECTURE
-        .extended_user_state_enabled
-        .load(Ordering::Acquire)
-    {
-        return true;
-    }
-    let Some((instance, slot)) = linux_process_extended_state_index(pid) else {
-        return false;
-    };
-    let state = unsafe {
-        X86_MUTABLE_RUNTIME
-            .process_extended_states
-            .get()
-            .cast::<ExtendedState>()
-            .add(instance * linux_process::PROCESS_RUNTIME_LIMIT + slot)
-    };
-    unsafe {
-        asm!(
-            "xsave64 [{}]",
-            in(reg) state,
-            in("eax") 7_u32,
-            in("edx") 0_u32,
-            options(nostack)
-        );
-        (*X86_MUTABLE_RUNTIME.process_extended_state_valid.get())[instance][slot] = true;
-    }
-    true
-}
-
-fn restore_linux_process_extended_state(pid: u32) -> bool {
-    if !CPU_ARCHITECTURE
-        .extended_user_state_enabled
-        .load(Ordering::Acquire)
-    {
-        return true;
-    }
-    let Some((instance, slot)) = linux_process_extended_state_index(pid) else {
-        return false;
-    };
-    if !unsafe { (*X86_MUTABLE_RUNTIME.process_extended_state_valid.get())[instance][slot] } {
-        return reset_extended_user_state();
-    }
-    let state = unsafe {
-        X86_MUTABLE_RUNTIME
-            .process_extended_states
-            .get()
-            .cast_const()
-            .cast::<ExtendedState>()
-            .add(instance * linux_process::PROCESS_RUNTIME_LIMIT + slot)
-    };
-    unsafe {
-        asm!(
-            "xrstor64 [{}]",
-            in(reg) state,
-            in("eax") 7_u32,
-            in("edx") 0_u32,
-            options(nostack)
-        );
-    }
-    true
-}
-
-fn clone_linux_process_extended_state(parent: u32, child: u32) -> bool {
-    let (Some((parent_instance, parent_slot)), Some((child_instance, child_slot))) = (
-        linux_process_extended_state_index(parent),
-        linux_process_extended_state_index(child),
-    ) else {
-        return false;
-    };
-    if parent_instance != child_instance {
-        return false;
-    }
-    unsafe {
-        (*X86_MUTABLE_RUNTIME.process_extended_states.get())[child_instance][child_slot] =
-            (*X86_MUTABLE_RUNTIME.process_extended_states.get())[parent_instance][parent_slot];
-        (*X86_MUTABLE_RUNTIME.process_extended_state_valid.get())[child_instance][child_slot] =
-            (*X86_MUTABLE_RUNTIME.process_extended_state_valid.get())[parent_instance][parent_slot];
-    }
-    true
-}
-
-fn discard_linux_process_extended_state(pid: u32) {
-    if let Some((instance, slot)) = linux_process_extended_state_index(pid) {
-        unsafe {
-            (*X86_MUTABLE_RUNTIME.process_extended_state_valid.get())[instance][slot] = false
-        };
-    }
 }
 
 pub(crate) fn initialize_user_call_gate() -> bool {
