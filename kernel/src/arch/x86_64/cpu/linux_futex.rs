@@ -23,9 +23,10 @@ pub(super) fn linux_futex_live_return(
             let Some(current) = current_linux_thread_handle() else {
                 return LINUX_ESRCH;
             };
-            let Some(target) = ready_linux_thread_handle() else {
+            let target = ready_linux_thread_handle();
+            if target.is_none() && current_linux_runtime_cpu_index() == 0 {
                 return LINUX_ENOSYS;
-            };
+            }
             let Some(tls) = linux_thread_context(current) else {
                 return LINUX_ESRCH;
             };
@@ -59,6 +60,12 @@ pub(super) fn linux_futex_live_return(
             {
                 return LINUX_EINVAL;
             }
+            let Some(target) = target else {
+                X86_RUNTIME
+                    .LINUX_FUTEX_WAIT_BLOCK_COUNT
+                    .fetch_add(1, Ordering::SeqCst);
+                return LINUX_RETURN_TO_KERNEL;
+            };
             let mut target_registers = LinuxSyscallFrame::ZERO;
             let mut target_rip = 0;
             let mut target_rsp = 0;

@@ -436,6 +436,9 @@ interior-mutable	kernel/src/arch/x86_64/smp.rs	IPI_GENERATION	per-cpu-arch	allow
 interior-mutable	kernel/src/arch/x86_64/smp.rs	IPI_RELEASE	verification-only	allowlist	none	cross-cpu-concurrency-proof
 interior-mutable	kernel/src/arch/x86_64/smp.rs	LINUX_PROCESS_JOBS	process-runtime	allowlist	none	ranked-cross-cpu-dispatch-lock
 interior-mutable	kernel/src/arch/x86_64/smp.rs	LINUX_PROCESS_RESULTS	process-runtime	allowlist	none	per-cpu-process-result-publication
+interior-mutable	kernel/src/arch/x86_64/smp.rs	LINUX_RUNTIME_THREAD_ACTIVE	process-runtime	allowlist	none	single-live-ap-thread-dispatch-state
+interior-mutable	kernel/src/arch/x86_64/smp.rs	LINUX_RUNTIME_THREAD_JOB	process-runtime	allowlist	none	ranked-cross-cpu-live-thread-dispatch-lock
+interior-mutable	kernel/src/arch/x86_64/smp.rs	LINUX_RUNTIME_THREAD_SLOT	process-runtime	allowlist	none	remote-live-thread-ownership-publication
 interior-mutable	kernel/src/arch/x86_64/smp.rs	MAILBOX_CPU	per-cpu-arch	allowlist	none	sequential-ap-startup-mailbox
 interior-mutable	kernel/src/arch/x86_64/smp.rs	MAILBOX_CR3	per-cpu-arch	allowlist	none	sequential-ap-startup-mailbox
 interior-mutable	kernel/src/arch/x86_64/smp.rs	MAILBOX_ENTRY	per-cpu-arch	allowlist	none	sequential-ap-startup-mailbox

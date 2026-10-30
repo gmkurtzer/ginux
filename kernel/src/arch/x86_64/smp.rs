@@ -20,6 +20,7 @@ const COMMAND_INVALIDATE: u8 = 2;
 const COMMAND_HOLD: u8 = 3;
 const COMMAND_LINUX_PROCESS: u8 = 4;
 const COMMAND_RUNTIME_OPERATION: u8 = 5;
+const COMMAND_LINUX_RUNTIME_THREAD: u8 = 6;
 const LINUX_RESULT_PENDING: u16 = u16::MAX;
 const LINUX_RESULT_FAILED: u16 = u16::MAX - 1;
 
@@ -30,6 +31,19 @@ struct LinuxProcessJob {
     stack: u64,
     fs_base: u64,
     general: [u64; 15],
+}
+
+#[derive(Clone, Copy)]
+struct LinuxRuntimeThreadJob {
+    root: FrameLease,
+    slot: u8,
+    generation: u32,
+    tid: u32,
+    entry: u64,
+    stack: u64,
+    fs_base: u64,
+    general: [u64; 15],
+    rflags: u64,
 }
 
 pub(crate) struct LinuxProcessTicket {
@@ -57,6 +71,10 @@ static LINUX_PROCESS_JOBS: SpinLock<[Option<LinuxProcessJob>; CPU_LIMIT]> =
     SpinLock::new(LockRank::ARCHITECTURE, [None; CPU_LIMIT]);
 static LINUX_PROCESS_RESULTS: [AtomicU16; CPU_LIMIT] =
     [const { AtomicU16::new(LINUX_RESULT_FAILED) }; CPU_LIMIT];
+static LINUX_RUNTIME_THREAD_JOB: SpinLock<Option<LinuxRuntimeThreadJob>> =
+    SpinLock::new(LockRank::CROSS_CPU_DISPATCH, None);
+static LINUX_RUNTIME_THREAD_ACTIVE: AtomicBool = AtomicBool::new(false);
+static LINUX_RUNTIME_THREAD_SLOT: AtomicU8 = AtomicU8::new(u8::MAX);
 
 global_asm!(
     r#"
@@ -277,6 +295,51 @@ pub(crate) fn execute_runtime_operation(cpu: usize, operation: u64) -> bool {
     })
 }
 
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn begin_linux_runtime_thread(
+    root: FrameLease,
+    slot: u8,
+    generation: u32,
+    tid: u32,
+    entry: u64,
+    stack: u64,
+    fs_base: u64,
+    general: [u64; 15],
+    rflags: u64,
+) -> bool {
+    if online_count() < 2
+        || LINUX_RUNTIME_THREAD_ACTIVE
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+    {
+        return false;
+    }
+    *LINUX_RUNTIME_THREAD_JOB.lock() = Some(LinuxRuntimeThreadJob {
+        root,
+        slot,
+        generation,
+        tid,
+        entry,
+        stack,
+        fs_base,
+        general,
+        rflags,
+    });
+    LINUX_RUNTIME_THREAD_SLOT.store(slot, Ordering::Release);
+    if dispatch(1, COMMAND_LINUX_RUNTIME_THREAD, 0).is_none() {
+        *LINUX_RUNTIME_THREAD_JOB.lock() = None;
+        LINUX_RUNTIME_THREAD_SLOT.store(u8::MAX, Ordering::Release);
+        LINUX_RUNTIME_THREAD_ACTIVE.store(false, Ordering::Release);
+        return false;
+    }
+    true
+}
+
+pub(crate) fn linux_runtime_thread_is_remote(slot: usize) -> bool {
+    LINUX_RUNTIME_THREAD_ACTIVE.load(Ordering::Acquire)
+        && usize::from(LINUX_RUNTIME_THREAD_SLOT.load(Ordering::Acquire)) == slot
+}
+
 pub(crate) fn verify_cross_cpu_mechanisms() -> bool {
     let count = online_count();
     if count == 0 || count > CPU_LIMIT {
@@ -457,6 +520,25 @@ extern "sysv64" fn interprocessor_interrupt_handler() {
                 cpu::execute_cross_cpu_runtime_operation(operation)
             };
             IPI_ARGUMENT[cpu].store(u64::from(result), Ordering::Release);
+        }
+        COMMAND_LINUX_RUNTIME_THREAD => {
+            let job = LINUX_RUNTIME_THREAD_JOB.lock().take();
+            let result = job.is_some_and(|job| {
+                cpu::begin_dispatched_linux_runtime_thread(
+                    job.root,
+                    job.slot,
+                    job.generation,
+                    job.tid,
+                    job.entry,
+                    job.stack,
+                    job.fs_base,
+                    job.general,
+                    job.rflags,
+                )
+            });
+            IPI_ARGUMENT[cpu].store(u64::from(result), Ordering::Release);
+            LINUX_RUNTIME_THREAD_SLOT.store(u8::MAX, Ordering::Release);
+            LINUX_RUNTIME_THREAD_ACTIVE.store(false, Ordering::Release);
         }
         _ => {}
     }

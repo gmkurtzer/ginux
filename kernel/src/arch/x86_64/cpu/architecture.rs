@@ -210,13 +210,20 @@ fn entry_state_is_installed() -> bool {
 }
 
 pub(crate) fn current_cpu_index() -> usize {
+    current_cpu_index_checked().expect("CPU entry state is installed")
+}
+
+pub(crate) fn current_cpu_index_checked() -> Option<usize> {
     let base = current_entry_state() as usize;
     let states = CPU_ARCHITECTURE
         .entry_states
         .get()
         .cast_const()
         .cast::<CpuEntryState>() as usize;
-    (base - states) / size_of::<CpuEntryState>()
+    (base >= states
+        && base < states + size_of::<[CpuEntryState; CPU_ENTRY_STATE_LIMIT]>()
+        && (base - states).is_multiple_of(size_of::<CpuEntryState>()))
+    .then_some((base - states) / size_of::<CpuEntryState>())
 }
 
 pub(crate) fn task_register_denies_user_io() -> bool {

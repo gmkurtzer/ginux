@@ -10,8 +10,10 @@ ovmf_vars_template="$(find_ovmf_vars)"
 accelerator="${QEMU_ACCEL:-$(default_accelerator)}"
 if [[ "$accelerator" == "tcg" ]]; then
     default_cpu_model="max,+smep,+smap,+umip"
+    accelerator_spec="tcg,thread=${QEMU_TCG_THREAD:-multi}"
 else
     default_cpu_model="host,+smep,+smap,+umip"
+    accelerator_spec="$accelerator"
 fi
 cpu_model="${QEMU_CPU:-$default_cpu_model}"
 esp_dir="${GINUX_ESP_DIR:-$repo_root/build/esp}"
@@ -69,7 +71,8 @@ if [[ -n "${GINUX_QEMU_HOSTFWD:-}" ]]; then
 fi
 
 exec "$qemu" \
-    -machine "q35,accel=$accelerator" \
+    -machine q35 \
+    -accel "$accelerator_spec" \
     -cpu "$cpu_model" \
     -smp "$cpus" \
     -m "$memory" \

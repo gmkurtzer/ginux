@@ -23,7 +23,9 @@ pub(crate) use architecture::{
     privilege_stack_guard_page, privilege_stack_top, stack_guard_pages,
     task_register_denies_user_io, user_interrupt_surface_is_minimal,
 };
-use architecture::{current_entry_state, install_user_interrupt_gate, CPU_ARCHITECTURE};
+use architecture::{
+    current_cpu_index_checked, current_entry_state, install_user_interrupt_gate, CPU_ARCHITECTURE,
+};
 pub(crate) use execution::enable_extended_user_state;
 use execution::{
     clone_linux_process_extended_state, discard_container_extended_state,
@@ -367,7 +369,7 @@ struct X86RuntimeOwner {
     LINUX_CONTROLLER_ROOT: RuntimeRef<AtomicU64>,
     LINUX_CROSS_PROCESS_PRLIMIT_VALIDATED: RuntimeRef<BankedAtomicBool>,
     LINUX_CURRENT_PROCESS_PID: RuntimeRef<BankedAtomicU32>,
-    LINUX_CURRENT_THREAD_SLOT: RuntimeRef<BankedAtomicU8>,
+    LINUX_CURRENT_THREAD_SLOT: RuntimeRef<CpuBankedAtomicU8>,
     LINUX_DESCRIPTOR_WAITS_ACTIVE: RuntimeRef<BankedAtomicBool>,
     LINUX_DOMAIN_EXEC_INJECT: RuntimeRef<AtomicBool>,
     LINUX_EPOLL_LAST_READY_DESCRIPTOR: RuntimeRef<BankedAtomicU64>,
@@ -417,7 +419,7 @@ struct X86RuntimeOwner {
     LINUX_IO_URING_REFS: RuntimeRef<BankedAtomicU16>,
     LINUX_IO_URING_SQES: RuntimeRef<BankedAtomicU64>,
     LINUX_IO_URING_SQ_RING: RuntimeRef<BankedAtomicU64>,
-    LINUX_LAST_PREEMPTED_THREAD_SLOT: RuntimeRef<BankedAtomicU8>,
+    LINUX_LAST_PREEMPTED_THREAD_SLOT: RuntimeRef<CpuBankedAtomicU8>,
     LINUX_LIVE_RETURN_VALIDATED: RuntimeRef<BankedAtomicBool>,
     LINUX_MASKED_WAIT_INTERRUPT_COUNT: RuntimeRef<BankedAtomicU32>,
     LINUX_NEXT_OPEN_FILE_ID: RuntimeRef<BankedAtomicU64>,
@@ -468,7 +470,7 @@ struct X86RuntimeOwner {
     LINUX_RUNTIME_FIRST_UNSUPPORTED_SYSCALL: RuntimeRef<BankedAtomicU64>,
     LINUX_RUNTIME_LATE_DIAGNOSTIC_WRITTEN: RuntimeRef<BankedAtomicBool>,
     LINUX_RUNTIME_MODE: RuntimeRef<AtomicBool>,
-    LINUX_RUNTIME_PREEMPT_TICKS: RuntimeRef<BankedAtomicU8>,
+    LINUX_RUNTIME_PREEMPT_TICKS: RuntimeRef<CpuBankedAtomicU8>,
     LINUX_RUNTIME_SLOW_DIAGNOSTIC_WRITTEN: RuntimeRef<BankedAtomicBool>,
     LINUX_RUNTIME_STALLED_DIAGNOSTIC_WRITTEN: RuntimeRef<BankedAtomicBool>,
     LINUX_RUNTIME_SUSPENDED: RuntimeRef<BankedAtomicBool>,
@@ -1318,6 +1320,74 @@ banked_atomic_integer!(BankedAtomicU16, AtomicU16, u16);
 banked_atomic_integer!(BankedAtomicU32, AtomicU32, u32);
 banked_atomic_integer!(BankedAtomicU64, AtomicU64, u64);
 
+struct CpuBankedAtomicU8 {
+    values: [[AtomicU8; CPU_ENTRY_STATE_LIMIT]; LINUX_RUNTIME_INSTANCE_LIMIT],
+    states: [[AtomicU8; CPU_ENTRY_STATE_LIMIT]; LINUX_RUNTIME_INSTANCE_LIMIT],
+    initial: u8,
+}
+
+impl CpuBankedAtomicU8 {
+    const fn new(value: u8) -> Self {
+        Self {
+            values: [const { [const { AtomicU8::new(0) }; CPU_ENTRY_STATE_LIMIT] };
+                LINUX_RUNTIME_INSTANCE_LIMIT],
+            states: [const { [const { AtomicU8::new(0) }; CPU_ENTRY_STATE_LIMIT] };
+                LINUX_RUNTIME_INSTANCE_LIMIT],
+            initial: value,
+        }
+    }
+
+    fn current(&self) -> &AtomicU8 {
+        let instance = linux_execution_instance();
+        let cpu = current_cpu_index_checked().unwrap_or(0);
+        if self.states[instance][cpu].load(Ordering::Acquire) != 2 {
+            if self.states[instance][cpu]
+                .compare_exchange(0, 1, Ordering::Acquire, Ordering::Acquire)
+                .is_ok()
+            {
+                self.values[instance][cpu].store(self.initial, Ordering::Relaxed);
+                self.states[instance][cpu].store(2, Ordering::Release);
+            } else {
+                while self.states[instance][cpu].load(Ordering::Acquire) != 2 {
+                    core::hint::spin_loop();
+                }
+            }
+        }
+        &self.values[instance][cpu]
+    }
+
+    fn load(&self, order: Ordering) -> u8 {
+        self.current().load(order)
+    }
+
+    fn store(&self, value: u8, order: Ordering) {
+        self.current().store(value, order);
+    }
+
+    fn swap(&self, value: u8, order: Ordering) -> u8 {
+        self.current().swap(value, order)
+    }
+
+    fn fetch_add(&self, value: u8, order: Ordering) -> u8 {
+        self.current().fetch_add(value, order)
+    }
+
+    fn compare_exchange(
+        &self,
+        current: u8,
+        new: u8,
+        success: Ordering,
+        failure: Ordering,
+    ) -> Result<u8, u8> {
+        self.current()
+            .compare_exchange(current, new, success, failure)
+    }
+}
+
+fn current_linux_runtime_cpu_index() -> usize {
+    current_cpu_index_checked().unwrap_or(0)
+}
+
 pub(crate) fn linux_startup_random() -> Option<[u8; 16]> {
     if core::arch::x86_64::__cpuid(1).ecx & (1 << 30) == 0 {
         return None;
@@ -1536,8 +1606,8 @@ static X86_RUNTIME_BACKING_LINUX_CLONE_REUSE_VALIDATED: BankedAtomicBool =
     BankedAtomicBool::new(false);
 static X86_RUNTIME_BACKING_LINUX_CHILD_GETTID_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
 static X86_RUNTIME_BACKING_LINUX_YIELD_SWITCH_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
-static X86_RUNTIME_BACKING_LINUX_LAST_PREEMPTED_THREAD_SLOT: BankedAtomicU8 =
-    BankedAtomicU8::new(LINUX_THREAD_SLOT_NONE);
+static X86_RUNTIME_BACKING_LINUX_LAST_PREEMPTED_THREAD_SLOT: CpuBankedAtomicU8 =
+    CpuBankedAtomicU8::new(LINUX_THREAD_SLOT_NONE);
 static X86_RUNTIME_BACKING_LINUX_CLONE_BUSY_REJECTION_COUNT: BankedAtomicU32 =
     BankedAtomicU32::new(0);
 static X86_RUNTIME_BACKING_LINUX_CLONE_INVALID_REJECTION_COUNT: BankedAtomicU32 =
@@ -1555,7 +1625,8 @@ static X86_RUNTIME_BACKING_LINUX_SLEEP_INTERRUPT_COUNT: BankedAtomicU32 = Banked
 static X86_RUNTIME_BACKING_LINUX_TIMER_WAIT_EXPIRY_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
 static X86_RUNTIME_BACKING_LINUX_TIMER_WAIT_PREEMPTION_COUNT: BankedAtomicU32 =
     BankedAtomicU32::new(0);
-static X86_RUNTIME_BACKING_LINUX_RUNTIME_PREEMPT_TICKS: BankedAtomicU8 = BankedAtomicU8::new(0);
+static X86_RUNTIME_BACKING_LINUX_RUNTIME_PREEMPT_TICKS: CpuBankedAtomicU8 =
+    CpuBankedAtomicU8::new(0);
 static X86_RUNTIME_BACKING_LINUX_POLL_WAIT_BLOCK_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
 static X86_RUNTIME_BACKING_LINUX_POLL_WAIT_WAKE_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
 static X86_RUNTIME_BACKING_LINUX_POLL_WAIT_TIMEOUT_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
@@ -1783,8 +1854,8 @@ static X86_RUNTIME_BACKING_LINUX_THREAD_IOV_ADDRESSES: [[BankedAtomicU64; LINUX_
 static X86_RUNTIME_BACKING_LINUX_THREAD_IOV_LENGTHS: [[BankedAtomicU64; LINUX_IOV_LIMIT];
     LINUX_THREAD_LIMIT] =
     [const { [const { BankedAtomicU64::new(0) }; LINUX_IOV_LIMIT] }; LINUX_THREAD_LIMIT];
-static X86_RUNTIME_BACKING_LINUX_CURRENT_THREAD_SLOT: BankedAtomicU8 =
-    BankedAtomicU8::new(LINUX_THREAD_SLOT_NONE);
+static X86_RUNTIME_BACKING_LINUX_CURRENT_THREAD_SLOT: CpuBankedAtomicU8 =
+    CpuBankedAtomicU8::new(LINUX_THREAD_SLOT_NONE);
 static X86_RUNTIME_BACKING_LINUX_NEXT_TID: BankedAtomicU32 = BankedAtomicU32::new(1);
 static X86_RUNTIME_BACKING_ELF_PROBE_RELRO: BankedAtomicU64 = BankedAtomicU64::new(0);
 static X86_RUNTIME_BACKING_ELF_PROBE_RELRO_SIZE: BankedAtomicU64 = BankedAtomicU64::new(0);
@@ -6457,10 +6528,12 @@ fn ready_linux_thread_handle() -> Option<LinuxThreadHandle> {
     });
     (1..=LINUX_THREAD_LIMIT).find_map(|offset| {
         let slot = after.wrapping_add(offset) % LINUX_THREAD_LIMIT;
-        (X86_RUNTIME.LINUX_THREAD_STATES[slot].load(Ordering::SeqCst) == LINUX_THREAD_READY)
-            .then(|| linux_thread_handle(slot))
-            .flatten()
-            .filter(|handle| linux_thread_return_context(*handle).is_some())
+        (X86_RUNTIME.LINUX_THREAD_STATES[slot].load(Ordering::SeqCst) == LINUX_THREAD_READY
+            && (current_linux_runtime_cpu_index() != 0
+                || !crate::arch::x86_64::smp::linux_runtime_thread_is_remote(slot)))
+        .then(|| linux_thread_handle(slot))
+        .flatten()
+        .filter(|handle| linux_thread_return_context(*handle).is_some())
     })
 }
 
@@ -11801,6 +11874,34 @@ fn linux_schedule_new_thread(
     let Some(child_context) = linux_thread_return_context(child) else {
         return LINUX_EINVAL;
     };
+    if !cfg!(feature = "verification-boot") && current_linux_runtime_cpu_index() == 0 {
+        if let Some(root) = linux_process::live_process_root(current_linux_process_pid()) {
+            let general = child_context.registers.process_general(
+                child_context.rax,
+                child_context.rip,
+                child_context.rflags,
+            );
+            if crate::arch::x86_64::smp::begin_linux_runtime_thread(
+                root,
+                child.slot,
+                child.generation,
+                child.tid,
+                child_context.rip,
+                child_context.rsp,
+                child_context.fs_base,
+                general,
+                child_context.rflags,
+            ) {
+                X86_RUNTIME
+                    .LINUX_YIELD_SWITCH_COUNT
+                    .fetch_add(1, Ordering::SeqCst);
+                X86_RUNTIME
+                    .LINUX_LIVE_RETURN_VALIDATED
+                    .store(true, Ordering::SeqCst);
+                return parent_result;
+            }
+        }
+    }
     if !switch_linux_thread(child) || !write_linux_live_return(output, child_context) {
         let _ = switch_linux_thread(parent);
         return LINUX_EINVAL;
@@ -11828,6 +11929,17 @@ fn linux_exit_child_to_parent(output: *mut LinuxSyscallFrame) -> u64 {
         || !retire_current_linux_thread()
     {
         return LINUX_ESRCH;
+    }
+    if woken == 1 {
+        X86_RUNTIME
+            .LINUX_FUTEX_EXIT_WAKE_COUNT
+            .fetch_add(1, Ordering::SeqCst);
+    }
+    X86_RUNTIME
+        .LINUX_CHILD_EXIT_COUNT
+        .fetch_add(1, Ordering::SeqCst);
+    if current_linux_runtime_cpu_index() != 0 {
+        return LINUX_RETURN_TO_KERNEL;
     }
     let Some(parent) = ready_linux_thread_handle() else {
         return LINUX_ESRCH;
@@ -11858,15 +11970,94 @@ fn linux_exit_child_to_parent(output: *mut LinuxSyscallFrame) -> u64 {
     if !write_linux_live_return(output, context) {
         return LINUX_EINVAL;
     }
-    if woken == 1 {
-        X86_RUNTIME
-            .LINUX_FUTEX_EXIT_WAKE_COUNT
-            .fetch_add(1, Ordering::SeqCst);
-    }
-    X86_RUNTIME
-        .LINUX_CHILD_EXIT_COUNT
-        .fetch_add(1, Ordering::SeqCst);
     context.rax
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn begin_dispatched_linux_runtime_thread(
+    root: memory::FrameLease,
+    slot: u8,
+    generation: u32,
+    tid: u32,
+    entry: u64,
+    stack: u64,
+    fs_base: u64,
+    general: [u64; 15],
+    rflags: u64,
+) -> bool {
+    let handle = LinuxThreadHandle {
+        slot,
+        generation,
+        tid,
+    };
+    let Some(mut context) = linux_thread_return_context(handle) else {
+        return false;
+    };
+    if context.rip != entry
+        || context.rsp != stack
+        || context.fs_base != fs_base
+        || context.rflags != rflags
+        || context
+            .registers
+            .process_general(context.rax, context.rip, context.rflags)
+            != general
+    {
+        return false;
+    }
+    let Some(saved_syscalls) = configure_linux_syscall() else {
+        return false;
+    };
+    let resumed = loop {
+        let selected = {
+            let _kernel_entry = crate::sync::kernel_entry_lock();
+            current_linux_runtime_cpu_index() != 0
+                && current_linux_thread_handle().is_none()
+                && linux_thread_handle(usize::from(slot)) == Some(handle)
+                && linux_thread_return_context(handle) == Some(context)
+                && switch_linux_thread(handle)
+        };
+        if !selected
+            || !address_space::resume_live_linux_process(
+                root,
+                context.rip,
+                context.rsp,
+                context.fs_base,
+                context
+                    .registers
+                    .process_general(context.rax, context.rip, context.rflags),
+                context.rflags,
+            )
+            || current_linux_thread_handle().is_some()
+        {
+            break false;
+        }
+        loop {
+            let state = X86_RUNTIME.LINUX_THREAD_STATES[usize::from(slot)].load(Ordering::Acquire);
+            if state == LINUX_THREAD_FREE {
+                break;
+            }
+            if state == LINUX_THREAD_READY {
+                let Some(next) = linux_thread_return_context(handle) else {
+                    break;
+                };
+                context = next;
+                break;
+            }
+            if state != LINUX_THREAD_BLOCKED {
+                break;
+            }
+            core::hint::spin_loop();
+        }
+        let state = X86_RUNTIME.LINUX_THREAD_STATES[usize::from(slot)].load(Ordering::Acquire);
+        if state == LINUX_THREAD_FREE {
+            break true;
+        }
+        if state != LINUX_THREAD_READY {
+            break false;
+        }
+    };
+    let restored = restore_linux_syscall(saved_syscalls);
+    resumed && restored
 }
 
 fn current_linux_process_pid() -> u32 {

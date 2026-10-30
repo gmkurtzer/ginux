@@ -3198,7 +3198,7 @@ pub(crate) fn prepare_live_process_write(pid: u32, address: usize) -> bool {
     true
 }
 
-fn live_process_root(pid: u32) -> Option<memory::FrameLease> {
+pub(crate) fn live_process_root(pid: u32) -> Option<memory::FrameLease> {
     let table = live_process_table_mut()?;
     let handle = table.handle_by_pid(pid)?;
     Some(table.process(handle)?.address_space?.root())

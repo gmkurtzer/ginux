@@ -16,6 +16,7 @@ impl LockRank {
     pub(crate) const PRIMITIVE_TEST_LOW: Self = Self(1);
     pub(crate) const PRIMITIVE_TEST_HIGH: Self = Self(2);
     pub(crate) const ARCHITECTURE: Self = Self(10);
+    pub(crate) const CROSS_CPU_DISPATCH: Self = Self(15);
     pub(crate) const PHYSICAL_MEMORY: Self = Self(20);
     pub(crate) const ADDRESS_SPACE: Self = Self(30);
     pub(crate) const SCHEDULER: Self = Self(40);
