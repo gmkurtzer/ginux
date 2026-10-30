@@ -43,7 +43,7 @@ state into explicit host, device, service, or domain-owned structures.
 
 ## Remaining work
 
-- Run final Gate 6 regression evidence and close the delegated gate.
+- None.
 
 ## Acceptance criteria
 
@@ -89,6 +89,9 @@ state into explicit host, device, service, or domain-owned structures.
   with the inventory reduced from 458 to 450 objects and zero Gate 6 migration
   rows, `make check` passed, and the full verification QEMU boot completed
   cleanly.
+- Final Gate 6 evidence passed: `make architecture-check` reported 450
+  classified globals and zero Gate 6 migration rows; `make check` passed; and
+  `make test-linux-abi` passed 23 interfaces and 375 syscalls.
 
 ## Decisions and limitations
 
@@ -106,9 +109,11 @@ not itself prohibited when ownership and synchronization are concrete.
   `9bc3ca23` owns filesystem/storage publication state; `d6b88ade` owns host
   network configuration; `1d0f262f` owns core host platform state;
   `f04ec028` owns host address-space service state; `7ac3b5aa` owns host
-  interrupt and timer state; per-CPU architecture ownership pending commit.
+  interrupt and timer state; `9a4276ea` owns per-CPU architecture state.
 
 ## Review policy and outcome
 
 Delegated closure authorized after platform/service ownership, failure,
-isolation, and regression criteria all pass. Outcome: pending.
+isolation, and regression criteria all pass. Outcome: passed and closed after
+fresh architecture, unit, ABI, service-failure, lifecycle, isolation, and QEMU
+boot evidence.

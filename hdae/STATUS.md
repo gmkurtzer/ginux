@@ -7,20 +7,19 @@
 - Active project: feedback-driven kernel hardening
 - Branch: `codex/feedback-hardening`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 6, platform and service state ownership, in progress
-- Last completed action: Gate 6 consolidated isolated network-service,
-  filesystem/storage publication, host-network, and core host memory/paging
-  state behind explicit owner roots; the latest slice passed static, unit, ABI,
-  and full verification-QEMU evidence
-- Next action: commit the verified core-host ownership slice, then migrate the
-  remaining address-space, PCI, timer, and per-CPU architecture state
+- Active gate: Gate 7, x86-64 decomposition, ready to start
+- Last completed action: Gate 6 moved all classified platform, service,
+  controller, device, timer, paging, physical-memory, and per-CPU architecture
+  state behind explicit owner roots and passed fresh static, unit, ABI,
+  service-failure, isolation, lifecycle, and full verification-QEMU evidence
+- Next action: inventory `cpu.rs` responsibilities and extract the first
+  behavior-preserving module along a validated ownership boundary
 
 ## Current repository state
 
 Local and remote `main` identify commit `1852455`. Gates 1 through 5 passed and
-closed under delegated review. Gate 6 is active. Its writable-global migration
-inventory is reduced to the remaining address-space, PCI, timer, and per-CPU
-architecture owners.
+closed under delegated review. Gate 6 has zero remaining migration rows and is
+ready for delegated closure. Gate 7 is next.
 
 ## Open decisions
 
