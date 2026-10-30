@@ -8,19 +8,19 @@
 - Branch: `codex/feedback-hardening`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 5, runtime state ownership, in progress
-- Last completed action: consolidated 13 Linux process-table, address-space,
-  fork scratch, and diagnostic globals into one per-instance process-runtime
-  owner; `make check`, `make test-linux-abi`, and the complete verification
-  QEMU sequence passed
-- Next action: design the domain-generation-owned socket runtime so its large
-  self-referential buffer/storage relationship is preserved without retaining
-  14 independent ambient globals, then migrate the x86-64 execution-state bank
+- Last completed action: consolidated 14 Linux socket platform, runtime, slot,
+  Unix-socket, and packet-buffer globals under one explicit owner while
+  retaining stable addresses for smoltcp; `make check`, `make test-linux-abi`,
+  and the complete verification QEMU sequence passed
+- Next action: classify the 408 x86-64 CPU runtime entries into cohesive
+  per-domain, per-process/thread, and per-CPU owner banks, then migrate the
+  smallest complete bank before changing the central execution-state layout
 
 ## Current repository state
 
 Local and remote `main` identify commit `1852455`. Gates 1 through 4 passed and
-closed under delegated review. Gate 5 is active; 461 classified runtime
-globals remain assigned to it after the process ownership consolidation.
+closed under delegated review. Gate 5 is active; 447 classified runtime
+globals remain assigned to it after the socket ownership consolidation.
 
 ## Open decisions
 

@@ -31,6 +31,9 @@ state out of ambient globals and into explicitly owned lifecycle objects.
 - [x] Consolidated 13 process-table, address-space, fork scratch, diagnostic,
   and lifecycle globals into one explicit process-runtime owner while
   retaining the existing per-domain instance banks and generation resets.
+- [x] Consolidated 14 socket platform, runtime, slot, Unix-socket, and packet
+  buffer globals under one explicit domain socket-runtime owner while keeping
+  smoltcp's self-referential buffers at stable addresses.
 
 ## Remaining work
 
@@ -61,6 +64,9 @@ state out of ambient globals and into explicitly owned lifecycle objects.
   (23 interfaces and 375 syscalls), and the full verification QEMU sequence
   all passed; the inventory decreased from 616 to 604 globals with 461 Gate 5
   migrations remaining.
+- After socket-runtime consolidation, the same three test layers passed; the
+  inventory decreased from 604 to 591 globals with 447 Gate 5 migrations
+  remaining.
 - Direct `bash tests/qemu/boot.sh` after `make check` was an invalid first
   attempt because the normal image lacks verification-only markers; no QEMU
   process was left behind, and the test was rerun with its required image.
@@ -78,8 +84,8 @@ Shared objects may remain only when Gate 4 explicitly classified them and Gate
 - Planned commits: per-CPU/task state, process/thread/signal state, domain state,
   scheduler/process tables, and lifecycle evidence.
 - Actual commits: `900d0d56` added explicit shared runtime owner roots;
-  process-runtime consolidation pending commit; remaining runtime migrations
-  pending.
+  `44a18062` consolidated process runtime ownership; socket-runtime
+  consolidation pending commit; remaining runtime migrations pending.
 
 ## Review policy and outcome
 
