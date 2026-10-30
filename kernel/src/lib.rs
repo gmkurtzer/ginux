@@ -34,18 +34,31 @@ mod scheduler;
 mod volume;
 
 use core::arch::{asm, global_asm};
+use core::cell::UnsafeCell;
 use core::ffi::c_void;
 use core::mem::size_of;
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 const COM1: u16 = 0x3f8;
-static OPERATOR_CONSOLE_READY: AtomicBool = AtomicBool::new(false);
-static BACKGROUND_DOMAIN_OUTPUT: AtomicBool = AtomicBool::new(false);
-static LINUX_REALTIME_EPOCH_SECONDS: AtomicU64 = AtomicU64::new(0);
-static LINUX_REALTIME_EPOCH_TSC: AtomicU64 = AtomicU64::new(0);
-static OCI_PULL_STARTED: AtomicU64 = AtomicU64::new(0);
-static mut PERSISTED_OCI_CATALOG: [u8; ginux_oci_cache::ENCODED_SIZE] =
-    [0; ginux_oci_cache::ENCODED_SIZE];
+struct HostControlOwner {
+    operator_console_ready: AtomicBool,
+    background_domain_output: AtomicBool,
+    linux_realtime_epoch_seconds: AtomicU64,
+    linux_realtime_epoch_tsc: AtomicU64,
+    oci_pull_started: AtomicU64,
+    persisted_oci_catalog: UnsafeCell<[u8; ginux_oci_cache::ENCODED_SIZE]>,
+}
+
+unsafe impl Sync for HostControlOwner {}
+
+static HOST_CONTROL: HostControlOwner = HostControlOwner {
+    operator_console_ready: AtomicBool::new(false),
+    background_domain_output: AtomicBool::new(false),
+    linux_realtime_epoch_seconds: AtomicU64::new(0),
+    linux_realtime_epoch_tsc: AtomicU64::new(0),
+    oci_pull_started: AtomicU64::new(0),
+    persisted_oci_catalog: UnsafeCell::new([0; ginux_oci_cache::ENCODED_SIZE]),
+};
 const EFI_RESET_SHUTDOWN: u32 = 2;
 const EFI_SUCCESS: usize = 0;
 pub(crate) const EFI_LOADER_CODE: u32 = 1;
@@ -69,22 +82,29 @@ fn initialize_linux_realtime(unix_time: u64, timestamp_counter: u64) -> bool {
     if unix_time < 1_577_836_800 || timestamp_counter == 0 {
         return false;
     }
-    LINUX_REALTIME_EPOCH_TSC.store(timestamp_counter, Ordering::Release);
-    LINUX_REALTIME_EPOCH_SECONDS
+    HOST_CONTROL
+        .linux_realtime_epoch_tsc
+        .store(timestamp_counter, Ordering::Release);
+    HOST_CONTROL
+        .linux_realtime_epoch_seconds
         .compare_exchange(0, unix_time, Ordering::AcqRel, Ordering::Acquire)
         .is_ok()
 }
 
 pub(crate) fn linux_realtime_epoch() -> Option<(u64, u64)> {
-    let seconds = LINUX_REALTIME_EPOCH_SECONDS.load(Ordering::Acquire);
-    let timestamp_counter = LINUX_REALTIME_EPOCH_TSC.load(Ordering::Acquire);
+    let seconds = HOST_CONTROL
+        .linux_realtime_epoch_seconds
+        .load(Ordering::Acquire);
+    let timestamp_counter = HOST_CONTROL
+        .linux_realtime_epoch_tsc
+        .load(Ordering::Acquire);
     (seconds != 0 && timestamp_counter != 0).then_some((seconds, timestamp_counter))
 }
 
 #[repr(C, align(4096))]
-struct KernelStack([u8; KERNEL_STACK_STORAGE_SIZE]);
+struct KernelStackOwner([u8; KERNEL_STACK_STORAGE_SIZE]);
 
-static mut KERNEL_STACK: KernelStack = KernelStack([0; KERNEL_STACK_STORAGE_SIZE]);
+static mut KERNEL_STACK: KernelStackOwner = KernelStackOwner([0; KERNEL_STACK_STORAGE_SIZE]);
 
 global_asm!(
     r#"
@@ -1262,7 +1282,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     let mut persisted_local_configuration = [0_u8; PERSISTENT_LOCAL_CONFIG_SIZE];
     let mut persisted_local_record = None;
     let mut persisted_local_configuration_valid = true;
-    let persisted_oci_catalog = &mut *core::ptr::addr_of_mut!(PERSISTED_OCI_CATALOG);
+    let persisted_oci_catalog = &mut *HOST_CONTROL.persisted_oci_catalog.get();
     let mut persisted_oci_catalog_valid = false;
     let mut persisted_oci_catalog_corrupt = false;
     let disk_volume = (|| {
@@ -3839,7 +3859,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             kernel_fail("\r\nginux: persistent local configuration invalid\r\n");
         }
     }
-    OPERATOR_CONSOLE_READY.store(true, Ordering::Release);
+    HOST_CONTROL
+        .operator_console_ready
+        .store(true, Ordering::Release);
     serial_write_raw(b"ginux: platform, security, devices, and runtime ready\r\n");
     serial_write("ginux: persistent storage ");
     serial_write(match host_volume.disposition {
@@ -3869,13 +3891,15 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     let mut controller_recovery_attempts = 0_u8;
     let mut controller_launch_announced = false;
     'managed: loop {
-        BACKGROUND_DOMAIN_OUTPUT.store(false, Ordering::Release);
+        HOST_CONTROL
+            .background_domain_output
+            .store(false, Ordering::Release);
         if !controller_launch_announced {
             serial_write("\r\nginux: launching embedded controller in ring 3\r\n");
             controller_launch_announced = true;
         }
         let controller_completed = address_space::run_installed_interactive_controller();
-        BACKGROUND_DOMAIN_OUTPUT.store(
+        HOST_CONTROL.background_domain_output.store(
             arch::x86_64::cpu::detached_container_lifecycle_pending(),
             Ordering::Release,
         );
@@ -3943,7 +3967,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         }
         if arch::x86_64::cpu::take_container_pull_request() {
             let pull_started = arch::x86_64::timer::timestamp_counter();
-            OCI_PULL_STARTED.store(pull_started, Ordering::Release);
+            HOST_CONTROL
+                .oci_pull_started
+                .store(pull_started, Ordering::Release);
             if !image_store::begin_layer_pull() {
                 serial_write("ginux: OCI image staging reset failed\r\n");
                 arch::x86_64::cpu::complete_container_pull(false);
@@ -4098,7 +4124,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
                     serial_write(" bytes)\r\n");
                 }
             }
-            let pull_started = OCI_PULL_STARTED.swap(0, Ordering::AcqRel);
+            let pull_started = HOST_CONTROL.oci_pull_started.swap(0, Ordering::AcqRel);
             if pull_started != 0 {
                 serial_write_elapsed("ginux: timing OCI total: ", pull_started);
             }
@@ -4406,10 +4432,14 @@ fn serial_write(message: &str) {
 }
 
 pub(crate) fn serial_write_bytes(bytes: &[u8]) {
-    if !cfg!(feature = "verification-boot") && !OPERATOR_CONSOLE_READY.load(Ordering::Acquire) {
+    if !cfg!(feature = "verification-boot")
+        && !HOST_CONTROL.operator_console_ready.load(Ordering::Acquire)
+    {
         return;
     }
-    if BACKGROUND_DOMAIN_OUTPUT.load(Ordering::Acquire)
+    if HOST_CONTROL
+        .background_domain_output
+        .load(Ordering::Acquire)
         && arch::x86_64::cpu::buffer_configured_container_console(bytes)
     {
         return;

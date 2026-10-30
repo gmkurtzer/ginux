@@ -1,4 +1,4 @@
-use core::arch::asm;
+use core::{arch::asm, cell::UnsafeCell};
 
 use crate::{pe::ImageSummary, BootInfo, UefiMemoryDescriptor, EFI_RUNTIME_SERVICES_CODE};
 
@@ -157,9 +157,13 @@ pub(crate) fn validated_user_root_frames(root: u64) -> Option<ValidatedUserRootF
         return None;
     }
     let entries = direct_map_range_address(root, PAGE_SIZE)? as *const u64;
-    let kernel_entry = unsafe { core::ptr::addr_of!(PML4.0).cast::<u64>().read() };
+    let kernel_entry = unsafe {
+        core::ptr::addr_of!((*PAGING.pml4.get()).0)
+            .cast::<u64>()
+            .read()
+    };
     let kernel_direct_entry = unsafe {
-        core::ptr::addr_of!(PML4.0)
+        core::ptr::addr_of!((*PAGING.pml4.get()).0)
             .cast::<u64>()
             .add(DIRECT_MAP_PML4_INDEX)
             .read()
@@ -424,19 +428,31 @@ fn single_user_table_entry(table_address: u64) -> Option<u64> {
 #[repr(C, align(4096))]
 struct PageTable([u64; ENTRY_COUNT]);
 
-static mut PML4: PageTable = PageTable([0; ENTRY_COUNT]);
+struct PagingOwner {
+    pml4: UnsafeCell<PageTable>,
+    pdpt: UnsafeCell<PageTable>,
+    direct_pdpt: UnsafeCell<PageTable>,
+    page_directories: UnsafeCell<[PageTable; DIRECTORY_COUNT]>,
+    fine_page_tables: UnsafeCell<[PageTable; MAX_FINE_TABLES]>,
+    mmio_directory: UnsafeCell<PageTable>,
+    mmio_table: UnsafeCell<PageTable>,
+}
+
+unsafe impl Sync for PagingOwner {}
+
+static PAGING: PagingOwner = PagingOwner {
+    pml4: UnsafeCell::new(PageTable([0; ENTRY_COUNT])),
+    pdpt: UnsafeCell::new(PageTable([0; ENTRY_COUNT])),
+    direct_pdpt: UnsafeCell::new(PageTable([0; ENTRY_COUNT])),
+    page_directories: UnsafeCell::new([PageTable([0; ENTRY_COUNT]); DIRECTORY_COUNT]),
+    fine_page_tables: UnsafeCell::new([PageTable([0; ENTRY_COUNT]); MAX_FINE_TABLES]),
+    mmio_directory: UnsafeCell::new(PageTable([0; ENTRY_COUNT])),
+    mmio_table: UnsafeCell::new(PageTable([0; ENTRY_COUNT])),
+};
 
 pub(crate) fn kernel_root_address() -> u64 {
-    core::ptr::addr_of!(PML4) as u64
+    PAGING.pml4.get().cast_const() as u64
 }
-static mut PDPT: PageTable = PageTable([0; ENTRY_COUNT]);
-static mut DIRECT_PDPT: PageTable = PageTable([0; ENTRY_COUNT]);
-static mut PAGE_DIRECTORIES: [PageTable; DIRECTORY_COUNT] =
-    [PageTable([0; ENTRY_COUNT]); DIRECTORY_COUNT];
-static mut FINE_PAGE_TABLES: [PageTable; MAX_FINE_TABLES] =
-    [PageTable([0; ENTRY_COUNT]); MAX_FINE_TABLES];
-static mut MMIO_DIRECTORY: PageTable = PageTable([0; ENTRY_COUNT]);
-static mut MMIO_TABLE: PageTable = PageTable([0; ENTRY_COUNT]);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
@@ -483,13 +499,13 @@ pub(crate) unsafe fn install_initial_identity_map(
         return Err(PagingError::RequiredAddressOutsideMap);
     }
 
-    let pml4_address = core::ptr::addr_of!(PML4) as usize;
-    let pdpt_address = core::ptr::addr_of!(PDPT) as usize;
-    let direct_pdpt_address = core::ptr::addr_of!(DIRECT_PDPT) as usize;
-    let directories_address = core::ptr::addr_of!(PAGE_DIRECTORIES) as usize;
-    let fine_tables_address = core::ptr::addr_of!(FINE_PAGE_TABLES) as usize;
-    let mmio_directory_address = core::ptr::addr_of!(MMIO_DIRECTORY) as usize;
-    let mmio_table_address = core::ptr::addr_of!(MMIO_TABLE) as usize;
+    let pml4_address = PAGING.pml4.get().cast_const() as usize;
+    let pdpt_address = PAGING.pdpt.get().cast_const() as usize;
+    let direct_pdpt_address = PAGING.direct_pdpt.get().cast_const() as usize;
+    let directories_address = PAGING.page_directories.get().cast_const() as usize;
+    let fine_tables_address = PAGING.fine_page_tables.get().cast_const() as usize;
+    let mmio_directory_address = PAGING.mmio_directory.get().cast_const() as usize;
+    let mmio_table_address = PAGING.mmio_table.get().cast_const() as usize;
 
     for address in [
         pml4_address,
@@ -515,10 +531,10 @@ pub(crate) unsafe fn install_initial_identity_map(
         return Err(PagingError::GuardMisaligned);
     }
 
-    let pml4 = core::ptr::addr_of_mut!(PML4.0).cast::<u64>();
-    let pdpt = core::ptr::addr_of_mut!(PDPT.0).cast::<u64>();
-    let direct_pdpt = core::ptr::addr_of_mut!(DIRECT_PDPT.0).cast::<u64>();
-    let directories = core::ptr::addr_of_mut!(PAGE_DIRECTORIES).cast::<PageTable>();
+    let pml4 = core::ptr::addr_of_mut!((*PAGING.pml4.get()).0).cast::<u64>();
+    let pdpt = core::ptr::addr_of_mut!((*PAGING.pdpt.get()).0).cast::<u64>();
+    let direct_pdpt = core::ptr::addr_of_mut!((*PAGING.direct_pdpt.get()).0).cast::<u64>();
+    let directories = PAGING.page_directories.get().cast::<PageTable>();
 
     zero_entries(pml4);
     zero_entries(pdpt);
@@ -856,8 +872,8 @@ pub(crate) unsafe fn install_initial_identity_map(
     {
         return Err(PagingError::MmioMapInvalid);
     }
-    let mmio_directory = core::ptr::addr_of_mut!(MMIO_DIRECTORY.0).cast::<u64>();
-    let mmio_table = core::ptr::addr_of_mut!(MMIO_TABLE.0).cast::<u64>();
+    let mmio_directory = core::ptr::addr_of_mut!((*PAGING.mmio_directory.get()).0).cast::<u64>();
+    let mmio_table = core::ptr::addr_of_mut!((*PAGING.mmio_table.get()).0).cast::<u64>();
     zero_entries(mmio_directory);
     zero_entries(mmio_table);
     for index in 0..mmio_pages {
@@ -985,7 +1001,7 @@ pub(crate) unsafe fn install_initial_identity_map(
         writable: true,
     };
 
-    let fine_tables = core::ptr::addr_of_mut!(FINE_PAGE_TABLES).cast::<PageTable>();
+    let fine_tables = PAGING.fine_page_tables.get().cast::<PageTable>();
     let mut fine_regions = [usize::MAX; MAX_FINE_TABLES];
     let mut fine_count = 0;
     for guard in guard_pages {
@@ -1375,11 +1391,11 @@ pub(crate) fn direct_map_translation_is_bounded() -> bool {
 }
 
 pub(crate) fn direct_map_alias_is_valid() -> bool {
-    let pml4 = unsafe { core::ptr::addr_of!(PML4.0).cast::<u64>() };
+    let pml4 = unsafe { core::ptr::addr_of!((*PAGING.pml4.get()).0).cast::<u64>() };
     let identity = unsafe { pml4.read() };
     let direct = unsafe { pml4.add(DIRECT_MAP_PML4_INDEX).read() };
-    let expected_identity = core::ptr::addr_of!(PDPT) as u64 | PRESENT | WRITABLE;
-    let expected_direct = core::ptr::addr_of!(DIRECT_PDPT) as u64 | PRESENT | WRITABLE;
+    let expected_identity = PAGING.pdpt.get().cast_const() as u64 | PRESENT | WRITABLE;
+    let expected_direct = PAGING.direct_pdpt.get().cast_const() as u64 | PRESENT | WRITABLE;
     if (identity ^ expected_identity) & !ACCESSED != 0
         || (direct ^ expected_direct) & !ACCESSED != 0
         || direct & PRESENT == 0
@@ -1387,8 +1403,8 @@ pub(crate) fn direct_map_alias_is_valid() -> bool {
     {
         return false;
     }
-    let identity_pdpt = unsafe { core::ptr::addr_of!(PDPT.0).cast::<u64>() };
-    let direct_pdpt = unsafe { core::ptr::addr_of!(DIRECT_PDPT.0).cast::<u64>() };
+    let identity_pdpt = unsafe { core::ptr::addr_of!((*PAGING.pdpt.get()).0).cast::<u64>() };
+    let direct_pdpt = unsafe { core::ptr::addr_of!((*PAGING.direct_pdpt.get()).0).cast::<u64>() };
     for index in 0..DIRECTORY_COUNT {
         if unsafe { (identity_pdpt.add(index).read() ^ direct_pdpt.add(index).read()) & !ACCESSED }
             != 0
@@ -1396,7 +1412,7 @@ pub(crate) fn direct_map_alias_is_valid() -> bool {
             return false;
         }
     }
-    let physical = core::ptr::addr_of!(PML4) as usize;
+    let physical = PAGING.pml4.get().cast_const() as usize;
     let Some(alias) = direct_map_address(physical) else {
         return false;
     };
@@ -1426,23 +1442,24 @@ pub(crate) fn mmio_mapping_is_valid(mapping: MmioMapping) -> bool {
         return false;
     }
     unsafe {
-        let direct_pdpt = core::ptr::addr_of!(DIRECT_PDPT.0).cast::<u64>();
+        let direct_pdpt = core::ptr::addr_of!((*PAGING.direct_pdpt.get()).0).cast::<u64>();
         let directory_entry = direct_pdpt.add(MMIO_PDPT_INDEX).read();
         if directory_entry & (PRESENT | WRITABLE | USER | LARGE_PAGE | NO_EXECUTE)
             != PRESENT | WRITABLE
-            || directory_entry & ADDRESS_MASK as u64 != core::ptr::addr_of!(MMIO_DIRECTORY) as u64
+            || directory_entry & ADDRESS_MASK as u64
+                != PAGING.mmio_directory.get().cast_const() as u64
         {
             return false;
         }
-        let directory = core::ptr::addr_of!(MMIO_DIRECTORY.0).cast::<u64>();
+        let directory = core::ptr::addr_of!((*PAGING.mmio_directory.get()).0).cast::<u64>();
         let table_entry = directory.read();
         if table_entry & (PRESENT | WRITABLE | USER | LARGE_PAGE | NO_EXECUTE) != PRESENT | WRITABLE
-            || table_entry & ADDRESS_MASK as u64 != core::ptr::addr_of!(MMIO_TABLE) as u64
+            || table_entry & ADDRESS_MASK as u64 != PAGING.mmio_table.get().cast_const() as u64
             || (1..ENTRY_COUNT).any(|index| directory.add(index).read() != 0)
         {
             return false;
         }
-        let table = core::ptr::addr_of!(MMIO_TABLE.0).cast::<u64>();
+        let table = core::ptr::addr_of!((*PAGING.mmio_table.get()).0).cast::<u64>();
         let page_count = mapping.mapped_length / PAGE_SIZE;
         let first_page = window_offset / PAGE_SIZE;
         let expected_flags =
@@ -1483,7 +1500,7 @@ pub(crate) fn mmio_mappings_are_exact<const N: usize>(mappings: [MmioMapping; N]
             }
         }
     }
-    let table = unsafe { core::ptr::addr_of!(MMIO_TABLE.0).cast::<u64>() };
+    let table = unsafe { core::ptr::addr_of!((*PAGING.mmio_table.get()).0).cast::<u64>() };
     (0..ENTRY_COUNT).all(|index| {
         let expected = mappings.into_iter().find_map(|mapping| {
             let first_index = (mapping.virtual_page - MMIO_WINDOW_BASE) / PAGE_SIZE;
@@ -1523,7 +1540,10 @@ pub(crate) fn mmio_identity_alias_is_absent(mapping: MmioMapping) -> bool {
         .all(|physical| {
             let physical = physical as usize;
             let region = physical / LARGE_PAGE_SIZE as usize;
-            let directory = core::ptr::addr_of!(PAGE_DIRECTORIES)
+            let directory = PAGING
+                .page_directories
+                .get()
+                .cast_const()
                 .cast::<PageTable>()
                 .wrapping_add(region / ENTRY_COUNT);
             let directory_entries = unsafe { core::ptr::addr_of!((*directory).0).cast::<u64>() };
@@ -1567,13 +1587,13 @@ pub(crate) fn mmio_translation_is_bounded(
 pub(crate) fn static_page_tables_are_read_only() -> bool {
     const TABLE_PAGE_COUNT: usize = 5 + DIRECTORY_COUNT + MAX_FINE_TABLES;
     let mut table_pages = [0_usize; TABLE_PAGE_COUNT];
-    table_pages[0] = core::ptr::addr_of!(PML4) as usize;
-    table_pages[1] = core::ptr::addr_of!(PDPT) as usize;
-    table_pages[2] = core::ptr::addr_of!(DIRECT_PDPT) as usize;
-    table_pages[3] = core::ptr::addr_of!(MMIO_DIRECTORY) as usize;
-    table_pages[4] = core::ptr::addr_of!(MMIO_TABLE) as usize;
-    let directories_address = core::ptr::addr_of!(PAGE_DIRECTORIES) as usize;
-    let fine_tables_address = core::ptr::addr_of!(FINE_PAGE_TABLES) as usize;
+    table_pages[0] = PAGING.pml4.get().cast_const() as usize;
+    table_pages[1] = PAGING.pdpt.get().cast_const() as usize;
+    table_pages[2] = PAGING.direct_pdpt.get().cast_const() as usize;
+    table_pages[3] = PAGING.mmio_directory.get().cast_const() as usize;
+    table_pages[4] = PAGING.mmio_table.get().cast_const() as usize;
+    let directories_address = PAGING.page_directories.get().cast_const() as usize;
+    let fine_tables_address = PAGING.fine_page_tables.get().cast_const() as usize;
     for index in 0..DIRECTORY_COUNT {
         table_pages[5 + index] = directories_address + index * PAGE_SIZE;
     }
@@ -1582,7 +1602,10 @@ pub(crate) fn static_page_tables_are_read_only() -> bool {
     }
     table_pages.into_iter().all(|address| unsafe {
         let region = address / LARGE_PAGE_SIZE as usize;
-        let directory = core::ptr::addr_of!(PAGE_DIRECTORIES)
+        let directory = PAGING
+            .page_directories
+            .get()
+            .cast_const()
             .cast::<PageTable>()
             .add(region / ENTRY_COUNT);
         let directory_entries = core::ptr::addr_of!((*directory).0).cast::<u64>();
@@ -1599,7 +1622,11 @@ pub(crate) fn static_page_tables_are_read_only() -> bool {
 
 pub(crate) fn identity_map_obeys_wx(boot_info: &BootInfo, image: &ImageSummary) -> bool {
     unsafe {
-        let directories = core::ptr::addr_of!(PAGE_DIRECTORIES).cast::<PageTable>();
+        let directories = PAGING
+            .page_directories
+            .get()
+            .cast_const()
+            .cast::<PageTable>();
         for region in 0..DIRECTORY_COUNT * ENTRY_COUNT {
             let directory = directories.add(region / ENTRY_COUNT);
             let entries = core::ptr::addr_of!((*directory).0).cast::<u64>();
@@ -1665,7 +1692,10 @@ pub(crate) fn identity_range_is_read_only_data(start: usize, length: usize) -> b
     loop {
         let region = address / LARGE_PAGE_SIZE as usize;
         let directory = unsafe {
-            core::ptr::addr_of!(PAGE_DIRECTORIES)
+            PAGING
+                .page_directories
+                .get()
+                .cast_const()
                 .cast::<PageTable>()
                 .add(region / ENTRY_COUNT)
         };
@@ -1764,17 +1794,17 @@ const fn ranges_overlap_u64(left: (u64, u64), right: (u64, u64)) -> bool {
 }
 
 fn is_static_table_page(address: usize) -> bool {
-    if address == core::ptr::addr_of!(PML4) as usize
-        || address == core::ptr::addr_of!(PDPT) as usize
-        || address == core::ptr::addr_of!(DIRECT_PDPT) as usize
-        || address == core::ptr::addr_of!(MMIO_DIRECTORY) as usize
-        || address == core::ptr::addr_of!(MMIO_TABLE) as usize
+    if address == PAGING.pml4.get().cast_const() as usize
+        || address == PAGING.pdpt.get().cast_const() as usize
+        || address == PAGING.direct_pdpt.get().cast_const() as usize
+        || address == PAGING.mmio_directory.get().cast_const() as usize
+        || address == PAGING.mmio_table.get().cast_const() as usize
     {
         return true;
     }
-    let directories = core::ptr::addr_of!(PAGE_DIRECTORIES) as usize;
+    let directories = PAGING.page_directories.get().cast_const() as usize;
     let directories_end = directories + DIRECTORY_COUNT * PAGE_SIZE;
-    let fine_tables = core::ptr::addr_of!(FINE_PAGE_TABLES) as usize;
+    let fine_tables = PAGING.fine_page_tables.get().cast_const() as usize;
     let fine_tables_end = fine_tables + MAX_FINE_TABLES * PAGE_SIZE;
     (directories..directories_end).contains(&address)
         || (fine_tables..fine_tables_end).contains(&address)

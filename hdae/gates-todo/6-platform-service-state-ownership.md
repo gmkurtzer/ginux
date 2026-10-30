@@ -28,6 +28,9 @@ state into explicit host, device, service, or domain-owned structures.
 - [x] Consolidated virtual-network inventory, attachments, host link and IPv4
   configuration, routes, and generations from 13 ambient globals into one
   explicit host-network owner root.
+- [x] Consolidated physical-memory allocation, host paging tables, controller
+  publication state, and bootstrap kernel-stack storage into four explicit
+  host or bootstrap owner roots.
 
 ## Remaining work
 
@@ -65,6 +68,10 @@ state into explicit host, device, service, or domain-owned structures.
   check before reaching its pre-existing embedded minimal-domain panic; the
   same later failure reproduced at parent commit `9bc3ca23`, and both runs
   cleaned up QEMU.
+- After the core-host migration, `make architecture-check` passed with the
+  writable-global inventory reduced from 507 to 493 objects, `make check`
+  passed, and `make build-verification && bash tests/qemu/boot.sh` completed
+  the full verification boot and clean QEMU shutdown.
 
 ## Decisions and limitations
 
@@ -79,8 +86,8 @@ not itself prohibited when ownership and synchronization are concrete.
 - Planned commits: filesystem/storage ownership, network/socket ownership,
   device/controller ownership, and failure/lifecycle evidence.
 - Actual commits: `5ba79480` owns isolated network-service state;
-  `9bc3ca23` owns filesystem/storage publication state; host-network ownership
-  pending commit.
+  `9bc3ca23` owns filesystem/storage publication state; `d6b88ade` owns host
+  network configuration; core-host ownership pending commit.
 
 ## Review policy and outcome
 

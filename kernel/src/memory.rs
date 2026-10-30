@@ -2,8 +2,8 @@ use crate::{
     arch::x86_64::paging, BootInfo, UefiMemoryDescriptor, EFI_BOOT_SERVICES_CODE,
     EFI_BOOT_SERVICES_DATA, EFI_CONVENTIONAL_MEMORY,
 };
-use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use core::{cell::UnsafeCell, mem::MaybeUninit};
 
 const PAGE_SIZE: u64 = 4096;
 const LOW_MEMORY_LIMIT: u64 = 1024 * 1024;
@@ -15,12 +15,21 @@ const DOMAIN_FRAME_LIMIT: usize = 192;
 const LIVE_INDEX_EMPTY: u32 = 0;
 const LIVE_INDEX_TOMBSTONE: u32 = u32::MAX;
 
-static INITIALIZED: AtomicBool = AtomicBool::new(false);
-static RUNTIME_EXTENT_STARTS: [AtomicU64; crate::control_abi::DOMAIN_LIMIT] =
-    [const { AtomicU64::new(0) }; crate::control_abi::DOMAIN_LIMIT];
-static RUNTIME_EXTENT_COUNTS: [AtomicUsize; crate::control_abi::DOMAIN_LIMIT] =
-    [const { AtomicUsize::new(0) }; crate::control_abi::DOMAIN_LIMIT];
-static mut GLOBAL_ALLOCATOR: MaybeUninit<FrameAllocator> = MaybeUninit::uninit();
+struct PhysicalMemoryOwner {
+    initialized: AtomicBool,
+    runtime_extent_starts: [AtomicU64; crate::control_abi::DOMAIN_LIMIT],
+    runtime_extent_counts: [AtomicUsize; crate::control_abi::DOMAIN_LIMIT],
+    allocator: UnsafeCell<MaybeUninit<FrameAllocator>>,
+}
+
+unsafe impl Sync for PhysicalMemoryOwner {}
+
+static PHYSICAL_MEMORY: PhysicalMemoryOwner = PhysicalMemoryOwner {
+    initialized: AtomicBool::new(false),
+    runtime_extent_starts: [const { AtomicU64::new(0) }; crate::control_abi::DOMAIN_LIMIT],
+    runtime_extent_counts: [const { AtomicUsize::new(0) }; crate::control_abi::DOMAIN_LIMIT],
+    allocator: UnsafeCell::new(MaybeUninit::uninit()),
+};
 
 #[derive(Clone, Copy)]
 struct Range {
@@ -678,14 +687,14 @@ impl<
 }
 
 pub(crate) fn initialize(boot_info: &BootInfo, ceiling: u64) -> bool {
-    if INITIALIZED.load(Ordering::Acquire) {
+    if PHYSICAL_MEMORY.initialized.load(Ordering::Acquire) {
         return false;
     }
     // SAFETY: Bootstrap initialization is single-processor and interrupts do
     // not access the allocator. Constructing the large tracking tables in
     // their final static location avoids consuming the bounded kernel stack.
     unsafe {
-        let allocator = core::ptr::addr_of_mut!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
+        let allocator = PHYSICAL_MEMORY.allocator.get().cast::<FrameAllocator>();
         core::ptr::write_bytes(
             allocator.cast::<u8>(),
             0,
@@ -695,19 +704,19 @@ pub(crate) fn initialize(boot_info: &BootInfo, ceiling: u64) -> bool {
             return false;
         }
     }
-    INITIALIZED.store(true, Ordering::Release);
+    PHYSICAL_MEMORY.initialized.store(true, Ordering::Release);
     true
 }
 
 pub(crate) fn allocate_frames<const N: usize>(owner: FrameOwner) -> Option<[FrameLease; N]> {
-    if !INITIALIZED.load(Ordering::Acquire) {
+    if !PHYSICAL_MEMORY.initialized.load(Ordering::Acquire) {
         return None;
     }
     // SAFETY: Initialization published a valid allocator. Bootstrap is
     // single-processor and callers keep interrupts disabled, so access is
     // serialized until an SMP-safe allocator replaces this path.
     unsafe {
-        let allocator = core::ptr::addr_of_mut!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
+        let allocator = PHYSICAL_MEMORY.allocator.get().cast::<FrameAllocator>();
         let frames = (*allocator).reserve::<N>(owner)?;
         for frame in &frames {
             let Some(address) = frame.direct_map_address() else {
@@ -724,14 +733,14 @@ pub(crate) fn allocate_frame_prefix<const N: usize>(
     owner: FrameOwner,
     count: usize,
 ) -> Option<[FrameLease; N]> {
-    if !INITIALIZED.load(Ordering::Acquire) || count == 0 || count > N {
+    if !PHYSICAL_MEMORY.initialized.load(Ordering::Acquire) || count == 0 || count > N {
         return None;
     }
     // SAFETY: As with `allocate_frames`, bootstrap and syscall execution keep
     // allocator access serialized. A partial reservation is rolled back
     // atomically before returning failure.
     unsafe {
-        let allocator = core::ptr::addr_of_mut!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
+        let allocator = PHYSICAL_MEMORY.allocator.get().cast::<FrameAllocator>();
         let mut frames = [FrameLease::EMPTY; N];
         for index in 0..count {
             let Some(frame) = (*allocator).allocate_one(owner) else {
@@ -759,12 +768,12 @@ pub(crate) fn allocate_frame_prefix_into(
     output: &mut [FrameLease],
     count: usize,
 ) -> bool {
-    if !INITIALIZED.load(Ordering::Acquire) || count == 0 || count > output.len() {
+    if !PHYSICAL_MEMORY.initialized.load(Ordering::Acquire) || count == 0 || count > output.len() {
         return false;
     }
     output.fill(FrameLease::EMPTY);
     unsafe {
-        let allocator = core::ptr::addr_of_mut!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
+        let allocator = PHYSICAL_MEMORY.allocator.get().cast::<FrameAllocator>();
         for index in 0..count {
             let Some(frame) = (*allocator).allocate_one(owner) else {
                 if index != 0 {
@@ -791,13 +800,13 @@ pub(crate) fn allocate_frame_prefix_into(
 pub(crate) fn allocate_contiguous_frames<const N: usize>(
     owner: FrameOwner,
 ) -> Option<[FrameLease; N]> {
-    if !INITIALIZED.load(Ordering::Acquire) {
+    if !PHYSICAL_MEMORY.initialized.load(Ordering::Acquire) {
         return None;
     }
     // SAFETY: Initialization published a valid allocator. Bootstrap is
     // single-processor and callers keep interrupts disabled.
     unsafe {
-        let allocator = core::ptr::addr_of_mut!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
+        let allocator = PHYSICAL_MEMORY.allocator.get().cast::<FrameAllocator>();
         let frames = (*allocator).reserve_contiguous::<N>(owner)?;
         for frame in &frames {
             let Some(address) = frame.direct_map_address() else {
@@ -814,11 +823,11 @@ pub(crate) fn allocate_contiguous_extent(
     owner: FrameOwner,
     count: usize,
 ) -> Option<(FrameLease, usize)> {
-    if !INITIALIZED.load(Ordering::Acquire) || count == 0 {
+    if !PHYSICAL_MEMORY.initialized.load(Ordering::Acquire) || count == 0 {
         return None;
     }
     unsafe {
-        let allocator = core::ptr::addr_of_mut!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
+        let allocator = PHYSICAL_MEMORY.allocator.get().cast::<FrameAllocator>();
         let first = (*allocator).reserve_contiguous_extent(owner, count)?;
         let address = first.direct_map_address()?;
         core::ptr::write_bytes(
@@ -835,7 +844,7 @@ pub(crate) fn scrub_and_release_contiguous_extent(
     first: FrameLease,
     count: usize,
 ) -> bool {
-    if !INITIALIZED.load(Ordering::Acquire) || count == 0 {
+    if !PHYSICAL_MEMORY.initialized.load(Ordering::Acquire) || count == 0 {
         return false;
     }
     let Some(address) = first.direct_map_address() else {
@@ -846,24 +855,24 @@ pub(crate) fn scrub_and_release_contiguous_extent(
     };
     unsafe { core::ptr::write_bytes(address as *mut u8, 0, length) };
     unsafe {
-        let allocator = core::ptr::addr_of_mut!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
+        let allocator = PHYSICAL_MEMORY.allocator.get().cast::<FrameAllocator>();
         (*allocator).release_contiguous_extent(owner, first, count)
     }
 }
 
 pub(crate) fn allocate_runtime_extent<const N: usize>() -> Option<[FrameLease; N]> {
-    if !INITIALIZED.load(Ordering::Acquire) || N == 0 {
+    if !PHYSICAL_MEMORY.initialized.load(Ordering::Acquire) || N == 0 {
         return None;
     }
     let slot = crate::arch::x86_64::cpu::current_container_slot()?;
-    let existing = RUNTIME_EXTENT_STARTS[slot].load(Ordering::Acquire);
-    let count = RUNTIME_EXTENT_COUNTS[slot].load(Ordering::Acquire);
+    let existing = PHYSICAL_MEMORY.runtime_extent_starts[slot].load(Ordering::Acquire);
+    let count = PHYSICAL_MEMORY.runtime_extent_counts[slot].load(Ordering::Acquire);
     let start = if existing != 0 {
         (count == N).then_some(existing)?
     } else {
         let size = (N as u64).checked_mul(PAGE_SIZE)?;
         let start = unsafe {
-            let allocator = core::ptr::addr_of_mut!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
+            let allocator = PHYSICAL_MEMORY.allocator.get().cast::<FrameAllocator>();
             let index = ((*allocator).active_range..(*allocator).range_count).find(|index| {
                 (*allocator).ranges[*index]
                     .end
@@ -874,8 +883,8 @@ pub(crate) fn allocate_runtime_extent<const N: usize>() -> Option<[FrameLease; N
             (*allocator).ranges[index].next = start.checked_add(size)?;
             start
         };
-        RUNTIME_EXTENT_COUNTS[slot].store(N, Ordering::Release);
-        RUNTIME_EXTENT_STARTS[slot].store(start, Ordering::Release);
+        PHYSICAL_MEMORY.runtime_extent_counts[slot].store(N, Ordering::Release);
+        PHYSICAL_MEMORY.runtime_extent_starts[slot].store(start, Ordering::Release);
         start
     };
     let frames = core::array::from_fn(|index| FrameLease {
@@ -903,9 +912,10 @@ pub(crate) fn scrub_runtime_extent<const N: usize>(frames: [FrameLease; N]) -> b
 
 fn runtime_extent_owns(frames: &[FrameLease]) -> bool {
     !frames.is_empty()
-        && RUNTIME_EXTENT_STARTS
+        && PHYSICAL_MEMORY
+            .runtime_extent_starts
             .iter()
-            .zip(&RUNTIME_EXTENT_COUNTS)
+            .zip(&PHYSICAL_MEMORY.runtime_extent_counts)
             .any(|(start, count)| {
                 let start = start.load(Ordering::Acquire);
                 let count = count.load(Ordering::Acquire);
@@ -929,21 +939,25 @@ pub(crate) fn frame_address_is_runtime(address: u64) -> bool {
 }
 
 pub(crate) fn release_frames<const N: usize>(owner: FrameOwner, frames: [FrameLease; N]) -> bool {
-    if !INITIALIZED.load(Ordering::Acquire) {
+    if !PHYSICAL_MEMORY.initialized.load(Ordering::Acquire) {
         return false;
     }
     unsafe {
-        let allocator = core::ptr::addr_of_mut!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
+        let allocator = PHYSICAL_MEMORY.allocator.get().cast::<FrameAllocator>();
         (*allocator).release(owner, frames)
     }
 }
 
 pub(crate) fn frame_leases_releasable(owner: FrameOwner, frames: &[FrameLease]) -> bool {
-    if !INITIALIZED.load(Ordering::Acquire) || frames.is_empty() {
+    if !PHYSICAL_MEMORY.initialized.load(Ordering::Acquire) || frames.is_empty() {
         return false;
     }
     unsafe {
-        let allocator = core::ptr::addr_of!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
+        let allocator = PHYSICAL_MEMORY
+            .allocator
+            .get()
+            .cast_const()
+            .cast::<FrameAllocator>();
         (*allocator).can_release(owner, frames)
             && frames
                 .iter()
@@ -952,18 +966,22 @@ pub(crate) fn frame_leases_releasable(owner: FrameOwner, frames: &[FrameLease]) 
 }
 
 pub(crate) fn live_frame_lease(owner: FrameOwner, address: u64) -> Option<FrameLease> {
-    if !INITIALIZED.load(Ordering::Acquire) || !address.is_multiple_of(PAGE_SIZE) {
+    if !PHYSICAL_MEMORY.initialized.load(Ordering::Acquire) || !address.is_multiple_of(PAGE_SIZE) {
         return None;
     }
     unsafe {
-        let allocator = core::ptr::addr_of!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
+        let allocator = PHYSICAL_MEMORY
+            .allocator
+            .get()
+            .cast_const()
+            .cast::<FrameAllocator>();
         let position = (*allocator).live_position(address)?;
         ((*allocator).live_owners[position] == owner).then_some((*allocator).live_frames[position])
     }
 }
 
 pub(crate) fn scrub_and_release_frames(owner: FrameOwner, frames: &[FrameLease]) -> bool {
-    if !INITIALIZED.load(Ordering::Acquire) || frames.is_empty() {
+    if !PHYSICAL_MEMORY.initialized.load(Ordering::Acquire) || frames.is_empty() {
         return false;
     }
     // SAFETY: The allocator and direct map are serialized by the same
@@ -971,7 +989,7 @@ pub(crate) fn scrub_and_release_frames(owner: FrameOwner, frames: &[FrameLease])
     // release preconditions are checked before any payload is destroyed, so a
     // stale or duplicate lease cannot scrub a newer allocation.
     unsafe {
-        let allocator = core::ptr::addr_of_mut!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
+        let allocator = PHYSICAL_MEMORY.allocator.get().cast::<FrameAllocator>();
         if !(*allocator).can_release(owner, frames)
             || frames
                 .iter()
@@ -990,47 +1008,60 @@ pub(crate) fn scrub_and_release_frames(owner: FrameOwner, frames: &[FrameLease])
 }
 
 pub(crate) fn transfer_frame_owner(from: FrameOwner, to: FrameOwner) -> Option<usize> {
-    if !INITIALIZED.load(Ordering::Acquire) {
+    if !PHYSICAL_MEMORY.initialized.load(Ordering::Acquire) {
         return None;
     }
     unsafe {
-        let allocator = core::ptr::addr_of_mut!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
+        let allocator = PHYSICAL_MEMORY.allocator.get().cast::<FrameAllocator>();
         (*allocator).transfer_owner(from, to)
     }
 }
 
 pub(crate) fn frames_owned_by(owner: FrameOwner, frames: &[FrameLease]) -> bool {
-    if !INITIALIZED.load(Ordering::Acquire) {
+    if !PHYSICAL_MEMORY.initialized.load(Ordering::Acquire) {
         return false;
     }
     unsafe {
-        let allocator = core::ptr::addr_of!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
+        let allocator = PHYSICAL_MEMORY
+            .allocator
+            .get()
+            .cast_const()
+            .cast::<FrameAllocator>();
         (*allocator).owns(owner, frames) || owner.is_kernel() && runtime_extent_owns(frames)
     }
 }
 
 pub(crate) fn any_frame_lease_live(frames: &[FrameLease]) -> bool {
-    if !INITIALIZED.load(Ordering::Acquire) {
+    if !PHYSICAL_MEMORY.initialized.load(Ordering::Acquire) {
         return false;
     }
     unsafe {
-        let allocator = core::ptr::addr_of!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
+        let allocator = PHYSICAL_MEMORY
+            .allocator
+            .get()
+            .cast_const()
+            .cast::<FrameAllocator>();
         (*allocator).tracks_any(frames)
     }
 }
 
 pub(crate) fn frame_addresses_owned_by(owner: FrameOwner, addresses: &[u64]) -> bool {
-    if !INITIALIZED.load(Ordering::Acquire) {
+    if !PHYSICAL_MEMORY.initialized.load(Ordering::Acquire) {
         return false;
     }
     unsafe {
-        let allocator = core::ptr::addr_of!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
+        let allocator = PHYSICAL_MEMORY
+            .allocator
+            .get()
+            .cast_const()
+            .cast::<FrameAllocator>();
         (*allocator).owns_addresses(owner, addresses)
             || owner.is_kernel()
                 && !addresses.is_empty()
-                && RUNTIME_EXTENT_STARTS
+                && PHYSICAL_MEMORY
+                    .runtime_extent_starts
                     .iter()
-                    .zip(&RUNTIME_EXTENT_COUNTS)
+                    .zip(&PHYSICAL_MEMORY.runtime_extent_counts)
                     .any(|(start, count)| {
                         let start = start.load(Ordering::Acquire);
                         let count = count.load(Ordering::Acquire);
@@ -1045,21 +1076,29 @@ pub(crate) fn frame_addresses_owned_by(owner: FrameOwner, addresses: &[u64]) -> 
 }
 
 pub(crate) fn owner_live_frame_count(owner: FrameOwner) -> Option<usize> {
-    if !INITIALIZED.load(Ordering::Acquire) {
+    if !PHYSICAL_MEMORY.initialized.load(Ordering::Acquire) {
         return None;
     }
     unsafe {
-        let allocator = core::ptr::addr_of!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
+        let allocator = PHYSICAL_MEMORY
+            .allocator
+            .get()
+            .cast_const()
+            .cast::<FrameAllocator>();
         Some((*allocator).owner_live_count(owner))
     }
 }
 
 pub(crate) fn frame_counts() -> Option<(u64, u64)> {
-    if !INITIALIZED.load(Ordering::Acquire) {
+    if !PHYSICAL_MEMORY.initialized.load(Ordering::Acquire) {
         return None;
     }
     unsafe {
-        let allocator = core::ptr::addr_of!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
+        let allocator = PHYSICAL_MEMORY
+            .allocator
+            .get()
+            .cast_const()
+            .cast::<FrameAllocator>();
         let available = (*allocator)
             .available_frames()
             .checked_add((*allocator).recycled_count as u64)?;
@@ -1069,11 +1108,15 @@ pub(crate) fn frame_counts() -> Option<(u64, u64)> {
 }
 
 pub(crate) fn reclaimed_boot_service_frame_count() -> Option<u64> {
-    if !INITIALIZED.load(Ordering::Acquire) {
+    if !PHYSICAL_MEMORY.initialized.load(Ordering::Acquire) {
         return None;
     }
     unsafe {
-        let allocator = core::ptr::addr_of!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
+        let allocator = PHYSICAL_MEMORY
+            .allocator
+            .get()
+            .cast_const()
+            .cast::<FrameAllocator>();
         Some((*allocator).reclaimed_boot_service_frames)
     }
 }
