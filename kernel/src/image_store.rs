@@ -20,6 +20,8 @@ struct ImageStoreOwner {
     rootfs_frame_starts: [AtomicU64; crate::control_abi::DOMAIN_LIMIT],
     rootfs_frame_counts: [AtomicUsize; crate::control_abi::DOMAIN_LIMIT],
     rootfs_lengths: [AtomicUsize; crate::control_abi::DOMAIN_LIMIT],
+    rootfs_owner_slots: [AtomicUsize; crate::control_abi::DOMAIN_LIMIT],
+    rootfs_refcounts: [AtomicUsize; crate::control_abi::DOMAIN_LIMIT],
 }
 
 unsafe impl Sync for ImageStoreOwner {}
@@ -32,6 +34,8 @@ static IMAGE_STORE: ImageStoreOwner = ImageStoreOwner {
     rootfs_frame_starts: [const { AtomicU64::new(0) }; crate::control_abi::DOMAIN_LIMIT],
     rootfs_frame_counts: [const { AtomicUsize::new(0) }; crate::control_abi::DOMAIN_LIMIT],
     rootfs_lengths: [const { AtomicUsize::new(0) }; crate::control_abi::DOMAIN_LIMIT],
+    rootfs_owner_slots: [const { AtomicUsize::new(0) }; crate::control_abi::DOMAIN_LIMIT],
+    rootfs_refcounts: [const { AtomicUsize::new(0) }; crate::control_abi::DOMAIN_LIMIT],
 };
 
 #[derive(Clone, Copy)]
@@ -492,9 +496,15 @@ pub(crate) fn install_published_layers(slot: usize) -> bool {
                 return false;
             }
         }
-        IMAGE_STORE.rootfs_frame_starts[slot].store(first_frame.address(), Ordering::Release);
-        IMAGE_STORE.rootfs_frame_counts[slot].store(page_count, Ordering::Release);
-        IMAGE_STORE.rootfs_lengths[slot].store(rootfs_end, Ordering::Release);
+        if !register_rootfs_backing(slot, first_frame, page_count, rootfs_end) {
+            let _ = crate::published_rootfs::uninstall_published_rootfs(slot);
+            let _ = memory::scrub_and_release_contiguous_extent(
+                FrameOwner::KERNEL,
+                first_frame,
+                page_count,
+            );
+            return false;
+        }
         for index in 0..layer_count {
             unsafe {
                 IMAGE_STORE
@@ -534,20 +544,78 @@ pub(crate) fn install_cached_rootfs(
     if !crate::published_rootfs::install_published_rootfs(slot, bytes) {
         return false;
     }
-    IMAGE_STORE.rootfs_frame_starts[slot].store(first_frame.address(), Ordering::Release);
-    IMAGE_STORE.rootfs_frame_counts[slot].store(page_count, Ordering::Release);
-    IMAGE_STORE.rootfs_lengths[slot].store(length, Ordering::Release);
+    if register_rootfs_backing(slot, first_frame, page_count, length) {
+        true
+    } else {
+        let _ = crate::published_rootfs::uninstall_published_rootfs(slot);
+        false
+    }
+}
+
+fn register_rootfs_backing(
+    slot: usize,
+    first_frame: FrameLease,
+    page_count: usize,
+    length: usize,
+) -> bool {
+    let Some(backing) = IMAGE_STORE.rootfs_refcounts.iter().position(|references| {
+        references
+            .compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+    }) else {
+        return false;
+    };
+    IMAGE_STORE.rootfs_frame_starts[backing].store(first_frame.address(), Ordering::Release);
+    IMAGE_STORE.rootfs_frame_counts[backing].store(page_count, Ordering::Release);
+    IMAGE_STORE.rootfs_lengths[backing].store(length, Ordering::Release);
+    IMAGE_STORE.rootfs_owner_slots[slot].store(backing + 1, Ordering::Release);
+    true
+}
+
+pub(crate) fn share_installed_rootfs(source: usize, target: usize) -> bool {
+    if source >= crate::control_abi::DOMAIN_LIMIT
+        || target >= crate::control_abi::DOMAIN_LIMIT
+        || source == target
+        || crate::published_rootfs::is_installed(target)
+    {
+        return false;
+    }
+    let backing = IMAGE_STORE.rootfs_owner_slots[source]
+        .load(Ordering::Acquire)
+        .checked_sub(1);
+    let Some(backing) = backing.filter(|backing| *backing < crate::control_abi::DOMAIN_LIMIT)
+    else {
+        return false;
+    };
+    let Some(bytes) = installed_rootfs(source) else {
+        return false;
+    };
+    if !crate::published_rootfs::install_published_rootfs(target, bytes) {
+        return false;
+    }
+    let previous = IMAGE_STORE.rootfs_refcounts[backing].fetch_add(1, Ordering::AcqRel);
+    if previous == 0 {
+        IMAGE_STORE.rootfs_refcounts[backing].store(0, Ordering::Release);
+        let _ = crate::published_rootfs::uninstall_published_rootfs(target);
+        return false;
+    }
+    IMAGE_STORE.rootfs_owner_slots[target].store(backing + 1, Ordering::Release);
     true
 }
 
 pub(crate) fn installed_rootfs(slot: usize) -> Option<&'static [u8]> {
+    let backing = IMAGE_STORE
+        .rootfs_owner_slots
+        .get(slot)?
+        .load(Ordering::Acquire)
+        .checked_sub(1)?;
     let start = IMAGE_STORE
         .rootfs_frame_starts
-        .get(slot)?
+        .get(backing)?
         .load(Ordering::Acquire);
     let length = IMAGE_STORE
         .rootfs_lengths
-        .get(slot)?
+        .get(backing)?
         .load(Ordering::Acquire);
     let frame = FrameLease::from_parts(start, 1)?;
     let address = frame.direct_map_address()?;
@@ -560,10 +628,25 @@ pub(crate) fn uninstall_rootfs(slot: usize) -> bool {
     {
         return false;
     }
-    let start = IMAGE_STORE.rootfs_frame_starts[slot].load(Ordering::Acquire);
-    let count = IMAGE_STORE.rootfs_frame_counts[slot].load(Ordering::Acquire);
-    if count == 0 || start == 0 {
+    let Some(backing) = IMAGE_STORE.rootfs_owner_slots[slot]
+        .swap(0, Ordering::AcqRel)
+        .checked_sub(1)
+        .filter(|backing| *backing < crate::control_abi::DOMAIN_LIMIT)
+    else {
         return true;
+    };
+    let references = IMAGE_STORE.rootfs_refcounts[backing].load(Ordering::Acquire);
+    if references == 0 {
+        return false;
+    }
+    let references = IMAGE_STORE.rootfs_refcounts[backing].fetch_sub(1, Ordering::AcqRel);
+    if references > 1 {
+        return true;
+    }
+    let start = IMAGE_STORE.rootfs_frame_starts[backing].load(Ordering::Acquire);
+    let count = IMAGE_STORE.rootfs_frame_counts[backing].load(Ordering::Acquire);
+    if count == 0 || start == 0 {
+        return false;
     }
     let Some(first_frame) = FrameLease::from_parts(start, 1) else {
         return false;
@@ -571,9 +654,10 @@ pub(crate) fn uninstall_rootfs(slot: usize) -> bool {
     let released =
         memory::scrub_and_release_contiguous_extent(FrameOwner::KERNEL, first_frame, count);
     if released {
-        IMAGE_STORE.rootfs_frame_starts[slot].store(0, Ordering::Release);
-        IMAGE_STORE.rootfs_frame_counts[slot].store(0, Ordering::Release);
-        IMAGE_STORE.rootfs_lengths[slot].store(0, Ordering::Release);
+        IMAGE_STORE.rootfs_frame_starts[backing].store(0, Ordering::Release);
+        IMAGE_STORE.rootfs_frame_counts[backing].store(0, Ordering::Release);
+        IMAGE_STORE.rootfs_lengths[backing].store(0, Ordering::Release);
+        IMAGE_STORE.rootfs_refcounts[backing].store(0, Ordering::Release);
     }
     released
 }

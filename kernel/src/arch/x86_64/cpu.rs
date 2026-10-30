@@ -32885,6 +32885,8 @@ fn container_console_read_byte() -> Option<u8> {
     let byte = crate::serial_read_byte_blocking();
     if byte == CONTAINER_CONSOLE_DETACH {
         X86_RUNTIME.CONTAINER_CONSOLE_ATTACHED[slot].store(false, Ordering::Release);
+        X86_RUNTIME.CONTAINER_CONTROL_STATES[slot]
+            .store(control_abi::DOMAIN_STATE_RUNNING as u8, Ordering::Release);
         X86_RUNTIME
             .LINUX_RUNTIME_SUSPEND_REQUESTED
             .store(true, Ordering::Release);
@@ -40566,6 +40568,18 @@ pub(crate) fn configured_container_image(output: &mut [u8]) -> Option<usize> {
         *destination = source.load(Ordering::SeqCst);
     }
     Some(size)
+}
+
+pub(crate) fn container_image_matches(slot: usize, image: &[u8]) -> bool {
+    let Some(size) = X86_RUNTIME.CONTAINER_IMAGE_SIZES.get(slot) else {
+        return false;
+    };
+    let size = usize::from(size.load(Ordering::Acquire));
+    size == image.len()
+        && X86_RUNTIME.CONTAINER_IMAGES[slot][..size]
+            .iter()
+            .zip(image)
+            .all(|(stored, expected)| stored.load(Ordering::Acquire) == *expected)
 }
 
 pub(crate) fn take_container_pull_request() -> bool {

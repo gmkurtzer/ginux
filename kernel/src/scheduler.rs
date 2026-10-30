@@ -3,10 +3,12 @@ use crate::owned_state::OwnedState;
 
 const MAX_THREADS: usize = 8;
 const PROCESS_CPU_LIMIT: usize = 4;
+const PROCESS_WORKSPACE_LIMIT: usize = crate::control_abi::DOMAIN_LIMIT + 1;
 pub(crate) const IPC_PEER_CLOSED: u64 = u64::MAX - 4;
 
 static SCHEDULER_RUNTIME: OwnedState<Runtime> = OwnedState::empty();
-static PROCESS_WORKSPACE: OwnedState<ProcessScheduler> = OwnedState::empty();
+static PROCESS_WORKSPACES: [OwnedState<ProcessScheduler>; PROCESS_WORKSPACE_LIMIT] =
+    [const { OwnedState::empty() }; PROCESS_WORKSPACE_LIMIT];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct ThreadId {
@@ -1238,7 +1240,8 @@ impl ProcessScheduler {
 }
 
 pub(crate) fn acquire_process_scheduler_workspace() -> Option<&'static mut ProcessScheduler> {
-    let claim = PROCESS_WORKSPACE.try_claim()?;
+    let workspace = current_process_scheduler_workspace();
+    let claim = workspace.try_claim()?;
     // SAFETY: The owner claim serializes initialization. Each field is written
     // directly so the bounded kernel stack never holds a complete scheduler
     // temporary.
@@ -1256,24 +1259,32 @@ pub(crate) fn acquire_process_scheduler_workspace() -> Option<&'static mut Proce
     }
     claim.publish_initialized();
     // SAFETY: A successful claim gives this lifecycle exclusive workspace use.
-    Some(unsafe { &mut *PROCESS_WORKSPACE.get_mut_ptr()? })
+    Some(unsafe { &mut *workspace.get_mut_ptr()? })
 }
 
 pub(crate) fn active_process_scheduler_workspace() -> Option<&'static mut ProcessScheduler> {
+    let workspace = current_process_scheduler_workspace();
     // SAFETY: The process lifecycle retains the exclusive workspace claim.
-    Some(unsafe { &mut *PROCESS_WORKSPACE.get_mut_ptr()? })
+    Some(unsafe { &mut *workspace.get_mut_ptr()? })
 }
 
 pub(crate) fn release_process_scheduler_workspace() -> bool {
+    let workspace_owner = current_process_scheduler_workspace();
     let clean = {
-        let Some(workspace) = PROCESS_WORKSPACE.get() else {
+        let Some(workspace) = workspace_owner.get() else {
             return false;
         };
         workspace.scheduler.threads.iter().all(Option::is_none)
             && workspace.scheduler.current.is_none()
             && workspace.current_by_cpu.iter().all(Option::is_none)
     };
-    clean && PROCESS_WORKSPACE.reset()
+    clean && workspace_owner.reset()
+}
+
+fn current_process_scheduler_workspace() -> &'static OwnedState<ProcessScheduler> {
+    let instance = crate::arch::x86_64::cpu::current_container_slot()
+        .unwrap_or(crate::control_abi::DOMAIN_LIMIT);
+    &PROCESS_WORKSPACES[instance]
 }
 
 pub(crate) fn schedule_process_on_current_cpu_for_test() -> bool {

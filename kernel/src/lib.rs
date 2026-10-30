@@ -4006,13 +4006,28 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
                 serial_write("\r\n");
                 let catalog_contains_image = persisted_oci_catalog_valid
                     && oci_catalog_contains(persisted_oci_catalog, &image[..image_size]);
-                match if catalog_contains_image {
+                let configured_slot = arch::x86_64::cpu::configured_container_slot();
+                let shared_rootfs = configured_slot.and_then(|target| {
+                    (0..control_abi::DOMAIN_LIMIT)
+                        .find(|source| {
+                            *source != target
+                                && published_rootfs::is_installed(*source)
+                                && arch::x86_64::cpu::container_image_matches(
+                                    *source,
+                                    &image[..image_size],
+                                )
+                        })
+                        .filter(|source| image_store::share_installed_rootfs(*source, target))
+                });
+                match if shared_rootfs.is_some() {
+                    OciCacheRestore::RootfsHit
+                } else if catalog_contains_image {
                     restore_cached_oci_layers(
                         virtio_block,
                         virtio_mmio,
                         virtio_iommu_profile,
                         &image[..image_size],
-                        arch::x86_64::cpu::configured_container_slot(),
+                        configured_slot,
                     )
                 } else {
                     OciCacheRestore::Miss
@@ -4595,6 +4610,18 @@ fn restore_cached_oci_layers(
             let Ok(length) = usize::try_from(rootfs.length) else {
                 return Some(OciCacheRestore::Invalid);
             };
+            if let Some(source) = (0..control_abi::DOMAIN_LIMIT).find(|source| {
+                *source != slot
+                    && image_store::installed_rootfs(*source).is_some_and(|bytes| {
+                        bytes.len() == length && crypto::sha256(bytes) == rootfs.digest
+                    })
+            }) {
+                return Some(if image_store::share_installed_rootfs(source, slot) {
+                    OciCacheRestore::RootfsHit
+                } else {
+                    OciCacheRestore::Invalid
+                });
+            }
             let page_count = length.div_ceil(4096);
             let Some((first_frame, allocated)) =
                 memory::allocate_contiguous_extent(memory::FrameOwner::KERNEL, page_count)

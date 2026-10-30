@@ -461,7 +461,7 @@ interior-mutable	kernel/src/memory.rs	PHYSICAL_MEMORY	platform-device	allowlist	
 interior-mutable	kernel/src/network.rs	NETWORKS	platform-device	allowlist	none	explicit-host-virtual-network-owner-root
 interior-mutable	kernel/src/packet.rs	PACKETS	platform-device	allowlist	none	explicit-host-packet-mailbox-owner-root
 interior-mutable	kernel/src/published_rootfs.rs	PUBLISHED_ROOTFS	platform-device	allowlist	none	explicit-domain-rootfs-publication-owner-root
-interior-mutable	kernel/src/scheduler.rs	PROCESS_WORKSPACE	shared-runtime	allowlist	none	explicit-lifecycle-owner-root
+interior-mutable	kernel/src/scheduler.rs	PROCESS_WORKSPACES	domain-runtime	allowlist	none	explicit-per-domain-lifecycle-owner-root
 interior-mutable	kernel/src/scheduler.rs	SCHEDULER_RUNTIME	shared-runtime	allowlist	none	explicit-lifecycle-owner-root
 interior-mutable	kernel/src/sync.rs	HELD_RANKS	per-cpu-arch	allowlist	none	explicit-per-cpu-lock-order-tracker
 interior-mutable	kernel/src/sync.rs	HIGH	verification-only	allowlist	none	verification-build-only

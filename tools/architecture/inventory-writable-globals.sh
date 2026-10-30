@@ -52,7 +52,7 @@ find "${source_roots[@]}" -type f -name '*.rs' -print0 |
 while IFS= read -r wrapper; do
     [[ -n "$wrapper" ]] || continue
     emit_matches interior-mutable \
-        "^\\s*(pub(\\([^)]*\\))?\\s+)?static\\s+[A-Z0-9_]+\\s*:\\s*${wrapper}([[:space:]<]|=)" \
+        "^\\s*(pub(\\([^)]*\\))?\\s+)?static\\s+[A-Z0-9_]+\\s*:\\s*[^=]*${wrapper}([[:space:]<;,\\]]|=)" \
         >>"$scratch"
 done <"$cell_types"
 

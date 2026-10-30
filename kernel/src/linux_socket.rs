@@ -103,6 +103,7 @@ pub(crate) enum TimeoutOption {
 #[derive(Clone, Copy)]
 struct Slot {
     occupied: bool,
+    owner: u8,
     references: u16,
     kind: Kind,
     handle: Option<SocketHandle>,
@@ -139,6 +140,7 @@ struct Slot {
 impl Slot {
     const EMPTY: Self = Self {
         occupied: false,
+        owner: 0,
         references: 0,
         kind: Kind::Tcp,
         handle: None,
@@ -219,6 +221,11 @@ static SOCKET_RUNTIME_OWNER: SocketRuntimeOwner = SocketRuntimeOwner {
     udp_rx_meta: UnsafeCell::new([[udp::PacketMetadata::EMPTY; UDP_PACKET_COUNT]; SLOT_COUNT]),
     udp_tx_meta: UnsafeCell::new([[udp::PacketMetadata::EMPTY; UDP_PACKET_COUNT]; SLOT_COUNT]),
 };
+
+fn current_owner() -> u8 {
+    crate::arch::x86_64::cpu::current_container_slot().unwrap_or(crate::control_abi::DOMAIN_LIMIT)
+        as u8
+}
 
 macro_rules! owner_field {
     ($name:ident, $field:ident, $ty:ty) => {
@@ -396,6 +403,7 @@ pub(crate) fn open(kind: Kind) -> Result<u8, Error> {
     unsafe {
         socket_slots()[slot] = Slot {
             occupied: true,
+            owner: current_owner(),
             references: 1,
             kind,
             handle: Some(handle),
@@ -441,6 +449,7 @@ pub(crate) fn open_unix(socket_type: u8) -> Result<u8, Error> {
     unsafe {
         socket_slots()[slot] = Slot {
             occupied: true,
+            owner: current_owner(),
             references: 1,
             kind: Kind::Unix,
             ..Slot::EMPTY
@@ -479,6 +488,7 @@ pub(crate) fn bind_unix(slot: u8, path: &[u8]) -> Result<(), Error> {
         return Err(Error::Invalid);
     }
     let in_use = unsafe {
+        let owner = state.owner;
         unix_path_lengths()
             .iter()
             .enumerate()
@@ -486,6 +496,7 @@ pub(crate) fn bind_unix(slot: u8, path: &[u8]) -> Result<(), Error> {
                 candidate != index
                     && usize::from(*length) == path.len()
                     && socket_slots()[candidate].occupied
+                    && socket_slots()[candidate].owner == owner
                     && unix_paths()[candidate][..path.len()] == *path
             })
     };
@@ -508,6 +519,7 @@ pub(crate) fn connect_unix(slot: u8, path: &[u8]) -> Result<(), Error> {
         return Err(Error::Invalid);
     }
     let peer = unsafe {
+        let owner = state.owner;
         unix_path_lengths()
             .iter()
             .enumerate()
@@ -515,6 +527,7 @@ pub(crate) fn connect_unix(slot: u8, path: &[u8]) -> Result<(), Error> {
                 *candidate != index
                     && usize::from(**length) == path.len()
                     && socket_slots()[*candidate].occupied
+                    && socket_slots()[*candidate].owner == owner
                     && socket_slots()[*candidate].kind == Kind::Unix
                     && unix_socket_types()[*candidate] == unix_socket_types()[index]
                     && unix_paths()[*candidate][..path.len()] == *path
@@ -536,6 +549,7 @@ pub(crate) fn connect_unix(slot: u8, path: &[u8]) -> Result<(), Error> {
     unsafe {
         socket_slots()[accepted] = Slot {
             occupied: true,
+            owner: listener.owner,
             references: 1,
             kind: Kind::Unix,
             handle: None,
@@ -608,6 +622,7 @@ pub(crate) fn open_pair(socket_type: u8) -> Result<(u8, u8), Error> {
     unsafe {
         socket_slots()[first] = Slot {
             occupied: true,
+            owner: current_owner(),
             references: 1,
             kind: Kind::Unix,
             handle: None,
@@ -642,6 +657,7 @@ pub(crate) fn open_pair(socket_type: u8) -> Result<(u8, u8), Error> {
         };
         socket_slots()[second] = Slot {
             occupied: true,
+            owner: current_owner(),
             references: 1,
             kind: Kind::Unix,
             handle: None,
@@ -815,8 +831,9 @@ pub(crate) fn shutdown() -> bool {
     // duplicated descriptors and SCM_RIGHTS references that no live process
     // can release after its process tree has been retired.
     let mut index = 0;
+    let owner = current_owner();
     while index < SLOT_COUNT {
-        if unsafe { socket_slots()[index].occupied } {
+        if unsafe { socket_slots()[index].occupied && socket_slots()[index].owner == owner } {
             unsafe { socket_slots()[index].references = 1 };
             if !close(index as u8) {
                 return false;
@@ -824,11 +841,7 @@ pub(crate) fn shutdown() -> bool {
         }
         index += 1;
     }
-    unsafe { *unix_inflight_rights_state() = 0 };
-    if unsafe { socket_runtime_state().is_none() } {
-        return true;
-    }
-    teardown()
+    true
 }
 
 pub(crate) fn duplicate(slot: u8) -> bool {
@@ -1090,6 +1103,7 @@ pub(crate) fn accept(slot: u8) -> Result<(u8, IpEndpoint), Error> {
         unsafe {
             socket_slots()[accepted_index] = Slot {
                 occupied: true,
+                owner: listener.owner,
                 references: 1,
                 kind: listener.kind,
                 handle: None,
@@ -1166,6 +1180,7 @@ pub(crate) fn accept(slot: u8) -> Result<(u8, IpEndpoint), Error> {
     unsafe {
         socket_slots()[accepted_index] = Slot {
             occupied: true,
+            owner: listener.owner,
             references: 1,
             kind: Kind::Tcp,
             handle: Some(handle),
@@ -1222,18 +1237,6 @@ pub(crate) fn accept_blocking(slot: u8) -> Result<(u8, IpEndpoint), Error> {
             result => return result,
         }
     }
-}
-
-fn teardown() -> bool {
-    let Some(platform) = (unsafe { socket_platform() }) else {
-        return false;
-    };
-    let Some(runtime) = (unsafe { socket_runtime_state().take() }) else {
-        return false;
-    };
-    pci::quiesce_isolated_network(platform.device, platform.common)
-        && runtime._translation.finish()
-        && memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[runtime._dma])
 }
 
 pub(crate) fn connect(slot: u8, remote: IpEndpoint) -> Result<(), Error> {
