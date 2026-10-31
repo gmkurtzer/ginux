@@ -40,6 +40,10 @@ context and verifies stale handles remain rejected.
 - `make test-rocky-smp-thread-context` passed nine 2-vCPU/2-thread and nine
   4-vCPU/4-thread sysbench thread-yield samples. Every workload marker was zero;
   no user fault, panic, register mismatch, stale generation, or hang appeared.
+- A separate exact reproduction reran the original 4-vCPU/4-thread
+  `cpu memory threads` order for three batches and three runs per workload. All
+  nine CPU, nine memory, and nine thread markers were zero. The formerly
+  failing second batch completed without a fault or panic.
 - `make check` passed formatting, lint, unit, compatibility, writable-global,
   runtime-owner, synchronization, privilege-entry, user-access, and architecture
   checks.

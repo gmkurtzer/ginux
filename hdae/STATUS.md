@@ -11,7 +11,8 @@
   passed and awaiting checkpoint acceptance
 - Last completed action: exact cross-thread IRET restoration passed the
   deterministic 1/2/4-vCPU verification matrix, 18 live thread-yield samples,
-  full static checks, futex regression, and shared-page regression
+  the exact original 27-sample CPU/memory/thread sequence, full static checks,
+  futex regression, and shared-page regression
 - Next action: obtain human acceptance; only then close Gate 11.6 and resume
   Gate 11
 
@@ -43,6 +44,9 @@ is commit `5e3393e3`; its report and raw evidence locations are under
   test-rocky-smp-shared-page`, and `make test-rocky-smp-thread-context` passed.
   The last command completed nine samples at each of 2 and 4 vCPUs. No tested
   volume owner remained.
+- The exact original 4-vCPU/4-thread `cpu memory threads` sequence passed three
+  batches and 27 total workload markers, including the formerly failing second
+  batch.
 
 ## Limitations
 
