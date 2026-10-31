@@ -4,30 +4,54 @@
 
 - Active skill: `.agents/skills/hdae-development/SKILL.md`
 - Reload required after compaction, reset, resume, or handoff: yes
-- Active project: feedback-driven kernel hardening
-- Branch: `codex/feedback-hardening`
+- Active project: feedback-driven kernel hardening follow-up
+- Branch: `codex/performance-parity`
 - Baseline tag: `research-v1-baseline`
-- Active gate: none; Gate 11 passed and closed under delegated review
-- Last completed action: the complete matched 1/2/4-vCPU Linux/Ginux matrix
-  passed validation and its reduced tables and interpretation were published
-- Next action: stop at the completed batch boundary for human evaluation
+- Active gate: none; Gate 12 is accepted and closed
+- Last completed action: the human accepted the final matched matrix and full
+  qualification suite on October 30, 2026; every performance cell meets the
+  approved `0.96x` floor
+- Next action: publish `codex/performance-parity` and open the follow-up pull
+  request with the accepted performance table
 
 ## Current repository state
 
-Local and remote `main` identify commit `1852455`. The first ten
-feedback-hardening gates passed and closed under delegated review on
-`codex/feedback-hardening`; Gate 11 adds measurement-only qualification to the
-same branch and PR.
+Local and remote `main` identify merged PR #7 at commit `a2a1eace`. The first
+eleven feedback-hardening gates and inserted correctness gates are complete.
+Gate 12 is complete on `codex/performance-parity` for a separate follow-up PR.
 The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
 matrix and repeated stress pass. Gate 11's comparison and reduced evidence are
 under `docs/feedback-hardening/`. No push or merge was performed.
 
 ## Open decisions
 
-- None. The approved feedback-hardening batch and its follow-up measurement
-  gate are complete.
+- None. Gate 12 passed and was accepted at its required human checkpoint.
 
 ## Active diagnosis
+
+- Four-vCPU runtime work now dispatches independently to CPUs 1 through 3.
+  A targeted nine-sample four-thread run produced a 2,924 events/s median,
+  versus the matched Linux baseline of 1,254 events/s. The prior baseline was
+  0.014x Linux.
+- Coordinated fast futex waits and arbitrary-count wakes preserve an atomic
+  wait-publication/wake boundary. Armed interval timers no longer disable safe
+  fast syscalls before a signal is actually pending.
+- Profiling found that glibc issued about 699,000 valid
+  `FUTEX_WAIT_BITSET|FUTEX_CLOCK_REALTIME` calls during a four-thread memory
+  sample. Ginux had returned `EINVAL` for every call. Full bitset operation,
+  mask, and absolute-timeout handling now preserves Linux semantics; the
+  coordinator uses Linux-permitted spurious wakeups while remote workers run.
+- A focused three-sample four-vCPU run produced medians of 2,540 MiB/s for
+  memory and 1.061 seconds for mutex, versus matched Linux medians of 2,496
+  MiB/s and 1.096 seconds. Thread yield remained above the Linux baseline.
+- The final exact-code matrix contains nine matched samples per cell. Every
+  cell reaches at least `0.970x`; eighteen of twenty unique cells beat Linux.
+  Fixed 2-vCPU CPU throughput is `0.982x`, and scaled 4-vCPU mutex is `0.970x`.
+- `make check`, `make architecture-check`, `make test-smp`, `make
+  test-rocky-smp-futex`, `make test-rocky-smp-shared-page`, and `make
+  test-rocky-smp-thread-context` pass.
+
+## Prior correctness diagnosis
 
 - Fault diagnostics proved the saved thread slot retained the valid shared
   counter in `r11`, while a syscall-based switch resumed it with RFLAGS in

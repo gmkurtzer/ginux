@@ -1822,6 +1822,8 @@ static X86_RUNTIME_BACKING_LINUX_THREAD_WAIT_DEADLINES: [BankedAtomicU64; LINUX_
     [const { BankedAtomicU64::new(0) }; LINUX_THREAD_LIMIT];
 static X86_RUNTIME_BACKING_LINUX_THREAD_WAIT_PRIOR_SIGNAL_MASKS: [BankedAtomicU64;
     LINUX_THREAD_LIMIT] = [const { BankedAtomicU64::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_FUTEX_COORDINATION: crate::sync::SpinLock<()> =
+    crate::sync::SpinLock::new(crate::sync::LockRank::FUTEX_COORDINATION, ());
 static X86_RUNTIME_BACKING_LINUX_THREAD_POLL_DESCRIPTORS: [[BankedAtomicU32; LINUX_POLLFD_LIMIT];
     LINUX_THREAD_LIMIT] =
     [const { [const { BankedAtomicU32::new(0) }; LINUX_POLLFD_LIMIT] }; LINUX_THREAD_LIMIT];
@@ -6771,6 +6773,11 @@ fn wake_linux_futex(address: u64, limit: u32) -> u32 {
 }
 
 fn wake_linux_futex_masked(address: u64, mask: u32, limit: u32) -> u32 {
+    let _coordination = LINUX_FUTEX_COORDINATION.lock();
+    wake_linux_futex_masked_locked(address, mask, limit)
+}
+
+fn wake_linux_futex_masked_locked(address: u64, mask: u32, limit: u32) -> u32 {
     if address == 0 || limit == 0 {
         return 0;
     }
@@ -11529,6 +11536,36 @@ fn write_linux_boot_profile() {
     }
 }
 
+fn reset_linux_boot_profile() {
+    if !cfg!(feature = "linux-boot-profile") {
+        return;
+    }
+    for count in &X86_RUNTIME.LINUX_BOOT_PROFILE_SYSCALL_COUNTS {
+        count.store(0, Ordering::Relaxed);
+    }
+    for ticks in &X86_RUNTIME.LINUX_BOOT_PROFILE_SYSCALL_TICKS {
+        ticks.store(0, Ordering::Relaxed);
+    }
+    X86_RUNTIME
+        .LINUX_BOOT_PROFILE_SAVE_COUNT
+        .store(0, Ordering::Relaxed);
+    X86_RUNTIME
+        .LINUX_BOOT_PROFILE_SAVE_TICKS
+        .store(0, Ordering::Relaxed);
+    X86_RUNTIME
+        .LINUX_BOOT_PROFILE_RESTORE_COUNT
+        .store(0, Ordering::Relaxed);
+    X86_RUNTIME
+        .LINUX_BOOT_PROFILE_RESTORE_TICKS
+        .store(0, Ordering::Relaxed);
+    for count in &X86_RUNTIME.LINUX_BOOT_PROFILE_LIFECYCLE_COUNTS {
+        count.store(0, Ordering::Relaxed);
+    }
+    for ticks in &X86_RUNTIME.LINUX_BOOT_PROFILE_LIFECYCLE_TICKS {
+        ticks.store(0, Ordering::Relaxed);
+    }
+}
+
 fn linux_boot_profile_lifecycle_phase(index: usize, started: Option<u64>) {
     if let Some(started) = started {
         X86_RUNTIME.LINUX_BOOT_PROFILE_LIFECYCLE_COUNTS[index].fetch_add(1, Ordering::Relaxed);
@@ -12066,6 +12103,16 @@ fn linux_exit_child_to_parent(output: *mut LinuxSyscallFrame) -> u64 {
     let clear_child_tid = current_linux_clear_child_tid().unwrap_or(0);
     let robust_list = current_linux_robust_list().unwrap_or(0);
     let tid = current_linux_tid().unwrap_or(0);
+    if cfg!(feature = "linux-boot-profile") {
+        serial_write("ginux: profile child-exit pid/tid: ");
+        serial_write_u64(u64::from(current_linux_process_pid()));
+        serial_write("/");
+        serial_write_u64(u64::from(tid));
+        serial_write("\r\n");
+        write_linux_futex_profile();
+        write_linux_boot_profile();
+        reset_linux_boot_profile();
+    }
     if clear_child_tid != 0 {
         let _ = copy_to_linux_user(clear_child_tid, &0_u32.to_ne_bytes());
     }

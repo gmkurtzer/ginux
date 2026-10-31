@@ -11,6 +11,9 @@ The published initial experiment remains identified by the
 `codex/feedback-hardening`; the initial ten-gate batch used delegated closure
 after complete fresh evidence. Follow-up topology measurement and its inserted
 correctness gates retain explicit review policies in their gate records.
+Gate 12 is a separate follow-up experiment on `codex/performance-parity`: it
+tests whether profiling-guided implementation work can bring every matched UP
+and SMP userspace benchmark to Linux parity without weakening correctness.
 
 ## Intended outcome
 
@@ -38,6 +41,11 @@ the SMP gate passes, ordinary QEMU regression commands default to two virtual
 CPUs, while dedicated topology qualification continues to cover one, two, and
 four virtual CPUs.
 
+Gate 12 covers CPU, memory, thread-yield, and mutex performance at fixed one-
+thread and scaled one-, two-, and four-vCPU topologies. Its target is to beat
+the matched Rocky-on-Linux median in every cell; passage requires every
+favorable-direction ratio to reach at least 0.96x.
+
 ## Non-goals
 
 - Do not rewrite history or alter the published baseline tag.
@@ -49,6 +57,8 @@ four virtual CPUs.
   obscures their evidence.
 - Do not weaken existing Linux ABI, Rocky boot, domain, storage, or performance
   gates to make a hardening gate pass.
+- Do not special-case sysbench, change the workload, or give Linux and Ginux
+  different benchmark resources to make the performance gate pass.
 
 ## Human direction
 
