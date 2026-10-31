@@ -14,6 +14,16 @@
 - Pull request: one pull request from `codex/feedback-hardening` to `main` for
   the entire secondary experiment; verify its remote status before Gate 1 work
 
+Gate 12 is a separate follow-up delivery:
+
+- Working branch: `codex/performance-parity`
+- Intended base: merged `main` containing PR #7
+- Review policy: autonomous iteration inside the approved gate, followed by a
+  human checkpoint after all objective criteria pass
+- Pull request: a new follow-up PR, not PR #7
+- Commit policy: signed, coherent profiling, mechanism, regression, and final
+  evidence commits
+
 ## Gate sequence
 
 | Gate | Purpose | Depends on |
@@ -31,10 +41,17 @@
 | 11 | Measure matched 1/2/4-vCPU Linux and Ginux topologies | 10 |
 | 11.5 | Correct shared writable Linux pages across runtime CPUs | Gate 11 fault reproduction |
 | 11.6 | Preserve exact Linux thread context across SMP returns | Gate 11 fault reproduction |
+| 12 | Reach matched UP and SMP performance parity | 11, 11.5, 11.6 |
 
 Gate 11 paused twice when measurement exposed correctness failures. Gates 11.5
 and 11.6 corrected those failures and retained regressions before the scaled
 matrix resumed.
+
+Gate 12 uses the completed Gate 11 matrix as its historical baseline, collects
+fresh paired measurements, profiles the largest costs, and iterates on general
+kernel mechanisms until every fixed and scaled sysbench cell reaches at least
+0.96x matched Linux performance. The target remains greater than 1.00x in every
+cell.
 
 Each gate's approved scope, evidence, acceptance criteria, planned commits, and
 stopping point live in its file under `gates-todo/`. Completed gates move to

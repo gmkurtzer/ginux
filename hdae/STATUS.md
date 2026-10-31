@@ -4,28 +4,30 @@
 
 - Active skill: `.agents/skills/hdae-development/SKILL.md`
 - Reload required after compaction, reset, resume, or handoff: yes
-- Active project: feedback-driven kernel hardening
-- Branch: `codex/feedback-hardening`
+- Active project: profiling-guided UP and SMP performance parity
+- Branch: `codex/performance-parity`
 - Baseline tag: `research-v1-baseline`
-- Active gate: none; Gate 11 passed and closed under delegated review
-- Last completed action: the complete matched 1/2/4-vCPU Linux/Ginux matrix
-  passed validation and its reduced tables and interpretation were published
-- Next action: stop at the completed batch boundary for human evaluation
+- Active gate: Gate 12, approved and open
+- Last completed action: PR #7 merged into `main`; a clean follow-up branch was
+  created and the Gate 12 scope and acceptance boundary were approved
+- Next action: reproduce the merged baseline, add bounded profiling, and
+  attribute the largest scheduler, futex, context-switch, timer, IPI, or memory
+  costs before optimizing them
 
 ## Current repository state
 
-Local and remote `main` identify commit `1852455`. The first ten
-feedback-hardening gates passed and closed under delegated review on
-`codex/feedback-hardening`; Gate 11 adds measurement-only qualification to the
-same branch and PR.
+Local and remote `main` identify merged PR #7 at commit `a2a1eace`. The first
+eleven feedback-hardening gates and inserted correctness gates are complete.
+Gate 12 is isolated on `codex/performance-parity` for a separate follow-up PR.
 The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
 matrix and repeated stress pass. Gate 11's comparison and reduced evidence are
 under `docs/feedback-hardening/`. No push or merge was performed.
 
 ## Open decisions
 
-- None. The approved feedback-hardening batch and its follow-up measurement
-  gate are complete.
+- None. The human approved autonomous Gate 12 iteration with a final review
+  checkpoint. Stop early only for a major architecture choice, benchmark or
+  correctness weakening, scope expansion, or a disproportional dead end.
 
 ## Active diagnosis
 

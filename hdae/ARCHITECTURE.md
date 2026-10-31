@@ -26,6 +26,10 @@ the repository's `docs/` design records.
 7. **SMP as normal operation.** Ginux must operate with one, two, and four
    processors. Once the SMP gate passes, two processors become the default for
    ordinary QEMU tests so concurrency remains exercised continuously.
+8. **Honest performance parity.** Performance work optimizes general kernel
+   mechanisms. Linux and Ginux use the same benchmark binary, workload,
+   machine model, CPU model, memory, duration, topology, and sample count;
+   benchmark-specific shortcuts are prohibited.
 
 ## Current evidence anchors
 
