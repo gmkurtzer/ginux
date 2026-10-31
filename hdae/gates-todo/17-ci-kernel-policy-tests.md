@@ -67,11 +67,15 @@ pure kernel policy behind a host-testable boundary.
   its 10 ms APIC deadline on a loaded runner. The helper window is now one
   second of guest TSC time so the test still proves timer preemption without
   depending on host scheduling latency.
+- Run `41179498965` passed static checks but later failed a separate native
+  volume recovery invariant under x86 QEMU cross-emulated on the macOS arm64
+  runner. The QEMU job now uses GitHub's `macos-15-intel` runner so the x86-64
+  guest is not cross-architecture translated.
 
 ## Decisions and limitations
 
 - The workflow uses read-only repository permissions. Final-head confirmation
-  is pending after hardening the packet-timeout test window.
+  is pending on the x86-64 macOS runner.
 - The user explicitly directed the corrective work into existing pull request
   #9, overriding the default one-gate-per-PR delivery split.
 

@@ -8,11 +8,11 @@
 - Branch: `codex/issue-5-criticism-reconciliation`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gates 14 through 18, corrective implementation for issue #5
-- Last completed action: final-head CI run `41179187159` reproduced a timing
-  race in the packet-wait timeout self-test after the prior code-bearing run
-  had passed; the non-cooperative helper window is now robust to loaded hosts
-- Next action: run the complete local QEMU boot, then commit, push, and confirm
-  both CI jobs on the corrected pull-request head
+- Last completed action: run `41179498965` passed static checks but exposed a
+  separate timing-sensitive native-volume failure under x86 QEMU on a macOS
+  arm64 runner; the QEMU job is now pinned to `macos-15-intel`
+- Next action: commit and push the runner correction, then confirm both CI jobs
+  on the x86-64 pull-request runner
 
 ## Current repository state
 

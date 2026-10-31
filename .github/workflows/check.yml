@@ -19,7 +19,7 @@ jobs:
       - run: make check
 
   qemu:
-    runs-on: macos-15
+    runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v5
       - run: brew install qemu
