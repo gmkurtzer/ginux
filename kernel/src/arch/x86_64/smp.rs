@@ -71,10 +71,12 @@ static LINUX_PROCESS_JOBS: SpinLock<[Option<LinuxProcessJob>; CPU_LIMIT]> =
     SpinLock::new(LockRank::ARCHITECTURE, [None; CPU_LIMIT]);
 static LINUX_PROCESS_RESULTS: [AtomicU16; CPU_LIMIT] =
     [const { AtomicU16::new(LINUX_RESULT_FAILED) }; CPU_LIMIT];
-static LINUX_RUNTIME_THREAD_JOB: SpinLock<Option<LinuxRuntimeThreadJob>> =
-    SpinLock::new(LockRank::CROSS_CPU_DISPATCH, None);
-static LINUX_RUNTIME_THREAD_ACTIVE: AtomicBool = AtomicBool::new(false);
-static LINUX_RUNTIME_THREAD_SLOT: AtomicU8 = AtomicU8::new(u8::MAX);
+static LINUX_RUNTIME_THREAD_JOBS: SpinLock<[Option<LinuxRuntimeThreadJob>; CPU_LIMIT]> =
+    SpinLock::new(LockRank::CROSS_CPU_DISPATCH, [const { None }; CPU_LIMIT]);
+static LINUX_RUNTIME_THREAD_ACTIVE: [AtomicBool; CPU_LIMIT] =
+    [const { AtomicBool::new(false) }; CPU_LIMIT];
+static LINUX_RUNTIME_THREAD_SLOTS: [AtomicU8; CPU_LIMIT] =
+    [const { AtomicU8::new(u8::MAX) }; CPU_LIMIT];
 pub(super) static TLB_SHOOTDOWN_ADDRESS: AtomicU64 = AtomicU64::new(0);
 pub(super) static TLB_SHOOTDOWN_ACKNOWLEDGED: AtomicU32 = AtomicU32::new(0);
 
@@ -309,14 +311,18 @@ pub(crate) fn begin_linux_runtime_thread(
     general: [u64; 15],
     rflags: u64,
 ) -> bool {
-    if online_count() < 2
-        || LINUX_RUNTIME_THREAD_ACTIVE
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .is_err()
-    {
+    let count = online_count();
+    if count < 2 {
         return false;
     }
-    *LINUX_RUNTIME_THREAD_JOB.lock() = Some(LinuxRuntimeThreadJob {
+    let Some(cpu) = (1..count).find(|cpu| {
+        LINUX_RUNTIME_THREAD_ACTIVE[*cpu]
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+    }) else {
+        return false;
+    };
+    LINUX_RUNTIME_THREAD_JOBS.lock()[cpu] = Some(LinuxRuntimeThreadJob {
         root,
         slot,
         generation,
@@ -327,25 +333,34 @@ pub(crate) fn begin_linux_runtime_thread(
         general,
         rflags,
     });
-    LINUX_RUNTIME_THREAD_SLOT.store(slot, Ordering::Release);
-    if dispatch(1, COMMAND_LINUX_RUNTIME_THREAD, 0).is_none() {
-        *LINUX_RUNTIME_THREAD_JOB.lock() = None;
-        LINUX_RUNTIME_THREAD_SLOT.store(u8::MAX, Ordering::Release);
-        LINUX_RUNTIME_THREAD_ACTIVE.store(false, Ordering::Release);
+    LINUX_RUNTIME_THREAD_SLOTS[cpu].store(slot, Ordering::Release);
+    if dispatch(cpu, COMMAND_LINUX_RUNTIME_THREAD, 0).is_none() {
+        LINUX_RUNTIME_THREAD_JOBS.lock()[cpu] = None;
+        LINUX_RUNTIME_THREAD_SLOTS[cpu].store(u8::MAX, Ordering::Release);
+        LINUX_RUNTIME_THREAD_ACTIVE[cpu].store(false, Ordering::Release);
         return false;
     }
     true
 }
 
 pub(crate) fn linux_runtime_thread_is_remote(slot: usize) -> bool {
-    linux_runtime_thread_slot() == Some(slot)
+    (1..online_count()).any(|cpu| {
+        LINUX_RUNTIME_THREAD_ACTIVE[cpu].load(Ordering::Acquire)
+            && usize::from(LINUX_RUNTIME_THREAD_SLOTS[cpu].load(Ordering::Acquire)) == slot
+    })
 }
 
 pub(crate) fn linux_runtime_thread_slot() -> Option<usize> {
-    if !LINUX_RUNTIME_THREAD_ACTIVE.load(Ordering::Acquire) {
+    let current = cpu::current_cpu_index();
+    let cpu = if current == 0 {
+        (1..online_count()).find(|cpu| LINUX_RUNTIME_THREAD_ACTIVE[*cpu].load(Ordering::Acquire))?
+    } else {
+        current
+    };
+    if cpu >= online_count() || !LINUX_RUNTIME_THREAD_ACTIVE[cpu].load(Ordering::Acquire) {
         return None;
     }
-    let slot = usize::from(LINUX_RUNTIME_THREAD_SLOT.load(Ordering::Acquire));
+    let slot = usize::from(LINUX_RUNTIME_THREAD_SLOTS[cpu].load(Ordering::Acquire));
     (slot != usize::from(u8::MAX)).then_some(slot)
 }
 
@@ -572,7 +587,7 @@ extern "sysv64" fn interprocessor_interrupt_handler() {
             IPI_ARGUMENT[cpu].store(u64::from(result), Ordering::Release);
         }
         COMMAND_LINUX_RUNTIME_THREAD => {
-            let job = LINUX_RUNTIME_THREAD_JOB.lock().take();
+            let job = LINUX_RUNTIME_THREAD_JOBS.lock()[cpu].take();
             let result = job.is_some_and(|job| {
                 cpu::begin_dispatched_linux_runtime_thread(
                     job.root,
@@ -587,8 +602,8 @@ extern "sysv64" fn interprocessor_interrupt_handler() {
                 )
             });
             IPI_ARGUMENT[cpu].store(u64::from(result), Ordering::Release);
-            LINUX_RUNTIME_THREAD_SLOT.store(u8::MAX, Ordering::Release);
-            LINUX_RUNTIME_THREAD_ACTIVE.store(false, Ordering::Release);
+            LINUX_RUNTIME_THREAD_SLOTS[cpu].store(u8::MAX, Ordering::Release);
+            LINUX_RUNTIME_THREAD_ACTIVE[cpu].store(false, Ordering::Release);
         }
         _ => {}
     }

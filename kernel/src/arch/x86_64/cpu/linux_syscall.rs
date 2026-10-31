@@ -24,10 +24,6 @@ pub(super) extern "sysv64" fn linux_syscall_handler(
             .load(Ordering::Acquire)
             == 0
         && current_container_slot().is_some_and(|slot| !crate::linux_signal::any_pending(slot))
-        && X86_RUNTIME
-            .ELF_PROBE_REAL_TIMER_DEADLINE
-            .load(Ordering::Acquire)
-            == 0
         && !X86_RUNTIME
             .LINUX_RUNTIME_BACKGROUND_YIELD_REQUESTED
             .load(Ordering::Acquire);
@@ -37,19 +33,23 @@ pub(super) extern "sysv64" fn linux_syscall_handler(
     if number == LINUX_SCHED_YIELD_SYSCALL
         && fast_runtime_syscall
         && current_linux_runtime_cpu_index() != 0
-        && linux_runtime_thread_count_within(2)
-        && current_linux_thread_slot()
-            == crate::arch::x86_64::smp::linux_runtime_thread_slot()
+        && current_linux_thread_slot() == crate::arch::x86_64::smp::linux_runtime_thread_slot()
     {
         return 0;
+    }
+    if number == LINUX_FUTEX_SYSCALL && fast_runtime_syscall {
+        let register = |index: usize| saved_registers.argument(index).unwrap_or(0);
+        if let Some(result) =
+            linux_remote_futex_wait_fast(register(5), register(4), register(3), register(0))
+        {
+            return result;
+        }
     }
     // Linux normally satisfies supported wall and monotonic clocks through
     // vDSO. Retain a guarded fast syscall fallback for CPU-time clocks and
     // callers that deliberately issue SYSCALL. The result copy still validates
     // the destination leaf permissions.
-    if number == LINUX_CLOCK_GETTIME_SYSCALL
-        && fast_runtime_syscall
-    {
+    if number == LINUX_CLOCK_GETTIME_SYSCALL && fast_runtime_syscall {
         return linux_clock_gettime(saved_registers.rdi, saved_registers.rsi);
     }
     let _kernel_entry = crate::sync::kernel_entry_lock();

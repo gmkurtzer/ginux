@@ -8,12 +8,11 @@
 - Branch: `codex/performance-parity`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 12, approved and open
-- Last completed action: a fresh complete matched baseline and fixed 2-vCPU
-  thread-yield profile identified the successful-spurious-futex-wake loop and
-  single-remote-worker limit as the dominant scheduler costs
-- Next action: replace the CPU 0 spurious-wake loop with a real kernel wait and
-  generalize remote runtime-thread dispatch across all online application CPUs,
-  then rerun targeted cells before the complete matrix
+- Last completed action: generalized Linux runtime-thread dispatch across all
+  online application CPUs and added coordinated futex fast paths; the focused
+  futex, shared-page, and exact-thread-context SMP regressions pass
+- Next action: profile and optimize the remaining scaled mutex and memory gaps,
+  then rerun the fixed and scaled targeted cells before the complete matrix
 
 ## Current repository state
 
@@ -31,6 +30,22 @@ under `docs/feedback-hardening/`. No push or merge was performed.
   correctness weakening, scope expansion, or a disproportional dead end.
 
 ## Active diagnosis
+
+- Four-vCPU runtime work now dispatches independently to CPUs 1 through 3.
+  A targeted nine-sample four-thread run produced a 2,924 events/s median,
+  versus the matched Linux baseline of 1,254 events/s. The prior baseline was
+  0.014x Linux.
+- Coordinated fast futex waits and arbitrary-count wakes preserve an atomic
+  wait-publication/wake boundary. Armed interval timers no longer disable safe
+  fast syscalls before a signal is actually pending.
+- The scaled four-vCPU mutex median remains about 1.46 seconds versus Linux at
+  1.096 seconds, below the 0.96x floor. Profiling attributes the remaining work
+  to high-frequency futex coordination rather than the former single-worker
+  dispatch limit.
+- `make test-rocky-smp-futex`, `make test-rocky-smp-shared-page`, and `make
+  test-rocky-smp-thread-context` pass with the new mechanisms.
+
+## Prior correctness diagnosis
 
 - Fault diagnostics proved the saved thread slot retained the valid shared
   counter in `r11`, while a syscall-based switch resumed it with RFLAGS in

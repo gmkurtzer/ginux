@@ -37,6 +37,10 @@ percent of Linux is acceptable; the target is faster than Linux in every cell.
   strategy with the human.
 - [x] Reproduce and preserve a fresh complete baseline.
 - [x] Add bounded child-exit profiling and attribute the first dominant costs.
+- [x] Generalize remote Linux runtime-thread dispatch across every online
+  application CPU.
+- [x] Add coordinated futex wait/wake fast paths and preserve prior SMP
+  correctness regressions.
 
 ## Remaining work
 
@@ -95,6 +99,11 @@ percent of Linux is acceptable; the target is faster than Linux in every cell.
   successful-spurious-wake path explains the extra futex loop.
 - Source inspection confirmed only one remote Linux runtime-thread job exists
   and it is always dispatched to CPU 1, matching the 4-vCPU scaling collapse.
+- A targeted nine-sample 4-vCPU/4-thread run reached a 2,924 events/s median,
+  2.33x the matched Linux median of 1,254 events/s. The focused futex,
+  shared-page, and exact-thread-context SMP regression commands all pass.
+- The targeted 4-vCPU/4-thread mutex median remains about 1.46 seconds versus
+  Linux at 1.096 seconds, so the gate remains open.
 
 ## Decisions and limitations
 

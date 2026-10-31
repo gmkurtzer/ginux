@@ -3127,6 +3127,17 @@ pub(crate) fn copy_to_current_user_partial(address: u64, input: &[u8]) -> usize 
     input.len().saturating_sub(remaining)
 }
 
+/// Copy a small value from an already materialized Linux userspace mapping.
+/// The active kernel-owned page tables remain authoritative: every covered
+/// leaf must be present and userspace-accessible, and the fault-recovering raw
+/// copy still converts a concurrent mapping fault into failure.
+pub(crate) fn copy_from_current_linux_user_fast(address: u64, output: &mut [u8]) -> bool {
+    if !current_linux_range_mapped(address, output.len(), false) {
+        return false;
+    }
+    unsafe { cpu::raw_copy_from_user(output.as_mut_ptr(), address as *const u8, output.len()) == 0 }
+}
+
 /// Copy a small result into the active Linux address space without repeating
 /// ownership validation for every page-table level. The kernel creates and
 /// exclusively owns Linux page tables, validates the root before entering

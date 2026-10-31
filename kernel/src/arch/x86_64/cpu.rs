@@ -1822,6 +1822,8 @@ static X86_RUNTIME_BACKING_LINUX_THREAD_WAIT_DEADLINES: [BankedAtomicU64; LINUX_
     [const { BankedAtomicU64::new(0) }; LINUX_THREAD_LIMIT];
 static X86_RUNTIME_BACKING_LINUX_THREAD_WAIT_PRIOR_SIGNAL_MASKS: [BankedAtomicU64;
     LINUX_THREAD_LIMIT] = [const { BankedAtomicU64::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_FUTEX_COORDINATION: crate::sync::SpinLock<()> =
+    crate::sync::SpinLock::new(crate::sync::LockRank::FUTEX_COORDINATION, ());
 static X86_RUNTIME_BACKING_LINUX_THREAD_POLL_DESCRIPTORS: [[BankedAtomicU32; LINUX_POLLFD_LIMIT];
     LINUX_THREAD_LIMIT] =
     [const { [const { BankedAtomicU32::new(0) }; LINUX_POLLFD_LIMIT] }; LINUX_THREAD_LIMIT];
@@ -6610,19 +6612,6 @@ fn current_linux_thread_slot() -> Option<usize> {
         .then_some(slot)
 }
 
-fn linux_runtime_thread_count_within(limit: usize) -> bool {
-    let mut count = 0;
-    for state in &X86_RUNTIME.LINUX_THREAD_STATES {
-        if state.load(Ordering::Acquire) != LINUX_THREAD_FREE {
-            count += 1;
-            if count > limit {
-                return false;
-            }
-        }
-    }
-    true
-}
-
 fn store_current_linux_signal_mask(mask: u64) {
     X86_RUNTIME
         .ELF_PROBE_SIGNAL_MASK
@@ -6784,6 +6773,11 @@ fn wake_linux_futex(address: u64, limit: u32) -> u32 {
 }
 
 fn wake_linux_futex_masked(address: u64, mask: u32, limit: u32) -> u32 {
+    let _coordination = LINUX_FUTEX_COORDINATION.lock();
+    wake_linux_futex_masked_locked(address, mask, limit)
+}
+
+fn wake_linux_futex_masked_locked(address: u64, mask: u32, limit: u32) -> u32 {
     if address == 0 || limit == 0 {
         return 0;
     }

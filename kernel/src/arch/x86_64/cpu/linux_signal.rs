@@ -909,6 +909,29 @@ pub(crate) fn expire_linux_waits_from_timer(frame: &mut UserInterruptFrame) {
             .unwrap_or(name.len());
         crate::serial_write_bytes(&name[..length]);
         serial_write("\r\n");
+        for slot in 0..LINUX_THREAD_LIMIT {
+            let state = X86_RUNTIME.LINUX_THREAD_STATES[slot].load(Ordering::Acquire);
+            if state == LINUX_THREAD_FREE {
+                continue;
+            }
+            serial_write("ginux: Linux stalled thread slot/tid/state/wait/remote: ");
+            serial_write_u64(slot as u64);
+            serial_write("/");
+            serial_write_u64(u64::from(
+                X86_RUNTIME.LINUX_THREAD_TIDS[slot].load(Ordering::Acquire),
+            ));
+            serial_write("/");
+            serial_write_u64(u64::from(state));
+            serial_write("/");
+            serial_write_u64(u64::from(
+                X86_RUNTIME.LINUX_THREAD_WAIT_KINDS[slot].load(Ordering::Acquire),
+            ));
+            serial_write("/");
+            serial_write_u64(u64::from(
+                crate::arch::x86_64::smp::linux_runtime_thread_is_remote(slot),
+            ));
+            serial_write("\r\n");
+        }
         write_linux_runtime_syscall_trace();
     }
     let descriptor_wakes = wake_linux_descriptor_waits();
