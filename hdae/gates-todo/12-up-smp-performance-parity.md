@@ -46,11 +46,11 @@ percent of Linux is acceptable; the target is faster than Linux in every cell.
 
 ## Remaining work
 
-- [ ] Optimize measured general kernel mechanisms.
-- [ ] Add regression coverage for changed mechanisms.
-- [ ] Re-run targeted cells until stable.
-- [ ] Run and validate the complete matched matrix.
-- [ ] Publish final evidence and stop for human review.
+- [x] Optimize measured general kernel mechanisms.
+- [x] Add regression coverage for changed mechanisms.
+- [x] Re-run targeted cells until stable.
+- [x] Run and validate the complete matched matrix.
+- [x] Publish final evidence and stop for human review.
 
 ## Acceptance criteria
 
@@ -111,15 +111,25 @@ percent of Linux is acceptable; the target is faster than Linux in every cell.
 - A focused three-sample 4-vCPU/4-thread run after the correction reached a
   2,540 MiB/s memory median and 1.061-second mutex median, versus matched Linux
   medians of 2,496 MiB/s and 1.096 seconds. Thread yield also remained above
-  Linux. The complete matrix is still required before passage.
-- `make check`, `make test-rocky-smp-futex`, `make
-  test-rocky-smp-shared-page`, and `make test-rocky-smp-thread-context` pass.
+  Linux.
+- The final matrix contains nine matched Linux and Ginux samples in every cell.
+  Every favorable-direction ratio is at least `0.970x`; eighteen of twenty
+  unique cells beat Linux. Fixed 2-vCPU CPU throughput is `0.982x`, and scaled
+  4-vCPU mutex is `0.970x`.
+- Final reduced evidence is committed under
+  `docs/feedback-hardening/gate-12-results/`; interpretation and before/after
+  attribution are in `docs/feedback-hardening/GATE-12-PERFORMANCE-PARITY.md`.
+- `make check`, `make architecture-check`, `make test-smp`, `make
+  test-rocky-smp-futex`, `make test-rocky-smp-shared-page`, and `make
+  test-rocky-smp-thread-context` pass on the final code.
 
 ## Decisions and limitations
 
 - Passage uses a 0.96x floor because the human defined two-to-four percent as
-  acceptable. Optimization continues toward greater than 1.00x while credible
-  in-scope improvements remain.
+  acceptable. The stronger greater-than-1.00x target was reached in eighteen
+  of twenty unique cells; further work on the two accepted cells was stopped
+  after profiling and a bounded fast-path iteration produced no additional
+  movement.
 - Boot remains observational because the compared startup paths differ.
 - The agent may iterate autonomously but must stop for a major architecture
   decision, benchmark or correctness weakening, material scope expansion, or a
@@ -132,10 +142,10 @@ percent of Linux is acceptable; the target is faster than Linux in every cell.
 - Pull request: new follow-up PR
 - Planned commits: gate and baseline; bounded profiling; one or more coherent
   mechanism optimizations with regressions; final matched evidence and closure
-- Actual commits: pending
+- Actual commits: `0804af92`, `4478f23c`, `e9acfb57`, `b2a91ac7`,
+  `91bbafea`, and the final fast-path/evidence commit containing this checkpoint
 
 ## Review policy and outcome
 
-Human checkpoint after all objective criteria pass. Autonomous implementation
-and verification inside the approved gate are authorized; the gate remains in
-`gates-todo/` until the human accepts it.
+All objective criteria passed. Human acceptance is now required; the gate
+remains in `gates-todo/` until that checkpoint is complete.

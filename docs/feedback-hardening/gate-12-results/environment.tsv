@@ -1,0 +1,6 @@
+field	value
+sysbench_sha256	7cf6b71521436bd32a8ab197851035ff1632bee383fec5a35468d61969e7c18d
+machine	q35
+memory	2G
+sysbench_samples_per_cell	9
+boot_samples_per_cell	3

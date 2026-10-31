@@ -8,11 +8,11 @@
 - Branch: `codex/performance-parity`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 12, approved and open
-- Last completed action: implemented Linux futex bitset operations and removed
-  the `FUTEX_WAIT_BITSET` retry storm; the focused four-vCPU memory, mutex, and
-  thread-yield cells now exceed the matched Linux medians
-- Next action: rerun the remaining fixed and scaled targeted cells, then collect
-  and validate the complete nine-sample matched matrix
+- Last completed action: completed the final matched matrix and full
+  qualification suite; every performance cell meets the approved `0.96x`
+  floor
+- Next action: stop at the Gate 12 human checkpoint for result review and gate
+  acceptance
 
 ## Current repository state
 
@@ -25,9 +25,8 @@ under `docs/feedback-hardening/`. No push or merge was performed.
 
 ## Open decisions
 
-- None. The human approved autonomous Gate 12 iteration with a final review
-  checkpoint. Stop early only for a major architecture choice, benchmark or
-  correctness weakening, scope expansion, or a disproportional dead end.
+- Gate 12 is technically passed and awaits the required human review checkpoint
+  before moving from `gates-todo/` to `gates-done/`.
 
 ## Active diagnosis
 
@@ -46,8 +45,12 @@ under `docs/feedback-hardening/`. No push or merge was performed.
 - A focused three-sample four-vCPU run produced medians of 2,540 MiB/s for
   memory and 1.061 seconds for mutex, versus matched Linux medians of 2,496
   MiB/s and 1.096 seconds. Thread yield remained above the Linux baseline.
-- `make check`, `make test-rocky-smp-futex`, `make
-  test-rocky-smp-shared-page`, and `make test-rocky-smp-thread-context` pass.
+- The final exact-code matrix contains nine matched samples per cell. Every
+  cell reaches at least `0.970x`; eighteen of twenty unique cells beat Linux.
+  Fixed 2-vCPU CPU throughput is `0.982x`, and scaled 4-vCPU mutex is `0.970x`.
+- `make check`, `make architecture-check`, `make test-smp`, `make
+  test-rocky-smp-futex`, `make test-rocky-smp-shared-page`, and `make
+  test-rocky-smp-thread-context` pass.
 
 ## Prior correctness diagnosis
 

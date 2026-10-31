@@ -46,7 +46,13 @@ pub(super) fn linux_remote_futex_wait_fast(
     operation: u64,
     value: u64,
     timeout: u64,
+    bitset: u64,
 ) -> Option<u64> {
+    const FUTEX_COMMAND_MASK: u64 = 0x7f;
+    const FUTEX_WAIT_BITSET: u64 = 9;
+    const FUTEX_PRIVATE_FLAG: u64 = 128;
+    const FUTEX_CLOCK_REALTIME: u64 = 256;
+
     profile_linux_futex_operation(operation);
     if !address.is_multiple_of(size_of::<u32>() as u64) {
         return None;
@@ -86,6 +92,52 @@ pub(super) fn linux_remote_futex_wait_fast(
             ));
         }
         return Some(u64::from(woken));
+    }
+    let command = operation & FUTEX_COMMAND_MASK;
+    let flags = operation & !FUTEX_COMMAND_MASK;
+    if command == FUTEX_WAIT_BITSET {
+        if flags & !(FUTEX_PRIVATE_FLAG | FUTEX_CLOCK_REALTIME) != 0
+            || bitset == 0
+            || bitset > u64::from(u32::MAX)
+        {
+            return Some(LINUX_EINVAL);
+        }
+        let mut bytes = [0_u8; size_of::<u32>()];
+        if !address_space::copy_from_current_linux_user_fast(address, &mut bytes) {
+            return None;
+        }
+        if u64::from(u32::from_ne_bytes(bytes)) != value {
+            return Some(LINUX_EAGAIN);
+        }
+        crate::arch::x86_64::smp::linux_runtime_thread_slot()?;
+        if timeout != 0 {
+            let mut timeout_bytes = [0_u8; 16];
+            if !address_space::copy_from_current_linux_user_fast(timeout, &mut timeout_bytes) {
+                return None;
+            }
+            let Some(requested) = linux_timespec_nanoseconds(&timeout_bytes) else {
+                return Some(LINUX_EINVAL);
+            };
+            let expired = if flags & FUTEX_CLOCK_REALTIME == 0 {
+                linux_elapsed_nanoseconds()? >= requested
+            } else {
+                let (seconds, nanoseconds) = linux_realtime_time()?;
+                let Some(realtime_now) = seconds
+                    .checked_mul(NANOSECONDS_PER_SECOND)
+                    .and_then(|seconds| seconds.checked_add(nanoseconds))
+                else {
+                    return Some(LINUX_EINVAL);
+                };
+                realtime_now >= requested
+            };
+            if expired {
+                return Some(LINUX_ETIMEDOUT);
+            }
+        }
+        // A remote application CPU can satisfy the predicate concurrently.
+        // Linux permits this wait to return spuriously, and returning directly
+        // preserves the coordinator's exact live syscall frame.
+        return Some(0);
     }
     if !matches!(operation, 0 | 128) || timeout != 0 {
         return None;
