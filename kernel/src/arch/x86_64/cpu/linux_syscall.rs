@@ -15,12 +15,7 @@ pub(super) extern "sysv64" fn linux_syscall_handler(
     // SAFETY: the assembly entry stub passes the aligned base of the exact
     // twelve-register frame represented by LinuxSyscallFrame.
     let saved_registers = unsafe { registers.read() };
-    // Linux normally satisfies supported wall and monotonic clocks through
-    // vDSO. Retain a guarded fast syscall fallback for CPU-time clocks and
-    // callers that deliberately issue SYSCALL. The result copy still validates
-    // the destination leaf permissions.
-    if number == LINUX_CLOCK_GETTIME_SYSCALL
-        && X86_RUNTIME.LINUX_RUNTIME_MODE.load(Ordering::Acquire)
+    let fast_runtime_syscall = X86_RUNTIME.LINUX_RUNTIME_MODE.load(Ordering::Acquire)
         && X86_RUNTIME.ELF_PROBE_ACTIVE.load(Ordering::Acquire)
         && !X86_RUNTIME.ELF_PROBE_SECCOMP_STRICT.load(Ordering::Acquire)
         && !X86_RUNTIME.LINUX_SIGNAL_ACTIVE.load(Ordering::Acquire)
@@ -35,7 +30,25 @@ pub(super) extern "sysv64" fn linux_syscall_handler(
             == 0
         && !X86_RUNTIME
             .LINUX_RUNTIME_BACKGROUND_YIELD_REQUESTED
-            .load(Ordering::Acquire)
+            .load(Ordering::Acquire);
+    // A remotely dispatched runtime thread owns its application CPU until it
+    // blocks or exits. With no pending asynchronous work, sched_yield() is only
+    // a hint and selecting that same thread again has no observable effect.
+    if number == LINUX_SCHED_YIELD_SYSCALL
+        && fast_runtime_syscall
+        && current_linux_runtime_cpu_index() != 0
+        && linux_runtime_thread_count_within(2)
+        && current_linux_thread_slot()
+            == crate::arch::x86_64::smp::linux_runtime_thread_slot()
+    {
+        return 0;
+    }
+    // Linux normally satisfies supported wall and monotonic clocks through
+    // vDSO. Retain a guarded fast syscall fallback for CPU-time clocks and
+    // callers that deliberately issue SYSCALL. The result copy still validates
+    // the destination leaf permissions.
+    if number == LINUX_CLOCK_GETTIME_SYSCALL
+        && fast_runtime_syscall
     {
         return linux_clock_gettime(saved_registers.rdi, saved_registers.rsi);
     }

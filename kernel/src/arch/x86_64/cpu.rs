@@ -6610,6 +6610,19 @@ fn current_linux_thread_slot() -> Option<usize> {
         .then_some(slot)
 }
 
+fn linux_runtime_thread_count_within(limit: usize) -> bool {
+    let mut count = 0;
+    for state in &X86_RUNTIME.LINUX_THREAD_STATES {
+        if state.load(Ordering::Acquire) != LINUX_THREAD_FREE {
+            count += 1;
+            if count > limit {
+                return false;
+            }
+        }
+    }
+    true
+}
+
 fn store_current_linux_signal_mask(mask: u64) {
     X86_RUNTIME
         .ELF_PROBE_SIGNAL_MASK
