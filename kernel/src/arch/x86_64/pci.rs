@@ -3440,8 +3440,10 @@ fn validate_network_queue_size(size: u16) -> Option<u16> {
 }
 
 pub(crate) fn verify_network_queue_rejections(initialization: VirtioNetworkInitialization) -> bool {
-    initialization.receive_queue_size == 256
-        && initialization.transmit_queue_size == 256
+    validate_network_queue_size(initialization.receive_queue_size)
+        == Some(initialization.receive_queue_size)
+        && validate_network_queue_size(initialization.transmit_queue_size)
+            == Some(initialization.transmit_queue_size)
         && initialization
             .transmit_notification
             .checked_sub(initialization.receive_notification)
@@ -3451,6 +3453,8 @@ pub(crate) fn verify_network_queue_rejections(initialization: VirtioNetworkIniti
         && validate_network_queue_size(QUEUE_SIZE) == Some(QUEUE_SIZE)
         && validate_network_queue_size(255).is_none()
         && validate_network_queue_size(256) == Some(256)
+        && validate_network_queue_size(1000).is_none()
+        && validate_network_queue_size(1024) == Some(1024)
         && notification_byte_offset(1, 4, 4).is_none()
         && notification_byte_offset(u16::MAX, u32::MAX, 4096).is_none()
 }
