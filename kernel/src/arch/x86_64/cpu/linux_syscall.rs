@@ -1459,7 +1459,7 @@ pub(super) extern "sysv64" fn linux_syscall_handler(
     };
     let result = if runtime_mode
         && result != LINUX_RETURN_TO_KERNEL
-        && result != LINUX_RETURN_FROM_SIGNAL
+        && result != LINUX_RETURN_FROM_IRET
         && number != LINUX_RT_SIGRETURN_SYSCALL
         && !X86_RUNTIME.LINUX_SIGNAL_ACTIVE.load(Ordering::SeqCst)
     {
@@ -1526,7 +1526,7 @@ pub(super) extern "sysv64" fn linux_syscall_handler(
     }
     if runtime_mode
         && result != LINUX_RETURN_TO_KERNEL
-        && result != LINUX_RETURN_FROM_SIGNAL
+        && result != LINUX_RETURN_FROM_IRET
         && !X86_RUNTIME.LINUX_SIGNAL_ACTIVE.load(Ordering::Acquire)
         && X86_RUNTIME
             .LINUX_RUNTIME_BACKGROUND_YIELD_REQUESTED

@@ -550,13 +550,13 @@ pub(super) fn linux_select_live_return(
         rax: target_rax,
         fs_base: active_fs_base(),
     };
-    if !write_linux_live_return(output, selected) {
+    if !write_linux_thread_live_return(output, target, selected) {
         return LINUX_EINVAL;
     }
     X86_RUNTIME
         .LINUX_LIVE_RETURN_VALIDATED
         .store(true, Ordering::SeqCst);
-    selected.rax
+    LINUX_RETURN_FROM_IRET
 }
 
 pub(super) fn linux_poll_live_return(
@@ -843,7 +843,7 @@ pub(super) fn linux_poll_wait_live_return(
         rax: target_rax,
         fs_base: active_fs_base(),
     };
-    if !write_linux_live_return(output, selected) {
+    if !write_linux_thread_live_return(output, target, selected) {
         return LINUX_EINVAL;
     }
     X86_RUNTIME
@@ -862,7 +862,7 @@ pub(super) fn linux_poll_wait_live_return(
                 .fetch_add(1, Ordering::SeqCst);
         }
     }
-    selected.rax
+    LINUX_RETURN_FROM_IRET
 }
 
 pub(super) fn linux_ppoll_live_return(

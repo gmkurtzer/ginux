@@ -112,7 +112,7 @@ pub(super) fn linux_futex_live_return(
                 rax: target_rax,
                 fs_base: active_fs_base(),
             };
-            if !write_linux_live_return(output, selected) {
+            if !write_linux_thread_live_return(output, target, selected) {
                 return LINUX_EINVAL;
             }
             X86_RUNTIME
@@ -121,7 +121,7 @@ pub(super) fn linux_futex_live_return(
             X86_RUNTIME
                 .LINUX_FUTEX_WAIT_BLOCK_COUNT
                 .fetch_add(1, Ordering::SeqCst);
-            selected.rax
+            LINUX_RETURN_FROM_IRET
         }
         1 | 129 => {
             let woken = wake_linux_futex(address, u32::try_from(value).unwrap_or(u32::MAX));
@@ -264,7 +264,7 @@ pub(super) fn linux_futex_wait_live_return(
         rax: target_rax,
         fs_base: active_fs_base(),
     };
-    if !write_linux_live_return(output, selected) {
+    if !write_linux_thread_live_return(output, target, selected) {
         return LINUX_EINVAL;
     }
     X86_RUNTIME
@@ -273,7 +273,7 @@ pub(super) fn linux_futex_wait_live_return(
     X86_RUNTIME
         .LINUX_FUTEX_WAIT_BLOCK_COUNT
         .fetch_add(1, Ordering::SeqCst);
-    selected.rax
+    LINUX_RETURN_FROM_IRET
 }
 
 #[allow(clippy::too_many_arguments)]

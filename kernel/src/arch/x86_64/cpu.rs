@@ -2750,8 +2750,8 @@ ginux_linux_syscall_entry:
 5:
     cmp rax, {linux_return_to_kernel}
     je ginux_user_return_kernel
-    cmp rax, {linux_return_from_signal}
-    je ginux_linux_signal_return
+    cmp rax, {linux_return_from_iret}
+    je ginux_linux_iret_return
     mov gs:[{entry_syscall_result}], rax
     mov rsp, gs:[{entry_kernel_frame}]
     pop r15
@@ -2791,7 +2791,7 @@ ginux_invalid_user_return:
     pop rbp
     pop rbx
     ret
-ginux_linux_signal_return:
+ginux_linux_iret_return:
     mov rsp, gs:[{entry_kernel_frame}]
     pop r15
     pop r14
@@ -2845,7 +2845,7 @@ ginux_user_return_kernel:
     tlb_shootdown_address = sym super::smp::TLB_SHOOTDOWN_ADDRESS,
     tlb_shootdown_acknowledged = sym super::smp::TLB_SHOOTDOWN_ACKNOWLEDGED,
     linux_return_to_kernel = const LINUX_RETURN_TO_KERNEL as i64,
-    linux_return_from_signal = const LINUX_RETURN_FROM_SIGNAL as i64,
+    linux_return_from_iret = const LINUX_RETURN_FROM_IRET as i64,
     user_data = const USER_DATA_SELECTOR as u64,
     user_code = const USER_CODE_SELECTOR as u64,
 );
@@ -6263,6 +6263,125 @@ fn linux_thread_return_context(handle: LinuxThreadHandle) -> Option<LinuxUserCon
     context.is_valid().then_some(context)
 }
 
+fn linux_thread_resume_general(
+    handle: LinuxThreadHandle,
+    context: LinuxUserContext,
+) -> Option<[u64; 15]> {
+    let slot = usize::from(handle.slot);
+    (linux_thread_context(handle).is_some() && linux_thread_return_context(handle) == Some(context))
+        .then(|| {
+            context.registers.process_general(
+                context.rax,
+                X86_RUNTIME.LINUX_THREAD_RCXS[slot].load(Ordering::SeqCst),
+                X86_RUNTIME.LINUX_THREAD_R11S[slot].load(Ordering::SeqCst),
+            )
+        })
+}
+
+fn verify_linux_thread_interrupt_resume_context(
+    handle: LinuxThreadHandle,
+    original: LinuxUserContext,
+) -> bool {
+    let interrupted = UserFaultContext {
+        r15: 0x1500_0000_0000_0015,
+        r14: 0x1400_0000_0000_0014,
+        r13: 0x1300_0000_0000_0013,
+        r12: 0x1200_0000_0000_0012,
+        r11: 0x1100_0000_0000_0011,
+        r10: 0x1000_0000_0000_0010,
+        r9: 0x0900_0000_0000_0009,
+        r8: 0x0800_0000_0000_0008,
+        rbp: 0xb000_0000_0000_000b,
+        rdi: 0xd000_0000_0000_000d,
+        rsi: 0x5000_0000_0000_0005,
+        rdx: 0xd200_0000_0000_0002,
+        rcx: 0xc000_0000_0000_000c,
+        rbx: 0xb100_0000_0000_0001,
+        rax: 0xa000_0000_0000_000a,
+        rip: original.rip,
+        rflags: original.rflags,
+        rsp: original.rsp,
+    };
+    let expected = [
+        interrupted.rax,
+        interrupted.rbx,
+        interrupted.rcx,
+        interrupted.rdx,
+        interrupted.rsi,
+        interrupted.rdi,
+        interrupted.rbp,
+        interrupted.r8,
+        interrupted.r9,
+        interrupted.r10,
+        interrupted.r11,
+        interrupted.r12,
+        interrupted.r13,
+        interrupted.r14,
+        interrupted.r15,
+    ];
+    let saved = save_linux_interrupt_context(handle, interrupted, original.fs_base);
+    let interrupted_context = linux_thread_return_context(handle);
+    // SAFETY: verification runs with serialized ownership of this CPU's entry
+    // state and restores the complete record before returning.
+    let saved_entry_state = unsafe { current_entry_state().read() };
+    let mut exact_frame = LinuxSyscallFrame::ZERO;
+    let exact_return_prepared = interrupted_context.is_some_and(|context| {
+        write_linux_thread_live_return(&mut exact_frame, handle, context)
+            && exact_frame == context.registers
+            && unsafe {
+                let entry_state = &*current_entry_state();
+                entry_state.user_rsp == context.rsp
+                    && entry_state.user_rip == context.rip
+                    && entry_state.user_rflags == context.rflags
+                    && entry_state.signal_rax == expected[0]
+                    && entry_state.signal_rcx == expected[2]
+                    && entry_state.signal_r11 == expected[10]
+            }
+    });
+    // SAFETY: restore the serialized per-CPU record captured above.
+    unsafe { current_entry_state().write(saved_entry_state) };
+    let exact = saved
+        && exact_return_prepared
+        && interrupted_context.is_some_and(|context| {
+            context.rip == original.rip
+                && context.rsp == original.rsp
+                && context.rflags == original.rflags
+                && context.fs_base == original.fs_base
+                && linux_thread_resume_general(handle, context) == Some(expected)
+        });
+    let restored = save_linux_interrupt_context(
+        handle,
+        UserFaultContext {
+            r15: original.registers.r15,
+            r14: original.registers.r14,
+            r13: original.registers.r13,
+            r12: original.registers.r12,
+            r11: original.rflags,
+            r10: original.registers.r10,
+            r9: original.registers.r9,
+            r8: original.registers.r8,
+            rbp: original.registers.rbp,
+            rdi: original.registers.rdi,
+            rsi: original.registers.rsi,
+            rdx: original.registers.rdx,
+            rcx: original.rip,
+            rbx: original.registers.rbx,
+            rax: original.rax,
+            rip: original.rip,
+            rflags: original.rflags,
+            rsp: original.rsp,
+        },
+        original.fs_base,
+    ) && linux_thread_return_context(handle) == Some(original)
+        && linux_thread_resume_general(handle, original)
+            == Some(original.registers.process_general(
+                original.rax,
+                original.rip,
+                original.rflags,
+            ));
+    exact && restored
+}
+
 fn save_linux_thread_return_context(handle: LinuxThreadHandle, context: LinuxUserContext) -> bool {
     let slot = usize::from(handle.slot);
     let Some(tls) = linux_thread_context(handle) else {
@@ -7635,6 +7754,8 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
                 PAGE_SIZE,
             )?;
             let selected = linux_thread_return_context(sibling_thread)?;
+            let interrupt_resume_context_valid =
+                verify_linux_thread_interrupt_resume_context(sibling_thread, selected);
             let mut installed_registers = LinuxSyscallFrame::ZERO;
             let mut installed_rip = 0;
             let mut installed_rsp = 0;
@@ -7671,6 +7792,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
                 || clone.child.fs_base != execution.sibling_fs_base as u64
                 || clone.child.registers != proof_registers
                 || selected != clone.child
+                || !interrupt_resume_context_valid
                 || !return_installed
                 || installed_registers != clone.child.registers
                 || installed_rip != clone.child.rip
@@ -7704,6 +7826,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
                         clone.child.fs_base == execution.sibling_fs_base as u64,
                         clone.child.registers == proof_registers,
                         selected == clone.child,
+                        interrupt_resume_context_valid,
                         return_installed,
                         installed_registers == clone.child.registers,
                         installed_rip == clone.child.rip,
@@ -11901,11 +12024,9 @@ fn linux_schedule_new_thread(
     };
     if !cfg!(feature = "verification-boot") && current_linux_runtime_cpu_index() == 0 {
         if let Some(root) = linux_process::live_process_root(current_linux_process_pid()) {
-            let general = child_context.registers.process_general(
-                child_context.rax,
-                child_context.rip,
-                child_context.rflags,
-            );
+            let Some(general) = linux_thread_resume_general(child, child_context) else {
+                return LINUX_EINVAL;
+            };
             if crate::arch::x86_64::smp::begin_linux_runtime_thread(
                 root,
                 child.slot,
@@ -11927,7 +12048,8 @@ fn linux_schedule_new_thread(
             }
         }
     }
-    if !switch_linux_thread(child) || !write_linux_live_return(output, child_context) {
+    if !switch_linux_thread(child) || !write_linux_thread_live_return(output, child, child_context)
+    {
         let _ = switch_linux_thread(parent);
         return LINUX_EINVAL;
     }
@@ -11937,7 +12059,7 @@ fn linux_schedule_new_thread(
     X86_RUNTIME
         .LINUX_LIVE_RETURN_VALIDATED
         .store(true, Ordering::SeqCst);
-    child_context.rax
+    LINUX_RETURN_FROM_IRET
 }
 
 fn linux_exit_child_to_parent(output: *mut LinuxSyscallFrame) -> u64 {
@@ -11992,10 +12114,10 @@ fn linux_exit_child_to_parent(output: *mut LinuxSyscallFrame) -> u64 {
         rax,
         fs_base: active_fs_base(),
     };
-    if !write_linux_live_return(output, context) {
+    if !write_linux_thread_live_return(output, parent, context) {
         return LINUX_EINVAL;
     }
-    context.rax
+    LINUX_RETURN_FROM_IRET
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -12018,14 +12140,14 @@ pub(crate) fn begin_dispatched_linux_runtime_thread(
     let Some(mut context) = linux_thread_return_context(handle) else {
         return false;
     };
+    let Some(initial_general) = linux_thread_resume_general(handle, context) else {
+        return false;
+    };
     if context.rip != entry
         || context.rsp != stack
         || context.fs_base != fs_base
         || context.rflags != rflags
-        || context
-            .registers
-            .process_general(context.rax, context.rip, context.rflags)
-            != general
+        || initial_general != general
     {
         return false;
     }
@@ -12033,26 +12155,28 @@ pub(crate) fn begin_dispatched_linux_runtime_thread(
         return false;
     };
     let resumed = loop {
-        let selected = {
+        let selected_general = {
             let _kernel_entry = crate::sync::kernel_entry_lock();
-            current_linux_runtime_cpu_index() != 0
+            let selected = current_linux_runtime_cpu_index() != 0
                 && current_linux_thread_handle().is_none()
                 && linux_thread_handle(usize::from(slot)) == Some(handle)
                 && linux_thread_return_context(handle) == Some(context)
-                && switch_linux_thread(handle)
+                && switch_linux_thread(handle);
+            selected
+                .then(|| linux_thread_resume_general(handle, context))
+                .flatten()
         };
-        if !selected
-            || !address_space::resume_live_linux_process(
-                root,
-                context.rip,
-                context.rsp,
-                context.fs_base,
-                context
-                    .registers
-                    .process_general(context.rax, context.rip, context.rflags),
-                context.rflags,
-            )
-            || current_linux_thread_handle().is_some()
+        let Some(resume_general) = selected_general else {
+            break false;
+        };
+        if !address_space::resume_live_linux_process(
+            root,
+            context.rip,
+            context.rsp,
+            context.fs_base,
+            resume_general,
+            context.rflags,
+        ) || current_linux_thread_handle().is_some()
         {
             break false;
         }
@@ -12594,13 +12718,13 @@ fn linux_sched_yield_live_return(
         rax: target_rax,
         fs_base: active_fs_base(),
     };
-    if !write_linux_live_return(output, selected) {
+    if !write_linux_thread_live_return(output, target, selected) {
         return LINUX_EINVAL;
     }
     X86_RUNTIME
         .LINUX_LIVE_RETURN_VALIDATED
         .store(true, Ordering::SeqCst);
-    selected.rax
+    LINUX_RETURN_FROM_IRET
 }
 
 fn write_linux_live_return(output: *mut LinuxSyscallFrame, context: LinuxUserContext) -> bool {
@@ -12628,6 +12752,32 @@ fn write_linux_live_return(output: *mut LinuxSyscallFrame, context: LinuxUserCon
             && entry_state.user_rip == context.rip
             && entry_state.user_rflags == context.rflags
     }
+}
+
+fn write_linux_thread_live_return(
+    output: *mut LinuxSyscallFrame,
+    handle: LinuxThreadHandle,
+    context: LinuxUserContext,
+) -> bool {
+    let Some(general) = linux_thread_resume_general(handle, context) else {
+        return false;
+    };
+    if !write_linux_live_return(output, context) {
+        return false;
+    }
+    // A target thread may have been interrupted between arbitrary userspace
+    // instructions. Unlike a normal SYSCALL return, RCX and R11 are then live
+    // application registers rather than the return RIP and RFLAGS. Publish the
+    // exact saved values for the IRETQ epilogue used by cross-thread returns.
+    // SAFETY: the serialized syscall entry owns this per-CPU state until the
+    // assembly epilogue consumes it.
+    unsafe {
+        let entry_state = &mut *current_entry_state();
+        entry_state.signal_rax = general[0];
+        entry_state.signal_rcx = general[2];
+        entry_state.signal_r11 = general[10];
+    }
+    true
 }
 
 fn restore_linux_process_live_return(output: *mut LinuxSyscallFrame, pid: u32) -> bool {
@@ -30542,7 +30692,7 @@ fn linux_blocking_descriptor_io_live_return(
         rax: target_rax,
         fs_base: active_fs_base(),
     };
-    if !write_linux_live_return(output, selected) {
+    if !write_linux_thread_live_return(output, target, selected) {
         return LINUX_EINVAL;
     }
     X86_RUNTIME
@@ -30569,7 +30719,7 @@ fn linux_blocking_descriptor_io_live_return(
             .LINUX_EVENTFD_READ_BLOCK_COUNT
             .fetch_add(1, Ordering::SeqCst);
     }
-    selected.rax
+    LINUX_RETURN_FROM_IRET
 }
 
 fn linux_eventfd_write(descriptor: u64, address: u64, count: u64) -> Option<u64> {
@@ -32177,7 +32327,7 @@ fn linux_epoll_wait_duration_live_return(
         rax: target_rax,
         fs_base: active_fs_base(),
     };
-    if !write_linux_live_return(output, selected) {
+    if !write_linux_thread_live_return(output, target, selected) {
         return LINUX_EINVAL;
     }
     X86_RUNTIME
@@ -32192,7 +32342,7 @@ fn linux_epoll_wait_duration_live_return(
             .LINUX_EPOLL_WAIT_BLOCK_COUNT
             .fetch_add(1, Ordering::SeqCst);
     }
-    selected.rax
+    LINUX_RETURN_FROM_IRET
 }
 
 fn linux_temporary_signal_mask(input: LinuxSignalMaskInput) -> Result<u64, u64> {
@@ -42042,6 +42192,37 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
         serial_write(" ");
         serial_write_u64(active_fs_base());
         serial_write("\r\n");
+        let current_thread = current_linux_thread_handle();
+        serial_write(
+            "ginux: Linux fault cpu/slot/generation/state/saved-rip/saved-rsp/saved-rcx/saved-r11: ",
+        );
+        for value in [
+            current_linux_runtime_cpu_index() as u64,
+            current_thread.map_or(u64::MAX, |handle| u64::from(handle.slot)),
+            current_thread.map_or(0, |handle| u64::from(handle.generation)),
+            current_thread.map_or(0, |handle| {
+                u64::from(
+                    X86_RUNTIME.LINUX_THREAD_STATES[usize::from(handle.slot)]
+                        .load(Ordering::SeqCst),
+                )
+            }),
+            current_thread.map_or(0, |handle| {
+                X86_RUNTIME.LINUX_THREAD_RIPS[usize::from(handle.slot)].load(Ordering::SeqCst)
+            }),
+            current_thread.map_or(0, |handle| {
+                X86_RUNTIME.LINUX_THREAD_RSPS[usize::from(handle.slot)].load(Ordering::SeqCst)
+            }),
+            current_thread.map_or(0, |handle| {
+                X86_RUNTIME.LINUX_THREAD_RCXS[usize::from(handle.slot)].load(Ordering::SeqCst)
+            }),
+            current_thread.map_or(0, |handle| {
+                X86_RUNTIME.LINUX_THREAD_R11S[usize::from(handle.slot)].load(Ordering::SeqCst)
+            }),
+        ] {
+            serial_write_u64(value);
+            serial_write(" ");
+        }
+        serial_write("\r\n");
         let mut instruction = [0_u8; 16];
         if copy_from_linux_user(context.rip, &mut instruction) {
             serial_write("ginux: Linux fault instruction bytes:");
@@ -42066,6 +42247,12 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
             context.r14,
             context.r15,
         ] {
+            serial_write(" ");
+            serial_write_u64(value);
+        }
+        serial_write("\r\n");
+        serial_write("ginux: Linux user fault r8/r9/r10/r11:");
+        for value in [context.r8, context.r9, context.r10, context.r11] {
             serial_write(" ");
             serial_write_u64(value);
         }

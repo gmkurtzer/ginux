@@ -531,7 +531,7 @@ pub(super) fn linux_clock_nanosleep_live_return(
         rax: target_rax,
         fs_base: active_fs_base(),
     };
-    if !write_linux_live_return(output, selected) {
+    if !write_linux_thread_live_return(output, target, selected) {
         return LINUX_EINVAL;
     }
     X86_RUNTIME
@@ -540,7 +540,7 @@ pub(super) fn linux_clock_nanosleep_live_return(
     X86_RUNTIME
         .LINUX_SLEEP_BLOCK_COUNT
         .fetch_add(1, Ordering::SeqCst);
-    selected.rax
+    LINUX_RETURN_FROM_IRET
 }
 
 pub(super) fn linux_setitimer(which: u64, input_address: u64, old_output_address: u64) -> u64 {
