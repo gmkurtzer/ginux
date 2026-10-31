@@ -35,11 +35,11 @@ percent of Linux is acceptable; the target is faster than Linux in every cell.
 - [x] Create `codex/performance-parity` from merged `main`.
 - [x] Align the goal, scope, acceptance threshold, review policy, and delivery
   strategy with the human.
+- [x] Reproduce and preserve a fresh complete baseline.
+- [x] Add bounded child-exit profiling and attribute the first dominant costs.
 
 ## Remaining work
 
-- [ ] Reproduce and preserve a fresh complete baseline.
-- [ ] Add bounded profiling and attribute the dominant costs.
 - [ ] Optimize measured general kernel mechanisms.
 - [ ] Add regression coverage for changed mechanisms.
 - [ ] Re-run targeted cells until stable.
@@ -86,7 +86,15 @@ percent of Linux is acceptable; the target is faster than Linux in every cell.
 ## Evidence
 
 - Historical Gate 11 reduced results are under
-  `docs/feedback-hardening/gate-11-results/`; fresh Gate 12 evidence is pending.
+  `docs/feedback-hardening/gate-11-results/`.
+- `make benchmark-topology-matrix` with forced isolated output completed every
+  baseline cell; reduced results and initial attribution are recorded in
+  `docs/feedback-hardening/GATE-12-BASELINE.md`.
+- Fixed 2-vCPU profiling measured about 1.27 million calls per four-second
+  sample, split almost evenly between `futex` and `sched_yield`. The current
+  successful-spurious-wake path explains the extra futex loop.
+- Source inspection confirmed only one remote Linux runtime-thread job exists
+  and it is always dispatched to CPU 1, matching the 4-vCPU scaling collapse.
 
 ## Decisions and limitations
 

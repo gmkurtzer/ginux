@@ -11529,6 +11529,36 @@ fn write_linux_boot_profile() {
     }
 }
 
+fn reset_linux_boot_profile() {
+    if !cfg!(feature = "linux-boot-profile") {
+        return;
+    }
+    for count in &X86_RUNTIME.LINUX_BOOT_PROFILE_SYSCALL_COUNTS {
+        count.store(0, Ordering::Relaxed);
+    }
+    for ticks in &X86_RUNTIME.LINUX_BOOT_PROFILE_SYSCALL_TICKS {
+        ticks.store(0, Ordering::Relaxed);
+    }
+    X86_RUNTIME
+        .LINUX_BOOT_PROFILE_SAVE_COUNT
+        .store(0, Ordering::Relaxed);
+    X86_RUNTIME
+        .LINUX_BOOT_PROFILE_SAVE_TICKS
+        .store(0, Ordering::Relaxed);
+    X86_RUNTIME
+        .LINUX_BOOT_PROFILE_RESTORE_COUNT
+        .store(0, Ordering::Relaxed);
+    X86_RUNTIME
+        .LINUX_BOOT_PROFILE_RESTORE_TICKS
+        .store(0, Ordering::Relaxed);
+    for count in &X86_RUNTIME.LINUX_BOOT_PROFILE_LIFECYCLE_COUNTS {
+        count.store(0, Ordering::Relaxed);
+    }
+    for ticks in &X86_RUNTIME.LINUX_BOOT_PROFILE_LIFECYCLE_TICKS {
+        ticks.store(0, Ordering::Relaxed);
+    }
+}
+
 fn linux_boot_profile_lifecycle_phase(index: usize, started: Option<u64>) {
     if let Some(started) = started {
         X86_RUNTIME.LINUX_BOOT_PROFILE_LIFECYCLE_COUNTS[index].fetch_add(1, Ordering::Relaxed);
@@ -12066,6 +12096,15 @@ fn linux_exit_child_to_parent(output: *mut LinuxSyscallFrame) -> u64 {
     let clear_child_tid = current_linux_clear_child_tid().unwrap_or(0);
     let robust_list = current_linux_robust_list().unwrap_or(0);
     let tid = current_linux_tid().unwrap_or(0);
+    if cfg!(feature = "linux-boot-profile") {
+        serial_write("ginux: profile child-exit pid/tid: ");
+        serial_write_u64(u64::from(current_linux_process_pid()));
+        serial_write("/");
+        serial_write_u64(u64::from(tid));
+        serial_write("\r\n");
+        write_linux_boot_profile();
+        reset_linux_boot_profile();
+    }
     if clear_child_tid != 0 {
         let _ = copy_to_linux_user(clear_child_tid, &0_u32.to_ne_bytes());
     }

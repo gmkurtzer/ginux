@@ -8,11 +8,12 @@
 - Branch: `codex/performance-parity`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 12, approved and open
-- Last completed action: PR #7 merged into `main`; a clean follow-up branch was
-  created and the Gate 12 scope and acceptance boundary were approved
-- Next action: reproduce the merged baseline, add bounded profiling, and
-  attribute the largest scheduler, futex, context-switch, timer, IPI, or memory
-  costs before optimizing them
+- Last completed action: a fresh complete matched baseline and fixed 2-vCPU
+  thread-yield profile identified the successful-spurious-futex-wake loop and
+  single-remote-worker limit as the dominant scheduler costs
+- Next action: replace the CPU 0 spurious-wake loop with a real kernel wait and
+  generalize remote runtime-thread dispatch across all online application CPUs,
+  then rerun targeted cells before the complete matrix
 
 ## Current repository state
 
