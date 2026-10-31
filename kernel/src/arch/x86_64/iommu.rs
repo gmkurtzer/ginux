@@ -23,14 +23,7 @@ const FAULT_RECORD_STRIDE: u64 = 16;
 const FAULT_RECORD_HIGH_DELTA: u64 = 8;
 const PRIMARY_PENDING_FAULT: u32 = 1 << 1;
 const FAULT_RECORD_VALID: u64 = 1 << 63;
-const FAULT_RECORD_TRANSACTION_READ: u64 = 1 << 62;
-const FAULT_RECORD_REASON_SHIFT: u64 = 32;
-const FAULT_RECORD_REASON_MASK: u64 = 0xff;
-const FAULT_RECORD_PASID_SHIFT: u64 = 40;
-const FAULT_RECORD_NO_PASID: u64 = 0xffff;
-const FAULT_RECORD_SOURCE_MASK: u64 = 0xffff;
 const FAULT_INFORMATION_MASK: u64 = !0xfff;
-const WRITE_PERMISSION_FAULT: u64 = 5;
 const TRANSLATION_ENABLE_STATUS: u32 = 1 << 31;
 const SET_ROOT_TABLE_POINTER: u32 = 1 << 30;
 const ROOT_TABLE_POINTER_STATUS: u32 = 1 << 30;
@@ -307,17 +300,10 @@ impl ActiveTranslation {
             return false;
         };
         let source = (u64::from(bus) << 8) | (u64::from(device) << 3) | u64::from(function);
-        let expected_high = FAULT_RECORD_VALID
-            | (FAULT_RECORD_NO_PASID << FAULT_RECORD_PASID_SHIFT)
-            | (WRITE_PERMISSION_FAULT << FAULT_RECORD_REASON_SHIFT)
-            | source;
+        let cleared_high = high & !FAULT_RECORD_VALID;
         if status & FAULT_STATUS_MASK != PRIMARY_PENDING_FAULT
             || low & FAULT_INFORMATION_MASK != fault_address
-            || high != expected_high
-            || high & FAULT_RECORD_TRANSACTION_READ != 0
-            || high >> FAULT_RECORD_REASON_SHIFT & FAULT_RECORD_REASON_MASK
-                != WRITE_PERMISSION_FAULT
-            || high & FAULT_RECORD_SOURCE_MASK != source
+            || !ginux_kernel_policy::valid_vtd_write_fault_record(high, source as u16)
             || read_u32(self.mapping, self.register_base + GLOBAL_STATUS_OFFSET)
                 .is_none_or(|global| global & TRANSLATION_ENABLE_STATUS == 0)
             || read_u64(self.mapping, self.register_base + ROOT_TABLE_ADDRESS_OFFSET)
@@ -334,7 +320,7 @@ impl ActiveTranslation {
             && read_u64(
                 self.mapping,
                 self.fault_record_register + FAULT_RECORD_HIGH_DELTA,
-            ) == Some(expected_high & !FAULT_RECORD_VALID)
+            ) == Some(cleared_high)
             && invalidate_caches(self.mapping, self.register_base, self.iotlb_register)
             && self.is_active()
     }
