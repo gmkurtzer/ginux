@@ -7,13 +7,11 @@
 - Active project: feedback-driven kernel hardening
 - Branch: `codex/feedback-hardening`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 11.5, SMP shared-writable-page correctness, technically
-  passed and awaiting checkpoint acceptance
-- Last completed action: added permission-preserving local recovery and
-  synchronous NMI-based cross-CPU invalidation; all focused and regression
-  evidence passed at 1, 2, and 4 vCPUs
-- Next action: human review of Gate 11.5; if accepted, move it to
-  `gates-done/` and resume the paused Gate 11 benchmark matrix
+- Active gate: Gate 11, matched UP and SMP benchmark matrix, in progress
+- Last completed action: the human accepted Gate 11.5 after its shared-page
+  coherence fix and all objective verification passed
+- Next action: resume `make benchmark-topology-matrix` from its preserved
+  fixed cells and complete the scaled 2- and 4-vCPU measurements
 
 ## Current repository state
 
@@ -25,10 +23,10 @@ The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
 matrix and repeated stress pass. The final qualification report and raw/reduced
 evidence are under `docs/feedback-hardening/`. No push or merge was performed.
 
-## Required decision
+## Open decisions
 
-- Accept or reject the technically passed Gate 11.5 checkpoint. Gate 11 remains
-  paused until acceptance.
+- None. Gate 11 has delegated completion policy and resumes within its approved
+  measurement-only scope.
 
 ## Active diagnosis
 
