@@ -27,8 +27,10 @@ pure kernel policy behind a host-testable boundary.
 
 - [x] Added read-only GitHub Actions jobs for static and QEMU verification.
 - [x] Added `ginux-kernel-policy` and wired the kernel to its validators.
-- [x] Added three host-side tests covering positive and negative inputs.
+- [x] Added four host-side tests covering positive and negative inputs.
 - [x] Added the crate's lint and tests to `make check`.
+- [x] Made the VT-d fault-policy check accept the no-PASID encodings emitted
+  by QEMU 10 and QEMU 11 while retaining strict field and reserved-bit checks.
 
 ## Remaining work
 
@@ -45,20 +47,23 @@ pure kernel policy behind a host-testable boundary.
 
 ## Verification plan
 
-- `cargo test --package ginux-kernel-policy` -> three tests pass.
+- `cargo test --package ginux-kernel-policy` -> four tests pass.
 - `make check` -> includes kernel-policy lint/tests and passes.
 - `make test` -> complete QEMU verification boot passes.
 - GitHub Actions -> both jobs pass after the branch is pushed.
 
 ## Evidence
 
-- `cargo test --package ginux-kernel-policy` -> 3 passed, 0 failed.
+- `cargo test --package ginux-kernel-policy` -> 4 passed, 0 failed.
 - `make check` -> passed.
 - `make test` -> passed with `GINUX_KERNEL_OK` and `Boot test passed.`
+- GitHub Actions run `41178529192` reached the verification kernel on QEMU
+  11.1.2 and exposed a no-PASID encoding change from `0xffff` to `0`; the new
+  policy test covers both encodings and the complete local QEMU boot passes.
 
 ## Decisions and limitations
 
-- CI confirmation is necessarily pending until the workflow is pushed.
+- CI confirmation remains pending for the compatibility correction.
 - The user explicitly directed the corrective work into existing pull request
   #9, overriding the default one-gate-per-PR delivery split.
 
@@ -68,7 +73,9 @@ pure kernel policy behind a host-testable boundary.
 - Intended base: `main`
 - Pull request: existing PR #9
 - Planned commits: CI and test seam; delivery checkpoint
-- Actual commits: `0a3078ec` (CI workflow, host-testable policy, and tests)
+- Actual commits: `0a3078ec` (CI workflow, host-testable policy, and tests),
+  `40b29d3a`, `94cf22a2`, and `0269501f` (CI portability), `89dfa8e0`
+  (QEMU 11 VT-d compatibility)
 
 ## Review policy and outcome
 

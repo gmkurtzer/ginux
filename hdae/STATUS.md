@@ -8,10 +8,11 @@
 - Branch: `codex/issue-5-criticism-reconciliation`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gates 14 through 18, corrective implementation for issue #5
-- Last completed action: implemented all four residual areas in existing PR #9
-  and passed `make check` plus the complete `make test` QEMU boot
-- Next action: commit and push `codex/issue-5-criticism-reconciliation`, update
-  PR #9 and issue #5, and record the resulting CI evidence
+- Last completed action: corrected the VT-d verification policy for QEMU 10
+  and QEMU 11 no-PASID encodings; four host policy tests, direct kernel clippy,
+  and the complete local `make test` QEMU boot pass
+- Next action: commit and push the compatibility correction to
+  `codex/issue-5-criticism-reconciliation`, then confirm both PR #9 CI jobs
 
 ## Current repository state
 

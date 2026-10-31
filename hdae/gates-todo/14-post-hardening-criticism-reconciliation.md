@@ -80,8 +80,9 @@ independently reviewable residual defect.
 - Pull request: intended; non-closing reference to issue #5
 - Planned commits: evidence report; four corrective areas; delivery checkpoint
 - Actual commits: `70f405fe` (report), `476fba04` (unsafe/lint), `339149da`
-  (compatibility semantics), `0a3078ec` (decomposition and CI); delivery
-  checkpoint pending
+  (compatibility semantics), `0a3078ec` (decomposition and CI), `40b29d3a`,
+  `94cf22a2`, and `0269501f` (CI portability), `89dfa8e0` (QEMU 11 VT-d
+  compatibility); delivery checkpoint pending
 
 ## Review policy and outcome
 
