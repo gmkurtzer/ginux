@@ -71,11 +71,13 @@ pure kernel policy behind a host-testable boundary.
   volume recovery invariant under x86 QEMU cross-emulated on the macOS arm64
   runner. The QEMU job now uses GitHub's `macos-15-intel` runner so the x86-64
   guest is not cross-architecture translated.
+- GitHub Actions run https://github.com/gmkurtzer/ginux/actions/runs/41179779273
+  -> static passed in 2m00s and x86-hosted QEMU passed in 6m44s.
 
 ## Decisions and limitations
 
-- The workflow uses read-only repository permissions. Final-head confirmation
-  is pending on the x86-64 macOS runner.
+- The workflow uses read-only repository permissions and is confirmed on the
+  x86-64 macOS runner.
 - The user explicitly directed the corrective work into existing pull request
   #9, overriding the default one-gate-per-PR delivery split.
 
@@ -87,7 +89,8 @@ pure kernel policy behind a host-testable boundary.
 - Planned commits: CI and test seam; delivery checkpoint
 - Actual commits: `0a3078ec` (CI workflow, host-testable policy, and tests),
   `40b29d3a`, `94cf22a2`, and `0269501f` (CI portability), `89dfa8e0`
-  (QEMU 11 VT-d compatibility)
+  (QEMU 11 VT-d compatibility), `de04d4e8` (timeout-test stability),
+  `4e160cc6` (x86 CI runner)
 
 ## Review policy and outcome
 

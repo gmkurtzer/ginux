@@ -8,11 +8,10 @@
 - Branch: `codex/issue-5-criticism-reconciliation`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gates 14 through 18, corrective implementation for issue #5
-- Last completed action: run `41179498965` passed static checks but exposed a
-  separate timing-sensitive native-volume failure under x86 QEMU on a macOS
-  arm64 runner; the QEMU job is now pinned to `macos-15-intel`
-- Next action: commit and push the runner correction, then confirm both CI jobs
-  on the x86-64 pull-request runner
+- Last completed action: GitHub Actions run `41179779273` passed both static
+  checks and the complete QEMU boot on the `macos-15-intel` runner
+- Next action: commit and push this final evidence checkpoint, confirm the
+  documentation-only head, and return PR #9 to the maintainer for review
 
 ## Current repository state
 

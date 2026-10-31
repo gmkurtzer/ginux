@@ -67,6 +67,8 @@ independently reviewable residual defect.
 - Issue response: https://github.com/gmkurtzer/ginux/issues/5#issuecomment-6540049147
 - GitHub Actions run https://github.com/gmkurtzer/ginux/actions/runs/41178914309
   -> static and QEMU jobs passed.
+- Final code run https://github.com/gmkurtzer/ginux/actions/runs/41179779273
+  -> static and x86-hosted QEMU jobs passed.
 
 ## Decisions and limitations
 
@@ -84,7 +86,8 @@ independently reviewable residual defect.
 - Actual commits: `70f405fe` (report), `476fba04` (unsafe/lint), `339149da`
   (compatibility semantics), `0a3078ec` (decomposition and CI), `40b29d3a`,
   `94cf22a2`, and `0269501f` (CI portability), `89dfa8e0` (QEMU 11 VT-d
-  compatibility); delivery checkpoint pending
+  compatibility), `de04d4e8` (timeout-test stability), `4e160cc6` (x86 CI
+  runner); final evidence checkpoint pending
 
 ## Review policy and outcome
 
