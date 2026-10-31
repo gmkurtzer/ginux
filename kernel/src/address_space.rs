@@ -37,6 +37,7 @@ use crate::{
         apic::LocalApic,
         cpu, iommu, paging,
         pci::{self, VirtioBlockDevice, VirtioNetworkDevice, VirtioNetworkInitialization},
+        smp,
         timer::{self, LocalApicCalibration},
     },
     domain, ipc, memory, network, packet, scheduler, volume,
@@ -5704,9 +5705,7 @@ pub(crate) fn refresh_current_linux_runtime_translation(
     // bypass: the leaf must already grant the exact access that faulted.
     let value = unsafe { entry.read_volatile() };
     let frame = value & ADDRESS_MASK;
-    if value & (PRESENT | USER) != PRESENT | USER
-        || write && value & WRITABLE == 0
-        || execute && value & NO_EXECUTE != 0
+    if !linux_runtime_leaf_grants(value, write, execute)
         || memory::live_frame_lease(memory::FrameOwner::KERNEL, frame).is_none()
     {
         return false;
@@ -5715,6 +5714,26 @@ pub(crate) fn refresh_current_linux_runtime_translation(
         asm!("invlpg [{}]", in(reg) address, options(nostack, preserves_flags));
     }
     true
+}
+
+fn linux_runtime_leaf_grants(value: u64, write: bool, execute: bool) -> bool {
+    value & (PRESENT | USER) == PRESENT | USER
+        && (!write || value & WRITABLE != 0)
+        && (!execute || value & NO_EXECUTE == 0)
+}
+
+pub(crate) fn verify_linux_runtime_translation_permissions() -> bool {
+    let read_only = PRESENT | USER | NO_EXECUTE;
+    let writable = PRESENT | USER | WRITABLE | NO_EXECUTE;
+    let executable = PRESENT | USER;
+    linux_runtime_leaf_grants(read_only, false, false)
+        && !linux_runtime_leaf_grants(read_only, true, false)
+        && !linux_runtime_leaf_grants(read_only, false, true)
+        && linux_runtime_leaf_grants(writable, true, false)
+        && !linux_runtime_leaf_grants(writable, false, true)
+        && linux_runtime_leaf_grants(executable, false, true)
+        && !linux_runtime_leaf_grants(executable & !PRESENT, false, true)
+        && !linux_runtime_leaf_grants(executable & !USER, false, true)
 }
 
 pub(crate) fn current_linux_user_page_count() -> Option<usize> {
@@ -5791,7 +5810,8 @@ pub(crate) fn install_current_linux_runtime_page(
         return None;
     }
     let entry = ensure_current_linux_leaf(address)?;
-    let old = linux_runtime_page_from_value(unsafe { entry.read() });
+    let old_value = unsafe { entry.read() };
+    let old = linux_runtime_page_from_value(old_value);
     if old.occupied && (!replace || old.sealed) {
         return None;
     }
@@ -5800,9 +5820,13 @@ pub(crate) fn install_current_linux_runtime_page(
         | if protection & 2 != 0 { WRITABLE } else { 0 }
         | if protection & 4 != 0 { 0 } else { NO_EXECUTE }
         | if file { LINUX_RUNTIME_FILE } else { 0 };
-    unsafe {
-        entry.write(frame.address() | flags);
-        asm!("invlpg [{}]", in(reg) address, options(nostack, preserves_flags));
+    unsafe { entry.write(frame.address() | flags) };
+    if !smp::invalidate_runtime_translation(address) {
+        unsafe {
+            entry.write(old_value);
+            asm!("invlpg [{}]", in(reg) address, options(nostack, preserves_flags));
+        }
+        return None;
     }
     (unsafe { entry.read() } & (ADDRESS_MASK | PRESENT | WRITABLE | USER | NO_EXECUTE)
         == frame.address()
@@ -5929,7 +5953,8 @@ pub(crate) fn reserve_current_linux_runtime_page(
         return None;
     }
     let entry = ensure_current_linux_leaf(address)?;
-    let old = linux_runtime_page_from_value(unsafe { entry.read() });
+    let old_value = unsafe { entry.read() };
+    let old = linux_runtime_page_from_value(old_value);
     if old.occupied && (!replace || old.sealed) {
         return None;
     }
@@ -5943,9 +5968,13 @@ pub(crate) fn reserve_current_linux_runtime_page(
         | if protection & 2 != 0 { WRITABLE } else { 0 }
         | if protection & 4 != 0 { 0 } else { NO_EXECUTE }
         | if file { LINUX_RUNTIME_FILE } else { 0 };
-    unsafe {
-        entry.write(value);
-        asm!("invlpg [{}]", in(reg) address, options(nostack, preserves_flags));
+    unsafe { entry.write(value) };
+    if !smp::invalidate_runtime_translation(address) {
+        unsafe {
+            entry.write(old_value);
+            asm!("invlpg [{}]", in(reg) address, options(nostack, preserves_flags));
+        }
+        return None;
     }
     (unsafe { entry.read() } == value).then_some(old.frame)
 }
@@ -5956,9 +5985,14 @@ pub(crate) fn remove_current_linux_runtime_page(address: u64) -> LinuxRuntimePag
     };
     let old = linux_runtime_page_from_value(unsafe { entry.read() });
     if old.occupied {
-        unsafe {
-            entry.write(0);
-            asm!("invlpg [{}]", in(reg) address, options(nostack, preserves_flags));
+        let old_value = unsafe { entry.read() };
+        unsafe { entry.write(0) };
+        if !smp::invalidate_runtime_translation(address) {
+            unsafe {
+                entry.write(old_value);
+                asm!("invlpg [{}]", in(reg) address, options(nostack, preserves_flags));
+            }
+            return LinuxRuntimePage::EMPTY;
         }
     }
     old
@@ -6041,9 +6075,13 @@ pub(crate) fn protect_current_linux_runtime_page(address: u64, protection: u8) -
                 }
         }
     };
-    unsafe {
-        entry.write(value);
-        asm!("invlpg [{}]", in(reg) address, options(nostack, preserves_flags));
+    unsafe { entry.write(value) };
+    if !smp::invalidate_runtime_translation(address) {
+        unsafe {
+            entry.write(old_value);
+            asm!("invlpg [{}]", in(reg) address, options(nostack, preserves_flags));
+        }
+        return false;
     }
     linux_runtime_page_from_value(unsafe { entry.read() }).protection == protection
 }
@@ -6080,9 +6118,14 @@ pub(crate) fn replace_current_linux_runtime_page(
         } else {
             0
         };
-    unsafe {
-        entry.write(value);
-        asm!("invlpg [{}]", in(reg) address, options(nostack, preserves_flags));
+    let old_value = unsafe { entry.read() };
+    unsafe { entry.write(value) };
+    if !smp::invalidate_runtime_translation(address) {
+        unsafe {
+            entry.write(old_value);
+            asm!("invlpg [{}]", in(reg) address, options(nostack, preserves_flags));
+        }
+        return None;
     }
     let current = linux_runtime_page_from_value(unsafe { entry.read() });
     (current.frame == Some(frame)
@@ -6145,9 +6188,14 @@ pub(crate) fn materialize_current_linux_runtime_page(
         } else {
             0
         };
-    unsafe {
-        entry.write(value);
-        asm!("invlpg [{}]", in(reg) address, options(nostack, preserves_flags));
+    let old_value = unsafe { entry.read() };
+    unsafe { entry.write(value) };
+    if !smp::invalidate_runtime_translation(address) {
+        unsafe {
+            entry.write(old_value);
+            asm!("invlpg [{}]", in(reg) address, options(nostack, preserves_flags));
+        }
+        return false;
     }
     let current = linux_runtime_page_from_value(unsafe { entry.read() });
     current.frame == Some(frame)

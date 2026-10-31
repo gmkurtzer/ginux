@@ -21,6 +21,7 @@ const APIC_DELIVERY_PENDING: u32 = 1 << 12;
 const APIC_LEVEL_ASSERT: u32 = 1 << 14;
 const APIC_TRIGGER_LEVEL: u32 = 1 << 15;
 const APIC_DELIVERY_INIT: u32 = 5 << 8;
+const APIC_DELIVERY_NMI: u32 = 4 << 8;
 const APIC_DELIVERY_STARTUP: u32 = 6 << 8;
 const X2APIC_INTERRUPT_COMMAND_MSR: u32 = 0x830;
 
@@ -124,6 +125,10 @@ impl LocalApic {
 
     pub(crate) unsafe fn send_fixed(&self, target: u32, vector: u8) -> bool {
         vector >= 32 && self.send_ipi(target, u32::from(vector))
+    }
+
+    pub(crate) unsafe fn send_nmi(&self, target: u32) -> bool {
+        self.send_ipi(target, APIC_DELIVERY_NMI)
     }
 
     pub(crate) unsafe fn end_of_interrupt(&self) {

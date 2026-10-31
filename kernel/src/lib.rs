@@ -1843,6 +1843,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         if !linux_process::verify_lifecycle_contract() {
             kernel_fail("ginux: bounded Linux process lifecycle contract invalid\r\n");
         }
+        if !address_space::verify_linux_runtime_translation_permissions() {
+            kernel_fail("ginux: Linux translation recovery permissions invalid\r\n");
+        }
+        serial_write("ginux: Linux translation recovery permissions validated\r\n");
         if !arch::x86_64::cpu::verify_cross_cpu_linux_runtime_mechanisms() {
             kernel_fail("ginux: cross-CPU Linux runtime mechanisms invalid\r\n");
         }

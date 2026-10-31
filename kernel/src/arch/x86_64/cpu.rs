@@ -2410,6 +2410,14 @@ ginux_nmi_entry:
     clac
     cld
     lock inc byte ptr [rip + {entry_nmi_probe_hits}]
+    push rax
+    mov rax, qword ptr [rip + {tlb_shootdown_address}]
+    test rax, rax
+    jz 1f
+    invlpg [rax]
+    lock inc dword ptr [rip + {tlb_shootdown_acknowledged}]
+1:
+    pop rax
     iretq
     GINUX_EXCEPTION_NO_ERROR 4
     GINUX_EXCEPTION_NO_ERROR 5
@@ -2834,6 +2842,8 @@ ginux_user_return_kernel:
     entry_signal_r11 = const 64,
     entry_nmi_probe_mask = sym PRIVILEGE_ENTRY_NMI_PROBE_MASK,
     entry_nmi_probe_hits = sym PRIVILEGE_ENTRY_NMI_PROBE_HITS,
+    tlb_shootdown_address = sym super::smp::TLB_SHOOTDOWN_ADDRESS,
+    tlb_shootdown_acknowledged = sym super::smp::TLB_SHOOTDOWN_ACKNOWLEDGED,
     linux_return_to_kernel = const LINUX_RETURN_TO_KERNEL as i64,
     linux_return_from_signal = const LINUX_RETURN_FROM_SIGNAL as i64,
     user_data = const USER_DATA_SELECTOR as u64,

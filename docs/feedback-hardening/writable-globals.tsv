@@ -443,6 +443,8 @@ interior-mutable	kernel/src/arch/x86_64/smp.rs	MAILBOX_CPU	per-cpu-arch	allowlis
 interior-mutable	kernel/src/arch/x86_64/smp.rs	MAILBOX_CR3	per-cpu-arch	allowlist	none	sequential-ap-startup-mailbox
 interior-mutable	kernel/src/arch/x86_64/smp.rs	MAILBOX_ENTRY	per-cpu-arch	allowlist	none	sequential-ap-startup-mailbox
 interior-mutable	kernel/src/arch/x86_64/smp.rs	MAILBOX_STACK	per-cpu-arch	allowlist	none	sequential-ap-startup-mailbox
+interior-mutable	kernel/src/arch/x86_64/smp.rs	TLB_SHOOTDOWN_ADDRESS	per-cpu-arch	allowlist	none	serialized-cross-cpu-translation-mailbox
+interior-mutable	kernel/src/arch/x86_64/smp.rs	TLB_SHOOTDOWN_ACKNOWLEDGED	per-cpu-arch	allowlist	none	serialized-cross-cpu-translation-acknowledgement
 interior-mutable	kernel/src/arch/x86_64/timer.rs	TIMER	platform-device	allowlist	none	explicit-host-timer-owner-root
 interior-mutable	kernel/src/domain.rs	DOMAIN_RUNTIME	shared-runtime	allowlist	none	explicit-lifecycle-owner-root
 interior-mutable	kernel/src/image_store.rs	IMAGE_STORE	platform-device	allowlist	none	explicit-host-image-store-owner-root

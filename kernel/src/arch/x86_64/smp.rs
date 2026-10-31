@@ -75,6 +75,8 @@ static LINUX_RUNTIME_THREAD_JOB: SpinLock<Option<LinuxRuntimeThreadJob>> =
     SpinLock::new(LockRank::CROSS_CPU_DISPATCH, None);
 static LINUX_RUNTIME_THREAD_ACTIVE: AtomicBool = AtomicBool::new(false);
 static LINUX_RUNTIME_THREAD_SLOT: AtomicU8 = AtomicU8::new(u8::MAX);
+pub(super) static TLB_SHOOTDOWN_ADDRESS: AtomicU64 = AtomicU64::new(0);
+pub(super) static TLB_SHOOTDOWN_ACKNOWLEDGED: AtomicU32 = AtomicU32::new(0);
 
 global_asm!(
     r#"
@@ -483,6 +485,47 @@ fn saved_local_apic() -> Option<LocalApic> {
         super::apic::Mode::XApic
     };
     LocalApic::from_saved(0, mode, APIC_BASE.load(Ordering::Acquire))
+}
+
+pub(crate) fn invalidate_runtime_translation(address: u64) -> bool {
+    if address == 0 || !address.is_multiple_of(4096) {
+        return false;
+    }
+    if TLB_SHOOTDOWN_ADDRESS
+        .compare_exchange(0, address, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return false;
+    }
+    TLB_SHOOTDOWN_ACKNOWLEDGED.store(0, Ordering::Release);
+    let current = cpu::current_cpu_index();
+    let Some(apic) = saved_local_apic() else {
+        TLB_SHOOTDOWN_ADDRESS.store(0, Ordering::Release);
+        return false;
+    };
+    let mut targets = 0_u32;
+    for target in 0..online_count() {
+        if target == current || !ONLINE[target].load(Ordering::Acquire) {
+            continue;
+        }
+        let apic_id = APIC_IDS[target].load(Ordering::Acquire);
+        if !(unsafe { apic.send_nmi(apic_id) }) {
+            TLB_SHOOTDOWN_ADDRESS.store(0, Ordering::Release);
+            return false;
+        }
+        targets += 1;
+    }
+    unsafe { asm!("invlpg [{}]", in(reg) address, options(nostack, preserves_flags)) };
+    let acknowledged = (0..IPI_WAIT_LIMIT).any(|_| {
+        if TLB_SHOOTDOWN_ACKNOWLEDGED.load(Ordering::Acquire) >= targets {
+            true
+        } else {
+            core::hint::spin_loop();
+            false
+        }
+    });
+    TLB_SHOOTDOWN_ADDRESS.store(0, Ordering::Release);
+    acknowledged
 }
 
 extern "sysv64" fn interprocessor_interrupt_handler() {
