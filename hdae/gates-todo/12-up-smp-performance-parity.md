@@ -41,6 +41,8 @@ percent of Linux is acceptable; the target is faster than Linux in every cell.
   application CPU.
 - [x] Add coordinated futex wait/wake fast paths and preserve prior SMP
   correctness regressions.
+- [x] Implement Linux futex bitset masks and absolute timeout semantics, and
+  remove the glibc bitset-wait retry storm.
 
 ## Remaining work
 
@@ -102,8 +104,16 @@ percent of Linux is acceptable; the target is faster than Linux in every cell.
 - A targeted nine-sample 4-vCPU/4-thread run reached a 2,924 events/s median,
   2.33x the matched Linux median of 1,254 events/s. The focused futex,
   shared-page, and exact-thread-context SMP regression commands all pass.
-- The targeted 4-vCPU/4-thread mutex median remains about 1.46 seconds versus
-  Linux at 1.096 seconds, so the gate remains open.
+- Futex profiling found roughly 699,000 operation-265 calls in one scaled
+  memory sample. Operation 265 is a valid
+  `FUTEX_WAIT_BITSET|FUTEX_CLOCK_REALTIME` request that the old implementation
+  rejected with `EINVAL`, forcing a userspace retry loop.
+- A focused three-sample 4-vCPU/4-thread run after the correction reached a
+  2,540 MiB/s memory median and 1.061-second mutex median, versus matched Linux
+  medians of 2,496 MiB/s and 1.096 seconds. Thread yield also remained above
+  Linux. The complete matrix is still required before passage.
+- `make check`, `make test-rocky-smp-futex`, `make
+  test-rocky-smp-shared-page`, and `make test-rocky-smp-thread-context` pass.
 
 ## Decisions and limitations
 

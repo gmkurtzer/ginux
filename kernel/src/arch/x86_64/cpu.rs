@@ -12109,6 +12109,7 @@ fn linux_exit_child_to_parent(output: *mut LinuxSyscallFrame) -> u64 {
         serial_write("/");
         serial_write_u64(u64::from(tid));
         serial_write("\r\n");
+        write_linux_futex_profile();
         write_linux_boot_profile();
         reset_linux_boot_profile();
     }

@@ -8,11 +8,11 @@
 - Branch: `codex/performance-parity`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 12, approved and open
-- Last completed action: generalized Linux runtime-thread dispatch across all
-  online application CPUs and added coordinated futex fast paths; the focused
-  futex, shared-page, and exact-thread-context SMP regressions pass
-- Next action: profile and optimize the remaining scaled mutex and memory gaps,
-  then rerun the fixed and scaled targeted cells before the complete matrix
+- Last completed action: implemented Linux futex bitset operations and removed
+  the `FUTEX_WAIT_BITSET` retry storm; the focused four-vCPU memory, mutex, and
+  thread-yield cells now exceed the matched Linux medians
+- Next action: rerun the remaining fixed and scaled targeted cells, then collect
+  and validate the complete nine-sample matched matrix
 
 ## Current repository state
 
@@ -38,12 +38,16 @@ under `docs/feedback-hardening/`. No push or merge was performed.
 - Coordinated fast futex waits and arbitrary-count wakes preserve an atomic
   wait-publication/wake boundary. Armed interval timers no longer disable safe
   fast syscalls before a signal is actually pending.
-- The scaled four-vCPU mutex median remains about 1.46 seconds versus Linux at
-  1.096 seconds, below the 0.96x floor. Profiling attributes the remaining work
-  to high-frequency futex coordination rather than the former single-worker
-  dispatch limit.
-- `make test-rocky-smp-futex`, `make test-rocky-smp-shared-page`, and `make
-  test-rocky-smp-thread-context` pass with the new mechanisms.
+- Profiling found that glibc issued about 699,000 valid
+  `FUTEX_WAIT_BITSET|FUTEX_CLOCK_REALTIME` calls during a four-thread memory
+  sample. Ginux had returned `EINVAL` for every call. Full bitset operation,
+  mask, and absolute-timeout handling now preserves Linux semantics; the
+  coordinator uses Linux-permitted spurious wakeups while remote workers run.
+- A focused three-sample four-vCPU run produced medians of 2,540 MiB/s for
+  memory and 1.061 seconds for mutex, versus matched Linux medians of 2,496
+  MiB/s and 1.096 seconds. Thread yield remained above the Linux baseline.
+- `make check`, `make test-rocky-smp-futex`, `make
+  test-rocky-smp-shared-page`, and `make test-rocky-smp-thread-context` pass.
 
 ## Prior correctness diagnosis
 
