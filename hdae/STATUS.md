@@ -7,13 +7,12 @@
 - Active project: feedback-driven kernel hardening
 - Branch: `codex/feedback-hardening`
 - Baseline tag: `research-v1-baseline`
-- Active gate: proposed Gate 11.6, SMP Linux thread-context integrity, awaiting
-  human alignment and execution approval
+- Active gate: Gate 11.6, SMP Linux thread-context integrity, in progress
 - Last completed action: Gate 11 resumed; scaled 2-vCPU/2-thread completed, but
   scaled 4-vCPU/4-thread batch 2 faulted in the thread-yield workload with an
   unmapped low atomic-counter address after batch 1 passed completely
-- Next action: review Gate 11.6 scope and checkpoint policy; Gate 11 remains
-  paused and no implementation has started
+- Next action: reproduce the four-thread fault with full `r8`--`r11`, CPU,
+  slot, generation, and scheduling-transition diagnostics
 
 ## Current repository state
 
@@ -25,9 +24,10 @@ The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
 matrix and repeated stress pass. The final qualification report and raw/reduced
 evidence are under `docs/feedback-hardening/`. No push or merge was performed.
 
-## Required decision
+## Open decisions
 
-- Approve, revise, or reject proposed Gate 11.6 on the current branch and PR.
+- None. Gate 11.6 is approved on the current branch and PR; Gate 11 remains
+  paused until this checkpoint passes and is accepted.
 
 ## Active diagnosis
 
