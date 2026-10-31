@@ -7,13 +7,13 @@
 - Active project: feedback-driven kernel hardening
 - Branch: `codex/feedback-hardening`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 11.5, SMP shared-writable-page correctness, in progress
-- Last completed action: completed every fixed one-thread cell at 1, 2, and 4
-  vCPUs; scaled 2-vCPU/2-thread CPU samples passed, but its shared-memory
-  workload produced a Linux write page fault on a mapped shared page
-- Next action: implement a permission-preserving local translation refresh for
-  non-present Linux faults whose authoritative page-table leaf is already
-  present and grants the attempted access, then rerun the focused stress
+- Active gate: Gate 11.5, SMP shared-writable-page correctness, technically
+  passed and awaiting checkpoint acceptance
+- Last completed action: added permission-preserving local recovery and
+  synchronous NMI-based cross-CPU invalidation; all focused and regression
+  evidence passed at 1, 2, and 4 vCPUs
+- Next action: human review of Gate 11.5; if accepted, move it to
+  `gates-done/` and resume the paused Gate 11 benchmark matrix
 
 ## Current repository state
 
@@ -25,21 +25,23 @@ The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
 matrix and repeated stress pass. The final qualification report and raw/reduced
 evidence are under `docs/feedback-hardening/`. No push or merge was performed.
 
-## Open decisions
+## Required decision
 
-- None. The human approved Gate 11.5 on October 30, 2026. Stop for review after
-  every objective criterion passes; Gate 11 remains paused meanwhile.
+- Accept or reject the technically passed Gate 11.5 checkpoint. Gate 11 remains
+  paused until acceptance.
 
 ## Active diagnosis
 
-- A fresh two-vCPU/two-thread run with one three-second CPU sample followed by
-  one three-second shared-memory sample deterministically reproduced the locked
-  write fault on its first boot.
-- The hardware reported a non-present write fault while a serialized walk of
-  the active root found an occupied, framed, writable leaf. The narrow current
-  diagnosis is a CPU-local stale non-present translation after another runtime
-  CPU publishes the shared page; the planned recovery invalidates only the
-  faulting CPU and only when the existing leaf already grants the exact access.
+- The pre-fix two-vCPU/two-thread CPU-to-memory sequence deterministically
+  reproduced a locked-write non-present fault while the serialized active-root
+  walk reported a present writable leaf.
+- Mapping mutations now complete a serialized NMI shootdown on every online
+  CPU and fail closed with leaf rollback if acknowledgement fails. A local
+  fault refresh remains as permission-preserving defense in depth.
+- Three fresh 2-vCPU/2-thread and three fresh 4-vCPU/4-thread shared-memory
+  workloads passed, as did `make check`, `make architecture-check`, `make
+  test-smp`, and `make test-rocky-smp-futex`. No QEMU process or benchmark
+  volume owner remained.
 
 ## Limitations
 
