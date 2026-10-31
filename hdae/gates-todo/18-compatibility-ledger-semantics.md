@@ -35,7 +35,7 @@ while the documented socket-family contract remains partial.
 ## Remaining work
 
 - [x] Run deterministic verification.
-- [ ] Push the branch, open the PR, and add reciprocal links.
+- [x] Push the branch, open the PR, and add reciprocal links.
 
 ## Acceptance criteria
 
@@ -60,6 +60,9 @@ while the documented socket-family contract remains partial.
 - `make linux-compat-check` -> passed with 53 Complete, 257 Partial, 48
   Policy-denied, 17 Unsupported, and 0 Missing.
 - `make architecture-check` and `make check` -> passed.
+- Pull request: https://github.com/gmkurtzer/ginux/pull/11
+- Source response: https://github.com/gmkurtzer/ginux/issues/5#issuecomment-6540094116
+- Reciprocal PR comment: https://github.com/gmkurtzer/ginux/pull/11#issuecomment-6540093930
 
 ## Decisions and limitations
 
@@ -72,9 +75,10 @@ while the documented socket-family contract remains partial.
 - Intended base: `main`
 - Pull request: intended; non-closing reference to issue #5
 - Planned commits: ledger semantics and verification; delivery links
-- Actual commits: pending
+- Actual commits: `58923752` (ledger, checker, runtime catalog, and gate)
 
 ## Review policy and outcome
 
-Delegated by the saved proactive scheduled-review policy. Close only after all
-criteria pass and the PR plus reciprocal links exist.
+Delegated by the saved proactive scheduled-review policy. All criteria passed,
+and delivery is complete through PR #11 with reciprocal links. The gate remains
+open for maintainer review.
