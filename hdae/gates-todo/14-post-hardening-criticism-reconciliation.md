@@ -36,7 +36,7 @@ independently reviewable residual defect.
 
 - [x] Push the branch and open pull request #9.
 - [x] Record the stable pull-request URL.
-- [ ] Post the response with the stable evidence link.
+- [x] Post the response with the stable evidence link.
 
 ## Acceptance criteria
 
@@ -61,6 +61,7 @@ independently reviewable residual defect.
   workflow files: zero.
 - Full claim matrix: `docs/feedback-hardening/GATE-14-CRITICISM-RECONCILIATION.md`.
 - Pull request: https://github.com/gmkurtzer/ginux/pull/9
+- Issue response: https://github.com/gmkurtzer/ginux/issues/5#issuecomment-6540049147
 
 ## Decisions and limitations
 
@@ -79,5 +80,5 @@ independently reviewable residual defect.
 ## Review policy and outcome
 
 Delegated by the saved proactive scheduled-review policy. Technical criteria
-passed and delivery exists through open pull request #9. The gate remains open
-until the public response links the stable evidence.
+passed, delivery exists through open pull request #9, and the public response
+links the stable evidence. The gate remains open for maintainer review.
