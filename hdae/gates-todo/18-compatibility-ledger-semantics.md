@@ -35,7 +35,7 @@ while the documented socket-family contract remains partial.
 ## Remaining work
 
 - [x] Run deterministic verification.
-- [ ] Push the existing branch and update pull request #9.
+- [x] Push the existing branch and update pull request #9.
 
 ## Acceptance criteria
 

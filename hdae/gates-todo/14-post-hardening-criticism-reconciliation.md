@@ -39,7 +39,7 @@ independently reviewable residual defect.
 - [x] Push the branch and open pull request #9.
 - [x] Record the stable pull-request URL.
 - [x] Post the response with the stable evidence link.
-- [ ] Push the corrective commits and update PR #9 and issue #5.
+- [x] Push the corrective commits and update PR #9 and issue #5.
 
 ## Acceptance criteria
 
@@ -65,6 +65,8 @@ independently reviewable residual defect.
 - Full claim matrix: `docs/feedback-hardening/GATE-14-CRITICISM-RECONCILIATION.md`.
 - Pull request: https://github.com/gmkurtzer/ginux/pull/9
 - Issue response: https://github.com/gmkurtzer/ginux/issues/5#issuecomment-6540049147
+- GitHub Actions run https://github.com/gmkurtzer/ginux/actions/runs/41178914309
+  -> static and QEMU jobs passed.
 
 ## Decisions and limitations
 

@@ -35,7 +35,7 @@ pure kernel policy behind a host-testable boundary.
 ## Remaining work
 
 - [x] Run local static and QEMU verification.
-- [ ] Confirm the workflow on GitHub after pushing pull request #9.
+- [x] Confirm the workflow on GitHub after pushing pull request #9.
 
 ## Acceptance criteria
 
@@ -60,10 +60,13 @@ pure kernel policy behind a host-testable boundary.
 - GitHub Actions run `41178529192` reached the verification kernel on QEMU
   11.1.2 and exposed a no-PASID encoding change from `0xffff` to `0`; the new
   policy test covers both encodings and the complete local QEMU boot passes.
+- GitHub Actions run https://github.com/gmkurtzer/ginux/actions/runs/41178914309
+  -> static passed in 1m46s and QEMU passed in 3m24s.
 
 ## Decisions and limitations
 
-- CI confirmation remains pending for the compatibility correction.
+- The workflow is confirmed on the pull-request head with read-only repository
+  permissions.
 - The user explicitly directed the corrective work into existing pull request
   #9, overriding the default one-gate-per-PR delivery split.
 

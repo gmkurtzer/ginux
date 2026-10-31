@@ -28,7 +28,7 @@ observable behavior.
 ## Remaining work
 
 - [x] Run static and QEMU verification.
-- [ ] Push the existing branch and update pull request #9.
+- [x] Push the existing branch and update pull request #9.
 
 ## Acceptance criteria
 
