@@ -53,6 +53,7 @@ a valid device solely because QEMU selected 1024 rather than 256.
 - `make check` -> passed builds, static checks, compatibility checks, and unit
   tests.
 - Pull request: https://github.com/gmkurtzer/ginux/pull/10
+- Issue response: https://github.com/gmkurtzer/ginux/issues/4#issuecomment-6540049160
 
 ## Decisions and limitations
 
