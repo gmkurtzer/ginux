@@ -1,0 +1,88 @@
+GINUX_BENCH_SYSBENCH_SHA256 7cf6b71521436bd32a8ab197851035ff1632bee383fec5a35468d61969e7c18d
+Booting x86-64 Ginux with QEMU/tcg using CPU max,+smep,+smap,+umip
+[2J[01;01H[=3h[2J[01;01H[2J[01;01H[=3h[2J[01;01H[2J[01;01H[=3h[2J[01;01HBdsDxe: loading Boot0001 "UEFI QEMU HARDDISK QM00011 " from PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x5,0xFFFF,0x0)
+BdsDxe: starting Boot0001 "UEFI QEMU HARDDISK QM00011 " from PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x5,0xFFFF,0x0)
+[2J[01;01HGinux booted
+ginux: booting
+ginux: memory protections ready
+ginux: memory manager ready
+ginux: boot devices ready
+ginux: control runtime ready
+ginux: platform, security, devices, and runtime ready
+ginux: persistent storage recovered (generation 1, 134217720 data sectors)
+ginux: local configuration recovered (generation 5)
+ginux: timing boot-to-controller: 255 ms
+
+ginux: launching embedded controller in ring 3
+
+Ginux controller v0 (ring 3)
+Type 'help' for commands.
+ginux: Linux live sysinfo accounting validated
+ginux: Linux getrandom contract validated
+ginux: Linux resource-limit queries validated
+ginux: Linux process identity validated
+ginux: Linux timekeeping validated
+ginux: Linux runtime pipe accounting validated
+eth0: automatic DHCP configuration
+eth0: requesting DHCP lease
+eth0: DHCP configured 10.0.2.15/24 via 10.0.2.2 DNS 10.0.2.3
+ginux> domain new rocky
+domain: create rejected
+ginux> domain set rocky image=docker.io/ginux/sysbench-rocky10:local init=/bin/sh
+rocky: settings accepted; configured
+ginux> domain start rocky --attach
+ginux: checking OCI cache docker.io/ginux/sysbench-rocky10:local
+ginux: OCI cache hit (published root filesystem)
+ginux: timing OCI cache restore: 505 ms
+ginux: timing OCI unpack/publish: 0 ms
+ginux: timing OCI total: 505 ms
+ginux: OCI image ready
+ginux: local configuration committed (generation 5)
+ginux: starting configured runtime domain
+ginux: entering configured Linux init
+ginux: timing domain-start-to-Linux-init-entry: 0 ms
+sh: cannot set terminal process group (-1): Inappropriate ioctl for device
+sh: no job control in this shell
+sh-5.2# echo GINUX_BENCH_IMAGE_READY >&2
+GINUX_BENCH_IMAGE_READY
+sh-5.2# < echo GINUX_BENCH_WORKLOAD_END_memory_1=$status >&2
+GINUX_BENCH_WORKLOAD_BEGIN_memory_1
+sysbench 1.0.20 (using system LuaJIT 2.1.1720049189)
+
+Running the test with following options:
+Number of threads: 1
+Initializing random number generator from current time
+
+
+Running memory speed test with the following options:
+  block size: 1KiB
+  total size: 102400MiB
+  operation: write
+  scope: global
+
+Initializing worker threads...
+
+Threads started!
+
+Total operations: 1844586 (612658.40 per second)
+
+1801.35 MiB transferred (598.30 MiB/sec)
+
+
+General statistics:
+    total time:                          3.0066s
+    total number of events:              1844586
+
+Latency (ms):
+         min:                                    0.00
+         avg:                                    0.00
+         max:                                   14.01
+         95th percentile:                        0.00
+         sum:                                 1125.47
+
+Threads fairness:
+    events (avg/stddev):           1844586.0000/0.00
+    execution time (avg/stddev):   1.1255/0.00
+
+GINUX_BENCH_WORKLOAD_END_memory_1=0
+sh-5.2# qemu-system-x86_64: terminating on signal 15 from pid 72580 (<unknown process>)

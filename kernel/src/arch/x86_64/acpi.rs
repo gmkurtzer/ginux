@@ -13,6 +13,7 @@ const MAX_TABLE_SIZE: usize = 1024 * 1024;
 const MAX_ROOT_ENTRIES: usize = 4096;
 const MADT_ENABLED: u32 = 1;
 const MADT_ONLINE_CAPABLE: u32 = 1 << 1;
+const MAX_ENABLED_PROCESSORS: usize = 4;
 
 #[derive(Clone, Copy)]
 struct DmarDeviceScopes {
@@ -39,6 +40,7 @@ impl DmarDeviceScopes {
 #[derive(Clone, Copy)]
 pub(crate) struct PlatformInfo {
     pub(crate) enabled_processors: usize,
+    pub(crate) processor_apic_ids: [u32; MAX_ENABLED_PROCESSORS],
     pub(crate) io_apics: usize,
     pub(crate) local_apic_address: u64,
     pub(crate) first_io_apic_address: u32,
@@ -163,6 +165,7 @@ fn parse_madt(address: usize, mapped_limit: usize) -> Option<PlatformInfo> {
     }
     let mut info = PlatformInfo {
         enabled_processors: 0,
+        processor_apic_ids: [0; MAX_ENABLED_PROCESSORS],
         io_apics: 0,
         local_apic_address: unsafe { u64::from(read_unaligned(table.bytes.add(36).cast::<u32>())) },
         first_io_apic_address: 0,
@@ -190,7 +193,8 @@ fn parse_madt(address: usize, mapped_limit: usize) -> Option<PlatformInfo> {
             0 if entry_length >= 8 => {
                 let flags = unsafe { read_unaligned(entry.add(4).cast::<u32>()) };
                 if flags & (MADT_ENABLED | MADT_ONLINE_CAPABLE) != 0 {
-                    info.enabled_processors = info.enabled_processors.checked_add(1)?;
+                    let apic_id = u32::from(unsafe { entry.add(3).read() });
+                    record_processor(&mut info, apic_id)?;
                 }
             }
             1 if entry_length >= 12 => {
@@ -206,9 +210,10 @@ fn parse_madt(address: usize, mapped_limit: usize) -> Option<PlatformInfo> {
                 info.local_apic_address = unsafe { read_unaligned(entry.add(4).cast::<u64>()) };
             }
             9 if entry_length >= 16 => {
-                let flags = unsafe { read_unaligned(entry.add(4).cast::<u32>()) };
+                let apic_id = unsafe { read_unaligned(entry.add(4).cast::<u32>()) };
+                let flags = unsafe { read_unaligned(entry.add(8).cast::<u32>()) };
                 if flags & (MADT_ENABLED | MADT_ONLINE_CAPABLE) != 0 {
-                    info.enabled_processors = info.enabled_processors.checked_add(1)?;
+                    record_processor(&mut info, apic_id)?;
                 }
             }
             _ => {}
@@ -218,6 +223,17 @@ fn parse_madt(address: usize, mapped_limit: usize) -> Option<PlatformInfo> {
 
     (info.enabled_processors != 0 && info.io_apics != 0 && info.local_apic_address != 0)
         .then_some(info)
+}
+
+fn record_processor(info: &mut PlatformInfo, apic_id: u32) -> Option<()> {
+    if info.enabled_processors == MAX_ENABLED_PROCESSORS
+        || info.processor_apic_ids[..info.enabled_processors].contains(&apic_id)
+    {
+        return None;
+    }
+    info.processor_apic_ids[info.enabled_processors] = apic_id;
+    info.enabled_processors += 1;
+    Some(())
 }
 
 #[derive(Clone, Copy)]

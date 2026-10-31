@@ -12,11 +12,19 @@ pub(crate) const PROCESS_KEYRING: i32 = 1;
 pub(crate) const SESSION_KEYRING: i32 = 2;
 pub(crate) const USER_KEYRING: i32 = 3;
 
-static LOCKS: [AtomicBool; INSTANCE_LIMIT] = [const { AtomicBool::new(false) }; INSTANCE_LIMIT];
-static ROOT_ADDRESSES: [AtomicU64; INSTANCE_LIMIT] = [const { AtomicU64::new(0) }; INSTANCE_LIMIT];
-static ROOT_GENERATIONS: [AtomicU32; INSTANCE_LIMIT] =
-    [const { AtomicU32::new(0) }; INSTANCE_LIMIT];
-static NEXT_SERIALS: [AtomicU32; INSTANCE_LIMIT] = [const { AtomicU32::new(100) }; INSTANCE_LIMIT];
+struct KeyringRuntimeOwner {
+    locks: [AtomicBool; INSTANCE_LIMIT],
+    root_addresses: [AtomicU64; INSTANCE_LIMIT],
+    root_generations: [AtomicU32; INSTANCE_LIMIT],
+    next_serials: [AtomicU32; INSTANCE_LIMIT],
+}
+
+static KEYRING_RUNTIME: KeyringRuntimeOwner = KeyringRuntimeOwner {
+    locks: [const { AtomicBool::new(false) }; INSTANCE_LIMIT],
+    root_addresses: [const { AtomicU64::new(0) }; INSTANCE_LIMIT],
+    root_generations: [const { AtomicU32::new(0) }; INSTANCE_LIMIT],
+    next_serials: [const { AtomicU32::new(100) }; INSTANCE_LIMIT],
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Error {
@@ -56,7 +64,7 @@ struct Guard {
 impl Guard {
     fn acquire() -> Option<Self> {
         let instance = linux_process::current_ipc_instance();
-        let lock = LOCKS.get(instance)?;
+        let lock = KEYRING_RUNTIME.locks.get(instance)?;
         while lock
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
             .is_err()
@@ -69,21 +77,21 @@ impl Guard {
 
 impl Drop for Guard {
     fn drop(&mut self) {
-        LOCKS[self.instance].store(false, Ordering::Release);
+        KEYRING_RUNTIME.locks[self.instance].store(false, Ordering::Release);
     }
 }
 
 fn root(instance: usize) -> Option<memory::FrameLease> {
     memory::FrameLease::from_parts(
-        ROOT_ADDRESSES[instance].load(Ordering::Acquire),
-        ROOT_GENERATIONS[instance].load(Ordering::Acquire),
+        KEYRING_RUNTIME.root_addresses[instance].load(Ordering::Acquire),
+        KEYRING_RUNTIME.root_generations[instance].load(Ordering::Acquire),
     )
 }
 
 fn publish_root(instance: usize, root: Option<memory::FrameLease>) {
     let root = root.unwrap_or(memory::FrameLease::EMPTY);
-    ROOT_GENERATIONS[instance].store(root.generation(), Ordering::Release);
-    ROOT_ADDRESSES[instance].store(root.address(), Ordering::Release);
+    KEYRING_RUNTIME.root_generations[instance].store(root.generation(), Ordering::Release);
+    KEYRING_RUNTIME.root_addresses[instance].store(root.address(), Ordering::Release);
 }
 
 fn page(frame: memory::FrameLease) -> Option<&'static KeyPage> {
@@ -134,7 +142,7 @@ pub(crate) fn add(key_type: &[u8], description: &[u8], payload: &[u8]) -> Result
         return Err(Error::NoMemory);
     };
     unsafe { core::ptr::write_bytes(address as *mut u8, 0, PAGE_SIZE) };
-    let serial = NEXT_SERIALS[guard.instance]
+    let serial = KEYRING_RUNTIME.next_serials[guard.instance]
         .fetch_add(1, Ordering::SeqCst)
         .max(100) as i32;
     let key = page_mut(frame).ok_or(Error::NoMemory)?;
@@ -240,7 +248,7 @@ pub(crate) fn teardown() -> bool {
     let released = clear();
     if released {
         let instance = linux_process::current_ipc_instance();
-        NEXT_SERIALS[instance].store(100, Ordering::SeqCst);
+        KEYRING_RUNTIME.next_serials[instance].store(100, Ordering::SeqCst);
     }
     released
 }

@@ -1,0 +1,12 @@
+Privilege-entry architecture check passed
+User-access architecture check passed
+Writable-global classification check passed (474 globals)
+x86 runtime-owner check passed (404 managed backings)
+Synchronization architecture check passed
+Architecture consistency check passed
+claim	disposition	evidence
+SYSCALL entry initially uses user RSP	resolved-or-not-reproduced	/Users/gmk/git/ginux/kernel/src/arch/x86_64/cpu.rs:2632 switches to trusted GS-based entry storage at line 2639 before stack use
+NMI lacks a dedicated IST	resolved-or-not-reproduced	/Users/gmk/git/ginux/kernel/src/arch/x86_64/cpu/architecture.rs:564 assigns the NMI IST explicitly
+machine check lacks a dedicated IST	resolved-or-not-reproduced	/Users/gmk/git/ginux/kernel/src/arch/x86_64/cpu/architecture.rs:564 assigns the machine-check IST explicitly
+user-copy faults are not recoverable	resolved-or-not-reproduced	copy path changed
+software bookkeeping overrides a failed hardware walk	rejected	/Users/gmk/git/ginux/kernel/src/address_space.rs:5556 walks active page tables and the fast copy checks leaf presence/permissions at line 3152

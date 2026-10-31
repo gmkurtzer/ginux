@@ -1,0 +1,26 @@
+    Finished `release` profile [optimized] target(s) in 0.06s
+Built build/linux-probe.elf and build/linux-dynamic
+    Finished `release` profile [optimized] target(s) in 0.02s
+Built target/x86_64-unknown-none/release/ginux-controller-runtime
+    Finished `release` profile [optimized] target(s) in 0.03s
+Built target/x86_64-unknown-none/release/ginux-network-service-runtime
+    Finished `release` profile [optimized] target(s) in 0.01s
+Built target/x86_64-unknown-none/release/ginux-protocol-service-runtime
+    Finished `release` profile [optimized] target(s) in 0.01s
+Built target/x86_64-unknown-none/release/ginux-volume-service-runtime
+Generated boot/efi/src/generated_boot.rs from control-plane/bootstrap.hex signed by the development-only RFC test key
+Building Ginux verification boot for x86_64-unknown-uefi (release)
+   Compiling ginux-boot v0.1.0 (/Users/gmk/git/ginux/boot/efi)
+    Finished `release` profile [optimized] target(s) in 5.58s
+Built verification image build/esp/EFI/BOOT/BOOTX64.EFI
+Qualifying Ginux with 1 CPU(s)
+Boot test passed.
+Qualifying Ginux with 2 CPU(s)
+Boot test passed.
+Qualifying Ginux with 4 CPU(s)
+Boot test passed.
+Running two-CPU SMP stress pass 1 of 2
+Boot test passed.
+Running two-CPU SMP stress pass 2 of 2
+Boot test passed.
+SMP topology and stress matrix passed.

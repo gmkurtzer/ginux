@@ -10,8 +10,10 @@ ovmf_vars_template="$(find_ovmf_vars)"
 accelerator="${QEMU_ACCEL:-$(default_accelerator)}"
 if [[ "$accelerator" == "tcg" ]]; then
     default_cpu_model="max,+smep,+smap,+umip"
+    accelerator_spec="tcg,thread=${QEMU_TCG_THREAD:-multi}"
 else
     default_cpu_model="host,+smep,+smap,+umip"
+    accelerator_spec="$accelerator"
 fi
 cpu_model="${QEMU_CPU:-$default_cpu_model}"
 esp_dir="${GINUX_ESP_DIR:-$repo_root/build/esp}"
@@ -47,9 +49,18 @@ if [[ -n "${GINUX_QEMU_PID_FILE:-}" ]]; then
 fi
 
 memory="${GINUX_MEMORY:-1G}"
+cpus="${GINUX_CPUS:-2}"
+case "$cpus" in
+    1|2|4) ;;
+    *) echo "GINUX_CPUS must be 1, 2, or 4" >&2; exit 2 ;;
+esac
 network_capture=()
 if [[ -n "${GINUX_PCAP:-}" ]]; then
     network_capture=(-object "filter-dump,id=ginux-capture,netdev=ginux-net,file=$GINUX_PCAP")
+fi
+qemu_debug=()
+if [[ -n "${GINUX_QEMU_DEBUG_LOG:-}" ]]; then
+    qemu_debug=(-d "${GINUX_QEMU_DEBUG_FLAGS:-int}" -D "$GINUX_QEMU_DEBUG_LOG")
 fi
 qemu_netdev="user,id=ginux-net,restrict=off"
 if [[ -n "${GINUX_QEMU_DNS:-}" ]]; then
@@ -60,9 +71,10 @@ if [[ -n "${GINUX_QEMU_HOSTFWD:-}" ]]; then
 fi
 
 exec "$qemu" \
-    -machine "q35,accel=$accelerator" \
+    -machine q35 \
+    -accel "$accelerator_spec" \
     -cpu "$cpu_model" \
-    -smp 1 \
+    -smp "$cpus" \
     -m "$memory" \
     -display none \
     -monitor none \
@@ -73,6 +85,7 @@ exec "$qemu" \
     -device "virtio-blk-pci,drive=ginux-volume,disable-legacy=on,iommu_platform=on,serial=ginux-volume" \
     -netdev "$qemu_netdev" \
     ${network_capture[@]+"${network_capture[@]}"} \
+    ${qemu_debug[@]+"${qemu_debug[@]}"} \
     -device "virtio-net-pci,netdev=ginux-net,disable-legacy=on,iommu_platform=on,mac=52:54:00:12:34:56,addr=0x3" \
     -drive "if=none,id=ginux-volume,format=raw,file=$volume_image" \
     -drive "if=pflash,format=raw,readonly=on,file=$ovmf_code" \

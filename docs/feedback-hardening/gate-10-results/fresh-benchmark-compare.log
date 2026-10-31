@@ -1,0 +1,17 @@
+workload	metric	linux_n	linux_median	ginux_n	ginux_median	ginux_result
+CPU	events/s	9	232.360	9	265.470	1.142x faster
+Memory	MiB/s	9	679.510	9	597.260	1.138x slower
+Threads	events/s	9	306.129	9	312.708	1.021x faster
+Mutex	s/event	9	1.550	9	1.444	1.073x faster
+Benchmark inputs match:
+  platform: linux/amd64
+  machine:  q35
+  vCPUs:    1
+  memory:   2G
+  sysbench: 7cf6b71521436bd32a8ab197851035ff1632bee383fec5a35468d61969e7c18d
+
+Raw results:
+  /Users/gmk/git/ginux/build/benchmark/rocky10-single-vcpu/rocky-linux-summary.tsv
+  /Users/gmk/git/ginux/build/benchmark/rocky10-single-vcpu/rocky-linux-run-*-results.log
+  /Users/gmk/git/ginux/build/benchmark/rocky10-single-vcpu/ginux-sysbench-*.log
+  /Users/gmk/git/ginux/build/benchmark/rocky10-single-vcpu/sysbench-comparison.tsv

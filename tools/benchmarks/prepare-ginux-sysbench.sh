@@ -6,9 +6,9 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 
 require_benchmark_tool docker
-mkdir -p "$benchmark_dir"
-rootfs="$benchmark_dir/sysbench-minimal-rootfs.tar"
-volume="$benchmark_dir/ginux-volume.raw"
+mkdir -p "$benchmark_asset_dir"
+rootfs="$benchmark_asset_dir/sysbench-minimal-rootfs.tar"
+volume="$benchmark_asset_dir/ginux-volume.raw"
 
 docker build --platform linux/amd64 -f "$benchmark_root/tools/benchmarks/sysbench.Dockerfile" \
     -t "$GINUX_SYSBENCH_IMAGE" "$benchmark_root"

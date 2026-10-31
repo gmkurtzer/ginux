@@ -38,11 +38,17 @@ def linux_samples(directory: Path, workload: str) -> list[float]:
 
 def ginux_samples(directory: Path, workload: str) -> list[float]:
     samples = []
-    for path in sorted(directory.glob(f"ginux-sysbench-{workload}-*.log")):
+    paths = sorted(directory.glob("ginux-sysbench-batch-*.log"))
+    if not paths:
+        paths = sorted(directory.glob(f"ginux-sysbench-{workload}-*.log"))
+    pattern = re.compile(
+        rf"GINUX_BENCH_WORKLOAD_BEGIN_{workload}_[0-9]+(.*?)"
+        rf"GINUX_BENCH_WORKLOAD_END_{workload}_[0-9]+=0",
+        re.DOTALL,
+    )
+    for path in paths:
         text = path.read_text(errors="replace")
-        if not re.search(rf"GINUX_BENCH_WORKLOAD_END_{workload}_[0-9]+=0", text):
-            continue
-        samples.append(value(workload, text))
+        samples.extend(value(workload, block) for block in pattern.findall(text))
     return samples
 
 

@@ -3512,7 +3512,9 @@ pub(crate) fn verify_interpreted_plan() -> bool {
         && auxiliary[25] == 0x40_0100
         && auxiliary[29] == 0x70_2000
         && auxiliary[35] == 0x70_3000
-        && auxiliary[36..] == [0, 0];
+        && auxiliary[36] == 33
+        && auxiliary[37] == 0
+        && auxiliary[38..] == [0, 0];
     let main_valid = combined.initial_entry == 0x60_0100
         && combined.main_entry == 0x40_0100
         && combined.interpreter_base == 0x60_0000

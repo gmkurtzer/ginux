@@ -6,13 +6,15 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 
 linux_log="$benchmark_dir/rocky-linux-run-1-results.log"
-ginux_log="$benchmark_dir/ginux-sysbench-cpu-1.log"
+ginux_log=$(find "$benchmark_dir" -maxdepth 1 -type f \
+    \( -name 'ginux-sysbench-batch-*.log' -o -name 'ginux-sysbench-cpu-*.log' \) \
+    -print | LC_ALL=C sort | sed -n '1p')
 
 [[ -s "$linux_log" ]] || {
     echo "benchmark: missing Linux results; run 'make benchmark-linux-comparison'" >&2
     exit 1
 }
-[[ -s "$ginux_log" ]] || {
+[[ -n "$ginux_log" && -s "$ginux_log" ]] || {
     echo "benchmark: missing Ginux results; run 'make benchmark-ginux-sysbench'" >&2
     exit 1
 }
@@ -42,6 +44,7 @@ Benchmark inputs match:
   platform: linux/amd64
   machine:  $BENCHMARK_MACHINE
   vCPUs:    $BENCHMARK_VCPUS
+  threads:  $BENCHMARK_THREADS
   memory:   $BENCHMARK_MEMORY
   sysbench: $linux_hash
 

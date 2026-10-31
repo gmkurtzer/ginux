@@ -1,0 +1,36 @@
+    Finished `release` profile [optimized] target(s) in 0.02s
+Built build/linux-probe.elf and build/linux-dynamic
+    Finished `release` profile [optimized] target(s) in 0.01s
+Built target/x86_64-unknown-none/release/ginux-controller-runtime
+    Finished `release` profile [optimized] target(s) in 0.03s
+Built target/x86_64-unknown-none/release/ginux-network-service-runtime
+    Finished `release` profile [optimized] target(s) in 0.01s
+Built target/x86_64-unknown-none/release/ginux-protocol-service-runtime
+    Finished `release` profile [optimized] target(s) in 0.01s
+Built target/x86_64-unknown-none/release/ginux-volume-service-runtime
+Generated boot/efi/src/generated_boot.rs from control-plane/bootstrap.hex signed by the development-only RFC test key
+Building Ginux for x86_64-unknown-uefi (release)
+   Compiling ginux-boot v0.1.0 (/Users/gmk/git/ginux/boot/efi)
+    Finished `release` profile [optimized] target(s) in 4.81s
+Built build/esp/EFI/BOOT/BOOTX64.EFI
+Rocky timing QEMU-start-to-multi-user: 14832 ms
+Rocky timing Linux-init-to-console: 6501 ms
+Rocky timing domain-start-to-login: 15 s
+Rocky timing Linux-init-to-login: 8 s
+Rocky systemd console login target passed.
+Rocky timing QEMU-start-to-multi-user: 15866 ms
+Rocky timing Linux-init-to-console: 6503 ms
+Rocky timing domain-start-to-login: 15 s
+Rocky timing Linux-init-to-login: 8 s
+Rocky systemd console login target passed.
+Rocky timing QEMU-start-to-multi-user: 14702 ms
+Rocky timing Linux-init-to-console: 6394 ms
+Rocky timing domain-start-to-login: 15 s
+Rocky timing Linux-init-to-login: 7 s
+Rocky systemd console login target passed.
+Rocky timing QEMU-start-to-multi-user: 14522 ms
+Rocky timing Linux-init-to-console: 6327 ms
+Rocky timing domain-start-to-login: 14 s
+Rocky timing Linux-init-to-login: 7 s
+Rocky systemd console login target passed.
+Ginux boot benchmark completed: /Users/gmk/git/ginux/build/benchmark/rocky10-single-vcpu/ginux-boot-summary.tsv

@@ -141,7 +141,7 @@ coverage, and a physical-hardware matrix remain future work.
 | Storage | Persistent configuration and verified OCI layer cache | Writable domain persistence and production recovery remain incomplete |
 | Networking | Host DHCP/DNS, virtual-link configuration, loopback, and tested lifecycle | Independent per-domain packet paths and leases remain unfinished |
 | Devices | QEMU virtio block/network, MSI-X, and VT-d paths | No GPU, NVMe, broad hardware, or stable third-party driver ABI |
-| Performance | Narrow single-vCPU QEMU comparison using the same sysbench binary | Not a native, multicore, or general kernel benchmark |
+| Performance | Matched 1/2/4-vCPU QEMU comparison using the same Rocky userspace and sysbench binary | Not a native-hardware or general kernel benchmark; four-thread scheduling remains weak |
 | Security | Capability and generation mechanisms exercised by tests | No independent audit or production security claim |
 
 The validated development target is QEMU's x86-64 Q35 machine with OVMF,

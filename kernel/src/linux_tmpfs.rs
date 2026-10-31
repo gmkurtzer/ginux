@@ -3,7 +3,10 @@ use crate::{
     control_abi,
     memory::{self, FrameLease, FrameOwner},
 };
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::{
+    cell::UnsafeCell,
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 pub(crate) const FILE_CAPACITY: usize = 64;
 const PAGE_SIZE: usize = 4096;
@@ -14,8 +17,17 @@ const FIRST_FILE_INODE: u64 = 18;
 const HOST_INSTANCE: usize = control_abi::DOMAIN_LIMIT;
 const INSTANCE_LIMIT: usize = control_abi::DOMAIN_LIMIT + 1;
 
-static INSTALLED: AtomicBool = AtomicBool::new(false);
-static mut LIVE_TMPFS: [Tmpfs; INSTANCE_LIMIT] = [const { Tmpfs::new() }; INSTANCE_LIMIT];
+struct TmpfsRuntimeOwner {
+    installed: AtomicBool,
+    instances: UnsafeCell<[Tmpfs; INSTANCE_LIMIT]>,
+}
+
+unsafe impl Sync for TmpfsRuntimeOwner {}
+
+static TMPFS_RUNTIME: TmpfsRuntimeOwner = TmpfsRuntimeOwner {
+    installed: AtomicBool::new(false),
+    instances: UnsafeCell::new([const { Tmpfs::new() }; INSTANCE_LIMIT]),
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct FileHandle {
@@ -536,17 +548,22 @@ pub(crate) fn verify_contract() -> bool {
 }
 
 pub(crate) fn install() -> bool {
-    if INSTALLED.load(Ordering::Acquire) {
+    if TMPFS_RUNTIME.installed.load(Ordering::Acquire) {
         return false;
     }
     let mut index = 0;
     while index < INSTANCE_LIMIT {
         unsafe {
-            core::ptr::addr_of_mut!(LIVE_TMPFS[index]).write(Tmpfs::new());
+            TMPFS_RUNTIME
+                .instances
+                .get()
+                .cast::<Tmpfs>()
+                .add(index)
+                .write(Tmpfs::new());
         }
         index += 1;
     }
-    INSTALLED.store(true, Ordering::Release);
+    TMPFS_RUNTIME.installed.store(true, Ordering::Release);
     (0..INSTANCE_LIMIT).all(|index| live_at(index).is_some_and(Tmpfs::clean))
 }
 
@@ -683,23 +700,19 @@ fn live() -> Option<&'static Tmpfs> {
 }
 
 fn live_at(index: usize) -> Option<&'static Tmpfs> {
-    if !INSTALLED.load(Ordering::Acquire) {
+    if !TMPFS_RUNTIME.installed.load(Ordering::Acquire) {
         return None;
     }
-    let tmpfs = unsafe { core::ptr::addr_of!(LIVE_TMPFS).cast::<Tmpfs>().add(index) };
+    let tmpfs = unsafe { TMPFS_RUNTIME.instances.get().cast::<Tmpfs>().add(index) };
     Some(unsafe { &*tmpfs })
 }
 
 fn live_mut() -> Option<&'static mut Tmpfs> {
-    if !INSTALLED.load(Ordering::Acquire) {
+    if !TMPFS_RUNTIME.installed.load(Ordering::Acquire) {
         return None;
     }
     let index = current_instance();
-    let tmpfs = unsafe {
-        core::ptr::addr_of_mut!(LIVE_TMPFS)
-            .cast::<Tmpfs>()
-            .add(index)
-    };
+    let tmpfs = unsafe { TMPFS_RUNTIME.instances.get().cast::<Tmpfs>().add(index) };
     Some(unsafe { &mut *tmpfs })
 }
 

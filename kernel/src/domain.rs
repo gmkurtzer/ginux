@@ -1,7 +1,6 @@
 use crate::capability::{Handle, Rights, Table as CapabilityTable};
 use crate::manifest::Manifest;
-use core::mem::MaybeUninit;
-use core::sync::atomic::{AtomicBool, Ordering};
+use crate::owned_state::OwnedState;
 
 const NATIVE_DOMAIN_CAPACITY: usize = 8;
 const CONTAINER_DOMAIN_CAPACITY: usize = crate::control_abi::DOMAIN_LIMIT;
@@ -17,8 +16,7 @@ const EVENT_CAPACITY: usize = 4;
 pub(crate) const MAX_AUXILIARY_SERVICES: usize = NATIVE_DOMAIN_CAPACITY - 2;
 const MAX_SERVICE_IDENTITIES: usize = 1 + MAX_AUXILIARY_SERVICES;
 
-static INITIALIZED: AtomicBool = AtomicBool::new(false);
-static mut GLOBAL_MANAGER: MaybeUninit<Manager> = MaybeUninit::uninit();
+static DOMAIN_RUNTIME: OwnedState<Manager> = OwnedState::empty();
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct DomainId {
@@ -1140,7 +1138,7 @@ impl Manager {
 }
 
 pub(crate) fn initialize_control_plane(manifest: &Manifest) -> Option<u64> {
-    if INITIALIZED.load(Ordering::Acquire) {
+    if DOMAIN_RUNTIME.get().is_some() {
         return None;
     }
     const HOST_CONTROL: u64 = 1;
@@ -1172,19 +1170,15 @@ pub(crate) fn initialize_control_plane(manifest: &Manifest) -> Option<u64> {
         return None;
     }
     let encoded = encode_id(id);
-    unsafe {
-        core::ptr::addr_of_mut!(GLOBAL_MANAGER).write(MaybeUninit::new(manager));
-    }
-    INITIALIZED.store(true, Ordering::Release);
+    DOMAIN_RUNTIME.try_install(manager).ok()?;
     control_plane_permits(0, HOST_CONTROL, Rights::MANAGE).then_some(encoded)
 }
 
 pub(crate) fn control_plane_permits(root_index: usize, object: u64, rights: Rights) -> bool {
-    if !INITIALIZED.load(Ordering::Acquire) {
-        return false;
-    }
-    unsafe {
-        let manager = &*core::ptr::addr_of!(GLOBAL_MANAGER).cast::<Manager>();
+    {
+        let Some(manager) = DOMAIN_RUNTIME.get() else {
+            return false;
+        };
         let Some(id) = manager.control_plane_id else {
             return false;
         };
@@ -1538,7 +1532,12 @@ pub(crate) fn configure_container_network_mode(
     let Some(id) = decode_id(domain_raw) else {
         return false;
     };
-    let manager = unsafe { &mut *core::ptr::addr_of_mut!(GLOBAL_MANAGER).cast::<Manager>() };
+    let Some(manager) = DOMAIN_RUNTIME.get_mut_ptr() else {
+        return false;
+    };
+    // SAFETY: Domain mutation is serialized on the bootstrap CPU until Gate 8
+    // supplies the runtime lock for this explicit owner root.
+    let manager = unsafe { &mut *manager };
     let Some(domain) = manager.domain_mut(id) else {
         return false;
     };
@@ -3217,17 +3216,13 @@ pub(crate) fn last_retired_service_domain() -> Option<u64> {
 }
 
 fn global_manager() -> Option<&'static Manager> {
-    if !INITIALIZED.load(Ordering::Acquire) {
-        return None;
-    }
-    unsafe { Some(&*core::ptr::addr_of!(GLOBAL_MANAGER).cast::<Manager>()) }
+    DOMAIN_RUNTIME.get()
 }
 
 fn global_manager_mut() -> Option<&'static mut Manager> {
-    if !INITIALIZED.load(Ordering::Acquire) {
-        return None;
-    }
-    unsafe { Some(&mut *core::ptr::addr_of_mut!(GLOBAL_MANAGER).cast::<Manager>()) }
+    // SAFETY: Domain mutation is serialized on the bootstrap CPU until Gate 8
+    // supplies the runtime lock for this explicit owner root.
+    Some(unsafe { &mut *DOMAIN_RUNTIME.get_mut_ptr()? })
 }
 
 const fn encode_id(id: DomainId) -> u64 {

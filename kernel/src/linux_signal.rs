@@ -1,4 +1,7 @@
-use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use core::{
+    cell::UnsafeCell,
+    sync::atomic::{AtomicBool, AtomicU64, Ordering},
+};
 
 use crate::{control_abi, linux_process, memory};
 
@@ -93,12 +96,21 @@ struct Page {
 
 const _: [(); PAGE_SIZE] = [(); core::mem::size_of::<Page>()];
 
-static LOCKS: [AtomicBool; INSTANCE_LIMIT] = [const { AtomicBool::new(false) }; INSTANCE_LIMIT];
-static PENDING_COUNTS: [AtomicU64; INSTANCE_LIMIT] = [const { AtomicU64::new(0) }; INSTANCE_LIMIT];
-static mut PROCESS_QUEUES: [[Queue; linux_process::PROCESS_LIMIT]; INSTANCE_LIMIT] =
-    [[Queue::EMPTY; linux_process::PROCESS_LIMIT]; INSTANCE_LIMIT];
-static mut THREAD_QUEUES: [[Queue; THREAD_QUEUE_LIMIT]; INSTANCE_LIMIT] =
-    [[Queue::EMPTY; THREAD_QUEUE_LIMIT]; INSTANCE_LIMIT];
+struct SignalRuntimeOwner {
+    locks: [AtomicBool; INSTANCE_LIMIT],
+    pending_counts: [AtomicU64; INSTANCE_LIMIT],
+    process_queues: UnsafeCell<[[Queue; linux_process::PROCESS_LIMIT]; INSTANCE_LIMIT]>,
+    thread_queues: UnsafeCell<[[Queue; THREAD_QUEUE_LIMIT]; INSTANCE_LIMIT]>,
+}
+
+unsafe impl Sync for SignalRuntimeOwner {}
+
+static SIGNAL_RUNTIME: SignalRuntimeOwner = SignalRuntimeOwner {
+    locks: [const { AtomicBool::new(false) }; INSTANCE_LIMIT],
+    pending_counts: [const { AtomicU64::new(0) }; INSTANCE_LIMIT],
+    process_queues: UnsafeCell::new([[Queue::EMPTY; linux_process::PROCESS_LIMIT]; INSTANCE_LIMIT]),
+    thread_queues: UnsafeCell::new([[Queue::EMPTY; THREAD_QUEUE_LIMIT]; INSTANCE_LIMIT]),
+};
 
 struct Guard {
     instance: usize,
@@ -106,7 +118,7 @@ struct Guard {
 
 impl Guard {
     fn acquire(instance: usize) -> Result<Self, Error> {
-        let lock = LOCKS.get(instance).ok_or(Error::Invalid)?;
+        let lock = SIGNAL_RUNTIME.locks.get(instance).ok_or(Error::Invalid)?;
         while lock
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
             .is_err()
@@ -119,12 +131,16 @@ impl Guard {
     fn queue(&self, scope: Scope, slot: usize) -> Option<&'static mut Queue> {
         match scope {
             Scope::Process if slot < linux_process::PROCESS_LIMIT => Some(unsafe {
-                &mut *core::ptr::addr_of_mut!(PROCESS_QUEUES)
+                &mut *SIGNAL_RUNTIME
+                    .process_queues
+                    .get()
                     .cast::<Queue>()
                     .add(self.instance * linux_process::PROCESS_LIMIT + slot)
             }),
             Scope::Thread if slot < THREAD_QUEUE_LIMIT => Some(unsafe {
-                &mut *core::ptr::addr_of_mut!(THREAD_QUEUES)
+                &mut *SIGNAL_RUNTIME
+                    .thread_queues
+                    .get()
                     .cast::<Queue>()
                     .add(self.instance * THREAD_QUEUE_LIMIT + slot)
             }),
@@ -135,7 +151,7 @@ impl Guard {
 
 impl Drop for Guard {
     fn drop(&mut self) {
-        LOCKS[self.instance].store(false, Ordering::Release);
+        SIGNAL_RUNTIME.locks[self.instance].store(false, Ordering::Release);
     }
 }
 
@@ -271,12 +287,13 @@ pub(crate) fn enqueue(
         reserved: [0; 2],
     };
     queue.pending = queue.pending.checked_add(1).ok_or(Error::NoMemory)?;
-    PENDING_COUNTS[instance].fetch_add(1, Ordering::Release);
+    SIGNAL_RUNTIME.pending_counts[instance].fetch_add(1, Ordering::Release);
     Ok(true)
 }
 
 pub(crate) fn any_pending(instance: usize) -> bool {
-    PENDING_COUNTS
+    SIGNAL_RUNTIME
+        .pending_counts
         .get(instance)
         .is_some_and(|count| count.load(Ordering::Acquire) != 0)
 }
@@ -357,7 +374,7 @@ pub(crate) fn dequeue(
     };
     page_mut(frame).ok_or(Error::Invalid)?.entries[index] = Entry::EMPTY;
     queue.pending = queue.pending.checked_sub(1).ok_or(Error::Invalid)?;
-    PENDING_COUNTS[instance].fetch_sub(1, Ordering::AcqRel);
+    SIGNAL_RUNTIME.pending_counts[instance].fetch_sub(1, Ordering::AcqRel);
     if !release_empty_pages(queue) {
         return Err(Error::Invalid);
     }
@@ -387,7 +404,7 @@ pub(crate) fn clear(instance: usize, scope: Scope, slot: usize) -> Result<(), Er
     let pending = queue.pending;
     *queue = Queue::EMPTY;
     if pending != 0 {
-        PENDING_COUNTS[instance].fetch_sub(pending, Ordering::AcqRel);
+        SIGNAL_RUNTIME.pending_counts[instance].fetch_sub(pending, Ordering::AcqRel);
     }
     Ok(())
 }

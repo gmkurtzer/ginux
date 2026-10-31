@@ -51,7 +51,7 @@ run_boot() {
             printf '%s\n' \
                 'domain new alpine' \
                 'domain set alpine image=alpine:latest init=/bin/sh' \
-                'domain start alpine'
+                'domain start alpine --attach'
             for _ in {1..240}; do
                 if grep -aFq 'ginux: OCI cache stored 1 layer' "$output_file" \
                     && grep -aFq 'ginux: local configuration committed' "$output_file"; then
@@ -62,7 +62,7 @@ run_boot() {
                 sleep 1
             done
         else
-            printf '%s\n' 'domain start alpine'
+            printf '%s\n' 'domain start alpine --attach'
             for _ in {1..120}; do
                 if grep -aFq 'ginux: OCI cache hit (1 layer)' "$output_file" \
                     && grep -aFq 'ginux: OCI image ready' "$output_file"; then

@@ -1,0 +1,340 @@
+    Finished `release` profile [optimized] target(s) in 0.02s
+Built build/linux-probe.elf and build/linux-dynamic
+    Finished `release` profile [optimized] target(s) in 0.01s
+Built target/x86_64-unknown-none/release/ginux-controller-runtime
+    Finished `release` profile [optimized] target(s) in 0.02s
+Built target/x86_64-unknown-none/release/ginux-network-service-runtime
+    Finished `release` profile [optimized] target(s) in 0.01s
+Built target/x86_64-unknown-none/release/ginux-protocol-service-runtime
+    Finished `release` profile [optimized] target(s) in 0.01s
+Built target/x86_64-unknown-none/release/ginux-volume-service-runtime
+Generated boot/efi/src/generated_boot.rs from control-plane/bootstrap.hex signed by the development-only RFC test key
+Building Ginux for x86_64-unknown-uefi (release)
+   Compiling ginux-boot v0.1.0 (/Users/gmk/git/ginux/boot/efi)
+    Finished `release` profile [optimized] target(s) in 5.15s
+Built build/esp/EFI/BOOT/BOOTX64.EFI
+sh-5.2# /usr/bin/dnf -y update; printf 'DNF_UPDATE_EXIT=%s\n' "$?"
+ attr                    x86_64 2.6.0-1.el10_2                  baseos     63 k
+ ca-certificates         noarch 2026.2.92_v9.0.319-100.3.el10_2 baseos    980 k
+ coreutils-single        x86_64 9.5-8.el10_2.1                  baseos    614 k
+ crypto-policies         noarch 20260216-1.git0e54016.el10_2.2  baseos     63 k
+ crypto-policies-scripts noarch 20260216-1.git0e54016.el10_2.2  baseos    115 k
+ curl                    x86_64 8.12.1-4.el10_2.7               baseos    217 k
+ cyrus-sasl-lib          x86_64 2.1.28-30.el10_2                baseos    100 k
+ expat                   x86_64 2.7.3-1.el10_2.7                baseos    122 k
+ gawk                    x86_64 5.3.0-6.el10_2.1                baseos    1.1 M
+ glib2                   x86_64 2.80.4-12.el10_2.22             baseos    3.0 M
+ glibc                   x86_64 2.39-145.el10_2                 baseos    2.1 M
+ glibc-common            x86_64 2.39-145.el10_2                 baseos    312 k
+ glibc-minimal-langpack  x86_64 2.39-145.el10_2                 baseos     28 k
+ gnutls                  x86_64 3.8.10-5.el10_2                 baseos    1.5 M
+ gzip                    x86_64 1.13-4.el10_2                   baseos    164 k
+ libacl                  x86_64 2.4.0-1.el10_2                  baseos     26 k
+ libarchive              x86_64 3.7.7-11.el10_2                 baseos    414 k
+ libattr                 x86_64 2.6.0-1.el10_2                  baseos     18 k
+ libcurl-minimal         x86_64 8.12.1-4.el10_2.7               baseos    296 k
+ libevent                x86_64 2.1.13-1.el10_2                 baseos    259 k
+ libnghttp2              x86_64 1.68.0-3.el10_2.2               baseos     73 k
+ libsolv                 x86_64 0.7.33-5.el10_2                 baseos    429 k
+ libtasn1                x86_64 4.20.0-5.el10_2                 baseos     75 k
+ libusb1                 x86_64 1.0.30-1.el10_2                 baseos     77 k
+ libxml2                 x86_64 2.12.5-10.el10_2.4              baseos    691 k
+ openssl-fips-provider   x86_64 1:3.5.8-2.el10_2                baseos    811 k
+ openssl-libs            x86_64 1:3.5.8-2.el10_2                baseos    2.3 M
+ p11-kit                 x86_64 0.26.4-1.el10_2                 baseos    545 k
+ p11-kit-trust           x86_64 0.26.4-1.el10_2                 baseos    141 k
+ pam                     x86_64 1.6.1-9.el10_2.1                baseos    512 k
+ pam-libs                x86_64 1.6.1-9.el10_2.1                baseos     56 k
+ pcre2                   x86_64 10.44-1.5.el10_2                baseos    246 k
+ pcre2-syntax            noarch 10.44-1.5.el10_2                baseos    149 k
+ python3                 x86_64 3.12.15-1.el10_2                baseos     27 k
+ python3-libs            x86_64 3.12.15-1.el10_2                baseos    8.9 M
+ rocky-gpg-keys          noarch 10.2-1.2.el10                   baseos     25 k
+ rocky-release           noarch 10.2-1.2.el10                   baseos     26 k
+ rocky-repos             noarch 10.2-1.2.el10                   baseos     13 k
+ rpm-sequoia             x86_64 1.10.2.1-1.el10_2               baseos    971 k
+ sqlite-libs             x86_64 3.46.1-6.el10_2                 baseos    744 k
+ systemd-libs            x86_64 257-23.el10_2.2.rocky.0.1       baseos    839 k
+ tar                     x86_64 2:1.35-13.el10_2                baseos    858 k
+ tzdata                  noarch 2026e-1.el10_2                  baseos    500 k
+ vim-data                noarch 2:9.1.083-9.el10_2.22           baseos     19 k
+ vim-minimal             x86_64 2:9.1.083-9.el10_2.22           baseos    801 k
+ xz-libs                 x86_64 1:5.6.2-4.el10_2.1              baseos    111 k
+Installing weak dependencies:
+ gawk-all-langpacks      x86_64 5.3.0-6.el10_2.1                appstream 273 k
+
+Transaction Summary
+================================================================================
+Install   1 Package
+Upgrade  46 Packages
+
+Total download size: 31 M
+Downloading Packages:
+Rocky Linux 10 - App     [            ===     ] ---  B/s |   0  B     --:-- ETA
+Rocky Linux 10 - App     [               ===  ] 8.0 kB/s | 2.8 kB     --:-- ETA
+(1/47): gawk-all-lan  0% [                    ] ---  B/s |   0  B     --:-- ETA
+(1/47): attr-2.6.0-1.el10_2.x86_64.rpm          284 kB/s |  63 kB     00:00    
+(2-3/47): gawk-all-l  0% [                    ] 382 kB/s |  90 kB     01:23 ETA
+(2/47): ca-certificates-2026.2.92_v9.0.319-100. 2.1 MB/s | 980 kB     00:00    
+(3-4/47): coreutils-  4% [-                   ] 620 kB/s | 1.3 MB     00:49 ETA
+(3/47): coreutils-single-9.5-8.el10_2.1.x86_64. 2.1 MB/s | 614 kB     00:00    
+(4-5/47): crypto-pol  5% [=                   ] 678 kB/s | 1.6 MB     00:44 ETA
+(4/47): crypto-policies-20260216-1.git0e54016.e 763 kB/s |  63 kB     00:00    
+(5-6/47): crypto-pol  5% [=                   ] 689 kB/s | 1.7 MB     00:44 ETA
+(5/47): crypto-policies-scripts-20260216-1.git0 1.0 MB/s | 115 kB     00:00    
+(6-7/47): curl-8.12.  6% [=                   ] 711 kB/s | 1.9 MB     00:42 ETA
+(6/47): curl-8.12.1-4.el10_2.7.x86_64.rpm       1.8 MB/s | 217 kB     00:00    
+(7-8/47): cyrus-sasl  6% [=                   ] 751 kB/s | 2.1 MB     00:39 ETA
+(7/47): cyrus-sasl-lib-2.1.28-30.el10_2.x86_64. 997 kB/s | 100 kB     00:00    
+(8-9/47): expat-2.7.  7% [=                   ] 779 kB/s | 2.3 MB     00:38 ETA
+(8/47): gawk-all-langpacks-5.3.0-6.el10_2.1.x86 350 kB/s | 273 kB     00:00    
+(9-10/47): gawk-5.3.  7% [=-                  ] 806 kB/s | 2.5 MB     00:36 ETA
+(9/47): expat-2.7.3-1.el10_2.7.x86_64.rpm       1.1 MB/s | 122 kB     00:00    
+(10-11/47): glib2-2.  7% [=-                  ] 811 kB/s | 2.5 MB     00:36 ETA
+(10/47): gawk-5.3.0-6.el10_2.1.x86_64.rpm       3.4 MB/s | 1.1 MB     00:00    
+(11-12/47): glibc-2. 14% [==-                 ] 1.2 MB/s | 4.6 MB     00:22 ETA
+(11-13/47): glibc-co 26% [=====               ] 1.9 MB/s | 8.4 MB     00:12 ETA
+(11/47): glib2-2.80.4-12.el10_2.22.x86_64.rpm   4.6 MB/s | 3.0 MB     00:00    
+(12-13/47): glibc-co 27% [=====               ] 1.9 MB/s | 8.6 MB     00:12 ETA
+(12/47): glibc-2.39-145.el10_2.x86_64.rpm       3.0 MB/s | 2.1 MB     00:00    
+(13-14/47): glibc-co 27% [=====-              ] 1.9 MB/s | 8.7 MB     00:12 ETA
+(13/47): glibc-common-2.39-145.el10_2.x86_64.rp 686 kB/s | 312 kB     00:00    
+(14-15/47): glibc-mi 28% [=====-              ] 1.9 MB/s | 8.9 MB     00:11 ETA
+(14/47): glibc-minimal-langpack-2.39-145.el10_2 235 kB/s |  28 kB     00:00    
+(15-16/47): gnutls-3 28% [=====-              ] 1.9 MB/s | 9.0 MB     00:11 ETA
+(15/47): gzip-1.13-4.el10_2.x86_64.rpm          994 kB/s | 164 kB     00:00    
+(16-17/47): gnutls-3 31% [======              ] 2.0 MB/s | 9.8 MB     00:10 ETA
+(16/47): libacl-2.4.0-1.el10_2.x86_64.rpm       217 kB/s |  26 kB     00:00    
+(17-18/47): gnutls-3 31% [======              ] 2.0 MB/s | 9.8 MB     00:10 ETA
+(17/47): gnutls-3.8.10-5.el10_2.x86_64.rpm      5.0 MB/s | 1.5 MB     00:00    
+(18-19/47): libarchi 34% [======-             ] 2.2 MB/s |  11 MB     00:09 ETA
+(18/47): libattr-2.6.0-1.el10_2.x86_64.rpm      141 kB/s |  18 kB     00:00    
+(19-20/47): libarchi 34% [======-             ] 2.2 MB/s |  11 MB     00:09 ETA
+(19/47): libarchive-3.7.7-11.el10_2.x86_64.rpm  2.6 MB/s | 414 kB     00:00    
+(20-21/47): libcurl- 35% [=======             ] 2.2 MB/s |  11 MB     00:09 ETA
+(20/47): libcurl-minimal-8.12.1-4.el10_2.7.x86_ 2.3 MB/s | 296 kB     00:00    
+(21-22/47): libevent 36% [=======             ] 2.3 MB/s |  12 MB     00:08 ETA
+(21/47): libevent-2.1.13-1.el10_2.x86_64.rpm    1.9 MB/s | 259 kB     00:00    
+(22-23/47): libnghtt 37% [=======             ] 2.3 MB/s |  12 MB     00:08 ETA
+(22/47): libnghttp2-1.68.0-3.el10_2.2.x86_64.rp 676 kB/s |  73 kB     00:00    
+(23/47): libsolv-0.7 37% [=======             ] 2.3 MB/s |  12 MB     00:08 ETA
+(23/47): libsolv-0.7.33-5.el10_2.x86_64.rpm     2.6 MB/s | 429 kB     00:00    
+(24-25/47): libtasn1 38% [=======-            ] 2.3 MB/s |  12 MB     00:08 ETA
+(24/47): libtasn1-4.20.0-5.el10_2.x86_64.rpm    490 kB/s |  75 kB     00:00    
+(25-26/47): libusb1- 39% [=======-            ] 2.3 MB/s |  12 MB     00:08 ETA
+(25/47): libusb1-1.0.30-1.el10_2.x86_64.rpm     500 kB/s |  77 kB     00:00    
+(26/47): libxml2-2.1 39% [=======-            ] 2.3 MB/s |  12 MB     00:08 ETA
+(26/47): openssl-fips-provider-3.5.8-2.el10_2.x 2.8 MB/s | 811 kB     00:00    
+(27-28/47): libxml2- 45% [=========           ] 2.6 MB/s |  14 MB     00:06 ETA
+(27/47): libxml2-2.12.5-10.el10_2.4.x86_64.rpm  2.1 MB/s | 691 kB     00:00    
+(28-29/47): openssl- 46% [=========           ] 2.6 MB/s |  15 MB     00:06 ETA
+(28/47): openssl-libs-3.5.8-2.el10_2.x86_64.rpm 4.9 MB/s | 2.3 MB     00:00    
+(29-30/47): p11-kit- 51% [==========          ] 2.9 MB/s |  16 MB     00:05 ETA
+(29/47): p11-kit-0.26.4-1.el10_2.x86_64.rpm     2.6 MB/s | 545 kB     00:00    
+(30-31/47): pam-1.6. 52% [==========-         ] 3.0 MB/s |  17 MB     00:05 ETA
+(30/47): p11-kit-trust-0.26.4-1.el10_2.x86_64.r 726 kB/s | 141 kB     00:00    
+(31-32/47): pam-libs 53% [==========-         ] 3.0 MB/s |  17 MB     00:04 ETA
+(31/47): pam-libs-1.6.1-9.el10_2.1.x86_64.rpm   786 kB/s |  56 kB     00:00    
+(32-33/47): pcre2-10 53% [==========-         ] 3.0 MB/s |  17 MB     00:04 ETA
+(32/47): pam-1.6.1-9.el10_2.1.x86_64.rpm        3.1 MB/s | 512 kB     00:00    
+(33-34/47): pcre2-sy 55% [===========         ] 3.0 MB/s |  17 MB     00:04 ETA
+(33/47): pcre2-10.44-1.5.el10_2.x86_64.rpm      1.8 MB/s | 246 kB     00:00    
+(34-35/47): python3- 55% [===========         ] 3.1 MB/s |  18 MB     00:04 ETA
+(34/47): pcre2-syntax-10.44-1.5.el10_2.noarch.r 1.4 MB/s | 149 kB     00:00    
+(35-36/47): python3- 56% [===========         ] 3.1 MB/s |  18 MB     00:04 ETA
+(35/47): python3-3.12.15-1.el10_2.x86_64.rpm    418 kB/s |  27 kB     00:00    
+(36-37/47): rocky-gp 56% [===========         ] 3.0 MB/s |  18 MB     00:04 ETA
+(36/47): rocky-gpg-keys-10.2-1.2.el10.noarch.rp 265 kB/s |  25 kB     00:00    
+(37-38/47): rocky-re 57% [===========-        ] 3.1 MB/s |  18 MB     00:04 ETA
+(37/47): rocky-release-10.2-1.2.el10.noarch.rpm 251 kB/s |  26 kB     00:00    
+(38-39/47): rocky-re 58% [===========-        ] 3.1 MB/s |  18 MB     00:04 ETA
+(38/47): rocky-repos-10.2-1.2.el10.noarch.rpm   196 kB/s |  13 kB     00:00    
+(39-40/47): rpm-sequ 60% [============        ] 3.2 MB/s |  19 MB     00:03 ETA
+(39/47): rpm-sequoia-1.10.2.1-1.el10_2.x86_64.r 2.9 MB/s | 971 kB     00:00    
+(40-41/47): sqlite-l 69% [=============-      ] 3.6 MB/s |  22 MB     00:02 ETA
+(40/47): sqlite-libs-3.46.1-6.el10_2.x86_64.rpm 1.9 MB/s | 744 kB     00:00    
+(41-42/47): systemd- 72% [==============-     ] 3.7 MB/s |  23 MB     00:02 ETA
+(41-43/47): tar-1.35 82% [================-   ] 4.1 MB/s |  26 MB     00:01 ETA
+(41/47): python3-libs-3.12.15-1.el10_2.x86_64.r 6.6 MB/s | 8.9 MB     00:01    
+(42-43/47): systemd- 90% [==================  ] 4.3 MB/s |  28 MB     00:00 ETA
+(42/47): systemd-libs-257-23.el10_2.2.rocky.0.1 917 kB/s | 839 kB     00:00    
+(43-44/47): tar-1.35 93% [==================- ] 4.4 MB/s |  29 MB     00:00 ETA
+(43/47): tar-1.35-13.el10_2.x86_64.rpm          1.0 MB/s | 858 kB     00:00    
+(44-45/47): tzdata-2 95% [=================== ] 4.5 MB/s |  30 MB     00:00 ETA
+(44/47): vim-data-9.1.083-9.el10_2.22.noarch.rp 212 kB/s |  19 kB     00:00    
+(45-46/47): tzdata-2 97% [=================== ] 4.5 MB/s |  30 MB     00:00 ETA
+(45/47): tzdata-2026e-1.el10_2.noarch.rpm       3.1 MB/s | 500 kB     00:00    
+(46-47/47): vim-mini 97% [=================== ] 4.5 MB/s |  30 MB     00:00 ETA
+(46/47): vim-minimal-9.1.083-9.el10_2.22.x86_64 3.9 MB/s | 801 kB     00:00    
+(47/47): xz-libs-5.6 99% [===================-] 4.6 MB/s |  31 MB     00:00 ETA
+(47/47): xz-libs-5.6.2-4.el10_2.1.x86_64.rpm    678 kB/s | 111 kB     00:00    
+--------------------------------------------------------------------------------
+Total                                           6.4 MB/s |  31 MB     00:04     
+ginux: Linux runtime exceeded sixty seconds; execution snapshot: pid=9 tid=9 rip=4339136 rsp=8914944 syscalls=180054 epoll-fd/events=18446744073709551615/0 name=rpmkeys
+
+ginux: Linux init recent syscall/result pairs: 3/0 16/0 1/80 13/0 13/0 44/48 45/5 45/34 45/18446744073709551605 44/24 45/18446744073709551605 44/65 45/18446744073709551605 44/24 45/18446744073709551605 44/48 45/18446744073709551605 44/24 45/18446744073709551605 45/18446744073709551605 45/18446744073709551605 45/18446744073709551605 3/0 3/0 3/0 13/0 3/0 13/0 87/0 16/0 39/8 1/81 8/58740 1/111 39/8 1/81 8/58851 1/111 96/0 201/1793366552 257/16 262/0 21/0 262/0 39/8 8/58962 1/93 262/0 293/0 5/0 16/1 8/1 293/0 14/0 58/18446744073709547520 3/0 3/0 33/0 33/1 80/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 14/0 436/0 436/0 59/0
+
+Rocky dnf test failed: timed out waiting for 'rocky: stopped'
+sh-5.2# /usr/bin/dnf -y update; printf 'DNF_UPDATE_EXIT=%s\n' "$?"
+ ca-certificates         noarch 2026.2.92_v9.0.319-100.3.el10_2 baseos    980 k
+ coreutils-single        x86_64 9.5-8.el10_2.1                  baseos    614 k
+ crypto-policies         noarch 20260216-1.git0e54016.el10_2.2  baseos     63 k
+ crypto-policies-scripts noarch 20260216-1.git0e54016.el10_2.2  baseos    115 k
+ curl                    x86_64 8.12.1-4.el10_2.7               baseos    217 k
+ cyrus-sasl-lib          x86_64 2.1.28-30.el10_2                baseos    100 k
+ expat                   x86_64 2.7.3-1.el10_2.7                baseos    122 k
+ gawk                    x86_64 5.3.0-6.el10_2.1                baseos    1.1 M
+ glib2                   x86_64 2.80.4-12.el10_2.22             baseos    3.0 M
+ glibc                   x86_64 2.39-145.el10_2                 baseos    2.1 M
+ glibc-common            x86_64 2.39-145.el10_2                 baseos    312 k
+ glibc-minimal-langpack  x86_64 2.39-145.el10_2                 baseos     28 k
+ gnutls                  x86_64 3.8.10-5.el10_2                 baseos    1.5 M
+ gzip                    x86_64 1.13-4.el10_2                   baseos    164 k
+ libacl                  x86_64 2.4.0-1.el10_2                  baseos     26 k
+ libarchive              x86_64 3.7.7-11.el10_2                 baseos    414 k
+ libattr                 x86_64 2.6.0-1.el10_2                  baseos     18 k
+ libcurl-minimal         x86_64 8.12.1-4.el10_2.7               baseos    296 k
+ libevent                x86_64 2.1.13-1.el10_2                 baseos    259 k
+ libnghttp2              x86_64 1.68.0-3.el10_2.2               baseos     73 k
+ libsolv                 x86_64 0.7.33-5.el10_2                 baseos    429 k
+ libtasn1                x86_64 4.20.0-5.el10_2                 baseos     75 k
+ libusb1                 x86_64 1.0.30-1.el10_2                 baseos     77 k
+ libxml2                 x86_64 2.12.5-10.el10_2.4              baseos    691 k
+ openssl-fips-provider   x86_64 1:3.5.8-2.el10_2                baseos    811 k
+ openssl-libs            x86_64 1:3.5.8-2.el10_2                baseos    2.3 M
+ p11-kit                 x86_64 0.26.4-1.el10_2                 baseos    545 k
+ p11-kit-trust           x86_64 0.26.4-1.el10_2                 baseos    141 k
+ pam                     x86_64 1.6.1-9.el10_2.1                baseos    512 k
+ pam-libs                x86_64 1.6.1-9.el10_2.1                baseos     56 k
+ pcre2                   x86_64 10.44-1.5.el10_2                baseos    246 k
+ pcre2-syntax            noarch 10.44-1.5.el10_2                baseos    149 k
+ python3                 x86_64 3.12.15-1.el10_2                baseos     27 k
+ python3-libs            x86_64 3.12.15-1.el10_2                baseos    8.9 M
+ rocky-gpg-keys          noarch 10.2-1.2.el10                   baseos     25 k
+ rocky-release           noarch 10.2-1.2.el10                   baseos     26 k
+ rocky-repos             noarch 10.2-1.2.el10                   baseos     13 k
+ rpm-sequoia             x86_64 1.10.2.1-1.el10_2               baseos    971 k
+ sqlite-libs             x86_64 3.46.1-6.el10_2                 baseos    744 k
+ systemd-libs            x86_64 257-23.el10_2.2.rocky.0.1       baseos    839 k
+ tar                     x86_64 2:1.35-13.el10_2                baseos    858 k
+ tzdata                  noarch 2026e-1.el10_2                  baseos    500 k
+ vim-data                noarch 2:9.1.083-9.el10_2.22           baseos     19 k
+ vim-minimal             x86_64 2:9.1.083-9.el10_2.22           baseos    801 k
+ xz-libs                 x86_64 1:5.6.2-4.el10_2.1              baseos    111 k
+Installing weak dependencies:
+ gawk-all-langpacks      x86_64 5.3.0-6.el10_2.1                appstream 273 k
+
+Transaction Summary
+================================================================================
+Install   1 Package
+Upgrade  46 Packages
+
+Total download size: 31 M
+Downloading Packages:
+Rocky Linux 10 - App     [            ===     ] ---  B/s |   0  B     --:-- ETA
+Rocky Linux 10 - App     [               ===  ] 8.0 kB/s | 2.8 kB     --:-- ETA
+(1/47): gawk-all-lan  0% [                    ] ---  B/s |   0  B     --:-- ETA
+(1/47): attr-2.6.0-1.el10_2.x86_64.rpm          284 kB/s |  63 kB     00:00    
+(2-3/47): gawk-all-l  0% [                    ] 382 kB/s |  90 kB     01:23 ETA
+(2/47): ca-certificates-2026.2.92_v9.0.319-100. 2.1 MB/s | 980 kB     00:00    
+(3-4/47): coreutils-  4% [-                   ] 620 kB/s | 1.3 MB     00:49 ETA
+(3/47): coreutils-single-9.5-8.el10_2.1.x86_64. 2.1 MB/s | 614 kB     00:00    
+(4-5/47): crypto-pol  5% [=                   ] 678 kB/s | 1.6 MB     00:44 ETA
+(4/47): crypto-policies-20260216-1.git0e54016.e 763 kB/s |  63 kB     00:00    
+(5-6/47): crypto-pol  5% [=                   ] 689 kB/s | 1.7 MB     00:44 ETA
+(5/47): crypto-policies-scripts-20260216-1.git0 1.0 MB/s | 115 kB     00:00    
+(6-7/47): curl-8.12.  6% [=                   ] 711 kB/s | 1.9 MB     00:42 ETA
+(6/47): curl-8.12.1-4.el10_2.7.x86_64.rpm       1.8 MB/s | 217 kB     00:00    
+(7-8/47): cyrus-sasl  6% [=                   ] 751 kB/s | 2.1 MB     00:39 ETA
+(7/47): cyrus-sasl-lib-2.1.28-30.el10_2.x86_64. 997 kB/s | 100 kB     00:00    
+(8-9/47): expat-2.7.  7% [=                   ] 779 kB/s | 2.3 MB     00:38 ETA
+(8/47): gawk-all-langpacks-5.3.0-6.el10_2.1.x86 350 kB/s | 273 kB     00:00    
+(9-10/47): gawk-5.3.  7% [=-                  ] 806 kB/s | 2.5 MB     00:36 ETA
+(9/47): expat-2.7.3-1.el10_2.7.x86_64.rpm       1.1 MB/s | 122 kB     00:00    
+(10-11/47): glib2-2.  7% [=-                  ] 811 kB/s | 2.5 MB     00:36 ETA
+(10/47): gawk-5.3.0-6.el10_2.1.x86_64.rpm       3.4 MB/s | 1.1 MB     00:00    
+(11-12/47): glibc-2. 14% [==-                 ] 1.2 MB/s | 4.6 MB     00:22 ETA
+(11-13/47): glibc-co 26% [=====               ] 1.9 MB/s | 8.4 MB     00:12 ETA
+(11/47): glib2-2.80.4-12.el10_2.22.x86_64.rpm   4.6 MB/s | 3.0 MB     00:00    
+(12-13/47): glibc-co 27% [=====               ] 1.9 MB/s | 8.6 MB     00:12 ETA
+(12/47): glibc-2.39-145.el10_2.x86_64.rpm       3.0 MB/s | 2.1 MB     00:00    
+(13-14/47): glibc-co 27% [=====-              ] 1.9 MB/s | 8.7 MB     00:12 ETA
+(13/47): glibc-common-2.39-145.el10_2.x86_64.rp 686 kB/s | 312 kB     00:00    
+(14-15/47): glibc-mi 28% [=====-              ] 1.9 MB/s | 8.9 MB     00:11 ETA
+(14/47): glibc-minimal-langpack-2.39-145.el10_2 235 kB/s |  28 kB     00:00    
+(15-16/47): gnutls-3 28% [=====-              ] 1.9 MB/s | 9.0 MB     00:11 ETA
+(15/47): gzip-1.13-4.el10_2.x86_64.rpm          994 kB/s | 164 kB     00:00    
+(16-17/47): gnutls-3 31% [======              ] 2.0 MB/s | 9.8 MB     00:10 ETA
+(16/47): libacl-2.4.0-1.el10_2.x86_64.rpm       217 kB/s |  26 kB     00:00    
+(17-18/47): gnutls-3 31% [======              ] 2.0 MB/s | 9.8 MB     00:10 ETA
+(17/47): gnutls-3.8.10-5.el10_2.x86_64.rpm      5.0 MB/s | 1.5 MB     00:00    
+(18-19/47): libarchi 34% [======-             ] 2.2 MB/s |  11 MB     00:09 ETA
+(18/47): libattr-2.6.0-1.el10_2.x86_64.rpm      141 kB/s |  18 kB     00:00    
+(19-20/47): libarchi 34% [======-             ] 2.2 MB/s |  11 MB     00:09 ETA
+(19/47): libarchive-3.7.7-11.el10_2.x86_64.rpm  2.6 MB/s | 414 kB     00:00    
+(20-21/47): libcurl- 35% [=======             ] 2.2 MB/s |  11 MB     00:09 ETA
+(20/47): libcurl-minimal-8.12.1-4.el10_2.7.x86_ 2.3 MB/s | 296 kB     00:00    
+(21-22/47): libevent 36% [=======             ] 2.3 MB/s |  12 MB     00:08 ETA
+(21/47): libevent-2.1.13-1.el10_2.x86_64.rpm    1.9 MB/s | 259 kB     00:00    
+(22-23/47): libnghtt 37% [=======             ] 2.3 MB/s |  12 MB     00:08 ETA
+(22/47): libnghttp2-1.68.0-3.el10_2.2.x86_64.rp 676 kB/s |  73 kB     00:00    
+(23/47): libsolv-0.7 37% [=======             ] 2.3 MB/s |  12 MB     00:08 ETA
+(23/47): libsolv-0.7.33-5.el10_2.x86_64.rpm     2.6 MB/s | 429 kB     00:00    
+(24-25/47): libtasn1 38% [=======-            ] 2.3 MB/s |  12 MB     00:08 ETA
+(24/47): libtasn1-4.20.0-5.el10_2.x86_64.rpm    490 kB/s |  75 kB     00:00    
+(25-26/47): libusb1- 39% [=======-            ] 2.3 MB/s |  12 MB     00:08 ETA
+(25/47): libusb1-1.0.30-1.el10_2.x86_64.rpm     500 kB/s |  77 kB     00:00    
+(26/47): libxml2-2.1 39% [=======-            ] 2.3 MB/s |  12 MB     00:08 ETA
+(26/47): openssl-fips-provider-3.5.8-2.el10_2.x 2.8 MB/s | 811 kB     00:00    
+(27-28/47): libxml2- 45% [=========           ] 2.6 MB/s |  14 MB     00:06 ETA
+(27/47): libxml2-2.12.5-10.el10_2.4.x86_64.rpm  2.1 MB/s | 691 kB     00:00    
+(28-29/47): openssl- 46% [=========           ] 2.6 MB/s |  15 MB     00:06 ETA
+(28/47): openssl-libs-3.5.8-2.el10_2.x86_64.rpm 4.9 MB/s | 2.3 MB     00:00    
+(29-30/47): p11-kit- 51% [==========          ] 2.9 MB/s |  16 MB     00:05 ETA
+(29/47): p11-kit-0.26.4-1.el10_2.x86_64.rpm     2.6 MB/s | 545 kB     00:00    
+(30-31/47): pam-1.6. 52% [==========-         ] 3.0 MB/s |  17 MB     00:05 ETA
+(30/47): p11-kit-trust-0.26.4-1.el10_2.x86_64.r 726 kB/s | 141 kB     00:00    
+(31-32/47): pam-libs 53% [==========-         ] 3.0 MB/s |  17 MB     00:04 ETA
+(31/47): pam-libs-1.6.1-9.el10_2.1.x86_64.rpm   786 kB/s |  56 kB     00:00    
+(32-33/47): pcre2-10 53% [==========-         ] 3.0 MB/s |  17 MB     00:04 ETA
+(32/47): pam-1.6.1-9.el10_2.1.x86_64.rpm        3.1 MB/s | 512 kB     00:00    
+(33-34/47): pcre2-sy 55% [===========         ] 3.0 MB/s |  17 MB     00:04 ETA
+(33/47): pcre2-10.44-1.5.el10_2.x86_64.rpm      1.8 MB/s | 246 kB     00:00    
+(34-35/47): python3- 55% [===========         ] 3.1 MB/s |  18 MB     00:04 ETA
+(34/47): pcre2-syntax-10.44-1.5.el10_2.noarch.r 1.4 MB/s | 149 kB     00:00    
+(35-36/47): python3- 56% [===========         ] 3.1 MB/s |  18 MB     00:04 ETA
+(35/47): python3-3.12.15-1.el10_2.x86_64.rpm    418 kB/s |  27 kB     00:00    
+(36-37/47): rocky-gp 56% [===========         ] 3.0 MB/s |  18 MB     00:04 ETA
+(36/47): rocky-gpg-keys-10.2-1.2.el10.noarch.rp 265 kB/s |  25 kB     00:00    
+(37-38/47): rocky-re 57% [===========-        ] 3.1 MB/s |  18 MB     00:04 ETA
+(37/47): rocky-release-10.2-1.2.el10.noarch.rpm 251 kB/s |  26 kB     00:00    
+(38-39/47): rocky-re 58% [===========-        ] 3.1 MB/s |  18 MB     00:04 ETA
+(38/47): rocky-repos-10.2-1.2.el10.noarch.rpm   196 kB/s |  13 kB     00:00    
+(39-40/47): rpm-sequ 60% [============        ] 3.2 MB/s |  19 MB     00:03 ETA
+(39/47): rpm-sequoia-1.10.2.1-1.el10_2.x86_64.r 2.9 MB/s | 971 kB     00:00    
+(40-41/47): sqlite-l 69% [=============-      ] 3.6 MB/s |  22 MB     00:02 ETA
+(40/47): sqlite-libs-3.46.1-6.el10_2.x86_64.rpm 1.9 MB/s | 744 kB     00:00    
+(41-42/47): systemd- 72% [==============-     ] 3.7 MB/s |  23 MB     00:02 ETA
+(41-43/47): tar-1.35 82% [================-   ] 4.1 MB/s |  26 MB     00:01 ETA
+(41/47): python3-libs-3.12.15-1.el10_2.x86_64.r 6.6 MB/s | 8.9 MB     00:01    
+(42-43/47): systemd- 90% [==================  ] 4.3 MB/s |  28 MB     00:00 ETA
+(42/47): systemd-libs-257-23.el10_2.2.rocky.0.1 917 kB/s | 839 kB     00:00    
+(43-44/47): tar-1.35 93% [==================- ] 4.4 MB/s |  29 MB     00:00 ETA
+(43/47): tar-1.35-13.el10_2.x86_64.rpm          1.0 MB/s | 858 kB     00:00    
+(44-45/47): tzdata-2 95% [=================== ] 4.5 MB/s |  30 MB     00:00 ETA
+(44/47): vim-data-9.1.083-9.el10_2.22.noarch.rp 212 kB/s |  19 kB     00:00    
+(45-46/47): tzdata-2 97% [=================== ] 4.5 MB/s |  30 MB     00:00 ETA
+(45/47): tzdata-2026e-1.el10_2.noarch.rpm       3.1 MB/s | 500 kB     00:00    
+(46-47/47): vim-mini 97% [=================== ] 4.5 MB/s |  30 MB     00:00 ETA
+(46/47): vim-minimal-9.1.083-9.el10_2.22.x86_64 3.9 MB/s | 801 kB     00:00    
+(47/47): xz-libs-5.6 99% [===================-] 4.6 MB/s |  31 MB     00:00 ETA
+(47/47): xz-libs-5.6.2-4.el10_2.1.x86_64.rpm    678 kB/s | 111 kB     00:00    
+--------------------------------------------------------------------------------
+Total                                           6.4 MB/s |  31 MB     00:04     
+ginux: Linux runtime exceeded sixty seconds; execution snapshot: pid=9 tid=9 rip=4339136 rsp=8914944 syscalls=180054 epoll-fd/events=18446744073709551615/0 name=rpmkeys
+
+ginux: Linux init recent syscall/result pairs: 3/0 16/0 1/80 13/0 13/0 44/48 45/5 45/34 45/18446744073709551605 44/24 45/18446744073709551605 44/65 45/18446744073709551605 44/24 45/18446744073709551605 44/48 45/18446744073709551605 44/24 45/18446744073709551605 45/18446744073709551605 45/18446744073709551605 45/18446744073709551605 3/0 3/0 3/0 13/0 3/0 13/0 87/0 16/0 39/8 1/81 8/58740 1/111 39/8 1/81 8/58851 1/111 96/0 201/1793366552 257/16 262/0 21/0 262/0 39/8 8/58962 1/93 262/0 293/0 5/0 16/1 8/1 293/0 14/0 58/18446744073709547520 3/0 3/0 33/0 33/1 80/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 13/0 14/0 436/0 436/0 59/0
+
+qemu-system-x86_64: terminating on signal 15 from pid 7959 (<unknown process>)
+Rocky dnf test failed: dnf update did not complete cleanly
+make: *** [test-rocky-dnf] Error 1

@@ -151,6 +151,11 @@ The gate body owns substantive information, not routing metadata:
 ## Acceptance criteria
 - <Positive, negative, and regression behavior.>
 
+## Verification plan
+- `<automated command, test, or reproducible procedure>` -> <expected result>.
+- <If deterministic verification is impractical: why, the most objective
+  repeatable evidence available, and whether human judgment is required.>
+
 ## Evidence
 - `<command or procedure>` -> <observed result.>
 
@@ -175,8 +180,14 @@ and conventions; `STATUS.md` contains only the resumable active checkpoint.
 ## Scale planning to the work
 
 Every task needs a plan discussion before execution, but not every task needs a
-large planning system. For a small, bounded change, a concise outcome, scope,
-verification, and stop point may be sufficient. For a long project, persist:
+gate or a large planning system. For a small, bounded request expected to finish
+in one prompt or one near-single implementation-and-verification loop, use a
+concise outcome, scope, verification, and stop point without creating a gate.
+Use a gate when work is likely to require multiple loops or checkpoints, span a
+context compaction or handoff, or need durable scope, decision, task, and
+evidence tracking. If uncertain, ask the human whether the request should use
+an HDAE gate for iteration and review before creating one. For a long project,
+persist:
 
 - explicit goals and non-goals;
 - an ordered gate map with dependencies;
@@ -185,6 +196,14 @@ verification, and stop point may be sufficient. For a long project, persist:
 - the proposed checkpoint map for any multi-gate execution batch;
 - progress checkpoints, risks, decisions, and scope changes; and
 - the current next action.
+
+The human is the authority for ambiguous direction. If goals, gate boundaries,
+scope, priorities, acceptance criteria, expected results, or the meaning of
+observed results are unclear, incomplete, or conflicting, ask a focused
+question and wait before continuing affected work. State the known facts, the
+specific uncertainty, and why the answer matters. Do not silently choose a
+plausible interpretation; continue only unrelated work that cannot constrain
+the human's answer.
 
 Before starting a long execution loop, tell the human what will run, its scope,
 and when progress will be reported. Give an ETA range and confidence only when
@@ -197,14 +216,14 @@ invalidate them.
 Use stable identifiers when they reduce ambiguity. Maintain the relationship:
 
 ```text
-Goal -> Gate -> Acceptance criterion -> Task -> Evidence
+Goal -> Gate -> Acceptance criterion -> Verification plan -> Task -> Evidence
 ```
 
 Every goal must be covered by one or more gates. Every acceptance criterion
-must have planned work and fresh evidence. Every task must belong to an approved
-gate and criterion; new tasks that expand scope require a gate update and human
-approval. Record removed or changed scope with its reason instead of silently
-deleting it.
+must have planned verification, planned work, and fresh evidence. Every task
+must belong to an approved gate and criterion; new tasks that expand scope
+require a gate update and human approval. Record removed or changed scope with
+its reason instead of silently deleting it.
 
 At planning and completion boundaries, perform four checks:
 
@@ -285,6 +304,9 @@ the reloaded skill restores the workflow and authority boundaries.
 A useful gate is:
 
 - **Observable:** success appears in behavior or a meaningful artifact.
+- **Deterministic where practical:** controlled inputs produce objectively
+  checkable results through an automated test, command, or reproducible
+  procedure.
 - **Executable:** verification names concrete commands or procedures.
 - **Falsifiable:** negative cases can prove the work wrong.
 - **Bounded:** it can finish and be reviewed independently.
@@ -294,6 +316,14 @@ A useful gate is:
 
 Avoid gates such as “improve quality,” “finish compatibility,” or “make it
 secure.” Replace them with specific properties and limitations.
+
+At gate creation, map every acceptance criterion to its planned verification
+and expected result. Prefer stable fixtures, controlled environments,
+machine-checkable outputs, explicit exit statuses, and assertions about
+resulting state. If a criterion cannot be verified deterministically, record
+why, use the most objective repeatable evidence available, and identify any
+human judgment or external dependency. Human acceptance evaluates direction
+and subjective quality; it does not replace reasonable automated checks.
 
 ## Delivery strategy and commit structure
 
@@ -317,8 +347,9 @@ choice does not authorize pushing or opening a pull request.
 
 ## Human gate-alignment conversation
 
-The agent must make the proposed work visible enough for the human to find
-omissions before implementation. Use this sequence:
+After deciding that work requires a gate, the agent must make the proposed work
+visible enough for the human to find omissions before implementation. Use this
+sequence:
 
 1. summarize the intended outcome and constraints;
 2. ask focused questions whose answers could change architecture, scope, or
@@ -331,7 +362,8 @@ omissions before implementation. Use this sequence:
 The coverage review considers each relevant surface:
 
 - functional behavior and failure paths;
-- automated tests, regression checks, and required evidence;
+- deterministic automated tests, regression checks, non-deterministic
+  exceptions, and required evidence;
 - user workflows, interfaces, and discoverability;
 - documentation and examples;
 - compatibility, migration, persistence, and rollback;
@@ -344,7 +376,8 @@ check, not permission to expand the user's goal.
 
 At gate completion, repeat the coverage review against the approved scope and
 show evidence for every acceptance criterion. Missing or unverified work keeps
-the gate partial.
+the gate partial. Ambiguous evidence or disagreement about what the result
+means requires user guidance; it is not evidence of passage.
 
 ## Multi-gate batches and checkpoint policy
 

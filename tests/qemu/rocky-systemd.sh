@@ -239,27 +239,32 @@ qemu_started_at_ms=$(now_ms)
             for ((benchmark_run = 1; benchmark_run <= ${GINUX_BENCHMARK_WORKLOAD_RUNS:-3}; benchmark_run++)); do
                 case "$workload" in
                     cpu)
-                        command="/usr/bin/sysbench cpu --threads=1 --time=${GINUX_BENCHMARK_WORKLOAD_SECONDS:-3} --cpu-max-prime=20000 run"
+                        command="/usr/bin/sysbench cpu --threads=${GINUX_BENCHMARK_THREADS:-1} --time=${GINUX_BENCHMARK_WORKLOAD_SECONDS:-3} --cpu-max-prime=20000 run"
                         ;;
                     memory)
-                        command="/usr/bin/sysbench memory --threads=1 --time=${GINUX_BENCHMARK_WORKLOAD_SECONDS:-3} --memory-block-size=${GINUX_BENCHMARK_MEMORY_BLOCK_SIZE:-1K} --memory-total-size=100G run"
+                        command="/usr/bin/sysbench memory --threads=${GINUX_BENCHMARK_THREADS:-1} --time=${GINUX_BENCHMARK_WORKLOAD_SECONDS:-3} --memory-block-size=${GINUX_BENCHMARK_MEMORY_BLOCK_SIZE:-1K} --memory-total-size=100G run"
                         ;;
                     threads)
-                        command="/usr/bin/sysbench threads --threads=1 --time=${GINUX_BENCHMARK_WORKLOAD_SECONDS:-3} run"
+                        command="/usr/bin/sysbench threads --threads=${GINUX_BENCHMARK_THREADS:-1} --time=${GINUX_BENCHMARK_WORKLOAD_SECONDS:-3} run"
                         ;;
                     mutex)
-                        command="/usr/bin/sysbench mutex --threads=1 --time=${GINUX_BENCHMARK_WORKLOAD_SECONDS:-3} run"
+                        command="/usr/bin/sysbench mutex --threads=${GINUX_BENCHMARK_THREADS:-1} --time=${GINUX_BENCHMARK_WORKLOAD_SECONDS:-3} run"
                         ;;
                 esac
-                marker="GINUX_BENCH_WORKLOAD_END_${workload}_${benchmark_run}=0"
+                marker="GINUX_BENCH_WORKLOAD_END_${workload}_${benchmark_run}="
                 shell_prompt_count=$(grep -Foc 'sh-5.2#' "$output_file" || true)
-                printf '%s\n' "echo GINUX_BENCH_WORKLOAD_BEGIN_${workload}_${benchmark_run} >&2; $command >&2"
+                printf '%s\n' "echo GINUX_BENCH_WORKLOAD_BEGIN_${workload}_${benchmark_run} >&2; $command >&2; status=\$?; echo ${marker}\$status >&2"
                 wait_for_count 'sh-5.2#' "$((shell_prompt_count + 1))" 600
-                printf '%s\n' "$marker" >>"$output_file"
+                if ! grep -Fq "${marker}0" "$output_file"; then
+                    fail "sysbench workload $workload run $benchmark_run failed"
+                fi
                 if [[ "${GINUX_BENCHMARK_SINGLE_RUN:-0}" == 1 ]]; then
                     printf '%s\n' ok >"$success_file"
                     stop_qemu
                     exit 0
+                fi
+                if [[ "${GINUX_BENCHMARK_REUSE_DOMAIN:-0}" == 1 ]]; then
+                    continue
                 fi
                 controller_prompt_count=$(grep -Foc 'ginux>' "$output_file" || true)
                 printf '%s\n' exit
@@ -270,6 +275,14 @@ qemu_started_at_ms=$(now_ms)
                 fi
             done
         done
+        if [[ "${GINUX_BENCHMARK_REUSE_DOMAIN:-0}" == 1 ]]; then
+            controller_prompt_count=$(grep -Foc 'ginux>' "$output_file" || true)
+            printf '%s\n' exit
+            wait_for_count 'ginux>' "$((controller_prompt_count + 1))" 30
+            printf '%s\n' ok >"$success_file"
+            stop_qemu
+            exit 0
+        fi
         wait_for 'ginux> ' 30
         printf '%s\n' shutdown
         wait_for 'GINUX_KERNEL_OK' 30
@@ -417,6 +430,13 @@ if [[ "${GINUX_BENCHMARK_SINGLE_RUN:-0}" == 1 && -s "$success_file" ]] \
     && grep -Eq 'GINUX_BENCH_WORKLOAD_END_[a-z]+_[0-9]+=0' "$output_file" \
     && ! grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC|^ginux: Linux user fault' "$output_file"; then
     echo 'Ginux sysbench sample completed.'
+    exit 0
+fi
+
+if [[ "${GINUX_BENCHMARK_REUSE_DOMAIN:-0}" == 1 && -s "$success_file" ]] \
+    && grep -Eq 'GINUX_BENCH_WORKLOAD_END_[a-z]+_[0-9]+=0' "$output_file" \
+    && ! grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC|^ginux: Linux user fault' "$output_file"; then
+    echo 'Ginux batched sysbench samples completed.'
     exit 0
 fi
 

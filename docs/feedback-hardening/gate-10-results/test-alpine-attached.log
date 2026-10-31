@@ -1,0 +1,127 @@
+    Finished `release` profile [optimized] target(s) in 0.02s
+Built build/linux-probe.elf and build/linux-dynamic
+    Finished `release` profile [optimized] target(s) in 0.01s
+Built target/x86_64-unknown-none/release/ginux-controller-runtime
+    Finished `release` profile [optimized] target(s) in 0.02s
+Built target/x86_64-unknown-none/release/ginux-network-service-runtime
+    Finished `release` profile [optimized] target(s) in 0.01s
+Built target/x86_64-unknown-none/release/ginux-protocol-service-runtime
+    Finished `release` profile [optimized] target(s) in 0.01s
+Built target/x86_64-unknown-none/release/ginux-volume-service-runtime
+Generated boot/efi/src/generated_boot.rs from control-plane/bootstrap.hex signed by the development-only RFC test key
+Building Ginux for x86_64-unknown-uefi (release)
+   Compiling ginux-boot v0.1.0 (/Users/gmk/git/ginux/boot/efi)
+    Finished `release` profile [optimized] target(s) in 4.98s
+Built build/esp/EFI/BOOT/BOOTX64.EFI
+Booting x86-64 Ginux with QEMU/tcg using CPU max,+smep,+smap,+umip
+[2J[01;01H[=3h[2J[01;01H[2J[01;01H[=3h[2J[01;01H[2J[01;01H[=3h[2J[01;01HBdsDxe: loading Boot0001 "UEFI QEMU HARDDISK QM00011 " from PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x5,0xFFFF,0x0)
+BdsDxe: starting Boot0001 "UEFI QEMU HARDDISK QM00011 " from PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x5,0xFFFF,0x0)
+[2J[01;01HGinux booted
+ginux: booting
+ginux: memory protections ready
+ginux: memory manager ready
+ginux: boot devices ready
+ginux: control runtime ready
+ginux: platform, security, devices, and runtime ready
+ginux: persistent storage initialized (generation 1, 2040 data sectors)
+ginux: timing boot-to-controller: 290 ms
+
+ginux: launching embedded controller in ring 3
+
+Ginux controller v0 (ring 3)
+Type 'help' for commands.
+ginux: Linux live sysinfo accounting validated
+ginux: Linux getrandom contract validated
+ginux: Linux resource-limit queries validated
+ginux: Linux process identity validated
+ginux: Linux timekeeping validated
+ginux: Linux runtime pipe accounting validated
+eth0: automatic DHCP configuration
+eth0: requesting DHCP lease
+eth0: DHCP configured 10.0.2.15/24 via 10.0.2.2 DNS 10.0.2.3
+ginux> domain new alpine
+alpine: created (image required)
+ginux> domain set alpine image=alpine:latest init=/bin/sh
+alpine: settings accepted; configured
+ginux> domain list
+NAME            STATE       PERSONALITY  INIT                  CPU  MEM-MIB  AUTO   NETWORKS          IMAGE
+alpine          configured  linux        /bin/sh               1    128      false  host(shared)      docker.io/library/alpine:latest
+ginux> domain start alpine --attach
+ginux: checking OCI cache docker.io/library/alpine:latest
+ginux: OCI cache miss; pulling image
+ginux: pulling OCI image docker.io/library/alpine:latest
+ginux: OCI authenticating with registry
+ginux: OCI pulling image manifest
+ginux: OCI pulling image configuration
+ginux: OCI manifest selected for linux/amd64
+ginux: OCI image configuration verified
+ginux: OCI layer 1/1: pulling sha256:7b229517ed222597277036d94892173207d01a731ab3a88eeb1de2e963a2c788 (3853109 bytes)
+ginux: OCI layer 1/1: verified sha256:7b229517ed222597277036d94892173207d01a731ab3a88eeb1de2e963a2c788 (3853109 bytes)
+ginux: timing OCI transfer: 2973 ms
+ginux: OCI cache write unavailable; continuing with verified image
+ginux: OCI unpacking image filesystem
+ginux: timing OCI unpack/publish: 109 ms
+ginux: timing OCI total: 3090 ms
+ginux: OCI image ready
+ginux: local configuration committed (generation 1)
+ginux: starting configured runtime domain
+ginux: entering configured Linux init
+ginux: timing domain-start-to-Linux-init-entry: 0 ms
+Alpine shell test failed while waiting for line 'LIBC_RUNTIME_OK'.
+Booting x86-64 Ginux with QEMU/tcg using CPU max,+smep,+smap,+umip
+[2J[01;01H[=3h[2J[01;01H[2J[01;01H[=3h[2J[01;01H[2J[01;01H[=3h[2J[01;01HBdsDxe: loading Boot0001 "UEFI QEMU HARDDISK QM00011 " from PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x5,0xFFFF,0x0)
+BdsDxe: starting Boot0001 "UEFI QEMU HARDDISK QM00011 " from PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x5,0xFFFF,0x0)
+[2J[01;01HGinux booted
+ginux: booting
+ginux: memory protections ready
+ginux: memory manager ready
+ginux: boot devices ready
+ginux: control runtime ready
+ginux: platform, security, devices, and runtime ready
+ginux: persistent storage initialized (generation 1, 2040 data sectors)
+ginux: timing boot-to-controller: 290 ms
+
+ginux: launching embedded controller in ring 3
+
+Ginux controller v0 (ring 3)
+Type 'help' for commands.
+ginux: Linux live sysinfo accounting validated
+ginux: Linux getrandom contract validated
+ginux: Linux resource-limit queries validated
+ginux: Linux process identity validated
+ginux: Linux timekeeping validated
+ginux: Linux runtime pipe accounting validated
+eth0: automatic DHCP configuration
+eth0: requesting DHCP lease
+eth0: DHCP configured 10.0.2.15/24 via 10.0.2.2 DNS 10.0.2.3
+ginux> domain new alpine
+alpine: created (image required)
+ginux> domain set alpine image=alpine:latest init=/bin/sh
+alpine: settings accepted; configured
+ginux> domain list
+NAME            STATE       PERSONALITY  INIT                  CPU  MEM-MIB  AUTO   NETWORKS          IMAGE
+alpine          configured  linux        /bin/sh               1    128      false  host(shared)      docker.io/library/alpine:latest
+ginux> domain start alpine --attach
+ginux: checking OCI cache docker.io/library/alpine:latest
+ginux: OCI cache miss; pulling image
+ginux: pulling OCI image docker.io/library/alpine:latest
+ginux: OCI authenticating with registry
+ginux: OCI pulling image manifest
+ginux: OCI pulling image configuration
+ginux: OCI manifest selected for linux/amd64
+ginux: OCI image configuration verified
+ginux: OCI layer 1/1: pulling sha256:7b229517ed222597277036d94892173207d01a731ab3a88eeb1de2e963a2c788 (3853109 bytes)
+ginux: OCI layer 1/1: verified sha256:7b229517ed222597277036d94892173207d01a731ab3a88eeb1de2e963a2c788 (3853109 bytes)
+ginux: timing OCI transfer: 2973 ms
+ginux: OCI cache write unavailable; continuing with verified image
+ginux: OCI unpacking image filesystem
+ginux: timing OCI unpack/publish: 109 ms
+ginux: timing OCI total: 3090 ms
+ginux: OCI image ready
+ginux: local configuration committed (generation 1)
+ginux: starting configured runtime domain
+ginux: entering configured Linux init
+ginux: timing domain-start-to-Linux-init-entry: 0 ms
+qemu-system-x86_64: terminating on signal 15 from pid 92596 (<unknown process>)
+Alpine shell test failed: missing 'LIBC_RUNTIME_OK'.
+make: *** [test-alpine] Error 1

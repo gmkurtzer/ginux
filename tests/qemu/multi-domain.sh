@@ -2,10 +2,16 @@
 set -euo pipefail
 
 repo_root=$(cd "$(dirname "$0")/../.." && pwd)
-output_file=$(mktemp "${TMPDIR:-/tmp}/ginux-multi-domain.XXXXXX")
+output_file="${GINUX_MULTI_DOMAIN_LOG:-}"
+output_file_is_temporary=0
+if [[ -z "$output_file" ]]; then
+    output_file=$(mktemp "${TMPDIR:-/tmp}/ginux-multi-domain.XXXXXX")
+    output_file_is_temporary=1
+fi
 volume_image=$(mktemp "${TMPDIR:-/tmp}/ginux-multi-domain-volume.XXXXXX")
 qemu_pid_file=$(mktemp "${TMPDIR:-/tmp}/ginux-multi-domain-pid.XXXXXX")
 qemu_pid=""
+base_volume="${GINUX_MULTI_DOMAIN_BASE_VOLUME:-$repo_root/build/qemu/rocky-systemd-volume.raw}"
 
 stop_qemu() {
     local pid=""
@@ -23,7 +29,8 @@ cleanup() {
         kill "$qemu_pid" 2>/dev/null || true
         wait "$qemu_pid" 2>/dev/null || true
     fi
-    rm -f "$output_file" "$volume_image" "$qemu_pid_file"
+    [[ "$output_file_is_temporary" == 0 ]] || rm -f "$output_file"
+    rm -f "$volume_image" "$qemu_pid_file"
 }
 trap cleanup EXIT
 
@@ -62,58 +69,53 @@ wait_for_count() {
     return 1
 }
 
-dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
+if [[ ! -f "$base_volume" ]]; then
+    echo "Multi-domain test requires a cached Rocky volume: $base_volume" >&2
+    echo "Run 'make test-rocky-systemd' first or set GINUX_MULTI_DOMAIN_BASE_VOLUME." >&2
+    exit 1
+fi
+if ! cp -c "$base_volume" "$volume_image" 2>/dev/null; then
+    if ! cp --sparse=always "$base_volume" "$volume_image" 2>/dev/null; then
+        cp "$base_volume" "$volume_image"
+    fi
+fi
+: >"$output_file"
 {
     wait_for 'ginux> '
     printf '%s\n' \
-        'domain new alpine' \
-        'domain set alpine image=alpine:latest init=/bin/sh' \
-        'domain start alpine'
-    wait_for 'alpine: running (detached)'
-    printf '%s\n' \
-        'domain new alpine2' \
-        'domain set alpine2 image=alpine:latest init=/bin/sh' \
-        'domain start alpine2'
-    wait_for 'alpine2: running (detached)'
-    printf '%s\n' \
         'domain new rocky' \
-        'domain set rocky image=rockylinux/rockylinux:10 init=/usr/bin/true' \
-        'domain start rocky'
-    wait_for_count 'ginux: OCI image ready' 3 240
-    wait_for_count 'ginux: entering configured Linux init' 3 30
+        'domain set rocky image=rockylinux/rockylinux:10-ubi-init init=/sbin/init memory-mib=768' \
+        'domain start rocky --attach'
+    wait_for 'ginux: OCI image ready' 300
+    wait_for 'ginux login:' 180
+    printf '\035'
+    wait_for "[detached from domain; use 'domain attach NAME' to return]" 10
+    printf '%s\n' \
+        'domain new rocky2' \
+        'domain set rocky2 image=rockylinux/rockylinux:10-ubi-init init=/sbin/init memory-mib=768' \
+        'domain start rocky2 --attach'
+    wait_for_count 'ginux login:' 2 180
+    printf '\035'
+    wait_for_count "[detached from domain; use 'domain attach NAME' to return]" 2 10
+    wait_for_count 'ginux: OCI image ready' 2 300
+    wait_for_count 'ginux: entering configured Linux init' 2 30
+    printf '%s\n' 'domain list'
+    wait_for 'rocky           running     linux'
+    wait_for 'rocky2          running     linux'
+    printf '%s\n' 'domain exec rocky /bin/true'
+    wait_for_count 'rocky: command completed' 1
+    printf '%s\n' 'domain exec rocky2 /bin/true'
+    wait_for_count 'rocky2: command completed' 1
+    printf '%s\n' 'domain stop rocky'
     wait_for 'rocky: stopped'
-    printf '%s\n' 'domain list' 'ps'
-    wait_for 'alpine          running     linux'
-    wait_for 'alpine2         running     linux'
-    wait_for 'rocky           stopped     linux'
-    wait_for '100    0      R      alpine:init'
-    wait_for '101    0      R      alpine2:init'
-    printf '%s\n' 'domain attach alpine'
-    wait_for $'\033[2J\033[H'
-    printf '%s\n' \
-        "printf 'ALPINE_DOMAIN_OK\\n'" \
-        "test -f /proc/1/status && printf 'ALPINE_PROC_OK\\n'"
-    wait_for 'ALPINE_DOMAIN_OK'
-    wait_for 'ALPINE_PROC_OK'
-    printf '\035'
-    wait_for "[detached from domain; use 'domain attach NAME' to return]"
-    printf '%s\n' 'domain attach alpine2'
-    printf '%s\n' "printf 'ALPINE2_DOMAIN_OK\\n'"
-    wait_for 'ALPINE2_DOMAIN_OK'
-    printf '\035'
-    wait_for_count "[detached from domain; use 'domain attach NAME' to return]" 2 30
-    printf '%s\n' 'domain attach alpine'
-    printf '%s\n' \
-        "printf 'ALPINE_RESUME_OK\\n'" \
-        'exit 0'
-    wait_for 'ALPINE_RESUME_OK'
-    wait_for 'alpine: stopped'
-    printf '%s\n' 'domain stop alpine2'
-    wait_for 'alpine2: stopped'
+    printf '%s\n' 'domain exec rocky2 /bin/true'
+    wait_for_count 'rocky2: command completed' 2
+    printf '%s\n' 'domain stop rocky2'
+    wait_for 'rocky2: stopped'
     printf '%s\n' \
         'domain list' \
         'shutdown'
-} | GINUX_VOLUME_IMAGE="$volume_image" GINUX_QEMU_PID_FILE="$qemu_pid_file" \
+} | GINUX_MEMORY="${GINUX_MEMORY:-2G}" GINUX_VOLUME_IMAGE="$volume_image" GINUX_QEMU_PID_FILE="$qemu_pid_file" \
     "$repo_root/tools/qemu/run.sh" >"$output_file" 2>&1 &
 qemu_pid=$!
 
@@ -140,12 +142,7 @@ fi
 wait "$qemu_pid" || true
 qemu_pid=""
 
-for expected in \
-    'ALPINE_DOMAIN_OK' \
-    'ALPINE_PROC_OK' \
-    'ALPINE2_DOMAIN_OK' \
-    'ALPINE_RESUME_OK' \
-    'GINUX_KERNEL_OK'; do
+for expected in 'GINUX_KERNEL_OK'; do
     if ! grep -Fq "$expected" "$output_file"; then
         tail -n 160 "$output_file"
         echo "Multi-domain test failed: missing '$expected'." >&2
@@ -159,4 +156,4 @@ if grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC|live registry refresh snapshot failed' "
     exit 1
 fi
 
-echo "Concurrent Alpine and Rocky domain lifecycle test passed."
+echo "Concurrent Rocky domain lifecycle test passed."

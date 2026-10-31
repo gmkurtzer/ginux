@@ -3,6 +3,7 @@ use crate::{
     control_abi,
     memory::{self, FrameLease, FrameOwner},
 };
+use core::cell::UnsafeCell;
 
 const PAGE_SIZE: usize = 4096;
 pub(crate) const PATH_CAPACITY: usize = 256;
@@ -383,7 +384,12 @@ pub(crate) fn remove_process_shared_mappings(pid: u32) {
     }
 }
 
-static mut OVERLAYS: [Overlay; INSTANCE_LIMIT] = [Overlay::EMPTY; INSTANCE_LIMIT];
+struct OverlayRuntimeOwner(UnsafeCell<[Overlay; INSTANCE_LIMIT]>);
+
+unsafe impl Sync for OverlayRuntimeOwner {}
+
+static OVERLAY_RUNTIME: OverlayRuntimeOwner =
+    OverlayRuntimeOwner(UnsafeCell::new([Overlay::EMPTY; INSTANCE_LIMIT]));
 
 pub(crate) fn lookup(path: &[u8]) -> Option<Metadata> {
     valid_path(path)?;
@@ -1385,16 +1391,12 @@ fn xattr_page(page: FrameLease) -> Option<&'static XattrPage> {
 
 fn live() -> Option<&'static Overlay> {
     let index = current_instance();
-    Some(unsafe { &*core::ptr::addr_of!(OVERLAYS).cast::<Overlay>().add(index) })
+    Some(unsafe { &*OVERLAY_RUNTIME.0.get().cast::<Overlay>().add(index) })
 }
 
 fn live_mut() -> &'static mut Overlay {
     let index = current_instance();
-    unsafe {
-        &mut *core::ptr::addr_of_mut!(OVERLAYS)
-            .cast::<Overlay>()
-            .add(index)
-    }
+    unsafe { &mut *OVERLAY_RUNTIME.0.get().cast::<Overlay>().add(index) }
 }
 
 fn current_instance() -> usize {

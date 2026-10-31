@@ -127,7 +127,7 @@ ginux_linux_probe:
     require_equal
     cmp qword ptr [rax + 24], 0
     je failure
-    cmp qword ptr [rax + 32], 0
+    cmp qword ptr [rax + 32], 33
     require_equal
     cmp qword ptr [rax + 40], 0
     require_equal
@@ -173,6 +173,17 @@ ginux_linux_probe:
 #endif
     cmp qword ptr [rsp], 1
     require_equal
+#ifndef GINUX_LINKED
+    mov r15, rsp
+    push 39
+    pop rax
+    mov rsp, 0x409000
+    syscall
+    cmp eax, 1
+    require_equal
+    mov rsp, r15
+    xor r15d, r15d
+#endif
     mov rax, qword ptr [rsp + 8]
     cmp byte ptr [rax], '/'
     require_equal
@@ -237,7 +248,7 @@ valid_interpreter_base:
     require_equal
     cmp qword ptr [rsp + 312], 25
     require_equal
-    cmp qword ptr [rsp + 328], 0
+    cmp qword ptr [rsp + 328], 33
     require_equal
 
 #if !defined(GINUX_LINKED) || !defined(GINUX_GRAPH)
@@ -308,7 +319,7 @@ valid_interpreter_base:
     pop rdx
     push 7
     pop rax
-    call syscall_expect_enosys
+    call syscall_expect_zero
 
     mov edi, 0x405c80
     push 65
@@ -369,8 +380,8 @@ valid_interpreter_base:
     pop rdx
     push 7
     pop rax
-    call syscall_expect_enosys
-    cmp word ptr [0x405ca6], 0x7777
+    call syscall_expect_zero
+    cmp word ptr [0x405ca6], 0
     require_equal
 
     xor edi, edi
@@ -399,8 +410,8 @@ valid_interpreter_base:
     mov qword ptr [0x405cc8], 1
     mov word ptr [0x405ca6], 0x7777
     mov eax, 271
-    call syscall_expect_enosys
-    cmp word ptr [0x405ca6], 0x7777
+    call syscall_expect_zero
+    cmp word ptr [0x405ca6], 0
     require_equal
 
     mov qword ptr [0x405cd0], 0
@@ -2532,8 +2543,10 @@ linux_child_joined:
     mov edx, 0x4050a0
     mov eax, 204
     call syscall_expect_eight
-    cmp qword ptr [0x4050a0], 1
-    require_equal
+    test qword ptr [0x4050a0], 1
+    jnz 991f
+    ud2
+991:
 
     mov eax, 203
     call syscall_expect_zero

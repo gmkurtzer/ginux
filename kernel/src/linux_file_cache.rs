@@ -1,4 +1,5 @@
 use crate::{arch::x86_64::cpu, control_abi, memory};
+use core::cell::UnsafeCell;
 
 const PAGE_SIZE: usize = 4096;
 const INITIAL_CAPACITY: usize = 64;
@@ -38,24 +39,27 @@ impl CacheTable {
     };
 }
 
-static mut CACHE_TABLES: [CacheTable; control_abi::DOMAIN_LIMIT] =
-    [CacheTable::EMPTY; control_abi::DOMAIN_LIMIT];
+struct FileCacheRuntimeOwner(UnsafeCell<[CacheTable; control_abi::DOMAIN_LIMIT]>);
+
+unsafe impl Sync for FileCacheRuntimeOwner {}
+
+static FILE_CACHE_RUNTIME: FileCacheRuntimeOwner = FileCacheRuntimeOwner(UnsafeCell::new(
+    [CacheTable::EMPTY; control_abi::DOMAIN_LIMIT],
+));
 
 fn current_slot() -> Option<usize> {
     cpu::current_container_slot().filter(|slot| *slot < control_abi::DOMAIN_LIMIT)
 }
 
 fn table(slot: usize) -> CacheTable {
-    unsafe {
-        *core::ptr::addr_of!(CACHE_TABLES)
-            .cast::<CacheTable>()
-            .add(slot)
-    }
+    unsafe { *FILE_CACHE_RUNTIME.0.get().cast::<CacheTable>().add(slot) }
 }
 
 fn set_table(slot: usize, table: CacheTable) {
     unsafe {
-        core::ptr::addr_of_mut!(CACHE_TABLES)
+        FILE_CACHE_RUNTIME
+            .0
+            .get()
             .cast::<CacheTable>()
             .add(slot)
             .write(table)

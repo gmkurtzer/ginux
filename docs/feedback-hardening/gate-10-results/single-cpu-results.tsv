@@ -1,0 +1,6 @@
+workload	metric	baseline_median	qualified_median	change	limit	result
+boot	s	12.860	14.702	14.32% slower	at most 25% slower	PASS
+cpu	events/s	267.650	257.110	3.94% slower	at most 20% slower	PASS
+memory	MiB/s	620.580	603.600	2.74% slower	at most 20% slower	PASS
+threads	events/s	309.732	274.548	11.36% slower	at most 20% slower	PASS
+mutex	s/event	1.423	1.457	2.39% slower	at most 20% slower	PASS

@@ -5,10 +5,17 @@ use crate::{control_abi, linux_process, memory};
 const INSTANCE_LIMIT: usize = control_abi::DOMAIN_LIMIT + 1;
 const WALK_LIMIT: usize = 262_144;
 
-static LOCKS: [AtomicBool; INSTANCE_LIMIT] = [const { AtomicBool::new(false) }; INSTANCE_LIMIT];
-static ROOT_ADDRESSES: [AtomicU64; INSTANCE_LIMIT] = [const { AtomicU64::new(0) }; INSTANCE_LIMIT];
-static ROOT_GENERATIONS: [AtomicU32; INSTANCE_LIMIT] =
-    [const { AtomicU32::new(0) }; INSTANCE_LIMIT];
+struct AioRuntimeOwner {
+    locks: [AtomicBool; INSTANCE_LIMIT],
+    root_addresses: [AtomicU64; INSTANCE_LIMIT],
+    root_generations: [AtomicU32; INSTANCE_LIMIT],
+}
+
+static AIO_RUNTIME: AioRuntimeOwner = AioRuntimeOwner {
+    locks: [const { AtomicBool::new(false) }; INSTANCE_LIMIT],
+    root_addresses: [const { AtomicU64::new(0) }; INSTANCE_LIMIT],
+    root_generations: [const { AtomicU32::new(0) }; INSTANCE_LIMIT],
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Error {
@@ -48,7 +55,7 @@ struct Guard {
 impl Guard {
     fn acquire() -> Option<Self> {
         let instance = linux_process::current_ipc_instance();
-        let lock = LOCKS.get(instance)?;
+        let lock = AIO_RUNTIME.locks.get(instance)?;
         while lock
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
             .is_err()
@@ -60,7 +67,7 @@ impl Guard {
 }
 impl Drop for Guard {
     fn drop(&mut self) {
-        LOCKS[self.instance].store(false, Ordering::Release);
+        AIO_RUNTIME.locks[self.instance].store(false, Ordering::Release);
     }
 }
 
@@ -75,14 +82,14 @@ fn zero(frame: memory::FrameLease) -> bool {
 }
 fn root(instance: usize) -> Option<memory::FrameLease> {
     memory::FrameLease::from_parts(
-        ROOT_ADDRESSES[instance].load(Ordering::Acquire),
-        ROOT_GENERATIONS[instance].load(Ordering::Acquire),
+        AIO_RUNTIME.root_addresses[instance].load(Ordering::Acquire),
+        AIO_RUNTIME.root_generations[instance].load(Ordering::Acquire),
     )
 }
 fn publish(instance: usize, value: Option<memory::FrameLease>) {
     let value = value.unwrap_or(memory::FrameLease::EMPTY);
-    ROOT_GENERATIONS[instance].store(value.generation(), Ordering::Release);
-    ROOT_ADDRESSES[instance].store(value.address(), Ordering::Release);
+    AIO_RUNTIME.root_generations[instance].store(value.generation(), Ordering::Release);
+    AIO_RUNTIME.root_addresses[instance].store(value.address(), Ordering::Release);
 }
 fn context(frame: memory::FrameLease) -> Option<&'static Context> {
     Some(unsafe { &*(frame.direct_map_address()? as *const Context) })

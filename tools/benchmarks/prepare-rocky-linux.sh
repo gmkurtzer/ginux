@@ -14,10 +14,10 @@ ovmf_code=$(find_ovmf_code)
 ovmf_vars_template=$(find_ovmf_vars)
 accelerator=$(benchmark_accelerator)
 cpu_model=$(benchmark_cpu "$accelerator")
-cloud_image="$benchmark_dir/$ROCKY_CLOUD_IMAGE_NAME"
-prepared_image="$benchmark_dir/rocky-linux-prepared.qcow2"
-preparation_log="$benchmark_dir/rocky-linux-prepare.log"
-seed_dir="$benchmark_dir/nocloud"
+cloud_image="$benchmark_asset_dir/$ROCKY_CLOUD_IMAGE_NAME"
+prepared_image="$benchmark_asset_dir/rocky-linux-prepared-v2.qcow2"
+preparation_log="$benchmark_asset_dir/rocky-linux-prepare-v2.log"
+seed_dir="$benchmark_asset_dir/nocloud-v2"
 http_port="${GINUX_BENCHMARK_HTTP_PORT:-18080}"
 http_pid=""
 qemu_pid=""
@@ -31,7 +31,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-mkdir -p "$benchmark_dir" "$seed_dir"
+mkdir -p "$benchmark_asset_dir" "$seed_dir"
 
 if [[ ! -f "$cloud_image" ]] || [[ "$(hash_file "$cloud_image")" != "$ROCKY_CLOUD_IMAGE_SHA256" ]]; then
     partial="$cloud_image.partial"
@@ -76,21 +76,28 @@ write_files:
           output=/dev/virtio-ports/org.ginux.benchmark
       fi
       exec 3>"\$output"
+      threads=1
+      threads_file=/sys/firmware/qemu_fw_cfg/by_name/opt/ginux/threads/raw
+      if [ -r "\$threads_file" ]; then
+          candidate=\$(tr -dc '0-9' <"\$threads_file")
+          case "\$candidate" in 1|2|4) threads=\$candidate ;; esac
+      fi
       echo GINUX_BENCH_READY >&3
       {
           printf 'GINUX_BENCH_KERNEL_TO_MULTI_USER_SECONDS '
           cut -d' ' -f1 /proc/uptime
           printf 'GINUX_BENCH_SYSBENCH_SHA256 '
           sha256sum /usr/bin/sysbench | awk '{print \$1}'
+          echo "GINUX_BENCH_THREADS \$threads"
           for workload in cpu memory threads mutex; do
               run=1
               while [ \$run -le ${BENCHMARK_WORKLOAD_RUNS} ]; do
                   echo "GINUX_BENCH_WORKLOAD_BEGIN \$workload \$run"
                   case \$workload in
-                      cpu) sysbench cpu --threads=1 --time=${BENCHMARK_WORKLOAD_SECONDS} --cpu-max-prime=20000 run ;;
-                      memory) sysbench memory --threads=1 --time=${BENCHMARK_WORKLOAD_SECONDS} --memory-total-size=100G run ;;
-                      threads) sysbench threads --threads=1 --time=${BENCHMARK_WORKLOAD_SECONDS} run ;;
-                      mutex) sysbench mutex --threads=1 --time=${BENCHMARK_WORKLOAD_SECONDS} run ;;
+                      cpu) sysbench cpu --threads=\$threads --time=${BENCHMARK_WORKLOAD_SECONDS} --cpu-max-prime=20000 run ;;
+                      memory) sysbench memory --threads=\$threads --time=${BENCHMARK_WORKLOAD_SECONDS} --memory-total-size=100G run ;;
+                      threads) sysbench threads --threads=\$threads --time=${BENCHMARK_WORKLOAD_SECONDS} run ;;
+                      mutex) sysbench mutex --threads=\$threads --time=${BENCHMARK_WORKLOAD_SECONDS} run ;;
                   esac
                   echo "GINUX_BENCH_WORKLOAD_END \$workload \$run \$?"
                   run=\$((run + 1))
@@ -138,7 +145,7 @@ kill -0 "$http_pid" 2>/dev/null || {
     exit 1
 }
 
-cp "$ovmf_vars_template" "$benchmark_dir/rocky-linux-prepare-vars.fd"
+cp "$ovmf_vars_template" "$benchmark_asset_dir/rocky-linux-prepare-v2-vars.fd"
 : >"$preparation_log"
 echo "Preparing Rocky Linux baseline under QEMU/$accelerator; this installs EPEL and sysbench once."
 "$qemu" \
@@ -146,7 +153,7 @@ echo "Preparing Rocky Linux baseline under QEMU/$accelerator; this installs EPEL
     -cpu "$cpu_model" -smp "$BENCHMARK_VCPUS" -m "$BENCHMARK_MEMORY" \
     -display none -monitor none -serial stdio -no-reboot \
     -drive "if=pflash,format=raw,readonly=on,file=$ovmf_code" \
-    -drive "if=pflash,format=raw,file=$benchmark_dir/rocky-linux-prepare-vars.fd" \
+    -drive "if=pflash,format=raw,file=$benchmark_asset_dir/rocky-linux-prepare-v2-vars.fd" \
     -drive "if=none,id=linux-root,format=qcow2,file=$prepared_image" \
     -device "virtio-blk-pci,drive=linux-root,bootindex=1" \
     -netdev user,id=linux-net,restrict=off \

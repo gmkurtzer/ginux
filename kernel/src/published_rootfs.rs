@@ -51,38 +51,45 @@ pub(crate) enum ProcessPlanFailure<'a> {
     UnsupportedLoadLayout,
 }
 
-static ADDRESSES: [AtomicUsize; crate::control_abi::DOMAIN_LIMIT] =
-    [const { AtomicUsize::new(0) }; crate::control_abi::DOMAIN_LIMIT];
-static SIZES: [AtomicUsize; crate::control_abi::DOMAIN_LIMIT] =
-    [const { AtomicUsize::new(0) }; crate::control_abi::DOMAIN_LIMIT];
-static ENTRY_COUNTS: [AtomicUsize; crate::control_abi::DOMAIN_LIMIT] =
-    [const { AtomicUsize::new(0) }; crate::control_abi::DOMAIN_LIMIT];
-static CONTENT_LENGTHS: [AtomicUsize; crate::control_abi::DOMAIN_LIMIT] =
-    [const { AtomicUsize::new(0) }; crate::control_abi::DOMAIN_LIMIT];
-static INDEX_STARTS: [AtomicUsize; crate::control_abi::DOMAIN_LIMIT] =
-    [const { AtomicUsize::new(0) }; crate::control_abi::DOMAIN_LIMIT];
-static ENTRY_OFFSET_STARTS: [AtomicUsize; crate::control_abi::DOMAIN_LIMIT] =
-    [const { AtomicUsize::new(0) }; crate::control_abi::DOMAIN_LIMIT];
-static CHILD_HEAD_STARTS: [AtomicUsize; crate::control_abi::DOMAIN_LIMIT] =
-    [const { AtomicUsize::new(0) }; crate::control_abi::DOMAIN_LIMIT];
-static CHILD_NEXT_STARTS: [AtomicUsize; crate::control_abi::DOMAIN_LIMIT] =
-    [const { AtomicUsize::new(0) }; crate::control_abi::DOMAIN_LIMIT];
-static INDEX_FRAME_STARTS: [AtomicUsize; crate::control_abi::DOMAIN_LIMIT] =
-    [const { AtomicUsize::new(0) }; crate::control_abi::DOMAIN_LIMIT];
-static INDEX_GENERATIONS: [AtomicU32; crate::control_abi::DOMAIN_LIMIT] =
-    [const { AtomicU32::new(0) }; crate::control_abi::DOMAIN_LIMIT];
-static INDEX_FRAME_COUNTS: [AtomicUsize; crate::control_abi::DOMAIN_LIMIT] =
-    [const { AtomicUsize::new(0) }; crate::control_abi::DOMAIN_LIMIT];
-static INDEX_CAPACITIES: [AtomicUsize; crate::control_abi::DOMAIN_LIMIT] =
-    [const { AtomicUsize::new(0) }; crate::control_abi::DOMAIN_LIMIT];
-static ENTRY_CACHE_HANDLES: [[AtomicU16; ENTRY_CACHE_SLOTS]; crate::control_abi::DOMAIN_LIMIT] =
-    [const { [const { AtomicU16::new(0) }; ENTRY_CACHE_SLOTS] }; crate::control_abi::DOMAIN_LIMIT];
-static ENTRY_CACHE_OFFSETS: [[AtomicUsize; ENTRY_CACHE_SLOTS]; crate::control_abi::DOMAIN_LIMIT] =
-    [const { [const { AtomicUsize::new(0) }; ENTRY_CACHE_SLOTS] };
-        crate::control_abi::DOMAIN_LIMIT];
+struct PublishedRootfsOwner {
+    addresses: [AtomicUsize; crate::control_abi::DOMAIN_LIMIT],
+    sizes: [AtomicUsize; crate::control_abi::DOMAIN_LIMIT],
+    entry_counts: [AtomicUsize; crate::control_abi::DOMAIN_LIMIT],
+    content_lengths: [AtomicUsize; crate::control_abi::DOMAIN_LIMIT],
+    index_starts: [AtomicUsize; crate::control_abi::DOMAIN_LIMIT],
+    entry_offset_starts: [AtomicUsize; crate::control_abi::DOMAIN_LIMIT],
+    child_head_starts: [AtomicUsize; crate::control_abi::DOMAIN_LIMIT],
+    child_next_starts: [AtomicUsize; crate::control_abi::DOMAIN_LIMIT],
+    index_frame_starts: [AtomicUsize; crate::control_abi::DOMAIN_LIMIT],
+    index_generations: [AtomicU32; crate::control_abi::DOMAIN_LIMIT],
+    index_frame_counts: [AtomicUsize; crate::control_abi::DOMAIN_LIMIT],
+    index_capacities: [AtomicUsize; crate::control_abi::DOMAIN_LIMIT],
+    entry_cache_handles: [[AtomicU16; ENTRY_CACHE_SLOTS]; crate::control_abi::DOMAIN_LIMIT],
+    entry_cache_offsets: [[AtomicUsize; ENTRY_CACHE_SLOTS]; crate::control_abi::DOMAIN_LIMIT],
+}
+
+static PUBLISHED_ROOTFS: PublishedRootfsOwner = PublishedRootfsOwner {
+    addresses: [const { AtomicUsize::new(0) }; crate::control_abi::DOMAIN_LIMIT],
+    sizes: [const { AtomicUsize::new(0) }; crate::control_abi::DOMAIN_LIMIT],
+    entry_counts: [const { AtomicUsize::new(0) }; crate::control_abi::DOMAIN_LIMIT],
+    content_lengths: [const { AtomicUsize::new(0) }; crate::control_abi::DOMAIN_LIMIT],
+    index_starts: [const { AtomicUsize::new(0) }; crate::control_abi::DOMAIN_LIMIT],
+    entry_offset_starts: [const { AtomicUsize::new(0) }; crate::control_abi::DOMAIN_LIMIT],
+    child_head_starts: [const { AtomicUsize::new(0) }; crate::control_abi::DOMAIN_LIMIT],
+    child_next_starts: [const { AtomicUsize::new(0) }; crate::control_abi::DOMAIN_LIMIT],
+    index_frame_starts: [const { AtomicUsize::new(0) }; crate::control_abi::DOMAIN_LIMIT],
+    index_generations: [const { AtomicU32::new(0) }; crate::control_abi::DOMAIN_LIMIT],
+    index_frame_counts: [const { AtomicUsize::new(0) }; crate::control_abi::DOMAIN_LIMIT],
+    index_capacities: [const { AtomicUsize::new(0) }; crate::control_abi::DOMAIN_LIMIT],
+    entry_cache_handles: [const { [const { AtomicU16::new(0) }; ENTRY_CACHE_SLOTS] };
+        crate::control_abi::DOMAIN_LIMIT],
+    entry_cache_offsets: [const { [const { AtomicUsize::new(0) }; ENTRY_CACHE_SLOTS] };
+        crate::control_abi::DOMAIN_LIMIT],
+};
 
 pub(crate) fn is_installed(slot: usize) -> bool {
-    slot < crate::control_abi::DOMAIN_LIMIT && SIZES[slot].load(Ordering::Acquire) != 0
+    slot < crate::control_abi::DOMAIN_LIMIT
+        && PUBLISHED_ROOTFS.sizes[slot].load(Ordering::Acquire) != 0
 }
 
 pub(crate) fn install_published_rootfs(slot: usize, bytes: &'static [u8]) -> bool {
@@ -99,23 +106,23 @@ pub(crate) fn install_published_rootfs(slot: usize, bytes: &'static [u8]) -> boo
         return false;
     }
     clear_entry_cache(slot);
-    ADDRESSES[slot].store(bytes.as_ptr() as usize, Ordering::Relaxed);
-    ENTRY_COUNTS[slot].store(metadata.entry_count(), Ordering::Relaxed);
-    CONTENT_LENGTHS[slot].store(metadata.content_length(), Ordering::Relaxed);
-    SIZES[slot].store(bytes.len(), Ordering::Release);
+    PUBLISHED_ROOTFS.addresses[slot].store(bytes.as_ptr() as usize, Ordering::Relaxed);
+    PUBLISHED_ROOTFS.entry_counts[slot].store(metadata.entry_count(), Ordering::Relaxed);
+    PUBLISHED_ROOTFS.content_lengths[slot].store(metadata.content_length(), Ordering::Relaxed);
+    PUBLISHED_ROOTFS.sizes[slot].store(bytes.len(), Ordering::Release);
     true
 }
 
 pub(crate) fn uninstall_published_rootfs(slot: usize) -> bool {
-    let Some(size) = SIZES.get(slot) else {
+    let Some(size) = PUBLISHED_ROOTFS.sizes.get(slot) else {
         return false;
     };
     if size.swap(0, Ordering::AcqRel) == 0 {
         return true;
     }
-    ADDRESSES[slot].store(0, Ordering::Release);
-    ENTRY_COUNTS[slot].store(0, Ordering::Release);
-    CONTENT_LENGTHS[slot].store(0, Ordering::Release);
+    PUBLISHED_ROOTFS.addresses[slot].store(0, Ordering::Release);
+    PUBLISHED_ROOTFS.entry_counts[slot].store(0, Ordering::Release);
+    PUBLISHED_ROOTFS.content_lengths[slot].store(0, Ordering::Release);
     clear_entry_cache(slot);
     release_path_index(slot)
 }
@@ -281,29 +288,29 @@ fn install_path_index(slot: usize, rootfs: &Rootfs<'_>) -> bool {
         child_next[index] = child_heads[parent];
         child_heads[parent] = index;
     }
-    INDEX_STARTS[slot].store(address, Ordering::Relaxed);
-    ENTRY_OFFSET_STARTS[slot].store(address + index_bytes, Ordering::Relaxed);
-    CHILD_HEAD_STARTS[slot].store(child_head_address, Ordering::Relaxed);
-    CHILD_NEXT_STARTS[slot].store(child_next_address, Ordering::Relaxed);
-    INDEX_FRAME_STARTS[slot].store(first.address() as usize, Ordering::Relaxed);
-    INDEX_GENERATIONS[slot].store(first.generation(), Ordering::Relaxed);
-    INDEX_FRAME_COUNTS[slot].store(allocated, Ordering::Relaxed);
-    INDEX_CAPACITIES[slot].store(capacity, Ordering::Release);
+    PUBLISHED_ROOTFS.index_starts[slot].store(address, Ordering::Relaxed);
+    PUBLISHED_ROOTFS.entry_offset_starts[slot].store(address + index_bytes, Ordering::Relaxed);
+    PUBLISHED_ROOTFS.child_head_starts[slot].store(child_head_address, Ordering::Relaxed);
+    PUBLISHED_ROOTFS.child_next_starts[slot].store(child_next_address, Ordering::Relaxed);
+    PUBLISHED_ROOTFS.index_frame_starts[slot].store(first.address() as usize, Ordering::Relaxed);
+    PUBLISHED_ROOTFS.index_generations[slot].store(first.generation(), Ordering::Relaxed);
+    PUBLISHED_ROOTFS.index_frame_counts[slot].store(allocated, Ordering::Relaxed);
+    PUBLISHED_ROOTFS.index_capacities[slot].store(capacity, Ordering::Release);
     true
 }
 
 fn release_path_index(slot: usize) -> bool {
-    let capacity = INDEX_CAPACITIES[slot].swap(0, Ordering::AcqRel);
+    let capacity = PUBLISHED_ROOTFS.index_capacities[slot].swap(0, Ordering::AcqRel);
     if capacity == 0 {
         return true;
     }
-    INDEX_STARTS[slot].store(0, Ordering::Release);
-    ENTRY_OFFSET_STARTS[slot].store(0, Ordering::Release);
-    CHILD_HEAD_STARTS[slot].store(0, Ordering::Release);
-    CHILD_NEXT_STARTS[slot].store(0, Ordering::Release);
-    let start = INDEX_FRAME_STARTS[slot].swap(0, Ordering::AcqRel) as u64;
-    let generation = INDEX_GENERATIONS[slot].swap(0, Ordering::AcqRel);
-    let count = INDEX_FRAME_COUNTS[slot].swap(0, Ordering::AcqRel);
+    PUBLISHED_ROOTFS.index_starts[slot].store(0, Ordering::Release);
+    PUBLISHED_ROOTFS.entry_offset_starts[slot].store(0, Ordering::Release);
+    PUBLISHED_ROOTFS.child_head_starts[slot].store(0, Ordering::Release);
+    PUBLISHED_ROOTFS.child_next_starts[slot].store(0, Ordering::Release);
+    let start = PUBLISHED_ROOTFS.index_frame_starts[slot].swap(0, Ordering::AcqRel) as u64;
+    let generation = PUBLISHED_ROOTFS.index_generations[slot].swap(0, Ordering::AcqRel);
+    let count = PUBLISHED_ROOTFS.index_frame_counts[slot].swap(0, Ordering::AcqRel);
     FrameLease::from_parts(start, generation).is_some_and(|first| {
         memory::scrub_and_release_contiguous_extent(FrameOwner::KERNEL, first, count)
     })
@@ -331,15 +338,27 @@ fn entry_path_matches(entry: Entry<'_>, path: &[u8]) -> bool {
 }
 
 fn index_table(slot: usize) -> Option<&'static [PathIndexEntry]> {
-    let capacity = INDEX_CAPACITIES.get(slot)?.load(Ordering::Acquire);
-    let start = INDEX_STARTS.get(slot)?.load(Ordering::Relaxed);
+    let capacity = PUBLISHED_ROOTFS
+        .index_capacities
+        .get(slot)?
+        .load(Ordering::Acquire);
+    let start = PUBLISHED_ROOTFS
+        .index_starts
+        .get(slot)?
+        .load(Ordering::Relaxed);
     (capacity != 0 && start != 0)
         .then(|| unsafe { core::slice::from_raw_parts(start as *const PathIndexEntry, capacity) })
 }
 
 fn entry_offsets(slot: usize) -> Option<&'static [usize]> {
-    let count = ENTRY_COUNTS.get(slot)?.load(Ordering::Acquire);
-    let start = ENTRY_OFFSET_STARTS.get(slot)?.load(Ordering::Relaxed);
+    let count = PUBLISHED_ROOTFS
+        .entry_counts
+        .get(slot)?
+        .load(Ordering::Acquire);
+    let start = PUBLISHED_ROOTFS
+        .entry_offset_starts
+        .get(slot)?
+        .load(Ordering::Relaxed);
     (count != 0 && start != 0)
         .then(|| unsafe { core::slice::from_raw_parts(start as *const usize, count) })
 }
@@ -467,8 +486,11 @@ fn rootfs() -> Option<Rootfs<'static>> {
 }
 
 fn rootfs_for(slot: usize) -> Option<Rootfs<'static>> {
-    let size = SIZES.get(slot)?.load(Ordering::Acquire);
-    let address = ADDRESSES.get(slot)?.load(Ordering::Relaxed);
+    let size = PUBLISHED_ROOTFS.sizes.get(slot)?.load(Ordering::Acquire);
+    let address = PUBLISHED_ROOTFS
+        .addresses
+        .get(slot)?
+        .load(Ordering::Relaxed);
     if address == 0 || size == 0 {
         return None;
     }
@@ -478,8 +500,14 @@ fn rootfs_for(slot: usize) -> Option<Rootfs<'static>> {
     Rootfs::from_metadata(
         bytes,
         RootfsMetadata::new(
-            ENTRY_COUNTS.get(slot)?.load(Ordering::Relaxed),
-            CONTENT_LENGTHS.get(slot)?.load(Ordering::Relaxed),
+            PUBLISHED_ROOTFS
+                .entry_counts
+                .get(slot)?
+                .load(Ordering::Relaxed),
+            PUBLISHED_ROOTFS
+                .content_lengths
+                .get(slot)?
+                .load(Ordering::Relaxed),
         )?,
     )
 }
@@ -698,19 +726,19 @@ pub(crate) fn entry(handle: u16) -> Option<Entry<'static>> {
     let slot = crate::arch::x86_64::cpu::current_container_slot()?;
     let cache = usize::from(handle) % ENTRY_CACHE_SLOTS;
     let rootfs = rootfs_for(slot)?;
-    if ENTRY_CACHE_HANDLES[slot][cache].load(Ordering::Acquire) == handle {
-        let offset = ENTRY_CACHE_OFFSETS[slot][cache].load(Ordering::Relaxed);
+    if PUBLISHED_ROOTFS.entry_cache_handles[slot][cache].load(Ordering::Acquire) == handle {
+        let offset = PUBLISHED_ROOTFS.entry_cache_offsets[slot][cache].load(Ordering::Relaxed);
         return rootfs.entry_at_offset(offset);
     }
     let offset = entry_offset(slot, index)?;
     let entry = rootfs.entry_at_offset(offset)?;
-    ENTRY_CACHE_OFFSETS[slot][cache].store(offset, Ordering::Relaxed);
-    ENTRY_CACHE_HANDLES[slot][cache].store(handle, Ordering::Release);
+    PUBLISHED_ROOTFS.entry_cache_offsets[slot][cache].store(offset, Ordering::Relaxed);
+    PUBLISHED_ROOTFS.entry_cache_handles[slot][cache].store(handle, Ordering::Release);
     Some(entry)
 }
 
 fn clear_entry_cache(slot: usize) {
-    for handle in &ENTRY_CACHE_HANDLES[slot] {
+    for handle in &PUBLISHED_ROOTFS.entry_cache_handles[slot] {
         handle.store(0, Ordering::Release);
     }
 }
@@ -729,8 +757,14 @@ pub(crate) fn next_child(directory: u16, cursor: usize) -> Option<Option<Child>>
         index
     };
     let offsets = entry_offsets(slot)?;
-    let head_start = CHILD_HEAD_STARTS.get(slot)?.load(Ordering::Acquire);
-    let next_start = CHILD_NEXT_STARTS.get(slot)?.load(Ordering::Acquire);
+    let head_start = PUBLISHED_ROOTFS
+        .child_head_starts
+        .get(slot)?
+        .load(Ordering::Acquire);
+    let next_start = PUBLISHED_ROOTFS
+        .child_next_starts
+        .get(slot)?
+        .load(Ordering::Acquire);
     if head_start == 0 || next_start == 0 {
         return None;
     }
