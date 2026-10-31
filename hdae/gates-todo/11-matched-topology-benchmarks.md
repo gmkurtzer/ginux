@@ -36,8 +36,9 @@ thread counts scaled with available CPUs.
 - [x] Correct the two-vCPU no-ready-peer private-futex result and add a
   deterministic Rocky regression.
 - [ ] Run the matched Linux and Ginux measurements. Every fixed one-thread
-  cell passed at 1, 2, and 4 vCPUs. Scaled 2-vCPU/2-thread Linux passed and its
-  Ginux CPU samples passed, but the Ginux shared-memory workload faulted.
+  cell passed at 1, 2, and 4 vCPUs. The scaled 2-vCPU/2-thread cell now passes
+  on both systems. Scaled 4-vCPU/4-thread Linux passed; Ginux completed its
+  first full batch, then faulted in the second batch's thread-yield workload.
 - [ ] Verify raw samples, binary identity, results, and QEMU cleanup.
 - [ ] Publish the comparison and its limitations.
 
@@ -100,6 +101,13 @@ thread counts scaled with available CPUs.
   on a locked write to mapped shared address `549771632656`.
 - The failed scaled run terminated QEMU and left the benchmark volume unopened
   according to `lsof`; process enumeration was unavailable in the sandbox.
+- After accepted Gate 11.5, the resumed scaled 2-vCPU/2-thread Ginux cell
+  completed all nine samples per workload. The scaled 4-vCPU/4-thread Linux
+  cell completed, and Ginux completed its first full batch plus the second
+  batch's CPU and memory samples. The second batch then faulted during
+  `threads_1` at RIP `4283650` on `lock inc [r11]`, with CR2 `66050`,
+  page-fault error 7, and no page-table or process-registry mapping for page
+  `65536`.
 
 ## Decisions and limitations
 
@@ -120,6 +128,10 @@ thread counts scaled with available CPUs.
   SMP shared-writable-page correctness gap assigned to Gate 11.5; fixed-thread
   measurements remain valid. Gate 11.5 passed and was accepted on October 30,
   2026, so the scaled matrix resumes with the corrected implementation.
+- The later four-thread low-address fault is also not a performance result. It
+  occurs after shared-memory coverage passes and is assigned to proposed Gate
+  11.6 for thread-context and scheduling diagnosis. Gate 11 is paused because
+  kernel correctness changes remain outside its measurement-only scope.
 
 ## Delivery strategy
 
