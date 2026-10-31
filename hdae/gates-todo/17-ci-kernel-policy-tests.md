@@ -62,11 +62,16 @@ pure kernel policy behind a host-testable boundary.
   policy test covers both encodings and the complete local QEMU boot passes.
 - GitHub Actions run https://github.com/gmkurtzer/ginux/actions/runs/41178914309
   -> static passed in 1m46s and QEMU passed in 3m24s.
+- Evidence-only run `41179187159` reproduced a pre-existing timing race in the
+  packet-wait timeout self-test: the non-cooperative helper could retire before
+  its 10 ms APIC deadline on a loaded runner. The helper window is now one
+  second of guest TSC time so the test still proves timer preemption without
+  depending on host scheduling latency.
 
 ## Decisions and limitations
 
-- The workflow is confirmed on the pull-request head with read-only repository
-  permissions.
+- The workflow uses read-only repository permissions. Final-head confirmation
+  is pending after hardening the packet-timeout test window.
 - The user explicitly directed the corrective work into existing pull request
   #9, overriding the default one-gate-per-PR delivery split.
 

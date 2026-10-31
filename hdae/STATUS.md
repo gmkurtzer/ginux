@@ -8,10 +8,11 @@
 - Branch: `codex/issue-5-criticism-reconciliation`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gates 14 through 18, corrective implementation for issue #5
-- Last completed action: pushed the QEMU 11 VT-d compatibility correction to
-  PR #9; GitHub Actions run `41178914309` passed both static and QEMU jobs
-- Next action: commit and push the final evidence checkpoint, confirm the new
-  pull-request head, and return PR #9 to the maintainer for review
+- Last completed action: final-head CI run `41179187159` reproduced a timing
+  race in the packet-wait timeout self-test after the prior code-bearing run
+  had passed; the non-cooperative helper window is now robust to loaded hosts
+- Next action: run the complete local QEMU boot, then commit, push, and confirm
+  both CI jobs on the corrected pull-request head
 
 ## Current repository state
 
