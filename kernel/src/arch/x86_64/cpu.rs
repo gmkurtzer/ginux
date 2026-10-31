@@ -41956,6 +41956,12 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
         0
     };
     let fault_metadata = frame.metadata(fault_address);
+    if fault_domain.is_none()
+        && X86_RUNTIME.ELF_PROBE_ACTIVE.load(Ordering::SeqCst)
+        && refresh_linux_runtime_translation(fault_metadata)
+    {
+        return 0;
+    }
     if fault_domain.is_none() && materialize_linux_cow_page(fault_metadata) {
         return 0;
     }
@@ -42152,6 +42158,21 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
         }
     }
     resume_action(action)
+}
+
+fn refresh_linux_runtime_translation(fault: domain::FaultMetadata) -> bool {
+    if !X86_RUNTIME.LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
+        || fault.vector != 14
+        || fault.error & 1 != 0
+        || fault.address >= 1 << 47
+    {
+        return false;
+    }
+    address_space::refresh_current_linux_runtime_translation(
+        fault.address & !(PAGE_SIZE as u64 - 1),
+        fault.error & 2 != 0,
+        fault.error & 16 != 0,
+    )
 }
 
 fn materialize_linux_runtime_stack_page(fault: domain::FaultMetadata) -> bool {

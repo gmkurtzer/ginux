@@ -5686,6 +5686,37 @@ pub(crate) fn current_linux_runtime_page(address: u64) -> LinuxRuntimePage {
     })
 }
 
+pub(crate) fn refresh_current_linux_runtime_translation(
+    address: u64,
+    write: bool,
+    execute: bool,
+) -> bool {
+    if address >= 1 << 47 || !address.is_multiple_of(PAGE_SIZE as u64) {
+        return false;
+    }
+    let Some(entry) = current_linux_leaf(address) else {
+        return false;
+    };
+    // The page-table leaf is shared by every CPU running this address space.
+    // A remote CPU can retain an earlier non-present translation after another
+    // CPU materializes the page, so inspect the authoritative leaf before
+    // retrying the fault locally. Never turn this recovery into a permission
+    // bypass: the leaf must already grant the exact access that faulted.
+    let value = unsafe { entry.read_volatile() };
+    let frame = value & ADDRESS_MASK;
+    if value & (PRESENT | USER) != PRESENT | USER
+        || write && value & WRITABLE == 0
+        || execute && value & NO_EXECUTE != 0
+        || memory::live_frame_lease(memory::FrameOwner::KERNEL, frame).is_none()
+    {
+        return false;
+    }
+    unsafe {
+        asm!("invlpg [{}]", in(reg) address, options(nostack, preserves_flags));
+    }
+    true
+}
+
 pub(crate) fn current_linux_user_page_count() -> Option<usize> {
     let root = mapped_frame::<u64>(current_root())?;
     let mut pages = 0_usize;
