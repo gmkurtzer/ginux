@@ -8,10 +8,10 @@
 - Branch: `hdae/issue-4-boot-queue-size`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 19, QEMU boot queue-size contract
-- Last completed action: the queue-pattern probes, `make check`, and the full
-  QEMU 10.1.2 `make test` passed
-- Next action: commit and push the dedicated branch, open its pull request, and
-  add reciprocal links to issue #4 and the pull request
+- Last completed action: delivered the verified Gate 19 fix through open PR #13
+  and added reciprocal links to issue #4 and the pull request
+- Next action: maintainer review of PR #13; retain issue #4 in scheduled
+  attention until the user acknowledges it
 
 ## Current repository state
 

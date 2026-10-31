@@ -36,8 +36,8 @@ sizes remain rejected.
 ## Remaining work
 
 - [x] Run deterministic static and QEMU verification.
-- [ ] Commit and push the dedicated branch.
-- [ ] Open the remediation pull request and add reciprocal links.
+- [x] Commit and push the dedicated branch.
+- [x] Open the remediation pull request and add reciprocal links.
 
 ## Acceptance criteria
 
@@ -65,6 +65,11 @@ sizes remain rejected.
   warning-denying lints, and unit tests.
 - `make test` on QEMU 10.1.2 under TCG -> emitted `GINUX_KERNEL_OK` and
   `Boot test passed.`
+- Pull request: https://github.com/gmkurtzer/ginux/pull/13
+- Issue response:
+  https://github.com/gmkurtzer/ginux/issues/4#issuecomment-6546511460
+- Pull-request source link:
+  https://github.com/gmkurtzer/ginux/pull/13#issuecomment-6546511744
 
 ## Decisions and limitations
 
@@ -78,12 +83,14 @@ sizes remain rejected.
 
 - Working branch: `hdae/issue-4-boot-queue-size`
 - Intended base: `main`
-- Pull request: intended; non-closing reference to issue #4
-- Planned commits: one signed implementation, gate, and verification commit
-- Actual commits: pending
+- Pull request: https://github.com/gmkurtzer/ginux/pull/13; non-closing
+  reference to issue #4
+- Planned commits: signed implementation and verification; delivery checkpoint
+- Actual commits: `fdd33f87` (implementation, gate, and verification evidence);
+  delivery-link checkpoint follows
 
 ## Review policy and outcome
 
-Delegated by the saved proactive scheduled-review policy. Keep this gate in
-`gates-todo/` for maintainer review after the verified branch, open pull
-request, and reciprocal source links exist.
+Delegated by the saved proactive scheduled-review policy. Technical criteria
+passed and delivery is complete through open PR #13 with reciprocal source
+links. Keep this gate in `gates-todo/` for maintainer review.
