@@ -143,9 +143,10 @@ percent of Linux is acceptable; the target is faster than Linux in every cell.
 - Planned commits: gate and baseline; bounded profiling; one or more coherent
   mechanism optimizations with regressions; final matched evidence and closure
 - Actual commits: `0804af92`, `4478f23c`, `e9acfb57`, `b2a91ac7`,
-  `91bbafea`, and `4a1564bf`
+  `91bbafea`, `4a1564bf`, and `5870ca26`; the accepted checkpoint is recorded
+  by the gate-closure commit.
 
 ## Review policy and outcome
 
-All objective criteria passed. Human acceptance is now required; the gate
-remains in `gates-todo/` until that checkpoint is complete.
+All objective criteria passed. The human accepted the results on October 30,
+2026. Gate 12 is closed and the branch is ready for its follow-up pull request.

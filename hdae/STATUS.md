@@ -4,29 +4,28 @@
 
 - Active skill: `.agents/skills/hdae-development/SKILL.md`
 - Reload required after compaction, reset, resume, or handoff: yes
-- Active project: profiling-guided UP and SMP performance parity
+- Active project: feedback-driven kernel hardening follow-up
 - Branch: `codex/performance-parity`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 12, approved and open
-- Last completed action: completed the final matched matrix and full
-  qualification suite; every performance cell meets the approved `0.96x`
-  floor
-- Next action: stop at the Gate 12 human checkpoint for result review and gate
-  acceptance
+- Active gate: none; Gate 12 is accepted and closed
+- Last completed action: the human accepted the final matched matrix and full
+  qualification suite on October 30, 2026; every performance cell meets the
+  approved `0.96x` floor
+- Next action: publish `codex/performance-parity` and open the follow-up pull
+  request with the accepted performance table
 
 ## Current repository state
 
 Local and remote `main` identify merged PR #7 at commit `a2a1eace`. The first
 eleven feedback-hardening gates and inserted correctness gates are complete.
-Gate 12 is isolated on `codex/performance-parity` for a separate follow-up PR.
+Gate 12 is complete on `codex/performance-parity` for a separate follow-up PR.
 The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
 matrix and repeated stress pass. Gate 11's comparison and reduced evidence are
 under `docs/feedback-hardening/`. No push or merge was performed.
 
 ## Open decisions
 
-- Gate 12 is technically passed and awaits the required human review checkpoint
-  before moving from `gates-todo/` to `gates-done/`.
+- None. Gate 12 passed and was accepted at its required human checkpoint.
 
 ## Active diagnosis
 
