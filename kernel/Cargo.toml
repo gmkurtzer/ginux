@@ -15,6 +15,7 @@ path = "src/lib.rs"
 
 [dependencies]
 ginux-image-store = { path = "../crates/image-store" }
+ginux-kernel-policy = { path = "../crates/kernel-policy" }
 ginux-oci = { path = "../crates/oci" }
 ginux-oci-cache = { path = "../crates/oci-cache" }
 ed25519-dalek = { version = "=3.0.0", default-features = false }

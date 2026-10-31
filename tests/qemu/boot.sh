@@ -3,6 +3,12 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+boot_timeout_seconds="${GINUX_BOOT_TIMEOUT_SECONDS:-180}"
+if [[ ! "$boot_timeout_seconds" =~ ^[1-9][0-9]*$ ]]; then
+    echo "Boot test failed: GINUX_BOOT_TIMEOUT_SECONDS must be a positive integer." >&2
+    exit 2
+fi
+
 output_file="$(mktemp -t ginux-boot.XXXXXX)"
 reboot_output_file="$(mktemp -t ginux-reboot.XXXXXX)"
 corrupt_output_file="$(mktemp -t ginux-corrupt.XXXXXX)"
@@ -51,7 +57,7 @@ run_boot() {
     : >"$qemu_pid_file"
     {
         qemu_seen=false
-        for _ in {1..180}; do
+        for ((attempt = 0; attempt < boot_timeout_seconds; attempt++)); do
             if grep -Fq 'ginux> ' "$boot_output"; then
                 break
             fi
@@ -76,7 +82,7 @@ run_boot() {
         "$repo_root/tools/qemu/run.sh" >"$boot_output" 2>&1 &
     qemu_pid=$!
 
-    for _ in {1..180}; do
+    for ((attempt = 0; attempt < boot_timeout_seconds; attempt++)); do
         if ! kill -0 "$qemu_pid" 2>/dev/null; then
             break
         fi
@@ -89,7 +95,7 @@ run_boot() {
         wait "$qemu_pid" 2>/dev/null || true
         qemu_pid=""
         cat "$boot_output"
-        echo "Boot test failed: $boot_name QEMU boot did not finish within 180 seconds." >&2
+        echo "Boot test failed: $boot_name QEMU boot did not finish within ${boot_timeout_seconds} seconds." >&2
         exit 1
     fi
 

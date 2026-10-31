@@ -264,7 +264,9 @@ ginux_packet_wait_timeout_helper_start:
     shl rdx, 32
     or rax, rdx
     sub rax, r12
-    cmp rax, 100000000
+    # Keep the peer non-cooperative for a full second of guest TSC time so a
+    # loaded CI host cannot let it retire before the 10 ms APIC deadline.
+    cmp rax, 1000000000
     jb .timeout_helper_spin
     mov esi, 52
     mov eax, 2

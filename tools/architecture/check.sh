@@ -50,5 +50,6 @@ bash "${repo_root}/tools/architecture/check-user-access.sh"
 bash "${repo_root}/tools/architecture/check-writable-globals.sh"
 bash "${repo_root}/tools/architecture/check-x86-runtime-owner.sh"
 bash "${repo_root}/tools/architecture/check-synchronization.sh"
+bash "${repo_root}/tools/architecture/check-kernel-unsafe.sh"
 
 echo "Architecture consistency check passed"

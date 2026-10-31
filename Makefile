@@ -263,8 +263,11 @@ check: manifest architecture-check linux-compat-check
 	@$(MAKE) abi-conformance
 	@cargo fmt --all -- --check
 	@cargo clippy --package ginux-boot --target $(TARGET) -- -D warnings
+	@cargo clippy --package ginux-kernel --target x86_64-unknown-none -- -D warnings
 	@cargo clippy --package ginux-native-abi -- -D warnings
 	@cargo test --package ginux-native-abi
+	@cargo clippy --package ginux-kernel-policy -- -D warnings
+	@cargo test --package ginux-kernel-policy
 	@cargo clippy --package ginux-command -- -D warnings
 	@cargo test --package ginux-command
 	@cargo clippy --package ginux-oci -- -D warnings

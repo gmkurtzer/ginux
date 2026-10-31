@@ -1,0 +1,9 @@
+[package]
+name = "ginux-kernel-policy"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+publish = false
+
+[lib]
+path = "src/lib.rs"
