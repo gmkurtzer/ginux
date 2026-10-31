@@ -10,6 +10,7 @@ BEGIN {
     count_by_status["Complete"] = 0
     count_by_status["Partial"] = 0
     count_by_status["Policy-denied"] = 0
+    count_by_status["Unsupported"] = 0
     count_by_status["Missing"] = 0
 }
 function fail(message) {
@@ -39,7 +40,7 @@ FNR == NR {
     if (have_previous && number <= previous) {
         fail("syscall " number " is out of order")
     }
-    if (status != "Complete" && status != "Partial" && status != "Policy-denied" && status != "Missing") {
+    if (status != "Complete" && status != "Partial" && status != "Policy-denied" && status != "Unsupported" && status != "Missing") {
         fail("invalid status \047" status "\047 for syscall " number)
     }
     status_by_number[number] = status
@@ -60,11 +61,12 @@ $0 ~ /^const LINUX_[A-Z0-9_]+_SYSCALL: u64 = [0-9]+;$/ {
     }
 }
 END {
-    if (declared_count != 4 \
+    if (declared_count != 5 \
         || declared[1] != count_by_status["Complete"] \
         || declared[2] != count_by_status["Partial"] \
         || declared[3] != count_by_status["Policy-denied"] \
-        || declared[4] != count_by_status["Missing"]) {
+        || declared[4] != count_by_status["Unsupported"] \
+        || declared[5] != count_by_status["Missing"]) {
         fail("declared syscall totals do not match the matrix")
     }
     if (failed) {
@@ -73,6 +75,7 @@ END {
     print "Linux compatibility matrix check passed (" count_by_status["Complete"] \
         " complete, " count_by_status["Partial"] " partial, " \
         count_by_status["Policy-denied"] " policy-denied, " \
+        count_by_status["Unsupported"] " unsupported, " \
         count_by_status["Missing"] " missing)"
 }
 ' "$matrix" "$dispatcher"

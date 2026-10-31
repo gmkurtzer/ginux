@@ -35,6 +35,7 @@ new syscall table and UAPI changes.
 | Complete | Matches the pinned Linux contract and has positive, negative, and edge-case conformance tests. |
 | Partial | Dispatched and useful, but intentionally bounded or not yet proven equivalent to Linux. |
 | Policy-denied | Recognized as a privileged operation and rejected by the container authority policy. This is not full syscall support. |
+| Unsupported | Defined by the pinned x86-64 table but obsolete or unavailable there; returns Linux-compatible `-ENOSYS` intentionally. |
 | Missing | Returns `-ENOSYS` through the default dispatcher. |
 
 Detailed bounded behavior for implemented calls lives in
@@ -42,7 +43,7 @@ Detailed bounded behavior for implemented calls lives in
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **82 Complete**, **245 Partial**, **48 Policy-denied**, **0 Missing**.
+Current totals: **53 Complete**, **257 Partial**, **48 Policy-denied**, **17 Unsupported**, **0 Missing**.
 
 ## Current stopping point
 
@@ -499,21 +500,21 @@ therefore omitted.
 | 38 | setitimer | Partial |
 | 39 | getpid | Complete |
 | 40 | sendfile | Partial |
-| 41 | socket | Complete |
+| 41 | socket | Partial |
 | 42 | connect | Partial |
 | 43 | accept | Partial |
-| 44 | sendto | Complete |
-| 45 | recvfrom | Complete |
-| 46 | sendmsg | Complete |
-| 47 | recvmsg | Complete |
+| 44 | sendto | Partial |
+| 45 | recvfrom | Partial |
+| 46 | sendmsg | Partial |
+| 47 | recvmsg | Partial |
 | 48 | shutdown | Partial |
-| 49 | bind | Complete |
-| 50 | listen | Complete |
-| 51 | getsockname | Complete |
-| 52 | getpeername | Complete |
-| 53 | socketpair | Complete |
-| 54 | setsockopt | Complete |
-| 55 | getsockopt | Complete |
+| 49 | bind | Partial |
+| 50 | listen | Partial |
+| 51 | getsockname | Partial |
+| 52 | getpeername | Partial |
+| 53 | socketpair | Partial |
+| 54 | setsockopt | Partial |
+| 55 | getsockopt | Partial |
 | 56 | clone | Partial |
 | 57 | fork | Partial |
 | 58 | vfork | Partial |
@@ -592,7 +593,7 @@ therefore omitted.
 | 131 | sigaltstack | Partial |
 | 132 | utime | Partial |
 | 133 | mknod | Partial |
-| 134 | uselib | Complete |
+| 134 | uselib | Unsupported |
 | 135 | personality | Partial |
 | 136 | ustat | Complete |
 | 137 | statfs | Partial |
@@ -614,7 +615,7 @@ therefore omitted.
 | 153 | vhangup | Policy-denied |
 | 154 | modify_ldt | Partial |
 | 155 | pivot_root | Policy-denied |
-| 156 | _sysctl | Complete |
+| 156 | _sysctl | Unsupported |
 | 157 | prctl | Partial |
 | 158 | arch_prctl | Partial |
 | 159 | adjtimex | Policy-denied |
@@ -632,18 +633,18 @@ therefore omitted.
 | 171 | setdomainname | Policy-denied |
 | 172 | iopl | Policy-denied |
 | 173 | ioperm | Policy-denied |
-| 174 | create_module | Complete |
+| 174 | create_module | Unsupported |
 | 175 | init_module | Policy-denied |
 | 176 | delete_module | Policy-denied |
-| 177 | get_kernel_syms | Complete |
-| 178 | query_module | Complete |
+| 177 | get_kernel_syms | Unsupported |
+| 178 | query_module | Unsupported |
 | 179 | quotactl | Policy-denied |
-| 180 | nfsservctl | Complete |
-| 181 | getpmsg | Complete |
-| 182 | putpmsg | Complete |
-| 183 | afs_syscall | Complete |
-| 184 | tuxcall | Complete |
-| 185 | security | Complete |
+| 180 | nfsservctl | Unsupported |
+| 181 | getpmsg | Unsupported |
+| 182 | putpmsg | Unsupported |
+| 183 | afs_syscall | Unsupported |
+| 184 | tuxcall | Unsupported |
+| 185 | security | Unsupported |
 | 186 | gettid | Complete |
 | 187 | readahead | Complete |
 | 188 | setxattr | Partial |
@@ -663,17 +664,17 @@ therefore omitted.
 | 202 | futex | Partial |
 | 203 | sched_setaffinity | Complete |
 | 204 | sched_getaffinity | Complete |
-| 205 | set_thread_area | Complete |
+| 205 | set_thread_area | Unsupported |
 | 206 | io_setup | Partial |
 | 207 | io_destroy | Partial |
 | 208 | io_getevents | Partial |
 | 209 | io_submit | Partial |
 | 210 | io_cancel | Partial |
-| 211 | get_thread_area | Complete |
-| 212 | lookup_dcookie | Complete |
+| 211 | get_thread_area | Unsupported |
+| 212 | lookup_dcookie | Unsupported |
 | 213 | epoll_create | Partial |
-| 214 | epoll_ctl_old | Complete |
-| 215 | epoll_wait_old | Complete |
+| 214 | epoll_ctl_old | Unsupported |
+| 215 | epoll_wait_old | Unsupported |
 | 216 | remap_file_pages | Partial |
 | 217 | getdents64 | Partial |
 | 218 | set_tid_address | Complete |
@@ -694,7 +695,7 @@ therefore omitted.
 | 233 | epoll_ctl | Partial |
 | 234 | tgkill | Partial |
 | 235 | utimes | Partial |
-| 236 | vserver | Complete |
+| 236 | vserver | Unsupported |
 | 237 | mbind | Partial |
 | 238 | set_mempolicy | Partial |
 | 239 | get_mempolicy | Partial |
