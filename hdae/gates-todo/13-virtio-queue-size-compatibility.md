@@ -31,8 +31,8 @@ a valid device solely because QEMU selected 1024 rather than 256.
 ## Remaining work
 
 - [x] Run the verification commands.
-- [ ] Push the branch and open the pull request.
-- [ ] Record the stable pull-request URL.
+- [x] Push the branch and open pull request #10.
+- [x] Record the stable pull-request URL.
 
 ## Acceptance criteria
 
@@ -52,6 +52,7 @@ a valid device solely because QEMU selected 1024 rather than 256.
 - `make architecture-check` -> passed all architecture checks.
 - `make check` -> passed builds, static checks, compatibility checks, and unit
   tests.
+- Pull request: https://github.com/gmkurtzer/ginux/pull/10
 
 ## Decisions and limitations
 
@@ -64,9 +65,10 @@ a valid device solely because QEMU selected 1024 rather than 256.
 - Intended base: `main`
 - Pull request: intended; non-closing reference to issue #4
 - Planned commits: implementation and gate evidence; delivery checkpoint
-- Actual commits: pending
+- Actual commits: `d4f673d8` (implementation, gate, and verification evidence)
 
 ## Review policy and outcome
 
-Delegated by the saved proactive scheduled-review policy. The gate may close
-after all criteria pass and the remote branch and open pull request exist.
+Delegated by the saved proactive scheduled-review policy. All criteria passed
+and delivery is complete through open pull request #10; the gate remains open
+for maintainer review.
