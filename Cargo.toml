@@ -4,6 +4,7 @@ members = [
     "control-plane/runtime",
     "crates/command",
     "crates/image-store",
+    "crates/kernel-policy",
     "crates/native-abi",
     "crates/oci",
     "crates/oci-cache",

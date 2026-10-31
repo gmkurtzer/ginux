@@ -431,6 +431,7 @@ version = "0.1.0"
 dependencies = [
  "ed25519-dalek",
  "ginux-image-store",
+ "ginux-kernel-policy",
  "ginux-native-abi",
  "ginux-oci",
  "ginux-oci-cache",
@@ -439,6 +440,10 @@ dependencies = [
  "miniz_oxide",
  "smoltcp",
 ]
+
+[[package]]
+name = "ginux-kernel-policy"
+version = "0.1.0"
 
 [[package]]
 name = "ginux-manifest-tool"
