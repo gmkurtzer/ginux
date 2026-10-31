@@ -12,15 +12,15 @@ jobs:
   static:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - run: rustup target add x86_64-unknown-uefi
+      - uses: actions/checkout@v5
+      - run: rustup target add x86_64-unknown-uefi x86_64-unknown-none
       - run: make check
 
   qemu:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: sudo apt-get update
       - run: sudo apt-get install --yes clang make ovmf qemu-system-x86
-      - run: rustup target add x86_64-unknown-uefi
+      - run: rustup target add x86_64-unknown-uefi x86_64-unknown-none
       - run: make test
