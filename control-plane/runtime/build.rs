@@ -23,7 +23,7 @@ fn main() {
         };
         let status = match columns[3] {
             "Complete" => "Pass",
-            "Partial" | "Missing" => "Fail",
+            "Partial" | "Unsupported" | "Missing" => "Fail",
             "Policy-denied" => "PolicyExempt",
             _ => continue,
         };
