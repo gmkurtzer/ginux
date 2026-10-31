@@ -7,12 +7,13 @@
 - Active project: feedback-driven kernel hardening
 - Branch: `codex/feedback-hardening`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 11.6, SMP Linux thread-context integrity, in progress
-- Last completed action: Gate 11 resumed; scaled 2-vCPU/2-thread completed, but
-  scaled 4-vCPU/4-thread batch 2 faulted in the thread-yield workload with an
-  unmapped low atomic-counter address after batch 1 passed completely
-- Next action: reproduce the four-thread fault with full `r8`--`r11`, CPU,
-  slot, generation, and scheduling-transition diagnostics
+- Active gate: Gate 11.6, SMP Linux thread-context integrity, technically
+  passed and awaiting checkpoint acceptance
+- Last completed action: exact cross-thread IRET restoration passed the
+  deterministic 1/2/4-vCPU verification matrix, 18 live thread-yield samples,
+  full static checks, futex regression, and shared-page regression
+- Next action: obtain human acceptance; only then close Gate 11.6 and resume
+  Gate 11
 
 ## Current repository state
 
@@ -21,25 +22,26 @@ feedback-hardening gates passed and closed under delegated review on
 `codex/feedback-hardening`; Gate 11 adds measurement-only qualification to the
 same branch and PR.
 The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
-matrix and repeated stress pass. The final qualification report and raw/reduced
-evidence are under `docs/feedback-hardening/`. No push or merge was performed.
+matrix and repeated stress pass. Gate 11.6's exact register-return correction
+is commit `5e3393e3`; its report and raw evidence locations are under
+`docs/feedback-hardening/`. No push or merge was performed.
 
 ## Open decisions
 
-- None. Gate 11.6 is approved on the current branch and PR; Gate 11 remains
-  paused until this checkpoint passes and is accepted.
+- Gate 11.6 passed technically and requires human acceptance. Gate 11 remains
+  paused until that checkpoint is accepted.
 
 ## Active diagnosis
 
-- The pre-fix two-vCPU/two-thread CPU-to-memory sequence deterministically
-  reproduced a locked-write non-present fault while the serialized active-root
-  walk reported a present writable leaf.
-- Mapping mutations now complete a serialized NMI shootdown on every online
-  CPU and fail closed with leaf rollback if acknowledgement fails. A local
-  fault refresh remains as permission-preserving defense in depth.
-- Three fresh 2-vCPU/2-thread and three fresh 4-vCPU/4-thread shared-memory
-  workloads passed, as did `make check`, `make architecture-check`, `make
-  test-smp`, and `make test-rocky-smp-futex`. No QEMU process or benchmark
+- Fault diagnostics proved the saved thread slot retained the valid shared
+  counter in `r11`, while a syscall-based switch resumed it with RFLAGS in
+  `r11`. The SYSRET epilogue was correct for an ordinary syscall but incorrect
+  for a target asynchronously saved by an interrupt.
+- Scheduler-backed cross-thread syscall switches now use the exact-register
+  IRET epilogue; ordinary same-thread syscalls retain SYSRET.
+- `make check`, `make test-smp`, `make test-rocky-smp-futex`, `make
+  test-rocky-smp-shared-page`, and `make test-rocky-smp-thread-context` passed.
+  The last command completed nine samples at each of 2 and 4 vCPUs. No tested
   volume owner remained.
 
 ## Limitations
