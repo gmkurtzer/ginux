@@ -30,8 +30,8 @@ unsafe-boundary baseline while the existing unsafe code is reduced over time.
 
 ## Remaining work
 
-- [ ] Run deterministic verification.
-- [ ] Deliver the PR and reciprocal links.
+- [x] Run deterministic verification.
+- [ ] Push the existing branch and update pull request #9.
 
 ## Acceptance criteria
 
@@ -49,20 +49,24 @@ unsafe-boundary baseline while the existing unsafe code is reduced over time.
 ## Evidence
 
 - Baseline: 1,033 unsafe blocks, 109 SAFETY comments, one top-level `static mut`.
+- `make architecture-check` and `make check` -> passed.
 
 ## Decisions and limitations
 
 - The initial ratchet prevents regression; future gates should lower the unsafe
   ceiling and increase documented boundaries.
+- The user explicitly directed the corrective work into existing pull request
+  #9, overriding the default one-gate-per-PR delivery split.
 
 ## Delivery strategy
 
-- Working branch: `hdae/kernel-unsafe-lint-baseline`
+- Working branch: `codex/issue-5-criticism-reconciliation`
 - Intended base: `main`
-- Pull request: intended; non-closing reference to issue #5
+- Pull request: existing PR #9
 - Planned commits: lint and unsafe ratchet; delivery links
-- Actual commits: pending
+- Actual commits: `476fba04` (lint and unsafe ratchet); delivery checkpoint pending
 
 ## Review policy and outcome
 
-Delegated by the saved proactive scheduled-review policy.
+Delegated by the saved proactive scheduled-review policy; remains open for
+maintainer review in pull request #9.

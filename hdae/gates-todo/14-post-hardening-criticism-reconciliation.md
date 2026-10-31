@@ -15,7 +15,8 @@ independently reviewable residual defect.
 
 - Classify each public claim against current source and fresh checks.
 - Commit a public evidence matrix and draft a non-duplicative issue response.
-- Identify separate follow-up gates for residual implementation work.
+- Implement the four residual areas in the existing pull request, as explicitly
+  directed by the maintainer after the initial reconciliation-only delivery.
 - Keep the privately reported item confidential.
 
 ## Non-goals
@@ -31,18 +32,20 @@ independently reviewable residual defect.
   verification.
 - [x] Recorded resolved, partial, and confirmed residual findings.
 - [x] Drafted the maintainer response and four separate follow-up gate scopes.
+- [x] Implemented the four corrective areas in Gates 15 through 18.
 
 ## Remaining work
 
 - [x] Push the branch and open pull request #9.
 - [x] Record the stable pull-request URL.
 - [x] Post the response with the stable evidence link.
+- [ ] Push the corrective commits and update PR #9 and issue #5.
 
 ## Acceptance criteria
 
 - Every public finding has a current classification and direct evidence.
 - Resolved findings are supported by source plus fresh checks, not merge status.
-- Each residual area has an independently reviewable follow-up gate scope.
+- Each residual area has a durable follow-up gate and verification evidence.
 - No confidential report detail appears in the repository or response.
 
 ## Verification plan
@@ -66,16 +69,19 @@ independently reviewable residual defect.
 ## Decisions and limitations
 
 - The private finding remains a private security checkpoint.
-- Decomposition, unsafe/lint policy, CI/unit tests, and compatibility-ledger
-  semantics are separate delivery units and must not share this branch.
+- The initial delivery split left PR #9 without implementation. The maintainer
+  explicitly overrode that split and directed all four corrective gates into
+  this existing branch and PR.
 
 ## Delivery strategy
 
 - Working branch: `codex/issue-5-criticism-reconciliation`
 - Intended base: `main`
 - Pull request: intended; non-closing reference to issue #5
-- Planned commits: evidence report and gate; delivery checkpoint
-- Actual commits: `70f405fe` (evidence report, gate, and response draft)
+- Planned commits: evidence report; four corrective areas; delivery checkpoint
+- Actual commits: `70f405fe` (report), `476fba04` (unsafe/lint), `339149da`
+  (compatibility semantics), `0a3078ec` (decomposition and CI); delivery
+  checkpoint pending
 
 ## Review policy and outcome
 

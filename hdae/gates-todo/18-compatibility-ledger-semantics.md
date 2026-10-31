@@ -35,7 +35,7 @@ while the documented socket-family contract remains partial.
 ## Remaining work
 
 - [x] Run deterministic verification.
-- [ ] Push the branch, open the PR, and add reciprocal links.
+- [ ] Push the existing branch and update pull request #9.
 
 ## Acceptance criteria
 
@@ -65,14 +65,20 @@ while the documented socket-family contract remains partial.
 
 - Unsupported distinguishes intentional Linux-compatible ENOSYS behavior from
   an unimplemented default-dispatch hole.
+- A separate PR #11 was opened before the user directed all corrective work
+  into PR #9. The implementation is now incorporated here; PR #11 will be
+  marked superseded but not closed without authorization.
+- The user explicitly directed the corrective work into existing pull request
+  #9, overriding the default one-gate-per-PR delivery split.
 
 ## Delivery strategy
 
-- Working branch: `hdae/compatibility-ledger-semantics`
+- Working branch: `codex/issue-5-criticism-reconciliation`
 - Intended base: `main`
-- Pull request: intended; non-closing reference to issue #5
+- Pull request: existing PR #9
 - Planned commits: ledger semantics and verification; delivery links
-- Actual commits: pending
+- Actual commits: `339149da` (ledger semantics), `0a3078ec` (regenerated
+  embedded runtime catalog); delivery checkpoint pending
 
 ## Review policy and outcome
 

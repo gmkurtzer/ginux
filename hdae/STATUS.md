@@ -4,15 +4,14 @@
 
 - Active skill: `.agents/skills/hdae-development/SKILL.md`
 - Reload required after compaction, reset, resume, or handoff: yes
-- Active project: feedback-driven kernel hardening follow-up
-- Branch: `codex/performance-parity`
+- Active project: feedback-driven kernel hardening issue #5 remediation
+- Branch: `codex/issue-5-criticism-reconciliation`
 - Baseline tag: `research-v1-baseline`
-- Active gate: none; Gate 12 is accepted and closed
-- Last completed action: the human accepted the final matched matrix and full
-  qualification suite on October 30, 2026; every performance cell meets the
-  approved `0.96x` floor
-- Next action: publish `codex/performance-parity` and open the follow-up pull
-  request with the accepted performance table
+- Active gate: Gates 14 through 18, corrective implementation for issue #5
+- Last completed action: implemented all four residual areas in existing PR #9
+  and passed `make check` plus the complete `make test` QEMU boot
+- Next action: commit and push `codex/issue-5-criticism-reconciliation`, update
+  PR #9 and issue #5, and record the resulting CI evidence
 
 ## Current repository state
 
