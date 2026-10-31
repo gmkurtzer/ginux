@@ -35,16 +35,14 @@ thread counts scaled with available CPUs.
 - [x] Add reproducible matrix orchestration and summary generation.
 - [x] Correct the two-vCPU no-ready-peer private-futex result and add a
   deterministic Rocky regression.
-- [ ] Run the matched Linux and Ginux measurements. Every fixed one-thread
-  cell passed at 1, 2, and 4 vCPUs. The scaled 2-vCPU/2-thread cell now passes
-  on both systems. Scaled 4-vCPU/4-thread Linux passed; Ginux completed its
-  first full batch, then faulted in the second batch's thread-yield workload.
-- [ ] Verify raw samples, binary identity, results, and QEMU cleanup.
-- [ ] Publish the comparison and its limitations.
+- [x] Run the matched Linux and Ginux measurements at every fixed and scaled
+  topology.
+- [x] Verify raw samples, binary identity, results, and QEMU cleanup.
+- [x] Publish the comparison and its limitations.
 
 ## Remaining work
 
-- [ ] Complete every approved task and acceptance criterion.
+- [x] Complete every approved task and acceptance criterion.
 
 ## Acceptance criteria
 
@@ -108,6 +106,21 @@ thread counts scaled with available CPUs.
   `threads_1` at RIP `4283650` on `lock inc [r11]`, with CR2 `66050`,
   page-fault error 7, and no page-table or process-registry mapping for page
   `65536`.
+- Gate 11.6 corrected the exact cross-thread register return and passed the
+  original failing sequence. The resumed `make benchmark-topology-matrix`
+  reused every completed cell and produced nine successful Ginux samples for
+  every workload in the scaled 4-vCPU/4-thread cell.
+- `make benchmark-topology-compare` verified nine Linux and nine Ginux samples
+  in every sysbench cell, three boot samples at each topology, and one matching
+  sysbench SHA-256 across all Linux and Ginux cells.
+- At four vCPUs/four threads, Ginux reached 0.658x Linux CPU throughput, 0.839x
+  memory throughput, 0.085x thread-yield throughput, and 0.425x favorable
+  mutex performance. Relative to its own one-vCPU result, Ginux scaled to
+  3.265x CPU, 2.061x memory, 0.301x thread-yield, and 0.497x mutex performance.
+- Reduced tables and interpretation are published in
+  [`docs/feedback-hardening/GATE-11-TOPOLOGY-BENCHMARKS.md`](../../docs/feedback-hardening/GATE-11-TOPOLOGY-BENCHMARKS.md)
+  and its linked `gate-11-results/` directory. Exact-volume inspection found
+  no remaining owner after the matrix.
 
 ## Decisions and limitations
 
@@ -143,11 +156,14 @@ thread counts scaled with available CPUs.
   futex no-peer regression and compatibility fix; measured evidence and gate
   closure
 - Actual commits: `b7ab9b14` benchmark matrix; `cedea0ae` batched lifecycle;
-  `31de6894` blocker checkpoint
+  `31de6894` blocker checkpoint; inserted correctness gates 11.5 and 11.6;
+  `929f6a60` final reduced evidence and comparison
 
 ## Review policy and outcome
 
 Delegated completion was approved with the measurement request and direction
 to add the work to the existing pull request. Close automatically only after
 all objective criteria pass; stop for any changed benchmark meaning, unmatched
-control, implementation tuning, or scope expansion.
+control, implementation tuning, or scope expansion. Technical status: passed.
+All objective criteria passed on October 30, 2026; the gate is closed under the
+approved delegated review policy.

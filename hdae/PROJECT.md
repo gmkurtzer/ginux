@@ -8,9 +8,9 @@ hardening iteration using Human-Directed Agentic Engineering (HDAE).
 
 The published initial experiment remains identified by the
 `research-v1-baseline` tag. Work for this experiment is performed on
-`codex/feedback-hardening`; the current ten-gate batch uses delegated closure
-after complete fresh evidence and stops only for a failed dependency or a
-genuine architecture or scope decision.
+`codex/feedback-hardening`; the initial ten-gate batch used delegated closure
+after complete fresh evidence. Follow-up topology measurement and its inserted
+correctness gates retain explicit review policies in their gate records.
 
 ## Intended outcome
 

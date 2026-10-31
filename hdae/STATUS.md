@@ -7,11 +7,10 @@
 - Active project: feedback-driven kernel hardening
 - Branch: `codex/feedback-hardening`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 11, matched UP and SMP benchmark matrix, resumed
-- Last completed action: the human accepted Gate 11.6 after its exact original
-  4-vCPU/4-thread sequence passed all 27 workload markers
-- Next action: resume `make benchmark-topology-matrix` at the incomplete scaled
-  4-vCPU/4-thread Ginux cell, then validate and publish the complete comparison
+- Active gate: none; Gate 11 passed and closed under delegated review
+- Last completed action: the complete matched 1/2/4-vCPU Linux/Ginux matrix
+  passed validation and its reduced tables and interpretation were published
+- Next action: stop at the completed batch boundary for human evaluation
 
 ## Current repository state
 
@@ -20,14 +19,13 @@ feedback-hardening gates passed and closed under delegated review on
 `codex/feedback-hardening`; Gate 11 adds measurement-only qualification to the
 same branch and PR.
 The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
-matrix and repeated stress pass. Gate 11.6's exact register-return correction
-is commit `5e3393e3`; its report and raw evidence locations are under
-`docs/feedback-hardening/`. No push or merge was performed.
+matrix and repeated stress pass. Gate 11's comparison and reduced evidence are
+under `docs/feedback-hardening/`. No push or merge was performed.
 
 ## Open decisions
 
-- None. Gate 11.6 is accepted and closed; Gate 11 may complete its remaining
-  measurement-only work under delegated review.
+- None. The approved feedback-hardening batch and its follow-up measurement
+  gate are complete.
 
 ## Active diagnosis
 
@@ -44,6 +42,10 @@ is commit `5e3393e3`; its report and raw evidence locations are under
 - The exact original 4-vCPU/4-thread `cpu memory threads` sequence passed three
   batches and 27 total workload markers, including the formerly failing second
   batch.
+- The full matched topology matrix then completed. Every sysbench cell contains
+  nine Linux and nine Ginux samples with the same binary hash; every boot cell
+  contains three samples. Four-thread Ginux scheduling remains a measured
+  performance limitation rather than a correctness failure.
 
 ## Limitations
 
@@ -66,3 +68,5 @@ The authoritative execution state and gate outcomes are the files under this
 `hdae/` directory.
 Gate 10 evidence and final limits are in
 [`docs/feedback-hardening/GATE-10-QUALIFICATION.md`](../docs/feedback-hardening/GATE-10-QUALIFICATION.md).
+Gate 11 evidence and final limits are in
+[`docs/feedback-hardening/GATE-11-TOPOLOGY-BENCHMARKS.md`](../docs/feedback-hardening/GATE-11-TOPOLOGY-BENCHMARKS.md).
