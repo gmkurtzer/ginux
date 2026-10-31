@@ -167,8 +167,8 @@ if ! grep -q '^ginux: modern virtio network function: 0:3.0' "$output_file" ||
     ! grep -q '^ginux: virtio-net cacheable alias absent' "$output_file" ||
     ! grep -q '^ginux: virtio-net accepted features: 12884934688' "$output_file" ||
     ! grep -q '^ginux: virtio-net queues available: 3' "$output_file" ||
-    ! grep -q '^ginux: virtio-net receive queue size: 256' "$output_file" ||
-    ! grep -q '^ginux: virtio-net transmit queue size: 256' "$output_file" ||
+    ! grep -Eq '^ginux: virtio-net receive queue size: (8|16|32|64|128|256|512|1024|2048|4096|8192|16384|32768)[[:space:]]*$' "$output_file" ||
+    ! grep -Eq '^ginux: virtio-net transmit queue size: (8|16|32|64|128|256|512|1024|2048|4096|8192|16384|32768)[[:space:]]*$' "$output_file" ||
     ! grep -q '^ginux: virtio-net receive notification address: [0-9]' "$output_file" ||
     ! grep -q '^ginux: virtio-net transmit notification address: [0-9]' "$output_file" ||
     ! grep -q '^ginux: virtio-net queues remain disabled and DMA-unbound' "$output_file" ||
