@@ -129,9 +129,10 @@ thread counts scaled with available CPUs.
   measurements remain valid. Gate 11.5 passed and was accepted on October 30,
   2026, so the scaled matrix resumes with the corrected implementation.
 - The later four-thread low-address fault is also not a performance result. It
-  occurs after shared-memory coverage passes and is assigned to proposed Gate
-  11.6 for thread-context and scheduling diagnosis. Gate 11 is paused because
-  kernel correctness changes remain outside its measurement-only scope.
+  occurs after shared-memory coverage passes and was assigned to Gate 11.6 for
+  thread-context and scheduling diagnosis. Gate 11.6 passed and was accepted
+  on October 30, 2026, so the scaled matrix resumes with exact cross-thread
+  register restoration.
 
 ## Delivery strategy
 

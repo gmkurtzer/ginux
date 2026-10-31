@@ -7,14 +7,11 @@
 - Active project: feedback-driven kernel hardening
 - Branch: `codex/feedback-hardening`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 11.6, SMP Linux thread-context integrity, technically
-  passed and awaiting checkpoint acceptance
-- Last completed action: exact cross-thread IRET restoration passed the
-  deterministic 1/2/4-vCPU verification matrix, 18 live thread-yield samples,
-  the exact original 27-sample CPU/memory/thread sequence, full static checks,
-  futex regression, and shared-page regression
-- Next action: obtain human acceptance; only then close Gate 11.6 and resume
-  Gate 11
+- Active gate: Gate 11, matched UP and SMP benchmark matrix, resumed
+- Last completed action: the human accepted Gate 11.6 after its exact original
+  4-vCPU/4-thread sequence passed all 27 workload markers
+- Next action: resume `make benchmark-topology-matrix` at the incomplete scaled
+  4-vCPU/4-thread Ginux cell, then validate and publish the complete comparison
 
 ## Current repository state
 
@@ -29,8 +26,8 @@ is commit `5e3393e3`; its report and raw evidence locations are under
 
 ## Open decisions
 
-- Gate 11.6 passed technically and requires human acceptance. Gate 11 remains
-  paused until that checkpoint is accepted.
+- None. Gate 11.6 is accepted and closed; Gate 11 may complete its remaining
+  measurement-only work under delegated review.
 
 ## Active diagnosis
 
