@@ -3045,6 +3045,7 @@ struct RegisteredAuxiliaryAddressSpace {
 enum AuxiliaryAddressSpace {
     Wx(WxAddressSpace),
     Native(NativeServiceAddressSpace),
+    Graphics(NativeServiceAddressSpace<GRAPHICS_SERVICE_IMAGE_PAGES, GRAPHICS_SERVICE_FRAME_COUNT>),
     Network(
         NativeServiceAddressSpace<
             NATIVE_NETWORK_IMAGE_PAGES,
@@ -6721,6 +6722,8 @@ pub(crate) fn verify_control_plane_wx_layout() -> bool {
 
 const NATIVE_SERVICE_IMAGE_PAGES: usize = 7;
 pub(crate) const NATIVE_SERVICE_FRAME_COUNT: usize = 4 + NATIVE_SERVICE_IMAGE_PAGES + 3;
+pub(crate) const GRAPHICS_SERVICE_IMAGE_PAGES: usize = 8;
+const GRAPHICS_SERVICE_FRAME_COUNT: usize = 4 + GRAPHICS_SERVICE_IMAGE_PAGES + 3;
 const NATIVE_NETWORK_IMAGE_PAGES: usize = 160;
 const NATIVE_NETWORK_STACK_PAGES: usize = 16;
 pub(crate) const NATIVE_NETWORK_FRAME_COUNT: usize =
@@ -7266,6 +7269,7 @@ impl AuxiliaryAddressSpace {
         match self {
             Self::Wx(space) => space.root,
             Self::Native(space) => space.root,
+            Self::Graphics(space) => space.root,
             Self::Network(space) => space.root,
             Self::Controller(space) => space.root,
         }
@@ -7275,6 +7279,7 @@ impl AuxiliaryAddressSpace {
         match self {
             Self::Wx(space) => space.kernel_root,
             Self::Native(space) => space.kernel_root,
+            Self::Graphics(space) => space.kernel_root,
             Self::Network(space) => space.kernel_root,
             Self::Controller(space) => space.kernel_root,
         }
@@ -7288,6 +7293,7 @@ impl AuxiliaryAddressSpace {
         match self {
             Self::Wx(space) => space.dma_frame,
             Self::Native(space) => space.dma_frame,
+            Self::Graphics(space) => space.dma_frame,
             Self::Network(space) => space.dma_frame,
             Self::Controller(space) => space.dma_frame,
         }
@@ -7297,6 +7303,7 @@ impl AuxiliaryAddressSpace {
         match self {
             Self::Wx(space) => space.device_page_mapping_is_exact(7, physical, true),
             Self::Native(space) => space.device_page_mapping_is_exact(14, physical),
+            Self::Graphics(_) => false,
             Self::Network(space) => space.device_page_mapping_is_exact(
                 NATIVE_NETWORK_IMAGE_PAGES + NATIVE_NETWORK_STACK_PAGES + 5,
                 physical,
@@ -7320,6 +7327,7 @@ impl AuxiliaryAddressSpace {
                     .store(if recovered { 2 } else { 1 }, Ordering::Release);
                 true
             },
+            Self::Graphics(_) => false,
             Self::Network(_) => false,
             Self::Controller(_) => false,
         }
@@ -7343,6 +7351,10 @@ impl AuxiliaryAddressSpace {
                             && memory::frame_leases_releasable(space.owner, &[frame])
                     })
             }
+            Self::Graphics(space) => {
+                memory::frames_owned_by(space.owner, &space.frames)
+                    && memory::frame_leases_releasable(space.owner, &space.frames)
+            }
             Self::Network(space) => {
                 memory::frames_owned_by(space.owner, &space.frames)
                     && memory::frame_leases_releasable(space.owner, &space.frames)
@@ -7362,6 +7374,7 @@ impl AuxiliaryAddressSpace {
         match self {
             Self::Wx(space) => space.release(),
             Self::Native(space) => space.release(),
+            Self::Graphics(space) => space.release(),
             Self::Network(space) => space.release(),
             Self::Controller(space) => space.release(),
         }
@@ -7374,6 +7387,15 @@ pub(crate) fn verify_native_service_materialization(
     verify_native_service_materialization_with_capacity::<
         NATIVE_SERVICE_IMAGE_PAGES,
         NATIVE_SERVICE_FRAME_COUNT,
+    >(image)
+}
+
+pub(crate) fn verify_native_graphics_service_materialization(
+    image: &crate::native_elf::NativeImage<'_>,
+) -> bool {
+    verify_native_service_materialization_with_capacity::<
+        GRAPHICS_SERVICE_IMAGE_PAGES,
+        GRAPHICS_SERVICE_FRAME_COUNT,
     >(image)
 }
 
@@ -7780,7 +7802,10 @@ pub(crate) fn verify_native_graphics_devices(image: &crate::native_elf::NativeIm
         return false;
     }
     let kernel_root = current_root();
-    let Some(space) = NativeServiceAddressSpace::new(kernel_root, owner, image) else {
+    let Some(space) = NativeServiceAddressSpace::<
+        GRAPHICS_SERVICE_IMAGE_PAGES,
+        GRAPHICS_SERVICE_FRAME_COUNT,
+    >::new(kernel_root, owner, image) else {
         return false;
     };
     if !space.layout_is_valid(image)
@@ -7788,7 +7813,7 @@ pub(crate) fn verify_native_graphics_devices(image: &crate::native_elf::NativeIm
         || !space.write_graphics_boot_info_v1(
             ginux_native_abi::NativeGraphicsBootV1::device_validation(console, display, input, 3),
         )
-        || memory::owner_live_frame_count(owner) != Some(NATIVE_SERVICE_FRAME_COUNT)
+        || memory::owner_live_frame_count(owner) != Some(GRAPHICS_SERVICE_FRAME_COUNT)
     {
         let _ = space.release();
         return false;
@@ -7798,9 +7823,14 @@ pub(crate) fn verify_native_graphics_devices(image: &crate::native_elf::NativeIm
         let _ = space.release();
         return false;
     };
-    let boot_info = USER_TEST_ADDRESS + NATIVE_BOOT_INFO_PAGE * PAGE_SIZE;
-    let stack = USER_TEST_ADDRESS + (NATIVE_STACK_PAGE + 2) * PAGE_SIZE;
-    if !register_address_space(auxiliary, AuxiliaryAddressSpace::Native(space))
+    let boot_info = USER_TEST_ADDRESS
+        + NativeServiceAddressSpace::<
+            GRAPHICS_SERVICE_IMAGE_PAGES,
+            GRAPHICS_SERVICE_FRAME_COUNT,
+        >::BOOT_INFO_PAGE
+            * PAGE_SIZE;
+    let stack = USER_TEST_ADDRESS + (GRAPHICS_SERVICE_IMAGE_PAGES + 3) * PAGE_SIZE;
+    if !register_address_space(auxiliary, AuxiliaryAddressSpace::Graphics(space))
         || !scheduler::queue_auxiliary(auxiliary, root, entry, stack, console)
         || !cpu::activate_user_root(root)
     {
@@ -7854,22 +7884,30 @@ fn run_native_graphics_service(
         return None;
     }
     let kernel_root = current_root();
-    let space = NativeServiceAddressSpace::new(kernel_root, owner, image)?;
+    let space = NativeServiceAddressSpace::<
+        GRAPHICS_SERVICE_IMAGE_PAGES,
+        GRAPHICS_SERVICE_FRAME_COUNT,
+    >::new(kernel_root, owner, image)?;
     if !space.layout_is_valid(image)
         || !space.relocations_are_valid(image)
         || !space.write_graphics_boot_info(ginux_native_abi::NativeGraphicsBootV0::new(
             handle, command, generation,
         ))
-        || memory::owner_live_frame_count(owner) != Some(NATIVE_SERVICE_FRAME_COUNT)
+        || memory::owner_live_frame_count(owner) != Some(GRAPHICS_SERVICE_FRAME_COUNT)
     {
         let _ = space.release();
         return None;
     }
     let root = space.root;
     let entry = usize::try_from(space.entry).ok()?;
-    let boot_info = USER_TEST_ADDRESS + NATIVE_BOOT_INFO_PAGE * PAGE_SIZE;
-    let stack = USER_TEST_ADDRESS + (NATIVE_STACK_PAGE + 2) * PAGE_SIZE;
-    if !register_address_space(auxiliary, AuxiliaryAddressSpace::Native(space))
+    let boot_info = USER_TEST_ADDRESS
+        + NativeServiceAddressSpace::<
+            GRAPHICS_SERVICE_IMAGE_PAGES,
+            GRAPHICS_SERVICE_FRAME_COUNT,
+        >::BOOT_INFO_PAGE
+            * PAGE_SIZE;
+    let stack = USER_TEST_ADDRESS + (GRAPHICS_SERVICE_IMAGE_PAGES + 3) * PAGE_SIZE;
+    if !register_address_space(auxiliary, AuxiliaryAddressSpace::Graphics(space))
         || !scheduler::queue_auxiliary(auxiliary, root, entry, stack, handle)
         || !cpu::activate_user_root(root)
     {

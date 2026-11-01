@@ -5,6 +5,7 @@ members = [
     "crates/command",
     "crates/controller-ui",
     "crates/display-protocol",
+    "crates/domain-display",
     "crates/windowing",
     "crates/image-store",
     "crates/kernel-policy",

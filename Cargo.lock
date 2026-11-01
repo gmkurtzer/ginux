@@ -431,11 +431,16 @@ name = "ginux-display-protocol"
 version = "0.1.0"
 
 [[package]]
+name = "ginux-domain-display"
+version = "0.1.0"
+
+[[package]]
 name = "ginux-graphics-service-runtime"
 version = "0.1.0"
 dependencies = [
  "ginux-controller-ui",
  "ginux-display-protocol",
+ "ginux-domain-display",
  "ginux-native-abi",
  "ginux-windowing",
 ]

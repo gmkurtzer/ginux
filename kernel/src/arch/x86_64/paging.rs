@@ -289,11 +289,22 @@ pub(crate) fn validated_user_root_frames(root: u64) -> Option<ValidatedUserRootF
         entry & !(ACCESSED | DIRTY) == expected && (entry & DIRTY == 0 || expected & WRITABLE != 0)
     };
     let network_layout = native_entry(15) & PRESENT != 0;
-    let controller_layout = !network_layout && native_entry(7) & PRESENT != 0;
+    let graphics_layout = !network_layout
+        && native_entry(7) & PRESENT != 0
+        && native_entry(8) == 0
+        && native_entry(9) & (PRESENT | WRITABLE | USER | NO_EXECUTE)
+            == (PRESENT | WRITABLE | USER | NO_EXECUTE)
+        && native_entry(10) & (PRESENT | WRITABLE | USER | NO_EXECUTE)
+            == (PRESENT | WRITABLE | USER | NO_EXECUTE)
+        && native_entry(11) == 0
+        && native_entry(12) & (PRESENT | USER | NO_EXECUTE) == (PRESENT | USER | NO_EXECUTE);
+    let controller_layout = !network_layout && !graphics_layout && native_entry(7) & PRESENT != 0;
     let image_capacity = if network_layout {
         160
     } else if controller_layout {
         crate::address_space::NATIVE_CONTROLLER_IMAGE_PAGES
+    } else if graphics_layout {
+        crate::address_space::GRAPHICS_SERVICE_IMAGE_PAGES
     } else {
         7
     };

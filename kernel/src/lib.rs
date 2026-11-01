@@ -1815,7 +1815,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             .any(|relocation| {
                 relocation.is_none_or(|relocation| relocation.target == 0 || relocation.addend == 0)
             })
-        || !address_space::verify_native_service_materialization(&graphics_image)
+        || !address_space::verify_native_graphics_service_materialization(&graphics_image)
     {
         kernel_fail("ginux: graphical controller service load plan invalid\r\n");
     }
