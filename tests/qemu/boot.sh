@@ -270,6 +270,11 @@ if ! grep -q '^ginux: native display protocol conformance validated in ring 3' "
     exit 1
 fi
 
+if ! grep -q '^ginux: controller seat focus and leases validated in ring 3' "$output_file"; then
+    echo "Boot test failed: controller seat focus and lease recovery was not exercised." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: compiled native network service executed in ring 3' "$output_file" ||
     ! grep -q '^ginux: native network service negotiated control ABI v4' "$output_file" ||
     ! grep -q '^ginux: native network service validated control descriptor v4' "$output_file" ||
@@ -695,8 +700,8 @@ if ! grep -q '^ginux: malformed boot manifests rejected' "$output_file"; then
     exit 1
 fi
 
-if ! grep -q '^ginux: manifest authority grants: 10' "$output_file"; then
-    echo "Boot test failed: a signed directional packet authority grant is missing." >&2
+if ! grep -q '^ginux: manifest authority grants: 12' "$output_file"; then
+    echo "Boot test failed: the signed boot authority grants are incomplete." >&2
     exit 1
 fi
 

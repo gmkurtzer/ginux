@@ -14,6 +14,10 @@ pub const MAX_EVENTS: usize = 16;
 pub const MAX_WIDTH: u32 = 4096;
 pub const MAX_HEIGHT: u32 = 2160;
 pub const MAX_STRIDE: u32 = MAX_WIDTH * 4;
+pub const MAX_LEASE_TICKS: u64 = 60_000;
+pub const LEASE_OBSERVE: u16 = 1 << 0;
+pub const LEASE_EXCLUSIVE: u16 = 1 << 1;
+pub const LEASE_RIGHTS: u16 = LEASE_OBSERVE | LEASE_EXCLUSIVE;
 
 pub const OPCODE_CREATE_SURFACE: u16 = 1;
 pub const OPCODE_CREATE_BUFFER: u16 = 2;
@@ -81,6 +85,91 @@ impl Header {
 pub struct ClientHandle {
     slot: u16,
     generation: u32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Resource {
+    Display,
+    Keyboard,
+    Pointer,
+}
+
+impl Resource {
+    const fn index(self) -> usize {
+        match self {
+            Self::Display => 0,
+            Self::Keyboard => 1,
+            Self::Pointer => 2,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Revoker {
+    TrustedController,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LeaseStatus {
+    pub resource: Resource,
+    pub rights: u16,
+    pub generation: u32,
+    pub owner_slot: u16,
+    pub owner_generation: u32,
+    pub surface_id: u32,
+    pub expiry_tick: u64,
+    pub revoker: Revoker,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SeatStatus {
+    pub trusted_focus: bool,
+    pub focus_owner_slot: u16,
+    pub focus_owner_generation: u32,
+    pub focus_surface_id: u32,
+    pub pointer_captured: bool,
+    pub lease_count: u8,
+    pub transition_sequence: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TransitionKind {
+    Focus,
+    Capture,
+    Lease,
+    Revoke,
+    SecureAttention,
+    OwnerDeath,
+    Timeout,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Transition {
+    pub kind: TransitionKind,
+    pub owner_slot: u16,
+    pub owner_generation: u32,
+    pub surface_id: u32,
+    pub sequence: u64,
+}
+
+const EMPTY_TRANSITION: Transition = Transition {
+    kind: TransitionKind::Revoke,
+    owner_slot: 0,
+    owner_generation: 0,
+    surface_id: 0,
+    sequence: 0,
+};
+
+#[derive(Clone, Copy)]
+struct Focus {
+    owner: ClientHandle,
+    surface_id: u32,
+}
+
+#[derive(Clone, Copy)]
+struct Lease {
+    status: LeaseStatus,
+    owner: ClientHandle,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -243,6 +332,15 @@ impl Client {
 pub struct Server {
     clients: [Client; MAX_CLIENTS],
     generations: [u32; MAX_CLIENTS],
+    focus: Option<Focus>,
+    pointer_capture: Option<Focus>,
+    leases: [Option<Lease>; 3],
+    lease_generations: [u32; 3],
+    now: u64,
+    history: [Transition; MAX_EVENTS],
+    history_head: usize,
+    history_count: usize,
+    transition_sequence: u64,
 }
 
 impl Default for Server {
@@ -256,6 +354,15 @@ impl Server {
         Self {
             clients: [Client::empty(), Client::empty()],
             generations: [0; MAX_CLIENTS],
+            focus: None,
+            pointer_capture: None,
+            leases: [None; 3],
+            lease_generations: [0; 3],
+            now: 0,
+            history: [EMPTY_TRANSITION; MAX_EVENTS],
+            history_head: 0,
+            history_count: 0,
+            transition_sequence: 0,
         }
     }
 
@@ -302,9 +409,274 @@ impl Server {
     }
 
     pub fn disconnect(&mut self, handle: ClientHandle) -> Result<(), ProtocolError> {
-        let client = self.client_mut(handle)?;
-        *client = Client::empty();
+        self.client(handle)?;
+        self.revoke_owner(handle, TransitionKind::OwnerDeath);
+        *self.client_mut(handle)? = Client::empty();
         Ok(())
+    }
+
+    fn validate_surface(&self, handle: ClientHandle, surface_id: u32) -> Result<(), ProtocolError> {
+        let client = self.client(handle)?;
+        let index = client
+            .object_index(surface_id)
+            .ok_or(ProtocolError::Object)?;
+        if matches!(
+            client.objects[index],
+            Some(Object {
+                kind: ObjectKind::Surface(_),
+                ..
+            })
+        ) {
+            Ok(())
+        } else {
+            Err(ProtocolError::ObjectType)
+        }
+    }
+
+    fn record(&mut self, kind: TransitionKind, focus: Option<Focus>) {
+        self.transition_sequence = self.transition_sequence.saturating_add(1);
+        let focus = focus.unwrap_or(Focus {
+            owner: ClientHandle {
+                slot: 0,
+                generation: 0,
+            },
+            surface_id: 0,
+        });
+        let transition = Transition {
+            kind,
+            owner_slot: focus.owner.slot,
+            owner_generation: focus.owner.generation,
+            surface_id: focus.surface_id,
+            sequence: self.transition_sequence,
+        };
+        let slot = if self.history_count < MAX_EVENTS {
+            let slot = (self.history_head + self.history_count) % MAX_EVENTS;
+            self.history_count += 1;
+            slot
+        } else {
+            let slot = self.history_head;
+            self.history_head = (self.history_head + 1) % MAX_EVENTS;
+            slot
+        };
+        self.history[slot] = transition;
+    }
+
+    fn lease_owned_by_other(&self, resource: Resource, owner: ClientHandle) -> bool {
+        self.leases[resource.index()].is_some_and(|lease| lease.owner != owner)
+    }
+
+    pub fn focus_surface(
+        &mut self,
+        handle: ClientHandle,
+        surface_id: u32,
+    ) -> Result<(), ProtocolError> {
+        self.validate_surface(handle, surface_id)?;
+        if self.client(handle)?.event_count == MAX_EVENTS {
+            return Err(ProtocolError::QueueFull);
+        }
+        if self.lease_owned_by_other(Resource::Display, handle)
+            || self.lease_owned_by_other(Resource::Keyboard, handle)
+        {
+            return Err(ProtocolError::Busy);
+        }
+        let focus = Focus {
+            owner: handle,
+            surface_id,
+        };
+        self.focus = Some(focus);
+        if self
+            .pointer_capture
+            .is_some_and(|capture| capture.owner != handle || capture.surface_id != surface_id)
+        {
+            self.pointer_capture = None;
+        }
+        self.record(TransitionKind::Focus, Some(focus));
+        self.send_input(handle, surface_id, EventKind::Focus, 1, 0)
+    }
+
+    pub fn capture_pointer(
+        &mut self,
+        handle: ClientHandle,
+        surface_id: u32,
+    ) -> Result<(), ProtocolError> {
+        self.validate_surface(handle, surface_id)?;
+        if self
+            .focus
+            .is_none_or(|focus| focus.owner != handle || focus.surface_id != surface_id)
+            || self.lease_owned_by_other(Resource::Pointer, handle)
+        {
+            return Err(ProtocolError::Capability);
+        }
+        let capture = Focus {
+            owner: handle,
+            surface_id,
+        };
+        self.pointer_capture = Some(capture);
+        self.record(TransitionKind::Capture, Some(capture));
+        Ok(())
+    }
+
+    pub fn grant_lease(
+        &mut self,
+        handle: ClientHandle,
+        surface_id: u32,
+        resource: Resource,
+        rights: u16,
+        duration_ticks: u64,
+    ) -> Result<LeaseStatus, ProtocolError> {
+        self.validate_surface(handle, surface_id)?;
+        if rights == 0
+            || rights & !LEASE_RIGHTS != 0
+            || duration_ticks == 0
+            || duration_ticks > MAX_LEASE_TICKS
+        {
+            return Err(ProtocolError::Bounds);
+        }
+        if self.leases[resource.index()].is_some() {
+            return Err(ProtocolError::Busy);
+        }
+        if self
+            .focus
+            .is_none_or(|focus| focus.owner != handle || focus.surface_id != surface_id)
+        {
+            return Err(ProtocolError::Capability);
+        }
+        let generation = self.lease_generations[resource.index()]
+            .checked_add(1)
+            .filter(|generation| *generation != 0)
+            .ok_or(ProtocolError::Capacity)?;
+        let expiry_tick = self
+            .now
+            .checked_add(duration_ticks)
+            .ok_or(ProtocolError::Bounds)?;
+        self.lease_generations[resource.index()] = generation;
+        let status = LeaseStatus {
+            resource,
+            rights,
+            generation,
+            owner_slot: handle.slot,
+            owner_generation: handle.generation,
+            surface_id,
+            expiry_tick,
+            revoker: Revoker::TrustedController,
+        };
+        self.leases[resource.index()] = Some(Lease {
+            status,
+            owner: handle,
+        });
+        self.record(
+            TransitionKind::Lease,
+            Some(Focus {
+                owner: handle,
+                surface_id,
+            }),
+        );
+        Ok(status)
+    }
+
+    pub fn revoke_lease(
+        &mut self,
+        resource: Resource,
+        generation: u32,
+    ) -> Result<(), ProtocolError> {
+        let lease = self.leases[resource.index()].ok_or(ProtocolError::Object)?;
+        if lease.status.generation != generation {
+            return Err(ProtocolError::Capability);
+        }
+        self.leases[resource.index()] = None;
+        self.record(
+            TransitionKind::Revoke,
+            Some(Focus {
+                owner: lease.owner,
+                surface_id: lease.status.surface_id,
+            }),
+        );
+        Ok(())
+    }
+
+    fn revoke_owner(&mut self, owner: ClientHandle, reason: TransitionKind) {
+        let focus = self.focus.filter(|focus| focus.owner == owner);
+        for lease in &mut self.leases {
+            if lease.is_some_and(|lease| lease.owner == owner) {
+                *lease = None;
+            }
+        }
+        if focus.is_some() {
+            self.focus = None;
+        }
+        if self
+            .pointer_capture
+            .is_some_and(|capture| capture.owner == owner)
+        {
+            self.pointer_capture = None;
+        }
+        self.record(reason, focus);
+    }
+
+    pub fn secure_attention(&mut self) {
+        self.focus = None;
+        self.pointer_capture = None;
+        self.leases.fill(None);
+        self.record(TransitionKind::SecureAttention, None);
+    }
+
+    pub fn advance_time(&mut self, now: u64) -> Result<(), ProtocolError> {
+        if now < self.now {
+            return Err(ProtocolError::Bounds);
+        }
+        self.now = now;
+        let focused_owner = self.focus.map(|focus| focus.owner);
+        let mut focused_lease_expired = false;
+        for lease in &mut self.leases {
+            if lease.is_some_and(|lease| lease.status.expiry_tick <= now) {
+                focused_lease_expired |=
+                    lease.is_some_and(|lease| Some(lease.owner) == focused_owner);
+                *lease = None;
+            }
+        }
+        if let (true, Some(owner)) = (focused_lease_expired, focused_owner) {
+            self.revoke_owner(owner, TransitionKind::Timeout);
+        }
+        Ok(())
+    }
+
+    pub fn route_physical_input(
+        &mut self,
+        kind: EventKind,
+        value0: i32,
+        value1: i32,
+    ) -> Result<bool, ProtocolError> {
+        let target = match kind {
+            EventKind::Pointer => self.pointer_capture.or(self.focus),
+            EventKind::Keyboard => self.focus,
+            _ => return Err(ProtocolError::ObjectType),
+        };
+        let Some(target) = target else {
+            return Ok(false);
+        };
+        self.send_input(target.owner, target.surface_id, kind, value0, value1)?;
+        Ok(true)
+    }
+
+    pub fn seat_status(&self) -> SeatStatus {
+        let focus = self.focus;
+        SeatStatus {
+            trusted_focus: focus.is_none(),
+            focus_owner_slot: focus.map_or(0, |focus| focus.owner.slot),
+            focus_owner_generation: focus.map_or(0, |focus| focus.owner.generation),
+            focus_surface_id: focus.map_or(0, |focus| focus.surface_id),
+            pointer_captured: self.pointer_capture.is_some(),
+            lease_count: self.leases.iter().filter(|lease| lease.is_some()).count() as u8,
+            transition_sequence: self.transition_sequence,
+        }
+    }
+
+    pub fn lease_status(&self, resource: Resource) -> Option<LeaseStatus> {
+        self.leases[resource.index()].map(|lease| lease.status)
+    }
+
+    pub fn transition(&self, index: usize) -> Option<Transition> {
+        (index < self.history_count).then(|| self.history[(self.history_head + index) % MAX_EVENTS])
     }
 
     pub fn create_surface(&mut self, handle: ClientHandle, id: u32) -> Result<(), ProtocolError> {
@@ -619,23 +991,39 @@ impl Server {
         if object_id <= 2 {
             return Err(ProtocolError::Object);
         }
-        let client = self.client_mut(handle)?;
-        let index = client
-            .object_index(object_id)
-            .ok_or(ProtocolError::Object)?;
-        if matches!(
-            client.objects[index],
-            Some(Object {
-                kind: ObjectKind::Buffer(Buffer {
-                    published: true,
+        let was_focused_surface = {
+            let client = self.client_mut(handle)?;
+            let index = client
+                .object_index(object_id)
+                .ok_or(ProtocolError::Object)?;
+            if matches!(
+                client.objects[index],
+                Some(Object {
+                    kind: ObjectKind::Buffer(Buffer {
+                        published: true,
+                        ..
+                    }),
                     ..
-                }),
-                ..
-            })
-        ) {
-            return Err(ProtocolError::Busy);
+                })
+            ) {
+                return Err(ProtocolError::Busy);
+            }
+            let was_surface = matches!(
+                client.objects[index],
+                Some(Object {
+                    kind: ObjectKind::Surface(_),
+                    ..
+                })
+            );
+            client.objects[index] = None;
+            was_surface
+                && self
+                    .focus
+                    .is_some_and(|focus| focus.owner == handle && focus.surface_id == object_id)
+        };
+        if was_focused_surface {
+            self.revoke_owner(handle, TransitionKind::OwnerDeath);
         }
-        client.objects[index] = None;
         Ok(())
     }
 }
@@ -707,6 +1095,53 @@ pub fn contract_probe() -> bool {
         && server.next_event(second) == Ok(None)
 }
 
+pub fn seat_contract_probe() -> bool {
+    let mut server = Server::new();
+    let Ok(first) = server.connect(VERSION, SUPPORTED_FEATURES) else {
+        return false;
+    };
+    let Ok(second) = server.connect(VERSION, SUPPORTED_FEATURES) else {
+        return false;
+    };
+    if server.create_surface(first, 3).is_err()
+        || server.create_surface(second, 3).is_err()
+        || server.focus_surface(first, 3).is_err()
+        || server.capture_pointer(first, 3).is_err()
+    {
+        return false;
+    }
+    let Ok(keyboard) = server.grant_lease(first, 3, Resource::Keyboard, LEASE_EXCLUSIVE, 10) else {
+        return false;
+    };
+    if keyboard.owner_generation == 0
+        || keyboard.expiry_tick != 10
+        || server.focus_surface(second, 3) != Err(ProtocolError::Busy)
+        || server.route_physical_input(EventKind::Keyboard, 30, 1) != Ok(true)
+    {
+        return false;
+    }
+    server.secure_attention();
+    if !server.seat_status().trusted_focus
+        || server.seat_status().lease_count != 0
+        || server.route_physical_input(EventKind::Keyboard, 30, 1) != Ok(false)
+        || server.revoke_lease(Resource::Keyboard, keyboard.generation)
+            != Err(ProtocolError::Object)
+        || server.focus_surface(second, 3).is_err()
+        || server
+            .grant_lease(second, 3, Resource::Pointer, LEASE_EXCLUSIVE, 5)
+            .is_err()
+        || server.advance_time(5).is_err()
+        || !server.seat_status().trusted_focus
+        || server.disconnect(second).is_err()
+        || server.focus_surface(second, 3) != Err(ProtocolError::Capability)
+    {
+        return false;
+    }
+    server.focus_surface(first, 3).is_ok()
+        && server.seat_status().focus_owner_generation != 0
+        && server.transition(0).is_some()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -714,6 +1149,7 @@ mod tests {
     #[test]
     fn contract_probe_covers_two_isolated_clients() {
         assert!(contract_probe());
+        assert!(seat_contract_probe());
     }
 
     #[test]
@@ -818,5 +1254,93 @@ mod tests {
             server.send_input(client, 3, EventKind::Keyboard, 30, 1),
             Err(ProtocolError::QueueFull)
         );
+    }
+
+    #[test]
+    fn secure_attention_timeout_owner_death_and_stale_handles_recover() {
+        let mut server = Server::new();
+        let first = server.connect(VERSION, SUPPORTED_FEATURES).unwrap();
+        let second = server.connect(VERSION, SUPPORTED_FEATURES).unwrap();
+        server.create_surface(first, 3).unwrap();
+        server.create_surface(second, 3).unwrap();
+        server.focus_surface(first, 3).unwrap();
+        server.capture_pointer(first, 3).unwrap();
+        let display = server
+            .grant_lease(first, 3, Resource::Display, LEASE_EXCLUSIVE, 10)
+            .unwrap();
+        assert_eq!(server.focus_surface(second, 3), Err(ProtocolError::Busy));
+        assert_eq!(
+            server.route_physical_input(EventKind::Keyboard, 30, 1),
+            Ok(true)
+        );
+        server.secure_attention();
+        assert!(server.seat_status().trusted_focus);
+        assert_eq!(server.seat_status().lease_count, 0);
+        assert_eq!(
+            server.revoke_lease(Resource::Display, display.generation),
+            Err(ProtocolError::Object)
+        );
+
+        server.focus_surface(second, 3).unwrap();
+        let pointer = server
+            .grant_lease(second, 3, Resource::Pointer, LEASE_EXCLUSIVE, 5)
+            .unwrap();
+        assert_eq!(pointer.expiry_tick, 5);
+        server.advance_time(5).unwrap();
+        assert!(server.seat_status().trusted_focus);
+        assert_eq!(server.seat_status().lease_count, 0);
+
+        server.focus_surface(first, 3).unwrap();
+        server.disconnect(first).unwrap();
+        assert!(server.seat_status().trusted_focus);
+        assert_eq!(
+            server.route_physical_input(EventKind::Pointer, 1, 1),
+            Ok(false)
+        );
+        assert_eq!(
+            server.focus_surface(first, 3),
+            Err(ProtocolError::Capability)
+        );
+        let mut event_count = 0;
+        while let Some(event) = server.next_event(second).unwrap() {
+            assert!(!matches!(
+                event.kind,
+                EventKind::Keyboard | EventKind::Pointer
+            ));
+            event_count += 1;
+        }
+        assert_eq!(event_count, 2);
+    }
+
+    #[test]
+    fn concurrent_lease_requests_have_one_winner() {
+        extern crate std;
+        use std::sync::{Arc, Mutex};
+        use std::thread;
+
+        let mut server = Server::new();
+        let first = server.connect(VERSION, SUPPORTED_FEATURES).unwrap();
+        let second = server.connect(VERSION, SUPPORTED_FEATURES).unwrap();
+        server.create_surface(first, 3).unwrap();
+        server.create_surface(second, 3).unwrap();
+        let server = Arc::new(Mutex::new(server));
+        let contenders = [(server.clone(), first), (server.clone(), second)];
+        let mut threads = std::vec::Vec::new();
+        for (server, client) in contenders {
+            threads.push(thread::spawn(move || {
+                let mut server = server.lock().unwrap();
+                server.focus_surface(client, 3).is_ok()
+                    && server
+                        .grant_lease(client, 3, Resource::Keyboard, LEASE_EXCLUSIVE, 10)
+                        .is_ok()
+            }));
+        }
+        let winners = threads
+            .into_iter()
+            .map(|thread| thread.join().unwrap())
+            .filter(|won| *won)
+            .count();
+        assert_eq!(winners, 1);
+        assert_eq!(server.lock().unwrap().seat_status().lease_count, 1);
     }
 }
