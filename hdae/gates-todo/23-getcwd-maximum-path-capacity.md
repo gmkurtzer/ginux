@@ -30,7 +30,7 @@ terminating NUL without indexing beyond the kernel's fixed output buffer.
 
 ## Remaining work
 
-- [ ] Deliver the signed commit, pull request, and reciprocal links.
+- [ ] Maintainer review and acceptance.
 
 ## Acceptance criteria
 
@@ -53,6 +53,9 @@ terminating NUL without indexing beyond the kernel's fixed output buffer.
 - `make check` -> passed, including architecture checks, warning-denying
   clippy, formatting, and unit tests.
 - `make test` on QEMU 10.1.2/TCG -> `GINUX_KERNEL_OK`; `Boot test passed.`
+- Delivery: [PR #38](https://github.com/gmkurtzer/ginux/pull/38).
+- Source response: [issue #21 comment](https://github.com/gmkurtzer/ginux/issues/21#issuecomment-6562025264).
+- Reciprocal response: [PR #38 comment](https://github.com/gmkurtzer/ginux/pull/38#issuecomment-6562025026).
 
 ## Decisions and limitations
 
@@ -63,9 +66,11 @@ terminating NUL without indexing beyond the kernel's fixed output buffer.
 
 - Working branch: `hdae/issue-21-getcwd-capacity`
 - Intended base: `main`
-- Pull request: intended, non-closing reference to issue #21
+- Pull request: [PR #38](https://github.com/gmkurtzer/ginux/pull/38), open,
+  non-closing reference to issue #21
 - Planned commits: correction and evidence; delivery checkpoint
-- Actual commits: pending
+- Actual commits: `24eea9cf` correction and evidence; delivery checkpoint
+  pending
 
 ## Review policy and outcome
 
