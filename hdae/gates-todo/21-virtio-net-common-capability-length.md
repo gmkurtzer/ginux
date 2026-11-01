@@ -29,7 +29,7 @@ queue-device field at offset `0x30`.
 
 ## Remaining work
 
-- [ ] Deliver the signed commit, pull request, and reciprocal links.
+- [ ] Maintainer review and acceptance.
 
 ## Acceptance criteria
 
@@ -48,6 +48,9 @@ queue-device field at offset `0x30`.
 - `make check` -> passed, including formatting, warning-denying clippy,
   architecture checks, and all unit tests.
 - `make test` on QEMU 10.1.2/TCG -> `GINUX_KERNEL_OK`; `Boot test passed.`
+- Delivery: [PR #36](https://github.com/gmkurtzer/ginux/pull/36).
+- Source response: [issue #30 comment](https://github.com/gmkurtzer/ginux/issues/30#issuecomment-6561947439).
+- Reciprocal response: [PR #36 comment](https://github.com/gmkurtzer/ginux/pull/36#issuecomment-6561947105).
 
 ## Decisions and limitations
 
@@ -58,9 +61,11 @@ queue-device field at offset `0x30`.
 
 - Working branch: `hdae/issue-30-virtio-net-common-length`
 - Intended base: `main`
-- Pull request: intended, non-closing reference to issue #30
+- Pull request: [PR #36](https://github.com/gmkurtzer/ginux/pull/36), open,
+  non-closing reference to issue #30
 - Planned commits: correction and regression; delivery checkpoint
-- Actual commits: correction and regression commit pending
+- Actual commits: `8e12ae60` correction and regression; delivery checkpoint
+  pending
 
 ## Review policy and outcome
 
