@@ -93,8 +93,8 @@ pub(crate) struct ValidatedUserRootFrames {
     dma: Option<u64>,
     native_executable_pages: [u64; 3],
     native_image_pages: u8,
-    native_stack_page: u8,
-    native_stack_pages: u8,
+    native_stack_page: u16,
+    native_stack_pages: u16,
     native_table: u64,
 }
 
@@ -440,8 +440,8 @@ pub(crate) fn validated_user_root_frames(root: u64) -> Option<ValidatedUserRootF
         dma: (native_dma != 0).then_some(native_dma_address),
         native_executable_pages,
         native_image_pages: image_pages as u8,
-        native_stack_page: stack_page as u8,
-        native_stack_pages: stack_pages as u8,
+        native_stack_page: stack_page as u16,
+        native_stack_pages: stack_pages as u16,
         native_table: table_address,
     })
 }

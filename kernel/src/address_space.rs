@@ -6741,7 +6741,10 @@ const NATIVE_NETWORK_STACK_PAGES: usize = 16;
 pub(crate) const NATIVE_NETWORK_FRAME_COUNT: usize =
     4 + NATIVE_NETWORK_IMAGE_PAGES + NATIVE_NETWORK_STACK_PAGES + 1;
 pub(crate) const NATIVE_CONTROLLER_IMAGE_PAGES: usize = 32;
-pub(crate) const NATIVE_CONTROLLER_STACK_PAGES: usize = 255;
+// The native service layout currently uses one user PTE table. This leaves the
+// final three entries for boot information and reserved device mappings while
+// providing the bounded 800x600 software composition surface.
+pub(crate) const NATIVE_CONTROLLER_STACK_PAGES: usize = 474;
 pub(crate) const NATIVE_CONTROLLER_FRAME_COUNT: usize =
     4 + NATIVE_CONTROLLER_IMAGE_PAGES + NATIVE_CONTROLLER_STACK_PAGES + 1;
 const NATIVE_STACK_PAGE: usize = NATIVE_SERVICE_IMAGE_PAGES + 1;

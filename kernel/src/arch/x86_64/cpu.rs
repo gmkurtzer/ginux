@@ -164,6 +164,7 @@ struct X86RuntimeOwner {
     CONTAINER_EXEC_REQUESTED: RuntimeRef<[AtomicBool; control_abi::DOMAIN_LIMIT]>,
     CONTAINER_EXTENDED_STATE_VALID: RuntimeRef<[AtomicBool; control_abi::DOMAIN_LIMIT]>,
     CONTAINER_HOST_SHUTDOWN_REQUESTED: RuntimeRef<AtomicBool>,
+    CONTAINER_HOST_REBOOT_REQUESTED: RuntimeRef<AtomicBool>,
     CONTAINER_IMAGES:
         RuntimeRef<[[AtomicU8; control_abi::DOMAIN_MAX_IMAGE_SIZE]; control_abi::DOMAIN_LIMIT]>,
     CONTAINER_IMAGE_SIZES: RuntimeRef<[AtomicU8; control_abi::DOMAIN_LIMIT]>,
@@ -600,6 +601,9 @@ static X86_RUNTIME: X86RuntimeOwner = X86RuntimeOwner {
     CONTAINER_EXTENDED_STATE_VALID: RuntimeRef(&X86_RUNTIME_BACKING_CONTAINER_EXTENDED_STATE_VALID),
     CONTAINER_HOST_SHUTDOWN_REQUESTED: RuntimeRef(
         &X86_RUNTIME_BACKING_CONTAINER_HOST_SHUTDOWN_REQUESTED,
+    ),
+    CONTAINER_HOST_REBOOT_REQUESTED: RuntimeRef(
+        &X86_RUNTIME_BACKING_CONTAINER_HOST_REBOOT_REQUESTED,
     ),
     CONTAINER_IMAGES: RuntimeRef(&X86_RUNTIME_BACKING_CONTAINER_IMAGES),
     CONTAINER_IMAGE_SIZES: RuntimeRef(&X86_RUNTIME_BACKING_CONTAINER_IMAGE_SIZES),
@@ -2106,6 +2110,7 @@ static X86_RUNTIME_BACKING_CONTAINER_SELECTED_SLOT: AtomicU8 = AtomicU8::new(CON
 static X86_RUNTIME_BACKING_CONTAINER_ACTIVE_SLOT: AtomicU8 = AtomicU8::new(CONTAINER_SLOT_NONE);
 static X86_RUNTIME_BACKING_CONTAINER_RESTART_REQUESTED: AtomicBool = AtomicBool::new(false);
 static X86_RUNTIME_BACKING_CONTAINER_HOST_SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
+static X86_RUNTIME_BACKING_CONTAINER_HOST_REBOOT_REQUESTED: AtomicBool = AtomicBool::new(false);
 static X86_RUNTIME_BACKING_CONTAINER_MANAGEMENT_ENABLED: AtomicBool = AtomicBool::new(false);
 static LINUX_ABI_TEST_RESULTS: AtomicU64 = AtomicU64::new(0);
 static X86_RUNTIME_BACKING_NETWORK_PING_REQUESTED: AtomicU64 = AtomicU64::new(0);
@@ -5257,6 +5262,12 @@ pub(crate) fn take_container_restart_request() -> bool {
 pub(crate) fn take_container_host_shutdown_request() -> bool {
     X86_RUNTIME
         .CONTAINER_HOST_SHUTDOWN_REQUESTED
+        .swap(false, Ordering::SeqCst)
+}
+
+pub(crate) fn take_container_host_reboot_request() -> bool {
+    X86_RUNTIME
+        .CONTAINER_HOST_REBOOT_REQUESTED
         .swap(false, Ordering::SeqCst)
 }
 
@@ -41207,6 +41218,19 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
     }
     let operation = frame.first_argument();
     if operation == control_abi::DOMAIN_HOST_SHUTDOWN && frame.second_argument() == 0 {
+        X86_RUNTIME
+            .CONTAINER_HOST_SHUTDOWN_REQUESTED
+            .store(true, Ordering::SeqCst);
+        return active_container_slot()
+            .map(|slot| {
+                u64::from(X86_RUNTIME.CONTAINER_CONTROL_STATES[slot].load(Ordering::SeqCst))
+            })
+            .unwrap_or(0);
+    }
+    if operation == control_abi::DOMAIN_HOST_REBOOT && frame.second_argument() == 0 {
+        X86_RUNTIME
+            .CONTAINER_HOST_REBOOT_REQUESTED
+            .store(true, Ordering::SeqCst);
         X86_RUNTIME
             .CONTAINER_HOST_SHUTDOWN_REQUESTED
             .store(true, Ordering::SeqCst);

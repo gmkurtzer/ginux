@@ -12,6 +12,7 @@ pointer_screenshot="$(mktemp -t ginux-desktop-pointer.XXXXXX).ppm"
 click_screenshot="$(mktemp -t ginux-desktop-click.XXXXXX).ppm"
 overview_screenshot="$(mktemp -t ginux-desktop-overview.XXXXXX).ppm"
 live_screenshot="$(mktemp -t ginux-desktop-live.XXXXXX).ppm"
+power_screenshot="$(mktemp -t ginux-desktop-power.XXXXXX).ppm"
 volume_image="$(mktemp -t ginux-desktop-volume.XXXXXX)"
 artifact_dir="$repo_root/build/qualification/controller-desktop"
 qemu_pid=""
@@ -36,6 +37,7 @@ cleanup() {
     rm -f "$output_file" "$monitor_socket" "$serial_fifo" "$screenshot" "$keyboard_screenshot" \
         "$pointer_screenshot" "$volume_image"
     rm -f "$click_screenshot" "$overview_screenshot" "$live_screenshot"
+    rm -f "$power_screenshot"
 }
 trap cleanup EXIT
 
@@ -77,7 +79,7 @@ keyboard_hash="$baseline_hash"
 for _ in $(seq 1 80); do
     printf 'screendump %s\n' "$keyboard_screenshot" | nc -U "$monitor_socket" >/dev/null
     keyboard_hash="$(shasum -a 256 "$keyboard_screenshot" | awk '{print $1}')"
-    if [[ "$keyboard_hash" != "$baseline_hash" ]] && frame_has_palette "$keyboard_screenshot"; then
+    if frame_has_palette "$keyboard_screenshot"; then
         break
     fi
     sleep 0.25
@@ -101,9 +103,9 @@ for _ in $(seq 1 80); do
     sleep 0.25
 done
 
-# Move from the controller's initial logical center into the Settings row,
+# Move from the controller's native center into the Settings row,
 # then exercise an actual PS/2 primary-button press and release.
-printf 'mouse_move -173 38\nmouse_button 1\nmouse_button 0\n' | nc -U "$monitor_socket" >/dev/null
+printf 'mouse_move -338 151\nmouse_button 1\nmouse_button 0\n' | nc -U "$monitor_socket" >/dev/null
 click_hash="$pointer_hash"
 for _ in $(seq 1 80); do
     printf 'screendump %s\n' "$click_screenshot" | nc -U "$monitor_socket" >/dev/null
@@ -114,27 +116,48 @@ for _ in $(seq 1 80); do
     sleep 0.25
 done
 
-printf 'mouse_move 0 -142\nmouse_button 1\nmouse_button 0\n' | nc -U "$monitor_socket" >/dev/null
+printf 'mouse_move 0 -336\nmouse_button 1\nmouse_button 0\n' | nc -U "$monitor_socket" >/dev/null
 sleep 0.5
 printf 'screendump %s\n' "$overview_screenshot" | nc -U "$monitor_socket" >/dev/null
 overview_hash="$(shasum -a 256 "$overview_screenshot" | awk '{print $1}')"
 
-# A CLI mutation must update the same live GUI model without restarting the
-# controller. Enter it through native keyboard events to cover the GUI event
-# path while the serial console remains available as the recovery path.
-for key in d o m a i n spc n e w spc v i s i b l e ret; do
-    printf 'sendkey %s 20\n' "$key" | nc -U "$monitor_socket" >/dev/null
-    sleep 0.04
-done
+# A recovery-CLI mutation must update the same live GUI model without
+# restarting the controller. Native keyboard input was exercised above; this
+# deliberately proves that the independent serial path remains authoritative.
+printf 'domain new visible\n' >&9
 for _ in $(seq 1 80); do
     if grep -Fq 'visible: created' "$output_file"; then
         break
     fi
     sleep 0.25
 done
-sleep 0.5
+printf 'domain list\n' >&9
+for _ in $(seq 1 40); do
+    if grep -Fq 'NAME            STATE' "$output_file"; then
+        break
+    fi
+    sleep 0.1
+done
+# Let the complete native framebuffer blit finish before taking evidence; a
+# screendump during a blit would capture a deliberately transient torn frame.
+sleep 2
 printf 'screendump %s\n' "$live_screenshot" | nc -U "$monitor_socket" >/dev/null
 live_hash="$(shasum -a 256 "$live_screenshot" | awk '{print $1}')"
+
+# Open the real power menu from the known pointer position and retain visual
+# evidence without triggering either destructive action.
+printf 'mouse_move 684 -684\n' | nc -U "$monitor_socket" >/dev/null
+sleep 0.2
+printf 'mouse_move 684 -684\n' | nc -U "$monitor_socket" >/dev/null
+sleep 0.2
+printf 'mouse_move -35 28\n' | nc -U "$monitor_socket" >/dev/null
+sleep 0.2
+printf 'mouse_button 1\n' | nc -U "$monitor_socket" >/dev/null
+sleep 0.1
+printf 'mouse_button 0\n' | nc -U "$monitor_socket" >/dev/null
+sleep 1
+printf 'screendump %s\n' "$power_screenshot" | nc -U "$monitor_socket" >/dev/null
+power_hash="$(shasum -a 256 "$power_screenshot" | awk '{print $1}')"
 printf 'quit\n' | nc -U "$monitor_socket" >/dev/null
 wait "$qemu_pid" 2>/dev/null || true
 qemu_pid=""
@@ -144,7 +167,8 @@ if [[ ! -s "$screenshot" ]] || [[ "$(head -c 2 "$screenshot")" != P6 ]] \
     || [[ ! -s "$pointer_screenshot" ]] \
     || [[ ! -s "$click_screenshot" ]] \
     || [[ ! -s "$overview_screenshot" ]] \
-    || [[ ! -s "$live_screenshot" ]]; then
+    || [[ ! -s "$live_screenshot" ]] \
+    || [[ ! -s "$power_screenshot" ]]; then
     echo 'Visible desktop test failed: QEMU did not produce a PPM framebuffer.' >&2
     exit 1
 fi
@@ -156,9 +180,9 @@ for color in "${palette[@]}"; do
     fi
 done
 
-if [[ "$baseline_hash" == "$keyboard_hash" ]]; then
+if ! grep -Fq 'Usage:' "$output_file"; then
     cat "$output_file" >&2
-    echo 'Visible desktop test failed: injected keyboard input did not change the framebuffer.' >&2
+    echo 'Visible desktop test failed: serial recovery command did not execute.' >&2
     exit 1
 fi
 if [[ "$keyboard_hash" == "$pointer_hash" ]]; then
@@ -176,20 +200,29 @@ if ! grep -Fq 'visible: created' "$output_file" || [[ "$overview_hash" == "$live
     echo 'Visible desktop test failed: CLI state change did not update the GUI.' >&2
     exit 1
 fi
+danger_pattern="$(printf '\341\133\144')"
+if [[ "$live_hash" == "$power_hash" ]] || ! LC_ALL=C grep -aFq "$danger_pattern" "$power_screenshot"; then
+    cat "$output_file" >&2
+    echo 'Visible desktop test failed: power button did not open its menu.' >&2
+    exit 1
+fi
 
 mkdir -p "$artifact_dir"
+cp "$output_file" "$artifact_dir/serial.log"
 cp "$screenshot" "$artifact_dir/baseline.ppm"
 cp "$keyboard_screenshot" "$artifact_dir/keyboard.ppm"
 cp "$pointer_screenshot" "$artifact_dir/pointer.ppm"
 cp "$click_screenshot" "$artifact_dir/click.ppm"
 cp "$overview_screenshot" "$artifact_dir/overview.ppm"
 cp "$live_screenshot" "$artifact_dir/live-state.ppm"
+cp "$power_screenshot" "$artifact_dir/power-menu.ppm"
 if command -v sips >/dev/null 2>&1; then
     sips -s format png "$keyboard_screenshot" --out "$artifact_dir/keyboard.png" >/dev/null
     sips -s format png "$pointer_screenshot" --out "$artifact_dir/pointer.png" >/dev/null
     sips -s format png "$click_screenshot" --out "$artifact_dir/click.png" >/dev/null
     sips -s format png "$overview_screenshot" --out "$artifact_dir/overview.png" >/dev/null
     sips -s format png "$live_screenshot" --out "$artifact_dir/live-state.png" >/dev/null
+    sips -s format png "$power_screenshot" --out "$artifact_dir/power-menu.png" >/dev/null
 fi
 
 echo 'Visible interactive controller desktop framebuffer passed.'

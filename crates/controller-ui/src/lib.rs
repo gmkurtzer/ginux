@@ -2,13 +2,14 @@
 
 use ginux_native_abi::{
     NATIVE_DOMAIN_ATTACH, NATIVE_DOMAIN_CONTROL_OPERATION, NATIVE_DOMAIN_CREATE,
-    NATIVE_DOMAIN_EXEC, NATIVE_DOMAIN_QUERY, NATIVE_DOMAIN_RESTART, NATIVE_DOMAIN_SET_CPU,
-    NATIVE_DOMAIN_SET_IMAGE, NATIVE_DOMAIN_SET_INIT, NATIVE_DOMAIN_SET_MEMORY_MIB,
-    NATIVE_DOMAIN_START_ATTACHED, NATIVE_DOMAIN_STOP, NATIVE_HOST_INSPECT_OPERATION,
-    NATIVE_NETWORK_INVENTORY_OPERATION, NATIVE_ROOT_OPERATION,
+    NATIVE_DOMAIN_EXEC, NATIVE_DOMAIN_HOST_REBOOT, NATIVE_DOMAIN_HOST_SHUTDOWN,
+    NATIVE_DOMAIN_QUERY, NATIVE_DOMAIN_RESTART, NATIVE_DOMAIN_SET_CPU, NATIVE_DOMAIN_SET_IMAGE,
+    NATIVE_DOMAIN_SET_INIT, NATIVE_DOMAIN_SET_MEMORY_MIB, NATIVE_DOMAIN_START_ATTACHED,
+    NATIVE_DOMAIN_STOP, NATIVE_HOST_INSPECT_OPERATION, NATIVE_NETWORK_INVENTORY_OPERATION,
+    NATIVE_ROOT_OPERATION,
 };
 use ginux_windowing::{
-    paint_border, paint_rect, paint_text_5x7_scaled, Rect, COLOR_ACCENT, COLOR_BORDER,
+    paint_border, paint_rect, paint_text_5x7_smooth, Rect, COLOR_ACCENT, COLOR_BORDER,
     COLOR_DARK_TEXT, COLOR_DESKTOP, COLOR_HEALTHY, COLOR_MUTED, COLOR_PANEL, COLOR_SURFACE,
     COLOR_SURFACE_RAISED, COLOR_TEXT,
 };
@@ -17,12 +18,75 @@ pub const MAX_DOMAINS: usize = 4;
 pub const MAX_JOBS: usize = 8;
 pub const MAX_NOTICES: usize = 8;
 pub const MAX_NAME: usize = 16;
-const UI_SCALE: i16 = 1;
-const LOGICAL_WIDTH: u16 = 400;
-const LOGICAL_HEIGHT: u16 = 300;
-pub const SHELL_WIDTH: usize = LOGICAL_WIDTH as usize * UI_SCALE as usize;
-pub const SHELL_HEIGHT: usize = LOGICAL_HEIGHT as usize * UI_SCALE as usize;
+const LOGICAL_WIDTH: u16 = 800;
+const LOGICAL_HEIGHT: u16 = 600;
+pub const SHELL_WIDTH: usize = LOGICAL_WIDTH as usize;
+pub const SHELL_HEIGHT: usize = LOGICAL_HEIGHT as usize;
 pub const SHELL_BACKGROUND_COLOR: u32 = COLOR_DESKTOP;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Theme {
+    pub desktop: u32,
+    pub panel: u32,
+    pub surface: u32,
+    pub raised: u32,
+    pub border: u32,
+    pub accent: u32,
+    pub text: u32,
+    pub muted: u32,
+    pub healthy: u32,
+    pub danger: u32,
+}
+
+pub const DEFAULT_THEME: Theme = Theme {
+    desktop: COLOR_DESKTOP,
+    panel: COLOR_PANEL,
+    surface: COLOR_SURFACE,
+    raised: COLOR_SURFACE_RAISED,
+    border: COLOR_BORDER,
+    accent: COLOR_ACCENT,
+    text: COLOR_TEXT,
+    muted: COLOR_MUTED,
+    healthy: COLOR_HEALTHY,
+    danger: 0x00e1_5b64,
+};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Layout {
+    pub width: u16,
+    pub height: u16,
+    pub top_bar_height: u16,
+    pub sidebar_width: u16,
+    pub content_left: i16,
+    pub content_top: i16,
+    pub content_width: u16,
+    pub content_bottom: i16,
+    pub nav_left: i16,
+    pub nav_width: u16,
+    pub nav_first_top: u16,
+    pub nav_step: u16,
+}
+
+pub const DEFAULT_LAYOUT: Layout = Layout {
+    width: LOGICAL_WIDTH,
+    height: LOGICAL_HEIGHT,
+    top_bar_height: 56,
+    sidebar_width: 184,
+    content_left: 216,
+    content_top: 88,
+    content_width: 560,
+    content_bottom: 560,
+    nav_left: 12,
+    nav_width: 160,
+    nav_first_top: 106,
+    nav_step: 56,
+};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PowerAction {
+    Reboot,
+    Shutdown,
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Page {
@@ -41,15 +105,23 @@ pub struct ShellState {
     pub pointer_x: u16,
     pub pointer_y: u16,
     pub buttons: u8,
+    pub power_menu: bool,
+    pub power_confirmation: Option<PowerAction>,
+    pub layout: Layout,
+    power_action: Option<PowerAction>,
 }
 
 impl ShellState {
     pub const fn new() -> Self {
         Self {
             page: Page::Overview,
-            pointer_x: 200,
-            pointer_y: 150,
+            pointer_x: 400,
+            pointer_y: 300,
             buttons: 0,
+            power_menu: false,
+            power_confirmation: None,
+            layout: DEFAULT_LAYOUT,
+            power_action: None,
         }
     }
 
@@ -70,15 +142,52 @@ impl ShellState {
         if changed & 1 == 0 || buttons & 1 == 0 {
             return false;
         }
-        let Some(page) = page_at(
-            self.pointer_x / UI_SCALE as u16,
-            self.pointer_y / UI_SCALE as u16,
-        ) else {
+        let (x, y) = (self.pointer_x, self.pointer_y);
+        let power_left = self.layout.width.saturating_sub(112);
+        if (power_left..self.layout.width).contains(&x)
+            && (0..self.layout.top_bar_height).contains(&y)
+        {
+            self.power_menu = !self.power_menu;
+            self.power_confirmation = None;
+            return true;
+        }
+        if let Some(action) = self.power_confirmation {
+            if (280..392).contains(&x) && (344..382).contains(&y) {
+                self.power_confirmation = None;
+                return true;
+            }
+            if (408..520).contains(&x) && (344..382).contains(&y) {
+                self.power_action = Some(action);
+                self.power_confirmation = None;
+                self.power_menu = false;
+                return true;
+            }
+            return false;
+        }
+        if self.power_menu {
+            let action = if (624..784).contains(&x) && (58..102).contains(&y) {
+                Some(PowerAction::Reboot)
+            } else if (624..784).contains(&x) && (102..146).contains(&y) {
+                Some(PowerAction::Shutdown)
+            } else {
+                None
+            };
+            if let Some(action) = action {
+                self.power_confirmation = Some(action);
+                return true;
+            }
+            self.power_menu = false;
+        }
+        let Some(page) = page_at(x, y, &self.layout) else {
             return false;
         };
         let changed = self.page != page;
         self.page = page;
         changed
+    }
+
+    pub fn take_power_action(&mut self) -> Option<PowerAction> {
+        self.power_action.take()
     }
 }
 
@@ -199,6 +308,7 @@ pub enum Operation {
     StorageStatus,
     FocusStatus,
     LeaseStatus,
+    Reboot,
     Shutdown,
 }
 
@@ -226,7 +336,8 @@ impl Operation {
             Self::NetworkStatus => (NATIVE_NETWORK_INVENTORY_OPERATION, 0),
             Self::StorageStatus => (NATIVE_ROOT_OPERATION, 0),
             Self::FocusStatus | Self::LeaseStatus => (NATIVE_HOST_INSPECT_OPERATION, 0),
-            Self::Shutdown => (NATIVE_DOMAIN_CONTROL_OPERATION, 4),
+            Self::Reboot => (NATIVE_DOMAIN_CONTROL_OPERATION, NATIVE_DOMAIN_HOST_REBOOT),
+            Self::Shutdown => (NATIVE_DOMAIN_CONTROL_OPERATION, NATIVE_DOMAIN_HOST_SHUTDOWN),
         }
     }
 }
@@ -507,133 +618,156 @@ impl<'a, B: ManagementBackend> Application<'a, B> {
         let mut state = ShellState::new();
         state.pointer_x = 350;
         state.pointer_y = 230;
-        self.render_shell_view(
-            pixels,
-            stride,
-            b"controller terminal",
-            &state,
-            &SystemView::model(),
-        )
+        self.render_shell_view(pixels, stride, &state, &SystemView::model())
     }
 
     pub fn render_shell_state(
         &self,
         pixels: &mut [u32],
         stride: usize,
-        terminal: &[u8],
         pointer_x: u16,
         pointer_y: u16,
     ) -> Result<u64, Error> {
         let mut state = ShellState::new();
         state.pointer_x = pointer_x;
         state.pointer_y = pointer_y;
-        self.render_shell_view(pixels, stride, terminal, &state, &SystemView::model())
+        self.render_shell_view(pixels, stride, &state, &SystemView::model())
     }
 
     pub fn render_shell_view(
         &self,
         pixels: &mut [u32],
         stride: usize,
-        terminal: &[u8],
         state: &ShellState,
         view: &SystemView,
     ) -> Result<u64, Error> {
+        self.render_shell_view_with_theme(pixels, stride, state, view, &DEFAULT_THEME)
+    }
+
+    pub fn render_shell_view_with_theme(
+        &self,
+        pixels: &mut [u32],
+        stride: usize,
+        state: &ShellState,
+        view: &SystemView,
+        theme: &Theme,
+    ) -> Result<u64, Error> {
+        let layout = state.layout;
+        if layout.width as usize != SHELL_WIDTH
+            || layout.height as usize != SHELL_HEIGHT
+            || layout.top_bar_height >= layout.height
+            || layout.sidebar_width >= layout.width
+            || layout.content_left < i16::try_from(layout.sidebar_width).unwrap_or(i16::MAX)
+            || layout.content_width == 0
+            || i32::from(layout.content_left) + i32::from(layout.content_width)
+                > i32::from(layout.width)
+        {
+            return Err(Error::Failed);
+        }
         rect(
             pixels,
             stride,
-            Rect::new(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT),
-            COLOR_DESKTOP,
+            Rect::new(0, 0, layout.width, layout.height),
+            theme.desktop,
         )?;
 
         // Trusted system bar.
-        rect(pixels, stride, Rect::new(0, 0, 400, 15), COLOR_PANEL)?;
-        rect(pixels, stride, Rect::new(0, 14, 400, 1), COLOR_BORDER)?;
-        text(pixels, stride, 7, 5, b"GINUX", COLOR_TEXT)?;
-        text(
+        rect(
             pixels,
             stride,
-            90,
-            5,
-            b"SYSTEM MANAGEMENT | HOST: GINUX",
-            COLOR_MUTED,
+            Rect::new(0, 0, layout.width, layout.top_bar_height),
+            theme.panel,
         )?;
+        rect(
+            pixels,
+            stride,
+            Rect::new(0, layout.top_bar_height as i16 - 1, layout.width, 1),
+            theme.border,
+        )?;
+        text(pixels, stride, 24, 20, b"GINUX", theme.text)?;
+        text(pixels, stride, 304, 20, b"System Management", theme.muted)?;
         let mut time = [b'0'; 5];
         time[0] = b'0' + view.hour / 10;
         time[1] = b'0' + view.hour % 10;
         time[2] = b':';
         time[3] = b'0' + view.minute / 10;
         time[4] = b'0' + view.minute % 10;
-        text(pixels, stride, 310, 5, &time, COLOR_MUTED)?;
-        rect(pixels, stride, Rect::new(341, 5, 5, 5), COLOR_HEALTHY)?;
-        text(
-            pixels,
-            stride,
-            350,
-            5,
-            if view.healthy {
-                b"HEALTHY"
-            } else {
-                b"DEGRADED"
-            },
-            if view.healthy {
-                COLOR_HEALTHY
-            } else {
-                COLOR_MUTED
-            },
-        )?;
-
-        // Controller window and chrome.
-        let shell = Rect::new(11, 29, 378, 247);
-        rect(pixels, stride, shell, COLOR_PANEL)?;
-        outline(pixels, stride, shell, COLOR_BORDER)?;
+        text(pixels, stride, 652, 20, &time, theme.muted)?;
         rect(
             pixels,
             stride,
-            Rect::new(12, 30, 376, 14),
-            COLOR_SURFACE_RAISED,
+            Rect::new(724, 23, 8, 8),
+            if view.healthy {
+                theme.healthy
+            } else {
+                theme.danger
+            },
         )?;
-        text(pixels, stride, 17, 35, b"GINUX CONTROLLER", COLOR_TEXT)?;
-        text(pixels, stride, 347, 35, b"-  O  X", COLOR_MUTED)?;
+        draw_power_icon(pixels, stride, layout.width as i16 - 48, 16, theme.text)?;
 
         // Navigation rail.
-        rect(pixels, stride, Rect::new(12, 44, 68, 206), COLOR_PANEL)?;
-        rect(pixels, stride, Rect::new(79, 44, 1, 206), COLOR_BORDER)?;
-        for (page, y, icon, label) in [
-            (Page::Overview, 55, 0, &b"OVERVIEW"[..]),
-            (Page::Domains, 77, 1, &b"DOMAINS"[..]),
-            (Page::Network, 101, 2, &b"NETWORK"[..]),
-            (Page::Storage, 125, 3, &b"STORAGE"[..]),
-            (Page::Devices, 149, 4, &b"DEVICES"[..]),
-            (Page::Events, 173, 5, &b"EVENTS"[..]),
-            (Page::Settings, 197, 6, &b"SETTINGS"[..]),
-        ] {
+        rect(
+            pixels,
+            stride,
+            Rect::new(
+                0,
+                layout.top_bar_height as i16,
+                layout.sidebar_width,
+                layout.height - layout.top_bar_height,
+            ),
+            theme.panel,
+        )?;
+        rect(
+            pixels,
+            stride,
+            Rect::new(
+                layout.sidebar_width as i16 - 1,
+                layout.top_bar_height as i16,
+                1,
+                layout.height - layout.top_bar_height,
+            ),
+            theme.border,
+        )?;
+        text(pixels, stride, 24, 78, b"Controller", theme.muted)?;
+        for (index, (page, icon, label)) in [
+            (Page::Overview, 0, &b"Overview"[..]),
+            (Page::Domains, 1, &b"Domains"[..]),
+            (Page::Network, 2, &b"Network"[..]),
+            (Page::Storage, 3, &b"Storage"[..]),
+            (Page::Devices, 4, &b"Devices"[..]),
+            (Page::Events, 5, &b"Events"[..]),
+            (Page::Settings, 6, &b"Settings"[..]),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let y = layout.nav_first_top as i16 + 18 + index as i16 * layout.nav_step as i16;
             let selected = state.page == page;
             if selected {
-                rect(pixels, stride, Rect::new(13, y - 7, 66, 18), COLOR_ACCENT)?;
+                rect(
+                    pixels,
+                    stride,
+                    Rect::new(layout.nav_left, y - 18, layout.nav_width, 42),
+                    theme.accent,
+                )?;
             }
-            let color = if selected { COLOR_TEXT } else { COLOR_MUTED };
-            nav_icon(pixels, stride, 19, y - 2, icon, color)?;
-            text(pixels, stride, 33, y, label, color)?;
+            let color = if selected { theme.text } else { theme.muted };
+            nav_icon(pixels, stride, 28, y - 7, icon, color)?;
+            text(pixels, stride, 60, y - 5, label, color)?;
         }
 
         if state.page == Page::Overview {
-            self.render_overview(pixels, stride, view)?;
+            self.render_overview(pixels, stride, view, theme, &layout)?;
         } else {
-            render_page(pixels, stride, state.page, view)?;
+            render_page(pixels, stride, state.page, view, theme, &layout)?;
         }
 
-        // Command surface.
-        let command = Rect::new(16, 257, 368, 14);
-        rect(pixels, stride, command, COLOR_SURFACE)?;
-        outline(pixels, stride, command, COLOR_ACCENT)?;
-        text(pixels, stride, 22, 262, b"GINUX>", COLOR_MUTED)?;
-        text(pixels, stride, 50, 262, terminal, COLOR_TEXT)?;
-        rect(
-            pixels,
-            stride,
-            Rect::new(50 + terminal.len() as i16 * 6, 261, 2, 7),
-            COLOR_TEXT,
-        )?;
+        if state.power_menu {
+            render_power_menu(pixels, stride, theme)?;
+        }
+        if let Some(action) = state.power_confirmation {
+            render_power_confirmation(pixels, stride, action, theme)?;
+        }
 
         draw_pointer(
             pixels,
@@ -649,8 +783,20 @@ impl<'a, B: ManagementBackend> Application<'a, B> {
         pixels: &mut [u32],
         stride: usize,
         view: &SystemView,
+        theme: &Theme,
+        layout: &Layout,
     ) -> Result<(), Error> {
-        text(pixels, stride, 91, 51, b"SYSTEM OVERVIEW", COLOR_TEXT)?;
+        let left = layout.content_left;
+        let card_width = (layout.content_width - 32) / 3;
+        let card_top = layout.content_top + 44;
+        text(
+            pixels,
+            stride,
+            left,
+            layout.content_top,
+            b"System Overview",
+            theme.text,
+        )?;
         let mut domain_value = [0_u8; 3];
         let domain_value = decimal(&mut domain_value, u64::from(view.domain_count));
         let mut domain_detail = [0_u8; 20];
@@ -662,22 +808,20 @@ impl<'a, B: ManagementBackend> Application<'a, B> {
         card(
             pixels,
             stride,
-            Rect::new(89, 71, 94, 40),
+            Rect::new(left, card_top, card_width, 104),
             1,
-            b"DOMAINS",
-            domain_value,
-            domain_detail,
+            (b"Domains", domain_value, domain_detail),
+            theme,
         )?;
         let mut cpu = [0_u8; 6];
         let cpu = decimal_suffix(&mut cpu, u64::from(view.cpu_allocated), b" CPU");
         card(
             pixels,
             stride,
-            Rect::new(190, 71, 93, 40),
+            Rect::new(left + card_width as i16 + 16, card_top, card_width, 104),
             4,
-            b"ALLOCATED",
-            cpu,
-            b"CONFIGURED",
+            (b"CPU", cpu, b"Configured"),
+            theme,
         )?;
         let mut memory = [0_u8; 8];
         let memory = decimal_suffix(&mut memory, u64::from(view.memory_used_mib), b"M");
@@ -686,91 +830,159 @@ impl<'a, B: ManagementBackend> Application<'a, B> {
         card(
             pixels,
             stride,
-            Rect::new(290, 71, 94, 40),
+            Rect::new(
+                left + (card_width as i16 + 16) * 2,
+                card_top,
+                card_width,
+                104,
+            ),
             3,
-            b"MEMORY",
-            memory,
-            memory_detail,
+            (b"Memory", memory, memory_detail),
+            theme,
         )?;
 
         // Domain inventory.
-        let table = Rect::new(89, 119, 295, 132);
-        rect(pixels, stride, table, COLOR_PANEL)?;
-        outline(pixels, stride, table, COLOR_BORDER)?;
+        let table_top = card_top + 128;
+        let table = Rect::new(
+            left,
+            table_top,
+            layout.content_width,
+            (layout.content_bottom - table_top) as u16,
+        );
+        rect(pixels, stride, table, theme.panel)?;
+        outline(pixels, stride, table, theme.border)?;
         rect(
             pixels,
             stride,
-            Rect::new(90, 120, 293, 13),
-            COLOR_SURFACE_RAISED,
+            Rect::new(left + 1, table_top + 1, layout.content_width - 2, 40),
+            theme.raised,
         )?;
-        text(pixels, stride, 96, 124, b"DOMAINS", COLOR_TEXT)?;
-        rect(pixels, stride, Rect::new(90, 133, 293, 15), COLOR_SURFACE)?;
-        for x in [181, 264, 314] {
-            rect(pixels, stride, Rect::new(x, 133, 1, 30), COLOR_BORDER)?;
+        text(
+            pixels,
+            stride,
+            left + 16,
+            table_top + 14,
+            b"Domains",
+            theme.text,
+        )?;
+        rect(
+            pixels,
+            stride,
+            Rect::new(left + 1, table_top + 41, layout.content_width - 2, 42),
+            theme.surface,
+        )?;
+        for offset in [182, 332, 434] {
+            rect(
+                pixels,
+                stride,
+                Rect::new(left + offset, table_top + 41, 1, 98),
+                theme.border,
+            )?;
         }
-        text(pixels, stride, 96, 138, b"NAME", COLOR_MUTED)?;
-        text(pixels, stride, 187, 138, b"STATE", COLOR_MUTED)?;
-        text(pixels, stride, 270, 138, b"CPU", COLOR_MUTED)?;
-        text(pixels, stride, 320, 138, b"MEMORY", COLOR_MUTED)?;
-        rect(pixels, stride, Rect::new(90, 148, 293, 1), COLOR_BORDER)?;
+        text(
+            pixels,
+            stride,
+            left + 16,
+            table_top + 55,
+            b"Name",
+            theme.muted,
+        )?;
+        text(
+            pixels,
+            stride,
+            left + 198,
+            table_top + 55,
+            b"State",
+            theme.muted,
+        )?;
+        text(
+            pixels,
+            stride,
+            left + 348,
+            table_top + 55,
+            b"CPU",
+            theme.muted,
+        )?;
+        text(
+            pixels,
+            stride,
+            left + 450,
+            table_top + 55,
+            b"Memory",
+            theme.muted,
+        )?;
+        rect(
+            pixels,
+            stride,
+            Rect::new(left + 1, table_top + 82, layout.content_width - 2, 1),
+            theme.border,
+        )?;
         for (index, domain) in view.domains[..usize::from(view.domain_count.min(MAX_DOMAINS as u8))]
             .iter()
             .enumerate()
         {
-            let y = 154 + index as i16 * 14;
-            text(pixels, stride, 96, y, domain.name(), COLOR_TEXT)?;
+            let y = table_top + 102 + index as i16 * 42;
+            text(pixels, stride, left + 16, y, domain.name(), theme.text)?;
             let state = domain_state_text(domain.state);
             rect(
                 pixels,
                 stride,
-                Rect::new(187, y, 5, 5),
+                Rect::new(left + 198, y + 3, 8, 8),
                 if domain.state == DomainState::Running {
-                    COLOR_HEALTHY
+                    theme.healthy
                 } else {
-                    COLOR_MUTED
+                    theme.muted
                 },
             )?;
-            text(pixels, stride, 197, y, state, COLOR_TEXT)?;
+            text(pixels, stride, left + 216, y, state, theme.text)?;
             let mut cpu = [0_u8; 5];
             let cpu = decimal(&mut cpu, u64::from(domain.cpu));
-            text(pixels, stride, 270, y, cpu, COLOR_TEXT)?;
+            text(pixels, stride, left + 348, y, cpu, theme.text)?;
             let mut memory = [0_u8; 8];
             let memory = decimal_suffix(&mut memory, u64::from(domain.memory_mib), b"M");
-            text(pixels, stride, 320, y, memory, COLOR_TEXT)?;
+            text(pixels, stride, left + 450, y, memory, theme.text)?;
         }
         Ok(())
     }
 }
 
-fn page_at(x: u16, y: u16) -> Option<Page> {
-    if (89..183).contains(&x) && (71..111).contains(&y) {
+fn page_at(x: u16, y: u16, layout: &Layout) -> Option<Page> {
+    let content_left = layout.content_left.max(0) as u16;
+    let card_top = (layout.content_top + 44).max(0) as u16;
+    let first_card_right = content_left + (layout.content_width - 32) / 3;
+    if (content_left..first_card_right).contains(&x) && (card_top..card_top + 104).contains(&y) {
         return Some(Page::Domains);
     }
-    if !(13..79).contains(&x) {
+    let nav_left = layout.nav_left.max(0) as u16;
+    if !(nav_left..nav_left + layout.nav_width).contains(&x) {
         return None;
     }
     [
-        (Page::Overview, 48_u16),
-        (Page::Domains, 70),
-        (Page::Network, 94),
-        (Page::Storage, 118),
-        (Page::Devices, 142),
-        (Page::Events, 166),
-        (Page::Settings, 190),
+        Page::Overview,
+        Page::Domains,
+        Page::Network,
+        Page::Storage,
+        Page::Devices,
+        Page::Events,
+        Page::Settings,
     ]
     .into_iter()
-    .find_map(|(page, top)| (y >= top && y < top + 18).then_some(page))
+    .enumerate()
+    .find_map(|(index, page)| {
+        let top = layout.nav_first_top + index as u16 * layout.nav_step;
+        (y >= top && y < top + 42).then_some(page)
+    })
 }
 
 fn page_title(page: Page) -> &'static [u8] {
     match page {
-        Page::Overview => b"SYSTEM OVERVIEW",
-        Page::Domains => b"DOMAINS",
-        Page::Network => b"NETWORK",
-        Page::Storage => b"STORAGE",
-        Page::Devices => b"DEVICES",
-        Page::Events => b"EVENTS",
-        Page::Settings => b"SETTINGS",
+        Page::Overview => b"System Overview",
+        Page::Domains => b"Domains",
+        Page::Network => b"Network",
+        Page::Storage => b"Storage",
+        Page::Devices => b"Devices",
+        Page::Events => b"Events",
+        Page::Settings => b"Settings",
     }
 }
 
@@ -779,57 +991,86 @@ fn render_page(
     stride: usize,
     page: Page,
     view: &SystemView,
+    theme: &Theme,
+    layout: &Layout,
 ) -> Result<(), Error> {
-    text(pixels, stride, 91, 51, page_title(page), COLOR_TEXT)?;
-    let panel = Rect::new(89, 71, 295, 180);
-    rect(pixels, stride, panel, COLOR_PANEL)?;
-    outline(pixels, stride, panel, COLOR_BORDER)?;
     text(
         pixels,
         stride,
-        98,
-        82,
-        b"LIVE CONTROLLER VIEW",
-        COLOR_HEALTHY,
+        layout.content_left,
+        layout.content_top,
+        page_title(page),
+        theme.text,
+    )?;
+    let panel_top = layout.content_top + 44;
+    let panel = Rect::new(
+        layout.content_left,
+        panel_top,
+        layout.content_width,
+        (layout.content_bottom - panel_top) as u16,
+    );
+    rect(pixels, stride, panel, theme.panel)?;
+    outline(pixels, stride, panel, theme.border)?;
+    text(
+        pixels,
+        stride,
+        layout.content_left + 24,
+        panel_top + 24,
+        b"Live Controller View",
+        theme.healthy,
     )?;
     let (label, value) = match page {
-        Page::Domains => (b"CONFIGURED DOMAINS".as_slice(), view.domain_count),
-        Page::Network => (b"HOST NETWORK STATUS".as_slice(), u8::from(view.healthy)),
-        Page::Storage => (b"LOCAL STORAGE STATUS".as_slice(), u8::from(view.healthy)),
-        Page::Devices => (b"DEVICE SERVICE STATUS".as_slice(), u8::from(view.healthy)),
-        Page::Events => (b"ACTIVE EVENT COUNT".as_slice(), 0),
-        Page::Settings => (b"SYSTEM SETTINGS".as_slice(), 1),
-        Page::Overview => (b"CONFIGURED DOMAINS".as_slice(), view.domain_count),
+        Page::Domains => (b"Configured domains".as_slice(), view.domain_count),
+        Page::Network => (b"Host network status".as_slice(), u8::from(view.healthy)),
+        Page::Storage => (b"Local storage status".as_slice(), u8::from(view.healthy)),
+        Page::Devices => (b"Device service status".as_slice(), u8::from(view.healthy)),
+        Page::Events => (b"Active event count".as_slice(), 0),
+        Page::Settings => (b"System settings".as_slice(), 1),
+        Page::Overview => (b"Configured domains".as_slice(), view.domain_count),
     };
-    text(pixels, stride, 98, 101, label, COLOR_MUTED)?;
+    text(
+        pixels,
+        stride,
+        layout.content_left + 24,
+        panel_top + 72,
+        label,
+        theme.muted,
+    )?;
     let mut numeric = [0_u8; 3];
     let numeric = decimal(&mut numeric, u64::from(value));
-    text(pixels, stride, 98, 113, numeric, COLOR_TEXT)?;
+    text(
+        pixels,
+        stride,
+        layout.content_left + 24,
+        panel_top + 100,
+        numeric,
+        theme.text,
+    )?;
     if page == Page::Settings {
         text(
             pixels,
             stride,
-            98,
-            142,
-            b"DATE, TIME, AND TIMEZONE",
-            COLOR_TEXT,
+            layout.content_left + 24,
+            panel_top + 172,
+            b"Date, time, and timezone",
+            theme.text,
         )?;
         text(
             pixels,
             stride,
-            98,
-            154,
-            b"CONFIGURATION INTERFACE PENDING",
-            COLOR_MUTED,
+            layout.content_left + 24,
+            panel_top + 204,
+            b"Configuration interface pending",
+            theme.muted,
         )?;
     } else {
         text(
             pixels,
             stride,
-            98,
-            142,
-            b"STATE REFRESHES FROM THE KERNEL",
-            COLOR_MUTED,
+            layout.content_left + 24,
+            panel_top + 172,
+            b"State refreshes from the kernel",
+            theme.muted,
         )?;
     }
     Ok(())
@@ -862,21 +1103,21 @@ fn decimal_suffix<'a>(output: &'a mut [u8], value: u64, suffix: &[u8]) -> &'a [u
 
 fn count_detail(output: &mut [u8], running: u64, stopped: u64) -> &[u8] {
     let mut length = decimal(output, running).len();
-    let separator = b" RUN ";
+    let separator = b" run ";
     let count = separator.len().min(output.len().saturating_sub(length));
     output[length..length + count].copy_from_slice(&separator[..count]);
     length += count;
     length += decimal(&mut output[length..], stopped).len();
-    let suffix = b" STOP";
+    let suffix = b" stopped";
     let count = suffix.len().min(output.len().saturating_sub(length));
     output[length..length + count].copy_from_slice(&suffix[..count]);
     &output[..length + count]
 }
 
 fn total_detail(output: &mut [u8], total: u64) -> &[u8] {
-    output[..3].copy_from_slice(b"OF ");
+    output[..3].copy_from_slice(b"of ");
     let mut length = 3 + decimal(&mut output[3..], total).len();
-    let suffix = b" MIB";
+    let suffix = b" MiB";
     let count = suffix.len().min(output.len().saturating_sub(length));
     output[length..length + count].copy_from_slice(&suffix[..count]);
     length += count;
@@ -885,13 +1126,13 @@ fn total_detail(output: &mut [u8], total: u64) -> &[u8] {
 
 fn domain_state_text(state: DomainState) -> &'static [u8] {
     match state {
-        DomainState::Created => b"CREATED",
-        DomainState::Configured => b"CONFIGURED",
-        DomainState::Starting => b"STARTING",
-        DomainState::Running => b"RUNNING",
-        DomainState::Stopped => b"STOPPED",
-        DomainState::Failed => b"FAILED",
-        DomainState::Empty => b"EMPTY",
+        DomainState::Created => b"Created",
+        DomainState::Configured => b"Configured",
+        DomainState::Starting => b"Starting",
+        DomainState::Running => b"Running",
+        DomainState::Stopped => b"Stopped",
+        DomainState::Failed => b"Failed",
+        DomainState::Empty => b"Empty",
     }
 }
 
@@ -904,12 +1145,7 @@ fn outline(pixels: &mut [u32], stride: usize, area: Rect, color: u32) -> Result<
 }
 
 fn scaled_rect(area: Rect) -> Rect {
-    Rect::new(
-        area.x * UI_SCALE,
-        area.y * UI_SCALE,
-        area.width * UI_SCALE as u16,
-        area.height * UI_SCALE as u16,
-    )
+    area
 }
 
 fn text(
@@ -920,8 +1156,7 @@ fn text(
     value: &[u8],
     color: u32,
 ) -> Result<(), Error> {
-    paint_text_5x7_scaled(pixels, stride, x * UI_SCALE, y * UI_SCALE, value, color, 1)
-        .map_err(|_| Error::Failed)
+    paint_text_5x7_smooth(pixels, stride, x, y, value, color).map_err(|_| Error::Failed)
 }
 
 fn card(
@@ -929,16 +1164,23 @@ fn card(
     stride: usize,
     area: Rect,
     icon: u8,
-    label: &[u8],
-    value: &[u8],
-    detail: &[u8],
+    content: (&[u8], &[u8], &[u8]),
+    theme: &Theme,
 ) -> Result<(), Error> {
-    rect(pixels, stride, area, COLOR_SURFACE_RAISED)?;
-    outline(pixels, stride, area, COLOR_BORDER)?;
-    nav_icon(pixels, stride, area.x + 7, area.y + 13, icon, COLOR_TEXT)?;
-    text(pixels, stride, area.x + 27, area.y + 9, label, COLOR_MUTED)?;
-    text(pixels, stride, area.x + 27, area.y + 17, value, COLOR_TEXT)?;
-    text(pixels, stride, area.x + 7, area.y + 32, detail, COLOR_MUTED)
+    let (label, value, detail) = content;
+    rect(pixels, stride, area, theme.raised)?;
+    outline(pixels, stride, area, theme.border)?;
+    nav_icon(pixels, stride, area.x + 16, area.y + 34, icon, theme.text)?;
+    text(pixels, stride, area.x + 58, area.y + 22, label, theme.muted)?;
+    text(pixels, stride, area.x + 58, area.y + 50, value, theme.text)?;
+    text(
+        pixels,
+        stride,
+        area.x + 16,
+        area.y + 78,
+        detail,
+        theme.muted,
+    )
 }
 
 fn nav_icon(
@@ -949,97 +1191,173 @@ fn nav_icon(
     kind: u8,
     color: u32,
 ) -> Result<(), Error> {
+    const S: i16 = 2;
     match kind {
         0 => {
             for (dx, dy) in [(0, 0), (5, 0), (0, 5), (5, 5)] {
-                outline(pixels, stride, Rect::new(x + dx, y + dy, 4, 4), color)?;
+                outline(
+                    pixels,
+                    stride,
+                    Rect::new(x + dx * S, y + dy * S, 8, 8),
+                    color,
+                )?;
             }
         }
         1 => {
-            outline(pixels, stride, Rect::new(x + 1, y, 8, 10), color)?;
-            rect(pixels, stride, Rect::new(x, y + 3, 10, 1), color)?;
+            outline(pixels, stride, Rect::new(x + 2, y, 16, 20), color)?;
+            rect(pixels, stride, Rect::new(x, y + 6, 20, 2), color)?;
         }
         2 => {
             for (dx, dy) in [(0, 7), (5, 0), (10, 7)] {
-                outline(pixels, stride, Rect::new(x + dx, y + dy, 3, 3), color)?;
+                outline(
+                    pixels,
+                    stride,
+                    Rect::new(x + dx * S, y + dy * S, 6, 6),
+                    color,
+                )?;
             }
-            rect(pixels, stride, Rect::new(x + 6, y + 3, 1, 5), color)?;
-            rect(pixels, stride, Rect::new(x + 2, y + 7, 9, 1), color)?;
+            rect(pixels, stride, Rect::new(x + 12, y + 6, 2, 10), color)?;
+            rect(pixels, stride, Rect::new(x + 4, y + 14, 18, 2), color)?;
         }
         3 => {
-            outline(pixels, stride, Rect::new(x, y + 1, 11, 8), color)?;
-            rect(pixels, stride, Rect::new(x + 2, y + 4, 7, 1), color)?;
+            outline(pixels, stride, Rect::new(x, y + 2, 22, 16), color)?;
+            rect(pixels, stride, Rect::new(x + 4, y + 8, 14, 2), color)?;
         }
         4 => {
-            outline(pixels, stride, Rect::new(x + 2, y + 2, 7, 7), color)?;
+            outline(pixels, stride, Rect::new(x + 4, y + 4, 14, 14), color)?;
             for (dx, dy) in [(0, 4), (10, 4), (5, 0), (5, 10)] {
-                rect(pixels, stride, Rect::new(x + dx, y + dy, 2, 2), color)?;
+                rect(
+                    pixels,
+                    stride,
+                    Rect::new(x + dx * S, y + dy * S, 4, 4),
+                    color,
+                )?;
             }
         }
         5 => {
-            outline(pixels, stride, Rect::new(x, y, 10, 11), color)?;
-            rect(pixels, stride, Rect::new(x + 3, y + 3, 1, 1), color)?;
-            rect(pixels, stride, Rect::new(x + 3, y + 7, 1, 1), color)?;
-            rect(pixels, stride, Rect::new(x + 6, y + 3, 2, 1), color)?;
-            rect(pixels, stride, Rect::new(x + 6, y + 7, 2, 1), color)?;
+            outline(pixels, stride, Rect::new(x, y, 20, 22), color)?;
+            rect(pixels, stride, Rect::new(x + 6, y + 6, 2, 2), color)?;
+            rect(pixels, stride, Rect::new(x + 6, y + 14, 2, 2), color)?;
+            rect(pixels, stride, Rect::new(x + 12, y + 6, 4, 2), color)?;
+            rect(pixels, stride, Rect::new(x + 12, y + 14, 4, 2), color)?;
         }
         _ => {
-            outline(pixels, stride, Rect::new(x + 1, y + 1, 9, 9), color)?;
-            rect(pixels, stride, Rect::new(x + 5, y + 3, 1, 5), color)?;
-            rect(pixels, stride, Rect::new(x + 3, y + 5, 5, 1), color)?;
+            outline(pixels, stride, Rect::new(x + 2, y + 2, 18, 18), color)?;
+            rect(pixels, stride, Rect::new(x + 10, y + 6, 2, 10), color)?;
+            rect(pixels, stride, Rect::new(x + 6, y + 10, 10, 2), color)?;
         }
     }
     Ok(())
 }
 
 fn draw_pointer(pixels: &mut [u32], stride: usize, x: i16, y: i16) -> Result<(), Error> {
-    for (dx, dy) in [
-        (0, 0),
-        (0, 1),
-        (0, 2),
-        (0, 3),
-        (0, 4),
-        (0, 5),
-        (0, 6),
-        (0, 7),
-        (0, 8),
-        (1, 1),
-        (1, 2),
-        (1, 3),
-        (1, 4),
-        (1, 5),
-        (1, 6),
-        (1, 7),
-        (2, 2),
-        (2, 3),
-        (2, 4),
-        (2, 5),
-        (2, 6),
-        (3, 3),
-        (3, 4),
-        (3, 5),
-        (4, 4),
-        (4, 5),
-        (5, 5),
-    ] {
-        paint_rect(
-            pixels,
-            stride,
-            Rect::new(x + dx * 2, y + dy * 2, 2, 2),
-            COLOR_DARK_TEXT,
-        )
-        .map_err(|_| Error::Failed)?;
+    // A compact arrow with a dark outline, light face, and accent hotspot.
+    let rows: [u16; 18] = [
+        0b1,
+        0b11,
+        0b111,
+        0b1111,
+        0b1_1111,
+        0b11_1111,
+        0b111_1111,
+        0b1111_1111,
+        0b1_1111_1111,
+        0b11_1111_1111,
+        0b111_1111_1111,
+        0b1_1111_1111_1111,
+        0b111_1111,
+        0b110_0111,
+        0b1100_0011,
+        0b1100_0001,
+        0b1100_0000,
+        0b1000_0000,
+    ];
+    for (row, bits) in rows.into_iter().enumerate() {
+        let width = 16 - bits.leading_zeros() as i16;
+        for column in 0..width {
+            if bits & (1 << column) == 0 {
+                continue;
+            }
+            let edge = column == 0
+                || row == 0
+                || column == width - 1
+                || row + 1 == rows.len()
+                || rows[row + 1] & (1 << column) == 0;
+            paint_rect(
+                pixels,
+                stride,
+                Rect::new(x + column, y + row as i16, 1, 1),
+                if edge { COLOR_DARK_TEXT } else { COLOR_TEXT },
+            )
+            .map_err(|_| Error::Failed)?;
+        }
     }
-    for (dx, dy) in [(1, 2), (1, 3), (1, 4), (2, 3), (2, 4), (3, 4)] {
-        paint_rect(
-            pixels,
-            stride,
-            Rect::new(x + dx * 2, y + dy * 2, 2, 2),
-            COLOR_TEXT,
-        )
+    paint_rect(pixels, stride, Rect::new(x + 2, y + 3, 2, 2), COLOR_ACCENT)
         .map_err(|_| Error::Failed)?;
-    }
     Ok(())
+}
+
+fn draw_power_icon(
+    pixels: &mut [u32],
+    stride: usize,
+    x: i16,
+    y: i16,
+    color: u32,
+) -> Result<(), Error> {
+    rect(pixels, stride, Rect::new(x + 11, y, 3, 13), color)?;
+    rect(pixels, stride, Rect::new(x + 5, y + 6, 5, 2), color)?;
+    rect(pixels, stride, Rect::new(x + 15, y + 6, 5, 2), color)?;
+    rect(pixels, stride, Rect::new(x + 2, y + 9, 3, 12), color)?;
+    rect(pixels, stride, Rect::new(x + 20, y + 9, 3, 12), color)?;
+    rect(pixels, stride, Rect::new(x + 5, y + 21, 4, 3), color)?;
+    rect(pixels, stride, Rect::new(x + 16, y + 21, 4, 3), color)?;
+    rect(pixels, stride, Rect::new(x + 9, y + 24, 7, 2), color)
+}
+
+fn render_power_menu(pixels: &mut [u32], stride: usize, theme: &Theme) -> Result<(), Error> {
+    let panel = Rect::new(616, 56, 168, 96);
+    rect(pixels, stride, panel, theme.raised)?;
+    outline(pixels, stride, panel, theme.border)?;
+    text(pixels, stride, 636, 72, b"Reboot", theme.text)?;
+    rect(pixels, stride, Rect::new(624, 101, 152, 1), theme.border)?;
+    text(pixels, stride, 636, 116, b"Shut down", theme.danger)
+}
+
+fn render_power_confirmation(
+    pixels: &mut [u32],
+    stride: usize,
+    action: PowerAction,
+    theme: &Theme,
+) -> Result<(), Error> {
+    rect(pixels, stride, Rect::new(0, 0, 800, 600), 0x0006_0c16)?;
+    let panel = Rect::new(248, 218, 336, 180);
+    rect(pixels, stride, panel, theme.raised)?;
+    outline(pixels, stride, panel, theme.border)?;
+    text(
+        pixels,
+        stride,
+        280,
+        250,
+        if action == PowerAction::Reboot {
+            b"Reboot Ginux?"
+        } else {
+            b"Shut down Ginux?"
+        },
+        theme.text,
+    )?;
+    text(
+        pixels,
+        stride,
+        280,
+        286,
+        b"Running domains will stop.",
+        theme.muted,
+    )?;
+    rect(pixels, stride, Rect::new(280, 344, 112, 38), theme.surface)?;
+    outline(pixels, stride, Rect::new(280, 344, 112, 38), theme.border)?;
+    text(pixels, stride, 298, 356, b"Cancel", theme.text)?;
+    rect(pixels, stride, Rect::new(408, 344, 112, 38), theme.danger)?;
+    text(pixels, stride, 424, 356, b"Confirm", theme.text)
 }
 
 pub fn cli_execute<B: ManagementBackend>(
@@ -1161,6 +1479,7 @@ mod tests {
             Operation::StorageStatus,
             Operation::FocusStatus,
             Operation::LeaseStatus,
+            Operation::Reboot,
             Operation::Shutdown,
         ] {
             assert_ne!(operation.abi().0, 0);
@@ -1175,22 +1494,79 @@ mod tests {
         let mut pixels = [0_u32; SHELL_WIDTH * SHELL_HEIGHT];
         let hash = app.render_shell(&mut pixels, SHELL_WIDTH).unwrap();
         assert_ne!(hash, 0);
-        assert_eq!(pixels[29 * SHELL_WIDTH + 11], COLOR_BORDER);
-        assert_eq!(pixels[30 * SHELL_WIDTH + 12], COLOR_SURFACE_RAISED);
-        assert_eq!(pixels[48 * SHELL_WIDTH + 13], COLOR_ACCENT);
-        assert_eq!(pixels[71 * SHELL_WIDTH + 89], COLOR_BORDER);
-        assert_eq!(pixels[72 * SHELL_WIDTH + 90], COLOR_SURFACE_RAISED);
+        assert_eq!(pixels[0], COLOR_PANEL);
+        assert_eq!(pixels[55 * SHELL_WIDTH], COLOR_BORDER);
+        assert_eq!(pixels[106 * SHELL_WIDTH + 12], COLOR_ACCENT);
+        assert_eq!(pixels[260 * SHELL_WIDTH + 216], COLOR_BORDER);
+        assert_eq!(pixels[261 * SHELL_WIDTH + 217], COLOR_SURFACE_RAISED);
         assert_eq!(hash, app.render_shell(&mut pixels, SHELL_WIDTH).unwrap());
     }
 
     #[test]
     fn pointer_click_selects_navigation_once() {
         let mut state = ShellState::new();
-        assert!(state.pointer_motion(45, 197));
+        assert!(state.pointer_motion(80, 460));
         assert!(state.pointer_buttons(1, 1));
         assert_eq!(state.page, Page::Settings);
         assert!(!state.pointer_buttons(1, 0));
         assert!(!state.pointer_buttons(0, 0));
+        assert_eq!(state.page, Page::Settings);
+    }
+
+    #[test]
+    fn power_menu_requires_confirmation_and_routes_reboot() {
+        let mut state = ShellState::new();
+        assert!(state.pointer_motion(760, 24));
+        assert!(state.pointer_buttons(1, 1));
+        assert!(state.power_menu);
+        assert!(!state.pointer_buttons(1, 0));
+        assert!(state.pointer_motion(700, 80));
+        assert!(state.pointer_buttons(1, 1));
+        assert_eq!(state.power_confirmation, Some(PowerAction::Reboot));
+        assert!(!state.pointer_buttons(1, 0));
+        assert!(state.pointer_motion(460, 360));
+        assert!(state.pointer_buttons(1, 1));
+        assert_eq!(state.take_power_action(), Some(PowerAction::Reboot));
+        assert_eq!(state.take_power_action(), None);
+    }
+
+    #[test]
+    fn theme_override_changes_rendered_frame() {
+        let mut backend = ModelBackend::new();
+        let app = Application::new(&mut backend);
+        let state = ShellState::new();
+        let view = SystemView::model();
+        let mut pixels = [0_u32; SHELL_WIDTH * SHELL_HEIGHT];
+        let default = app
+            .render_shell_view_with_theme(&mut pixels, SHELL_WIDTH, &state, &view, &DEFAULT_THEME)
+            .unwrap();
+        let mut alternate = DEFAULT_THEME;
+        alternate.accent = 0x00ff_8800;
+        let changed = app
+            .render_shell_view_with_theme(&mut pixels, SHELL_WIDTH, &state, &view, &alternate)
+            .unwrap();
+        assert_ne!(default, changed);
+        assert_eq!(pixels[106 * SHELL_WIDTH + 12], alternate.accent);
+    }
+
+    #[test]
+    fn layout_override_moves_rendering_and_hit_testing_together() {
+        let mut backend = ModelBackend::new();
+        let app = Application::new(&mut backend);
+        let mut state = ShellState::new();
+        state.layout.sidebar_width = 200;
+        state.layout.content_left = 232;
+        state.layout.content_width = 544;
+        state.layout.nav_left = 16;
+        state.layout.nav_width = 172;
+        state.layout.nav_first_top = 112;
+        let view = SystemView::model();
+        let mut pixels = [0_u32; SHELL_WIDTH * SHELL_HEIGHT];
+        app.render_shell_view(&mut pixels, SHELL_WIDTH, &state, &view)
+            .unwrap();
+        assert_eq!(pixels[112 * SHELL_WIDTH + 16], DEFAULT_THEME.accent);
+        assert!(state.pointer_motion(80, 112 + 6 * 56 + 10));
+        assert!(state.pointer_buttons(1, 1));
         assert_eq!(state.page, Page::Settings);
     }
 
@@ -1202,7 +1578,7 @@ mod tests {
         let mut pixels = [0_u32; SHELL_WIDTH * SHELL_HEIGHT];
         let empty = SystemView::empty();
         let empty_hash = app
-            .render_shell_view(&mut pixels, SHELL_WIDTH, b"", &state, &empty)
+            .render_shell_view(&mut pixels, SHELL_WIDTH, &state, &empty)
             .unwrap();
         let mut live = empty;
         live.healthy = true;
@@ -1219,7 +1595,7 @@ mod tests {
             memory_mib: 512,
         };
         let live_hash = app
-            .render_shell_view(&mut pixels, SHELL_WIDTH, b"", &state, &live)
+            .render_shell_view(&mut pixels, SHELL_WIDTH, &state, &live)
             .unwrap();
         assert_ne!(empty_hash, live_hash);
     }

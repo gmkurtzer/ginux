@@ -323,7 +323,7 @@ objects. The GUI requires no private kernel calls. It must expose:
 - active focus, seats, resources, and leases;
 - asynchronous operation progress and failures;
 - graphical-service and domain-display health; and
-- clean shutdown plus an embedded controller terminal.
+- clean reboot and shutdown through a confirmation-safe power menu.
 
 A slow domain operation runs asynchronously and cannot block input, composition,
 or the CLI.
@@ -336,14 +336,19 @@ system management, and overall health. The left navigation provides Overview,
 Domains, Network, Storage, Devices, Events, and Settings destinations. Settings
 is the stable home for system-wide configuration, beginning with date, time,
 and timezone controls and expanding as additional host configuration is added.
-The Overview page summarizes domain, CPU, and memory state; shows a compact
-domain table; and keeps the controller command surface visible.
+The Overview page summarizes domain, CPU, and memory state and shows a compact
+live domain table. The serial controller remains an independent recovery and
+automation interface rather than being duplicated as a graphical prompt.
 
-The native renderer is allocation-free and composes a 400 by 300 logical
-surface that is presented as an 800 by 600 controller desktop on the current
-QEMU framebuffer. It uses a fixed pixel font, simple rectangles, borders, and
-a software pointer. Color is never the only status signal: labels, values, and
-state text remain present. The accepted visual reference is
+The native renderer composes directly at the configured 800 by 600 display
+resolution. The controller shell fills that surface without a nested virtual
+window, fake window controls, graphical prompt, unused margins, or doubled
+logical pixels. It uses a softened mixed-case bitmap face, refined native
+icons, and a high-contrast outlined software pointer. Palette and major layout
+dimensions are centralized in explicit `Theme` and `Layout` contracts so the
+shell can be restyled without changing management behavior or hit testing.
+Color is never the only status signal: labels, values, and state text remain
+present. The accepted visual reference is
 `docs/images/controller-desktop-concept-v2.png`; actual QEMU framebuffer
 evidence is retained under
 `build/qualification/controller-desktop/` after visible qualification.
@@ -383,8 +388,9 @@ presentation, secure attention, generation retirement, and fault recovery.
 
 `make test-controller-desktop-visible` boots the ordinary runtime, captures the
 actual emulated display through QEMU, injects PS/2 keyboard and relative-pointer
-input, and verifies that each input changes a complete controller desktop
-frame. It retains baseline, keyboard, and pointer evidence in
+input, and verifies navigation, live domain data, and the power menu in complete
+controller desktop frames. It retains baseline, keyboard, pointer, live-state,
+and power-menu evidence in
 `build/qualification/controller-desktop/`. On macOS, `make run-gui` opens
 the same runtime in a Cocoa window; click that window to focus its physical
 keyboard and pointer while the serial controller remains in the invoking
@@ -405,8 +411,8 @@ Measurements recorded on 2026-11-01 on an Apple Silicon macOS host with QEMU
 | Metric | Measured | Budget | Result |
 |---|---:|---:|---|
 | Two-presentation model startup | 1 us | 50,000 us | pass |
-| Input-to-frame p95 with background domain | 426 us | 16,667 us | pass |
-| Steady software frame p95 | 282 us | 16,667 us | pass |
+| Input-to-frame p95 with background domain | 321 us | 16,667 us | pass |
+| Steady software frame p95 | 244 us | 16,667 us | pass |
 | Fault/recovery cycle p95 | <1 us | 1,000 us | pass |
 | Modeled bounded working set | 1,950,000 bytes | 8,388,608 bytes | pass |
 

@@ -10,7 +10,7 @@ architecture and serial recovery path.
 
 - Produce and iteratively review an 800 by 600 UI/UX concept image before code.
 - Define the visual hierarchy, palette, typography, spacing, window chrome,
-  system status presentation, command surface, and pointer treatment.
+  system status presentation, management surface, and pointer treatment.
 - Translate the accepted concept into the allocation-free native renderer.
 - Decouple graphical input from blocking serial reads and coalesce pointer
   motion so movement remains responsive under QEMU.
@@ -22,6 +22,12 @@ architecture and serial recovery path.
   refined software-rendered iconography.
 - Preserve keyboard, pointer, serial recovery, windowing, and controller behavior.
 - Verify the implemented design using actual QEMU framebuffer screenshots.
+- Replace the rejected centered low-resolution window with a native 800 by 600
+  controller shell that consumes the complete configured display.
+- Remove the nonfunctional graphical command prompt and fake
+  minimize/maximize/close controls; keep the serial CLI as the recovery path.
+- Add a configurable theme/layout contract, a refined pointer, and a trusted
+  power control with explicit reboot and shutdown choices.
 
 ## Non-goals
 
@@ -37,14 +43,14 @@ architecture and serial recovery path.
 - [x] Added a Settings destination for general system configuration, beginning
   with date, time, and timezone controls.
 - [x] Implemented the accepted hierarchy, palette, cards, domain table,
-  command surface, navigation, Events destination, status treatment, and
+  management surface, navigation, Events destination, status treatment, and
   software pointer in the allocation-free native renderer.
 - [x] Updated deterministic fixtures, service image limits, sparse native
   service layout validation, and controller desktop documentation.
 - [x] Passed real-QEMU visible input, complete desktop, performance, and full
   repository regression qualification.
-- [x] Replaced coarse 160 by 100 composition with a 400 by 300 logical layout
-  presented at 800 by 600, matching the accepted mockup hierarchy and spacing.
+- [x] Replaced coarse 160 by 100 composition with an interim 400 by 300 logical
+  layout; later human review superseded this with the native 800 by 600 result.
 - [x] Removed full-frame clearing from incremental input repaints so interactive
   frames remain complete rather than visibly redrawing from top to bottom.
 
@@ -60,6 +66,13 @@ architecture and serial recovery path.
   remove fresh per-frame demonstration backends.
 - [x] Prove CLI and GUI actions observe the same underlying state.
 - [ ] Obtain human visual acceptance of the implemented framebuffer.
+- [x] Render at native 800 by 600 resolution without doubled logical pixels,
+  unused desktop margins, or nested window chrome.
+- [x] Replace the block pointer with a styled, high-contrast cursor.
+- [x] Remove the graphical command prompt and expose reboot/shutdown through a
+  discoverable power menu with confirmation-safe interaction.
+- [x] Centralize palette, density, and layout choices in a configurable UI
+  theme rather than scattering visual constants through the renderer.
 
 ## Acceptance criteria
 
@@ -77,6 +90,14 @@ architecture and serial recovery path.
 - Keyboard and pointer interaction remain visible and functional while the
   serial controller remains an independent recovery path.
 - Existing controller desktop performance and regression budgets pass.
+- The configured 800 by 600 QEMU mode is filled by a native-resolution shell;
+  no 400 by 300 composition is scaled to fit it.
+- The controller has no fake window-management controls or nonfunctional
+  graphical prompt, and the serial CLI continues to operate independently.
+- A corner power control opens clearly labeled Reboot and Shut down actions;
+  tests prove routing and host lifecycle behavior.
+- Visual colors, spacing, and major dimensions come from one explicit theme and
+  layout configuration with deterministic alternate-theme coverage.
 
 ## Verification plan
 
@@ -84,6 +105,8 @@ architecture and serial recovery path.
 - Deterministic renderer tests -> stable expected pixels.
 - Deterministic controller tests -> hit testing, button transitions, navigation,
   disabled controls, and CLI/GUI state equivalence pass.
+- Deterministic renderer tests -> native dimensions, full-frame coverage,
+  styled cursor, theme overrides, and power-menu states pass.
 - `make test-controller-desktop-visible` -> real framebuffer, independent
   pointer motion, button clicks, keyboard input, and live-state changes pass.
 - `make test-controller-desktop-all` -> integrated desktop regressions pass.
@@ -109,16 +132,17 @@ architecture and serial recovery path.
   and modeled working set 1,950,000 bytes; all budgets passed.
 - `make check` -> architecture, ABI, format, lint, unit, and compatibility
   checks passed.
-- `make test-controller-desktop-visible` -> real 1280 by 800 QEMU framebuffer
-  contains the centered complete 800 by 600 controller design; retained input
+- `make test-controller-desktop-visible` -> the configured QEMU framebuffer
+  contains the complete native 800 by 600 controller shell; retained input
   frames no longer contain partially cleared regions.
 - `make test-controller-desktop-all` -> complete desktop suite and 2-CPU/4-CPU
   recovery stress passed after the high-resolution renderer change.
 - `make test-controller-desktop-performance` -> startup 1 us,
   input-to-frame p95 426 us, steady-frame p95 282 us, recovery-cycle p95 0 us,
   and modeled working set 1,950,000 bytes; all budgets passed.
-- `cargo test -p ginux-windowing -p ginux-controller-ui` -> 10 tests passed,
-  including exact pixels, click navigation, and live-state frame changes.
+- `cargo test -p ginux-windowing -p ginux-controller-ui` -> 13 tests passed,
+  including exact pixels, click navigation, configurable theme/layout, power
+  confirmation, and live-state frame changes.
 - `make test-controller-desktop-visible` -> real QEMU interaction passed on
   2026-11-01: independent pointer motion, Settings and Overview clicks, native
   keyboard input, and a CLI-created domain changing the live GUI were retained
@@ -131,6 +155,15 @@ architecture and serial recovery path.
   and modeled working set 1,950,000 bytes; all budgets passed.
 - `make check` -> architecture, unsafe baseline, ABI, format, clippy, unit, and
   compatibility checks passed after final cleanup.
+- `make test-controller-desktop-visible` -> native 800 by 600 full-shell QEMU
+  frames passed with mixed-case softened text, live domain inventory, styled
+  cursor, navigation clicks, and a retained power-menu screenshot.
+- `make test-controller-desktop-all` -> complete desktop contract, recovery,
+  2-CPU/4-CPU stress, boot, and visible framebuffer qualification passed after
+  the native-resolution revision.
+- `make test-controller-desktop-performance` -> presentation startup 0 us,
+  input-to-frame p95 321 us, steady-frame p95 244 us, recovery-cycle p95 0 us,
+  and modeled working set 1,950,000 bytes; all budgets passed.
 
 ## Decisions and limitations
 
@@ -162,8 +195,13 @@ architecture and serial recovery path.
   without allowing it to stall native input and rendering.
 - A larger dynamically mapped render surface was considered, but the current
   bounded native-controller mapping contract does not expose a suitable
-  allocator. The accepted implementation instead uses a denser 5 by 7 font and
-  refined 400 by 300 logical composition scaled to the 800 by 600 display.
+  allocator. The earlier 400 by 300 compromise is now rejected by human review;
+  this revision must provide native 800 by 600 composition with bounded,
+  explicitly accounted controller memory.
+- Human framebuffer review on 2026-11-01 removed the internal window metaphor:
+  the trusted controller is the shell, so fake minimize/maximize controls and
+  the graphical command prompt have no useful role. The serial CLI remains the
+  independent recovery interface.
 
 ## Delivery strategy
 

@@ -118,6 +118,14 @@ type HandleProtocol =
     unsafe extern "efiapi" fn(EfiHandle, *const EfiGuid, *mut *mut c_void) -> EfiStatus;
 type LocateProtocol =
     unsafe extern "efiapi" fn(*const EfiGuid, *mut c_void, *mut *mut c_void) -> EfiStatus;
+type QueryGraphicsMode = unsafe extern "efiapi" fn(
+    *mut EfiGraphicsOutputProtocol,
+    u32,
+    *mut usize,
+    *mut *mut EfiGraphicsOutputModeInformation,
+) -> EfiStatus;
+type SetGraphicsMode = unsafe extern "efiapi" fn(*mut EfiGraphicsOutputProtocol, u32) -> EfiStatus;
+type FreePool = unsafe extern "efiapi" fn(*mut c_void) -> EfiStatus;
 
 #[repr(C)]
 struct EfiGraphicsOutputModeInformation {
@@ -400,6 +408,26 @@ unsafe fn locate_framebuffer(boot_services: *mut EfiBootServices) -> Framebuffer
         panic!("UEFI did not provide graphics output");
     }
     let graphics = protocol.cast::<EfiGraphicsOutputProtocol>();
+    let initial_mode = (*graphics).mode;
+    if !initial_mode.is_null() {
+        let query: QueryGraphicsMode = core::mem::transmute((*graphics).query_mode);
+        let set: SetGraphicsMode = core::mem::transmute((*graphics).set_mode);
+        let free_pool: FreePool = core::mem::transmute((*boot_services).free_pool);
+        for candidate in 0..(*initial_mode).max_mode {
+            let mut size = 0_usize;
+            let mut info = core::ptr::null_mut();
+            if query(graphics, candidate, &mut size, &mut info) == EFI_SUCCESS && !info.is_null() {
+                let selected = (*info).horizontal_resolution == 800
+                    && (*info).vertical_resolution == 600
+                    && (*info).pixel_format <= 1;
+                let _ = free_pool(info.cast());
+                if selected {
+                    let _ = set(graphics, candidate);
+                    break;
+                }
+            }
+        }
+    }
     let mode = (*graphics).mode;
     if mode.is_null() || (*mode).info.is_null() {
         panic!("UEFI graphics output mode is unavailable");

@@ -9,8 +9,8 @@ use ginux_native_abi::{
 const MAX_WIDTH: u32 = 4096;
 const MAX_HEIGHT: u32 = 2160;
 const BYTES_PER_PIXEL: usize = 4;
-const MAX_BLIT_WIDTH: usize = 512;
-const MAX_BLIT_HEIGHT: u32 = 512;
+const MAX_BLIT_WIDTH: usize = 800;
+const MAX_BLIT_HEIGHT: u32 = 600;
 const MAX_BLIT_SCALE: u32 = 16;
 
 #[derive(Clone, Copy)]
@@ -62,6 +62,8 @@ impl ControllerDevices {
         }
         self.framebuffer = Some(framebuffer);
         self.reset_input();
+        self.pointer_x = (framebuffer.width / 2).min(i16::MAX as u32) as i16;
+        self.pointer_y = (framebuffer.height / 2).min(i16::MAX as u32) as i16;
         true
     }
 
@@ -184,8 +186,14 @@ impl ControllerDevices {
         self.mouse_length = 0;
         let dx = i16::from(self.mouse_packet[1] as i8);
         let dy = -i16::from(self.mouse_packet[2] as i8);
-        self.pointer_x = (self.pointer_x + dx).clamp(0, 399);
-        self.pointer_y = (self.pointer_y + dy).clamp(0, 299);
+        let max_x = self.framebuffer.map_or(399, |framebuffer| {
+            framebuffer.width.saturating_sub(1) as i16
+        });
+        let max_y = self.framebuffer.map_or(299, |framebuffer| {
+            framebuffer.height.saturating_sub(1) as i16
+        });
+        self.pointer_x = (self.pointer_x + dx).clamp(0, max_x);
+        self.pointer_y = (self.pointer_y + dy).clamp(0, max_y);
         if dx != 0 || dy != 0 {
             let _ = self.inject(
                 ginux_native_abi::NATIVE_INPUT_KIND_POINTER_MOTION,

@@ -859,8 +859,73 @@ pub fn paint_text_5x7_scaled(
     Ok(())
 }
 
+/// Paint the compact 5x7 face with softened exposed corners. This keeps the
+/// renderer allocation-free while avoiding the blocky appearance of a raw
+/// nearest-neighbour scale at normal controller UI sizes.
+pub fn paint_text_5x7_smooth(
+    pixels: &mut [u32],
+    stride: usize,
+    x: i16,
+    y: i16,
+    text: &[u8],
+    color: u32,
+) -> Result<(), Error> {
+    if stride == 0 || !pixels.len().is_multiple_of(stride) {
+        return Err(Error::Bounds);
+    }
+    let width = i32::try_from(stride).map_err(|_| Error::Bounds)?;
+    let height = i32::try_from(pixels.len() / stride).map_err(|_| Error::Bounds)?;
+    for (index, byte) in text.iter().copied().enumerate() {
+        let glyph = glyph_5x7(byte);
+        let origin_x = i32::from(x) + index as i32 * 12;
+        let origin_y = i32::from(y);
+        for row in 0..7_usize {
+            for column in 0..5_usize {
+                if glyph[row] & (1 << (4 - column)) == 0 {
+                    continue;
+                }
+                let left = column != 0 && glyph[row] & (1 << (5 - column)) != 0;
+                let right = column != 4 && glyph[row] & (1 << (3 - column)) != 0;
+                let above = row != 0 && glyph[row - 1] & (1 << (4 - column)) != 0;
+                let below = row != 6 && glyph[row + 1] & (1 << (4 - column)) != 0;
+                for dy in 0..2_i32 {
+                    for dx in 0..2_i32 {
+                        let px = origin_x + column as i32 * 2 + dx;
+                        let py = origin_y + row as i32 * 2 + dy;
+                        if px < 0 || py < 0 || px >= width || py >= height {
+                            continue;
+                        }
+                        let soften = match (dx, dy) {
+                            (0, 0) => !left && !above,
+                            (1, 0) => !right && !above,
+                            (0, 1) => !left && !below,
+                            _ => !right && !below,
+                        };
+                        let slot = py as usize * stride + px as usize;
+                        pixels[slot] = if soften {
+                            blend_rgb(pixels[slot], color, 3, 4)
+                        } else {
+                            color
+                        };
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn blend_rgb(background: u32, foreground: u32, numerator: u32, denominator: u32) -> u32 {
+    let blend = |shift| {
+        let background = (background >> shift) & 0xff_u32;
+        let foreground = (foreground >> shift) & 0xff_u32;
+        (background * (denominator - numerator) + foreground * numerator) / denominator
+    };
+    (blend(16) << 16) | (blend(8) << 8) | blend(0)
+}
+
 fn glyph_5x7(byte: u8) -> [u8; 7] {
-    match byte.to_ascii_uppercase() {
+    match byte {
         b'A' => [0x0e, 0x11, 0x11, 0x1f, 0x11, 0x11, 0x11],
         b'B' => [0x1e, 0x11, 0x11, 0x1e, 0x11, 0x11, 0x1e],
         b'C' => [0x0e, 0x11, 0x10, 0x10, 0x10, 0x11, 0x0e],
@@ -887,6 +952,32 @@ fn glyph_5x7(byte: u8) -> [u8; 7] {
         b'X' => [0x11, 0x11, 0x0a, 0x04, 0x0a, 0x11, 0x11],
         b'Y' => [0x11, 0x11, 0x0a, 0x04, 0x04, 0x04, 0x04],
         b'Z' => [0x1f, 0x01, 0x02, 0x04, 0x08, 0x10, 0x1f],
+        b'a' => [0, 0, 0x0e, 0x01, 0x0f, 0x11, 0x0f],
+        b'b' => [0x10, 0x10, 0x16, 0x19, 0x11, 0x11, 0x1e],
+        b'c' => [0, 0, 0x0e, 0x11, 0x10, 0x11, 0x0e],
+        b'd' => [0x01, 0x01, 0x0d, 0x13, 0x11, 0x11, 0x0f],
+        b'e' => [0, 0, 0x0e, 0x11, 0x1f, 0x10, 0x0e],
+        b'f' => [0x06, 0x09, 0x08, 0x1e, 0x08, 0x08, 0x08],
+        b'g' => [0, 0, 0x0f, 0x11, 0x0f, 0x01, 0x0e],
+        b'h' => [0x10, 0x10, 0x16, 0x19, 0x11, 0x11, 0x11],
+        b'i' => [0x04, 0, 0x0c, 0x04, 0x04, 0x04, 0x0e],
+        b'j' => [0x02, 0, 0x06, 0x02, 0x02, 0x12, 0x0c],
+        b'k' => [0x10, 0x10, 0x12, 0x14, 0x18, 0x14, 0x12],
+        b'l' => [0x0c, 0x04, 0x04, 0x04, 0x04, 0x04, 0x0e],
+        b'm' => [0, 0, 0x1a, 0x15, 0x15, 0x15, 0x15],
+        b'n' => [0, 0, 0x16, 0x19, 0x11, 0x11, 0x11],
+        b'o' => [0, 0, 0x0e, 0x11, 0x11, 0x11, 0x0e],
+        b'p' => [0, 0, 0x1e, 0x11, 0x1e, 0x10, 0x10],
+        b'q' => [0, 0, 0x0d, 0x13, 0x0f, 0x01, 0x01],
+        b'r' => [0, 0, 0x16, 0x19, 0x10, 0x10, 0x10],
+        b's' => [0, 0, 0x0f, 0x10, 0x0e, 0x01, 0x1e],
+        b't' => [0x08, 0x08, 0x1e, 0x08, 0x08, 0x09, 0x06],
+        b'u' => [0, 0, 0x11, 0x11, 0x11, 0x13, 0x0d],
+        b'v' => [0, 0, 0x11, 0x11, 0x11, 0x0a, 0x04],
+        b'w' => [0, 0, 0x11, 0x11, 0x15, 0x15, 0x0a],
+        b'x' => [0, 0, 0x11, 0x0a, 0x04, 0x0a, 0x11],
+        b'y' => [0, 0, 0x11, 0x11, 0x0f, 0x01, 0x0e],
+        b'z' => [0, 0, 0x1f, 0x02, 0x04, 0x08, 0x1f],
         b'0' => [0x0e, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0e],
         b'1' => [0x04, 0x0c, 0x04, 0x04, 0x04, 0x04, 0x0e],
         b'2' => [0x0e, 0x11, 0x01, 0x02, 0x04, 0x08, 0x1f],

@@ -18,16 +18,16 @@ use ginux_native_abi::{
     NATIVE_DOMAIN_CONFIG_IMAGE, NATIVE_DOMAIN_CONFIG_INIT, NATIVE_DOMAIN_CONFIG_MEMORY,
     NATIVE_DOMAIN_CONFIG_PERSONALITY, NATIVE_DOMAIN_CONTROL_OPERATION, NATIVE_DOMAIN_CREATE,
     NATIVE_DOMAIN_CURSOR_END, NATIVE_DOMAIN_EXEC, NATIVE_DOMAIN_EXEC_INTERACTIVE,
-    NATIVE_DOMAIN_EXEC_MAX_ARGUMENTS, NATIVE_DOMAIN_HOST_SHUTDOWN, NATIVE_DOMAIN_INJECT_FAILURE,
-    NATIVE_DOMAIN_LIMIT, NATIVE_DOMAIN_MAX_NAME_SIZE, NATIVE_DOMAIN_POLL_BACKGROUND,
-    NATIVE_DOMAIN_QUERY, NATIVE_DOMAIN_RESTART, NATIVE_DOMAIN_RUNTIME_CONSOLE_ATTACHED,
-    NATIVE_DOMAIN_RUNTIME_ROOTFS_READY, NATIVE_DOMAIN_RUNTIME_SUSPENDED,
-    NATIVE_DOMAIN_SET_AUTOSTART, NATIVE_DOMAIN_SET_CPU, NATIVE_DOMAIN_SET_IMAGE,
-    NATIVE_DOMAIN_SET_INIT, NATIVE_DOMAIN_SET_MEMORY_MIB, NATIVE_DOMAIN_SET_PERSONALITY,
-    NATIVE_DOMAIN_START_ATTACHED, NATIVE_DOMAIN_STATE_BOOTING, NATIVE_DOMAIN_STATE_CONFIGURED,
-    NATIVE_DOMAIN_STATE_CREATED, NATIVE_DOMAIN_STATE_FAILED, NATIVE_DOMAIN_STATE_RUNNING,
-    NATIVE_DOMAIN_STATE_STARTING, NATIVE_DOMAIN_STATE_STOPPED, NATIVE_DOMAIN_STOP,
-    NATIVE_HOST_INSPECT_OPERATION, NATIVE_HOST_INSPECT_RECORD_SIZE,
+    NATIVE_DOMAIN_EXEC_MAX_ARGUMENTS, NATIVE_DOMAIN_HOST_REBOOT, NATIVE_DOMAIN_HOST_SHUTDOWN,
+    NATIVE_DOMAIN_INJECT_FAILURE, NATIVE_DOMAIN_LIMIT, NATIVE_DOMAIN_MAX_NAME_SIZE,
+    NATIVE_DOMAIN_POLL_BACKGROUND, NATIVE_DOMAIN_QUERY, NATIVE_DOMAIN_RESTART,
+    NATIVE_DOMAIN_RUNTIME_CONSOLE_ATTACHED, NATIVE_DOMAIN_RUNTIME_ROOTFS_READY,
+    NATIVE_DOMAIN_RUNTIME_SUSPENDED, NATIVE_DOMAIN_SET_AUTOSTART, NATIVE_DOMAIN_SET_CPU,
+    NATIVE_DOMAIN_SET_IMAGE, NATIVE_DOMAIN_SET_INIT, NATIVE_DOMAIN_SET_MEMORY_MIB,
+    NATIVE_DOMAIN_SET_PERSONALITY, NATIVE_DOMAIN_START_ATTACHED, NATIVE_DOMAIN_STATE_BOOTING,
+    NATIVE_DOMAIN_STATE_CONFIGURED, NATIVE_DOMAIN_STATE_CREATED, NATIVE_DOMAIN_STATE_FAILED,
+    NATIVE_DOMAIN_STATE_RUNNING, NATIVE_DOMAIN_STATE_STARTING, NATIVE_DOMAIN_STATE_STOPPED,
+    NATIVE_DOMAIN_STOP, NATIVE_HOST_INSPECT_OPERATION, NATIVE_HOST_INSPECT_RECORD_SIZE,
     NATIVE_HOST_INSPECT_REQUEST_SIZE, NATIVE_HOST_INSPECT_STATE_READY,
     NATIVE_HOST_INSPECT_STATE_STOPPING, NATIVE_HOST_INSPECT_VERSION,
     NATIVE_HOST_PROCESS_KIND_CONTROLLER, NATIVE_HOST_PROCESS_KIND_DOMAIN_INIT,
@@ -533,7 +533,6 @@ extern "C" fn ginux_controller_main() -> ! {
     write(console, b"Type 'help' for commands.\r\n");
     render_controller_desktop(
         GINUX_DISPLAY_FD,
-        b"",
         &desktop.shell,
         &desktop.view,
         &mut desktop.display_initialized,
@@ -582,7 +581,6 @@ extern "C" fn ginux_controller_main() -> ! {
         desktop.view = collect_system_view(host);
         render_controller_desktop(
             GINUX_DISPLAY_FD,
-            b"",
             &desktop.shell,
             &desktop.view,
             &mut desktop.display_initialized,
@@ -700,19 +698,27 @@ fn read_line(
         let (pointer_changed, content_changed, key_count) =
             drain_controller_input(input, &mut desktop.shell, &mut shift, &mut keys);
         let mut redraw = pointer_changed || content_changed;
+        if let Some(action) = desktop.shell.take_power_action() {
+            let operation = match action {
+                ginux_controller_ui::PowerAction::Reboot => NATIVE_DOMAIN_HOST_REBOOT,
+                ginux_controller_ui::PowerAction::Shutdown => NATIVE_DOMAIN_HOST_SHUTDOWN,
+            };
+            if call(NATIVE_DOMAIN_CONTROL_OPERATION, host, operation, 0) == NATIVE_CALL_FAILED {
+                exit(NATIVE_SERVICE_EXIT_REJECTED);
+            }
+            exit(NATIVE_SERVICE_EXIT_COMPLETED);
+        }
         for byte in keys[..key_count].iter().copied() {
             if handle_line_byte(console, byte, line, &mut length) {
                 write(console, b"\r\n");
                 return length;
             }
-            redraw = true;
         }
         if let Some(byte) = try_read_console_byte() {
             if handle_line_byte(console, byte, line, &mut length) {
                 write(console, b"\r\n");
                 return length;
             }
-            redraw = true;
         }
         let now = monotonic_millis();
         if now >= refresh_at {
@@ -724,10 +730,8 @@ fn read_line(
             refresh_at = now.saturating_add(250);
         }
         if redraw {
-            let visible = length.min(18);
             render_controller_desktop(
                 display,
-                &line[length - visible..length],
                 &desktop.shell,
                 &desktop.view,
                 &mut desktop.display_initialized,
@@ -875,7 +879,6 @@ fn monotonic_millis() -> u64 {
 
 fn render_controller_desktop(
     display: u64,
-    terminal: &[u8],
     shell: &ginux_controller_ui::ShellState,
     view: &ginux_controller_ui::SystemView,
     display_initialized: &mut bool,
@@ -887,7 +890,7 @@ fn render_controller_desktop(
     let mut backend = ginux_controller_ui::ModelBackend::new();
     let app = ginux_controller_ui::Application::new(&mut backend);
     if app
-        .render_shell_view(&mut pixels, WIDTH, terminal, shell, view)
+        .render_shell_view(&mut pixels, WIDTH, shell, view)
         .is_err()
     {
         exit(NATIVE_SERVICE_EXIT_REJECTED);

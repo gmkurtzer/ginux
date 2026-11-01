@@ -62,6 +62,7 @@ static HOST_CONTROL: HostControlOwner = HostControlOwner {
     persisted_oci_catalog: UnsafeCell::new([0; ginux_oci_cache::ENCODED_SIZE]),
 };
 const EFI_RESET_SHUTDOWN: u32 = 2;
+const EFI_RESET_COLD: u32 = 0;
 const EFI_SUCCESS: usize = 0;
 pub(crate) const EFI_LOADER_CODE: u32 = 1;
 const EFI_LOADER_DATA: u32 = 2;
@@ -4340,7 +4341,12 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: controller requested clean shutdown");
     serial_write("\r\nGINUX_KERNEL_OK\r\n");
 
-    (boot_info.reset_system)(EFI_RESET_SHUTDOWN, EFI_SUCCESS, 0, core::ptr::null());
+    let reset = if arch::x86_64::cpu::take_container_host_reboot_request() {
+        EFI_RESET_COLD
+    } else {
+        EFI_RESET_SHUTDOWN
+    };
+    (boot_info.reset_system)(reset, EFI_SUCCESS, 0, core::ptr::null());
     kernel_fail("ginux: firmware shutdown returned unexpectedly\r\n");
 }
 

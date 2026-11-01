@@ -9,19 +9,18 @@
 - Branch: `codex/controller-desktop`
 - Intended base: `main` at `759cf2e2`
 - Active gate: Gate 31, controller desktop visual design
-- Status: all objective Gate 31 criteria pass; final human framebuffer and
-  interaction acceptance remains required
+- Status: objective implementation and qualification complete; awaiting the
+  final human visual and interaction checkpoint for Gate 31
 - Last evidence: `make check`, `make test-controller-desktop-all`,
-  `make test-controller-desktop-performance`, and final real-QEMU
-  `make test-controller-desktop-visible` passed on 2026-11-01. Retained frames
-  prove click navigation, independent pointer motion, native keyboard input,
-  and a CLI-created domain appearing in the live GUI.
-- Open decisions or limitations: visual quality and usability require the
-  confirmed final human checkpoint; the renderer remains a bounded software
-  composition without runtime font loading or GPU acceleration by design
-- Exact next action: human runs `make run-gui`, exercises pointer, clicks,
-  keyboard, and live domain state, then accepts Gate 31 or reports specific
-  remaining visual or interaction defects
+  `make test-controller-desktop-performance`, and real-QEMU
+  `make test-controller-desktop-visible` passed on 2026-11-01. Retained native
+  800 by 600 frames prove click navigation, independent pointer motion, native
+  keyboard input, live domain inventory, and the Reboot/Shut down menu.
+- Open decisions or limitations: final visual quality and usability still
+  require the confirmed human checkpoint; software rendering and the serial
+  recovery CLI remain architectural constraints
+- Exact next action: present the retained framebuffer evidence and `make
+  run-gui` workflow for final human visual and interaction acceptance
 
 ## Governing outcome
 

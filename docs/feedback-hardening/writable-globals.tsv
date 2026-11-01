@@ -36,6 +36,7 @@ interior-mutable	kernel/src/arch/x86_64/cpu.rs	X86_RUNTIME_BACKING_CONTAINER_EXE
 interior-mutable	kernel/src/arch/x86_64/cpu.rs	X86_RUNTIME_BACKING_CONTAINER_EXEC_REQUESTED	domain-runtime	allowlist	none	explicit-x86-runtime-owner-backing
 interior-mutable	kernel/src/arch/x86_64/cpu.rs	X86_RUNTIME_BACKING_CONTAINER_EXTENDED_STATE_VALID	domain-runtime	allowlist	none	explicit-x86-runtime-owner-backing
 interior-mutable	kernel/src/arch/x86_64/cpu.rs	X86_RUNTIME_BACKING_CONTAINER_HOST_SHUTDOWN_REQUESTED	domain-runtime	allowlist	none	explicit-x86-runtime-owner-backing
+interior-mutable	kernel/src/arch/x86_64/cpu.rs	X86_RUNTIME_BACKING_CONTAINER_HOST_REBOOT_REQUESTED	domain-runtime	allowlist	none	explicit-x86-runtime-owner-backing
 interior-mutable	kernel/src/arch/x86_64/cpu.rs	X86_RUNTIME_BACKING_CONTAINER_IMAGES	domain-runtime	allowlist	none	explicit-x86-runtime-owner-backing
 interior-mutable	kernel/src/arch/x86_64/cpu.rs	X86_RUNTIME_BACKING_CONTAINER_IMAGE_SIZES	domain-runtime	allowlist	none	explicit-x86-runtime-owner-backing
 interior-mutable	kernel/src/arch/x86_64/cpu.rs	X86_RUNTIME_BACKING_CONTAINER_INITS	domain-runtime	allowlist	none	explicit-x86-runtime-owner-backing
