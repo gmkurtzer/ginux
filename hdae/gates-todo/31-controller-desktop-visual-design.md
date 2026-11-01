@@ -28,13 +28,13 @@ architecture and serial recovery path.
   minimize/maximize/close controls; keep the serial CLI as the recovery path.
 - Add a configurable theme/layout contract, a refined pointer, and a trusted
   power control with explicit reboot and shutdown choices.
-- Select and fill a true 1920 by 1080 GOP mode when firmware exposes it, with a
+- Select and fill a true 1024 by 768 GOP mode when firmware exposes it, with a
   deterministic fallback only when that mode is unavailable.
 - Replace transient full-frame composition and per-pixel native blitting with
   a persistent, damage-aware presentation path sized on demand for the selected
   mode.
 - Replace the softened 5 by 7 bitmap treatment with a legible, antialiased
-  typeface suitable for a 1080p systems-management interface.
+  typeface suitable for a native-resolution systems-management interface.
 
 ## Non-goals
 
@@ -80,7 +80,7 @@ architecture and serial recovery path.
   discoverable power menu with confirmation-safe interaction.
 - [x] Centralize palette, density, and layout choices in a configurable UI
   theme rather than scattering visual constants through the renderer.
-- [x] Render and visibly qualify the shell at 1920 by 1080.
+- [x] Render and visibly qualify the shell at 1024 by 768.
 - [x] Remove full-frame recomposition and per-pixel copy work from pointer and
   ordinary control interaction.
 - [x] Replace the bitmap-cell typography with antialiased glyph rendering.
@@ -111,7 +111,7 @@ architecture and serial recovery path.
   tests prove routing and host lifecycle behavior.
 - Visual colors, spacing, and major dimensions come from one explicit theme and
   layout configuration with deterministic alternate-theme coverage.
-- QEMU exposes a 1920 by 1080 controller framebuffer and every major shell
+- QEMU exposes a 1024 by 768 controller framebuffer and every major shell
   region is rendered at that native resolution; the test fails rather than
   silently accepting 800 by 600.
 - Typography uses antialiased glyph coverage rather than scaled binary bitmap
@@ -135,9 +135,9 @@ architecture and serial recovery path.
 - `make test-controller-desktop-all` -> integrated desktop regressions pass.
 - `make test-controller-desktop-performance` -> published budgets pass.
 - `make check` -> architecture, ABI, format, lint, and unit checks pass.
-- Deterministic renderer tests -> 1920 by 1080 layout, antialiased glyph alpha,
+- Deterministic renderer tests -> 1024 by 768 layout, antialiased glyph alpha,
   bounded damage rectangles, and unchanged pixels outside damage pass.
-- `make test-controller-desktop-visible` -> reports an exact 1920 by 1080 GOP
+- `make test-controller-desktop-visible` -> reports an exact 1024 by 768 GOP
   frame and retains a readable framebuffer image.
 - `make test-controller-desktop-latency` -> real-QEMU pointer/click p95 is at
   most 50 ms, no sample exceeds 100 ms, and page presentation is at most 250 ms.
@@ -208,6 +208,16 @@ architecture and serial recovery path.
   controller, domain display, Wayland, presentation, recovery, verification
   boot, 2-vCPU/4-vCPU stress, exact 1080p framebuffer, and latency suite passed
   on 2026-11-01.
+- `make test-controller-desktop-latency` -> exact 1024 by 768 real-QEMU frames,
+  navigation, live-state, and power-menu checks passed after the requested size
+  correction; visible interaction p95 was 20.899 ms, maximum was 21.182 ms,
+  and complete Settings-page presentation was 18.125 ms.
+- `make test-controller-desktop-performance` -> the 1024 by 768 release model
+  passed at 1,040 us input-to-frame p95, 736 us steady-frame p95, and a bounded
+  3,175,728-byte working set.
+- `make test-controller-desktop-all` and `make check` -> complete desktop,
+  2-vCPU/4-vCPU stress, architecture, ABI, formatting, lint, and unit
+  regressions passed after the 1024 by 768 revision.
 
 ## Decisions and limitations
 
@@ -258,6 +268,13 @@ architecture and serial recovery path.
 - The antialiased ASCII atlas is generated from Inter under the SIL Open Font
   License 1.1 and packed at four bits of alpha per sample to keep the embedded
   controller image within its measured size bound.
+- Human clarification corrected the final target from 1920 by 1080 to the
+  standard 1024 by 768 GOP mode. The UI now renders one logical pixel per
+  physical pixel, retains direct framebuffer mapping and bounded pointer
+  damage, and fits within the laptop display without host-side downscaling.
+- Real-QEMU latency timestamps now stop when QEMU is asked to sample the
+  framebuffer. Subsequent PPM encoding and filesystem output are observer
+  overhead and are deliberately excluded from presentation latency.
 
 ## Delivery strategy
 
@@ -266,14 +283,16 @@ architecture and serial recovery path.
 - Pull request: continue the integrated controller-desktop pull request
 - Planned commits: accepted visual reference; native implementation and tests;
   responsive input and interaction; live management state; native-resolution
-  visual refinement; 1080p damage-aware presentation and typography; evidence
+  visual refinement; native damage-aware presentation and typography; evidence
   and gate closure
 - Actual commits: `eb71161a` (accepted visual reference); `af7cb035`
   (initial native implementation); `71c097fd` (Settings navigation);
   `d6682bc4` (high-resolution renderer); `d9f77bf3` (responsive input,
   clickable navigation, live state, typography, and interaction evidence);
   `9d8ac33b` (native 1080p GOP mapping, damage-aware presentation,
-  antialiased Inter typography, and real-QEMU latency qualification)
+  antialiased Inter typography, and real-QEMU latency qualification);
+  `e8f7636c` (native 1024 by 768 fit, 1:1 layout, and corrected presentation
+  latency measurement)
 
 ## Review policy and outcome
 
