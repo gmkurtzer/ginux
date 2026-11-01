@@ -26,9 +26,8 @@
   ring-3 controller shell with software rendering and an independent serial
   recovery CLI; final visual quality and real-QEMU interaction still require
   the confirmed human checkpoint
-- Exact next action: commit the full-density revision, then present its retained
-  real-QEMU frames and `make run-gui` workflow for human visual and interaction
-  acceptance
+- Exact next action: present commit `b5976576`, its retained real-QEMU frames,
+  and the `make run-gui` workflow for human visual and interaction acceptance
 
 ## Governing outcome
 

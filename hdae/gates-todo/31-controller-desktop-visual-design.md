@@ -324,7 +324,9 @@ architecture and serial recovery path.
   antialiased Inter typography, and real-QEMU latency qualification);
   `e8f7636c` (native 1024 by 768 fit, 1:1 layout, and corrected presentation
   latency measurement); `61f909f9` (compact 16-pixel typography, rebalanced
-  summary cards, refreshed qualification evidence, and updated documentation)
+  summary cards, refreshed qualification evidence, and updated documentation);
+  `b5976576` (13-pixel body and 16-pixel heading hierarchy, compact shell
+  density, proportional table columns, updated interactions, and fresh evidence)
 
 ## Review policy and outcome
 
