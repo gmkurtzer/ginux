@@ -1,0 +1,22 @@
+name: issue-14-linux-repro
+
+on:
+  push:
+    branches: [hdae/issue-14-native-volume-linux]
+
+permissions:
+  contents: read
+
+jobs:
+  qemu-linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - run: sudo apt-get update
+      - run: sudo apt-get install --yes ovmf qemu-system-x86
+      - run: rustup target add x86_64-unknown-uefi x86_64-unknown-none
+      - run: qemu-system-x86_64 --version
+      - run: make test
+        env:
+          GINUX_BOOT_TIMEOUT_SECONDS: 300
+          QEMU_ACCEL: tcg
