@@ -205,6 +205,24 @@ mod tests {
     }
 
     #[test]
+    fn rejects_nonzero_payload_padding_with_valid_digest() {
+        let payload = b"padding";
+        let (_, committed) = encode(1, payload).expect("valid short record");
+        assert_eq!(decode(&committed).expect("short record").payload(), payload);
+        for offset in HEADER_SIZE + payload.len()..SECTOR_SIZE {
+            let mut sector = committed;
+            sector[offset] = 1;
+            let digest = digest_sector(&sector);
+            sector[DIGEST_OFFSET..DIGEST_OFFSET + DIGEST_SIZE].copy_from_slice(&digest);
+            assert_eq!(decode(&sector), None, "offset {offset}");
+        }
+
+        let full_payload = [0x5a; PAYLOAD_CAPACITY];
+        let (_, full) = encode(1, &full_payload).expect("valid full record");
+        assert_eq!(decode(&full).expect("full record").payload(), full_payload);
+    }
+
+    #[test]
     fn host_volume_header_round_trips_exact_geometry() {
         let header = HostVolumeHeader::new(131_072).expect("valid sparse volume");
         let encoded = header.encode();
