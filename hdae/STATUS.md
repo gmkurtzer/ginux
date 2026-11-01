@@ -23,9 +23,9 @@
   ring-3 controller shell with software rendering and an independent serial
   recovery CLI; final visual quality and real-QEMU interaction still require
   the confirmed human checkpoint
-- Exact next action: run `make check`, commit the compact typography checkpoint,
-  and present the retained real-QEMU framebuffer plus `make run-gui` workflow
-  for human visual and interaction acceptance
+- Exact next action: present commit `61f909f9`, the retained real-QEMU
+  framebuffer, and the `make run-gui` workflow for human visual and interaction
+  acceptance
 
 ## Governing outcome
 

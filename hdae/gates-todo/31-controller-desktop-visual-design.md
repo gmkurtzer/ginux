@@ -307,7 +307,8 @@ architecture and serial recovery path.
   `9d8ac33b` (native 1080p GOP mapping, damage-aware presentation,
   antialiased Inter typography, and real-QEMU latency qualification);
   `e8f7636c` (native 1024 by 768 fit, 1:1 layout, and corrected presentation
-  latency measurement)
+  latency measurement); `61f909f9` (compact 16-pixel typography, rebalanced
+  summary cards, refreshed qualification evidence, and updated documentation)
 
 ## Review policy and outcome
 
