@@ -232,12 +232,16 @@ make test-rocky-systemd    # cold and cached Rocky systemd boot
 make test-storage          # volume initialization, recovery, and reset
 make test-controller-desktop-all         # integrated desktop and SMP recovery
 make test-controller-desktop-performance # measured responsiveness budgets
+make test-controller-desktop-visible     # QEMU pixels plus keyboard/pointer input
+make run-desktop                         # open the controller desktop on macOS
 make check                 # architecture, ABI, format, lint, and unit checks
 ```
 
 The desktop architecture, operator model, tested Wayland subset, recovery
 behavior, measured budgets, and unsupported features are documented in the
 [native controller desktop specification](docs/CONTROLLER-DESKTOP.md).
+The visible test retains baseline, keyboard, and pointer framebuffer evidence
+under `build/qualification/controller-desktop/`.
 
 The evaluated checkpoint does **not** have a fully passing aggregate `make
 test`: a post-`execve()` system-supervisor lifecycle probe remains a recorded

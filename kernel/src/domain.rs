@@ -1320,8 +1320,8 @@ pub(crate) fn initialize_boot_auxiliary_service_with_three_grants(
     .then_some(encode_id(id))
 }
 
-pub(crate) fn initialize_boot_auxiliary_service_with_four_grants(
-    grants: [(usize, u64, Rights); 4],
+pub(crate) fn initialize_boot_auxiliary_service_with_six_grants(
+    grants: [(usize, u64, Rights); 6],
 ) -> Option<u64> {
     let manager = global_manager_mut()?;
     let control = manager.domain(manager.control_plane_id?)?;
@@ -1330,7 +1330,7 @@ pub(crate) fn initialize_boot_auxiliary_service_with_four_grants(
         source: placeholder,
         object: 1,
         rights: Rights::READ,
-    }; 4];
+    }; 6];
     for (index, (root_index, object, rights)) in grants.into_iter().enumerate() {
         delegated[index] = DelegationGrant {
             source: control.boot_roots.get(root_index).copied().flatten()?,
@@ -1343,7 +1343,7 @@ pub(crate) fn initialize_boot_auxiliary_service_with_four_grants(
     (domain.role == Role::AuxiliaryService
         && domain.state == State::Ready
         && domain.thread_limit == 0
-        && domain.boot_root_count == 4
+        && domain.boot_root_count == 6
         && domain.capabilities.boot_authority_is_sealed())
     .then_some(encode_id(id))
 }

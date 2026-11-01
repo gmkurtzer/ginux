@@ -7,9 +7,9 @@ use ginux_native_abi::{
     native_control_abi_is_compatible, NativeControlDescriptorV4, NativeDisplayRequestV0,
     NativeGraphicsBootV0, NativeGraphicsBootV1, NativeInputEventV0, NATIVE_CALL_FAILED,
     NATIVE_CONSOLE_WRITE_OPERATION, NATIVE_CONTROL_DESCRIPTOR_OPERATION,
-    NATIVE_CONTROL_DESCRIPTOR_SIZE, NATIVE_CONTROL_DISCOVERY_OPERATION, NATIVE_DISPLAY_OPERATION,
-    NATIVE_DISPLAY_QUERY, NATIVE_DISPLAY_RESET, NATIVE_DISPLAY_WRITE_PIXEL,
-    NATIVE_GRAPHICS_BOOT_V1_VERSION, NATIVE_GRAPHICS_COMMAND_COMPLETE,
+    NATIVE_CONTROL_DESCRIPTOR_SIZE, NATIVE_CONTROL_DISCOVERY_OPERATION, NATIVE_DISPLAY_BLIT,
+    NATIVE_DISPLAY_OPERATION, NATIVE_DISPLAY_QUERY, NATIVE_DISPLAY_RESET,
+    NATIVE_DISPLAY_WRITE_PIXEL, NATIVE_GRAPHICS_BOOT_V1_VERSION, NATIVE_GRAPHICS_COMMAND_COMPLETE,
     NATIVE_GRAPHICS_COMMAND_FAULT, NATIVE_GRAPHICS_COMMAND_VALIDATE_DEVICES, NATIVE_INPUT_KIND_KEY,
     NATIVE_INPUT_KIND_POINTER_BUTTON, NATIVE_INPUT_KIND_POINTER_MOTION, NATIVE_INPUT_OPERATION,
     NATIVE_INPUT_READ, NATIVE_INPUT_RESET, NATIVE_SERVICE_EXIT_COMPLETED,
@@ -94,6 +94,7 @@ extern "C" fn ginux_graphics_service_main(info: *const NativeGraphicsBootV0) -> 
                 || !ginux_wayland_domain::contract_probe()
                 || !ginux_domain_presentation::contract_probe()
                 || !ginux_desktop_recovery::contract_probe()
+                || !render_controller_desktop(info)
                 || call(
                     NATIVE_CONSOLE_WRITE_OPERATION,
                     info.v0.console_capability,
@@ -170,6 +171,60 @@ extern "C" fn ginux_graphics_service_main(info: *const NativeGraphicsBootV0) -> 
         }
         _ => fail(),
     }
+}
+
+fn render_controller_desktop(info: &NativeGraphicsBootV1) -> bool {
+    const WIDTH: usize = 96;
+    const HEIGHT: usize = 64;
+    let mut pixels = [0_u32; WIDTH * HEIGHT];
+    let mut backend = ginux_controller_ui::ModelBackend::new();
+    let app = ginux_controller_ui::Application::new(&mut backend);
+    if app.render_shell(&mut pixels, WIDTH).is_err() {
+        return false;
+    }
+    let mut display = NativeDisplayRequestV0 {
+        size: NativeDisplayRequestV0::SIZE,
+        version: 0,
+        command: NATIVE_DISPLAY_QUERY,
+        x: 0,
+        y: 0,
+        color: 0,
+        width: 0,
+        height: 0,
+        stride: 0,
+        format: 0,
+        reserved: 0,
+    };
+    if call(
+        NATIVE_DISPLAY_OPERATION,
+        info.display_capability,
+        (&mut display as *mut NativeDisplayRequestV0) as u64,
+        0,
+    ) != u64::from(NativeDisplayRequestV0::SIZE)
+    {
+        return false;
+    }
+    let scale = (display.width / WIDTH as u32)
+        .min(display.height / HEIGHT as u32)
+        .max(1);
+    let rendered_width = WIDTH as u32 * scale;
+    let rendered_height = HEIGHT as u32 * scale;
+    let left = display.width.saturating_sub(rendered_width) / 2;
+    let top = display.height.saturating_sub(rendered_height) / 2;
+    display.command = NATIVE_DISPLAY_BLIT;
+    display.x = left;
+    display.y = top;
+    display.width = WIDTH as u32;
+    display.height = HEIGHT as u32;
+    display.stride = WIDTH as u32;
+    display.format = 0;
+    display.reserved = scale;
+    call(
+        NATIVE_DISPLAY_OPERATION,
+        info.display_capability,
+        (&mut display as *mut NativeDisplayRequestV0) as u64,
+        pixels.as_ptr() as u64,
+    ) == u64::from(NativeDisplayRequestV0::SIZE)
 }
 
 fn validate_devices(info: &NativeGraphicsBootV1) -> bool {

@@ -351,6 +351,8 @@ Run the complete desktop qualification from the repository root:
 ```sh
 make test-controller-desktop-all
 make test-controller-desktop-performance
+make test-controller-desktop-visible
+make run-desktop
 ```
 
 The first command builds a verification image, runs every native desktop
@@ -358,6 +360,15 @@ contract, boots that image in QEMU, and repeats the recovery boot with two and
 four virtual CPUs. It covers controller startup, native windows and management,
 two-domain isolation, the bounded Wayland subset, managed and full-screen
 presentation, secure attention, generation retirement, and fault recovery.
+
+`make test-controller-desktop-visible` boots the ordinary runtime, captures the
+actual emulated display through QEMU, injects PS/2 keyboard and relative-pointer
+input, and verifies that each input changes a complete controller desktop
+frame. It retains baseline, keyboard, and pointer evidence in
+`build/qualification/controller-desktop/`. On macOS, `make run-desktop` opens
+the same runtime in a Cocoa window; click that window to focus its physical
+keyboard and pointer while the serial controller remains in the invoking
+terminal. Set `GINUX_QEMU_DISPLAY` to another QEMU display backend when needed.
 
 The performance command runs the release-mode host model at 800 by 600 pixels
 for 500 samples. The input-to-frame path keeps a second domain active, consumes

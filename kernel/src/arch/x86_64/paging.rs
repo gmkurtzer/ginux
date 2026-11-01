@@ -318,6 +318,8 @@ pub(crate) fn validated_user_root_frames(root: u64) -> Option<ValidatedUserRootF
         16
     } else if graphics_layout {
         crate::address_space::GRAPHICS_SERVICE_STACK_PAGES
+    } else if controller_layout {
+        crate::address_space::NATIVE_CONTROLLER_STACK_PAGES
     } else {
         2
     };

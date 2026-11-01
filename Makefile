@@ -18,7 +18,7 @@ SYSTEM_PROFILE := profiles/minimal-system-v0/profile.tsv
 
 .DEFAULT_GOAL := help
 
-.PHONY: help doctor manifest system-image test-alpine test-rocky-shell test-rocky-dnf test-multi-domain test-linux-abi test-linux-runtime test-storage test-oci-cache test-smp test-rocky-smp-futex test-rocky-smp-shared-page test-rocky-smp-thread-context probe-rocky-systemd test-rocky-systemd test-rocky-detached test-domain-responsiveness test-controller-graphics-runtime test-controller-display-input test-native-display-protocol test-controller-seat-leases test-native-windowing test-native-windowing-screenshots test-graphical-controller test-controller-console test-domain-display-bridge test-linux-wayland-domain test-domain-desktop-experience test-controller-desktop-recovery test-controller-desktop-stress test-controller-desktop-all test-controller-desktop-performance benchmark-rocky-systemd benchmark-prepare-linux benchmark-prepare-ginux benchmark-linux-comparison benchmark-ginux-boot benchmark-boot-comparison benchmark-ginux-sysbench benchmark-compare benchmark-topology-matrix benchmark-topology-compare profile-rocky-systemd rocky-image rocky-image-check linux-probe controller-runtime network-service protocol-service graphics-service volume-service abi-conformance architecture-check linux-compat-check build build-verification build-linux-profile run reset-storage test test-c1 test-c2 fmt gate clean
+.PHONY: help doctor manifest system-image test-alpine test-rocky-shell test-rocky-dnf test-multi-domain test-linux-abi test-linux-runtime test-storage test-oci-cache test-smp test-rocky-smp-futex test-rocky-smp-shared-page test-rocky-smp-thread-context probe-rocky-systemd test-rocky-systemd test-rocky-detached test-domain-responsiveness test-controller-graphics-runtime test-controller-display-input test-native-display-protocol test-controller-seat-leases test-native-windowing test-native-windowing-screenshots test-graphical-controller test-controller-console test-domain-display-bridge test-linux-wayland-domain test-domain-desktop-experience test-controller-desktop-recovery test-controller-desktop-stress test-controller-desktop-visible test-controller-desktop-all test-controller-desktop-performance run-desktop benchmark-rocky-systemd benchmark-prepare-linux benchmark-prepare-ginux benchmark-linux-comparison benchmark-ginux-boot benchmark-boot-comparison benchmark-ginux-sysbench benchmark-compare benchmark-topology-matrix benchmark-topology-compare profile-rocky-systemd rocky-image rocky-image-check linux-probe controller-runtime network-service protocol-service graphics-service volume-service abi-conformance architecture-check linux-compat-check build build-verification build-linux-profile run reset-storage test test-c1 test-c2 fmt gate clean
 
 help:
 	@echo "Ginux development targets"
@@ -68,6 +68,8 @@ help:
 	@echo "  make test-rocky-smp-thread-context Verify 2/4-vCPU thread context integrity"
 	@echo "  make test-controller-desktop-all Qualify the complete native desktop path"
 	@echo "  make test-controller-desktop-performance Measure desktop responsiveness budgets"
+	@echo "  make test-controller-desktop-visible Verify pixels from a running QEMU framebuffer"
+	@echo "  make run-desktop             Open the native controller desktop in QEMU"
 	@echo "  make test-c1 Build and verify the interactive controller console"
 	@echo "  make test-c2 Verify configured domain lifecycle management"
 	@echo "  make check   Run formatting and lint checks"
@@ -286,6 +288,10 @@ test-controller-desktop-stress: build-verification
 	@cargo test --package ginux-desktop-recovery repeated_multi_component_lifecycle_has_constant_resource_bounds
 	@GINUX_DESKTOP_STRESS_RUNS=2 tests/qemu/controller-desktop-stress.sh
 
+test-controller-desktop-visible: build
+
+	@tests/qemu/controller-desktop-visible.sh
+
 test-controller-desktop-all: build-verification
 	@cargo test --package ginux-display-protocol
 	@cargo test --package ginux-windowing
@@ -296,10 +302,14 @@ test-controller-desktop-all: build-verification
 	@cargo test --package ginux-desktop-recovery
 	@tests/qemu/boot.sh
 	@GINUX_DESKTOP_STRESS_RUNS=1 tests/qemu/controller-desktop-stress.sh
+	@$(MAKE) test-controller-desktop-visible
 
 test-controller-desktop-performance:
 	@mkdir -p build/qualification
 	@cargo run --quiet --release --package ginux-desktop-qualification | tee build/qualification/controller-desktop-performance.txt
+
+run-desktop: build
+	@GINUX_QEMU_DISPLAY="$${GINUX_QEMU_DISPLAY:-cocoa}" tools/qemu/run.sh
 
 test-smp: build-verification
 	@tests/qemu/smp-matrix.sh

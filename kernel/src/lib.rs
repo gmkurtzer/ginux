@@ -501,6 +501,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     {
         kernel_fail("ginux: controller framebuffer/input contract invalid\r\n");
     }
+    let _ = controller_devices::initialize_hardware_input();
     serial_write("ginux: controller framebuffer mode and pixel bounds validated\r\n");
     serial_write("ginux: normalized keyboard and pointer queues validated\r\n");
     serial_write("ginux: controller input overflow and reset validated\r\n");
@@ -1856,6 +1857,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         if !arch::x86_64::cpu::publish_linux_abi_test_results() {
             kernel_fail("ginux: Linux ABI status publication failed\r\n");
         }
+        if !address_space::verify_native_graphics_devices(&graphics_image) {
+            kernel_fail("ginux: visible graphical controller startup failed\r\n");
+        }
+        serial_write("ginux: visible controller desktop rendered from ring 3\r\n");
     }
     if !linux_socket::configure(
         virtio_network,
@@ -3947,6 +3952,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     HOST_CONTROL
         .operator_console_ready
         .store(true, Ordering::Release);
+    if !controller_devices::initialize_hardware_input() {
+        kernel_fail("ginux: PS/2 keyboard and pointer initialization failed\r\n");
+    }
     serial_write_raw(b"ginux: platform, security, devices, and runtime ready\r\n");
     serial_write("ginux: persistent storage ");
     serial_write(match host_volume.disposition {
@@ -4556,14 +4564,19 @@ fn serial_write_raw(bytes: &[u8]) {
 }
 
 pub(crate) fn serial_read_byte_blocking() -> u8 {
-    while !serial_input_ready() {
+    loop {
+        if (unsafe { inb(COM1 + 5) } & 0x01) != 0 {
+            return unsafe { inb(COM1) };
+        }
+        if let Some(byte) = controller_devices::read_hardware_input() {
+            return byte;
+        }
         core::hint::spin_loop();
     }
-    unsafe { inb(COM1) }
 }
 
 pub(crate) fn serial_input_ready() -> bool {
-    (unsafe { inb(COM1 + 5) } & 0x01) != 0
+    (unsafe { inb(COM1 + 5) } & 0x01) != 0 || controller_devices::hardware_input_ready()
 }
 
 fn serial_write_usize(value: usize) {

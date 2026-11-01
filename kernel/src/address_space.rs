@@ -3060,7 +3060,11 @@ enum AuxiliaryAddressSpace {
         >,
     ),
     Controller(
-        NativeServiceAddressSpace<NATIVE_CONTROLLER_IMAGE_PAGES, NATIVE_CONTROLLER_FRAME_COUNT>,
+        NativeServiceAddressSpace<
+            NATIVE_CONTROLLER_IMAGE_PAGES,
+            NATIVE_CONTROLLER_FRAME_COUNT,
+            NATIVE_CONTROLLER_STACK_PAGES,
+        >,
     ),
 }
 
@@ -6729,7 +6733,7 @@ pub(crate) fn verify_control_plane_wx_layout() -> bool {
 const NATIVE_SERVICE_IMAGE_PAGES: usize = 7;
 pub(crate) const NATIVE_SERVICE_FRAME_COUNT: usize = 4 + NATIVE_SERVICE_IMAGE_PAGES + 3;
 pub(crate) const GRAPHICS_SERVICE_IMAGE_PAGES: usize = 10;
-pub(crate) const GRAPHICS_SERVICE_STACK_PAGES: usize = 8;
+pub(crate) const GRAPHICS_SERVICE_STACK_PAGES: usize = 16;
 const GRAPHICS_SERVICE_FRAME_COUNT: usize =
     4 + GRAPHICS_SERVICE_IMAGE_PAGES + GRAPHICS_SERVICE_STACK_PAGES + 1;
 const NATIVE_NETWORK_IMAGE_PAGES: usize = 160;
@@ -6737,7 +6741,9 @@ const NATIVE_NETWORK_STACK_PAGES: usize = 16;
 pub(crate) const NATIVE_NETWORK_FRAME_COUNT: usize =
     4 + NATIVE_NETWORK_IMAGE_PAGES + NATIVE_NETWORK_STACK_PAGES + 1;
 pub(crate) const NATIVE_CONTROLLER_IMAGE_PAGES: usize = 16;
-pub(crate) const NATIVE_CONTROLLER_FRAME_COUNT: usize = 4 + NATIVE_CONTROLLER_IMAGE_PAGES + 3;
+pub(crate) const NATIVE_CONTROLLER_STACK_PAGES: usize = 16;
+pub(crate) const NATIVE_CONTROLLER_FRAME_COUNT: usize =
+    4 + NATIVE_CONTROLLER_IMAGE_PAGES + NATIVE_CONTROLLER_STACK_PAGES + 1;
 const NATIVE_STACK_PAGE: usize = NATIVE_SERVICE_IMAGE_PAGES + 1;
 const NATIVE_BOOT_INFO_PAGE: usize = NATIVE_STACK_PAGE + 3;
 
@@ -7477,7 +7483,7 @@ pub(crate) fn run_interactive_controller(image: &crate::native_elf::NativeImage<
     }
     let rights = crate::capability::Rights::READ.union(crate::capability::Rights::WRITE);
     let host_rights = crate::capability::Rights::READ.union(crate::capability::Rights::MANAGE);
-    let Some(controller) = domain::initialize_boot_auxiliary_service_with_four_grants([
+    let Some(controller) = domain::initialize_boot_auxiliary_service_with_six_grants([
         (1, 2, rights),
         (0, 1, host_rights),
         (
@@ -7490,6 +7496,8 @@ pub(crate) fn run_interactive_controller(image: &crate::native_elf::NativeImage<
             crate::control_abi::NETWORK_DEVICE_OBJECT,
             crate::capability::Rights::READ.union(crate::capability::Rights::WRITE),
         ),
+        (10, ginux_native_abi::NATIVE_DISPLAY_OBJECT, rights),
+        (11, ginux_native_abi::NATIVE_INPUT_OBJECT, rights),
     ]) else {
         crate::serial_write("ginux: controller domain admission failed\r\n");
         return false;
@@ -7499,6 +7507,8 @@ pub(crate) fn run_interactive_controller(image: &crate::native_elf::NativeImage<
         Some(host),
         Some(root_handle),
         Some(network_handle),
+        Some(display_handle),
+        Some(input_handle),
         Some(identity),
         Some(owner),
     ) = (
@@ -7506,6 +7516,8 @@ pub(crate) fn run_interactive_controller(image: &crate::native_elf::NativeImage<
         domain::auxiliary_boot_handle(controller, 1),
         domain::auxiliary_boot_handle(controller, 2),
         domain::auxiliary_boot_handle(controller, 3),
+        domain::auxiliary_boot_handle(controller, 4),
+        domain::auxiliary_boot_handle(controller, 5),
         domain::domain_service_identity(controller),
         memory::FrameOwner::domain(controller),
     )
@@ -7516,6 +7528,7 @@ pub(crate) fn run_interactive_controller(image: &crate::native_elf::NativeImage<
     let Some(space) = NativeServiceAddressSpace::<
         NATIVE_CONTROLLER_IMAGE_PAGES,
         NATIVE_CONTROLLER_FRAME_COUNT,
+        NATIVE_CONTROLLER_STACK_PAGES,
     >::new(kernel_root, owner, image) else {
         crate::serial_write("ginux: controller address-space creation failed\r\n");
         crate::serial_write("ginux: controller image-pages/owner-frames: ");
@@ -7541,6 +7554,18 @@ pub(crate) fn run_interactive_controller(image: &crate::native_elf::NativeImage<
             crate::control_abi::NETWORK_DEVICE_OBJECT,
             rights,
         )
+        || !domain::handle_permits(
+            controller,
+            display_handle,
+            ginux_native_abi::NATIVE_DISPLAY_OBJECT,
+            rights,
+        )
+        || !domain::handle_permits(
+            controller,
+            input_handle,
+            ginux_native_abi::NATIVE_INPUT_OBJECT,
+            rights,
+        )
     {
         crate::serial_write("ginux: controller authority validation failed\r\n");
         let _ = space.release();
@@ -7552,7 +7577,8 @@ pub(crate) fn run_interactive_controller(image: &crate::native_elf::NativeImage<
         let _ = space.release();
         return false;
     };
-    let stack = USER_TEST_ADDRESS + (NATIVE_CONTROLLER_IMAGE_PAGES + 3) * PAGE_SIZE;
+    let stack = USER_TEST_ADDRESS
+        + (NATIVE_CONTROLLER_IMAGE_PAGES + 1 + NATIVE_CONTROLLER_STACK_PAGES) * PAGE_SIZE;
     if domain::publish_controller_process(controller).is_none() {
         crate::serial_write("ginux: controller process publication failed\r\n");
         return false;
@@ -7584,6 +7610,8 @@ pub(crate) fn run_interactive_controller(image: &crate::native_elf::NativeImage<
         host,
         root_handle,
         network_handle,
+        display_handle,
+        input_handle,
         controller,
         identity,
     );
@@ -11574,8 +11602,21 @@ fn register_address_space(domain_id: u64, space: AuxiliaryAddressSpace) -> bool 
             .iter()
             .flatten()
             .any(|registered| registered.domain == domain_id)
-    } || !domain::bind_auxiliary_address_space(domain_id, space.root())
-    {
+    } {
+        let _ = space.release();
+        return false;
+    }
+    if !domain::bind_auxiliary_address_space(domain_id, space.root()) {
+        crate::serial_write("ginux: auxiliary address-space bind rejected domain/root/frames: ");
+        crate::serial_write_u64(domain_id);
+        crate::serial_write(" ");
+        crate::serial_write_u64(space.root());
+        crate::serial_write(" ");
+        crate::serial_write_u64(
+            crate::arch::x86_64::paging::validated_user_root_frames(space.root())
+                .map_or(u64::MAX, |frames| frames.base_count() as u64),
+        );
+        crate::serial_write("\r\n");
         let _ = space.release();
         return false;
     }

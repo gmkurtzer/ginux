@@ -358,6 +358,17 @@ impl<'a, B: ManagementBackend> Application<'a, B> {
         self.count
     }
     pub fn render_shell(&self, pixels: &mut [u32], stride: usize) -> Result<u64, Error> {
+        self.render_shell_state(pixels, stride, b"controller terminal", 48, 32)
+    }
+
+    pub fn render_shell_state(
+        &self,
+        pixels: &mut [u32],
+        stride: usize,
+        terminal: &[u8],
+        pointer_x: u16,
+        pointer_y: u16,
+    ) -> Result<u64, Error> {
         let mut desktop = Desktop::new(96, 64);
         let window = desktop
             .create_window(Rect::new(2, 9, 92, 53), b"Ginux Controller", true)
@@ -374,7 +385,7 @@ impl<'a, B: ManagementBackend> Application<'a, B> {
             .add_widget(
                 window,
                 WidgetKind::Table,
-                Rect::new(2, 12, 60, 27),
+                Rect::new(2, 12, 60, 18),
                 b"NAME STATE CPU MEM",
             )
             .map_err(|_| Error::Failed)?;
@@ -390,11 +401,21 @@ impl<'a, B: ManagementBackend> Application<'a, B> {
             .add_widget(
                 window,
                 WidgetKind::TextField,
-                Rect::new(2, 42, 82, 7),
-                b"controller terminal",
+                Rect::new(2, 32, 82, 7),
+                terminal,
             )
             .map_err(|_| Error::Failed)?;
         desktop.render(pixels, stride).map_err(|_| Error::Failed)?;
+        let x = usize::from(pointer_x.min(95));
+        let y = usize::from(pointer_y.min(63));
+        for offset in 0..5_usize {
+            if x + offset < 96 {
+                pixels[y * stride + x + offset] = 0x00ff_ffff;
+            }
+            if y + offset < 64 {
+                pixels[(y + offset) * stride + x] = 0x00ff_ffff;
+            }
+        }
         Ok(ginux_windowing::pixel_hash(pixels))
     }
 }

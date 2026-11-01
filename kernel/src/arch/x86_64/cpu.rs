@@ -365,8 +365,10 @@ struct X86RuntimeOwner {
     LINUX_CLONE_REUSE_VALIDATED: RuntimeRef<BankedAtomicBool>,
     LINUX_CLONE_TID_FAULT_COUNT: RuntimeRef<BankedAtomicU32>,
     LINUX_CONTROLLER_CONSOLE: RuntimeRef<AtomicU64>,
+    LINUX_CONTROLLER_DISPLAY: RuntimeRef<AtomicU64>,
     LINUX_CONTROLLER_DOMAIN: RuntimeRef<AtomicU64>,
     LINUX_CONTROLLER_HOST: RuntimeRef<AtomicU64>,
+    LINUX_CONTROLLER_INPUT: RuntimeRef<AtomicU64>,
     LINUX_CONTROLLER_NETWORK: RuntimeRef<AtomicU64>,
     LINUX_CONTROLLER_ROOT: RuntimeRef<AtomicU64>,
     LINUX_CROSS_PROCESS_PRLIMIT_VALIDATED: RuntimeRef<BankedAtomicBool>,
@@ -853,8 +855,10 @@ static X86_RUNTIME: X86RuntimeOwner = X86RuntimeOwner {
     LINUX_CLONE_REUSE_VALIDATED: RuntimeRef(&X86_RUNTIME_BACKING_LINUX_CLONE_REUSE_VALIDATED),
     LINUX_CLONE_TID_FAULT_COUNT: RuntimeRef(&X86_RUNTIME_BACKING_LINUX_CLONE_TID_FAULT_COUNT),
     LINUX_CONTROLLER_CONSOLE: RuntimeRef(&X86_RUNTIME_BACKING_LINUX_CONTROLLER_CONSOLE),
+    LINUX_CONTROLLER_DISPLAY: RuntimeRef(&X86_RUNTIME_BACKING_LINUX_CONTROLLER_DISPLAY),
     LINUX_CONTROLLER_DOMAIN: RuntimeRef(&X86_RUNTIME_BACKING_LINUX_CONTROLLER_DOMAIN),
     LINUX_CONTROLLER_HOST: RuntimeRef(&X86_RUNTIME_BACKING_LINUX_CONTROLLER_HOST),
+    LINUX_CONTROLLER_INPUT: RuntimeRef(&X86_RUNTIME_BACKING_LINUX_CONTROLLER_INPUT),
     LINUX_CONTROLLER_NETWORK: RuntimeRef(&X86_RUNTIME_BACKING_LINUX_CONTROLLER_NETWORK),
     LINUX_CONTROLLER_ROOT: RuntimeRef(&X86_RUNTIME_BACKING_LINUX_CONTROLLER_ROOT),
     LINUX_CROSS_PROCESS_PRLIMIT_VALIDATED: RuntimeRef(
@@ -1155,7 +1159,9 @@ static X86_RUNTIME: X86RuntimeOwner = X86RuntimeOwner {
 
 static X86_RUNTIME_BACKING_LINUX_CONTROLLER_DOMAIN: AtomicU64 = AtomicU64::new(0);
 static X86_RUNTIME_BACKING_LINUX_CONTROLLER_CONSOLE: AtomicU64 = AtomicU64::new(0);
+static X86_RUNTIME_BACKING_LINUX_CONTROLLER_DISPLAY: AtomicU64 = AtomicU64::new(0);
 static X86_RUNTIME_BACKING_LINUX_CONTROLLER_HOST: AtomicU64 = AtomicU64::new(0);
+static X86_RUNTIME_BACKING_LINUX_CONTROLLER_INPUT: AtomicU64 = AtomicU64::new(0);
 static X86_RUNTIME_BACKING_LINUX_CONTROLLER_ROOT: AtomicU64 = AtomicU64::new(0);
 static X86_RUNTIME_BACKING_LINUX_CONTROLLER_NETWORK: AtomicU64 = AtomicU64::new(0);
 
@@ -3386,6 +3392,8 @@ pub(crate) fn execute_native_controller(
     host_handle: u64,
     root_handle: u64,
     network_handle: u64,
+    display_handle: u64,
+    input_handle: u64,
     domain_id: u64,
     service_identity: u64,
 ) {
@@ -3409,6 +3417,12 @@ pub(crate) fn execute_native_controller(
     X86_RUNTIME
         .LINUX_CONTROLLER_NETWORK
         .store(network_handle, Ordering::Release);
+    X86_RUNTIME
+        .LINUX_CONTROLLER_DISPLAY
+        .store(display_handle, Ordering::Release);
+    X86_RUNTIME
+        .LINUX_CONTROLLER_INPUT
+        .store(input_handle, Ordering::Release);
     if configure_linux_syscall().is_none() {
         X86_RUNTIME
             .LINUX_CONTROLLER_DOMAIN
@@ -10597,6 +10611,8 @@ fn linux_controller_syscall(
                 3 => X86_RUNTIME.LINUX_CONTROLLER_HOST.load(Ordering::Acquire),
                 4 => X86_RUNTIME.LINUX_CONTROLLER_ROOT.load(Ordering::Acquire),
                 5 => X86_RUNTIME.LINUX_CONTROLLER_NETWORK.load(Ordering::Acquire),
+                6 => X86_RUNTIME.LINUX_CONTROLLER_DISPLAY.load(Ordering::Acquire),
+                7 => X86_RUNTIME.LINUX_CONTROLLER_INPUT.load(Ordering::Acquire),
                 _ => return Some(LINUX_EBADF),
             };
             let mut request = [0_u8; ginux_native_abi::GINUX_CONTROL_IOCTL_SIZE as usize];
@@ -10638,13 +10654,13 @@ fn linux_controller_syscall(
         LINUX_PIPE_SYSCALL => Some(linux_socket_pipe(
             first,
             0,
-            6,
+            8,
             address_space::copy_to_current_user,
         )),
         LINUX_PIPE2_SYSCALL => Some(linux_socket_pipe(
             first,
             second,
-            6,
+            8,
             address_space::copy_to_current_user,
         )),
         LINUX_POLL_SYSCALL => Some(linux_controller_poll(first, second, third)),
@@ -10661,7 +10677,7 @@ fn linux_controller_syscall(
             address_space::copy_from_current_user,
             address_space::copy_to_current_user,
         )),
-        LINUX_DUP_SYSCALL => Some(linux_device_dup_at_least(first, 6, false)),
+        LINUX_DUP_SYSCALL => Some(linux_device_dup_at_least(first, 8, false)),
         LINUX_DUP2_SYSCALL => Some(linux_console_dup2(first, second)),
         LINUX_DUP3_SYSCALL => Some(linux_dup3(first, second, third)),
         LINUX_FCNTL_SYSCALL => Some(linux_descriptor_fcntl(first, second, third)),
@@ -10745,6 +10761,12 @@ fn linux_controller_syscall(
                 .store(0, Ordering::Release);
             X86_RUNTIME
                 .LINUX_CONTROLLER_NETWORK
+                .store(0, Ordering::Release);
+            X86_RUNTIME
+                .LINUX_CONTROLLER_DISPLAY
+                .store(0, Ordering::Release);
+            X86_RUNTIME
+                .LINUX_CONTROLLER_INPUT
                 .store(0, Ordering::Release);
             Some(if result == u64::MAX {
                 LINUX_RETURN_TO_KERNEL
@@ -39171,6 +39193,18 @@ fn controller_display_call(
         format: u32::from_le_bytes(bytes[32..36].try_into().unwrap()),
         reserved: u32::from_le_bytes(bytes[36..40].try_into().unwrap()),
     };
+    if command == ginux_native_abi::NATIVE_DISPLAY_BLIT {
+        return if crate::controller_devices::blit(
+            &request,
+            frame.second_argument(),
+            address_space::copy_from_current_user,
+        ) && domain::renew_auxiliary_call_epoch(caller_domain)
+        {
+            u64::from(request.size)
+        } else {
+            failed
+        };
+    }
     if request.reserved != 0 || !crate::controller_devices::display(&mut request) {
         return failed;
     }
@@ -39178,7 +39212,9 @@ fn controller_display_call(
     bytes[24..28].copy_from_slice(&request.height.to_le_bytes());
     bytes[28..32].copy_from_slice(&request.stride.to_le_bytes());
     bytes[32..36].copy_from_slice(&request.format.to_le_bytes());
-    if !address_space::copy_to_current_user(frame.first_argument(), &bytes) {
+    if !address_space::copy_to_current_user(frame.first_argument(), &bytes)
+        || !domain::renew_auxiliary_call_epoch(caller_domain)
+    {
         return failed;
     }
     u64::from(request.size)
@@ -39207,7 +39243,11 @@ fn controller_input_call(
                 return failed;
             }
             let Some(event) = crate::controller_devices::input() else {
-                return 0;
+                return if domain::renew_auxiliary_call_epoch(caller_domain) {
+                    0
+                } else {
+                    failed
+                };
             };
             let mut bytes = [0_u8; ginux_native_abi::NativeInputEventV0::SIZE as usize];
             bytes[0..4].copy_from_slice(&event.size.to_le_bytes());
@@ -39216,7 +39256,9 @@ fn controller_input_call(
             bytes[8..12].copy_from_slice(&event.code.to_le_bytes());
             bytes[12..16].copy_from_slice(&event.value.to_le_bytes());
             bytes[16..24].copy_from_slice(&event.sequence.to_le_bytes());
-            if address_space::copy_to_current_user(frame.first_argument(), &bytes) {
+            if address_space::copy_to_current_user(frame.first_argument(), &bytes)
+                && domain::renew_auxiliary_call_epoch(caller_domain)
+            {
                 u64::from(event.size)
             } else {
                 failed
@@ -39232,7 +39274,11 @@ fn controller_input_call(
                 return failed;
             }
             crate::controller_devices::reset_input();
-            0
+            if domain::renew_auxiliary_call_epoch(caller_domain) {
+                0
+            } else {
+                failed
+            }
         }
         _ => failed,
     }

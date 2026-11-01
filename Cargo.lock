@@ -415,6 +415,7 @@ name = "ginux-controller-runtime"
 version = "0.1.0"
 dependencies = [
  "ginux-command",
+ "ginux-controller-ui",
  "ginux-native-abi",
 ]
 
