@@ -73,10 +73,10 @@ qemu_pid=""
 for expected in \
     'Linux userspace runtime conformance summary:' \
     'Interfaces: 17 pass, 5 fail, 1 policy-exempt, 23 total' \
-    'Syscalls: 82 pass, 245 fail, 48 policy-exempt, 375 total' \
+    'Syscalls: 53 pass, 274 fail, 48 policy-exempt, 375 total' \
     'Linux userspace conformance results:' \
     'NAME/IDENTIFIER' \
-    'Summary: 99 pass, 250 fail, 49 policy-exempt, 398 total' \
+    'Summary: 70 pass, 279 fail, 49 policy-exempt, 398 total' \
     'PASS = verified; FAIL = incomplete or unsupported; POLICY-EXEMPT = deliberately denied.' \
     '1      0      R      controller' \
     'Shutting down Ginux.'; do
@@ -122,7 +122,7 @@ read -r report_rows interface_rows syscall_rows pass_rows fail_rows exempt_rows 
     ' "$output_file"
 )
 if [[ "$report_rows $interface_rows $syscall_rows $pass_rows $fail_rows $exempt_rows" != \
-    '398 23 375 99 250 49' ]]; then
+    '398 23 375 70 279 49' ]]; then
     cat "$output_file"
     echo "Linux ABI report test failed: incomplete or inconsistent result table." >&2
     exit 1

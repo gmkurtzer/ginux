@@ -152,11 +152,12 @@ and TCG on Apple Silicon Macs.
 
 ### Linux compatibility status
 
-The Linux 6.12 x86-64 ledger classifies all 375 syscall numbers: 82 complete,
-245 partial, and 48 policy-denied. Classification means every syscall number has
-an explicit disposition; it does not mean complete Linux conformance. Loader,
-process, VFS, terminal, socket, IPC, namespace, cgroup, pseudo-filesystem, and
-device behavior is implemented only to the extent recorded in the
+The Linux 6.12 x86-64 ledger classifies all 375 syscall numbers: 53 complete,
+257 partial, 17 unsupported with an intentional Linux-compatible `ENOSYS`, and
+48 policy-denied. Classification means every syscall number has an explicit
+disposition; it does not mean complete Linux conformance. Loader, process, VFS,
+terminal, socket, IPC, namespace, cgroup, pseudo-filesystem, and device behavior
+is implemented only to the extent recorded in the
 [compatibility matrix](docs/LINUX-COMPATIBILITY.md).
 
 The project uses real workloads as compound integration tests. Alpine exercises
