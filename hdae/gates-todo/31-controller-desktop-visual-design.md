@@ -336,7 +336,9 @@ architecture and serial recovery path.
   latency measurement); `61f909f9` (compact 16-pixel typography, rebalanced
   summary cards, refreshed qualification evidence, and updated documentation);
   `b5976576` (13-pixel body and 16-pixel heading hierarchy, compact shell
-  density, proportional table columns, updated interactions, and fresh evidence)
+  density, proportional table columns, updated interactions, and fresh evidence);
+  `9f263e7a` (antialiased bounded power control, aligned interaction test, and
+  real-QEMU visual evidence)
 
 ## Review policy and outcome
 
