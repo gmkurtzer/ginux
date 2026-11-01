@@ -328,7 +328,23 @@ objects. The GUI requires no private kernel calls. It must expose:
 A slow domain operation runs asynchronously and cannot block input, composition,
 or the CLI.
 
-## 12. Verification map
+## 12. Visual system
+
+The controller desktop uses a restrained dark navy and slate palette with blue
+selection and mint health accents. A persistent top bar identifies Ginux,
+system management, and overall health. The left navigation provides Overview,
+Domains, Network, Storage, Devices, and Events destinations. The Overview page
+summarizes domain, CPU, and memory state; shows a compact domain table; and
+keeps the controller command surface visible.
+
+The native renderer is allocation-free and uses a fixed pixel font, simple
+rectangles, borders, and a software pointer. Color is never the only status
+signal: labels, values, and state text remain present. The accepted visual
+reference is `docs/images/controller-desktop-concept-v2.png`; actual QEMU
+framebuffer evidence is retained under
+`build/qualification/controller-desktop/` after visible qualification.
+
+## 13. Verification map
 
 | Architectural property | Implementing gate | Required evidence |
 |---|---:|---|
@@ -344,7 +360,7 @@ or the CLI.
 | Fault recovery and resource reclamation | 29 | failure matrix and repeated SMP stress |
 | Performance, regression, and documentation | 30 | clean full qualification and measured budgets |
 
-## 13. Qualification and measured budgets
+## 14. Qualification and measured budgets
 
 Run the complete desktop qualification from the repository root:
 
@@ -385,8 +401,8 @@ Measurements recorded on 2026-10-31 on an Apple Silicon macOS host with QEMU
 | Metric | Measured | Budget | Result |
 |---|---:|---:|---|
 | Two-presentation model startup | 1 us | 50,000 us | pass |
-| Input-to-frame p95 with background domain | 421 us | 16,667 us | pass |
-| Steady software frame p95 | 277 us | 16,667 us | pass |
+| Input-to-frame p95 with background domain | 475 us | 16,667 us | pass |
+| Steady software frame p95 | 252 us | 16,667 us | pass |
 | Fault/recovery cycle p95 | <1 us | 1,000 us | pass |
 | Modeled bounded working set | 1,950,000 bytes | 8,388,608 bytes | pass |
 
@@ -395,7 +411,7 @@ software renderer. They are not GPU, physical-device, whole-system CPU,
 resident-memory, or interactive desktop benchmarks. Raw output is retained at
 `build/qualification/controller-desktop-performance.txt` after each run.
 
-## 14. Explicit initial limitations
+## 15. Explicit initial limitations
 
 GND0 does not initially provide GPU acceleration, DRM/KMS, direct device
 passthrough, multiple outputs, touch, clipboard, drag-and-drop, audio,

@@ -1858,6 +1858,11 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             kernel_fail("ginux: Linux ABI status publication failed\r\n");
         }
         if !address_space::verify_native_graphics_devices(&graphics_image) {
+            serial_write("ginux: graphics verification exit detail/fault: ");
+            serial_write_u64(domain::last_lifecycle_event_detail().map_or(255, u64::from));
+            serial_write(" ");
+            serial_write_u64(domain::last_lifecycle_event_has_fault().map_or(2, u64::from));
+            serial_write("\r\n");
             kernel_fail("ginux: visible graphical controller startup failed\r\n");
         }
         serial_write("ginux: visible controller desktop rendered from ring 3\r\n");
@@ -4549,6 +4554,10 @@ pub(crate) fn serial_write_bytes(bytes: &[u8]) {
     {
         return;
     }
+    serial_write_raw(bytes);
+}
+
+pub(crate) fn serial_write_early(bytes: &[u8]) {
     serial_write_raw(bytes);
 }
 

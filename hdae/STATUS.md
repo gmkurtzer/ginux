@@ -9,14 +9,16 @@
 - Branch: `codex/controller-desktop`
 - Intended base: `main` at `759cf2e2`
 - Active gate: Gate 31, controller desktop visual design
-- Status: v2 concept accepted; native implementation in progress
+- Status: technically passed; awaiting final human review of the actual QEMU
+  framebuffer
 - Last evidence: `make check`, `make test-controller-desktop-all`,
-  `make test-controller-desktop-performance`, and the final real-QEMU
-  `make test-controller-desktop-visible` run passed; retained screenshots show
-  keyboard and pointer state changes and no QEMU process remained
+  `make test-controller-desktop-performance`, and real-QEMU
+  `make test-controller-desktop-visible` passed on 2026-11-01; retained
+  screenshots show keyboard and pointer state changes
 - Open decisions or limitations: none inside Gate 19; GPU acceleration, raw GPU
   passthrough, and broad desktop compatibility are deferred
-- Exact next action: implement the accepted v2 hierarchy in the native renderer
+- Exact next action: present the retained QEMU framebuffer and obtain human
+  visual acceptance; close Gate 31 only if accepted
 
 ## Governing outcome
 

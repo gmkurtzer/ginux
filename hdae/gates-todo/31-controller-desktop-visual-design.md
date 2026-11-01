@@ -26,12 +26,16 @@ and interaction model.
 - [x] Generated and reviewed an initial 800 by 600 visual concept.
 - [x] Added the requested Events destination and accepted the resulting v2
   concept as the implementation reference.
+- [x] Implemented the accepted hierarchy, palette, cards, domain table,
+  command surface, navigation, Events destination, status treatment, and
+  software pointer in the allocation-free native renderer.
+- [x] Updated deterministic fixtures, service image limits, sparse native
+  service layout validation, and controller desktop documentation.
+- [x] Passed real-QEMU visible input, complete desktop, performance, and full
+  repository regression qualification.
 
 ## Remaining work
 
-- [ ] Implement the accepted visual system in the native renderer.
-- [ ] Update deterministic visual fixtures and documentation.
-- [ ] Run real-QEMU visible-input, desktop, performance, and regression tests.
 - [ ] Obtain human visual acceptance of the implemented framebuffer.
 
 ## Acceptance criteria
@@ -58,6 +62,19 @@ and interaction model.
 - `docs/images/controller-desktop-concept-v2.png` -> human-accepted 800 by 600
   visual reference containing Overview, Domains, Network, Storage, Devices, and
   Events navigation destinations.
+- `cargo test -p ginux-windowing -p ginux-controller-ui` -> 8 deterministic
+  renderer and controller tests passed.
+- `make test-controller-desktop-visible` -> actual QEMU framebuffer rendered;
+  injected keyboard and pointer input each changed the frame; PNG evidence was
+  retained under `build/qualification/controller-desktop/`.
+- `make test-controller-desktop-all` -> protocol, windowing, controller,
+  multi-domain, Wayland, presentation, recovery, 2-CPU/4-CPU stress, boot, and
+  visible framebuffer qualification passed.
+- `make test-controller-desktop-performance` -> startup 1 us,
+  input-to-frame p95 475 us, steady-frame p95 252 us, recovery-cycle p95 0 us,
+  and modeled working set 1,950,000 bytes; all budgets passed.
+- `make check` -> architecture, ABI, format, lint, unit, and compatibility
+  checks passed.
 
 ## Decisions and limitations
 
@@ -65,6 +82,8 @@ and interaction model.
   navy/slate surfaces, a limited blue/teal status palette, compact information
   density, and a clean software-renderable pointer.
 - The concept is a visual specification, not a bitmap shipped by the kernel.
+- Native service layout recognition now uses exact guard-page and stack
+  geometry rather than assuming the final reserved image page is populated.
 
 ## Delivery strategy
 
@@ -73,10 +92,13 @@ and interaction model.
 - Pull request: continue the integrated controller-desktop pull request
 - Planned commits: accepted visual reference; native implementation and tests;
   evidence and gate closure
-- Actual commits: pending
+- Actual commits: `eb71161a` (accepted visual reference); implementation commit
+  pending
 
 ## Review policy and outcome
 
 Human checkpoints are required for the concept image and the final implemented
 QEMU framebuffer because visual quality is subjective. Objective implementation
-and regression loops may proceed autonomously between those checkpoints.
+and regression loops may proceed autonomously between those checkpoints. The
+implementation is technically passed and remains open for final human visual
+acceptance.

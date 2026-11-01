@@ -24,7 +24,7 @@ const NETWORK_SERVICE_MAX_SIZE: usize = 512 * 1024;
 const PROTOCOL_SERVICE_MAX_SIZE: usize = 64 * 1024;
 const VOLUME_SERVICE_MAX_SIZE: usize = 64 * 1024;
 const GRAPHICS_SERVICE_MAX_SIZE: usize = 64 * 1024;
-const CONTROLLER_RUNTIME_MAX_SIZE: usize = 64 * 1024;
+const CONTROLLER_RUNTIME_MAX_SIZE: usize = 128 * 1024;
 const ROOT_IMAGE_MAX_SIZE: usize = 192 * 4096;
 const DEVELOPMENT_SEED: [u8; 32] = [
     0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60, 0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec, 0x2c, 0xc4,
@@ -52,7 +52,7 @@ fn main() {
     let bundle = wrap_executable(&code, entries);
     let controller_runtime = read_root_artifact(Path::new(&arguments[5]));
     if controller_runtime.is_empty() || controller_runtime.len() > CONTROLLER_RUNTIME_MAX_SIZE {
-        fail("controller runtime must contain 1 through 65536 bytes");
+        fail("controller runtime must contain 1 through 131072 bytes");
     }
     let network_service = read_root_artifact(Path::new(&arguments[6]));
     if network_service.is_empty() || network_service.len() > NETWORK_SERVICE_MAX_SIZE {

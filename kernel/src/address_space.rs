@@ -6732,7 +6732,7 @@ pub(crate) fn verify_control_plane_wx_layout() -> bool {
 
 const NATIVE_SERVICE_IMAGE_PAGES: usize = 7;
 pub(crate) const NATIVE_SERVICE_FRAME_COUNT: usize = 4 + NATIVE_SERVICE_IMAGE_PAGES + 3;
-pub(crate) const GRAPHICS_SERVICE_IMAGE_PAGES: usize = 10;
+pub(crate) const GRAPHICS_SERVICE_IMAGE_PAGES: usize = 16;
 pub(crate) const GRAPHICS_SERVICE_STACK_PAGES: usize = 16;
 const GRAPHICS_SERVICE_FRAME_COUNT: usize =
     4 + GRAPHICS_SERVICE_IMAGE_PAGES + GRAPHICS_SERVICE_STACK_PAGES + 1;
@@ -6740,8 +6740,8 @@ const NATIVE_NETWORK_IMAGE_PAGES: usize = 160;
 const NATIVE_NETWORK_STACK_PAGES: usize = 16;
 pub(crate) const NATIVE_NETWORK_FRAME_COUNT: usize =
     4 + NATIVE_NETWORK_IMAGE_PAGES + NATIVE_NETWORK_STACK_PAGES + 1;
-pub(crate) const NATIVE_CONTROLLER_IMAGE_PAGES: usize = 16;
-pub(crate) const NATIVE_CONTROLLER_STACK_PAGES: usize = 16;
+pub(crate) const NATIVE_CONTROLLER_IMAGE_PAGES: usize = 32;
+pub(crate) const NATIVE_CONTROLLER_STACK_PAGES: usize = 32;
 pub(crate) const NATIVE_CONTROLLER_FRAME_COUNT: usize =
     4 + NATIVE_CONTROLLER_IMAGE_PAGES + NATIVE_CONTROLLER_STACK_PAGES + 1;
 const NATIVE_STACK_PAGE: usize = NATIVE_SERVICE_IMAGE_PAGES + 1;
@@ -7793,6 +7793,7 @@ pub(crate) fn verify_native_graphics_devices(image: &crate::native_elf::NativeIm
             1,
         )
     {
+        crate::serial_write_early(b"ginux: graphics device test input injection failed\r\n");
         return false;
     }
     let read_write = crate::capability::Rights::READ.union(crate::capability::Rights::WRITE);
@@ -7801,6 +7802,7 @@ pub(crate) fn verify_native_graphics_devices(image: &crate::native_elf::NativeIm
         (10, ginux_native_abi::NATIVE_DISPLAY_OBJECT, read_write),
         (11, ginux_native_abi::NATIVE_INPUT_OBJECT, read_write),
     ]) else {
+        crate::serial_write_early(b"ginux: graphics device test domain admission failed\r\n");
         return false;
     };
     let (Some(console), Some(display), Some(input), Some(identity), Some(owner)) = (
@@ -7810,6 +7812,7 @@ pub(crate) fn verify_native_graphics_devices(image: &crate::native_elf::NativeIm
         domain::domain_service_identity(auxiliary),
         memory::FrameOwner::domain(auxiliary),
     ) else {
+        crate::serial_write_early(b"ginux: graphics device test capabilities unavailable\r\n");
         return false;
     };
     if !domain::handle_permits(auxiliary, console, 2, crate::capability::Rights::WRITE)
@@ -7838,6 +7841,7 @@ pub(crate) fn verify_native_graphics_devices(image: &crate::native_elf::NativeIm
             crate::capability::Rights::READ,
         )
     {
+        crate::serial_write_early(b"ginux: graphics device test capability validation failed\r\n");
         return false;
     }
     let kernel_root = current_root();
@@ -7846,6 +7850,7 @@ pub(crate) fn verify_native_graphics_devices(image: &crate::native_elf::NativeIm
         GRAPHICS_SERVICE_FRAME_COUNT,
         GRAPHICS_SERVICE_STACK_PAGES,
     >::new(kernel_root, owner, image) else {
+        crate::serial_write_early(b"ginux: graphics device test address space failed\r\n");
         return false;
     };
     if !space.layout_is_valid(image)
@@ -7855,6 +7860,7 @@ pub(crate) fn verify_native_graphics_devices(image: &crate::native_elf::NativeIm
         )
         || memory::owner_live_frame_count(owner) != Some(GRAPHICS_SERVICE_FRAME_COUNT)
     {
+        crate::serial_write_early(b"ginux: graphics device test layout failed\r\n");
         let _ = space.release();
         return false;
     }
@@ -7872,15 +7878,21 @@ pub(crate) fn verify_native_graphics_devices(image: &crate::native_elf::NativeIm
             * PAGE_SIZE;
     let stack = USER_TEST_ADDRESS
         + (GRAPHICS_SERVICE_IMAGE_PAGES + 1 + GRAPHICS_SERVICE_STACK_PAGES) * PAGE_SIZE;
-    if !register_address_space(auxiliary, AuxiliaryAddressSpace::Graphics(space))
-        || !scheduler::queue_auxiliary(auxiliary, root, entry, stack, console)
-        || !cpu::activate_user_root(root)
-    {
+    if !register_address_space(auxiliary, AuxiliaryAddressSpace::Graphics(space)) {
+        crate::serial_write_early(b"ginux: graphics device test registration failed\r\n");
+        return false;
+    }
+    if !scheduler::queue_auxiliary(auxiliary, root, entry, stack, console) {
+        crate::serial_write_early(b"ginux: graphics device test queue failed\r\n");
+        return false;
+    }
+    if !cpu::activate_user_root(root) {
+        crate::serial_write_early(b"ginux: graphics device test activation failed\r\n");
         return false;
     }
     cpu::execute_native_auxiliary(entry, stack, boot_info as u64, console, auxiliary, identity);
     let event = domain::take_lifecycle_event();
-    current_root() == kernel_root
+    let valid = current_root() == kernel_root
         && scheduler::current_domain().is_none()
         && registered_auxiliary_address_space_count() == 0
         && memory::owner_live_frame_count(owner) == Some(0)
@@ -7892,7 +7904,11 @@ pub(crate) fn verify_native_graphics_devices(image: &crate::native_elf::NativeIm
         && domain::last_lifecycle_event_has_fault() == Some(false)
         && domain::last_lifecycle_service_identity() == Some(identity)
         && domain::take_lifecycle_event().is_none()
-        && crate::controller_devices::input().is_none()
+        && crate::controller_devices::input().is_none();
+    if !valid {
+        crate::serial_write_early(b"ginux: graphics device test execution failed\r\n");
+    }
+    valid
 }
 
 fn run_native_graphics_service(

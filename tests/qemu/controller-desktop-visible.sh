@@ -12,7 +12,7 @@ pointer_screenshot="$(mktemp -t ginux-desktop-pointer.XXXXXX).ppm"
 volume_image="$(mktemp -t ginux-desktop-volume.XXXXXX)"
 artifact_dir="$repo_root/build/qualification/controller-desktop"
 qemu_pid=""
-palette=('\030\040\050' '\050\064\100' '\030\214\170' '\140\170\240')
+palette=('\010\020\035' '\015\027\046' '\023\040\062' '\015\177\362')
 
 frame_has_palette() {
     local frame="$1"

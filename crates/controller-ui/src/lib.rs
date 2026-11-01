@@ -7,12 +7,18 @@ use ginux_native_abi::{
     NATIVE_DOMAIN_START_ATTACHED, NATIVE_DOMAIN_STOP, NATIVE_HOST_INSPECT_OPERATION,
     NATIVE_NETWORK_INVENTORY_OPERATION, NATIVE_ROOT_OPERATION,
 };
-use ginux_windowing::{Desktop, Rect, WidgetKind};
+use ginux_windowing::{
+    paint_border, paint_rect, paint_text, Desktop, Rect, COLOR_ACCENT, COLOR_BORDER,
+    COLOR_DARK_TEXT, COLOR_HEALTHY, COLOR_MUTED, COLOR_PANEL, COLOR_SURFACE, COLOR_SURFACE_RAISED,
+    COLOR_TEXT,
+};
 
 pub const MAX_DOMAINS: usize = 4;
 pub const MAX_JOBS: usize = 8;
 pub const MAX_NOTICES: usize = 8;
 pub const MAX_NAME: usize = 16;
+pub const SHELL_WIDTH: usize = 160;
+pub const SHELL_HEIGHT: usize = 100;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Error {
@@ -358,7 +364,7 @@ impl<'a, B: ManagementBackend> Application<'a, B> {
         self.count
     }
     pub fn render_shell(&self, pixels: &mut [u32], stride: usize) -> Result<u64, Error> {
-        self.render_shell_state(pixels, stride, b"controller terminal", 48, 32)
+        self.render_shell_state(pixels, stride, b"controller terminal", 128, 76)
     }
 
     pub fn render_shell_state(
@@ -369,55 +375,169 @@ impl<'a, B: ManagementBackend> Application<'a, B> {
         pointer_x: u16,
         pointer_y: u16,
     ) -> Result<u64, Error> {
-        let mut desktop = Desktop::new(96, 64);
+        let mut desktop = Desktop::new(SHELL_WIDTH as u16, SHELL_HEIGHT as u16);
         let window = desktop
-            .create_window(Rect::new(2, 9, 92, 53), b"Ginux Controller", true)
+            .create_window(Rect::new(4, 10, 152, 87), b"Ginux Controller", true)
             .map_err(|_| Error::Failed)?;
-        desktop
-            .add_widget(
-                window,
-                WidgetKind::Menu,
-                Rect::new(2, 2, 34, 7),
-                b"System Domains",
-            )
-            .map_err(|_| Error::Failed)?;
-        desktop
-            .add_widget(
-                window,
-                WidgetKind::Table,
-                Rect::new(2, 12, 60, 18),
-                b"NAME STATE CPU MEM",
-            )
-            .map_err(|_| Error::Failed)?;
-        desktop
-            .add_widget(
-                window,
-                WidgetKind::Button,
-                Rect::new(66, 12, 18, 7),
-                b"Start",
-            )
-            .map_err(|_| Error::Failed)?;
-        desktop
-            .add_widget(
-                window,
-                WidgetKind::TextField,
-                Rect::new(2, 32, 82, 7),
-                terminal,
-            )
-            .map_err(|_| Error::Failed)?;
+        let _ = window;
         desktop.render(pixels, stride).map_err(|_| Error::Failed)?;
-        let x = usize::from(pointer_x.min(95));
-        let y = usize::from(pointer_y.min(63));
-        for offset in 0..5_usize {
-            if x + offset < 96 {
-                pixels[y * stride + x + offset] = 0x00ff_ffff;
-            }
-            if y + offset < 64 {
-                pixels[(y + offset) * stride + x] = 0x00ff_ffff;
-            }
+
+        // System bar.
+        text(pixels, stride, 4, 2, b"GINUX", COLOR_TEXT)?;
+        text(pixels, stride, 61, 2, b"SYSTEM MANAGEMENT", COLOR_MUTED)?;
+        rect(pixels, stride, Rect::new(147, 2, 3, 3), COLOR_HEALTHY)?;
+        text(pixels, stride, 152, 2, b"OK", COLOR_HEALTHY)?;
+
+        // Navigation rail.
+        rect(pixels, stride, Rect::new(5, 20, 37, 76), COLOR_PANEL)?;
+        rect(pixels, stride, Rect::new(42, 20, 1, 76), COLOR_BORDER)?;
+        rect(pixels, stride, Rect::new(7, 23, 33, 8), COLOR_ACCENT)?;
+        text(pixels, stride, 9, 25, b"OVERVIEW", COLOR_TEXT)?;
+        for (y, label) in [
+            (35, &b"DOMAINS"[..]),
+            (45, &b"NETWORK"[..]),
+            (55, &b"STORAGE"[..]),
+            (65, &b"DEVICES"[..]),
+            (75, &b"EVENTS"[..]),
+        ] {
+            rect(pixels, stride, Rect::new(9, y + 1, 2, 2), COLOR_MUTED)?;
+            text(pixels, stride, 14, y, label, COLOR_MUTED)?;
         }
+
+        // Overview heading and summary cards.
+        text(pixels, stride, 47, 23, b"SYSTEM OVERVIEW", COLOR_TEXT)?;
+        card(
+            pixels,
+            stride,
+            Rect::new(47, 31, 32, 17),
+            b"DOMAINS",
+            b"1 UP",
+        )?;
+        card(pixels, stride, Rect::new(82, 31, 32, 17), b"CPU", b"2%")?;
+        card(
+            pixels,
+            stride,
+            Rect::new(117, 31, 34, 17),
+            b"MEMORY",
+            b"12%",
+        )?;
+
+        // Domain inventory.
+        let table = Rect::new(47, 51, 104, 27);
+        rect(pixels, stride, table, COLOR_PANEL)?;
+        outline(pixels, stride, table, COLOR_BORDER)?;
+        rect(
+            pixels,
+            stride,
+            Rect::new(table.x, table.y, table.width, 8),
+            COLOR_SURFACE_RAISED,
+        )?;
+        text(pixels, stride, 50, 53, b"DOMAINS", COLOR_TEXT)?;
+        text(
+            pixels,
+            stride,
+            50,
+            62,
+            b"NAME      STATE  CPU  MEM",
+            COLOR_MUTED,
+        )?;
+        rect(pixels, stride, Rect::new(47, 68, 104, 1), COLOR_BORDER)?;
+        text(
+            pixels,
+            stride,
+            50,
+            71,
+            b"ROCKY     RUNNING  1  128",
+            COLOR_TEXT,
+        )?;
+        rect(pixels, stride, Rect::new(85, 72, 2, 2), COLOR_HEALTHY)?;
+
+        // Command surface.
+        let command = Rect::new(47, 82, 104, 11);
+        rect(pixels, stride, command, COLOR_SURFACE)?;
+        outline(pixels, stride, command, COLOR_ACCENT)?;
+        text(pixels, stride, 50, 85, b"GINUX>", COLOR_MUTED)?;
+        text(pixels, stride, 74, 85, terminal, COLOR_TEXT)?;
+        rect(pixels, stride, Rect::new(147, 85, 1, 5), COLOR_ACCENT)?;
+
+        draw_pointer(
+            pixels,
+            stride,
+            pointer_x.min((SHELL_WIDTH - 1) as u16) as i16,
+            pointer_y.min((SHELL_HEIGHT - 1) as u16) as i16,
+        )?;
         Ok(ginux_windowing::pixel_hash(pixels))
     }
+}
+
+fn rect(pixels: &mut [u32], stride: usize, area: Rect, color: u32) -> Result<(), Error> {
+    paint_rect(pixels, stride, area, color).map_err(|_| Error::Failed)
+}
+
+fn outline(pixels: &mut [u32], stride: usize, area: Rect, color: u32) -> Result<(), Error> {
+    paint_border(pixels, stride, area, color).map_err(|_| Error::Failed)
+}
+
+fn text(
+    pixels: &mut [u32],
+    stride: usize,
+    x: i16,
+    y: i16,
+    value: &[u8],
+    color: u32,
+) -> Result<(), Error> {
+    paint_text(pixels, stride, x, y, value, color).map_err(|_| Error::Failed)
+}
+
+fn card(
+    pixels: &mut [u32],
+    stride: usize,
+    area: Rect,
+    label: &[u8],
+    value: &[u8],
+) -> Result<(), Error> {
+    rect(pixels, stride, area, COLOR_SURFACE_RAISED)?;
+    outline(pixels, stride, area, COLOR_BORDER)?;
+    text(pixels, stride, area.x + 3, area.y + 3, label, COLOR_MUTED)?;
+    text(pixels, stride, area.x + 3, area.y + 10, value, COLOR_TEXT)?;
+    rect(
+        pixels,
+        stride,
+        Rect::new(area.x + area.width as i16 - 5, area.y + 3, 2, 2),
+        COLOR_HEALTHY,
+    )
+}
+
+fn draw_pointer(pixels: &mut [u32], stride: usize, x: i16, y: i16) -> Result<(), Error> {
+    for (dx, dy) in [
+        (0, 0),
+        (0, 1),
+        (0, 2),
+        (0, 3),
+        (0, 4),
+        (0, 5),
+        (1, 1),
+        (1, 2),
+        (1, 3),
+        (1, 4),
+        (2, 2),
+        (2, 3),
+        (2, 4),
+        (3, 3),
+        (3, 4),
+        (4, 4),
+    ] {
+        rect(
+            pixels,
+            stride,
+            Rect::new(x + dx, y + dy, 1, 1),
+            COLOR_DARK_TEXT,
+        )?;
+    }
+    for (dx, dy) in [(1, 2), (1, 3), (2, 3)] {
+        rect(pixels, stride, Rect::new(x + dx, y + dy, 1, 1), COLOR_TEXT)?;
+    }
+    Ok(())
 }
 
 pub fn cli_execute<B: ManagementBackend>(
@@ -550,9 +670,9 @@ mod tests {
     fn graphical_shell_has_stable_exact_pixels() {
         let mut backend = ModelBackend::new();
         let app = Application::new(&mut backend);
-        let mut pixels = [0_u32; 96 * 64];
-        let hash = app.render_shell(&mut pixels, 96).unwrap();
+        let mut pixels = [0_u32; SHELL_WIDTH * SHELL_HEIGHT];
+        let hash = app.render_shell(&mut pixels, SHELL_WIDTH).unwrap();
         assert_ne!(hash, 0);
-        assert_eq!(hash, app.render_shell(&mut pixels, 96).unwrap());
+        assert_eq!(hash, app.render_shell(&mut pixels, SHELL_WIDTH).unwrap());
     }
 }

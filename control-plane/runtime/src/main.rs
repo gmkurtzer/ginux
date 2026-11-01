@@ -692,7 +692,7 @@ fn read_line(
             }
             _ => {}
         }
-        let visible = length.min(25);
+        let visible = length.min(18);
         render_controller_desktop(display, &line[length - visible..length], *pointer);
     }
 }
@@ -717,8 +717,8 @@ fn drain_controller_input(input: u64, pointer: &mut (u16, u16)) {
 }
 
 fn render_controller_desktop(display: u64, terminal: &[u8], pointer: (u16, u16)) {
-    const WIDTH: usize = 96;
-    const HEIGHT: usize = 64;
+    const WIDTH: usize = ginux_controller_ui::SHELL_WIDTH;
+    const HEIGHT: usize = ginux_controller_ui::SHELL_HEIGHT;
     let mut pixels = [0_u32; WIDTH * HEIGHT];
     let mut backend = ginux_controller_ui::ModelBackend::new();
     let app = ginux_controller_ui::Application::new(&mut backend);

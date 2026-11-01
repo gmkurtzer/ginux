@@ -5,15 +5,16 @@ pub const MAX_WIDGETS: usize = 8;
 pub const MAX_DAMAGE: usize = 16;
 pub const MAX_TEXT: usize = 32;
 
-const DESKTOP: u32 = 0x0018_2028;
-const PANEL: u32 = 0x0028_3440;
-const WINDOW: u32 = 0x00d8_dce0;
-const TRUSTED: u32 = 0x0018_8c78;
-const TITLE: u32 = 0x0048_5868;
-const FOCUSED: u32 = 0x0060_78a0;
-const BLACK: u32 = 0x0000_0000;
-const WHITE: u32 = 0x00ff_ffff;
-const ACCENT: u32 = 0x0028_78c8;
+pub const COLOR_DESKTOP: u32 = 0x0008_101d;
+pub const COLOR_PANEL: u32 = 0x000d_1726;
+pub const COLOR_SURFACE: u32 = 0x0013_2032;
+pub const COLOR_SURFACE_RAISED: u32 = 0x0018_283c;
+pub const COLOR_BORDER: u32 = 0x0033_4a62;
+pub const COLOR_TEXT: u32 = 0x00e6_edf7;
+pub const COLOR_MUTED: u32 = 0x008d_a2ba;
+pub const COLOR_ACCENT: u32 = 0x000d_7ff2;
+pub const COLOR_HEALTHY: u32 = 0x002f_d49a;
+pub const COLOR_DARK_TEXT: u32 = 0x0008_101d;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Rect {
@@ -550,12 +551,12 @@ impl Desktop {
         if stride < usize::from(self.width) || pixels.len() < stride * usize::from(self.height) {
             return Err(Error::Bounds);
         }
-        fill(pixels, stride, self.screen(), DESKTOP, self.screen());
+        fill(pixels, stride, self.screen(), COLOR_DESKTOP, self.screen());
         fill(
             pixels,
             stride,
             Rect::new(0, 0, self.width, 8),
-            PANEL,
+            COLOR_PANEL,
             self.screen(),
         );
         for z in 1..=u8::MAX {
@@ -570,15 +571,26 @@ impl Desktop {
                 fill(
                     pixels,
                     stride,
-                    window.rect,
-                    if window.trusted { TRUSTED } else { WINDOW },
-                    clip,
+                    Rect::new(
+                        window.rect.x + 1,
+                        window.rect.y + 1,
+                        window.rect.width,
+                        window.rect.height,
+                    ),
+                    COLOR_DESKTOP,
+                    self.screen(),
                 );
+                fill(pixels, stride, window.rect, COLOR_SURFACE, clip);
+                border(pixels, stride, window.rect, COLOR_BORDER, clip);
                 fill(
                     pixels,
                     stride,
                     Rect::new(window.rect.x, window.rect.y, window.rect.width, 9),
-                    if window.focused { FOCUSED } else { TITLE },
+                    if window.focused {
+                        COLOR_SURFACE_RAISED
+                    } else {
+                        COLOR_PANEL
+                    },
                     clip,
                 );
                 draw_text(
@@ -587,7 +599,7 @@ impl Desktop {
                     window.rect.x + 2,
                     window.rect.y + 1,
                     &window.title[..usize::from(window.title_len)],
-                    WHITE,
+                    COLOR_TEXT,
                     clip,
                 );
                 if window.trusted {
@@ -600,7 +612,11 @@ impl Desktop {
                             3,
                             3,
                         ),
-                        WHITE,
+                        if window.focused {
+                            COLOR_HEALTHY
+                        } else {
+                            COLOR_MUTED
+                        },
                         clip,
                     );
                 }
@@ -618,42 +634,44 @@ impl Desktop {
                             rect.x,
                             rect.y,
                             &widget.text[..usize::from(widget.len)],
-                            BLACK,
+                            COLOR_TEXT,
                             clip,
                         ),
                         WidgetKind::Button | WidgetKind::Menu => {
-                            fill(pixels, stride, rect, ACCENT, clip);
+                            fill(pixels, stride, rect, COLOR_ACCENT, clip);
                             draw_text(
                                 pixels,
                                 stride,
                                 rect.x + 2,
                                 rect.y + 2,
                                 &widget.text[..usize::from(widget.len)],
-                                WHITE,
+                                COLOR_TEXT,
                                 clip,
                             );
                         }
                         WidgetKind::TextField => {
-                            fill(pixels, stride, rect, WHITE, clip);
+                            fill(pixels, stride, rect, COLOR_PANEL, clip);
+                            border(pixels, stride, rect, COLOR_BORDER, clip);
                             draw_text(
                                 pixels,
                                 stride,
                                 rect.x + 1,
                                 rect.y + 2,
                                 &widget.text[..usize::from(widget.len)],
-                                BLACK,
+                                COLOR_TEXT,
                                 clip,
                             );
                         }
                         WidgetKind::Table => {
-                            fill(pixels, stride, rect, WHITE, clip);
+                            fill(pixels, stride, rect, COLOR_PANEL, clip);
+                            border(pixels, stride, rect, COLOR_BORDER, clip);
                             draw_text(
                                 pixels,
                                 stride,
                                 rect.x + 1,
                                 rect.y + 1,
                                 &widget.text[..usize::from(widget.len)],
-                                BLACK,
+                                COLOR_TEXT,
                                 clip,
                             );
                             if rect.height > 7 {
@@ -661,7 +679,7 @@ impl Desktop {
                                     pixels,
                                     stride,
                                     Rect::new(rect.x, rect.y + 7, rect.width, 1),
-                                    TITLE,
+                                    COLOR_BORDER,
                                     clip,
                                 );
                             }
@@ -683,6 +701,92 @@ fn fill(pixels: &mut [u32], stride: usize, rect: Rect, color: u32, clip: Rect) {
             pixels[y as usize * stride + x as usize] = color;
         }
     }
+}
+
+fn border(pixels: &mut [u32], stride: usize, rect: Rect, color: u32, clip: Rect) {
+    if rect.width == 0 || rect.height == 0 {
+        return;
+    }
+    fill(
+        pixels,
+        stride,
+        Rect::new(rect.x, rect.y, rect.width, 1),
+        color,
+        clip,
+    );
+    fill(
+        pixels,
+        stride,
+        Rect::new(rect.x, rect.y + rect.height as i16 - 1, rect.width, 1),
+        color,
+        clip,
+    );
+    fill(
+        pixels,
+        stride,
+        Rect::new(rect.x, rect.y, 1, rect.height),
+        color,
+        clip,
+    );
+    fill(
+        pixels,
+        stride,
+        Rect::new(rect.x + rect.width as i16 - 1, rect.y, 1, rect.height),
+        color,
+        clip,
+    );
+}
+
+pub fn paint_rect(pixels: &mut [u32], stride: usize, rect: Rect, color: u32) -> Result<(), Error> {
+    if stride == 0 || !pixels.len().is_multiple_of(stride) {
+        return Err(Error::Bounds);
+    }
+    let width = u16::try_from(stride).map_err(|_| Error::Bounds)?;
+    let height = u16::try_from(pixels.len() / stride).map_err(|_| Error::Bounds)?;
+    let clip = Rect::new(0, 0, width, height);
+    fill(pixels, stride, rect, color, clip);
+    Ok(())
+}
+
+pub fn paint_border(
+    pixels: &mut [u32],
+    stride: usize,
+    rect: Rect,
+    color: u32,
+) -> Result<(), Error> {
+    if stride == 0 || !pixels.len().is_multiple_of(stride) {
+        return Err(Error::Bounds);
+    }
+    let width = u16::try_from(stride).map_err(|_| Error::Bounds)?;
+    let height = u16::try_from(pixels.len() / stride).map_err(|_| Error::Bounds)?;
+    let clip = Rect::new(0, 0, width, height);
+    border(pixels, stride, rect, color, clip);
+    Ok(())
+}
+
+pub fn paint_text(
+    pixels: &mut [u32],
+    stride: usize,
+    x: i16,
+    y: i16,
+    text: &[u8],
+    color: u32,
+) -> Result<(), Error> {
+    if stride == 0 || !pixels.len().is_multiple_of(stride) {
+        return Err(Error::Bounds);
+    }
+    let width = u16::try_from(stride).map_err(|_| Error::Bounds)?;
+    let height = u16::try_from(pixels.len() / stride).map_err(|_| Error::Bounds)?;
+    draw_text(
+        pixels,
+        stride,
+        x,
+        y,
+        text,
+        color,
+        Rect::new(0, 0, width, height),
+    );
+    Ok(())
 }
 
 fn draw_text(
@@ -924,7 +1028,7 @@ mod tests {
         desktop.render(&mut first, 96).unwrap();
         desktop.render(&mut second, 96).unwrap();
         assert_eq!(first, second);
-        assert_eq!(pixel_hash(&first), 0x9303_a09c_a575_bba2);
+        assert_eq!(pixel_hash(&first), 0x828c_bd51_615c_3e2c);
     }
 
     #[test]

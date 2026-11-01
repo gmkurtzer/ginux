@@ -157,8 +157,8 @@ impl ControllerDevices {
         self.mouse_length = 0;
         let dx = i16::from(self.mouse_packet[1] as i8);
         let dy = -i16::from(self.mouse_packet[2] as i8);
-        self.pointer_x = (self.pointer_x + dx).clamp(0, 95);
-        self.pointer_y = (self.pointer_y + dy).clamp(0, 63);
+        self.pointer_x = (self.pointer_x + dx).clamp(0, 159);
+        self.pointer_y = (self.pointer_y + dy).clamp(0, 99);
         let _ = self.inject(
             ginux_native_abi::NATIVE_INPUT_KIND_POINTER_MOTION,
             u32::from(self.pointer_x as u16) | (u32::from(self.pointer_y as u16) << 16),

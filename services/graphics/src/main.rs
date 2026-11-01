@@ -177,9 +177,24 @@ fn render_controller_desktop(info: &NativeGraphicsBootV1) -> bool {
     const WIDTH: usize = 96;
     const HEIGHT: usize = 64;
     let mut pixels = [0_u32; WIDTH * HEIGHT];
-    let mut backend = ginux_controller_ui::ModelBackend::new();
-    let app = ginux_controller_ui::Application::new(&mut backend);
-    if app.render_shell(&mut pixels, WIDTH).is_err() {
+    let mut desktop = ginux_windowing::Desktop::new(WIDTH as u16, HEIGHT as u16);
+    let Ok(window) = desktop.create_window(
+        ginux_windowing::Rect::new(3, 9, 90, 52),
+        b"Ginux Controller",
+        true,
+    ) else {
+        return false;
+    };
+    if desktop
+        .add_widget(
+            window,
+            ginux_windowing::WidgetKind::Label,
+            ginux_windowing::Rect::new(6, 6, 72, 7),
+            b"SYSTEM OVERVIEW",
+        )
+        .is_err()
+        || desktop.render(&mut pixels, WIDTH).is_err()
+    {
         return false;
     }
     let mut display = NativeDisplayRequestV0 {
