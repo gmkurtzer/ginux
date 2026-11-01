@@ -8,15 +8,15 @@
 - Active project: native controller desktop
 - Branch: `codex/controller-desktop`
 - Intended base: `main` at `759cf2e2`
-- Active gate: none; Gates 19–30 are complete
-- Status: Gate 30 passed and closed after visible interactive qualification
+- Active gate: Gate 31, controller desktop visual design
+- Status: v2 concept accepted; native implementation in progress
 - Last evidence: `make check`, `make test-controller-desktop-all`,
   `make test-controller-desktop-performance`, and the final real-QEMU
   `make test-controller-desktop-visible` run passed; retained screenshots show
   keyboard and pointer state changes and no QEMU process remained
 - Open decisions or limitations: none inside Gate 19; GPU acceleration, raw GPU
   passthrough, and broad desktop compatibility are deferred
-- Exact next action: human review of the visible controller desktop and branch
+- Exact next action: implement the accepted v2 hierarchy in the native renderer
 
 ## Governing outcome
 
@@ -40,6 +40,7 @@ windowed or full screen. The CLI remains the recovery path.
 - Gate 29: passed and closed under delegated review on 2026-10-31
 - Gate 30: passed and closed under delegated review on 2026-10-31 after visible
   QEMU framebuffer, keyboard, pointer, performance, and regression evidence
+- Gate 31: human checkpoints at concept acceptance and final QEMU visual review
 - Gates 20–30: delegated closure after complete objective evidence; continue
   without another planned checkpoint and stop only for a genuine clarification,
   failed dependency, or material scope/architecture change
