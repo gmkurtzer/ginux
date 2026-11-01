@@ -8,16 +8,16 @@
 - Active project: native controller desktop
 - Branch: `codex/controller-desktop`
 - Intended base: `main` at `759cf2e2`
-- Active gate: Gate 20, graphical controller runtime foundation
-- Status: Gate 19 accepted; Gate 20 starting
-- Last evidence: `make architecture-check`, document marker scan, Gate 20–30
-  mapping/ledger validation, `git diff --check`, and the complete HDAE coverage
-  review passed
+- Active gate: Gate 21, controller framebuffer and input devices
+- Status: Gates 19–20 closed; Gate 21 starting
+- Last evidence: Gate 20 passed `make test-controller-graphics-runtime`,
+  `make check`, `make architecture-check`, native ABI tests, and
+  `git diff --check`; commit `b57bce11`
 - Open decisions or limitations: none inside Gate 19; GPU acceleration, raw GPU
   passthrough, and broad desktop compatibility are deferred
-- Exact next action: close Gate 19 in the locked ledger, inspect existing native
-  auxiliary-service launch/supervision paths, and establish the Gate 20 runtime
-  baseline and deterministic test
+- Exact next action: inspect UEFI/QEMU framebuffer and input handoff support,
+  establish the Gate 21 device baseline, and implement the bounded
+  kernel-to-controller device contracts and deterministic QEMU test
 
 ## Governing outcome
 
@@ -29,6 +29,7 @@ windowed or full screen. The CLI remains the recovery path.
 ## Confirmed review policy
 
 - Gate 19: accepted by the human on 2026-10-31
+- Gate 20: passed and closed under delegated review on 2026-10-31
 - Gates 20–30: delegated closure after complete objective evidence; continue
   without another planned checkpoint and stop only for a genuine clarification,
   failed dependency, or material scope/architecture change
