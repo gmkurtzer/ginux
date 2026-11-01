@@ -72,7 +72,8 @@ architecture and serial recovery path.
 - [x] Populate all displayed system and domain fields from live kernel state;
   remove fresh per-frame demonstration backends.
 - [x] Prove CLI and GUI actions observe the same underlying state.
-- [ ] Obtain human visual acceptance of the implemented framebuffer.
+- [x] Obtained human visual and interaction acceptance of the implemented
+  framebuffer on 2026-11-01.
 - [x] Render at native 800 by 600 resolution without doubled logical pixels,
   unused desktop margins, or nested window chrome.
 - [x] Replace the block pointer with a styled, high-contrast cursor.
@@ -338,7 +339,8 @@ architecture and serial recovery path.
   `b5976576` (13-pixel body and 16-pixel heading hierarchy, compact shell
   density, proportional table columns, updated interactions, and fresh evidence);
   `9f263e7a` (antialiased bounded power control, aligned interaction test, and
-  real-QEMU visual evidence)
+  real-QEMU visual evidence); `a5269f21` and `d99eddb6` (durable qualification
+  checkpoints for the accepted density and power-control revisions)
 
 ## Review policy and outcome
 
@@ -347,5 +349,5 @@ QEMU interaction and framebuffer because visual quality and usability are
 subjective. Objective implementation and regression loops may proceed
 autonomously between those checkpoints. Human direction on 2026-11-01 approved
 continuing all remaining work inside Gate 31 without intermediate checkoff.
-All objective criteria now pass; the gate remains open only for final human
-visual and interaction acceptance.
+All objective criteria passed, and the human accepted the final framebuffer and
+interaction result on 2026-11-01. Gate 31 is accepted and closed.

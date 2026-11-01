@@ -8,9 +8,9 @@
 - Active project: native controller desktop
 - Branch: `codex/controller-desktop`
 - Intended base: `main` at `759cf2e2`
-- Active gate: Gate 31, controller desktop visual design
-- Status: objective 1024 by 768 visual and latency criteria pass; open at the
-  required human visual and interaction checkpoint
+- Active gate: none in the controller-desktop batch; Gate 31 is closed
+- Status: Gates 19–31 are complete; Gate 31 passed all objective criteria and
+  received final human visual and interaction acceptance on 2026-11-01
 - Last evidence: the first compact-font checkpoint was rejected by human review
   because the sidebar, rows, cards, and labels still retained oversized 1080p
   proportions. The resulting full-density revision passed
@@ -26,10 +26,10 @@
   20.973 ms maximum, and 20.485 ms for a complete page change.
 - Open decisions or limitations: the accepted architecture remains a native
   ring-3 controller shell with software rendering and an independent serial
-  recovery CLI; final visual quality and real-QEMU interaction still require
-  the confirmed human checkpoint
-- Exact next action: present commit `9f263e7a`, its retained real-QEMU frames,
-  and the `make run-gui` workflow for human visual and interaction acceptance
+  recovery CLI; unrelated open Gates 13–18 remain outside this completed batch
+- Exact next action: review the completed branch state, then push
+  `codex/controller-desktop` and prepare its integrated pull request when the
+  human requests publication
 
 ## Governing outcome
 
@@ -57,9 +57,9 @@ windowed or full screen. The CLI remains the recovery path.
   correction of the requested display size from 1920 by 1080 to the standard
   1024 by 768 mode. A subsequent human review requested denser typography and
   spacing at that resolution, then rejected the first font-only refinement as
-  materially unchanged. Objective checks pass after the resulting full-density
-  redesign, and the gate remains open for human visual and interaction
-  acceptance.
+  materially unchanged. The resulting full-density redesign and refined power
+  control passed the complete objective suite and received final human visual
+  and interaction acceptance on 2026-11-01. Gate 31 is closed.
 - Gates 20–30: delegated closure after complete objective evidence; continue
   without another planned checkpoint and stop only for a genuine clarification,
   failed dependency, or material scope/architecture change

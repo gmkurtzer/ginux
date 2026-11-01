@@ -39,7 +39,7 @@ toolkit, a native graphical controller, a domain display bridge, and a minimal
 Wayland environment inside Linux domains. It includes deterministic QEMU tests,
 failure recovery, performance budgets, and operator/developer documentation.
 
-All Gates 19–30 use `codex/controller-desktop`, target `main`, and are intended
+All Gates 19–31 use `codex/controller-desktop`, target `main`, and are intended
 for one integrated pull request because the protocol, compositor, controller,
 and domain bridge are one inseparable vertical feature.
 

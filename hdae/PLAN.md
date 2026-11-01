@@ -4,7 +4,7 @@
 
 - Working branch: `codex/controller-desktop`
 - Intended base: `main`
-- Pull request: one integrated pull request for Gates 19–30
+- Pull request: one integrated pull request for Gates 19–31
 - Origin: design discussion prompted by GitHub issue #12; no contributor code is
   merged by this plan
 - Commit policy: signed, coherent commits at gate boundaries where practical
@@ -31,14 +31,17 @@ product deliveries.
 | 28 | Deliver windowed and full-screen domain presentation | 24, 25, 27 | Delegated |
 | 29 | Harden lifecycle and failure recovery | 28 | Delegated |
 | 30 | Qualify performance, isolation, UX, and documentation | 29 | Delegated batch end |
+| 31 | Refine and qualify native visual design and interaction | 30 | Accepted |
 
 ## Execution policy
 
 The human accepted Gate 19 and then delegated continuous execution and closure
-of Gates 20–30 on 2026-10-31. A gate closes only after every criterion has fresh
-evidence. Stop for a clarification that materially affects behavior, a failed
-dependency with no safe in-scope path, changed architecture, scope expansion,
-or a new consequential security decision.
+of Gates 20–30 on 2026-10-31. Gate 31 was added as a human visual checkpoint and
+accepted on 2026-11-01 after all objective evidence passed. A gate closes only
+after every criterion has fresh evidence. Stop for a clarification that
+materially affects behavior, a failed dependency with no safe in-scope path,
+changed architecture, scope expansion, or a new consequential security
+decision.
 
 ## Coverage
 
