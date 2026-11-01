@@ -224,4 +224,17 @@ mod tests {
             None
         );
     }
+
+    #[test]
+    fn rejects_nonzero_reserved_header_bytes_with_valid_digest() {
+        let (_, committed) = encode(1, b"reserved").expect("valid record");
+        assert!(decode(&committed).is_some());
+        for offset in RESERVED_OFFSET..HEADER_SIZE {
+            let mut sector = committed;
+            sector[offset] = 1;
+            let digest = digest_sector(&sector);
+            sector[DIGEST_OFFSET..DIGEST_OFFSET + DIGEST_SIZE].copy_from_slice(&digest);
+            assert_eq!(decode(&sector), None, "offset {offset}");
+        }
+    }
 }
