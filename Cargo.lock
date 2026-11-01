@@ -419,9 +419,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ginux-display-protocol"
+version = "0.1.0"
+
+[[package]]
 name = "ginux-graphics-service-runtime"
 version = "0.1.0"
 dependencies = [
+ "ginux-display-protocol",
  "ginux-native-abi",
 ]
 

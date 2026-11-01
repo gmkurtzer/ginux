@@ -3,6 +3,7 @@ members = [
     "boot/efi",
     "control-plane/runtime",
     "crates/command",
+    "crates/display-protocol",
     "crates/image-store",
     "crates/kernel-policy",
     "crates/native-abi",
