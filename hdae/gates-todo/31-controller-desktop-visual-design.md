@@ -42,6 +42,8 @@ and interaction model.
 
 ## Remaining work
 
+- [ ] Replace the visibly pixelated 3 by 5 scaled font and coarse iconography
+  with a readable native visual treatment suitable for routine use.
 - [ ] Obtain human visual acceptance of the implemented framebuffer.
 
 ## Acceptance criteria
@@ -101,6 +103,10 @@ and interaction model.
   configuration workflows remain a later functional gate.
 - Human framebuffer review rejected the technically passing 160 by 100 result
   as visibly too coarse; technical passage does not satisfy visual acceptance.
+- Human framebuffer review on 2026-11-01 also rejected the 400 by 300 logical
+  result as still unreasonably pixelated. Responsive pointer input, clickable
+  controls, and live state are separate functional requirements and must not be
+  claimed by this visual gate.
 - Native service layout recognition now uses exact guard-page and stack
   geometry rather than assuming the final reserved image page is populated.
 

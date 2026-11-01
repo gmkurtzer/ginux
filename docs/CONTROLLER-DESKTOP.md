@@ -372,7 +372,7 @@ Run the complete desktop qualification from the repository root:
 make test-controller-desktop-all
 make test-controller-desktop-performance
 make test-controller-desktop-visible
-make run-desktop
+make run-gui
 ```
 
 The first command builds a verification image, runs every native desktop
@@ -385,7 +385,7 @@ presentation, secure attention, generation retirement, and fault recovery.
 actual emulated display through QEMU, injects PS/2 keyboard and relative-pointer
 input, and verifies that each input changes a complete controller desktop
 frame. It retains baseline, keyboard, and pointer evidence in
-`build/qualification/controller-desktop/`. On macOS, `make run-desktop` opens
+`build/qualification/controller-desktop/`. On macOS, `make run-gui` opens
 the same runtime in a Cocoa window; click that window to focus its physical
 keyboard and pointer while the serial controller remains in the invoking
 terminal. Set `GINUX_QEMU_DISPLAY` to another QEMU display backend when needed.

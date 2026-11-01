@@ -233,7 +233,7 @@ make test-storage          # volume initialization, recovery, and reset
 make test-controller-desktop-all         # integrated desktop and SMP recovery
 make test-controller-desktop-performance # measured responsiveness budgets
 make test-controller-desktop-visible     # QEMU pixels plus keyboard/pointer input
-make run-desktop                         # open the controller desktop on macOS
+make run-gui                             # open the controller GUI on macOS
 make check                 # architecture, ABI, format, lint, and unit checks
 ```
 
