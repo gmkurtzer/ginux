@@ -6747,6 +6747,10 @@ pub(crate) const NATIVE_CONTROLLER_IMAGE_PAGES: usize = 32;
 pub(crate) const NATIVE_CONTROLLER_STACK_PAGES: usize = 474;
 pub(crate) const NATIVE_CONTROLLER_FRAME_COUNT: usize =
     4 + NATIVE_CONTROLLER_IMAGE_PAGES + NATIVE_CONTROLLER_STACK_PAGES + 1;
+const CONTROLLER_FRAMEBUFFER_TABLE_COUNT: usize = 5;
+pub(crate) const NATIVE_CONTROLLER_MAX_FRAME_COUNT: usize =
+    NATIVE_CONTROLLER_FRAME_COUNT + CONTROLLER_FRAMEBUFFER_TABLE_COUNT;
+const CONTROLLER_FRAMEBUFFER_PAGE: usize = ENTRY_COUNT;
 const NATIVE_STACK_PAGE: usize = NATIVE_SERVICE_IMAGE_PAGES + 1;
 const NATIVE_BOOT_INFO_PAGE: usize = NATIVE_STACK_PAGE + 3;
 
@@ -6762,6 +6766,8 @@ struct NativeServiceAddressSpace<
     image_pages: usize,
     owner: memory::FrameOwner,
     dma_frame: Option<memory::FrameLease>,
+    framebuffer_tables: [Option<memory::FrameLease>; CONTROLLER_FRAMEBUFFER_TABLE_COUNT],
+    framebuffer_user_address: Option<u64>,
 }
 
 impl<const IMAGE_CAPACITY: usize, const FRAME_COUNT: usize, const STACK_PAGES: usize>
@@ -6861,6 +6867,8 @@ impl<const IMAGE_CAPACITY: usize, const FRAME_COUNT: usize, const STACK_PAGES: u
             image_pages,
             owner,
             dma_frame: None,
+            framebuffer_tables: [None; CONTROLLER_FRAMEBUFFER_TABLE_COUNT],
+            framebuffer_user_address: None,
         })
     }
 
@@ -7014,6 +7022,85 @@ impl<const IMAGE_CAPACITY: usize, const FRAME_COUNT: usize, const STACK_PAGES: u
         }
         self.dma_frame = Some(frame);
         Some((USER_TEST_ADDRESS + index * PAGE_SIZE, physical))
+    }
+
+    fn map_controller_framebuffer(
+        &mut self,
+        info: crate::controller_devices::FramebufferInfo,
+    ) -> Option<u64> {
+        if self.framebuffer_user_address.is_some() || info.format != 1 {
+            return None;
+        }
+        let required = usize::try_from(info.stride)
+            .ok()?
+            .checked_mul(usize::try_from(info.height).ok()?)?
+            .checked_mul(4)?;
+        if required == 0 || required > info.size {
+            return None;
+        }
+        let physical_start = info.base & !(PAGE_SIZE as u64 - 1);
+        let offset = usize::try_from(info.base - physical_start).ok()?;
+        let mapping_bytes = offset.checked_add(required)?;
+        let page_count = mapping_bytes.checked_add(PAGE_SIZE - 1)? / PAGE_SIZE;
+        if page_count > CONTROLLER_FRAMEBUFFER_TABLE_COUNT * ENTRY_COUNT {
+            return None;
+        }
+        let tables = memory::allocate_frames::<CONTROLLER_FRAMEBUFFER_TABLE_COUNT>(self.owner)?;
+        let addresses = tables.map(memory::FrameLease::address);
+        let mapped = unsafe {
+            (|| {
+                let root = mapped_frame::<u64>(self.root)?;
+                let pdpt = mapped_frame::<u64>(root.add(1).read() & ADDRESS_MASK)?;
+                let directory = mapped_frame::<u64>(pdpt.read() & ADDRESS_MASK)?;
+                for (index, table_physical) in addresses.iter().copied().enumerate() {
+                    if directory.add(1 + index).read() != 0 {
+                        return None;
+                    }
+                    zero_frame(table_physical)?;
+                }
+                for (index, table_physical) in addresses.iter().copied().enumerate() {
+                    directory
+                        .add(1 + index)
+                        .write(table_physical | PRESENT | WRITABLE | USER);
+                }
+                for page in 0..page_count {
+                    let table = mapped_frame::<u64>(addresses[page / ENTRY_COUNT])?;
+                    let physical = physical_start.checked_add((page * PAGE_SIZE) as u64)?;
+                    if physical & !ADDRESS_MASK != 0 {
+                        return None;
+                    }
+                    table.add(page % ENTRY_COUNT).write(
+                        physical
+                            | PRESENT
+                            | WRITABLE
+                            | USER
+                            | WRITE_THROUGH
+                            | CACHE_DISABLE
+                            | NO_EXECUTE,
+                    );
+                }
+                Some(())
+            })()
+        };
+        if mapped.is_none() {
+            unsafe {
+                if let Some(root) = mapped_frame::<u64>(self.root) {
+                    if let Some(pdpt) = mapped_frame::<u64>(root.add(1).read() & ADDRESS_MASK) {
+                        if let Some(directory) = mapped_frame::<u64>(pdpt.read() & ADDRESS_MASK) {
+                            for index in 0..CONTROLLER_FRAMEBUFFER_TABLE_COUNT {
+                                directory.add(1 + index).write(0);
+                            }
+                        }
+                    }
+                }
+            }
+            let _ = memory::scrub_and_release_frames(self.owner, &tables);
+            return None;
+        }
+        self.framebuffer_tables = tables.map(Some);
+        let address = (USER_TEST_ADDRESS + CONTROLLER_FRAMEBUFFER_PAGE * PAGE_SIZE + offset) as u64;
+        self.framebuffer_user_address = Some(address);
+        Some(address)
     }
 
     fn write_boot_info(&self, info: ginux_native_abi::NativeServiceBootV0) -> bool {
@@ -7276,8 +7363,15 @@ impl<const IMAGE_CAPACITY: usize, const FRAME_COUNT: usize, const STACK_PAGES: u
 
     fn release(self) -> bool {
         let dma = self.dma_frame;
-        memory::scrub_and_release_frames(self.owner, &self.frames)
-            && dma.is_none_or(|frame| memory::scrub_and_release_frames(self.owner, &[frame]))
+        let frames_released = memory::scrub_and_release_frames(self.owner, &self.frames);
+        let dma_released =
+            dma.is_none_or(|frame| memory::scrub_and_release_frames(self.owner, &[frame]));
+        let framebuffer_released = self
+            .framebuffer_tables
+            .into_iter()
+            .flatten()
+            .all(|frame| memory::scrub_and_release_frames(self.owner, &[frame]));
+        frames_released && dma_released && framebuffer_released
     }
 }
 
@@ -7289,6 +7383,13 @@ impl AuxiliaryAddressSpace {
             Self::Graphics(space) => space.root,
             Self::Network(space) => space.root,
             Self::Controller(space) => space.root,
+        }
+    }
+
+    fn framebuffer_user_address(&self) -> Option<u64> {
+        match self {
+            Self::Controller(space) => space.framebuffer_user_address,
+            _ => None,
         }
     }
 
@@ -7383,6 +7484,10 @@ impl AuxiliaryAddressSpace {
             Self::Controller(space) => {
                 memory::frames_owned_by(space.owner, &space.frames)
                     && memory::frame_leases_releasable(space.owner, &space.frames)
+                    && space.framebuffer_tables.iter().flatten().all(|frame| {
+                        memory::frames_owned_by(space.owner, &[*frame])
+                            && memory::frame_leases_releasable(space.owner, &[*frame])
+                    })
             }
         }
     }
@@ -7528,7 +7633,7 @@ pub(crate) fn run_interactive_controller(image: &crate::native_elf::NativeImage<
         crate::serial_write("ginux: controller capability setup failed\r\n");
         return false;
     };
-    let Some(space) = NativeServiceAddressSpace::<
+    let Some(mut space) = NativeServiceAddressSpace::<
         NATIVE_CONTROLLER_IMAGE_PAGES,
         NATIVE_CONTROLLER_FRAME_COUNT,
         NATIVE_CONTROLLER_STACK_PAGES,
@@ -7541,6 +7646,16 @@ pub(crate) fn run_interactive_controller(image: &crate::native_elf::NativeImage<
         crate::serial_write("\r\n");
         return false;
     };
+    let Some(framebuffer) = crate::controller_devices::framebuffer_info() else {
+        crate::serial_write("ginux: controller framebuffer unavailable\r\n");
+        let _ = space.release();
+        return false;
+    };
+    if space.map_controller_framebuffer(framebuffer).is_none() {
+        crate::serial_write("ginux: controller framebuffer mapping failed\r\n");
+        let _ = space.release();
+        return false;
+    }
     if !space.layout_is_valid(image)
         || !space.relocations_are_valid(image)
         || !domain::handle_permits(controller, console, 2, rights)
@@ -7619,6 +7734,20 @@ pub(crate) fn run_interactive_controller(image: &crate::native_elf::NativeImage<
         identity,
     );
     interactive_controller_return_is_valid(controller, owner, identity, kernel_root)
+}
+
+pub(crate) fn controller_framebuffer_user_address(domain_id: u64) -> Option<u64> {
+    let registry = ADDRESS_SPACE_SERVICES
+        .auxiliary_address_spaces
+        .get()
+        .cast_const();
+    unsafe {
+        (*registry)
+            .iter()
+            .flatten()
+            .find(|registered| registered.domain == domain_id)
+            .and_then(|registered| registered.space.framebuffer_user_address())
+    }
 }
 
 fn interactive_controller_return_is_valid(

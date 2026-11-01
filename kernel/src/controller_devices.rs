@@ -311,6 +311,10 @@ pub(crate) fn install(info: FramebufferInfo) -> bool {
     DEVICES.lock().install(info)
 }
 
+pub(crate) fn framebuffer_info() -> Option<FramebufferInfo> {
+    DEVICES.lock().framebuffer
+}
+
 pub(crate) fn display(request: &mut NativeDisplayRequestV0) -> bool {
     DEVICES.lock().display(request)
 }
@@ -450,20 +454,25 @@ pub(crate) fn initialize_hardware_input() -> bool {
     if wait_input_clear() {
         out_u8(0x64, 0xa8);
     }
-    if wait_input_clear() {
-        out_u8(0x64, 0xd4);
-    }
-    let mouse_command = if wait_input_clear() {
-        out_u8(0x60, 0xf4);
-        true
-    } else {
-        false
-    };
-    let mouse_enabled = mouse_command && wait_output_ready() == Some(0xfa);
+    // Use the highest standard PS/2 reporting rate. QEMU otherwise defaults
+    // to 100 Hz, which is visibly coarse on a 1920 by 1080 software cursor.
+    let mouse_enabled = write_mouse(0xf3) && write_mouse(200) && write_mouse(0xf4);
     keyboard_enabled && mouse_enabled
 }
 
 fn write_keyboard(command: u8) -> bool {
+    if !wait_input_clear() {
+        return false;
+    }
+    out_u8(0x60, command);
+    wait_output_ready() == Some(0xfa)
+}
+
+fn write_mouse(command: u8) -> bool {
+    if !wait_input_clear() {
+        return false;
+    }
+    out_u8(0x64, 0xd4);
     if !wait_input_clear() {
         return false;
     }

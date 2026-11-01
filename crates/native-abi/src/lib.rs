@@ -235,6 +235,8 @@ pub const NATIVE_DISPLAY_WRITE_PIXEL: u16 = 1;
 pub const NATIVE_DISPLAY_RESET: u16 = 2;
 pub const NATIVE_DISPLAY_FILL_RECT: u16 = 3;
 pub const NATIVE_DISPLAY_BLIT: u16 = 4;
+/// Return the controller's capability-bounded, writable GOP mapping address.
+pub const NATIVE_DISPLAY_MAP: u16 = 5;
 pub const NATIVE_INPUT_READ: u16 = 0;
 pub const NATIVE_INPUT_RESET: u16 = 1;
 pub const NATIVE_INPUT_KIND_KEY: u16 = 1;

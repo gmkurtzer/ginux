@@ -9,7 +9,7 @@ use ginux_native_abi::{
     NATIVE_ROOT_OPERATION,
 };
 use ginux_windowing::{
-    paint_border, paint_rect, paint_text_5x7_smooth, Rect, COLOR_ACCENT, COLOR_BORDER,
+    paint_border, paint_rect, paint_text_inter_20, Rect, COLOR_ACCENT, COLOR_BORDER,
     COLOR_DARK_TEXT, COLOR_DESKTOP, COLOR_HEALTHY, COLOR_MUTED, COLOR_PANEL, COLOR_SURFACE,
     COLOR_SURFACE_RAISED, COLOR_TEXT,
 };
@@ -18,10 +18,11 @@ pub const MAX_DOMAINS: usize = 4;
 pub const MAX_JOBS: usize = 8;
 pub const MAX_NOTICES: usize = 8;
 pub const MAX_NAME: usize = 16;
-const LOGICAL_WIDTH: u16 = 800;
-const LOGICAL_HEIGHT: u16 = 600;
-pub const SHELL_WIDTH: usize = LOGICAL_WIDTH as usize;
-pub const SHELL_HEIGHT: usize = LOGICAL_HEIGHT as usize;
+const LOGICAL_WIDTH: u16 = 960;
+const LOGICAL_HEIGHT: u16 = 540;
+const DISPLAY_SCALE: u16 = 2;
+pub const SHELL_WIDTH: usize = LOGICAL_WIDTH as usize * DISPLAY_SCALE as usize;
+pub const SHELL_HEIGHT: usize = LOGICAL_HEIGHT as usize * DISPLAY_SCALE as usize;
 pub const SHELL_BACKGROUND_COLOR: u32 = COLOR_DESKTOP;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -70,15 +71,15 @@ pub struct Layout {
 pub const DEFAULT_LAYOUT: Layout = Layout {
     width: LOGICAL_WIDTH,
     height: LOGICAL_HEIGHT,
-    top_bar_height: 56,
-    sidebar_width: 184,
-    content_left: 216,
-    content_top: 88,
-    content_width: 560,
-    content_bottom: 560,
-    nav_left: 12,
-    nav_width: 160,
-    nav_first_top: 106,
+    top_bar_height: 52,
+    sidebar_width: 220,
+    content_left: 252,
+    content_top: 82,
+    content_width: 680,
+    content_bottom: 510,
+    nav_left: 16,
+    nav_width: 188,
+    nav_first_top: 94,
     nav_step: 56,
 };
 
@@ -115,8 +116,8 @@ impl ShellState {
     pub const fn new() -> Self {
         Self {
             page: Page::Overview,
-            pointer_x: 400,
-            pointer_y: 300,
+            pointer_x: (SHELL_WIDTH / 2) as u16,
+            pointer_y: (SHELL_HEIGHT / 2) as u16,
             buttons: 0,
             power_menu: false,
             power_confirmation: None,
@@ -142,7 +143,10 @@ impl ShellState {
         if changed & 1 == 0 || buttons & 1 == 0 {
             return false;
         }
-        let (x, y) = (self.pointer_x, self.pointer_y);
+        let (x, y) = (
+            self.pointer_x / DISPLAY_SCALE,
+            self.pointer_y / DISPLAY_SCALE,
+        );
         let power_left = self.layout.width.saturating_sub(112);
         if (power_left..self.layout.width).contains(&x)
             && (0..self.layout.top_bar_height).contains(&y)
@@ -152,11 +156,11 @@ impl ShellState {
             return true;
         }
         if let Some(action) = self.power_confirmation {
-            if (280..392).contains(&x) && (344..382).contains(&y) {
+            if (344..456).contains(&x) && (296..334).contains(&y) {
                 self.power_confirmation = None;
                 return true;
             }
-            if (408..520).contains(&x) && (344..382).contains(&y) {
+            if (504..616).contains(&x) && (296..334).contains(&y) {
                 self.power_action = Some(action);
                 self.power_confirmation = None;
                 self.power_menu = false;
@@ -165,9 +169,9 @@ impl ShellState {
             return false;
         }
         if self.power_menu {
-            let action = if (624..784).contains(&x) && (58..102).contains(&y) {
+            let action = if (776..944).contains(&x) && (54..98).contains(&y) {
                 Some(PowerAction::Reboot)
-            } else if (624..784).contains(&x) && (102..146).contains(&y) {
+            } else if (776..944).contains(&x) && (98..142).contains(&y) {
                 Some(PowerAction::Shutdown)
             } else {
                 None
@@ -644,6 +648,16 @@ impl<'a, B: ManagementBackend> Application<'a, B> {
         self.render_shell_view_with_theme(pixels, stride, state, view, &DEFAULT_THEME)
     }
 
+    pub fn render_shell_view_without_pointer(
+        &self,
+        pixels: &mut [u32],
+        stride: usize,
+        state: &ShellState,
+        view: &SystemView,
+    ) -> Result<u64, Error> {
+        self.render_shell_view_with_theme_inner(pixels, stride, state, view, &DEFAULT_THEME, false)
+    }
+
     pub fn render_shell_view_with_theme(
         &self,
         pixels: &mut [u32],
@@ -652,9 +666,21 @@ impl<'a, B: ManagementBackend> Application<'a, B> {
         view: &SystemView,
         theme: &Theme,
     ) -> Result<u64, Error> {
+        self.render_shell_view_with_theme_inner(pixels, stride, state, view, theme, true)
+    }
+
+    fn render_shell_view_with_theme_inner(
+        &self,
+        pixels: &mut [u32],
+        stride: usize,
+        state: &ShellState,
+        view: &SystemView,
+        theme: &Theme,
+        paint_pointer: bool,
+    ) -> Result<u64, Error> {
         let layout = state.layout;
-        if layout.width as usize != SHELL_WIDTH
-            || layout.height as usize != SHELL_HEIGHT
+        if layout.width != LOGICAL_WIDTH
+            || layout.height != LOGICAL_HEIGHT
             || layout.top_bar_height >= layout.height
             || layout.sidebar_width >= layout.width
             || layout.content_left < i16::try_from(layout.sidebar_width).unwrap_or(i16::MAX)
@@ -685,18 +711,18 @@ impl<'a, B: ManagementBackend> Application<'a, B> {
             theme.border,
         )?;
         text(pixels, stride, 24, 20, b"GINUX", theme.text)?;
-        text(pixels, stride, 304, 20, b"System Management", theme.muted)?;
+        text(pixels, stride, 392, 18, b"System Management", theme.muted)?;
         let mut time = [b'0'; 5];
         time[0] = b'0' + view.hour / 10;
         time[1] = b'0' + view.hour % 10;
         time[2] = b':';
         time[3] = b'0' + view.minute / 10;
         time[4] = b'0' + view.minute % 10;
-        text(pixels, stride, 652, 20, &time, theme.muted)?;
+        text(pixels, stride, 810, 18, &time, theme.muted)?;
         rect(
             pixels,
             stride,
-            Rect::new(724, 23, 8, 8),
+            Rect::new(868, 21, 8, 8),
             if view.healthy {
                 theme.healthy
             } else {
@@ -769,13 +795,19 @@ impl<'a, B: ManagementBackend> Application<'a, B> {
             render_power_confirmation(pixels, stride, action, theme)?;
         }
 
-        draw_pointer(
-            pixels,
-            stride,
-            state.pointer_x.min((SHELL_WIDTH - 1) as u16) as i16,
-            state.pointer_y.min((SHELL_HEIGHT - 1) as u16) as i16,
-        )?;
-        Ok(ginux_windowing::pixel_hash(pixels))
+        if paint_pointer {
+            draw_pointer(
+                pixels,
+                stride,
+                state.pointer_x.min((SHELL_WIDTH - 1) as u16) as i16,
+                state.pointer_y.min((SHELL_HEIGHT - 1) as u16) as i16,
+            )?;
+        }
+        Ok(if paint_pointer {
+            ginux_windowing::pixel_hash(pixels)
+        } else {
+            0
+        })
     }
 
     fn render_overview(
@@ -871,7 +903,7 @@ impl<'a, B: ManagementBackend> Application<'a, B> {
             Rect::new(left + 1, table_top + 41, layout.content_width - 2, 42),
             theme.surface,
         )?;
-        for offset in [182, 332, 434] {
+        for offset in [230, 410, 530] {
             rect(
                 pixels,
                 stride,
@@ -890,7 +922,7 @@ impl<'a, B: ManagementBackend> Application<'a, B> {
         text(
             pixels,
             stride,
-            left + 198,
+            left + 246,
             table_top + 55,
             b"State",
             theme.muted,
@@ -898,7 +930,7 @@ impl<'a, B: ManagementBackend> Application<'a, B> {
         text(
             pixels,
             stride,
-            left + 348,
+            left + 426,
             table_top + 55,
             b"CPU",
             theme.muted,
@@ -906,7 +938,7 @@ impl<'a, B: ManagementBackend> Application<'a, B> {
         text(
             pixels,
             stride,
-            left + 450,
+            left + 546,
             table_top + 55,
             b"Memory",
             theme.muted,
@@ -927,23 +959,32 @@ impl<'a, B: ManagementBackend> Application<'a, B> {
             rect(
                 pixels,
                 stride,
-                Rect::new(left + 198, y + 3, 8, 8),
+                Rect::new(left + 246, y + 3, 8, 8),
                 if domain.state == DomainState::Running {
                     theme.healthy
                 } else {
                     theme.muted
                 },
             )?;
-            text(pixels, stride, left + 216, y, state, theme.text)?;
+            text(pixels, stride, left + 264, y, state, theme.text)?;
             let mut cpu = [0_u8; 5];
             let cpu = decimal(&mut cpu, u64::from(domain.cpu));
-            text(pixels, stride, left + 348, y, cpu, theme.text)?;
+            text(pixels, stride, left + 426, y, cpu, theme.text)?;
             let mut memory = [0_u8; 8];
             let memory = decimal_suffix(&mut memory, u64::from(domain.memory_mib), b"M");
-            text(pixels, stride, left + 450, y, memory, theme.text)?;
+            text(pixels, stride, left + 546, y, memory, theme.text)?;
         }
         Ok(())
     }
+}
+
+pub fn paint_shell_pointer(pixels: &mut [u32], stride: usize, x: u16, y: u16) -> Result<(), Error> {
+    draw_pointer(
+        pixels,
+        stride,
+        x.min((SHELL_WIDTH - 1) as u16) as i16,
+        y.min((SHELL_HEIGHT - 1) as u16) as i16,
+    )
 }
 
 fn page_at(x: u16, y: u16, layout: &Layout) -> Option<Page> {
@@ -1145,7 +1186,12 @@ fn outline(pixels: &mut [u32], stride: usize, area: Rect, color: u32) -> Result<
 }
 
 fn scaled_rect(area: Rect) -> Rect {
-    area
+    Rect::new(
+        area.x.saturating_mul(DISPLAY_SCALE as i16),
+        area.y.saturating_mul(DISPLAY_SCALE as i16),
+        area.width.saturating_mul(DISPLAY_SCALE),
+        area.height.saturating_mul(DISPLAY_SCALE),
+    )
 }
 
 fn text(
@@ -1156,7 +1202,15 @@ fn text(
     value: &[u8],
     color: u32,
 ) -> Result<(), Error> {
-    paint_text_5x7_smooth(pixels, stride, x, y, value, color).map_err(|_| Error::Failed)
+    paint_text_inter_20(
+        pixels,
+        stride,
+        x.saturating_mul(DISPLAY_SCALE as i16),
+        y.saturating_mul(DISPLAY_SCALE as i16),
+        value,
+        color,
+    )
+    .map_err(|_| Error::Failed)
 }
 
 fn card(
@@ -1315,12 +1369,12 @@ fn draw_power_icon(
 }
 
 fn render_power_menu(pixels: &mut [u32], stride: usize, theme: &Theme) -> Result<(), Error> {
-    let panel = Rect::new(616, 56, 168, 96);
+    let panel = Rect::new(776, 52, 168, 96);
     rect(pixels, stride, panel, theme.raised)?;
     outline(pixels, stride, panel, theme.border)?;
-    text(pixels, stride, 636, 72, b"Reboot", theme.text)?;
-    rect(pixels, stride, Rect::new(624, 101, 152, 1), theme.border)?;
-    text(pixels, stride, 636, 116, b"Shut down", theme.danger)
+    text(pixels, stride, 796, 68, b"Reboot", theme.text)?;
+    rect(pixels, stride, Rect::new(784, 97, 152, 1), theme.border)?;
+    text(pixels, stride, 796, 112, b"Shut down", theme.danger)
 }
 
 fn render_power_confirmation(
@@ -1329,15 +1383,20 @@ fn render_power_confirmation(
     action: PowerAction,
     theme: &Theme,
 ) -> Result<(), Error> {
-    rect(pixels, stride, Rect::new(0, 0, 800, 600), 0x0006_0c16)?;
-    let panel = Rect::new(248, 218, 336, 180);
+    rect(
+        pixels,
+        stride,
+        Rect::new(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT),
+        0x0006_0c16,
+    )?;
+    let panel = Rect::new(312, 154, 336, 180);
     rect(pixels, stride, panel, theme.raised)?;
     outline(pixels, stride, panel, theme.border)?;
     text(
         pixels,
         stride,
-        280,
-        250,
+        344,
+        186,
         if action == PowerAction::Reboot {
             b"Reboot Ginux?"
         } else {
@@ -1348,16 +1407,16 @@ fn render_power_confirmation(
     text(
         pixels,
         stride,
-        280,
-        286,
+        344,
+        222,
         b"Running domains will stop.",
         theme.muted,
     )?;
-    rect(pixels, stride, Rect::new(280, 344, 112, 38), theme.surface)?;
-    outline(pixels, stride, Rect::new(280, 344, 112, 38), theme.border)?;
-    text(pixels, stride, 298, 356, b"Cancel", theme.text)?;
-    rect(pixels, stride, Rect::new(408, 344, 112, 38), theme.danger)?;
-    text(pixels, stride, 424, 356, b"Confirm", theme.text)
+    rect(pixels, stride, Rect::new(344, 296, 112, 38), theme.surface)?;
+    outline(pixels, stride, Rect::new(344, 296, 112, 38), theme.border)?;
+    text(pixels, stride, 362, 308, b"Cancel", theme.text)?;
+    rect(pixels, stride, Rect::new(504, 296, 112, 38), theme.danger)?;
+    text(pixels, stride, 520, 308, b"Confirm", theme.text)
 }
 
 pub fn cli_execute<B: ManagementBackend>(
@@ -1409,6 +1468,7 @@ pub fn contract_probe() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    extern crate std;
 
     #[test]
     fn gui_workflow_is_nonblocking_and_reports_each_result() {
@@ -1491,21 +1551,21 @@ mod tests {
     fn graphical_shell_has_stable_exact_pixels() {
         let mut backend = ModelBackend::new();
         let app = Application::new(&mut backend);
-        let mut pixels = [0_u32; SHELL_WIDTH * SHELL_HEIGHT];
+        let mut pixels = std::vec![0_u32; SHELL_WIDTH * SHELL_HEIGHT];
         let hash = app.render_shell(&mut pixels, SHELL_WIDTH).unwrap();
         assert_ne!(hash, 0);
         assert_eq!(pixels[0], COLOR_PANEL);
-        assert_eq!(pixels[55 * SHELL_WIDTH], COLOR_BORDER);
-        assert_eq!(pixels[106 * SHELL_WIDTH + 12], COLOR_ACCENT);
-        assert_eq!(pixels[260 * SHELL_WIDTH + 216], COLOR_BORDER);
-        assert_eq!(pixels[261 * SHELL_WIDTH + 217], COLOR_SURFACE_RAISED);
+        assert_eq!(pixels[102 * SHELL_WIDTH], COLOR_BORDER);
+        assert_eq!(pixels[188 * SHELL_WIDTH + 32], COLOR_ACCENT);
+        assert_eq!(pixels[508 * SHELL_WIDTH + 504], COLOR_BORDER);
+        assert_eq!(pixels[510 * SHELL_WIDTH + 506], COLOR_SURFACE_RAISED);
         assert_eq!(hash, app.render_shell(&mut pixels, SHELL_WIDTH).unwrap());
     }
 
     #[test]
     fn pointer_click_selects_navigation_once() {
         let mut state = ShellState::new();
-        assert!(state.pointer_motion(80, 460));
+        assert!(state.pointer_motion(160, 880));
         assert!(state.pointer_buttons(1, 1));
         assert_eq!(state.page, Page::Settings);
         assert!(!state.pointer_buttons(1, 0));
@@ -1516,15 +1576,15 @@ mod tests {
     #[test]
     fn power_menu_requires_confirmation_and_routes_reboot() {
         let mut state = ShellState::new();
-        assert!(state.pointer_motion(760, 24));
+        assert!(state.pointer_motion(1800, 48));
         assert!(state.pointer_buttons(1, 1));
         assert!(state.power_menu);
         assert!(!state.pointer_buttons(1, 0));
-        assert!(state.pointer_motion(700, 80));
+        assert!(state.pointer_motion(1680, 152));
         assert!(state.pointer_buttons(1, 1));
         assert_eq!(state.power_confirmation, Some(PowerAction::Reboot));
         assert!(!state.pointer_buttons(1, 0));
-        assert!(state.pointer_motion(460, 360));
+        assert!(state.pointer_motion(1120, 630));
         assert!(state.pointer_buttons(1, 1));
         assert_eq!(state.take_power_action(), Some(PowerAction::Reboot));
         assert_eq!(state.take_power_action(), None);
@@ -1536,7 +1596,7 @@ mod tests {
         let app = Application::new(&mut backend);
         let state = ShellState::new();
         let view = SystemView::model();
-        let mut pixels = [0_u32; SHELL_WIDTH * SHELL_HEIGHT];
+        let mut pixels = std::vec![0_u32; SHELL_WIDTH * SHELL_HEIGHT];
         let default = app
             .render_shell_view_with_theme(&mut pixels, SHELL_WIDTH, &state, &view, &DEFAULT_THEME)
             .unwrap();
@@ -1546,7 +1606,7 @@ mod tests {
             .render_shell_view_with_theme(&mut pixels, SHELL_WIDTH, &state, &view, &alternate)
             .unwrap();
         assert_ne!(default, changed);
-        assert_eq!(pixels[106 * SHELL_WIDTH + 12], alternate.accent);
+        assert_eq!(pixels[188 * SHELL_WIDTH + 32], alternate.accent);
     }
 
     #[test]
@@ -1561,11 +1621,11 @@ mod tests {
         state.layout.nav_width = 172;
         state.layout.nav_first_top = 112;
         let view = SystemView::model();
-        let mut pixels = [0_u32; SHELL_WIDTH * SHELL_HEIGHT];
+        let mut pixels = std::vec![0_u32; SHELL_WIDTH * SHELL_HEIGHT];
         app.render_shell_view(&mut pixels, SHELL_WIDTH, &state, &view)
             .unwrap();
-        assert_eq!(pixels[112 * SHELL_WIDTH + 16], DEFAULT_THEME.accent);
-        assert!(state.pointer_motion(80, 112 + 6 * 56 + 10));
+        assert_eq!(pixels[224 * SHELL_WIDTH + 32], DEFAULT_THEME.accent);
+        assert!(state.pointer_motion(160, (112 + 6 * 56 + 10) * 2));
         assert!(state.pointer_buttons(1, 1));
         assert_eq!(state.page, Page::Settings);
     }
@@ -1575,7 +1635,7 @@ mod tests {
         let mut backend = ModelBackend::new();
         let app = Application::new(&mut backend);
         let state = ShellState::new();
-        let mut pixels = [0_u32; SHELL_WIDTH * SHELL_HEIGHT];
+        let mut pixels = std::vec![0_u32; SHELL_WIDTH * SHELL_HEIGHT];
         let empty = SystemView::empty();
         let empty_hash = app
             .render_shell_view(&mut pixels, SHELL_WIDTH, &state, &empty)

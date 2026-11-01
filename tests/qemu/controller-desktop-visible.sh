@@ -13,9 +13,14 @@ click_screenshot="$(mktemp -t ginux-desktop-click.XXXXXX).ppm"
 overview_screenshot="$(mktemp -t ginux-desktop-overview.XXXXXX).ppm"
 live_screenshot="$(mktemp -t ginux-desktop-live.XXXXXX).ppm"
 power_screenshot="$(mktemp -t ginux-desktop-power.XXXXXX).ppm"
+latency_reference="$(mktemp -t ginux-desktop-latency-reference.XXXXXX).ppm"
+latency_capture="$(mktemp -t ginux-desktop-latency-capture.XXXXXX).ppm"
+latency_samples="$(mktemp -t ginux-desktop-latency-samples.XXXXXX)"
+monitor_fifo="$(mktemp -u /tmp/ginux-desktop-monitor-input.XXXXXX)"
 volume_image="$(mktemp -t ginux-desktop-volume.XXXXXX)"
 artifact_dir="$repo_root/build/qualification/controller-desktop"
 qemu_pid=""
+monitor_client_pid=""
 palette=('\010\020\035' '\015\027\046' '\023\040\062' '\015\177\362')
 
 frame_has_palette() {
@@ -28,16 +33,107 @@ frame_has_palette() {
     done
 }
 
+frame_is_1080p() {
+    [[ "$(sed -n '2p' "$1")" == '1920 1080' ]]
+}
+
+frame_pixel_hex() {
+    local frame="$1" x="$2" y="$3" offset
+    offset=$((17 + (y * 1920 + x) * 3))
+    dd if="$frame" bs=1 skip="$offset" count=3 2>/dev/null \
+        | od -An -tx1 | tr -d ' \n'
+}
+
+timestamp_ms() {
+    perl -MTime::HiRes=time -e 'printf "%.3f\n", time() * 1000'
+}
+
+move_pointer() {
+    local remaining_x="$1" remaining_y="$2" step_x step_y
+    while ((remaining_x != 0 || remaining_y != 0)); do
+        step_x="$remaining_x"
+        step_y="$remaining_y"
+        ((step_x > 100)) && step_x=100
+        ((step_x < -100)) && step_x=-100
+        ((step_y > 100)) && step_y=100
+        ((step_y < -100)) && step_y=-100
+        monitor_command "mouse_move $step_x $step_y"
+        sleep 0.002
+        remaining_x=$((remaining_x - step_x))
+        remaining_y=$((remaining_y - step_y))
+    done
+}
+
+monitor_command() {
+    printf '%s\n' "$1" >&8
+}
+
+capture_frame() {
+    local frame="$1"
+    rm -f "$frame"
+    monitor_command "screendump $frame"
+    for _ in $(seq 1 100); do
+        if [[ -s "$frame" ]] && frame_is_1080p "$frame" \
+            && [[ "$(wc -c <"$frame" | tr -d ' ')" -ge 6220817 ]]; then
+            return 0
+        fi
+        sleep 0.001
+    done
+    echo "Visible desktop test failed: incomplete framebuffer capture $frame." >&2
+    exit 1
+}
+
+start_monitor_client() {
+    mkfifo "$monitor_fifo"
+    nc -U "$monitor_socket" <"$monitor_fifo" >/dev/null &
+    monitor_client_pid=$!
+    exec 8>"$monitor_fifo"
+}
+
+measure_visible_change() {
+    local label="$1" command="$2" start end elapsed changed=0
+    start="$(timestamp_ms)"
+    printf '%b' "$command" >&8
+    # Let the emulated input IRQ run before requesting a screendump. An
+    # immediate screendump pauses vCPU execution and measures the observer's
+    # interference rather than the presentation path.
+    sleep 0.008
+    for _ in $(seq 1 80); do
+        capture_frame "$latency_capture"
+        if ! cmp -s "$latency_reference" "$latency_capture"; then
+            changed=1
+            break
+        fi
+        sleep 0.005
+    done
+    if ((changed == 0)); then
+        echo "Visible desktop test failed: $label did not produce a visible frame." >&2
+        exit 1
+    fi
+    end="$(timestamp_ms)"
+    elapsed="$(awk -v start="$start" -v end="$end" 'BEGIN { printf "%.3f", end - start }')"
+    printf '%s\n' "$elapsed" >>"$latency_samples"
+    cp "$latency_capture" "$latency_reference"
+    printf '%s %s ms\n' "$label" "$elapsed"
+}
+
 cleanup() {
     if [[ -n "$qemu_pid" ]] && kill -0 "$qemu_pid" 2>/dev/null; then
         kill "$qemu_pid" 2>/dev/null || true
         wait "$qemu_pid" 2>/dev/null || true
+    fi
+    exec 8>&- 2>/dev/null || true
+    if [[ -n "$monitor_client_pid" ]] && kill -0 "$monitor_client_pid" 2>/dev/null; then
+        kill "$monitor_client_pid" 2>/dev/null || true
+        wait "$monitor_client_pid" 2>/dev/null || true
     fi
     exec 9>&- 9<&- || true
     rm -f "$output_file" "$monitor_socket" "$serial_fifo" "$screenshot" "$keyboard_screenshot" \
         "$pointer_screenshot" "$volume_image"
     rm -f "$click_screenshot" "$overview_screenshot" "$live_screenshot"
     rm -f "$power_screenshot"
+    rm -f "$latency_reference" "$latency_capture" "$latency_samples"
+    rm -f "$monitor_fifo"
 }
 trap cleanup EXIT
 
@@ -103,23 +199,51 @@ for _ in $(seq 1 80); do
     sleep 0.25
 done
 
-# Move from the controller's native center into the Settings row,
-# then exercise an actual PS/2 primary-button press and release.
-printf 'mouse_move -338 151\nmouse_button 1\nmouse_button 0\n' | nc -U "$monitor_socket" >/dev/null
-click_hash="$pointer_hash"
-for _ in $(seq 1 80); do
-    printf 'screendump %s\n' "$click_screenshot" | nc -U "$monitor_socket" >/dev/null
-    click_hash="$(shasum -a 256 "$click_screenshot" | awk '{print $1}')"
-    if [[ "$click_hash" != "$pointer_hash" ]] && frame_has_palette "$click_screenshot"; then
-        break
+start_monitor_client
+cp "$pointer_screenshot" "$latency_reference"
+for sample in $(seq 1 20); do
+    if ((sample % 2 == 1)); then
+        delta=6
+    else
+        delta=-6
     fi
-    sleep 0.25
+    measure_visible_change "pointer-$sample" "mouse_move $delta 0\n"
 done
 
-printf 'mouse_move 0 -336\nmouse_button 1\nmouse_button 0\n' | nc -U "$monitor_socket" >/dev/null
+# HMP relative movement is scaled by the emulated PS/2 resolution. Clamp to a
+# known edge before selecting exact shell controls so the test is independent
+# of that scale and of its earlier latency samples.
+move_pointer -5000 5000
+sleep 0.05
+move_pointer 208 -179
+sleep 0.05
+capture_frame "$latency_reference"
+measure_visible_change 'page-settings' 'mouse_button 1\nmouse_button 0\n'
+cp "$latency_capture" "$click_screenshot"
+click_hash="$pointer_hash"
+click_hash="$(shasum -a 256 "$click_screenshot" | awk '{print $1}')"
+if [[ "$(frame_pixel_hex "$click_screenshot" 32 900)" != '0d7ff2' ]]; then
+    mkdir -p "$artifact_dir"
+    cp "$click_screenshot" "$artifact_dir/debug-target-settings.ppm"
+    if command -v sips >/dev/null 2>&1; then
+        sips -s format png "$click_screenshot" --out "$artifact_dir/debug-target-settings.png" >/dev/null
+    fi
+    echo 'Visible desktop test failed: Settings click did not select Settings.' >&2
+    exit 1
+fi
+
+move_pointer -5000 -5000
+sleep 0.05
+move_pointer 208 220
+sleep 0.05
+printf 'mouse_button 1\nmouse_button 0\n' >&8
 sleep 0.5
-printf 'screendump %s\n' "$overview_screenshot" | nc -U "$monitor_socket" >/dev/null
+capture_frame "$overview_screenshot"
 overview_hash="$(shasum -a 256 "$overview_screenshot" | awk '{print $1}')"
+if [[ "$(frame_pixel_hex "$overview_screenshot" 32 220)" != '0d7ff2' ]]; then
+    echo 'Visible desktop test failed: Overview click did not select Overview.' >&2
+    exit 1
+fi
 
 # A recovery-CLI mutation must update the same live GUI model without
 # restarting the controller. Native keyboard input was exercised above; this
@@ -138,27 +262,30 @@ for _ in $(seq 1 40); do
     fi
     sleep 0.1
 done
-# Let the complete native framebuffer blit finish before taking evidence; a
-# screendump during a blit would capture a deliberately transient torn frame.
-sleep 2
-printf 'screendump %s\n' "$live_screenshot" | nc -U "$monitor_socket" >/dev/null
-live_hash="$(shasum -a 256 "$live_screenshot" | awk '{print $1}')"
+# The mapped framebuffer is persistent. Poll until the controller's periodic
+# live-state snapshot has incorporated the serial mutation.
+live_hash="$overview_hash"
+for _ in $(seq 1 20); do
+    sleep 0.05
+    capture_frame "$live_screenshot"
+    live_hash="$(shasum -a 256 "$live_screenshot" | awk '{print $1}')"
+    [[ "$live_hash" != "$overview_hash" ]] && break
+done
 
 # Open the real power menu from the known pointer position and retain visual
 # evidence without triggering either destructive action.
-printf 'mouse_move 684 -684\n' | nc -U "$monitor_socket" >/dev/null
+move_pointer 5000 -5000
+sleep 0.05
+move_pointer -205 30
+sleep 0.05
 sleep 0.2
-printf 'mouse_move 684 -684\n' | nc -U "$monitor_socket" >/dev/null
-sleep 0.2
-printf 'mouse_move -35 28\n' | nc -U "$monitor_socket" >/dev/null
-sleep 0.2
-printf 'mouse_button 1\n' | nc -U "$monitor_socket" >/dev/null
+monitor_command 'mouse_button 1'
 sleep 0.1
-printf 'mouse_button 0\n' | nc -U "$monitor_socket" >/dev/null
+monitor_command 'mouse_button 0'
 sleep 1
-printf 'screendump %s\n' "$power_screenshot" | nc -U "$monitor_socket" >/dev/null
+capture_frame "$power_screenshot"
 power_hash="$(shasum -a 256 "$power_screenshot" | awk '{print $1}')"
-printf 'quit\n' | nc -U "$monitor_socket" >/dev/null
+monitor_command 'quit'
 wait "$qemu_pid" 2>/dev/null || true
 qemu_pid=""
 
@@ -172,6 +299,13 @@ if [[ ! -s "$screenshot" ]] || [[ "$(head -c 2 "$screenshot")" != P6 ]] \
     echo 'Visible desktop test failed: QEMU did not produce a PPM framebuffer.' >&2
     exit 1
 fi
+for frame in "$screenshot" "$keyboard_screenshot" "$pointer_screenshot" "$click_screenshot" \
+    "$overview_screenshot" "$live_screenshot" "$power_screenshot"; do
+    if ! frame_is_1080p "$frame"; then
+        echo "Visible desktop test failed: expected 1920x1080 framebuffer in $frame." >&2
+        exit 1
+    fi
+done
 for color in "${palette[@]}"; do
     pattern="$(printf '%b' "$color")"
     if ! LC_ALL=C grep -aFq "$pattern" "$screenshot"; then
@@ -195,7 +329,32 @@ if [[ "$pointer_hash" == "$click_hash" ]]; then
     echo 'Visible desktop test failed: pointer click did not change the active view.' >&2
     exit 1
 fi
+
+sorted_latencies="$artifact_dir/interaction-latencies-sorted-ms.txt"
+mkdir -p "$artifact_dir"
+LC_ALL=C sort -n "$latency_samples" >"$sorted_latencies"
+latency_count="$(wc -l <"$sorted_latencies" | tr -d ' ')"
+p95_index=$(((latency_count * 95 + 99) / 100))
+p95_latency="$(sed -n "${p95_index}p" "$sorted_latencies")"
+max_latency="$(tail -n 1 "$sorted_latencies")"
+page_latency="$(tail -n 1 "$latency_samples")"
+if ! awk -v p95="$p95_latency" -v max="$max_latency" -v page="$page_latency" \
+    'BEGIN { exit !(p95 <= 50 && max <= 100 && page <= 250) }'; then
+    printf 'Visible desktop latency failed: p95=%s ms max=%s ms page=%s ms\n' \
+        "$p95_latency" "$max_latency" "$page_latency" >&2
+    exit 1
+fi
 if ! grep -Fq 'visible: created' "$output_file" || [[ "$overview_hash" == "$live_hash" ]]; then
+    mkdir -p "$artifact_dir"
+    cp "$click_screenshot" "$artifact_dir/debug-settings.ppm"
+    cp "$overview_screenshot" "$artifact_dir/debug-overview.ppm"
+    cp "$live_screenshot" "$artifact_dir/debug-live.ppm"
+    if command -v sips >/dev/null 2>&1; then
+        sips -s format png "$click_screenshot" --out "$artifact_dir/debug-settings.png" >/dev/null
+        sips -s format png "$overview_screenshot" --out "$artifact_dir/debug-overview.png" >/dev/null
+        sips -s format png "$live_screenshot" --out "$artifact_dir/debug-live.png" >/dev/null
+    fi
+    printf 'settings=%s overview=%s live=%s\n' "$click_hash" "$overview_hash" "$live_hash" >&2
     cat "$output_file" >&2
     echo 'Visible desktop test failed: CLI state change did not update the GUI.' >&2
     exit 1
@@ -207,7 +366,6 @@ if [[ "$live_hash" == "$power_hash" ]] || ! LC_ALL=C grep -aFq "$danger_pattern"
     exit 1
 fi
 
-mkdir -p "$artifact_dir"
 cp "$output_file" "$artifact_dir/serial.log"
 cp "$screenshot" "$artifact_dir/baseline.ppm"
 cp "$keyboard_screenshot" "$artifact_dir/keyboard.ppm"
@@ -225,5 +383,10 @@ if command -v sips >/dev/null 2>&1; then
     sips -s format png "$power_screenshot" --out "$artifact_dir/power-menu.png" >/dev/null
 fi
 
+printf 'resolution=1920x1080\np95_ms=%s\nmax_ms=%s\npage_ms=%s\n' \
+    "$p95_latency" "$max_latency" "$page_latency" >"$artifact_dir/latency-summary.txt"
+
 echo 'Visible interactive controller desktop framebuffer passed.'
+printf 'Latency: p95=%s ms max=%s ms page=%s ms\n' \
+    "$p95_latency" "$max_latency" "$page_latency"
 echo "Evidence: $artifact_dir"

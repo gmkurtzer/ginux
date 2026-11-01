@@ -1,5 +1,7 @@
 #![no_std]
 
+mod inter_20;
+
 pub const MAX_WINDOWS: usize = 4;
 pub const MAX_WIDGETS: usize = 8;
 pub const MAX_DAMAGE: usize = 16;
@@ -915,6 +917,65 @@ pub fn paint_text_5x7_smooth(
     Ok(())
 }
 
+/// Paint the embedded antialiased Inter controller face. The atlas is
+/// generated ahead of time so the freestanding renderer needs neither a font
+/// parser nor allocation at runtime.
+pub fn paint_text_inter_20(
+    pixels: &mut [u32],
+    stride: usize,
+    x: i16,
+    y: i16,
+    text: &[u8],
+    color: u32,
+) -> Result<(), Error> {
+    if stride == 0 || !pixels.len().is_multiple_of(stride) {
+        return Err(Error::Bounds);
+    }
+    let width = i32::try_from(stride).map_err(|_| Error::Bounds)?;
+    let height = i32::try_from(pixels.len() / stride).map_err(|_| Error::Bounds)?;
+    let mut origin_x = i32::from(x);
+    let origin_y = i32::from(y);
+    for byte in text.iter().copied() {
+        let byte = if (inter_20::GLYPH_FIRST..=inter_20::GLYPH_LAST).contains(&byte) {
+            byte
+        } else {
+            b'?'
+        };
+        let glyph = usize::from(byte - inter_20::GLYPH_FIRST);
+        let glyph_start = glyph * inter_20::GLYPH_WIDTH * inter_20::GLYPH_HEIGHT;
+        for row in 0..inter_20::GLYPH_HEIGHT {
+            let py = origin_y + row as i32;
+            if py < 0 || py >= height {
+                continue;
+            }
+            for column in 0..inter_20::GLYPH_WIDTH {
+                let px = origin_x + column as i32;
+                if px < 0 || px >= width {
+                    continue;
+                }
+                let alpha_index = glyph_start + row * inter_20::GLYPH_WIDTH + column;
+                let packed = inter_20::GLYPH_ALPHA_4[alpha_index / 2];
+                let alpha = u32::from(if alpha_index.is_multiple_of(2) {
+                    packed >> 4
+                } else {
+                    packed & 0x0f
+                }) * 17;
+                if alpha == 0 {
+                    continue;
+                }
+                let slot = py as usize * stride + px as usize;
+                pixels[slot] = if alpha == 255 {
+                    color
+                } else {
+                    blend_rgb(pixels[slot], color, alpha, 255)
+                };
+            }
+        }
+        origin_x += i32::from(inter_20::GLYPH_ADVANCE[glyph]);
+    }
+    Ok(())
+}
+
 fn blend_rgb(background: u32, foreground: u32, numerator: u32, denominator: u32) -> u32 {
     let blend = |shift| {
         let background = (background >> shift) & 0xff_u32;
@@ -1245,6 +1306,20 @@ mod tests {
         desktop.render(&mut second, 96).unwrap();
         assert_eq!(first, second);
         assert_eq!(pixel_hash(&first), 0x828c_bd51_615c_3e2c);
+    }
+
+    #[test]
+    fn embedded_inter_face_contains_antialiased_edge_coverage() {
+        const BACKGROUND: u32 = 0x0810_23;
+        const FOREGROUND: u32 = 0xe7ee_f8;
+        let mut pixels = [BACKGROUND; 48 * 32];
+
+        paint_text_inter_20(&mut pixels, 48, 2, 2, b"G", FOREGROUND).unwrap();
+
+        assert!(pixels.iter().any(|pixel| *pixel == FOREGROUND));
+        assert!(pixels
+            .iter()
+            .any(|pixel| *pixel != BACKGROUND && *pixel != FOREGROUND));
     }
 
     #[test]

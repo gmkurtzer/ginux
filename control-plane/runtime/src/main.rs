@@ -13,21 +13,21 @@ use ginux_native_abi::{
     GINUX_CONTROL_IOCTL, NATIVE_CALL_FAILED, NATIVE_CONSOLE_MAX_LINE_BYTES,
     NATIVE_CONTROL_DESCRIPTOR_OPERATION, NATIVE_CONTROL_DESCRIPTOR_SIZE,
     NATIVE_CONTROL_DISCOVERY_OPERATION, NATIVE_CONTROL_MAX_BUFFERED_CONSOLE_BYTES,
-    NATIVE_DISPLAY_BLIT, NATIVE_DISPLAY_FILL_RECT, NATIVE_DISPLAY_OPERATION, NATIVE_DISPLAY_QUERY,
-    NATIVE_DOMAIN_ATTACH, NATIVE_DOMAIN_CONFIG_AUTOSTART, NATIVE_DOMAIN_CONFIG_CPU,
-    NATIVE_DOMAIN_CONFIG_IMAGE, NATIVE_DOMAIN_CONFIG_INIT, NATIVE_DOMAIN_CONFIG_MEMORY,
-    NATIVE_DOMAIN_CONFIG_PERSONALITY, NATIVE_DOMAIN_CONTROL_OPERATION, NATIVE_DOMAIN_CREATE,
-    NATIVE_DOMAIN_CURSOR_END, NATIVE_DOMAIN_EXEC, NATIVE_DOMAIN_EXEC_INTERACTIVE,
-    NATIVE_DOMAIN_EXEC_MAX_ARGUMENTS, NATIVE_DOMAIN_HOST_REBOOT, NATIVE_DOMAIN_HOST_SHUTDOWN,
-    NATIVE_DOMAIN_INJECT_FAILURE, NATIVE_DOMAIN_LIMIT, NATIVE_DOMAIN_MAX_NAME_SIZE,
-    NATIVE_DOMAIN_POLL_BACKGROUND, NATIVE_DOMAIN_QUERY, NATIVE_DOMAIN_RESTART,
-    NATIVE_DOMAIN_RUNTIME_CONSOLE_ATTACHED, NATIVE_DOMAIN_RUNTIME_ROOTFS_READY,
-    NATIVE_DOMAIN_RUNTIME_SUSPENDED, NATIVE_DOMAIN_SET_AUTOSTART, NATIVE_DOMAIN_SET_CPU,
-    NATIVE_DOMAIN_SET_IMAGE, NATIVE_DOMAIN_SET_INIT, NATIVE_DOMAIN_SET_MEMORY_MIB,
-    NATIVE_DOMAIN_SET_PERSONALITY, NATIVE_DOMAIN_START_ATTACHED, NATIVE_DOMAIN_STATE_BOOTING,
-    NATIVE_DOMAIN_STATE_CONFIGURED, NATIVE_DOMAIN_STATE_CREATED, NATIVE_DOMAIN_STATE_FAILED,
-    NATIVE_DOMAIN_STATE_RUNNING, NATIVE_DOMAIN_STATE_STARTING, NATIVE_DOMAIN_STATE_STOPPED,
-    NATIVE_DOMAIN_STOP, NATIVE_HOST_INSPECT_OPERATION, NATIVE_HOST_INSPECT_RECORD_SIZE,
+    NATIVE_DISPLAY_MAP, NATIVE_DISPLAY_OPERATION, NATIVE_DISPLAY_QUERY, NATIVE_DOMAIN_ATTACH,
+    NATIVE_DOMAIN_CONFIG_AUTOSTART, NATIVE_DOMAIN_CONFIG_CPU, NATIVE_DOMAIN_CONFIG_IMAGE,
+    NATIVE_DOMAIN_CONFIG_INIT, NATIVE_DOMAIN_CONFIG_MEMORY, NATIVE_DOMAIN_CONFIG_PERSONALITY,
+    NATIVE_DOMAIN_CONTROL_OPERATION, NATIVE_DOMAIN_CREATE, NATIVE_DOMAIN_CURSOR_END,
+    NATIVE_DOMAIN_EXEC, NATIVE_DOMAIN_EXEC_INTERACTIVE, NATIVE_DOMAIN_EXEC_MAX_ARGUMENTS,
+    NATIVE_DOMAIN_HOST_REBOOT, NATIVE_DOMAIN_HOST_SHUTDOWN, NATIVE_DOMAIN_INJECT_FAILURE,
+    NATIVE_DOMAIN_LIMIT, NATIVE_DOMAIN_MAX_NAME_SIZE, NATIVE_DOMAIN_POLL_BACKGROUND,
+    NATIVE_DOMAIN_QUERY, NATIVE_DOMAIN_RESTART, NATIVE_DOMAIN_RUNTIME_CONSOLE_ATTACHED,
+    NATIVE_DOMAIN_RUNTIME_ROOTFS_READY, NATIVE_DOMAIN_RUNTIME_SUSPENDED,
+    NATIVE_DOMAIN_SET_AUTOSTART, NATIVE_DOMAIN_SET_CPU, NATIVE_DOMAIN_SET_IMAGE,
+    NATIVE_DOMAIN_SET_INIT, NATIVE_DOMAIN_SET_MEMORY_MIB, NATIVE_DOMAIN_SET_PERSONALITY,
+    NATIVE_DOMAIN_START_ATTACHED, NATIVE_DOMAIN_STATE_BOOTING, NATIVE_DOMAIN_STATE_CONFIGURED,
+    NATIVE_DOMAIN_STATE_CREATED, NATIVE_DOMAIN_STATE_FAILED, NATIVE_DOMAIN_STATE_RUNNING,
+    NATIVE_DOMAIN_STATE_STARTING, NATIVE_DOMAIN_STATE_STOPPED, NATIVE_DOMAIN_STOP,
+    NATIVE_HOST_INSPECT_OPERATION, NATIVE_HOST_INSPECT_RECORD_SIZE,
     NATIVE_HOST_INSPECT_REQUEST_SIZE, NATIVE_HOST_INSPECT_STATE_READY,
     NATIVE_HOST_INSPECT_STATE_STOPPING, NATIVE_HOST_INSPECT_VERSION,
     NATIVE_HOST_PROCESS_KIND_CONTROLLER, NATIVE_HOST_PROCESS_KIND_DOMAIN_INIT,
@@ -121,7 +121,63 @@ struct LinuxPollFd {
 struct DesktopState {
     shell: ginux_controller_ui::ShellState,
     view: ginux_controller_ui::SystemView,
-    display_initialized: bool,
+    surface: DisplaySurface,
+    pointer_backing: PointerBacking,
+}
+
+#[derive(Clone, Copy)]
+struct DisplaySurface {
+    address: u64,
+    width: usize,
+    height: usize,
+    stride: usize,
+}
+
+impl DisplaySurface {
+    const fn empty() -> Self {
+        Self {
+            address: 0,
+            width: 0,
+            height: 0,
+            stride: 0,
+        }
+    }
+
+    fn pixels(&mut self) -> Option<&mut [u32]> {
+        let length = self.stride.checked_mul(self.height)?;
+        if self.address == 0 || self.width == 0 || self.width > self.stride || length == 0 {
+            return None;
+        }
+        // SAFETY: The kernel returns this mapping only to the controller that
+        // holds the display capability. It covers stride * height writable,
+        // NX GOP pixels for the lifetime of this resident process.
+        Some(unsafe { core::slice::from_raw_parts_mut(self.address as *mut u32, length) })
+    }
+}
+
+const POINTER_BACKING_WIDTH: usize = 18;
+const POINTER_BACKING_HEIGHT: usize = 20;
+
+struct PointerBacking {
+    pixels: [u32; POINTER_BACKING_WIDTH * POINTER_BACKING_HEIGHT],
+    x: usize,
+    y: usize,
+    width: usize,
+    height: usize,
+    valid: bool,
+}
+
+impl PointerBacking {
+    const fn new() -> Self {
+        Self {
+            pixels: [0; POINTER_BACKING_WIDTH * POINTER_BACKING_HEIGHT],
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 0,
+            valid: false,
+        }
+    }
 }
 const COMMAND_STATUS: u16 = 1;
 const COMMAND_COMPONENTS: u16 = 2;
@@ -527,17 +583,12 @@ extern "C" fn ginux_controller_main() -> ! {
     let mut desktop = DesktopState {
         shell: ginux_controller_ui::ShellState::new(),
         view: collect_system_view(host),
-        display_initialized: false,
+        surface: DisplaySurface::empty(),
+        pointer_backing: PointerBacking::new(),
     };
     write(console, b"\r\nGinux controller v0 (ring 3)\r\n");
     write(console, b"Type 'help' for commands.\r\n");
-    render_controller_desktop(
-        GINUX_DISPLAY_FD,
-        &desktop.shell,
-        &desktop.view,
-        &mut desktop.display_initialized,
-        None,
-    );
+    render_controller_desktop(GINUX_DISPLAY_FD, &mut desktop, false);
     if !linux_sysinfo_contract(console) {
         exit(NATIVE_SERVICE_EXIT_REJECTED);
     }
@@ -579,13 +630,7 @@ extern "C" fn ginux_controller_main() -> ! {
         let mut background = NativeDomainRequestV3::zeroed();
         let _ = domain_call(host, NATIVE_DOMAIN_POLL_BACKGROUND, &mut background);
         desktop.view = collect_system_view(host);
-        render_controller_desktop(
-            GINUX_DISPLAY_FD,
-            &desktop.shell,
-            &desktop.view,
-            &mut desktop.display_initialized,
-            None,
-        );
+        render_controller_desktop(GINUX_DISPLAY_FD, &mut desktop, false);
         write(console, b"ginux> ");
         let length = read_line(
             console,
@@ -730,13 +775,9 @@ fn read_line(
             refresh_at = now.saturating_add(250);
         }
         if redraw {
-            render_controller_desktop(
-                display,
-                &desktop.shell,
-                &desktop.view,
-                &mut desktop.display_initialized,
-                (pointer_changed && !content_changed && key_count == 0).then_some(old_pointer),
-            );
+            let pointer_only = pointer_changed && !content_changed && key_count == 0;
+            let _ = old_pointer;
+            render_controller_desktop(display, desktop, pointer_only);
         } else {
             let _ = linux_syscall(LINUX_SCHED_YIELD_SYSCALL, 0, 0, 0);
         }
@@ -877,147 +918,120 @@ fn monotonic_millis() -> u64 {
         .saturating_add(time[1] / 1_000_000)
 }
 
-fn render_controller_desktop(
-    display: u64,
-    shell: &ginux_controller_ui::ShellState,
-    view: &ginux_controller_ui::SystemView,
-    display_initialized: &mut bool,
-    pointer_damage: Option<(u16, u16)>,
-) {
-    const WIDTH: usize = ginux_controller_ui::SHELL_WIDTH;
-    const HEIGHT: usize = ginux_controller_ui::SHELL_HEIGHT;
-    let mut pixels = [0_u32; WIDTH * HEIGHT];
-    let mut backend = ginux_controller_ui::ModelBackend::new();
-    let app = ginux_controller_ui::Application::new(&mut backend);
-    if app
-        .render_shell_view(&mut pixels, WIDTH, shell, view)
-        .is_err()
-    {
-        exit(NATIVE_SERVICE_EXIT_REJECTED);
-    }
-    let mut request = NativeDisplayRequestV0 {
-        size: NativeDisplayRequestV0::SIZE,
-        version: 0,
-        command: NATIVE_DISPLAY_QUERY,
-        x: 0,
-        y: 0,
-        color: 0,
-        width: 0,
-        height: 0,
-        stride: 0,
-        format: 0,
-        reserved: 0,
-    };
-    if call(
-        NATIVE_DISPLAY_OPERATION,
-        display,
-        (&mut request as *mut NativeDisplayRequestV0) as u64,
-        0,
-    ) != u64::from(NativeDisplayRequestV0::SIZE)
-    {
-        exit(NATIVE_SERVICE_EXIT_REJECTED);
-    }
-    let framebuffer_width = request.width;
-    let framebuffer_height = request.height;
-    if !*display_initialized {
-        request.command = NATIVE_DISPLAY_FILL_RECT;
-        request.x = 0;
-        request.y = 0;
-        request.color = ginux_controller_ui::SHELL_BACKGROUND_COLOR;
-        request.width = framebuffer_width;
-        request.height = framebuffer_height;
+fn render_controller_desktop(display: u64, desktop: &mut DesktopState, pointer_only: bool) {
+    if desktop.surface.address == 0 {
+        let mut request = NativeDisplayRequestV0 {
+            size: NativeDisplayRequestV0::SIZE,
+            version: 0,
+            command: NATIVE_DISPLAY_QUERY,
+            x: 0,
+            y: 0,
+            color: 0,
+            width: 0,
+            height: 0,
+            stride: 0,
+            format: 0,
+            reserved: 0,
+        };
         if call(
             NATIVE_DISPLAY_OPERATION,
             display,
             (&mut request as *mut NativeDisplayRequestV0) as u64,
             0,
         ) != u64::from(NativeDisplayRequestV0::SIZE)
+            || request.format != 1
+            || request.width as usize != ginux_controller_ui::SHELL_WIDTH
+            || request.height as usize != ginux_controller_ui::SHELL_HEIGHT
+            || request.stride < request.width
         {
             exit(NATIVE_SERVICE_EXIT_REJECTED);
         }
-        *display_initialized = true;
-    }
-    let scale = (framebuffer_width / WIDTH as u32)
-        .min(framebuffer_height / HEIGHT as u32)
-        .max(1);
-    let origin_x = framebuffer_width.saturating_sub(WIDTH as u32 * scale) / 2;
-    let origin_y = framebuffer_height.saturating_sub(HEIGHT as u32 * scale) / 2;
-    if let Some(old_pointer) = pointer_damage {
-        blit_pointer_damage(
-            display,
-            &mut request,
-            &pixels,
-            origin_x,
-            origin_y,
-            scale,
-            old_pointer,
-        );
-        blit_pointer_damage(
-            display,
-            &mut request,
-            &pixels,
-            origin_x,
-            origin_y,
-            scale,
-            (shell.pointer_x, shell.pointer_y),
-        );
-    } else {
-        request.command = NATIVE_DISPLAY_BLIT;
-        request.x = origin_x;
-        request.y = origin_y;
-        request.width = WIDTH as u32;
-        request.height = HEIGHT as u32;
-        request.stride = WIDTH as u32;
-        request.format = 0;
-        request.reserved = scale;
-        if call(
+        request.command = NATIVE_DISPLAY_MAP;
+        let address = call(
             NATIVE_DISPLAY_OPERATION,
             display,
             (&mut request as *mut NativeDisplayRequestV0) as u64,
-            pixels.as_ptr() as u64,
-        ) != u64::from(NativeDisplayRequestV0::SIZE)
+            0,
+        );
+        if address == NATIVE_CALL_FAILED || address == 0 {
+            exit(NATIVE_SERVICE_EXIT_REJECTED);
+        }
+        desktop.surface = DisplaySurface {
+            address,
+            width: request.width as usize,
+            height: request.height as usize,
+            stride: request.stride as usize,
+        };
+    }
+    let stride = desktop.surface.stride;
+    let width = desktop.surface.width;
+    let height = desktop.surface.height;
+    let Some(pixels) = desktop.surface.pixels() else {
+        exit(NATIVE_SERVICE_EXIT_REJECTED);
+    };
+    if pointer_only && desktop.pointer_backing.valid {
+        restore_pointer_backing(pixels, stride, &mut desktop.pointer_backing);
+    } else {
+        let mut backend = ginux_controller_ui::ModelBackend::new();
+        let app = ginux_controller_ui::Application::new(&mut backend);
+        if app
+            .render_shell_view_without_pointer(pixels, stride, &desktop.shell, &desktop.view)
+            .is_err()
         {
             exit(NATIVE_SERVICE_EXIT_REJECTED);
         }
     }
-}
-
-fn blit_pointer_damage(
-    display: u64,
-    request: &mut NativeDisplayRequestV0,
-    pixels: &[u32],
-    origin_x: u32,
-    origin_y: u32,
-    scale: u32,
-    pointer: (u16, u16),
-) {
-    const WIDTH: usize = ginux_controller_ui::SHELL_WIDTH;
-    const HEIGHT: usize = ginux_controller_ui::SHELL_HEIGHT;
-    const MARGIN: usize = 2;
-    const POINTER_WIDTH: usize = 16;
-    const POINTER_HEIGHT: usize = 20;
-    let source_x = usize::from(pointer.0).saturating_sub(MARGIN);
-    let source_y = usize::from(pointer.1).saturating_sub(MARGIN);
-    let width = (POINTER_WIDTH + MARGIN * 2).min(WIDTH - source_x);
-    let height = (POINTER_HEIGHT + MARGIN * 2).min(HEIGHT - source_y);
-    request.command = NATIVE_DISPLAY_BLIT;
-    request.x = origin_x + source_x as u32 * scale;
-    request.y = origin_y + source_y as u32 * scale;
-    request.width = width as u32;
-    request.height = height as u32;
-    request.stride = WIDTH as u32;
-    request.format = 0;
-    request.reserved = scale;
-    let source = pixels.as_ptr().wrapping_add(source_y * WIDTH + source_x);
-    if call(
-        NATIVE_DISPLAY_OPERATION,
-        display,
-        (request as *mut NativeDisplayRequestV0) as u64,
-        source as u64,
-    ) != u64::from(NativeDisplayRequestV0::SIZE)
+    capture_pointer_backing(
+        pixels,
+        stride,
+        width,
+        height,
+        desktop.shell.pointer_x,
+        desktop.shell.pointer_y,
+        &mut desktop.pointer_backing,
+    );
+    if ginux_controller_ui::paint_shell_pointer(
+        pixels,
+        stride,
+        desktop.shell.pointer_x,
+        desktop.shell.pointer_y,
+    )
+    .is_err()
     {
         exit(NATIVE_SERVICE_EXIT_REJECTED);
     }
+}
+
+fn restore_pointer_backing(pixels: &mut [u32], stride: usize, backing: &mut PointerBacking) {
+    for row in 0..backing.height {
+        let source = row * POINTER_BACKING_WIDTH;
+        let target = (backing.y + row) * stride + backing.x;
+        pixels[target..target + backing.width]
+            .copy_from_slice(&backing.pixels[source..source + backing.width]);
+    }
+    backing.valid = false;
+}
+
+fn capture_pointer_backing(
+    pixels: &[u32],
+    stride: usize,
+    width: usize,
+    height: usize,
+    x: u16,
+    y: u16,
+    backing: &mut PointerBacking,
+) {
+    backing.x = usize::from(x).min(width.saturating_sub(1));
+    backing.y = usize::from(y).min(height.saturating_sub(1));
+    backing.width = POINTER_BACKING_WIDTH.min(width - backing.x);
+    backing.height = POINTER_BACKING_HEIGHT.min(height - backing.y);
+    for row in 0..backing.height {
+        let source = (backing.y + row) * stride + backing.x;
+        let target = row * POINTER_BACKING_WIDTH;
+        backing.pixels[target..target + backing.width]
+            .copy_from_slice(&pixels[source..source + backing.width]);
+    }
+    backing.valid = true;
 }
 
 fn test_linux_userspace(console: u64, host: u64, arguments: Arguments<'_>) {

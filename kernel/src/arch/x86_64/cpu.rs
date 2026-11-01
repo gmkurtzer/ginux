@@ -39174,6 +39174,9 @@ fn controller_display_call(
     ) {
         return failed;
     }
+    if command == ginux_native_abi::NATIVE_DISPLAY_MAP {
+        return address_space::controller_framebuffer_user_address(caller_domain).unwrap_or(failed);
+    }
     let mut request = ginux_native_abi::NativeDisplayRequestV0 {
         size: u32::from_le_bytes(bytes[0..4].try_into().unwrap()),
         version: u16::from_le_bytes(bytes[4..6].try_into().unwrap()),

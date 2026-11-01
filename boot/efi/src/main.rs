@@ -413,19 +413,33 @@ unsafe fn locate_framebuffer(boot_services: *mut EfiBootServices) -> Framebuffer
         let query: QueryGraphicsMode = core::mem::transmute((*graphics).query_mode);
         let set: SetGraphicsMode = core::mem::transmute((*graphics).set_mode);
         let free_pool: FreePool = core::mem::transmute((*boot_services).free_pool);
+        let mut selected_mode = None;
+        let mut selected_score = 0_u64;
         for candidate in 0..(*initial_mode).max_mode {
             let mut size = 0_usize;
             let mut info = core::ptr::null_mut();
             if query(graphics, candidate, &mut size, &mut info) == EFI_SUCCESS && !info.is_null() {
-                let selected = (*info).horizontal_resolution == 800
-                    && (*info).vertical_resolution == 600
-                    && (*info).pixel_format <= 1;
-                let _ = free_pool(info.cast());
-                if selected {
-                    let _ = set(graphics, candidate);
-                    break;
+                let width = (*info).horizontal_resolution;
+                let height = (*info).vertical_resolution;
+                let format = (*info).pixel_format;
+                let supported = format <= 1 && width <= 1920 && height <= 1080;
+                // Prefer the native 1080p target, BGR byte order (which is the
+                // controller renderer's in-memory 0x00RRGGBB layout), then the
+                // largest supported fallback.  The score keeps mode selection
+                // deterministic regardless of firmware enumeration order.
+                let exact = width == 1920 && height == 1080;
+                let score = u64::from(exact) << 63
+                    | u64::from(format == 1) << 62
+                    | (u64::from(width) * u64::from(height));
+                if supported && score > selected_score {
+                    selected_mode = Some(candidate);
+                    selected_score = score;
                 }
+                let _ = free_pool(info.cast());
             }
+        }
+        if let Some(selected_mode) = selected_mode {
+            let _ = set(graphics, selected_mode);
         }
     }
     let mode = (*graphics).mode;

@@ -340,13 +340,17 @@ The Overview page summarizes domain, CPU, and memory state and shows a compact
 live domain table. The serial controller remains an independent recovery and
 automation interface rather than being duplicated as a graphical prompt.
 
-The native renderer composes directly at the configured 800 by 600 display
-resolution. The controller shell fills that surface without a nested virtual
-window, fake window controls, graphical prompt, unused margins, or doubled
-logical pixels. It uses a softened mixed-case bitmap face, refined native
-icons, and a high-contrast outlined software pointer. Palette and major layout
-dimensions are centralized in explicit `Theme` and `Layout` contracts so the
-shell can be restyled without changing management behavior or hit testing.
+The boot path selects an exact 1920 by 1080 GOP mode when firmware exposes it,
+and the native renderer fills that surface without a nested virtual window,
+fake window controls, graphical prompt, or unused margins. The controller maps
+only the capability-authorized framebuffer pages into its address space and
+writes them directly, avoiding the former per-pixel syscall copy path. Pointer
+motion restores and repaints only its bounded 18 by 20 saved-under region.
+Controller text uses an embedded, antialiased Inter atlas generated at build
+time; icons and the high-contrast pointer remain allocation-free software
+primitives. Palette and major layout dimensions are centralized in explicit
+`Theme` and `Layout` contracts so the shell can be restyled without changing
+management behavior or hit testing.
 Color is never the only status signal: labels, values, and state text remain
 present. The accepted visual reference is
 `docs/images/controller-desktop-concept-v2.png`; actual QEMU framebuffer
@@ -377,6 +381,7 @@ Run the complete desktop qualification from the repository root:
 make test-controller-desktop-all
 make test-controller-desktop-performance
 make test-controller-desktop-visible
+make test-controller-desktop-latency
 make run-gui
 ```
 
@@ -389,14 +394,16 @@ presentation, secure attention, generation retirement, and fault recovery.
 `make test-controller-desktop-visible` boots the ordinary runtime, captures the
 actual emulated display through QEMU, injects PS/2 keyboard and relative-pointer
 input, and verifies navigation, live domain data, and the power menu in complete
-controller desktop frames. It retains baseline, keyboard, pointer, live-state,
-and power-menu evidence in
+1920 by 1080 controller desktop frames. The same run measures the complete
+QEMU event-to-visible-frame path; `make test-controller-desktop-latency` is the
+explicit latency gate. It retains baseline, keyboard, pointer, live-state,
+power-menu, and latency evidence in
 `build/qualification/controller-desktop/`. On macOS, `make run-gui` opens
 the same runtime in a Cocoa window; click that window to focus its physical
 keyboard and pointer while the serial controller remains in the invoking
 terminal. Set `GINUX_QEMU_DISPLAY` to another QEMU display backend when needed.
 
-The performance command runs the release-mode host model at 800 by 600 pixels
+The performance command runs the release-mode host model at 1920 by 1080 pixels
 for 500 samples. The input-to-frame path keeps a second domain active, consumes
 one focused input event, publishes the resulting foreground frame, and renders
 it. The steady-frame measurement renders an already-published frame. Recovery
@@ -411,10 +418,10 @@ Measurements recorded on 2026-11-01 on an Apple Silicon macOS host with QEMU
 | Metric | Measured | Budget | Result |
 |---|---:|---:|---|
 | Two-presentation model startup | 1 us | 50,000 us | pass |
-| Input-to-frame p95 with background domain | 321 us | 16,667 us | pass |
-| Steady software frame p95 | 244 us | 16,667 us | pass |
+| Input-to-frame p95 with background domain | 1,317 us | 16,667 us | pass |
+| Steady software frame p95 | 959 us | 16,667 us | pass |
 | Fault/recovery cycle p95 | <1 us | 1,000 us | pass |
-| Modeled bounded working set | 1,950,000 bytes | 8,388,608 bytes | pass |
+| Modeled bounded working set | 8,324,400 bytes | 8,388,608 bytes | pass |
 
 These budgets are regression limits for the implemented state machines and
 software renderer. They are not GPU, physical-device, whole-system CPU,
