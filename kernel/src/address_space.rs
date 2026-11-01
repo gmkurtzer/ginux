@@ -7154,14 +7154,21 @@ impl<const IMAGE_CAPACITY: usize, const FRAME_COUNT: usize, const STACK_PAGES: u
         if !info.is_valid_arp_consumer() {
             return false;
         }
-        let Some(page) = mapped_frame::<ginux_native_abi::NativeProtocolBootV0>(
-            self.frames[Self::BOOT_INFO_FRAME].address(),
-        ) else {
+        self.write_boot_info_value(info)
+    }
+
+    fn write_graphics_boot_info(&self, info: ginux_native_abi::NativeGraphicsBootV0) -> bool {
+        if !info.is_valid() {
+            return false;
+        }
+        self.write_boot_info_value(info)
+    }
+
+    fn write_boot_info_value<T: Copy>(&self, info: T) -> bool {
+        let Some(page) = mapped_frame::<T>(self.frames[Self::BOOT_INFO_FRAME].address()) else {
             return false;
         };
-        unsafe {
-            page.write(info);
-        }
+        unsafe { page.write(info) };
         true
     }
 
@@ -7685,6 +7692,107 @@ pub(crate) fn verify_native_network_service(image: &crate::native_elf::NativeIma
         crate::serial_write_u64(domain::last_lifecycle_event_detail().map_or(u64::MAX, u64::from));
     }
     valid
+}
+
+pub(crate) fn verify_native_graphics_service(image: &crate::native_elf::NativeImage<'_>) -> bool {
+    let Some(identity) = run_native_graphics_service(
+        image,
+        None,
+        ginux_native_abi::NATIVE_GRAPHICS_COMMAND_FAULT,
+        1,
+    ) else {
+        return false;
+    };
+    run_native_graphics_service(
+        image,
+        Some(identity),
+        ginux_native_abi::NATIVE_GRAPHICS_COMMAND_COMPLETE,
+        2,
+    ) == Some(identity)
+}
+
+fn run_native_graphics_service(
+    image: &crate::native_elf::NativeImage<'_>,
+    restart_identity: Option<u64>,
+    command: u32,
+    generation: u64,
+) -> Option<u64> {
+    let auxiliary = if let Some(identity) = restart_identity {
+        domain::initialize_boot_auxiliary_service_restart(
+            1,
+            2,
+            crate::capability::Rights::WRITE,
+            identity,
+        )?
+    } else {
+        domain::initialize_boot_auxiliary_service(1, 2, crate::capability::Rights::WRITE)?
+    };
+    let (Some(handle), Some(identity), Some(owner)) = (
+        domain::auxiliary_boot_handle(auxiliary, 0),
+        domain::domain_service_identity(auxiliary),
+        memory::FrameOwner::domain(auxiliary),
+    ) else {
+        return None;
+    };
+    if restart_identity.is_some_and(|expected| expected != identity)
+        || !domain::handle_permits(auxiliary, handle, 2, crate::capability::Rights::WRITE)
+        || domain::handle_permits(auxiliary, handle, 2, crate::capability::Rights::READ)
+        || domain::handle_permits(auxiliary, handle, 1, crate::capability::Rights::MANAGE)
+    {
+        return None;
+    }
+    let kernel_root = current_root();
+    let space = NativeServiceAddressSpace::new(kernel_root, owner, image)?;
+    if !space.layout_is_valid(image)
+        || !space.relocations_are_valid(image)
+        || !space.write_graphics_boot_info(ginux_native_abi::NativeGraphicsBootV0::new(
+            handle, command, generation,
+        ))
+        || memory::owner_live_frame_count(owner) != Some(NATIVE_SERVICE_FRAME_COUNT)
+    {
+        let _ = space.release();
+        return None;
+    }
+    let root = space.root;
+    let entry = usize::try_from(space.entry).ok()?;
+    let boot_info = USER_TEST_ADDRESS + NATIVE_BOOT_INFO_PAGE * PAGE_SIZE;
+    let stack = USER_TEST_ADDRESS + (NATIVE_STACK_PAGE + 2) * PAGE_SIZE;
+    if !register_address_space(auxiliary, AuxiliaryAddressSpace::Native(space))
+        || !scheduler::queue_auxiliary(auxiliary, root, entry, stack, handle)
+        || !cpu::activate_user_root(root)
+    {
+        return None;
+    }
+    cpu::execute_native_auxiliary(entry, stack, boot_info as u64, handle, auxiliary, identity);
+    let event = domain::take_lifecycle_event()?;
+    let expected_kind = if command == ginux_native_abi::NATIVE_GRAPHICS_COMMAND_FAULT {
+        crate::control_abi::LIFECYCLE_AUXILIARY_FAULT
+    } else {
+        crate::control_abi::LIFECYCLE_AUXILIARY_EXITED
+    };
+    let expected_status = if command == ginux_native_abi::NATIVE_GRAPHICS_COMMAND_FAULT {
+        0
+    } else {
+        ginux_native_abi::NATIVE_SERVICE_EXIT_COMPLETED
+    };
+    if current_root() != kernel_root
+        || scheduler::current_domain().is_some()
+        || registered_auxiliary_address_space_count() != 0
+        || memory::owner_live_frame_count(owner) != Some(0)
+        || !domain::domain_is_retired(auxiliary)
+        || domain::handle_permits(auxiliary, handle, 2, crate::capability::Rights::WRITE)
+        || event != (auxiliary << 8) | u64::from(expected_kind)
+        || domain::last_lifecycle_event_audit()
+            .is_none_or(|(kind, audited, _)| kind != expected_kind || audited != auxiliary)
+        || domain::last_lifecycle_event_detail() != Some(expected_status)
+        || domain::last_lifecycle_event_has_fault()
+            != Some(command == ginux_native_abi::NATIVE_GRAPHICS_COMMAND_FAULT)
+        || domain::last_lifecycle_service_identity() != Some(identity)
+        || domain::take_lifecycle_event().is_some()
+    {
+        return None;
+    }
+    Some(identity)
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]

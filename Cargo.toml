@@ -13,6 +13,7 @@ members = [
     "crates/volume-format",
     "crates/volume-service",
     "kernel",
+    "services/graphics",
     "services/network",
     "services/protocol",
     "services/volume",

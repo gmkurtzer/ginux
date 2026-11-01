@@ -244,6 +244,16 @@ if ! grep -q '^ginux: measured isolated protocol service discovered' "$output_fi
     exit 1
 fi
 
+if ! grep -q '^ginux: measured graphical controller service discovered' "$output_file" ||
+    ! grep -q '^ginux: graphical controller service ready' "$output_file" ||
+    ! grep -q '^ginux: graphical controller runtime fault contained' "$output_file" ||
+    ! grep -q '^ginux: graphical controller runtime restarted with stable identity' "$output_file" ||
+    ! grep -q '^ginux: graphical controller runtime grants and frames retired cleanly' "$output_file" ||
+    ! grep -q '^ginux: serial controller recovery remained available' "$output_file"; then
+    echo "Boot test failed: the graphical controller service lifecycle was not isolated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: compiled native network service executed in ring 3' "$output_file" ||
     ! grep -q '^ginux: native network service negotiated control ABI v4' "$output_file" ||
     ! grep -q '^ginux: native network service validated control descriptor v4' "$output_file" ||

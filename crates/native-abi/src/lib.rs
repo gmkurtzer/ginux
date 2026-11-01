@@ -124,6 +124,13 @@ pub const NATIVE_PROTOCOL_BOOT_V4_VERSION: u16 = 4;
 pub const NATIVE_PROTOCOL_BOOT_V4_SIZE: u16 = 56;
 pub const NATIVE_PROTOCOL_BOOT_V5_VERSION: u16 = 5;
 pub const NATIVE_PROTOCOL_BOOT_V5_SIZE: u16 = 72;
+pub const NATIVE_GRAPHICS_BOOT_MAGIC: u64 = 0x3042_4758_554e_4947;
+pub const NATIVE_GRAPHICS_BOOT_VERSION: u16 = 0;
+pub const NATIVE_GRAPHICS_BOOT_SIZE: u16 = 40;
+pub const NATIVE_GRAPHICS_FEATURE_LIFECYCLE: u32 = 1 << 0;
+pub const NATIVE_GRAPHICS_FEATURE_CONSOLE_IPC: u32 = 1 << 1;
+pub const NATIVE_GRAPHICS_COMMAND_COMPLETE: u32 = 0;
+pub const NATIVE_GRAPHICS_COMMAND_FAULT: u32 = 1;
 pub const NATIVE_CONTROL_DISCOVERY_OPERATION: u64 = 0;
 pub const NATIVE_CONTROL_ABI_VERSION: u16 = 4;
 pub const NATIVE_CONTROL_FEATURE_OPAQUE_CAPABILITIES: u16 = 1 << 0;
@@ -1667,6 +1674,50 @@ const _: () = assert!(core::mem::align_of::<NativeProtocolBootV0>() == 8);
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NativeGraphicsBootV0 {
+    pub magic: u64,
+    pub version: u16,
+    pub size: u16,
+    pub features: u32,
+    pub console_capability: u64,
+    pub command: u32,
+    pub reserved: u32,
+    pub generation: u64,
+}
+
+impl NativeGraphicsBootV0 {
+    pub const fn new(console_capability: u64, command: u32, generation: u64) -> Self {
+        Self {
+            magic: NATIVE_GRAPHICS_BOOT_MAGIC,
+            version: NATIVE_GRAPHICS_BOOT_VERSION,
+            size: NATIVE_GRAPHICS_BOOT_SIZE,
+            features: NATIVE_GRAPHICS_FEATURE_LIFECYCLE | NATIVE_GRAPHICS_FEATURE_CONSOLE_IPC,
+            console_capability,
+            command,
+            reserved: 0,
+            generation,
+        }
+    }
+
+    pub const fn is_valid(&self) -> bool {
+        self.magic == NATIVE_GRAPHICS_BOOT_MAGIC
+            && self.version == NATIVE_GRAPHICS_BOOT_VERSION
+            && self.size == NATIVE_GRAPHICS_BOOT_SIZE
+            && self.features
+                == NATIVE_GRAPHICS_FEATURE_LIFECYCLE | NATIVE_GRAPHICS_FEATURE_CONSOLE_IPC
+            && self.console_capability != 0
+            && (self.command == NATIVE_GRAPHICS_COMMAND_COMPLETE
+                || self.command == NATIVE_GRAPHICS_COMMAND_FAULT)
+            && self.reserved == 0
+            && self.generation != 0
+    }
+}
+
+const _: () = assert!(core::mem::size_of::<NativeGraphicsBootV0>() == 40);
+const _: () = assert!(core::mem::align_of::<NativeGraphicsBootV0>() == 8);
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NativeProtocolBootV1 {
     pub magic: u64,
     pub version: u16,
@@ -2179,6 +2230,42 @@ mod tests {
             ..reply
         }
         .is_valid_icmp_echo_reply());
+    }
+
+    #[test]
+    fn graphics_bootstrap_layout_and_validation_are_frozen() {
+        assert_eq!(NATIVE_GRAPHICS_BOOT_MAGIC.to_le_bytes(), *b"GINUXGB0");
+        assert_eq!(core::mem::size_of::<NativeGraphicsBootV0>(), 40);
+        assert_eq!(core::mem::align_of::<NativeGraphicsBootV0>(), 8);
+        assert_eq!(core::mem::offset_of!(NativeGraphicsBootV0, magic), 0);
+        assert_eq!(core::mem::offset_of!(NativeGraphicsBootV0, version), 8);
+        assert_eq!(core::mem::offset_of!(NativeGraphicsBootV0, size), 10);
+        assert_eq!(core::mem::offset_of!(NativeGraphicsBootV0, features), 12);
+        assert_eq!(
+            core::mem::offset_of!(NativeGraphicsBootV0, console_capability),
+            16
+        );
+        assert_eq!(core::mem::offset_of!(NativeGraphicsBootV0, command), 24);
+        assert_eq!(core::mem::offset_of!(NativeGraphicsBootV0, generation), 32);
+        let valid = NativeGraphicsBootV0::new(7, NATIVE_GRAPHICS_COMMAND_COMPLETE, 1);
+        assert!(valid.is_valid());
+        for invalid in [
+            NativeGraphicsBootV0 { magic: 0, ..valid },
+            NativeGraphicsBootV0 {
+                console_capability: 0,
+                ..valid
+            },
+            NativeGraphicsBootV0 {
+                command: u32::MAX,
+                ..valid
+            },
+            NativeGraphicsBootV0 {
+                generation: 0,
+                ..valid
+            },
+        ] {
+            assert!(!invalid.is_valid());
+        }
     }
 
     #[test]

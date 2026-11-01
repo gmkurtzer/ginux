@@ -1775,6 +1775,30 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: native protocol service relative relocations applied\r\n");
     serial_write("ginux: native protocol service W^X address space verified\r\n");
     serial_write("ginux: native protocol service guard pages verified\r\n");
+    let Some(graphics_service_node) = initramfs::published_regular_file_node(b"native/graphics")
+    else {
+        kernel_fail("ginux: graphical controller service missing\r\n");
+    };
+    let Some(graphics_service) = initramfs::published_file_by_node(graphics_service_node) else {
+        kernel_fail("ginux: graphical controller service unreadable\r\n");
+    };
+    let Some(graphics_image) = native_elf::inspect(graphics_service) else {
+        kernel_fail("ginux: graphical controller service ELF invalid\r\n");
+    };
+    if graphics_image.bytes.len() != graphics_service.len()
+        || graphics_image.entry == 0
+        || graphics_image.segments.iter().flatten().count() != 3
+        || graphics_image.relocation_count == 0
+        || graphics_image.relocations[..graphics_image.relocation_count]
+            .iter()
+            .any(|relocation| {
+                relocation.is_none_or(|relocation| relocation.target == 0 || relocation.addend == 0)
+            })
+        || !address_space::verify_native_service_materialization(&graphics_image)
+    {
+        kernel_fail("ginux: graphical controller service load plan invalid\r\n");
+    }
+    serial_write("ginux: measured graphical controller service discovered\r\n");
     if !linux_mount::verify_contract() || !linux_mount::install_initial() {
         kernel_fail("ginux: initial Linux mount namespace invalid\r\n");
     }
@@ -3209,6 +3233,13 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         serial_write("\r\nginux: native network service started without boot capabilities");
         serial_write("\r\nginux: native network service exited through lifecycle ABI v0");
         serial_write("\r\nginux: native network service address space retired cleanly");
+        if !address_space::verify_native_graphics_service(&graphics_image) {
+            kernel_fail("\r\nginux: graphical controller runtime invariant failed\r\n");
+        }
+        serial_write("\r\nginux: graphical controller runtime fault contained");
+        serial_write("\r\nginux: graphical controller runtime restarted with stable identity");
+        serial_write("\r\nginux: graphical controller runtime grants and frames retired cleanly");
+        serial_write("\r\nginux: serial controller recovery remained available");
         if !address_space::verify_native_network_bootstrap(
             &network_image,
             virtio_network,

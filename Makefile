@@ -12,12 +12,13 @@ VOLUME_SERVICE := target/x86_64-unknown-none/$(PROFILE)/ginux-volume-service-run
 CONTROLLER_RUNTIME := target/x86_64-unknown-none/$(PROFILE)/ginux-controller-runtime
 NETWORK_SERVICE := target/x86_64-unknown-none/$(PROFILE)/ginux-network-service-runtime
 PROTOCOL_SERVICE := target/x86_64-unknown-none/$(PROFILE)/ginux-protocol-service-runtime
+GRAPHICS_SERVICE := target/x86_64-unknown-none/$(PROFILE)/ginux-graphics-service-runtime
 INITRAMFS := build/initramfs-v0.cpio
 SYSTEM_PROFILE := profiles/minimal-system-v0/profile.tsv
 
 .DEFAULT_GOAL := help
 
-.PHONY: help doctor manifest system-image test-alpine test-rocky-shell test-rocky-dnf test-multi-domain test-linux-abi test-linux-runtime test-storage test-oci-cache test-smp test-rocky-smp-futex test-rocky-smp-shared-page test-rocky-smp-thread-context probe-rocky-systemd test-rocky-systemd test-rocky-detached test-domain-responsiveness benchmark-rocky-systemd benchmark-prepare-linux benchmark-prepare-ginux benchmark-linux-comparison benchmark-ginux-boot benchmark-boot-comparison benchmark-ginux-sysbench benchmark-compare benchmark-topology-matrix benchmark-topology-compare profile-rocky-systemd rocky-image rocky-image-check linux-probe controller-runtime network-service protocol-service volume-service abi-conformance architecture-check linux-compat-check build build-verification build-linux-profile run reset-storage test test-c1 test-c2 fmt gate clean
+.PHONY: help doctor manifest system-image test-alpine test-rocky-shell test-rocky-dnf test-multi-domain test-linux-abi test-linux-runtime test-storage test-oci-cache test-smp test-rocky-smp-futex test-rocky-smp-shared-page test-rocky-smp-thread-context probe-rocky-systemd test-rocky-systemd test-rocky-detached test-domain-responsiveness test-controller-graphics-runtime benchmark-rocky-systemd benchmark-prepare-linux benchmark-prepare-ginux benchmark-linux-comparison benchmark-ginux-boot benchmark-boot-comparison benchmark-ginux-sysbench benchmark-compare benchmark-topology-matrix benchmark-topology-compare profile-rocky-systemd rocky-image rocky-image-check linux-probe controller-runtime network-service protocol-service graphics-service volume-service abi-conformance architecture-check linux-compat-check build build-verification build-linux-profile run reset-storage test test-c1 test-c2 fmt gate clean
 
 help:
 	@echo "Ginux development targets"
@@ -48,6 +49,7 @@ help:
 	@echo "  make controller-runtime Build the embedded Linux-ABI ring-3 controller"
 	@echo "  make network-service Build the freestanding isolated network service"
 	@echo "  make protocol-service Build the freestanding isolated protocol service"
+	@echo "  make graphics-service Build the freestanding graphical controller service"
 	@echo "  make volume-service Build the freestanding isolated volume service"
 	@echo "  make abi-conformance Compile the public native ABI as freestanding C"
 	@echo "  make architecture-check Check architecture and roadmap consistency"
@@ -74,9 +76,9 @@ help:
 doctor:
 	@tools/qemu/doctor.sh
 
-manifest: linux-probe controller-runtime network-service protocol-service volume-service
+manifest: linux-probe controller-runtime network-service protocol-service graphics-service volume-service
 	@mkdir -p "$(dir $(INITRAMFS))"
-	@cargo run --quiet --package ginux-manifest-tool -- boot/manifest-v0.conf control-plane/bootstrap.hex "$(INITRAMFS)" "$(LINUX_DYNAMIC_DIR)" "$(CONTROLLER_RUNTIME)" "$(NETWORK_SERVICE)" "$(PROTOCOL_SERVICE)" "$(VOLUME_SERVICE)" "$(SYSTEM_PROFILE)" boot/efi/src/generated_boot.rs
+	@cargo run --quiet --package ginux-manifest-tool -- boot/manifest-v0.conf control-plane/bootstrap.hex "$(INITRAMFS)" "$(LINUX_DYNAMIC_DIR)" "$(CONTROLLER_RUNTIME)" "$(NETWORK_SERVICE)" "$(PROTOCOL_SERVICE)" "$(VOLUME_SERVICE)" "$(GRAPHICS_SERVICE)" "$(SYSTEM_PROFILE)" boot/efi/src/generated_boot.rs
 	@test -s "$(INITRAMFS)"
 
 system-image: manifest
@@ -122,6 +124,11 @@ protocol-service:
 	@cargo build --package ginux-protocol-service-runtime --target x86_64-unknown-none $(CARGO_PROFILE_FLAG)
 	@test -f "$(PROTOCOL_SERVICE)"
 	@echo "Built $(PROTOCOL_SERVICE)"
+
+graphics-service:
+	@cargo build --package ginux-graphics-service-runtime --target x86_64-unknown-none $(CARGO_PROFILE_FLAG)
+	@test -f "$(GRAPHICS_SERVICE)"
+	@echo "Built $(GRAPHICS_SERVICE)"
 
 abi-conformance:
 	@clang -target x86_64-none-elf -std=c11 -ffreestanding -fsyntax-only \
@@ -230,6 +237,9 @@ test-oci-cache: build
 test: build-verification
 	@tests/qemu/boot.sh
 
+test-controller-graphics-runtime: build-verification
+	@tests/qemu/boot.sh
+
 test-smp: build-verification
 	@tests/qemu/smp-matrix.sh
 
@@ -287,6 +297,7 @@ check: manifest architecture-check linux-compat-check
 	@cargo test --package ginux-volume-service
 	@cargo clippy --package ginux-network-service-runtime --target x86_64-unknown-none -- -D warnings
 	@cargo clippy --package ginux-protocol-service-runtime --target x86_64-unknown-none -- -D warnings
+	@cargo clippy --package ginux-graphics-service-runtime --target x86_64-unknown-none -- -D warnings
 	@cargo clippy --package ginux-volume-service-runtime --target x86_64-unknown-none -- -D warnings
 	@cargo clippy --package ginux-manifest-tool -- -D warnings
 
