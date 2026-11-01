@@ -9,7 +9,7 @@ use ginux_native_abi::{
     NATIVE_ROOT_OPERATION,
 };
 use ginux_windowing::{
-    paint_border, paint_rect, paint_text_inter_20, Rect, COLOR_ACCENT, COLOR_BORDER,
+    paint_border, paint_rect, paint_text_inter_16, Rect, COLOR_ACCENT, COLOR_BORDER,
     COLOR_DARK_TEXT, COLOR_DESKTOP, COLOR_HEALTHY, COLOR_MUTED, COLOR_PANEL, COLOR_SURFACE,
     COLOR_SURFACE_RAISED, COLOR_TEXT,
 };
@@ -840,7 +840,7 @@ impl<'a, B: ManagementBackend> Application<'a, B> {
         card(
             pixels,
             stride,
-            Rect::new(left, card_top, card_width, 104),
+            Rect::new(left, card_top, card_width, 116),
             1,
             (b"Domains", domain_value, domain_detail),
             theme,
@@ -850,7 +850,7 @@ impl<'a, B: ManagementBackend> Application<'a, B> {
         card(
             pixels,
             stride,
-            Rect::new(left + card_width as i16 + 16, card_top, card_width, 104),
+            Rect::new(left + card_width as i16 + 16, card_top, card_width, 116),
             4,
             (b"CPU", cpu, b"Configured"),
             theme,
@@ -866,7 +866,7 @@ impl<'a, B: ManagementBackend> Application<'a, B> {
                 left + (card_width as i16 + 16) * 2,
                 card_top,
                 card_width,
-                104,
+                116,
             ),
             3,
             (b"Memory", memory, memory_detail),
@@ -874,7 +874,7 @@ impl<'a, B: ManagementBackend> Application<'a, B> {
         )?;
 
         // Domain inventory.
-        let table_top = card_top + 128;
+        let table_top = card_top + 140;
         let table = Rect::new(
             left,
             table_top,
@@ -1202,7 +1202,7 @@ fn text(
     value: &[u8],
     color: u32,
 ) -> Result<(), Error> {
-    paint_text_inter_20(
+    paint_text_inter_16(
         pixels,
         stride,
         x.saturating_mul(DISPLAY_SCALE as i16),
@@ -1225,8 +1225,8 @@ fn card(
     rect(pixels, stride, area, theme.raised)?;
     outline(pixels, stride, area, theme.border)?;
     nav_icon(pixels, stride, area.x + 16, area.y + 34, icon, theme.text)?;
-    text(pixels, stride, area.x + 58, area.y + 22, label, theme.muted)?;
-    text(pixels, stride, area.x + 58, area.y + 50, value, theme.text)?;
+    text(pixels, stride, area.x + 58, area.y + 18, label, theme.muted)?;
+    text(pixels, stride, area.x + 58, area.y + 46, value, theme.text)?;
     text(
         pixels,
         stride,

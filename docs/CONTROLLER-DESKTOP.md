@@ -346,9 +346,10 @@ fake window controls, graphical prompt, or unused margins. The controller maps
 only the capability-authorized framebuffer pages into its address space and
 writes them directly, avoiding the former per-pixel syscall copy path. Pointer
 motion restores and repaints only its bounded 18 by 20 saved-under region.
-Controller text uses an embedded, antialiased Inter atlas generated at build
-time; icons and the high-contrast pointer remain allocation-free software
-primitives. Palette and major layout dimensions are centralized in explicit
+Controller text uses a compact 16-pixel embedded, antialiased Inter atlas
+generated at build time and spaced specifically for the 1024 by 768 shell;
+icons and the high-contrast pointer remain allocation-free software primitives.
+Palette and major layout dimensions are centralized in explicit
 `Theme` and `Layout` contracts so the shell can be restyled without changing
 management behavior or hit testing.
 Color is never the only status signal: labels, values, and state text remain
@@ -418,10 +419,10 @@ Measurements recorded on 2026-11-01 on an Apple Silicon macOS host with QEMU
 | Metric | Measured | Budget | Result |
 |---|---:|---:|---|
 | Two-presentation model startup | 1 us | 50,000 us | pass |
-| Input-to-frame p95 with background domain | 1,317 us | 16,667 us | pass |
-| Steady software frame p95 | 959 us | 16,667 us | pass |
+| Input-to-frame p95 with background domain | 826 us | 16,667 us | pass |
+| Steady software frame p95 | 835 us | 16,667 us | pass |
 | Fault/recovery cycle p95 | <1 us | 1,000 us | pass |
-| Modeled bounded working set | 8,324,400 bytes | 8,388,608 bytes | pass |
+| Modeled bounded working set | 3,175,728 bytes | 8,388,608 bytes | pass |
 
 These budgets are regression limits for the implemented state machines and
 software renderer. They are not GPU, physical-device, whole-system CPU,

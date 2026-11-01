@@ -1,6 +1,6 @@
 #![no_std]
 
-mod inter_20;
+mod inter_16;
 
 pub const MAX_WINDOWS: usize = 4;
 pub const MAX_WIDGETS: usize = 8;
@@ -920,7 +920,7 @@ pub fn paint_text_5x7_smooth(
 /// Paint the embedded antialiased Inter controller face. The atlas is
 /// generated ahead of time so the freestanding renderer needs neither a font
 /// parser nor allocation at runtime.
-pub fn paint_text_inter_20(
+pub fn paint_text_inter_16(
     pixels: &mut [u32],
     stride: usize,
     x: i16,
@@ -936,25 +936,25 @@ pub fn paint_text_inter_20(
     let mut origin_x = i32::from(x);
     let origin_y = i32::from(y);
     for byte in text.iter().copied() {
-        let byte = if (inter_20::GLYPH_FIRST..=inter_20::GLYPH_LAST).contains(&byte) {
+        let byte = if (inter_16::GLYPH_FIRST..=inter_16::GLYPH_LAST).contains(&byte) {
             byte
         } else {
             b'?'
         };
-        let glyph = usize::from(byte - inter_20::GLYPH_FIRST);
-        let glyph_start = glyph * inter_20::GLYPH_WIDTH * inter_20::GLYPH_HEIGHT;
-        for row in 0..inter_20::GLYPH_HEIGHT {
+        let glyph = usize::from(byte - inter_16::GLYPH_FIRST);
+        let glyph_start = glyph * inter_16::GLYPH_WIDTH * inter_16::GLYPH_HEIGHT;
+        for row in 0..inter_16::GLYPH_HEIGHT {
             let py = origin_y + row as i32;
             if py < 0 || py >= height {
                 continue;
             }
-            for column in 0..inter_20::GLYPH_WIDTH {
+            for column in 0..inter_16::GLYPH_WIDTH {
                 let px = origin_x + column as i32;
                 if px < 0 || px >= width {
                     continue;
                 }
-                let alpha_index = glyph_start + row * inter_20::GLYPH_WIDTH + column;
-                let packed = inter_20::GLYPH_ALPHA_4[alpha_index / 2];
+                let alpha_index = glyph_start + row * inter_16::GLYPH_WIDTH + column;
+                let packed = inter_16::GLYPH_ALPHA_4[alpha_index / 2];
                 let alpha = u32::from(if alpha_index.is_multiple_of(2) {
                     packed >> 4
                 } else {
@@ -971,7 +971,7 @@ pub fn paint_text_inter_20(
                 };
             }
         }
-        origin_x += i32::from(inter_20::GLYPH_ADVANCE[glyph]);
+        origin_x += i32::from(inter_16::GLYPH_ADVANCE[glyph]);
     }
     Ok(())
 }
@@ -1314,7 +1314,7 @@ mod tests {
         const FOREGROUND: u32 = 0xe7ee_f8;
         let mut pixels = [BACKGROUND; 48 * 32];
 
-        paint_text_inter_20(&mut pixels, 48, 2, 2, b"G", FOREGROUND).unwrap();
+        paint_text_inter_16(&mut pixels, 48, 2, 2, b"G", FOREGROUND).unwrap();
 
         assert!(pixels.iter().any(|pixel| *pixel == FOREGROUND));
         assert!(pixels

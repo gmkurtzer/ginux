@@ -218,6 +218,17 @@ architecture and serial recovery path.
 - `make test-controller-desktop-all` and `make check` -> complete desktop,
   2-vCPU/4-vCPU stress, architecture, ABI, formatting, lint, and unit
   regressions passed after the 1024 by 768 revision.
+- `make test-controller-desktop-latency` -> the compact 1024 by 768 typography
+  pass retained exact native frames, navigation, live state, and power-menu
+  behavior; visible interaction p95 was 19.930 ms, maximum was 19.948 ms, and
+  complete Settings-page presentation was 19.384 ms.
+- `make test-controller-desktop-performance` -> the compact release model
+  passed at 826 us input-to-frame p95, 835 us steady-frame p95, and a bounded
+  3,175,728-byte working set.
+- `make test-controller-desktop-all` -> the complete desktop suite and 2-vCPU/
+  4-vCPU recovery stress passed after the compact typography revision.
+- `make check` -> architecture, unsafe baseline, ABI, formatting, lint, unit,
+  and compatibility checks passed after the compact typography revision.
 
 ## Decisions and limitations
 
@@ -272,6 +283,10 @@ architecture and serial recovery path.
   standard 1024 by 768 GOP mode. The UI now renders one logical pixel per
   physical pixel, retains direct framebuffer mapping and bounded pointer
   damage, and fits within the laptop display without host-side downscaling.
+- Human review of the first 1024 by 768 frame found that its 20-pixel type and
+  card spacing retained 1080p proportions. The embedded face is now 16 pixels,
+  summary cards have deliberate vertical breathing room, and the domain table
+  starts below the complete card content rather than crowding it.
 - Real-QEMU latency timestamps now stop when QEMU is asked to sample the
   framebuffer. Subsequent PPM encoding and filesystem output are observer
   overhead and are deliberately excluded from presentation latency.

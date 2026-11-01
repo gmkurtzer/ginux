@@ -6,10 +6,10 @@
 #include <stdlib.h>
 
 enum {
-    FONT_SIZE = 20,
-    CELL_WIDTH = 24,
-    CELL_HEIGHT = 28,
-    BASELINE = 22,
+    FONT_SIZE = 16,
+    CELL_WIDTH = 20,
+    CELL_HEIGHT = 22,
+    BASELINE = 17,
     FIRST_GLYPH = 32,
     LAST_GLYPH = 126,
     GLYPH_COUNT = LAST_GLYPH - FIRST_GLYPH + 1,
