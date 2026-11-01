@@ -25,6 +25,12 @@ pub struct Endpoint {
     domain: u64,
 }
 
+impl Endpoint {
+    pub const fn generation(self) -> u32 {
+        self.generation
+    }
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LinuxDisplayRequestV0 {

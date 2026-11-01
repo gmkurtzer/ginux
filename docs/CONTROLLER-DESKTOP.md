@@ -273,6 +273,23 @@ accessibility, decoration, data-device, or broad desktop-shell compatibility.
 
 ## 10. Lifecycle and recovery
 
+### Managed domain presentation
+
+The controller represents one running Linux domain desktop with one stable
+presentation object. Its last completed frame remains visible while a bounded
+resize configure is outstanding; accepting the matching configure serial
+replaces only the generation-bound bridge endpoint. Entering full screen keeps
+the same domain surface and frame sequence while granting a logical exclusive
+lease. It does not restart the domain or transfer a physical device.
+
+Controller-rendered chrome identifies the domain and whether it owns focus or
+an exclusive lease. Secure attention is handled before domain input, returns
+the view to its prior managed rectangle, revokes exclusive ownership, and
+prevents further physical input until focus is explicitly granted again.
+Minimize, stop, failure, and restart likewise clear focus and leases. Stop and
+failure clear domain pixels and show distinct controller-owned state; restart
+creates a fresh bridge generation with no inherited input or frame queue.
+
 | Failure | Required response |
 |---|---|
 | Native client exits | destroy its objects, revoke capture/lease, damage exposed desktop |

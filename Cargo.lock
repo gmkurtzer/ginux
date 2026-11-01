@@ -435,12 +435,20 @@ name = "ginux-domain-display"
 version = "0.1.0"
 
 [[package]]
+name = "ginux-domain-presentation"
+version = "0.1.0"
+dependencies = [
+ "ginux-domain-display",
+]
+
+[[package]]
 name = "ginux-graphics-service-runtime"
 version = "0.1.0"
 dependencies = [
  "ginux-controller-ui",
  "ginux-display-protocol",
  "ginux-domain-display",
+ "ginux-domain-presentation",
  "ginux-native-abi",
  "ginux-wayland-domain",
  "ginux-windowing",

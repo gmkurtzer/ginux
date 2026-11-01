@@ -23,6 +23,7 @@ const WINDOWING_READY: &[u8] = b"ginux: native windowing and toolkit validated i
 const CONTROLLER_READY: &[u8] = b"ginux: graphical controller workflows validated in ring 3\r\n";
 const DOMAIN_BRIDGE_READY: &[u8] = b"ginux: isolated domain display bridge validated in ring 3\r\n";
 const WAYLAND_READY: &[u8] = b"ginux: Linux domain Wayland environment validated in ring 3\r\n";
+const PRESENTATION_READY: &[u8] = b"ginux: domain desktop presentation validated in ring 3\r\n";
 static SERVICE_IDENTITY: &[u8] = b"GINUX_GRAPHICS_SERVICE_V0";
 
 global_asm!(
@@ -90,6 +91,7 @@ extern "C" fn ginux_graphics_service_main(info: *const NativeGraphicsBootV0) -> 
                 || !ginux_controller_ui::contract_probe()
                 || !ginux_domain_display::contract_probe()
                 || !ginux_wayland_domain::contract_probe()
+                || !ginux_domain_presentation::contract_probe()
                 || call(
                     NATIVE_CONSOLE_WRITE_OPERATION,
                     info.v0.console_capability,
@@ -123,6 +125,15 @@ extern "C" fn ginux_graphics_service_main(info: *const NativeGraphicsBootV0) -> 
                 WAYLAND_READY.as_ptr() as u64,
                 WAYLAND_READY.len() as u64,
             ) != WAYLAND_READY.len() as u64
+            {
+                fail();
+            }
+            if call(
+                NATIVE_CONSOLE_WRITE_OPERATION,
+                info.v0.console_capability,
+                PRESENTATION_READY.as_ptr() as u64,
+                PRESENTATION_READY.len() as u64,
+            ) != PRESENTATION_READY.len() as u64
             {
                 fail();
             }
