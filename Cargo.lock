@@ -428,6 +428,7 @@ version = "0.1.0"
 dependencies = [
  "ginux-display-protocol",
  "ginux-native-abi",
+ "ginux-windowing",
 ]
 
 [[package]]
@@ -545,6 +546,10 @@ dependencies = [
  "ginux-volume-format",
  "ginux-volume-service",
 ]
+
+[[package]]
+name = "ginux-windowing"
+version = "0.1.0"
 
 [[package]]
 name = "group"

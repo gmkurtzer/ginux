@@ -13,4 +13,5 @@ bench = false
 
 [dependencies]
 ginux-display-protocol = { path = "../../crates/display-protocol" }
+ginux-windowing = { path = "../../crates/windowing" }
 ginux-native-abi = { path = "../../crates/native-abi" }

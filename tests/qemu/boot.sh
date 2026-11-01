@@ -275,6 +275,11 @@ if ! grep -q '^ginux: controller seat focus and leases validated in ring 3' "$ou
     exit 1
 fi
 
+if ! grep -q '^ginux: native windowing and toolkit validated in ring 3' "$output_file"; then
+    echo "Boot test failed: native windowing and toolkit were not exercised." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: compiled native network service executed in ring 3' "$output_file" ||
     ! grep -q '^ginux: native network service negotiated control ABI v4' "$output_file" ||
     ! grep -q '^ginux: native network service validated control descriptor v4' "$output_file" ||
