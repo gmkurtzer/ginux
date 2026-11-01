@@ -20,11 +20,17 @@ domain and connect it to one native controller surface.
 
 ## Completed work
 
-- [ ] None.
+- [x] Added generation-bound per-domain display and input endpoints.
+- [x] Added bounded frame and input queues with explicit backpressure.
+- [x] Added Linux-facing transport records and a ring-3 contract probe.
+- [x] Added focus-gated physical input and labeled synthetic input.
+- [x] Added resize, stop, restart, stale-generation, and cross-domain tests.
+- [x] Extended strict native address-space validation for the eight-page
+  graphics service without enlarging unrelated services.
 
 ## Remaining work
 
-- [ ] Implement bridge, Linux endpoint, isolation/stress tests, and evidence.
+- [x] Implement bridge, Linux endpoint, isolation/stress tests, and evidence.
 
 ## Acceptance criteria
 
@@ -44,7 +50,11 @@ domain and connect it to one native controller surface.
 
 ## Evidence
 
-- Not yet run.
+- `make test-domain-display-bridge` -> passed three host contract tests and the
+  ring-3 QEMU bridge assertion.
+- `make test-smp` -> passed 1-, 2-, and 4-CPU boots plus two 2-CPU stress runs.
+- `make check` -> passed architecture, compatibility, build, and crate tests.
+- `git diff --check` -> passed.
 
 ## Decisions and limitations
 
@@ -57,8 +67,10 @@ domain and connect it to one native controller surface.
 - Intended base: `main`
 - Pull request: shared integrated PR for Gates 19–30
 - Planned commits: bridge ABI; Linux endpoint; isolation/lifecycle tests
-- Actual commits: pending
+- Actual commits: `0d7c4504` (bridge, integration, and tests); gate record in
+  the following documentation commit
 
 ## Review policy and outcome
 
-Delegated closure under the approved Gates 19–30 batch after all criteria pass.
+Passed and closed under the approved Gates 19–30 delegated batch on
+2026-10-31. No individual human review was required at this boundary.
