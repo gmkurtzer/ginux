@@ -9,19 +9,19 @@
 - Branch: `codex/controller-desktop`
 - Intended base: `main` at `759cf2e2`
 - Active gate: Gate 31, controller desktop visual design
-- Status: technically passed renderer was rejected at human review; visual
-  quality and functional interaction remain incomplete
+- Status: all objective Gate 31 criteria pass; final human framebuffer and
+  interaction acceptance remains required
 - Last evidence: `make check`, `make test-controller-desktop-all`,
-  `make test-controller-desktop-performance`, and real-QEMU
-  `make test-controller-desktop-visible` passed on 2026-11-01; retained
-  screenshots show the complete 800 by 600 design plus keyboard and pointer
-  state changes
-- Open decisions or limitations: the 3 by 5 scaled bitmap font is visibly
-  pixelated; pointer input is coupled to blocking serial reads; click routing is
-  absent; displayed management data comes from a fresh model rather than live
-  kernel state
-- Exact next action: implement an independent bounded GUI event loop with
-  coalesced pointer motion and button routing, then verify it in QEMU
+  `make test-controller-desktop-performance`, and final real-QEMU
+  `make test-controller-desktop-visible` passed on 2026-11-01. Retained frames
+  prove click navigation, independent pointer motion, native keyboard input,
+  and a CLI-created domain appearing in the live GUI.
+- Open decisions or limitations: visual quality and usability require the
+  confirmed final human checkpoint; the renderer remains a bounded software
+  composition without runtime font loading or GPU acceleration by design
+- Exact next action: human runs `make run-gui`, exercises pointer, clicks,
+  keyboard, and live domain state, then accepts Gate 31 or reports specific
+  remaining visual or interaction defects
 
 ## Governing outcome
 
