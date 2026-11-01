@@ -32,7 +32,7 @@ successful process exit.
 
 ## Remaining work
 
-- [ ] Deliver the signed commit, pull request, and reciprocal links.
+- [ ] Maintainer review and acceptance.
 
 ## Acceptance criteria
 
@@ -55,6 +55,9 @@ successful process exit.
 - `make check` -> passed, including architecture checks, warning-denying
   clippy, formatting, and unit tests.
 - `make test` on QEMU 10.1.2/TCG -> `GINUX_KERNEL_OK`; `Boot test passed.`
+- Delivery: [PR #37](https://github.com/gmkurtzer/ginux/pull/37).
+- Source response: [issue #26 comment](https://github.com/gmkurtzer/ginux/issues/26#issuecomment-6561988902).
+- Reciprocal response: [PR #37 comment](https://github.com/gmkurtzer/ginux/pull/37#issuecomment-6561988454).
 
 ## Decisions and limitations
 
@@ -65,9 +68,11 @@ successful process exit.
 
 - Working branch: `hdae/issue-26-linux-init-frame-release`
 - Intended base: `main`
-- Pull request: intended, non-closing reference to issue #26
+- Pull request: [PR #37](https://github.com/gmkurtzer/ginux/pull/37), open,
+  non-closing reference to issue #26
 - Planned commits: correction and evidence; delivery checkpoint
-- Actual commits: pending
+- Actual commits: `b79cdb8a` correction and evidence; delivery checkpoint
+  pending
 
 ## Review policy and outcome
 
