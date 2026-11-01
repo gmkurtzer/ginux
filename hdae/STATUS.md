@@ -8,16 +8,16 @@
 - Active project: native controller desktop
 - Branch: `codex/controller-desktop`
 - Intended base: `main` at `759cf2e2`
-- Active gate: Gate 27, Linux domain Wayland environment
-- Status: Gates 19–26 closed; Gate 27 starting
-- Last evidence: Gate 26 passed `make test-domain-display-bridge`,
-  `make test-smp`, `make check`, and `git diff --check`; implementation commit
-  `0d7c4504`
+- Active gate: Gate 28, windowed and full-screen domain experience
+- Status: Gates 19–27 closed; Gate 28 starting
+- Last evidence: Gate 27 passed `make test-linux-wayland-domain`,
+  `make test-domain-display-bridge`, `make check`, and `git diff --check`;
+  implementation commit `eb5c1e96`
 - Open decisions or limitations: none inside Gate 19; GPU acceleration, raw GPU
   passthrough, and broad desktop compatibility are deferred
-- Exact next action: implement the recorded minimal Wayland subset and
-  domain-local compositor path, then prove two unmodified selected clients,
-  input, damage, crash recovery, and teardown under QEMU
+- Exact next action: implement one live domain surface moving between managed
+  window and full-screen presentation, including resize, focus, trusted
+  identity, secure attention, lifecycle state, and deterministic screenshots
 
 ## Governing outcome
 
@@ -36,6 +36,7 @@ windowed or full screen. The CLI remains the recovery path.
 - Gate 24: passed and closed under delegated review on 2026-10-31
 - Gate 25: passed and closed under delegated review on 2026-10-31
 - Gate 26: passed and closed under delegated review on 2026-10-31
+- Gate 27: passed and closed under delegated review on 2026-10-31
 - Gates 20–30: delegated closure after complete objective evidence; continue
   without another planned checkpoint and stop only for a genuine clarification,
   failed dependency, or material scope/architecture change

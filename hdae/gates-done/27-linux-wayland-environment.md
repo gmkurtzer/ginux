@@ -21,12 +21,19 @@ domain's composed desktop through the Ginux bridge.
 
 ## Completed work
 
-- [ ] None.
+- [x] Added a bounded domain-local compositor model with the standard Wayland
+  socket path and recorded `wl_*`/`xdg_*` interface subset.
+- [x] Added two simultaneous standards-only client workflows using shared
+  buffers, configure acknowledgements, damage, frame callbacks, and input.
+- [x] Added explicit unsupported-interface failures, client crash/reconnect,
+  generation invalidation, and domain reset cleanup.
+- [x] Integrated the contract into the isolated ring-3 graphics service and
+  documented the exact limits.
 
 ## Remaining work
 
-- [ ] Select recorded protocol subset, implement, test clients, and stop for
-  human review.
+- [x] Select and record the protocol subset, implement it, test clients, and
+  collect delegated evidence.
 
 ## Acceptance criteria
 
@@ -47,12 +54,18 @@ domain's composed desktop through the Ginux bridge.
 
 ## Evidence
 
-- Not yet run.
+- `make test-linux-wayland-domain` -> passed three client/compositor tests and
+  the ring-3 QEMU contract assertion.
+- `make test-domain-display-bridge` -> passed dependency and QEMU bridge tests.
+- `make check` -> passed architecture, compatibility, build, and crate tests.
+- `git diff --check` -> passed.
 
 ## Decisions and limitations
 
 - Wayland is a Linux-domain compatibility mechanism, not the Ginux host display
-  protocol. The exact supported interface set must be recorded with evidence.
+  protocol. The exact supported interface set and fixed resource bounds are
+  recorded in `docs/CONTROLLER-DESKTOP.md`; general Wayland and desktop
+  environment compatibility remain out of scope.
 
 ## Delivery strategy
 
@@ -60,10 +73,10 @@ domain's composed desktop through the Ginux bridge.
 - Intended base: `main`
 - Pull request: shared integrated PR for Gates 19–30
 - Planned commits: protocol subset/runtime; compositor bridge; QEMU clients/tests
-- Actual commits: pending
+- Actual commits: `eb5c1e96` (compositor subset, clients, QEMU integration,
+  and documentation); gate record in the following documentation commit
 
 ## Review policy and outcome
 
-Delegated closure under the human's expanded Gates 20–30 authorization on
-2026-10-31. Continue after complete evidence; stop only for a clarification,
-failed dependency, or scope/architecture change.
+Passed and closed under the human's expanded Gates 20–30 delegated batch on
+2026-10-31. No individual human review was required at this boundary.
