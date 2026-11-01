@@ -9,9 +9,9 @@ use ginux_native_abi::{
     NATIVE_ROOT_OPERATION,
 };
 use ginux_windowing::{
-    paint_border, paint_rect, paint_text_inter_16, Rect, COLOR_ACCENT, COLOR_BORDER,
-    COLOR_DARK_TEXT, COLOR_DESKTOP, COLOR_HEALTHY, COLOR_MUTED, COLOR_PANEL, COLOR_SURFACE,
-    COLOR_SURFACE_RAISED, COLOR_TEXT,
+    paint_border, paint_rect, paint_text_inter_13, paint_text_inter_16, Rect, COLOR_ACCENT,
+    COLOR_BORDER, COLOR_DARK_TEXT, COLOR_DESKTOP, COLOR_HEALTHY, COLOR_MUTED, COLOR_PANEL,
+    COLOR_SURFACE, COLOR_SURFACE_RAISED, COLOR_TEXT,
 };
 
 pub const MAX_DOMAINS: usize = 4;
@@ -71,16 +71,16 @@ pub struct Layout {
 pub const DEFAULT_LAYOUT: Layout = Layout {
     width: LOGICAL_WIDTH,
     height: LOGICAL_HEIGHT,
-    top_bar_height: 52,
-    sidebar_width: 220,
-    content_left: 252,
-    content_top: 82,
-    content_width: 744,
-    content_bottom: 738,
-    nav_left: 16,
-    nav_width: 188,
-    nav_first_top: 94,
-    nav_step: 56,
+    top_bar_height: 48,
+    sidebar_width: 184,
+    content_left: 208,
+    content_top: 70,
+    content_width: 792,
+    content_bottom: 744,
+    nav_left: 12,
+    nav_width: 160,
+    nav_first_top: 82,
+    nav_step: 46,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -169,9 +169,9 @@ impl ShellState {
             return false;
         }
         if self.power_menu {
-            let action = if (840..1008).contains(&x) && (54..98).contains(&y) {
+            let action = if (840..1008).contains(&x) && (48..90).contains(&y) {
                 Some(PowerAction::Reboot)
-            } else if (840..1008).contains(&x) && (98..142).contains(&y) {
+            } else if (840..1008).contains(&x) && (90..132).contains(&y) {
                 Some(PowerAction::Shutdown)
             } else {
                 None
@@ -710,26 +710,26 @@ impl<'a, B: ManagementBackend> Application<'a, B> {
             Rect::new(0, layout.top_bar_height as i16 - 1, layout.width, 1),
             theme.border,
         )?;
-        text(pixels, stride, 24, 20, b"GINUX", theme.text)?;
-        text(pixels, stride, 424, 18, b"System Management", theme.muted)?;
+        heading(pixels, stride, 20, 13, b"GINUX", theme.text)?;
+        text(pixels, stride, 447, 15, b"System Management", theme.muted)?;
         let mut time = [b'0'; 5];
         time[0] = b'0' + view.hour / 10;
         time[1] = b'0' + view.hour % 10;
         time[2] = b':';
         time[3] = b'0' + view.minute / 10;
         time[4] = b'0' + view.minute % 10;
-        text(pixels, stride, 850, 18, &time, theme.muted)?;
+        text(pixels, stride, 862, 15, &time, theme.muted)?;
         rect(
             pixels,
             stride,
-            Rect::new(908, 21, 8, 8),
+            Rect::new(912, 19, 7, 7),
             if view.healthy {
                 theme.healthy
             } else {
                 theme.danger
             },
         )?;
-        draw_power_icon(pixels, stride, layout.width as i16 - 48, 16, theme.text)?;
+        draw_power_icon(pixels, stride, layout.width as i16 - 44, 11, theme.text)?;
 
         // Navigation rail.
         rect(
@@ -754,7 +754,7 @@ impl<'a, B: ManagementBackend> Application<'a, B> {
             ),
             theme.border,
         )?;
-        text(pixels, stride, 24, 78, b"Controller", theme.muted)?;
+        text(pixels, stride, 20, 62, b"Controller", theme.muted)?;
         for (index, (page, icon, label)) in [
             (Page::Overview, 0, &b"Overview"[..]),
             (Page::Domains, 1, &b"Domains"[..]),
@@ -767,19 +767,19 @@ impl<'a, B: ManagementBackend> Application<'a, B> {
         .into_iter()
         .enumerate()
         {
-            let y = layout.nav_first_top as i16 + 18 + index as i16 * layout.nav_step as i16;
+            let top = layout.nav_first_top as i16 + index as i16 * layout.nav_step as i16;
             let selected = state.page == page;
             if selected {
                 rect(
                     pixels,
                     stride,
-                    Rect::new(layout.nav_left, y - 18, layout.nav_width, 42),
+                    Rect::new(layout.nav_left, top, layout.nav_width, 36),
                     theme.accent,
                 )?;
             }
             let color = if selected { theme.text } else { theme.muted };
-            nav_icon(pixels, stride, 28, y - 7, icon, color)?;
-            text(pixels, stride, 60, y - 5, label, color)?;
+            nav_icon(pixels, stride, 22, top + 7, icon, color)?;
+            text(pixels, stride, 52, top + 9, label, color)?;
         }
 
         if state.page == Page::Overview {
@@ -819,9 +819,9 @@ impl<'a, B: ManagementBackend> Application<'a, B> {
         layout: &Layout,
     ) -> Result<(), Error> {
         let left = layout.content_left;
-        let card_width = (layout.content_width - 32) / 3;
-        let card_top = layout.content_top + 44;
-        text(
+        let card_width = (layout.content_width - 24) / 3;
+        let card_top = layout.content_top + 34;
+        heading(
             pixels,
             stride,
             left,
@@ -840,7 +840,7 @@ impl<'a, B: ManagementBackend> Application<'a, B> {
         card(
             pixels,
             stride,
-            Rect::new(left, card_top, card_width, 116),
+            Rect::new(left, card_top, card_width, 96),
             1,
             (b"Domains", domain_value, domain_detail),
             theme,
@@ -850,7 +850,7 @@ impl<'a, B: ManagementBackend> Application<'a, B> {
         card(
             pixels,
             stride,
-            Rect::new(left + card_width as i16 + 16, card_top, card_width, 116),
+            Rect::new(left + card_width as i16 + 12, card_top, card_width, 96),
             4,
             (b"CPU", cpu, b"Configured"),
             theme,
@@ -863,10 +863,10 @@ impl<'a, B: ManagementBackend> Application<'a, B> {
             pixels,
             stride,
             Rect::new(
-                left + (card_width as i16 + 16) * 2,
+                left + (card_width as i16 + 12) * 2,
                 card_top,
                 card_width,
-                116,
+                96,
             ),
             3,
             (b"Memory", memory, memory_detail),
@@ -874,7 +874,7 @@ impl<'a, B: ManagementBackend> Application<'a, B> {
         )?;
 
         // Domain inventory.
-        let table_top = card_top + 140;
+        let table_top = card_top + 112;
         let table = Rect::new(
             left,
             table_top,
@@ -886,28 +886,31 @@ impl<'a, B: ManagementBackend> Application<'a, B> {
         rect(
             pixels,
             stride,
-            Rect::new(left + 1, table_top + 1, layout.content_width - 2, 40),
+            Rect::new(left + 1, table_top + 1, layout.content_width - 2, 32),
             theme.raised,
         )?;
         text(
             pixels,
             stride,
             left + 16,
-            table_top + 14,
+            table_top + 8,
             b"Domains",
             theme.text,
         )?;
         rect(
             pixels,
             stride,
-            Rect::new(left + 1, table_top + 41, layout.content_width - 2, 42),
+            Rect::new(left + 1, table_top + 33, layout.content_width - 2, 34),
             theme.surface,
         )?;
-        for offset in [230, 410, 530] {
+        let state_column = (layout.content_width * 32 / 100) as i16;
+        let cpu_column = (layout.content_width * 58 / 100) as i16;
+        let memory_column = (layout.content_width * 74 / 100) as i16;
+        for offset in [state_column, cpu_column, memory_column] {
             rect(
                 pixels,
                 stride,
-                Rect::new(left + offset, table_top + 41, 1, 98),
+                Rect::new(left + offset, table_top + 33, 1, 104),
                 theme.border,
             )?;
         }
@@ -915,64 +918,78 @@ impl<'a, B: ManagementBackend> Application<'a, B> {
             pixels,
             stride,
             left + 16,
-            table_top + 55,
+            table_top + 42,
             b"Name",
             theme.muted,
         )?;
         text(
             pixels,
             stride,
-            left + 246,
-            table_top + 55,
+            left + state_column + 12,
+            table_top + 42,
             b"State",
             theme.muted,
         )?;
         text(
             pixels,
             stride,
-            left + 426,
-            table_top + 55,
+            left + cpu_column + 12,
+            table_top + 42,
             b"CPU",
             theme.muted,
         )?;
         text(
             pixels,
             stride,
-            left + 546,
-            table_top + 55,
+            left + memory_column + 12,
+            table_top + 42,
             b"Memory",
             theme.muted,
         )?;
         rect(
             pixels,
             stride,
-            Rect::new(left + 1, table_top + 82, layout.content_width - 2, 1),
+            Rect::new(left + 1, table_top + 66, layout.content_width - 2, 1),
             theme.border,
         )?;
         for (index, domain) in view.domains[..usize::from(view.domain_count.min(MAX_DOMAINS as u8))]
             .iter()
             .enumerate()
         {
-            let y = table_top + 102 + index as i16 * 42;
-            text(pixels, stride, left + 16, y, domain.name(), theme.text)?;
+            let y = table_top + 78 + index as i16 * 36;
+            text(pixels, stride, left + 12, y, domain.name(), theme.text)?;
             let state = domain_state_text(domain.state);
             rect(
                 pixels,
                 stride,
-                Rect::new(left + 246, y + 3, 8, 8),
+                Rect::new(left + state_column + 12, y + 4, 7, 7),
                 if domain.state == DomainState::Running {
                     theme.healthy
                 } else {
                     theme.muted
                 },
             )?;
-            text(pixels, stride, left + 264, y, state, theme.text)?;
+            text(
+                pixels,
+                stride,
+                left + state_column + 28,
+                y,
+                state,
+                theme.text,
+            )?;
             let mut cpu = [0_u8; 5];
             let cpu = decimal(&mut cpu, u64::from(domain.cpu));
-            text(pixels, stride, left + 426, y, cpu, theme.text)?;
+            text(pixels, stride, left + cpu_column + 12, y, cpu, theme.text)?;
             let mut memory = [0_u8; 8];
             let memory = decimal_suffix(&mut memory, u64::from(domain.memory_mib), b"M");
-            text(pixels, stride, left + 546, y, memory, theme.text)?;
+            text(
+                pixels,
+                stride,
+                left + memory_column + 12,
+                y,
+                memory,
+                theme.text,
+            )?;
         }
         Ok(())
     }
@@ -989,9 +1006,9 @@ pub fn paint_shell_pointer(pixels: &mut [u32], stride: usize, x: u16, y: u16) ->
 
 fn page_at(x: u16, y: u16, layout: &Layout) -> Option<Page> {
     let content_left = layout.content_left.max(0) as u16;
-    let card_top = (layout.content_top + 44).max(0) as u16;
-    let first_card_right = content_left + (layout.content_width - 32) / 3;
-    if (content_left..first_card_right).contains(&x) && (card_top..card_top + 104).contains(&y) {
+    let card_top = (layout.content_top + 34).max(0) as u16;
+    let first_card_right = content_left + (layout.content_width - 24) / 3;
+    if (content_left..first_card_right).contains(&x) && (card_top..card_top + 96).contains(&y) {
         return Some(Page::Domains);
     }
     let nav_left = layout.nav_left.max(0) as u16;
@@ -1011,7 +1028,7 @@ fn page_at(x: u16, y: u16, layout: &Layout) -> Option<Page> {
     .enumerate()
     .find_map(|(index, page)| {
         let top = layout.nav_first_top + index as u16 * layout.nav_step;
-        (y >= top && y < top + 42).then_some(page)
+        (y >= top && y < top + 36).then_some(page)
     })
 }
 
@@ -1035,7 +1052,7 @@ fn render_page(
     theme: &Theme,
     layout: &Layout,
 ) -> Result<(), Error> {
-    text(
+    heading(
         pixels,
         stride,
         layout.content_left,
@@ -1043,7 +1060,7 @@ fn render_page(
         page_title(page),
         theme.text,
     )?;
-    let panel_top = layout.content_top + 44;
+    let panel_top = layout.content_top + 34;
     let panel = Rect::new(
         layout.content_left,
         panel_top,
@@ -1055,8 +1072,8 @@ fn render_page(
     text(
         pixels,
         stride,
-        layout.content_left + 24,
-        panel_top + 24,
+        layout.content_left + 18,
+        panel_top + 18,
         b"Live Controller View",
         theme.healthy,
     )?;
@@ -1072,8 +1089,8 @@ fn render_page(
     text(
         pixels,
         stride,
-        layout.content_left + 24,
-        panel_top + 72,
+        layout.content_left + 18,
+        panel_top + 54,
         label,
         theme.muted,
     )?;
@@ -1082,8 +1099,8 @@ fn render_page(
     text(
         pixels,
         stride,
-        layout.content_left + 24,
-        panel_top + 100,
+        layout.content_left + 18,
+        panel_top + 76,
         numeric,
         theme.text,
     )?;
@@ -1091,16 +1108,16 @@ fn render_page(
         text(
             pixels,
             stride,
-            layout.content_left + 24,
-            panel_top + 172,
+            layout.content_left + 18,
+            panel_top + 132,
             b"Date, time, and timezone",
             theme.text,
         )?;
         text(
             pixels,
             stride,
-            layout.content_left + 24,
-            panel_top + 204,
+            layout.content_left + 18,
+            panel_top + 158,
             b"Configuration interface pending",
             theme.muted,
         )?;
@@ -1108,8 +1125,8 @@ fn render_page(
         text(
             pixels,
             stride,
-            layout.content_left + 24,
-            panel_top + 172,
+            layout.content_left + 18,
+            panel_top + 132,
             b"State refreshes from the kernel",
             theme.muted,
         )?;
@@ -1202,6 +1219,25 @@ fn text(
     value: &[u8],
     color: u32,
 ) -> Result<(), Error> {
+    paint_text_inter_13(
+        pixels,
+        stride,
+        x.saturating_mul(DISPLAY_SCALE as i16),
+        y.saturating_mul(DISPLAY_SCALE as i16),
+        value,
+        color,
+    )
+    .map_err(|_| Error::Failed)
+}
+
+fn heading(
+    pixels: &mut [u32],
+    stride: usize,
+    x: i16,
+    y: i16,
+    value: &[u8],
+    color: u32,
+) -> Result<(), Error> {
     paint_text_inter_16(
         pixels,
         stride,
@@ -1224,14 +1260,14 @@ fn card(
     let (label, value, detail) = content;
     rect(pixels, stride, area, theme.raised)?;
     outline(pixels, stride, area, theme.border)?;
-    nav_icon(pixels, stride, area.x + 16, area.y + 34, icon, theme.text)?;
-    text(pixels, stride, area.x + 58, area.y + 18, label, theme.muted)?;
-    text(pixels, stride, area.x + 58, area.y + 46, value, theme.text)?;
+    nav_icon(pixels, stride, area.x + 14, area.y + 26, icon, theme.text)?;
+    text(pixels, stride, area.x + 48, area.y + 14, label, theme.muted)?;
+    text(pixels, stride, area.x + 48, area.y + 36, value, theme.text)?;
     text(
         pixels,
         stride,
-        area.x + 16,
-        area.y + 78,
+        area.x + 14,
+        area.y + 68,
         detail,
         theme.muted,
     )
@@ -1369,12 +1405,12 @@ fn draw_power_icon(
 }
 
 fn render_power_menu(pixels: &mut [u32], stride: usize, theme: &Theme) -> Result<(), Error> {
-    let panel = Rect::new(840, 52, 168, 96);
+    let panel = Rect::new(840, 48, 168, 84);
     rect(pixels, stride, panel, theme.raised)?;
     outline(pixels, stride, panel, theme.border)?;
-    text(pixels, stride, 860, 68, b"Reboot", theme.text)?;
-    rect(pixels, stride, Rect::new(848, 97, 152, 1), theme.border)?;
-    text(pixels, stride, 860, 112, b"Shut down", theme.danger)
+    text(pixels, stride, 858, 61, b"Reboot", theme.text)?;
+    rect(pixels, stride, Rect::new(848, 89, 152, 1), theme.border)?;
+    text(pixels, stride, 858, 103, b"Shut down", theme.danger)
 }
 
 fn render_power_confirmation(
@@ -1392,7 +1428,7 @@ fn render_power_confirmation(
     let panel = Rect::new(344, 294, 336, 180);
     rect(pixels, stride, panel, theme.raised)?;
     outline(pixels, stride, panel, theme.border)?;
-    text(
+    heading(
         pixels,
         stride,
         376,
@@ -1555,17 +1591,17 @@ mod tests {
         let hash = app.render_shell(&mut pixels, SHELL_WIDTH).unwrap();
         assert_ne!(hash, 0);
         assert_eq!(pixels[0], COLOR_PANEL);
-        assert_eq!(pixels[51 * SHELL_WIDTH], COLOR_BORDER);
-        assert_eq!(pixels[94 * SHELL_WIDTH + 16], COLOR_ACCENT);
-        assert_eq!(pixels[126 * SHELL_WIDTH + 252], COLOR_BORDER);
-        assert_eq!(pixels[127 * SHELL_WIDTH + 253], COLOR_SURFACE_RAISED);
+        assert_eq!(pixels[47 * SHELL_WIDTH], COLOR_BORDER);
+        assert_eq!(pixels[82 * SHELL_WIDTH + 12], COLOR_ACCENT);
+        assert_eq!(pixels[104 * SHELL_WIDTH + 208], COLOR_BORDER);
+        assert_eq!(pixels[105 * SHELL_WIDTH + 209], COLOR_SURFACE_RAISED);
         assert_eq!(hash, app.render_shell(&mut pixels, SHELL_WIDTH).unwrap());
     }
 
     #[test]
     fn pointer_click_selects_navigation_once() {
         let mut state = ShellState::new();
-        assert!(state.pointer_motion(80, 440));
+        assert!(state.pointer_motion(80, 368));
         assert!(state.pointer_buttons(1, 1));
         assert_eq!(state.page, Page::Settings);
         assert!(!state.pointer_buttons(1, 0));
@@ -1606,7 +1642,7 @@ mod tests {
             .render_shell_view_with_theme(&mut pixels, SHELL_WIDTH, &state, &view, &alternate)
             .unwrap();
         assert_ne!(default, changed);
-        assert_eq!(pixels[94 * SHELL_WIDTH + 16], alternate.accent);
+        assert_eq!(pixels[82 * SHELL_WIDTH + 12], alternate.accent);
     }
 
     #[test]
@@ -1625,7 +1661,7 @@ mod tests {
         app.render_shell_view(&mut pixels, SHELL_WIDTH, &state, &view)
             .unwrap();
         assert_eq!(pixels[112 * SHELL_WIDTH + 16], DEFAULT_THEME.accent);
-        assert!(state.pointer_motion(80, 112 + 6 * 56 + 10));
+        assert!(state.pointer_motion(80, 112 + 6 * 46 + 10));
         assert!(state.pointer_buttons(1, 1));
         assert_eq!(state.page, Page::Settings);
     }

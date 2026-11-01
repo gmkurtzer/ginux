@@ -258,14 +258,14 @@ done
 # of that scale and of its earlier latency samples.
 move_pointer -5000 5000
 sleep 0.05
-move_pointer 104 -303
+move_pointer 104 -385
 sleep 0.05
 capture_frame "$latency_reference"
-measure_visible_pixel 'page-settings' 'mouse_button 1\nmouse_button 0\n' 16 440 0d7ff2
+measure_visible_pixel 'page-settings' 'mouse_button 1\nmouse_button 0\n' 12 358 0d7ff2
 cp "$latency_capture" "$click_screenshot"
 click_hash="$pointer_hash"
 click_hash="$(shasum -a 256 "$click_screenshot" | awk '{print $1}')"
-if [[ "$(frame_pixel_hex "$click_screenshot" 16 440)" != '0d7ff2' ]]; then
+if [[ "$(frame_pixel_hex "$click_screenshot" 12 358)" != '0d7ff2' ]]; then
     mkdir -p "$artifact_dir"
     cp "$click_screenshot" "$artifact_dir/debug-target-settings.ppm"
     if command -v sips >/dev/null 2>&1; then
@@ -277,13 +277,13 @@ fi
 
 move_pointer -5000 -5000
 sleep 0.05
-move_pointer 104 98
+move_pointer 104 86
 sleep 0.05
 printf 'mouse_button 1\nmouse_button 0\n' >&8
 sleep 0.5
 capture_frame "$overview_screenshot"
 overview_hash="$(shasum -a 256 "$overview_screenshot" | awk '{print $1}')"
-if [[ "$(frame_pixel_hex "$overview_screenshot" 16 110)" != '0d7ff2' ]]; then
+if [[ "$(frame_pixel_hex "$overview_screenshot" 12 82)" != '0d7ff2' ]]; then
     echo 'Visible desktop test failed: Overview click did not select Overview.' >&2
     exit 1
 fi

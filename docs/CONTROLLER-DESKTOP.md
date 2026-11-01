@@ -346,9 +346,12 @@ fake window controls, graphical prompt, or unused margins. The controller maps
 only the capability-authorized framebuffer pages into its address space and
 writes them directly, avoiding the former per-pixel syscall copy path. Pointer
 motion restores and repaints only its bounded 18 by 20 saved-under region.
-Controller text uses a compact 16-pixel embedded, antialiased Inter atlas
-generated at build time and spaced specifically for the 1024 by 768 shell;
-icons and the high-contrast pointer remain allocation-free software primitives.
+Controller text uses embedded, antialiased Inter atlases generated at build
+time: a compact 13-pixel body face for navigation, cards, tables, and controls,
+plus a restrained 16-pixel face reserved for brand and page headings. The
+184-pixel navigation rail, 36-pixel selection rows, proportional table columns,
+and compact cards are sized specifically for the 1024 by 768 shell. Icons and
+the high-contrast pointer remain allocation-free software primitives.
 Palette and major layout dimensions are centralized in explicit
 `Theme` and `Layout` contracts so the shell can be restyled without changing
 management behavior or hit testing.
@@ -419,8 +422,8 @@ Measurements recorded on 2026-11-01 on an Apple Silicon macOS host with QEMU
 | Metric | Measured | Budget | Result |
 |---|---:|---:|---|
 | Two-presentation model startup | 1 us | 50,000 us | pass |
-| Input-to-frame p95 with background domain | 826 us | 16,667 us | pass |
-| Steady software frame p95 | 835 us | 16,667 us | pass |
+| Input-to-frame p95 with background domain | 835 us | 16,667 us | pass |
+| Steady software frame p95 | 863 us | 16,667 us | pass |
 | Fault/recovery cycle p95 | <1 us | 1,000 us | pass |
 | Modeled bounded working set | 3,175,728 bytes | 8,388,608 bytes | pass |
 

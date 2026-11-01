@@ -229,6 +229,16 @@ architecture and serial recovery path.
   4-vCPU recovery stress passed after the compact typography revision.
 - `make check` -> architecture, unsafe baseline, ABI, formatting, lint, unit,
   and compatibility checks passed after the compact typography revision.
+- `make test-controller-desktop-latency` -> the full-density 1024 by 768
+  revision retained exact Overview, Settings, live-domain, and power-menu
+  frames; visible interaction p95 was 20.972 ms, maximum was 21.238 ms, and
+  complete Settings-page presentation was 18.661 ms.
+- `make test-controller-desktop-performance` -> the full-density release model
+  passed at 835 us input-to-frame p95, 863 us steady-frame p95, and a bounded
+  3,175,728-byte working set.
+- `make test-controller-desktop-all` and `make check` -> the complete desktop,
+  2-vCPU/4-vCPU recovery, architecture, ABI, formatting, lint, unit, and
+  compatibility checks passed after the full-density revision.
 
 ## Decisions and limitations
 
@@ -287,6 +297,12 @@ architecture and serial recovery path.
   card spacing retained 1080p proportions. The embedded face is now 16 pixels,
   summary cards have deliberate vertical breathing room, and the domain table
   starts below the complete card content rather than crowding it.
+- Human review rejected that first compact-font result as visually unchanged:
+  reducing glyphs alone left the 220-pixel rail, 42-pixel rows, large content
+  margins, tall cards, and fixed table columns oversized. The subsequent
+  revision treats density as one system: 13-pixel body text, 16-pixel headings,
+  a 184-pixel rail, 36-pixel navigation rows, compact cards, and proportional
+  columns shared by rendering and hit testing.
 - Real-QEMU latency timestamps now stop when QEMU is asked to sample the
   framebuffer. Subsequent PPM encoding and filesystem output are observer
   overhead and are deliberately excluded from presentation latency.

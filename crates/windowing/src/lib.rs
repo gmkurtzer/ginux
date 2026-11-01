@@ -1,5 +1,6 @@
 #![no_std]
 
+mod inter_13;
 mod inter_16;
 
 pub const MAX_WINDOWS: usize = 4;
@@ -920,13 +921,41 @@ pub fn paint_text_5x7_smooth(
 /// Paint the embedded antialiased Inter controller face. The atlas is
 /// generated ahead of time so the freestanding renderer needs neither a font
 /// parser nor allocation at runtime.
-pub fn paint_text_inter_16(
+struct FontAtlas {
+    first: u8,
+    last: u8,
+    width: usize,
+    height: usize,
+    advance: &'static [u8],
+    alpha_4: &'static [u8],
+}
+
+const INTER_13: FontAtlas = FontAtlas {
+    first: inter_13::GLYPH_FIRST,
+    last: inter_13::GLYPH_LAST,
+    width: inter_13::GLYPH_WIDTH,
+    height: inter_13::GLYPH_HEIGHT,
+    advance: &inter_13::GLYPH_ADVANCE,
+    alpha_4: &inter_13::GLYPH_ALPHA_4,
+};
+
+const INTER_16: FontAtlas = FontAtlas {
+    first: inter_16::GLYPH_FIRST,
+    last: inter_16::GLYPH_LAST,
+    width: inter_16::GLYPH_WIDTH,
+    height: inter_16::GLYPH_HEIGHT,
+    advance: &inter_16::GLYPH_ADVANCE,
+    alpha_4: &inter_16::GLYPH_ALPHA_4,
+};
+
+fn paint_text_atlas(
     pixels: &mut [u32],
     stride: usize,
     x: i16,
     y: i16,
     text: &[u8],
     color: u32,
+    atlas: &FontAtlas,
 ) -> Result<(), Error> {
     if stride == 0 || !pixels.len().is_multiple_of(stride) {
         return Err(Error::Bounds);
@@ -936,25 +965,25 @@ pub fn paint_text_inter_16(
     let mut origin_x = i32::from(x);
     let origin_y = i32::from(y);
     for byte in text.iter().copied() {
-        let byte = if (inter_16::GLYPH_FIRST..=inter_16::GLYPH_LAST).contains(&byte) {
+        let byte = if (atlas.first..=atlas.last).contains(&byte) {
             byte
         } else {
             b'?'
         };
-        let glyph = usize::from(byte - inter_16::GLYPH_FIRST);
-        let glyph_start = glyph * inter_16::GLYPH_WIDTH * inter_16::GLYPH_HEIGHT;
-        for row in 0..inter_16::GLYPH_HEIGHT {
+        let glyph = usize::from(byte - atlas.first);
+        let glyph_start = glyph * atlas.width * atlas.height;
+        for row in 0..atlas.height {
             let py = origin_y + row as i32;
             if py < 0 || py >= height {
                 continue;
             }
-            for column in 0..inter_16::GLYPH_WIDTH {
+            for column in 0..atlas.width {
                 let px = origin_x + column as i32;
                 if px < 0 || px >= width {
                     continue;
                 }
-                let alpha_index = glyph_start + row * inter_16::GLYPH_WIDTH + column;
-                let packed = inter_16::GLYPH_ALPHA_4[alpha_index / 2];
+                let alpha_index = glyph_start + row * atlas.width + column;
+                let packed = atlas.alpha_4[alpha_index / 2];
                 let alpha = u32::from(if alpha_index.is_multiple_of(2) {
                     packed >> 4
                 } else {
@@ -971,9 +1000,33 @@ pub fn paint_text_inter_16(
                 };
             }
         }
-        origin_x += i32::from(inter_16::GLYPH_ADVANCE[glyph]);
+        origin_x += i32::from(atlas.advance[glyph]);
     }
     Ok(())
+}
+
+/// Paint compact body text for the 1024 by 768 controller shell.
+pub fn paint_text_inter_13(
+    pixels: &mut [u32],
+    stride: usize,
+    x: i16,
+    y: i16,
+    text: &[u8],
+    color: u32,
+) -> Result<(), Error> {
+    paint_text_atlas(pixels, stride, x, y, text, color, &INTER_13)
+}
+
+/// Paint the larger heading face used sparingly for visual hierarchy.
+pub fn paint_text_inter_16(
+    pixels: &mut [u32],
+    stride: usize,
+    x: i16,
+    y: i16,
+    text: &[u8],
+    color: u32,
+) -> Result<(), Error> {
+    paint_text_atlas(pixels, stride, x, y, text, color, &INTER_16)
 }
 
 fn blend_rgb(background: u32, foreground: u32, numerator: u32, denominator: u32) -> u32 {
@@ -1314,7 +1367,7 @@ mod tests {
         const FOREGROUND: u32 = 0xe7ee_f8;
         let mut pixels = [BACKGROUND; 48 * 32];
 
-        paint_text_inter_16(&mut pixels, 48, 2, 2, b"G", FOREGROUND).unwrap();
+        paint_text_inter_13(&mut pixels, 48, 2, 2, b"G", FOREGROUND).unwrap();
 
         assert!(pixels.iter().any(|pixel| *pixel == FOREGROUND));
         assert!(pixels
