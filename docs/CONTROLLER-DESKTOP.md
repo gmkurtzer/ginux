@@ -374,8 +374,8 @@ Measurements recorded on 2026-10-31 on an Apple Silicon macOS host with QEMU
 | Metric | Measured | Budget | Result |
 |---|---:|---:|---|
 | Two-presentation model startup | 1 us | 50,000 us | pass |
-| Input-to-frame p95 with background domain | 476 us | 16,667 us | pass |
-| Steady software frame p95 | 245 us | 16,667 us | pass |
+| Input-to-frame p95 with background domain | 421 us | 16,667 us | pass |
+| Steady software frame p95 | 277 us | 16,667 us | pass |
 | Fault/recovery cycle p95 | <1 us | 1,000 us | pass |
 | Modeled bounded working set | 1,950,000 bytes | 8,388,608 bytes | pass |
 
