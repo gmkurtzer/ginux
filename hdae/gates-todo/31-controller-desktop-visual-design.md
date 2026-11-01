@@ -111,8 +111,9 @@ and interaction model.
 - Pull request: continue the integrated controller-desktop pull request
 - Planned commits: accepted visual reference; native implementation and tests;
   evidence and gate closure
-- Actual commits: `eb71161a` (accepted visual reference); implementation commit
-  pending
+- Actual commits: `eb71161a` (accepted visual reference); `af7cb035`
+  (initial native implementation); `71c097fd` (Settings navigation);
+  `d6682bc4` (high-resolution renderer and final technical evidence)
 
 ## Review policy and outcome
 
