@@ -419,6 +419,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ginux-controller-ui"
+version = "0.1.0"
+dependencies = [
+ "ginux-native-abi",
+ "ginux-windowing",
+]
+
+[[package]]
 name = "ginux-display-protocol"
 version = "0.1.0"
 
@@ -426,6 +434,7 @@ version = "0.1.0"
 name = "ginux-graphics-service-runtime"
 version = "0.1.0"
 dependencies = [
+ "ginux-controller-ui",
  "ginux-display-protocol",
  "ginux-native-abi",
  "ginux-windowing",

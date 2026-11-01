@@ -4090,6 +4090,24 @@ pub(crate) fn verify_mapped_system_init_plan(protected_start: u64, protected_siz
     )
 }
 
+pub(crate) fn verify_published_system_init_plan() -> bool {
+    let Some(node) = crate::initramfs::published_regular_file_node(b"sbin/init") else {
+        return false;
+    };
+    let Some(plan) =
+        crate::initramfs::published_file_by_node(node).and_then(measured_static_exec_plan)
+    else {
+        return false;
+    };
+    plan.entry == 0x41_5000
+        && plan.executable.page_count == 4
+        && plan.writable.page_count == 1
+        && !plan.executable.writable
+        && plan.executable.executable
+        && plan.writable.writable
+        && !plan.writable.executable
+}
+
 #[inline(never)]
 fn verify_interpreted_fixture_inputs() -> bool {
     const PATH: &[u8] = b"/lib64/ld-ginux.so";

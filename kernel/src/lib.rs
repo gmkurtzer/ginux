@@ -4309,10 +4309,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
                 }
             } else {
                 arch::x86_64::cpu::begin_configured_container();
-                if !linux_elf::verify_mapped_system_init_plan(
-                    boot_info.image_base as u64,
-                    boot_info.image_size,
-                ) {
+                if !linux_elf::verify_published_system_init_plan() {
                     kernel_fail("ginux: minimal system init execution failed\r\n");
                 }
                 arch::x86_64::cpu::stop_configured_container();

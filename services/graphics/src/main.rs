@@ -20,6 +20,7 @@ const READY: &[u8] = b"ginux: graphical controller service ready\r\n";
 const PROTOCOL_READY: &[u8] = b"ginux: native display protocol conformance validated in ring 3\r\n";
 const SEAT_READY: &[u8] = b"ginux: controller seat focus and leases validated in ring 3\r\n";
 const WINDOWING_READY: &[u8] = b"ginux: native windowing and toolkit validated in ring 3\r\n";
+const CONTROLLER_READY: &[u8] = b"ginux: graphical controller workflows validated in ring 3\r\n";
 static SERVICE_IDENTITY: &[u8] = b"GINUX_GRAPHICS_SERVICE_V0";
 
 global_asm!(
@@ -84,6 +85,7 @@ extern "C" fn ginux_graphics_service_main(info: *const NativeGraphicsBootV0) -> 
                 || !ginux_display_protocol::contract_probe()
                 || !ginux_display_protocol::seat_contract_probe()
                 || !ginux_windowing::contract_probe()
+                || !ginux_controller_ui::contract_probe()
                 || call(
                     NATIVE_CONSOLE_WRITE_OPERATION,
                     info.v0.console_capability,
@@ -99,6 +101,15 @@ extern "C" fn ginux_graphics_service_main(info: *const NativeGraphicsBootV0) -> 
                 SEAT_READY.as_ptr() as u64,
                 SEAT_READY.len() as u64,
             ) != SEAT_READY.len() as u64
+            {
+                fail();
+            }
+            if call(
+                NATIVE_CONSOLE_WRITE_OPERATION,
+                info.v0.console_capability,
+                CONTROLLER_READY.as_ptr() as u64,
+                CONTROLLER_READY.len() as u64,
+            ) != CONTROLLER_READY.len() as u64
             {
                 fail();
             }
