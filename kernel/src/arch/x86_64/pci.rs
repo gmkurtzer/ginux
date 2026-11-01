@@ -290,7 +290,7 @@ impl VirtioNetworkDevice {
             .checked_add(u64::from(self.common_offset))?;
         let length = usize::try_from(self.common_length).ok()?;
         physical.checked_add(length as u64)?;
-        (length > COMMON_QUEUE_DEVICE).then_some((physical, length))
+        (length >= COMMON_QUEUE_DEVICE + size_of::<u64>()).then_some((physical, length))
     }
 
     pub(crate) fn device_region(self) -> Option<(u64, usize)> {
@@ -615,13 +615,19 @@ pub(crate) fn verify_parser_rejections(device: VirtioBlockDevice) -> bool {
 
 pub(crate) fn verify_network_parser_rejections(device: VirtioNetworkDevice) -> bool {
     let config = unsafe { read_config_space(device.bus, device.device, device.function) };
-    verify_parser_rejections_for(
-        &config,
-        VIRTIO_NETWORK_DEVICE,
-        device.bus,
-        device.device,
-        device.function,
-    )
+    let mut undersized_common = device;
+    undersized_common.common_length = (COMMON_QUEUE_DEVICE + size_of::<u64>() - 1) as u32;
+    let mut minimum_common = device;
+    minimum_common.common_length = (COMMON_QUEUE_DEVICE + size_of::<u64>()) as u32;
+    undersized_common.common_region().is_none()
+        && minimum_common.common_region().is_some()
+        && verify_parser_rejections_for(
+            &config,
+            VIRTIO_NETWORK_DEVICE,
+            device.bus,
+            device.device,
+            device.function,
+        )
 }
 
 fn verify_parser_rejections_for(
