@@ -18,11 +18,19 @@ temporary, observable, and safely revocable.
 
 ## Completed work
 
-- [ ] None.
+- [x] Added explicit keyboard focus, pointer capture, trusted-controller focus,
+  bounded transition history, and read-only seat status.
+- [x] Added generation-bound display, keyboard, and pointer leases with bounded
+  rights, expiry, trusted revocation, and observable status.
+- [x] Added synchronous secure attention, timeout, surface destruction,
+  disconnect, and stale-client recovery.
+- [x] Added isolated physical-input routing and transactional focus changes.
+- [x] Added host concurrency tests, a ring-3 contract probe, and 1/2/4-CPU QEMU
+  regression coverage.
 
 ## Remaining work
 
-- [ ] Implement state machines and tests, then stop for human review.
+- [x] No remaining work.
 
 ## Acceptance criteria
 
@@ -44,12 +52,25 @@ temporary, observable, and safely revocable.
 
 ## Evidence
 
-- Not yet run.
+- `cargo test --package ginux-display-protocol` -> 6 tests passed, including
+  concurrent lease contention, secure attention, timeout, owner death, stale
+  handles, and cross-client input isolation.
+- `make test-controller-seat-leases` -> ring-3 contract probe and full boot test
+  passed.
+- `make test-smp` -> 1-, 2-, and 4-CPU qualification plus two 2-CPU stress
+  passes succeeded.
+- `make check` -> complete static, ABI, compatibility, and unit regression suite
+  passed; unsafe baseline remained 1033 blocks.
+- `git diff --check` -> passed.
 
 ## Decisions and limitations
 
 - Exclusive use is a controller-mediated logical lease; raw physical transfer is
   deferred until a later IOMMU/device-virtualization design.
+- Controller status copies identity and lease metadata but never returns an
+  authority-bearing client handle.
+- The boot harness's obsolete manifest-grant assertion was corrected from 10
+  to the 12 grants introduced by the accepted display/input architecture.
 
 ## Delivery strategy
 
@@ -57,10 +78,9 @@ temporary, observable, and safely revocable.
 - Intended base: `main`
 - Pull request: shared integrated PR for Gates 19–30
 - Planned commits: seat/focus state; lease authority/recovery; stress tests
-- Actual commits: pending
+- Actual commits: `f942f71c`
 
 ## Review policy and outcome
 
-Delegated closure under the human's expanded Gates 20–30 authorization on
-2026-10-31. Continue after complete evidence; stop only for a clarification,
-failed dependency, or scope/architecture change.
+Passed and closed on 2026-10-31 under the human's delegated Gates 20–30
+authorization. Every acceptance criterion has fresh objective evidence.
