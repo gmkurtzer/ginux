@@ -38988,6 +38988,7 @@ fn dispatch_charged_call(
     caller_domain: u64,
     frame: *mut UserTrapFrame,
 ) -> u64 {
+    let frame_ref = unsafe { frame.as_ref() };
     match number {
         0 => {
             if CONTROL_DISCOVERY_OVERRIDE_DOMAIN
@@ -39010,7 +39011,7 @@ fn dispatch_charged_call(
         }
         3 => runtime_result(frame),
         4 => {
-            let Some(frame) = (unsafe { frame.as_ref() }) else {
+            let Some(frame) = frame_ref else {
                 return u64::MAX;
             };
             let message = frame.first_argument();
@@ -39079,6 +39080,12 @@ fn dispatch_charged_call(
         ginux_native_abi::NATIVE_NETWORK_INVENTORY_OPERATION => {
             network_inventory_call(caller_domain, capability, frame)
         }
+        ginux_native_abi::NATIVE_DISPLAY_OPERATION => {
+            controller_display_call(caller_domain, capability, frame_ref)
+        }
+        ginux_native_abi::NATIVE_INPUT_OPERATION => {
+            controller_input_call(caller_domain, capability, frame_ref)
+        }
         control_abi::PACKET_PUBLISH_OPERATION => {
             packet_publish_call(caller_domain, capability, frame)
         }
@@ -39118,6 +39125,116 @@ fn dispatch_charged_call(
             packet_egress_drain_wait_call(caller_domain, capability, frame)
         }
         _ => u64::MAX,
+    }
+}
+
+fn controller_display_call(
+    caller_domain: u64,
+    capability: u64,
+    frame: Option<&UserTrapFrame>,
+) -> u64 {
+    let failed = ginux_native_abi::NATIVE_CALL_FAILED;
+    let Some(frame) = frame else {
+        return failed;
+    };
+    if !domain::is_auxiliary_service(caller_domain) {
+        return failed;
+    }
+    let mut bytes = [0_u8; ginux_native_abi::NativeDisplayRequestV0::SIZE as usize];
+    if !address_space::copy_from_current_user(frame.first_argument(), &mut bytes) {
+        return failed;
+    }
+    let command = u16::from_le_bytes(bytes[6..8].try_into().unwrap());
+    let rights = if command == ginux_native_abi::NATIVE_DISPLAY_QUERY {
+        Rights::READ
+    } else {
+        Rights::WRITE
+    };
+    if !domain::handle_permits(
+        caller_domain,
+        capability,
+        ginux_native_abi::NATIVE_DISPLAY_OBJECT,
+        rights,
+    ) {
+        return failed;
+    }
+    let mut request = ginux_native_abi::NativeDisplayRequestV0 {
+        size: u32::from_le_bytes(bytes[0..4].try_into().unwrap()),
+        version: u16::from_le_bytes(bytes[4..6].try_into().unwrap()),
+        command,
+        x: u32::from_le_bytes(bytes[8..12].try_into().unwrap()),
+        y: u32::from_le_bytes(bytes[12..16].try_into().unwrap()),
+        color: u32::from_le_bytes(bytes[16..20].try_into().unwrap()),
+        width: u32::from_le_bytes(bytes[20..24].try_into().unwrap()),
+        height: u32::from_le_bytes(bytes[24..28].try_into().unwrap()),
+        stride: u32::from_le_bytes(bytes[28..32].try_into().unwrap()),
+        format: u32::from_le_bytes(bytes[32..36].try_into().unwrap()),
+        reserved: u32::from_le_bytes(bytes[36..40].try_into().unwrap()),
+    };
+    if request.reserved != 0 || !crate::controller_devices::display(&mut request) {
+        return failed;
+    }
+    bytes[20..24].copy_from_slice(&request.width.to_le_bytes());
+    bytes[24..28].copy_from_slice(&request.height.to_le_bytes());
+    bytes[28..32].copy_from_slice(&request.stride.to_le_bytes());
+    bytes[32..36].copy_from_slice(&request.format.to_le_bytes());
+    if !address_space::copy_to_current_user(frame.first_argument(), &bytes) {
+        return failed;
+    }
+    u64::from(request.size)
+}
+
+fn controller_input_call(
+    caller_domain: u64,
+    capability: u64,
+    frame: Option<&UserTrapFrame>,
+) -> u64 {
+    let failed = ginux_native_abi::NATIVE_CALL_FAILED;
+    let Some(frame) = frame else {
+        return failed;
+    };
+    if !domain::is_auxiliary_service(caller_domain) {
+        return failed;
+    }
+    match frame.second_argument() as u16 {
+        ginux_native_abi::NATIVE_INPUT_READ => {
+            if !domain::handle_permits(
+                caller_domain,
+                capability,
+                ginux_native_abi::NATIVE_INPUT_OBJECT,
+                Rights::READ,
+            ) {
+                return failed;
+            }
+            let Some(event) = crate::controller_devices::input() else {
+                return 0;
+            };
+            let mut bytes = [0_u8; ginux_native_abi::NativeInputEventV0::SIZE as usize];
+            bytes[0..4].copy_from_slice(&event.size.to_le_bytes());
+            bytes[4..6].copy_from_slice(&event.version.to_le_bytes());
+            bytes[6..8].copy_from_slice(&event.kind.to_le_bytes());
+            bytes[8..12].copy_from_slice(&event.code.to_le_bytes());
+            bytes[12..16].copy_from_slice(&event.value.to_le_bytes());
+            bytes[16..24].copy_from_slice(&event.sequence.to_le_bytes());
+            if address_space::copy_to_current_user(frame.first_argument(), &bytes) {
+                u64::from(event.size)
+            } else {
+                failed
+            }
+        }
+        ginux_native_abi::NATIVE_INPUT_RESET => {
+            if !domain::handle_permits(
+                caller_domain,
+                capability,
+                ginux_native_abi::NATIVE_INPUT_OBJECT,
+                Rights::WRITE,
+            ) {
+                return failed;
+            }
+            crate::controller_devices::reset_input();
+            0
+        }
+        _ => failed,
     }
 }
 

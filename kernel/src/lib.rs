@@ -4,6 +4,7 @@ mod address_space;
 mod arch;
 mod capability;
 mod control_abi;
+mod controller_devices;
 mod crypto;
 mod domain;
 mod executable;
@@ -77,7 +78,7 @@ const PERSISTENT_LOCAL_CONFIG_SIZE: usize =
     arch::x86_64::cpu::PERSISTENT_DOMAIN_CONFIG_SIZE + network::PERSISTENT_NETWORK_CONFIG_SIZE;
 const KERNEL_STACK_TOP_OFFSET: usize = PAGE_SIZE + KERNEL_STACK_SIZE;
 pub const BOOT_INFO_MAGIC: u64 = 0x0049_4258_554e_4947;
-pub const BOOT_INFO_VERSION: u32 = 7;
+pub const BOOT_INFO_VERSION: u32 = 8;
 
 fn initialize_linux_realtime(unix_time: u64, timestamp_counter: u64) -> bool {
     if unix_time < 1_577_836_800 || timestamp_counter == 0 {
@@ -154,6 +155,12 @@ pub struct BootInfo {
     pub controller_runtime_size: usize,
     pub root_image: *const u8,
     pub root_image_size: usize,
+    pub framebuffer_base: u64,
+    pub framebuffer_size: usize,
+    pub framebuffer_width: u32,
+    pub framebuffer_height: u32,
+    pub framebuffer_stride: u32,
+    pub framebuffer_format: u32,
     pub oci_rootfs: *const u8,
     pub oci_rootfs_size: usize,
     pub unix_time: u64,
@@ -483,6 +490,20 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: page-table transition failed\r\n");
     };
     serial_write("ginux: kernel page tables active\r\n");
+    if !controller_devices::install(controller_devices::FramebufferInfo {
+        base: boot_info.framebuffer_base,
+        size: boot_info.framebuffer_size,
+        width: boot_info.framebuffer_width,
+        height: boot_info.framebuffer_height,
+        stride: boot_info.framebuffer_stride,
+        format: boot_info.framebuffer_format,
+    }) || !controller_devices::verify_contract()
+    {
+        kernel_fail("ginux: controller framebuffer/input contract invalid\r\n");
+    }
+    serial_write("ginux: controller framebuffer mode and pixel bounds validated\r\n");
+    serial_write("ginux: normalized keyboard and pointer queues validated\r\n");
+    serial_write("ginux: controller input overflow and reset validated\r\n");
     if !arch::x86_64::cpu::execute_disable_enabled()
         || !arch::x86_64::paging::identity_map_obeys_wx(boot_info, &image)
     {
@@ -3240,6 +3261,15 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         serial_write("\r\nginux: graphical controller runtime restarted with stable identity");
         serial_write("\r\nginux: graphical controller runtime grants and frames retired cleanly");
         serial_write("\r\nginux: serial controller recovery remained available");
+        if !address_space::verify_native_graphics_devices(&graphics_image) {
+            kernel_fail("\r\nginux: graphical controller device invariant failed\r\n");
+        }
+        serial_write("\r\nginux: graphical controller framebuffer capability exercised in ring 3");
+        serial_write("\r\nginux: graphical controller input capability exercised in ring 3");
+        serial_write("\r\nginux: unauthorized display and input capabilities rejected");
+        serial_write(
+            "\r\nginux: graphical controller device grants and input state retired cleanly",
+        );
         if !address_space::verify_native_network_bootstrap(
             &network_image,
             virtio_network,

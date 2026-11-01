@@ -7164,6 +7164,13 @@ impl<const IMAGE_CAPACITY: usize, const FRAME_COUNT: usize, const STACK_PAGES: u
         self.write_boot_info_value(info)
     }
 
+    fn write_graphics_boot_info_v1(&self, info: ginux_native_abi::NativeGraphicsBootV1) -> bool {
+        if !info.is_valid() {
+            return false;
+        }
+        self.write_boot_info_value(info)
+    }
+
     fn write_boot_info_value<T: Copy>(&self, info: T) -> bool {
         let Some(page) = mapped_frame::<T>(self.frames[Self::BOOT_INFO_FRAME].address()) else {
             return false;
@@ -7709,6 +7716,111 @@ pub(crate) fn verify_native_graphics_service(image: &crate::native_elf::NativeIm
         ginux_native_abi::NATIVE_GRAPHICS_COMMAND_COMPLETE,
         2,
     ) == Some(identity)
+}
+
+pub(crate) fn verify_native_graphics_devices(image: &crate::native_elf::NativeImage<'_>) -> bool {
+    crate::controller_devices::reset_input();
+    if !crate::controller_devices::inject_input(ginux_native_abi::NATIVE_INPUT_KIND_KEY, 30, 1)
+        || !crate::controller_devices::inject_input(
+            ginux_native_abi::NATIVE_INPUT_KIND_POINTER_MOTION,
+            0,
+            7,
+        )
+        || !crate::controller_devices::inject_input(
+            ginux_native_abi::NATIVE_INPUT_KIND_POINTER_BUTTON,
+            1,
+            1,
+        )
+    {
+        return false;
+    }
+    let read_write = crate::capability::Rights::READ.union(crate::capability::Rights::WRITE);
+    let Some(auxiliary) = domain::initialize_boot_auxiliary_service_with_three_grants([
+        (1, 2, crate::capability::Rights::WRITE),
+        (10, ginux_native_abi::NATIVE_DISPLAY_OBJECT, read_write),
+        (11, ginux_native_abi::NATIVE_INPUT_OBJECT, read_write),
+    ]) else {
+        return false;
+    };
+    let (Some(console), Some(display), Some(input), Some(identity), Some(owner)) = (
+        domain::auxiliary_boot_handle(auxiliary, 0),
+        domain::auxiliary_boot_handle(auxiliary, 1),
+        domain::auxiliary_boot_handle(auxiliary, 2),
+        domain::domain_service_identity(auxiliary),
+        memory::FrameOwner::domain(auxiliary),
+    ) else {
+        return false;
+    };
+    if !domain::handle_permits(auxiliary, console, 2, crate::capability::Rights::WRITE)
+        || !domain::handle_permits(
+            auxiliary,
+            display,
+            ginux_native_abi::NATIVE_DISPLAY_OBJECT,
+            read_write,
+        )
+        || !domain::handle_permits(
+            auxiliary,
+            input,
+            ginux_native_abi::NATIVE_INPUT_OBJECT,
+            read_write,
+        )
+        || domain::handle_permits(
+            auxiliary,
+            console,
+            ginux_native_abi::NATIVE_DISPLAY_OBJECT,
+            crate::capability::Rights::READ,
+        )
+        || domain::handle_permits(
+            auxiliary,
+            display,
+            ginux_native_abi::NATIVE_INPUT_OBJECT,
+            crate::capability::Rights::READ,
+        )
+    {
+        return false;
+    }
+    let kernel_root = current_root();
+    let Some(space) = NativeServiceAddressSpace::new(kernel_root, owner, image) else {
+        return false;
+    };
+    if !space.layout_is_valid(image)
+        || !space.relocations_are_valid(image)
+        || !space.write_graphics_boot_info_v1(
+            ginux_native_abi::NativeGraphicsBootV1::device_validation(console, display, input, 3),
+        )
+        || memory::owner_live_frame_count(owner) != Some(NATIVE_SERVICE_FRAME_COUNT)
+    {
+        let _ = space.release();
+        return false;
+    }
+    let root = space.root;
+    let Ok(entry) = usize::try_from(space.entry) else {
+        let _ = space.release();
+        return false;
+    };
+    let boot_info = USER_TEST_ADDRESS + NATIVE_BOOT_INFO_PAGE * PAGE_SIZE;
+    let stack = USER_TEST_ADDRESS + (NATIVE_STACK_PAGE + 2) * PAGE_SIZE;
+    if !register_address_space(auxiliary, AuxiliaryAddressSpace::Native(space))
+        || !scheduler::queue_auxiliary(auxiliary, root, entry, stack, console)
+        || !cpu::activate_user_root(root)
+    {
+        return false;
+    }
+    cpu::execute_native_auxiliary(entry, stack, boot_info as u64, console, auxiliary, identity);
+    let event = domain::take_lifecycle_event();
+    current_root() == kernel_root
+        && scheduler::current_domain().is_none()
+        && registered_auxiliary_address_space_count() == 0
+        && memory::owner_live_frame_count(owner) == Some(0)
+        && domain::domain_is_retired(auxiliary)
+        && event
+            == Some((auxiliary << 8) | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_EXITED))
+        && domain::last_lifecycle_event_detail()
+            == Some(ginux_native_abi::NATIVE_SERVICE_EXIT_COMPLETED)
+        && domain::last_lifecycle_event_has_fault() == Some(false)
+        && domain::last_lifecycle_service_identity() == Some(identity)
+        && domain::take_lifecycle_event().is_none()
+        && crate::controller_devices::input().is_none()
 }
 
 fn run_native_graphics_service(

@@ -6,7 +6,7 @@ const NATIVE_DOMAIN_CAPACITY: usize = 8;
 const CONTAINER_DOMAIN_CAPACITY: usize = crate::control_abi::DOMAIN_LIMIT;
 const MAX_DOMAINS: usize = NATIVE_DOMAIN_CAPACITY + CONTAINER_DOMAIN_CAPACITY;
 pub(crate) const HOST_DOMAIN_CURSOR_END: u64 = MAX_DOMAINS as u64;
-const MAX_BOOT_GRANTS: usize = 10;
+const MAX_BOOT_GRANTS: usize = 12;
 const CONTROL_CALL_BUDGET: u16 = 79;
 const SERVICE_CALL_BUDGET: u16 = 23;
 const BOOTSTRAP_THREAD_LIMIT: u16 = 1;
@@ -1292,6 +1292,34 @@ pub(crate) fn initialize_boot_auxiliary_service_with_two_grants(
     .then_some(encode_id(id))
 }
 
+pub(crate) fn initialize_boot_auxiliary_service_with_three_grants(
+    grants: [(usize, u64, Rights); 3],
+) -> Option<u64> {
+    let manager = global_manager_mut()?;
+    let control = manager.domain(manager.control_plane_id?)?;
+    let placeholder = control.boot_roots.first().copied().flatten()?;
+    let mut delegated = [DelegationGrant {
+        source: placeholder,
+        object: 1,
+        rights: Rights::READ,
+    }; 3];
+    for (index, (root_index, object, rights)) in grants.into_iter().enumerate() {
+        delegated[index] = DelegationGrant {
+            source: control.boot_roots.get(root_index).copied().flatten()?,
+            object,
+            rights,
+        };
+    }
+    let id = manager.create_auxiliary_service_with_delegations(&delegated)?;
+    let domain = manager.domain(id)?;
+    (domain.role == Role::AuxiliaryService
+        && domain.state == State::Ready
+        && domain.thread_limit == 0
+        && domain.boot_root_count == 3
+        && domain.capabilities.boot_authority_is_sealed())
+    .then_some(encode_id(id))
+}
+
 pub(crate) fn initialize_boot_auxiliary_service_with_four_grants(
     grants: [(usize, u64, Rights); 4],
 ) -> Option<u64> {
@@ -1570,6 +1598,12 @@ pub(crate) fn auxiliary_service_is_ready(domain_raw: u64) -> bool {
                 && domain.failure_policy == Some(ServiceFailurePolicy::StopOnly)
         })
     })
+}
+
+pub(crate) fn is_auxiliary_service(domain_raw: u64) -> bool {
+    decode_id(domain_raw)
+        .and_then(|id| global_manager()?.domain(id))
+        .is_some_and(|domain| domain.role == Role::AuxiliaryService)
 }
 
 pub(crate) fn create_auxiliary_service(

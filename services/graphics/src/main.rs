@@ -4,10 +4,15 @@
 use core::arch::{asm, global_asm};
 
 use ginux_native_abi::{
-    native_control_abi_is_compatible, NativeControlDescriptorV4, NativeGraphicsBootV0,
+    native_control_abi_is_compatible, NativeControlDescriptorV4, NativeDisplayRequestV0,
+    NativeGraphicsBootV0, NativeGraphicsBootV1, NativeInputEventV0, NATIVE_CALL_FAILED,
     NATIVE_CONSOLE_WRITE_OPERATION, NATIVE_CONTROL_DESCRIPTOR_OPERATION,
-    NATIVE_CONTROL_DESCRIPTOR_SIZE, NATIVE_CONTROL_DISCOVERY_OPERATION,
-    NATIVE_GRAPHICS_COMMAND_COMPLETE, NATIVE_GRAPHICS_COMMAND_FAULT, NATIVE_SERVICE_EXIT_COMPLETED,
+    NATIVE_CONTROL_DESCRIPTOR_SIZE, NATIVE_CONTROL_DISCOVERY_OPERATION, NATIVE_DISPLAY_OPERATION,
+    NATIVE_DISPLAY_QUERY, NATIVE_DISPLAY_RESET, NATIVE_DISPLAY_WRITE_PIXEL,
+    NATIVE_GRAPHICS_BOOT_V1_VERSION, NATIVE_GRAPHICS_COMMAND_COMPLETE,
+    NATIVE_GRAPHICS_COMMAND_FAULT, NATIVE_GRAPHICS_COMMAND_VALIDATE_DEVICES, NATIVE_INPUT_KIND_KEY,
+    NATIVE_INPUT_KIND_POINTER_BUTTON, NATIVE_INPUT_KIND_POINTER_MOTION, NATIVE_INPUT_OPERATION,
+    NATIVE_INPUT_READ, NATIVE_INPUT_RESET, NATIVE_SERVICE_EXIT_COMPLETED,
     NATIVE_SERVICE_EXIT_OPERATION,
 };
 
@@ -42,7 +47,13 @@ extern "C" fn ginux_graphics_service_main(info: *const NativeGraphicsBootV0) -> 
     let Some(info) = (unsafe { info.as_ref() }) else {
         fail();
     };
-    if !info.is_valid() {
+    let valid_v1 = info.version == NATIVE_GRAPHICS_BOOT_V1_VERSION
+        && unsafe {
+            (info as *const NativeGraphicsBootV0 as *const NativeGraphicsBootV1)
+                .as_ref()
+                .is_some_and(NativeGraphicsBootV1::is_valid)
+        };
+    if !info.is_valid() && !valid_v1 {
         fail();
     }
     if call(
@@ -57,8 +68,116 @@ extern "C" fn ginux_graphics_service_main(info: *const NativeGraphicsBootV0) -> 
     match info.command {
         NATIVE_GRAPHICS_COMMAND_COMPLETE => exit(NATIVE_SERVICE_EXIT_COMPLETED),
         NATIVE_GRAPHICS_COMMAND_FAULT => fail(),
+        NATIVE_GRAPHICS_COMMAND_VALIDATE_DEVICES
+            if info.version == NATIVE_GRAPHICS_BOOT_V1_VERSION =>
+        {
+            let Some(info) = (unsafe {
+                (info as *const NativeGraphicsBootV0 as *const NativeGraphicsBootV1).as_ref()
+            }) else {
+                fail();
+            };
+            if !info.is_valid() || !validate_devices(info) {
+                fail();
+            }
+            exit(NATIVE_SERVICE_EXIT_COMPLETED)
+        }
         _ => fail(),
     }
+}
+
+fn validate_devices(info: &NativeGraphicsBootV1) -> bool {
+    let mut display = NativeDisplayRequestV0 {
+        size: NativeDisplayRequestV0::SIZE,
+        version: 0,
+        command: NATIVE_DISPLAY_QUERY,
+        x: 0,
+        y: 0,
+        color: 0,
+        width: 0,
+        height: 0,
+        stride: 0,
+        format: 0,
+        reserved: 0,
+    };
+    if call(
+        NATIVE_DISPLAY_OPERATION,
+        info.v0.console_capability,
+        (&mut display as *mut NativeDisplayRequestV0) as u64,
+        0,
+    ) != NATIVE_CALL_FAILED
+        || call(
+            NATIVE_DISPLAY_OPERATION,
+            info.display_capability,
+            (&mut display as *mut NativeDisplayRequestV0) as u64,
+            0,
+        ) != u64::from(NativeDisplayRequestV0::SIZE)
+        || display.width == 0
+        || display.height == 0
+        || display.stride < display.width
+        || display.format > 1
+    {
+        return false;
+    }
+    display.command = NATIVE_DISPLAY_WRITE_PIXEL;
+    display.x = 0;
+    display.y = 0;
+    display.color = 0x0014_3658;
+    if call(
+        NATIVE_DISPLAY_OPERATION,
+        info.display_capability,
+        (&mut display as *mut NativeDisplayRequestV0) as u64,
+        0,
+    ) != u64::from(NativeDisplayRequestV0::SIZE)
+    {
+        return false;
+    }
+    display.command = NATIVE_DISPLAY_RESET;
+    if call(
+        NATIVE_DISPLAY_OPERATION,
+        info.display_capability,
+        (&mut display as *mut NativeDisplayRequestV0) as u64,
+        0,
+    ) != u64::from(NativeDisplayRequestV0::SIZE)
+    {
+        return false;
+    }
+
+    let mut event = NativeInputEventV0::EMPTY;
+    if call(
+        NATIVE_INPUT_OPERATION,
+        info.display_capability,
+        (&mut event as *mut NativeInputEventV0) as u64,
+        u64::from(NATIVE_INPUT_READ),
+    ) != NATIVE_CALL_FAILED
+    {
+        return false;
+    }
+    for (index, expected_kind) in [
+        NATIVE_INPUT_KIND_KEY,
+        NATIVE_INPUT_KIND_POINTER_MOTION,
+        NATIVE_INPUT_KIND_POINTER_BUTTON,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        if call(
+            NATIVE_INPUT_OPERATION,
+            info.input_capability,
+            (&mut event as *mut NativeInputEventV0) as u64,
+            u64::from(NATIVE_INPUT_READ),
+        ) != u64::from(NativeInputEventV0::SIZE)
+            || event.kind != expected_kind
+            || event.sequence != index as u64 + 1
+        {
+            return false;
+        }
+    }
+    call(
+        NATIVE_INPUT_OPERATION,
+        info.input_capability,
+        0,
+        u64::from(NATIVE_INPUT_RESET),
+    ) == 0
 }
 
 fn descriptor() -> NativeControlDescriptorV4 {

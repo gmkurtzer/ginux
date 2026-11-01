@@ -120,6 +120,47 @@
 #define GINUX_NATIVE_NETWORK_KIND_MASK UINT16_C(0x00ff)
 #define GINUX_NATIVE_NETWORK_FLAG_UP UINT16_C(0x0100)
 #define GINUX_NATIVE_NETWORK_MAX_NAME_SIZE UINT16_C(16)
+#define GINUX_NATIVE_DISPLAY_OPERATION UINT64_C(39)
+#define GINUX_NATIVE_INPUT_OPERATION UINT64_C(40)
+#define GINUX_NATIVE_DISPLAY_OBJECT UINT64_C(11)
+#define GINUX_NATIVE_INPUT_OBJECT UINT64_C(12)
+#define GINUX_NATIVE_DISPLAY_QUERY UINT16_C(0)
+#define GINUX_NATIVE_DISPLAY_WRITE_PIXEL UINT16_C(1)
+#define GINUX_NATIVE_DISPLAY_RESET UINT16_C(2)
+#define GINUX_NATIVE_INPUT_READ UINT16_C(0)
+#define GINUX_NATIVE_INPUT_RESET UINT16_C(1)
+#define GINUX_NATIVE_INPUT_KIND_KEY UINT16_C(1)
+#define GINUX_NATIVE_INPUT_KIND_POINTER_MOTION UINT16_C(2)
+#define GINUX_NATIVE_INPUT_KIND_POINTER_BUTTON UINT16_C(3)
+
+struct ginux_native_display_request_v0 {
+    uint32_t size;
+    uint16_t version;
+    uint16_t command;
+    uint32_t x;
+    uint32_t y;
+    uint32_t color;
+    uint32_t width;
+    uint32_t height;
+    uint32_t stride;
+    uint32_t format;
+    uint32_t reserved;
+};
+
+_Static_assert(sizeof(struct ginux_native_display_request_v0) == 40,
+               "ginux native display request v0 size");
+
+struct ginux_native_input_event_v0 {
+    uint32_t size;
+    uint16_t version;
+    uint16_t kind;
+    uint32_t code;
+    int32_t value;
+    uint64_t sequence;
+};
+
+_Static_assert(sizeof(struct ginux_native_input_event_v0) == 24,
+               "ginux native input event v0 size");
 
 struct ginux_native_domain_request_v3 {
     uint32_t size;

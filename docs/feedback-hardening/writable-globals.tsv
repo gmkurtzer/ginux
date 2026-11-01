@@ -450,6 +450,7 @@ interior-mutable	kernel/src/arch/x86_64/smp.rs	MAILBOX_STACK	per-cpu-arch	allowl
 interior-mutable	kernel/src/arch/x86_64/smp.rs	TLB_SHOOTDOWN_ADDRESS	per-cpu-arch	allowlist	none	serialized-cross-cpu-translation-mailbox
 interior-mutable	kernel/src/arch/x86_64/smp.rs	TLB_SHOOTDOWN_ACKNOWLEDGED	per-cpu-arch	allowlist	none	serialized-cross-cpu-translation-acknowledgement
 interior-mutable	kernel/src/arch/x86_64/timer.rs	TIMER	platform-device	allowlist	none	explicit-host-timer-owner-root
+interior-mutable	kernel/src/controller_devices.rs	DEVICES	platform-device	allowlist	none	explicit-controller-display-input-owner-root
 interior-mutable	kernel/src/domain.rs	DOMAIN_RUNTIME	shared-runtime	allowlist	none	explicit-lifecycle-owner-root
 interior-mutable	kernel/src/image_store.rs	IMAGE_STORE	platform-device	allowlist	none	explicit-host-image-store-owner-root
 interior-mutable	kernel/src/initramfs.rs	PUBLISHED_ROOT	platform-device	allowlist	none	explicit-host-initramfs-owner-root

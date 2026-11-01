@@ -351,8 +351,8 @@ fn parse_config(source: &str) -> (u64, Vec<(u64, u64)>) {
     let sequence = sequence.filter(|value| *value != 0).unwrap_or_else(|| {
         fail("manifest requires one nonzero sequence");
     });
-    if grants.is_empty() || grants.len() > 10 {
-        fail("manifest requires one through ten grants");
+    if grants.is_empty() || grants.len() > 12 {
+        fail("manifest requires one through twelve grants");
     }
     (sequence, grants)
 }

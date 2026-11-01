@@ -4172,7 +4172,7 @@ fn read_mmio_u32(address: usize) -> u32 {
     u32::from_le(value)
 }
 
-fn write_mmio_u32(address: usize, value: u32) {
+pub(crate) fn write_mmio_u32(address: usize, value: u32) {
     compiler_fence(Ordering::SeqCst);
     unsafe { write_volatile(address as *mut u32, value.to_le()) };
     compiler_fence(Ordering::SeqCst);

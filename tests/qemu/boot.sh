@@ -254,6 +254,17 @@ if ! grep -q '^ginux: measured graphical controller service discovered' "$output
     exit 1
 fi
 
+if ! grep -q '^ginux: controller framebuffer mode and pixel bounds validated' "$output_file" ||
+    ! grep -q '^ginux: normalized keyboard and pointer queues validated' "$output_file" ||
+    ! grep -q '^ginux: controller input overflow and reset validated' "$output_file" ||
+    ! grep -q '^ginux: graphical controller framebuffer capability exercised in ring 3' "$output_file" ||
+    ! grep -q '^ginux: graphical controller input capability exercised in ring 3' "$output_file" ||
+    ! grep -q '^ginux: unauthorized display and input capabilities rejected' "$output_file" ||
+    ! grep -q '^ginux: graphical controller device grants and input state retired cleanly' "$output_file"; then
+    echo "Boot test failed: controller display/input isolation was not verified." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: compiled native network service executed in ring 3' "$output_file" ||
     ! grep -q '^ginux: native network service negotiated control ABI v4' "$output_file" ||
     ! grep -q '^ginux: native network service validated control descriptor v4' "$output_file" ||

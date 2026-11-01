@@ -131,6 +131,9 @@ pub const NATIVE_GRAPHICS_FEATURE_LIFECYCLE: u32 = 1 << 0;
 pub const NATIVE_GRAPHICS_FEATURE_CONSOLE_IPC: u32 = 1 << 1;
 pub const NATIVE_GRAPHICS_COMMAND_COMPLETE: u32 = 0;
 pub const NATIVE_GRAPHICS_COMMAND_FAULT: u32 = 1;
+pub const NATIVE_GRAPHICS_COMMAND_VALIDATE_DEVICES: u32 = 2;
+pub const NATIVE_GRAPHICS_BOOT_V1_VERSION: u16 = 1;
+pub const NATIVE_GRAPHICS_BOOT_V1_SIZE: u16 = 56;
 pub const NATIVE_CONTROL_DISCOVERY_OPERATION: u64 = 0;
 pub const NATIVE_CONTROL_ABI_VERSION: u16 = 4;
 pub const NATIVE_CONTROL_FEATURE_OPAQUE_CAPABILITIES: u16 = 1 << 0;
@@ -222,6 +225,65 @@ pub const NATIVE_PROGRESS_OPERATION: u64 = 36;
 pub const NATIVE_PROGRESS_MAX_SIZE: usize = 128;
 pub const NATIVE_CONSOLE_READ_BYTE_OPERATION: u64 = 37;
 pub const NATIVE_NETWORK_INVENTORY_OPERATION: u64 = 38;
+pub const NATIVE_DISPLAY_OPERATION: u64 = 39;
+pub const NATIVE_INPUT_OPERATION: u64 = 40;
+pub const NATIVE_DISPLAY_OBJECT: u64 = 11;
+pub const NATIVE_INPUT_OBJECT: u64 = 12;
+pub const NATIVE_DISPLAY_QUERY: u16 = 0;
+pub const NATIVE_DISPLAY_WRITE_PIXEL: u16 = 1;
+pub const NATIVE_DISPLAY_RESET: u16 = 2;
+pub const NATIVE_INPUT_READ: u16 = 0;
+pub const NATIVE_INPUT_RESET: u16 = 1;
+pub const NATIVE_INPUT_KIND_KEY: u16 = 1;
+pub const NATIVE_INPUT_KIND_POINTER_MOTION: u16 = 2;
+pub const NATIVE_INPUT_KIND_POINTER_BUTTON: u16 = 3;
+pub const NATIVE_INPUT_QUEUE_CAPACITY: usize = 64;
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NativeDisplayRequestV0 {
+    pub size: u32,
+    pub version: u16,
+    pub command: u16,
+    pub x: u32,
+    pub y: u32,
+    pub color: u32,
+    pub width: u32,
+    pub height: u32,
+    pub stride: u32,
+    pub format: u32,
+    pub reserved: u32,
+}
+
+impl NativeDisplayRequestV0 {
+    pub const SIZE: u32 = 40;
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NativeInputEventV0 {
+    pub size: u32,
+    pub version: u16,
+    pub kind: u16,
+    pub code: u32,
+    pub value: i32,
+    pub sequence: u64,
+}
+
+impl NativeInputEventV0 {
+    pub const SIZE: u32 = 24;
+    pub const EMPTY: Self = Self {
+        size: Self::SIZE,
+        version: 0,
+        kind: 0,
+        code: 0,
+        value: 0,
+        sequence: 0,
+    };
+}
+
+const _: () = assert!(core::mem::size_of::<NativeDisplayRequestV0>() == 40);
+const _: () = assert!(core::mem::size_of::<NativeInputEventV0>() == 24);
 pub const NATIVE_NETWORK_INVENTORY_REQUEST_SIZE: u32 = 72;
 pub const NATIVE_NETWORK_INVENTORY_VERSION: u16 = 0;
 pub const NATIVE_NETWORK_INVENTORY_QUERY: u16 = 1;
@@ -1707,7 +1769,8 @@ impl NativeGraphicsBootV0 {
                 == NATIVE_GRAPHICS_FEATURE_LIFECYCLE | NATIVE_GRAPHICS_FEATURE_CONSOLE_IPC
             && self.console_capability != 0
             && (self.command == NATIVE_GRAPHICS_COMMAND_COMPLETE
-                || self.command == NATIVE_GRAPHICS_COMMAND_FAULT)
+                || self.command == NATIVE_GRAPHICS_COMMAND_FAULT
+                || self.command == NATIVE_GRAPHICS_COMMAND_VALIDATE_DEVICES)
             && self.reserved == 0
             && self.generation != 0
     }
@@ -1715,6 +1778,52 @@ impl NativeGraphicsBootV0 {
 
 const _: () = assert!(core::mem::size_of::<NativeGraphicsBootV0>() == 40);
 const _: () = assert!(core::mem::align_of::<NativeGraphicsBootV0>() == 8);
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NativeGraphicsBootV1 {
+    pub v0: NativeGraphicsBootV0,
+    pub display_capability: u64,
+    pub input_capability: u64,
+}
+
+impl NativeGraphicsBootV1 {
+    pub const fn device_validation(
+        console_capability: u64,
+        display_capability: u64,
+        input_capability: u64,
+        generation: u64,
+    ) -> Self {
+        let mut v0 = NativeGraphicsBootV0::new(
+            console_capability,
+            NATIVE_GRAPHICS_COMMAND_VALIDATE_DEVICES,
+            generation,
+        );
+        v0.version = NATIVE_GRAPHICS_BOOT_V1_VERSION;
+        v0.size = NATIVE_GRAPHICS_BOOT_V1_SIZE;
+        Self {
+            v0,
+            display_capability,
+            input_capability,
+        }
+    }
+
+    pub const fn is_valid(&self) -> bool {
+        self.v0.magic == NATIVE_GRAPHICS_BOOT_MAGIC
+            && self.v0.version == NATIVE_GRAPHICS_BOOT_V1_VERSION
+            && self.v0.size == NATIVE_GRAPHICS_BOOT_V1_SIZE
+            && self.v0.features
+                == NATIVE_GRAPHICS_FEATURE_LIFECYCLE | NATIVE_GRAPHICS_FEATURE_CONSOLE_IPC
+            && self.v0.console_capability != 0
+            && self.v0.command == NATIVE_GRAPHICS_COMMAND_VALIDATE_DEVICES
+            && self.v0.reserved == 0
+            && self.v0.generation != 0
+            && self.display_capability != 0
+            && self.input_capability != 0
+    }
+}
+
+const _: () = assert!(core::mem::size_of::<NativeGraphicsBootV1>() == 56);
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -2266,6 +2375,24 @@ mod tests {
         ] {
             assert!(!invalid.is_valid());
         }
+        assert_eq!(core::mem::size_of::<NativeGraphicsBootV1>(), 56);
+        assert_eq!(
+            core::mem::offset_of!(NativeGraphicsBootV1, display_capability),
+            40
+        );
+        assert_eq!(
+            core::mem::offset_of!(NativeGraphicsBootV1, input_capability),
+            48
+        );
+        let devices = NativeGraphicsBootV1::device_validation(7, 8, 9, 2);
+        assert!(devices.is_valid());
+        assert!(!NativeGraphicsBootV1 {
+            input_capability: 0,
+            ..devices
+        }
+        .is_valid());
+        assert_eq!(core::mem::size_of::<NativeDisplayRequestV0>(), 40);
+        assert_eq!(core::mem::size_of::<NativeInputEventV0>(), 24);
     }
 
     #[test]
@@ -2285,6 +2412,8 @@ mod tests {
         assert!(header.contains("GINUX_NATIVE_NETWORK_DEVICE_QUERY_DHCP UINT64_C(16)"));
         assert!(header.contains("GINUX_NATIVE_NETWORK_DEVICE_SET_DNS UINT64_C(17)"));
         assert!(header.contains("GINUX_NATIVE_NETWORK_DEVICE_QUERY_DNS UINT64_C(18)"));
+        assert!(header.contains("GINUX_NATIVE_DISPLAY_OPERATION UINT64_C(39)"));
+        assert!(header.contains("GINUX_NATIVE_INPUT_OPERATION UINT64_C(40)"));
         assert!(header.contains("GINUX_NATIVE_NETWORK_DEVICE_QUERY_PING_TARGET UINT64_C(19)"));
         assert!(header.contains("GINUX_NATIVE_NETWORK_DEVICE_ACTIVATE_EMPTY_QUEUES UINT64_C(12)"));
         assert!(header
