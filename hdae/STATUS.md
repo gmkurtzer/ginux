@@ -8,16 +8,16 @@
 - Active project: native controller desktop
 - Branch: `codex/controller-desktop`
 - Intended base: `main` at `759cf2e2`
-- Active gate: Gate 22, native display protocol
-- Status: Gates 19–21 closed; Gate 22 starting
-- Last evidence: Gate 21 passed `make test-controller-display-input`,
-  `make check`, `make architecture-check`, native ABI tests, and
-  `git diff --check`; commits `ac630cd2` and `a3245f67`
+- Active gate: Gate 23, seats, focus, and resource leases
+- Status: Gates 19–22 closed; Gate 23 starting
+- Last evidence: Gate 22 passed `make test-native-display-protocol`,
+  `make check`, protocol/native ABI tests, ring-3 QEMU conformance, and
+  `git diff --check`; commit `0ab16189`
 - Open decisions or limitations: none inside Gate 19; GPU acceleration, raw GPU
   passthrough, and broad desktop compatibility are deferred
-- Exact next action: load Gate 22, establish the protocol baseline, and
-  implement the bounded versioned surface/buffer/damage/commit contract with
-  deterministic producer/consumer and rejection tests
+- Exact next action: load Gate 23 and implement explicit seat focus, trusted
+  attention, generation-scoped leases, revocation, and deterministic routing
+  and failure tests over the Gate 22 protocol
 
 ## Governing outcome
 
@@ -31,6 +31,7 @@ windowed or full screen. The CLI remains the recovery path.
 - Gate 19: accepted by the human on 2026-10-31
 - Gate 20: passed and closed under delegated review on 2026-10-31
 - Gate 21: passed and closed under delegated review on 2026-10-31
+- Gate 22: passed and closed under delegated review on 2026-10-31
 - Gates 20–30: delegated closure after complete objective evidence; continue
   without another planned checkpoint and stop only for a genuine clarification,
   failed dependency, or material scope/architecture change
