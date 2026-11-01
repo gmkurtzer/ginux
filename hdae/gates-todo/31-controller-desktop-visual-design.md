@@ -28,6 +28,13 @@ architecture and serial recovery path.
   minimize/maximize/close controls; keep the serial CLI as the recovery path.
 - Add a configurable theme/layout contract, a refined pointer, and a trusted
   power control with explicit reboot and shutdown choices.
+- Select and fill a true 1920 by 1080 GOP mode when firmware exposes it, with a
+  deterministic fallback only when that mode is unavailable.
+- Replace transient full-frame composition and per-pixel native blitting with
+  a persistent, damage-aware presentation path sized on demand for the selected
+  mode.
+- Replace the softened 5 by 7 bitmap treatment with a legible, antialiased
+  typeface suitable for a 1080p systems-management interface.
 
 ## Non-goals
 
@@ -73,6 +80,12 @@ architecture and serial recovery path.
   discoverable power menu with confirmation-safe interaction.
 - [x] Centralize palette, density, and layout choices in a configurable UI
   theme rather than scattering visual constants through the renderer.
+- [x] Render and visibly qualify the shell at 1920 by 1080.
+- [x] Remove full-frame recomposition and per-pixel copy work from pointer and
+  ordinary control interaction.
+- [x] Replace the bitmap-cell typography with antialiased glyph rendering.
+- [x] Measure the complete controller-to-GOP interaction path in real QEMU and
+  retain machine-checkable latency evidence.
 
 ## Acceptance criteria
 
@@ -98,6 +111,16 @@ architecture and serial recovery path.
   tests prove routing and host lifecycle behavior.
 - Visual colors, spacing, and major dimensions come from one explicit theme and
   layout configuration with deterministic alternate-theme coverage.
+- QEMU exposes a 1920 by 1080 controller framebuffer and every major shell
+  region is rendered at that native resolution; the test fails rather than
+  silently accepting 800 by 600.
+- Typography uses antialiased glyph coverage rather than scaled binary bitmap
+  cells, and retained framebuffer evidence is readable at normal display scale.
+- Pointer motion and ordinary clicks update only bounded damaged regions. A
+  real-QEMU interaction test records end-to-visible-frame latency with a p95 at
+  or below 50 ms and no sample above 100 ms on the qualification host.
+- Full page changes avoid the prior userspace-to-kernel per-pixel syscall copy
+  path and complete within 250 ms in the same real-QEMU qualification.
 
 ## Verification plan
 
@@ -112,6 +135,12 @@ architecture and serial recovery path.
 - `make test-controller-desktop-all` -> integrated desktop regressions pass.
 - `make test-controller-desktop-performance` -> published budgets pass.
 - `make check` -> architecture, ABI, format, lint, and unit checks pass.
+- Deterministic renderer tests -> 1920 by 1080 layout, antialiased glyph alpha,
+  bounded damage rectangles, and unchanged pixels outside damage pass.
+- `make test-controller-desktop-visible` -> reports an exact 1920 by 1080 GOP
+  frame and retains a readable framebuffer image.
+- `make test-controller-desktop-latency` -> real-QEMU pointer/click p95 is at
+  most 50 ms, no sample exceeds 100 ms, and page presentation is at most 250 ms.
 
 ## Evidence
 
@@ -164,6 +193,21 @@ architecture and serial recovery path.
 - `make test-controller-desktop-performance` -> presentation startup 0 us,
   input-to-frame p95 321 us, steady-frame p95 244 us, recovery-cycle p95 0 us,
   and modeled working set 1,950,000 bytes; all budgets passed.
+- `cargo test -p ginux-windowing -p ginux-controller-ui` -> 14 tests passed,
+  including deterministic proof that the embedded Inter atlas produces partial
+  antialias coverage.
+- `make test-controller-desktop-latency` -> exact 1920 by 1080 real-QEMU frames,
+  navigation clicks, live CLI-to-GUI state, power menu, and input all passed;
+  final visible interaction p95 was 43.624 ms, maximum was 57.258 ms, and
+  complete Settings-page presentation was 57.258 ms. Machine-readable evidence
+  is under `build/qualification/controller-desktop/`.
+- `make test-controller-desktop-performance` -> the 1920 by 1080 release model
+  passed: 1 us startup, 1,317 us input-to-frame p95, 959 us steady-frame p95,
+  0 us recovery p95, and 8,324,400 modeled bytes.
+- `make test-controller-desktop-all` -> complete protocol, windowing,
+  controller, domain display, Wayland, presentation, recovery, verification
+  boot, 2-vCPU/4-vCPU stress, exact 1080p framebuffer, and latency suite passed
+  on 2026-11-01.
 
 ## Decisions and limitations
 
@@ -202,6 +246,18 @@ architecture and serial recovery path.
   the trusted controller is the shell, so fake minimize/maximize controls and
   the graphical command prompt have no useful role. The serial CLI remains the
   independent recovery interface.
+- Human framebuffer review later on 2026-11-01 rejected the nominal 800 by 600
+  output as visually equivalent to a much lower resolution and found refresh
+  latency painful. The prior renderer benchmark measured composition in
+  isolation, not complete GOP presentation, so those results cannot close this
+  criterion. This is a failed checkpoint and reopens implementation.
+- The revised controller maps only the GOP pages authorized by its display
+  capability, renders full pages directly into that persistent surface, and
+  uses an 18 by 20 saved-under region for pointer-only damage. The PS/2 device
+  is configured for its standard 200 Hz report rate.
+- The antialiased ASCII atlas is generated from Inter under the SIL Open Font
+  License 1.1 and packed at four bits of alpha per sample to keep the embedded
+  controller image within its measured size bound.
 
 ## Delivery strategy
 
@@ -210,11 +266,14 @@ architecture and serial recovery path.
 - Pull request: continue the integrated controller-desktop pull request
 - Planned commits: accepted visual reference; native implementation and tests;
   responsive input and interaction; live management state; native-resolution
-  visual refinement; evidence and gate closure
+  visual refinement; 1080p damage-aware presentation and typography; evidence
+  and gate closure
 - Actual commits: `eb71161a` (accepted visual reference); `af7cb035`
   (initial native implementation); `71c097fd` (Settings navigation);
   `d6682bc4` (high-resolution renderer); `d9f77bf3` (responsive input,
-  clickable navigation, live state, typography, and interaction evidence)
+  clickable navigation, live state, typography, and interaction evidence);
+  `9d8ac33b` (native 1080p GOP mapping, damage-aware presentation,
+  antialiased Inter typography, and real-QEMU latency qualification)
 
 ## Review policy and outcome
 
