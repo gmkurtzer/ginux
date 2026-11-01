@@ -641,8 +641,7 @@ pub(crate) fn run_linux_init(init: &[u8]) -> LinuxProcessOutcome {
         crate::serial_write_u64(u64::from(stage));
         crate::serial_write_bytes(b"\r\n");
     }
-    let owned_released = valid
-        && runtime_scrubbed
+    let owned_released = runtime_scrubbed
         && memory::release_frames(
             memory::FrameOwner::KERNEL,
             // Runtime teardown releases the initial stack, heap, vvar, and
@@ -663,7 +662,7 @@ pub(crate) fn run_linux_init(init: &[u8]) -> LinuxProcessOutcome {
         crate::serial_write_u64(u64::from(owned_released));
         crate::serial_write_bytes(b"\r\n");
     }
-    if owned_released {
+    if valid && owned_released {
         let (status, syscall) = cpu::linux_runtime_diagnostics();
         if status.is_some_and(|status| status != 0) || syscall.is_some() {
             crate::serial_write_bytes(b"ginux: Linux init diagnostics: exit=");
