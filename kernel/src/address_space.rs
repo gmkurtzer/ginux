@@ -3045,7 +3045,13 @@ struct RegisteredAuxiliaryAddressSpace {
 enum AuxiliaryAddressSpace {
     Wx(WxAddressSpace),
     Native(NativeServiceAddressSpace),
-    Graphics(NativeServiceAddressSpace<GRAPHICS_SERVICE_IMAGE_PAGES, GRAPHICS_SERVICE_FRAME_COUNT>),
+    Graphics(
+        NativeServiceAddressSpace<
+            GRAPHICS_SERVICE_IMAGE_PAGES,
+            GRAPHICS_SERVICE_FRAME_COUNT,
+            GRAPHICS_SERVICE_STACK_PAGES,
+        >,
+    ),
     Network(
         NativeServiceAddressSpace<
             NATIVE_NETWORK_IMAGE_PAGES,
@@ -6722,8 +6728,10 @@ pub(crate) fn verify_control_plane_wx_layout() -> bool {
 
 const NATIVE_SERVICE_IMAGE_PAGES: usize = 7;
 pub(crate) const NATIVE_SERVICE_FRAME_COUNT: usize = 4 + NATIVE_SERVICE_IMAGE_PAGES + 3;
-pub(crate) const GRAPHICS_SERVICE_IMAGE_PAGES: usize = 8;
-const GRAPHICS_SERVICE_FRAME_COUNT: usize = 4 + GRAPHICS_SERVICE_IMAGE_PAGES + 3;
+pub(crate) const GRAPHICS_SERVICE_IMAGE_PAGES: usize = 9;
+pub(crate) const GRAPHICS_SERVICE_STACK_PAGES: usize = 4;
+const GRAPHICS_SERVICE_FRAME_COUNT: usize =
+    4 + GRAPHICS_SERVICE_IMAGE_PAGES + GRAPHICS_SERVICE_STACK_PAGES + 1;
 const NATIVE_NETWORK_IMAGE_PAGES: usize = 160;
 const NATIVE_NETWORK_STACK_PAGES: usize = 16;
 pub(crate) const NATIVE_NETWORK_FRAME_COUNT: usize =
@@ -7387,6 +7395,7 @@ pub(crate) fn verify_native_service_materialization(
     verify_native_service_materialization_with_capacity::<
         NATIVE_SERVICE_IMAGE_PAGES,
         NATIVE_SERVICE_FRAME_COUNT,
+        2,
     >(image)
 }
 
@@ -7396,6 +7405,7 @@ pub(crate) fn verify_native_graphics_service_materialization(
     verify_native_service_materialization_with_capacity::<
         GRAPHICS_SERVICE_IMAGE_PAGES,
         GRAPHICS_SERVICE_FRAME_COUNT,
+        GRAPHICS_SERVICE_STACK_PAGES,
     >(image)
 }
 
@@ -7416,11 +7426,12 @@ pub(crate) fn verify_native_network_service_materialization(
 fn verify_native_service_materialization_with_capacity<
     const IMAGE_PAGES: usize,
     const FRAME_COUNT: usize,
+    const STACK_PAGES: usize,
 >(
     image: &crate::native_elf::NativeImage<'_>,
 ) -> bool {
     let kernel_root = current_root();
-    let Some(space) = NativeServiceAddressSpace::<IMAGE_PAGES, FRAME_COUNT>::new(
+    let Some(space) = NativeServiceAddressSpace::<IMAGE_PAGES, FRAME_COUNT, STACK_PAGES>::new(
         kernel_root,
         memory::FrameOwner::KERNEL,
         image,
@@ -7805,6 +7816,7 @@ pub(crate) fn verify_native_graphics_devices(image: &crate::native_elf::NativeIm
     let Some(space) = NativeServiceAddressSpace::<
         GRAPHICS_SERVICE_IMAGE_PAGES,
         GRAPHICS_SERVICE_FRAME_COUNT,
+        GRAPHICS_SERVICE_STACK_PAGES,
     >::new(kernel_root, owner, image) else {
         return false;
     };
@@ -7827,9 +7839,11 @@ pub(crate) fn verify_native_graphics_devices(image: &crate::native_elf::NativeIm
         + NativeServiceAddressSpace::<
             GRAPHICS_SERVICE_IMAGE_PAGES,
             GRAPHICS_SERVICE_FRAME_COUNT,
+            GRAPHICS_SERVICE_STACK_PAGES,
         >::BOOT_INFO_PAGE
             * PAGE_SIZE;
-    let stack = USER_TEST_ADDRESS + (GRAPHICS_SERVICE_IMAGE_PAGES + 3) * PAGE_SIZE;
+    let stack = USER_TEST_ADDRESS
+        + (GRAPHICS_SERVICE_IMAGE_PAGES + 1 + GRAPHICS_SERVICE_STACK_PAGES) * PAGE_SIZE;
     if !register_address_space(auxiliary, AuxiliaryAddressSpace::Graphics(space))
         || !scheduler::queue_auxiliary(auxiliary, root, entry, stack, console)
         || !cpu::activate_user_root(root)
@@ -7887,6 +7901,7 @@ fn run_native_graphics_service(
     let space = NativeServiceAddressSpace::<
         GRAPHICS_SERVICE_IMAGE_PAGES,
         GRAPHICS_SERVICE_FRAME_COUNT,
+        GRAPHICS_SERVICE_STACK_PAGES,
     >::new(kernel_root, owner, image)?;
     if !space.layout_is_valid(image)
         || !space.relocations_are_valid(image)
@@ -7904,9 +7919,11 @@ fn run_native_graphics_service(
         + NativeServiceAddressSpace::<
             GRAPHICS_SERVICE_IMAGE_PAGES,
             GRAPHICS_SERVICE_FRAME_COUNT,
+            GRAPHICS_SERVICE_STACK_PAGES,
         >::BOOT_INFO_PAGE
             * PAGE_SIZE;
-    let stack = USER_TEST_ADDRESS + (GRAPHICS_SERVICE_IMAGE_PAGES + 3) * PAGE_SIZE;
+    let stack = USER_TEST_ADDRESS
+        + (GRAPHICS_SERVICE_IMAGE_PAGES + 1 + GRAPHICS_SERVICE_STACK_PAGES) * PAGE_SIZE;
     if !register_address_space(auxiliary, AuxiliaryAddressSpace::Graphics(space))
         || !scheduler::queue_auxiliary(auxiliary, root, entry, stack, handle)
         || !cpu::activate_user_root(root)

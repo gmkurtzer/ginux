@@ -254,6 +254,23 @@ The initial compatibility set is recorded by Gate 27 from observed client
 protocol use. Unsupported required globals are absent or return explicit
 protocol failure; they must not hang indefinitely.
 
+### Initial Linux Wayland compatibility set
+
+The bounded domain compositor publishes `/run/user/0/wayland-0` and models the
+ordinary client-facing objects needed by the initial demonstration workload:
+`wl_display`, `wl_registry`, `wl_compositor`, `wl_shm`, `wl_seat`, and
+`xdg_wm_base`. The selected clients create one shared-memory surface each,
+acknowledge `xdg_surface` configuration, attach and damage a buffer, request a
+frame callback, and consume pointer or keyboard events. Two clients may be live
+and composed concurrently into the single exported domain desktop.
+
+The implementation is intentionally bounded to four clients, eight windows,
+and 32 queued events per client. Unknown globals and requests fail explicitly.
+Client disconnect destroys its windows, invalidates its generation, and leaves
+other clients live; domain reset invalidates every client and exported frame.
+This first subset does not advertise X11, Xwayland, GPU, clipboard, audio,
+accessibility, decoration, data-device, or broad desktop-shell compatibility.
+
 ## 10. Lifecycle and recovery
 
 | Failure | Required response |

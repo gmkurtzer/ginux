@@ -442,6 +442,7 @@ dependencies = [
  "ginux-display-protocol",
  "ginux-domain-display",
  "ginux-native-abi",
+ "ginux-wayland-domain",
  "ginux-windowing",
 ]
 
@@ -560,6 +561,10 @@ dependencies = [
  "ginux-volume-format",
  "ginux-volume-service",
 ]
+
+[[package]]
+name = "ginux-wayland-domain"
+version = "0.1.0"
 
 [[package]]
 name = "ginux-windowing"

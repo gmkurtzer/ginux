@@ -288,16 +288,22 @@ pub(crate) fn validated_user_root_frames(root: u64) -> Option<ValidatedUserRootF
     let flags_match = |entry: u64, expected: u64| {
         entry & !(ACCESSED | DIRTY) == expected && (entry & DIRTY == 0 || expected & WRITABLE != 0)
     };
-    let network_layout = native_entry(15) & PRESENT != 0;
-    let graphics_layout = !network_layout
-        && native_entry(7) & PRESENT != 0
-        && native_entry(8) == 0
-        && native_entry(9) & (PRESENT | WRITABLE | USER | NO_EXECUTE)
-            == (PRESENT | WRITABLE | USER | NO_EXECUTE)
-        && native_entry(10) & (PRESENT | WRITABLE | USER | NO_EXECUTE)
-            == (PRESENT | WRITABLE | USER | NO_EXECUTE)
-        && native_entry(11) == 0
-        && native_entry(12) & (PRESENT | USER | NO_EXECUTE) == (PRESENT | USER | NO_EXECUTE);
+    let graphics_stack_page = crate::address_space::GRAPHICS_SERVICE_IMAGE_PAGES + 1;
+    let graphics_layout = native_entry(crate::address_space::GRAPHICS_SERVICE_IMAGE_PAGES - 1)
+        & PRESENT
+        != 0
+        && native_entry(crate::address_space::GRAPHICS_SERVICE_IMAGE_PAGES) == 0
+        && (0..crate::address_space::GRAPHICS_SERVICE_STACK_PAGES).all(|offset| {
+            native_entry(graphics_stack_page + offset) & (PRESENT | WRITABLE | USER | NO_EXECUTE)
+                == (PRESENT | WRITABLE | USER | NO_EXECUTE)
+        })
+        && native_entry(graphics_stack_page + crate::address_space::GRAPHICS_SERVICE_STACK_PAGES)
+            == 0
+        && native_entry(
+            graphics_stack_page + crate::address_space::GRAPHICS_SERVICE_STACK_PAGES + 1,
+        ) & (PRESENT | USER | NO_EXECUTE)
+            == (PRESENT | USER | NO_EXECUTE);
+    let network_layout = !graphics_layout && native_entry(15) & PRESENT != 0;
     let controller_layout = !network_layout && !graphics_layout && native_entry(7) & PRESENT != 0;
     let image_capacity = if network_layout {
         160
@@ -308,7 +314,13 @@ pub(crate) fn validated_user_root_frames(root: u64) -> Option<ValidatedUserRootF
     } else {
         7
     };
-    let stack_pages = if network_layout { 16 } else { 2 };
+    let stack_pages = if network_layout {
+        16
+    } else if graphics_layout {
+        crate::address_space::GRAPHICS_SERVICE_STACK_PAGES
+    } else {
+        2
+    };
     let stack_page = image_capacity + 1;
     let boot_info_page = stack_page + stack_pages + 1;
     let image_pages = (0..image_capacity)
