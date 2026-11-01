@@ -4,27 +4,29 @@
 
 - Active skill: `.agents/skills/hdae-development/SKILL.md`
 - Reload required after compaction, reset, resume, or handoff: yes
-- Active project: feedback-driven kernel hardening issue #5 remediation
-- Branch: `codex/issue-5-criticism-reconciliation`
+- Active project: issue #4 QEMU queue-size verification follow-up
+- Branch: `hdae/issue-4-boot-queue-size`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gates 14 through 18, corrective implementation for issue #5
-- Last completed action: GitHub Actions run `41179779273` passed both static
-  checks and the complete QEMU boot on the `macos-15-intel` runner
-- Next action: commit and push this final evidence checkpoint, confirm the
-  documentation-only head, and return PR #9 to the maintainer for review
+- Active gate: Gate 19, QEMU boot queue-size contract
+- Last completed action: delivered the verified Gate 19 fix through open PR #13
+  and added reciprocal links to issue #4 and the pull request
+- Next action: maintainer review of PR #13; retain issue #4 in scheduled
+  attention until the user acknowledges it
 
 ## Current repository state
 
-Local and remote `main` identify merged PR #7 at commit `a2a1eace`. The first
+Remote `main` identifies merged PRs #9 and #10 at commit `759cf2e2`. The first
 eleven feedback-hardening gates and inserted correctness gates are complete.
-Gate 12 is complete on `codex/performance-parity` for a separate follow-up PR.
+Gate 12 is complete on `codex/performance-parity`. Gates 13 through 18 remain
+in `gates-todo/` for maintainer review after their delivery through merged PRs
+#9 and #10.
 The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
 matrix and repeated stress pass. Gate 11's comparison and reduced evidence are
 under `docs/feedback-hardening/`. No push or merge was performed.
 
 ## Open decisions
 
-- None. Gate 12 passed and was accepted at its required human checkpoint.
+- None. The saved scheduled-review policy delegates this bounded remediation.
 
 ## Active diagnosis
 
