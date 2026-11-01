@@ -8,16 +8,16 @@
 - Active project: native controller desktop
 - Branch: `codex/controller-desktop`
 - Intended base: `main` at `759cf2e2`
-- Active gate: Gate 24, native windowing system and toolkit
-- Status: Gates 19–23 closed; Gate 24 starting
-- Last evidence: Gate 23 passed `make test-controller-seat-leases`,
-  `make test-smp`, `make check`, the display-protocol concurrency/recovery
-  tests, ring-3 QEMU conformance, and `git diff --check`; commit `f942f71c`
+- Active gate: Gate 25, graphical controller application
+- Status: Gates 19–24 closed; Gate 25 starting
+- Last evidence: Gate 24 passed `make test-native-windowing`,
+  `make test-native-windowing-screenshots`, `make check`, exact-pixel fixture
+  comparison, ring-3 QEMU conformance, and `git diff --check`; commit `85c9f646`
 - Open decisions or limitations: none inside Gate 19; GPU acceleration, raw GPU
   passthrough, and broad desktop compatibility are deferred
-- Exact next action: load Gate 24 and implement the bounded compositor,
-  window-state model, trusted chrome, software rendering, native toolkit, and
-  deterministic window/input/damage tests over the Gate 23 seat model
+- Exact next action: load Gate 25 and build the graphical controller application
+  as a peer of the CLI over the existing management interface, with domain,
+  network, storage, device, and status workflows and CLI fallback tests
 
 ## Governing outcome
 
@@ -33,6 +33,7 @@ windowed or full screen. The CLI remains the recovery path.
 - Gate 21: passed and closed under delegated review on 2026-10-31
 - Gate 22: passed and closed under delegated review on 2026-10-31
 - Gate 23: passed and closed under delegated review on 2026-10-31
+- Gate 24: passed and closed under delegated review on 2026-10-31
 - Gates 20–30: delegated closure after complete objective evidence; continue
   without another planned checkpoint and stop only for a genuine clarification,
   failed dependency, or material scope/architecture change

@@ -20,11 +20,19 @@ build real Ginux controller applications.
 
 ## Completed work
 
-- [ ] None.
+- [x] Added a bounded, allocation-free native desktop/compositor model with
+  z-order, focus, movement, resize, minimize, maximize, restore, and close.
+- [x] Added software rendering with clipping, bounded damage, bounded frame
+  callbacks, decorations, cursor-target input dispatch, and distinct trusted
+  controller chrome.
+- [x] Added labels, menus, buttons, text fields, and tables plus deterministic
+  text rendering and text edit/navigation/selection/backspace/submit behavior.
+- [x] Added a native demo contract, exact-pixel screenshot fixture, scripted
+  input/lifecycle tests, and ring-3 execution.
 
 ## Remaining work
 
-- [ ] Implement compositor policy, toolkit, demos, screenshot tests, and evidence.
+- [x] No remaining work.
 
 ## Acceptance criteria
 
@@ -44,12 +52,22 @@ build real Ginux controller applications.
 
 ## Evidence
 
-- Not yet run.
+- `make test-native-windowing` -> 4 host lifecycle/widget/render tests and the
+  ring-3 QEMU windowing contract passed.
+- `make test-native-windowing-screenshots` -> exact 96x64 pixel fixture hash
+  `55c32738580bb202` matched with zero tolerance.
+- `make check` -> complete regression suite passed; unsafe baseline remained
+  1033 blocks.
+- `git diff --check` -> passed.
 
 ## Decisions and limitations
 
 - The toolkit is intentionally sufficient rather than general purpose; the
   graphical controller is its product test.
+- The ring-3 contract uses a 32x24 framebuffer to respect the deliberately
+  small graphical-service stack; the full screenshot fixture remains 96x64.
+- Text uses a deterministic compact built-in glyph renderer; arbitrary fonts
+  remain a declared non-goal.
 
 ## Delivery strategy
 
@@ -57,8 +75,8 @@ build real Ginux controller applications.
 - Intended base: `main`
 - Pull request: shared integrated PR for Gates 19–30
 - Planned commits: compositor policy; rendering/text; widgets/toolkit; tests
-- Actual commits: pending
+- Actual commits: `85c9f646`
 
 ## Review policy and outcome
 
-Delegated closure under the approved Gates 19–30 batch after all criteria pass.
+Passed and closed on 2026-10-31 under the delegated Gates 20–30 batch policy.
