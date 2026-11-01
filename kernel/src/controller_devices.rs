@@ -9,8 +9,8 @@ use ginux_native_abi::{
 const MAX_WIDTH: u32 = 4096;
 const MAX_HEIGHT: u32 = 2160;
 const BYTES_PER_PIXEL: usize = 4;
-const MAX_BLIT_WIDTH: usize = 256;
-const MAX_BLIT_HEIGHT: u32 = 256;
+const MAX_BLIT_WIDTH: usize = 512;
+const MAX_BLIT_HEIGHT: u32 = 512;
 const MAX_BLIT_SCALE: u32 = 16;
 
 #[derive(Clone, Copy)]
@@ -49,8 +49,8 @@ impl ControllerDevices {
             shift: false,
             mouse_packet: [0; 3],
             mouse_length: 0,
-            pointer_x: 48,
-            pointer_y: 32,
+            pointer_x: 200,
+            pointer_y: 150,
         }
     }
 
@@ -157,8 +157,8 @@ impl ControllerDevices {
         self.mouse_length = 0;
         let dx = i16::from(self.mouse_packet[1] as i8);
         let dy = -i16::from(self.mouse_packet[2] as i8);
-        self.pointer_x = (self.pointer_x + dx).clamp(0, 159);
-        self.pointer_y = (self.pointer_y + dy).clamp(0, 99);
+        self.pointer_x = (self.pointer_x + dx).clamp(0, 399);
+        self.pointer_y = (self.pointer_y + dy).clamp(0, 299);
         let _ = self.inject(
             ginux_native_abi::NATIVE_INPUT_KIND_POINTER_MOTION,
             u32::from(self.pointer_x as u16) | (u32::from(self.pointer_y as u16) << 16),

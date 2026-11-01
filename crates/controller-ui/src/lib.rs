@@ -8,17 +8,18 @@ use ginux_native_abi::{
     NATIVE_NETWORK_INVENTORY_OPERATION, NATIVE_ROOT_OPERATION,
 };
 use ginux_windowing::{
-    paint_border, paint_rect, paint_text, Desktop, Rect, COLOR_ACCENT, COLOR_BORDER,
-    COLOR_DARK_TEXT, COLOR_HEALTHY, COLOR_MUTED, COLOR_PANEL, COLOR_SURFACE, COLOR_SURFACE_RAISED,
-    COLOR_TEXT,
+    paint_border, paint_rect, paint_text, paint_text_scaled, Rect, COLOR_ACCENT, COLOR_BORDER,
+    COLOR_DARK_TEXT, COLOR_DESKTOP, COLOR_HEALTHY, COLOR_MUTED, COLOR_PANEL, COLOR_SURFACE,
+    COLOR_SURFACE_RAISED, COLOR_TEXT,
 };
 
 pub const MAX_DOMAINS: usize = 4;
 pub const MAX_JOBS: usize = 8;
 pub const MAX_NOTICES: usize = 8;
 pub const MAX_NAME: usize = 16;
-pub const SHELL_WIDTH: usize = 160;
-pub const SHELL_HEIGHT: usize = 100;
+pub const SHELL_WIDTH: usize = 400;
+pub const SHELL_HEIGHT: usize = 300;
+pub const SHELL_BACKGROUND_COLOR: u32 = COLOR_DESKTOP;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Error {
@@ -364,7 +365,7 @@ impl<'a, B: ManagementBackend> Application<'a, B> {
         self.count
     }
     pub fn render_shell(&self, pixels: &mut [u32], stride: usize) -> Result<u64, Error> {
-        self.render_shell_state(pixels, stride, b"controller terminal", 128, 76)
+        self.render_shell_state(pixels, stride, b"controller terminal", 350, 230)
     }
 
     pub fn render_shell_state(
@@ -375,91 +376,128 @@ impl<'a, B: ManagementBackend> Application<'a, B> {
         pointer_x: u16,
         pointer_y: u16,
     ) -> Result<u64, Error> {
-        let mut desktop = Desktop::new(SHELL_WIDTH as u16, SHELL_HEIGHT as u16);
-        let window = desktop
-            .create_window(Rect::new(4, 10, 152, 87), b"Ginux Controller", true)
-            .map_err(|_| Error::Failed)?;
-        let _ = window;
-        desktop.render(pixels, stride).map_err(|_| Error::Failed)?;
+        rect(
+            pixels,
+            stride,
+            Rect::new(0, 0, SHELL_WIDTH as u16, SHELL_HEIGHT as u16),
+            COLOR_DESKTOP,
+        )?;
 
-        // System bar.
-        text(pixels, stride, 4, 2, b"GINUX", COLOR_TEXT)?;
-        text(pixels, stride, 61, 2, b"SYSTEM MANAGEMENT", COLOR_MUTED)?;
-        rect(pixels, stride, Rect::new(147, 2, 3, 3), COLOR_HEALTHY)?;
-        text(pixels, stride, 152, 2, b"OK", COLOR_HEALTHY)?;
+        // Trusted system bar.
+        rect(pixels, stride, Rect::new(0, 0, 400, 15), COLOR_PANEL)?;
+        rect(pixels, stride, Rect::new(0, 14, 400, 1), COLOR_BORDER)?;
+        text(pixels, stride, 7, 5, b"GINUX", COLOR_TEXT)?;
+        text(
+            pixels,
+            stride,
+            154,
+            5,
+            b"SYSTEM MANAGEMENT | HOST: GINUX",
+            COLOR_MUTED,
+        )?;
+        text(pixels, stride, 340, 5, b"10:24", COLOR_MUTED)?;
+        rect(pixels, stride, Rect::new(365, 5, 5, 5), COLOR_HEALTHY)?;
+        text(pixels, stride, 374, 5, b"HEALTHY", COLOR_HEALTHY)?;
+
+        // Controller window and chrome.
+        let shell = Rect::new(11, 29, 378, 247);
+        rect(pixels, stride, shell, COLOR_PANEL)?;
+        outline(pixels, stride, shell, COLOR_BORDER)?;
+        rect(
+            pixels,
+            stride,
+            Rect::new(12, 30, 376, 14),
+            COLOR_SURFACE_RAISED,
+        )?;
+        text(pixels, stride, 17, 35, b"GINUX CONTROLLER", COLOR_TEXT)?;
+        text(pixels, stride, 347, 35, b"-  O  X", COLOR_MUTED)?;
 
         // Navigation rail.
-        rect(pixels, stride, Rect::new(5, 20, 37, 76), COLOR_PANEL)?;
-        rect(pixels, stride, Rect::new(42, 20, 1, 76), COLOR_BORDER)?;
-        rect(pixels, stride, Rect::new(7, 23, 33, 8), COLOR_ACCENT)?;
-        text(pixels, stride, 9, 25, b"OVERVIEW", COLOR_TEXT)?;
-        for (y, label) in [
-            (35, &b"DOMAINS"[..]),
-            (45, &b"NETWORK"[..]),
-            (55, &b"STORAGE"[..]),
-            (65, &b"DEVICES"[..]),
-            (75, &b"EVENTS"[..]),
-            (85, &b"SETTINGS"[..]),
+        rect(pixels, stride, Rect::new(12, 44, 68, 206), COLOR_PANEL)?;
+        rect(pixels, stride, Rect::new(79, 44, 1, 206), COLOR_BORDER)?;
+        rect(pixels, stride, Rect::new(13, 48, 66, 18), COLOR_ACCENT)?;
+        nav_icon(pixels, stride, 19, 53, 0, COLOR_TEXT)?;
+        text(pixels, stride, 33, 55, b"OVERVIEW", COLOR_TEXT)?;
+        for (y, icon, label) in [
+            (77, 1, &b"DOMAINS"[..]),
+            (101, 2, &b"NETWORK"[..]),
+            (125, 3, &b"STORAGE"[..]),
+            (149, 4, &b"DEVICES"[..]),
+            (173, 5, &b"EVENTS"[..]),
+            (197, 6, &b"SETTINGS"[..]),
         ] {
-            rect(pixels, stride, Rect::new(9, y + 1, 2, 2), COLOR_MUTED)?;
-            text(pixels, stride, 14, y, label, COLOR_MUTED)?;
+            nav_icon(pixels, stride, 19, y - 2, icon, COLOR_MUTED)?;
+            text(pixels, stride, 33, y, label, COLOR_MUTED)?;
         }
 
         // Overview heading and summary cards.
-        text(pixels, stride, 47, 23, b"SYSTEM OVERVIEW", COLOR_TEXT)?;
+        text_scaled(pixels, stride, 91, 51, b"SYSTEM OVERVIEW", COLOR_TEXT, 2)?;
         card(
             pixels,
             stride,
-            Rect::new(47, 31, 32, 17),
+            Rect::new(89, 71, 94, 40),
+            1,
             b"DOMAINS",
-            b"1 UP",
+            b"1",
+            b"1 RUN / 0 STOP",
         )?;
-        card(pixels, stride, Rect::new(82, 31, 32, 17), b"CPU", b"2%")?;
         card(
             pixels,
             stride,
-            Rect::new(117, 31, 34, 17),
+            Rect::new(190, 71, 93, 40),
+            4,
+            b"CPU",
+            b"2%",
+            b"2 / 96 CORES",
+        )?;
+        card(
+            pixels,
+            stride,
+            Rect::new(290, 71, 94, 40),
+            3,
             b"MEMORY",
             b"12%",
+            b"3.7 GB / 31.9 GB",
         )?;
 
         // Domain inventory.
-        let table = Rect::new(47, 51, 104, 27);
+        let table = Rect::new(89, 119, 295, 132);
         rect(pixels, stride, table, COLOR_PANEL)?;
         outline(pixels, stride, table, COLOR_BORDER)?;
         rect(
             pixels,
             stride,
-            Rect::new(table.x, table.y, table.width, 8),
+            Rect::new(90, 120, 293, 13),
             COLOR_SURFACE_RAISED,
         )?;
-        text(pixels, stride, 50, 53, b"DOMAINS", COLOR_TEXT)?;
-        text(
-            pixels,
-            stride,
-            50,
-            62,
-            b"NAME      STATE  CPU  MEM",
-            COLOR_MUTED,
-        )?;
-        rect(pixels, stride, Rect::new(47, 68, 104, 1), COLOR_BORDER)?;
-        text(
-            pixels,
-            stride,
-            50,
-            71,
-            b"ROCKY     RUNNING  1  128",
-            COLOR_TEXT,
-        )?;
-        rect(pixels, stride, Rect::new(85, 72, 2, 2), COLOR_HEALTHY)?;
+        text(pixels, stride, 96, 124, b"DOMAINS", COLOR_TEXT)?;
+        rect(pixels, stride, Rect::new(90, 133, 293, 15), COLOR_SURFACE)?;
+        for x in [181, 264, 314] {
+            rect(pixels, stride, Rect::new(x, 133, 1, 30), COLOR_BORDER)?;
+        }
+        text(pixels, stride, 96, 138, b"NAME", COLOR_MUTED)?;
+        text(pixels, stride, 187, 138, b"STATE", COLOR_MUTED)?;
+        text(pixels, stride, 270, 138, b"CPU", COLOR_MUTED)?;
+        text(pixels, stride, 320, 138, b"MEMORY", COLOR_MUTED)?;
+        rect(pixels, stride, Rect::new(90, 148, 293, 1), COLOR_BORDER)?;
+        text(pixels, stride, 96, 154, b"ROCKY", COLOR_TEXT)?;
+        rect(pixels, stride, Rect::new(187, 154, 5, 5), COLOR_HEALTHY)?;
+        text(pixels, stride, 197, 154, b"RUNNING", COLOR_TEXT)?;
+        text(pixels, stride, 270, 154, b"2%", COLOR_TEXT)?;
+        text(pixels, stride, 320, 154, b"3.7 GB", COLOR_TEXT)?;
 
         // Command surface.
-        let command = Rect::new(47, 82, 104, 11);
+        let command = Rect::new(16, 257, 368, 14);
         rect(pixels, stride, command, COLOR_SURFACE)?;
         outline(pixels, stride, command, COLOR_ACCENT)?;
-        text(pixels, stride, 50, 85, b"GINUX>", COLOR_MUTED)?;
-        text(pixels, stride, 74, 85, terminal, COLOR_TEXT)?;
-        rect(pixels, stride, Rect::new(147, 85, 1, 5), COLOR_ACCENT)?;
+        text(pixels, stride, 22, 262, b"GINUX>", COLOR_MUTED)?;
+        text(pixels, stride, 50, 262, terminal, COLOR_TEXT)?;
+        rect(
+            pixels,
+            stride,
+            Rect::new(50 + terminal.len() as i16 * 4, 261, 2, 7),
+            COLOR_TEXT,
+        )?;
 
         draw_pointer(
             pixels,
@@ -490,23 +528,105 @@ fn text(
     paint_text(pixels, stride, x, y, value, color).map_err(|_| Error::Failed)
 }
 
+fn text_scaled(
+    pixels: &mut [u32],
+    stride: usize,
+    x: i16,
+    y: i16,
+    value: &[u8],
+    color: u32,
+    scale: u16,
+) -> Result<(), Error> {
+    paint_text_scaled(pixels, stride, x, y, value, color, scale).map_err(|_| Error::Failed)
+}
+
 fn card(
     pixels: &mut [u32],
     stride: usize,
     area: Rect,
+    icon: u8,
     label: &[u8],
     value: &[u8],
+    detail: &[u8],
 ) -> Result<(), Error> {
     rect(pixels, stride, area, COLOR_SURFACE_RAISED)?;
     outline(pixels, stride, area, COLOR_BORDER)?;
-    text(pixels, stride, area.x + 3, area.y + 3, label, COLOR_MUTED)?;
-    text(pixels, stride, area.x + 3, area.y + 10, value, COLOR_TEXT)?;
+    nav_icon(pixels, stride, area.x + 7, area.y + 13, icon, COLOR_TEXT)?;
+    text(pixels, stride, area.x + 27, area.y + 9, label, COLOR_MUTED)?;
+    text_scaled(
+        pixels,
+        stride,
+        area.x + 27,
+        area.y + 17,
+        value,
+        COLOR_TEXT,
+        2,
+    )?;
+    text(
+        pixels,
+        stride,
+        area.x + 27,
+        area.y + 32,
+        detail,
+        COLOR_MUTED,
+    )?;
     rect(
         pixels,
         stride,
-        Rect::new(area.x + area.width as i16 - 5, area.y + 3, 2, 2),
+        Rect::new(area.x + area.width as i16 - 12, area.y + 8, 5, 5),
         COLOR_HEALTHY,
     )
+}
+
+fn nav_icon(
+    pixels: &mut [u32],
+    stride: usize,
+    x: i16,
+    y: i16,
+    kind: u8,
+    color: u32,
+) -> Result<(), Error> {
+    match kind {
+        0 => {
+            for (dx, dy) in [(0, 0), (5, 0), (0, 5), (5, 5)] {
+                outline(pixels, stride, Rect::new(x + dx, y + dy, 4, 4), color)?;
+            }
+        }
+        1 => {
+            outline(pixels, stride, Rect::new(x + 1, y, 8, 10), color)?;
+            rect(pixels, stride, Rect::new(x, y + 3, 10, 1), color)?;
+        }
+        2 => {
+            for (dx, dy) in [(0, 7), (5, 0), (10, 7)] {
+                outline(pixels, stride, Rect::new(x + dx, y + dy, 3, 3), color)?;
+            }
+            rect(pixels, stride, Rect::new(x + 6, y + 3, 1, 5), color)?;
+            rect(pixels, stride, Rect::new(x + 2, y + 7, 9, 1), color)?;
+        }
+        3 => {
+            outline(pixels, stride, Rect::new(x, y + 1, 11, 8), color)?;
+            rect(pixels, stride, Rect::new(x + 2, y + 4, 7, 1), color)?;
+        }
+        4 => {
+            outline(pixels, stride, Rect::new(x + 2, y + 2, 7, 7), color)?;
+            for (dx, dy) in [(0, 4), (10, 4), (5, 0), (5, 10)] {
+                rect(pixels, stride, Rect::new(x + dx, y + dy, 2, 2), color)?;
+            }
+        }
+        5 => {
+            outline(pixels, stride, Rect::new(x, y, 10, 11), color)?;
+            rect(pixels, stride, Rect::new(x + 3, y + 3, 1, 1), color)?;
+            rect(pixels, stride, Rect::new(x + 3, y + 7, 1, 1), color)?;
+            rect(pixels, stride, Rect::new(x + 6, y + 3, 2, 1), color)?;
+            rect(pixels, stride, Rect::new(x + 6, y + 7, 2, 1), color)?;
+        }
+        _ => {
+            outline(pixels, stride, Rect::new(x + 1, y + 1, 9, 9), color)?;
+            rect(pixels, stride, Rect::new(x + 5, y + 3, 1, 5), color)?;
+            rect(pixels, stride, Rect::new(x + 3, y + 5, 5, 1), color)?;
+        }
+    }
+    Ok(())
 }
 
 fn draw_pointer(pixels: &mut [u32], stride: usize, x: i16, y: i16) -> Result<(), Error> {
@@ -517,16 +637,27 @@ fn draw_pointer(pixels: &mut [u32], stride: usize, x: i16, y: i16) -> Result<(),
         (0, 3),
         (0, 4),
         (0, 5),
+        (0, 6),
+        (0, 7),
+        (0, 8),
         (1, 1),
         (1, 2),
         (1, 3),
         (1, 4),
+        (1, 5),
+        (1, 6),
+        (1, 7),
         (2, 2),
         (2, 3),
         (2, 4),
+        (2, 5),
+        (2, 6),
         (3, 3),
         (3, 4),
+        (3, 5),
         (4, 4),
+        (4, 5),
+        (5, 5),
     ] {
         rect(
             pixels,
@@ -535,7 +666,7 @@ fn draw_pointer(pixels: &mut [u32], stride: usize, x: i16, y: i16) -> Result<(),
             COLOR_DARK_TEXT,
         )?;
     }
-    for (dx, dy) in [(1, 2), (1, 3), (2, 3)] {
+    for (dx, dy) in [(1, 2), (1, 3), (1, 4), (2, 3), (2, 4), (3, 4)] {
         rect(pixels, stride, Rect::new(x + dx, y + dy, 1, 1), COLOR_TEXT)?;
     }
     Ok(())
@@ -674,6 +805,11 @@ mod tests {
         let mut pixels = [0_u32; SHELL_WIDTH * SHELL_HEIGHT];
         let hash = app.render_shell(&mut pixels, SHELL_WIDTH).unwrap();
         assert_ne!(hash, 0);
+        assert_eq!(pixels[29 * SHELL_WIDTH + 11], COLOR_BORDER);
+        assert_eq!(pixels[30 * SHELL_WIDTH + 12], COLOR_SURFACE_RAISED);
+        assert_eq!(pixels[48 * SHELL_WIDTH + 13], COLOR_ACCENT);
+        assert_eq!(pixels[71 * SHELL_WIDTH + 89], COLOR_BORDER);
+        assert_eq!(pixels[72 * SHELL_WIDTH + 90], COLOR_SURFACE_RAISED);
         assert_eq!(hash, app.render_shell(&mut pixels, SHELL_WIDTH).unwrap());
     }
 }

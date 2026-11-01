@@ -772,20 +772,50 @@ pub fn paint_text(
     text: &[u8],
     color: u32,
 ) -> Result<(), Error> {
+    paint_text_scaled(pixels, stride, x, y, text, color, 1)
+}
+
+pub fn paint_text_scaled(
+    pixels: &mut [u32],
+    stride: usize,
+    x: i16,
+    y: i16,
+    text: &[u8],
+    color: u32,
+    scale: u16,
+) -> Result<(), Error> {
     if stride == 0 || !pixels.len().is_multiple_of(stride) {
+        return Err(Error::Bounds);
+    }
+    if scale == 0 || scale > 4 {
         return Err(Error::Bounds);
     }
     let width = u16::try_from(stride).map_err(|_| Error::Bounds)?;
     let height = u16::try_from(pixels.len() / stride).map_err(|_| Error::Bounds)?;
-    draw_text(
-        pixels,
-        stride,
-        x,
-        y,
-        text,
-        color,
-        Rect::new(0, 0, width, height),
-    );
+    let clip = Rect::new(0, 0, width, height);
+    let scale = scale as i16;
+    for (index, byte) in text.iter().enumerate() {
+        let ox = x + index as i16 * 4 * scale;
+        for row in 0..5_i16 {
+            let bits = glyph(*byte)[row as usize];
+            for column in 0..3_i16 {
+                if bits & (1 << (2 - column)) != 0 {
+                    fill(
+                        pixels,
+                        stride,
+                        Rect::new(
+                            ox + column * scale,
+                            y + row * scale,
+                            scale as u16,
+                            scale as u16,
+                        ),
+                        color,
+                        clip,
+                    );
+                }
+            }
+        }
+    }
     Ok(())
 }
 
@@ -859,6 +889,8 @@ fn glyph(byte: u8) -> [u8; 5] {
         b'_' => [0, 0, 0, 0, 0b111],
         b'.' => [0, 0, 0, 0, 0b010],
         b':' => [0, 0b010, 0, 0b010, 0],
+        b'|' => [0b010, 0b010, 0b010, 0b010, 0b010],
+        b'%' => [0b101, 0b001, 0b010, 0b100, 0b101],
         b'/' => [0b001, 0b001, 0b010, 0b100, 0b100],
         b'>' => [0b100, 0b010, 0b001, 0b010, 0b100],
         b' ' => [0; 5],

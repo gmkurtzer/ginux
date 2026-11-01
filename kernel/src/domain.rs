@@ -2552,7 +2552,7 @@ fn address_space_root_is_owned(domain_raw: u64, root: u64) -> bool {
         return false;
     };
     (frames.base_count() == crate::address_space::USER_ADDRESS_SPACE_FRAMES
-        || (8..=crate::address_space::NATIVE_NETWORK_FRAME_COUNT).contains(&frames.base_count()))
+        || (8..=crate::address_space::NATIVE_CONTROLLER_FRAME_COUNT).contains(&frames.base_count()))
         && frames.frames_owned_by(owner)
         && frames
             .dma()

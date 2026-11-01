@@ -12,7 +12,7 @@ const MAX_RANGES: usize = 128;
 const MAX_RECYCLED_FRAMES: usize = 262_144;
 const MAX_LIVE_FRAMES: usize = 262_144;
 const MAX_LIVE_INDEX: usize = MAX_LIVE_FRAMES * 2;
-const DOMAIN_FRAME_LIMIT: usize = 192;
+const DOMAIN_FRAME_LIMIT: usize = 384;
 const LIVE_INDEX_EMPTY: u32 = 0;
 const LIVE_INDEX_TOMBSTONE: u32 = u32::MAX;
 

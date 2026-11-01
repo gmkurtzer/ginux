@@ -339,11 +339,13 @@ and timezone controls and expanding as additional host configuration is added.
 The Overview page summarizes domain, CPU, and memory state; shows a compact
 domain table; and keeps the controller command surface visible.
 
-The native renderer is allocation-free and uses a fixed pixel font, simple
-rectangles, borders, and a software pointer. Color is never the only status
-signal: labels, values, and state text remain present. The accepted visual
-reference is `docs/images/controller-desktop-concept-v2.png`; actual QEMU
-framebuffer evidence is retained under
+The native renderer is allocation-free and composes a 400 by 300 logical
+surface that is presented as an 800 by 600 controller desktop on the current
+QEMU framebuffer. It uses a fixed pixel font, simple rectangles, borders, and
+a software pointer. Color is never the only status signal: labels, values, and
+state text remain present. The accepted visual reference is
+`docs/images/controller-desktop-concept-v2.png`; actual QEMU framebuffer
+evidence is retained under
 `build/qualification/controller-desktop/` after visible qualification.
 
 ## 13. Verification map
@@ -397,14 +399,14 @@ restart. The memory figure is the modeled bounded allocation for two
 presentations, the supervisor, the pixel buffer, and measurement samples; it is
 not process RSS.
 
-Measurements recorded on 2026-10-31 on an Apple Silicon macOS host with QEMU
+Measurements recorded on 2026-11-01 on an Apple Silicon macOS host with QEMU
 10.1.2 were:
 
 | Metric | Measured | Budget | Result |
 |---|---:|---:|---|
 | Two-presentation model startup | 1 us | 50,000 us | pass |
-| Input-to-frame p95 with background domain | 475 us | 16,667 us | pass |
-| Steady software frame p95 | 252 us | 16,667 us | pass |
+| Input-to-frame p95 with background domain | 426 us | 16,667 us | pass |
+| Steady software frame p95 | 282 us | 16,667 us | pass |
 | Fault/recovery cycle p95 | <1 us | 1,000 us | pass |
 | Modeled bounded working set | 1,950,000 bytes | 8,388,608 bytes | pass |
 

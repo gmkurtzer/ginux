@@ -35,6 +35,10 @@ and interaction model.
   service layout validation, and controller desktop documentation.
 - [x] Passed real-QEMU visible input, complete desktop, performance, and full
   repository regression qualification.
+- [x] Replaced coarse 160 by 100 composition with a 400 by 300 logical layout
+  presented at 800 by 600, matching the accepted mockup hierarchy and spacing.
+- [x] Removed full-frame clearing from incremental input repaints so interactive
+  frames remain complete rather than visibly redrawing from top to bottom.
 
 ## Remaining work
 
@@ -78,6 +82,14 @@ and interaction model.
   and modeled working set 1,950,000 bytes; all budgets passed.
 - `make check` -> architecture, ABI, format, lint, unit, and compatibility
   checks passed.
+- `make test-controller-desktop-visible` -> real 1280 by 800 QEMU framebuffer
+  contains the centered complete 800 by 600 controller design; retained input
+  frames no longer contain partially cleared regions.
+- `make test-controller-desktop-all` -> complete desktop suite and 2-CPU/4-CPU
+  recovery stress passed after the high-resolution renderer change.
+- `make test-controller-desktop-performance` -> startup 1 us,
+  input-to-frame p95 426 us, steady-frame p95 282 us, recovery-cycle p95 0 us,
+  and modeled working set 1,950,000 bytes; all budgets passed.
 
 ## Decisions and limitations
 
@@ -87,6 +99,8 @@ and interaction model.
 - The concept is a visual specification, not a bitmap shipped by the kernel.
 - Human framebuffer review added Settings after the accepted concept; its
   configuration workflows remain a later functional gate.
+- Human framebuffer review rejected the technically passing 160 by 100 result
+  as visibly too coarse; technical passage does not satisfy visual acceptance.
 - Native service layout recognition now uses exact guard-page and stack
   geometry rather than assuming the final reserved image page is populated.
 
