@@ -422,12 +422,12 @@ unsafe fn locate_framebuffer(boot_services: *mut EfiBootServices) -> Framebuffer
                 let width = (*info).horizontal_resolution;
                 let height = (*info).vertical_resolution;
                 let format = (*info).pixel_format;
-                let supported = format <= 1 && width <= 1920 && height <= 1080;
-                // Prefer the native 1080p target, BGR byte order (which is the
+                let supported = format <= 1 && width <= 1024 && height <= 768;
+                // Prefer the native 1024 by 768 target, BGR byte order (which is the
                 // controller renderer's in-memory 0x00RRGGBB layout), then the
                 // largest supported fallback.  The score keeps mode selection
                 // deterministic regardless of firmware enumeration order.
-                let exact = width == 1920 && height == 1080;
+                let exact = width == 1024 && height == 768;
                 let score = u64::from(exact) << 63
                     | u64::from(format == 1) << 62
                     | (u64::from(width) * u64::from(height));

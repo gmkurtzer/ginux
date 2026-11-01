@@ -6,8 +6,8 @@ use std::time::{Duration, Instant};
 use ginux_desktop_recovery::{Component, Supervisor, RETRY_TICKS};
 use ginux_domain_presentation::{Presentation, Rect};
 
-const WIDTH: usize = 1920;
-const HEIGHT: usize = 1080;
+const WIDTH: usize = 1024;
+const HEIGHT: usize = 768;
 const SAMPLES: usize = 500;
 const STARTUP_BUDGET: Duration = Duration::from_millis(50);
 const INPUT_TO_FRAME_BUDGET: Duration = Duration::from_micros(16_667);
@@ -37,7 +37,7 @@ fn presentation(domain: u64) -> Presentation {
     Presentation::start(
         domain,
         Rect::new(0, 0, WIDTH as u16, HEIGHT as u16),
-        Rect::new(96, 54, 1728, 972),
+        Rect::new(51, 38, 922, 692),
     )
     .expect("presentation startup")
 }

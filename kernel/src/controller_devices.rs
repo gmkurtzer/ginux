@@ -455,7 +455,7 @@ pub(crate) fn initialize_hardware_input() -> bool {
         out_u8(0x64, 0xa8);
     }
     // Use the highest standard PS/2 reporting rate. QEMU otherwise defaults
-    // to 100 Hz, which is visibly coarse on a 1920 by 1080 software cursor.
+    // to 100 Hz, which is visibly coarse on a native software cursor.
     let mouse_enabled = write_mouse(0xf3) && write_mouse(200) && write_mouse(0xf4);
     keyboard_enabled && mouse_enabled
 }

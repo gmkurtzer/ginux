@@ -18,9 +18,9 @@ pub const MAX_DOMAINS: usize = 4;
 pub const MAX_JOBS: usize = 8;
 pub const MAX_NOTICES: usize = 8;
 pub const MAX_NAME: usize = 16;
-const LOGICAL_WIDTH: u16 = 960;
-const LOGICAL_HEIGHT: u16 = 540;
-const DISPLAY_SCALE: u16 = 2;
+const LOGICAL_WIDTH: u16 = 1024;
+const LOGICAL_HEIGHT: u16 = 768;
+const DISPLAY_SCALE: u16 = 1;
 pub const SHELL_WIDTH: usize = LOGICAL_WIDTH as usize * DISPLAY_SCALE as usize;
 pub const SHELL_HEIGHT: usize = LOGICAL_HEIGHT as usize * DISPLAY_SCALE as usize;
 pub const SHELL_BACKGROUND_COLOR: u32 = COLOR_DESKTOP;
@@ -75,8 +75,8 @@ pub const DEFAULT_LAYOUT: Layout = Layout {
     sidebar_width: 220,
     content_left: 252,
     content_top: 82,
-    content_width: 680,
-    content_bottom: 510,
+    content_width: 744,
+    content_bottom: 738,
     nav_left: 16,
     nav_width: 188,
     nav_first_top: 94,
@@ -156,11 +156,11 @@ impl ShellState {
             return true;
         }
         if let Some(action) = self.power_confirmation {
-            if (344..456).contains(&x) && (296..334).contains(&y) {
+            if (376..488).contains(&x) && (410..448).contains(&y) {
                 self.power_confirmation = None;
                 return true;
             }
-            if (504..616).contains(&x) && (296..334).contains(&y) {
+            if (536..648).contains(&x) && (410..448).contains(&y) {
                 self.power_action = Some(action);
                 self.power_confirmation = None;
                 self.power_menu = false;
@@ -169,9 +169,9 @@ impl ShellState {
             return false;
         }
         if self.power_menu {
-            let action = if (776..944).contains(&x) && (54..98).contains(&y) {
+            let action = if (840..1008).contains(&x) && (54..98).contains(&y) {
                 Some(PowerAction::Reboot)
-            } else if (776..944).contains(&x) && (98..142).contains(&y) {
+            } else if (840..1008).contains(&x) && (98..142).contains(&y) {
                 Some(PowerAction::Shutdown)
             } else {
                 None
@@ -711,18 +711,18 @@ impl<'a, B: ManagementBackend> Application<'a, B> {
             theme.border,
         )?;
         text(pixels, stride, 24, 20, b"GINUX", theme.text)?;
-        text(pixels, stride, 392, 18, b"System Management", theme.muted)?;
+        text(pixels, stride, 424, 18, b"System Management", theme.muted)?;
         let mut time = [b'0'; 5];
         time[0] = b'0' + view.hour / 10;
         time[1] = b'0' + view.hour % 10;
         time[2] = b':';
         time[3] = b'0' + view.minute / 10;
         time[4] = b'0' + view.minute % 10;
-        text(pixels, stride, 810, 18, &time, theme.muted)?;
+        text(pixels, stride, 850, 18, &time, theme.muted)?;
         rect(
             pixels,
             stride,
-            Rect::new(868, 21, 8, 8),
+            Rect::new(908, 21, 8, 8),
             if view.healthy {
                 theme.healthy
             } else {
@@ -1369,12 +1369,12 @@ fn draw_power_icon(
 }
 
 fn render_power_menu(pixels: &mut [u32], stride: usize, theme: &Theme) -> Result<(), Error> {
-    let panel = Rect::new(776, 52, 168, 96);
+    let panel = Rect::new(840, 52, 168, 96);
     rect(pixels, stride, panel, theme.raised)?;
     outline(pixels, stride, panel, theme.border)?;
-    text(pixels, stride, 796, 68, b"Reboot", theme.text)?;
-    rect(pixels, stride, Rect::new(784, 97, 152, 1), theme.border)?;
-    text(pixels, stride, 796, 112, b"Shut down", theme.danger)
+    text(pixels, stride, 860, 68, b"Reboot", theme.text)?;
+    rect(pixels, stride, Rect::new(848, 97, 152, 1), theme.border)?;
+    text(pixels, stride, 860, 112, b"Shut down", theme.danger)
 }
 
 fn render_power_confirmation(
@@ -1389,14 +1389,14 @@ fn render_power_confirmation(
         Rect::new(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT),
         0x0006_0c16,
     )?;
-    let panel = Rect::new(312, 154, 336, 180);
+    let panel = Rect::new(344, 294, 336, 180);
     rect(pixels, stride, panel, theme.raised)?;
     outline(pixels, stride, panel, theme.border)?;
     text(
         pixels,
         stride,
-        344,
-        186,
+        376,
+        326,
         if action == PowerAction::Reboot {
             b"Reboot Ginux?"
         } else {
@@ -1407,16 +1407,16 @@ fn render_power_confirmation(
     text(
         pixels,
         stride,
-        344,
-        222,
+        376,
+        362,
         b"Running domains will stop.",
         theme.muted,
     )?;
-    rect(pixels, stride, Rect::new(344, 296, 112, 38), theme.surface)?;
-    outline(pixels, stride, Rect::new(344, 296, 112, 38), theme.border)?;
-    text(pixels, stride, 362, 308, b"Cancel", theme.text)?;
-    rect(pixels, stride, Rect::new(504, 296, 112, 38), theme.danger)?;
-    text(pixels, stride, 520, 308, b"Confirm", theme.text)
+    rect(pixels, stride, Rect::new(376, 410, 112, 38), theme.surface)?;
+    outline(pixels, stride, Rect::new(376, 410, 112, 38), theme.border)?;
+    text(pixels, stride, 394, 422, b"Cancel", theme.text)?;
+    rect(pixels, stride, Rect::new(536, 410, 112, 38), theme.danger)?;
+    text(pixels, stride, 552, 422, b"Confirm", theme.text)
 }
 
 pub fn cli_execute<B: ManagementBackend>(
@@ -1555,17 +1555,17 @@ mod tests {
         let hash = app.render_shell(&mut pixels, SHELL_WIDTH).unwrap();
         assert_ne!(hash, 0);
         assert_eq!(pixels[0], COLOR_PANEL);
-        assert_eq!(pixels[102 * SHELL_WIDTH], COLOR_BORDER);
-        assert_eq!(pixels[188 * SHELL_WIDTH + 32], COLOR_ACCENT);
-        assert_eq!(pixels[508 * SHELL_WIDTH + 504], COLOR_BORDER);
-        assert_eq!(pixels[510 * SHELL_WIDTH + 506], COLOR_SURFACE_RAISED);
+        assert_eq!(pixels[51 * SHELL_WIDTH], COLOR_BORDER);
+        assert_eq!(pixels[94 * SHELL_WIDTH + 16], COLOR_ACCENT);
+        assert_eq!(pixels[126 * SHELL_WIDTH + 252], COLOR_BORDER);
+        assert_eq!(pixels[127 * SHELL_WIDTH + 253], COLOR_SURFACE_RAISED);
         assert_eq!(hash, app.render_shell(&mut pixels, SHELL_WIDTH).unwrap());
     }
 
     #[test]
     fn pointer_click_selects_navigation_once() {
         let mut state = ShellState::new();
-        assert!(state.pointer_motion(160, 880));
+        assert!(state.pointer_motion(80, 440));
         assert!(state.pointer_buttons(1, 1));
         assert_eq!(state.page, Page::Settings);
         assert!(!state.pointer_buttons(1, 0));
@@ -1576,15 +1576,15 @@ mod tests {
     #[test]
     fn power_menu_requires_confirmation_and_routes_reboot() {
         let mut state = ShellState::new();
-        assert!(state.pointer_motion(1800, 48));
+        assert!(state.pointer_motion(980, 24));
         assert!(state.pointer_buttons(1, 1));
         assert!(state.power_menu);
         assert!(!state.pointer_buttons(1, 0));
-        assert!(state.pointer_motion(1680, 152));
+        assert!(state.pointer_motion(860, 76));
         assert!(state.pointer_buttons(1, 1));
         assert_eq!(state.power_confirmation, Some(PowerAction::Reboot));
         assert!(!state.pointer_buttons(1, 0));
-        assert!(state.pointer_motion(1120, 630));
+        assert!(state.pointer_motion(560, 430));
         assert!(state.pointer_buttons(1, 1));
         assert_eq!(state.take_power_action(), Some(PowerAction::Reboot));
         assert_eq!(state.take_power_action(), None);
@@ -1606,7 +1606,7 @@ mod tests {
             .render_shell_view_with_theme(&mut pixels, SHELL_WIDTH, &state, &view, &alternate)
             .unwrap();
         assert_ne!(default, changed);
-        assert_eq!(pixels[188 * SHELL_WIDTH + 32], alternate.accent);
+        assert_eq!(pixels[94 * SHELL_WIDTH + 16], alternate.accent);
     }
 
     #[test]
@@ -1624,8 +1624,8 @@ mod tests {
         let mut pixels = std::vec![0_u32; SHELL_WIDTH * SHELL_HEIGHT];
         app.render_shell_view(&mut pixels, SHELL_WIDTH, &state, &view)
             .unwrap();
-        assert_eq!(pixels[224 * SHELL_WIDTH + 32], DEFAULT_THEME.accent);
-        assert!(state.pointer_motion(160, (112 + 6 * 56 + 10) * 2));
+        assert_eq!(pixels[112 * SHELL_WIDTH + 16], DEFAULT_THEME.accent);
+        assert!(state.pointer_motion(80, 112 + 6 * 56 + 10));
         assert!(state.pointer_buttons(1, 1));
         assert_eq!(state.page, Page::Settings);
     }

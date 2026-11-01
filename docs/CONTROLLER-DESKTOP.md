@@ -340,7 +340,7 @@ The Overview page summarizes domain, CPU, and memory state and shows a compact
 live domain table. The serial controller remains an independent recovery and
 automation interface rather than being duplicated as a graphical prompt.
 
-The boot path selects an exact 1920 by 1080 GOP mode when firmware exposes it,
+The boot path selects an exact 1024 by 768 GOP mode when firmware exposes it,
 and the native renderer fills that surface without a nested virtual window,
 fake window controls, graphical prompt, or unused margins. The controller maps
 only the capability-authorized framebuffer pages into its address space and
@@ -394,7 +394,7 @@ presentation, secure attention, generation retirement, and fault recovery.
 `make test-controller-desktop-visible` boots the ordinary runtime, captures the
 actual emulated display through QEMU, injects PS/2 keyboard and relative-pointer
 input, and verifies navigation, live domain data, and the power menu in complete
-1920 by 1080 controller desktop frames. The same run measures the complete
+1024 by 768 controller desktop frames. The same run measures the complete
 QEMU event-to-visible-frame path; `make test-controller-desktop-latency` is the
 explicit latency gate. It retains baseline, keyboard, pointer, live-state,
 power-menu, and latency evidence in
@@ -403,7 +403,7 @@ the same runtime in a Cocoa window; click that window to focus its physical
 keyboard and pointer while the serial controller remains in the invoking
 terminal. Set `GINUX_QEMU_DISPLAY` to another QEMU display backend when needed.
 
-The performance command runs the release-mode host model at 1920 by 1080 pixels
+The performance command runs the release-mode host model at 1024 by 768 pixels
 for 500 samples. The input-to-frame path keeps a second domain active, consumes
 one focused input event, publishes the resulting foreground frame, and renders
 it. The steady-frame measurement renders an already-published frame. Recovery

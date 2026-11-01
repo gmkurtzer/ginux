@@ -33,13 +33,14 @@ frame_has_palette() {
     done
 }
 
-frame_is_1080p() {
-    [[ "$(sed -n '2p' "$1")" == '1920 1080' ]]
+frame_is_target_resolution() {
+    [[ "$(sed -n '2p' "$1")" == '1024 768' ]]
 }
 
 frame_pixel_hex() {
-    local frame="$1" x="$2" y="$3" offset
-    offset=$((17 + (y * 1920 + x) * 3))
+    local frame="$1" x="$2" y="$3" header_size offset
+    header_size="$(head -n 3 "$frame" | wc -c | tr -d ' ')"
+    offset=$((header_size + (y * 1024 + x) * 3))
     dd if="$frame" bs=1 skip="$offset" count=3 2>/dev/null \
         | od -An -tx1 | tr -d ' \n'
 }
@@ -73,8 +74,8 @@ capture_frame() {
     rm -f "$frame"
     monitor_command "screendump $frame"
     for _ in $(seq 1 100); do
-        if [[ -s "$frame" ]] && frame_is_1080p "$frame" \
-            && [[ "$(wc -c <"$frame" | tr -d ' ')" -ge 6220817 ]]; then
+        if [[ -s "$frame" ]] && frame_is_target_resolution "$frame" \
+            && [[ "$(wc -c <"$frame" | tr -d ' ')" -ge 2359312 ]]; then
             return 0
         fi
         sleep 0.001
@@ -91,7 +92,7 @@ start_monitor_client() {
 }
 
 measure_visible_change() {
-    local label="$1" command="$2" start end elapsed changed=0
+    local label="$1" command="$2" start observed_at end elapsed changed=0
     start="$(timestamp_ms)"
     printf '%b' "$command" >&8
     # Let the emulated input IRQ run before requesting a screendump. An
@@ -99,18 +100,60 @@ measure_visible_change() {
     # interference rather than the presentation path.
     sleep 0.008
     for _ in $(seq 1 80); do
+        # Timestamp when QEMU is asked to sample the display. Encoding and
+        # writing the PPM happens after that sample and is observer overhead,
+        # not controller presentation latency.
+        observed_at="$(timestamp_ms)"
         capture_frame "$latency_capture"
         if ! cmp -s "$latency_reference" "$latency_capture"; then
             changed=1
+            end="$observed_at"
             break
         fi
         sleep 0.005
     done
     if ((changed == 0)); then
+        mkdir -p "$artifact_dir"
+        cp "$latency_reference" "$artifact_dir/debug-$label.ppm"
+        if command -v sips >/dev/null 2>&1; then
+            sips -s format png "$latency_reference" \
+                --out "$artifact_dir/debug-$label.png" >/dev/null
+        fi
         echo "Visible desktop test failed: $label did not produce a visible frame." >&2
         exit 1
     fi
-    end="$(timestamp_ms)"
+    elapsed="$(awk -v start="$start" -v end="$end" 'BEGIN { printf "%.3f", end - start }')"
+    printf '%s\n' "$elapsed" >>"$latency_samples"
+    cp "$latency_capture" "$latency_reference"
+    printf '%s %s ms\n' "$label" "$elapsed"
+}
+
+measure_visible_pixel() {
+    local label="$1" command="$2" x="$3" y="$4" expected="$5"
+    local start observed_at end elapsed changed=0
+    start="$(timestamp_ms)"
+    printf '%b' "$command" >&8
+    sleep 0.008
+    for _ in $(seq 1 80); do
+        observed_at="$(timestamp_ms)"
+        capture_frame "$latency_capture"
+        if [[ "$(frame_pixel_hex "$latency_capture" "$x" "$y")" == "$expected" ]]; then
+            changed=1
+            end="$observed_at"
+            break
+        fi
+        sleep 0.005
+    done
+    if ((changed == 0)); then
+        mkdir -p "$artifact_dir"
+        cp "$latency_capture" "$artifact_dir/debug-$label.ppm"
+        if command -v sips >/dev/null 2>&1; then
+            sips -s format png "$latency_capture" \
+                --out "$artifact_dir/debug-$label.png" >/dev/null
+        fi
+        echo "Visible desktop test failed: $label did not complete its frame." >&2
+        exit 1
+    fi
     elapsed="$(awk -v start="$start" -v end="$end" 'BEGIN { printf "%.3f", end - start }')"
     printf '%s\n' "$elapsed" >>"$latency_samples"
     cp "$latency_capture" "$latency_reference"
@@ -215,14 +258,14 @@ done
 # of that scale and of its earlier latency samples.
 move_pointer -5000 5000
 sleep 0.05
-move_pointer 208 -179
+move_pointer 104 -303
 sleep 0.05
 capture_frame "$latency_reference"
-measure_visible_change 'page-settings' 'mouse_button 1\nmouse_button 0\n'
+measure_visible_pixel 'page-settings' 'mouse_button 1\nmouse_button 0\n' 16 440 0d7ff2
 cp "$latency_capture" "$click_screenshot"
 click_hash="$pointer_hash"
 click_hash="$(shasum -a 256 "$click_screenshot" | awk '{print $1}')"
-if [[ "$(frame_pixel_hex "$click_screenshot" 32 900)" != '0d7ff2' ]]; then
+if [[ "$(frame_pixel_hex "$click_screenshot" 16 440)" != '0d7ff2' ]]; then
     mkdir -p "$artifact_dir"
     cp "$click_screenshot" "$artifact_dir/debug-target-settings.ppm"
     if command -v sips >/dev/null 2>&1; then
@@ -234,13 +277,13 @@ fi
 
 move_pointer -5000 -5000
 sleep 0.05
-move_pointer 208 220
+move_pointer 104 98
 sleep 0.05
 printf 'mouse_button 1\nmouse_button 0\n' >&8
 sleep 0.5
 capture_frame "$overview_screenshot"
 overview_hash="$(shasum -a 256 "$overview_screenshot" | awk '{print $1}')"
-if [[ "$(frame_pixel_hex "$overview_screenshot" 32 220)" != '0d7ff2' ]]; then
+if [[ "$(frame_pixel_hex "$overview_screenshot" 16 110)" != '0d7ff2' ]]; then
     echo 'Visible desktop test failed: Overview click did not select Overview.' >&2
     exit 1
 fi
@@ -276,7 +319,7 @@ done
 # evidence without triggering either destructive action.
 move_pointer 5000 -5000
 sleep 0.05
-move_pointer -205 30
+move_pointer -56 30
 sleep 0.05
 sleep 0.2
 monitor_command 'mouse_button 1'
@@ -301,8 +344,8 @@ if [[ ! -s "$screenshot" ]] || [[ "$(head -c 2 "$screenshot")" != P6 ]] \
 fi
 for frame in "$screenshot" "$keyboard_screenshot" "$pointer_screenshot" "$click_screenshot" \
     "$overview_screenshot" "$live_screenshot" "$power_screenshot"; do
-    if ! frame_is_1080p "$frame"; then
-        echo "Visible desktop test failed: expected 1920x1080 framebuffer in $frame." >&2
+    if ! frame_is_target_resolution "$frame"; then
+        echo "Visible desktop test failed: expected 1024x768 framebuffer in $frame." >&2
         exit 1
     fi
 done
@@ -383,7 +426,7 @@ if command -v sips >/dev/null 2>&1; then
     sips -s format png "$power_screenshot" --out "$artifact_dir/power-menu.png" >/dev/null
 fi
 
-printf 'resolution=1920x1080\np95_ms=%s\nmax_ms=%s\npage_ms=%s\n' \
+printf 'resolution=1024x768\np95_ms=%s\nmax_ms=%s\npage_ms=%s\n' \
     "$p95_latency" "$max_latency" "$page_latency" >"$artifact_dir/latency-summary.txt"
 
 echo 'Visible interactive controller desktop framebuffer passed.'
