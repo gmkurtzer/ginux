@@ -82,8 +82,8 @@ protocol boundary, state model, and initial non-goals before implementation.
 - Intended base: `main`
 - Pull request: intended, shared integrated PR for Gates 19–30
 - Planned commits: HDAE project/gate plan; architecture decision/specification
-- Actual commits: `20eaffb9` (project and gate plan); architecture checkpoint
-  commit pending
+- Actual commits: `20eaffb9` (project and gate plan); `395d0843`
+  (architecture decision, specification, and technical evidence)
 
 ## Review policy and outcome
 

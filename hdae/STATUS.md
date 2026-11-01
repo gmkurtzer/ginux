@@ -16,9 +16,8 @@
   review passed
 - Open decisions or limitations: none inside Gate 19; GPU acceleration, raw GPU
   passthrough, and broad desktop compatibility are deferred
-- Exact next action: commit the Gate 19 architecture checkpoint and request
-  human acceptance; after acceptance, move Gate 19 unchanged to `gates-done/`
-  and begin delegated Gate 20
+- Exact next action: request human acceptance; after acceptance, move Gate 19
+  unchanged to `gates-done/` and begin delegated Gate 20
 
 ## Governing outcome
 
