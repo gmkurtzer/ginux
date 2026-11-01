@@ -24,6 +24,7 @@ const CONTROLLER_READY: &[u8] = b"ginux: graphical controller workflows validate
 const DOMAIN_BRIDGE_READY: &[u8] = b"ginux: isolated domain display bridge validated in ring 3\r\n";
 const WAYLAND_READY: &[u8] = b"ginux: Linux domain Wayland environment validated in ring 3\r\n";
 const PRESENTATION_READY: &[u8] = b"ginux: domain desktop presentation validated in ring 3\r\n";
+const RECOVERY_READY: &[u8] = b"ginux: controller desktop recovery validated in ring 3\r\n";
 static SERVICE_IDENTITY: &[u8] = b"GINUX_GRAPHICS_SERVICE_V0";
 
 global_asm!(
@@ -92,6 +93,7 @@ extern "C" fn ginux_graphics_service_main(info: *const NativeGraphicsBootV0) -> 
                 || !ginux_domain_display::contract_probe()
                 || !ginux_wayland_domain::contract_probe()
                 || !ginux_domain_presentation::contract_probe()
+                || !ginux_desktop_recovery::contract_probe()
                 || call(
                     NATIVE_CONSOLE_WRITE_OPERATION,
                     info.v0.console_capability,
@@ -107,6 +109,15 @@ extern "C" fn ginux_graphics_service_main(info: *const NativeGraphicsBootV0) -> 
                 SEAT_READY.as_ptr() as u64,
                 SEAT_READY.len() as u64,
             ) != SEAT_READY.len() as u64
+            {
+                fail();
+            }
+            if call(
+                NATIVE_CONSOLE_WRITE_OPERATION,
+                info.v0.console_capability,
+                RECOVERY_READY.as_ptr() as u64,
+                RECOVERY_READY.len() as u64,
+            ) != RECOVERY_READY.len() as u64
             {
                 fail();
             }

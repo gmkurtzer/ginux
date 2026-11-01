@@ -4,6 +4,7 @@ members = [
     "control-plane/runtime",
     "crates/command",
     "crates/controller-ui",
+    "crates/desktop-recovery",
     "crates/display-protocol",
     "crates/domain-display",
     "crates/domain-presentation",

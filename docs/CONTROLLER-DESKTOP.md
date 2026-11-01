@@ -305,6 +305,14 @@ Restart never reuses an old generation. Resource accounting covers processes,
 address spaces, frames, mappings, capabilities, protocol objects, event queues,
 callbacks, and leases.
 
+The recovery supervisor records a bounded diagnostic stream naming the failed
+component, retired generation, recovery result, and monotonic sequence. Faults
+immediately restore trusted focus and clear presentation leases, surfaces,
+buffers, event queues, and handles. Restarts use a fresh generation after a
+bounded retry delay; three consecutive failed attempts exhaust the automatic
+restart budget and leave the serial CLI as the recovery path. Successful
+recovery resets the consecutive-failure budget.
+
 ## 11. Management integration
 
 The graphical controller and CLI query and mutate the same canonical management

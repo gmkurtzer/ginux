@@ -18,7 +18,7 @@ SYSTEM_PROFILE := profiles/minimal-system-v0/profile.tsv
 
 .DEFAULT_GOAL := help
 
-.PHONY: help doctor manifest system-image test-alpine test-rocky-shell test-rocky-dnf test-multi-domain test-linux-abi test-linux-runtime test-storage test-oci-cache test-smp test-rocky-smp-futex test-rocky-smp-shared-page test-rocky-smp-thread-context probe-rocky-systemd test-rocky-systemd test-rocky-detached test-domain-responsiveness test-controller-graphics-runtime test-controller-display-input test-native-display-protocol test-controller-seat-leases test-native-windowing test-native-windowing-screenshots test-graphical-controller test-controller-console test-domain-display-bridge test-linux-wayland-domain test-domain-desktop-experience benchmark-rocky-systemd benchmark-prepare-linux benchmark-prepare-ginux benchmark-linux-comparison benchmark-ginux-boot benchmark-boot-comparison benchmark-ginux-sysbench benchmark-compare benchmark-topology-matrix benchmark-topology-compare profile-rocky-systemd rocky-image rocky-image-check linux-probe controller-runtime network-service protocol-service graphics-service volume-service abi-conformance architecture-check linux-compat-check build build-verification build-linux-profile run reset-storage test test-c1 test-c2 fmt gate clean
+.PHONY: help doctor manifest system-image test-alpine test-rocky-shell test-rocky-dnf test-multi-domain test-linux-abi test-linux-runtime test-storage test-oci-cache test-smp test-rocky-smp-futex test-rocky-smp-shared-page test-rocky-smp-thread-context probe-rocky-systemd test-rocky-systemd test-rocky-detached test-domain-responsiveness test-controller-graphics-runtime test-controller-display-input test-native-display-protocol test-controller-seat-leases test-native-windowing test-native-windowing-screenshots test-graphical-controller test-controller-console test-domain-display-bridge test-linux-wayland-domain test-domain-desktop-experience test-controller-desktop-recovery test-controller-desktop-stress benchmark-rocky-systemd benchmark-prepare-linux benchmark-prepare-ginux benchmark-linux-comparison benchmark-ginux-boot benchmark-boot-comparison benchmark-ginux-sysbench benchmark-compare benchmark-topology-matrix benchmark-topology-compare profile-rocky-systemd rocky-image rocky-image-check linux-probe controller-runtime network-service protocol-service graphics-service volume-service abi-conformance architecture-check linux-compat-check build build-verification build-linux-profile run reset-storage test test-c1 test-c2 fmt gate clean
 
 help:
 	@echo "Ginux development targets"
@@ -275,6 +275,14 @@ test-linux-wayland-domain: build-verification
 test-domain-desktop-experience: build-verification
 	@cargo test --package ginux-domain-presentation
 	@tests/qemu/boot.sh
+
+test-controller-desktop-recovery: build-verification
+	@cargo test --package ginux-desktop-recovery
+	@tests/qemu/boot.sh
+
+test-controller-desktop-stress: build-verification
+	@cargo test --package ginux-desktop-recovery repeated_multi_component_lifecycle_has_constant_resource_bounds
+	@GINUX_DESKTOP_STRESS_RUNS=2 tests/qemu/controller-desktop-stress.sh
 
 test-smp: build-verification
 	@tests/qemu/smp-matrix.sh

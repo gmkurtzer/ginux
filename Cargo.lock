@@ -427,6 +427,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ginux-desktop-recovery"
+version = "0.1.0"
+dependencies = [
+ "ginux-display-protocol",
+ "ginux-domain-display",
+ "ginux-domain-presentation",
+ "ginux-wayland-domain",
+]
+
+[[package]]
 name = "ginux-display-protocol"
 version = "0.1.0"
 
@@ -446,6 +456,7 @@ name = "ginux-graphics-service-runtime"
 version = "0.1.0"
 dependencies = [
  "ginux-controller-ui",
+ "ginux-desktop-recovery",
  "ginux-display-protocol",
  "ginux-domain-display",
  "ginux-domain-presentation",

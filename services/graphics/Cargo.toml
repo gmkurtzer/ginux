@@ -14,6 +14,7 @@ bench = false
 [dependencies]
 ginux-display-protocol = { path = "../../crates/display-protocol" }
 ginux-controller-ui = { path = "../../crates/controller-ui" }
+ginux-desktop-recovery = { path = "../../crates/desktop-recovery" }
 ginux-domain-display = { path = "../../crates/domain-display" }
 ginux-domain-presentation = { path = "../../crates/domain-presentation" }
 ginux-wayland-domain = { path = "../../crates/wayland-domain" }

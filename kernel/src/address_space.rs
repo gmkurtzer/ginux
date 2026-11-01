@@ -6728,7 +6728,7 @@ pub(crate) fn verify_control_plane_wx_layout() -> bool {
 
 const NATIVE_SERVICE_IMAGE_PAGES: usize = 7;
 pub(crate) const NATIVE_SERVICE_FRAME_COUNT: usize = 4 + NATIVE_SERVICE_IMAGE_PAGES + 3;
-pub(crate) const GRAPHICS_SERVICE_IMAGE_PAGES: usize = 9;
+pub(crate) const GRAPHICS_SERVICE_IMAGE_PAGES: usize = 10;
 pub(crate) const GRAPHICS_SERVICE_STACK_PAGES: usize = 8;
 const GRAPHICS_SERVICE_FRAME_COUNT: usize =
     4 + GRAPHICS_SERVICE_IMAGE_PAGES + GRAPHICS_SERVICE_STACK_PAGES + 1;
