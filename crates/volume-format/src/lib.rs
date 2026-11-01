@@ -232,6 +232,31 @@ mod tests {
     }
 
     #[test]
+    fn host_volume_header_rejects_inconsistent_geometry() {
+        let minimum =
+            HostVolumeHeader::new(HOST_VOLUME_MINIMUM_SECTORS).expect("minimum valid volume");
+        assert_eq!(HostVolumeHeader::decode(&minimum.encode()), Some(minimum));
+
+        let malformed = [
+            HostVolumeHeader {
+                data_start_sector: minimum.data_start_sector + 1,
+                ..minimum
+            },
+            HostVolumeHeader {
+                data_sectors: minimum.data_sectors + 1,
+                ..minimum
+            },
+            HostVolumeHeader {
+                volume_sectors: HOST_VOLUME_MINIMUM_SECTORS - 1,
+                data_sectors: 0,
+                ..minimum
+            },
+        ];
+        let decoded = malformed.map(|header| HostVolumeHeader::decode(&header.encode()));
+        assert_eq!(decoded, [None; 3]);
+    }
+
+    #[test]
     fn host_volume_header_rejects_small_mismatched_and_trailing_layouts() {
         assert_eq!(HostVolumeHeader::new(8), None);
         let mut encoded = HostVolumeHeader::new(16).expect("valid volume").encode();
