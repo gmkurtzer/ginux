@@ -156,7 +156,7 @@ fn write_pixel(info: FramebufferInfo, request: &NativeDisplayRequestV0) -> bool 
         return false;
     };
     crate::arch::x86_64::pci::write_mmio_u32(address as usize, request.color);
-    true
+    crate::arch::x86_64::pci::read_mmio_u32(address as usize) == request.color
 }
 
 pub(crate) fn install(info: FramebufferInfo) -> bool {
