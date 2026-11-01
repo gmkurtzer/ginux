@@ -25,6 +25,7 @@ members = [
     "services/protocol",
     "services/volume",
     "tools/manifest-tool",
+    "tools/desktop-qualification",
 ]
 resolver = "2"
 

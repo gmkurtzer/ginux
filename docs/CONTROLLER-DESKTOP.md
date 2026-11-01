@@ -344,7 +344,47 @@ or the CLI.
 | Fault recovery and resource reclamation | 29 | failure matrix and repeated SMP stress |
 | Performance, regression, and documentation | 30 | clean full qualification and measured budgets |
 
-## 13. Explicit initial limitations
+## 13. Qualification and measured budgets
+
+Run the complete desktop qualification from the repository root:
+
+```sh
+make test-controller-desktop-all
+make test-controller-desktop-performance
+```
+
+The first command builds a verification image, runs every native desktop
+contract, boots that image in QEMU, and repeats the recovery boot with two and
+four virtual CPUs. It covers controller startup, native windows and management,
+two-domain isolation, the bounded Wayland subset, managed and full-screen
+presentation, secure attention, generation retirement, and fault recovery.
+
+The performance command runs the release-mode host model at 800 by 600 pixels
+for 500 samples. The input-to-frame path keeps a second domain active, consumes
+one focused input event, publishes the resulting foreground frame, and renders
+it. The steady-frame measurement renders an already-published frame. Recovery
+cycles one supervised component through fault containment and fresh-generation
+restart. The memory figure is the modeled bounded allocation for two
+presentations, the supervisor, the pixel buffer, and measurement samples; it is
+not process RSS.
+
+Measurements recorded on 2026-10-31 on an Apple Silicon macOS host with QEMU
+10.1.2 were:
+
+| Metric | Measured | Budget | Result |
+|---|---:|---:|---|
+| Two-presentation model startup | 1 us | 50,000 us | pass |
+| Input-to-frame p95 with background domain | 476 us | 16,667 us | pass |
+| Steady software frame p95 | 245 us | 16,667 us | pass |
+| Fault/recovery cycle p95 | <1 us | 1,000 us | pass |
+| Modeled bounded working set | 1,950,000 bytes | 8,388,608 bytes | pass |
+
+These budgets are regression limits for the implemented state machines and
+software renderer. They are not GPU, physical-device, whole-system CPU,
+resident-memory, or interactive desktop benchmarks. Raw output is retained at
+`build/qualification/controller-desktop-performance.txt` after each run.
+
+## 14. Explicit initial limitations
 
 GND0 does not initially provide GPU acceleration, DRM/KMS, direct device
 passthrough, multiple outputs, touch, clipboard, drag-and-drop, audio,

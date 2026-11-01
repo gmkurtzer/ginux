@@ -269,6 +269,22 @@ impl Presentation {
             .map_err(|_| Error::Display)
     }
 
+    pub fn input_round_trip(&mut self, kind: u16, first: i32, second: i32) -> Result<u64, Error> {
+        let sequence = self.send_input(kind, first, second)?;
+        let input = self
+            .bridge
+            .take_input(self.endpoint)
+            .map_err(|_| Error::Display)?;
+        if input.sequence != sequence
+            || input.kind != kind
+            || input.value0 != first
+            || input.value1 != second
+        {
+            return Err(Error::State);
+        }
+        Ok(sequence)
+    }
+
     pub fn stop(&mut self) -> Result<(), Error> {
         self.require_running()?;
         self.bridge
@@ -469,6 +485,14 @@ mod tests {
         assert!(!view.status().exclusive_lease);
         assert!(!view.status().focused);
         assert_eq!(view.send_input(1, 1, 1), Err(Error::State));
+    }
+
+    #[test]
+    fn input_round_trip_consumes_the_focused_domain_event() {
+        let mut view = view();
+        view.focus().unwrap();
+        assert_eq!(view.input_round_trip(1, 30, 1), Ok(1));
+        assert_eq!(view.input_round_trip(2, -4, 7), Ok(2));
     }
 
     #[test]

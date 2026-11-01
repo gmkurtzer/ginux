@@ -1,0 +1,10 @@
+[package]
+name = "ginux-desktop-qualification"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+publish = false
+
+[dependencies]
+ginux-desktop-recovery = { path = "../../crates/desktop-recovery" }
+ginux-domain-presentation = { path = "../../crates/domain-presentation" }

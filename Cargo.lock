@@ -427,6 +427,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ginux-desktop-qualification"
+version = "0.1.0"
+dependencies = [
+ "ginux-desktop-recovery",
+ "ginux-domain-presentation",
+]
+
+[[package]]
 name = "ginux-desktop-recovery"
 version = "0.1.0"
 dependencies = [
