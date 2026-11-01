@@ -17,7 +17,7 @@ SYSTEM_PROFILE := profiles/minimal-system-v0/profile.tsv
 
 .DEFAULT_GOAL := help
 
-.PHONY: help doctor manifest system-image test-alpine test-rocky-shell test-rocky-dnf test-multi-domain test-linux-abi test-linux-runtime test-storage test-oci-cache test-smp test-rocky-smp-futex test-rocky-smp-shared-page test-rocky-smp-thread-context probe-rocky-systemd test-rocky-systemd test-rocky-detached test-domain-responsiveness benchmark-rocky-systemd benchmark-prepare-linux benchmark-prepare-ginux benchmark-linux-comparison benchmark-ginux-boot benchmark-boot-comparison benchmark-ginux-sysbench benchmark-compare benchmark-topology-matrix benchmark-topology-compare profile-rocky-systemd rocky-image rocky-image-check linux-probe controller-runtime network-service protocol-service volume-service abi-conformance architecture-check linux-compat-check build build-verification build-linux-profile run reset-storage test test-c1 test-c2 fmt gate clean
+.PHONY: help doctor manifest system-image test-alpine test-rocky-shell test-rocky-dnf test-multi-domain test-linux-abi test-linux-runtime test-storage test-oci-cache test-smp test-rocky-smp-futex test-rocky-smp-shared-page test-rocky-smp-thread-context probe-rocky-systemd test-rocky-systemd test-rocky-detached test-domain-responsiveness benchmark-rocky-systemd benchmark-prepare-linux benchmark-prepare-ginux benchmark-linux-comparison benchmark-ginux-boot benchmark-boot-comparison benchmark-ginux-sysbench benchmark-compare benchmark-topology-matrix benchmark-topology-compare profile-rocky-systemd rocky-image rocky-image-check linux-probe controller-runtime network-service protocol-service volume-service abi-conformance architecture-check linux-compat-check build build-verification build-linux-profile run reset-storage test test-qemu-smoke test-c1 test-c2 fmt gate clean
 
 help:
 	@echo "Ginux development targets"
@@ -60,6 +60,7 @@ help:
 	@echo "  make test-storage Verify fresh, recovered, and reset persistent boots"
 	@echo "  make test-oci-cache Verify OCI layers are reused after reboot"
 	@echo "  make test    Build and verify the automated QEMU boot test"
+	@echo "  make test-qemu-smoke Boot the normal image once and verify core integration"
 	@echo "  make test-smp Qualify 1/2/4 CPUs and repeat the two-CPU stress run"
 	@echo "  make test-rocky-smp-futex Verify two-CPU private-futex compatibility"
 	@echo "  make test-rocky-smp-shared-page Verify 2/4-vCPU shared writable pages"
@@ -229,6 +230,9 @@ test-oci-cache: build
 
 test: build-verification
 	@tests/qemu/boot.sh
+
+test-qemu-smoke: build
+	@tests/qemu/smoke.sh
 
 test-smp: build-verification
 	@tests/qemu/smp-matrix.sh
