@@ -1,10 +1,10 @@
-# Controller desktop visual design
+# Controller GUI visual design and interaction
 
 ## Goal
 
 Replace the proof-of-function controller screen with a coherent, readable,
-professional native Ginux desktop while preserving the accepted architecture
-and interaction model.
+responsive, and operational native Ginux GUI while preserving the accepted
+architecture and serial recovery path.
 
 ## Approved scope
 
@@ -12,13 +12,21 @@ and interaction model.
 - Define the visual hierarchy, palette, typography, spacing, window chrome,
   system status presentation, command surface, and pointer treatment.
 - Translate the accepted concept into the allocation-free native renderer.
+- Decouple graphical input from blocking serial reads and coalesce pointer
+  motion so movement remains responsive under QEMU.
+- Route pointer buttons, hit testing, focus, navigation, and supported actions
+  through the native controller application.
+- Replace demonstration state with live kernel-backed management snapshots and
+  preserve CLI/GUI state equivalence.
+- Replace scaled 3 by 5 glyphs with a readable native-resolution font and
+  refined software-rendered iconography.
 - Preserve keyboard, pointer, serial recovery, windowing, and controller behavior.
 - Verify the implemented design using actual QEMU framebuffer screenshots.
 
 ## Non-goals
 
-- Changing the controller architecture, management semantics, or domain model.
-- GPU acceleration, general font loading, animation, or a production desktop.
+- Changing the controller trust boundary, domain model, or management semantics.
+- GPU acceleration, runtime font loading, animation, or a production desktop.
 - Copying an existing operating-system desktop or third-party brand.
 
 ## Completed work
@@ -44,6 +52,13 @@ and interaction model.
 
 - [ ] Replace the visibly pixelated 3 by 5 scaled font and coarse iconography
   with a readable native visual treatment suitable for routine use.
+- [ ] Make pointer motion independent of serial keyboard activity, bounded,
+  coalesced, and predictably responsive.
+- [ ] Implement pointer-button routing, hit testing, focus, navigation, and
+  clickable supported controller actions.
+- [ ] Populate all displayed system and domain fields from live kernel state;
+  remove fresh per-frame demonstration backends.
+- [ ] Prove CLI and GUI actions observe the same underlying state.
 - [ ] Obtain human visual acceptance of the implemented framebuffer.
 
 ## Acceptance criteria
@@ -53,14 +68,24 @@ and interaction model.
   spacing, typography intent, controls, and pointer treatment.
 - Text is legible, controls are visually distinguishable, and system state is
   understandable without relying on color alone.
-- Keyboard and pointer interaction remain visible and functional.
+- Pointer motion is smooth and predictable under QEMU without requiring serial
+  keystrokes, and button transitions are neither lost nor duplicated.
+- Navigation and supported controls are clickable; disabled controls are
+  visibly and behaviorally inert.
+- Displayed system and domain state updates after CLI or GUI changes without a
+  controller restart or demonstration fixture.
+- Keyboard and pointer interaction remain visible and functional while the
+  serial controller remains an independent recovery path.
 - Existing controller desktop performance and regression budgets pass.
 
 ## Verification plan
 
 - Human concept review -> accepted visual reference.
 - Deterministic renderer tests -> stable expected pixels.
-- `make test-controller-desktop-visible` -> real framebuffer and input changes.
+- Deterministic controller tests -> hit testing, button transitions, navigation,
+  disabled controls, and CLI/GUI state equivalence pass.
+- `make test-controller-desktop-visible` -> real framebuffer, independent
+  pointer motion, button clicks, keyboard input, and live-state changes pass.
 - `make test-controller-desktop-all` -> integrated desktop regressions pass.
 - `make test-controller-desktop-performance` -> published budgets pass.
 - `make check` -> architecture, ABI, format, lint, and unit checks pass.
@@ -99,14 +124,16 @@ and interaction model.
   navy/slate surfaces, a limited blue/teal status palette, compact information
   density, and a clean software-renderable pointer.
 - The concept is a visual specification, not a bitmap shipped by the kernel.
-- Human framebuffer review added Settings after the accepted concept; its
-  configuration workflows remain a later functional gate.
+- Human framebuffer review added Settings after the accepted concept; date,
+  time, and timezone remain visible future settings unless the current kernel
+  management ABI already supports them.
 - Human framebuffer review rejected the technically passing 160 by 100 result
   as visibly too coarse; technical passage does not satisfy visual acceptance.
-- Human framebuffer review on 2026-11-01 also rejected the 400 by 300 logical
-  result as still unreasonably pixelated. Responsive pointer input, clickable
-  controls, and live state are separate functional requirements and must not be
-  claimed by this visual gate.
+- Human framebuffer review on 2026-11-01 rejected the 400 by 300 logical result
+  as still unreasonably pixelated and identified unusable pointer latency,
+  absent clicking, and static demonstration data. Human direction explicitly
+  incorporated all four findings into this existing gate rather than creating
+  additional gates.
 - Native service layout recognition now uses exact guard-page and stack
   geometry rather than assuming the final reserved image page is populated.
 
@@ -116,7 +143,8 @@ and interaction model.
 - Intended base: `main`
 - Pull request: continue the integrated controller-desktop pull request
 - Planned commits: accepted visual reference; native implementation and tests;
-  evidence and gate closure
+  responsive input and interaction; live management state; native-resolution
+  visual refinement; evidence and gate closure
 - Actual commits: `eb71161a` (accepted visual reference); `af7cb035`
   (initial native implementation); `71c097fd` (Settings navigation);
   `d6682bc4` (high-resolution renderer and final technical evidence)
@@ -124,7 +152,7 @@ and interaction model.
 ## Review policy and outcome
 
 Human checkpoints are required for the concept image and the final implemented
-QEMU framebuffer because visual quality is subjective. Objective implementation
-and regression loops may proceed autonomously between those checkpoints. The
-implementation is technically passed and remains open for final human visual
-acceptance.
+QEMU interaction and framebuffer because visual quality and usability are
+subjective. Objective implementation and regression loops may proceed
+autonomously between those checkpoints. Human direction on 2026-11-01 approved
+continuing all remaining work inside Gate 31 without intermediate checkoff.

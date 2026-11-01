@@ -20,8 +20,8 @@
   pixelated; pointer input is coupled to blocking serial reads; click routing is
   absent; displayed management data comes from a fresh model rather than live
   kernel state
-- Exact next action: align follow-up gates for responsive input, actionable
-  controls, live management data, and materially improved typography
+- Exact next action: implement an independent bounded GUI event loop with
+  coalesced pointer motion and button routing, then verify it in QEMU
 
 ## Governing outcome
 
@@ -45,7 +45,9 @@ windowed or full screen. The CLI remains the recovery path.
 - Gate 29: passed and closed under delegated review on 2026-10-31
 - Gate 30: passed and closed under delegated review on 2026-10-31 after visible
   QEMU framebuffer, keyboard, pointer, performance, and regression evidence
-- Gate 31: human checkpoints at concept acceptance and final QEMU visual review
+- Gate 31: expanded by human direction on 2026-11-01 to include responsive
+  input, clickable controls, live state, and visual quality; proceed
+  autonomously to final QEMU interaction and visual review
 - Gates 20–30: delegated closure after complete objective evidence; continue
   without another planned checkpoint and stop only for a genuine clarification,
   failed dependency, or material scope/architecture change
