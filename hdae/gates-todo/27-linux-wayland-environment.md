@@ -64,5 +64,6 @@ domain's composed desktop through the Ginux bridge.
 
 ## Review policy and outcome
 
-Human checkpoint approved for this batch. Stop after technical passage and wait
-for explicit acceptance before Gate 28.
+Delegated closure under the human's expanded Gates 20–30 authorization on
+2026-10-31. Continue after complete evidence; stop only for a clarification,
+failed dependency, or scope/architecture change.

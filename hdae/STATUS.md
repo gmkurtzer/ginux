@@ -8,16 +8,16 @@
 - Active project: native controller desktop
 - Branch: `codex/controller-desktop`
 - Intended base: `main` at `759cf2e2`
-- Active gate: Gate 19, controller desktop architecture
-- Status: technically passed; waiting for human acceptance at the approved
-  architecture checkpoint
+- Active gate: Gate 20, graphical controller runtime foundation
+- Status: Gate 19 accepted; Gate 20 starting
 - Last evidence: `make architecture-check`, document marker scan, Gate 20–30
   mapping/ledger validation, `git diff --check`, and the complete HDAE coverage
   review passed
 - Open decisions or limitations: none inside Gate 19; GPU acceleration, raw GPU
   passthrough, and broad desktop compatibility are deferred
-- Exact next action: request human acceptance; after acceptance, move Gate 19
-  unchanged to `gates-done/` and begin delegated Gate 20
+- Exact next action: close Gate 19 in the locked ledger, inspect existing native
+  auxiliary-service launch/supervision paths, and establish the Gate 20 runtime
+  baseline and deterministic test
 
 ## Governing outcome
 
@@ -26,14 +26,12 @@ controller desktop. Native applications use a Ginux protocol; Linux domains run
 their own Wayland environment and export one desktop surface that can be
 windowed or full screen. The CLI remains the recovery path.
 
-## Confirmed checkpoint map
+## Confirmed review policy
 
-- Gate 19: human architecture checkpoint
-- Gates 20–22: delegated after objective evidence
-- Gate 23: human resource/focus checkpoint
-- Gates 24–26: delegated after objective evidence
-- Gate 27: human Linux/Wayland checkpoint
-- Gates 28–30: delegated after objective evidence, then batch report
+- Gate 19: accepted by the human on 2026-10-31
+- Gates 20–30: delegated closure after complete objective evidence; continue
+  without another planned checkpoint and stop only for a genuine clarification,
+  failed dependency, or material scope/architecture change
 
 ## Repository notes
 

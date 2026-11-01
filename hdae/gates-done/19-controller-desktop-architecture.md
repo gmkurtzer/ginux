@@ -36,7 +36,7 @@ protocol boundary, state model, and initial non-goals before implementation.
 
 ## Remaining work
 
-- [ ] Obtain human acceptance at the checkpoint.
+- None.
 
 ## Acceptance criteria
 
@@ -87,5 +87,4 @@ protocol boundary, state model, and initial non-goals before implementation.
 
 ## Review policy and outcome
 
-Technically passed. Human checkpoint approved for this batch; waiting for
-explicit acceptance before Gate 20.
+Passed and accepted by the human on 2026-10-31. Gate 19 is closed.
