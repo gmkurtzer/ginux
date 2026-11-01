@@ -319,7 +319,7 @@ done
 # evidence without triggering either destructive action.
 move_pointer 5000 -5000
 sleep 0.05
-move_pointer -56 30
+move_pointer -32 24
 sleep 0.05
 sleep 0.2
 monitor_command 'mouse_button 1'

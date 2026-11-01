@@ -21,13 +21,16 @@
   The complete desktop suite, including 2-vCPU and 4-vCPU recovery stress,
   passed. The release host model passed at 835 us input-to-frame p95, 863 us
   steady-frame p95, and a bounded 3,175,728-byte working set. `make check`
-  passed.
+  passed. A follow-up power-control refinement replaced the block glyph with a
+  bounded antialiased button; its real-QEMU menu test passed at 20.844 ms p95,
+  20.973 ms maximum, and 20.485 ms for a complete page change.
 - Open decisions or limitations: the accepted architecture remains a native
   ring-3 controller shell with software rendering and an independent serial
   recovery CLI; final visual quality and real-QEMU interaction still require
   the confirmed human checkpoint
-- Exact next action: present commit `b5976576`, its retained real-QEMU frames,
-  and the `make run-gui` workflow for human visual and interaction acceptance
+- Exact next action: commit the power-control refinement, then present its
+  retained real-QEMU frames and `make run-gui` workflow for human visual and
+  interaction acceptance
 
 ## Governing outcome
 

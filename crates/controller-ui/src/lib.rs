@@ -147,7 +147,7 @@ impl ShellState {
             self.pointer_x / DISPLAY_SCALE,
             self.pointer_y / DISPLAY_SCALE,
         );
-        let power_left = self.layout.width.saturating_sub(112);
+        let power_left = self.layout.width.saturating_sub(56);
         if (power_left..self.layout.width).contains(&x)
             && (0..self.layout.top_bar_height).contains(&y)
         {
@@ -729,7 +729,31 @@ impl<'a, B: ManagementBackend> Application<'a, B> {
                 theme.danger
             },
         )?;
-        draw_power_icon(pixels, stride, layout.width as i16 - 44, 11, theme.text)?;
+        let power_background = if state.power_menu {
+            theme.raised
+        } else {
+            theme.surface
+        };
+        rect(
+            pixels,
+            stride,
+            Rect::new(layout.width as i16 - 48, 7, 34, 34),
+            power_background,
+        )?;
+        outline(
+            pixels,
+            stride,
+            Rect::new(layout.width as i16 - 48, 7, 34, 34),
+            theme.border,
+        )?;
+        draw_power_icon(
+            pixels,
+            stride,
+            layout.width as i16 - 41,
+            13,
+            theme.text,
+            power_background,
+        )?;
 
         // Navigation rail.
         rect(
@@ -1393,15 +1417,55 @@ fn draw_power_icon(
     x: i16,
     y: i16,
     color: u32,
+    background: u32,
 ) -> Result<(), Error> {
-    rect(pixels, stride, Rect::new(x + 11, y, 3, 13), color)?;
-    rect(pixels, stride, Rect::new(x + 5, y + 6, 5, 2), color)?;
-    rect(pixels, stride, Rect::new(x + 15, y + 6, 5, 2), color)?;
-    rect(pixels, stride, Rect::new(x + 2, y + 9, 3, 12), color)?;
-    rect(pixels, stride, Rect::new(x + 20, y + 9, 3, 12), color)?;
-    rect(pixels, stride, Rect::new(x + 5, y + 21, 4, 3), color)?;
-    rect(pixels, stride, Rect::new(x + 16, y + 21, 4, 3), color)?;
-    rect(pixels, stride, Rect::new(x + 9, y + 24, 7, 2), color)
+    if stride == 0 || !pixels.len().is_multiple_of(stride) {
+        return Err(Error::Failed);
+    }
+    let height = pixels.len() / stride;
+    for row in 0_i16..20 {
+        for column in 0_i16..20 {
+            let dx = column * 2 + 1 - 20;
+            let dy = row * 2 + 1 - 21;
+            let distance = dx * dx + dy * dy;
+            let ring = if row <= 5 && (7..=12).contains(&column) {
+                0
+            } else if (196..=256).contains(&distance) {
+                255
+            } else if (156..196).contains(&distance) || (256..=324).contains(&distance) {
+                112
+            } else {
+                0
+            };
+            let stem = if (9..=10).contains(&column) && row <= 9 {
+                255
+            } else if (column == 8 || column == 11) && (1..=8).contains(&row) {
+                80
+            } else {
+                0
+            };
+            let alpha = ring.max(stem);
+            if alpha == 0 {
+                continue;
+            }
+            let px = x + column;
+            let py = y + row;
+            if px < 0 || py < 0 || px as usize >= stride || py as usize >= height {
+                continue;
+            }
+            pixels[py as usize * stride + px as usize] =
+                blend_color(background, color, alpha as u32);
+        }
+    }
+    Ok(())
+}
+
+fn blend_color(background: u32, foreground: u32, alpha: u32) -> u32 {
+    let inverse = 255 - alpha;
+    let red = (((background >> 16) & 0xff) * inverse + ((foreground >> 16) & 0xff) * alpha) / 255;
+    let green = (((background >> 8) & 0xff) * inverse + ((foreground >> 8) & 0xff) * alpha) / 255;
+    let blue = ((background & 0xff) * inverse + (foreground & 0xff) * alpha) / 255;
+    (red << 16) | (green << 8) | blue
 }
 
 fn render_power_menu(pixels: &mut [u32], stride: usize, theme: &Theme) -> Result<(), Error> {
@@ -1595,6 +1659,12 @@ mod tests {
         assert_eq!(pixels[82 * SHELL_WIDTH + 12], COLOR_ACCENT);
         assert_eq!(pixels[104 * SHELL_WIDTH + 208], COLOR_BORDER);
         assert_eq!(pixels[105 * SHELL_WIDTH + 209], COLOR_SURFACE_RAISED);
+        let softened_power = blend_color(DEFAULT_THEME.surface, DEFAULT_THEME.text, 112);
+        assert!(pixels
+            .chunks_exact(SHELL_WIDTH)
+            .skip(13)
+            .take(20)
+            .any(|row| row[983..1003].contains(&softened_power)));
         assert_eq!(hash, app.render_shell(&mut pixels, SHELL_WIDTH).unwrap());
     }
 

@@ -239,6 +239,12 @@ architecture and serial recovery path.
 - `make test-controller-desktop-all` and `make check` -> the complete desktop,
   2-vCPU/4-vCPU recovery, architecture, ABI, formatting, lint, unit, and
   compatibility checks passed after the full-density revision.
+- `make test-controller-desktop-latency` -> the refined antialiased power
+  control opened its real QEMU menu through the button's actual compact hit
+  region; visible interaction p95 was 20.844 ms, maximum was 20.973 ms, and
+  complete Settings-page presentation was 20.485 ms.
+- `make check` -> architecture, unsafe baseline, ABI, formatting, lint, unit,
+  and compatibility checks passed after the power-control refinement.
 
 ## Decisions and limitations
 
@@ -303,6 +309,10 @@ architecture and serial recovery path.
   revision treats density as one system: 13-pixel body text, 16-pixel headings,
   a 184-pixel rail, 36-pixel navigation rows, compact cards, and proportional
   columns shared by rendering and hit testing.
+- Human review accepted the revised overall density but rejected the remaining
+  block-built power glyph. It is now a 20-pixel antialiased ring and stem inside
+  a 34-pixel bounded button, with a distinct active-menu surface and a click
+  target aligned to the visible control.
 - Real-QEMU latency timestamps now stop when QEMU is asked to sample the
   framebuffer. Subsequent PPM encoding and filesystem output are observer
   overhead and are deliberately excluded from presentation latency.

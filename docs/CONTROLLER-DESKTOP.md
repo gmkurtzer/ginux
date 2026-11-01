@@ -351,7 +351,9 @@ time: a compact 13-pixel body face for navigation, cards, tables, and controls,
 plus a restrained 16-pixel face reserved for brand and page headings. The
 184-pixel navigation rail, 36-pixel selection rows, proportional table columns,
 and compact cards are sized specifically for the 1024 by 768 shell. Icons and
-the high-contrast pointer remain allocation-free software primitives.
+the high-contrast pointer remain allocation-free software primitives. The
+top-bar power control uses an antialiased 20-pixel symbol inside a bounded,
+bordered button and exposes the separately labeled Reboot and Shut down menu.
 Palette and major layout dimensions are centralized in explicit
 `Theme` and `Layout` contracts so the shell can be restyled without changing
 management behavior or hit testing.
