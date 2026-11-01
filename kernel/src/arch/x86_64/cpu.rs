@@ -39079,6 +39079,10 @@ fn dispatch_charged_call(
         ginux_native_abi::NATIVE_NETWORK_INVENTORY_OPERATION => {
             network_inventory_call(caller_domain, capability, frame)
         }
+        // The frequency is the one the Linux clock profile already trusts; it
+        // grants no authority, so no capability is required.
+        ginux_native_abi::NATIVE_TIMESTAMP_FREQUENCY_OPERATION => timer::monotonic_frequency()
+            .unwrap_or(ginux_native_abi::NATIVE_TIMESTAMP_FREQUENCY_UNAVAILABLE),
         control_abi::PACKET_PUBLISH_OPERATION => {
             packet_publish_call(caller_domain, capability, frame)
         }
