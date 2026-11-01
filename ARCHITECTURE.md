@@ -43,7 +43,7 @@ The design is intentionally narrower than Linux in hardware support. A binary co
 
 ### Explicitly deferred
 
-SELinux enforcement, eBPF, netfilter compatibility, binary Linux `.ko` loading, advanced Linux tracing, nested container engines, broad consumer hardware, graphical desktops, arbitrary USB devices, printers, and comprehensive virtualization are not required for the proof of concept. Their deferral must not close the stable extension points needed for later support.
+SELinux enforcement, eBPF, netfilter compatibility, binary Linux `.ko` loading, advanced Linux tracing, nested container engines, broad consumer hardware, arbitrary USB devices, printers, and comprehensive virtualization are not required for the proof of concept. A native controller desktop and bounded Linux-domain presentation are a follow-up research track defined by ADR 0003; broad desktop environments, GPU acceleration, and general display compatibility remain deferred. Their deferral must not close the stable extension points needed for later support.
 
 ## 4. System architecture
 

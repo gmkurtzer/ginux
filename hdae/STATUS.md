@@ -9,15 +9,16 @@
 - Branch: `codex/controller-desktop`
 - Intended base: `main` at `759cf2e2`
 - Active gate: Gate 19, controller desktop architecture
-- Status: planning artifacts being persisted; architecture deliverables not yet
-  verified
-- Last evidence: current `origin/main` was fetched and the branch was created
-  from commit `759cf2e2`
+- Status: technically passed; waiting for human acceptance at the approved
+  architecture checkpoint
+- Last evidence: `make architecture-check`, document marker scan, Gate 20–30
+  mapping/ledger validation, `git diff --check`, and the complete HDAE coverage
+  review passed
 - Open decisions or limitations: none inside Gate 19; GPU acceleration, raw GPU
   passthrough, and broad desktop compatibility are deferred
-- Exact next action: create the approved Gate 19–30 ledger, complete Gate 19's
-  architecture decision and protocol/state specifications, run documentation
-  verification, commit, and stop for the Gate 19 human checkpoint
+- Exact next action: commit the Gate 19 architecture checkpoint and request
+  human acceptance; after acceptance, move Gate 19 unchanged to `gates-done/`
+  and begin delegated Gate 20
 
 ## Governing outcome
 

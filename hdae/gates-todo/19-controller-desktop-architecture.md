@@ -27,11 +27,15 @@ protocol boundary, state model, and initial non-goals before implementation.
 - [x] Human approved the architecture direction, gate batch, branch/PR strategy,
   and checkpoints in conversation.
 - [x] Project intent, architecture invariants, and gate sequence are persisted.
+- [x] ADR 0003 fixes the controller, kernel, native-client, and Linux-domain
+  trust and process boundaries.
+- [x] `docs/CONTROLLER-DESKTOP.md` specifies GND0, object/buffer/surface
+  lifecycles, window policy, seats, focus, leases, the domain bridge, recovery,
+  and the Gate 20–30 verification map.
+- [x] Architecture consistency and forward/reverse coverage checks passed.
 
 ## Remaining work
 
-- [ ] Add the architecture decision and detailed protocol/state specification.
-- [ ] Verify cross-document consistency and acceptance coverage.
 - [ ] Obtain human acceptance at the checkpoint.
 
 ## Acceptance criteria
@@ -54,7 +58,17 @@ protocol boundary, state model, and initial non-goals before implementation.
 
 ## Evidence
 
-- Not yet run.
+- `git diff --check` -> passed.
+- unresolved-marker scan across ADR 0003 and the desktop specification -> no
+  `TODO`, `TBD`, or `FIXME` markers.
+- Gate 20–30 mapping/ledger loop -> every later gate has one specification
+  mapping and one authoritative todo record.
+- `make architecture-check` -> passed, including privilege entry, user access,
+  writable-global classification, runtime ownership, synchronization, and
+  kernel unsafe baselines.
+- Manual forward/reverse coverage review -> every approved functional, failure,
+  regression, workflow, documentation, compatibility, operational,
+  performance, and security boundary is mapped or explicitly deferred.
 
 ## Decisions and limitations
 
@@ -68,9 +82,10 @@ protocol boundary, state model, and initial non-goals before implementation.
 - Intended base: `main`
 - Pull request: intended, shared integrated PR for Gates 19–30
 - Planned commits: HDAE project/gate plan; architecture decision/specification
-- Actual commits: pending
+- Actual commits: `20eaffb9` (project and gate plan); architecture checkpoint
+  commit pending
 
 ## Review policy and outcome
 
-Human checkpoint approved for this batch. Stop after technical passage and wait
-for explicit acceptance before Gate 20.
+Technically passed. Human checkpoint approved for this batch; waiting for
+explicit acceptance before Gate 20.
