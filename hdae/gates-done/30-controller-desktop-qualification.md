@@ -34,10 +34,21 @@ isolation, responsiveness, regressions, reproducibility, and documentation.
   explicit unsupported desktop surface.
 - [x] Audited process cleanup, document links, and forward/reverse/coverage/
   orphan traceability for Gates 19–30.
+- [x] Re-audited the claimed graphical result after human review and identified
+  that existing QEMU tests are headless contract probes rather than a visible
+  interactive desktop.
+- [x] Rendered a persistent native controller desktop from the ring-3
+  controller into the QEMU-visible framebuffer.
+- [x] Added `make run-desktop`, which opens the ordinary runtime in a native
+  QEMU Cocoa window while retaining the serial recovery controller.
+- [x] Routed emulated PS/2 keyboard and relative-pointer input into the native
+  controller desktop.
+- [x] Added a real QEMU framebuffer test that injects physical input, verifies
+  distinct complete frames, retains visual evidence, and shuts QEMU down.
 
 ## Remaining work
 
-- [x] None.
+None.
 
 ## Acceptance criteria
 
@@ -93,11 +104,29 @@ isolation, responsiveness, regressions, reproducibility, and documentation.
 - `git diff --check`, documentation target/link inspection, gate-ledger review,
   and `git log origin/main..HEAD` -> no whitespace failure, broken local desktop
   link, unchecked Gate 19–30 work, or branch change outside the approved batch.
+- `make test-controller-desktop-visible` -> passed against the actual QEMU
+  framebuffer after injecting `help` through the PS/2 keyboard and moving the
+  emulated pointer; baseline, keyboard, and pointer frames were distinct and
+  complete. Evidence is retained under
+  `build/qualification/controller-desktop/`.
+- `make test-controller-desktop-all` -> passed again with the visible input and
+  framebuffer test included after all native desktop component suites, the
+  complete QEMU verification boot, and two-/four-vCPU recovery coverage.
+- `make test-controller-desktop-performance` -> passed with 0 us startup,
+  347 us input-to-frame p95, 249 us steady-frame p95, 0 us modeled recovery,
+  and a 1,950,000-byte modeled working set.
+- `make check` -> passed architecture consistency, 487 classified writable
+  globals, 406 managed x86 runtime backings, the 1,036-block unsafe boundary,
+  the 375-syscall Linux matrix, native C ABI, format/lint, and unit suites.
+- Post-test process inspection -> no Ginux QEMU process remained.
 
 ## Decisions and limitations
 
 - Qualification is for the recorded QEMU software-rendered environment and the
   selected Wayland clients, not general hardware or desktop compatibility.
+- The visible controller is deliberately a basic native software-rendered
+  shell. It proves the physical display/input path and controller-owned
+  windowing boundary; it is not a finished desktop environment.
 - Performance values cover the release-mode desktop state machines and software
   renderer on the recorded host. They are not whole-system CPU/RSS, GPU,
   physical-display, or end-user latency measurements.
@@ -109,9 +138,13 @@ isolation, responsiveness, regressions, reproducibility, and documentation.
 - Pull request: shared integrated PR for Gates 19–30
 - Planned commits: qualification harness; performance evidence; documentation
 - Actual commits: `85f599b2` (qualification harness, budgets, and docs),
-  `cc138367` (ABI report consistency), and the gate-closure commit.
+  `cc138367` (ABI report consistency), and `b21f2c03` (visible interactive
+  controller desktop and real-QEMU acceptance test).
 
 ## Review policy and outcome
 
-Passed and closed on 2026-10-31 under the human-confirmed delegated batch. The
-integrated branch is ready for human review before publication.
+Reopened on 2026-10-31 after human review established that the desktop could not
+be launched or observed. Passed and closed under the confirmed delegated policy
+on 2026-10-31: `make run-desktop` opens the persistent controller desktop,
+physical keyboard and pointer input change observable state, and the automated
+QEMU framebuffer test retains evidence of those transitions.

@@ -8,16 +8,15 @@
 - Active project: native controller desktop
 - Branch: `codex/controller-desktop`
 - Intended base: `main` at `759cf2e2`
-- Active gate: none; Gates 19–30 are closed
-- Status: native controller desktop batch complete and ready for human review
-- Last evidence: Gate 30 passed `make clean && make check`,
-  `make test-controller-desktop-all`, `make test-controller-desktop-performance`,
-  SMP, controller, storage, ABI, Rocky shell/systemd, multi-domain, cleanup, and
-  documentation/traceability audits
+- Active gate: none; Gates 19–30 are complete
+- Status: Gate 30 passed and closed after visible interactive qualification
+- Last evidence: `make check`, `make test-controller-desktop-all`,
+  `make test-controller-desktop-performance`, and the final real-QEMU
+  `make test-controller-desktop-visible` run passed; retained screenshots show
+  keyboard and pointer state changes and no QEMU process remained
 - Open decisions or limitations: none inside Gate 19; GPU acceleration, raw GPU
   passthrough, and broad desktop compatibility are deferred
-- Exact next action: human reviews `codex/controller-desktop`; push or pull
-  request creation still requires explicit authorization
+- Exact next action: human review of the visible controller desktop and branch
 
 ## Governing outcome
 
@@ -39,7 +38,8 @@ windowed or full screen. The CLI remains the recovery path.
 - Gate 27: passed and closed under delegated review on 2026-10-31
 - Gate 28: passed and closed under delegated review on 2026-10-31
 - Gate 29: passed and closed under delegated review on 2026-10-31
-- Gate 30: passed and closed under delegated review on 2026-10-31
+- Gate 30: passed and closed under delegated review on 2026-10-31 after visible
+  QEMU framebuffer, keyboard, pointer, performance, and regression evidence
 - Gates 20–30: delegated closure after complete objective evidence; continue
   without another planned checkpoint and stop only for a genuine clarification,
   failed dependency, or material scope/architecture change
