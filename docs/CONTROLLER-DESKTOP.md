@@ -333,9 +333,11 @@ or the CLI.
 The controller desktop uses a restrained dark navy and slate palette with blue
 selection and mint health accents. A persistent top bar identifies Ginux,
 system management, and overall health. The left navigation provides Overview,
-Domains, Network, Storage, Devices, and Events destinations. The Overview page
-summarizes domain, CPU, and memory state; shows a compact domain table; and
-keeps the controller command surface visible.
+Domains, Network, Storage, Devices, Events, and Settings destinations. Settings
+is the stable home for system-wide configuration, beginning with date, time,
+and timezone controls and expanding as additional host configuration is added.
+The Overview page summarizes domain, CPU, and memory state; shows a compact
+domain table; and keeps the controller command surface visible.
 
 The native renderer is allocation-free and uses a fixed pixel font, simple
 rectangles, borders, and a software pointer. Color is never the only status

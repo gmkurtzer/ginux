@@ -399,6 +399,7 @@ impl<'a, B: ManagementBackend> Application<'a, B> {
             (55, &b"STORAGE"[..]),
             (65, &b"DEVICES"[..]),
             (75, &b"EVENTS"[..]),
+            (85, &b"SETTINGS"[..]),
         ] {
             rect(pixels, stride, Rect::new(9, y + 1, 2, 2), COLOR_MUTED)?;
             text(pixels, stride, 14, y, label, COLOR_MUTED)?;

@@ -26,6 +26,8 @@ and interaction model.
 - [x] Generated and reviewed an initial 800 by 600 visual concept.
 - [x] Added the requested Events destination and accepted the resulting v2
   concept as the implementation reference.
+- [x] Added a Settings destination for general system configuration, beginning
+  with date, time, and timezone controls.
 - [x] Implemented the accepted hierarchy, palette, cards, domain table,
   command surface, navigation, Events destination, status treatment, and
   software pointer in the allocation-free native renderer.
@@ -66,7 +68,8 @@ and interaction model.
   renderer and controller tests passed.
 - `make test-controller-desktop-visible` -> actual QEMU framebuffer rendered;
   injected keyboard and pointer input each changed the frame; PNG evidence was
-  retained under `build/qualification/controller-desktop/`.
+  retained under `build/qualification/controller-desktop/`; rerun after adding
+  Settings passed on 2026-11-01.
 - `make test-controller-desktop-all` -> protocol, windowing, controller,
   multi-domain, Wayland, presentation, recovery, 2-CPU/4-CPU stress, boot, and
   visible framebuffer qualification passed.
@@ -82,6 +85,8 @@ and interaction model.
   navy/slate surfaces, a limited blue/teal status palette, compact information
   density, and a clean software-renderable pointer.
 - The concept is a visual specification, not a bitmap shipped by the kernel.
+- Human framebuffer review added Settings after the accepted concept; its
+  configuration workflows remain a later functional gate.
 - Native service layout recognition now uses exact guard-page and stack
   geometry rather than assuming the final reserved image page is populated.
 
