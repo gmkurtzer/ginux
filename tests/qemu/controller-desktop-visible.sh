@@ -9,6 +9,9 @@ serial_fifo="$(mktemp -u /tmp/ginux-desktop-serial.XXXXXX)"
 screenshot="$(mktemp -t ginux-desktop.XXXXXX).ppm"
 keyboard_screenshot="$(mktemp -t ginux-desktop-keyboard.XXXXXX).ppm"
 pointer_screenshot="$(mktemp -t ginux-desktop-pointer.XXXXXX).ppm"
+click_screenshot="$(mktemp -t ginux-desktop-click.XXXXXX).ppm"
+overview_screenshot="$(mktemp -t ginux-desktop-overview.XXXXXX).ppm"
+live_screenshot="$(mktemp -t ginux-desktop-live.XXXXXX).ppm"
 volume_image="$(mktemp -t ginux-desktop-volume.XXXXXX)"
 artifact_dir="$repo_root/build/qualification/controller-desktop"
 qemu_pid=""
@@ -32,6 +35,7 @@ cleanup() {
     exec 9>&- 9<&- || true
     rm -f "$output_file" "$monitor_socket" "$serial_fifo" "$screenshot" "$keyboard_screenshot" \
         "$pointer_screenshot" "$volume_image"
+    rm -f "$click_screenshot" "$overview_screenshot" "$live_screenshot"
 }
 trap cleanup EXIT
 
@@ -78,6 +82,13 @@ for _ in $(seq 1 80); do
     fi
     sleep 0.25
 done
+printf 'sendkey ret 50\n' | nc -U "$monitor_socket" >/dev/null
+for _ in $(seq 1 80); do
+    if grep -Fq 'Usage:' "$output_file"; then
+        break
+    fi
+    sleep 0.1
+done
 
 printf 'mouse_move 18 9\n' | nc -U "$monitor_socket" >/dev/null
 pointer_hash="$keyboard_hash"
@@ -89,13 +100,51 @@ for _ in $(seq 1 80); do
     fi
     sleep 0.25
 done
+
+# Move from the controller's initial logical center into the Settings row,
+# then exercise an actual PS/2 primary-button press and release.
+printf 'mouse_move -173 38\nmouse_button 1\nmouse_button 0\n' | nc -U "$monitor_socket" >/dev/null
+click_hash="$pointer_hash"
+for _ in $(seq 1 80); do
+    printf 'screendump %s\n' "$click_screenshot" | nc -U "$monitor_socket" >/dev/null
+    click_hash="$(shasum -a 256 "$click_screenshot" | awk '{print $1}')"
+    if [[ "$click_hash" != "$pointer_hash" ]] && frame_has_palette "$click_screenshot"; then
+        break
+    fi
+    sleep 0.25
+done
+
+printf 'mouse_move 0 -142\nmouse_button 1\nmouse_button 0\n' | nc -U "$monitor_socket" >/dev/null
+sleep 0.5
+printf 'screendump %s\n' "$overview_screenshot" | nc -U "$monitor_socket" >/dev/null
+overview_hash="$(shasum -a 256 "$overview_screenshot" | awk '{print $1}')"
+
+# A CLI mutation must update the same live GUI model without restarting the
+# controller. Enter it through native keyboard events to cover the GUI event
+# path while the serial console remains available as the recovery path.
+for key in d o m a i n spc n e w spc v i s i b l e ret; do
+    printf 'sendkey %s 20\n' "$key" | nc -U "$monitor_socket" >/dev/null
+    sleep 0.04
+done
+for _ in $(seq 1 80); do
+    if grep -Fq 'visible: created' "$output_file"; then
+        break
+    fi
+    sleep 0.25
+done
+sleep 0.5
+printf 'screendump %s\n' "$live_screenshot" | nc -U "$monitor_socket" >/dev/null
+live_hash="$(shasum -a 256 "$live_screenshot" | awk '{print $1}')"
 printf 'quit\n' | nc -U "$monitor_socket" >/dev/null
 wait "$qemu_pid" 2>/dev/null || true
 qemu_pid=""
 
 if [[ ! -s "$screenshot" ]] || [[ "$(head -c 2 "$screenshot")" != P6 ]] \
     || [[ ! -s "$keyboard_screenshot" ]] \
-    || [[ ! -s "$pointer_screenshot" ]]; then
+    || [[ ! -s "$pointer_screenshot" ]] \
+    || [[ ! -s "$click_screenshot" ]] \
+    || [[ ! -s "$overview_screenshot" ]] \
+    || [[ ! -s "$live_screenshot" ]]; then
     echo 'Visible desktop test failed: QEMU did not produce a PPM framebuffer.' >&2
     exit 1
 fi
@@ -117,14 +166,30 @@ if [[ "$keyboard_hash" == "$pointer_hash" ]]; then
     echo 'Visible desktop test failed: injected pointer input did not change the framebuffer.' >&2
     exit 1
 fi
+if [[ "$pointer_hash" == "$click_hash" ]]; then
+    cat "$output_file" >&2
+    echo 'Visible desktop test failed: pointer click did not change the active view.' >&2
+    exit 1
+fi
+if ! grep -Fq 'visible: created' "$output_file" || [[ "$overview_hash" == "$live_hash" ]]; then
+    cat "$output_file" >&2
+    echo 'Visible desktop test failed: CLI state change did not update the GUI.' >&2
+    exit 1
+fi
 
 mkdir -p "$artifact_dir"
 cp "$screenshot" "$artifact_dir/baseline.ppm"
 cp "$keyboard_screenshot" "$artifact_dir/keyboard.ppm"
 cp "$pointer_screenshot" "$artifact_dir/pointer.ppm"
+cp "$click_screenshot" "$artifact_dir/click.ppm"
+cp "$overview_screenshot" "$artifact_dir/overview.ppm"
+cp "$live_screenshot" "$artifact_dir/live-state.ppm"
 if command -v sips >/dev/null 2>&1; then
     sips -s format png "$keyboard_screenshot" --out "$artifact_dir/keyboard.png" >/dev/null
     sips -s format png "$pointer_screenshot" --out "$artifact_dir/pointer.png" >/dev/null
+    sips -s format png "$click_screenshot" --out "$artifact_dir/click.png" >/dev/null
+    sips -s format png "$overview_screenshot" --out "$artifact_dir/overview.png" >/dev/null
+    sips -s format png "$live_screenshot" --out "$artifact_dir/live-state.png" >/dev/null
 fi
 
 echo 'Visible interactive controller desktop framebuffer passed.'

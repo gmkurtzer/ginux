@@ -8,7 +8,7 @@ use ginux_native_abi::{
     NATIVE_NETWORK_INVENTORY_OPERATION, NATIVE_ROOT_OPERATION,
 };
 use ginux_windowing::{
-    paint_border, paint_rect, paint_text, paint_text_scaled, Rect, COLOR_ACCENT, COLOR_BORDER,
+    paint_border, paint_rect, paint_text_5x7_scaled, Rect, COLOR_ACCENT, COLOR_BORDER,
     COLOR_DARK_TEXT, COLOR_DESKTOP, COLOR_HEALTHY, COLOR_MUTED, COLOR_PANEL, COLOR_SURFACE,
     COLOR_SURFACE_RAISED, COLOR_TEXT,
 };
@@ -17,9 +17,148 @@ pub const MAX_DOMAINS: usize = 4;
 pub const MAX_JOBS: usize = 8;
 pub const MAX_NOTICES: usize = 8;
 pub const MAX_NAME: usize = 16;
-pub const SHELL_WIDTH: usize = 400;
-pub const SHELL_HEIGHT: usize = 300;
+const UI_SCALE: i16 = 1;
+const LOGICAL_WIDTH: u16 = 400;
+const LOGICAL_HEIGHT: u16 = 300;
+pub const SHELL_WIDTH: usize = LOGICAL_WIDTH as usize * UI_SCALE as usize;
+pub const SHELL_HEIGHT: usize = LOGICAL_HEIGHT as usize * UI_SCALE as usize;
 pub const SHELL_BACKGROUND_COLOR: u32 = COLOR_DESKTOP;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Page {
+    Overview,
+    Domains,
+    Network,
+    Storage,
+    Devices,
+    Events,
+    Settings,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ShellState {
+    pub page: Page,
+    pub pointer_x: u16,
+    pub pointer_y: u16,
+    pub buttons: u8,
+}
+
+impl ShellState {
+    pub const fn new() -> Self {
+        Self {
+            page: Page::Overview,
+            pointer_x: 200,
+            pointer_y: 150,
+            buttons: 0,
+        }
+    }
+
+    pub fn pointer_motion(&mut self, x: u16, y: u16) -> bool {
+        let next = (
+            x.min((SHELL_WIDTH - 1) as u16),
+            y.min((SHELL_HEIGHT - 1) as u16),
+        );
+        if (self.pointer_x, self.pointer_y) == next {
+            return false;
+        }
+        (self.pointer_x, self.pointer_y) = next;
+        true
+    }
+
+    pub fn pointer_buttons(&mut self, changed: u8, buttons: u8) -> bool {
+        self.buttons = buttons;
+        if changed & 1 == 0 || buttons & 1 == 0 {
+            return false;
+        }
+        let Some(page) = page_at(
+            self.pointer_x / UI_SCALE as u16,
+            self.pointer_y / UI_SCALE as u16,
+        ) else {
+            return false;
+        };
+        let changed = self.page != page;
+        self.page = page;
+        changed
+    }
+}
+
+impl Default for ShellState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DomainView {
+    pub name: [u8; MAX_NAME],
+    pub name_len: u8,
+    pub state: DomainState,
+    pub cpu: u16,
+    pub memory_mib: u32,
+}
+
+impl DomainView {
+    pub const EMPTY: Self = Self {
+        name: [0; MAX_NAME],
+        name_len: 0,
+        state: DomainState::Empty,
+        cpu: 0,
+        memory_mib: 0,
+    };
+
+    pub fn name(&self) -> &[u8] {
+        &self.name[..usize::from(self.name_len)]
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SystemView {
+    pub domains: [DomainView; MAX_DOMAINS],
+    pub domain_count: u8,
+    pub running_count: u8,
+    pub cpu_allocated: u16,
+    pub memory_used_mib: u32,
+    pub memory_total_mib: u32,
+    pub hour: u8,
+    pub minute: u8,
+    pub healthy: bool,
+}
+
+impl SystemView {
+    pub const fn empty() -> Self {
+        Self {
+            domains: [DomainView::EMPTY; MAX_DOMAINS],
+            domain_count: 0,
+            running_count: 0,
+            cpu_allocated: 0,
+            memory_used_mib: 0,
+            memory_total_mib: 0,
+            hour: 0,
+            minute: 0,
+            healthy: false,
+        }
+    }
+
+    fn model() -> Self {
+        let mut view = Self::empty();
+        view.domain_count = 1;
+        view.running_count = 1;
+        view.cpu_allocated = 2;
+        view.memory_used_mib = 3_789;
+        view.memory_total_mib = 32_666;
+        view.hour = 10;
+        view.minute = 24;
+        view.healthy = true;
+        view.domains[0] = DomainView {
+            name: *b"rocky\0\0\0\0\0\0\0\0\0\0\0",
+            name_len: 5,
+            state: DomainState::Running,
+            cpu: 2,
+            memory_mib: 3_789,
+        };
+        view
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Error {
@@ -365,7 +504,16 @@ impl<'a, B: ManagementBackend> Application<'a, B> {
         self.count
     }
     pub fn render_shell(&self, pixels: &mut [u32], stride: usize) -> Result<u64, Error> {
-        self.render_shell_state(pixels, stride, b"controller terminal", 350, 230)
+        let mut state = ShellState::new();
+        state.pointer_x = 350;
+        state.pointer_y = 230;
+        self.render_shell_view(
+            pixels,
+            stride,
+            b"controller terminal",
+            &state,
+            &SystemView::model(),
+        )
     }
 
     pub fn render_shell_state(
@@ -376,10 +524,24 @@ impl<'a, B: ManagementBackend> Application<'a, B> {
         pointer_x: u16,
         pointer_y: u16,
     ) -> Result<u64, Error> {
+        let mut state = ShellState::new();
+        state.pointer_x = pointer_x;
+        state.pointer_y = pointer_y;
+        self.render_shell_view(pixels, stride, terminal, &state, &SystemView::model())
+    }
+
+    pub fn render_shell_view(
+        &self,
+        pixels: &mut [u32],
+        stride: usize,
+        terminal: &[u8],
+        state: &ShellState,
+        view: &SystemView,
+    ) -> Result<u64, Error> {
         rect(
             pixels,
             stride,
-            Rect::new(0, 0, SHELL_WIDTH as u16, SHELL_HEIGHT as u16),
+            Rect::new(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT),
             COLOR_DESKTOP,
         )?;
 
@@ -390,14 +552,35 @@ impl<'a, B: ManagementBackend> Application<'a, B> {
         text(
             pixels,
             stride,
-            154,
+            90,
             5,
             b"SYSTEM MANAGEMENT | HOST: GINUX",
             COLOR_MUTED,
         )?;
-        text(pixels, stride, 340, 5, b"10:24", COLOR_MUTED)?;
-        rect(pixels, stride, Rect::new(365, 5, 5, 5), COLOR_HEALTHY)?;
-        text(pixels, stride, 374, 5, b"HEALTHY", COLOR_HEALTHY)?;
+        let mut time = [b'0'; 5];
+        time[0] = b'0' + view.hour / 10;
+        time[1] = b'0' + view.hour % 10;
+        time[2] = b':';
+        time[3] = b'0' + view.minute / 10;
+        time[4] = b'0' + view.minute % 10;
+        text(pixels, stride, 310, 5, &time, COLOR_MUTED)?;
+        rect(pixels, stride, Rect::new(341, 5, 5, 5), COLOR_HEALTHY)?;
+        text(
+            pixels,
+            stride,
+            350,
+            5,
+            if view.healthy {
+                b"HEALTHY"
+            } else {
+                b"DEGRADED"
+            },
+            if view.healthy {
+                COLOR_HEALTHY
+            } else {
+                COLOR_MUTED
+            },
+        )?;
 
         // Controller window and chrome.
         let shell = Rect::new(11, 29, 378, 247);
@@ -415,49 +598,99 @@ impl<'a, B: ManagementBackend> Application<'a, B> {
         // Navigation rail.
         rect(pixels, stride, Rect::new(12, 44, 68, 206), COLOR_PANEL)?;
         rect(pixels, stride, Rect::new(79, 44, 1, 206), COLOR_BORDER)?;
-        rect(pixels, stride, Rect::new(13, 48, 66, 18), COLOR_ACCENT)?;
-        nav_icon(pixels, stride, 19, 53, 0, COLOR_TEXT)?;
-        text(pixels, stride, 33, 55, b"OVERVIEW", COLOR_TEXT)?;
-        for (y, icon, label) in [
-            (77, 1, &b"DOMAINS"[..]),
-            (101, 2, &b"NETWORK"[..]),
-            (125, 3, &b"STORAGE"[..]),
-            (149, 4, &b"DEVICES"[..]),
-            (173, 5, &b"EVENTS"[..]),
-            (197, 6, &b"SETTINGS"[..]),
+        for (page, y, icon, label) in [
+            (Page::Overview, 55, 0, &b"OVERVIEW"[..]),
+            (Page::Domains, 77, 1, &b"DOMAINS"[..]),
+            (Page::Network, 101, 2, &b"NETWORK"[..]),
+            (Page::Storage, 125, 3, &b"STORAGE"[..]),
+            (Page::Devices, 149, 4, &b"DEVICES"[..]),
+            (Page::Events, 173, 5, &b"EVENTS"[..]),
+            (Page::Settings, 197, 6, &b"SETTINGS"[..]),
         ] {
-            nav_icon(pixels, stride, 19, y - 2, icon, COLOR_MUTED)?;
-            text(pixels, stride, 33, y, label, COLOR_MUTED)?;
+            let selected = state.page == page;
+            if selected {
+                rect(pixels, stride, Rect::new(13, y - 7, 66, 18), COLOR_ACCENT)?;
+            }
+            let color = if selected { COLOR_TEXT } else { COLOR_MUTED };
+            nav_icon(pixels, stride, 19, y - 2, icon, color)?;
+            text(pixels, stride, 33, y, label, color)?;
         }
 
-        // Overview heading and summary cards.
-        text_scaled(pixels, stride, 91, 51, b"SYSTEM OVERVIEW", COLOR_TEXT, 2)?;
+        if state.page == Page::Overview {
+            self.render_overview(pixels, stride, view)?;
+        } else {
+            render_page(pixels, stride, state.page, view)?;
+        }
+
+        // Command surface.
+        let command = Rect::new(16, 257, 368, 14);
+        rect(pixels, stride, command, COLOR_SURFACE)?;
+        outline(pixels, stride, command, COLOR_ACCENT)?;
+        text(pixels, stride, 22, 262, b"GINUX>", COLOR_MUTED)?;
+        text(pixels, stride, 50, 262, terminal, COLOR_TEXT)?;
+        rect(
+            pixels,
+            stride,
+            Rect::new(50 + terminal.len() as i16 * 6, 261, 2, 7),
+            COLOR_TEXT,
+        )?;
+
+        draw_pointer(
+            pixels,
+            stride,
+            state.pointer_x.min((SHELL_WIDTH - 1) as u16) as i16,
+            state.pointer_y.min((SHELL_HEIGHT - 1) as u16) as i16,
+        )?;
+        Ok(ginux_windowing::pixel_hash(pixels))
+    }
+
+    fn render_overview(
+        &self,
+        pixels: &mut [u32],
+        stride: usize,
+        view: &SystemView,
+    ) -> Result<(), Error> {
+        text(pixels, stride, 91, 51, b"SYSTEM OVERVIEW", COLOR_TEXT)?;
+        let mut domain_value = [0_u8; 3];
+        let domain_value = decimal(&mut domain_value, u64::from(view.domain_count));
+        let mut domain_detail = [0_u8; 20];
+        let domain_detail = count_detail(
+            &mut domain_detail,
+            u64::from(view.running_count),
+            u64::from(view.domain_count.saturating_sub(view.running_count)),
+        );
         card(
             pixels,
             stride,
             Rect::new(89, 71, 94, 40),
             1,
             b"DOMAINS",
-            b"1",
-            b"1 RUN / 0 STOP",
+            domain_value,
+            domain_detail,
         )?;
+        let mut cpu = [0_u8; 6];
+        let cpu = decimal_suffix(&mut cpu, u64::from(view.cpu_allocated), b" CPU");
         card(
             pixels,
             stride,
             Rect::new(190, 71, 93, 40),
             4,
-            b"CPU",
-            b"2%",
-            b"2 / 96 CORES",
+            b"ALLOCATED",
+            cpu,
+            b"CONFIGURED",
         )?;
+        let mut memory = [0_u8; 8];
+        let memory = decimal_suffix(&mut memory, u64::from(view.memory_used_mib), b"M");
+        let mut memory_detail = [0_u8; 16];
+        let memory_detail = total_detail(&mut memory_detail, u64::from(view.memory_total_mib));
         card(
             pixels,
             stride,
             Rect::new(290, 71, 94, 40),
             3,
             b"MEMORY",
-            b"12%",
-            b"3.7 GB / 31.9 GB",
+            memory,
+            memory_detail,
         )?;
 
         // Domain inventory.
@@ -480,41 +713,203 @@ impl<'a, B: ManagementBackend> Application<'a, B> {
         text(pixels, stride, 270, 138, b"CPU", COLOR_MUTED)?;
         text(pixels, stride, 320, 138, b"MEMORY", COLOR_MUTED)?;
         rect(pixels, stride, Rect::new(90, 148, 293, 1), COLOR_BORDER)?;
-        text(pixels, stride, 96, 154, b"ROCKY", COLOR_TEXT)?;
-        rect(pixels, stride, Rect::new(187, 154, 5, 5), COLOR_HEALTHY)?;
-        text(pixels, stride, 197, 154, b"RUNNING", COLOR_TEXT)?;
-        text(pixels, stride, 270, 154, b"2%", COLOR_TEXT)?;
-        text(pixels, stride, 320, 154, b"3.7 GB", COLOR_TEXT)?;
+        for (index, domain) in view.domains[..usize::from(view.domain_count.min(MAX_DOMAINS as u8))]
+            .iter()
+            .enumerate()
+        {
+            let y = 154 + index as i16 * 14;
+            text(pixels, stride, 96, y, domain.name(), COLOR_TEXT)?;
+            let state = domain_state_text(domain.state);
+            rect(
+                pixels,
+                stride,
+                Rect::new(187, y, 5, 5),
+                if domain.state == DomainState::Running {
+                    COLOR_HEALTHY
+                } else {
+                    COLOR_MUTED
+                },
+            )?;
+            text(pixels, stride, 197, y, state, COLOR_TEXT)?;
+            let mut cpu = [0_u8; 5];
+            let cpu = decimal(&mut cpu, u64::from(domain.cpu));
+            text(pixels, stride, 270, y, cpu, COLOR_TEXT)?;
+            let mut memory = [0_u8; 8];
+            let memory = decimal_suffix(&mut memory, u64::from(domain.memory_mib), b"M");
+            text(pixels, stride, 320, y, memory, COLOR_TEXT)?;
+        }
+        Ok(())
+    }
+}
 
-        // Command surface.
-        let command = Rect::new(16, 257, 368, 14);
-        rect(pixels, stride, command, COLOR_SURFACE)?;
-        outline(pixels, stride, command, COLOR_ACCENT)?;
-        text(pixels, stride, 22, 262, b"GINUX>", COLOR_MUTED)?;
-        text(pixels, stride, 50, 262, terminal, COLOR_TEXT)?;
-        rect(
+fn page_at(x: u16, y: u16) -> Option<Page> {
+    if (89..183).contains(&x) && (71..111).contains(&y) {
+        return Some(Page::Domains);
+    }
+    if !(13..79).contains(&x) {
+        return None;
+    }
+    [
+        (Page::Overview, 48_u16),
+        (Page::Domains, 70),
+        (Page::Network, 94),
+        (Page::Storage, 118),
+        (Page::Devices, 142),
+        (Page::Events, 166),
+        (Page::Settings, 190),
+    ]
+    .into_iter()
+    .find_map(|(page, top)| (y >= top && y < top + 18).then_some(page))
+}
+
+fn page_title(page: Page) -> &'static [u8] {
+    match page {
+        Page::Overview => b"SYSTEM OVERVIEW",
+        Page::Domains => b"DOMAINS",
+        Page::Network => b"NETWORK",
+        Page::Storage => b"STORAGE",
+        Page::Devices => b"DEVICES",
+        Page::Events => b"EVENTS",
+        Page::Settings => b"SETTINGS",
+    }
+}
+
+fn render_page(
+    pixels: &mut [u32],
+    stride: usize,
+    page: Page,
+    view: &SystemView,
+) -> Result<(), Error> {
+    text(pixels, stride, 91, 51, page_title(page), COLOR_TEXT)?;
+    let panel = Rect::new(89, 71, 295, 180);
+    rect(pixels, stride, panel, COLOR_PANEL)?;
+    outline(pixels, stride, panel, COLOR_BORDER)?;
+    text(
+        pixels,
+        stride,
+        98,
+        82,
+        b"LIVE CONTROLLER VIEW",
+        COLOR_HEALTHY,
+    )?;
+    let (label, value) = match page {
+        Page::Domains => (b"CONFIGURED DOMAINS".as_slice(), view.domain_count),
+        Page::Network => (b"HOST NETWORK STATUS".as_slice(), u8::from(view.healthy)),
+        Page::Storage => (b"LOCAL STORAGE STATUS".as_slice(), u8::from(view.healthy)),
+        Page::Devices => (b"DEVICE SERVICE STATUS".as_slice(), u8::from(view.healthy)),
+        Page::Events => (b"ACTIVE EVENT COUNT".as_slice(), 0),
+        Page::Settings => (b"SYSTEM SETTINGS".as_slice(), 1),
+        Page::Overview => (b"CONFIGURED DOMAINS".as_slice(), view.domain_count),
+    };
+    text(pixels, stride, 98, 101, label, COLOR_MUTED)?;
+    let mut numeric = [0_u8; 3];
+    let numeric = decimal(&mut numeric, u64::from(value));
+    text(pixels, stride, 98, 113, numeric, COLOR_TEXT)?;
+    if page == Page::Settings {
+        text(
             pixels,
             stride,
-            Rect::new(50 + terminal.len() as i16 * 4, 261, 2, 7),
+            98,
+            142,
+            b"DATE, TIME, AND TIMEZONE",
             COLOR_TEXT,
         )?;
-
-        draw_pointer(
+        text(
             pixels,
             stride,
-            pointer_x.min((SHELL_WIDTH - 1) as u16) as i16,
-            pointer_y.min((SHELL_HEIGHT - 1) as u16) as i16,
+            98,
+            154,
+            b"CONFIGURATION INTERFACE PENDING",
+            COLOR_MUTED,
         )?;
-        Ok(ginux_windowing::pixel_hash(pixels))
+    } else {
+        text(
+            pixels,
+            stride,
+            98,
+            142,
+            b"STATE REFRESHES FROM THE KERNEL",
+            COLOR_MUTED,
+        )?;
+    }
+    Ok(())
+}
+
+fn decimal(output: &mut [u8], mut value: u64) -> &[u8] {
+    let mut reversed = [0_u8; 20];
+    let mut count = 0;
+    loop {
+        reversed[count] = b'0' + (value % 10) as u8;
+        count += 1;
+        value /= 10;
+        if value == 0 || count == reversed.len() {
+            break;
+        }
+    }
+    let count = count.min(output.len());
+    for index in 0..count {
+        output[index] = reversed[count - index - 1];
+    }
+    &output[..count]
+}
+
+fn decimal_suffix<'a>(output: &'a mut [u8], value: u64, suffix: &[u8]) -> &'a [u8] {
+    let digits = decimal(output, value).len();
+    let suffix_len = suffix.len().min(output.len().saturating_sub(digits));
+    output[digits..digits + suffix_len].copy_from_slice(&suffix[..suffix_len]);
+    &output[..digits + suffix_len]
+}
+
+fn count_detail(output: &mut [u8], running: u64, stopped: u64) -> &[u8] {
+    let mut length = decimal(output, running).len();
+    let separator = b" RUN ";
+    let count = separator.len().min(output.len().saturating_sub(length));
+    output[length..length + count].copy_from_slice(&separator[..count]);
+    length += count;
+    length += decimal(&mut output[length..], stopped).len();
+    let suffix = b" STOP";
+    let count = suffix.len().min(output.len().saturating_sub(length));
+    output[length..length + count].copy_from_slice(&suffix[..count]);
+    &output[..length + count]
+}
+
+fn total_detail(output: &mut [u8], total: u64) -> &[u8] {
+    output[..3].copy_from_slice(b"OF ");
+    let mut length = 3 + decimal(&mut output[3..], total).len();
+    let suffix = b" MIB";
+    let count = suffix.len().min(output.len().saturating_sub(length));
+    output[length..length + count].copy_from_slice(&suffix[..count]);
+    length += count;
+    &output[..length]
+}
+
+fn domain_state_text(state: DomainState) -> &'static [u8] {
+    match state {
+        DomainState::Created => b"CREATED",
+        DomainState::Configured => b"CONFIGURED",
+        DomainState::Starting => b"STARTING",
+        DomainState::Running => b"RUNNING",
+        DomainState::Stopped => b"STOPPED",
+        DomainState::Failed => b"FAILED",
+        DomainState::Empty => b"EMPTY",
     }
 }
 
 fn rect(pixels: &mut [u32], stride: usize, area: Rect, color: u32) -> Result<(), Error> {
-    paint_rect(pixels, stride, area, color).map_err(|_| Error::Failed)
+    paint_rect(pixels, stride, scaled_rect(area), color).map_err(|_| Error::Failed)
 }
 
 fn outline(pixels: &mut [u32], stride: usize, area: Rect, color: u32) -> Result<(), Error> {
-    paint_border(pixels, stride, area, color).map_err(|_| Error::Failed)
+    paint_border(pixels, stride, scaled_rect(area), color).map_err(|_| Error::Failed)
+}
+
+fn scaled_rect(area: Rect) -> Rect {
+    Rect::new(
+        area.x * UI_SCALE,
+        area.y * UI_SCALE,
+        area.width * UI_SCALE as u16,
+        area.height * UI_SCALE as u16,
+    )
 }
 
 fn text(
@@ -525,19 +920,8 @@ fn text(
     value: &[u8],
     color: u32,
 ) -> Result<(), Error> {
-    paint_text(pixels, stride, x, y, value, color).map_err(|_| Error::Failed)
-}
-
-fn text_scaled(
-    pixels: &mut [u32],
-    stride: usize,
-    x: i16,
-    y: i16,
-    value: &[u8],
-    color: u32,
-    scale: u16,
-) -> Result<(), Error> {
-    paint_text_scaled(pixels, stride, x, y, value, color, scale).map_err(|_| Error::Failed)
+    paint_text_5x7_scaled(pixels, stride, x * UI_SCALE, y * UI_SCALE, value, color, 1)
+        .map_err(|_| Error::Failed)
 }
 
 fn card(
@@ -553,29 +937,8 @@ fn card(
     outline(pixels, stride, area, COLOR_BORDER)?;
     nav_icon(pixels, stride, area.x + 7, area.y + 13, icon, COLOR_TEXT)?;
     text(pixels, stride, area.x + 27, area.y + 9, label, COLOR_MUTED)?;
-    text_scaled(
-        pixels,
-        stride,
-        area.x + 27,
-        area.y + 17,
-        value,
-        COLOR_TEXT,
-        2,
-    )?;
-    text(
-        pixels,
-        stride,
-        area.x + 27,
-        area.y + 32,
-        detail,
-        COLOR_MUTED,
-    )?;
-    rect(
-        pixels,
-        stride,
-        Rect::new(area.x + area.width as i16 - 12, area.y + 8, 5, 5),
-        COLOR_HEALTHY,
-    )
+    text(pixels, stride, area.x + 27, area.y + 17, value, COLOR_TEXT)?;
+    text(pixels, stride, area.x + 7, area.y + 32, detail, COLOR_MUTED)
 }
 
 fn nav_icon(
@@ -659,15 +1022,22 @@ fn draw_pointer(pixels: &mut [u32], stride: usize, x: i16, y: i16) -> Result<(),
         (4, 5),
         (5, 5),
     ] {
-        rect(
+        paint_rect(
             pixels,
             stride,
-            Rect::new(x + dx, y + dy, 1, 1),
+            Rect::new(x + dx * 2, y + dy * 2, 2, 2),
             COLOR_DARK_TEXT,
-        )?;
+        )
+        .map_err(|_| Error::Failed)?;
     }
     for (dx, dy) in [(1, 2), (1, 3), (1, 4), (2, 3), (2, 4), (3, 4)] {
-        rect(pixels, stride, Rect::new(x + dx, y + dy, 1, 1), COLOR_TEXT)?;
+        paint_rect(
+            pixels,
+            stride,
+            Rect::new(x + dx * 2, y + dy * 2, 2, 2),
+            COLOR_TEXT,
+        )
+        .map_err(|_| Error::Failed)?;
     }
     Ok(())
 }
@@ -811,5 +1181,46 @@ mod tests {
         assert_eq!(pixels[71 * SHELL_WIDTH + 89], COLOR_BORDER);
         assert_eq!(pixels[72 * SHELL_WIDTH + 90], COLOR_SURFACE_RAISED);
         assert_eq!(hash, app.render_shell(&mut pixels, SHELL_WIDTH).unwrap());
+    }
+
+    #[test]
+    fn pointer_click_selects_navigation_once() {
+        let mut state = ShellState::new();
+        assert!(state.pointer_motion(45, 197));
+        assert!(state.pointer_buttons(1, 1));
+        assert_eq!(state.page, Page::Settings);
+        assert!(!state.pointer_buttons(1, 0));
+        assert!(!state.pointer_buttons(0, 0));
+        assert_eq!(state.page, Page::Settings);
+    }
+
+    #[test]
+    fn live_view_changes_rendered_frame() {
+        let mut backend = ModelBackend::new();
+        let app = Application::new(&mut backend);
+        let state = ShellState::new();
+        let mut pixels = [0_u32; SHELL_WIDTH * SHELL_HEIGHT];
+        let empty = SystemView::empty();
+        let empty_hash = app
+            .render_shell_view(&mut pixels, SHELL_WIDTH, b"", &state, &empty)
+            .unwrap();
+        let mut live = empty;
+        live.healthy = true;
+        live.domain_count = 1;
+        live.running_count = 1;
+        live.cpu_allocated = 2;
+        live.memory_used_mib = 512;
+        live.memory_total_mib = 2_048;
+        live.domains[0] = DomainView {
+            name: *b"rocky\0\0\0\0\0\0\0\0\0\0\0",
+            name_len: 5,
+            state: DomainState::Running,
+            cpu: 2,
+            memory_mib: 512,
+        };
+        let live_hash = app
+            .render_shell_view(&mut pixels, SHELL_WIDTH, b"", &state, &live)
+            .unwrap();
+        assert_ne!(empty_hash, live_hash);
     }
 }

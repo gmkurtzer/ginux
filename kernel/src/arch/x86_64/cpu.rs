@@ -10554,25 +10554,8 @@ fn linux_controller_syscall(
             if !domain::handle_permits(domain_id, capability, 2, Rights::READ) {
                 return Some(LINUX_EBADF);
             }
-            if !crate::serial_input_ready() && queue_background_container_work() {
-                let mut frame = UserTrapFrame::from_linux_syscall(
-                    registers.into_array(),
-                    user_rip,
-                    user_stack,
-                    user_rflags,
-                    second,
-                    third,
-                );
-                if !scheduler::suspend_container_lifecycle(
-                    &mut frame,
-                    USER_CODE_SELECTOR,
-                    USER_DATA_SELECTOR,
-                    0,
-                    active_fs_base(),
-                ) {
-                    return Some(LINUX_EIO);
-                }
-                return Some(LINUX_RETURN_TO_KERNEL);
+            if !crate::serial_input_ready() {
+                return Some(LINUX_EAGAIN);
             }
             let byte = crate::serial_read_byte_blocking();
             if !address_space::copy_to_current_user(second, &[byte]) {
@@ -39241,6 +39224,13 @@ fn controller_input_call(
                 Rights::READ,
             ) {
                 return failed;
+            }
+            for _ in 0..32 {
+                if crate::controller_devices::read_hardware_input().is_none()
+                    && !crate::controller_devices::hardware_input_ready()
+                {
+                    break;
+                }
             }
             let Some(event) = crate::controller_devices::input() else {
                 return if domain::renew_auxiliary_call_epoch(caller_domain) {

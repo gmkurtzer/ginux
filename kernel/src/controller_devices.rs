@@ -31,6 +31,7 @@ struct ControllerDevices {
     next_sequence: u64,
     overflow_count: u64,
     shift: bool,
+    buttons: u8,
     mouse_packet: [u8; 3],
     mouse_length: u8,
     pointer_x: i16,
@@ -47,6 +48,7 @@ impl ControllerDevices {
             next_sequence: 1,
             overflow_count: 0,
             shift: false,
+            buttons: 0,
             mouse_packet: [0; 3],
             mouse_length: 0,
             pointer_x: 200,
@@ -92,7 +94,26 @@ impl ControllerDevices {
     }
 
     fn inject(&mut self, kind: u16, code: u32, value: i32) -> bool {
-        if self.count == self.input.len() || kind == 0 || self.next_sequence == u64::MAX {
+        if kind == 0 || self.next_sequence == u64::MAX {
+            self.overflow_count = self.overflow_count.saturating_add(1);
+            return false;
+        }
+        if kind == ginux_native_abi::NATIVE_INPUT_KIND_POINTER_MOTION && self.count != 0 {
+            let previous = (self.head + self.count - 1) % self.input.len();
+            if self.input[previous].kind == kind {
+                self.input[previous] = NativeInputEventV0 {
+                    size: NativeInputEventV0::SIZE,
+                    version: 0,
+                    kind,
+                    code,
+                    value,
+                    sequence: self.next_sequence,
+                };
+                self.next_sequence += 1;
+                return true;
+            }
+        }
+        if self.count == self.input.len() {
             self.overflow_count = self.overflow_count.saturating_add(1);
             return false;
         }
@@ -127,6 +148,7 @@ impl ControllerDevices {
         self.count = 0;
         self.next_sequence = 1;
         self.overflow_count = 0;
+        self.buttons = 0;
         self.mouse_length = 0;
     }
 
@@ -135,6 +157,11 @@ impl ControllerDevices {
         let code = scancode & 0x7f;
         if matches!(code, 0x2a | 0x36) {
             self.shift = !released;
+            let _ = self.inject(
+                ginux_native_abi::NATIVE_INPUT_KIND_KEY,
+                u32::from(code),
+                if released { 0 } else { 1 },
+            );
             return None;
         }
         let _ = self.inject(
@@ -159,16 +186,23 @@ impl ControllerDevices {
         let dy = -i16::from(self.mouse_packet[2] as i8);
         self.pointer_x = (self.pointer_x + dx).clamp(0, 399);
         self.pointer_y = (self.pointer_y + dy).clamp(0, 299);
-        let _ = self.inject(
-            ginux_native_abi::NATIVE_INPUT_KIND_POINTER_MOTION,
-            u32::from(self.pointer_x as u16) | (u32::from(self.pointer_y as u16) << 16),
-            (i32::from(dx) & 0xffff) | (i32::from(dy) << 16),
-        );
-        let _ = self.inject(
-            ginux_native_abi::NATIVE_INPUT_KIND_POINTER_BUTTON,
-            u32::from(self.mouse_packet[0] & 0x07),
-            1,
-        );
+        if dx != 0 || dy != 0 {
+            let _ = self.inject(
+                ginux_native_abi::NATIVE_INPUT_KIND_POINTER_MOTION,
+                u32::from(self.pointer_x as u16) | (u32::from(self.pointer_y as u16) << 16),
+                (i32::from(dx) & 0xffff) | (i32::from(dy) << 16),
+            );
+        }
+        let buttons = self.mouse_packet[0] & 0x07;
+        let changed = self.buttons ^ buttons;
+        if changed != 0 {
+            self.buttons = buttons;
+            let _ = self.inject(
+                ginux_native_abi::NATIVE_INPUT_KIND_POINTER_BUTTON,
+                u32::from(changed),
+                i32::from(buttons),
+            );
+        }
         true
     }
 }
@@ -559,6 +593,14 @@ pub(crate) fn verify_contract() -> bool {
         .iter()
         .enumerate()
         .any(|(index, event)| event.is_none_or(|event| event.sequence != index as u64 + 1))
+        || input().is_some()
+    {
+        return false;
+    }
+    reset_input();
+    if !inject_input(ginux_native_abi::NATIVE_INPUT_KIND_POINTER_MOTION, 1, 1)
+        || !inject_input(ginux_native_abi::NATIVE_INPUT_KIND_POINTER_MOTION, 2, 2)
+        || input().is_none_or(|event| event.sequence != 2 || event.code != 2 || event.value != 2)
         || input().is_some()
     {
         return false;
