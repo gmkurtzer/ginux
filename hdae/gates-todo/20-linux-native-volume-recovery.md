@@ -34,10 +34,12 @@ fault-containment, or persistent-storage invariants.
 - [x] Confirmed current macOS/arm64 QEMU TCG passes while the report spans
   multiple Linux QEMU versions and both KVM and TCG.
 - [x] Added a bounded Ubuntu/QEMU TCG reproduction workflow on this branch.
+- [x] Ran the first isolated Linux reproduction and posted its evidence and
+  focused log request to the source issue.
 
 ## Remaining work
 
-- [ ] Reproduce and classify the exact Linux failure.
+- [ ] Reproduce and classify the reported QEMU 10/11 ring-3 failure.
 - [ ] Implement the evidence-supported correction and regression coverage.
 - [ ] Run `make check` and complete QEMU verification on macOS and Linux.
 - [ ] Commit and push the verified correction.
@@ -71,7 +73,12 @@ fault-containment, or persistent-storage invariants.
   relative address `0x4ade`; the reported `0x5146` instruction lies outside
   its executable segment, indicating corrupted or invalid resume state rather
   than a faulting service instruction.
-- Linux reproduction run: pending.
+- [Ubuntu reproduction run 41334525169](https://github.com/gmkurtzer/ginux/actions/runs/41334525169)
+  built successfully under QEMU 8.2.2 but timed out before the controller
+  prompt because that QEMU defaulted to an insufficient IOMMU address width;
+  it did not reproduce the reported `0x5146` fault.
+- [Issue #14 response](https://github.com/gmkurtzer/ginux/issues/14#issuecomment-6562031525)
+  records the result and requests one complete serial and QEMU interrupt log.
 
 ## Decisions and limitations
 
@@ -81,6 +88,9 @@ fault-containment, or persistent-storage invariants.
   opened.
 - No pull request will be opened until the branch contains the actual verified
   corrective deliverable.
+- PR #31 independently corrects QEMU 8.2's launcher address-width mismatch;
+  Gate 20 still needs evidence from the reported QEMU 10/11 environment rather
+  than conflating that separate compatibility problem with the service fault.
 
 ## Delivery strategy
 
@@ -90,7 +100,8 @@ fault-containment, or persistent-storage invariants.
   reference to issue #14
 - Planned commits: reproduction evidence; correction and regression; delivery
   checkpoint
-- Actual commits: pending
+- Actual commits: `1358dd1c` reproduction workflow and checkpoint; current
+  evidence checkpoint pending
 
 ## Review policy and outcome
 
