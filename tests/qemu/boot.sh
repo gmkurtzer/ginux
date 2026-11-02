@@ -796,6 +796,7 @@ if ! grep -q '^ginux: IOMMU root/context hierarchy constructed' "$output_file" |
     ! grep -q '^ginux: one-page identity DMA translation encoded exactly' "$output_file" ||
     ! grep -q '^ginux: invalid IOMMU table inputs rejected' "$output_file" ||
     ! grep -q '^ginux: IOMMU hardware state unchanged after table construction' "$output_file" ||
+    ! grep -q '^ginux: failed IOMMU activation rollback quarantined' "$output_file" ||
     ! grep -q '^ginux: IOMMU translation frames scrubbed and released' "$output_file"; then
     echo "Boot test failed: IOMMU translation hierarchy lifecycle did not complete." >&2
     exit 1
