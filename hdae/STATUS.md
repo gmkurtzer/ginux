@@ -4,31 +4,28 @@
 
 - Active skill: `.agents/skills/hdae-development/SKILL.md`
 - Reload required after compaction, reset, resume, or handoff: yes
-- Active project: issue #15 TLS client entropy
-- Branch: `hdae/issue-15-tls-entropy`
+- Active project: issue #16 pinned top-level manifest digest
+- Branch: `hdae/issue-16-manifest-digest`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 32, TLS client entropy
-- Last completed action: maintainer review of PR #40 corrected the false
-  `preserves_flags` declaration; current-main reconciliation plus fresh
-  `make check` and `make test` passed
-- Next action: push the reconciled PR #40 head and verify its final CI
+- Active gate: Gate 33, pinned top-level manifest digest
+- Last completed action: reconciled merged PR #40, regenerated the combined
+  network service, and passed fresh `make check` and `make test`
+- Next action: push the conflict-free PR #42 head and verify final CI
 
 ## Current repository state
 
-Remote `main` is at `1203e291` after merged PR #41. The first
+Remote `main` is at `e8b42d85` after merged PR #40. The first
 eleven feedback-hardening gates and inserted correctness gates are complete.
 Gate 12 is complete on `codex/performance-parity`. Gates 13 through 19 and 21
-through 23 remain in `gates-todo/` for maintainer review after delivery through
-merged pull requests. Gate 20 was delivered and merged through PR #41 and
-remains in `gates-todo/` for maintainer review. Gate 32 is delivered through
-open pull request #40 and awaits maintainer review.
+through 23 and Gate 32 remain in `gates-todo/` for maintainer review after
+delivery through merged pull requests. Gate 33 is active on this branch.
 The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
 matrix and repeated stress pass. Gate 11's comparison and reduced evidence are
 under `docs/feedback-hardening/`. No push or merge was performed.
 
 ## Open decisions
 
-- None. The saved scheduled-review policy delegates Gate 32 remediation.
+- None. The user explicitly selected issue #16 as the next remediation.
 
 ## Active diagnosis
 
