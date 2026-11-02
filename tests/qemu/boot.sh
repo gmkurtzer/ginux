@@ -1227,6 +1227,16 @@ if ! grep -q '^ginux: per-domain physical frame budgets enforced' "$output_file"
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux mmap domain quota enforced atomically' "$output_file"; then
+    echo "Boot test failed: Linux mmap domain quota was not enforced atomically." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: Linux SysV domain quota enforced independently' "$output_file"; then
+    echo "Boot test failed: Linux SysV domain quota was not enforced independently." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: generation-owned virtio DMA frame allocated' "$output_file"; then
     echo "Boot test failed: virtio DMA memory was not generation-owned." >&2
     exit 1

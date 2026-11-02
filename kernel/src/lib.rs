@@ -1144,6 +1144,14 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: tracked frame release ownership verified");
     serial_write("\r\nginux: stale frame leases rejected");
     serial_write("\r\nginux: per-domain physical frame budgets enforced");
+    if !arch::x86_64::cpu::verify_linux_mmap_frame_quota() {
+        kernel_fail("\r\nginux: Linux mmap domain quota invalid\r\n");
+    }
+    serial_write("\r\nginux: Linux mmap domain quota enforced atomically");
+    if !linux_sysv_ipc::verify_allocation_quota() {
+        kernel_fail("\r\nginux: Linux SysV domain quota invalid\r\n");
+    }
+    serial_write("\r\nginux: Linux SysV domain quota enforced independently");
     if !arch::x86_64::pci::verify_queue_rejections() {
         kernel_fail("\r\nginux: virtio queue contract invalid\r\n");
     }
