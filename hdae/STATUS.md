@@ -4,28 +4,29 @@
 
 - Active skill: `.agents/skills/hdae-development/SKILL.md`
 - Reload required after compaction, reset, resume, or handoff: yes
-- Active project: issue #16 pinned top-level manifest digest
-- Branch: `hdae/issue-16-manifest-digest`
+- Active project: remaining reporter remediation batch
+- Branch: `hdae/issue-25-mprotect-shootdown`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 33, pinned top-level manifest digest
-- Last completed action: reconciled merged PR #40, regenerated the combined
-  network service, and passed fresh `make check` and `make test`
-- Next action: push the conflict-free PR #42 head and verify final CI
+- Active gate: Gate 40, acknowledged SMP mprotect revocation for issue #25
+- Last completed action: confirmed the active-image fast path invalidates only
+  the local TLB while the established runtime path waits for all online CPUs
+- Next action: commit Gate 40 and route the fast path through the acknowledged
+  SMP invalidator
 
 ## Current repository state
 
-Remote `main` is at `e8b42d85` after merged PR #40. The first
+Remote `main` is at `ecbb3142`. The first
 eleven feedback-hardening gates and inserted correctness gates are complete.
-Gate 12 is complete on `codex/performance-parity`. Gates 13 through 19 and 21
-through 23 and Gate 32 remain in `gates-todo/` for maintainer review after
-delivery through merged pull requests. Gate 33 is active on this branch.
+Gate 12 is complete on `codex/performance-parity`. Gate 40 is active on this
+branch; Gates 34 through 36, 38, and 39 are delivered on dedicated open PRs,
+while Gate 37 awaits the separate unpack-memory policy decision.
 The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
 matrix and repeated stress pass. Gate 11's comparison and reduced evidence are
 under `docs/feedback-hardening/`. No push or merge was performed.
 
 ## Open decisions
 
-- None. The user explicitly selected issue #16 as the next remediation.
+- Gate 37 awaits the unpack-memory policy; it does not affect Gate 40.
 
 ## Active diagnosis
 
