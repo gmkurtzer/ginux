@@ -35,10 +35,11 @@ helpers from reading or modifying a live process's `memfd_secret` pages.
 - [x] Added a cross-process regression that denies both syscalls and helper
   calls, clears the test bit, and proves the original target bytes are intact.
 - [x] Passed the complete static and QEMU regression suites.
+- [x] Published PR #48 and added reciprocal issue/PR summaries.
 
 ## Remaining work
 
-- [ ] Push, open the remediation PR, add reciprocal links, and confirm CI.
+- [ ] GitHub CI is external evidence and must finish before merge.
 
 ## Acceptance criteria
 
@@ -84,7 +85,8 @@ helpers from reading or modifying a live process's `memfd_secret` pages.
 
 - Working branch: `hdae/issue-24-secret-process-vm`
 - Intended base: `main`
-- Pull request: intended; non-closing reference to issue #24
+- Pull request: [#48](https://github.com/gmkurtzer/ginux/pull/48), with a
+  non-closing reference to issue #24
 - Planned commits: gate definition; secret metadata and remote-copy regression;
   evidence; delivery
 - Actual commits: `0999760d` (gate definition), `653b9c44` (authoritative PTE

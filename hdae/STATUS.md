@@ -7,11 +7,10 @@
 - Active project: remaining reporter remediation batch
 - Branch: `hdae/issue-24-secret-process-vm`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 39, passed and awaiting delivery for issue #24
-- Last completed action: made target PTE secret metadata authoritative and
-  passed fresh `make check` plus `make test`
-- Next action: publish the Gate 39 branch and PR, add reciprocal links, then
-  start Gate 40 for issue #25
+- Active gate: Gate 39, delivered as PR #48 for issue #24
+- Last completed action: published PR #48 with reciprocal issue/PR summaries
+  after fresh `make check` and `make test` passed
+- Next action: confirm PR #48 CI while starting Gate 40 for issue #25
 
 ## Current repository state
 
