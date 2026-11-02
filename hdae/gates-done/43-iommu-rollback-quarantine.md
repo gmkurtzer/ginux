@@ -31,13 +31,16 @@ unless rollback proves translation disabled and the root pointer cleared.
 - [x] Confirmed `DeviceTranslationProfile::activate` retires the inactive
   hierarchy after every activation failure.
 - [x] Confirmed retained kernel-owned table leases cannot be reallocated.
+- [x] Added explicit active, clean-inactive, and failed-rollback outcomes.
+- [x] Made rollback attempt and validate disable, cache invalidation, root
+  clearing, command completion, and final inactive hardware state.
+- [x] Retire tables after clean failure and quarantine them after ambiguous
+  rollback.
+- [x] Added deterministic release/quarantine ownership evidence.
+- [x] Passed target-aware static and complete QEMU verification.
 
 ## Remaining work
 
-- [ ] Propagate clean-failure versus rollback-failure outcomes.
-- [ ] Retire tables only after proven inactive rollback.
-- [ ] Add deterministic safe-retirement and quarantine evidence.
-- [ ] Run focused, static, and complete QEMU verification.
 - [ ] Push, open the remediation PR, add reciprocal links, and confirm CI.
 
 ## Acceptance criteria
@@ -63,11 +66,23 @@ unless rollback proves translation disabled and the root pointer cleared.
 
 - Issue #29's cited rollback and profile paths match current
   `kernel/src/arch/x86_64/iommu.rs`.
+- `make check` -> passed; architecture checks, Clippy, unit tests, and the
+  unchanged unsafe baseline of 1,033 blocks all passed.
+- `make test` -> passed on the default two-vCPU QEMU profile, including
+  `ginux: failed IOMMU activation rollback quarantined` and the existing VT-d
+  activation, fault recovery, teardown, native-service, and replacement
+  proofs.
+- The deterministic retirement matrix released all six frames after a clean
+  failure, retained all six live kernel-owned frames after ambiguous rollback,
+  then cleaned its test quarantine and restored the baseline frame count.
 
 ## Decisions and limitations
 
 - Ambiguous rollback intentionally leaks six table frames until reboot; reuse
   could permit a still-active IOMMU to walk attacker-influenced memory.
+- A generic host-wide `cargo check --workspace --all-targets` is not a valid
+  Apple-Silicon check for the repository's x86-64 freestanding services;
+  target-aware `make check` passed.
 
 ## Delivery strategy
 
@@ -76,9 +91,11 @@ unless rollback proves translation disabled and the root pointer cleared.
 - Pull request: intended; non-closing reference to issue #29
 - Planned commits: gate definition; explicit rollback outcome and quarantine
   matrix; evidence; delivery
-- Actual commits: pending
+- Actual commits: `65c8db6f` (gate definition), `5e6eeee1` (mechanism and
+  deterministic evidence), and the gate-closing evidence commit containing
+  this update
 
 ## Review policy and outcome
 
-Delegated in the user-approved remaining-reports batch; stop only if safe
-rollback requires a different VT-d command protocol.
+Passed and closed under the user-approved remaining-reports batch delegation.
+No merge or issue closure was performed.

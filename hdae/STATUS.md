@@ -7,19 +7,19 @@
 - Active project: remaining reporter remediation batch
 - Branch: `hdae/issue-29-iommu-rollback-quarantine`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 43, IOMMU rollback quarantine for issue #29
-- Last completed action: confirmed activation rollback results are discarded
-  before unconditional translation-table retirement
-- Next action: commit Gate 43 and propagate clean versus failed rollback so
-  table frames remain quarantined on ambiguity
+- Active gate: none; Gate 43 passed and closed under batch delegation
+- Last completed action: passed `make check` and complete `make test` evidence
+  for Gate 43's clean-retirement and ambiguous-rollback quarantine paths
+- Next action: push Gate 43, open and link the issue #29 remediation PR, verify
+  CI for the delivered batch, and report merge/closure readiness
 
 ## Current repository state
 
 Remote `main` is at `ecbb3142`. The first
 eleven feedback-hardening gates and inserted correctness gates are complete.
-Gate 12 is complete on `codex/performance-parity`. Gate 43 is active on this
-branch; Gates 34 through 36, 38 through 40, and 42 are delivered on dedicated
-open PRs, while Gates 37 and 41 await human policy/architecture choices.
+Gate 12 is complete on `codex/performance-parity`. Gates 34 through 36, 38
+through 40, 42, and 43 passed under the remaining-reports batch and are on
+dedicated branches; Gates 37 and 41 await human policy/architecture choices.
 The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
 matrix and repeated stress pass. Gate 11's comparison and reduced evidence are
 under `docs/feedback-hardening/`. No push or merge was performed.
@@ -30,6 +30,14 @@ under `docs/feedback-hardening/`. No push or merge was performed.
 - Gate 41 awaits the rootfs-exec transaction-boundary choice.
 
 ## Active diagnosis
+
+- Gate 43 now distinguishes ordinary inactive activation failure from failed
+  rollback. Ordinary failure permits table retirement only after rollback
+  proves translation disabled, caches invalidated, the root cleared, command
+  completion, and final inactive state. Ambiguous rollback leaves all six
+  table leases live and kernel-owned until reboot.
+- `make check` and complete `make test` pass; the deterministic QEMU marker is
+  `ginux: failed IOMMU activation rollback quarantined`.
 
 - Four-vCPU runtime work now dispatches independently to CPUs 1 through 3.
   A targeted nine-sample four-thread run produced a 2,924 events/s median,
