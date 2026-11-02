@@ -4,15 +4,14 @@
 
 - Active skill: `.agents/skills/hdae-development/SKILL.md`
 - Reload required after compaction, reset, resume, or handoff: yes
-- Active project: remaining reporter remediation batch
+- Active project: remaining reporter remediation batch, delivery complete
 - Branch: `hdae/issue-43-release-overflow`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 44, release overflow checks for issue #43
-- Last completed action: enabled release overflow checks, corrected the boot
-  invariants they exposed, and passed `make check`, `make test`, and the final
-  normal-image smoke test
-- Next action: commit the Gate 44 evidence, push the dedicated branch, open and
-  link the remediation PR, then inspect CI
+- Active gate: none; Gate 44 closed under delegated completion
+- Last completed action: published issue #43 remediation as PR #54, linked the
+  issue, and confirmed passing `static` and `qemu` CI
+- Next action: maintainer review of PRs #52, #53, and #54; merge and issue
+  closure remain human decisions
 
 ## Current repository state
 
@@ -20,8 +19,8 @@ Remote `main` is at `ecbb3142`. The first
 eleven feedback-hardening gates and inserted correctness gates are complete.
 Gate 12 is complete on `codex/performance-parity`. Gates 13 through 19 and 21
 through 23 and Gate 32 remain in `gates-todo/` for maintainer review after
-delivery through merged pull requests. Gate 44 has passed technically and is
-awaiting authorized PR publication and CI confirmation on this branch.
+delivery through merged pull requests. Gate 44 is closed in `gates-done/` and
+delivered through green PR #54.
 The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
 matrix and repeated stress pass. Gate 11's comparison and reduced evidence are
 under `docs/feedback-hardening/`. No push or merge was performed.

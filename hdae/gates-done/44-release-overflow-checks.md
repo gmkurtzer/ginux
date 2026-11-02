@@ -43,7 +43,7 @@ builds.
 
 ## Remaining work
 
-- [ ] Push, open the remediation PR, add reciprocal links, and confirm CI.
+- None.
 
 ## Acceptance criteria
 
@@ -83,6 +83,11 @@ builds.
   unit tests, Clippy, and the release overflow regression.
 - `make test` passed the complete deterministic two-vCPU QEMU verification and
   Linux ELF/runtime compatibility suite.
+- Branch `hdae/issue-43-release-overflow` was pushed and published as
+  [PR #54](https://github.com/gmkurtzer/ginux/pull/54).
+- Issue #43 received the implementation and verification summary with the PR
+  link; the issue remains open for maintainer review.
+- PR #54 CI passed: `static` in 2m22s and `qemu` in 5m15s.
 
 ## Decisions and limitations
 
@@ -103,12 +108,13 @@ builds.
 - Planned commits: gate definition; release profile and regression; evidence;
   delivery
 - Actual commits: `a3f0c33d` (gate), `9b11baea` (profile, regression, generated
-  image, and capacity), `50e06d76` (checked-release boot invariants); evidence
-  and delivery commits pending
+  image, and capacity), `50e06d76` (checked-release boot invariants),
+  `66648d28` (verification evidence), plus the delivery commit containing this
+  final outcome
 
 ## Review policy and outcome
 
-Delegated objective completion under the user-approved remaining-reports batch.
-All technical criteria pass; publication and CI confirmation remain before
-closure. Publishing the PR and reciprocal comments is authorized; merge and
-issue closure are not.
+Closed under delegated objective completion in the user-approved
+remaining-reports batch. All technical criteria and PR CI passed; the branch,
+PR, and reciprocal issue summary are published. No merge or issue closure was
+performed.
