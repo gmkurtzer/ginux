@@ -8,20 +8,21 @@
 - Branch: `hdae/issue-19-domain-memory`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 36, per-domain Linux memory accounting for issue #19
-- Last completed action: merged current `main` at `95f8ef24` into PR #46 and
-  reconciled the Gate 36 delivery checkpoint
+- Last completed action: merged current `main` at `a7a41ae2` into PR #46 and
+  reconciled Gate 36 after PR #45 merged and issue #18 closed
 - Next action: run fresh `make check` and `make test`, commit and push the
   synchronized head, then verify its new CI and first-pass review marker
 
 ## Current repository state
 
-Remote `main` is at `95f8ef24` after merged PR #44. The first
+Remote `main` is at `a7a41ae2` after merged PR #45. The first
 eleven feedback-hardening gates and inserted correctness gates are complete.
 Gate 12 is complete on `codex/performance-parity`. Gates 13 through 19 and 21
 through 23 and Gates 32 through 33 remain in `gates-todo/` for maintainer
 review after delivery through merged pull requests. Gate 34 was delivered
-through merged PR #44 and issue #17 is closed; Gate 35 is fully validated in
-open PR #45; Gate 36 is delivered through open PR #46.
+through merged PR #44 and issue #17 is closed; Gate 35 was delivered through
+merged PR #45 and issue #18 is closed; Gate 36 is delivered through open PR
+#46.
 The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
 matrix and repeated stress pass. Gate 11's comparison and reduced evidence are
 under `docs/feedback-hardening/`. No direct push to `main` was performed.

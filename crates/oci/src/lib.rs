@@ -728,13 +728,23 @@ fn whiteout_hides(entry: Entry<'_>, path: &[u8]) -> bool {
     let Some(target) = name.strip_prefix(b".wh.") else {
         return false;
     };
-    let path_split = path
-        .iter()
-        .rposition(|byte| *byte == b'/')
-        .map_or((b"" as &[u8], path), |index| {
-            (&path[..index], &path[index + 1..])
-        });
-    path_split.0 == directory && path_split.1 == target
+    if target.is_empty() {
+        return false;
+    }
+    let remainder = if directory.is_empty() {
+        path
+    } else {
+        let Some(remainder) = path
+            .strip_prefix(directory)
+            .and_then(|remainder| remainder.strip_prefix(b"/"))
+        else {
+            return false;
+        };
+        remainder
+    };
+    remainder
+        .strip_prefix(target)
+        .is_some_and(|suffix| suffix.is_empty() || suffix.starts_with(b"/"))
 }
 
 #[cfg(feature = "sha256")]
@@ -1200,6 +1210,18 @@ mod tests {
         let root = Rootfs::parse(&bytes).unwrap();
         assert!(root.find(b"etc/value").is_none());
         assert!(root.find(b"etc/.wh.value").is_none());
+
+        let mut bytes = archive(b"secret", b"", b'5', b"");
+        bytes.truncate(bytes.len() - TAR_BLOCK_SIZE * 2);
+        bytes.extend_from_slice(&archive(b"secret/key", b"removed", b'0', b""));
+        bytes.truncate(bytes.len() - TAR_BLOCK_SIZE * 2);
+        bytes.extend_from_slice(&archive(b"secret2/key", b"retained", b'0', b""));
+        bytes.truncate(bytes.len() - TAR_BLOCK_SIZE * 2);
+        bytes.extend_from_slice(&archive(b".wh.secret", b"", b'0', b""));
+        let root = Rootfs::parse(&bytes).unwrap();
+        assert!(root.find(b"secret").is_none());
+        assert!(root.find(b"secret/key").is_none());
+        assert_eq!(root.find(b"secret2/key").unwrap().data, b"retained");
     }
 
     #[test]
