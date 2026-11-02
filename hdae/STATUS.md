@@ -8,28 +8,30 @@
 - Branch: `hdae/issue-19-domain-memory`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 36, per-domain Linux memory accounting for issue #19
-- Last completed action: Gate 36 implementation committed with passing static,
-  architecture, unsafe-inventory, and complete QEMU evidence
-- Next action: commit Gate 36 evidence, push the dedicated branch, open its
-  remediation PR, add reciprocal issue/PR links, and confirm GitHub CI
+- Last completed action: merged current `main` at `95f8ef24` into PR #46 and
+  reconciled the Gate 36 delivery checkpoint
+- Next action: run fresh `make check` and `make test`, commit and push the
+  synchronized head, then verify its new CI and first-pass review marker
 
 ## Current repository state
 
-Remote `main` is at `ecbb3142` after merged PR #42. The first
+Remote `main` is at `95f8ef24` after merged PR #44. The first
 eleven feedback-hardening gates and inserted correctness gates are complete.
 Gate 12 is complete on `codex/performance-parity`. Gates 13 through 19 and 21
 through 23 and Gates 32 through 33 remain in `gates-todo/` for maintainer
-review after delivery through merged pull requests. Gates 34 and 35 are
-delivered through open PRs #44 and #45; Gate 36 passes locally and awaits
-delivery.
+review after delivery through merged pull requests. Gate 34 was delivered
+through merged PR #44 and issue #17 is closed; Gate 35 is fully validated in
+open PR #45; Gate 36 is delivered through open PR #46.
 The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
 matrix and repeated stress pass. Gate 11's comparison and reduced evidence are
-under `docs/feedback-hardening/`. No push or merge was performed.
+under `docs/feedback-hardening/`. No direct push to `main` was performed.
 
 ## Open decisions
 
 - None. The architecture already defines a domain as the unit of memory
-  ownership and accounting; Gate 36 implements that existing invariant.
+  ownership and accounting; Gate 36 implements that existing invariant. The
+  user delegated issues #17, #18, #19, #20, #22, #24, #25, #27, #28, and #29
+  as one automatic batch with final review after all PRs.
 
 ## Active diagnosis
 

@@ -47,7 +47,10 @@ stack, copy-on-write, tmpfs, and SysV shared-memory growth at the configured
 
 ## Remaining work
 
-- [ ] Push, open the remediation PR, add reciprocal links, and confirm CI.
+- [x] Push, open the remediation PR, add reciprocal links, and confirm initial
+  CI.
+- [ ] Confirm CI and the first-pass marker on the current-main synchronized
+  head.
 
 ## Acceptance criteria
 
@@ -81,6 +84,9 @@ stack, copy-on-write, tmpfs, and SysV shared-memory growth at the configured
 - QEMU emitted `Linux mmap domain quota enforced atomically` and `Linux SysV
   domain quota enforced independently` before the remaining kernel and Linux
   compatibility checks passed.
+- [PR #46](https://github.com/gmkurtzer/ginux/pull/46) contains the dedicated
+  remediation branch and references issue #19; its original delivered head
+  passed GitHub `static` and `qemu` checks.
 
 ## Decisions and limitations
 
@@ -95,7 +101,8 @@ stack, copy-on-write, tmpfs, and SysV shared-memory growth at the configured
 
 - Working branch: `hdae/issue-19-domain-memory`
 - Intended base: `main`
-- Pull request: intended; non-closing reference to issue #19
+- Pull request: [#46](https://github.com/gmkurtzer/ginux/pull/46); non-closing
+  reference to issue #19
 - Planned commits: gate definition; configurable allocator budget; Linux
   runtime ownership; tmpfs and SysV ownership; regression/evidence; delivery
 - Actual commits: `3013a1b0` gate definition; `013eaa1f` allocator, Linux
