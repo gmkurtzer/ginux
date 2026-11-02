@@ -45,9 +45,8 @@ fault-containment, or persistent-storage invariants.
 - [x] Reproduce and classify the reported ring-3 failure path.
 - [x] Implement the evidence-supported correction using the existing recovery
   sequence as its integration regression.
-- [ ] Run `make check` and complete QEMU verification on macOS and Linux
-  (`make check` and three local QEMU runs pass; Linux remains pending).
-- [ ] Commit and push the verified correction.
+- [x] Run `make check` and complete QEMU verification on macOS and Linux.
+- [x] Commit and push the verified correction.
 - [ ] Open the remediation pull request and add reciprocal source links.
 
 ## Acceptance criteria
@@ -108,6 +107,9 @@ fault-containment, or persistent-storage invariants.
   OVMF filenames, which `common.sh` did not search. The harness also wrote its
   PID file after firmware discovery, so the producer could not detect that
   early launcher exit and waited for the full timeout.
+- [Ubuntu verification run 41369349235](https://github.com/gmkurtzer/ginux/actions/runs/41369349235)
+  passed the complete `make test` boot on Ubuntu/QEMU TCG after the stale
+  interrupt drain and launcher corrections.
 
 ## Decisions and limitations
 
@@ -140,8 +142,9 @@ fault-containment, or persistent-storage invariants.
   reference to issue #14
 - Planned commits: reproduction evidence; correction and regression; delivery
   checkpoint
-- Actual commits: `1358dd1c` reproduction workflow and checkpoint; PBA drain
-  correction and evidence commit pending
+- Actual commits: `1358dd1c` reproduction workflow and checkpoint; `17284060`
+  stale PBA drain correction; `19e68576` preserved Linux boot diagnostics;
+  `04d377a5` Ubuntu 4 MiB OVMF discovery and prompt launcher-failure detection
 
 ## Review policy and outcome
 
