@@ -30,12 +30,15 @@ and its IOMMU translation are confirmed retired.
 - [x] Confirmed backend-start failure also releases after ignoring a failed
   translation retirement.
 - [x] Confirmed retaining a live kernel-owned lease prevents allocator reuse.
+- [x] Centralized the release-or-quarantine decision and applied it to normal
+  teardown plus backend-start failure.
+- [x] Added a four-case retirement matrix proving all failed combinations keep
+  live ownership while success/success scrubs and releases.
+- [x] Passed focused compilation, the complete static gate, and complete QEMU
+  regression.
 
 ## Remaining work
 
-- [ ] Release DMA only after both teardown acknowledgements.
-- [ ] Retain and prove live ownership for every failed combination.
-- [ ] Run focused, static, and complete QEMU verification.
 - [ ] Push, open the remediation PR, add reciprocal links, and confirm CI.
 
 ## Acceptance criteria
@@ -59,6 +62,12 @@ and its IOMMU translation are confirmed retired.
 - Issue #28's cited sequence matches current `kernel/src/lib.rs`.
 - A live `FrameLease` owned by `FrameOwner::KERNEL` is ineligible for allocator
   reuse, so retaining it is a fail-closed quarantine.
+- `make check` passed with the unchanged 1,033-block unsafe baseline and Linux
+  compatibility matrix.
+- `make test` passed and emitted
+  `failed runtime volume DMA retirement quarantined`.
+- The deterministic matrix restored the original kernel live-frame count after
+  explicitly cleaning only its three simulated quarantines.
 
 ## Decisions and limitations
 
@@ -72,9 +81,12 @@ and its IOMMU translation are confirmed retired.
 - Pull request: intended; non-closing reference to issue #28
 - Planned commits: gate definition; fail-closed retirement and matrix;
   evidence; delivery
-- Actual commits: pending
+- Actual commits: `7c6184de` (gate definition), `20494327` (fail-closed
+  retirement and matrix), plus the evidence/delivery commit containing this
+  record
 
 ## Review policy and outcome
 
-Delegated in the user-approved remaining-reports batch; stop only if quarantine
-requires a broader recovery policy.
+Passed and closed under the user-approved remaining-reports batch delegation.
+No broader recovery policy was required; ambiguous teardown leaks one frame
+until reboot by design.

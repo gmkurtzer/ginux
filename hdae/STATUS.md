@@ -7,11 +7,11 @@
 - Active project: remaining reporter remediation batch
 - Branch: `hdae/issue-28-dma-quarantine`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 42, runtime-volume DMA quarantine for issue #28
-- Last completed action: confirmed failed device or IOMMU retirement currently
-  cannot prevent unconditional DMA frame release
-- Next action: commit Gate 42 and enforce release only after both teardown
-  acknowledgements
+- Active gate: Gate 42, passed and awaiting delivery for issue #28
+- Last completed action: enforced release only after both teardown
+  acknowledgements and passed fresh `make check` plus `make test`
+- Next action: publish the Gate 42 branch and PR, add reciprocal links, then
+  start Gate 43 for issue #29
 
 ## Current repository state
 
