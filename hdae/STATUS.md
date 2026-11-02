@@ -8,10 +8,11 @@
 - Branch: `hdae/issue-43-release-overflow`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 44, release overflow checks for issue #43
-- Last completed action: reproduced the unchecked release-profile configuration
-  and recorded a 70,063,104-byte EFI plus 9.22-second cached smoke baseline
-- Next action: enable release overflow checks, add a release-mode wrapping-size
-  regression, and measure then run full verification
+- Last completed action: enabled release overflow checks, corrected the boot
+  invariants they exposed, and passed `make check`, `make test`, and the final
+  normal-image smoke test
+- Next action: commit the Gate 44 evidence, push the dedicated branch, open and
+  link the remediation PR, then inspect CI
 
 ## Current repository state
 
@@ -19,7 +20,8 @@ Remote `main` is at `ecbb3142`. The first
 eleven feedback-hardening gates and inserted correctness gates are complete.
 Gate 12 is complete on `codex/performance-parity`. Gates 13 through 19 and 21
 through 23 and Gate 32 remain in `gates-todo/` for maintainer review after
-delivery through merged pull requests. Gate 44 is active on this branch.
+delivery through merged pull requests. Gate 44 has passed technically and is
+awaiting authorized PR publication and CI confirmation on this branch.
 The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
 matrix and repeated stress pass. Gate 11's comparison and reduced evidence are
 under `docs/feedback-hardening/`. No push or merge was performed.

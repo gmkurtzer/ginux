@@ -31,12 +31,18 @@ builds.
   `overflow-checks`, so optimized arithmetic uses Rust's wrapping default.
 - [x] Recorded the baseline EFI size as 70,063,104 bytes and a cached-build
   two-vCPU QEMU smoke wall time of 9.22 seconds.
+- [x] Enabled release overflow checks and added a release-only runtime overflow
+  regression to the standard static suite.
+- [x] Replaced two eager conditional computations whose rejected branches
+  underflowed, and derived network address-space validation from the canonical
+  161-page checked-release image capacity.
+- [x] Raised the generated root publication capacity from 160 to 164 pages for
+  the 664,136-byte checked-release root image.
+- [x] Measured the post-change image and smoke-test result.
+- [x] Ran `make check` and `make test` successfully.
 
 ## Remaining work
 
-- [ ] Enable checked release arithmetic and add the release regression.
-- [ ] Measure the post-change image and smoke-test result.
-- [ ] Run `make check` and `make test`.
 - [ ] Push, open the remediation PR, add reciprocal links, and confirm CI.
 
 ## Acceptance criteria
@@ -63,6 +69,20 @@ builds.
   `main@ecbb3142`.
 - Baseline: 70,063,104-byte EFI image; cached-build smoke test passed in 9.22
   seconds wall time.
+- `cargo test --release --package ginux-oci
+  release_profile_traps_size_overflow` passed and is part of `make check`.
+- The first checked-release boot exposed eager rejected-branch underflows in
+  MMIO validation and CPU-index validation; both now use lazy `then` branches.
+- The checked-release network runtime spans 161 virtual pages. Its loader and
+  validator now share the canonical capacity instead of duplicating 160.
+- Post-change root image: 664,136 bytes. Post-change EFI: 70,135,296 bytes,
+  72,192 bytes (about 0.103%) above baseline.
+- Final cached normal-image smoke passed in 9.54 seconds wall time, 0.32 seconds
+  above the 9.22-second coarse baseline.
+- `make check` passed, including architecture checks, compatibility checks,
+  unit tests, Clippy, and the release overflow regression.
+- `make test` passed the complete deterministic two-vCPU QEMU verification and
+  Linux ELF/runtime compatibility suite.
 
 ## Decisions and limitations
 
@@ -71,6 +91,9 @@ builds.
   than aborting the kernel.
 - Wall-clock QEMU smoke timing is noisy and is recorded only as a coarse
   regression signal, not a performance benchmark.
+- Enabling checks increased optimized code enough to require four additional
+  root-image publication pages and one additional network-service image page;
+  these remain fixed, bounded capacities.
 
 ## Delivery strategy
 
@@ -79,10 +102,13 @@ builds.
 - Pull request: intended; non-closing reference to issue #43
 - Planned commits: gate definition; release profile and regression; evidence;
   delivery
-- Actual commits: pending
+- Actual commits: `a3f0c33d` (gate), `9b11baea` (profile, regression, generated
+  image, and capacity), `50e06d76` (checked-release boot invariants); evidence
+  and delivery commits pending
 
 ## Review policy and outcome
 
 Delegated objective completion under the user-approved remaining-reports batch.
-Publishing the PR and reciprocal comments is authorized; merge and issue
-closure are not.
+All technical criteria pass; publication and CI confirmation remain before
+closure. Publishing the PR and reciprocal comments is authorized; merge and
+issue closure are not.
