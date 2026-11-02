@@ -4,29 +4,31 @@
 
 - Active skill: `.agents/skills/hdae-development/SKILL.md`
 - Reload required after compaction, reset, resume, or handoff: yes
-- Active project: issue #14 Linux native-volume recovery
-- Branch: `hdae/issue-14-native-volume-linux`
+- Active project: issue #15 TLS client entropy
+- Branch: `hdae/issue-15-tls-entropy`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 20, Linux native-volume recovery
-- Last completed action: opened PR #41 and posted the verified remediation and
-  Linux-run evidence to issue #14
-- Next action: await maintainer review of Gate 20 at the pull-request checkpoint
+- Active gate: Gate 32, TLS client entropy
+- Last completed action: maintainer review of PR #40 corrected the false
+  `preserves_flags` declaration; current-main reconciliation plus fresh
+  `make check` and `make test` passed
+- Next action: push the reconciled PR #40 head and verify its final CI
 
 ## Current repository state
 
-Remote `main` is at `fbe6472e` after merged PRs #31 through #38. The first
+Remote `main` is at `1203e291` after merged PR #41. The first
 eleven feedback-hardening gates and inserted correctness gates are complete.
 Gate 12 is complete on `codex/performance-parity`. Gates 13 through 19 and 21
 through 23 remain in `gates-todo/` for maintainer review after delivery through
-merged pull requests. Gate 20 remains active on this branch.
+merged pull requests. Gate 20 was delivered and merged through PR #41 and
+remains in `gates-todo/` for maintainer review. Gate 32 is delivered through
+open pull request #40 and awaits maintainer review.
 The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
 matrix and repeated stress pass. Gate 11's comparison and reduced evidence are
 under `docs/feedback-hardening/`. No push or merge was performed.
 
 ## Open decisions
 
-- None. The user explicitly requested resolving the failures one at a time;
-  Gate 20 remains the first checkpoint.
+- None. The saved scheduled-review policy delegates Gate 32 remediation.
 
 ## Active diagnosis
 
