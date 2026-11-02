@@ -41,8 +41,8 @@ follows any descriptor.
 - [x] Add reusable digest-selector verification and deterministic tests.
 - [x] Enforce it on the top-level body before parsing.
 - [x] Run targeted, static, and complete QEMU verification.
-- [ ] Commit and push the dedicated branch.
-- [ ] Open the remediation pull request and add reciprocal source links.
+- [x] Commit and push the dedicated branch.
+- [x] Open the remediation pull request and add reciprocal source links.
 
 ## Acceptance criteria
 
@@ -86,7 +86,9 @@ follows any descriptor.
 
 - Working branch: `hdae/issue-16-manifest-digest`
 - Intended base: `main`
-- Pull request: intended; non-closing reference to issue #16
+- Pull request: [#42](https://github.com/gmkurtzer/ginux/pull/42); non-closing
+  reference to issue #16
+- Source update: [issue #16 comment](https://github.com/gmkurtzer/ginux/issues/16#issuecomment-6567619728)
 - Planned commits: gate and regression mechanism; integration and evidence;
   delivery checkpoint
 - Actual commits: `bb9b7d16` gate definition; `5f5ced0e` digest verification
@@ -96,4 +98,5 @@ follows any descriptor.
 ## Review policy and outcome
 
 Delegated by the user's request to resolve issue #16 next. Keep the gate in
-`gates-todo/` at the pull-request checkpoint for maintainer review.
+`gates-todo/` at the pull-request checkpoint for maintainer review. Delivery
+requirements are complete; final PR CI is pending.

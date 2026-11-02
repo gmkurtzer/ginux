@@ -8,10 +8,10 @@
 - Branch: `hdae/issue-16-manifest-digest`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 33, pinned top-level manifest digest
-- Last completed action: digest-pin regression, full `make check`, and complete
-  QEMU `make test` passed with the regenerated embedded network service
-- Next action: push the verified branch, open the remediation pull request, and
-  add reciprocal issue links
+- Last completed action: opened PR #42 and linked its verified Gate 33
+  remediation to issue #16
+- Next action: verify final PR #42 CI and stop at the maintainer-review
+  checkpoint
 
 ## Current repository state
 
