@@ -35,14 +35,18 @@ stack, copy-on-write, tmpfs, and SysV shared-memory growth at the configured
   allocated as `FrameOwner::KERNEL`.
 - [x] Confirmed the allocator's existing 192-frame non-kernel ceiling is a
   service-domain policy and cannot represent configurable container limits.
+- [x] Added configurable generation-owned frame limits without changing the
+  existing supervised-service ceiling.
+- [x] Charged private Linux mmap, stack, exec, copy-on-write, process, tmpfs,
+  and SysV allocations to the current container domain.
+- [x] Preserved kernel ownership for page-table hierarchy and globally shared
+  immutable file-cache frames.
+- [x] Added atomic mmap-style and independent SysV quota exhaustion proofs.
+- [x] Passed the static, architecture, unsafe-inventory, and complete QEMU
+  verification suites.
 
 ## Remaining work
 
-- [ ] Add configurable owner-limit allocation without weakening service quotas.
-- [ ] Charge and release Linux private runtime frames to the container owner.
-- [ ] Charge and release per-container tmpfs and SysV IPC frames.
-- [ ] Add deterministic quota and syscall-family regressions.
-- [ ] Run focused, static, and complete QEMU verification.
 - [ ] Push, open the remediation PR, add reciprocal links, and confirm CI.
 
 ## Acceptance criteria
@@ -71,6 +75,12 @@ stack, copy-on-write, tmpfs, and SysV shared-memory growth at the configured
 
 - Issue #19's static report matches the current allocation paths and the
   architecture's existing requirement that a domain own and account memory.
+- `cargo check --package ginux-kernel --target x86_64-unknown-none` passed.
+- `make check` passed, including the unchanged unsafe baseline of 1,033 blocks.
+- `make test` passed the complete two-vCPU QEMU boot and Linux runtime suite.
+- QEMU emitted `Linux mmap domain quota enforced atomically` and `Linux SysV
+  domain quota enforced independently` before the remaining kernel and Linux
+  compatibility checks passed.
 
 ## Decisions and limitations
 
@@ -78,6 +88,8 @@ stack, copy-on-write, tmpfs, and SysV shared-memory growth at the configured
   `RLIMIT_AS` continues to constrain virtual address space independently.
 - Global immutable file-cache frames remain kernel-owned because assigning a
   shared cache page to one domain would make ownership depend on lookup order.
+- Linux page-table hierarchy frames remain kernel-owned; the configured domain
+  budget covers private payload memory, tmpfs, and SysV objects.
 
 ## Delivery strategy
 
@@ -86,10 +98,14 @@ stack, copy-on-write, tmpfs, and SysV shared-memory growth at the configured
 - Pull request: intended; non-closing reference to issue #19
 - Planned commits: gate definition; configurable allocator budget; Linux
   runtime ownership; tmpfs and SysV ownership; regression/evidence; delivery
-- Actual commits: pending
+- Actual commits: `3013a1b0` gate definition; `013eaa1f` allocator, Linux
+  ownership, tmpfs/SysV accounting, and regression evidence. The tightly
+  coupled ownership conversion was kept in one implementation commit so every
+  committed code state retains consistent allocation and release semantics.
 
 ## Review policy and outcome
 
 Delegated in the user-approved remaining-reports batch. The architecture
 already requires domain memory ownership; stop for any implementation result
 that would require changing that policy or weakening an existing service quota.
+All technical criteria pass; delivery and maintainer merge remain pending.

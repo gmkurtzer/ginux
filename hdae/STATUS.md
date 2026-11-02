@@ -8,10 +8,10 @@
 - Branch: `hdae/issue-19-domain-memory`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 36, per-domain Linux memory accounting for issue #19
-- Last completed action: PR #45 delivered Gate 35 for issue #18 with passing
-  local and GitHub static/QEMU evidence
-- Next action: commit Gate 36 and implement a configurable allocator owner
-  limit while preserving the existing supervised-service ceiling
+- Last completed action: Gate 36 implementation committed with passing static,
+  architecture, unsafe-inventory, and complete QEMU evidence
+- Next action: commit Gate 36 evidence, push the dedicated branch, open its
+  remediation PR, add reciprocal issue/PR links, and confirm GitHub CI
 
 ## Current repository state
 
@@ -20,7 +20,8 @@ eleven feedback-hardening gates and inserted correctness gates are complete.
 Gate 12 is complete on `codex/performance-parity`. Gates 13 through 19 and 21
 through 23 and Gates 32 through 33 remain in `gates-todo/` for maintainer
 review after delivery through merged pull requests. Gates 34 and 35 are
-delivered through open PRs #44 and #45; Gate 36 is active.
+delivered through open PRs #44 and #45; Gate 36 passes locally and awaits
+delivery.
 The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
 matrix and repeated stress pass. Gate 11's comparison and reduced evidence are
 under `docs/feedback-hardening/`. No push or merge was performed.
@@ -31,6 +32,15 @@ under `docs/feedback-hardening/`. No push or merge was performed.
   ownership and accounting; Gate 36 implements that existing invariant.
 
 ## Active diagnosis
+
+- Configurable allocator owner limits stop exactly at the container budget,
+  preserve independent owner capacity, and restore capacity after release.
+- Linux private mmap, exec, stack, copy-on-write, process, tmpfs, and SysV
+  frames use the generation-safe container owner; shared immutable file-cache
+  and page-table hierarchy frames remain kernel-owned by design.
+- `make check` passes with the unsafe inventory unchanged at 1,033 blocks.
+  `make test` passes the full two-vCPU QEMU and Linux runtime suite, including
+  atomic mmap-style and independent SysV quota-exhaustion markers.
 
 - Four-vCPU runtime work now dispatches independently to CPUs 1 through 3.
   A targeted nine-sample four-thread run produced a 2,924 events/s median,
