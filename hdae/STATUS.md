@@ -7,11 +7,11 @@
 - Active project: remaining reporter remediation batch
 - Branch: `hdae/issue-24-secret-process-vm`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 39, secret remote-copy exclusion for issue #24
-- Last completed action: confirmed active mapping metadata drops the hardware
-  secret bit before direct-map cross-process copies
-- Next action: commit Gate 39, preserve secret metadata, and add denial plus
-  non-mutation regressions
+- Active gate: Gate 39, passed and awaiting delivery for issue #24
+- Last completed action: made target PTE secret metadata authoritative and
+  passed fresh `make check` plus `make test`
+- Next action: publish the Gate 39 branch and PR, add reciprocal links, then
+  start Gate 40 for issue #25
 
 ## Current repository state
 

@@ -30,13 +30,14 @@ helpers from reading or modifying a live process's `memfd_secret` pages.
 - [x] Confirmed `current_linux_active_mapping` omits that bit.
 - [x] Confirmed remote-copy helpers dereference the frame direct map without a
   secret-page check.
+- [x] Made the target process PTE secret bit authoritative for remote range,
+  read, write, COW-preparation, scalar-write, and console-copy paths.
+- [x] Added a cross-process regression that denies both syscalls and helper
+  calls, clears the test bit, and proves the original target bytes are intact.
+- [x] Passed the complete static and QEMU regression suites.
 
 ## Remaining work
 
-- [ ] Validate remote ranges against authoritative per-process PTE metadata.
-- [ ] Reject secret pages in all remote-copy primitives.
-- [ ] Add deterministic denial and non-mutation evidence.
-- [ ] Run focused, static, and complete QEMU verification.
 - [ ] Push, open the remediation PR, add reciprocal links, and confirm CI.
 
 ## Acceptance criteria
@@ -64,6 +65,13 @@ helpers from reading or modifying a live process's `memfd_secret` pages.
 - Issue #24's cited paths match `kernel/src/arch/x86_64/cpu.rs`,
   `kernel/src/address_space.rs`, and `kernel/src/linux_process.rs` on current
   `main`.
+- `make check` passed, including the reduced 1,032-block unsafe inventory and
+  unchanged Linux compatibility matrix.
+- `make test` passed and emitted
+  `secret process memory excluded from remote copy`.
+- The regression returned `EFAULT` for remote read and write, rejected direct
+  helper access, and observed byte-for-byte target equality after clearing the
+  verification-only secret bit.
 
 ## Decisions and limitations
 
@@ -79,9 +87,11 @@ helpers from reading or modifying a live process's `memfd_secret` pages.
 - Pull request: intended; non-closing reference to issue #24
 - Planned commits: gate definition; secret metadata and remote-copy regression;
   evidence; delivery
-- Actual commits: pending
+- Actual commits: `0999760d` (gate definition), `653b9c44` (authoritative PTE
+  exclusion and regression), plus the evidence/delivery commit containing this
+  record
 
 ## Review policy and outcome
 
-Delegated in the user-approved remaining-reports batch; stop only if preserving
-secret metadata requires a broader address-space ABI change.
+Passed and closed under the user-approved remaining-reports batch delegation.
+No address-space ABI change was required.
