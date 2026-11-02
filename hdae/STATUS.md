@@ -4,28 +4,30 @@
 
 - Active skill: `.agents/skills/hdae-development/SKILL.md`
 - Reload required after compaction, reset, resume, or handoff: yes
-- Active project: issue #16 pinned top-level manifest digest
-- Branch: `hdae/issue-16-manifest-digest`
+- Active project: remaining reporter remediation batch
+- Branch: `hdae/issue-28-dma-quarantine`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 33, pinned top-level manifest digest
-- Last completed action: reconciled merged PR #40, regenerated the combined
-  network service, and passed fresh `make check` and `make test`
-- Next action: push the conflict-free PR #42 head and verify final CI
+- Active gate: Gate 42, runtime-volume DMA quarantine for issue #28
+- Last completed action: confirmed failed device or IOMMU retirement currently
+  cannot prevent unconditional DMA frame release
+- Next action: commit Gate 42 and enforce release only after both teardown
+  acknowledgements
 
 ## Current repository state
 
-Remote `main` is at `e8b42d85` after merged PR #40. The first
+Remote `main` is at `ecbb3142`. The first
 eleven feedback-hardening gates and inserted correctness gates are complete.
-Gate 12 is complete on `codex/performance-parity`. Gates 13 through 19 and 21
-through 23 and Gate 32 remain in `gates-todo/` for maintainer review after
-delivery through merged pull requests. Gate 33 is active on this branch.
+Gate 12 is complete on `codex/performance-parity`. Gate 42 is active on this
+branch; Gates 34 through 36 and 38 through 40 are delivered on dedicated open
+PRs, while Gates 37 and 41 await human policy/architecture choices.
 The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
 matrix and repeated stress pass. Gate 11's comparison and reduced evidence are
 under `docs/feedback-hardening/`. No push or merge was performed.
 
 ## Open decisions
 
-- None. The user explicitly selected issue #16 as the next remediation.
+- Gate 37 awaits the unpack-memory policy.
+- Gate 41 awaits the rootfs-exec transaction-boundary choice.
 
 ## Active diagnosis
 
