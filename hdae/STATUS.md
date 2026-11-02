@@ -8,10 +8,9 @@
 - Branch: `hdae/issue-16-manifest-digest`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 33, pinned top-level manifest digest
-- Last completed action: PR #40 advanced `main`; source reconciliation retained
-  both the TLS entropy and pinned-manifest fixes
-- Next action: regenerate the combined embedded service, rerun full
-  verification, push PR #42, and verify final CI
+- Last completed action: reconciled merged PR #40, regenerated the combined
+  network service, and passed fresh `make check` and `make test`
+- Next action: push the conflict-free PR #42 head and verify final CI
 
 ## Current repository state
 

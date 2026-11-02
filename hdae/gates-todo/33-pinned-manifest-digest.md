@@ -74,6 +74,8 @@ follows any descriptor.
   checks, including all 9 `ginux-oci` tests.
 - `make test` on QEMU 10.1.2/TCG -> emitted `GINUX_KERNEL_OK` and reported
   `Boot test passed.`
+- After PR #40 advanced `main`, the combined TLS entropy and manifest-pin
+  network service was regenerated; fresh `make check` and `make test` passed.
 
 ## Decisions and limitations
 
@@ -93,10 +95,11 @@ follows any descriptor.
   delivery checkpoint
 - Actual commits: `bb9b7d16` gate definition; `5f5ced0e` digest verification
   and regression tests; `938511bc` regenerated boot and full verification
-  evidence
+  evidence; `cc5f1f3e` current-main reconciliation
 
 ## Review policy and outcome
 
 Delegated by the user's request to resolve issue #16 next. Keep the gate in
 `gates-todo/` at the pull-request checkpoint for maintainer review. Delivery
-requirements are complete; final PR CI is pending.
+requirements and current-main verification are complete; final PR CI is
+pending.
