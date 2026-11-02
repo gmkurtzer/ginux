@@ -8,10 +8,9 @@
 - Branch: `hdae/issue-17-pax-chain`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 34, iterative PAX header chains for issue #17
-- Last completed action: confirmed recursive PAX chaining permits input-sized
-  kernel stack growth
-- Next action: replace recursion with checked iteration and retain a long-chain
-  regression
+- Last completed action: iterative PAX parsing and the 4,000-header regression
+  pass targeted unit tests and warning-denying clippy
+- Next action: commit the implementation and run full static and QEMU evidence
 
 ## Current repository state
 

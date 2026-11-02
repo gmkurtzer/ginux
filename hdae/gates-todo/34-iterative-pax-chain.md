@@ -24,10 +24,13 @@ kernel stack growth while preserving valid PAX override behavior.
 
 - [x] Confirmed each PAX header recursively calls `parse_entry` and does not
   count toward `TAR_MAX_ENTRIES`.
+- [x] Replaced recursive chaining with checked offset iteration while retaining
+  earliest-header override precedence.
+- [x] Added a 4,000-header regression that resolves to one valid entry.
 
 ## Remaining work
 
-- [ ] Implement iterative PAX parsing and regression coverage.
+- [x] Implement iterative PAX parsing and regression coverage.
 - [ ] Run `make check` and `make test`.
 - [ ] Push, open the remediation PR, and add reciprocal links.
 
@@ -48,6 +51,10 @@ kernel stack growth while preserving valid PAX override behavior.
 
 - Current `parse_entry` recursively enters the next header for every type `x`
   entry, including an empty PAX payload.
+- `cargo test --package ginux-oci` -> all 10 tests passed, including the
+  4,000-header chain and multi-header override precedence.
+- Warning-denying `ginux-oci` clippy passed; source search confirms the
+  recursive call is absent.
 
 ## Decisions and limitations
 
@@ -61,7 +68,7 @@ kernel stack growth while preserving valid PAX override behavior.
 - Pull request: intended; non-closing reference to issue #17
 - Planned commits: iterative parser and regression; generated/evidence;
   delivery checkpoint
-- Actual commits: pending
+- Actual commits: `e9976442` gate definition; implementation pending
 
 ## Review policy and outcome
 
