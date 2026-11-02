@@ -11,8 +11,8 @@ helpers from reading or modifying a live process's `memfd_secret` pages.
 
 ## Approved scope
 
-- Preserve the hardware runtime-page secret attribute in
-  `LinuxActiveImageMapping` through snapshot, fork, import, and replacement.
+- Enforce the authoritative hardware runtime-page secret attribute for live
+  process ranges instead of trusting the lossy imported mapping summary.
 - Reject secret pages before every direct-map remote read or write.
 - Add deterministic read-denial, write-denial, and non-mutation regressions.
 - Retain ordinary cross-process transfer, partial-transfer, permission, and
@@ -33,7 +33,7 @@ helpers from reading or modifying a live process's `memfd_secret` pages.
 
 ## Remaining work
 
-- [ ] Preserve secret metadata through every active-mapping lifecycle.
+- [ ] Validate remote ranges against authoritative per-process PTE metadata.
 - [ ] Reject secret pages in all remote-copy primitives.
 - [ ] Add deterministic denial and non-mutation evidence.
 - [ ] Run focused, static, and complete QEMU verification.
@@ -41,7 +41,8 @@ helpers from reading or modifying a live process's `memfd_secret` pages.
 
 ## Acceptance criteria
 
-- Imported and forked secret mappings retain `secret=true`.
+- Imported and forked secret mappings remain excluded because remote access
+  consults their authoritative PTE secret bit.
 - Remote reads and writes spanning a secret page fail without disclosing or
   modifying any byte of that page.
 - Ordinary remote reads/writes, partial transfers, and credential checks remain
@@ -50,8 +51,8 @@ helpers from reading or modifying a live process's `memfd_secret` pages.
 
 ## Verification plan
 
-- Mapping lifecycle contract -> active hardware, snapshot, fork, and imported
-  metadata preserve the secret flag.
+- Mapping lifecycle contract -> forked/imported mappings retain the PTE secret
+  bit and remote access consults that authoritative bit.
 - Remote-copy regression -> read, write, and mapped-range checks reject a
   secret mapping, and its original bytes remain unchanged.
 - Existing cross-process verifier -> ordinary success, partial transfer,
@@ -68,6 +69,8 @@ helpers from reading or modifying a live process's `memfd_secret` pages.
 
 - Secret exclusion is mapping metadata, not discretionary ptrace policy. An
   otherwise authorized caller still receives `EFAULT` for secret pages.
+- The PTE is the source of truth. Copying the bit into a second mapping summary
+  would create two security-sensitive representations that could diverge.
 
 ## Delivery strategy
 
