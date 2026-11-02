@@ -102,6 +102,12 @@ fault-containment, or persistent-storage invariants.
   built commit `17284060` successfully but again timed out after 300 seconds
   before emitting any serial output. This is an earlier Linux/OVMF boot stall,
   not evidence that the corrected native-volume recovery path failed.
+- [Ubuntu diagnostic run 41368554650](https://github.com/gmkurtzer/ginux/actions/runs/41368554650)
+  preserved four empty boot logs and no QEMU debug log. That proves the
+  launcher exited before QEMU startup: Ubuntu 24.04 provides only the 4 MiB
+  OVMF filenames, which `common.sh` did not search. The harness also wrote its
+  PID file after firmware discovery, so the producer could not detect that
+  early launcher exit and waited for the full timeout.
 
 ## Decisions and limitations
 
@@ -122,6 +128,9 @@ fault-containment, or persistent-storage invariants.
   guest-error diagnostics as an artifact on both success and failure; ordinary
   local and repository test behavior is unchanged unless the artifact
   directory environment variable is set.
+- The launcher now recognizes Ubuntu's `OVMF_CODE_4M.fd` and
+  `OVMF_VARS_4M.fd` pair and publishes its PID before dependency discovery, so
+  missing prerequisites fail promptly instead of appearing as a QEMU hang.
 
 ## Delivery strategy
 

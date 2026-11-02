@@ -8,11 +8,10 @@
 - Branch: `hdae/issue-14-native-volume-linux`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 20, Linux native-volume recovery
-- Last completed action: Linux run 41367841412 built the correction but timed
-  out before any kernel serial output; added persistent boot and QEMU evidence
-  capture to the branch-only workflow
-- Next action: push the evidence-capture update and classify the Linux/OVMF
-  stall from its preserved serial and interrupt artifacts
+- Last completed action: diagnostic run 41368554650 proved QEMU never launched;
+  added Ubuntu 24.04's 4 MiB OVMF paths and early launcher PID publication
+- Next action: verify the launcher correction locally, push it, and use the
+  next Ubuntu run to evaluate the native-volume fix itself
 
 ## Current repository state
 
