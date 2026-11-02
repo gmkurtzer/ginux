@@ -261,6 +261,10 @@ pub(crate) unsafe fn pull(info: &NativeNetworkBootV8) -> bool {
         return false;
     }
     sockets.get_mut::<tcp::Socket>(tcp_handle).abort();
+    if !reference.manifest_digest_matches(manifest_body.bytes()) {
+        progress(b"registry pinned manifest digest rejected");
+        return false;
+    }
     let platform = ginux_oci::Platform::native_linux();
     if let Some(selected) = ginux_oci::select_manifest(manifest_body.bytes(), platform) {
         let Some(selected_digest) = parse_digest(selected.digest) else {

@@ -8,10 +8,9 @@
 - Branch: `hdae/issue-16-manifest-digest`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 33, pinned top-level manifest digest
-- Last completed action: confirmed digest pins affect the registry request path
-  but do not verify the fetched top-level manifest or index body
-- Next action: add host-tested conditional pin verification and enforce it
-  before top-level descriptor parsing
+- Last completed action: added host-tested conditional pin verification before
+  top-level descriptor parsing; targeted unit tests and clippy pass
+- Next action: commit the implementation, then run `make check` and `make test`
 
 ## Current repository state
 

@@ -29,11 +29,15 @@ follows any descriptor.
 - [x] Confirmed the digest selector currently affects only the request path.
 - [x] Confirmed selected manifests, configurations, and layers are verified,
   but the initially fetched top-level body is not.
+- [x] Added host-tested conditional digest-pin verification to the OCI
+  reference boundary.
+- [x] Enforced the pin immediately after top-level transfer and before index
+  selection or manifest parsing.
 
 ## Remaining work
 
-- [ ] Add reusable digest-selector verification and deterministic tests.
-- [ ] Enforce it on the top-level body before parsing.
+- [x] Add reusable digest-selector verification and deterministic tests.
+- [x] Enforce it on the top-level body before parsing.
 - [ ] Run targeted, static, and complete QEMU verification.
 - [ ] Commit and push the dedicated branch.
 - [ ] Open the remediation pull request and add reciprocal source links.
@@ -60,6 +64,10 @@ follows any descriptor.
 - `ImageReference::write_manifest_path` includes the selector in the URL.
 - The top-level body currently reaches `select_manifest` or
   `parse_registry_manifest` without comparison to `reference.selector`.
+- `cargo test --package ginux-oci` -> 9 tests passed, including exact pinned
+  body acceptance, changed-body rejection, and unchanged tag behavior.
+- Warning-denying clippy for `ginux-oci` and the freestanding network service
+  -> passed.
 
 ## Decisions and limitations
 
@@ -75,7 +83,8 @@ follows any descriptor.
 - Pull request: intended; non-closing reference to issue #16
 - Planned commits: gate and regression mechanism; integration and evidence;
   delivery checkpoint
-- Actual commits: pending
+- Actual commits: `bb9b7d16` gate definition; implementation and verification
+  evidence pending
 
 ## Review policy and outcome
 

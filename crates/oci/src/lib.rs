@@ -256,6 +256,32 @@ pub fn valid_registry_digest(digest: &str) -> bool {
         && digest.as_bytes()[7..].iter().all(u8::is_ascii_hexdigit)
 }
 
+#[cfg(feature = "sha256")]
+fn parse_sha256_selector(selector: &[u8]) -> Option<[u8; 32]> {
+    let hex = selector.strip_prefix(b"sha256:")?;
+    if hex.len() != 64 {
+        return None;
+    }
+    let mut digest = [0_u8; 32];
+    for (index, output) in digest.iter_mut().enumerate() {
+        let pair = &hex[index * 2..index * 2 + 2];
+        *output = hex_nibble(pair[0])?
+            .checked_mul(16)?
+            .checked_add(hex_nibble(pair[1])?)?;
+    }
+    Some(digest)
+}
+
+#[cfg(feature = "sha256")]
+fn hex_nibble(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        b'A'..=b'F' => Some(value - b'A' + 10),
+        _ => None,
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ReferenceError {
     Empty,
@@ -382,6 +408,14 @@ impl<'a> ImageReference<'a> {
         used = copy_part(output, used, suffix);
         used = copy_part(output, used, self.selector);
         Ok(used)
+    }
+
+    #[cfg(feature = "sha256")]
+    pub fn manifest_digest_matches(self, body: &[u8]) -> bool {
+        if !self.digest {
+            return true;
+        }
+        parse_sha256_selector(self.selector).is_some_and(|expected| verify_sha256(body, &expected))
     }
 }
 
@@ -963,6 +997,19 @@ mod tests {
         ] {
             assert!(ImageReference::parse(invalid).is_err(), "{invalid:?}");
         }
+    }
+
+    #[test]
+    fn digest_pins_bind_top_level_manifest_bytes() {
+        let pinned = ImageReference::parse(
+            b"alpine@sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+        )
+        .unwrap();
+        assert!(pinned.manifest_digest_matches(b"hello"));
+        assert!(!pinned.manifest_digest_matches(b"goodbye"));
+
+        let tagged = ImageReference::parse(b"alpine:latest").unwrap();
+        assert!(tagged.manifest_digest_matches(b"any registry response"));
     }
 
     #[test]
