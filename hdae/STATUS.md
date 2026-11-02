@@ -7,18 +7,21 @@
 - Active project: remaining reporter remediation batch
 - Branch: `hdae/issue-20-gzip-unpack`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 37, bounded OCI layer unpack for issue #20
-- Last completed action: recorded the human-selected separate host-wide
-  rootfs-unpack policy with a 512-MiB default
-- Next action: implement bounded preflight before rootfs allocation, retain
-  regressions, and run focused plus full verification
+- Active gate: Gate 41, transactional rootfs exec for issue #27, on its
+  dedicated branch after switching worktrees
+- Last completed action: Gate 37 passed `make check` and `make test`, closed
+  under delegated batch authority, and was delivered in PR #52 with a
+  reciprocal issue summary
+- Next action: switch to `hdae/issue-27-transactional-rootfs-exec`, record the
+  selected staged-publication design, then implement and verify it
 
 ## Current repository state
 
 Remote `main` is at `ecbb3142`. Gates 34 and 35 are delivered through open PRs
 #44 and #45. Gate 36 is delivered through open PR #46 with passing local static
 and complete QEMU evidence; GitHub checks were pending at last observation.
-Gate 37 is active with its unpack-memory policy resolved.
+Gate 37 is delivered through PR #52 with fresh local static and complete QEMU
+evidence.
 The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
 matrix and repeated stress pass. Gate 11's comparison and reduced evidence are
 under `docs/feedback-hardening/`. No push or merge was performed.

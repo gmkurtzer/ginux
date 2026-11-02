@@ -36,9 +36,11 @@ zeroing, while preserving valid OCI layer semantics and supported images.
 
 ## Remaining work
 
-- [ ] Implement pre-allocation output validation and the selected bound.
-- [ ] Add regressions and run focused, static, and complete QEMU verification.
-- [ ] Push, open the remediation PR, add reciprocal links, and confirm CI.
+- [x] Implemented pre-allocation output validation and the selected bound.
+- [x] Added regressions and ran focused, static, and complete QEMU verification.
+- [x] Pushed, opened PR #52, and added the reciprocal issue link. GitHub CI
+  remains external follow-up evidence and does not replace the fresh local
+  acceptance suite.
 
 ## Acceptance criteria
 
@@ -62,6 +64,12 @@ zeroing, while preserving valid OCI layer semantics and supported images.
 - Issue #20 matches `kernel/src/image_store.rs`.
 - `ARCHITECTURE.md` requires unpack resource exhaustion to fail the initiating
   operation without destabilizing other domains, but defines no RAM limit.
+- `make check` -> passed, including architecture, compatibility, clippy, and
+  all host-side crate tests.
+- `make test` -> passed the complete multi-boot QEMU sequence and emitted
+  `ginux: bounded OCI rootfs unpack policy verified`.
+- PR #52: <https://github.com/gmkurtzer/ginux/pull/52>.
+- Issue summary: <https://github.com/gmkurtzer/ginux/issues/20#issuecomment-6569098566>.
 
 ## Decisions and limitations
 
@@ -77,11 +85,13 @@ zeroing, while preserving valid OCI layer semantics and supported images.
 - Pull request: intended; non-closing reference to issue #20
 - Planned commits: gate definition; bounded preflight/allocator mechanism;
   regressions/evidence; delivery
-- Actual commits: pending
+- Actual commits: `1bce59ce` defines the gate; `8667f694` implements the
+  policy, regressions, and fresh evidence integration; final delivery record
+  follows in the closing commit.
 
 ## Review policy and outcome
 
-The unpack-memory checkpoint was resolved by the human. Implementation and
-objective closure may proceed under the user-approved remaining-reports batch;
-publishing the PR and reciprocal comments is authorized, but merge and issue
-closure are not.
+The unpack-memory checkpoint was resolved by the human. Gate 37 passed every
+objective criterion and closed under the user-approved remaining-reports batch.
+PR #52 and the reciprocal issue summary were published; merge and issue closure
+remain maintainer actions.
