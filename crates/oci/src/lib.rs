@@ -1175,4 +1175,11 @@ mod tests {
         trailing.push(1);
         assert!(Rootfs::parse(&trailing).is_none());
     }
+
+    #[test]
+    #[should_panic]
+    fn release_profile_traps_size_overflow() {
+        let untrusted_size = std::hint::black_box(usize::MAX);
+        let _allocation_size = untrusted_size + 1;
+    }
 }

@@ -283,6 +283,7 @@ check: manifest architecture-check linux-compat-check
 	@cargo test --package ginux-command
 	@cargo clippy --package ginux-oci -- -D warnings
 	@cargo test --package ginux-oci
+	@cargo test --release --package ginux-oci release_profile_traps_size_overflow
 	@cargo clippy --package ginux-oci-cache -- -D warnings
 	@cargo test --package ginux-oci-cache
 	@cargo clippy --package ginux-image-store -- -D warnings

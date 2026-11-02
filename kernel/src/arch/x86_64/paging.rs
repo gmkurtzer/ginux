@@ -1526,13 +1526,13 @@ pub(crate) fn mmio_mappings_are_exact<const N: usize>(mappings: [MmioMapping; N]
             let pages = mapping.mapped_length / PAGE_SIZE;
             (first_index..first_index + pages)
                 .contains(&index)
-                .then_some(
+                .then(|| {
                     (mapping.physical_page + ((index - first_index) * PAGE_SIZE) as u64)
                         | PRESENT
                         | CACHE_DISABLE
                         | NO_EXECUTE
-                        | if mapping.writable { WRITABLE } else { 0 },
-                )
+                        | if mapping.writable { WRITABLE } else { 0 }
+                })
         });
         let Some(expected) = expected else {
             return unsafe { table.add(index).read() == 0 };
