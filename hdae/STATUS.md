@@ -9,9 +9,9 @@
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 32, TLS client entropy
 - Last completed action: maintainer review of PR #40 corrected the false
-  `preserves_flags` declaration and fresh `make check` and `make test` passed
-- Next action: complete the current-main reconciliation, push PR #40, and
-  verify its final CI
+  `preserves_flags` declaration; current-main reconciliation plus fresh
+  `make check` and `make test` passed
+- Next action: push the reconciled PR #40 head and verify its final CI
 
 ## Current repository state
 

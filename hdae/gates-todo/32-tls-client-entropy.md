@@ -73,6 +73,8 @@ is unavailable.
 - Maintainer review found and removed the false `preserves_flags` declaration
   from the `RDRAND`/`setc` assembly; targeted clippy, fresh `make check`, and
   fresh `make test` all passed afterward.
+- After PR #41 advanced `main`, the branch was reconciled with current main;
+  fresh `make check` and `make test` again passed on the combined head.
 
 ## Decisions and limitations
 
@@ -90,7 +92,8 @@ is unavailable.
 - Planned commits: implementation and regression evidence; delivery checkpoint
 - Actual commits: `62756f4d` (implementation, generated boot image, and
   verification evidence), `4d12e47d` (delivery checkpoint), `29c452c1`
-  (assembly contract correction and fresh review evidence)
+  (assembly contract correction and fresh review evidence), `513bc686`
+  (current-main reconciliation)
 
 ## Review policy and outcome
 
