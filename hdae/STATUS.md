@@ -10,8 +10,8 @@
 - Active gate: Gate 33, pinned top-level manifest digest
 - Last completed action: digest-pin regression, full `make check`, and complete
   QEMU `make test` passed with the regenerated embedded network service
-- Next action: commit generated boot and final evidence, push the branch, open
-  the remediation pull request, and add reciprocal issue links
+- Next action: push the verified branch, open the remediation pull request, and
+  add reciprocal issue links
 
 ## Current repository state
 

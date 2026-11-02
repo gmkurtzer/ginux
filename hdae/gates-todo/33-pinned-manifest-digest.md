@@ -90,7 +90,8 @@ follows any descriptor.
 - Planned commits: gate and regression mechanism; integration and evidence;
   delivery checkpoint
 - Actual commits: `bb9b7d16` gate definition; `5f5ced0e` digest verification
-  and regression tests; generated boot and final evidence pending
+  and regression tests; `938511bc` regenerated boot and full verification
+  evidence
 
 ## Review policy and outcome
 
