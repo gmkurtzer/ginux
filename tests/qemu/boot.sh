@@ -8,6 +8,9 @@ if [[ ! "$boot_timeout_seconds" =~ ^[1-9][0-9]*$ ]]; then
     echo "Boot test failed: GINUX_BOOT_TIMEOUT_SECONDS must be a positive integer." >&2
     exit 2
 fi
+if [[ -n "${GINUX_BOOT_ARTIFACT_DIR:-}" ]]; then
+    mkdir -p "$GINUX_BOOT_ARTIFACT_DIR"
+fi
 
 output_file="$(mktemp -t ginux-boot.XXXXXX)"
 reboot_output_file="$(mktemp -t ginux-reboot.XXXXXX)"
@@ -34,6 +37,13 @@ cleanup() {
     if [[ -n "$qemu_pid" ]] && kill -0 "$qemu_pid" 2>/dev/null; then
         kill "$qemu_pid" 2>/dev/null || true
         wait "$qemu_pid" 2>/dev/null || true
+    fi
+    if [[ -n "${GINUX_BOOT_ARTIFACT_DIR:-}" ]]; then
+        mkdir -p "$GINUX_BOOT_ARTIFACT_DIR"
+        cp "$output_file" "$GINUX_BOOT_ARTIFACT_DIR/initial-boot.log"
+        cp "$reboot_output_file" "$GINUX_BOOT_ARTIFACT_DIR/reboot.log"
+        cp "$corrupt_output_file" "$GINUX_BOOT_ARTIFACT_DIR/corrupt-media.log"
+        cp "$native_corrupt_output_file" "$GINUX_BOOT_ARTIFACT_DIR/native-corrupt-media.log"
     fi
     rm -f \
         "$output_file" \

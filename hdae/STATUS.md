@@ -10,17 +10,17 @@
 - Active gate: Gate 32, TLS client entropy
 - Last completed action: maintainer review of PR #40 corrected the false
   `preserves_flags` declaration and fresh `make check` and `make test` passed
-- Next action: push commit `29c452c1` to PR #40 and verify its final CI
+- Next action: complete the current-main reconciliation, push PR #40, and
+  verify its final CI
 
 ## Current repository state
 
-Remote `main` is at `fbe6472e` after merged PRs #31 through #38. The first
+Remote `main` is at `1203e291` after merged PR #41. The first
 eleven feedback-hardening gates and inserted correctness gates are complete.
-Gate 12 is complete on `codex/performance-parity`. Gates 13 through 18 remain
-in `gates-todo/` for maintainer review after their delivery through merged PRs
-#9 and #10. Gates 19 and 21 through 23 are delivered through merged pull
-requests and remain in `gates-todo/` for maintainer review. Gate 20 remains
-blocked on exact Linux reproduction evidence. Gate 32 is delivered through
+Gate 12 is complete on `codex/performance-parity`. Gates 13 through 19 and 21
+through 23 remain in `gates-todo/` for maintainer review after delivery through
+merged pull requests. Gate 20 was delivered and merged through PR #41 and
+remains in `gates-todo/` for maintainer review. Gate 32 is delivered through
 open pull request #40 and awaits maintainer review.
 The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
 matrix and repeated stress pass. Gate 11's comparison and reduced evidence are

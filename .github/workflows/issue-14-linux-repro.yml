@@ -1,0 +1,31 @@
+name: issue-14-linux-repro
+
+on:
+  push:
+    branches: [hdae/issue-14-native-volume-linux]
+
+permissions:
+  contents: read
+
+jobs:
+  qemu-linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - run: sudo apt-get update
+      - run: sudo apt-get install --yes ovmf qemu-system-x86
+      - run: rustup target add x86_64-unknown-uefi x86_64-unknown-none
+      - run: qemu-system-x86_64 --version
+      - run: make test
+        env:
+          GINUX_BOOT_TIMEOUT_SECONDS: 300
+          GINUX_BOOT_ARTIFACT_DIR: build/issue-14-artifacts
+          GINUX_QEMU_DEBUG_LOG: build/issue-14-artifacts/qemu-interrupts.log
+          GINUX_QEMU_DEBUG_FLAGS: int,guest_errors
+          QEMU_ACCEL: tcg
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue-14-linux-reproduction
+          path: build/issue-14-artifacts
+          if-no-files-found: warn
