@@ -4,28 +4,30 @@
 
 - Active skill: `.agents/skills/hdae-development/SKILL.md`
 - Reload required after compaction, reset, resume, or handoff: yes
-- Active project: issue #16 pinned top-level manifest digest
-- Branch: `hdae/issue-16-manifest-digest`
+- Active project: remaining reporter remediation batch
+- Branch: `hdae/issue-20-gzip-unpack`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 33, pinned top-level manifest digest
-- Last completed action: reconciled merged PR #40, regenerated the combined
-  network service, and passed fresh `make check` and `make test`
-- Next action: push the conflict-free PR #42 head and verify final CI
+- Active gate: Gate 37, bounded OCI layer unpack for issue #20
+- Last completed action: confirmed forged gzip `ISIZE` controls rootfs
+  allocation and OCI descriptor size is compressed length, not a valid check
+- Next action: obtain the unpack-memory policy, then implement bounded preflight
+  and allocation on this dedicated branch
 
 ## Current repository state
 
-Remote `main` is at `e8b42d85` after merged PR #40. The first
-eleven feedback-hardening gates and inserted correctness gates are complete.
-Gate 12 is complete on `codex/performance-parity`. Gates 13 through 19 and 21
-through 23 and Gate 32 remain in `gates-todo/` for maintainer review after
-delivery through merged pull requests. Gate 33 is active on this branch.
+Remote `main` is at `ecbb3142`. Gates 34 and 35 are delivered through open PRs
+#44 and #45. Gate 36 is delivered through open PR #46 with passing local static
+and complete QEMU evidence; GitHub checks were pending at last observation.
+Gate 37 is scoped but waits on one unpack-memory policy decision.
 The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
 matrix and repeated stress pass. Gate 11's comparison and reduced evidence are
 under `docs/feedback-hardening/`. No push or merge was performed.
 
 ## Open decisions
 
-- None. The user explicitly selected issue #16 as the next remediation.
+- For issue #20, should decompressed OCI rootfs bytes use a separate
+  configurable unpack-RAM limit (and what default), or each container's
+  `memory_limit_mib`?
 
 ## Active diagnosis
 
