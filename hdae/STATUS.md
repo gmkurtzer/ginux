@@ -4,29 +4,29 @@
 
 - Active skill: `.agents/skills/hdae-development/SKILL.md`
 - Reload required after compaction, reset, resume, or handoff: yes
-- Active project: issue #14 Linux native-volume recovery
-- Branch: `hdae/issue-14-native-volume-linux`
+- Active project: issue #16 pinned top-level manifest digest
+- Branch: `hdae/issue-16-manifest-digest`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 20, Linux native-volume recovery
-- Last completed action: opened PR #41 and posted the verified remediation and
-  Linux-run evidence to issue #14
-- Next action: await maintainer review of Gate 20 at the pull-request checkpoint
+- Active gate: Gate 33, pinned top-level manifest digest
+- Last completed action: confirmed digest pins affect the registry request path
+  but do not verify the fetched top-level manifest or index body
+- Next action: add host-tested conditional pin verification and enforce it
+  before top-level descriptor parsing
 
 ## Current repository state
 
-Remote `main` is at `fbe6472e` after merged PRs #31 through #38. The first
+Remote `main` is at `1203e291` after merged PR #41. The first
 eleven feedback-hardening gates and inserted correctness gates are complete.
-Gate 12 is complete on `codex/performance-parity`. Gates 13 through 19 and 21
-through 23 remain in `gates-todo/` for maintainer review after delivery through
-merged pull requests. Gate 20 remains active on this branch.
+Gate 12 is complete on `codex/performance-parity`. Gates 13 through 23 remain
+in `gates-todo/` for maintainer review after delivery through merged pull
+requests. Gate 33 is active on this branch.
 The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
 matrix and repeated stress pass. Gate 11's comparison and reduced evidence are
 under `docs/feedback-hardening/`. No push or merge was performed.
 
 ## Open decisions
 
-- None. The user explicitly requested resolving the failures one at a time;
-  Gate 20 remains the first checkpoint.
+- None. The user explicitly selected issue #16 as the next remediation.
 
 ## Active diagnosis
 
