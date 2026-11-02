@@ -8,18 +8,18 @@
 - Branch: `hdae/issue-16-manifest-digest`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 33, pinned top-level manifest digest
-- Last completed action: opened PR #42 and linked its verified Gate 33
-  remediation to issue #16
-- Next action: verify final PR #42 CI and stop at the maintainer-review
-  checkpoint
+- Last completed action: PR #40 advanced `main`; source reconciliation retained
+  both the TLS entropy and pinned-manifest fixes
+- Next action: regenerate the combined embedded service, rerun full
+  verification, push PR #42, and verify final CI
 
 ## Current repository state
 
-Remote `main` is at `1203e291` after merged PR #41. The first
+Remote `main` is at `e8b42d85` after merged PR #40. The first
 eleven feedback-hardening gates and inserted correctness gates are complete.
-Gate 12 is complete on `codex/performance-parity`. Gates 13 through 23 remain
-in `gates-todo/` for maintainer review after delivery through merged pull
-requests. Gate 33 is active on this branch.
+Gate 12 is complete on `codex/performance-parity`. Gates 13 through 19 and 21
+through 23 and Gate 32 remain in `gates-todo/` for maintainer review after
+delivery through merged pull requests. Gate 33 is active on this branch.
 The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
 matrix and repeated stress pass. Gate 11's comparison and reduced evidence are
 under `docs/feedback-hardening/`. No push or merge was performed.
