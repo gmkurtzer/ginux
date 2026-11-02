@@ -291,13 +291,17 @@ pub(crate) fn validated_user_root_frames(root: u64) -> Option<ValidatedUserRootF
     let network_layout = native_entry(15) & PRESENT != 0;
     let controller_layout = !network_layout && native_entry(7) & PRESENT != 0;
     let image_capacity = if network_layout {
-        160
+        crate::address_space::NATIVE_NETWORK_IMAGE_PAGES
     } else if controller_layout {
         crate::address_space::NATIVE_CONTROLLER_IMAGE_PAGES
     } else {
         7
     };
-    let stack_pages = if network_layout { 16 } else { 2 };
+    let stack_pages = if network_layout {
+        crate::address_space::NATIVE_NETWORK_STACK_PAGES
+    } else {
+        2
+    };
     let stack_page = image_capacity + 1;
     let boot_info_page = stack_page + stack_pages + 1;
     let image_pages = (0..image_capacity)
