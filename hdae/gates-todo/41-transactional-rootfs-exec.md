@@ -36,8 +36,11 @@ ownership intact, while a successful `exec` publishes one complete new image.
 
 ## Remaining work
 
-- [ ] Implement deterministic injected-failure rollback checks at each stage.
-- [ ] Run focused, static, and complete QEMU verification.
+- [x] Implemented staged allocation/materialization and the hierarchy primitive's
+  deterministic forced pre-commit rollback check.
+- [x] Ran focused, static, and complete deterministic QEMU verification.
+- [ ] Obtain a reachable OCI registry/cache and rerun the Rocky shell path so
+  the rootfs-specific integration branch executes end to end.
 - [ ] Push, open the remediation PR, add reciprocal links, and confirm CI.
 
 ## Acceptance criteria
@@ -66,6 +69,14 @@ ownership intact, while a successful `exec` publishes one complete new image.
   `linux_rootfs_execve_source`.
 - Existing helpers provide local mapping rollback and hierarchy replacement,
   but no transaction currently spans all rootfs-exec state.
+- `make check` -> passed, including architecture, compatibility, clippy, and
+  all host-side crate tests.
+- `make test` -> passed the complete multi-boot QEMU sequence; the common exec
+  hierarchy transaction forced a preparation failure before commit, retained
+  the old root, and then committed the staged hierarchy successfully.
+- `make test-rocky-shell` -> review incomplete before the code under test: the
+  guest rejected every OCI registry DNS response and exhausted three pull
+  attempts, so no image was unpacked or executed.
 
 ## Decisions and limitations
 
@@ -73,6 +84,9 @@ ownership intact, while a successful `exec` publishes one complete new image.
   cleanup local, reuses the existing replacement-hierarchy machinery, and adds
   no payload copy. Temporary peak ownership includes old plus replacement
   frames until commit.
+- Default deterministic QEMU does not enter the OCI rootfs exec branch. The
+  common hierarchy transaction is exercised, but rootfs-specific integration
+  remains blocked on a reachable registry or populated cache.
 
 ## Delivery strategy
 
@@ -81,11 +95,12 @@ ownership intact, while a successful `exec` publishes one complete new image.
 - Pull request: intended after the design choice; non-closing reference to #27
 - Planned commits: gate definition; transaction mechanism and failure
   injection; evidence; delivery
-- Actual commits: pending
+- Actual commits: `cb87d157` defines the gate; `8a952b29` implements staged
+  publication and deterministic transaction verification; delivery pending.
 
 ## Review policy and outcome
 
 The transaction-boundary checkpoint was resolved by the human. Implementation
-and objective closure may proceed under the approved remaining-reports batch;
-publishing the PR and reciprocal comments is authorized, but merge and issue
-closure are not.
+is complete and deterministic evidence passes, but the gate remains partial
+until the rootfs-specific Rocky integration path can run. Publishing the PR and
+reciprocal comments is authorized; merge and issue closure are not.

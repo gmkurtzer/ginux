@@ -8,22 +8,23 @@
 - Branch: `hdae/issue-27-transactional-rootfs-exec`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 41, transactional rootfs exec for issue #27
-- Last completed action: recorded the human-selected staged replacement
-  address-space design with direct materialization into final replacement frames
-- Next action: isolate preparation from publication in
-  `linux_rootfs_execve_source`, add deterministic pre-commit failure checks,
-  and run focused plus full verification
+- Last completed action: staged rootfs exec passed `make check` and complete
+  deterministic `make test`; `make test-rocky-shell` stopped before unpack/exec
+  because guest OCI DNS failed on all three pull attempts
+- Next action: publish the partial-evidence remediation PR and reciprocal issue
+  summary, then triage and implement issue #43 on a dedicated gate/branch
 
 ## Current repository state
 
 Remote `main` is at `ecbb3142`. The first
 eleven feedback-hardening gates and inserted correctness gates are complete.
-Gate 12 is complete on `codex/performance-parity`. Gate 41 is active on
-this branch; Gates 34 through 36 and 38 through 40 are delivered on dedicated
-open PRs, while Gate 37 awaits the separate unpack-memory policy decision.
+Gate 12 is complete on `codex/performance-parity`. Gate 41 is implemented but
+awaits a reachable OCI registry/cache for rootfs-specific integration on
+this branch; Gates 34 through 40 are delivered on dedicated PRs, including
+Gate 37 in PR #52.
 The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
 matrix and repeated stress pass. Gate 11's comparison and reduced evidence are
-under `docs/feedback-hardening/`. No push or merge was performed.
+under `docs/feedback-hardening/`. Gate 41 has not yet been pushed or merged.
 
 ## Open decisions
 
