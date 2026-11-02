@@ -7,11 +7,10 @@
 - Active project: remaining reporter remediation batch
 - Branch: `hdae/issue-25-mprotect-shootdown`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 40, passed and awaiting delivery for issue #25
-- Last completed action: routed active-image permission revocation through the
-  acknowledged SMP invalidator and passed fresh `make check` plus `make test`
-- Next action: publish the Gate 40 branch and PR, add reciprocal links, then
-  start Gate 41 for issue #27
+- Active gate: Gate 40, delivered as PR #49 for issue #25
+- Last completed action: published PR #49 with reciprocal issue/PR summaries
+  after fresh `make check` and two-vCPU `make test` passed
+- Next action: confirm PR #49 CI while starting Gate 41 for issue #27
 
 ## Current repository state
 

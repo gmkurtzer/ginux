@@ -35,10 +35,11 @@ writable translation for the same Linux address space.
   invalidator and restore the old PTE if it cannot complete.
 - [x] Passed focused compilation, the complete static gate, and default
   two-vCPU QEMU regression.
+- [x] Published PR #49 and added reciprocal issue/PR summaries.
 
 ## Remaining work
 
-- [ ] Push, open the remediation PR, add reciprocal links, and confirm CI.
+- [ ] GitHub CI is external evidence and must finish before merge.
 
 ## Acceptance criteria
 
@@ -79,7 +80,8 @@ writable translation for the same Linux address space.
 
 - Working branch: `hdae/issue-25-mprotect-shootdown`
 - Intended base: `main`
-- Pull request: intended; non-closing reference to issue #25
+- Pull request: [#49](https://github.com/gmkurtzer/ginux/pull/49), with a
+  non-closing reference to issue #25
 - Planned commits: gate definition; acknowledged revocation and regression;
   evidence; delivery
 - Actual commits: `949b3b19` (gate definition), `0d2ce4b0` (acknowledged
