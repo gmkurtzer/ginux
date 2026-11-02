@@ -8,10 +8,10 @@
 - Branch: `hdae/issue-18-whiteout-subtree`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 35, directory whiteout subtrees for issue #18
-- Last completed action: PR #44 delivered Gate 34 for issue #17 with passing
-  local and GitHub static/QEMU evidence
-- Next action: commit Gate 35, implement exact-and-subtree whiteout handling
-  in the OCI reader and published-rootfs index, and add regression coverage
+- Last completed action: Gate 35's focused OCI regression, warning-denying
+  clippy, `make check`, and complete two-vCPU `make test` all pass
+- Next action: commit the Gate 35 evidence, push the branch, open the issue #18
+  remediation PR, and add reciprocal links
 
 ## Current repository state
 

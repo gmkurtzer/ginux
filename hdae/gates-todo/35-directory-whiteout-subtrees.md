@@ -26,12 +26,16 @@ and every descendant so removed content cannot reappear by full-path lookup.
 - [x] Confirmed `whiteout_hides` matches only the exact target.
 - [x] Confirmed the published-rootfs index removes only the exact target for a
   plain whiteout even though subtree removal already exists for opaque markers.
+- [x] Made plain whiteouts hide the exact target and descendants in the OCI
+  reader and published-rootfs path index.
+- [x] Added the reported two-layer subtree regression and an adjacent-prefix
+  assertion.
 
 ## Remaining work
 
-- [ ] Implement exact-and-descendant plain-whiteout handling in both paths.
-- [ ] Add focused regression coverage.
-- [ ] Run focused, static, and complete QEMU verification.
+- [x] Implement exact-and-descendant plain-whiteout handling in both paths.
+- [x] Add focused regression coverage.
+- [x] Run focused, static, and complete QEMU verification.
 - [ ] Push, open the remediation PR, add reciprocal links, and confirm CI.
 
 ## Acceptance criteria
@@ -53,6 +57,15 @@ and every descendant so removed content cannot reappear by full-path lookup.
 
 - Issue #18's code-path analysis matches the current implementation: both
   lookup paths preserve descendants after removing only the exact directory.
+- `cargo test --package ginux-oci` -> all 9 tests passed, including a lower
+  `secret/key`, upper `.wh.secret`, and retained adjacent `secret2/key`.
+- Warning-denying `ginux-oci` clippy passed.
+- Source inspection confirms plain published-rootfs whiteouts remove the exact
+  target and then reuse `remove_index_children` for its descendants.
+- `make check` -> all static, architecture, unit, and warning-denying checks
+  passed.
+- `make test` -> the complete two-vCPU QEMU verification boot reached
+  `GINUX_KERNEL_OK` and reported `Boot test passed.`
 
 ## Decisions and limitations
 
@@ -66,7 +79,8 @@ and every descendant so removed content cannot reappear by full-path lookup.
 - Pull request: intended; non-closing reference to issue #18
 - Planned commits: gate definition; whiteout behavior and regression;
   generated/evidence; delivery checkpoint
-- Actual commits: pending
+- Actual commits: `61882c29` gate definition; `344f4d84` whiteout behavior and
+  regression; evidence and delivery checkpoints pending
 
 ## Review policy and outcome
 
