@@ -98,6 +98,10 @@ fault-containment, or persistent-storage invariants.
 - Three consecutive local `make test` runs on QEMU 10.1.2/TCG -> passed;
   every run completed the intentional fault and forced-cancellation recovery
   paths, emitted `GINUX_KERNEL_OK`, and reported `Boot test passed.`
+- [Ubuntu correction run 41367841412](https://github.com/gmkurtzer/ginux/actions/runs/41367841412)
+  built commit `17284060` successfully but again timed out after 300 seconds
+  before emitting any serial output. This is an earlier Linux/OVMF boot stall,
+  not evidence that the corrected native-volume recovery path failed.
 
 ## Decisions and limitations
 
@@ -114,6 +118,10 @@ fault-containment, or persistent-storage invariants.
   active, then resets the software interrupt count before publishing the fresh
   domain and request. It does not accept an incomplete request or weaken any
   teardown assertion.
+- The branch-only workflow now preserves all boot logs plus QEMU interrupt and
+  guest-error diagnostics as an artifact on both success and failure; ordinary
+  local and repository test behavior is unchanged unless the artifact
+  directory environment variable is set.
 
 ## Delivery strategy
 

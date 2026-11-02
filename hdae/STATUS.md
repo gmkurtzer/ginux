@@ -8,10 +8,11 @@
 - Branch: `hdae/issue-14-native-volume-linux`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 20, Linux native-volume recovery
-- Last completed action: implemented a bounded stale-PBA drain; `make check`
-  and three consecutive local QEMU 10.1.2/TCG boots pass
-- Next action: commit and push the Gate 20 correction, then inspect the fresh
-  Ubuntu/QEMU workflow before opening its pull request
+- Last completed action: Linux run 41367841412 built the correction but timed
+  out before any kernel serial output; added persistent boot and QEMU evidence
+  capture to the branch-only workflow
+- Next action: push the evidence-capture update and classify the Linux/OVMF
+  stall from its preserved serial and interrupt artifacts
 
 ## Current repository state
 
