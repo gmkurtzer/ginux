@@ -1757,6 +1757,11 @@ if [[ "$(grep -c '^DEVFS_READY' "$output_file")" -ne 1 ]] ||
     exit 1
 fi
 
+if ! grep -q '^ginux: blocking Linux socket polls bounded independently of guest timeout' "$output_file"; then
+    echo "Boot test failed: guest timeouts could exceed the blocking socket poll budget." >&2
+    exit 1
+fi
+
 if [[ "$(grep -c '^TMPFS_READY' "$output_file")" -ne 1 ]] ||
     ! grep -q '^ginux: quota-bound page-backed RAM store installed' "$output_file" ||
     ! grep -q '^ginux: generation-safe Linux tmpfs view mounted at /tmp' "$output_file" ||
