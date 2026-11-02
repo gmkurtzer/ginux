@@ -1111,7 +1111,7 @@ fn tls_seed() -> Option<[u8; 32]> {
                     "setc {ready}",
                     value = out(reg) value,
                     ready = out(reg_byte) ready,
-                    options(nostack, preserves_flags)
+                    options(nostack)
                 );
             }
             if ready != 0 {

@@ -8,10 +8,9 @@
 - Branch: `hdae/issue-15-tls-entropy`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 32, TLS client entropy
-- Last completed action: delivered the verified Gate 32 fix through pull
-  request #40 with reciprocal Issue #15 links
-- Next action: maintainer review of pull request #40; continue scheduled triage
-  of the remaining open security and correctness reports
+- Last completed action: maintainer review of PR #40 corrected the false
+  `preserves_flags` declaration and fresh `make check` and `make test` passed
+- Next action: push the review correction to PR #40 and verify its final CI
 
 ## Current repository state
 

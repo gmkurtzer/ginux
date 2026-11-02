@@ -33,6 +33,8 @@ is unavailable.
   CPUID-gated `RDRAND` sampling.
 - [x] Replaced the RTC-derived seed with four fresh bounded hardware samples
   per connection and fail-closed handling before TLS setup.
+- [x] Corrected the inline-assembly flag contract so the compiler is informed
+  that `RDRAND` changes condition flags.
 - [x] Passed targeted lint, full static checks, and the complete QEMU boot.
 
 ## Remaining work
@@ -68,6 +70,9 @@ is unavailable.
 - `make check` -> passed all static, architecture, lint, and unit checks.
 - `make test` on QEMU 10.1.2/TCG -> emitted `GINUX_KERNEL_OK` and
   `Boot test passed.`
+- Maintainer review found and removed the false `preserves_flags` declaration
+  from the `RDRAND`/`setc` assembly; targeted clippy, fresh `make check`, and
+  fresh `make test` all passed afterward.
 
 ## Decisions and limitations
 
@@ -84,7 +89,8 @@ is unavailable.
   reference to issue #15
 - Planned commits: implementation and regression evidence; delivery checkpoint
 - Actual commits: `62756f4d` (implementation, generated boot image, and
-  verification evidence), `4d12e47d` (delivery checkpoint)
+  verification evidence), `4d12e47d` (delivery checkpoint), assembly contract
+  correction and review evidence pending
 
 ## Review policy and outcome
 
