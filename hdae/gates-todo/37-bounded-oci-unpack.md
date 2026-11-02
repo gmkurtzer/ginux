@@ -31,10 +31,11 @@ zeroing, while preserving valid OCI layer semantics and supported images.
   and zeroing the combined rootfs extent.
 - [x] Confirmed OCI manifest layer size cannot validate uncompressed length.
 - [x] Confirmed no existing per-layer or assembled-rootfs RAM limit exists.
+- [x] Human selected a separate host-wide configurable rootfs-unpack RAM
+  policy with a 512-MiB default.
 
 ## Remaining work
 
-- [ ] Obtain the unpack-memory policy and default limit from the human.
 - [ ] Implement pre-allocation output validation and the selected bound.
 - [ ] Add regressions and run focused, static, and complete QEMU verification.
 - [ ] Push, open the remediation PR, add reciprocal links, and confirm CI.
@@ -64,10 +65,10 @@ zeroing, while preserving valid OCI layer semantics and supported images.
 
 ## Decisions and limitations
 
-- Open human decision: use a separate configurable rootfs-unpack RAM limit
-  (recommended; default required) or reuse each container's
-  `memory_limit_mib`. The latter conflates runtime-private memory with a
-  potentially shared immutable rootfs and may reject 128-MiB defaults.
+- The human selected a separate host-wide configurable rootfs-unpack RAM
+  policy with a 512-MiB default. The install path receives the policy
+  explicitly rather than conflating immutable-rootfs staging with a domain's
+  private `memory_limit_mib`.
 
 ## Delivery strategy
 
@@ -80,5 +81,7 @@ zeroing, while preserving valid OCI layer semantics and supported images.
 
 ## Review policy and outcome
 
-Checkpoint required for the unpack-memory policy. Unrelated gates in the
-user-approved remaining-reports batch may continue while this gate waits.
+The unpack-memory checkpoint was resolved by the human. Implementation and
+objective closure may proceed under the user-approved remaining-reports batch;
+publishing the PR and reciprocal comments is authorized, but merge and issue
+closure are not.

@@ -1795,6 +1795,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     if !image_store::install() {
         kernel_fail("ginux: boot-local image store initialization failed\r\n");
     }
+    if !image_store::verify_rootfs_unpack_policy() {
+        kernel_fail("ginux: OCI rootfs unpack policy verification failed\r\n");
+    }
+    serial_write("ginux: bounded OCI rootfs unpack policy verified\r\n");
     if !cfg!(feature = "verification-boot") {
         serial_write_raw(b"ginux: control runtime ready\r\n");
     }
@@ -4142,7 +4146,12 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             }
             let unpack_started = arch::x86_64::timer::timestamp_counter();
             let success = slot.is_some_and(|slot| {
-                image_size != 0 && (cached_rootfs || image_store::install_published_layers(slot))
+                image_size != 0
+                    && (cached_rootfs
+                        || image_store::install_published_layers(
+                            slot,
+                            image_store::DEFAULT_ROOTFS_UNPACK_LIMIT_BYTES,
+                        ))
             });
             serial_write_elapsed("ginux: timing OCI unpack/publish: ", unpack_started);
             if success && !cached_rootfs {

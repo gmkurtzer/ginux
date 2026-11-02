@@ -8,26 +8,25 @@
 - Branch: `hdae/issue-20-gzip-unpack`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 37, bounded OCI layer unpack for issue #20
-- Last completed action: confirmed forged gzip `ISIZE` controls rootfs
-  allocation and OCI descriptor size is compressed length, not a valid check
-- Next action: obtain the unpack-memory policy, then implement bounded preflight
-  and allocation on this dedicated branch
+- Last completed action: recorded the human-selected separate host-wide
+  rootfs-unpack policy with a 512-MiB default
+- Next action: implement bounded preflight before rootfs allocation, retain
+  regressions, and run focused plus full verification
 
 ## Current repository state
 
 Remote `main` is at `ecbb3142`. Gates 34 and 35 are delivered through open PRs
 #44 and #45. Gate 36 is delivered through open PR #46 with passing local static
 and complete QEMU evidence; GitHub checks were pending at last observation.
-Gate 37 is scoped but waits on one unpack-memory policy decision.
+Gate 37 is active with its unpack-memory policy resolved.
 The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
 matrix and repeated stress pass. Gate 11's comparison and reduced evidence are
 under `docs/feedback-hardening/`. No push or merge was performed.
 
 ## Open decisions
 
-- For issue #20, should decompressed OCI rootfs bytes use a separate
-  configurable unpack-RAM limit (and what default), or each container's
-  `memory_limit_mib`?
+- None for Gate 37. Gate 41 will use the human-selected staged replacement
+  address-space design.
 
 ## Active diagnosis
 
