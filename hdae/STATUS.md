@@ -8,10 +8,10 @@
 - Branch: `hdae/issue-18-whiteout-subtree`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 35, directory whiteout subtrees for issue #18
-- Last completed action: Gate 35's focused OCI regression, warning-denying
-  clippy, `make check`, and complete two-vCPU `make test` all pass
-- Next action: commit the Gate 35 evidence, push the branch, open the issue #18
-  remediation PR, and add reciprocal links
+- Last completed action: opened PR #45 for issue #18 after all local evidence
+  passed, then added reciprocal issue and PR summaries
+- Next action: record and push the PR link checkpoint, then confirm PR #45 CI
+  before advancing to issue #19
 
 ## Current repository state
 

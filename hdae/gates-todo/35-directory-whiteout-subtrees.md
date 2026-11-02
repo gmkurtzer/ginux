@@ -36,7 +36,8 @@ and every descendant so removed content cannot reappear by full-path lookup.
 - [x] Implement exact-and-descendant plain-whiteout handling in both paths.
 - [x] Add focused regression coverage.
 - [x] Run focused, static, and complete QEMU verification.
-- [ ] Push, open the remediation PR, add reciprocal links, and confirm CI.
+- [x] Push, open the remediation PR, and add reciprocal links.
+- [ ] Confirm final pull-request CI.
 
 ## Acceptance criteria
 
@@ -66,6 +67,8 @@ and every descendant so removed content cannot reappear by full-path lookup.
   passed.
 - `make test` -> the complete two-vCPU QEMU verification boot reached
   `GINUX_KERNEL_OK` and reported `Boot test passed.`
+- [PR #45](https://github.com/gmkurtzer/ginux/pull/45) contains the dedicated
+  remediation branch; issue #18 and the PR contain reciprocal summaries.
 
 ## Decisions and limitations
 
@@ -76,11 +79,13 @@ and every descendant so removed content cannot reappear by full-path lookup.
 
 - Working branch: `hdae/issue-18-whiteout-subtree`
 - Intended base: `main`
-- Pull request: intended; non-closing reference to issue #18
+- Pull request: [#45](https://github.com/gmkurtzer/ginux/pull/45); non-closing
+  reference to issue #18
 - Planned commits: gate definition; whiteout behavior and regression;
   generated/evidence; delivery checkpoint
 - Actual commits: `61882c29` gate definition; `344f4d84` whiteout behavior and
-  regression; evidence and delivery checkpoints pending
+  regression; `b7a057cc` verification evidence; delivery-link checkpoint
+  pending
 
 ## Review policy and outcome
 
