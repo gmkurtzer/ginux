@@ -36,10 +36,11 @@ and its IOMMU translation are confirmed retired.
   live ownership while success/success scrubs and releases.
 - [x] Passed focused compilation, the complete static gate, and complete QEMU
   regression.
+- [x] Published PR #50 and added reciprocal issue/PR summaries.
 
 ## Remaining work
 
-- [ ] Push, open the remediation PR, add reciprocal links, and confirm CI.
+- [ ] GitHub CI is external evidence and must finish before merge.
 
 ## Acceptance criteria
 
@@ -78,7 +79,8 @@ and its IOMMU translation are confirmed retired.
 
 - Working branch: `hdae/issue-28-dma-quarantine`
 - Intended base: `main`
-- Pull request: intended; non-closing reference to issue #28
+- Pull request: [#50](https://github.com/gmkurtzer/ginux/pull/50), with a
+  non-closing reference to issue #28
 - Planned commits: gate definition; fail-closed retirement and matrix;
   evidence; delivery
 - Actual commits: `7c6184de` (gate definition), `20494327` (fail-closed

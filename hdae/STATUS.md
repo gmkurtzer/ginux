@@ -7,11 +7,10 @@
 - Active project: remaining reporter remediation batch
 - Branch: `hdae/issue-28-dma-quarantine`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 42, passed and awaiting delivery for issue #28
-- Last completed action: enforced release only after both teardown
-  acknowledgements and passed fresh `make check` plus `make test`
-- Next action: publish the Gate 42 branch and PR, add reciprocal links, then
-  start Gate 43 for issue #29
+- Active gate: Gate 42, delivered as PR #50 for issue #28
+- Last completed action: published PR #50 with reciprocal issue/PR summaries
+  after fresh `make check` and `make test` passed
+- Next action: confirm PR #50 CI while starting Gate 43 for issue #29
 
 ## Current repository state
 
