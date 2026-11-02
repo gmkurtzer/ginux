@@ -1008,8 +1008,12 @@ unsafe fn https_get(
     let config = TlsConfig::new()
         .with_server_name(host)
         .enable_rsa_signatures();
+    let Some(seed) = tls_seed() else {
+        progress(b"registry TLS hardware entropy unavailable");
+        return false;
+    };
     let provider = Provider {
-        rng: ChaCha8Rng::from_seed(seed()),
+        rng: ChaCha8Rng::from_seed(seed),
         verifier: StrictVerifier::new(Certificate::X509(root)),
     };
     if let Err(error) = tls.open(TlsContext::new(&config, provider)) {
@@ -1091,14 +1095,33 @@ unsafe fn decode_pem(pem: &str) -> Option<&'static [u8]> {
     Some(core::slice::from_raw_parts(decoded.as_ptr(), decoded.len()))
 }
 
-fn seed() -> [u8; 32] {
-    let mut output = [0; 32];
-    let time = REGISTRY_SERVICE.clock.load(Ordering::Acquire);
-    for index in 0..4 {
-        output[index * 8..index * 8 + 8]
-            .copy_from_slice(&time.wrapping_mul((index + 1) as u64).to_le_bytes());
+fn tls_seed() -> Option<[u8; 32]> {
+    if core::arch::x86_64::__cpuid(1).ecx & (1 << 30) == 0 {
+        return None;
     }
-    output
+    let mut output = [0; 32];
+    for chunk in output.as_chunks_mut::<8>().0 {
+        let mut generated = None;
+        for _ in 0..16 {
+            let mut value: u64;
+            let mut ready: u8;
+            unsafe {
+                core::arch::asm!(
+                    "rdrand {value}",
+                    "setc {ready}",
+                    value = out(reg) value,
+                    ready = out(reg_byte) ready,
+                    options(nostack, preserves_flags)
+                );
+            }
+            if ready != 0 {
+                generated = Some(value);
+                break;
+            }
+        }
+        chunk.copy_from_slice(&generated?.to_ne_bytes());
+    }
+    Some(output)
 }
 
 fn read_response(

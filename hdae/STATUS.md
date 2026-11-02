@@ -4,29 +4,32 @@
 
 - Active skill: `.agents/skills/hdae-development/SKILL.md`
 - Reload required after compaction, reset, resume, or handoff: yes
-- Active project: issue #4 QEMU queue-size verification follow-up
-- Branch: `hdae/issue-4-boot-queue-size`
+- Active project: issue #15 TLS client entropy
+- Branch: `hdae/issue-15-tls-entropy`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 19, QEMU boot queue-size contract
-- Last completed action: delivered the verified Gate 19 fix through open PR #13
-  and added reciprocal links to issue #4 and the pull request
-- Next action: maintainer review of PR #13; retain issue #4 in scheduled
-  attention until the user acknowledges it
+- Active gate: Gate 32, TLS client entropy
+- Last completed action: implemented CPUID-gated bounded `RDRAND` seeding for
+  every TLS connection; targeted lint, `make check`, and the complete QEMU
+  `make test` pass
+- Next action: commit and push Gate 32, then open its pull request and add
+  reciprocal Issue #15 links
 
 ## Current repository state
 
-Remote `main` identifies merged PRs #9 and #10 at commit `759cf2e2`. The first
+Remote `main` is at `fbe6472e` after merged PRs #31 through #38. The first
 eleven feedback-hardening gates and inserted correctness gates are complete.
 Gate 12 is complete on `codex/performance-parity`. Gates 13 through 18 remain
 in `gates-todo/` for maintainer review after their delivery through merged PRs
-#9 and #10.
+#9 and #10. Gates 19 and 21 through 23 are delivered through merged pull
+requests and remain in `gates-todo/` for maintainer review. Gate 20 remains
+blocked on exact Linux reproduction evidence. Gate 32 is active.
 The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
 matrix and repeated stress pass. Gate 11's comparison and reduced evidence are
 under `docs/feedback-hardening/`. No push or merge was performed.
 
 ## Open decisions
 
-- None. The saved scheduled-review policy delegates this bounded remediation.
+- None. The saved scheduled-review policy delegates Gate 32 remediation.
 
 ## Active diagnosis
 
