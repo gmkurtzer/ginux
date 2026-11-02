@@ -10,8 +10,8 @@
 - Active gate: none; Gate 43 passed and closed under batch delegation
 - Last completed action: passed `make check` and complete `make test` evidence
   for Gate 43's clean-retirement and ambiguous-rollback quarantine paths
-- Next action: push Gate 43, open and link the issue #29 remediation PR, verify
-  CI for the delivered batch, and report merge/closure readiness
+- Next action: verify CI for PRs #44 through #51, inspect current issue states,
+  and report merge/closure readiness for the complete batch
 
 ## Current repository state
 

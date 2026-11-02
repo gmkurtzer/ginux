@@ -41,7 +41,8 @@ unless rollback proves translation disabled and the root pointer cleared.
 
 ## Remaining work
 
-- [ ] Push, open the remediation PR, add reciprocal links, and confirm CI.
+- [x] Pushed the branch, opened PR #51, and added reciprocal issue/PR links.
+- [ ] Confirm final GitHub CI.
 
 ## Acceptance criteria
 
@@ -75,6 +76,9 @@ unless rollback proves translation disabled and the root pointer cleared.
 - The deterministic retirement matrix released all six frames after a clean
   failure, retained all six live kernel-owned frames after ambiguous rollback,
   then cleaned its test quarantine and restored the baseline frame count.
+- [PR #51](https://github.com/gmkurtzer/ginux/pull/51) carries the dedicated
+  remediation; issue #29 and the PR contain reciprocal implementation and
+  evidence summaries.
 
 ## Decisions and limitations
 
