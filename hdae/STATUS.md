@@ -8,10 +8,10 @@
 - Branch: `hdae/issue-14-native-volume-linux`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 20, Linux native-volume recovery
-- Last completed action: merged current `main`, including PR #31's explicit
-  48-bit QEMU IOMMU address width, into the Linux reproduction branch
-- Next action: push the refreshed branch, inspect the new Ubuntu/QEMU run, and
-  implement the smallest correction only if it reproduces Issue #14
+- Last completed action: implemented a bounded stale-PBA drain; `make check`
+  and three consecutive local QEMU 10.1.2/TCG boots pass
+- Next action: commit and push the Gate 20 correction, then inspect the fresh
+  Ubuntu/QEMU workflow before opening its pull request
 
 ## Current repository state
 
@@ -26,7 +26,8 @@ under `docs/feedback-hardening/`. No push or merge was performed.
 
 ## Open decisions
 
-- None. The saved scheduled-review policy delegates Gate 20 remediation.
+- None. The user explicitly requested resolving the failures one at a time;
+  Gate 20 remains the first checkpoint.
 
 ## Active diagnosis
 
