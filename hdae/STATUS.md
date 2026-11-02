@@ -8,10 +8,9 @@
 - Branch: `hdae/issue-14-native-volume-linux`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 20, Linux native-volume recovery
-- Last completed action: Ubuntu verification run 41369349235 passed the full
-  `make test` boot with the stale-interrupt drain and launcher corrections
-- Next action: commit the final evidence checkpoint, open the remediation pull
-  request, and add reciprocal links to issue #14
+- Last completed action: opened PR #41 and posted the verified remediation and
+  Linux-run evidence to issue #14
+- Next action: await maintainer review of Gate 20 at the pull-request checkpoint
 
 ## Current repository state
 

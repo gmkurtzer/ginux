@@ -47,7 +47,7 @@ fault-containment, or persistent-storage invariants.
   sequence as its integration regression.
 - [x] Run `make check` and complete QEMU verification on macOS and Linux.
 - [x] Commit and push the verified correction.
-- [ ] Open the remediation pull request and add reciprocal source links.
+- [x] Open the remediation pull request and add reciprocal source links.
 
 ## Acceptance criteria
 
@@ -138,8 +138,9 @@ fault-containment, or persistent-storage invariants.
 
 - Working branch: `hdae/issue-14-native-volume-linux`
 - Intended base: `main`
-- Pull request: intended after the verified correction exists; non-closing
-  reference to issue #14
+- Pull request: [#41](https://github.com/gmkurtzer/ginux/pull/41), with a
+  non-closing reference to issue #14
+- Source update: [issue #14 comment](https://github.com/gmkurtzer/ginux/issues/14#issuecomment-6566506147)
 - Planned commits: reproduction evidence; correction and regression; delivery
   checkpoint
 - Actual commits: `1358dd1c` reproduction workflow and checkpoint; `17284060`
@@ -150,4 +151,5 @@ fault-containment, or persistent-storage invariants.
 
 Delegated by the saved proactive scheduled-review policy. Keep the gate in
 `gates-todo/`; successful delivery requires a verified fix, pushed branch,
-open pull request, and reciprocal links.
+open pull request, and reciprocal links. Those delivery requirements are now
+complete; maintainer review is the active checkpoint.
