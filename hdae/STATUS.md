@@ -8,11 +8,10 @@
 - Branch: `hdae/issue-15-tls-entropy`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 32, TLS client entropy
-- Last completed action: implemented CPUID-gated bounded `RDRAND` seeding for
-  every TLS connection; targeted lint, `make check`, and the complete QEMU
-  `make test` pass
-- Next action: push Gate 32, then open its pull request and add reciprocal
-  Issue #15 links
+- Last completed action: delivered the verified Gate 32 fix through pull
+  request #40 with reciprocal Issue #15 links
+- Next action: maintainer review of pull request #40; continue scheduled triage
+  of the remaining open security and correctness reports
 
 ## Current repository state
 
@@ -22,7 +21,8 @@ Gate 12 is complete on `codex/performance-parity`. Gates 13 through 18 remain
 in `gates-todo/` for maintainer review after their delivery through merged PRs
 #9 and #10. Gates 19 and 21 through 23 are delivered through merged pull
 requests and remain in `gates-todo/` for maintainer review. Gate 20 remains
-blocked on exact Linux reproduction evidence. Gate 32 is active.
+blocked on exact Linux reproduction evidence. Gate 32 is delivered through
+open pull request #40 and awaits maintainer review.
 The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
 matrix and repeated stress pass. Gate 11's comparison and reduced evidence are
 under `docs/feedback-hardening/`. No push or merge was performed.

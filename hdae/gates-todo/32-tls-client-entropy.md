@@ -39,8 +39,8 @@ is unavailable.
 
 - [x] Implement fail-closed per-connection hardware seeding.
 - [x] Run static and QEMU verification.
-- [ ] Commit and push the dedicated branch.
-- [ ] Open the remediation pull request and add reciprocal source links.
+- [x] Commit and push the dedicated branch.
+- [x] Open the remediation pull request and add reciprocal source links.
 
 ## Acceptance criteria
 
@@ -80,10 +80,11 @@ is unavailable.
 
 - Working branch: `hdae/issue-15-tls-entropy`
 - Intended base: `main`
-- Pull request: intended; non-closing reference to issue #15
+- Pull request: [#40](https://github.com/gmkurtzer/ginux/pull/40); non-closing
+  reference to issue #15
 - Planned commits: implementation and regression evidence; delivery checkpoint
 - Actual commits: `62756f4d` (implementation, generated boot image, and
-  verification evidence); delivery checkpoint pending
+  verification evidence), `4d12e47d` (delivery checkpoint)
 
 ## Review policy and outcome
 
