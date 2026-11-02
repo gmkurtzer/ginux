@@ -8,10 +8,10 @@
 - Branch: `hdae/issue-17-pax-chain`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 34, iterative PAX header chains for issue #17
-- Last completed action: opened PR #44 for issue #17 after all local evidence
-  passed, then added reciprocal issue and PR summaries
-- Next action: record and push the PR link checkpoint, then confirm PR #44 CI
-  before advancing to issue #18
+- Last completed action: PR #44 for issue #17 passed both GitHub `static` and
+  `qemu` checks after all local evidence and reciprocal links passed
+- Next action: record and push the final Gate 34 evidence, then create the
+  dedicated issue #18 whiteout-subtree branch and Gate 35
 
 ## Current repository state
 

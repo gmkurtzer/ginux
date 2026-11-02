@@ -33,7 +33,7 @@ kernel stack growth while preserving valid PAX override behavior.
 - [x] Implement iterative PAX parsing and regression coverage.
 - [x] Run `make check` and `make test`.
 - [x] Push, open the remediation PR, and add reciprocal links.
-- [ ] Confirm final pull-request CI.
+- [x] Confirm final pull-request CI.
 
 ## Acceptance criteria
 
@@ -62,6 +62,7 @@ kernel stack growth while preserving valid PAX override behavior.
   `GINUX_KERNEL_OK` and reported `Boot test passed.`
 - [PR #44](https://github.com/gmkurtzer/ginux/pull/44) contains the dedicated
   remediation branch; issue #17 and the PR contain reciprocal summaries.
+- PR #44 GitHub `static` and `qemu` checks passed on the delivery head.
 
 ## Decisions and limitations
 
@@ -83,4 +84,5 @@ kernel stack growth while preserving valid PAX override behavior.
 ## Review policy and outcome
 
 Delegated in the user-approved remaining-reports batch. Stop only for failed
-evidence or a new architectural decision; final review occurs after the batch.
+evidence or a new architectural decision; all objective Gate 34 criteria pass,
+and final review occurs after the batch.
