@@ -39,10 +39,11 @@ the serialized kernel-entry path in an unbounded busy-wait.
 - [x] Added deterministic boot-time poll-budget verification and a QEMU marker.
 - [x] Passed focused compilation, the complete static gate, and the complete
   QEMU boot regression.
+- [x] Published PR #47 and added reciprocal issue/PR summaries.
 
 ## Remaining work
 
-- [ ] Push, open the remediation PR, add reciprocal links, and confirm CI.
+- [ ] GitHub CI is external evidence and must finish before merge.
 
 ## Acceptance criteria
 
@@ -86,7 +87,8 @@ the serialized kernel-entry path in an unbounded busy-wait.
 
 - Working branch: `hdae/issue-22-blocking-sockets`
 - Intended base: `main`
-- Pull request: intended; non-closing reference to issue #22
+- Pull request: [#47](https://github.com/gmkurtzer/ginux/pull/47), with a
+  non-closing reference to issue #22
 - Planned commits: gate definition; bounded poll mechanism and regression;
   evidence; delivery
 - Actual commits: `b8538b6e` (gate definition), `38c52ae3` (mechanism and
