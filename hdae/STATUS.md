@@ -4,29 +4,29 @@
 
 - Active skill: `.agents/skills/hdae-development/SKILL.md`
 - Reload required after compaction, reset, resume, or handoff: yes
-- Active project: issue #4 QEMU queue-size verification follow-up
-- Branch: `hdae/issue-4-boot-queue-size`
+- Active project: issue #14 Linux native-volume recovery
+- Branch: `hdae/issue-14-native-volume-linux`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 19, QEMU boot queue-size contract
-- Last completed action: delivered the verified Gate 19 fix through open PR #13
-  and added reciprocal links to issue #4 and the pull request
-- Next action: maintainer review of PR #13; retain issue #4 in scheduled
-  attention until the user acknowledges it
+- Active gate: Gate 20, Linux native-volume recovery
+- Last completed action: opened PR #41 and posted the verified remediation and
+  Linux-run evidence to issue #14
+- Next action: await maintainer review of Gate 20 at the pull-request checkpoint
 
 ## Current repository state
 
-Remote `main` identifies merged PRs #9 and #10 at commit `759cf2e2`. The first
+Remote `main` is at `fbe6472e` after merged PRs #31 through #38. The first
 eleven feedback-hardening gates and inserted correctness gates are complete.
-Gate 12 is complete on `codex/performance-parity`. Gates 13 through 18 remain
-in `gates-todo/` for maintainer review after their delivery through merged PRs
-#9 and #10.
+Gate 12 is complete on `codex/performance-parity`. Gates 13 through 19 and 21
+through 23 remain in `gates-todo/` for maintainer review after delivery through
+merged pull requests. Gate 20 remains active on this branch.
 The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
 matrix and repeated stress pass. Gate 11's comparison and reduced evidence are
 under `docs/feedback-hardening/`. No push or merge was performed.
 
 ## Open decisions
 
-- None. The saved scheduled-review policy delegates this bounded remediation.
+- None. The user explicitly requested resolving the failures one at a time;
+  Gate 20 remains the first checkpoint.
 
 ## Active diagnosis
 
