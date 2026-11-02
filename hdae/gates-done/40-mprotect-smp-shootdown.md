@@ -31,13 +31,13 @@ writable translation for the same Linux address space.
   `smp::invalidate_runtime_translation`.
 - [x] Confirmed that mechanism waits for every online sibling CPU to
   acknowledge the invalidation.
+- [x] Routed each active-image permission revoke through the acknowledged SMP
+  invalidator and restore the old PTE if it cannot complete.
+- [x] Passed focused compilation, the complete static gate, and default
+  two-vCPU QEMU regression.
 
 ## Remaining work
 
-- [ ] Require acknowledged shootdown for each active-image permission revoke.
-- [ ] Bind the existing active-image read-only transition proof to the existing
-  2-vCPU acknowledged-shootdown proof.
-- [ ] Run focused, static, and complete QEMU verification.
 - [ ] Push, open the remediation PR, add reciprocal links, and confirm CI.
 
 ## Acceptance criteria
@@ -62,6 +62,13 @@ writable translation for the same Linux address space.
 
 - Issue #25's cited fast path and the existing acknowledged mechanism match
   current `kernel/src/address_space.rs` and `kernel/src/arch/x86_64/smp.rs`.
+- `make check` passed with the unchanged 1,033-block unsafe baseline and Linux
+  compatibility matrix.
+- `make test` passed on the default two-vCPU profile, including both
+  `cross-CPU interrupts and invalidation verified` and
+  `Linux read-only memory transition validated`.
+- Source inspection confirms no local-only `invlpg` remains in
+  `protect_current_linux_range_read_only`.
 
 ## Decisions and limitations
 
@@ -75,9 +82,10 @@ writable translation for the same Linux address space.
 - Pull request: intended; non-closing reference to issue #25
 - Planned commits: gate definition; acknowledged revocation and regression;
   evidence; delivery
-- Actual commits: pending
+- Actual commits: `949b3b19` (gate definition), `0d2ce4b0` (acknowledged
+  revocation), plus the evidence/delivery commit containing this record
 
 ## Review policy and outcome
 
-Delegated in the user-approved remaining-reports batch; stop only if the
-existing shootdown cannot safely cover shared Linux address spaces.
+Passed and closed under the user-approved remaining-reports batch delegation.
+The established shootdown safely covers every online CPU without an ABI change.

@@ -7,11 +7,11 @@
 - Active project: remaining reporter remediation batch
 - Branch: `hdae/issue-25-mprotect-shootdown`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 40, acknowledged SMP mprotect revocation for issue #25
-- Last completed action: confirmed the active-image fast path invalidates only
-  the local TLB while the established runtime path waits for all online CPUs
-- Next action: commit Gate 40 and route the fast path through the acknowledged
-  SMP invalidator
+- Active gate: Gate 40, passed and awaiting delivery for issue #25
+- Last completed action: routed active-image permission revocation through the
+  acknowledged SMP invalidator and passed fresh `make check` plus `make test`
+- Next action: publish the Gate 40 branch and PR, add reciprocal links, then
+  start Gate 41 for issue #27
 
 ## Current repository state
 
