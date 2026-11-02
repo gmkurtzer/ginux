@@ -10,7 +10,7 @@
 - Active gate: Gate 32, TLS client entropy
 - Last completed action: maintainer review of PR #40 corrected the false
   `preserves_flags` declaration and fresh `make check` and `make test` passed
-- Next action: push the review correction to PR #40 and verify its final CI
+- Next action: push commit `29c452c1` to PR #40 and verify its final CI
 
 ## Current repository state
 

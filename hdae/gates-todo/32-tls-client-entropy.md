@@ -89,8 +89,8 @@ is unavailable.
   reference to issue #15
 - Planned commits: implementation and regression evidence; delivery checkpoint
 - Actual commits: `62756f4d` (implementation, generated boot image, and
-  verification evidence), `4d12e47d` (delivery checkpoint), assembly contract
-  correction and review evidence pending
+  verification evidence), `4d12e47d` (delivery checkpoint), `29c452c1`
+  (assembly contract correction and fresh review evidence)
 
 ## Review policy and outcome
 
