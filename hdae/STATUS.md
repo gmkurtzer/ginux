@@ -8,22 +8,22 @@
 - Branch: `hdae/issue-18-whiteout-subtree`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 35, directory whiteout subtrees for issue #18
-- Last completed action: PR #45 for issue #18 passed both GitHub `static` and
-  `qemu` checks after all local evidence and reciprocal links passed
-- Next action: record and push final Gate 35 evidence, then create the dedicated
-  issue #19 per-domain memory-accounting branch and Gate 36
+- Last completed action: merged current `main` at `95f8ef24` into PR #45 and
+  reconciled the Gate 35 checkpoint after PR #44 merged and issue #17 closed
+- Next action: run fresh `make check` and `make test`, commit and push the
+  synchronized head, then verify its new CI and first-pass review marker
 
 ## Current repository state
 
-Remote `main` is at `ecbb3142` after merged PR #42. The first
+Remote `main` is at `95f8ef24` after merged PR #44. The first
 eleven feedback-hardening gates and inserted correctness gates are complete.
 Gate 12 is complete on `codex/performance-parity`. Gates 13 through 19 and 21
 through 23 and Gates 32 through 33 remain in `gates-todo/` for maintainer
-review after delivery through merged pull requests. Gate 34 is delivered
-through open PR #44; Gate 35 is active.
+review after delivery through merged pull requests. Gate 34 was delivered
+through merged PR #44 and issue #17 is closed; Gate 35 is active in PR #45.
 The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
 matrix and repeated stress pass. Gate 11's comparison and reduced evidence are
-under `docs/feedback-hardening/`. No push or merge was performed.
+under `docs/feedback-hardening/`. No direct push to `main` was performed.
 
 ## Open decisions
 
