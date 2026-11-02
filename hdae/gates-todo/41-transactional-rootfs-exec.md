@@ -41,7 +41,8 @@ ownership intact, while a successful `exec` publishes one complete new image.
 - [x] Ran focused, static, and complete deterministic QEMU verification.
 - [ ] Obtain a reachable OCI registry/cache and rerun the Rocky shell path so
   the rootfs-specific integration branch executes end to end.
-- [ ] Push, open the remediation PR, add reciprocal links, and confirm CI.
+- [x] Pushed, opened PR #53, and added the reciprocal issue link. CI remains
+  external follow-up evidence.
 
 ## Acceptance criteria
 
@@ -77,6 +78,8 @@ ownership intact, while a successful `exec` publishes one complete new image.
 - `make test-rocky-shell` -> review incomplete before the code under test: the
   guest rejected every OCI registry DNS response and exhausted three pull
   attempts, so no image was unpacked or executed.
+- PR #53: <https://github.com/gmkurtzer/ginux/pull/53>.
+- Issue summary: <https://github.com/gmkurtzer/ginux/issues/27#issuecomment-6569276429>.
 
 ## Decisions and limitations
 
@@ -96,7 +99,8 @@ ownership intact, while a successful `exec` publishes one complete new image.
 - Planned commits: gate definition; transaction mechanism and failure
   injection; evidence; delivery
 - Actual commits: `cb87d157` defines the gate; `8a952b29` implements staged
-  publication and deterministic transaction verification; delivery pending.
+  publication and deterministic transaction verification; `65ac3d0d` records
+  evidence; final delivery record follows in the next commit.
 
 ## Review policy and outcome
 

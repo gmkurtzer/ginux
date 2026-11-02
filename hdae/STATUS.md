@@ -8,11 +8,12 @@
 - Branch: `hdae/issue-27-transactional-rootfs-exec`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 41, transactional rootfs exec for issue #27
-- Last completed action: staged rootfs exec passed `make check` and complete
-  deterministic `make test`; `make test-rocky-shell` stopped before unpack/exec
-  because guest OCI DNS failed on all three pull attempts
-- Next action: publish the partial-evidence remediation PR and reciprocal issue
-  summary, then triage and implement issue #43 on a dedicated gate/branch
+- Last completed action: delivered the partial-evidence staged rootfs exec in
+  PR #53 with a reciprocal issue summary; the Rocky registry DNS limitation is
+  explicit in both
+- Next action: create a dedicated gate/branch from `main` for issue #43,
+  reproduce release overflow behavior, implement the narrow fix, and measure
+  image-size plus boot impact
 
 ## Current repository state
 
