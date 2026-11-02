@@ -8,10 +8,10 @@
 - Branch: `hdae/issue-18-whiteout-subtree`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 35, directory whiteout subtrees for issue #18
-- Last completed action: opened PR #45 for issue #18 after all local evidence
-  passed, then added reciprocal issue and PR summaries
-- Next action: record and push the PR link checkpoint, then confirm PR #45 CI
-  before advancing to issue #19
+- Last completed action: PR #45 for issue #18 passed both GitHub `static` and
+  `qemu` checks after all local evidence and reciprocal links passed
+- Next action: record and push final Gate 35 evidence, then create the dedicated
+  issue #19 per-domain memory-accounting branch and Gate 36
 
 ## Current repository state
 

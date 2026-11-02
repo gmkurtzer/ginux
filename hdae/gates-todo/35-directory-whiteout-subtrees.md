@@ -37,7 +37,7 @@ and every descendant so removed content cannot reappear by full-path lookup.
 - [x] Add focused regression coverage.
 - [x] Run focused, static, and complete QEMU verification.
 - [x] Push, open the remediation PR, and add reciprocal links.
-- [ ] Confirm final pull-request CI.
+- [x] Confirm pull-request CI on the delivered code and link head.
 
 ## Acceptance criteria
 
@@ -69,6 +69,8 @@ and every descendant so removed content cannot reappear by full-path lookup.
   `GINUX_KERNEL_OK` and reported `Boot test passed.`
 - [PR #45](https://github.com/gmkurtzer/ginux/pull/45) contains the dedicated
   remediation branch; issue #18 and the PR contain reciprocal summaries.
+- PR #45 GitHub `static` and `qemu` checks passed on the delivered code and
+  reciprocal-link head.
 
 ## Decisions and limitations
 
@@ -90,4 +92,5 @@ and every descendant so removed content cannot reappear by full-path lookup.
 ## Review policy and outcome
 
 Delegated in the user-approved remaining-reports batch. Stop only for failed
-evidence or a new architectural decision; final review occurs after the batch.
+evidence or a new architectural decision; all objective Gate 35 criteria pass,
+and final review occurs after the batch.
