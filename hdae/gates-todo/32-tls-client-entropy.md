@@ -82,7 +82,8 @@ is unavailable.
 - Intended base: `main`
 - Pull request: intended; non-closing reference to issue #15
 - Planned commits: implementation and regression evidence; delivery checkpoint
-- Actual commits: implementation and evidence commit pending
+- Actual commits: `62756f4d` (implementation, generated boot image, and
+  verification evidence); delivery checkpoint pending
 
 ## Review policy and outcome
 

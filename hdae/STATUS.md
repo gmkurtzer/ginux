@@ -11,8 +11,8 @@
 - Last completed action: implemented CPUID-gated bounded `RDRAND` seeding for
   every TLS connection; targeted lint, `make check`, and the complete QEMU
   `make test` pass
-- Next action: commit and push Gate 32, then open its pull request and add
-  reciprocal Issue #15 links
+- Next action: push Gate 32, then open its pull request and add reciprocal
+  Issue #15 links
 
 ## Current repository state
 
