@@ -78,6 +78,7 @@ pub(crate) fn inspect(base: *const u8, mapped_size: usize) -> Option<ImageSummar
     let mut executable_range_count = 0_usize;
     let mut writable_ranges = [(0_usize, 0_usize); MAX_SECTIONS];
     let mut writable_range_count = 0_usize;
+    let mut section_ranges = [(0_usize, 0_usize); MAX_SECTIONS];
     for index in 0..sections {
         let section = section_table.checked_add(index.checked_mul(SECTION_HEADER_SIZE)?)?;
         let virtual_size = read_u32(base, mapped_size, section + 8)? as usize;
@@ -90,6 +91,16 @@ pub(crate) fn inspect(base: *const u8, mapped_size: usize) -> Option<ImageSummar
                     .is_none_or(|end| end > image_size))
         {
             return None;
+        }
+        if virtual_size != 0 {
+            let end = virtual_address.checked_add(virtual_size)?;
+            if section_ranges[..index]
+                .iter()
+                .any(|&(prior_start, prior_end)| virtual_address < prior_end && prior_start < end)
+            {
+                return None;
+            }
+            section_ranges[index] = (virtual_address, end);
         }
         let executable = characteristics & SECTION_EXECUTE != 0;
         let writable = characteristics & SECTION_WRITE != 0;
@@ -139,4 +150,100 @@ fn read_u16(base: *const u8, size: usize, offset: usize) -> Option<u16> {
 fn read_u32(base: *const u8, size: usize, offset: usize) -> Option<u32> {
     let end = offset.checked_add(4)?;
     (end <= size).then(|| unsafe { base.add(offset).cast::<u32>().read_unaligned() })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[repr(align(4096))]
+    struct Image([u8; PAGE_SIZE * 5]);
+
+    fn image(sections: &[(u32, u32, u32)]) -> Image {
+        let mut image = Image([0; PAGE_SIZE * 5]);
+        let bytes = &mut image.0;
+        let pe = 64;
+        let coff = pe + 4;
+        let optional = coff + COFF_HEADER_SIZE;
+        let table = optional + 64;
+        bytes[..2].copy_from_slice(&DOS_MAGIC.to_le_bytes());
+        bytes[0x3c..0x40].copy_from_slice(&(pe as u32).to_le_bytes());
+        bytes[pe..pe + 4].copy_from_slice(&PE_SIGNATURE.to_le_bytes());
+        bytes[coff..coff + 2].copy_from_slice(&AMD64_MACHINE.to_le_bytes());
+        bytes[coff + 2..coff + 4].copy_from_slice(&(sections.len() as u16).to_le_bytes());
+        bytes[coff + 16..coff + 18].copy_from_slice(&64_u16.to_le_bytes());
+        bytes[optional..optional + 2].copy_from_slice(&PE32_PLUS_MAGIC.to_le_bytes());
+        bytes[optional + 32..optional + 36].copy_from_slice(&(PAGE_SIZE as u32).to_le_bytes());
+        bytes[optional + 56..optional + 60]
+            .copy_from_slice(&((PAGE_SIZE * 5) as u32).to_le_bytes());
+        for (index, &(start, size, flags)) in sections.iter().enumerate() {
+            let section = table + index * SECTION_HEADER_SIZE;
+            bytes[section + 8..section + 12].copy_from_slice(&size.to_le_bytes());
+            bytes[section + 12..section + 16].copy_from_slice(&start.to_le_bytes());
+            bytes[section + 36..section + 40].copy_from_slice(&flags.to_le_bytes());
+        }
+        image
+    }
+
+    #[test]
+    fn adjacent_sections_preserve_summary_and_permissions() {
+        let image = image(&[(4096, 4096, SECTION_EXECUTE), (8192, 4096, SECTION_WRITE)]);
+        let base = image.0.as_ptr() as usize;
+        let summary = inspect(image.0.as_ptr(), image.0.len()).expect("disjoint sections");
+        assert_eq!(summary.sections, 2);
+        assert_eq!(summary.executable_sections, 1);
+        assert_eq!(summary.writable_sections, 1);
+        assert_eq!(summary.image_range(), (base, base + image.0.len()));
+        assert_eq!(summary.executable_ranges(), &[(base + 4096, base + 8192)]);
+        assert_eq!(summary.writable_ranges(), &[(base + 8192, base + 12288)]);
+    }
+
+    #[test]
+    fn rejects_overlaps_regardless_of_permissions_or_section_order() {
+        for (first, second) in [
+            ((4096, 4096, SECTION_EXECUTE), (4096, 4096, SECTION_WRITE)),
+            ((4096, 8192, SECTION_EXECUTE), (8192, 8192, SECTION_WRITE)),
+            ((4096, 12288, SECTION_EXECUTE), (8192, 4096, 0)),
+            ((8192, 4096, SECTION_EXECUTE), (8192, 4096, SECTION_EXECUTE)),
+        ] {
+            for sections in [[first, second], [second, first]] {
+                let image = image(&sections);
+                assert!(inspect(image.0.as_ptr(), image.0.len()).is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn rejects_overlaps_between_read_only_sections() {
+        let image = image(&[(4096, 4096, SECTION_EXECUTE), (8192, 4096, 0), (8192, 1, 0)]);
+        assert!(inspect(image.0.as_ptr(), image.0.len()).is_none());
+    }
+
+    #[test]
+    fn rejects_overlaps_with_nonadjacent_sections() {
+        let image = image(&[(4096, 4096, SECTION_EXECUTE), (8192, 4096, 0), (4096, 1, 0)]);
+        assert!(inspect(image.0.as_ptr(), image.0.len()).is_none());
+    }
+
+    #[test]
+    fn ignores_empty_sections_and_accepts_unsorted_disjoint_sections() {
+        let image = image(&[
+            (8192, 4096, SECTION_WRITE),
+            (4096, 4096, SECTION_EXECUTE),
+            (4096, 0, 0),
+        ]);
+        assert!(inspect(image.0.as_ptr(), image.0.len()).is_some());
+    }
+
+    #[test]
+    fn rejects_existing_alignment_bounds_and_writable_code_violations() {
+        for section in [
+            (4097, 1, SECTION_EXECUTE),
+            (16384, 8192, SECTION_EXECUTE),
+            (4096, 4096, SECTION_EXECUTE | SECTION_WRITE),
+        ] {
+            let image = image(&[section]);
+            assert!(inspect(image.0.as_ptr(), image.0.len()).is_none());
+        }
+    }
 }

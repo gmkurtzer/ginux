@@ -8,18 +8,18 @@
 - Branch: `hdae/issue-14-native-volume-linux`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 20, Linux native-volume recovery
-- Last completed action: created a bounded Ubuntu/QEMU TCG reproduction
-  workflow after mapping the reported fault outside the service executable
-- Next action: push the reproduction checkpoint, inspect its exact Linux fault
-  evidence, then implement and verify the smallest supported correction
+- Last completed action: merged current `main`, including PR #31's explicit
+  48-bit QEMU IOMMU address width, into the Linux reproduction branch
+- Next action: push the refreshed branch, inspect the new Ubuntu/QEMU run, and
+  implement the smallest correction only if it reproduces Issue #14
 
 ## Current repository state
 
-Remote `main` identifies merged PRs #9 and #10 at commit `759cf2e2`. The first
+Remote `main` is at `fbe6472e` after merged PRs #31 through #38. The first
 eleven feedback-hardening gates and inserted correctness gates are complete.
-Gate 12 is complete on `codex/performance-parity`. Gates 13 through 18 remain
-in `gates-todo/` for maintainer review after delivery through merged PRs #9
-and #10. Gate 19 is delivered through open PR #13.
+Gate 12 is complete on `codex/performance-parity`. Gates 13 through 19 and 21
+through 23 remain in `gates-todo/` for maintainer review after delivery through
+merged pull requests. Gate 20 remains active on this branch.
 The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
 matrix and repeated stress pass. Gate 11's comparison and reduced evidence are
 under `docs/feedback-hardening/`. No push or merge was performed.

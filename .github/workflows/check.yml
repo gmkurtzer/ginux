@@ -24,6 +24,13 @@ jobs:
       - uses: actions/checkout@v5
       - run: brew install qemu
       - run: rustup target add x86_64-unknown-uefi x86_64-unknown-none
-      - run: make test
+      - name: QEMU boot smoke test
+        if: github.event_name == 'pull_request'
+        run: make test-qemu-smoke
+        env:
+          GINUX_BOOT_TIMEOUT_SECONDS: 180
+      - name: Full QEMU integration test
+        if: github.event_name == 'push'
+        run: make test
         env:
           GINUX_BOOT_TIMEOUT_SECONDS: 300

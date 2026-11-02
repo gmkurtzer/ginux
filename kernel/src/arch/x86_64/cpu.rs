@@ -22904,7 +22904,7 @@ fn linux_normalized_relative_path(path: &[u8]) -> bool {
 
 fn linux_getcwd(address: u64, capacity: u64) -> u64 {
     let state = X86_RUNTIME.ELF_PROBE_CWD.load(Ordering::SeqCst);
-    let mut output = [0_u8; crate::linux_overlay::PATH_CAPACITY + 1];
+    let mut output = [0_u8; crate::linux_overlay::PATH_CAPACITY + 2];
     output[0] = b'/';
     let rootfs_cwd = X86_RUNTIME.ELF_PROBE_ROOTFS_CWD.load(Ordering::SeqCst);
     let overlay_cwd = X86_RUNTIME.ELF_PROBE_OVERLAY_CWD.load(Ordering::SeqCst);

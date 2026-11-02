@@ -81,7 +81,7 @@ exec "$qemu" \
     -serial stdio \
     -no-reboot \
     -net none \
-    -device "intel-iommu,intremap=off" \
+    -device "intel-iommu,intremap=off,aw-bits=48" \
     -device "virtio-blk-pci,drive=ginux-volume,disable-legacy=on,iommu_platform=on,serial=ginux-volume" \
     -netdev "$qemu_netdev" \
     ${network_capture[@]+"${network_capture[@]}"} \
