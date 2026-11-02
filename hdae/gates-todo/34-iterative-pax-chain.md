@@ -31,7 +31,7 @@ kernel stack growth while preserving valid PAX override behavior.
 ## Remaining work
 
 - [x] Implement iterative PAX parsing and regression coverage.
-- [ ] Run `make check` and `make test`.
+- [x] Run `make check` and `make test`.
 - [ ] Push, open the remediation PR, and add reciprocal links.
 
 ## Acceptance criteria
@@ -55,6 +55,10 @@ kernel stack growth while preserving valid PAX override behavior.
   4,000-header chain and multi-header override precedence.
 - Warning-denying `ginux-oci` clippy passed; source search confirms the
   recursive call is absent.
+- `make check` -> passed all static, architecture, unit, and warning-denying
+  checks; all 10 `ginux-oci` tests passed in the complete suite.
+- `make test` -> the complete two-vCPU QEMU verification boot reached
+  `GINUX_KERNEL_OK` and reported `Boot test passed.`
 
 ## Decisions and limitations
 
@@ -68,7 +72,8 @@ kernel stack growth while preserving valid PAX override behavior.
 - Pull request: intended; non-closing reference to issue #17
 - Planned commits: iterative parser and regression; generated/evidence;
   delivery checkpoint
-- Actual commits: `e9976442` gate definition; implementation pending
+- Actual commits: `e9976442` gate definition; `4294c0a7` iterative parser and
+  regression; delivery checkpoint pending
 
 ## Review policy and outcome
 

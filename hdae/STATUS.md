@@ -8,9 +8,10 @@
 - Branch: `hdae/issue-17-pax-chain`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 34, iterative PAX header chains for issue #17
-- Last completed action: iterative PAX parsing and the 4,000-header regression
-  pass targeted unit tests and warning-denying clippy
-- Next action: commit the implementation and run full static and QEMU evidence
+- Last completed action: iterative PAX parsing, its 4,000-header regression,
+  `make check`, and the complete two-vCPU `make test` verification all pass
+- Next action: commit the Gate 34 evidence checkpoint, push the branch, open
+  the issue #17 remediation PR, and add reciprocal links
 
 ## Current repository state
 
