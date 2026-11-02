@@ -32,7 +32,8 @@ kernel stack growth while preserving valid PAX override behavior.
 
 - [x] Implement iterative PAX parsing and regression coverage.
 - [x] Run `make check` and `make test`.
-- [ ] Push, open the remediation PR, and add reciprocal links.
+- [x] Push, open the remediation PR, and add reciprocal links.
+- [ ] Confirm final pull-request CI.
 
 ## Acceptance criteria
 
@@ -59,6 +60,8 @@ kernel stack growth while preserving valid PAX override behavior.
   checks; all 10 `ginux-oci` tests passed in the complete suite.
 - `make test` -> the complete two-vCPU QEMU verification boot reached
   `GINUX_KERNEL_OK` and reported `Boot test passed.`
+- [PR #44](https://github.com/gmkurtzer/ginux/pull/44) contains the dedicated
+  remediation branch; issue #17 and the PR contain reciprocal summaries.
 
 ## Decisions and limitations
 
@@ -69,11 +72,13 @@ kernel stack growth while preserving valid PAX override behavior.
 
 - Working branch: `hdae/issue-17-pax-chain`
 - Intended base: `main`
-- Pull request: intended; non-closing reference to issue #17
+- Pull request: [#44](https://github.com/gmkurtzer/ginux/pull/44); non-closing
+  reference to issue #17
 - Planned commits: iterative parser and regression; generated/evidence;
   delivery checkpoint
 - Actual commits: `e9976442` gate definition; `4294c0a7` iterative parser and
-  regression; delivery checkpoint pending
+  regression; `7ac928e2` verification evidence; delivery-link checkpoint
+  pending
 
 ## Review policy and outcome
 

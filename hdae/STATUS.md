@@ -8,10 +8,10 @@
 - Branch: `hdae/issue-17-pax-chain`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 34, iterative PAX header chains for issue #17
-- Last completed action: iterative PAX parsing, its 4,000-header regression,
-  `make check`, and the complete two-vCPU `make test` verification all pass
-- Next action: commit the Gate 34 evidence checkpoint, push the branch, open
-  the issue #17 remediation PR, and add reciprocal links
+- Last completed action: opened PR #44 for issue #17 after all local evidence
+  passed, then added reciprocal issue and PR summaries
+- Next action: record and push the PR link checkpoint, then confirm PR #44 CI
+  before advancing to issue #18
 
 ## Current repository state
 
