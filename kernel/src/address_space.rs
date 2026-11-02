@@ -3609,6 +3609,7 @@ pub(crate) fn replace_current_linux_image_and_hierarchy(
     old_mappings: &[cpu::LinuxActiveImageMapping],
     old_hierarchy: &[memory::FrameLease],
     new_hierarchy: &[memory::FrameLease],
+    preserve_frame: impl Fn(memory::FrameLease) -> bool,
 ) -> bool {
     if old_hierarchy.len() != new_hierarchy.len()
         || !(5..=6).contains(&old_hierarchy.len())
@@ -3659,15 +3660,19 @@ pub(crate) fn replace_current_linux_image_and_hierarchy(
     ) {
         return false;
     }
-    let mut retired_mappings = [memory::FrameLease::EMPTY; cpu::LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
-    let mut retired_mapping_count = 0;
-    for mapping in old_mappings.iter().filter(|mapping| !mapping.shared) {
-        retired_mappings[retired_mapping_count] = mapping.frame;
-        retired_mapping_count += 1;
-    }
-    let retired_mappings = &retired_mappings[..retired_mapping_count];
-    if !memory::frame_leases_releasable(memory::FrameOwner::KERNEL, retired_mappings)
-        || !memory::frame_leases_releasable(memory::FrameOwner::KERNEL, old_hierarchy)
+    let retire_mapping = |mapping: &&cpu::LinuxActiveImageMapping| {
+        !mapping.shared
+            && !preserve_frame(mapping.frame)
+            && !mappings
+                .iter()
+                .any(|replacement| replacement.frame == mapping.frame.address())
+    };
+    if old_mappings.iter().filter(retire_mapping).any(|mapping| {
+        !memory::frame_leases_releasable(
+            memory::FrameOwner::KERNEL,
+            core::slice::from_ref(&mapping.frame),
+        )
+    }) || !memory::frame_leases_releasable(memory::FrameOwner::KERNEL, old_hierarchy)
     {
         return false;
     }
@@ -3676,8 +3681,12 @@ pub(crate) fn replace_current_linux_image_and_hierarchy(
         unsafe { activate(old_hierarchy[0].address()) };
         return false;
     }
-    memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, retired_mappings)
-        && memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, old_hierarchy)
+    old_mappings.iter().filter(retire_mapping).all(|mapping| {
+        memory::scrub_and_release_frames(
+            memory::FrameOwner::KERNEL,
+            core::slice::from_ref(&mapping.frame),
+        )
+    }) && memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, old_hierarchy)
 }
 
 fn prepare_linux_hierarchy_replacement(

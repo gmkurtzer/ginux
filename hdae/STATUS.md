@@ -7,17 +7,18 @@
 - Active project: remaining reporter remediation batch
 - Branch: `hdae/issue-27-transactional-rootfs-exec`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 41, transactional rootfs exec for issue #27, checkpointed
-- Last completed action: confirmed publication precedes multiple fallible and
-  destructive operations and enumerated the required transaction surfaces
-- Next action: await the staged-address-space versus full-rollback-guard choice;
-  continue independent Gate 42 for issue #28 meanwhile
+- Active gate: Gate 41, transactional rootfs exec for issue #27
+- Last completed action: recorded the human-selected staged replacement
+  address-space design with direct materialization into final replacement frames
+- Next action: isolate preparation from publication in
+  `linux_rootfs_execve_source`, add deterministic pre-commit failure checks,
+  and run focused plus full verification
 
 ## Current repository state
 
 Remote `main` is at `ecbb3142`. The first
 eleven feedback-hardening gates and inserted correctness gates are complete.
-Gate 12 is complete on `codex/performance-parity`. Gate 41 is checkpointed on
+Gate 12 is complete on `codex/performance-parity`. Gate 41 is active on
 this branch; Gates 34 through 36 and 38 through 40 are delivered on dedicated
 open PRs, while Gate 37 awaits the separate unpack-memory policy decision.
 The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
@@ -26,8 +27,7 @@ under `docs/feedback-hardening/`. No push or merge was performed.
 
 ## Open decisions
 
-- Gate 37 awaits the unpack-memory policy.
-- Gate 41 awaits the rootfs-exec transaction-boundary choice.
+- None for Gate 41. The human selected staged address-space publication.
 
 ## Active diagnosis
 

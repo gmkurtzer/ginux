@@ -1506,35 +1506,6 @@ impl ProcessTable {
         true
     }
 
-    fn set_exec_context(&mut self, pid: u32, rip: u64, rsp: u64) -> bool {
-        let Some(handle) = self.handle_by_pid(pid) else {
-            return false;
-        };
-        let Some(process) = self
-            .process_mut(handle)
-            .filter(|process| process.state == ProcessState::Running)
-        else {
-            return false;
-        };
-        let context = ProcessExecutionContext {
-            general: [0; 15],
-            rip,
-            rsp,
-            rflags: (1 << 1) | (1 << 9),
-            fs_base: 0,
-        };
-        if process
-            .address_space
-            .as_ref()
-            .is_none_or(|space| !context.is_valid(space))
-        {
-            return false;
-        }
-        process.context = Some(context);
-        process.executed = true;
-        true
-    }
-
     fn process(&self, handle: ProcessHandle) -> Option<&Process> {
         self.processes
             .get(usize::from(handle.slot))?
@@ -2754,10 +2725,6 @@ pub(crate) fn mark_live_process_executed(pid: u32) -> bool {
     live_process_table_mut().is_some_and(|table| table.mark_executed(pid))
 }
 
-pub(crate) fn set_live_process_exec_context(pid: u32, rip: u64, rsp: u64) -> bool {
-    live_process_table_mut().is_some_and(|table| table.set_exec_context(pid, rip, rsp))
-}
-
 pub(crate) fn live_process_slot(pid: u32) -> Option<usize> {
     let table = live_process_table_mut()?;
     let handle = table.handle_by_pid(pid)?;
@@ -2895,25 +2862,6 @@ pub(crate) fn replace_live_process_mapping(
         writable,
         executable,
         false,
-    )
-}
-
-pub(crate) fn replace_live_process_mapping_for_exec(
-    pid: u32,
-    address: usize,
-    expected: memory::FrameLease,
-    replacement: memory::FrameLease,
-    writable: bool,
-    executable: bool,
-) -> bool {
-    replace_live_process_mapping_inner(
-        pid,
-        address,
-        expected,
-        replacement,
-        writable,
-        executable,
-        true,
     )
 }
 

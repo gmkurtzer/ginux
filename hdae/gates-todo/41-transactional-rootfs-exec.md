@@ -9,18 +9,16 @@
 Make every failed rootfs `exec` leave the complete old process image and frame
 ownership intact, while a successful `exec` publishes one complete new image.
 
-## Scope awaiting human decision
+## Approved scope
 
-Choose one complete transaction boundary before implementation:
-
-- Recommended: build a staged replacement address space and process-image
-  metadata, then publish it at one atomic commit point.
-- Alternative: retain a complete old-image ownership guard and roll back page
-  tables, mapping registry, heap/stack, mmap state, TLS, thread/process context,
-  descriptors, signals, vvar, and all frame ownership on every late failure.
-
-Both designs must cover every mutable surface; a segments-only rollback is not
-acceptable.
+- Build the replacement address space and complete process-image metadata in
+  staged ownership that is not observable by the running process.
+- Materialize ELF and stack bytes directly into their final replacement frames;
+  staging must not add a payload copy.
+- Publish the mutually consistent replacement at one commit point, then retire
+  the old image exactly once.
+- Cover page tables, mapping registry, heap/stack, mmap state, TLS,
+  thread/process context, descriptors, signals, vvar, and frame ownership.
 
 ## Non-goals
 
@@ -34,11 +32,10 @@ acceptable.
   are replaced before fallible heap/stack/reset/release/context checks.
 - [x] Confirmed old segment frames may be scrubbed before those late checks.
 - [x] Identified all late mutable surfaces that must share one transaction.
+- [x] Human selected staged replacement address-space publication.
 
 ## Remaining work
 
-- [ ] Obtain the human's transaction-boundary choice.
-- [ ] Finalize acceptance and implementation tasks for that design.
 - [ ] Implement deterministic injected-failure rollback checks at each stage.
 - [ ] Run focused, static, and complete QEMU verification.
 - [ ] Push, open the remediation PR, add reciprocal links, and confirm CI.
@@ -72,10 +69,10 @@ acceptable.
 
 ## Decisions and limitations
 
-- Open decision: staged address-space publication (recommended) versus a
-  complete old-image rollback guard.
-- Work is paused because choosing between these changes the ownership and
-  publication architecture.
+- The human selected staged address-space publication because it keeps failure
+  cleanup local, reuses the existing replacement-hierarchy machinery, and adds
+  no payload copy. Temporary peak ownership includes old plus replacement
+  frames until commit.
 
 ## Delivery strategy
 
@@ -88,5 +85,7 @@ acceptable.
 
 ## Review policy and outcome
 
-Human checkpoint for the transaction-boundary choice; implementation may then
-run under the approved remaining-reports batch policy.
+The transaction-boundary checkpoint was resolved by the human. Implementation
+and objective closure may proceed under the approved remaining-reports batch;
+publishing the PR and reciprocal comments is authorized, but merge and issue
+closure are not.

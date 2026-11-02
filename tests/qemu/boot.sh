@@ -162,6 +162,11 @@ if ! grep -q '^GINUX_KERNEL_OK' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: staged Linux exec hierarchy rollback and commit verified' "$output_file"; then
+    echo "Boot test failed: staged Linux exec hierarchy transaction was not verified." >&2
+    exit 1
+fi
+
 "$repo_root/tests/qemu/check-linux-runtime.sh" "$output_file"
 
 if ! grep -q '^ginux: modern virtio network function: 0:3.0' "$output_file" ||

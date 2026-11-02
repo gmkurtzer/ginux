@@ -23234,6 +23234,7 @@ fn replace_current_linux_image_with_hierarchy(
     mappings: &[LinuxExecMapping],
     old_mappings: &[LinuxActiveImageMapping],
     hierarchy_count: usize,
+    preserve_frame: impl Fn(memory::FrameLease) -> bool,
 ) -> bool {
     let old: [Option<memory::FrameLease>; 6] = core::array::from_fn(|index| {
         memory::FrameLease::from_parts(
@@ -23247,6 +23248,7 @@ fn replace_current_linux_image_with_hierarchy(
                 mappings,
                 old_mappings,
                 [root, pdpt, directory, main, read_only],
+                &preserve_frame,
             )
         }
         (
@@ -23256,6 +23258,7 @@ fn replace_current_linux_image_with_hierarchy(
             mappings,
             old_mappings,
             [root, pdpt, directory, read_only, main, interpreter],
+            &preserve_frame,
         ),
         _ => false,
     }
@@ -23266,6 +23269,7 @@ fn replace_current_linux_image_hierarchy<const N: usize>(
     mappings: &[LinuxExecMapping],
     old_mappings: &[LinuxActiveImageMapping],
     old: [memory::FrameLease; N],
+    preserve_frame: &impl Fn(memory::FrameLease) -> bool,
 ) -> bool {
     if address_space::current_root_address() != old[0].address()
         || !memory::frames_owned_by(memory::FrameOwner::KERNEL, &old)
@@ -23287,6 +23291,7 @@ fn replace_current_linux_image_hierarchy<const N: usize>(
             old_mappings,
             &old,
             &new,
+            preserve_frame,
         )
     {
         let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &new);
@@ -23297,6 +23302,7 @@ fn replace_current_linux_image_hierarchy<const N: usize>(
         X86_RUNTIME.ELF_PROBE_PAGE_TABLE_GENERATIONS[index]
             .store(frame.generation(), Ordering::SeqCst);
     }
+    serial_write("ginux: staged Linux exec hierarchy rollback and commit verified\r\n");
     true
 }
 
@@ -23576,23 +23582,71 @@ fn linux_rootfs_execve_source(
         serial_write("\r\n");
         return LINUX_ENOEXEC;
     };
+    let pid = current_linux_process_pid();
+    let Some(old_address_space) = live_linux_process_address_space_snapshot() else {
+        return LINUX_ENOEXEC;
+    };
+    let stack_low = X86_RUNTIME.ELF_PROBE_STACK_LOW.load(Ordering::SeqCst) as usize;
+    if stack_low == 0 || stack_low > stack_page as usize || !stack_low.is_multiple_of(PAGE_SIZE) {
+        return LINUX_ENOEXEC;
+    }
+    let stack_pages = (stack_page as usize - stack_low) / PAGE_SIZE + 1;
+    let Some(heap_base) = (X86_RUNTIME.ELF_PROBE_BRK_LIMIT.load(Ordering::SeqCst) as usize)
+        .checked_sub(LINUX_RUNTIME_HEAP_PAGES * PAGE_SIZE)
+    else {
+        return LINUX_ENOEXEC;
+    };
+    let Some(staged_mapping_count) = replacement_count
+        .checked_add(LINUX_RUNTIME_HEAP_PAGES)
+        .and_then(|count| count.checked_add(stack_pages))
+        .filter(|count| *count <= LINUX_ACTIVE_IMAGE_MAPPING_LIMIT - 2)
+    else {
+        return LINUX_ENOMEM;
+    };
+    let process_name = path.rsplit(|byte| *byte == b'/').next().unwrap_or(path);
+    if process_name.is_empty() {
+        return LINUX_ENOEXEC;
+    }
+    let process_name = &process_name[..process_name.len().min(15)];
+    let Some(main_code) = plan.main_executable() else {
+        return LINUX_ENOEXEC;
+    };
+    let Some(loader_code) = plan.loader_executable() else {
+        return LINUX_ENOEXEC;
+    };
+    let Some(thread) =
+        current_linux_thread_handle().filter(|thread| linux_thread_context(*thread).is_some())
+    else {
+        return LINUX_ESRCH;
+    };
+    let thread_slot = usize::from(thread.slot);
+    let Some(stack_end) = stack_page.checked_add(PAGE_SIZE as u64) else {
+        return LINUX_ENOMEM;
+    };
+    let Some(stack_size) = stack_end.checked_sub(stack_low as u64) else {
+        return LINUX_ENOEXEC;
+    };
     let Some(replacements) = memory::allocate_frame_prefix::<LINUX_ACTIVE_IMAGE_MAPPING_LIMIT>(
         memory::FrameOwner::KERNEL,
-        replacement_count,
+        staged_mapping_count,
     ) else {
         serial_write("ginux: Linux exec frame allocation failed count: ");
-        serial_write_u64(replacement_count as u64);
+        serial_write_u64(staged_mapping_count as u64);
         serial_write("\r\n");
         return LINUX_ENOMEM;
     };
     let mut replacement_index = 0;
-    let pid = current_linux_process_pid();
+    let mut staged_mappings = [LinuxExecMapping::EMPTY; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
     let release_parent_on_exec = X86_RUNTIME
         .LINUX_PROCESS_RELEASE_PARENT_ON_EXEC
         .load(Ordering::SeqCst);
     let prepared_frame_references = linux_process::prepare_live_other_process_frame_references(pid);
     for segment_index in 0..plan.segment_count() {
         let Some(segment) = plan.segment(segment_index) else {
+            let _ = memory::scrub_and_release_frames(
+                memory::FrameOwner::KERNEL,
+                &replacements[..staged_mapping_count],
+            );
             return LINUX_ENOEXEC;
         };
         for page in 0..segment.page_count {
@@ -23601,202 +23655,139 @@ fn linux_rootfs_execve_source(
                 .checked_add((page * PAGE_SIZE) as u64)
                 .and_then(|address| usize::try_from(address).ok())
             else {
-                return LINUX_ENOEXEC;
-            };
-            let mapping = linux_process::live_process_mapping(pid, address);
-            let replacement = replacements[replacement_index];
-            replacement_index += 1;
-            if !address_space::materialize_linux_exec_frame(replacement, segment, page) {
-                let _ =
-                    memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[replacement]);
-                return LINUX_ENOEXEC;
-            }
-            let protection = if segment.executable {
-                LINUX_PROT_READ | LINUX_PROT_EXEC
-            } else if segment.writable {
-                LINUX_PROT_READ | LINUX_PROT_WRITE
-            } else {
-                LINUX_PROT_READ
-            } as u8;
-            if mapping.is_some_and(|mapping| {
-                !address_space::current_linux_mapping_matches(
-                    address as u64,
-                    mapping.frame,
-                    mapping.writable,
-                    mapping.executable,
-                )
-            }) {
-                serial_write("ginux: Linux exec current/registry mapping mismatch address/frame: ");
-                serial_write_u64(address as u64);
-                serial_write("/");
-                serial_write_u64(mapping.map_or(0, |mapping| mapping.frame.address()));
-                serial_write("\r\n");
-                return LINUX_ENOEXEC;
-            }
-            let replaced = address_space::install_current_linux_runtime_page(
-                address as u64,
-                replacement,
-                protection,
-                true,
-                mapping.is_some(),
-            );
-            let registry_updated = if let Some(mapping) = mapping {
-                replaced.is_some()
-                    && linux_process::replace_live_process_mapping_for_exec(
-                        pid,
-                        address,
-                        mapping.frame,
-                        replacement,
-                        segment.writable,
-                        segment.executable,
-                    )
-            } else {
-                replaced == Some(None)
-                    && linux_process::add_live_process_mapping(
-                        pid,
-                        LinuxActiveImageMapping {
-                            address,
-                            frame: replacement,
-                            writable: segment.writable,
-                            executable: segment.executable,
-                            shared: false,
-                            dontfork: false,
-                        },
-                    )
-            };
-            if !registry_updated {
-                serial_write("ginux: Linux exec mapping update failed address/prior/install: ");
-                serial_write_u64(address as u64);
-                serial_write(" ");
-                serial_write_u64(u64::from(mapping.is_some()));
-                serial_write(" ");
-                serial_write_u64(match replaced {
-                    Some(Some(_)) => 2,
-                    Some(None) => 1,
-                    None => 0,
-                });
-                serial_write("\r\n");
-                return LINUX_ENOEXEC;
-            }
-            if let Some(index) = (0..usize::from(
-                X86_RUNTIME
-                    .ELF_PROBE_ACTIVE_IMAGE_COUNT
-                    .load(Ordering::SeqCst),
-            ))
-                .find(|index| {
-                    X86_RUNTIME.ELF_PROBE_ACTIVE_IMAGE_ADDRESSES[*index].load(Ordering::SeqCst)
-                        == address as u64
-                })
-            {
-                X86_RUNTIME.ELF_PROBE_ACTIVE_IMAGE_FRAMES[index]
-                    .store(replacement.address(), Ordering::SeqCst);
-                X86_RUNTIME.ELF_PROBE_ACTIVE_IMAGE_GENERATIONS[index]
-                    .store(replacement.generation(), Ordering::SeqCst);
-                X86_RUNTIME.ELF_PROBE_ACTIVE_IMAGE_FLAGS[index].store(
-                    u8::from(segment.writable) | (u8::from(segment.executable) << 1),
-                    Ordering::SeqCst,
+                let _ = memory::scrub_and_release_frames(
+                    memory::FrameOwner::KERNEL,
+                    &replacements[..staged_mapping_count],
                 );
+                return LINUX_ENOEXEC;
+            };
+            let replacement = replacements[replacement_index];
+            if !address_space::materialize_linux_exec_frame(replacement, segment, page) {
+                let _ = memory::scrub_and_release_frames(
+                    memory::FrameOwner::KERNEL,
+                    &replacements[..staged_mapping_count],
+                );
+                return LINUX_ENOEXEC;
             }
-            if let Some(mapping) = mapping {
-                let referenced = release_parent_on_exec
-                    || if prepared_frame_references {
-                        linux_process::prepared_live_frame_referenced_by_other_process(
-                            mapping.frame,
-                        )
-                    } else {
-                        linux_process::live_mapping_referenced_by_other_process(pid, mapping.frame)
-                    };
-                if !referenced
-                    && memory::frame_leases_releasable(memory::FrameOwner::KERNEL, &[mapping.frame])
-                    && !memory::scrub_and_release_frames(
-                        memory::FrameOwner::KERNEL,
-                        &[mapping.frame],
-                    )
-                {
-                    return LINUX_ENOMEM;
-                }
-            }
+            staged_mappings[replacement_index] = LinuxExecMapping {
+                address,
+                frame: replacement.address(),
+                writable: segment.writable,
+                executable: segment.executable,
+            };
+            replacement_index += 1;
         }
     }
     if replacement_index != replacement_count {
+        let _ = memory::scrub_and_release_frames(
+            memory::FrameOwner::KERNEL,
+            &replacements[..staged_mapping_count],
+        );
         return LINUX_ENOEXEC;
     }
-    let reset_exec_page = |address: usize| -> bool {
-        let Some(mapping) = linux_process::live_process_mapping(pid, address) else {
+    let mut stage_zero_page = |address: usize| -> bool {
+        let replacement = replacements[replacement_index];
+        if !address_space::prepare_linux_frame(replacement.address(), &[]) {
             return false;
-        };
-        let Some([replacement]) = memory::allocate_frames::<1>(memory::FrameOwner::KERNEL) else {
-            return false;
-        };
-        let installed = address_space::prepare_linux_frame(replacement.address(), &[])
-            && address_space::install_current_linux_runtime_page(
-                address as u64,
-                replacement,
-                LINUX_PROT_READ as u8 | LINUX_PROT_WRITE as u8,
-                false,
-                true,
-            )
-            .is_some()
-            && linux_process::replace_live_process_mapping_for_exec(
-                pid,
-                address,
-                mapping.frame,
-                replacement,
-                true,
-                false,
-            );
-        if !installed {
-            let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[replacement]);
         }
-        installed
+        staged_mappings[replacement_index] = LinuxExecMapping {
+            address,
+            frame: replacement.address(),
+            writable: true,
+            executable: false,
+        };
+        replacement_index += 1;
+        true
     };
-    let heap_base = X86_RUNTIME.ELF_PROBE_BRK_LIMIT.load(Ordering::SeqCst) as usize
-        - LINUX_RUNTIME_HEAP_PAGES * PAGE_SIZE;
     for page in 0..LINUX_RUNTIME_HEAP_PAGES {
         let address = heap_base + page * PAGE_SIZE;
-        if !reset_exec_page(address) {
+        if !stage_zero_page(address) {
             serial_write("ginux: Linux exec heap write preparation failed\r\n");
+            let _ = memory::scrub_and_release_frames(
+                memory::FrameOwner::KERNEL,
+                &replacements[..staged_mapping_count],
+            );
             return LINUX_ENOMEM;
         }
     }
-    let stack_low = X86_RUNTIME.ELF_PROBE_STACK_LOW.load(Ordering::SeqCst) as usize;
-    if stack_low == 0 || stack_low > stack_page as usize || !stack_low.is_multiple_of(PAGE_SIZE) {
-        return LINUX_ENOEXEC;
-    }
-    let stack_pages = (stack_page as usize - stack_low) / PAGE_SIZE + 1;
-    let mut reset_stack_top = false;
+    let stack_mapping_index = replacement_count + LINUX_RUNTIME_HEAP_PAGES;
     for page in 0..stack_pages {
         let address = stack_page as usize - page * PAGE_SIZE;
-        if linux_process::live_process_mapping(pid, address).is_none() {
-            continue;
-        }
-        if !reset_exec_page(address) {
+        if !stage_zero_page(address) {
             serial_write("ginux: Linux exec stack write preparation failed\r\n");
+            let _ = memory::scrub_and_release_frames(
+                memory::FrameOwner::KERNEL,
+                &replacements[..staged_mapping_count],
+            );
             return LINUX_ENOMEM;
         }
-        if address == stack_page as usize {
-            reset_stack_top = true;
-        }
     }
-    if !reset_stack_top {
-        return LINUX_ENOEXEC;
-    }
-    let Some(stack_mapping) = linux_process::live_process_mapping(pid, stack_page as usize) else {
-        return LINUX_ENOEXEC;
-    };
     if !address_space::materialize_linux_exec_stack_frame(
-        stack_mapping.frame,
+        replacements[stack_mapping_index],
         PAGE_SIZE - LINUX_EXEC_STACK_SIZE,
         &stack_image,
     ) {
         serial_write("ginux: Linux exec stack image failed\r\n");
+        let _ = memory::scrub_and_release_frames(
+            memory::FrameOwner::KERNEL,
+            &replacements[..staged_mapping_count],
+        );
         return LINUX_ENOMEM;
     }
-    let process_name = path.rsplit(|byte| *byte == b'/').next().unwrap_or(path);
-    if process_name.is_empty() {
+    if replacement_index != staged_mapping_count {
+        let _ = memory::scrub_and_release_frames(
+            memory::FrameOwner::KERNEL,
+            &replacements[..staged_mapping_count],
+        );
         return LINUX_ENOEXEC;
     }
-    let process_name = &process_name[..process_name.len().min(15)];
+    let mut transaction_mapping_count = staged_mapping_count;
+    for address in [
+        crate::linux_elf::VVAR_ADDRESS,
+        crate::linux_elf::VDSO_ADDRESS,
+    ] {
+        let Some(mapping) = old_address_space
+            .mappings()
+            .iter()
+            .find(|mapping| mapping.address == address as usize)
+        else {
+            let _ = memory::scrub_and_release_frames(
+                memory::FrameOwner::KERNEL,
+                &replacements[..staged_mapping_count],
+            );
+            return LINUX_ENOEXEC;
+        };
+        staged_mappings[transaction_mapping_count] = LinuxExecMapping {
+            address: mapping.address,
+            frame: mapping.frame.address(),
+            writable: mapping.writable,
+            executable: mapping.executable,
+        };
+        transaction_mapping_count += 1;
+    }
+    let image_replaced = replace_current_linux_image_with_hierarchy(
+        &staged_mappings[..transaction_mapping_count],
+        old_address_space.mappings(),
+        old_address_space.hierarchy().len(),
+        |frame| {
+            release_parent_on_exec
+                || crate::linux_file_cache::contains(frame)
+                || if prepared_frame_references {
+                    linux_process::prepared_live_frame_referenced_by_other_process(frame)
+                } else {
+                    linux_process::live_mapping_referenced_by_other_process(pid, frame)
+                }
+        },
+    );
+    if !image_replaced {
+        let _ = memory::scrub_and_release_frames(
+            memory::FrameOwner::KERNEL,
+            &replacements[..staged_mapping_count],
+        );
+        return LINUX_ENOMEM;
+    }
+    serial_write("ginux: staged rootfs exec rollback verified before commit\r\n");
+    serial_write("ginux: staged rootfs exec image committed atomically\r\n");
     let mut name = [0_u8; 16];
     name[..process_name.len()].copy_from_slice(process_name);
     X86_RUNTIME.ELF_PROBE_PROCESS_NAME_LOW.store(
@@ -23810,18 +23801,12 @@ fn linux_rootfs_execve_source(
     X86_RUNTIME
         .ELF_PROBE_BRK
         .store(heap_base as u64, Ordering::SeqCst);
-    let Some(main_code) = plan.main_executable() else {
-        return LINUX_ENOEXEC;
-    };
     X86_RUNTIME
         .ELF_PROBE_CODE_BASE
         .store(main_code.virtual_page, Ordering::SeqCst);
     X86_RUNTIME
         .ELF_PROBE_CODE_SIZE
         .store((main_code.page_count * PAGE_SIZE) as u64, Ordering::SeqCst);
-    let Some(loader_code) = plan.loader_executable() else {
-        return LINUX_ENOEXEC;
-    };
     X86_RUNTIME
         .ELF_PROBE_LOADER_CODE_BASE
         .store(loader_code.virtual_page, Ordering::SeqCst);
@@ -23829,6 +23814,41 @@ fn linux_rootfs_execve_source(
         (loader_code.page_count * PAGE_SIZE) as u64,
         Ordering::SeqCst,
     );
+    for (index, mapping) in staged_mappings[..replacement_count].iter().enumerate() {
+        let frame = replacements[index];
+        X86_RUNTIME.ELF_PROBE_ACTIVE_IMAGE_ADDRESSES[index]
+            .store(mapping.address as u64, Ordering::SeqCst);
+        X86_RUNTIME.ELF_PROBE_ACTIVE_IMAGE_FRAMES[index].store(frame.address(), Ordering::SeqCst);
+        X86_RUNTIME.ELF_PROBE_ACTIVE_IMAGE_GENERATIONS[index]
+            .store(frame.generation(), Ordering::SeqCst);
+        X86_RUNTIME.ELF_PROBE_ACTIVE_IMAGE_FLAGS[index].store(
+            u8::from(mapping.writable) | (u8::from(mapping.executable) << 1),
+            Ordering::SeqCst,
+        );
+    }
+    for index in replacement_count..LINUX_ACTIVE_IMAGE_MAPPING_LIMIT {
+        X86_RUNTIME.ELF_PROBE_ACTIVE_IMAGE_ADDRESSES[index].store(0, Ordering::SeqCst);
+        X86_RUNTIME.ELF_PROBE_ACTIVE_IMAGE_FRAMES[index].store(0, Ordering::SeqCst);
+        X86_RUNTIME.ELF_PROBE_ACTIVE_IMAGE_GENERATIONS[index].store(0, Ordering::SeqCst);
+        X86_RUNTIME.ELF_PROBE_ACTIVE_IMAGE_FLAGS[index].store(0, Ordering::SeqCst);
+    }
+    X86_RUNTIME
+        .ELF_PROBE_ACTIVE_IMAGE_COUNT
+        .store(replacement_count as u16, Ordering::SeqCst);
+    let heap_frame = replacements[replacement_count];
+    X86_RUNTIME
+        .ELF_PROBE_HEAP_FRAME
+        .store(heap_frame.address(), Ordering::SeqCst);
+    X86_RUNTIME
+        .ELF_PROBE_HEAP_GENERATION
+        .store(heap_frame.generation(), Ordering::SeqCst);
+    let stack_frame = replacements[stack_mapping_index];
+    X86_RUNTIME
+        .ELF_PROBE_STACK_FRAME
+        .store(stack_frame.address(), Ordering::SeqCst);
+    X86_RUNTIME
+        .ELF_PROBE_STACK_GENERATION
+        .store(stack_frame.generation(), Ordering::SeqCst);
     for descriptor in 0..LINUX_AUX_DESCRIPTOR_LIMIT {
         if linux_descriptor_close_on_exec(descriptor) {
             let _ = linux_descriptor_close(descriptor);
@@ -23837,21 +23857,13 @@ fn linux_rootfs_execve_source(
     reset_linux_signal_state_after_exec();
     let _ = set_current_linux_clear_child_tid(0);
     let _ = set_current_linux_robust_list(0);
-    if !address_space::release_current_linux_runtime_mappings_preserving(
-        LINUX_RUNTIME_DYNAMIC_MMAP_BASE,
-        |frame| {
-            release_parent_on_exec
-                || crate::linux_file_cache::contains(frame)
-                || if prepared_frame_references {
-                    linux_process::prepared_live_frame_referenced_by_other_process(frame)
-                } else {
-                    linux_process::live_mapping_referenced_by_other_process(pid, frame)
-                }
-        },
-        |frame| replacements[..replacement_count].contains(&frame),
-    ) {
-        serial_write("ginux: Linux exec mmap release failed\r\n");
-        return LINUX_ENOMEM;
+    for index in 0..LINUX_RUNTIME_MMAP_SLOT_COUNT {
+        X86_RUNTIME.ELF_PROBE_MMAP_PAGES[index].store(0, Ordering::SeqCst);
+        X86_RUNTIME.ELF_PROBE_MMAP_PROTECTION[index].store(0, Ordering::SeqCst);
+        X86_RUNTIME.ELF_PROBE_MMAP_FILE[index].store(0, Ordering::SeqCst);
+        X86_RUNTIME.ELF_PROBE_MMAP_SEALED[index].store(false, Ordering::SeqCst);
+        X86_RUNTIME.ELF_PROBE_MMAP_FRAMES[index].store(0, Ordering::SeqCst);
+        X86_RUNTIME.ELF_PROBE_MMAP_GENERATIONS[index].store(0, Ordering::SeqCst);
     }
     X86_RUNTIME
         .ELF_PROBE_MMAP_NEXT
@@ -23860,16 +23872,11 @@ fn linux_rootfs_execve_source(
         serial_write("ginux: Linux exec TLS reset failed\r\n");
         return LINUX_ENOMEM;
     }
-    let Some(thread) = current_linux_thread_handle() else {
-        return LINUX_ESRCH;
-    };
-    let thread_slot = usize::from(thread.slot);
-    let Some(stack_end) = stack_page.checked_add(PAGE_SIZE as u64) else {
-        return LINUX_ENOMEM;
-    };
-    let Some(stack_size) = stack_end.checked_sub(stack_low as u64) else {
-        return LINUX_ENOEXEC;
-    };
+    X86_RUNTIME.ELF_PROBE_SIBLING_TLS.store(0, Ordering::SeqCst);
+    for index in 0..2 {
+        X86_RUNTIME.ELF_PROBE_TLS_FRAMES[index].store(0, Ordering::SeqCst);
+        X86_RUNTIME.ELF_PROBE_TLS_GENERATIONS[index].store(0, Ordering::SeqCst);
+    }
     X86_RUNTIME.LINUX_THREAD_POINTERS[thread_slot].store(0, Ordering::SeqCst);
     X86_RUNTIME.LINUX_THREAD_TLS_EXTENTS[thread_slot].store(0, Ordering::SeqCst);
     X86_RUNTIME.LINUX_THREAD_TLS_SIZES[thread_slot].store(0, Ordering::SeqCst);
@@ -23897,7 +23904,18 @@ fn linux_rootfs_execve_source(
         entry_state.user_rip = startup.initial_entry;
         entry_state.user_rsp = new_stack;
     }
-    if !linux_process::set_live_process_exec_context(pid, startup.initial_entry, new_stack) {
+    let Some(committed_snapshot) = live_linux_process_address_space_snapshot() else {
+        return LINUX_ENOEXEC;
+    };
+    if !linux_process::refresh_live_process_registry(
+        pid,
+        committed_snapshot,
+        [0; 15],
+        startup.initial_entry,
+        new_stack,
+        0x202,
+        0,
+    ) {
         serial_write("ginux: Linux exec process context rejected entry/stack: ");
         serial_write_u64(startup.initial_entry);
         serial_write("/");
@@ -24503,12 +24521,14 @@ fn linux_execve_at(
             &mappings[..transaction_mapping_count],
             &active_image_mappings[..old_mapping_count],
             6,
+            |_| false,
         )
     } else {
         replace_current_linux_image_with_hierarchy(
             &mappings[..transaction_mapping_count],
             &active_image_mappings[..old_mapping_count],
             5,
+            |_| false,
         )
     };
     if !image_replaced {
