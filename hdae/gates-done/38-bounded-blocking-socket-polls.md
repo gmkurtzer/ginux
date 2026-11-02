@@ -33,12 +33,15 @@ the serialized kernel-entry path in an unbounded busy-wait.
 - [x] Confirmed blocking socket loops execute under `kernel_entry_lock`.
 - [x] Confirmed guest timeout conversion is currently unbounded.
 - [x] Confirmed timeout-free `accept_blocking` loops forever.
+- [x] Centralized zero, absent, finite, and overflowing timeout conversion under
+  `BLOCKING_POLL_LIMIT`.
+- [x] Bounded blocking accept, connect, send, receive, peek, and wait-all paths.
+- [x] Added deterministic boot-time poll-budget verification and a QEMU marker.
+- [x] Passed focused compilation, the complete static gate, and the complete
+  QEMU boot regression.
 
 ## Remaining work
 
-- [ ] Centralize and enforce the maximum blocking poll budget.
-- [ ] Add deterministic regression evidence.
-- [ ] Run focused, static, and complete QEMU verification.
 - [ ] Push, open the remediation PR, add reciprocal links, and confirm CI.
 
 ## Acceptance criteria
@@ -64,6 +67,14 @@ the serialized kernel-entry path in an unbounded busy-wait.
 - Issue #22's code-path report matches `kernel/src/linux_socket.rs`.
 - The existing `BLOCKING_POLL_LIMIT` provides an established repository bound;
   it was not consistently applied to guest timeouts or accept.
+- `cargo check --package ginux-kernel --target x86_64-unknown-none` passed.
+- `make check` passed, including the unchanged 1,033-block unsafe baseline and
+  the Linux compatibility matrix.
+- `make test` passed and emitted
+  `blocking Linux socket polls bounded independently of guest timeout`.
+- Source inspection found every blocking socket loop obtains its iteration
+  count through the centralized bounded helper; no open-ended accept loop
+  remains.
 
 ## Decisions and limitations
 
@@ -78,9 +89,11 @@ the serialized kernel-entry path in an unbounded busy-wait.
 - Pull request: intended; non-closing reference to issue #22
 - Planned commits: gate definition; bounded poll mechanism and regression;
   evidence; delivery
-- Actual commits: pending
+- Actual commits: `b8538b6e` (gate definition), `38c52ae3` (mechanism and
+  regression), plus the evidence/delivery commit containing this record
 
 ## Review policy and outcome
 
-Delegated in the user-approved remaining-reports batch; stop only if preserving
-socket ABI requires a broader scheduler design.
+Passed and closed under the user-approved remaining-reports batch delegation.
+The bounded-budget mitigation preserves the existing socket ABI; a scheduler-
+backed wait redesign was not required.

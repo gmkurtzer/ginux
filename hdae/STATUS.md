@@ -7,16 +7,17 @@
 - Active project: remaining reporter remediation batch
 - Branch: `hdae/issue-22-blocking-sockets`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 38, bounded blocking socket polls for issue #22
-- Last completed action: confirmed guest timeouts can enlarge blocking socket
-  spins and timeout-free accept can loop forever under kernel entry serialization
-- Next action: commit Gate 38 and centralize all blocking socket poll budgets
+- Active gate: Gate 38, passed and awaiting delivery for issue #22
+- Last completed action: bounded every blocking Linux socket poll independently
+  of guest timeout and passed `make check` plus `make test`
+- Next action: publish the Gate 38 branch and PR, add reciprocal links, then
+  start Gate 39 for issue #24
 
 ## Current repository state
 
 Remote `main` is at `ecbb3142`. Gates 34 through 36 are delivered through open
 PRs #44 through #46. Gate 37 is checkpointed on its dedicated branch pending
-the unpack-memory policy. Gate 38 is active and independent.
+the unpack-memory policy. Gate 38 passed independently and is ready to publish.
 The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
 matrix and repeated stress pass. Gate 11's comparison and reduced evidence are
 under `docs/feedback-hardening/`. No push or merge was performed.
