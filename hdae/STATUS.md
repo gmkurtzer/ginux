@@ -8,9 +8,10 @@
 - Branch: `hdae/issue-16-manifest-digest`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 33, pinned top-level manifest digest
-- Last completed action: added host-tested conditional pin verification before
-  top-level descriptor parsing; targeted unit tests and clippy pass
-- Next action: commit the implementation, then run `make check` and `make test`
+- Last completed action: digest-pin regression, full `make check`, and complete
+  QEMU `make test` passed with the regenerated embedded network service
+- Next action: commit generated boot and final evidence, push the branch, open
+  the remediation pull request, and add reciprocal issue links
 
 ## Current repository state
 

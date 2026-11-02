@@ -33,12 +33,14 @@ follows any descriptor.
   reference boundary.
 - [x] Enforced the pin immediately after top-level transfer and before index
   selection or manifest parsing.
+- [x] Regenerated the embedded network service and passed full static and QEMU
+  verification.
 
 ## Remaining work
 
 - [x] Add reusable digest-selector verification and deterministic tests.
 - [x] Enforce it on the top-level body before parsing.
-- [ ] Run targeted, static, and complete QEMU verification.
+- [x] Run targeted, static, and complete QEMU verification.
 - [ ] Commit and push the dedicated branch.
 - [ ] Open the remediation pull request and add reciprocal source links.
 
@@ -68,6 +70,10 @@ follows any descriptor.
   body acceptance, changed-body rejection, and unchanged tag behavior.
 - Warning-denying clippy for `ginux-oci` and the freestanding network service
   -> passed.
+- `make check` -> passed all formatting, architecture, lint, unit, and ABI
+  checks, including all 9 `ginux-oci` tests.
+- `make test` on QEMU 10.1.2/TCG -> emitted `GINUX_KERNEL_OK` and reported
+  `Boot test passed.`
 
 ## Decisions and limitations
 
@@ -83,8 +89,8 @@ follows any descriptor.
 - Pull request: intended; non-closing reference to issue #16
 - Planned commits: gate and regression mechanism; integration and evidence;
   delivery checkpoint
-- Actual commits: `bb9b7d16` gate definition; implementation and verification
-  evidence pending
+- Actual commits: `bb9b7d16` gate definition; `5f5ced0e` digest verification
+  and regression tests; generated boot and final evidence pending
 
 ## Review policy and outcome
 
