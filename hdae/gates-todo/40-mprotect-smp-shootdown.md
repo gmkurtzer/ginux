@@ -35,7 +35,8 @@ writable translation for the same Linux address space.
 ## Remaining work
 
 - [ ] Require acknowledged shootdown for each active-image permission revoke.
-- [ ] Add deterministic path evidence to the existing 2-vCPU shootdown proof.
+- [ ] Bind the existing active-image read-only transition proof to the existing
+  2-vCPU acknowledged-shootdown proof.
 - [ ] Run focused, static, and complete QEMU verification.
 - [ ] Push, open the remediation PR, add reciprocal links, and confirm CI.
 
@@ -53,8 +54,8 @@ writable translation for the same Linux address space.
   after clearing `WRITABLE` and checks its result.
 - Existing SMP mechanism proof -> cross-CPU interrupt and invalidation
   acknowledgement still passes on the default two-vCPU QEMU profile.
-- Boot marker -> active-image read-only transition reports acknowledged SMP
-  invalidation.
+- Paired boot markers -> the default two-vCPU boot reports both acknowledged
+  cross-CPU invalidation and the active-image read-only transition.
 - `make check` and `make test` -> full static and boot checks pass.
 
 ## Evidence
