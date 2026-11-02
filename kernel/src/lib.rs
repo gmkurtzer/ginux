@@ -1144,6 +1144,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: tracked frame release ownership verified");
     serial_write("\r\nginux: stale frame leases rejected");
     serial_write("\r\nginux: per-domain physical frame budgets enforced");
+    if !verify_runtime_volume_dma_retirement() {
+        kernel_fail("\r\nginux: runtime volume DMA quarantine invariant failed\r\n");
+    }
+    serial_write("\r\nginux: failed runtime volume DMA retirement quarantined");
     if !arch::x86_64::pci::verify_queue_rejections() {
         kernel_fail("\r\nginux: virtio queue contract invalid\r\n");
     }
@@ -4560,18 +4564,52 @@ fn with_runtime_volume<T>(
             dma_virtual,
         )
     }) else {
-        let _ = translation.finish();
-        let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[dma_frame]);
+        let translation_retired = translation.finish();
+        let _ = retire_runtime_volume_dma(dma_frame, true, translation_retired);
         return None;
     };
     let result = operation(&mut backend);
     let device_quiesced = backend.finish();
     let translation_retired = translation.finish();
-    let dma_retired = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[dma_frame])
-        && !memory::any_frame_lease_live(&[dma_frame]);
+    let dma_retired = retire_runtime_volume_dma(dma_frame, device_quiesced, translation_retired);
     (device_quiesced && translation_retired && dma_retired)
         .then_some(result)
         .flatten()
+}
+
+fn retire_runtime_volume_dma(
+    dma_frame: memory::FrameLease,
+    device_quiesced: bool,
+    translation_retired: bool,
+) -> bool {
+    device_quiesced
+        && translation_retired
+        && memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[dma_frame])
+        && !memory::any_frame_lease_live(&[dma_frame])
+}
+
+fn verify_runtime_volume_dma_retirement() -> bool {
+    let Some(before) = memory::owner_live_frame_count(memory::FrameOwner::KERNEL) else {
+        return false;
+    };
+    let Some(frames) = memory::allocate_frames::<4>(memory::FrameOwner::KERNEL) else {
+        return false;
+    };
+    let retained = [(false, true), (true, false), (false, false)]
+        .into_iter()
+        .zip(frames[..3].iter().copied())
+        .all(|((device_quiesced, translation_retired), frame)| {
+            !retire_runtime_volume_dma(frame, device_quiesced, translation_retired)
+                && memory::frames_owned_by(memory::FrameOwner::KERNEL, &[frame])
+                && memory::any_frame_lease_live(&[frame])
+        });
+    let released = retire_runtime_volume_dma(frames[3], true, true)
+        && !memory::any_frame_lease_live(&[frames[3]]);
+    let cleanup = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &frames[..3]);
+    retained
+        && released
+        && cleanup
+        && memory::owner_live_frame_count(memory::FrameOwner::KERNEL) == Some(before)
 }
 
 enum OciCacheRestore {
