@@ -24236,16 +24236,16 @@ fn linux_rootfs_execve_source(
     // Every tracked fork child must return to the kernel scheduler after a
     // successful exec so execution can resume from the replacement image.
     // CLONE_VM/vfork separately controls when the parent may resume; it does
-    // not determine whether the exec transition is reported.
-    if X86_RUNTIME
+    // not determine whether the exec transition is reported. Report every
+    // exec, not only the first one after fork: a child may exec more than
+    // once (`nice cmd`, `env cmd`) or exec after forking its own child, and
+    // an unreported exec leaves it runnable with no executor resuming it.
+    X86_RUNTIME
         .LINUX_PROCESS_CHILD_EXEC_PID
-        .load(Ordering::SeqCst)
-        == pid
-    {
-        X86_RUNTIME
-            .LINUX_PROCESS_CHILD_EXECUTED
-            .store(true, Ordering::SeqCst);
-    }
+        .store(pid, Ordering::SeqCst);
+    X86_RUNTIME
+        .LINUX_PROCESS_CHILD_EXECUTED
+        .store(true, Ordering::SeqCst);
     if !refresh_linux_vvar() {
         return LINUX_ENOMEM;
     }
@@ -32336,6 +32336,7 @@ fn run_scheduled_linux_process(parent_pid: u32, target_pid: Option<u32>) -> bool
         return false;
     }
     let _ = take_linux_child_yield(selected.pid);
+    let _ = take_linux_child_exec(selected.pid);
     let exit = take_linux_child_exit(selected.pid);
     let returned = if let Some(status) = exit {
         let process_slot = linux_process::live_process_slot(selected.pid);
