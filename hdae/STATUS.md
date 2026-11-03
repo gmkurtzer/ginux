@@ -7,9 +7,10 @@
   https://github.com/gmkurtzer/usshim/pull/1 and is not merged.
 - Gate 2 is accepted and closed. It remains delivered in open
   https://github.com/gmkurtzer/usshim/pull/2 and is not merged.
-- Gate 3 is technically passed on dedicated branch `hdae/execution-kernel`,
-  stacked on the accepted Gate 2 state while its intended eventual base remains
-  `main`. It is delivered in https://github.com/gmkurtzer/usshim/pull/3.
+- Gate 3 is accepted and closed. It remains delivered on dedicated branch
+  `hdae/execution-kernel`, stacked on the accepted Gate 2 state while its
+  intended eventual base remains `main`, in open
+  https://github.com/gmkurtzer/usshim/pull/3.
 - Authoritative name: Ginus (Ginux Userspace).
 - Runtime isolation unit: domain.
 - Policy unit: versioned contract.
@@ -88,6 +89,7 @@ scope, threat model, and invariants.
   `make test` passed. The interpreted fixture emitted its argument/environment,
   syscall 999 returned `-ENOSYS`, virtual `getpid` returned 4242, exit returned
   zero, and a truncated ELF was rejected before execution.
+- Human accepted Gate 3 on 2026-11-03. Gate 4 has not started.
 
 ## Open decisions and limitations
 
@@ -109,17 +111,16 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Stop for human acceptance after review of `make demo-gate-3` and pull request
-3. Do not begin Gate 4 before explicit acceptance.
+Provide the requested complete gate summary. Do not begin Gate 4 until the
+human explicitly directs advancement.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 3, execution kernel; technically passed and delivered in
-  pull request 3, human checkpoint pending
+- Active gate: none; Gate 3 is accepted and closed, and Gate 4 is the next
+  planned checkpoint but has not started
 - Last evidence: Gate 3 demo and complete aggregate regression suite passed on
   2026-11-03
-- Required human decision: accept or reject Gate 3 after its branch and pull
-  request are delivered
+- Required human decision: whether to begin Gate 4

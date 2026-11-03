@@ -43,10 +43,12 @@ and no direct host syscall access.
   invalid-mapping, overlap, and write/execute denial behavior.
 - [x] Added Rocky integration tests, aggregate regressions, documentation, and
   an explicit human demonstration.
+- [x] Human reviewed the Gate 3 result and accepted the checkpoint on
+  2026-11-03.
 
 ## Remaining work
 
-- [ ] Human runs or reviews `make demo-gate-3` and accepts or rejects the gate.
+None.
 
 ## Acceptance criteria
 
@@ -120,11 +122,11 @@ and no direct host syscall access.
 - Actual commits: `e137733` (interpreted baseline), `370b661` (Ginus-owned
   memory, ELF, x86, syscall and audit core), `fb31678` (Ginus integration and
   demo), `52ef264` (invalid mapping regressions), and `f90aea4` (verification
-  evidence)
+  evidence), and `e0f94ed` (pull-request delivery record)
 
 ## Review policy and outcome
 
-Technically passed on 2026-11-03. Human checkpoint remains open because this
-gate establishes the memory and syscall security boundary used by all later
-compatibility work. Present `make demo-gate-3`, fresh evidence, and the pull
-request before acceptance.
+Passed and accepted by the human on 2026-11-03 after review of the working
+demonstration. The dedicated branch remains delivered in pull request 3; that
+pull request remains open and must not be merged or closed without explicit
+authorization.
