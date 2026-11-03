@@ -27,6 +27,21 @@ root_size=$(($2 * 512))
 loop_device=$(losetup --find --show --read-only \
     --offset "$root_offset" --sizelimit "$root_size" "$raw_image")
 mount -t xfs -o ro,nouuid "$loop_device" "$mountpoint"
+mount_options=$(findmnt -no OPTIONS --target "$mountpoint")
+case ",$mount_options," in
+    *,ro,*) ;;
+    *) printf '%s\n' 'Rocky source root was not mounted read-only' >&2; exit 1 ;;
+esac
+if awk -F: 'NR > 2 { name=$1; gsub(/^[ \t]+|[ \t]+$/, "", name); if (name ~ /^(eth|en)/) found=1 } END { exit !found }' \
+    /proc/net/dev; then
+    printf '%s\n' 'extraction helper unexpectedly has an Ethernet interface' >&2
+    exit 1
+fi
+if awk 'NR > 1 && $2 == "00000000" { found=1 } END { exit !found }' /proc/net/route; then
+    printf '%s\n' 'extraction helper unexpectedly has a default IPv4 route' >&2
+    exit 1
+fi
+printf '%s\n' 'EXTRACT: source-mount=read-only helper-network=no-ethernet,no-default-route'
 
 (
     printf '%s\n' 'GINUS_ROOTFS_MANIFEST_VERSION=1'
