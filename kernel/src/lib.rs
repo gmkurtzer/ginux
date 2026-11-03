@@ -1833,6 +1833,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: blocking Linux socket poll budget invalid\r\n");
     }
     serial_write("ginux: blocking Linux socket polls bounded independently of guest timeout\r\n");
+    if !arch::x86_64::cpu::verify_synchronous_poll_budget() {
+        kernel_fail("ginux: synchronous Linux poll budget invalid\r\n");
+    }
+    serial_write("ginux: synchronous Linux poll waits bounded independently of timeout\r\n");
     if cfg!(feature = "verification-boot") {
         if !network::set_link(1)
             || !network::set_ipv4((24_u64 << 32) | 0x0a00_020f)
