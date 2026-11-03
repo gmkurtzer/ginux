@@ -51,16 +51,19 @@ syscall ABI directly.
   negative tests.
 - [x] Prototyped direct-Linux and Linux-namespace-container benchmark workloads
   with five samples and variance.
+- [x] Pinned, fetched, and verified the official immutable Rocky Linux 10.2
+  x86-64 GenericCloud image and retained it outside Git.
+- [x] Booted Rocky normally under QEMU TCG and verified systemd as real PID 1
+  with `multi-user.target` active before Ginus starts.
+- [x] Converted Ginus and the benchmark runner from PID-1 programs into
+  ordinary host processes that exit without controlling host lifecycle.
+- [x] Ran interception and matched benchmark evidence inside the Rocky host and
+  verified host systemd health after Ginus exits.
+- [x] Replaced the initramfs harness and documentation with the Rocky host
+  workflow and a cleanup-checked human demonstration.
 
 ## Remaining work
 
-- [ ] Pin and cache the official Rocky 10 x86-64 cloud image.
-- [ ] Boot Rocky to normal systemd readiness under QEMU TCG.
-- [ ] Convert Ginus from a PID-1 executable to an ordinary host process that
-  returns control without rebooting or shutting down the host.
-- [ ] Run interception tests and matched benchmarks inside the Rocky host.
-- [ ] Prove the host remains healthy after the Ginus process exits.
-- [ ] Update documentation and the human demonstration.
 - [ ] Human runs or reviews revised `make demo-gate-1` and accepts or rejects
   the gate.
 
@@ -137,6 +140,40 @@ syscall ABI directly.
   It intentionally does not yet implement the later Ginus-owned memory,
   descriptor, virtual-filesystem, device, or versioned domain-contract models.
 
+## Fresh evidence
+
+- Source manifest: official Rocky Linux 10.2 immutable image
+  `Rocky-10-GenericCloud-Base-10.2-20260525.0.x86_64.qcow2`, size 544,997,376
+  bytes, published and observed SHA-256
+  `9fc9e9ff16888bb68ac39b0392e25c9c92684d50c85f1cce6ab549363bbc4b48`.
+- `make host-image-fetch` -> performed the explicit one-time download and
+  passed size and SHA-256 verification. No ordinary build or test target calls
+  the fetch script.
+- `make host-boot-test` -> Rocky 10.2 booted under QEMU TCG, cloud-init and SSH
+  became ready, `/proc/1/comm` was `systemd`, `multi-user.target` was active,
+  and the VM shut down cleanly.
+- `make clean && make doctor && make host-image-verify && make build && make
+  check && make test-unit && make test` -> passed from clean generated state
+  while retaining the verified cache. QEMU guest networking used `restrict=on`;
+  no acquisition command ran. Three dispatcher unit tests passed and all
+  target-correct Clippy checks passed with warnings denied.
+- Revised `make test-intercept` -> Ginus reported `host-process pid1=no` as the
+  unprivileged Rocky `ginus` user; `getpid` returned virtual PID 4242; managed
+  `write` was checked but not executed; `uname` returned `EPERM`; the unique
+  direct-write marker was absent; Ginus exited zero; host systemd and
+  `multi-user.target` remained healthy.
+- Revised `make bench-baseline` -> 30 samples passed inside Rocky 10.2 kernel
+  6.12.0-211.16.1.el10_2.0.1.x86_64. Five samples were recorded for each
+  direct/container and CPU/syscall/process combination with nanosecond units,
+  mean, population variance, and standard deviation. The demonstration run's
+  means were direct CPU 9,581,448 ns, syscall 45,307,827 ns, process 35,097,176
+  ns; namespace-container CPU 9,172,046 ns, syscall 45,528,028 ns, process
+  42,512,613 ns.
+- Revised `make demo-gate-1` -> showed Rocky/systemd readiness, Ginus as a
+  non-PID-1 process, expected emulated/mediated/denied decisions, direct-bypass
+  negative evidence, post-Ginus host health, benchmark evidence, and clean VM
+  shutdown; exited zero with no PID file or QEMU process remaining.
+
 ## Decisions and limitations
 
 - Rust and x86-64 are approved for the initial implementation.
@@ -159,17 +196,19 @@ syscall ABI directly.
 - Pull request: https://github.com/gmkurtzer/usshim/pull/1; dedicated branch
   push and PR creation authorized on 2026-11-03; never merge or close without
   explicit authorization
-- Planned commits: project scaffold and checks; interception proof and tests;
-  benchmark controls and architecture evidence
+- Planned commits: original scaffold/interception/benchmark evidence; approved
+  architecture correction; ordinary-process Rocky host harness; fresh evidence
 - Actual commits: `b644e8b` (workspace and interception proof), `30e1c38`
   (benchmark controls and design evidence), `59d8130` (verification evidence),
-  and the delivery checkpoint commit. The first two planned implementation
+  `f1d52b3` (delivery checkpoint), `8c8df2c` (exploit-gate removal), `200934c`
+  (host architecture correction), `0618630` (ordinary-process Rocky harness),
+  and the pending revised-evidence commit. The first two planned implementation
   commits were combined because the scaffold and executable proof formed one
   buildable change.
 
 ## Review policy and outcome
 
-Partial after the 2026-11-03 architecture correction. Pull request 1 must be
-revised and all Rocky-host acceptance evidence rerun. Present the revised
-`make demo-gate-1`, fresh evidence, and the pull request, then stop for
+Technically passed under the corrected architecture on 2026-11-03 and delivered
+in revised pull request 1. Human acceptance remains pending. Present the
+revised `make demo-gate-1`, fresh evidence, and the pull request, then stop for
 acceptance before closing the gate or beginning Gate 2.

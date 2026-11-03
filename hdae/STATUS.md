@@ -2,10 +2,10 @@
 
 ## Current checkpoint
 
-- Gate 1 is partial on branch `hdae/foundation-interception` and delivered in
-  https://github.com/gmkurtzer/usshim/pull/1. Its original PID-1 harness was
-  superseded by the approved ordinary-host-process architecture and must be
-  revised before the gate can pass.
+- Gate 1 is technically passed under the corrected ordinary-host-process
+  architecture on branch `hdae/foundation-interception` and delivered in
+  revised https://github.com/gmkurtzer/usshim/pull/1. Human acceptance is
+  pending.
 - Authoritative name: Ginus (Ginux Userspace).
 - Runtime isolation unit: domain.
 - Policy unit: versioned contract.
@@ -51,38 +51,38 @@ scope, threat model, and invariants.
 - Coverage review: functionality, failure behavior, deterministic tests, user
   configuration, documentation, compatibility, recovery, performance, and
   security are assigned to explicit gates; none is silently omitted.
-- Gate 1 clean verification on 2026-11-03 passed `make doctor`, `make build`,
-  `make check`, `make test-unit`, `make test-intercept`, `make test`,
+- Revised Gate 1 clean verification on 2026-11-03 passed `make doctor`,
+  `make host-image-verify`, `make build`, `make check`, `make test-unit`,
+  `make test-intercept`, `make test`, `make host-boot-test`,
   `make bench-baseline`, and `make demo-gate-1` under QEMU TCG.
-- The demo showed virtual `getpid` 4242, checked write mediation without host
-  execution, `uname` denied with `EPERM`, no direct-write marker, successful
-  QEMU shutdown, and no remaining background process.
-- The baseline recorded 30 nanosecond samples across matched direct-Linux and
-  namespace-container CPU, syscall, and process workloads, with five
-  repetitions and variance for each combination.
+- Rocky Linux 10.2 booted normally with host systemd as real PID 1. Ginus ran
+  as the unprivileged ordinary `ginus` process, mediated the fixed payload,
+  exited zero, and left systemd plus `multi-user.target` healthy.
+- The revised demo showed virtual `getpid` 4242, checked write mediation without
+  host execution, `uname` denied with `EPERM`, no direct-write marker, matched
+  Rocky-host benchmark samples, clean QEMU shutdown, and no remaining PID file
+  or VM process.
 
 ## Open decisions and limitations
 
 - `PTRACE_SYSEMU` is accepted only as the Gate 1 bootstrap experiment. The
   final Ginus execution/task/memory design remains a Gate 3 decision.
-- The exact Rocky image, image preparation backend, configuration syntax,
-  network backend, and performance budgets remain decisions assigned to later
-  gates.
+- Rocky host image is pinned to official Rocky 10.2 GenericCloud build
+  10.2-20260525.0. The domain-image preparation backend, configuration syntax,
+  network backend, and performance budgets remain later-gate decisions.
 - The repository and directory still use the historical `usshim` name; rename
   is not authorized in the current planning task.
 
 ## Exact next action
 
-Revise Gate 1 so QEMU boots a normal Rocky 10 host, Ginus runs as an ordinary
-process, managed interception passes, the host remains healthy after Ginus
-exits, and matched benchmarks run inside that host. Update pull request 1 and
-stop for human acceptance. Do not begin Gate 2 before explicit acceptance.
+Stop for human acceptance of revised Gate 1 after the reviewer runs or reviews
+`make demo-gate-1`. Do not begin Gate 2 before explicit acceptance.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 1 partial; ordinary-process Rocky-host revision in progress
-- Last evidence: PID-1 prototype passed but is superseded by architecture
+- Active gate: revised Gate 1 technically passed; human acceptance pending
+- Last evidence: full clean Rocky-host Gate 1 command set passed on 2026-11-03
 - Required human decision: accept or reject revised Gate 1 after demonstration
