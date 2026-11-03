@@ -5,17 +5,17 @@
 - Active skill: `.agents/skills/hdae-development/SKILL.md`
 - Reload required after compaction, reset, resume, or handoff: yes
 - Active project: remaining reporter remediation batch
-- Branch: `hdae/issue-28-dma-quarantine`
+- Branch: `hdae/issue-29-iommu-rollback-quarantine`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 42, delivered as PR #50 for issue #28
-- Last completed action: merged PR #49, closed issue #25, and synchronized PR
-  #50 with current `main`
+- Active gate: Gate 43, delivered as PR #51 for issue #29
+- Last completed action: merged PR #50, closed issue #28, and synchronized PR
+  #51 with current `main`
 - Next action: run fresh `make check` and `make test`, then push the new exact
-  PR #50 head for GitHub CI and a later unchanged-head review
+  PR #51 head for GitHub CI and a later unchanged-head review
 
 ## Current repository state
 
-Remote `main` is at `9e7e2988`. The first
+Remote `main` is at `144d8119`. The first
 eleven feedback-hardening gates and inserted correctness gates are complete.
 Gate 12 is complete on `codex/performance-parity`. Gates 13 through 19 and 21
 through 23 and Gates 32 through 33 remain in `gates-todo/` for maintainer
@@ -24,8 +24,9 @@ through merged PR #44 and issue #17 is closed; Gate 35 was delivered through
 merged PR #45 and issue #18 is closed; Gate 36 was delivered through merged PR
 #46 and issue #19 is closed. Gate 37 was delivered through merged PR #59 and
 issue #57 is closed. Gate 40 was delivered through merged PR #49 and issue #25
-is closed. PR #50 is being synchronized for fresh validation; PRs #51 through
-#54 remain open and conflicted pending the same merge-train process.
+is closed. Gate 42 was delivered through merged PR #50 and issue #28 is closed.
+PR #51 is being synchronized for fresh validation; PRs #52 through #54 remain
+open and conflicted pending the same merge-train process.
 The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
 matrix and repeated stress pass. Gate 11's comparison and reduced evidence are
 under `docs/feedback-hardening/`. No direct push to `main` was performed.
@@ -34,10 +35,18 @@ under `docs/feedback-hardening/`. No direct push to `main` was performed.
 
 - None. The architecture defines a domain as the unit of private payload memory
   ownership and accounting; Gate 37 must preserve that invariant. The
-  user delegated issues #17, #18, #19, #20, #22, #24, #25, #27, #28, and #29
-  as one automatic batch with final review after all PRs.
+  delegated remediation batch includes issues #20, #27, #29, and #43 still in
+  the serial merge train.
 
 ## Active diagnosis
+
+- Gate 43 now distinguishes ordinary inactive activation failure from failed
+  rollback. Ordinary failure permits table retirement only after rollback
+  proves translation disabled, caches invalidated, the root cleared, command
+  completion, and final inactive state. Ambiguous rollback leaves all six
+  table leases live and kernel-owned until reboot.
+- `make check` and complete `make test` pass; the deterministic QEMU marker is
+  `ginux: failed IOMMU activation rollback quarantined`.
 
 - Root cause: Gate 36 correctly allocated private payload frames to the domain,
   but several leaf lookup, fork/exec, RELRO, and cleanup paths still assumed
