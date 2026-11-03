@@ -7,7 +7,8 @@ use core::cell::UnsafeCell;
 
 const PAGE_SIZE: usize = 4096;
 pub(crate) const PATH_CAPACITY: usize = 256;
-const NODE_COUNT: usize = 10;
+// Nine nodes per page: ten no longer fit once a node records its hard-link target.
+const NODE_COUNT: usize = 9;
 const MAPPING_COUNT: usize = 100;
 const DATA_CAPACITY: usize = PAGE_SIZE - core::mem::size_of::<FrameLease>();
 const XATTR_NAME_CAPACITY: usize = 255;
@@ -116,6 +117,10 @@ struct Node {
     mode: u32,
     seals: u32,
     fifo_socket: u8,
+    // Nonzero for an additional hard link: the generation of the node that
+    // holds the shared inode (data, mode, times, xattrs). Linked names carry
+    // the same inode number, so the target handle is (link_target, inode).
+    link_target: u32,
     handle: Handle,
     size: usize,
     first_page: FrameLease,
@@ -141,6 +146,7 @@ impl Node {
         mode: 0,
         seals: 0,
         fifo_socket: 0,
+        link_target: 0,
         handle: Handle {
             generation: 0,
             inode: 0,
@@ -162,15 +168,33 @@ impl Node {
         &self.path[..usize::from(self.path_length)]
     }
 
+    fn inode_handle(&self) -> Handle {
+        if self.link_target == 0 {
+            self.handle
+        } else {
+            Handle {
+                generation: self.link_target,
+                inode: self.handle.inode,
+            }
+        }
+    }
+
     fn metadata(&self) -> Metadata {
+        // A hard link reports the shared inode's attributes under its own
+        // name handle, so descriptors keep naming the link they opened.
+        let inode = if self.link_target == 0 {
+            self
+        } else {
+            node(self.handle).unwrap_or(self)
+        };
         Metadata {
             handle: self.handle,
-            kind: self.kind,
-            mode: self.mode,
-            size: self.size,
-            atime: self.atime,
-            mtime: self.mtime,
-            ctime: self.ctime,
+            kind: inode.kind,
+            mode: inode.mode,
+            size: inode.size,
+            atime: inode.atime,
+            mtime: inode.mtime,
+            ctime: inode.ctime,
         }
     }
 }
@@ -488,7 +512,7 @@ pub(crate) fn copy_path(handle: Handle, output: &mut [u8]) -> Option<usize> {
 }
 
 pub(crate) fn path_hash(handle: Handle) -> Option<u64> {
-    let node = node(handle)?;
+    let node = name_node(handle)?;
     let mut hash = 0xcbf2_9ce4_8422_2325_u64;
     for byte in node.path() {
         hash ^= u64::from(*byte);
@@ -591,6 +615,7 @@ fn create(path: &[u8], kind: NodeKind, mode: u32, initial: &[u8]) -> Option<Hand
         mode: mode & 0o7777,
         seals: 0,
         fifo_socket: 0,
+        link_target: 0,
         handle,
         size: 0,
         first_page: FrameLease::EMPTY,
@@ -613,9 +638,98 @@ fn create(path: &[u8], kind: NodeKind, mode: u32, initial: &[u8]) -> Option<Hand
     Some(handle)
 }
 
+/// Adds `path` as another name for the regular file behind `source`, like
+/// Linux vfs_link() (fs/namei.c): both names share one inode, so data, mode,
+/// times and xattrs written through either name are visible through the
+/// other, and each name can be renamed or unlinked independently.
+pub(crate) fn link(source: Handle, path: &[u8]) -> Option<Handle> {
+    valid_path(path)?;
+    let target = node(source)
+        .filter(|node| node.kind == NodeKind::File)?
+        .handle;
+    if lookup(path).is_some() {
+        return None;
+    }
+    let replace_whiteout = hidden(path);
+    let overlay = live_mut();
+    let generation = overlay.next_generation.checked_add(1)?;
+    let node = if replace_whiteout {
+        node_by_path_mut(overlay, path)?
+    } else {
+        empty_node_slot(overlay)?
+    };
+    let mut stored_path = [0_u8; PATH_CAPACITY];
+    stored_path[..path.len()].copy_from_slice(path);
+    let handle = Handle {
+        generation,
+        inode: target.inode,
+    };
+    *node = Node {
+        active: true,
+        linked: true,
+        path_length: path.len() as u16,
+        link_target: target.generation,
+        handle,
+        path: stored_path,
+        ..Node::EMPTY
+    };
+    overlay.next_generation = generation;
+    Some(handle)
+}
+
+/// Linux st_nlink for the node behind `handle`: the number of names of a
+/// non-directory (0 once the last name is gone while it is still open), and
+/// for a directory 2 plus one per subdirectory, whose ".." entries link back
+/// to it (tmpfs: mm/shmem.c:3084 and mm/shmem.c:3896).
+pub(crate) fn link_count(handle: Handle) -> Option<u32> {
+    let name = name_node(handle)?;
+    let inode = name.inode_handle();
+    let directory = node(handle)?.kind == NodeKind::Directory;
+    if directory && !name.linked {
+        return Some(0);
+    }
+    let mut prefix = [0_u8; PATH_CAPACITY];
+    let prefix_length = name.path().len() + 1;
+    if directory {
+        prefix[..prefix_length - 1].copy_from_slice(name.path());
+        prefix[prefix_length - 1] = b'/';
+    }
+    let mut count = if directory { 2 } else { 0 };
+    for_each_node(live()?, |candidate| {
+        if !candidate.linked || candidate.whiteout {
+            return None::<()>;
+        }
+        let counted = if directory {
+            candidate.kind == NodeKind::Directory
+                && candidate
+                    .path()
+                    .strip_prefix(&prefix[..prefix_length])
+                    .is_some_and(|remainder| !remainder.contains(&b'/'))
+        } else {
+            candidate.inode_handle() == inode
+        };
+        count += u32::from(counted);
+        None
+    });
+    Some(count)
+}
+
+fn shares_inode(handle: Handle) -> bool {
+    name_node(handle).is_some_and(|name| name.link_target != 0)
+        || node(handle).is_some_and(|inode| inode.kind == NodeKind::File)
+            && link_count(handle).is_some_and(|count| count > 1)
+}
+
 pub(crate) fn whiteout(path: &[u8]) -> bool {
     if valid_path(path).is_none() {
         return false;
+    }
+    // A name whose inode other names still share must not release the
+    // shared data: drop only that name and record a separate whiteout.
+    if let Some(existing) = lookup(path).filter(|metadata| shares_inode(metadata.handle)) {
+        if !unlink(existing.handle) {
+            return false;
+        }
     }
     let has_node = lookup(path).is_some() || hidden(path);
     let overlay = live_mut();
@@ -659,6 +773,7 @@ pub(crate) fn whiteout(path: &[u8]) -> bool {
         mode: 0,
         seals: 0,
         fifo_socket: 0,
+        link_target: 0,
         handle: Handle { generation, inode },
         size: 0,
         first_page: FrameLease::EMPTY,
@@ -909,7 +1024,7 @@ pub(crate) fn rename(handle: Handle, path: &[u8]) -> bool {
     if valid_path(path).is_none() || lookup(path).is_some() {
         return false;
     }
-    let Some(source) = node(handle) else {
+    let Some(source) = name_node(handle) else {
         return false;
     };
     if !source.linked {
@@ -1002,7 +1117,7 @@ pub(crate) fn unlink(handle: Handle) -> bool {
             return false;
         }
     }
-    let Some(node) = node_mut(handle) else {
+    let Some(node) = name_node_mut(handle) else {
         return false;
     };
     node.linked = false;
@@ -1329,12 +1444,24 @@ fn release_data_pages(mut page: FrameLease) -> bool {
     true
 }
 
+// The node holding the inode behind `handle`: the node itself, or for a hard
+// link the node it shares data with. Data and attribute operations use this.
 fn node(handle: Handle) -> Option<&'static Node> {
+    name_node(name_node(handle)?.inode_handle())
+}
+
+fn node_mut(handle: Handle) -> Option<&'static mut Node> {
+    let target = name_node(handle)?.inode_handle();
+    name_node_mut(target)
+}
+
+// The name entry for `handle` itself (path, linked, whiteout).
+fn name_node(handle: Handle) -> Option<&'static Node> {
     let overlay = live()?;
     for_each_node(overlay, |node| (node.handle == handle).then_some(node))
 }
 
-fn node_mut(handle: Handle) -> Option<&'static mut Node> {
+fn name_node_mut(handle: Handle) -> Option<&'static mut Node> {
     let overlay = live_mut();
     let mut page = overlay.first_node_page;
     while page != FrameLease::EMPTY {

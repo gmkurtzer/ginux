@@ -16280,6 +16280,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let secret_memory = verify_linux_memfd_secret_syscall();
     let mount_queries = verify_linux_mount_query_syscalls();
     let file_handles = verify_linux_file_handle_syscalls();
+    let overlay_hard_links = verify_linux_overlay_hard_links();
     let shadow_stack = linux_map_shadow_stack(0, PAGE_SIZE as u64, 0) == LINUX_EOPNOTSUPP
         && linux_map_shadow_stack(1, 0, u64::MAX) == LINUX_EOPNOTSUPP;
     let uretprobe = verify_linux_default_signal_dispositions();
@@ -16346,6 +16347,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         secret_memory,
         mount_queries,
         file_handles,
+        overlay_hard_links,
         shadow_stack,
         uretprobe,
         seccomp,
@@ -16409,6 +16411,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && secret_memory
         && mount_queries
         && file_handles
+        && overlay_hard_links
         && shadow_stack
         && uretprobe
         && seccomp
@@ -18562,6 +18565,93 @@ fn verify_linux_file_handle_syscalls() -> bool {
     let removed = crate::linux_overlay::unlink(node);
     let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
     reopened && path_only && closed && removed && unmapped
+}
+
+fn verify_linux_overlay_hard_links() -> bool {
+    let mapping = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    if !(LINUX_RUNTIME_DYNAMIC_MMAP_BASE..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
+        .contains(&mapping)
+    {
+        return false;
+    }
+    let Some(first) = crate::linux_overlay::create_file(b"ginux-link-a", 0o600, b"x") else {
+        let _ = linux_runtime_munmap(mapping, PAGE_SIZE as u64);
+        return false;
+    };
+    let prepared = copy_to_linux_user(mapping, b"/ginux-link-a\0")
+        && copy_to_linux_user(mapping + 64, b"/ginux-link-b\0")
+        && copy_to_linux_user(mapping + 128, b"/ginux-loop-a\0");
+    let linked = prepared
+        && linux_linkat(
+            u64::from(LINUX_AT_FDCWD),
+            mapping,
+            u64::from(LINUX_AT_FDCWD),
+            mapping + 64,
+            0,
+        ) == 0;
+    let second = crate::linux_overlay::lookup(b"ginux-link-b").map(|metadata| metadata.handle);
+    let shares_data = |handle| {
+        let mut contents = [0_u8; 2];
+        crate::linux_overlay::read(handle, 0, &mut contents) == Some(2) && contents == *b"xy"
+    };
+    let shared = linked
+        && second.is_some_and(|second| {
+            crate::linux_overlay::write(second, 1, b"y") == Some(1)
+                && shares_data(first)
+                && second.inode() == first.inode()
+                && crate::linux_overlay::link_count(first) == Some(2)
+        });
+    // Both handles name one inode, so each reports its remaining names.
+    let first_removed = shared
+        && crate::linux_overlay::unlink(first)
+        && crate::linux_overlay::link_count(first) == Some(1)
+        && second.and_then(crate::linux_overlay::link_count) == Some(1);
+    let second_removed = first_removed
+        && second.is_some_and(|second| {
+            shares_data(second)
+                && crate::linux_overlay::unlink(second)
+                && crate::linux_overlay::link_count(second) == Some(0)
+                && crate::linux_overlay::link_count(first) == Some(0)
+        });
+    let directory = crate::linux_overlay::create_directory(b"ginux-link-d", 0o700);
+    let children = [
+        crate::linux_overlay::create_directory(b"ginux-link-d/a", 0o700),
+        crate::linux_overlay::create_directory(b"ginux-link-d/b", 0o700),
+        crate::linux_overlay::create_file(b"ginux-link-d/f", 0o600, &[]),
+    ];
+    let directory_links = children.iter().all(Option::is_some)
+        && directory.and_then(crate::linux_overlay::link_count) == Some(4);
+    let loop_links = [
+        crate::linux_overlay::create_symlink(b"ginux-loop-a", b"/ginux-loop-b"),
+        crate::linux_overlay::create_symlink(b"ginux-loop-b", b"/ginux-loop-a"),
+    ];
+    let symlink_loop = prepared
+        && loop_links.iter().all(Option::is_some)
+        && linux_openat(u64::from(LINUX_AT_FDCWD), mapping + 128, 0, 0) == LINUX_ELOOP;
+    let removed = children
+        .into_iter()
+        .chain([directory])
+        .chain(loop_links)
+        .all(|handle| handle.is_some_and(crate::linux_overlay::unlink));
+    let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
+    let valid = shared
+        && first_removed
+        && second_removed
+        && directory_links
+        && symlink_loop
+        && removed
+        && unmapped;
+    if valid {
+        serial_write("ginux: Linux overlay hard links share one inode\r\n");
+    }
+    valid
 }
 
 fn verify_linux_mount_query_syscalls() -> bool {
@@ -25445,6 +25535,8 @@ fn linux_overlay_stat(metadata: crate::linux_overlay::Metadata) -> [u8; LINUX_ST
         crate::linux_overlay::NodeKind::Fifo => 0o010000,
     };
     let mut stat = linux_stat(kind | metadata.mode, metadata.handle.inode());
+    let links = crate::linux_overlay::link_count(metadata.handle).unwrap_or(1);
+    stat[16..24].copy_from_slice(&u64::from(links).to_ne_bytes());
     stat[48..56].copy_from_slice(&(metadata.size as u64).to_ne_bytes());
     stat[64..72].copy_from_slice(&(metadata.size as u64).div_ceil(512).to_ne_bytes());
     stat[72..80].copy_from_slice(&metadata.atime.0.to_ne_bytes());
@@ -25561,13 +25653,21 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64, mode: u64) -> u64
     let mut overlay_metadata =
         canonical_length.and_then(|length| crate::linux_overlay::lookup(&canonical[..length]));
     let mut rootfs_at_path = linux_rootfs_path_at(directory, path);
-    if overlay_metadata
+    // Follow overlay symlink chains; like Linux reserve_stack()
+    // (fs/namei.c:1981), following more than MAXSYMLINKS (40) fails with ELOOP.
+    const MAX_SYMLINKS: u32 = 40;
+    let mut followed_links = 0;
+    while overlay_metadata
         .is_some_and(|metadata| metadata.kind == crate::linux_overlay::NodeKind::Symlink)
     {
         let metadata = overlay_metadata.unwrap();
         if flags & LINUX_O_NOFOLLOW != 0 {
             return LINUX_ELOOP;
         }
+        if followed_links == MAX_SYMLINKS {
+            return LINUX_ELOOP;
+        }
+        followed_links += 1;
         let mut target = [0_u8; crate::linux_overlay::PATH_CAPACITY];
         let Some(target_length) = crate::linux_overlay::read(metadata.handle, 0, &mut target)
         else {
@@ -26566,7 +26666,7 @@ fn linux_linkat(
         }
         let created = match source.kind {
             crate::linux_overlay::NodeKind::File => {
-                crate::linux_overlay::create_file(destination, source.mode, &[])
+                crate::linux_overlay::link(source.handle, destination)
             }
             crate::linux_overlay::NodeKind::Symlink => {
                 let mut target = [0_u8; crate::linux_overlay::PATH_CAPACITY];
@@ -26580,38 +26680,32 @@ fn linux_linkat(
             }
             crate::linux_overlay::NodeKind::Directory => None,
         };
-        let Some(created) = created else {
-            return LINUX_ENOSPC;
-        };
-        if source.kind == crate::linux_overlay::NodeKind::File {
-            let mut offset = 0;
-            let mut chunk = [0_u8; 4096];
-            while offset < source.size {
-                let length = (source.size - offset).min(chunk.len());
-                if crate::linux_overlay::read(source.handle, offset, &mut chunk[..length])
-                    != Some(length)
-                    || crate::linux_overlay::write(created, offset, &chunk[..length])
-                        != Some(length)
-                {
-                    return LINUX_EIO;
-                }
-                offset += length;
-            }
-        }
-        return 0;
+        return if created.is_some() { 0 } else { LINUX_ENOSPC };
     }
-    let Some((_, Some(entry))) =
+    let Some((rootfs_handle, Some(entry))) =
         linux_rootfs_metadata_path_at(old_directory, &old_path[..old_path_length])
     else {
         return LINUX_ENOENT;
     };
     match entry.kind {
         crate::published_rootfs::EntryKind::File | crate::published_rootfs::EntryKind::Hardlink => {
-            crate::linux_overlay::create_file(
-                destination,
-                linux_rootfs_mode(entry) & 0o7777,
-                entry.data,
-            )
+            // Copy the image file up once at its own path, then add the new
+            // name to that overlay inode so both names share it.
+            let mut source = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+            let Some(length) = crate::published_rootfs::copy_path(rootfs_handle, &mut source)
+            else {
+                return LINUX_EROFS;
+            };
+            crate::linux_overlay::lookup(&source[..length])
+                .map(|metadata| metadata.handle)
+                .or_else(|| {
+                    crate::linux_overlay::create_file(
+                        &source[..length],
+                        linux_rootfs_mode(entry) & 0o7777,
+                        entry.data,
+                    )
+                })
+                .and_then(|copied| crate::linux_overlay::link(copied, destination))
         }
         crate::published_rootfs::EntryKind::Symlink => {
             crate::linux_overlay::create_symlink(destination, entry.link)
@@ -27485,6 +27579,11 @@ fn linux_renameat(
     if !linux_overlay_parent_exists(&new_canonical[..new_length]) {
         return LINUX_ENOENT;
     }
+    // Renaming one hard link onto another name of the same inode leaves both
+    // names in place (vfs_rename(), fs/namei.c:6101).
+    if target.is_some_and(|target| target.handle.inode() == source.handle.inode()) {
+        return 0;
+    }
     if target.is_some_and(|target| !crate::linux_overlay::unlink(target.handle)) {
         return LINUX_ENOTEMPTY;
     }
@@ -27655,10 +27754,11 @@ fn linux_statx(directory: u64, path_address: u64, flags: u64, mask: u64, stat_ad
                 crate::linux_overlay::NodeKind::Fifo => 0o010000,
             } | metadata.mode;
             let size = metadata.size as u64;
+            let links = crate::linux_overlay::link_count(metadata.handle).unwrap_or(1);
             let mut stat = [0_u8; 256];
             linux_statx_set_mount(&mut stat, LinuxFilesystemKind::Root);
             stat[4..8].copy_from_slice(&(PAGE_SIZE as u32).to_ne_bytes());
-            stat[16..20].copy_from_slice(&1_u32.to_ne_bytes());
+            stat[16..20].copy_from_slice(&links.to_ne_bytes());
             stat[28..30].copy_from_slice(&(mode as u16).to_ne_bytes());
             stat[32..40].copy_from_slice(&metadata.handle.inode().to_ne_bytes());
             stat[40..48].copy_from_slice(&size.to_ne_bytes());
