@@ -31,6 +31,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "ginus-vfs"
+version = "0.1.0"
+
+[[package]]
+name = "ginus-vfs-index"
+version = "0.1.0"
+dependencies = [
+ "ginus-vfs",
+]
+
+[[package]]
 name = "managed-payload"
 version = "0.1.0"
 
