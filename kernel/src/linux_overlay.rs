@@ -536,7 +536,9 @@ pub(crate) fn create_fifo(path: &[u8], mode: u32) -> Option<Handle> {
 
 pub(crate) fn fifo_socket(handle: Handle) -> Option<u8> {
     let node = node(handle)?;
-    (node.kind == NodeKind::Fifo && node.fifo_socket != 0).then_some(node.fifo_socket - 1)
+    (node.kind == NodeKind::Fifo)
+        .then(|| node.fifo_socket.checked_sub(1))
+        .flatten()
 }
 
 pub(crate) fn set_fifo_socket(handle: Handle, slot: u8) -> bool {

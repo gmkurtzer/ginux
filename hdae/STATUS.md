@@ -5,71 +5,34 @@
 - Active skill: `.agents/skills/hdae-development/SKILL.md`
 - Reload required after compaction, reset, resume, or handoff: yes
 - Active project: remaining reporter remediation batch
-- Branch: `hdae/issue-20-gzip-unpack`
+- Branch: `hdae/issue-43-release-overflow`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 37 bounded OCI unpack, delivered as PR #52 for issue #20
-- Last completed action: merged PR #51, closed issue #29, synchronized PR #52
-  with current `main`, and passed fresh local validation
-- Next action: wait for GitHub CI on the final PR #52 head, then require a
-  later unchanged-head review before merge and issue closure
+- Active gate: none; Gate 44 closed under delegated completion
+- Last completed action: regenerated PR #54's checked-release EFI source from
+  the merged inputs; fresh `make check` and complete `make test` passed
+- Next action: commit and push the synchronized exact head, require green PR CI,
+  then merge PR #54 and close issue #43 with its final evidence
 
 ## Current repository state
 
-Remote `main` is at `8232ab57`. The first
+Remote `main` is at `b4628fc2`. The first
 eleven feedback-hardening gates and inserted correctness gates are complete.
 Gate 12 is complete on `codex/performance-parity`. Gates 13 through 19 and 21
-through 23 and Gates 32 through 33 remain in `gates-todo/` for maintainer
-review after delivery through merged pull requests. Gate 34 was delivered
-through merged PR #44 and issue #17 is closed; Gate 35 was delivered through
-merged PR #45 and issue #18 is closed; Gate 36 was delivered through merged PR
-#46 and issue #19 is closed. Gate 37 was delivered through merged PR #59 and
-issue #57 is closed. Gate 40 was delivered through merged PR #49 and issue #25
-is closed. Gate 42 was delivered through merged PR #50 and issue #28 is closed.
-Gate 43 was delivered through merged PR #51 and issue #29 is closed. PR #52 is
-synchronized with current `main`; fresh `make check` and complete `make test`
-pass, including `GINUX_KERNEL_OK` and `Boot test passed`. Its final head awaits
-GitHub CI and a later unchanged-head review. PRs #53 and #54 remain open and
-conflicted pending the same merge-train process.
+through 23 and Gates 32 through 33 remain in `gates-todo/` for maintainer review
+after delivery through merged pull requests. PR #52 is merged and issue #20 is
+closed. PR #53 is synchronized with current `main`, but its mandatory Rocky
+rootfs integration remains blocked before image download by registry DNS. Gate
+44 is closed in `gates-done/`; PR #54 is being synchronized and revalidated.
 The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
 matrix and repeated stress pass. Gate 11's comparison and reduced evidence are
-under `docs/feedback-hardening/`. No direct push to `main` was performed.
+under `docs/feedback-hardening/`. No push or merge was performed.
 
 ## Open decisions
 
-- None. The architecture defines a domain as the unit of private payload memory
-  ownership and accounting; Gate 37 must preserve that invariant. The
-  delegated remediation batch includes issues #20, #27, and #43 still in the
-  serial merge train. Gate 41 uses the human-selected staged replacement
-  address-space design.
+- None. Issue #43 is confirmed and the user authorized merge and closure after
+  the synchronized head passes its complete evidence and GitHub CI.
 
 ## Active diagnosis
-
-- Gate 43 now distinguishes ordinary inactive activation failure from failed
-  rollback. Ordinary failure permits table retirement only after rollback
-  proves translation disabled, caches invalidated, the root cleared, command
-  completion, and final inactive state. Ambiguous rollback leaves all six
-  table leases live and kernel-owned until reboot.
-- `make check` and complete `make test` pass; the deterministic QEMU marker is
-  `ginux: failed IOMMU activation rollback quarantined`.
-
-- Root cause: Gate 36 correctly allocated private payload frames to the domain,
-  but several leaf lookup, fork/exec, RELRO, and cleanup paths still assumed
-  every payload frame was kernel-owned. Allocation succeeded, then validation
-  treated the live domain-owned frame as absent.
-- Wayland is not involved. PR #56's clock change does not resolve the failure.
-- Payload leaves now accept exact live leases owned by the domain or kernel,
-  plus immutable runtime extents; hierarchy frames remain kernel-only.
-- `make check`, `make test`, and `make test-alpine` pass. Alpine completes its
-  shell, restart, and failure-containment probes under the 128 MiB budget.
-
-- Configurable allocator owner limits stop exactly at the container budget,
-  preserve independent owner capacity, and restore capacity after release.
-- Linux private mmap, exec, stack, copy-on-write, process, tmpfs, and SysV
-  frames use the generation-safe container owner; shared immutable file-cache
-  and page-table hierarchy frames remain kernel-owned by design.
-- `make check` passes with the unsafe inventory unchanged at 1,033 blocks.
-  `make test` passes the full two-vCPU QEMU and Linux runtime suite, including
-  atomic mmap-style and independent SysV quota-exhaustion markers.
 
 - Four-vCPU runtime work now dispatches independently to CPUs 1 through 3.
   A targeted nine-sample four-thread run produced a 2,924 events/s median,

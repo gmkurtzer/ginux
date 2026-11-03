@@ -223,7 +223,7 @@ pub(crate) fn current_cpu_index_checked() -> Option<usize> {
     (base >= states
         && base < states + size_of::<[CpuEntryState; CPU_ENTRY_STATE_LIMIT]>()
         && (base - states).is_multiple_of(size_of::<CpuEntryState>()))
-    .then_some((base - states) / size_of::<CpuEntryState>())
+    .then(|| (base - states) / size_of::<CpuEntryState>())
 }
 
 pub(crate) fn task_register_denies_user_io() -> bool {

@@ -19611,11 +19611,18 @@ fn verify_linux_queued_self_signals(
 
 fn verify_linux_descriptor_argument_widths() -> bool {
     const UPPER_REGISTER_BITS: u64 = 1_u64 << 32;
-    let control = linux_descriptor_fcntl(
-        UPPER_REGISTER_BITS | 1,
-        UPPER_REGISTER_BITS | LINUX_F_GETFD,
-        0,
-    ) == 0
+    let decimal_paths = linux_decimal(b"0") == Some(0)
+        && linux_decimal(b"18446744073709551615") == Some(u64::MAX)
+        && linux_decimal(b"").is_none()
+        && linux_decimal(b"/").is_none()
+        && linux_decimal(b"1/").is_none()
+        && linux_decimal(b"18446744073709551616").is_none();
+    let control = decimal_paths
+        && linux_descriptor_fcntl(
+            UPPER_REGISTER_BITS | 1,
+            UPPER_REGISTER_BITS | LINUX_F_GETFD,
+            0,
+        ) == 0
         && linux_flock(UPPER_REGISTER_BITS | 1, UPPER_REGISTER_BITS | 1) == 0;
     let first = linux_console_dup(UPPER_REGISTER_BITS | 1);
     if first >= LINUX_DESCRIPTOR_TABLE_LIMIT {
@@ -22532,10 +22539,7 @@ fn linux_readlink_at(
     };
     let path = &path[..path_length];
     if let Some(descriptor_bytes) = path.strip_prefix(b"/proc/self/fd/") {
-        let Some(descriptor) = descriptor_bytes.iter().try_fold(0_u64, |value, byte| {
-            byte.is_ascii_digit()
-                .then_some(value.checked_mul(10)?.checked_add(u64::from(byte - b'0'))?)
-        }) else {
+        let Some(descriptor) = linux_decimal(descriptor_bytes) else {
             return LINUX_ENOENT;
         };
         let mut target = [0_u8; crate::linux_overlay::PATH_CAPACITY];
@@ -22751,13 +22755,17 @@ fn linux_proc_numeric_file(path: &[u8], absolute: bool) -> Option<(u32, &[u8])> 
     (pid != 0).then_some((pid, name))
 }
 
+fn linux_decimal(bytes: &[u8]) -> Option<u64> {
+    (!bytes.is_empty()).then_some(())?;
+    bytes.iter().try_fold(0_u64, |value, byte| {
+        let digit = byte.checked_sub(b'0').filter(|digit| *digit <= 9)?;
+        value.checked_mul(10)?.checked_add(u64::from(digit))
+    })
+}
+
 fn linux_proc_fdinfo_target(path: &[u8]) -> Option<u64> {
     let descriptor = path.strip_prefix(b"/proc/self/fdinfo/")?;
-    let descriptor = descriptor.iter().try_fold(0_u64, |value, byte| {
-        byte.is_ascii_digit()
-            .then(|| value.checked_mul(10)?.checked_add(u64::from(byte - b'0')))
-            .flatten()
-    })?;
+    let descriptor = linux_decimal(descriptor)?;
     linux_pidfd_descriptor(descriptor).then_some(descriptor)
 }
 
@@ -24007,10 +24015,7 @@ fn linux_execve_at(
                 None => return LINUX_EBADF,
             }
         } else if let Some(descriptor_bytes) = path[..path_length].strip_prefix(b"/proc/self/fd/") {
-            let Some(descriptor) = descriptor_bytes.iter().try_fold(0_u64, |value, byte| {
-                byte.is_ascii_digit()
-                    .then_some(value.checked_mul(10)?.checked_add(u64::from(byte - b'0'))?)
-            }) else {
+            let Some(descriptor) = linux_decimal(descriptor_bytes) else {
                 return LINUX_ENOENT;
             };
             match linux_descriptor_path(descriptor, &mut resolved) {
@@ -25191,10 +25196,7 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64, mode: u64) -> u64
         return LINUX_EINVAL;
     }
     if let Some(descriptor_bytes) = path[..path_length].strip_prefix(b"/proc/self/fd/") {
-        let Some(descriptor) = descriptor_bytes.iter().try_fold(0_u64, |value, byte| {
-            byte.is_ascii_digit()
-                .then_some(value.checked_mul(10)?.checked_add(u64::from(byte - b'0'))?)
-        }) else {
+        let Some(descriptor) = linux_decimal(descriptor_bytes) else {
             return LINUX_ENOENT;
         };
         if linux_overlay_descriptor_handle(descriptor).is_some() {
@@ -37778,10 +37780,7 @@ fn linux_mount_filesystem(
     let mut resolved_target = [0_u8; crate::linux_overlay::PATH_CAPACITY];
     let target =
         if let Some(descriptor_bytes) = target[..target_length].strip_prefix(b"/proc/self/fd/") {
-            let Some(descriptor) = descriptor_bytes.iter().try_fold(0_u64, |value, byte| {
-                byte.is_ascii_digit()
-                    .then_some(value.checked_mul(10)?.checked_add(u64::from(byte - b'0'))?)
-            }) else {
+            let Some(descriptor) = linux_decimal(descriptor_bytes) else {
                 return LINUX_ENOENT;
             };
             let Some(length) = linux_descriptor_path(descriptor, &mut resolved_target) else {

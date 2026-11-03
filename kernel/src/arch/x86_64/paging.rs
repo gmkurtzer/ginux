@@ -291,13 +291,17 @@ pub(crate) fn validated_user_root_frames(root: u64) -> Option<ValidatedUserRootF
     let network_layout = native_entry(15) & PRESENT != 0;
     let controller_layout = !network_layout && native_entry(7) & PRESENT != 0;
     let image_capacity = if network_layout {
-        160
+        crate::address_space::NATIVE_NETWORK_IMAGE_PAGES
     } else if controller_layout {
         crate::address_space::NATIVE_CONTROLLER_IMAGE_PAGES
     } else {
         7
     };
-    let stack_pages = if network_layout { 16 } else { 2 };
+    let stack_pages = if network_layout {
+        crate::address_space::NATIVE_NETWORK_STACK_PAGES
+    } else {
+        2
+    };
     let stack_page = image_capacity + 1;
     let boot_info_page = stack_page + stack_pages + 1;
     let image_pages = (0..image_capacity)
@@ -1526,13 +1530,13 @@ pub(crate) fn mmio_mappings_are_exact<const N: usize>(mappings: [MmioMapping; N]
             let pages = mapping.mapped_length / PAGE_SIZE;
             (first_index..first_index + pages)
                 .contains(&index)
-                .then_some(
+                .then(|| {
                     (mapping.physical_page + ((index - first_index) * PAGE_SIZE) as u64)
                         | PRESENT
                         | CACHE_DISABLE
                         | NO_EXECUTE
-                        | if mapping.writable { WRITABLE } else { 0 },
-                )
+                        | if mapping.writable { WRITABLE } else { 0 }
+                })
         });
         let Some(expected) = expected else {
             return unsafe { table.add(index).read() == 0 };
