@@ -4,18 +4,21 @@
 
 ```text
 Host Linux kernel
-  `- /sbin/ginus: trusted host PID 1 and userspace kernel
-       `- domain
-            |- versioned contract and normalized configuration
-            |- virtual CPU contexts and address spaces
-            |- virtual processes, descriptors, devices, and kernel views
-            `- Rocky Linux systemd: virtual PID 1
-                 `- managed services and processes
+  `- Rocky Linux host systemd: real host PID 1
+       `- ginus: trusted ordinary host process and userspace kernel
+            `- domain
+                 |- versioned contract and normalized configuration
+                 |- virtual CPU contexts and address spaces
+                 |- virtual processes, descriptors, devices, and kernel views
+                 `- Rocky Linux systemd: virtual domain PID 1
+                      `- managed services and processes
 ```
 
-Ginus remains resident. It does not install restrictions and then `exec` the
-real init. Systemd and its descendants execute as managed domain code and see a
-Linux-compatible interface implemented by Ginus.
+The host boots and operates normally without Ginus replacing its init. Ginus
+remains resident after an operator or host service starts it; it does not
+install restrictions and then disappear. Domain systemd and its descendants
+execute as managed code and see a Linux-compatible interface implemented by
+Ginus.
 
 ## Security invariants
 
@@ -40,19 +43,22 @@ Linux-compatible interface implemented by Ginus.
 
 ## Major components
 
-### Host bootstrap
+### Host integration
 
-`/sbin/ginus` runs as host PID 1, validates host prerequisites and domain
-configuration, initializes logging and recovery behavior, prepares the cached
-Rocky userspace, and starts the domain. Host-PID-1 signal, child-reaping,
-shutdown, and failure behavior are part of the trusted boundary.
+Ginus is an ordinary Rocky host executable. It validates host prerequisites
+and domain configuration, initializes logging and recovery behavior, opens
+only the host resources needed by configured backends, and starts the domain.
+Host systemd may supervise Ginus as a service, but manual invocation is the
+Gate 1 baseline. Ginus failure stops its domains without replacing or shutting
+down the host init system.
 
 ### Execution platform
 
 Development and verification run on a macOS arm64 host through QEMU TCG
-emulating a Linux x86-64 machine. Ginus runs as PID 1 inside that emulated
-machine and acts as the application kernel for its managed userspace rather
-than booting another guest Linux kernel beneath the domain. Gate 1 selects and
+emulating a normally booted Rocky Linux 10 x86-64 host. Host systemd remains
+real PID 1 and Ginus runs as an ordinary process inside that environment.
+Ginus acts as the application kernel for its managed userspace rather than
+booting another guest Linux kernel beneath the domain. Gate 1 selects and
 proves an emulation-compatible syscall-trap mechanism, address-space control,
 and prevention of direct host syscalls. KVM acceleration is a deferred
 optimization and is not an initial acceptance requirement.

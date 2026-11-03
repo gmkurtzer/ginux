@@ -31,11 +31,13 @@ rather than an all-or-nothing inheritance from the host kernel.
 
 ## Initial outcome
 
-The initial milestone will install Ginus as `/sbin/ginus`, boot it as host PID
-1 with `init=/sbin/ginus`, and run an unmodified Rocky Linux 10 systemd
-userspace as virtual PID 1 inside one Ginus domain. The Rocky userspace will be
-prepared from an official, checksum-pinned cloud QCOW2 image and cached so
-ordinary boots and tests do not require network access.
+The initial milestone will boot a normal Rocky Linux 10 host with systemd as
+the real host PID 1, install Ginus as an ordinary host executable, and run an
+unmodified Rocky Linux 10 systemd userspace as virtual PID 1 inside one Ginus
+domain. Ginus remains resident as the userspace kernel for the processes it
+launches. The Rocky host and domain userspace will be derived from an official,
+checksum-pinned cloud QCOW2 image and cached so ordinary boots and tests do not
+require network access.
 
 The milestone succeeds when:
 
@@ -67,6 +69,8 @@ solved.
 - Rust implementation on Linux x86-64.
 - macOS arm64 development host using QEMU TCG to emulate the complete Linux
   x86-64 verification environment.
+- A normally booted Rocky Linux 10 development VM with host systemd as PID 1;
+  Ginus runs inside it as an ordinary process or service.
 - An emulation-compatible syscall-interception mechanism selected by Gate 1;
   KVM acceleration is not required by the initial milestone.
 - One Rocky Linux 10 systemd domain from a cached cloud image.
@@ -82,6 +86,7 @@ solved.
 ## Non-goals for the initial milestone
 
 - Running the host distribution root directly under Ginus.
+- Replacing the Rocky host's init process or requiring `init=/sbin/ginus`.
 - Pulling or assembling OCI images at every boot.
 - Arbitrary physical-device, GPU, MMIO, or DMA passthrough.
 - VFIO/IOMMU hardware assignment.

@@ -2,9 +2,10 @@
 
 ## Current checkpoint
 
-- Gate 1, foundation and interception proof, is technically passed and
-  delivered in https://github.com/gmkurtzer/usshim/pull/1 from branch
-  `hdae/foundation-interception`. Human acceptance is pending.
+- Gate 1 is partial on branch `hdae/foundation-interception` and delivered in
+  https://github.com/gmkurtzer/usshim/pull/1. Its original PID-1 harness was
+  superseded by the approved ordinary-host-process architecture and must be
+  revised before the gate can pass.
 - Authoritative name: Ginus (Ginux Userspace).
 - Runtime isolation unit: domain.
 - Policy unit: versioned contract.
@@ -17,10 +18,12 @@
 
 ## Governing outcome and invariants
 
-Ginus must boot as host PID 1 and run an unmodified Rocky Linux 10 systemd
-userspace inside a domain without allowing managed code to invoke host syscalls
-directly. All interactions are emulated, mediated, or denied according to the
-domain contract. Domain-visible kernel state and devices are Ginus-owned.
+A normal Rocky Linux 10 host must boot with systemd as real PID 1. Ginus runs
+as an ordinary host process and launches an unmodified Rocky Linux 10 systemd
+userspace as virtual domain PID 1 without allowing managed code to invoke host
+syscalls directly. All managed interactions are emulated, mediated, or denied
+according to the domain contract. Domain-visible kernel state and devices are
+Ginus-owned.
 
 See `hdae/PROJECT.md` and `hdae/ARCHITECTURE.md` for the authoritative intent,
 scope, threat model, and invariants.
@@ -40,6 +43,11 @@ scope, threat model, and invariants.
 - Human direction on 2026-11-03 removed the public-exploit demonstration gate.
   The project retains deterministic defensive contract, malformed-input,
   escape-attempt, fuzz, recovery, and authority-reduction verification.
+- Human direction on 2026-11-03 corrected the host boundary: Rocky Linux boots
+  normally with host systemd as PID 1; Ginus is an ordinary process or service
+  that creates and supervises domains beneath it. Domain systemd is virtual
+  PID 1. The earlier Gate 1 PID-1 result is retained as superseded evidence,
+  not accepted product behavior.
 - Coverage review: functionality, failure behavior, deterministic tests, user
   configuration, documentation, compatibility, recovery, performance, and
   security are assigned to explicit gates; none is silently omitted.
@@ -65,14 +73,16 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Stop for human acceptance of Gate 1 after the reviewer runs or reviews
-`make demo-gate-1`. Do not begin Gate 2 before explicit acceptance.
+Revise Gate 1 so QEMU boots a normal Rocky 10 host, Ginus runs as an ordinary
+process, managed interception passes, the host remains healthy after Ginus
+exits, and matched benchmarks run inside that host. Update pull request 1 and
+stop for human acceptance. Do not begin Gate 2 before explicit acceptance.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 1 technically passed and delivered; human acceptance pending
-- Last evidence: full clean Gate 1 command set passed on 2026-11-03
-- Required human decision: accept or reject Gate 1 after its demonstration
+- Active gate: Gate 1 partial; ordinary-process Rocky-host revision in progress
+- Last evidence: PID-1 prototype passed but is superseded by architecture
+- Required human decision: accept or reject revised Gate 1 after demonstration

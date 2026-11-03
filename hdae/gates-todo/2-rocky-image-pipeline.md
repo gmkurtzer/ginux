@@ -1,4 +1,4 @@
-# Rocky image pipeline
+# Rocky domain-userspace pipeline
 
 ## Source
 
@@ -7,15 +7,14 @@ without downloading it on every boot.
 
 ## Goal
 
-Provide a pinned, verified, cached, and reproducibly prepared Rocky Linux 10
-x86-64 userspace that ordinary Ginus builds, boots, and tests can consume
-offline.
+Reproducibly prepare the Gate 1 verified and cached Rocky Linux 10 x86-64 image
+content as a domain userspace that Ginus builds and tests can consume offline.
 
 ## Approved scope
 
-- Select an official Rocky Linux 10 x86-64 cloud QCOW2 artifact and record its
-  immutable version, source, size, and published checksum.
-- Implement explicit fetch, verification, preparation, and image-test targets.
+- Reuse the official Rocky Linux 10 x86-64 cloud QCOW2 artifact and verified
+  cache established for the Gate 1 host.
+- Implement explicit preparation and domain-image test targets.
 - Store downloaded and prepared artifacts in documented cache locations outside
   Git while keeping a small source manifest in Git.
 - Prepare the filesystem content needed by Ginus without booting the image's
@@ -37,8 +36,8 @@ offline.
 
 ## Remaining work
 
-- [ ] Pin the approved official image and checksum.
-- [ ] Implement cache, verify, and preparation tooling.
+- [ ] Validate the Gate 1 source manifest as the preparation input.
+- [ ] Implement reproducible preparation and domain-image tooling.
 - [ ] Document artifact ownership, cleanup, and offline operation.
 - [ ] Add corruption, missing-artifact, and repeatability tests.
 
@@ -60,10 +59,8 @@ offline.
 
 ## Verification plan
 
-- `make image-fetch` -> downloads the pinned artifact only when absent or
-  invalid and exits zero after verification.
-- `make image-verify` -> exits zero for the approved artifact and nonzero for a
-  controlled corrupt copy.
+- `make host-image-verify` -> revalidates the Gate 1 cached source and exits
+  nonzero for a controlled corrupt copy.
 - `make image-prepare` -> produces the documented prepared userspace and content
   manifest.
 - `make test-image` -> validates required systemd, loader, library, and machine
@@ -81,8 +78,8 @@ offline.
 
 ## Decisions and limitations
 
-- Exact Rocky artifact and preparation backend are selected within this gate
-  from official sources and recorded before code depends on them.
+- The Rocky source artifact is selected and verified by Gate 1; this gate
+  selects only the reproducible domain-userspace preparation backend.
 - The QCOW2 is a source and cache format, not a guest-kernel execution model.
 
 ## Delivery strategy
@@ -91,12 +88,12 @@ offline.
 - Intended base: `main`
 - Pull request: intended; dedicated branch push and PR creation authorized on
   2026-11-03; never merge or close without explicit authorization
-- Planned commits: pinned image manifest and cache contract; preparation tools
-  and Make targets; offline and corruption verification
+- Planned commits: domain-image preparation contract; preparation tools and
+  Make targets; offline, corruption, and repeatability verification
 - Actual commits: pending
 
 ## Review policy and outcome
 
-Human checkpoint because the selected supply-chain source and root preparation
-become dependencies for all later compatibility evidence. Present
+Human checkpoint because the prepared root becomes a dependency for all later
+compatibility evidence. Present
 `make demo-gate-2`, fresh evidence, and the pull request before acceptance.

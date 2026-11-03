@@ -33,11 +33,11 @@ replace it.
 
 ## Ordered gate map
 
-1. **Foundation and interception proof**: Rust scaffold, threat model,
-   Makefile contract, matched emulated benchmark baseline, and syscall
-   interception proof inside a QEMU TCG Linux x86-64 environment.
-2. **Rocky image pipeline**: pinned, verified, cached, and offline-prepared
-   Rocky Linux 10 userspace.
+1. **Rocky host foundation and interception proof**: boot a normal Rocky Linux
+   10 host under QEMU TCG, run Ginus as an ordinary process, and prove matched
+   syscall interception and benchmark controls without replacing host systemd.
+2. **Rocky domain-userspace pipeline**: reproducibly prepare the cached,
+   verified Rocky image content for consumption beneath Ginus.
 3. **Execution kernel**: address spaces, ELF loading, syscall ABI, central
    dispatch, and small unmodified programs.
 4. **Domain configuration and lifecycle**: versioned configuration,
