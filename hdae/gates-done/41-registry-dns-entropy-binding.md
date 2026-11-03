@@ -33,7 +33,7 @@ traffic used to select the image-pull endpoint.
 
 ## Remaining work
 
-- [ ] Publish the dedicated branch and pull request.
+- None.
 
 ## Acceptance criteria
 
@@ -73,12 +73,14 @@ traffic used to select the image-pull endpoint.
 
 - Working branch: `hdae/issue-63-registry-dns-entropy`
 - Intended base: `main`
-- Pull request: intended, with a non-closing reference to issue #63
+- Pull request: [#73](https://github.com/gmkurtzer/ginux/pull/73), with a
+  non-closing reference to issue #63
 - Planned commits: gate and DNS trust-boundary implementation; evidence and delivery
-- Actual commits: the implementation commit containing this record, followed by
-  a delivery-state commit
+- Actual commits: `dc363b26` (gate, implementation, regressions, and evidence),
+  followed by the delivery-state commit containing this update
 
 ## Review policy and outcome
 
-Delegated completion under the user's authorized proactive-remediation policy.
-The gate remains open until validation passes and an open pull request exists.
+Passed and closed under the user's authorized proactive-remediation policy.
+All technical criteria passed and the dedicated branch and PR #73 exist; merge
+remains subject to the separate two-pass policy.

@@ -9,8 +9,9 @@
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 41, registry DNS entropy and response binding
 - Last completed action: DNS binding unit tests, `make check`, and `make test`
-  passed without enlarging the 160-page root-image capacity
-- Next action: commit, push, and open the dedicated issue #63 pull request
+  passed and Gate 41 was delivered through PR #73
+- Next action: wait for GitHub checks and a subsequent unchanged-head review of
+  PR #73
 
 ## Current repository state
 
