@@ -162,6 +162,11 @@ if ! grep -q '^GINUX_KERNEL_OK' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: bounded OCI rootfs unpack policy verified' "$output_file"; then
+    echo "Boot test failed: OCI rootfs expansion was not bounded before allocation." >&2
+    exit 1
+fi
+
 "$repo_root/tests/qemu/check-linux-runtime.sh" "$output_file"
 
 if ! grep -q '^ginux: modern virtio network function: 0:3.0' "$output_file" ||
