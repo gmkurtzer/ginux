@@ -116,13 +116,15 @@ lifecycle.
 
 - Working branch: `hdae/domain-config-lifecycle`
 - Intended base: `main`
-- Pull request: intended; dedicated branch push and PR creation authorized on
-  2026-11-03; never merge or close without explicit authorization
+- Pull request: https://github.com/gmkurtzer/usshim/pull/4; dedicated branch
+  push and PR creation authorized on 2026-11-03; temporarily stacked on pull
+  request 3; never merge or close without explicit authorization
 - Planned commits: versioned schema and normalization; lifecycle state machine;
   ordinary-host-process failure, cleanup, and configuration verification
 - Actual commits: `34eb2e4` (strict TOML schema, normalization, lifecycle model,
   configuration documentation) and `ec858c4` (Ginus integration, Rocky/QEMU
-  lifecycle harness, failure/signal/reaping tests, and demonstration)
+  lifecycle harness, failure/signal/reaping tests, and demonstration), and
+  `1b2c37d` (verification evidence and checkpoint documentation)
 
 ## Review policy and outcome
 

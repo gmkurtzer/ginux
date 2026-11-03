@@ -13,7 +13,8 @@
   https://github.com/gmkurtzer/usshim/pull/3.
 - Gate 4 is technically passed on dedicated branch
   `hdae/domain-config-lifecycle`, stacked on the accepted Gate 3 state while
-  its intended eventual base remains `main`. Pull-request delivery is pending.
+  its intended eventual base remains `main`. It is delivered in
+  https://github.com/gmkurtzer/usshim/pull/4.
 - Authoritative name: Ginus (Ginux Userspace).
 - Runtime isolation unit: domain.
 - Policy unit: versioned contract.
@@ -117,8 +118,8 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Push `hdae/domain-config-lifecycle`, open and record its pull request, then stop
-for human review of `make demo-gate-4`. Do not begin Gate 5 before acceptance.
+Stop for human review of `make demo-gate-4` and pull request 4. Do not begin
+Gate 5 before explicit acceptance.
 
 ## Context recovery
 
@@ -126,7 +127,7 @@ for human review of `make demo-gate-4`. Do not begin Gate 5 before acceptance.
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
 - Active gate: Gate 4, domain configuration and lifecycle; technically passed,
-  pull-request delivery pending, human checkpoint pending
+  delivered in pull request 4, human checkpoint pending
 - Last evidence: Gate 4 demo and complete aggregate regression suite passed on
   2026-11-03
 - Required human decision: accept or reject Gate 4 after its branch and pull
