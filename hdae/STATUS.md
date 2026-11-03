@@ -9,7 +9,7 @@
   https://github.com/gmkurtzer/usshim/pull/2 and is not merged.
 - Gate 3 is technically passed on dedicated branch `hdae/execution-kernel`,
   stacked on the accepted Gate 2 state while its intended eventual base remains
-  `main`. Pull request delivery is pending.
+  `main`. It is delivered in https://github.com/gmkurtzer/usshim/pull/3.
 - Authoritative name: Ginus (Ginux Userspace).
 - Runtime isolation unit: domain.
 - Policy unit: versioned contract.
@@ -109,15 +109,16 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Push the Gate 3 branch, open its dedicated pull request, record the stable URL,
-and stop for human acceptance after `make demo-gate-3` review.
+Stop for human acceptance after review of `make demo-gate-3` and pull request
+3. Do not begin Gate 4 before explicit acceptance.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 3, execution kernel; technically passed, delivery pending
+- Active gate: Gate 3, execution kernel; technically passed and delivered in
+  pull request 3, human checkpoint pending
 - Last evidence: Gate 3 demo and complete aggregate regression suite passed on
   2026-11-03
 - Required human decision: accept or reject Gate 3 after its branch and pull

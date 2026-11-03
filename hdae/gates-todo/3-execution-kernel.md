@@ -112,13 +112,15 @@ and no direct host syscall access.
 
 - Working branch: `hdae/execution-kernel`
 - Intended base: `main`
-- Pull request: intended; dedicated branch push and PR creation authorized on
-  2026-11-03; never merge or close without explicit authorization
+- Pull request: https://github.com/gmkurtzer/usshim/pull/3; dedicated branch
+  push and PR creation authorized on 2026-11-03; temporarily stacked on pull
+  request 2; never merge or close without explicit authorization
 - Planned commits: address-space and ELF loader; syscall ABI and minimal
   handlers; denial, audit, and malformed-input tests
 - Actual commits: `e137733` (interpreted baseline), `370b661` (Ginus-owned
   memory, ELF, x86, syscall and audit core), `fb31678` (Ginus integration and
-  demo), and `52ef264` (invalid mapping regressions)
+  demo), `52ef264` (invalid mapping regressions), and `f90aea4` (verification
+  evidence)
 
 ## Review policy and outcome
 
