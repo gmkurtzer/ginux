@@ -1245,9 +1245,12 @@ pub(super) fn linux_terminate_by_default_signal(signal: u64) -> u64 {
         if !clear_current_linux_process_signal_queues() {
             return LINUX_EIO;
         }
+        // A fatal signal leaves the signal number itself as the wait status
+        // (kernel/signal.c:3112 do_group_exit(signr)); the parent decodes it
+        // as WIFSIGNALED rather than as an exit code.
         X86_RUNTIME
             .LINUX_PROCESS_CHILD_STATUS
-            .store((128 + signal.min(127)) as u8, Ordering::SeqCst);
+            .store((signal & 0x7f) as u16, Ordering::SeqCst);
         X86_RUNTIME
             .LINUX_PROCESS_CHILD_EXIT_PID
             .store(pid, Ordering::SeqCst);

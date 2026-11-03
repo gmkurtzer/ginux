@@ -684,6 +684,36 @@ pub(super) extern "sysv64" fn linux_syscall_handler(
                 result
             }
         }
+        // musl posix_spawn() calls clone(CLONE_VM|CLONE_VFORK|SIGCHLD) with a
+        // child stack. That is vfork() (kernel/fork.c:2881) running the child
+        // on `newsp` (kernel/fork.c:2910), so share the vfork path.
+        LINUX_CLONE_SYSCALL
+            if saved_registers.rdi & 0xffff_ffff
+                == LINUX_CLONE_VM | LINUX_CLONE_VFORK | LINUX_SIGCHLD =>
+        {
+            let child_stack = saved_registers.rsi;
+            if child_stack != 0
+                && !materialize_linux_runtime_user_range(
+                    (child_stack - 1) & !(PAGE_SIZE as u64 - 1),
+                    PAGE_SIZE,
+                    true,
+                )
+            {
+                LINUX_EFAULT
+            } else {
+                linux_request_process_fork(
+                    runtime_mode,
+                    syscall_return,
+                    false,
+                    false,
+                    child_stack,
+                    true,
+                    0,
+                    0,
+                    false,
+                )
+            }
+        }
         LINUX_CLONE_SYSCALL => {
             let result = linux_clone_thread(saved_registers, user_rip, user_rflags);
             if runtime_mode {
@@ -903,8 +933,10 @@ pub(super) extern "sysv64" fn linux_syscall_handler(
         LINUX_CAPSET_SYSCALL => linux_capset(first_argument, buffer),
         LINUX_GETPRIORITY_SYSCALL => linux_getpriority(first_argument, buffer),
         LINUX_SETPRIORITY_SYSCALL => linux_setpriority(first_argument, buffer, count),
-        LINUX_SCHED_SETPARAM_SYSCALL => linux_set_scheduler(first_argument, 0, buffer),
-        LINUX_SCHED_SETSCHEDULER_SYSCALL => linux_set_scheduler(first_argument, buffer, count),
+        LINUX_SCHED_SETPARAM_SYSCALL => linux_set_scheduler(first_argument, None, buffer),
+        LINUX_SCHED_SETSCHEDULER_SYSCALL => {
+            linux_set_scheduler(first_argument, Some(buffer), count)
+        }
         LINUX_SCHED_GETPARAM_SYSCALL => linux_sched_getparam(first_argument, buffer),
         LINUX_SCHED_GETSCHEDULER_SYSCALL => linux_sched_getscheduler(first_argument),
         LINUX_SCHED_GET_PRIORITY_MAX_SYSCALL | LINUX_SCHED_GET_PRIORITY_MIN_SYSCALL => {
@@ -1353,9 +1385,11 @@ pub(super) extern "sysv64" fn linux_syscall_handler(
             if !clear_current_linux_process_signal_queues() {
                 return LINUX_EIO;
             }
+            // Linux stores `(code & 0xff) << 8` as the wait status
+            // (kernel/exit.c:1144).
             X86_RUNTIME
                 .LINUX_PROCESS_CHILD_STATUS
-                .store(first_argument as u8, Ordering::SeqCst);
+                .store(u16::from(first_argument as u8) << 8, Ordering::SeqCst);
             X86_RUNTIME
                 .LINUX_PROCESS_CHILD_EXIT_PID
                 .store(current_linux_process_pid(), Ordering::SeqCst);

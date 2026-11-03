@@ -210,7 +210,9 @@ enum ProcessState {
     Running,
     Stopped { signal: u8 },
     Exiting,
-    Zombie { status: u8 },
+    // `status` is the Linux wait-status word (`task->exit_code`): the exit
+    // code in bits 8..15, or the terminating signal in bits 0..6.
+    Zombie { status: u16 },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -489,6 +491,8 @@ struct Process {
     context: Option<ProcessExecutionContext>,
     scheduler_thread: Option<scheduler::ProcessThreadHandle>,
     cpu_affinity: u64,
+    // Linux scheduling policy, or'ed with SCHED_RESET_ON_FORK.
+    sched_policy: u8,
     state: ProcessState,
     wait_event: Option<ProcessWaitEvent>,
 }
@@ -502,7 +506,7 @@ enum ProcessWaitEvent {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct WaitResult {
     pid: u32,
-    status: u8,
+    status: u16,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -510,7 +514,7 @@ pub(crate) enum ChildWaitState {
     Running,
     Stopped { pid: u32, signal: u8 },
     Continued { pid: u32 },
-    Exited { pid: u32, status: u8 },
+    Exited { pid: u32, status: u16 },
 }
 
 #[derive(Clone, Copy)]
@@ -1096,7 +1100,7 @@ impl ProcessTable {
         Some(expected_space)
     }
 
-    fn exit(&mut self, handle: ProcessHandle, status: u8) -> bool {
+    fn exit(&mut self, handle: ProcessHandle, status: u16) -> bool {
         let Some(process) = self.process_mut(handle) else {
             return false;
         };
@@ -1122,7 +1126,7 @@ impl ProcessTable {
     fn exit_after_current_address_space_retired(
         &mut self,
         handle: ProcessHandle,
-        status: u8,
+        status: u16,
     ) -> bool {
         let Some(process) = self.process_mut(handle) else {
             return false;
@@ -1142,7 +1146,7 @@ impl ProcessTable {
         &mut self,
         handle: ProcessHandle,
         expected_space: ProcessAddressSpace,
-        status: u8,
+        status: u16,
     ) -> bool {
         let Some(process) = self.process(handle) else {
             return false;
@@ -1204,12 +1208,14 @@ impl ProcessTable {
         &self,
         parent: ProcessHandle,
         pid: Option<u32>,
+        report_exited: bool,
         report_stopped: bool,
         report_continued: bool,
     ) -> Option<ChildWaitState> {
         self.child_wait_state_matching(
             parent,
             |process| pid.is_none_or(|pid| process.handle.pid == pid),
+            report_exited,
             report_stopped,
             report_continued,
         )
@@ -1219,12 +1225,14 @@ impl ProcessTable {
         &self,
         parent: ProcessHandle,
         process_group: u32,
+        report_exited: bool,
         report_stopped: bool,
         report_continued: bool,
     ) -> Option<ChildWaitState> {
         self.child_wait_state_matching(
             parent,
             |process| process.process_group == process_group,
+            report_exited,
             report_stopped,
             report_continued,
         )
@@ -1234,17 +1242,21 @@ impl ProcessTable {
         &self,
         parent: ProcessHandle,
         matches: impl Fn(&Process) -> bool,
+        report_exited: bool,
         report_stopped: bool,
         report_continued: bool,
     ) -> Option<ChildWaitState> {
         if self.process(parent)?.state != ProcessState::Running {
             return None;
         }
-        let mut children = self
-            .processes
-            .iter()
-            .flatten()
-            .filter(|process| process.parent == Some(parent) && matches(process));
+        // Linux wait_task_zombie() ignores a zombie unless WEXITED was
+        // requested, and the zombie then does not count as a waitable child
+        // either (kernel/exit.c wait_consider_task()).
+        let mut children = self.processes.iter().flatten().filter(|process| {
+            process.parent == Some(parent)
+                && matches(process)
+                && (report_exited || !matches!(process.state, ProcessState::Zombie { .. }))
+        });
         let child = children
             .clone()
             .find(|process| matches!(process.state, ProcessState::Zombie { .. }))
@@ -1434,10 +1446,18 @@ impl ProcessTable {
             generation,
             pid,
         };
-        let (process_group, session, cpu_affinity) = parent
+        // A child inherits the policy; sched_fork() only clears the
+        // reset-on-fork flag because RT and deadline policies are never
+        // granted here (kernel/sched/core.c:4857-4876).
+        let (process_group, session, cpu_affinity, sched_policy) = parent
             .and_then(|parent| self.process(parent))
-            .map_or((pid, pid, u64::MAX), |parent| {
-                (parent.process_group, parent.session, parent.cpu_affinity)
+            .map_or((pid, pid, u64::MAX, 0), |parent| {
+                (
+                    parent.process_group,
+                    parent.session,
+                    parent.cpu_affinity,
+                    parent.sched_policy & !SCHED_RESET_ON_FORK,
+                )
             });
         self.generations[slot] = generation;
         self.processes[slot] = Some(Process {
@@ -1453,6 +1473,7 @@ impl ProcessTable {
             context,
             scheduler_thread: None,
             cpu_affinity,
+            sched_policy,
             state,
             wait_event: None,
         });
@@ -1880,14 +1901,14 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
         return false;
     }
     if table.process_group(first_child.pid) != Some((1, 1))
-        || table.child_wait_state(init, Some(first_child.pid), false, false)
+        || table.child_wait_state(init, Some(first_child.pid), true, false, false)
             != Some(ChildWaitState::Running)
         || table.set_process_group(init.pid, first_child.pid, first_child.pid) != Ok(())
         || table.process_group(first_child.pid) != Some((3, 1))
-        || table.child_group_wait_state(init, first_child.pid, false, false)
+        || table.child_group_wait_state(init, first_child.pid, true, false, false)
             != Some(ChildWaitState::Running)
         || table
-            .child_group_wait_state(init, init.pid, false, false)
+            .child_group_wait_state(init, init.pid, true, false, false)
             .is_some()
         || table.set_process_group(init.pid, first_child.pid, init.pid) != Ok(())
         || !table.mark_executed(first_child.pid)
@@ -1903,21 +1924,21 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
         return false;
     }
     if !table.stop(first_child, 19)
-        || table.child_wait_state(init, Some(first_child.pid), false, false)
+        || table.child_wait_state(init, Some(first_child.pid), true, false, false)
             != Some(ChildWaitState::Running)
-        || table.child_wait_state(init, Some(first_child.pid), true, false)
+        || table.child_wait_state(init, Some(first_child.pid), true, true, false)
             != Some(ChildWaitState::Stopped {
                 pid: first_child.pid,
                 signal: 19,
             })
         || !table.consume_wait_event(init, first_child.pid)
         || !table.continue_process(first_child)
-        || table.child_wait_state(init, Some(first_child.pid), false, true)
+        || table.child_wait_state(init, Some(first_child.pid), true, false, true)
             != Some(ChildWaitState::Continued {
                 pid: first_child.pid,
             })
         || !table.consume_wait_event(init, first_child.pid)
-        || table.child_wait_state(init, Some(first_child.pid), true, true)
+        || table.child_wait_state(init, Some(first_child.pid), true, true, true)
             != Some(ChildWaitState::Running)
     {
         return false;
@@ -1981,7 +2002,7 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
             child_context.general,
         )
     };
-    let Some(child_exit_status) = child_exit_status else {
+    let Some(child_exit_status) = child_exit_status.map(u16::from) else {
         return false;
     };
     if crate::arch::x86_64::smp::online_count() > 1 {
@@ -2121,12 +2142,15 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
                 && !memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[mapping.frame])
         })
         || !table.exit(first_child, child_exit_status)
-        || table.child_wait_state(init, Some(first_child.pid), false, false)
+        || table
+            .child_wait_state(init, Some(first_child.pid), false, true, true)
+            .is_some()
+        || table.child_wait_state(init, Some(first_child.pid), true, false, false)
             != Some(ChildWaitState::Exited {
                 pid: first_child.pid,
                 status: child_exit_status,
             })
-        || table.child_group_wait_state(init, first_child.pid, false, false)
+        || table.child_group_wait_state(init, first_child.pid, true, false, false)
             != Some(ChildWaitState::Exited {
                 pid: first_child.pid,
                 status: child_exit_status,
@@ -2675,6 +2699,39 @@ pub(crate) fn live_process_cpu_affinity(pid: u32) -> Option<u64> {
     .then_some(process.cpu_affinity)
 }
 
+/// Flag kept with the stored scheduling policy for sched_reset_on_fork.
+pub(crate) const SCHED_RESET_ON_FORK: u8 = 0x80;
+
+pub(crate) fn live_process_sched_policy(pid: u32) -> Option<u8> {
+    let table = live_process_table_mut()?;
+    let process = table.process(table.handle_by_pid(pid)?)?;
+    matches!(
+        process.state,
+        ProcessState::Running | ProcessState::Stopped { .. }
+    )
+    .then_some(process.sched_policy)
+}
+
+pub(crate) fn set_live_process_sched_policy(pid: u32, policy: u8) -> bool {
+    let Some(table) = live_process_table_mut() else {
+        return false;
+    };
+    let Some(process) = table
+        .handle_by_pid(pid)
+        .and_then(|handle| table.process_mut(handle))
+    else {
+        return false;
+    };
+    if !matches!(
+        process.state,
+        ProcessState::Running | ProcessState::Stopped { .. }
+    ) {
+        return false;
+    }
+    process.sched_policy = policy;
+    true
+}
+
 pub(crate) fn set_live_process_cpu_affinity(pid: u32, mask: u64) -> bool {
     if mask == 0 {
         return false;
@@ -2856,6 +2913,11 @@ pub(crate) fn live_process_count() -> Option<u16> {
         .count()
         .try_into()
         .ok()
+}
+
+/// Whether a fork can still obtain an address-space storage slot.
+pub(crate) fn live_runtime_slot_available() -> bool {
+    live_process_table_mut().is_some_and(|table| table.free_runtime_slot().is_some())
 }
 
 pub(crate) fn host_live_process_count() -> Option<u16> {
@@ -3747,7 +3809,7 @@ fn release_live_process_address_space(
 }
 
 #[inline(never)]
-pub(crate) fn complete_live_child_exit(pid: u32, status: u8) -> Option<LiveProcessDispatch> {
+pub(crate) fn complete_live_child_exit(pid: u32, status: u16) -> Option<LiveProcessDispatch> {
     process_runtime()
         .fork_execution_stage
         .store(15, Ordering::Release);
@@ -3875,7 +3937,7 @@ pub(crate) fn switch_live_process(from_pid: u32, to_pid: u32) -> Option<LiveProc
     table.dispatch(to_handle)
 }
 
-pub(crate) fn wait_live_child(parent_pid: u32, child_pid: u32) -> Option<(u32, u8)> {
+pub(crate) fn wait_live_child(parent_pid: u32, child_pid: u32) -> Option<(u32, u16)> {
     let table = live_process_table_mut()?;
     let parent = table.handle_by_pid(parent_pid)?;
     table
@@ -3886,23 +3948,37 @@ pub(crate) fn wait_live_child(parent_pid: u32, child_pid: u32) -> Option<(u32, u
 pub(crate) fn live_child_wait_state(
     parent_pid: u32,
     child_pid: Option<u32>,
+    report_exited: bool,
     report_stopped: bool,
     report_continued: bool,
 ) -> Option<ChildWaitState> {
     let table = live_process_table_mut()?;
     let parent = table.handle_by_pid(parent_pid)?;
-    table.child_wait_state(parent, child_pid, report_stopped, report_continued)
+    table.child_wait_state(
+        parent,
+        child_pid,
+        report_exited,
+        report_stopped,
+        report_continued,
+    )
 }
 
 pub(crate) fn live_child_group_wait_state(
     parent_pid: u32,
     process_group: u32,
+    report_exited: bool,
     report_stopped: bool,
     report_continued: bool,
 ) -> Option<ChildWaitState> {
     let table = live_process_table_mut()?;
     let parent = table.handle_by_pid(parent_pid)?;
-    table.child_group_wait_state(parent, process_group, report_stopped, report_continued)
+    table.child_group_wait_state(
+        parent,
+        process_group,
+        report_exited,
+        report_stopped,
+        report_continued,
+    )
 }
 
 pub(crate) fn consume_live_child_wait_event(parent_pid: u32, child_pid: u32) -> bool {
@@ -4055,7 +4131,8 @@ fn verify_live_fork_clone_and_execution_transaction() -> bool {
         return false;
     };
     let resources_released = retiring.scrub_and_release();
-    let exited = resources_released && table.exit(child_handle, exit_status.unwrap_or(0));
+    let exited =
+        resources_released && table.exit(child_handle, u16::from(exit_status.unwrap_or(0)));
     let waited = exited
         && table.wait(parent_handle, child_handle.pid)
             == Some(WaitResult {
