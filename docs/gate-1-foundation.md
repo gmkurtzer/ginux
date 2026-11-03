@@ -47,14 +47,17 @@ own Linux process address space and is traced from its first instruction after
 
 The tested properties are narrow and falsifiable:
 
-1. Ginus refuses to run as host PID 1.
-2. Every syscall issued by the fixed single-threaded payload stops at Ginus.
-3. Ginus resolves it through `ginus_core::decide` before any host effect.
-4. Ginus either emulates a result, performs checked mediation, or returns a
+1. Every syscall issued by the fixed single-threaded payload stops at Ginus.
+2. Ginus resolves it through `ginus_core::decide` before any host effect.
+3. Ginus either emulates a result, performs checked mediation, or returns a
    denial. There is no direct-continue decision.
-5. A managed `write` carries a unique marker. The test fails if that marker is
+4. A managed `write` carries a unique marker. The test fails if that marker is
    observed in host output.
-6. After Ginus exits, Rocky systemd and `multi-user.target` remain healthy.
+5. After Ginus exits, Rocky systemd and `multi-user.target` remain healthy.
+
+Ginus does not inspect or depend on its numeric host PID. The Rocky harness
+checks host systemd because normal host boot is a Gate 1 environment property,
+not because PID numbering is part of the Ginus interface.
 
 This proof does not yet provide general ELF loading, a Ginus-owned address
 space, threads, signals, dynamic linking, domain systemd, virtual filesystems,
@@ -90,7 +93,6 @@ make demo-gate-1
 The demo must show Rocky readiness with systemd as PID 1, followed by:
 
 ```text
-GINUS: host-process pid1=no
 GINUS: syscall=getpid decision=emulate result=4242
 GINUS: syscall=write decision=mediate host-write=not-executed
 GINUS: syscall=uname decision=deny errno=EPERM

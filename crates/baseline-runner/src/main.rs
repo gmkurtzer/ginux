@@ -77,9 +77,6 @@ unsafe extern "C" fn memcpy(
 
 #[no_mangle]
 extern "C" fn rust_main() -> ! {
-    if unsafe { syscall0(SYS_GETPID) } == 1 {
-        fail(b"refusing to benchmark as host PID 1");
-    }
     line(b"BENCH_META architecture=x86_64 accelerator=tcg repetitions=5 unit=ns");
     line(b"BENCH_META container=linux-namespaces(mount,pid,uts,ipc)");
 

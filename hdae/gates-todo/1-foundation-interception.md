@@ -100,9 +100,9 @@ syscall ABI directly.
 - `make build` -> produces the Ginus development binary and test artifacts.
 - `make check` -> formatting, lint, and static checks exit zero.
 - `make test-unit` -> all foundation unit tests pass.
-- `make test-intercept` -> inside the Rocky host, Ginus has a non-1 host PID;
-  positive syscall, denied syscall, direct-bypass negative, clean Ginus exit,
-  and post-exit host-health checks pass.
+- `make test-intercept` -> inside the Rocky host, positive syscall, denied
+  syscall, direct-bypass negative, clean Ginus exit, and post-exit host-health
+  checks pass.
 - `make test` with network disabled -> exits zero.
 - `make bench-baseline` -> emits reproducible Rocky-host native and
   conventional-container baseline records with environment metadata.
@@ -157,11 +157,11 @@ syscall ABI directly.
   while retaining the verified cache. QEMU guest networking used `restrict=on`;
   no acquisition command ran. Three dispatcher unit tests passed and all
   target-correct Clippy checks passed with warnings denied.
-- Revised `make test-intercept` -> Ginus reported `host-process pid1=no` as the
-  unprivileged Rocky `ginus` user; `getpid` returned virtual PID 4242; managed
-  `write` was checked but not executed; `uname` returned `EPERM`; the unique
-  direct-write marker was absent; Ginus exited zero; host systemd and
-  `multi-user.target` remained healthy.
+- Revised `make test-intercept` -> Ginus ran as the unprivileged Rocky `ginus`
+  user; `getpid` returned virtual PID 4242; managed `write` was checked but not
+  executed; `uname` returned `EPERM`; the unique direct-write marker was
+  absent; Ginus exited zero; host systemd and `multi-user.target` remained
+  healthy.
 - Revised `make bench-baseline` -> 30 samples passed inside Rocky 10.2 kernel
   6.12.0-211.16.1.el10_2.0.1.x86_64. Five samples were recorded for each
   direct/container and CPU/syscall/process combination with nanosecond units,
@@ -179,8 +179,9 @@ syscall ABI directly.
 - Rust and x86-64 are approved for the initial implementation.
 - KVM is outside initial acceptance. Gate 1 selects an interception mechanism
   that works inside QEMU TCG on the macOS arm64 development host.
-- Ginus is never the host PID 1 in the approved architecture. Host systemd is
-  PID 1; only domain systemd later receives virtual PID 1 semantics.
+- Host systemd owns the host PID 1 role; only domain systemd later receives
+  virtual PID 1 semantics. Ginus itself has no numeric host-PID check or
+  dependency.
 - `PTRACE_SYSEMU` is the Gate 1 bootstrap mechanism, not the final Ginus
   execution architecture. Full Ginus-owned task and memory behavior remains a
   Gate 3 decision.

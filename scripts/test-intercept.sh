@@ -13,7 +13,6 @@ rocky_scp \
     "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/ginus-managed-payload"
 rocky_ssh 'chmod 0755 /var/tmp/ginus /var/tmp/ginus-managed-payload; /var/tmp/ginus' > "$log" 2>&1
 
-grep -Fq 'GINUS: host-process pid1=no' "$log"
 grep -Fq 'GINUS: syscall=getpid decision=emulate result=4242' "$log"
 grep -Fq 'GINUS: syscall=write decision=mediate host-write=not-executed' "$log"
 grep -Fq 'GINUS: syscall=uname decision=deny errno=EPERM' "$log"

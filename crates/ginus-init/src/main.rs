@@ -17,7 +17,6 @@ global_asm!(
 );
 
 const SYS_WRITE_HOST: usize = 1;
-const SYS_GETPID_HOST: usize = 39;
 const SYS_FORK: usize = 57;
 const SYS_EXECVE: usize = 59;
 const SYS_EXIT_HOST: usize = 60;
@@ -95,10 +94,6 @@ unsafe extern "C" fn memcpy(
 
 #[no_mangle]
 extern "C" fn rust_main() -> ! {
-    if unsafe { syscall0(SYS_GETPID_HOST) } == 1 {
-        fail(b"refusing to run as host PID 1");
-    }
-    line(b"GINUS: host-process pid1=no");
     line(b"GINUS: interception platform=ptrace-sysemu");
 
     let child = unsafe { syscall0(SYS_FORK) };
