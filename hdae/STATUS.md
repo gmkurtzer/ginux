@@ -4,14 +4,13 @@
 
 - Active skill: `.agents/skills/hdae-development/SKILL.md`
 - Reload required after compaction, reset, resume, or handoff: yes
-- Active project: issue #57 Linux lazy-page quota regression
-- Branch: `hdae/issue-57-linux-lazy-page`
+- Active project: issue #63 registry DNS entropy and response binding
+- Branch: `hdae/issue-63-registry-dns-entropy`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 37, Linux lazy-page quota regression
-- Last completed action: delivered Gate 37 through PR #59 after `make check`,
-  `make test`, and `make test-alpine` passed with the 128 MiB quota intact
-- Next action: wait for a subsequent hourly pass and green GitHub checks before
-  merging PR #59 and closing issue #57
+- Active gate: Gate 41, registry DNS entropy and response binding
+- Last completed action: DNS binding unit tests, `make check`, and `make test`
+  passed without enlarging the 160-page root-image capacity
+- Next action: commit, push, and open the dedicated issue #63 pull request
 
 ## Current repository state
 
