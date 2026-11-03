@@ -56,10 +56,11 @@ The runtime itself negotiates only `FLUSH`, `VERSION_1`, and
 `ACCESS_PLATFORM`, configures queue
 zero and MSI-X table entry zero, and implements the shared whole-sector trait
 with one descriptor head. The first submission rejects a stale future request,
-publishes its available entry without notifying the device, and proves a real
-100 ms APIC timeout does not consume the request generation. It then notifies
-queue zero, retries that same generation successfully, and rejects a duplicate
-wait after completion. Every subsequent submission publishes a monotonically
+fills its descriptors and available ring slot but withholds the available
+index, because a device may consume any published entry without a doorbell,
+and proves a real 100 ms APIC timeout does not consume the request generation.
+It then publishes the available index, notifies queue zero, retries that same
+generation successfully, and rejects a duplicate wait after completion. Every subsequent submission publishes a monotonically
 advancing available index, notifies queue zero, and blocks through control ABI
 v4 operation 19 command 2 using the exact next request generation. Used ID, used length,
 status, and device status are validated before returning to the shared volume

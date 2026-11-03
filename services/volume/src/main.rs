@@ -289,10 +289,11 @@ impl VirtioBlock {
             }
             let available_slot = usize::from(self.available % QUEUE_SIZE);
             write_u16(self.dma + AVAIL_OFFSET + 4 + available_slot * 2, 0);
-            compiler_fence(Ordering::SeqCst);
-            self.available = self.available.wrapping_add(1);
-            write_u16(self.dma + AVAIL_OFFSET + 2, self.available);
         }
+        // The un-notified wait below must time out, so the request may not be
+        // exposed yet: a device may consume any buffer published in avail.idx
+        // without a doorbell (QEMU kicks every queue when ioeventfd starts at
+        // DRIVER_OK), and its completion would then satisfy that wait.
         if self.request == 1
             && (wait(self.capability, NATIVE_BLOCK_WAIT_PREPARED, 2) != NATIVE_BLOCK_WAIT_FAILED
                 || wait(self.capability, NATIVE_BLOCK_WAIT_PREPARED, self.request)
@@ -300,7 +301,12 @@ impl VirtioBlock {
         {
             return false;
         }
-        unsafe { write_u16(self.notification, 0) };
+        compiler_fence(Ordering::SeqCst);
+        self.available = self.available.wrapping_add(1);
+        unsafe {
+            write_u16(self.dma + AVAIL_OFFSET + 2, self.available);
+            write_u16(self.notification, 0);
+        }
         let wait_result = wait(self.capability, NATIVE_BLOCK_WAIT_NOTIFIED, self.request);
         if wait_result == NATIVE_BLOCK_WAIT_CANCELLED {
             exit(NATIVE_SERVICE_EXIT_RESTART_REQUIRED);
