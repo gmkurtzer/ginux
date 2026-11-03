@@ -13,6 +13,10 @@ mod execution;
 mod linux_abi;
 mod linux_futex;
 mod linux_poll;
+
+pub(crate) fn verify_synchronous_poll_budget() -> bool {
+    linux_poll::verify_synchronous_poll_budget()
+}
 mod linux_random;
 mod linux_signal;
 mod linux_syscall;
