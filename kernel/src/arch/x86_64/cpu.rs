@@ -27335,9 +27335,7 @@ fn linux_utimensat(directory: u64, path_address: u64, times_address: u64, flags:
     let Some(metadata) = crate::linux_overlay::metadata(handle) else {
         return LINUX_ENOENT;
     };
-    let now = linux_realtime_time()
-        .map(|(seconds, nanoseconds)| (seconds as i64, nanoseconds as i64))
-        .unwrap_or((0, 0));
+    let now = linux_file_timestamp();
     let mut times = [now, now];
     if times_address != 0 {
         let mut input = [0_u8; 32];
@@ -27359,6 +27357,14 @@ fn linux_utimensat(directory: u64, path_address: u64, times_address: u64, flags:
         }
     }
     linux_set_times(handle, times)
+}
+
+/// CLOCK_REALTIME as a file timestamp, or (0, 0) before the realtime epoch is
+/// known.
+pub(crate) fn linux_file_timestamp() -> (i64, i64) {
+    linux_realtime_time()
+        .map(|(seconds, nanoseconds)| (seconds as i64, nanoseconds as i64))
+        .unwrap_or((0, 0))
 }
 
 fn linux_utime(path_address: u64, times_address: u64) -> u64 {
