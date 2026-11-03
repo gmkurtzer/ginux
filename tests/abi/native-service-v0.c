@@ -186,6 +186,10 @@ _Static_assert(GINUX_NATIVE_NETWORK_INVENTORY_OPERATION == UINT64_C(38),
                "network inventory operation");
 _Static_assert(GINUX_NATIVE_NETWORK_INVENTORY_SET_LINK == UINT16_C(5),
                "network inventory link operation");
+_Static_assert(GINUX_NATIVE_TIMESTAMP_FREQUENCY_OPERATION == UINT64_C(39),
+               "timestamp frequency operation");
+_Static_assert(GINUX_NATIVE_TIMESTAMP_FREQUENCY_UNAVAILABLE == UINT64_MAX - UINT64_C(2),
+               "timestamp frequency unavailable result");
 _Static_assert(GINUX_NATIVE_NETWORK_FLAG_UP == UINT16_C(0x0100),
                "network inventory link state flag");
 _Static_assert(sizeof(struct ginux_native_network_inventory_request_v0) == 72,
