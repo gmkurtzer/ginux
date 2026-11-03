@@ -15,11 +15,15 @@
   `hdae/domain-config-lifecycle`, stacked on the accepted Gate 3 state while
   its intended eventual base remains `main`, in open
   https://github.com/gmkurtzer/usshim/pull/4.
+- Gate 5 is accepted and closed. It remains delivered on dedicated branch
+  `hdae/virtual-vfs-userspace`, stacked on the accepted Gate 4 state while its
+  intended eventual base remains `main`, in open
+  https://github.com/gmkurtzer/usshim/pull/5.
 - Authoritative name: Ginus (Ginux Userspace).
 - Runtime isolation unit: domain.
 - Policy unit: versioned contract.
 - Initial gate map: twelve checkpoint gates at positions 1 through 11 and 13;
-  Gates 1 through 4 are accepted and eight gates remain open.
+  Gates 1 through 5 are accepted and seven gates remain open.
 - The ordered gate batch is authorized, but every open gate remains a human
   checkpoint requiring a working demonstration and explicit acceptance.
 
@@ -147,6 +151,7 @@ scope, threat model, and invariants.
 - Gate 5 is delivered in open pull request
   https://github.com/gmkurtzer/usshim/pull/5 from dedicated branch
   `hdae/virtual-vfs-userspace`. It is not merged or closed.
+- Human accepted Gate 5 on 2026-11-03 and directed advancement to Gate 6.
 
 ## Open decisions and limitations
 
@@ -169,30 +174,32 @@ scope, threat model, and invariants.
 - The selected Rocky OCI image has one layer; deterministic synthetic fixtures
   now cover general multi-layer replacement, whiteout, and opaque-directory
   semantics.
-- The native Bash proof currently uses a read-only unprivileged chroot. Gate 5
-  must still prove its kernel descriptors are limited to immutable image
-  content and the bootstrap console and that sensitive interface classes never
-  use native passthrough.
+- The native Bash proof uses a read-only unprivileged chroot and limits kernel
+  descriptors to immutable image content and the bootstrap console. Gate 6
+  adds Ginus-owned device objects rather than expanding native passthrough.
+- Gate 6 will begin with a Ginus-owned isolated packet queue as its mediated
+  network backend. It does not provide host or external network connectivity;
+  later connectivity backends must preserve the same virtual interface and
+  mediation boundary.
 - Unicorn Engine 2 is not part of the Gate 5 path. It is preserved as deferred
   Gate 14, with reconsideration required after the native compatibility path is
   demonstrated and before production-boundary claims are made.
 
 ## Exact next action
 
-Human runs or reviews `make demo-gate-5` and pull request 5, then explicitly
-accepts Gate 5 or requests corrections.
+Create the Gate 6 branch and implement the virtual device registry plus
+Ginus-owned console, null, zero, and random frontends.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 5, virtual VFS and dynamic userspace; authorized and in
-  passed/delivered state on `hdae/virtual-vfs-userspace`; awaiting human
-  acceptance
+- Active gate: Gate 6, device ownership and virtual hardware; authorized and
+  starting on dedicated branch `hdae/device-ownership`
 - Last evidence: `make check`, `make test-unit`, `make test-oci-layers`,
   `make test-oci-image`, and a post-assembly `make test-native-vfs` passed on
   2026-11-03; the latest native run includes balanced negative probes and
   supervisor-loss verification; `make demo-gate-5` and aggregate `make test`
   also passed
-- Required human decision: none until the Gate 5 demonstration checkpoint
+- Required human decision: none until the Gate 6 demonstration checkpoint

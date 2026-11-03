@@ -226,4 +226,5 @@ Ginus-owned immutable base and domain-local writable overlay.
 Human checkpoint because host-backed files are a security boundary and the
 accepted VFS model constrains later device and systemd behavior. Present
 `make demo-gate-5`, fresh evidence, and the pull request before acceptance.
-Technical status: passed and delivered on 2026-11-03; awaiting human acceptance.
+Technical status: passed and delivered on 2026-11-03. Human acceptance was
+recorded on 2026-11-03; Gate 5 is closed.
