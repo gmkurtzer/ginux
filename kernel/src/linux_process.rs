@@ -3659,34 +3659,23 @@ fn release_live_process_address_space(
                 continue;
             } else {
                 let ownership_started = crate::arch::x86_64::timer::timestamp_counter();
-                let owned = memory::frames_owned_by(
-                    memory::FrameOwner::KERNEL,
-                    core::slice::from_ref(&mapping.frame),
-                );
+                let owned = memory::frame_owner(mapping.frame).is_some();
                 if cfg!(feature = "linux-boot-profile") {
                     crate::arch::x86_64::cpu::linux_boot_profile_record_lifecycle_phase(
                         10,
                         ownership_started,
                     );
                 }
-                if owned && !release_batch[..release_count].contains(&mapping.frame) {
-                    release_batch[release_count] = mapping.frame;
-                    release_count += 1;
-                    if release_count == release_batch.len() {
-                        let scrub_started = crate::arch::x86_64::timer::timestamp_counter();
-                        if !memory::scrub_and_release_frames(
-                            memory::FrameOwner::KERNEL,
-                            &release_batch,
-                        ) {
-                            return false;
-                        }
-                        if cfg!(feature = "linux-boot-profile") {
-                            crate::arch::x86_64::cpu::linux_boot_profile_record_lifecycle_phase(
-                                11,
-                                scrub_started,
-                            );
-                        }
-                        release_count = 0;
+                if owned {
+                    let scrub_started = crate::arch::x86_64::timer::timestamp_counter();
+                    if !scrub_and_release_process_frames(core::slice::from_ref(&mapping.frame)) {
+                        return false;
+                    }
+                    if cfg!(feature = "linux-boot-profile") {
+                        crate::arch::x86_64::cpu::linux_boot_profile_record_lifecycle_phase(
+                            11,
+                            scrub_started,
+                        );
                     }
                 }
             }

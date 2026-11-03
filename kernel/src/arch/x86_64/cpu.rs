@@ -3608,13 +3608,18 @@ impl LinuxProcessAddressSpaceSnapshot {
                 mapping.address != 0
                     && mapping.address.is_multiple_of(PAGE_SIZE)
                     && !(mapping.writable && mapping.executable)
-                    && (memory::frames_owned_by(
-                        memory::FrameOwner::KERNEL,
-                        core::slice::from_ref(&mapping.frame),
-                    ) || memory::frame_lease_is_runtime(mapping.frame))
+                    && linux_runtime_snapshot_mapping_frame_owned(mapping.frame)
                     && (index == 0 || self.mappings[index - 1].address < mapping.address)
             })
     }
+}
+
+fn linux_runtime_snapshot_mapping_frame_owned(frame: memory::FrameLease) -> bool {
+    memory::frame_lease_is_runtime(frame)
+        || memory::frame_owner(frame).is_some_and(|owner| {
+            owner == memory::FrameOwner::KERNEL
+                || linux_runtime_frame_policy().is_some_and(|(expected, _)| owner == expected)
+        })
 }
 
 #[derive(Clone, Copy)]
