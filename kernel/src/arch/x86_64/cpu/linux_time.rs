@@ -359,9 +359,14 @@ pub(super) fn linux_alarm(seconds: u64) -> u64 {
     let old_deadline = X86_RUNTIME
         .ELF_PROBE_REAL_TIMER_DEADLINE
         .load(Ordering::SeqCst);
-    let remaining = old_deadline
-        .saturating_sub(now)
-        .div_ceil(NANOSECONDS_PER_SECOND);
+    // alarm_setitimer() rounds the old remainder to the nearest second, but
+    // never reports a pending sub-second alarm as 0 (kernel/time/itimer.c:314).
+    let old_remaining = old_deadline.saturating_sub(now);
+    let mut remaining = old_remaining / NANOSECONDS_PER_SECOND;
+    let remainder = old_remaining % NANOSECONDS_PER_SECOND;
+    if remaining == 0 && remainder != 0 || remainder >= NANOSECONDS_PER_SECOND / 2 {
+        remaining += 1;
+    }
     let deadline = if seconds == 0 {
         0
     } else {
@@ -430,22 +435,36 @@ pub(super) fn linux_clock_nanosleep_live_return(
 ) -> u64 {
     let clock = u64::from(clock as u32);
     let flags = u64::from(flags as u32);
-    if !matches!(clock, LINUX_CLOCK_REALTIME | LINUX_CLOCK_MONOTONIC)
-        || flags & !LINUX_TIMER_ABSTIME != 0
-    {
-        return LINUX_EINVAL;
-    }
+    // clock_nanosleep() resolves the clock before reading the request: clocks
+    // without an nsleep method fail with EOPNOTSUPP, unknown ids with EINVAL
+    // (kernel/time/posix-timers.c:1387-1393). BOOTTIME and TAI read like
+    // MONOTONIC and REALTIME here, as in clock_gettime(). Alarm clocks behave
+    // as on a Linux system without an RTC wakeup device; CPU-time sleeps are
+    // not implemented. common_nsleep() only tests TIMER_ABSTIME in flags.
+    let realtime = match clock {
+        LINUX_CLOCK_REALTIME | LINUX_CLOCK_TAI => true,
+        LINUX_CLOCK_MONOTONIC | LINUX_CLOCK_BOOTTIME => false,
+        LINUX_CLOCK_THREAD_CPUTIME_ID
+        | LINUX_CLOCK_MONOTONIC_RAW
+        | LINUX_CLOCK_REALTIME_COARSE
+        | LINUX_CLOCK_MONOTONIC_COARSE
+        | LINUX_CLOCK_REALTIME_ALARM
+        | LINUX_CLOCK_BOOTTIME_ALARM => return LINUX_EOPNOTSUPP,
+        _ => return LINUX_EINVAL,
+    };
     let mut request_bytes = [0_u8; 16];
     if !copy_from_linux_user(request, &mut request_bytes) {
         return LINUX_EFAULT;
     }
-    let Some(requested) = linux_timespec_nanoseconds(&request_bytes) else {
+    // timespec64_to_ktime() clamps huge valid requests to KTIME_MAX, so a
+    // sleep of TYPE_MAXIMUM(time_t) seconds blocks instead of failing.
+    let Some(requested) = linux_timespec_nanoseconds_saturating(&request_bytes) else {
         return LINUX_EINVAL;
     };
     let Some(monotonic_now) = linux_elapsed_nanoseconds() else {
         return LINUX_ENOSYS;
     };
-    let realtime_now = if clock == LINUX_CLOCK_REALTIME {
+    let realtime_now = if realtime {
         let Some((seconds, nanoseconds)) = linux_realtime_time() else {
             return LINUX_ENOSYS;
         };
@@ -460,34 +479,29 @@ pub(super) fn linux_clock_nanosleep_live_return(
         monotonic_now
     };
     let absolute = flags & LINUX_TIMER_ABSTIME != 0;
-    let deadline = if absolute && clock == LINUX_CLOCK_REALTIME {
+    let deadline = if absolute && realtime {
         monotonic_now.saturating_add(requested.saturating_sub(realtime_now))
     } else if absolute {
         requested
     } else {
-        let Some(deadline) = monotonic_now.checked_add(requested) else {
-            return LINUX_EINVAL;
-        };
-        deadline
+        monotonic_now.saturating_add(requested)
     };
     if deadline <= monotonic_now {
         return 0;
     }
+    // Linux writes rmtp only when the sleep is interrupted and reports a bad
+    // pointer then (kernel/time/hrtimer.c nanosleep_copyout()), so it is not
+    // validated here; signal delivery handles the fault.
     let remaining = if absolute { 0 } else { remaining };
-    if remaining != 0 && !linux_writable_user_range_contains(remaining, 16) {
-        return LINUX_EFAULT;
-    }
     let Some(current) = current_linux_thread_handle() else {
         return LINUX_ESRCH;
     };
-    let Some(target) = ready_linux_thread_handle() else {
-        // With no runnable peer, the current process is the domain's idle
-        // task. Sleep in the kernel until the deadline instead of exposing an
-        // implementation detail as ENOSYS. Device/timer interrupts still wake
-        // the CPU and are handled normally between checks.
-        while linux_elapsed_nanoseconds().is_some_and(|now| now < deadline) {
-            unsafe { asm!("sti", "hlt", "cli", options(nomem, nostack)) };
-        }
+    // With no runnable peer, the current process is the domain's idle task.
+    // Sleep in the kernel instead of exposing an implementation detail as
+    // ENOSYS, but block normally once a sibling becomes runnable so a long
+    // sleep cannot starve it.
+    let Some(target) = ready_linux_thread_handle().or_else(|| linux_idle_until_ready(deadline))
+    else {
         return 0;
     };
     let Some(tls) = linux_thread_context(current) else {
@@ -543,6 +557,20 @@ pub(super) fn linux_clock_nanosleep_live_return(
     LINUX_RETURN_FROM_IRET
 }
 
+/// Idles the CPU until another thread of the current process becomes
+/// runnable, which it returns, or until the monotonic `deadline` passes.
+/// Device/timer interrupts still wake the CPU and are handled normally
+/// between checks; the timer interrupt also expires timed waits.
+pub(super) fn linux_idle_until_ready(deadline: u64) -> Option<LinuxThreadHandle> {
+    while linux_elapsed_nanoseconds().is_some_and(|now| now < deadline) {
+        unsafe { asm!("sti", "hlt", "cli", options(nomem, nostack)) };
+        if let Some(target) = ready_linux_thread_handle() {
+            return Some(target);
+        }
+    }
+    None
+}
+
 pub(super) fn linux_setitimer(which: u64, input_address: u64, old_output_address: u64) -> u64 {
     let which = u64::from(which as u32);
     if which > 2 {
@@ -583,10 +611,7 @@ pub(super) fn linux_setitimer(which: u64, input_address: u64, old_output_address
     let deadline = if value == 0 {
         0
     } else {
-        let Some(deadline) = now.checked_add(value) else {
-            return LINUX_EINVAL;
-        };
-        deadline
+        now.saturating_add(value)
     };
     if old_output_address != 0 && !copy_to_linux_user(old_output_address, &old) {
         return LINUX_EFAULT;
@@ -608,9 +633,12 @@ pub(super) fn linux_timeval_nanoseconds(value: &[u8]) -> Option<u64> {
     if seconds < 0 || !(0..1_000_000).contains(&microseconds) {
         return None;
     }
-    (seconds as u64)
-        .checked_mul(NANOSECONDS_PER_SECOND)
-        .and_then(|seconds| seconds.checked_add((microseconds as u64) * 1_000))
+    // Valid but huge timevals saturate like timespec64_to_ktime().
+    Some(
+        (seconds as u64)
+            .saturating_mul(NANOSECONDS_PER_SECOND)
+            .saturating_add((microseconds as u64) * 1_000),
+    )
 }
 
 pub(super) fn linux_interval_timer_specification(

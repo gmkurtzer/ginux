@@ -1726,7 +1726,18 @@ pub(super) fn linux_deliver_signal_to_blocked_wait(
         return LINUX_ESRCH;
     };
     let saved_interrupted = interrupted;
-    interrupted.rax = interrupted_result;
+    // nanosleep() validates rmtp only when it has to write the remainder, and
+    // a fault there replaces the interruption result with EFAULT
+    // (kernel/time/hrtimer.c nanosleep_copyout()).
+    let remaining_faults = wait_kind == LINUX_THREAD_WAIT_SLEEP && {
+        let address = X86_RUNTIME.LINUX_THREAD_WAIT_OUTPUTS[slot].load(Ordering::SeqCst);
+        address != 0 && !linux_writable_user_range_contains(address, 16)
+    };
+    interrupted.rax = if remaining_faults {
+        LINUX_EFAULT
+    } else {
+        interrupted_result
+    };
     let masked_wait = matches!(
         wait_kind,
         LINUX_THREAD_WAIT_PPOLL
@@ -1805,7 +1816,7 @@ pub(super) fn linux_deliver_signal_to_blocked_wait(
     }
     let timeout_remaining = if wait_kind == LINUX_THREAD_WAIT_SLEEP {
         let address = X86_RUNTIME.LINUX_THREAD_WAIT_OUTPUTS[slot].load(Ordering::SeqCst);
-        if address == 0 {
+        if address == 0 || remaining_faults {
             None
         } else {
             let Some(now) = linux_elapsed_nanoseconds() else {

@@ -19495,7 +19495,8 @@ fn verify_linux_timer_argument_widths() -> bool {
                 && i64::from_ne_bytes(current[16..24].try_into().unwrap()) >= 0
                 && (0..1_000_000).contains(&i64::from_ne_bytes(current[24..].try_into().unwrap()))
         }
-        && linux_alarm(UPPER_REGISTER_BITS | 3) == 3
+        // Just under 2.5 s remain; alarm() rounds that to the nearest second.
+        && linux_alarm(UPPER_REGISTER_BITS | 3) == 2
         && X86_RUNTIME
             .ELF_PROBE_REAL_TIMER_INTERVAL
             .load(Ordering::SeqCst)
@@ -19564,11 +19565,26 @@ fn verify_linux_timer_argument_widths() -> bool {
         && linux_timer_gettime(UPPER_REGISTER_BITS | 1, mapping) == 0
         && linux_timer_getoverrun(UPPER_REGISTER_BITS | 1) == 0
         && linux_timer_delete(UPPER_REGISTER_BITS | 1) == 0;
+    // Huge but valid timer values saturate to "never" instead of EINVAL.
+    let mut huge_timer = [0_u8; 32];
+    huge_timer[16..24].copy_from_slice(&i64::MAX.to_ne_bytes());
+    let huge_timers = posix_timer
+        && copy_to_linux_user(mapping, &huge_timer)
+        && linux_setitimer(0, mapping, 0) == 0
+        && X86_RUNTIME
+            .ELF_PROBE_REAL_TIMER_DEADLINE
+            .load(Ordering::SeqCst)
+            == u64::MAX
+        && copy_to_linux_user(mapping, &[0_u8; 32])
+        && linux_setitimer(0, mapping, 0) == 0;
     let timerfd = linux_timerfd_create(
         UPPER_REGISTER_BITS | LINUX_CLOCK_MONOTONIC,
         UPPER_REGISTER_BITS | LINUX_TFD_NONBLOCK,
     );
-    let timerfd_valid = posix_timer
+    const TFD_TIMER_CANCEL_ON_SET: u64 = 2;
+    let mut short_timer = [0_u8; 32];
+    short_timer[24..].copy_from_slice(&1_i64.to_ne_bytes());
+    let timerfd_valid = huge_timers
         && timerfd < LINUX_AUX_DESCRIPTOR_LIMIT
         && linux_timerfd_settime(
             UPPER_REGISTER_BITS | timerfd,
@@ -19577,6 +19593,22 @@ fn verify_linux_timer_argument_widths() -> bool {
             0,
         ) == 0
         && linux_timerfd_gettime(UPPER_REGISTER_BITS | timerfd, mapping) == 0
+        // Linux ignores CANCEL_ON_SET on monotonic timers and checks flags
+        // before the descriptor.
+        && linux_timerfd_settime(
+            timerfd,
+            LINUX_TFD_TIMER_ABSTIME | TFD_TIMER_CANCEL_ON_SET,
+            mapping,
+            0,
+        ) == 0
+        && linux_timerfd_settime(timerfd, 4, mapping, 0) == LINUX_EINVAL
+        && linux_timerfd_settime(u64::from(u32::MAX), 4, mapping, 0) == LINUX_EINVAL
+        && linux_timerfd_settime(u64::from(u32::MAX), 0, mapping, 0) == LINUX_EBADF
+        // A read accepts any buffer of at least eight bytes.
+        && copy_to_linux_user(mapping, &short_timer)
+        && linux_timerfd_settime(timerfd, 0, mapping, 0) == 0
+        && linux_timerfd_read(timerfd, mapping + 192, 4) == Some(LINUX_EINVAL)
+        && linux_timerfd_read(timerfd, mapping + 192, 64) == Some(8)
         && linux_descriptor_close(timerfd) == 0;
     if X86_RUNTIME
         .ELF_PROBE_POSIX_TIMER_ACTIVE
@@ -30645,7 +30677,7 @@ fn linux_descriptor_read_live_return(
         }
         (LINUX_THREAD_WAIT_EVENTFD_READ, 8)
     } else if linux_timerfd_descriptor(descriptor) {
-        if count != 8 {
+        if count < 8 {
             return LINUX_EINVAL;
         }
         (LINUX_THREAD_WAIT_TIMERFD_READ, 8)
@@ -31141,10 +31173,11 @@ fn linux_timer_settime(timer: u64, flags: u64, new_address: u64, old_address: u6
     if !copy_from_linux_user(new_address, &mut specification) {
         return LINUX_EFAULT;
     }
-    let Some(interval) = linux_timespec_nanoseconds(&specification[..16]) else {
+    // Valid but huge timespecs saturate like timespec64_to_ktime().
+    let Some(interval) = linux_timespec_nanoseconds_saturating(&specification[..16]) else {
         return LINUX_EINVAL;
     };
-    let Some(value) = linux_timespec_nanoseconds(&specification[16..]) else {
+    let Some(value) = linux_timespec_nanoseconds_saturating(&specification[16..]) else {
         return LINUX_EINVAL;
     };
     let Some(now) = linux_elapsed_nanoseconds() else {
@@ -31164,10 +31197,7 @@ fn linux_timer_settime(timer: u64, flags: u64, new_address: u64, old_address: u6
     } else if flags & TIMER_ABSTIME != 0 {
         value
     } else {
-        let Some(deadline) = now.checked_add(value) else {
-            return LINUX_EINVAL;
-        };
-        deadline
+        now.saturating_add(value)
     };
     if old_address != 0 && !copy_to_linux_user(old_address, &old) {
         return LINUX_EFAULT;
@@ -31244,23 +31274,16 @@ fn linux_timerfd_settime(descriptor: u64, flags: u64, new_address: u64, old_addr
     const TFD_TIMER_CANCEL_ON_SET: u64 = 2;
     let descriptor = u64::from(descriptor as u32);
     let flags = u64::from(flags as u32);
-    let Some(state) = linux_timerfd_state(descriptor) else {
-        return LINUX_EBADF;
-    };
-    let clock = u64::from(state.clock.load(Ordering::SeqCst));
-    if flags & !(LINUX_TFD_TIMER_ABSTIME | TFD_TIMER_CANCEL_ON_SET) != 0
-        || flags & TFD_TIMER_CANCEL_ON_SET != 0
-            && (flags & LINUX_TFD_TIMER_ABSTIME == 0
-                || !matches!(clock, LINUX_CLOCK_REALTIME | LINUX_CLOCK_REALTIME_ALARM))
-    {
-        return LINUX_EINVAL;
-    }
-    if old_address != 0 && !linux_writable_user_range_contains(old_address, 32) {
-        return LINUX_EFAULT;
-    }
+    // Linux copies the new value, then checks flags and the itimerspec, and
+    // only then looks up the descriptor (fs/timerfd.c:574-576, :480-486).
+    // TFD_TIMER_CANCEL_ON_SET is silently ignored unless the timer is an
+    // absolute REALTIME one (timerfd_setup_cancel()); Ginux never cancels.
     let mut specification = [0_u8; 32];
     if !copy_from_linux_user(new_address, &mut specification) {
         return LINUX_EFAULT;
+    }
+    if flags & !(LINUX_TFD_TIMER_ABSTIME | TFD_TIMER_CANCEL_ON_SET) != 0 {
+        return LINUX_EINVAL;
     }
     let Some(interval) = linux_timespec_nanoseconds_saturating(&specification[..16]) else {
         return LINUX_EINVAL;
@@ -31268,6 +31291,13 @@ fn linux_timerfd_settime(descriptor: u64, flags: u64, new_address: u64, old_addr
     let Some(value) = linux_timespec_nanoseconds_saturating(&specification[16..]) else {
         return LINUX_EINVAL;
     };
+    let Some(state) = linux_timerfd_state(descriptor) else {
+        return LINUX_EBADF;
+    };
+    let clock = u64::from(state.clock.load(Ordering::SeqCst));
+    if old_address != 0 && !linux_writable_user_range_contains(old_address, 32) {
+        return LINUX_EFAULT;
+    }
     let Some(now) = linux_elapsed_nanoseconds() else {
         return LINUX_ENOSYS;
     };
@@ -31294,10 +31324,7 @@ fn linux_timerfd_settime(descriptor: u64, flags: u64, new_address: u64, old_addr
     } else if flags & LINUX_TFD_TIMER_ABSTIME != 0 {
         value
     } else {
-        let Some(deadline) = now.checked_add(value) else {
-            return LINUX_EINVAL;
-        };
-        deadline
+        now.saturating_add(value)
     };
     if old_address != 0 && !copy_to_linux_user(old_address, &old) {
         return LINUX_EFAULT;
@@ -31329,7 +31356,9 @@ fn linux_timerfd_gettime(descriptor: u64, address: u64) -> u64 {
 
 fn linux_timerfd_read(descriptor: u64, address: u64, count: u64) -> Option<u64> {
     let state = linux_timerfd_state(descriptor)?;
-    if count != 8 {
+    // timerfd_read_iter() accepts any buffer of at least eight bytes and
+    // returns the eight-byte expiration count (fs/timerfd.c:307-308).
+    if count < 8 {
         return Some(LINUX_EINVAL);
     }
     let Some(now) = linux_elapsed_nanoseconds() else {

@@ -96,10 +96,26 @@ pub(super) fn linux_remote_futex_wait_fast(
     let command = operation & FUTEX_COMMAND_MASK;
     let flags = operation & !FUTEX_COMMAND_MASK;
     if command == FUTEX_WAIT_BITSET {
-        if flags & !(FUTEX_PRIVATE_FLAG | FUTEX_CLOCK_REALTIME) != 0
-            || bitset == 0
-            || bitset > u64::from(u32::MAX)
-        {
+        if flags & !(FUTEX_PRIVATE_FLAG | FUTEX_CLOCK_REALTIME) != 0 {
+            // Linux reports unknown futex operation bits as ENOSYS; leave
+            // that to the ordinary path.
+            return None;
+        }
+        // Linux copies and validates the timeout in sys_futex() before
+        // futex_wait() checks the bitset or the futex word.
+        let requested = if timeout == 0 {
+            None
+        } else {
+            let mut timeout_bytes = [0_u8; 16];
+            if !address_space::copy_from_current_linux_user_fast(timeout, &mut timeout_bytes) {
+                return None;
+            }
+            let Some(requested) = linux_timespec_nanoseconds_saturating(&timeout_bytes) else {
+                return Some(LINUX_EINVAL);
+            };
+            Some(requested)
+        };
+        if bitset == 0 || bitset > u64::from(u32::MAX) {
             return Some(LINUX_EINVAL);
         }
         let mut bytes = [0_u8; size_of::<u32>()];
@@ -110,14 +126,7 @@ pub(super) fn linux_remote_futex_wait_fast(
             return Some(LINUX_EAGAIN);
         }
         crate::arch::x86_64::smp::linux_runtime_thread_slot()?;
-        if timeout != 0 {
-            let mut timeout_bytes = [0_u8; 16];
-            if !address_space::copy_from_current_linux_user_fast(timeout, &mut timeout_bytes) {
-                return None;
-            }
-            let Some(requested) = linux_timespec_nanoseconds(&timeout_bytes) else {
-                return Some(LINUX_EINVAL);
-            };
+        if let Some(requested) = requested {
             let expired = if flags & FUTEX_CLOCK_REALTIME == 0 {
                 linux_elapsed_nanoseconds()? >= requested
             } else {
@@ -243,6 +252,7 @@ pub(super) fn linux_remote_futex_wait_fast(
     finish(0)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn linux_futex_live_return(
     output: *mut LinuxSyscallFrame,
     caller: LinuxUserContext,
@@ -250,24 +260,87 @@ pub(super) fn linux_futex_live_return(
     operation: u64,
     value: u64,
     timeout: u64,
+    second_address: u64,
     bitset: u64,
 ) -> u64 {
     const FUTEX_COMMAND_MASK: u64 = 0x7f;
     const FUTEX_WAIT: u64 = 0;
     const FUTEX_WAKE: u64 = 1;
+    const FUTEX_REQUEUE: u64 = 3;
+    const FUTEX_CMP_REQUEUE: u64 = 4;
+    const FUTEX_LOCK_PI: u64 = 6;
     const FUTEX_WAIT_BITSET: u64 = 9;
     const FUTEX_WAKE_BITSET: u64 = 10;
+    const FUTEX_WAIT_REQUEUE_PI: u64 = 11;
+    const FUTEX_LOCK_PI2: u64 = 13;
     const FUTEX_PRIVATE_FLAG: u64 = 128;
     const FUTEX_CLOCK_REALTIME: u64 = 256;
+    const FUTEX_ROBUST_FLAGS: u64 = 512 | 1024;
 
     profile_linux_futex_operation(operation);
     let command = operation & FUTEX_COMMAND_MASK;
     let flags = operation & !FUTEX_COMMAND_MASK;
-    if !address.is_multiple_of(size_of::<u32>() as u64)
-        || flags & !(FUTEX_PRIVATE_FLAG | FUTEX_CLOCK_REALTIME) != 0
+    let known_flags = flags & !(FUTEX_PRIVATE_FLAG | FUTEX_CLOCK_REALTIME) == 0;
+    // sys_futex() copies and validates the timeout of every timed command
+    // before do_futex() looks at the operation or the futex word
+    // (kernel/futex/syscalls.c:192-207). Huge valid timespecs saturate.
+    let requested = if timeout != 0
+        && flags & !(FUTEX_PRIVATE_FLAG | FUTEX_CLOCK_REALTIME | FUTEX_ROBUST_FLAGS) == 0
+        && matches!(
+            command,
+            FUTEX_WAIT | FUTEX_LOCK_PI | FUTEX_WAIT_BITSET | FUTEX_WAIT_REQUEUE_PI | FUTEX_LOCK_PI2
+        ) {
+        let mut timeout_bytes = [0_u8; 16];
+        if !copy_from_linux_user(timeout, &mut timeout_bytes) {
+            return LINUX_EFAULT;
+        }
+        let Some(requested) = linux_timespec_nanoseconds_saturating(&timeout_bytes) else {
+            return LINUX_EINVAL;
+        };
+        Some(requested)
+    } else {
+        None
+    };
+    // do_futex() rejects unimplemented commands, FUTEX_CLOCK_REALTIME outside
+    // the bitset wait, and unknown operation bits with ENOSYS
+    // (kernel/futex/syscalls.c:113-118, :161).
+    if !known_flags
+        || !matches!(
+            command,
+            FUTEX_WAIT
+                | FUTEX_WAKE
+                | FUTEX_REQUEUE
+                | FUTEX_CMP_REQUEUE
+                | FUTEX_WAIT_BITSET
+                | FUTEX_WAKE_BITSET
+        )
         || flags & FUTEX_CLOCK_REALTIME != 0 && command != FUTEX_WAIT_BITSET
     {
+        return LINUX_ENOSYS;
+    }
+    if !address.is_multiple_of(size_of::<u32>() as u64) {
         return LINUX_EINVAL;
+    }
+    if matches!(command, FUTEX_REQUEUE | FUTEX_CMP_REQUEUE) {
+        // futex_requeue() takes both counts as int and rejects negative
+        // ones; the requeue limit travels in the timeout register
+        // (kernel/futex/syscalls.c:139-142, kernel/futex/requeue.c:400).
+        let wake_count = value as u32 as i32;
+        let requeue_count = timeout as u32 as i32;
+        if wake_count < 0
+            || requeue_count < 0
+            || !second_address.is_multiple_of(size_of::<u32>() as u64)
+        {
+            return LINUX_EINVAL;
+        }
+        let expected = (command == FUTEX_CMP_REQUEUE).then_some(bitset as u32);
+        return requeue_linux_futex(
+            address,
+            second_address,
+            expected,
+            wake_count as u32,
+            requeue_count as u32,
+        );
     }
     let mut bytes = [0_u8; size_of::<u32>()];
     if !copy_from_linux_user(address, &mut bytes) {
@@ -294,9 +367,7 @@ pub(super) fn linux_futex_live_return(
         }
         return u64::from(woken);
     }
-    if !matches!(command, FUTEX_WAIT | FUTEX_WAIT_BITSET)
-        || command == FUTEX_WAIT_BITSET && (bitset == 0 || bitset > u64::from(u32::MAX))
-    {
+    if command == FUTEX_WAIT_BITSET && (bitset == 0 || bitset > u64::from(u32::MAX)) {
         return LINUX_EINVAL;
     }
     if u64::from(u32::from_ne_bytes(bytes)) != value {
@@ -305,30 +376,20 @@ pub(super) fn linux_futex_live_return(
     let Some(current) = current_linux_thread_handle() else {
         return LINUX_ESRCH;
     };
-    let target = ready_linux_thread_handle();
+    let mut target = ready_linux_thread_handle();
     let Some(tls) = linux_thread_context(current) else {
         return LINUX_ESRCH;
     };
-    let deadline = if timeout == 0 {
-        0
-    } else {
-        let mut timeout_bytes = [0_u8; 16];
-        if !copy_from_linux_user(timeout, &mut timeout_bytes) {
-            return LINUX_EFAULT;
-        }
-        let Some(requested) = linux_timespec_nanoseconds(&timeout_bytes) else {
-            return LINUX_EINVAL;
-        };
+    let deadline = if let Some(requested) = requested {
         if command == FUTEX_WAIT {
             if requested == 0 {
                 return LINUX_ETIMEDOUT;
             }
-            let Some(deadline) =
-                linux_elapsed_nanoseconds().and_then(|now| now.checked_add(requested))
-            else {
-                return LINUX_EINVAL;
+            // ktime_add_safe() clamps the relative deadline to KTIME_MAX.
+            let Some(now) = linux_elapsed_nanoseconds() else {
+                return LINUX_ENOSYS;
             };
-            deadline
+            now.saturating_add(requested)
         } else {
             let Some(monotonic_now) = linux_elapsed_nanoseconds() else {
                 return LINUX_ENOSYS;
@@ -354,6 +415,8 @@ pub(super) fn linux_futex_live_return(
                 monotonic_now.saturating_add(requested - realtime_now)
             }
         }
+    } else {
+        0
     };
     let wait_mask = if command == FUTEX_WAIT_BITSET {
         bitset
@@ -364,7 +427,16 @@ pub(super) fn linux_futex_live_return(
         if crate::arch::x86_64::smp::linux_runtime_thread_slot().is_some() {
             return 0;
         }
-        return LINUX_ENOSYS;
+        if deadline == 0 {
+            return LINUX_ENOSYS;
+        }
+        // As in nanosleep, idle while nothing else can run. If the deadline
+        // passes first, report ETIMEDOUT like Linux futex_wait()'s hrtimer
+        // (kernel/futex/waitwake.c); otherwise block normally below.
+        target = linux_idle_until_ready(deadline);
+        if target.is_none() {
+            return LINUX_ETIMEDOUT;
+        }
     }
     if command == FUTEX_WAIT_BITSET
         && current_linux_runtime_cpu_index() == 0
@@ -497,7 +569,7 @@ pub(super) fn linux_futex_wait_live_return(
         if !copy_from_linux_user(timeout, &mut timeout_bytes) {
             return LINUX_EFAULT;
         }
-        let Some(deadline) = linux_timespec_nanoseconds(&timeout_bytes) else {
+        let Some(deadline) = linux_timespec_nanoseconds_saturating(&timeout_bytes) else {
             return LINUX_EINVAL;
         };
         let Some(monotonic_now) = linux_elapsed_nanoseconds() else {
@@ -662,20 +734,45 @@ pub(super) fn linux_futex_requeue(
     {
         return LINUX_EINVAL;
     }
-    let mut source_bytes = [0_u8; 4];
     let mut target_bytes = [0_u8; 4];
-    if !copy_from_linux_user(source, &mut source_bytes)
-        || !copy_from_linux_user(target, &mut target_bytes)
-    {
+    if !copy_from_linux_user(target, &mut target_bytes) {
         return LINUX_EFAULT;
     }
-    if u64::from(u32::from_ne_bytes(source_bytes)) != expected {
-        return LINUX_EAGAIN;
+    requeue_linux_futex(
+        source,
+        target,
+        Some(expected as u32),
+        wake_count as u32,
+        requeue_count as u32,
+    )
+}
+
+/// Wakes up to `wake_count` waiters on `source` and moves up to
+/// `requeue_count` further waiters to `target`, returning both counts summed
+/// like Linux futex_requeue() (kernel/futex/requeue.c). With `expected`, the
+/// source word is compared under the futex lock first and a mismatch fails
+/// with EAGAIN, as for FUTEX_CMP_REQUEUE.
+fn requeue_linux_futex(
+    source: u64,
+    target: u64,
+    expected: Option<u32>,
+    wake_count: u32,
+    requeue_count: u32,
+) -> u64 {
+    let _coordination = LINUX_FUTEX_COORDINATION.lock();
+    if let Some(expected) = expected {
+        let mut source_bytes = [0_u8; 4];
+        if !copy_from_linux_user(source, &mut source_bytes) {
+            return LINUX_EFAULT;
+        }
+        if u32::from_ne_bytes(source_bytes) != expected {
+            return LINUX_EAGAIN;
+        }
     }
-    let woken = wake_linux_futex(source, wake_count as u32);
+    let woken = wake_linux_futex_masked_locked(source, u32::MAX, wake_count);
     let mut requeued = 0_u32;
     for slot in 0..LINUX_THREAD_LIMIT {
-        if requeued == requeue_count as u32 {
+        if requeued == requeue_count {
             break;
         }
         if X86_RUNTIME.LINUX_THREAD_STATES[slot].load(Ordering::SeqCst) == LINUX_THREAD_BLOCKED

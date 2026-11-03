@@ -1159,6 +1159,7 @@ pub(super) extern "sysv64" fn linux_syscall_handler(
             buffer,
             count,
             register(0),
+            register(2),
             register(1),
         ),
         LINUX_FUTEX_WAKE_SYSCALL => linux_futex_wake(first_argument, buffer, count, register(0)),
