@@ -5,6 +5,10 @@ derived from untrusted input. This directory is intentionally **not** a member
 of the root workspace: upstream crates keep resolving `license.workspace =
 true` against the root manifest, and no root file is modified.
 
+All commands below are run from **inside this directory** (`cd fuzz`), so the
+pinned toolchain in `rust-toolchain.toml` applies and the root toolchain
+(1.99.0, UEFI target) is untouched.
+
 ## Targets
 
 | target | crate | surfaces | seeds | dictionary |
@@ -20,7 +24,7 @@ data) or trips ASan is a finding; returning `None`/`Err` is fine.
 
 - **Toolchain**: pinned nightly `nightly-2026-11-02` (see
   `rust-toolchain.toml`; rustup auto-installs it with `rust-src` and
-  `llvm-tools-preview` on first use inside `fuzz/`).
+  `llvm-tools-preview` on first use from inside `fuzz/`).
 - **cargo-fuzz**: `cargo install cargo-fuzz --locked --version 0.13.2`
 - **clang + g++** (the libFuzzer runtime is C++).
 - The target triple `x86_64-unknown-linux-gnu` is passed explicitly: recent
@@ -32,32 +36,33 @@ Expected result: libFuzzer runs for 30 s, prints `Done ...` / exec stats and
 exits 0; no crash files appear under `fuzz/artifacts/`.
 
 ```sh
-mkdir -p fuzz/corpus fuzz/artifacts
+cd fuzz
+mkdir -p corpus artifacts
 
 cargo fuzz run --target x86_64-unknown-linux-gnu --sanitizer address \
   oci_surfaces -- -max_total_time=30 -rss_limit_mb=4096 \
-  -artifact_prefix=fuzz/artifacts/ -dict=fuzz/oci.dict \
-  fuzz/corpus fuzz/corpus-seed
+  -artifact_prefix=artifacts/ -dict=oci.dict \
+  corpus corpus-seed
 
 cargo fuzz run --target x86_64-unknown-linux-gnu --sanitizer address \
   protocol_surfaces -- -max_total_time=30 -rss_limit_mb=4096 \
-  -artifact_prefix=fuzz/artifacts/ -dict=fuzz/protocol.dict \
-  fuzz/corpus fuzz/corpus-seed-protocol
+  -artifact_prefix=artifacts/ -dict=protocol.dict \
+  corpus corpus-seed-protocol
 
 cargo fuzz run --target x86_64-unknown-linux-gnu --sanitizer address \
   volume_surfaces -- -max_total_time=30 -rss_limit_mb=4096 \
-  -artifact_prefix=fuzz/artifacts/ -dict=fuzz/volume.dict \
-  fuzz/corpus fuzz/corpus-seed-volume
+  -artifact_prefix=artifacts/ -dict=volume.dict \
+  corpus corpus-seed-volume
 ```
 
 ## Longer rounds and coverage
 
 ```sh
-# 10-minute round per target (same flags, -max_total_time=600)
-# Coverage (requires llvm-tools-preview, included in the pinned toolchain):
+# 10-minute round per target: same flags, -max_total_time=600
+# Coverage (llvm-tools-preview is included in the pinned toolchain):
 cargo fuzz coverage --target x86_64-unknown-linux-gnu oci_surfaces -- \
-  fuzz/corpus fuzz/corpus-seed
-# -> fuzz/coverage/<target>/lcov.info (genhtml for HTML report)
+  corpus corpus-seed
+# -> coverage/<target>/lcov.info (genhtml for an HTML report)
 ```
 
 ## Notes
