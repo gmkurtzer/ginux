@@ -7,11 +7,11 @@
 - Active project: issue #63 registry DNS entropy and response binding
 - Branch: `hdae/issue-63-registry-dns-entropy`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 41, registry DNS entropy and response binding
-- Last completed action: removed the unauthenticated DNS fallback, retained
-  RDRAND-backed registry entropy, and added RDRAND-backed kernel interface entropy
-- Next action: validate the repaired PR #73 against current `main`, then publish
-  the new exact head for GitHub checks and a later unchanged-head review
+- Active gate: none; Gates 41 and 42 are technically complete on PR #73
+- Last completed action: removed the unauthenticated DNS fallback, added
+  RDRAND-backed kernel interface entropy, and passed `make check` and `make test`
+- Next action: publish the repaired exact head for GitHub checks and a later
+  unchanged-head review
 
 ## Current repository state
 
