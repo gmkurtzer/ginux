@@ -2,9 +2,9 @@
 
 ## Current checkpoint
 
-- Gate 1, foundation and interception proof, is technically passed on branch
-  `hdae/foundation-interception` and is pending pull-request delivery and human
-  acceptance.
+- Gate 1, foundation and interception proof, is technically passed and
+  delivered in https://github.com/gmkurtzer/usshim/pull/1 from branch
+  `hdae/foundation-interception`. Human acceptance is pending.
 - Authoritative name: Ginus (Ginux Userspace).
 - Runtime isolation unit: domain.
 - Policy unit: versioned contract.
@@ -60,14 +60,14 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Commit the Gate 1 evidence, push `hdae/foundation-interception`, open and record
-its pull request, then stop for human acceptance after `make demo-gate-1`.
+Stop for human acceptance of Gate 1 after the reviewer runs or reviews
+`make demo-gate-1`. Do not begin Gate 2 before explicit acceptance.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 1 technically passed; delivery and human acceptance pending
+- Active gate: Gate 1 technically passed and delivered; human acceptance pending
 - Last evidence: full clean Gate 1 command set passed on 2026-11-03
 - Required human decision: accept or reject Gate 1 after its demonstration

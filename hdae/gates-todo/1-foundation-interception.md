@@ -51,7 +51,6 @@ invoke the host syscall ABI directly.
 
 ## Remaining work
 
-- [ ] Push the dedicated branch, open its pull request, and record the URL.
 - [ ] Human runs or reviews `make demo-gate-1` and accepts or rejects the gate.
 
 ## Acceptance criteria
@@ -133,17 +132,20 @@ invoke the host syscall ABI directly.
 
 - Working branch: `hdae/foundation-interception`
 - Intended base: `main`
-- Pull request: intended; dedicated branch push and PR creation authorized on
-  2026-11-03; never merge or close without explicit authorization
+- Pull request: https://github.com/gmkurtzer/usshim/pull/1; dedicated branch
+  push and PR creation authorized on 2026-11-03; never merge or close without
+  explicit authorization
 - Planned commits: project scaffold and checks; interception proof and tests;
   benchmark controls and architecture evidence
 - Actual commits: `b644e8b` (workspace and interception proof), `30e1c38`
-  (benchmark controls and design evidence), plus the pending evidence/delivery
-  commit. The first two planned implementation commits were combined because
-  the scaffold and executable proof formed one buildable change.
+  (benchmark controls and design evidence), `59d8130` (verification evidence),
+  and the delivery checkpoint commit. The first two planned implementation
+  commits were combined because the scaffold and executable proof formed one
+  buildable change.
 
 ## Review policy and outcome
 
-Technically passed on 2026-11-03; delivery and human acceptance remain pending.
-Present `make demo-gate-1`, fresh automated evidence, and the pull request,
-then stop for acceptance before closing the gate or beginning Gate 2.
+Technically passed and delivered in pull request 1 on 2026-11-03; human
+acceptance remains pending. Present `make demo-gate-1`, fresh automated
+evidence, and the pull request, then stop for acceptance before closing the
+gate or beginning Gate 2.
