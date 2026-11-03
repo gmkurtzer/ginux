@@ -1144,6 +1144,14 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: tracked frame release ownership verified");
     serial_write("\r\nginux: stale frame leases rejected");
     serial_write("\r\nginux: per-domain physical frame budgets enforced");
+    if !arch::x86_64::cpu::verify_linux_mmap_frame_quota() {
+        kernel_fail("\r\nginux: Linux mmap domain quota invalid\r\n");
+    }
+    serial_write("\r\nginux: Linux mmap domain quota enforced atomically");
+    if !linux_sysv_ipc::verify_allocation_quota() {
+        kernel_fail("\r\nginux: Linux SysV domain quota invalid\r\n");
+    }
+    serial_write("\r\nginux: Linux SysV domain quota enforced independently");
     if !arch::x86_64::pci::verify_queue_rejections() {
         kernel_fail("\r\nginux: virtio queue contract invalid\r\n");
     }
@@ -1821,6 +1829,14 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     ) {
         kernel_fail("\r\nginux: Linux socket transport configuration failed\r\n");
     }
+    if !linux_socket::verify_blocking_poll_budget() {
+        kernel_fail("ginux: blocking Linux socket poll budget invalid\r\n");
+    }
+    serial_write("ginux: blocking Linux socket polls bounded independently of guest timeout\r\n");
+    if !arch::x86_64::cpu::verify_synchronous_poll_budget() {
+        kernel_fail("ginux: synchronous Linux poll budget invalid\r\n");
+    }
+    serial_write("ginux: synchronous Linux poll waits bounded independently of timeout\r\n");
     if cfg!(feature = "verification-boot") {
         if !network::set_link(1)
             || !network::set_ipv4((24_u64 << 32) | 0x0a00_020f)
@@ -1847,6 +1863,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             kernel_fail("ginux: Linux translation recovery permissions invalid\r\n");
         }
         serial_write("ginux: Linux translation recovery permissions validated\r\n");
+        if !address_space::verify_linux_domain_owned_runtime_page_metadata() {
+            kernel_fail("ginux: domain-owned Linux runtime page metadata invalid\r\n");
+        }
+        serial_write("ginux: domain-owned Linux runtime page metadata validated\r\n");
         if !arch::x86_64::cpu::verify_cross_cpu_linux_runtime_mechanisms() {
             kernel_fail("ginux: cross-CPU Linux runtime mechanisms invalid\r\n");
         }

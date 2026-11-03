@@ -7,27 +7,55 @@
 - Active project: remaining reporter remediation batch
 - Branch: `hdae/issue-25-mprotect-shootdown`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 40, delivered as PR #49 for issue #25
-- Last completed action: published PR #49 with reciprocal issue/PR summaries
-  after fresh `make check` and two-vCPU `make test` passed
-- Next action: confirm PR #49 CI while starting Gate 41 for issue #27
+- Active gate: Gate 40 mprotect SMP shootdown, delivered as PR #49 for issue #25
+- Last completed action: merged current `main` into PR #49 and resolved the
+  durable HDAE checkpoint conflict
+- Next action: run fresh `make check` and `make test`, then push the new exact
+  head for GitHub CI and a later unchanged-head review
 
 ## Current repository state
 
-Remote `main` is at `ecbb3142`. The first
+Remote `main` is at `5dd58ca4`. The first
 eleven feedback-hardening gates and inserted correctness gates are complete.
-Gate 12 is complete on `codex/performance-parity`. Gate 40 is active on this
-branch; Gates 34 through 36, 38, and 39 are delivered on dedicated open PRs,
-while Gate 37 awaits the separate unpack-memory policy decision.
+Gate 12 is complete on `codex/performance-parity`. Gates 13 through 19 and 21
+through 23 and Gates 32 through 33 remain in `gates-todo/` for maintainer
+review after delivery through merged pull requests. Gate 34 was delivered
+through merged PR #44 and issue #17 is closed; Gate 35 was delivered through
+merged PR #45 and issue #18 is closed; Gate 36 was delivered through merged PR
+#46 and issue #19 is closed. Gate 37 was delivered through merged PR #59 and
+issue #57 is closed. PR #49 is being synchronized for fresh validation; PRs
+#50 through #54 remain open and conflicted pending the same merge-train process.
 The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
 matrix and repeated stress pass. Gate 11's comparison and reduced evidence are
-under `docs/feedback-hardening/`. No push or merge was performed.
+under `docs/feedback-hardening/`. No direct push to `main` was performed.
 
 ## Open decisions
 
-- Gate 37 awaits the unpack-memory policy; it does not affect Gate 40.
+- None. The architecture defines a domain as the unit of private payload memory
+  ownership and accounting; Gate 37 must preserve that invariant. The
+  user delegated issues #17, #18, #19, #20, #22, #24, #25, #27, #28, and #29
+  as one automatic batch with final review after all PRs.
 
 ## Active diagnosis
+
+- Root cause: Gate 36 correctly allocated private payload frames to the domain,
+  but several leaf lookup, fork/exec, RELRO, and cleanup paths still assumed
+  every payload frame was kernel-owned. Allocation succeeded, then validation
+  treated the live domain-owned frame as absent.
+- Wayland is not involved. PR #56's clock change does not resolve the failure.
+- Payload leaves now accept exact live leases owned by the domain or kernel,
+  plus immutable runtime extents; hierarchy frames remain kernel-only.
+- `make check`, `make test`, and `make test-alpine` pass. Alpine completes its
+  shell, restart, and failure-containment probes under the 128 MiB budget.
+
+- Configurable allocator owner limits stop exactly at the container budget,
+  preserve independent owner capacity, and restore capacity after release.
+- Linux private mmap, exec, stack, copy-on-write, process, tmpfs, and SysV
+  frames use the generation-safe container owner; shared immutable file-cache
+  and page-table hierarchy frames remain kernel-owned by design.
+- `make check` passes with the unsafe inventory unchanged at 1,033 blocks.
+  `make test` passes the full two-vCPU QEMU and Linux runtime suite, including
+  atomic mmap-style and independent SysV quota-exhaustion markers.
 
 - Four-vCPU runtime work now dispatches independently to CPUs 1 through 3.
   A targeted nine-sample four-thread run produced a 2,924 events/s median,

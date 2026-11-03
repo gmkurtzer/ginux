@@ -16,6 +16,7 @@ use smoltcp::{
 
 use crate::{
     arch::x86_64::{
+        cpu::linux_startup_random,
         iommu::{DeviceTranslation, DeviceTranslationProfile},
         paging::MmioMapping,
         pci::{self, VirtioNetworkDevice, VirtioNetworkInitialization},
@@ -40,7 +41,7 @@ const RX_BUFFER_OFFSET: usize = 0x400;
 const TX_BUFFER_OFFSET: usize = 0xa00;
 const RX_DESCRIPTOR_LENGTH: usize = 0x5ff;
 const VIRTIO_HEADER_LENGTH: usize = 12;
-const BLOCKING_POLL_LIMIT: usize = 20_000;
+pub(crate) const BLOCKING_POLL_LIMIT: usize = 20_000;
 const PAGE_SIZE: usize = 4096;
 const LOCAL_DATA_CAPACITY: usize =
     PAGE_SIZE - core::mem::size_of::<memory::FrameLease>() - core::mem::size_of::<u32>();
@@ -969,15 +970,30 @@ pub(crate) fn timeout_option(slot: u8, option: TimeoutOption) -> Result<u64, Err
     })
 }
 
-fn timeout_poll_limit(slot: u8, option: TimeoutOption) -> Option<usize> {
-    timeout_option(slot, option)
-        .ok()
-        .filter(|microseconds| *microseconds != 0)
-        .map(|microseconds| {
-            usize::try_from(microseconds.div_ceil(1_000))
+fn timeout_poll_limit(slot: u8, option: TimeoutOption) -> usize {
+    bounded_timeout_poll_limit(timeout_option(slot, option).ok())
+}
+
+fn bounded_timeout_poll_limit(microseconds: Option<u64>) -> usize {
+    microseconds
+        .filter(|value| *value != 0)
+        .map(|value| {
+            usize::try_from(value.div_ceil(1_000))
                 .unwrap_or(usize::MAX)
-                .max(1)
+                .clamp(1, BLOCKING_POLL_LIMIT)
         })
+        .unwrap_or(BLOCKING_POLL_LIMIT)
+}
+
+pub(crate) fn verify_blocking_poll_budget() -> bool {
+    bounded_timeout_poll_limit(None) == BLOCKING_POLL_LIMIT
+        && bounded_timeout_poll_limit(Some(0)) == BLOCKING_POLL_LIMIT
+        && bounded_timeout_poll_limit(Some(1)) == 1
+        && bounded_timeout_poll_limit(Some(1_000)) == 1
+        && bounded_timeout_poll_limit(Some(1_001)) == 2
+        && bounded_timeout_poll_limit(Some((BLOCKING_POLL_LIMIT as u64) * 1_000))
+            == BLOCKING_POLL_LIMIT
+        && bounded_timeout_poll_limit(Some(u64::MAX)) == BLOCKING_POLL_LIMIT
 }
 
 pub(crate) fn bind(slot: u8, address: u32, requested_port: u16) -> Result<u16, Error> {
@@ -1229,21 +1245,14 @@ pub(crate) fn accept(slot: u8) -> Result<(u8, IpEndpoint), Error> {
 }
 
 pub(crate) fn accept_blocking(slot: u8) -> Result<(u8, IpEndpoint), Error> {
-    if let Some(limit) = timeout_poll_limit(slot, TimeoutOption::Receive) {
-        for _ in 0..limit {
-            match accept(slot) {
-                Err(Error::WouldBlock | Error::InProgress) => core::hint::spin_loop(),
-                result => return result,
-            }
-        }
-        return Err(Error::WouldBlock);
-    }
-    loop {
+    let limit = timeout_poll_limit(slot, TimeoutOption::Receive);
+    for _ in 0..limit {
         match accept(slot) {
             Err(Error::WouldBlock | Error::InProgress) => core::hint::spin_loop(),
             result => return result,
         }
     }
+    Err(Error::WouldBlock)
 }
 
 fn teardown() -> bool {
@@ -1454,7 +1463,7 @@ pub(crate) fn send_blocking(
     input: &[u8],
     remote: Option<IpEndpoint>,
 ) -> Result<usize, Error> {
-    let limit = timeout_poll_limit(slot, TimeoutOption::Send).unwrap_or(BLOCKING_POLL_LIMIT);
+    let limit = timeout_poll_limit(slot, TimeoutOption::Send);
     for _ in 0..limit {
         match send(slot, input, remote) {
             Err(Error::WouldBlock | Error::InProgress) => core::hint::spin_loop(),
@@ -1688,7 +1697,7 @@ pub(crate) fn recv_message_blocking(
         return Ok((0, 0, None));
     }
     if !wait_all || kind(slot) == Some(Kind::Udp) {
-        let limit = timeout_poll_limit(slot, TimeoutOption::Receive).unwrap_or(BLOCKING_POLL_LIMIT);
+        let limit = timeout_poll_limit(slot, TimeoutOption::Receive);
         for _ in 0..limit {
             match recv_message(slot, output, peek_only) {
                 Err(Error::WouldBlock | Error::InProgress) => core::hint::spin_loop(),
@@ -1700,7 +1709,7 @@ pub(crate) fn recv_message_blocking(
     }
     if peek_only {
         let mut observed = 0;
-        let limit = timeout_poll_limit(slot, TimeoutOption::Receive).unwrap_or(BLOCKING_POLL_LIMIT);
+        let limit = timeout_poll_limit(slot, TimeoutOption::Receive);
         for _ in 0..limit {
             match recv_message(slot, output, true) {
                 Ok((copied, _, endpoint)) if copied == output.len() || copied == 0 => {
@@ -1725,7 +1734,7 @@ pub(crate) fn recv_message_blocking(
         };
     }
     let mut received = 0;
-    let limit = timeout_poll_limit(slot, TimeoutOption::Receive).unwrap_or(BLOCKING_POLL_LIMIT);
+    let limit = timeout_poll_limit(slot, TimeoutOption::Receive);
     for _ in 0..limit {
         match recv_message(slot, &mut output[received..], false) {
             Ok((0, _, endpoint)) => return Ok((received, received, endpoint)),
@@ -1757,7 +1766,7 @@ pub(crate) fn recv_blocking(
     slot: u8,
     output: &mut [u8],
 ) -> Result<(usize, Option<IpEndpoint>), Error> {
-    let limit = timeout_poll_limit(slot, TimeoutOption::Receive).unwrap_or(BLOCKING_POLL_LIMIT);
+    let limit = timeout_poll_limit(slot, TimeoutOption::Receive);
     for _ in 0..limit {
         match recv(slot, output) {
             Err(Error::WouldBlock | Error::InProgress) => core::hint::spin_loop(),
@@ -1769,7 +1778,7 @@ pub(crate) fn recv_blocking(
 }
 
 pub(crate) fn complete_connect(slot: u8) -> Result<(), Error> {
-    let limit = timeout_poll_limit(slot, TimeoutOption::Send).unwrap_or(BLOCKING_POLL_LIMIT);
+    let limit = timeout_poll_limit(slot, TimeoutOption::Send);
     for _ in 0..limit {
         let Some((_, writable, error)) = readiness(slot) else {
             return Err(Error::Invalid);
@@ -2187,6 +2196,9 @@ fn runtime() -> Result<&'static mut Runtime, Error> {
     if ipv4 == 0 || prefix > 32 || gateway == 0 {
         return Err(Error::Unavailable);
     }
+    let Some(interface_entropy) = linux_startup_random() else {
+        return Err(Error::Unavailable);
+    };
     let receive = platform
         .notification
         .address(platform.initialization.receive_notification, 2)
@@ -2221,7 +2233,7 @@ fn runtime() -> Result<&'static mut Runtime, Error> {
     }
     let mut device = unsafe { VirtioNet::new(dma_virtual, dma.address(), receive, transmit) };
     let mut config = InterfaceConfig::new(EthernetAddress(platform.initialization.mac).into());
-    config.random_seed = u64::from(ipv4) << 32 | u64::from(gateway);
+    config.random_seed = u64::from_ne_bytes(interface_entropy[..8].try_into().unwrap());
     let mut interface = Interface::new(config, &mut device, Instant::from_millis(0));
     interface.update_ip_addrs(|addresses| {
         let _ = addresses.push(IpCidr::new(
