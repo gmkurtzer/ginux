@@ -1772,6 +1772,11 @@ if ! grep -q '^ginux: blocking Linux socket polls bounded independently of guest
     exit 1
 fi
 
+if ! grep -q '^ginux: synchronous Linux poll waits bounded independently of timeout' "$output_file"; then
+    echo "Boot test failed: poll/ppoll/select could wait without a bounded kernel-entry budget." >&2
+    exit 1
+fi
+
 if [[ "$(grep -c '^TMPFS_READY' "$output_file")" -ne 1 ]] ||
     ! grep -q '^ginux: quota-bound page-backed RAM store installed' "$output_file" ||
     ! grep -q '^ginux: generation-safe Linux tmpfs view mounted at /tmp' "$output_file" ||
