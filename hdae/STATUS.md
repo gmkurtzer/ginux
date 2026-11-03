@@ -7,7 +7,8 @@
   https://github.com/gmkurtzer/usshim/pull/1 and is not merged.
 - Gate 2 is technically passed on the dedicated
   `hdae/rocky-image-pipeline` branch. Until Gate 1 is merged, Gate 2 is stacked
-  on its accepted branch state while its intended base remains `main`.
+  on its accepted branch state while its intended base remains `main`. It is
+  delivered in https://github.com/gmkurtzer/usshim/pull/2.
 - Authoritative name: Ginus (Ginux Userspace).
 - Runtime isolation unit: domain.
 - Policy unit: versioned contract.
@@ -91,16 +92,16 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Push the Gate 2 branch, open its dedicated pull request, record the stable URL,
-and stop for human acceptance after `make demo-gate-2` review.
+Stop for human acceptance after review of `make demo-gate-2` and pull request
+2. Do not begin Gate 3 before explicit acceptance.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 2, Rocky domain-userspace pipeline; technically passed,
-  delivery and human checkpoint pending
+- Active gate: Gate 2, Rocky domain-userspace pipeline; technically passed and
+  delivered in pull request 2, human checkpoint pending
 - Last evidence: Gate 2 demo and aggregate regression suite passed on
   2026-11-03
 - Required human decision: accept or reject Gate 2 after reviewing the demo

@@ -124,13 +124,14 @@ content as a domain userspace that Ginus builds and tests can consume offline.
 
 - Working branch: `hdae/rocky-image-pipeline`
 - Intended base: `main`
-- Pull request: intended; dedicated branch push and PR creation authorized on
-  2026-11-03; never merge or close without explicit authorization
+- Pull request: https://github.com/gmkurtzer/usshim/pull/2; dedicated branch
+  push and PR creation authorized on 2026-11-03; temporarily stacked on pull
+  request 1; never merge or close without explicit authorization
 - Planned commits: domain-image preparation contract; preparation tools and
   Make targets; offline, corruption, and repeatability verification
 - Actual commits: `04a1faf` (preparation contract) and `f58892f` (offline
-  preparation, verification, and demo tooling); evidence/delivery checkpoint
-  commit pending
+  preparation, verification, and demo tooling), and `5f460c5` (verification
+  evidence); final delivery checkpoint commit pending
 
 ## Review policy and outcome
 
