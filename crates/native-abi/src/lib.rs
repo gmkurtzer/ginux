@@ -227,6 +227,11 @@ pub const NATIVE_NETWORK_KIND_VIRTUAL: u16 = 2;
 pub const NATIVE_NETWORK_KIND_MASK: u16 = 0x00ff;
 pub const NATIVE_NETWORK_FLAG_UP: u16 = 0x0100;
 pub const NATIVE_NETWORK_MAX_NAME_SIZE: usize = 16;
+/// Returns the kernel-calibrated timestamp-counter frequency in hertz, so a
+/// native service can derive monotonic time from RDTSC without spending a
+/// call per reading.
+pub const NATIVE_TIMESTAMP_FREQUENCY_OPERATION: u64 = 39;
+pub const NATIVE_TIMESTAMP_FREQUENCY_UNAVAILABLE: u64 = u64::MAX - 2;
 pub const NATIVE_NETWORK_CURSOR_END: u64 = u64::MAX;
 
 #[repr(C)]
@@ -2227,6 +2232,9 @@ mod tests {
         assert!(header.contains("GINUX_NATIVE_NETWORK_INVENTORY_OPERATION UINT64_C(38)"));
         assert!(header.contains("GINUX_NATIVE_NETWORK_INVENTORY_SET_LINK UINT16_C(5)"));
         assert!(header.contains("GINUX_NATIVE_NETWORK_FLAG_UP UINT16_C(0x0100)"));
+        assert!(header.contains("GINUX_NATIVE_TIMESTAMP_FREQUENCY_OPERATION UINT64_C(39)"));
+        assert!(header
+            .contains("GINUX_NATIVE_TIMESTAMP_FREQUENCY_UNAVAILABLE (UINT64_MAX - UINT64_C(2))"));
         assert!(header.contains("struct ginux_native_network_inventory_request_v0"));
         assert!(header.contains("sizeof(struct ginux_native_control_descriptor_v4) == 16"));
     }

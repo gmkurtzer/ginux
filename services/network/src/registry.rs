@@ -16,6 +16,7 @@ use ginux_native_abi::NativeNetworkBootV8;
 use ginux_native_abi::{
     NativeImageStoreRequestV0, NATIVE_IMAGE_STORE_ABORT, NATIVE_IMAGE_STORE_OPERATION,
     NATIVE_IMAGE_STORE_PUBLISH, NATIVE_IMAGE_STORE_RESULT_FAILED, NATIVE_PROGRESS_OPERATION,
+    NATIVE_TIMESTAMP_FREQUENCY_OPERATION,
 };
 use heapless::{String, Vec};
 use p256::ecdsa::DerSignature;
@@ -25,7 +26,7 @@ use smoltcp::{
     iface::{Config, Interface, SocketHandle, SocketSet, SocketStorage},
     phy::{Device, DeviceCapabilities, Medium, PacketMeta, RxToken, TxToken},
     socket::{dns, tcp},
-    time::Instant,
+    time::{Duration, Instant},
     wire::{DnsQueryType, EthernetAddress, IpAddress, IpCidr, Ipv4Address},
 };
 
@@ -39,6 +40,14 @@ const QUEUE_SIZE: u16 = 8;
 const TCP_BUFFER_SIZE: usize = 16 * 1024;
 const NETWORK_POLL_LIMIT: usize = 25_000_000;
 const POLLS_PER_MILLISECOND: usize = 1024;
+// Network waits keep the bound the poll budget gave them on the poll clock,
+// but measure it in time so it no longer shrinks on faster processors.
+const NETWORK_TIMEOUT_MILLISECONDS: u64 = (NETWORK_POLL_LIMIT / POLLS_PER_MILLISECOND) as u64;
+const TIMESTAMP_FREQUENCY_MINIMUM: u64 = 1_000_000;
+const TIMESTAMP_FREQUENCY_MAXIMUM: u64 = 100_000_000_000;
+const MILLISECONDS_PER_SECOND: u64 = 1000;
+// smoltcp stores Instant as i64 microseconds; leave headroom for deadlines.
+const NETWORK_CLOCK_MAXIMUM_MILLISECONDS: u64 = i64::MAX as u64 / 1000 / 2;
 const TLS_RECORD_SIZE: usize = 16_640;
 const CERTIFICATE_SIZE: usize = 4096;
 const HTTP_HEADER_SIZE: usize = 8192;
@@ -47,6 +56,10 @@ const METADATA_BODY_SIZE: usize = 64 * 1024;
 struct RegistryServiceOwner {
     clock: AtomicU64,
     progress_capability: AtomicU64,
+    timestamp_ticks_per_millisecond: AtomicU64,
+    timestamp_origin: AtomicU64,
+    network_clock_polls: AtomicU64,
+    network_clock_milliseconds: AtomicU64,
     dns_fallback_a: AtomicU32,
     dns_fallback_state: AtomicU32,
     dns_query_sent: AtomicU32,
@@ -66,6 +79,10 @@ unsafe impl Sync for RegistryServiceOwner {}
 static REGISTRY_SERVICE: RegistryServiceOwner = RegistryServiceOwner {
     clock: AtomicU64::new(0),
     progress_capability: AtomicU64::new(0),
+    timestamp_ticks_per_millisecond: AtomicU64::new(0),
+    timestamp_origin: AtomicU64::new(0),
+    network_clock_polls: AtomicU64::new(0),
+    network_clock_milliseconds: AtomicU64::new(0),
     dns_fallback_a: AtomicU32::new(0),
     dns_fallback_state: AtomicU32::new(0),
     dns_query_sent: AtomicU32::new(0),
@@ -86,6 +103,7 @@ pub(crate) unsafe fn pull(info: &NativeNetworkBootV8) -> bool {
         .clock
         .store(info.unix_time, Ordering::Release);
     progress(b"initializing registry network stack");
+    start_network_clock();
     let Some(mut device) = VirtioNet::new(info) else {
         progress(b"registry network device initialization failed");
         return false;
@@ -487,6 +505,95 @@ pub(crate) fn progress(message: &[u8]) {
         );
     }
     let _ = result;
+}
+
+/// Selects the clock that drives smoltcp for this registry session.
+///
+/// A kernel that reports its calibrated timestamp-counter frequency gives the
+/// stack real milliseconds from RDTSC at no further call cost. A kernel
+/// without a calibrated counter reports it unavailable, and the stack keeps
+/// the poll-count clock. Services ship in the same boot image as the kernel,
+/// so the operation is always present.
+fn start_network_clock() {
+    let frequency = timestamp_frequency();
+    let ticks_per_millisecond =
+        if (TIMESTAMP_FREQUENCY_MINIMUM..=TIMESTAMP_FREQUENCY_MAXIMUM).contains(&frequency) {
+            frequency / MILLISECONDS_PER_SECOND
+        } else {
+            progress(b"registry timestamp frequency unavailable; using poll clock");
+            0
+        };
+    let service = &REGISTRY_SERVICE;
+    service
+        .timestamp_ticks_per_millisecond
+        .store(ticks_per_millisecond, Ordering::Release);
+    service
+        .timestamp_origin
+        .store(timestamp_counter(), Ordering::Release);
+    service.network_clock_polls.store(0, Ordering::Release);
+    service
+        .network_clock_milliseconds
+        .store(0, Ordering::Release);
+}
+
+/// Returns the session's monotonic time; it never moves backwards, even if a
+/// migration between processors observes a lower timestamp counter.
+fn network_now() -> Instant {
+    let service = &REGISTRY_SERVICE;
+    let ticks_per_millisecond = service
+        .timestamp_ticks_per_millisecond
+        .load(Ordering::Acquire);
+    let milliseconds = timestamp_counter()
+        .saturating_sub(service.timestamp_origin.load(Ordering::Acquire))
+        .checked_div(ticks_per_millisecond)
+        .unwrap_or_else(|| {
+            let polls = service.network_clock_polls.fetch_add(1, Ordering::AcqRel) + 1;
+            polls / POLLS_PER_MILLISECOND as u64
+        });
+    let previous = service
+        .network_clock_milliseconds
+        .fetch_max(milliseconds, Ordering::AcqRel);
+    Instant::from_millis(
+        previous
+            .max(milliseconds)
+            .min(NETWORK_CLOCK_MAXIMUM_MILLISECONDS) as i64,
+    )
+}
+
+fn network_deadline() -> Instant {
+    network_now() + Duration::from_millis(NETWORK_TIMEOUT_MILLISECONDS)
+}
+
+fn timestamp_frequency() -> u64 {
+    let mut result = NATIVE_TIMESTAMP_FREQUENCY_OPERATION;
+    unsafe {
+        core::arch::asm!(
+            "int 0x80",
+            inlateout("rax") result,
+            in("rdi") 0_u64,
+            in("rsi") 0_u64,
+            in("rdx") 0_u64,
+            options(nostack),
+        );
+    }
+    result
+}
+
+fn timestamp_counter() -> u64 {
+    let low: u32;
+    let high: u32;
+    // SAFETY: LFENCE and RDTSC are unprivileged x86-64 instructions and do
+    // not access memory. LFENCE prevents an earlier read from passing RDTSC.
+    unsafe {
+        core::arch::asm!(
+            "lfence",
+            "rdtsc",
+            out("eax") low,
+            out("edx") high,
+            options(nomem, nostack)
+        );
+    }
+    (u64::from(high) << 32) | u64::from(low)
 }
 
 pub(crate) fn set_progress_capability(capability: u64) {
@@ -1334,13 +1441,15 @@ fn resolve(
     sockets: &mut SocketSet<'static>,
     handle: SocketHandle,
 ) -> Option<IpAddress> {
-    let mut elapsed_polls = 0_usize;
     for attempt in 0..3 {
         REGISTRY_SERVICE.dns_fallback_a.store(0, Ordering::Release);
         REGISTRY_SERVICE
             .dns_fallback_state
             .store(0, Ordering::Release);
         REGISTRY_SERVICE.dns_query_sent.store(0, Ordering::Release);
+        // smoltcp stamps the query timeout from the last poll; refresh it so
+        // time spent outside the stack does not expire the query at once.
+        let _ = interface.poll(network_now(), device, sockets);
         let query = match sockets.get_mut::<dns::Socket>(handle).start_query(
             interface.context(),
             host,
@@ -1353,13 +1462,13 @@ fn resolve(
             }
         };
         let mut pending = true;
-        for _ in 0..NETWORK_POLL_LIMIT {
-            elapsed_polls = elapsed_polls.saturating_add(1);
-            let _ = interface.poll(
-                Instant::from_millis((elapsed_polls / POLLS_PER_MILLISECOND) as i64),
-                device,
-                sockets,
-            );
+        let deadline = network_deadline();
+        loop {
+            let now = network_now();
+            if now >= deadline {
+                break;
+            }
+            let _ = interface.poll(now, device, sockets);
             let fallback = REGISTRY_SERVICE.dns_fallback_a.swap(0, Ordering::AcqRel);
             if fallback != 0 {
                 sockets.get_mut::<dns::Socket>(handle).cancel_query(query);
@@ -1407,8 +1516,6 @@ struct TcpStream<'a> {
     device: &'a mut VirtioNet,
     sockets: &'a mut SocketSet<'static>,
     handle: SocketHandle,
-    tick: i64,
-    polls: usize,
 }
 
 impl<'a> TcpStream<'a> {
@@ -1430,30 +1537,24 @@ impl<'a> TcpStream<'a> {
             device,
             sockets,
             handle,
-            tick: 0,
-            polls: 0,
         };
-        for _ in 0..NETWORK_POLL_LIMIT {
-            stream.poll();
+        let deadline = network_deadline();
+        loop {
+            let now = stream.poll();
             let socket = stream.sockets.get::<tcp::Socket>(stream.handle);
             if socket.may_send() && socket.may_recv() {
                 return Some(stream);
             }
-            if !socket.is_open() {
+            if !socket.is_open() || now >= deadline {
                 return None;
             }
         }
-        None
     }
 
-    fn poll(&mut self) {
-        self.polls = self.polls.wrapping_add(1);
-        if self.polls.is_multiple_of(POLLS_PER_MILLISECOND) {
-            self.tick += 1;
-        }
-        let _ = self
-            .interface
-            .poll(Instant::from_millis(self.tick), self.device, self.sockets);
+    fn poll(&mut self) -> Instant {
+        let now = network_now();
+        let _ = self.interface.poll(now, self.device, self.sockets);
+        now
     }
 
     fn abort(&mut self) {
@@ -1471,8 +1572,9 @@ impl Read for TcpStream<'_> {
         if output.is_empty() {
             return Ok(0);
         }
-        for _ in 0..NETWORK_POLL_LIMIT {
-            self.poll();
+        let deadline = network_deadline();
+        loop {
+            let now = self.poll();
             let socket = self.sockets.get_mut::<tcp::Socket>(self.handle);
             if socket.can_recv() {
                 return socket.recv_slice(output).map_err(|_| ErrorKind::Other);
@@ -1480,15 +1582,18 @@ impl Read for TcpStream<'_> {
             if !socket.may_recv() {
                 return Ok(0);
             }
+            if now >= deadline {
+                return Err(ErrorKind::TimedOut);
+            }
         }
-        Err(ErrorKind::TimedOut)
     }
 }
 
 impl Write for TcpStream<'_> {
     fn write(&mut self, input: &[u8]) -> Result<usize, Self::Error> {
-        for _ in 0..NETWORK_POLL_LIMIT {
-            self.poll();
+        let deadline = network_deadline();
+        loop {
+            let now = self.poll();
             let socket = self.sockets.get_mut::<tcp::Socket>(self.handle);
             if socket.can_send() {
                 return socket.send_slice(input).map_err(|_| ErrorKind::Other);
@@ -1496,18 +1601,23 @@ impl Write for TcpStream<'_> {
             if !socket.may_send() {
                 return Err(ErrorKind::BrokenPipe);
             }
+            if now >= deadline {
+                return Err(ErrorKind::TimedOut);
+            }
         }
-        Err(ErrorKind::TimedOut)
     }
 
     fn flush(&mut self) -> Result<(), Self::Error> {
-        for _ in 0..NETWORK_POLL_LIMIT {
-            self.poll();
+        let deadline = network_deadline();
+        loop {
+            let now = self.poll();
             if self.sockets.get::<tcp::Socket>(self.handle).send_queue() == 0 {
                 return Ok(());
             }
+            if now >= deadline {
+                return Err(ErrorKind::TimedOut);
+            }
         }
-        Err(ErrorKind::TimedOut)
     }
 }
 

@@ -5,28 +5,45 @@
 - Active skill: `.agents/skills/hdae-development/SKILL.md`
 - Reload required after compaction, reset, resume, or handoff: yes
 - Active project: remaining reporter remediation batch
-- Branch: `hdae/issue-22-blocking-sockets`
+- Branch: `hdae/issue-19-domain-memory`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 38, delivered as PR #47 for issue #22
-- Last completed action: published PR #47 with reciprocal issue/PR summaries
-  after `make check` and `make test` passed
-- Next action: confirm PR #47 CI while starting Gate 39 for issue #24
+- Active gate: Gate 36, per-domain Linux memory accounting for issue #19
+- Last completed action: merged current `main` at `a7a41ae2` into PR #46 and
+  reconciled Gate 36 after PR #45 merged and issue #18 closed
+- Next action: run fresh `make check` and `make test`, commit and push the
+  synchronized head, then verify its new CI and first-pass review marker
 
 ## Current repository state
 
-Remote `main` is at `ecbb3142`. Gates 34 through 36 are delivered through open
-PRs #44 through #46. Gate 37 is checkpointed on its dedicated branch pending
-the unpack-memory policy. Gate 38 passed independently and is delivered as
-PR #47.
+Remote `main` is at `a7a41ae2` after merged PR #45. The first
+eleven feedback-hardening gates and inserted correctness gates are complete.
+Gate 12 is complete on `codex/performance-parity`. Gates 13 through 19 and 21
+through 23 and Gates 32 through 33 remain in `gates-todo/` for maintainer
+review after delivery through merged pull requests. Gate 34 was delivered
+through merged PR #44 and issue #17 is closed; Gate 35 was delivered through
+merged PR #45 and issue #18 is closed; Gate 36 is delivered through open PR
+#46.
 The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
 matrix and repeated stress pass. Gate 11's comparison and reduced evidence are
-under `docs/feedback-hardening/`. No push or merge was performed.
+under `docs/feedback-hardening/`. No direct push to `main` was performed.
 
 ## Open decisions
 
-- Gate 37 awaits the unpack-memory policy; it does not affect Gate 38.
+- None. The architecture already defines a domain as the unit of memory
+  ownership and accounting; Gate 36 implements that existing invariant. The
+  user delegated issues #17, #18, #19, #20, #22, #24, #25, #27, #28, and #29
+  as one automatic batch with final review after all PRs.
 
 ## Active diagnosis
+
+- Configurable allocator owner limits stop exactly at the container budget,
+  preserve independent owner capacity, and restore capacity after release.
+- Linux private mmap, exec, stack, copy-on-write, process, tmpfs, and SysV
+  frames use the generation-safe container owner; shared immutable file-cache
+  and page-table hierarchy frames remain kernel-owned by design.
+- `make check` passes with the unsafe inventory unchanged at 1,033 blocks.
+  `make test` passes the full two-vCPU QEMU and Linux runtime suite, including
+  atomic mmap-style and independent SysV quota-exhaustion markers.
 
 - Four-vCPU runtime work now dispatches independently to CPUs 1 through 3.
   A targeted nine-sample four-thread run produced a 2,924 events/s median,

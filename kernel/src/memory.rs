@@ -168,9 +168,18 @@ impl<
     }
 
     pub(crate) fn reserve<const N: usize>(&mut self, owner: FrameOwner) -> Option<[FrameLease; N]> {
+        self.reserve_with_owner_limit::<N>(owner, OWNER_LIMIT)
+    }
+
+    fn reserve_with_owner_limit<const N: usize>(
+        &mut self,
+        owner: FrameOwner,
+        owner_limit: usize,
+    ) -> Option<[FrameLease; N]> {
         if N == 0
             || self.live_count.checked_add(N)? > LIVE_LIMIT
-            || (!owner.is_kernel() && self.owner_live_count(owner).checked_add(N)? > OWNER_LIMIT)
+            || (!owner.is_kernel()
+                && (owner_limit == 0 || self.owner_live_count(owner).checked_add(N)? > owner_limit))
             || self.allocated_frames.checked_add(N as u64).is_none()
         {
             return None;
@@ -192,7 +201,7 @@ impl<
         }
         let mut frames = [EMPTY_LEASE; N];
         for frame in &mut frames {
-            *frame = self.allocate_one(owner)?;
+            *frame = self.allocate_one_with_owner_limit(owner, owner_limit)?;
         }
         Some(frames)
     }
@@ -375,8 +384,17 @@ impl<
     }
 
     fn allocate_one(&mut self, owner: FrameOwner) -> Option<FrameLease> {
+        self.allocate_one_with_owner_limit(owner, OWNER_LIMIT)
+    }
+
+    fn allocate_one_with_owner_limit(
+        &mut self,
+        owner: FrameOwner,
+        owner_limit: usize,
+    ) -> Option<FrameLease> {
         if self.live_count == LIVE_LIMIT
-            || (!owner.is_kernel() && self.owner_live_count(owner) >= OWNER_LIMIT)
+            || (!owner.is_kernel()
+                && (owner_limit == 0 || self.owner_live_count(owner) >= owner_limit))
         {
             return None;
         }
@@ -718,6 +736,13 @@ pub(crate) fn initialize(boot_info: &BootInfo, ceiling: u64) -> bool {
 }
 
 pub(crate) fn allocate_frames<const N: usize>(owner: FrameOwner) -> Option<[FrameLease; N]> {
+    allocate_frames_with_optional_owner_limit(owner, None)
+}
+
+fn allocate_frames_with_optional_owner_limit<const N: usize>(
+    owner: FrameOwner,
+    owner_limit: Option<usize>,
+) -> Option<[FrameLease; N]> {
     if !PHYSICAL_MEMORY.initialized.load(Ordering::Acquire) {
         return None;
     }
@@ -726,7 +751,10 @@ pub(crate) fn allocate_frames<const N: usize>(owner: FrameOwner) -> Option<[Fram
     // a valid FrameAllocator.
     unsafe {
         let allocator = storage.assume_init_mut();
-        let frames = allocator.reserve::<N>(owner)?;
+        let frames = match owner_limit {
+            Some(limit) => allocator.reserve_with_owner_limit::<N>(owner, limit)?,
+            None => allocator.reserve::<N>(owner)?,
+        };
         for frame in &frames {
             let Some(address) = frame.direct_map_address() else {
                 let _ = allocator.release(owner, frames);
@@ -738,11 +766,33 @@ pub(crate) fn allocate_frames<const N: usize>(owner: FrameOwner) -> Option<[Fram
     }
 }
 
+pub(crate) fn allocate_frames_with_owner_limit<const N: usize>(
+    owner: FrameOwner,
+    owner_limit: usize,
+) -> Option<[FrameLease; N]> {
+    if owner.is_kernel() {
+        return None;
+    }
+    allocate_frames_with_optional_owner_limit(owner, Some(owner_limit))
+}
+
 pub(crate) fn allocate_frame_prefix<const N: usize>(
     owner: FrameOwner,
     count: usize,
 ) -> Option<[FrameLease; N]> {
-    if !PHYSICAL_MEMORY.initialized.load(Ordering::Acquire) || count == 0 || count > N {
+    allocate_frame_prefix_with_optional_owner_limit(owner, None, count)
+}
+
+fn allocate_frame_prefix_with_optional_owner_limit<const N: usize>(
+    owner: FrameOwner,
+    owner_limit: Option<usize>,
+    count: usize,
+) -> Option<[FrameLease; N]> {
+    if !PHYSICAL_MEMORY.initialized.load(Ordering::Acquire)
+        || owner_limit == Some(0)
+        || count == 0
+        || count > N
+    {
         return None;
     }
     let mut storage = PHYSICAL_MEMORY.allocator.lock();
@@ -752,7 +802,11 @@ pub(crate) fn allocate_frame_prefix<const N: usize>(
         let allocator = storage.assume_init_mut();
         let mut frames = [FrameLease::EMPTY; N];
         for index in 0..count {
-            let Some(frame) = allocator.allocate_one(owner) else {
+            let frame = match owner_limit {
+                Some(limit) => allocator.allocate_one_with_owner_limit(owner, limit),
+                None => allocator.allocate_one(owner),
+            };
+            let Some(frame) = frame else {
                 if index != 0 {
                     let _ = allocator.release_slice(owner, &frames[..index]);
                 }
@@ -772,12 +826,36 @@ pub(crate) fn allocate_frame_prefix<const N: usize>(
     }
 }
 
+pub(crate) fn allocate_frame_prefix_with_owner_limit<const N: usize>(
+    owner: FrameOwner,
+    owner_limit: usize,
+    count: usize,
+) -> Option<[FrameLease; N]> {
+    if owner.is_kernel() {
+        return None;
+    }
+    allocate_frame_prefix_with_optional_owner_limit(owner, Some(owner_limit), count)
+}
+
 pub(crate) fn allocate_frame_prefix_into(
     owner: FrameOwner,
     output: &mut [FrameLease],
     count: usize,
 ) -> bool {
-    if !PHYSICAL_MEMORY.initialized.load(Ordering::Acquire) || count == 0 || count > output.len() {
+    allocate_frame_prefix_into_with_optional_owner_limit(owner, None, output, count)
+}
+
+fn allocate_frame_prefix_into_with_optional_owner_limit(
+    owner: FrameOwner,
+    owner_limit: Option<usize>,
+    output: &mut [FrameLease],
+    count: usize,
+) -> bool {
+    if !PHYSICAL_MEMORY.initialized.load(Ordering::Acquire)
+        || owner_limit == Some(0)
+        || count == 0
+        || count > output.len()
+    {
         return false;
     }
     output.fill(FrameLease::EMPTY);
@@ -785,7 +863,11 @@ pub(crate) fn allocate_frame_prefix_into(
     unsafe {
         let allocator = storage.assume_init_mut();
         for index in 0..count {
-            let Some(frame) = allocator.allocate_one(owner) else {
+            let frame = match owner_limit {
+                Some(limit) => allocator.allocate_one_with_owner_limit(owner, limit),
+                None => allocator.allocate_one(owner),
+            };
+            let Some(frame) = frame else {
                 if index != 0 {
                     let _ = allocator.release_slice(owner, &output[..index]);
                     output[..index].fill(FrameLease::EMPTY);
@@ -805,6 +887,18 @@ pub(crate) fn allocate_frame_prefix_into(
         }
     }
     true
+}
+
+pub(crate) fn allocate_frame_prefix_into_with_owner_limit(
+    owner: FrameOwner,
+    owner_limit: usize,
+    output: &mut [FrameLease],
+    count: usize,
+) -> bool {
+    if owner.is_kernel() {
+        return false;
+    }
+    allocate_frame_prefix_into_with_optional_owner_limit(owner, Some(owner_limit), output, count)
 }
 
 pub(crate) fn allocate_contiguous_frames<const N: usize>(
@@ -980,6 +1074,11 @@ pub(crate) fn frame_leases_releasable(owner: FrameOwner, frames: &[FrameLease]) 
 }
 
 pub(crate) fn live_frame_lease(owner: FrameOwner, address: u64) -> Option<FrameLease> {
+    let (frame, actual_owner) = live_frame_record(address)?;
+    (actual_owner == owner).then_some(frame)
+}
+
+fn live_frame_record(address: u64) -> Option<(FrameLease, FrameOwner)> {
     if !PHYSICAL_MEMORY.initialized.load(Ordering::Acquire) || !address.is_multiple_of(PAGE_SIZE) {
         return None;
     }
@@ -987,8 +1086,27 @@ pub(crate) fn live_frame_lease(owner: FrameOwner, address: u64) -> Option<FrameL
     unsafe {
         let allocator = storage.assume_init_mut();
         let position = allocator.live_position(address)?;
-        (allocator.live_owners[position] == owner).then_some(allocator.live_frames[position])
+        Some((
+            allocator.live_frames[position],
+            allocator.live_owners[position],
+        ))
     }
+}
+
+pub(crate) fn frame_owner(frame: FrameLease) -> Option<FrameOwner> {
+    let (current, owner) = live_frame_record(frame.address())?;
+    (current == frame).then_some(owner)
+}
+
+pub(crate) fn frames_have_same_owner(frames: &[FrameLease]) -> bool {
+    let Some(owner) = frames.first().and_then(|frame| frame_owner(*frame)) else {
+        return false;
+    };
+    frames_owned_by(owner, frames)
+}
+
+pub(crate) fn live_frame_lease_any_owner(address: u64) -> Option<FrameLease> {
+    live_frame_record(address).map(|(frame, _)| frame)
 }
 
 pub(crate) fn scrub_and_release_frames(owner: FrameOwner, frames: &[FrameLease]) -> bool {
@@ -1193,6 +1311,36 @@ pub(crate) fn verify_reservation_invariants() -> bool {
     let bounded_transfer_completed = budgeted.transfer_owner(owner, third_owner) == Some(16)
         && budgeted.owner_live_count(owner) == 0
         && budgeted.owner_live_count(third_owner) == 16;
+    let mut configurable = TestFrameAllocator {
+        ranges: [EMPTY_RANGE; MAX_RANGES],
+        range_count: 1,
+        active_range: 0,
+        allocated_frames: 0,
+        reclaimed_boot_service_frames: 0,
+        live_frames: [EMPTY_LEASE; TEST_FRAME_LIMIT],
+        live_owners: [FrameOwner::KERNEL; TEST_FRAME_LIMIT],
+        live_index: [LIVE_INDEX_EMPTY; TEST_INDEX_LIMIT],
+        live_count: 0,
+        recycled: [EMPTY_LEASE; TEST_FRAME_LIMIT],
+        recycled_count: 0,
+    };
+    configurable.ranges[0] = Range {
+        next: 0x70_0000,
+        end: 0x70_0000 + 10 * PAGE_SIZE,
+    };
+    let configurable_owner = configurable.reserve_with_owner_limit::<4>(owner, 4);
+    let configurable_limit_enforced = configurable_owner.is_some()
+        && configurable
+            .reserve_with_owner_limit::<1>(owner, 4)
+            .is_none()
+        && configurable
+            .reserve_with_owner_limit::<2>(other_owner, 2)
+            .is_some();
+    let configurable_capacity_restored = configurable_owner
+        .is_some_and(|frames| configurable.release(owner, frames))
+        && configurable
+            .reserve_with_owner_limit::<1>(owner, 4)
+            .is_some();
     let mut contiguous = TestFrameAllocator {
         ranges: [EMPTY_RANGE; MAX_RANGES],
         range_count: 2,
@@ -1255,6 +1403,8 @@ pub(crate) fn verify_reservation_invariants() -> bool {
         && budget_filled
         && transfer_over_budget_rejected
         && bounded_transfer_completed
+        && configurable_limit_enforced
+        && configurable_capacity_restored
         && contiguous_failure_atomic
         && contiguous_ranges_selected
         && contiguous_released
