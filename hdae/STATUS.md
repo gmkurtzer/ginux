@@ -5,10 +5,10 @@
 - Gate 1 is accepted and closed under the corrected ordinary-host-process
   architecture. It remains delivered in open
   https://github.com/gmkurtzer/usshim/pull/1 and is not merged.
-- Gate 2 is technically passed on the dedicated
-  `hdae/rocky-image-pipeline` branch. Until Gate 1 is merged, Gate 2 is stacked
-  on its accepted branch state while its intended base remains `main`. It is
-  delivered in https://github.com/gmkurtzer/usshim/pull/2.
+- Gate 2 is accepted and closed. It remains delivered in open
+  https://github.com/gmkurtzer/usshim/pull/2 and is not merged.
+- Gate 3 is active on dedicated branch `hdae/execution-kernel`, stacked on the
+  accepted Gate 2 state while its intended eventual base remains `main`.
 - Authoritative name: Ginus (Ginux Userspace).
 - Runtime isolation unit: domain.
 - Policy unit: versioned contract.
@@ -79,6 +79,7 @@ scope, threat model, and invariants.
   asserted a read-only source mount plus no helper Ethernet/default route, and
   explicitly stated that Ginus execution, VFS, and systemd boot are not Gate 2
   evidence. The revised demonstration passed on 2026-11-03.
+- Human accepted Gate 2 on 2026-11-03 and directed advancement to Gate 3.
 
 ## Open decisions and limitations
 
@@ -97,17 +98,17 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Stop for human acceptance after review of `make demo-gate-2` and pull request
-2. Do not begin Gate 3 before explicit acceptance.
+Create the Gate 3 branch from accepted Gate 2 state, implement the bounded ELF
+loader, domain memory model, syscall ABI/dispatcher, audit and denial paths,
+then verify them through `make test-runtime` and `make demo-gate-3`.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 2, Rocky domain-userspace pipeline; technically passed and
-  delivered in pull request 2, human checkpoint pending
-- Last evidence: revised, explicit eight-check Gate 2 demo passed on
-  2026-11-03; prior aggregate regression suite also passed
-- Required human decision: accept or reject Gate 2 after reviewing the demo
-  and pull request
+- Active gate: Gate 3, execution kernel; implementation starting
+- Last evidence: revised, explicit eight-check Gate 2 demo passed and Gate 2
+  was accepted on 2026-11-03
+- Required human decision: none until the Gate 3 checkpoint unless execution
+  evidence forces a material architecture change

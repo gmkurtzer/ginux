@@ -45,10 +45,11 @@ content as a domain userspace that Ginus builds and tests can consume offline.
   demonstration.
 - [x] Revised the human demonstration to expose eight named checks, concrete
   compared values, enforced extraction isolation, and explicit non-coverage.
+- [x] Human reviewed the revised demonstration and accepted Gate 2.
 
 ## Remaining work
 
-- [ ] Human runs or reviews `make demo-gate-2` and accepts or rejects the gate.
+- None.
 
 ## Acceptance criteria
 
@@ -137,11 +138,11 @@ content as a domain userspace that Ginus builds and tests can consume offline.
 - Actual commits: `04a1faf` (preparation contract) and `f58892f` (offline
   preparation, verification, and demo tooling), and `5f460c5` (verification
   evidence); `f46f0c9` records pull request delivery; `7e89e7a` makes human
-  evidence explicit and strengthens extraction-isolation assertions
+  evidence explicit and strengthens extraction-isolation assertions; `2bf20cf`
+  records the revised checkpoint evidence
 
 ## Review policy and outcome
 
-Technically passed on 2026-11-03. Human checkpoint remains open because the
-prepared root becomes a dependency for all later compatibility evidence.
-Present `make demo-gate-2`, fresh evidence, and the pull request before
-acceptance.
+Passed and accepted on 2026-11-03 after the human reviewed the revised explicit
+eight-check demonstration. Gate closed at that checkpoint; pull request 2
+remains open and must not be merged or closed without explicit authorization.
