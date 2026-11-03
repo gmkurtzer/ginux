@@ -11,6 +11,10 @@ name = "ginus-core"
 version = "0.1.0"
 
 [[package]]
+name = "ginus-devices"
+version = "0.1.0"
+
+[[package]]
 name = "ginus-domain"
 version = "0.1.0"
 

@@ -37,12 +37,14 @@ DMA authority.
 
 ## Completed work
 
-- [ ] None; gate not started.
+- [x] Implement the bounded virtual device registry, Ginus-only descriptor
+  namespace, assignment visibility, exclusive backend ownership, revocation,
+  ioctl validation, and direct-mapping denial.
+- [x] Implement Ginus-owned console, null, zero, and deterministic random
+  frontends with unit verification.
 
 ## Remaining work
 
-- [ ] Implement virtual device registry and `/dev` projection.
-- [ ] Implement pseudo-device and console frontends.
 - [ ] Implement file-backed block and bounded partition behavior.
 - [ ] Implement the approved virtual network backend.
 - [ ] Add exclusivity, ioctl, mapping, teardown, and benchmark verification.
@@ -83,7 +85,12 @@ DMA authority.
 
 ## Evidence
 
-- Not run.
+- `cargo test -p ginus-devices` -> six registry, pseudo-device, block,
+  network, ownership, ioctl, mapping, and lifecycle tests passed.
+- `cargo clippy -p ginus-devices --all-targets -- -D warnings` -> passed.
+- `make test-devices test-block test-network` -> initial component targets
+  passed; block remains memory-backed until the next milestone and benchmark
+  targets are not yet implemented.
 
 ## Decisions and limitations
 
@@ -91,6 +98,10 @@ DMA authority.
   gate; this gate must not create a generic raw-device escape hatch.
 - The initial network backend is selected and documented during this gate
   without allowing an unmediated host syscall to complete.
+- The initial network backend is a bounded Ginus-owned packet queue. It has no
+  host socket, TUN/TAP descriptor, external connectivity, or unchecked control
+  path. This establishes the mediated frontend; later connectivity is outside
+  this gate.
 
 ## Delivery strategy
 
@@ -100,7 +111,7 @@ DMA authority.
   2026-11-03; never merge or close without explicit authorization
 - Planned commits: virtual device registry and pseudo-devices; block and
   partition backend; network backend; isolation and benchmark verification
-- Actual commits: pending
+- Actual commits: registry and pseudo-device foundation pending commit
 
 ## Review policy and outcome
 

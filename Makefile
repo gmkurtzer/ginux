@@ -7,7 +7,7 @@ PAYLOAD := target/$(X86_TARGET)/release/managed-payload
 BASELINE := target/$(X86_TARGET)/release/baseline-runner
 RUNTIME_FIXTURE := target/$(X86_TARGET)/release/runtime-fixture
 
-.PHONY: doctor host-image-fetch host-image-verify host-boot-test image-helper-fetch image-prepare domain-image-fetch domain-image-verify domain-image-prepare test-image test-oci-image test-oci-layers test-vfs test-native-vfs image-cache-clean build check test test-unit test-intercept test-runtime test-config test-domain bench-baseline demo-gate-1 demo-gate-2 demo-gate-3 demo-gate-4 demo-gate-5 clean
+.PHONY: doctor host-image-fetch host-image-verify host-boot-test image-helper-fetch image-prepare domain-image-fetch domain-image-verify domain-image-prepare test-image test-oci-image test-oci-layers test-vfs test-native-vfs image-cache-clean build check test test-unit test-intercept test-runtime test-config test-domain test-devices test-block test-network bench-baseline demo-gate-1 demo-gate-2 demo-gate-3 demo-gate-4 demo-gate-5 clean
 
 doctor:
 	@./scripts/doctor.sh
@@ -58,6 +58,7 @@ check:
 	cargo fmt --check
 	cargo clippy -p ginus-core --all-targets -- -D warnings
 	cargo clippy -p ginus-domain --all-targets -- -D warnings
+	cargo clippy -p ginus-devices --all-targets -- -D warnings
 	cargo clippy -p ginus-init --bin ginus --target $(X86_TARGET) --release -- -D warnings
 	cargo clippy -p managed-payload --bin managed-payload --target $(X86_TARGET) --release -- -D warnings
 	cargo clippy -p baseline-runner --bin baseline-runner --target $(X86_TARGET) --release -- -D warnings
@@ -69,6 +70,7 @@ check:
 test-unit:
 	cargo test -p ginus-core
 	cargo test -p ginus-domain
+	cargo test -p ginus-devices
 	cargo test -p ginus-runtime
 	cargo test -p ginus-vfs
 
@@ -83,6 +85,17 @@ test-config: build
 
 test-domain: build
 	@./scripts/with-rocky-host.sh ./scripts/test-domain.sh
+
+test-devices:
+	cargo test -p ginus-devices registry
+	cargo test -p ginus-devices pseudo_devices
+	cargo test -p ginus-devices conflicts_ioctls
+
+test-block:
+	cargo test -p ginus-devices block_
+
+test-network:
+	cargo test -p ginus-devices network_
 
 test-vfs: build domain-image-prepare
 	@./scripts/with-rocky-host.sh ./scripts/test-vfs.sh

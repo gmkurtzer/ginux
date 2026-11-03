@@ -152,6 +152,15 @@ scope, threat model, and invariants.
   https://github.com/gmkurtzer/usshim/pull/5 from dedicated branch
   `hdae/virtual-vfs-userspace`. It is not merged or closed.
 - Human accepted Gate 5 on 2026-11-03 and directed advancement to Gate 6.
+- Gate 6 began on `hdae/device-ownership`. The first milestone added the
+  bounded Ginus device registry, virtual descriptor namespace, assignment
+  visibility, exclusive ownership and revocation, console/null/zero/random
+  frontends, fail-closed ioctls and mappings, bounded partitions, and the
+  isolated packet-queue model.
+- `cargo test -p ginus-devices`, its strict clippy check, and the initial
+  `make test-devices test-block test-network` targets passed. The block unit
+  backend is still memory-backed; host file mediation and end-to-end QEMU
+  evidence remain incomplete.
 
 ## Open decisions and limitations
 
@@ -187,8 +196,9 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Create the Gate 6 branch and implement the virtual device registry plus
-Ginus-owned console, null, zero, and random frontends.
+Connect normalized Gate 6 configuration to the registry, add the mediated
+file-backed block adapter and QEMU functional tests, then benchmark block and
+network paths.
 
 ## Context recovery
 
@@ -198,8 +208,7 @@ Ginus-owned console, null, zero, and random frontends.
 - Active gate: Gate 6, device ownership and virtual hardware; authorized and
   starting on dedicated branch `hdae/device-ownership`
 - Last evidence: `make check`, `make test-unit`, `make test-oci-layers`,
-  `make test-oci-image`, and a post-assembly `make test-native-vfs` passed on
-  2026-11-03; the latest native run includes balanced negative probes and
-  supervisor-loss verification; `make demo-gate-5` and aggregate `make test`
-  also passed
+  `make test-oci-image`, and Gate 5 QEMU evidence passed before acceptance;
+  Gate 6 `cargo test -p ginus-devices`, strict clippy, and initial component
+  Make targets passed on 2026-11-03
 - Required human decision: none until the Gate 6 demonstration checkpoint
