@@ -43,6 +43,8 @@ content as a domain userspace that Ginus builds and tests can consume offline.
   missing-source, repeatability, offline-network, and clean-preservation checks.
 - [x] Documented artifact ownership, cleanup, offline operation, and the human
   demonstration.
+- [x] Revised the human demonstration to expose eight named checks, concrete
+  compared values, enforced extraction isolation, and explicit non-coverage.
 
 ## Remaining work
 
@@ -96,9 +98,12 @@ content as a domain userspace that Ginus builds and tests can consume offline.
 - `make clean` followed by cache checks and `make image-prepare` -> retained the
   prepared artifacts and manifest hash, removed temporary work, and reused the
   cache without extraction or network access.
-- `make demo-gate-2` -> printed Rocky Linux 10.2 identity, source and prepared
-  paths, the stable manifest hash, corruption rejection, disabled helper
-  networking, and `GATE2: PASS`.
+- Revised `make demo-gate-2` -> reported eight individually named checks with
+  source size/checksum, artifact sizes, Rocky identity, runtime inputs,
+  provenance, both repeat-manifest hashes, cache/Git policy, and negative-path
+  results. Extraction asserted a read-only source mount, no Ethernet interface,
+  and no default route. The summary explicitly excluded Ginus execution, VFS,
+  and systemd boot from Gate 2; all checks passed.
 - `make test` -> formatting, lint, unit tests, Gate 1 Rocky interception
   regression, and Gate 2 offline repeatability tests all passed; the Rocky VM
   and extraction work were cleaned up.
@@ -131,7 +136,8 @@ content as a domain userspace that Ginus builds and tests can consume offline.
   Make targets; offline, corruption, and repeatability verification
 - Actual commits: `04a1faf` (preparation contract) and `f58892f` (offline
   preparation, verification, and demo tooling), and `5f460c5` (verification
-  evidence); `f46f0c9` records pull request delivery
+  evidence); `f46f0c9` records pull request delivery; `7e89e7a` makes human
+  evidence explicit and strengthens extraction-isolation assertions
 
 ## Review policy and outcome
 

@@ -74,6 +74,11 @@ scope, threat model, and invariants.
   extraction produced manifest SHA-256
   `49e69bc6209b9d8ed084e221924b633c3126ccaa9a2f920bb8464249a5f66721`;
   corrupt and missing sources were rejected.
+- After human feedback that the original demo was opaque, the revised
+  `make demo-gate-2` reported eight named checks and their concrete values,
+  asserted a read-only source mount plus no helper Ethernet/default route, and
+  explicitly stated that Ginus execution, VFS, and systemd boot are not Gate 2
+  evidence. The revised demonstration passed on 2026-11-03.
 
 ## Open decisions and limitations
 
@@ -102,7 +107,7 @@ Stop for human acceptance after review of `make demo-gate-2` and pull request
 - Reload after context shift: required
 - Active gate: Gate 2, Rocky domain-userspace pipeline; technically passed and
   delivered in pull request 2, human checkpoint pending
-- Last evidence: Gate 2 demo and aggregate regression suite passed on
-  2026-11-03
+- Last evidence: revised, explicit eight-check Gate 2 demo passed on
+  2026-11-03; prior aggregate regression suite also passed
 - Required human decision: accept or reject Gate 2 after reviewing the demo
   and pull request

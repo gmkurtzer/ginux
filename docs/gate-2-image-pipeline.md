@@ -51,3 +51,11 @@ The demo verifies the pinned source, reports its Rocky identity, prepares it
 without network access, compares two independently generated content
 manifests, rejects a controlled corrupt source, and leaves the prepared cache
 available for later gates.
+
+The output reports eight named checks: pinned source identity, prepared
+artifacts, Rocky userspace identity, required runtime inputs, provenance,
+repeatability, cache/Git policy, and corrupt/missing-source failure paths. It
+also verifies that the extraction mount is read-only and that the helper has
+neither an Ethernet interface nor a default route. The final summary explicitly
+states that Gate 2 does not test Ginus execution, Ginus VFS behavior, or booting
+systemd under Ginus; those belong to later gates.
