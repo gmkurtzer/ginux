@@ -3,7 +3,7 @@
 ## Strategy
 
 Build Ginus from the security boundary outward. First prove that unmodified
-x86-64 code can run without direct access to host syscalls. Then add a cached
+x86-64 code can run without unmediated host-syscall effects. Then add a cached
 Rocky userspace, domain configuration, Linux runtime behavior, virtual kernel
 objects, systemd compatibility, explicit contract controls, performance
 evidence, and boundary hardening.
@@ -43,9 +43,10 @@ replace it.
    dispatch, and small unmodified programs.
 4. **Domain configuration and lifecycle**: versioned configuration,
    normalization, create/start/inspect/stop, resources, and failure behavior.
-5. **OCI-backed virtual VFS and dynamic userspace**: explicit OCI acquisition,
-   verified cached layers, virtual descriptors, immutable root and writable
-   overlay, dynamic loader behavior, and a Rocky shell.
+5. **OCI-backed virtual VFS and native dynamic userspace**: explicit OCI
+   acquisition, verified cached layers, virtual descriptors, immutable root and
+   writable overlay, and a Rocky shell executed by the host under continuous
+   `PTRACE_SYSEMU` supervision.
 6. **Device ownership and virtual hardware**: virtual `/dev`, console, block
    or bounded partition, virtual networking, exclusivity, revocation, and
    device-path benchmarks.
@@ -134,7 +135,9 @@ define their expected result.
 
 ## Deferred roadmap
 
-After the initial twelve gates, likely milestones include multiple concurrent
+After the initial twelve gates, Gate 14 preserves the Unicorn Engine execution
+backend as a concrete alternative to native `PTRACE_SYSEMU`. Other likely
+milestones include multiple concurrent
 domains, conventional containers within a domain, network and storage backend
 expansion, physical-device assignment with a separately reviewed IOMMU/VFIO
 model, non-x86 architectures, live lifecycle controls, distribution expansion,

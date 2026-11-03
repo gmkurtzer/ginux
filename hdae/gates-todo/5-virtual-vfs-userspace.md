@@ -22,10 +22,11 @@ Ginus-owned immutable base and domain-local writable overlay.
 - Apply OCI whiteout and opaque-directory semantics required by the selected
   image and present the assembled root with a disposable domain-local writable
   overlay.
-- Consume OCI launch metadata while keeping Ginus as the execution runtime;
-  do not invoke an external OCI runtime for managed code.
-- Implement ELF interpreter loading and the minimum file and memory behavior
-  needed by the selected Rocky dynamic program and shell fixtures.
+- Consume OCI launch metadata while keeping Ginus as the supervising userspace
+  kernel; do not invoke an external OCI runtime for managed code.
+- Pass the selected ELF and image-provided dynamic loader to the host kernel for
+  native execution under continuous `PTRACE_SYSEMU` supervision. Every syscall
+  must stop before host effect and resolve through Ginus dispatch.
 - Prevent managed code from learning or receiving host paths and descriptors as
   authority.
 
@@ -58,7 +59,10 @@ Ginus-owned immutable base and domain-local writable overlay.
 
 - [ ] Generalize deterministic assembly beyond the selected single-layer image
   and add synthetic OCI whiteout and opaque-directory tests.
-- [ ] Add dynamic ELF interpreter and library loading support.
+- [ ] Enable the native `ptrace-sysemu` backend and controlled OCI execution
+  view for the image-provided dynamic loader, libraries, and Bash.
+- [ ] Add fail-closed supervision-loss, unexpected-stop, and attempted direct
+  syscall continuation tests.
 - [ ] Add isolation, traversal, overlay, malformed-file, and cleanup tests.
 
 ## Acceptance criteria
@@ -71,6 +75,10 @@ Ginus-owned immutable base and domain-local writable overlay.
   access; a missing or corrupt cached object fails closed with a useful error.
 - Managed execution is performed by Ginus, and the demonstration verifies that
   no external OCI runtime launches the domain workload.
+- The host kernel loads and natively executes the selected ELF, but every
+  managed syscall is observed before effect and no direct continuation occurs.
+- Tracee escape, unexpected ptrace state, or supervisor loss terminates the
+  domain without allowing an unsupervised workload to continue.
 - Path traversal, symlink loops, invalid descriptors, permission failures, and
   overlay deletion behave deterministically for the documented profile.
 - Managed descriptor values cannot be used as host descriptors, and host paths
@@ -120,10 +128,13 @@ Ginus-owned immutable base and domain-local writable overlay.
 - The selected Rocky image currently has one filesystem layer. Multi-layer
   replacement, whiteout, and opaque-directory behavior remains mandatory
   before Gate 5 can pass.
-- Open implementation decision: use Unicorn Engine 2 as Ginus's x86-64 CPU
-  interpreter core while retaining Ginus-owned memory, VFS, syscall dispatch,
-  policy, and lifecycle. This would replace expansion of the small handcrafted
-  Gate 3 instruction decoder, not delegate OCI runtime or host syscall access.
+- Gate 5 uses native host ELF execution under `PTRACE_SYSEMU`. This deliberately
+  exposes the host ELF loader, memory manager, faults, signals, scheduler, and
+  ptrace implementation; Ginus narrows syscall effects but does not claim a
+  userspace-only CPU or memory boundary on this path.
+- Unicorn Engine 2 is preserved as deferred Gate 14. It is the alternative path
+  for moving CPU and memory execution back into Ginus without discarding the
+  OCI, VFS, contract, or lifecycle work from this gate.
 
 ## Delivery strategy
 

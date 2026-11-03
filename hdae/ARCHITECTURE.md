@@ -22,13 +22,13 @@ Ginus.
 
 ## Security invariants
 
-1. Managed execution cannot invoke the host syscall ABI directly.
-2. Every managed syscall enters one central Ginus dispatch path before any host
-   effect occurs.
+1. No managed syscall instruction may complete as an unmediated host syscall.
+2. Every managed syscall stops before execution and enters one central Ginus
+   dispatch path before any host effect occurs.
 3. Dispatch first resolves the domain contract, then emulates, performs a
    mediated host operation, or denies the request.
 4. Managed pointers, structures, strings, and ioctl payloads are copied through
-   the domain memory model and validated before use.
+   the active backend's controlled memory-access path and validated before use.
 5. Managed descriptor numbers resolve only to Ginus objects. Host descriptors
    are never installed into or disclosed to managed code.
 6. `/dev`, `/proc`, `/sys`, cgroups, mounts, process identities, and machine
@@ -58,22 +58,31 @@ Development and verification run on a macOS arm64 host through QEMU TCG
 emulating a normally booted Rocky Linux 10 x86-64 host. Host systemd remains
 real PID 1 and Ginus runs as an ordinary process inside that environment.
 Ginus acts as the application kernel for its managed userspace rather than
-booting another guest Linux kernel beneath the domain. The security-focused
-baseline is a Ginus x86-64 instruction interpreter: managed registers and
-memory are Ginus data, and a managed `syscall` instruction becomes an internal
-dispatch event without entering the host kernel. Gate 1 `PTRACE_SYSEMU`
-evidence remains a prototype for a possible performance-focused backend, not
-the secure baseline. KVM acceleration is deferred and is not an initial
-acceptance requirement.
+booting another guest Linux kernel beneath the domain. Gate 5 uses native
+x86-64 execution supervised by `PTRACE_SYSEMU`: the host kernel loads the ELF
+and its interpreter, the host CPU executes instructions, and every managed
+syscall stops before its kernel implementation runs. Ginus may then emulate,
+mediate, or deny the operation and resumes only with `PTRACE_SYSEMU`; losing
+supervision terminates the tracee and fails the domain closed. The Gate 1 proof
+established that this mechanism works inside the QEMU TCG Rocky host.
+
+This backend intentionally trusts more host-kernel surface than a userspace CPU
+interpreter. ELF loading, virtual memory, page faults, signals, scheduling, and
+ptrace remain host-kernel responsibilities and possible attack surface. The
+Gate 3 handcrafted interpreter remains evidence for a stricter profile but is
+not the Gate 5 compatibility path. A Unicorn Engine backend is explicitly
+deferred as the alternative path for returning CPU and memory execution to
+Ginus while retaining the same contract dispatcher. KVM acceleration remains
+outside the initial milestone.
 
 ### Domain memory and task model
 
-Ginus owns managed address spaces, mappings, executable loading, task and
-thread identities, scheduling-facing state, signals, clocks, credentials,
-capabilities, and lifecycle. Managed PIDs and addresses are not authority to
-host processes or memory. In the interpreter backend, managed virtual addresses
-index only validated Ginus-owned memory and permission metadata; they are never
-dereferenced as host pointers.
+Ginus owns the domain's virtual identities, descriptors, devices, contract, and
+lifecycle. With `PTRACE_SYSEMU`, host tracees provide native address spaces and
+tasks under continuous Ginus supervision; their host identities and addresses
+are never exposed as domain authority. Ginus copies and validates tracee memory
+before mediation. In interpreter backends, managed virtual addresses instead
+index only Ginus-owned memory and permission metadata.
 
 ### Contract dispatcher
 
@@ -97,8 +106,9 @@ acquisition operation pulls and verifies its manifest, configuration, and
 layers into a host-owned cache outside Git. Ginus deterministically assembles
 the layers into an immutable indexed virtual root and adds a bounded,
 domain-local writable overlay. The OCI configuration supplies launch metadata,
-but Ginus—not `runc`, `crun`, `containerd`, or another OCI runtime—loads and
-executes the domain userspace through its own execution kernel. Managed code
+but Ginus—not `runc`, `crun`, `containerd`, or another OCI runtime—constructs
+the execution view and supervises native loading through `PTRACE_SYSEMU`.
+Managed code
 receives neither host paths nor host descriptors. Ordinary domain starts and
 tests require no network access.
 
@@ -163,3 +173,8 @@ an explicit acquisition operation, cached outside Git, assembled into an
 immutable indexed virtual root, and paired with a bounded in-memory write
 overlay. The host continues to boot independently from its Rocky cloud QCOW2.
 Human approval was recorded on 2026-11-03.
+
+Gate 5 selected native host ELF execution under `PTRACE_SYSEMU` as its dynamic
+userspace path with human approval on 2026-11-03. The host execution surface is
+an explicit limitation. Unicorn Engine remains a deferred alternative backend,
+not a discarded design.

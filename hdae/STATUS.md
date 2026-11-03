@@ -115,9 +115,11 @@ scope, threat model, and invariants.
 
 ## Open decisions and limitations
 
-- Human direction selected the security-focused full x86-64 interpreter as the
-  Gate 3 baseline. Gate 4 exposes execution profile/backend selection but
-  rejects the performance profile until a separately reviewed backend exists.
+- Human direction selected the security-focused handcrafted x86-64 interpreter
+  for Gate 3 and accepted its evidence. On 2026-11-03 the human selected native
+  host ELF execution under `PTRACE_SYSEMU` for Gate 5 compatibility. The host
+  handles instructions, ELF loading, memory, faults, signals, and scheduling;
+  Ginus must stop every syscall before effect and fail closed on lost tracing.
 - Rocky host image is pinned to official Rocky 10.2 GenericCloud build
   10.2-20260525.0. Gate 2 selected a pinned, network-disabled
   Docker/LinuxKit helper that mounts a temporary raw conversion read-only;
@@ -129,16 +131,15 @@ scope, threat model, and invariants.
   is not authorized in the current planning task.
 - The selected Rocky OCI image has one layer. General multi-layer whiteout and
   opaque-directory assembly remains required before Gate 5 passes.
-- Running the real Rocky dynamic loader and Bash requires a substantially more
-  complete x86-64 execution engine than Gate 3's handcrafted fixture decoder.
-  The recommended implementation is Unicorn Engine 2 with its x86 syscall
-  hook, while Ginus retains memory ownership and all syscall/VFS dispatch.
+- Unicorn Engine 2 is not part of the Gate 5 path. It is preserved as deferred
+  Gate 14, with reconsideration required after the native compatibility path is
+  demonstrated and before production-boundary claims are made.
 
 ## Exact next action
 
-Obtain human direction on integrating Unicorn Engine 2 as Ginus's CPU
-interpreter core. If approved, add the backend without changing the no-direct-
-host-syscall invariant, then implement dynamic-loader VFS/syscall support.
+Enable the existing `ptrace-sysemu` configuration backend and launch the Rocky
+dynamic loader and Bash from the controlled OCI execution view while ensuring
+every syscall stops before host effect.
 
 ## Context recovery
 
@@ -149,5 +150,4 @@ host-syscall invariant, then implement dynamic-loader VFS/syscall support.
   progress on `hdae/virtual-vfs-userspace`
 - Last evidence: Gate 4 demo and complete aggregate regression suite passed on
   2026-11-03
-- Required human decision: approve or reject Unicorn Engine 2 as the x86-64
-  interpreter core for real Rocky dynamic userspace
+- Required human decision: none until the next Gate 5 demonstration checkpoint

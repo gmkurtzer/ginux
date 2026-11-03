@@ -14,9 +14,10 @@ reduce parts of that surface, but managed processes still execute permitted
 system calls directly against the host Linux kernel. A compromised process can
 therefore attempt to exploit any host-kernel path that remains reachable.
 
-Ginus interposes a userspace-kernel boundary. Managed code cannot issue host
-system calls directly. Ginus intercepts each request and either emulates it,
-performs a validated mediated operation through the host, or denies it. The
+Ginus interposes a userspace-kernel boundary. A managed syscall may not complete
+as an unmediated host syscall. Ginus intercepts each request before its host
+effect and either emulates it, performs a validated mediated operation through
+the host, or denies it. The
 goal is to make compatibility an explicit, configurable security contract
 rather than an all-or-nothing inheritance from the host kernel.
 
@@ -42,7 +43,8 @@ starts and tests do not require network access.
 
 The milestone succeeds when:
 
-1. managed x86-64 code cannot execute host Linux system calls directly;
+1. no managed x86-64 syscall completes against the host without a Ginus
+   contract decision;
 2. systemd reproducibly reaches the defined multi-user readiness marker;
 3. the domain sees Ginus-owned `/dev`, `/proc`, `/sys`, and cgroup interfaces;
 4. domain configuration selects its image, resources, devices, contract, and
@@ -74,6 +76,8 @@ solved.
   Ginus runs inside it as an ordinary process or service.
 - An emulation-compatible syscall-interception mechanism selected by Gate 1;
   KVM acceleration is not required by the initial milestone.
+- Native x86-64 ELF execution supervised with `PTRACE_SYSEMU`, with the host
+  kernel performing instruction execution and Ginus controlling syscall effects.
 - One Rocky Linux 10 systemd domain from a cached, digest-pinned OCI image.
 - Linux ABI interception, emulation, mediated host operations, denial, and
   audit logging.

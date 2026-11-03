@@ -3,7 +3,7 @@
 ## Source
 
 Core Ginus product requirement: each domain exposes an explicit, versioned,
-configurable Linux contract with logging and no direct host syscall path.
+configurable Linux contract with logging and no unmediated host syscall effect.
 
 ## Goal
 

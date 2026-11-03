@@ -56,7 +56,7 @@ honest security and compatibility boundary for the initial milestone.
   evidence.
 - Bounded fuzz runs complete for the approved duration and corpus without an
   untriaged crash, hang, memory-safety failure, or invariant violation.
-- Escape fixtures cannot directly invoke host syscalls, use managed values as
+- Escape fixtures cannot complete unmediated host syscalls, use managed values as
   host descriptors, observe unassigned host state, exceed block ranges, weaken
   the contract, or retain resources after teardown.
 - Ginus drops or confines unneeded host capabilities, descriptors, paths, and
