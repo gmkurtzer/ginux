@@ -131,7 +131,7 @@ content as a domain userspace that Ginus builds and tests can consume offline.
   Make targets; offline, corruption, and repeatability verification
 - Actual commits: `04a1faf` (preparation contract) and `f58892f` (offline
   preparation, verification, and demo tooling), and `5f460c5` (verification
-  evidence); final delivery checkpoint commit pending
+  evidence); `f46f0c9` records pull request delivery
 
 ## Review policy and outcome
 
