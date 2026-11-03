@@ -3454,10 +3454,7 @@ pub(crate) fn protect_current_linux_range_read_only(address: u64, length: u64) -
         let value = unsafe { leaf.read() };
         if value & (PRESENT | USER | WRITABLE | NO_EXECUTE)
             != PRESENT | USER | WRITABLE | NO_EXECUTE
-            || !memory::frame_addresses_owned_by(
-                memory::FrameOwner::KERNEL,
-                &[value & ADDRESS_MASK],
-            )
+            || live_linux_mapping_frame(value & ADDRESS_MASK).is_none()
         {
             return false;
         }
@@ -4152,13 +4149,6 @@ pub(crate) fn complete_current_linux_process_snapshot(
     mappings: &mut [cpu::LinuxActiveImageMapping; cpu::LINUX_PROCESS_MAPPING_LIMIT],
     mapping_count: &mut usize,
 ) -> bool {
-    fn live_mapping_frame(address: u64) -> Option<memory::FrameLease> {
-        memory::live_frame_lease(memory::FrameOwner::KERNEL, address).or_else(|| {
-            memory::FrameLease::from_parts(address, 1)
-                .filter(|frame| memory::frame_lease_is_runtime(*frame))
-        })
-    }
-
     fn walk(
         root: u64,
         hierarchy: &mut [memory::FrameLease; cpu::LINUX_PROCESS_HIERARCHY_LIMIT],
@@ -4219,7 +4209,8 @@ pub(crate) fn complete_current_linux_process_snapshot(
                     .iter()
                     .any(|frame| frame.address() == child)
                 {
-                    let Some(frame) = live_mapping_frame(child) else {
+                    let Some(frame) = memory::live_frame_lease(memory::FrameOwner::KERNEL, child)
+                    else {
                         return false;
                     };
                     let Some(slot) = hierarchy.get_mut(*hierarchy_count) else {
@@ -4255,7 +4246,7 @@ pub(crate) fn complete_current_linux_process_snapshot(
                 existing.dontfork = value & LINUX_RUNTIME_DONTFORK != 0;
                 continue;
             }
-            let Some(frame) = live_mapping_frame(frame_address) else {
+            let Some(frame) = live_linux_mapping_frame(frame_address) else {
                 return false;
             };
             let Some(slot) = mappings.get_mut(*mapping_count) else {
@@ -4617,11 +4608,7 @@ pub(crate) fn copy_to_linux_process(
             return false;
         }
         let frame_address = value & ADDRESS_MASK;
-        let frame =
-            memory::live_frame_lease(memory::FrameOwner::KERNEL, frame_address).or_else(|| {
-                memory::FrameLease::from_parts(frame_address, 1)
-                    .filter(|frame| memory::frame_lease_is_runtime(*frame))
-            });
+        let frame = live_linux_mapping_frame(frame_address);
         let Some(target) = frame.and_then(memory::FrameLease::direct_map_address) else {
             crate::serial_write("ginux: console input frame is unavailable\r\n");
             return false;
@@ -5259,7 +5246,7 @@ pub(crate) fn current_linux_mapping_matches(
     if address >= 1 << 47
         || !address.is_multiple_of(PAGE_SIZE as u64)
         || writable && executable
-        || memory::frame_owner(frame).is_none()
+        || !(memory::frame_owner(frame).is_some() || memory::frame_lease_is_runtime(frame))
     {
         return false;
     }
@@ -5295,11 +5282,7 @@ pub(crate) fn current_linux_active_mapping(address: u64) -> Option<cpu::LinuxAct
         return None;
     }
     let frame_address = value & ADDRESS_MASK;
-    let frame =
-        memory::live_frame_lease(memory::FrameOwner::KERNEL, frame_address).or_else(|| {
-            memory::FrameLease::from_parts(frame_address, 1)
-                .filter(|frame| memory::frame_lease_is_runtime(*frame))
-        })?;
+    let frame = live_linux_mapping_frame(frame_address)?;
     let runtime = current_linux_runtime_page(page);
     Some(cpu::LinuxActiveImageMapping {
         address: page as usize,
@@ -5617,7 +5600,7 @@ fn linux_runtime_page_from_value(value: u64) -> LinuxRuntimePage {
         return LinuxRuntimePage::EMPTY;
     }
     let frame = (value & ADDRESS_MASK != 0)
-        .then(|| memory::live_frame_lease(memory::FrameOwner::KERNEL, value & ADDRESS_MASK))
+        .then(|| live_linux_mapping_frame(value & ADDRESS_MASK))
         .flatten();
     let protection = if value & PRESENT != 0 || value & LINUX_RUNTIME_DEMAND != 0 {
         1 | if value & (WRITABLE | LINUX_RUNTIME_COW) != 0 {
@@ -5639,6 +5622,13 @@ fn linux_runtime_page_from_value(value: u64) -> LinuxRuntimePage {
         dontfork: value & LINUX_RUNTIME_DONTFORK != 0,
         wipeonfork: value & LINUX_RUNTIME_WIPEONFORK != 0,
     }
+}
+
+fn live_linux_mapping_frame(address: u64) -> Option<memory::FrameLease> {
+    memory::live_frame_lease_any_owner(address).or_else(|| {
+        memory::FrameLease::from_parts(address, 1)
+            .filter(|frame| memory::frame_lease_is_runtime(*frame))
+    })
 }
 
 fn ensure_current_linux_leaf(address: u64) -> Option<*mut u64> {
@@ -5712,7 +5702,7 @@ pub(crate) fn refresh_current_linux_runtime_translation(
     let value = unsafe { entry.read_volatile() };
     let frame = value & ADDRESS_MASK;
     if !linux_runtime_leaf_grants(value, write, execute)
-        || memory::live_frame_lease(memory::FrameOwner::KERNEL, frame).is_none()
+        || live_linux_mapping_frame(frame).is_none()
     {
         return false;
     }
@@ -5740,6 +5730,23 @@ pub(crate) fn verify_linux_runtime_translation_permissions() -> bool {
         && linux_runtime_leaf_grants(executable, false, true)
         && !linux_runtime_leaf_grants(executable & !PRESENT, false, true)
         && !linux_runtime_leaf_grants(executable & !USER, false, true)
+}
+
+pub(crate) fn verify_linux_domain_owned_runtime_page_metadata() -> bool {
+    let Some(owner) = memory::FrameOwner::domain(0x0000_ffff_fffe_0003) else {
+        return false;
+    };
+    let Some([frame]) = memory::allocate_frames_with_owner_limit::<1>(owner, 1) else {
+        return false;
+    };
+    let page =
+        linux_runtime_page_from_value(frame.address() | PRESENT | USER | WRITABLE | NO_EXECUTE);
+    let recognized = page.occupied
+        && page.frame == Some(frame)
+        && page.protection == 3
+        && !page.file
+        && memory::frame_owner(frame) == Some(owner);
+    recognized && memory::scrub_and_release_frames(owner, &[frame])
 }
 
 pub(crate) fn current_linux_user_page_count() -> Option<usize> {
@@ -6281,10 +6288,10 @@ pub(crate) fn release_current_linux_runtime_mappings_preserving(
                             && !memory::frame_lease_is_runtime(*frame)
                             && !preserve_frame(*frame)
                     }) {
-                        if !memory::scrub_and_release_frames(
-                            memory::FrameOwner::KERNEL,
-                            core::slice::from_ref(&frame),
-                        ) {
+                        let Some(owner) = memory::frame_owner(frame) else {
+                            return false;
+                        };
+                        if !memory::scrub_and_release_frames(owner, core::slice::from_ref(&frame)) {
                             return false;
                         }
                     }
@@ -6369,10 +6376,7 @@ pub(crate) fn retire_linux_child_address_space(root: memory::FrameLease) -> bool
             }
             if value & PRESENT != 0 {
                 let address = value & ADDRESS_MASK;
-                if value & USER == 0
-                    || !(memory::live_frame_lease(memory::FrameOwner::KERNEL, address).is_some()
-                        || memory::frame_address_is_runtime(address))
-                {
+                if value & USER == 0 || live_linux_mapping_frame(address).is_none() {
                     return false;
                 }
             } else if value & (LINUX_RUNTIME_RESERVED | USER) != LINUX_RUNTIME_RESERVED | USER {

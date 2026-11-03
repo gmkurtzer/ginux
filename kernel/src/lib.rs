@@ -1855,6 +1855,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             kernel_fail("ginux: Linux translation recovery permissions invalid\r\n");
         }
         serial_write("ginux: Linux translation recovery permissions validated\r\n");
+        if !address_space::verify_linux_domain_owned_runtime_page_metadata() {
+            kernel_fail("ginux: domain-owned Linux runtime page metadata invalid\r\n");
+        }
+        serial_write("ginux: domain-owned Linux runtime page metadata validated\r\n");
         if !arch::x86_64::cpu::verify_cross_cpu_linux_runtime_mechanisms() {
             kernel_fail("ginux: cross-CPU Linux runtime mechanisms invalid\r\n");
         }
