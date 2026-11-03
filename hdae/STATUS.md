@@ -2,10 +2,12 @@
 
 ## Current checkpoint
 
-- Gate 1 is technically passed under the corrected ordinary-host-process
-  architecture on branch `hdae/foundation-interception` and delivered in
-  revised https://github.com/gmkurtzer/usshim/pull/1. Human acceptance is
-  pending.
+- Gate 1 is accepted and closed under the corrected ordinary-host-process
+  architecture. It remains delivered in open
+  https://github.com/gmkurtzer/usshim/pull/1 and is not merged.
+- Gate 2 is active on the dedicated `hdae/rocky-image-pipeline` branch. Until
+  Gate 1 is merged, Gate 2 is stacked on its accepted branch state while its
+  intended base remains `main`.
 - Authoritative name: Ginus (Ginux Userspace).
 - Runtime isolation unit: domain.
 - Policy unit: versioned contract.
@@ -14,7 +16,6 @@
 - The twelve remaining gates are authorized as an ordered batch, but each
   remains a human checkpoint requiring a working demonstration and explicit
   acceptance.
-- Gate 2 must not begin until Gate 1 is explicitly accepted.
 
 ## Governing outcome and invariants
 
@@ -62,6 +63,10 @@ scope, threat model, and invariants.
   host execution, `uname` denied with `EPERM`, no direct-write marker, matched
   Rocky-host benchmark samples, clean QEMU shutdown, and no remaining PID file
   or VM process.
+- Human accepted Gate 1 on 2026-11-03 and directed advancement to Gate 2.
+- Final Gate 1 verification after removing Ginus numeric host-PID checks passed
+  `make check`, `make test-unit`, and `make demo-gate-1`; normal host PID 1
+  validation remains only in the Rocky boot harness.
 
 ## Open decisions and limitations
 
@@ -75,14 +80,17 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Stop for human acceptance of revised Gate 1 after the reviewer runs or reviews
-`make demo-gate-1`. Do not begin Gate 2 before explicit acceptance.
+Create the Gate 2 branch from the accepted Gate 1 state, select and prove an
+offline QCOW2 extraction backend, then implement deterministic preparation,
+image validation, corruption checks, and `make demo-gate-2`.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: revised Gate 1 technically passed; human acceptance pending
-- Last evidence: full clean Rocky-host Gate 1 command set passed on 2026-11-03
-- Required human decision: accept or reject revised Gate 1 after demonstration
+- Active gate: Gate 2, Rocky domain-userspace pipeline; implementation starting
+- Last evidence: final PID-independent Gate 1 checks and demo passed on
+  2026-11-03; Gate 1 accepted
+- Required human decision: none until the Gate 2 checkpoint unless its
+  preparation backend requires a material architecture change

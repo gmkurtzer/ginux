@@ -61,11 +61,13 @@ syscall ABI directly.
   verified host systemd health after Ginus exits.
 - [x] Replaced the initramfs harness and documentation with the Rocky host
   workflow and a cleanup-checked human demonstration.
+- [x] Removed numeric host-PID checks from Ginus and the benchmark runner;
+  normal host boot remains a harness property rather than a runtime contract.
+- [x] Human reviewed the corrected design and advanced the project to Gate 2.
 
 ## Remaining work
 
-- [ ] Human runs or reviews revised `make demo-gate-1` and accepts or rejects
-  the gate.
+- None.
 
 ## Acceptance criteria
 
@@ -170,9 +172,14 @@ syscall ABI directly.
   ns; namespace-container CPU 9,172,046 ns, syscall 45,528,028 ns, process
   42,512,613 ns.
 - Revised `make demo-gate-1` -> showed Rocky/systemd readiness, Ginus as a
-  non-PID-1 process, expected emulated/mediated/denied decisions, direct-bypass
-  negative evidence, post-Ginus host health, benchmark evidence, and clean VM
-  shutdown; exited zero with no PID file or QEMU process remaining.
+  normal host process, expected emulated/mediated/denied decisions,
+  direct-bypass negative evidence, post-Ginus host health, benchmark evidence,
+  and clean VM shutdown; exited zero with no PID file or QEMU process
+  remaining.
+- Final `make check && make test-unit` and `make demo-gate-1` after removing
+  numeric host-PID assumptions -> passed. The demo printed no Ginus PID claim,
+  preserved all interception evidence, left host systemd healthy, and cleaned
+  up QEMU.
 
 ## Decisions and limitations
 
@@ -203,13 +210,14 @@ syscall ABI directly.
   (benchmark controls and design evidence), `59d8130` (verification evidence),
   `f1d52b3` (delivery checkpoint), `8c8df2c` (exploit-gate removal), `200934c`
   (host architecture correction), `0618630` (ordinary-process Rocky harness),
-  and the pending revised-evidence commit. The first two planned implementation
-  commits were combined because the scaffold and executable proof formed one
-  buildable change.
+  `bf3bf66` (revised evidence), and `ba16386` (remove numeric host-PID
+  assumptions). The first two planned implementation commits were combined
+  because the scaffold and executable proof formed one buildable change.
 
 ## Review policy and outcome
 
-Technically passed under the corrected architecture on 2026-11-03 and delivered
-in revised pull request 1. Human acceptance remains pending. Present the
-revised `make demo-gate-1`, fresh evidence, and the pull request, then stop for
-acceptance before closing the gate or beginning Gate 2.
+Passed under the corrected architecture and delivered in revised pull request
+1. The human accepted the result on 2026-11-03 by confirming the PID-independent
+design and directing work to move to Gate 2. Gate closed at that checkpoint;
+pull request 1 remains open and must not be merged or closed without explicit
+authorization.
