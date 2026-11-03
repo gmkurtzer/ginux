@@ -3467,7 +3467,11 @@ pub(crate) fn protect_current_linux_range_read_only(address: u64, length: u64) -
         let value = unsafe { leaf.read() };
         unsafe {
             leaf.write(value & !WRITABLE);
-            asm!("invlpg [{}]", in(reg) page, options(nostack, preserves_flags));
+            if !smp::invalidate_runtime_translation(page) {
+                leaf.write(value);
+                let _ = smp::invalidate_runtime_translation(page);
+                return false;
+            }
         }
     }
     true
