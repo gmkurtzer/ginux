@@ -55,6 +55,8 @@ offline.
   target is documented separately and is not part of normal testing.
 - No downloaded QCOW2, prepared root, or large generated artifact is tracked by
   Git.
+- `make demo-gate-2` lets a human verify the pinned image, inspect its identity,
+  prepare it offline from cache, and observe corruption rejection.
 
 ## Verification plan
 
@@ -70,6 +72,8 @@ offline.
   -> exits zero without contacting a remote service.
 - Repeat preparation -> content manifests compare equal under the documented
   determinism rules.
+- `make demo-gate-2` -> performs the documented cache, identity, offline
+  preparation, and corruption checks and exits zero.
 
 ## Evidence
 
@@ -85,7 +89,8 @@ offline.
 
 - Working branch: `hdae/rocky-image-pipeline`
 - Intended base: `main`
-- Pull request: intended; do not push or open without explicit authorization
+- Pull request: intended; dedicated branch push and PR creation authorized on
+  2026-11-03; never merge or close without explicit authorization
 - Planned commits: pinned image manifest and cache contract; preparation tools
   and Make targets; offline and corruption verification
 - Actual commits: pending
@@ -93,5 +98,5 @@ offline.
 ## Review policy and outcome
 
 Human checkpoint because the selected supply-chain source and root preparation
-become dependencies for all later compatibility evidence.
-
+become dependencies for all later compatibility evidence. Present
+`make demo-gate-2`, fresh evidence, and the pull request before acceptance.

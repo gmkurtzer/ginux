@@ -54,6 +54,8 @@ domain-local writable overlay.
   are absent from the managed ABI and audit output unless explicitly sanitized.
 - Domain teardown releases open objects and removes its disposable overlay.
 - Earlier runtime, configuration, image, and interception tests remain passing.
+- `make demo-gate-5` lets a human run the selected Rocky dynamic program and
+  shell, modify the overlay, and verify the immutable base remains unchanged.
 
 ## Verification plan
 
@@ -62,6 +64,8 @@ domain-local writable overlay.
 - `make test-runtime` -> static and selected dynamic Rocky fixtures pass.
 - Cached-image integrity comparison before and after VFS tests -> unchanged.
 - `make test` with network disabled -> exits zero.
+- `make demo-gate-5` -> performs the documented dynamic-userspace and overlay
+  isolation demonstration, cleans up, and exits zero.
 
 ## Evidence
 
@@ -78,7 +82,8 @@ domain-local writable overlay.
 
 - Working branch: `hdae/virtual-vfs-userspace`
 - Intended base: `main`
-- Pull request: intended; do not push or open without explicit authorization
+- Pull request: intended; dedicated branch push and PR creation authorized on
+  2026-11-03; never merge or close without explicit authorization
 - Planned commits: virtual path and descriptor model; Rocky base and overlay;
   dynamic loader compatibility and isolation tests
 - Actual commits: pending
@@ -86,5 +91,5 @@ domain-local writable overlay.
 ## Review policy and outcome
 
 Human checkpoint because host-backed files are a security boundary and the
-accepted VFS model constrains later device and systemd behavior.
-
+accepted VFS model constrains later device and systemd behavior. Present
+`make demo-gate-5`, fresh evidence, and the pull request before acceptance.

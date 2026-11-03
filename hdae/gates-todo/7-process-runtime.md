@@ -55,6 +55,8 @@ early helper fixtures.
 - Blocking operations can be interrupted and domain shutdown can terminate all
   managed work within the documented test timeout.
 - Earlier VFS, device, runtime, and interception tests remain passing.
+- `make demo-gate-7` lets a human observe managed process creation, signaling,
+  waiting, synchronization, and complete lifecycle cleanup.
 
 ## Verification plan
 
@@ -64,6 +66,8 @@ early helper fixtures.
 - Repeated lifecycle stress procedure -> completes the documented iteration
   count with zero leaked managed tasks or backend resources.
 - `make test` with network disabled -> exits zero.
+- `make demo-gate-7` -> performs the documented process and signal lifecycle,
+  verifies cleanup, and exits zero.
 
 ## Evidence
 
@@ -79,7 +83,8 @@ early helper fixtures.
 
 - Working branch: `hdae/process-runtime`
 - Intended base: `main`
-- Pull request: intended; do not push or open without explicit authorization
+- Pull request: intended; dedicated branch push and PR creation authorized on
+  2026-11-03; never merge or close without explicit authorization
 - Planned commits: process and thread lifecycle; signals, synchronization, and
   time; credentials and event interfaces; stress and cleanup verification
 - Actual commits: pending
@@ -88,5 +93,5 @@ early helper fixtures.
 
 Human checkpoint. Process identity and privilege behavior are security
 boundaries and require explicit review before virtual kernel views build on
-them.
-
+them. Present `make demo-gate-7`, fresh evidence, and the pull request before
+acceptance.

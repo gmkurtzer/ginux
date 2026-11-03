@@ -52,6 +52,8 @@ and no direct host syscall access.
 - Malformed ELF metadata, invalid pointers, oversized lengths, and invalid
   mappings fail deterministically without crashing Ginus.
 - Earlier interception and offline-test criteria remain passing.
+- `make demo-gate-3` lets a human run the managed static fixture, inspect its
+  Linux-style result and audit decision, and observe a malformed-input denial.
 
 ## Verification plan
 
@@ -61,6 +63,8 @@ and no direct host syscall access.
   passing.
 - `make check` -> formatting, lint, and static checks exit zero.
 - `make test` with network disabled -> all mandatory tests exit zero.
+- `make demo-gate-3` -> performs the documented managed execution and negative
+  case, cleans up, and exits zero.
 
 ## Evidence
 
@@ -77,7 +81,8 @@ and no direct host syscall access.
 
 - Working branch: `hdae/execution-kernel`
 - Intended base: `main`
-- Pull request: intended; do not push or open without explicit authorization
+- Pull request: intended; dedicated branch push and PR creation authorized on
+  2026-11-03; never merge or close without explicit authorization
 - Planned commits: address-space and ELF loader; syscall ABI and minimal
   handlers; denial, audit, and malformed-input tests
 - Actual commits: pending
@@ -85,5 +90,5 @@ and no direct host syscall access.
 ## Review policy and outcome
 
 Human checkpoint because this gate establishes the memory and syscall security
-boundary used by all later compatibility work.
-
+boundary used by all later compatibility work. Present `make demo-gate-3`,
+fresh evidence, and the pull request before acceptance.

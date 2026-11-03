@@ -10,18 +10,30 @@ evidence, an exploit demonstration, and boundary hardening.
 
 Every implementation gate uses a dedicated `hdae/<gate-slug>` branch based on
 `main` and is intended for its own pull request. Local commits must be signed
-off. No branch is pushed and no pull request is opened or merged without
-current explicit authorization.
+off. The human authorized pushing each dedicated gate branch and opening its
+pull request on 2026-11-03. This does not authorize pushing directly to `main`,
+merging, or closing a pull request.
 
-All thirteen initial gates are human checkpoints. A later conversation may
-approve a precise multi-gate batch and delegate objective gates, but this plan
-does not assume that authorization.
+The human authorized Gates 1 through 13 as one ordered batch on 2026-11-03.
+All thirteen gates remain human checkpoints: after each gate passes, update
+the evidence, push its dedicated branch, open or update its pull request, run
+the human demonstration, and stop for acceptance before advancing. Batch
+authorization does not permit advancing past an unaccepted checkpoint,
+weakening criteria, expanding scope, or resolving a material architecture
+decision silently.
+
+Every gate must provide a working human demonstration through
+`make demo-gate-N`, where `N` is the gate position. The target must document
+prerequisites, state what the human should observe, return nonzero when its
+machine-checkable checks fail, and clean up or provide an explicit cleanup
+target. A demonstration supplements automated acceptance evidence; it does not
+replace it.
 
 ## Ordered gate map
 
 1. **Foundation and interception proof**: Rust scaffold, threat model,
-   Makefile contract, native benchmark baseline, and KVM syscall-interception
-   proof.
+   Makefile contract, matched emulated benchmark baseline, and syscall
+   interception proof inside a QEMU TCG Linux x86-64 environment.
 2. **Rocky image pipeline**: pinned, verified, cached, and offline-prepared
    Rocky Linux 10 userspace.
 3. **Execution kernel**: address spaces, ELF loading, syscall ABI, central
@@ -67,6 +79,8 @@ preserving these rules:
   reviewed fixture or report is intentionally committed.
 - Each target returns nonzero when mandatory verification fails.
 - Aggregate targets never hide a failing mandatory subtarget.
+- Benchmark controls run inside the same emulated x86-64 environment as Ginus
+  unless a gate explicitly documents a non-comparable host measurement.
 
 Planned public targets are:
 
@@ -102,6 +116,7 @@ make bench-compare
 make bench-block
 make bench-network
 make bench-report
+make demo-gate-N
 ```
 
 Targets become mandatory only in the gate that introduces them. Gate records
@@ -124,4 +139,3 @@ domains, conventional containers within a domain, network and storage backend
 expansion, physical-device assignment with a separately reviewed IOMMU/VFIO
 model, non-x86 architectures, live lifecycle controls, distribution expansion,
 and production operational hardening. None is authorized by this plan.
-

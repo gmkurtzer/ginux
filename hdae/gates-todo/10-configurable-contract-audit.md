@@ -63,6 +63,8 @@ complete, useful, bounded audit trail of contract decisions.
   and exposes dropped-event accounting.
 - Effective configuration and contract evidence can reproduce which policy was
   active for a test result.
+- `make demo-gate-10` lets a human compare permissive and strict contracts,
+  observe a mediated operation and denial, and inspect bounded audit records.
 
 ## Verification plan
 
@@ -75,6 +77,8 @@ complete, useful, bounded audit trail of contract decisions.
 - Audit flood fixture -> resource bounds and dropped-event accounting match the
   documented policy.
 - `make test` -> all mandatory regression suites exit zero.
+- `make demo-gate-10` -> performs the documented profile comparison, mediation,
+  denial, audit, and cleanup demonstration and exits zero.
 
 ## Evidence
 
@@ -91,7 +95,8 @@ complete, useful, bounded audit trail of contract decisions.
 
 - Working branch: `hdae/configurable-contract`
 - Intended base: `main`
-- Pull request: intended; do not push or open without explicit authorization
+- Pull request: intended; dedicated branch push and PR creation authorized on
+  2026-11-03; never merge or close without explicit authorization
 - Planned commits: contract schema and validation; dispatcher and backend
   integration; structured audit and bounds; profiles and security regressions
 - Actual commits: pending
@@ -99,5 +104,5 @@ complete, useful, bounded audit trail of contract decisions.
 ## Review policy and outcome
 
 Human checkpoint because this gate defines the operator-visible security
-contract and the evidence used for later exploit claims.
-
+contract and the evidence used for later exploit claims. Present
+`make demo-gate-10`, fresh evidence, and the pull request before acceptance.

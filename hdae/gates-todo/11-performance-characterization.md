@@ -59,6 +59,8 @@ preserving every security invariant and compatibility criterion.
   functional and security regression.
 - The report identifies fixed overhead, workload-sensitive overhead, variance,
   known bottlenecks, and unsupported conclusions.
+- `make demo-gate-11` lets a human run a bounded comparison and inspect raw
+  matched results, budget decisions, and the generated report.
 
 ## Verification plan
 
@@ -72,6 +74,8 @@ preserving every security invariant and compatibility criterion.
   included in comparison evidence.
 - `make test test-systemd test-contract test-security` -> all available
   mandatory regressions exit zero after optimization.
+- `make demo-gate-11` -> performs the documented bounded benchmark comparison,
+  validates approved budgets, generates the report, and exits zero.
 
 ## Evidence
 
@@ -89,7 +93,8 @@ preserving every security invariant and compatibility criterion.
 
 - Working branch: `hdae/performance-characterization`
 - Intended base: `main`
-- Pull request: intended; do not push or open without explicit authorization
+- Pull request: intended; dedicated branch push and PR creation authorized on
+  2026-11-03; never merge or close without explicit authorization
 - Planned commits: matched benchmark protocols and budget record; comparison
   and report tooling; targeted optimizations; final regression and evidence
 - Actual commits: pending
@@ -97,5 +102,5 @@ preserving every security invariant and compatibility criterion.
 ## Review policy and outcome
 
 Human checkpoint before approving numeric budgets and again at completion. No
-performance claim is accepted solely from an aggregate score.
-
+performance claim is accepted solely from an aggregate score. Present
+`make demo-gate-11`, raw evidence, and the pull request before final acceptance.

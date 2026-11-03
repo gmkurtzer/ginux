@@ -49,10 +49,13 @@ shutdown, and failure behavior are part of the trusted boundary.
 
 ### Execution platform
 
-The initial candidate uses KVM to execute unmodified x86-64 managed code while
-Ginus acts as the application kernel rather than booting a guest Linux kernel.
-Gate 1 must prove syscall interception, address-space switching, and prevention
-of direct host syscalls before this becomes a locked architectural decision.
+Development and verification run on a macOS arm64 host through QEMU TCG
+emulating a Linux x86-64 machine. Ginus runs as PID 1 inside that emulated
+machine and acts as the application kernel for its managed userspace rather
+than booting another guest Linux kernel beneath the domain. Gate 1 selects and
+proves an emulation-compatible syscall-trap mechanism, address-space control,
+and prevention of direct host syscalls. KVM acceleration is a deferred
+optimization and is not an initial acceptance requirement.
 
 ### Domain memory and task model
 
@@ -125,7 +128,8 @@ and idle overhead.
 
 ## Important open decisions
 
-- Exact KVM execution and syscall-trap mechanism after Gate 1 evidence.
+- Exact emulation-compatible execution and syscall-trap mechanism after Gate 1
+  evidence.
 - Rocky QCOW2 version, checksum, preparation tool, and virtual-root backing.
 - Configuration serialization format and command-line interface.
 - Initial network backend and packet mediation boundary.
@@ -137,4 +141,3 @@ and idle overhead.
 Changing a security invariant or resolving an open decision with material
 architectural impact requires human review and an update to the affected open
 gate before implementation continues.
-

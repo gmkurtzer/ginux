@@ -67,8 +67,10 @@ solved.
 ## Initial scope
 
 - Rust implementation on Linux x86-64.
-- QEMU/KVM development and verification environment.
-- KVM-assisted interception feasibility, subject to Gate 1 evidence.
+- macOS arm64 development host using QEMU TCG to emulate the complete Linux
+  x86-64 verification environment.
+- An emulation-compatible syscall-interception mechanism selected by Gate 1;
+  KVM acceleration is not required by the initial milestone.
 - One Rocky Linux 10 systemd domain from a cached cloud image.
 - Linux ABI interception, emulation, mediated host operations, denial, and
   audit logging.
@@ -87,6 +89,7 @@ solved.
 - VFIO/IOMMU hardware assignment.
 - Multiple architectures or compatibility ABIs beyond native x86-64.
 - Complete Linux conformance or support for every distribution.
+- KVM acceleration or KVM-specific domain behavior.
 - Production readiness, independent security certification, or a universal
   claim that all kernel exploits are prevented.
 - Multiple domains, containers within a domain, live migration, or distributed
@@ -105,4 +108,5 @@ solved.
 - Compatibility claims are tied to executable tests and named environments.
 - Performance is continuously measured; an optimization may not bypass the
   mediation boundary.
-
+- Every human checkpoint includes a documented, runnable demonstration with
+  expected observations and cleanup instructions.

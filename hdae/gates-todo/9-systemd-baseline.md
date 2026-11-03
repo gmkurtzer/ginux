@@ -58,6 +58,8 @@ controlled shutdown using only cached artifacts.
 - Boot evidence records duration, peak and idle resource measurements, and
   environment metadata without yet asserting final performance budgets.
 - Every earlier mandatory suite remains passing.
+- `make demo-gate-9` lets a human watch Rocky systemd run as virtual PID 1,
+  reach the readiness marker, inspect managed services, and shut down cleanly.
 
 ## Verification plan
 
@@ -70,6 +72,8 @@ controlled shutdown using only cached artifacts.
 - `make bench` systemd profile -> emits boot and idle measurements with
   environment metadata.
 - `make test` -> all mandatory regression suites exit zero.
+- `make demo-gate-9` -> performs the documented visible systemd boot,
+  readiness, inspection, and shutdown sequence and exits zero.
 
 ## Evidence
 
@@ -86,7 +90,8 @@ controlled shutdown using only cached artifacts.
 
 - Working branch: `hdae/systemd-baseline`
 - Intended base: `main`
-- Pull request: intended; do not push or open without explicit authorization
+- Pull request: intended; dedicated branch push and PR creation authorized on
+  2026-11-03; never merge or close without explicit authorization
 - Planned commits: systemd boot profile and harness; bounded compatibility
   tranches; readiness, failure, shutdown, and measurement evidence
 - Actual commits: pending
@@ -94,5 +99,5 @@ controlled shutdown using only cached artifacts.
 ## Review policy and outcome
 
 Human checkpoint. Systemd readiness is the principal compatibility milestone
-and its exact meaning and evidence require explicit acceptance.
-
+and its exact meaning and evidence require explicit acceptance. Present
+`make demo-gate-9`, fresh evidence, and the pull request before acceptance.

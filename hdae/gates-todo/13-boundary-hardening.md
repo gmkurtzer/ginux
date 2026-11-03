@@ -68,6 +68,8 @@ honest security and compatibility boundary for the initial milestone.
   budgets remain passing after hardening.
 - Documentation states supported claims and unresolved risks precisely enough
   that it does not imply production readiness or universal exploit prevention.
+- `make demo-gate-13` lets a human run a bounded escape and recovery sequence,
+  inspect residual host authority, and verify the final limitations report.
 
 ## Verification plan
 
@@ -83,6 +85,8 @@ honest security and compatibility boundary for the initial milestone.
 - `make bench-compare` -> all approved mandatory budgets pass after hardening.
 - Documentation consistency check -> claims map to current executable evidence
   and every known limitation remains visible.
+- `make demo-gate-13` -> performs the documented boundary, recovery, residual
+  authority, and report inspection demonstration and exits zero.
 
 ## Evidence
 
@@ -99,13 +103,14 @@ honest security and compatibility boundary for the initial milestone.
 
 - Working branch: `hdae/boundary-hardening`
 - Intended base: `main`
-- Pull request: intended; do not push or open without explicit authorization
+- Pull request: intended; dedicated branch push and PR creation authorized on
+  2026-11-03; never merge or close without explicit authorization
 - Planned commits: malformed-input and fuzz harnesses; escape and authority
   reduction; recovery and cleanup; full regression evidence and limitations
 - Actual commits: pending
 
 ## Review policy and outcome
 
-Human checkpoint. This gate closes the initial milestone only after explicit
-acceptance of the evidence, residual risks, and scoped claims.
-
+Human checkpoint. Present `make demo-gate-13`, fresh evidence, and the pull
+request. This gate closes the initial milestone only after explicit acceptance
+of the evidence, residual risks, and scoped claims.

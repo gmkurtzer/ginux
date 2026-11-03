@@ -63,6 +63,8 @@ DMA authority.
   backends, and leave the disposable test devices reusable.
 - Block and network benchmarks record throughput, latency, CPU, workload,
   repetitions, and environment without asserting an unapproved budget.
+- `make demo-gate-6` lets a human inspect assigned devices, exercise block and
+  network paths, and observe rejection of a conflicting assignment and ioctl.
 
 ## Verification plan
 
@@ -76,6 +78,8 @@ DMA authority.
   records with environment metadata.
 - `make test` with network access disabled except the isolated local test
   backend -> exits zero.
+- `make demo-gate-6` -> performs the documented device assignment, I/O,
+  conflict, denial, and cleanup demonstration and exits zero.
 
 ## Evidence
 
@@ -92,7 +96,8 @@ DMA authority.
 
 - Working branch: `hdae/device-ownership`
 - Intended base: `main`
-- Pull request: intended; do not push or open without explicit authorization
+- Pull request: intended; dedicated branch push and PR creation authorized on
+  2026-11-03; never merge or close without explicit authorization
 - Planned commits: virtual device registry and pseudo-devices; block and
   partition backend; network backend; isolation and benchmark verification
 - Actual commits: pending
@@ -100,5 +105,5 @@ DMA authority.
 ## Review policy and outcome
 
 Human checkpoint because device mediation and backend ownership materially
-affect the security boundary.
-
+affect the security boundary. Present `make demo-gate-6`, fresh evidence, and
+the pull request before acceptance.

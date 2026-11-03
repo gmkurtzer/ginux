@@ -12,17 +12,21 @@ invoke the host syscall ABI directly.
 
 ## Approved scope
 
-- Establish the Rust workspace, top-level Makefile, test layout, and QEMU/KVM
-  development harness.
+- Establish the Rust workspace, top-level Makefile, test layout, and QEMU TCG
+  Linux x86-64 development harness for the macOS arm64 host.
 - Record the initial threat model and execution-platform decision evidence.
-- Implement the smallest KVM-assisted experiment needed to run a fixed
-  unmodified x86-64 test ELF and intercept selected syscalls.
+- Evaluate emulation-compatible trap options and implement the smallest
+  experiment needed to run a fixed unmodified x86-64 test ELF and intercept
+  selected syscalls without KVM.
 - Route intercepted operations through a central decision point that can allow
   emulation or denial; direct host continuation is forbidden.
-- Establish native and conventional-container benchmark controls for a small
-  CPU loop, syscall loop, and process startup measurement.
+- Establish matched direct-Linux and conventional-container benchmark controls
+  inside the same emulated x86-64 environment for a small CPU loop, syscall
+  loop, and process startup measurement.
 - Add `doctor`, `build`, `check`, `test`, `test-unit`, `test-intercept`, and
   `bench-baseline` Make targets.
+- Add `make demo-gate-1` as a runnable human demonstration of intercepted,
+  emulated, and denied syscalls with explicit expected output and cleanup.
 
 ## Non-goals
 
@@ -39,7 +43,7 @@ invoke the host syscall ABI directly.
 ## Remaining work
 
 - [ ] Create the Rust and Makefile scaffold.
-- [ ] Implement the KVM interception experiment.
+- [ ] Implement the emulation-compatible interception experiment.
 - [ ] Add positive and negative interception tests.
 - [ ] Capture baseline benchmark results and environment metadata.
 - [ ] Reconcile the experiment with every architecture invariant.
@@ -55,8 +59,12 @@ invoke the host syscall ABI directly.
 - Evidence demonstrates that managed execution cannot escape the interception
   path by issuing a direct host syscall in the tested execution mode.
 - All interception decisions use one central dispatch boundary.
-- Native and conventional-container baseline measurements record workload,
-  environment, units, repetitions, and variance.
+- Direct-Linux and conventional-container baseline measurements run inside the
+  same emulated x86-64 environment and record workload, environment, units,
+  repetitions, and variance.
+- A human can run `make demo-gate-1` and observe a managed syscall answered by
+  Ginus, a denied syscall blocked before host execution, and a successful
+  cleanup result.
 - `make test` succeeds without network access.
 
 ## Verification plan
@@ -70,6 +78,8 @@ invoke the host syscall ABI directly.
 - `make test` with network disabled -> exits zero.
 - `make bench-baseline` -> emits reproducible native and conventional-container
   baseline records with environment metadata.
+- `make demo-gate-1` -> prints the documented interception demonstration,
+  validates each observation, cleans up, and exits zero.
 
 ## Evidence
 
@@ -78,20 +88,22 @@ invoke the host syscall ABI directly.
 ## Decisions and limitations
 
 - Rust and x86-64 are approved for the initial implementation.
-- KVM is the initial candidate, not a locked decision until this gate passes.
+- KVM is outside initial acceptance. Gate 1 selects an interception mechanism
+  that works inside QEMU TCG on the macOS arm64 development host.
 - Performance budgets remain open until baseline evidence exists.
 
 ## Delivery strategy
 
 - Working branch: `hdae/foundation-interception`
 - Intended base: `main`
-- Pull request: intended; do not push or open without explicit authorization
+- Pull request: intended; dedicated branch push and PR creation authorized on
+  2026-11-03; never merge or close without explicit authorization
 - Planned commits: project scaffold and checks; interception proof and tests;
   benchmark controls and architecture evidence
 - Actual commits: pending
 
 ## Review policy and outcome
 
-Human checkpoint. Stop after fresh verification and request acceptance before
-closing the gate or beginning Gate 2.
-
+Human checkpoint. Present `make demo-gate-1`, fresh automated evidence, and the
+pull request, then stop for acceptance before closing the gate or beginning
+Gate 2.

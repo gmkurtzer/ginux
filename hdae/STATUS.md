@@ -2,12 +2,15 @@
 
 ## Current checkpoint
 
-- Project establishment records are drafted on `main` for human review.
+- Project establishment records are committed on `main`; the implementation
+  batch is authorized.
 - Authoritative name: Ginus (Ginux Userspace).
 - Runtime isolation unit: domain.
 - Policy unit: versioned contract.
 - Initial gate map: thirteen checkpoint gates under `hdae/gates-todo/`.
-- No implementation gate is authorized or active.
+- Gates 1 through 13 are authorized as an ordered batch, but each remains a
+  human checkpoint requiring a working demonstration and explicit acceptance.
+- Gate 1 is authorized to begin after this alignment update is committed.
 
 ## Governing outcome and invariants
 
@@ -27,6 +30,10 @@ scope, threat model, and invariants.
   direction, Rocky Linux 10 systemd baseline, cached cloud QCOW2 source,
   virtual kernel trees, device assignment requirement, benchmark requirement,
   and dedicated branch/PR delivery per implementation gate.
+- Human direction on 2026-11-03 selected macOS arm64 plus QEMU TCG as the
+  development environment, removed KVM from initial acceptance, authorized the
+  ordered 13-gate batch, required a runnable human demonstration for every
+  checkpoint, and authorized pushing dedicated branches and opening PRs.
 - Coverage review: functionality, failure behavior, deterministic tests, user
   configuration, documentation, compatibility, recovery, performance, and
   security are assigned to explicit gates; none is silently omitted.
@@ -34,8 +41,7 @@ scope, threat model, and invariants.
 
 ## Open decisions and limitations
 
-- Human review of the detailed gate ledger is required before Gate 1 begins.
-- The exact Rocky image, KVM trap design, image preparation backend,
+- The exact Rocky image, emulation-compatible trap design, image preparation backend,
   configuration syntax, network backend, performance budgets, and public CVE
   remain decisions assigned to later gates.
 - The repository and directory still use the historical `usshim` name; rename
@@ -43,15 +49,15 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Review the proposed gate files with the human. Correct any missing or
-incorrectly scoped criteria, then obtain explicit approval for Gate 1 and its
-checkpoint before creating branch `hdae/foundation-interception`.
+Commit this alignment update, create branch `hdae/foundation-interception`, and
+execute Gate 1 through fresh automated evidence and `make demo-gate-1`. Push
+the branch, open its pull request, and stop for human acceptance.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: none; establishment checkpoint
+- Active gate: Gate 1 authorized; alignment update pending before branch work
 - Last evidence: planning records only; implementation not run
-- Required human decision: approve or revise Gate 1 after reviewing the ledger
+- Required human decision: accept or reject Gate 1 after its demonstration

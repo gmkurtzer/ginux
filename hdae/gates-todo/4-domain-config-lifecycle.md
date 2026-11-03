@@ -54,6 +54,8 @@ lifecycle.
   zombie leakage for the tested process model.
 - Configuration never grants an implicit host device, descriptor, path, or
   contract capability.
+- `make demo-gate-4` lets a human inspect normalized configuration, start and
+  stop a domain, and observe fail-closed rejection of an invalid configuration.
 
 ## Verification plan
 
@@ -64,6 +66,8 @@ lifecycle.
 - PID-1 harness test -> expected signals are handled, children are reaped, and
   shutdown returns the expected machine-checkable status.
 - `make test` with network disabled -> exits zero.
+- `make demo-gate-4` -> performs the documented valid and invalid lifecycle
+  demonstrations, verifies cleanup, and exits zero.
 
 ## Evidence
 
@@ -80,7 +84,8 @@ lifecycle.
 
 - Working branch: `hdae/domain-config-lifecycle`
 - Intended base: `main`
-- Pull request: intended; do not push or open without explicit authorization
+- Pull request: intended; dedicated branch push and PR creation authorized on
+  2026-11-03; never merge or close without explicit authorization
 - Planned commits: versioned schema and normalization; lifecycle state machine;
   PID-1 failure, cleanup, and configuration verification
 - Actual commits: pending
@@ -88,5 +93,5 @@ lifecycle.
 ## Review policy and outcome
 
 Human checkpoint. The effective configuration becomes the authority record for
-later domains and must be accepted before backends consume it.
-
+later domains and must be accepted before backends consume it. Present
+`make demo-gate-4`, fresh evidence, and the pull request before acceptance.

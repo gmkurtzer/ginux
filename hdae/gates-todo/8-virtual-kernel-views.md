@@ -57,6 +57,8 @@ mounts, identifiers, and configuration are not leaked as domain authority.
 - Machine, boot, hostname, mount, resource, and device information is
   internally consistent across the virtual interfaces.
 - Earlier process, device, VFS, and runtime suites remain passing.
+- `make demo-gate-8` lets a human inspect virtual `/proc`, `/sys`, and cgroups,
+  compare them with host inventory, and observe rejection of a host mutation.
 
 ## Verification plan
 
@@ -67,6 +69,8 @@ mounts, identifiers, and configuration are not leaked as domain authority.
 - Host-versus-domain inventory comparison -> no unassigned host object appears
   in the managed fixture's observable results.
 - `make test` with network disabled -> exits zero.
+- `make demo-gate-8` -> performs the documented virtual-view, host-leakage, and
+  mutation demonstration and exits zero.
 
 ## Evidence
 
@@ -82,7 +86,8 @@ mounts, identifiers, and configuration are not leaked as domain authority.
 
 - Working branch: `hdae/virtual-kernel-views`
 - Intended base: `main`
-- Pull request: intended; do not push or open without explicit authorization
+- Pull request: intended; dedicated branch push and PR creation authorized on
+  2026-11-03; never merge or close without explicit authorization
 - Planned commits: procfs model; sysfs and device projection; cgroup and
   mount/identity model; consistency and leakage verification
 - Actual commits: pending
@@ -90,5 +95,5 @@ mounts, identifiers, and configuration are not leaked as domain authority.
 ## Review policy and outcome
 
 Human checkpoint because these interfaces define the kernel identity and
-authority visible to the domain.
-
+authority visible to the domain. Present `make demo-gate-8`, fresh evidence,
+and the pull request before acceptance.
