@@ -234,6 +234,9 @@ fn install_path_index(slot: usize, rootfs: &Rootfs<'_>) -> bool {
             if removed == b".wh..opq" {
                 remove_index_children(rootfs, table, &visible[..name_start.saturating_sub(1)]);
             } else {
+                if removed.is_empty() {
+                    continue;
+                }
                 let mut target = [0_u8; PATH_CAPACITY];
                 let target_length = name_start
                     .checked_add(removed.len())
@@ -248,7 +251,9 @@ fn install_path_index(slot: usize, rootfs: &Rootfs<'_>) -> bool {
                 }
                 target[..name_start].copy_from_slice(&visible[..name_start]);
                 target[name_start..target_length].copy_from_slice(removed);
-                remove_index_path(rootfs, table, &target[..target_length]);
+                let target = &target[..target_length];
+                remove_index_path(rootfs, table, target);
+                remove_index_children(rootfs, table, target);
             }
             continue;
         }

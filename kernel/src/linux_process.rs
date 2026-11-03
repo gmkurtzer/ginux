@@ -4,7 +4,7 @@ use core::{
     sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering},
 };
 
-use crate::{address_space, arch::x86_64::cpu, control_abi, linux_user, memory, scheduler};
+use crate::{address_space, arch::x86_64::cpu, control_abi, domain, linux_user, memory, scheduler};
 
 pub(crate) const PROCESS_LIMIT: usize = 16;
 pub(crate) const PROCESS_RUNTIME_LIMIT: usize = 7;
@@ -88,6 +88,57 @@ static PROCESS_RUNTIME: ProcessRuntimeOwner =
         ),
         test_table: UnsafeCell::new(MaybeUninit::uninit()),
     }));
+
+fn process_frame_policy() -> Option<(memory::FrameOwner, usize)> {
+    let instance = current_process_instance();
+    (instance < control_abi::DOMAIN_LIMIT)
+        .then_some(instance)
+        .and_then(domain::container_domain_frame_policy)
+}
+
+fn process_private_frame_owner() -> memory::FrameOwner {
+    process_frame_policy().map_or(memory::FrameOwner::KERNEL, |(owner, _)| owner)
+}
+
+fn process_private_frames_owned(frames: &[memory::FrameLease]) -> bool {
+    !frames.is_empty() && memory::frames_owned_by(process_private_frame_owner(), frames)
+}
+
+fn process_mapping_frame_owned(frame: memory::FrameLease) -> bool {
+    memory::frame_lease_is_runtime(frame)
+        || memory::frame_owner(frame).is_some_and(|owner| {
+            owner == memory::FrameOwner::KERNEL || owner == process_private_frame_owner()
+        })
+}
+
+fn allocate_process_private_frames<const N: usize>() -> Option<[memory::FrameLease; N]> {
+    process_frame_policy().map_or_else(
+        || memory::allocate_frames::<N>(memory::FrameOwner::KERNEL),
+        |(owner, limit)| memory::allocate_frames_with_owner_limit::<N>(owner, limit),
+    )
+}
+
+fn allocate_process_private_prefix_into(output: &mut [memory::FrameLease], count: usize) -> bool {
+    if let Some((owner, limit)) = process_frame_policy() {
+        memory::allocate_frame_prefix_into_with_owner_limit(owner, limit, output, count)
+    } else {
+        memory::allocate_frame_prefix_into(memory::FrameOwner::KERNEL, output, count)
+    }
+}
+
+fn process_frames_releasable(frames: &[memory::FrameLease]) -> bool {
+    let Some(owner) = frames.first().and_then(|frame| memory::frame_owner(*frame)) else {
+        return false;
+    };
+    memory::frame_leases_releasable(owner, frames)
+}
+
+fn scrub_and_release_process_frames(frames: &[memory::FrameLease]) -> bool {
+    let Some(owner) = frames.first().and_then(|frame| memory::frame_owner(*frame)) else {
+        return false;
+    };
+    memory::scrub_and_release_frames(owner, frames)
+}
 
 fn process_runtime() -> &'static ProcessRuntimeState {
     // SAFETY: The owner has boot lifetime. Mutable fields use atomics or
@@ -271,8 +322,7 @@ impl ProcessAddressSpace {
                 mapping.address == 0
                     || !mapping.address.is_multiple_of(PAGE_SIZE)
                     || mapping.writable && mapping.executable
-                    || !(memory::frames_owned_by(memory::FrameOwner::KERNEL, &[mapping.frame])
-                        || memory::frame_lease_is_runtime(mapping.frame))
+                    || !process_mapping_frame_owned(mapping.frame)
                     || hierarchy.contains(&mapping.frame)
                     || mappings[..index].iter().any(|prior| {
                         prior.address == mapping.address
@@ -357,10 +407,10 @@ impl ProcessAddressSpace {
 
     fn is_owned(&self) -> bool {
         memory::frames_owned_by(memory::FrameOwner::KERNEL, self.hierarchy())
-            && self.mappings().iter().all(|mapping| {
-                memory::frame_lease_is_runtime(mapping.frame)
-                    || memory::frames_owned_by(memory::FrameOwner::KERNEL, &[mapping.frame])
-            })
+            && self
+                .mappings()
+                .iter()
+                .all(|mapping| process_mapping_frame_owned(mapping.frame))
     }
 
     fn hierarchy_is_owned(&self) -> bool {
@@ -409,10 +459,7 @@ impl ProcessAddressSpace {
             || self.mappings().iter().any(|mapping| {
                 !mapping.shared
                     && !memory::frame_lease_is_runtime(mapping.frame)
-                    && !memory::frame_leases_releasable(
-                        memory::FrameOwner::KERNEL,
-                        &[mapping.frame],
-                    )
+                    && !process_frames_releasable(&[mapping.frame])
             })
         {
             return false;
@@ -421,8 +468,7 @@ impl ProcessAddressSpace {
             memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, self.hierarchy());
         for mapping in self.mappings() {
             if !mapping.shared && !memory::frame_lease_is_runtime(mapping.frame) {
-                released &=
-                    memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[mapping.frame]);
+                released &= scrub_and_release_process_frames(&[mapping.frame]);
             }
         }
         released
@@ -1005,7 +1051,7 @@ impl ProcessTable {
         (4..=PROCESS_HIERARCHY_LIMIT).contains(&hierarchy.len())
             && pages.len() <= PROCESS_PRIVATE_PAGE_LIMIT
             && memory::frames_owned_by(memory::FrameOwner::KERNEL, hierarchy)
-            && (pages.is_empty() || memory::frames_owned_by(memory::FrameOwner::KERNEL, pages))
+            && (pages.is_empty() || process_private_frames_owned(pages))
             && unique(hierarchy)
             && unique(pages)
             && hierarchy.iter().all(|frame| !pages.contains(frame))
@@ -1113,7 +1159,7 @@ impl ProcessTable {
             || expected_space.mappings().iter().any(|mapping| {
                 !mapping.shared
                     && !memory::frame_lease_is_runtime(mapping.frame)
-                    && memory::frames_owned_by(memory::FrameOwner::KERNEL, &[mapping.frame])
+                    && memory::frame_owner(mapping.frame).is_some()
                     && !self.frame_referenced_by_other_process(handle, mapping.frame)
             })
         {
@@ -2926,9 +2972,7 @@ fn replace_live_process_mapping_inner(
     executable: bool,
     private_exec_mapping: bool,
 ) -> bool {
-    if writable && executable
-        || !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[replacement])
-    {
+    if writable && executable || !process_private_frames_owned(&[replacement]) {
         return false;
     }
     let Some(table) = live_process_table_mut() else {
@@ -2968,8 +3012,7 @@ pub(crate) fn add_live_process_mapping(pid: u32, mapping: cpu::LinuxActiveImageM
     if mapping.address == 0
         || !mapping.address.is_multiple_of(PAGE_SIZE)
         || mapping.writable && mapping.executable
-        || !(memory::frames_owned_by(memory::FrameOwner::KERNEL, &[mapping.frame])
-            || memory::frame_lease_is_runtime(mapping.frame))
+        || !process_mapping_frame_owned(mapping.frame)
     {
         return false;
     }
@@ -3161,7 +3204,7 @@ pub(crate) fn prepare_live_process_write(pid: u32, address: usize) -> bool {
     if address_space::linux_cow_page_in_root(root, address as u64) != Some(mapping.frame) {
         return true;
     }
-    let Some([replacement]) = memory::allocate_frames::<1>(memory::FrameOwner::KERNEL) else {
+    let Some([replacement]) = allocate_process_private_frames::<1>() else {
         return false;
     };
     if !address_space::copy_linux_frame(mapping.frame, replacement)
@@ -3189,12 +3232,12 @@ pub(crate) fn prepare_live_process_write(pid: u32, address: usize) -> bool {
             true,
             mapping.executable,
         );
-        let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[replacement]);
+        let _ = scrub_and_release_process_frames(&[replacement]);
         return false;
     }
     if !live_mapping_referenced_by_other_process(pid, mapping.frame)
         && !memory::frame_lease_is_runtime(mapping.frame)
-        && !memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[mapping.frame])
+        && !scrub_and_release_process_frames(&[mapping.frame])
     {
         return false;
     }
@@ -3301,7 +3344,7 @@ pub(crate) fn begin_live_fork(
             .iter()
             .filter(|mapping| {
                 !memory::frame_lease_is_runtime(mapping.frame)
-                    && !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[mapping.frame])
+                    && !process_mapping_frame_owned(mapping.frame)
             })
             .take(4)
         {
@@ -3353,13 +3396,7 @@ pub(crate) fn begin_live_fork(
         .store(112, Ordering::Release);
     let child_pages = unsafe { &mut *process_runtime().fork_allocation_scratch.get() };
     let private_count = private_count.unwrap_or(0);
-    if private_count != 0
-        && !memory::allocate_frame_prefix_into(
-            memory::FrameOwner::KERNEL,
-            child_pages,
-            private_count,
-        )
-    {
+    if private_count != 0 && !allocate_process_private_prefix_into(child_pages, private_count) {
         let _ = memory::scrub_and_release_frames(
             memory::FrameOwner::KERNEL,
             &child_hierarchy[..hierarchy_count],
@@ -3642,34 +3679,23 @@ fn release_live_process_address_space(
                 continue;
             } else {
                 let ownership_started = crate::arch::x86_64::timer::timestamp_counter();
-                let owned = memory::frames_owned_by(
-                    memory::FrameOwner::KERNEL,
-                    core::slice::from_ref(&mapping.frame),
-                );
+                let owned = memory::frame_owner(mapping.frame).is_some();
                 if cfg!(feature = "linux-boot-profile") {
                     crate::arch::x86_64::cpu::linux_boot_profile_record_lifecycle_phase(
                         10,
                         ownership_started,
                     );
                 }
-                if owned && !release_batch[..release_count].contains(&mapping.frame) {
-                    release_batch[release_count] = mapping.frame;
-                    release_count += 1;
-                    if release_count == release_batch.len() {
-                        let scrub_started = crate::arch::x86_64::timer::timestamp_counter();
-                        if !memory::scrub_and_release_frames(
-                            memory::FrameOwner::KERNEL,
-                            &release_batch,
-                        ) {
-                            return false;
-                        }
-                        if cfg!(feature = "linux-boot-profile") {
-                            crate::arch::x86_64::cpu::linux_boot_profile_record_lifecycle_phase(
-                                11,
-                                scrub_started,
-                            );
-                        }
-                        release_count = 0;
+                if owned {
+                    let scrub_started = crate::arch::x86_64::timer::timestamp_counter();
+                    if !scrub_and_release_process_frames(core::slice::from_ref(&mapping.frame)) {
+                        return false;
+                    }
+                    if cfg!(feature = "linux-boot-profile") {
+                        crate::arch::x86_64::cpu::linux_boot_profile_record_lifecycle_phase(
+                            11,
+                            scrub_started,
+                        );
                     }
                 }
             }
@@ -3952,7 +3978,7 @@ fn verify_live_fork_clone_and_execution_transaction() -> bool {
         return false;
     }
     let child_pages = unsafe { &mut *process_runtime().fork_allocation_scratch.get() };
-    if !memory::allocate_frame_prefix_into(memory::FrameOwner::KERNEL, child_pages, private_count) {
+    if !allocate_process_private_prefix_into(child_pages, private_count) {
         let _released = memory::scrub_and_release_frames(
             memory::FrameOwner::KERNEL,
             &child_hierarchy[..hierarchy_count],
@@ -4123,7 +4149,7 @@ fn verify_live_fork_clone_only_transaction() -> bool {
         reject!(208);
     }
     let child_pages = unsafe { &mut *process_runtime().fork_allocation_scratch.get() };
-    if !memory::allocate_frame_prefix_into(memory::FrameOwner::KERNEL, child_pages, private_count) {
+    if !allocate_process_private_prefix_into(child_pages, private_count) {
         let _ = memory::scrub_and_release_frames(
             memory::FrameOwner::KERNEL,
             &child_hierarchy[..hierarchy_count],
@@ -4435,12 +4461,12 @@ fn scrub_candidate_resources(
     pages: &[memory::FrameLease],
 ) -> bool {
     if !memory::frame_leases_releasable(memory::FrameOwner::KERNEL, hierarchy)
-        || !memory::frame_leases_releasable(memory::FrameOwner::KERNEL, pages)
+        || !pages.is_empty() && !process_frames_releasable(pages)
     {
         return false;
     }
     memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, hierarchy)
-        && memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, pages)
+        && (pages.is_empty() || scrub_and_release_process_frames(pages))
 }
 
 pub(crate) fn copy_private_pages(
@@ -4450,11 +4476,10 @@ pub(crate) fn copy_private_pages(
     if source.is_empty()
         || source.len() != destination.len()
         || source.len() > PROCESS_PRIVATE_PAGE_LIMIT
-        || !source.iter().all(|frame| {
-            memory::frames_owned_by(memory::FrameOwner::KERNEL, &[*frame])
-                || memory::frame_lease_is_runtime(*frame)
-        })
-        || !memory::frames_owned_by(memory::FrameOwner::KERNEL, destination)
+        || !source
+            .iter()
+            .all(|frame| process_mapping_frame_owned(*frame))
+        || !process_private_frames_owned(destination)
         || source
             .iter()
             .enumerate()
@@ -4505,7 +4530,7 @@ fn copy_validated_private_pages(
             .filter(|mapping| mapping_requires_fork_copy(mapping))
             .count()
             != source.len()
-        || !memory::frames_owned_by(memory::FrameOwner::KERNEL, destination)
+        || !process_private_frames_owned(destination)
     {
         return false;
     }
