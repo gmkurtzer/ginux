@@ -46,8 +46,8 @@ within the configured domain memory budget.
 
 ## Remaining work
 
-- [ ] Make signed commits, push the dedicated branch, open the linked PR, and
-  record its stable URL and first-pass evidence.
+- [x] Made signed commits, pushed the dedicated branch, opened the linked PR,
+  and recorded its stable URL and first-pass evidence.
 
 ## Acceptance criteria
 
@@ -105,10 +105,12 @@ within the configured domain memory budget.
 
 - Working branch: `hdae/issue-57-linux-lazy-page`
 - Intended base: `main` at `82df3d719e14246233d509799ad220c4c39e7088`
-- Pull request: intended; non-closing reference to issue #57
+- Pull request: [#59](https://github.com/gmkurtzer/ginux/pull/59); non-closing
+  reference to issue #57
 - Planned commits: gate and reproduction checkpoint; allocator/accounting fix
   with regression; verification and delivery evidence
-- Actual commits: pending
+- Actual commits: `d3e9c8c5` gate and evidence; `f1309e57` owner-aware Linux
+  payload handling and regression
 
 ## Review policy and outcome
 

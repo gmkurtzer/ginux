@@ -8,11 +8,10 @@
 - Branch: `hdae/issue-57-linux-lazy-page`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 37, Linux lazy-page quota regression
-- Last completed action: corrected domain-owned payload lookup, RELRO, exec,
-  and child-cleanup paths; `make check`, `make test`, and `make test-alpine`
-  pass with the 128 MiB quota intact
-- Next action: commit, push, open the linked Gate 37 PR, and post first-pass
-  evidence without merging it this run
+- Last completed action: delivered Gate 37 through PR #59 after `make check`,
+  `make test`, and `make test-alpine` passed with the 128 MiB quota intact
+- Next action: wait for a subsequent hourly pass and green GitHub checks before
+  merging PR #59 and closing issue #57
 
 ## Current repository state
 
