@@ -263,7 +263,12 @@ linux-compat-check:
 test-linux-abi: build
 	@tests/qemu/linux-abi-report.sh
 
-.PHONY: check-pe
+.PHONY: check-pe check-scheduler
+check-scheduler:
+	@mkdir -p build
+	@rustc --edition=2021 --test -D warnings tests/host/scheduler.rs -o build/scheduler-tests
+	@build/scheduler-tests
+
 check-pe:
 	@mkdir -p build
 	@rustc --edition=2021 --test -D warnings kernel/src/pe.rs -o build/pe-tests
@@ -273,6 +278,7 @@ check: manifest architecture-check linux-compat-check
 	@$(MAKE) abi-conformance
 	@cargo fmt --all -- --check
 	@$(MAKE) check-pe
+	@$(MAKE) check-scheduler
 	@cargo clippy --package ginux-boot --target $(TARGET) -- -D warnings
 	@cargo clippy --package ginux-kernel --target x86_64-unknown-none -- -D warnings
 	@cargo clippy --package ginux-native-abi -- -D warnings
