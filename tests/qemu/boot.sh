@@ -1231,6 +1231,16 @@ if ! grep -q '^ginux: failed runtime volume DMA retirement quarantined' "$output
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux mmap domain quota enforced atomically' "$output_file"; then
+    echo "Boot test failed: Linux mmap domain quota was not enforced atomically." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: Linux SysV domain quota enforced independently' "$output_file"; then
+    echo "Boot test failed: Linux SysV domain quota was not enforced independently." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: generation-owned virtio DMA frame allocated' "$output_file"; then
     echo "Boot test failed: virtio DMA memory was not generation-owned." >&2
     exit 1
@@ -1758,6 +1768,16 @@ fi
 if [[ "$(grep -c '^DEVFS_READY' "$output_file")" -ne 1 ]] ||
     ! grep -q '^ginux: bounded Linux devfs profile validated' "$output_file"; then
     echo "Boot test failed: the bounded Linux device namespace was not validated." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: blocking Linux socket polls bounded independently of guest timeout' "$output_file"; then
+    echo "Boot test failed: guest timeouts could exceed the blocking socket poll budget." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: synchronous Linux poll waits bounded independently of timeout' "$output_file"; then
+    echo "Boot test failed: poll/ppoll/select could wait without a bounded kernel-entry budget." >&2
     exit 1
 fi
 
@@ -3358,6 +3378,10 @@ if ! grep -q '^ginux: Linux process-group wait selectors validated' "$output_fil
 fi
 if ! grep -q '^ginux: Linux cross-process memory transfer validated' "$output_file"; then
     echo "Boot test failed: Linux cross-process memory transfer was not validated." >&2
+    exit 1
+fi
+if ! grep -q '^ginux: secret process memory excluded from remote copy' "$output_file"; then
+    echo "Boot test failed: remote process copy did not exclude secret memory." >&2
     exit 1
 fi
 if ! grep -q '^ginux: Linux cross-process resource comparison validated' "$output_file"; then

@@ -323,7 +323,7 @@ impl Tmpfs {
             };
             let next = page.next;
             if page.files.iter().all(Option::is_none) {
-                if !memory::scrub_and_release_frames(FrameOwner::KERNEL, &[current]) {
+                if !scrub_and_release_current_frames(&[current]) {
                     return false;
                 }
                 if previous == FrameLease::EMPTY {
@@ -351,9 +351,9 @@ impl File {
 }
 
 fn allocate_file_page() -> Option<FrameLease> {
-    let [page] = memory::allocate_frames::<1>(FrameOwner::KERNEL)?;
+    let [page] = allocate_current_frames::<1>()?;
     let Some(address) = page.direct_map_address() else {
-        let _ = memory::scrub_and_release_frames(FrameOwner::KERNEL, &[page]);
+        let _ = scrub_and_release_current_frames(&[page]);
         return None;
     };
     unsafe {
@@ -383,12 +383,12 @@ fn allocate_data_pages(count: usize) -> Option<FrameLease> {
     let mut first = FrameLease::EMPTY;
     let mut last = FrameLease::EMPTY;
     for _ in 0..count {
-        let Some([page]) = memory::allocate_frames::<1>(FrameOwner::KERNEL) else {
+        let Some([page]) = allocate_current_frames::<1>() else {
             let _ = release_data_pages(first);
             return None;
         };
         let Some(address) = page.direct_map_address() else {
-            let _ = memory::scrub_and_release_frames(FrameOwner::KERNEL, &[page]);
+            let _ = scrub_and_release_current_frames(&[page]);
             let _ = release_data_pages(first);
             return None;
         };
@@ -436,7 +436,7 @@ fn release_data_pages(mut page: FrameLease) -> bool {
         let Some(next) = data_page(page).map(|data| data.next) else {
             return false;
         };
-        if !memory::scrub_and_release_frames(FrameOwner::KERNEL, &[page]) {
+        if !scrub_and_release_current_frames(&[page]) {
             return false;
         }
         page = next;
@@ -445,7 +445,7 @@ fn release_data_pages(mut page: FrameLease) -> bool {
 }
 
 pub(crate) fn verify_contract() -> bool {
-    let Some(frames_before) = memory::owner_live_frame_count(FrameOwner::KERNEL) else {
+    let Some(frames_before) = memory::owner_live_frame_count(current_frame_owner()) else {
         return false;
     };
     let mut tmpfs = Tmpfs::new();
@@ -544,7 +544,7 @@ pub(crate) fn verify_contract() -> bool {
             return false;
         }
     }
-    tmpfs.clean() && memory::owner_live_frame_count(FrameOwner::KERNEL) == Some(frames_before)
+    tmpfs.clean() && memory::owner_live_frame_count(current_frame_owner()) == Some(frames_before)
 }
 
 pub(crate) fn install() -> bool {
@@ -597,7 +597,7 @@ pub(crate) fn usage() -> usize {
 }
 
 pub(crate) fn verify_live_object_contract() -> bool {
-    let Some(frames_before) = memory::owner_live_frame_count(FrameOwner::KERNEL) else {
+    let Some(frames_before) = memory::owner_live_frame_count(current_frame_owner()) else {
         return false;
     };
     let first_name = b"sha256:live-a";
@@ -637,7 +637,7 @@ pub(crate) fn verify_live_object_contract() -> bool {
         && open(first_name).is_none()
         && open(second_name).is_none()
         && open(overflow_name).is_none()
-        && memory::owner_live_frame_count(FrameOwner::KERNEL) == Some(frames_before)
+        && memory::owner_live_frame_count(current_frame_owner()) == Some(frames_before)
 }
 
 pub(crate) fn from_generation(generation: u32) -> Option<FileHandle> {
@@ -718,4 +718,29 @@ fn live_mut() -> Option<&'static mut Tmpfs> {
 
 fn current_instance() -> usize {
     cpu::current_container_slot().unwrap_or(HOST_INSTANCE)
+}
+
+fn current_frame_policy() -> Option<(FrameOwner, usize)> {
+    let instance = current_instance();
+    (instance < crate::control_abi::DOMAIN_LIMIT)
+        .then_some(instance)
+        .and_then(crate::domain::container_domain_frame_policy)
+}
+
+fn current_frame_owner() -> FrameOwner {
+    current_frame_policy().map_or(FrameOwner::KERNEL, |(owner, _)| owner)
+}
+
+fn allocate_current_frames<const N: usize>() -> Option<[FrameLease; N]> {
+    current_frame_policy().map_or_else(
+        || memory::allocate_frames::<N>(FrameOwner::KERNEL),
+        |(owner, limit)| memory::allocate_frames_with_owner_limit::<N>(owner, limit),
+    )
+}
+
+fn scrub_and_release_current_frames(frames: &[FrameLease]) -> bool {
+    let Some(owner) = frames.first().and_then(|frame| memory::frame_owner(*frame)) else {
+        return false;
+    };
+    memory::scrub_and_release_frames(owner, frames)
 }
