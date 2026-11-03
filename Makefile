@@ -6,7 +6,7 @@ GINUS := target/$(X86_TARGET)/release/ginus
 PAYLOAD := target/$(X86_TARGET)/release/managed-payload
 BASELINE := target/$(X86_TARGET)/release/baseline-runner
 
-.PHONY: doctor host-image-fetch host-image-verify host-boot-test build check test test-unit test-intercept bench-baseline demo-gate-1 clean
+.PHONY: doctor host-image-fetch host-image-verify host-boot-test image-helper-fetch image-prepare test-image image-cache-clean build check test test-unit test-intercept bench-baseline demo-gate-1 demo-gate-2 clean
 
 doctor:
 	@./scripts/doctor.sh
@@ -19,6 +19,18 @@ host-image-verify:
 
 host-boot-test: build
 	@./scripts/with-rocky-host.sh ./scripts/check-rocky-host.sh
+
+image-helper-fetch:
+	@./scripts/fetch-rocky-domain-helper.sh
+
+image-prepare:
+	@./scripts/prepare-rocky-domain.sh
+
+test-image:
+	@./scripts/test-rocky-domain.sh
+
+image-cache-clean:
+	rm -rf build/cache/domain
 
 build:
 	cargo build -p ginus-init --target $(X86_TARGET) --release
@@ -38,13 +50,16 @@ test-unit:
 test-intercept: build
 	@./scripts/with-rocky-host.sh ./scripts/test-intercept.sh
 
-test: check test-unit test-intercept
+test: check test-unit test-intercept test-image
 
 bench-baseline: build
 	@./scripts/with-rocky-host.sh ./scripts/bench-baseline.sh
 
 demo-gate-1: doctor build
 	@./scripts/with-rocky-host.sh ./scripts/demo-gate-1.sh
+
+demo-gate-2: doctor
+	@./scripts/demo-gate-2.sh
 
 clean:
 	cargo clean

@@ -3,7 +3,7 @@ set -eu
 
 . ./config/rocky-host-image.env
 
-image=build/cache/rocky/$ROCKY_IMAGE_NAME
+image=${ROCKY_IMAGE_PATH:-build/cache/rocky/$ROCKY_IMAGE_NAME}
 published=$(awk '/^SHA256 / {print $NF}' config/rocky-host-image.CHECKSUM)
 if [ "$published" != "$ROCKY_IMAGE_SHA256" ]; then
     printf '%s\n' 'tracked Rocky published checksum disagrees with image manifest' >&2
