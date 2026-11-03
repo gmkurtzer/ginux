@@ -19,6 +19,7 @@ name = "ginus-init"
 version = "0.1.0"
 dependencies = [
  "ginus-core",
+ "ginus-domain",
  "ginus-runtime",
 ]
 
