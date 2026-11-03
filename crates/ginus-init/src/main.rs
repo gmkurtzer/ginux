@@ -205,7 +205,8 @@ extern "C" fn rust_main(initial_stack: *const usize) -> ! {
         } else if argc >= 4 && c_string_equals(command, b"native") {
             let config_path = unsafe { *argv.add(2) as *const u8 };
             let root_path = unsafe { *argv.add(3) as *const u8 };
-            native_main(config_path, root_path);
+            let hold = argc >= 5 && c_string_equals(unsafe { *argv.add(4) as *const u8 }, b"hold");
+            native_main(config_path, root_path, hold);
         } else if argc >= 4 && c_string_equals(command, b"domain") {
             let config_path = unsafe { *argv.add(2) as *const u8 };
             let fixture_path = unsafe { *argv.add(3) as *const u8 };
@@ -367,7 +368,7 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
             .any(|window| window == needle)
 }
 
-fn native_main(config_path: *const u8, root_path: *const u8) -> ! {
+fn native_main(config_path: *const u8, root_path: *const u8, hold: bool) -> ! {
     let config = load_config(config_path);
     print_effective_config(&config);
     let mut domain = Domain::create(config);
@@ -379,18 +380,19 @@ fn native_main(config_path: *const u8, root_path: *const u8) -> ! {
         domain_fail(&mut domain, b"native tracee fork failed");
     }
     if child == 0 {
-        native_tracee(root_path);
+        native_tracee(root_path, hold);
     }
     supervise_native(child as usize, &mut domain)
 }
 
-fn native_tracee(root_path: *const u8) -> ! {
+fn native_tracee(root_path: *const u8, hold: bool) -> ! {
     static ROOT: &[u8] = b"/\0";
     static BASH: &[u8] = b"/usr/bin/bash\0";
     static ARG1: &[u8] = b"--noprofile\0";
     static ARG2: &[u8] = b"--norc\0";
     static ARG3: &[u8] = b"-c\0";
     static COMMAND: &[u8] = b"printf 'GINUS_NATIVE_SHELL: PASS\\n'\0";
+    static HOLD_COMMAND: &[u8] = b"printf 'GINUS_NATIVE_HOLD: READY\\n'; while :; do :; done\0";
     static ENV_PATH: &[u8] = b"PATH=/usr/bin:/bin\0";
     static ENV_HOME: &[u8] = b"HOME=/\0";
     static ENV_LOCALE: &[u8] = b"LC_ALL=C\0";
@@ -422,7 +424,11 @@ fn native_tracee(root_path: *const u8) -> ! {
         ARG1.as_ptr(),
         ARG2.as_ptr(),
         ARG3.as_ptr(),
-        COMMAND.as_ptr(),
+        if hold {
+            HOLD_COMMAND.as_ptr()
+        } else {
+            COMMAND.as_ptr()
+        },
         core::ptr::null(),
     ];
     let environment = [

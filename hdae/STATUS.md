@@ -123,6 +123,10 @@ scope, threat model, and invariants.
   `make test-oci-image` passed replacement, whiteout, opaque-directory,
   repeatability, integrity, identity, and offline checks. A fresh
   `make test-native-vfs` passed against the resulting assembled root.
+- The expanded native QEMU test also passed fail-closed supervisor loss: after
+  a held Rocky Bash reported readiness, killing Ginus caused
+  `PTRACE_O_EXITKILL` to remove the tracee. Normal execution, emulated `getpid`,
+  denied `getppid`, immutable Bash content, and cleanup passed in the same run.
 
 ## Open decisions and limitations
 
@@ -155,8 +159,8 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Resolve the native-backend VFS/descriptor boundary, then add fail-closed
-supervision-loss and remaining isolation/cleanup tests.
+Obtain human direction on the native-backend VFS/descriptor boundary, then add
+unexpected-stop and remaining isolation/cleanup tests.
 
 ## Context recovery
 
@@ -167,5 +171,6 @@ supervision-loss and remaining isolation/cleanup tests.
   progress on `hdae/virtual-vfs-userspace`
 - Last evidence: `make check`, `make test-unit`, `make test-oci-layers`,
   `make test-oci-image`, and a post-assembly `make test-native-vfs` passed on
-  2026-11-03
-- Required human decision: none until the next Gate 5 demonstration checkpoint
+  2026-11-03; the latest native run includes supervisor-loss verification
+- Required human decision: whether the native performance profile may use
+  kernel file descriptors confined to a private domain filesystem view

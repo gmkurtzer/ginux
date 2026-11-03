@@ -65,8 +65,9 @@ Ginus-owned immutable base and domain-local writable overlay.
 - [ ] Replace the bootstrap host-backed path and descriptor operations with the
   accepted Ginus-controlled VFS/descriptor boundary, or obtain explicit human
   approval for a revised native-backend boundary and criteria.
-- [ ] Add fail-closed supervision-loss, unexpected-stop, and attempted direct
-  syscall continuation tests.
+- [x] Added a fail-closed supervisor-loss test and explicit audit assertions for
+  emulated and denied syscalls before effect.
+- [ ] Add unexpected-stop and remaining ptrace-state tests.
 - [ ] Add isolation, traversal, overlay, malformed-file, and cleanup tests.
 
 ## Acceptance criteria
@@ -127,6 +128,10 @@ Ginus-owned immutable base and domain-local writable overlay.
 - After multi-layer assembly commit `19ade45`, `make check`, `make test-unit`,
   `make test-oci-layers`, and `make test-oci-image` passed. A fresh
   `make test-native-vfs` then passed against the assembled root in QEMU.
+- The expanded `make test-native-vfs` started a held Rocky Bash tracee, killed
+  the Ginus supervisor with `SIGKILL`, and verified `PTRACE_O_EXITKILL` removed
+  the tracee. The same run asserted virtual `getpid` and denied `getppid` audit
+  entries and passed normal cleanup.
 
 ## Decisions and limitations
 
@@ -168,7 +173,7 @@ Ginus-owned immutable base and domain-local writable overlay.
   root architecture to OCI; `287127e` added pinned OCI acquisition and root
   preparation; `b1a320e` connected the OCI root to Ginus and QEMU verification;
   `8e5847a` added the native ptrace Rocky loader and Bash proof; `19ade45`
-  added deterministic multi-layer OCI assembly
+  added deterministic multi-layer OCI assembly; supervisor-loss commit pending
 
 ## Review policy and outcome
 
