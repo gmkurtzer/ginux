@@ -23132,7 +23132,17 @@ fn linux_chdir(path_address: u64) -> u64 {
         Err(error) => return error,
     };
     let path = &path[..length];
+    // getname_flags(): an empty path is ENOENT (fs/namei.c:204).
+    if path.is_empty() {
+        return LINUX_ENOENT;
+    }
     if X86_RUNTIME.LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
+        let mut followed = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+        let path =
+            match linux_follow_overlay_symlink(u64::from(LINUX_AT_FDCWD), path, &mut followed) {
+                Ok((_, path)) => path,
+                Err(error) => return error,
+            };
         let mut canonical = [0_u8; crate::linux_overlay::PATH_CAPACITY];
         if let Ok(length) = linux_canonical_path_at(u64::from(LINUX_AT_FDCWD), path, &mut canonical)
         {
@@ -25304,7 +25314,14 @@ fn linux_overlay_stat(metadata: crate::linux_overlay::Metadata) -> [u8; LINUX_ST
 
 fn linux_openat(directory: u64, path_address: u64, flags: u64, mode: u64) -> u64 {
     let directory = u64::from(directory as u32);
-    let flags = u64::from(flags as u32);
+    // Like Linux build_open_how(), ignore bits outside VALID_OPEN_FLAGS and
+    // keep only O_PATH_FLAGS with O_PATH (fs/open.c:1213-1219). O_SYNC,
+    // O_DSYNC, O_DIRECT and O_ASYNC are accepted and have no effect here;
+    // O_EXCL without O_CREAT is ignored.
+    let mut flags = u64::from(flags as u32) & LINUX_VALID_OPEN_FLAGS;
+    if flags & LINUX_O_PATH != 0 {
+        flags &= LINUX_O_DIRECTORY | LINUX_O_NOFOLLOW | LINUX_O_PATH | LINUX_O_CLOEXEC;
+    }
     let mode = u64::from(mode as u32);
     let mut path = [0_u8; 256];
     let mut path_length = match copy_linux_c_string(path_address, &mut path) {
@@ -25313,22 +25330,7 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64, mode: u64) -> u64
     };
     let access = flags & 3;
     if access == 3
-        || flags
-            & !(3
-                | LINUX_O_CLOEXEC
-                | LINUX_O_NOCTTY
-                | LINUX_O_DIRECTORY
-                | LINUX_O_CREAT
-                | LINUX_O_EXCL
-                | LINUX_O_TRUNC
-                | LINUX_O_APPEND
-                | LINUX_O_NONBLOCK
-                | LINUX_O_LARGEFILE
-                | LINUX_O_NOFOLLOW
-                | LINUX_O_NOATIME
-                | LINUX_O_PATH)
-            != 0
-        || flags & LINUX_O_EXCL != 0 && flags & LINUX_O_CREAT == 0
+        || flags & LINUX_O_TMPFILE_BIT != 0
         // Linux build_open_flags() rejects O_CREAT|O_DIRECTORY before any
         // lookup, so nothing is created (fs/open.c:1279).
         || flags & (LINUX_O_CREAT | LINUX_O_DIRECTORY) == (LINUX_O_CREAT | LINUX_O_DIRECTORY)
@@ -25742,7 +25744,13 @@ fn linux_openat2(directory: u64, path_address: u64, how_address: u64, size: u64)
     let flags = u64::from_ne_bytes(how[..8].try_into().unwrap());
     let mode = u64::from_ne_bytes(how[8..16].try_into().unwrap());
     let resolve = u64::from_ne_bytes(how[16..24].try_into().unwrap());
-    if resolve != 0 || mode & !0o7777 != 0 || mode != 0 && flags & LINUX_O_CREAT == 0 {
+    // Unlike open(), openat2() rejects unknown flags, checked on the full
+    // 64-bit value before linux_openat() narrows it (fs/open.c:1254).
+    if flags & !LINUX_VALID_OPEN_FLAGS != 0
+        || resolve != 0
+        || mode & !0o7777 != 0
+        || mode != 0 && flags & LINUX_O_CREAT == 0
+    {
         return LINUX_EINVAL;
     }
     linux_openat(directory, path_address, flags, mode)
@@ -26049,6 +26057,79 @@ fn linux_open_by_handle_at(mount_descriptor: u64, handle_address: u64, flags: u6
     descriptor
 }
 
+/// Linux lookups follow a trailing symlink unless AT_SYMLINK_NOFOLLOW is set
+/// (fs/stat.c:288, fs/open.c:477, fs/open.c:554). The overlay lookups in the
+/// stat, access and chdir paths return the link itself, so resolve a
+/// trailing overlay symlink to an absolute path first. A relative target is
+/// resolved from the directory holding the link; more than MAXSYMLINKS (40)
+/// links is ELOOP.
+fn linux_follow_overlay_symlink<'a>(
+    directory: u64,
+    path: &'a [u8],
+    output: &'a mut [u8; crate::linux_overlay::PATH_CAPACITY],
+) -> Result<(u64, &'a [u8]), u64> {
+    let mut canonical = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+    let Ok(mut length) = linux_canonical_path_at(directory, path, &mut canonical) else {
+        return Ok((directory, path));
+    };
+    let mut followed = None;
+    let mut hops = 0;
+    while let Some(link) = crate::linux_overlay::lookup(&canonical[..length])
+        .filter(|metadata| metadata.kind == crate::linux_overlay::NodeKind::Symlink)
+    {
+        if hops == 40 {
+            return Err(LINUX_ELOOP);
+        }
+        hops += 1;
+        let mut target = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+        let target_length =
+            crate::linux_overlay::read(link.handle, 0, &mut target).ok_or(LINUX_EIO)?;
+        let target = &target[..target_length];
+        let mut raw = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+        let raw_length = if target.starts_with(b"/") {
+            raw[..target.len()].copy_from_slice(target);
+            target.len()
+        } else {
+            let parent = canonical[..length]
+                .iter()
+                .rposition(|byte| *byte == b'/')
+                .unwrap_or(0);
+            let end = parent + 2 + target.len();
+            if end > raw.len() {
+                return Err(LINUX_ENAMETOOLONG);
+            }
+            raw[0] = b'/';
+            raw[1..1 + parent].copy_from_slice(&canonical[..parent]);
+            raw[1 + parent] = b'/';
+            raw[2 + parent..end].copy_from_slice(target);
+            end
+        };
+        output[0] = b'/';
+        match linux_canonical_path_at(
+            u64::from(LINUX_AT_FDCWD),
+            &raw[..raw_length],
+            &mut canonical,
+        ) {
+            Ok(resolved) => {
+                length = resolved;
+                output[1..1 + length].copy_from_slice(&canonical[..length]);
+                followed = Some(1 + length);
+            }
+            // The link resolves to the root directory.
+            Err(LINUX_EISDIR) => {
+                followed = Some(1);
+                break;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    let output: &'a [u8; crate::linux_overlay::PATH_CAPACITY] = output;
+    Ok(match followed {
+        None => (directory, path),
+        Some(end) => (u64::from(LINUX_AT_FDCWD), &output[..end]),
+    })
+}
+
 fn linux_newfstatat(directory: u64, path_address: u64, stat_address: u64, flags: u64) -> u64 {
     let directory = u64::from(directory as u32);
     let flags = u64::from(flags as u32);
@@ -26071,6 +26152,20 @@ fn linux_newfstatat(directory: u64, path_address: u64, stat_address: u64, flags:
             LINUX_EFAULT
         };
     }
+    // getname_flags(): an empty path is ENOENT without AT_EMPTY_PATH
+    // (fs/namei.c:204).
+    if path.is_empty() {
+        return LINUX_ENOENT;
+    }
+    let mut followed = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+    let (directory, path) = if flags & LINUX_AT_SYMLINK_NOFOLLOW != 0 {
+        (directory, path)
+    } else {
+        match linux_follow_overlay_symlink(directory, path, &mut followed) {
+            Ok(resolved) => resolved,
+            Err(error) => return error,
+        }
+    };
     if let Some(kind) = linux_virtual_mount_path_at(directory, path) {
         let stat = if kind & LINUX_DEVICE_DIRECTORY != 0 {
             linux_stat(
@@ -27514,6 +27609,15 @@ fn linux_faccessat(directory: u64, path_address: u64, mode: u64, flags: u64) -> 
             || mode & 1 != 0 && permissions & 0o111 == 0;
         return if denied { LINUX_EACCES } else { 0 };
     }
+    let mut followed = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+    let (directory, path) = if flags & LINUX_AT_SYMLINK_NOFOLLOW != 0 {
+        (directory, path)
+    } else {
+        match linux_follow_overlay_symlink(directory, path, &mut followed) {
+            Ok(resolved) => resolved,
+            Err(error) => return error,
+        }
+    };
     if let Some(kind) = linux_virtual_mount_path_at(directory, path) {
         let denied = if kind & LINUX_DEVICE_DIRECTORY != 0 {
             mode & 2 != 0
@@ -27600,6 +27704,20 @@ fn linux_statx(directory: u64, path_address: u64, flags: u64, mask: u64, stat_ad
         Err(error) => return error,
     };
     let path = &path[..path_length];
+    // getname_flags(): an empty path is ENOENT without AT_EMPTY_PATH
+    // (fs/namei.c:204).
+    if path.is_empty() && flags & LINUX_AT_EMPTY_PATH == 0 {
+        return LINUX_ENOENT;
+    }
+    let mut followed = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+    let (directory, path) = if flags & LINUX_AT_SYMLINK_NOFOLLOW != 0 {
+        (directory, path)
+    } else {
+        match linux_follow_overlay_symlink(directory, path, &mut followed) {
+            Ok(resolved) => resolved,
+            Err(error) => return error,
+        }
+    };
     if let Some(kind) = linux_virtual_mount_path_at(directory, path) {
         let (inode, mode, size) = if kind & LINUX_DEVICE_DIRECTORY != 0 {
             (
@@ -33962,19 +34080,24 @@ fn linux_positioned_iov(
     descriptor: u64,
     vectors: u64,
     count: u64,
-    offset_low: u64,
-    offset_high: u64,
+    offset: u64,
     flags: u64,
     write: bool,
 ) -> u64 {
-    if offset_high != 0 || flags != 0 {
+    // On x86-64 pos_from_hilo() ignores pos_h, and do_preadv()/do_pwritev()
+    // reject a negative position (fs/read_write.c:1128, 1136). preadv2() and
+    // pwritev2() without flags dispatch pos == -1 to readv()/writev().
+    if (offset as i64) < -1 || offset as i64 == -1 && flags == 0 {
+        return LINUX_EINVAL;
+    }
+    if flags != 0 {
         return LINUX_EOPNOTSUPP;
     }
     let (ranges, vector_count) = match linux_socket_iov_ranges(vectors, count, !write) {
         Ok(ranges) => ranges,
         Err(error) => return error,
     };
-    let mut offset = offset_low;
+    let mut offset = offset;
     let mut total = 0_u64;
     for (address, length) in ranges[..vector_count].iter().copied() {
         let result = if write {
@@ -36019,7 +36142,10 @@ fn linux_descriptor_set_status_flags(
     argument: u64,
     supported: u64,
 ) -> u64 {
-    if argument & !(3 | supported) != 0 {
+    // Linux setfl() keeps only the SETFL_MASK bits and ignores the rest
+    // (fs/fcntl.c:37, 83). O_DIRECT stays EINVAL because neither direct I/O
+    // nor packetized pipes are implemented (fs/fcntl.c:61-64).
+    if argument & LINUX_O_DIRECT != 0 {
         return LINUX_EINVAL;
     }
     let current = flags.load(Ordering::SeqCst);

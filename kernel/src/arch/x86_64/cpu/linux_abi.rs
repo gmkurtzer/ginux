@@ -792,6 +792,29 @@ pub(super) const LINUX_O_LARGEFILE: u64 = 0x8000;
 pub(super) const LINUX_O_NOFOLLOW: u64 = 0x20000;
 pub(super) const LINUX_O_NOATIME: u64 = 0x40000;
 pub(super) const LINUX_O_PATH: u64 = 0x20_0000;
+pub(super) const LINUX_O_DSYNC: u64 = 0x1000;
+pub(super) const LINUX_O_ASYNC: u64 = 0x2000;
+pub(super) const LINUX_O_DIRECT: u64 = 0x4000;
+pub(super) const LINUX_O_SYNC: u64 = 0x10_0000 | LINUX_O_DSYNC;
+pub(super) const LINUX_O_TMPFILE_BIT: u64 = 0x40_0000;
+/// Linux VALID_OPEN_FLAGS without O_EMPTYPATH.
+pub(super) const LINUX_VALID_OPEN_FLAGS: u64 = 3
+    | LINUX_O_CREAT
+    | LINUX_O_EXCL
+    | LINUX_O_NOCTTY
+    | LINUX_O_TRUNC
+    | LINUX_O_APPEND
+    | LINUX_O_NONBLOCK
+    | LINUX_O_SYNC
+    | LINUX_O_ASYNC
+    | LINUX_O_DIRECT
+    | LINUX_O_LARGEFILE
+    | LINUX_O_DIRECTORY
+    | LINUX_O_NOFOLLOW
+    | LINUX_O_NOATIME
+    | LINUX_O_CLOEXEC
+    | LINUX_O_PATH
+    | LINUX_O_TMPFILE_BIT;
 pub(super) const LINUX_PR_SET_DUMPABLE: u64 = 4;
 pub(super) const LINUX_PR_GET_DUMPABLE: u64 = 3;
 pub(super) const LINUX_PR_SET_PDEATHSIG: u64 = 1;

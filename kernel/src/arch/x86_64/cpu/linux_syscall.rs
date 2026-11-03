@@ -452,39 +452,43 @@ pub(super) extern "sysv64" fn linux_syscall_handler(
             buffer,
             count,
         ),
-        LINUX_PREADV_SYSCALL => linux_positioned_iov(
-            first_argument,
-            buffer,
-            count,
-            register(0),
-            register(2),
-            0,
-            false,
-        ),
-        LINUX_PWRITEV_SYSCALL => linux_positioned_iov(
-            first_argument,
-            buffer,
-            count,
-            register(0),
-            register(2),
-            0,
-            true,
-        ),
+        LINUX_PREADV_SYSCALL => {
+            linux_positioned_iov(first_argument, buffer, count, register(0), 0, false)
+        }
+        LINUX_PWRITEV_SYSCALL => {
+            linux_positioned_iov(first_argument, buffer, count, register(0), 0, true)
+        }
+        LINUX_PREADV2_SYSCALL if register(0) == u64::MAX && register(1) == 0 => {
+            linux_descriptor_readv_live_return(
+                registers,
+                syscall_return,
+                first_argument,
+                buffer,
+                count,
+            )
+        }
         LINUX_PREADV2_SYSCALL => linux_positioned_iov(
             first_argument,
             buffer,
             count,
             register(0),
-            register(2),
             register(1),
             false,
         ),
+        LINUX_PWRITEV2_SYSCALL if register(0) == u64::MAX && register(1) == 0 => {
+            linux_descriptor_writev_live_return(
+                registers,
+                syscall_return,
+                first_argument,
+                buffer,
+                count,
+            )
+        }
         LINUX_PWRITEV2_SYSCALL => linux_positioned_iov(
             first_argument,
             buffer,
             count,
             register(0),
-            register(2),
             register(1),
             true,
         ),
