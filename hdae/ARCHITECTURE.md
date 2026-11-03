@@ -95,8 +95,12 @@ There is no direct-continue action.
 The initial root is prepared reproducibly from a checksum-pinned official Rocky
 Linux 10 cloud QCOW2 image. The source image is cached outside Git. Ginus
 presents a virtual root with an immutable prepared base and a domain-local
-writable overlay. The exact initial preparation and backing strategy is a Gate
-2 decision; it must not require network access during ordinary boot or tests.
+writable overlay. Gate 5 uses a persistent derived Rocky host QCOW2 provisioned
+once with the verified rootfs tar and Ginus index. Ordinary QEMU boots use a
+disposable overlay above that cached host image. Ginus reads the tar through a
+trusted host-owned handle and applies domain writes only to a bounded in-memory
+overlay; managed code receives neither the host path nor descriptor. Ordinary
+boot and tests require no network access.
 
 ### Virtual kernel filesystems
 
@@ -141,7 +145,6 @@ and idle overhead.
 
 ## Important open decisions
 
-- Rocky QCOW2 version, checksum, preparation tool, and virtual-root backing.
 - Initial network backend and packet mediation boundary.
 - Numeric performance budgets, set from reproducible baseline evidence before
   Gate 11 begins.
@@ -153,3 +156,7 @@ gate before implementation continues.
 
 Gate 4 selected strict, versioned TOML as the operator-facing domain
 configuration format with human approval on 2026-11-03.
+
+Gate 5 selected a persistent derived host QCOW2 containing the verified rootfs
+tar and index, with disposable per-boot QCOW overlays and a bounded in-memory
+domain write overlay, with human approval on 2026-11-03.

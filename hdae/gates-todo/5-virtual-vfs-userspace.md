@@ -33,11 +33,14 @@ domain-local writable overlay.
 
 ## Completed work
 
-- [ ] None; gate not started.
+- [x] Selected the initial backing model with human approval: a persistent
+  derived Rocky host QCOW2 caches the verified rootfs tar and Ginus index;
+  ordinary boots and domain writes remain disposable overlays.
 
 ## Remaining work
 
 - [ ] Implement virtual objects, path lookup, and descriptor semantics.
+- [ ] Provision and verify the persistent derived QCOW2 asset cache.
 - [ ] Connect the verified Rocky base and writable overlay.
 - [ ] Add dynamic ELF interpreter and library loading support.
 - [ ] Add isolation, traversal, overlay, malformed-file, and cleanup tests.
@@ -77,6 +80,11 @@ domain-local writable overlay.
   filesystem operations must fail explicitly rather than silently use host
   behavior.
 - Durable writable domain storage is deferred.
+- The trusted Rocky host can name the cached tar and index. Managed code can
+  name only virtual paths and receives no host path or descriptor authority.
+- Ordinary QEMU boots use a disposable overlay above the persistent derived
+  host QCOW2. Domain writes use a separate bounded in-memory overlay and cannot
+  modify either cached layer.
 
 ## Delivery strategy
 
