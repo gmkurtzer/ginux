@@ -218,7 +218,8 @@ Ginus-owned immutable base and domain-local writable overlay.
   added deterministic multi-layer OCI assembly; `43db983` added supervisor-loss
   protection; `1c18c36` added the approved balanced execution profile;
   `f151475` added unexpected-stop and final isolation checks; `bba01f9` added
-  the human demonstration and final technical evidence; delivery record pending
+  the human demonstration and final technical evidence; subsequent ledger
+  commits recorded delivery in pull request 5
 
 ## Review policy and outcome
 
