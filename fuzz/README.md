@@ -64,7 +64,7 @@ cargo fuzz coverage --target x86_64-unknown-linux-gnu oci_surfaces -- \
 
 - Evolved corpora (`fuzz/corpus/`), crash artifacts (`fuzz/artifacts/`) and
   coverage output are git-ignored; only the committed seed corpora and
-  dictionaries above are tracked (113 files, < 500 KB total).
+  dictionaries above are tracked (113 files, about 84 KB total).
 - The differential PAX/tar-crate harness explored during preparation is
   deliberately **not** part of this PR: it would add the `tar` crate and its
   transitive dependencies as an external dependency for review-side
