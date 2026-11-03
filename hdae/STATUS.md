@@ -83,8 +83,11 @@ scope, threat model, and invariants.
 
 ## Open decisions and limitations
 
-- `PTRACE_SYSEMU` is accepted only as the Gate 1 bootstrap experiment. The
-  final Ginus execution/task/memory design remains a Gate 3 decision.
+- Human direction selected the security-focused full x86-64 interpreter as the
+  Gate 3 baseline. Managed memory and registers are Ginus data, and managed
+  `syscall` instructions become internal events. Gate 4 will expose execution
+  profile/backend selection so future performance-focused domains can make a
+  different, explicitly documented trust tradeoff.
 - Rocky host image is pinned to official Rocky 10.2 GenericCloud build
   10.2-20260525.0. Gate 2 selected a pinned, network-disabled
   Docker/LinuxKit helper that mounts a temporary raw conversion read-only;
@@ -98,9 +101,9 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Create the Gate 3 branch from accepted Gate 2 state, implement the bounded ELF
-loader, domain memory model, syscall ABI/dispatcher, audit and denial paths,
-then verify them through `make test-runtime` and `make demo-gate-3`.
+Implement the bounded x86-64 interpreter, ELF loader, domain memory model,
+syscall ABI/dispatcher, audit and denial paths, then verify them through
+`make test-runtime` and `make demo-gate-3`.
 
 ## Context recovery
 

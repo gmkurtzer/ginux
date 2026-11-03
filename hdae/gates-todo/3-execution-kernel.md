@@ -31,7 +31,9 @@ and no direct host syscall access.
 
 ## Completed work
 
-- [ ] None; gate not started.
+- [x] Selected the security-focused baseline: a bounded x86-64 instruction
+  interpreter with Ginus-owned registers, memory, permissions, ELF loading,
+  stack construction, and syscall events.
 
 ## Remaining work
 
@@ -76,6 +78,13 @@ and no direct host syscall access.
   fixture is not a general Linux compatibility claim.
 - Contract configuration remains internal and test-oriented until Gate 10, but
   the central dispatch boundary is architectural and may not be bypassed.
+- The interpreter is intentionally a bounded static-program compatibility
+  profile, not a claim of complete x86-64 instruction coverage.
+- Gate 4 will make execution profile selection explicit. Gate 3 implements only
+  the security-focused interpreter; a performance-focused backend must be
+  added and reviewed separately before it can be selected.
+- Gate 3 is temporarily stacked on accepted Gate 2 commit `797b716` because
+  pull requests 1 and 2 remain open. Its intended eventual base remains `main`.
 
 ## Delivery strategy
 
