@@ -1242,6 +1242,11 @@ if ! grep -q '^ginux: Linux mmap domain quota enforced atomically' "$output_file
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux overlay domain quota lifecycle enforced' "$output_file"; then
+    echo "Boot test failed: Linux overlay domain quota lifecycle was not enforced." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux SysV domain quota enforced independently' "$output_file"; then
     echo "Boot test failed: Linux SysV domain quota was not enforced independently." >&2
     exit 1

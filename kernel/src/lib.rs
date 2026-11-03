@@ -1152,6 +1152,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("\r\nginux: Linux mmap domain quota invalid\r\n");
     }
     serial_write("\r\nginux: Linux mmap domain quota enforced atomically");
+    if !linux_overlay::verify_frame_quota() {
+        kernel_fail("\r\nginux: Linux overlay domain quota invalid\r\n");
+    }
+    serial_write("\r\nginux: Linux overlay domain quota lifecycle enforced");
     if !linux_sysv_ipc::verify_allocation_quota() {
         kernel_fail("\r\nginux: Linux SysV domain quota invalid\r\n");
     }
