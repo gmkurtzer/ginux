@@ -90,6 +90,8 @@ scope, threat model, and invariants.
   syscall 999 returned `-ENOSYS`, virtual `getpid` returned 4242, exit returned
   zero, and a truncated ELF was rejected before execution.
 - Human accepted Gate 3 on 2026-11-03. Gate 4 has not started.
+- Human authorized Gate 4 on 2026-11-03 and approved strict, versioned TOML as
+  its operator-facing configuration format.
 
 ## Open decisions and limitations
 
@@ -111,16 +113,16 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Provide the requested complete gate summary. Do not begin Gate 4 until the
-human explicitly directs advancement.
+Implement Gate 4 configuration parsing and normalization on
+`hdae/domain-config-lifecycle`, then implement and verify the lifecycle.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: none; Gate 3 is accepted and closed, and Gate 4 is the next
-  planned checkpoint but has not started
+- Active gate: Gate 4, domain configuration and lifecycle; authorized and in
+  progress on `hdae/domain-config-lifecycle`
 - Last evidence: Gate 3 demo and complete aggregate regression suite passed on
   2026-11-03
-- Required human decision: whether to begin Gate 4
+- Required human decision: none until the Gate 4 demonstration checkpoint

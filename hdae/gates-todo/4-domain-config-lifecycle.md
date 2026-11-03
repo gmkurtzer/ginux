@@ -33,13 +33,13 @@ lifecycle.
 
 ## Completed work
 
-- [ ] None; gate not started.
+- [x] Selected strict, versioned TOML as the operator-facing configuration
+  format with human approval on 2026-11-03.
 
 ## Remaining work
 
-- [ ] Select and document the serialization format.
 - [ ] Implement parsing, normalization, validation, and effective output.
-- [ ] Implement lifecycle state and host-PID-1 control behavior.
+- [ ] Implement lifecycle state and ordinary-host-process control behavior.
 - [ ] Add invalid-config, failure, cleanup, and restart tests.
 
 ## Acceptance criteria
@@ -77,8 +77,8 @@ lifecycle.
 
 ## Decisions and limitations
 
-- Schema syntax is intentionally selected in this gate; the semantic fields
-  listed above are already approved.
+- Strict TOML is the approved schema syntax. Unknown and duplicate fields are
+  rejected rather than ignored.
 - Runtime configuration mutation is deferred because it changes contract
   authority and audit requirements.
 
@@ -89,7 +89,7 @@ lifecycle.
 - Pull request: intended; dedicated branch push and PR creation authorized on
   2026-11-03; never merge or close without explicit authorization
 - Planned commits: versioned schema and normalization; lifecycle state machine;
-  PID-1 failure, cleanup, and configuration verification
+  ordinary-host-process failure, cleanup, and configuration verification
 - Actual commits: pending
 
 ## Review policy and outcome
