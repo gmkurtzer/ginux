@@ -46,12 +46,18 @@ Ginus-owned immutable base and domain-local writable overlay.
   virtually boots its userspace, and remains the execution runtime.
 - [x] Implemented the initial immutable index, virtual path/object, symlink,
   descriptor, and in-memory overlay foundations.
+- [x] Implemented explicit OCI acquisition and offline verification for the
+  pinned Rocky 10.2 linux/amd64 manifest, configuration, and layer.
+- [x] Verified the uncompressed OCI `diff_id`, built the Ginus root index, and
+  rejected missing and corrupt cache objects.
+- [x] Connected the OCI root and disposable write overlay to Ginus in the
+  emulated Rocky host; verified Rocky identity, Bash ELF access, teardown, and
+  rejection of a truncated VFS index.
 
 ## Remaining work
 
-- [ ] Implement explicit OCI acquisition, digest verification, cache identity,
-  deterministic layer assembly, and whiteout handling.
-- [ ] Connect the verified OCI root and writable overlay to the domain.
+- [ ] Generalize deterministic assembly beyond the selected single-layer image
+  and add synthetic OCI whiteout and opaque-directory tests.
 - [ ] Add dynamic ELF interpreter and library loading support.
 - [ ] Add isolation, traversal, overlay, malformed-file, and cleanup tests.
 
@@ -87,7 +93,18 @@ Ginus-owned immutable base and domain-local writable overlay.
 
 ## Evidence
 
-- Not run.
+- `make test-oci-image` passed six checks: pinned object digests and sizes,
+  verified `diff_id`, repeatable Ginus index, Rocky/Bash identity, corrupt and
+  missing cache rejection, and offline verification/preparation.
+- The pinned linux/amd64 OCI manifest is
+  `sha256:e372170ca8630f0f03e9b70fdd0bf4a3ce3426b0de7cdba615f06337389de176`;
+  its single layer expands to verified `diff_id`
+  `sha256:f0c7ff1acfc99a513a834c43874f79b8584ae074e5e56fa6aafc3dcf4f5ab428`.
+- `make test-vfs` passed inside the QEMU TCG Rocky host: Ginus resolved
+  `/etc/os-release` and `/usr/bin/bash` from the OCI root, created and removed
+  an overlay-only file, exposed no managed host path or descriptor, and
+  rejected a truncated index.
+- `make check` and `make test-unit` passed after the OCI/VFS integration.
 
 ## Decisions and limitations
 
@@ -100,6 +117,13 @@ Ginus-owned immutable base and domain-local writable overlay.
 - The Rocky cloud QCOW2 boots only the host and is not the domain root backing.
   Domain writes use a bounded in-memory overlay and cannot modify cached OCI
   objects or the immutable assembled root.
+- The selected Rocky image currently has one filesystem layer. Multi-layer
+  replacement, whiteout, and opaque-directory behavior remains mandatory
+  before Gate 5 can pass.
+- Open implementation decision: use Unicorn Engine 2 as Ginus's x86-64 CPU
+  interpreter core while retaining Ginus-owned memory, VFS, syscall dispatch,
+  policy, and lifecycle. This would replace expansion of the small handcrafted
+  Gate 3 instruction decoder, not delegate OCI runtime or host syscall access.
 
 ## Delivery strategy
 
@@ -111,7 +135,9 @@ Ginus-owned immutable base and domain-local writable overlay.
   immutable root assembly; domain overlay; dynamic loader compatibility and
   isolation tests
 - Actual commits: `4994fed` recorded the superseded derived-QCOW decision;
-  `c6e3124` implemented the reusable indexed VFS core; correction commit pending
+  `c6e3124` implemented the reusable indexed VFS core; `2b111fc` corrected the
+  root architecture to OCI; `287127e` added pinned OCI acquisition and root
+  preparation; `b1a320e` connected the OCI root to Ginus and QEMU verification
 
 ## Review policy and outcome
 

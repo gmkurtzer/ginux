@@ -106,6 +106,12 @@ scope, threat model, and invariants.
   explicitly pulls and caches the image, assembles its layers into an immutable
   indexed root, and supplies a bounded in-memory write overlay. An external OCI
   runtime must not execute managed code, and the host QCOW2 remains independent.
+- Gate 5 now has a verified pinned OCI acquisition/cache pipeline and a Ginus
+  immutable root index. `make test-oci-image` passed six acquisition,
+  integrity, identity, corruption, repeatability, and offline checks.
+- `make test-vfs` passed in the QEMU TCG Rocky host. Ginus resolved Rocky
+  identity and Bash from the OCI root, created and discarded its own overlay
+  file, kept the host filesystem unchanged, and rejected a truncated index.
 
 ## Open decisions and limitations
 
@@ -121,12 +127,18 @@ scope, threat model, and invariants.
   read-only, but remains trusted build tooling rather than a runtime boundary.
 - The repository and directory still use the historical `usshim` name; rename
   is not authorized in the current planning task.
+- The selected Rocky OCI image has one layer. General multi-layer whiteout and
+  opaque-directory assembly remains required before Gate 5 passes.
+- Running the real Rocky dynamic loader and Bash requires a substantially more
+  complete x86-64 execution engine than Gate 3's handcrafted fixture decoder.
+  The recommended implementation is Unicorn Engine 2 with its x86 syscall
+  hook, while Ginus retains memory ownership and all syscall/VFS dispatch.
 
 ## Exact next action
 
-Implement Gate 5 OCI acquisition and deterministic layer assembly, then connect
-the resulting immutable Rocky root to the virtual path/object model on
-`hdae/virtual-vfs-userspace`.
+Obtain human direction on integrating Unicorn Engine 2 as Ginus's CPU
+interpreter core. If approved, add the backend without changing the no-direct-
+host-syscall invariant, then implement dynamic-loader VFS/syscall support.
 
 ## Context recovery
 
@@ -137,4 +149,5 @@ the resulting immutable Rocky root to the virtual path/object model on
   progress on `hdae/virtual-vfs-userspace`
 - Last evidence: Gate 4 demo and complete aggregate regression suite passed on
   2026-11-03
-- Required human decision: none until the Gate 5 demonstration checkpoint
+- Required human decision: approve or reject Unicorn Engine 2 as the x86-64
+  interpreter core for real Rocky dynamic userspace
