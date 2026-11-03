@@ -1,0 +1,125 @@
+{
+  "probe": "context4a",
+  "cpus": 4,
+  "status": "RESPONSIVE",
+  "latency_seconds": 1.0557,
+  "response": "domain status s1probe\nName:        s1probe\nState:       booting\nPersonality: linux\nInit:        /context4a\nCPU:         4\nMemory MiB:  128\nAutostart:   false\nNetworks:    host(shared)      \nImage:       docker.io/library/alpine:latest\nConsole:     detached\nRootfs:      ready\nExecution:   idle\nginux> ",
+  "events": [
+    {
+      "seconds": 2.86,
+      "event": "command",
+      "command": "domain new s1probe"
+    },
+    {
+      "seconds": 2.9102,
+      "event": "command",
+      "command": "domain set s1probe image=alpine:latest init=/context4a cpu=4"
+    },
+    {
+      "seconds": 2.962,
+      "event": "command",
+      "command": "domain start s1probe"
+    },
+    {
+      "seconds": 4.0124,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 5.0681,
+      "event": "response",
+      "sample": 0,
+      "active": true
+    },
+    {
+      "seconds": 6.0682,
+      "event": "command",
+      "command": "domain stop s1probe"
+    },
+    {
+      "seconds": 6.1189,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 6.1691,
+      "event": "stopped",
+      "cycle": 0
+    },
+    {
+      "seconds": 6.1692,
+      "event": "command",
+      "command": "domain start s1probe"
+    },
+    {
+      "seconds": 7.2195,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 7.2697,
+      "event": "restarted",
+      "cycle": 0
+    },
+    {
+      "seconds": 7.2698,
+      "event": "command",
+      "command": "domain stop s1probe"
+    },
+    {
+      "seconds": 7.3202,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 7.3704,
+      "event": "stopped",
+      "cycle": 1
+    },
+    {
+      "seconds": 7.3704,
+      "event": "command",
+      "command": "domain start s1probe"
+    },
+    {
+      "seconds": 8.4211,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 8.4715,
+      "event": "restarted",
+      "cycle": 1
+    },
+    {
+      "seconds": 8.4716,
+      "event": "command",
+      "command": "domain stop s1probe"
+    },
+    {
+      "seconds": 8.522,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 8.5723,
+      "event": "stopped",
+      "cycle": 2
+    },
+    {
+      "seconds": 8.5724,
+      "event": "command",
+      "command": "domain start s1probe"
+    },
+    {
+      "seconds": 9.6228,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 9.673,
+      "event": "restarted",
+      "cycle": 2
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+Excerpt from make test on code commit 2659ba595fe8d5880f69816c56c29df4aff872ac.
+
+ginux: Linux user fault rax/rbx/rcx/rdx/rdi/rsi/rsp/rbp/r12/r13/r14/r15: 0 0 4212235 4215072 4215104 0 4234848 924951136 920458616 922281528 0 0
+ginux: Linux user fault r8/r9/r10/r11: 18446744073709551615 0 8 582
+ginux: Linux user fault stack return address: 1
+ginux: Linux user fault vector/error/address/rip:14 4 4239360 4195752
+ginux: Linux user fault rax/rbx/rcx/rdx/rdi/rsi/rsp/rbp/r12/r13/r14/r15: 0 729901195959685712 4195732 0 11 4202520 4233216 924951136 920458616 922281528 0 0
+ginux: Linux user fault r8/r9/r10/r11: 4096 8 8 582
+ginux: Linux user fault stack return address: 2
+ginux: Linux user fault rax/rbx/rcx/rdx/rdi/rsi/rsp/rbp/r12/r13/r14/r15: 0 0 4212235 4215072 4215104 0 4234848 924951136 920458616 922281528 0 0
+ginux: Linux user fault r8/r9/r10/r11: 18446744073709551615 0 8 582
+ginux: Linux user fault stack return address: 1
+ginux: Linux user fault rax/rbx/rcx/rdx/rdi/rsi/rsp/rbp/r12/r13/r14/r15: 0 0 4212235 4215072 4215104 0 4234848 924951136 920458616 922281528 0 0
+ginux: Linux user fault r8/r9/r10/r11: 18446744073709551615 0 8 582
+ginux: Linux user fault stack return address: 1
+ginux: Linux user fault rax/rbx/rcx/rdx/rdi/rsi/rsp/rbp/r12/r13/r14/r15: 0 0 4212235 4215072 4215104 0 4234848 924951136 920458616 922281528 0 0
+ginux: Linux user fault r8/r9/r10/r11: 18446744073709551615 0 8 582
+ginux: Linux user fault stack return address: 1
+ginux: Linux user fault vector/error/address/rip:6 0 0 4214196
+ginux: Linux user fault rax/rbx/rcx/rdx/rdi/rsi/rsp/rbp/r12/r13/r14/r15: 18446744073709551612 5 4214190 8 2 4218464 4234872 4215188 6390016 4190872 2 4190208
+ginux: Linux user fault r8/r9/r10/r11: 8 8 0 582
+ginux: Linux user fault stack return address: 4201167
+Boot test failed: initial boot did not prove native volume IOMMU lifecycle isolation.
+make: *** [Makefile:232: test] Error 1

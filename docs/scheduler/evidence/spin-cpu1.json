@@ -1,0 +1,444 @@
+{
+  "probe": "spin",
+  "cpus": 1,
+  "status": "RESPONSIVE",
+  "latency_seconds": 0.0502,
+  "response": "domain status s1probe\nName:        s1probe\nState:       booting\nPersonality: linux\nInit:        /spin\nCPU:         1\nMemory MiB:  128\nAutostart:   false\nNetworks:    host(shared)      \nImage:       docker.io/library/alpine:latest\nConsole:     detached\nRootfs:      ready\nExecution:   idle\nginux> ",
+  "events": [
+    {
+      "seconds": 3.2625,
+      "event": "command",
+      "command": "domain new s1probe"
+    },
+    {
+      "seconds": 3.3128,
+      "event": "command",
+      "command": "domain set s1probe image=alpine:latest init=/spin cpu=1"
+    },
+    {
+      "seconds": 3.3631,
+      "event": "command",
+      "command": "domain start s1probe"
+    },
+    {
+      "seconds": 4.4134,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 5.1167,
+      "event": "response",
+      "sample": 0,
+      "active": true
+    },
+    {
+      "seconds": 6.1169,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 6.1672,
+      "event": "response",
+      "sample": 1,
+      "active": true
+    },
+    {
+      "seconds": 7.1673,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 7.2176,
+      "event": "response",
+      "sample": 2,
+      "active": true
+    },
+    {
+      "seconds": 8.2178,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 8.2681,
+      "event": "response",
+      "sample": 3,
+      "active": true
+    },
+    {
+      "seconds": 9.2683,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 9.3185,
+      "event": "response",
+      "sample": 4,
+      "active": true
+    },
+    {
+      "seconds": 10.3187,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 10.3689,
+      "event": "response",
+      "sample": 5,
+      "active": true
+    },
+    {
+      "seconds": 11.3691,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 11.4193,
+      "event": "response",
+      "sample": 6,
+      "active": true
+    },
+    {
+      "seconds": 12.4195,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 12.4698,
+      "event": "response",
+      "sample": 7,
+      "active": true
+    },
+    {
+      "seconds": 13.4699,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 13.5202,
+      "event": "response",
+      "sample": 8,
+      "active": true
+    },
+    {
+      "seconds": 14.5204,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 14.5706,
+      "event": "response",
+      "sample": 9,
+      "active": true
+    },
+    {
+      "seconds": 15.5708,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 15.621,
+      "event": "response",
+      "sample": 10,
+      "active": true
+    },
+    {
+      "seconds": 16.6212,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 16.6714,
+      "event": "response",
+      "sample": 11,
+      "active": true
+    },
+    {
+      "seconds": 17.6716,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 17.7225,
+      "event": "response",
+      "sample": 12,
+      "active": true
+    },
+    {
+      "seconds": 18.7227,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 18.773,
+      "event": "response",
+      "sample": 13,
+      "active": true
+    },
+    {
+      "seconds": 19.7731,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 19.8234,
+      "event": "response",
+      "sample": 14,
+      "active": true
+    },
+    {
+      "seconds": 20.8235,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 20.8738,
+      "event": "response",
+      "sample": 15,
+      "active": true
+    },
+    {
+      "seconds": 21.874,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 21.9243,
+      "event": "response",
+      "sample": 16,
+      "active": true
+    },
+    {
+      "seconds": 22.9244,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 22.9747,
+      "event": "response",
+      "sample": 17,
+      "active": true
+    },
+    {
+      "seconds": 23.9749,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 24.0251,
+      "event": "response",
+      "sample": 18,
+      "active": true
+    },
+    {
+      "seconds": 25.0253,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 25.0756,
+      "event": "response",
+      "sample": 19,
+      "active": true
+    },
+    {
+      "seconds": 26.0757,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 26.126,
+      "event": "response",
+      "sample": 20,
+      "active": true
+    },
+    {
+      "seconds": 27.1262,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 27.1765,
+      "event": "response",
+      "sample": 21,
+      "active": true
+    },
+    {
+      "seconds": 28.1766,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 28.2269,
+      "event": "response",
+      "sample": 22,
+      "active": true
+    },
+    {
+      "seconds": 29.2271,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 29.2773,
+      "event": "response",
+      "sample": 23,
+      "active": true
+    },
+    {
+      "seconds": 30.2775,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 30.3285,
+      "event": "response",
+      "sample": 24,
+      "active": true
+    },
+    {
+      "seconds": 31.3287,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 31.3791,
+      "event": "response",
+      "sample": 25,
+      "active": true
+    },
+    {
+      "seconds": 32.3799,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 32.4302,
+      "event": "response",
+      "sample": 26,
+      "active": true
+    },
+    {
+      "seconds": 33.4304,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 33.4807,
+      "event": "response",
+      "sample": 27,
+      "active": true
+    },
+    {
+      "seconds": 34.4809,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 34.5311,
+      "event": "response",
+      "sample": 28,
+      "active": true
+    },
+    {
+      "seconds": 35.5313,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 35.5816,
+      "event": "response",
+      "sample": 29,
+      "active": true
+    },
+    {
+      "seconds": 36.5817,
+      "event": "command",
+      "command": "domain stop s1probe"
+    },
+    {
+      "seconds": 36.632,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 36.6822,
+      "event": "stopped",
+      "cycle": 0
+    },
+    {
+      "seconds": 36.6823,
+      "event": "command",
+      "command": "domain start s1probe"
+    },
+    {
+      "seconds": 37.7345,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 37.7848,
+      "event": "restarted",
+      "cycle": 0
+    },
+    {
+      "seconds": 37.7849,
+      "event": "command",
+      "command": "domain stop s1probe"
+    },
+    {
+      "seconds": 37.8352,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 37.8855,
+      "event": "stopped",
+      "cycle": 1
+    },
+    {
+      "seconds": 37.8856,
+      "event": "command",
+      "command": "domain start s1probe"
+    },
+    {
+      "seconds": 38.936,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 38.9862,
+      "event": "restarted",
+      "cycle": 1
+    },
+    {
+      "seconds": 38.9863,
+      "event": "command",
+      "command": "domain stop s1probe"
+    },
+    {
+      "seconds": 39.0366,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 39.0868,
+      "event": "stopped",
+      "cycle": 2
+    },
+    {
+      "seconds": 39.0869,
+      "event": "command",
+      "command": "domain start s1probe"
+    },
+    {
+      "seconds": 40.1376,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 40.1878,
+      "event": "restarted",
+      "cycle": 2
+    }
+  ]
+}

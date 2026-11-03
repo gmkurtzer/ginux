@@ -1,0 +1,147 @@
+{
+  "probe": "spin",
+  "cpus": 4,
+  "status": "RESPONSIVE",
+  "latency_seconds": 0.0507,
+  "response": "domain status s1probe\nName:        s1probe\nState:       booting\nPersonality: linux\nInit:        /spin\nCPU:         4\nMemory MiB:  128\nAutostart:   false\nNetworks:    host(shared)      \nImage:       docker.io/library/alpine:latest\nConsole:     detached\nRootfs:      ready\nExecution:   idle\nginux> ",
+  "events": [
+    {
+      "seconds": 3.7677,
+      "event": "command",
+      "command": "domain new s1probe"
+    },
+    {
+      "seconds": 3.8179,
+      "event": "command",
+      "command": "domain set s1probe image=alpine:latest init=/spin cpu=4"
+    },
+    {
+      "seconds": 3.8683,
+      "event": "command",
+      "command": "domain start s1probe"
+    },
+    {
+      "seconds": 4.9186,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 5.8232,
+      "event": "response",
+      "sample": 0,
+      "active": true
+    },
+    {
+      "seconds": 6.8269,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 6.8772,
+      "event": "response",
+      "sample": 1,
+      "active": true
+    },
+    {
+      "seconds": 7.8775,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 7.9282,
+      "event": "response",
+      "sample": 2,
+      "active": true
+    },
+    {
+      "seconds": 8.9284,
+      "event": "command",
+      "command": "domain stop s1probe"
+    },
+    {
+      "seconds": 8.9787,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 9.0289,
+      "event": "stopped",
+      "cycle": 0
+    },
+    {
+      "seconds": 9.029,
+      "event": "command",
+      "command": "domain start s1probe"
+    },
+    {
+      "seconds": 10.0793,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 10.1296,
+      "event": "restarted",
+      "cycle": 0
+    },
+    {
+      "seconds": 10.1297,
+      "event": "command",
+      "command": "domain stop s1probe"
+    },
+    {
+      "seconds": 10.1799,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 10.234,
+      "event": "stopped",
+      "cycle": 1
+    },
+    {
+      "seconds": 10.234,
+      "event": "command",
+      "command": "domain start s1probe"
+    },
+    {
+      "seconds": 11.2844,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 11.3347,
+      "event": "restarted",
+      "cycle": 1
+    },
+    {
+      "seconds": 11.3348,
+      "event": "command",
+      "command": "domain stop s1probe"
+    },
+    {
+      "seconds": 11.386,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 11.4362,
+      "event": "stopped",
+      "cycle": 2
+    },
+    {
+      "seconds": 11.4363,
+      "event": "command",
+      "command": "domain start s1probe"
+    },
+    {
+      "seconds": 12.4867,
+      "event": "command",
+      "command": "domain status s1probe"
+    },
+    {
+      "seconds": 12.5369,
+      "event": "restarted",
+      "cycle": 2
+    }
+  ]
+}

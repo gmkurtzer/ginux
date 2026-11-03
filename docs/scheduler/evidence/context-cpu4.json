@@ -1,0 +1,106 @@
+{
+  "cpus": 4,
+  "workers": 4,
+  "status": "PASS",
+  "events": [
+    {
+      "event": "command",
+      "seconds": 3.4286,
+      "command": "domain new s1a"
+    },
+    {
+      "event": "command",
+      "seconds": 3.4792,
+      "command": "domain set s1a image=alpine:latest init=/context4a cpu=4"
+    },
+    {
+      "event": "command",
+      "seconds": 3.53,
+      "command": "domain start s1a"
+    },
+    {
+      "event": "command",
+      "seconds": 3.5802,
+      "command": "domain new s1b"
+    },
+    {
+      "event": "command",
+      "seconds": 3.6817,
+      "command": "domain set s1b image=alpine:latest init=/context4b cpu=4"
+    },
+    {
+      "event": "command",
+      "seconds": 3.7825,
+      "command": "domain start s1b"
+    },
+    {
+      "event": "quiet_interval_start",
+      "seconds": 5.6891,
+      "duration": 30.0
+    },
+    {
+      "event": "quiet_interval_end",
+      "seconds": 35.7216
+    },
+    {
+      "event": "command",
+      "seconds": 35.7217,
+      "command": "domain status s1a"
+    },
+    {
+      "event": "domain_status",
+      "seconds": 35.7721,
+      "name": "s1a",
+      "response": "domain status s1a\nName:        s1a\nState:       running\nPersonality: linux\nInit:        /context4a\nCPU:         4\nMemory MiB:  128\nAutostart:   false\nNetworks:    host(shared)      \nImage:       docker.io/library/alpine:latest\nConsole:     detached\nRootfs:      ready\nExecution:   idle\nginux> "
+    },
+    {
+      "event": "command",
+      "seconds": 35.7721,
+      "command": "domain status s1b"
+    },
+    {
+      "event": "domain_status",
+      "seconds": 35.8223,
+      "name": "s1b",
+      "response": "domain status s1b\nName:        s1b\nState:       running\nPersonality: linux\nInit:        /context4b\nCPU:         4\nMemory MiB:  128\nAutostart:   false\nNetworks:    host(shared)      \nImage:       docker.io/library/alpine:latest\nConsole:     detached\nRootfs:      ready\nExecution:   idle\nginux> "
+    },
+    {
+      "event": "command",
+      "seconds": 35.8224,
+      "command": "domain attach s1a"
+    },
+    {
+      "event": "context_pass",
+      "seconds": 35.8729,
+      "name": "s1a",
+      "workers": 4,
+      "cpu_mask": 15,
+      "seed": 4951,
+      "report": "domain attach s1a\n\u001b[2J\u001b[Hginux: checking OCI cache docker.io/library/alpine:latest\nginux: OCI cache hit (1 layer)\nginux: timing OCI cache restore: 138 ms\nginux: OCI unpacking image filesystem\nginux: timing OCI unpack/publish: 64 ms\nginux: timing OCI total: 228 ms\nginux: OCI image ready\nginux: local configuration committed (generation 1)\nginux: starting configured runtime domain\nginux: entering configured Linux init\nginux: timing domain-start-to-Linux-init-entry: 0 ms\nS1_CONTEXT_PASS workers=4 cpu_mask=15 error=0 seed=4951 elapsed_us=13651221\n"
+    },
+    {
+      "event": "command",
+      "seconds": 35.8729,
+      "command": "x"
+    },
+    {
+      "event": "command",
+      "seconds": 35.9232,
+      "command": "domain attach s1b"
+    },
+    {
+      "event": "context_pass",
+      "seconds": 35.9735,
+      "name": "s1b",
+      "workers": 4,
+      "cpu_mask": 15,
+      "seed": 27368,
+      "report": "domain attach s1b\n\u001b[2J\u001b[Hginux: checking OCI cache docker.io/library/alpine:latest\nginux: OCI cache hit (published root filesystem)\nginux: timing OCI cache restore: 0 ms\nginux: timing OCI unpack/publish: 0 ms\nginux: timing OCI total: 0 ms\nginux: OCI image ready\nginux: local configuration committed (generation 2)\nginux: starting configured runtime domain\nginux: entering configured Linux init\nginux: timing domain-start-to-Linux-init-entry: 0 ms\nS1_CONTEXT_PASS workers=4 cpu_mask=15 error=0 seed=27368 elapsed_us=13446280\n"
+    },
+    {
+      "event": "command",
+      "seconds": 35.9735,
+      "command": "x"
+    }
+  ]
+}
