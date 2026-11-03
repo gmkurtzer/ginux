@@ -4,14 +4,14 @@
 
 - Active skill: `.agents/skills/hdae-development/SKILL.md`
 - Reload required after compaction, reset, resume, or handoff: yes
-- Active project: issue #62 synchronous poll budget
-- Branch: `hdae/issue-62-poll-budget`
+- Active project: issue #63 registry DNS entropy and response binding
+- Branch: `hdae/issue-63-registry-dns-entropy`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 40, synchronous poll budget
-- Last completed action: `make check` and `make test` passed and Gate 40 was
-  delivered through PR #70
-- Next action: begin Gate 41 for issue #63 while PR #70 awaits GitHub checks and
-  a subsequent unchanged-head review
+- Active gate: none; Gates 41 and 42 are technically complete on PR #73
+- Last completed action: removed the unauthenticated DNS fallback, added
+  RDRAND-backed kernel interface entropy, and passed `make check` and `make test`
+- Next action: publish the repaired exact head for GitHub checks and a later
+  unchanged-head review
 
 ## Current repository state
 

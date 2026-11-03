@@ -2,7 +2,7 @@ use core::{
     cell::UnsafeCell,
     fmt::Write as _,
     ptr::{read_volatile, write_volatile},
-    sync::atomic::{compiler_fence, AtomicU32, AtomicU64, Ordering},
+    sync::atomic::{compiler_fence, AtomicU64, Ordering},
 };
 
 use base64ct::{Base64, Encoding};
@@ -60,9 +60,6 @@ struct RegistryServiceOwner {
     timestamp_origin: AtomicU64,
     network_clock_polls: AtomicU64,
     network_clock_milliseconds: AtomicU64,
-    dns_fallback_a: AtomicU32,
-    dns_fallback_state: AtomicU32,
-    dns_query_sent: AtomicU32,
     tcp_rx: UnsafeCell<[u8; TCP_BUFFER_SIZE]>,
     tcp_tx: UnsafeCell<[u8; TCP_BUFFER_SIZE]>,
     dns_queries: UnsafeCell<[Option<dns::DnsQuery>; 1]>,
@@ -83,9 +80,6 @@ static REGISTRY_SERVICE: RegistryServiceOwner = RegistryServiceOwner {
     timestamp_origin: AtomicU64::new(0),
     network_clock_polls: AtomicU64::new(0),
     network_clock_milliseconds: AtomicU64::new(0),
-    dns_fallback_a: AtomicU32::new(0),
-    dns_fallback_state: AtomicU32::new(0),
-    dns_query_sent: AtomicU32::new(0),
     tcp_rx: UnsafeCell::new([0; TCP_BUFFER_SIZE]),
     tcp_tx: UnsafeCell::new([0; TCP_BUFFER_SIZE]),
     dns_queries: UnsafeCell::new([None]),
@@ -104,13 +98,17 @@ pub(crate) unsafe fn pull(info: &NativeNetworkBootV8) -> bool {
         .store(info.unix_time, Ordering::Release);
     progress(b"initializing registry network stack");
     start_network_clock();
+    let Some(interface_entropy) = tls_seed() else {
+        progress(b"registry TLS hardware entropy unavailable");
+        return false;
+    };
     let Some(mut device) = VirtioNet::new(info) else {
         progress(b"registry network device initialization failed");
         return false;
     };
     let mac = info.mac_address.to_be_bytes();
     let mut config = Config::new(EthernetAddress(mac[2..].try_into().unwrap()).into());
-    config.random_seed = info.unix_time ^ u64::from(info.ipv4);
+    config.random_seed = u64::from_ne_bytes(interface_entropy[..8].try_into().unwrap());
     let mut interface = Interface::new(config, &mut device, Instant::from_millis(0));
     let ip = info.ipv4.to_be_bytes();
     interface.update_ip_addrs(|addresses| {
@@ -1441,12 +1439,7 @@ fn resolve(
     sockets: &mut SocketSet<'static>,
     handle: SocketHandle,
 ) -> Option<IpAddress> {
-    for attempt in 0..3 {
-        REGISTRY_SERVICE.dns_fallback_a.store(0, Ordering::Release);
-        REGISTRY_SERVICE
-            .dns_fallback_state
-            .store(0, Ordering::Release);
-        REGISTRY_SERVICE.dns_query_sent.store(0, Ordering::Release);
+    for _ in 0..3 {
         // smoltcp stamps the query timeout from the last poll; refresh it so
         // time spent outside the stack does not expire the query at once.
         let _ = interface.poll(network_now(), device, sockets);
@@ -1469,13 +1462,6 @@ fn resolve(
                 break;
             }
             let _ = interface.poll(now, device, sockets);
-            let fallback = REGISTRY_SERVICE.dns_fallback_a.swap(0, Ordering::AcqRel);
-            if fallback != 0 {
-                sockets.get_mut::<dns::Socket>(handle).cancel_query(query);
-                return Some(IpAddress::Ipv4(Ipv4Address::from_octets(
-                    fallback.to_be_bytes(),
-                )));
-            }
             match sockets
                 .get_mut::<dns::Socket>(handle)
                 .get_query_result(query)
@@ -1496,16 +1482,6 @@ fn resolve(
         }
         if pending {
             sockets.get_mut::<dns::Socket>(handle).cancel_query(query);
-        }
-        if attempt == 2 {
-            let mut message = String::<96>::new();
-            let _ = write!(
-                message,
-                "registry DNS response rejected (wire state {}, query sent {})",
-                REGISTRY_SERVICE.dns_fallback_state.load(Ordering::Acquire),
-                REGISTRY_SERVICE.dns_query_sent.load(Ordering::Acquire),
-            );
-            progress(message.as_bytes());
         }
     }
     None
@@ -1703,11 +1679,6 @@ impl RxToken for VirtioRxToken {
                 (device.dma + RX_BUFFER_OFFSET as usize + TX_HEADER_LENGTH) as *const u8,
                 self.1,
             );
-            if let Some(address) = first_dns_a_record(bytes) {
-                REGISTRY_SERVICE
-                    .dns_fallback_a
-                    .store(address, Ordering::Release);
-            }
             let result = callback(bytes);
             device.rx_used = device.rx_used.wrapping_add(1);
             device.post_receive();
@@ -1717,103 +1688,6 @@ impl RxToken for VirtioRxToken {
 
     fn meta(&self) -> PacketMeta {
         PacketMeta::default()
-    }
-}
-
-fn is_dns_query(frame: &[u8]) -> bool {
-    let Some(protocol) = frame.get(23) else {
-        return false;
-    };
-    if frame.get(12..14) != Some(&[0x08, 0x00]) || *protocol != 17 {
-        return false;
-    }
-    let header_length = usize::from(frame[14] & 0x0f) * 4;
-    let udp = 14 + header_length;
-    frame
-        .get(udp + 2..udp + 4)
-        .and_then(|bytes| bytes.try_into().ok())
-        .map(u16::from_be_bytes)
-        == Some(53)
-}
-
-fn first_dns_a_record(frame: &[u8]) -> Option<u32> {
-    if frame.len() < 14 + 20 + 8 + 12
-        || u16::from_be_bytes(frame[12..14].try_into().ok()?) != 0x0800
-    {
-        return None;
-    }
-    let ip = 14;
-    let header_length = usize::from(frame[ip] & 0x0f).checked_mul(4)?;
-    if header_length < 20 || frame.get(ip + 9).copied()? != 17 {
-        return None;
-    }
-    let udp = ip.checked_add(header_length)?;
-    if u16::from_be_bytes(frame.get(udp..udp + 2)?.try_into().ok()?) != 53 {
-        return None;
-    }
-    REGISTRY_SERVICE
-        .dns_fallback_state
-        .store(1, Ordering::Release);
-    let dns = udp.checked_add(8)?;
-    let message = frame.get(dns..)?;
-    let flags = u16::from_be_bytes(message.get(2..4)?.try_into().ok()?);
-    if flags & 0x8000 == 0 {
-        return None;
-    }
-    REGISTRY_SERVICE
-        .dns_fallback_state
-        .store(2, Ordering::Release);
-    if flags & 0x000f != 0 {
-        REGISTRY_SERVICE
-            .dns_fallback_state
-            .store(10 + u32::from(flags & 0x000f), Ordering::Release);
-        return None;
-    }
-    let questions = usize::from(u16::from_be_bytes(message.get(4..6)?.try_into().ok()?));
-    let answers = usize::from(u16::from_be_bytes(message.get(6..8)?.try_into().ok()?));
-    let authority = usize::from(u16::from_be_bytes(message.get(8..10)?.try_into().ok()?));
-    let additional = usize::from(u16::from_be_bytes(message.get(10..12)?.try_into().ok()?));
-    let mut cursor = 12;
-    for _ in 0..questions {
-        cursor = skip_dns_name(message, cursor)?.checked_add(4)?;
-        message.get(..cursor)?;
-    }
-    for _ in 0..answers.checked_add(authority)?.checked_add(additional)? {
-        cursor = skip_dns_name(message, cursor)?;
-        let record_type = u16::from_be_bytes(message.get(cursor..cursor + 2)?.try_into().ok()?);
-        let class = u16::from_be_bytes(message.get(cursor + 2..cursor + 4)?.try_into().ok()?);
-        let length = usize::from(u16::from_be_bytes(
-            message.get(cursor + 8..cursor + 10)?.try_into().ok()?,
-        ));
-        let data = cursor.checked_add(10)?;
-        let end = data.checked_add(length)?;
-        let bytes = message.get(data..end)?;
-        if record_type == 1 && class == 1 && length == 4 {
-            return Some(u32::from_be_bytes(bytes.try_into().ok()?));
-        }
-        cursor = end;
-    }
-    REGISTRY_SERVICE
-        .dns_fallback_state
-        .store(4, Ordering::Release);
-    None
-}
-
-fn skip_dns_name(message: &[u8], mut cursor: usize) -> Option<usize> {
-    loop {
-        let length = *message.get(cursor)?;
-        if length == 0 {
-            return cursor.checked_add(1);
-        }
-        if length & 0xc0 == 0xc0 {
-            message.get(cursor + 1)?;
-            return cursor.checked_add(2);
-        }
-        if length & 0xc0 != 0 || length > 63 {
-            return None;
-        }
-        cursor = cursor.checked_add(1 + usize::from(length))?;
-        message.get(..cursor)?;
     }
 }
 
@@ -1834,9 +1708,6 @@ impl TxToken for VirtioTxToken {
                 length,
             );
             let result = callback(bytes);
-            if is_dns_query(bytes) {
-                REGISTRY_SERVICE.dns_query_sent.store(1, Ordering::Release);
-            }
             write_u64(
                 device.dma + TX_DESC_OFFSET as usize,
                 device.dma_device + TX_BUFFER_OFFSET,
