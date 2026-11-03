@@ -144,6 +144,9 @@ scope, threat model, and invariants.
 - `make demo-gate-5` passed all eight named checks and reported its explicit
   non-claims. A fresh aggregate `make test` also passed all earlier-gate lint,
   unit, QEMU interception/runtime/config/domain, and image-pipeline regressions.
+- Gate 5 is delivered in open pull request
+  https://github.com/gmkurtzer/usshim/pull/5 from dedicated branch
+  `hdae/virtual-vfs-userspace`. It is not merged or closed.
 
 ## Open decisions and limitations
 
@@ -176,8 +179,8 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Commit the final Gate 5 demonstration/evidence, push the dedicated branch, open
-its pull request, record the URL, and stop for human acceptance.
+Human runs or reviews `make demo-gate-5` and pull request 5, then explicitly
+accepts Gate 5 or requests corrections.
 
 ## Context recovery
 
@@ -185,8 +188,8 @@ its pull request, record the URL, and stop for human acceptance.
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
 - Active gate: Gate 5, virtual VFS and dynamic userspace; authorized and in
-  technical-pass state on `hdae/virtual-vfs-userspace`; awaiting delivery and
-  human acceptance
+  passed/delivered state on `hdae/virtual-vfs-userspace`; awaiting human
+  acceptance
 - Last evidence: `make check`, `make test-unit`, `make test-oci-layers`,
   `make test-oci-image`, and a post-assembly `make test-native-vfs` passed on
   2026-11-03; the latest native run includes balanced negative probes and

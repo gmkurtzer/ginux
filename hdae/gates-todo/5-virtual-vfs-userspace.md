@@ -76,8 +76,8 @@ Ginus-owned immutable base and domain-local writable overlay.
 - [x] Added isolation, traversal, overlay, malformed-file, and cleanup tests.
 - [x] Added `make demo-gate-5` with eight named human-readable checks and
   explicit non-claims.
-- [ ] Deliver the dedicated branch and pull request, then obtain human
-  acceptance at the Gate 5 checkpoint.
+- [x] Delivered the dedicated branch and pull request.
+- [ ] Obtain human acceptance at the Gate 5 checkpoint.
 
 ## Acceptance criteria
 
@@ -205,8 +205,8 @@ Ginus-owned immutable base and domain-local writable overlay.
 
 - Working branch: `hdae/virtual-vfs-userspace`
 - Intended base: `main`
-- Pull request: intended; dedicated branch push and PR creation authorized on
-  2026-11-03; never merge or close without explicit authorization
+- Pull request: https://github.com/gmkurtzer/usshim/pull/5; open and awaiting
+  review; never merge or close without explicit authorization
 - Planned commits: virtual path and descriptor model; OCI acquisition and
   immutable root assembly; domain overlay; dynamic loader compatibility and
   isolation tests
@@ -217,12 +217,12 @@ Ginus-owned immutable base and domain-local writable overlay.
   `8e5847a` added the native ptrace Rocky loader and Bash proof; `19ade45`
   added deterministic multi-layer OCI assembly; `43db983` added supervisor-loss
   protection; `1c18c36` added the approved balanced execution profile;
-  `f151475` added unexpected-stop and final isolation checks; demonstration and
-  final evidence commit pending
+  `f151475` added unexpected-stop and final isolation checks; `bba01f9` added
+  the human demonstration and final technical evidence; delivery record pending
 
 ## Review policy and outcome
 
 Human checkpoint because host-backed files are a security boundary and the
 accepted VFS model constrains later device and systemd behavior. Present
 `make demo-gate-5`, fresh evidence, and the pull request before acceptance.
-Technical status: passed on 2026-11-03; awaiting delivery and human acceptance.
+Technical status: passed and delivered on 2026-11-03; awaiting human acceptance.
