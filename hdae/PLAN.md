@@ -45,8 +45,8 @@ replace it.
    normalization, create/start/inspect/stop, resources, and failure behavior.
 5. **OCI-backed virtual VFS and native dynamic userspace**: explicit OCI
    acquisition, verified cached layers, virtual descriptors, immutable root and
-   writable overlay, and a Rocky shell executed by the host under continuous
-   ptrace syscall-entry/exit supervision.
+   writable overlay, and a Rocky shell executed with the balanced profile under
+   continuous ptrace syscall-entry/exit supervision.
 6. **Device ownership and virtual hardware**: virtual `/dev`, console, block
    or bounded partition, virtual networking, exclusivity, revocation, and
    device-path benchmarks.

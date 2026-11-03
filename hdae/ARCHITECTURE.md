@@ -29,8 +29,11 @@ Ginus.
    mediated host operation, or denies the request.
 4. Managed pointers, structures, strings, and ioctl payloads are copied through
    the active backend's controlled memory-access path and validated before use.
-5. Managed descriptor numbers resolve only to Ginus objects. Host descriptors
-   are never installed into or disclosed to managed code.
+5. Security-profile descriptor numbers resolve only to Ginus objects. The
+   balanced native profile may use kernel descriptors solely for immutable OCI
+   image content and an explicitly assigned bootstrap console inside a private
+   domain filesystem view. Their use remains syscall-mediated; supervisor or
+   unrelated host descriptors and host paths are never disclosed.
 6. `/dev`, `/proc`, `/sys`, cgroups, mounts, process identities, and machine
    identity are derived from Ginus state.
 7. Device assignment is explicit and exclusive by default. Domain teardown
@@ -77,6 +80,22 @@ deferred as the alternative path for returning CPU and memory execution to
 Ginus while retaining the same contract dispatcher. KVM acceleration remains
 outside the initial milestone.
 
+Execution profile and syscall action are separate choices:
+
+- **Security:** Ginus interprets instructions; syscalls are emulated, proxied,
+  or denied, and descriptors remain Ginus-virtual.
+- **Balanced:** the host executes instructions under ptrace. A minimal,
+  validated set of read-only loader, immutable-image, memory, signal, and
+  bootstrap-console operations may continue inside a private domain view.
+  Writable storage, devices, networking, ioctls, credentials, and virtual
+  kernel state are emulated, proxied through Ginus objects, or denied.
+- **Performance:** native execution may use a broader validated passthrough set,
+  but only after explicit configuration, benchmarks, and security review.
+
+Gate 5 implements the balanced profile. Backend selection may later be made per
+process, but mixed interpreter/native process semantics are not part of this
+gate.
+
 ### Domain memory and task model
 
 Ginus owns the domain's virtual identities, descriptors, devices, contract, and
@@ -99,7 +118,9 @@ decision has one of these effects:
 - **Audit:** record the decision, relevant normalized arguments, result, domain
   identity, and contract version without leaking secrets.
 
-There is no direct-continue action.
+There is no unchecked direct-continue action. Balanced and performance
+passthrough are explicit contract decisions after argument and authority
+validation, and their exits are observed and audited.
 
 ### Virtual VFS and image backend
 
@@ -182,3 +203,8 @@ showed that approved passthrough syscalls require syscall-entry/exit supervision
 `PTRACE_SYSEMU` skips the syscall even when followed by `PTRACE_SYSCALL`. The
 host execution surface is an explicit limitation. Unicorn Engine remains a
 deferred alternative backend, not a discarded design.
+
+Gate 5 selected the balanced execution profile with human approval on
+2026-11-03. Native tracees may hold kernel descriptors only for immutable image
+content and an assigned bootstrap console within a private domain filesystem
+view. Security-sensitive interfaces remain virtualized, proxied, or denied.

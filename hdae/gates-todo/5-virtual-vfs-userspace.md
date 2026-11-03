@@ -27,8 +27,13 @@ Ginus-owned immutable base and domain-local writable overlay.
 - Pass the selected ELF and image-provided dynamic loader to the host kernel for
   native execution under continuous ptrace syscall-entry/exit supervision.
   Every syscall must stop before host effect and resolve through Ginus dispatch.
-- Prevent managed code from learning or receiving host paths and descriptors as
-  authority.
+- Implement the approved balanced profile: native instruction execution with
+  confined passthrough only for the minimal read-only loader, immutable-image,
+  memory, signal, and bootstrap-console surface. Writable storage, devices,
+  networking, ioctls, credentials, and virtual kernel state remain emulated,
+  proxied through Ginus objects, or denied.
+- Prevent managed code from learning host paths or receiving supervisor and
+  unrelated host descriptors as authority.
 
 ## Non-goals
 
@@ -62,9 +67,9 @@ Ginus-owned immutable base and domain-local writable overlay.
 - [x] Enabled the native `ptrace-native` backend and proved the image-provided
   dynamic loader, libraries, and Bash execute from a read-only OCI bootstrap
   view with entry/exit audit and fail-closed contract decisions.
-- [ ] Replace the bootstrap host-backed path and descriptor operations with the
-  accepted Ginus-controlled VFS/descriptor boundary, or obtain explicit human
-  approval for a revised native-backend boundary and criteria.
+- [x] Enforced and tested the approved balanced boundary: kernel descriptors are
+  confined to immutable OCI content and the assigned bootstrap console;
+  sensitive interfaces cannot use native passthrough.
 - [x] Added a fail-closed supervisor-loss test and explicit audit assertions for
   emulated and denied syscalls before effect.
 - [ ] Add unexpected-stop and remaining ptrace-state tests.
@@ -87,8 +92,12 @@ Ginus-owned immutable base and domain-local writable overlay.
   domain without allowing an unsupervised workload to continue.
 - Path traversal, symlink loops, invalid descriptors, permission failures, and
   overlay deletion behave deterministically for the documented profile.
-- Managed descriptor values cannot be used as host descriptors, and host paths
-  are absent from the managed ABI and audit output unless explicitly sanitized.
+- Under the balanced profile, kernel descriptor values are usable only through
+  validated operations on immutable OCI content or the assigned bootstrap
+  console inside the private domain view. Ginus/supervisor descriptors and host
+  paths are absent from the managed ABI and sanitized audit output.
+- Writable storage, devices, networking, ioctls, credentials, and virtual
+  kernel state do not use native passthrough in the balanced profile.
 - Domain teardown releases open objects and removes its disposable overlay.
 - Earlier runtime, configuration, image, and interception tests remain passing.
 - `make demo-gate-5` lets a human run the selected Rocky dynamic program and
@@ -99,6 +108,8 @@ Ginus-owned immutable base and domain-local writable overlay.
 - `make test-vfs` -> path, descriptor, overlay, isolation, malformed-input, and
   teardown tests pass.
 - `make test-runtime` -> static and selected dynamic Rocky fixtures pass.
+- Balanced-profile negative tests -> mutation flags, ioctls, networking,
+  credential changes, and unknown operations are denied before host effect.
 - Cached OCI-object integrity comparison before and after VFS tests ->
   unchanged.
 - `make test` with network disabled -> exits zero.
@@ -132,6 +143,13 @@ Ginus-owned immutable base and domain-local writable overlay.
   the Ginus supervisor with `SIGKILL`, and verified `PTRACE_O_EXITKILL` removed
   the tracee. The same run asserted virtual `getpid` and denied `getppid` audit
   entries and passed normal cleanup.
+- After balanced-profile approval, `make check` and `make test-unit` passed the
+  new profile/configuration, syscall-surface classification, mutation-flag,
+  W+X, ioctl, networking, credential-change, and unknown-syscall checks.
+  `make test-native-vfs` then passed in QEMU with classified immutable-image and
+  bootstrap-console passthrough, virtual PID/UID/GID/parent identity, denied
+  ioctl, a denied `O_CREAT` probe with no resulting file, a denied socket probe,
+  and the existing supervisor-loss check.
 
 ## Decisions and limitations
 
@@ -153,8 +171,15 @@ Ginus-owned immutable base and domain-local writable overlay.
   explicitly validated syscall implementations; Ginus does not claim a
   userspace-only CPU or memory boundary on this path.
 - The current Bash proof uses a read-only, unprivileged chroot bootstrap view.
-  Its host-backed pathname and descriptor operations do not yet satisfy Gate 5's
-  final Ginus-owned VFS/descriptor criterion.
+  Human direction on 2026-11-03 approved evolving it into the balanced profile:
+  read-only immutable-image and bootstrap-console kernel descriptors are
+  permitted only inside a private domain view, while sensitive operations must
+  remain Ginus-mediated or denied.
+- Execution backend and syscall action are orthogonal. The security profile
+  retains the Gate 3 interpreter and Ginus-virtual descriptors; the balanced
+  profile is Gate 5's compatibility path; a broader performance profile
+  requires later benchmarks and review. Per-process backend selection is
+  deferred beyond this gate.
 - Unicorn Engine 2 is preserved as deferred Gate 14. It is the alternative path
   for moving CPU and memory execution back into Ginus without discarding the
   OCI, VFS, contract, or lifecycle work from this gate.

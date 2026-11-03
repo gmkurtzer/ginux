@@ -75,6 +75,7 @@ impl<const ITEMS: usize, const N: usize> TextList<ITEMS, N> {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ExecutionProfile {
     Security,
+    Balanced,
     Performance,
 }
 
@@ -302,6 +303,7 @@ impl DomainConfig {
         let supported_execution = matches!(
             (self.execution_profile, self.execution_backend),
             (ExecutionProfile::Security, ExecutionBackend::Interpreter)
+                | (ExecutionProfile::Balanced, ExecutionBackend::PtraceNative)
                 | (
                     ExecutionProfile::Performance,
                     ExecutionBackend::PtraceNative
@@ -352,6 +354,7 @@ impl DomainConfig {
         output.raw(b"\n\n[execution]\nprofile = ")?;
         output.quoted(match self.execution_profile {
             ExecutionProfile::Security => b"security",
+            ExecutionProfile::Balanced => b"balanced",
             ExecutionProfile::Performance => b"performance",
         })?;
         output.raw(b"\nbackend = ")?;
@@ -523,6 +526,7 @@ fn parse_field(
             builder.mark(1 << 8)?;
             builder.execution_profile = match parse_string::<32>(value)?.as_bytes() {
                 b"security" => ExecutionProfile::Security,
+                b"balanced" => ExecutionProfile::Balanced,
                 b"performance" => ExecutionProfile::Performance,
                 _ => return Err(ConfigError::InvalidValue),
             };
@@ -939,10 +943,10 @@ policy = "stop"
     #[test]
     fn accepts_native_ptrace_execution_pair() {
         let native = VALID
-            .replace("profile = \"security\"", "profile = \"performance\"")
+            .replace("profile = \"security\"", "profile = \"balanced\"")
             .replace("backend = \"interpreter\"", "backend = \"ptrace-native\"");
         let config = DomainConfig::parse(native.as_bytes()).unwrap();
-        assert_eq!(config.execution_profile, ExecutionProfile::Performance);
+        assert_eq!(config.execution_profile, ExecutionProfile::Balanced);
         assert_eq!(config.execution_backend, ExecutionBackend::PtraceNative);
     }
 

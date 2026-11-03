@@ -4,7 +4,8 @@
 use core::arch::{asm, global_asm};
 use core::panic::PanicInfo;
 use ginus_core::{
-    decide, decide_native_bootstrap, Action, SYS_EXIT, SYS_EXIT_GROUP, SYS_GETPID, SYS_UNAME,
+    balanced_arguments_allowed, balanced_identity_result, balanced_surface, decide,
+    decide_balanced, Action, BalancedSurface, SYS_EXIT, SYS_EXIT_GROUP, SYS_GETPID, SYS_UNAME,
     SYS_WRITE,
 };
 use ginus_domain::{ConfigError, Domain, DomainConfig};
@@ -205,8 +206,16 @@ extern "C" fn rust_main(initial_stack: *const usize) -> ! {
         } else if argc >= 4 && c_string_equals(command, b"native") {
             let config_path = unsafe { *argv.add(2) as *const u8 };
             let root_path = unsafe { *argv.add(3) as *const u8 };
-            let hold = argc >= 5 && c_string_equals(unsafe { *argv.add(4) as *const u8 }, b"hold");
-            native_main(config_path, root_path, hold);
+            let mode = if argc >= 5
+                && c_string_equals(unsafe { *argv.add(4) as *const u8 }, b"hold")
+            {
+                1
+            } else if argc >= 5 && c_string_equals(unsafe { *argv.add(4) as *const u8 }, b"probe") {
+                2
+            } else {
+                0
+            };
+            native_main(config_path, root_path, mode);
         } else if argc >= 4 && c_string_equals(command, b"domain") {
             let config_path = unsafe { *argv.add(2) as *const u8 };
             let fixture_path = unsafe { *argv.add(3) as *const u8 };
@@ -368,7 +377,7 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
             .any(|window| window == needle)
 }
 
-fn native_main(config_path: *const u8, root_path: *const u8, hold: bool) -> ! {
+fn native_main(config_path: *const u8, root_path: *const u8, mode: usize) -> ! {
     let config = load_config(config_path);
     print_effective_config(&config);
     let mut domain = Domain::create(config);
@@ -380,12 +389,12 @@ fn native_main(config_path: *const u8, root_path: *const u8, hold: bool) -> ! {
         domain_fail(&mut domain, b"native tracee fork failed");
     }
     if child == 0 {
-        native_tracee(root_path, hold);
+        native_tracee(root_path, mode);
     }
     supervise_native(child as usize, &mut domain)
 }
 
-fn native_tracee(root_path: *const u8, hold: bool) -> ! {
+fn native_tracee(root_path: *const u8, mode: usize) -> ! {
     static ROOT: &[u8] = b"/\0";
     static BASH: &[u8] = b"/usr/bin/bash\0";
     static ARG1: &[u8] = b"--noprofile\0";
@@ -393,6 +402,7 @@ fn native_tracee(root_path: *const u8, hold: bool) -> ! {
     static ARG3: &[u8] = b"-c\0";
     static COMMAND: &[u8] = b"printf 'GINUS_NATIVE_SHELL: PASS\\n'\0";
     static HOLD_COMMAND: &[u8] = b"printf 'GINUS_NATIVE_HOLD: READY\\n'; while :; do :; done\0";
+    static PROBE_COMMAND: &[u8] = b"if : > /tmp/ginus-mutation; then exit 90; else printf 'GINUS_BALANCED_MUTATION: BLOCKED\\n'; fi; if exec 9<>/dev/tcp/127.0.0.1/9; then exit 91; else printf 'GINUS_BALANCED_NETWORK: BLOCKED\\n'; fi\0";
     static ENV_PATH: &[u8] = b"PATH=/usr/bin:/bin\0";
     static ENV_HOME: &[u8] = b"HOME=/\0";
     static ENV_LOCALE: &[u8] = b"LC_ALL=C\0";
@@ -424,10 +434,10 @@ fn native_tracee(root_path: *const u8, hold: bool) -> ! {
         ARG1.as_ptr(),
         ARG2.as_ptr(),
         ARG3.as_ptr(),
-        if hold {
-            HOLD_COMMAND.as_ptr()
-        } else {
-            COMMAND.as_ptr()
+        match mode {
+            1 => HOLD_COMMAND.as_ptr(),
+            2 => PROBE_COMMAND.as_ptr(),
+            _ => COMMAND.as_ptr(),
         },
         core::ptr::null(),
     ];
@@ -474,7 +484,7 @@ fn supervise_native(pid: usize, domain: &mut Domain) -> ! {
     if ptrace(PTRACE_SETOPTIONS, pid, 0, options) < 0 || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0 {
         native_fail(domain, pid, b"native ptrace setup failed");
     }
-    line(b"GINUS_NATIVE: backend=ptrace-native elf-loader=host contract=gate5-bootstrap");
+    line(b"GINUS_NATIVE: backend=ptrace-native profile=balanced elf-loader=host contract=gate5-balanced");
     line(b"GINUS_NATIVE: tracee-uid=1000 tracee-gid=1000 root=oci-read-only");
 
     let mut sequence = 0u64;
@@ -518,19 +528,22 @@ fn supervise_native(pid: usize, domain: &mut Domain) -> ! {
 
         sequence += 1;
         let syscall = registers.orig_rax;
-        let decision = decide_native_bootstrap(syscall);
+        let decision = decide_balanced(syscall);
         write_all(b"GINUS_NATIVE_AUDIT: sequence=");
         write_u64(sequence);
         write_all(b" phase=entry syscall=");
         write_u64(syscall);
         write_all(b" action=");
         match decision.action {
-            Action::Emulate if syscall == SYS_GETPID => {
-                line(b"emulate result=4242");
+            Action::Emulate if balanced_identity_result(syscall).is_some() => {
+                let result = balanced_identity_result(syscall).unwrap_or(0);
+                write_all(b"emulate surface=virtual-identity result=");
+                write_i64(result);
+                write_all(b"\n");
                 registers.orig_rax = u64::MAX;
                 awaiting_exit = true;
                 override_exit = true;
-                override_result = VIRTUAL_PID as i64;
+                override_result = result;
                 if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0
                     || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0
                 {
@@ -549,7 +562,8 @@ fn supervise_native(pid: usize, domain: &mut Domain) -> ! {
                 exit_process(0)
             }
             Action::Mediate if native_arguments_allowed(syscall, &registers) => {
-                line(b"mediate result=pending");
+                write_all(b"mediate surface=");
+                line(balanced_surface_name(balanced_surface(syscall)));
                 awaiting_exit = true;
                 if ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0 {
                     native_fail(domain, pid, b"native mediated syscall failed");
@@ -587,18 +601,19 @@ fn supervise_native(pid: usize, domain: &mut Domain) -> ! {
 }
 
 fn native_arguments_allowed(syscall: u64, registers: &UserRegs) -> bool {
-    const PROT_WRITE: u64 = 2;
-    const PROT_EXEC: u64 = 4;
-    match syscall {
-        0 => registers.rdx <= 1024 * 1024,
-        1 => matches!(registers.rdi, 1 | 2) && registers.rdx <= 4096,
-        20 => matches!(registers.rdi, 1 | 2) && registers.rdx <= 16,
-        2 => registers.rsi & 3 == 0,
-        9 | 10 => registers.rdx & (PROT_WRITE | PROT_EXEC) != (PROT_WRITE | PROT_EXEC),
-        17 => registers.rdx <= 1024 * 1024,
-        257 => registers.rdx & 3 == 0,
-        318 => registers.rdx <= 256,
-        _ => true,
+    balanced_arguments_allowed(syscall, registers.rdi, registers.rsi, registers.rdx)
+}
+
+fn balanced_surface_name(surface: BalancedSurface) -> &'static [u8] {
+    match surface {
+        BalancedSurface::ImageRead => b"immutable-image result=pending",
+        BalancedSurface::Memory => b"memory result=pending",
+        BalancedSurface::Task => b"task result=pending",
+        BalancedSurface::Console => b"bootstrap-console result=pending",
+        BalancedSurface::Random => b"random result=pending",
+        BalancedSurface::VirtualIdentity | BalancedSurface::Lifecycle | BalancedSurface::Denied => {
+            b"invalid result=denied"
+        }
     }
 }
 

@@ -79,6 +79,11 @@ solved.
 - Native x86-64 ELF execution supervised with ptrace syscall-entry and
   syscall-exit stops, with the host kernel performing instruction execution
   and Ginus deciding every syscall before any permitted host effect.
+- Three explicit execution profiles: `security` interprets instructions and
+  virtualizes kernel-facing state; `balanced` executes instructions natively
+  while limiting passthrough to a minimal confined loader/memory surface; and
+  `performance` may permit a broader validated native surface after later
+  measurement and review.
 - One Rocky Linux 10 systemd domain from a cached, digest-pinned OCI image.
 - Linux ABI interception, emulation, mediated host operations, denial, and
   audit logging.

@@ -127,6 +127,16 @@ scope, threat model, and invariants.
   a held Rocky Bash reported readiness, killing Ginus caused
   `PTRACE_O_EXITKILL` to remove the tracee. Normal execution, emulated `getpid`,
   denied `getppid`, immutable Bash content, and cleanup passed in the same run.
+- Human direction on 2026-11-03 approved a balanced execution profile for Gate
+  5: native instruction execution with minimal confined passthrough for
+  read-only loader/image, memory, signal, and bootstrap-console operations;
+  sensitive interfaces remain emulated, proxied, or denied. The security
+  profile retains interpreted execution and Ginus-virtual descriptors.
+- The approved balanced model is now executable. Local checks passed explicit
+  syscall-surface and negative policy tests. QEMU passed Rocky Bash with
+  classified read-only image and console passthrough, virtual identity, denied
+  ioctl, blocked `O_CREAT` with no file created, blocked socket creation, and
+  fail-closed supervisor loss.
 
 ## Open decisions and limitations
 
@@ -149,18 +159,18 @@ scope, threat model, and invariants.
 - The selected Rocky OCI image has one layer; deterministic synthetic fixtures
   now cover general multi-layer replacement, whiteout, and opaque-directory
   semantics.
-- The native Bash proof currently uses a read-only unprivileged chroot and
-  host-backed path/descriptor operations. It proves loader compatibility and
-  syscall decision timing, but does not yet satisfy Gate 5's final
-  Ginus-controlled VFS/descriptor boundary.
+- The native Bash proof currently uses a read-only unprivileged chroot. Gate 5
+  must still prove its kernel descriptors are limited to immutable image
+  content and the bootstrap console and that sensitive interface classes never
+  use native passthrough.
 - Unicorn Engine 2 is not part of the Gate 5 path. It is preserved as deferred
   Gate 14, with reconsideration required after the native compatibility path is
   demonstrated and before production-boundary claims are made.
 
 ## Exact next action
 
-Obtain human direction on the native-backend VFS/descriptor boundary, then add
-unexpected-stop and remaining isolation/cleanup tests.
+Add unexpected-stop handling and remaining isolation/cleanup tests, then build
+the human-readable `make demo-gate-5` checkpoint.
 
 ## Context recovery
 
@@ -171,6 +181,6 @@ unexpected-stop and remaining isolation/cleanup tests.
   progress on `hdae/virtual-vfs-userspace`
 - Last evidence: `make check`, `make test-unit`, `make test-oci-layers`,
   `make test-oci-image`, and a post-assembly `make test-native-vfs` passed on
-  2026-11-03; the latest native run includes supervisor-loss verification
-- Required human decision: whether the native performance profile may use
-  kernel file descriptors confined to a private domain filesystem view
+  2026-11-03; the latest native run includes balanced negative probes and
+  supervisor-loss verification
+- Required human decision: none until the Gate 5 demonstration checkpoint

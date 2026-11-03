@@ -12,7 +12,7 @@ vcpus = 1
 memory_mib = 256
 
 [execution]
-profile = "performance"
+profile = "balanced"
 backend = "ptrace-native"
 
 [contract]
