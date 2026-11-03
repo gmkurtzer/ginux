@@ -24,9 +24,11 @@ pub(super) fn linux_rt_sigaction(signal: u64, action: u64, old_action: u64, set_
         if !copy_from_linux_user(action, &mut bytes) {
             return LINUX_EFAULT;
         }
+        // Linux clears unknown flag bits so userspace can probe for them
+        // (kernel/signal.c:4396-4404).
         Some([
             parse_word(&bytes, 0),
-            parse_word(&bytes, 8),
+            parse_word(&bytes, 8) & LINUX_SA_UAPI_FLAGS,
             parse_word(&bytes, 16),
             parse_word(&bytes, 24) & !LINUX_UNBLOCKABLE_SIGNALS,
         ])
@@ -52,25 +54,51 @@ pub(super) fn linux_rt_sigaction(signal: u64, action: u64, old_action: u64, set_
         X86_RUNTIME.ELF_PROBE_SIGNAL_FLAGS[index].store(flags, Ordering::SeqCst);
         X86_RUNTIME.ELF_PROBE_SIGNAL_RESTORERS[index].store(restorer, Ordering::SeqCst);
         X86_RUNTIME.ELF_PROBE_SIGNAL_ACTION_MASKS[index].store(mask, Ordering::SeqCst);
+        // POSIX 3.3.1.3: an ignored disposition discards the pending signal,
+        // whether or not it is blocked (kernel/signal.c:4413-4430).
+        if handler == 1 || handler == 0 && linux_default_signal_ignored(signal) {
+            flush_current_linux_process_pending_signal(signal);
+        }
     }
     0
 }
 
+fn flush_current_linux_process_pending_signal(signal: u64) {
+    let index = signal as usize - 1;
+    let signal_bit = 1 << index;
+    X86_RUNTIME
+        .ELF_PROBE_PENDING_SIGNALS
+        .fetch_and(!signal_bit, Ordering::SeqCst);
+    X86_RUNTIME.ELF_PROBE_PENDING_SIGNAL_CODES[index].store(0, Ordering::SeqCst);
+    X86_RUNTIME.ELF_PROBE_PENDING_SIGNAL_VALUES[index].store(0, Ordering::SeqCst);
+    let Some(process) = linux_process::live_process_slot(current_linux_process_pid()) else {
+        return;
+    };
+    let instance = linux_signal_instance();
+    let flush = |scope, slot| {
+        while let Ok(Some(_)) = crate::linux_signal::dequeue(instance, scope, slot, signal_bit) {}
+    };
+    flush(crate::linux_signal::Scope::Process, process);
+    for thread in 0..crate::linux_signal::THREAD_LIMIT {
+        flush(
+            crate::linux_signal::Scope::Thread,
+            linux_thread_signal_queue_slot(process, thread),
+        );
+    }
+}
+
 pub(super) fn linux_sigaltstack(new_stack: u64, old_stack: u64) -> u64 {
-    if old_stack != 0 && !linux_writable_user_range_contains(old_stack, LINUX_ALT_STACK_SIZE) {
-        return LINUX_EFAULT;
-    }
-    if new_stack != 0
-        && X86_RUNTIME.ELF_PROBE_ALT_STACK_FLAGS.load(Ordering::SeqCst) == LINUX_SS_ONSTACK
-    {
-        return LINUX_EPERM;
-    }
+    // Linux copies the new stack in first, then checks EPERM, EINVAL and
+    // ENOMEM before the old stack is copied out (kernel/signal.c:4458-4527).
     let replacement = if new_stack == 0 {
         None
     } else {
         let mut bytes = [0_u8; LINUX_ALT_STACK_SIZE];
         if !copy_from_linux_user(new_stack, &mut bytes) {
             return LINUX_EFAULT;
+        }
+        if X86_RUNTIME.ELF_PROBE_ALT_STACK_FLAGS.load(Ordering::SeqCst) == LINUX_SS_ONSTACK {
+            return LINUX_EPERM;
         }
         let mut pointer_bytes = [0_u8; 8];
         let mut flags_bytes = [0_u8; 4];
@@ -81,18 +109,11 @@ pub(super) fn linux_sigaltstack(new_stack: u64, old_stack: u64) -> u64 {
         let pointer = u64::from_ne_bytes(pointer_bytes);
         let flags = u32::from_ne_bytes(flags_bytes);
         let size = u64::from_ne_bytes(size_bytes);
-        match flags {
+        // SS_ONSTACK is accepted like 0; ss_sp is not validated.
+        match flags & !LINUX_SS_FLAG_BITS {
             LINUX_SS_DISABLE => Some((0, LINUX_SS_DISABLE, 0)),
-            0 | LINUX_SS_AUTODISARM if size < LINUX_MIN_ALT_STACK_SIZE => return LINUX_ENOMEM,
-            0 | LINUX_SS_AUTODISARM => {
-                let Ok(length) = usize::try_from(size) else {
-                    return LINUX_EFAULT;
-                };
-                if !linux_writable_user_range_contains(pointer, length) {
-                    return LINUX_EFAULT;
-                }
-                Some((pointer, flags, size))
-            }
+            0 | LINUX_SS_ONSTACK if size < LINUX_MIN_ALT_STACK_SIZE => return LINUX_ENOMEM,
+            0 | LINUX_SS_ONSTACK => Some((pointer, flags & LINUX_SS_FLAG_BITS, size)),
             _ => return LINUX_EINVAL,
         }
     };
@@ -168,13 +189,15 @@ pub(super) fn linux_rt_sigprocmask(how: u64, set: u64, old_set: u64, set_size: u
 }
 
 pub(super) fn linux_rt_sigpending(set: u64, set_size: u64) -> u64 {
-    if set_size != LINUX_SIGNAL_SET_SIZE {
+    // Linux accepts any size up to sigset_t and copies that many bytes
+    // (kernel/signal.c:3460-3470).
+    if set_size > LINUX_SIGNAL_SET_SIZE {
         return LINUX_EINVAL;
     }
     let dynamic = linux_dynamic_pending_masks().map_or(0, |(process, thread)| process | thread);
     let pending = (X86_RUNTIME.ELF_PROBE_PENDING_SIGNALS.load(Ordering::SeqCst) | dynamic)
         & X86_RUNTIME.ELF_PROBE_SIGNAL_MASK.load(Ordering::SeqCst);
-    if copy_to_linux_user(set, &pending.to_ne_bytes()) {
+    if set_size == 0 || copy_to_linux_user(set, &pending.to_ne_bytes()[..set_size as usize]) {
         0
     } else {
         LINUX_EFAULT
@@ -194,6 +217,23 @@ pub(super) fn linux_rt_sigqueueinfo(
     let thread = thread.map(|thread| u64::from(thread as u32));
     let signal = u64::from(signal as u32);
     let current_process = u64::from(current_linux_process_pid());
+    // Linux copies siginfo in first, even for signal 0, then rejects kernel
+    // si_codes and SI_TKILL only for tasks other than the caller, and looks
+    // the target up before validating the signal (kernel/signal.c:4018-4021,
+    // 4267-4291, 4307-4327, 805-812).
+    let mut bytes = [0_u8; size_of::<LinuxSignalInformation>()];
+    if !copy_from_linux_user(information, &mut bytes) {
+        return LINUX_EFAULT;
+    }
+    let code = i32::from_ne_bytes(bytes[8..12].try_into().unwrap());
+    let value = u64::from_ne_bytes(bytes[24..32].try_into().unwrap());
+    if thread.is_some_and(|thread| process as i32 <= 0 || thread as i32 <= 0) {
+        return LINUX_EINVAL;
+    }
+    let caller = current_linux_tid().map_or(current_process, u64::from);
+    if (code >= 0 || code == LINUX_SI_TKILL) && thread.unwrap_or(process) != caller {
+        return LINUX_EPERM;
+    }
     let resolved_thread = if let Some(thread) = thread {
         match linux_tgkill_target(process, thread) {
             Ok(target) => Some(target),
@@ -206,33 +246,23 @@ pub(super) fn linux_rt_sigqueueinfo(
         LinuxThreadSignalTarget::Active(target) => Some(target),
         LinuxThreadSignalTarget::Saved { .. } => None,
     });
-    if signal == 0 {
-        let target_process = resolved_thread.map_or(process as u32, |target| match target {
-            LinuxThreadSignalTarget::Active(_) => current_linux_process_pid(),
-            LinuxThreadSignalTarget::Saved { pid, .. } => pid,
-        });
-        if target_process != current_linux_process_pid() {
-            if linux_process::live_process_slot(target_process).is_none() {
-                return LINUX_ESRCH;
-            }
-            if !linux_signal_permitted(target_process, signal) {
-                return LINUX_EPERM;
-            }
-        }
-        return 0;
+    let target_process = resolved_thread.map_or(process as u32, |target| match target {
+        LinuxThreadSignalTarget::Active(_) => current_linux_process_pid(),
+        LinuxThreadSignalTarget::Saved { pid, .. } => pid,
+    });
+    let remote = target_process != current_linux_process_pid();
+    if remote && linux_process::live_process_slot(target_process).is_none() {
+        return LINUX_ESRCH;
     }
-    if !(1..=LINUX_SIGNAL_COUNT as u64).contains(&signal) {
+    if !(1..=LINUX_SIGNAL_COUNT as u64).contains(&signal) && signal != 0 {
         return LINUX_EINVAL;
     }
-    let mut bytes = [0_u8; size_of::<LinuxSignalInformation>()];
-    if !copy_from_linux_user(information, &mut bytes) {
-        return LINUX_EFAULT;
-    }
-    let code = i32::from_ne_bytes(bytes[8..12].try_into().unwrap());
-    if code >= 0 {
+    if remote && !linux_signal_permitted(target_process, signal) {
         return LINUX_EPERM;
     }
-    let value = u64::from_ne_bytes(bytes[24..32].try_into().unwrap());
+    if signal == 0 {
+        return 0;
+    }
     let (sender_pid, sender_uid) = linux_signal_sender();
     if let Some(LinuxThreadSignalTarget::Saved {
         pid,
@@ -240,9 +270,6 @@ pub(super) fn linux_rt_sigqueueinfo(
         thread_slot,
     }) = resolved_thread
     {
-        if !linux_signal_permitted(pid, signal) {
-            return LINUX_EPERM;
-        }
         return linux_queue_saved_thread_signal(
             pid,
             process_slot,
@@ -252,15 +279,8 @@ pub(super) fn linux_rt_sigqueueinfo(
             Some(value),
         );
     }
-    if process != current_process {
-        let process = process as u32;
-        if linux_process::live_process_slot(process).is_none() {
-            return LINUX_ESRCH;
-        }
-        if !linux_signal_permitted(process, signal) {
-            return LINUX_EPERM;
-        }
-        return linux_queue_process_signal(process, signal, code, Some(value));
+    if remote {
+        return linux_queue_process_signal(target_process, signal, code, Some(value));
     }
     if wake_linux_signal_wait_target(
         target_thread,
@@ -269,10 +289,6 @@ pub(super) fn linux_rt_sigqueueinfo(
         Some(value),
         Some((sender_pid, sender_uid)),
     ) {
-        return 0;
-    }
-    let handler = X86_RUNTIME.ELF_PROBE_SIGNAL_HANDLERS[signal as usize - 1].load(Ordering::SeqCst);
-    if handler == 1 || handler == 0 && linux_default_signal_ignored(signal) {
         return 0;
     }
     let instance = linux_signal_instance();
@@ -296,6 +312,13 @@ pub(super) fn linux_rt_sigqueueinfo(
             X86_RUNTIME.ELF_PROBE_SIGNAL_MASK.load(Ordering::SeqCst),
         )
     };
+    let handler = X86_RUNTIME.ELF_PROBE_SIGNAL_HANDLERS[signal as usize - 1].load(Ordering::SeqCst);
+    // Blocked signals are never ignored (kernel/signal.c:106-114).
+    if (handler == 1 || handler == 0 && linux_default_signal_ignored(signal))
+        && target_mask & (1 << (signal - 1)) == 0
+    {
+        return 0;
+    }
     if target_is_current && target_mask & (1 << (signal - 1)) == 0 {
         return linux_kill(
             u64::from(current_linux_process_pid()),
@@ -1017,15 +1040,10 @@ pub(super) fn linux_executable_user_address(address: u64) -> bool {
 }
 
 pub(super) fn linux_signal_action_deliverable(handler: u64, flags: u64, restorer: u64) -> bool {
-    let supported = LINUX_SA_SIGINFO
-        | LINUX_SA_RESTORER
-        | LINUX_SA_RESTART
-        | LINUX_SA_ONSTACK
-        | LINUX_SA_NODEFER
-        | LINUX_SA_RESETHAND;
+    // rt_sigaction already stores only UAPI_SA_FLAGS; Linux never refuses
+    // delivery because of a flag such as SA_NOCLDSTOP.
     handler > 1
         && flags & LINUX_SA_RESTORER != 0
-        && flags & !supported == 0
         && linux_executable_user_address(handler)
         && linux_executable_user_address(restorer)
 }
@@ -1213,11 +1231,9 @@ pub(super) fn linux_apply_delivered_signal_action(
         0
     };
     store_current_linux_signal_mask(old_mask | action_mask | automatic_mask);
+    // SA_RESETHAND resets only the handler (kernel/signal.c:3015-3016).
     if flags & LINUX_SA_RESETHAND != 0 {
         X86_RUNTIME.ELF_PROBE_SIGNAL_HANDLERS[index].store(0, Ordering::SeqCst);
-        X86_RUNTIME.ELF_PROBE_SIGNAL_FLAGS[index].store(0, Ordering::SeqCst);
-        X86_RUNTIME.ELF_PROBE_SIGNAL_RESTORERS[index].store(0, Ordering::SeqCst);
-        X86_RUNTIME.ELF_PROBE_SIGNAL_ACTION_MASKS[index].store(0, Ordering::SeqCst);
     }
 }
 
@@ -1324,7 +1340,9 @@ pub(super) fn linux_signal_targets(
         let selected = match selector {
             value if value > 0 => pid == value as u32,
             0 => group.is_some_and(|group| linux_process::live_process_group(pid) == Some(group)),
-            -1 => pid != 1,
+            // kill(-1) skips init and the caller's own thread group
+            // (kernel/signal.c:1634-1635).
+            -1 => pid > 1 && pid != current,
             _ => group.is_some_and(|group| linux_process::live_process_group(pid) == Some(group)),
         };
         if selected {
@@ -1382,11 +1400,10 @@ pub(super) fn linux_target_signal_ignored(target: u32, signal: u64) -> bool {
                 (state.signal_handlers[index], mask)
             })
     };
-    handler == 1
-        || handler == 0
-            && signal != LINUX_SIGCHLD
-            && linux_default_signal_ignored(signal)
-            && mask & (1 << index) == 0
+    // Blocked signals are never ignored (kernel/signal.c:106-114).
+    (handler == 1
+        || handler == 0 && signal != LINUX_SIGCHLD && linux_default_signal_ignored(signal))
+        && mask & (1 << index) == 0
 }
 
 pub(super) fn linux_queue_process_signal(
@@ -1433,13 +1450,19 @@ pub(super) fn linux_kill(
 ) -> u64 {
     let (signal, signal_code, signal_value) = generated;
     let signal = u64::from(signal as u32);
-    if !(1..=LINUX_SIGNAL_COUNT as u64).contains(&signal) && signal != 0 {
-        return LINUX_EINVAL;
-    }
     let (targets, count) = match linux_signal_targets(pid as u32 as i32) {
         Ok(targets) => targets,
         Err(error) => return error,
     };
+    // The signal number is validated per target, after the lookup
+    // (kernel/signal.c:805-812).
+    if !(1..=LINUX_SIGNAL_COUNT as u64).contains(&signal) && signal != 0 {
+        return LINUX_EINVAL;
+    }
+    // kill(-1) ignores EPERM from individual targets and returns the last
+    // other error (kernel/signal.c:1636-1644).
+    let broadcast = pid as u32 as i32 == -1;
+    let mut broadcast_error = 0;
     let mut permitted = false;
     let mut current = false;
     for target in targets[..count].iter().copied() {
@@ -1456,8 +1479,14 @@ pub(super) fn linux_kill(
         }
         let result = linux_queue_process_signal(target, signal, signal_code, signal_value);
         if result != 0 {
-            return result;
+            if !broadcast {
+                return result;
+            }
+            broadcast_error = result;
         }
+    }
+    if broadcast {
+        return broadcast_error;
     }
     if !permitted {
         return LINUX_EPERM;
@@ -1488,10 +1517,10 @@ pub(super) fn linux_kill_current(
         return 0;
     }
     let handler = X86_RUNTIME.ELF_PROBE_SIGNAL_HANDLERS[index].load(Ordering::SeqCst);
-    if handler == 1 || handler == 0 && linux_default_signal_ignored(signal) {
-        return 0;
-    }
     let old_mask = X86_RUNTIME.ELF_PROBE_SIGNAL_MASK.load(Ordering::SeqCst);
+    // Blocked signals are never ignored: they stay pending because the
+    // disposition may change before they are unblocked
+    // (kernel/signal.c:106-114).
     if old_mask & signal_bit != 0 {
         if signal >= 32 {
             let Some(process) = linux_process::live_process_slot(current_linux_process_pid())
@@ -1526,6 +1555,9 @@ pub(super) fn linux_kill_current(
         X86_RUNTIME
             .ELF_PROBE_PENDING_SIGNALS
             .fetch_or(signal_bit, Ordering::SeqCst);
+        return 0;
+    }
+    if handler == 1 || handler == 0 && linux_default_signal_ignored(signal) {
         return 0;
     }
     if handler == 0 {
@@ -2212,15 +2244,16 @@ pub(super) fn linux_send_thread_signal(
         return LINUX_EINVAL;
     }
     let handler = X86_RUNTIME.ELF_PROBE_SIGNAL_HANDLERS[signal as usize - 1].load(Ordering::SeqCst);
-    if handler == 1 || handler == 0 && linux_default_signal_ignored(signal) {
+    let slot = usize::from(target.slot);
+    let unblocked = X86_RUNTIME.LINUX_THREAD_SIGNAL_MASKS[slot].load(Ordering::SeqCst)
+        & (1 << (signal - 1))
+        == 0;
+    // Blocked signals are never ignored (kernel/signal.c:106-114).
+    if (handler == 1 || handler == 0 && linux_default_signal_ignored(signal)) && unblocked {
         return 0;
     }
-    let slot = usize::from(target.slot);
     let target_is_current = current_linux_thread_handle() == Some(target);
-    if target_is_current
-        && X86_RUNTIME.LINUX_THREAD_SIGNAL_MASKS[slot].load(Ordering::SeqCst) & (1 << (signal - 1))
-            == 0
-    {
+    if target_is_current && unblocked {
         return linux_kill(
             u64::from(current_linux_process_pid()),
             (signal, code, None),

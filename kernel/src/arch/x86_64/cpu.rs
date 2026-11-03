@@ -19640,7 +19640,7 @@ fn verify_linux_signal_argument_widths() -> bool {
             UPPER_REGISTER_BITS | current_pid,
             Some(UPPER_REGISTER_BITS | current_tid),
             UPPER_REGISTER_BITS,
-            0,
+            mapping,
             core::ptr::null_mut(),
             interrupted,
             (0, 0),
@@ -19825,6 +19825,7 @@ fn verify_linux_queued_self_signals(
         ) == 0
         && wait_for_signal(SIGNAL, LINUX_SI_TKILL, THREAD_VALUE)
         && wait_for_signal(SIGNAL, LINUX_SI_QUEUE, VALUE);
+    // Kernel si_codes are reserved only when queueing to another task.
     let errors = write_information(0, LINUX_SI_KERNEL, VALUE)
         && linux_rt_sigqueueinfo(
             current_pid,
@@ -19834,8 +19835,10 @@ fn verify_linux_queued_self_signals(
             core::ptr::null_mut(),
             interrupted,
             (0, 0),
-        ) == LINUX_EPERM
-        && linux_rt_sigpending(pending_set, LINUX_SIGNAL_SET_SIZE - 1) == LINUX_EINVAL
+        ) == 0
+        && wait_for_signal(SIGNAL, LINUX_SI_KERNEL, VALUE)
+        && linux_rt_sigpending(pending_set, LINUX_SIGNAL_SET_SIZE / 2) == 0
+        && linux_rt_sigpending(pending_set, LINUX_SIGNAL_SET_SIZE + 1) == LINUX_EINVAL
         && linux_rt_sigpending(1, LINUX_SIGNAL_SET_SIZE) == LINUX_EFAULT
         && linux_rt_sigqueueinfo(
             current_pid,
@@ -19845,7 +19848,52 @@ fn verify_linux_queued_self_signals(
             core::ptr::null_mut(),
             interrupted,
             (0, 0),
+        ) == LINUX_EFAULT
+        && linux_rt_sigqueueinfo(
+            current_pid,
+            None,
+            LINUX_SIGNAL_COUNT as u64 + 1,
+            information,
+            core::ptr::null_mut(),
+            interrupted,
+            (0, 0),
         ) == LINUX_EINVAL;
+    // A blocked signal stays pending under SIG_IGN, installing SIG_IGN
+    // flushes it, and rt_sigaction drops non-UAPI sa_flags bits.
+    const SA_UNSUPPORTED: u64 = 0x400;
+    let action = mapping + 512;
+    let original_action = mapping + 544;
+    let ignored_action = mapping + 576;
+    let mut ignore = [0_u8; LINUX_SIGNAL_ACTION_SIZE];
+    ignore[..8].copy_from_slice(&1_u64.to_ne_bytes());
+    ignore[8..16].copy_from_slice(&(LINUX_SA_NOCLDSTOP | SA_UNSUPPORTED).to_ne_bytes());
+    let pending_signal = || {
+        let mut bytes = [0_u8; LINUX_SIGNAL_SET_SIZE as usize];
+        linux_rt_sigpending(pending_set, LINUX_SIGNAL_SET_SIZE) == 0
+            && copy_from_linux_user(pending_set, &mut bytes)
+            && u64::from_ne_bytes(bytes) & SIGNAL_BIT != 0
+    };
+    let saved_action = copy_to_linux_user(action, &ignore)
+        && linux_rt_sigaction(SIGNAL, action, original_action, LINUX_SIGNAL_SET_SIZE) == 0;
+    let mut readback = [0_u8; LINUX_SIGNAL_ACTION_SIZE];
+    let ignored = saved_action
+        && write_information(0, LINUX_SI_QUEUE, VALUE)
+        && linux_rt_sigqueueinfo(
+            current_pid,
+            None,
+            SIGNAL,
+            information,
+            core::ptr::null_mut(),
+            interrupted,
+            (0, 0),
+        ) == 0
+        && pending_signal()
+        && linux_rt_sigaction(SIGNAL, action, ignored_action, LINUX_SIGNAL_SET_SIZE) == 0
+        && !pending_signal()
+        && copy_from_linux_user(ignored_action, &mut readback)
+        && u64::from_ne_bytes(readback[8..16].try_into().unwrap()) == LINUX_SA_NOCLDSTOP;
+    let restored_action =
+        !saved_action || linux_rt_sigaction(SIGNAL, original_action, 0, LINUX_SIGNAL_SET_SIZE) == 0;
 
     store_current_linux_signal_mask(old_mask);
     X86_RUNTIME
@@ -19857,7 +19905,13 @@ fn verify_linux_queued_self_signals(
         .store(old_realtime_code, Ordering::SeqCst);
     X86_RUNTIME.ELF_PROBE_PENDING_SIGNAL_VALUES[realtime_index]
         .store(old_realtime_value, Ordering::SeqCst);
-    process_signal && thread_signal && realtime_signal && separated_signals && errors
+    process_signal
+        && thread_signal
+        && realtime_signal
+        && separated_signals
+        && errors
+        && ignored
+        && restored_action
 }
 
 fn verify_linux_descriptor_argument_widths() -> bool {

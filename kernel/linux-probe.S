@@ -2110,13 +2110,19 @@ linux_child_joined:
     cmp qword ptr [0x405168], 2048
     require_equal
 
+    mov edi, 1
+    xor esi, esi
+    mov eax, 131
+    call syscall_expect_efault
+
+    # Linux does not validate ss_sp.
     mov qword ptr [0x405140], 0x406000
     mov qword ptr [0x405148], 0
     mov qword ptr [0x405150], 2048
     mov edi, 0x405140
     xor esi, esi
     mov eax, 131
-    call syscall_expect_efault
+    call syscall_expect_zero
 
     mov qword ptr [0x405140], 0x405800
     mov qword ptr [0x405148], 0

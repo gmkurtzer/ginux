@@ -607,8 +607,9 @@ ginux_linux_exec_target:
     cmp qword ptr [rip + .Lsignal_count], 7
     jne .Lfailure
 
+    # rt_sigpending() accepts sizes up to 8 and rejects larger ones.
     lea rdi, [rip + .Lpending_mask]
-    mov esi, 7
+    mov esi, 9
     mov eax, 127
     syscall
     cmp rax, -22
@@ -683,13 +684,16 @@ ginux_linux_exec_target:
     syscall
     test rax, rax
     jne .Lfailure
+    # SA_RESETHAND resets only the handler; flags, restorer and mask stay.
     cmp qword ptr [rip + .Lold_signal_action], 0
     jne .Lfailure
-    cmp qword ptr [rip + .Lold_signal_action + 8], 0
+    mov eax, 0xc4000004
+    cmp qword ptr [rip + .Lold_signal_action + 8], rax
     jne .Lfailure
-    cmp qword ptr [rip + .Lold_signal_action + 16], 0
+    lea rax, [rip + .Lsignal_restorer]
+    cmp qword ptr [rip + .Lold_signal_action + 16], rax
     jne .Lfailure
-    cmp qword ptr [rip + .Lold_signal_action + 24], 0
+    cmp qword ptr [rip + .Lold_signal_action + 24], 0x200
     jne .Lfailure
     mov edi, 99
     xor esi, esi

@@ -822,6 +822,7 @@ pub(super) const LINUX_ALT_STACK_SIZE: usize = 24;
 pub(super) const LINUX_MIN_ALT_STACK_SIZE: u64 = 2048;
 pub(super) const LINUX_SS_DISABLE: u32 = 2;
 pub(super) const LINUX_SS_AUTODISARM: u32 = 1 << 31;
+pub(super) const LINUX_SS_FLAG_BITS: u32 = LINUX_SS_AUTODISARM;
 pub(super) const LINUX_UNBLOCKABLE_SIGNALS: u64 = (1 << (9 - 1)) | (1 << (19 - 1));
 pub(super) const LINUX_SIGSEGV: u64 = 11;
 pub(super) const LINUX_SIGPIPE: u64 = 13;
@@ -835,12 +836,25 @@ pub(super) const LINUX_SI_TKILL: i32 = -6;
 pub(super) const LINUX_SI_KERNEL: i32 = 0x80;
 pub(super) const LINUX_SEGV_MAPERR: i32 = 1;
 pub(super) const LINUX_SEGV_ACCERR: i32 = 2;
+pub(super) const LINUX_SA_NOCLDSTOP: u64 = 0x0000_0001;
+pub(super) const LINUX_SA_NOCLDWAIT: u64 = 0x0000_0002;
 pub(super) const LINUX_SA_SIGINFO: u64 = 0x0000_0004;
+pub(super) const LINUX_SA_EXPOSE_TAGBITS: u64 = 0x0000_0800;
 pub(super) const LINUX_SA_RESTART: u64 = 0x1000_0000;
 pub(super) const LINUX_SA_RESTORER: u64 = 0x0400_0000;
 pub(super) const LINUX_SA_ONSTACK: u64 = 0x0800_0000;
 pub(super) const LINUX_SA_NODEFER: u64 = 0x4000_0000;
 pub(super) const LINUX_SA_RESETHAND: u64 = 0x8000_0000;
+// UAPI_SA_FLAGS from include/linux/signal_types.h with x86's SA_RESTORER.
+pub(super) const LINUX_SA_UAPI_FLAGS: u64 = LINUX_SA_NOCLDSTOP
+    | LINUX_SA_NOCLDWAIT
+    | LINUX_SA_SIGINFO
+    | LINUX_SA_ONSTACK
+    | LINUX_SA_RESTART
+    | LINUX_SA_NODEFER
+    | LINUX_SA_RESETHAND
+    | LINUX_SA_EXPOSE_TAGBITS
+    | LINUX_SA_RESTORER;
 pub(super) const LINUX_SIGNAL_FRAME_SIZE: usize = 440;
 pub(super) const LINUX_SIGNAL_FRAME_INFO_OFFSET: u64 = 312;
 pub(super) const LINUX_SIGNAL_FRAME_CONTEXT_OFFSET: u64 = 8;
