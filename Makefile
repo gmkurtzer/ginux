@@ -7,7 +7,7 @@ PAYLOAD := target/$(X86_TARGET)/release/managed-payload
 BASELINE := target/$(X86_TARGET)/release/baseline-runner
 RUNTIME_FIXTURE := target/$(X86_TARGET)/release/runtime-fixture
 
-.PHONY: doctor host-image-fetch host-image-verify host-boot-test image-helper-fetch image-prepare domain-image-fetch domain-image-verify domain-image-prepare test-image test-oci-image test-vfs image-cache-clean build check test test-unit test-intercept test-runtime test-config test-domain bench-baseline demo-gate-1 demo-gate-2 demo-gate-3 demo-gate-4 clean
+.PHONY: doctor host-image-fetch host-image-verify host-boot-test image-helper-fetch image-prepare domain-image-fetch domain-image-verify domain-image-prepare test-image test-oci-image test-vfs test-native-vfs image-cache-clean build check test test-unit test-intercept test-runtime test-config test-domain bench-baseline demo-gate-1 demo-gate-2 demo-gate-3 demo-gate-4 clean
 
 doctor:
 	@./scripts/doctor.sh
@@ -83,6 +83,9 @@ test-domain: build
 
 test-vfs: build domain-image-prepare
 	@./scripts/with-rocky-host.sh ./scripts/test-vfs.sh
+
+test-native-vfs: build domain-image-prepare
+	@./scripts/with-rocky-host.sh ./scripts/test-native-vfs.sh
 
 test: check test-unit test-intercept test-runtime test-config test-domain test-image
 

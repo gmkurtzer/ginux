@@ -3,7 +3,10 @@
 
 use core::arch::{asm, global_asm};
 use core::panic::PanicInfo;
-use ginus_core::{decide, Action, SYS_EXIT, SYS_GETPID, SYS_UNAME, SYS_WRITE};
+use ginus_core::{
+    decide, decide_native_bootstrap, Action, SYS_EXIT, SYS_EXIT_GROUP, SYS_GETPID, SYS_UNAME,
+    SYS_WRITE,
+};
 use ginus_domain::{ConfigError, Domain, DomainConfig};
 use ginus_runtime::{execute, AddressSpace, AuditAction, LoadError};
 use ginus_vfs::{BaseReader, Index, VfsError, VirtualFs, O_CREATE, O_READ, O_WRITE};
@@ -25,6 +28,12 @@ const SYS_READ_HOST: usize = 0;
 const SYS_CLOSE_HOST: usize = 3;
 const SYS_RT_SIGPROCMASK: usize = 14;
 const SYS_PREAD64: usize = 17;
+const SYS_CHDIR: usize = 80;
+const SYS_SETGID: usize = 106;
+const SYS_SETUID: usize = 105;
+const SYS_SETGROUPS: usize = 116;
+const SYS_PRCTL: usize = 157;
+const SYS_CHROOT: usize = 161;
 const SYS_PAUSE: usize = 34;
 const SYS_FORK: usize = 57;
 const SYS_EXECVE: usize = 59;
@@ -42,6 +51,7 @@ const PTRACE_PEEKDATA: usize = 2;
 const PTRACE_KILL: usize = 8;
 const PTRACE_GETREGS: usize = 12;
 const PTRACE_SETREGS: usize = 13;
+const PTRACE_SYSCALL: usize = 24;
 const PTRACE_SYSEMU: usize = 31;
 const PTRACE_SETOPTIONS: usize = 0x4200;
 const PTRACE_O_TRACESYSGOOD: usize = 1;
@@ -56,6 +66,9 @@ const MAX_VFS_INDEX_SIZE: usize = 8 * 1024 * 1024;
 const SIG_BLOCK: usize = 0;
 const SIGTERM: usize = 15;
 const SIGKILL: usize = 9;
+const PR_SET_NO_NEW_PRIVS: usize = 38;
+const DOMAIN_UID: usize = 1000;
+const DOMAIN_GID: usize = 1000;
 
 static mut ELF_BYTES: [u8; MAX_ELF_SIZE] = [0; MAX_ELF_SIZE];
 static mut CONFIG_BYTES: [u8; MAX_CONFIG_SIZE] = [0; MAX_CONFIG_SIZE];
@@ -189,6 +202,10 @@ extern "C" fn rust_main(initial_stack: *const usize) -> ! {
             let rootfs_path = unsafe { *argv.add(3) as *const u8 };
             let index_path = unsafe { *argv.add(4) as *const u8 };
             vfs_main(config_path, rootfs_path, index_path);
+        } else if argc >= 4 && c_string_equals(command, b"native") {
+            let config_path = unsafe { *argv.add(2) as *const u8 };
+            let root_path = unsafe { *argv.add(3) as *const u8 };
+            native_main(config_path, root_path);
         } else if argc >= 4 && c_string_equals(command, b"domain") {
             let config_path = unsafe { *argv.add(2) as *const u8 };
             let fixture_path = unsafe { *argv.add(3) as *const u8 };
@@ -348,6 +365,242 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
         || haystack
             .windows(needle.len())
             .any(|window| window == needle)
+}
+
+fn native_main(config_path: *const u8, root_path: *const u8) -> ! {
+    let config = load_config(config_path);
+    print_effective_config(&config);
+    let mut domain = Domain::create(config);
+    if domain.start().is_err() {
+        domain_fail(&mut domain, b"invalid native start transition");
+    }
+    let child = unsafe { syscall0(SYS_FORK) };
+    if child < 0 {
+        domain_fail(&mut domain, b"native tracee fork failed");
+    }
+    if child == 0 {
+        native_tracee(root_path);
+    }
+    supervise_native(child as usize, &mut domain)
+}
+
+fn native_tracee(root_path: *const u8) -> ! {
+    static ROOT: &[u8] = b"/\0";
+    static BASH: &[u8] = b"/usr/bin/bash\0";
+    static ARG1: &[u8] = b"--noprofile\0";
+    static ARG2: &[u8] = b"--norc\0";
+    static ARG3: &[u8] = b"-c\0";
+    static COMMAND: &[u8] = b"printf 'GINUS_NATIVE_SHELL: PASS\\n'\0";
+    static ENV_PATH: &[u8] = b"PATH=/usr/bin:/bin\0";
+    static ENV_HOME: &[u8] = b"HOME=/\0";
+    static ENV_LOCALE: &[u8] = b"LC_ALL=C\0";
+    static ENV_CONTAINER: &[u8] = b"container=ginus\0";
+
+    if unsafe { syscall1(SYS_CHROOT, root_path as usize) } < 0 {
+        native_tracee_setup_fail(120);
+    }
+    if unsafe { syscall1(SYS_CHDIR, ROOT.as_ptr() as usize) } < 0 {
+        native_tracee_setup_fail(121);
+    }
+    if unsafe { syscall4(SYS_PTRACE, PTRACE_TRACEME, 0, 0, 0) } < 0 {
+        native_tracee_setup_fail(122);
+    }
+    if unsafe { syscall2(SYS_SETGROUPS, 0, 0) } < 0 {
+        native_tracee_setup_fail(123);
+    }
+    if unsafe { syscall1(SYS_SETGID, DOMAIN_GID) } < 0 {
+        native_tracee_setup_fail(124);
+    }
+    if unsafe { syscall1(SYS_SETUID, DOMAIN_UID) } < 0 {
+        native_tracee_setup_fail(125);
+    }
+    if unsafe { syscall5(SYS_PRCTL, PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) } < 0 {
+        native_tracee_setup_fail(126);
+    }
+    let argv = [
+        BASH.as_ptr(),
+        ARG1.as_ptr(),
+        ARG2.as_ptr(),
+        ARG3.as_ptr(),
+        COMMAND.as_ptr(),
+        core::ptr::null(),
+    ];
+    let environment = [
+        ENV_PATH.as_ptr(),
+        ENV_HOME.as_ptr(),
+        ENV_LOCALE.as_ptr(),
+        ENV_CONTAINER.as_ptr(),
+        core::ptr::null(),
+    ];
+    unsafe {
+        syscall3(
+            SYS_EXECVE,
+            BASH.as_ptr() as usize,
+            argv.as_ptr() as usize,
+            environment.as_ptr() as usize,
+        );
+        syscall1(SYS_EXIT_HOST, 127);
+    }
+    loop {
+        core::hint::spin_loop();
+    }
+}
+
+fn native_tracee_setup_fail(code: usize) -> ! {
+    unsafe { syscall1(SYS_EXIT_HOST, code) };
+    loop {
+        core::hint::spin_loop();
+    }
+}
+
+fn supervise_native(pid: usize, domain: &mut Domain) -> ! {
+    let mut status = 0i32;
+    if wait(pid, &mut status) < 0 {
+        native_fail(domain, pid, b"native tracee wait after exec failed");
+    }
+    if !stopped(status) {
+        write_all(b"GINUS_NATIVE: pre-exec-status=");
+        write_i64(status as i64);
+        write_all(b"\n");
+        native_fail(domain, pid, b"native tracee did not stop after exec");
+    }
+    let options = PTRACE_O_TRACESYSGOOD | PTRACE_O_EXITKILL;
+    if ptrace(PTRACE_SETOPTIONS, pid, 0, options) < 0 || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0 {
+        native_fail(domain, pid, b"native ptrace setup failed");
+    }
+    line(b"GINUS_NATIVE: backend=ptrace-native elf-loader=host contract=gate5-bootstrap");
+    line(b"GINUS_NATIVE: tracee-uid=1000 tracee-gid=1000 root=oci-read-only");
+
+    let mut sequence = 0u64;
+    let mut awaiting_exit = false;
+    let mut override_exit = false;
+    let mut override_result = 0i64;
+    loop {
+        status = 0;
+        if wait(pid, &mut status) < 0 || !stopped(status) {
+            native_fail(domain, pid, b"native tracee escaped supervision");
+        }
+        let signal = ((status >> 8) & 0xff) as u8;
+        if signal != (5 | 0x80) && signal != 5 {
+            native_fail(domain, pid, b"unexpected native trace stop");
+        }
+        let mut registers = core::mem::MaybeUninit::<UserRegs>::uninit();
+        if ptrace(PTRACE_GETREGS, pid, 0, registers.as_mut_ptr() as usize) < 0 {
+            native_fail(domain, pid, b"native register read failed");
+        }
+        let mut registers = unsafe { registers.assume_init() };
+
+        if awaiting_exit {
+            if override_exit {
+                registers.rax = override_result as u64;
+                if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0 {
+                    native_fail(domain, pid, b"native result override failed");
+                }
+            }
+            write_all(b"GINUS_NATIVE_AUDIT: sequence=");
+            write_u64(sequence);
+            write_all(b" phase=exit result=");
+            write_i64(registers.rax as i64);
+            write_all(b"\n");
+            awaiting_exit = false;
+            override_exit = false;
+            if ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0 {
+                native_fail(domain, pid, b"native resume failed");
+            }
+            continue;
+        }
+
+        sequence += 1;
+        let syscall = registers.orig_rax;
+        let decision = decide_native_bootstrap(syscall);
+        write_all(b"GINUS_NATIVE_AUDIT: sequence=");
+        write_u64(sequence);
+        write_all(b" phase=entry syscall=");
+        write_u64(syscall);
+        write_all(b" action=");
+        match decision.action {
+            Action::Emulate if syscall == SYS_GETPID => {
+                line(b"emulate result=4242");
+                registers.orig_rax = u64::MAX;
+                awaiting_exit = true;
+                override_exit = true;
+                override_result = VIRTUAL_PID as i64;
+                if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0
+                {
+                    native_fail(domain, pid, b"native getpid emulation failed");
+                }
+            }
+            Action::Emulate if syscall == SYS_EXIT || syscall == SYS_EXIT_GROUP => {
+                line(b"emulate result=domain-stop");
+                let _ = ptrace(PTRACE_KILL, pid, 0, 0);
+                let _ = wait(pid, &mut status);
+                if domain.task_exited(true).is_err() {
+                    domain_fail(domain, b"native exit transition failed");
+                }
+                line(b"GINUS_NATIVE: supervisor=attached direct-unsupervised-syscalls=0");
+                line(b"GINUS_NATIVE_CHECK: PASS");
+                exit_process(0)
+            }
+            Action::Mediate if native_arguments_allowed(syscall, &registers) => {
+                line(b"mediate result=pending");
+                awaiting_exit = true;
+                if ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0 {
+                    native_fail(domain, pid, b"native mediated syscall failed");
+                }
+            }
+            Action::Mediate => {
+                line(b"deny result=-1 reason=invalid-arguments");
+                registers.orig_rax = u64::MAX;
+                awaiting_exit = true;
+                override_exit = true;
+                override_result = -EPERM;
+                if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0
+                {
+                    native_fail(domain, pid, b"native argument denial failed");
+                }
+            }
+            Action::Deny(errno) => {
+                write_all(b"deny result=-");
+                write_u64(errno as u64);
+                write_all(b"\n");
+                registers.orig_rax = u64::MAX;
+                awaiting_exit = true;
+                override_exit = true;
+                override_result = -(errno as i64);
+                if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0
+                {
+                    native_fail(domain, pid, b"native syscall denial failed");
+                }
+            }
+            _ => native_fail(domain, pid, b"invalid native contract decision"),
+        }
+    }
+}
+
+fn native_arguments_allowed(syscall: u64, registers: &UserRegs) -> bool {
+    const PROT_WRITE: u64 = 2;
+    const PROT_EXEC: u64 = 4;
+    match syscall {
+        0 => registers.rdx <= 1024 * 1024,
+        1 => matches!(registers.rdi, 1 | 2) && registers.rdx <= 4096,
+        20 => matches!(registers.rdi, 1 | 2) && registers.rdx <= 16,
+        2 => registers.rsi & 3 == 0,
+        9 | 10 => registers.rdx & (PROT_WRITE | PROT_EXEC) != (PROT_WRITE | PROT_EXEC),
+        17 => registers.rdx <= 1024 * 1024,
+        257 => registers.rdx & 3 == 0,
+        318 => registers.rdx <= 256,
+        _ => true,
+    }
+}
+
+fn native_fail(domain: &mut Domain, pid: usize, reason: &[u8]) -> ! {
+    let _ = ptrace(PTRACE_KILL, pid, 0, 0);
+    let mut status = 0;
+    let _ = wait(pid, &mut status);
+    domain_fail(domain, reason)
 }
 
 fn config_main(config_path: *const u8) -> ! {
@@ -1014,6 +1267,24 @@ unsafe fn syscall4(number: usize, a1: usize, a2: usize, a3: usize, a4: usize) ->
         in("rsi") a2,
         in("rdx") a3,
         in("r10") a4,
+        lateout("rcx") _,
+        lateout("r11") _,
+        options(nostack)
+    );
+    result
+}
+
+#[inline(always)]
+unsafe fn syscall5(number: usize, a1: usize, a2: usize, a3: usize, a4: usize, a5: usize) -> isize {
+    let result: isize;
+    asm!(
+        "syscall",
+        inlateout("rax") number as isize => result,
+        in("rdi") a1,
+        in("rsi") a2,
+        in("rdx") a3,
+        in("r10") a4,
+        in("r8") a5,
         lateout("rcx") _,
         lateout("r11") _,
         options(nostack)

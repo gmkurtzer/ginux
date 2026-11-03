@@ -82,6 +82,7 @@ pub enum ExecutionProfile {
 pub enum ExecutionBackend {
     Interpreter,
     PtraceSysemu,
+    PtraceNative,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -298,9 +299,15 @@ impl DomainConfig {
         if !(1..=64).contains(&self.vcpus) || !(16..=1_048_576).contains(&self.memory_mib) {
             return Err(ConfigError::InvalidValue);
         }
-        if self.execution_profile != ExecutionProfile::Security
-            || self.execution_backend != ExecutionBackend::Interpreter
-        {
+        let supported_execution = matches!(
+            (self.execution_profile, self.execution_backend),
+            (ExecutionProfile::Security, ExecutionBackend::Interpreter)
+                | (
+                    ExecutionProfile::Performance,
+                    ExecutionBackend::PtraceNative
+                )
+        );
+        if !supported_execution {
             return Err(ConfigError::UnsupportedExecution);
         }
         if self.network_backend != NetworkBackend::None {
@@ -351,6 +358,7 @@ impl DomainConfig {
         output.quoted(match self.execution_backend {
             ExecutionBackend::Interpreter => b"interpreter",
             ExecutionBackend::PtraceSysemu => b"ptrace-sysemu",
+            ExecutionBackend::PtraceNative => b"ptrace-native",
         })?;
         output.raw(b"\n\n[contract]\nprofile = ")?;
         output.quoted(self.contract_profile.as_bytes())?;
@@ -524,6 +532,7 @@ fn parse_field(
             builder.execution_backend = match parse_string::<32>(value)?.as_bytes() {
                 b"interpreter" => ExecutionBackend::Interpreter,
                 b"ptrace-sysemu" => ExecutionBackend::PtraceSysemu,
+                b"ptrace-native" => ExecutionBackend::PtraceNative,
                 _ => return Err(ConfigError::InvalidValue),
             };
         }
@@ -925,6 +934,16 @@ policy = "stop"
             DomainConfig::parse(performance.as_bytes()),
             Err(ConfigError::UnsupportedExecution)
         );
+    }
+
+    #[test]
+    fn accepts_native_ptrace_execution_pair() {
+        let native = VALID
+            .replace("profile = \"security\"", "profile = \"performance\"")
+            .replace("backend = \"interpreter\"", "backend = \"ptrace-native\"");
+        let config = DomainConfig::parse(native.as_bytes()).unwrap();
+        assert_eq!(config.execution_profile, ExecutionProfile::Performance);
+        assert_eq!(config.execution_backend, ExecutionBackend::PtraceNative);
     }
 
     #[test]

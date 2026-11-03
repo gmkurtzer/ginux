@@ -12,8 +12,8 @@ vcpus = 1
 memory_mib = 256
 
 [execution]
-profile = "security"
-backend = "interpreter"
+profile = "performance"
+backend = "ptrace-native"
 
 [contract]
 profile = "gate5-vfs"
