@@ -20144,6 +20144,9 @@ fn linux_runtime_mmap(
             if metadata.kind != crate::linux_overlay::NodeKind::File
                 || !matches!(state & 3, LINUX_DESCRIPTOR_INPUT | 3)
                 || !offset.is_multiple_of(PAGE_SIZE as u64)
+                || (sharing == LINUX_MAP_SHARED
+                    && protection & LINUX_PROT_WRITE != 0
+                    && state & 3 == 1)
             {
                 return LINUX_EACCES;
             }
