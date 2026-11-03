@@ -194,7 +194,7 @@ struct Guard {
 
 impl Guard {
     fn acquire() -> Option<Self> {
-        let instance = linux_process::current_ipc_instance();
+        let instance: usize = linux_process::current_ipc_instance();
         let lock = SYSV_IPC_RUNTIME.locks.get(instance)?;
         while lock
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
@@ -275,60 +275,13 @@ fn message_page_mut(frame: memory::FrameLease) -> Option<&'static mut MessagePag
 }
 
 fn allocate_zeroed() -> Option<memory::FrameLease> {
-    let instance = linux_process::current_ipc_instance();
-    let policy = (instance < crate::control_abi::DOMAIN_LIMIT)
-        .then_some(instance)
-        .and_then(crate::domain::container_domain_frame_policy);
-    allocate_zeroed_with_policy(policy)
-}
-
-fn allocate_zeroed_with_policy(
-    policy: Option<(memory::FrameOwner, usize)>,
-) -> Option<memory::FrameLease> {
-    let [frame] = policy.map_or_else(
-        || memory::allocate_frames::<1>(memory::FrameOwner::KERNEL),
-        |(owner, limit)| memory::allocate_frames_with_owner_limit::<1>(owner, limit),
-    )?;
+    let [frame] = memory::allocate_frames::<1>(memory::FrameOwner::KERNEL)?;
     let Some(address) = frame.direct_map_address() else {
-        let _ = scrub_and_release_frames(&[frame]);
+        let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[frame]);
         return None;
     };
     unsafe { core::ptr::write_bytes(address as *mut u8, 0, PAGE_SIZE) };
     Some(frame)
-}
-
-pub(crate) fn verify_allocation_quota() -> bool {
-    let Some(owner) = memory::FrameOwner::domain(0x0000_ffff_fffe_0002) else {
-        return false;
-    };
-    let policy = Some((owner, 2));
-    let (Some(first), Some(second)) = (
-        allocate_zeroed_with_policy(policy),
-        allocate_zeroed_with_policy(policy),
-    ) else {
-        return false;
-    };
-    let limit_enforced = allocate_zeroed_with_policy(policy).is_none();
-    limit_enforced
-        && scrub_and_release_frames(&[first, second])
-        && memory::owner_live_frame_count(owner) == Some(0)
-        && allocate_zeroed_with_policy(policy)
-            .is_some_and(|frame| scrub_and_release_frames(&[frame]))
-}
-
-fn current_frame_owner() -> memory::FrameOwner {
-    let instance = linux_process::current_ipc_instance();
-    (instance < crate::control_abi::DOMAIN_LIMIT)
-        .then_some(instance)
-        .and_then(crate::domain::container_domain_frame_policy)
-        .map_or(memory::FrameOwner::KERNEL, |(owner, _)| owner)
-}
-
-fn scrub_and_release_frames(frames: &[memory::FrameLease]) -> bool {
-    let Some(owner) = frames.first().and_then(|frame| memory::frame_owner(*frame)) else {
-        return false;
-    };
-    memory::scrub_and_release_frames(owner, frames)
 }
 
 fn find_segment(
@@ -390,11 +343,11 @@ fn release_segment_chain(first: memory::FrameLease) -> bool {
         };
         let next = (page.next_page != memory::FrameLease::EMPTY).then_some(page.next_page);
         for data in page.frames[..usize::from(page.frames_used)].iter().copied() {
-            if !scrub_and_release_frames(&[data]) {
+            if !memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[data]) {
                 return false;
             }
         }
-        if !scrub_and_release_frames(&[frame]) {
+        if !memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[frame]) {
             return false;
         }
         current = next;
@@ -458,7 +411,7 @@ pub(crate) fn get_or_create(
     let first = allocate_zeroed().ok_or(Error::NoMemory)?;
     let id = SYSV_IPC_RUNTIME.next_ids[guard.instance].fetch_add(1, Ordering::AcqRel);
     if id == 0 {
-        let _ = scrub_and_release_frames(&[first]);
+        let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[first]);
         return Err(Error::NoMemory);
     }
     {
@@ -478,7 +431,7 @@ pub(crate) fn get_or_create(
                 return Err(Error::NoMemory);
             };
             let Some(page) = segment_page_mut(metadata) else {
-                let _ = scrub_and_release_frames(&[next]);
+                let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[next]);
                 let _ = release_segment_chain(first);
                 return Err(Error::NoMemory);
             };
@@ -490,7 +443,7 @@ pub(crate) fn get_or_create(
             return Err(Error::NoMemory);
         };
         let Some(page) = segment_page_mut(metadata) else {
-            let _ = scrub_and_release_frames(&[data]);
+            let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[data]);
             let _ = release_segment_chain(first);
             return Err(Error::NoMemory);
         };
@@ -620,7 +573,7 @@ fn detach_matching(instance: usize, pid: u32, address: Option<u64>) -> Result<us
             page.last_pid = pid;
             let remove = page.marked_for_removal != 0 && page.attachments == 0;
             let segment_id = page.id;
-            if !scrub_and_release_frames(&[record]) {
+            if !memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[record]) {
                 return Err(Error::Invalid);
             }
             if remove {
@@ -679,7 +632,7 @@ pub(crate) fn inherit_process_attachments(parent: u32, child: u32) -> Result<(),
                 guard.instance,
             );
             let Some(entry) = attachment_mut(clone) else {
-                let _ = scrub_and_release_frames(&[clone]);
+                let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[clone]);
                 let _ = detach_matching(guard.instance, child, None);
                 return Err(Error::NoMemory);
             };
@@ -689,12 +642,12 @@ pub(crate) fn inherit_process_attachments(parent: u32, child: u32) -> Result<(),
             entry.length = source.length;
             entry.pid = child;
             let Some(segment) = segment_page_mut(source.segment) else {
-                let _ = scrub_and_release_frames(&[clone]);
+                let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[clone]);
                 let _ = detach_matching(guard.instance, child, None);
                 return Err(Error::Invalid);
             };
             let Some(attachments) = segment.attachments.checked_add(1) else {
-                let _ = scrub_and_release_frames(&[clone]);
+                let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[clone]);
                 let _ = detach_matching(guard.instance, child, None);
                 return Err(Error::NoMemory);
             };
@@ -733,7 +686,7 @@ pub(crate) fn teardown() -> bool {
             return false;
         };
         attachments = (entry.next != memory::FrameLease::EMPTY).then_some(entry.next);
-        if !scrub_and_release_frames(&[record]) {
+        if !memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[record]) {
             return false;
         }
     }
@@ -814,7 +767,9 @@ pub(crate) fn teardown() -> bool {
         };
         queues = (queue.next_queue != memory::FrameLease::EMPTY).then_some(queue.next_queue);
         let messages = (queue.head != memory::FrameLease::EMPTY).then_some(queue.head);
-        if !release_messages(messages) || !scrub_and_release_frames(&[queue_frame]) {
+        if !release_messages(messages)
+            || !memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[queue_frame])
+        {
             return false;
         }
     }
@@ -907,7 +862,7 @@ fn release_semaphore_chain(first: memory::FrameLease) -> bool {
             return false;
         };
         current = (page.next_page != memory::FrameLease::EMPTY).then_some(page.next_page);
-        if !scrub_and_release_frames(&[frame]) {
+        if !memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[frame]) {
             return false;
         }
     }
@@ -945,12 +900,12 @@ pub(crate) fn semaphore_get_or_create(
     let first = allocate_zeroed().ok_or(Error::NoMemory)?;
     let id = SYSV_IPC_RUNTIME.next_semaphore_ids[guard.instance].fetch_add(1, Ordering::AcqRel);
     if id == 0 || id > i32::MAX as u32 {
-        let _ = scrub_and_release_frames(&[first]);
+        let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[first]);
         return Err(Error::NoMemory);
     }
     {
         let Some(page) = semaphore_page_mut(first) else {
-            let _ = scrub_and_release_frames(&[first]);
+            let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[first]);
             return Err(Error::NoMemory);
         };
         page.id = id;
@@ -974,7 +929,7 @@ pub(crate) fn semaphore_get_or_create(
                 return Err(Error::NoMemory);
             };
             let Some(page) = semaphore_page_mut(metadata) else {
-                let _ = scrub_and_release_frames(&[next]);
+                let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[next]);
                 let _ = release_semaphore_chain(first);
                 return Err(Error::NoMemory);
             };
@@ -1210,7 +1165,7 @@ fn release_message(first: memory::FrameLease) -> bool {
             return false;
         };
         current = (page.next_page != memory::FrameLease::EMPTY).then_some(page.next_page);
-        if !scrub_and_release_frames(&[frame]) {
+        if !memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[frame]) {
             return false;
         }
     }
@@ -1254,7 +1209,7 @@ pub(crate) fn message_get_or_create(
     let frame = allocate_zeroed().ok_or(Error::NoMemory)?;
     let id = SYSV_IPC_RUNTIME.next_message_ids[guard.instance].fetch_add(1, Ordering::AcqRel);
     if id == 0 || id > i32::MAX as u32 {
-        let _ = scrub_and_release_frames(&[frame]);
+        let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[frame]);
         return Err(Error::NoMemory);
     }
     let old_root = root(
@@ -1263,7 +1218,7 @@ pub(crate) fn message_get_or_create(
         guard.instance,
     );
     let Some(queue) = message_queue_mut(frame) else {
-        let _ = scrub_and_release_frames(&[frame]);
+        let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[frame]);
         return Err(Error::NoMemory);
     };
     queue.next_queue = old_root.unwrap_or(memory::FrameLease::EMPTY);
@@ -1332,7 +1287,7 @@ pub(crate) fn posix_queue_open(
     let frame = allocate_zeroed().ok_or(Error::NoMemory)?;
     let id = SYSV_IPC_RUNTIME.next_message_ids[guard.instance].fetch_add(1, Ordering::AcqRel);
     if id == 0 || id > i32::MAX as u32 {
-        let _ = scrub_and_release_frames(&[frame]);
+        let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[frame]);
         return Err(Error::NoMemory);
     }
     let old_root = root(
@@ -1453,7 +1408,9 @@ fn remove_message_queue_locked(
             next,
         );
     }
-    if release_messages(messages) && scrub_and_release_frames(&[frame]) {
+    if release_messages(messages)
+        && memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[frame])
+    {
         Ok(())
     } else {
         Err(Error::Invalid)
@@ -1675,14 +1632,16 @@ pub(crate) fn message_queue_remove(id: u32) -> Result<(), Error> {
             next,
         );
     }
-    if !release_messages(messages) || !scrub_and_release_frames(&[frame]) {
+    if !release_messages(messages)
+        || !memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[frame])
+    {
         return Err(Error::Invalid);
     }
     Ok(())
 }
 
 pub(crate) fn verify_message_queue_lifecycle() -> bool {
-    let Some(before) = memory::owner_live_frame_count(current_frame_owner()) else {
+    let Some(before) = memory::owner_live_frame_count(memory::FrameOwner::KERNEL) else {
         return false;
     };
     let Ok(id) = message_get_or_create(0x4d53_4751, 0o620, true, true) else {
@@ -1780,11 +1739,11 @@ pub(crate) fn verify_message_queue_lifecycle() -> bool {
         })
         && message_queue_remove(id).is_ok()
         && matches!(message_queue_info(id), Err(Error::Invalid));
-    verified && memory::owner_live_frame_count(current_frame_owner()) == Some(before)
+    verified && memory::owner_live_frame_count(memory::FrameOwner::KERNEL) == Some(before)
 }
 
 pub(crate) fn verify_semaphore_lifecycle() -> bool {
-    let Some(before) = memory::owner_live_frame_count(current_frame_owner()) else {
+    let Some(before) = memory::owner_live_frame_count(memory::FrameOwner::KERNEL) else {
         return false;
     };
     let Ok(id) = semaphore_get_or_create(
@@ -1839,11 +1798,11 @@ pub(crate) fn verify_semaphore_lifecycle() -> bool {
             .is_ok_and(|set| set.count == (SEMAPHORE_CAPACITY + 7) as u64 && set.mode == 0o600)
         && semaphore_remove(id).is_ok()
         && matches!(semaphore_set(id), Err(Error::Invalid));
-    verified && memory::owner_live_frame_count(current_frame_owner()) == Some(before)
+    verified && memory::owner_live_frame_count(memory::FrameOwner::KERNEL) == Some(before)
 }
 
 pub(crate) fn verify_shared_memory_lifecycle() -> bool {
-    let Some(before) = memory::owner_live_frame_count(current_frame_owner()) else {
+    let Some(before) = memory::owner_live_frame_count(memory::FrameOwner::KERNEL) else {
         return false;
     };
     let Ok(id) = get_or_create(0x4749_4e55, 2 * PAGE_SIZE as u64, 0o600, true, true, 1) else {
@@ -1884,6 +1843,6 @@ pub(crate) fn verify_shared_memory_lifecycle() -> bool {
     })()
     .is_some();
     verified
-        && memory::owner_live_frame_count(current_frame_owner()) == Some(before)
+        && memory::owner_live_frame_count(memory::FrameOwner::KERNEL) == Some(before)
         && get_or_create(0x4749_4e55, 0, 0, false, false, 1) == Err(Error::NoEntry)
 }

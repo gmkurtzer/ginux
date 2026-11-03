@@ -54,7 +54,7 @@ struct Guard {
 }
 impl Guard {
     fn acquire() -> Option<Self> {
-        let instance = linux_process::current_ipc_instance();
+        let instance: usize = linux_process::current_ipc_instance();
         let lock = AIO_RUNTIME.locks.get(instance)?;
         while lock
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)

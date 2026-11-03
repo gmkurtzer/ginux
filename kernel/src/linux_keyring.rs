@@ -63,7 +63,7 @@ struct Guard {
 
 impl Guard {
     fn acquire() -> Option<Self> {
-        let instance = linux_process::current_ipc_instance();
+        let instance: usize = linux_process::current_ipc_instance();
         let lock = KEYRING_RUNTIME.locks.get(instance)?;
         while lock
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
@@ -247,7 +247,7 @@ pub(crate) fn clear() -> bool {
 pub(crate) fn teardown() -> bool {
     let released = clear();
     if released {
-        let instance = linux_process::current_ipc_instance();
+        let instance: usize = linux_process::current_ipc_instance();
         KEYRING_RUNTIME.next_serials[instance].store(100, Ordering::SeqCst);
     }
     released
