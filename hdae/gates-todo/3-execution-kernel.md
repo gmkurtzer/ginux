@@ -34,13 +34,19 @@ and no direct host syscall access.
 - [x] Selected the security-focused baseline: a bounded x86-64 instruction
   interpreter with Ginus-owned registers, memory, permissions, ELF loading,
   stack construction, and syscall events.
+- [x] Implemented bounded ELF64 validation/loading, fixed virtual memory,
+  page-level read/write/execute enforcement, and Linux initial stack layout.
+- [x] Implemented the fixture-profile x86-64 interpreter and Linux syscall ABI
+  event path with emulated identity/exit and validated output mediation.
+- [x] Added structured ordered audit records and fail-closed unknown-syscall,
+  invalid-pointer, oversized-write, unsupported-instruction, malformed-ELF,
+  invalid-mapping, overlap, and write/execute denial behavior.
+- [x] Added Rocky integration tests, aggregate regressions, documentation, and
+  an explicit human demonstration.
 
 ## Remaining work
 
-- [ ] Implement memory and ELF foundations.
-- [ ] Implement Linux syscall entry and minimal handlers.
-- [ ] Add audit and denial behavior.
-- [ ] Add malformed ELF, pointer, mapping, and syscall tests.
+- [ ] Human runs or reviews `make demo-gate-3` and accepts or rejects the gate.
 
 ## Acceptance criteria
 
@@ -70,7 +76,23 @@ and no direct host syscall access.
 
 ## Evidence
 
-- Not run.
+- `cargo test -p ginus-runtime` -> six tests passed for ELF loading, Linux stack
+  layout, page permissions, copy boundaries, invalid/oversized pointers,
+  unknown syscalls, malformed/W+X/out-of-range/oversized segments, and
+  unsupported instructions.
+- `make check` -> formatting and all target-correct Clippy checks passed with
+  warnings denied, including the interpreter and static fixture.
+- `make test-runtime` -> Rocky 10.2 ran Ginus as an ordinary host process;
+  Ginus loaded and interpreted a 4,424-byte static ELF64 x86-64 fixture from
+  bytes, produced the expected argument/environment output and five ordered
+  audit records, denied syscall 999 with `-ENOSYS`, and rejected a truncated
+  ELF before execution.
+- `make demo-gate-3` -> printed the execution boundary, ELF/memory/stack
+  evidence, managed output, all five syscall decisions, direct-host-syscall
+  impossibility for interpreted code, malformed-input denial, explicit
+  non-coverage, clean Rocky shutdown, and `GATE3: PASS`.
+- `make test` -> Gate 1 interception, six runtime unit tests, Gate 3 Rocky
+  execution, and Gate 2 offline repeatability/corruption regressions all passed.
 
 ## Decisions and limitations
 
@@ -94,10 +116,13 @@ and no direct host syscall access.
   2026-11-03; never merge or close without explicit authorization
 - Planned commits: address-space and ELF loader; syscall ABI and minimal
   handlers; denial, audit, and malformed-input tests
-- Actual commits: pending
+- Actual commits: `e137733` (interpreted baseline), `370b661` (Ginus-owned
+  memory, ELF, x86, syscall and audit core), `fb31678` (Ginus integration and
+  demo), and `52ef264` (invalid mapping regressions)
 
 ## Review policy and outcome
 
-Human checkpoint because this gate establishes the memory and syscall security
-boundary used by all later compatibility work. Present `make demo-gate-3`,
-fresh evidence, and the pull request before acceptance.
+Technically passed on 2026-11-03. Human checkpoint remains open because this
+gate establishes the memory and syscall security boundary used by all later
+compatibility work. Present `make demo-gate-3`, fresh evidence, and the pull
+request before acceptance.
