@@ -1,5 +1,10 @@
 [workspace]
-members = ["crates/ginus-core", "crates/ginus-init", "crates/managed-payload"]
+members = [
+    "crates/baseline-init",
+    "crates/ginus-core",
+    "crates/ginus-init",
+    "crates/managed-payload",
+]
 resolver = "2"
 
 [profile.release]

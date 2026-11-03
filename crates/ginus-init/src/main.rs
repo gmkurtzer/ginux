@@ -243,12 +243,7 @@ fn ptrace(request: usize, pid: usize, addr: usize, data: usize) -> isize {
 
 fn read_tracee_word(pid: usize, address: usize) -> bool {
     let mut word = 0u64;
-    ptrace(
-        PTRACE_PEEKDATA,
-        pid,
-        address,
-        &mut word as *mut _ as usize,
-    ) >= 0
+    ptrace(PTRACE_PEEKDATA, pid, address, &mut word as *mut _ as usize) >= 0
 }
 
 fn line(message: &[u8]) {

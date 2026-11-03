@@ -3,6 +3,10 @@
 version = 4
 
 [[package]]
+name = "baseline-init"
+version = "0.1.0"
+
+[[package]]
 name = "ginus-core"
 version = "0.1.0"
 

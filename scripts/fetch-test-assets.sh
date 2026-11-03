@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-url=https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/x86_64/netboot-3.24.3/vmlinuz-virt
+url=https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/x86_64/netboot-3.24.3/vmlinuz-virt
 expected=17fbd3efd16f2e7cb1b945f06423b37399ba7d5ac8cdd3665e7f13f363500e85
 destination=build/cache/vmlinuz-virt-3.24.3
 temporary=${destination}.download

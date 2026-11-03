@@ -12,7 +12,8 @@ esac
 mkdir -p "$root/sbin" "$root/dev" "$root/proc" "$root/sys" "$root/tmp"
 cp target/x86_64-unknown-linux-gnu/release/ginus "$root/sbin/ginus"
 cp target/x86_64-unknown-linux-gnu/release/managed-payload "$root/managed-payload"
-chmod 0755 "$root/sbin/ginus" "$root/managed-payload"
+cp target/x86_64-unknown-linux-gnu/release/baseline-init "$root/sbin/baseline-init"
+chmod 0755 "$root/sbin/ginus" "$root/sbin/baseline-init" "$root/managed-payload"
 
 (cd "$root" && find . -print | LC_ALL=C sort | cpio -o -H newc 2>/dev/null) | gzip -n -9 > "$output"
 printf 'built %s\n' "$output"
