@@ -26,3 +26,21 @@ make demo-gate-1
 See [`docs/gate-1-foundation.md`](docs/gate-1-foundation.md) for the threat
 model, design decision, expected demonstration, benchmark method, and current
 limitations.
+
+## Gate 4 domain configuration and lifecycle
+
+Gate 4 adds strict, versioned TOML configuration and the deterministic
+single-domain lifecycle. Its demonstration prints the canonical effective
+configuration, exercises managed start and cleanup, rejects unsupported or
+authority-granting inputs before managed execution, and verifies SIGTERM plus
+child reaping inside the Rocky QEMU host.
+
+```sh
+make test-config
+make test-domain
+make demo-gate-4
+```
+
+See [`docs/gate-4-domain-lifecycle.md`](docs/gate-4-domain-lifecycle.md) for
+the supported schema subset, execution profile, lifecycle, and current
+limitations.

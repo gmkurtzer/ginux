@@ -35,12 +35,17 @@ lifecycle.
 
 - [x] Selected strict, versioned TOML as the operator-facing configuration
   format with human approval on 2026-11-03.
+- [x] Implemented bounded parsing, complete-field validation, canonical
+  normalization, and effective configuration output.
+- [x] Implemented the single-domain state machine, managed fixture startup,
+  natural exit, requested stop, startup/runtime failure, resource cleanup,
+  host SIGTERM handling, and child reaping.
+- [x] Added unit, Rocky/QEMU integration, aggregate regression, documentation,
+  and explicit human-demonstration coverage.
 
 ## Remaining work
 
-- [ ] Implement parsing, normalization, validation, and effective output.
-- [ ] Implement lifecycle state and ordinary-host-process control behavior.
-- [ ] Add invalid-config, failure, cleanup, and restart tests.
+- [ ] Human runs or reviews `make demo-gate-4` and accepts or rejects the gate.
 
 ## Acceptance criteria
 
@@ -61,19 +66,36 @@ lifecycle.
 
 ## Verification plan
 
-- `make test-config` -> schema versioning, normalization, defaults, conflict,
-  unknown-field, unsupported-feature, and fail-closed tests pass.
+- `make test-config` -> schema versioning, normalization, required-field,
+  conflict, unknown-field, unsupported-feature, and fail-closed tests pass.
 - `make test-domain` -> create/start/inspect/stop/failure/cleanup state-machine
   tests pass.
-- Host-process harness test -> expected signals are handled, children are reaped, and
-  shutdown returns the expected machine-checkable status.
+- Host-process harness test -> expected signals are handled, children are
+  reaped, and shutdown returns the expected machine-checkable status.
 - `make test` with network disabled -> exits zero.
 - `make demo-gate-4` -> performs the documented valid and invalid lifecycle
   demonstrations, verifies cleanup, and exits zero.
 
 ## Evidence
 
-- Not run.
+- `cargo test -p ginus-domain` -> seven tests passed for versioned parsing,
+  canonical normalization, comments/order equivalence, missing/duplicate/
+  unknown fields, unsupported execution, host-authority rejection, lifecycle
+  transitions, startup failure, runtime failure, and cleanup.
+- `make test-config` -> Rocky 10.2 ran Ginus as an ordinary host process;
+  equivalent TOML inputs produced byte-identical effective configuration, and
+  unknown fields, the unsupported performance backend, and a host root path
+  were rejected with `managed-started=false`.
+- `make test-domain` -> the configured interpreted fixture ran with its
+  configured argument/environment; created, running, stopped, and failed
+  states were observed; malformed init cleanup succeeded; SIGTERM requested a
+  stop; the host helper was reaped with zero zombies; and a repeat start passed.
+- `make demo-gate-4` -> printed six named sections with concrete configuration,
+  rejection, execution, failure-cleanup, signal, and reaping evidence and ended
+  with `GATE4: PASS (configuration and single-domain lifecycle profile)`.
+- `make test` -> formatting, all Clippy checks, 16 unit tests, Gate 1
+  interception, Gate 3 runtime, Gate 4 configuration/lifecycle, and all eight
+  Gate 2 offline-image checks passed.
 
 ## Decisions and limitations
 
@@ -81,6 +103,14 @@ lifecycle.
   rejected rather than ignored.
 - Runtime configuration mutation is deferred because it changes contract
   authority and audit requirements.
+- Gate 4 supports only `security` plus `interpreter` and `network = "none"`.
+  Recognized performance and mediated-network choices fail closed until their
+  implementations receive later gate review.
+- Storage and device entries are logical identifiers only in this gate. They
+  grant no host path, descriptor, or backend authority; Gate 6 makes them
+  operational.
+- Gate 4 is temporarily stacked on accepted Gate 3 commit `8ef4340` because
+  pull requests 1 through 3 remain open. Its intended eventual base is `main`.
 
 ## Delivery strategy
 
@@ -90,10 +120,13 @@ lifecycle.
   2026-11-03; never merge or close without explicit authorization
 - Planned commits: versioned schema and normalization; lifecycle state machine;
   ordinary-host-process failure, cleanup, and configuration verification
-- Actual commits: pending
+- Actual commits: `34eb2e4` (strict TOML schema, normalization, lifecycle model,
+  configuration documentation) and `ec858c4` (Ginus integration, Rocky/QEMU
+  lifecycle harness, failure/signal/reaping tests, and demonstration)
 
 ## Review policy and outcome
 
-Human checkpoint. The effective configuration becomes the authority record for
-later domains and must be accepted before backends consume it. Present
-`make demo-gate-4`, fresh evidence, and the pull request before acceptance.
+Technically passed on 2026-11-03. Human checkpoint remains open because the
+effective configuration becomes the authority record for later domains.
+Present `make demo-gate-4`, fresh evidence, and the pull request before
+acceptance.
