@@ -2322,22 +2322,85 @@ pub(super) fn linux_deliver_pending_signal(
     result
 }
 
-pub(super) fn deliver_linux_sigsegv(
+/// Signal, siginfo code and siginfo address Linux forces on a task for a
+/// user-mode CPU exception (arch/x86/kernel/traps.c do_error_trap/do_trap,
+/// exc_general_protection, exc_alignment_check, exc_int3; arch/x86/mm/fault.c
+/// __bad_area_nosemaphore). `code` is `None` where Linux derives si_code from
+/// state Ginux does not model (#DB DR6, #MF/#XM FPU status): those faults
+/// still take the signal's default action but are not delivered to a handler.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) struct LinuxFaultSignal {
+    pub(super) signal: u64,
+    pub(super) code: Option<i32>,
+    pub(super) address: u64,
+}
+
+pub(super) const fn linux_fault_signal(fault: domain::FaultMetadata) -> LinuxFaultSignal {
+    let (signal, code, address) = match fault.vector {
+        0 => (LINUX_SIGFPE, Some(LINUX_FPE_INTDIV), fault.instruction),
+        1 => (LINUX_SIGTRAP, None, 0),
+        3 => (LINUX_SIGTRAP, Some(LINUX_SI_KERNEL), 0),
+        6 => (LINUX_SIGILL, Some(LINUX_ILL_ILLOPN), fault.instruction),
+        11 | 12 => (LINUX_SIGBUS, Some(LINUX_SI_KERNEL), 0),
+        14 if fault.error & 1 == 0 => (LINUX_SIGSEGV, Some(LINUX_SEGV_MAPERR), fault.address),
+        14 => (LINUX_SIGSEGV, Some(LINUX_SEGV_ACCERR), fault.address),
+        16 | 19 => (LINUX_SIGFPE, None, 0),
+        17 => (LINUX_SIGBUS, Some(LINUX_BUS_ADRALN), 0),
+        // #OF, #BR, #TS, #GP and anything else a user context can raise.
+        _ => (LINUX_SIGSEGV, Some(LINUX_SI_KERNEL), 0),
+    };
+    LinuxFaultSignal {
+        signal,
+        code,
+        address,
+    }
+}
+
+pub(super) fn verify_linux_fault_signals() -> bool {
+    let fault = |vector, error| domain::FaultMetadata {
+        vector,
+        error,
+        address: 16,
+        instruction: 0x40_1000,
+    };
+    let expect = |vector, error, signal, code, address| {
+        linux_fault_signal(fault(vector, error))
+            == LinuxFaultSignal {
+                signal,
+                code,
+                address,
+            }
+    };
+    expect(0, 0, LINUX_SIGFPE, Some(LINUX_FPE_INTDIV), 0x40_1000)
+        && expect(6, 0, LINUX_SIGILL, Some(LINUX_ILL_ILLOPN), 0x40_1000)
+        && expect(13, 0, LINUX_SIGSEGV, Some(LINUX_SI_KERNEL), 0)
+        && expect(14, 6, LINUX_SIGSEGV, Some(LINUX_SEGV_MAPERR), 16)
+        && expect(14, 7, LINUX_SIGSEGV, Some(LINUX_SEGV_ACCERR), 16)
+        && expect(12, 0, LINUX_SIGBUS, Some(LINUX_SI_KERNEL), 0)
+        && expect(17, 0, LINUX_SIGBUS, Some(LINUX_BUS_ADRALN), 0)
+        && expect(19, 0, LINUX_SIGFPE, None, 0)
+}
+
+pub(super) fn deliver_linux_fault_signal(
     frame: &mut UserFaultFrame,
     fault: domain::FaultMetadata,
+    fault_signal: LinuxFaultSignal,
 ) -> bool {
-    if !frame.is_page_fault()
-        || current_linux_thread_handle().is_none()
+    let Some(code) = fault_signal.code else {
+        return false;
+    };
+    if current_linux_thread_handle().is_none()
         || X86_RUNTIME.LINUX_SIGNAL_ACTIVE.load(Ordering::SeqCst)
     {
         return false;
     }
-    let signal_bit = 1 << (LINUX_SIGSEGV - 1);
+    let signal = fault_signal.signal;
+    let signal_bit = 1 << (signal - 1);
     let old_mask = X86_RUNTIME.ELF_PROBE_SIGNAL_MASK.load(Ordering::SeqCst);
     if old_mask & signal_bit != 0 {
         return false;
     }
-    let index = LINUX_SIGSEGV as usize - 1;
+    let index = signal as usize - 1;
     let handler = X86_RUNTIME.ELF_PROBE_SIGNAL_HANDLERS[index].load(Ordering::SeqCst);
     let flags = X86_RUNTIME.ELF_PROBE_SIGNAL_FLAGS[index].load(Ordering::SeqCst);
     let restorer = X86_RUNTIME.ELF_PROBE_SIGNAL_RESTORERS[index].load(Ordering::SeqCst);
@@ -2376,15 +2439,7 @@ pub(super) fn deliver_linux_sigsegv(
     let signal_frame = linux_rt_signal_frame(
         context,
         flags,
-        LinuxSignalInformation::fault(
-            LINUX_SIGSEGV,
-            if fault.error & 1 == 0 {
-                LINUX_SEGV_MAPERR
-            } else {
-                LINUX_SEGV_ACCERR
-            },
-            fault.address,
-        ),
+        LinuxSignalInformation::fault(signal, code, fault_signal.address),
         fault.vector,
         fault.error,
         fault.address,
@@ -2395,7 +2450,7 @@ pub(super) fn deliver_linux_sigsegv(
     if !frame.enter_signal_handler(
         handler,
         signal_stack,
-        LINUX_SIGSEGV,
+        signal,
         (
             signal_stack + LINUX_SIGNAL_FRAME_INFO_OFFSET,
             signal_stack + LINUX_SIGNAL_FRAME_CONTEXT_OFFSET,

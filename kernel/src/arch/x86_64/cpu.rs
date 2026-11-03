@@ -4932,14 +4932,21 @@ fn execute_deferred_live_fork() -> bool {
         cfg!(feature = "linux-boot-profile").then(timer::timestamp_counter);
     let parent = (child_resumed && child_exited)
         .then(|| {
-            (linux_queue_process_signal(
-                parent_pid,
-                LINUX_SIGCHLD,
-                LINUX_CLD_EXITED,
-                Some(u64::from(child_status)),
-            ) == 0)
-                .then(|| linux_process::complete_live_child_exit(child.pid, child_status))
-                .flatten()
+            // Linux never fails an exit notification for lack of memory: a
+            // legacy signal stays pending without its siginfo
+            // (kernel/signal.c __send_signal_locked). Dropping SIGCHLD is the
+            // closest fallback; the child must still be reaped.
+            matches!(
+                linux_queue_process_signal(
+                    parent_pid,
+                    LINUX_SIGCHLD,
+                    LINUX_CLD_EXITED,
+                    Some(u64::from(child_status)),
+                ),
+                0 | LINUX_EAGAIN
+            )
+            .then(|| linux_process::complete_live_child_exit(child.pid, child_status))
+            .flatten()
         })
         .flatten();
     let Some(parent) = parent else {
@@ -16312,6 +16319,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let fadvise = verify_linux_fadvise64_syscall();
     let shared_file_access = verify_linux_shared_file_mapping_access();
     let runtime_boot_contracts = verify_linux_runtime_boot_contracts();
+    let fault_signals = verify_linux_fault_signals();
     let mappings_released =
         address_space::release_current_linux_runtime_mappings(LINUX_RUNTIME_DYNAMIC_MMAP_BASE);
     X86_RUNTIME
@@ -16377,6 +16385,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         shared_file_access,
         runtime_boot_contracts,
         mappings_released,
+        fault_signals,
     ]
     .into_iter()
     .enumerate()
@@ -16440,6 +16449,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && shared_file_access
         && runtime_boot_contracts
         && mappings_released
+        && fault_signals
 }
 
 fn verify_linux_runtime_boot_contracts() -> bool {
@@ -42716,10 +42726,20 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
             serial_write("\r\n");
         }
         write_linux_runtime_syscall_trace();
-        if deliver_linux_sigsegv(frame, fault_metadata) {
+        let fault_signal = linux_fault_signal(fault_metadata);
+        if deliver_linux_fault_signal(frame, fault_metadata, fault_signal) {
             return 0;
         }
         abort_linux_signal();
+        // Linux force_sig_fault() resets a blocked or ignored fault signal to
+        // SIG_DFL (kernel/signal.c force_sig_info_to_task), so an undelivered
+        // fault kills only the faulting process. Init keeps failing the domain.
+        if X86_RUNTIME.LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
+            && current_linux_process_pid() != 1
+            && linux_terminate_by_default_signal(fault_signal.signal) == LINUX_RETURN_TO_KERNEL
+        {
+            return u64::MAX;
+        }
         X86_RUNTIME.ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
         return u64::MAX;
     }
