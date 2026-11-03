@@ -35,6 +35,7 @@ const SYS_RT_SIGPROCMASK: usize = 14;
 const SYS_PREAD64: usize = 17;
 const SYS_PWRITE64: usize = 18;
 const SYS_FSYNC: usize = 74;
+const SYS_CLOCK_GETTIME: usize = 228;
 const SYS_CHDIR: usize = 80;
 const SYS_SETGID: usize = 106;
 const SYS_SETUID: usize = 105;
@@ -53,6 +54,8 @@ const SYS_SIGNALFD4: usize = 289;
 const AT_FDCWD: usize = (-100isize) as usize;
 const O_RDONLY: usize = 0;
 const O_RDWR: usize = 2;
+const CLOCK_MONOTONIC: usize = 1;
+const CLOCK_PROCESS_CPUTIME_ID: usize = 2;
 
 const PTRACE_TRACEME: usize = 0;
 const PTRACE_PEEKDATA: usize = 2;
@@ -231,6 +234,11 @@ extern "C" fn rust_main(initial_stack: *const usize) -> ! {
             let config_path = unsafe { *argv.add(2) as *const u8 };
             let block_path = unsafe { *argv.add(3) as *const u8 };
             devices_main(config_path, block_path);
+        } else if argc >= 5 && c_string_equals(command, b"device-bench") {
+            let config_path = unsafe { *argv.add(2) as *const u8 };
+            let block_path = unsafe { *argv.add(3) as *const u8 };
+            let kind = unsafe { *argv.add(4) as *const u8 };
+            device_bench_main(config_path, block_path, kind);
         }
     }
     gate1_main()
@@ -433,6 +441,115 @@ fn device_fail(reason: &[u8]) -> ! {
     write_all(b"GATE6_DEVICES: FAIL: ");
     line(reason);
     exit_process(1)
+}
+
+#[repr(C)]
+struct Timespec {
+    seconds: i64,
+    nanoseconds: i64,
+}
+
+fn clock_nanoseconds(clock: usize) -> u64 {
+    let mut value = Timespec {
+        seconds: 0,
+        nanoseconds: 0,
+    };
+    if unsafe { syscall2(SYS_CLOCK_GETTIME, clock, &mut value as *mut _ as usize) } != 0
+        || value.seconds < 0
+        || value.nanoseconds < 0
+    {
+        device_fail(b"benchmark clock failed");
+    }
+    value.seconds as u64 * 1_000_000_000 + value.nanoseconds as u64
+}
+
+fn device_bench_main(config_path: *const u8, block_path: *const u8, kind: *const u8) -> ! {
+    let config = load_config(config_path);
+    let repetitions = 1024u64;
+    let operations = repetitions * 2;
+    let (bytes, wall_ns, cpu_ns) = if c_string_equals(kind, b"block") {
+        if !text_list_contains(config.storage.as_slice(), b"block0") {
+            device_fail(b"block benchmark assignment missing");
+        }
+        let descriptor =
+            unsafe { syscall4(SYS_OPENAT_HOST, AT_FDCWD, block_path as usize, O_RDWR, 0) };
+        if descriptor < 0 {
+            device_fail(b"benchmark block open failed");
+        }
+        let backend = HostBlock {
+            descriptor: descriptor as usize,
+            len: 4096,
+        };
+        let mut partition = Partition::new(backend, 1024, 2048, false)
+            .unwrap_or_else(|_| device_fail(b"benchmark partition failed"));
+        let data = [0x5au8; 256];
+        let mut output = [0u8; 256];
+        let wall_start = clock_nanoseconds(CLOCK_MONOTONIC);
+        let cpu_start = clock_nanoseconds(CLOCK_PROCESS_CPUTIME_ID);
+        for iteration in 0..repetitions {
+            let offset = (iteration % 8) * 256;
+            if partition.write_at(offset, &data).is_err()
+                || partition.read_at(offset, &mut output).is_err()
+            {
+                device_fail(b"benchmark block I/O failed");
+            }
+        }
+        if partition.close().is_err() {
+            device_fail(b"benchmark block close failed");
+        }
+        (
+            repetitions * 512,
+            clock_nanoseconds(CLOCK_MONOTONIC) - wall_start,
+            clock_nanoseconds(CLOCK_PROCESS_CPUTIME_ID) - cpu_start,
+        )
+    } else if c_string_equals(kind, b"network") {
+        if config.network_backend != ginus_domain::NetworkBackend::Mediated {
+            device_fail(b"network benchmark assignment missing");
+        }
+        let mut network: IsolatedNetwork<2> = IsolatedNetwork::new();
+        let frame = [0xabu8; 64];
+        let mut output = [0u8; 64];
+        let wall_start = clock_nanoseconds(CLOCK_MONOTONIC);
+        let cpu_start = clock_nanoseconds(CLOCK_PROCESS_CPUTIME_ID);
+        for _ in 0..repetitions {
+            if network.send(&frame).is_err() || network.receive(&mut output) != Ok(64) {
+                device_fail(b"benchmark network I/O failed");
+            }
+        }
+        network.close();
+        (
+            repetitions * 128,
+            clock_nanoseconds(CLOCK_MONOTONIC) - wall_start,
+            clock_nanoseconds(CLOCK_PROCESS_CPUTIME_ID) - cpu_start,
+        )
+    } else {
+        device_fail(b"unknown benchmark kind");
+    };
+    let throughput = bytes.saturating_mul(1_000_000_000) / wall_ns.max(1);
+    let latency = wall_ns / operations;
+    write_all(b"GINUS_BENCH: kind=");
+    if c_string_equals(kind, b"block") {
+        write_all(b"block");
+    } else {
+        write_all(b"network");
+    }
+    write_all(b" workload=rw-pairs repetitions=");
+    write_u64(repetitions);
+    write_all(b" operations=");
+    write_u64(operations);
+    write_all(b" bytes=");
+    write_u64(bytes);
+    write_all(b" wall_ns=");
+    write_u64(wall_ns);
+    write_all(b" cpu_ns=");
+    write_u64(cpu_ns);
+    write_all(b" throughput_Bps=");
+    write_u64(throughput);
+    write_all(b" latency_ns_per_op=");
+    write_u64(latency);
+    write_all(b" environment=rocky10-x86_64-qemu-tcg\n");
+    line(b"GINUS_BENCH: PASS");
+    exit_process(0)
 }
 
 struct HostRootfs {
