@@ -1226,6 +1226,10 @@ if ! grep -q '^ginux: per-domain physical frame budgets enforced' "$output_file"
     echo "Boot test failed: per-domain physical-frame budgets were not enforced." >&2
     exit 1
 fi
+if ! grep -q '^ginux: failed runtime volume DMA retirement quarantined' "$output_file"; then
+    echo "Boot test failed: failed runtime volume DMA retirement was not quarantined." >&2
+    exit 1
+fi
 
 if ! grep -q '^ginux: Linux mmap domain quota enforced atomically' "$output_file"; then
     echo "Boot test failed: Linux mmap domain quota was not enforced atomically." >&2
