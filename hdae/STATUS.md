@@ -8,10 +8,10 @@
 - Branch: `hdae/issue-20-gzip-unpack`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 37 bounded OCI unpack, delivered as PR #52 for issue #20
-- Last completed action: merged PR #51, closed issue #29, and synchronized PR
-  #52 with current `main`
-- Next action: run fresh `make check` and `make test`, then push the new exact
-  PR #52 head for GitHub CI and a later unchanged-head review
+- Last completed action: merged PR #51, closed issue #29, synchronized PR #52
+  with current `main`, and passed fresh local validation
+- Next action: wait for GitHub CI on the final PR #52 head, then require a
+  later unchanged-head review before merge and issue closure
 
 ## Current repository state
 
@@ -26,7 +26,9 @@ merged PR #45 and issue #18 is closed; Gate 36 was delivered through merged PR
 issue #57 is closed. Gate 40 was delivered through merged PR #49 and issue #25
 is closed. Gate 42 was delivered through merged PR #50 and issue #28 is closed.
 Gate 43 was delivered through merged PR #51 and issue #29 is closed. PR #52 is
-being synchronized for fresh validation; PRs #53 and #54 remain open and
+synchronized with current `main`; fresh `make check` and complete `make test`
+pass, including `GINUX_KERNEL_OK` and `Boot test passed`. Its final head awaits
+GitHub CI and a later unchanged-head review. PRs #53 and #54 remain open and
 conflicted pending the same merge-train process.
 The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
 matrix and repeated stress pass. Gate 11's comparison and reduced evidence are
