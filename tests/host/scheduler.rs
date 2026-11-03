@@ -95,6 +95,18 @@ mod scheduler {
         }
         const OPS: [Op; 5] = [Op::Yield, Op::Preempt, Op::Block, Op::Fault, Op::Exit];
 
+        #[test]
+        fn lifecycle_handoffs_continue_after_diagnostic_saturation() {
+            let _guard = LOCK.lock().unwrap();
+            setup(false, false, false);
+            let mut frame = trap();
+            for _ in 0..1024 {
+                assert!(suspend_container_lifecycle(&mut frame, CS, SS, 0, 0x1110));
+                assert!(resume_container_lifecycle(1).is_some());
+            }
+            assert_eq!(runtime_mut().unwrap().blocks, u8::MAX);
+        }
+
         fn setup(second: bool, same_root: bool, blocked_peer: bool) {
             SCHEDULER_RUNTIME.reset();
             assert!(initialize_control_runtime(1));
