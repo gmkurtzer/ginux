@@ -22989,6 +22989,16 @@ fn linux_runtime_file_kind(path: &[u8]) -> Option<u16> {
     if path == b"/tmp/ginux-ready" && linux_tmpfs::open(b"ginux-ready").is_some() {
         return Some(LINUX_FILE_TMP_SCRATCH);
     }
+    // The remaining kinds serve files of Ginux's own measured initramfs. A
+    // domain running an OCI image must see only that image plus its overlay:
+    // never these files, and in particular never one the domain deleted
+    // (a whiteout). Otherwise `/init` and `/lib64/ld-ginux.so` appear in every
+    // container, and `unlink /etc/hostname` exposes the initramfs copy.
+    if crate::linux_overlay::hidden(path)
+        || current_container_slot().is_some_and(crate::published_rootfs::is_installed)
+    {
+        return None;
+    }
     let (kind, root_name) = match path {
         b"/init" => (LINUX_FILE_INIT, b"linux/init" as &[u8]),
         b"/lib64/ld-ginux.so" => (LINUX_FILE_INTERPRETER, b"linux/ld-ginux.so" as &[u8]),
