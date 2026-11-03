@@ -73,7 +73,12 @@ pub const OCI_CATALOG_PAYLOAD_CAPACITY: usize =
 pub const OCI_OBJECT_START_SECTOR: usize = 256;
 
 const LOCAL_CONFIG_MAGIC: &[u8; 8] = b"GINUXLC1";
-const LOCAL_CONFIG_VERSION: u32 = 1;
+// Version 1 digests only the payload, so generation and length are not
+// integrity-protected. Version 2 binds the header fields into the digest.
+// Version 1 slots remain readable; every new commit writes version 2.
+const LOCAL_CONFIG_LEGACY_VERSION: u32 = 1;
+const LOCAL_CONFIG_VERSION: u32 = 2;
+const LOCAL_CONFIG_BOUND_HEADER: usize = 32;
 const LOCAL_CONFIG_COMMIT_MARKER: u64 = 0x3147_4643_4c58_5547;
 const OCI_CATALOG_MAGIC: &[u8; 8] = b"GINUXOC1";
 const OCI_CATALOG_COMMIT_MARKER: u64 = 0x3147_434f_5855_4e47;
@@ -148,6 +153,7 @@ pub fn recover_local_config<D: BlockDevice>(
     output: &mut [u8],
 ) -> Result<Option<LocalConfigRecord>, ScanError> {
     recover_extent(device, output, LOCAL_CONFIG_LAYOUT)
+        .map(|selected| selected.map(|(_, record)| record))
 }
 
 pub fn recover_oci_catalog<D: BlockDevice>(
@@ -155,13 +161,14 @@ pub fn recover_oci_catalog<D: BlockDevice>(
     output: &mut [u8],
 ) -> Result<Option<OciCatalogRecord>, ScanError> {
     recover_extent(device, output, OCI_CATALOG_LAYOUT)
+        .map(|selected| selected.map(|(_, record)| record))
 }
 
 fn recover_extent<D: BlockDevice>(
     device: &mut D,
     output: &mut [u8],
     layout: ExtentLayout,
-) -> Result<Option<LocalConfigRecord>, ScanError> {
+) -> Result<Option<(usize, LocalConfigRecord)>, ScanError> {
     let mut selected: Option<(usize, LocalConfigRecord)> = None;
     let mut corrupt = false;
     for (slot, start) in layout.slot_starts.iter().copied().enumerate() {
@@ -188,7 +195,7 @@ fn recover_extent<D: BlockDevice>(
             output,
             layout,
         )?;
-        Ok(Some(record))
+        Ok(Some((slot, record)))
     } else if corrupt {
         Err(ScanError::Corrupt)
     } else {
@@ -222,15 +229,19 @@ fn commit_extent<D: BlockDevice>(
         return Err(CommitError::PayloadTooLarge);
     }
     let current = recover_extent(device, recovery, layout).map_err(scan_error)?;
-    if let Some(record) = current {
+    if let Some((_, record)) = current {
         if &recovery[..record.length] == payload {
             return Ok(record);
         }
     }
     let generation = current
-        .map_or(Some(1), |record| record.generation.checked_add(1))
+        .map_or(Some(1), |(_, record)| record.generation.checked_add(1))
         .ok_or(CommitError::GenerationExhausted)?;
-    let target = current.map_or(0, |record| (record.generation as usize) & 1);
+    // Always write the slot that does not hold the recovered record, as
+    // commit_through() does for the host-volume record. Deriving the target
+    // from the generation's parity would overwrite the only valid copy
+    // whenever that copy does not sit in its "expected" slot.
+    let target = current.map_or(0, |(slot, _)| slot ^ 1);
     let start = layout.slot_starts[target];
     let prepared = extent_header(generation, payload, false, layout);
     let committed = extent_header(generation, payload, true, layout);
@@ -264,8 +275,12 @@ fn inspect_extent_slot<D: BlockDevice>(
     if header.iter().all(|byte| *byte == 0) {
         return Ok(LocalConfigSlot::Empty);
     }
+    let version = u32::from_le_bytes(header[8..12].try_into().unwrap_or([0; 4]));
     if &header[..8] != layout.magic
-        || u32::from_le_bytes(header[8..12].try_into().unwrap_or([0; 4])) != LOCAL_CONFIG_VERSION
+        || !matches!(version, LOCAL_CONFIG_LEGACY_VERSION | LOCAL_CONFIG_VERSION)
+        || version == LOCAL_CONFIG_VERSION
+            && (header[14..16].iter().any(|byte| *byte != 0)
+                || header[20..24].iter().any(|byte| *byte != 0))
         || usize::from(u16::from_le_bytes(
             header[12..14].try_into().unwrap_or([0; 2]),
         )) != LOCAL_CONFIG_HEADER_SIZE
@@ -289,8 +304,7 @@ fn inspect_extent_slot<D: BlockDevice>(
         return Ok(LocalConfigSlot::Corrupt);
     }
     read_extent_payload(device, start, length, scratch, layout)?;
-    let expected: [u8; 32] = Sha256::digest(&scratch[..length]).into();
-    if header[40..72] != expected {
+    if header[40..72] != extent_digest(version, &header, &scratch[..length]) {
         return Ok(LocalConfigSlot::Corrupt);
     }
     Ok(LocalConfigSlot::Committed(LocalConfigRecord {
@@ -314,12 +328,25 @@ fn extent_header(
     if committed {
         header[32..40].copy_from_slice(&layout.marker.to_le_bytes());
     }
-    let digest: [u8; 32] = Sha256::digest(payload).into();
+    let digest = extent_digest(LOCAL_CONFIG_VERSION, &header, payload);
     header[40..72].copy_from_slice(&digest);
     let first = payload.len().min(SECTOR_SIZE - LOCAL_CONFIG_HEADER_SIZE);
     header[LOCAL_CONFIG_HEADER_SIZE..LOCAL_CONFIG_HEADER_SIZE + first]
         .copy_from_slice(&payload[..first]);
     header
+}
+
+/// Version 2 digests magic, version, header size, length and generation
+/// (bytes 0..32) followed by the payload. The commit marker stays outside the
+/// digest so the prepared and committed headers share it; it is checked for
+/// an exact value instead.
+fn extent_digest(version: u32, header: &[u8; SECTOR_SIZE], payload: &[u8]) -> [u8; 32] {
+    let mut digest = Sha256::new();
+    if version != LOCAL_CONFIG_LEGACY_VERSION {
+        digest.update(&header[..LOCAL_CONFIG_BOUND_HEADER]);
+    }
+    digest.update(payload);
+    digest.finalize().into()
 }
 
 fn write_extent_slot<D: BlockDevice>(
@@ -742,6 +769,99 @@ mod tests {
             Err(ScanError::Corrupt)
         );
         assert_eq!(device.pending, before);
+    }
+
+    fn write_slot(
+        device: &mut LargeMemoryDevice,
+        slot: usize,
+        header: &[u8; SECTOR_SIZE],
+        payload: &[u8],
+    ) {
+        let start = LOCAL_CONFIG_SLOT_STARTS[slot];
+        assert!(write_extent_slot(device, start, payload, header, LOCAL_CONFIG_LAYOUT).is_ok());
+        device.durable.clone_from(&device.pending);
+    }
+
+    #[test]
+    fn generation_bit_flip_in_stale_slot_cannot_roll_back() {
+        let mut device = LargeMemoryDevice::new();
+        commit_local_config(&mut device, b"old-config").expect("generation 1");
+        commit_local_config(&mut device, b"new-config").expect("generation 2");
+        // One flipped bit turns the stale generation 1 into 1 | 1 << 40.
+        device.pending[LOCAL_CONFIG_SLOT_STARTS[0]][24 + 5] ^= 1;
+        let mut output = vec![0; LOCAL_CONFIG_PAYLOAD_CAPACITY];
+        let record = recover_local_config(&mut device, &mut output)
+            .expect("scan")
+            .expect("newest record");
+        assert_eq!(record.generation, 2);
+        assert_eq!(&output[..record.length], b"new-config");
+    }
+
+    #[test]
+    fn commit_never_targets_the_slot_holding_the_recovered_record() {
+        let mut device = LargeMemoryDevice::new();
+        // The only valid record has generation 2 but sits in slot 0.
+        let header = extent_header(2, b"only-copy", true, LOCAL_CONFIG_LAYOUT);
+        write_slot(&mut device, 0, &header, b"only-copy");
+        let before =
+            device.pending[LOCAL_CONFIG_SLOT_STARTS[0]..LOCAL_CONFIG_SLOT_STARTS[1]].to_vec();
+
+        let record = commit_local_config(&mut device, b"next").expect("commit");
+        assert_eq!(record.generation, 3);
+        assert_eq!(
+            &device.pending[LOCAL_CONFIG_SLOT_STARTS[0]..LOCAL_CONFIG_SLOT_STARTS[1]],
+            before.as_slice()
+        );
+        let mut output = vec![0; LOCAL_CONFIG_PAYLOAD_CAPACITY];
+        let recovered = recover_local_config(&mut device, &mut output)
+            .expect("scan")
+            .expect("record");
+        assert_eq!(recovered.generation, 3);
+        assert_eq!(&output[..recovered.length], b"next");
+    }
+
+    #[test]
+    fn legacy_version_one_slots_recover_and_migrate() {
+        let mut device = LargeMemoryDevice::new();
+        let payload = b"written-by-version-1";
+        let mut header = extent_header(5, payload, true, LOCAL_CONFIG_LAYOUT);
+        header[8..12].copy_from_slice(&LOCAL_CONFIG_LEGACY_VERSION.to_le_bytes());
+        let legacy: [u8; 32] = Sha256::digest(payload).into();
+        header[40..72].copy_from_slice(&legacy);
+        write_slot(&mut device, 0, &header, payload);
+
+        let mut output = vec![0; LOCAL_CONFIG_PAYLOAD_CAPACITY];
+        let record = recover_local_config(&mut device, &mut output)
+            .expect("scan")
+            .expect("legacy record");
+        assert_eq!(record.generation, 5);
+        assert_eq!(&output[..record.length], payload);
+
+        let next = commit_local_config(&mut device, b"version-2").expect("commit");
+        assert_eq!(next.generation, 6);
+        let written = &device.pending[LOCAL_CONFIG_SLOT_STARTS[1]];
+        assert_eq!(&written[8..12], &LOCAL_CONFIG_VERSION.to_le_bytes());
+        let record = recover_local_config(&mut device, &mut output)
+            .expect("scan")
+            .expect("migrated record");
+        assert_eq!(record.generation, 6);
+        assert_eq!(&output[..record.length], b"version-2");
+    }
+
+    #[test]
+    fn version_two_rejects_nonzero_reserved_header_bytes() {
+        let mut device = LargeMemoryDevice::new();
+        commit_local_config(&mut device, b"settings").expect("commit");
+        for offset in [14, 15, 20, 21, 22, 23] {
+            let mut copy = device.clone();
+            copy.pending[LOCAL_CONFIG_SLOT_STARTS[0]][offset] = 1;
+            let mut output = vec![0; LOCAL_CONFIG_PAYLOAD_CAPACITY];
+            assert_eq!(
+                recover_local_config(&mut copy, &mut output),
+                Err(ScanError::Corrupt),
+                "offset {offset}"
+            );
+        }
     }
 
     #[test]
