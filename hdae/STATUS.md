@@ -141,6 +141,9 @@ scope, threat model, and invariants.
   external `SIGSTOP`, Ginus killed and reaped the tracee and cleaned domain
   state. Four VFS unit tests now include independent overlay-instance isolation
   plus traversal, symlink-loop, invalid-descriptor, overlay, and teardown paths.
+- `make demo-gate-5` passed all eight named checks and reported its explicit
+  non-claims. A fresh aggregate `make test` also passed all earlier-gate lint,
+  unit, QEMU interception/runtime/config/domain, and image-pipeline regressions.
 
 ## Open decisions and limitations
 
@@ -173,8 +176,8 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Build the human-readable `make demo-gate-5` checkpoint, run the complete Gate 5
-regression set, reconcile every criterion, then push the branch and open its PR.
+Commit the final Gate 5 demonstration/evidence, push the dedicated branch, open
+its pull request, record the URL, and stop for human acceptance.
 
 ## Context recovery
 
@@ -182,9 +185,11 @@ regression set, reconcile every criterion, then push the branch and open its PR.
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
 - Active gate: Gate 5, virtual VFS and dynamic userspace; authorized and in
-  progress on `hdae/virtual-vfs-userspace`
+  technical-pass state on `hdae/virtual-vfs-userspace`; awaiting delivery and
+  human acceptance
 - Last evidence: `make check`, `make test-unit`, `make test-oci-layers`,
   `make test-oci-image`, and a post-assembly `make test-native-vfs` passed on
   2026-11-03; the latest native run includes balanced negative probes and
-  supervisor-loss verification
+  supervisor-loss verification; `make demo-gate-5` and aggregate `make test`
+  also passed
 - Required human decision: none until the Gate 5 demonstration checkpoint

@@ -74,6 +74,10 @@ Ginus-owned immutable base and domain-local writable overlay.
   emulated and denied syscalls before effect.
 - [x] Added unexpected-stop and remaining ptrace-state tests.
 - [x] Added isolation, traversal, overlay, malformed-file, and cleanup tests.
+- [x] Added `make demo-gate-5` with eight named human-readable checks and
+  explicit non-claims.
+- [ ] Deliver the dedicated branch and pull request, then obtain human
+  acceptance at the Gate 5 checkpoint.
 
 ## Acceptance criteria
 
@@ -155,6 +159,14 @@ Ginus-owned immutable base and domain-local writable overlay.
   exact failure, and released domain state. The VFS unit suite also passed a
   two-instance overlay-isolation test alongside traversal, symlink-loop,
   invalid-descriptor, permission, unlink, malformed-index, and teardown checks.
+- `make demo-gate-5` passed 8/8 checks: pinned offline OCI objects, multi-layer
+  semantics, Ginus VFS overlay/teardown, unmodified Rocky loader and Bash,
+  balanced allow/deny policy, virtual identity, fail-closed tracing, unchanged
+  cached root/index, and cleanup. It explicitly excludes full VFS, devices,
+  networking, `/proc`, `/sys`, and systemd claims.
+- A fresh aggregate `make test` passed formatting/lint, 24 unit tests, Gate 1
+  interception, Gate 3 runtime, Gate 4 configuration/lifecycle, and all eight
+  Gate 2 image-pipeline checks.
 
 ## Decisions and limitations
 
@@ -205,10 +217,12 @@ Ginus-owned immutable base and domain-local writable overlay.
   `8e5847a` added the native ptrace Rocky loader and Bash proof; `19ade45`
   added deterministic multi-layer OCI assembly; `43db983` added supervisor-loss
   protection; `1c18c36` added the approved balanced execution profile;
-  unexpected-stop and final isolation commit pending
+  `f151475` added unexpected-stop and final isolation checks; demonstration and
+  final evidence commit pending
 
 ## Review policy and outcome
 
 Human checkpoint because host-backed files are a security boundary and the
 accepted VFS model constrains later device and systemd behavior. Present
 `make demo-gate-5`, fresh evidence, and the pull request before acceptance.
+Technical status: passed on 2026-11-03; awaiting delivery and human acceptance.
