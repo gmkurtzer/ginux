@@ -7,7 +7,8 @@ true` against the root manifest, and no root file is modified.
 
 All commands below are run from **inside this directory** (`cd fuzz`), so the
 pinned toolchain in `rust-toolchain.toml` applies and the root toolchain
-(1.99.0, UEFI target) is untouched.
+(1.99.0, UEFI target) is untouched. The commands use the host's default
+target, so they run natively on Linux and macOS.
 
 ## Targets
 
@@ -26,9 +27,8 @@ data) or trips ASan is a finding; returning `None`/`Err` is fine.
   `rust-toolchain.toml`; rustup auto-installs it with `rust-src` and
   `llvm-tools-preview` on first use from inside `fuzz/`).
 - **cargo-fuzz**: `cargo install cargo-fuzz --locked --version 0.13.2`
-- **clang + g++** (the libFuzzer runtime is C++).
-- The target triple `x86_64-unknown-linux-gnu` is passed explicitly: recent
-  cargo-fuzz defaults to musl, which is not what these commands expect.
+- **clang and a C++ compiler** (the libFuzzer runtime is C++): on Linux
+  `clang` and `g++`; on macOS the Xcode command line tools.
 
 ## Smoke run (bounded, about 60 s per target)
 
@@ -39,17 +39,17 @@ exits 0; no crash files appear under `fuzz/artifacts/`.
 cd fuzz
 mkdir -p corpus artifacts
 
-cargo fuzz run --target x86_64-unknown-linux-gnu --sanitizer address \
+cargo fuzz run --sanitizer address \
   oci_surfaces -- -max_total_time=30 -rss_limit_mb=4096 \
   -artifact_prefix=artifacts/ -dict=oci.dict \
   corpus corpus-seed
 
-cargo fuzz run --target x86_64-unknown-linux-gnu --sanitizer address \
+cargo fuzz run --sanitizer address \
   protocol_surfaces -- -max_total_time=30 -rss_limit_mb=4096 \
   -artifact_prefix=artifacts/ -dict=protocol.dict \
   corpus corpus-seed-protocol
 
-cargo fuzz run --target x86_64-unknown-linux-gnu --sanitizer address \
+cargo fuzz run --sanitizer address \
   volume_surfaces -- -max_total_time=30 -rss_limit_mb=4096 \
   -artifact_prefix=artifacts/ -dict=volume.dict \
   corpus corpus-seed-volume
@@ -59,17 +59,28 @@ cargo fuzz run --target x86_64-unknown-linux-gnu --sanitizer address \
 
 ```sh
 # 10-minute round per target: same flags, -max_total_time=600
+
 # Coverage (llvm-tools-preview is included in the pinned toolchain):
-cargo fuzz coverage --target x86_64-unknown-linux-gnu oci_surfaces \
-  corpus corpus-seed
+cargo fuzz coverage oci_surfaces corpus corpus-seed
+
 # cargo-fuzz 0.13.2 stops at the merged profile; summarise with llvm-cov
-# from the pinned toolchain (llvm-tools-preview). The coverage build lives
-# under a separate target dir: target/<host>/coverage/<triple>/release/:
-"$(rustc --print sysroot)/lib/rustlib/x86_64-unknown-linux-gnu/bin/llvm-cov" report \
-  target/x86_64-unknown-linux-gnu/coverage/x86_64-unknown-linux-gnu/release/oci_surfaces \
+# from the pinned toolchain. The coverage build lives under a separate
+# target dir: target/<host>/coverage/<host>/release/
+HOST="$(rustc -vV | sed -n 's/^host: //p')"
+"$(rustc --print sysroot)/lib/rustlib/$HOST/bin/llvm-cov" report \
+  "target/$HOST/coverage/$HOST/release/oci_surfaces" \
   -instr-profile=coverage/oci_surfaces/coverage.profdata -summary-only
 # -> coverage/oci_surfaces/coverage.profdata + the per-file/TOTAL report table
 ```
+
+## Optional: explicit Linux target
+
+The commands above use the host's default target. To force a Linux target
+(for example when cross-building from another host), append
+`--target x86_64-unknown-linux-gnu` to the `cargo fuzz` commands. This
+additionally requires `x86_64-linux-gnu-g++` as a cross compiler, and the
+resulting executable only runs on a Linux x86_64 host. If you use it for
+coverage, replace `$HOST` in the paths above with `x86_64-unknown-linux-gnu`.
 
 ## Notes
 
