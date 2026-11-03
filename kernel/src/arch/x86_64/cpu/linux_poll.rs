@@ -472,7 +472,50 @@ pub(super) fn linux_select_live_return(
         return LINUX_ESRCH;
     };
     let Some(target) = ready_linux_thread_handle() else {
-        return LINUX_ENOSYS;
+        // A lone Linux process has no peer thread to schedule. Wait like the
+        // socket poll path instead of leaking the scheduler's lack of a
+        // target as ENOSYS to userspace.
+        let deadline = match parsed.duration {
+            Some(duration) => {
+                let Some(deadline) =
+                    linux_elapsed_nanoseconds().and_then(|now| now.checked_add(duration))
+                else {
+                    return LINUX_EINVAL;
+                };
+                Some(deadline)
+            }
+            None => None,
+        };
+        let syscall = if pselect {
+            LINUX_PSELECT6_SYSCALL
+        } else {
+            LINUX_SELECT_SYSCALL
+        };
+        let result =
+            linux_poll_wait_sockets_live_return(output, caller, deadline, syscall, |copy| {
+                match linux_select_ready(parsed.snapshot) {
+                    Ok((_, _, 0)) if !copy => 0,
+                    Ok((ready_read, ready_write, _)) => linux_select_copy_result(
+                        parsed.snapshot,
+                        ready_read,
+                        ready_write,
+                        copy_to_linux_user,
+                    ),
+                    Err(error) => error,
+                }
+            });
+        // Report select()'s unslept time like the ready path above
+        // (fs/select.c poll_select_finish()).
+        return match deadline {
+            Some(deadline)
+                if !pselect
+                    && result < u64::MAX - 4095
+                    && !linux_select_write_remaining(parsed.snapshot, deadline) =>
+            {
+                LINUX_EFAULT
+            }
+            _ => result,
+        };
     };
     let Some(tls) = linux_thread_context(current) else {
         return LINUX_ESRCH;
@@ -632,40 +675,100 @@ pub(super) fn yield_current_linux_process_wait(caller: LinuxUserContext) -> bool
     yield_current_linux_process(caller, LINUX_EINTR)
 }
 
-fn linux_poll_synchronously(address: u64, active: &mut [u8], duration: Option<u64>) -> u64 {
-    let deadline = duration
-        .and_then(|duration| linux_elapsed_nanoseconds().and_then(|now| now.checked_add(duration)));
+/// Evaluates `pollfd` readiness. The result is copied out when an event is
+/// ready or `copy` requests the final, possibly empty, result.
+fn linux_poll_descriptors(address: u64, active: &mut [u8], copy: bool) -> u64 {
+    let mut ready = 0;
+    for pollfd in active.as_chunks_mut::<8>().0 {
+        let descriptor = i32::from_ne_bytes(pollfd[..4].try_into().unwrap());
+        let events = u16::from_ne_bytes(pollfd[4..6].try_into().unwrap());
+        let returned = linux_descriptor_poll_events(descriptor, events);
+        pollfd[6..8].copy_from_slice(&returned.to_ne_bytes());
+        ready += u64::from(returned != 0);
+    }
+    if ready == 0 && !copy {
+        0
+    } else if active.is_empty() || copy_to_linux_user(address, active) {
+        ready
+    } else {
+        LINUX_EFAULT
+    }
+}
+
+fn linux_poll_deadline_expired(deadline: Option<u64>) -> bool {
+    deadline.is_some_and(|deadline| linux_elapsed_nanoseconds().is_some_and(|now| now >= deadline))
+}
+
+/// Spins for at most `BLOCKING_POLL_LIMIT` readiness checks. Returns the
+/// nonzero ready count or error, or 0 without copying anything out when the
+/// deadline or the budget expires first.
+fn linux_poll_budget(deadline: Option<u64>, poll: &mut impl FnMut(bool) -> u64) -> u64 {
     for _ in 0..crate::linux_socket::BLOCKING_POLL_LIMIT {
-        let mut ready = 0;
-        for pollfd in active.as_chunks_mut::<8>().0 {
-            let descriptor = i32::from_ne_bytes(pollfd[..4].try_into().unwrap());
-            let events = u16::from_ne_bytes(pollfd[4..6].try_into().unwrap());
-            let returned = linux_descriptor_poll_events(descriptor, events);
-            pollfd[6..8].copy_from_slice(&returned.to_ne_bytes());
-            ready += u64::from(returned != 0);
-        }
-        if ready != 0 {
-            return if active.is_empty() || copy_to_linux_user(address, active) {
-                ready
-            } else {
-                LINUX_EFAULT
-            };
-        }
-        if deadline
-            .is_some_and(|deadline| linux_elapsed_nanoseconds().is_some_and(|now| now >= deadline))
-        {
-            return if active.is_empty() || copy_to_linux_user(address, active) {
-                0
-            } else {
-                LINUX_EFAULT
-            };
+        let result = poll(false);
+        if result != 0 || linux_poll_deadline_expired(deadline) {
+            return result;
         }
         core::hint::spin_loop();
     }
-    if active.is_empty() || copy_to_linux_user(address, active) {
-        0
-    } else {
-        LINUX_EFAULT
+    0
+}
+
+fn linux_poll_synchronously(address: u64, active: &mut [u8], duration: Option<u64>) -> u64 {
+    let deadline = duration
+        .and_then(|duration| linux_elapsed_nanoseconds().and_then(|now| now.checked_add(duration)));
+    let mut poll = |copy| linux_poll_descriptors(address, active, copy);
+    match linux_poll_budget(deadline, &mut poll) {
+        0 => poll(true),
+        result => result,
+    }
+}
+
+/// Socket-backed descriptors, including runtime pipes, are not woken through
+/// the thread wait engine, and the nested executor runs another process only
+/// when the current one hands over the CPU. Linux sleeps until an event or
+/// the timeout (fs/select.c do_poll() and do_select()), so run a still
+/// running child that may produce the event, as blocking pipe reads do, and
+/// give an untimed wait's ancestors a turn by restarting the syscall instead
+/// of returning 0. A vfork() parent released at the child's exec depends on
+/// this: the exec'd writer has not run yet when the parent polls the pipe.
+/// A timed wait keeps checking until its deadline. `poll(copy)` follows
+/// `linux_poll_descriptors()`.
+fn linux_poll_wait_sockets_live_return(
+    output: *mut LinuxSyscallFrame,
+    caller: LinuxUserContext,
+    deadline: Option<u64>,
+    syscall: u64,
+    mut poll: impl FnMut(bool) -> u64,
+) -> u64 {
+    let runtime = X86_RUNTIME.LINUX_RUNTIME_MODE.load(Ordering::SeqCst);
+    let pid = current_linux_process_pid();
+    let restartable = runtime && deadline.is_none() && pid != 1;
+    loop {
+        let ran_child = runtime
+            && linux_process::live_running_child_pid(pid).is_some_and(|child| {
+                refresh_live_linux_process_registry(caller)
+                    && run_scheduled_linux_process(pid, Some(child))
+                    && restore_linux_process_live_return(output, pid)
+            });
+        let result = if ran_child {
+            poll(false)
+        } else {
+            linux_poll_budget(deadline, &mut poll)
+        };
+        if result != 0 {
+            return result;
+        }
+        if linux_poll_deadline_expired(deadline) {
+            return poll(true);
+        }
+        if restartable && restart_current_linux_process_syscall(caller, syscall) {
+            return LINUX_RETURN_TO_KERNEL;
+        }
+        // Without a deadline, a process with nothing to schedule keeps the
+        // fixed synchronous budget and reports no events.
+        if !ran_child && deadline.is_none() {
+            return poll(true);
+        }
     }
 }
 
@@ -750,7 +853,17 @@ pub(super) fn linux_poll_wait_live_return(
         descriptor >= 0 && linux_socket_slot(descriptor as u64).is_some()
     });
     if !waits_for_parent_unix_peer && polls_socket {
-        return linux_poll_synchronously(address, active, duration);
+        let syscall = if wait_kind == LINUX_THREAD_WAIT_PPOLL {
+            LINUX_PPOLL_SYSCALL
+        } else {
+            LINUX_POLL_SYSCALL
+        };
+        let deadline = duration.and_then(|duration| {
+            linux_elapsed_nanoseconds().and_then(|now| now.checked_add(duration))
+        });
+        return linux_poll_wait_sockets_live_return(output, caller, deadline, syscall, |copy| {
+            linux_poll_descriptors(address, active, copy)
+        });
     }
     let Some(current) = current_linux_thread_handle() else {
         return LINUX_ESRCH;

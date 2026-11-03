@@ -485,8 +485,22 @@ pub(super) fn linux_clock_nanosleep_live_return(
         // task. Sleep in the kernel until the deadline instead of exposing an
         // implementation detail as ENOSYS. Device/timer interrupts still wake
         // the CPU and are handled normally between checks.
+        //
+        // Linux lets other processes, such as a parent about to signal this
+        // child, run while it sleeps (kernel/time/hrtimer.c do_nanosleep()).
+        // The nested executor runs them only when this process hands over the
+        // CPU, so after each tick give an absolute sleep's ancestors a turn by
+        // restarting it; re-reading the same absolute deadline keeps it exact.
+        // A relative sleep would restart with a later deadline.
+        let yields = absolute && current_linux_process_pid() != 1;
         while linux_elapsed_nanoseconds().is_some_and(|now| now < deadline) {
             unsafe { asm!("sti", "hlt", "cli", options(nomem, nostack)) };
+            if yields
+                && linux_elapsed_nanoseconds().is_some_and(|now| now < deadline)
+                && restart_current_linux_process_syscall(caller, LINUX_CLOCK_NANOSLEEP_SYSCALL)
+            {
+                return LINUX_RETURN_TO_KERNEL;
+            }
         }
         return 0;
     };
