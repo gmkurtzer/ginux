@@ -635,7 +635,7 @@ pub(super) fn yield_current_linux_process_wait(caller: LinuxUserContext) -> bool
 fn linux_poll_synchronously(address: u64, active: &mut [u8], duration: Option<u64>) -> u64 {
     let deadline = duration
         .and_then(|duration| linux_elapsed_nanoseconds().and_then(|now| now.checked_add(duration)));
-    loop {
+    for _ in 0..crate::linux_socket::BLOCKING_POLL_LIMIT {
         let mut ready = 0;
         for pollfd in active.as_chunks_mut::<8>().0 {
             let descriptor = i32::from_ne_bytes(pollfd[..4].try_into().unwrap());
@@ -662,6 +662,15 @@ fn linux_poll_synchronously(address: u64, active: &mut [u8], duration: Option<u6
         }
         core::hint::spin_loop();
     }
+    if active.is_empty() || copy_to_linux_user(address, active) {
+        0
+    } else {
+        LINUX_EFAULT
+    }
+}
+
+pub(super) fn verify_synchronous_poll_budget() -> bool {
+    linux_poll_synchronously(0, &mut [], None) == 0
 }
 
 pub(super) fn linux_poll_wait_live_return(
