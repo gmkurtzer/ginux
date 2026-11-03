@@ -8,9 +8,10 @@
 - Branch: `hdae/issue-62-poll-budget`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 40, synchronous poll budget
-- Last completed action: `make check` and `make test` passed after applying the
-  existing fixed socket-poll budget with deterministic boot evidence
-- Next action: commit, push, and open the dedicated issue #62 pull request
+- Last completed action: `make check` and `make test` passed and Gate 40 was
+  delivered through PR #70
+- Next action: begin Gate 41 for issue #63 while PR #70 awaits GitHub checks and
+  a subsequent unchanged-head review
 
 ## Current repository state
 

@@ -28,7 +28,7 @@ kernel-entry path in an unbounded spin when the guest requests no timeout.
 
 ## Remaining work
 
-- [ ] Publish the dedicated branch and pull request.
+- None.
 
 ## Acceptance criteria
 
@@ -61,12 +61,14 @@ kernel-entry path in an unbounded spin when the guest requests no timeout.
 
 - Working branch: `hdae/issue-62-poll-budget`
 - Intended base: `main`
-- Pull request: intended, with a non-closing reference to issue #62
+- Pull request: [#70](https://github.com/gmkurtzer/ginux/pull/70), with a
+  non-closing reference to issue #62
 - Planned commits: gate definition and bounded mechanism; evidence and delivery
-- Actual commits: the implementation commit containing this record, followed by
-  a delivery-state commit
+- Actual commits: `72b3a757` (gate, implementation, regression, and evidence),
+  followed by the delivery-state commit containing this update
 
 ## Review policy and outcome
 
-Delegated completion under the user's authorized proactive-remediation policy.
-The gate remains open until validation passes and an open pull request exists.
+Passed and closed under the user's authorized proactive-remediation policy.
+All technical criteria passed and the dedicated branch and PR #70 exist; merge
+remains subject to the separate two-pass policy.
