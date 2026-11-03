@@ -16249,6 +16249,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let unix_inflight_rights = verify_linux_unix_inflight_rights();
     let aio = verify_linux_aio_syscalls();
     let memfd_seals = verify_linux_memfd_seals();
+    let mmap_access_modes = verify_linux_mmap_access_modes();
     let secret_memory = verify_linux_memfd_secret_syscall();
     let mount_queries = verify_linux_mount_query_syscalls();
     let file_handles = verify_linux_file_handle_syscalls();
@@ -16313,6 +16314,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         unix_inflight_rights,
         aio,
         memfd_seals,
+        mmap_access_modes,
         secret_memory,
         mount_queries,
         file_handles,
@@ -16374,6 +16376,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && unix_inflight_rights
         && aio
         && memfd_seals
+        && mmap_access_modes
         && secret_memory
         && mount_queries
         && file_handles
@@ -18560,6 +18563,115 @@ fn verify_linux_memfd_seals() -> bool {
     valid
 }
 
+fn verify_linux_mmap_access_modes() -> bool {
+    let scratch = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    if !(LINUX_RUNTIME_DYNAMIC_MMAP_BASE..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
+        .contains(&scratch)
+    {
+        return false;
+    }
+    let Some(node) = crate::linux_overlay::create_file(b"ginux-mmap-modes", 0o600, b"matrix")
+    else {
+        let _ = linux_runtime_munmap(scratch, PAGE_SIZE as u64);
+        return false;
+    };
+    let path_ready = copy_to_linux_user(scratch, b"/ginux-mmap-modes\0");
+    let descriptors = if path_ready {
+        [
+            linux_openat(u64::from(LINUX_AT_FDCWD), scratch, 0, 0),
+            linux_openat(u64::from(LINUX_AT_FDCWD), scratch, 1, 0),
+            linux_openat(u64::from(LINUX_AT_FDCWD), scratch, 2, 0),
+        ]
+    } else {
+        [LINUX_EBADF; 3]
+    };
+    let opened = descriptors
+        .iter()
+        .all(|descriptor| *descriptor < LINUX_AUX_DESCRIPTOR_LIMIT);
+    let mapping_matches = |descriptor, protection, sharing, accepted| {
+        let result = linux_runtime_mmap(0, PAGE_SIZE as u64, protection, sharing, descriptor, 0);
+        if accepted {
+            (LINUX_RUNTIME_DYNAMIC_MMAP_BASE..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
+                .contains(&result)
+                && linux_runtime_munmap(result, PAGE_SIZE as u64) == 0
+        } else {
+            result == LINUX_EACCES
+        }
+    };
+    let shared_read = opened
+        && [
+            mapping_matches(descriptors[0], LINUX_PROT_READ, LINUX_MAP_SHARED, true),
+            mapping_matches(descriptors[1], LINUX_PROT_READ, LINUX_MAP_SHARED, false),
+            mapping_matches(descriptors[2], LINUX_PROT_READ, LINUX_MAP_SHARED, true),
+        ]
+        .into_iter()
+        .all(|valid| valid);
+    let shared_writable = opened
+        && [
+            mapping_matches(
+                descriptors[0],
+                LINUX_PROT_READ | LINUX_PROT_WRITE,
+                LINUX_MAP_SHARED,
+                false,
+            ),
+            mapping_matches(
+                descriptors[1],
+                LINUX_PROT_READ | LINUX_PROT_WRITE,
+                LINUX_MAP_SHARED,
+                false,
+            ),
+            mapping_matches(
+                descriptors[2],
+                LINUX_PROT_READ | LINUX_PROT_WRITE,
+                LINUX_MAP_SHARED,
+                true,
+            ),
+        ]
+        .into_iter()
+        .all(|valid| valid);
+    let private_writable = opened
+        && [
+            mapping_matches(
+                descriptors[0],
+                LINUX_PROT_READ | LINUX_PROT_WRITE,
+                LINUX_MAP_PRIVATE,
+                true,
+            ),
+            mapping_matches(
+                descriptors[1],
+                LINUX_PROT_READ | LINUX_PROT_WRITE,
+                LINUX_MAP_PRIVATE,
+                false,
+            ),
+            mapping_matches(
+                descriptors[2],
+                LINUX_PROT_READ | LINUX_PROT_WRITE,
+                LINUX_MAP_PRIVATE,
+                true,
+            ),
+        ]
+        .into_iter()
+        .all(|valid| valid);
+    let closed = descriptors.into_iter().all(|descriptor| {
+        descriptor < LINUX_AUX_DESCRIPTOR_LIMIT && linux_descriptor_close(descriptor) == 0
+    });
+    let removed = crate::linux_overlay::unlink(node);
+    let scratch_released = linux_runtime_munmap(scratch, PAGE_SIZE as u64) == 0;
+    let valid =
+        shared_read && shared_writable && private_writable && closed && removed && scratch_released;
+    if valid {
+        serial_write("ginux: Linux mmap descriptor access matrix validated\r\n");
+    }
+    valid
+}
+
 fn verify_linux_memfd_secret_syscall() -> bool {
     let descriptor = linux_memfd_secret(1);
     if descriptor >= LINUX_AUX_DESCRIPTOR_LIMIT {
@@ -20151,6 +20263,9 @@ fn linux_runtime_mmap(
             if metadata.kind != crate::linux_overlay::NodeKind::File
                 || !matches!(state & 3, LINUX_DESCRIPTOR_INPUT | 3)
                 || !offset.is_multiple_of(PAGE_SIZE as u64)
+                || (sharing == LINUX_MAP_SHARED
+                    && protection & LINUX_PROT_WRITE != 0
+                    && state & 3 == 1)
             {
                 return LINUX_EACCES;
             }
