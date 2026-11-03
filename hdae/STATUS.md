@@ -101,10 +101,11 @@ scope, threat model, and invariants.
   and helper reaping. Seven domain unit tests, `make test-config`,
   `make test-domain`, `make demo-gate-4`, and aggregate `make test` passed.
 - Human accepted Gate 4 on 2026-11-03 and directed advancement to Gate 5.
-- Human approved the Gate 5 backing strategy on 2026-11-03: provision the
-  verified rootfs tar and Ginus index once into a persistent derived Rocky host
-  QCOW2, boot disposable overlays above it, and keep domain writes in a bounded
-  in-memory overlay.
+- Human corrected and approved the Gate 5 backing strategy on 2026-11-03: the
+  domain virtually boots a digest-pinned Rocky OCI image through Ginus. Ginus
+  explicitly pulls and caches the image, assembles its layers into an immutable
+  indexed root, and supplies a bounded in-memory write overlay. An external OCI
+  runtime must not execute managed code, and the host QCOW2 remains independent.
 
 ## Open decisions and limitations
 
@@ -123,7 +124,8 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Implement the Gate 5 immutable Rocky base index and virtual path/object model on
+Implement Gate 5 OCI acquisition and deterministic layer assembly, then connect
+the resulting immutable Rocky root to the virtual path/object model on
 `hdae/virtual-vfs-userspace`.
 
 ## Context recovery

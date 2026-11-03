@@ -35,9 +35,10 @@ The initial milestone will boot a normal Rocky Linux 10 host with systemd as
 the real host PID 1, install Ginus as an ordinary host executable, and run an
 unmodified Rocky Linux 10 systemd userspace as virtual PID 1 inside one Ginus
 domain. Ginus remains resident as the userspace kernel for the processes it
-launches. The Rocky host and domain userspace will be derived from an official,
-checksum-pinned cloud QCOW2 image and cached so ordinary boots and tests do not
-require network access.
+launches. The Rocky host boots from an official, checksum-pinned cloud QCOW2
+image. Each domain virtually boots a digest-pinned Rocky OCI image as its root
+filesystem; Ginus pulls and caches that image explicitly so ordinary domain
+starts and tests do not require network access.
 
 The milestone succeeds when:
 
@@ -73,7 +74,7 @@ solved.
   Ginus runs inside it as an ordinary process or service.
 - An emulation-compatible syscall-interception mechanism selected by Gate 1;
   KVM acceleration is not required by the initial milestone.
-- One Rocky Linux 10 systemd domain from a cached cloud image.
+- One Rocky Linux 10 systemd domain from a cached, digest-pinned OCI image.
 - Linux ABI interception, emulation, mediated host operations, denial, and
   audit logging.
 - Domain-owned processes, address spaces, file descriptors, virtual kernel

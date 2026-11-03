@@ -92,15 +92,15 @@ There is no direct-continue action.
 
 ### Virtual VFS and image backend
 
-The initial root is prepared reproducibly from a checksum-pinned official Rocky
-Linux 10 cloud QCOW2 image. The source image is cached outside Git. Ginus
-presents a virtual root with an immutable prepared base and a domain-local
-writable overlay. Gate 5 uses a persistent derived Rocky host QCOW2 provisioned
-once with the verified rootfs tar and Ginus index. Ordinary QEMU boots use a
-disposable overlay above that cached host image. Ginus reads the tar through a
-trusted host-owned handle and applies domain writes only to a bounded in-memory
-overlay; managed code receives neither the host path nor descriptor. Ordinary
-boot and tests require no network access.
+The initial domain root is a digest-pinned Rocky Linux 10 OCI image. An explicit
+acquisition operation pulls and verifies its manifest, configuration, and
+layers into a host-owned cache outside Git. Ginus deterministically assembles
+the layers into an immutable indexed virtual root and adds a bounded,
+domain-local writable overlay. The OCI configuration supplies launch metadata,
+but Ginus—not `runc`, `crun`, `containerd`, or another OCI runtime—loads and
+executes the domain userspace through its own execution kernel. Managed code
+receives neither host paths nor host descriptors. Ordinary domain starts and
+tests require no network access.
 
 ### Virtual kernel filesystems
 
@@ -157,6 +157,9 @@ gate before implementation continues.
 Gate 4 selected strict, versioned TOML as the operator-facing domain
 configuration format with human approval on 2026-11-03.
 
-Gate 5 selected a persistent derived host QCOW2 containing the verified rootfs
-tar and index, with disposable per-boot QCOW overlays and a bounded in-memory
-domain write overlay, with human approval on 2026-11-03.
+Gate 5 selected a digest-pinned OCI image as the domain root filesystem, with
+Ginus acting as the userspace kernel and runtime. The image is pulled only by
+an explicit acquisition operation, cached outside Git, assembled into an
+immutable indexed virtual root, and paired with a bounded in-memory write
+overlay. The host continues to boot independently from its Rocky cloud QCOW2.
+Human approval was recorded on 2026-11-03.

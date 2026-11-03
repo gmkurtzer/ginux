@@ -47,12 +47,15 @@ check:
 	cargo clippy -p managed-payload --bin managed-payload --target $(X86_TARGET) --release -- -D warnings
 	cargo clippy -p baseline-runner --bin baseline-runner --target $(X86_TARGET) --release -- -D warnings
 	cargo clippy -p ginus-runtime --all-targets -- -D warnings
+	cargo clippy -p ginus-vfs --all-targets -- -D warnings
+	cargo clippy -p ginus-vfs-index --all-targets -- -D warnings
 	cargo clippy -p runtime-fixture --bin runtime-fixture --target $(X86_TARGET) --release -- -D warnings
 
 test-unit:
 	cargo test -p ginus-core
 	cargo test -p ginus-domain
 	cargo test -p ginus-runtime
+	cargo test -p ginus-vfs
 
 test-intercept: build
 	@./scripts/with-rocky-host.sh ./scripts/test-intercept.sh
