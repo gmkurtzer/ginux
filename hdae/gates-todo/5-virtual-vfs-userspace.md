@@ -25,8 +25,8 @@ Ginus-owned immutable base and domain-local writable overlay.
 - Consume OCI launch metadata while keeping Ginus as the supervising userspace
   kernel; do not invoke an external OCI runtime for managed code.
 - Pass the selected ELF and image-provided dynamic loader to the host kernel for
-  native execution under continuous `PTRACE_SYSEMU` supervision. Every syscall
-  must stop before host effect and resolve through Ginus dispatch.
+  native execution under continuous ptrace syscall-entry/exit supervision.
+  Every syscall must stop before host effect and resolve through Ginus dispatch.
 - Prevent managed code from learning or receiving host paths and descriptors as
   authority.
 
@@ -59,8 +59,12 @@ Ginus-owned immutable base and domain-local writable overlay.
 
 - [ ] Generalize deterministic assembly beyond the selected single-layer image
   and add synthetic OCI whiteout and opaque-directory tests.
-- [ ] Enable the native `ptrace-sysemu` backend and controlled OCI execution
-  view for the image-provided dynamic loader, libraries, and Bash.
+- [x] Enabled the native `ptrace-native` backend and proved the image-provided
+  dynamic loader, libraries, and Bash execute from a read-only OCI bootstrap
+  view with entry/exit audit and fail-closed contract decisions.
+- [ ] Replace the bootstrap host-backed path and descriptor operations with the
+  accepted Ginus-controlled VFS/descriptor boundary, or obtain explicit human
+  approval for a revised native-backend boundary and criteria.
 - [ ] Add fail-closed supervision-loss, unexpected-stop, and attempted direct
   syscall continuation tests.
 - [ ] Add isolation, traversal, overlay, malformed-file, and cleanup tests.
@@ -76,7 +80,8 @@ Ginus-owned immutable base and domain-local writable overlay.
 - Managed execution is performed by Ginus, and the demonstration verifies that
   no external OCI runtime launches the domain workload.
 - The host kernel loads and natively executes the selected ELF, but every
-  managed syscall is observed before effect and no direct continuation occurs.
+  managed syscall is observed and decided before effect; only explicitly
+  validated passthrough operations may execute in the native backend.
 - Tracee escape, unexpected ptrace state, or supervisor loss terminates the
   domain without allowing an unsupervised workload to continue.
 - Path traversal, symlink loops, invalid descriptors, permission failures, and
@@ -113,6 +118,11 @@ Ginus-owned immutable base and domain-local writable overlay.
   an overlay-only file, exposed no managed host path or descriptor, and
   rejected a truncated index.
 - `make check` and `make test-unit` passed after the OCI/VFS integration.
+- `make test-native-vfs` passed in the QEMU TCG Rocky host. The host loaded the
+  unmodified OCI Bash and its image-provided dynamic loader, Ginus audited 238
+  syscall entries, emulated `getpid` as 4242, denied unsupported calls, observed
+  permitted exits, printed `GINUS_NATIVE_SHELL: PASS`, and stopped the tracee
+  at `exit_group`. The Bash file digest was unchanged afterward.
 
 ## Decisions and limitations
 
@@ -128,10 +138,15 @@ Ginus-owned immutable base and domain-local writable overlay.
 - The selected Rocky image currently has one filesystem layer. Multi-layer
   replacement, whiteout, and opaque-directory behavior remains mandatory
   before Gate 5 can pass.
-- Gate 5 uses native host ELF execution under `PTRACE_SYSEMU`. This deliberately
-  exposes the host ELF loader, memory manager, faults, signals, scheduler, and
-  ptrace implementation; Ginus narrows syscall effects but does not claim a
+- Gate 5 uses native host ELF execution under ptrace syscall-entry/exit
+  supervision. `PTRACE_SYSEMU` remains useful for the Gate 1 no-effect proof,
+  but cannot execute an approved syscall. The native path deliberately exposes
+  the host ELF loader, memory manager, faults, signals, scheduler, ptrace, and
+  explicitly validated syscall implementations; Ginus does not claim a
   userspace-only CPU or memory boundary on this path.
+- The current Bash proof uses a read-only, unprivileged chroot bootstrap view.
+  Its host-backed pathname and descriptor operations do not yet satisfy Gate 5's
+  final Ginus-owned VFS/descriptor criterion.
 - Unicorn Engine 2 is preserved as deferred Gate 14. It is the alternative path
   for moving CPU and memory execution back into Ginus without discarding the
   OCI, VFS, contract, or lifecycle work from this gate.
@@ -148,7 +163,8 @@ Ginus-owned immutable base and domain-local writable overlay.
 - Actual commits: `4994fed` recorded the superseded derived-QCOW decision;
   `c6e3124` implemented the reusable indexed VFS core; `2b111fc` corrected the
   root architecture to OCI; `287127e` added pinned OCI acquisition and root
-  preparation; `b1a320e` connected the OCI root to Ginus and QEMU verification
+  preparation; `b1a320e` connected the OCI root to Ginus and QEMU verification;
+  `8e5847a` added the native ptrace Rocky loader and Bash proof
 
 ## Review policy and outcome
 

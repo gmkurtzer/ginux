@@ -51,7 +51,8 @@ complete, useful, bounded audit trail of contract decisions.
 
 - Every managed syscall and admitted ioctl in the tested profiles has an
   explicit effective decision and contract version.
-- No policy action directly continues a managed syscall on the host.
+- No policy action permits an unchecked managed syscall to continue on the
+  host; native passthrough must first validate the operation and arguments.
 - Unknown operations and unknown security-critical policy fields fail closed.
 - The strict profile denies its selected operations while the systemd profile
   retains the accepted systemd baseline.

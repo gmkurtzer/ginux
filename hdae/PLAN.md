@@ -46,7 +46,7 @@ replace it.
 5. **OCI-backed virtual VFS and native dynamic userspace**: explicit OCI
    acquisition, verified cached layers, virtual descriptors, immutable root and
    writable overlay, and a Rocky shell executed by the host under continuous
-   `PTRACE_SYSEMU` supervision.
+   ptrace syscall-entry/exit supervision.
 6. **Device ownership and virtual hardware**: virtual `/dev`, console, block
    or bounded partition, virtual networking, exclusivity, revocation, and
    device-path benchmarks.
@@ -136,7 +136,7 @@ define their expected result.
 ## Deferred roadmap
 
 After the initial twelve gates, Gate 14 preserves the Unicorn Engine execution
-backend as a concrete alternative to native `PTRACE_SYSEMU`. Other likely
+backend as a concrete alternative to native ptrace execution. Other likely
 milestones include multiple concurrent
 domains, conventional containers within a domain, network and storage backend
 expansion, physical-device assignment with a separately reviewed IOMMU/VFIO

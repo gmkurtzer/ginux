@@ -59,12 +59,14 @@ emulating a normally booted Rocky Linux 10 x86-64 host. Host systemd remains
 real PID 1 and Ginus runs as an ordinary process inside that environment.
 Ginus acts as the application kernel for its managed userspace rather than
 booting another guest Linux kernel beneath the domain. Gate 5 uses native
-x86-64 execution supervised by `PTRACE_SYSEMU`: the host kernel loads the ELF
-and its interpreter, the host CPU executes instructions, and every managed
-syscall stops before its kernel implementation runs. Ginus may then emulate,
-mediate, or deny the operation and resumes only with `PTRACE_SYSEMU`; losing
-supervision terminates the tracee and fails the domain closed. The Gate 1 proof
-established that this mechanism works inside the QEMU TCG Rocky host.
+x86-64 execution supervised by ptrace syscall-entry and syscall-exit stops: the
+host kernel loads the ELF and its interpreter, the host CPU executes
+instructions, and every managed syscall stops before its kernel implementation
+runs. Ginus may then emulate or deny it by replacing the syscall before effect,
+or allow a validated operation to execute and observe its exit. Losing
+supervision terminates the tracee and fails the domain closed. Gate 1's
+`PTRACE_SYSEMU` proof remains the strict no-host-effect interception fixture;
+it cannot by itself execute an approved syscall.
 
 This backend intentionally trusts more host-kernel surface than a userspace CPU
 interpreter. ELF loading, virtual memory, page faults, signals, scheduling, and
@@ -78,11 +80,11 @@ outside the initial milestone.
 ### Domain memory and task model
 
 Ginus owns the domain's virtual identities, descriptors, devices, contract, and
-lifecycle. With `PTRACE_SYSEMU`, host tracees provide native address spaces and
-tasks under continuous Ginus supervision; their host identities and addresses
-are never exposed as domain authority. Ginus copies and validates tracee memory
-before mediation. In interpreter backends, managed virtual addresses instead
-index only Ginus-owned memory and permission metadata.
+lifecycle. With native ptrace supervision, host tracees provide address spaces
+and tasks under continuous Ginus supervision; their host identities and
+addresses are never exposed as domain authority. Ginus copies and validates
+tracee memory before mediation. In interpreter backends, managed virtual
+addresses instead index only Ginus-owned memory and permission metadata.
 
 ### Contract dispatcher
 
@@ -107,7 +109,7 @@ layers into a host-owned cache outside Git. Ginus deterministically assembles
 the layers into an immutable indexed virtual root and adds a bounded,
 domain-local writable overlay. The OCI configuration supplies launch metadata,
 but Ginus—not `runc`, `crun`, `containerd`, or another OCI runtime—constructs
-the execution view and supervises native loading through `PTRACE_SYSEMU`.
+the execution view and supervises native loading through ptrace syscall stops.
 Managed code
 receives neither host paths nor host descriptors. Ordinary domain starts and
 tests require no network access.
@@ -174,7 +176,9 @@ immutable indexed virtual root, and paired with a bounded in-memory write
 overlay. The host continues to boot independently from its Rocky cloud QCOW2.
 Human approval was recorded on 2026-11-03.
 
-Gate 5 selected native host ELF execution under `PTRACE_SYSEMU` as its dynamic
-userspace path with human approval on 2026-11-03. The host execution surface is
-an explicit limitation. Unicorn Engine remains a deferred alternative backend,
-not a discarded design.
+Gate 5 selected native host ELF execution under continuous ptrace supervision
+as its dynamic userspace path with human approval on 2026-11-03. Experimentation
+showed that approved passthrough syscalls require syscall-entry/exit supervision;
+`PTRACE_SYSEMU` skips the syscall even when followed by `PTRACE_SYSCALL`. The
+host execution surface is an explicit limitation. Unicorn Engine remains a
+deferred alternative backend, not a discarded design.

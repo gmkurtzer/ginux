@@ -112,14 +112,22 @@ scope, threat model, and invariants.
 - `make test-vfs` passed in the QEMU TCG Rocky host. Ginus resolved Rocky
   identity and Bash from the OCI root, created and discarded its own overlay
   file, kept the host filesystem unchanged, and rejected a truncated index.
+- Gate 5 native execution milestone commit `8e5847a` added the `ptrace-native`
+  backend. `make check`, `make test-unit`, and `make test-native-vfs` passed.
+  The QEMU Rocky host loaded the unmodified OCI Bash and image loader, Ginus
+  audited 238 syscall entries, emulated `getpid` as 4242, denied unsupported
+  calls, printed `GINUS_NATIVE_SHELL: PASS`, stopped at `exit_group`, and
+  preserved the Bash digest.
 
 ## Open decisions and limitations
 
 - Human direction selected the security-focused handcrafted x86-64 interpreter
   for Gate 3 and accepted its evidence. On 2026-11-03 the human selected native
-  host ELF execution under `PTRACE_SYSEMU` for Gate 5 compatibility. The host
-  handles instructions, ELF loading, memory, faults, signals, and scheduling;
-  Ginus must stop every syscall before effect and fail closed on lost tracing.
+  host ELF execution under continuous ptrace supervision for Gate 5
+  compatibility. The host handles instructions, ELF loading, memory, faults,
+  signals, and scheduling; Ginus must stop every syscall before effect and fail
+  closed on lost tracing. Approved passthrough calls require ptrace entry/exit
+  stops because `PTRACE_SYSEMU` always skips the syscall implementation.
 - Rocky host image is pinned to official Rocky 10.2 GenericCloud build
   10.2-20260525.0. Gate 2 selected a pinned, network-disabled
   Docker/LinuxKit helper that mounts a temporary raw conversion read-only;
@@ -131,15 +139,18 @@ scope, threat model, and invariants.
   is not authorized in the current planning task.
 - The selected Rocky OCI image has one layer. General multi-layer whiteout and
   opaque-directory assembly remains required before Gate 5 passes.
+- The native Bash proof currently uses a read-only unprivileged chroot and
+  host-backed path/descriptor operations. It proves loader compatibility and
+  syscall decision timing, but does not yet satisfy Gate 5's final
+  Ginus-controlled VFS/descriptor boundary.
 - Unicorn Engine 2 is not part of the Gate 5 path. It is preserved as deferred
   Gate 14, with reconsideration required after the native compatibility path is
   demonstrated and before production-boundary claims are made.
 
 ## Exact next action
 
-Enable the existing `ptrace-sysemu` configuration backend and launch the Rocky
-dynamic loader and Bash from the controlled OCI execution view while ensuring
-every syscall stops before host effect.
+Implement deterministic multi-layer OCI assembly with synthetic whiteout and
+opaque-directory tests, then return to the native VFS/descriptor boundary.
 
 ## Context recovery
 
@@ -148,6 +159,6 @@ every syscall stops before host effect.
 - Reload after context shift: required
 - Active gate: Gate 5, virtual VFS and dynamic userspace; authorized and in
   progress on `hdae/virtual-vfs-userspace`
-- Last evidence: Gate 4 demo and complete aggregate regression suite passed on
-  2026-11-03
+- Last evidence: `make check`, `make test-unit`, and `make test-native-vfs`
+  passed on 2026-11-03
 - Required human decision: none until the next Gate 5 demonstration checkpoint

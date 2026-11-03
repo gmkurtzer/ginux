@@ -76,8 +76,9 @@ solved.
   Ginus runs inside it as an ordinary process or service.
 - An emulation-compatible syscall-interception mechanism selected by Gate 1;
   KVM acceleration is not required by the initial milestone.
-- Native x86-64 ELF execution supervised with `PTRACE_SYSEMU`, with the host
-  kernel performing instruction execution and Ginus controlling syscall effects.
+- Native x86-64 ELF execution supervised with ptrace syscall-entry and
+  syscall-exit stops, with the host kernel performing instruction execution
+  and Ginus deciding every syscall before any permitted host effect.
 - One Rocky Linux 10 systemd domain from a cached, digest-pinned OCI image.
 - Linux ABI interception, emulation, mediated host operations, denial, and
   audit logging.
@@ -105,9 +106,10 @@ solved.
 
 ## Product principles
 
-- No managed process directly continues a host syscall.
-- "Passthrough" means a Ginus-controlled, validated, translated or proxied
-  operation; it never means exposing a host descriptor or unchecked pointer.
+- No managed syscall reaches a host effect before a Ginus contract decision.
+- "Passthrough" means a Ginus-controlled operation whose syscall and arguments
+  are validated before the native backend may resume it; it never means an
+  unchecked syscall, descriptor, pointer, or ioctl payload.
 - Unknown contract operations fail closed and produce useful audit evidence.
 - Domain-visible kernel state is Ginus state, not an accidental view of host
   `/proc`, `/sys`, `/dev`, or cgroups.

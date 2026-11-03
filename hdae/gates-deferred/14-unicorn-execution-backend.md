@@ -13,17 +13,17 @@ contract-dispatch, device, lifecycle, and audit interfaces.
 ## Deferred reason
 
 The initial milestone prioritizes compatibility and progress through the Rocky
-dynamic-loader and systemd gates. Native execution under `PTRACE_SYSEMU` uses
+dynamic-loader and systemd gates. Native execution under ptrace supervision uses
 the host kernel's mature ELF, CPU, and memory behavior while Ginus intercepts
 every syscall before effect. Implementing and validating a second CPU backend
 now would delay that path and is not required for Gate 5 acceptance.
 
 ## Return condition
 
-Reconsider this gate after the native `PTRACE_SYSEMU` path runs the Gate 9
+Reconsider this gate after the native ptrace path runs the Gate 9
 systemd baseline and Gate 11 has measured its performance, and before Ginus
 makes production-boundary claims. Reconsider it earlier if native supervision
-cannot satisfy a gate without direct syscall continuation, or if the exposed
+cannot satisfy a gate without unchecked syscall continuation, or if the exposed
 host ELF, memory, signal, fault, scheduling, or ptrace surface is unacceptable.
 
 ## Proposed scope
@@ -53,7 +53,7 @@ host ELF, memory, signal, fault, scheduling, or ptrace surface is unacceptable.
   are not accepted as domain authority.
 - Backend-differential tests identify semantic mismatches deterministically.
 - Benchmarks quantify compatibility and overhead relative to native
-  `PTRACE_SYSEMU`.
+  native ptrace supervision.
 
 ## Delivery strategy
 
