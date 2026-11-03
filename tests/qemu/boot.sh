@@ -162,6 +162,11 @@ if ! grep -q '^GINUX_KERNEL_OK' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: bounded OCI rootfs unpack policy verified' "$output_file"; then
+    echo "Boot test failed: OCI rootfs expansion was not bounded before allocation." >&2
+    exit 1
+fi
+
 "$repo_root/tests/qemu/check-linux-runtime.sh" "$output_file"
 
 if ! grep -q '^ginux: modern virtio network function: 0:3.0' "$output_file" ||
@@ -796,6 +801,7 @@ if ! grep -q '^ginux: IOMMU root/context hierarchy constructed' "$output_file" |
     ! grep -q '^ginux: one-page identity DMA translation encoded exactly' "$output_file" ||
     ! grep -q '^ginux: invalid IOMMU table inputs rejected' "$output_file" ||
     ! grep -q '^ginux: IOMMU hardware state unchanged after table construction' "$output_file" ||
+    ! grep -q '^ginux: failed IOMMU activation rollback quarantined' "$output_file" ||
     ! grep -q '^ginux: IOMMU translation frames scrubbed and released' "$output_file"; then
     echo "Boot test failed: IOMMU translation hierarchy lifecycle did not complete." >&2
     exit 1

@@ -1197,13 +1197,22 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: one-page identity DMA translation encoded exactly");
     serial_write("\r\nginux: invalid IOMMU table inputs rejected");
     serial_write("\r\nginux: IOMMU hardware state unchanged after table construction");
-    let Some(iommu_active) = arch::x86_64::iommu::activate_translation(
-        platform.first_iommu_register_base,
-        iommu_mmio,
+    if !arch::x86_64::iommu::verify_failed_activation_retirement(
         iommu_capabilities,
-        &iommu_translation,
         virtio_dma_frame,
-    ) else {
+    ) {
+        kernel_fail("\r\nginux: failed IOMMU activation retirement invariant failed\r\n");
+    }
+    serial_write("\r\nginux: failed IOMMU activation rollback quarantined");
+    let arch::x86_64::iommu::TranslationActivation::Active(iommu_active) =
+        arch::x86_64::iommu::activate_translation(
+            platform.first_iommu_register_base,
+            iommu_mmio,
+            iommu_capabilities,
+            &iommu_translation,
+            virtio_dma_frame,
+        )
+    else {
         kernel_fail("\r\nginux: IOMMU translation activation failed\r\n");
     };
     if !iommu_active.is_active() {
@@ -1426,13 +1435,15 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     let Some(virtio_network_guard_virtual) = virtio_network_guard_frame.direct_map_address() else {
         kernel_fail("\r\nginux: virtio-net guard page is outside direct map\r\n");
     };
-    let Some(virtio_network_active) = arch::x86_64::iommu::activate_translation(
-        platform.first_iommu_register_base,
-        iommu_mmio,
-        iommu_capabilities,
-        &virtio_network_translation,
-        virtio_network_dma_frame,
-    ) else {
+    let arch::x86_64::iommu::TranslationActivation::Active(virtio_network_active) =
+        arch::x86_64::iommu::activate_translation(
+            platform.first_iommu_register_base,
+            iommu_mmio,
+            iommu_capabilities,
+            &virtio_network_translation,
+            virtio_network_dma_frame,
+        )
+    else {
         kernel_fail("\r\nginux: virtio-net IOMMU activation failed\r\n");
     };
     let network_queues_activated = virtio_network_active.is_active()
@@ -1807,6 +1818,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     if !image_store::install() {
         kernel_fail("ginux: boot-local image store initialization failed\r\n");
     }
+    if !image_store::verify_rootfs_unpack_policy() {
+        kernel_fail("ginux: OCI rootfs unpack policy verification failed\r\n");
+    }
+    serial_write("ginux: bounded OCI rootfs unpack policy verified\r\n");
     if !cfg!(feature = "verification-boot") {
         serial_write_raw(b"ginux: control runtime ready\r\n");
     }
@@ -4166,7 +4181,12 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             }
             let unpack_started = arch::x86_64::timer::timestamp_counter();
             let success = slot.is_some_and(|slot| {
-                image_size != 0 && (cached_rootfs || image_store::install_published_layers(slot))
+                image_size != 0
+                    && (cached_rootfs
+                        || image_store::install_published_layers(
+                            slot,
+                            image_store::DEFAULT_ROOTFS_UNPACK_LIMIT_BYTES,
+                        ))
             });
             serial_write_elapsed("ginux: timing OCI unpack/publish: ", unpack_started);
             if success && !cached_rootfs {
