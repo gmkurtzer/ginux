@@ -57,8 +57,8 @@ Ginus-owned immutable base and domain-local writable overlay.
 
 ## Remaining work
 
-- [ ] Generalize deterministic assembly beyond the selected single-layer image
-  and add synthetic OCI whiteout and opaque-directory tests.
+- [x] Generalized deterministic assembly across ordered OCI layers and added
+  synthetic replacement, whiteout, opaque-directory, and repeatability tests.
 - [x] Enabled the native `ptrace-native` backend and proved the image-provided
   dynamic loader, libraries, and Bash execute from a read-only OCI bootstrap
   view with entry/exit audit and fail-closed contract decisions.
@@ -106,9 +106,10 @@ Ginus-owned immutable base and domain-local writable overlay.
 
 ## Evidence
 
-- `make test-oci-image` passed six checks: pinned object digests and sizes,
+- `make test-oci-image` passed seven checks: pinned object digests and sizes,
   verified `diff_id`, repeatable Ginus index, Rocky/Bash identity, corrupt and
-  missing cache rejection, and offline verification/preparation.
+  missing cache rejection, offline verification/preparation, and synthetic
+  multi-layer replacement, whiteout, and opaque-directory semantics.
 - The pinned linux/amd64 OCI manifest is
   `sha256:e372170ca8630f0f03e9b70fdd0bf4a3ce3426b0de7cdba615f06337389de176`;
   its single layer expands to verified `diff_id`
@@ -123,6 +124,9 @@ Ginus-owned immutable base and domain-local writable overlay.
   syscall entries, emulated `getpid` as 4242, denied unsupported calls, observed
   permitted exits, printed `GINUS_NATIVE_SHELL: PASS`, and stopped the tracee
   at `exit_group`. The Bash file digest was unchanged afterward.
+- After multi-layer assembly commit `19ade45`, `make check`, `make test-unit`,
+  `make test-oci-layers`, and `make test-oci-image` passed. A fresh
+  `make test-native-vfs` then passed against the assembled root in QEMU.
 
 ## Decisions and limitations
 
@@ -135,9 +139,8 @@ Ginus-owned immutable base and domain-local writable overlay.
 - The Rocky cloud QCOW2 boots only the host and is not the domain root backing.
   Domain writes use a bounded in-memory overlay and cannot modify cached OCI
   objects or the immutable assembled root.
-- The selected Rocky image currently has one filesystem layer. Multi-layer
-  replacement, whiteout, and opaque-directory behavior remains mandatory
-  before Gate 5 can pass.
+- The selected Rocky image currently has one filesystem layer, so general
+  multi-layer behavior is covered by deterministic synthetic layer fixtures.
 - Gate 5 uses native host ELF execution under ptrace syscall-entry/exit
   supervision. `PTRACE_SYSEMU` remains useful for the Gate 1 no-effect proof,
   but cannot execute an approved syscall. The native path deliberately exposes
@@ -164,7 +167,8 @@ Ginus-owned immutable base and domain-local writable overlay.
   `c6e3124` implemented the reusable indexed VFS core; `2b111fc` corrected the
   root architecture to OCI; `287127e` added pinned OCI acquisition and root
   preparation; `b1a320e` connected the OCI root to Ginus and QEMU verification;
-  `8e5847a` added the native ptrace Rocky loader and Bash proof
+  `8e5847a` added the native ptrace Rocky loader and Bash proof; `19ade45`
+  added deterministic multi-layer OCI assembly
 
 ## Review policy and outcome
 

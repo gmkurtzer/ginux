@@ -118,6 +118,11 @@ scope, threat model, and invariants.
   audited 238 syscall entries, emulated `getpid` as 4242, denied unsupported
   calls, printed `GINUS_NATIVE_SHELL: PASS`, stopped at `exit_group`, and
   preserved the Bash digest.
+- Gate 5 multi-layer assembly commit `19ade45` removed the one-layer-only
+  preparation restriction. `make test-oci-layers` and the expanded seven-check
+  `make test-oci-image` passed replacement, whiteout, opaque-directory,
+  repeatability, integrity, identity, and offline checks. A fresh
+  `make test-native-vfs` passed against the resulting assembled root.
 
 ## Open decisions and limitations
 
@@ -137,8 +142,9 @@ scope, threat model, and invariants.
   read-only, but remains trusted build tooling rather than a runtime boundary.
 - The repository and directory still use the historical `usshim` name; rename
   is not authorized in the current planning task.
-- The selected Rocky OCI image has one layer. General multi-layer whiteout and
-  opaque-directory assembly remains required before Gate 5 passes.
+- The selected Rocky OCI image has one layer; deterministic synthetic fixtures
+  now cover general multi-layer replacement, whiteout, and opaque-directory
+  semantics.
 - The native Bash proof currently uses a read-only unprivileged chroot and
   host-backed path/descriptor operations. It proves loader compatibility and
   syscall decision timing, but does not yet satisfy Gate 5's final
@@ -149,8 +155,8 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Implement deterministic multi-layer OCI assembly with synthetic whiteout and
-opaque-directory tests, then return to the native VFS/descriptor boundary.
+Resolve the native-backend VFS/descriptor boundary, then add fail-closed
+supervision-loss and remaining isolation/cleanup tests.
 
 ## Context recovery
 
@@ -159,6 +165,7 @@ opaque-directory tests, then return to the native VFS/descriptor boundary.
 - Reload after context shift: required
 - Active gate: Gate 5, virtual VFS and dynamic userspace; authorized and in
   progress on `hdae/virtual-vfs-userspace`
-- Last evidence: `make check`, `make test-unit`, and `make test-native-vfs`
-  passed on 2026-11-03
+- Last evidence: `make check`, `make test-unit`, `make test-oci-layers`,
+  `make test-oci-image`, and a post-assembly `make test-native-vfs` passed on
+  2026-11-03
 - Required human decision: none until the next Gate 5 demonstration checkpoint
