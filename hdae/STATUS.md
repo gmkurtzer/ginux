@@ -4,30 +4,33 @@
 
 - Active skill: `.agents/skills/hdae-development/SKILL.md`
 - Reload required after compaction, reset, resume, or handoff: yes
-- Active project: remaining reporter remediation batch, delivery complete
+- Active project: remaining reporter remediation batch
 - Branch: `hdae/issue-43-release-overflow`
 - Baseline tag: `research-v1-baseline`
 - Active gate: none; Gate 44 closed under delegated completion
-- Last completed action: published issue #43 remediation as PR #54, linked the
-  issue, and confirmed passing `static` and `qemu` CI
-- Next action: maintainer review of PRs #52, #53, and #54; merge and issue
-  closure remain human decisions
+- Last completed action: regenerated PR #54's checked-release EFI source from
+  the merged inputs; fresh `make check` and complete `make test` passed
+- Next action: commit and push the synchronized exact head, require green PR CI,
+  then merge PR #54 and close issue #43 with its final evidence
 
 ## Current repository state
 
-Remote `main` is at `ecbb3142`. The first
+Remote `main` is at `b4628fc2`. The first
 eleven feedback-hardening gates and inserted correctness gates are complete.
 Gate 12 is complete on `codex/performance-parity`. Gates 13 through 19 and 21
-through 23 and Gate 32 remain in `gates-todo/` for maintainer review after
-delivery through merged pull requests. Gate 44 is closed in `gates-done/` and
-delivered through green PR #54.
+through 23 and Gates 32 through 33 remain in `gates-todo/` for maintainer review
+after delivery through merged pull requests. PR #52 is merged and issue #20 is
+closed. PR #53 is synchronized with current `main`, but its mandatory Rocky
+rootfs integration remains blocked before image download by registry DNS. Gate
+44 is closed in `gates-done/`; PR #54 is being synchronized and revalidated.
 The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
 matrix and repeated stress pass. Gate 11's comparison and reduced evidence are
 under `docs/feedback-hardening/`. No push or merge was performed.
 
 ## Open decisions
 
-- None. Issue #43 is confirmed and the user authorized the dedicated fix/PR.
+- None. Issue #43 is confirmed and the user authorized merge and closure after
+  the synchronized head passes its complete evidence and GitHub CI.
 
 ## Active diagnosis
 

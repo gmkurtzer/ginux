@@ -88,6 +88,12 @@ builds.
 - Issue #43 received the implementation and verification summary with the PR
   link; the issue remains open for maintainer review.
 - PR #54 CI passed: `static` in 2m22s and `qemu` in 5m15s.
+- After PR #52 merged, PR #54 was synchronized with `main@b4628fc2`; the
+  checked-release boot source was regenerated from the merged inputs.
+- Fresh `make check` passed on the synchronized tree, including the
+  release-profile overflow trap and architecture/compatibility checks.
+- Fresh complete `make test` passed on the synchronized tree, including
+  `GINUX_KERNEL_OK`, Linux ELF/runtime compatibility, and `Boot test passed`.
 
 ## Decisions and limitations
 
@@ -109,8 +115,8 @@ builds.
   delivery
 - Actual commits: `a3f0c33d` (gate), `9b11baea` (profile, regression, generated
   image, and capacity), `50e06d76` (checked-release boot invariants),
-  `66648d28` (verification evidence), plus the delivery commit containing this
-  final outcome
+  `66648d28` (verification evidence), plus the delivery commit and the pending
+  signed merge from current `main` containing final synchronized evidence
 
 ## Review policy and outcome
 

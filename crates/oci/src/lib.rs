@@ -728,13 +728,23 @@ fn whiteout_hides(entry: Entry<'_>, path: &[u8]) -> bool {
     let Some(target) = name.strip_prefix(b".wh.") else {
         return false;
     };
-    let path_split = path
-        .iter()
-        .rposition(|byte| *byte == b'/')
-        .map_or((b"" as &[u8], path), |index| {
-            (&path[..index], &path[index + 1..])
-        });
-    path_split.0 == directory && path_split.1 == target
+    if target.is_empty() {
+        return false;
+    }
+    let remainder = if directory.is_empty() {
+        path
+    } else {
+        let Some(remainder) = path
+            .strip_prefix(directory)
+            .and_then(|remainder| remainder.strip_prefix(b"/"))
+        else {
+            return false;
+        };
+        remainder
+    };
+    remainder
+        .strip_prefix(target)
+        .is_some_and(|suffix| suffix.is_empty() || suffix.starts_with(b"/"))
 }
 
 #[cfg(feature = "sha256")]
@@ -743,85 +753,97 @@ pub fn verify_sha256(bytes: &[u8], expected: &[u8; 32]) -> bool {
     actual == *expected
 }
 
-fn parse_entry(bytes: &[u8], offset: usize) -> Option<(Entry<'_>, usize)> {
-    let header = bytes.get(offset..offset.checked_add(TAR_HEADER_SIZE)?)?;
-    if &header[257..263] != b"ustar\0" || checksum(header)? != stored_checksum(header)? {
-        return None;
-    }
-    if header[156] == b'x' {
+fn parse_entry(bytes: &[u8], mut offset: usize) -> Option<(Entry<'_>, usize)> {
+    let mut overrides = PaxOverrides {
+        path: None,
+        link: None,
+    };
+    let (mut entry, next) = loop {
+        let header = bytes.get(offset..offset.checked_add(TAR_HEADER_SIZE)?)?;
+        if &header[257..263] != b"ustar\0" || checksum(header)? != stored_checksum(header)? {
+            return None;
+        }
+        if header[156] == b'x' {
+            let size = usize::try_from(octal(&header[124..136])?).ok()?;
+            let data_start = offset.checked_add(TAR_HEADER_SIZE)?;
+            let data_end = data_start.checked_add(size)?;
+            let current = parse_pax_overrides(bytes.get(data_start..data_end)?)?;
+            if overrides.path.is_none() {
+                overrides.path = current.path;
+            }
+            if overrides.link.is_none() {
+                overrides.link = current.link;
+            }
+            let padded = size.checked_add(TAR_BLOCK_SIZE - 1)? / TAR_BLOCK_SIZE * TAR_BLOCK_SIZE;
+            offset = data_start.checked_add(padded)?;
+            continue;
+        }
+        let stored_path = terminated(&header[..TAR_NAME_SIZE])?;
+        let prefix = terminated(&header[345..345 + TAR_PREFIX_SIZE])?;
         let size = usize::try_from(octal(&header[124..136])?).ok()?;
+        let mode = u32::try_from(octal(&header[100..108])?).ok()?;
+        let kind = match header[156] {
+            0 | b'0' => EntryKind::File,
+            b'5' if size == 0 => EntryKind::Directory,
+            b'2' if size == 0 => EntryKind::Symlink,
+            b'1' if size == 0 => EntryKind::Hardlink,
+            _ => return None,
+        };
+        let path = if kind == EntryKind::Directory {
+            stored_path.strip_suffix(b"/").unwrap_or(stored_path)
+        } else {
+            stored_path
+        };
+        if path.is_empty() || !valid_entry_path(prefix, path) {
+            return None;
+        }
+        let link = terminated(&header[157..257])?;
+        if matches!(kind, EntryKind::Symlink | EntryKind::Hardlink) && link.is_empty() {
+            return None;
+        }
+        if kind == EntryKind::Hardlink && !valid_path(link.strip_prefix(b"/").unwrap_or(link)) {
+            return None;
+        }
         let data_start = offset.checked_add(TAR_HEADER_SIZE)?;
         let data_end = data_start.checked_add(size)?;
-        let overrides = parse_pax_overrides(bytes.get(data_start..data_end)?)?;
+        let data = bytes.get(data_start..data_end)?;
         let padded = size.checked_add(TAR_BLOCK_SIZE - 1)? / TAR_BLOCK_SIZE * TAR_BLOCK_SIZE;
         let next = data_start.checked_add(padded)?;
-        let (mut entry, next) = parse_entry(bytes, next)?;
-        if let Some(path) = overrides.path {
-            let path = if entry.kind == EntryKind::Directory {
-                path.strip_suffix(b"/").unwrap_or(path)
-            } else {
-                path
-            };
-            if path.is_empty() || !valid_entry_path(b"", path) {
-                return None;
-            }
-            entry.path = path;
-            entry.prefix = b"";
-        }
-        if let Some(link) = overrides.link {
-            if link.is_empty()
-                || entry.kind == EntryKind::Hardlink
-                    && !valid_path(link.strip_prefix(b"/").unwrap_or(link))
-            {
-                return None;
-            }
-            entry.link = link;
-        }
-        return Some((entry, next));
-    }
-    let stored_path = terminated(&header[..TAR_NAME_SIZE])?;
-    let prefix = terminated(&header[345..345 + TAR_PREFIX_SIZE])?;
-    let size = usize::try_from(octal(&header[124..136])?).ok()?;
-    let mode = u32::try_from(octal(&header[100..108])?).ok()?;
-    let kind = match header[156] {
-        0 | b'0' => EntryKind::File,
-        b'5' if size == 0 => EntryKind::Directory,
-        b'2' if size == 0 => EntryKind::Symlink,
-        b'1' if size == 0 => EntryKind::Hardlink,
-        _ => return None,
+        bytes.get(offset..next)?;
+        break (
+            Entry {
+                path,
+                prefix,
+                data,
+                link,
+                kind,
+                mode,
+            },
+            next,
+        );
     };
-    let path = if kind == EntryKind::Directory {
-        stored_path.strip_suffix(b"/").unwrap_or(stored_path)
-    } else {
-        stored_path
-    };
-    if path.is_empty() || !valid_entry_path(prefix, path) {
-        return None;
+    if let Some(path) = overrides.path {
+        let path = if entry.kind == EntryKind::Directory {
+            path.strip_suffix(b"/").unwrap_or(path)
+        } else {
+            path
+        };
+        if path.is_empty() || !valid_entry_path(b"", path) {
+            return None;
+        }
+        entry.path = path;
+        entry.prefix = b"";
     }
-    let link = terminated(&header[157..257])?;
-    if matches!(kind, EntryKind::Symlink | EntryKind::Hardlink) && link.is_empty() {
-        return None;
+    if let Some(link) = overrides.link {
+        if link.is_empty()
+            || entry.kind == EntryKind::Hardlink
+                && !valid_path(link.strip_prefix(b"/").unwrap_or(link))
+        {
+            return None;
+        }
+        entry.link = link;
     }
-    if kind == EntryKind::Hardlink && !valid_path(link.strip_prefix(b"/").unwrap_or(link)) {
-        return None;
-    }
-    let data_start = offset.checked_add(TAR_HEADER_SIZE)?;
-    let data_end = data_start.checked_add(size)?;
-    let data = bytes.get(data_start..data_end)?;
-    let padded = size.checked_add(TAR_BLOCK_SIZE - 1)? / TAR_BLOCK_SIZE * TAR_BLOCK_SIZE;
-    let next = data_start.checked_add(padded)?;
-    bytes.get(offset..next)?;
-    Some((
-        Entry {
-            path,
-            prefix,
-            data,
-            link,
-            kind,
-            mode,
-        },
-        next,
-    ))
+    Some((entry, next))
 }
 
 #[derive(Clone, Copy)]
@@ -1147,6 +1169,31 @@ mod tests {
         let root = Rootfs::parse(&bytes).unwrap();
         assert_eq!(root.entry_count(), 1);
         assert_eq!(root.find(b"bin/tool").unwrap().link, b"bin/real");
+
+        let mut bytes = archive(b"PaxHeaders/first", b"14 path=first\n", b'x', b"");
+        bytes.truncate(bytes.len() - TAR_BLOCK_SIZE * 2);
+        let mut second = archive(b"PaxHeaders/second", b"15 path=second\n", b'x', b"");
+        second.truncate(second.len() - TAR_BLOCK_SIZE * 2);
+        bytes.extend_from_slice(&second);
+        bytes.extend_from_slice(&archive(b"original", b"value", b'0', b""));
+        let root = Rootfs::parse(&bytes).unwrap();
+        assert_eq!(root.find(b"first").unwrap().data, b"value");
+        assert!(root.find(b"second").is_none());
+    }
+
+    #[test]
+    fn parses_long_pax_chains_without_recursive_stack_growth() {
+        let mut bytes = Vec::new();
+        for _ in 0..4_000 {
+            let mut pax = archive(b"PaxHeaders/empty", b"", b'x', b"");
+            pax.truncate(pax.len() - TAR_BLOCK_SIZE * 2);
+            bytes.extend_from_slice(&pax);
+        }
+        bytes.extend_from_slice(&archive(b"bin/tool", b"ELF", b'0', b""));
+
+        let root = Rootfs::parse(&bytes).unwrap();
+        assert_eq!(root.entry_count(), 1);
+        assert_eq!(root.find(b"bin/tool").unwrap().data, b"ELF");
     }
 
     #[test]
@@ -1163,6 +1210,18 @@ mod tests {
         let root = Rootfs::parse(&bytes).unwrap();
         assert!(root.find(b"etc/value").is_none());
         assert!(root.find(b"etc/.wh.value").is_none());
+
+        let mut bytes = archive(b"secret", b"", b'5', b"");
+        bytes.truncate(bytes.len() - TAR_BLOCK_SIZE * 2);
+        bytes.extend_from_slice(&archive(b"secret/key", b"removed", b'0', b""));
+        bytes.truncate(bytes.len() - TAR_BLOCK_SIZE * 2);
+        bytes.extend_from_slice(&archive(b"secret2/key", b"retained", b'0', b""));
+        bytes.truncate(bytes.len() - TAR_BLOCK_SIZE * 2);
+        bytes.extend_from_slice(&archive(b".wh.secret", b"", b'0', b""));
+        let root = Rootfs::parse(&bytes).unwrap();
+        assert!(root.find(b"secret").is_none());
+        assert!(root.find(b"secret/key").is_none());
+        assert_eq!(root.find(b"secret2/key").unwrap().data, b"retained");
     }
 
     #[test]
