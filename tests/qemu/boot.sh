@@ -3412,6 +3412,10 @@ if ! grep -q '^ginux: Linux memfd sealing enforced across descriptors' "$output_
     echo "Boot test failed: Linux memfd sealing was not enforced across descriptors." >&2
     exit 1
 fi
+if ! grep -q '^ginux: Linux mmap descriptor access matrix validated' "$output_file"; then
+    echo "Boot test failed: Linux mmap descriptor access modes were not validated." >&2
+    exit 1
+fi
 
 if ! grep -q '^ginux: Linux single-CPU topology queries validated' "$output_file"; then
     echo "Boot test failed: Linux single-CPU topology queries were not validated." >&2
