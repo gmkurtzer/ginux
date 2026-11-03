@@ -40,6 +40,59 @@ pub fn valid_vtd_write_fault_record(high: u64, source: u16) -> bool {
         && high & SOURCE_MASK == u64::from(source)
 }
 
+/// First directory-stream position of the upper layer in a merged
+/// (overlay-over-image) directory. Lower-layer cursors stay below it, so a
+/// position handed to user space as `d_off` stays valid between calls.
+pub const MERGED_DIRECTORY_UPPER_BASE: usize = 1 << 32;
+
+pub enum MergedDirectoryEntry<L, U> {
+    Lower(L),
+    Upper(U),
+}
+
+/// Returns the next visible entry of a merged directory at or after
+/// `position`, with the position that follows it.
+///
+/// Like Linux overlayfs (`fs/overlayfs/readdir.c`, `ovl_dir_read_merged`),
+/// lower entries come first in their own order, minus whiteouts, followed by
+/// the upper entries that do not replace a lower name. `lower(cursor)` and
+/// `upper(cursor)` yield `None` on error, `Some(None)` at the end, or the
+/// entry with its next cursor; `lower_visible` rejects whited-out lower
+/// entries and `upper_only` rejects upper entries already reported in place
+/// of a lower entry with the same name.
+pub fn merged_directory_next<L, U>(
+    mut position: usize,
+    mut lower: impl FnMut(usize) -> Option<Option<(usize, L)>>,
+    mut upper: impl FnMut(usize) -> Option<Option<(usize, U)>>,
+    mut lower_visible: impl FnMut(&L) -> bool,
+    mut upper_only: impl FnMut(&U) -> bool,
+) -> Option<Option<(usize, MergedDirectoryEntry<L, U>)>> {
+    while position < MERGED_DIRECTORY_UPPER_BASE {
+        let Some((next, entry)) = lower(position)? else {
+            position = MERGED_DIRECTORY_UPPER_BASE;
+            break;
+        };
+        if next >= MERGED_DIRECTORY_UPPER_BASE {
+            return None;
+        }
+        if lower_visible(&entry) {
+            return Some(Some((next, MergedDirectoryEntry::Lower(entry))));
+        }
+        position = next;
+    }
+    let mut cursor = position - MERGED_DIRECTORY_UPPER_BASE;
+    loop {
+        let Some((next, entry)) = upper(cursor)? else {
+            return Some(None);
+        };
+        if upper_only(&entry) {
+            let next = MERGED_DIRECTORY_UPPER_BASE.checked_add(next)?;
+            return Some(Some((next, MergedDirectoryEntry::Upper(entry))));
+        }
+        cursor = next;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -81,5 +134,94 @@ mod tests {
         assert!(!valid_vtd_write_fault_record(qemu_11 | (1 << 61), SOURCE));
         assert!(!valid_vtd_write_fault_record(qemu_11, SOURCE + 1));
         assert!(!valid_vtd_write_fault_record(qemu_11 ^ (1 << 32), SOURCE));
+    }
+
+    // Lower layer modelled like the published rootfs: cursor 0 starts the
+    // list, cursor i + 1 names entry i, and entries form a linked list.
+    const LOWER: [(&str, usize); 4] = [("b", 3), ("shells", 2), ("a", 4), ("motd", 5)];
+    const LOWER_HEAD: usize = 1;
+    const LOWER_END: usize = 5;
+
+    fn lower(cursor: usize) -> Option<Option<(usize, &'static str)>> {
+        let index = match cursor {
+            0 => LOWER_HEAD - 1,
+            LOWER_END => return Some(None),
+            cursor => cursor - 1,
+        };
+        let (name, next) = LOWER.get(index)?;
+        Some(Some((*next, *name)))
+    }
+
+    fn upper(names: &[&'static str], cursor: usize) -> Option<Option<(usize, &'static str)>> {
+        Some(names.get(cursor).map(|name| (cursor + 1, *name)))
+    }
+
+    fn merged(
+        position: usize,
+        upper_names: &[&'static str],
+        whiteouts: &[&str],
+    ) -> Option<Option<(usize, &'static str)>> {
+        let step = merged_directory_next(
+            position,
+            lower,
+            |cursor| upper(upper_names, cursor),
+            |name| !whiteouts.contains(name),
+            |name| LOWER.iter().all(|(lower, _)| lower != name),
+        )?;
+        Some(step.map(|(next, entry)| {
+            (
+                next,
+                match entry {
+                    MergedDirectoryEntry::Lower(name) | MergedDirectoryEntry::Upper(name) => name,
+                },
+            )
+        }))
+    }
+
+    #[test]
+    fn merged_directory_hides_whiteouts_and_lists_upper_entries_once() {
+        // "motd" is a copy-up of a lower entry; "new" and "dir" exist only upper.
+        let upper_names = ["new", "motd", "dir"];
+        let mut names = [""; 8];
+        let mut count = 0;
+        let mut position = 0;
+        while let Some((next, name)) = merged(position, &upper_names, &["shells"]).unwrap() {
+            names[count] = name;
+            count += 1;
+            position = next;
+        }
+        assert_eq!(names[..count], ["b", "a", "motd", "new", "dir"]);
+        assert_eq!(merged(position, &upper_names, &["shells"]), Some(None));
+    }
+
+    #[test]
+    fn merged_directory_resumes_from_every_returned_position() {
+        let upper_names = ["new", "motd", "dir"];
+        let expected = ["b", "a", "motd", "new", "dir"];
+        let mut position = 0;
+        for index in 0..expected.len() {
+            // A fresh call at each returned d_off neither skips nor repeats.
+            let (next, name) = merged(position, &upper_names, &["shells"])
+                .unwrap()
+                .unwrap();
+            assert_eq!(name, expected[index]);
+            let mut rest = 0;
+            let mut cursor = next;
+            while let Some((after, _)) = merged(cursor, &upper_names, &["shells"]).unwrap() {
+                rest += 1;
+                cursor = after;
+            }
+            assert_eq!(rest, expected.len() - index - 1);
+            position = next;
+        }
+    }
+
+    #[test]
+    fn merged_directory_without_lower_entries_lists_upper_only() {
+        let whiteouts = ["b", "shells", "a", "motd"];
+        let (next, name) = merged(0, &["x"], &whiteouts).unwrap().unwrap();
+        assert_eq!((next, name), (MERGED_DIRECTORY_UPPER_BASE + 1, "x"));
+        assert_eq!(merged(next, &["x"], &whiteouts), Some(None));
+        assert_eq!(merged(0, &[], &whiteouts), Some(None));
     }
 }
