@@ -2024,9 +2024,9 @@ pub(crate) fn suspend_container_lifecycle(
     else {
         return false;
     };
-    let Some(blocks) = runtime.blocks.checked_add(1) else {
-        return false;
-    };
+    // Lifecycle returns are ordinary production scheduling, not a bounded
+    // verification run. Diagnostic saturation must not prevent a handoff.
+    let blocks = runtime.blocks.saturating_add(1);
     let saved = frame.saved_context(result, root, fs_base);
     if !runtime
         .scheduler

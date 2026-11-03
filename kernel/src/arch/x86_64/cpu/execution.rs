@@ -14,11 +14,98 @@ use super::{
 };
 use crate::{control_abi, linux_process};
 
-pub(super) const EXTENDED_STATE_SIZE: usize = 1024;
+pub(crate) const EXTENDED_STATE_SIZE: usize = 1024;
 
 #[derive(Clone, Copy)]
 #[repr(C, align(64))]
-pub(super) struct ExtendedState(pub(super) [u8; EXTENDED_STATE_SIZE]);
+pub(crate) struct ExtendedState(pub(super) [u8; EXTENDED_STATE_SIZE]);
+
+// Interrupt assembly captures this state before any Rust code can use SIMD.
+// The kernel-entry lock and quiescence barrier protect the selected bank.
+pub(super) fn save_interrupt_container_state(state: &ExtendedState) -> bool {
+    let Some(slot) = active_container_slot() else {
+        return false;
+    };
+    // SAFETY: only the BSP suspending the active domain writes this slot.
+    unsafe {
+        (*X86_MUTABLE_RUNTIME.container_extended_states.get())[slot] = *state;
+    }
+    X86_RUNTIME.CONTAINER_EXTENDED_STATE_VALID[slot].store(true, Ordering::Release);
+    true
+}
+
+pub(super) fn save_interrupt_thread_state(thread: usize, state: &ExtendedState) -> bool {
+    let Some((instance, process, thread)) =
+        linux_thread_extended_state_index(super::current_linux_process_pid(), thread)
+    else {
+        return false;
+    };
+    // SAFETY: the entry lock serializes the thread table; the interrupted CPU
+    // exclusively owns this running thread's architectural state.
+    unsafe {
+        (*X86_MUTABLE_RUNTIME.process_extended_states.get())[instance][process][thread] = *state;
+        (*X86_MUTABLE_RUNTIME.process_extended_state_valid.get())[instance][process][thread] = true;
+    }
+    true
+}
+
+pub(super) fn load_interrupt_thread_state(thread: usize, state: &mut ExtendedState) -> bool {
+    let Some((instance, process, thread)) =
+        linux_thread_extended_state_index(super::current_linux_process_pid(), thread)
+    else {
+        return false;
+    };
+    // SAFETY: the entry lock owns selection of this non-running target thread.
+    unsafe {
+        *state = if (*X86_MUTABLE_RUNTIME.process_extended_state_valid.get())[instance][process]
+            [thread]
+        {
+            (*X86_MUTABLE_RUNTIME.process_extended_states.get())[instance][process][thread]
+        } else {
+            // XSTATE_BV == 0 requests architectural initial state on XRSTOR.
+            ExtendedState([0; EXTENDED_STATE_SIZE])
+        };
+    }
+    true
+}
+
+pub(super) fn preserve_suspended_thread_extended_state() -> bool {
+    let (Some(slot), Some(thread)) = (active_container_slot(), current_linux_thread_slot()) else {
+        return false;
+    };
+    // SAFETY: AP quiescence completed; the BSP owns the suspended container.
+    let state = unsafe { (*X86_MUTABLE_RUNTIME.container_extended_states.get())[slot] };
+    save_interrupt_thread_state(thread, &state)
+}
+
+pub(super) fn linux_resume_extended_state() -> *const ExtendedState {
+    if !CPU_ARCHITECTURE
+        .extended_user_state_enabled
+        .load(Ordering::Acquire)
+        || !X86_RUNTIME.LINUX_RUNTIME_MODE.load(Ordering::Acquire)
+    {
+        return core::ptr::null();
+    }
+    let Some(thread) = current_linux_thread_slot() else {
+        return core::ptr::null();
+    };
+    let Some((instance, process, thread)) =
+        linux_thread_extended_state_index(super::current_linux_process_pid(), thread)
+    else {
+        return core::ptr::null();
+    };
+    // SAFETY: selection already grants this CPU exclusive ownership of the
+    // running thread. The assembly entry consumes the pointer before IRET.
+    unsafe {
+        if (*X86_MUTABLE_RUNTIME.process_extended_state_valid.get())[instance][process][thread] {
+            core::ptr::addr_of!(
+                (*X86_MUTABLE_RUNTIME.process_extended_states.get())[instance][process][thread]
+            )
+        } else {
+            core::ptr::null()
+        }
+    }
+}
 
 pub(crate) fn enable_extended_user_state() -> bool {
     let features = __cpuid(1);

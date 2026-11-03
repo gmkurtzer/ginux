@@ -2462,14 +2462,22 @@ pub(crate) fn force_stop_runtime_process_registry() -> bool {
     let Some(init) = table.init else {
         return false;
     };
-    let Some(run_queue) = scheduler::active_process_scheduler_workspace() else {
-        return false;
-    };
-    run_queue.retire_all();
-    for process in table.processes.iter_mut().flatten() {
-        process.scheduler_thread = None;
-    }
-    if !scheduler::release_process_scheduler_workspace() {
+    if let Some(run_queue) = scheduler::active_process_scheduler_workspace() {
+        run_queue.retire_all();
+        for process in table.processes.iter_mut().flatten() {
+            process.scheduler_thread = None;
+        }
+        if !scheduler::release_process_scheduler_workspace() {
+            return false;
+        }
+    } else if table
+        .processes
+        .iter()
+        .flatten()
+        .any(|process| process.scheduler_thread.is_some())
+    {
+        // A runtime that never forked has no process-scheduler workspace.
+        // Missing storage is an error only if a process still owns a binding.
         return false;
     }
 

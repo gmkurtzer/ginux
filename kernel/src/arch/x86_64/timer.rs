@@ -116,10 +116,41 @@ ginux_apic_timer_entry:
     push r13
     push r14
     push r15
+    // CS follows the fifteen saved GPRs and RIP. Install kernel GS before
+    // Rust resolves per-CPU ownership; ring-0 interruptions already have it.
+    test qword ptr [rsp + 128], 3
+    jz 5f
+    swapgs
+5:
     mov r12, rsp
+    xor r13d, r13d
+    mov rax, cr4
+    test eax, 1 << 18
+    jz 2f
+    sub rsp, 1024
+    and rsp, -64
+    mov r13, rsp
+    mov rdi, rsp
+    mov ecx, 128
+    xor eax, eax
+    rep stosq
+    mov eax, 7
+    xor edx, edx
+    xsave64 [r13]
+2:
     mov rdi, r12
+    mov rsi, r13
     and rsp, -16
     call {timer_handler}
+    movzx r14d, al
+    test r13, r13
+    jz 3f
+    mov eax, 7
+    xor edx, edx
+    xrstor64 [r13]
+3:
+    test r14, r14
+    jnz 4f
     mov rsp, r12
     pop r15
     pop r14
@@ -136,7 +167,15 @@ ginux_apic_timer_entry:
     pop rcx
     pop rbx
     pop rax
+    test qword ptr [rsp + 8], 3
+    jz 6f
+    swapgs
+6:
     iretq
+4:
+    // Only a saved ring-3 Linux frame can request this exit. Rust dropped
+    // its entry guard and GS already names this CPU's kernel entry state.
+    jmp ginux_user_return_kernel
 
     .global ginux_apic_spurious_entry
 ginux_apic_spurious_entry:
@@ -691,7 +730,10 @@ pub(crate) unsafe fn verify_device_wait_timeout_interrupt() -> bool {
     finish_device_wait_timer(DEVICE_WAIT_TEST_DOMAIN, 1) == Some(true)
 }
 
-extern "sysv64" fn timer_interrupt_handler(frame: *mut UserInterruptFrame) {
+extern "sysv64" fn timer_interrupt_handler(
+    frame: *mut UserInterruptFrame,
+    extended: *mut cpu::ExtendedState,
+) -> bool {
     let _kernel_entry = crate::sync::kernel_entry_lock();
     TIMER.fired.store(true, Ordering::SeqCst);
     let mode = if TIMER.interrupt_apic_mode.load(Ordering::SeqCst) == 1 {
@@ -702,7 +744,7 @@ extern "sysv64" fn timer_interrupt_handler(frame: *mut UserInterruptFrame) {
     let Some(apic) =
         LocalApic::from_saved(0, mode, TIMER.interrupt_apic_base.load(Ordering::SeqCst))
     else {
-        return;
+        return false;
     };
     // SAFETY: The verifier initializes these values before unmasking the timer,
     // and the handler runs with exclusive bootstrap-processor APIC ownership.
@@ -727,7 +769,7 @@ extern "sysv64" fn timer_interrupt_handler(frame: *mut UserInterruptFrame) {
                 TIMER.device_wait_timed_out.store(true, Ordering::SeqCst);
                 if scheduler::current_domain() != Some(domain) {
                     let Some(frame) = (unsafe { frame.as_mut() }) else {
-                        return;
+                        return false;
                     };
                     if let RuntimeAction::Resume {
                         address_space_root,
@@ -754,18 +796,22 @@ extern "sysv64" fn timer_interrupt_handler(frame: *mut UserInterruptFrame) {
                 .fetch_add(1, Ordering::SeqCst);
             TIMER.device_wait_timed_out.store(true, Ordering::SeqCst);
         }
-        return;
+        return false;
     }
     if TIMER.linux_wait_armed.load(Ordering::SeqCst) {
+        // SAFETY: assembly supplies its live GPR frame and an aligned XSAVE
+        // buffer (or null if XSAVE is disabled), both on this interrupt stack.
         if let Some(frame) = unsafe { frame.as_mut() } {
-            cpu::expire_linux_waits_from_timer(frame);
+            if cpu::expire_linux_waits_from_timer(frame, unsafe { extended.as_mut() }) {
+                return true;
+            }
         }
         let reload = TIMER.linux_wait_reload.load(Ordering::SeqCst);
         if reload != 0 && TIMER.linux_wait_armed.load(Ordering::SeqCst) {
             // SAFETY: the Linux execution phase owns this one-shot timer.
             unsafe { apic.write(APIC_INITIAL_COUNT, reload) };
         }
-        return;
+        return false;
     }
     if TIMER.preemption_armed.load(Ordering::SeqCst)
         && TIMER.preemption_count.load(Ordering::SeqCst) == 0
@@ -777,13 +823,13 @@ extern "sysv64" fn timer_interrupt_handler(frame: *mut UserInterruptFrame) {
             // one-shot timer until finish_scheduler_preemption masks it.
             unsafe { apic.write(APIC_INITIAL_COUNT, reload) };
         }
-        return;
+        return false;
     }
     if !TIMER.preemption_armed.swap(false, Ordering::SeqCst) {
-        return;
+        return false;
     }
     let Some(frame) = (unsafe { frame.as_mut() }) else {
-        return;
+        return false;
     };
     let action = scheduler::preempt_runtime(
         frame,
@@ -801,6 +847,7 @@ extern "sysv64" fn timer_interrupt_handler(frame: *mut UserInterruptFrame) {
             TIMER.preemption_count.fetch_add(1, Ordering::SeqCst);
         }
     }
+    false
 }
 
 unsafe fn in_u8(port: u16) -> u8 {

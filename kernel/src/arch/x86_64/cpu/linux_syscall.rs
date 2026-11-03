@@ -1543,6 +1543,7 @@ pub(super) extern "sysv64" fn linux_syscall_handler(
         }
     }
     if runtime_mode
+        && current_linux_runtime_cpu_index() == 0
         && result != LINUX_RETURN_TO_KERNEL
         && result != LINUX_RETURN_FROM_IRET
         && !X86_RUNTIME.LINUX_SIGNAL_ACTIVE.load(Ordering::Acquire)

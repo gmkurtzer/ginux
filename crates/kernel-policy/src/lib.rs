@@ -1,5 +1,19 @@
 #![no_std]
 
+/// Search a bounded domain ring, beginning at the next slot after the last run.
+pub fn next_runnable_domain(
+    cursor: usize,
+    limit: usize,
+    mut runnable: impl FnMut(usize) -> bool,
+) -> Option<usize> {
+    if limit == 0 {
+        return None;
+    }
+    (0..limit)
+        .map(|offset| (cursor % limit + offset) % limit)
+        .find(|slot| runnable(*slot))
+}
+
 pub fn valid_domain_personality(personality: &[u8]) -> bool {
     personality == b"linux"
 }
@@ -43,6 +57,19 @@ pub fn valid_vtd_write_fault_record(high: u64, source: u16) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn domain_ring_visits_every_runnable_slot_and_wraps() {
+        let mut cursor = 0;
+        for expected in [1, 3, 1, 3, 1, 3] {
+            let selected = next_runnable_domain(cursor, 4, |slot| slot == 1 || slot == 3);
+            assert_eq!(selected, Some(expected));
+            cursor = expected + 1;
+        }
+        assert_eq!(next_runnable_domain(usize::MAX, 0, |_| true), None);
+        assert_eq!(next_runnable_domain(3, 4, |_| false), None);
+        assert_eq!(next_runnable_domain(usize::MAX, 4, |_| true), Some(3));
+    }
 
     #[test]
     fn personality_accepts_only_linux() {

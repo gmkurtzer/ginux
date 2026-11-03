@@ -17,6 +17,7 @@ mod linux_poll;
 pub(crate) fn verify_synchronous_poll_budget() -> bool {
     linux_poll::verify_synchronous_poll_budget()
 }
+mod linux_preempt;
 mod linux_random;
 mod linux_signal;
 mod linux_syscall;
@@ -31,18 +32,20 @@ pub(crate) use architecture::{
 use architecture::{
     current_cpu_index_checked, current_entry_state, install_user_interrupt_gate, CPU_ARCHITECTURE,
 };
-pub(crate) use execution::enable_extended_user_state;
 use execution::{
     clone_linux_process_extended_state, discard_container_extended_state,
     discard_linux_process_extended_state, discard_linux_thread_extended_state,
     initialize_linux_thread_extended_state, reset_extended_user_state,
     restore_container_extended_state, restore_linux_process_extended_state,
     save_container_extended_state, save_linux_process_extended_state,
-    switch_linux_thread_extended_state, ExtendedState, EXTENDED_STATE_SIZE,
+    switch_linux_thread_extended_state, EXTENDED_STATE_SIZE,
 };
+pub(crate) use execution::{enable_extended_user_state, ExtendedState};
 pub(crate) use linux_abi::*;
 use linux_futex::*;
 use linux_poll::*;
+pub(crate) use linux_preempt::quiesce_linux_runtime_interrupt;
+use linux_preempt::*;
 pub(crate) use linux_random::*;
 pub(crate) use linux_signal::expire_linux_waits_from_timer;
 use linux_signal::*;
@@ -183,6 +186,7 @@ struct X86RuntimeOwner {
     CONTAINER_PULL_REQUESTED: RuntimeRef<AtomicBool>,
     CONTAINER_RESTART_REQUESTED: RuntimeRef<AtomicBool>,
     CONTAINER_SELECTED_SLOT: RuntimeRef<AtomicU8>,
+    CONTAINER_BACKGROUND_CURSOR: RuntimeRef<AtomicU8>,
     CONTAINER_STOP_REQUESTED: RuntimeRef<[AtomicBool; control_abi::DOMAIN_LIMIT]>,
     DOMAIN_PERSONALITIES: RuntimeRef<
         [[AtomicU8; control_abi::DOMAIN_MAX_PERSONALITY_SIZE]; control_abi::DOMAIN_LIMIT],
@@ -480,11 +484,13 @@ struct X86RuntimeOwner {
     LINUX_RUNTIME_SLOW_DIAGNOSTIC_WRITTEN: RuntimeRef<BankedAtomicBool>,
     LINUX_RUNTIME_STALLED_DIAGNOSTIC_WRITTEN: RuntimeRef<BankedAtomicBool>,
     LINUX_RUNTIME_SUSPENDED: RuntimeRef<BankedAtomicBool>,
+    LINUX_RUNTIME_INTERRUPT_SUSPENDED: RuntimeRef<BankedAtomicBool>,
     LINUX_RUNTIME_SUSPEND_ADDRESS: RuntimeRef<BankedAtomicU64>,
     LINUX_RUNTIME_SUSPEND_COUNT: RuntimeRef<BankedAtomicU64>,
     LINUX_RUNTIME_SUSPEND_FS_BASE: RuntimeRef<BankedAtomicU64>,
     LINUX_RUNTIME_SUSPEND_PID: RuntimeRef<BankedAtomicU32>,
-    LINUX_RUNTIME_SUSPEND_REGISTERS: RuntimeRef<[BankedAtomicU64; LINUX_SYSCALL_FRAME_REGISTERS]>,
+    LINUX_RUNTIME_SUSPEND_REGISTERS:
+        RuntimeRef<[BankedAtomicU64; LINUX_SYSCALL_FRAME_REGISTERS + 2]>,
     LINUX_RUNTIME_SUSPEND_REQUESTED: RuntimeRef<BankedAtomicBool>,
     LINUX_RUNTIME_SUSPEND_RESULT: RuntimeRef<BankedAtomicU64>,
     LINUX_RUNTIME_SUSPEND_RFLAGS: RuntimeRef<BankedAtomicU64>,
@@ -615,6 +621,7 @@ static X86_RUNTIME: X86RuntimeOwner = X86RuntimeOwner {
     CONTAINER_PULL_REQUESTED: RuntimeRef(&X86_RUNTIME_BACKING_CONTAINER_PULL_REQUESTED),
     CONTAINER_RESTART_REQUESTED: RuntimeRef(&X86_RUNTIME_BACKING_CONTAINER_RESTART_REQUESTED),
     CONTAINER_SELECTED_SLOT: RuntimeRef(&X86_RUNTIME_BACKING_CONTAINER_SELECTED_SLOT),
+    CONTAINER_BACKGROUND_CURSOR: RuntimeRef(&X86_RUNTIME_BACKING_CONTAINER_BACKGROUND_CURSOR),
     CONTAINER_STOP_REQUESTED: RuntimeRef(&X86_RUNTIME_BACKING_CONTAINER_STOP_REQUESTED),
     DOMAIN_PERSONALITIES: RuntimeRef(&X86_RUNTIME_BACKING_DOMAIN_PERSONALITIES),
     DOMAIN_PERSONALITY_SIZES: RuntimeRef(&X86_RUNTIME_BACKING_DOMAIN_PERSONALITY_SIZES),
@@ -1021,6 +1028,9 @@ static X86_RUNTIME: X86RuntimeOwner = X86RuntimeOwner {
         &X86_RUNTIME_BACKING_LINUX_RUNTIME_STALLED_DIAGNOSTIC_WRITTEN,
     ),
     LINUX_RUNTIME_SUSPENDED: RuntimeRef(&X86_RUNTIME_BACKING_LINUX_RUNTIME_SUSPENDED),
+    LINUX_RUNTIME_INTERRUPT_SUSPENDED: RuntimeRef(
+        &X86_RUNTIME_BACKING_LINUX_RUNTIME_INTERRUPT_SUSPENDED,
+    ),
     LINUX_RUNTIME_SUSPEND_ADDRESS: RuntimeRef(&X86_RUNTIME_BACKING_LINUX_RUNTIME_SUSPEND_ADDRESS),
     LINUX_RUNTIME_SUSPEND_COUNT: RuntimeRef(&X86_RUNTIME_BACKING_LINUX_RUNTIME_SUSPEND_COUNT),
     LINUX_RUNTIME_SUSPEND_FS_BASE: RuntimeRef(&X86_RUNTIME_BACKING_LINUX_RUNTIME_SUSPEND_FS_BASE),
@@ -2101,6 +2111,7 @@ static X86_RUNTIME_BACKING_DOMAIN_PERSONALITIES: [[AtomicU8;
     [const { [const { AtomicU8::new(0) }; control_abi::DOMAIN_MAX_PERSONALITY_SIZE] };
         control_abi::DOMAIN_LIMIT];
 static X86_RUNTIME_BACKING_CONTAINER_SELECTED_SLOT: AtomicU8 = AtomicU8::new(CONTAINER_SLOT_NONE);
+static X86_RUNTIME_BACKING_CONTAINER_BACKGROUND_CURSOR: AtomicU8 = AtomicU8::new(0);
 static X86_RUNTIME_BACKING_CONTAINER_ACTIVE_SLOT: AtomicU8 = AtomicU8::new(CONTAINER_SLOT_NONE);
 static X86_RUNTIME_BACKING_CONTAINER_RESTART_REQUESTED: AtomicBool = AtomicBool::new(false);
 static X86_RUNTIME_BACKING_CONTAINER_HOST_SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
@@ -2141,6 +2152,8 @@ static X86_RUNTIME_BACKING_LINUX_RUNTIME_BACKGROUND_SUSPENDED: BankedAtomicBool 
 static X86_RUNTIME_BACKING_LINUX_RUNTIME_BACKGROUND_TICKS: BankedAtomicU32 =
     BankedAtomicU32::new(0);
 static X86_RUNTIME_BACKING_LINUX_RUNTIME_SUSPENDED: BankedAtomicBool = BankedAtomicBool::new(false);
+static X86_RUNTIME_BACKING_LINUX_RUNTIME_INTERRUPT_SUSPENDED: BankedAtomicBool =
+    BankedAtomicBool::new(false);
 static X86_RUNTIME_BACKING_LINUX_RUNTIME_SUSPEND_ADDRESS: BankedAtomicU64 = BankedAtomicU64::new(0);
 static X86_RUNTIME_BACKING_LINUX_RUNTIME_SUSPEND_COUNT: BankedAtomicU64 = BankedAtomicU64::new(0);
 static X86_RUNTIME_BACKING_LINUX_RUNTIME_SUSPEND_RIP: BankedAtomicU64 = BankedAtomicU64::new(0);
@@ -2150,8 +2163,8 @@ static X86_RUNTIME_BACKING_LINUX_RUNTIME_SUSPEND_FS_BASE: BankedAtomicU64 = Bank
 static X86_RUNTIME_BACKING_LINUX_RUNTIME_SUSPEND_RESULT: BankedAtomicU64 = BankedAtomicU64::new(0);
 static X86_RUNTIME_BACKING_LINUX_RUNTIME_SUSPEND_PID: BankedAtomicU32 = BankedAtomicU32::new(0);
 static X86_RUNTIME_BACKING_LINUX_RUNTIME_SUSPEND_REGISTERS: [BankedAtomicU64;
-    LINUX_SYSCALL_FRAME_REGISTERS] =
-    [const { BankedAtomicU64::new(0) }; LINUX_SYSCALL_FRAME_REGISTERS];
+    LINUX_SYSCALL_FRAME_REGISTERS + 2] =
+    [const { BankedAtomicU64::new(0) }; LINUX_SYSCALL_FRAME_REGISTERS + 2];
 const CONTAINER_CONSOLE_CAPACITY: usize = 4096;
 const CONTAINER_CONSOLE_DETACH: u8 = 0x1d;
 static X86_RUNTIME_BACKING_CONTAINER_CONSOLE_ATTACHED: [AtomicBool; control_abi::DOMAIN_LIMIT] =
@@ -2522,7 +2535,14 @@ ginux_process_user_enter:
     push rcx
     push {user_code}
     push rdi
-    mov rax, rdx
+    mov r9, rdx
+    test r8, r8
+    jz 1f
+    mov eax, 7
+    xor edx, edx
+    xrstor64 [r8]
+1:
+    mov rax, r9
     mov rbx, [rax + 8]
     mov rcx, [rax + 16]
     mov rdx, [rax + 24]
@@ -2704,6 +2724,7 @@ ginux_linux_iret_return:
     mov r11, gs:[{entry_signal_r11}]
     swapgs
     iretq
+    .global ginux_user_return_kernel
 ginux_user_return_kernel:
     mov rsp, gs:[{entry_return_stack}]
     pop r15
@@ -2748,7 +2769,8 @@ extern "C" {
 unsafe fn enter_linux_process(entry: usize, stack: usize, general: *const u64, rflags: u64) {
     let entry_state = current_entry_state();
     let previous_return_stack = (*entry_state).return_stack;
-    ginux_process_user_enter(entry, stack, general, rflags);
+    let extended = execution::linux_resume_extended_state();
+    ginux_process_user_enter(entry, stack, general, rflags, extended);
     (*entry_state).return_stack = previous_return_stack;
 }
 
@@ -2795,7 +2817,13 @@ extern "sysv64" {
         service_identity: u64,
         root_handle: u64,
     );
-    fn ginux_process_user_enter(entry: usize, stack: usize, general: *const u64, rflags: u64);
+    fn ginux_process_user_enter(
+        entry: usize,
+        stack: usize,
+        general: *const u64,
+        rflags: u64,
+        extended: *const ExtendedState,
+    );
 }
 
 pub(crate) unsafe fn raw_copy_from_user(output: *mut u8, input: *const u8, length: usize) -> usize {
@@ -6343,6 +6371,13 @@ fn install_linux_thread_return(
 }
 
 fn switch_linux_thread(handle: LinuxThreadHandle) -> bool {
+    switch_linux_thread_context(handle, None)
+}
+
+fn switch_linux_thread_context(
+    handle: LinuxThreadHandle,
+    interrupted: Option<&mut ExtendedState>,
+) -> bool {
     let slot = usize::from(handle.slot);
     let Some(context) = linux_thread_context(handle) else {
         return false;
@@ -6356,7 +6391,12 @@ fn switch_linux_thread(handle: LinuxThreadHandle) -> bool {
         if prior >= LINUX_THREAD_LIMIT
             || X86_RUNTIME.LINUX_THREAD_STATES[prior].load(Ordering::SeqCst) != LINUX_THREAD_RUNNING
             || X86_RUNTIME.LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
-                && !switch_linux_thread_extended_state(prior, slot)
+                && !if let Some(state) = interrupted {
+                    execution::save_interrupt_thread_state(prior, state)
+                        && execution::load_interrupt_thread_state(slot, state)
+                } else {
+                    switch_linux_thread_extended_state(prior, slot)
+                }
         {
             return false;
         }
@@ -6365,7 +6405,11 @@ fn switch_linux_thread(handle: LinuxThreadHandle) -> bool {
             Ordering::SeqCst,
         );
         X86_RUNTIME.LINUX_THREAD_STATES[prior].store(LINUX_THREAD_READY, Ordering::SeqCst);
-    } else if !reset_extended_user_state() {
+    } else if !if X86_RUNTIME.LINUX_RUNTIME_MODE.load(Ordering::Acquire) {
+        execution::restore_linux_thread_extended_state(current_linux_process_pid(), slot)
+    } else {
+        reset_extended_user_state()
+    } {
         return false;
     }
     if !install_linux_tls_context(context) {
@@ -6620,6 +6664,11 @@ fn block_current_linux_thread(kind: u8, key: u64, output: u64, deadline: u64) ->
         || X86_RUNTIME.LINUX_THREAD_WAIT_KEYS[slot].load(Ordering::SeqCst) != 0
         || X86_RUNTIME.LINUX_THREAD_WAIT_OUTPUTS[slot].load(Ordering::SeqCst) != 0
         || X86_RUNTIME.LINUX_THREAD_WAIT_DEADLINES[slot].load(Ordering::SeqCst) != 0
+    {
+        return false;
+    }
+    if X86_RUNTIME.LINUX_RUNTIME_MODE.load(Ordering::Acquire)
+        && !save_linux_process_extended_state(current_linux_process_pid())
     {
         return false;
     }
@@ -8795,6 +8844,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
         PRIVILEGE_ENTRY_NMI_PROBE_HITS.store(0, Ordering::SeqCst);
         PRIVILEGE_ENTRY_NMI_PROBE_MASK.store(PRIVILEGE_ENTRY_NMI_STAGE_MASK, Ordering::SeqCst);
     }
+    start_linux_domain_slice();
     let user_entered = unsafe { enter_user(execution.entry, execution.stack, 0, 0, 0, 0, 0, 0, 0) };
     if !user_entered {
         if execution.runtime {
@@ -8819,7 +8869,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution<'_>) -> Linux
                 == PRIVILEGE_ENTRY_NMI_STAGE_COUNT;
     if execution.runtime {
         if X86_RUNTIME.LINUX_RUNTIME_SUSPENDED.load(Ordering::Acquire) {
-            let state_saved = save_container_extended_state();
+            let state_saved = finish_suspended_linux_state();
             let registry_suspended =
                 state_saved && linux_process::suspend_runtime_process_registry();
             let mount_deactivated = registry_suspended && linux_mount::deactivate_initial();
@@ -10550,9 +10600,14 @@ fn linux_controller_syscall(
                 return Some(LINUX_EBADF);
             }
             if !crate::serial_input_ready() && queue_background_container_work() {
+                // This read has not consumed a byte. Resume at SYSCALL rather
+                // than returning a false EOF on every background time slice.
+                let Some(retry_rip) = user_rip.checked_sub(2) else {
+                    return Some(LINUX_EIO);
+                };
                 let mut frame = UserTrapFrame::from_linux_syscall(
                     registers.into_array(),
-                    user_rip,
+                    retry_rip,
                     user_stack,
                     user_rflags,
                     second,
@@ -12071,6 +12126,9 @@ pub(crate) fn begin_dispatched_linux_runtime_thread(
     general: [u64; 15],
     rflags: u64,
 ) -> bool {
+    if crate::arch::x86_64::smp::linux_runtime_quiescence_requested() {
+        return true;
+    }
     let handle = LinuxThreadHandle {
         slot,
         generation,
@@ -12094,6 +12152,9 @@ pub(crate) fn begin_dispatched_linux_runtime_thread(
         return false;
     };
     let resumed = loop {
+        if crate::arch::x86_64::smp::linux_runtime_quiescence_requested() {
+            break true;
+        }
         let selected_general = {
             let _kernel_entry = crate::sync::kernel_entry_lock();
             let selected = current_linux_runtime_cpu_index() != 0
@@ -12120,6 +12181,9 @@ pub(crate) fn begin_dispatched_linux_runtime_thread(
             break false;
         }
         loop {
+            if crate::arch::x86_64::smp::linux_runtime_quiescence_requested() {
+                break;
+            }
             let state = X86_RUNTIME.LINUX_THREAD_STATES[usize::from(slot)].load(Ordering::Acquire);
             if state == LINUX_THREAD_FREE {
                 break;
@@ -12135,6 +12199,9 @@ pub(crate) fn begin_dispatched_linux_runtime_thread(
                 break;
             }
             core::hint::spin_loop();
+        }
+        if crate::arch::x86_64::smp::linux_runtime_quiescence_requested() {
+            break true;
         }
         let state = X86_RUNTIME.LINUX_THREAD_STATES[usize::from(slot)].load(Ordering::Acquire);
         if state == LINUX_THREAD_FREE {
@@ -12772,6 +12839,10 @@ fn save_suspended_linux_runtime(
     {
         stored.store(value, Ordering::Release);
     }
+    X86_RUNTIME.LINUX_RUNTIME_SUSPEND_REGISTERS[LINUX_SYSCALL_FRAME_REGISTERS]
+        .store(context.rip, Ordering::Release);
+    X86_RUNTIME.LINUX_RUNTIME_SUSPEND_REGISTERS[LINUX_SYSCALL_FRAME_REGISTERS + 1]
+        .store(context.rflags, Ordering::Release);
     X86_RUNTIME
         .LINUX_RUNTIME_SUSPEND_ADDRESS
         .store(address, Ordering::Release);
@@ -12802,6 +12873,7 @@ fn save_suspended_linux_runtime(
     if let Some(slot) = active_container_slot() {
         X86_RUNTIME.CONTAINER_BACKGROUND_SUSPENDED[slot].store(background, Ordering::Release);
     }
+    crate::arch::x86_64::smp::request_linux_runtime_quiescence();
     true
 }
 
@@ -12944,7 +13016,10 @@ pub(crate) fn resume_suspended_linux_runtime(mmap: u64) -> LinuxElfResult {
     X86_RUNTIME
         .LINUX_CURRENT_PROCESS_PID
         .store(process.pid, Ordering::Release);
-    if (!background || domain_exec)
+    // Both console and quantum suspensions retain the live per-domain bank.
+    // A process snapshot is needed only when exec injection changes processes;
+    // an ordinary console read may never have created such a snapshot.
+    if domain_exec
         && (!restore_saved_linux_process_runtime_state(process.pid)
             || !restore_linux_process_extended_state(process.pid))
     {
@@ -13004,6 +13079,10 @@ pub(crate) fn resume_suspended_linux_runtime(mmap: u64) -> LinuxElfResult {
             .store(false, Ordering::Release);
         return LinuxElfResult::FAILED;
     }
+    start_linux_domain_slice();
+    if !stopping && !domain_exec {
+        dispatch_ready_linux_runtime_threads(process.root);
+    }
     let resumed = if domain_exec {
         execute_deferred_live_fork()
     } else {
@@ -13012,9 +13091,13 @@ pub(crate) fn resume_suspended_linux_runtime(mmap: u64) -> LinuxElfResult {
             context.rip,
             context.rsp,
             context.fs_base,
-            context
-                .registers
-                .process_general(context.rax, context.rip, context.rflags),
+            context.registers.process_general(
+                context.rax,
+                X86_RUNTIME.LINUX_RUNTIME_SUSPEND_REGISTERS[LINUX_SYSCALL_FRAME_REGISTERS]
+                    .load(Ordering::Acquire),
+                X86_RUNTIME.LINUX_RUNTIME_SUSPEND_REGISTERS[LINUX_SYSCALL_FRAME_REGISTERS + 1]
+                    .load(Ordering::Acquire),
+            ),
             context.rflags,
         )
     };
@@ -13028,7 +13111,7 @@ pub(crate) fn resume_suspended_linux_runtime(mmap: u64) -> LinuxElfResult {
         serial_write("\r\n");
     }
     if X86_RUNTIME.LINUX_RUNTIME_SUSPENDED.load(Ordering::Acquire) {
-        let state_saved = save_container_extended_state();
+        let state_saved = finish_suspended_linux_state();
         let registry_suspended = state_saved && linux_process::suspend_runtime_process_registry();
         let mount_deactivated = registry_suspended && linux_mount::deactivate_initial();
         let timer_finished = timer::finish_linux_wait_timer();
@@ -13064,7 +13147,7 @@ fn finish_linux_runtime(mmap: u64, saved_msrs: [u64; 5]) -> LinuxElfResult {
         }
     }
     if forks_completed && X86_RUNTIME.LINUX_RUNTIME_SUSPENDED.load(Ordering::Acquire) {
-        let state_saved = save_container_extended_state();
+        let state_saved = finish_suspended_linux_state();
         let registry_suspended = state_saved && linux_process::suspend_runtime_process_registry();
         let mount_deactivated = registry_suspended && linux_mount::deactivate_initial();
         let timer_finished = timer::finish_linux_wait_timer();
@@ -13645,6 +13728,27 @@ impl LinuxProcessRuntimeState {
     };
 }
 
+struct LinuxSignalContextBank {
+    values: UnsafeCell<[LinuxSignalContext; LINUX_RUNTIME_INSTANCE_LIMIT]>,
+}
+
+impl LinuxSignalContextBank {
+    const fn new() -> Self {
+        Self {
+            values: UnsafeCell::new([LinuxSignalContext::ZERO; LINUX_RUNTIME_INSTANCE_LIMIT]),
+        }
+    }
+
+    fn get(&self) -> *mut LinuxSignalContext {
+        // The same bounded instance owns LINUX_SIGNAL_ACTIVE and this record.
+        // Entry serialization and AP quiescence keep it fixed while accessed.
+        self.values
+            .get()
+            .cast::<LinuxSignalContext>()
+            .wrapping_add(current_linux_execution_instance())
+    }
+}
+
 struct X86MutableRuntimeOwner {
     container_extended_states: UnsafeCell<[ExtendedState; control_abi::DOMAIN_LIMIT]>,
     process_extended_states: UnsafeCell<
@@ -13663,7 +13767,7 @@ struct X86MutableRuntimeOwner {
         [[[LinuxThreadRuntimeState; LINUX_THREAD_LIMIT]; linux_process::PROCESS_RUNTIME_LIMIT];
             LINUX_PROCESS_RUNTIME_INSTANCE_LIMIT],
     >,
-    signal_context: UnsafeCell<LinuxSignalContext>,
+    signal_context: LinuxSignalContextBank,
 }
 
 // SAFETY: Gate 5 centralizes the legacy mutable runtime banks behind this
@@ -13690,7 +13794,7 @@ static X86_MUTABLE_RUNTIME: X86MutableRuntimeOwner = X86MutableRuntimeOwner {
         [[[LinuxThreadRuntimeState::EMPTY; LINUX_THREAD_LIMIT];
             linux_process::PROCESS_RUNTIME_LIMIT]; LINUX_PROCESS_RUNTIME_INSTANCE_LIMIT],
     ),
-    signal_context: UnsafeCell::new(LinuxSignalContext::ZERO),
+    signal_context: LinuxSignalContextBank::new(),
 };
 
 fn linux_process_runtime_state(pid: u32) -> Option<&'static mut LinuxProcessRuntimeState> {
@@ -41420,8 +41524,10 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
         }
         control_abi::DOMAIN_STOP
             if requested_slot.is_some()
-                && container_state(requested_slot.unwrap_or(0))
-                    == control_abi::DOMAIN_STATE_RUNNING
+                && matches!(
+                    container_state(requested_slot.unwrap_or(0)),
+                    control_abi::DOMAIN_STATE_BOOTING | control_abi::DOMAIN_STATE_RUNNING
+                )
                 && (active_container_slot() == requested_slot
                     || address_space::linux_runtime_is_suspended(requested_slot.unwrap_or(0))) =>
         {
@@ -41708,15 +41814,26 @@ fn queue_background_container_work() -> bool {
     {
         return true;
     }
-    let Some(slot) = (0..control_abi::DOMAIN_LIMIT).find(|slot| {
-        matches!(
-            container_state(*slot),
-            control_abi::DOMAIN_STATE_BOOTING | control_abi::DOMAIN_STATE_RUNNING
-        ) && X86_RUNTIME.CONTAINER_BACKGROUND_SUSPENDED[*slot].load(Ordering::Acquire)
-            && address_space::linux_runtime_is_suspended(*slot)
-    }) else {
+    let cursor = usize::from(
+        X86_RUNTIME
+            .CONTAINER_BACKGROUND_CURSOR
+            .load(Ordering::Acquire),
+    );
+    let Some(slot) =
+        ginux_kernel_policy::next_runnable_domain(cursor, control_abi::DOMAIN_LIMIT, |slot| {
+            matches!(
+                container_state(slot),
+                control_abi::DOMAIN_STATE_BOOTING | control_abi::DOMAIN_STATE_RUNNING
+            ) && X86_RUNTIME.CONTAINER_BACKGROUND_SUSPENDED[slot].load(Ordering::Acquire)
+                && address_space::linux_runtime_is_suspended(slot)
+        })
+    else {
         return false;
     };
+    X86_RUNTIME.CONTAINER_BACKGROUND_CURSOR.store(
+        ((slot + 1) % control_abi::DOMAIN_LIMIT) as u8,
+        Ordering::Release,
+    );
     X86_RUNTIME
         .CONTAINER_SELECTED_SLOT
         .store(slot as u8, Ordering::Release);

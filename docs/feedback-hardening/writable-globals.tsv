@@ -483,3 +483,6 @@ interior-mutable	kernel/src/volume.rs	LIVE_VOLUME	platform-device	allowlist	none
 interior-mutable	services/network/src/main.rs	REGISTRY_HEAP	service-runtime	allowlist	none	explicit-service-generation-heap-owner-root
 interior-mutable	services/network/src/registry.rs	REGISTRY_PULL	service-runtime	allowlist	none	explicit-service-generation-pull-owner-root
 interior-mutable	services/network/src/registry.rs	REGISTRY_SERVICE	service-runtime	allowlist	none	explicit-service-generation-network-owner-root
+interior-mutable	kernel/src/arch/x86_64/cpu.rs	X86_RUNTIME_BACKING_CONTAINER_BACKGROUND_CURSOR	domain-runtime	allowlist	none	BSP-entry-lock-owned-round-robin-cursor
+interior-mutable	kernel/src/arch/x86_64/cpu.rs	X86_RUNTIME_BACKING_LINUX_RUNTIME_INTERRUPT_SUSPENDED	domain-runtime	allowlist	none	active-domain-interrupt-snapshot-consumed-on-suspend
+interior-mutable	kernel/src/arch/x86_64/smp.rs	LINUX_RUNTIME_QUIESCE	shared-runtime	allowlist	none	BSP-release-request-AP-acquire-safepoints-reset-after-quiescence

@@ -844,7 +844,10 @@ pub(super) fn linux_interrupt_context(handle: LinuxThreadHandle) -> Option<UserF
     })
 }
 
-pub(crate) fn expire_linux_waits_from_timer(frame: &mut UserInterruptFrame) {
+pub(crate) fn expire_linux_waits_from_timer(
+    frame: &mut UserInterruptFrame,
+    extended: Option<&mut ExtendedState>,
+) -> bool {
     if X86_RUNTIME.LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
         && !X86_RUNTIME
             .LINUX_RUNTIME_STALLED_DIAGNOSTIC_WRITTEN
@@ -936,30 +939,8 @@ pub(crate) fn expire_linux_waits_from_timer(frame: &mut UserInterruptFrame) {
     }
     let descriptor_wakes = wake_linux_descriptor_waits();
     let expired = expire_linux_waits();
-    // Detached domains keep the CPU until the operator has input. Polling at
-    // 200 Hz bounds console latency without serializing an idle runtime on
-    // every timer interrupt.
-    if X86_RUNTIME.LINUX_RUNTIME_MODE.load(Ordering::Acquire)
-        && active_container_slot().is_some_and(|slot| {
-            matches!(
-                container_state(slot),
-                control_abi::DOMAIN_STATE_BOOTING | control_abi::DOMAIN_STATE_RUNNING
-            ) && !X86_RUNTIME.CONTAINER_CONSOLE_ATTACHED[slot].load(Ordering::Acquire)
-        })
-        && X86_RUNTIME
-            .LINUX_RUNTIME_BACKGROUND_TICKS
-            .fetch_add(1, Ordering::AcqRel)
-            + 1
-            >= 5
-    {
-        X86_RUNTIME
-            .LINUX_RUNTIME_BACKGROUND_TICKS
-            .store(0, Ordering::Release);
-        if crate::serial_input_ready() {
-            X86_RUNTIME
-                .LINUX_RUNTIME_BACKGROUND_YIELD_REQUESTED
-                .store(true, Ordering::Release);
-        }
+    if suspend_background_linux_interrupt(frame, extended.as_deref()) {
+        return true;
     }
     // A Linux runtime thread can wait in a userspace spin lock without making
     // another syscall. Give a runnable sibling a bounded time slice so such a
@@ -981,26 +962,26 @@ pub(crate) fn expire_linux_waits_from_timer(frame: &mut UserInterruptFrame) {
         false
     };
     if descriptor_wakes == 0 && expired == 0 && !runtime_quantum {
-        return;
+        return false;
     }
     X86_RUNTIME
         .LINUX_TIMER_WAIT_EXPIRY_COUNT
         .fetch_add(expired, Ordering::SeqCst);
     let Some(interrupted) = frame.user_context(USER_CODE_SELECTOR, USER_DATA_SELECTOR) else {
-        return;
+        return false;
     };
     if let (Some(current), Some(target)) =
         (current_linux_thread_handle(), ready_linux_thread_handle())
     {
         let Some(target_context) = linux_interrupt_context(target) else {
-            return;
+            return false;
         };
         let mut restored = *frame;
         if !restored.restore_user_context(target_context, USER_CODE_SELECTOR, USER_DATA_SELECTOR)
             || !save_linux_interrupt_context(current, interrupted, active_fs_base())
-            || !switch_linux_thread(target)
+            || !switch_linux_thread_context(target, extended)
         {
-            return;
+            return false;
         }
         *frame = restored;
         X86_RUNTIME
@@ -1010,6 +991,7 @@ pub(crate) fn expire_linux_waits_from_timer(frame: &mut UserInterruptFrame) {
             .LINUX_TIMER_WAIT_PREEMPTION_COUNT
             .fetch_add(1, Ordering::SeqCst);
     }
+    false
 }
 
 pub(super) fn linux_executable_user_address(address: u64) -> bool {

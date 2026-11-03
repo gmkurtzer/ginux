@@ -14,6 +14,7 @@ const TRAMPOLINE_VECTOR: u8 = (TRAMPOLINE_PHYSICAL >> 12) as u8;
 const STARTUP_WAIT_LIMIT: usize = 20_000_000;
 const IPI_WAIT_LIMIT: usize = 20_000_000;
 const IPI_VECTOR: u8 = 0xf1;
+const LINUX_QUIESCE_VECTOR: u8 = 0xf2;
 const COMMAND_NONE: u8 = 0;
 const COMMAND_PING: u8 = 1;
 const COMMAND_INVALIDATE: u8 = 2;
@@ -77,6 +78,9 @@ static LINUX_RUNTIME_THREAD_ACTIVE: [AtomicBool; CPU_LIMIT] =
     [const { AtomicBool::new(false) }; CPU_LIMIT];
 static LINUX_RUNTIME_THREAD_SLOTS: [AtomicU8; CPU_LIMIT] =
     [const { AtomicU8::new(u8::MAX) }; CPU_LIMIT];
+// BSP publishes under the entry lock, workers observe at user-interrupt and
+// blocked-job safepoints. Cleared only after every old job has returned.
+static LINUX_RUNTIME_QUIESCE: AtomicBool = AtomicBool::new(false);
 pub(super) static TLB_SHOOTDOWN_ADDRESS: AtomicU64 = AtomicU64::new(0);
 pub(super) static TLB_SHOOTDOWN_ACKNOWLEDGED: AtomicU32 = AtomicU32::new(0);
 
@@ -208,18 +212,98 @@ ginux_ipi_entry:
     pop rbx
     pop rax
     iretq
+    .global ginux_linux_quiesce_entry
+ginux_linux_quiesce_entry:
+    clac
+    cld
+    push rax
+    push rbx
+    push rcx
+    push rdx
+    push rsi
+    push rdi
+    push rbp
+    push r8
+    push r9
+    push r10
+    push r11
+    push r12
+    push r13
+    push r14
+    push r15
+    // CS follows the fifteen saved GPRs and RIP. Install kernel GS before
+    // Rust resolves per-CPU ownership; ring-0 interruptions already have it.
+    test qword ptr [rsp + 128], 3
+    jz 5f
+    swapgs
+5:
+    mov r12, rsp
+    xor r13d, r13d
+    mov rax, cr4
+    test eax, 1 << 18
+    jz 2f
+    sub rsp, 1024
+    and rsp, -64
+    mov r13, rsp
+    mov rdi, rsp
+    mov ecx, 128
+    xor eax, eax
+    rep stosq
+    mov eax, 7
+    xor edx, edx
+    xsave64 [r13]
+2:
+    mov rdi, r12
+    mov rsi, r13
+    and rsp, -16
+    call {quiesce_handler}
+    movzx r14d, al
+    test r13, r13
+    jz 3f
+    mov eax, 7
+    xor edx, edx
+    xrstor64 [r13]
+3:
+    test r14, r14
+    jnz 4f
+    mov rsp, r12
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rbp
+    pop rdi
+    pop rsi
+    pop rdx
+    pop rcx
+    pop rbx
+    pop rax
+    test qword ptr [rsp + 8], 3
+    jz 6f
+    swapgs
+6:
+    iretq
+4:
+    jmp ginux_user_return_kernel
+
 "#,
     mailbox_cr3 = sym MAILBOX_CR3,
     mailbox_stack = sym MAILBOX_STACK,
     mailbox_entry = sym MAILBOX_ENTRY,
     mailbox_cpu = sym MAILBOX_CPU,
     ipi_handler = sym interprocessor_interrupt_handler,
+    quiesce_handler = sym linux_quiesce_interrupt_handler,
 );
 
 unsafe extern "C" {
     static ginux_ap_trampoline_start: u8;
     static ginux_ap_trampoline_end: u8;
     fn ginux_ipi_entry();
+    fn ginux_linux_quiesce_entry();
 }
 
 pub(crate) fn prepare_trampoline() -> bool {
@@ -240,7 +324,12 @@ pub(crate) fn start_application_processors(platform: PlatformInfo, apic: &LocalA
     if platform.enabled_processors == 0 || platform.enabled_processors > CPU_LIMIT {
         return false;
     }
-    if !cpu::install_interrupt_gate(IPI_VECTOR, ginux_ipi_entry as *const () as usize) {
+    if !cpu::install_interrupt_gate(IPI_VECTOR, ginux_ipi_entry as *const () as usize)
+        || !cpu::install_interrupt_gate(
+            LINUX_QUIESCE_VECTOR,
+            ginux_linux_quiesce_entry as *const () as usize,
+        )
+    {
         return false;
     }
     APIC_BASE.store(apic.physical_base, Ordering::Release);
@@ -312,7 +401,7 @@ pub(crate) fn begin_linux_runtime_thread(
     rflags: u64,
 ) -> bool {
     let count = online_count();
-    if count < 2 {
+    if count < 2 || linux_runtime_quiescence_requested() {
         return false;
     }
     let Some(cpu) = (1..count).find(|cpu| {
@@ -348,6 +437,67 @@ pub(crate) fn linux_runtime_thread_is_remote(slot: usize) -> bool {
         LINUX_RUNTIME_THREAD_ACTIVE[cpu].load(Ordering::Acquire)
             && usize::from(LINUX_RUNTIME_THREAD_SLOTS[cpu].load(Ordering::Acquire)) == slot
     })
+}
+
+pub(crate) fn linux_runtime_quiescence_requested() -> bool {
+    LINUX_RUNTIME_QUIESCE.load(Ordering::Acquire)
+}
+
+pub(crate) fn request_linux_runtime_quiescence() {
+    LINUX_RUNTIME_QUIESCE.store(true, Ordering::Release);
+    for target in 1..online_count() {
+        if !LINUX_RUNTIME_THREAD_ACTIVE[target].load(Ordering::Acquire) {
+            continue;
+        }
+        let Some(apic) = saved_local_apic() else {
+            crate::kernel_fail("ginux: AP quiescence has no local APIC\r\n");
+        };
+        // SAFETY: online APIC IDs are initialized at startup. This vector has
+        // no mailbox and cannot overwrite a pending dispatch command.
+        if !unsafe {
+            apic.send_fixed(
+                APIC_IDS[target].load(Ordering::Acquire),
+                LINUX_QUIESCE_VECTOR,
+            )
+        } {
+            crate::kernel_fail("ginux: AP quiescence interrupt failed\r\n");
+        }
+    }
+}
+
+pub(crate) fn wait_linux_runtime_quiescence() {
+    // Call only outside the kernel-entry lock. A timeout must fail closed;
+    // changing the shared domain bank while a worker is live is unsafe.
+    for _ in 0..IPI_WAIT_LIMIT {
+        if (1..online_count())
+            .all(|target| !LINUX_RUNTIME_THREAD_ACTIVE[target].load(Ordering::Acquire))
+        {
+            return;
+        }
+        core::hint::spin_loop();
+    }
+    crate::kernel_fail("ginux: AP quiescence timed out\r\n");
+}
+
+pub(crate) fn resume_linux_runtime_dispatch() {
+    LINUX_RUNTIME_QUIESCE.store(false, Ordering::Release);
+}
+
+extern "sysv64" fn linux_quiesce_interrupt_handler(
+    frame: *mut crate::scheduler::UserInterruptFrame,
+    extended: *const cpu::ExtendedState,
+) -> bool {
+    // SAFETY: this CPU owns its local APIC and the assembly-owned interrupt
+    // frame/XSAVE buffer remain live until the epilogue consumes the result.
+    unsafe {
+        if let Some(apic) = saved_local_apic() {
+            apic.end_of_interrupt();
+        }
+        let Some(frame) = frame.as_ref() else {
+            return false;
+        };
+        cpu::quiesce_linux_runtime_interrupt(frame, extended.as_ref())
+    }
 }
 
 pub(crate) fn linux_runtime_thread_slot() -> Option<usize> {
@@ -549,7 +699,16 @@ extern "sysv64" fn interprocessor_interrupt_handler() {
         return;
     }
     let generation = IPI_GENERATION[cpu].load(Ordering::Acquire);
-    match IPI_COMMAND[cpu].swap(COMMAND_NONE, Ordering::AcqRel) {
+    let command = IPI_COMMAND[cpu].swap(COMMAND_NONE, Ordering::AcqRel);
+    if command == COMMAND_LINUX_RUNTIME_THREAD {
+        // Long-lived userspace must not keep this priority class in-service:
+        // the separate quiescence IPI must be deliverable while the job runs.
+        if let Some(apic) = saved_local_apic() {
+            // SAFETY: acknowledge this CPU's dispatch interrupt exactly once.
+            unsafe { apic.end_of_interrupt() };
+        }
+    }
+    match command {
         COMMAND_PING => {}
         COMMAND_INVALIDATE => {
             let address = IPI_ARGUMENT[cpu].load(Ordering::Acquire);
@@ -608,8 +767,10 @@ extern "sysv64" fn interprocessor_interrupt_handler() {
         _ => {}
     }
     IPI_ACKNOWLEDGED[cpu].store(generation, Ordering::Release);
-    if let Some(apic) = saved_local_apic() {
-        unsafe { apic.end_of_interrupt() };
+    if command != COMMAND_LINUX_RUNTIME_THREAD {
+        if let Some(apic) = saved_local_apic() {
+            unsafe { apic.end_of_interrupt() };
+        }
     }
 }
 
