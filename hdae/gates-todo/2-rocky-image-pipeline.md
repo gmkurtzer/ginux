@@ -32,11 +32,14 @@ content as a domain userspace that Ginus builds and tests can consume offline.
 
 ## Completed work
 
-- [ ] None; gate not started.
+- [x] Validated the Gate 1 source manifest and XFS/GPT source layout.
+- [x] Selected a pinned, network-disabled Docker/LinuxKit extraction helper so
+  the Rocky source kernel is never booted during preparation.
+- [x] Defined the rootfs tar, deterministic content manifest, cache ownership,
+  and explicit cleanup contract.
 
 ## Remaining work
 
-- [ ] Validate the Gate 1 source manifest as the preparation input.
 - [ ] Implement reproducible preparation and domain-image tooling.
 - [ ] Document artifact ownership, cleanup, and offline operation.
 - [ ] Add corruption, missing-artifact, and repeatability tests.
@@ -81,6 +84,13 @@ content as a domain userspace that Ginus builds and tests can consume offline.
 - The Rocky source artifact is selected and verified by Gate 1; this gate
   selects only the reproducible domain-userspace preparation backend.
 - The QCOW2 is a source and cache format, not a guest-kernel execution model.
+- The backend converts QCOW2 to a temporary sparse raw disk on macOS, then uses
+  Docker Desktop's LinuxKit kernel and a pinned Rocky helper container to mount
+  the XFS root read-only. It does not boot the kernel contained in the source.
+- The sorted path/metadata/content manifest is the deterministic equivalent;
+  tar byte identity is not required across tool versions.
+- Gate 2 is temporarily stacked on accepted Gate 1 commit `d061bc1` because
+  pull request 1 remains open. Its intended eventual base is still `main`.
 
 ## Delivery strategy
 

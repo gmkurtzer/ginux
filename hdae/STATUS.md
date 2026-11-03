@@ -73,23 +73,25 @@ scope, threat model, and invariants.
 - `PTRACE_SYSEMU` is accepted only as the Gate 1 bootstrap experiment. The
   final Ginus execution/task/memory design remains a Gate 3 decision.
 - Rocky host image is pinned to official Rocky 10.2 GenericCloud build
-  10.2-20260525.0. The domain-image preparation backend, configuration syntax,
-  network backend, and performance budgets remain later-gate decisions.
+  10.2-20260525.0. Gate 2 selected a pinned, network-disabled
+  Docker/LinuxKit helper that mounts a temporary raw conversion read-only;
+  configuration syntax, network backend, and performance budgets remain
+  later-gate decisions.
 - The repository and directory still use the historical `usshim` name; rename
   is not authorized in the current planning task.
 
 ## Exact next action
 
-Create the Gate 2 branch from the accepted Gate 1 state, select and prove an
-offline QCOW2 extraction backend, then implement deterministic preparation,
-image validation, corruption checks, and `make demo-gate-2`.
+Implement and prove the selected offline QCOW2 extraction backend, then add
+image validation, corruption and repeatability checks, and `make demo-gate-2`.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 2, Rocky domain-userspace pipeline; implementation starting
+- Active gate: Gate 2, Rocky domain-userspace pipeline; preparation contract
+  selected, implementation in progress
 - Last evidence: final PID-independent Gate 1 checks and demo passed on
   2026-11-03; Gate 1 accepted
 - Required human decision: none until the Gate 2 checkpoint unless its
