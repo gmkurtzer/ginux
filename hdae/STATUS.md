@@ -11,15 +11,15 @@
   `hdae/execution-kernel`, stacked on the accepted Gate 2 state while its
   intended eventual base remains `main`, in open
   https://github.com/gmkurtzer/usshim/pull/3.
-- Gate 4 is technically passed on dedicated branch
+- Gate 4 is accepted and closed. It remains delivered on dedicated branch
   `hdae/domain-config-lifecycle`, stacked on the accepted Gate 3 state while
-  its intended eventual base remains `main`. It is delivered in
+  its intended eventual base remains `main`, in open
   https://github.com/gmkurtzer/usshim/pull/4.
 - Authoritative name: Ginus (Ginux Userspace).
 - Runtime isolation unit: domain.
 - Policy unit: versioned contract.
 - Initial gate map: twelve checkpoint gates at positions 1 through 11 and 13;
-  Gates 1 through 3 are accepted and nine gates remain open.
+  Gates 1 through 4 are accepted and eight gates remain open.
 - The ordered gate batch is authorized, but every open gate remains a human
   checkpoint requiring a working demonstration and explicit acceptance.
 
@@ -100,6 +100,7 @@ scope, threat model, and invariants.
   lifecycle, managed fixture execution, failure cleanup, signal-driven stop,
   and helper reaping. Seven domain unit tests, `make test-config`,
   `make test-domain`, `make demo-gate-4`, and aggregate `make test` passed.
+- Human accepted Gate 4 on 2026-11-03 and directed advancement to Gate 5.
 
 ## Open decisions and limitations
 
@@ -118,17 +119,17 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Stop for human review of `make demo-gate-4` and pull request 4. Do not begin
-Gate 5 before explicit acceptance.
+Resolve Gate 5's virtual-root backing decision with the human, then begin the
+approved Gate 5 implementation on `hdae/virtual-vfs-userspace`.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 4, domain configuration and lifecycle; technically passed,
-  delivered in pull request 4, human checkpoint pending
+- Active gate: Gate 5, virtual VFS and dynamic userspace; authorized, backing
+  decision pending before implementation
 - Last evidence: Gate 4 demo and complete aggregate regression suite passed on
   2026-11-03
-- Required human decision: accept or reject Gate 4 after its branch and pull
-  request are delivered
+- Required human decision: select the Gate 5 immutable-base and disposable-
+  overlay backing strategy

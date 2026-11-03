@@ -42,10 +42,12 @@ lifecycle.
   host SIGTERM handling, and child reaping.
 - [x] Added unit, Rocky/QEMU integration, aggregate regression, documentation,
   and explicit human-demonstration coverage.
+- [x] Human reviewed the Gate 4 demonstration and accepted the checkpoint on
+  2026-11-03.
 
 ## Remaining work
 
-- [ ] Human runs or reviews `make demo-gate-4` and accepts or rejects the gate.
+None.
 
 ## Acceptance criteria
 
@@ -124,11 +126,12 @@ lifecycle.
 - Actual commits: `34eb2e4` (strict TOML schema, normalization, lifecycle model,
   configuration documentation) and `ec858c4` (Ginus integration, Rocky/QEMU
   lifecycle harness, failure/signal/reaping tests, and demonstration), and
-  `1b2c37d` (verification evidence and checkpoint documentation)
+  `1b2c37d` (verification evidence and checkpoint documentation), and
+  `8a52781` (pull-request delivery record)
 
 ## Review policy and outcome
 
-Technically passed on 2026-11-03. Human checkpoint remains open because the
-effective configuration becomes the authority record for later domains.
-Present `make demo-gate-4`, fresh evidence, and the pull request before
-acceptance.
+Passed and accepted by the human on 2026-11-03 after review of the working
+demonstration. The dedicated branch remains delivered in pull request 4; that
+pull request remains open and must not be merged or closed without explicit
+authorization.
