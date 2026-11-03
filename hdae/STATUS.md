@@ -4,14 +4,13 @@
 
 - Active skill: `.agents/skills/hdae-development/SKILL.md`
 - Reload required after compaction, reset, resume, or handoff: yes
-- Active project: issue #57 Linux lazy-page quota regression
-- Branch: `hdae/issue-57-linux-lazy-page`
+- Active project: issue #62 synchronous poll budget
+- Branch: `hdae/issue-62-poll-budget`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 37, Linux lazy-page quota regression
-- Last completed action: delivered Gate 37 through PR #59 after `make check`,
-  `make test`, and `make test-alpine` passed with the 128 MiB quota intact
-- Next action: wait for a subsequent hourly pass and green GitHub checks before
-  merging PR #59 and closing issue #57
+- Active gate: Gate 40, synchronous poll budget
+- Last completed action: `make check` and `make test` passed after applying the
+  existing fixed socket-poll budget with deterministic boot evidence
+- Next action: commit, push, and open the dedicated issue #62 pull request
 
 ## Current repository state
 

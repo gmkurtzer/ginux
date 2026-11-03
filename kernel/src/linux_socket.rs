@@ -40,7 +40,7 @@ const RX_BUFFER_OFFSET: usize = 0x400;
 const TX_BUFFER_OFFSET: usize = 0xa00;
 const RX_DESCRIPTOR_LENGTH: usize = 0x5ff;
 const VIRTIO_HEADER_LENGTH: usize = 12;
-const BLOCKING_POLL_LIMIT: usize = 20_000;
+pub(crate) const BLOCKING_POLL_LIMIT: usize = 20_000;
 const PAGE_SIZE: usize = 4096;
 const LOCAL_DATA_CAPACITY: usize =
     PAGE_SIZE - core::mem::size_of::<memory::FrameLease>() - core::mem::size_of::<u32>();
