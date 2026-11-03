@@ -59,7 +59,39 @@ if rocky_ssh "sudo kill -0 '$tracee_pid'" >/dev/null 2>&1; then
     exit 1
 fi
 
+stop_pid=$(rocky_ssh "sudo sh -c 'exec /var/tmp/ginus native /var/tmp/gate5.toml \"$domain_root\" hold > /var/tmp/ginus-stop.log 2>&1 & echo \$!'")
+case "$stop_pid" in *[!0-9]*|'') printf '%s\n' 'invalid unexpected-stop supervisor PID' >&2; exit 1 ;; esac
+ready=0
+attempt=0
+while [ "$attempt" -lt 50 ]; do
+    if rocky_ssh "grep -Fqx 'GINUS_NATIVE_HOLD: READY' /var/tmp/ginus-stop.log" >/dev/null 2>&1; then
+        ready=1
+        break
+    fi
+    sleep 1
+    attempt=$((attempt + 1))
+done
+test "$ready" -eq 1
+stopped_tracee_pid=$(rocky_ssh "pgrep -P '$stop_pid' -x bash")
+case "$stopped_tracee_pid" in *[!0-9]*|'') printf '%s\n' 'invalid unexpected-stop tracee PID' >&2; exit 1 ;; esac
+rocky_ssh "sudo kill -STOP '$stopped_tracee_pid'"
+attempt=0
+while [ "$attempt" -lt 50 ]; do
+    if rocky_ssh "grep -Fqx 'GINUS_DOMAIN: failed reason=unexpected native trace stop' /var/tmp/ginus-stop.log" >/dev/null 2>&1; then
+        break
+    fi
+    sleep 0.1
+    attempt=$((attempt + 1))
+done
+grep_result=$(rocky_ssh "grep -Fxc 'GINUS_DOMAIN: failed reason=unexpected native trace stop' /var/tmp/ginus-stop.log")
+test "$grep_result" -eq 1
+if rocky_ssh "sudo kill -0 '$stopped_tracee_pid'" >/dev/null 2>&1; then
+    printf '%s\n' 'tracee survived unexpected ptrace stop' >&2
+    exit 1
+fi
+rocky_ssh "grep -Fqx 'GINUS_DOMAIN: cleanup resources=false managed-task=false' /var/tmp/ginus-stop.log"
+
 rocky_ssh "sha256sum '$domain_root/usr/bin/bash'" > build/gate5-bash-after.sha256
 cmp build/gate5-bash-before.sha256 build/gate5-bash-after.sha256
-rocky_ssh 'sudo rm -rf /var/lib/ginus/domains/gate5 /var/tmp/ginus-hold.log; rm -f /var/tmp/ginus /var/tmp/gate5.toml /var/tmp/ginus-oci-rootfs.tar'
+rocky_ssh 'sudo rm -rf /var/lib/ginus/domains/gate5 /var/tmp/ginus-hold.log /var/tmp/ginus-stop.log; rm -f /var/tmp/ginus /var/tmp/gate5.toml /var/tmp/ginus-oci-rootfs.tar'
 printf '%s\n' 'test-native-vfs: PASS'

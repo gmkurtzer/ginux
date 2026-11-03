@@ -137,6 +137,10 @@ scope, threat model, and invariants.
   classified read-only image and console passthrough, virtual identity, denied
   ioctl, blocked `O_CREAT` with no file created, blocked socket creation, and
   fail-closed supervisor loss.
+- The latest native QEMU run also passed unexpected-stop handling: after an
+  external `SIGSTOP`, Ginus killed and reaped the tracee and cleaned domain
+  state. Four VFS unit tests now include independent overlay-instance isolation
+  plus traversal, symlink-loop, invalid-descriptor, overlay, and teardown paths.
 
 ## Open decisions and limitations
 
@@ -169,8 +173,8 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Add unexpected-stop handling and remaining isolation/cleanup tests, then build
-the human-readable `make demo-gate-5` checkpoint.
+Build the human-readable `make demo-gate-5` checkpoint, run the complete Gate 5
+regression set, reconcile every criterion, then push the branch and open its PR.
 
 ## Context recovery
 

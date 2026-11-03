@@ -782,4 +782,28 @@ mod tests {
             Err(VfsError::NotFound)
         );
     }
+
+    #[test]
+    fn overlays_are_isolated_between_domain_instances() {
+        let bytes = index_bytes();
+        let mut first: VirtualFs<'_, Reader, 4, 32, 4> =
+            VirtualFs::new(Index::new(&bytes).unwrap(), Reader(*b"BASETOOL"));
+        let mut second: VirtualFs<'_, Reader, 4, 32, 4> =
+            VirtualFs::new(Index::new(&bytes).unwrap(), Reader(*b"BASETOOL"));
+
+        let first_base = first.open(b"/base", O_READ | O_WRITE).unwrap();
+        first.write(first_base, b"edit").unwrap();
+        let first_new = first.open(b"/usr/new", O_WRITE | O_CREATE).unwrap();
+        first.write(first_new, b"private").unwrap();
+
+        let second_base = second.open(b"/base", O_READ).unwrap();
+        let mut output = [0u8; 4];
+        assert_eq!(second.read(second_base, &mut output), Ok(4));
+        assert_eq!(&output, b"BASE");
+        assert_eq!(second.open(b"/usr/new", O_READ), Err(VfsError::NotFound));
+
+        first.teardown();
+        assert_eq!(first.overlay_files(), 0);
+        assert_eq!(second.overlay_files(), 0);
+    }
 }

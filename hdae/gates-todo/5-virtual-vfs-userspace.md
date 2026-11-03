@@ -72,8 +72,8 @@ Ginus-owned immutable base and domain-local writable overlay.
   sensitive interfaces cannot use native passthrough.
 - [x] Added a fail-closed supervisor-loss test and explicit audit assertions for
   emulated and denied syscalls before effect.
-- [ ] Add unexpected-stop and remaining ptrace-state tests.
-- [ ] Add isolation, traversal, overlay, malformed-file, and cleanup tests.
+- [x] Added unexpected-stop and remaining ptrace-state tests.
+- [x] Added isolation, traversal, overlay, malformed-file, and cleanup tests.
 
 ## Acceptance criteria
 
@@ -150,6 +150,11 @@ Ginus-owned immutable base and domain-local writable overlay.
   bootstrap-console passthrough, virtual PID/UID/GID/parent identity, denied
   ioctl, a denied `O_CREAT` probe with no resulting file, a denied socket probe,
   and the existing supervisor-loss check.
+- The expanded QEMU run sent `SIGSTOP` to a held tracee. Ginus treated the
+  unexpected ptrace stop as fatal, killed and reaped the tracee, reported the
+  exact failure, and released domain state. The VFS unit suite also passed a
+  two-instance overlay-isolation test alongside traversal, symlink-loop,
+  invalid-descriptor, permission, unlink, malformed-index, and teardown checks.
 
 ## Decisions and limitations
 
@@ -198,7 +203,9 @@ Ginus-owned immutable base and domain-local writable overlay.
   root architecture to OCI; `287127e` added pinned OCI acquisition and root
   preparation; `b1a320e` connected the OCI root to Ginus and QEMU verification;
   `8e5847a` added the native ptrace Rocky loader and Bash proof; `19ade45`
-  added deterministic multi-layer OCI assembly; supervisor-loss commit pending
+  added deterministic multi-layer OCI assembly; `43db983` added supervisor-loss
+  protection; `1c18c36` added the approved balanced execution profile;
+  unexpected-stop and final isolation commit pending
 
 ## Review policy and outcome
 
