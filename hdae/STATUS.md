@@ -5,9 +5,9 @@
 - Gate 1 is accepted and closed under the corrected ordinary-host-process
   architecture. It remains delivered in open
   https://github.com/gmkurtzer/usshim/pull/1 and is not merged.
-- Gate 2 is active on the dedicated `hdae/rocky-image-pipeline` branch. Until
-  Gate 1 is merged, Gate 2 is stacked on its accepted branch state while its
-  intended base remains `main`.
+- Gate 2 is technically passed on the dedicated
+  `hdae/rocky-image-pipeline` branch. Until Gate 1 is merged, Gate 2 is stacked
+  on its accepted branch state while its intended base remains `main`.
 - Authoritative name: Ginus (Ginux Userspace).
 - Runtime isolation unit: domain.
 - Policy unit: versioned contract.
@@ -67,6 +67,12 @@ scope, threat model, and invariants.
 - Final Gate 1 verification after removing Ginus numeric host-PID checks passed
   `make check`, `make test-unit`, and `make demo-gate-1`; normal host PID 1
   validation remains only in the Rocky boot harness.
+- Gate 2 `make image-prepare`, `make test-image`, `make demo-gate-2`, clean-cache
+  preservation checks, and aggregate `make test` passed. The pinned helper
+  mounted the source XFS root read-only with networking disabled; repeat
+  extraction produced manifest SHA-256
+  `49e69bc6209b9d8ed084e221924b633c3126ccaa9a2f920bb8464249a5f66721`;
+  corrupt and missing sources were rejected.
 
 ## Open decisions and limitations
 
@@ -77,22 +83,25 @@ scope, threat model, and invariants.
   Docker/LinuxKit helper that mounts a temporary raw conversion read-only;
   configuration syntax, network backend, and performance budgets remain
   later-gate decisions.
+- Gate 2 preparation requires Docker Desktop and a pinned privileged helper
+  container. It is network-disabled and mounts only a temporary raw conversion
+  read-only, but remains trusted build tooling rather than a runtime boundary.
 - The repository and directory still use the historical `usshim` name; rename
   is not authorized in the current planning task.
 
 ## Exact next action
 
-Implement and prove the selected offline QCOW2 extraction backend, then add
-image validation, corruption and repeatability checks, and `make demo-gate-2`.
+Push the Gate 2 branch, open its dedicated pull request, record the stable URL,
+and stop for human acceptance after `make demo-gate-2` review.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 2, Rocky domain-userspace pipeline; preparation contract
-  selected, implementation in progress
-- Last evidence: final PID-independent Gate 1 checks and demo passed on
-  2026-11-03; Gate 1 accepted
-- Required human decision: none until the Gate 2 checkpoint unless its
-  preparation backend requires a material architecture change
+- Active gate: Gate 2, Rocky domain-userspace pipeline; technically passed,
+  delivery and human checkpoint pending
+- Last evidence: Gate 2 demo and aggregate regression suite passed on
+  2026-11-03
+- Required human decision: accept or reject Gate 2 after reviewing the demo
+  and pull request

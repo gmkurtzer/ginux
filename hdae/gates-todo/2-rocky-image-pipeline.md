@@ -37,12 +37,16 @@ content as a domain userspace that Ginus builds and tests can consume offline.
   the Rocky source kernel is never booted during preparation.
 - [x] Defined the rootfs tar, deterministic content manifest, cache ownership,
   and explicit cleanup contract.
+- [x] Implemented pinned-helper acquisition, verified QCOW2 conversion,
+  read-only GPT/XFS extraction, atomic cache publication, and cache reuse.
+- [x] Added Rocky identity, systemd, loader, machine-identity, corruption,
+  missing-source, repeatability, offline-network, and clean-preservation checks.
+- [x] Documented artifact ownership, cleanup, offline operation, and the human
+  demonstration.
 
 ## Remaining work
 
-- [ ] Implement reproducible preparation and domain-image tooling.
-- [ ] Document artifact ownership, cleanup, and offline operation.
-- [ ] Add corruption, missing-artifact, and repeatability tests.
+- [ ] Human runs or reviews `make demo-gate-2` and accepts or rejects the gate.
 
 ## Acceptance criteria
 
@@ -77,7 +81,27 @@ content as a domain userspace that Ginus builds and tests can consume offline.
 
 ## Evidence
 
-- Not run.
+- Source inspection -> the pinned QCOW2 is GPT with the Rocky root on XFS
+  partition 4; its checksum remained
+  `9fc9e9ff16888bb68ac39b0392e25c9c92684d50c85f1cce6ab549363bbc4b48`.
+- `make image-prepare` -> converted the verified source to temporary sparse raw
+  form, mounted partition 4 read-only through the pinned helper with
+  `--network none`, and produced a 793,917,440-byte rootfs tar plus a
+  6,445,041-byte content manifest.
+- `make test-image` -> found Rocky 10.2 identity, machine-id input, x86-64
+  systemd and dynamic loader; a forced second extraction produced the identical
+  manifest SHA-256
+  `49e69bc6209b9d8ed084e221924b633c3126ccaa9a2f920bb8464249a5f66721`;
+  corrupt and missing source paths were rejected.
+- `make clean` followed by cache checks and `make image-prepare` -> retained the
+  prepared artifacts and manifest hash, removed temporary work, and reused the
+  cache without extraction or network access.
+- `make demo-gate-2` -> printed Rocky Linux 10.2 identity, source and prepared
+  paths, the stable manifest hash, corruption rejection, disabled helper
+  networking, and `GATE2: PASS`.
+- `make test` -> formatting, lint, unit tests, Gate 1 Rocky interception
+  regression, and Gate 2 offline repeatability tests all passed; the Rocky VM
+  and extraction work were cleaned up.
 
 ## Decisions and limitations
 
@@ -91,6 +115,10 @@ content as a domain userspace that Ginus builds and tests can consume offline.
   tar byte identity is not required across tool versions.
 - Gate 2 is temporarily stacked on accepted Gate 1 commit `d061bc1` because
   pull request 1 remains open. Its intended eventual base is still `main`.
+- The extraction helper requires a running Docker Desktop engine and a
+  privileged container so LinuxKit can create a read-only loop mapping. The
+  helper is pinned, receives no network, and is trusted preparation tooling;
+  it is not part of the Ginus runtime boundary.
 
 ## Delivery strategy
 
@@ -100,10 +128,13 @@ content as a domain userspace that Ginus builds and tests can consume offline.
   2026-11-03; never merge or close without explicit authorization
 - Planned commits: domain-image preparation contract; preparation tools and
   Make targets; offline, corruption, and repeatability verification
-- Actual commits: pending
+- Actual commits: `04a1faf` (preparation contract) and `f58892f` (offline
+  preparation, verification, and demo tooling); evidence/delivery checkpoint
+  commit pending
 
 ## Review policy and outcome
 
-Human checkpoint because the prepared root becomes a dependency for all later
-compatibility evidence. Present
-`make demo-gate-2`, fresh evidence, and the pull request before acceptance.
+Technically passed on 2026-11-03. Human checkpoint remains open because the
+prepared root becomes a dependency for all later compatibility evidence.
+Present `make demo-gate-2`, fresh evidence, and the pull request before
+acceptance.
