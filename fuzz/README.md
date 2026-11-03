@@ -60,7 +60,7 @@ cargo fuzz run --target x86_64-unknown-linux-gnu --sanitizer address \
 ```sh
 # 10-minute round per target: same flags, -max_total_time=600
 # Coverage (llvm-tools-preview is included in the pinned toolchain):
-cargo fuzz coverage --target x86_64-unknown-linux-gnu oci_surfaces -- \
+cargo fuzz coverage --target x86_64-unknown-linux-gnu oci_surfaces \
   corpus corpus-seed
 # -> coverage/<target>/lcov.info (genhtml for an HTML report)
 ```
