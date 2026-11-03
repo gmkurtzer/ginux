@@ -10,7 +10,9 @@ use generated_boot::{
     BOOT_MANIFEST, BOOT_MANIFEST_SHA256, BOOT_MANIFEST_SIGNATURE, CONTROLLER_RUNTIME,
     CONTROL_PLANE_BUNDLE, ROOT_IMAGE,
 };
-use ginux_kernel::{kernel_entry, BootInfo, ResetSystem, BOOT_INFO_MAGIC, BOOT_INFO_VERSION};
+use ginux_kernel::{
+    kernel_entry, rebase_loaded_image, BootInfo, ResetSystem, BOOT_INFO_MAGIC, BOOT_INFO_VERSION,
+};
 
 type EfiHandle = *mut c_void;
 type EfiStatus = usize;
@@ -18,6 +20,12 @@ type EfiStatus = usize;
 const EFI_SUCCESS: EfiStatus = 0;
 const COM1: u16 = 0x3f8;
 const MEMORY_MAP_CAPACITY: usize = 128 * 1024;
+const PAGE_SIZE: usize = 4096;
+// The kernel runs from this image and its bootstrap page tables identity-map
+// only [0, 4 GiB) (`INITIAL_IDENTITY_LIMIT`).
+const IDENTITY_LIMIT: u64 = 1 << 32;
+const ALLOCATE_MAX_ADDRESS: u32 = 1;
+const EFI_LOADER_CODE: u32 = 1;
 const ACPI_20_TABLE_GUID: EfiGuid = EfiGuid {
     data1: 0x8868_e871,
     data2: 0xe4f1,
@@ -113,6 +121,9 @@ struct EfiTime {
 type GetMemoryMap =
     unsafe extern "efiapi" fn(*mut usize, *mut u8, *mut usize, *mut usize, *mut u32) -> EfiStatus;
 
+type AllocatePages = unsafe extern "efiapi" fn(u32, u32, usize, *mut u64) -> EfiStatus;
+type EfiMain = extern "efiapi" fn(EfiHandle, *mut EfiSystemTable) -> EfiStatus;
+
 type ExitBootServices = unsafe extern "efiapi" fn(EfiHandle, usize) -> EfiStatus;
 type HandleProtocol =
     unsafe extern "efiapi" fn(EfiHandle, *const EfiGuid, *mut *mut c_void) -> EfiStatus;
@@ -187,7 +198,7 @@ struct EfiBootServices {
     header: EfiTableHeader,
     raise_tpl: usize,
     restore_tpl: usize,
-    allocate_pages: usize,
+    allocate_pages: AllocatePages,
     free_pages: usize,
     get_memory_map: GetMemoryMap,
     allocate_pool: usize,
@@ -245,11 +256,25 @@ struct EfiSystemTable {
 #[repr(C, align(16))]
 struct MemoryMapStorage([u8; MEMORY_MAP_CAPACITY]);
 
+extern "C" {
+    // Linker-defined start of the image this code is currently running from.
+    static __ImageBase: u8;
+}
+
 static mut MEMORY_MAP_STORAGE: MemoryMapStorage = MemoryMapStorage([0; MEMORY_MAP_CAPACITY]);
 
 #[no_mangle]
 extern "efiapi" fn efi_main(image: EfiHandle, system_table: *mut EfiSystemTable) -> EfiStatus {
     serial_init();
+
+    // SAFETY: UEFI supplies a valid system table and boot services are still
+    // active. Nothing in this image has been modified yet, so a relocated
+    // copy starts from a pristine state and repeats only the steps above.
+    if !system_table.is_null() {
+        if let Some(status) = unsafe { run_below_identity_limit(image, system_table) } {
+            return status;
+        }
+    }
 
     // Keep the firmware-console message as a convenience for UTM's graphical view.
     // Serial is the authoritative interface used by automated tests.
@@ -300,6 +325,50 @@ extern "efiapi" fn efi_main(image: EfiHandle, system_table: *mut EfiSystemTable)
     unsafe { kernel_entry(core::ptr::addr_of!(boot_info)) }
 }
 
+/// Firmware may load the image at its 5 GiB link base (or anywhere else) when
+/// RAM exists there, but the kernel requires its image inside the initial
+/// identity map. Copy the image below 4 GiB, reapply its base relocations,
+/// and continue in the copy. Returns `None` when no move is needed.
+unsafe fn run_below_identity_limit(
+    image: EfiHandle,
+    system_table: *mut EfiSystemTable,
+) -> Option<EfiStatus> {
+    let boot_services = (*system_table).boot_services;
+    if boot_services.is_null() {
+        return None;
+    }
+    let (image_base, image_size) = loaded_image_bounds(image, boot_services);
+    // The relocated copy still sees the firmware's original LoadedImage data.
+    if running_image_base() != image_base || image_base as u64 + image_size as u64 <= IDENTITY_LIMIT
+    {
+        return None;
+    }
+    let mut target = IDENTITY_LIMIT - 1;
+    let status = ((*boot_services).allocate_pages)(
+        ALLOCATE_MAX_ADDRESS,
+        EFI_LOADER_CODE,
+        image_size.div_ceil(PAGE_SIZE),
+        &mut target,
+    );
+    if status != EFI_SUCCESS {
+        panic!("no memory below 4 GiB for the EFI image");
+    }
+    let copy = target as *mut u8;
+    core::ptr::copy_nonoverlapping(image_base, copy, image_size);
+    let delta = target.wrapping_sub(image_base as u64);
+    if rebase_loaded_image(core::slice::from_raw_parts_mut(copy, image_size), delta).is_none() {
+        panic!("EFI image base relocations are invalid");
+    }
+    let entry = efi_main as EfiMain as usize - image_base as usize + copy as usize;
+    let entry = core::mem::transmute::<usize, EfiMain>(entry);
+    Some(entry(image, system_table))
+}
+
+fn running_image_base() -> *const u8 {
+    // Taking the address of the linker-defined symbol never reads it.
+    core::ptr::addr_of!(__ImageBase)
+}
+
 unsafe fn find_acpi_rsdp(system_table: *const EfiSystemTable) -> *const u8 {
     let table_count = (*system_table).number_of_table_entries;
     let tables = (*system_table).configuration_table;
@@ -330,7 +399,8 @@ unsafe fn exit_boot_services(
     if boot_services.is_null() || runtime_services.is_null() {
         panic!("UEFI service table is missing");
     }
-    let (image_base, image_size) = loaded_image_bounds(image, boot_services);
+    let (_, image_size) = loaded_image_bounds(image, boot_services);
+    let image_base = running_image_base();
     let unix_time = read_unix_time(runtime_services);
     let framebuffer = locate_framebuffer(boot_services);
 
