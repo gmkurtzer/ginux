@@ -3608,13 +3608,18 @@ impl LinuxProcessAddressSpaceSnapshot {
                 mapping.address != 0
                     && mapping.address.is_multiple_of(PAGE_SIZE)
                     && !(mapping.writable && mapping.executable)
-                    && (memory::frames_owned_by(
-                        memory::FrameOwner::KERNEL,
-                        core::slice::from_ref(&mapping.frame),
-                    ) || memory::frame_lease_is_runtime(mapping.frame))
+                    && linux_runtime_snapshot_mapping_frame_owned(mapping.frame)
                     && (index == 0 || self.mappings[index - 1].address < mapping.address)
             })
     }
+}
+
+fn linux_runtime_snapshot_mapping_frame_owned(frame: memory::FrameLease) -> bool {
+    memory::frame_lease_is_runtime(frame)
+        || memory::frame_owner(frame).is_some_and(|owner| {
+            owner == memory::FrameOwner::KERNEL
+                || linux_runtime_frame_policy().is_some_and(|(expected, _)| owner == expected)
+        })
 }
 
 #[derive(Clone, Copy)]
@@ -13196,15 +13201,21 @@ fn linux_mmap_clear_slot_lease(slot: usize) {
 fn linux_allocate_mmap_leases(
     pages: usize,
 ) -> Option<[memory::FrameLease; LINUX_RUNTIME_MMAP_SLOT_COUNT]> {
+    linux_allocate_mmap_leases_with_policy(pages, linux_runtime_frame_policy())
+}
+
+fn linux_allocate_mmap_leases_with_policy(
+    pages: usize,
+    policy: Option<(memory::FrameOwner, usize)>,
+) -> Option<[memory::FrameLease; LINUX_RUNTIME_MMAP_SLOT_COUNT]> {
     if !(1..=LINUX_RUNTIME_MMAP_SLOT_COUNT).contains(&pages) {
         return None;
     }
     let mut leases = [memory::FrameLease::EMPTY; LINUX_RUNTIME_MMAP_SLOT_COUNT];
     for index in 0..pages {
-        let Some([lease]) = memory::allocate_frames::<1>(memory::FrameOwner::KERNEL) else {
+        let Some([lease]) = allocate_linux_runtime_frames_with_policy::<1>(policy) else {
             if index != 0 {
-                let _ =
-                    memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &leases[..index]);
+                let _ = release_linux_runtime_frames(&leases[..index]);
             }
             return None;
         };
@@ -13234,7 +13245,7 @@ fn linux_mmap_unmap_and_release_slots(start_slot: usize, pages: usize) -> bool {
             let Some(lease) = linux_mmap_slot_lease(slot) else {
                 return false;
             };
-            if !memory::frame_leases_releasable(memory::FrameOwner::KERNEL, &[lease])
+            if !linux_runtime_frames_releasable(&[lease])
                 || !address_space::current_linux_mapping_matches(
                     address,
                     lease,
@@ -13258,7 +13269,8 @@ fn linux_mmap_unmap_and_release_slots(start_slot: usize, pages: usize) -> bool {
         }
         if !crate::linux_file_cache::contains(lease)
             && (!address_space::prepare_linux_frame(lease.address(), &[])
-                || !memory::release_frames(memory::FrameOwner::KERNEL, [lease]))
+                || !memory::frame_owner(lease)
+                    .is_some_and(|owner| memory::release_frames(owner, [lease])))
         {
             return false;
         }
@@ -14790,12 +14802,68 @@ fn release_linux_runtime_page(page: address_space::LinuxRuntimePage) -> bool {
     page.shared || page.frame.is_none_or(release_linux_runtime_frame)
 }
 
+fn linux_runtime_frame_policy() -> Option<(memory::FrameOwner, usize)> {
+    current_container_slot().and_then(domain::container_domain_frame_policy)
+}
+
+fn allocate_linux_runtime_frames<const N: usize>() -> Option<[memory::FrameLease; N]> {
+    allocate_linux_runtime_frames_with_policy(linux_runtime_frame_policy())
+}
+
+fn allocate_linux_runtime_frames_with_policy<const N: usize>(
+    policy: Option<(memory::FrameOwner, usize)>,
+) -> Option<[memory::FrameLease; N]> {
+    policy.map_or_else(
+        || memory::allocate_frames::<N>(memory::FrameOwner::KERNEL),
+        |(owner, limit)| memory::allocate_frames_with_owner_limit::<N>(owner, limit),
+    )
+}
+
+pub(crate) fn verify_linux_mmap_frame_quota() -> bool {
+    let Some(owner) = memory::FrameOwner::domain(0x0000_ffff_fffe_0001) else {
+        return false;
+    };
+    let policy = Some((owner, 2));
+    let exhausted_atomically = linux_allocate_mmap_leases_with_policy(3, policy).is_none()
+        && memory::owner_live_frame_count(owner) == Some(0);
+    let Some(frames) = linux_allocate_mmap_leases_with_policy(2, policy) else {
+        return false;
+    };
+    let limit_enforced = allocate_linux_runtime_frames_with_policy::<1>(policy).is_none();
+    exhausted_atomically
+        && limit_enforced
+        && release_linux_runtime_frames(&frames[..2])
+        && memory::owner_live_frame_count(owner) == Some(0)
+}
+
+fn allocate_linux_runtime_frame_prefix<const N: usize>(
+    count: usize,
+) -> Option<[memory::FrameLease; N]> {
+    linux_runtime_frame_policy().map_or_else(
+        || memory::allocate_frame_prefix::<N>(memory::FrameOwner::KERNEL, count),
+        |(owner, limit)| memory::allocate_frame_prefix_with_owner_limit::<N>(owner, limit, count),
+    )
+}
+
 fn release_linux_runtime_frame(frame: memory::FrameLease) -> bool {
     crate::linux_file_cache::contains(frame)
-        || memory::scrub_and_release_frames(
-            memory::FrameOwner::KERNEL,
-            core::slice::from_ref(&frame),
-        )
+        || memory::frame_owner(frame).is_some_and(|owner| {
+            memory::scrub_and_release_frames(owner, core::slice::from_ref(&frame))
+        })
+}
+
+fn release_linux_runtime_frames(frames: &[memory::FrameLease]) -> bool {
+    let Some(owner) = frames.first().and_then(|frame| memory::frame_owner(*frame)) else {
+        return false;
+    };
+    memory::scrub_and_release_frames(owner, frames)
+}
+
+fn linux_runtime_frames_releasable(frames: &[memory::FrameLease]) -> bool {
+    let Some(owner) = frames.first().and_then(|frame| memory::frame_owner(*frame)) else {
+        return false;
+    };
+    memory::frame_leases_releasable(owner, frames)
 }
 
 fn rollback_linux_runtime_mapping(address: u64, pages: usize) -> bool {
@@ -21047,8 +21115,7 @@ fn linux_runtime_mprotect(address: u64, length: u64, protection: u64) -> u64 {
             else {
                 continue;
             };
-            let Some([replacement]) = memory::allocate_frames::<1>(memory::FrameOwner::KERNEL)
-            else {
+            let Some([replacement]) = allocate_linux_runtime_frames::<1>() else {
                 return LINUX_ENOMEM;
             };
             if !address_space::copy_linux_frame(source, replacement)
@@ -21058,8 +21125,7 @@ fn linux_runtime_mprotect(address: u64, length: u64, protection: u64) -> u64 {
                     protection as u8,
                 ) != Some(source)
             {
-                let _ =
-                    memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[replacement]);
+                let _ = release_linux_runtime_frame(replacement);
                 return LINUX_ENOMEM;
             }
         }
@@ -21553,8 +21619,7 @@ fn linux_mprotect_mmap(address: u64, length: u64, protection: u64) -> u64 {
         };
         for lease in &leases[..pages] {
             if !address_space::prepare_linux_frame(lease.address(), &[]) {
-                let _ =
-                    memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &leases[..pages]);
+                let _ = release_linux_runtime_frames(&leases[..pages]);
                 return LINUX_ENOMEM;
             }
         }
@@ -21563,7 +21628,7 @@ fn linux_mprotect_mmap(address: u64, length: u64, protection: u64) -> u64 {
             &leases[..pages],
             protection & LINUX_PROT_WRITE != 0,
         ) {
-            let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &leases[..pages]);
+            let _ = release_linux_runtime_frames(&leases[..pages]);
             return LINUX_ENOMEM;
         }
         for (offset, lease) in leases[..pages].iter().copied().enumerate() {
@@ -21740,11 +21805,7 @@ fn linux_mmap(address: u64, length: u64, protection: u64, flags: u64, fd: u64, o
                     return LINUX_ENOMEM;
                 }
             }
-            if released_count != 0
-                && !memory::frame_leases_releasable(
-                    memory::FrameOwner::KERNEL,
-                    &released[..released_count],
-                )
+            if released_count != 0 && !linux_runtime_frames_releasable(&released[..released_count])
                 || !address_space::reserve_current_linux_pages(
                     mapping,
                     &old_leases[..usize::from(pages)],
@@ -21759,12 +21820,7 @@ fn linux_mmap(address: u64, length: u64, protection: u64, flags: u64, fd: u64, o
                 slots[slot] = Some((0, 0));
             }
             linux_mmap_rebuild_areas(slots);
-            if released_count != 0
-                && !memory::scrub_and_release_frames(
-                    memory::FrameOwner::KERNEL,
-                    &released[..released_count],
-                )
-            {
+            if released_count != 0 && !release_linux_runtime_frames(&released[..released_count]) {
                 return LINUX_ENOMEM;
             }
             return mapping;
@@ -21784,10 +21840,7 @@ fn linux_mmap(address: u64, length: u64, protection: u64, flags: u64, fd: u64, o
             &file[page_start..page_start.saturating_add(PAGE_SIZE).min(file.len())]
         });
         if !address_space::prepare_linux_frame(leases[offset].address(), bytes) {
-            let _ = memory::scrub_and_release_frames(
-                memory::FrameOwner::KERNEL,
-                &leases[..usize::from(pages)],
-            );
+            let _ = release_linux_runtime_frames(&leases[..usize::from(pages)]);
             return LINUX_ENOMEM;
         }
     }
@@ -21809,18 +21862,12 @@ fn linux_mmap(address: u64, length: u64, protection: u64, flags: u64, fd: u64, o
                                 mapping + (offset * PAGE_SIZE) as u64,
                             )
                         {
-                            let _ = memory::scrub_and_release_frames(
-                                memory::FrameOwner::KERNEL,
-                                &leases[..usize::from(pages)],
-                            );
+                            let _ = release_linux_runtime_frames(&leases[..usize::from(pages)]);
                             return LINUX_ENOMEM;
                         }
                     } else {
                         let Some(lease) = linux_mmap_slot_lease(slot) else {
-                            let _ = memory::scrub_and_release_frames(
-                                memory::FrameOwner::KERNEL,
-                                &leases[..usize::from(pages)],
-                            );
+                            let _ = release_linux_runtime_frames(&leases[..usize::from(pages)]);
                             return LINUX_ENOMEM;
                         };
                         old_leases[offset] = Some(lease);
@@ -21833,20 +21880,13 @@ fn linux_mmap(address: u64, length: u64, protection: u64, flags: u64, fd: u64, o
                     if linux_mmap_slot_frame(slot) != 0
                         || X86_RUNTIME.ELF_PROBE_MMAP_GENERATIONS[slot].load(Ordering::SeqCst) != 0
                     {
-                        let _ = memory::scrub_and_release_frames(
-                            memory::FrameOwner::KERNEL,
-                            &leases[..usize::from(pages)],
-                        );
+                        let _ = release_linux_runtime_frames(&leases[..usize::from(pages)]);
                         return LINUX_ENOMEM;
                     }
                 }
             }
         }
-        if released_count != 0
-            && !memory::frame_leases_releasable(
-                memory::FrameOwner::KERNEL,
-                &released[..released_count],
-            )
+        if released_count != 0 && !linux_runtime_frames_releasable(&released[..released_count])
             || !address_space::replace_current_linux_pages(
                 mapping,
                 &old_leases[..usize::from(pages)],
@@ -21855,10 +21895,7 @@ fn linux_mmap(address: u64, length: u64, protection: u64, flags: u64, fd: u64, o
                 protection & LINUX_PROT_WRITE != 0,
             )
         {
-            let _ = memory::scrub_and_release_frames(
-                memory::FrameOwner::KERNEL,
-                &leases[..usize::from(pages)],
-            );
+            let _ = release_linux_runtime_frames(&leases[..usize::from(pages)]);
             return LINUX_ENOMEM;
         }
         for (offset, lease) in leases[..usize::from(pages)].iter().copied().enumerate() {
@@ -21867,12 +21904,7 @@ fn linux_mmap(address: u64, length: u64, protection: u64, flags: u64, fd: u64, o
             slots[slot] = Some((protection as u8, 0));
         }
         linux_mmap_rebuild_areas(slots);
-        if released_count != 0
-            && !memory::scrub_and_release_frames(
-                memory::FrameOwner::KERNEL,
-                &released[..released_count],
-            )
-        {
+        if released_count != 0 && !release_linux_runtime_frames(&released[..released_count]) {
             return LINUX_ENOMEM;
         }
         return mapping;
@@ -21897,10 +21929,7 @@ fn linux_mmap(address: u64, length: u64, protection: u64, flags: u64, fd: u64, o
                     lease.address(),
                 );
             }
-            let _ = memory::scrub_and_release_frames(
-                memory::FrameOwner::KERNEL,
-                &leases[..usize::from(pages)],
-            );
+            let _ = release_linux_runtime_frames(&leases[..usize::from(pages)]);
             return LINUX_ENOMEM;
         }
         mapped += 1;
@@ -22051,16 +22080,16 @@ fn linux_mmap_fixed_file(
     else {
         return LINUX_EINVAL;
     };
-    let Some([lease]) = memory::allocate_frames::<1>(memory::FrameOwner::KERNEL) else {
+    let Some([lease]) = allocate_linux_runtime_frames::<1>() else {
         return LINUX_ENOMEM;
     };
     let frame = lease.address();
     if mapping_state.load(Ordering::SeqCst) & bit != 0 {
-        let _ = memory::release_frames(memory::FrameOwner::KERNEL, [lease]);
+        let _ = release_linux_runtime_frame(lease);
         return LINUX_EEXIST;
     }
     if !address_space::prepare_linux_frame(frame, &file[start..end]) {
-        let _ = memory::release_frames(memory::FrameOwner::KERNEL, [lease]);
+        let _ = release_linux_runtime_frame(lease);
         return LINUX_ENOMEM;
     }
     let writable = protection & LINUX_PROT_WRITE != 0;
@@ -22068,7 +22097,7 @@ fn linux_mmap_fixed_file(
     if !address_space::map_current_linux_file_page(address, frame, writable, executable) {
         let scrubbed = address_space::prepare_linux_frame(frame, &[]);
         if scrubbed {
-            let _ = memory::release_frames(memory::FrameOwner::KERNEL, [lease]);
+            let _ = release_linux_runtime_frame(lease);
         }
         return LINUX_EEXIST;
     }
@@ -22076,7 +22105,7 @@ fn linux_mmap_fixed_file(
         let unmapped = address_space::unmap_current_linux_page(address, frame);
         let scrubbed = unmapped && address_space::prepare_linux_frame(frame, &[]);
         if scrubbed {
-            let _ = memory::release_frames(memory::FrameOwner::KERNEL, [lease]);
+            let _ = release_linux_runtime_frame(lease);
         }
         return LINUX_ENOMEM;
     }
@@ -23216,7 +23245,8 @@ fn release_linux_exec_frames(
             let frame_scrubbed = address_space::prepare_linux_frame(frame.address(), &[]);
             scrubbed &= frame_scrubbed;
             if frame_scrubbed {
-                let frame_released = memory::release_frames(memory::FrameOwner::KERNEL, [frame]);
+                let frame_released = memory::frame_owner(frame)
+                    .is_some_and(|owner| memory::release_frames(owner, [frame]));
                 released &= frame_released;
                 if frame_released {
                     *slot = None;
@@ -23576,10 +23606,9 @@ fn linux_rootfs_execve_source(
         serial_write("\r\n");
         return LINUX_ENOEXEC;
     };
-    let Some(replacements) = memory::allocate_frame_prefix::<LINUX_ACTIVE_IMAGE_MAPPING_LIMIT>(
-        memory::FrameOwner::KERNEL,
-        replacement_count,
-    ) else {
+    let Some(replacements) =
+        allocate_linux_runtime_frame_prefix::<LINUX_ACTIVE_IMAGE_MAPPING_LIMIT>(replacement_count)
+    else {
         serial_write("ginux: Linux exec frame allocation failed count: ");
         serial_write_u64(replacement_count as u64);
         serial_write("\r\n");
@@ -23607,8 +23636,7 @@ fn linux_rootfs_execve_source(
             let replacement = replacements[replacement_index];
             replacement_index += 1;
             if !address_space::materialize_linux_exec_frame(replacement, segment, page) {
-                let _ =
-                    memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[replacement]);
+                let _ = release_linux_runtime_frame(replacement);
                 return LINUX_ENOEXEC;
             }
             let protection = if segment.executable {
@@ -23707,11 +23735,8 @@ fn linux_rootfs_execve_source(
                         linux_process::live_mapping_referenced_by_other_process(pid, mapping.frame)
                     };
                 if !referenced
-                    && memory::frame_leases_releasable(memory::FrameOwner::KERNEL, &[mapping.frame])
-                    && !memory::scrub_and_release_frames(
-                        memory::FrameOwner::KERNEL,
-                        &[mapping.frame],
-                    )
+                    && linux_runtime_frames_releasable(&[mapping.frame])
+                    && !release_linux_runtime_frame(mapping.frame)
                 {
                     return LINUX_ENOMEM;
                 }
@@ -23725,7 +23750,7 @@ fn linux_rootfs_execve_source(
         let Some(mapping) = linux_process::live_process_mapping(pid, address) else {
             return false;
         };
-        let Some([replacement]) = memory::allocate_frames::<1>(memory::FrameOwner::KERNEL) else {
+        let Some([replacement]) = allocate_linux_runtime_frames::<1>() else {
             return false;
         };
         let installed = address_space::prepare_linux_frame(replacement.address(), &[])
@@ -23746,7 +23771,7 @@ fn linux_rootfs_execve_source(
                 false,
             );
         if !installed {
-            let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[replacement]);
+            let _ = release_linux_runtime_frame(replacement);
         }
         installed
     };
@@ -24237,7 +24262,7 @@ fn linux_execve_at(
     let mut mapping_index = 0;
     for segment in segments.into_iter().flatten() {
         for page in 0..segment.page_count {
-            let Some([frame]) = memory::allocate_frames::<1>(memory::FrameOwner::KERNEL) else {
+            let Some([frame]) = allocate_linux_runtime_frames::<1>() else {
                 let _ = release_linux_exec_frames(&mut exec_frames);
                 return LINUX_ENOMEM;
             };
@@ -24254,7 +24279,7 @@ fn linux_execve_at(
         return LINUX_ENOEXEC;
     }
     {
-        let Some([frame]) = memory::allocate_frames::<1>(memory::FrameOwner::KERNEL) else {
+        let Some([frame]) = allocate_linux_runtime_frames::<1>() else {
             let _ = release_linux_exec_frames(&mut exec_frames);
             return LINUX_ENOMEM;
         };
@@ -24269,7 +24294,7 @@ fn linux_execve_at(
         }
     }
     if interpreted {
-        let Some([frame]) = memory::allocate_frames::<1>(memory::FrameOwner::KERNEL) else {
+        let Some([frame]) = allocate_linux_runtime_frames::<1>() else {
             let _ = release_linux_exec_frames(&mut exec_frames);
             return LINUX_ENOMEM;
         };
@@ -24280,7 +24305,7 @@ fn linux_execve_at(
         }
     }
     if let Some((_, thread_pointers)) = interpreted_tls {
-        let Some(frames) = memory::allocate_frames::<2>(memory::FrameOwner::KERNEL) else {
+        let Some(frames) = allocate_linux_runtime_frames::<2>() else {
             let _ = release_linux_exec_frames(&mut exec_frames);
             return LINUX_ENOMEM;
         };
@@ -24298,7 +24323,7 @@ fn linux_execve_at(
         }
     }
     {
-        let Some([frame]) = memory::allocate_frames::<1>(memory::FrameOwner::KERNEL) else {
+        let Some([frame]) = allocate_linux_runtime_frames::<1>() else {
             let _ = release_linux_exec_frames(&mut exec_frames);
             return LINUX_ENOMEM;
         };
@@ -36551,6 +36576,7 @@ fn verify_linux_running_child_wait_selectors(pid: u32) -> bool {
         serial_write("ginux: Linux process-group wait selectors validated\r\n");
         serial_write("ginux: Linux nonblocking pidfd wait validated\r\n");
         serial_write("ginux: Linux cross-process memory transfer validated\r\n");
+        serial_write("ginux: secret process memory excluded from remote copy\r\n");
         serial_write("ginux: Linux cross-process resource comparison validated\r\n");
         serial_write("ginux: Linux shared open-file position validated\r\n");
         serial_write("ginux: Linux cross-process pidfd descriptor duplication validated\r\n");
@@ -36715,9 +36741,49 @@ fn verify_linux_cross_process_vm(pid: u32) -> bool {
                 && linux_process_vm_iov(u64::from(pid), mapping + 32, 1, mapping + 16, 1, 0, false)
                     == LINUX_EFAULT
         };
+    let mut secret_excluded = false;
+    if errors {
+        remote[..8].copy_from_slice(&target.to_ne_bytes());
+        remote[8..].copy_from_slice(&(LENGTH as u64).to_ne_bytes());
+        let mut before = [0_u8; LENGTH];
+        if let Some(root) = linux_process::live_process_root(pid) {
+            let prepared = copy_to_linux_user(mapping + 16, &remote)
+                && linux_process::copy_from_live_process(pid, target, &mut before);
+            let marked =
+                prepared && address_space::set_linux_mapping_secret_in_root(root, target, true);
+            if marked {
+                let read_denied = linux_process_vm_iov(
+                    u64::from(pid),
+                    mapping + 32,
+                    1,
+                    mapping + 16,
+                    1,
+                    0,
+                    false,
+                ) == LINUX_EFAULT;
+                let write_denied =
+                    linux_process_vm_iov(u64::from(pid), mapping, 1, mapping + 16, 1, 0, true)
+                        == LINUX_EFAULT;
+                let helpers_denied =
+                    !linux_process::live_process_range_mapped(pid, target, LENGTH, false)
+                        && !linux_process::live_process_range_mapped(pid, target, LENGTH, true)
+                        && !linux_process::copy_from_live_process(pid, target, &mut [0_u8; LENGTH])
+                        && !linux_process::copy_to_live_process(pid, target, &pattern);
+                let cleared = address_space::set_linux_mapping_secret_in_root(root, target, false);
+                let mut after = [0_u8; LENGTH];
+                secret_excluded = read_denied
+                    && write_denied
+                    && helpers_denied
+                    && cleared
+                    && linux_process::copy_from_live_process(pid, target, &mut after)
+                    && after == before;
+            }
+        }
+    }
     let restored = linux_process::copy_to_live_process(pid, target, &original);
     let workspace_restored = copy_to_linux_user(mapping, &workspace);
-    let valid = partial && permission && errors && restored && workspace_restored;
+    let valid =
+        partial && permission && errors && secret_excluded && restored && workspace_restored;
     if !valid {
         serial_write("ginux: Linux cross-process memory validation failed:");
         for value in [
@@ -36728,6 +36794,7 @@ fn verify_linux_cross_process_vm(pid: u32) -> bool {
             partial,
             permission,
             errors,
+            secret_excluded,
             restored,
             workspace_restored,
         ] {
@@ -38206,7 +38273,7 @@ fn materialize_linux_runtime_user_range(address: u64, length: usize, writable: b
             if linux_runtime_primary_stack_contains(page_address) {
                 record_linux_primary_stack_growth(page_address);
             }
-            let Some([frame]) = memory::allocate_frames::<1>(memory::FrameOwner::KERNEL) else {
+            let Some([frame]) = allocate_linux_runtime_frames::<1>() else {
                 return false;
             };
             if !address_space::prepare_linux_frame(frame.address(), &[])
@@ -38217,7 +38284,7 @@ fn materialize_linux_runtime_user_range(address: u64, length: usize, writable: b
                     false,
                 )
             {
-                let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[frame]);
+                let _ = release_linux_runtime_frame(frame);
                 return false;
             }
         } else {
@@ -38252,7 +38319,7 @@ fn materialize_linux_primary_stack_page(page_address: u64) -> bool {
     {
         return false;
     }
-    let Some([frame]) = memory::allocate_frames::<1>(memory::FrameOwner::KERNEL) else {
+    let Some([frame]) = allocate_linux_runtime_frames::<1>() else {
         return false;
     };
     if !address_space::prepare_linux_frame(frame.address(), &[])
@@ -38264,7 +38331,7 @@ fn materialize_linux_primary_stack_page(page_address: u64) -> bool {
             reserved.occupied,
         ) != Some(None)
     {
-        let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[frame]);
+        let _ = release_linux_runtime_frame(frame);
         return false;
     }
     record_linux_primary_stack_growth(page_address);
@@ -39079,6 +39146,10 @@ fn dispatch_charged_call(
         ginux_native_abi::NATIVE_NETWORK_INVENTORY_OPERATION => {
             network_inventory_call(caller_domain, capability, frame)
         }
+        // The frequency is the one the Linux clock profile already trusts; it
+        // grants no authority, so no capability is required.
+        ginux_native_abi::NATIVE_TIMESTAMP_FREQUENCY_OPERATION => timer::monotonic_frequency()
+            .unwrap_or(ginux_native_abi::NATIVE_TIMESTAMP_FREQUENCY_UNAVAILABLE),
         control_abi::PACKET_PUBLISH_OPERATION => {
             packet_publish_call(caller_domain, capability, frame)
         }
@@ -42329,7 +42400,7 @@ fn grow_linux_runtime_stack(fault: domain::FaultMetadata) -> bool {
     {
         return false;
     }
-    let Some([frame]) = memory::allocate_frames::<1>(memory::FrameOwner::KERNEL) else {
+    let Some([frame]) = allocate_linux_runtime_frames::<1>() else {
         return false;
     };
     if !address_space::prepare_linux_frame(frame.address(), &[])
@@ -42341,7 +42412,7 @@ fn grow_linux_runtime_stack(fault: domain::FaultMetadata) -> bool {
             reserved.occupied,
         ) != Some(None)
     {
-        let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[frame]);
+        let _ = release_linux_runtime_frame(frame);
         return false;
     }
     X86_RUNTIME
@@ -42413,7 +42484,7 @@ fn materialize_linux_cow_address(address: u64) -> bool {
     else {
         return false;
     };
-    let Some([replacement]) = memory::allocate_frames::<1>(memory::FrameOwner::KERNEL) else {
+    let Some([replacement]) = allocate_linux_runtime_frames::<1>() else {
         return false;
     };
     let copied = address_space::copy_linux_frame(source, replacement);
@@ -42444,12 +42515,12 @@ fn materialize_linux_cow_address(address: u64) -> bool {
                 mapping.executable,
             );
         }
-        let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[replacement]);
+        let _ = release_linux_runtime_frame(replacement);
         return false;
     }
     if !linux_process::live_mapping_referenced_by_other_process(pid, source)
         && !memory::frame_lease_is_runtime(source)
-        && !memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[source])
+        && !release_linux_runtime_frame(source)
     {
         return false;
     }
@@ -42477,7 +42548,7 @@ fn materialize_linux_runtime_mapping(fault: domain::FaultMetadata) -> bool {
     {
         return false;
     }
-    let Some([frame]) = memory::allocate_frames::<1>(memory::FrameOwner::KERNEL) else {
+    let Some([frame]) = allocate_linux_runtime_frames::<1>() else {
         return false;
     };
     if !address_space::prepare_linux_frame(frame.address(), &[])
@@ -42488,7 +42559,7 @@ fn materialize_linux_runtime_mapping(fault: domain::FaultMetadata) -> bool {
             false,
         )
     {
-        let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[frame]);
+        let _ = release_linux_runtime_frame(frame);
         return false;
     }
     true

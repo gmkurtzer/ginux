@@ -4,30 +4,57 @@
 
 - Active skill: `.agents/skills/hdae-development/SKILL.md`
 - Reload required after compaction, reset, resume, or handoff: yes
-- Active project: issue #16 pinned top-level manifest digest
-- Branch: `hdae/issue-16-manifest-digest`
+- Active project: issue #57 Linux lazy-page quota regression
+- Branch: `hdae/issue-57-linux-lazy-page`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 33, pinned top-level manifest digest
-- Last completed action: reconciled merged PR #40, regenerated the combined
-  network service, and passed fresh `make check` and `make test`
-- Next action: push the conflict-free PR #42 head and verify final CI
+- Active gate: Gate 37, Linux lazy-page quota regression
+- Last completed action: delivered Gate 37 through PR #59 after `make check`,
+  `make test`, and `make test-alpine` passed with the 128 MiB quota intact
+- Next action: wait for a subsequent hourly pass and green GitHub checks before
+  merging PR #59 and closing issue #57
 
 ## Current repository state
 
-Remote `main` is at `e8b42d85` after merged PR #40. The first
+Remote `main` is at `82df3d71` after merged PR #46. The first
 eleven feedback-hardening gates and inserted correctness gates are complete.
 Gate 12 is complete on `codex/performance-parity`. Gates 13 through 19 and 21
-through 23 and Gate 32 remain in `gates-todo/` for maintainer review after
-delivery through merged pull requests. Gate 33 is active on this branch.
+through 23 and Gates 32 through 33 remain in `gates-todo/` for maintainer
+review after delivery through merged pull requests. Gate 34 was delivered
+through merged PR #44 and issue #17 is closed; Gate 35 was delivered through
+merged PR #45 and issue #18 is closed; Gate 36 was delivered through merged PR
+#46 and issue #19 is closed. Gate 37 is active for the confirmed issue #57
+regression.
 The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
 matrix and repeated stress pass. Gate 11's comparison and reduced evidence are
-under `docs/feedback-hardening/`. No push or merge was performed.
+under `docs/feedback-hardening/`. No direct push to `main` was performed.
 
 ## Open decisions
 
-- None. The user explicitly selected issue #16 as the next remediation.
+- None. The architecture defines a domain as the unit of private payload memory
+  ownership and accounting; Gate 37 must preserve that invariant. The
+  user delegated issues #17, #18, #19, #20, #22, #24, #25, #27, #28, and #29
+  as one automatic batch with final review after all PRs.
 
 ## Active diagnosis
+
+- Root cause: Gate 36 correctly allocated private payload frames to the domain,
+  but several leaf lookup, fork/exec, RELRO, and cleanup paths still assumed
+  every payload frame was kernel-owned. Allocation succeeded, then validation
+  treated the live domain-owned frame as absent.
+- Wayland is not involved. PR #56's clock change does not resolve the failure.
+- Payload leaves now accept exact live leases owned by the domain or kernel,
+  plus immutable runtime extents; hierarchy frames remain kernel-only.
+- `make check`, `make test`, and `make test-alpine` pass. Alpine completes its
+  shell, restart, and failure-containment probes under the 128 MiB budget.
+
+- Configurable allocator owner limits stop exactly at the container budget,
+  preserve independent owner capacity, and restore capacity after release.
+- Linux private mmap, exec, stack, copy-on-write, process, tmpfs, and SysV
+  frames use the generation-safe container owner; shared immutable file-cache
+  and page-table hierarchy frames remain kernel-owned by design.
+- `make check` passes with the unsafe inventory unchanged at 1,033 blocks.
+  `make test` passes the full two-vCPU QEMU and Linux runtime suite, including
+  atomic mmap-style and independent SysV quota-exhaustion markers.
 
 - Four-vCPU runtime work now dispatches independently to CPUs 1 through 3.
   A targeted nine-sample four-thread run produced a 2,924 events/s median,
