@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "crates/baseline-init",
+    "crates/baseline-runner",
     "crates/ginus-core",
     "crates/ginus-init",
     "crates/managed-payload",

@@ -2,7 +2,7 @@
 set -eu
 
 missing=0
-for command in cargo rustc rustup qemu-system-x86_64 cpio gzip shasum perl; do
+for command in cargo rustc rustup qemu-system-x86_64 qemu-img ssh scp ssh-keygen hdiutil shasum; do
     if command -v "$command" >/dev/null 2>&1; then
         printf 'doctor: %-24s ok\n' "$command"
     else
@@ -23,11 +23,11 @@ case "$(uname -s)-$(uname -m)" in
     *) printf 'doctor: reference host          unsupported (%s-%s)\n' "$(uname -s)" "$(uname -m)" >&2; missing=1 ;;
 esac
 
-kernel=build/cache/vmlinuz-virt-3.24.3
-if [ -f "$kernel" ]; then
-    printf '%s\n' 'doctor: cached test kernel     ok'
+image=build/cache/rocky/Rocky-10-GenericCloud-Base-10.2-20260525.0.x86_64.qcow2
+if [ -f "$image" ]; then
+    printf '%s\n' 'doctor: cached Rocky host      present'
 else
-    printf '%s\n' 'doctor: cached test kernel     absent (run make fetch-test-assets)'
+    printf '%s\n' 'doctor: cached Rocky host      absent (run make host-image-fetch)'
 fi
 
 [ "$missing" -eq 0 ]

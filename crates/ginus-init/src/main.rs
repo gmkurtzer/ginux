@@ -17,12 +17,12 @@ global_asm!(
 );
 
 const SYS_WRITE_HOST: usize = 1;
+const SYS_GETPID_HOST: usize = 39;
 const SYS_FORK: usize = 57;
 const SYS_EXECVE: usize = 59;
 const SYS_EXIT_HOST: usize = 60;
 const SYS_WAIT4: usize = 61;
 const SYS_PTRACE: usize = 101;
-const SYS_REBOOT: usize = 169;
 
 const PTRACE_TRACEME: usize = 0;
 const PTRACE_PEEKDATA: usize = 2;
@@ -95,7 +95,10 @@ unsafe extern "C" fn memcpy(
 
 #[no_mangle]
 extern "C" fn rust_main() -> ! {
-    line(b"GINUS: booted as PID 1 in QEMU TCG x86_64");
+    if unsafe { syscall0(SYS_GETPID_HOST) } == 1 {
+        fail(b"refusing to run as host PID 1");
+    }
+    line(b"GINUS: host-process pid1=no");
     line(b"GINUS: interception platform=ptrace-sysemu");
 
     let child = unsafe { syscall0(SYS_FORK) };
@@ -118,7 +121,7 @@ fn tracee() -> ! {
         }
     }
 
-    static PATH: &[u8] = b"/managed-payload\0";
+    static PATH: &[u8] = b"/var/tmp/ginus-managed-payload\0";
     let argv = [PATH.as_ptr(), core::ptr::null()];
     let envp: [*const u8; 1] = [core::ptr::null()];
     unsafe {
@@ -206,7 +209,7 @@ fn supervise(pid: usize) -> ! {
                 if success {
                     line(b"GINUS: direct-host-syscall bypass=not-observed");
                     line(b"GATE1: PASS");
-                    shutdown();
+                    exit_process(0);
                 }
                 fail(b"payload reported failure");
             }
@@ -272,22 +275,11 @@ fn write_all(bytes: &[u8]) {
 fn fail(reason: &[u8]) -> ! {
     write_all(b"GATE1: FAIL: ");
     line(reason);
-    shutdown()
+    exit_process(1)
 }
 
-fn shutdown() -> ! {
-    const LINUX_REBOOT_MAGIC1: usize = 0xfee1dead;
-    const LINUX_REBOOT_MAGIC2: usize = 0x28121969;
-    const LINUX_REBOOT_CMD_RESTART: usize = 0x01234567;
-    unsafe {
-        syscall4(
-            SYS_REBOOT,
-            LINUX_REBOOT_MAGIC1,
-            LINUX_REBOOT_MAGIC2,
-            LINUX_REBOOT_CMD_RESTART,
-            0,
-        );
-    }
+fn exit_process(code: usize) -> ! {
+    unsafe { syscall1(SYS_EXIT_HOST, code) };
     loop {
         core::hint::spin_loop();
     }

@@ -1,9 +1,14 @@
 #!/bin/sh
 set -eu
 
+./scripts/stop-rocky-host.sh
+
 rm -rf \
-    build/initramfs-root \
-    build/ginus-initramfs.cpio.gz \
+    build/rocky-seed \
+    build/rocky-seed.iso \
+    build/rocky-host-overlay.qcow2 \
+    build/rocky-host.pid \
+    build/rocky-host-serial.log \
     build/gate1-intercept.log \
     build/bench-baseline.log \
     build/bench-baseline.csv \

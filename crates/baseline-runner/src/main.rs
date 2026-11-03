@@ -20,7 +20,6 @@ const SYS_FORK: usize = 57;
 const SYS_EXIT: usize = 60;
 const SYS_WAIT4: usize = 61;
 const SYS_GETPID: usize = 39;
-const SYS_REBOOT: usize = 169;
 const SYS_CLOCK_GETTIME: usize = 228;
 const SYS_UNSHARE: usize = 272;
 
@@ -78,6 +77,9 @@ unsafe extern "C" fn memcpy(
 
 #[no_mangle]
 extern "C" fn rust_main() -> ! {
+    if unsafe { syscall0(SYS_GETPID) } == 1 {
+        fail(b"refusing to benchmark as host PID 1");
+    }
     line(b"BENCH_META architecture=x86_64 accelerator=tcg repetitions=5 unit=ns");
     line(b"BENCH_META container=linux-namespaces(mount,pid,uts,ipc)");
 
@@ -90,7 +92,7 @@ extern "C" fn rust_main() -> ! {
     }
 
     line(b"BENCH: PASS");
-    shutdown()
+    exit(0)
 }
 
 fn run_sample(mode: Mode, workload: Workload, repetition: usize) {
@@ -259,21 +261,11 @@ fn write_all(bytes: &[u8]) {
 fn fail(reason: &[u8]) -> ! {
     write_all(b"BENCH: FAIL: ");
     line(reason);
-    shutdown()
+    exit(1)
 }
 
 fn exit(code: usize) -> ! {
     unsafe { syscall1(SYS_EXIT, code) };
-    loop {
-        core::hint::spin_loop();
-    }
-}
-
-fn shutdown() -> ! {
-    const MAGIC1: usize = 0xfee1dead;
-    const MAGIC2: usize = 0x28121969;
-    const RESTART: usize = 0x01234567;
-    unsafe { syscall4(SYS_REBOOT, MAGIC1, MAGIC2, RESTART, 0) };
     loop {
         core::hint::spin_loop();
     }

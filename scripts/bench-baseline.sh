@@ -1,11 +1,16 @@
 #!/bin/sh
 set -eu
 
+. ./scripts/rocky-host-common.sh
+
 raw=build/bench-baseline.log
 samples=build/bench-baseline.csv
 summary=build/bench-baseline-summary.csv
 
-./scripts/run-qemu.sh baseline > "$raw" 2>&1
+rocky_scp \
+    target/x86_64-unknown-linux-gnu/release/baseline-runner \
+    "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/baseline-runner"
+rocky_ssh 'chmod 0755 /var/tmp/baseline-runner; sudo /var/tmp/baseline-runner' > "$raw" 2>&1
 grep -Fq 'BENCH: PASS' "$raw"
 
 printf '%s\n' 'mode,workload,repetition,nanoseconds' > "$samples"
@@ -43,5 +48,6 @@ awk -F, '
 ' "$samples" | LC_ALL=C sort >> "$summary"
 
 grep '^BENCH_META ' "$raw" | tr -d '\r'
+rocky_ssh '. /etc/os-release; printf "BENCH_META host=%s version=%s kernel=%s\\n" "$ID" "$VERSION_ID" "$(uname -r)"'
 cat "$summary"
 printf 'benchmark samples: %s\n' "$samples"
