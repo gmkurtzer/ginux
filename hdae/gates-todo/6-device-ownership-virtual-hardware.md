@@ -50,8 +50,7 @@ DMA authority.
 
 ## Remaining work
 
-- [ ] Add benchmark targets and finish aggregate and human-demonstration
-  verification.
+- [x] No technical work remains; human checkpoint acceptance is required.
 
 ## Acceptance criteria
 
@@ -100,6 +99,19 @@ DMA authority.
   an out-of-range write, kept the preceding 1024 bytes zero, exchanged an
   isolated packet, denied unknown controls/mapping/conflicting ownership, and
   released the backend for reuse.
+- `make test-block` -> two range-confinement, read-only, flush, and close tests
+  passed against disposable backends.
+- `make test-network` -> isolated bounded send/receive, denied control, queue,
+  and revocation test passed.
+- `make bench-block` -> passed 1024 write/read pairs (524288 bytes, 2048
+  operations) in Rocky x86-64 under QEMU TCG and recorded wall time, process
+  CPU time, throughput, latency, workload, repetitions, bytes, and environment.
+- `make bench-network` -> passed 1024 isolated send/receive pairs (131072
+  bytes, 2048 operations) with the same required metadata.
+- `make demo-gate-6` -> passed 6/6 named human checks and retained benchmark
+  records in `build/bench-block.txt` and `build/bench-network.txt`.
+- `make test` -> passed formatting, strict lint, 31 unit tests, prior Gate 1,
+  2, 3, and 4 regressions, and the Gate 6 Rocky QEMU device path.
 
 ## Decisions and limitations
 
@@ -120,10 +132,14 @@ DMA authority.
   2026-11-03; never merge or close without explicit authorization
 - Planned commits: virtual device registry and pseudo-devices; block and
   partition backend; network backend; isolation and benchmark verification
-- Actual commits: registry and pseudo-device foundation pending commit
+- Actual commits: `eb39ada` added the registry and pseudo-device foundation;
+  `0ad0e90` added normalized configuration plus mediated block/network QEMU
+  verification; `17568e3` added reproducible benchmarks, documentation, and
+  the human demonstration
 
 ## Review policy and outcome
 
 Human checkpoint because device mediation and backend ownership materially
 affect the security boundary. Present `make demo-gate-6`, fresh evidence, and
 the pull request before acceptance.
+Technical status: passed on 2026-11-03; delivery and human acceptance pending.

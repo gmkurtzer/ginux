@@ -161,8 +161,13 @@ scope, threat model, and invariants.
   component targets passed. `make test-devices` then passed end-to-end in the
   Rocky QEMU host with normalized assignment, a disposable file-backed bounded
   partition, isolated packet exchange, denial checks, flush, revocation, and
-  backend reuse. Benchmarks, aggregate regression, and the Gate 6 human demo
-  remain incomplete.
+  backend reuse.
+- `make bench-block` and `make bench-network` passed in Rocky x86-64 under QEMU
+  TCG and recorded workload, repetitions, bytes, wall time, process CPU time,
+  throughput, latency, and environment without imposing a budget.
+- `make demo-gate-6` passed all 6 named checks. A fresh `make test` passed
+  formatting, strict lint, 31 unit tests, prior-gate regressions, Gate 2 image
+  checks, and the Gate 6 Rocky QEMU device path.
 
 ## Open decisions and limitations
 
@@ -176,7 +181,7 @@ scope, threat model, and invariants.
 - Rocky host image is pinned to official Rocky 10.2 GenericCloud build
   10.2-20260525.0. Gate 2 selected a pinned, network-disabled
   Docker/LinuxKit helper that mounts a temporary raw conversion read-only;
-  network backend and performance budgets remain later-gate decisions.
+  performance budgets remain a later-gate decision.
 - Gate 2 preparation requires Docker Desktop and a pinned privileged helper
   container. It is network-disabled and mounts only a temporary raw conversion
   read-only, but remains trusted build tooling rather than a runtime boundary.
@@ -188,7 +193,7 @@ scope, threat model, and invariants.
 - The native Bash proof uses a read-only unprivileged chroot and limits kernel
   descriptors to immutable image content and the bootstrap console. Gate 6
   adds Ginus-owned device objects rather than expanding native passthrough.
-- Gate 6 will begin with a Ginus-owned isolated packet queue as its mediated
+- Gate 6 uses a Ginus-owned isolated packet queue as its mediated
   network backend. It does not provide host or external network connectivity;
   later connectivity backends must preserve the same virtual interface and
   mediation boundary.
@@ -198,8 +203,8 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Add reproducible block and network benchmarks, finish aggregate regression,
-and provide the Gate 6 human demonstration.
+Commit and deliver the technically passed Gate 6 branch and pull request, then
+stop for human review of `make demo-gate-6`.
 
 ## Context recovery
 
@@ -207,9 +212,11 @@ and provide the Gate 6 human demonstration.
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
 - Active gate: Gate 6, device ownership and virtual hardware; authorized and
-  starting on dedicated branch `hdae/device-ownership`
+  technically passed on dedicated branch `hdae/device-ownership`; delivery and
+  human acceptance pending
 - Last evidence: `make check`, `make test-unit`, `make test-oci-layers`,
-  `make test-oci-image`, and Gate 5 QEMU evidence passed before acceptance;
-  Gate 6 `cargo test -p ginus-devices`, strict clippy, and initial component
-  Make targets passed on 2026-11-03
-- Required human decision: none until the Gate 6 demonstration checkpoint
+  `make test-devices`, `make test-block`, `make test-network`,
+  `make bench-block`, `make bench-network`, `make demo-gate-6`, and aggregate
+  `make test` passed on 2026-11-03
+- Required human decision: accept Gate 6 or request corrections after reviewing
+  its demonstration and pull request
