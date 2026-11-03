@@ -104,5 +104,5 @@ complete, useful, bounded audit trail of contract decisions.
 ## Review policy and outcome
 
 Human checkpoint because this gate defines the operator-visible security
-contract and the evidence used for later exploit claims. Present
+contract and the evidence used for later kernel-exposure claims. Present
 `make demo-gate-10`, fresh evidence, and the pull request before acceptance.

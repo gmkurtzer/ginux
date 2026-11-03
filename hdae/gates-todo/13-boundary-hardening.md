@@ -23,7 +23,7 @@ honest security and compatibility boundary for the initial milestone.
   syscall surface after bootstrap as far as the validated architecture permits.
 - Verify startup failure, domain crash, forced stop, audit saturation, and host
   shutdown or recovery behavior.
-- Rerun functional, systemd, contract, exploit, and performance comparisons.
+- Rerun functional, systemd, contract, security, and performance comparisons.
 - Document supported behavior, threat-model exclusions, known gaps, operational
   requirements, and measured performance.
 
@@ -45,7 +45,7 @@ honest security and compatibility boundary for the initial milestone.
 - [ ] Build malformed-input, fuzz, and escape suites.
 - [ ] Minimize and verify Ginus host authority.
 - [ ] Exercise recovery and cleanup behavior.
-- [ ] Run full functional, security, exploit, and benchmark regressions.
+- [ ] Run full functional, security, and benchmark regressions.
 - [ ] Publish initial security, compatibility, operations, and performance
   limitations.
 
@@ -64,7 +64,7 @@ honest security and compatibility boundary for the initial milestone.
   tested.
 - Failure and recovery fixtures reach their expected states without silent
   fallback, resource leakage, or uncontrolled host shutdown.
-- Systemd, contract, selected exploit prevention, and approved performance
+- Systemd, contract, defensive boundary checks, and approved performance
   budgets remain passing after hardening.
 - Documentation states supported claims and unresolved risks precisely enough
   that it does not imply production readiness or universal exploit prevention.
@@ -80,7 +80,7 @@ honest security and compatibility boundary for the initial milestone.
   discovered defect.
 - `make test-recovery` -> startup failure, domain crash, forced stop, audit
   saturation, and shutdown/recovery cases pass.
-- `make test test-systemd test-contract test-exploit` -> all mandatory suites
+- `make test test-systemd test-contract test-security` -> all mandatory suites
   exit zero.
 - `make bench-compare` -> all approved mandatory budgets pass after hardening.
 - Documentation consistency check -> claims map to current executable evidence

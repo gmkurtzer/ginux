@@ -44,9 +44,7 @@ The milestone succeeds when:
 3. the domain sees Ginus-owned `/dev`, `/proc`, `/sys`, and cgroup interfaces;
 4. domain configuration selects its image, resources, devices, contract, and
    audit behavior;
-5. a public host-kernel exploit vector succeeds in a controlled vulnerable
-   baseline but is unreachable through the selected Ginus contract; and
-6. reproducible benchmarks quantify CPU, memory, syscall, process, storage,
+5. reproducible benchmarks quantify CPU, memory, syscall, process, storage,
    network, and boot overhead against native and conventional-container
    controls.
 
@@ -79,7 +77,7 @@ solved.
 - Virtual console, pseudo-devices, file-backed block devices or bounded
   partitions, and virtual network interfaces.
 - Deterministic Makefile targets for build, checks, tests, image preparation,
-  security demonstrations, and benchmarks.
+  defensive boundary verification, and benchmarks.
 
 ## Non-goals for the initial milestone
 

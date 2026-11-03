@@ -8,9 +8,11 @@
 - Authoritative name: Ginus (Ginux Userspace).
 - Runtime isolation unit: domain.
 - Policy unit: versioned contract.
-- Initial gate map: thirteen checkpoint gates under `hdae/gates-todo/`.
-- Gates 1 through 13 are authorized as an ordered batch, but each remains a
-  human checkpoint requiring a working demonstration and explicit acceptance.
+- Initial gate map: twelve checkpoint gates under `hdae/gates-todo/` at
+  positions 1 through 11 and 13.
+- The twelve remaining gates are authorized as an ordered batch, but each
+  remains a human checkpoint requiring a working demonstration and explicit
+  acceptance.
 - Gate 2 must not begin until Gate 1 is explicitly accepted.
 
 ## Governing outcome and invariants
@@ -33,8 +35,11 @@ scope, threat model, and invariants.
   and dedicated branch/PR delivery per implementation gate.
 - Human direction on 2026-11-03 selected macOS arm64 plus QEMU TCG as the
   development environment, removed KVM from initial acceptance, authorized the
-  ordered 13-gate batch, required a runnable human demonstration for every
+  ordered gate batch, required a runnable human demonstration for every
   checkpoint, and authorized pushing dedicated branches and opening PRs.
+- Human direction on 2026-11-03 removed the public-exploit demonstration gate.
+  The project retains deterministic defensive contract, malformed-input,
+  escape-attempt, fuzz, recovery, and authority-reduction verification.
 - Coverage review: functionality, failure behavior, deterministic tests, user
   configuration, documentation, compatibility, recovery, performance, and
   security are assigned to explicit gates; none is silently omitted.
@@ -53,8 +58,8 @@ scope, threat model, and invariants.
 - `PTRACE_SYSEMU` is accepted only as the Gate 1 bootstrap experiment. The
   final Ginus execution/task/memory design remains a Gate 3 decision.
 - The exact Rocky image, image preparation backend, configuration syntax,
-  network backend, performance budgets, and public CVE remain decisions
-  assigned to later gates.
+  network backend, and performance budgets remain decisions assigned to later
+  gates.
 - The repository and directory still use the historical `usshim` name; rename
   is not authorized in the current planning task.
 

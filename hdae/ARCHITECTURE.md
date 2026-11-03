@@ -135,7 +135,6 @@ and idle overhead.
 - Initial network backend and packet mediation boundary.
 - Numeric performance budgets, set from reproducible baseline evidence before
   Gate 11 begins.
-- Public vulnerability and controlled kernel version used by Gate 12.
 - Final repository and directory rename from `usshim` to `ginus`.
 
 Changing a security invariant or resolving an open decision with material

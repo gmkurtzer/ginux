@@ -6,7 +6,7 @@ Build Ginus from the security boundary outward. First prove that unmodified
 x86-64 code can run without direct access to host syscalls. Then add a cached
 Rocky userspace, domain configuration, Linux runtime behavior, virtual kernel
 objects, systemd compatibility, explicit contract controls, performance
-evidence, an exploit demonstration, and boundary hardening.
+evidence, and boundary hardening.
 
 Every implementation gate uses a dedicated `hdae/<gate-slug>` branch based on
 `main` and is intended for its own pull request. Local commits must be signed
@@ -14,13 +14,15 @@ off. The human authorized pushing each dedicated gate branch and opening its
 pull request on 2026-11-03. This does not authorize pushing directly to `main`,
 merging, or closing a pull request.
 
-The human authorized Gates 1 through 13 as one ordered batch on 2026-11-03.
-All thirteen gates remain human checkpoints: after each gate passes, update
-the evidence, push its dedicated branch, open or update its pull request, run
-the human demonstration, and stop for acceptance before advancing. Batch
-authorization does not permit advancing past an unaccepted checkpoint,
-weakening criteria, expanding scope, or resolving a material architecture
-decision silently.
+The human authorized the twelve remaining gates (positions 1 through 11 and
+13) as one ordered batch on 2026-11-03. Position 12 was removed at the human's
+direction because a public-exploit reproduction is not required for this
+constructive project. All twelve gates remain human checkpoints: after each
+gate passes, update the evidence, push its dedicated branch, open or update its
+pull request, run the human demonstration, and stop for acceptance before
+advancing. Batch authorization does not permit advancing past an unaccepted
+checkpoint, weakening criteria, expanding scope, or resolving a material
+architecture decision silently.
 
 Every gate must provide a working human demonstration through
 `make demo-gate-N`, where `N` is the gate position. The target must document
@@ -55,9 +57,6 @@ replace it.
     filesystem, and kernel-view policy with fail-closed validation and logs.
 11. **Performance characterization and optimization**: native, conventional
     container, and Ginus comparisons against approved budgets.
-12. **Exploit demonstration**: controlled public vulnerability succeeds in the
-    vulnerable baseline and is blocked by the Ginus contract while systemd
-    remains healthy.
 13. **Boundary hardening**: malformed ABI tests, fuzzing, escape attempts,
     Ginus privilege reduction, recovery, performance regression, and explicit
     limitations.
@@ -107,7 +106,6 @@ make test-kernel-views
 make test-cgroup
 make test-systemd
 make test-contract
-make test-exploit
 make test-security
 make test-recovery
 make bench-baseline
@@ -124,7 +122,7 @@ define their expected result.
 
 ## Traceability
 
-- Kernel-exposure control is proven by Gates 1, 3, 10, 12, and 13.
+- Kernel-exposure control is proven by Gates 1, 3, 10, and 13.
 - General systemd compatibility is built by Gates 2, 3, 5, 7, 8, and 9.
 - Per-domain configuration and ownership are built by Gates 4, 6, 8, and 10.
 - Device mediation is built and measured by Gates 6, 10, 11, and 13.
@@ -134,7 +132,7 @@ define their expected result.
 
 ## Deferred roadmap
 
-After the initial thirteen gates, likely milestones include multiple concurrent
+After the initial twelve gates, likely milestones include multiple concurrent
 domains, conventional containers within a domain, network and storage backend
 expansion, physical-device assignment with a separately reviewed IOMMU/VFIO
 model, non-x86 architectures, live lifecycle controls, distribution expansion,
