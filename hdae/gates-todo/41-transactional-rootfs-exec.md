@@ -78,6 +78,16 @@ ownership intact, while a successful `exec` publishes one complete new image.
 - `make test-rocky-shell` -> review incomplete before the code under test: the
   guest rejected every OCI registry DNS response and exhausted three pull
   attempts, so no image was unpacked or executed.
+- Synchronization with `main` at `b4628fc2` -> the staged transaction now uses
+  the domain-aware runtime frame policy for allocation and rollback; the only
+  code conflicts were this ownership integration and retaining both QEMU
+  transaction assertions.
+- Fresh `make check` and complete `make test` after synchronization -> passed,
+  including `GINUX_KERNEL_OK`, the staged hierarchy transaction assertion,
+  bounded OCI unpack assertion, and `Boot test passed`.
+- Fresh `make test-rocky-shell` after synchronization -> failed before the
+  code under test for the same external reason: all three registry DNS
+  resolutions failed, no image was downloaded, unpacked, or executed.
 - PR #53: <https://github.com/gmkurtzer/ginux/pull/53>.
 - Issue summary: <https://github.com/gmkurtzer/ginux/issues/27#issuecomment-6569276429>.
 
