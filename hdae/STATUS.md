@@ -8,12 +8,13 @@
 - Branch: `hdae/issue-80-overlay-domain-accounting`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 45, overlay domain memory accounting for issue #80
-- Last completed action: confirmed that every writable-overlay allocation and
-  cleanup path is hard-coded to `FrameOwner::KERNEL`, bypassing the active
-  container memory limit
-- Next action: implement owner-limited overlay allocation and owner-derived
-  cleanup, add deterministic quota lifecycle regressions, and run `make check`
-  plus the complete QEMU suite before publishing the dedicated pull request
+- Last completed action: routed every writable-overlay allocation through the
+  active domain frame policy, made container policy lookup fail closed, derived
+  cleanup ownership from frame leases, and passed `make check` plus complete
+  `make test`
+- Next action: commit the evidence checkpoint, push the dedicated branch, open
+  the issue #80 pull request, and post the first-pass validation marker; merge
+  only on a later hourly pass with current green exact-head CI
 
 ## Current repository state
 
@@ -35,6 +36,16 @@ under `docs/feedback-hardening/`. No push or merge was performed.
 
 - None for Gate 45. The domain remains the unit of private writable payload
   memory ownership and accounting.
+
+## Active Gate 45 evidence
+
+- `make check` passes with the unsafe inventory unchanged at 1,032 blocks.
+- `make test` passes the complete deterministic two-vCPU QEMU and Linux runtime
+  suite.
+- The new boot marker is `ginux: Linux overlay domain quota lifecycle enforced`.
+- Node, shared-mapping, data, and xattr allocation share the same domain limit;
+  cleanup derives the actual allocator owner, and a live container with a
+  missing policy cannot fall back to kernel-owned frames.
 
 ## Active diagnosis
 

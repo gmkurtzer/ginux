@@ -30,9 +30,9 @@ memory limit, while host overlay setup retains kernel-owned allocation.
 
 ## Remaining work
 
-- [ ] Implement domain-aware overlay allocation and owner-aware cleanup.
-- [ ] Add deterministic quota lifecycle and isolation regressions.
-- [ ] Run the static and complete QEMU regression suites.
+- [x] Implement domain-aware overlay allocation and owner-aware cleanup.
+- [x] Add deterministic quota lifecycle and isolation regressions.
+- [x] Run the static and complete QEMU regression suites.
 - [ ] Publish the dedicated pull request and link issue #80.
 
 ## Acceptance criteria
@@ -43,7 +43,8 @@ memory limit, while host overlay setup retains kernel-owned allocation.
   container owner.
 - Allocation fails closed if a container is active but its domain policy cannot
   be resolved; it never falls back to `FrameOwner::KERNEL` in that state.
-- Rollback, unlink reclamation, and teardown restore the charged owner capacity.
+- Rollback and teardown restore charged owner capacity; unlink preserves Linux
+  open-handle semantics without allowing further allocation past the quota.
 - Exhausting one domain does not consume or block another domain's capacity.
 - Host overlay setup continues to use kernel-owned frames.
 
@@ -61,6 +62,14 @@ memory limit, while host overlay setup retains kernel-owned allocation.
 
 - Current `origin/main` inspection -> all overlay allocation and matching
   cleanup paths are hard-coded to `FrameOwner::KERNEL`; issue reproduced.
+- `make check` -> passed, including formatting, architecture, unsafe inventory,
+  and workspace unit checks.
+- `make test` -> passed the complete two-vCPU QEMU and Linux runtime suite; the
+  new deterministic marker is `ginux: Linux overlay domain quota lifecycle
+  enforced`.
+- Source inspection after implementation -> node, mapping, data, and xattr
+  frames all use the same fail-closed domain policy; every rollback and teardown
+  release derives the actual owner from the frame lease.
 
 ## Decisions and limitations
 
@@ -68,6 +77,10 @@ memory limit, while host overlay setup retains kernel-owned allocation.
   with `memory::frame_owner`, so teardown is correct even outside the allocating
   container's current execution context.
 - The host fallback is permitted only when no container slot is active.
+- Linux unlink semantics retain unlinked-but-open overlay data. Capacity is
+  restored on rollback, destructive whiteout replacement, and runtime teardown;
+  adding descriptor reference-counted early reclamation is outside this
+  accounting defect and is not required to prevent the budget bypass.
 
 ## Delivery strategy
 
@@ -76,7 +89,8 @@ memory limit, while host overlay setup retains kernel-owned allocation.
 - Pull request: intended, dedicated to issue #80
 - Planned commits: gate definition; ownership implementation and deterministic
   regression; final evidence/checkpoint update
-- Actual commits: pending
+- Actual commits: `a02052cf` (gate definition), `b379e28b` (implementation and
+  regression); final checkpoint commit pending
 
 ## Review policy and outcome
 
