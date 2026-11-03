@@ -7,7 +7,7 @@ PAYLOAD := target/$(X86_TARGET)/release/managed-payload
 BASELINE := target/$(X86_TARGET)/release/baseline-runner
 RUNTIME_FIXTURE := target/$(X86_TARGET)/release/runtime-fixture
 
-.PHONY: doctor host-image-fetch host-image-verify host-boot-test image-helper-fetch image-prepare test-image image-cache-clean build check test test-unit test-intercept test-runtime test-config test-domain bench-baseline demo-gate-1 demo-gate-2 demo-gate-3 demo-gate-4 clean
+.PHONY: doctor host-image-fetch host-image-verify host-boot-test image-helper-fetch image-prepare domain-image-fetch domain-image-verify domain-image-prepare test-image test-oci-image image-cache-clean build check test test-unit test-intercept test-runtime test-config test-domain bench-baseline demo-gate-1 demo-gate-2 demo-gate-3 demo-gate-4 clean
 
 doctor:
 	@./scripts/doctor.sh
@@ -27,8 +27,20 @@ image-helper-fetch:
 image-prepare:
 	@./scripts/prepare-rocky-domain.sh
 
+domain-image-fetch:
+	@./scripts/fetch-rocky-oci.sh
+
+domain-image-verify:
+	@./scripts/verify-rocky-oci.sh
+
+domain-image-prepare:
+	@./scripts/prepare-rocky-oci.sh
+
 test-image:
 	@./scripts/test-rocky-domain.sh
+
+test-oci-image:
+	@./scripts/test-rocky-oci.sh
 
 image-cache-clean:
 	rm -rf build/cache/domain

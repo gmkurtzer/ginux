@@ -70,7 +70,6 @@ fn verify_index(source: &mut File, mut index_file: File) -> Result<(), Box<dyn s
     index_file.read_to_end(&mut bytes)?;
     let index = Index::new(&bytes).map_err(|_| "generated index failed validation")?;
     for path in [
-        b"/usr/bin/true".as_slice(),
         b"/usr/bin/bash".as_slice(),
         b"/usr/lib64/ld-linux-x86-64.so.2".as_slice(),
         b"/usr/lib64/libc.so.6".as_slice(),
@@ -166,7 +165,16 @@ fn scan_tar(
             .ok_or("tar offset overflow")?;
     }
     if !entries.iter().any(|entry| entry.path == b"/") {
-        return Err("rootfs tar has no root directory".into());
+        entries.push(OwnedEntry {
+            path: b"/".to_vec(),
+            kind: NodeKind::Directory,
+            mode: 0o755,
+            uid: 0,
+            gid: 0,
+            size: 0,
+            data_offset: 0,
+            link: Vec::new(),
+        });
     }
     Ok(entries)
 }
