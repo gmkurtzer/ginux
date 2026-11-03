@@ -25323,6 +25323,9 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64, mode: u64) -> u64
                 | LINUX_O_PATH)
             != 0
         || flags & LINUX_O_EXCL != 0 && flags & LINUX_O_CREAT == 0
+        // Linux build_open_flags() rejects O_CREAT|O_DIRECTORY before any
+        // lookup, so nothing is created (fs/open.c:1279).
+        || flags & (LINUX_O_CREAT | LINUX_O_DIRECTORY) == (LINUX_O_CREAT | LINUX_O_DIRECTORY)
     {
         return LINUX_EINVAL;
     }
@@ -25484,6 +25487,21 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64, mode: u64) -> u64
     {
         return LINUX_EEXIST;
     }
+    // Linux do_open() checks an existing entry before truncating or copying
+    // it up: O_CREAT on a directory is EISDIR, O_DIRECTORY on a
+    // non-directory is ENOTDIR (fs/namei.c:4808-4822).
+    let existing_directory = match overlay_metadata {
+        Some(metadata) => Some(metadata.kind == crate::linux_overlay::NodeKind::Directory),
+        None => rootfs_at_path.map(|(_, entry)| {
+            entry.is_none_or(|entry| entry.kind == crate::published_rootfs::EntryKind::Directory)
+        }),
+    };
+    if flags & LINUX_O_CREAT != 0 && existing_directory == Some(true) {
+        return LINUX_EISDIR;
+    }
+    if flags & LINUX_O_DIRECTORY != 0 && existing_directory == Some(false) {
+        return LINUX_ENOTDIR;
+    }
     if let Some(metadata) = overlay_metadata {
         overlay_handle = Some(metadata.handle);
         if flags & LINUX_O_TRUNC != 0
@@ -25541,6 +25559,9 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64, mode: u64) -> u64
         overlay_handle = Some(handle);
     } else if canonical_length.is_some()
         && flags & LINUX_O_CREAT != 0
+        // An existing lower entry is opened as is; a read-only open needs no
+        // copy-up and must not shadow it with an empty file.
+        && rootfs_at_path.is_none()
         && !tmp_path
         && !virtual_device
         && !writable_proc_path
@@ -26461,6 +26482,53 @@ fn linux_linkat(
     .map_or(LINUX_ENOSPC, |_| 0)
 }
 
+/// The visible lower (image) entry at a canonical path, without following a
+/// trailing symlink. A `None` entry is the root directory.
+fn linux_lower_entry(
+    path: &[u8],
+) -> Option<(u16, Option<crate::published_rootfs::Entry<'static>>)> {
+    if crate::linux_overlay::hidden(path) {
+        return None;
+    }
+    crate::published_rootfs::lookup_metadata_at(crate::published_rootfs::ROOT_HANDLE, path)
+        .filter(|(handle, _)| !linux_rootfs_handle_hidden(*handle))
+}
+
+fn linux_lower_entry_is_directory(entry: Option<crate::published_rootfs::Entry<'_>>) -> bool {
+    entry.is_none_or(|entry| entry.kind == crate::published_rootfs::EntryKind::Directory)
+}
+
+/// Whether the merged directory at `path` has a visible child in either
+/// layer. Lower children are hidden only by their own or an ancestor's
+/// whiteout.
+fn linux_merged_directory_has_children(path: &[u8], lower: Option<u16>) -> bool {
+    if crate::linux_overlay::has_children(path) {
+        return true;
+    }
+    let Some(directory) = lower else {
+        return false;
+    };
+    let mut child = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+    let mut cursor = 0;
+    while let Some(Some(entry)) = crate::published_rootfs::next_child(directory, cursor) {
+        let Some(end) = path
+            .len()
+            .checked_add(1 + entry.name.len())
+            .filter(|end| *end <= child.len())
+        else {
+            return true;
+        };
+        child[..path.len()].copy_from_slice(path);
+        child[path.len()] = b'/';
+        child[path.len() + 1..end].copy_from_slice(entry.name);
+        if !crate::linux_overlay::hidden(&child[..end]) {
+            return true;
+        }
+        cursor = entry.next_cursor;
+    }
+    false
+}
+
 fn linux_unlinkat(directory: u64, path_address: u64, flags: u64) -> u64 {
     let directory = u64::from(directory as u32);
     let flags = u64::from(flags as u32);
@@ -26502,21 +26570,26 @@ fn linux_unlinkat(directory: u64, path_address: u64, flags: u64) -> u64 {
         Err(error) => return error,
     };
     let Some(metadata) = crate::linux_overlay::lookup(&canonical[..length]) else {
-        return if crate::linux_overlay::hidden(&canonical[..length]) {
-            LINUX_ENOENT
-        } else if crate::published_rootfs::lookup_at(
-            crate::published_rootfs::ROOT_HANDLE,
-            &canonical[..length],
-        )
-        .is_some()
-        {
-            if crate::linux_overlay::whiteout(&canonical[..length]) {
-                0
-            } else {
-                LINUX_ENOSPC
-            }
+        let Some((handle, entry)) = linux_lower_entry(&canonical[..length]) else {
+            return LINUX_ENOENT;
+        };
+        // A whiteout hides the whole lower subtree, so apply the Linux
+        // may_delete_dentry() type checks and the simple_rmdir() emptiness
+        // check first (fs/namei.c:3708-3713, fs/libfs.c:815).
+        let directory = linux_lower_entry_is_directory(entry);
+        if flags == LINUX_AT_REMOVEDIR && !directory {
+            return LINUX_ENOTDIR;
+        }
+        if flags == 0 && directory {
+            return LINUX_EISDIR;
+        }
+        if directory && linux_merged_directory_has_children(&canonical[..length], Some(handle)) {
+            return LINUX_ENOTEMPTY;
+        }
+        return if crate::linux_overlay::whiteout(&canonical[..length]) {
+            0
         } else {
-            LINUX_ENOENT
+            LINUX_ENOSPC
         };
     };
     if flags == LINUX_AT_REMOVEDIR && metadata.kind != crate::linux_overlay::NodeKind::Directory {
@@ -26524,6 +26597,13 @@ fn linux_unlinkat(directory: u64, path_address: u64, flags: u64) -> u64 {
     }
     if flags == 0 && metadata.kind == crate::linux_overlay::NodeKind::Directory {
         return LINUX_EISDIR;
+    }
+    if flags == LINUX_AT_REMOVEDIR
+        && linux_lower_entry(&canonical[..length]).is_some_and(|(handle, _)| {
+            linux_merged_directory_has_children(&canonical[..length], Some(handle))
+        })
+    {
+        return LINUX_ENOTEMPTY;
     }
     if flags == LINUX_AT_REMOVEDIR
         && canonical[..length].starts_with(b"sys/fs/cgroup/")
@@ -27308,31 +27388,101 @@ fn linux_renameat(
             Ok(length) => length,
             Err(error) => return error,
         };
-    let Some(source) = crate::linux_overlay::lookup(&old_canonical[..old_length]) else {
+    let old_path = &old_canonical[..old_length];
+    let new_path = &new_canonical[..new_length];
+    let source = crate::linux_overlay::lookup(old_path);
+    let source_lower = linux_lower_entry(old_path);
+    if source.is_none() && source_lower.is_none() {
         return LINUX_ENOENT;
-    };
-    let target = crate::linux_overlay::lookup(&new_canonical[..new_length]);
-    if flags == RENAME_NOREPLACE
-        && (target.is_some()
-            || crate::published_rootfs::lookup_at(
-                crate::published_rootfs::ROOT_HANDLE,
-                &new_canonical[..new_length],
-            )
-            .is_some())
-    {
+    }
+    let target = crate::linux_overlay::lookup(new_path);
+    let target_lower = linux_lower_entry(new_path);
+    if flags == RENAME_NOREPLACE && (target.is_some() || target_lower.is_some()) {
         return LINUX_EEXIST;
     }
-    if !linux_overlay_parent_exists(&new_canonical[..new_length]) {
+    if !linux_overlay_parent_exists(new_path) {
         return LINUX_ENOENT;
     }
+    let source_directory = source.map_or_else(
+        || source_lower.is_some_and(|(_, entry)| linux_lower_entry_is_directory(entry)),
+        |source| source.kind == crate::linux_overlay::NodeKind::Directory,
+    );
+    // Linux lock_rename() traps: moving a directory into its own subtree is
+    // EINVAL, and a target that is an ancestor of the source is never empty
+    // (fs/namei.c:3894-3906).
+    if ginux_kernel_policy::strict_path_descendant(old_path, new_path) {
+        return if source_directory {
+            LINUX_EINVAL
+        } else {
+            LINUX_ENOTDIR
+        };
+    }
+    if ginux_kernel_policy::strict_path_descendant(new_path, old_path) {
+        return LINUX_ENOTEMPTY;
+    }
+    // vfs_rename() succeeds without doing anything when source and target
+    // are the same file (fs/namei.c:6101).
+    if old_path == new_path {
+        return 0;
+    }
+    let target_directory = match target {
+        Some(target) => Some(target.kind == crate::linux_overlay::NodeKind::Directory),
+        None => target_lower.map(|(_, entry)| linux_lower_entry_is_directory(entry)),
+    };
+    // may_delete_dentry() on the target with the source's type, then the
+    // simple_rename() emptiness check (fs/namei.c:3708-3713, fs/libfs.c:882).
+    match target_directory {
+        Some(false) if source_directory => return LINUX_ENOTDIR,
+        Some(true) if !source_directory => return LINUX_EISDIR,
+        Some(true)
+            if linux_merged_directory_has_children(
+                new_path,
+                target_lower.map(|(handle, _)| handle),
+            ) =>
+        {
+            return LINUX_ENOTEMPTY
+        }
+        _ => {}
+    }
+    // Like overlayfs without redirect_dir, a directory with a lower layer is
+    // not moved: EXDEV makes mv fall back to copying (fs/overlayfs/dir.c:1147).
+    // A lower regular file is copied up first; lower symlinks also take the
+    // EXDEV path.
+    if source_directory && source_lower.is_some() {
+        return LINUX_EXDEV;
+    }
+    let source = if let Some(source) = source {
+        source.handle
+    } else {
+        let Some(entry) = source_lower.and_then(|(_, entry)| entry).filter(|entry| {
+            matches!(
+                entry.kind,
+                crate::published_rootfs::EntryKind::File
+                    | crate::published_rootfs::EntryKind::Hardlink
+            )
+        }) else {
+            return LINUX_EXDEV;
+        };
+        let Some(handle) = crate::linux_overlay::create_file(
+            old_path,
+            linux_rootfs_mode(entry) & 0o7777,
+            entry.data,
+        ) else {
+            return LINUX_ENOSPC;
+        };
+        handle
+    };
     if target.is_some_and(|target| !crate::linux_overlay::unlink(target.handle)) {
         return LINUX_ENOTEMPTY;
     }
-    if crate::linux_overlay::rename(source.handle, &new_canonical[..new_length]) {
-        0
-    } else {
-        LINUX_EIO
+    if !crate::linux_overlay::rename(source, new_path) {
+        return LINUX_EIO;
     }
+    // Without a whiteout the lower entry would reappear at the old path.
+    if source_lower.is_some() && !crate::linux_overlay::whiteout(old_path) {
+        return LINUX_ENOSPC;
+    }
+    0
 }
 
 fn linux_faccessat(directory: u64, path_address: u64, mode: u64, flags: u64) -> u64 {

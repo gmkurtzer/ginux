@@ -414,6 +414,19 @@ pub(crate) fn hidden(path: &[u8]) -> bool {
         })
 }
 
+pub(crate) fn has_children(path: &[u8]) -> bool {
+    valid_path(path).is_some()
+        && live().is_some_and(|overlay| {
+            for_each_node(overlay, |node| {
+                (node.linked
+                    && !node.whiteout
+                    && ginux_kernel_policy::strict_path_descendant(path, node.path()))
+                .then_some(())
+            })
+            .is_some()
+        })
+}
+
 pub(crate) fn from_generation(generation: u32) -> Option<Handle> {
     let overlay = live()?;
     for_each_node(overlay, |node| {
