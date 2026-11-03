@@ -16299,6 +16299,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let memory_locking = verify_linux_memory_locking_syscalls();
     let address_space_limit = verify_linux_address_space_limit();
     let fadvise = verify_linux_fadvise64_syscall();
+    let shared_file_access = verify_linux_shared_file_mapping_access();
     let runtime_boot_contracts = verify_linux_runtime_boot_contracts();
     let mappings_released =
         address_space::release_current_linux_runtime_mappings(LINUX_RUNTIME_DYNAMIC_MMAP_BASE);
@@ -16362,6 +16363,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         memory_locking,
         address_space_limit,
         fadvise,
+        shared_file_access,
         runtime_boot_contracts,
         mappings_released,
     ]
@@ -16424,6 +16426,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && memory_locking
         && address_space_limit
         && fadvise
+        && shared_file_access
         && runtime_boot_contracts
         && mappings_released
 }
@@ -17601,6 +17604,115 @@ fn verify_linux_fadvise64_syscall() -> bool {
     let removed = crate::linux_overlay::unlink(node);
     let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
     pipe_rejected && closed && removed && unmapped
+}
+
+fn verify_linux_shared_file_mapping_access() -> bool {
+    let mapping = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    if !(LINUX_RUNTIME_DYNAMIC_MMAP_BASE..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
+        .contains(&mapping)
+    {
+        return false;
+    }
+    let Some(node) = crate::linux_overlay::create_file(b"ginux-shared-access", 0o600, b"original")
+    else {
+        let _ = linux_runtime_munmap(mapping, PAGE_SIZE as u64);
+        return false;
+    };
+    let mapped = |result: u64| {
+        (LINUX_RUNTIME_DYNAMIC_MMAP_BASE..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
+            .contains(&result)
+    };
+    let file_is = |expected: &[u8; 8]| {
+        let mut contents = [0_u8; 8];
+        crate::linux_overlay::read(node, 0, &mut contents) == Some(8) && &contents == expected
+    };
+    let prepared = copy_to_linux_user(mapping, b"/ginux-shared-access\0");
+    let input = if prepared {
+        linux_openat(u64::from(LINUX_AT_FDCWD), mapping, 0, 0)
+    } else {
+        LINUX_EFAULT
+    };
+    let read_write = if input < LINUX_AUX_DESCRIPTOR_LIMIT {
+        linux_openat(u64::from(LINUX_AT_FDCWD), mapping, 2, 0)
+    } else {
+        LINUX_EFAULT
+    };
+    let opened = input < LINUX_AUX_DESCRIPTOR_LIMIT && read_write < LINUX_AUX_DESCRIPTOR_LIMIT;
+    let read_write_protection = LINUX_PROT_READ | LINUX_PROT_WRITE;
+    let shared_write_rejected = opened
+        && linux_runtime_mmap(
+            0,
+            PAGE_SIZE as u64,
+            read_write_protection,
+            LINUX_MAP_SHARED,
+            input,
+            0,
+        ) == LINUX_EACCES;
+    let shared_read = if shared_write_rejected {
+        linux_runtime_mmap(
+            0,
+            PAGE_SIZE as u64,
+            LINUX_PROT_READ,
+            LINUX_MAP_SHARED,
+            input,
+            0,
+        )
+    } else {
+        LINUX_EINVAL
+    };
+    let upgrade_rejected = mapped(shared_read)
+        && linux_mprotect(shared_read, PAGE_SIZE as u64, read_write_protection) == LINUX_EACCES
+        && linux_runtime_munmap(shared_read, PAGE_SIZE as u64) == 0;
+    let private = if upgrade_rejected {
+        linux_runtime_mmap(
+            0,
+            PAGE_SIZE as u64,
+            read_write_protection,
+            LINUX_MAP_PRIVATE,
+            input,
+            0,
+        )
+    } else {
+        LINUX_EINVAL
+    };
+    let private_isolated = mapped(private)
+        && copy_to_linux_user(private, b"modified")
+        && linux_runtime_munmap(private, PAGE_SIZE as u64) == 0
+        && file_is(b"original");
+    let shared = if private_isolated {
+        linux_runtime_mmap(
+            0,
+            PAGE_SIZE as u64,
+            read_write_protection,
+            LINUX_MAP_SHARED,
+            read_write,
+            0,
+        )
+    } else {
+        LINUX_EINVAL
+    };
+    let shared_written = mapped(shared)
+        && copy_to_linux_user(shared, b"modified")
+        && linux_runtime_munmap(shared, PAGE_SIZE as u64) == 0
+        && file_is(b"modified");
+    let closed = input < LINUX_AUX_DESCRIPTOR_LIMIT
+        && linux_descriptor_close(input) == 0
+        && read_write < LINUX_AUX_DESCRIPTOR_LIMIT
+        && linux_descriptor_close(read_write) == 0;
+    let removed = crate::linux_overlay::unlink(node);
+    let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
+    let valid = shared_written && closed && removed && unmapped;
+    if valid {
+        serial_write("ginux: Linux shared file mapping write access validated\r\n");
+    }
+    valid
 }
 
 fn verify_linux_io_uring_syscalls() -> bool {
@@ -20245,6 +20357,7 @@ fn linux_runtime_mmap(
         return LINUX_ENOMEM;
     }
     let mut overlay_file = None;
+    let mut overlay_writable = false;
     let mut immutable_rootfs_file = None;
     let mut secret = false;
     let file = if anonymous {
@@ -20262,6 +20375,15 @@ fn linux_runtime_mmap(
             let Some(metadata) = crate::linux_overlay::metadata(handle) else {
                 return LINUX_EBADF;
             };
+            // Linux mm/mmap.c: a writable shared mapping requires a descriptor
+            // opened for writing, checked before memfd seals.
+            overlay_writable = state & 3 == 3;
+            if sharing == LINUX_MAP_SHARED
+                && protection & LINUX_PROT_WRITE != 0
+                && !overlay_writable
+            {
+                return LINUX_EACCES;
+            }
             if sharing == LINUX_MAP_SHARED
                 && protection & LINUX_PROT_WRITE != 0
                 && crate::linux_overlay::file_seals(handle).is_some_and(|seals| {
@@ -20305,8 +20427,11 @@ fn linux_runtime_mmap(
                     LINUX_EBADF
                 };
             };
+            // These descriptors are always read-only, so a writable shared
+            // mapping is rejected as Linux does without FMODE_WRITE.
             if linux_proc_file(state)
                 || state & 3 != LINUX_DESCRIPTOR_INPUT
+                || sharing == LINUX_MAP_SHARED && protection & LINUX_PROT_WRITE != 0
                 || !offset.is_multiple_of(PAGE_SIZE as u64)
             {
                 return LINUX_EACCES;
@@ -20445,7 +20570,13 @@ fn linux_runtime_mmap(
         for page in 0..pages {
             let address = mapping + (page * PAGE_SIZE) as u64;
             let offset = start.saturating_add(page * PAGE_SIZE);
-            if !crate::linux_overlay::register_shared_mapping(pid, address, handle, offset) {
+            if !crate::linux_overlay::register_shared_mapping(
+                pid,
+                address,
+                handle,
+                offset,
+                overlay_writable,
+            ) {
                 for rollback in 0..page {
                     let _ = crate::linux_overlay::remove_shared_mapping(
                         pid,
@@ -20707,9 +20838,14 @@ fn linux_msync(address: u64, length: u64, flags: u64) -> u64 {
 }
 
 fn linux_flush_shared_mapping_page(pid: u32, address: u64) -> bool {
-    let Some((handle, offset)) = crate::linux_overlay::shared_mapping(pid, address) else {
+    let Some((handle, offset, writable)) = crate::linux_overlay::shared_mapping(pid, address)
+    else {
         return true;
     };
+    // A mapping without VM_MAYWRITE can never be dirtied; never write it back.
+    if !writable {
+        return true;
+    }
     let Some(metadata) = crate::linux_overlay::metadata(handle) else {
         return false;
     };
@@ -21246,6 +21382,19 @@ fn linux_runtime_mprotect(address: u64, length: u64, protection: u64) -> u64 {
         } else {
             LINUX_ENOMEM
         };
+    }
+    // Linux mm/mprotect.c: PROT_WRITE needs VM_MAYWRITE, which a shared
+    // mapping of a descriptor not opened for writing never has.
+    if protection & LINUX_PROT_WRITE != 0
+        && (0..pages).any(|page| {
+            crate::linux_overlay::shared_mapping(
+                current_linux_process_pid(),
+                address + (page * PAGE_SIZE) as u64,
+            )
+            .is_some_and(|(_, _, writable)| !writable)
+        })
+    {
+        return LINUX_EACCES;
     }
     if protection & LINUX_PROT_WRITE != 0 {
         for page in 0..pages {

@@ -77,6 +77,8 @@ struct XattrPage {
 #[derive(Clone, Copy)]
 struct SharedMapping {
     active: bool,
+    // Linux VM_MAYWRITE: clear when the descriptor was not opened for writing.
+    writable: bool,
     pid: u32,
     address: u64,
     handle: Handle,
@@ -86,6 +88,7 @@ struct SharedMapping {
 impl SharedMapping {
     const EMPTY: Self = Self {
         active: false,
+        writable: false,
         pid: 0,
         address: 0,
         handle: Handle {
@@ -205,6 +208,7 @@ pub(crate) fn register_shared_mapping(
     address: u64,
     handle: Handle,
     offset: usize,
+    writable: bool,
 ) -> bool {
     if pid == 0 || !address.is_multiple_of(PAGE_SIZE as u64) || metadata(handle).is_none() {
         return false;
@@ -226,6 +230,7 @@ pub(crate) fn register_shared_mapping(
         if let Some(mapping) = mappings.mappings.iter_mut().find(|mapping| !mapping.active) {
             *mapping = SharedMapping {
                 active: true,
+                writable,
                 pid,
                 address,
                 handle,
@@ -253,6 +258,7 @@ pub(crate) fn register_shared_mapping(
     };
     *mapping = SharedMapping {
         active: true,
+        writable,
         pid,
         address,
         handle,
@@ -261,7 +267,7 @@ pub(crate) fn register_shared_mapping(
     true
 }
 
-pub(crate) fn shared_mapping(pid: u32, address: u64) -> Option<(Handle, usize)> {
+pub(crate) fn shared_mapping(pid: u32, address: u64) -> Option<(Handle, usize, bool)> {
     let overlay = live()?;
     let mut page = overlay.first_mapping_page;
     while page != FrameLease::EMPTY {
@@ -271,7 +277,7 @@ pub(crate) fn shared_mapping(pid: u32, address: u64) -> Option<(Handle, usize)> 
             .iter()
             .find(|mapping| mapping.active && mapping.pid == pid && mapping.address == address)
         {
-            return Some((mapping.handle, mapping.offset));
+            return Some((mapping.handle, mapping.offset, mapping.writable));
         }
         page = mappings.next;
     }
@@ -360,7 +366,13 @@ pub(crate) fn clone_shared_mappings(parent: u32, child: u32) -> bool {
         let Some(mapping) = selected else {
             return false;
         };
-        if !register_shared_mapping(child, mapping.address, mapping.handle, mapping.offset) {
+        if !register_shared_mapping(
+            child,
+            mapping.address,
+            mapping.handle,
+            mapping.offset,
+            mapping.writable,
+        ) {
             remove_process_shared_mappings(child);
             return false;
         }
