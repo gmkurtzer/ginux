@@ -4596,6 +4596,9 @@ pub(crate) fn copy_to_linux_process(
             return false;
         };
         let mut value = unsafe { leaf.read() };
+        if value & LINUX_RUNTIME_SECRET != 0 {
+            return false;
+        }
         if value & (PRESENT | USER | WRITABLE) == PRESENT | USER
             && crate::linux_process::prepare_live_process_write(pid, page)
         {
@@ -5868,18 +5871,57 @@ pub(crate) fn install_current_linux_shared_page(
 }
 
 pub(crate) fn mark_current_linux_runtime_page_secret(address: u64) -> bool {
-    let Some(entry) = current_linux_leaf(address) else {
+    let Some(root) = memory::live_frame_lease(memory::FrameOwner::KERNEL, current_root()) else {
         return false;
     };
-    let value = unsafe { entry.read() };
-    if !linux_runtime_page_from_value(value).occupied {
+    set_linux_mapping_secret_in_root(root, address, true)
+}
+
+pub(crate) fn linux_mapping_secret_in_root(root: memory::FrameLease, address: u64) -> Option<bool> {
+    if address >= 1 << 47 || !address.is_multiple_of(PAGE_SIZE as u64) {
+        return None;
+    }
+    let (_, value) = linux_mapping_leaf_value_in_root(root, address)?;
+    (value & (PRESENT | USER) == PRESENT | USER).then_some(value & LINUX_RUNTIME_SECRET != 0)
+}
+
+fn linux_mapping_leaf_value_in_root(
+    root: memory::FrameLease,
+    address: u64,
+) -> Option<(*mut u64, u64)> {
+    if !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[root]) {
+        return None;
+    }
+    let entry = linux_leaf_in_root(root.address(), address)?;
+    Some((entry, unsafe { entry.read() }))
+}
+
+pub(crate) fn set_linux_mapping_secret_in_root(
+    root: memory::FrameLease,
+    address: u64,
+    enabled: bool,
+) -> bool {
+    if address >= 1 << 47 || !address.is_multiple_of(PAGE_SIZE as u64) {
         return false;
     }
-    unsafe {
-        entry.write(value | LINUX_RUNTIME_SECRET);
-        asm!("invlpg [{}]", in(reg) address, options(nostack, preserves_flags));
+    let Some((entry, value)) = linux_mapping_leaf_value_in_root(root, address) else {
+        return false;
+    };
+    if value & (PRESENT | USER) != PRESENT | USER {
+        return false;
     }
-    linux_runtime_page_from_value(unsafe { entry.read() }).secret
+    let replacement = if enabled {
+        value | LINUX_RUNTIME_SECRET
+    } else {
+        value & !LINUX_RUNTIME_SECRET
+    };
+    unsafe {
+        entry.write(replacement);
+        if root.address() == current_root() {
+            asm!("invlpg [{}]", in(reg) address, options(nostack, preserves_flags));
+        }
+    }
+    linux_mapping_secret_in_root(root, address) == Some(enabled)
 }
 
 pub(crate) fn set_current_linux_runtime_page_dontfork(address: u64, enabled: bool) -> bool {

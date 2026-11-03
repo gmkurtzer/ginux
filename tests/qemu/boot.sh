@@ -3371,6 +3371,10 @@ if ! grep -q '^ginux: Linux cross-process memory transfer validated' "$output_fi
     echo "Boot test failed: Linux cross-process memory transfer was not validated." >&2
     exit 1
 fi
+if ! grep -q '^ginux: secret process memory excluded from remote copy' "$output_file"; then
+    echo "Boot test failed: remote process copy did not exclude secret memory." >&2
+    exit 1
+fi
 if ! grep -q '^ginux: Linux cross-process resource comparison validated' "$output_file"; then
     echo "Boot test failed: Linux cross-process resource comparison was not validated." >&2
     exit 1

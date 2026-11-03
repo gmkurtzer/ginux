@@ -3078,9 +3078,15 @@ pub(crate) fn write_live_process_u32(pid: u32, address: u64, value: u32) -> bool
     if offset + size_of::<u32>() > PAGE_SIZE {
         return false;
     }
+    let Some(root) = live_process_root(pid) else {
+        return false;
+    };
     let Some(mapping) = live_process_mapping(pid, page).filter(|mapping| mapping.writable) else {
         return false;
     };
+    if address_space::linux_mapping_secret_in_root(root, page as u64) != Some(false) {
+        return false;
+    }
     let Some(frame) = mapping.frame.direct_map_address() else {
         return false;
     };
@@ -3116,9 +3122,14 @@ pub(crate) fn live_process_range_mapped(
     if length == 0 {
         return true;
     }
+    let Some(root) = live_process_root(pid) else {
+        return false;
+    };
     let mut page = address & !(PAGE_SIZE - 1);
     while page < end {
-        if live_process_mapping(pid, page).is_none_or(|mapping| writable && !mapping.writable) {
+        if live_process_mapping(pid, page).is_none_or(|mapping| writable && !mapping.writable)
+            || address_space::linux_mapping_secret_in_root(root, page as u64) != Some(false)
+        {
             return false;
         }
         let Some(next) = page.checked_add(PAGE_SIZE) else {
@@ -3139,11 +3150,17 @@ fn copy_live_process_bytes(
     let Ok(mut address) = usize::try_from(address) else {
         return false;
     };
+    let Some(root) = live_process_root(pid) else {
+        return false;
+    };
     let mut copied = 0;
     while copied < buffer_length {
         let page = address & !(PAGE_SIZE - 1);
         let offset = address & (PAGE_SIZE - 1);
         let length = (buffer_length - copied).min(PAGE_SIZE - offset);
+        if address_space::linux_mapping_secret_in_root(root, page as u64) != Some(false) {
+            return false;
+        }
         if write && !prepare_live_process_write(pid, page) {
             return false;
         }
@@ -3173,13 +3190,16 @@ fn copy_live_process_bytes(
 }
 
 pub(crate) fn prepare_live_process_write(pid: u32, address: usize) -> bool {
+    let Some(root) = live_process_root(pid) else {
+        return false;
+    };
+    if address_space::linux_mapping_secret_in_root(root, address as u64) != Some(false) {
+        return false;
+    }
     let Some(mapping) =
         live_process_mapping(pid, address).filter(|mapping| mapping.writable && !mapping.shared)
     else {
         return live_process_mapping(pid, address).is_some_and(|mapping| mapping.writable);
-    };
-    let Some(root) = live_process_root(pid) else {
-        return false;
     };
     if address_space::linux_cow_page_in_root(root, address as u64) != Some(mapping.frame) {
         return true;

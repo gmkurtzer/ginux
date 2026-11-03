@@ -36576,6 +36576,7 @@ fn verify_linux_running_child_wait_selectors(pid: u32) -> bool {
         serial_write("ginux: Linux process-group wait selectors validated\r\n");
         serial_write("ginux: Linux nonblocking pidfd wait validated\r\n");
         serial_write("ginux: Linux cross-process memory transfer validated\r\n");
+        serial_write("ginux: secret process memory excluded from remote copy\r\n");
         serial_write("ginux: Linux cross-process resource comparison validated\r\n");
         serial_write("ginux: Linux shared open-file position validated\r\n");
         serial_write("ginux: Linux cross-process pidfd descriptor duplication validated\r\n");
@@ -36740,9 +36741,49 @@ fn verify_linux_cross_process_vm(pid: u32) -> bool {
                 && linux_process_vm_iov(u64::from(pid), mapping + 32, 1, mapping + 16, 1, 0, false)
                     == LINUX_EFAULT
         };
+    let mut secret_excluded = false;
+    if errors {
+        remote[..8].copy_from_slice(&target.to_ne_bytes());
+        remote[8..].copy_from_slice(&(LENGTH as u64).to_ne_bytes());
+        let mut before = [0_u8; LENGTH];
+        if let Some(root) = linux_process::live_process_root(pid) {
+            let prepared = copy_to_linux_user(mapping + 16, &remote)
+                && linux_process::copy_from_live_process(pid, target, &mut before);
+            let marked =
+                prepared && address_space::set_linux_mapping_secret_in_root(root, target, true);
+            if marked {
+                let read_denied = linux_process_vm_iov(
+                    u64::from(pid),
+                    mapping + 32,
+                    1,
+                    mapping + 16,
+                    1,
+                    0,
+                    false,
+                ) == LINUX_EFAULT;
+                let write_denied =
+                    linux_process_vm_iov(u64::from(pid), mapping, 1, mapping + 16, 1, 0, true)
+                        == LINUX_EFAULT;
+                let helpers_denied =
+                    !linux_process::live_process_range_mapped(pid, target, LENGTH, false)
+                        && !linux_process::live_process_range_mapped(pid, target, LENGTH, true)
+                        && !linux_process::copy_from_live_process(pid, target, &mut [0_u8; LENGTH])
+                        && !linux_process::copy_to_live_process(pid, target, &pattern);
+                let cleared = address_space::set_linux_mapping_secret_in_root(root, target, false);
+                let mut after = [0_u8; LENGTH];
+                secret_excluded = read_denied
+                    && write_denied
+                    && helpers_denied
+                    && cleared
+                    && linux_process::copy_from_live_process(pid, target, &mut after)
+                    && after == before;
+            }
+        }
+    }
     let restored = linux_process::copy_to_live_process(pid, target, &original);
     let workspace_restored = copy_to_linux_user(mapping, &workspace);
-    let valid = partial && permission && errors && restored && workspace_restored;
+    let valid =
+        partial && permission && errors && secret_excluded && restored && workspace_restored;
     if !valid {
         serial_write("ginux: Linux cross-process memory validation failed:");
         for value in [
@@ -36753,6 +36794,7 @@ fn verify_linux_cross_process_vm(pid: u32) -> bool {
             partial,
             permission,
             errors,
+            secret_excluded,
             restored,
             workspace_restored,
         ] {
