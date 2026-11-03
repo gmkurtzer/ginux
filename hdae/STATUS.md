@@ -2,15 +2,16 @@
 
 ## Current checkpoint
 
-- Project establishment records are committed on `main`; the implementation
-  batch is authorized.
+- Gate 1, foundation and interception proof, is technically passed on branch
+  `hdae/foundation-interception` and is pending pull-request delivery and human
+  acceptance.
 - Authoritative name: Ginus (Ginux Userspace).
 - Runtime isolation unit: domain.
 - Policy unit: versioned contract.
 - Initial gate map: thirteen checkpoint gates under `hdae/gates-todo/`.
 - Gates 1 through 13 are authorized as an ordered batch, but each remains a
   human checkpoint requiring a working demonstration and explicit acceptance.
-- Gate 1 is authorized to begin after this alignment update is committed.
+- Gate 2 must not begin until Gate 1 is explicitly accepted.
 
 ## Governing outcome and invariants
 
@@ -37,27 +38,36 @@ scope, threat model, and invariants.
 - Coverage review: functionality, failure behavior, deterministic tests, user
   configuration, documentation, compatibility, recovery, performance, and
   security are assigned to explicit gates; none is silently omitted.
-- Implementation evidence: not run; no gate has begun.
+- Gate 1 clean verification on 2026-11-03 passed `make doctor`, `make build`,
+  `make check`, `make test-unit`, `make test-intercept`, `make test`,
+  `make bench-baseline`, and `make demo-gate-1` under QEMU TCG.
+- The demo showed virtual `getpid` 4242, checked write mediation without host
+  execution, `uname` denied with `EPERM`, no direct-write marker, successful
+  QEMU shutdown, and no remaining background process.
+- The baseline recorded 30 nanosecond samples across matched direct-Linux and
+  namespace-container CPU, syscall, and process workloads, with five
+  repetitions and variance for each combination.
 
 ## Open decisions and limitations
 
-- The exact Rocky image, emulation-compatible trap design, image preparation backend,
-  configuration syntax, network backend, performance budgets, and public CVE
-  remain decisions assigned to later gates.
+- `PTRACE_SYSEMU` is accepted only as the Gate 1 bootstrap experiment. The
+  final Ginus execution/task/memory design remains a Gate 3 decision.
+- The exact Rocky image, image preparation backend, configuration syntax,
+  network backend, performance budgets, and public CVE remain decisions
+  assigned to later gates.
 - The repository and directory still use the historical `usshim` name; rename
   is not authorized in the current planning task.
 
 ## Exact next action
 
-Commit this alignment update, create branch `hdae/foundation-interception`, and
-execute Gate 1 through fresh automated evidence and `make demo-gate-1`. Push
-the branch, open its pull request, and stop for human acceptance.
+Commit the Gate 1 evidence, push `hdae/foundation-interception`, open and record
+its pull request, then stop for human acceptance after `make demo-gate-1`.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 1 authorized; alignment update pending before branch work
-- Last evidence: planning records only; implementation not run
+- Active gate: Gate 1 technically passed; delivery and human acceptance pending
+- Last evidence: full clean Gate 1 command set passed on 2026-11-03
 - Required human decision: accept or reject Gate 1 after its demonstration

@@ -1,7 +1,12 @@
 #!/bin/sh
 set -eu
 
-case "${1:-build}" in
-    build) rm -rf build ;;
-    *) printf '%s\n' 'refusing unsafe build cleanup' >&2; exit 1 ;;
-esac
+rm -rf \
+    build/initramfs-root \
+    build/ginus-initramfs.cpio.gz \
+    build/gate1-intercept.log \
+    build/bench-baseline.log \
+    build/bench-baseline.csv \
+    build/bench-baseline-summary.csv
+
+printf '%s\n' 'cleaned generated Gate 1 artifacts; retained build/cache'

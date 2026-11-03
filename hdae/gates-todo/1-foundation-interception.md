@@ -38,15 +38,21 @@ invoke the host syscall ABI directly.
 
 ## Completed work
 
-- [ ] None; gate not started.
+- [x] Created the Rust workspace, cross-target build, Makefile interface, and
+  checksum-pinned QEMU TCG x86-64 harness.
+- [x] Implemented a PID-1 Ginus experiment using `PTRACE_SYSEMU`, a central
+  decision function, and a fixed unmodified managed ELF.
+- [x] Added positive emulation, checked mediation, denial, and direct-effect
+  negative tests.
+- [x] Added direct-Linux and Linux-namespace-container benchmark controls for
+  CPU, syscall, and process-startup workloads with five samples and variance.
+- [x] Documented the reference environment, threat model, mechanism decision,
+  human demo, benchmark method, and current limitations.
 
 ## Remaining work
 
-- [ ] Create the Rust and Makefile scaffold.
-- [ ] Implement the emulation-compatible interception experiment.
-- [ ] Add positive and negative interception tests.
-- [ ] Capture baseline benchmark results and environment metadata.
-- [ ] Reconcile the experiment with every architecture invariant.
+- [ ] Push the dedicated branch, open its pull request, and record the URL.
+- [ ] Human runs or reviews `make demo-gate-1` and accepts or rejects the gate.
 
 ## Acceptance criteria
 
@@ -83,13 +89,44 @@ invoke the host syscall ABI directly.
 
 ## Evidence
 
-- Not run.
+- Reference host: Darwin arm64; QEMU 10.1.2; Rust 1.98.1; x86-64 Linux target;
+  Alpine 3.24.3 kernel 6.18.58; QEMU TCG with no KVM requirement.
+- `make clean && make doctor && make build` -> clean cross-build succeeded;
+  doctor found every host tool and the verified cached kernel; generated
+  artifacts were rebuilt while the external cache was retained.
+- `make check` -> formatting and target-correct Clippy checks passed with
+  warnings denied for all four crates.
+- `make test-unit` -> three dispatcher unit tests passed.
+- `make test-intercept` -> QEMU booted Ginus as PID 1; managed `getpid`
+  returned virtual PID 4242; managed `write` was checked but not executed;
+  `uname` returned `EPERM`; the direct-write marker was absent; `GATE1: PASS`.
+- `make test` -> passed. The target graph contains no acquisition command and
+  used only the already verified cached kernel, so ordinary tests did not use
+  the network.
+- `make bench-baseline` -> 30 samples passed in one emulated x86-64 boot. Five
+  samples were recorded for each direct/container and CPU/syscall/process
+  combination with nanosecond units, mean, population variance, and standard
+  deviation. This run's means were direct CPU 9,290,541 ns, syscall 33,301,371
+  ns, process 28,975,450 ns; namespace-container CPU 9,597,893 ns, syscall
+  33,766,498 ns, process 28,405,868 ns.
+- `make demo-gate-1` -> printed the expected emulated, mediated, denied, bypass
+  negative, pass, and cleanup observations and exited zero.
+- Architecture reconciliation: the experiment proves central pre-effect
+  dispatch and no direct-continue path for the fixed single-threaded payload.
+  It intentionally does not yet implement the later Ginus-owned memory,
+  descriptor, virtual-filesystem, device, or versioned domain-contract models.
 
 ## Decisions and limitations
 
 - Rust and x86-64 are approved for the initial implementation.
 - KVM is outside initial acceptance. Gate 1 selects an interception mechanism
   that works inside QEMU TCG on the macOS arm64 development host.
+- `PTRACE_SYSEMU` is the Gate 1 bootstrap mechanism, not the final Ginus
+  execution architecture. Full Ginus-owned task and memory behavior remains a
+  Gate 3 decision.
+- The benchmark container control uses conventional Linux mount, PID, UTS, and
+  IPC namespaces without an OCI runtime. It measures matched kernel controls,
+  not Ginus overhead; budgets remain deferred to Gate 11.
 - Performance budgets remain open until baseline evidence exists.
 
 ## Delivery strategy
@@ -100,10 +137,13 @@ invoke the host syscall ABI directly.
   2026-11-03; never merge or close without explicit authorization
 - Planned commits: project scaffold and checks; interception proof and tests;
   benchmark controls and architecture evidence
-- Actual commits: pending
+- Actual commits: `b644e8b` (workspace and interception proof), `30e1c38`
+  (benchmark controls and design evidence), plus the pending evidence/delivery
+  commit. The first two planned implementation commits were combined because
+  the scaffold and executable proof formed one buildable change.
 
 ## Review policy and outcome
 
-Human checkpoint. Present `make demo-gate-1`, fresh automated evidence, and the
-pull request, then stop for acceptance before closing the gate or beginning
-Gate 2.
+Technically passed on 2026-11-03; delivery and human acceptance remain pending.
+Present `make demo-gate-1`, fresh automated evidence, and the pull request,
+then stop for acceptance before closing the gate or beginning Gate 2.
