@@ -1,0 +1,10 @@
+[package]
+name = "runtime-fixture"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+build = "build.rs"
+
+[[bin]]
+name = "runtime-fixture"
+path = "src/main.rs"
