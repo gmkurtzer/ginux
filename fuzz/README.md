@@ -63,9 +63,10 @@ cargo fuzz run --target x86_64-unknown-linux-gnu --sanitizer address \
 cargo fuzz coverage --target x86_64-unknown-linux-gnu oci_surfaces \
   corpus corpus-seed
 # cargo-fuzz 0.13.2 stops at the merged profile; summarise with llvm-cov
-# from the pinned toolchain (llvm-tools-preview):
+# from the pinned toolchain (llvm-tools-preview). The coverage build lives
+# under a separate target dir: target/<host>/coverage/<triple>/release/:
 "$(rustc --print sysroot)/lib/rustlib/x86_64-unknown-linux-gnu/bin/llvm-cov" report \
-  target/x86_64-unknown-linux-gnu/release/oci_surfaces \
+  target/x86_64-unknown-linux-gnu/coverage/x86_64-unknown-linux-gnu/release/oci_surfaces \
   -instr-profile=coverage/oci_surfaces/coverage.profdata -summary-only
 # -> coverage/oci_surfaces/coverage.profdata + the per-file/TOTAL report table
 ```
