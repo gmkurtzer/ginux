@@ -2,9 +2,11 @@ use ginus_vfs::{
     encode_header, encode_record, Entry, Index, NodeKind, HEADER_SIZE, MAX_LINK, MAX_PATH,
     RECORD_SIZE,
 };
+use std::collections::BTreeMap;
 use std::env;
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{copy, Read, Seek, SeekFrom, Write};
+use std::path::PathBuf;
 
 type PaxRecords<'a> = Vec<(&'a [u8], &'a [u8])>;
 
@@ -20,18 +22,42 @@ struct OwnedEntry {
     link: Vec<u8>,
 }
 
+#[derive(Debug)]
+struct LayerRecord {
+    layer: usize,
+    path: Vec<u8>,
+    kind: u8,
+    record_offset: u64,
+    record_len: u64,
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut arguments = env::args_os();
     let _program = arguments.next();
-    let input = arguments
-        .next()
-        .ok_or("usage: ginus-vfs-index ROOTFS.tar OUTPUT.index")?;
+    let first = arguments.next().ok_or(
+        "usage: ginus-vfs-index ROOTFS.tar OUTPUT.index | assemble OUTPUT.tar OUTPUT.index LAYER.tar...",
+    )?;
+    if first == "assemble" {
+        let rootfs = arguments.next().ok_or("missing assembled rootfs output")?;
+        let index = arguments.next().ok_or("missing assembled index output")?;
+        let layers = arguments.map(PathBuf::from).collect::<Vec<_>>();
+        if layers.is_empty() {
+            return Err("at least one OCI layer is required".into());
+        }
+        let rootfs = PathBuf::from(rootfs);
+        assemble_layers(&layers, rootfs.clone())?;
+        return build_assembled_index(rootfs, PathBuf::from(index), layers.len());
+    }
     let output = arguments
         .next()
         .ok_or("usage: ginus-vfs-index ROOTFS.tar OUTPUT.index")?;
     if arguments.next().is_some() {
         return Err("usage: ginus-vfs-index ROOTFS.tar OUTPUT.index".into());
     }
+    build_index_from(first.into(), output.into())
+}
+
+fn build_index_from(input: PathBuf, output: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     let mut source = File::open(input)?;
     let source_len = source.metadata()?.len();
     let mut entries = scan_tar(&mut source, source_len)?;
@@ -63,6 +89,160 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     drop(destination);
     verify_index(&mut source, File::open(output)?)?;
     Ok(())
+}
+
+fn build_assembled_index(
+    rootfs: PathBuf,
+    output: PathBuf,
+    layer_count: usize,
+) -> Result<(), Box<dyn std::error::Error>> {
+    build_index_from(rootfs, output)?;
+    println!("ASSEMBLE: layers={layer_count} whiteouts=applied");
+    Ok(())
+}
+
+fn assemble_layers(
+    layer_paths: &[PathBuf],
+    output: PathBuf,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut merged = BTreeMap::<Vec<u8>, LayerRecord>::new();
+    let mut layers = Vec::with_capacity(layer_paths.len());
+    for (layer_index, path) in layer_paths.iter().enumerate() {
+        let mut source = File::open(path)?;
+        let source_len = source.metadata()?.len();
+        let records = scan_layer(&mut source, source_len, layer_index)?;
+
+        for record in records.iter().filter(|record| whiteout(record).is_some()) {
+            let (target, opaque) = whiteout(record).expect("filtered whiteout");
+            if opaque {
+                remove_descendants(&mut merged, &target);
+            } else {
+                merged.remove(&target);
+                remove_descendants(&mut merged, &target);
+            }
+        }
+        for record in records {
+            if whiteout(&record).is_some() {
+                continue;
+            }
+            if !matches!(record.kind, 0 | b'0' | b'2' | b'5' | b'7') {
+                continue;
+            }
+            if !matches!(record.kind, b'5') {
+                remove_descendants(&mut merged, &record.path);
+            }
+            merged.insert(record.path.clone(), record);
+        }
+        layers.push(source);
+    }
+
+    let mut destination = File::create(output)?;
+    for record in merged.values() {
+        let source = layers
+            .get_mut(record.layer)
+            .ok_or("invalid layer record source")?;
+        source.seek(SeekFrom::Start(record.record_offset))?;
+        let copied = copy(&mut source.take(record.record_len), &mut destination)?;
+        if copied != record.record_len {
+            return Err("truncated OCI layer record".into());
+        }
+    }
+    destination.write_all(&[0u8; 1024])?;
+    destination.flush()?;
+    Ok(())
+}
+
+fn scan_layer(
+    source: &mut File,
+    source_len: u64,
+    layer: usize,
+) -> Result<Vec<LayerRecord>, Box<dyn std::error::Error>> {
+    let mut records = Vec::new();
+    let mut offset = 0u64;
+    let mut pending_offset: Option<u64> = None;
+    let mut pax_path: Option<Vec<u8>> = None;
+    while offset + 512 <= source_len {
+        source.seek(SeekFrom::Start(offset))?;
+        let mut header = [0u8; 512];
+        source.read_exact(&mut header)?;
+        if header.iter().all(|byte| *byte == 0) {
+            break;
+        }
+        verify_checksum(&header)?;
+        let size = parse_octal(&header[124..136])?;
+        let data_offset = offset + 512;
+        let padded = size.checked_add(511).ok_or("tar size overflow")? / 512 * 512;
+        let end = data_offset
+            .checked_add(padded)
+            .ok_or("tar offset overflow")?;
+        if end > source_len {
+            return Err("truncated OCI layer entry".into());
+        }
+        match header[156] {
+            b'g' => return Err("global PAX headers are unsupported in OCI layers".into()),
+            b'x' => {
+                if pending_offset.is_none() {
+                    pending_offset = Some(offset);
+                }
+                let size_usize = usize::try_from(size).map_err(|_| "PAX record too large")?;
+                let mut data = vec![0u8; size_usize];
+                source.read_exact(&mut data)?;
+                for (key, value) in parse_pax(&data)? {
+                    if key == b"path" {
+                        pax_path = Some(value.to_vec());
+                    }
+                }
+            }
+            kind => {
+                let path = pax_path.take().unwrap_or_else(|| header_path(&header));
+                let path = normalize_archive_path(&path)?;
+                let record_offset = pending_offset.take().unwrap_or(offset);
+                records.push(LayerRecord {
+                    layer,
+                    path,
+                    kind,
+                    record_offset,
+                    record_len: end - record_offset,
+                });
+            }
+        }
+        offset = end;
+    }
+    if pending_offset.is_some() {
+        return Err("OCI layer ends with an unattached PAX header".into());
+    }
+    Ok(records)
+}
+
+fn whiteout(record: &LayerRecord) -> Option<(Vec<u8>, bool)> {
+    let slash = record.path.iter().rposition(|byte| *byte == b'/')?;
+    let parent = &record.path[..slash];
+    let name = &record.path[slash + 1..];
+    if name == b".wh..wh..opq" {
+        return Some((if parent.is_empty() { b"/" } else { parent }.to_vec(), true));
+    }
+    let target_name = name.strip_prefix(b".wh.")?;
+    if target_name.is_empty() {
+        return None;
+    }
+    let mut target = if parent.is_empty() {
+        b"/".to_vec()
+    } else {
+        parent.to_vec()
+    };
+    if target.len() > 1 {
+        target.push(b'/');
+    }
+    target.extend_from_slice(target_name);
+    Some((target, false))
+}
+
+fn remove_descendants(merged: &mut BTreeMap<Vec<u8>, LayerRecord>, path: &[u8]) {
+    let mut prefix = path.to_vec();
+    if prefix != b"/" {
+        prefix.push(b'/');
+    }
+    merged.retain(|candidate, _| !candidate.starts_with(&prefix));
 }
 
 fn verify_index(source: &mut File, mut index_file: File) -> Result<(), Box<dyn std::error::Error>> {
