@@ -31,7 +31,6 @@ use smoltcp::{
 };
 
 use crate::{
-    dns_binding::{capture_dns_query, first_bound_dns_a_record, DnsQueryBinding},
     reset_registry_allocator, RX_AVAIL_OFFSET, RX_BUFFER_OFFSET, RX_DESCRIPTOR_LENGTH,
     RX_DESC_OFFSET, RX_USED_OFFSET, TX_AVAIL_OFFSET, TX_BUFFER_OFFSET, TX_DESC_OFFSET,
     TX_HEADER_LENGTH, TX_USED_OFFSET,
@@ -61,8 +60,6 @@ struct RegistryServiceOwner {
     timestamp_origin: AtomicU64,
     network_clock_polls: AtomicU64,
     network_clock_milliseconds: AtomicU64,
-    dns_fallback_a: UnsafeCell<u32>,
-    dns_query_binding: UnsafeCell<Option<DnsQueryBinding>>,
     tcp_rx: UnsafeCell<[u8; TCP_BUFFER_SIZE]>,
     tcp_tx: UnsafeCell<[u8; TCP_BUFFER_SIZE]>,
     dns_queries: UnsafeCell<[Option<dns::DnsQuery>; 1]>,
@@ -83,8 +80,6 @@ static REGISTRY_SERVICE: RegistryServiceOwner = RegistryServiceOwner {
     timestamp_origin: AtomicU64::new(0),
     network_clock_polls: AtomicU64::new(0),
     network_clock_milliseconds: AtomicU64::new(0),
-    dns_fallback_a: UnsafeCell::new(0),
-    dns_query_binding: UnsafeCell::new(None),
     tcp_rx: UnsafeCell::new([0; TCP_BUFFER_SIZE]),
     tcp_tx: UnsafeCell::new([0; TCP_BUFFER_SIZE]),
     dns_queries: UnsafeCell::new([None]),
@@ -1437,7 +1432,7 @@ fn read_chunked(stream: &mut impl Read, initial: &[u8], sink: &mut impl BodySink
     }
 }
 
-unsafe fn resolve(
+fn resolve(
     host: &str,
     interface: &mut Interface,
     device: &mut VirtioNet,
@@ -1445,8 +1440,6 @@ unsafe fn resolve(
     handle: SocketHandle,
 ) -> Option<IpAddress> {
     for _ in 0..3 {
-        *REGISTRY_SERVICE.dns_fallback_a.get() = 0;
-        *REGISTRY_SERVICE.dns_query_binding.get() = None;
         // smoltcp stamps the query timeout from the last poll; refresh it so
         // time spent outside the stack does not expire the query at once.
         let _ = interface.poll(network_now(), device, sockets);
@@ -1469,14 +1462,6 @@ unsafe fn resolve(
                 break;
             }
             let _ = interface.poll(now, device, sockets);
-            let fallback = core::mem::replace(&mut *REGISTRY_SERVICE.dns_fallback_a.get(), 0);
-            if fallback != 0 {
-                sockets.get_mut::<dns::Socket>(handle).cancel_query(query);
-                *REGISTRY_SERVICE.dns_query_binding.get() = None;
-                return Some(IpAddress::Ipv4(Ipv4Address::from_octets(
-                    fallback.to_be_bytes(),
-                )));
-            }
             match sockets
                 .get_mut::<dns::Socket>(handle)
                 .get_query_result(query)
@@ -1484,7 +1469,6 @@ unsafe fn resolve(
                 Ok(addresses) => {
                     pending = false;
                     if let Some(address) = addresses.first().copied() {
-                        *REGISTRY_SERVICE.dns_query_binding.get() = None;
                         return Some(address);
                     }
                     break;
@@ -1499,7 +1483,6 @@ unsafe fn resolve(
         if pending {
             sockets.get_mut::<dns::Socket>(handle).cancel_query(query);
         }
-        *REGISTRY_SERVICE.dns_query_binding.get() = None;
     }
     None
 }
@@ -1696,13 +1679,6 @@ impl RxToken for VirtioRxToken {
                 (device.dma + RX_BUFFER_OFFSET as usize + TX_HEADER_LENGTH) as *const u8,
                 self.1,
             );
-            let binding = *REGISTRY_SERVICE.dns_query_binding.get();
-            if let Some(address) = binding
-                .as_ref()
-                .and_then(|binding| first_bound_dns_a_record(bytes, binding))
-            {
-                *REGISTRY_SERVICE.dns_fallback_a.get() = address;
-            }
             let result = callback(bytes);
             device.rx_used = device.rx_used.wrapping_add(1);
             device.post_receive();
@@ -1732,9 +1708,6 @@ impl TxToken for VirtioTxToken {
                 length,
             );
             let result = callback(bytes);
-            if let Some(binding) = capture_dns_query(bytes) {
-                *REGISTRY_SERVICE.dns_query_binding.get() = Some(binding);
-            }
             write_u64(
                 device.dma + TX_DESC_OFFSET as usize,
                 device.dma_device + TX_BUFFER_OFFSET,

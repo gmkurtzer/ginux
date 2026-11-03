@@ -31,7 +31,6 @@ use ginux_native_abi::{
     NATIVE_SERVICE_EXIT_RESTART_REQUIRED,
 };
 
-mod dns_binding;
 mod registry;
 
 const TLS_HEAP_SIZE: usize = 128 * 1024;

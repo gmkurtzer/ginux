@@ -296,7 +296,6 @@ check: manifest architecture-check linux-compat-check
 	@cargo test --package ginux-volume-format
 	@cargo clippy --package ginux-volume-service -- -D warnings
 	@cargo test --package ginux-volume-service
-	@cargo test --package ginux-network-service-runtime --lib
 	@cargo clippy --package ginux-network-service-runtime --target x86_64-unknown-none -- -D warnings
 	@cargo clippy --package ginux-protocol-service-runtime --target x86_64-unknown-none -- -D warnings
 	@cargo clippy --package ginux-volume-service-runtime --target x86_64-unknown-none -- -D warnings

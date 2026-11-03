@@ -16,6 +16,7 @@ use smoltcp::{
 
 use crate::{
     arch::x86_64::{
+        cpu::linux_startup_random,
         iommu::{DeviceTranslation, DeviceTranslationProfile},
         paging::MmioMapping,
         pci::{self, VirtioNetworkDevice, VirtioNetworkInitialization},
@@ -2195,6 +2196,9 @@ fn runtime() -> Result<&'static mut Runtime, Error> {
     if ipv4 == 0 || prefix > 32 || gateway == 0 {
         return Err(Error::Unavailable);
     }
+    let Some(interface_entropy) = linux_startup_random() else {
+        return Err(Error::Unavailable);
+    };
     let receive = platform
         .notification
         .address(platform.initialization.receive_notification, 2)
@@ -2229,7 +2233,7 @@ fn runtime() -> Result<&'static mut Runtime, Error> {
     }
     let mut device = unsafe { VirtioNet::new(dma_virtual, dma.address(), receive, transmit) };
     let mut config = InterfaceConfig::new(EthernetAddress(platform.initialization.mac).into());
-    config.random_seed = u64::from(ipv4) << 32 | u64::from(gateway);
+    config.random_seed = u64::from_ne_bytes(interface_entropy[..8].try_into().unwrap());
     let mut interface = Interface::new(config, &mut device, Instant::from_millis(0));
     interface.update_ip_addrs(|addresses| {
         let _ = addresses.push(IpCidr::new(
