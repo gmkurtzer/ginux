@@ -8,30 +8,55 @@
 - Branch: `hdae/issue-27-transactional-rootfs-exec`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 41, transactional rootfs exec for issue #27
-- Last completed action: delivered the partial-evidence staged rootfs exec in
-  PR #53 with a reciprocal issue summary; the Rocky registry DNS limitation is
-  explicit in both
-- Next action: create a dedicated gate/branch from `main` for issue #43,
-  reproduce release overflow behavior, implement the narrow fix, and measure
-  image-size plus boot impact
+- Last completed action: merged PR #52, closed issue #20, and synchronized PR
+  #53's staged exec transaction with domain-owned runtime frames on current
+  `main`
+- Next action: run `make check`, complete `make test`, and
+  `make test-rocky-shell`; merge PR #53 and close issue #27 only if every
+  mandatory criterion passes
 
 ## Current repository state
 
-Remote `main` is at `ecbb3142`. The first
+Remote `main` is at `b4628fc2`. The first
 eleven feedback-hardening gates and inserted correctness gates are complete.
-Gate 12 is complete on `codex/performance-parity`. Gate 41 is implemented but
-awaits a reachable OCI registry/cache for rootfs-specific integration on
-this branch; Gates 34 through 40 are delivered on dedicated PRs, including
-Gate 37 in PR #52.
-The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
-matrix and repeated stress pass. Gate 11's comparison and reduced evidence are
-under `docs/feedback-hardening/`. Gate 41 has not yet been pushed or merged.
+Gate 12 is complete on `codex/performance-parity`. PR #52 is merged and issue
+#20 is closed. Gate 41 is implemented and synchronized with current `main`, but
+still requires fresh static, complete QEMU, and rootfs-specific Rocky evidence.
+PR #54 remains open behind PR #53 in the serial merge train.
 
 ## Open decisions
 
-- None for Gate 41. The human selected staged address-space publication.
+- None for Gate 41. The human selected staged address-space publication. The
+  domain remains the unit of private payload memory ownership and accounting.
 
 ## Active diagnosis
+
+- Gate 43 now distinguishes ordinary inactive activation failure from failed
+  rollback. Ordinary failure permits table retirement only after rollback
+  proves translation disabled, caches invalidated, the root cleared, command
+  completion, and final inactive state. Ambiguous rollback leaves all six
+  table leases live and kernel-owned until reboot.
+- `make check` and complete `make test` pass; the deterministic QEMU marker is
+  `ginux: failed IOMMU activation rollback quarantined`.
+
+- Root cause: Gate 36 correctly allocated private payload frames to the domain,
+  but several leaf lookup, fork/exec, RELRO, and cleanup paths still assumed
+  every payload frame was kernel-owned. Allocation succeeded, then validation
+  treated the live domain-owned frame as absent.
+- Wayland is not involved. PR #56's clock change does not resolve the failure.
+- Payload leaves now accept exact live leases owned by the domain or kernel,
+  plus immutable runtime extents; hierarchy frames remain kernel-only.
+- `make check`, `make test`, and `make test-alpine` pass. Alpine completes its
+  shell, restart, and failure-containment probes under the 128 MiB budget.
+
+- Configurable allocator owner limits stop exactly at the container budget,
+  preserve independent owner capacity, and restore capacity after release.
+- Linux private mmap, exec, stack, copy-on-write, process, tmpfs, and SysV
+  frames use the generation-safe container owner; shared immutable file-cache
+  and page-table hierarchy frames remain kernel-owned by design.
+- `make check` passes with the unsafe inventory unchanged at 1,033 blocks.
+  `make test` passes the full two-vCPU QEMU and Linux runtime suite, including
+  atomic mmap-style and independent SysV quota-exhaustion markers.
 
 - Four-vCPU runtime work now dispatches independently to CPUs 1 through 3.
   A targeted nine-sample four-thread run produced a 2,924 events/s median,
