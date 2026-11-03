@@ -705,6 +705,12 @@ mod tests {
         assert_eq!(memory.load_elf(b"bad"), Err(LoadError::Truncated));
         let elf = elf_with(&[0x90], 7);
         assert_eq!(memory.load_elf(&elf), Err(LoadError::WriteExecuteSegment));
+        let mut outside = elf_with(&[0x90], 5);
+        outside[80..88].copy_from_slice(&ADDRESS_END.to_le_bytes());
+        assert_eq!(memory.load_elf(&outside), Err(LoadError::InvalidSegment));
+        let mut oversized = elf_with(&[0x90], 5);
+        oversized[96..104].copy_from_slice(&1024u64.to_le_bytes());
+        assert_eq!(memory.load_elf(&oversized), Err(LoadError::InvalidSegment));
     }
 
     #[test]
