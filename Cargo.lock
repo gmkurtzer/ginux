@@ -21,6 +21,7 @@ dependencies = [
  "ginus-core",
  "ginus-domain",
  "ginus-runtime",
+ "ginus-vfs",
 ]
 
 [[package]]

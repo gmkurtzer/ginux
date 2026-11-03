@@ -704,9 +704,9 @@ fn validate_reference(bytes: &[u8]) -> Result<(), ConfigError> {
     if bytes.is_empty()
         || bytes[0] == b'/'
         || bytes.windows(2).any(|window| window == b"..")
-        || !bytes
-            .iter()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b':'))
+        || !bytes.iter().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b':' | b'/' | b'@')
+        })
     {
         return Err(ConfigError::HostAuthority);
     }
@@ -938,6 +938,19 @@ policy = "stop"
         assert_eq!(
             DomainConfig::parse(traversal.as_bytes()),
             Err(ConfigError::HostAuthority)
+        );
+    }
+
+    #[test]
+    fn accepts_digest_pinned_oci_root_reference() {
+        let oci = VALID.replace(
+            "root = \"rocky-10.2\"",
+            "root = \"docker.io/rockylinux/rockylinux@sha256:e372170ca863\"",
+        );
+        let config = DomainConfig::parse(oci.as_bytes()).unwrap();
+        assert_eq!(
+            config.root.as_bytes(),
+            b"docker.io/rockylinux/rockylinux@sha256:e372170ca863"
         );
     }
 

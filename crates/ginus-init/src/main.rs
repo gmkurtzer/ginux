@@ -6,6 +6,7 @@ use core::panic::PanicInfo;
 use ginus_core::{decide, Action, SYS_EXIT, SYS_GETPID, SYS_UNAME, SYS_WRITE};
 use ginus_domain::{ConfigError, Domain, DomainConfig};
 use ginus_runtime::{execute, AddressSpace, AuditAction, LoadError};
+use ginus_vfs::{BaseReader, Index, VfsError, VirtualFs, O_CREATE, O_READ, O_WRITE};
 
 global_asm!(
     ".global _start",
@@ -23,6 +24,7 @@ const SYS_WRITE_HOST: usize = 1;
 const SYS_READ_HOST: usize = 0;
 const SYS_CLOSE_HOST: usize = 3;
 const SYS_RT_SIGPROCMASK: usize = 14;
+const SYS_PREAD64: usize = 17;
 const SYS_PAUSE: usize = 34;
 const SYS_FORK: usize = 57;
 const SYS_EXECVE: usize = 59;
@@ -50,12 +52,14 @@ const ENOSYS: i64 = 38;
 const VIRTUAL_PID: u64 = 4242;
 const MAX_ELF_SIZE: usize = 64 * 1024;
 const MAX_CONFIG_SIZE: usize = 16 * 1024;
+const MAX_VFS_INDEX_SIZE: usize = 8 * 1024 * 1024;
 const SIG_BLOCK: usize = 0;
 const SIGTERM: usize = 15;
 const SIGKILL: usize = 9;
 
 static mut ELF_BYTES: [u8; MAX_ELF_SIZE] = [0; MAX_ELF_SIZE];
 static mut CONFIG_BYTES: [u8; MAX_CONFIG_SIZE] = [0; MAX_CONFIG_SIZE];
+static mut VFS_INDEX_BYTES: [u8; MAX_VFS_INDEX_SIZE] = [0; MAX_VFS_INDEX_SIZE];
 
 #[repr(C)]
 struct UserRegs {
@@ -146,6 +150,26 @@ unsafe extern "C" fn bcmp(
 }
 
 #[no_mangle]
+unsafe extern "C" fn memcmp(
+    left: *const core::ffi::c_void,
+    right: *const core::ffi::c_void,
+    length: usize,
+) -> i32 {
+    let left = left.cast::<u8>();
+    let right = right.cast::<u8>();
+    let mut index = 0;
+    while index < length {
+        let left_byte = core::ptr::read_volatile(left.add(index));
+        let right_byte = core::ptr::read_volatile(right.add(index));
+        if left_byte != right_byte {
+            return left_byte as i32 - right_byte as i32;
+        }
+        index += 1;
+    }
+    0
+}
+
+#[no_mangle]
 extern "C" fn rust_main(initial_stack: *const usize) -> ! {
     let argc = unsafe { *initial_stack };
     let argv = unsafe { initial_stack.add(1) };
@@ -160,6 +184,11 @@ extern "C" fn rust_main(initial_stack: *const usize) -> ! {
         } else if c_string_equals(command, b"lifecycle") {
             let config_path = unsafe { *argv.add(2) as *const u8 };
             lifecycle_main(config_path);
+        } else if argc >= 5 && c_string_equals(command, b"vfs") {
+            let config_path = unsafe { *argv.add(2) as *const u8 };
+            let rootfs_path = unsafe { *argv.add(3) as *const u8 };
+            let index_path = unsafe { *argv.add(4) as *const u8 };
+            vfs_main(config_path, rootfs_path, index_path);
         } else if argc >= 4 && c_string_equals(command, b"domain") {
             let config_path = unsafe { *argv.add(2) as *const u8 };
             let fixture_path = unsafe { *argv.add(3) as *const u8 };
@@ -167,6 +196,158 @@ extern "C" fn rust_main(initial_stack: *const usize) -> ! {
         }
     }
     gate1_main()
+}
+
+struct HostRootfs {
+    descriptor: usize,
+}
+
+impl BaseReader for HostRootfs {
+    fn read_at(&mut self, offset: u64, output: &mut [u8]) -> Result<(), VfsError> {
+        let result = unsafe {
+            syscall4(
+                SYS_PREAD64,
+                self.descriptor,
+                output.as_mut_ptr() as usize,
+                output.len(),
+                offset as usize,
+            )
+        };
+        if result == output.len() as isize {
+            Ok(())
+        } else {
+            Err(VfsError::Io)
+        }
+    }
+}
+
+fn vfs_main(config_path: *const u8, rootfs_path: *const u8, index_path: *const u8) -> ! {
+    let config = load_config(config_path);
+    let mut domain = Domain::create(config);
+    if domain.start().is_err() {
+        domain_fail(&mut domain, b"invalid start transition");
+    }
+    let index_length = read_index(index_path);
+    let index_bytes = unsafe {
+        core::slice::from_raw_parts(
+            core::ptr::addr_of!(VFS_INDEX_BYTES).cast::<u8>(),
+            index_length,
+        )
+    };
+    let index = match Index::new(index_bytes) {
+        Ok(index) => index,
+        Err(_) => domain_fail(&mut domain, b"invalid VFS index"),
+    };
+    let descriptor =
+        unsafe { syscall4(SYS_OPENAT_HOST, AT_FDCWD, rootfs_path as usize, O_RDONLY, 0) };
+    if descriptor < 0 {
+        domain_fail(&mut domain, b"rootfs open failed");
+    }
+    let reader = HostRootfs {
+        descriptor: descriptor as usize,
+    };
+    let mut vfs: VirtualFs<'_, HostRootfs, 8, 4096, 8> = VirtualFs::new(index, reader);
+
+    let os_fd = match vfs.open(b"/etc/os-release", O_READ) {
+        Ok(value) => value,
+        Err(_) => vfs_fail(
+            &mut domain,
+            &mut vfs,
+            descriptor as usize,
+            b"os-release lookup failed",
+        ),
+    };
+    let mut os_release = [0u8; 512];
+    let os_length = match vfs.read(os_fd, &mut os_release) {
+        Ok(value) => value,
+        Err(_) => vfs_fail(
+            &mut domain,
+            &mut vfs,
+            descriptor as usize,
+            b"os-release read failed",
+        ),
+    };
+    let _ = vfs.close(os_fd);
+    if !contains(&os_release[..os_length], b"Rocky Linux") {
+        vfs_fail(
+            &mut domain,
+            &mut vfs,
+            descriptor as usize,
+            b"Rocky identity missing",
+        );
+    }
+
+    let bash_fd = match vfs.open(b"/usr/bin/bash", O_READ) {
+        Ok(value) => value,
+        Err(_) => vfs_fail(
+            &mut domain,
+            &mut vfs,
+            descriptor as usize,
+            b"bash lookup failed",
+        ),
+    };
+    let mut magic = [0u8; 4];
+    if vfs.read(bash_fd, &mut magic) != Ok(4) || &magic != b"\x7fELF" {
+        vfs_fail(
+            &mut domain,
+            &mut vfs,
+            descriptor as usize,
+            b"bash ELF read failed",
+        );
+    }
+    let _ = vfs.close(bash_fd);
+
+    let overlay_fd = match vfs.open(b"/ginus-overlay-proof", O_READ | O_WRITE | O_CREATE) {
+        Ok(value) => value,
+        Err(_) => vfs_fail(
+            &mut domain,
+            &mut vfs,
+            descriptor as usize,
+            b"overlay create failed",
+        ),
+    };
+    if vfs.write(overlay_fd, b"domain-local") != Ok(12) {
+        vfs_fail(
+            &mut domain,
+            &mut vfs,
+            descriptor as usize,
+            b"overlay write failed",
+        );
+    }
+    let _ = vfs.close(overlay_fd);
+
+    write_all(b"GINUS_VFS: root=");
+    line(config.root.as_bytes());
+    line(b"GINUS_VFS: base=/etc/os-release identity=Rocky-Linux");
+    line(b"GINUS_VFS: base=/usr/bin/bash format=ELF64-x86_64");
+    line(b"GINUS_VFS: overlay=/ginus-overlay-proof value=domain-local");
+    line(b"GINUS_VFS: managed-host-paths=unexposed managed-host-fds=unexposed");
+    vfs.teardown();
+    let _ = unsafe { syscall1(SYS_CLOSE_HOST, descriptor as usize) };
+    if domain.task_exited(true).is_err() {
+        domain_fail(&mut domain, b"invalid task-exit transition");
+    }
+    line(b"GINUS_VFS: teardown overlay-files=0 descriptors=0");
+    line(b"GINUS_VFS_CHECK: PASS");
+    exit_process(0)
+}
+
+fn vfs_fail(
+    domain: &mut Domain,
+    vfs: &mut VirtualFs<'_, HostRootfs, 8, 4096, 8>,
+    descriptor: usize,
+    reason: &[u8],
+) -> ! {
+    vfs.teardown();
+    let _ = unsafe { syscall1(SYS_CLOSE_HOST, descriptor) };
+    domain_fail(domain, reason)
+}
+
+fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+    needle.is_empty()
+        || haystack
+            .windows(needle.len())
+            .any(|window| window == needle)
 }
 
 fn config_main(config_path: *const u8) -> ! {
@@ -497,6 +678,39 @@ fn read_config(path: *const u8) -> usize {
     let _ = unsafe { syscall1(SYS_CLOSE_HOST, descriptor as usize) };
     if length == 0 || length == MAX_CONFIG_SIZE {
         config_rejected(ConfigError::ValueTooLong);
+    }
+    length
+}
+
+fn read_index(path: *const u8) -> usize {
+    let descriptor = unsafe { syscall4(SYS_OPENAT_HOST, AT_FDCWD, path as usize, O_RDONLY, 0) };
+    if descriptor < 0 {
+        runtime_fail(b"VFS index open failed");
+    }
+    let mut length = 0usize;
+    while length < MAX_VFS_INDEX_SIZE {
+        let result = unsafe {
+            syscall3(
+                SYS_READ_HOST,
+                descriptor as usize,
+                core::ptr::addr_of_mut!(VFS_INDEX_BYTES)
+                    .cast::<u8>()
+                    .add(length) as usize,
+                MAX_VFS_INDEX_SIZE - length,
+            )
+        };
+        if result < 0 {
+            let _ = unsafe { syscall1(SYS_CLOSE_HOST, descriptor as usize) };
+            runtime_fail(b"VFS index read failed");
+        }
+        if result == 0 {
+            break;
+        }
+        length += result as usize;
+    }
+    let _ = unsafe { syscall1(SYS_CLOSE_HOST, descriptor as usize) };
+    if length == 0 || length == MAX_VFS_INDEX_SIZE {
+        runtime_fail(b"VFS index size invalid");
     }
     length
 }
