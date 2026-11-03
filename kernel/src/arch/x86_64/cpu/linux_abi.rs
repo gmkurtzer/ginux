@@ -76,6 +76,7 @@ pub(super) const LINUX_CLONE_SYSVSEM: u64 = 0x0004_0000;
 pub(super) const LINUX_CLONE_SETTLS: u64 = 0x0008_0000;
 pub(super) const LINUX_CLONE_PARENT_SETTID: u64 = 0x0010_0000;
 pub(super) const LINUX_CLONE_CHILD_CLEARTID: u64 = 0x0020_0000;
+pub(super) const LINUX_CLONE_DETACHED: u64 = 0x0040_0000;
 pub(super) const LINUX_CLONE_CHILD_SETTID: u64 = 0x0100_0000;
 pub(super) const LINUX_CLONE_PIDFD: u64 = 0x0000_1000;
 pub(super) const LINUX_CLONE_VFORK: u64 = 0x0000_4000;
