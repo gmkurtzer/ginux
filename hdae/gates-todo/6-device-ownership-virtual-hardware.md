@@ -42,12 +42,16 @@ DMA authority.
   ioctl validation, and direct-mapping denial.
 - [x] Implement Ginus-owned console, null, zero, and deterministic random
   frontends with unit verification.
+- [x] Connect normalized device/storage/network configuration to the registry
+  and exercise it in the Rocky QEMU host.
+- [x] Implement the mediated file-backed block adapter and bounded read-write
+  partition with flush and close policy.
+- [x] Implement the bounded, isolated packet-queue network backend.
 
 ## Remaining work
 
-- [ ] Implement file-backed block and bounded partition behavior.
-- [ ] Implement the approved virtual network backend.
-- [ ] Add exclusivity, ioctl, mapping, teardown, and benchmark verification.
+- [ ] Add benchmark targets and finish aggregate and human-demonstration
+  verification.
 
 ## Acceptance criteria
 
@@ -89,8 +93,13 @@ DMA authority.
   network, ownership, ioctl, mapping, and lifecycle tests passed.
 - `cargo clippy -p ginus-devices --all-targets -- -D warnings` -> passed.
 - `make test-devices test-block test-network` -> initial component targets
-  passed; block remains memory-backed until the next milestone and benchmark
-  targets are not yet implemented.
+  passed before host integration.
+- `make test-devices` -> passed in the Rocky Linux 10 QEMU TCG host. The
+  normalized configuration projected six assigned devices; Ginus mediated a
+  disposable file-backed 2048-byte partition, flushed and closed it, rejected
+  an out-of-range write, kept the preceding 1024 bytes zero, exchanged an
+  isolated packet, denied unknown controls/mapping/conflicting ownership, and
+  released the backend for reuse.
 
 ## Decisions and limitations
 

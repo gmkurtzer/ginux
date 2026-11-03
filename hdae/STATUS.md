@@ -158,9 +158,11 @@ scope, threat model, and invariants.
   frontends, fail-closed ioctls and mappings, bounded partitions, and the
   isolated packet-queue model.
 - `cargo test -p ginus-devices`, its strict clippy check, and the initial
-  `make test-devices test-block test-network` targets passed. The block unit
-  backend is still memory-backed; host file mediation and end-to-end QEMU
-  evidence remain incomplete.
+  component targets passed. `make test-devices` then passed end-to-end in the
+  Rocky QEMU host with normalized assignment, a disposable file-backed bounded
+  partition, isolated packet exchange, denial checks, flush, revocation, and
+  backend reuse. Benchmarks, aggregate regression, and the Gate 6 human demo
+  remain incomplete.
 
 ## Open decisions and limitations
 
@@ -196,9 +198,8 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Connect normalized Gate 6 configuration to the registry, add the mediated
-file-backed block adapter and QEMU functional tests, then benchmark block and
-network paths.
+Add reproducible block and network benchmarks, finish aggregate regression,
+and provide the Gate 6 human demonstration.
 
 ## Context recovery
 

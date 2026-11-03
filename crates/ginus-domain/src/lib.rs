@@ -312,9 +312,6 @@ impl DomainConfig {
         if !supported_execution {
             return Err(ConfigError::UnsupportedExecution);
         }
-        if self.network_backend != NetworkBackend::None {
-            return Err(ConfigError::UnsupportedBackend);
-        }
         for value in self
             .storage
             .as_slice()
@@ -948,6 +945,19 @@ policy = "stop"
         let config = DomainConfig::parse(native.as_bytes()).unwrap();
         assert_eq!(config.execution_profile, ExecutionProfile::Balanced);
         assert_eq!(config.execution_backend, ExecutionBackend::PtraceNative);
+    }
+
+    #[test]
+    fn accepts_mediated_network_without_host_authority() {
+        let mediated = VALID
+            .replace(
+                "assignments = []\n[network]",
+                "assignments = [\"net0\"]\n[network]",
+            )
+            .replace("backend = \"none\"", "backend = \"mediated\"");
+        let config = DomainConfig::parse(mediated.as_bytes()).unwrap();
+        assert_eq!(config.network_backend, NetworkBackend::Mediated);
+        assert_eq!(config.devices.as_slice()[0].as_bytes(), b"net0");
     }
 
     #[test]

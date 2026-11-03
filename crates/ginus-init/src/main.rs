@@ -8,6 +8,10 @@ use ginus_core::{
     decide_balanced, Action, BalancedSurface, SYS_EXIT, SYS_EXIT_GROUP, SYS_GETPID, SYS_UNAME,
     SYS_WRITE,
 };
+use ginus_devices::{
+    BlockBackend, DeviceError, DeviceKind, DeviceName, DeviceRegistry, IsolatedNetwork, Partition,
+    IOCTL_CONSOLE_GET_SIZE,
+};
 use ginus_domain::{ConfigError, Domain, DomainConfig};
 use ginus_runtime::{execute, AddressSpace, AuditAction, LoadError};
 use ginus_vfs::{BaseReader, Index, VfsError, VirtualFs, O_CREATE, O_READ, O_WRITE};
@@ -29,6 +33,8 @@ const SYS_READ_HOST: usize = 0;
 const SYS_CLOSE_HOST: usize = 3;
 const SYS_RT_SIGPROCMASK: usize = 14;
 const SYS_PREAD64: usize = 17;
+const SYS_PWRITE64: usize = 18;
+const SYS_FSYNC: usize = 74;
 const SYS_CHDIR: usize = 80;
 const SYS_SETGID: usize = 106;
 const SYS_SETUID: usize = 105;
@@ -46,6 +52,7 @@ const SYS_OPENAT_HOST: usize = 257;
 const SYS_SIGNALFD4: usize = 289;
 const AT_FDCWD: usize = (-100isize) as usize;
 const O_RDONLY: usize = 0;
+const O_RDWR: usize = 2;
 
 const PTRACE_TRACEME: usize = 0;
 const PTRACE_PEEKDATA: usize = 2;
@@ -220,9 +227,212 @@ extern "C" fn rust_main(initial_stack: *const usize) -> ! {
             let config_path = unsafe { *argv.add(2) as *const u8 };
             let fixture_path = unsafe { *argv.add(3) as *const u8 };
             domain_main(config_path, fixture_path);
+        } else if argc >= 4 && c_string_equals(command, b"devices") {
+            let config_path = unsafe { *argv.add(2) as *const u8 };
+            let block_path = unsafe { *argv.add(3) as *const u8 };
+            devices_main(config_path, block_path);
         }
     }
     gate1_main()
+}
+
+struct HostBlock {
+    descriptor: usize,
+    len: u64,
+}
+
+impl BlockBackend for HostBlock {
+    fn len(&self) -> u64 {
+        self.len
+    }
+
+    fn read_at(&mut self, offset: u64, output: &mut [u8]) -> Result<(), DeviceError> {
+        let result = unsafe {
+            syscall4(
+                SYS_PREAD64,
+                self.descriptor,
+                output.as_mut_ptr() as usize,
+                output.len(),
+                offset as usize,
+            )
+        };
+        if result == output.len() as isize {
+            Ok(())
+        } else {
+            Err(DeviceError::Backend)
+        }
+    }
+
+    fn write_at(&mut self, offset: u64, input: &[u8]) -> Result<(), DeviceError> {
+        let result = unsafe {
+            syscall4(
+                SYS_PWRITE64,
+                self.descriptor,
+                input.as_ptr() as usize,
+                input.len(),
+                offset as usize,
+            )
+        };
+        if result == input.len() as isize {
+            Ok(())
+        } else {
+            Err(DeviceError::Backend)
+        }
+    }
+
+    fn flush(&mut self) -> Result<(), DeviceError> {
+        if unsafe { syscall1(SYS_FSYNC, self.descriptor) } == 0 {
+            Ok(())
+        } else {
+            Err(DeviceError::Backend)
+        }
+    }
+
+    fn close(&mut self) -> Result<(), DeviceError> {
+        if unsafe { syscall1(SYS_CLOSE_HOST, self.descriptor) } == 0 {
+            Ok(())
+        } else {
+            Err(DeviceError::Backend)
+        }
+    }
+}
+
+fn devices_main(config_path: *const u8, block_path: *const u8) -> ! {
+    let config = load_config(config_path);
+    let domain_id = 6u64;
+    let mut registry: DeviceRegistry<8, 8> = DeviceRegistry::new();
+    let specifications = [
+        (b"console".as_slice(), DeviceKind::Console, 1u64),
+        (b"null".as_slice(), DeviceKind::Null, 2),
+        (b"zero".as_slice(), DeviceKind::Zero, 3),
+        (b"random".as_slice(), DeviceKind::Random, 4),
+        (b"block0".as_slice(), DeviceKind::Block, 100),
+        (b"net0".as_slice(), DeviceKind::Network, 200),
+    ];
+    for (name, kind, backend) in specifications {
+        if text_list_contains(config.devices.as_slice(), name)
+            && registry
+                .assign(
+                    domain_id,
+                    backend,
+                    DeviceName::new(name).unwrap_or_else(|_| device_fail(b"invalid device name")),
+                    kind,
+                )
+                .is_err()
+        {
+            device_fail(b"device assignment failed");
+        }
+    }
+    if !text_list_contains(config.storage.as_slice(), b"block0")
+        || config.network_backend != ginus_domain::NetworkBackend::Mediated
+    {
+        device_fail(b"required normalized assignment missing");
+    }
+    let mut visible = [DeviceName::new(b"unused").unwrap(); 8];
+    let visible_count = registry.visible(domain_id, &mut visible);
+    if visible_count != 6 {
+        device_fail(b"unexpected device projection");
+    }
+    line(b"GINUS_DEVICES: visible=console,null,zero,random,block0,net0 unassigned=hidden");
+
+    let zero = registry
+        .open(domain_id, b"zero")
+        .unwrap_or_else(|_| device_fail(b"zero open failed"));
+    let mut zeros = [1u8; 16];
+    if registry.read(domain_id, zero, &mut zeros) != Ok(16) || zeros != [0; 16] {
+        device_fail(b"zero read failed");
+    }
+    let console = registry
+        .open(domain_id, b"console")
+        .unwrap_or_else(|_| device_fail(b"console open failed"));
+    let mut window = [0u8; 8];
+    if registry
+        .ioctl(domain_id, console, IOCTL_CONSOLE_GET_SIZE, &mut window)
+        .is_err()
+        || registry.ioctl(domain_id, console, 0xdead, &mut []).is_ok()
+        || registry.map(domain_id, console).is_ok()
+    {
+        device_fail(b"ioctl or mapping policy failed");
+    }
+    line(b"GINUS_DEVICES: handles=virtual pseudo=PASS ioctl-unknown=denied mmap=denied");
+
+    let host_descriptor =
+        unsafe { syscall4(SYS_OPENAT_HOST, AT_FDCWD, block_path as usize, O_RDWR, 0) };
+    if host_descriptor < 0 {
+        device_fail(b"block backend open failed");
+    }
+    let backend = HostBlock {
+        descriptor: host_descriptor as usize,
+        len: 4096,
+    };
+    let mut partition = Partition::new(backend, 1024, 2048, false)
+        .unwrap_or_else(|_| device_fail(b"partition creation failed"));
+    if partition.write_at(0, b"GINUS-BLOCK").is_err() || partition.flush().is_err() {
+        device_fail(b"partition write failed");
+    }
+    let mut block_value = [0u8; 11];
+    if partition.read_at(0, &mut block_value).is_err()
+        || &block_value != b"GINUS-BLOCK"
+        || partition.write_at(2047, b"xx").is_ok()
+    {
+        device_fail(b"partition confinement failed");
+    }
+    if partition.close().is_err() {
+        device_fail(b"partition close failed");
+    }
+    line(b"GINUS_BLOCK: backend=file partition=1024:2048 rw=PASS flush=PASS bounds=denied");
+
+    let mut network: IsolatedNetwork<4> = IsolatedNetwork::new();
+    if network.send(b"domain-packet").is_err() {
+        device_fail(b"network send failed");
+    }
+    let mut packet = [0u8; 64];
+    if network.receive(&mut packet) != Ok(13)
+        || &packet[..13] != b"domain-packet"
+        || network.control(1).is_ok()
+    {
+        device_fail(b"network mediation failed");
+    }
+    network.close();
+    line(
+        b"GINUS_NETWORK: backend=isolated-queue send=PASS receive=PASS control=denied host-fd=none",
+    );
+
+    if registry.assign(
+        7,
+        100,
+        DeviceName::new(b"otherdisk").unwrap(),
+        DeviceKind::Block,
+    ) != Err(DeviceError::AssignmentConflict)
+    {
+        device_fail(b"exclusive conflict accepted");
+    }
+    registry.revoke(domain_id);
+    if registry
+        .assign(
+            7,
+            100,
+            DeviceName::new(b"otherdisk").unwrap(),
+            DeviceKind::Block,
+        )
+        .is_err()
+        || registry.write(domain_id, console, b"revoked").is_ok()
+    {
+        device_fail(b"revocation failed");
+    }
+    line(b"GINUS_DEVICES: conflict=denied teardown=flushed,released,reusable");
+    line(b"GATE6_DEVICES: PASS");
+    exit_process(0)
+}
+
+fn text_list_contains<const N: usize>(values: &[ginus_domain::Text<N>], expected: &[u8]) -> bool {
+    values.iter().any(|value| value.as_bytes() == expected)
+}
+
+fn device_fail(reason: &[u8]) -> ! {
+    write_all(b"GATE6_DEVICES: FAIL: ");
+    line(reason);
+    exit_process(1)
 }
 
 struct HostRootfs {

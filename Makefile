@@ -86,10 +86,11 @@ test-config: build
 test-domain: build
 	@./scripts/with-rocky-host.sh ./scripts/test-domain.sh
 
-test-devices:
+test-devices: build
 	cargo test -p ginus-devices registry
 	cargo test -p ginus-devices pseudo_devices
 	cargo test -p ginus-devices conflicts_ioctls
+	@./scripts/with-rocky-host.sh ./scripts/test-devices.sh
 
 test-block:
 	cargo test -p ginus-devices block_
