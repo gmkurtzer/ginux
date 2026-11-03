@@ -4,37 +4,49 @@
 
 - Active skill: `.agents/skills/hdae-development/SKILL.md`
 - Reload required after compaction, reset, resume, or handoff: yes
-- Active project: remaining reporter remediation batch
-- Branch: `hdae/issue-19-domain-memory`
+- Active project: issue #57 Linux lazy-page quota regression
+- Branch: `hdae/issue-57-linux-lazy-page`
 - Baseline tag: `research-v1-baseline`
-- Active gate: Gate 36, per-domain Linux memory accounting for issue #19
-- Last completed action: merged current `main` at `a7a41ae2` into PR #46 and
-  reconciled Gate 36 after PR #45 merged and issue #18 closed
-- Next action: run fresh `make check` and `make test`, commit and push the
-  synchronized head, then verify its new CI and first-pass review marker
+- Active gate: Gate 37, Linux lazy-page quota regression
+- Last completed action: corrected domain-owned payload lookup, RELRO, exec,
+  and child-cleanup paths; `make check`, `make test`, and `make test-alpine`
+  pass with the 128 MiB quota intact
+- Next action: commit, push, open the linked Gate 37 PR, and post first-pass
+  evidence without merging it this run
 
 ## Current repository state
 
-Remote `main` is at `a7a41ae2` after merged PR #45. The first
+Remote `main` is at `82df3d71` after merged PR #46. The first
 eleven feedback-hardening gates and inserted correctness gates are complete.
 Gate 12 is complete on `codex/performance-parity`. Gates 13 through 19 and 21
 through 23 and Gates 32 through 33 remain in `gates-todo/` for maintainer
 review after delivery through merged pull requests. Gate 34 was delivered
 through merged PR #44 and issue #17 is closed; Gate 35 was delivered through
-merged PR #45 and issue #18 is closed; Gate 36 is delivered through open PR
-#46.
+merged PR #45 and issue #18 is closed; Gate 36 was delivered through merged PR
+#46 and issue #19 is closed. Gate 37 is active for the confirmed issue #57
+regression.
 The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
 matrix and repeated stress pass. Gate 11's comparison and reduced evidence are
 under `docs/feedback-hardening/`. No direct push to `main` was performed.
 
 ## Open decisions
 
-- None. The architecture already defines a domain as the unit of memory
-  ownership and accounting; Gate 36 implements that existing invariant. The
+- None. The architecture defines a domain as the unit of private payload memory
+  ownership and accounting; Gate 37 must preserve that invariant. The
   user delegated issues #17, #18, #19, #20, #22, #24, #25, #27, #28, and #29
   as one automatic batch with final review after all PRs.
 
 ## Active diagnosis
+
+- Root cause: Gate 36 correctly allocated private payload frames to the domain,
+  but several leaf lookup, fork/exec, RELRO, and cleanup paths still assumed
+  every payload frame was kernel-owned. Allocation succeeded, then validation
+  treated the live domain-owned frame as absent.
+- Wayland is not involved. PR #56's clock change does not resolve the failure.
+- Payload leaves now accept exact live leases owned by the domain or kernel,
+  plus immutable runtime extents; hierarchy frames remain kernel-only.
+- `make check`, `make test`, and `make test-alpine` pass. Alpine completes its
+  shell, restart, and failure-containment probes under the 128 MiB budget.
 
 - Configurable allocator owner limits stop exactly at the container budget,
   preserve independent owner capacity, and restore capacity after release.
