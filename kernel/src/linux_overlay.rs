@@ -599,6 +599,7 @@ fn create(path: &[u8], kind: NodeKind, mode: u32, initial: &[u8]) -> Option<Hand
     let mut stored_path = [0_u8; PATH_CAPACITY];
     stored_path[..path.len()].copy_from_slice(path);
     let handle = Handle { generation, inode };
+    let now = cpu::linux_file_timestamp();
     *node = Node {
         active: true,
         linked: true,
@@ -617,9 +618,9 @@ fn create(path: &[u8], kind: NodeKind, mode: u32, initial: &[u8]) -> Option<Hand
         cached_page: FrameLease::EMPTY,
         cached_page_index: 0,
         xattr_first: FrameLease::EMPTY,
-        atime: (0, 0),
-        mtime: (0, 0),
-        ctime: (0, 0),
+        atime: now,
+        mtime: now,
+        ctime: now,
         path: stored_path,
     };
     overlay.next_generation = generation;
@@ -766,6 +767,11 @@ pub(crate) fn write(handle: Handle, offset: usize, input: &[u8]) -> Option<usize
         page = data.next;
     }
     node.size = node.size.max(end);
+    // A successful non-empty write updates mtime and ctime (Linux
+    // file_update_time via file_modified).
+    let now = cpu::linux_file_timestamp();
+    node.mtime = now;
+    node.ctime = now;
     Some(input.len())
 }
 
@@ -780,6 +786,14 @@ pub(crate) fn truncate(handle: Handle, size: usize) -> bool {
         if ensure_data_pages(node, size.div_ceil(DATA_CAPACITY)).is_none() {
             return false;
         }
+    } else if size < node.size && size != 0 {
+        // Keep the invariant that bytes past `size` in allocated pages are
+        // zero. Otherwise a later extension by truncate or by a write past
+        // EOF would expose the discarded bytes instead of zeroes (Linux
+        // truncate_pagecache zeroes the partial page beyond the new size).
+        if zero_data_range(node, size, node.size).is_none() {
+            return false;
+        }
     } else if size == 0 {
         let first = core::mem::replace(&mut node.first_page, FrameLease::EMPTY);
         if !release_data_pages(first) {
@@ -792,6 +806,11 @@ pub(crate) fn truncate(handle: Handle, size: usize) -> bool {
         node.cached_page_index = 0;
     }
     node.size = size;
+    // truncate(2), ftruncate(2) and O_TRUNC update mtime and ctime
+    // (fs/open.c do_truncate: ATTR_MTIME | ATTR_CTIME).
+    let now = cpu::linux_file_timestamp();
+    node.mtime = now;
+    node.ctime = now;
     true
 }
 
@@ -800,6 +819,7 @@ pub(crate) fn set_mode(handle: Handle, mode: u32) -> bool {
         return false;
     };
     node.mode = mode & 0o7777;
+    node.ctime = cpu::linux_file_timestamp();
     true
 }
 
@@ -809,7 +829,9 @@ pub(crate) fn set_times(handle: Handle, atime: (i64, i64), mtime: (i64, i64)) ->
     };
     node.atime = atime;
     node.mtime = mtime;
-    node.ctime = mtime;
+    // ctime records the inode change itself, not the requested time
+    // (utimensat sets ATTR_CTIME to the current time).
+    node.ctime = cpu::linux_file_timestamp();
     true
 }
 
@@ -1423,8 +1445,16 @@ fn release_xattr_pages(mut page: FrameLease) -> bool {
 }
 
 fn ensure_data_pages(node: &mut Node, required: usize) -> Option<()> {
+    let (old_count, old_last) = (node.page_count, node.last_page);
     while node.page_count < required {
-        let next = allocate_data_page()?;
+        let Some(next) = allocate_data_page() else {
+            // All or nothing: a failed extension (e.g. a write far past EOF
+            // that exceeds the domain's memory) must not keep the pages it
+            // did get. Otherwise the file silently pins them until it is
+            // deleted, and the rest of the domain runs out of memory.
+            release_extension(node, old_count, old_last);
+            return None;
+        };
         if node.first_page == FrameLease::EMPTY {
             node.first_page = next;
             node.cached_page = next;
@@ -1434,6 +1464,52 @@ fn ensure_data_pages(node: &mut Node, required: usize) -> Option<()> {
         }
         node.last_page = next;
         node.page_count += 1;
+    }
+    Some(())
+}
+
+/// Drop the pages appended after `old_last` and restore the page list to
+/// `old_count` pages.
+fn release_extension(node: &mut Node, old_count: usize, old_last: FrameLease) {
+    if node.page_count == old_count {
+        return;
+    }
+    let appended = if old_last == FrameLease::EMPTY {
+        core::mem::replace(&mut node.first_page, FrameLease::EMPTY)
+    } else {
+        match data_page_mut(old_last) {
+            Some(data) => core::mem::replace(&mut data.next, FrameLease::EMPTY),
+            None => return,
+        }
+    };
+    if release_data_pages(appended) {
+        node.page_count = old_count;
+        node.last_page = old_last;
+        if node.cached_page_index >= old_count {
+            node.cached_page = node.first_page;
+            node.cached_page_index = 0;
+        }
+    }
+}
+
+/// Zero bytes `[start, end)` of a node's data. `end` must not exceed the
+/// allocated pages.
+fn zero_data_range(node: &mut Node, start: usize, end: usize) -> Option<()> {
+    if start >= end || end > node.page_count.checked_mul(DATA_CAPACITY)? {
+        return (start >= end).then_some(());
+    }
+    let mut page = node.first_page;
+    let mut page_start = 0;
+    while page_start < end {
+        let data = data_page_mut(page)?;
+        let page_end = page_start + DATA_CAPACITY;
+        if page_end > start {
+            let from = start.max(page_start) - page_start;
+            let to = end.min(page_end) - page_start;
+            data.bytes[from..to].fill(0);
+        }
+        page_start = page_end;
+        page = data.next;
     }
     Some(())
 }
