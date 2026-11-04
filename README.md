@@ -35,27 +35,36 @@ before requests reach the host kernel. This creates an opportunity to control
 which kernel interfaces a domain can observe or invoke without asking Linux to
 abandon its compatibility guarantees.
 
-The idea is not novel. [User-Mode Linux](https://kernel.org/doc/html/v5.8/virt/uml/user_mode_linux.html)
-runs a Linux kernel as a normal host process;
-[gVisor](https://gvisor.dev/docs/) implements a Linux-compatible application
-kernel in userspace; [Gramine](https://gramine.readthedocs.io/en/stable/) uses
-an application-specific manifest with a library OS; and Linux
-[seccomp user notification](https://docs.kernel.org/userspace-api/seccomp_filter.html#userspace-notification)
-can delegate selected system calls to a userspace supervisor. The
-[Proxos research](https://www.usenix.org/legacy/events/osdi06/tech/ta-min.html)
-is an especially close precedent: it made application trust configurable by
-routing parts of the system-call interface to different operating systems.
+The idea is not novel. Several systems explore related boundaries, although
+they make different choices about compatibility, policy, and how much of an
+operating system they reproduce:
+
+| Approach | Execution model | Interface control | Relationship to Ginux Userspace |
+|---|---|---|---|
+| Linux [seccomp](https://docs.kernel.org/userspace-api/seccomp_filter.html#userspace-notification) | Filtering inside the host kernel, with optional userspace notification | Allows, denies, traps, or delegates selected host syscalls | Restricts the existing Linux ABI but does not provide a complete virtual kernel contract |
+| [User-Mode Linux](https://kernel.org/doc/html/v5.8/virt/uml/user_mode_linux.html) | A complete Linux kernel running as a host process | Presents a conventional Linux environment over virtual hardware | Reuses Linux itself rather than defining a smaller contract-oriented shim |
+| [gVisor](https://gvisor.dev/docs/) | A userspace application kernel intercepting application syscalls | Implements a Linux-like system interface while isolating the host | Closely related application-kernel model, with its own compatibility and performance tradeoffs |
+| [Gramine](https://gramine.readthedocs.io/en/stable/) | A library OS packaged with an application | Uses an application-specific manifest and library-OS policy | Demonstrates per-application configuration around an isolated Linux workload |
+| [Proxos](https://www.usenix.org/legacy/events/osdi06/tech/ta-min.html) | System calls routed between private and commodity operating systems | Application-defined rules partition trust across the syscall interface | Especially close precedent for making the application/OS relationship configurable |
+| **Ginux Userspace** | A userspace-kernel shim supervising managed domains | A versioned contract governs emulation, mediation, denial, and virtual state | Makes the declared contract itself the domain boundary and compatibility promise |
 
 Ginux Userspace explores its own point in that design space by making the
 kernel/userspace contract explicit, versioned, and configurable for each
 domain. Linux must preserve its host ABI, but a Ginux domain does not have to
-inherit all of it. Its contract can allow an operation, emulate or mediate it,
-replace the visible behavior, or deny it before the request reaches the host
-kernel. In other words, Linux promises not to break its userspace; Ginux
-Userspace can intentionally define a narrower virtual userspace and make every
-departure from Linux's full contract visible and reviewable. The intended
-result is a small shim with selectable compatibility, security, and performance
-policies, not an implicit or universal claim of Linux equivalence.
+inherit all of it. Ginux does **not** guarantee the complete Linux ABI. For a
+managed domain, the promise is the declared contract and the behavior supported
+by evidence for that contract. It may authorize a validated operation, emulate
+or mediate it, replace its visible behavior, or deny it before the request
+reaches the host kernel. New contract versions may intentionally narrow or
+change behavior that native Linux preserves.
+
+In other words, Linux promises not to break its userspace; Ginux Userspace can
+intentionally define a different virtual userspace while making each departure
+from the underlying interface visible and reviewable. The intended result is a
+small shim with selectable compatibility, security, and performance policies,
+not an implicit or universal claim of Linux equivalence. Linux compatibility is
+the initial practical target, not the architectural definition of every future
+contract.
 
 The intended differentiators are:
 
@@ -66,10 +75,10 @@ The intended differentiators are:
 - **Compatibility is selectable rather than assumed.** Security, balanced, and
   performance profiles can make different emulation, mediation, and denial
   decisions without silently bypassing the contract.
-- **The host remains responsible for being a real kernel.** Ginux Userspace
-  runs as an ordinary Linux process and relies on Linux for hardware support
-  and execution while preventing managed workloads from treating the entire
-  host ABI as automatically available.
+- **The host remains responsible for being a real kernel.** The initial Ginux
+  Userspace implementation runs as an ordinary Linux process and relies on the
+  host for hardware support and execution while preventing managed workloads
+  from treating the entire host ABI as automatically available.
 - **Claims remain tied to evidence.** A contract and its test suite identify
   the exact workloads and interfaces demonstrated to work instead of treating
   “Linux compatible” as an unlimited promise.
