@@ -29,6 +29,10 @@ jobs:
         run: make test-qemu-smoke
         env:
           GINUX_BOOT_TIMEOUT_SECONDS: 180
+      - name: QEMU EFI load above 4 GiB test
+        run: make test-efi-load-above-4g
+        env:
+          GINUX_BOOT_TIMEOUT_SECONDS: 180
       - name: Full QEMU integration test
         if: github.event_name == 'push'
         run: make test

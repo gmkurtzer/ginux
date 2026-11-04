@@ -339,8 +339,19 @@ unsafe fn run_below_identity_limit(
     }
     let (image_base, image_size) = loaded_image_bounds(image, boot_services);
     // The relocated copy still sees the firmware's original LoadedImage data.
-    if running_image_base() != image_base || image_base as u64 + image_size as u64 <= IDENTITY_LIMIT
-    {
+    // These serial lines let tests/qemu/efi-load-above-4g.sh assert both paths.
+    if running_image_base() != image_base {
+        serial_write("ginux: EFI image entered at relocated base ");
+        serial_write_hex(running_image_base() as u64);
+        serial_write("\r\n");
+        return None;
+    }
+    serial_write("ginux: EFI image loaded at ");
+    serial_write_hex(image_base as u64);
+    serial_write(" size ");
+    serial_write_hex(image_size as u64);
+    serial_write("\r\n");
+    if image_base as u64 + image_size as u64 <= IDENTITY_LIMIT {
         return None;
     }
     let mut target = IDENTITY_LIMIT - 1;
@@ -359,6 +370,9 @@ unsafe fn run_below_identity_limit(
     if rebase_loaded_image(core::slice::from_raw_parts_mut(copy, image_size), delta).is_none() {
         panic!("EFI image base relocations are invalid");
     }
+    serial_write("ginux: EFI image relocated below 4 GiB to ");
+    serial_write_hex(target);
+    serial_write("\r\n");
     let entry = efi_main as EfiMain as usize - image_base as usize + copy as usize;
     let entry = core::mem::transmute::<usize, EfiMain>(entry);
     Some(entry(image, system_table))
@@ -643,6 +657,24 @@ fn serial_write_u64(mut value: u64) {
             core::hint::spin_loop();
         }
         unsafe { outb(COM1, *byte) };
+    }
+}
+
+fn serial_write_hex(value: u64) {
+    let mut digits = [0_u8; 16];
+    let mut index = digits.len();
+    let mut rest = value;
+    loop {
+        index -= 1;
+        digits[index] = b"0123456789abcdef"[(rest & 0xf) as usize];
+        rest >>= 4;
+        if rest == 0 {
+            break;
+        }
+    }
+    serial_write("0x");
+    if let Ok(text) = core::str::from_utf8(&digits[index..]) {
+        serial_write(text);
     }
 }
 
