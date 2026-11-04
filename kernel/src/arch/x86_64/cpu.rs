@@ -453,7 +453,7 @@ struct X86RuntimeOwner {
     LINUX_PROCESS_CHILD_EXEC_PID: RuntimeRef<BankedAtomicU32>,
     LINUX_PROCESS_CHILD_EXITED: RuntimeRef<BankedAtomicBool>,
     LINUX_PROCESS_CHILD_EXIT_PID: RuntimeRef<BankedAtomicU32>,
-    LINUX_PROCESS_CHILD_STATUS: RuntimeRef<BankedAtomicU8>,
+    LINUX_PROCESS_CHILD_STATUS: RuntimeRef<BankedAtomicU16>,
     LINUX_PROCESS_CHILD_YIELDED: RuntimeRef<BankedAtomicBool>,
     LINUX_PROCESS_CHILD_YIELD_PID: RuntimeRef<BankedAtomicU32>,
     LINUX_PROCESS_RELEASE_PARENT_ON_EXEC: RuntimeRef<BankedAtomicBool>,
@@ -1471,7 +1471,7 @@ static X86_RUNTIME_BACKING_LINUX_PROCESS_CHILD_EXEC_PID: BankedAtomicU32 = Banke
 static X86_RUNTIME_BACKING_LINUX_PROCESS_CHILD_YIELD_PID: BankedAtomicU32 = BankedAtomicU32::new(0);
 static X86_RUNTIME_BACKING_LINUX_PROCESS_RELEASE_PARENT_ON_EXEC: BankedAtomicBool =
     BankedAtomicBool::new(false);
-static X86_RUNTIME_BACKING_LINUX_PROCESS_CHILD_STATUS: BankedAtomicU8 = BankedAtomicU8::new(0);
+static X86_RUNTIME_BACKING_LINUX_PROCESS_CHILD_STATUS: BankedAtomicU16 = BankedAtomicU16::new(0);
 static X86_RUNTIME_BACKING_LINUX_CURRENT_PROCESS_PID: BankedAtomicU32 = BankedAtomicU32::new(1);
 static X86_RUNTIME_BACKING_LINUX_PROCESS_CGROUP_GENERATIONS: [BankedAtomicU32;
     linux_process::PROCESS_RUNTIME_LIMIT] =
@@ -4932,12 +4932,7 @@ fn execute_deferred_live_fork() -> bool {
         cfg!(feature = "linux-boot-profile").then(timer::timestamp_counter);
     let parent = (child_resumed && child_exited)
         .then(|| {
-            (linux_queue_process_signal(
-                parent_pid,
-                LINUX_SIGCHLD,
-                LINUX_CLD_EXITED,
-                Some(u64::from(child_status)),
-            ) == 0)
+            (linux_queue_child_exit_signal(parent_pid, child_status) == 0)
                 .then(|| linux_process::complete_live_child_exit(child.pid, child_status))
                 .flatten()
         })
@@ -5014,12 +5009,12 @@ fn execute_deferred_live_fork() -> bool {
     }
     let wait_count = X86_RUNTIME.LINUX_PROCESS_WAIT_COUNT.load(Ordering::SeqCst);
     let valid = parent_resumed
-        && child_status == LINUX_PROBE_EXIT_STATUS as u8
+        && child_status == (LINUX_PROBE_EXIT_STATUS as u16) << 8
         && wait_count == 1
         && !X86_RUNTIME.LINUX_FORK_REQUESTED.load(Ordering::SeqCst);
     X86_RUNTIME.LIVE_FORK_PUBLIC_DIAGNOSTIC.store(
         u8::from(parent_resumed)
-            | (u8::from(child_status == LINUX_PROBE_EXIT_STATUS as u8) << 1)
+            | (u8::from(child_status == (LINUX_PROBE_EXIT_STATUS as u16) << 8) << 1)
             | (u8::from(wait_count == 1) << 2)
             | (u8::from(X86_RUNTIME.ELF_PROBE_COMPLETED.load(Ordering::SeqCst)) << 3)
             | (u8::from(!X86_RUNTIME.ELF_PROBE_ACTIVE.load(Ordering::SeqCst)) << 4),
@@ -11608,7 +11603,12 @@ fn linux_request_process_fork(
         refresh_live_linux_process_registry(caller)
     };
     let leader = current_linux_tid() == Some(current_linux_process_pid());
-    let nproc_reached = linux_nproc_limit_reached();
+    // Running out of process storage is Linux's EAGAIN (kernel/fork.c
+    // copy_process()), not a failure of the deferred fork transaction.
+    // vfork children that exec are released without running, so a
+    // posix_spawn() loop can fill the table before any child exits.
+    let nproc_reached =
+        linux_nproc_limit_reached() || !linux_process::live_runtime_slot_available();
     let requested = X86_RUNTIME
         .LINUX_FORK_REQUESTED
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -12209,7 +12209,23 @@ fn linux_child_yielded(pid: u32) -> bool {
             == pid
 }
 
-fn take_linux_child_exit(pid: u32) -> Option<u8> {
+/// Splits a Linux wait-status word into the si_code and si_status that
+/// SIGCHLD and waitid() report (kernel/exit.c wait_task_zombie()). Ginux
+/// writes no core files, so the 0x80 core flag and CLD_DUMPED never occur.
+fn linux_child_exit_information(status: u16) -> (i32, u32) {
+    if status & 0x7f != 0 {
+        (LINUX_CLD_KILLED, u32::from(status & 0x7f))
+    } else {
+        (LINUX_CLD_EXITED, u32::from(status >> 8))
+    }
+}
+
+fn linux_queue_child_exit_signal(parent: u32, status: u16) -> u64 {
+    let (code, value) = linux_child_exit_information(status);
+    linux_queue_process_signal(parent, LINUX_SIGCHLD, code, Some(u64::from(value)))
+}
+
+fn take_linux_child_exit(pid: u32) -> Option<u16> {
     if !linux_child_exited(pid) {
         return None;
     }
@@ -12264,6 +12280,18 @@ fn linux_set_current_identity(number: u64, first: u64, second: u64, third: u64) 
     let Some(credentials) = current_linux_credentials() else {
         return LINUX_ESRCH;
     };
+    // setuid()/setgid() reject the invalid id -1 instead of treating it as
+    // "unchanged" (kernel/sys.c:487, kernel/sys.c:659). setfsuid()/setfsgid()
+    // never fail; they report the previous fsuid/fsgid, which always equals
+    // the effective id here (kernel/sys.c:904-981).
+    match number {
+        LINUX_SETUID_SYSCALL | LINUX_SETGID_SYSCALL if first as u32 == u32::MAX => {
+            return LINUX_EINVAL;
+        }
+        LINUX_SETFSUID_SYSCALL => return u64::from(credentials.euid),
+        LINUX_SETFSGID_SYSCALL => return u64::from(credentials.egid),
+        _ => {}
+    }
     let unchanged =
         |requested: u64, current: u32| requested as u32 == u32::MAX || requested as u32 == current;
     let accepted = match number {
@@ -12293,18 +12321,10 @@ fn linux_set_current_identity(number: u64, first: u64, second: u64, third: u64) 
                 && unchanged(second, credentials.egid)
                 && unchanged(third, credentials.sgid)
         }
-        LINUX_SETFSUID_SYSCALL => unchanged(first, credentials.euid),
-        LINUX_SETFSGID_SYSCALL => unchanged(first, credentials.egid),
         _ => false,
     };
     if accepted {
-        if matches!(number, LINUX_SETFSUID_SYSCALL) {
-            u64::from(credentials.euid)
-        } else if matches!(number, LINUX_SETFSGID_SYSCALL) {
-            u64::from(credentials.egid)
-        } else {
-            0
-        }
+        0
     } else {
         LINUX_EPERM
     }
@@ -12346,22 +12366,37 @@ enum LinuxChildWaitSelector {
 fn linux_child_wait_state(
     parent: u32,
     selector: LinuxChildWaitSelector,
-    report_stopped: bool,
-    report_continued: bool,
+    options: u64,
 ) -> Option<linux_process::ChildWaitState> {
+    // Every Ginux child reports to its parent with SIGCHLD, so __WCLONE
+    // without __WALL has no eligible child (kernel/exit.c:1165-1177).
+    // __WNOTHREAD only narrows the search to children of the calling
+    // thread, and only the thread-group leader waits here.
+    if options & LINUX_WCLONE != 0 && options & LINUX_WALL == 0 {
+        return None;
+    }
+    let report_exited = options & LINUX_WEXITED != 0;
+    let report_stopped = options & LINUX_WUNTRACED != 0;
+    let report_continued = options & LINUX_WCONTINUED != 0;
     match selector {
-        LinuxChildWaitSelector::Any => {
-            linux_process::live_child_wait_state(parent, None, report_stopped, report_continued)
-        }
+        LinuxChildWaitSelector::Any => linux_process::live_child_wait_state(
+            parent,
+            None,
+            report_exited,
+            report_stopped,
+            report_continued,
+        ),
         LinuxChildWaitSelector::Process(pid) => linux_process::live_child_wait_state(
             parent,
             Some(pid),
+            report_exited,
             report_stopped,
             report_continued,
         ),
         LinuxChildWaitSelector::ProcessGroup(group) => linux_process::live_child_group_wait_state(
             parent,
             group,
+            report_exited,
             report_stopped,
             report_continued,
         ),
@@ -12375,7 +12410,15 @@ fn linux_wait4(pid: u64, status_address: u64, options: u64, rusage: u64) -> u64 
     }
     let pid = pid as u32 as i32;
     let options = u64::from(options as u32);
-    if options & !(LINUX_WNOHANG | LINUX_WUNTRACED | LINUX_WCONTINUED) != 0 {
+    if options
+        & !(LINUX_WNOHANG
+            | LINUX_WUNTRACED
+            | LINUX_WCONTINUED
+            | LINUX_WNOTHREAD
+            | LINUX_WCLONE
+            | LINUX_WALL)
+        != 0
+    {
         return LINUX_EINVAL;
     }
     if status_address != 0 && !linux_writable_user_range_contains(status_address, size_of::<u32>())
@@ -12397,19 +12440,15 @@ fn linux_wait4(pid: u64, status_address: u64, options: u64, rusage: u64) -> u64 
         i32::MIN => return LINUX_ESRCH,
         _ => LinuxChildWaitSelector::ProcessGroup(pid.unsigned_abs()),
     };
-    let Some(state) = linux_child_wait_state(
-        parent_pid,
-        selector,
-        options & LINUX_WUNTRACED != 0,
-        options & LINUX_WCONTINUED != 0,
-    ) else {
+    // wait4() always waits for exited children (kernel/exit.c:1892).
+    let Some(state) = linux_child_wait_state(parent_pid, selector, options | LINUX_WEXITED) else {
         return LINUX_ECHILD;
     };
     let (waited, encoded, reaped) = match state {
         linux_process::ChildWaitState::Exited {
             pid: waited,
             status,
-        } => (waited, u32::from(status) << 8, true),
+        } => (waited, u32::from(status), true),
         linux_process::ChildWaitState::Stopped { pid, signal } => {
             (pid, u32::from(signal) << 8 | 0x7f, false)
         }
@@ -12429,7 +12468,7 @@ fn linux_wait4(pid: u64, status_address: u64, options: u64, rusage: u64) -> u64 
         return LINUX_EFAULT;
     }
     if reaped {
-        let status = (encoded >> 8) as u8;
+        let status = encoded as u16;
         if linux_process::wait_live_child(parent_pid, waited) != Some((waited, status)) {
             return LINUX_ECHILD;
         }
@@ -12485,7 +12524,14 @@ fn linux_waitid(id_type: u64, id: u64, information: u64, options: u64, rusage: u
     let id = u64::from(id as u32);
     let options = u64::from(options as u32);
     if options
-        & !(LINUX_WEXITED | LINUX_WUNTRACED | LINUX_WCONTINUED | LINUX_WNOHANG | LINUX_WNOWAIT)
+        & !(LINUX_WEXITED
+            | LINUX_WUNTRACED
+            | LINUX_WCONTINUED
+            | LINUX_WNOHANG
+            | LINUX_WNOWAIT
+            | LINUX_WNOTHREAD
+            | LINUX_WCLONE
+            | LINUX_WALL)
         != 0
         || options & (LINUX_WEXITED | LINUX_WUNTRACED | LINUX_WCONTINUED) == 0
     {
@@ -12533,12 +12579,7 @@ fn linux_waitid(id_type: u64, id: u64, information: u64, options: u64, rusage: u
         return LINUX_EFAULT;
     }
     let parent = current_linux_process_pid();
-    let Some(state) = linux_child_wait_state(
-        parent,
-        selector,
-        options & LINUX_WUNTRACED != 0,
-        options & LINUX_WCONTINUED != 0,
-    ) else {
+    let Some(state) = linux_child_wait_state(parent, selector, options) else {
         return LINUX_ECHILD;
     };
     if state == linux_process::ChildWaitState::Running {
@@ -12557,14 +12598,15 @@ fn linux_waitid(id_type: u64, id: u64, information: u64, options: u64, rusage: u
         }
         return 0;
     };
-    let (pid, status, code, reaped) = match state {
+    let (pid, status, code, reaped, wait_status) = match state {
         linux_process::ChildWaitState::Exited { pid, status } => {
-            (pid, u32::from(status), LINUX_CLD_EXITED, true)
+            let (code, value) = linux_child_exit_information(status);
+            (pid, value, code, true, status)
         }
         linux_process::ChildWaitState::Stopped { pid, signal } => {
-            (pid, u32::from(signal), 5, false)
+            (pid, u32::from(signal), 5, false, 0)
         }
-        linux_process::ChildWaitState::Continued { pid } => (pid, 18, 6, false),
+        linux_process::ChildWaitState::Continued { pid } => (pid, 18, 6, false, 0),
         linux_process::ChildWaitState::Running => unreachable!(),
     };
     let mut result = [0_u8; SIGNAL_INFORMATION_SIZE];
@@ -12584,7 +12626,7 @@ fn linux_waitid(id_type: u64, id: u64, information: u64, options: u64, rusage: u
     }
     if options & LINUX_WNOWAIT == 0 {
         if reaped {
-            if linux_process::wait_live_child(parent, pid) != Some((pid, status as u8)) {
+            if linux_process::wait_live_child(parent, pid) != Some((pid, wait_status)) {
                 return LINUX_ECHILD;
             }
         } else if !linux_process::consume_live_child_wait_event(parent, pid) {
@@ -16878,18 +16920,29 @@ fn verify_linux_scheduler_queries() -> bool {
         && linux_sched_getparam(current, 1) == LINUX_EFAULT;
     let setters = parameter
         && copy_to_linux_user(mapping, &0_u32.to_ne_bytes())
-        && linux_set_scheduler(0, 0, mapping) == 0
-        && linux_set_scheduler(current, 0, mapping) == 0
-        && linux_set_scheduler(0, 1_u64 << 32, mapping) == 0
-        && linux_set_scheduler(2, 0, mapping) == LINUX_ESRCH
-        && linux_set_scheduler(u64::MAX, 0, mapping) == LINUX_EINVAL
-        && linux_set_scheduler(0, 4, mapping) == LINUX_EINVAL
-        && linux_set_scheduler(0, 1, mapping) == LINUX_EPERM
-        && linux_set_scheduler(0, 0, 1) == LINUX_EFAULT
+        && linux_set_scheduler(0, Some(0), mapping) == 0
+        && linux_set_scheduler(current, Some(0), mapping) == 0
+        && linux_set_scheduler(0, Some(1_u64 << 32), mapping) == 0
+        && linux_set_scheduler(2, Some(0), mapping) == LINUX_ESRCH
+        && linux_set_scheduler(u64::MAX, Some(0), mapping) == LINUX_EINVAL
+        && linux_set_scheduler(0, Some(4), mapping) == LINUX_EINVAL
+        && linux_set_scheduler(0, Some(1), mapping) == LINUX_EINVAL
+        && linux_set_scheduler(0, Some(0), 1) == LINUX_EFAULT
+        && linux_set_scheduler(0, Some(3), mapping) == 0
+        && linux_sched_getscheduler(0) == 3
+        && linux_set_scheduler(0, Some(5 | LINUX_SCHED_RESET_ON_FORK), mapping) == 0
+        && linux_set_scheduler(0, None, mapping) == 0
+        && linux_sched_getscheduler(0) == 5 | LINUX_SCHED_RESET_ON_FORK
+        && linux_set_scheduler(0, Some(3 | LINUX_SCHED_RESET_ON_FORK), mapping) == LINUX_EPERM
+        && linux_set_scheduler(0, Some(5), mapping) == LINUX_EPERM
         && copy_to_linux_user(mapping, &1_u32.to_ne_bytes())
-        && linux_set_scheduler(0, 0, mapping) == LINUX_EINVAL;
+        && linux_set_scheduler(0, None, mapping) == LINUX_EINVAL
+        && linux_set_scheduler(0, Some(3), mapping) == LINUX_EINVAL
+        && linux_set_scheduler(0, Some(1), mapping) == LINUX_EPERM;
+    // Leaving SCHED_IDLE is privileged; restore the default policy directly.
+    let restored = linux_process::set_live_process_sched_policy(current_linux_process_pid(), 0);
     let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
-    setters && unmapped
+    setters && restored && unmapped && linux_sched_getscheduler(0) == 0
 }
 
 fn verify_linux_scheduler_affinity() -> bool {
@@ -32744,14 +32797,8 @@ fn run_scheduled_linux_process(parent_pid: u32, target_pid: Option<u32>) -> bool
         let signals_cleared = process_slot.is_some_and(|slot| {
             clear_linux_signal_queues_for_process(linux_signal_instance(), slot)
         });
-        let child_signal_queued = selected_parent.is_some_and(|pid| {
-            linux_queue_process_signal(
-                pid,
-                LINUX_SIGCHLD,
-                LINUX_CLD_EXITED,
-                Some(u64::from(status)),
-            ) == 0
-        });
+        let child_signal_queued =
+            selected_parent.is_some_and(|pid| linux_queue_child_exit_signal(pid, status) == 0);
         let parent = (signals_cleared && child_signal_queued)
             .then(|| linux_process::complete_live_child_exit(selected.pid, status))
             .flatten();
@@ -37130,11 +37177,12 @@ fn verify_linux_cross_process_prlimit(pid: u32) -> bool {
         && linux_process::live_child_wait_state(
             current_linux_process_pid(),
             Some(pid),
+            true,
             false,
             false,
         ) == Some(linux_process::ChildWaitState::Exited {
             pid,
-            status: LINUX_PROBE_EXIT_STATUS as u8,
+            status: (LINUX_PROBE_EXIT_STATUS as u16) << 8,
         });
     let parent_group = linux_process::live_process_group(current_linux_process_pid());
     let group_wait = parent_group.is_some_and(|group| {
@@ -37873,7 +37921,22 @@ fn linux_scheduler_process(pid: u64) -> Result<u32, u64> {
 }
 
 fn linux_sched_getscheduler(pid: u64) -> u64 {
-    linux_scheduler_process(pid).map_or_else(|error| error, |_| 0)
+    match linux_scheduler_process(pid) {
+        Ok(pid) => linux_process::live_process_sched_policy(pid)
+            .map_or(LINUX_ESRCH, linux_sched_policy_value),
+        Err(error) => error,
+    }
+}
+
+/// sched_getscheduler() reports the policy with SCHED_RESET_ON_FORK or'ed
+/// in (kernel/sched/syscalls.c:1010-1013).
+fn linux_sched_policy_value(stored: u8) -> u64 {
+    let reset_on_fork = if stored & linux_process::SCHED_RESET_ON_FORK != 0 {
+        LINUX_SCHED_RESET_ON_FORK
+    } else {
+        0
+    };
+    u64::from(stored & !linux_process::SCHED_RESET_ON_FORK) | reset_on_fork
 }
 
 fn linux_sched_getparam(pid: u64, address: u64) -> u64 {
@@ -39413,25 +39476,88 @@ fn linux_capset(header_address: u64, data_address: u64) -> u64 {
     }
 }
 
-fn linux_set_scheduler(pid: u64, policy: u64, parameter_address: u64) -> u64 {
-    let policy = u64::from(policy as u32);
-    if let Err(error) = linux_scheduler_process(pid) {
-        return error;
-    }
-    if !matches!(policy, 0 | 1 | 2 | 3 | 5 | 6) {
+/// sched_setscheduler() with `Some(policy)`, sched_setparam() with `None`
+/// (SETPARAM_POLICY keeps the current policy and reset-on-fork flag).
+fn linux_set_scheduler(pid: u64, policy: Option<u64>, parameter_address: u64) -> u64 {
+    // kernel/sched/syscalls.c:934-947 and do_sched_setscheduler(): argument
+    // errors, then the parameter copy, then the task lookup.
+    if policy.is_some_and(|policy| (policy as i32) < 0)
+        || (pid as i32) < 0
+        || parameter_address == 0
+    {
         return LINUX_EINVAL;
-    }
-    if policy != 0 {
-        return LINUX_EPERM;
     }
     let mut priority = [0_u8; 4];
     if !copy_from_linux_user(parameter_address, &mut priority) {
         return LINUX_EFAULT;
     }
-    if priority == [0; 4] {
+    let pid = match linux_scheduler_process(pid) {
+        Ok(pid) => pid,
+        Err(error) => return error,
+    };
+    let Some(current) = linux_process::live_process_sched_policy(pid) else {
+        return LINUX_ESRCH;
+    };
+    let (policy, reset_on_fork) = match policy {
+        // _sched_setscheduler() strips the legacy SCHED_RESET_ON_FORK bit
+        // before the policy is validated.
+        Some(policy) => (
+            u64::from(policy as u32) & !LINUX_SCHED_RESET_ON_FORK,
+            policy & LINUX_SCHED_RESET_ON_FORK != 0,
+        ),
+        None => (
+            u64::from(current & !linux_process::SCHED_RESET_ON_FORK),
+            current & linux_process::SCHED_RESET_ON_FORK != 0,
+        ),
+    };
+    linux_apply_scheduler_policy(
+        pid,
+        current,
+        policy,
+        u32::from_ne_bytes(priority),
+        reset_on_fork,
+    )
+}
+
+/// The unprivileged part of __sched_setscheduler()
+/// (kernel/sched/syscalls.c:435-482 and 497-536).
+fn linux_apply_scheduler_policy(
+    pid: u32,
+    current: u8,
+    policy: u64,
+    priority: u32,
+    reset_on_fork: bool,
+) -> u64 {
+    // SCHED_NORMAL, FIFO, RR, BATCH, IDLE and DEADLINE.
+    if !matches!(policy, 0 | 1 | 2 | 3 | 5 | 6) {
+        return LINUX_EINVAL;
+    }
+    // Parameter ranges are checked before permissions: FIFO and RR need a
+    // priority of 1..=99, every other policy 0. Ginux accepts no deadline
+    // parameters, and __checkparam_dl() rejects the empty set.
+    if priority > 99 || matches!(policy, 1 | 2) != (priority != 0) || policy == 6 {
+        return LINUX_EINVAL;
+    }
+    // Without CAP_SYS_NICE the RT policies need RLIMIT_RTPRIO, leaving
+    // SCHED_IDLE needs RLIMIT_NICE headroom and a set reset-on-fork flag
+    // cannot be cleared. Switching between NORMAL, BATCH and IDLE is free.
+    let current_policy = current & !linux_process::SCHED_RESET_ON_FORK;
+    if matches!(policy, 1 | 2)
+        || current_policy == 5 && policy != 5
+        || current & linux_process::SCHED_RESET_ON_FORK != 0 && !reset_on_fork
+    {
+        return LINUX_EPERM;
+    }
+    let stored = policy as u8
+        | if reset_on_fork {
+            linux_process::SCHED_RESET_ON_FORK
+        } else {
+            0
+        };
+    if linux_process::set_live_process_sched_policy(pid, stored) {
         0
     } else {
-        LINUX_EINVAL
+        LINUX_ESRCH
     }
 }
 
@@ -39485,13 +39611,26 @@ fn linux_sched_setattr(pid: u64, attribute_address: u64, flags: u64) -> u64 {
     if !matches!(policy, 0 | 1 | 2 | 3 | 5 | 6) {
         return LINUX_EINVAL;
     }
-    if policy != 0 || scheduler_flags != 0 {
-        return LINUX_EPERM;
-    }
-    if nice != 0 || priority != 0 || runtime != 0 || deadline != 0 || period != 0 {
+    if nice != 0 || runtime != 0 || deadline != 0 || period != 0 {
         return LINUX_EINVAL;
     }
-    0
+    if scheduler_flags & !LINUX_SCHED_FLAG_RESET_ON_FORK != 0 {
+        return LINUX_EPERM;
+    }
+    let pid = match linux_scheduler_process(pid) {
+        Ok(pid) => pid,
+        Err(error) => return error,
+    };
+    let Some(current) = linux_process::live_process_sched_policy(pid) else {
+        return LINUX_ESRCH;
+    };
+    linux_apply_scheduler_policy(
+        pid,
+        current,
+        u64::from(policy),
+        priority,
+        scheduler_flags & LINUX_SCHED_FLAG_RESET_ON_FORK != 0,
+    )
 }
 
 fn linux_sched_getattr(pid: u64, attribute_address: u64, size: u64, flags: u64) -> u64 {
@@ -39506,8 +39645,19 @@ fn linux_sched_getattr(pid: u64, attribute_address: u64, size: u64, flags: u64) 
     if size > PAGE_SIZE as u64 {
         return LINUX_E2BIG;
     }
+    let Some(policy) = linux_scheduler_process(pid)
+        .ok()
+        .and_then(linux_process::live_process_sched_policy)
+    else {
+        return LINUX_ESRCH;
+    };
     let mut attribute = [0_u8; SCHED_ATTR_SIZE];
     attribute[..4].copy_from_slice(&(SCHED_ATTR_SIZE as u32).to_ne_bytes());
+    attribute[4..8]
+        .copy_from_slice(&u32::from(policy & !linux_process::SCHED_RESET_ON_FORK).to_ne_bytes());
+    if policy & linux_process::SCHED_RESET_ON_FORK != 0 {
+        attribute[8..16].copy_from_slice(&LINUX_SCHED_FLAG_RESET_ON_FORK.to_ne_bytes());
+    }
     attribute[52..56].copy_from_slice(&1024_u32.to_ne_bytes());
     if !copy_to_linux_user(attribute_address, &attribute) {
         return LINUX_EFAULT;

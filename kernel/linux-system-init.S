@@ -2531,8 +2531,7 @@ ginux_linux_system_init:
     lea rdx, [rip + .Lstatus]
     mov eax, 144
     syscall
-    cmp rax, -1
-    jne .Lfailure
+    call .Lrequire_einval
     xor edi, edi
     mov esi, 4
     lea rdx, [rip + .Lstatus]
@@ -2655,8 +2654,7 @@ ginux_linux_system_init:
     xor edx, edx
     mov eax, 314
     syscall
-    cmp rax, -1
-    jne .Lfailure
+    call .Lrequire_einval
     mov dword ptr [rip + .Lsched_attr + 4], 0
     mov dword ptr [rip + .Lsched_attr + 16], 1
     xor edi, edi
@@ -3169,7 +3167,7 @@ ginux_linux_system_init:
 
     mov rdi, r12
     xor esi, esi
-    mov edx, 0x80000000
+    mov edx, 0x01000000
     xor r10d, r10d
     mov eax, 61
     syscall
