@@ -168,6 +168,9 @@ scope, threat model, and invariants.
 - `make demo-gate-6` passed all 6 named checks. A fresh `make test` passed
   formatting, strict lint, 31 unit tests, prior-gate regressions, Gate 2 image
   checks, and the Gate 6 Rocky QEMU device path.
+- Gate 6 is delivered in open pull request
+  https://github.com/gmkurtzer/usshim/pull/6 from dedicated branch
+  `hdae/device-ownership`. It is not merged or closed.
 
 ## Open decisions and limitations
 
@@ -203,8 +206,8 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Commit and deliver the technically passed Gate 6 branch and pull request, then
-stop for human review of `make demo-gate-6`.
+Human runs or reviews `make demo-gate-6` and pull request 6, then explicitly
+accepts Gate 6 or requests corrections.
 
 ## Context recovery
 
@@ -212,8 +215,8 @@ stop for human review of `make demo-gate-6`.
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
 - Active gate: Gate 6, device ownership and virtual hardware; authorized and
-  technically passed on dedicated branch `hdae/device-ownership`; delivery and
-  human acceptance pending
+  passed/delivered on dedicated branch `hdae/device-ownership`; awaiting human
+  acceptance
 - Last evidence: `make check`, `make test-unit`, `make test-oci-layers`,
   `make test-devices`, `make test-block`, `make test-network`,
   `make bench-block`, `make bench-network`, `make demo-gate-6`, and aggregate

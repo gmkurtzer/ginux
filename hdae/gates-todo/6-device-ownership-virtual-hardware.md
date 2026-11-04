@@ -128,8 +128,8 @@ DMA authority.
 
 - Working branch: `hdae/device-ownership`
 - Intended base: `main`
-- Pull request: intended; dedicated branch push and PR creation authorized on
-  2026-11-03; never merge or close without explicit authorization
+- Pull request: https://github.com/gmkurtzer/usshim/pull/6; open and awaiting
+  review; never merge or close without explicit authorization
 - Planned commits: virtual device registry and pseudo-devices; block and
   partition backend; network backend; isolation and benchmark verification
 - Actual commits: `eb39ada` added the registry and pseudo-device foundation;
@@ -142,4 +142,4 @@ DMA authority.
 Human checkpoint because device mediation and backend ownership materially
 affect the security boundary. Present `make demo-gate-6`, fresh evidence, and
 the pull request before acceptance.
-Technical status: passed on 2026-11-03; delivery and human acceptance pending.
+Technical status: passed and delivered on 2026-11-03; human acceptance pending.
