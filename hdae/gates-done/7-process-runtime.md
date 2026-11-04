@@ -57,7 +57,7 @@ early helper fixtures.
 
 ## Remaining work
 
-- [ ] Human review and acceptance of the Gate 7 demonstration and evidence.
+- None.
 
 ## Acceptance criteria
 
@@ -147,6 +147,5 @@ early helper fixtures.
 
 ## Review policy and outcome
 
-Human checkpoint. Gate 7 is technically passed and remains open pending
-explicit human review. Process identity and privilege behavior are security
-boundaries and require acceptance before virtual kernel views build on them.
+Accepted by the human on 2026-11-04 through explicit direction to advance to
+Gate 8. The process identity and privilege evidence passed its checkpoint.

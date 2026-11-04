@@ -24,8 +24,7 @@
 - Runtime isolation unit: domain.
 - Policy unit: versioned contract.
 - Initial gate map: twelve checkpoint gates at positions 1 through 11 and 13;
-  Gates 1 through 6 are accepted, two inserted rename gates are open, and eight
-  gates remain open.
+  Gates 1 through 7.75 are accepted and five gates remain open.
 - The ordered gate batch is authorized, but every open gate remains a human
   checkpoint requiring a working demonstration and explicit acceptance.
 
@@ -229,6 +228,9 @@ scope, threat model, and invariants.
   https://github.com/gmkurtzer/ginux-us/pull/9 from `hdae/ginux-rename`.
   GitHub rejected renaming the repository to `gmkurtzer/ginux` with HTTP 422
   because that repository already exists and is non-empty.
+- Human direction on 2026-11-04 accepted Gates 7, 7.5, and 7.75 and directed
+  advancement to Gate 8. Repository integration into the existing Ginux project
+  is deferred until the separately planned move on the following morning.
 
 ## Open decisions and limitations
 
@@ -266,20 +268,19 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Obtain human direction on whether to integrate this branch into the existing
-`gmkurtzer/ginux` repository, rename that repository first, or retain a
-separate repository name; then complete repository delivery and stop for review.
+Close accepted Gates 7, 7.5, and 7.75, start Gate 8 on
+`hdae/virtual-kernel-views`, and implement its bounded virtual procfs, sysfs,
+cgroup, mount, namespace, and identity views.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 7.75, Ginux final project rename, authorized and started on
-  dedicated branch `hdae/ginux-rename`; Gate 7 remains technically passed
-  with repeated post-rename evidence; Gate 7.75 repository delivery is partial
-  pending human integration direction
+- Active gate: Gate 8, virtual kernel views, authorized for execution on
+  dedicated branch `hdae/virtual-kernel-views`; Gates 7, 7.5, and 7.75 are
+  accepted and ready to close
 - Last evidence: Gate 7.75 `make check`, `make test`,
   `make test-native-vfs`, and `make demo-gate-7` passed on 2026-11-04
-- Required human decision: none until the Gate 7 demonstration checkpoint; the
+- Required human decision: none until the Gate 8 demonstration checkpoint; the
   Gate 9 DNF repository choice is deferred until before Gate 9 implementation
