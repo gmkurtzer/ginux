@@ -1148,9 +1148,16 @@ impl ProcessScheduler {
             return None;
         }
         thread.context = context.0;
-        thread.state = State::Ready;
         self.current_by_cpu[cpu] = None;
-        self.schedule_next_on(cpu)
+        // The caller yields because it is about to wait. Like Linux, which
+        // dequeues a blocking task before picking the next one
+        // (kernel/sched/core.c try_to_block_task()), select any other
+        // eligible process first, whatever its priority, and fall back to the
+        // caller only when nothing else can run. Leaving it Running until the
+        // pick keeps it ineligible.
+        let selected = self.schedule_next_on(cpu);
+        self.scheduler.thread_mut(handle.0)?.state = State::Ready;
+        selected.or_else(|| self.schedule_next_on(cpu))
     }
 
     pub(crate) fn switch_current(
@@ -1320,6 +1327,8 @@ pub(crate) fn verify_smp_process_scheduler(remote_operation: u64) -> bool {
             || run_queue.dispatch_count(0) != Some(1)
             || run_queue.dispatch_count(1) != Some(1)
             || run_queue.scheduler.thread(fallback.0)?.state != State::Ready
+            || run_queue.yield_current(first, context)?.handle() != fallback
+            || run_queue.scheduler.thread(first.0)?.state != State::Ready
         {
             return None;
         }
