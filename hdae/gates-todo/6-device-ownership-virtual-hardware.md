@@ -90,7 +90,7 @@ DMA authority.
 - Physical-device assignment requires a later threat-model and architecture
   gate; this gate must not create a generic raw-device escape hatch.
 - The initial network backend is selected and documented during this gate
-  without weakening the no-direct-host-syscall invariant.
+  without allowing an unmediated host syscall to complete.
 
 ## Delivery strategy
 

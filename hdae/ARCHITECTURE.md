@@ -22,15 +22,18 @@ Ginus.
 
 ## Security invariants
 
-1. Managed execution cannot invoke the host syscall ABI directly.
-2. Every managed syscall enters one central Ginus dispatch path before any host
-   effect occurs.
+1. No managed syscall instruction may complete as an unmediated host syscall.
+2. Every managed syscall stops before execution and enters one central Ginus
+   dispatch path before any host effect occurs.
 3. Dispatch first resolves the domain contract, then emulates, performs a
    mediated host operation, or denies the request.
 4. Managed pointers, structures, strings, and ioctl payloads are copied through
-   the domain memory model and validated before use.
-5. Managed descriptor numbers resolve only to Ginus objects. Host descriptors
-   are never installed into or disclosed to managed code.
+   the active backend's controlled memory-access path and validated before use.
+5. Security-profile descriptor numbers resolve only to Ginus objects. The
+   balanced native profile may use kernel descriptors solely for immutable OCI
+   image content and an explicitly assigned bootstrap console inside a private
+   domain filesystem view. Their use remains syscall-mediated; supervisor or
+   unrelated host descriptors and host paths are never disclosed.
 6. `/dev`, `/proc`, `/sys`, cgroups, mounts, process identities, and machine
    identity are derived from Ginus state.
 7. Device assignment is explicit and exclusive by default. Domain teardown
@@ -58,22 +61,49 @@ Development and verification run on a macOS arm64 host through QEMU TCG
 emulating a normally booted Rocky Linux 10 x86-64 host. Host systemd remains
 real PID 1 and Ginus runs as an ordinary process inside that environment.
 Ginus acts as the application kernel for its managed userspace rather than
-booting another guest Linux kernel beneath the domain. The security-focused
-baseline is a Ginus x86-64 instruction interpreter: managed registers and
-memory are Ginus data, and a managed `syscall` instruction becomes an internal
-dispatch event without entering the host kernel. Gate 1 `PTRACE_SYSEMU`
-evidence remains a prototype for a possible performance-focused backend, not
-the secure baseline. KVM acceleration is deferred and is not an initial
-acceptance requirement.
+booting another guest Linux kernel beneath the domain. Gate 5 uses native
+x86-64 execution supervised by ptrace syscall-entry and syscall-exit stops: the
+host kernel loads the ELF and its interpreter, the host CPU executes
+instructions, and every managed syscall stops before its kernel implementation
+runs. Ginus may then emulate or deny it by replacing the syscall before effect,
+or allow a validated operation to execute and observe its exit. Losing
+supervision terminates the tracee and fails the domain closed. Gate 1's
+`PTRACE_SYSEMU` proof remains the strict no-host-effect interception fixture;
+it cannot by itself execute an approved syscall.
+
+This backend intentionally trusts more host-kernel surface than a userspace CPU
+interpreter. ELF loading, virtual memory, page faults, signals, scheduling, and
+ptrace remain host-kernel responsibilities and possible attack surface. The
+Gate 3 handcrafted interpreter remains evidence for a stricter profile but is
+not the Gate 5 compatibility path. A Unicorn Engine backend is explicitly
+deferred as the alternative path for returning CPU and memory execution to
+Ginus while retaining the same contract dispatcher. KVM acceleration remains
+outside the initial milestone.
+
+Execution profile and syscall action are separate choices:
+
+- **Security:** Ginus interprets instructions; syscalls are emulated, proxied,
+  or denied, and descriptors remain Ginus-virtual.
+- **Balanced:** the host executes instructions under ptrace. A minimal,
+  validated set of read-only loader, immutable-image, memory, signal, and
+  bootstrap-console operations may continue inside a private domain view.
+  Writable storage, devices, networking, ioctls, credentials, and virtual
+  kernel state are emulated, proxied through Ginus objects, or denied.
+- **Performance:** native execution may use a broader validated passthrough set,
+  but only after explicit configuration, benchmarks, and security review.
+
+Gate 5 implements the balanced profile. Backend selection may later be made per
+process, but mixed interpreter/native process semantics are not part of this
+gate.
 
 ### Domain memory and task model
 
-Ginus owns managed address spaces, mappings, executable loading, task and
-thread identities, scheduling-facing state, signals, clocks, credentials,
-capabilities, and lifecycle. Managed PIDs and addresses are not authority to
-host processes or memory. In the interpreter backend, managed virtual addresses
-index only validated Ginus-owned memory and permission metadata; they are never
-dereferenced as host pointers.
+Ginus owns the domain's virtual identities, descriptors, devices, contract, and
+lifecycle. With native ptrace supervision, host tracees provide address spaces
+and tasks under continuous Ginus supervision; their host identities and
+addresses are never exposed as domain authority. Ginus copies and validates
+tracee memory before mediation. In interpreter backends, managed virtual
+addresses instead index only Ginus-owned memory and permission metadata.
 
 ### Contract dispatcher
 
@@ -88,15 +118,22 @@ decision has one of these effects:
 - **Audit:** record the decision, relevant normalized arguments, result, domain
   identity, and contract version without leaking secrets.
 
-There is no direct-continue action.
+There is no unchecked direct-continue action. Balanced and performance
+passthrough are explicit contract decisions after argument and authority
+validation, and their exits are observed and audited.
 
 ### Virtual VFS and image backend
 
-The initial root is prepared reproducibly from a checksum-pinned official Rocky
-Linux 10 cloud QCOW2 image. The source image is cached outside Git. Ginus
-presents a virtual root with an immutable prepared base and a domain-local
-writable overlay. The exact initial preparation and backing strategy is a Gate
-2 decision; it must not require network access during ordinary boot or tests.
+The initial domain root is a digest-pinned Rocky Linux 10 OCI image. An explicit
+acquisition operation pulls and verifies its manifest, configuration, and
+layers into a host-owned cache outside Git. Ginus deterministically assembles
+the layers into an immutable indexed virtual root and adds a bounded,
+domain-local writable overlay. The OCI configuration supplies launch metadata,
+but Ginus—not `runc`, `crun`, `containerd`, or another OCI runtime—constructs
+the execution view and supervises native loading through ptrace syscall stops.
+Managed code
+receives neither host paths nor host descriptors. Ordinary domain starts and
+tests require no network access.
 
 ### Virtual kernel filesystems
 
@@ -141,7 +178,6 @@ and idle overhead.
 
 ## Important open decisions
 
-- Rocky QCOW2 version, checksum, preparation tool, and virtual-root backing.
 - Initial network backend and packet mediation boundary.
 - Numeric performance budgets, set from reproducible baseline evidence before
   Gate 11 begins.
@@ -153,3 +189,22 @@ gate before implementation continues.
 
 Gate 4 selected strict, versioned TOML as the operator-facing domain
 configuration format with human approval on 2026-11-03.
+
+Gate 5 selected a digest-pinned OCI image as the domain root filesystem, with
+Ginus acting as the userspace kernel and runtime. The image is pulled only by
+an explicit acquisition operation, cached outside Git, assembled into an
+immutable indexed virtual root, and paired with a bounded in-memory write
+overlay. The host continues to boot independently from its Rocky cloud QCOW2.
+Human approval was recorded on 2026-11-03.
+
+Gate 5 selected native host ELF execution under continuous ptrace supervision
+as its dynamic userspace path with human approval on 2026-11-03. Experimentation
+showed that approved passthrough syscalls require syscall-entry/exit supervision;
+`PTRACE_SYSEMU` skips the syscall even when followed by `PTRACE_SYSCALL`. The
+host execution surface is an explicit limitation. Unicorn Engine remains a
+deferred alternative backend, not a discarded design.
+
+Gate 5 selected the balanced execution profile with human approval on
+2026-11-03. Native tracees may hold kernel descriptors only for immutable image
+content and an assigned bootstrap console within a private domain filesystem
+view. Security-sensitive interfaces remain virtualized, proxied, or denied.

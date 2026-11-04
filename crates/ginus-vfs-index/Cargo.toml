@@ -1,0 +1,12 @@
+[package]
+name = "ginus-vfs-index"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[[bin]]
+name = "ginus-vfs-index"
+path = "src/main.rs"
+
+[dependencies]
+ginus-vfs = { path = "../ginus-vfs" }

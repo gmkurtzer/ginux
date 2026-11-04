@@ -5,6 +5,8 @@ members = [
     "crates/ginus-domain",
     "crates/ginus-init",
     "crates/ginus-runtime",
+    "crates/ginus-vfs",
+    "crates/ginus-vfs-index",
     "crates/managed-payload",
     "crates/runtime-fixture",
 ]

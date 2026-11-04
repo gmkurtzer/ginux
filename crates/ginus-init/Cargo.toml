@@ -12,3 +12,4 @@ path = "src/main.rs"
 ginus-core = { path = "../ginus-core" }
 ginus-domain = { path = "../ginus-domain" }
 ginus-runtime = { path = "../ginus-runtime" }
+ginus-vfs = { path = "../ginus-vfs" }

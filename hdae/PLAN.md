@@ -3,7 +3,7 @@
 ## Strategy
 
 Build Ginus from the security boundary outward. First prove that unmodified
-x86-64 code can run without direct access to host syscalls. Then add a cached
+x86-64 code can run without unmediated host-syscall effects. Then add a cached
 Rocky userspace, domain configuration, Linux runtime behavior, virtual kernel
 objects, systemd compatibility, explicit contract controls, performance
 evidence, and boundary hardening.
@@ -36,14 +36,17 @@ replace it.
 1. **Rocky host foundation and interception proof**: boot a normal Rocky Linux
    10 host under QEMU TCG, run Ginus as an ordinary process, and prove matched
    syscall interception and benchmark controls without replacing host systemd.
-2. **Rocky domain-userspace pipeline**: reproducibly prepare the cached,
-   verified Rocky image content for consumption beneath Ginus.
+2. **Rocky image-pipeline foundation**: reproducibly extract and verify Rocky
+   filesystem content as pipeline evidence and fixtures. Gate 5 supersedes its
+   cloud-image-derived domain root with the approved OCI domain-image path.
 3. **Execution kernel**: address spaces, ELF loading, syscall ABI, central
    dispatch, and small unmodified programs.
 4. **Domain configuration and lifecycle**: versioned configuration,
    normalization, create/start/inspect/stop, resources, and failure behavior.
-5. **Virtual VFS and dynamic userspace**: virtual descriptors, root and
-   overlay, dynamic loader behavior, and a Rocky shell.
+5. **OCI-backed virtual VFS and native dynamic userspace**: explicit OCI
+   acquisition, verified cached layers, virtual descriptors, immutable root and
+   writable overlay, and a Rocky shell executed with the balanced profile under
+   continuous ptrace syscall-entry/exit supervision.
 6. **Device ownership and virtual hardware**: virtual `/dev`, console, block
    or bounded partition, virtual networking, exclusivity, revocation, and
    device-path benchmarks.
@@ -132,7 +135,9 @@ define their expected result.
 
 ## Deferred roadmap
 
-After the initial twelve gates, likely milestones include multiple concurrent
+After the initial twelve gates, Gate 14 preserves the Unicorn Engine execution
+backend as a concrete alternative to native ptrace execution. Other likely
+milestones include multiple concurrent
 domains, conventional containers within a domain, network and storage backend
 expansion, physical-device assignment with a separately reviewed IOMMU/VFIO
 model, non-x86 architectures, live lifecycle controls, distribution expansion,

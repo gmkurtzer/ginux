@@ -75,6 +75,7 @@ impl<const ITEMS: usize, const N: usize> TextList<ITEMS, N> {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ExecutionProfile {
     Security,
+    Balanced,
     Performance,
 }
 
@@ -82,6 +83,7 @@ pub enum ExecutionProfile {
 pub enum ExecutionBackend {
     Interpreter,
     PtraceSysemu,
+    PtraceNative,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -298,9 +300,16 @@ impl DomainConfig {
         if !(1..=64).contains(&self.vcpus) || !(16..=1_048_576).contains(&self.memory_mib) {
             return Err(ConfigError::InvalidValue);
         }
-        if self.execution_profile != ExecutionProfile::Security
-            || self.execution_backend != ExecutionBackend::Interpreter
-        {
+        let supported_execution = matches!(
+            (self.execution_profile, self.execution_backend),
+            (ExecutionProfile::Security, ExecutionBackend::Interpreter)
+                | (ExecutionProfile::Balanced, ExecutionBackend::PtraceNative)
+                | (
+                    ExecutionProfile::Performance,
+                    ExecutionBackend::PtraceNative
+                )
+        );
+        if !supported_execution {
             return Err(ConfigError::UnsupportedExecution);
         }
         if self.network_backend != NetworkBackend::None {
@@ -345,12 +354,14 @@ impl DomainConfig {
         output.raw(b"\n\n[execution]\nprofile = ")?;
         output.quoted(match self.execution_profile {
             ExecutionProfile::Security => b"security",
+            ExecutionProfile::Balanced => b"balanced",
             ExecutionProfile::Performance => b"performance",
         })?;
         output.raw(b"\nbackend = ")?;
         output.quoted(match self.execution_backend {
             ExecutionBackend::Interpreter => b"interpreter",
             ExecutionBackend::PtraceSysemu => b"ptrace-sysemu",
+            ExecutionBackend::PtraceNative => b"ptrace-native",
         })?;
         output.raw(b"\n\n[contract]\nprofile = ")?;
         output.quoted(self.contract_profile.as_bytes())?;
@@ -515,6 +526,7 @@ fn parse_field(
             builder.mark(1 << 8)?;
             builder.execution_profile = match parse_string::<32>(value)?.as_bytes() {
                 b"security" => ExecutionProfile::Security,
+                b"balanced" => ExecutionProfile::Balanced,
                 b"performance" => ExecutionProfile::Performance,
                 _ => return Err(ConfigError::InvalidValue),
             };
@@ -524,6 +536,7 @@ fn parse_field(
             builder.execution_backend = match parse_string::<32>(value)?.as_bytes() {
                 b"interpreter" => ExecutionBackend::Interpreter,
                 b"ptrace-sysemu" => ExecutionBackend::PtraceSysemu,
+                b"ptrace-native" => ExecutionBackend::PtraceNative,
                 _ => return Err(ConfigError::InvalidValue),
             };
         }
@@ -704,9 +717,9 @@ fn validate_reference(bytes: &[u8]) -> Result<(), ConfigError> {
     if bytes.is_empty()
         || bytes[0] == b'/'
         || bytes.windows(2).any(|window| window == b"..")
-        || !bytes
-            .iter()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b':'))
+        || !bytes.iter().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b':' | b'/' | b'@')
+        })
     {
         return Err(ConfigError::HostAuthority);
     }
@@ -928,6 +941,16 @@ policy = "stop"
     }
 
     #[test]
+    fn accepts_native_ptrace_execution_pair() {
+        let native = VALID
+            .replace("profile = \"security\"", "profile = \"balanced\"")
+            .replace("backend = \"interpreter\"", "backend = \"ptrace-native\"");
+        let config = DomainConfig::parse(native.as_bytes()).unwrap();
+        assert_eq!(config.execution_profile, ExecutionProfile::Balanced);
+        assert_eq!(config.execution_backend, ExecutionBackend::PtraceNative);
+    }
+
+    #[test]
     fn rejects_implicit_host_authority() {
         let host_root = VALID.replace("root = \"rocky-10.2\"", "root = \"/host/root\"");
         assert_eq!(
@@ -938,6 +961,19 @@ policy = "stop"
         assert_eq!(
             DomainConfig::parse(traversal.as_bytes()),
             Err(ConfigError::HostAuthority)
+        );
+    }
+
+    #[test]
+    fn accepts_digest_pinned_oci_root_reference() {
+        let oci = VALID.replace(
+            "root = \"rocky-10.2\"",
+            "root = \"docker.io/rockylinux/rockylinux@sha256:e372170ca863\"",
+        );
+        let config = DomainConfig::parse(oci.as_bytes()).unwrap();
+        assert_eq!(
+            config.root.as_bytes(),
+            b"docker.io/rockylinux/rockylinux@sha256:e372170ca863"
         );
     }
 

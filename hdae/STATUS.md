@@ -15,11 +15,15 @@
   `hdae/domain-config-lifecycle`, stacked on the accepted Gate 3 state while
   its intended eventual base remains `main`, in open
   https://github.com/gmkurtzer/usshim/pull/4.
+- Gate 5 is accepted and closed. It remains delivered on dedicated branch
+  `hdae/virtual-vfs-userspace`, stacked on the accepted Gate 4 state while its
+  intended eventual base remains `main`, in open
+  https://github.com/gmkurtzer/usshim/pull/5.
 - Authoritative name: Ginus (Ginux Userspace).
 - Runtime isolation unit: domain.
 - Policy unit: versioned contract.
 - Initial gate map: twelve checkpoint gates at positions 1 through 11 and 13;
-  Gates 1 through 4 are accepted and eight gates remain open.
+  Gates 1 through 5 are accepted and seven gates remain open.
 - The ordered gate batch is authorized, but every open gate remains a human
   checkpoint requiring a working demonstration and explicit acceptance.
 
@@ -101,12 +105,63 @@ scope, threat model, and invariants.
   and helper reaping. Seven domain unit tests, `make test-config`,
   `make test-domain`, `make demo-gate-4`, and aggregate `make test` passed.
 - Human accepted Gate 4 on 2026-11-03 and directed advancement to Gate 5.
+- Human corrected and approved the Gate 5 backing strategy on 2026-11-03: the
+  domain virtually boots a digest-pinned Rocky OCI image through Ginus. Ginus
+  explicitly pulls and caches the image, assembles its layers into an immutable
+  indexed root, and supplies a bounded in-memory write overlay. An external OCI
+  runtime must not execute managed code, and the host QCOW2 remains independent.
+- Gate 5 now has a verified pinned OCI acquisition/cache pipeline and a Ginus
+  immutable root index. `make test-oci-image` passed six acquisition,
+  integrity, identity, corruption, repeatability, and offline checks.
+- `make test-vfs` passed in the QEMU TCG Rocky host. Ginus resolved Rocky
+  identity and Bash from the OCI root, created and discarded its own overlay
+  file, kept the host filesystem unchanged, and rejected a truncated index.
+- Gate 5 native execution milestone commit `8e5847a` added the `ptrace-native`
+  backend. `make check`, `make test-unit`, and `make test-native-vfs` passed.
+  The QEMU Rocky host loaded the unmodified OCI Bash and image loader, Ginus
+  audited 238 syscall entries, emulated `getpid` as 4242, denied unsupported
+  calls, printed `GINUS_NATIVE_SHELL: PASS`, stopped at `exit_group`, and
+  preserved the Bash digest.
+- Gate 5 multi-layer assembly commit `19ade45` removed the one-layer-only
+  preparation restriction. `make test-oci-layers` and the expanded seven-check
+  `make test-oci-image` passed replacement, whiteout, opaque-directory,
+  repeatability, integrity, identity, and offline checks. A fresh
+  `make test-native-vfs` passed against the resulting assembled root.
+- The expanded native QEMU test also passed fail-closed supervisor loss: after
+  a held Rocky Bash reported readiness, killing Ginus caused
+  `PTRACE_O_EXITKILL` to remove the tracee. Normal execution, emulated `getpid`,
+  denied `getppid`, immutable Bash content, and cleanup passed in the same run.
+- Human direction on 2026-11-03 approved a balanced execution profile for Gate
+  5: native instruction execution with minimal confined passthrough for
+  read-only loader/image, memory, signal, and bootstrap-console operations;
+  sensitive interfaces remain emulated, proxied, or denied. The security
+  profile retains interpreted execution and Ginus-virtual descriptors.
+- The approved balanced model is now executable. Local checks passed explicit
+  syscall-surface and negative policy tests. QEMU passed Rocky Bash with
+  classified read-only image and console passthrough, virtual identity, denied
+  ioctl, blocked `O_CREAT` with no file created, blocked socket creation, and
+  fail-closed supervisor loss.
+- The latest native QEMU run also passed unexpected-stop handling: after an
+  external `SIGSTOP`, Ginus killed and reaped the tracee and cleaned domain
+  state. Four VFS unit tests now include independent overlay-instance isolation
+  plus traversal, symlink-loop, invalid-descriptor, overlay, and teardown paths.
+- `make demo-gate-5` passed all eight named checks and reported its explicit
+  non-claims. A fresh aggregate `make test` also passed all earlier-gate lint,
+  unit, QEMU interception/runtime/config/domain, and image-pipeline regressions.
+- Gate 5 is delivered in open pull request
+  https://github.com/gmkurtzer/usshim/pull/5 from dedicated branch
+  `hdae/virtual-vfs-userspace`. It is not merged or closed.
+- Human accepted Gate 5 on 2026-11-03 and directed advancement to Gate 6.
 
 ## Open decisions and limitations
 
-- Human direction selected the security-focused full x86-64 interpreter as the
-  Gate 3 baseline. Gate 4 exposes execution profile/backend selection but
-  rejects the performance profile until a separately reviewed backend exists.
+- Human direction selected the security-focused handcrafted x86-64 interpreter
+  for Gate 3 and accepted its evidence. On 2026-11-03 the human selected native
+  host ELF execution under continuous ptrace supervision for Gate 5
+  compatibility. The host handles instructions, ELF loading, memory, faults,
+  signals, and scheduling; Ginus must stop every syscall before effect and fail
+  closed on lost tracing. Approved passthrough calls require ptrace entry/exit
+  stops because `PTRACE_SYSEMU` always skips the syscall implementation.
 - Rocky host image is pinned to official Rocky 10.2 GenericCloud build
   10.2-20260525.0. Gate 2 selected a pinned, network-disabled
   Docker/LinuxKit helper that mounts a temporary raw conversion read-only;
@@ -116,20 +171,35 @@ scope, threat model, and invariants.
   read-only, but remains trusted build tooling rather than a runtime boundary.
 - The repository and directory still use the historical `usshim` name; rename
   is not authorized in the current planning task.
+- The selected Rocky OCI image has one layer; deterministic synthetic fixtures
+  now cover general multi-layer replacement, whiteout, and opaque-directory
+  semantics.
+- The native Bash proof uses a read-only unprivileged chroot and limits kernel
+  descriptors to immutable image content and the bootstrap console. Gate 6
+  adds Ginus-owned device objects rather than expanding native passthrough.
+- Gate 6 will begin with a Ginus-owned isolated packet queue as its mediated
+  network backend. It does not provide host or external network connectivity;
+  later connectivity backends must preserve the same virtual interface and
+  mediation boundary.
+- Unicorn Engine 2 is not part of the Gate 5 path. It is preserved as deferred
+  Gate 14, with reconsideration required after the native compatibility path is
+  demonstrated and before production-boundary claims are made.
 
 ## Exact next action
 
-Resolve Gate 5's virtual-root backing decision with the human, then begin the
-approved Gate 5 implementation on `hdae/virtual-vfs-userspace`.
+Create the Gate 6 branch and implement the virtual device registry plus
+Ginus-owned console, null, zero, and random frontends.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 5, virtual VFS and dynamic userspace; authorized, backing
-  decision pending before implementation
-- Last evidence: Gate 4 demo and complete aggregate regression suite passed on
-  2026-11-03
-- Required human decision: select the Gate 5 immutable-base and disposable-
-  overlay backing strategy
+- Active gate: Gate 6, device ownership and virtual hardware; authorized and
+  starting on dedicated branch `hdae/device-ownership`
+- Last evidence: `make check`, `make test-unit`, `make test-oci-layers`,
+  `make test-oci-image`, and a post-assembly `make test-native-vfs` passed on
+  2026-11-03; the latest native run includes balanced negative probes and
+  supervisor-loss verification; `make demo-gate-5` and aggregate `make test`
+  also passed
+- Required human decision: none until the Gate 6 demonstration checkpoint

@@ -14,9 +14,10 @@ reduce parts of that surface, but managed processes still execute permitted
 system calls directly against the host Linux kernel. A compromised process can
 therefore attempt to exploit any host-kernel path that remains reachable.
 
-Ginus interposes a userspace-kernel boundary. Managed code cannot issue host
-system calls directly. Ginus intercepts each request and either emulates it,
-performs a validated mediated operation through the host, or denies it. The
+Ginus interposes a userspace-kernel boundary. A managed syscall may not complete
+as an unmediated host syscall. Ginus intercepts each request before its host
+effect and either emulates it, performs a validated mediated operation through
+the host, or denies it. The
 goal is to make compatibility an explicit, configurable security contract
 rather than an all-or-nothing inheritance from the host kernel.
 
@@ -35,13 +36,15 @@ The initial milestone will boot a normal Rocky Linux 10 host with systemd as
 the real host PID 1, install Ginus as an ordinary host executable, and run an
 unmodified Rocky Linux 10 systemd userspace as virtual PID 1 inside one Ginus
 domain. Ginus remains resident as the userspace kernel for the processes it
-launches. The Rocky host and domain userspace will be derived from an official,
-checksum-pinned cloud QCOW2 image and cached so ordinary boots and tests do not
-require network access.
+launches. The Rocky host boots from an official, checksum-pinned cloud QCOW2
+image. Each domain virtually boots a digest-pinned Rocky OCI image as its root
+filesystem; Ginus pulls and caches that image explicitly so ordinary domain
+starts and tests do not require network access.
 
 The milestone succeeds when:
 
-1. managed x86-64 code cannot execute host Linux system calls directly;
+1. no managed x86-64 syscall completes against the host without a Ginus
+   contract decision;
 2. systemd reproducibly reaches the defined multi-user readiness marker;
 3. the domain sees Ginus-owned `/dev`, `/proc`, `/sys`, and cgroup interfaces;
 4. domain configuration selects its image, resources, devices, contract, and
@@ -73,7 +76,15 @@ solved.
   Ginus runs inside it as an ordinary process or service.
 - An emulation-compatible syscall-interception mechanism selected by Gate 1;
   KVM acceleration is not required by the initial milestone.
-- One Rocky Linux 10 systemd domain from a cached cloud image.
+- Native x86-64 ELF execution supervised with ptrace syscall-entry and
+  syscall-exit stops, with the host kernel performing instruction execution
+  and Ginus deciding every syscall before any permitted host effect.
+- Three explicit execution profiles: `security` interprets instructions and
+  virtualizes kernel-facing state; `balanced` executes instructions natively
+  while limiting passthrough to a minimal confined loader/memory surface; and
+  `performance` may permit a broader validated native surface after later
+  measurement and review.
+- One Rocky Linux 10 systemd domain from a cached, digest-pinned OCI image.
 - Linux ABI interception, emulation, mediated host operations, denial, and
   audit logging.
 - Domain-owned processes, address spaces, file descriptors, virtual kernel
@@ -100,9 +111,10 @@ solved.
 
 ## Product principles
 
-- No managed process directly continues a host syscall.
-- "Passthrough" means a Ginus-controlled, validated, translated or proxied
-  operation; it never means exposing a host descriptor or unchecked pointer.
+- No managed syscall reaches a host effect before a Ginus contract decision.
+- "Passthrough" means a Ginus-controlled operation whose syscall and arguments
+  are validated before the native backend may resume it; it never means an
+  unchecked syscall, descriptor, pointer, or ioctl payload.
 - Unknown contract operations fail closed and produce useful audit evidence.
 - Domain-visible kernel state is Ginus state, not an accidental view of host
   `/proc`, `/sys`, `/dev`, or cgroups.

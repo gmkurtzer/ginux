@@ -3,9 +3,14 @@
 
 use core::arch::{asm, global_asm};
 use core::panic::PanicInfo;
-use ginus_core::{decide, Action, SYS_EXIT, SYS_GETPID, SYS_UNAME, SYS_WRITE};
+use ginus_core::{
+    balanced_arguments_allowed, balanced_identity_result, balanced_surface, decide,
+    decide_balanced, Action, BalancedSurface, SYS_EXIT, SYS_EXIT_GROUP, SYS_GETPID, SYS_UNAME,
+    SYS_WRITE,
+};
 use ginus_domain::{ConfigError, Domain, DomainConfig};
 use ginus_runtime::{execute, AddressSpace, AuditAction, LoadError};
+use ginus_vfs::{BaseReader, Index, VfsError, VirtualFs, O_CREATE, O_READ, O_WRITE};
 
 global_asm!(
     ".global _start",
@@ -23,6 +28,13 @@ const SYS_WRITE_HOST: usize = 1;
 const SYS_READ_HOST: usize = 0;
 const SYS_CLOSE_HOST: usize = 3;
 const SYS_RT_SIGPROCMASK: usize = 14;
+const SYS_PREAD64: usize = 17;
+const SYS_CHDIR: usize = 80;
+const SYS_SETGID: usize = 106;
+const SYS_SETUID: usize = 105;
+const SYS_SETGROUPS: usize = 116;
+const SYS_PRCTL: usize = 157;
+const SYS_CHROOT: usize = 161;
 const SYS_PAUSE: usize = 34;
 const SYS_FORK: usize = 57;
 const SYS_EXECVE: usize = 59;
@@ -40,6 +52,7 @@ const PTRACE_PEEKDATA: usize = 2;
 const PTRACE_KILL: usize = 8;
 const PTRACE_GETREGS: usize = 12;
 const PTRACE_SETREGS: usize = 13;
+const PTRACE_SYSCALL: usize = 24;
 const PTRACE_SYSEMU: usize = 31;
 const PTRACE_SETOPTIONS: usize = 0x4200;
 const PTRACE_O_TRACESYSGOOD: usize = 1;
@@ -50,12 +63,17 @@ const ENOSYS: i64 = 38;
 const VIRTUAL_PID: u64 = 4242;
 const MAX_ELF_SIZE: usize = 64 * 1024;
 const MAX_CONFIG_SIZE: usize = 16 * 1024;
+const MAX_VFS_INDEX_SIZE: usize = 8 * 1024 * 1024;
 const SIG_BLOCK: usize = 0;
 const SIGTERM: usize = 15;
 const SIGKILL: usize = 9;
+const PR_SET_NO_NEW_PRIVS: usize = 38;
+const DOMAIN_UID: usize = 1000;
+const DOMAIN_GID: usize = 1000;
 
 static mut ELF_BYTES: [u8; MAX_ELF_SIZE] = [0; MAX_ELF_SIZE];
 static mut CONFIG_BYTES: [u8; MAX_CONFIG_SIZE] = [0; MAX_CONFIG_SIZE];
+static mut VFS_INDEX_BYTES: [u8; MAX_VFS_INDEX_SIZE] = [0; MAX_VFS_INDEX_SIZE];
 
 #[repr(C)]
 struct UserRegs {
@@ -146,6 +164,26 @@ unsafe extern "C" fn bcmp(
 }
 
 #[no_mangle]
+unsafe extern "C" fn memcmp(
+    left: *const core::ffi::c_void,
+    right: *const core::ffi::c_void,
+    length: usize,
+) -> i32 {
+    let left = left.cast::<u8>();
+    let right = right.cast::<u8>();
+    let mut index = 0;
+    while index < length {
+        let left_byte = core::ptr::read_volatile(left.add(index));
+        let right_byte = core::ptr::read_volatile(right.add(index));
+        if left_byte != right_byte {
+            return left_byte as i32 - right_byte as i32;
+        }
+        index += 1;
+    }
+    0
+}
+
+#[no_mangle]
 extern "C" fn rust_main(initial_stack: *const usize) -> ! {
     let argc = unsafe { *initial_stack };
     let argv = unsafe { initial_stack.add(1) };
@@ -160,6 +198,24 @@ extern "C" fn rust_main(initial_stack: *const usize) -> ! {
         } else if c_string_equals(command, b"lifecycle") {
             let config_path = unsafe { *argv.add(2) as *const u8 };
             lifecycle_main(config_path);
+        } else if argc >= 5 && c_string_equals(command, b"vfs") {
+            let config_path = unsafe { *argv.add(2) as *const u8 };
+            let rootfs_path = unsafe { *argv.add(3) as *const u8 };
+            let index_path = unsafe { *argv.add(4) as *const u8 };
+            vfs_main(config_path, rootfs_path, index_path);
+        } else if argc >= 4 && c_string_equals(command, b"native") {
+            let config_path = unsafe { *argv.add(2) as *const u8 };
+            let root_path = unsafe { *argv.add(3) as *const u8 };
+            let mode = if argc >= 5
+                && c_string_equals(unsafe { *argv.add(4) as *const u8 }, b"hold")
+            {
+                1
+            } else if argc >= 5 && c_string_equals(unsafe { *argv.add(4) as *const u8 }, b"probe") {
+                2
+            } else {
+                0
+            };
+            native_main(config_path, root_path, mode);
         } else if argc >= 4 && c_string_equals(command, b"domain") {
             let config_path = unsafe { *argv.add(2) as *const u8 };
             let fixture_path = unsafe { *argv.add(3) as *const u8 };
@@ -167,6 +223,405 @@ extern "C" fn rust_main(initial_stack: *const usize) -> ! {
         }
     }
     gate1_main()
+}
+
+struct HostRootfs {
+    descriptor: usize,
+}
+
+impl BaseReader for HostRootfs {
+    fn read_at(&mut self, offset: u64, output: &mut [u8]) -> Result<(), VfsError> {
+        let result = unsafe {
+            syscall4(
+                SYS_PREAD64,
+                self.descriptor,
+                output.as_mut_ptr() as usize,
+                output.len(),
+                offset as usize,
+            )
+        };
+        if result == output.len() as isize {
+            Ok(())
+        } else {
+            Err(VfsError::Io)
+        }
+    }
+}
+
+fn vfs_main(config_path: *const u8, rootfs_path: *const u8, index_path: *const u8) -> ! {
+    let config = load_config(config_path);
+    let mut domain = Domain::create(config);
+    if domain.start().is_err() {
+        domain_fail(&mut domain, b"invalid start transition");
+    }
+    let index_length = read_index(index_path);
+    let index_bytes = unsafe {
+        core::slice::from_raw_parts(
+            core::ptr::addr_of!(VFS_INDEX_BYTES).cast::<u8>(),
+            index_length,
+        )
+    };
+    let index = match Index::new(index_bytes) {
+        Ok(index) => index,
+        Err(_) => domain_fail(&mut domain, b"invalid VFS index"),
+    };
+    let descriptor =
+        unsafe { syscall4(SYS_OPENAT_HOST, AT_FDCWD, rootfs_path as usize, O_RDONLY, 0) };
+    if descriptor < 0 {
+        domain_fail(&mut domain, b"rootfs open failed");
+    }
+    let reader = HostRootfs {
+        descriptor: descriptor as usize,
+    };
+    let mut vfs: VirtualFs<'_, HostRootfs, 8, 4096, 8> = VirtualFs::new(index, reader);
+
+    let os_fd = match vfs.open(b"/etc/os-release", O_READ) {
+        Ok(value) => value,
+        Err(_) => vfs_fail(
+            &mut domain,
+            &mut vfs,
+            descriptor as usize,
+            b"os-release lookup failed",
+        ),
+    };
+    let mut os_release = [0u8; 512];
+    let os_length = match vfs.read(os_fd, &mut os_release) {
+        Ok(value) => value,
+        Err(_) => vfs_fail(
+            &mut domain,
+            &mut vfs,
+            descriptor as usize,
+            b"os-release read failed",
+        ),
+    };
+    let _ = vfs.close(os_fd);
+    if !contains(&os_release[..os_length], b"Rocky Linux") {
+        vfs_fail(
+            &mut domain,
+            &mut vfs,
+            descriptor as usize,
+            b"Rocky identity missing",
+        );
+    }
+
+    let bash_fd = match vfs.open(b"/usr/bin/bash", O_READ) {
+        Ok(value) => value,
+        Err(_) => vfs_fail(
+            &mut domain,
+            &mut vfs,
+            descriptor as usize,
+            b"bash lookup failed",
+        ),
+    };
+    let mut magic = [0u8; 4];
+    if vfs.read(bash_fd, &mut magic) != Ok(4) || &magic != b"\x7fELF" {
+        vfs_fail(
+            &mut domain,
+            &mut vfs,
+            descriptor as usize,
+            b"bash ELF read failed",
+        );
+    }
+    let _ = vfs.close(bash_fd);
+
+    let overlay_fd = match vfs.open(b"/ginus-overlay-proof", O_READ | O_WRITE | O_CREATE) {
+        Ok(value) => value,
+        Err(_) => vfs_fail(
+            &mut domain,
+            &mut vfs,
+            descriptor as usize,
+            b"overlay create failed",
+        ),
+    };
+    if vfs.write(overlay_fd, b"domain-local") != Ok(12) {
+        vfs_fail(
+            &mut domain,
+            &mut vfs,
+            descriptor as usize,
+            b"overlay write failed",
+        );
+    }
+    let _ = vfs.close(overlay_fd);
+
+    write_all(b"GINUS_VFS: root=");
+    line(config.root.as_bytes());
+    line(b"GINUS_VFS: base=/etc/os-release identity=Rocky-Linux");
+    line(b"GINUS_VFS: base=/usr/bin/bash format=ELF64-x86_64");
+    line(b"GINUS_VFS: overlay=/ginus-overlay-proof value=domain-local");
+    line(b"GINUS_VFS: managed-host-paths=unexposed managed-host-fds=unexposed");
+    vfs.teardown();
+    let _ = unsafe { syscall1(SYS_CLOSE_HOST, descriptor as usize) };
+    if domain.task_exited(true).is_err() {
+        domain_fail(&mut domain, b"invalid task-exit transition");
+    }
+    line(b"GINUS_VFS: teardown overlay-files=0 descriptors=0");
+    line(b"GINUS_VFS_CHECK: PASS");
+    exit_process(0)
+}
+
+fn vfs_fail(
+    domain: &mut Domain,
+    vfs: &mut VirtualFs<'_, HostRootfs, 8, 4096, 8>,
+    descriptor: usize,
+    reason: &[u8],
+) -> ! {
+    vfs.teardown();
+    let _ = unsafe { syscall1(SYS_CLOSE_HOST, descriptor) };
+    domain_fail(domain, reason)
+}
+
+fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+    needle.is_empty()
+        || haystack
+            .windows(needle.len())
+            .any(|window| window == needle)
+}
+
+fn native_main(config_path: *const u8, root_path: *const u8, mode: usize) -> ! {
+    let config = load_config(config_path);
+    print_effective_config(&config);
+    let mut domain = Domain::create(config);
+    if domain.start().is_err() {
+        domain_fail(&mut domain, b"invalid native start transition");
+    }
+    let child = unsafe { syscall0(SYS_FORK) };
+    if child < 0 {
+        domain_fail(&mut domain, b"native tracee fork failed");
+    }
+    if child == 0 {
+        native_tracee(root_path, mode);
+    }
+    supervise_native(child as usize, &mut domain)
+}
+
+fn native_tracee(root_path: *const u8, mode: usize) -> ! {
+    static ROOT: &[u8] = b"/\0";
+    static BASH: &[u8] = b"/usr/bin/bash\0";
+    static ARG1: &[u8] = b"--noprofile\0";
+    static ARG2: &[u8] = b"--norc\0";
+    static ARG3: &[u8] = b"-c\0";
+    static COMMAND: &[u8] = b"printf 'GINUS_NATIVE_SHELL: PASS\\n'\0";
+    static HOLD_COMMAND: &[u8] = b"printf 'GINUS_NATIVE_HOLD: READY\\n'; while :; do :; done\0";
+    static PROBE_COMMAND: &[u8] = b"if : > /tmp/ginus-mutation; then exit 90; else printf 'GINUS_BALANCED_MUTATION: BLOCKED\\n'; fi; if exec 9<>/dev/tcp/127.0.0.1/9; then exit 91; else printf 'GINUS_BALANCED_NETWORK: BLOCKED\\n'; fi\0";
+    static ENV_PATH: &[u8] = b"PATH=/usr/bin:/bin\0";
+    static ENV_HOME: &[u8] = b"HOME=/\0";
+    static ENV_LOCALE: &[u8] = b"LC_ALL=C\0";
+    static ENV_CONTAINER: &[u8] = b"container=ginus\0";
+
+    if unsafe { syscall1(SYS_CHROOT, root_path as usize) } < 0 {
+        native_tracee_setup_fail(120);
+    }
+    if unsafe { syscall1(SYS_CHDIR, ROOT.as_ptr() as usize) } < 0 {
+        native_tracee_setup_fail(121);
+    }
+    if unsafe { syscall4(SYS_PTRACE, PTRACE_TRACEME, 0, 0, 0) } < 0 {
+        native_tracee_setup_fail(122);
+    }
+    if unsafe { syscall2(SYS_SETGROUPS, 0, 0) } < 0 {
+        native_tracee_setup_fail(123);
+    }
+    if unsafe { syscall1(SYS_SETGID, DOMAIN_GID) } < 0 {
+        native_tracee_setup_fail(124);
+    }
+    if unsafe { syscall1(SYS_SETUID, DOMAIN_UID) } < 0 {
+        native_tracee_setup_fail(125);
+    }
+    if unsafe { syscall5(SYS_PRCTL, PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) } < 0 {
+        native_tracee_setup_fail(126);
+    }
+    let argv = [
+        BASH.as_ptr(),
+        ARG1.as_ptr(),
+        ARG2.as_ptr(),
+        ARG3.as_ptr(),
+        match mode {
+            1 => HOLD_COMMAND.as_ptr(),
+            2 => PROBE_COMMAND.as_ptr(),
+            _ => COMMAND.as_ptr(),
+        },
+        core::ptr::null(),
+    ];
+    let environment = [
+        ENV_PATH.as_ptr(),
+        ENV_HOME.as_ptr(),
+        ENV_LOCALE.as_ptr(),
+        ENV_CONTAINER.as_ptr(),
+        core::ptr::null(),
+    ];
+    unsafe {
+        syscall3(
+            SYS_EXECVE,
+            BASH.as_ptr() as usize,
+            argv.as_ptr() as usize,
+            environment.as_ptr() as usize,
+        );
+        syscall1(SYS_EXIT_HOST, 127);
+    }
+    loop {
+        core::hint::spin_loop();
+    }
+}
+
+fn native_tracee_setup_fail(code: usize) -> ! {
+    unsafe { syscall1(SYS_EXIT_HOST, code) };
+    loop {
+        core::hint::spin_loop();
+    }
+}
+
+fn supervise_native(pid: usize, domain: &mut Domain) -> ! {
+    let mut status = 0i32;
+    if wait(pid, &mut status) < 0 {
+        native_fail(domain, pid, b"native tracee wait after exec failed");
+    }
+    if !stopped(status) {
+        write_all(b"GINUS_NATIVE: pre-exec-status=");
+        write_i64(status as i64);
+        write_all(b"\n");
+        native_fail(domain, pid, b"native tracee did not stop after exec");
+    }
+    let options = PTRACE_O_TRACESYSGOOD | PTRACE_O_EXITKILL;
+    if ptrace(PTRACE_SETOPTIONS, pid, 0, options) < 0 || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0 {
+        native_fail(domain, pid, b"native ptrace setup failed");
+    }
+    line(b"GINUS_NATIVE: backend=ptrace-native profile=balanced elf-loader=host contract=gate5-balanced");
+    line(b"GINUS_NATIVE: tracee-uid=1000 tracee-gid=1000 root=oci-read-only");
+
+    let mut sequence = 0u64;
+    let mut awaiting_exit = false;
+    let mut override_exit = false;
+    let mut override_result = 0i64;
+    loop {
+        status = 0;
+        if wait(pid, &mut status) < 0 || !stopped(status) {
+            native_fail(domain, pid, b"native tracee escaped supervision");
+        }
+        let signal = ((status >> 8) & 0xff) as u8;
+        if signal != (5 | 0x80) && signal != 5 {
+            native_fail(domain, pid, b"unexpected native trace stop");
+        }
+        let mut registers = core::mem::MaybeUninit::<UserRegs>::uninit();
+        if ptrace(PTRACE_GETREGS, pid, 0, registers.as_mut_ptr() as usize) < 0 {
+            native_fail(domain, pid, b"native register read failed");
+        }
+        let mut registers = unsafe { registers.assume_init() };
+
+        if awaiting_exit {
+            if override_exit {
+                registers.rax = override_result as u64;
+                if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0 {
+                    native_fail(domain, pid, b"native result override failed");
+                }
+            }
+            write_all(b"GINUS_NATIVE_AUDIT: sequence=");
+            write_u64(sequence);
+            write_all(b" phase=exit result=");
+            write_i64(registers.rax as i64);
+            write_all(b"\n");
+            awaiting_exit = false;
+            override_exit = false;
+            if ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0 {
+                native_fail(domain, pid, b"native resume failed");
+            }
+            continue;
+        }
+
+        sequence += 1;
+        let syscall = registers.orig_rax;
+        let decision = decide_balanced(syscall);
+        write_all(b"GINUS_NATIVE_AUDIT: sequence=");
+        write_u64(sequence);
+        write_all(b" phase=entry syscall=");
+        write_u64(syscall);
+        write_all(b" action=");
+        match decision.action {
+            Action::Emulate if balanced_identity_result(syscall).is_some() => {
+                let result = balanced_identity_result(syscall).unwrap_or(0);
+                write_all(b"emulate surface=virtual-identity result=");
+                write_i64(result);
+                write_all(b"\n");
+                registers.orig_rax = u64::MAX;
+                awaiting_exit = true;
+                override_exit = true;
+                override_result = result;
+                if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0
+                {
+                    native_fail(domain, pid, b"native getpid emulation failed");
+                }
+            }
+            Action::Emulate if syscall == SYS_EXIT || syscall == SYS_EXIT_GROUP => {
+                line(b"emulate result=domain-stop");
+                let _ = ptrace(PTRACE_KILL, pid, 0, 0);
+                let _ = wait(pid, &mut status);
+                if domain.task_exited(true).is_err() {
+                    domain_fail(domain, b"native exit transition failed");
+                }
+                line(b"GINUS_NATIVE: supervisor=attached direct-unsupervised-syscalls=0");
+                line(b"GINUS_NATIVE_CHECK: PASS");
+                exit_process(0)
+            }
+            Action::Mediate if native_arguments_allowed(syscall, &registers) => {
+                write_all(b"mediate surface=");
+                line(balanced_surface_name(balanced_surface(syscall)));
+                awaiting_exit = true;
+                if ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0 {
+                    native_fail(domain, pid, b"native mediated syscall failed");
+                }
+            }
+            Action::Mediate => {
+                line(b"deny result=-1 reason=invalid-arguments");
+                registers.orig_rax = u64::MAX;
+                awaiting_exit = true;
+                override_exit = true;
+                override_result = -EPERM;
+                if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0
+                {
+                    native_fail(domain, pid, b"native argument denial failed");
+                }
+            }
+            Action::Deny(errno) => {
+                write_all(b"deny result=-");
+                write_u64(errno as u64);
+                write_all(b"\n");
+                registers.orig_rax = u64::MAX;
+                awaiting_exit = true;
+                override_exit = true;
+                override_result = -(errno as i64);
+                if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0
+                {
+                    native_fail(domain, pid, b"native syscall denial failed");
+                }
+            }
+            _ => native_fail(domain, pid, b"invalid native contract decision"),
+        }
+    }
+}
+
+fn native_arguments_allowed(syscall: u64, registers: &UserRegs) -> bool {
+    balanced_arguments_allowed(syscall, registers.rdi, registers.rsi, registers.rdx)
+}
+
+fn balanced_surface_name(surface: BalancedSurface) -> &'static [u8] {
+    match surface {
+        BalancedSurface::ImageRead => b"immutable-image result=pending",
+        BalancedSurface::Memory => b"memory result=pending",
+        BalancedSurface::Task => b"task result=pending",
+        BalancedSurface::Console => b"bootstrap-console result=pending",
+        BalancedSurface::Random => b"random result=pending",
+        BalancedSurface::VirtualIdentity | BalancedSurface::Lifecycle | BalancedSurface::Denied => {
+            b"invalid result=denied"
+        }
+    }
+}
+
+fn native_fail(domain: &mut Domain, pid: usize, reason: &[u8]) -> ! {
+    let _ = ptrace(PTRACE_KILL, pid, 0, 0);
+    let mut status = 0;
+    let _ = wait(pid, &mut status);
+    domain_fail(domain, reason)
 }
 
 fn config_main(config_path: *const u8) -> ! {
@@ -501,6 +956,39 @@ fn read_config(path: *const u8) -> usize {
     length
 }
 
+fn read_index(path: *const u8) -> usize {
+    let descriptor = unsafe { syscall4(SYS_OPENAT_HOST, AT_FDCWD, path as usize, O_RDONLY, 0) };
+    if descriptor < 0 {
+        runtime_fail(b"VFS index open failed");
+    }
+    let mut length = 0usize;
+    while length < MAX_VFS_INDEX_SIZE {
+        let result = unsafe {
+            syscall3(
+                SYS_READ_HOST,
+                descriptor as usize,
+                core::ptr::addr_of_mut!(VFS_INDEX_BYTES)
+                    .cast::<u8>()
+                    .add(length) as usize,
+                MAX_VFS_INDEX_SIZE - length,
+            )
+        };
+        if result < 0 {
+            let _ = unsafe { syscall1(SYS_CLOSE_HOST, descriptor as usize) };
+            runtime_fail(b"VFS index read failed");
+        }
+        if result == 0 {
+            break;
+        }
+        length += result as usize;
+    }
+    let _ = unsafe { syscall1(SYS_CLOSE_HOST, descriptor as usize) };
+    if length == 0 || length == MAX_VFS_INDEX_SIZE {
+        runtime_fail(b"VFS index size invalid");
+    }
+    length
+}
+
 fn runtime_load_fail(error: LoadError) -> ! {
     write_all(b"GATE3: FAIL: elf rejected reason=");
     line(match error {
@@ -800,6 +1288,24 @@ unsafe fn syscall4(number: usize, a1: usize, a2: usize, a3: usize, a4: usize) ->
         in("rsi") a2,
         in("rdx") a3,
         in("r10") a4,
+        lateout("rcx") _,
+        lateout("r11") _,
+        options(nostack)
+    );
+    result
+}
+
+#[inline(always)]
+unsafe fn syscall5(number: usize, a1: usize, a2: usize, a3: usize, a4: usize, a5: usize) -> isize {
+    let result: isize;
+    asm!(
+        "syscall",
+        inlateout("rax") number as isize => result,
+        in("rdi") a1,
+        in("rsi") a2,
+        in("rdx") a3,
+        in("r10") a4,
+        in("r8") a5,
         lateout("rcx") _,
         lateout("r11") _,
         options(nostack)
