@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Exercise a detached CPU hog and measure a real controller response.
 
-Run inside an isolated test environment. --volume is a pre-seeded OCI cache
-containing /spin and /cooperative at docker.io/library/alpine:latest. The harness
+Run inside an isolated test environment. --volume is an OCI cache prepared by
+prepare.py with /spin and /cooperative at the configured fixture image. The harness
 copies it, uses QEMU user networking without forwarded ports and always kills
 its own QEMU process group on completion/timeout. This proves only controller
 responsiveness, not inter-process fairness or register preservation.
@@ -127,6 +127,8 @@ def run(args):
                     response = active_response()
                     if not ('State:       booting' in response or 'State:       running' in response) or 'Execution:   idle' not in response:
                         raise RuntimeError('restart failed: ' + response)
+                    if args.init == 'busy4a' and 'State:       booting' not in response:
+                        raise RuntimeError('continuous workers completed after restart: ' + response)
                     event('restarted', cycle=cycle)
             if 'GINUX_KERNEL_PANIC' in contents() or 'controller failed' in contents():
                 raise RuntimeError('kernel/controller failure')

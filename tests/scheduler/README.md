@@ -23,7 +23,7 @@ make test-scheduler SCHEDULER_TEST_ARGS='--accel tcg --iterations 5000000 --quie
 Choose a new output directory for every run. The command builds the normal EFI,
 compiles the static PIE payloads, creates a deterministic USTAR rootfs and a new
 64 MiB cache through the repository's `seed-benchmark-cache`, then runs all cases.
-The private fixture reference `docker.io/library/scheduler-test:local` is resolved
+The local fixture reference `docker.io/library/scheduler-test:local` is resolved
 from that cache; it is not a published container image. Network access is needed
 only to install build dependencies, not to obtain the test filesystem.
 
