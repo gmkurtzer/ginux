@@ -245,6 +245,8 @@ scope, threat model, and invariants.
 - Gate 8 Rocky QEMU integration passed virtual procfs, sysfs, cgroup, and
   identity markers while host cgroup, mount, and block inventories remained
   byte-identical. `make demo-gate-8` passed all seven named checks.
+- Fresh aggregate `make test` passed 44 component tests, all prior-gate QEMU
+  regressions, and the Gate 8 QEMU fixture.
 
 ## Open decisions and limitations
 
@@ -282,8 +284,8 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Run the fresh aggregate offline regression suite, reconcile Gate 8 criteria,
-push `hdae/virtual-kernel-views`, open its pull request, and stop for review.
+Push `hdae/virtual-kernel-views`, open its pull request, record delivery, and
+stop for human review.
 
 ## Context recovery
 
@@ -291,9 +293,9 @@ push `hdae/virtual-kernel-views`, open its pull request, and stop for review.
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
 - Active gate: Gate 8, virtual kernel views, authorized for execution on
-  dedicated branch `hdae/virtual-kernel-views`; component, QEMU integration,
-  and demonstration checks pass; aggregate regression and delivery remain
-- Last evidence: `make check`, `make test-kernel-views`, and
-  `make demo-gate-8` passed on 2026-11-04
+  dedicated branch `hdae/virtual-kernel-views`; technically passed and awaits
+  branch/PR delivery plus human review
+- Last evidence: `make check`, `make test-kernel-views`,
+  `make demo-gate-8`, and fresh aggregate `make test` passed on 2026-11-04
 - Required human decision: none until the Gate 8 demonstration checkpoint; the
   Gate 9 DNF repository choice is deferred until before Gate 9 implementation

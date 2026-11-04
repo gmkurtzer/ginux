@@ -52,11 +52,12 @@ mounts, identifiers, and configuration are not leaked as domain authority.
   inventory before/after comparison.
 - [x] Add stable `make test-kernel-views`, `make test-cgroup`, aggregate
   wiring, and the seven-check human demonstration.
+- [x] Run the fresh aggregate offline regression suite.
 
 ## Remaining work
 
-- [ ] Run the fresh aggregate offline regression suite and deliver the branch
-  and pull request.
+- [ ] Push the dedicated branch, open its pull request, and stop for human
+  review.
 
 ## Acceptance criteria
 
@@ -118,6 +119,9 @@ mounts, identifiers, and configuration are not leaked as domain authority.
   cgroup, mount, and block-device inventories were byte-identical before/after.
 - `make demo-gate-8` -> passed all seven human-visible virtual-view,
   leakage-denial, mutation-denial, and host-unchanged checks.
+- Fresh aggregate `make test` -> passed formatting, strict lint, 44 component
+  tests, all prior QEMU interception/runtime/config/domain/image/device/process
+  regressions, and the Gate 8 Rocky QEMU kernel-view fixture.
 
 ## Decisions and limitations
 
@@ -139,5 +143,5 @@ mounts, identifiers, and configuration are not leaked as domain authority.
 ## Review policy and outcome
 
 Human checkpoint because these interfaces define the kernel identity and
-authority visible to the domain. Present `make demo-gate-8`, fresh evidence,
-and the pull request before acceptance.
+authority visible to the domain. Gate 8 is technically passed; branch delivery
+and the pull request remain before explicit acceptance.
