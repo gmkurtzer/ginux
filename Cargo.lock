@@ -25,6 +25,7 @@ dependencies = [
  "ginux-core",
  "ginux-devices",
  "ginux-domain",
+ "ginux-kernel-views",
  "ginux-process",
  "ginux-runtime",
  "ginux-vfs",

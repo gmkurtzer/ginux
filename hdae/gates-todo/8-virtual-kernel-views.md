@@ -48,11 +48,15 @@ mounts, identifiers, and configuration are not leaked as domain authority.
   explicit rejection of unsupported host-affecting operations.
 - [x] Implement domain-owned machine/boot/hostname and mount/PID/UTS/cgroup
   namespace identity views with host-PID exclusion.
+- [x] Add the Rocky QEMU integration fixture with host cgroup, mount, and block
+  inventory before/after comparison.
+- [x] Add stable `make test-kernel-views`, `make test-cgroup`, aggregate
+  wiring, and the seven-check human demonstration.
 
 ## Remaining work
 
-- [ ] Add the Rocky QEMU integration fixture, complete cross-view leakage tests,
-  aggregate regression wiring, and the human demonstration.
+- [ ] Run the fresh aggregate offline regression suite and deliver the branch
+  and pull request.
 
 ## Acceptance criteria
 
@@ -104,6 +108,16 @@ mounts, identifiers, and configuration are not leaked as domain authority.
   read-only hostname denial.
 - Strict clippy for `ginux-kernel-views` -> passed after the cgroup and
   identity expansion.
+- `make check` -> passed name validation, formatting, and strict workspace
+  lint including the new component and x86-64 static Ginux binary.
+- Initial x86-64 static build exposed an implicit `memmove` dependency from
+  cgroup member compaction. The compaction is now an explicit bounded loop;
+  the static build and strict lint pass without adding host-runtime linkage.
+- `make test-kernel-views` -> six component tests and the Rocky QEMU fixture
+  passed; virtual procfs/sysfs/cgroup/identity markers matched and host
+  cgroup, mount, and block-device inventories were byte-identical before/after.
+- `make demo-gate-8` -> passed all seven human-visible virtual-view,
+  leakage-denial, mutation-denial, and host-unchanged checks.
 
 ## Decisions and limitations
 

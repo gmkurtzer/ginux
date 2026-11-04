@@ -113,7 +113,11 @@ impl<const GROUPS: usize> CgroupFs<GROUPS> {
                 .position(|member| *member == pid)
             {
                 let count = group.member_count as usize;
-                group.members.copy_within(position + 1..count, position);
+                let mut index = position;
+                while index + 1 < count {
+                    group.members[index] = group.members[index + 1];
+                    index += 1;
+                }
                 group.member_count -= 1;
             }
         }

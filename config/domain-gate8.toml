@@ -1,0 +1,34 @@
+schema_version = 1
+
+[domain]
+id = "gate8-demo"
+root = "docker.io/rockylinux/rockylinux@sha256:e372170ca8630f0f03e9b70fdd0bf4a3ce3426b0de7cdba615f06337389de176"
+init = "/sbin/init"
+args = []
+environment = ["container=ginux"]
+
+[resources]
+vcpus = 2
+memory_mib = 512
+
+[execution]
+profile = "balanced"
+backend = "ptrace-native"
+
+[contract]
+profile = "gate8-kernel-views"
+
+[storage]
+assignments = ["vda"]
+
+[devices]
+assignments = ["console", "null", "zero", "random"]
+
+[network]
+backend = "mediated"
+
+[audit]
+mode = "stderr"
+
+[failure]
+policy = "stop"
