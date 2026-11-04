@@ -16379,6 +16379,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let address_space_limit = verify_linux_address_space_limit();
     let fadvise = verify_linux_fadvise64_syscall();
     let shared_file_access = verify_linux_shared_file_mapping_access();
+    let chmod_symlinks = verify_linux_chmod_symlinks();
     let runtime_boot_contracts = verify_linux_runtime_boot_contracts();
     let memory_argument_edges = verify_linux_memory_argument_edges();
     let mappings_released =
@@ -16444,6 +16445,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         address_space_limit,
         fadvise,
         shared_file_access,
+        chmod_symlinks,
         runtime_boot_contracts,
         memory_argument_edges,
         mappings_released,
@@ -16508,6 +16510,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && address_space_limit
         && fadvise
         && shared_file_access
+        && chmod_symlinks
         && runtime_boot_contracts
         && memory_argument_edges
         && mappings_released
@@ -17514,6 +17517,55 @@ fn verify_linux_readahead_syscall() -> bool {
     let removed = crate::linux_overlay::unlink(node);
     let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
     errors && closed && removed && unmapped
+}
+
+fn verify_linux_chmod_symlinks() -> bool {
+    let mapping = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    if !(LINUX_RUNTIME_DYNAMIC_MMAP_BASE..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
+        .contains(&mapping)
+    {
+        return false;
+    }
+    let Some(file) = crate::linux_overlay::create_file(b"ginux-chmod", 0o644, b"mode") else {
+        let _ = linux_runtime_munmap(mapping, PAGE_SIZE as u64);
+        return false;
+    };
+    let Some(link) = crate::linux_overlay::create_symlink(b"ginux-chmod-link", b"/ginux-chmod")
+    else {
+        let _ = crate::linux_overlay::unlink(file);
+        let _ = linux_runtime_munmap(mapping, PAGE_SIZE as u64);
+        return false;
+    };
+    let mode = || crate::linux_overlay::metadata(file).map(|metadata| metadata.mode);
+    // chmod changes the symlink target; AT_SYMLINK_NOFOLLOW refuses a symlink.
+    let followed = copy_to_linux_user(mapping, b"/ginux-chmod-link\0")
+        && linux_fchmodat(u64::from(LINUX_AT_FDCWD), mapping, 0o604, 0) == 0
+        && mode() == Some(0o604)
+        && linux_fchmodat(
+            u64::from(LINUX_AT_FDCWD),
+            mapping,
+            0o600,
+            LINUX_AT_SYMLINK_NOFOLLOW,
+        ) == LINUX_EOPNOTSUPP
+        && mode() == Some(0o604)
+        && copy_to_linux_user(mapping, b"/ginux-chmod\0")
+        && linux_fchmodat(
+            u64::from(LINUX_AT_FDCWD),
+            mapping,
+            0o600,
+            LINUX_AT_SYMLINK_NOFOLLOW,
+        ) == 0
+        && mode() == Some(0o600);
+    let removed = crate::linux_overlay::unlink(link) && crate::linux_overlay::unlink(file);
+    let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
+    followed && removed && unmapped
 }
 
 fn verify_linux_memory_locking_syscalls() -> bool {
@@ -27235,7 +27287,7 @@ fn linux_fchmodat(directory: u64, path_address: u64, mode: u64, flags: u64) -> u
     let directory = u64::from(directory as u32);
     let mode = u64::from(mode as u32);
     let flags = u64::from(flags as u32);
-    if flags != 0 {
+    if flags & !(LINUX_AT_SYMLINK_NOFOLLOW | LINUX_AT_EMPTY_PATH) != 0 {
         return LINUX_EINVAL;
     }
     let mut path = [0_u8; crate::linux_overlay::PATH_CAPACITY];
@@ -27243,28 +27295,57 @@ fn linux_fchmodat(directory: u64, path_address: u64, mode: u64, flags: u64) -> u
         Ok(length) => length,
         Err(error) => return error,
     };
-    let mut canonical = [0_u8; crate::linux_overlay::PATH_CAPACITY];
-    let length = match linux_canonical_path_at(directory, &path[..path_length], &mut canonical) {
-        Ok(length) => length,
-        Err(error) => return error,
-    };
-    if let Some(metadata) = crate::linux_overlay::lookup(&canonical[..length]) {
-        return if crate::linux_overlay::set_mode(metadata.handle, mode as u32) {
-            0
-        } else {
-            LINUX_EIO
-        };
+    if path_length == 0 && flags & LINUX_AT_EMPTY_PATH != 0 {
+        return linux_fchmod(directory, mode);
     }
-    if crate::published_rootfs::lookup_at(
-        crate::published_rootfs::ROOT_HANDLE,
-        &canonical[..length],
-    )
-    .is_some()
+    if path_length == 0 {
+        // An empty pathname is invalid without AT_EMPTY_PATH (fs/namei.c:204).
+        return LINUX_ENOENT;
+    }
+    if flags & LINUX_AT_SYMLINK_NOFOLLOW != 0 {
+        // Linux refuses to change the mode of a symlink itself
+        // (fs/attr.c:457); any other final component is the same object
+        // the lookup below reaches.
+        let mut canonical = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+        let length = match linux_canonical_path_at(directory, &path[..path_length], &mut canonical)
+        {
+            Ok(length) => length,
+            Err(error) => return error,
+        };
+        let symlink = if let Some(metadata) = crate::linux_overlay::lookup(&canonical[..length]) {
+            metadata.kind == crate::linux_overlay::NodeKind::Symlink
+        } else {
+            linux_rootfs_metadata_path_at(directory, &path[..path_length]).is_some_and(
+                |(_, entry)| {
+                    entry.is_some_and(|entry| {
+                        entry.kind == crate::published_rootfs::EntryKind::Symlink
+                    })
+                },
+            )
+        };
+        if symlink {
+            return LINUX_EOPNOTSUPP;
+        }
+    }
+    // chmod follows the final symlink (fs/open.c:726). Resolve through the
+    // open path and change the mode through the descriptor, which copies an
+    // image file up the same way fchmod does.
+    let descriptor = linux_openat(directory, path_address, LINUX_O_PATH, 0);
+    if descriptor >= LINUX_RETURN_TO_KERNEL {
+        return descriptor;
+    }
+    // The overlay has no merged directory listing: an upper copy of an
+    // image directory would hide its image entries, so keep refusing those.
+    let result = if linux_overlay_descriptor_handle(descriptor).is_none()
+        && linux_rootfs_entry(descriptor)
+            .is_none_or(|entry| entry.kind == crate::published_rootfs::EntryKind::Directory)
     {
         LINUX_EROFS
     } else {
-        LINUX_ENOENT
-    }
+        linux_fchmod(descriptor, mode)
+    };
+    let _ = linux_descriptor_close(descriptor);
+    result
 }
 
 fn linux_fchown(descriptor: u64, uid: u64, gid: u64) -> u64 {
@@ -27290,21 +27371,27 @@ fn linux_fchownat(directory: u64, path_address: u64, uid: u64, gid: u64, flags: 
     if path_length == 0 && flags & LINUX_AT_EMPTY_PATH != 0 {
         return linux_fchown(directory, uid, gid);
     }
+    if path_length == 0 {
+        return LINUX_ENOENT;
+    }
+    // Ginux records no file ownership, so chown only has to resolve the
+    // path like Linux (fs/open.c:846); image entries need no copy-up.
+    if flags & LINUX_AT_SYMLINK_NOFOLLOW == 0 {
+        let descriptor = linux_openat(directory, path_address, LINUX_O_PATH, 0);
+        if descriptor >= LINUX_RETURN_TO_KERNEL {
+            return descriptor;
+        }
+        return linux_descriptor_close(descriptor);
+    }
     let mut canonical = [0_u8; crate::linux_overlay::PATH_CAPACITY];
     let length = match linux_canonical_path_at(directory, &path[..path_length], &mut canonical) {
         Ok(length) => length,
         Err(error) => return error,
     };
-    if crate::linux_overlay::lookup(&canonical[..length]).is_some() {
-        return 0;
-    }
-    if crate::published_rootfs::lookup_at(
-        crate::published_rootfs::ROOT_HANDLE,
-        &canonical[..length],
-    )
-    .is_some()
+    if crate::linux_overlay::lookup(&canonical[..length]).is_some()
+        || linux_rootfs_metadata_path_at(directory, &path[..path_length]).is_some()
     {
-        LINUX_EROFS
+        0
     } else {
         LINUX_ENOENT
     }
