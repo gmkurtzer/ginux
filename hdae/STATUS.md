@@ -235,9 +235,9 @@ scope, threat model, and invariants.
 - Gate 2 preparation requires Docker Desktop and a pinned privileged helper
   container. It is network-disabled and mounts only a temporary raw conversion
   read-only, but remains trusted build tooling rather than a runtime boundary.
-- The local checkout move is the remaining external rename step. The active
-  source tree, generated cache format, GitHub repository, and origin already
-  use the new name.
+- The local checkout is `/Users/gmk/git/ginux-us`. The active source tree,
+  generated cache format, GitHub repository, origin, and local path all use the
+  new name.
 - The selected Rocky OCI image has one layer; deterministic synthetic fixtures
   now cover general multi-layer replacement, whiteout, and opaque-directory
   semantics.
@@ -254,9 +254,8 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Commit and push the final delivery checkpoint, move the local checkout to
-`/Users/gmk/git/ginux-us`, verify the clean checkout there, and stop for human
-review.
+Stop for human review and explicit acceptance of Gate 7.5 and Gate 7 before
+Gate 8 begins.
 
 ## Context recovery
 
@@ -265,7 +264,7 @@ review.
 - Reload after context shift: required
 - Active gate: Gate 7.5, Ginux-us project rename, authorized and started on
   dedicated branch `hdae/ginux-us-rename`; Gate 7 remains technically passed
-  with repeated post-rename evidence and awaits human review
+  with repeated post-rename evidence; both await human review
 - Last evidence: `make check`, `make test`, `make test-native-vfs`, and
   `make demo-gate-7` passed on 2026-11-04
 - Required human decision: none until the Gate 7 demonstration checkpoint; the
