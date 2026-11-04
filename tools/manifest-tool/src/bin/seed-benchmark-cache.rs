@@ -190,9 +190,16 @@ fn normalize_exported_tar(bytes: &mut [u8]) {
 
 fn main() {
     let arguments: Vec<String> = env::args().collect();
-    if arguments.len() != 4 {
-        fail("usage: seed-benchmark-cache VOLUME ROOTFS-TAR IMAGE-REFERENCE");
+    if !matches!(arguments.len(), 4 | 5) {
+        fail("usage: seed-benchmark-cache VOLUME ROOTFS-TAR IMAGE-REFERENCE [VOLUME-MIB]");
     }
+    let volume_bytes = arguments.get(4).map_or(VOLUME_BYTES, |size| {
+        size.parse::<u64>()
+            .ok()
+            .and_then(|mib| mib.checked_mul(1024 * 1024))
+            .filter(|bytes| *bytes >= 64 * 1024 * 1024)
+            .unwrap_or_else(|| fail("VOLUME-MIB must be at least 64 and fit in u64"))
+    });
     if OBJECT_START_SECTOR as usize != OCI_OBJECT_START_SECTOR {
         fail("OCI cache layout constants disagree");
     }
@@ -203,6 +210,9 @@ fn main() {
     }
     normalize_exported_tar(&mut rootfs);
     ginux_oci::Rootfs::parse(&rootfs).unwrap_or_else(|| fail(&diagnose_rootfs(&rootfs)));
+    if rootfs.len() as u64 > volume_bytes - OBJECT_START_SECTOR * SECTOR_SIZE as u64 {
+        fail("rootfs does not fit in the requested volume");
+    }
     let digest: [u8; 32] = Sha256::digest(&rootfs).into();
     let file = OpenOptions::new()
         .create(true)
@@ -211,10 +221,10 @@ fn main() {
         .write(true)
         .open(&arguments[1])
         .unwrap_or_else(|error| fail(&format!("cannot create volume: {error}")));
-    file.set_len(VOLUME_BYTES)
+    file.set_len(volume_bytes)
         .unwrap_or_else(|error| fail(&format!("cannot size volume: {error}")));
     let mut device = FileDevice(file);
-    open_host_volume(&mut device, VOLUME_BYTES / SECTOR_SIZE as u64)
+    open_host_volume(&mut device, volume_bytes / SECTOR_SIZE as u64)
         .unwrap_or_else(|error| fail(&format!("cannot initialize volume: {error:?}")));
 
     let mut sector = [0_u8; SECTOR_SIZE];

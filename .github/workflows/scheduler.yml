@@ -1,0 +1,49 @@
+name: scheduler
+
+on:
+  pull_request:
+  push:
+    branches: [main, fix/background-domain-preemption]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  detached-domains:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        cpus: [1, 2, 4]
+    steps:
+      - uses: actions/checkout@v5
+      - run: sudo apt-get update
+      - run: sudo apt-get install --yes gcc clang ovmf qemu-system-x86
+      - run: rustup target add x86_64-unknown-uefi x86_64-unknown-none
+      - name: Build the pinned pre-fix oracle control
+        if: matrix.cpus == 1
+        run: |
+          git fetch --depth=1 origin 7fdc880e66972074c5153d71ef2ee249d54f7139
+          git worktree add --detach "$RUNNER_TEMP/scheduler-baseline" 7fdc880e66972074c5153d71ef2ee249d54f7139
+          make -C "$RUNNER_TEMP/scheduler-baseline" build
+      - name: Offline scheduler acceptance (QEMU TCG)
+        env:
+          CPUS: ${{ matrix.cpus }}
+          QEMU_ACCEL: tcg
+        run: |
+          baseline=""
+          if [ "$CPUS" = 1 ]; then
+            baseline="--negative-source $RUNNER_TEMP/scheduler-baseline"
+          fi
+          make test-scheduler SCHEDULER_TEST_ARGS="--output build/scheduler-ci --cpus $CPUS --accel tcg --iterations 5000000 --quiet-seconds 180 --response-timeout 20 $baseline"
+      - name: Retain commands, hashes, results and serial logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scheduler-tcg-${{ matrix.cpus }}cpu
+          path: |
+            build/scheduler-ci/**/*.json
+            build/scheduler-ci/**/*.log
+          if-no-files-found: warn

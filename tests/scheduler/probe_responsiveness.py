@@ -35,7 +35,9 @@ def run(args):
     env.pop('GINUX_QEMU_HOSTFWD', None)
     env.update(GINUX_VOLUME_IMAGE=str(volume), GINUX_CPUS=str(args.cpus),
                GINUX_ESP_DIR=str(runner / 'build/esp'),
-               QEMU_ACCEL='kvm')
+               QEMU_ACCEL=args.accel)
+    if args.accel == 'auto':
+        env.pop('QEMU_ACCEL')
     events = []
     start = time.monotonic()
     def event(kind, **kw):
@@ -47,7 +49,8 @@ def run(args):
                                 stderr=subprocess.STDOUT, start_new_session=True)
         def contents():
             return log.read_text(errors='replace').replace('\r', '')
-        def wait(marker, offset=0, seconds=30):
+        def wait(marker, offset=0, seconds=None):
+            seconds = args.response_timeout if seconds is None else seconds
             deadline = time.monotonic() + seconds
             while time.monotonic() < deadline:
                 value = contents()[offset:]
@@ -63,23 +66,43 @@ def run(args):
             proc.stdin.flush()
             event('command', command=command)
             return offset
+        def active_response():
+            deadline = time.monotonic() + args.boot_timeout
+            while time.monotonic() < deadline:
+                response = status_response()
+                active = ('State:       running' in response or 'State:       booting' in response)
+                if active and 'Rootfs:      ready' in response and 'Execution:   idle' in response:
+                    return response
+                if 'State:       failed' in response or 'State:       stopped' in response:
+                    raise RuntimeError('domain failed during startup: ' + response)
+                event('startup_pending', response=response)
+                time.sleep(.5)
+            raise RuntimeError('domain never entered its userspace workload')
+        def status_response():
+            offset = send('domain status s1probe')
+            response = wait('Execution:', offset)
+            # A previous command's trailing prompt may arrive after send().
+            # Only accept the prompt following this status record.
+            wait('ginux> ', offset + response.index('Execution:'))
+            return contents()[offset:]
         result = {'probe': args.init, 'cpus': args.cpus, 'status': 'ERROR'}
         try:
-            wait('ginux> ')
+            wait('ginux> ', seconds=args.boot_timeout)
             offset = send('domain new s1probe')
             wait('s1probe: created', offset)
-            offset = send(f'domain set s1probe image=alpine:latest init=/{args.init} cpu={args.cpus}')
+            offset = send(f'domain set s1probe image={args.image} init=/{args.init} cpu={args.cpus}')
             wait('settings accepted', offset)
             offset = send('domain start s1probe')
             wait('s1probe: starting (detached)', offset)
             # Let the controller enter the configured runtime with no queued input.
             time.sleep(1)
             for sample in range(args.samples):
-                offset = send('domain status s1probe')
                 sent = time.monotonic()
                 try:
-                    response = wait('Execution:', offset, args.response_timeout)
+                    response = active_response() if sample == 0 else status_response()
                     active = ('State:       running' in response or 'State:       booting' in response) and 'Rootfs:      ready' in response
+                    if args.init == 'busy4a':
+                        active = active and 'State:       booting' in response
                     active = active and 'controller failed' not in contents()
                     result.update(status='RESPONSIVE' if active else 'ERROR', latency_seconds=round(time.monotonic() - sent, 4), response=response)
                     event('response', sample=sample, active=active)
@@ -94,16 +117,14 @@ def run(args):
                 for cycle in range(3):
                     offset = send('domain stop s1probe')
                     wait('s1probe: stopped', offset, args.response_timeout)
-                    offset = send('domain status s1probe')
-                    response = wait('Execution:', offset, args.response_timeout)
+                    response = status_response()
                     if 'State:       stopped' not in response or 'Execution:   inactive' not in response:
                         raise RuntimeError('stop failed: ' + response)
                     event('stopped', cycle=cycle)
                     offset = send('domain start s1probe')
                     wait('starting (detached)', offset, args.response_timeout)
                     time.sleep(1)
-                    offset = send('domain status s1probe')
-                    response = wait('Execution:', offset, args.response_timeout)
+                    response = active_response()
                     if not ('State:       booting' in response or 'State:       running' in response) or 'Execution:   idle' not in response:
                         raise RuntimeError('restart failed: ' + response)
                     event('restarted', cycle=cycle)
@@ -130,9 +151,12 @@ if __name__ == '__main__':
     parser.add_argument('--source', required=True)
     parser.add_argument('--volume', required=True)
     parser.add_argument('--output', required=True)
-    parser.add_argument('--init', choices=['spin', 'cooperative', 'context1a', 'context2a', 'context4a'], required=True)
+    parser.add_argument('--init', choices=['spin', 'cooperative', 'busy4a', 'context1a', 'context2a', 'context4a'], required=True)
     parser.add_argument('--cpus', type=int, choices=[1, 2, 4], default=1)
     parser.add_argument('--response-timeout', type=float, default=3)
+    parser.add_argument('--boot-timeout', type=float, default=180)
+    parser.add_argument('--accel', choices=['auto', 'kvm', 'tcg'], default=os.environ.get('QEMU_ACCEL', 'auto'))
+    parser.add_argument('--image', default='docker.io/library/scheduler-test:local')
     parser.add_argument('--expect', choices=['RESPONSIVE', 'NO_RESPONSE'], default='RESPONSIVE')
     parser.add_argument('--remove-volume', action='store_true')
     parser.add_argument('--samples', type=int, default=3)

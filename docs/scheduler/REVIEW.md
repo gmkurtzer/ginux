@@ -1,7 +1,8 @@
 # Detached-domain preemption: validation notes
 
-This change addresses #83 and is stacked on PR #84, the native scheduler
-atomicity fix for #82. The publication base is upstream main `4c832ea6`. Attached-console
+This change addresses #83. PR #84, the native scheduler atomicity fix for #82,
+is now merged. The initial publication base was `4c832ea6`; the acceptance
+follow-up integrates main `c8d12653`, including the controller desktop. Attached-console
 preemption and switching separate processes inside one domain are outside scope.
 
 ## Mechanism and invariants
@@ -21,16 +22,24 @@ runnable/blocked and are dispatched again after domain activation. NMI remains
 TLB-only. A quiescence timeout fails closed.
 
 The patch also banks signal-return state, retains the live domain bank on
-console resume, retries interrupted controller reads, saturates lifecycle
+console resume, returns EAGAIN after background work to the desktop controller's
+nonblocking read loop, saturates lifecycle
 statistics and permits stopping an init that has never forked. Native operation
 counters retain the checked-overflow policy of the separate atomicity fix.
 
 ## Reproduction
 
-See `tests/scheduler/README.md` for payload build/import and harness commands.
-Each harness owns its VM process group and copies the cached volume, ESP and
-firmware variables. No host ports are forwarded. A private cache reference named
-`alpine:latest` is used for these static payloads; it is not an Alpine image.
+Run `make test-scheduler` as documented in `tests/scheduler/README.md`.
+The acceptance follow-up compiles static payloads, constructs a fresh offline
+64 MiB cache with repository tooling, and supports QEMU TCG as well as KVM.
+The public `scheduler` workflow runs 1/2/4 CPU cells and retains logs, hashes and
+JSON evidence. It needs no private seed volume or contributor-host access.
+
+The revised context oracle also requires overlapping computation intervals;
+the stop/restart probe uses a continuous four-worker payload. Every case waits
+for its own complete status record rather than an earlier command's prompt.
+The historical measurements below are retained as original contributor evidence;
+new acceptance results are recorded separately after fresh validation.
 
 The one-CPU pre-fix control responds to three queries when the workload calls
 `sched_yield()`, but a no-syscall spinner receives no controller response within
@@ -45,7 +54,7 @@ Signal fixtures compute inside SIGUSR1, return through sigreturn and complete
 five timed sleeps. Stop/start reuses the runtime slot; there is no delete action
 in the current domain-control ABI.
 
-## Publication validation
+## Historical publication validation
 
 Code commit: `2659ba595fe8d5880f69816c56c29df4aff872ac` (documentation/evidence
 commits do not change the tested executable). QEMU/KVM, q35, 1 GiB RAM,

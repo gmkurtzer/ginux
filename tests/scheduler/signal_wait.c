@@ -8,11 +8,14 @@
 #ifndef SEED
 #define SEED 4951
 #endif
+#ifndef CONTEXT_ITERATIONS
+#define CONTEXT_ITERATIONS 100000000
+#endif
 extern int check_context(uint64_t, uint64_t);
 static volatile sig_atomic_t hits, failure;
 static void handler(int signal) {
     (void)signal;
-    failure = check_context(20000000, SEED + 0x400);
+    failure = check_context(CONTEXT_ITERATIONS / 5, SEED + 0x400);
     ++hits;
 }
 int main(void) {

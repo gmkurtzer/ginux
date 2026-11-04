@@ -63,6 +63,7 @@ help:
 	@echo "  make test-oci-cache Verify OCI layers are reused after reboot"
 	@echo "  make test    Build and verify the automated QEMU boot test"
 	@echo "  make test-qemu-smoke Boot the normal image once and verify core integration"
+	@echo "  make test-scheduler Build offline scheduler fixtures and qualify detached domains"
 	@echo "  make test-smp Qualify 1/2/4 CPUs and repeat the two-CPU stress run"
 	@echo "  make test-rocky-smp-futex Verify two-CPU private-futex compatibility"
 	@echo "  make test-rocky-smp-shared-page Verify 2/4-vCPU shared writable pages"
@@ -242,6 +243,10 @@ test-oci-cache: build
 
 test: build-verification
 	@tests/qemu/boot.sh
+
+.PHONY: test-scheduler
+test-scheduler: build
+	@python3 tests/scheduler/run.py $(SCHEDULER_TEST_ARGS)
 
 test-controller-graphics-runtime: build-verification
 	@tests/qemu/boot.sh

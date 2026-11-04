@@ -1,5 +1,18 @@
 # HDAE Status
 
+## PR #85 acceptance follow-up (2026-11-04)
+
+Active skill: `.agents/skills/hdae-development/SKILL.md`; full reload and method
+reference required after context shift. Active gate:
+[`46-scheduler-reproducible-acceptance`](gates-todo/46-scheduler-reproducible-acceptance.md).
+Branch: `fix/background-domain-preemption`; status: partial. Current main
+`c8d12653` integrated in `713ca279`; desktop nonblocking reads preserved.
+The user authorized continuation of PR #85 to remove private-fixture/KVM access
+dependencies. Source-built cache, portable harness and public CI are in progress.
+Next: validate TCG runtime and oracle controls, then the full 1/2/4 CPU matrix,
+static/full boot regression, and publish exact evidence. No merge is authorized.
+The controller-desktop checkpoint below is historical upstream context.
+
 ## Recovery checkpoint
 
 - Active skill: `hdae-development`
