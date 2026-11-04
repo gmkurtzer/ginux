@@ -74,7 +74,8 @@ can enqueue a duplicate accept or repoint the peer.
 - Pull request: intended, dedicated to issue #69
 - Planned commits: gate, implementation, and regression; validation and
   delivery checkpoint
-- Actual commits: pending
+- Actual commits: `9f96395e` (gate, reconnect guard, Linux errno mapping,
+  regression, and initial evidence); delivery checkpoint pending
 
 ## Review policy and outcome
 
