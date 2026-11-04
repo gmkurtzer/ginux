@@ -1415,11 +1415,13 @@ valid_interpreter_base:
     push 2
     pop r14
 linux_clone_repeat:
-    mov edi, 0x13d0f00
+    # Use the clone(flags, stack, ptid, ctid, tls) register order with ctid in
+    # r10 and tls in r8, plus the legacy CLONE_DETACHED bit musl passes.
+    mov edi, 0x17d0f00
     mov esi, 0x413000
     mov edx, 0x405194
-    lea r8d, [edx + 4]
-    mov r9d, 0x410fc0
+    lea r10d, [edx + 4]
+    mov r8d, 0x410fc0
     push 56
     pop rax
     syscall
@@ -1475,7 +1477,7 @@ linux_clone_repeat:
     add rsp, 16
     push 1
     push 0
-    mov rdi, r8
+    lea rdi, [rbp + 4]
     xor esi, esi
     mov edx, ebx
     mov r10, rsp
@@ -1845,7 +1847,7 @@ linux_clone_repeat:
     require_equal
     jmp linux_child_joined
 linux_parent_futex_wait:
-    mov rdi, r8
+    lea rdi, [rbp + 4]
     xor esi, esi
     mov edx, ebx
     xor r10d, r10d
@@ -5195,8 +5197,8 @@ resolution_valid:
     mov edi, 0x13d0f00
     mov esi, 0x413000
     mov edx, 0x4061fc
-    mov r8d, 0x405198
-    mov r9d, 0x410fc0
+    mov r10d, 0x405198
+    mov r8d, 0x410fc0
     push 56
     pop rax
     call syscall_expect_efault
@@ -5463,10 +5465,10 @@ child_thread_probe:
     mov r15, rdx
     mov eax, 186
     syscall
-    cmp eax, dword ptr [r8]
+    cmp eax, dword ptr [r10]
     require_equal
     mov rax, qword ptr fs:[0]
-    cmp rax, r9
+    cmp rax, r8
     require_equal
     mov qword ptr [0x4050e0], -1
     xor edi, edi

@@ -692,8 +692,8 @@ pub(super) extern "sysv64" fn linux_syscall_handler(
                     saved_registers.rdi,
                     saved_registers.rsi,
                     saved_registers.rdx,
+                    saved_registers.r10,
                     saved_registers.r8,
-                    saved_registers.r9,
                     result,
                 ] {
                     serial_write_u64(value);

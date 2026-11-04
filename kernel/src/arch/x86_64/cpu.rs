@@ -6081,7 +6081,6 @@ fn construct_linux_clone_context(
         || X86_RUNTIME.LINUX_THREAD_STATES[slot].load(Ordering::SeqCst) != LINUX_THREAD_READY
         || current_linux_thread_slot() == Some(slot)
         || request.tls != context.thread_pointer as u64
-        || request.child_stack & 15 != 0
         || request.child_stack < X86_RUNTIME.LINUX_THREAD_STACK_BASES[slot].load(Ordering::SeqCst)
         || X86_RUNTIME.LINUX_THREAD_STACK_BASES[slot]
             .load(Ordering::SeqCst)
@@ -11772,12 +11771,17 @@ fn linux_clone3(
 }
 
 fn linux_clone_thread(registers: LinuxSyscallFrame, user_rip: u64, user_rflags: u64) -> u64 {
+    // x86-64 uses the generic clone(flags, newsp, parent_tid, child_tid, tls)
+    // order (kernel/fork.c:2910), and the fourth and fifth syscall arguments
+    // arrive in r10 and r8 (arch/x86/entry/entry_64.S:75). CLONE_DETACHED is
+    // ignored by clone(), which musl's pthread_create() passes; Linux rejects
+    // it only with CLONE_PIDFD (kernel/fork.c:2080) and in clone3().
     let request = LinuxCloneRequest {
-        flags: registers.rdi,
+        flags: registers.rdi & !LINUX_CLONE_DETACHED,
         child_stack: registers.rsi,
         parent_tid: registers.rdx,
-        child_tid: registers.r8,
-        tls: registers.r9,
+        child_tid: registers.r10,
+        tls: registers.r8,
     };
     linux_clone_thread_request(request, registers, user_rip, user_rflags)
 }
@@ -11812,9 +11816,12 @@ fn linux_clone_thread_request(
         let Ok(stack_top) = usize::try_from(request.child_stack) else {
             return LINUX_EINVAL;
         };
+        // Linux installs the child stack pointer as given, without an
+        // alignment check (arch/x86/kernel/process.c:245). musl's __clone
+        // passes a 16-byte-aligned top minus 8 so that the child's `pop`
+        // leaves an ABI-aligned stack.
         if !linux_thread_clone_flags_supported(request.flags)
             || stack_top == 0
-            || stack_top & 15 != 0
             || !linux_readable_user_range_contains(request.tls, 16)
         {
             return LINUX_EINVAL;
