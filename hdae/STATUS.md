@@ -247,6 +247,9 @@ scope, threat model, and invariants.
   byte-identical. `make demo-gate-8` passed all seven named checks.
 - Fresh aggregate `make test` passed 44 component tests, all prior-gate QEMU
   regressions, and the Gate 8 QEMU fixture.
+- Gate 8 is delivered in open
+  https://github.com/gmkurtzer/ginux-us/pull/10 from
+  `hdae/virtual-kernel-views`.
 
 ## Open decisions and limitations
 
@@ -284,8 +287,8 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Push `hdae/virtual-kernel-views`, open its pull request, record delivery, and
-stop for human review.
+Stop for human review of `make demo-gate-8`, the passing evidence, and pull
+request 10.
 
 ## Context recovery
 
@@ -293,8 +296,8 @@ stop for human review.
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
 - Active gate: Gate 8, virtual kernel views, authorized for execution on
-  dedicated branch `hdae/virtual-kernel-views`; technically passed and awaits
-  branch/PR delivery plus human review
+  dedicated branch `hdae/virtual-kernel-views`; technically passed, delivered,
+  and awaiting human review
 - Last evidence: `make check`, `make test-kernel-views`,
   `make demo-gate-8`, and fresh aggregate `make test` passed on 2026-11-04
 - Required human decision: none until the Gate 8 demonstration checkpoint; the

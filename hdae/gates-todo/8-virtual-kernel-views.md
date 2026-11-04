@@ -56,8 +56,7 @@ mounts, identifiers, and configuration are not leaked as domain authority.
 
 ## Remaining work
 
-- [ ] Push the dedicated branch, open its pull request, and stop for human
-  review.
+- [ ] Human review and acceptance of the Gate 8 demonstration and evidence.
 
 ## Acceptance criteria
 
@@ -122,6 +121,8 @@ mounts, identifiers, and configuration are not leaked as domain authority.
 - Fresh aggregate `make test` -> passed formatting, strict lint, 44 component
   tests, all prior QEMU interception/runtime/config/domain/image/device/process
   regressions, and the Gate 8 Rocky QEMU kernel-view fixture.
+- Branch `hdae/virtual-kernel-views` -> pushed; dedicated pull request 10 is
+  open at https://github.com/gmkurtzer/ginux-us/pull/10.
 
 ## Decisions and limitations
 
@@ -133,15 +134,18 @@ mounts, identifiers, and configuration are not leaked as domain authority.
 
 - Working branch: `hdae/virtual-kernel-views`
 - Intended base: `main`
-- Pull request: intended; dedicated branch push and PR creation authorized on
-  2026-11-03; never merge or close without explicit authorization
+- Pull request: https://github.com/gmkurtzer/ginux-us/pull/10; based on the
+  stacked accepted rename branch; never merge or close without explicit
+  authorization
 - Planned commits: procfs model; sysfs and device projection; cgroup and
   mount/identity model; consistency and leakage verification
-- Actual commits: the procfs foundation is recorded by the commit containing
-  this evidence update
+- Actual commits: `51c028c` added virtual procfs; `8a16d1d` added virtual
+  sysfs/device projection; `31c098e` added cgroup and identity views;
+  `65057a6` added QEMU integration and the human demonstration; `15a3552`
+  recorded aggregate verification
 
 ## Review policy and outcome
 
 Human checkpoint because these interfaces define the kernel identity and
-authority visible to the domain. Gate 8 is technically passed; branch delivery
-and the pull request remain before explicit acceptance.
+authority visible to the domain. Gate 8 is technically passed and delivered;
+explicit acceptance remains before Gate 9.
