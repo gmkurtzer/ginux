@@ -1,78 +1,56 @@
-# Feedback-Hardening Plan
+# Native Controller Desktop Plan
 
 ## Delivery strategy
 
-- Working branch: `codex/feedback-hardening`
+- Working branch: `codex/controller-desktop`
 - Intended base: `main`
-- Historical baseline: `research-v1-baseline`
-- Review policy: delegated closure for all ten gates after complete fresh test
-  evidence; stop only for a failed dependency, architectural decision, scope
-  expansion, or consequential action outside the approved batch. Gate 11 was
-  added afterward as delegated measurement work; inserted correctness gates
-  11.5 and 11.6 used explicit human checkpoints.
-- Commit policy: small, signed-off commits associated with one gate
-- Pull request: one pull request from `codex/feedback-hardening` to `main` for
-  the entire secondary experiment; verify its remote status before Gate 1 work
+- Pull request: one integrated pull request for Gates 19–31
+- Origin: design discussion prompted by GitHub issue #12; no contributor code is
+  merged by this plan
+- Commit policy: signed, coherent commits at gate boundaries where practical
+- Push policy: no push without current user authorization
 
-Gate 12 is a separate follow-up delivery:
-
-- Working branch: `codex/performance-parity`
-- Intended base: merged `main` containing PR #7
-- Review policy: autonomous iteration inside the approved gate, followed by a
-  human checkpoint after all objective criteria pass
-- Pull request: a new follow-up PR, not PR #7
-- Commit policy: signed, coherent profiling, mechanism, regression, and final
-  evidence commits
+The single-PR exception is deliberate: the native display protocol, compositor,
+window system, controller application, domain bridge, and Linux presentation
+path form one vertical feature and cannot be reviewed honestly as independent
+product deliveries.
 
 ## Gate sequence
 
-| Gate | Purpose | Depends on |
-|---:|---|---|
-| 1 | Baseline and claim reproduction | None |
-| 2 | Harden x86-64 privilege entry | 1 |
-| 3 | Add fault-recovering userspace access | 2 |
-| 4 | Classify global state and define ownership | 3 |
-| 5 | Migrate runtime state ownership | 4 |
-| 6 | Migrate platform and service state ownership | 5 |
-| 7 | Decompose the x86-64 implementation | 6 |
-| 8 | Add synchronization and SMP readiness | 7 |
-| 9 | Implement SMP and make 2-vCPU QEMU the default | 8 |
-| 10 | Qualify and compare the result | 9 |
-| 11 | Measure matched 1/2/4-vCPU Linux and Ginux topologies | 10 |
-| 11.5 | Correct shared writable Linux pages across runtime CPUs | Gate 11 fault reproduction |
-| 11.6 | Preserve exact Linux thread context across SMP returns | Gate 11 fault reproduction |
-| 12 | Reach matched UP and SMP performance parity | 11, 11.5, 11.6 |
+| Gate | Purpose | Depends on | Review |
+|---:|---|---|---|
+| 19 | Fix controller desktop architecture and trust model | Existing kernel/controller baseline | Accepted |
+| 20 | Establish a graphical ring-3 controller runtime | 19 | Delegated |
+| 21 | Add framebuffer and input device support | 20 | Delegated |
+| 22 | Implement the native display protocol | 20, 21 | Delegated |
+| 23 | Implement seats, focus, and resource leases | 22 | Delegated |
+| 24 | Build the native windowing system and toolkit | 23 | Delegated |
+| 25 | Build the graphical controller application | 24 | Delegated |
+| 26 | Bridge virtual display and input into domains | 23 | Delegated |
+| 27 | Run a minimal Wayland environment in a Linux domain | 26 | Delegated |
+| 28 | Deliver windowed and full-screen domain presentation | 24, 25, 27 | Delegated |
+| 29 | Harden lifecycle and failure recovery | 28 | Delegated |
+| 30 | Qualify performance, isolation, UX, and documentation | 29 | Delegated batch end |
+| 31 | Refine and qualify native visual design and interaction | 30 | Accepted |
 
-Gate 11 paused twice when measurement exposed correctness failures. Gates 11.5
-and 11.6 corrected those failures and retained regressions before the scaled
-matrix resumed.
+## Execution policy
 
-Gate 12 uses the completed Gate 11 matrix as its historical baseline, collects
-fresh paired measurements, profiles the largest costs, and iterates on general
-kernel mechanisms until every fixed and scaled sysbench cell reaches at least
-0.96x matched Linux performance. The target remains greater than 1.00x in every
-cell.
+The human accepted Gate 19 and then delegated continuous execution and closure
+of Gates 20–30 on 2026-10-31. Gate 31 was added as a human visual checkpoint and
+accepted on 2026-11-01 after all objective evidence passed. A gate closes only
+after every criterion has fresh evidence. Stop for a clarification that
+materially affects behavior, a failed dependency with no safe in-scope path,
+changed architecture, scope expansion, or a new consequential security
+decision.
 
-Each gate's approved scope, evidence, acceptance criteria, planned commits, and
-stopping point live in its file under `gates-todo/`. Completed gates move to
-`gates-done/`; intentionally postponed gates move to `gates-deferred/` with a
-recorded reason. Gate numbers are stable.
+## Coverage
 
-## Execution rule
-
-Only one gate is active at a time. The human approved the initial ten-gate batch
-and delegated closure of each gate after all its criteria pass with fresh test
-evidence. Later approved gates follow their own recorded review policies. The
-agent advances automatically in order, but stops when a gate fails, a dependency
-is invalidated, or a new decision would change architecture, scope, risk, or an
-acceptance criterion. Evidence and limitations are recorded before each gate
-moves to `gates-done/`.
-
-## Planned commit shape
-
-Security gates separate reproductions, mechanisms, and integration evidence
-where practical. Global-state work separates classification from runtime and
-platform/service migrations. Decomposition, synchronization, and SMP use
-incremental subsystem commits rather than a single repository-wide rewrite.
-All gates remain on one branch and one pull request, but no gate is squashed
-into another gate's evidence.
+- Function and failure paths: Gates 20–29.
+- Deterministic tests and regressions: every gate, consolidated by Gate 30.
+- Operator and developer workflows: Gates 24, 25, 28, and 30.
+- Documentation and examples: Gates 19 and 30.
+- Compatibility: Gate 27; broader desktop environments are explicitly deferred.
+- Persistence and migration: no persistent desktop state in this iteration.
+- Recovery and maintenance: Gate 29.
+- Performance and security boundaries: Gates 19, 23, 29, and 30.
+- Privacy: not applicable beyond preventing cross-domain display/input leakage.

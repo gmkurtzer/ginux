@@ -33,6 +33,7 @@ pub const DOMAIN_ATTACH: u64 = 12;
 pub const DOMAIN_SET_PERSONALITY: u64 = 13;
 pub const DOMAIN_POLL_BACKGROUND: u64 = 14;
 pub const DOMAIN_EXEC: u64 = 15;
+pub const DOMAIN_HOST_REBOOT: u64 = 16;
 pub const DOMAIN_EXEC_REQUEST_SIZE: usize = 40;
 pub const DOMAIN_EXEC_REQUEST_VERSION: u16 = 0;
 pub const DOMAIN_EXEC_INTERACTIVE: u16 = 1 << 0;

@@ -36,6 +36,12 @@ static LOADED_IMAGE_PROTOCOL_GUID: EfiGuid = EfiGuid {
     data3: 0x11d2,
     data4: [0x8e, 0x3f, 0x00, 0xa0, 0xc9, 0x69, 0x72, 0x3b],
 };
+static GRAPHICS_OUTPUT_PROTOCOL_GUID: EfiGuid = EfiGuid {
+    data1: 0x9042_a9de,
+    data2: 0x23dc,
+    data3: 0x4a38,
+    data4: [0x96, 0xfb, 0x7a, 0xde, 0xd0, 0x80, 0x51, 0x6a],
+};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 #[repr(C)]
@@ -110,6 +116,54 @@ type GetMemoryMap =
 type ExitBootServices = unsafe extern "efiapi" fn(EfiHandle, usize) -> EfiStatus;
 type HandleProtocol =
     unsafe extern "efiapi" fn(EfiHandle, *const EfiGuid, *mut *mut c_void) -> EfiStatus;
+type LocateProtocol =
+    unsafe extern "efiapi" fn(*const EfiGuid, *mut c_void, *mut *mut c_void) -> EfiStatus;
+type QueryGraphicsMode = unsafe extern "efiapi" fn(
+    *mut EfiGraphicsOutputProtocol,
+    u32,
+    *mut usize,
+    *mut *mut EfiGraphicsOutputModeInformation,
+) -> EfiStatus;
+type SetGraphicsMode = unsafe extern "efiapi" fn(*mut EfiGraphicsOutputProtocol, u32) -> EfiStatus;
+type FreePool = unsafe extern "efiapi" fn(*mut c_void) -> EfiStatus;
+
+#[repr(C)]
+struct EfiGraphicsOutputModeInformation {
+    version: u32,
+    horizontal_resolution: u32,
+    vertical_resolution: u32,
+    pixel_format: u32,
+    pixel_information: [u32; 4],
+    pixels_per_scan_line: u32,
+}
+
+#[repr(C)]
+struct EfiGraphicsOutputProtocolMode {
+    max_mode: u32,
+    mode: u32,
+    info: *const EfiGraphicsOutputModeInformation,
+    size_of_info: usize,
+    framebuffer_base: u64,
+    framebuffer_size: usize,
+}
+
+#[repr(C)]
+struct EfiGraphicsOutputProtocol {
+    query_mode: usize,
+    set_mode: usize,
+    blt: usize,
+    mode: *const EfiGraphicsOutputProtocolMode,
+}
+
+#[derive(Clone, Copy)]
+struct FramebufferHandoff {
+    base: u64,
+    size: usize,
+    width: u32,
+    height: u32,
+    stride: u32,
+    format: u32,
+}
 
 #[repr(C)]
 struct EfiLoadedImageProtocol {
@@ -158,6 +212,17 @@ struct EfiBootServices {
     exit: usize,
     unload_image: usize,
     exit_boot_services: ExitBootServices,
+    get_next_monotonic_count: usize,
+    stall: usize,
+    set_watchdog_timer: usize,
+    connect_controller: usize,
+    disconnect_controller: usize,
+    open_protocol: usize,
+    close_protocol: usize,
+    open_protocol_information: usize,
+    protocols_per_handle: usize,
+    locate_handle_buffer: usize,
+    locate_protocol: LocateProtocol,
 }
 
 #[repr(C)]
@@ -267,6 +332,7 @@ unsafe fn exit_boot_services(
     }
     let (image_base, image_size) = loaded_image_bounds(image, boot_services);
     let unix_time = read_unix_time(runtime_services);
+    let framebuffer = locate_framebuffer(boot_services);
 
     let memory_map = core::ptr::addr_of_mut!(MEMORY_MAP_STORAGE.0).cast::<u8>();
 
@@ -311,6 +377,12 @@ unsafe fn exit_boot_services(
                 controller_runtime_size: CONTROLLER_RUNTIME.len(),
                 root_image: ROOT_IMAGE.as_ptr(),
                 root_image_size: ROOT_IMAGE.len(),
+                framebuffer_base: framebuffer.base,
+                framebuffer_size: framebuffer.size,
+                framebuffer_width: framebuffer.width,
+                framebuffer_height: framebuffer.height,
+                framebuffer_stride: framebuffer.stride,
+                framebuffer_format: framebuffer.format,
                 oci_rootfs: core::ptr::null(),
                 oci_rootfs_size: 0,
                 unix_time,
@@ -322,6 +394,77 @@ unsafe fn exit_boot_services(
     }
 
     panic!("failed to exit UEFI boot services");
+}
+
+unsafe fn locate_framebuffer(boot_services: *mut EfiBootServices) -> FramebufferHandoff {
+    let mut protocol = core::ptr::null_mut();
+    if ((*boot_services).locate_protocol)(
+        core::ptr::addr_of!(GRAPHICS_OUTPUT_PROTOCOL_GUID),
+        core::ptr::null_mut(),
+        &mut protocol,
+    ) != EFI_SUCCESS
+        || protocol.is_null()
+    {
+        panic!("UEFI did not provide graphics output");
+    }
+    let graphics = protocol.cast::<EfiGraphicsOutputProtocol>();
+    let initial_mode = (*graphics).mode;
+    if !initial_mode.is_null() {
+        let query: QueryGraphicsMode = core::mem::transmute((*graphics).query_mode);
+        let set: SetGraphicsMode = core::mem::transmute((*graphics).set_mode);
+        let free_pool: FreePool = core::mem::transmute((*boot_services).free_pool);
+        let mut selected_mode = None;
+        let mut selected_score = 0_u64;
+        for candidate in 0..(*initial_mode).max_mode {
+            let mut size = 0_usize;
+            let mut info = core::ptr::null_mut();
+            if query(graphics, candidate, &mut size, &mut info) == EFI_SUCCESS && !info.is_null() {
+                let width = (*info).horizontal_resolution;
+                let height = (*info).vertical_resolution;
+                let format = (*info).pixel_format;
+                let supported = format <= 1 && width <= 1024 && height <= 768;
+                // Prefer the native 1024 by 768 target, BGR byte order (which is the
+                // controller renderer's in-memory 0x00RRGGBB layout), then the
+                // largest supported fallback.  The score keeps mode selection
+                // deterministic regardless of firmware enumeration order.
+                let exact = width == 1024 && height == 768;
+                let score = u64::from(exact) << 63
+                    | u64::from(format == 1) << 62
+                    | (u64::from(width) * u64::from(height));
+                if supported && score > selected_score {
+                    selected_mode = Some(candidate);
+                    selected_score = score;
+                }
+                let _ = free_pool(info.cast());
+            }
+        }
+        if let Some(selected_mode) = selected_mode {
+            let _ = set(graphics, selected_mode);
+        }
+    }
+    let mode = (*graphics).mode;
+    if mode.is_null() || (*mode).info.is_null() {
+        panic!("UEFI graphics output mode is unavailable");
+    }
+    let info = &*(*mode).info;
+    let handoff = FramebufferHandoff {
+        base: (*mode).framebuffer_base,
+        size: (*mode).framebuffer_size,
+        width: info.horizontal_resolution,
+        height: info.vertical_resolution,
+        stride: info.pixels_per_scan_line,
+        format: info.pixel_format,
+    };
+    if handoff.base == 0
+        || handoff.size == 0
+        || handoff.width == 0
+        || handoff.height == 0
+        || handoff.stride < handoff.width
+        || handoff.format > 1
+    {
+        panic!("UEFI graphics output mode is unsupported");
+    }
+    handoff
 }
 
 unsafe fn read_unix_time(runtime_services: *mut EfiRuntimeServices) -> u64 {

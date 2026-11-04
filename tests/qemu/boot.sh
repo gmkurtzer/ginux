@@ -259,6 +259,67 @@ if ! grep -q '^ginux: measured isolated protocol service discovered' "$output_fi
     exit 1
 fi
 
+if ! grep -q '^ginux: measured graphical controller service discovered' "$output_file" ||
+    ! grep -q '^ginux: graphical controller service ready' "$output_file" ||
+    ! grep -q '^ginux: graphical controller runtime fault contained' "$output_file" ||
+    ! grep -q '^ginux: graphical controller runtime restarted with stable identity' "$output_file" ||
+    ! grep -q '^ginux: graphical controller runtime grants and frames retired cleanly' "$output_file" ||
+    ! grep -q '^ginux: serial controller recovery remained available' "$output_file"; then
+    echo "Boot test failed: the graphical controller service lifecycle was not isolated." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: controller framebuffer mode and pixel bounds validated' "$output_file" ||
+    ! grep -q '^ginux: normalized keyboard and pointer queues validated' "$output_file" ||
+    ! grep -q '^ginux: controller input overflow and reset validated' "$output_file" ||
+    ! grep -q '^ginux: graphical controller framebuffer capability exercised in ring 3' "$output_file" ||
+    ! grep -q '^ginux: graphical controller input capability exercised in ring 3' "$output_file" ||
+    ! grep -q '^ginux: unauthorized display and input capabilities rejected' "$output_file" ||
+    ! grep -q '^ginux: graphical controller device grants and input state retired cleanly' "$output_file"; then
+    echo "Boot test failed: controller display/input isolation was not verified." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: native display protocol conformance validated in ring 3' "$output_file"; then
+    echo "Boot test failed: native display protocol conformance was not exercised in ring 3." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: controller seat focus and leases validated in ring 3' "$output_file"; then
+    echo "Boot test failed: controller seat focus and lease recovery was not exercised." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: native windowing and toolkit validated in ring 3' "$output_file"; then
+    echo "Boot test failed: native windowing and toolkit were not exercised." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: graphical controller workflows validated in ring 3' "$output_file"; then
+    echo "Boot test failed: graphical controller workflows were not exercised." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: isolated domain display bridge validated in ring 3' "$output_file"; then
+    echo "Boot test failed: domain display/input bridge was not exercised." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: Linux domain Wayland environment validated in ring 3' "$output_file"; then
+    echo "Boot test failed: Linux domain Wayland environment was not exercised." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: domain desktop presentation validated in ring 3' "$output_file"; then
+    echo "Boot test failed: domain desktop presentation was not exercised." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: controller desktop recovery validated in ring 3' "$output_file"; then
+    echo "Boot test failed: controller desktop recovery was not exercised." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: compiled native network service executed in ring 3' "$output_file" ||
     ! grep -q '^ginux: native network service negotiated control ABI v4' "$output_file" ||
     ! grep -q '^ginux: native network service validated control descriptor v4' "$output_file" ||
@@ -684,8 +745,8 @@ if ! grep -q '^ginux: malformed boot manifests rejected' "$output_file"; then
     exit 1
 fi
 
-if ! grep -q '^ginux: manifest authority grants: 10' "$output_file"; then
-    echo "Boot test failed: a signed directional packet authority grant is missing." >&2
+if ! grep -q '^ginux: manifest authority grants: 12' "$output_file"; then
+    echo "Boot test failed: the signed boot authority grants are incomplete." >&2
     exit 1
 fi
 

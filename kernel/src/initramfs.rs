@@ -12,7 +12,10 @@ const MAX_NAME_SIZE: usize = 256;
 const MAX_FILE_SIZE: usize = 8 * 1024 * 1024;
 const PAGE_SIZE: usize = 4096;
 const MAX_INDEXED_ENTRIES: usize = 64;
-const ROOT_FRAME_COUNT: usize = 164;
+// The measured boot archive is immutable and materialized before a general
+// kernel heap exists. Keep its contiguous publication envelope explicit; all
+// runtime domain and image storage remains demand allocated.
+const ROOT_FRAME_COUNT: usize = 192;
 const ROOT_CAPACITY: usize = ROOT_FRAME_COUNT * PAGE_SIZE;
 const TYPE_MASK: u32 = 0o170000;
 const DIRECTORY: u32 = 0o040000;
@@ -231,7 +234,7 @@ pub(crate) fn verify_pinned_image(bytes: &[u8]) -> bool {
     let Some(archive) = parse(bytes) else {
         return false;
     };
-    archive.entry_count() == 27
+    archive.entry_count() == 28
         && archive.find(b"init").is_some_and(|entry| {
             entry.mode == 0o100555 && entry.data == b"GINUX_INITRAMFS_INIT_V0\n"
         })
@@ -304,6 +307,9 @@ pub(crate) fn verify_pinned_image(bytes: &[u8]) -> bool {
             .is_some_and(|entry| entry.mode == 0o100555 && !entry.data.is_empty())
         && archive
             .find(b"native/protocol")
+            .is_some_and(|entry| entry.mode == 0o100555 && !entry.data.is_empty())
+        && archive
+            .find(b"native/graphics")
             .is_some_and(|entry| entry.mode == 0o100555 && !entry.data.is_empty())
         && archive.find(b"missing").is_none()
 }
@@ -819,7 +825,7 @@ pub(crate) fn verify_read_only_index(source: &[u8]) -> bool {
     };
     let base = root.image.frames[0].direct_map_address();
     let init = root.lookup(b"init");
-    let valid = root.node_count == 27
+    let valid = root.node_count == 28
         && init.is_some_and(|entry| {
             entry.mode == 0o100555
                 && entry.data == b"GINUX_INITRAMFS_INIT_V0\n"
@@ -896,6 +902,9 @@ pub(crate) fn verify_read_only_index(source: &[u8]) -> bool {
             .is_some_and(|entry| entry.mode == 0o100555 && !entry.data.is_empty())
         && root
             .lookup(b"native/protocol")
+            .is_some_and(|entry| entry.mode == 0o100555 && !entry.data.is_empty())
+        && root
+            .lookup(b"native/graphics")
             .is_some_and(|entry| entry.mode == 0o100555 && !entry.data.is_empty())
         && root.lookup(b"missing").is_none()
         && root.lookup(b"../init").is_none()

@@ -12,12 +12,13 @@ VOLUME_SERVICE := target/x86_64-unknown-none/$(PROFILE)/ginux-volume-service-run
 CONTROLLER_RUNTIME := target/x86_64-unknown-none/$(PROFILE)/ginux-controller-runtime
 NETWORK_SERVICE := target/x86_64-unknown-none/$(PROFILE)/ginux-network-service-runtime
 PROTOCOL_SERVICE := target/x86_64-unknown-none/$(PROFILE)/ginux-protocol-service-runtime
+GRAPHICS_SERVICE := target/x86_64-unknown-none/$(PROFILE)/ginux-graphics-service-runtime
 INITRAMFS := build/initramfs-v0.cpio
 SYSTEM_PROFILE := profiles/minimal-system-v0/profile.tsv
 
 .DEFAULT_GOAL := help
 
-.PHONY: help doctor manifest system-image test-alpine test-rocky-shell test-rocky-dnf test-multi-domain test-linux-abi test-linux-runtime test-storage test-oci-cache test-smp test-rocky-smp-futex test-rocky-smp-shared-page test-rocky-smp-thread-context probe-rocky-systemd test-rocky-systemd test-rocky-detached test-domain-responsiveness benchmark-rocky-systemd benchmark-prepare-linux benchmark-prepare-ginux benchmark-linux-comparison benchmark-ginux-boot benchmark-boot-comparison benchmark-ginux-sysbench benchmark-compare benchmark-topology-matrix benchmark-topology-compare profile-rocky-systemd rocky-image rocky-image-check linux-probe controller-runtime network-service protocol-service volume-service abi-conformance architecture-check linux-compat-check build build-verification build-linux-profile run reset-storage test test-qemu-smoke test-c1 test-c2 fmt gate clean
+.PHONY: help doctor manifest system-image test-alpine test-rocky-shell test-rocky-dnf test-multi-domain test-linux-abi test-linux-runtime test-storage test-oci-cache test-smp test-rocky-smp-futex test-rocky-smp-shared-page test-rocky-smp-thread-context probe-rocky-systemd test-rocky-systemd test-rocky-detached test-domain-responsiveness test-controller-graphics-runtime test-controller-display-input test-native-display-protocol test-controller-seat-leases test-native-windowing test-native-windowing-screenshots test-graphical-controller test-controller-console test-domain-display-bridge test-linux-wayland-domain test-domain-desktop-experience test-controller-desktop-recovery test-controller-desktop-stress test-controller-desktop-visible test-controller-desktop-latency test-controller-desktop-all test-controller-desktop-performance run-gui benchmark-rocky-systemd benchmark-prepare-linux benchmark-prepare-ginux benchmark-linux-comparison benchmark-ginux-boot benchmark-boot-comparison benchmark-ginux-sysbench benchmark-compare benchmark-topology-matrix benchmark-topology-compare profile-rocky-systemd rocky-image rocky-image-check linux-probe controller-runtime network-service protocol-service graphics-service volume-service abi-conformance architecture-check linux-compat-check build build-verification build-linux-profile run reset-storage test test-qemu-smoke test-c1 test-c2 fmt gate clean
 
 help:
 	@echo "Ginux development targets"
@@ -48,6 +49,7 @@ help:
 	@echo "  make controller-runtime Build the embedded Linux-ABI ring-3 controller"
 	@echo "  make network-service Build the freestanding isolated network service"
 	@echo "  make protocol-service Build the freestanding isolated protocol service"
+	@echo "  make graphics-service Build the freestanding graphical controller service"
 	@echo "  make volume-service Build the freestanding isolated volume service"
 	@echo "  make abi-conformance Compile the public native ABI as freestanding C"
 	@echo "  make architecture-check Check architecture and roadmap consistency"
@@ -65,6 +67,11 @@ help:
 	@echo "  make test-rocky-smp-futex Verify two-CPU private-futex compatibility"
 	@echo "  make test-rocky-smp-shared-page Verify 2/4-vCPU shared writable pages"
 	@echo "  make test-rocky-smp-thread-context Verify 2/4-vCPU thread context integrity"
+	@echo "  make test-controller-desktop-all Qualify the complete native desktop path"
+	@echo "  make test-controller-desktop-performance Measure desktop responsiveness budgets"
+	@echo "  make test-controller-desktop-visible Verify pixels from a running QEMU framebuffer"
+	@echo "  make test-controller-desktop-latency Verify real QEMU interaction latency"
+	@echo "  make run-gui                 Open the native controller GUI in QEMU"
 	@echo "  make test-c1 Build and verify the interactive controller console"
 	@echo "  make test-c2 Verify configured domain lifecycle management"
 	@echo "  make check   Run formatting and lint checks"
@@ -75,9 +82,9 @@ help:
 doctor:
 	@tools/qemu/doctor.sh
 
-manifest: linux-probe controller-runtime network-service protocol-service volume-service
+manifest: linux-probe controller-runtime network-service protocol-service graphics-service volume-service
 	@mkdir -p "$(dir $(INITRAMFS))"
-	@cargo run --quiet --package ginux-manifest-tool -- boot/manifest-v0.conf control-plane/bootstrap.hex "$(INITRAMFS)" "$(LINUX_DYNAMIC_DIR)" "$(CONTROLLER_RUNTIME)" "$(NETWORK_SERVICE)" "$(PROTOCOL_SERVICE)" "$(VOLUME_SERVICE)" "$(SYSTEM_PROFILE)" boot/efi/src/generated_boot.rs
+	@cargo run --quiet --package ginux-manifest-tool -- boot/manifest-v0.conf control-plane/bootstrap.hex "$(INITRAMFS)" "$(LINUX_DYNAMIC_DIR)" "$(CONTROLLER_RUNTIME)" "$(NETWORK_SERVICE)" "$(PROTOCOL_SERVICE)" "$(VOLUME_SERVICE)" "$(GRAPHICS_SERVICE)" "$(SYSTEM_PROFILE)" boot/efi/src/generated_boot.rs
 	@test -s "$(INITRAMFS)"
 
 system-image: manifest
@@ -123,6 +130,11 @@ protocol-service:
 	@cargo build --package ginux-protocol-service-runtime --target x86_64-unknown-none $(CARGO_PROFILE_FLAG)
 	@test -f "$(PROTOCOL_SERVICE)"
 	@echo "Built $(PROTOCOL_SERVICE)"
+
+graphics-service:
+	@cargo build --package ginux-graphics-service-runtime --target x86_64-unknown-none $(CARGO_PROFILE_FLAG)
+	@test -f "$(GRAPHICS_SERVICE)"
+	@echo "Built $(GRAPHICS_SERVICE)"
 
 abi-conformance:
 	@clang -target x86_64-none-elf -std=c11 -ffreestanding -fsyntax-only \
@@ -231,6 +243,79 @@ test-oci-cache: build
 test: build-verification
 	@tests/qemu/boot.sh
 
+test-controller-graphics-runtime: build-verification
+	@tests/qemu/boot.sh
+
+test-controller-display-input: build-verification
+	@tests/qemu/boot.sh
+
+test-native-display-protocol: build-verification
+	@cargo test --package ginux-display-protocol
+	@tests/qemu/boot.sh
+
+test-controller-seat-leases: build-verification
+	@cargo test --package ginux-display-protocol
+	@tests/qemu/boot.sh
+
+test-native-windowing: build-verification
+	@cargo test --package ginux-windowing
+	@tests/qemu/boot.sh
+
+test-native-windowing-screenshots:
+	@cargo test --package ginux-windowing deterministic_screenshot_matches_exact_fixture
+
+test-graphical-controller: build-verification
+	@cargo test --package ginux-controller-ui
+	@tests/qemu/boot.sh
+
+test-controller-console: test-c1
+
+test-domain-display-bridge: build-verification
+	@cargo test --package ginux-domain-display
+	@tests/qemu/boot.sh
+
+test-linux-wayland-domain: build-verification
+	@cargo test --package ginux-wayland-domain
+	@tests/qemu/boot.sh
+
+test-domain-desktop-experience: build-verification
+	@cargo test --package ginux-domain-presentation
+	@tests/qemu/boot.sh
+
+test-controller-desktop-recovery: build-verification
+	@cargo test --package ginux-desktop-recovery
+	@tests/qemu/boot.sh
+
+test-controller-desktop-stress: build-verification
+	@cargo test --package ginux-desktop-recovery repeated_multi_component_lifecycle_has_constant_resource_bounds
+	@GINUX_DESKTOP_STRESS_RUNS=2 tests/qemu/controller-desktop-stress.sh
+
+test-controller-desktop-visible: build
+
+	@tests/qemu/controller-desktop-visible.sh
+
+test-controller-desktop-latency: test-controller-desktop-visible
+	@test -s build/qualification/controller-desktop/latency-summary.txt
+
+test-controller-desktop-all: build-verification
+	@cargo test --package ginux-display-protocol
+	@cargo test --package ginux-windowing
+	@cargo test --package ginux-controller-ui
+	@cargo test --package ginux-domain-display
+	@cargo test --package ginux-wayland-domain
+	@cargo test --package ginux-domain-presentation
+	@cargo test --package ginux-desktop-recovery
+	@tests/qemu/boot.sh
+	@GINUX_DESKTOP_STRESS_RUNS=1 tests/qemu/controller-desktop-stress.sh
+	@$(MAKE) test-controller-desktop-visible
+
+test-controller-desktop-performance:
+	@mkdir -p build/qualification
+	@cargo run --quiet --release --package ginux-desktop-qualification | tee build/qualification/controller-desktop-performance.txt
+
+run-gui: build
+	@GINUX_QEMU_DISPLAY="$${GINUX_QEMU_DISPLAY:-cocoa}" tools/qemu/run.sh
+
 test-qemu-smoke: build
 	@tests/qemu/smoke.sh
 
@@ -305,6 +390,7 @@ check: manifest architecture-check linux-compat-check
 	@cargo test --package ginux-volume-service
 	@cargo clippy --package ginux-network-service-runtime --target x86_64-unknown-none -- -D warnings
 	@cargo clippy --package ginux-protocol-service-runtime --target x86_64-unknown-none -- -D warnings
+	@cargo clippy --package ginux-graphics-service-runtime --target x86_64-unknown-none -- -D warnings
 	@cargo clippy --package ginux-volume-service-runtime --target x86_64-unknown-none -- -D warnings
 	@cargo clippy --package ginux-manifest-tool -- -D warnings
 

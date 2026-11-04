@@ -4238,14 +4238,14 @@ fn read_mmio_u64(address: usize) -> u64 {
     u64::from_le(value)
 }
 
-fn read_mmio_u32(address: usize) -> u32 {
+pub(crate) fn read_mmio_u32(address: usize) -> u32 {
     compiler_fence(Ordering::SeqCst);
     let value = unsafe { read_volatile(address as *const u32) };
     compiler_fence(Ordering::SeqCst);
     u32::from_le(value)
 }
 
-fn write_mmio_u32(address: usize, value: u32) {
+pub(crate) fn write_mmio_u32(address: usize, value: u32) {
     compiler_fence(Ordering::SeqCst);
     unsafe { write_volatile(address as *mut u32, value.to_le()) };
     compiler_fence(Ordering::SeqCst);

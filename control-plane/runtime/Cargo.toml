@@ -13,4 +13,5 @@ bench = false
 
 [dependencies]
 ginux-command = { path = "../../crates/command" }
+ginux-controller-ui = { path = "../../crates/controller-ui" }
 ginux-native-abi = { path = "../../crates/native-abi" }

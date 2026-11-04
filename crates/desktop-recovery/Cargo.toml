@@ -1,0 +1,14 @@
+[package]
+name = "ginux-desktop-recovery"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+ginux-display-protocol = { path = "../display-protocol" }
+ginux-domain-display = { path = "../domain-display" }
+ginux-domain-presentation = { path = "../domain-presentation" }
+ginux-wayland-domain = { path = "../wayland-domain" }
+

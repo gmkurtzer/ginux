@@ -3044,6 +3044,13 @@ struct RegisteredAuxiliaryAddressSpace {
 enum AuxiliaryAddressSpace {
     Wx(WxAddressSpace),
     Native(NativeServiceAddressSpace),
+    Graphics(
+        NativeServiceAddressSpace<
+            GRAPHICS_SERVICE_IMAGE_PAGES,
+            GRAPHICS_SERVICE_FRAME_COUNT,
+            GRAPHICS_SERVICE_STACK_PAGES,
+        >,
+    ),
     Network(
         NativeServiceAddressSpace<
             NATIVE_NETWORK_IMAGE_PAGES,
@@ -3052,7 +3059,11 @@ enum AuxiliaryAddressSpace {
         >,
     ),
     Controller(
-        NativeServiceAddressSpace<NATIVE_CONTROLLER_IMAGE_PAGES, NATIVE_CONTROLLER_FRAME_COUNT>,
+        NativeServiceAddressSpace<
+            NATIVE_CONTROLLER_IMAGE_PAGES,
+            NATIVE_CONTROLLER_FRAME_COUNT,
+            NATIVE_CONTROLLER_STACK_PAGES,
+        >,
     ),
 }
 
@@ -6760,12 +6771,25 @@ pub(crate) fn verify_control_plane_wx_layout() -> bool {
 
 const NATIVE_SERVICE_IMAGE_PAGES: usize = 7;
 pub(crate) const NATIVE_SERVICE_FRAME_COUNT: usize = 4 + NATIVE_SERVICE_IMAGE_PAGES + 3;
+pub(crate) const GRAPHICS_SERVICE_IMAGE_PAGES: usize = 16;
+pub(crate) const GRAPHICS_SERVICE_STACK_PAGES: usize = 16;
+const GRAPHICS_SERVICE_FRAME_COUNT: usize =
+    4 + GRAPHICS_SERVICE_IMAGE_PAGES + GRAPHICS_SERVICE_STACK_PAGES + 1;
 pub(crate) const NATIVE_NETWORK_IMAGE_PAGES: usize = 161;
 pub(crate) const NATIVE_NETWORK_STACK_PAGES: usize = 16;
 pub(crate) const NATIVE_NETWORK_FRAME_COUNT: usize =
     4 + NATIVE_NETWORK_IMAGE_PAGES + NATIVE_NETWORK_STACK_PAGES + 1;
-pub(crate) const NATIVE_CONTROLLER_IMAGE_PAGES: usize = 16;
-pub(crate) const NATIVE_CONTROLLER_FRAME_COUNT: usize = 4 + NATIVE_CONTROLLER_IMAGE_PAGES + 3;
+pub(crate) const NATIVE_CONTROLLER_IMAGE_PAGES: usize = 32;
+// The native service layout currently uses one user PTE table. This leaves the
+// final three entries for boot information and reserved device mappings while
+// providing the bounded 800x600 software composition surface.
+pub(crate) const NATIVE_CONTROLLER_STACK_PAGES: usize = 474;
+pub(crate) const NATIVE_CONTROLLER_FRAME_COUNT: usize =
+    4 + NATIVE_CONTROLLER_IMAGE_PAGES + NATIVE_CONTROLLER_STACK_PAGES + 1;
+const CONTROLLER_FRAMEBUFFER_TABLE_COUNT: usize = 5;
+pub(crate) const NATIVE_CONTROLLER_MAX_FRAME_COUNT: usize =
+    NATIVE_CONTROLLER_FRAME_COUNT + CONTROLLER_FRAMEBUFFER_TABLE_COUNT;
+const CONTROLLER_FRAMEBUFFER_PAGE: usize = ENTRY_COUNT;
 const NATIVE_STACK_PAGE: usize = NATIVE_SERVICE_IMAGE_PAGES + 1;
 const NATIVE_BOOT_INFO_PAGE: usize = NATIVE_STACK_PAGE + 3;
 
@@ -6781,6 +6805,8 @@ struct NativeServiceAddressSpace<
     image_pages: usize,
     owner: memory::FrameOwner,
     dma_frame: Option<memory::FrameLease>,
+    framebuffer_tables: [Option<memory::FrameLease>; CONTROLLER_FRAMEBUFFER_TABLE_COUNT],
+    framebuffer_user_address: Option<u64>,
 }
 
 impl<const IMAGE_CAPACITY: usize, const FRAME_COUNT: usize, const STACK_PAGES: usize>
@@ -6880,6 +6906,8 @@ impl<const IMAGE_CAPACITY: usize, const FRAME_COUNT: usize, const STACK_PAGES: u
             image_pages,
             owner,
             dma_frame: None,
+            framebuffer_tables: [None; CONTROLLER_FRAMEBUFFER_TABLE_COUNT],
+            framebuffer_user_address: None,
         })
     }
 
@@ -7033,6 +7061,85 @@ impl<const IMAGE_CAPACITY: usize, const FRAME_COUNT: usize, const STACK_PAGES: u
         }
         self.dma_frame = Some(frame);
         Some((USER_TEST_ADDRESS + index * PAGE_SIZE, physical))
+    }
+
+    fn map_controller_framebuffer(
+        &mut self,
+        info: crate::controller_devices::FramebufferInfo,
+    ) -> Option<u64> {
+        if self.framebuffer_user_address.is_some() || info.format != 1 {
+            return None;
+        }
+        let required = usize::try_from(info.stride)
+            .ok()?
+            .checked_mul(usize::try_from(info.height).ok()?)?
+            .checked_mul(4)?;
+        if required == 0 || required > info.size {
+            return None;
+        }
+        let physical_start = info.base & !(PAGE_SIZE as u64 - 1);
+        let offset = usize::try_from(info.base - physical_start).ok()?;
+        let mapping_bytes = offset.checked_add(required)?;
+        let page_count = mapping_bytes.checked_add(PAGE_SIZE - 1)? / PAGE_SIZE;
+        if page_count > CONTROLLER_FRAMEBUFFER_TABLE_COUNT * ENTRY_COUNT {
+            return None;
+        }
+        let tables = memory::allocate_frames::<CONTROLLER_FRAMEBUFFER_TABLE_COUNT>(self.owner)?;
+        let addresses = tables.map(memory::FrameLease::address);
+        let mapped = unsafe {
+            (|| {
+                let root = mapped_frame::<u64>(self.root)?;
+                let pdpt = mapped_frame::<u64>(root.add(1).read() & ADDRESS_MASK)?;
+                let directory = mapped_frame::<u64>(pdpt.read() & ADDRESS_MASK)?;
+                for (index, table_physical) in addresses.iter().copied().enumerate() {
+                    if directory.add(1 + index).read() != 0 {
+                        return None;
+                    }
+                    zero_frame(table_physical)?;
+                }
+                for (index, table_physical) in addresses.iter().copied().enumerate() {
+                    directory
+                        .add(1 + index)
+                        .write(table_physical | PRESENT | WRITABLE | USER);
+                }
+                for page in 0..page_count {
+                    let table = mapped_frame::<u64>(addresses[page / ENTRY_COUNT])?;
+                    let physical = physical_start.checked_add((page * PAGE_SIZE) as u64)?;
+                    if physical & !ADDRESS_MASK != 0 {
+                        return None;
+                    }
+                    table.add(page % ENTRY_COUNT).write(
+                        physical
+                            | PRESENT
+                            | WRITABLE
+                            | USER
+                            | WRITE_THROUGH
+                            | CACHE_DISABLE
+                            | NO_EXECUTE,
+                    );
+                }
+                Some(())
+            })()
+        };
+        if mapped.is_none() {
+            unsafe {
+                if let Some(root) = mapped_frame::<u64>(self.root) {
+                    if let Some(pdpt) = mapped_frame::<u64>(root.add(1).read() & ADDRESS_MASK) {
+                        if let Some(directory) = mapped_frame::<u64>(pdpt.read() & ADDRESS_MASK) {
+                            for index in 0..CONTROLLER_FRAMEBUFFER_TABLE_COUNT {
+                                directory.add(1 + index).write(0);
+                            }
+                        }
+                    }
+                }
+            }
+            let _ = memory::scrub_and_release_frames(self.owner, &tables);
+            return None;
+        }
+        self.framebuffer_tables = tables.map(Some);
+        let address = (USER_TEST_ADDRESS + CONTROLLER_FRAMEBUFFER_PAGE * PAGE_SIZE + offset) as u64;
+        self.framebuffer_user_address = Some(address);
+        Some(address)
     }
 
     fn write_boot_info(&self, info: ginux_native_abi::NativeServiceBootV0) -> bool {
@@ -7193,14 +7300,28 @@ impl<const IMAGE_CAPACITY: usize, const FRAME_COUNT: usize, const STACK_PAGES: u
         if !info.is_valid_arp_consumer() {
             return false;
         }
-        let Some(page) = mapped_frame::<ginux_native_abi::NativeProtocolBootV0>(
-            self.frames[Self::BOOT_INFO_FRAME].address(),
-        ) else {
+        self.write_boot_info_value(info)
+    }
+
+    fn write_graphics_boot_info(&self, info: ginux_native_abi::NativeGraphicsBootV0) -> bool {
+        if !info.is_valid() {
+            return false;
+        }
+        self.write_boot_info_value(info)
+    }
+
+    fn write_graphics_boot_info_v1(&self, info: ginux_native_abi::NativeGraphicsBootV1) -> bool {
+        if !info.is_valid() {
+            return false;
+        }
+        self.write_boot_info_value(info)
+    }
+
+    fn write_boot_info_value<T: Copy>(&self, info: T) -> bool {
+        let Some(page) = mapped_frame::<T>(self.frames[Self::BOOT_INFO_FRAME].address()) else {
             return false;
         };
-        unsafe {
-            page.write(info);
-        }
+        unsafe { page.write(info) };
         true
     }
 
@@ -7281,8 +7402,15 @@ impl<const IMAGE_CAPACITY: usize, const FRAME_COUNT: usize, const STACK_PAGES: u
 
     fn release(self) -> bool {
         let dma = self.dma_frame;
-        memory::scrub_and_release_frames(self.owner, &self.frames)
-            && dma.is_none_or(|frame| memory::scrub_and_release_frames(self.owner, &[frame]))
+        let frames_released = memory::scrub_and_release_frames(self.owner, &self.frames);
+        let dma_released =
+            dma.is_none_or(|frame| memory::scrub_and_release_frames(self.owner, &[frame]));
+        let framebuffer_released = self
+            .framebuffer_tables
+            .into_iter()
+            .flatten()
+            .all(|frame| memory::scrub_and_release_frames(self.owner, &[frame]));
+        frames_released && dma_released && framebuffer_released
     }
 }
 
@@ -7291,8 +7419,16 @@ impl AuxiliaryAddressSpace {
         match self {
             Self::Wx(space) => space.root,
             Self::Native(space) => space.root,
+            Self::Graphics(space) => space.root,
             Self::Network(space) => space.root,
             Self::Controller(space) => space.root,
+        }
+    }
+
+    fn framebuffer_user_address(&self) -> Option<u64> {
+        match self {
+            Self::Controller(space) => space.framebuffer_user_address,
+            _ => None,
         }
     }
 
@@ -7300,6 +7436,7 @@ impl AuxiliaryAddressSpace {
         match self {
             Self::Wx(space) => space.kernel_root,
             Self::Native(space) => space.kernel_root,
+            Self::Graphics(space) => space.kernel_root,
             Self::Network(space) => space.kernel_root,
             Self::Controller(space) => space.kernel_root,
         }
@@ -7313,6 +7450,7 @@ impl AuxiliaryAddressSpace {
         match self {
             Self::Wx(space) => space.dma_frame,
             Self::Native(space) => space.dma_frame,
+            Self::Graphics(space) => space.dma_frame,
             Self::Network(space) => space.dma_frame,
             Self::Controller(space) => space.dma_frame,
         }
@@ -7322,6 +7460,7 @@ impl AuxiliaryAddressSpace {
         match self {
             Self::Wx(space) => space.device_page_mapping_is_exact(7, physical, true),
             Self::Native(space) => space.device_page_mapping_is_exact(14, physical),
+            Self::Graphics(_) => false,
             Self::Network(space) => space.device_page_mapping_is_exact(
                 NATIVE_NETWORK_IMAGE_PAGES + NATIVE_NETWORK_STACK_PAGES + 5,
                 physical,
@@ -7345,6 +7484,7 @@ impl AuxiliaryAddressSpace {
                     .store(if recovered { 2 } else { 1 }, Ordering::Release);
                 true
             },
+            Self::Graphics(_) => false,
             Self::Network(_) => false,
             Self::Controller(_) => false,
         }
@@ -7368,6 +7508,10 @@ impl AuxiliaryAddressSpace {
                             && memory::frame_leases_releasable(space.owner, &[frame])
                     })
             }
+            Self::Graphics(space) => {
+                memory::frames_owned_by(space.owner, &space.frames)
+                    && memory::frame_leases_releasable(space.owner, &space.frames)
+            }
             Self::Network(space) => {
                 memory::frames_owned_by(space.owner, &space.frames)
                     && memory::frame_leases_releasable(space.owner, &space.frames)
@@ -7379,6 +7523,10 @@ impl AuxiliaryAddressSpace {
             Self::Controller(space) => {
                 memory::frames_owned_by(space.owner, &space.frames)
                     && memory::frame_leases_releasable(space.owner, &space.frames)
+                    && space.framebuffer_tables.iter().flatten().all(|frame| {
+                        memory::frames_owned_by(space.owner, &[*frame])
+                            && memory::frame_leases_releasable(space.owner, &[*frame])
+                    })
             }
         }
     }
@@ -7387,6 +7535,7 @@ impl AuxiliaryAddressSpace {
         match self {
             Self::Wx(space) => space.release(),
             Self::Native(space) => space.release(),
+            Self::Graphics(space) => space.release(),
             Self::Network(space) => space.release(),
             Self::Controller(space) => space.release(),
         }
@@ -7399,6 +7548,17 @@ pub(crate) fn verify_native_service_materialization(
     verify_native_service_materialization_with_capacity::<
         NATIVE_SERVICE_IMAGE_PAGES,
         NATIVE_SERVICE_FRAME_COUNT,
+        2,
+    >(image)
+}
+
+pub(crate) fn verify_native_graphics_service_materialization(
+    image: &crate::native_elf::NativeImage<'_>,
+) -> bool {
+    verify_native_service_materialization_with_capacity::<
+        GRAPHICS_SERVICE_IMAGE_PAGES,
+        GRAPHICS_SERVICE_FRAME_COUNT,
+        GRAPHICS_SERVICE_STACK_PAGES,
     >(image)
 }
 
@@ -7419,11 +7579,12 @@ pub(crate) fn verify_native_network_service_materialization(
 fn verify_native_service_materialization_with_capacity<
     const IMAGE_PAGES: usize,
     const FRAME_COUNT: usize,
+    const STACK_PAGES: usize,
 >(
     image: &crate::native_elf::NativeImage<'_>,
 ) -> bool {
     let kernel_root = current_root();
-    let Some(space) = NativeServiceAddressSpace::<IMAGE_PAGES, FRAME_COUNT>::new(
+    let Some(space) = NativeServiceAddressSpace::<IMAGE_PAGES, FRAME_COUNT, STACK_PAGES>::new(
         kernel_root,
         memory::FrameOwner::KERNEL,
         image,
@@ -7469,7 +7630,7 @@ pub(crate) fn run_interactive_controller(image: &crate::native_elf::NativeImage<
     }
     let rights = crate::capability::Rights::READ.union(crate::capability::Rights::WRITE);
     let host_rights = crate::capability::Rights::READ.union(crate::capability::Rights::MANAGE);
-    let Some(controller) = domain::initialize_boot_auxiliary_service_with_four_grants([
+    let Some(controller) = domain::initialize_boot_auxiliary_service_with_six_grants([
         (1, 2, rights),
         (0, 1, host_rights),
         (
@@ -7482,6 +7643,8 @@ pub(crate) fn run_interactive_controller(image: &crate::native_elf::NativeImage<
             crate::control_abi::NETWORK_DEVICE_OBJECT,
             crate::capability::Rights::READ.union(crate::capability::Rights::WRITE),
         ),
+        (10, ginux_native_abi::NATIVE_DISPLAY_OBJECT, rights),
+        (11, ginux_native_abi::NATIVE_INPUT_OBJECT, rights),
     ]) else {
         crate::serial_write("ginux: controller domain admission failed\r\n");
         return false;
@@ -7491,6 +7654,8 @@ pub(crate) fn run_interactive_controller(image: &crate::native_elf::NativeImage<
         Some(host),
         Some(root_handle),
         Some(network_handle),
+        Some(display_handle),
+        Some(input_handle),
         Some(identity),
         Some(owner),
     ) = (
@@ -7498,6 +7663,8 @@ pub(crate) fn run_interactive_controller(image: &crate::native_elf::NativeImage<
         domain::auxiliary_boot_handle(controller, 1),
         domain::auxiliary_boot_handle(controller, 2),
         domain::auxiliary_boot_handle(controller, 3),
+        domain::auxiliary_boot_handle(controller, 4),
+        domain::auxiliary_boot_handle(controller, 5),
         domain::domain_service_identity(controller),
         memory::FrameOwner::domain(controller),
     )
@@ -7505,9 +7672,10 @@ pub(crate) fn run_interactive_controller(image: &crate::native_elf::NativeImage<
         crate::serial_write("ginux: controller capability setup failed\r\n");
         return false;
     };
-    let Some(space) = NativeServiceAddressSpace::<
+    let Some(mut space) = NativeServiceAddressSpace::<
         NATIVE_CONTROLLER_IMAGE_PAGES,
         NATIVE_CONTROLLER_FRAME_COUNT,
+        NATIVE_CONTROLLER_STACK_PAGES,
     >::new(kernel_root, owner, image) else {
         crate::serial_write("ginux: controller address-space creation failed\r\n");
         crate::serial_write("ginux: controller image-pages/owner-frames: ");
@@ -7517,6 +7685,16 @@ pub(crate) fn run_interactive_controller(image: &crate::native_elf::NativeImage<
         crate::serial_write("\r\n");
         return false;
     };
+    let Some(framebuffer) = crate::controller_devices::framebuffer_info() else {
+        crate::serial_write("ginux: controller framebuffer unavailable\r\n");
+        let _ = space.release();
+        return false;
+    };
+    if space.map_controller_framebuffer(framebuffer).is_none() {
+        crate::serial_write("ginux: controller framebuffer mapping failed\r\n");
+        let _ = space.release();
+        return false;
+    }
     if !space.layout_is_valid(image)
         || !space.relocations_are_valid(image)
         || !domain::handle_permits(controller, console, 2, rights)
@@ -7533,6 +7711,18 @@ pub(crate) fn run_interactive_controller(image: &crate::native_elf::NativeImage<
             crate::control_abi::NETWORK_DEVICE_OBJECT,
             rights,
         )
+        || !domain::handle_permits(
+            controller,
+            display_handle,
+            ginux_native_abi::NATIVE_DISPLAY_OBJECT,
+            rights,
+        )
+        || !domain::handle_permits(
+            controller,
+            input_handle,
+            ginux_native_abi::NATIVE_INPUT_OBJECT,
+            rights,
+        )
     {
         crate::serial_write("ginux: controller authority validation failed\r\n");
         let _ = space.release();
@@ -7544,7 +7734,8 @@ pub(crate) fn run_interactive_controller(image: &crate::native_elf::NativeImage<
         let _ = space.release();
         return false;
     };
-    let stack = USER_TEST_ADDRESS + (NATIVE_CONTROLLER_IMAGE_PAGES + 3) * PAGE_SIZE;
+    let stack = USER_TEST_ADDRESS
+        + (NATIVE_CONTROLLER_IMAGE_PAGES + 1 + NATIVE_CONTROLLER_STACK_PAGES) * PAGE_SIZE;
     if domain::publish_controller_process(controller).is_none() {
         crate::serial_write("ginux: controller process publication failed\r\n");
         return false;
@@ -7576,10 +7767,26 @@ pub(crate) fn run_interactive_controller(image: &crate::native_elf::NativeImage<
         host,
         root_handle,
         network_handle,
+        display_handle,
+        input_handle,
         controller,
         identity,
     );
     interactive_controller_return_is_valid(controller, owner, identity, kernel_root)
+}
+
+pub(crate) fn controller_framebuffer_user_address(domain_id: u64) -> Option<u64> {
+    let registry = ADDRESS_SPACE_SERVICES
+        .auxiliary_address_spaces
+        .get()
+        .cast_const();
+    unsafe {
+        (*registry)
+            .iter()
+            .flatten()
+            .find(|registered| registered.domain == domain_id)
+            .and_then(|registered| registered.space.framebuffer_user_address())
+    }
 }
 
 fn interactive_controller_return_is_valid(
@@ -7724,6 +7931,250 @@ pub(crate) fn verify_native_network_service(image: &crate::native_elf::NativeIma
         crate::serial_write_u64(domain::last_lifecycle_event_detail().map_or(u64::MAX, u64::from));
     }
     valid
+}
+
+pub(crate) fn verify_native_graphics_service(image: &crate::native_elf::NativeImage<'_>) -> bool {
+    let Some(identity) = run_native_graphics_service(
+        image,
+        None,
+        ginux_native_abi::NATIVE_GRAPHICS_COMMAND_FAULT,
+        1,
+    ) else {
+        return false;
+    };
+    run_native_graphics_service(
+        image,
+        Some(identity),
+        ginux_native_abi::NATIVE_GRAPHICS_COMMAND_COMPLETE,
+        2,
+    ) == Some(identity)
+}
+
+pub(crate) fn verify_native_graphics_devices(image: &crate::native_elf::NativeImage<'_>) -> bool {
+    crate::controller_devices::reset_input();
+    if !crate::controller_devices::inject_input(ginux_native_abi::NATIVE_INPUT_KIND_KEY, 30, 1)
+        || !crate::controller_devices::inject_input(
+            ginux_native_abi::NATIVE_INPUT_KIND_POINTER_MOTION,
+            0,
+            7,
+        )
+        || !crate::controller_devices::inject_input(
+            ginux_native_abi::NATIVE_INPUT_KIND_POINTER_BUTTON,
+            1,
+            1,
+        )
+    {
+        crate::serial_write_early(b"ginux: graphics device test input injection failed\r\n");
+        return false;
+    }
+    let read_write = crate::capability::Rights::READ.union(crate::capability::Rights::WRITE);
+    let Some(auxiliary) = domain::initialize_boot_auxiliary_service_with_three_grants([
+        (1, 2, crate::capability::Rights::WRITE),
+        (10, ginux_native_abi::NATIVE_DISPLAY_OBJECT, read_write),
+        (11, ginux_native_abi::NATIVE_INPUT_OBJECT, read_write),
+    ]) else {
+        crate::serial_write_early(b"ginux: graphics device test domain admission failed\r\n");
+        return false;
+    };
+    let (Some(console), Some(display), Some(input), Some(identity), Some(owner)) = (
+        domain::auxiliary_boot_handle(auxiliary, 0),
+        domain::auxiliary_boot_handle(auxiliary, 1),
+        domain::auxiliary_boot_handle(auxiliary, 2),
+        domain::domain_service_identity(auxiliary),
+        memory::FrameOwner::domain(auxiliary),
+    ) else {
+        crate::serial_write_early(b"ginux: graphics device test capabilities unavailable\r\n");
+        return false;
+    };
+    if !domain::handle_permits(auxiliary, console, 2, crate::capability::Rights::WRITE)
+        || !domain::handle_permits(
+            auxiliary,
+            display,
+            ginux_native_abi::NATIVE_DISPLAY_OBJECT,
+            read_write,
+        )
+        || !domain::handle_permits(
+            auxiliary,
+            input,
+            ginux_native_abi::NATIVE_INPUT_OBJECT,
+            read_write,
+        )
+        || domain::handle_permits(
+            auxiliary,
+            console,
+            ginux_native_abi::NATIVE_DISPLAY_OBJECT,
+            crate::capability::Rights::READ,
+        )
+        || domain::handle_permits(
+            auxiliary,
+            display,
+            ginux_native_abi::NATIVE_INPUT_OBJECT,
+            crate::capability::Rights::READ,
+        )
+    {
+        crate::serial_write_early(b"ginux: graphics device test capability validation failed\r\n");
+        return false;
+    }
+    let kernel_root = current_root();
+    let Some(space) = NativeServiceAddressSpace::<
+        GRAPHICS_SERVICE_IMAGE_PAGES,
+        GRAPHICS_SERVICE_FRAME_COUNT,
+        GRAPHICS_SERVICE_STACK_PAGES,
+    >::new(kernel_root, owner, image) else {
+        crate::serial_write_early(b"ginux: graphics device test address space failed\r\n");
+        return false;
+    };
+    if !space.layout_is_valid(image)
+        || !space.relocations_are_valid(image)
+        || !space.write_graphics_boot_info_v1(
+            ginux_native_abi::NativeGraphicsBootV1::device_validation(console, display, input, 3),
+        )
+        || memory::owner_live_frame_count(owner) != Some(GRAPHICS_SERVICE_FRAME_COUNT)
+    {
+        crate::serial_write_early(b"ginux: graphics device test layout failed\r\n");
+        let _ = space.release();
+        return false;
+    }
+    let root = space.root;
+    let Ok(entry) = usize::try_from(space.entry) else {
+        let _ = space.release();
+        return false;
+    };
+    let boot_info = USER_TEST_ADDRESS
+        + NativeServiceAddressSpace::<
+            GRAPHICS_SERVICE_IMAGE_PAGES,
+            GRAPHICS_SERVICE_FRAME_COUNT,
+            GRAPHICS_SERVICE_STACK_PAGES,
+        >::BOOT_INFO_PAGE
+            * PAGE_SIZE;
+    let stack = USER_TEST_ADDRESS
+        + (GRAPHICS_SERVICE_IMAGE_PAGES + 1 + GRAPHICS_SERVICE_STACK_PAGES) * PAGE_SIZE;
+    if !register_address_space(auxiliary, AuxiliaryAddressSpace::Graphics(space)) {
+        crate::serial_write_early(b"ginux: graphics device test registration failed\r\n");
+        return false;
+    }
+    if !scheduler::queue_auxiliary(auxiliary, root, entry, stack, console) {
+        crate::serial_write_early(b"ginux: graphics device test queue failed\r\n");
+        return false;
+    }
+    if !cpu::activate_user_root(root) {
+        crate::serial_write_early(b"ginux: graphics device test activation failed\r\n");
+        return false;
+    }
+    cpu::execute_native_auxiliary(entry, stack, boot_info as u64, console, auxiliary, identity);
+    let event = domain::take_lifecycle_event();
+    let valid = current_root() == kernel_root
+        && scheduler::current_domain().is_none()
+        && registered_auxiliary_address_space_count() == 0
+        && memory::owner_live_frame_count(owner) == Some(0)
+        && domain::domain_is_retired(auxiliary)
+        && event
+            == Some((auxiliary << 8) | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_EXITED))
+        && domain::last_lifecycle_event_detail()
+            == Some(ginux_native_abi::NATIVE_SERVICE_EXIT_COMPLETED)
+        && domain::last_lifecycle_event_has_fault() == Some(false)
+        && domain::last_lifecycle_service_identity() == Some(identity)
+        && domain::take_lifecycle_event().is_none()
+        && crate::controller_devices::input().is_none();
+    if !valid {
+        crate::serial_write_early(b"ginux: graphics device test execution failed\r\n");
+    }
+    valid
+}
+
+fn run_native_graphics_service(
+    image: &crate::native_elf::NativeImage<'_>,
+    restart_identity: Option<u64>,
+    command: u32,
+    generation: u64,
+) -> Option<u64> {
+    let auxiliary = if let Some(identity) = restart_identity {
+        domain::initialize_boot_auxiliary_service_restart(
+            1,
+            2,
+            crate::capability::Rights::WRITE,
+            identity,
+        )?
+    } else {
+        domain::initialize_boot_auxiliary_service(1, 2, crate::capability::Rights::WRITE)?
+    };
+    let (Some(handle), Some(identity), Some(owner)) = (
+        domain::auxiliary_boot_handle(auxiliary, 0),
+        domain::domain_service_identity(auxiliary),
+        memory::FrameOwner::domain(auxiliary),
+    ) else {
+        return None;
+    };
+    if restart_identity.is_some_and(|expected| expected != identity)
+        || !domain::handle_permits(auxiliary, handle, 2, crate::capability::Rights::WRITE)
+        || domain::handle_permits(auxiliary, handle, 2, crate::capability::Rights::READ)
+        || domain::handle_permits(auxiliary, handle, 1, crate::capability::Rights::MANAGE)
+    {
+        return None;
+    }
+    let kernel_root = current_root();
+    let space = NativeServiceAddressSpace::<
+        GRAPHICS_SERVICE_IMAGE_PAGES,
+        GRAPHICS_SERVICE_FRAME_COUNT,
+        GRAPHICS_SERVICE_STACK_PAGES,
+    >::new(kernel_root, owner, image)?;
+    if !space.layout_is_valid(image)
+        || !space.relocations_are_valid(image)
+        || !space.write_graphics_boot_info(ginux_native_abi::NativeGraphicsBootV0::new(
+            handle, command, generation,
+        ))
+        || memory::owner_live_frame_count(owner) != Some(GRAPHICS_SERVICE_FRAME_COUNT)
+    {
+        let _ = space.release();
+        return None;
+    }
+    let root = space.root;
+    let entry = usize::try_from(space.entry).ok()?;
+    let boot_info = USER_TEST_ADDRESS
+        + NativeServiceAddressSpace::<
+            GRAPHICS_SERVICE_IMAGE_PAGES,
+            GRAPHICS_SERVICE_FRAME_COUNT,
+            GRAPHICS_SERVICE_STACK_PAGES,
+        >::BOOT_INFO_PAGE
+            * PAGE_SIZE;
+    let stack = USER_TEST_ADDRESS
+        + (GRAPHICS_SERVICE_IMAGE_PAGES + 1 + GRAPHICS_SERVICE_STACK_PAGES) * PAGE_SIZE;
+    if !register_address_space(auxiliary, AuxiliaryAddressSpace::Graphics(space))
+        || !scheduler::queue_auxiliary(auxiliary, root, entry, stack, handle)
+        || !cpu::activate_user_root(root)
+    {
+        return None;
+    }
+    cpu::execute_native_auxiliary(entry, stack, boot_info as u64, handle, auxiliary, identity);
+    let event = domain::take_lifecycle_event()?;
+    let expected_kind = if command == ginux_native_abi::NATIVE_GRAPHICS_COMMAND_FAULT {
+        crate::control_abi::LIFECYCLE_AUXILIARY_FAULT
+    } else {
+        crate::control_abi::LIFECYCLE_AUXILIARY_EXITED
+    };
+    let expected_status = if command == ginux_native_abi::NATIVE_GRAPHICS_COMMAND_FAULT {
+        0
+    } else {
+        ginux_native_abi::NATIVE_SERVICE_EXIT_COMPLETED
+    };
+    if current_root() != kernel_root
+        || scheduler::current_domain().is_some()
+        || registered_auxiliary_address_space_count() != 0
+        || memory::owner_live_frame_count(owner) != Some(0)
+        || !domain::domain_is_retired(auxiliary)
+        || domain::handle_permits(auxiliary, handle, 2, crate::capability::Rights::WRITE)
+        || event != (auxiliary << 8) | u64::from(expected_kind)
+        || domain::last_lifecycle_event_audit()
+            .is_none_or(|(kind, audited, _)| kind != expected_kind || audited != auxiliary)
+        || domain::last_lifecycle_event_detail() != Some(expected_status)
+        || domain::last_lifecycle_event_has_fault()
+            != Some(command == ginux_native_abi::NATIVE_GRAPHICS_COMMAND_FAULT)
+        || domain::last_lifecycle_service_identity() != Some(identity)
+        || domain::take_lifecycle_event().is_some()
+    {
+        return None;
+    }
+    Some(identity)
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -11338,8 +11789,21 @@ fn register_address_space(domain_id: u64, space: AuxiliaryAddressSpace) -> bool 
             .iter()
             .flatten()
             .any(|registered| registered.domain == domain_id)
-    } || !domain::bind_auxiliary_address_space(domain_id, space.root())
-    {
+    } {
+        let _ = space.release();
+        return false;
+    }
+    if !domain::bind_auxiliary_address_space(domain_id, space.root()) {
+        crate::serial_write("ginux: auxiliary address-space bind rejected domain/root/frames: ");
+        crate::serial_write_u64(domain_id);
+        crate::serial_write(" ");
+        crate::serial_write_u64(space.root());
+        crate::serial_write(" ");
+        crate::serial_write_u64(
+            crate::arch::x86_64::paging::validated_user_root_frames(space.root())
+                .map_or(u64::MAX, |frames| frames.base_count() as u64),
+        );
+        crate::serial_write("\r\n");
         let _ = space.release();
         return false;
     }

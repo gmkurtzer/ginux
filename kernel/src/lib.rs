@@ -4,6 +4,7 @@ mod address_space;
 mod arch;
 mod capability;
 mod control_abi;
+mod controller_devices;
 mod crypto;
 mod domain;
 mod executable;
@@ -61,6 +62,7 @@ static HOST_CONTROL: HostControlOwner = HostControlOwner {
     persisted_oci_catalog: UnsafeCell::new([0; ginux_oci_cache::ENCODED_SIZE]),
 };
 const EFI_RESET_SHUTDOWN: u32 = 2;
+const EFI_RESET_COLD: u32 = 0;
 const EFI_SUCCESS: usize = 0;
 pub(crate) const EFI_LOADER_CODE: u32 = 1;
 const EFI_LOADER_DATA: u32 = 2;
@@ -77,7 +79,7 @@ const PERSISTENT_LOCAL_CONFIG_SIZE: usize =
     arch::x86_64::cpu::PERSISTENT_DOMAIN_CONFIG_SIZE + network::PERSISTENT_NETWORK_CONFIG_SIZE;
 const KERNEL_STACK_TOP_OFFSET: usize = PAGE_SIZE + KERNEL_STACK_SIZE;
 pub const BOOT_INFO_MAGIC: u64 = 0x0049_4258_554e_4947;
-pub const BOOT_INFO_VERSION: u32 = 7;
+pub const BOOT_INFO_VERSION: u32 = 8;
 
 fn initialize_linux_realtime(unix_time: u64, timestamp_counter: u64) -> bool {
     if unix_time < 1_577_836_800 || timestamp_counter == 0 {
@@ -154,6 +156,12 @@ pub struct BootInfo {
     pub controller_runtime_size: usize,
     pub root_image: *const u8,
     pub root_image_size: usize,
+    pub framebuffer_base: u64,
+    pub framebuffer_size: usize,
+    pub framebuffer_width: u32,
+    pub framebuffer_height: u32,
+    pub framebuffer_stride: u32,
+    pub framebuffer_format: u32,
     pub oci_rootfs: *const u8,
     pub oci_rootfs_size: usize,
     pub unix_time: u64,
@@ -483,6 +491,21 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: page-table transition failed\r\n");
     };
     serial_write("ginux: kernel page tables active\r\n");
+    if !controller_devices::install(controller_devices::FramebufferInfo {
+        base: boot_info.framebuffer_base,
+        size: boot_info.framebuffer_size,
+        width: boot_info.framebuffer_width,
+        height: boot_info.framebuffer_height,
+        stride: boot_info.framebuffer_stride,
+        format: boot_info.framebuffer_format,
+    }) || !controller_devices::verify_contract()
+    {
+        kernel_fail("ginux: controller framebuffer/input contract invalid\r\n");
+    }
+    let _ = controller_devices::initialize_hardware_input();
+    serial_write("ginux: controller framebuffer mode and pixel bounds validated\r\n");
+    serial_write("ginux: normalized keyboard and pointer queues validated\r\n");
+    serial_write("ginux: controller input overflow and reset validated\r\n");
     if !arch::x86_64::cpu::execute_disable_enabled()
         || !arch::x86_64::paging::identity_map_obeys_wx(boot_info, &image)
     {
@@ -1802,6 +1825,30 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: native protocol service relative relocations applied\r\n");
     serial_write("ginux: native protocol service W^X address space verified\r\n");
     serial_write("ginux: native protocol service guard pages verified\r\n");
+    let Some(graphics_service_node) = initramfs::published_regular_file_node(b"native/graphics")
+    else {
+        kernel_fail("ginux: graphical controller service missing\r\n");
+    };
+    let Some(graphics_service) = initramfs::published_file_by_node(graphics_service_node) else {
+        kernel_fail("ginux: graphical controller service unreadable\r\n");
+    };
+    let Some(graphics_image) = native_elf::inspect(graphics_service) else {
+        kernel_fail("ginux: graphical controller service ELF invalid\r\n");
+    };
+    if graphics_image.bytes.len() != graphics_service.len()
+        || graphics_image.entry == 0
+        || graphics_image.segments.iter().flatten().count() != 3
+        || graphics_image.relocation_count == 0
+        || graphics_image.relocations[..graphics_image.relocation_count]
+            .iter()
+            .any(|relocation| {
+                relocation.is_none_or(|relocation| relocation.target == 0 || relocation.addend == 0)
+            })
+        || !address_space::verify_native_graphics_service_materialization(&graphics_image)
+    {
+        kernel_fail("ginux: graphical controller service load plan invalid\r\n");
+    }
+    serial_write("ginux: measured graphical controller service discovered\r\n");
     if !linux_mount::verify_contract() || !linux_mount::install_initial() {
         kernel_fail("ginux: initial Linux mount namespace invalid\r\n");
     }
@@ -1842,6 +1889,15 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         if !arch::x86_64::cpu::publish_linux_abi_test_results() {
             kernel_fail("ginux: Linux ABI status publication failed\r\n");
         }
+        if !address_space::verify_native_graphics_devices(&graphics_image) {
+            serial_write("ginux: graphics verification exit detail/fault: ");
+            serial_write_u64(domain::last_lifecycle_event_detail().map_or(255, u64::from));
+            serial_write(" ");
+            serial_write_u64(domain::last_lifecycle_event_has_fault().map_or(2, u64::from));
+            serial_write("\r\n");
+            kernel_fail("ginux: visible graphical controller startup failed\r\n");
+        }
+        serial_write("ginux: visible controller desktop rendered from ring 3\r\n");
     }
     if !linux_socket::configure(
         virtio_network,
@@ -3252,6 +3308,22 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         serial_write("\r\nginux: native network service started without boot capabilities");
         serial_write("\r\nginux: native network service exited through lifecycle ABI v0");
         serial_write("\r\nginux: native network service address space retired cleanly");
+        if !address_space::verify_native_graphics_service(&graphics_image) {
+            kernel_fail("\r\nginux: graphical controller runtime invariant failed\r\n");
+        }
+        serial_write("\r\nginux: graphical controller runtime fault contained");
+        serial_write("\r\nginux: graphical controller runtime restarted with stable identity");
+        serial_write("\r\nginux: graphical controller runtime grants and frames retired cleanly");
+        serial_write("\r\nginux: serial controller recovery remained available");
+        if !address_space::verify_native_graphics_devices(&graphics_image) {
+            kernel_fail("\r\nginux: graphical controller device invariant failed\r\n");
+        }
+        serial_write("\r\nginux: graphical controller framebuffer capability exercised in ring 3");
+        serial_write("\r\nginux: graphical controller input capability exercised in ring 3");
+        serial_write("\r\nginux: unauthorized display and input capabilities rejected");
+        serial_write(
+            "\r\nginux: graphical controller device grants and input state retired cleanly",
+        );
         if !address_space::verify_native_network_bootstrap(
             &network_image,
             virtio_network,
@@ -3929,6 +4001,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     HOST_CONTROL
         .operator_console_ready
         .store(true, Ordering::Release);
+    if !controller_devices::initialize_hardware_input() {
+        kernel_fail("ginux: PS/2 keyboard and pointer initialization failed\r\n");
+    }
     serial_write_raw(b"ginux: platform, security, devices, and runtime ready\r\n");
     serial_write("ginux: persistent storage ");
     serial_write(match host_volume.disposition {
@@ -4296,10 +4371,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
                 }
             } else {
                 arch::x86_64::cpu::begin_configured_container();
-                if !linux_elf::verify_mapped_system_init_plan(
-                    boot_info.image_base as u64,
-                    boot_info.image_size,
-                ) {
+                if !linux_elf::verify_published_system_init_plan() {
                     kernel_fail("ginux: minimal system init execution failed\r\n");
                 }
                 arch::x86_64::cpu::stop_configured_container();
@@ -4317,7 +4389,12 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: controller requested clean shutdown");
     serial_write("\r\nGINUX_KERNEL_OK\r\n");
 
-    (boot_info.reset_system)(EFI_RESET_SHUTDOWN, EFI_SUCCESS, 0, core::ptr::null());
+    let reset = if arch::x86_64::cpu::take_container_host_reboot_request() {
+        EFI_RESET_COLD
+    } else {
+        EFI_RESET_SHUTDOWN
+    };
+    (boot_info.reset_system)(reset, EFI_SUCCESS, 0, core::ptr::null());
     kernel_fail("ginux: firmware shutdown returned unexpectedly\r\n");
 }
 
@@ -4534,6 +4611,10 @@ pub(crate) fn serial_write_bytes(bytes: &[u8]) {
     serial_write_raw(bytes);
 }
 
+pub(crate) fn serial_write_early(bytes: &[u8]) {
+    serial_write_raw(bytes);
+}
+
 fn serial_write_raw(bytes: &[u8]) {
     for byte in bytes.iter().copied() {
         while unsafe { inb(COM1 + 5) } & 0x20 == 0 {
@@ -4546,14 +4627,19 @@ fn serial_write_raw(bytes: &[u8]) {
 }
 
 pub(crate) fn serial_read_byte_blocking() -> u8 {
-    while !serial_input_ready() {
+    loop {
+        if (unsafe { inb(COM1 + 5) } & 0x01) != 0 {
+            return unsafe { inb(COM1) };
+        }
+        if let Some(byte) = controller_devices::read_hardware_input() {
+            return byte;
+        }
         core::hint::spin_loop();
     }
-    unsafe { inb(COM1) }
 }
 
 pub(crate) fn serial_input_ready() -> bool {
-    (unsafe { inb(COM1 + 5) } & 0x01) != 0
+    (unsafe { inb(COM1 + 5) } & 0x01) != 0 || controller_devices::hardware_input_ready()
 }
 
 fn serial_write_usize(value: usize) {
