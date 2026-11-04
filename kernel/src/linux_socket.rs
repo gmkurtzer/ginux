@@ -303,6 +303,40 @@ fn release_local_pages(mut page: memory::FrameLease) -> bool {
     true
 }
 
+fn release_slot_local_pages(state: &mut Slot) -> bool {
+    if !release_local_pages(state.local_first) {
+        return false;
+    }
+    state.local_first = memory::FrameLease::EMPTY;
+    state.local_last = memory::FrameLease::EMPTY;
+    state.local_head = 0;
+    state.local_length = 0;
+    true
+}
+
+pub(crate) fn verify_handled_socket_page_release() -> bool {
+    let Some(before) = memory::owner_live_frame_count(memory::FrameOwner::KERNEL) else {
+        return false;
+    };
+    let bytes = [0x5a_u8; LOCAL_DATA_CAPACITY + 1];
+    let Some((first, last)) = allocate_local_pages(&bytes) else {
+        return false;
+    };
+    let mut state = Slot {
+        local_first: first,
+        local_last: last,
+        local_head: 1,
+        local_length: bytes.len(),
+        ..Slot::EMPTY
+    };
+    release_slot_local_pages(&mut state)
+        && state.local_first == memory::FrameLease::EMPTY
+        && state.local_last == memory::FrameLease::EMPTY
+        && state.local_head == 0
+        && state.local_length == 0
+        && memory::owner_live_frame_count(memory::FrameOwner::KERNEL) == Some(before)
+}
+
 fn allocate_local_pages(input: &[u8]) -> Option<(memory::FrameLease, memory::FrameLease)> {
     let mut first = memory::FrameLease::EMPTY;
     let mut last = memory::FrameLease::EMPTY;
@@ -733,7 +767,7 @@ pub(crate) fn close(slot: u8) -> bool {
         if pending_right_count > unsafe { *unix_inflight_rights_state() } {
             return false;
         }
-        if !release_local_pages(state.local_first) {
+        if !release_slot_local_pages(state) {
             return false;
         }
         if state.kind == Kind::Tcp {
@@ -784,9 +818,13 @@ pub(crate) fn close(slot: u8) -> bool {
     let Some(runtime) = runtime_existing() else {
         return false;
     };
-    let Some(handle) = state.handle.take() else {
+    let Some(handle) = state.handle else {
         return false;
     };
+    if !release_slot_local_pages(state) {
+        return false;
+    }
+    state.handle = None;
     runtime.sockets.remove(handle);
     *state = Slot::EMPTY;
     true
@@ -807,13 +845,9 @@ pub(crate) fn shutdown_socket(slot: u8, how: u8) -> Result<(), Error> {
         return Err(Error::NotConnected);
     }
     if matches!(how, 0 | 2) {
-        if !release_local_pages(state.local_first) {
+        if !release_slot_local_pages(state) {
             return Err(Error::Invalid);
         }
-        state.local_first = memory::FrameLease::EMPTY;
-        state.local_last = memory::FrameLease::EMPTY;
-        state.local_head = 0;
-        state.local_length = 0;
         state.read_shutdown = true;
     }
     if matches!(how, 1 | 2) {

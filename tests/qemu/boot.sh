@@ -3517,6 +3517,10 @@ if ! grep -q '^ginux: Linux bounded monotonic clocks validated' "$output_file"; 
     echo "Boot test failed: Linux monotonic clocks were not validated." >&2
     exit 1
 fi
+if ! grep -q '^ginux: handled socket local pages released' "$output_file"; then
+    echo "Boot test failed: handled socket local-page cleanup was not validated." >&2
+    exit 1
+fi
 
 if ! grep -q '^ginux: Linux bounded clock resolution validated' "$output_file"; then
     echo "Boot test failed: Linux clock resolution was not validated." >&2

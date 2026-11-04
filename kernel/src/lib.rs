@@ -1912,6 +1912,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: blocking Linux socket poll budget invalid\r\n");
     }
     serial_write("ginux: blocking Linux socket polls bounded independently of guest timeout\r\n");
+    if !linux_socket::verify_handled_socket_page_release() {
+        kernel_fail("ginux: handled socket local-page release invalid\r\n");
+    }
+    serial_write("ginux: handled socket local pages released\r\n");
     if !arch::x86_64::cpu::verify_synchronous_poll_budget() {
         kernel_fail("ginux: synchronous Linux poll budget invalid\r\n");
     }
