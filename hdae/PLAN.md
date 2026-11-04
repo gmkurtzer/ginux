@@ -56,8 +56,8 @@ replace it.
    select `ginux` as the command, preserve locked historical lineage records,
    and rerun Gate 7 before human acceptance.
 7.75. **Ginux final project rename**: rename active product and repository
-   surfaces to Ginux while intentionally retaining the current local checkout
-   directory for later integration.
+   surfaces to Ginux while retaining the transitional checkout until the
+   unified repository transition.
 8. **Virtual kernel views**: Ginux-owned `/proc`, `/sys`, cgroup v2, mounts,
    namespaces, and machine identity without host leakage.
 8.5. **Unified repository transition**: preserve the final standalone kernel

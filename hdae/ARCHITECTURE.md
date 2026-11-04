@@ -194,10 +194,12 @@ gate before implementation continues.
 Gate 7.5 performed the transitional project rename and selected `ginux` as the
 command-line executable. Gate 7.75 superseded the transitional product and
 repository name with Ginux after the full kernel project pivoted to this
-userspace-kernel architecture. The local checkout directory intentionally
-retains its transitional name for later integration. The human approved
-preserving accepted gate records and existing Git history as immutable lineage
-evidence on 2026-11-04.
+userspace-kernel architecture. Gate 8.5 joins that accepted implementation to
+the original Ginux repository without changing its source tree. The final
+standalone kernel remains on `bootable-kernel` and at
+`bootable-kernel-final`; both histories are parents of the continuing
+userspace-kernel line. The human approved preserving accepted gate records and
+existing Git history as immutable lineage evidence on 2026-11-04.
 
 Gate 4 selected strict, versioned TOML as the operator-facing domain
 configuration format with human approval on 2026-11-03.

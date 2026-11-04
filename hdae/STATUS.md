@@ -305,9 +305,9 @@ open the transition pull request for human review.
 - Reload after context shift: required
 - Active gate: Gate 8.5, unified repository transition, authorized on dedicated
   branch `codex/userspace-transition`; implementation is in progress
-- Last evidence: both repositories have zero open pull requests/issues;
-  `ginux-us/main` at `2306c2e` contains Gate 8 and Ginux `main` remains at the
-  final standalone-kernel commit `4d4a53bb`
+- Last evidence: both repositories have zero open pull requests/issues; staging
+  commit `2306c2e` contains Gate 8 and Ginux `main` remains at the final
+  standalone-kernel commit `4d4a53bb`
 - Required human decision: review the transition pull request after all Gate
   8.5 criteria pass; the Gate 9 DNF repository choice remains deferred until
   before Gate 9 implementation
