@@ -3,22 +3,22 @@
 ## Current checkpoint
 
 - Gate 1 is accepted and closed under the corrected ordinary-host-process
-  architecture. Pull request https://github.com/gmkurtzer/ginux/pull/1 was
+  architecture. Pull request https://github.com/gmkurtzer/ginux-us/pull/1 was
   merged by the human on 2026-11-04.
 - Gate 2 is accepted and closed. Pull request
-  https://github.com/gmkurtzer/ginux/pull/2 was merged by the human on
+  https://github.com/gmkurtzer/ginux-us/pull/2 was merged by the human on
   2026-11-04.
 - Gate 3 is accepted and closed. Pull request
-  https://github.com/gmkurtzer/ginux/pull/3 was merged by the human on
+  https://github.com/gmkurtzer/ginux-us/pull/3 was merged by the human on
   2026-11-04.
 - Gate 4 is accepted and closed. Pull request
-  https://github.com/gmkurtzer/ginux/pull/4 was merged by the human on
+  https://github.com/gmkurtzer/ginux-us/pull/4 was merged by the human on
   2026-11-04.
 - Gate 5 is accepted and closed. Pull request
-  https://github.com/gmkurtzer/ginux/pull/5 was merged by the human on
+  https://github.com/gmkurtzer/ginux-us/pull/5 was merged by the human on
   2026-11-04.
 - Gate 6 is accepted and closed. Pull request
-  https://github.com/gmkurtzer/ginux/pull/6 was merged by the human on
+  https://github.com/gmkurtzer/ginux-us/pull/6 was merged by the human on
   2026-11-04.
 - Authoritative name: Ginux.
 - Runtime isolation unit: domain.
@@ -151,7 +151,7 @@ scope, threat model, and invariants.
   non-claims. A fresh aggregate `make test` also passed all earlier-gate lint,
   unit, QEMU interception/runtime/config/domain, and image-pipeline regressions.
 - Gate 5 is delivered in open pull request
-  https://github.com/gmkurtzer/ginux/pull/5 from dedicated branch
+  https://github.com/gmkurtzer/ginux-us/pull/5 from dedicated branch
   `hdae/virtual-vfs-userspace`. It is not merged or closed.
 - Human accepted Gate 5 on 2026-11-03 and directed advancement to Gate 6.
 - Gate 6 began on `hdae/device-ownership`. The first milestone added the
@@ -171,7 +171,7 @@ scope, threat model, and invariants.
   formatting, strict lint, 31 unit tests, prior-gate regressions, Gate 2 image
   checks, and the Gate 6 Rocky QEMU device path.
 - Gate 6 is delivered in open pull request
-  https://github.com/gmkurtzer/ginux/pull/6 from dedicated branch
+  https://github.com/gmkurtzer/ginux-us/pull/6 from dedicated branch
   `hdae/device-ownership`. It is not merged or closed.
 - Human accepted Gate 6 on 2026-11-03 and directed advancement to Gate 7.
 - Human direction added usable multi-user login, virtual PID inspection,
@@ -206,7 +206,7 @@ scope, threat model, and invariants.
   aggregate `make test` passed. The demo reports nine named checks; the native
   regression retains fail-closed supervisor-loss and unexpected-stop evidence.
 - Gate 7 is technically passed. Pull request
-  https://github.com/gmkurtzer/ginux/pull/7 was merged by the human on
+  https://github.com/gmkurtzer/ginux-us/pull/7 was merged by the human on
   2026-11-04, but the gate still awaits explicit human checkpoint acceptance.
 - Gate 7.5 completed the transitional active-project rename, selected `ginux`
   as the executable, and selected `ginux-*` package names; its deterministic
@@ -218,13 +218,17 @@ scope, threat model, and invariants.
   image suite and full aggregate suite passed after the migration fix.
 - The transitional GitHub repository rename preserved PRs 1 through 7 as
   reachable merged records. Gate 7.5 remains delivered in open
-  https://github.com/gmkurtzer/ginux/pull/8 through repository redirects.
+  https://github.com/gmkurtzer/ginux-us/pull/8 through repository redirects.
 - Human direction on 2026-11-04 selected Ginux as the final project and
   repository name because the full kernel project is pivoting to this
   userspace-kernel architecture. The local checkout directory must not move.
 - Gate 7.75 active surfaces and demonstrations now use Ginux. `make check`,
   `make test`, `make test-native-vfs`, and `make demo-gate-7` passed; the
   demonstration again passed all nine process-runtime checks.
+- Gate 7.75 is delivered in open
+  https://github.com/gmkurtzer/ginux-us/pull/9 from `hdae/ginux-rename`.
+  GitHub rejected renaming the repository to `gmkurtzer/ginux` with HTTP 422
+  because that repository already exists and is non-empty.
 
 ## Open decisions and limitations
 
@@ -243,8 +247,9 @@ scope, threat model, and invariants.
   container. It is network-disabled and mounts only a temporary raw conversion
   read-only, but remains trusted build tooling rather than a runtime boundary.
 - The local checkout intentionally remains `/Users/gmk/git/ginux-us` for
-  later integration. Product, source, cache, GitHub, and origin identifiers use
-  Ginux; the directory is the explicit exception.
+  later integration. Product, source, and cache identifiers use Ginux. GitHub
+  and origin remain on the transitional repository until the human chooses how
+  this work should enter the existing Ginux repository.
 - The selected Rocky OCI image has one layer; deterministic synthetic fixtures
   now cover general multi-layer replacement, whiteout, and opaque-directory
   semantics.
@@ -261,9 +266,9 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Commit and push the evidence checkpoint, open the Gate 7.75 pull request, rename
-GitHub and origin to `gmkurtzer/ginux`, verify PR history and the unchanged
-local directory, and stop for human review.
+Obtain human direction on whether to integrate this branch into the existing
+`gmkurtzer/ginux` repository, rename that repository first, or retain a
+separate repository name; then complete repository delivery and stop for review.
 
 ## Context recovery
 
@@ -272,7 +277,8 @@ local directory, and stop for human review.
 - Reload after context shift: required
 - Active gate: Gate 7.75, Ginux final project rename, authorized and started on
   dedicated branch `hdae/ginux-rename`; Gate 7 remains technically passed
-  and awaits repeated post-rename evidence and human review
+  with repeated post-rename evidence; Gate 7.75 repository delivery is partial
+  pending human integration direction
 - Last evidence: Gate 7.75 `make check`, `make test`,
   `make test-native-vfs`, and `make demo-gate-7` passed on 2026-11-04
 - Required human decision: none until the Gate 7 demonstration checkpoint; the

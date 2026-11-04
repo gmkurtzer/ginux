@@ -19,7 +19,7 @@ matches=$(rg -n \
     --glob '!hdae/gates-todo/7.5-ginux-us-rename.md' \
     --glob '!hdae/gates-todo/7.75-ginux-rename.md' \
     --glob '!scripts/check-name.sh' \
-    "$pattern" . | grep -v -E '/Users/gmk/git/ginux-us|hdae/ginux-us-rename')
+    "$pattern" . | grep -v -E '/Users/gmk/git/ginux-us|hdae/ginux-us-rename|github.com/gmkurtzer/ginux-us/')
 status=$?
 set -e
 

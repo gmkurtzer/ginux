@@ -134,7 +134,7 @@ early helper fixtures.
 
 - Working branch: `hdae/process-runtime`
 - Intended base: `main`
-- Pull request: https://github.com/gmkurtzer/ginux/pull/7; merged by the
+- Pull request: https://github.com/gmkurtzer/ginux-us/pull/7; merged by the
   human on 2026-11-04; merge does not substitute for this gate's explicit
   acceptance checkpoint
 - Planned commits: process and thread lifecycle; signals, synchronization, and
