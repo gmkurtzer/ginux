@@ -37,15 +37,20 @@ DMA authority.
 
 ## Completed work
 
-- [ ] None; gate not started.
+- [x] Implement the bounded virtual device registry, Ginus-only descriptor
+  namespace, assignment visibility, exclusive backend ownership, revocation,
+  ioctl validation, and direct-mapping denial.
+- [x] Implement Ginus-owned console, null, zero, and deterministic random
+  frontends with unit verification.
+- [x] Connect normalized device/storage/network configuration to the registry
+  and exercise it in the Rocky QEMU host.
+- [x] Implement the mediated file-backed block adapter and bounded read-write
+  partition with flush and close policy.
+- [x] Implement the bounded, isolated packet-queue network backend.
 
 ## Remaining work
 
-- [ ] Implement virtual device registry and `/dev` projection.
-- [ ] Implement pseudo-device and console frontends.
-- [ ] Implement file-backed block and bounded partition behavior.
-- [ ] Implement the approved virtual network backend.
-- [ ] Add exclusivity, ioctl, mapping, teardown, and benchmark verification.
+- [x] No technical work remains; human checkpoint acceptance is required.
 
 ## Acceptance criteria
 
@@ -83,7 +88,30 @@ DMA authority.
 
 ## Evidence
 
-- Not run.
+- `cargo test -p ginus-devices` -> six registry, pseudo-device, block,
+  network, ownership, ioctl, mapping, and lifecycle tests passed.
+- `cargo clippy -p ginus-devices --all-targets -- -D warnings` -> passed.
+- `make test-devices test-block test-network` -> initial component targets
+  passed before host integration.
+- `make test-devices` -> passed in the Rocky Linux 10 QEMU TCG host. The
+  normalized configuration projected six assigned devices; Ginus mediated a
+  disposable file-backed 2048-byte partition, flushed and closed it, rejected
+  an out-of-range write, kept the preceding 1024 bytes zero, exchanged an
+  isolated packet, denied unknown controls/mapping/conflicting ownership, and
+  released the backend for reuse.
+- `make test-block` -> two range-confinement, read-only, flush, and close tests
+  passed against disposable backends.
+- `make test-network` -> isolated bounded send/receive, denied control, queue,
+  and revocation test passed.
+- `make bench-block` -> passed 1024 write/read pairs (524288 bytes, 2048
+  operations) in Rocky x86-64 under QEMU TCG and recorded wall time, process
+  CPU time, throughput, latency, workload, repetitions, bytes, and environment.
+- `make bench-network` -> passed 1024 isolated send/receive pairs (131072
+  bytes, 2048 operations) with the same required metadata.
+- `make demo-gate-6` -> passed 6/6 named human checks and retained benchmark
+  records in `build/bench-block.txt` and `build/bench-network.txt`.
+- `make test` -> passed formatting, strict lint, 31 unit tests, prior Gate 1,
+  2, 3, and 4 regressions, and the Gate 6 Rocky QEMU device path.
 
 ## Decisions and limitations
 
@@ -91,19 +119,28 @@ DMA authority.
   gate; this gate must not create a generic raw-device escape hatch.
 - The initial network backend is selected and documented during this gate
   without allowing an unmediated host syscall to complete.
+- The initial network backend is a bounded Ginus-owned packet queue. It has no
+  host socket, TUN/TAP descriptor, external connectivity, or unchecked control
+  path. This establishes the mediated frontend; later connectivity is outside
+  this gate.
 
 ## Delivery strategy
 
 - Working branch: `hdae/device-ownership`
 - Intended base: `main`
-- Pull request: intended; dedicated branch push and PR creation authorized on
-  2026-11-03; never merge or close without explicit authorization
+- Pull request: https://github.com/gmkurtzer/usshim/pull/6; open and awaiting
+  review; never merge or close without explicit authorization
 - Planned commits: virtual device registry and pseudo-devices; block and
   partition backend; network backend; isolation and benchmark verification
-- Actual commits: pending
+- Actual commits: `eb39ada` added the registry and pseudo-device foundation;
+  `0ad0e90` added normalized configuration plus mediated block/network QEMU
+  verification; `17568e3` added reproducible benchmarks, documentation, and
+  the human demonstration
 
 ## Review policy and outcome
 
 Human checkpoint because device mediation and backend ownership materially
 affect the security boundary. Present `make demo-gate-6`, fresh evidence, and
 the pull request before acceptance.
+Technical status: passed and delivered on 2026-11-03. Human acceptance was
+recorded on 2026-11-03; Gate 6 is closed.

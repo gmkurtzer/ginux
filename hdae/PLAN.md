@@ -54,8 +54,9 @@ replace it.
    credential, and event behavior required by systemd.
 8. **Virtual kernel views**: Ginus-owned `/proc`, `/sys`, cgroup v2, mounts,
    namespaces, and machine identity without host leakage.
-9. **Systemd baseline**: Rocky systemd as virtual PID 1 reaching a defined
-   multi-user readiness marker and controlled shutdown.
+9. **Systemd baseline**: Rocky systemd as virtual PID 1 reaching a usable
+   multi-user login, virtual PID and lockdown inspection, a bounded DNF update
+   workflow, and controlled shutdown.
 10. **Configurable contract and audit**: versioned syscall, ioctl, device,
     filesystem, and kernel-view policy with fail-closed validation and logs.
 11. **Performance characterization and optimization**: native, conventional

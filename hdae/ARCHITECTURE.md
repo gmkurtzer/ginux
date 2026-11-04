@@ -157,6 +157,12 @@ support, direct MMIO, and DMA are later architecture work. They may not be
 introduced as ordinary configuration extensions because they change the threat
 model.
 
+Gate 6's initial network backend is a bounded Ginus-owned packet queue. It
+provides deterministic send/receive and lifecycle semantics without opening a
+host socket or TUN/TAP descriptor and deliberately has no external
+connectivity. A later connectivity backend must preserve the same virtual
+interface and explicit packet-mediation boundary.
+
 ### Configuration and lifecycle
 
 Each domain has a versioned configuration containing identity, root image,
@@ -178,7 +184,6 @@ and idle overhead.
 
 ## Important open decisions
 
-- Initial network backend and packet mediation boundary.
 - Numeric performance budgets, set from reproducible baseline evidence before
   Gate 11 begins.
 - Final repository and directory rename from `usshim` to `ginus`.

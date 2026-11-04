@@ -19,11 +19,15 @@
   `hdae/virtual-vfs-userspace`, stacked on the accepted Gate 4 state while its
   intended eventual base remains `main`, in open
   https://github.com/gmkurtzer/usshim/pull/5.
+- Gate 6 is accepted and closed. It remains delivered on dedicated branch
+  `hdae/device-ownership`, stacked on the accepted Gate 5 state while its
+  intended eventual base remains `main`, in open
+  https://github.com/gmkurtzer/usshim/pull/6.
 - Authoritative name: Ginus (Ginux Userspace).
 - Runtime isolation unit: domain.
 - Policy unit: versioned contract.
 - Initial gate map: twelve checkpoint gates at positions 1 through 11 and 13;
-  Gates 1 through 5 are accepted and seven gates remain open.
+  Gates 1 through 6 are accepted and six gates remain open.
 - The ordered gate batch is authorized, but every open gate remains a human
   checkpoint requiring a working demonstration and explicit acceptance.
 
@@ -152,6 +156,30 @@ scope, threat model, and invariants.
   https://github.com/gmkurtzer/usshim/pull/5 from dedicated branch
   `hdae/virtual-vfs-userspace`. It is not merged or closed.
 - Human accepted Gate 5 on 2026-11-03 and directed advancement to Gate 6.
+- Gate 6 began on `hdae/device-ownership`. The first milestone added the
+  bounded Ginus device registry, virtual descriptor namespace, assignment
+  visibility, exclusive ownership and revocation, console/null/zero/random
+  frontends, fail-closed ioctls and mappings, bounded partitions, and the
+  isolated packet-queue model.
+- `cargo test -p ginus-devices`, its strict clippy check, and the initial
+  component targets passed. `make test-devices` then passed end-to-end in the
+  Rocky QEMU host with normalized assignment, a disposable file-backed bounded
+  partition, isolated packet exchange, denial checks, flush, revocation, and
+  backend reuse.
+- `make bench-block` and `make bench-network` passed in Rocky x86-64 under QEMU
+  TCG and recorded workload, repetitions, bytes, wall time, process CPU time,
+  throughput, latency, and environment without imposing a budget.
+- `make demo-gate-6` passed all 6 named checks. A fresh `make test` passed
+  formatting, strict lint, 31 unit tests, prior-gate regressions, Gate 2 image
+  checks, and the Gate 6 Rocky QEMU device path.
+- Gate 6 is delivered in open pull request
+  https://github.com/gmkurtzer/usshim/pull/6 from dedicated branch
+  `hdae/device-ownership`. It is not merged or closed.
+- Human accepted Gate 6 on 2026-11-03 and directed advancement to Gate 7.
+- Human direction added usable multi-user login, virtual PID inspection,
+  lockdown checks, and a DNF update workflow to the Gate 9 systemd milestone.
+  The DNF repository source remains an explicit decision required before Gate
+  9 begins and does not block Gate 7.
 
 ## Open decisions and limitations
 
@@ -165,7 +193,7 @@ scope, threat model, and invariants.
 - Rocky host image is pinned to official Rocky 10.2 GenericCloud build
   10.2-20260525.0. Gate 2 selected a pinned, network-disabled
   Docker/LinuxKit helper that mounts a temporary raw conversion read-only;
-  network backend and performance budgets remain later-gate decisions.
+  performance budgets remain a later-gate decision.
 - Gate 2 preparation requires Docker Desktop and a pinned privileged helper
   container. It is network-disabled and mounts only a temporary raw conversion
   read-only, but remains trusted build tooling rather than a runtime boundary.
@@ -177,7 +205,7 @@ scope, threat model, and invariants.
 - The native Bash proof uses a read-only unprivileged chroot and limits kernel
   descriptors to immutable image content and the bootstrap console. Gate 6
   adds Ginus-owned device objects rather than expanding native passthrough.
-- Gate 6 will begin with a Ginus-owned isolated packet queue as its mediated
+- Gate 6 uses a Ginus-owned isolated packet queue as its mediated
   network backend. It does not provide host or external network connectivity;
   later connectivity backends must preserve the same virtual interface and
   mediation boundary.
@@ -187,19 +215,19 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Create the Gate 6 branch and implement the virtual device registry plus
-Ginus-owned console, null, zero, and random frontends.
+Close Gate 6, create the Gate 7 branch, and implement the bounded virtual
+process identity and lifecycle foundation.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 6, device ownership and virtual hardware; authorized and
-  starting on dedicated branch `hdae/device-ownership`
+- Active gate: Gate 7, process runtime; authorized and starting on dedicated
+  branch `hdae/process-runtime`
 - Last evidence: `make check`, `make test-unit`, `make test-oci-layers`,
-  `make test-oci-image`, and a post-assembly `make test-native-vfs` passed on
-  2026-11-03; the latest native run includes balanced negative probes and
-  supervisor-loss verification; `make demo-gate-5` and aggregate `make test`
-  also passed
-- Required human decision: none until the Gate 6 demonstration checkpoint
+  `make test-devices`, `make test-block`, `make test-network`,
+  `make bench-block`, `make bench-network`, `make demo-gate-6`, and aggregate
+  `make test` passed on 2026-11-03
+- Required human decision: none until the Gate 7 demonstration checkpoint; the
+  Gate 9 DNF repository choice is deferred until before Gate 9 implementation

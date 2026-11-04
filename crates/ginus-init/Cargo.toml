@@ -11,5 +11,6 @@ path = "src/main.rs"
 [dependencies]
 ginus-core = { path = "../ginus-core" }
 ginus-domain = { path = "../ginus-domain" }
+ginus-devices = { path = "../ginus-devices" }
 ginus-runtime = { path = "../ginus-runtime" }
 ginus-vfs = { path = "../ginus-vfs" }
