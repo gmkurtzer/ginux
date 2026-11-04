@@ -12,6 +12,7 @@ rm -rf \
     build/gate1-intercept.log \
     build/bench-baseline.log \
     build/bench-baseline.csv \
-    build/bench-baseline-summary.csv
+    build/bench-baseline-summary.csv \
+    build/rocky-domain-work
 
-printf '%s\n' 'cleaned generated Gate 1 artifacts; retained build/cache'
+printf '%s\n' 'cleaned generated artifacts; retained build/cache'

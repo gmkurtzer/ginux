@@ -5,9 +5,10 @@
 - Gate 1 is accepted and closed under the corrected ordinary-host-process
   architecture. It remains delivered in open
   https://github.com/gmkurtzer/usshim/pull/1 and is not merged.
-- Gate 2 is active on the dedicated `hdae/rocky-image-pipeline` branch. Until
-  Gate 1 is merged, Gate 2 is stacked on its accepted branch state while its
-  intended base remains `main`.
+- Gate 2 is accepted and closed. It remains delivered in open
+  https://github.com/gmkurtzer/usshim/pull/2 and is not merged.
+- Gate 3 is active on dedicated branch `hdae/execution-kernel`, stacked on the
+  accepted Gate 2 state while its intended eventual base remains `main`.
 - Authoritative name: Ginus (Ginux Userspace).
 - Runtime isolation unit: domain.
 - Policy unit: versioned contract.
@@ -67,30 +68,47 @@ scope, threat model, and invariants.
 - Final Gate 1 verification after removing Ginus numeric host-PID checks passed
   `make check`, `make test-unit`, and `make demo-gate-1`; normal host PID 1
   validation remains only in the Rocky boot harness.
+- Gate 2 `make image-prepare`, `make test-image`, `make demo-gate-2`, clean-cache
+  preservation checks, and aggregate `make test` passed. The pinned helper
+  mounted the source XFS root read-only with networking disabled; repeat
+  extraction produced manifest SHA-256
+  `49e69bc6209b9d8ed084e221924b633c3126ccaa9a2f920bb8464249a5f66721`;
+  corrupt and missing sources were rejected.
+- After human feedback that the original demo was opaque, the revised
+  `make demo-gate-2` reported eight named checks and their concrete values,
+  asserted a read-only source mount plus no helper Ethernet/default route, and
+  explicitly stated that Ginus execution, VFS, and systemd boot are not Gate 2
+  evidence. The revised demonstration passed on 2026-11-03.
+- Human accepted Gate 2 on 2026-11-03 and directed advancement to Gate 3.
 
 ## Open decisions and limitations
 
 - `PTRACE_SYSEMU` is accepted only as the Gate 1 bootstrap experiment. The
   final Ginus execution/task/memory design remains a Gate 3 decision.
 - Rocky host image is pinned to official Rocky 10.2 GenericCloud build
-  10.2-20260525.0. The domain-image preparation backend, configuration syntax,
-  network backend, and performance budgets remain later-gate decisions.
+  10.2-20260525.0. Gate 2 selected a pinned, network-disabled
+  Docker/LinuxKit helper that mounts a temporary raw conversion read-only;
+  configuration syntax, network backend, and performance budgets remain
+  later-gate decisions.
+- Gate 2 preparation requires Docker Desktop and a pinned privileged helper
+  container. It is network-disabled and mounts only a temporary raw conversion
+  read-only, but remains trusted build tooling rather than a runtime boundary.
 - The repository and directory still use the historical `usshim` name; rename
   is not authorized in the current planning task.
 
 ## Exact next action
 
-Create the Gate 2 branch from the accepted Gate 1 state, select and prove an
-offline QCOW2 extraction backend, then implement deterministic preparation,
-image validation, corruption checks, and `make demo-gate-2`.
+Create the Gate 3 branch from accepted Gate 2 state, implement the bounded ELF
+loader, domain memory model, syscall ABI/dispatcher, audit and denial paths,
+then verify them through `make test-runtime` and `make demo-gate-3`.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 2, Rocky domain-userspace pipeline; implementation starting
-- Last evidence: final PID-independent Gate 1 checks and demo passed on
-  2026-11-03; Gate 1 accepted
-- Required human decision: none until the Gate 2 checkpoint unless its
-  preparation backend requires a material architecture change
+- Active gate: Gate 3, execution kernel; implementation starting
+- Last evidence: revised, explicit eight-check Gate 2 demo passed and Gate 2
+  was accepted on 2026-11-03
+- Required human decision: none until the Gate 3 checkpoint unless execution
+  evidence forces a material architecture change
