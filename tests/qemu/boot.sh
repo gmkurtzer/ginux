@@ -1303,6 +1303,11 @@ if ! grep -q '^ginux: Linux mmap domain quota enforced atomically' "$output_file
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux file locks conflict between open file descriptions' "$output_file"; then
+    echo "Boot test failed: Linux file locks did not conflict between open file descriptions." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux overlay domain quota lifecycle enforced' "$output_file"; then
     echo "Boot test failed: Linux overlay domain quota lifecycle was not enforced." >&2
     exit 1

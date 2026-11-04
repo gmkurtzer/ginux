@@ -13165,6 +13165,10 @@ fn finish_linux_runtime(mmap: u64, saved_msrs: [u64; 5]) -> LinuxElfResult {
             .store(0, Ordering::SeqCst);
     }
     let keyrings_released = sysv_ipc_released && crate::linux_keyring::teardown();
+    let lock_instance = linux_process::current_ipc_instance() as u16;
+    LINUX_FILE_LOCKS
+        .lock()
+        .release(|lock| lock.file.instance == lock_instance);
     let mount_deactivated = linux_mount::deactivate_initial();
     let timer_finished = timer::finish_linux_wait_timer();
     let msrs_restored = restore_linux_syscall(saved_msrs);
@@ -16348,6 +16352,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let secret_memory = verify_linux_memfd_secret_syscall();
     let mount_queries = verify_linux_mount_query_syscalls();
     let file_handles = verify_linux_file_handle_syscalls();
+    let file_locks = verify_linux_file_locks();
     let shadow_stack = linux_map_shadow_stack(0, PAGE_SIZE as u64, 0) == LINUX_EOPNOTSUPP
         && linux_map_shadow_stack(1, 0, u64::MAX) == LINUX_EOPNOTSUPP;
     let uretprobe = verify_linux_default_signal_dispositions();
@@ -16416,6 +16421,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         secret_memory,
         mount_queries,
         file_handles,
+        file_locks,
         shadow_stack,
         uretprobe,
         seccomp,
@@ -16481,6 +16487,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && secret_memory
         && mount_queries
         && file_handles
+        && file_locks
         && shadow_stack
         && uretprobe
         && seccomp
@@ -18704,6 +18711,97 @@ fn verify_linux_file_handle_syscalls() -> bool {
     reopened && path_only && closed && removed && unmapped
 }
 
+fn verify_linux_file_locks() -> bool {
+    const RDWR: u64 = 2;
+    const WRITE: i16 = 1;
+    let mapping = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    if !(LINUX_RUNTIME_DYNAMIC_MMAP_BASE..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
+        .contains(&mapping)
+    {
+        return false;
+    }
+    let Some(node) = crate::linux_overlay::create_file(b"ginux-lock", 0o600, b"0123456789") else {
+        let _ = linux_runtime_munmap(mapping, PAGE_SIZE as u64);
+        return false;
+    };
+    let prepared = copy_to_linux_user(mapping, b"/ginux-lock\0");
+    let open = || {
+        if prepared {
+            linux_openat(u64::from(LINUX_AT_FDCWD), mapping, RDWR, 0)
+        } else {
+            LINUX_EBADF
+        }
+    };
+    let lock = |descriptor: u64, command: u64, start: i64, length: i64| {
+        let mut record = [0_u8; 32];
+        record[..2].copy_from_slice(&WRITE.to_ne_bytes());
+        record[8..16].copy_from_slice(&start.to_ne_bytes());
+        record[16..24].copy_from_slice(&length.to_ne_bytes());
+        if copy_to_linux_user(mapping + 64, &record) {
+            linux_descriptor_fcntl(descriptor, command, mapping + 64)
+        } else {
+            LINUX_EFAULT
+        }
+    };
+    let (first, second, third) = (open(), open(), open());
+    let opened = [first, second, third]
+        .iter()
+        .all(|descriptor| *descriptor < LINUX_AUX_DESCRIPTOR_LIMIT);
+    // Two open file descriptions of one file: OFD locks conflict on
+    // overlapping bytes only, F_OFD_GETLK reports the holder with l_pid -1,
+    // and a POSIX lock of the same process conflicts with them.
+    let ofd = opened
+        && lock(first, LINUX_F_OFD_SETLK, 0, 10) == 0
+        && lock(second, LINUX_F_OFD_SETLK, 5, 10) == LINUX_EAGAIN
+        && lock(second, LINUX_F_OFD_SETLK, 10, 10) == 0
+        && lock(third, LINUX_F_SETLK, 9, 1) == LINUX_EAGAIN
+        && lock(third, LINUX_F_OFD_GETLK, 0, 0) == 0
+        && {
+            let mut record = [0_u8; 32];
+            copy_from_linux_user(mapping + 64, &mut record)
+                && record[..2] == WRITE.to_ne_bytes()
+                && record[8..16] == 0_i64.to_ne_bytes()
+                && record[16..24] == 10_i64.to_ne_bytes()
+                && record[24..28] == (-1_i32).to_ne_bytes()
+        };
+    // flock: another description conflicts; a blocking request that nothing
+    // can release is EDEADLK instead of a wait that never ends.
+    let flocked = ofd
+        && linux_flock(None, first, 2) == 0
+        && linux_flock(None, second, 2 | 4) == LINUX_EAGAIN
+        && linux_flock(None, second, 2) == LINUX_EDEADLK;
+    // Closing the first description drops its flock and OFD locks; closing
+    // any descriptor of the file drops this process's POSIX locks.
+    let released = flocked
+        && lock(third, LINUX_F_SETLK, 40, 10) == 0
+        && lock(second, LINUX_F_OFD_SETLK, 45, 1) == LINUX_EAGAIN
+        && linux_descriptor_close(first) == 0
+        && linux_flock(None, second, 2 | 4) == 0
+        && lock(second, LINUX_F_OFD_SETLK, 0, 10) == 0
+        && linux_descriptor_close(third) == 0
+        && lock(second, LINUX_F_OFD_SETLK, 45, 1) == 0;
+    let closed = linux_descriptor_close(second) == 0;
+    if !released {
+        for descriptor in [first, third] {
+            let _ = linux_descriptor_close(descriptor);
+        }
+    }
+    let removed = crate::linux_overlay::unlink(node);
+    let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
+    let valid = released && closed && removed && unmapped;
+    if valid {
+        serial_write("ginux: Linux file locks conflict between open file descriptions\r\n");
+    }
+    valid
+}
+
 fn verify_linux_mount_query_syscalls() -> bool {
     let mapping = linux_runtime_mmap(
         0,
@@ -20168,7 +20266,7 @@ fn verify_linux_descriptor_argument_widths() -> bool {
             UPPER_REGISTER_BITS | LINUX_F_GETFD,
             0,
         ) == 0
-        && linux_flock(UPPER_REGISTER_BITS | 1, UPPER_REGISTER_BITS | 1) == 0;
+        && linux_flock(None, UPPER_REGISTER_BITS | 1, UPPER_REGISTER_BITS | 1) == 0;
     let first = linux_console_dup(UPPER_REGISTER_BITS | 1);
     if first >= LINUX_DESCRIPTOR_TABLE_LIMIT {
         return false;
@@ -35974,12 +36072,17 @@ fn linux_close_range(first: u64, last: u64, flags: u64) -> u64 {
 }
 
 fn linux_descriptor_close_with_wake(descriptor: u64, wake_waiters: bool) -> u64 {
+    let locked_file = linux_lock_file(descriptor)
+        .map(|(file, _)| (file, linux_descriptor_open_file_id(descriptor)));
     let result = linux_descriptor_close_with_wake_inner(descriptor, wake_waiters);
     if result == 0 {
         if let Some(cell) = linux_descriptor_open_file_id_cell(descriptor) {
             cell.store(0, Ordering::SeqCst);
         }
         linux_legacy_descriptor_offset(descriptor).store(0, Ordering::SeqCst);
+        if let Some((file, id)) = locked_file {
+            linux_release_closed_file_locks(file, id);
+        }
     }
     result
 }
@@ -36545,6 +36648,16 @@ fn linux_memfd_fcntl(descriptor: u64, command: u64, argument: u64) -> u64 {
 }
 
 fn linux_descriptor_fcntl(descriptor: u64, command: u64, argument: u64) -> u64 {
+    linux_descriptor_fcntl_live(None, descriptor, command, argument)
+}
+
+/// fcntl(2); `live` lets F_SETLKW and F_OFD_SETLKW wait for the lock holder.
+fn linux_descriptor_fcntl_live(
+    live: LinuxLiveSyscall,
+    descriptor: u64,
+    command: u64,
+    argument: u64,
+) -> u64 {
     let descriptor = u64::from(descriptor as u32);
     let command = u64::from(command as u32);
     let state = linux_device_descriptor(descriptor);
@@ -36662,10 +36775,8 @@ fn linux_descriptor_fcntl(descriptor: u64, command: u64, argument: u64) -> u64 {
         LINUX_F_GETFD | LINUX_F_SETFD => {
             linux_fcntl_descriptor_flags(descriptor, command, argument)
         }
-        LINUX_F_GETLK | LINUX_F_OFD_GETLK => linux_fcntl_lock(command, argument),
-        LINUX_F_SETLK | LINUX_F_SETLKW | LINUX_F_OFD_SETLK | LINUX_F_OFD_SETLKW => {
-            linux_fcntl_lock(command, argument)
-        }
+        LINUX_F_GETLK | LINUX_F_OFD_GETLK | LINUX_F_SETLK | LINUX_F_SETLKW | LINUX_F_OFD_SETLK
+        | LINUX_F_OFD_SETLKW => linux_fcntl_lock(live, descriptor, command, argument),
         LINUX_F_ADD_SEALS | LINUX_F_GET_SEALS => linux_memfd_fcntl(descriptor, command, argument),
         LINUX_F_GETFL => {
             u64::from((state & 3) - 1)
@@ -36686,30 +36797,362 @@ fn linux_descriptor_fcntl(descriptor: u64, command: u64, argument: u64) -> u64 {
     }
 }
 
-fn linux_flock(descriptor: u64, operation: u64) -> u64 {
+type LinuxLiveSyscall = Option<(*mut LinuxSyscallFrame, LinuxUserContext)>;
+
+static LINUX_FILE_LOCKS: crate::sync::SpinLock<crate::linux_file_lock::LockTable> =
+    crate::sync::SpinLock::new(
+        crate::sync::LockRank::FILESYSTEM,
+        crate::linux_file_lock::LockTable::new(),
+    );
+
+fn linux_flock(live: LinuxLiveSyscall, descriptor: u64, operation: u64) -> u64 {
+    const LOCK_SH: u64 = 1;
+    const LOCK_EX: u64 = 2;
+    const LOCK_NB: u64 = 4;
+    const LOCK_UN: u64 = 8;
+    const LOCK_MAND: u64 = 32;
     let descriptor = u64::from(descriptor as u32);
     let operation = u64::from(operation as u32);
-    if !linux_descriptor_open(descriptor) {
-        LINUX_EBADF
-    } else if operation <= 6 {
-        0
-    } else {
-        LINUX_EINVAL
+    // Linux ignores LOCK_MAND before looking at the descriptor and rejects
+    // any other operation than one of SH, EX and UN (fs/locks.c:2280).
+    if operation & LOCK_MAND != 0 {
+        return 0;
     }
+    let kind = match operation & !LOCK_NB {
+        LOCK_SH => Some(crate::linux_file_lock::Kind::Read),
+        LOCK_EX => Some(crate::linux_file_lock::Kind::Write),
+        LOCK_UN => None,
+        _ => return LINUX_EINVAL,
+    };
+    if !linux_descriptor_open(descriptor) {
+        return LINUX_EBADF;
+    }
+    // Only overlay and image files have an inode to lock; other descriptors
+    // keep accepting flock() without effect.
+    let Some((file, _)) = linux_lock_file(descriptor) else {
+        return 0;
+    };
+    // A flock lock belongs to the open file description, so dup() and fork()
+    // share it (flock_make_lock).
+    let Some(id) = linux_descriptor_open_file_id(descriptor) else {
+        return LINUX_EBADF;
+    };
+    let owner = crate::linux_file_lock::Owner::Flock(id);
+    let pid = current_linux_process_pid();
+    let wait = (operation & LOCK_NB == 0).then_some(live);
+    linux_file_lock_until(wait, LINUX_FLOCK_SYSCALL, |table| {
+        table.set_whole(file, owner, pid, kind)
+    })
 }
 
-fn linux_fcntl_lock(command: u64, address: u64) -> u64 {
+fn linux_fcntl_lock(live: LinuxLiveSyscall, descriptor: u64, command: u64, address: u64) -> u64 {
+    use crate::linux_file_lock::{Kind, Owner, OFFSET_MAX};
     let mut lock = [0_u8; 32];
     if address == 0 || !copy_from_linux_user(address, &mut lock) {
         return LINUX_EFAULT;
     }
-    if matches!(command, LINUX_F_GETLK | LINUX_F_OFD_GETLK) {
-        lock[..2].copy_from_slice(&2_i16.to_ne_bytes());
-        if !copy_to_linux_user(address, &lock) {
-            return LINUX_EFAULT;
+    let lock_type = i16::from_ne_bytes([lock[0], lock[1]]);
+    let whence = i16::from_ne_bytes([lock[2], lock[3]]);
+    let start = i64::from_ne_bytes(lock[8..16].try_into().unwrap());
+    let length = i64::from_ne_bytes(lock[16..24].try_into().unwrap());
+    let lock_pid = i32::from_ne_bytes(lock[24..28].try_into().unwrap());
+    let query = matches!(command, LINUX_F_GETLK | LINUX_F_OFD_GETLK);
+    let description = matches!(
+        command,
+        LINUX_F_OFD_GETLK | LINUX_F_OFD_SETLK | LINUX_F_OFD_SETLKW
+    );
+    // Same checks and order as fcntl_getlk/fcntl_setlk and
+    // flock64_to_posix_lock (fs/locks.c:510, 2437, 2565).
+    if command == LINUX_F_GETLK && !matches!(lock_type, 0 | 1) {
+        return LINUX_EINVAL;
+    }
+    let file = linux_lock_file(descriptor);
+    let base = match whence {
+        0 => 0,
+        1 => linux_descriptor_offset(descriptor).load(Ordering::SeqCst) as i64,
+        2 => file.map_or(0, |(_, size)| size as i64),
+        _ => return LINUX_EINVAL,
+    };
+    let Some(first) = base.checked_add(start) else {
+        return LINUX_EOVERFLOW;
+    };
+    if first < 0 {
+        return LINUX_EINVAL;
+    }
+    let (first, last) = match length {
+        0 => (first, i64::MAX),
+        length if length > 0 => match first.checked_add(length - 1) {
+            Some(last) => (first, last),
+            None => return LINUX_EOVERFLOW,
+        },
+        length if first + length < 0 => return LINUX_EINVAL,
+        length => (first + length, first - 1),
+    };
+    let kind = match lock_type {
+        0 => Some(Kind::Read),
+        1 => Some(Kind::Write),
+        2 => None,
+        _ => return LINUX_EINVAL,
+    };
+    if !query {
+        let access = linux_device_descriptor(descriptor) & 3;
+        let permitted = match kind {
+            Some(Kind::Read) => access & LINUX_DESCRIPTOR_INPUT != 0,
+            Some(Kind::Write) => access & LINUX_DESCRIPTOR_OUTPUT != 0,
+            None => true,
+        };
+        if !permitted {
+            return LINUX_EBADF;
         }
     }
-    0
+    if description && lock_pid != 0 {
+        return LINUX_EINVAL;
+    }
+    let Some((file, _)) = file else {
+        if query {
+            lock[..2].copy_from_slice(&2_i16.to_ne_bytes());
+            if !copy_to_linux_user(address, &lock) {
+                return LINUX_EFAULT;
+            }
+        }
+        return 0;
+    };
+    // POSIX locks belong to the process, OFD locks to the open file
+    // description (fcntl_setlk sets flc_owner = filp for F_OFD_*).
+    let owner = if description {
+        let Some(id) = linux_descriptor_open_file_id(descriptor) else {
+            return LINUX_EBADF;
+        };
+        Owner::Description(id)
+    } else {
+        Owner::Process(current_linux_process_pid())
+    };
+    let (first, last) = (first as u64, last as u64);
+    if query {
+        let conflict = linux_file_lock_conflict(file, owner, kind, first, last);
+        // posix_lock_to_flock: SEEK_SET, a length of 0 up to OFFSET_MAX,
+        // and l_pid -1 for an OFD lock. Without a conflict only l_type
+        // changes.
+        match conflict {
+            None => lock[..2].copy_from_slice(&2_i16.to_ne_bytes()),
+            Some(held) => {
+                let held_type: i16 = if held.kind == Kind::Read { 0 } else { 1 };
+                let held_length = if held.end == OFFSET_MAX {
+                    0
+                } else {
+                    held.end - held.start + 1
+                };
+                let held_pid = match held.owner {
+                    Owner::Process(_) => held.pid as i32,
+                    _ => -1,
+                };
+                lock[..2].copy_from_slice(&held_type.to_ne_bytes());
+                lock[2..4].copy_from_slice(&0_i16.to_ne_bytes());
+                lock[8..16].copy_from_slice(&held.start.to_ne_bytes());
+                lock[16..24].copy_from_slice(&held_length.to_ne_bytes());
+                lock[24..28].copy_from_slice(&held_pid.to_ne_bytes());
+            }
+        }
+        return if copy_to_linux_user(address, &lock) {
+            0
+        } else {
+            LINUX_EFAULT
+        };
+    }
+    let pid = current_linux_process_pid();
+    let wait = matches!(command, LINUX_F_SETLKW | LINUX_F_OFD_SETLKW).then_some(live);
+    linux_file_lock_until(wait, LINUX_FCNTL_SYSCALL, |table| {
+        table.set_range(file, owner, pid, kind, first, last)
+    })
+}
+
+/// The lock identity and size of an overlay or image file descriptor. Locks
+/// are kept per inode (st_dev, st_ino), so every name and descriptor of a
+/// file shares them.
+fn linux_lock_file(descriptor: u64) -> Option<(crate::linux_file_lock::File, u64)> {
+    if linux_overlay_descriptor_handle(descriptor).is_none()
+        && linux_rootfs_descriptor(descriptor) == 0
+    {
+        return None;
+    }
+    let stat = linux_descriptor_stat(descriptor)?;
+    let field = |offset: usize| u64::from_ne_bytes(stat[offset..offset + 8].try_into().unwrap());
+    Some((
+        crate::linux_file_lock::File {
+            instance: linux_process::current_ipc_instance() as u16,
+            device: field(0),
+            inode: field(8),
+        },
+        field(48),
+    ))
+}
+
+/// Runs `operation` on the lock table. A conflicting lock whose owner is gone
+/// (an exited process, or a description no descriptor refers to any more)
+/// is dropped and the operation repeated; process exit does not walk the
+/// table.
+fn linux_file_lock_attempt(
+    mut operation: impl FnMut(
+        &mut crate::linux_file_lock::LockTable,
+    ) -> Result<(), crate::linux_file_lock::Error>,
+) -> Result<(), crate::linux_file_lock::Error> {
+    use crate::linux_file_lock::{Error, CAPACITY};
+    let mut result = operation(&mut LINUX_FILE_LOCKS.lock());
+    for _ in 0..CAPACITY {
+        match result {
+            Err(Error::Conflict(held)) if !linux_file_lock_owner_alive(held) => {
+                LINUX_FILE_LOCKS.lock().release(|lock| {
+                    lock.file.instance == held.file.instance && lock.owner == held.owner
+                });
+            }
+            Err(Error::NoSpace) if linux_release_dead_file_locks() => {}
+            _ => return result,
+        }
+        result = operation(&mut LINUX_FILE_LOCKS.lock());
+    }
+    result
+}
+
+fn linux_file_lock_conflict(
+    file: crate::linux_file_lock::File,
+    owner: crate::linux_file_lock::Owner,
+    kind: Option<crate::linux_file_lock::Kind>,
+    first: u64,
+    last: u64,
+) -> Option<crate::linux_file_lock::Lock> {
+    match linux_file_lock_attempt(|table| {
+        table
+            .conflict(file, owner, kind, first, last)
+            .map_or(Ok(()), |held| {
+                Err(crate::linux_file_lock::Error::Conflict(held))
+            })
+    }) {
+        Err(crate::linux_file_lock::Error::Conflict(held)) => Some(held),
+        _ => None,
+    }
+}
+
+/// F_SETLK, flock(LOCK_NB) and their blocking forms. A blocked request waits
+/// as the blocking unix-socket receive does: it runs a still-running child
+/// that may release the lock, or restarts the call through its parent so the
+/// holder can run. A pending unblocked signal ends the wait with EINTR
+/// (wait_event_interruptible in do_lock_file_wait; it is not restarted for
+/// SA_RESTART handlers). When nothing else can run, the wait could never end
+/// and EDEADLK is returned instead of blocking forever.
+fn linux_file_lock_until(
+    wait: Option<LinuxLiveSyscall>,
+    syscall: u64,
+    mut operation: impl FnMut(
+        &mut crate::linux_file_lock::LockTable,
+    ) -> Result<(), crate::linux_file_lock::Error>,
+) -> u64 {
+    loop {
+        match linux_file_lock_attempt(&mut operation) {
+            Ok(()) => return 0,
+            Err(crate::linux_file_lock::Error::NoSpace) => return LINUX_ENOLCK,
+            Err(crate::linux_file_lock::Error::Conflict(_)) => {}
+        }
+        let Some(live) = wait else {
+            return LINUX_EAGAIN;
+        };
+        let Some((output, caller)) =
+            live.filter(|_| X86_RUNTIME.LINUX_RUNTIME_MODE.load(Ordering::SeqCst))
+        else {
+            return LINUX_EDEADLK;
+        };
+        if linux_unblocked_signal_pending() {
+            return LINUX_EINTR;
+        }
+        let pid = current_linux_process_pid();
+        if let Some(child) = linux_process::live_running_child_pid(pid) {
+            if !refresh_live_linux_process_registry(caller)
+                || !run_scheduled_linux_process(pid, Some(child))
+                || !restore_linux_process_live_return(output, pid)
+            {
+                return LINUX_EDEADLK;
+            }
+            continue;
+        }
+        return if pid != 1 && restart_current_linux_process_syscall(caller, syscall) {
+            LINUX_RETURN_TO_KERNEL
+        } else {
+            LINUX_EDEADLK
+        };
+    }
+}
+
+fn linux_unblocked_signal_pending() -> bool {
+    let unblocked = !X86_RUNTIME.ELF_PROBE_SIGNAL_MASK.load(Ordering::SeqCst);
+    X86_RUNTIME.ELF_PROBE_PENDING_SIGNALS.load(Ordering::SeqCst) & unblocked != 0
+        || linux_peek_dynamic_signal(unblocked).is_some()
+}
+
+fn linux_file_lock_owner_alive(lock: crate::linux_file_lock::Lock) -> bool {
+    match lock.owner {
+        crate::linux_file_lock::Owner::Process(pid) => {
+            pid == current_linux_process_pid()
+                || linux_process::live_process_runtime_slot(pid).is_some()
+        }
+        crate::linux_file_lock::Owner::Description(id)
+        | crate::linux_file_lock::Owner::Flock(id) => linux_open_file_referenced(id),
+    }
+}
+
+/// Whether any descriptor of a live process in this domain still refers to
+/// the open file description `id`: the current table, and the saved table
+/// of every other process.
+fn linux_open_file_referenced(id: u64) -> bool {
+    if (0..LINUX_DESCRIPTOR_TABLE_LIMIT).any(|descriptor| {
+        linux_descriptor_open(descriptor)
+            && linux_descriptor_open_file_id_cell(descriptor)
+                .is_some_and(|cell| cell.load(Ordering::SeqCst) == id)
+    }) {
+        return true;
+    }
+    let current = current_linux_process_pid();
+    (0..linux_process::PROCESS_LIMIT)
+        .filter_map(linux_process::live_process_pid_at)
+        .filter(|pid| *pid != current)
+        .filter_map(linux_process_runtime_state)
+        .any(|state| {
+            state.valid
+                && (state.descriptors.open_file_ids.contains(&id)
+                    || state.descriptors.stdio_open_file_ids.contains(&id))
+        })
+}
+
+/// Drops the locks of every gone owner in this domain; true if any went.
+fn linux_release_dead_file_locks() -> bool {
+    let instance = linux_process::current_ipc_instance() as u16;
+    let mut released = false;
+    for index in 0..crate::linux_file_lock::CAPACITY {
+        let held = LINUX_FILE_LOCKS.lock().lock_at(index);
+        if let Some(held) = held.filter(|held| held.file.instance == instance) {
+            if !linux_file_lock_owner_alive(held) {
+                LINUX_FILE_LOCKS
+                    .lock()
+                    .release(|lock| lock.file.instance == instance && lock.owner == held.owner);
+                released = true;
+            }
+        }
+    }
+    released
+}
+
+/// close(2) of any descriptor drops the process's POSIX locks on that file
+/// (locks_remove_posix via filp_flush); the last close of an open file
+/// description drops its OFD and flock locks (locks_remove_file).
+fn linux_release_closed_file_locks(file: crate::linux_file_lock::File, id: Option<u64>) {
+    use crate::linux_file_lock::Owner;
+    let pid = current_linux_process_pid();
+    let id = id.filter(|id| !linux_open_file_referenced(*id));
+    LINUX_FILE_LOCKS.lock().release(|lock| {
+        lock.file.instance == file.instance
+            && (lock.file == file && lock.owner == Owner::Process(pid)
+                || id.is_some_and(|id| {
+                    matches!(lock.owner, Owner::Description(owner) | Owner::Flock(owner) if owner == id)
+                }))
+    });
 }
 
 fn linux_descriptor_set_nonblocking(flags: &BankedAtomicU32, argument: u64) -> u64 {
