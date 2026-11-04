@@ -48,7 +48,9 @@ static void *worker(void *argument) {
 }
 int main(void) {
     struct timespec begin, end;
-    clock_gettime(CLOCK_MONOTONIC, &begin);
+    /* Ginux's monotonic epoch is per domain. Realtime uses the shared boot
+     * epoch, so these intervals can be compared across detached domains. */
+    if (clock_gettime(CLOCK_REALTIME, &begin)) return 4;
     pthread_t threads[WORKERS];
     for (unsigned i = 1; i < WORKERS; ++i) {
         int err = pthread_create(&threads[i], 0, worker, (void *)(uintptr_t)i);
@@ -56,11 +58,11 @@ int main(void) {
     }
     worker(0);
     for (unsigned i = 1; i < WORKERS; ++i) pthread_join(threads[i], 0);
-    clock_gettime(CLOCK_MONOTONIC, &end);
+    if (clock_gettime(CLOCK_REALTIME, &end)) return 4;
     long long elapsed_us = (end.tv_sec - begin.tv_sec) * 1000000LL + (end.tv_nsec - begin.tv_nsec) / 1000;
     long long start_us = begin.tv_sec * 1000000LL + begin.tv_nsec / 1000;
     long long end_us = end.tv_sec * 1000000LL + end.tv_nsec / 1000;
-    printf("S1_CONTEXT_%s workers=%u cpu_mask=%u error=%u seed=%u elapsed_us=%lld start_us=%lld end_us=%lld\n",
+    printf("S1_CONTEXT_%s workers=%u cpu_mask=%u error=%u seed=%u elapsed_us=%lld realtime_start_us=%lld realtime_end_us=%lld\n",
            failed ? "FAIL" : "PASS", WORKERS, cpu_mask, failed, SEED, elapsed_us, start_us, end_us);
     fflush(stdout);
     /* This ordinary console wait marks init ready and allows attaching to

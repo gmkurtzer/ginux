@@ -122,7 +122,7 @@ def run(a):
                 if a.prefix == 'signal' and 'signals=1 waits=5' not in report:
                     raise RuntimeError(name + ': missing signal-return/timed-wait evidence')
                 if a.prefix == 'context':
-                    interval = re.search(r'start_us=(\d+) end_us=(\d+)', report)
+                    interval = re.search(r'realtime_start_us=(\d+) realtime_end_us=(\d+)', report)
                     if not interval:
                         raise RuntimeError(name + ': missing competition interval')
                     intervals.append(tuple(map(int, interval.groups())))

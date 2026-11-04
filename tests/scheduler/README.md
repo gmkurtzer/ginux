@@ -52,7 +52,8 @@ Startup waits for each domain to enter userspace before starting the next; this
 avoids overlapping the kernel's asynchronous cache/install request slot. After
 both starts, the context harness sends **no serial input during the quiet
 interval**. In addition to the sentinel results it requires at least 500 ms of
-overlap between the two reported computation intervals. Sequential completion
+overlap between the two reported computation intervals, using the shared
+`CLOCK_REALTIME` epoch (Ginux's `CLOCK_MONOTONIC` epoch is per domain). Sequential completion
 cannot satisfy that assertion. Context checks must individually last at least
 500 ms; the signal report must also include `signals=1 waits=5`.
 
