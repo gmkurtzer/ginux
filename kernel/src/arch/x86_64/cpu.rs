@@ -16312,6 +16312,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let fadvise = verify_linux_fadvise64_syscall();
     let shared_file_access = verify_linux_shared_file_mapping_access();
     let runtime_boot_contracts = verify_linux_runtime_boot_contracts();
+    let symlink_path_walk = verify_linux_symlink_path_walk();
     let mappings_released =
         address_space::release_current_linux_runtime_mappings(LINUX_RUNTIME_DYNAMIC_MMAP_BASE);
     X86_RUNTIME
@@ -16376,6 +16377,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         fadvise,
         shared_file_access,
         runtime_boot_contracts,
+        symlink_path_walk,
         mappings_released,
     ]
     .into_iter()
@@ -16439,7 +16441,64 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && fadvise
         && shared_file_access
         && runtime_boot_contracts
+        && symlink_path_walk
         && mappings_released
+}
+
+fn verify_linux_symlink_path_walk() -> bool {
+    let mapping = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    if !(LINUX_RUNTIME_DYNAMIC_MMAP_BASE..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
+        .contains(&mapping)
+    {
+        return false;
+    }
+    let directory = crate::linux_overlay::create_directory(b"ginux-symlink-walk", 0o700);
+    let file = crate::linux_overlay::create_file(b"ginux-symlink-walk/c", 0o600, b"C");
+    let links = [
+        crate::linux_overlay::create_symlink(b"ginux-symlink-walk-abs", b"/ginux-symlink-walk"),
+        crate::linux_overlay::create_symlink(b"ginux-symlink-walk-rel", b"ginux-symlink-walk"),
+        crate::linux_overlay::create_symlink(
+            b"ginux-symlink-walk-loop",
+            b"ginux-symlink-walk-loop",
+        ),
+        crate::linux_overlay::create_symlink(b"ginux-symlink-walk/l", b"c"),
+    ];
+    let at = u64::from(LINUX_AT_FDCWD);
+    let stat = mapping + 256;
+    let path = |name: &[u8]| copy_to_linux_user(mapping, name);
+    let walked = directory.is_some()
+        && file.is_some()
+        && links.iter().all(Option::is_some)
+        && path(b"/ginux-symlink-walk-abs/c\0")
+        && linux_newfstatat(at, mapping, stat, 0) == 0
+        && path(b"/ginux-symlink-walk-rel/c\0")
+        && linux_newfstatat(at, mapping, stat, 0) == 0
+        && path(b"/ginux-symlink-walk-loop/c\0")
+        && linux_newfstatat(at, mapping, stat, 0) == LINUX_ELOOP
+        && path(b"/ginux-symlink-walk-rel/n\0")
+        && linux_mkdirat(at, mapping, 0o700) == 0;
+    let created = crate::linux_overlay::lookup(b"ginux-symlink-walk/n");
+    // The relative target "c" names ginux-symlink-walk/c, not /c.
+    let relative = path(b"/ginux-symlink-walk/l\0") && {
+        let descriptor = linux_openat(at, mapping, 0, 0);
+        descriptor < LINUX_RETURN_TO_KERNEL && linux_descriptor_close(descriptor) == 0
+    };
+    let removed = created.is_some_and(|metadata| crate::linux_overlay::unlink(metadata.handle))
+        && links
+            .into_iter()
+            .flatten()
+            .all(crate::linux_overlay::unlink)
+        && file.is_some_and(crate::linux_overlay::unlink)
+        && directory.is_some_and(crate::linux_overlay::unlink);
+    let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
+    walked && created.is_some() && relative && removed && unmapped
 }
 
 fn verify_linux_runtime_boot_contracts() -> bool {
@@ -25198,17 +25257,27 @@ fn linux_rootfs_path_at(
     if !X86_RUNTIME.LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
         return None;
     }
-    let directory = if path.starts_with(b"/") {
-        crate::published_rootfs::ROOT_HANDLE
-    } else if directory as u32 == LINUX_AT_FDCWD {
-        X86_RUNTIME.ELF_PROBE_ROOTFS_CWD.load(Ordering::SeqCst)
-    } else {
-        linux_rootfs_descriptor(directory)
-    };
-    (directory != 0)
-        .then(|| crate::published_rootfs::lookup_at(directory, path))
-        .flatten()
+    let mut canonical = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+    let path = linux_rootfs_canonical_path(directory, path, &mut canonical)?;
+    crate::published_rootfs::lookup_at(crate::published_rootfs::ROOT_HANDLE, path)
         .filter(|(handle, _)| !linux_rootfs_handle_hidden(*handle))
+}
+
+/// The image path for `path` at `directory`: the canonical path, in which
+/// linux_canonical_path_at() has followed the overlay and image symlinks of
+/// every component but the last, so that an image lookup also works through
+/// an overlay symlink (fs/namei.c link_path_walk()).
+fn linux_rootfs_canonical_path<'a>(
+    directory: u64,
+    path: &[u8],
+    output: &'a mut [u8; crate::linux_overlay::PATH_CAPACITY],
+) -> Option<&'a [u8]> {
+    match linux_canonical_path_at(directory, path, output) {
+        Ok(length) => Some(&output[..length]),
+        // The path names the root directory.
+        Err(LINUX_EISDIR) => Some(&[]),
+        Err(_) => None,
+    }
 }
 
 fn linux_rootfs_handle_hidden(handle: u16) -> bool {
@@ -25315,8 +25384,67 @@ fn linux_canonical_path_at(
         }
         crate::published_rootfs::copy_path(handle, output).ok_or(LINUX_ENOTDIR)?
     };
-    for component in path.split(|byte| *byte == b'/') {
-        if component.is_empty() || component == b"." {
+    // Linux follows a symlink in every component that is followed by another
+    // one, "." and ".." included. A relative target continues from the
+    // directory holding the link, an absolute one from the root, and more
+    // than MAXSYMLINKS links fail with ELOOP (fs/namei.c link_path_walk(),
+    // pick_link(), reserve_stack()). The rest of the walk is kept in
+    // `pending` behind the target of each followed link.
+    let mut pending = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+    pending
+        .get_mut(..path.len())
+        .ok_or(LINUX_ENAMETOOLONG)?
+        .copy_from_slice(path);
+    let mut pending_length = path.len();
+    let mut position = 0;
+    let mut links = 0;
+    let mut walked_named = false;
+    while position < pending_length {
+        let start = position;
+        let end = pending[start..pending_length]
+            .iter()
+            .position(|byte| *byte == b'/')
+            .map_or(pending_length, |offset| start + offset);
+        position = end + 1;
+        if start == end {
+            continue;
+        }
+        if walked_named {
+            let mut target = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+            if let Some(target_length) = linux_path_symlink_target(&output[..length], &mut target)?
+            {
+                links += 1;
+                if links > LINUX_MAXSYMLINKS {
+                    return Err(LINUX_ELOOP);
+                }
+                if target_length == 0 {
+                    return Err(LINUX_ENOENT);
+                }
+                let rest = pending_length - start;
+                let total = target_length + 1 + rest;
+                if total > pending.len() {
+                    return Err(LINUX_ENAMETOOLONG);
+                }
+                pending.copy_within(start..pending_length, target_length + 1);
+                pending[..target_length].copy_from_slice(&target[..target_length]);
+                pending[target_length] = b'/';
+                pending_length = total;
+                position = 0;
+                length = if target.starts_with(b"/") {
+                    0
+                } else {
+                    output[..length]
+                        .iter()
+                        .rposition(|byte| *byte == b'/')
+                        .unwrap_or(0)
+                };
+                walked_named = false;
+                continue;
+            }
+        }
+        walked_named = false;
+        let component = &pending[start..end];
+        if component == b"." {
             continue;
         }
         if component == b".." {
@@ -25339,11 +25467,78 @@ fn linux_canonical_path_at(
             .ok_or(LINUX_ENAMETOOLONG)?;
         output[length..end].copy_from_slice(component);
         length = end;
+        walked_named = true;
     }
     if length == 0 {
         return Err(LINUX_EISDIR);
     }
     Ok(length)
+}
+
+/// Linux MAXSYMLINKS (include/linux/namei.h).
+const LINUX_MAXSYMLINKS: usize = 40;
+
+/// The target of the overlay or image symlink at the canonical `link`, or
+/// `None` if no symlink is visible there.
+fn linux_path_symlink_target(
+    link: &[u8],
+    output: &mut [u8; crate::linux_overlay::PATH_CAPACITY],
+) -> Result<Option<usize>, u64> {
+    if let Some(metadata) = crate::linux_overlay::lookup(link) {
+        if metadata.kind != crate::linux_overlay::NodeKind::Symlink {
+            return Ok(None);
+        }
+        return crate::linux_overlay::read(metadata.handle, 0, output)
+            .map(Some)
+            .ok_or(LINUX_EIO);
+    }
+    if crate::linux_overlay::hidden(link) {
+        return Ok(None);
+    }
+    let Some((handle, Some(entry))) =
+        crate::published_rootfs::lookup_metadata_at(crate::published_rootfs::ROOT_HANDLE, link)
+    else {
+        return Ok(None);
+    };
+    // lookup_metadata_at() also resolves image links in the parent; only an
+    // entry at exactly `link` is the link itself.
+    let mut found = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+    if entry.kind != crate::published_rootfs::EntryKind::Symlink
+        || crate::published_rootfs::copy_path(handle, &mut found)
+            .is_none_or(|length| &found[..length] != link)
+    {
+        return Ok(None);
+    }
+    output
+        .get_mut(..entry.link.len())
+        .ok_or(LINUX_ENAMETOOLONG)?
+        .copy_from_slice(entry.link);
+    Ok(Some(entry.link.len()))
+}
+
+/// Canonical path named by `target`, the target of the symlink at the
+/// canonical `link`. A relative target is resolved from the directory that
+/// holds the link, not from the caller's directory (fs/namei.c pick_link()).
+fn linux_symlink_target_at(
+    link: &[u8],
+    target: &[u8],
+    output: &mut [u8; crate::linux_overlay::PATH_CAPACITY],
+) -> Result<usize, u64> {
+    let parent = if target.starts_with(b"/") {
+        0
+    } else {
+        link.iter().rposition(|byte| *byte == b'/').unwrap_or(0)
+    };
+    let mut raw = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+    let end = parent + 2 + target.len();
+    if end > raw.len() {
+        return Err(LINUX_ENAMETOOLONG);
+    }
+    raw[0] = b'/';
+    raw[1..1 + parent].copy_from_slice(&link[..parent]);
+    raw[1 + parent] = b'/';
+    raw[2 + parent..end].copy_from_slice(target);
+    linux_canonical_path_at(u64::from(LINUX_AT_FDCWD), &raw[..end], output)
 }
 
 fn linux_overlay_parent_exists(path: &[u8]) -> bool {
@@ -25380,16 +25575,9 @@ fn linux_rootfs_metadata_path_at(
     if !X86_RUNTIME.LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
         return None;
     }
-    let directory = if path.starts_with(b"/") {
-        crate::published_rootfs::ROOT_HANDLE
-    } else if directory as u32 == LINUX_AT_FDCWD {
-        X86_RUNTIME.ELF_PROBE_ROOTFS_CWD.load(Ordering::SeqCst)
-    } else {
-        linux_rootfs_descriptor(directory)
-    };
-    (directory != 0)
-        .then(|| crate::published_rootfs::lookup_metadata_at(directory, path))
-        .flatten()
+    let mut canonical = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+    let path = linux_rootfs_canonical_path(directory, path, &mut canonical)?;
+    crate::published_rootfs::lookup_metadata_at(crate::published_rootfs::ROOT_HANDLE, path)
         .filter(|(handle, _)| !linux_rootfs_handle_hidden(*handle))
 }
 
@@ -25552,7 +25740,7 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64, mode: u64) -> u64
     let mut canonical_length = if X86_RUNTIME.LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
         match linux_canonical_path_at(directory, path, &mut canonical) {
             Ok(length) => Some(length),
-            Err(error) if flags & LINUX_O_CREAT != 0 => return error,
+            Err(error) if flags & LINUX_O_CREAT != 0 || error == LINUX_ELOOP => return error,
             Err(_) => None,
         }
     } else {
@@ -25574,13 +25762,20 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64, mode: u64) -> u64
             return LINUX_EIO;
         };
         let mut resolved = [0_u8; crate::linux_overlay::PATH_CAPACITY];
-        let resolved_length =
-            match linux_canonical_path_at(directory, &target[..target_length], &mut resolved) {
-                Ok(length) => length,
-                Err(error) => return error,
-            };
+        let resolved_length = match linux_symlink_target_at(
+            &canonical[..canonical_length.unwrap_or(0)],
+            &target[..target_length],
+            &mut resolved,
+        ) {
+            Ok(length) => length,
+            Err(error) => return error,
+        };
+        let mut absolute = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+        absolute[0] = b'/';
+        absolute[1..1 + resolved_length].copy_from_slice(&resolved[..resolved_length]);
         overlay_metadata = crate::linux_overlay::lookup(&resolved[..resolved_length]);
-        rootfs_at_path = linux_rootfs_path_at(u64::from(LINUX_AT_FDCWD), &target[..target_length]);
+        rootfs_at_path =
+            linux_rootfs_path_at(u64::from(LINUX_AT_FDCWD), &absolute[..1 + resolved_length]);
         canonical[..resolved_length].copy_from_slice(&resolved[..resolved_length]);
         canonical_length = Some(resolved_length);
     }
@@ -26220,7 +26415,11 @@ fn linux_newfstatat(directory: u64, path_address: u64, stat_address: u64, flags:
         };
     }
     let mut canonical = [0_u8; crate::linux_overlay::PATH_CAPACITY];
-    if let Ok(length) = linux_canonical_path_at(directory, path, &mut canonical) {
+    let canonical_length = linux_canonical_path_at(directory, path, &mut canonical);
+    if canonical_length == Err(LINUX_ELOOP) {
+        return LINUX_ELOOP;
+    }
+    if let Ok(length) = canonical_length {
         if let Some(metadata) = crate::linux_overlay::lookup(&canonical[..length]) {
             let stat = linux_overlay_stat(metadata);
             return if copy_to_linux_user(stat_address, &stat) {
@@ -27532,7 +27731,11 @@ fn linux_faccessat(directory: u64, path_address: u64, mode: u64, flags: u64) -> 
         return if denied { LINUX_EACCES } else { 0 };
     }
     let mut canonical = [0_u8; crate::linux_overlay::PATH_CAPACITY];
-    if let Ok(length) = linux_canonical_path_at(directory, path, &mut canonical) {
+    let canonical_length = linux_canonical_path_at(directory, path, &mut canonical);
+    if canonical_length == Err(LINUX_ELOOP) {
+        return LINUX_ELOOP;
+    }
+    if let Ok(length) = canonical_length {
         if let Some(metadata) = crate::linux_overlay::lookup(&canonical[..length]) {
             let denied = mode & 4 != 0 && metadata.mode & 0o444 == 0
                 || mode & 2 != 0 && metadata.mode & 0o222 == 0
@@ -27646,7 +27849,11 @@ fn linux_statx(directory: u64, path_address: u64, flags: u64, mask: u64, stat_ad
         };
     }
     let mut canonical = [0_u8; crate::linux_overlay::PATH_CAPACITY];
-    if let Ok(length) = linux_canonical_path_at(directory, path, &mut canonical) {
+    let canonical_length = linux_canonical_path_at(directory, path, &mut canonical);
+    if canonical_length == Err(LINUX_ELOOP) {
+        return LINUX_ELOOP;
+    }
+    if let Ok(length) = canonical_length {
         if let Some(metadata) = crate::linux_overlay::lookup(&canonical[..length]) {
             let mode = match metadata.kind {
                 crate::linux_overlay::NodeKind::File => 0o100000,
