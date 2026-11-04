@@ -180,6 +180,36 @@ scope, threat model, and invariants.
   lockdown checks, and a DNF update workflow to the Gate 9 systemd milestone.
   The DNF repository source remains an explicit decision required before Gate
   9 begins and does not block Gate 7.
+- Gate 7 began on `hdae/process-runtime`. Its first milestone added a bounded
+  Ginus process table with virtual lifecycle and identity, generation-safe task
+  handles, virtual credentials and capability dropping, signal masks/queues,
+  futex and eventfd primitives, deterministic exhaustion, and shutdown cleanup.
+- The initial `cargo test -p ginus-process`, strict clippy, and
+  `make test-process` run passed six component tests. Native supervisor
+  integration, stress, QEMU fixtures, aggregate regression, and the demo remain
+  incomplete.
+- The second Gate 7 milestone added signal dispositions and exec reset,
+  monotonic/realtime clocks, one-shot and periodic timers, and bounded
+  epoll-style event readiness. Seven process-component tests and strict clippy
+  passed; native integration and interruption semantics remain incomplete.
+- The Rocky QEMU `make test-process` fixture passed 256 repeated virtual
+  lifecycle cycles plus signals, virtual credentials, futex, eventfd, epoll,
+  timers, stale identity denial, and zero-task cleanup. This fixture currently
+  validates the Ginus process model.
+- Gate 7 native supervision now auto-attaches forked tracees and translates
+  `fork`, `getpid`, `getppid`, and `wait4` across host and virtual identities.
+  The Rocky QEMU stress passed 32 fork/wait cycles with two concurrent children
+  per round, 32 expected child exits, interrupted-wait restart handling, and
+  zero-task cleanup.
+- Gate 7 stress found and fixed raw `PTRACE_PEEKTEXT` ABI handling, the
+  auto-attached child's initial trace phase, and host-PID argument restoration
+  across an interrupted/restarted `wait4`.
+- Fresh `make test-runtime`, `make test-native-vfs`, `make demo-gate-7`, and
+  aggregate `make test` passed. The demo reports nine named checks; the native
+  regression retains fail-closed supervisor-loss and unexpected-stop evidence.
+- Gate 7 is technically passed and delivered in open pull request
+  https://github.com/gmkurtzer/usshim/pull/7 from `hdae/process-runtime`. It is
+  not merged or closed and is awaiting human checkpoint review.
 
 ## Open decisions and limitations
 
@@ -215,19 +245,17 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Close Gate 6, create the Gate 7 branch, and implement the bounded virtual
-process identity and lifecycle foundation.
+Stop for human review of pull request 7 and `make demo-gate-7`.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 7, process runtime; authorized and starting on dedicated
-  branch `hdae/process-runtime`
-- Last evidence: `make check`, `make test-unit`, `make test-oci-layers`,
-  `make test-devices`, `make test-block`, `make test-network`,
-  `make bench-block`, `make bench-network`, `make demo-gate-6`, and aggregate
-  `make test` passed on 2026-11-03
+- Active gate: Gate 7, process runtime; technically passed on dedicated branch
+  `hdae/process-runtime`, delivered in pull request 7 and awaiting human review
+- Last evidence: `make test-process`, `make test-runtime`,
+  `make test-native-vfs`, `make demo-gate-7`, and aggregate `make test` passed
+  on 2026-11-03
 - Required human decision: none until the Gate 7 demonstration checkpoint; the
   Gate 9 DNF repository choice is deferred until before Gate 9 implementation

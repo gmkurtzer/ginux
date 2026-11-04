@@ -25,9 +25,14 @@ dependencies = [
  "ginus-core",
  "ginus-devices",
  "ginus-domain",
+ "ginus-process",
  "ginus-runtime",
  "ginus-vfs",
 ]
+
+[[package]]
+name = "ginus-process"
+version = "0.1.0"
 
 [[package]]
 name = "ginus-runtime"
@@ -49,6 +54,10 @@ dependencies = [
 
 [[package]]
 name = "managed-payload"
+version = "0.1.0"
+
+[[package]]
+name = "process-native-fixture"
 version = "0.1.0"
 
 [[package]]

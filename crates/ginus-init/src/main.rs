@@ -13,6 +13,10 @@ use ginus_devices::{
     IOCTL_CONSOLE_GET_SIZE,
 };
 use ginus_domain::{ConfigError, Domain, DomainConfig};
+use ginus_process::{
+    Credentials, EventFd, EventPoll, FutexTable, ProcessError, ProcessTable, SignalAction,
+    SignalDelivery, TimerTable, VirtualClock, EVENT_READ, EVENT_WRITE,
+};
 use ginus_runtime::{execute, AddressSpace, AuditAction, LoadError};
 use ginus_vfs::{BaseReader, Index, VfsError, VirtualFs, O_CREATE, O_READ, O_WRITE};
 
@@ -58,6 +62,9 @@ const CLOCK_MONOTONIC: usize = 1;
 const CLOCK_PROCESS_CPUTIME_ID: usize = 2;
 
 const PTRACE_TRACEME: usize = 0;
+const PTRACE_PEEKTEXT: usize = 1;
+const PTRACE_POKETEXT: usize = 4;
+const PTRACE_CONT: usize = 7;
 const PTRACE_PEEKDATA: usize = 2;
 const PTRACE_KILL: usize = 8;
 const PTRACE_GETREGS: usize = 12;
@@ -65,8 +72,11 @@ const PTRACE_SETREGS: usize = 13;
 const PTRACE_SYSCALL: usize = 24;
 const PTRACE_SYSEMU: usize = 31;
 const PTRACE_SETOPTIONS: usize = 0x4200;
+const PTRACE_GETEVENTMSG: usize = 0x4201;
 const PTRACE_O_TRACESYSGOOD: usize = 1;
+const PTRACE_O_TRACEFORK: usize = 1 << 1;
 const PTRACE_O_EXITKILL: usize = 1 << 20;
+const PTRACE_EVENT_FORK: usize = 1;
 
 const EPERM: i64 = 1;
 const ENOSYS: i64 = 38;
@@ -230,6 +240,13 @@ extern "C" fn rust_main(initial_stack: *const usize) -> ! {
             let config_path = unsafe { *argv.add(2) as *const u8 };
             let fixture_path = unsafe { *argv.add(3) as *const u8 };
             domain_main(config_path, fixture_path);
+        } else if c_string_equals(command, b"process") {
+            let config_path = unsafe { *argv.add(2) as *const u8 };
+            process_main(config_path);
+        } else if argc >= 4 && c_string_equals(command, b"process-native") {
+            let config_path = unsafe { *argv.add(2) as *const u8 };
+            let fixture_path = unsafe { *argv.add(3) as *const u8 };
+            process_native_main(config_path, fixture_path);
         } else if argc >= 4 && c_string_equals(command, b"devices") {
             let config_path = unsafe { *argv.add(2) as *const u8 };
             let block_path = unsafe { *argv.add(3) as *const u8 };
@@ -242,6 +259,570 @@ extern "C" fn rust_main(initial_stack: *const usize) -> ! {
         }
     }
     gate1_main()
+}
+
+fn process_main(config_path: *const u8) -> ! {
+    let config = load_config(config_path);
+    let mut domain = Domain::create(config);
+    if domain.start().is_err() {
+        process_fail(b"domain start failed");
+    }
+    let mut processes: ProcessTable<8> = ProcessTable::new();
+    let init = processes
+        .create_init(Credentials::root())
+        .unwrap_or_else(|_| process_fail(b"virtual init failed"));
+    if init.pid != 1 || processes.view(init).map(|view| view.parent) != Ok(0) {
+        process_fail(b"virtual init identity failed");
+    }
+    line(b"GINUS_PROCESS: init=1 parent=0 host-pid=unexposed");
+
+    let mut final_child = init;
+    for iteration in 0..256u32 {
+        let child = processes
+            .fork(init)
+            .unwrap_or_else(|_| process_fail(b"fork failed"));
+        let thread = processes
+            .clone_thread(child)
+            .unwrap_or_else(|_| process_fail(b"clone thread failed"));
+        if processes.view(thread).map(|view| view.tgid) != Ok(child.pid)
+            || processes.exec(child) != Ok(1)
+        {
+            process_fail(b"thread or exec identity failed");
+        }
+        processes
+            .exit(thread, 0)
+            .unwrap_or_else(|_| process_fail(b"thread exit failed"));
+        processes
+            .exit(child, iteration as i32)
+            .unwrap_or_else(|_| process_fail(b"child exit failed"));
+        if processes.wait(init, Some(thread.pid)).is_err()
+            || processes
+                .wait(init, Some(child.pid))
+                .map(|result| result.status)
+                != Ok(iteration as i32)
+        {
+            process_fail(b"wait or reap failed");
+        }
+        final_child = child;
+    }
+    if processes.view(final_child) != Err(ProcessError::InvalidTask) || processes.active() != 1 {
+        process_fail(b"stale identity or lifecycle leak");
+    }
+    line(b"GINUS_PROCESS: fork-clone-exec-wait iterations=256 stale-id=denied active=1");
+
+    let signal_child = processes
+        .fork(init)
+        .unwrap_or_else(|_| process_fail(b"signal child failed"));
+    processes
+        .set_signal_action(signal_child, 10, SignalAction::Handler(0x4000))
+        .unwrap_or_else(|_| process_fail(b"signal action failed"));
+    processes
+        .signal(signal_child, 10)
+        .unwrap_or_else(|_| process_fail(b"signal queue failed"));
+    if processes.blocking_interrupted(signal_child) != Ok(true)
+        || processes.begin_signal(signal_child)
+            != Ok(Some(SignalDelivery::Handler {
+                signal: 10,
+                address: 0x4000,
+            }))
+        || processes.signal_return(signal_child).is_err()
+    {
+        process_fail(b"signal delivery or return failed");
+    }
+    line(b"GINUS_PROCESS: signal=10 blocked-wait=interrupted handler=0x4000 return=PASS");
+
+    let credentials = processes
+        .credentials_mut(signal_child)
+        .unwrap_or_else(|_| process_fail(b"credentials lookup failed"));
+    if credentials.set_groups(&[10, 20]).is_err()
+        || credentials.set_gid(1000).is_err()
+        || credentials.set_uid(1000).is_err()
+        || credentials.capabilities != 0
+        || credentials.set_uid(0) != Err(ProcessError::PermissionDenied)
+    {
+        process_fail(b"virtual credential transition failed");
+    }
+    line(b"GINUS_PROCESS: virtual-uid=1000 virtual-gid=1000 host-credentials=unchanged regain-root=denied");
+
+    let mut futex: FutexTable<2> = FutexTable::new();
+    if futex.wait(signal_child, 0x1000, 7, 7).is_err() {
+        process_fail(b"futex wait failed");
+    }
+    let mut woken = [init; 1];
+    if futex.wake(0x1000, 1, &mut woken) != Ok(1) || woken[0] != signal_child {
+        process_fail(b"futex wake failed");
+    }
+    let mut event = EventFd::new(0, false);
+    let mut poll: EventPoll<2> = EventPoll::new();
+    if poll.add(7, EVENT_READ | EVENT_WRITE).is_err()
+        || event.write(9).is_err()
+        || poll.ready(7, EVENT_READ) != Ok(EVENT_READ)
+        || event.read() != Ok(9)
+    {
+        process_fail(b"eventfd or epoll failed");
+    }
+    let mut clock = VirtualClock::new();
+    let mut timers: TimerTable<2> = TimerTable::new();
+    let timer = timers
+        .create()
+        .unwrap_or_else(|_| process_fail(b"timer create failed"));
+    if timers.arm(timer, 0, 50, 25).is_err() || clock.advance(125).is_err() {
+        process_fail(b"timer arm failed");
+    }
+    timers.update(clock.monotonic_ns());
+    if timers.read(timer) != Ok(4) {
+        process_fail(b"timer expiration failed");
+    }
+    line(b"GINUS_PROCESS: futex-wake=1 eventfd=9 epoll=readable timer-expirations=4");
+
+    if processes.shutdown(137) != 2 || processes.reap_all() != 2 || processes.active() != 0 {
+        process_fail(b"shutdown cleanup failed");
+    }
+    if domain.task_exited(true).is_err() {
+        process_fail(b"domain cleanup failed");
+    }
+    line(b"GINUS_PROCESS: shutdown tasks=0 waiters=0 events=0 timers=0 resources=released");
+    line(b"GATE7_PROCESS: PASS");
+    exit_process(0)
+}
+
+fn process_fail(reason: &[u8]) -> ! {
+    write_all(b"GATE7_PROCESS: FAIL: ");
+    line(reason);
+    exit_process(1)
+}
+
+#[derive(Clone, Copy)]
+struct NativeProcessTask {
+    host_pid: usize,
+    virtual_id: ginus_process::TaskId,
+    awaiting_exit: bool,
+    override_result: bool,
+    result: i64,
+    syscall: u64,
+    translated_rdi: u64,
+    fork_result_pending: u32,
+    fork_breakpoint_rip: usize,
+    fork_breakpoint_word: usize,
+    tracing: bool,
+}
+
+fn process_native_main(config_path: *const u8, fixture_path: *const u8) -> ! {
+    let config = load_config(config_path);
+    let mut domain = Domain::create(config);
+    if domain.start().is_err() {
+        process_fail(b"native process domain start failed");
+    }
+    let child = unsafe { syscall0(SYS_FORK) };
+    if child < 0 {
+        process_fail(b"native process tracee fork failed");
+    }
+    if child == 0 {
+        process_native_tracee(fixture_path);
+    }
+    supervise_process_native(child as usize, &mut domain)
+}
+
+fn process_native_tracee(fixture_path: *const u8) -> ! {
+    if unsafe { syscall4(SYS_PTRACE, PTRACE_TRACEME, 0, 0, 0) } < 0
+        || unsafe { syscall5(SYS_PRCTL, PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) } < 0
+    {
+        native_tracee_setup_fail(130);
+    }
+    let argv = [fixture_path, core::ptr::null()];
+    let environment: [*const u8; 1] = [core::ptr::null()];
+    unsafe {
+        syscall3(
+            SYS_EXECVE,
+            fixture_path as usize,
+            argv.as_ptr() as usize,
+            environment.as_ptr() as usize,
+        );
+        syscall1(SYS_EXIT_HOST, 131);
+    }
+    loop {
+        core::hint::spin_loop();
+    }
+}
+
+fn supervise_process_native(root_host_pid: usize, domain: &mut Domain) -> ! {
+    let mut status = 0i32;
+    if wait(root_host_pid, &mut status) < 0 || !stopped(status) {
+        write_all(b"GINUS_NATIVE_PROCESS: initial-status=");
+        write_i64(status as i64);
+        write_all(b"\n");
+        native_fail(
+            domain,
+            root_host_pid,
+            b"process fixture did not stop after exec",
+        );
+    }
+    let options = PTRACE_O_TRACESYSGOOD | PTRACE_O_TRACEFORK | PTRACE_O_EXITKILL;
+    if ptrace(PTRACE_SETOPTIONS, root_host_pid, 0, options) < 0 {
+        native_fail(domain, root_host_pid, b"process ptrace options failed");
+    }
+    let mut processes: ProcessTable<8> = ProcessTable::new();
+    let root_virtual = processes
+        .create_init(Credentials::unprivileged(1000, 1000))
+        .unwrap_or_else(|_| process_native_fail(domain, root_host_pid, b"virtual init failed"));
+    let mut tasks: [Option<NativeProcessTask>; 8] = [None; 8];
+    tasks[0] = Some(NativeProcessTask {
+        host_pid: root_host_pid,
+        virtual_id: root_virtual,
+        awaiting_exit: false,
+        override_result: false,
+        result: 0,
+        syscall: 0,
+        translated_rdi: 0,
+        fork_result_pending: 0,
+        fork_breakpoint_rip: 0,
+        fork_breakpoint_word: 0,
+        tracing: true,
+    });
+    if ptrace(PTRACE_SYSCALL, root_host_pid, 0, 0) < 0 {
+        process_native_fail(domain, root_host_pid, b"process initial resume failed");
+    }
+    line(b"GINUS_NATIVE_PROCESS: virtual-init=1 host-pid=unexposed ptrace=attached");
+    let mut native_child_exits = 0usize;
+
+    loop {
+        status = 0;
+        let waited = unsafe {
+            syscall4(
+                SYS_WAIT4,
+                (-1isize) as usize,
+                &mut status as *mut _ as usize,
+                0,
+                0,
+            )
+        };
+        if waited <= 0 {
+            process_native_fail(domain, root_host_pid, b"process wait-any failed");
+        }
+        let host_pid = waited as usize;
+        let Some(task_index) = tasks
+            .iter()
+            .position(|task| task.is_some_and(|task| task.host_pid == host_pid))
+        else {
+            process_native_fail(domain, root_host_pid, b"unknown host tracee");
+        };
+        let task = tasks[task_index].unwrap();
+
+        if !stopped(status) {
+            let exit_status = if status & 0x7f == 0 {
+                status >> 8
+            } else {
+                128 + (status & 0x7f)
+            };
+            if processes.exit(task.virtual_id, exit_status).is_err() {
+                process_native_fail(domain, root_host_pid, b"virtual exit failed");
+            }
+            if let Some(entry) = tasks[task_index].as_mut() {
+                entry.tracing = false;
+            }
+            if task.virtual_id != root_virtual && exit_status == 23 {
+                native_child_exits += 1;
+            }
+            if task.virtual_id == root_virtual {
+                if exit_status != 0
+                    || native_child_exits != 32
+                    || tasks.iter().flatten().any(|entry| entry.tracing)
+                {
+                    write_all(b"GINUS_NATIVE_PROCESS: root-exit=");
+                    write_i64(exit_status as i64);
+                    write_all(b" tracing-remaining=");
+                    write_u64(tasks.iter().flatten().filter(|entry| entry.tracing).count() as u64);
+                    write_all(b"\n");
+                    process_native_fail(domain, root_host_pid, b"native process fixture failed");
+                }
+                if processes.reap_all() == 0 || processes.active() != 0 {
+                    process_native_fail(domain, root_host_pid, b"native process cleanup failed");
+                }
+                if domain.task_exited(true).is_err() {
+                    process_native_fail(domain, root_host_pid, b"native domain exit failed");
+                }
+                line(b"GINUS_NATIVE_PROCESS: fork=mediated iterations=32 concurrent-children=2 child=ptrace-attached pid-translation=PASS");
+                line(b"GINUS_NATIVE_PROCESS: wait=translated child-exits=32 exit-status=23 tasks=0 cleanup=PASS");
+                line(b"GATE7_NATIVE_PROCESS: PASS");
+                exit_process(0);
+            }
+            continue;
+        }
+
+        let event = (status as usize) >> 16;
+        if event == PTRACE_EVENT_FORK {
+            let mut child_host_pid = 0usize;
+            if ptrace(
+                PTRACE_GETEVENTMSG,
+                host_pid,
+                0,
+                &mut child_host_pid as *mut _ as usize,
+            ) < 0
+            {
+                process_native_fail(domain, root_host_pid, b"fork event read failed");
+            }
+            let child_virtual = processes.fork(task.virtual_id).unwrap_or_else(|_| {
+                process_native_fail(domain, root_host_pid, b"virtual fork failed")
+            });
+            let Some(child_slot) = tasks.iter().position(Option::is_none) else {
+                process_native_fail(domain, root_host_pid, b"host task table full");
+            };
+            tasks[child_slot] = Some(NativeProcessTask {
+                host_pid: child_host_pid,
+                virtual_id: child_virtual,
+                awaiting_exit: false,
+                override_result: false,
+                result: 0,
+                syscall: 0,
+                translated_rdi: 0,
+                fork_result_pending: 0,
+                fork_breakpoint_rip: 0,
+                fork_breakpoint_word: 0,
+                tracing: true,
+            });
+            let mut parent_registers = core::mem::MaybeUninit::<UserRegs>::uninit();
+            if ptrace(
+                PTRACE_GETREGS,
+                host_pid,
+                0,
+                parent_registers.as_mut_ptr() as usize,
+            ) < 0
+            {
+                process_native_fail(domain, root_host_pid, b"fork breakpoint registers failed");
+            }
+            let parent_registers = unsafe { parent_registers.assume_init() };
+            let breakpoint_rip = parent_registers.rip as usize;
+            let mut breakpoint_word = 0usize;
+            if ptrace(
+                PTRACE_PEEKTEXT,
+                host_pid,
+                breakpoint_rip,
+                &mut breakpoint_word as *mut _ as usize,
+            ) < 0
+            {
+                process_native_fail(domain, root_host_pid, b"fork breakpoint read failed");
+            }
+            if ptrace(
+                PTRACE_POKETEXT,
+                host_pid,
+                breakpoint_rip,
+                (breakpoint_word & !0xff) | 0xcc,
+            ) < 0
+            {
+                process_native_fail(domain, root_host_pid, b"fork breakpoint install failed");
+            }
+            let parent = tasks[task_index].as_mut().unwrap();
+            parent.awaiting_exit = false;
+            parent.override_result = false;
+            parent.fork_result_pending = child_virtual.pid;
+            parent.fork_breakpoint_rip = breakpoint_rip;
+            parent.fork_breakpoint_word = breakpoint_word;
+            if ptrace(PTRACE_CONT, host_pid, 0, 0) < 0 {
+                process_native_fail(
+                    domain,
+                    root_host_pid,
+                    b"fork parent breakpoint resume failed",
+                );
+            }
+            continue;
+        }
+
+        let signal = ((status >> 8) & 0xff) as u8;
+        if signal == 5 && tasks[task_index].unwrap().fork_result_pending != 0 {
+            let mut parent_registers = core::mem::MaybeUninit::<UserRegs>::uninit();
+            if ptrace(
+                PTRACE_GETREGS,
+                host_pid,
+                0,
+                parent_registers.as_mut_ptr() as usize,
+            ) < 0
+            {
+                process_native_fail(domain, root_host_pid, b"fork result read failed");
+            }
+            let mut parent_registers = unsafe { parent_registers.assume_init() };
+            let pending = tasks[task_index].unwrap();
+            let virtual_pid = pending.fork_result_pending;
+            if ptrace(
+                PTRACE_POKETEXT,
+                host_pid,
+                pending.fork_breakpoint_rip,
+                pending.fork_breakpoint_word,
+            ) < 0
+            {
+                process_native_fail(domain, root_host_pid, b"fork breakpoint restore failed");
+            }
+            write_all(b"GINUS_NATIVE_PROCESS_AUDIT: fork host-result=");
+            write_i64(parent_registers.rax as i64);
+            write_all(b" virtual-result=");
+            write_u64(virtual_pid as u64);
+            write_all(b"\n");
+            parent_registers.rip = pending.fork_breakpoint_rip as u64;
+            parent_registers.rax = virtual_pid as u64;
+            if ptrace(
+                PTRACE_SETREGS,
+                host_pid,
+                0,
+                &parent_registers as *const _ as usize,
+            ) < 0
+            {
+                process_native_fail(domain, root_host_pid, b"fork result translation failed");
+            }
+            let parent = tasks[task_index].as_mut().unwrap();
+            parent.fork_result_pending = 0;
+            parent.fork_breakpoint_rip = 0;
+            parent.fork_breakpoint_word = 0;
+            if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
+                process_native_fail(domain, root_host_pid, b"fork parent resume failed");
+            }
+            continue;
+        }
+        if signal == 19 {
+            let _ = ptrace(PTRACE_SETOPTIONS, host_pid, 0, options);
+            if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
+                process_native_fail(domain, root_host_pid, b"fork child resume failed");
+            }
+            continue;
+        }
+        if signal == 17 {
+            if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
+                process_native_fail(domain, root_host_pid, b"SIGCHLD mediation failed");
+            }
+            continue;
+        }
+        if signal != (5 | 0x80) {
+            write_all(b"GINUS_NATIVE_PROCESS: unexpected-signal=");
+            write_u64(signal as u64);
+            write_all(b" event=");
+            write_u64(event as u64);
+            write_all(b" host-pid=");
+            write_u64(host_pid as u64);
+            write_all(b" virtual-pid=");
+            write_u64(task.virtual_id.pid as u64);
+            let mut diagnostic_registers = core::mem::MaybeUninit::<UserRegs>::uninit();
+            if ptrace(
+                PTRACE_GETREGS,
+                host_pid,
+                0,
+                diagnostic_registers.as_mut_ptr() as usize,
+            ) >= 0
+            {
+                let diagnostic_registers = unsafe { diagnostic_registers.assume_init() };
+                write_all(b" rip=");
+                write_u64(diagnostic_registers.rip);
+                write_all(b" orig-syscall=");
+                write_u64(diagnostic_registers.orig_rax);
+            }
+            write_all(b"\n");
+            process_native_fail(domain, root_host_pid, b"unexpected process trace stop");
+        }
+        let mut registers = core::mem::MaybeUninit::<UserRegs>::uninit();
+        if ptrace(PTRACE_GETREGS, host_pid, 0, registers.as_mut_ptr() as usize) < 0 {
+            process_native_fail(domain, root_host_pid, b"process registers read failed");
+        }
+        let mut registers = unsafe { registers.assume_init() };
+        let mut current = tasks[task_index].unwrap();
+        if current.awaiting_exit {
+            let restore_translated_argument = current.syscall == 61 && current.translated_rdi != 0;
+            if current.syscall == 61 && registers.rax as i64 > 0 {
+                let waited_host = registers.rax as usize;
+                let Some(waited_index) = tasks
+                    .iter()
+                    .position(|entry| entry.is_some_and(|entry| entry.host_pid == waited_host))
+                else {
+                    process_native_fail(domain, root_host_pid, b"wait result host pid unknown");
+                };
+                let waited_virtual = tasks[waited_index].unwrap().virtual_id;
+                write_all(b"GINUS_NATIVE_PROCESS_AUDIT: wait host-result=");
+                write_i64(registers.rax as i64);
+                write_all(b" virtual-result=");
+                write_u64(waited_virtual.pid as u64);
+                write_all(b"\n");
+                if processes
+                    .wait(current.virtual_id, Some(waited_virtual.pid))
+                    .is_err()
+                {
+                    process_native_fail(domain, root_host_pid, b"virtual wait failed");
+                }
+                registers.rax = waited_virtual.pid as u64;
+                registers.rdi = current.translated_rdi;
+                tasks[waited_index] = None;
+                current.override_result = true;
+            } else if current.override_result {
+                registers.rax = current.result as u64;
+            }
+            if restore_translated_argument {
+                registers.rdi = current.translated_rdi;
+            }
+            if (current.override_result || restore_translated_argument)
+                && ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+            {
+                process_native_fail(domain, root_host_pid, b"process result translation failed");
+            }
+            current.awaiting_exit = false;
+            current.override_result = false;
+            current.translated_rdi = 0;
+            tasks[task_index] = Some(current);
+            if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
+                process_native_fail(domain, root_host_pid, b"process exit resume failed");
+            }
+            continue;
+        }
+
+        current.syscall = registers.orig_rax;
+        current.awaiting_exit = true;
+        match registers.orig_rax {
+            39 | 110 => {
+                let view = processes.view(current.virtual_id).unwrap_or_else(|_| {
+                    process_native_fail(domain, root_host_pid, b"identity lookup failed")
+                });
+                current.result = if registers.orig_rax == 39 {
+                    view.id.pid as i64
+                } else {
+                    view.parent as i64
+                };
+                current.override_result = true;
+                registers.orig_rax = u64::MAX;
+            }
+            57 => {}
+            61 => {
+                if registers.rdi != u64::MAX {
+                    let virtual_pid = registers.rdi as u32;
+                    let Some(target) = tasks
+                        .iter()
+                        .flatten()
+                        .find(|entry| entry.virtual_id.pid == virtual_pid)
+                    else {
+                        write_all(b"GINUS_NATIVE_PROCESS_AUDIT: invalid-wait-selector=");
+                        write_u64(virtual_pid as u64);
+                        write_all(b" caller=");
+                        write_u64(current.virtual_id.pid as u64);
+                        write_all(b"\n");
+                        process_native_fail(domain, root_host_pid, b"wait selector invalid");
+                    };
+                    current.translated_rdi = registers.rdi;
+                    registers.rdi = target.host_pid as u64;
+                }
+            }
+            1 if matches!(registers.rdi, 1 | 2) && registers.rdx <= 4096 => {}
+            60 | 231 => {}
+            _ => {
+                current.result = -ENOSYS;
+                current.override_result = true;
+                registers.orig_rax = u64::MAX;
+            }
+        }
+        tasks[task_index] = Some(current);
+        if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+            || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
+        {
+            process_native_fail(domain, root_host_pid, b"process syscall dispatch failed");
+        }
+    }
+}
+
+fn process_native_fail(domain: &mut Domain, root_pid: usize, reason: &[u8]) -> ! {
+    let _ = ptrace(PTRACE_KILL, root_pid, 0, 0);
+    domain_fail(domain, reason)
 }
 
 struct HostBlock {
