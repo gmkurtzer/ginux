@@ -16270,6 +16270,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let descriptor_argument_widths = verify_linux_descriptor_argument_widths();
     let process_selector_widths = verify_linux_process_selector_widths();
     let filesystem_argument_widths = verify_linux_filesystem_argument_widths();
+    let rename_exchange = verify_linux_rename_exchange();
     let event_argument_widths = verify_linux_event_argument_widths();
     let process_advice = verify_linux_process_madvise_syscall();
     let posix_queues = verify_linux_posix_message_queue_syscalls();
@@ -16336,6 +16337,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         descriptor_argument_widths,
         process_selector_widths,
         filesystem_argument_widths,
+        rename_exchange,
         event_argument_widths,
         process_advice,
         posix_queues,
@@ -16399,6 +16401,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && descriptor_argument_widths
         && process_selector_widths
         && filesystem_argument_widths
+        && rename_exchange
         && event_argument_widths
         && process_advice
         && posix_queues
@@ -20119,6 +20122,54 @@ fn verify_linux_filesystem_argument_widths() -> bool {
         && path_closed
         && xattr_removed
         && unmapped
+}
+
+fn verify_linux_rename_exchange() -> bool {
+    const RENAME_EXCHANGE: u64 = 2;
+    let mapping = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    if mapping >= LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39)
+        || !copy_to_linux_user(mapping, b"/ginux-exchange-file\0")
+        || !copy_to_linux_user(mapping + 256, b"/ginux-exchange-directory\0")
+        || !copy_to_linux_user(mapping + 512, b"/ginux-exchange-directory/child\0")
+        || !copy_to_linux_user(mapping + 768, b"/ginux-exchange-missing\0")
+    {
+        return false;
+    }
+    let cwd = u64::from(LINUX_AT_FDCWD);
+    let file = crate::linux_overlay::create_file(b"ginux-exchange-file", 0o600, b"file");
+    let directory = crate::linux_overlay::create_directory(b"ginux-exchange-directory", 0o700);
+    let child = directory.and_then(|_| {
+        crate::linux_overlay::create_file(b"ginux-exchange-directory/child", 0o600, b"child")
+    });
+    let rejected = linux_renameat(cwd, mapping, cwd, mapping + 256, RENAME_EXCHANGE | 1)
+        == LINUX_EINVAL
+        && linux_renameat(cwd, mapping, cwd, mapping + 768, RENAME_EXCHANGE) == LINUX_ENOENT
+        && linux_renameat(cwd, mapping + 256, cwd, mapping + 512, RENAME_EXCHANGE) == LINUX_EINVAL
+        && linux_renameat(cwd, mapping, cwd, mapping, RENAME_EXCHANGE) == 0;
+    let exchanged = linux_renameat(cwd, mapping, cwd, mapping + 256, RENAME_EXCHANGE) == 0;
+    let has = |path: &[u8], handle: Option<crate::linux_overlay::Handle>| {
+        crate::linux_overlay::lookup(path).is_some_and(|metadata| Some(metadata.handle) == handle)
+    };
+    let swapped = has(b"ginux-exchange-file", directory)
+        && has(b"ginux-exchange-file/child", child)
+        && has(b"ginux-exchange-directory", file)
+        && crate::linux_overlay::lookup(b"ginux-exchange-directory/child").is_none();
+    let removed = child.is_some_and(crate::linux_overlay::unlink)
+        && directory.is_some_and(crate::linux_overlay::unlink)
+        && file.is_some_and(crate::linux_overlay::unlink);
+    let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
+    let valid = rejected && exchanged && swapped && removed && unmapped;
+    if valid {
+        serial_write("ginux: Linux renameat2 RENAME_EXCHANGE swapped names\r\n");
+    }
+    valid
 }
 
 fn verify_linux_sysv_semaphore_syscalls() -> bool {
@@ -27432,6 +27483,85 @@ fn linux_truncate(path_address: u64, length: u64) -> u64 {
     }
 }
 
+fn linux_user_canonical_path_at(
+    directory: u64,
+    path_address: u64,
+    output: &mut [u8; crate::linux_overlay::PATH_CAPACITY],
+) -> Result<usize, u64> {
+    let mut path = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+    let length = copy_linux_c_string(path_address, &mut path)?;
+    linux_canonical_path_at(directory, &path[..length], output)
+}
+
+/// renameat2(RENAME_EXCHANGE): both names must exist (ENOENT, the target is
+/// looked up without LOOKUP_CREATE, fs/namei.c:3873-3874), neither may
+/// contain the other (EINVAL, fs/namei.c:3894-3906), and the same entry on
+/// both sides is a no-op (vfs_rename(), fs/namei.c:6101).
+fn linux_rename_exchange(
+    old_directory: u64,
+    old_path_address: u64,
+    new_directory: u64,
+    new_path_address: u64,
+) -> u64 {
+    let mut old_canonical = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+    let old_length =
+        match linux_user_canonical_path_at(old_directory, old_path_address, &mut old_canonical) {
+            Ok(length) => length,
+            Err(error) => return error,
+        };
+    let mut new_canonical = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+    let new_length =
+        match linux_user_canonical_path_at(new_directory, new_path_address, &mut new_canonical) {
+            Ok(length) => length,
+            Err(error) => return error,
+        };
+    let old_path = &old_canonical[..old_length];
+    let new_path = &new_canonical[..new_length];
+    // The visible image (lower layer) entry at a path: Some(is_directory).
+    let lower = |path: &[u8]| {
+        if crate::linux_overlay::hidden(path) {
+            return None;
+        }
+        crate::published_rootfs::lookup_metadata_at(crate::published_rootfs::ROOT_HANDLE, path).map(
+            |(_, entry)| {
+                entry
+                    .is_none_or(|entry| entry.kind == crate::published_rootfs::EntryKind::Directory)
+            },
+        )
+    };
+    let source = crate::linux_overlay::lookup(old_path);
+    let target = crate::linux_overlay::lookup(new_path);
+    let source_lower = lower(old_path);
+    let target_lower = lower(new_path);
+    if source.is_none() && source_lower.is_none() || target.is_none() && target_lower.is_none() {
+        return LINUX_ENOENT;
+    }
+    if old_path == new_path {
+        return 0;
+    }
+    if ginux_kernel_policy::path_within(old_path, new_path)
+        || ginux_kernel_policy::path_within(new_path, old_path)
+    {
+        return LINUX_EINVAL;
+    }
+    // Directories with an image layer are not moved, as in overlayfs without
+    // redirect_dir (ovl_can_move(), fs/overlayfs/dir.c:1002 and 1147-1152):
+    // their image children would stay at the old name. Entries that exist
+    // only in the image are not copied up here and take the same EXDEV.
+    if source.is_none()
+        || target.is_none()
+        || source_lower == Some(true)
+        || target_lower == Some(true)
+    {
+        return LINUX_EXDEV;
+    }
+    if crate::linux_overlay::exchange(old_path, new_path) {
+        0
+    } else {
+        LINUX_ENAMETOOLONG
+    }
+}
+
 fn linux_renameat(
     old_directory: u64,
     old_path_address: u64,
@@ -27443,8 +27573,21 @@ fn linux_renameat(
     let new_directory = u64::from(new_directory as u32);
     let flags = u64::from(flags as u32);
     const RENAME_NOREPLACE: u64 = 1;
-    if flags & !RENAME_NOREPLACE != 0 {
+    const RENAME_EXCHANGE: u64 = 2;
+    // RENAME_EXCHANGE does not combine with RENAME_NOREPLACE
+    // (fs/namei.c:6268-6273).
+    if flags & !(RENAME_NOREPLACE | RENAME_EXCHANGE) != 0
+        || flags == RENAME_NOREPLACE | RENAME_EXCHANGE
+    {
         return LINUX_EINVAL;
+    }
+    if flags == RENAME_EXCHANGE {
+        return linux_rename_exchange(
+            old_directory,
+            old_path_address,
+            new_directory,
+            new_path_address,
+        );
     }
     let mut old_path = [0_u8; crate::linux_overlay::PATH_CAPACITY];
     let old_length = match copy_linux_c_string(old_path_address, &mut old_path) {

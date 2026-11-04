@@ -1313,6 +1313,11 @@ if ! grep -q '^ginux: Linux SysV domain quota enforced independently' "$output_f
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux renameat2 RENAME_EXCHANGE swapped names' "$output_file"; then
+    echo "Boot test failed: Linux renameat2 RENAME_EXCHANGE did not swap names." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: generation-owned virtio DMA frame allocated' "$output_file"; then
     echo "Boot test failed: virtio DMA memory was not generation-owned." >&2
     exit 1

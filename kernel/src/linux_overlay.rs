@@ -981,6 +981,56 @@ pub(crate) fn rename(handle: Handle, path: &[u8]) -> bool {
     true
 }
 
+/// Swaps the names of the existing entries at `first` and `second`, carrying
+/// each directory's subtree along (RENAME_EXCHANGE). Neither may contain the
+/// other. Every new path is checked before any node changes, so a failure
+/// leaves both names in place and no name is ever missing.
+pub(crate) fn exchange(first: &[u8], second: &[u8]) -> bool {
+    if lookup(first).is_none()
+        || lookup(second).is_none()
+        || ginux_kernel_policy::path_within(first, second)
+        || ginux_kernel_policy::path_within(second, first)
+    {
+        return false;
+    }
+    let Some(overlay) = live() else {
+        return false;
+    };
+    let too_long = for_each_node(overlay, |candidate| {
+        let (prefix, suffix) =
+            ginux_kernel_policy::exchanged_path(first, second, candidate.path())?;
+        (candidate.linked && prefix.len() + suffix.len() >= PATH_CAPACITY).then_some(())
+    });
+    if too_long.is_some() {
+        return false;
+    }
+    let overlay = live_mut();
+    let mut page = overlay.first_node_page;
+    while page != FrameLease::EMPTY {
+        let Some(nodes) = node_page_mut(page) else {
+            return false;
+        };
+        for candidate in &mut nodes.nodes {
+            if !candidate.active || !candidate.linked {
+                continue;
+            }
+            let Some((prefix, suffix)) =
+                ginux_kernel_policy::exchanged_path(first, second, candidate.path())
+            else {
+                continue;
+            };
+            let new_length = prefix.len() + suffix.len();
+            let mut destination = [0_u8; PATH_CAPACITY];
+            destination[..prefix.len()].copy_from_slice(prefix);
+            destination[prefix.len()..new_length].copy_from_slice(suffix);
+            candidate.path = destination;
+            candidate.path_length = new_length as u16;
+        }
+        page = nodes.next;
+    }
+    true
+}
+
 pub(crate) fn unlink(handle: Handle) -> bool {
     let Some(metadata) = metadata(handle) else {
         return false;

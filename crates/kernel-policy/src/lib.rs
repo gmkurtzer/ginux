@@ -40,6 +40,29 @@ pub fn valid_vtd_write_fault_record(high: u64, source: u16) -> bool {
         && high & SOURCE_MASK == u64::from(source)
 }
 
+/// Whether `path` is the entry `ancestor` or lies in its subtree. Both are
+/// canonical slash-separated paths without a trailing slash.
+pub fn path_within(ancestor: &[u8], path: &[u8]) -> bool {
+    path.starts_with(ancestor) && (path.len() == ancestor.len() || path[ancestor.len()] == b'/')
+}
+
+/// The new prefix and the kept suffix of `path` when the disjoint entries
+/// `first` and `second` swap names (RENAME_EXCHANGE), or `None` when `path`
+/// is in neither subtree.
+pub fn exchanged_path<'a>(
+    first: &'a [u8],
+    second: &'a [u8],
+    path: &'a [u8],
+) -> Option<(&'a [u8], &'a [u8])> {
+    if path_within(first, path) {
+        Some((second, &path[first.len()..]))
+    } else if path_within(second, path) {
+        Some((first, &path[second.len()..]))
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -81,5 +104,27 @@ mod tests {
         assert!(!valid_vtd_write_fault_record(qemu_11 | (1 << 61), SOURCE));
         assert!(!valid_vtd_write_fault_record(qemu_11, SOURCE + 1));
         assert!(!valid_vtd_write_fault_record(qemu_11 ^ (1 << 32), SOURCE));
+    }
+
+    #[test]
+    fn exchanged_path_swaps_whole_subtrees() {
+        assert!(path_within(b"tmp/a", b"tmp/a"));
+        assert!(path_within(b"tmp/a", b"tmp/a/b"));
+        assert!(!path_within(b"tmp/a", b"tmp/ab"));
+        assert!(!path_within(b"tmp/a/b", b"tmp/a"));
+        assert_eq!(
+            exchanged_path(b"tmp/a", b"var/b", b"tmp/a"),
+            Some((&b"var/b"[..], &b""[..]))
+        );
+        assert_eq!(
+            exchanged_path(b"tmp/a", b"var/b", b"tmp/a/x/y"),
+            Some((&b"var/b"[..], &b"/x/y"[..]))
+        );
+        assert_eq!(
+            exchanged_path(b"tmp/a", b"var/b", b"var/b/z"),
+            Some((&b"tmp/a"[..], &b"/z"[..]))
+        );
+        assert_eq!(exchanged_path(b"tmp/a", b"var/b", b"tmp/ab"), None);
+        assert_eq!(exchanged_path(b"tmp/a", b"var/b", b"tmp"), None);
     }
 }
