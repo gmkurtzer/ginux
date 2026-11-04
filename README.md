@@ -11,10 +11,44 @@
 Ginux began as a research experiment: build an independent Rust kernel capable
 of running an unmodified Linux userspace, then find out what that experiment
 could teach us. It succeeded in reaching that goal, including booting Rocky
-Linux 10 through systemd, and it produced useful ideas around domains,
-configurable compatibility contracts, isolation, and controlled access to
-kernel services. Continuing to reproduce Linux hardware support is not the
-most useful destination for those ideas.
+Linux 10 through systemd. The result also made the next question much clearer:
+which ideas are actually worth carrying forward?
+
+### Why this pivot
+
+Building a kernel that can run Linux userspace is not the same as building a
+credible alternative to Linux, and competing with Linux is neither the goal
+nor a sensible use of this project. Linux is much more than its source code. It
+is a standard, a development process, a global community, vendor and hardware
+alignment, and decades of compatibility and operational experience. That
+complexity is necessary infrastructure for the software ecosystem, not a flaw
+for Ginux to code around.
+
+The experiment did expose a more useful direction. Linux deliberately protects
+its userspace ABI; as Linus Torvalds put it, **“And we simply do not break user
+space.”** The [kernel regression documentation](https://docs.kernel.org/process/handling-regressions.html)
+records that rule, and the [Linux ABI documentation](https://docs.kernel.org/admin-guide/abi.html)
+notes that interfaces such as system calls are expected to remain available.
+That compatibility is essential. A userspace kernel can preserve it for a
+managed workload while exposing a narrower, configurable virtual contract
+before requests reach the host kernel. This creates an opportunity to control
+which kernel interfaces a domain can observe or invoke without asking Linux to
+abandon its compatibility guarantees.
+
+The idea is not novel. [User-Mode Linux](https://kernel.org/doc/html/v5.8/virt/uml/user_mode_linux.html)
+runs a Linux kernel as a normal host process, while
+[gVisor](https://gvisor.dev/docs/) implements a Linux-compatible application
+kernel in userspace. Ginux Userspace explores its own point in that design
+space: a small, explicit shim between a real Linux kernel and a managed Linux
+userspace, governed by versioned contracts and selectable compatibility,
+security, and performance policies.
+
+This pivot is also an important result of the original AI experiment. AI made
+it practical to build ambitious prototype code, test an architectural idea,
+learn from the running system, and discard the wrong destination without
+treating the prototype itself as the product. The most valuable output was not
+simply a large body of kernel code; it was the ability to reach this conclusion
+through a working implementation.
 
 The standalone-kernel phase is therefore ending. During this transition:
 
