@@ -5091,12 +5091,14 @@ resolution_valid:
     pop rax
     call syscall_expect_efault
 
+    # FUTEX_FD was removed; Linux do_futex() reports unknown commands as
+    # ENOSYS (kernel/futex/syscalls.c:161).
     mov dword ptr [0x405c40], 42
     mov edi, 0x405c40
     mov esi, 2
     mov edx, 42
     mov eax, 202
-    call syscall_expect_einval
+    call syscall_expect_enosys
 
     mov edi, 0x405c41
     xor esi, esi
