@@ -14,7 +14,10 @@ length of the data region. Data begins at sector 8.
 
 Local configuration uses two independent 32-sector slots at sectors 8-39 and
 40-71. Each slot carries its own version, generation, length, SHA-256 digest,
-and commit marker. It records domain definitions and resource settings,
+and commit marker. Version 2 slots bind the header (magic, version, header
+size, length, generation) into the digest so a damaged generation cannot make
+a stale slot win; version 1 slots remain readable. A commit always writes the
+slot that does not hold the recovered record. It records domain definitions and resource settings,
 virtual-network topology and attachments, and host static/DHCP network policy.
 Runtime and failed/running process state is deliberately not restored; domains
 return as configured objects after reboot.
