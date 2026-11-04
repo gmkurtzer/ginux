@@ -142,4 +142,5 @@ DMA authority.
 Human checkpoint because device mediation and backend ownership materially
 affect the security boundary. Present `make demo-gate-6`, fresh evidence, and
 the pull request before acceptance.
-Technical status: passed and delivered on 2026-11-03; human acceptance pending.
+Technical status: passed and delivered on 2026-11-03. Human acceptance was
+recorded on 2026-11-03; Gate 6 is closed.

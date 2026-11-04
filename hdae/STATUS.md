@@ -19,11 +19,15 @@
   `hdae/virtual-vfs-userspace`, stacked on the accepted Gate 4 state while its
   intended eventual base remains `main`, in open
   https://github.com/gmkurtzer/usshim/pull/5.
+- Gate 6 is accepted and closed. It remains delivered on dedicated branch
+  `hdae/device-ownership`, stacked on the accepted Gate 5 state while its
+  intended eventual base remains `main`, in open
+  https://github.com/gmkurtzer/usshim/pull/6.
 - Authoritative name: Ginus (Ginux Userspace).
 - Runtime isolation unit: domain.
 - Policy unit: versioned contract.
 - Initial gate map: twelve checkpoint gates at positions 1 through 11 and 13;
-  Gates 1 through 5 are accepted and seven gates remain open.
+  Gates 1 through 6 are accepted and six gates remain open.
 - The ordered gate batch is authorized, but every open gate remains a human
   checkpoint requiring a working demonstration and explicit acceptance.
 
@@ -171,6 +175,11 @@ scope, threat model, and invariants.
 - Gate 6 is delivered in open pull request
   https://github.com/gmkurtzer/usshim/pull/6 from dedicated branch
   `hdae/device-ownership`. It is not merged or closed.
+- Human accepted Gate 6 on 2026-11-03 and directed advancement to Gate 7.
+- Human direction added usable multi-user login, virtual PID inspection,
+  lockdown checks, and a DNF update workflow to the Gate 9 systemd milestone.
+  The DNF repository source remains an explicit decision required before Gate
+  9 begins and does not block Gate 7.
 
 ## Open decisions and limitations
 
@@ -206,20 +215,19 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Human runs or reviews `make demo-gate-6` and pull request 6, then explicitly
-accepts Gate 6 or requests corrections.
+Close Gate 6, create the Gate 7 branch, and implement the bounded virtual
+process identity and lifecycle foundation.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 6, device ownership and virtual hardware; authorized and
-  passed/delivered on dedicated branch `hdae/device-ownership`; awaiting human
-  acceptance
+- Active gate: Gate 7, process runtime; authorized and starting on dedicated
+  branch `hdae/process-runtime`
 - Last evidence: `make check`, `make test-unit`, `make test-oci-layers`,
   `make test-devices`, `make test-block`, `make test-network`,
   `make bench-block`, `make bench-network`, `make demo-gate-6`, and aggregate
   `make test` passed on 2026-11-03
-- Required human decision: accept Gate 6 or request corrections after reviewing
-  its demonstration and pull request
+- Required human decision: none until the Gate 7 demonstration checkpoint; the
+  Gate 9 DNF repository choice is deferred until before Gate 9 implementation
