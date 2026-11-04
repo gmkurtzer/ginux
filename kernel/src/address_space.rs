@@ -5396,13 +5396,30 @@ pub(crate) fn replace_linux_cow_page_in_root(
         return false;
     }
     let flags = PRESENT | USER | WRITABLE | if executable { 0 } else { NO_EXECUTE };
+    write_linux_cow_leaf(root, entry, address, value, replacement.address() | flags)
+}
+
+// A sibling thread of the current process can run on an application CPU with
+// this root. Linux flushes the old copy-on-write translation on every CPU that
+// may cache it before the new page is used (mm/memory.c:4073
+// ptep_clear_flush); a local invlpg alone leaves that CPU reading the old
+// shared frame, or faulting on its stale read-only entry.
+fn write_linux_cow_leaf(
+    root: memory::FrameLease,
+    entry: *mut u64,
+    address: u64,
+    previous: u64,
+    value: u64,
+) -> bool {
     unsafe {
-        entry.write(replacement.address() | flags);
-        if root.address() == current_root() {
-            asm!("invlpg [{}]", in(reg) address, options(nostack, preserves_flags));
+        entry.write(value);
+        if root.address() == current_root() && !smp::invalidate_runtime_translation(address) {
+            entry.write(previous);
+            let _ = smp::invalidate_runtime_translation(address);
+            return false;
         }
         entry.read() & (ADDRESS_MASK | PRESENT | USER | WRITABLE | NO_EXECUTE | LINUX_RUNTIME_COW)
-            == replacement.address() | flags
+            == value
     }
 }
 
@@ -5428,14 +5445,7 @@ pub(crate) fn promote_linux_cow_page_in_root(
         return false;
     }
     let flags = PRESENT | USER | WRITABLE | if executable { 0 } else { NO_EXECUTE };
-    unsafe {
-        entry.write(expected.address() | flags);
-        if root.address() == current_root() {
-            asm!("invlpg [{}]", in(reg) address, options(nostack, preserves_flags));
-        }
-        entry.read() & (ADDRESS_MASK | PRESENT | USER | WRITABLE | NO_EXECUTE | LINUX_RUNTIME_COW)
-            == expected.address() | flags
-    }
+    write_linux_cow_leaf(root, entry, address, value, expected.address() | flags)
 }
 
 pub(crate) fn current_linux_address_executable(address: u64) -> bool {
