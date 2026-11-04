@@ -1308,6 +1308,11 @@ if ! grep -q '^ginux: Linux overlay domain quota lifecycle enforced' "$output_fi
     exit 1
 fi
 
+if ! grep -q '^ginux: failed Linux overlay renames left both paths unchanged' "$output_file"; then
+    echo "Boot test failed: a failed Linux overlay rename changed a path." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux SysV domain quota enforced independently' "$output_file"; then
     echo "Boot test failed: Linux SysV domain quota was not enforced independently." >&2
     exit 1

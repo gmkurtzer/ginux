@@ -18408,7 +18408,13 @@ fn verify_linux_file_handle_syscalls() -> bool {
             mapping + 128,
             0,
         ) == 0;
-    let renamed = named && crate::linux_overlay::rename(node, b"ginux-handle-renamed");
+    let renamed = named
+        && crate::linux_overlay::rename(
+            crate::linux_overlay::RenameSource::Node(node),
+            b"ginux-handle-renamed",
+            false,
+        )
+        .is_ok();
     let descriptor = if renamed {
         linux_open_by_handle_at(u64::from(LINUX_AT_FDCWD), mapping + 64, 0)
     } else {
@@ -27452,7 +27458,7 @@ fn linux_renameat(
         return LINUX_EXDEV;
     }
     let source = if let Some(source) = source {
-        source.handle
+        crate::linux_overlay::RenameSource::Node(source.handle)
     } else {
         let Some(entry) = source_lower.and_then(|(_, entry)| entry).filter(|entry| {
             matches!(
@@ -27463,26 +27469,21 @@ fn linux_renameat(
         }) else {
             return LINUX_EXDEV;
         };
-        let Some(handle) = crate::linux_overlay::create_file(
-            old_path,
-            linux_rootfs_mode(entry) & 0o7777,
-            entry.data,
-        ) else {
-            return LINUX_ENOSPC;
-        };
-        handle
+        crate::linux_overlay::RenameSource::Lower {
+            path: old_path,
+            mode: linux_rootfs_mode(entry) & 0o7777,
+            data: entry.data,
+        }
     };
-    if target.is_some_and(|target| !crate::linux_overlay::unlink(target.handle)) {
-        return LINUX_ENOTEMPTY;
+    // The overlay replaces the target and whites out the old path (without
+    // it the lower entry would reappear there) in one step that changes
+    // neither path when it fails.
+    match crate::linux_overlay::rename(source, new_path, source_lower.is_some()) {
+        Ok(()) => 0,
+        Err(crate::linux_overlay::RenameError::NotEmpty) => LINUX_ENOTEMPTY,
+        Err(crate::linux_overlay::RenameError::Invalid) => LINUX_EIO,
+        Err(crate::linux_overlay::RenameError::NoSpace) => LINUX_ENOSPC,
     }
-    if !crate::linux_overlay::rename(source, new_path) {
-        return LINUX_EIO;
-    }
-    // Without a whiteout the lower entry would reappear at the old path.
-    if source_lower.is_some() && !crate::linux_overlay::whiteout(old_path) {
-        return LINUX_ENOSPC;
-    }
-    0
 }
 
 fn linux_faccessat(directory: u64, path_address: u64, mode: u64, flags: u64) -> u64 {

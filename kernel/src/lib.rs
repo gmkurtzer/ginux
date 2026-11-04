@@ -1179,6 +1179,12 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("\r\nginux: Linux overlay domain quota invalid\r\n");
     }
     serial_write("\r\nginux: Linux overlay domain quota lifecycle enforced");
+    if cfg!(feature = "verification-boot") {
+        if !linux_overlay::verify_rename_rollback() {
+            kernel_fail("\r\nginux: Linux overlay rename rollback invalid\r\n");
+        }
+        serial_write("\r\nginux: failed Linux overlay renames left both paths unchanged");
+    }
     if !linux_sysv_ipc::verify_allocation_quota() {
         kernel_fail("\r\nginux: Linux SysV domain quota invalid\r\n");
     }
