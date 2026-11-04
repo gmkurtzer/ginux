@@ -210,6 +210,13 @@ scope, threat model, and invariants.
 - Gate 7 is technically passed and delivered in open pull request
   https://github.com/gmkurtzer/ginux-us/pull/7 from `hdae/process-runtime`. It is
   not merged or closed and is awaiting human checkpoint review.
+- Gate 7.5 renamed every active project surface to Ginux-us, the executable to
+  `ginux`, and packages to `ginux-*`; its deterministic stale-name check passes.
+- Post-rename `make check`, `make test`, `make test-native-vfs`, and
+  `make demo-gate-7` passed. The demonstration again passed all nine checks.
+- The first aggregate run found a predecessor generated rootfs manifest in the
+  persistent cache. The cache now rejects that marker and rebuilds it; the
+  image suite and full aggregate suite passed after the migration fix.
 
 ## Open decisions and limitations
 
@@ -227,8 +234,9 @@ scope, threat model, and invariants.
 - Gate 2 preparation requires Docker Desktop and a pinned privileged helper
   container. It is network-disabled and mounts only a temporary raw conversion
   read-only, but remains trusted build tooling rather than a runtime boundary.
-- The repository and directory still use the historical `ginux-us` name; rename
-  is not authorized in the current planning task.
+- GitHub delivery and the local checkout move are the remaining external rename
+  steps. The active source tree and generated cache format already use the new
+  name.
 - The selected Rocky OCI image has one layer; deterministic synthetic fixtures
   now cover general multi-layer replacement, whiteout, and opaque-directory
   semantics.
@@ -245,8 +253,9 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Rename active project surfaces to Ginux-us/`ginux`, add the stale-name check,
-and rerun Gate 7 under the new name.
+Push `hdae/ginux-us-rename`, open its pull request, rename the GitHub repository
+and remote, verify all eight open PRs remain reachable, then move the local
+checkout to `/Users/gmk/git/ginux-us` and stop for human review.
 
 ## Context recovery
 
@@ -255,9 +264,8 @@ and rerun Gate 7 under the new name.
 - Reload after context shift: required
 - Active gate: Gate 7.5, Ginux-us project rename, authorized and started on
   dedicated branch `hdae/ginux-us-rename`; Gate 7 remains technically passed
-  but awaits repeated post-rename evidence and human review
-- Last evidence: `make test-process`, `make test-runtime`,
-  `make test-native-vfs`, `make demo-gate-7`, and aggregate `make test` passed
-  on 2026-11-03
+  with repeated post-rename evidence and awaits human review
+- Last evidence: `make check`, `make test`, `make test-native-vfs`, and
+  `make demo-gate-7` passed on 2026-11-04
 - Required human decision: none until the Gate 7 demonstration checkpoint; the
   Gate 9 DNF repository choice is deferred until before Gate 9 implementation
