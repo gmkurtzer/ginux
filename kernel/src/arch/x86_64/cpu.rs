@@ -16312,6 +16312,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let fadvise = verify_linux_fadvise64_syscall();
     let shared_file_access = verify_linux_shared_file_mapping_access();
     let runtime_boot_contracts = verify_linux_runtime_boot_contracts();
+    let path_walk = verify_linux_path_walk_rules();
     let mappings_released =
         address_space::release_current_linux_runtime_mappings(LINUX_RUNTIME_DYNAMIC_MMAP_BASE);
     X86_RUNTIME
@@ -16376,6 +16377,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         fadvise,
         shared_file_access,
         runtime_boot_contracts,
+        path_walk,
         mappings_released,
     ]
     .into_iter()
@@ -16439,6 +16441,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && fadvise
         && shared_file_access
         && runtime_boot_contracts
+        && path_walk
         && mappings_released
 }
 
@@ -17432,6 +17435,49 @@ fn verify_linux_readahead_syscall() -> bool {
     let removed = crate::linux_overlay::unlink(node);
     let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
     errors && closed && removed && unmapped
+}
+
+fn verify_linux_path_walk_rules() -> bool {
+    let mapping = linux_runtime_mmap(
+        0,
+        PAGE_SIZE as u64,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    if !(LINUX_RUNTIME_DYNAMIC_MMAP_BASE..LINUX_RUNTIME_DYNAMIC_MMAP_BASE + (1 << 39))
+        .contains(&mapping)
+    {
+        return false;
+    }
+    let file = crate::linux_overlay::create_file(b"ginux-path-walk", 0o600, b"kept");
+    let directory = crate::linux_overlay::create_directory(b"ginux-path-walk-dir", 0o700);
+    let at = u64::from(LINUX_AT_FDCWD);
+    let stat = mapping + 256;
+    let path = |name: &[u8]| copy_to_linux_user(mapping, name);
+    let errors = file.is_some()
+        && directory.is_some()
+        && path(b"/ginux-path-walk/x\0")
+        && linux_newfstatat(at, mapping, stat, 0) == LINUX_ENOTDIR
+        && linux_mkdirat(at, mapping, 0o700) == LINUX_ENOTDIR
+        && path(b"/ginux-path-walk/../ginux-path-walk\0")
+        && linux_newfstatat(at, mapping, stat, 0) == LINUX_ENOTDIR
+        && path(b"/ginux-path-walk/\0")
+        && linux_newfstatat(at, mapping, stat, 0) == LINUX_ENOTDIR
+        && linux_openat(at, mapping, 0, 0) == LINUX_ENOTDIR
+        && linux_openat(at, mapping, LINUX_O_CREAT | 1, 0o600) == LINUX_EISDIR
+        && linux_unlinkat(at, mapping, 0) == LINUX_ENOTDIR
+        && path(b"/ginux-path-walk-dir/.\0")
+        && linux_unlinkat(at, mapping, LINUX_AT_REMOVEDIR) == LINUX_EINVAL
+        && path(b"/ginux-path-walk-dir/\0")
+        && linux_newfstatat(at, mapping, stat, 0) == 0;
+    let kept = crate::linux_overlay::lookup(b"ginux-path-walk").is_some()
+        && crate::linux_overlay::lookup(b"ginux-path-walk-dir").is_some();
+    let removed = file.is_some_and(crate::linux_overlay::unlink)
+        && directory.is_some_and(crate::linux_overlay::unlink);
+    let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
+    errors && kept && removed && unmapped
 }
 
 fn verify_linux_memory_locking_syscalls() -> bool {
@@ -25315,8 +25361,19 @@ fn linux_canonical_path_at(
         }
         crate::published_rootfs::copy_path(handle, output).ok_or(LINUX_ENOTDIR)?
     };
+    let mut walked_named = false;
     for component in path.split(|byte| *byte == b'/') {
-        if component.is_empty() || component == b"." {
+        if component.is_empty() {
+            continue;
+        }
+        // Linux walks every component that is followed by another one, ".."
+        // and "." included, and fails with ENOTDIR unless it is a directory
+        // (fs/namei.c link_path_walk()).
+        if walked_named && linux_path_is_directory(&output[..length], true) == Some(false) {
+            return Err(LINUX_ENOTDIR);
+        }
+        walked_named = false;
+        if component == b"." {
             continue;
         }
         if component == b".." {
@@ -25339,11 +25396,119 @@ fn linux_canonical_path_at(
             .ok_or(LINUX_ENAMETOOLONG)?;
         output[length..end].copy_from_slice(component);
         length = end;
+        walked_named = true;
     }
     if length == 0 {
         return Err(LINUX_EISDIR);
     }
     Ok(length)
+}
+
+/// `linux_canonical_path_at()` for calls that look up an existing entry. A
+/// trailing slash makes Linux follow the last component and require a
+/// directory (fs/namei.c lookup_last() and path_lookupat(), LOOKUP_DIRECTORY).
+fn linux_lookup_path_at(
+    directory: u64,
+    path: &[u8],
+    output: &mut [u8; crate::linux_overlay::PATH_CAPACITY],
+) -> Result<usize, u64> {
+    let length = linux_canonical_path_at(directory, path, output)?;
+    if ginux_kernel_policy::path_has_trailing_slash(path)
+        && linux_path_is_directory(&output[..length], true) == Some(false)
+    {
+        return Err(LINUX_ENOTDIR);
+    }
+    Ok(length)
+}
+
+/// Whether the entry at the canonical `path` is a directory: `Some(true)` for
+/// a directory, `Some(false)` for any other overlay node or image entry and
+/// `None` if nothing visible is there (or a symlink cannot be resolved). With
+/// `follow`, symlinks in the overlay and the image are followed.
+fn linux_path_is_directory(path: &[u8], follow: bool) -> Option<bool> {
+    let mut current = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+    current.get_mut(..path.len())?.copy_from_slice(path);
+    let mut length = path.len();
+    for _ in 0..LINUX_PATH_DIRECTORY_SYMLINK_LIMIT {
+        let path = &current[..length];
+        if path.is_empty() {
+            return Some(true);
+        }
+        if let Some(metadata) = crate::linux_overlay::lookup(path) {
+            if !follow || metadata.kind != crate::linux_overlay::NodeKind::Symlink {
+                return Some(metadata.kind == crate::linux_overlay::NodeKind::Directory);
+            }
+            let mut target = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+            let target_length = crate::linux_overlay::read(metadata.handle, 0, &mut target)?;
+            let mut resolved = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+            length = linux_symlink_target_path(path, &target[..target_length], &mut resolved)?;
+            current = resolved;
+            continue;
+        }
+        if crate::linux_overlay::hidden(path) {
+            return None;
+        }
+        let (handle, entry) = if follow {
+            crate::published_rootfs::lookup_at(crate::published_rootfs::ROOT_HANDLE, path)?
+        } else {
+            crate::published_rootfs::lookup_metadata_at(crate::published_rootfs::ROOT_HANDLE, path)?
+        };
+        if follow && entry.is_some() {
+            // The image resolved a symlink; the overlay may have replaced or
+            // removed its target.
+            let mut resolved = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+            let resolved_length = crate::published_rootfs::copy_path(handle, &mut resolved)?;
+            let resolved = &resolved[..resolved_length];
+            if resolved != path {
+                if let Some(metadata) = crate::linux_overlay::lookup(resolved) {
+                    return Some(metadata.kind == crate::linux_overlay::NodeKind::Directory);
+                }
+                if crate::linux_overlay::hidden(resolved) {
+                    return None;
+                }
+            }
+        }
+        return Some(
+            entry.is_none_or(|entry| entry.kind == crate::published_rootfs::EntryKind::Directory),
+        );
+    }
+    None
+}
+
+const LINUX_PATH_DIRECTORY_SYMLINK_LIMIT: usize = 8;
+
+/// Canonical path named by the symlink at canonical `link` with `target`.
+fn linux_symlink_target_path(
+    link: &[u8],
+    target: &[u8],
+    output: &mut [u8; crate::linux_overlay::PATH_CAPACITY],
+) -> Option<usize> {
+    let mut length = if target.starts_with(b"/") {
+        0
+    } else {
+        link.iter().rposition(|byte| *byte == b'/').unwrap_or(0)
+    };
+    output[..length].copy_from_slice(&link[..length]);
+    for component in target.split(|byte| *byte == b'/') {
+        if component.is_empty() || component == b"." {
+            continue;
+        }
+        if component == b".." {
+            length = output[..length]
+                .iter()
+                .rposition(|byte| *byte == b'/')
+                .unwrap_or(0);
+            continue;
+        }
+        if length != 0 {
+            *output.get_mut(length)? = b'/';
+            length += 1;
+        }
+        let end = length.checked_add(component.len())?;
+        output.get_mut(length..end)?.copy_from_slice(component);
+        length = end;
+    }
+    Some(length)
 }
 
 fn linux_overlay_parent_exists(path: &[u8]) -> bool {
@@ -25550,9 +25715,26 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64, mode: u64) -> u64
     let mut rootfs_handle = 0;
     let mut canonical = [0_u8; crate::linux_overlay::PATH_CAPACITY];
     let mut canonical_length = if X86_RUNTIME.LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
-        match linux_canonical_path_at(directory, path, &mut canonical) {
+        let canonical_path = if flags & LINUX_O_CREAT != 0 {
+            linux_canonical_path_at
+        } else {
+            linux_lookup_path_at
+        };
+        match canonical_path(directory, path, &mut canonical) {
+            // O_CREAT with a trailing slash is EISDIR once the parent was
+            // found (fs/namei.c lookup_fast_for_open()).
+            Ok(length)
+                if flags & LINUX_O_CREAT != 0
+                    && ginux_kernel_policy::path_has_trailing_slash(path) =>
+            {
+                return if linux_overlay_parent_exists(&canonical[..length]) {
+                    LINUX_EISDIR
+                } else {
+                    LINUX_ENOENT
+                };
+            }
             Ok(length) => Some(length),
-            Err(error) if flags & LINUX_O_CREAT != 0 => return error,
+            Err(error) if flags & LINUX_O_CREAT != 0 || error == LINUX_ENOTDIR => return error,
             Err(_) => None,
         }
     } else {
@@ -26220,7 +26402,11 @@ fn linux_newfstatat(directory: u64, path_address: u64, stat_address: u64, flags:
         };
     }
     let mut canonical = [0_u8; crate::linux_overlay::PATH_CAPACITY];
-    if let Ok(length) = linux_canonical_path_at(directory, path, &mut canonical) {
+    let canonical_length = linux_lookup_path_at(directory, path, &mut canonical);
+    if canonical_length == Err(LINUX_ENOTDIR) {
+        return LINUX_ENOTDIR;
+    }
+    if let Ok(length) = canonical_length {
         if let Some(metadata) = crate::linux_overlay::lookup(&canonical[..length]) {
             let stat = linux_overlay_stat(metadata);
             return if copy_to_linux_user(stat_address, &stat) {
@@ -26231,7 +26417,10 @@ fn linux_newfstatat(directory: u64, path_address: u64, stat_address: u64, flags:
         }
     }
     {
-        let oci = if flags & LINUX_AT_SYMLINK_NOFOLLOW != 0 {
+        // A trailing slash follows the last component even for lstat().
+        let oci = if flags & LINUX_AT_SYMLINK_NOFOLLOW != 0
+            && !ginux_kernel_policy::path_has_trailing_slash(path)
+        {
             linux_rootfs_metadata_path_at(directory, path)
         } else {
             linux_rootfs_path_at(directory, path)
@@ -26466,7 +26655,11 @@ fn linux_mknodat(directory: u64, path_address: u64, mode: u64, device: u64) -> u
     {
         return LINUX_EEXIST;
     }
-    if !linux_overlay_parent_exists(path) {
+    // Only mkdir() may create a name with a trailing slash (fs/namei.c
+    // filename_create()).
+    if ginux_kernel_policy::path_has_trailing_slash(requested_path)
+        || !linux_overlay_parent_exists(path)
+    {
         return LINUX_ENOENT;
     }
     let permissions =
@@ -26504,7 +26697,11 @@ fn linux_symlinkat(target_address: u64, directory: u64, path_address: u64) -> u6
     {
         return LINUX_EEXIST;
     }
-    if !linux_overlay_parent_exists(path) {
+    // Only mkdir() may create a name with a trailing slash (fs/namei.c
+    // filename_create()).
+    if ginux_kernel_policy::path_has_trailing_slash(requested_path)
+        || !linux_overlay_parent_exists(path)
+    {
         return LINUX_ENOENT;
     }
     crate::linux_overlay::create_symlink(path, &target[..target_length]).map_or(LINUX_ENOSPC, |_| 0)
@@ -26557,7 +26754,11 @@ fn linux_linkat(
     {
         return LINUX_EEXIST;
     }
-    if !linux_overlay_parent_exists(destination) {
+    // Only mkdir() may create a name with a trailing slash (fs/namei.c
+    // filename_create()).
+    if ginux_kernel_policy::path_has_trailing_slash(&new_path[..new_path_length])
+        || !linux_overlay_parent_exists(destination)
+    {
         return LINUX_ENOENT;
     }
     if let Some(source) = crate::linux_overlay::lookup(&old_canonical[..old_length]) {
@@ -26657,10 +26858,31 @@ fn linux_unlinkat(directory: u64, path_address: u64, flags: u64) -> u64 {
         };
     }
     let mut canonical = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+    let last = ginux_kernel_policy::path_last_component(path);
     let length = match linux_canonical_path_at(directory, path, &mut canonical) {
         Ok(length) => length,
+        Err(LINUX_EISDIR) if last != ginux_kernel_policy::PathLast::Normal => 0,
         Err(error) => return error,
     };
+    // Linux rejects a last component of ".", ".." or "/" before the lookup
+    // (fs/namei.c filename_rmdir() and filename_unlinkat()).
+    match (last, flags == LINUX_AT_REMOVEDIR) {
+        (ginux_kernel_policy::PathLast::Normal, _) => {}
+        (ginux_kernel_policy::PathLast::Dot, true) => return LINUX_EINVAL,
+        (ginux_kernel_policy::PathLast::DotDot, true) => return LINUX_ENOTEMPTY,
+        (ginux_kernel_policy::PathLast::Root, true) => return LINUX_EBUSY,
+        (_, false) => return LINUX_EISDIR,
+    }
+    // With a trailing slash the last component is looked up without
+    // following it and must be a directory (fs/namei.c filename_unlinkat(),
+    // may_delete_dentry()).
+    if ginux_kernel_policy::path_has_trailing_slash(path) {
+        match linux_path_is_directory(&canonical[..length], false) {
+            Some(false) => return LINUX_ENOTDIR,
+            Some(true) if flags == 0 => return LINUX_EISDIR,
+            _ => {}
+        }
+    }
     let Some(metadata) = crate::linux_overlay::lookup(&canonical[..length]) else {
         return if crate::linux_overlay::hidden(&canonical[..length]) {
             LINUX_ENOENT
@@ -26843,7 +27065,7 @@ fn linux_fchmodat(directory: u64, path_address: u64, mode: u64, flags: u64) -> u
         Err(error) => return error,
     };
     let mut canonical = [0_u8; crate::linux_overlay::PATH_CAPACITY];
-    let length = match linux_canonical_path_at(directory, &path[..path_length], &mut canonical) {
+    let length = match linux_lookup_path_at(directory, &path[..path_length], &mut canonical) {
         Ok(length) => length,
         Err(error) => return error,
     };
@@ -26890,7 +27112,7 @@ fn linux_fchownat(directory: u64, path_address: u64, uid: u64, gid: u64, flags: 
         return linux_fchown(directory, uid, gid);
     }
     let mut canonical = [0_u8; crate::linux_overlay::PATH_CAPACITY];
-    let length = match linux_canonical_path_at(directory, &path[..path_length], &mut canonical) {
+    let length = match linux_lookup_path_at(directory, &path[..path_length], &mut canonical) {
         Ok(length) => length,
         Err(error) => return error,
     };
@@ -27283,7 +27505,7 @@ fn linux_timestamp_handle(
             copied?
         } else {
             let mut canonical = [0_u8; crate::linux_overlay::PATH_CAPACITY];
-            let length = linux_canonical_path_at(directory, &path[..path_length], &mut canonical)?;
+            let length = linux_lookup_path_at(directory, &path[..path_length], &mut canonical)?;
             if let Some(metadata) = crate::linux_overlay::lookup(&canonical[..length]) {
                 metadata.handle
             } else {
@@ -27456,6 +27678,8 @@ fn linux_renameat(
         Ok(length) => length,
         Err(error) => return error,
     };
+    let trailing_slash = ginux_kernel_policy::path_has_trailing_slash(&old_path[..old_length])
+        || ginux_kernel_policy::path_has_trailing_slash(&new_path[..new_length]);
     let mut old_canonical = [0_u8; crate::linux_overlay::PATH_CAPACITY];
     let old_length =
         match linux_canonical_path_at(old_directory, &old_path[..old_length], &mut old_canonical) {
@@ -27468,6 +27692,12 @@ fn linux_renameat(
             Ok(length) => length,
             Err(error) => return error,
         };
+    // Unless the source is a directory, a trailing slash on either name is
+    // ENOTDIR (fs/namei.c filename_renameat2()).
+    if trailing_slash && linux_path_is_directory(&old_canonical[..old_length], false) == Some(false)
+    {
+        return LINUX_ENOTDIR;
+    }
     let Some(source) = crate::linux_overlay::lookup(&old_canonical[..old_length]) else {
         return LINUX_ENOENT;
     };
@@ -27532,7 +27762,11 @@ fn linux_faccessat(directory: u64, path_address: u64, mode: u64, flags: u64) -> 
         return if denied { LINUX_EACCES } else { 0 };
     }
     let mut canonical = [0_u8; crate::linux_overlay::PATH_CAPACITY];
-    if let Ok(length) = linux_canonical_path_at(directory, path, &mut canonical) {
+    let canonical_length = linux_lookup_path_at(directory, path, &mut canonical);
+    if canonical_length == Err(LINUX_ENOTDIR) {
+        return LINUX_ENOTDIR;
+    }
+    if let Ok(length) = canonical_length {
         if let Some(metadata) = crate::linux_overlay::lookup(&canonical[..length]) {
             let denied = mode & 4 != 0 && metadata.mode & 0o444 == 0
                 || mode & 2 != 0 && metadata.mode & 0o222 == 0
@@ -27646,7 +27880,11 @@ fn linux_statx(directory: u64, path_address: u64, flags: u64, mask: u64, stat_ad
         };
     }
     let mut canonical = [0_u8; crate::linux_overlay::PATH_CAPACITY];
-    if let Ok(length) = linux_canonical_path_at(directory, path, &mut canonical) {
+    let canonical_length = linux_lookup_path_at(directory, path, &mut canonical);
+    if canonical_length == Err(LINUX_ENOTDIR) {
+        return LINUX_ENOTDIR;
+    }
+    if let Ok(length) = canonical_length {
         if let Some(metadata) = crate::linux_overlay::lookup(&canonical[..length]) {
             let mode = match metadata.kind {
                 crate::linux_overlay::NodeKind::File => 0o100000,
@@ -27671,7 +27909,10 @@ fn linux_statx(directory: u64, path_address: u64, flags: u64, mask: u64, stat_ad
         }
     }
     {
-        let oci = if flags & LINUX_AT_SYMLINK_NOFOLLOW != 0 {
+        // A trailing slash follows the last component even for lstat().
+        let oci = if flags & LINUX_AT_SYMLINK_NOFOLLOW != 0
+            && !ginux_kernel_policy::path_has_trailing_slash(path)
+        {
             linux_rootfs_metadata_path_at(directory, path)
         } else {
             linux_rootfs_path_at(directory, path)

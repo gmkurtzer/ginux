@@ -19,6 +19,34 @@ pub fn valid_container_init(init: &[u8], maximum_size: usize) -> bool {
         && init.iter().all(u8::is_ascii_graphic)
 }
 
+/// Type of the last component of a Linux path (fs/namei.c `enum last_type`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PathLast {
+    Normal,
+    Dot,
+    DotDot,
+    Root,
+}
+
+pub fn path_last_component(path: &[u8]) -> PathLast {
+    match path
+        .split(|byte| *byte == b'/')
+        .rfind(|component| !component.is_empty())
+    {
+        Some(b".") => PathLast::Dot,
+        Some(b"..") => PathLast::DotDot,
+        Some(_) => PathLast::Normal,
+        None if path.starts_with(b"/") => PathLast::Root,
+        None => PathLast::Normal,
+    }
+}
+
+/// Whether the last component of `path` is followed by a slash, which makes
+/// Linux require it to be a directory (fs/namei.c `trailing_slashes()`).
+pub fn path_has_trailing_slash(path: &[u8]) -> bool {
+    path.ends_with(b"/") && path.iter().any(|byte| *byte != b'/')
+}
+
 pub fn valid_vtd_write_fault_record(high: u64, source: u16) -> bool {
     const VALID: u64 = 1 << 63;
     const TRANSACTION_READ: u64 = 1 << 62;
@@ -65,6 +93,30 @@ mod tests {
         assert!(!valid_container_init(b"sbin/init", 64));
         assert!(!valid_container_init(b"/sbin/ init", 64));
         assert!(!valid_container_init(b"/too/long", 8));
+    }
+
+    #[test]
+    fn path_last_component_matches_linux_last_type() {
+        assert_eq!(path_last_component(b"d/x"), PathLast::Normal);
+        assert_eq!(path_last_component(b"d/x/"), PathLast::Normal);
+        assert_eq!(path_last_component(b"d/."), PathLast::Dot);
+        assert_eq!(path_last_component(b"d/.//"), PathLast::Dot);
+        assert_eq!(path_last_component(b"."), PathLast::Dot);
+        assert_eq!(path_last_component(b"d/.."), PathLast::DotDot);
+        assert_eq!(path_last_component(b"d/..x"), PathLast::Normal);
+        assert_eq!(path_last_component(b"/"), PathLast::Root);
+        assert_eq!(path_last_component(b"///"), PathLast::Root);
+    }
+
+    #[test]
+    fn trailing_slash_needs_a_named_component() {
+        assert!(path_has_trailing_slash(b"f/"));
+        assert!(path_has_trailing_slash(b"/tmp/f//"));
+        assert!(path_has_trailing_slash(b"d/./"));
+        assert!(!path_has_trailing_slash(b"/tmp/f"));
+        assert!(!path_has_trailing_slash(b"d/."));
+        assert!(!path_has_trailing_slash(b"/"));
+        assert!(!path_has_trailing_slash(b""));
     }
 
     #[test]
