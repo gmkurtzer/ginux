@@ -518,7 +518,17 @@ pub(crate) fn path_hash(handle: Handle) -> Option<u64> {
 pub(crate) fn next_child(directory: Handle, cursor: usize) -> Option<Option<Child>> {
     let mut parent = [0_u8; PATH_CAPACITY];
     let parent_length = copy_path(directory, &mut parent)?;
-    let mut prefix_length = parent_length;
+    next_child_at(&parent[..parent_length], cursor)
+}
+
+// Children of `directory` by path, for image directories that have no overlay
+// node of their own; "" is the root directory.
+pub(crate) fn next_child_at(directory: &[u8], cursor: usize) -> Option<Option<Child>> {
+    let mut parent = [0_u8; PATH_CAPACITY];
+    parent
+        .get_mut(..directory.len())?
+        .copy_from_slice(directory);
+    let mut prefix_length = directory.len();
     if prefix_length != 0 {
         parent[prefix_length] = b'/';
         prefix_length += 1;

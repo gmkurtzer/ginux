@@ -36617,37 +36617,86 @@ fn linux_getdents(descriptor: u64, address: u64, count: u64, legacy: bool) -> u6
                 }
             }
         }
+        // Image directories are the lower layer of the domain overlay: list
+        // them merged like Linux overlayfs (fs/overlayfs/readdir.c), without
+        // whited-out names, with overlay entries replacing image entries of
+        // the same name and with overlay-only entries after the image ones.
+        let mut directory_path = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+        let Some(directory_length) =
+            crate::published_rootfs::copy_path(rootfs_directory, &mut directory_path)
+        else {
+            return LINUX_EINVAL;
+        };
+        let directory_path = &directory_path[..directory_length];
         loop {
-            let Some(child) = crate::published_rootfs::next_child(rootfs_directory, cursor) else {
+            let Some(step) = ginux_kernel_policy::merged_directory_next(
+                cursor,
+                |cursor| {
+                    crate::published_rootfs::next_child(rootfs_directory, cursor)
+                        .map(|child| child.map(|child| (child.next_cursor, child)))
+                },
+                |cursor| {
+                    crate::linux_overlay::next_child_at(directory_path, cursor)
+                        .map(|child| child.map(|child| (child.next_cursor, child)))
+                },
+                |child| !linux_rootfs_handle_hidden(child.handle),
+                |child| {
+                    crate::published_rootfs::lookup_metadata_at(rootfs_directory, child.name())
+                        .is_none()
+                },
+            ) else {
                 return LINUX_EINVAL;
             };
-            let Some(child) = child else {
+            let Some((next_cursor, entry)) = step else {
                 break;
             };
-            let kind = match child.entry.kind {
-                crate::published_rootfs::EntryKind::Directory => 4,
-                crate::published_rootfs::EntryKind::File => 8,
-                crate::published_rootfs::EntryKind::Hardlink => 8,
-                crate::published_rootfs::EntryKind::Symlink => 10,
+            let mut path = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+            let (inode, kind, name) = match &entry {
+                ginux_kernel_policy::MergedDirectoryEntry::Lower(child) => {
+                    let overlay = crate::published_rootfs::copy_path(child.handle, &mut path)
+                        .and_then(|length| crate::linux_overlay::lookup(&path[..length]));
+                    match overlay {
+                        Some(metadata) => (
+                            metadata.handle.inode(),
+                            linux_overlay_dirent_kind(metadata.kind),
+                            child.name,
+                        ),
+                        None => (
+                            linux_rootfs_inode(child.handle),
+                            match child.entry.kind {
+                                crate::published_rootfs::EntryKind::Directory => 4,
+                                crate::published_rootfs::EntryKind::File => 8,
+                                crate::published_rootfs::EntryKind::Hardlink => 8,
+                                crate::published_rootfs::EntryKind::Symlink => 10,
+                            },
+                            child.name,
+                        ),
+                    }
+                }
+                ginux_kernel_policy::MergedDirectoryEntry::Upper(child) => (
+                    child.metadata.handle.inode(),
+                    linux_overlay_dirent_kind(child.metadata.kind),
+                    child.name(),
+                ),
             };
-            let Ok(next) = i64::try_from(child.next_cursor + 2) else {
+            let Ok(next) = i64::try_from(next_cursor + 2) else {
                 return LINUX_EINVAL;
             };
             if !append_linux_dirent(
                 &mut entries[..output_capacity],
                 &mut used,
                 legacy,
-                linux_rootfs_inode(child.handle),
+                inode,
                 next,
                 kind,
-                child.name,
+                name,
             ) {
                 if used == 0 {
                     return LINUX_EINVAL;
                 }
                 break;
             }
-            cursor = child.next_cursor;
+            cursor = next_cursor;
         }
         if used == 0 {
             return 0;
@@ -36986,6 +37035,15 @@ fn linux_getdents(descriptor: u64, address: u64, count: u64, legacy: bool) -> u6
     }
     linux_descriptor_offset(descriptor).store(next_offset, Ordering::SeqCst);
     used as u64
+}
+
+fn linux_overlay_dirent_kind(kind: crate::linux_overlay::NodeKind) -> u8 {
+    match kind {
+        crate::linux_overlay::NodeKind::File => 8,
+        crate::linux_overlay::NodeKind::Directory => 4,
+        crate::linux_overlay::NodeKind::Symlink => 10,
+        crate::linux_overlay::NodeKind::Fifo => 1,
+    }
 }
 
 fn append_linux_dirent(
