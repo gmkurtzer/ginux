@@ -967,7 +967,10 @@ fn valid_entry_path(prefix: &[u8], path: &[u8]) -> bool {
 fn valid_path(path: &[u8]) -> bool {
     !path.is_empty()
         && path[0] != b'/'
-        && path.iter().all(|byte| byte.is_ascii_graphic())
+        // Linux file names may contain any byte except NUL and '/'. Image
+        // layers routinely carry UTF-8 names (the Mozilla CA bundle ships
+        // "NetLock_Arany_=Class_Gold=_Főtanúsítvány") and names with spaces.
+        && path.iter().all(|byte| *byte != 0)
         && path
             .split(|byte| *byte == b'/')
             .all(|component| !component.is_empty() && component != b"." && component != b"..")
@@ -1146,6 +1149,26 @@ mod tests {
         output.resize(output.len().div_ceil(TAR_BLOCK_SIZE) * TAR_BLOCK_SIZE, 0);
         output.resize(output.len() + TAR_BLOCK_SIZE * 2, 0);
         output
+    }
+
+    #[test]
+    fn accepts_utf8_and_space_names_but_rejects_nul_and_dot_components() {
+        let name = "etc/ssl/certs/NetLock_Arany_=Class_Gold=_Főtanúsítvány.pem".as_bytes();
+        let bytes = archive(name, b"PEM", b'0', b"");
+        assert_eq!(
+            Rootfs::parse(&bytes).unwrap().find(name).unwrap().data,
+            b"PEM"
+        );
+
+        let bytes = archive(b"opt/My Files/read me", b"x", b'0', b"");
+        assert!(Rootfs::parse(&bytes)
+            .unwrap()
+            .find(b"opt/My Files/read me")
+            .is_some());
+
+        assert!(!valid_path(b"etc/a\0b"));
+        assert!(!valid_path(b"etc/../passwd"));
+        assert!(!valid_path(b"/etc/passwd"));
     }
 
     #[test]
