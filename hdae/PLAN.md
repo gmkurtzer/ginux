@@ -60,6 +60,10 @@ replace it.
    directory for later integration.
 8. **Virtual kernel views**: Ginux-owned `/proc`, `/sys`, cgroup v2, mounts,
    namespaces, and machine identity without host leakage.
+8.5. **Unified repository transition**: preserve the final standalone kernel
+   as `bootable-kernel`, join its history to the accepted userspace-kernel
+   lineage, and deliver the userspace tree through a pull request to Ginux
+   `main`.
 9. **Systemd baseline**: Rocky systemd as virtual PID 1 reaching a usable
    multi-user login, virtual PID and lockdown inspection, a bounded DNF update
    workflow, and controlled shutdown.

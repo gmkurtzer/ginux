@@ -20,11 +20,17 @@
 - Gate 6 is accepted and closed. Pull request
   https://github.com/gmkurtzer/ginux-us/pull/6 was merged by the human on
   2026-11-04.
+- Gates 7, 7.5, and 7.75 are accepted and closed. Their pull requests were
+  merged by the human on 2026-11-04.
+- Gate 8 is accepted and closed. Pull request
+  https://github.com/gmkurtzer/ginux-us/pull/10 was merged as `2306c2e`, and
+  the human confirmed the gate complete on 2026-11-04.
 - Authoritative name: Ginux.
 - Runtime isolation unit: domain.
 - Policy unit: versioned contract.
 - Initial gate map: twelve checkpoint gates at positions 1 through 11 and 13;
-  Gates 1 through 7.75 are accepted and five gates remain open.
+  Gates 1 through 8 are accepted. Gate 8.5 is the active repository transition
+  checkpoint before Gate 9.
 - The ordered gate batch is authorized, but every open gate remains a human
   checkpoint requiring a working demonstration and explicit acceptance.
 
@@ -247,9 +253,10 @@ scope, threat model, and invariants.
   byte-identical. `make demo-gate-8` passed all seven named checks.
 - Fresh aggregate `make test` passed 44 component tests, all prior-gate QEMU
   regressions, and the Gate 8 QEMU fixture.
-- Gate 8 is delivered in open
-  https://github.com/gmkurtzer/ginux-us/pull/10 from
-  `hdae/virtual-kernel-views`.
+- Gate 8 was merged through https://github.com/gmkurtzer/ginux-us/pull/10 as
+  `2306c2e`; the human accepted its demonstration and evidence on 2026-11-04.
+- Both repositories were fetched after that merge and verified to have no open
+  pull requests or issues. The final standalone-kernel commit is `4d4a53bb`.
 
 ## Open decisions and limitations
 
@@ -267,10 +274,10 @@ scope, threat model, and invariants.
 - Gate 2 preparation requires Docker Desktop and a pinned privileged helper
   container. It is network-disabled and mounts only a temporary raw conversion
   read-only, but remains trusted build tooling rather than a runtime boundary.
-- The local checkout intentionally remains `/Users/gmk/git/ginux-us` for
-  later integration. Product, source, and cache identifiers use Ginux. GitHub
-  and origin remain on the transitional repository until the human chooses how
-  this work should enter the existing Ginux repository.
+- Product, source, and cache identifiers use Ginux. Gate 8.5 is moving this
+  accepted userspace-kernel lineage into the existing Ginux repository while
+  retaining the separate checkout and repository until a later archival
+  decision.
 - The selected Rocky OCI image has one layer; deterministic synthetic fixtures
   now cover general multi-layer replacement, whiteout, and opaque-directory
   semantics.
@@ -287,18 +294,20 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Stop for human review of `make demo-gate-8`, the passing evidence, and pull
-request 10.
+Execute Gate 8.5: preserve the standalone-kernel refs, join both histories,
+update unified project documentation, run the deterministic verification, and
+open the transition pull request for human review.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 8, virtual kernel views, authorized for execution on
-  dedicated branch `hdae/virtual-kernel-views`; technically passed, delivered,
-  and awaiting human review
-- Last evidence: `make check`, `make test-kernel-views`,
-  `make demo-gate-8`, and fresh aggregate `make test` passed on 2026-11-04
-- Required human decision: none until the Gate 8 demonstration checkpoint; the
-  Gate 9 DNF repository choice is deferred until before Gate 9 implementation
+- Active gate: Gate 8.5, unified repository transition, authorized on dedicated
+  branch `codex/userspace-transition`; implementation is in progress
+- Last evidence: both repositories have zero open pull requests/issues;
+  `ginux-us/main` at `2306c2e` contains Gate 8 and Ginux `main` remains at the
+  final standalone-kernel commit `4d4a53bb`
+- Required human decision: review the transition pull request after all Gate
+  8.5 criteria pass; the Gate 9 DNF repository choice remains deferred until
+  before Gate 9 implementation

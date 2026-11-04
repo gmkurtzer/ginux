@@ -56,7 +56,7 @@ mounts, identifiers, and configuration are not leaked as domain authority.
 
 ## Remaining work
 
-- [ ] Human review and acceptance of the Gate 8 demonstration and evidence.
+- None.
 
 ## Acceptance criteria
 
@@ -122,7 +122,10 @@ mounts, identifiers, and configuration are not leaked as domain authority.
   tests, all prior QEMU interception/runtime/config/domain/image/device/process
   regressions, and the Gate 8 Rocky QEMU kernel-view fixture.
 - Branch `hdae/virtual-kernel-views` -> pushed; dedicated pull request 10 is
-  open at https://github.com/gmkurtzer/ginux-us/pull/10.
+  merged at https://github.com/gmkurtzer/ginux-us/pull/10 as commit
+  `2306c2e`.
+- Human review on 2026-11-04 confirmed that Gate 8 is done and authorized the
+  repository transition.
 
 ## Decisions and limitations
 
@@ -147,5 +150,6 @@ mounts, identifiers, and configuration are not leaked as domain authority.
 ## Review policy and outcome
 
 Human checkpoint because these interfaces define the kernel identity and
-authority visible to the domain. Gate 8 is technically passed and delivered;
-explicit acceptance remains before Gate 9.
+authority visible to the domain. Gate 8 passed its complete verification plan,
+was merged through pull request 10, and was accepted by the human on
+2026-11-04.
