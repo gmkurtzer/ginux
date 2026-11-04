@@ -1,0 +1,19 @@
+name: check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  static-and-unit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - run: rustup component add clippy rustfmt
+      - run: rustup target add x86_64-unknown-linux-gnu
+      - run: make check
+      - run: make test-unit
