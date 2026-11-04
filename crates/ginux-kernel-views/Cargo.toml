@@ -1,0 +1,7 @@
+[package]
+name = "ginux-kernel-views"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ginux-process = { path = "../ginux-process" }

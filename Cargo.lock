@@ -31,6 +31,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ginux-kernel-views"
+version = "0.1.0"
+dependencies = [
+ "ginux-process",
+]
+
+[[package]]
 name = "ginux-process"
 version = "0.1.0"
 

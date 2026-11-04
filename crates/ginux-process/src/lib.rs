@@ -533,6 +533,27 @@ impl<const TASKS: usize> ProcessTable<TASKS> {
     pub fn active(&self) -> usize {
         self.tasks.iter().filter(|task| task.occupied).count()
     }
+
+    pub fn views(&self, output: &mut [TaskView]) -> usize {
+        let mut count = 0usize;
+        for task in self.tasks.iter().filter(|task| task.occupied) {
+            if count == output.len() {
+                break;
+            }
+            output[count] = TaskView {
+                id: task.id,
+                tgid: task.tgid,
+                parent: task.parent,
+                process_group: task.process_group,
+                session: task.session,
+                state: task.state,
+                credentials: task.credentials,
+                exec_epoch: task.exec_epoch,
+            };
+            count += 1;
+        }
+        count
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

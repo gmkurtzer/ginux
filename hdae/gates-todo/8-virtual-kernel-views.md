@@ -34,11 +34,15 @@ mounts, identifiers, and configuration are not leaked as domain authority.
 
 ## Completed work
 
-- [ ] None; gate not started.
+- [x] Add the no-std `ginux-kernel-views` component and workspace/test
+  integration.
+- [x] Implement bounded virtual procfs task status/stat, PID listing, uptime,
+  memory, mounts, hostname, and boot-identity reads from Ginux-owned inputs.
+- [x] Add process-table snapshot projection plus negative host-PID, invalid-path,
+  read-only mutation, buffer-boundary, and consistency tests.
 
 ## Remaining work
 
-- [ ] Implement virtual procfs views.
 - [ ] Implement virtual sysfs and assigned-device projection.
 - [ ] Implement bounded cgroup v2 and mount/identity behavior.
 - [ ] Add consistency, permission, mutation, and host-leakage tests.
@@ -74,7 +78,14 @@ mounts, identifiers, and configuration are not leaked as domain authority.
 
 ## Evidence
 
-- Not run.
+- Initial `cargo test -p ginux-kernel-views` -> one assertion used an
+  incorrect fixed window width for the expected PPid line; implementation
+  output was correct and the assertion was fixed.
+- Corrected `cargo test -p ginux-kernel-views` -> two virtual procfs,
+  identity, mount, host-PID exclusion, and mutation-denial tests passed.
+- `cargo clippy -p ginux-kernel-views --all-targets -- -D warnings` -> passed.
+- `cargo test -p ginux-process` -> all seven prior process-runtime tests
+  passed after adding bounded task snapshot projection.
 
 ## Decisions and limitations
 
@@ -90,7 +101,8 @@ mounts, identifiers, and configuration are not leaked as domain authority.
   2026-11-03; never merge or close without explicit authorization
 - Planned commits: procfs model; sysfs and device projection; cgroup and
   mount/identity model; consistency and leakage verification
-- Actual commits: pending
+- Actual commits: the procfs foundation is recorded by the commit containing
+  this evidence update
 
 ## Review policy and outcome
 

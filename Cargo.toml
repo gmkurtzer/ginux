@@ -5,6 +5,7 @@ members = [
     "crates/ginux-domain",
     "crates/ginux-devices",
     "crates/ginux-init",
+    "crates/ginux-kernel-views",
     "crates/ginux-process",
     "crates/ginux-runtime",
     "crates/ginux-vfs",
