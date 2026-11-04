@@ -89,7 +89,8 @@ solved.
 - Domain-owned processes, address spaces, file descriptors, virtual kernel
   views, configuration, resources, and lifecycle.
 - Virtual console, pseudo-devices, file-backed block devices or bounded
-  partitions, and virtual network interfaces.
+  partitions, an initial host-shared network backend, and later explicit
+  per-domain network selection and policy.
 - Deterministic Makefile targets for build, checks, tests, image preparation,
   defensive boundary verification, and benchmarks.
 
@@ -119,6 +120,8 @@ solved.
   `/proc`, `/sys`, `/dev`, or cgroups.
 - Device and resource ownership is explicit, exclusive by default, revocable,
   and bound to domain lifecycle.
+- Host-shared networking still passes through Ginux mediation. Sharing the
+  host socket namespace does not create an unchecked syscall path.
 - Compatibility claims are tied to executable tests and named environments.
 - Performance is continuously measured; an optimization may not bypass the
   mediation boundary.

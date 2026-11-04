@@ -31,12 +31,17 @@ a controlled shutdown.
   an explicitly mediated repository path without exposing host authority.
 - Use Rocky Linux's enabled default upstream repositories and perform an actual
   noninteractive `dnf -y update` through that mediated path.
+- Add a `shared` network backend that is the default when no network attachment
+  is configured. It uses the host's default routing, source-address selection,
+  and socket namespace for both outbound and inbound operations while retaining
+  Ginux interception, validation, mediation, and audit.
 
 ## Non-goals
 
 - Booting every Rocky service, arbitrary distributions, graphical targets,
-  real hardware discovery, unrestricted Internet package access, or production
-  service coverage.
+  real hardware discovery, or production service coverage.
+- Per-interface or source-address selection, ingress/egress port policy, and
+  port translation; these are Gate 9.5 work.
 - Weakening contract, device, or host-leakage invariants merely to satisfy a
   systemd probe.
 - Declaring general Linux or systemd compatibility from one target.
@@ -81,6 +86,12 @@ a controlled shutdown.
   from Rocky Linux's enabled default upstream repositories through the
   mediated repository path; `dnf -y update` exits successfully, and failure
   and rollback leave the base image immutable and domain state consistent.
+- With no explicit network attachment, managed sockets use the host's default
+  network and normal host bind semantics. Outbound DNS and TCP work, inbound
+  bind/listen/accept work, and an address/port already owned by another host or
+  domain process fails with the Linux-compatible address-in-use result.
+- Shared networking does not bypass central dispatch, disclose supervisor
+  descriptors, or permit an unchecked host syscall.
 - `make demo-gate-9` lets a human watch Rocky systemd run as virtual PID 1,
   log in at multi-user, inspect managed services and PIDs, run the lockdown and
   DNF checks, and shut down cleanly.
@@ -116,9 +127,13 @@ a controlled shutdown.
   therefore makes the procedure and pass/fail result reproducible while
   recording selected repository URLs, metadata timestamps, and package changes;
   it does not claim byte-for-byte deterministic upstream content.
-- The exact contract for DNS, metalink redirects, mirror endpoints, and
-  outbound transports must be approved before implementation. Generic
-  unrestricted domain networking remains outside this gate.
+- Human direction on 2026-11-04 selected host-shared networking as the Gate 9
+  default. All inbound and outbound operations share the normal host socket
+  namespace and routing; the first successful bind wins. Ginux mediation and
+  audit remain mandatory.
+- Interface/source-address selection, port allow/deny policy, and port
+  translation are approved as Gate 9.5 rather than being folded into this
+  systemd gate.
 - New architecture needs discovered during convergence require human direction
   or a corrective gate rather than silent scope expansion.
 

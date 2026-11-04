@@ -30,6 +30,9 @@
 - Policy unit: versioned contract.
 - Initial gate map: twelve checkpoint gates at positions 1 through 11 and 13;
   Gates 1 through 8.5 are accepted. Gate 9 is the active systemd baseline.
+- Gate 9.5 was added and authorized on 2026-11-04 for comprehensive domain
+  configuration, CLI overrides, network selection and policy, port translation,
+  volumes, access, identity, resources, devices, and pre-boot hooks.
 - The ordered gate batch is authorized, but every open gate remains a human
   checkpoint requiring a working demonstration and explicit acceptance.
 
@@ -293,9 +296,9 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Confirm the Gate 9 outbound-network contract needed by Rocky's default DNF
-repositories, then establish the exact systemd unit profile, readiness marker,
-timeout, shutdown result, and current failure baseline before implementation.
+Establish the exact systemd unit profile, readiness marker, timeout, shutdown
+result, and current failure baseline, then implement Gate 9's approved
+host-shared network backend and live upstream DNF workflow.
 
 ## Context recovery
 
@@ -305,7 +308,11 @@ timeout, shutdown result, and current failure baseline before implementation.
 - Active gate: Gate 9, systemd baseline, authorized on dedicated branch
   `hdae/systemd-baseline`; implementation has not started
 - Last evidence: pull request 152 merged as `d337713b`; local `main` was
-  fast-forwarded to that commit and Gate 9 was selected on 2026-11-04
-- Required human decision: approve or revise the proposed contract-bounded
-  outbound DNS and TCP 80/443 path required for Rocky's changing default
-  repositories; unrestricted domain networking remains out of scope
+  fast-forwarded to that commit; Gate 8.5 was closed; and Gate 9 was selected
+  on 2026-11-04
+- Approved network direction: Gate 9 defaults to full host-shared inbound and
+  outbound networking with normal host routing and bind conflicts, under Ginux
+  mediation and audit. Gate 9.5 adds comprehensive domain configuration,
+  network selection, port controls, and translation.
+- Required human decision: none for Gate 9. Gate 9.5 must resolve pre-boot hook
+  execution context and authority before implementing hooks.
