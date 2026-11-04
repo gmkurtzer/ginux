@@ -1,0 +1,9 @@
+[package]
+name = "baseline-runner"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[[bin]]
+name = "baseline-runner"
+path = "src/main.rs"
