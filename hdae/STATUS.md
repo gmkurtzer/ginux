@@ -310,7 +310,8 @@ accepting or merging the transition.
 - Last evidence: both lineages are ancestors of the transition head; application
   source matches staging commit `2306c2e`; `make check` and unrestricted
   `ROCKY_SSH_PORT=22242 make test` passed, including all 44 component tests and
-  every Rocky QEMU regression
+  every Rocky QEMU regression; GitHub Actions run 41926232434 passed the
+  replacement userspace `make check` and `make test-unit` job
 - Required human decision: accept or request changes to pull request 152; the
   Gate 9 DNF repository choice remains deferred until before Gate 9
   implementation
