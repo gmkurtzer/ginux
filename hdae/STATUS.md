@@ -29,8 +29,7 @@
 - Runtime isolation unit: domain.
 - Policy unit: versioned contract.
 - Initial gate map: twelve checkpoint gates at positions 1 through 11 and 13;
-  Gates 1 through 8 are accepted. Gate 8.5 is the active repository transition
-  checkpoint before Gate 9.
+  Gates 1 through 8.5 are accepted. Gate 9 is the active systemd baseline.
 - The ordered gate batch is authorized, but every open gate remains a human
   checkpoint requiring a working demonstration and explicit acceptance.
 
@@ -274,10 +273,10 @@ scope, threat model, and invariants.
 - Gate 2 preparation requires Docker Desktop and a pinned privileged helper
   container. It is network-disabled and mounts only a temporary raw conversion
   read-only, but remains trusted build tooling rather than a runtime boundary.
-- Product, source, and cache identifiers use Ginux. Gate 8.5 is moving this
-  accepted userspace-kernel lineage into the existing Ginux repository while
-  retaining the separate checkout and repository until a later archival
-  decision.
+- Product, source, and cache identifiers use Ginux. Gate 8.5 joined the
+  accepted userspace-kernel lineage into this repository as `d337713b`; the
+  final standalone kernel remains preserved on `bootable-kernel` and
+  `bootable-kernel-final`.
 - The selected Rocky OCI image has one layer; deterministic synthetic fixtures
   now cover general multi-layer replacement, whiteout, and opaque-directory
   semantics.
@@ -294,24 +293,19 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Human review of https://github.com/gmkurtzer/ginux/pull/152. Inspect the joined
-history, userspace source tree, unified README, preserved `bootable-kernel`
-branch and `bootable-kernel-final` tag, and the Gate 8.5 evidence before
-accepting or merging the transition.
+Confirm the Gate 9 outbound-network contract needed by Rocky's default DNF
+repositories, then establish the exact systemd unit profile, readiness marker,
+timeout, shutdown result, and current failure baseline before implementation.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 8.5, unified repository transition, authorized on dedicated
-  branch `codex/userspace-transition`; implementation, publication, and all
-  objective verification pass; pull request 152 awaits human review
-- Last evidence: both lineages are ancestors of the transition head; application
-  source matches staging commit `2306c2e`; `make check` and unrestricted
-  `ROCKY_SSH_PORT=22242 make test` passed, including all 44 component tests and
-  every Rocky QEMU regression; GitHub Actions run 41926232434 passed the
-  replacement userspace `make check` and `make test-unit` job
-- Required human decision: accept or request changes to pull request 152; the
-  Gate 9 DNF repository choice remains deferred until before Gate 9
-  implementation
+- Active gate: Gate 9, systemd baseline, authorized on dedicated branch
+  `hdae/systemd-baseline`; implementation has not started
+- Last evidence: pull request 152 merged as `d337713b`; local `main` was
+  fast-forwarded to that commit and Gate 9 was selected on 2026-11-04
+- Required human decision: approve or revise the proposed contract-bounded
+  outbound DNS and TCP 80/443 path required for Rocky's changing default
+  repositories; unrestricted domain networking remains out of scope

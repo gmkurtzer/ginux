@@ -29,6 +29,8 @@ a controlled shutdown.
 - Inspect virtual PIDs and selected lockdown probes from the logged-in domain.
 - Run a deterministic DNF metadata query and package update transaction through
   an explicitly mediated repository path without exposing host authority.
+- Use Rocky Linux's enabled default upstream repositories and perform an actual
+  noninteractive `dnf -y update` through that mediated path.
 
 ## Non-goals
 
@@ -76,8 +78,9 @@ a controlled shutdown.
   descriptors, credentials, capabilities, devices, and denied kernel
   interfaces.
 - DNF can query metadata and complete the selected package update transaction
-  through the mediated repository path; failure and rollback leave the base
-  image immutable and domain state consistent.
+  from Rocky Linux's enabled default upstream repositories through the
+  mediated repository path; `dnf -y update` exits successfully, and failure
+  and rollback leave the base image immutable and domain state consistent.
 - `make demo-gate-9` lets a human watch Rocky systemd run as virtual PID 1,
   log in at multi-user, inspect managed services and PIDs, run the lockdown and
   DNF checks, and shut down cleanly.
@@ -85,10 +88,11 @@ a controlled shutdown.
 ## Verification plan
 
 - `make test-systemd` -> cold boot, warm boot, repeated boot, readiness,
-  login, virtual PID inventory, lockdown probes, configured failure, DNF
-  transaction, and controlled shutdown cases pass.
-- `make test-systemd` with external network disabled and cache already prepared
-  -> exits zero without an acquisition request.
+  login, virtual PID inventory, lockdown probes, configured failure, live
+  upstream DNF transaction, and controlled shutdown cases pass.
+- Offline boot subtest with external network disabled and the domain image
+  already prepared -> reaches readiness and exits zero without an acquisition
+  request; the live DNF subtest is explicitly excluded from this offline case.
 - Domain teardown inventory -> no managed task, device assignment, overlay,
   or backend resource remains after the test.
 - `make bench` systemd profile -> emits boot and idle measurements with
@@ -105,9 +109,16 @@ a controlled shutdown.
 
 - The exact enabled unit set and readiness marker are recorded before this gate
   executes and become the named compatibility claim.
-- Before Gate 9 implementation, human direction is required on whether the DNF
-  proof uses a fully cached local Rocky repository fixture or mediated access
-  to an external Rocky repository. Gate 7 work does not depend on this choice.
+- Human direction on 2026-11-04 selected Rocky Linux's enabled default upstream
+  repositories and an actual `dnf -y update`, rather than a cached local
+  repository fixture.
+- Upstream repository contents and mirror selection change over time. The test
+  therefore makes the procedure and pass/fail result reproducible while
+  recording selected repository URLs, metadata timestamps, and package changes;
+  it does not claim byte-for-byte deterministic upstream content.
+- The exact contract for DNS, metalink redirects, mirror endpoints, and
+  outbound transports must be approved before implementation. Generic
+  unrestricted domain networking remains outside this gate.
 - New architecture needs discovered during convergence require human direction
   or a corrective gate rather than silent scope expansion.
 
