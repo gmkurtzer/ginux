@@ -9,10 +9,11 @@
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 41, transactional rootfs exec for issue #27
 - Last completed action: merged current `main` at `c8d12653` into PR #53's
-  branch; the only textual conflict was this active checkpoint
-- Next action: rerun `make check`, complete `make test`, and
-  `make test-rocky-shell`; merge only if the rootfs-specific integration runs
-  end to end and all evidence passes
+  branch; `make check` and complete `make test` pass, while the Rocky retry
+  again failed on registry DNS before download, unpack, or rootfs `exec`
+- Next action: push the conflict-free branch and keep PR #53 and issue #27 open
+  until a reachable registry or populated cache permits the mandatory
+  rootfs-specific integration run
 
 ## Current repository state
 
@@ -24,7 +25,8 @@ are closed. Gate 41 is implemented on PR #53; its last synchronized static and
 complete QEMU evidence pass, but rootfs-specific Rocky integration remains
 blocked before image download by registry DNS failure. The branch is now
 synchronized with current `main`, including the merged native controller
-desktop; fresh post-merge validation is pending.
+  desktop. Fresh post-merge static and complete deterministic QEMU validation
+  pass; the mandatory Rocky integration remains externally blocked.
 
 ## Open decisions
 

@@ -88,6 +88,13 @@ ownership intact, while a successful `exec` publishes one complete new image.
 - Fresh `make test-rocky-shell` after synchronization -> failed before the
   code under test for the same external reason: all three registry DNS
   resolutions failed, no image was downloaded, unpacked, or executed.
+- Synchronization with current `main` at `c8d12653` -> merged cleanly except
+  for the active HDAE checkpoint; `make check` and complete `make test` pass,
+  including the staged hierarchy transaction proof and controller-desktop
+  regressions.
+- Fresh `make test-rocky-shell` after that synchronization -> DHCP succeeded,
+  but all three Docker registry DNS resolutions failed before image download,
+  unpack, or rootfs `exec`; the required integration path remains not run.
 - PR #53: <https://github.com/gmkurtzer/ginux/pull/53>.
 - Issue summary: <https://github.com/gmkurtzer/ginux/issues/27#issuecomment-6569276429>.
 
@@ -110,7 +117,8 @@ ownership intact, while a successful `exec` publishes one complete new image.
   injection; evidence; delivery
 - Actual commits: `cb87d157` defines the gate; `8a952b29` implements staged
   publication and deterministic transaction verification; `65ac3d0d` records
-  evidence; final delivery record follows in the next commit.
+  evidence; `85950463` merges current `main`; final delivery evidence is
+  pending the reachable-registry integration run.
 
 ## Review policy and outcome
 
