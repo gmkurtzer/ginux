@@ -8,6 +8,9 @@ const MAX_SECTIONS: usize = 96;
 const SECTION_EXECUTE: u32 = 0x2000_0000;
 const SECTION_WRITE: u32 = 0x8000_0000;
 const PAGE_SIZE: usize = 4096;
+const BASE_RELOCATION_DIRECTORY: usize = 5;
+const IMAGE_REL_BASED_ABSOLUTE: u16 = 0;
+const IMAGE_REL_BASED_DIR64: u16 = 10;
 
 pub(crate) struct ImageSummary {
     pub(crate) sections: usize,
@@ -142,6 +145,81 @@ pub(crate) fn inspect(base: *const u8, mapped_size: usize) -> Option<ImageSummar
     })
 }
 
+/// Rebases a loaded PE32+ image after it was copied `delta` bytes away from
+/// the address its base relocations were last applied for. The relocation
+/// table is validated completely before any byte is modified.
+pub fn rebase_loaded_image(image: &mut [u8], delta: u64) -> Option<()> {
+    let (optional, image_size, relocations, relocations_size) = relocation_directory(image)?;
+    for apply in [false, true] {
+        let mut block = relocations;
+        while block < relocations + relocations_size {
+            let page = read_u32(image.as_ptr(), image_size, block)? as usize;
+            let block_size = read_u32(image.as_ptr(), image_size, block + 4)? as usize;
+            let block_end = block.checked_add(block_size)?;
+            if block_size < 8
+                || !block_size.is_multiple_of(2)
+                || block_end > relocations + relocations_size
+            {
+                return None;
+            }
+            for entry in (block + 8..block_end).step_by(2) {
+                let entry = read_u16(image.as_ptr(), image_size, entry)?;
+                let target = page.checked_add(usize::from(entry & 0x0fff))?;
+                match entry >> 12 {
+                    IMAGE_REL_BASED_ABSOLUTE => {}
+                    IMAGE_REL_BASED_DIR64 if target.checked_add(8)? <= image_size => {
+                        if apply {
+                            let field = &mut image[target..target + 8];
+                            let value = u64::from_le_bytes(field.try_into().ok()?);
+                            field.copy_from_slice(&value.wrapping_add(delta).to_le_bytes());
+                        }
+                    }
+                    _ => return None,
+                }
+            }
+            block = block_end;
+        }
+    }
+    // Keep the header's ImageBase in step with the applied delta, as UEFI
+    // loaders do, so the copy describes the address it now runs at.
+    let field = &mut image[optional + 24..optional + 32];
+    let image_base = u64::from_le_bytes(field.try_into().ok()?);
+    field.copy_from_slice(&image_base.wrapping_add(delta).to_le_bytes());
+    Some(())
+}
+
+fn relocation_directory(image: &[u8]) -> Option<(usize, usize, usize, usize)> {
+    let (base, size) = (image.as_ptr(), image.len());
+    if size < 64 || read_u16(base, size, 0)? != DOS_MAGIC {
+        return None;
+    }
+    let pe_offset = read_u32(base, size, 0x3c)? as usize;
+    if read_u32(base, size, pe_offset)? != PE_SIGNATURE {
+        return None;
+    }
+    let coff = pe_offset.checked_add(4)?;
+    let optional_size = read_u16(base, size, coff.checked_add(16)?)? as usize;
+    let optional = coff.checked_add(COFF_HEADER_SIZE)?;
+    let directory = optional.checked_add(112 + BASE_RELOCATION_DIRECTORY * 8)?;
+    if read_u16(base, size, coff)? != AMD64_MACHINE
+        || read_u16(base, size, optional)? != PE32_PLUS_MAGIC
+        || optional_size < 112 + (BASE_RELOCATION_DIRECTORY + 1) * 8
+        || read_u32(base, size, optional + 108)? as usize <= BASE_RELOCATION_DIRECTORY
+    {
+        return None;
+    }
+    let image_size = read_u32(base, size, optional + 56)? as usize;
+    let relocations = read_u32(base, size, directory)? as usize;
+    let relocations_size = read_u32(base, size, directory + 4)? as usize;
+    // An image without relocations cannot run anywhere but its link address.
+    (image_size <= size
+        && relocations_size != 0
+        && relocations
+            .checked_add(relocations_size)
+            .is_some_and(|end| end <= image_size))
+    .then_some((optional, image_size, relocations, relocations_size))
+}
+
 fn read_u16(base: *const u8, size: usize, offset: usize) -> Option<u16> {
     let end = offset.checked_add(2)?;
     (end <= size).then(|| unsafe { base.add(offset).cast::<u16>().read_unaligned() })
@@ -245,5 +323,77 @@ mod tests {
             let image = image(&[section]);
             assert!(inspect(image.0.as_ptr(), image.0.len()).is_none());
         }
+    }
+
+    fn relocatable_image(entries: &[u16]) -> Vec<u8> {
+        let mut bytes = vec![0_u8; PAGE_SIZE * 4];
+        let pe = 64;
+        let coff = pe + 4;
+        let optional = coff + COFF_HEADER_SIZE;
+        let relocations = PAGE_SIZE * 3;
+        bytes[..2].copy_from_slice(&DOS_MAGIC.to_le_bytes());
+        bytes[0x3c..0x40].copy_from_slice(&(pe as u32).to_le_bytes());
+        bytes[pe..pe + 4].copy_from_slice(&PE_SIGNATURE.to_le_bytes());
+        bytes[coff..coff + 2].copy_from_slice(&AMD64_MACHINE.to_le_bytes());
+        bytes[coff + 16..coff + 18].copy_from_slice(&240_u16.to_le_bytes());
+        bytes[optional..optional + 2].copy_from_slice(&PE32_PLUS_MAGIC.to_le_bytes());
+        bytes[optional + 24..optional + 32].copy_from_slice(&0x1_4000_0000_u64.to_le_bytes());
+        bytes[optional + 56..optional + 60]
+            .copy_from_slice(&((PAGE_SIZE * 4) as u32).to_le_bytes());
+        bytes[optional + 108..optional + 112].copy_from_slice(&16_u32.to_le_bytes());
+        let directory = optional + 112 + BASE_RELOCATION_DIRECTORY * 8;
+        let block_size = 8 + entries.len() * 2;
+        bytes[directory..directory + 4].copy_from_slice(&(relocations as u32).to_le_bytes());
+        bytes[directory + 4..directory + 8].copy_from_slice(&(block_size as u32).to_le_bytes());
+        bytes[relocations..relocations + 4].copy_from_slice(&(PAGE_SIZE as u32).to_le_bytes());
+        bytes[relocations + 4..relocations + 8].copy_from_slice(&(block_size as u32).to_le_bytes());
+        for (index, entry) in entries.iter().enumerate() {
+            let offset = relocations + 8 + index * 2;
+            bytes[offset..offset + 2].copy_from_slice(&entry.to_le_bytes());
+        }
+        bytes[PAGE_SIZE + 0x10..PAGE_SIZE + 0x18].copy_from_slice(&0x1_4000_2000_u64.to_le_bytes());
+        bytes
+    }
+
+    fn read_u64_at(bytes: &[u8], offset: usize) -> u64 {
+        u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap())
+    }
+
+    #[test]
+    fn rebase_applies_dir64_relocations_and_updates_image_base() {
+        let mut image = relocatable_image(&[(IMAGE_REL_BASED_DIR64 << 12) | 0x10, 0]);
+        let delta = 0x8000_0000_u64.wrapping_sub(0x1_4000_0000);
+        assert!(rebase_loaded_image(&mut image, delta).is_some());
+        assert_eq!(read_u64_at(&image, PAGE_SIZE + 0x10), 0x8000_2000);
+        assert_eq!(
+            read_u64_at(&image, 64 + 4 + COFF_HEADER_SIZE + 24),
+            0x8000_0000
+        );
+    }
+
+    #[test]
+    fn rebase_rejects_unsupported_or_out_of_bounds_entries_without_writing() {
+        // A valid DIR64 entry precedes each bad one, so a partial write would show.
+        let dir64 = (IMAGE_REL_BASED_DIR64 << 12) | 0x10;
+        let crossing = (IMAGE_REL_BASED_DIR64 << 12) | 0xffc;
+        for (bad, last_page) in [(3 << 12, false), (crossing, true)] {
+            let mut image = relocatable_image(&[dir64, bad]);
+            if last_page {
+                // Move the block to the last page so the second target crosses the image end.
+                let last_page = (PAGE_SIZE * 3) as u32;
+                image[PAGE_SIZE * 3..PAGE_SIZE * 3 + 4].copy_from_slice(&last_page.to_le_bytes());
+            }
+            let original = image.clone();
+            assert!(rebase_loaded_image(&mut image, 0x1000).is_none());
+            assert_eq!(image, original);
+        }
+    }
+
+    #[test]
+    fn rebase_rejects_images_without_relocations() {
+        let mut image = relocatable_image(&[]);
+        let directory = 64 + 4 + COFF_HEADER_SIZE + 112 + BASE_RELOCATION_DIRECTORY * 8;
+        image[directory + 4..directory + 8].copy_from_slice(&0_u32.to_le_bytes());
+        assert!(rebase_loaded_image(&mut image, 0x1000).is_none());
     }
 }

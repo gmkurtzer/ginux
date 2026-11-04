@@ -42,6 +42,8 @@ use core::ffi::c_void;
 use core::mem::size_of;
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
+pub use pe::rebase_loaded_image;
+
 const COM1: u16 = 0x3f8;
 struct HostControlOwner {
     operator_console_ready: AtomicBool,
