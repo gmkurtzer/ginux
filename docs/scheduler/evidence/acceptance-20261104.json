@@ -1,0 +1,800 @@
+{
+  "date": "2026-11-04",
+  "kernel_integration_commit": "713ca27929fbecccd37b4bd44dfe2699aa649efc",
+  "base_commit": "c8d1265306067fcf4bb5554af54aa790a49329fa",
+  "source_identity": "Source export; public CI records exact merge commits separately.",
+  "efi_sha256": "d2602187c186703c65cb32dd69387dfced001870df07036d3c97d6cc228f5101",
+  "accelerator": "kvm",
+  "iterations": 100000000,
+  "fixture_rootfs_sha256": {
+    "original": "816785d5aa581040ec37688e8f7a4e10410ac3c7bd8f1db9f28e8388b1adb705",
+    "shared-clock": "b4066645c09c3e6a34dfc94c944090afb848bace926443b8cdf3bacca520d479"
+  },
+  "cases": [
+    {
+      "name": "cooperative-1",
+      "fixture": "original",
+      "status": "RESPONSIVE",
+      "cpus": 1,
+      "events": [
+        {
+          "seconds": 8.5635,
+          "event": "response",
+          "sample": 0,
+          "active": true
+        },
+        {
+          "seconds": 10.1727,
+          "event": "response",
+          "sample": 1,
+          "active": true
+        },
+        {
+          "seconds": 11.68,
+          "event": "response",
+          "sample": 2,
+          "active": true
+        }
+      ]
+    },
+    {
+      "name": "spinner-1",
+      "fixture": "original",
+      "status": "RESPONSIVE",
+      "cpus": 1,
+      "events": [
+        {
+          "seconds": 7.0017,
+          "event": "response",
+          "sample": 0,
+          "active": true
+        },
+        {
+          "seconds": 8.4576,
+          "event": "response",
+          "sample": 1,
+          "active": true
+        },
+        {
+          "seconds": 10.0101,
+          "event": "response",
+          "sample": 2,
+          "active": true
+        },
+        {
+          "seconds": 11.3621,
+          "event": "response",
+          "sample": 3,
+          "active": true
+        },
+        {
+          "seconds": 12.7645,
+          "event": "response",
+          "sample": 4,
+          "active": true
+        },
+        {
+          "seconds": 14.1734,
+          "event": "response",
+          "sample": 5,
+          "active": true
+        },
+        {
+          "seconds": 15.5806,
+          "event": "response",
+          "sample": 6,
+          "active": true
+        },
+        {
+          "seconds": 16.9833,
+          "event": "response",
+          "sample": 7,
+          "active": true
+        },
+        {
+          "seconds": 18.3851,
+          "event": "response",
+          "sample": 8,
+          "active": true
+        },
+        {
+          "seconds": 19.7908,
+          "event": "response",
+          "sample": 9,
+          "active": true
+        },
+        {
+          "seconds": 21.1969,
+          "event": "response",
+          "sample": 10,
+          "active": true
+        },
+        {
+          "seconds": 22.5485,
+          "event": "response",
+          "sample": 11,
+          "active": true
+        },
+        {
+          "seconds": 23.9008,
+          "event": "response",
+          "sample": 12,
+          "active": true
+        },
+        {
+          "seconds": 25.3033,
+          "event": "response",
+          "sample": 13,
+          "active": true
+        },
+        {
+          "seconds": 26.7628,
+          "event": "response",
+          "sample": 14,
+          "active": true
+        },
+        {
+          "seconds": 28.1667,
+          "event": "response",
+          "sample": 15,
+          "active": true
+        },
+        {
+          "seconds": 29.5695,
+          "event": "response",
+          "sample": 16,
+          "active": true
+        },
+        {
+          "seconds": 30.921,
+          "event": "response",
+          "sample": 17,
+          "active": true
+        },
+        {
+          "seconds": 32.3766,
+          "event": "response",
+          "sample": 18,
+          "active": true
+        },
+        {
+          "seconds": 33.734,
+          "event": "response",
+          "sample": 19,
+          "active": true
+        },
+        {
+          "seconds": 35.1371,
+          "event": "response",
+          "sample": 20,
+          "active": true
+        },
+        {
+          "seconds": 36.589,
+          "event": "response",
+          "sample": 21,
+          "active": true
+        },
+        {
+          "seconds": 38.0917,
+          "event": "response",
+          "sample": 22,
+          "active": true
+        },
+        {
+          "seconds": 39.4529,
+          "event": "response",
+          "sample": 23,
+          "active": true
+        },
+        {
+          "seconds": 40.8617,
+          "event": "response",
+          "sample": 24,
+          "active": true
+        },
+        {
+          "seconds": 42.3651,
+          "event": "response",
+          "sample": 25,
+          "active": true
+        },
+        {
+          "seconds": 43.7722,
+          "event": "response",
+          "sample": 26,
+          "active": true
+        },
+        {
+          "seconds": 45.1747,
+          "event": "response",
+          "sample": 27,
+          "active": true
+        },
+        {
+          "seconds": 46.6334,
+          "event": "response",
+          "sample": 28,
+          "active": true
+        },
+        {
+          "seconds": 48.0368,
+          "event": "response",
+          "sample": 29,
+          "active": true
+        },
+        {
+          "seconds": 49.7511,
+          "event": "stopped",
+          "cycle": 0
+        },
+        {
+          "seconds": 51.4608,
+          "event": "restarted",
+          "cycle": 0
+        },
+        {
+          "seconds": 52.0139,
+          "event": "stopped",
+          "cycle": 1
+        },
+        {
+          "seconds": 53.6736,
+          "event": "restarted",
+          "cycle": 1
+        },
+        {
+          "seconds": 54.2905,
+          "event": "stopped",
+          "cycle": 2
+        },
+        {
+          "seconds": 56.0453,
+          "event": "restarted",
+          "cycle": 2
+        }
+      ]
+    },
+    {
+      "name": "context-1",
+      "fixture": "shared-clock",
+      "status": "PASS",
+      "cpus": 1,
+      "workers": 1,
+      "events": [
+        {
+          "event": "quiet_interval_start",
+          "seconds": 10.6545,
+          "duration": 90.0
+        },
+        {
+          "event": "quiet_interval_end",
+          "seconds": 100.7412
+        },
+        {
+          "event": "context_pass",
+          "seconds": 101.8055,
+          "name": "s1a",
+          "workers": 1,
+          "cpu_mask": 1,
+          "seed": 4951,
+          "report": "S1_CONTEXT_PASS workers=1 cpu_mask=1 error=0 seed=4951 elapsed_us=19045475 realtime_start_us=1793782479798571 realtime_end_us=1793782498844046\n"
+        },
+        {
+          "event": "context_pass",
+          "seconds": 102.126,
+          "name": "s1b",
+          "workers": 1,
+          "cpu_mask": 1,
+          "seed": 27368,
+          "report": "S1_CONTEXT_PASS workers=1 cpu_mask=1 error=0 seed=27368 elapsed_us=17155800 realtime_start_us=1793782481860867 realtime_end_us=1793782499016667\n"
+        },
+        {
+          "event": "competition_overlap",
+          "seconds": 102.1774,
+          "microseconds": 16983179
+        }
+      ]
+    },
+    {
+      "name": "cooperative-2",
+      "fixture": "original",
+      "status": "RESPONSIVE",
+      "cpus": 2,
+      "events": [
+        {
+          "seconds": 19.2287,
+          "event": "response",
+          "sample": 0,
+          "active": true
+        },
+        {
+          "seconds": 21.1039,
+          "event": "response",
+          "sample": 1,
+          "active": true
+        },
+        {
+          "seconds": 22.5799,
+          "event": "response",
+          "sample": 2,
+          "active": true
+        }
+      ]
+    },
+    {
+      "name": "spinner-2",
+      "fixture": "original",
+      "status": "RESPONSIVE",
+      "cpus": 2,
+      "events": [
+        {
+          "seconds": 26.5101,
+          "event": "response",
+          "sample": 0,
+          "active": true
+        },
+        {
+          "seconds": 28.3657,
+          "event": "response",
+          "sample": 1,
+          "active": true
+        },
+        {
+          "seconds": 29.8898,
+          "event": "response",
+          "sample": 2,
+          "active": true
+        },
+        {
+          "seconds": 32.3875,
+          "event": "stopped",
+          "cycle": 0
+        },
+        {
+          "seconds": 34.8837,
+          "event": "restarted",
+          "cycle": 0
+        },
+        {
+          "seconds": 35.9133,
+          "event": "stopped",
+          "cycle": 1
+        },
+        {
+          "seconds": 37.7342,
+          "event": "restarted",
+          "cycle": 1
+        },
+        {
+          "seconds": 38.4474,
+          "event": "stopped",
+          "cycle": 2
+        },
+        {
+          "seconds": 40.3679,
+          "event": "restarted",
+          "cycle": 2
+        }
+      ]
+    },
+    {
+      "name": "context-2",
+      "fixture": "shared-clock",
+      "status": "PASS",
+      "cpus": 2,
+      "workers": 2,
+      "events": [
+        {
+          "event": "quiet_interval_start",
+          "seconds": 10.6869,
+          "duration": 90.0
+        },
+        {
+          "event": "quiet_interval_end",
+          "seconds": 100.8686
+        },
+        {
+          "event": "context_pass",
+          "seconds": 101.9443,
+          "name": "s1a",
+          "workers": 2,
+          "cpu_mask": 3,
+          "seed": 4951,
+          "report": "S1_CONTEXT_PASS workers=2 cpu_mask=3 error=0 seed=4951 elapsed_us=22823088 realtime_start_us=1793782582412478 realtime_end_us=1793782605235565\n"
+        },
+        {
+          "event": "context_pass",
+          "seconds": 102.301,
+          "name": "s1b",
+          "workers": 2,
+          "cpu_mask": 3,
+          "seed": 27368,
+          "report": "S1_CONTEXT_PASS workers=2 cpu_mask=3 error=0 seed=27368 elapsed_us=20934524 realtime_start_us=1793782584893752 realtime_end_us=1793782605828276\n"
+        },
+        {
+          "event": "competition_overlap",
+          "seconds": 102.405,
+          "microseconds": 20341813
+        }
+      ]
+    },
+    {
+      "name": "cooperative-4",
+      "fixture": "original",
+      "status": "RESPONSIVE",
+      "cpus": 4,
+      "events": [
+        {
+          "seconds": 9.9573,
+          "event": "response",
+          "sample": 0,
+          "active": true
+        },
+        {
+          "seconds": 11.8686,
+          "event": "response",
+          "sample": 1,
+          "active": true
+        },
+        {
+          "seconds": 13.4846,
+          "event": "response",
+          "sample": 2,
+          "active": true
+        }
+      ]
+    },
+    {
+      "name": "spinner-4",
+      "fixture": "original",
+      "status": "RESPONSIVE",
+      "cpus": 4,
+      "events": [
+        {
+          "seconds": 16.3762,
+          "event": "response",
+          "sample": 0,
+          "active": true
+        },
+        {
+          "seconds": 17.8635,
+          "event": "response",
+          "sample": 1,
+          "active": true
+        },
+        {
+          "seconds": 19.3213,
+          "event": "response",
+          "sample": 2,
+          "active": true
+        },
+        {
+          "seconds": 21.9064,
+          "event": "stopped",
+          "cycle": 0
+        },
+        {
+          "seconds": 23.8787,
+          "event": "restarted",
+          "cycle": 0
+        },
+        {
+          "seconds": 24.8971,
+          "event": "stopped",
+          "cycle": 1
+        },
+        {
+          "seconds": 27.0535,
+          "event": "restarted",
+          "cycle": 1
+        },
+        {
+          "seconds": 28.024,
+          "event": "stopped",
+          "cycle": 2
+        },
+        {
+          "seconds": 29.9548,
+          "event": "restarted",
+          "cycle": 2
+        }
+      ]
+    },
+    {
+      "name": "context-4",
+      "fixture": "shared-clock",
+      "status": "PASS",
+      "cpus": 4,
+      "workers": 4,
+      "events": [
+        {
+          "event": "quiet_interval_start",
+          "seconds": 13.4133,
+          "duration": 90.0
+        },
+        {
+          "event": "quiet_interval_end",
+          "seconds": 103.4809
+        },
+        {
+          "event": "context_pass",
+          "seconds": 104.2355,
+          "name": "s1a",
+          "workers": 4,
+          "cpu_mask": 15,
+          "seed": 4951,
+          "report": "S1_CONTEXT_PASS workers=4 cpu_mask=15 error=0 seed=4951 elapsed_us=26421835 realtime_start_us=1793782690103157 realtime_end_us=1793782716524992\n"
+        },
+        {
+          "event": "context_pass",
+          "seconds": 104.5388,
+          "name": "s1b",
+          "workers": 4,
+          "cpu_mask": 15,
+          "seed": 27368,
+          "report": "S1_CONTEXT_PASS workers=4 cpu_mask=15 error=0 seed=27368 elapsed_us=24171552 realtime_start_us=1793782692898825 realtime_end_us=1793782717070377\n"
+        },
+        {
+          "event": "competition_overlap",
+          "seconds": 104.5891,
+          "microseconds": 23626167
+        }
+      ]
+    },
+    {
+      "name": "siblings-1",
+      "fixture": "shared-clock",
+      "status": "PASS",
+      "cpus": 1,
+      "workers": 4,
+      "events": [
+        {
+          "event": "quiet_interval_start",
+          "seconds": 9.5347,
+          "duration": 90.0
+        },
+        {
+          "event": "quiet_interval_end",
+          "seconds": 99.7265
+        },
+        {
+          "event": "context_pass",
+          "seconds": 100.5846,
+          "name": "s1a",
+          "workers": 4,
+          "cpu_mask": 1,
+          "seed": 4951,
+          "report": "S1_CONTEXT_PASS workers=4 cpu_mask=1 error=0 seed=4951 elapsed_us=78376632 realtime_start_us=1793782791192603 realtime_end_us=1793782869569235\n"
+        },
+        {
+          "event": "context_pass",
+          "seconds": 100.9872,
+          "name": "s1b",
+          "workers": 4,
+          "cpu_mask": 1,
+          "seed": 27368,
+          "report": "S1_CONTEXT_PASS workers=4 cpu_mask=1 error=0 seed=27368 elapsed_us=76403426 realtime_start_us=1793782793245707 realtime_end_us=1793782869649134\n"
+        },
+        {
+          "event": "competition_overlap",
+          "seconds": 101.0877,
+          "microseconds": 76323528
+        }
+      ]
+    },
+    {
+      "name": "signals-1",
+      "fixture": "original",
+      "status": "PASS",
+      "cpus": 1,
+      "workers": 1,
+      "events": [
+        {
+          "event": "quiet_interval_start",
+          "seconds": 24.0062,
+          "duration": 90.0
+        },
+        {
+          "event": "quiet_interval_end",
+          "seconds": 114.2058
+        },
+        {
+          "event": "context_pass",
+          "seconds": 115.1168,
+          "name": "s1a",
+          "workers": 1,
+          "cpu_mask": 1,
+          "seed": 4951,
+          "report": "S1_CONTEXT_PASS workers=1 cpu_mask=1 error=0 seed=4951 elapsed_us=6975485 signals=1 waits=5\n"
+        },
+        {
+          "event": "context_pass",
+          "seconds": 115.623,
+          "name": "s1b",
+          "workers": 1,
+          "cpu_mask": 1,
+          "seed": 27368,
+          "report": "S1_CONTEXT_PASS workers=1 cpu_mask=1 error=0 seed=27368 elapsed_us=4810003 signals=1 waits=5\n"
+        }
+      ]
+    },
+    {
+      "name": "active-stop-restart-4",
+      "fixture": "shared-clock",
+      "status": "RESPONSIVE",
+      "cpus": 4,
+      "events": [
+        {
+          "seconds": 12.0738,
+          "event": "response",
+          "sample": 0,
+          "active": true
+        },
+        {
+          "seconds": 13.9861,
+          "event": "stopped",
+          "cycle": 0
+        },
+        {
+          "seconds": 16.4624,
+          "event": "restarted",
+          "cycle": 0
+        },
+        {
+          "seconds": 17.3356,
+          "event": "stopped",
+          "cycle": 1
+        },
+        {
+          "seconds": 19.7337,
+          "event": "restarted",
+          "cycle": 1
+        },
+        {
+          "seconds": 20.6432,
+          "event": "stopped",
+          "cycle": 2
+        },
+        {
+          "seconds": 22.402,
+          "event": "restarted",
+          "cycle": 2
+        }
+      ]
+    }
+  ],
+  "additional_tcg_lifecycle": {
+    "status": "RESPONSIVE",
+    "probe": "busy4a",
+    "cpus": 4,
+    "events": [
+      {
+        "seconds": 18.9419,
+        "event": "command",
+        "command": "domain new s1probe"
+      },
+      {
+        "seconds": 20.7064,
+        "event": "command",
+        "command": "domain set s1probe image=docker.io/library/scheduler-test:local init=/busy4a cpu=4"
+      },
+      {
+        "seconds": 25.9776,
+        "event": "command",
+        "command": "domain start s1probe"
+      },
+      {
+        "seconds": 28.1426,
+        "event": "command",
+        "command": "domain status s1probe"
+      },
+      {
+        "seconds": 29.6123,
+        "event": "startup_pending",
+        "response": "domain status s1probe\nName:        s1probe\nState:       starting\nPersonality: linux\nInit:        /busy4a\nCPU:         4\nMemory MiB:  128\nAutostart:   false\nNetworks:    host(shared)      \nImage:       docker.io/library/scheduler-test:local\nConsole:     detached\nRootfs:      ready\nExecution:   booting\nginux> "
+      },
+      {
+        "seconds": 30.1125,
+        "event": "command",
+        "command": "domain status s1probe"
+      },
+      {
+        "seconds": 32.6053,
+        "event": "response",
+        "sample": 0,
+        "active": true
+      },
+      {
+        "seconds": 33.6073,
+        "event": "command",
+        "command": "domain stop s1probe"
+      },
+      {
+        "seconds": 34.9252,
+        "event": "command",
+        "command": "domain status s1probe"
+      },
+      {
+        "seconds": 36.6963,
+        "event": "stopped",
+        "cycle": 0
+      },
+      {
+        "seconds": 36.6964,
+        "event": "command",
+        "command": "domain start s1probe"
+      },
+      {
+        "seconds": 38.7078,
+        "event": "command",
+        "command": "domain status s1probe"
+      },
+      {
+        "seconds": 40.4273,
+        "event": "restarted",
+        "cycle": 0
+      },
+      {
+        "seconds": 40.4274,
+        "event": "command",
+        "command": "domain stop s1probe"
+      },
+      {
+        "seconds": 41.7469,
+        "event": "command",
+        "command": "domain status s1probe"
+      },
+      {
+        "seconds": 43.6178,
+        "event": "stopped",
+        "cycle": 1
+      },
+      {
+        "seconds": 43.6178,
+        "event": "command",
+        "command": "domain start s1probe"
+      },
+      {
+        "seconds": 45.8384,
+        "event": "command",
+        "command": "domain status s1probe"
+      },
+      {
+        "seconds": 48.7927,
+        "event": "restarted",
+        "cycle": 1
+      },
+      {
+        "seconds": 48.7927,
+        "event": "command",
+        "command": "domain stop s1probe"
+      },
+      {
+        "seconds": 49.9569,
+        "event": "command",
+        "command": "domain status s1probe"
+      },
+      {
+        "seconds": 51.7265,
+        "event": "stopped",
+        "cycle": 2
+      },
+      {
+        "seconds": 51.7265,
+        "event": "command",
+        "command": "domain start s1probe"
+      },
+      {
+        "seconds": 53.8429,
+        "event": "command",
+        "command": "domain status s1probe"
+      },
+      {
+        "seconds": 55.4064,
+        "event": "restarted",
+        "cycle": 2
+      }
+    ]
+  }
+}

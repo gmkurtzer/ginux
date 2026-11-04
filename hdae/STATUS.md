@@ -5,12 +5,16 @@
 Active skill: `.agents/skills/hdae-development/SKILL.md`; full reload and method
 reference required after context shift. Active gate:
 [`46-scheduler-reproducible-acceptance`](gates-todo/46-scheduler-reproducible-acceptance.md).
-Branch: `fix/background-domain-preemption`; status: partial. Current main
+Branch: `fix/background-domain-preemption`; status: maintainer review pending. Current main
 `c8d12653` integrated in `713ca279`; desktop nonblocking reads preserved.
 The user authorized continuation of PR #85 to remove private-fixture/KVM access
-dependencies. Source-built cache, portable harness and public CI are in progress.
-Next: validate TCG runtime and oracle controls, then the full 1/2/4 CPU matrix,
-static/full boot regression, and publish exact evidence. No merge is authorized.
+dependencies. Source-built cache and public TCG 1/2/4 CPU acceptance pass,
+including corrected shared-clock overlap and the pre-fix negative control.
+Public full QEMU integration and static checks pass; contributor KVM evidence
+and local native-volume failures are recorded in the gate and validation notes.
+Next: check CI for the final publication head, link its evidence in PR #85,
+and return to maintainer review. No merge is authorized. Private infrastructure
+identifiers belong only in ignored local worklogs, never in published artifacts.
 The controller-desktop checkpoint below is historical upstream context.
 
 ## Recovery checkpoint

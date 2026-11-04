@@ -38,8 +38,21 @@ JSON evidence. It needs no private seed volume or contributor-host access.
 The revised context oracle also requires overlapping computation intervals;
 the stop/restart probe uses a continuous four-worker payload. Every case waits
 for its own complete status record rather than an earlier command's prompt.
-The historical measurements below are retained as original contributor evidence;
-new acceptance results are recorded separately after fresh validation.
+The workflow also runs the full deterministic `make test` suite on macOS/QEMU
+TCG. The ordinary PR `qemu` check runs a smoke test, so its green result alone
+must not be described as full integration passage.
+
+The historical measurements below are retained as original contributor evidence.
+Current acceptance is tracked by the public `scheduler` workflow and its
+downloadable `scheduler-tcg-1cpu`, `scheduler-tcg-2cpu`, and
+`scheduler-tcg-4cpu` artifacts. Each artifact identifies the tested merge commit,
+EFI, compiler and payloads; the PR head and merge commit are different identities.
+
+Cross-domain computation overlap uses `CLOCK_REALTIME`, whose epoch is shared
+by the domains. Ginux's `CLOCK_MONOTONIC` epoch is per domain and cannot establish
+such overlap. Initial acceptance run `41801727049` passed its register, CPU-mask,
+signal, lifecycle and oracle-control checks, but its overlap calculation used the
+wrong clock. That overlap result is superseded by the corrected-clock reruns.
 
 The one-CPU pre-fix control responds to three queries when the workload calls
 `sched_yield()`, but a no-syscall spinner receives no controller response within
@@ -53,6 +66,28 @@ The harness requires both computation reports and clean console-read/exit.
 Signal fixtures compute inside SIGUSR1, return through sigreturn and complete
 five timed sleeps. Stop/start reuses the runtime slot; there is no delete action
 in the current domain-control ABI.
+
+## Acceptance follow-up, 2026-11-04
+
+The source-built KVM matrix passes all twelve cases after integration with
+`c8d12653`: cooperative/spinner/context on 1/2/4 CPUs, four siblings per domain
+on one CPU, signal/timed waits, and continuous four-worker stop/restart.
+The context and sibling cases were rerun with the shared-clock correction:
+observed computation overlap was 16.98 / 20.34 / 23.63 seconds on 1/2/4 CPUs and
+76.32 seconds for the sibling case. CPU masks were 1/3/15 as required.
+The continuous-worker test additionally passes on TCG and requires the workload
+to remain active after each of its three restarts.
+
+Compact contributor evidence, with input identities and sentinel reports, is in
+[`evidence/acceptance-20261104.json`](evidence/acceptance-20261104.json).
+It is supplementary evidence from a source export, not an independent CI result.
+The source-built pre-fix `7fdc880e` control passes its cooperative case and
+reproduces spinner starvation on both the contributor TCG host and public CI.
+
+The public [scheduler workflow](https://github.com/gmkurtzer/ginux/actions/workflows/scheduler.yml)
+runs the corrected fixtures from the checked-out PR merge tree. Its status and
+artifacts for the current PR head, together with `full-integration`, are the
+maintainer acceptance evidence. Old successful runs do not certify later code.
 
 ## Historical publication validation
 
@@ -90,7 +125,15 @@ They are not interrupt-latency microbenchmarks.
 
 ## Qualification limits
 
-The earlier candidate passed targeted 1/2/4-CPU runs, two-domain context tests,
+On the current integration with `c8d12653`, contributor Linux/QEMU 8.2 TCG
+`make test` failed during post-ABI-rejection native-volume recovery. A fresh
+unmodified `c8d12653` run on the same host also failed in native-volume lifecycle,
+but at replacement recovery on the recovery boot. The failure stages differ;
+this comparison does not prove identical causes. The dedicated public
+`full-integration` job is the independent full-suite acceptance path. Neither
+local failure is counted as a pass, and no native-volume fix is included here.
+
+The historical candidate passed targeted 1/2/4-CPU runs, two-domain context tests,
 four siblings per domain on one CPU, signal/timed-wait tests and stop/start.
 Its full boot suite and the unmodified local base both failed at Linux probe
 RIP 4214196, vector 6, RAX=-EINTR (-4), followed by a missing native-volume IOMMU
