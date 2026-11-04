@@ -1,8 +1,8 @@
-# Ginus Project Intent
+# Ginux-us Project Intent
 
 ## Name and terminology
 
-**Ginus** stands for **Ginux Userspace**. Ginus is a configurable userspace
+**Ginux-us** stands for **Ginux Userspace**. Ginux-us is a configurable userspace
 kernel that runs isolated Linux compatibility **domains**. Each domain is
 governed by a versioned **contract** describing the kernel-facing interfaces
 that it may observe and use.
@@ -14,8 +14,8 @@ reduce parts of that surface, but managed processes still execute permitted
 system calls directly against the host Linux kernel. A compromised process can
 therefore attempt to exploit any host-kernel path that remains reachable.
 
-Ginus interposes a userspace-kernel boundary. A managed syscall may not complete
-as an unmediated host syscall. Ginus intercepts each request before its host
+Ginux-us interposes a userspace-kernel boundary. A managed syscall may not complete
+as an unmediated host syscall. Ginux-us intercepts each request before its host
 effect and either emulates it, performs a validated mediated operation through
 the host, or denies it. The
 goal is to make compatibility an explicit, configurable security contract
@@ -33,20 +33,20 @@ rather than an all-or-nothing inheritance from the host kernel.
 ## Initial outcome
 
 The initial milestone will boot a normal Rocky Linux 10 host with systemd as
-the real host PID 1, install Ginus as an ordinary host executable, and run an
-unmodified Rocky Linux 10 systemd userspace as virtual PID 1 inside one Ginus
-domain. Ginus remains resident as the userspace kernel for the processes it
+the real host PID 1, install Ginux-us as an ordinary host executable, and run an
+unmodified Rocky Linux 10 systemd userspace as virtual PID 1 inside one Ginux-us
+domain. Ginux-us remains resident as the userspace kernel for the processes it
 launches. The Rocky host boots from an official, checksum-pinned cloud QCOW2
 image. Each domain virtually boots a digest-pinned Rocky OCI image as its root
-filesystem; Ginus pulls and caches that image explicitly so ordinary domain
+filesystem; Ginux-us pulls and caches that image explicitly so ordinary domain
 starts and tests do not require network access.
 
 The milestone succeeds when:
 
-1. no managed x86-64 syscall completes against the host without a Ginus
+1. no managed x86-64 syscall completes against the host without a Ginux-us
    contract decision;
 2. systemd reproducibly reaches the defined multi-user readiness marker;
-3. the domain sees Ginus-owned `/dev`, `/proc`, `/sys`, and cgroup interfaces;
+3. the domain sees Ginux-us-owned `/dev`, `/proc`, `/sys`, and cgroup interfaces;
 4. domain configuration selects its image, resources, devices, contract, and
    audit behavior;
 5. reproducible benchmarks quantify CPU, memory, syscall, process, storage,
@@ -61,7 +61,7 @@ filesystem content, network traffic, races, and process interactions. The
 adversary attempts to escape the domain, reach unintended host state, exploit
 the host kernel, weaken the domain contract, or interfere with another domain.
 
-The host kernel, hardware, Ginus binary and approved configuration, boot chain,
+The host kernel, hardware, Ginux-us binary and approved configuration, boot chain,
 and operator are initially trusted. Hardware side channels, a compromised host
 kernel, malicious firmware, and physical attacks are outside the initial threat
 model. These exclusions must remain visible and must not be described as
@@ -73,12 +73,12 @@ solved.
 - macOS arm64 development host using QEMU TCG to emulate the complete Linux
   x86-64 verification environment.
 - A normally booted Rocky Linux 10 development VM with host systemd as PID 1;
-  Ginus runs inside it as an ordinary process or service.
+  Ginux-us runs inside it as an ordinary process or service.
 - An emulation-compatible syscall-interception mechanism selected by Gate 1;
   KVM acceleration is not required by the initial milestone.
 - Native x86-64 ELF execution supervised with ptrace syscall-entry and
   syscall-exit stops, with the host kernel performing instruction execution
-  and Ginus deciding every syscall before any permitted host effect.
+  and Ginux-us deciding every syscall before any permitted host effect.
 - Three explicit execution profiles: `security` interprets instructions and
   virtualizes kernel-facing state; `balanced` executes instructions natively
   while limiting passthrough to a minimal confined loader/memory surface; and
@@ -96,8 +96,8 @@ solved.
 
 ## Non-goals for the initial milestone
 
-- Running the host distribution root directly under Ginus.
-- Replacing the Rocky host's init process or requiring `init=/sbin/ginus`.
+- Running the host distribution root directly under Ginux-us.
+- Replacing the Rocky host's init process or requiring `init=/sbin/ginux`.
 - Pulling or assembling OCI images at every boot.
 - Arbitrary physical-device, GPU, MMIO, or DMA passthrough.
 - VFIO/IOMMU hardware assignment.
@@ -111,12 +111,12 @@ solved.
 
 ## Product principles
 
-- No managed syscall reaches a host effect before a Ginus contract decision.
-- "Passthrough" means a Ginus-controlled operation whose syscall and arguments
+- No managed syscall reaches a host effect before a Ginux-us contract decision.
+- "Passthrough" means a Ginux-us-controlled operation whose syscall and arguments
   are validated before the native backend may resume it; it never means an
   unchecked syscall, descriptor, pointer, or ioctl payload.
 - Unknown contract operations fail closed and produce useful audit evidence.
-- Domain-visible kernel state is Ginus state, not an accidental view of host
+- Domain-visible kernel state is Ginux-us state, not an accidental view of host
   `/proc`, `/sys`, `/dev`, or cgroups.
 - Device and resource ownership is explicit, exclusive by default, revocable,
   and bound to domain lifecycle.

@@ -10,7 +10,7 @@ if ! docker image inspect "$ROCKY_DOMAIN_HELPER_IMAGE" >/dev/null 2>&1; then
 fi
 
 source_sha=$(shasum -a 256 "$ROCKY_SOURCE_IMAGE" | awk '{print $1}')
-if [ "${GINUS_IMAGE_FORCE:-0}" != 1 ] &&
+if [ "${GINUX_IMAGE_FORCE:-0}" != 1 ] &&
     [ -f "$ROCKY_DOMAIN_ROOTFS_PATH" ] &&
     [ -f "$ROCKY_DOMAIN_MANIFEST_PATH" ] &&
     [ -f "$ROCKY_DOMAIN_METADATA_PATH" ] &&

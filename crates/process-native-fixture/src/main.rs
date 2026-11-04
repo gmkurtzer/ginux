@@ -44,7 +44,7 @@ extern "C" fn fixture_main() -> ! {
         wait_child(second);
         round += 1;
     }
-    write(b"GINUS_NATIVE_PARENT: PASS\n");
+    write(b"GINUX_NATIVE_PARENT: PASS\n");
     exit(0)
 }
 

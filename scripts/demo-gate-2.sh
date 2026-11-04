@@ -4,7 +4,7 @@ set -eu
 . ./scripts/rocky-domain-common.sh
 
 printf '%s\n' 'Gate 2 scope: turn the pinned Rocky QCOW2 into a reproducible userspace archive.'
-printf '%s\n' 'This gate tests image preparation only; it does not run Rocky under Ginus.'
+printf '%s\n' 'This gate tests image preparation only; it does not run Rocky under Ginux-us.'
 printf '%s\n' 'The extraction helper must have no external network and mount the source read-only.'
 printf '%s\n' ''
 
@@ -24,5 +24,5 @@ printf '%s\n' '  - normal cleanup retained cache artifacts and Git tracks none o
 printf '  - rootfs: %s\n' "$ROCKY_DOMAIN_ROOTFS_PATH"
 printf '  - manifest sha256: %s\n' "$(shasum -a 256 "$ROCKY_DOMAIN_MANIFEST_PATH" | awk '{print $1}')"
 printf '%s\n' ''
-printf '%s\n' 'Not tested in Gate 2: Ginus execution, Ginus VFS behavior, or systemd boot under Ginus.'
+printf '%s\n' 'Not tested in Gate 2: Ginux-us execution, Ginux-us VFS behavior, or systemd boot under Ginux-us.'
 printf '%s\n' 'GATE2: PASS (image preparation pipeline only)'

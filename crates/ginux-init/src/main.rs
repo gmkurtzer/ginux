@@ -3,22 +3,22 @@
 
 use core::arch::{asm, global_asm};
 use core::panic::PanicInfo;
-use ginus_core::{
+use ginux_core::{
     balanced_arguments_allowed, balanced_identity_result, balanced_surface, decide,
     decide_balanced, Action, BalancedSurface, SYS_EXIT, SYS_EXIT_GROUP, SYS_GETPID, SYS_UNAME,
     SYS_WRITE,
 };
-use ginus_devices::{
+use ginux_devices::{
     BlockBackend, DeviceError, DeviceKind, DeviceName, DeviceRegistry, IsolatedNetwork, Partition,
     IOCTL_CONSOLE_GET_SIZE,
 };
-use ginus_domain::{ConfigError, Domain, DomainConfig};
-use ginus_process::{
+use ginux_domain::{ConfigError, Domain, DomainConfig};
+use ginux_process::{
     Credentials, EventFd, EventPoll, FutexTable, ProcessError, ProcessTable, SignalAction,
     SignalDelivery, TimerTable, VirtualClock, EVENT_READ, EVENT_WRITE,
 };
-use ginus_runtime::{execute, AddressSpace, AuditAction, LoadError};
-use ginus_vfs::{BaseReader, Index, VfsError, VirtualFs, O_CREATE, O_READ, O_WRITE};
+use ginux_runtime::{execute, AddressSpace, AuditAction, LoadError};
+use ginux_vfs::{BaseReader, Index, VfsError, VirtualFs, O_CREATE, O_READ, O_WRITE};
 
 global_asm!(
     ".global _start",
@@ -274,7 +274,7 @@ fn process_main(config_path: *const u8) -> ! {
     if init.pid != 1 || processes.view(init).map(|view| view.parent) != Ok(0) {
         process_fail(b"virtual init identity failed");
     }
-    line(b"GINUS_PROCESS: init=1 parent=0 host-pid=unexposed");
+    line(b"GINUX_PROCESS: init=1 parent=0 host-pid=unexposed");
 
     let mut final_child = init;
     for iteration in 0..256u32 {
@@ -308,7 +308,7 @@ fn process_main(config_path: *const u8) -> ! {
     if processes.view(final_child) != Err(ProcessError::InvalidTask) || processes.active() != 1 {
         process_fail(b"stale identity or lifecycle leak");
     }
-    line(b"GINUS_PROCESS: fork-clone-exec-wait iterations=256 stale-id=denied active=1");
+    line(b"GINUX_PROCESS: fork-clone-exec-wait iterations=256 stale-id=denied active=1");
 
     let signal_child = processes
         .fork(init)
@@ -329,7 +329,7 @@ fn process_main(config_path: *const u8) -> ! {
     {
         process_fail(b"signal delivery or return failed");
     }
-    line(b"GINUS_PROCESS: signal=10 blocked-wait=interrupted handler=0x4000 return=PASS");
+    line(b"GINUX_PROCESS: signal=10 blocked-wait=interrupted handler=0x4000 return=PASS");
 
     let credentials = processes
         .credentials_mut(signal_child)
@@ -342,7 +342,7 @@ fn process_main(config_path: *const u8) -> ! {
     {
         process_fail(b"virtual credential transition failed");
     }
-    line(b"GINUS_PROCESS: virtual-uid=1000 virtual-gid=1000 host-credentials=unchanged regain-root=denied");
+    line(b"GINUX_PROCESS: virtual-uid=1000 virtual-gid=1000 host-credentials=unchanged regain-root=denied");
 
     let mut futex: FutexTable<2> = FutexTable::new();
     if futex.wait(signal_child, 0x1000, 7, 7).is_err() {
@@ -373,7 +373,7 @@ fn process_main(config_path: *const u8) -> ! {
     if timers.read(timer) != Ok(4) {
         process_fail(b"timer expiration failed");
     }
-    line(b"GINUS_PROCESS: futex-wake=1 eventfd=9 epoll=readable timer-expirations=4");
+    line(b"GINUX_PROCESS: futex-wake=1 eventfd=9 epoll=readable timer-expirations=4");
 
     if processes.shutdown(137) != 2 || processes.reap_all() != 2 || processes.active() != 0 {
         process_fail(b"shutdown cleanup failed");
@@ -381,7 +381,7 @@ fn process_main(config_path: *const u8) -> ! {
     if domain.task_exited(true).is_err() {
         process_fail(b"domain cleanup failed");
     }
-    line(b"GINUS_PROCESS: shutdown tasks=0 waiters=0 events=0 timers=0 resources=released");
+    line(b"GINUX_PROCESS: shutdown tasks=0 waiters=0 events=0 timers=0 resources=released");
     line(b"GATE7_PROCESS: PASS");
     exit_process(0)
 }
@@ -395,7 +395,7 @@ fn process_fail(reason: &[u8]) -> ! {
 #[derive(Clone, Copy)]
 struct NativeProcessTask {
     host_pid: usize,
-    virtual_id: ginus_process::TaskId,
+    virtual_id: ginux_process::TaskId,
     awaiting_exit: bool,
     override_result: bool,
     result: i64,
@@ -448,7 +448,7 @@ fn process_native_tracee(fixture_path: *const u8) -> ! {
 fn supervise_process_native(root_host_pid: usize, domain: &mut Domain) -> ! {
     let mut status = 0i32;
     if wait(root_host_pid, &mut status) < 0 || !stopped(status) {
-        write_all(b"GINUS_NATIVE_PROCESS: initial-status=");
+        write_all(b"GINUX_NATIVE_PROCESS: initial-status=");
         write_i64(status as i64);
         write_all(b"\n");
         native_fail(
@@ -482,7 +482,7 @@ fn supervise_process_native(root_host_pid: usize, domain: &mut Domain) -> ! {
     if ptrace(PTRACE_SYSCALL, root_host_pid, 0, 0) < 0 {
         process_native_fail(domain, root_host_pid, b"process initial resume failed");
     }
-    line(b"GINUS_NATIVE_PROCESS: virtual-init=1 host-pid=unexposed ptrace=attached");
+    line(b"GINUX_NATIVE_PROCESS: virtual-init=1 host-pid=unexposed ptrace=attached");
     let mut native_child_exits = 0usize;
 
     loop {
@@ -528,7 +528,7 @@ fn supervise_process_native(root_host_pid: usize, domain: &mut Domain) -> ! {
                     || native_child_exits != 32
                     || tasks.iter().flatten().any(|entry| entry.tracing)
                 {
-                    write_all(b"GINUS_NATIVE_PROCESS: root-exit=");
+                    write_all(b"GINUX_NATIVE_PROCESS: root-exit=");
                     write_i64(exit_status as i64);
                     write_all(b" tracing-remaining=");
                     write_u64(tasks.iter().flatten().filter(|entry| entry.tracing).count() as u64);
@@ -541,8 +541,8 @@ fn supervise_process_native(root_host_pid: usize, domain: &mut Domain) -> ! {
                 if domain.task_exited(true).is_err() {
                     process_native_fail(domain, root_host_pid, b"native domain exit failed");
                 }
-                line(b"GINUS_NATIVE_PROCESS: fork=mediated iterations=32 concurrent-children=2 child=ptrace-attached pid-translation=PASS");
-                line(b"GINUS_NATIVE_PROCESS: wait=translated child-exits=32 exit-status=23 tasks=0 cleanup=PASS");
+                line(b"GINUX_NATIVE_PROCESS: fork=mediated iterations=32 concurrent-children=2 child=ptrace-attached pid-translation=PASS");
+                line(b"GINUX_NATIVE_PROCESS: wait=translated child-exits=32 exit-status=23 tasks=0 cleanup=PASS");
                 line(b"GATE7_NATIVE_PROCESS: PASS");
                 exit_process(0);
             }
@@ -651,7 +651,7 @@ fn supervise_process_native(root_host_pid: usize, domain: &mut Domain) -> ! {
             {
                 process_native_fail(domain, root_host_pid, b"fork breakpoint restore failed");
             }
-            write_all(b"GINUS_NATIVE_PROCESS_AUDIT: fork host-result=");
+            write_all(b"GINUX_NATIVE_PROCESS_AUDIT: fork host-result=");
             write_i64(parent_registers.rax as i64);
             write_all(b" virtual-result=");
             write_u64(virtual_pid as u64);
@@ -690,7 +690,7 @@ fn supervise_process_native(root_host_pid: usize, domain: &mut Domain) -> ! {
             continue;
         }
         if signal != (5 | 0x80) {
-            write_all(b"GINUS_NATIVE_PROCESS: unexpected-signal=");
+            write_all(b"GINUX_NATIVE_PROCESS: unexpected-signal=");
             write_u64(signal as u64);
             write_all(b" event=");
             write_u64(event as u64);
@@ -732,7 +732,7 @@ fn supervise_process_native(root_host_pid: usize, domain: &mut Domain) -> ! {
                     process_native_fail(domain, root_host_pid, b"wait result host pid unknown");
                 };
                 let waited_virtual = tasks[waited_index].unwrap().virtual_id;
-                write_all(b"GINUS_NATIVE_PROCESS_AUDIT: wait host-result=");
+                write_all(b"GINUX_NATIVE_PROCESS_AUDIT: wait host-result=");
                 write_i64(registers.rax as i64);
                 write_all(b" virtual-result=");
                 write_u64(waited_virtual.pid as u64);
@@ -792,7 +792,7 @@ fn supervise_process_native(root_host_pid: usize, domain: &mut Domain) -> ! {
                         .flatten()
                         .find(|entry| entry.virtual_id.pid == virtual_pid)
                     else {
-                        write_all(b"GINUS_NATIVE_PROCESS_AUDIT: invalid-wait-selector=");
+                        write_all(b"GINUX_NATIVE_PROCESS_AUDIT: invalid-wait-selector=");
                         write_u64(virtual_pid as u64);
                         write_all(b" caller=");
                         write_u64(current.virtual_id.pid as u64);
@@ -913,7 +913,7 @@ fn devices_main(config_path: *const u8, block_path: *const u8) -> ! {
         }
     }
     if !text_list_contains(config.storage.as_slice(), b"block0")
-        || config.network_backend != ginus_domain::NetworkBackend::Mediated
+        || config.network_backend != ginux_domain::NetworkBackend::Mediated
     {
         device_fail(b"required normalized assignment missing");
     }
@@ -922,7 +922,7 @@ fn devices_main(config_path: *const u8, block_path: *const u8) -> ! {
     if visible_count != 6 {
         device_fail(b"unexpected device projection");
     }
-    line(b"GINUS_DEVICES: visible=console,null,zero,random,block0,net0 unassigned=hidden");
+    line(b"GINUX_DEVICES: visible=console,null,zero,random,block0,net0 unassigned=hidden");
 
     let zero = registry
         .open(domain_id, b"zero")
@@ -943,7 +943,7 @@ fn devices_main(config_path: *const u8, block_path: *const u8) -> ! {
     {
         device_fail(b"ioctl or mapping policy failed");
     }
-    line(b"GINUS_DEVICES: handles=virtual pseudo=PASS ioctl-unknown=denied mmap=denied");
+    line(b"GINUX_DEVICES: handles=virtual pseudo=PASS ioctl-unknown=denied mmap=denied");
 
     let host_descriptor =
         unsafe { syscall4(SYS_OPENAT_HOST, AT_FDCWD, block_path as usize, O_RDWR, 0) };
@@ -956,12 +956,12 @@ fn devices_main(config_path: *const u8, block_path: *const u8) -> ! {
     };
     let mut partition = Partition::new(backend, 1024, 2048, false)
         .unwrap_or_else(|_| device_fail(b"partition creation failed"));
-    if partition.write_at(0, b"GINUS-BLOCK").is_err() || partition.flush().is_err() {
+    if partition.write_at(0, b"GINUX-BLOCK").is_err() || partition.flush().is_err() {
         device_fail(b"partition write failed");
     }
     let mut block_value = [0u8; 11];
     if partition.read_at(0, &mut block_value).is_err()
-        || &block_value != b"GINUS-BLOCK"
+        || &block_value != b"GINUX-BLOCK"
         || partition.write_at(2047, b"xx").is_ok()
     {
         device_fail(b"partition confinement failed");
@@ -969,7 +969,7 @@ fn devices_main(config_path: *const u8, block_path: *const u8) -> ! {
     if partition.close().is_err() {
         device_fail(b"partition close failed");
     }
-    line(b"GINUS_BLOCK: backend=file partition=1024:2048 rw=PASS flush=PASS bounds=denied");
+    line(b"GINUX_BLOCK: backend=file partition=1024:2048 rw=PASS flush=PASS bounds=denied");
 
     let mut network: IsolatedNetwork<4> = IsolatedNetwork::new();
     if network.send(b"domain-packet").is_err() {
@@ -984,7 +984,7 @@ fn devices_main(config_path: *const u8, block_path: *const u8) -> ! {
     }
     network.close();
     line(
-        b"GINUS_NETWORK: backend=isolated-queue send=PASS receive=PASS control=denied host-fd=none",
+        b"GINUX_NETWORK: backend=isolated-queue send=PASS receive=PASS control=denied host-fd=none",
     );
 
     if registry.assign(
@@ -1009,12 +1009,12 @@ fn devices_main(config_path: *const u8, block_path: *const u8) -> ! {
     {
         device_fail(b"revocation failed");
     }
-    line(b"GINUS_DEVICES: conflict=denied teardown=flushed,released,reusable");
+    line(b"GINUX_DEVICES: conflict=denied teardown=flushed,released,reusable");
     line(b"GATE6_DEVICES: PASS");
     exit_process(0)
 }
 
-fn text_list_contains<const N: usize>(values: &[ginus_domain::Text<N>], expected: &[u8]) -> bool {
+fn text_list_contains<const N: usize>(values: &[ginux_domain::Text<N>], expected: &[u8]) -> bool {
     values.iter().any(|value| value.as_bytes() == expected)
 }
 
@@ -1084,7 +1084,7 @@ fn device_bench_main(config_path: *const u8, block_path: *const u8, kind: *const
             clock_nanoseconds(CLOCK_PROCESS_CPUTIME_ID) - cpu_start,
         )
     } else if c_string_equals(kind, b"network") {
-        if config.network_backend != ginus_domain::NetworkBackend::Mediated {
+        if config.network_backend != ginux_domain::NetworkBackend::Mediated {
             device_fail(b"network benchmark assignment missing");
         }
         let mut network: IsolatedNetwork<2> = IsolatedNetwork::new();
@@ -1108,7 +1108,7 @@ fn device_bench_main(config_path: *const u8, block_path: *const u8, kind: *const
     };
     let throughput = bytes.saturating_mul(1_000_000_000) / wall_ns.max(1);
     let latency = wall_ns / operations;
-    write_all(b"GINUS_BENCH: kind=");
+    write_all(b"GINUX_BENCH: kind=");
     if c_string_equals(kind, b"block") {
         write_all(b"block");
     } else {
@@ -1129,7 +1129,7 @@ fn device_bench_main(config_path: *const u8, block_path: *const u8, kind: *const
     write_all(b" latency_ns_per_op=");
     write_u64(latency);
     write_all(b" environment=rocky10-x86_64-qemu-tcg\n");
-    line(b"GINUS_BENCH: PASS");
+    line(b"GINUX_BENCH: PASS");
     exit_process(0)
 }
 
@@ -1232,7 +1232,7 @@ fn vfs_main(config_path: *const u8, rootfs_path: *const u8, index_path: *const u
     }
     let _ = vfs.close(bash_fd);
 
-    let overlay_fd = match vfs.open(b"/ginus-overlay-proof", O_READ | O_WRITE | O_CREATE) {
+    let overlay_fd = match vfs.open(b"/ginux-overlay-proof", O_READ | O_WRITE | O_CREATE) {
         Ok(value) => value,
         Err(_) => vfs_fail(
             &mut domain,
@@ -1251,19 +1251,19 @@ fn vfs_main(config_path: *const u8, rootfs_path: *const u8, index_path: *const u
     }
     let _ = vfs.close(overlay_fd);
 
-    write_all(b"GINUS_VFS: root=");
+    write_all(b"GINUX_VFS: root=");
     line(config.root.as_bytes());
-    line(b"GINUS_VFS: base=/etc/os-release identity=Rocky-Linux");
-    line(b"GINUS_VFS: base=/usr/bin/bash format=ELF64-x86_64");
-    line(b"GINUS_VFS: overlay=/ginus-overlay-proof value=domain-local");
-    line(b"GINUS_VFS: managed-host-paths=unexposed managed-host-fds=unexposed");
+    line(b"GINUX_VFS: base=/etc/os-release identity=Rocky-Linux");
+    line(b"GINUX_VFS: base=/usr/bin/bash format=ELF64-x86_64");
+    line(b"GINUX_VFS: overlay=/ginux-overlay-proof value=domain-local");
+    line(b"GINUX_VFS: managed-host-paths=unexposed managed-host-fds=unexposed");
     vfs.teardown();
     let _ = unsafe { syscall1(SYS_CLOSE_HOST, descriptor as usize) };
     if domain.task_exited(true).is_err() {
         domain_fail(&mut domain, b"invalid task-exit transition");
     }
-    line(b"GINUS_VFS: teardown overlay-files=0 descriptors=0");
-    line(b"GINUS_VFS_CHECK: PASS");
+    line(b"GINUX_VFS: teardown overlay-files=0 descriptors=0");
+    line(b"GINUX_VFS_CHECK: PASS");
     exit_process(0)
 }
 
@@ -1308,13 +1308,13 @@ fn native_tracee(root_path: *const u8, mode: usize) -> ! {
     static ARG1: &[u8] = b"--noprofile\0";
     static ARG2: &[u8] = b"--norc\0";
     static ARG3: &[u8] = b"-c\0";
-    static COMMAND: &[u8] = b"printf 'GINUS_NATIVE_SHELL: PASS\\n'\0";
-    static HOLD_COMMAND: &[u8] = b"printf 'GINUS_NATIVE_HOLD: READY\\n'; while :; do :; done\0";
-    static PROBE_COMMAND: &[u8] = b"if : > /tmp/ginus-mutation; then exit 90; else printf 'GINUS_BALANCED_MUTATION: BLOCKED\\n'; fi; if exec 9<>/dev/tcp/127.0.0.1/9; then exit 91; else printf 'GINUS_BALANCED_NETWORK: BLOCKED\\n'; fi\0";
+    static COMMAND: &[u8] = b"printf 'GINUX_NATIVE_SHELL: PASS\\n'\0";
+    static HOLD_COMMAND: &[u8] = b"printf 'GINUX_NATIVE_HOLD: READY\\n'; while :; do :; done\0";
+    static PROBE_COMMAND: &[u8] = b"if : > /tmp/ginux-mutation; then exit 90; else printf 'GINUX_BALANCED_MUTATION: BLOCKED\\n'; fi; if exec 9<>/dev/tcp/127.0.0.1/9; then exit 91; else printf 'GINUX_BALANCED_NETWORK: BLOCKED\\n'; fi\0";
     static ENV_PATH: &[u8] = b"PATH=/usr/bin:/bin\0";
     static ENV_HOME: &[u8] = b"HOME=/\0";
     static ENV_LOCALE: &[u8] = b"LC_ALL=C\0";
-    static ENV_CONTAINER: &[u8] = b"container=ginus\0";
+    static ENV_CONTAINER: &[u8] = b"container=ginux\0";
 
     if unsafe { syscall1(SYS_CHROOT, root_path as usize) } < 0 {
         native_tracee_setup_fail(120);
@@ -1383,7 +1383,7 @@ fn supervise_native(pid: usize, domain: &mut Domain) -> ! {
         native_fail(domain, pid, b"native tracee wait after exec failed");
     }
     if !stopped(status) {
-        write_all(b"GINUS_NATIVE: pre-exec-status=");
+        write_all(b"GINUX_NATIVE: pre-exec-status=");
         write_i64(status as i64);
         write_all(b"\n");
         native_fail(domain, pid, b"native tracee did not stop after exec");
@@ -1392,8 +1392,8 @@ fn supervise_native(pid: usize, domain: &mut Domain) -> ! {
     if ptrace(PTRACE_SETOPTIONS, pid, 0, options) < 0 || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0 {
         native_fail(domain, pid, b"native ptrace setup failed");
     }
-    line(b"GINUS_NATIVE: backend=ptrace-native profile=balanced elf-loader=host contract=gate5-balanced");
-    line(b"GINUS_NATIVE: tracee-uid=1000 tracee-gid=1000 root=oci-read-only");
+    line(b"GINUX_NATIVE: backend=ptrace-native profile=balanced elf-loader=host contract=gate5-balanced");
+    line(b"GINUX_NATIVE: tracee-uid=1000 tracee-gid=1000 root=oci-read-only");
 
     let mut sequence = 0u64;
     let mut awaiting_exit = false;
@@ -1421,7 +1421,7 @@ fn supervise_native(pid: usize, domain: &mut Domain) -> ! {
                     native_fail(domain, pid, b"native result override failed");
                 }
             }
-            write_all(b"GINUS_NATIVE_AUDIT: sequence=");
+            write_all(b"GINUX_NATIVE_AUDIT: sequence=");
             write_u64(sequence);
             write_all(b" phase=exit result=");
             write_i64(registers.rax as i64);
@@ -1437,7 +1437,7 @@ fn supervise_native(pid: usize, domain: &mut Domain) -> ! {
         sequence += 1;
         let syscall = registers.orig_rax;
         let decision = decide_balanced(syscall);
-        write_all(b"GINUS_NATIVE_AUDIT: sequence=");
+        write_all(b"GINUX_NATIVE_AUDIT: sequence=");
         write_u64(sequence);
         write_all(b" phase=entry syscall=");
         write_u64(syscall);
@@ -1465,8 +1465,8 @@ fn supervise_native(pid: usize, domain: &mut Domain) -> ! {
                 if domain.task_exited(true).is_err() {
                     domain_fail(domain, b"native exit transition failed");
                 }
-                line(b"GINUS_NATIVE: supervisor=attached direct-unsupervised-syscalls=0");
-                line(b"GINUS_NATIVE_CHECK: PASS");
+                line(b"GINUX_NATIVE: supervisor=attached direct-unsupervised-syscalls=0");
+                line(b"GINUX_NATIVE_CHECK: PASS");
                 exit_process(0)
             }
             Action::Mediate if native_arguments_allowed(syscall, &registers) => {
@@ -1535,7 +1535,7 @@ fn native_fail(domain: &mut Domain, pid: usize, reason: &[u8]) -> ! {
 fn config_main(config_path: *const u8) -> ! {
     let config = load_config(config_path);
     print_effective_config(&config);
-    line(b"GINUS_CONFIG: PASS");
+    line(b"GINUX_CONFIG: PASS");
     exit_process(0)
 }
 
@@ -1582,14 +1582,14 @@ fn domain_main(config_path: *const u8, fixture_path: *const u8) -> ! {
     if report.exit_code != 0 {
         domain_fail(&mut domain, b"managed task failed");
     }
-    write_all(b"GINUS_DOMAIN: managed-output=");
+    write_all(b"GINUX_DOMAIN: managed-output=");
     write_all(&report.output[..report.output_len]);
     write_all(b"\n");
     if domain.task_exited(true).is_err() {
         domain_fail(&mut domain, b"invalid task-exit transition");
     }
     lifecycle_state(&domain);
-    line(b"GINUS_DOMAIN: cleanup resources=false managed-task=false");
+    line(b"GINUX_DOMAIN: cleanup resources=false managed-task=false");
     line(b"GATE4: PASS");
     exit_process(0)
 }
@@ -1638,7 +1638,7 @@ fn lifecycle_main(config_path: *const u8) -> ! {
         }
     }
 
-    write_all(b"GINUS_LIFECYCLE: state=running helper-pid=");
+    write_all(b"GINUX_LIFECYCLE: state=running helper-pid=");
     write_u64(child as u64);
     write_all(b" resources=true\n");
     let mut signal_info = [0u8; 128];
@@ -1657,7 +1657,7 @@ fn lifecycle_main(config_path: *const u8) -> ! {
         let _ = unsafe { syscall1(SYS_CLOSE_HOST, signal_fd as usize) };
         domain_fail(&mut domain, b"signal wait failed");
     }
-    line(b"GINUS_LIFECYCLE: signal=SIGTERM decision=stop");
+    line(b"GINUX_LIFECYCLE: signal=SIGTERM decision=stop");
     let _ = unsafe { syscall2(SYS_KILL, child as usize, SIGKILL) };
     let mut status = 0;
     if wait(child as usize, &mut status) != child {
@@ -1668,9 +1668,9 @@ fn lifecycle_main(config_path: *const u8) -> ! {
     if domain.stop().is_err() {
         domain_fail(&mut domain, b"invalid stop transition");
     }
-    line(b"GINUS_LIFECYCLE: helper=reaped zombies=0");
+    line(b"GINUX_LIFECYCLE: helper=reaped zombies=0");
     lifecycle_state(&domain);
-    line(b"GINUS_DOMAIN: cleanup resources=false managed-task=false");
+    line(b"GINUX_DOMAIN: cleanup resources=false managed-task=false");
     line(b"GATE4_LIFECYCLE: PASS");
     exit_process(0)
 }
@@ -1691,14 +1691,14 @@ fn print_effective_config(config: &DomainConfig) {
         Ok(normalized) => normalized,
         Err(error) => config_rejected(error),
     };
-    line(b"GINUS_CONFIG: accepted format=toml schema=1");
-    line(b"GINUS_CONFIG_EFFECTIVE_BEGIN");
+    line(b"GINUX_CONFIG: accepted format=toml schema=1");
+    line(b"GINUX_CONFIG_EFFECTIVE_BEGIN");
     write_all(normalized.as_bytes());
-    line(b"GINUS_CONFIG_EFFECTIVE_END");
+    line(b"GINUX_CONFIG_EFFECTIVE_END");
 }
 
 fn lifecycle_state(domain: &Domain) {
-    write_all(b"GINUS_LIFECYCLE: state=");
+    write_all(b"GINUX_LIFECYCLE: state=");
     write_all(domain.state().as_str().as_bytes());
     write_all(b" resources=");
     write_all(if domain.resources_acquired() {
@@ -1715,7 +1715,7 @@ fn lifecycle_state(domain: &Domain) {
 }
 
 fn config_rejected(error: ConfigError) -> ! {
-    write_all(b"GINUS_CONFIG: rejected reason=");
+    write_all(b"GINUX_CONFIG: rejected reason=");
     write_all(error.as_str().as_bytes());
     line(b" managed-started=false");
     exit_process(2)
@@ -1723,15 +1723,15 @@ fn config_rejected(error: ConfigError) -> ! {
 
 fn domain_fail(domain: &mut Domain, reason: &[u8]) -> ! {
     let _ = domain.task_exited(false);
-    write_all(b"GINUS_DOMAIN: failed reason=");
+    write_all(b"GINUX_DOMAIN: failed reason=");
     line(reason);
     lifecycle_state(domain);
-    line(b"GINUS_DOMAIN: cleanup resources=false managed-task=false");
+    line(b"GINUX_DOMAIN: cleanup resources=false managed-task=false");
     exit_process(1)
 }
 
 fn gate1_main() -> ! {
-    line(b"GINUS: interception platform=ptrace-sysemu");
+    line(b"GINUX: interception platform=ptrace-sysemu");
 
     let child = unsafe { syscall0(SYS_FORK) };
     if child < 0 {
@@ -1745,7 +1745,7 @@ fn gate1_main() -> ! {
 }
 
 fn runtime_main(path: *const u8) -> ! {
-    line(b"GINUS_RUNTIME: backend=x86_64-interpreter");
+    line(b"GINUX_RUNTIME: backend=x86_64-interpreter");
     let length = read_file(path);
     let elf =
         unsafe { core::slice::from_raw_parts(core::ptr::addr_of!(ELF_BYTES).cast::<u8>(), length) };
@@ -1754,27 +1754,27 @@ fn runtime_main(path: *const u8) -> ! {
         Ok(loaded) => loaded,
         Err(error) => runtime_load_fail(error),
     };
-    let stack = match memory.build_stack(&[b"runtime-fixture", b"fixture-arg"], &[b"GINUS_GATE=3"])
+    let stack = match memory.build_stack(&[b"runtime-fixture", b"fixture-arg"], &[b"GINUX_GATE=3"])
     {
         Ok(stack) => stack,
         Err(_) => runtime_fail(b"initial stack rejected"),
     };
-    line(b"GINUS_RUNTIME: elf=loaded class=ELF64 machine=x86_64 type=static");
-    line(b"GINUS_RUNTIME: memory=ginus-owned host-pointers=unreachable protections=enforced");
-    line(b"GINUS_RUNTIME: stack=linux-x86_64 argc=2 envc=1");
+    line(b"GINUX_RUNTIME: elf=loaded class=ELF64 machine=x86_64 type=static");
+    line(b"GINUX_RUNTIME: memory=ginux-owned host-pointers=unreachable protections=enforced");
+    line(b"GINUX_RUNTIME: stack=linux-x86_64 argc=2 envc=1");
 
     let report = match execute(&memory, loaded.entry, stack, 10_000) {
         Ok(report) => report,
         Err(_) => runtime_fail(b"interpreter execution failed"),
     };
-    if report.exit_code != 0 || &report.output[..report.output_len] != b"fixture-argGINUS_GATE=3" {
+    if report.exit_code != 0 || &report.output[..report.output_len] != b"fixture-argGINUX_GATE=3" {
         runtime_fail(b"managed fixture reported failure");
     }
-    write_all(b"GINUS_RUNTIME: managed-output=");
+    write_all(b"GINUX_RUNTIME: managed-output=");
     write_all(&report.output[..report.output_len]);
     write_all(b"\n");
     for record in report.audit.iter().take(report.audit_len) {
-        write_all(b"GINUS_AUDIT: sequence=");
+        write_all(b"GINUX_AUDIT: sequence=");
         write_u64(record.sequence as u64);
         write_all(b" syscall=");
         write_u64(record.syscall);
@@ -1795,7 +1795,7 @@ fn runtime_main(path: *const u8) -> ! {
     {
         runtime_fail(b"expected deny audit missing");
     }
-    line(b"GINUS_RUNTIME: direct-host-syscalls=impossible interpreted-syscall=internal-event");
+    line(b"GINUX_RUNTIME: direct-host-syscalls=impossible interpreted-syscall=internal-event");
     line(b"GATE3: PASS");
     exit_process(0)
 }
@@ -1940,7 +1940,7 @@ fn tracee() -> ! {
         }
     }
 
-    static PATH: &[u8] = b"/var/tmp/ginus-managed-payload\0";
+    static PATH: &[u8] = b"/var/tmp/ginux-managed-payload\0";
     let argv = [PATH.as_ptr(), core::ptr::null()];
     let envp: [*const u8; 1] = [core::ptr::null()];
     unsafe {
@@ -1981,7 +1981,7 @@ fn supervise(pid: usize) -> ! {
             fail(b"wait4 failed");
         }
         if !stopped(status) {
-            fail(b"payload exited outside Ginus dispatch");
+            fail(b"payload exited outside Ginux-us dispatch");
         }
 
         let signal = ((status >> 8) & 0xff) as u8;
@@ -2001,32 +2001,32 @@ fn supervise(pid: usize) -> ! {
             Action::Emulate if decision.syscall == SYS_GETPID => {
                 saw_getpid = true;
                 regs.rax = VIRTUAL_PID;
-                line(b"GINUS: syscall=getpid decision=emulate result=4242");
+                line(b"GINUX: syscall=getpid decision=emulate result=4242");
             }
             Action::Mediate if decision.syscall == SYS_WRITE => {
                 saw_write = true;
                 if regs.rdi != 1 || regs.rdx == 0 || regs.rdx > 4096 {
                     regs.rax = (-EPERM) as u64;
-                    line(b"GINUS: syscall=write decision=deny reason=invalid-arguments");
+                    line(b"GINUX: syscall=write decision=deny reason=invalid-arguments");
                 } else if !read_tracee_word(pid, regs.rsi as usize) {
                     regs.rax = (-EPERM) as u64;
-                    line(b"GINUS: syscall=write decision=deny reason=invalid-memory");
+                    line(b"GINUX: syscall=write decision=deny reason=invalid-memory");
                 } else {
                     regs.rax = regs.rdx;
-                    line(b"GINUS: syscall=write decision=mediate host-write=not-executed");
+                    line(b"GINUX: syscall=write decision=mediate host-write=not-executed");
                 }
             }
             Action::Deny(errno) if decision.syscall == SYS_UNAME => {
                 saw_uname = true;
                 regs.rax = (-(errno as i64)) as u64;
-                line(b"GINUS: syscall=uname decision=deny errno=EPERM");
+                line(b"GINUX: syscall=uname decision=deny errno=EPERM");
             }
             Action::Emulate if decision.syscall == SYS_EXIT => {
                 let success = regs.rdi == 0 && saw_getpid && saw_write && saw_uname;
                 let _ = ptrace(PTRACE_KILL, pid, 0, 0);
                 let _ = wait(pid, &mut status);
                 if success {
-                    line(b"GINUS: direct-host-syscall bypass=not-observed");
+                    line(b"GINUX: direct-host-syscall bypass=not-observed");
                     line(b"GATE1: PASS");
                     exit_process(0);
                 }
@@ -2034,11 +2034,11 @@ fn supervise(pid: usize) -> ! {
             }
             Action::Deny(errno) => {
                 regs.rax = (-(errno as i64)) as u64;
-                line(b"GINUS: syscall=unknown decision=deny errno=ENOSYS");
+                line(b"GINUX: syscall=unknown decision=deny errno=ENOSYS");
             }
             _ => {
                 regs.rax = (-ENOSYS) as u64;
-                line(b"GINUS: syscall=unexpected decision=deny errno=ENOSYS");
+                line(b"GINUX: syscall=unexpected decision=deny errno=ENOSYS");
             }
         }
 

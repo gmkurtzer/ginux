@@ -11,7 +11,7 @@ printf '%s\n' ''
 
 printf '%s\n' ''
 printf '%s\n' '1. Valid configuration and canonical effective authority:'
-grep -E '^(GINUS_CONFIG: accepted|schema_version|id =|root =|init =|vcpus =|memory_mib =|profile = "security"|backend = "interpreter"|GINUS_CONFIG: PASS)' build/gate4-config-valid.log
+grep -E '^(GINUX_CONFIG: accepted|schema_version|id =|root =|init =|vcpus =|memory_mib =|profile = "security"|backend = "interpreter"|GINUX_CONFIG: PASS)' build/gate4-config-valid.log
 printf '%s\n' ''
 printf '%s\n' '2. Equivalent TOML produced byte-identical effective configuration: PASS'
 printf '%s\n' ''
@@ -21,10 +21,10 @@ cat build/gate4-config-performance.log
 cat build/gate4-config-host-path.log
 printf '%s\n' ''
 printf '%s\n' '4. Managed domain execution and natural cleanup:'
-grep -E '^(GINUS_LIFECYCLE|GINUS_DOMAIN|GATE4:)' build/gate4-domain.log
+grep -E '^(GINUX_LIFECYCLE|GINUX_DOMAIN|GATE4:)' build/gate4-domain.log
 printf '%s\n' ''
 printf '%s\n' '5. Failed managed init cleanup:'
-grep -E '^(GINUS_LIFECYCLE|GINUS_DOMAIN)' build/gate4-domain-failure.log
+grep -E '^(GINUX_LIFECYCLE|GINUX_DOMAIN)' build/gate4-domain-failure.log
 printf '%s\n' ''
 printf '%s\n' '6. Host SIGTERM, helper reaping, and requested-stop cleanup:'
 cat build/gate4-lifecycle.log

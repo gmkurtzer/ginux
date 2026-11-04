@@ -4,7 +4,7 @@ set -eu
 raw_image=$1
 rootfs_output=$2
 manifest_output=$3
-mountpoint=/mnt/ginus-rocky-source
+mountpoint=/mnt/ginux-rocky-source
 loop_device=
 
 cleanup() {
@@ -44,7 +44,7 @@ fi
 printf '%s\n' 'EXTRACT: source-mount=read-only helper-network=no-ethernet,no-default-route'
 
 (
-    printf '%s\n' 'GINUS_ROOTFS_MANIFEST_VERSION=1'
+    printf '%s\n' 'GINUX_ROOTFS_MANIFEST_VERSION=1'
     cd "$mountpoint"
     find . -xdev -printf 'META\t%y\t%m\t%U\t%G\t%s\t%p\t%l\n' |
         LC_ALL=C sort

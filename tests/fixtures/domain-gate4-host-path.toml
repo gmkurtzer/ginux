@@ -2,10 +2,10 @@ schema_version = 1
 
 [domain]
 id = "gate4-host-path"
-root = "/var/lib/ginus/root"
+root = "/var/lib/ginux/root"
 init = "/runtime-fixture"
 args = ["fixture-arg"]
-environment = ["GINUS_GATE=4"]
+environment = ["GINUX_GATE=4"]
 
 [resources]
 vcpus = 1

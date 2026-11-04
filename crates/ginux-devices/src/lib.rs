@@ -534,7 +534,7 @@ mod tests {
     }
 
     #[test]
-    fn pseudo_devices_and_console_are_ginus_owned() {
+    fn pseudo_devices_and_console_are_ginux_owned() {
         let mut registry: DeviceRegistry<8, 8> = DeviceRegistry::new();
         for (backend, name, kind) in [
             (1, b"console".as_slice(), DeviceKind::Console),

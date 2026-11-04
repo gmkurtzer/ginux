@@ -23,10 +23,10 @@ printf '%s\n' new > "$upper/opt/old/upper"
 
 tar -cf "$work/base.tar" -C "$base" .
 tar -cf "$work/upper.tar" -C "$upper" .
-cargo run -q -p ginus-vfs-index -- assemble \
+cargo run -q -p ginux-vfs-index -- assemble \
     "$work/rootfs-1.tar" "$work/rootfs-1.index" \
     "$work/base.tar" "$work/upper.tar" >/dev/null
-cargo run -q -p ginus-vfs-index -- assemble \
+cargo run -q -p ginux-vfs-index -- assemble \
     "$work/rootfs-2.tar" "$work/rootfs-2.index" \
     "$work/base.tar" "$work/upper.tar" >/dev/null
 

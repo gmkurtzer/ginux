@@ -1,6 +1,6 @@
 #![no_std]
 
-pub const INDEX_MAGIC: &[u8; 8] = b"GINUSVFS";
+pub const INDEX_MAGIC: &[u8; 8] = b"GINUXVFS";
 pub const INDEX_VERSION: u32 = 1;
 pub const HEADER_SIZE: usize = 64;
 pub const RECORD_SIZE: usize = 424;

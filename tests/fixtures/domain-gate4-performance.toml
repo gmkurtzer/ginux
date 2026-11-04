@@ -5,7 +5,7 @@ id = "gate4-performance"
 root = "rocky-10.2-x86_64"
 init = "/runtime-fixture"
 args = ["fixture-arg"]
-environment = ["GINUS_GATE=4"]
+environment = ["GINUX_GATE=4"]
 
 [resources]
 vcpus = 1

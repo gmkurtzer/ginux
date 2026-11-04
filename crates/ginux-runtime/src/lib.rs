@@ -1,6 +1,6 @@
 #![no_std]
 
-use ginus_core::{decide, Action, SYS_EXIT, SYS_GETPID, SYS_WRITE};
+use ginux_core::{decide, Action, SYS_EXIT, SYS_GETPID, SYS_WRITE};
 
 pub const PAGE_SIZE: usize = 4096;
 pub const ADDRESS_BASE: u64 = 0x1_0000;

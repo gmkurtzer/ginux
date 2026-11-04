@@ -8,21 +8,21 @@ set -eu
 mkdir -p build/cache/rocky build/rocky-seed
 
 if [ ! -f "$ROCKY_KEY" ]; then
-    ssh-keygen -q -t ed25519 -N '' -C ginus-gate1 -f "$ROCKY_KEY"
+    ssh-keygen -q -t ed25519 -N '' -C ginux-gate1 -f "$ROCKY_KEY"
 fi
 public_key=$(cat "$ROCKY_KEY.pub")
 
 cat > build/rocky-seed/meta-data <<EOF
-instance-id: ginus-gate1
-local-hostname: ginus-rocky
+instance-id: ginux-gate1
+local-hostname: ginux-rocky
 EOF
 
 cat > build/rocky-seed/user-data <<EOF
 #cloud-config
 users:
   - default
-  - name: ginus
-    gecos: Ginus Gate 1
+  - name: ginux
+    gecos: Ginux-us Gate 1
     groups: [wheel]
     shell: /bin/bash
     sudo: ["ALL=(ALL) NOPASSWD:ALL"]

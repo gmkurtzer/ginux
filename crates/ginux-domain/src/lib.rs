@@ -857,7 +857,7 @@ id = "demo"
 root = "rocky-10.2"
 init = "/runtime-fixture"
 args = ["fixture-arg"]
-environment = ["GINUS_GATE=4"]
+environment = ["GINUX_GATE=4"]
 [resources]
 vcpus = 1
 memory_mib = 128

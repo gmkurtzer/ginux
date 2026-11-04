@@ -5,7 +5,7 @@ id = "gate5-demo"
 root = "docker.io/rockylinux/rockylinux@sha256:e372170ca8630f0f03e9b70fdd0bf4a3ce3426b0de7cdba615f06337389de176"
 init = "/bin/bash"
 args = []
-environment = ["container=ginus"]
+environment = ["container=ginux"]
 
 [resources]
 vcpus = 1

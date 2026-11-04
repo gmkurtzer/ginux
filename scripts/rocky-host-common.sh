@@ -1,7 +1,7 @@
 #!/bin/sh
 
 ROCKY_SSH_PORT=${ROCKY_SSH_PORT:-22222}
-ROCKY_SSH_USER=ginus
+ROCKY_SSH_USER=ginux
 ROCKY_KEY=build/cache/rocky/gate1_ed25519
 ROCKY_PID_FILE=build/rocky-host.pid
 ROCKY_SERIAL_LOG=build/rocky-host-serial.log
