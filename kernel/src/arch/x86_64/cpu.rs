@@ -14720,6 +14720,27 @@ fn linux_runtime_mapping_range(address: u64, length: u64) -> Option<(u64, usize)
     (pages != 0 && mapped_end <= end).then_some((mapped_end, pages))
 }
 
+/// Normalizes a runtime `mmap`/`mprotect` protection. Linux accepts any
+/// subset of `PROT_READ | PROT_WRITE | PROT_EXEC | PROT_SEM`
+/// (include/linux/mman.h:106-109); x86 page tables cannot express write- or
+/// execute-only pages, so either implies read as on Linux. Runtime pages keep
+/// Ginux's W^X invariant, so write combined with execute is still rejected.
+fn linux_runtime_protection(protection: u64) -> Option<u64> {
+    const LINUX_PROT_SEM: u64 = 8;
+    let access = LINUX_PROT_READ | LINUX_PROT_WRITE | LINUX_PROT_EXEC;
+    if protection & !(access | LINUX_PROT_SEM) != 0
+        || protection & (LINUX_PROT_WRITE | LINUX_PROT_EXEC) == LINUX_PROT_WRITE | LINUX_PROT_EXEC
+    {
+        return None;
+    }
+    let protection = protection & access;
+    Some(if protection == 0 {
+        0
+    } else {
+        protection | LINUX_PROT_READ
+    })
+}
+
 fn linux_page_ceil(address: u64) -> Option<u64> {
     address
         .checked_add(PAGE_SIZE as u64 - 1)
@@ -14810,21 +14831,26 @@ fn linux_runtime_select_mapping(address: u64, pages: usize, fixed: bool) -> Opti
     {
         return Some(address);
     }
-    let mut candidate = X86_RUNTIME
+    let next = X86_RUNTIME
         .ELF_PROBE_MMAP_NEXT
         .load(Ordering::SeqCst)
         .max(base);
-    while candidate
-        .checked_add(size)
-        .is_some_and(|mapped_end| mapped_end <= end)
-    {
-        if linux_runtime_range_available(candidate, pages) {
-            X86_RUNTIME
-                .ELF_PROBE_MMAP_NEXT
-                .store(candidate + size, Ordering::SeqCst);
-            return Some(candidate);
+    // Scan upward from the cursor, then wrap around once so ranges released
+    // by munmap below the cursor can be reused.
+    for (mut candidate, last_start) in [(next, end), (base, next)] {
+        while candidate < last_start
+            && candidate
+                .checked_add(size)
+                .is_some_and(|mapped_end| mapped_end <= end)
+        {
+            if linux_runtime_range_available(candidate, pages) {
+                X86_RUNTIME
+                    .ELF_PROBE_MMAP_NEXT
+                    .store(candidate + size, Ordering::SeqCst);
+                return Some(candidate);
+            }
+            candidate = candidate.checked_add(PAGE_SIZE as u64)?;
         }
-        candidate = candidate.checked_add(PAGE_SIZE as u64)?;
     }
     None
 }
@@ -16312,6 +16338,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let fadvise = verify_linux_fadvise64_syscall();
     let shared_file_access = verify_linux_shared_file_mapping_access();
     let runtime_boot_contracts = verify_linux_runtime_boot_contracts();
+    let memory_argument_edges = verify_linux_memory_argument_edges();
     let mappings_released =
         address_space::release_current_linux_runtime_mappings(LINUX_RUNTIME_DYNAMIC_MMAP_BASE);
     X86_RUNTIME
@@ -16376,6 +16403,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         fadvise,
         shared_file_access,
         runtime_boot_contracts,
+        memory_argument_edges,
         mappings_released,
     ]
     .into_iter()
@@ -16439,6 +16467,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && fadvise
         && shared_file_access
         && runtime_boot_contracts
+        && memory_argument_edges
         && mappings_released
 }
 
@@ -19454,6 +19483,109 @@ fn verify_linux_process_madvise_syscall() -> bool {
     discarded_locked && errors && closed && unmapped && population_unmapped && sealing
 }
 
+fn verify_linux_memory_argument_edges() -> bool {
+    const MREMAP_MAYMOVE: u64 = 1;
+    const MREMAP_FIXED: u64 = 2;
+    const MS_SYNC: u64 = 4;
+    let page = PAGE_SIZE as u64;
+    let anonymous = LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS;
+    let write_only = linux_runtime_mmap(0, page, LINUX_PROT_WRITE, anonymous, 0, 0);
+    let execute_only = linux_runtime_mmap(0, page, LINUX_PROT_EXEC, anonymous, u64::MAX, 0);
+    let protections = write_only < LINUX_RETURN_TO_KERNEL
+        && execute_only < LINUX_RETURN_TO_KERNEL
+        && address_space::current_linux_runtime_page(write_only).protection == 3
+        && address_space::current_linux_runtime_page(execute_only).protection == 5
+        && linux_runtime_mmap(
+            0,
+            page,
+            LINUX_PROT_READ | LINUX_PROT_WRITE | LINUX_PROT_EXEC,
+            anonymous,
+            u64::MAX,
+            0,
+        ) == LINUX_EINVAL
+        && linux_runtime_mmap(0, page, LINUX_PROT_READ, anonymous, u64::MAX, 1) == LINUX_EINVAL
+        && linux_mprotect(execute_only, 0, LINUX_PROT_READ) == 0
+        && linux_mprotect(execute_only + 1, 0, LINUX_PROT_READ) == LINUX_EINVAL
+        && linux_mprotect(execute_only, page, 0x0300_0000 | LINUX_PROT_READ) == LINUX_EINVAL
+        && linux_mprotect(execute_only, page, LINUX_PROT_WRITE) == 0
+        && address_space::current_linux_runtime_page(execute_only).protection == 3;
+    let no_replace = LINUX_MAP_FIXED | LINUX_MAP_FIXED_NOREPLACE;
+    let fixed_target = execute_only + page;
+    let fixed = protections
+        && linux_runtime_range_available(fixed_target, 1)
+        && linux_runtime_mmap(
+            fixed_target,
+            page,
+            LINUX_PROT_READ,
+            anonymous | no_replace,
+            u64::MAX,
+            0,
+        ) == fixed_target
+        && linux_runtime_mmap(
+            fixed_target,
+            page,
+            LINUX_PROT_READ,
+            anonymous | no_replace,
+            u64::MAX,
+            0,
+        ) == LINUX_EEXIST
+        && linux_runtime_munmap(fixed_target, page) == 0;
+    let discarded = fixed
+        && linux_mprotect(write_only, page, LINUX_PROT_READ | LINUX_PROT_WRITE) == 0
+        && copy_to_linux_user(write_only, &[0xa5])
+        && linux_mprotect(write_only, page, 0) == 0
+        && linux_madvise(write_only, page, LINUX_MADV_DONTNEED) == 0
+        && address_space::current_linux_runtime_page(write_only)
+            .frame
+            .is_none()
+        && linux_madvise(write_only, 0, LINUX_MADV_DONTNEED) == 0
+        && linux_madvise(write_only + 1, 0, LINUX_MADV_DONTNEED) == LINUX_EINVAL
+        && linux_mprotect(write_only, page, LINUX_PROT_READ | LINUX_PROT_WRITE) == 0
+        && {
+            let mut byte = [1_u8];
+            copy_from_linux_user(write_only, &mut byte) && byte == [0]
+        };
+    let empty_ranges = discarded
+        && linux_msync(write_only, 0, MS_SYNC) == 0
+        && linux_msync(write_only + 1, page, MS_SYNC) == LINUX_EINVAL
+        && linux_mincore(write_only, 0, 0) == 0;
+    let moved = empty_ranges
+        && copy_to_linux_user(write_only, &[0x5a])
+        && linux_mremap(
+            write_only,
+            page,
+            page,
+            MREMAP_MAYMOVE | MREMAP_FIXED,
+            execute_only,
+        ) == execute_only
+        && !address_space::current_linux_runtime_page(write_only).occupied
+        && {
+            let mut byte = [0_u8];
+            copy_from_linux_user(execute_only, &mut byte) && byte == [0x5a]
+        }
+        && linux_mremap(write_only, page, 2 * page, MREMAP_MAYMOVE, 0) == LINUX_EFAULT;
+    let next = X86_RUNTIME.ELF_PROBE_MMAP_NEXT.load(Ordering::SeqCst);
+    let wrapped = moved
+        && linux_runtime_mmap_end().is_some_and(|end| {
+            X86_RUNTIME
+                .ELF_PROBE_MMAP_NEXT
+                .store(end - page, Ordering::SeqCst);
+            let mapping = linux_runtime_mmap(0, 2 * page, LINUX_PROT_READ, anonymous, u64::MAX, 0);
+            mapping < end - page && linux_runtime_munmap(mapping, 2 * page) == 0
+        });
+    X86_RUNTIME
+        .ELF_PROBE_MMAP_NEXT
+        .store(next, Ordering::SeqCst);
+    let released = (write_only >= LINUX_RETURN_TO_KERNEL
+        || linux_runtime_munmap(write_only, page) == 0)
+        && (execute_only >= LINUX_RETURN_TO_KERNEL
+            || linux_runtime_munmap(execute_only, page) == 0);
+    if !wrapped || !released {
+        serial_write("ginux: Linux memory argument edge verification failed\r\n");
+    }
+    wrapped && released
+}
+
 fn verify_linux_timer_argument_widths() -> bool {
     const UPPER_REGISTER_BITS: u64 = 1_u64 << 32;
     const SIGEV_NONE: u32 = 1;
@@ -20332,21 +20464,30 @@ fn linux_runtime_mmap(
     fd: u64,
     offset: u64,
 ) -> u64 {
-    if length == 0
-        || ![
-            0,
-            LINUX_PROT_READ,
-            LINUX_PROT_READ | LINUX_PROT_WRITE,
-            LINUX_PROT_READ | LINUX_PROT_EXEC,
-        ]
-        .contains(&protection)
-    {
+    // Linux rejects an unaligned offset before anything else
+    // (arch/x86/kernel/sys_x86_64.c:86), then resolves the descriptor of a
+    // file mapping (EBADF, mm/mmap.c:588-592) before do_mmap rejects a zero
+    // length (mm/mmap.c:351).
+    if !offset.is_multiple_of(PAGE_SIZE as u64) {
         return LINUX_EINVAL;
     }
+    let anonymous = flags & LINUX_MAP_ANONYMOUS != 0;
+    if length == 0 {
+        return if !anonymous
+            && (linux_path_descriptor(fd)
+                || !linux_descriptor_open(fd) && linux_overlay_descriptor_handle(fd).is_none())
+        {
+            LINUX_EBADF
+        } else {
+            LINUX_EINVAL
+        };
+    }
+    let Some(protection) = linux_runtime_protection(protection) else {
+        return LINUX_EINVAL;
+    };
     let Ok(pages) = usize::try_from(length.div_ceil(PAGE_SIZE as u64)) else {
         return LINUX_ENOMEM;
     };
-    let anonymous = flags & LINUX_MAP_ANONYMOUS != 0;
     let fixed = flags & LINUX_MAP_FIXED != 0;
     let no_replace = flags & LINUX_MAP_FIXED_NOREPLACE != 0;
     // MAP_STACK is currently a Linux compatibility hint.  Runtime mappings
@@ -20383,11 +20524,10 @@ fn linux_runtime_mmap(
                 0
             }
     };
-    let anonymous_fd = fd == u64::MAX || fd == u64::from(u32::MAX);
-    if normalized != valid_flags
-        || fixed && no_replace
-        || anonymous && (!anonymous_fd || offset != 0)
-    {
+    // MAP_ANONYMOUS ignores the descriptor and the (aligned) offset, and
+    // MAP_FIXED_NOREPLACE implies MAP_FIXED, so both may be set
+    // (mm/mmap.c:365-366).
+    if normalized != valid_flags {
         return LINUX_EINVAL;
     }
     let Some(mapping) = linux_runtime_select_mapping(address, pages, fixed || no_replace) else {
@@ -20404,6 +20544,18 @@ fn linux_runtime_mmap(
         .count();
     if !linux_address_space_limit_allows(additional_pages) {
         return LINUX_ENOMEM;
+    }
+    // Mapping at or past EOF succeeds as on Linux, but a file mapping may not
+    // extend beyond MAX_LFS_FILESIZE (mm/mmap.c:267-278,436). Ginux populates
+    // file mappings eagerly, so pages wholly past EOF read as zero instead of
+    // raising SIGBUS on access.
+    if !anonymous
+        && (pages as u64)
+            .checked_mul(PAGE_SIZE as u64)
+            .and_then(|bytes| offset.checked_add(bytes))
+            .is_none_or(|end| end > i64::MAX as u64)
+    {
+        return LINUX_EOVERFLOW;
     }
     let mut overlay_file = None;
     let mut overlay_writable = false;
@@ -20459,9 +20611,6 @@ fn linux_runtime_mmap(
             let Ok(start) = usize::try_from(offset) else {
                 return LINUX_EINVAL;
             };
-            if start >= metadata.size {
-                return LINUX_EINVAL;
-            }
             overlay_file = Some((handle, start));
             None
         } else {
@@ -20488,22 +20637,12 @@ fn linux_runtime_mmap(
             let Ok(start) = usize::try_from(offset) else {
                 return LINUX_EINVAL;
             };
-            if start >= file.len() {
-                if X86_RUNTIME.LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
-                    serial_write("ginux: file mmap rejected offset/file-length: ");
-                    serial_write_u64(start as u64);
-                    serial_write(" ");
-                    serial_write_u64(file.len() as u64);
-                    serial_write("\r\n");
-                }
-                return LINUX_EINVAL;
-            }
             immutable_rootfs_file = rootfs_entry.map(|entry| entry.data);
             Some((file, start))
         }
     };
     let file_backed = !anonymous;
-    let replace = fixed;
+    let replace = fixed && !no_replace;
     for (installed, page) in (0..pages).enumerate() {
         let page_address = mapping + (page * PAGE_SIZE) as u64;
         let old_frame = if anonymous {
@@ -20522,7 +20661,11 @@ fn linux_runtime_mmap(
                 .filter(|_| sharing == LINUX_MAP_PRIVATE && protection & LINUX_PROT_WRITE == 0)
                 .and_then(|file| {
                     let page_offset = page.checked_mul(PAGE_SIZE)? as u64;
-                    Some((file.as_ptr() as u64, offset.checked_add(page_offset)?))
+                    let source_offset = offset.checked_add(page_offset)?;
+                    // Pages past EOF are zero-filled and never cached: an
+                    // empty file's base can alias another file's data.
+                    (source_offset < file.len() as u64)
+                        .then_some((file.as_ptr() as u64, source_offset))
                 });
             let cached = cache_source.and_then(|(source_base, source_offset)| {
                 crate::linux_file_cache::lookup(source_base, source_offset)
@@ -20722,22 +20865,27 @@ fn linux_mremap(
         || flags & !(MREMAP_MAYMOVE | MREMAP_FIXED | MREMAP_DONTUNMAP) != 0
         || flags & MREMAP_FIXED != 0 && flags & MREMAP_MAYMOVE == 0
         || flags & MREMAP_DONTUNMAP != 0
-        || (0..old_pages).any(|page| {
-            !address_space::current_linux_runtime_page(old_address + (page * PAGE_SIZE) as u64)
-                .occupied
-        })
     {
         return LINUX_EINVAL;
+    }
+    // A missing source mapping is EFAULT (mm/mremap.c:1754).
+    if (0..old_pages).any(|page| {
+        !address_space::current_linux_runtime_page(old_address + (page * PAGE_SIZE) as u64).occupied
+    }) {
+        return LINUX_EFAULT;
     }
     if (0..old_pages).any(|page| {
         address_space::current_linux_runtime_page(old_address + (page * PAGE_SIZE) as u64).sealed
     }) {
         return LINUX_EPERM;
     }
-    if old_pages == new_pages {
+    // MREMAP_FIXED always moves, even without a size change, and replaces
+    // the destination (mremap_to, mm/mremap.c:1463-1488).
+    let fixed = flags & MREMAP_FIXED != 0;
+    if !fixed && old_pages == new_pages {
         return old_address;
     }
-    if new_pages < old_pages {
+    if !fixed && new_pages < old_pages {
         for page in new_pages..old_pages {
             if !release_linux_runtime_page(address_space::remove_current_linux_runtime_page(
                 old_address + (page * PAGE_SIZE) as u64,
@@ -20749,14 +20897,14 @@ fn linux_mremap(
     }
 
     let template = address_space::current_linux_runtime_page(old_address);
-    let extension_pages = new_pages - old_pages;
+    let extension_pages = new_pages.saturating_sub(old_pages);
     if !linux_address_space_limit_allows(extension_pages) {
         return LINUX_ENOMEM;
     }
     if template.file {
         return LINUX_ENOMEM;
     }
-    if linux_runtime_range_available(old_end, extension_pages) {
+    if !fixed && linux_runtime_range_available(old_end, extension_pages) {
         for page in 0..extension_pages {
             let address = old_end + (page * PAGE_SIZE) as u64;
             if address_space::reserve_current_linux_runtime_page(
@@ -20787,7 +20935,6 @@ fn linux_mremap(
     if flags & MREMAP_MAYMOVE == 0 {
         return LINUX_ENOMEM;
     }
-    let fixed = flags & MREMAP_FIXED != 0;
     let Some(destination) = linux_runtime_select_mapping(fixed_address, new_pages, fixed) else {
         return LINUX_ENOMEM;
     };
@@ -20795,12 +20942,26 @@ fn linux_mremap(
         return LINUX_ENOMEM;
     };
     if destination < old_end && old_address < destination_end
-        || !linux_runtime_range_available(destination, new_pages)
+        || !fixed && !linux_runtime_range_available(destination, new_pages)
     {
         return if fixed { LINUX_EINVAL } else { LINUX_ENOMEM };
     }
+    let moved_pages = old_pages.min(new_pages);
+    if fixed {
+        let unmapped = linux_runtime_munmap(destination, (new_pages * PAGE_SIZE) as u64);
+        if unmapped != 0 {
+            return unmapped;
+        }
+        for page in new_pages..old_pages {
+            if !release_linux_runtime_page(address_space::remove_current_linux_runtime_page(
+                old_address + (page * PAGE_SIZE) as u64,
+            )) {
+                return LINUX_EINVAL;
+            }
+        }
+    }
 
-    for page_index in 0..old_pages {
+    for page_index in 0..moved_pages {
         let source = old_address + (page_index * PAGE_SIZE) as u64;
         let target = destination + (page_index * PAGE_SIZE) as u64;
         let page = address_space::remove_current_linux_runtime_page(source);
@@ -20868,6 +21029,14 @@ fn linux_msync(address: u64, length: u64, flags: u64) -> u64 {
     }
     if !X86_RUNTIME.LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
         return LINUX_ENOSYS;
+    }
+    // mm/msync.c:43-56: an unaligned start is EINVAL and an empty range
+    // succeeds before any mapping is inspected.
+    if !address.is_multiple_of(PAGE_SIZE as u64) {
+        return LINUX_EINVAL;
+    }
+    if length == 0 {
+        return 0;
     }
     let Some((_, pages)) = linux_runtime_mapping_range(address, length) else {
         return LINUX_ENOMEM;
@@ -21407,16 +21576,9 @@ fn linux_cachestat(descriptor: u64, range_address: u64, output_address: u64, fla
 }
 
 fn linux_runtime_mprotect(address: u64, length: u64, protection: u64) -> u64 {
-    if ![
-        0,
-        LINUX_PROT_READ,
-        LINUX_PROT_READ | LINUX_PROT_WRITE,
-        LINUX_PROT_READ | LINUX_PROT_EXEC,
-    ]
-    .contains(&protection)
-    {
+    let Some(protection) = linux_runtime_protection(protection) else {
         return LINUX_EINVAL;
-    }
+    };
     let Some((_, pages)) = linux_runtime_mapping_range(address, length) else {
         return LINUX_EINVAL;
     };
@@ -21536,9 +21698,11 @@ fn linux_runtime_madvise(address: u64, length: u64, advice: u64) -> u64 {
     for page in 0..pages {
         let page_address = address + (page * PAGE_SIZE) as u64;
         let state = address_space::current_linux_runtime_page(page_address);
+        // Linux discards PROT_NONE anonymous ranges too; a later access after
+        // mprotect sees fresh zero-filled pages.
         if !state.occupied
             || free && (state.file || state.shared || state.secret)
-            || !free && (state.file || state.protection == 0)
+            || !free && state.file
         {
             return LINUX_EINVAL;
         }
@@ -21727,8 +21891,12 @@ fn linux_madvise_reclaim_hint(address: u64, length: u64) -> u64 {
 }
 
 fn linux_runtime_mincore(address: u64, length: u64, vector: u64) -> u64 {
-    if length == 0 || !address.is_multiple_of(PAGE_SIZE as u64) {
+    if !address.is_multiple_of(PAGE_SIZE as u64) {
         return LINUX_EINVAL;
+    }
+    // mm/mincore.c:302-321: an aligned empty range reports no pages.
+    if length == 0 {
+        return 0;
     }
     let Some(pages) = length
         .checked_add(PAGE_SIZE as u64 - 1)
@@ -21760,7 +21928,24 @@ fn linux_runtime_mincore(address: u64, length: u64, vector: u64) -> u64 {
 }
 
 fn linux_mprotect(address: u64, length: u64, protection: u64) -> u64 {
-    if !address.is_multiple_of(PAGE_SIZE as u64) || length == 0 {
+    const LINUX_PROT_GROWSDOWN: u64 = 0x0100_0000;
+    const LINUX_PROT_GROWSUP: u64 = 0x0200_0000;
+    // mm/mprotect.c:885-892: strip the grows bits (both together are
+    // invalid), check alignment, and accept an empty range before validating
+    // the protection itself.
+    let grows = protection & (LINUX_PROT_GROWSDOWN | LINUX_PROT_GROWSUP);
+    let protection = protection & !grows;
+    if grows == LINUX_PROT_GROWSDOWN | LINUX_PROT_GROWSUP
+        || !address.is_multiple_of(PAGE_SIZE as u64)
+    {
+        return LINUX_EINVAL;
+    }
+    if length == 0 {
+        return 0;
+    }
+    // Ginux has no VM_GROWSDOWN/VM_GROWSUP mappings, for which Linux also
+    // rejects a grows bit with EINVAL (mm/mprotect.c:918-932).
+    if grows != 0 {
         return LINUX_EINVAL;
     }
     if X86_RUNTIME.LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
@@ -22000,7 +22185,7 @@ fn linux_mprotect_mmap(address: u64, length: u64, protection: u64) -> u64 {
 
 fn linux_mmap(address: u64, length: u64, protection: u64, flags: u64, fd: u64, offset: u64) -> u64 {
     if X86_RUNTIME.LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
-        if linux_io_uring_descriptor(fd) {
+        if flags & LINUX_MAP_ANONYMOUS == 0 && linux_io_uring_descriptor(fd) {
             return linux_io_uring_mmap(address, length, protection, flags, fd, offset);
         }
         return linux_runtime_mmap(address, length, protection, flags, fd, offset);
@@ -22497,6 +22682,41 @@ fn linux_munmap(address: u64, length: u64) -> u64 {
 
 fn linux_madvise(address: u64, length: u64, advice: u64) -> u64 {
     let advice = u64::from(advice as u32);
+    // mm/madvise.c:2003-2009: valid advice on an aligned empty range is a
+    // successful no-op.
+    if length == 0
+        && X86_RUNTIME.LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
+        && matches!(
+            advice,
+            LINUX_MADV_NORMAL
+                | LINUX_MADV_RANDOM
+                | LINUX_MADV_SEQUENTIAL
+                | LINUX_MADV_WILLNEED
+                | LINUX_MADV_DONTNEED
+                | LINUX_MADV_FREE
+                | LINUX_MADV_DONTNEED_LOCKED
+                | LINUX_MADV_MERGEABLE
+                | LINUX_MADV_UNMERGEABLE
+                | LINUX_MADV_HUGEPAGE
+                | LINUX_MADV_NOHUGEPAGE
+                | LINUX_MADV_DONTDUMP
+                | LINUX_MADV_DODUMP
+                | LINUX_MADV_DONTFORK
+                | LINUX_MADV_DOFORK
+                | LINUX_MADV_WIPEONFORK
+                | LINUX_MADV_KEEPONFORK
+                | LINUX_MADV_POPULATE_READ
+                | LINUX_MADV_POPULATE_WRITE
+                | LINUX_MADV_COLD
+                | LINUX_MADV_PAGEOUT
+        )
+    {
+        return if address.is_multiple_of(PAGE_SIZE as u64) {
+            0
+        } else {
+            LINUX_EINVAL
+        };
+    }
     if X86_RUNTIME.LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
         && matches!(
             advice,
