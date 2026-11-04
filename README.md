@@ -183,3 +183,8 @@ or fork it.
 The name remains a joke in the same family as Linux: **Ginux** combines Linux,
 GPT, and Greg. To keep the author's ego within its configured resource limit,
 the `G` officially stands for GPT.
+
+## License
+
+Ginux is available under the Apache License 2.0. See [`LICENSE`](LICENSE) and
+[`NOTICE`](NOTICE).
