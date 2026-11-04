@@ -43,11 +43,16 @@ mounts, identifiers, and configuration are not leaked as domain authority.
 - [x] Implement virtual sysfs class views from domain-assigned device snapshots,
   including virtual major/minor, network type, uevent, and CPU-online data.
 - [x] Add explicit unassigned-device exclusion and sysfs mutation-denial tests.
+- [x] Implement a bounded cgroup v2 hierarchy with root-only create/remove,
+  controller enablement, task attachment, memory/PID limits, events, and
+  explicit rejection of unsupported host-affecting operations.
+- [x] Implement domain-owned machine/boot/hostname and mount/PID/UTS/cgroup
+  namespace identity views with host-PID exclusion.
 
 ## Remaining work
 
-- [ ] Implement bounded cgroup v2 and mount/identity behavior.
-- [ ] Add consistency, permission, mutation, and host-leakage tests.
+- [ ] Add the Rocky QEMU integration fixture, complete cross-view leakage tests,
+  aggregate regression wiring, and the human demonstration.
 
 ## Acceptance criteria
 
@@ -93,6 +98,12 @@ mounts, identifiers, and configuration are not leaked as domain authority.
   unassigned host-device exclusion, and mutation denial.
 - `cargo test -p ginux-devices` -> all six device ownership and isolation
   regressions passed after adding bounded device snapshot projection.
+- Expanded `cargo test -p ginux-kernel-views` -> six tests passed, including
+  bounded systemd-style cgroup operations, privilege/limit/busy-path failures,
+  machine identity, consistent namespace links, host-PID exclusion, and
+  read-only hostname denial.
+- Strict clippy for `ginux-kernel-views` -> passed after the cgroup and
+  identity expansion.
 
 ## Decisions and limitations
 

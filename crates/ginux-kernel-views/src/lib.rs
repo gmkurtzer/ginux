@@ -1,7 +1,11 @@
 #![no_std]
 
+mod cgroup;
+
 use ginux_devices::{DeviceKind, DeviceView};
 use ginux_process::{TaskState, TaskView};
+
+pub use cgroup::CgroupFs;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ViewError {
@@ -10,6 +14,9 @@ pub enum ViewError {
     ReadOnly,
     BufferTooSmall,
     InvalidPath,
+    AlreadyExists,
+    LimitExceeded,
+    Busy,
 }
 
 #[derive(Clone, Copy)]
@@ -21,7 +28,71 @@ pub struct MemoryView {
 #[derive(Clone, Copy)]
 pub struct IdentityView<'a> {
     pub hostname: &'a [u8],
+    pub machine_id: &'a [u8],
     pub boot_id: &'a [u8],
+}
+
+#[derive(Clone, Copy)]
+pub struct NamespaceView {
+    pub mount: u64,
+    pub pid: u64,
+    pub uts: u64,
+    pub cgroup: u64,
+}
+
+pub struct IdentityFs<'a> {
+    tasks: &'a [TaskView],
+    identity: IdentityView<'a>,
+    namespaces: NamespaceView,
+}
+
+impl<'a> IdentityFs<'a> {
+    pub const fn new(
+        tasks: &'a [TaskView],
+        identity: IdentityView<'a>,
+        namespaces: NamespaceView,
+    ) -> Self {
+        Self {
+            tasks,
+            identity,
+            namespaces,
+        }
+    }
+
+    pub fn read(&self, path: &[u8], output: &mut [u8]) -> Result<usize, ViewError> {
+        let mut writer = Writer::new(output);
+        match path {
+            b"/etc/machine-id" => writer.bytes(self.identity.machine_id)?,
+            b"/etc/hostname" => writer.bytes(self.identity.hostname)?,
+            _ => return Err(ViewError::NotFound),
+        }
+        writer.byte(b'\n')?;
+        Ok(writer.len)
+    }
+
+    pub fn readlink(&self, path: &[u8], output: &mut [u8]) -> Result<usize, ViewError> {
+        let (pid, leaf) = parse_task_path(path, 0)?;
+        if !self.tasks.iter().any(|task| task.id.pid == pid) {
+            return Err(ViewError::NotFound);
+        }
+        let (name, id) = match leaf {
+            b"ns/mnt" => (b"mnt".as_slice(), self.namespaces.mount),
+            b"ns/pid" => (b"pid".as_slice(), self.namespaces.pid),
+            b"ns/uts" => (b"uts".as_slice(), self.namespaces.uts),
+            b"ns/cgroup" => (b"cgroup".as_slice(), self.namespaces.cgroup),
+            _ => return Err(ViewError::NotFound),
+        };
+        let mut writer = Writer::new(output);
+        writer.bytes(name)?;
+        writer.bytes(b":[")?;
+        writer.decimal(id)?;
+        writer.byte(b']')?;
+        Ok(writer.len)
+    }
+
+    pub fn write(&self, _path: &[u8], _input: &[u8]) -> Result<usize, ViewError> {
+        Err(ViewError::ReadOnly)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -398,6 +469,7 @@ mod tests {
             },
             IdentityView {
                 hostname: b"domain-a",
+                machine_id: b"0123456789abcdef0123456789abcdef",
                 boot_id: b"11111111-2222-3333-4444-555555555555",
             },
             &mounts,
@@ -443,6 +515,7 @@ mod tests {
             },
             IdentityView {
                 hostname: b"domain-a",
+                machine_id: b"0123456789abcdef0123456789abcdef",
                 boot_id: b"11111111-2222-3333-4444-555555555555",
             },
             &mounts,
@@ -520,6 +593,43 @@ mod tests {
         );
         assert_eq!(
             sysfs.write(b"/sys/class/block/vda/dev", b"8:0"),
+            Err(ViewError::ReadOnly)
+        );
+    }
+
+    #[test]
+    fn identity_and_namespaces_are_domain_owned_and_consistent() {
+        let (tasks, count) = fixture();
+        let identity = IdentityView {
+            hostname: b"domain-a",
+            machine_id: b"0123456789abcdef0123456789abcdef",
+            boot_id: b"11111111-2222-3333-4444-555555555555",
+        };
+        let identities = IdentityFs::new(
+            &tasks[..count],
+            identity,
+            NamespaceView {
+                mount: 101,
+                pid: 102,
+                uts: 103,
+                cgroup: 104,
+            },
+        );
+        let mut output = [0u8; 128];
+        let len = identities.read(b"/etc/machine-id", &mut output).unwrap();
+        assert_eq!(&output[..len], b"0123456789abcdef0123456789abcdef\n");
+        let len = identities.readlink(b"/proc/1/ns/mnt", &mut output).unwrap();
+        assert_eq!(&output[..len], b"mnt:[101]");
+        let len = identities
+            .readlink(b"/proc/2/ns/cgroup", &mut output)
+            .unwrap();
+        assert_eq!(&output[..len], b"cgroup:[104]");
+        assert_eq!(
+            identities.readlink(b"/proc/424242/ns/pid", &mut output),
+            Err(ViewError::NotFound)
+        );
+        assert_eq!(
+            identities.write(b"/etc/hostname", b"host-name"),
             Err(ViewError::ReadOnly)
         );
     }
