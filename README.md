@@ -29,6 +29,8 @@ Today, Ginux can:
 - execute selected unmodified Alpine musl/BusyBox and Rocky Linux glibc
   programs; and
 - boot Rocky Linux 10 systemd through `multi-user.target`.
+- boot a native ring-3 controller desktop, render trusted windows, and present
+  the tested Linux-domain Wayland subset as a managed or full-screen surface.
 
 Ginux is experimental. Linux ABI coverage, device support, filesystems,
 networking, resource enforcement, security validation, and real-hardware
@@ -150,11 +152,12 @@ and TCG on Apple Silicon Macs.
 
 ### Linux compatibility status
 
-The Linux 6.12 x86-64 ledger classifies all 375 syscall numbers: 82 complete,
-245 partial, and 48 policy-denied. Classification means every syscall number has
-an explicit disposition; it does not mean complete Linux conformance. Loader,
-process, VFS, terminal, socket, IPC, namespace, cgroup, pseudo-filesystem, and
-device behavior is implemented only to the extent recorded in the
+The Linux 6.12 x86-64 ledger classifies all 375 syscall numbers: 53 complete,
+257 partial, 17 unsupported with an intentional Linux-compatible `ENOSYS`, and
+48 policy-denied. Classification means every syscall number has an explicit
+disposition; it does not mean complete Linux conformance. Loader, process, VFS,
+terminal, socket, IPC, namespace, cgroup, pseudo-filesystem, and device behavior
+is implemented only to the extent recorded in the
 [compatibility matrix](docs/LINUX-COMPATIBILITY.md).
 
 The project uses real workloads as compound integration tests. Alpine exercises
@@ -227,8 +230,19 @@ make test-rocky-shell      # Rocky glibc shell and process/file behavior
 make test-multi-domain     # concurrent domain lifecycle
 make test-rocky-systemd    # cold and cached Rocky systemd boot
 make test-storage          # volume initialization, recovery, and reset
+make test-controller-desktop-all         # integrated desktop and SMP recovery
+make test-controller-desktop-performance # measured responsiveness budgets
+make test-controller-desktop-visible     # QEMU pixels plus keyboard/pointer input
+make test-controller-desktop-latency     # 1024x768 event-to-visible-frame latency
+make run-gui                             # open the controller GUI on macOS
 make check                 # architecture, ABI, format, lint, and unit checks
 ```
+
+The desktop architecture, operator model, tested Wayland subset, recovery
+behavior, measured budgets, and unsupported features are documented in the
+[native controller desktop specification](docs/CONTROLLER-DESKTOP.md).
+The visible test retains baseline, keyboard, and pointer framebuffer evidence
+under `build/qualification/controller-desktop/`.
 
 The evaluated checkpoint does **not** have a fully passing aggregate `make
 test`: a post-`execve()` system-supervisor lifecycle probe remains a recorded

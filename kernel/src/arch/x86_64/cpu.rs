@@ -171,6 +171,7 @@ struct X86RuntimeOwner {
     CONTAINER_EXEC_REQUESTED: RuntimeRef<[AtomicBool; control_abi::DOMAIN_LIMIT]>,
     CONTAINER_EXTENDED_STATE_VALID: RuntimeRef<[AtomicBool; control_abi::DOMAIN_LIMIT]>,
     CONTAINER_HOST_SHUTDOWN_REQUESTED: RuntimeRef<AtomicBool>,
+    CONTAINER_HOST_REBOOT_REQUESTED: RuntimeRef<AtomicBool>,
     CONTAINER_IMAGES:
         RuntimeRef<[[AtomicU8; control_abi::DOMAIN_MAX_IMAGE_SIZE]; control_abi::DOMAIN_LIMIT]>,
     CONTAINER_IMAGE_SIZES: RuntimeRef<[AtomicU8; control_abi::DOMAIN_LIMIT]>,
@@ -373,8 +374,10 @@ struct X86RuntimeOwner {
     LINUX_CLONE_REUSE_VALIDATED: RuntimeRef<BankedAtomicBool>,
     LINUX_CLONE_TID_FAULT_COUNT: RuntimeRef<BankedAtomicU32>,
     LINUX_CONTROLLER_CONSOLE: RuntimeRef<AtomicU64>,
+    LINUX_CONTROLLER_DISPLAY: RuntimeRef<AtomicU64>,
     LINUX_CONTROLLER_DOMAIN: RuntimeRef<AtomicU64>,
     LINUX_CONTROLLER_HOST: RuntimeRef<AtomicU64>,
+    LINUX_CONTROLLER_INPUT: RuntimeRef<AtomicU64>,
     LINUX_CONTROLLER_NETWORK: RuntimeRef<AtomicU64>,
     LINUX_CONTROLLER_ROOT: RuntimeRef<AtomicU64>,
     LINUX_CROSS_PROCESS_PRLIMIT_VALIDATED: RuntimeRef<BankedAtomicBool>,
@@ -608,6 +611,9 @@ static X86_RUNTIME: X86RuntimeOwner = X86RuntimeOwner {
     CONTAINER_EXTENDED_STATE_VALID: RuntimeRef(&X86_RUNTIME_BACKING_CONTAINER_EXTENDED_STATE_VALID),
     CONTAINER_HOST_SHUTDOWN_REQUESTED: RuntimeRef(
         &X86_RUNTIME_BACKING_CONTAINER_HOST_SHUTDOWN_REQUESTED,
+    ),
+    CONTAINER_HOST_REBOOT_REQUESTED: RuntimeRef(
+        &X86_RUNTIME_BACKING_CONTAINER_HOST_REBOOT_REQUESTED,
     ),
     CONTAINER_IMAGES: RuntimeRef(&X86_RUNTIME_BACKING_CONTAINER_IMAGES),
     CONTAINER_IMAGE_SIZES: RuntimeRef(&X86_RUNTIME_BACKING_CONTAINER_IMAGE_SIZES),
@@ -864,8 +870,10 @@ static X86_RUNTIME: X86RuntimeOwner = X86RuntimeOwner {
     LINUX_CLONE_REUSE_VALIDATED: RuntimeRef(&X86_RUNTIME_BACKING_LINUX_CLONE_REUSE_VALIDATED),
     LINUX_CLONE_TID_FAULT_COUNT: RuntimeRef(&X86_RUNTIME_BACKING_LINUX_CLONE_TID_FAULT_COUNT),
     LINUX_CONTROLLER_CONSOLE: RuntimeRef(&X86_RUNTIME_BACKING_LINUX_CONTROLLER_CONSOLE),
+    LINUX_CONTROLLER_DISPLAY: RuntimeRef(&X86_RUNTIME_BACKING_LINUX_CONTROLLER_DISPLAY),
     LINUX_CONTROLLER_DOMAIN: RuntimeRef(&X86_RUNTIME_BACKING_LINUX_CONTROLLER_DOMAIN),
     LINUX_CONTROLLER_HOST: RuntimeRef(&X86_RUNTIME_BACKING_LINUX_CONTROLLER_HOST),
+    LINUX_CONTROLLER_INPUT: RuntimeRef(&X86_RUNTIME_BACKING_LINUX_CONTROLLER_INPUT),
     LINUX_CONTROLLER_NETWORK: RuntimeRef(&X86_RUNTIME_BACKING_LINUX_CONTROLLER_NETWORK),
     LINUX_CONTROLLER_ROOT: RuntimeRef(&X86_RUNTIME_BACKING_LINUX_CONTROLLER_ROOT),
     LINUX_CROSS_PROCESS_PRLIMIT_VALIDATED: RuntimeRef(
@@ -1169,7 +1177,9 @@ static X86_RUNTIME: X86RuntimeOwner = X86RuntimeOwner {
 
 static X86_RUNTIME_BACKING_LINUX_CONTROLLER_DOMAIN: AtomicU64 = AtomicU64::new(0);
 static X86_RUNTIME_BACKING_LINUX_CONTROLLER_CONSOLE: AtomicU64 = AtomicU64::new(0);
+static X86_RUNTIME_BACKING_LINUX_CONTROLLER_DISPLAY: AtomicU64 = AtomicU64::new(0);
 static X86_RUNTIME_BACKING_LINUX_CONTROLLER_HOST: AtomicU64 = AtomicU64::new(0);
+static X86_RUNTIME_BACKING_LINUX_CONTROLLER_INPUT: AtomicU64 = AtomicU64::new(0);
 static X86_RUNTIME_BACKING_LINUX_CONTROLLER_ROOT: AtomicU64 = AtomicU64::new(0);
 static X86_RUNTIME_BACKING_LINUX_CONTROLLER_NETWORK: AtomicU64 = AtomicU64::new(0);
 
@@ -2115,6 +2125,7 @@ static X86_RUNTIME_BACKING_CONTAINER_BACKGROUND_CURSOR: AtomicU8 = AtomicU8::new
 static X86_RUNTIME_BACKING_CONTAINER_ACTIVE_SLOT: AtomicU8 = AtomicU8::new(CONTAINER_SLOT_NONE);
 static X86_RUNTIME_BACKING_CONTAINER_RESTART_REQUESTED: AtomicBool = AtomicBool::new(false);
 static X86_RUNTIME_BACKING_CONTAINER_HOST_SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
+static X86_RUNTIME_BACKING_CONTAINER_HOST_REBOOT_REQUESTED: AtomicBool = AtomicBool::new(false);
 static X86_RUNTIME_BACKING_CONTAINER_MANAGEMENT_ENABLED: AtomicBool = AtomicBool::new(false);
 static LINUX_ABI_TEST_RESULTS: AtomicU64 = AtomicU64::new(0);
 static X86_RUNTIME_BACKING_NETWORK_PING_REQUESTED: AtomicU64 = AtomicU64::new(0);
@@ -3418,6 +3429,8 @@ pub(crate) fn execute_native_controller(
     host_handle: u64,
     root_handle: u64,
     network_handle: u64,
+    display_handle: u64,
+    input_handle: u64,
     domain_id: u64,
     service_identity: u64,
 ) {
@@ -3441,6 +3454,12 @@ pub(crate) fn execute_native_controller(
     X86_RUNTIME
         .LINUX_CONTROLLER_NETWORK
         .store(network_handle, Ordering::Release);
+    X86_RUNTIME
+        .LINUX_CONTROLLER_DISPLAY
+        .store(display_handle, Ordering::Release);
+    X86_RUNTIME
+        .LINUX_CONTROLLER_INPUT
+        .store(input_handle, Ordering::Release);
     if configure_linux_syscall().is_none() {
         X86_RUNTIME
             .LINUX_CONTROLLER_DOMAIN
@@ -5280,6 +5299,12 @@ pub(crate) fn take_container_restart_request() -> bool {
 pub(crate) fn take_container_host_shutdown_request() -> bool {
     X86_RUNTIME
         .CONTAINER_HOST_SHUTDOWN_REQUESTED
+        .swap(false, Ordering::SeqCst)
+}
+
+pub(crate) fn take_container_host_reboot_request() -> bool {
+    X86_RUNTIME
+        .CONTAINER_HOST_REBOOT_REQUESTED
         .swap(false, Ordering::SeqCst)
 }
 
@@ -10599,30 +10624,30 @@ fn linux_controller_syscall(
             if !domain::handle_permits(domain_id, capability, 2, Rights::READ) {
                 return Some(LINUX_EBADF);
             }
-            if !crate::serial_input_ready() && queue_background_container_work() {
-                // This read has not consumed a byte. Resume at SYSCALL rather
-                // than returning a false EOF on every background time slice.
-                let Some(retry_rip) = user_rip.checked_sub(2) else {
-                    return Some(LINUX_EIO);
-                };
-                let mut frame = UserTrapFrame::from_linux_syscall(
-                    registers.into_array(),
-                    retry_rip,
-                    user_stack,
-                    user_rflags,
-                    second,
-                    third,
-                );
-                if !scheduler::suspend_container_lifecycle(
-                    &mut frame,
-                    USER_CODE_SELECTOR,
-                    USER_DATA_SELECTOR,
-                    0,
-                    active_fs_base(),
-                ) {
-                    return Some(LINUX_EIO);
+            if !crate::serial_input_ready() {
+                if queue_background_container_work() {
+                    // Resume the nonblocking desktop/CLI event loop with
+                    // EAGAIN after background work; an empty read is not EOF.
+                    let mut frame = UserTrapFrame::from_linux_syscall(
+                        registers.into_array(),
+                        user_rip,
+                        user_stack,
+                        user_rflags,
+                        second,
+                        third,
+                    );
+                    if !scheduler::suspend_container_lifecycle(
+                        &mut frame,
+                        USER_CODE_SELECTOR,
+                        USER_DATA_SELECTOR,
+                        LINUX_EAGAIN,
+                        active_fs_base(),
+                    ) {
+                        return Some(LINUX_EIO);
+                    }
+                    return Some(LINUX_RETURN_TO_KERNEL);
                 }
-                return Some(LINUX_RETURN_TO_KERNEL);
+                return Some(LINUX_EAGAIN);
             }
             let byte = crate::serial_read_byte_blocking();
             if !address_space::copy_to_current_user(second, &[byte]) {
@@ -10661,6 +10686,8 @@ fn linux_controller_syscall(
                 3 => X86_RUNTIME.LINUX_CONTROLLER_HOST.load(Ordering::Acquire),
                 4 => X86_RUNTIME.LINUX_CONTROLLER_ROOT.load(Ordering::Acquire),
                 5 => X86_RUNTIME.LINUX_CONTROLLER_NETWORK.load(Ordering::Acquire),
+                6 => X86_RUNTIME.LINUX_CONTROLLER_DISPLAY.load(Ordering::Acquire),
+                7 => X86_RUNTIME.LINUX_CONTROLLER_INPUT.load(Ordering::Acquire),
                 _ => return Some(LINUX_EBADF),
             };
             let mut request = [0_u8; ginux_native_abi::GINUX_CONTROL_IOCTL_SIZE as usize];
@@ -10702,13 +10729,13 @@ fn linux_controller_syscall(
         LINUX_PIPE_SYSCALL => Some(linux_socket_pipe(
             first,
             0,
-            6,
+            8,
             address_space::copy_to_current_user,
         )),
         LINUX_PIPE2_SYSCALL => Some(linux_socket_pipe(
             first,
             second,
-            6,
+            8,
             address_space::copy_to_current_user,
         )),
         LINUX_POLL_SYSCALL => Some(linux_controller_poll(first, second, third)),
@@ -10725,7 +10752,7 @@ fn linux_controller_syscall(
             address_space::copy_from_current_user,
             address_space::copy_to_current_user,
         )),
-        LINUX_DUP_SYSCALL => Some(linux_device_dup_at_least(first, 6, false)),
+        LINUX_DUP_SYSCALL => Some(linux_device_dup_at_least(first, 8, false)),
         LINUX_DUP2_SYSCALL => Some(linux_console_dup2(first, second)),
         LINUX_DUP3_SYSCALL => Some(linux_dup3(first, second, third)),
         LINUX_FCNTL_SYSCALL => Some(linux_descriptor_fcntl(first, second, third)),
@@ -10809,6 +10836,12 @@ fn linux_controller_syscall(
                 .store(0, Ordering::Release);
             X86_RUNTIME
                 .LINUX_CONTROLLER_NETWORK
+                .store(0, Ordering::Release);
+            X86_RUNTIME
+                .LINUX_CONTROLLER_DISPLAY
+                .store(0, Ordering::Release);
+            X86_RUNTIME
+                .LINUX_CONTROLLER_INPUT
                 .store(0, Ordering::Release);
             Some(if result == u64::MAX {
                 LINUX_RETURN_TO_KERNEL
@@ -39277,6 +39310,7 @@ fn dispatch_charged_call(
     caller_domain: u64,
     frame: *mut UserTrapFrame,
 ) -> u64 {
+    let frame_ref = unsafe { frame.as_ref() };
     match number {
         0 => {
             if CONTROL_DISCOVERY_OVERRIDE_DOMAIN
@@ -39299,7 +39333,7 @@ fn dispatch_charged_call(
         }
         3 => runtime_result(frame),
         4 => {
-            let Some(frame) = (unsafe { frame.as_ref() }) else {
+            let Some(frame) = frame_ref else {
                 return u64::MAX;
             };
             let message = frame.first_argument();
@@ -39368,6 +39402,12 @@ fn dispatch_charged_call(
         ginux_native_abi::NATIVE_NETWORK_INVENTORY_OPERATION => {
             network_inventory_call(caller_domain, capability, frame)
         }
+        ginux_native_abi::NATIVE_DISPLAY_OPERATION => {
+            controller_display_call(caller_domain, capability, frame_ref)
+        }
+        ginux_native_abi::NATIVE_INPUT_OPERATION => {
+            controller_input_call(caller_domain, capability, frame_ref)
+        }
         // The frequency is the one the Linux clock profile already trusts; it
         // grants no authority, so no capability is required.
         ginux_native_abi::NATIVE_TIMESTAMP_FREQUENCY_OPERATION => timer::monotonic_frequency()
@@ -39411,6 +39451,150 @@ fn dispatch_charged_call(
             packet_egress_drain_wait_call(caller_domain, capability, frame)
         }
         _ => u64::MAX,
+    }
+}
+
+fn controller_display_call(
+    caller_domain: u64,
+    capability: u64,
+    frame: Option<&UserTrapFrame>,
+) -> u64 {
+    let failed = ginux_native_abi::NATIVE_CALL_FAILED;
+    let Some(frame) = frame else {
+        return failed;
+    };
+    if !domain::is_auxiliary_service(caller_domain) {
+        return failed;
+    }
+    let mut bytes = [0_u8; ginux_native_abi::NativeDisplayRequestV0::SIZE as usize];
+    if !address_space::copy_from_current_user(frame.first_argument(), &mut bytes) {
+        return failed;
+    }
+    let command = u16::from_le_bytes(bytes[6..8].try_into().unwrap());
+    let rights = if command == ginux_native_abi::NATIVE_DISPLAY_QUERY {
+        Rights::READ
+    } else {
+        Rights::WRITE
+    };
+    if !domain::handle_permits(
+        caller_domain,
+        capability,
+        ginux_native_abi::NATIVE_DISPLAY_OBJECT,
+        rights,
+    ) {
+        return failed;
+    }
+    if command == ginux_native_abi::NATIVE_DISPLAY_MAP {
+        return address_space::controller_framebuffer_user_address(caller_domain).unwrap_or(failed);
+    }
+    let mut request = ginux_native_abi::NativeDisplayRequestV0 {
+        size: u32::from_le_bytes(bytes[0..4].try_into().unwrap()),
+        version: u16::from_le_bytes(bytes[4..6].try_into().unwrap()),
+        command,
+        x: u32::from_le_bytes(bytes[8..12].try_into().unwrap()),
+        y: u32::from_le_bytes(bytes[12..16].try_into().unwrap()),
+        color: u32::from_le_bytes(bytes[16..20].try_into().unwrap()),
+        width: u32::from_le_bytes(bytes[20..24].try_into().unwrap()),
+        height: u32::from_le_bytes(bytes[24..28].try_into().unwrap()),
+        stride: u32::from_le_bytes(bytes[28..32].try_into().unwrap()),
+        format: u32::from_le_bytes(bytes[32..36].try_into().unwrap()),
+        reserved: u32::from_le_bytes(bytes[36..40].try_into().unwrap()),
+    };
+    if command == ginux_native_abi::NATIVE_DISPLAY_BLIT {
+        return if crate::controller_devices::blit(
+            &request,
+            frame.second_argument(),
+            address_space::copy_from_current_user,
+        ) && domain::renew_auxiliary_call_epoch(caller_domain)
+        {
+            u64::from(request.size)
+        } else {
+            failed
+        };
+    }
+    if request.reserved != 0 || !crate::controller_devices::display(&mut request) {
+        return failed;
+    }
+    bytes[20..24].copy_from_slice(&request.width.to_le_bytes());
+    bytes[24..28].copy_from_slice(&request.height.to_le_bytes());
+    bytes[28..32].copy_from_slice(&request.stride.to_le_bytes());
+    bytes[32..36].copy_from_slice(&request.format.to_le_bytes());
+    if !address_space::copy_to_current_user(frame.first_argument(), &bytes)
+        || !domain::renew_auxiliary_call_epoch(caller_domain)
+    {
+        return failed;
+    }
+    u64::from(request.size)
+}
+
+fn controller_input_call(
+    caller_domain: u64,
+    capability: u64,
+    frame: Option<&UserTrapFrame>,
+) -> u64 {
+    let failed = ginux_native_abi::NATIVE_CALL_FAILED;
+    let Some(frame) = frame else {
+        return failed;
+    };
+    if !domain::is_auxiliary_service(caller_domain) {
+        return failed;
+    }
+    match frame.second_argument() as u16 {
+        ginux_native_abi::NATIVE_INPUT_READ => {
+            if !domain::handle_permits(
+                caller_domain,
+                capability,
+                ginux_native_abi::NATIVE_INPUT_OBJECT,
+                Rights::READ,
+            ) {
+                return failed;
+            }
+            for _ in 0..32 {
+                if crate::controller_devices::read_hardware_input().is_none()
+                    && !crate::controller_devices::hardware_input_ready()
+                {
+                    break;
+                }
+            }
+            let Some(event) = crate::controller_devices::input() else {
+                return if domain::renew_auxiliary_call_epoch(caller_domain) {
+                    0
+                } else {
+                    failed
+                };
+            };
+            let mut bytes = [0_u8; ginux_native_abi::NativeInputEventV0::SIZE as usize];
+            bytes[0..4].copy_from_slice(&event.size.to_le_bytes());
+            bytes[4..6].copy_from_slice(&event.version.to_le_bytes());
+            bytes[6..8].copy_from_slice(&event.kind.to_le_bytes());
+            bytes[8..12].copy_from_slice(&event.code.to_le_bytes());
+            bytes[12..16].copy_from_slice(&event.value.to_le_bytes());
+            bytes[16..24].copy_from_slice(&event.sequence.to_le_bytes());
+            if address_space::copy_to_current_user(frame.first_argument(), &bytes)
+                && domain::renew_auxiliary_call_epoch(caller_domain)
+            {
+                u64::from(event.size)
+            } else {
+                failed
+            }
+        }
+        ginux_native_abi::NATIVE_INPUT_RESET => {
+            if !domain::handle_permits(
+                caller_domain,
+                capability,
+                ginux_native_abi::NATIVE_INPUT_OBJECT,
+                Rights::WRITE,
+            ) {
+                return failed;
+            }
+            crate::controller_devices::reset_input();
+            if domain::renew_auxiliary_call_epoch(caller_domain) {
+                0
+            } else {
+                failed
+            }
+        }
+        _ => failed,
     }
 }
 
@@ -41347,6 +41531,19 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
     }
     let operation = frame.first_argument();
     if operation == control_abi::DOMAIN_HOST_SHUTDOWN && frame.second_argument() == 0 {
+        X86_RUNTIME
+            .CONTAINER_HOST_SHUTDOWN_REQUESTED
+            .store(true, Ordering::SeqCst);
+        return active_container_slot()
+            .map(|slot| {
+                u64::from(X86_RUNTIME.CONTAINER_CONTROL_STATES[slot].load(Ordering::SeqCst))
+            })
+            .unwrap_or(0);
+    }
+    if operation == control_abi::DOMAIN_HOST_REBOOT && frame.second_argument() == 0 {
+        X86_RUNTIME
+            .CONTAINER_HOST_REBOOT_REQUESTED
+            .store(true, Ordering::SeqCst);
         X86_RUNTIME
             .CONTAINER_HOST_SHUTDOWN_REQUESTED
             .store(true, Ordering::SeqCst);

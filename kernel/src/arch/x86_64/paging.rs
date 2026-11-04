@@ -22,6 +22,25 @@ const NO_EXECUTE: u64 = 1 << 63;
 const ADDRESS_MASK: usize = 0x000f_ffff_ffff_f000;
 const CR0_WRITE_PROTECT: usize = 1 << 16;
 
+#[derive(Clone, Copy)]
+struct ReadOnlyPageTable(*const u64);
+
+impl ReadOnlyPageTable {
+    fn from_physical(physical: u64) -> Option<Self> {
+        let address = direct_map_range_address(physical, PAGE_SIZE)?;
+        Some(Self(address as *const u64))
+    }
+
+    fn entry(self, index: usize) -> Option<u64> {
+        if index >= ENTRY_COUNT {
+            return None;
+        }
+        // SAFETY: construction requires a complete direct-map translation of
+        // one page-table page, and the index is bounded to that page.
+        Some(unsafe { self.0.add(index).read() })
+    }
+}
+
 pub(crate) const INITIAL_IDENTITY_LIMIT: usize = 1usize << 32;
 pub(crate) const DIRECT_MAP_BASE: usize = 0xffff_8000_0000_0000;
 const DIRECT_MAP_PML4_INDEX: usize = 256;
@@ -93,9 +112,10 @@ pub(crate) struct ValidatedUserRootFrames {
     dma: Option<u64>,
     native_executable_pages: [u64; 3],
     native_image_pages: u8,
-    native_stack_page: u8,
-    native_stack_pages: u8,
+    native_stack_page: u16,
+    native_stack_pages: u16,
     native_table: u64,
+    controller_display_tables: [u64; 5],
 }
 
 impl ValidatedUserRootFrames {
@@ -130,6 +150,11 @@ impl ValidatedUserRootFrames {
                     let frame = unsafe { table.add(index).read() } & ADDRESS_MASK as u64;
                     crate::memory::frame_addresses_owned_by(owner, &[frame])
                 })
+            && self
+                .controller_display_tables
+                .iter()
+                .filter(|frame| **frame != 0)
+                .all(|frame| crate::memory::frame_addresses_owned_by(owner, &[*frame]))
     }
 
     pub(crate) fn dma(&self) -> Option<u64> {
@@ -191,20 +216,26 @@ pub(crate) fn validated_user_root_frames(root: u64) -> Option<ValidatedUserRootF
     let pdpt_address = user & ADDRESS_MASK as u64;
     let pdpt_entry = single_user_table_entry(pdpt_address)?;
     let directory_address = pdpt_entry & ADDRESS_MASK as u64;
-    let directory_entry = single_user_table_entry(directory_address)?;
+    let directory = ReadOnlyPageTable::from_physical(directory_address)?;
+    let directory_entry = directory.entry(0)?;
+    if directory_entry & (PRESENT | WRITABLE | USER) != (PRESENT | WRITABLE | USER)
+        || directory_entry & (LARGE_PAGE | NO_EXECUTE) != 0
+    {
+        return None;
+    }
     let table_address = directory_entry & ADDRESS_MASK as u64;
     if table_address == 0 || table_address >= INITIAL_IDENTITY_LIMIT as u64 {
         return None;
     }
-    let table = direct_map_range_address(table_address, PAGE_SIZE)? as *const u64;
-    let code = unsafe { table.read() };
-    let first_guard = unsafe { table.add(1).read() };
-    let first_stack = unsafe { table.add(2).read() };
-    let second_guard = unsafe { table.add(3).read() };
-    let second_stack = unsafe { table.add(4).read() };
-    let device = unsafe { table.add(5).read() };
-    let dma = unsafe { table.add(6).read() };
-    let notification = unsafe { table.add(7).read() };
+    let table = ReadOnlyPageTable::from_physical(table_address)?;
+    let code = table.entry(0)?;
+    let first_guard = table.entry(1)?;
+    let first_stack = table.entry(2)?;
+    let second_guard = table.entry(3)?;
+    let second_stack = table.entry(4)?;
+    let device = table.entry(5)?;
+    let dma = table.entry(6)?;
+    let notification = table.entry(7)?;
     let code_address = code & ADDRESS_MASK as u64;
     let first_stack_address = first_stack & ADDRESS_MASK as u64;
     let second_stack_address = second_stack & ADDRESS_MASK as u64;
@@ -255,7 +286,7 @@ pub(crate) fn validated_user_root_frames(root: u64) -> Option<ValidatedUserRootF
         && device_valid
         && dma_valid
         && notification_valid
-        && (8..ENTRY_COUNT).all(|index| unsafe { table.add(index).read() == 0 })
+        && (8..ENTRY_COUNT).all(|index| table.entry(index) == Some(0))
         && legacy_frames
             .iter()
             .all(|frame| *frame != 0 && *frame < INITIAL_IDENTITY_LIMIT as u64)
@@ -276,10 +307,11 @@ pub(crate) fn validated_user_root_frames(root: u64) -> Option<ValidatedUserRootF
             native_stack_page: 0,
             native_stack_pages: 0,
             native_table: 0,
+            controller_display_tables: [0; 5],
         });
     }
 
-    let native_entry = |index: usize| unsafe { table.add(index).read() };
+    let native_entry = |index: usize| table.entry(index).unwrap_or(u64::MAX);
     let owned_flags = PRESENT | USER;
     let read_only_nx = owned_flags | NO_EXECUTE;
     let executable = owned_flags;
@@ -288,17 +320,100 @@ pub(crate) fn validated_user_root_frames(root: u64) -> Option<ValidatedUserRootF
     let flags_match = |entry: u64, expected: u64| {
         entry & !(ACCESSED | DIRTY) == expected && (entry & DIRTY == 0 || expected & WRITABLE != 0)
     };
-    let network_layout = native_entry(15) & PRESENT != 0;
-    let controller_layout = !network_layout && native_entry(7) & PRESENT != 0;
+    let layout_matches = |image_capacity: usize, stack_pages: usize| {
+        let stack_page = image_capacity + 1;
+        native_entry(image_capacity) == 0
+            && (0..stack_pages).all(|offset| {
+                native_entry(stack_page + offset) & (PRESENT | WRITABLE | USER | NO_EXECUTE)
+                    == (PRESENT | WRITABLE | USER | NO_EXECUTE)
+            })
+            && native_entry(stack_page + stack_pages) == 0
+            && native_entry(stack_page + stack_pages + 1) & (PRESENT | USER | NO_EXECUTE)
+                == (PRESENT | USER | NO_EXECUTE)
+    };
+    let network_layout = layout_matches(
+        crate::address_space::NATIVE_NETWORK_IMAGE_PAGES,
+        crate::address_space::NATIVE_NETWORK_STACK_PAGES,
+    );
+    let controller_layout = !network_layout
+        && layout_matches(
+            crate::address_space::NATIVE_CONTROLLER_IMAGE_PAGES,
+            crate::address_space::NATIVE_CONTROLLER_STACK_PAGES,
+        );
+    let mut controller_display_tables = [0_u64; 5];
+    let controller_display_valid = if controller_layout && directory.entry(1)? != 0 {
+        let framebuffer = crate::controller_devices::framebuffer_info()?;
+        let required = usize::try_from(framebuffer.stride)
+            .ok()?
+            .checked_mul(usize::try_from(framebuffer.height).ok()?)?
+            .checked_mul(4)?;
+        let physical_start = framebuffer.base & !(PAGE_SIZE as u64 - 1);
+        let offset = usize::try_from(framebuffer.base - physical_start).ok()?;
+        let page_count = offset.checked_add(required)?.checked_add(PAGE_SIZE - 1)? / PAGE_SIZE;
+        if framebuffer.format != 1 || page_count > controller_display_tables.len() * ENTRY_COUNT {
+            false
+        } else {
+            let directory_flags = PRESENT | WRITABLE | USER;
+            let leaf_flags = directory_flags | WRITE_THROUGH | CACHE_DISABLE | NO_EXECUTE;
+            let mut valid = true;
+            for (index, table_frame) in controller_display_tables.iter_mut().enumerate() {
+                let entry = directory.entry(1 + index)?;
+                let physical = entry & ADDRESS_MASK as u64;
+                *table_frame = physical;
+                valid &= physical != 0
+                    && physical < INITIAL_IDENTITY_LIMIT as u64
+                    && flags_match(entry, physical | directory_flags);
+                let Some(display_table) = ReadOnlyPageTable::from_physical(physical) else {
+                    valid = false;
+                    continue;
+                };
+                for leaf in 0..ENTRY_COUNT {
+                    let page = index * ENTRY_COUNT + leaf;
+                    let observed = display_table.entry(leaf)?;
+                    if page < page_count {
+                        let Some(expected_physical) =
+                            physical_start.checked_add((page * PAGE_SIZE) as u64)
+                        else {
+                            valid = false;
+                            continue;
+                        };
+                        valid &= flags_match(observed, expected_physical | leaf_flags);
+                    } else {
+                        valid &= observed == 0;
+                    }
+                }
+            }
+            valid
+                && (6..ENTRY_COUNT).all(|index| directory.entry(index) == Some(0))
+                && controller_display_tables
+                    .iter()
+                    .enumerate()
+                    .all(|(index, frame)| !controller_display_tables[index + 1..].contains(frame))
+        }
+    } else {
+        (1..ENTRY_COUNT).all(|index| directory.entry(index) == Some(0))
+    };
+    let graphics_layout = !network_layout
+        && !controller_layout
+        && layout_matches(
+            crate::address_space::GRAPHICS_SERVICE_IMAGE_PAGES,
+            crate::address_space::GRAPHICS_SERVICE_STACK_PAGES,
+        );
     let image_capacity = if network_layout {
         crate::address_space::NATIVE_NETWORK_IMAGE_PAGES
     } else if controller_layout {
         crate::address_space::NATIVE_CONTROLLER_IMAGE_PAGES
+    } else if graphics_layout {
+        crate::address_space::GRAPHICS_SERVICE_IMAGE_PAGES
     } else {
         7
     };
     let stack_pages = if network_layout {
         crate::address_space::NATIVE_NETWORK_STACK_PAGES
+    } else if graphics_layout {
+        crate::address_space::GRAPHICS_SERVICE_STACK_PAGES
+    } else if controller_layout {
+        crate::address_space::NATIVE_CONTROLLER_STACK_PAGES
     } else {
         2
     };
@@ -353,6 +468,10 @@ pub(crate) fn validated_user_root_frames(root: u64) -> Option<ValidatedUserRootF
     };
     let stack_index = 4 + image_pages;
     let native_frame_count = stack_index + stack_pages + 1;
+    let controller_display_table_count = controller_display_tables
+        .iter()
+        .filter(|frame| **frame != 0)
+        .count();
     let native_frame_at = |index: usize| -> u64 {
         match index {
             0 => root,
@@ -392,9 +511,13 @@ pub(crate) fn validated_user_root_frames(root: u64) -> Option<ValidatedUserRootF
             || (native_entry(common_page) == 0 && native_entry(notification_page) == 0))
         && dma_valid
         && mmio_valid
-        && (notification_page + 1..ENTRY_COUNT)
-            .all(|index| unsafe { table.add(index).read() == 0 })
+        && (notification_page + 1..ENTRY_COUNT).all(|index| table.entry(index) == Some(0))
         && native_frames_valid
+        && controller_display_valid
+        && controller_display_tables
+            .iter()
+            .filter(|frame| **frame != 0)
+            .all(|frame| !(0..native_frame_count).any(|index| native_frame_at(index) == *frame))
         && (native_dma == 0
             || !(0..native_frame_count).any(|index| native_frame_at(index) == native_dma_address)))
     .then_some(ValidatedUserRootFrames {
@@ -409,13 +532,14 @@ pub(crate) fn validated_user_root_frames(root: u64) -> Option<ValidatedUserRootF
             }
             frames
         },
-        base_count: native_frame_count,
+        base_count: native_frame_count + controller_display_table_count,
         dma: (native_dma != 0).then_some(native_dma_address),
         native_executable_pages,
         native_image_pages: image_pages as u8,
-        native_stack_page: stack_page as u8,
-        native_stack_pages: stack_pages as u8,
+        native_stack_page: stack_page as u16,
+        native_stack_pages: stack_pages as u16,
         native_table: table_address,
+        controller_display_tables,
     })
 }
 

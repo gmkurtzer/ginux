@@ -8,10 +8,10 @@ unsafe_blocks="$(rg -g '*.rs' -o 'unsafe \{' "$kernel_source" | wc -l | tr -d ' 
 safety_comments="$(rg -g '*.rs' -o 'SAFETY:' "$kernel_source" | wc -l | tr -d ' ')"
 static_mut="$(rg -g '*.rs' '^\s*(pub(\([^)]*\))?\s+)?static mut ' "$kernel_source" | wc -l | tr -d ' ')"
 
-# S-1 adds eight audited blocks for interrupt XSAVE buffers, exact resume
-# pointers and the maskable AP quiescence IPI. See docs/scheduler/REVIEW.md.
-if (( unsafe_blocks > 1041 )); then
-    echo "kernel unsafe check: unsafe blocks grew from 1041 to ${unsafe_blocks}" >&2
+# S-1 adds eight audited blocks to the controller-desktop baseline for
+# interrupt XSAVE buffers, exact resume and AP quiescence (docs/scheduler/REVIEW.md).
+if (( unsafe_blocks > 1044 )); then
+    echo "kernel unsafe check: unsafe blocks grew from 1044 to ${unsafe_blocks}" >&2
     exit 1
 fi
 if (( safety_comments < 109 )); then

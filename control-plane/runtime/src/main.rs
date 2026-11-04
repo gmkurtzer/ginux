@@ -7,17 +7,18 @@ use ginux_command::{
 };
 use ginux_native_abi::{
     native_control_abi_is_compatible, GinuxControlIoctlV0, NativeControlDescriptorV4,
-    NativeDomainExecArgumentV0, NativeDomainExecRequestV0, NativeDomainRequestV3,
-    NativeHostInspectRecordV0, NativeHostInspectRequestV0, NativeNetworkInventoryRequestV0,
-    NativeRootDirectoryRequestV4, GINUX_CONTROL_IOCTL, NATIVE_CALL_FAILED,
-    NATIVE_CONSOLE_MAX_LINE_BYTES, NATIVE_CONSOLE_READ_BYTE_OPERATION,
+    NativeDisplayRequestV0, NativeDomainExecArgumentV0, NativeDomainExecRequestV0,
+    NativeDomainRequestV3, NativeHostInspectRecordV0, NativeHostInspectRequestV0,
+    NativeInputEventV0, NativeNetworkInventoryRequestV0, NativeRootDirectoryRequestV4,
+    GINUX_CONTROL_IOCTL, NATIVE_CALL_FAILED, NATIVE_CONSOLE_MAX_LINE_BYTES,
     NATIVE_CONTROL_DESCRIPTOR_OPERATION, NATIVE_CONTROL_DESCRIPTOR_SIZE,
     NATIVE_CONTROL_DISCOVERY_OPERATION, NATIVE_CONTROL_MAX_BUFFERED_CONSOLE_BYTES,
-    NATIVE_DOMAIN_ATTACH, NATIVE_DOMAIN_CONFIG_AUTOSTART, NATIVE_DOMAIN_CONFIG_CPU,
-    NATIVE_DOMAIN_CONFIG_IMAGE, NATIVE_DOMAIN_CONFIG_INIT, NATIVE_DOMAIN_CONFIG_MEMORY,
-    NATIVE_DOMAIN_CONFIG_PERSONALITY, NATIVE_DOMAIN_CONTROL_OPERATION, NATIVE_DOMAIN_CREATE,
-    NATIVE_DOMAIN_CURSOR_END, NATIVE_DOMAIN_EXEC, NATIVE_DOMAIN_EXEC_INTERACTIVE,
-    NATIVE_DOMAIN_EXEC_MAX_ARGUMENTS, NATIVE_DOMAIN_HOST_SHUTDOWN, NATIVE_DOMAIN_INJECT_FAILURE,
+    NATIVE_DISPLAY_MAP, NATIVE_DISPLAY_OPERATION, NATIVE_DISPLAY_QUERY, NATIVE_DOMAIN_ATTACH,
+    NATIVE_DOMAIN_CONFIG_AUTOSTART, NATIVE_DOMAIN_CONFIG_CPU, NATIVE_DOMAIN_CONFIG_IMAGE,
+    NATIVE_DOMAIN_CONFIG_INIT, NATIVE_DOMAIN_CONFIG_MEMORY, NATIVE_DOMAIN_CONFIG_PERSONALITY,
+    NATIVE_DOMAIN_CONTROL_OPERATION, NATIVE_DOMAIN_CREATE, NATIVE_DOMAIN_CURSOR_END,
+    NATIVE_DOMAIN_EXEC, NATIVE_DOMAIN_EXEC_INTERACTIVE, NATIVE_DOMAIN_EXEC_MAX_ARGUMENTS,
+    NATIVE_DOMAIN_HOST_REBOOT, NATIVE_DOMAIN_HOST_SHUTDOWN, NATIVE_DOMAIN_INJECT_FAILURE,
     NATIVE_DOMAIN_LIMIT, NATIVE_DOMAIN_MAX_NAME_SIZE, NATIVE_DOMAIN_POLL_BACKGROUND,
     NATIVE_DOMAIN_QUERY, NATIVE_DOMAIN_RESTART, NATIVE_DOMAIN_RUNTIME_CONSOLE_ATTACHED,
     NATIVE_DOMAIN_RUNTIME_ROOTFS_READY, NATIVE_DOMAIN_RUNTIME_SUSPENDED,
@@ -30,17 +31,18 @@ use ginux_native_abi::{
     NATIVE_HOST_INSPECT_REQUEST_SIZE, NATIVE_HOST_INSPECT_STATE_READY,
     NATIVE_HOST_INSPECT_STATE_STOPPING, NATIVE_HOST_INSPECT_VERSION,
     NATIVE_HOST_PROCESS_KIND_CONTROLLER, NATIVE_HOST_PROCESS_KIND_DOMAIN_INIT,
-    NATIVE_HOST_PROC_ENUMERATE, NATIVE_HOST_PROC_STATUS, NATIVE_LINUX_ABI_TEST_COUNT,
-    NATIVE_LINUX_ABI_TEST_OPERATION, NATIVE_NETWORK_APPLY_VERSION, NATIVE_NETWORK_DEVICE_APPLY,
-    NATIVE_NETWORK_DEVICE_DHCP, NATIVE_NETWORK_DEVICE_OPERATION, NATIVE_NETWORK_DEVICE_PING,
-    NATIVE_NETWORK_DEVICE_QUERY_DHCP, NATIVE_NETWORK_DEVICE_QUERY_DNS,
-    NATIVE_NETWORK_DEVICE_QUERY_PING, NATIVE_NETWORK_DEVICE_QUERY_SNAPSHOT,
-    NATIVE_NETWORK_DEVICE_SET_DNS, NATIVE_NETWORK_DEVICE_SET_LINK, NATIVE_NETWORK_FLAG_UP,
-    NATIVE_NETWORK_INVENTORY_ATTACH, NATIVE_NETWORK_INVENTORY_CREATE_VIRTUAL,
-    NATIVE_NETWORK_INVENTORY_OPERATION, NATIVE_NETWORK_INVENTORY_QUERY,
-    NATIVE_NETWORK_INVENTORY_QUERY_ATTACHMENT, NATIVE_NETWORK_INVENTORY_SET_LINK,
-    NATIVE_NETWORK_KIND_MASK, NATIVE_NETWORK_KIND_VIRTUAL, NATIVE_NETWORK_MAX_NAME_SIZE,
-    NATIVE_NETWORK_SNAPSHOT_SIZE, NATIVE_NETWORK_SNAPSHOT_VERSION,
+    NATIVE_HOST_PROC_ENUMERATE, NATIVE_HOST_PROC_STATUS, NATIVE_INPUT_KIND_KEY,
+    NATIVE_INPUT_KIND_POINTER_BUTTON, NATIVE_INPUT_KIND_POINTER_MOTION, NATIVE_INPUT_OPERATION,
+    NATIVE_INPUT_READ, NATIVE_LINUX_ABI_TEST_COUNT, NATIVE_LINUX_ABI_TEST_OPERATION,
+    NATIVE_NETWORK_APPLY_VERSION, NATIVE_NETWORK_DEVICE_APPLY, NATIVE_NETWORK_DEVICE_DHCP,
+    NATIVE_NETWORK_DEVICE_OPERATION, NATIVE_NETWORK_DEVICE_PING, NATIVE_NETWORK_DEVICE_QUERY_DHCP,
+    NATIVE_NETWORK_DEVICE_QUERY_DNS, NATIVE_NETWORK_DEVICE_QUERY_PING,
+    NATIVE_NETWORK_DEVICE_QUERY_SNAPSHOT, NATIVE_NETWORK_DEVICE_SET_DNS,
+    NATIVE_NETWORK_DEVICE_SET_LINK, NATIVE_NETWORK_FLAG_UP, NATIVE_NETWORK_INVENTORY_ATTACH,
+    NATIVE_NETWORK_INVENTORY_CREATE_VIRTUAL, NATIVE_NETWORK_INVENTORY_OPERATION,
+    NATIVE_NETWORK_INVENTORY_QUERY, NATIVE_NETWORK_INVENTORY_QUERY_ATTACHMENT,
+    NATIVE_NETWORK_INVENTORY_SET_LINK, NATIVE_NETWORK_KIND_MASK, NATIVE_NETWORK_KIND_VIRTUAL,
+    NATIVE_NETWORK_MAX_NAME_SIZE, NATIVE_NETWORK_SNAPSHOT_SIZE, NATIVE_NETWORK_SNAPSHOT_VERSION,
     NATIVE_ROOT_DIRECTORY_RECORD_HEADER_SIZE, NATIVE_ROOT_DIRECTORY_REQUEST_SIZE,
     NATIVE_ROOT_MAX_DIRECTORY_RECORD_SIZE, NATIVE_ROOT_OPERATION, NATIVE_ROOT_READ_DIRECTORY,
     NATIVE_SERVICE_EXIT_COMPLETED, NATIVE_SERVICE_EXIT_REJECTED,
@@ -52,6 +54,8 @@ const LINUX_STDOUT: u64 = 1;
 const GINUX_HOST_FD: u64 = 3;
 const GINUX_ROOT_FD: u64 = 4;
 const GINUX_NETWORK_FD: u64 = 5;
+const GINUX_DISPLAY_FD: u64 = 6;
+const GINUX_INPUT_FD: u64 = 7;
 const LINUX_READ_SYSCALL: u64 = 0;
 const LINUX_WRITE_SYSCALL: u64 = 1;
 const LINUX_CLOSE_SYSCALL: u64 = 3;
@@ -112,6 +116,68 @@ struct LinuxPollFd {
     descriptor: i32,
     events: i16,
     returned: i16,
+}
+
+struct DesktopState {
+    shell: ginux_controller_ui::ShellState,
+    view: ginux_controller_ui::SystemView,
+    surface: DisplaySurface,
+    pointer_backing: PointerBacking,
+}
+
+#[derive(Clone, Copy)]
+struct DisplaySurface {
+    address: u64,
+    width: usize,
+    height: usize,
+    stride: usize,
+}
+
+impl DisplaySurface {
+    const fn empty() -> Self {
+        Self {
+            address: 0,
+            width: 0,
+            height: 0,
+            stride: 0,
+        }
+    }
+
+    fn pixels(&mut self) -> Option<&mut [u32]> {
+        let length = self.stride.checked_mul(self.height)?;
+        if self.address == 0 || self.width == 0 || self.width > self.stride || length == 0 {
+            return None;
+        }
+        // SAFETY: The kernel returns this mapping only to the controller that
+        // holds the display capability. It covers stride * height writable,
+        // NX GOP pixels for the lifetime of this resident process.
+        Some(unsafe { core::slice::from_raw_parts_mut(self.address as *mut u32, length) })
+    }
+}
+
+const POINTER_BACKING_WIDTH: usize = 18;
+const POINTER_BACKING_HEIGHT: usize = 20;
+
+struct PointerBacking {
+    pixels: [u32; POINTER_BACKING_WIDTH * POINTER_BACKING_HEIGHT],
+    x: usize,
+    y: usize,
+    width: usize,
+    height: usize,
+    valid: bool,
+}
+
+impl PointerBacking {
+    const fn new() -> Self {
+        Self {
+            pixels: [0; POINTER_BACKING_WIDTH * POINTER_BACKING_HEIGHT],
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 0,
+            valid: false,
+        }
+    }
 }
 const COMMAND_STATUS: u16 = 1;
 const COMMAND_COMPONENTS: u16 = 2;
@@ -486,6 +552,7 @@ _start:
 
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo<'_>) -> ! {
+    write(LINUX_STDOUT, b"ginux: controller panic\r\n");
     exit(NATIVE_SERVICE_EXIT_REJECTED)
 }
 
@@ -513,9 +580,15 @@ extern "C" fn ginux_controller_main() -> ! {
         exit(NATIVE_SERVICE_EXIT_REJECTED);
     }
     let mut line = [0_u8; MAX_LINE];
-
+    let mut desktop = DesktopState {
+        shell: ginux_controller_ui::ShellState::new(),
+        view: collect_system_view(host),
+        surface: DisplaySurface::empty(),
+        pointer_backing: PointerBacking::new(),
+    };
     write(console, b"\r\nGinux controller v0 (ring 3)\r\n");
     write(console, b"Type 'help' for commands.\r\n");
+    render_controller_desktop(GINUX_DISPLAY_FD, &mut desktop, false);
     if !linux_sysinfo_contract(console) {
         exit(NATIVE_SERVICE_EXIT_REJECTED);
     }
@@ -554,10 +627,19 @@ extern "C" fn ginux_controller_main() -> ! {
         set_dhcp_network(console, network);
     }
     loop {
-        write(console, b"ginux> ");
         let mut background = NativeDomainRequestV3::zeroed();
         let _ = domain_call(host, NATIVE_DOMAIN_POLL_BACKGROUND, &mut background);
-        let length = read_line(console, &mut line);
+        desktop.view = collect_system_view(host);
+        render_controller_desktop(GINUX_DISPLAY_FD, &mut desktop, false);
+        write(console, b"ginux> ");
+        let length = read_line(
+            console,
+            host,
+            GINUX_DISPLAY_FD,
+            GINUX_INPUT_FD,
+            &mut desktop,
+            &mut line,
+        );
         let Some(command) = line.get(..length) else {
             exit(NATIVE_SERVICE_EXIT_REJECTED);
         };
@@ -644,45 +726,312 @@ extern "C" fn ginux_controller_main() -> ! {
     }
 }
 
-fn read_line(console: u64, line: &mut [u8; MAX_LINE]) -> usize {
+fn read_line(
+    console: u64,
+    host: u64,
+    display: u64,
+    input: u64,
+    desktop: &mut DesktopState,
+    line: &mut [u8; MAX_LINE],
+) -> usize {
     let mut length = 0;
+    let mut refresh_at = monotonic_millis().saturating_add(250);
+    let mut shift = false;
     loop {
-        let byte = read_console_byte(console);
-        match byte {
-            b'\r' | b'\n' => {
+        let old_pointer = (desktop.shell.pointer_x, desktop.shell.pointer_y);
+        let mut keys = [0_u8; 16];
+        let (pointer_changed, content_changed, key_count) =
+            drain_controller_input(input, &mut desktop.shell, &mut shift, &mut keys);
+        let mut redraw = pointer_changed || content_changed;
+        if let Some(action) = desktop.shell.take_power_action() {
+            let operation = match action {
+                ginux_controller_ui::PowerAction::Reboot => NATIVE_DOMAIN_HOST_REBOOT,
+                ginux_controller_ui::PowerAction::Shutdown => NATIVE_DOMAIN_HOST_SHUTDOWN,
+            };
+            if call(NATIVE_DOMAIN_CONTROL_OPERATION, host, operation, 0) == NATIVE_CALL_FAILED {
+                exit(NATIVE_SERVICE_EXIT_REJECTED);
+            }
+            exit(NATIVE_SERVICE_EXIT_COMPLETED);
+        }
+        for byte in keys[..key_count].iter().copied() {
+            if handle_line_byte(console, byte, line, &mut length) {
                 write(console, b"\r\n");
                 return length;
             }
-            b'\t' => {
-                let (input, output) = line.split_at_mut(length);
-                let added = complete(&ROOT_COMMAND, input, output);
-                if added != 0 {
-                    write(console, &line[length..length + added]);
-                    length += added;
+        }
+        if let Some(byte) = try_read_console_byte() {
+            if handle_line_byte(console, byte, line, &mut length) {
+                write(console, b"\r\n");
+                return length;
+            }
+        }
+        let now = monotonic_millis();
+        if now >= refresh_at {
+            let refreshed = collect_system_view(host);
+            if refreshed != desktop.view {
+                desktop.view = refreshed;
+                redraw = true;
+            }
+            refresh_at = now.saturating_add(250);
+        }
+        if redraw {
+            let pointer_only = pointer_changed && !content_changed && key_count == 0;
+            let _ = old_pointer;
+            render_controller_desktop(display, desktop, pointer_only);
+        } else {
+            let _ = linux_syscall(LINUX_SCHED_YIELD_SYSCALL, 0, 0, 0);
+        }
+    }
+}
+
+fn handle_line_byte(console: u64, byte: u8, line: &mut [u8; MAX_LINE], length: &mut usize) -> bool {
+    match byte {
+        b'\r' | b'\n' => return true,
+        b'\t' => {
+            let (input, output) = line.split_at_mut(*length);
+            let added = complete(&ROOT_COMMAND, input, output);
+            if added != 0 {
+                write(console, &line[*length..*length + added]);
+                *length += added;
+            }
+        }
+        0x08 | 0x7f if *length != 0 => {
+            *length -= 1;
+            write(console, b"\x08 \x08");
+        }
+        byte @ 0x20..=0x7e if *length < line.len() => {
+            line[*length] = byte;
+            *length += 1;
+            write(console, &[byte]);
+        }
+        _ => {}
+    }
+    false
+}
+
+fn drain_controller_input(
+    input: u64,
+    shell: &mut ginux_controller_ui::ShellState,
+    shift: &mut bool,
+    keys: &mut [u8],
+) -> (bool, bool, usize) {
+    let mut pointer_changed = false;
+    let mut content_changed = false;
+    let mut key_count = 0;
+    loop {
+        let mut event = NativeInputEventV0::EMPTY;
+        let result = call(
+            NATIVE_INPUT_OPERATION,
+            input,
+            (&mut event as *mut NativeInputEventV0) as u64,
+            u64::from(NATIVE_INPUT_READ),
+        );
+        if result != u64::from(NativeInputEventV0::SIZE) {
+            return (pointer_changed, content_changed, key_count);
+        }
+        match event.kind {
+            NATIVE_INPUT_KIND_POINTER_MOTION => {
+                pointer_changed |=
+                    shell.pointer_motion((event.code & 0xffff) as u16, (event.code >> 16) as u16);
+            }
+            NATIVE_INPUT_KIND_POINTER_BUTTON => {
+                content_changed |= shell.pointer_buttons(event.code as u8, event.value as u8);
+            }
+            NATIVE_INPUT_KIND_KEY => {
+                let code = event.code as u8;
+                if matches!(code, 0x2a | 0x36) {
+                    *shift = event.value != 0;
+                } else if event.value != 0 && key_count < keys.len() {
+                    if let Some(byte) = set1_ascii(code, *shift) {
+                        keys[key_count] = byte;
+                        key_count += 1;
+                    }
                 }
-            }
-            0x08 | 0x7f if length != 0 => {
-                length -= 1;
-                write(console, b"\x08 \x08");
-            }
-            byte @ 0x20..=0x7e if length < line.len() => {
-                line[length] = byte;
-                length += 1;
-                write(console, &[byte]);
             }
             _ => {}
         }
     }
 }
 
-fn read_console_byte(console: u64) -> u8 {
-    const RETRY_LIMIT: usize = 3;
-    for _ in 0..RETRY_LIMIT {
-        if let Ok(byte) = u8::try_from(call(NATIVE_CONSOLE_READ_BYTE_OPERATION, console, 0, 0)) {
-            return byte;
+fn set1_ascii(code: u8, shift: bool) -> Option<u8> {
+    let plain = match code {
+        0x02..=0x0a => b'1' + code - 0x02,
+        0x0b => b'0',
+        0x0c => b'-',
+        0x0e => 0x08,
+        0x0f => b'\t',
+        0x10 => b'q',
+        0x11 => b'w',
+        0x12 => b'e',
+        0x13 => b'r',
+        0x14 => b't',
+        0x15 => b'y',
+        0x16 => b'u',
+        0x17 => b'i',
+        0x18 => b'o',
+        0x19 => b'p',
+        0x1c => b'\n',
+        0x1e => b'a',
+        0x1f => b's',
+        0x20 => b'd',
+        0x21 => b'f',
+        0x22 => b'g',
+        0x23 => b'h',
+        0x24 => b'j',
+        0x25 => b'k',
+        0x26 => b'l',
+        0x2c => b'z',
+        0x2d => b'x',
+        0x2e => b'c',
+        0x2f => b'v',
+        0x30 => b'b',
+        0x31 => b'n',
+        0x32 => b'm',
+        0x39 => b' ',
+        _ => return None,
+    };
+    Some(if shift && plain.is_ascii_lowercase() {
+        plain.to_ascii_uppercase()
+    } else {
+        plain
+    })
+}
+
+fn try_read_console_byte() -> Option<u8> {
+    let mut byte = 0_u8;
+    (linux_syscall(
+        LINUX_READ_SYSCALL,
+        LINUX_STDIN,
+        (&mut byte as *mut u8) as u64,
+        1,
+    ) == 1)
+        .then_some(byte)
+}
+
+fn monotonic_millis() -> u64 {
+    let mut time = [0_u64; 2];
+    if linux_syscall(LINUX_CLOCK_GETTIME_SYSCALL, 1, time.as_mut_ptr() as u64, 0) != 0 {
+        return 0;
+    }
+    time[0]
+        .saturating_mul(1_000)
+        .saturating_add(time[1] / 1_000_000)
+}
+
+fn render_controller_desktop(display: u64, desktop: &mut DesktopState, pointer_only: bool) {
+    if desktop.surface.address == 0 {
+        let mut request = NativeDisplayRequestV0 {
+            size: NativeDisplayRequestV0::SIZE,
+            version: 0,
+            command: NATIVE_DISPLAY_QUERY,
+            x: 0,
+            y: 0,
+            color: 0,
+            width: 0,
+            height: 0,
+            stride: 0,
+            format: 0,
+            reserved: 0,
+        };
+        if call(
+            NATIVE_DISPLAY_OPERATION,
+            display,
+            (&mut request as *mut NativeDisplayRequestV0) as u64,
+            0,
+        ) != u64::from(NativeDisplayRequestV0::SIZE)
+            || request.format != 1
+            || request.width as usize != ginux_controller_ui::SHELL_WIDTH
+            || request.height as usize != ginux_controller_ui::SHELL_HEIGHT
+            || request.stride < request.width
+        {
+            exit(NATIVE_SERVICE_EXIT_REJECTED);
+        }
+        request.command = NATIVE_DISPLAY_MAP;
+        let address = call(
+            NATIVE_DISPLAY_OPERATION,
+            display,
+            (&mut request as *mut NativeDisplayRequestV0) as u64,
+            0,
+        );
+        if address == NATIVE_CALL_FAILED || address == 0 {
+            exit(NATIVE_SERVICE_EXIT_REJECTED);
+        }
+        desktop.surface = DisplaySurface {
+            address,
+            width: request.width as usize,
+            height: request.height as usize,
+            stride: request.stride as usize,
+        };
+    }
+    let stride = desktop.surface.stride;
+    let width = desktop.surface.width;
+    let height = desktop.surface.height;
+    let Some(pixels) = desktop.surface.pixels() else {
+        exit(NATIVE_SERVICE_EXIT_REJECTED);
+    };
+    if pointer_only && desktop.pointer_backing.valid {
+        restore_pointer_backing(pixels, stride, &mut desktop.pointer_backing);
+    } else {
+        let mut backend = ginux_controller_ui::ModelBackend::new();
+        let app = ginux_controller_ui::Application::new(&mut backend);
+        if app
+            .render_shell_view_without_pointer(pixels, stride, &desktop.shell, &desktop.view)
+            .is_err()
+        {
+            exit(NATIVE_SERVICE_EXIT_REJECTED);
         }
     }
-    exit(NATIVE_SERVICE_EXIT_REJECTED)
+    capture_pointer_backing(
+        pixels,
+        stride,
+        width,
+        height,
+        desktop.shell.pointer_x,
+        desktop.shell.pointer_y,
+        &mut desktop.pointer_backing,
+    );
+    if ginux_controller_ui::paint_shell_pointer(
+        pixels,
+        stride,
+        desktop.shell.pointer_x,
+        desktop.shell.pointer_y,
+    )
+    .is_err()
+    {
+        exit(NATIVE_SERVICE_EXIT_REJECTED);
+    }
+}
+
+fn restore_pointer_backing(pixels: &mut [u32], stride: usize, backing: &mut PointerBacking) {
+    for row in 0..backing.height {
+        let source = row * POINTER_BACKING_WIDTH;
+        let target = (backing.y + row) * stride + backing.x;
+        pixels[target..target + backing.width]
+            .copy_from_slice(&backing.pixels[source..source + backing.width]);
+    }
+    backing.valid = false;
+}
+
+fn capture_pointer_backing(
+    pixels: &[u32],
+    stride: usize,
+    width: usize,
+    height: usize,
+    x: u16,
+    y: u16,
+    backing: &mut PointerBacking,
+) {
+    backing.x = usize::from(x).min(width.saturating_sub(1));
+    backing.y = usize::from(y).min(height.saturating_sub(1));
+    backing.width = POINTER_BACKING_WIDTH.min(width - backing.x);
+    backing.height = POINTER_BACKING_HEIGHT.min(height - backing.y);
+    for row in 0..backing.height {
+        let source = (backing.y + row) * stride + backing.x;
+        let target = row * POINTER_BACKING_WIDTH;
+        backing.pixels[target..target + backing.width]
+            .copy_from_slice(&pixels[source..source + backing.width]);
+    }
+    backing.valid = true;
 }
 
 fn test_linux_userspace(console: u64, host: u64, arguments: Arguments<'_>) {
@@ -1730,6 +2079,96 @@ fn next_domain(host: u64, cursor: u64) -> Option<(u64, NativeDomainRequestV3)> {
     (state != 0 && state != NATIVE_CALL_FAILED).then_some((state, request))
 }
 
+fn collect_system_view(host: u64) -> ginux_controller_ui::SystemView {
+    let mut view = ginux_controller_ui::SystemView::empty();
+    let mut information = [0_u8; 112];
+    if linux_syscall(LINUX_SYSINFO_SYSCALL, information.as_mut_ptr() as u64, 0, 0) == 0 {
+        let total = u64::from_ne_bytes(information[32..40].try_into().unwrap());
+        let free = u64::from_ne_bytes(information[40..48].try_into().unwrap());
+        let unit = u64::from(u32::from_ne_bytes(
+            information[104..108].try_into().unwrap(),
+        ));
+        view.memory_total_mib = total
+            .saturating_mul(unit)
+            .checked_div(1024 * 1024)
+            .unwrap_or(0)
+            .min(u64::from(u32::MAX)) as u32;
+        view.memory_used_mib = total
+            .saturating_sub(free)
+            .saturating_mul(unit)
+            .checked_div(1024 * 1024)
+            .unwrap_or(0)
+            .min(u64::from(u32::MAX)) as u32;
+        view.healthy = total != 0 && free <= total && unit != 0;
+    }
+    let mut realtime = [0_u64; 2];
+    if linux_syscall(
+        LINUX_CLOCK_GETTIME_SYSCALL,
+        0,
+        realtime.as_mut_ptr() as u64,
+        0,
+    ) == 0
+    {
+        let seconds = realtime[0] % 86_400;
+        view.hour = (seconds / 3_600) as u8;
+        view.minute = (seconds % 3_600 / 60) as u8;
+    }
+    let mut cursor = 0;
+    for _ in 0..NATIVE_DOMAIN_LIMIT {
+        let Some((state, request)) = next_domain(host, cursor) else {
+            break;
+        };
+        let slot = usize::from(
+            view.domain_count
+                .min(ginux_controller_ui::MAX_DOMAINS as u8),
+        );
+        view.domain_count = view.domain_count.saturating_add(1);
+        if state == NATIVE_DOMAIN_STATE_RUNNING {
+            view.running_count = view.running_count.saturating_add(1);
+        }
+        if request.config_flags & NATIVE_DOMAIN_CONFIG_CPU != 0 {
+            view.cpu_allocated = view.cpu_allocated.saturating_add(request.cpu_count);
+        }
+        if slot < ginux_controller_ui::MAX_DOMAINS {
+            let name_len = usize::from(request.name_size).min(NATIVE_DOMAIN_MAX_NAME_SIZE);
+            let mut domain = ginux_controller_ui::DomainView::EMPTY;
+            domain.name[..name_len].copy_from_slice(&request.name[..name_len]);
+            domain.name_len = name_len as u8;
+            domain.state = controller_domain_state(state);
+            domain.cpu = if request.config_flags & NATIVE_DOMAIN_CONFIG_CPU != 0 {
+                request.cpu_count
+            } else {
+                0
+            };
+            domain.memory_mib = if request.config_flags & NATIVE_DOMAIN_CONFIG_MEMORY != 0 {
+                request.memory_mib.min(u64::from(u32::MAX)) as u32
+            } else {
+                0
+            };
+            view.domains[slot] = domain;
+        }
+        if request.value == NATIVE_DOMAIN_CURSOR_END || request.value <= cursor {
+            break;
+        }
+        cursor = request.value;
+    }
+    view
+}
+
+fn controller_domain_state(state: u64) -> ginux_controller_ui::DomainState {
+    match state {
+        NATIVE_DOMAIN_STATE_RUNNING => ginux_controller_ui::DomainState::Running,
+        NATIVE_DOMAIN_STATE_STOPPED => ginux_controller_ui::DomainState::Stopped,
+        NATIVE_DOMAIN_STATE_FAILED => ginux_controller_ui::DomainState::Failed,
+        NATIVE_DOMAIN_STATE_CREATED => ginux_controller_ui::DomainState::Created,
+        NATIVE_DOMAIN_STATE_CONFIGURED => ginux_controller_ui::DomainState::Configured,
+        NATIVE_DOMAIN_STATE_STARTING | NATIVE_DOMAIN_STATE_BOOTING => {
+            ginux_controller_ui::DomainState::Starting
+        }
+        _ => ginux_controller_ui::DomainState::Empty,
+    }
+}
+
 fn append_domain_configuration(row: &mut OutputLine, host: u64, request: &NativeDomainRequestV3) {
     let configured = |flag| request.config_flags & flag != 0;
     if configured(NATIVE_DOMAIN_CONFIG_PERSONALITY) {
@@ -2553,20 +2992,6 @@ fn read_u64(bytes: &[u8], offset: usize) -> u64 {
 }
 
 fn call(number: u64, capability: u64, first: u64, second: u64) -> u64 {
-    if number == NATIVE_CONSOLE_READ_BYTE_OPERATION {
-        let mut byte = 0_u8;
-        return if linux_syscall(
-            LINUX_READ_SYSCALL,
-            LINUX_STDIN,
-            (&mut byte as *mut u8) as u64,
-            1,
-        ) == 1
-        {
-            u64::from(byte)
-        } else {
-            NATIVE_CALL_FAILED
-        };
-    }
     let request = GinuxControlIoctlV0::new(number, first, second);
     linux_syscall(
         LINUX_IOCTL_SYSCALL,

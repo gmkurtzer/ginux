@@ -50,7 +50,9 @@ native-call budget.
 
 `test linux all` emits one table with `NAME/IDENTIFIER`, `TYPE`, `ID`, and
 `RESULT` columns. The current profile reports 17 passing, 5 failing, and 1
-policy-exempt interface. The syscall ledger reports 82 passing, 245 failing,
-and 48 policy-exempt calls. The QEMU controller test executes the full report,
-checks representative entries from every outcome, verifies continued
-controller PID 1, and shuts down without a panic.
+policy-exempt interface. The syscall ledger reports 53 passing, 274 failing,
+and 48 policy-exempt calls. The 274 failures include 257 partially implemented
+calls and 17 calls whose documented Linux-compatible result is `ENOSYS`. The
+QEMU controller test executes the full report, checks representative entries
+from every outcome, verifies continued controller PID 1, and shuts down without
+a panic.

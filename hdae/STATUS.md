@@ -2,100 +2,79 @@
 
 ## Recovery checkpoint
 
-- Active skill: `.agents/skills/hdae-development/SKILL.md`
-- Reload required after compaction, reset, resume, or handoff: yes
-- Active project: remaining reporter remediation batch
-- Branch: `hdae/issue-43-release-overflow`
-- Baseline tag: `research-v1-baseline`
-- Active gate: none; Gate 44 closed under delegated completion
-- Last completed action: regenerated PR #54's checked-release EFI source from
-  the merged inputs; fresh `make check` and complete `make test` passed
-- Next action: commit and push the synchronized exact head, require green PR CI,
-  then merge PR #54 and close issue #43 with its final evidence
+- Active skill: `hdae-development`
+- Skill path: `.agents/skills/hdae-development/SKILL.md`
+- Reload after context shift: required
+- Active project: native controller desktop
+- Branch: `codex/controller-desktop`
+- Intended base: current `main`; integration merge with `7fdc880e` is in progress
+- Active gate: none in the controller-desktop batch; Gate 31 is closed
+- Status: Gates 19–31 are complete; Gate 31 passed all objective criteria and
+  received final human visual and interaction acceptance on 2026-11-01
+- Last evidence: the first compact-font checkpoint was rejected by human review
+  because the sidebar, rows, cards, and labels still retained oversized 1080p
+  proportions. The resulting full-density revision passed
+  `make test-controller-desktop-latency` on 2026-11-01 with exact 1024 by 768
+  Overview, Settings, live-domain, and power-menu frames; 13-pixel body text;
+  restrained 16-pixel headings; pointer/click navigation; 20.972 ms
+  visible-frame p95; 21.238 ms maximum; and an 18.661 ms complete page change.
+  The complete desktop suite, including 2-vCPU and 4-vCPU recovery stress,
+  passed. The release host model passed at 835 us input-to-frame p95, 863 us
+  steady-frame p95, and a bounded 3,175,728-byte working set. `make check`
+  passed. A follow-up power-control refinement replaced the block glyph with a
+  bounded antialiased button; its real-QEMU menu test passed at 20.844 ms p95,
+  20.973 ms maximum, and 20.485 ms for a complete page change.
+- Current-main integration evidence: merged `main` at `7fdc880e`, preserved the
+  timestamp ABI at operation 39, reassigned the branch-local display/input
+  operations to 40/41, and corrected native-network layout detection to use the
+  current 161-page image contract. `make check` and `make test` pass. The
+  consolidated controller-desktop suite passes its unit, QEMU, and 2/4-vCPU
+  recovery stages; the visible-frame test passes separately with 48.915 ms p95,
+  49.075 ms maximum, and an 18.286 ms page change after removing the
+  sandbox-only QEMU monitor-socket restriction. The release performance
+  qualification passes at 869 us input-to-frame p95, 504 us steady-frame p95,
+  and a bounded 3,175,728-byte modeled working set.
+- Open decisions or limitations: the accepted architecture remains a native
+  ring-3 controller shell with software rendering and an independent serial
+  recovery CLI; unrelated open Gates 13–18 remain outside this completed batch
+- Exact next action: commit and push the validated integration merge to pull
+  request #39, then wait for exact-head CI and a later review pass before merge
 
-## Current repository state
+## Governing outcome
 
-Remote `main` is at `b4628fc2`. The first
-eleven feedback-hardening gates and inserted correctness gates are complete.
-Gate 12 is complete on `codex/performance-parity`. Gates 13 through 19 and 21
-through 23 and Gates 32 through 33 remain in `gates-todo/` for maintainer review
-after delivery through merged pull requests. PR #52 is merged and issue #20 is
-closed. PR #53 is synchronized with current `main`, but its mandatory Rocky
-rootfs integration remains blocked before image download by registry DNS. Gate
-44 is closed in `gates-done/`; PR #54 is being synchronized and revalidated.
-The ordinary QEMU path defaults to two vCPUs; the complete one/two/four-vCPU
-matrix and repeated stress pass. Gate 11's comparison and reduced evidence are
-under `docs/feedback-hardening/`. No push or merge was performed.
+Ginux owns the physical display/input seat and presents a native ring-3
+controller desktop. Native applications use a Ginux protocol; Linux domains run
+their own Wayland environment and export one desktop surface that can be
+windowed or full screen. The CLI remains the recovery path.
 
-## Open decisions
+## Confirmed review policy
 
-- None. Issue #43 is confirmed and the user authorized merge and closure after
-  the synchronized head passes its complete evidence and GitHub CI.
+- Gate 19: accepted by the human on 2026-10-31
+- Gate 20: passed and closed under delegated review on 2026-10-31
+- Gate 21: passed and closed under delegated review on 2026-10-31
+- Gate 22: passed and closed under delegated review on 2026-10-31
+- Gate 23: passed and closed under delegated review on 2026-10-31
+- Gate 24: passed and closed under delegated review on 2026-10-31
+- Gate 25: passed and closed under delegated review on 2026-10-31
+- Gate 26: passed and closed under delegated review on 2026-10-31
+- Gate 27: passed and closed under delegated review on 2026-10-31
+- Gate 28: passed and closed under delegated review on 2026-10-31
+- Gate 29: passed and closed under delegated review on 2026-10-31
+- Gate 30: passed and closed under delegated review on 2026-10-31 after visible
+  QEMU framebuffer, keyboard, pointer, performance, and regression evidence
+- Gate 31: all objective criteria passed again on 2026-11-01 after human
+  correction of the requested display size from 1920 by 1080 to the standard
+  1024 by 768 mode. A subsequent human review requested denser typography and
+  spacing at that resolution, then rejected the first font-only refinement as
+  materially unchanged. The resulting full-density redesign and refined power
+  control passed the complete objective suite and received final human visual
+  and interaction acceptance on 2026-11-01. Gate 31 is closed.
+- Gates 20–30: delegated closure after complete objective evidence; continue
+  without another planned checkpoint and stop only for a genuine clarification,
+  failed dependency, or material scope/architecture change
 
-## Active diagnosis
+## Repository notes
 
-- Four-vCPU runtime work now dispatches independently to CPUs 1 through 3.
-  A targeted nine-sample four-thread run produced a 2,924 events/s median,
-  versus the matched Linux baseline of 1,254 events/s. The prior baseline was
-  0.014x Linux.
-- Coordinated fast futex waits and arbitrary-count wakes preserve an atomic
-  wait-publication/wake boundary. Armed interval timers no longer disable safe
-  fast syscalls before a signal is actually pending.
-- Profiling found that glibc issued about 699,000 valid
-  `FUTEX_WAIT_BITSET|FUTEX_CLOCK_REALTIME` calls during a four-thread memory
-  sample. Ginux had returned `EINVAL` for every call. Full bitset operation,
-  mask, and absolute-timeout handling now preserves Linux semantics; the
-  coordinator uses Linux-permitted spurious wakeups while remote workers run.
-- A focused three-sample four-vCPU run produced medians of 2,540 MiB/s for
-  memory and 1.061 seconds for mutex, versus matched Linux medians of 2,496
-  MiB/s and 1.096 seconds. Thread yield remained above the Linux baseline.
-- The final exact-code matrix contains nine matched samples per cell. Every
-  cell reaches at least `0.970x`; eighteen of twenty unique cells beat Linux.
-  Fixed 2-vCPU CPU throughput is `0.982x`, and scaled 4-vCPU mutex is `0.970x`.
-- `make check`, `make architecture-check`, `make test-smp`, `make
-  test-rocky-smp-futex`, `make test-rocky-smp-shared-page`, and `make
-  test-rocky-smp-thread-context` pass.
-
-## Prior correctness diagnosis
-
-- Fault diagnostics proved the saved thread slot retained the valid shared
-  counter in `r11`, while a syscall-based switch resumed it with RFLAGS in
-  `r11`. The SYSRET epilogue was correct for an ordinary syscall but incorrect
-  for a target asynchronously saved by an interrupt.
-- Scheduler-backed cross-thread syscall switches now use the exact-register
-  IRET epilogue; ordinary same-thread syscalls retain SYSRET.
-- `make check`, `make test-smp`, `make test-rocky-smp-futex`, `make
-  test-rocky-smp-shared-page`, and `make test-rocky-smp-thread-context` passed.
-  The last command completed nine samples at each of 2 and 4 vCPUs. No tested
-  volume owner remained.
-- The exact original 4-vCPU/4-thread `cpu memory threads` sequence passed three
-  batches and 27 total workload markers, including the formerly failing second
-  batch.
-- The full matched topology matrix then completed. Every sysbench cell contains
-  nine Linux and nine Ginux samples with the same binary hash; every boot cell
-  contains three samples. Four-thread Ginux scheduling remains a measured
-  performance limitation rather than a correctness failure.
-
-## Limitations
-
-- The floating upstream Alpine integration image currently stalls at Linux
-  user entry on both Gate 5 and pre-Gate-5 commits. Deterministic Linux ABI and
-  verification-boot suites pass; external Alpine compatibility is separate
-  follow-up work.
-- A Gate 7 user-access module extraction passed static and unit checks but
-  failed deterministic QEMU twice and was reverted. Its assembly and Rust
-  wrappers remain co-located with exception entry until emitted-code behavior
-  can be compared without weakening the gate.
-
-## Durable evidence
-
-The detailed rationale is in
-[`docs/FEEDBACK-HARDENING-RESEARCH.md`](../docs/FEEDBACK-HARDENING-RESEARCH.md).
-Gate 1 evidence is in
-[`docs/feedback-hardening/GATE-1-BASELINE.md`](../docs/feedback-hardening/GATE-1-BASELINE.md).
-The authoritative execution state and gate outcomes are the files under this
-`hdae/` directory.
-Gate 10 evidence and final limits are in
-[`docs/feedback-hardening/GATE-10-QUALIFICATION.md`](../docs/feedback-hardening/GATE-10-QUALIFICATION.md).
-Gate 11 evidence and final limits are in
-[`docs/feedback-hardening/GATE-11-TOPOLOGY-BENCHMARKS.md`](../docs/feedback-hardening/GATE-11-TOPOLOGY-BENCHMARKS.md).
+Gates 1–12 and their inserted sub-gates remain locked historical records.
+Unrelated open Gates 13–18 are preserved unchanged; this approved batch begins
+at the next available integer and does not claim their completion.
