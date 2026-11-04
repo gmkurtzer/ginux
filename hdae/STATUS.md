@@ -222,6 +222,9 @@ scope, threat model, and invariants.
 - Human direction on 2026-11-04 selected Ginux as the final project and
   repository name because the full kernel project is pivoting to this
   userspace-kernel architecture. The local checkout directory must not move.
+- Gate 7.75 active surfaces and demonstrations now use Ginux. `make check`,
+  `make test`, `make test-native-vfs`, and `make demo-gate-7` passed; the
+  demonstration again passed all nine process-runtime checks.
 
 ## Open decisions and limitations
 
@@ -258,9 +261,9 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Finish stale-name migration, rerun the full offline suite and Gate 7
-demonstration, deliver the dedicated branch and PR, rename GitHub to
-`gmkurtzer/ginux`, and stop for human review.
+Commit and push the evidence checkpoint, open the Gate 7.75 pull request, rename
+GitHub and origin to `gmkurtzer/ginux`, verify PR history and the unchanged
+local directory, and stop for human review.
 
 ## Context recovery
 
@@ -270,7 +273,7 @@ demonstration, deliver the dedicated branch and PR, rename GitHub to
 - Active gate: Gate 7.75, Ginux final project rename, authorized and started on
   dedicated branch `hdae/ginux-rename`; Gate 7 remains technically passed
   and awaits repeated post-rename evidence and human review
-- Last evidence: `make check`, `make test`, `make test-native-vfs`, and
-  `make demo-gate-7` passed on 2026-11-04
+- Last evidence: Gate 7.75 `make check`, `make test`,
+  `make test-native-vfs`, and `make demo-gate-7` passed on 2026-11-04
 - Required human decision: none until the Gate 7 demonstration checkpoint; the
   Gate 9 DNF repository choice is deferred until before Gate 9 implementation
