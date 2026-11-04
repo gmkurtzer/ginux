@@ -9,14 +9,14 @@
 - Branch: `hdae/issue-69-reconnect-guard`
 - Intended base: `main` at `fe48e646`
 - Active gate: Gate 47, TCP reconnect guard for issue #69
-- Status: implementation and complete deterministic validation pass; delivery
-  is pending
+- Status: implementation and complete deterministic validation pass; PR #101
+  is open and awaiting exact-head CI plus its first scheduled review marker
 - Last evidence: `make check` and complete `make test` pass with a new required
   reconnect-guard marker and `Boot test passed`
 - Open decisions or limitations: none; UDP and network-connect-in-progress
   semantics remain unchanged by scope
-- Exact next action: create signed commits, push the dedicated branch, open the
-  issue-linked PR, and record its stable URL in Gate 47 and issue #69
+- Exact next action: validate PR #101 at its exact head after CI, post the
+  first-pass marker, and retain it for the subsequent hourly merge pass
 
 ## Governing outcome
 

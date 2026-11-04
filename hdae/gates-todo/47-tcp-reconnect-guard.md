@@ -33,7 +33,7 @@ can enqueue a duplicate accept or repoint the peer.
 - [x] Implement the fail-before-mutation reconnect guard and Linux `EISCONN`.
 - [x] Add deterministic regression evidence.
 - [x] Run `make check` and `make test`.
-- [ ] Push a dedicated branch and open an issue-linked pull request.
+- [x] Push a dedicated branch and open an issue-linked pull request.
 
 ## Acceptance criteria
 
@@ -71,11 +71,13 @@ can enqueue a duplicate accept or repoint the peer.
 
 - Working branch: `hdae/issue-69-reconnect-guard`
 - Intended base: `main`
-- Pull request: intended, dedicated to issue #69
+- Pull request: [#101](https://github.com/gmkurtzer/ginux/pull/101), dedicated
+  to and closing issue #69 after merge
 - Planned commits: gate, implementation, and regression; validation and
   delivery checkpoint
 - Actual commits: `9f96395e` (gate, reconnect guard, Linux errno mapping,
-  regression, and initial evidence); delivery checkpoint pending
+  regression, and initial evidence); `772e5ac2` (validation checkpoint);
+  delivery record pending
 
 ## Review policy and outcome
 
