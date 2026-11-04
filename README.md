@@ -10,9 +10,9 @@
 > Ginux is pivoting from a standalone operating-system kernel to a userspace
 > kernel. Standalone-kernel development is frozen except for resolving pull
 > requests and issues that were already open by the cutoff. The standalone
-> kernel accomplished the research objective it was created to test. Anyone
-> who wants to continue developing it is welcome to fork the repository and
-> keep going; this upstream project will not continue that direction.
+> kernel accomplished the research objective it was created to test, and this
+> upstream project will not continue that direction. The code remains open
+> source and available to fork under its existing license.
 
 ## Project transition
 
@@ -66,13 +66,18 @@ or mediate it, replace its visible behavior, or deny it before the request
 reaches the host kernel. New contract versions may intentionally narrow or
 change behavior that native Linux preserves.
 
-In other words, Linux promises not to break its userspace; Ginux Userspace can
-intentionally define a different virtual userspace while making each departure
-from the underlying interface visible and reviewable. The intended result is a
-small shim with selectable compatibility, security, and performance policies,
-not an implicit or universal claim of Linux equivalence. Linux compatibility is
-the initial practical target, not the architectural definition of every future
-contract.
+Put bluntly: **Linux must not break userspace; Ginux Userspace is designed to
+break that full-ABI guarantee deliberately and selectively.** A domain should
+receive only the capabilities and interface behavior required for its approved
+workload to run. Everything else may be absent, denied, mediated, or replaced
+with virtual behavior. This is controlled contract definition rather than
+accidental incompatibility: every departure must be explicit, versioned,
+reviewable, and tested.
+
+The intended result is a small shim with selectable compatibility, security,
+and performance policies, not an implicit or universal claim of Linux
+equivalence. Linux compatibility is the initial practical target, not the
+architectural definition of every future contract.
 
 The intended differentiators are:
 
@@ -112,11 +117,12 @@ The standalone-kernel phase is therefore ending. During this transition:
 - links to that release and branch will be added here when the transition is
   complete.
 
-The standalone kernel will remain public and available to study, build, and
-fork. Anyone interested in continuing its development should fork it and keep
-going; more power to them. Please let us know about an active fork so that it
-can be linked from this README and made discoverable to others interested in
-that direction.
+The standalone kernel will remain public and available to study and build. As
+with any open-source project, anyone who independently chooses to continue it
+may fork the repository under its existing license. If a maintained fork does
+emerge, please let us know; it may be linked here as a continuation of the
+historical codebase, not as an endorsement of replacing or competing with
+Linux.
 
 ### The new direction: Ginux Userspace
 
