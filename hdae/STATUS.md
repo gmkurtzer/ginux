@@ -8,24 +8,23 @@
 - Branch: `hdae/issue-27-transactional-rootfs-exec`
 - Baseline tag: `research-v1-baseline`
 - Active gate: Gate 41, transactional rootfs exec for issue #27
-- Last completed action: resolved the independent remediation work through
-  merged PRs #54, #61, and #81 and closed issues #43, #58, and #78; PR #53's
-  Rocky integration remains blocked before image download on registry DNS
-- Next action: keep PR #53 and issue #27 open pending a reachable registry or
-  populated cache; when available, synchronize with current `main`, rerun the
-  full evidence including `make test-rocky-shell`, and merge only if it passes
+- Last completed action: merged current `main` at `c8d12653` into PR #53's
+  branch; the only textual conflict was this active checkpoint
+- Next action: rerun `make check`, complete `make test`, and
+  `make test-rocky-shell`; merge only if the rootfs-specific integration runs
+  end to end and all evidence passes
 
 ## Current repository state
 
-Remote `main` is at `4c832ea6`. The first
+Remote `main` is at `c8d12653`. The first
 eleven feedback-hardening gates and inserted correctness gates are complete.
 Gate 12 is complete on `codex/performance-parity`. PR #52 is merged and issue
 #20 is closed. PRs #54, #61, and #81 are merged and issues #43, #58, and #78
 are closed. Gate 41 is implemented on PR #53; its last synchronized static and
 complete QEMU evidence pass, but rootfs-specific Rocky integration remains
-blocked before image download by registry DNS failure. Current `main` advanced
-after that evidence, so the branch must be synchronized again before any future
-merge decision.
+blocked before image download by registry DNS failure. The branch is now
+synchronized with current `main`, including the merged native controller
+desktop; fresh post-merge validation is pending.
 
 ## Open decisions
 

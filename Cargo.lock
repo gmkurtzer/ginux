@@ -415,7 +415,63 @@ name = "ginux-controller-runtime"
 version = "0.1.0"
 dependencies = [
  "ginux-command",
+ "ginux-controller-ui",
  "ginux-native-abi",
+]
+
+[[package]]
+name = "ginux-controller-ui"
+version = "0.1.0"
+dependencies = [
+ "ginux-native-abi",
+ "ginux-windowing",
+]
+
+[[package]]
+name = "ginux-desktop-qualification"
+version = "0.1.0"
+dependencies = [
+ "ginux-desktop-recovery",
+ "ginux-domain-presentation",
+]
+
+[[package]]
+name = "ginux-desktop-recovery"
+version = "0.1.0"
+dependencies = [
+ "ginux-display-protocol",
+ "ginux-domain-display",
+ "ginux-domain-presentation",
+ "ginux-wayland-domain",
+]
+
+[[package]]
+name = "ginux-display-protocol"
+version = "0.1.0"
+
+[[package]]
+name = "ginux-domain-display"
+version = "0.1.0"
+
+[[package]]
+name = "ginux-domain-presentation"
+version = "0.1.0"
+dependencies = [
+ "ginux-domain-display",
+]
+
+[[package]]
+name = "ginux-graphics-service-runtime"
+version = "0.1.0"
+dependencies = [
+ "ginux-controller-ui",
+ "ginux-desktop-recovery",
+ "ginux-display-protocol",
+ "ginux-domain-display",
+ "ginux-domain-presentation",
+ "ginux-native-abi",
+ "ginux-wayland-domain",
+ "ginux-windowing",
 ]
 
 [[package]]
@@ -533,6 +589,14 @@ dependencies = [
  "ginux-volume-format",
  "ginux-volume-service",
 ]
+
+[[package]]
+name = "ginux-wayland-domain"
+version = "0.1.0"
+
+[[package]]
+name = "ginux-windowing"
+version = "0.1.0"
 
 [[package]]
 name = "group"
