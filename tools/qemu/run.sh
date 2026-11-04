@@ -4,6 +4,10 @@ set -euo pipefail
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 
+if [[ -n "${GINUX_QEMU_PID_FILE:-}" ]]; then
+    printf '%s\n' "$$" >"$GINUX_QEMU_PID_FILE"
+fi
+
 qemu="$(find_qemu)"
 ovmf_code="$(find_ovmf_code)"
 ovmf_vars_template="$(find_ovmf_vars)"
@@ -44,10 +48,6 @@ fi
 
 echo "Booting x86-64 Ginux with QEMU/$accelerator using CPU $cpu_model"
 
-if [[ -n "${GINUX_QEMU_PID_FILE:-}" ]]; then
-    printf '%s\n' "$$" >"$GINUX_QEMU_PID_FILE"
-fi
-
 memory="${GINUX_MEMORY:-1G}"
 cpus="${GINUX_CPUS:-2}"
 case "$cpus" in
@@ -83,7 +83,7 @@ exec "$qemu" \
     -serial stdio \
     -no-reboot \
     -net none \
-    -device "intel-iommu,intremap=off" \
+    -device "intel-iommu,intremap=off,aw-bits=48" \
     -device "virtio-blk-pci,drive=ginux-volume,disable-legacy=on,iommu_platform=on,serial=ginux-volume" \
     -netdev "$qemu_netdev" \
     ${network_capture[@]+"${network_capture[@]}"} \

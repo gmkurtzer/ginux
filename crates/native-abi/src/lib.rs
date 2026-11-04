@@ -226,8 +226,8 @@ pub const NATIVE_PROGRESS_OPERATION: u64 = 36;
 pub const NATIVE_PROGRESS_MAX_SIZE: usize = 128;
 pub const NATIVE_CONSOLE_READ_BYTE_OPERATION: u64 = 37;
 pub const NATIVE_NETWORK_INVENTORY_OPERATION: u64 = 38;
-pub const NATIVE_DISPLAY_OPERATION: u64 = 39;
-pub const NATIVE_INPUT_OPERATION: u64 = 40;
+pub const NATIVE_DISPLAY_OPERATION: u64 = 40;
+pub const NATIVE_INPUT_OPERATION: u64 = 41;
 pub const NATIVE_DISPLAY_OBJECT: u64 = 11;
 pub const NATIVE_INPUT_OBJECT: u64 = 12;
 pub const NATIVE_DISPLAY_QUERY: u16 = 0;
@@ -301,6 +301,11 @@ pub const NATIVE_NETWORK_KIND_VIRTUAL: u16 = 2;
 pub const NATIVE_NETWORK_KIND_MASK: u16 = 0x00ff;
 pub const NATIVE_NETWORK_FLAG_UP: u16 = 0x0100;
 pub const NATIVE_NETWORK_MAX_NAME_SIZE: usize = 16;
+/// Returns the kernel-calibrated timestamp-counter frequency in hertz, so a
+/// native service can derive monotonic time from RDTSC without spending a
+/// call per reading.
+pub const NATIVE_TIMESTAMP_FREQUENCY_OPERATION: u64 = 39;
+pub const NATIVE_TIMESTAMP_FREQUENCY_UNAVAILABLE: u64 = u64::MAX - 2;
 pub const NATIVE_NETWORK_CURSOR_END: u64 = u64::MAX;
 
 #[repr(C)]
@@ -2417,8 +2422,8 @@ mod tests {
         assert!(header.contains("GINUX_NATIVE_NETWORK_DEVICE_QUERY_DHCP UINT64_C(16)"));
         assert!(header.contains("GINUX_NATIVE_NETWORK_DEVICE_SET_DNS UINT64_C(17)"));
         assert!(header.contains("GINUX_NATIVE_NETWORK_DEVICE_QUERY_DNS UINT64_C(18)"));
-        assert!(header.contains("GINUX_NATIVE_DISPLAY_OPERATION UINT64_C(39)"));
-        assert!(header.contains("GINUX_NATIVE_INPUT_OPERATION UINT64_C(40)"));
+        assert!(header.contains("GINUX_NATIVE_DISPLAY_OPERATION UINT64_C(40)"));
+        assert!(header.contains("GINUX_NATIVE_INPUT_OPERATION UINT64_C(41)"));
         assert!(header.contains("GINUX_NATIVE_NETWORK_DEVICE_QUERY_PING_TARGET UINT64_C(19)"));
         assert!(header.contains("GINUX_NATIVE_NETWORK_DEVICE_ACTIVATE_EMPTY_QUEUES UINT64_C(12)"));
         assert!(header
@@ -2448,6 +2453,9 @@ mod tests {
         assert!(header.contains("GINUX_NATIVE_NETWORK_INVENTORY_OPERATION UINT64_C(38)"));
         assert!(header.contains("GINUX_NATIVE_NETWORK_INVENTORY_SET_LINK UINT16_C(5)"));
         assert!(header.contains("GINUX_NATIVE_NETWORK_FLAG_UP UINT16_C(0x0100)"));
+        assert!(header.contains("GINUX_NATIVE_TIMESTAMP_FREQUENCY_OPERATION UINT64_C(39)"));
+        assert!(header
+            .contains("GINUX_NATIVE_TIMESTAMP_FREQUENCY_UNAVAILABLE (UINT64_MAX - UINT64_C(2))"));
         assert!(header.contains("struct ginux_native_network_inventory_request_v0"));
         assert!(header.contains("sizeof(struct ginux_native_control_descriptor_v4) == 16"));
     }

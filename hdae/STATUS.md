@@ -7,7 +7,7 @@
 - Reload after context shift: required
 - Active project: native controller desktop
 - Branch: `codex/controller-desktop`
-- Intended base: `main` at `759cf2e2`
+- Intended base: current `main`; integration merge with `7fdc880e` is in progress
 - Active gate: none in the controller-desktop batch; Gate 31 is closed
 - Status: Gates 19–31 are complete; Gate 31 passed all objective criteria and
   received final human visual and interaction acceptance on 2026-11-01
@@ -24,12 +24,21 @@
   passed. A follow-up power-control refinement replaced the block glyph with a
   bounded antialiased button; its real-QEMU menu test passed at 20.844 ms p95,
   20.973 ms maximum, and 20.485 ms for a complete page change.
+- Current-main integration evidence: merged `main` at `7fdc880e`, preserved the
+  timestamp ABI at operation 39, reassigned the branch-local display/input
+  operations to 40/41, and corrected native-network layout detection to use the
+  current 161-page image contract. `make check` and `make test` pass. The
+  consolidated controller-desktop suite passes its unit, QEMU, and 2/4-vCPU
+  recovery stages; the visible-frame test passes separately with 48.915 ms p95,
+  49.075 ms maximum, and an 18.286 ms page change after removing the
+  sandbox-only QEMU monitor-socket restriction. The release performance
+  qualification passes at 869 us input-to-frame p95, 504 us steady-frame p95,
+  and a bounded 3,175,728-byte modeled working set.
 - Open decisions or limitations: the accepted architecture remains a native
   ring-3 controller shell with software rendering and an independent serial
   recovery CLI; unrelated open Gates 13–18 remain outside this completed batch
-- Exact next action: review the completed branch state, then push
-  `codex/controller-desktop` and prepare its integrated pull request when the
-  human requests publication
+- Exact next action: commit and push the validated integration merge to pull
+  request #39, then wait for exact-head CI and a later review pass before merge
 
 ## Governing outcome
 

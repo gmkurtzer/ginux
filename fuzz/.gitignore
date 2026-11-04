@@ -1,0 +1,12 @@
+# cargo-fuzz build output and everything libFuzzer generates at runtime.
+# Only hand-written sources, committed seed corpora, dictionaries and this
+# workspace's manifests are tracked. Evolved corpora, crash artifacts and
+# coverage output are never committed.
+target/
+corpus/
+artifacts/
+coverage/
+crash-*
+leak-*
+timeout-*
+oom-*

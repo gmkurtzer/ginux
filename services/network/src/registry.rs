@@ -2,7 +2,7 @@ use core::{
     cell::UnsafeCell,
     fmt::Write as _,
     ptr::{read_volatile, write_volatile},
-    sync::atomic::{compiler_fence, AtomicU32, AtomicU64, Ordering},
+    sync::atomic::{compiler_fence, AtomicU64, Ordering},
 };
 
 use base64ct::{Base64, Encoding};
@@ -16,6 +16,7 @@ use ginux_native_abi::NativeNetworkBootV8;
 use ginux_native_abi::{
     NativeImageStoreRequestV0, NATIVE_IMAGE_STORE_ABORT, NATIVE_IMAGE_STORE_OPERATION,
     NATIVE_IMAGE_STORE_PUBLISH, NATIVE_IMAGE_STORE_RESULT_FAILED, NATIVE_PROGRESS_OPERATION,
+    NATIVE_TIMESTAMP_FREQUENCY_OPERATION,
 };
 use heapless::{String, Vec};
 use p256::ecdsa::DerSignature;
@@ -25,7 +26,7 @@ use smoltcp::{
     iface::{Config, Interface, SocketHandle, SocketSet, SocketStorage},
     phy::{Device, DeviceCapabilities, Medium, PacketMeta, RxToken, TxToken},
     socket::{dns, tcp},
-    time::Instant,
+    time::{Duration, Instant},
     wire::{DnsQueryType, EthernetAddress, IpAddress, IpCidr, Ipv4Address},
 };
 
@@ -39,6 +40,14 @@ const QUEUE_SIZE: u16 = 8;
 const TCP_BUFFER_SIZE: usize = 16 * 1024;
 const NETWORK_POLL_LIMIT: usize = 25_000_000;
 const POLLS_PER_MILLISECOND: usize = 1024;
+// Network waits keep the bound the poll budget gave them on the poll clock,
+// but measure it in time so it no longer shrinks on faster processors.
+const NETWORK_TIMEOUT_MILLISECONDS: u64 = (NETWORK_POLL_LIMIT / POLLS_PER_MILLISECOND) as u64;
+const TIMESTAMP_FREQUENCY_MINIMUM: u64 = 1_000_000;
+const TIMESTAMP_FREQUENCY_MAXIMUM: u64 = 100_000_000_000;
+const MILLISECONDS_PER_SECOND: u64 = 1000;
+// smoltcp stores Instant as i64 microseconds; leave headroom for deadlines.
+const NETWORK_CLOCK_MAXIMUM_MILLISECONDS: u64 = i64::MAX as u64 / 1000 / 2;
 const TLS_RECORD_SIZE: usize = 16_640;
 const CERTIFICATE_SIZE: usize = 4096;
 const HTTP_HEADER_SIZE: usize = 8192;
@@ -47,9 +56,10 @@ const METADATA_BODY_SIZE: usize = 64 * 1024;
 struct RegistryServiceOwner {
     clock: AtomicU64,
     progress_capability: AtomicU64,
-    dns_fallback_a: AtomicU32,
-    dns_fallback_state: AtomicU32,
-    dns_query_sent: AtomicU32,
+    timestamp_ticks_per_millisecond: AtomicU64,
+    timestamp_origin: AtomicU64,
+    network_clock_polls: AtomicU64,
+    network_clock_milliseconds: AtomicU64,
     tcp_rx: UnsafeCell<[u8; TCP_BUFFER_SIZE]>,
     tcp_tx: UnsafeCell<[u8; TCP_BUFFER_SIZE]>,
     dns_queries: UnsafeCell<[Option<dns::DnsQuery>; 1]>,
@@ -66,9 +76,10 @@ unsafe impl Sync for RegistryServiceOwner {}
 static REGISTRY_SERVICE: RegistryServiceOwner = RegistryServiceOwner {
     clock: AtomicU64::new(0),
     progress_capability: AtomicU64::new(0),
-    dns_fallback_a: AtomicU32::new(0),
-    dns_fallback_state: AtomicU32::new(0),
-    dns_query_sent: AtomicU32::new(0),
+    timestamp_ticks_per_millisecond: AtomicU64::new(0),
+    timestamp_origin: AtomicU64::new(0),
+    network_clock_polls: AtomicU64::new(0),
+    network_clock_milliseconds: AtomicU64::new(0),
     tcp_rx: UnsafeCell::new([0; TCP_BUFFER_SIZE]),
     tcp_tx: UnsafeCell::new([0; TCP_BUFFER_SIZE]),
     dns_queries: UnsafeCell::new([None]),
@@ -86,13 +97,18 @@ pub(crate) unsafe fn pull(info: &NativeNetworkBootV8) -> bool {
         .clock
         .store(info.unix_time, Ordering::Release);
     progress(b"initializing registry network stack");
+    start_network_clock();
+    let Some(interface_entropy) = tls_seed() else {
+        progress(b"registry TLS hardware entropy unavailable");
+        return false;
+    };
     let Some(mut device) = VirtioNet::new(info) else {
         progress(b"registry network device initialization failed");
         return false;
     };
     let mac = info.mac_address.to_be_bytes();
     let mut config = Config::new(EthernetAddress(mac[2..].try_into().unwrap()).into());
-    config.random_seed = info.unix_time ^ u64::from(info.ipv4);
+    config.random_seed = u64::from_ne_bytes(interface_entropy[..8].try_into().unwrap());
     let mut interface = Interface::new(config, &mut device, Instant::from_millis(0));
     let ip = info.ipv4.to_be_bytes();
     interface.update_ip_addrs(|addresses| {
@@ -261,6 +277,10 @@ pub(crate) unsafe fn pull(info: &NativeNetworkBootV8) -> bool {
         return false;
     }
     sockets.get_mut::<tcp::Socket>(tcp_handle).abort();
+    if !reference.manifest_digest_matches(manifest_body.bytes()) {
+        progress(b"registry pinned manifest digest rejected");
+        return false;
+    }
     let platform = ginux_oci::Platform::native_linux();
     if let Some(selected) = ginux_oci::select_manifest(manifest_body.bytes(), platform) {
         let Some(selected_digest) = parse_digest(selected.digest) else {
@@ -483,6 +503,95 @@ pub(crate) fn progress(message: &[u8]) {
         );
     }
     let _ = result;
+}
+
+/// Selects the clock that drives smoltcp for this registry session.
+///
+/// A kernel that reports its calibrated timestamp-counter frequency gives the
+/// stack real milliseconds from RDTSC at no further call cost. A kernel
+/// without a calibrated counter reports it unavailable, and the stack keeps
+/// the poll-count clock. Services ship in the same boot image as the kernel,
+/// so the operation is always present.
+fn start_network_clock() {
+    let frequency = timestamp_frequency();
+    let ticks_per_millisecond =
+        if (TIMESTAMP_FREQUENCY_MINIMUM..=TIMESTAMP_FREQUENCY_MAXIMUM).contains(&frequency) {
+            frequency / MILLISECONDS_PER_SECOND
+        } else {
+            progress(b"registry timestamp frequency unavailable; using poll clock");
+            0
+        };
+    let service = &REGISTRY_SERVICE;
+    service
+        .timestamp_ticks_per_millisecond
+        .store(ticks_per_millisecond, Ordering::Release);
+    service
+        .timestamp_origin
+        .store(timestamp_counter(), Ordering::Release);
+    service.network_clock_polls.store(0, Ordering::Release);
+    service
+        .network_clock_milliseconds
+        .store(0, Ordering::Release);
+}
+
+/// Returns the session's monotonic time; it never moves backwards, even if a
+/// migration between processors observes a lower timestamp counter.
+fn network_now() -> Instant {
+    let service = &REGISTRY_SERVICE;
+    let ticks_per_millisecond = service
+        .timestamp_ticks_per_millisecond
+        .load(Ordering::Acquire);
+    let milliseconds = timestamp_counter()
+        .saturating_sub(service.timestamp_origin.load(Ordering::Acquire))
+        .checked_div(ticks_per_millisecond)
+        .unwrap_or_else(|| {
+            let polls = service.network_clock_polls.fetch_add(1, Ordering::AcqRel) + 1;
+            polls / POLLS_PER_MILLISECOND as u64
+        });
+    let previous = service
+        .network_clock_milliseconds
+        .fetch_max(milliseconds, Ordering::AcqRel);
+    Instant::from_millis(
+        previous
+            .max(milliseconds)
+            .min(NETWORK_CLOCK_MAXIMUM_MILLISECONDS) as i64,
+    )
+}
+
+fn network_deadline() -> Instant {
+    network_now() + Duration::from_millis(NETWORK_TIMEOUT_MILLISECONDS)
+}
+
+fn timestamp_frequency() -> u64 {
+    let mut result = NATIVE_TIMESTAMP_FREQUENCY_OPERATION;
+    unsafe {
+        core::arch::asm!(
+            "int 0x80",
+            inlateout("rax") result,
+            in("rdi") 0_u64,
+            in("rsi") 0_u64,
+            in("rdx") 0_u64,
+            options(nostack),
+        );
+    }
+    result
+}
+
+fn timestamp_counter() -> u64 {
+    let low: u32;
+    let high: u32;
+    // SAFETY: LFENCE and RDTSC are unprivileged x86-64 instructions and do
+    // not access memory. LFENCE prevents an earlier read from passing RDTSC.
+    unsafe {
+        core::arch::asm!(
+            "lfence",
+            "rdtsc",
+            out("eax") low,
+            out("edx") high,
+            options(nomem, nostack)
+        );
+    }
+    (u64::from(high) << 32) | u64::from(low)
 }
 
 pub(crate) fn set_progress_capability(capability: u64) {
@@ -1008,8 +1117,12 @@ unsafe fn https_get(
     let config = TlsConfig::new()
         .with_server_name(host)
         .enable_rsa_signatures();
+    let Some(seed) = tls_seed() else {
+        progress(b"registry TLS hardware entropy unavailable");
+        return false;
+    };
     let provider = Provider {
-        rng: ChaCha8Rng::from_seed(seed()),
+        rng: ChaCha8Rng::from_seed(seed),
         verifier: StrictVerifier::new(Certificate::X509(root)),
     };
     if let Err(error) = tls.open(TlsContext::new(&config, provider)) {
@@ -1091,14 +1204,33 @@ unsafe fn decode_pem(pem: &str) -> Option<&'static [u8]> {
     Some(core::slice::from_raw_parts(decoded.as_ptr(), decoded.len()))
 }
 
-fn seed() -> [u8; 32] {
-    let mut output = [0; 32];
-    let time = REGISTRY_SERVICE.clock.load(Ordering::Acquire);
-    for index in 0..4 {
-        output[index * 8..index * 8 + 8]
-            .copy_from_slice(&time.wrapping_mul((index + 1) as u64).to_le_bytes());
+fn tls_seed() -> Option<[u8; 32]> {
+    if core::arch::x86_64::__cpuid(1).ecx & (1 << 30) == 0 {
+        return None;
     }
-    output
+    let mut output = [0; 32];
+    for chunk in output.as_chunks_mut::<8>().0 {
+        let mut generated = None;
+        for _ in 0..16 {
+            let mut value: u64;
+            let mut ready: u8;
+            unsafe {
+                core::arch::asm!(
+                    "rdrand {value}",
+                    "setc {ready}",
+                    value = out(reg) value,
+                    ready = out(reg_byte) ready,
+                    options(nostack)
+                );
+            }
+            if ready != 0 {
+                generated = Some(value);
+                break;
+            }
+        }
+        chunk.copy_from_slice(&generated?.to_ne_bytes());
+    }
+    Some(output)
 }
 
 fn read_response(
@@ -1307,13 +1439,10 @@ fn resolve(
     sockets: &mut SocketSet<'static>,
     handle: SocketHandle,
 ) -> Option<IpAddress> {
-    let mut elapsed_polls = 0_usize;
-    for attempt in 0..3 {
-        REGISTRY_SERVICE.dns_fallback_a.store(0, Ordering::Release);
-        REGISTRY_SERVICE
-            .dns_fallback_state
-            .store(0, Ordering::Release);
-        REGISTRY_SERVICE.dns_query_sent.store(0, Ordering::Release);
+    for _ in 0..3 {
+        // smoltcp stamps the query timeout from the last poll; refresh it so
+        // time spent outside the stack does not expire the query at once.
+        let _ = interface.poll(network_now(), device, sockets);
         let query = match sockets.get_mut::<dns::Socket>(handle).start_query(
             interface.context(),
             host,
@@ -1326,20 +1455,13 @@ fn resolve(
             }
         };
         let mut pending = true;
-        for _ in 0..NETWORK_POLL_LIMIT {
-            elapsed_polls = elapsed_polls.saturating_add(1);
-            let _ = interface.poll(
-                Instant::from_millis((elapsed_polls / POLLS_PER_MILLISECOND) as i64),
-                device,
-                sockets,
-            );
-            let fallback = REGISTRY_SERVICE.dns_fallback_a.swap(0, Ordering::AcqRel);
-            if fallback != 0 {
-                sockets.get_mut::<dns::Socket>(handle).cancel_query(query);
-                return Some(IpAddress::Ipv4(Ipv4Address::from_octets(
-                    fallback.to_be_bytes(),
-                )));
+        let deadline = network_deadline();
+        loop {
+            let now = network_now();
+            if now >= deadline {
+                break;
             }
+            let _ = interface.poll(now, device, sockets);
             match sockets
                 .get_mut::<dns::Socket>(handle)
                 .get_query_result(query)
@@ -1361,16 +1483,6 @@ fn resolve(
         if pending {
             sockets.get_mut::<dns::Socket>(handle).cancel_query(query);
         }
-        if attempt == 2 {
-            let mut message = String::<96>::new();
-            let _ = write!(
-                message,
-                "registry DNS response rejected (wire state {}, query sent {})",
-                REGISTRY_SERVICE.dns_fallback_state.load(Ordering::Acquire),
-                REGISTRY_SERVICE.dns_query_sent.load(Ordering::Acquire),
-            );
-            progress(message.as_bytes());
-        }
     }
     None
 }
@@ -1380,8 +1492,6 @@ struct TcpStream<'a> {
     device: &'a mut VirtioNet,
     sockets: &'a mut SocketSet<'static>,
     handle: SocketHandle,
-    tick: i64,
-    polls: usize,
 }
 
 impl<'a> TcpStream<'a> {
@@ -1403,30 +1513,24 @@ impl<'a> TcpStream<'a> {
             device,
             sockets,
             handle,
-            tick: 0,
-            polls: 0,
         };
-        for _ in 0..NETWORK_POLL_LIMIT {
-            stream.poll();
+        let deadline = network_deadline();
+        loop {
+            let now = stream.poll();
             let socket = stream.sockets.get::<tcp::Socket>(stream.handle);
             if socket.may_send() && socket.may_recv() {
                 return Some(stream);
             }
-            if !socket.is_open() {
+            if !socket.is_open() || now >= deadline {
                 return None;
             }
         }
-        None
     }
 
-    fn poll(&mut self) {
-        self.polls = self.polls.wrapping_add(1);
-        if self.polls.is_multiple_of(POLLS_PER_MILLISECOND) {
-            self.tick += 1;
-        }
-        let _ = self
-            .interface
-            .poll(Instant::from_millis(self.tick), self.device, self.sockets);
+    fn poll(&mut self) -> Instant {
+        let now = network_now();
+        let _ = self.interface.poll(now, self.device, self.sockets);
+        now
     }
 
     fn abort(&mut self) {
@@ -1444,8 +1548,9 @@ impl Read for TcpStream<'_> {
         if output.is_empty() {
             return Ok(0);
         }
-        for _ in 0..NETWORK_POLL_LIMIT {
-            self.poll();
+        let deadline = network_deadline();
+        loop {
+            let now = self.poll();
             let socket = self.sockets.get_mut::<tcp::Socket>(self.handle);
             if socket.can_recv() {
                 return socket.recv_slice(output).map_err(|_| ErrorKind::Other);
@@ -1453,15 +1558,18 @@ impl Read for TcpStream<'_> {
             if !socket.may_recv() {
                 return Ok(0);
             }
+            if now >= deadline {
+                return Err(ErrorKind::TimedOut);
+            }
         }
-        Err(ErrorKind::TimedOut)
     }
 }
 
 impl Write for TcpStream<'_> {
     fn write(&mut self, input: &[u8]) -> Result<usize, Self::Error> {
-        for _ in 0..NETWORK_POLL_LIMIT {
-            self.poll();
+        let deadline = network_deadline();
+        loop {
+            let now = self.poll();
             let socket = self.sockets.get_mut::<tcp::Socket>(self.handle);
             if socket.can_send() {
                 return socket.send_slice(input).map_err(|_| ErrorKind::Other);
@@ -1469,18 +1577,23 @@ impl Write for TcpStream<'_> {
             if !socket.may_send() {
                 return Err(ErrorKind::BrokenPipe);
             }
+            if now >= deadline {
+                return Err(ErrorKind::TimedOut);
+            }
         }
-        Err(ErrorKind::TimedOut)
     }
 
     fn flush(&mut self) -> Result<(), Self::Error> {
-        for _ in 0..NETWORK_POLL_LIMIT {
-            self.poll();
+        let deadline = network_deadline();
+        loop {
+            let now = self.poll();
             if self.sockets.get::<tcp::Socket>(self.handle).send_queue() == 0 {
                 return Ok(());
             }
+            if now >= deadline {
+                return Err(ErrorKind::TimedOut);
+            }
         }
-        Err(ErrorKind::TimedOut)
     }
 }
 
@@ -1566,11 +1679,6 @@ impl RxToken for VirtioRxToken {
                 (device.dma + RX_BUFFER_OFFSET as usize + TX_HEADER_LENGTH) as *const u8,
                 self.1,
             );
-            if let Some(address) = first_dns_a_record(bytes) {
-                REGISTRY_SERVICE
-                    .dns_fallback_a
-                    .store(address, Ordering::Release);
-            }
             let result = callback(bytes);
             device.rx_used = device.rx_used.wrapping_add(1);
             device.post_receive();
@@ -1580,103 +1688,6 @@ impl RxToken for VirtioRxToken {
 
     fn meta(&self) -> PacketMeta {
         PacketMeta::default()
-    }
-}
-
-fn is_dns_query(frame: &[u8]) -> bool {
-    let Some(protocol) = frame.get(23) else {
-        return false;
-    };
-    if frame.get(12..14) != Some(&[0x08, 0x00]) || *protocol != 17 {
-        return false;
-    }
-    let header_length = usize::from(frame[14] & 0x0f) * 4;
-    let udp = 14 + header_length;
-    frame
-        .get(udp + 2..udp + 4)
-        .and_then(|bytes| bytes.try_into().ok())
-        .map(u16::from_be_bytes)
-        == Some(53)
-}
-
-fn first_dns_a_record(frame: &[u8]) -> Option<u32> {
-    if frame.len() < 14 + 20 + 8 + 12
-        || u16::from_be_bytes(frame[12..14].try_into().ok()?) != 0x0800
-    {
-        return None;
-    }
-    let ip = 14;
-    let header_length = usize::from(frame[ip] & 0x0f).checked_mul(4)?;
-    if header_length < 20 || frame.get(ip + 9).copied()? != 17 {
-        return None;
-    }
-    let udp = ip.checked_add(header_length)?;
-    if u16::from_be_bytes(frame.get(udp..udp + 2)?.try_into().ok()?) != 53 {
-        return None;
-    }
-    REGISTRY_SERVICE
-        .dns_fallback_state
-        .store(1, Ordering::Release);
-    let dns = udp.checked_add(8)?;
-    let message = frame.get(dns..)?;
-    let flags = u16::from_be_bytes(message.get(2..4)?.try_into().ok()?);
-    if flags & 0x8000 == 0 {
-        return None;
-    }
-    REGISTRY_SERVICE
-        .dns_fallback_state
-        .store(2, Ordering::Release);
-    if flags & 0x000f != 0 {
-        REGISTRY_SERVICE
-            .dns_fallback_state
-            .store(10 + u32::from(flags & 0x000f), Ordering::Release);
-        return None;
-    }
-    let questions = usize::from(u16::from_be_bytes(message.get(4..6)?.try_into().ok()?));
-    let answers = usize::from(u16::from_be_bytes(message.get(6..8)?.try_into().ok()?));
-    let authority = usize::from(u16::from_be_bytes(message.get(8..10)?.try_into().ok()?));
-    let additional = usize::from(u16::from_be_bytes(message.get(10..12)?.try_into().ok()?));
-    let mut cursor = 12;
-    for _ in 0..questions {
-        cursor = skip_dns_name(message, cursor)?.checked_add(4)?;
-        message.get(..cursor)?;
-    }
-    for _ in 0..answers.checked_add(authority)?.checked_add(additional)? {
-        cursor = skip_dns_name(message, cursor)?;
-        let record_type = u16::from_be_bytes(message.get(cursor..cursor + 2)?.try_into().ok()?);
-        let class = u16::from_be_bytes(message.get(cursor + 2..cursor + 4)?.try_into().ok()?);
-        let length = usize::from(u16::from_be_bytes(
-            message.get(cursor + 8..cursor + 10)?.try_into().ok()?,
-        ));
-        let data = cursor.checked_add(10)?;
-        let end = data.checked_add(length)?;
-        let bytes = message.get(data..end)?;
-        if record_type == 1 && class == 1 && length == 4 {
-            return Some(u32::from_be_bytes(bytes.try_into().ok()?));
-        }
-        cursor = end;
-    }
-    REGISTRY_SERVICE
-        .dns_fallback_state
-        .store(4, Ordering::Release);
-    None
-}
-
-fn skip_dns_name(message: &[u8], mut cursor: usize) -> Option<usize> {
-    loop {
-        let length = *message.get(cursor)?;
-        if length == 0 {
-            return cursor.checked_add(1);
-        }
-        if length & 0xc0 == 0xc0 {
-            message.get(cursor + 1)?;
-            return cursor.checked_add(2);
-        }
-        if length & 0xc0 != 0 || length > 63 {
-            return None;
-        }
-        cursor = cursor.checked_add(1 + usize::from(length))?;
-        message.get(..cursor)?;
     }
 }
 
@@ -1697,9 +1708,6 @@ impl TxToken for VirtioTxToken {
                 length,
             );
             let result = callback(bytes);
-            if is_dns_query(bytes) {
-                REGISTRY_SERVICE.dns_query_sent.store(1, Ordering::Release);
-            }
             write_u64(
                 device.dma + TX_DESC_OFFSET as usize,
                 device.dma_device + TX_BUFFER_OFFSET,

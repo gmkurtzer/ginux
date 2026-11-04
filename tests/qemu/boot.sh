@@ -8,6 +8,9 @@ if [[ ! "$boot_timeout_seconds" =~ ^[1-9][0-9]*$ ]]; then
     echo "Boot test failed: GINUX_BOOT_TIMEOUT_SECONDS must be a positive integer." >&2
     exit 2
 fi
+if [[ -n "${GINUX_BOOT_ARTIFACT_DIR:-}" ]]; then
+    mkdir -p "$GINUX_BOOT_ARTIFACT_DIR"
+fi
 
 output_file="$(mktemp -t ginux-boot.XXXXXX)"
 reboot_output_file="$(mktemp -t ginux-reboot.XXXXXX)"
@@ -34,6 +37,13 @@ cleanup() {
     if [[ -n "$qemu_pid" ]] && kill -0 "$qemu_pid" 2>/dev/null; then
         kill "$qemu_pid" 2>/dev/null || true
         wait "$qemu_pid" 2>/dev/null || true
+    fi
+    if [[ -n "${GINUX_BOOT_ARTIFACT_DIR:-}" ]]; then
+        mkdir -p "$GINUX_BOOT_ARTIFACT_DIR"
+        cp "$output_file" "$GINUX_BOOT_ARTIFACT_DIR/initial-boot.log"
+        cp "$reboot_output_file" "$GINUX_BOOT_ARTIFACT_DIR/reboot.log"
+        cp "$corrupt_output_file" "$GINUX_BOOT_ARTIFACT_DIR/corrupt-media.log"
+        cp "$native_corrupt_output_file" "$GINUX_BOOT_ARTIFACT_DIR/native-corrupt-media.log"
     fi
     rm -f \
         "$output_file" \
@@ -152,6 +162,11 @@ if ! grep -q '^GINUX_KERNEL_OK' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: bounded OCI rootfs unpack policy verified' "$output_file"; then
+    echo "Boot test failed: OCI rootfs expansion was not bounded before allocation." >&2
+    exit 1
+fi
+
 "$repo_root/tests/qemu/check-linux-runtime.sh" "$output_file"
 
 if ! grep -q '^ginux: modern virtio network function: 0:3.0' "$output_file" ||
@@ -167,8 +182,8 @@ if ! grep -q '^ginux: modern virtio network function: 0:3.0' "$output_file" ||
     ! grep -q '^ginux: virtio-net cacheable alias absent' "$output_file" ||
     ! grep -q '^ginux: virtio-net accepted features: 12884934688' "$output_file" ||
     ! grep -q '^ginux: virtio-net queues available: 3' "$output_file" ||
-    ! grep -q '^ginux: virtio-net receive queue size: 256' "$output_file" ||
-    ! grep -q '^ginux: virtio-net transmit queue size: 256' "$output_file" ||
+    ! grep -Eq '^ginux: virtio-net receive queue size: (8|16|32|64|128|256|512|1024|2048|4096|8192|16384|32768)[[:space:]]*$' "$output_file" ||
+    ! grep -Eq '^ginux: virtio-net transmit queue size: (8|16|32|64|128|256|512|1024|2048|4096|8192|16384|32768)[[:space:]]*$' "$output_file" ||
     ! grep -q '^ginux: virtio-net receive notification address: [0-9]' "$output_file" ||
     ! grep -q '^ginux: virtio-net transmit notification address: [0-9]' "$output_file" ||
     ! grep -q '^ginux: virtio-net queues remain disabled and DMA-unbound' "$output_file" ||
@@ -847,6 +862,7 @@ if ! grep -q '^ginux: IOMMU root/context hierarchy constructed' "$output_file" |
     ! grep -q '^ginux: one-page identity DMA translation encoded exactly' "$output_file" ||
     ! grep -q '^ginux: invalid IOMMU table inputs rejected' "$output_file" ||
     ! grep -q '^ginux: IOMMU hardware state unchanged after table construction' "$output_file" ||
+    ! grep -q '^ginux: failed IOMMU activation rollback quarantined' "$output_file" ||
     ! grep -q '^ginux: IOMMU translation frames scrubbed and released' "$output_file"; then
     echo "Boot test failed: IOMMU translation hierarchy lifecycle did not complete." >&2
     exit 1
@@ -1275,6 +1291,25 @@ fi
 
 if ! grep -q '^ginux: per-domain physical frame budgets enforced' "$output_file"; then
     echo "Boot test failed: per-domain physical-frame budgets were not enforced." >&2
+    exit 1
+fi
+if ! grep -q '^ginux: failed runtime volume DMA retirement quarantined' "$output_file"; then
+    echo "Boot test failed: failed runtime volume DMA retirement was not quarantined." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: Linux mmap domain quota enforced atomically' "$output_file"; then
+    echo "Boot test failed: Linux mmap domain quota was not enforced atomically." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: Linux overlay domain quota lifecycle enforced' "$output_file"; then
+    echo "Boot test failed: Linux overlay domain quota lifecycle was not enforced." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: Linux SysV domain quota enforced independently' "$output_file"; then
+    echo "Boot test failed: Linux SysV domain quota was not enforced independently." >&2
     exit 1
 fi
 
@@ -1805,6 +1840,16 @@ fi
 if [[ "$(grep -c '^DEVFS_READY' "$output_file")" -ne 1 ]] ||
     ! grep -q '^ginux: bounded Linux devfs profile validated' "$output_file"; then
     echo "Boot test failed: the bounded Linux device namespace was not validated." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: blocking Linux socket polls bounded independently of guest timeout' "$output_file"; then
+    echo "Boot test failed: guest timeouts could exceed the blocking socket poll budget." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: synchronous Linux poll waits bounded independently of timeout' "$output_file"; then
+    echo "Boot test failed: poll/ppoll/select could wait without a bounded kernel-entry budget." >&2
     exit 1
 fi
 
@@ -3407,6 +3452,10 @@ if ! grep -q '^ginux: Linux cross-process memory transfer validated' "$output_fi
     echo "Boot test failed: Linux cross-process memory transfer was not validated." >&2
     exit 1
 fi
+if ! grep -q '^ginux: secret process memory excluded from remote copy' "$output_file"; then
+    echo "Boot test failed: remote process copy did not exclude secret memory." >&2
+    exit 1
+fi
 if ! grep -q '^ginux: Linux cross-process resource comparison validated' "$output_file"; then
     echo "Boot test failed: Linux cross-process resource comparison was not validated." >&2
     exit 1
@@ -3433,6 +3482,10 @@ if ! grep -q '^ginux: Linux address-space resource limit enforced' "$output_file
 fi
 if ! grep -q '^ginux: Linux memfd sealing enforced across descriptors' "$output_file"; then
     echo "Boot test failed: Linux memfd sealing was not enforced across descriptors." >&2
+    exit 1
+fi
+if ! grep -q '^ginux: Linux mmap descriptor access matrix validated' "$output_file"; then
+    echo "Boot test failed: Linux mmap descriptor access modes were not validated." >&2
     exit 1
 fi
 

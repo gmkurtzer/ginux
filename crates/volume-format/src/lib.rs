@@ -205,12 +205,55 @@ mod tests {
     }
 
     #[test]
+    fn rejects_nonzero_payload_padding_with_valid_digest() {
+        let payload = b"padding";
+        let (_, committed) = encode(1, payload).expect("valid short record");
+        assert_eq!(decode(&committed).expect("short record").payload(), payload);
+        for offset in HEADER_SIZE + payload.len()..SECTOR_SIZE {
+            let mut sector = committed;
+            sector[offset] = 1;
+            let digest = digest_sector(&sector);
+            sector[DIGEST_OFFSET..DIGEST_OFFSET + DIGEST_SIZE].copy_from_slice(&digest);
+            assert_eq!(decode(&sector), None, "offset {offset}");
+        }
+
+        let full_payload = [0x5a; PAYLOAD_CAPACITY];
+        let (_, full) = encode(1, &full_payload).expect("valid full record");
+        assert_eq!(decode(&full).expect("full record").payload(), full_payload);
+    }
+
+    #[test]
     fn host_volume_header_round_trips_exact_geometry() {
         let header = HostVolumeHeader::new(131_072).expect("valid sparse volume");
         let encoded = header.encode();
         assert_eq!(HostVolumeHeader::decode(&encoded), Some(header));
         assert_eq!(header.data_start_sector, 8);
         assert_eq!(header.data_sectors, 131_064);
+    }
+
+    #[test]
+    fn host_volume_header_rejects_inconsistent_geometry() {
+        let minimum =
+            HostVolumeHeader::new(HOST_VOLUME_MINIMUM_SECTORS).expect("minimum valid volume");
+        assert_eq!(HostVolumeHeader::decode(&minimum.encode()), Some(minimum));
+
+        let malformed = [
+            HostVolumeHeader {
+                data_start_sector: minimum.data_start_sector + 1,
+                ..minimum
+            },
+            HostVolumeHeader {
+                data_sectors: minimum.data_sectors + 1,
+                ..minimum
+            },
+            HostVolumeHeader {
+                volume_sectors: HOST_VOLUME_MINIMUM_SECTORS - 1,
+                data_sectors: 0,
+                ..minimum
+            },
+        ];
+        let decoded = malformed.map(|header| HostVolumeHeader::decode(&header.encode()));
+        assert_eq!(decoded, [None; 3]);
     }
 
     #[test]
@@ -223,5 +266,18 @@ mod tests {
             HostVolumeHeader::decode(&[0; HOST_VOLUME_HEADER_SIZE + 1]),
             None
         );
+    }
+
+    #[test]
+    fn rejects_nonzero_reserved_header_bytes_with_valid_digest() {
+        let (_, committed) = encode(1, b"reserved").expect("valid record");
+        assert!(decode(&committed).is_some());
+        for offset in RESERVED_OFFSET..HEADER_SIZE {
+            let mut sector = committed;
+            sector[offset] = 1;
+            let digest = digest_sector(&sector);
+            sector[DIGEST_OFFSET..DIGEST_OFFSET + DIGEST_SIZE].copy_from_slice(&digest);
+            assert_eq!(decode(&sector), None, "offset {offset}");
+        }
     }
 }

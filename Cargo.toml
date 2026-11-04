@@ -39,6 +39,7 @@ panic = "abort"
 codegen-units = 1
 lto = true
 opt-level = "s"
+overflow-checks = true
 panic = "abort"
 strip = true
 

@@ -652,6 +652,7 @@ struct Scheduled {
     context: UserContext,
 }
 
+#[derive(Clone, Copy)]
 struct Scheduler {
     threads: [Option<Thread>; MAX_THREADS],
     generations: [u32; MAX_THREADS],
@@ -1782,6 +1783,8 @@ pub(crate) fn fault_runtime(
     else {
         return RuntimeAction::Invalid;
     };
+    // Stage peer wakeups and dispatch until every proof counter is checked.
+    let mut scheduler = runtime.scheduler;
     if let Some(reason) = peer_close {
         let Some(dead_domain) = runtime
             .scheduler
@@ -1790,21 +1793,17 @@ pub(crate) fn fault_runtime(
         else {
             return RuntimeAction::Invalid;
         };
-        runtime
-            .scheduler
-            .cancel_blocked_peers(dead_domain, reason, IPC_PEER_CLOSED);
+        scheduler.cancel_blocked_peers(dead_domain, reason, IPC_PEER_CLOSED);
     }
     let expected = frame.vector == 14
         && frame.error == 6
         && fault_address == 0
         && frame.rip == runtime.expected_fault_instruction
         && frame.r9 == 2;
-    let next = runtime.scheduler.exit_current(current);
     let Some(faults) = runtime.faults.checked_add(1) else {
         return RuntimeAction::Invalid;
     };
-    runtime.faults = faults;
-    runtime.expected_fault_observed |= expected;
+    let next = scheduler.exit_current(current);
     if let Some(next) = next {
         if next.context.address_space_root != current_root {
             let Some(switches) = runtime.address_space_switches.checked_add(1) else {
@@ -1812,6 +1811,9 @@ pub(crate) fn fault_runtime(
             };
             runtime.address_space_switches = switches;
         }
+        runtime.scheduler = scheduler;
+        runtime.faults = faults;
+        runtime.expected_fault_observed |= expected;
         frame.restore(next.context, code_selector, data_selector);
         RuntimeAction::Resume {
             result: next.context.rax,
@@ -1819,6 +1821,9 @@ pub(crate) fn fault_runtime(
             fs_base: next.context.fs_base,
         }
     } else {
+        runtime.scheduler = scheduler;
+        runtime.faults = faults;
+        runtime.expected_fault_observed |= expected;
         RuntimeAction::Complete
     }
 }
@@ -1845,20 +1850,22 @@ pub(crate) fn yield_runtime(
     else {
         return RuntimeAction::Invalid;
     };
+    let mut scheduler = runtime.scheduler;
     let saved = frame.saved_context(0, root, fs_base);
-    let Some(next) = runtime.scheduler.yield_current(current, saved) else {
-        return RuntimeAction::Invalid;
-    };
     let Some(yields) = runtime.yields.checked_add(1) else {
         return RuntimeAction::Invalid;
     };
-    runtime.yields = yields;
+    let Some(next) = scheduler.yield_current(current, saved) else {
+        return RuntimeAction::Invalid;
+    };
     if next.context.address_space_root != root {
         let Some(switches) = runtime.address_space_switches.checked_add(1) else {
             return RuntimeAction::Invalid;
         };
         runtime.address_space_switches = switches;
     }
+    runtime.scheduler = scheduler;
+    runtime.yields = yields;
     frame.restore(next.context, code_selector, data_selector);
     RuntimeAction::Resume {
         result: next.context.rax,
@@ -1889,20 +1896,22 @@ pub(crate) fn preempt_runtime(
     else {
         return RuntimeAction::Invalid;
     };
+    let mut scheduler = runtime.scheduler;
     let saved = frame.saved_context(root, fs_base);
-    let Some(next) = runtime.scheduler.yield_current(current, saved) else {
-        return RuntimeAction::Invalid;
-    };
     let Some(preemptions) = runtime.preemptions.checked_add(1) else {
         return RuntimeAction::Invalid;
     };
-    runtime.preemptions = preemptions;
+    let Some(next) = scheduler.yield_current(current, saved) else {
+        return RuntimeAction::Invalid;
+    };
     if next.context.address_space_root != root {
         let Some(switches) = runtime.address_space_switches.checked_add(1) else {
             return RuntimeAction::Invalid;
         };
         runtime.address_space_switches = switches;
     }
+    runtime.scheduler = scheduler;
+    runtime.preemptions = preemptions;
     frame.restore(next.context, code_selector, data_selector);
     RuntimeAction::Resume {
         result: next.context.rax,
@@ -1934,20 +1943,22 @@ pub(crate) fn block_runtime(
     else {
         return RuntimeAction::Invalid;
     };
+    let mut scheduler = runtime.scheduler;
     let saved = frame.saved_context(0, root, fs_base);
-    let Some(next) = runtime.scheduler.block_current(current, saved, reason) else {
-        return RuntimeAction::Invalid;
-    };
     let Some(blocks) = runtime.blocks.checked_add(1) else {
         return RuntimeAction::Invalid;
     };
-    runtime.blocks = blocks;
+    let Some(next) = scheduler.block_current(current, saved, reason) else {
+        return RuntimeAction::Invalid;
+    };
     if next.context.address_space_root != root {
         let Some(switches) = runtime.address_space_switches.checked_add(1) else {
             return RuntimeAction::Invalid;
         };
         runtime.address_space_switches = switches;
     }
+    runtime.scheduler = scheduler;
+    runtime.blocks = blocks;
     frame.restore(next.context, code_selector, data_selector);
     RuntimeAction::Resume {
         result: next.context.rax,
@@ -2346,6 +2357,8 @@ pub(crate) fn exit_runtime(
     else {
         return RuntimeAction::Invalid;
     };
+    // Stage peer wakeups and dispatch until every proof counter is checked.
+    let mut scheduler = runtime.scheduler;
     if let Some(reason) = peer_close {
         let Some(dead_domain) = runtime
             .scheduler
@@ -2354,15 +2367,12 @@ pub(crate) fn exit_runtime(
         else {
             return RuntimeAction::Invalid;
         };
-        runtime
-            .scheduler
-            .cancel_blocked_peers(dead_domain, reason, IPC_PEER_CLOSED);
+        scheduler.cancel_blocked_peers(dead_domain, reason, IPC_PEER_CLOSED);
     }
-    let next = runtime.scheduler.exit_current(current);
     let Some(exits) = runtime.exits.checked_add(1) else {
         return RuntimeAction::Invalid;
     };
-    runtime.exits = exits;
+    let next = scheduler.exit_current(current);
     if let Some(next) = next {
         if next.context.address_space_root != current_root {
             let Some(switches) = runtime.address_space_switches.checked_add(1) else {
@@ -2370,6 +2380,8 @@ pub(crate) fn exit_runtime(
             };
             runtime.address_space_switches = switches;
         }
+        runtime.scheduler = scheduler;
+        runtime.exits = exits;
         frame.restore(next.context, code_selector, data_selector);
         RuntimeAction::Resume {
             result: next.context.rax,
@@ -2377,6 +2389,8 @@ pub(crate) fn exit_runtime(
             fs_base: next.context.fs_base,
         }
     } else {
+        runtime.scheduler = scheduler;
+        runtime.exits = exits;
         RuntimeAction::Complete
     }
 }

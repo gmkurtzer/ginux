@@ -11,6 +11,7 @@ use crate::memory::{self, FrameLease, FrameOwner};
 const PAGE_SIZE: usize = 4096;
 const OBJECT_LIMIT: usize = ginux_oci::OCI_LAYER_LIMIT;
 pub(crate) const CACHE_QUOTA: usize = usize::MAX;
+pub(crate) const DEFAULT_ROOTFS_UNPACK_LIMIT_BYTES: usize = 512 * 1024 * 1024;
 
 struct ImageStoreOwner {
     installed: AtomicBool,
@@ -334,7 +335,7 @@ pub(crate) fn discard_published_layers() -> bool {
     .unwrap_or(false)
 }
 
-pub(crate) fn install_published_layers(slot: usize) -> bool {
+pub(crate) fn install_published_layers(slot: usize, unpack_limit_bytes: usize) -> bool {
     if slot >= crate::control_abi::DOMAIN_LIMIT || crate::published_rootfs::is_installed(slot) {
         return false;
     }
@@ -348,7 +349,6 @@ pub(crate) fn install_published_layers(slot: usize) -> bool {
         let mut compressed_lengths = [0_usize; ginux_oci::OCI_LAYER_LIMIT];
         let mut headers = [0_usize; ginux_oci::OCI_LAYER_LIMIT];
         let mut expected_lengths = [0_usize; ginux_oci::OCI_LAYER_LIMIT];
-        let mut allocation_length = 0_usize;
         for index in 0..layer_count {
             let digest = unsafe {
                 IMAGE_STORE
@@ -380,17 +380,18 @@ pub(crate) fn install_published_layers(slot: usize) -> bool {
             if expected_length == 0 {
                 return false;
             }
-            allocation_length = match allocation_length.checked_add(expected_length) {
-                Some(length) => length,
-                None => return false,
-            };
             digests[index] = digest;
             objects[index] = object;
             compressed_lengths[index] = compressed_length;
             headers[index] = header;
             expected_lengths[index] = expected_length;
         }
-        let page_count = allocation_length.div_ceil(PAGE_SIZE);
+        let Some((allocation_length, page_count)) =
+            rootfs_unpack_allocation(&expected_lengths[..layer_count], unpack_limit_bytes)
+        else {
+            crate::serial_write_bytes(b"ginux: OCI rootfs expansion exceeds unpack limit\r\n");
+            return false;
+        };
         let Some((first_frame, _)) =
             memory::allocate_contiguous_extent(FrameOwner::KERNEL, page_count)
         else {
@@ -521,6 +522,40 @@ pub(crate) fn install_published_layers(slot: usize) -> bool {
         true
     })
     .unwrap_or(false)
+}
+
+fn rootfs_unpack_allocation(
+    expected_lengths: &[usize],
+    unpack_limit_bytes: usize,
+) -> Option<(usize, usize)> {
+    if expected_lengths.is_empty() || unpack_limit_bytes == 0 {
+        return None;
+    }
+    let mut allocation_length = 0_usize;
+    for expected_length in expected_lengths {
+        if *expected_length == 0 {
+            return None;
+        }
+        allocation_length = allocation_length.checked_add(*expected_length)?;
+        if allocation_length > unpack_limit_bytes {
+            return None;
+        }
+    }
+    Some((allocation_length, allocation_length.div_ceil(PAGE_SIZE)))
+}
+
+pub(crate) fn verify_rootfs_unpack_policy() -> bool {
+    DEFAULT_ROOTFS_UNPACK_LIMIT_BYTES == 512 * 1024 * 1024
+        && rootfs_unpack_allocation(&[u32::MAX as usize], DEFAULT_ROOTFS_UNPACK_LIMIT_BYTES)
+            .is_none()
+        && rootfs_unpack_allocation(
+            &[DEFAULT_ROOTFS_UNPACK_LIMIT_BYTES, 1],
+            DEFAULT_ROOTFS_UNPACK_LIMIT_BYTES,
+        )
+        .is_none()
+        && rootfs_unpack_allocation(&[0], DEFAULT_ROOTFS_UNPACK_LIMIT_BYTES).is_none()
+        && rootfs_unpack_allocation(&[4096, 8192], DEFAULT_ROOTFS_UNPACK_LIMIT_BYTES)
+            == Some((12_288, 3))
 }
 
 pub(crate) fn install_cached_rootfs(

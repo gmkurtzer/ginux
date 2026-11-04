@@ -331,7 +331,10 @@ pub(crate) fn validated_user_root_frames(root: u64) -> Option<ValidatedUserRootF
             && native_entry(stack_page + stack_pages + 1) & (PRESENT | USER | NO_EXECUTE)
                 == (PRESENT | USER | NO_EXECUTE)
     };
-    let network_layout = layout_matches(160, 16);
+    let network_layout = layout_matches(
+        crate::address_space::NATIVE_NETWORK_IMAGE_PAGES,
+        crate::address_space::NATIVE_NETWORK_STACK_PAGES,
+    );
     let controller_layout = !network_layout
         && layout_matches(
             crate::address_space::NATIVE_CONTROLLER_IMAGE_PAGES,
@@ -397,7 +400,7 @@ pub(crate) fn validated_user_root_frames(root: u64) -> Option<ValidatedUserRootF
             crate::address_space::GRAPHICS_SERVICE_STACK_PAGES,
         );
     let image_capacity = if network_layout {
-        160
+        crate::address_space::NATIVE_NETWORK_IMAGE_PAGES
     } else if controller_layout {
         crate::address_space::NATIVE_CONTROLLER_IMAGE_PAGES
     } else if graphics_layout {
@@ -406,7 +409,7 @@ pub(crate) fn validated_user_root_frames(root: u64) -> Option<ValidatedUserRootF
         7
     };
     let stack_pages = if network_layout {
-        16
+        crate::address_space::NATIVE_NETWORK_STACK_PAGES
     } else if graphics_layout {
         crate::address_space::GRAPHICS_SERVICE_STACK_PAGES
     } else if controller_layout {
@@ -1651,13 +1654,13 @@ pub(crate) fn mmio_mappings_are_exact<const N: usize>(mappings: [MmioMapping; N]
             let pages = mapping.mapped_length / PAGE_SIZE;
             (first_index..first_index + pages)
                 .contains(&index)
-                .then_some(
+                .then(|| {
                     (mapping.physical_page + ((index - first_index) * PAGE_SIZE) as u64)
                         | PRESENT
                         | CACHE_DISABLE
                         | NO_EXECUTE
-                        | if mapping.writable { WRITABLE } else { 0 },
-                )
+                        | if mapping.writable { WRITABLE } else { 0 }
+                })
         });
         let Some(expected) = expected else {
             return unsafe { table.add(index).read() == 0 };

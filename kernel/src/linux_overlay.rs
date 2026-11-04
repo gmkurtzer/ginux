@@ -1,6 +1,6 @@
 use crate::{
     arch::x86_64::cpu,
-    control_abi,
+    control_abi, domain,
     memory::{self, FrameLease, FrameOwner},
 };
 use core::cell::UnsafeCell;
@@ -243,7 +243,7 @@ pub(crate) fn register_shared_mapping(
         overlay.first_mapping_page = page;
     } else {
         let Some(previous) = mapping_page_mut(last) else {
-            let _ = memory::scrub_and_release_frames(FrameOwner::KERNEL, &[page]);
+            let _ = scrub_and_release_frame(page);
             return false;
         };
         previous.next = page;
@@ -536,7 +536,9 @@ pub(crate) fn create_fifo(path: &[u8], mode: u32) -> Option<Handle> {
 
 pub(crate) fn fifo_socket(handle: Handle) -> Option<u8> {
     let node = node(handle)?;
-    (node.kind == NodeKind::Fifo && node.fifo_socket != 0).then_some(node.fifo_socket - 1)
+    (node.kind == NodeKind::Fifo)
+        .then(|| node.fifo_socket.checked_sub(1))
+        .flatten()
 }
 
 pub(crate) fn set_fifo_socket(handle: Handle, slot: u8) -> bool {
@@ -1011,7 +1013,7 @@ pub(crate) fn teardown() -> bool {
             }
             *node = Node::EMPTY;
         }
-        if !memory::scrub_and_release_frames(FrameOwner::KERNEL, core::slice::from_ref(&page)) {
+        if !scrub_and_release_frame(page) {
             return false;
         }
         page = next;
@@ -1022,7 +1024,7 @@ pub(crate) fn teardown() -> bool {
             return false;
         };
         let next = mappings.next;
-        if !memory::scrub_and_release_frames(FrameOwner::KERNEL, core::slice::from_ref(&page)) {
+        if !scrub_and_release_frame(page) {
             return false;
         }
         page = next;
@@ -1083,8 +1085,11 @@ fn empty_node_slot(overlay: &mut Overlay) -> Option<&mut Node> {
 }
 
 fn allocate_node_page() -> Option<FrameLease> {
-    let [page] = memory::allocate_frames::<1>(FrameOwner::KERNEL)?;
-    let address = page.direct_map_address()?;
+    let [page] = allocate_current_frames::<1>()?;
+    let Some(address) = page.direct_map_address() else {
+        let _ = scrub_and_release_frame(page);
+        return None;
+    };
     unsafe {
         core::ptr::write_bytes(address as *mut u8, 0, PAGE_SIZE);
         core::ptr::write(
@@ -1099,8 +1104,11 @@ fn allocate_node_page() -> Option<FrameLease> {
 }
 
 fn allocate_mapping_page() -> Option<FrameLease> {
-    let [page] = memory::allocate_frames::<1>(FrameOwner::KERNEL)?;
-    let address = page.direct_map_address()?;
+    let [page] = allocate_current_frames::<1>()?;
+    let Some(address) = page.direct_map_address() else {
+        let _ = scrub_and_release_frame(page);
+        return None;
+    };
     unsafe {
         core::ptr::write_bytes(address as *mut u8, 0, PAGE_SIZE);
         core::ptr::write(
@@ -1115,8 +1123,11 @@ fn allocate_mapping_page() -> Option<FrameLease> {
 }
 
 fn allocate_data_page() -> Option<FrameLease> {
-    let [page] = memory::allocate_frames::<1>(FrameOwner::KERNEL)?;
-    let address = page.direct_map_address()?;
+    let [page] = allocate_current_frames::<1>()?;
+    let Some(address) = page.direct_map_address() else {
+        let _ = scrub_and_release_frame(page);
+        return None;
+    };
     unsafe {
         core::ptr::write_bytes(address as *mut u8, 0, PAGE_SIZE);
         core::ptr::write(
@@ -1155,18 +1166,18 @@ fn append_xattr_pages(
     value_size: usize,
     removed: bool,
 ) -> bool {
-    let Some([page]) = memory::allocate_frames::<1>(FrameOwner::KERNEL) else {
+    let Some([page]) = allocate_current_frames::<1>() else {
         let _ = release_data_pages(value_first);
         return false;
     };
     let Some(address) = page.direct_map_address() else {
         let _ = release_data_pages(value_first);
-        let _ = memory::scrub_and_release_frames(FrameOwner::KERNEL, &[page]);
+        let _ = scrub_and_release_frame(page);
         return false;
     };
     let Some(node) = node_mut(handle) else {
         let _ = release_data_pages(value_first);
-        let _ = memory::scrub_and_release_frames(FrameOwner::KERNEL, &[page]);
+        let _ = scrub_and_release_frame(page);
         return false;
     };
     let mut stored_name = [0_u8; XATTR_NAME_CAPACITY];
@@ -1211,13 +1222,13 @@ where
             return None;
         };
         let Some(data) = data_page_mut(page) else {
-            let _ = memory::scrub_and_release_frames(FrameOwner::KERNEL, &[page]);
+            let _ = scrub_and_release_frame(page);
             let _ = release_data_pages(first);
             return None;
         };
         let length = remaining.min(DATA_CAPACITY);
         if !fill(&mut data.bytes[..length]) {
-            let _ = memory::scrub_and_release_frames(FrameOwner::KERNEL, &[page]);
+            let _ = scrub_and_release_frame(page);
             let _ = release_data_pages(first);
             return None;
         }
@@ -1225,7 +1236,7 @@ where
             first = page;
         } else {
             let Some(tail) = data_page_mut(last) else {
-                let _ = memory::scrub_and_release_frames(FrameOwner::KERNEL, &[page]);
+                let _ = scrub_and_release_frame(page);
                 let _ = release_data_pages(first);
                 return None;
             };
@@ -1268,9 +1279,7 @@ fn release_xattr_pages(mut page: FrameLease) -> bool {
             return false;
         };
         let previous = record.previous;
-        if !release_data_pages(record.value_first)
-            || !memory::scrub_and_release_frames(FrameOwner::KERNEL, &[page])
-        {
+        if !release_data_pages(record.value_first) || !scrub_and_release_frame(page) {
             return false;
         }
         page = previous;
@@ -1300,7 +1309,7 @@ fn release_data_pages(mut page: FrameLease) -> bool {
             return false;
         };
         let next = data.next;
-        if !memory::scrub_and_release_frames(FrameOwner::KERNEL, core::slice::from_ref(&page)) {
+        if !scrub_and_release_frame(page) {
             return false;
         }
         page = next;
@@ -1401,4 +1410,71 @@ fn live_mut() -> &'static mut Overlay {
 
 fn current_instance() -> usize {
     cpu::current_container_slot().unwrap_or(HOST_INSTANCE)
+}
+
+fn current_frame_policy() -> Result<Option<(FrameOwner, usize)>, ()> {
+    let Some(instance) = cpu::current_container_slot() else {
+        return Ok(None);
+    };
+    domain::container_domain_frame_policy(instance)
+        .map(Some)
+        .ok_or(())
+}
+
+fn allocate_current_frames<const N: usize>() -> Option<[FrameLease; N]> {
+    allocate_frames_with_policy(current_frame_policy())
+}
+
+fn allocate_frames_with_policy<const N: usize>(
+    policy: Result<Option<(FrameOwner, usize)>, ()>,
+) -> Option<[FrameLease; N]> {
+    match policy.ok()? {
+        Some((owner, limit)) => memory::allocate_frames_with_owner_limit::<N>(owner, limit),
+        None => memory::allocate_frames::<N>(FrameOwner::KERNEL),
+    }
+}
+
+fn scrub_and_release_frame(frame: FrameLease) -> bool {
+    memory::frame_owner(frame)
+        .is_some_and(|owner| memory::scrub_and_release_frames(owner, core::slice::from_ref(&frame)))
+}
+
+pub(crate) fn verify_frame_quota() -> bool {
+    let Some(first_owner) = FrameOwner::domain(0x0000_ffff_fffd_0001) else {
+        return false;
+    };
+    let Some(second_owner) = FrameOwner::domain(0x0000_ffff_fffd_0002) else {
+        return false;
+    };
+    let first_policy = Ok(Some((first_owner, 4)));
+    let second_policy = Ok(Some((second_owner, 1)));
+    let Some(mut first_frames) = allocate_frames_with_policy::<4>(first_policy) else {
+        return false;
+    };
+    let exhausted = memory::owner_live_frame_count(first_owner) == Some(4)
+        && allocate_frames_with_policy::<1>(first_policy).is_none()
+        && allocate_frames_with_policy::<1>(Err(())).is_none();
+    let Some([second_frame]) = allocate_frames_with_policy::<1>(second_policy) else {
+        let _ = memory::scrub_and_release_frames(first_owner, &first_frames);
+        return false;
+    };
+    let isolated = memory::owner_live_frame_count(second_owner) == Some(1);
+    let released = scrub_and_release_frame(first_frames[0]);
+    let replacement = allocate_frames_with_policy::<1>(first_policy);
+    if let Some([replacement]) = replacement {
+        first_frames[0] = replacement;
+    }
+    let restored = released
+        && replacement.is_some()
+        && memory::owner_live_frame_count(first_owner) == Some(4)
+        && memory::scrub_and_release_frames(first_owner, &first_frames)
+        && scrub_and_release_frame(second_frame)
+        && memory::owner_live_frame_count(first_owner) == Some(0)
+        && memory::owner_live_frame_count(second_owner) == Some(0);
+    let Some([host_frame]) = allocate_frames_with_policy::<1>(Ok(None)) else {
+        return false;
+    };
+    let host_fallback = memory::frame_owner(host_frame) == Some(FrameOwner::KERNEL)
+        && scrub_and_release_frame(host_frame);
+    exhausted && isolated && restored && host_fallback
 }

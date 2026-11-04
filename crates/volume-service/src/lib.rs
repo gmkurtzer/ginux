@@ -670,6 +670,66 @@ mod tests {
     }
 
     #[test]
+    fn identical_local_config_commit_performs_no_writes_or_flushes() {
+        struct CountingDevice {
+            inner: LargeMemoryDevice,
+            writes: usize,
+            flushes: usize,
+        }
+
+        impl BlockDevice for CountingDevice {
+            fn read_sector(&mut self, sector: usize, output: &mut [u8; SECTOR_SIZE]) -> bool {
+                self.inner.read_sector(sector, output)
+            }
+
+            fn write_sector(&mut self, sector: usize, input: &[u8; SECTOR_SIZE]) -> bool {
+                self.writes += 1;
+                self.inner.write_sector(sector, input)
+            }
+
+            fn flush(&mut self) -> bool {
+                self.flushes += 1;
+                self.inner.flush()
+            }
+        }
+
+        let mut device = CountingDevice {
+            inner: LargeMemoryDevice::new(),
+            writes: 0,
+            flushes: 0,
+        };
+        let first = commit_local_config(&mut device, b"first-config").expect("first commit");
+        assert!(device.writes > 0);
+        assert!(device.flushes > 0);
+        device.writes = 0;
+        device.flushes = 0;
+        let pending = device.inner.pending.clone();
+        let durable = device.inner.durable.clone();
+
+        let repeated = commit_local_config(&mut device, b"first-config").expect("identical commit");
+        assert_eq!(device.writes, 0);
+        assert_eq!(device.flushes, 0);
+        assert_eq!(repeated, first);
+        assert_eq!(device.inner.pending, pending);
+        assert_eq!(device.inner.durable, durable);
+
+        let changed = commit_local_config(&mut device, b"other-config").expect("changed commit");
+        assert_eq!(changed.generation, first.generation + 1);
+        assert_eq!(changed.length, b"other-config".len());
+        assert!(device.writes > 0);
+        assert!(device.flushes > 0);
+        assert_ne!(device.inner.pending, pending);
+        assert_ne!(device.inner.durable, durable);
+        device.inner.pending.clone_from(&device.inner.durable);
+        let mut output = [0; LOCAL_CONFIG_PAYLOAD_CAPACITY];
+        assert_eq!(
+            recover_local_config(&mut device, &mut output),
+            Ok(Some(changed))
+        );
+        assert_eq!(&output[..changed.length], b"other-config");
+    }
+
+    #[test]
     fn corrupt_local_config_is_rejected_without_modification() {
         let mut device = LargeMemoryDevice::new();
         commit_local_config(&mut device, b"persistent-settings").expect("config commit");

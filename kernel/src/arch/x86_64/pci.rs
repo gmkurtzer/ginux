@@ -290,7 +290,7 @@ impl VirtioNetworkDevice {
             .checked_add(u64::from(self.common_offset))?;
         let length = usize::try_from(self.common_length).ok()?;
         physical.checked_add(length as u64)?;
-        (length > COMMON_QUEUE_DEVICE).then_some((physical, length))
+        (length >= COMMON_QUEUE_DEVICE + size_of::<u64>()).then_some((physical, length))
     }
 
     pub(crate) fn device_region(self) -> Option<(u64, usize)> {
@@ -615,13 +615,19 @@ pub(crate) fn verify_parser_rejections(device: VirtioBlockDevice) -> bool {
 
 pub(crate) fn verify_network_parser_rejections(device: VirtioNetworkDevice) -> bool {
     let config = unsafe { read_config_space(device.bus, device.device, device.function) };
-    verify_parser_rejections_for(
-        &config,
-        VIRTIO_NETWORK_DEVICE,
-        device.bus,
-        device.device,
-        device.function,
-    )
+    let mut undersized_common = device;
+    undersized_common.common_length = (COMMON_QUEUE_DEVICE + size_of::<u64>() - 1) as u32;
+    let mut minimum_common = device;
+    minimum_common.common_length = (COMMON_QUEUE_DEVICE + size_of::<u64>()) as u32;
+    undersized_common.common_region().is_none()
+        && minimum_common.common_region().is_some()
+        && verify_parser_rejections_for(
+            &config,
+            VIRTIO_NETWORK_DEVICE,
+            device.bus,
+            device.device,
+            device.function,
+        )
 }
 
 fn verify_parser_rejections_for(
@@ -984,6 +990,27 @@ fn set_msix_entry_mask_raw(
     read_mmio_u32(entry + 12) == if masked { MSIX_VECTOR_MASK } else { 0 }
 }
 
+fn msix_vector_is_pending(target: MsixTarget, mapping: MmioMapping, index: u16) -> Option<bool> {
+    let msix = target.capability;
+    if index >= msix.vector_count {
+        return None;
+    }
+    let (pba, pba_length) = region_bounds(msix.pba_bar_address, msix.pba_offset, msix.pba_length)?;
+    let word = u32::from(index) / MSIX_PBA_BITS_PER_ENTRY;
+    let offset = usize::try_from(word.checked_mul(MSIX_PBA_ENTRY_SIZE)?).ok()?;
+    if offset
+        .checked_add(MSIX_PBA_ENTRY_SIZE as usize)
+        .is_none_or(|end| end > pba_length)
+    {
+        return None;
+    }
+    let address = pba
+        .checked_add(offset as u64)
+        .and_then(|physical| mapping.address(physical, MSIX_PBA_ENTRY_SIZE as usize))?;
+    let bit = u32::from(index) % MSIX_PBA_BITS_PER_ENTRY;
+    Some(read_mmio_u64(address) & (1_u64 << bit) != 0)
+}
+
 fn install_virtio_interrupt(apic: &LocalApic) -> bool {
     install_virtio_interrupt_at(apic, VIRTIO_INTERRUPT_VECTOR)
 }
@@ -1040,6 +1067,51 @@ fn retire_virtio_interrupt_at(apic: &LocalApic, vector: u8) -> bool {
             .store(0, Ordering::SeqCst);
     }
     cleared
+}
+
+fn drain_pending_virtio_interrupt(
+    device: VirtioBlockDevice,
+    mapping: MmioMapping,
+    apic: &LocalApic,
+) -> bool {
+    match msix_vector_is_pending(device.msix_target(), mapping, 0) {
+        Some(false) => return true,
+        Some(true) => {}
+        None => return false,
+    }
+    if !set_msix_entry_mask(device, mapping, 0, false) || !set_msix_control(device, true, false) {
+        return false;
+    }
+    let delivered = poll_for_virtio_interrupt();
+    let function_masked = set_msix_control(device, true, true);
+    let entry_masked = set_msix_entry_mask(device, mapping, 0, true);
+    let drained = delivered
+        && PCI_INTERRUPTS.virtio_count.load(Ordering::SeqCst) == 1
+        && msix_vector_is_pending(device.msix_target(), mapping, 0) == Some(false)
+        && apic.vector_is_idle(VIRTIO_INTERRUPT_VECTOR);
+    PCI_INTERRUPTS.virtio_fired.store(false, Ordering::SeqCst);
+    PCI_INTERRUPTS.virtio_count.store(0, Ordering::SeqCst);
+    function_masked && entry_masked && drained
+}
+
+fn poll_for_virtio_interrupt() -> bool {
+    unsafe {
+        asm!("sti", options(nomem, nostack));
+        let mut delivered = false;
+        for _ in 0..QUEUE_POLL_LIMIT {
+            if PCI_INTERRUPTS.virtio_count.load(Ordering::SeqCst) != 0 {
+                delivered = true;
+                break;
+            }
+            core::hint::spin_loop();
+        }
+        asm!("cli", options(nomem, nostack));
+        delivered
+    }
+}
+
+fn wait_for_interrupt() {
+    unsafe { asm!("sti", "hlt", "cli", options(nomem, nostack)) };
 }
 
 extern "sysv64" fn virtio_interrupt_handler(_frame: *mut UserInterruptFrame) {
@@ -1734,7 +1806,7 @@ pub(crate) fn complete_isolated_network_interrupt_wait(
     while !PCI_INTERRUPTS.virtio_fired.load(Ordering::SeqCst)
         && !timer::device_wait_timed_out(domain, request)
     {
-        unsafe { asm!("sti", "hlt", "cli", options(nomem, nostack)) };
+        wait_for_interrupt();
     }
     let function_masked = set_msix_control_raw(device.msix_target(), true, true);
     let entry_masked = set_msix_entry_mask_raw(device.msix_target(), msix_mapping, queue, true);
@@ -3712,7 +3784,8 @@ pub(crate) fn arm_isolated_device_interrupt(
     }
     let armed = set_msix_control(device, true, true)
         && set_pci_command(device, true)
-        && bus_master_is_enabled(device);
+        && bus_master_is_enabled(device)
+        && drain_pending_virtio_interrupt(device, msix_mapping, apic);
     if armed {
         PCI_INTERRUPTS.virtio_domain.store(domain, Ordering::SeqCst);
         PCI_INTERRUPTS
@@ -3808,7 +3881,7 @@ pub(crate) fn complete_isolated_interrupt_wait(
     {
         // STI's interrupt shadow covers the following HLT, so an interrupt
         // cannot be lost between the readiness test and sleeping.
-        unsafe { asm!("sti", "hlt", "cli", options(nomem, nostack)) };
+        wait_for_interrupt();
     }
     let function_masked = set_msix_control(device, true, true);
     let entry_masked = set_msix_entry_mask(device, msix_mapping, 0, true);

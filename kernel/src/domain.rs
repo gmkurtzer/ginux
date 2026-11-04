@@ -1507,6 +1507,17 @@ pub(crate) fn container_domain_limits(domain_raw: u64) -> Option<(u16, u64)> {
     (domain.role == Role::Container).then_some((domain.cpu_limit, domain.memory_limit_mib))
 }
 
+pub(crate) fn container_domain_frame_policy(
+    container_slot: usize,
+) -> Option<(crate::memory::FrameOwner, usize)> {
+    const FRAMES_PER_MIB: u64 = 1024 * 1024 / 4096;
+    let domain_raw = container_domain_for_slot(container_slot)?;
+    let (_, memory_limit_mib) = container_domain_limits(domain_raw)?;
+    let frames =
+        usize::try_from(memory_limit_mib.saturating_mul(FRAMES_PER_MIB)).unwrap_or(usize::MAX);
+    Some((crate::memory::FrameOwner::domain(domain_raw)?, frames))
+}
+
 pub(crate) fn configure_container_domain_limits(
     domain_raw: u64,
     cpu_limit: u16,
