@@ -6,8 +6,9 @@ GINUS := target/$(X86_TARGET)/release/ginus
 PAYLOAD := target/$(X86_TARGET)/release/managed-payload
 BASELINE := target/$(X86_TARGET)/release/baseline-runner
 RUNTIME_FIXTURE := target/$(X86_TARGET)/release/runtime-fixture
+PROCESS_NATIVE_FIXTURE := target/$(X86_TARGET)/release/process-native-fixture
 
-.PHONY: doctor host-image-fetch host-image-verify host-boot-test image-helper-fetch image-prepare domain-image-fetch domain-image-verify domain-image-prepare test-image test-oci-image test-oci-layers test-vfs test-native-vfs image-cache-clean build check test test-unit test-intercept test-runtime test-config test-domain test-process test-devices test-block test-network bench-baseline bench-block bench-network demo-gate-1 demo-gate-2 demo-gate-3 demo-gate-4 demo-gate-5 demo-gate-6 clean
+.PHONY: doctor host-image-fetch host-image-verify host-boot-test image-helper-fetch image-prepare domain-image-fetch domain-image-verify domain-image-prepare test-image test-oci-image test-oci-layers test-vfs test-native-vfs image-cache-clean build check test test-unit test-intercept test-runtime test-config test-domain test-process test-devices test-block test-network bench-baseline bench-block bench-network demo-gate-1 demo-gate-2 demo-gate-3 demo-gate-4 demo-gate-5 demo-gate-6 demo-gate-7 clean
 
 doctor:
 	@./scripts/doctor.sh
@@ -53,6 +54,7 @@ build:
 	cargo build -p managed-payload --target $(X86_TARGET) --release
 	cargo build -p baseline-runner --target $(X86_TARGET) --release
 	cargo build -p runtime-fixture --target $(X86_TARGET) --release
+	cargo build -p process-native-fixture --target $(X86_TARGET) --release
 
 check:
 	cargo fmt --check
@@ -67,6 +69,7 @@ check:
 	cargo clippy -p ginus-vfs --all-targets -- -D warnings
 	cargo clippy -p ginus-vfs-index --all-targets -- -D warnings
 	cargo clippy -p runtime-fixture --bin runtime-fixture --target $(X86_TARGET) --release -- -D warnings
+	cargo clippy -p process-native-fixture --bin process-native-fixture --target $(X86_TARGET) --release -- -D warnings
 
 test-unit:
 	cargo test -p ginus-core
@@ -110,7 +113,7 @@ test-vfs: build domain-image-prepare
 test-native-vfs: build domain-image-prepare
 	@./scripts/with-rocky-host.sh ./scripts/test-native-vfs.sh
 
-test: check test-unit test-intercept test-runtime test-config test-domain test-image test-devices
+test: check test-unit test-intercept test-runtime test-config test-domain test-image test-devices test-process
 
 bench-baseline: build
 	@./scripts/with-rocky-host.sh ./scripts/bench-baseline.sh
@@ -138,6 +141,9 @@ demo-gate-5: doctor build domain-image-prepare
 
 demo-gate-6: doctor build
 	@./scripts/with-rocky-host.sh ./scripts/demo-gate-6.sh
+
+demo-gate-7: doctor build
+	@./scripts/with-rocky-host.sh ./scripts/demo-gate-7.sh
 
 clean:
 	cargo clean

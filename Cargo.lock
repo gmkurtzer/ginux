@@ -57,5 +57,9 @@ name = "managed-payload"
 version = "0.1.0"
 
 [[package]]
+name = "process-native-fixture"
+version = "0.1.0"
+
+[[package]]
 name = "runtime-fixture"
 version = "0.1.0"

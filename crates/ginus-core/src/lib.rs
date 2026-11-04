@@ -2,7 +2,9 @@
 
 pub const SYS_WRITE: u64 = 1;
 pub const SYS_GETPID: u64 = 39;
+pub const SYS_FORK: u64 = 57;
 pub const SYS_EXIT: u64 = 60;
+pub const SYS_WAIT4: u64 = 61;
 pub const SYS_UNAME: u64 = 63;
 pub const SYS_GETUID: u64 = 102;
 pub const SYS_GETGID: u64 = 104;
@@ -53,7 +55,9 @@ pub const fn balanced_surface(syscall: u64) -> BalancedSurface {
             BalancedSurface::ImageRead
         }
         9 | 10 | 11 | 12 | 28 => BalancedSurface::Memory,
-        13 | 14 | 99 | 158 | 202 | 218 | 273 | 302 | 334 => BalancedSurface::Task,
+        13 | 14 | SYS_FORK | SYS_WAIT4 | 99 | 158 | 202 | 218 | 273 | 302 | 334 => {
+            BalancedSurface::Task
+        }
         1 | 20 => BalancedSurface::Console,
         318 => BalancedSurface::Random,
         SYS_GETPID | SYS_GETUID | SYS_GETGID | SYS_GETEUID | SYS_GETEGID | SYS_GETPPID
@@ -108,6 +112,7 @@ pub const fn balanced_arguments_allowed(syscall: u64, arg0: u64, arg1: u64, arg2
         257 => arg2 & (O_ACCMODE | MUTATING_OPEN_FLAGS) == 0,
         302 => arg0 == 0 && arg1 <= 15,
         318 => arg2 <= 256,
+        SYS_WAIT4 => arg0 == u64::MAX || arg0 > 0,
         _ => true,
     }
 }
@@ -137,6 +142,8 @@ mod tests {
         assert_eq!(balanced_surface(257), BalancedSurface::ImageRead);
         assert_eq!(balanced_surface(9), BalancedSurface::Memory);
         assert_eq!(balanced_surface(1), BalancedSurface::Console);
+        assert_eq!(balanced_surface(SYS_FORK), BalancedSurface::Task);
+        assert_eq!(balanced_surface(SYS_WAIT4), BalancedSurface::Task);
         assert_eq!(decide_balanced(0).action, Action::Mediate);
         assert_eq!(decide_balanced(SYS_GETPID).action, Action::Emulate);
         assert_eq!(balanced_identity_result(SYS_GETUID), Some(0));

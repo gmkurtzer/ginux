@@ -10,6 +10,7 @@ members = [
     "crates/ginus-vfs",
     "crates/ginus-vfs-index",
     "crates/managed-payload",
+    "crates/process-native-fixture",
     "crates/runtime-fixture",
 ]
 resolver = "2"
