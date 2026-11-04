@@ -9,7 +9,10 @@
 >
 > Ginux is pivoting from a standalone operating-system kernel to a userspace
 > kernel. Standalone-kernel development is frozen except for resolving pull
-> requests and issues that were already open by the cutoff.
+> requests and issues that were already open by the cutoff. The standalone
+> kernel accomplished the research objective it was created to test. Anyone
+> who wants to continue developing it is welcome to fork the repository and
+> keep going; this upstream project will not continue that direction.
 
 ## Project transition
 
@@ -88,12 +91,14 @@ The intended differentiators are:
   the exact workloads and interfaces demonstrated to work instead of treating
   “Linux compatible” as an unlimited promise.
 
-This pivot is also an important result of the original AI experiment. AI made
-it practical to build ambitious prototype code, test an architectural idea,
-learn from the running system, and discard the wrong destination without
-treating the prototype itself as the product. The most valuable output was not
-simply a large body of kernel code; it was the ability to reach this conclusion
-through a working implementation.
+This pivot is also an important result of the original AI experiment. The work
+used [Human-Directed Agentic Engineering (HDAE)](https://github.com/gmkurtzer/hdae)
+to combine human architecture and acceptance criteria with agent-executed
+implementation and test loops. AI made it practical to build ambitious
+prototype code, test an architectural idea, learn from the running system, and
+discard the wrong destination without treating the prototype itself as the
+product. The most valuable output was not simply a large body of kernel code;
+it was the ability to reach this conclusion through a working implementation.
 
 The standalone-kernel phase is therefore ending. During this transition:
 
@@ -108,9 +113,10 @@ The standalone-kernel phase is therefore ending. During this transition:
   complete.
 
 The standalone kernel will remain public and available to study, build, and
-fork. Anyone interested in continuing its development is warmly encouraged to
-do so. Please let us know about an active fork so that it can be linked from
-this README and made discoverable to others interested in that direction.
+fork. Anyone interested in continuing its development should fork it and keep
+going; more power to them. Please let us know about an active fork so that it
+can be linked from this README and made discoverable to others interested in
+that direction.
 
 ### The new direction: Ginux Userspace
 
