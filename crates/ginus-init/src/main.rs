@@ -4,12 +4,14 @@
 use core::arch::{asm, global_asm};
 use core::panic::PanicInfo;
 use ginus_core::{decide, Action, SYS_EXIT, SYS_GETPID, SYS_UNAME, SYS_WRITE};
+use ginus_runtime::{execute, AddressSpace, AuditAction, LoadError};
 
 global_asm!(
     ".global _start",
     ".type _start,@function",
     "_start:",
     "xor %rbp, %rbp",
+    "mov %rsp, %rdi",
     "andq $-16, %rsp",
     "call rust_main",
     "ud2",
@@ -17,11 +19,16 @@ global_asm!(
 );
 
 const SYS_WRITE_HOST: usize = 1;
+const SYS_READ_HOST: usize = 0;
+const SYS_CLOSE_HOST: usize = 3;
 const SYS_FORK: usize = 57;
 const SYS_EXECVE: usize = 59;
 const SYS_EXIT_HOST: usize = 60;
 const SYS_WAIT4: usize = 61;
 const SYS_PTRACE: usize = 101;
+const SYS_OPENAT_HOST: usize = 257;
+const AT_FDCWD: usize = (-100isize) as usize;
+const O_RDONLY: usize = 0;
 
 const PTRACE_TRACEME: usize = 0;
 const PTRACE_PEEKDATA: usize = 2;
@@ -36,6 +43,9 @@ const PTRACE_O_EXITKILL: usize = 1 << 20;
 const EPERM: i64 = 1;
 const ENOSYS: i64 = 38;
 const VIRTUAL_PID: u64 = 4242;
+const MAX_ELF_SIZE: usize = 64 * 1024;
+
+static mut ELF_BYTES: [u8; MAX_ELF_SIZE] = [0; MAX_ELF_SIZE];
 
 #[repr(C)]
 struct UserRegs {
@@ -93,7 +103,35 @@ unsafe extern "C" fn memcpy(
 }
 
 #[no_mangle]
-extern "C" fn rust_main() -> ! {
+unsafe extern "C" fn memset(
+    destination: *mut core::ffi::c_void,
+    value: i32,
+    length: usize,
+) -> *mut core::ffi::c_void {
+    let destination_bytes = destination.cast::<u8>();
+    let mut index = 0;
+    while index < length {
+        core::ptr::write_volatile(destination_bytes.add(index), value as u8);
+        index += 1;
+    }
+    destination
+}
+
+#[no_mangle]
+extern "C" fn rust_main(initial_stack: *const usize) -> ! {
+    let argc = unsafe { *initial_stack };
+    let argv = unsafe { initial_stack.add(1) };
+    if argc >= 3 {
+        let command = unsafe { *argv.add(1) as *const u8 };
+        if c_string_equals(command, b"runtime") {
+            let path = unsafe { *argv.add(2) as *const u8 };
+            runtime_main(path);
+        }
+    }
+    gate1_main()
+}
+
+fn gate1_main() -> ! {
     line(b"GINUS: interception platform=ptrace-sysemu");
 
     let child = unsafe { syscall0(SYS_FORK) };
@@ -105,6 +143,127 @@ extern "C" fn rust_main() -> ! {
     }
 
     supervise(child as usize)
+}
+
+fn runtime_main(path: *const u8) -> ! {
+    line(b"GINUS_RUNTIME: backend=x86_64-interpreter");
+    let length = read_file(path);
+    let elf =
+        unsafe { core::slice::from_raw_parts(core::ptr::addr_of!(ELF_BYTES).cast::<u8>(), length) };
+    let mut memory = AddressSpace::new();
+    let loaded = match memory.load_elf(elf) {
+        Ok(loaded) => loaded,
+        Err(error) => runtime_load_fail(error),
+    };
+    let stack = match memory.build_stack(&[b"runtime-fixture", b"fixture-arg"], &[b"GINUS_GATE=3"])
+    {
+        Ok(stack) => stack,
+        Err(_) => runtime_fail(b"initial stack rejected"),
+    };
+    line(b"GINUS_RUNTIME: elf=loaded class=ELF64 machine=x86_64 type=static");
+    line(b"GINUS_RUNTIME: memory=ginus-owned host-pointers=unreachable protections=enforced");
+    line(b"GINUS_RUNTIME: stack=linux-x86_64 argc=2 envc=1");
+
+    let report = match execute(&memory, loaded.entry, stack, 10_000) {
+        Ok(report) => report,
+        Err(_) => runtime_fail(b"interpreter execution failed"),
+    };
+    if report.exit_code != 0 || &report.output[..report.output_len] != b"fixture-argGINUS_GATE=3" {
+        runtime_fail(b"managed fixture reported failure");
+    }
+    write_all(b"GINUS_RUNTIME: managed-output=");
+    write_all(&report.output[..report.output_len]);
+    write_all(b"\n");
+    for record in report.audit.iter().take(report.audit_len) {
+        write_all(b"GINUS_AUDIT: sequence=");
+        write_u64(record.sequence as u64);
+        write_all(b" syscall=");
+        write_u64(record.syscall);
+        write_all(b" action=");
+        write_all(match record.action {
+            AuditAction::Emulate => b"emulate",
+            AuditAction::Mediate => b"mediate",
+            AuditAction::Deny => b"deny",
+        });
+        write_all(b" result=");
+        write_i64(record.result);
+        write_all(b"\n");
+    }
+    if report.audit_len != 5
+        || report.audit[2].syscall != 999
+        || report.audit[2].action != AuditAction::Deny
+        || report.audit[2].result != -38
+    {
+        runtime_fail(b"expected deny audit missing");
+    }
+    line(b"GINUS_RUNTIME: direct-host-syscalls=impossible interpreted-syscall=internal-event");
+    line(b"GATE3: PASS");
+    exit_process(0)
+}
+
+fn read_file(path: *const u8) -> usize {
+    let descriptor = unsafe { syscall4(SYS_OPENAT_HOST, AT_FDCWD, path as usize, O_RDONLY, 0) };
+    if descriptor < 0 {
+        runtime_fail(b"fixture open failed");
+    }
+    let mut length = 0usize;
+    while length < MAX_ELF_SIZE {
+        let result = unsafe {
+            syscall3(
+                SYS_READ_HOST,
+                descriptor as usize,
+                core::ptr::addr_of_mut!(ELF_BYTES).cast::<u8>().add(length) as usize,
+                MAX_ELF_SIZE - length,
+            )
+        };
+        if result < 0 {
+            let _ = unsafe { syscall1(SYS_CLOSE_HOST, descriptor as usize) };
+            runtime_fail(b"fixture read failed");
+        }
+        if result == 0 {
+            break;
+        }
+        length += result as usize;
+    }
+    let _ = unsafe { syscall1(SYS_CLOSE_HOST, descriptor as usize) };
+    if length == 0 || length == MAX_ELF_SIZE {
+        runtime_fail(b"fixture size invalid");
+    }
+    length
+}
+
+fn runtime_load_fail(error: LoadError) -> ! {
+    write_all(b"GATE3: FAIL: elf rejected reason=");
+    line(match error {
+        LoadError::Truncated => b"truncated",
+        LoadError::InvalidMagic => b"invalid-magic",
+        LoadError::UnsupportedClass => b"unsupported-class",
+        LoadError::UnsupportedEndian => b"unsupported-endian",
+        LoadError::UnsupportedType => b"unsupported-type",
+        LoadError::UnsupportedMachine => b"unsupported-machine",
+        LoadError::InvalidProgramHeaders => b"invalid-program-headers",
+        LoadError::UnsupportedInterpreter => b"dynamic-interpreter",
+        LoadError::InvalidSegment => b"invalid-segment",
+        LoadError::SegmentOverlap => b"segment-overlap",
+        LoadError::WriteExecuteSegment => b"write-execute-segment",
+        LoadError::InvalidEntry => b"invalid-entry",
+    });
+    exit_process(1)
+}
+
+fn runtime_fail(reason: &[u8]) -> ! {
+    write_all(b"GATE3: FAIL: ");
+    line(reason);
+    exit_process(1)
+}
+
+fn c_string_equals(value: *const u8, expected: &[u8]) -> bool {
+    for (index, byte) in expected.iter().enumerate() {
+        if unsafe { *value.add(index) } != *byte {
+            return false;
+        }
+    }
+    unsafe { *value.add(expected.len()) == 0 }
 }
 
 fn tracee() -> ! {
@@ -264,6 +423,30 @@ fn write_all(bytes: &[u8]) {
             return;
         }
         offset += result as usize;
+    }
+}
+
+fn write_u64(mut value: u64) {
+    let mut buffer = [0u8; 20];
+    let mut index = buffer.len();
+    if value == 0 {
+        write_all(b"0");
+        return;
+    }
+    while value != 0 {
+        index -= 1;
+        buffer[index] = b'0' + (value % 10) as u8;
+        value /= 10;
+    }
+    write_all(&buffer[index..]);
+}
+
+fn write_i64(value: i64) {
+    if value < 0 {
+        write_all(b"-");
+        write_u64(value.unsigned_abs());
+    } else {
+        write_u64(value as u64);
     }
 }
 

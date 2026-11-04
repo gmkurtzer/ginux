@@ -15,8 +15,20 @@ name = "ginus-init"
 version = "0.1.0"
 dependencies = [
  "ginus-core",
+ "ginus-runtime",
+]
+
+[[package]]
+name = "ginus-runtime"
+version = "0.1.0"
+dependencies = [
+ "ginus-core",
 ]
 
 [[package]]
 name = "managed-payload"
+version = "0.1.0"
+
+[[package]]
+name = "runtime-fixture"
 version = "0.1.0"

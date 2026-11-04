@@ -10,6 +10,8 @@ rm -rf \
     build/rocky-host.pid \
     build/rocky-host-serial.log \
     build/gate1-intercept.log \
+    build/gate3-runtime.log \
+    build/gate3-malformed.log \
     build/bench-baseline.log \
     build/bench-baseline.csv \
     build/bench-baseline-summary.csv \

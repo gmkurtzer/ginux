@@ -58,17 +58,22 @@ Development and verification run on a macOS arm64 host through QEMU TCG
 emulating a normally booted Rocky Linux 10 x86-64 host. Host systemd remains
 real PID 1 and Ginus runs as an ordinary process inside that environment.
 Ginus acts as the application kernel for its managed userspace rather than
-booting another guest Linux kernel beneath the domain. Gate 1 selects and
-proves an emulation-compatible syscall-trap mechanism, address-space control,
-and prevention of direct host syscalls. KVM acceleration is a deferred
-optimization and is not an initial acceptance requirement.
+booting another guest Linux kernel beneath the domain. The security-focused
+baseline is a Ginus x86-64 instruction interpreter: managed registers and
+memory are Ginus data, and a managed `syscall` instruction becomes an internal
+dispatch event without entering the host kernel. Gate 1 `PTRACE_SYSEMU`
+evidence remains a prototype for a possible performance-focused backend, not
+the secure baseline. KVM acceleration is deferred and is not an initial
+acceptance requirement.
 
 ### Domain memory and task model
 
 Ginus owns managed address spaces, mappings, executable loading, task and
 thread identities, scheduling-facing state, signals, clocks, credentials,
 capabilities, and lifecycle. Managed PIDs and addresses are not authority to
-host processes or memory.
+host processes or memory. In the interpreter backend, managed virtual addresses
+index only validated Ginus-owned memory and permission metadata; they are never
+dereferenced as host pointers.
 
 ### Contract dispatcher
 
@@ -118,11 +123,13 @@ model.
 ### Configuration and lifecycle
 
 Each domain has a versioned configuration containing identity, root image,
-init, environment, resource limits, contract profile, storage, devices,
-networking, audit behavior, and failure policy. Ginus validates and normalizes
-the complete configuration before starting managed code. The effective
-configuration is immutable evidence for that domain instance; mutable runtime
-controls, if later added, require explicit authorization and audit semantics.
+init, environment, resource limits, execution profile, contract profile,
+storage, devices, networking, audit behavior, and failure policy. The
+execution profile makes the performance/security tradeoff and backend trust
+boundary explicit. Ginus validates and normalizes the complete configuration
+before starting managed code. The effective configuration is immutable
+evidence for that domain instance; mutable runtime controls, if later added,
+require explicit authorization and audit semantics.
 
 ### Observability and benchmarking
 
@@ -134,8 +141,6 @@ and idle overhead.
 
 ## Important open decisions
 
-- Exact emulation-compatible execution and syscall-trap mechanism after Gate 1
-  evidence.
 - Rocky QCOW2 version, checksum, preparation tool, and virtual-root backing.
 - Configuration serialization format and command-line interface.
 - Initial network backend and packet mediation boundary.

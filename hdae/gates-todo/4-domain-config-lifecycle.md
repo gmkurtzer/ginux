@@ -14,12 +14,14 @@ lifecycle.
 
 - Define a versioned configuration schema and normalization rules.
 - Cover domain identity, prepared root reference, init and arguments,
-  environment, CPU and memory limits, contract profile, storage, devices,
-  networking, audit behavior, and failure policy.
+  environment, CPU and memory limits, execution profile/backend, contract
+  profile, storage, devices, networking, audit behavior, and failure policy.
+- Make the security/performance tradeoff and backend trust boundary explicit;
+  unsupported execution profiles fail before managed code starts.
 - Validate the complete configuration before managed execution begins.
 - Retain and expose the normalized effective configuration and lifecycle state.
 - Implement one domain per Ginus process for the initial milestone.
-- Add bounded host-PID-1 signal, child-reaping, shutdown, and fatal-startup
+- Add bounded host-process signal, child-reaping, shutdown, and fatal-startup
   behavior needed by the lifecycle harness.
 
 ## Non-goals
@@ -50,8 +52,8 @@ lifecycle.
   current state and effective configuration.
 - Startup failure and requested stop release all resources acquired by the
   lifecycle implementation and leave no runnable managed task.
-- Host-PID-1 signal and reaping tests demonstrate deterministic shutdown and no
-  zombie leakage for the tested process model.
+- Host-process signal and reaping tests demonstrate deterministic shutdown and
+  no zombie leakage for the tested process model.
 - Configuration never grants an implicit host device, descriptor, path, or
   contract capability.
 - `make demo-gate-4` lets a human inspect normalized configuration, start and
@@ -63,7 +65,7 @@ lifecycle.
   unknown-field, unsupported-feature, and fail-closed tests pass.
 - `make test-domain` -> create/start/inspect/stop/failure/cleanup state-machine
   tests pass.
-- PID-1 harness test -> expected signals are handled, children are reaped, and
+- Host-process harness test -> expected signals are handled, children are reaped, and
   shutdown returns the expected machine-checkable status.
 - `make test` with network disabled -> exits zero.
 - `make demo-gate-4` -> performs the documented valid and invalid lifecycle

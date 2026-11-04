@@ -7,8 +7,10 @@
   https://github.com/gmkurtzer/usshim/pull/1 and is not merged.
 - Gate 2 is accepted and closed. It remains delivered in open
   https://github.com/gmkurtzer/usshim/pull/2 and is not merged.
-- Gate 3 is active on dedicated branch `hdae/execution-kernel`, stacked on the
-  accepted Gate 2 state while its intended eventual base remains `main`.
+- Gate 3 is accepted and closed. It remains delivered on dedicated branch
+  `hdae/execution-kernel`, stacked on the accepted Gate 2 state while its
+  intended eventual base remains `main`, in open
+  https://github.com/gmkurtzer/usshim/pull/3.
 - Authoritative name: Ginus (Ginux Userspace).
 - Runtime isolation unit: domain.
 - Policy unit: versioned contract.
@@ -80,11 +82,22 @@ scope, threat model, and invariants.
   explicitly stated that Ginus execution, VFS, and systemd boot are not Gate 2
   evidence. The revised demonstration passed on 2026-11-03.
 - Human accepted Gate 2 on 2026-11-03 and directed advancement to Gate 3.
+- Gate 3 implemented the security-focused x86-64 interpreter, Ginus-owned
+  memory/permissions, bounded static ELF loader, Linux initial stack, central
+  syscall events, output mediation, audit records, and fail-closed errors.
+  Six runtime unit tests, `make test-runtime`, `make demo-gate-3`, and aggregate
+  `make test` passed. The interpreted fixture emitted its argument/environment,
+  syscall 999 returned `-ENOSYS`, virtual `getpid` returned 4242, exit returned
+  zero, and a truncated ELF was rejected before execution.
+- Human accepted Gate 3 on 2026-11-03. Gate 4 has not started.
 
 ## Open decisions and limitations
 
-- `PTRACE_SYSEMU` is accepted only as the Gate 1 bootstrap experiment. The
-  final Ginus execution/task/memory design remains a Gate 3 decision.
+- Human direction selected the security-focused full x86-64 interpreter as the
+  Gate 3 baseline. Managed memory and registers are Ginus data, and managed
+  `syscall` instructions become internal events. Gate 4 will expose execution
+  profile/backend selection so future performance-focused domains can make a
+  different, explicitly documented trust tradeoff.
 - Rocky host image is pinned to official Rocky 10.2 GenericCloud build
   10.2-20260525.0. Gate 2 selected a pinned, network-disabled
   Docker/LinuxKit helper that mounts a temporary raw conversion read-only;
@@ -98,17 +111,16 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Create the Gate 3 branch from accepted Gate 2 state, implement the bounded ELF
-loader, domain memory model, syscall ABI/dispatcher, audit and denial paths,
-then verify them through `make test-runtime` and `make demo-gate-3`.
+Provide the requested complete gate summary. Do not begin Gate 4 until the
+human explicitly directs advancement.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 3, execution kernel; implementation starting
-- Last evidence: revised, explicit eight-check Gate 2 demo passed and Gate 2
-  was accepted on 2026-11-03
-- Required human decision: none until the Gate 3 checkpoint unless execution
-  evidence forces a material architecture change
+- Active gate: none; Gate 3 is accepted and closed, and Gate 4 is the next
+  planned checkpoint but has not started
+- Last evidence: Gate 3 demo and complete aggregate regression suite passed on
+  2026-11-03
+- Required human decision: whether to begin Gate 4
