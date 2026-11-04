@@ -18795,7 +18795,26 @@ fn verify_linux_memfd_seals() -> bool {
         && duplicated < LINUX_DESCRIPTOR_TABLE_LIMIT
         && linux_descriptor_fcntl(descriptor, LINUX_F_GET_SEALS, 0) == 0
         && linux_regular_file_write_at(descriptor, mapping + 64, 4, 0) == 4;
-    let shared = initial
+    // SEEK_DATA/SEEK_HOLE, keep-size fallocate() and pwrite() with O_APPEND.
+    let state = linux_device_descriptor(descriptor);
+    let keep_punch = LINUX_FALLOC_FL_KEEP_SIZE | LINUX_FALLOC_FL_PUNCH_HOLE;
+    let mut punched = [0_u8; 5];
+    let file_io = initial
+        && linux_regular_file_seek(descriptor, state, 1, LINUX_SEEK_DATA) == 1
+        && linux_regular_file_seek(descriptor, state, 1, LINUX_SEEK_HOLE) == 4
+        && linux_regular_file_seek(descriptor, state, 4, LINUX_SEEK_DATA) == LINUX_ENXIO
+        && linux_fallocate(descriptor, LINUX_FALLOC_FL_PUNCH_HOLE, 0, 1) == LINUX_EOPNOTSUPP
+        && linux_fallocate(descriptor, LINUX_FALLOC_FL_KEEP_SIZE, 0, 64) == 0
+        && linux_fallocate(descriptor, keep_punch, 1, 2) == 0
+        && linux_descriptor_fcntl(descriptor, LINUX_F_SETFL, LINUX_O_APPEND) == 0
+        && linux_regular_file_write_at(descriptor, mapping + 64, 1, 0) == 1
+        && linux_regular_file_read_at(descriptor, mapping + 128, 8, 0) == 5
+        && copy_from_linux_user(mapping + 128, &mut punched)
+        && punched == *b"d\0\0ad"
+        && linux_descriptor_fcntl(descriptor, LINUX_F_SETFL, 0) == 0
+        && linux_ftruncate(descriptor, 4) == 0
+        && linux_regular_file_write_at(descriptor, mapping + 64, 4, 0) == 4;
+    let shared = file_io
         && linux_descriptor_fcntl(duplicated, LINUX_F_ADD_SEALS, LINUX_F_SEAL_GROW.into()) == 0
         && linux_descriptor_fcntl(descriptor, LINUX_F_GET_SEALS, 0) == u64::from(LINUX_F_SEAL_GROW)
         && linux_regular_file_write_at(descriptor, mapping + 64, 4, 0) == 4
@@ -27192,11 +27211,17 @@ fn linux_remove_empty_cgroup_controls(directory: crate::linux_overlay::Handle) -
 
 fn linux_ftruncate(descriptor: u64, length: u64) -> u64 {
     let descriptor = u64::from(descriptor as u32);
-    let state = linux_device_descriptor(descriptor);
-    if state & 3 != LINUX_DESCRIPTOR_OUTPUT && state & 3 != 3 {
+    // ksys_ftruncate() checks the length before the descriptor, and
+    // do_ftruncate() answers EINVAL for a pipe or a descriptor not open for
+    // writing (fs/open.c:199-203, 170).
+    if length > i64::MAX as u64 {
+        return LINUX_EINVAL;
+    }
+    if !linux_descriptor_open(descriptor) || linux_path_descriptor(descriptor) {
         return LINUX_EBADF;
     }
-    if length > i64::MAX as u64 {
+    let state = linux_device_descriptor(descriptor);
+    if state & 3 != LINUX_DESCRIPTOR_OUTPUT && state & 3 != 3 || linux_pipe_descriptor(descriptor) {
         return LINUX_EINVAL;
     }
     let handle = match linux_copy_up_descriptor(descriptor) {
@@ -27228,15 +27253,32 @@ fn linux_ftruncate(descriptor: u64, length: u64) -> u64 {
 fn linux_fallocate(descriptor: u64, mode: u64, offset: u64, length: u64) -> u64 {
     let descriptor = u64::from(descriptor as u32);
     let mode = u64::from(mode as u32);
+    if !linux_descriptor_open(descriptor) || linux_path_descriptor(descriptor) {
+        return LINUX_EBADF;
+    }
+    // vfs_fallocate() checks the range, then the mode, then the access mode
+    // (fs/open.c:256-289).
+    if offset > i64::MAX as u64 || length == 0 || length > i64::MAX as u64 {
+        return LINUX_EINVAL;
+    }
+    let keep_size = mode & LINUX_FALLOC_FL_KEEP_SIZE != 0;
+    let valid_mode = match mode & LINUX_FALLOC_FL_MODE_MASK {
+        0 | LINUX_FALLOC_FL_UNSHARE_RANGE | LINUX_FALLOC_FL_ZERO_RANGE => true,
+        LINUX_FALLOC_FL_PUNCH_HOLE => keep_size,
+        LINUX_FALLOC_FL_COLLAPSE_RANGE
+        | LINUX_FALLOC_FL_INSERT_RANGE
+        | LINUX_FALLOC_FL_WRITE_ZEROES => !keep_size,
+        _ => false,
+    };
+    if mode & !(LINUX_FALLOC_FL_MODE_MASK | LINUX_FALLOC_FL_KEEP_SIZE) != 0 || !valid_mode {
+        return LINUX_EOPNOTSUPP;
+    }
     let state = linux_device_descriptor(descriptor);
     if state & 3 != LINUX_DESCRIPTOR_OUTPUT && state & 3 != 3 {
         return LINUX_EBADF;
     }
-    if mode != 0 {
-        return LINUX_EOPNOTSUPP;
-    }
-    if offset > i64::MAX as u64 || length == 0 || length > i64::MAX as u64 {
-        return LINUX_EINVAL;
+    if linux_pipe_descriptor(descriptor) {
+        return LINUX_ESPIPE;
     }
     let Some(end) = offset
         .checked_add(length)
@@ -27244,6 +27286,11 @@ fn linux_fallocate(descriptor: u64, mode: u64, offset: u64, length: u64) -> u64 
     else {
         return LINUX_EFBIG;
     };
+    // Like shmem_fallocate(), support only preallocation and punching holes
+    // (mm/shmem.c:3634).
+    if mode & !(LINUX_FALLOC_FL_KEEP_SIZE | LINUX_FALLOC_FL_PUNCH_HOLE) != 0 {
+        return LINUX_EOPNOTSUPP;
+    }
     let handle = match linux_copy_up_descriptor(descriptor) {
         Ok(handle) => handle,
         Err(error) => return error,
@@ -27253,6 +27300,26 @@ fn linux_fallocate(descriptor: u64, mode: u64, offset: u64, length: u64) -> u64 
     };
     if metadata.kind != crate::linux_overlay::NodeKind::File {
         return LINUX_EISDIR;
+    }
+    if mode & LINUX_FALLOC_FL_PUNCH_HOLE != 0 {
+        if crate::linux_overlay::file_seals(handle)
+            .is_some_and(|seals| seals & (LINUX_F_SEAL_WRITE | LINUX_F_SEAL_FUTURE_WRITE) != 0)
+        {
+            return LINUX_EPERM;
+        }
+        // File data has no sparse representation; a punched range reads as
+        // zeros, which is what Linux guarantees. The size never changes.
+        let zeros = [0_u8; 512];
+        let mut position = offset as usize;
+        let end = (end as usize).min(metadata.size);
+        while position < end {
+            let length = (end - position).min(zeros.len());
+            if crate::linux_overlay::write(handle, position, &zeros[..length]).is_none() {
+                return LINUX_EIO;
+            }
+            position += length;
+        }
+        return 0;
     }
     if let Some(seals) = crate::linux_overlay::file_seals(handle) {
         if seals & (LINUX_F_SEAL_WRITE | LINUX_F_SEAL_FUTURE_WRITE) != 0
@@ -27264,7 +27331,11 @@ fn linux_fallocate(descriptor: u64, mode: u64, offset: u64, length: u64) -> u64 
     if metadata.size < end as usize && linux_file_extension_limit(end as usize).is_err() {
         return LINUX_EFBIG;
     }
-    if metadata.size >= end as usize || crate::linux_overlay::truncate(handle, end as usize) {
+    // With FALLOC_FL_KEEP_SIZE the size stays; there is nothing to reserve.
+    if metadata.size >= end as usize
+        || keep_size
+        || crate::linux_overlay::truncate(handle, end as usize)
+    {
         0
     } else {
         LINUX_ENOSPC
@@ -30336,6 +30407,23 @@ fn append_linux_decimal(output: &mut [u8], used: &mut usize, value: u64) -> bool
 }
 
 fn linux_regular_file_write_at(descriptor: u64, address: u64, count: u64, offset: u64) -> u64 {
+    let append =
+        linux_socket_flags(descriptor).is_some_and(|flags| flags & LINUX_O_APPEND as u32 != 0);
+    linux_regular_file_pwrite(descriptor, address, count, offset, append)
+}
+
+/// Positioned write; with `append` the data goes to the end of the file.
+fn linux_regular_file_pwrite(
+    descriptor: u64,
+    address: u64,
+    count: u64,
+    offset: u64,
+    append: bool,
+) -> u64 {
+    // ksys_pwrite64() rejects a negative position first (fs/read_write.c:796).
+    if (offset as i64) < 0 {
+        return LINUX_EINVAL;
+    }
     let state = linux_device_descriptor(descriptor);
     if linux_path_descriptor(descriptor) {
         return LINUX_EBADF;
@@ -30355,6 +30443,16 @@ fn linux_regular_file_write_at(descriptor: u64, address: u64, count: u64, offset
     };
     let Ok(start) = usize::try_from(offset) else {
         return LINUX_EINVAL;
+    };
+    // generic_write_checks_count() writes at i_size when IOCB_APPEND is set,
+    // so pwrite() on an O_APPEND file ignores its offset (fs/read_write.c:1758).
+    let start = if append {
+        let Some(metadata) = crate::linux_overlay::metadata(handle) else {
+            return LINUX_EIO;
+        };
+        metadata.size
+    } else {
+        start
     };
     linux_overlay_copy_from_user(handle, start, address, count)
 }
@@ -34536,9 +34634,27 @@ fn linux_positioned_iov(
     flags: u64,
     write: bool,
 ) -> u64 {
+    // kiocb_set_rw_flags(): RWF_APPEND and RWF_NOAPPEND override O_APPEND for
+    // this write, and both together are EINVAL (include/linux/fs.h:3465, 3490).
+    let append_flags = if write {
+        flags & (LINUX_RWF_APPEND | LINUX_RWF_NOAPPEND)
+    } else {
+        0
+    };
+    if append_flags == LINUX_RWF_APPEND | LINUX_RWF_NOAPPEND {
+        return LINUX_EINVAL;
+    }
+    let flags = flags & !append_flags;
     if offset_high != 0 || flags != 0 {
         return LINUX_EOPNOTSUPP;
     }
+    let append = match append_flags {
+        LINUX_RWF_APPEND => true,
+        LINUX_RWF_NOAPPEND => false,
+        _ => {
+            linux_socket_flags(descriptor).is_some_and(|status| status & LINUX_O_APPEND as u32 != 0)
+        }
+    };
     let (ranges, vector_count) = match linux_socket_iov_ranges(vectors, count, !write) {
         Ok(ranges) => ranges,
         Err(error) => return error,
@@ -34547,7 +34663,7 @@ fn linux_positioned_iov(
     let mut total = 0_u64;
     for (address, length) in ranges[..vector_count].iter().copied() {
         let result = if write {
-            linux_regular_file_write_at(descriptor, address, length as u64, offset)
+            linux_regular_file_pwrite(descriptor, address, length as u64, offset, append)
         } else {
             linux_regular_file_read_at(descriptor, address, length as u64, offset)
         };
@@ -35349,20 +35465,37 @@ fn linux_regular_file_inode(state: u16) -> Option<u64> {
 }
 
 fn linux_regular_file_seek(descriptor: u64, state: u16, offset: u64, whence: u64) -> u64 {
+    let size = || {
+        linux_overlay_descriptor_handle(descriptor)
+            .and_then(crate::linux_overlay::metadata)
+            .map_or_else(
+                || {
+                    linux_rootfs_entry(descriptor)
+                        .map_or_else(|| linux_file_size(state), |entry| entry.data.len() as u64)
+                },
+                |metadata| metadata.size as u64,
+            )
+    };
     let base = match whence {
         0 => 0_i128,
         1 => i128::from(linux_descriptor_offset(descriptor).load(Ordering::SeqCst)),
-        2 => i128::from(
-            linux_overlay_descriptor_handle(descriptor)
-                .and_then(crate::linux_overlay::metadata)
-                .map_or_else(
-                    || {
-                        linux_rootfs_entry(descriptor)
-                            .map_or_else(|| linux_file_size(state), |entry| entry.data.len() as u64)
-                    },
-                    |metadata| metadata.size as u64,
-                ),
-        ),
+        2 => i128::from(size()),
+        // Files have no holes here, so as in must_set_pos() the whole file
+        // is data and the only hole is at EOF; an offset at or past EOF
+        // (or negative) is ENXIO (fs/read_write.c:122-138).
+        LINUX_SEEK_DATA | LINUX_SEEK_HOLE => {
+            let size = size();
+            if offset >= size {
+                return LINUX_ENXIO;
+            }
+            let next = if whence == LINUX_SEEK_DATA {
+                offset
+            } else {
+                size
+            };
+            linux_descriptor_offset(descriptor).store(next, Ordering::SeqCst);
+            return next;
+        }
         _ => return LINUX_EINVAL,
     };
     let next = base + i128::from(offset as i64);
