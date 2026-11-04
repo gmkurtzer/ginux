@@ -44,6 +44,9 @@ early helper fixtures.
   counters.
 - [x] Implement virtual signal dispositions, exec reset semantics, monotonic and
   realtime clocks, one-shot/periodic timers, and bounded epoll-style readiness.
+- [x] Add the Rocky QEMU process-runtime fixture with 256 repeated virtual
+  fork/clone/exec/wait cycles, signal interruption/return, virtual privilege
+  drop, synchronization/events/time, stale-identity rejection, and teardown.
 
 ## Remaining work
 
@@ -51,8 +54,8 @@ early helper fixtures.
   dispatch without exposing host identities.
 - [ ] Connect signal frames/return and blocking interruption to managed native
   execution.
-- [ ] Add concurrency, race, repeated lifecycle stress, QEMU fixtures, and the
-  human demonstration.
+- [ ] Add native concurrency/race and supervisor-loss coverage, aggregate
+  regression, and the human demonstration.
 
 ## Acceptance criteria
 
@@ -89,12 +92,19 @@ early helper fixtures.
   readiness.
 - `cargo clippy -p ginus-process --all-targets -- -D warnings` -> passed.
 - `make test-process` -> passed the same deterministic component suite.
+- Expanded `make test-process` -> passed seven component tests and the Rocky
+  Linux 10 QEMU fixture: 256 lifecycle cycles, virtual PID 1, stale-ID denial,
+  signal handler/return, interrupted wait, virtual UID/GID drop without host
+  change, futex/eventfd/epoll/timer behavior, and zero-task teardown.
 
 ## Decisions and limitations
 
 - Behavior is implemented to explicit fixtures and documented semantics, not a
   blanket Linux process-conformance claim.
 - Unsupported privilege transitions must fail explicitly and remain virtual.
+- The current QEMU fixture exercises the Ginus process model inside the host
+  Ginus process. It is not yet evidence that the native ptrace supervisor can
+  manage multiple concurrent tracees; that integration remains mandatory.
 
 ## Delivery strategy
 
@@ -105,7 +115,8 @@ early helper fixtures.
 - Planned commits: process and thread lifecycle; signals, synchronization, and
   time; credentials and event interfaces; stress and cleanup verification
 - Actual commits: `440c98f` added the process-runtime foundation; virtual time,
-  signal-action, and event milestone pending commit
+  signal-action, and event milestone is `b385ed6`; QEMU process fixture pending
+  commit
 
 ## Review policy and outcome
 

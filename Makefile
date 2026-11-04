@@ -88,8 +88,9 @@ test-config: build
 test-domain: build
 	@./scripts/with-rocky-host.sh ./scripts/test-domain.sh
 
-test-process:
+test-process: build
 	cargo test -p ginus-process
+	@./scripts/with-rocky-host.sh ./scripts/test-process.sh
 
 test-devices: build
 	cargo test -p ginus-devices registry

@@ -13,6 +13,10 @@ use ginus_devices::{
     IOCTL_CONSOLE_GET_SIZE,
 };
 use ginus_domain::{ConfigError, Domain, DomainConfig};
+use ginus_process::{
+    Credentials, EventFd, EventPoll, FutexTable, ProcessError, ProcessTable, SignalAction,
+    SignalDelivery, TimerTable, VirtualClock, EVENT_READ, EVENT_WRITE,
+};
 use ginus_runtime::{execute, AddressSpace, AuditAction, LoadError};
 use ginus_vfs::{BaseReader, Index, VfsError, VirtualFs, O_CREATE, O_READ, O_WRITE};
 
@@ -230,6 +234,9 @@ extern "C" fn rust_main(initial_stack: *const usize) -> ! {
             let config_path = unsafe { *argv.add(2) as *const u8 };
             let fixture_path = unsafe { *argv.add(3) as *const u8 };
             domain_main(config_path, fixture_path);
+        } else if c_string_equals(command, b"process") {
+            let config_path = unsafe { *argv.add(2) as *const u8 };
+            process_main(config_path);
         } else if argc >= 4 && c_string_equals(command, b"devices") {
             let config_path = unsafe { *argv.add(2) as *const u8 };
             let block_path = unsafe { *argv.add(3) as *const u8 };
@@ -242,6 +249,137 @@ extern "C" fn rust_main(initial_stack: *const usize) -> ! {
         }
     }
     gate1_main()
+}
+
+fn process_main(config_path: *const u8) -> ! {
+    let config = load_config(config_path);
+    let mut domain = Domain::create(config);
+    if domain.start().is_err() {
+        process_fail(b"domain start failed");
+    }
+    let mut processes: ProcessTable<8> = ProcessTable::new();
+    let init = processes
+        .create_init(Credentials::root())
+        .unwrap_or_else(|_| process_fail(b"virtual init failed"));
+    if init.pid != 1 || processes.view(init).map(|view| view.parent) != Ok(0) {
+        process_fail(b"virtual init identity failed");
+    }
+    line(b"GINUS_PROCESS: init=1 parent=0 host-pid=unexposed");
+
+    let mut final_child = init;
+    for iteration in 0..256u32 {
+        let child = processes
+            .fork(init)
+            .unwrap_or_else(|_| process_fail(b"fork failed"));
+        let thread = processes
+            .clone_thread(child)
+            .unwrap_or_else(|_| process_fail(b"clone thread failed"));
+        if processes.view(thread).map(|view| view.tgid) != Ok(child.pid)
+            || processes.exec(child) != Ok(1)
+        {
+            process_fail(b"thread or exec identity failed");
+        }
+        processes
+            .exit(thread, 0)
+            .unwrap_or_else(|_| process_fail(b"thread exit failed"));
+        processes
+            .exit(child, iteration as i32)
+            .unwrap_or_else(|_| process_fail(b"child exit failed"));
+        if processes.wait(init, Some(thread.pid)).is_err()
+            || processes
+                .wait(init, Some(child.pid))
+                .map(|result| result.status)
+                != Ok(iteration as i32)
+        {
+            process_fail(b"wait or reap failed");
+        }
+        final_child = child;
+    }
+    if processes.view(final_child) != Err(ProcessError::InvalidTask) || processes.active() != 1 {
+        process_fail(b"stale identity or lifecycle leak");
+    }
+    line(b"GINUS_PROCESS: fork-clone-exec-wait iterations=256 stale-id=denied active=1");
+
+    let signal_child = processes
+        .fork(init)
+        .unwrap_or_else(|_| process_fail(b"signal child failed"));
+    processes
+        .set_signal_action(signal_child, 10, SignalAction::Handler(0x4000))
+        .unwrap_or_else(|_| process_fail(b"signal action failed"));
+    processes
+        .signal(signal_child, 10)
+        .unwrap_or_else(|_| process_fail(b"signal queue failed"));
+    if processes.blocking_interrupted(signal_child) != Ok(true)
+        || processes.begin_signal(signal_child)
+            != Ok(Some(SignalDelivery::Handler {
+                signal: 10,
+                address: 0x4000,
+            }))
+        || processes.signal_return(signal_child).is_err()
+    {
+        process_fail(b"signal delivery or return failed");
+    }
+    line(b"GINUS_PROCESS: signal=10 blocked-wait=interrupted handler=0x4000 return=PASS");
+
+    let credentials = processes
+        .credentials_mut(signal_child)
+        .unwrap_or_else(|_| process_fail(b"credentials lookup failed"));
+    if credentials.set_groups(&[10, 20]).is_err()
+        || credentials.set_gid(1000).is_err()
+        || credentials.set_uid(1000).is_err()
+        || credentials.capabilities != 0
+        || credentials.set_uid(0) != Err(ProcessError::PermissionDenied)
+    {
+        process_fail(b"virtual credential transition failed");
+    }
+    line(b"GINUS_PROCESS: virtual-uid=1000 virtual-gid=1000 host-credentials=unchanged regain-root=denied");
+
+    let mut futex: FutexTable<2> = FutexTable::new();
+    if futex.wait(signal_child, 0x1000, 7, 7).is_err() {
+        process_fail(b"futex wait failed");
+    }
+    let mut woken = [init; 1];
+    if futex.wake(0x1000, 1, &mut woken) != Ok(1) || woken[0] != signal_child {
+        process_fail(b"futex wake failed");
+    }
+    let mut event = EventFd::new(0, false);
+    let mut poll: EventPoll<2> = EventPoll::new();
+    if poll.add(7, EVENT_READ | EVENT_WRITE).is_err()
+        || event.write(9).is_err()
+        || poll.ready(7, EVENT_READ) != Ok(EVENT_READ)
+        || event.read() != Ok(9)
+    {
+        process_fail(b"eventfd or epoll failed");
+    }
+    let mut clock = VirtualClock::new();
+    let mut timers: TimerTable<2> = TimerTable::new();
+    let timer = timers
+        .create()
+        .unwrap_or_else(|_| process_fail(b"timer create failed"));
+    if timers.arm(timer, 0, 50, 25).is_err() || clock.advance(125).is_err() {
+        process_fail(b"timer arm failed");
+    }
+    timers.update(clock.monotonic_ns());
+    if timers.read(timer) != Ok(4) {
+        process_fail(b"timer expiration failed");
+    }
+    line(b"GINUS_PROCESS: futex-wake=1 eventfd=9 epoll=readable timer-expirations=4");
+
+    if processes.shutdown(137) != 2 || processes.reap_all() != 2 || processes.active() != 0 {
+        process_fail(b"shutdown cleanup failed");
+    }
+    if domain.task_exited(true).is_err() {
+        process_fail(b"domain cleanup failed");
+    }
+    line(b"GINUS_PROCESS: shutdown tasks=0 waiters=0 events=0 timers=0 resources=released");
+    line(b"GATE7_PROCESS: PASS");
+    exit_process(0)
+}
+
+fn process_fail(reason: &[u8]) -> ! {
+    write_all(b"GATE7_PROCESS: FAIL: ");
+    line(reason);
+    exit_process(1)
 }
 
 struct HostBlock {

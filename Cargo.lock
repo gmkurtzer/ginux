@@ -25,6 +25,7 @@ dependencies = [
  "ginus-core",
  "ginus-devices",
  "ginus-domain",
+ "ginus-process",
  "ginus-runtime",
  "ginus-vfs",
 ]

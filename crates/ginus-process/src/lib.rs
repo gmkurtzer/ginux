@@ -36,6 +36,13 @@ pub enum SignalAction {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SignalDelivery {
+    Default(u8),
+    Ignored(u8),
+    Handler { signal: u8, address: u64 },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TaskId {
     pub pid: u32,
     generation: u32,
@@ -139,6 +146,8 @@ struct Task {
     pending_signals: u64,
     exec_epoch: u32,
     signal_actions: [SignalAction; MAX_SIGNAL as usize],
+    signal_frame_active: bool,
+    saved_signal_mask: u64,
 }
 
 impl Task {
@@ -159,6 +168,8 @@ impl Task {
             pending_signals: 0,
             exec_epoch: 0,
             signal_actions: [SignalAction::Default; MAX_SIGNAL as usize],
+            signal_frame_active: false,
+            saved_signal_mask: 0,
         }
     }
 }
@@ -251,6 +262,8 @@ impl<const TASKS: usize> ProcessTable<TASKS> {
             pending_signals: 0,
             exec_epoch: 0,
             signal_actions: [SignalAction::Default; MAX_SIGNAL as usize],
+            signal_frame_active: false,
+            saved_signal_mask: 0,
         };
         Ok(id)
     }
@@ -317,6 +330,8 @@ impl<const TASKS: usize> ProcessTable<TASKS> {
         }
         task.pending_signals = 0;
         task.signal_mask = 0;
+        task.signal_frame_active = false;
+        task.saved_signal_mask = 0;
         for action in &mut task.signal_actions {
             if *action != SignalAction::Ignore {
                 *action = SignalAction::Default;
@@ -451,6 +466,46 @@ impl<const TASKS: usize> ProcessTable<TASKS> {
         let signal = deliverable.trailing_zeros() as u8 + 1;
         self.tasks[index].pending_signals &= !(1u64 << (signal - 1));
         Ok(Some(signal))
+    }
+
+    pub fn begin_signal(&mut self, id: TaskId) -> Result<Option<SignalDelivery>, ProcessError> {
+        let Some(signal) = self.next_signal(id)? else {
+            return Ok(None);
+        };
+        let index = self.index(id)?;
+        let task = &mut self.tasks[index];
+        let delivery = match task.signal_actions[signal as usize - 1] {
+            SignalAction::Default => SignalDelivery::Default(signal),
+            SignalAction::Ignore => SignalDelivery::Ignored(signal),
+            SignalAction::Handler(address) => {
+                if task.signal_frame_active {
+                    task.pending_signals |= 1u64 << (signal - 1);
+                    return Err(ProcessError::InvalidState);
+                }
+                task.signal_frame_active = true;
+                task.saved_signal_mask = task.signal_mask;
+                task.signal_mask |= 1u64 << (signal - 1);
+                SignalDelivery::Handler { signal, address }
+            }
+        };
+        Ok(Some(delivery))
+    }
+
+    pub fn signal_return(&mut self, id: TaskId) -> Result<(), ProcessError> {
+        let index = self.index(id)?;
+        let task = &mut self.tasks[index];
+        if !task.signal_frame_active {
+            return Err(ProcessError::InvalidState);
+        }
+        task.signal_mask = task.saved_signal_mask;
+        task.saved_signal_mask = 0;
+        task.signal_frame_active = false;
+        Ok(())
+    }
+
+    pub fn blocking_interrupted(&self, id: TaskId) -> Result<bool, ProcessError> {
+        let task = self.tasks[self.index(id)?];
+        Ok(task.pending_signals & !task.signal_mask != 0)
     }
 
     pub fn shutdown(&mut self, status: i32) -> usize {
@@ -937,6 +992,17 @@ mod tests {
             table.signal_action(init, 10),
             Ok(SignalAction::Handler(0x4000))
         );
+        table.signal(init, 10).unwrap();
+        assert_eq!(table.blocking_interrupted(init), Ok(true));
+        assert_eq!(
+            table.begin_signal(init),
+            Ok(Some(SignalDelivery::Handler {
+                signal: 10,
+                address: 0x4000,
+            }))
+        );
+        table.signal_return(init).unwrap();
+        assert_eq!(table.signal_return(init), Err(ProcessError::InvalidState));
         table.exec(init).unwrap();
         assert_eq!(table.signal_action(init, 10), Ok(SignalAction::Default));
         assert_eq!(

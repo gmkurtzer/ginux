@@ -192,6 +192,11 @@ scope, threat model, and invariants.
   monotonic/realtime clocks, one-shot and periodic timers, and bounded
   epoll-style event readiness. Seven process-component tests and strict clippy
   passed; native integration and interruption semantics remain incomplete.
+- The Rocky QEMU `make test-process` fixture passed 256 repeated virtual
+  lifecycle cycles plus signals, virtual credentials, futex, eventfd, epoll,
+  timers, stale identity denial, and zero-task cleanup. This fixture currently
+  validates the Ginus process model, not multi-tracee ptrace supervision; that
+  native integration remains mandatory before Gate 7 can pass.
 
 ## Open decisions and limitations
 
@@ -227,8 +232,8 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Connect the Gate 7 process model to managed execution, then complete timed and
-interruptible event behavior and QEMU lifecycle stress.
+Connect the Gate 7 process model to multi-tracee native supervision and add
+concurrency, race, supervisor-loss, aggregate, and demonstration evidence.
 
 ## Context recovery
 
@@ -242,6 +247,6 @@ interruptible event behavior and QEMU lifecycle stress.
   `make bench-block`, `make bench-network`, `make demo-gate-6`, and aggregate
   `make test` passed on 2026-11-03
 - Gate 7 component evidence: `cargo test -p ginus-process`, strict clippy, and
-  `make test-process` passed on 2026-11-03
+  the expanded Rocky QEMU `make test-process` passed on 2026-11-03
 - Required human decision: none until the Gate 7 demonstration checkpoint; the
   Gate 9 DNF repository choice is deferred until before Gate 9 implementation
