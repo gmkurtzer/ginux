@@ -20,6 +20,7 @@ use crate::{
         iommu::{DeviceTranslation, DeviceTranslationProfile},
         paging::MmioMapping,
         pci::{self, VirtioNetworkDevice, VirtioNetworkInitialization},
+        timer,
     },
     memory, network,
 };
@@ -182,7 +183,10 @@ struct Runtime {
     sockets: SocketSet<'static>,
     _dma: memory::FrameLease,
     _translation: DeviceTranslation,
-    tick: i64,
+    timestamp_origin: u64,
+    timestamp_ticks_per_millisecond: u64,
+    fallback_tick: u64,
+    clock_milliseconds: u64,
     next_port: u16,
     local_address: u32,
 }
@@ -2155,13 +2159,51 @@ fn poll() {
     let Some(runtime) = runtime_existing() else {
         return;
     };
-    runtime.tick = runtime.tick.wrapping_add(1);
-    let _ = runtime.interface.poll(
-        Instant::from_millis(runtime.tick),
-        &mut runtime.device,
-        &mut runtime.sockets,
-    );
+    let now = network_now(runtime);
+    let _ = runtime
+        .interface
+        .poll(now, &mut runtime.device, &mut runtime.sockets);
     drain_shutdown_tcp_receivers(runtime);
+}
+
+pub(crate) fn poll_from_timer() {
+    poll();
+}
+
+fn elapsed_network_milliseconds(
+    origin: u64,
+    counter: u64,
+    ticks_per_millisecond: u64,
+) -> Option<u64> {
+    counter
+        .saturating_sub(origin)
+        .checked_div(ticks_per_millisecond)
+}
+
+fn network_now(runtime: &mut Runtime) -> Instant {
+    let candidate = elapsed_network_milliseconds(
+        runtime.timestamp_origin,
+        timer::timestamp_counter(),
+        runtime.timestamp_ticks_per_millisecond,
+    )
+    .unwrap_or_else(|| {
+        runtime.fallback_tick = runtime.fallback_tick.saturating_add(1);
+        runtime.fallback_tick
+    });
+    runtime.clock_milliseconds = runtime
+        .clock_milliseconds
+        .max(candidate)
+        .min(i64::MAX as u64);
+    Instant::from_millis(runtime.clock_milliseconds as i64)
+}
+
+pub(crate) fn verify_network_clock_profile() -> bool {
+    elapsed_network_milliseconds(1_000, 1_000, 10) == Some(0)
+        && elapsed_network_milliseconds(1_000, 1_000, 10) == Some(0)
+        && elapsed_network_milliseconds(1_000, 1_010, 10) == Some(1)
+        && elapsed_network_milliseconds(1_000, 2_000, 10) == Some(100)
+        && elapsed_network_milliseconds(1_000, 999, 10) == Some(0)
+        && elapsed_network_milliseconds(1_000, u64::MAX, 0).is_none()
 }
 
 fn drain_shutdown_tcp_receivers(runtime: &mut Runtime) {
@@ -2254,6 +2296,10 @@ fn runtime() -> Result<&'static mut Runtime, Error> {
     let sockets = SocketSet::new(unsafe {
         core::slice::from_raw_parts_mut(socket_storage().as_mut_ptr(), SLOT_COUNT)
     });
+    let timestamp_ticks_per_millisecond = timer::monotonic_frequency()
+        .map(|frequency| frequency / 1_000)
+        .filter(|ticks| *ticks != 0)
+        .unwrap_or(0);
     unsafe {
         *socket_runtime_state() = Some(Runtime {
             interface,
@@ -2261,7 +2307,10 @@ fn runtime() -> Result<&'static mut Runtime, Error> {
             sockets,
             _dma: dma,
             _translation: translation,
-            tick: 0,
+            timestamp_origin: timer::timestamp_counter(),
+            timestamp_ticks_per_millisecond,
+            fallback_tick: 0,
+            clock_milliseconds: 0,
             next_port: 49_152,
             local_address: ipv4,
         });
