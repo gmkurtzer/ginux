@@ -1,5 +1,60 @@
 # Ginux
 
+> [!IMPORTANT]
+> **Ginux is pivoting from a standalone operating-system kernel to a
+> userspace kernel. Development of the standalone kernel is now frozen except
+> for resolving work that is already open. We are not accepting new issues or
+> pull requests for the standalone kernel implementation.**
+
+## Project transition
+
+Ginux began as a research experiment: build an independent Rust kernel capable
+of running an unmodified Linux userspace, then find out what that experiment
+could teach us. It succeeded in reaching that goal, including booting Rocky
+Linux 10 through systemd, and it produced useful ideas around domains,
+configurable compatibility contracts, isolation, and controlled access to
+kernel services. Continuing to reproduce Linux hardware support is not the
+most useful destination for those ideas.
+
+The standalone-kernel phase is therefore ending. During this transition:
+
+- no new standalone-kernel issues or pull requests will be accepted;
+- the existing issues and pull requests will be reviewed and either merged or
+  closed;
+- the final standalone-kernel state will be published as a tagged release and
+  preserved on a permanent archival branch; and
+- links to that release and branch will be added here when the transition is
+  complete.
+
+The standalone kernel will remain public and available to study, build, and
+fork. Anyone interested in continuing its development is warmly encouraged to
+do so. Please let us know about an active fork so that it can be linked from
+this README and made discoverable to others interested in that direction.
+
+### The new direction: Ginux Userspace
+
+Active development is moving to **Ginux Userspace**, a lightweight,
+configurable userspace kernel that runs as an ordinary process on a Linux host.
+Instead of recreating hardware drivers and the rest of a complete machine
+kernel, it uses the host for hardware execution while placing a deliberate
+userspace-kernel boundary around managed workloads.
+
+Each managed domain has an explicit, versioned contract. Before a managed
+system call can have a host effect, Ginux Userspace decides whether to emulate
+it, perform a validated mediated operation, or deny it. Domain-visible process
+identity, filesystems, devices, and kernel interfaces are intended to come
+from Ginux Userspace state rather than being accidental exposure of the host.
+The goal is a small, understandable, and reviewable mechanism that can balance
+Linux compatibility, isolation, and performance without implementing another
+complete hardware kernel.
+
+The successor is currently being developed in the
+[Ginux Userspace repository](https://github.com/gmkurtzer/ginux-us). Its history
+will be incorporated here as the continuing main line of Ginux after the
+standalone-kernel checkpoint is complete.
+
+## Standalone kernel prototype
+
 **A Rust-first x86-64 operating system built around native domains and Linux
 userspace compatibility.**
 
@@ -11,14 +66,14 @@ scheduler, process model, VFS, networking, device support, and Linux ABI, and
 runs an embedded administration controller in ring 3. Its primary workload is
 an unmodified Linux userspace running inside a kernel-native **domain**.
 
-The repository contains the complete bootable system, controller, native
-services, Linux compatibility implementation, hardware paths, build tools,
-architecture specifications, and QEMU test harnesses. The current development
-target is an x86-64 Q35 virtual machine with OVMF, Intel IOMMU, and virtio
-devices. It runs through KVM on an x86-64 Linux host and QEMU TCG on Apple
-Silicon.
+The repository currently contains the complete bootable system, controller,
+native services, Linux compatibility implementation, hardware paths, build
+tools, architecture specifications, and QEMU test harnesses. Its validated
+development target is an x86-64 Q35 virtual machine with OVMF, Intel IOMMU, and
+virtio devices. It runs through KVM on an x86-64 Linux host and QEMU TCG on
+Apple Silicon.
 
-Today, Ginux can:
+The standalone kernel can:
 
 - build as one bootable `GINUX.EFI` image;
 - start its embedded controller as an ordinary ring-3 process;
@@ -41,7 +96,7 @@ The name is a joke in the same family as Linux: **Ginux** combines Linux, GPT,
 and Greg. To keep the author's ego within its configured resource limit, the
 `G` officially stands for GPT.
 
-## Design goals
+## Standalone kernel design goals
 
 - **Linux userspace without Linux underneath.** Linux is a personality exposed
   by Ginux, not the host kernel.
@@ -132,7 +187,7 @@ separate ring-3 domains with bounded MMIO, DMA, queue, and packet authority.
 General driver support, production storage guarantees, broad filesystem
 coverage, and a physical-hardware matrix remain future work.
 
-## Current demonstrated state
+## Standalone kernel demonstrated state
 
 | Area | Demonstrated | Important boundary |
 |---|---|---|
