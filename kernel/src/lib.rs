@@ -14,6 +14,7 @@ mod ipc;
 mod linux_aio;
 mod linux_elf;
 mod linux_file_cache;
+mod linux_file_lock;
 mod linux_keyring;
 mod linux_mount;
 mod linux_overlay;

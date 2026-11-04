@@ -12,6 +12,7 @@ interior-mutable	kernel/src/arch/x86_64/cpu/linux_futex.rs	LINUX_PROFILE_FIRST_F
 interior-mutable	kernel/src/arch/x86_64/cpu/linux_futex.rs	LINUX_PROFILE_FUTEX_FAST_MISS_CPUS	verification-only	allowlist	none	feature-gated-futex-profile-state
 interior-mutable	kernel/src/arch/x86_64/cpu/linux_futex.rs	LINUX_PROFILE_FUTEX_OPERATION_COUNTS	verification-only	allowlist	none	feature-gated-futex-profile-counters
 interior-mutable	kernel/src/arch/x86_64/cpu.rs	LINUX_ABI_TEST_RESULTS	verification-only	allowlist	none	verification-build-only
+interior-mutable	kernel/src/arch/x86_64/cpu.rs	LINUX_FILE_LOCKS	domain-runtime	allowlist	none	ranked-file-lock-table
 interior-mutable	kernel/src/arch/x86_64/cpu.rs	LINUX_FUTEX_COORDINATION	process-runtime	allowlist	none	ranked-futex-wait-wake-coordination-lock
 interior-mutable	kernel/src/arch/x86_64/cpu.rs	PRIVILEGE_ENTRY_NMI_PROBE_HITS	verification-only	allowlist	none	verification-build-only
 interior-mutable	kernel/src/arch/x86_64/cpu.rs	PRIVILEGE_ENTRY_NMI_PROBE_MASK	verification-only	allowlist	none	verification-build-only

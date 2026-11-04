@@ -348,7 +348,7 @@ linux-compat-check:
 test-linux-abi: build
 	@tests/qemu/linux-abi-report.sh
 
-.PHONY: check-pe check-scheduler
+.PHONY: check-pe check-scheduler check-file-lock
 check-scheduler:
 	@mkdir -p build
 	@rustc --edition=2021 --test -D warnings tests/host/scheduler.rs -o build/scheduler-tests
@@ -359,10 +359,16 @@ check-pe:
 	@rustc --edition=2021 --test -D warnings kernel/src/pe.rs -o build/pe-tests
 	@build/pe-tests
 
+check-file-lock:
+	@mkdir -p build
+	@rustc --edition=2021 --test -D warnings kernel/src/linux_file_lock.rs -o build/file-lock-tests
+	@build/file-lock-tests
+
 check: manifest architecture-check linux-compat-check
 	@$(MAKE) abi-conformance
 	@cargo fmt --all -- --check
 	@$(MAKE) check-pe
+	@$(MAKE) check-file-lock
 	@$(MAKE) check-scheduler
 	@cargo clippy --package ginux-boot --target $(TARGET) -- -D warnings
 	@cargo clippy --package ginux-kernel --target x86_64-unknown-none -- -D warnings
