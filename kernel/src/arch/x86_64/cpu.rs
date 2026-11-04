@@ -27797,6 +27797,7 @@ fn linux_socket_error(error: crate::linux_socket::Error) -> u64 {
         crate::linux_socket::Error::Invalid => LINUX_EINVAL,
         crate::linux_socket::Error::InProgress => LINUX_EINPROGRESS,
         crate::linux_socket::Error::WouldBlock => LINUX_EAGAIN,
+        crate::linux_socket::Error::Connected => LINUX_EISCONN,
         crate::linux_socket::Error::NotConnected => LINUX_ENOTCONN,
         crate::linux_socket::Error::BrokenPipe => LINUX_EPIPE,
         crate::linux_socket::Error::Reset => LINUX_ECONNRESET,

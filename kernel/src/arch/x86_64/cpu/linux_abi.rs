@@ -458,6 +458,7 @@ pub(super) const LINUX_EROFS: u64 = u64::MAX - 29;
 pub(super) const LINUX_ETIMEDOUT: u64 = u64::MAX - 109;
 pub(super) const LINUX_ETOOMANYREFS: u64 = u64::MAX - 108;
 pub(super) const LINUX_ECONNRESET: u64 = u64::MAX - 103;
+pub(super) const LINUX_EISCONN: u64 = u64::MAX - 105;
 pub(super) const LINUX_ENOTCONN: u64 = u64::MAX - 106;
 pub(super) const LINUX_EINPROGRESS: u64 = u64::MAX - 114;
 pub(super) const LINUX_EAFNOSUPPORT: u64 = u64::MAX - 96;

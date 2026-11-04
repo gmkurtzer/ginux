@@ -80,6 +80,7 @@ pub(crate) enum Error {
     Invalid,
     InProgress,
     WouldBlock,
+    Connected,
     NotConnected,
     BrokenPipe,
     Reset,
@@ -1278,6 +1279,9 @@ pub(crate) fn connect(slot: u8, remote: IpEndpoint) -> Result<(), Error> {
     if state.listening {
         return Err(Error::Invalid);
     }
+    if reconnect_error(state.kind, state.peer).is_some() {
+        return Err(Error::Connected);
+    }
     let local_port = if state.local_port == 0 {
         allocate_ephemeral_port(runtime, state.kind, index).ok_or(Error::Exhausted)?
     } else {
@@ -1342,6 +1346,17 @@ pub(crate) fn connect(slot: u8, remote: IpEndpoint) -> Result<(), Error> {
         }
         Kind::Unix => Err(Error::Invalid),
     }
+}
+
+fn reconnect_error(kind: Kind, peer: Option<u8>) -> Option<Error> {
+    (kind == Kind::Tcp && peer.is_some()).then_some(Error::Connected)
+}
+
+pub(crate) fn verify_tcp_reconnect_guard() -> bool {
+    reconnect_error(Kind::Tcp, Some(1)) == Some(Error::Connected)
+        && reconnect_error(Kind::Tcp, None).is_none()
+        && reconnect_error(Kind::Udp, Some(1)).is_none()
+        && reconnect_error(Kind::Unix, Some(1)).is_none()
 }
 
 pub(crate) fn send(slot: u8, input: &[u8], remote: Option<IpEndpoint>) -> Result<usize, Error> {

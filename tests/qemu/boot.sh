@@ -3517,6 +3517,10 @@ if ! grep -q '^ginux: Linux bounded monotonic clocks validated' "$output_file"; 
     echo "Boot test failed: Linux monotonic clocks were not validated." >&2
     exit 1
 fi
+if ! grep -q '^ginux: TCP reconnect guard verified' "$output_file"; then
+    echo "Boot test failed: TCP reconnect rejection was not validated." >&2
+    exit 1
+fi
 
 if ! grep -q '^ginux: Linux bounded clock resolution validated' "$output_file"; then
     echo "Boot test failed: Linux clock resolution was not validated." >&2
