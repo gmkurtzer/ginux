@@ -25937,6 +25937,15 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64, mode: u64) -> u64
     let mut overlay_metadata =
         canonical_length.and_then(|length| crate::linux_overlay::lookup(&canonical[..length]));
     let mut rootfs_at_path = linux_rootfs_path_at(directory, path);
+    // Linux build_open_flags() turns O_CREAT|O_EXCL into O_NOFOLLOW, so an
+    // existing final component fails with EEXIST even when it is a symlink,
+    // dangling or not; the link target is never created (fs/open.c:1348,
+    // fs/namei.c:4808).
+    if flags & (LINUX_O_CREAT | LINUX_O_EXCL) == (LINUX_O_CREAT | LINUX_O_EXCL)
+        && (overlay_metadata.is_some() || linux_rootfs_metadata_path_at(directory, path).is_some())
+    {
+        return LINUX_EEXIST;
+    }
     if overlay_metadata
         .is_some_and(|metadata| metadata.kind == crate::linux_overlay::NodeKind::Symlink)
     {
