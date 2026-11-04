@@ -1,10 +1,15 @@
 # Ginux
 
-> [!IMPORTANT]
-> **Ginux is pivoting from a standalone operating-system kernel to a
-> userspace kernel. Development of the standalone kernel is now frozen except
-> for resolving work that is already open. We are not accepting new issues or
-> pull requests for the standalone kernel implementation.**
+> [!CAUTION]
+> ## Standalone-kernel contribution freeze
+>
+> **No new pull requests or issues for the standalone kernel will be accepted
+> after 11:59 p.m. Pacific Time on November 4, 2026. Anything opened after
+> that cutoff will be closed without review. No exceptions.**
+>
+> Ginux is pivoting from a standalone operating-system kernel to a userspace
+> kernel. Standalone-kernel development is frozen except for resolving pull
+> requests and issues that were already open by the cutoff.
 
 ## Project transition
 
@@ -92,9 +97,11 @@ through a working implementation.
 
 The standalone-kernel phase is therefore ending. During this transition:
 
-- no new standalone-kernel issues or pull requests will be accepted;
-- the existing issues and pull requests will be reviewed and either merged or
-  closed;
+- only standalone-kernel issues and pull requests opened by 11:59 p.m. Pacific
+  Time on November 4, 2026 will be considered;
+- anything opened after that cutoff will be closed without review;
+- work already open by the cutoff will be reviewed and either merged or
+  closed, with no guarantee that it will be accepted;
 - the final standalone-kernel state will be published as a tagged release and
   preserved on a permanent archival branch; and
 - links to that release and branch will be added here when the transition is
