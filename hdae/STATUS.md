@@ -195,8 +195,20 @@ scope, threat model, and invariants.
 - The Rocky QEMU `make test-process` fixture passed 256 repeated virtual
   lifecycle cycles plus signals, virtual credentials, futex, eventfd, epoll,
   timers, stale identity denial, and zero-task cleanup. This fixture currently
-  validates the Ginus process model, not multi-tracee ptrace supervision; that
-  native integration remains mandatory before Gate 7 can pass.
+  validates the Ginus process model.
+- Gate 7 native supervision now auto-attaches forked tracees and translates
+  `fork`, `getpid`, `getppid`, and `wait4` across host and virtual identities.
+  The Rocky QEMU stress passed 32 fork/wait cycles with two concurrent children
+  per round, 32 expected child exits, interrupted-wait restart handling, and
+  zero-task cleanup.
+- Gate 7 stress found and fixed raw `PTRACE_PEEKTEXT` ABI handling, the
+  auto-attached child's initial trace phase, and host-PID argument restoration
+  across an interrupted/restarted `wait4`.
+- Fresh `make test-runtime`, `make test-native-vfs`, `make demo-gate-7`, and
+  aggregate `make test` passed. The demo reports nine named checks; the native
+  regression retains fail-closed supervisor-loss and unexpected-stop evidence.
+- Gate 7 is technically passed and awaiting its dedicated branch delivery,
+  pull request, and human checkpoint review.
 
 ## Open decisions and limitations
 
@@ -232,21 +244,18 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Connect the Gate 7 process model to multi-tracee native supervision and add
-concurrency, race, supervisor-loss, aggregate, and demonstration evidence.
+Commit and deliver the completed Gate 7 evidence, open its pull request, and
+stop for human review of `make demo-gate-7`.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 7, process runtime; authorized and starting on dedicated
-  branch `hdae/process-runtime`
-- Last evidence: `make check`, `make test-unit`, `make test-oci-layers`,
-  `make test-devices`, `make test-block`, `make test-network`,
-  `make bench-block`, `make bench-network`, `make demo-gate-6`, and aggregate
-  `make test` passed on 2026-11-03
-- Gate 7 component evidence: `cargo test -p ginus-process`, strict clippy, and
-  the expanded Rocky QEMU `make test-process` passed on 2026-11-03
+- Active gate: Gate 7, process runtime; technically passed on dedicated branch
+  `hdae/process-runtime`, awaiting delivery and human review
+- Last evidence: `make test-process`, `make test-runtime`,
+  `make test-native-vfs`, `make demo-gate-7`, and aggregate `make test` passed
+  on 2026-11-03
 - Required human decision: none until the Gate 7 demonstration checkpoint; the
   Gate 9 DNF repository choice is deferred until before Gate 9 implementation
