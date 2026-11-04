@@ -74,7 +74,8 @@ so unread fast-path data cannot leak kernel frames.
 - Pull request: intended, dedicated to issue #66
 - Planned commits: gate, cleanup helper, and deterministic regression;
   validation and delivery checkpoint
-- Actual commits: pending
+- Actual commits: `b31411fe` (gate, shared cleanup helper, allocator regression,
+  and initial evidence); delivery checkpoint pending
 
 ## Review policy and outcome
 
