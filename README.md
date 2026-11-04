@@ -36,12 +36,43 @@ which kernel interfaces a domain can observe or invoke without asking Linux to
 abandon its compatibility guarantees.
 
 The idea is not novel. [User-Mode Linux](https://kernel.org/doc/html/v5.8/virt/uml/user_mode_linux.html)
-runs a Linux kernel as a normal host process, while
+runs a Linux kernel as a normal host process;
 [gVisor](https://gvisor.dev/docs/) implements a Linux-compatible application
-kernel in userspace. Ginux Userspace explores its own point in that design
-space: a small, explicit shim between a real Linux kernel and a managed Linux
-userspace, governed by versioned contracts and selectable compatibility,
-security, and performance policies.
+kernel in userspace; [Gramine](https://gramine.readthedocs.io/en/stable/) uses
+an application-specific manifest with a library OS; and Linux
+[seccomp user notification](https://docs.kernel.org/userspace-api/seccomp_filter.html#userspace-notification)
+can delegate selected system calls to a userspace supervisor. The
+[Proxos research](https://www.usenix.org/legacy/events/osdi06/tech/ta-min.html)
+is an especially close precedent: it made application trust configurable by
+routing parts of the system-call interface to different operating systems.
+
+Ginux Userspace explores its own point in that design space by making the
+kernel/userspace contract explicit, versioned, and configurable for each
+domain. Linux must preserve its host ABI, but a Ginux domain does not have to
+inherit all of it. Its contract can allow an operation, emulate or mediate it,
+replace the visible behavior, or deny it before the request reaches the host
+kernel. In other words, Linux promises not to break its userspace; Ginux
+Userspace can intentionally define a narrower virtual userspace and make every
+departure from Linux's full contract visible and reviewable. The intended
+result is a small shim with selectable compatibility, security, and performance
+policies, not an implicit or universal claim of Linux equivalence.
+
+The intended differentiators are:
+
+- **The contract is a first-class domain object.** It is explicit, versioned,
+  reviewable, and auditable, and it covers more than a syscall allowlist:
+  process identity, filesystems, devices, virtual kernel views, resources, and
+  lifecycle are part of the same declared boundary.
+- **Compatibility is selectable rather than assumed.** Security, balanced, and
+  performance profiles can make different emulation, mediation, and denial
+  decisions without silently bypassing the contract.
+- **The host remains responsible for being a real kernel.** Ginux Userspace
+  runs as an ordinary Linux process and relies on Linux for hardware support
+  and execution while preventing managed workloads from treating the entire
+  host ABI as automatically available.
+- **Claims remain tied to evidence.** A contract and its test suite identify
+  the exact workloads and interfaces demonstrated to work instead of treating
+  “Linux compatible” as an unlimited promise.
 
 This pivot is also an important result of the original AI experiment. AI made
 it practical to build ambitious prototype code, test an architectural idea,
