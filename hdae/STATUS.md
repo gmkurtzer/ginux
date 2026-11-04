@@ -3,31 +3,29 @@
 ## Current checkpoint
 
 - Gate 1 is accepted and closed under the corrected ordinary-host-process
-  architecture. It remains delivered in open
-  https://github.com/gmkurtzer/ginux-us/pull/1 and is not merged.
-- Gate 2 is accepted and closed. It remains delivered in open
-  https://github.com/gmkurtzer/ginux-us/pull/2 and is not merged.
-- Gate 3 is accepted and closed. It remains delivered on dedicated branch
-  `hdae/execution-kernel`, stacked on the accepted Gate 2 state while its
-  intended eventual base remains `main`, in open
-  https://github.com/gmkurtzer/ginux-us/pull/3.
-- Gate 4 is accepted and closed. It remains delivered on dedicated branch
-  `hdae/domain-config-lifecycle`, stacked on the accepted Gate 3 state while
-  its intended eventual base remains `main`, in open
-  https://github.com/gmkurtzer/ginux-us/pull/4.
-- Gate 5 is accepted and closed. It remains delivered on dedicated branch
-  `hdae/virtual-vfs-userspace`, stacked on the accepted Gate 4 state while its
-  intended eventual base remains `main`, in open
-  https://github.com/gmkurtzer/ginux-us/pull/5.
-- Gate 6 is accepted and closed. It remains delivered on dedicated branch
-  `hdae/device-ownership`, stacked on the accepted Gate 5 state while its
-  intended eventual base remains `main`, in open
-  https://github.com/gmkurtzer/ginux-us/pull/6.
+  architecture. Pull request https://github.com/gmkurtzer/ginux-us/pull/1 was
+  merged by the human on 2026-11-04.
+- Gate 2 is accepted and closed. Pull request
+  https://github.com/gmkurtzer/ginux-us/pull/2 was merged by the human on
+  2026-11-04.
+- Gate 3 is accepted and closed. Pull request
+  https://github.com/gmkurtzer/ginux-us/pull/3 was merged by the human on
+  2026-11-04.
+- Gate 4 is accepted and closed. Pull request
+  https://github.com/gmkurtzer/ginux-us/pull/4 was merged by the human on
+  2026-11-04.
+- Gate 5 is accepted and closed. Pull request
+  https://github.com/gmkurtzer/ginux-us/pull/5 was merged by the human on
+  2026-11-04.
+- Gate 6 is accepted and closed. Pull request
+  https://github.com/gmkurtzer/ginux-us/pull/6 was merged by the human on
+  2026-11-04.
 - Authoritative name: Ginux-us (Ginux Userspace).
 - Runtime isolation unit: domain.
 - Policy unit: versioned contract.
 - Initial gate map: twelve checkpoint gates at positions 1 through 11 and 13;
-  Gates 1 through 6 are accepted and six gates remain open.
+  Gates 1 through 6 are accepted, the inserted rename gate is active, and seven
+  gates remain open.
 - The ordered gate batch is authorized, but every open gate remains a human
   checkpoint requiring a working demonstration and explicit acceptance.
 
@@ -207,9 +205,9 @@ scope, threat model, and invariants.
 - Fresh `make test-runtime`, `make test-native-vfs`, `make demo-gate-7`, and
   aggregate `make test` passed. The demo reports nine named checks; the native
   regression retains fail-closed supervisor-loss and unexpected-stop evidence.
-- Gate 7 is technically passed and delivered in open pull request
-  https://github.com/gmkurtzer/ginux-us/pull/7 from `hdae/process-runtime`. It is
-  not merged or closed and is awaiting human checkpoint review.
+- Gate 7 is technically passed. Pull request
+  https://github.com/gmkurtzer/ginux-us/pull/7 was merged by the human on
+  2026-11-04, but the gate still awaits explicit human checkpoint acceptance.
 - Gate 7.5 renamed every active project surface to Ginux-us, the executable to
   `ginux`, and packages to `ginux-*`; its deterministic stale-name check passes.
 - Post-rename `make check`, `make test`, `make test-native-vfs`, and
@@ -217,6 +215,9 @@ scope, threat model, and invariants.
 - The first aggregate run found a predecessor generated rootfs manifest in the
   persistent cache. The cache now rejects that marker and rebuilds it; the
   image suite and full aggregate suite passed after the migration fix.
+- The GitHub repository is renamed to `gmkurtzer/ginux-us`; origin points to the
+  renamed repository, PRs 1 through 7 remain reachable as merged, and Gate 7.5
+  is delivered in open https://github.com/gmkurtzer/ginux-us/pull/8.
 
 ## Open decisions and limitations
 
@@ -234,9 +235,9 @@ scope, threat model, and invariants.
 - Gate 2 preparation requires Docker Desktop and a pinned privileged helper
   container. It is network-disabled and mounts only a temporary raw conversion
   read-only, but remains trusted build tooling rather than a runtime boundary.
-- GitHub delivery and the local checkout move are the remaining external rename
-  steps. The active source tree and generated cache format already use the new
-  name.
+- The local checkout move is the remaining external rename step. The active
+  source tree, generated cache format, GitHub repository, and origin already
+  use the new name.
 - The selected Rocky OCI image has one layer; deterministic synthetic fixtures
   now cover general multi-layer replacement, whiteout, and opaque-directory
   semantics.
@@ -253,9 +254,9 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Push `hdae/ginux-us-rename`, open its pull request, rename the GitHub repository
-and remote, verify all eight open PRs remain reachable, then move the local
-checkout to `/Users/gmk/git/ginux-us` and stop for human review.
+Commit and push the final delivery checkpoint, move the local checkout to
+`/Users/gmk/git/ginux-us`, verify the clean checkout there, and stop for human
+review.
 
 ## Context recovery
 
