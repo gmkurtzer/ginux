@@ -464,6 +464,7 @@ interior-mutable	kernel/src/linux_aio.rs	AIO_RUNTIME	domain-runtime	allowlist	no
 interior-mutable	kernel/src/linux_file_cache.rs	FILE_CACHE_RUNTIME	domain-runtime	allowlist	none	explicit-domain-file-cache-owner-root
 interior-mutable	kernel/src/linux_keyring.rs	KEYRING_RUNTIME	domain-runtime	allowlist	none	explicit-domain-keyring-runtime-owner-root
 interior-mutable	kernel/src/linux_mount.rs	MOUNT_RUNTIME	domain-runtime	allowlist	none	explicit-domain-mount-runtime-owner-root
+interior-mutable	kernel/src/linux_overlay.rs	INJECTED_FRAME_FAILURE	verification-only	allowlist	none	verification-build-only
 interior-mutable	kernel/src/linux_overlay.rs	OVERLAY_RUNTIME	domain-runtime	allowlist	none	explicit-domain-overlay-owner-root
 interior-mutable	kernel/src/linux_process.rs	PROCESS_RUNTIME	process-runtime	allowlist	none	explicit-process-runtime-owner-root
 interior-mutable	kernel/src/linux_process.rs	PROCESS_ADDRESS_SPACE_STORAGE	process-runtime	allowlist	none	demand-initialized-process-address-space-owner

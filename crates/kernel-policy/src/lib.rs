@@ -19,6 +19,12 @@ pub fn valid_container_init(init: &[u8], maximum_size: usize) -> bool {
         && init.iter().all(u8::is_ascii_graphic)
 }
 
+/// Whether `path` names an entry strictly below the directory `ancestor`.
+/// Both are canonical slash-separated paths without a trailing slash.
+pub fn strict_path_descendant(ancestor: &[u8], path: &[u8]) -> bool {
+    path.len() > ancestor.len() && path.starts_with(ancestor) && path[ancestor.len()] == b'/'
+}
+
 pub fn valid_vtd_write_fault_record(high: u64, source: u16) -> bool {
     const VALID: u64 = 1 << 63;
     const TRANSACTION_READ: u64 = 1 << 62;
@@ -65,6 +71,15 @@ mod tests {
         assert!(!valid_container_init(b"sbin/init", 64));
         assert!(!valid_container_init(b"/sbin/ init", 64));
         assert!(!valid_container_init(b"/too/long", 8));
+    }
+
+    #[test]
+    fn strict_path_descendant_matches_whole_components() {
+        assert!(strict_path_descendant(b"tmp/a", b"tmp/a/b"));
+        assert!(strict_path_descendant(b"tmp", b"tmp/a/b"));
+        assert!(!strict_path_descendant(b"tmp/a", b"tmp/a"));
+        assert!(!strict_path_descendant(b"tmp/a", b"tmp/ab"));
+        assert!(!strict_path_descendant(b"tmp/a/b", b"tmp/a"));
     }
 
     #[test]

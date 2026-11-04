@@ -4,6 +4,7 @@ use crate::{
     memory::{self, FrameLease, FrameOwner},
 };
 use core::cell::UnsafeCell;
+use core::sync::atomic::{AtomicUsize, Ordering};
 
 const PAGE_SIZE: usize = 4096;
 pub(crate) const PATH_CAPACITY: usize = 256;
@@ -403,6 +404,10 @@ unsafe impl Sync for OverlayRuntimeOwner {}
 static OVERLAY_RUNTIME: OverlayRuntimeOwner =
     OverlayRuntimeOwner(UnsafeCell::new([Overlay::EMPTY; INSTANCE_LIMIT]));
 
+// Verification-only fault injection: when nonzero, the overlay frame
+// allocation with this ordinal (1 is the next one) fails.
+static INJECTED_FRAME_FAILURE: AtomicUsize = AtomicUsize::new(0);
+
 pub(crate) fn lookup(path: &[u8]) -> Option<Metadata> {
     valid_path(path)?;
     let overlay = live()?;
@@ -420,6 +425,19 @@ pub(crate) fn hidden(path: &[u8]) -> bool {
                     && (node.path() == path
                         || path.starts_with(node.path())
                             && path.get(node.path().len()) == Some(&b'/')))
+                .then_some(())
+            })
+            .is_some()
+        })
+}
+
+pub(crate) fn has_children(path: &[u8]) -> bool {
+    valid_path(path).is_some()
+        && live().is_some_and(|overlay| {
+            for_each_node(overlay, |node| {
+                (node.linked
+                    && !node.whiteout
+                    && ginux_kernel_policy::strict_path_descendant(path, node.path()))
                 .then_some(())
             })
             .is_some()
@@ -607,7 +625,7 @@ fn create(path: &[u8], kind: NodeKind, mode: u32, initial: &[u8]) -> Option<Hand
     overlay.next_generation = generation;
     overlay.next_inode = inode;
     if !initial.is_empty() && write(handle, 0, initial) != Some(initial.len()) {
-        let _ = unlink(handle);
+        discard(handle);
         return None;
     }
     Some(handle)
@@ -905,22 +923,77 @@ pub(crate) fn remove_xattr(handle: Handle, name: &[u8]) -> bool {
     append_xattr(handle, name, &[], true)
 }
 
-pub(crate) fn rename(handle: Handle, path: &[u8]) -> bool {
-    if valid_path(path).is_none() || lookup(path).is_some() {
-        return false;
+/// What a rename moves: a linked overlay node, or a lower (image) regular
+/// file that is copied up first.
+#[derive(Clone, Copy)]
+pub(crate) enum RenameSource<'a> {
+    Node(Handle),
+    Lower {
+        path: &'a [u8],
+        mode: u32,
+        data: &'a [u8],
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RenameError {
+    /// The target directory still has overlay children.
+    NotEmpty,
+    /// The move cannot be represented, for example a descendant path would
+    /// exceed `PATH_CAPACITY`.
+    Invalid,
+    /// The copy-up or the old-path whiteout could not be allocated.
+    NoSpace,
+}
+
+/// Moves `source` to `path`, replacing the linked node there, and with
+/// `whiteout_old` leaves a whiteout so the lower entry at the old path stays
+/// hidden. Like shmem_rename2(), every check and the whiteout allocation
+/// happen before either path changes, and the target is dropped only after
+/// the move (mm/shmem.c:4011-4032). A copy-up made for the move is discarded
+/// again on failure, so an error leaves both paths as they were.
+pub(crate) fn rename(
+    source: RenameSource<'_>,
+    path: &[u8],
+    whiteout_old: bool,
+) -> Result<(), RenameError> {
+    match source {
+        RenameSource::Node(handle) => move_node(handle, path, whiteout_old),
+        RenameSource::Lower {
+            path: old_path,
+            mode,
+            data,
+        } => {
+            let copy = create_file(old_path, mode, data).ok_or(RenameError::NoSpace)?;
+            let moved = move_node(copy, path, whiteout_old);
+            if moved.is_err() {
+                discard(copy);
+            }
+            moved
+        }
     }
-    let Some(source) = node(handle) else {
-        return false;
-    };
-    if !source.linked {
-        return false;
-    }
+}
+
+fn move_node(handle: Handle, path: &[u8], whiteout_old: bool) -> Result<(), RenameError> {
+    valid_path(path).ok_or(RenameError::Invalid)?;
+    let source = node(handle)
+        .filter(|source| source.linked)
+        .ok_or(RenameError::Invalid)?;
     let mut old_path = [0_u8; PATH_CAPACITY];
     let old_length = source.path().len();
     old_path[..old_length].copy_from_slice(source.path());
     let directory = source.kind == NodeKind::Directory;
+    let replaced = lookup(path).map(|target| target.handle);
+    if replaced == Some(handle)
+        || ginux_kernel_policy::strict_path_descendant(&old_path[..old_length], path)
+    {
+        return Err(RenameError::Invalid);
+    }
+    if replaced.is_some() && has_children(path) {
+        return Err(RenameError::NotEmpty);
+    }
     let Some(overlay) = live() else {
-        return false;
+        return Err(RenameError::Invalid);
     };
     let valid = for_each_node(overlay, |candidate| {
         if !candidate.linked
@@ -947,13 +1020,36 @@ pub(crate) fn rename(handle: Handle, path: &[u8]) -> bool {
         None
     });
     if valid == Some(false) {
-        return false;
+        return Err(RenameError::Invalid);
     }
+    // Reserve the whiteout before anything changes: this is the only
+    // allocation of the move.
+    let whiteout = if whiteout_old {
+        let overlay = live_mut();
+        let handle = Handle {
+            generation: overlay
+                .next_generation
+                .checked_add(1)
+                .ok_or(RenameError::NoSpace)?,
+            inode: overlay
+                .next_inode
+                .checked_add(1)
+                .ok_or(RenameError::NoSpace)?,
+        };
+        Some((
+            empty_node_slot(live_mut()).ok_or(RenameError::NoSpace)?,
+            handle,
+        ))
+    } else {
+        None
+    };
+    // Nothing below fails: the loop walks the node pages the check above
+    // already walked, and the reserved slot is inactive, so it skips it.
     let overlay = live_mut();
     let mut page = overlay.first_node_page;
     while page != FrameLease::EMPTY {
         let Some(nodes) = node_page_mut(page) else {
-            return false;
+            return Err(RenameError::Invalid);
         };
         for candidate in &mut nodes.nodes {
             if !candidate.active || !candidate.linked {
@@ -978,7 +1074,34 @@ pub(crate) fn rename(handle: Handle, path: &[u8]) -> bool {
         }
         page = nodes.next;
     }
-    true
+    if let Some(target) = replaced.and_then(node_mut) {
+        target.linked = false;
+    }
+    if let Some((slot, handle)) = whiteout {
+        *slot = Node {
+            active: true,
+            linked: true,
+            whiteout: true,
+            path_length: old_length as u16,
+            handle,
+            path: old_path,
+            ..Node::EMPTY
+        };
+        overlay.next_generation = handle.generation;
+        overlay.next_inode = handle.inode;
+    }
+    Ok(())
+}
+
+/// Removes a node that no descriptor has seen yet and frees its slot.
+fn discard(handle: Handle) {
+    let Some(node) = node_mut(handle) else {
+        return;
+    };
+    node.linked = false;
+    if release_data_pages(node.first_page) && release_xattr_pages(node.xattr_first) {
+        *node = Node::EMPTY;
+    }
 }
 
 pub(crate) fn unlink(handle: Handle) -> bool {
@@ -1434,6 +1557,15 @@ fn current_frame_policy() -> Result<Option<(FrameOwner, usize)>, ()> {
 }
 
 fn allocate_current_frames<const N: usize>() -> Option<[FrameLease; N]> {
+    if cfg!(feature = "verification-boot") {
+        let countdown = INJECTED_FRAME_FAILURE.load(Ordering::SeqCst);
+        if countdown != 0 {
+            INJECTED_FRAME_FAILURE.store(countdown - 1, Ordering::SeqCst);
+            if countdown == 1 {
+                return None;
+            }
+        }
+    }
     allocate_frames_with_policy(current_frame_policy())
 }
 
@@ -1489,4 +1621,184 @@ pub(crate) fn verify_frame_quota() -> bool {
     let host_fallback = memory::frame_owner(host_frame) == Some(FrameOwner::KERNEL)
         && scrub_and_release_frame(host_frame);
     exhausted && isolated && restored && host_fallback
+}
+
+/// Boot verification for rename(): fails each overlay allocation a rename
+/// can make and checks that the call fails and leaves the old and the new
+/// path exactly as they were. A lower entry is a path without an overlay node
+/// or whiteout, which the merged view resolves to the image entry.
+pub(crate) fn verify_rename_rollback() -> bool {
+    // teardown() below must only remove what this verification created.
+    if live().is_none_or(|overlay| overlay.first_node_page != FrameLease::EMPTY) {
+        return false;
+    }
+    let passed = rename_rollback_cases();
+    INJECTED_FRAME_FAILURE.store(0, Ordering::SeqCst);
+    teardown() && passed
+}
+
+fn rename_rollback_cases() -> bool {
+    const SOURCE: &[u8] = b"rename-source";
+    const TARGET: &[u8] = b"rename-target";
+    const LOWER_TARGET: &[u8] = b"rename-lower-target";
+    const DIRECTORY: &[u8] = b"rename-directory";
+    let lower = RenameSource::Lower {
+        path: SOURCE,
+        mode: 0o644,
+        data: b"lower",
+    };
+    let mut fillers = 0;
+    let Some(target) = create_file(TARGET, 0o600, b"target") else {
+        return false;
+    };
+    // Copy-up fails: no free node slot, then no data page.
+    let copy_up = rename_fails_unchanged(lower, SOURCE, LOWER_TARGET, true, 0, 1, &mut fillers)
+        && rename_fails_unchanged(lower, SOURCE, LOWER_TARGET, true, 2, 1, &mut fillers);
+    // The copy-up takes the last free slot and the old-path whiteout cannot
+    // be allocated (allocation 1 is the copy-up data page), with a lower
+    // target and with an overlay target that would be replaced.
+    let whiteout = rename_fails_unchanged(lower, SOURCE, LOWER_TARGET, true, 1, 2, &mut fillers)
+        && rename_fails_unchanged(lower, SOURCE, TARGET, true, 1, 2, &mut fillers);
+    // An overlay file that shadows a lower one needs only the whiteout.
+    let shadowing = create_file(SOURCE, 0o640, b"upper").is_some_and(|source| {
+        let failed = rename_fails_unchanged(
+            RenameSource::Node(source),
+            SOURCE,
+            TARGET,
+            true,
+            0,
+            1,
+            &mut fillers,
+        );
+        failed && unlink(source)
+    });
+    // A directory whose child would exceed PATH_CAPACITY at the target fails
+    // the move itself; the existing empty target directory must survive.
+    let mut child = [b'c'; 200];
+    child[..DIRECTORY.len()].copy_from_slice(DIRECTORY);
+    child[DIRECTORY.len()] = b'/';
+    let long_target = [b't'; 100];
+    let invalid = create_directory(DIRECTORY, 0o755).is_some_and(|directory| {
+        create_file(&child, 0o644, b"child").is_some()
+            && create_directory(&long_target, 0o755).is_some()
+            && {
+                let before = path_state(&child);
+                let failed = rename_fails_unchanged(
+                    RenameSource::Node(directory),
+                    DIRECTORY,
+                    &long_target,
+                    false,
+                    usize::MAX,
+                    0,
+                    &mut fillers,
+                );
+                failed && path_state(&child) == before
+            }
+    });
+    // The success path still moves the copy-up over the overlay target and
+    // whites out the old path.
+    let moved = rename(lower, TARGET, true).is_ok()
+        && lookup(SOURCE).is_none()
+        && hidden(SOURCE)
+        && lookup(TARGET).is_some_and(|metadata| {
+            let mut contents = [0_u8; 8];
+            metadata.handle != target
+                && read(metadata.handle, 0, &mut contents) == Some(5)
+                && contents[..5] == *b"lower"
+        })
+        && node(target).is_some_and(|target| !target.linked);
+    for (name, passed) in [
+        (&b"copy-up"[..], copy_up),
+        (b"whiteout", whiteout),
+        (b"shadowing", shadowing),
+        (b"invalid", invalid),
+        (b"moved", moved),
+    ] {
+        if !passed {
+            crate::serial_write_bytes(b"\r\nginux: overlay rename case failed: ");
+            crate::serial_write_bytes(name);
+        }
+    }
+    copy_up && whiteout && shadowing && invalid && moved
+}
+
+/// Leaves `free` node slots (`usize::MAX` keeps the current count), fails
+/// the `allocation`-th overlay frame allocation of one rename (0 injects
+/// nothing and expects `Invalid`) and checks that the rename fails, that the
+/// injected failure was reached, and that both paths and the number of free
+/// node slots are unchanged.
+fn rename_fails_unchanged(
+    source: RenameSource<'_>,
+    old_path: &[u8],
+    path: &[u8],
+    whiteout_old: bool,
+    free: usize,
+    allocation: usize,
+    fillers: &mut u8,
+) -> bool {
+    if free != usize::MAX && !fill_node_slots(free, fillers) {
+        return false;
+    }
+    let slots = free_node_slots();
+    let before = (path_state(old_path), path_state(path));
+    INJECTED_FRAME_FAILURE.store(allocation, Ordering::SeqCst);
+    let expected = if allocation == 0 {
+        RenameError::Invalid
+    } else {
+        RenameError::NoSpace
+    };
+    let failed = rename(source, path, whiteout_old) == Err(expected);
+    let reached = INJECTED_FRAME_FAILURE.swap(0, Ordering::SeqCst) == 0;
+    failed
+        && reached
+        && (path_state(old_path), path_state(path)) == before
+        && free_node_slots() == slots
+}
+
+type PathState = (
+    bool,
+    Option<(Handle, NodeKind, u32, usize)>,
+    Option<usize>,
+    [u8; 8],
+);
+
+fn path_state(path: &[u8]) -> PathState {
+    let metadata = lookup(path);
+    let mut contents = [0_u8; 8];
+    let read = metadata.and_then(|metadata| read(metadata.handle, 0, &mut contents));
+    (
+        hidden(path),
+        metadata.map(|metadata| (metadata.handle, metadata.kind, metadata.mode, metadata.size)),
+        read,
+        contents,
+    )
+}
+
+fn free_node_slots() -> usize {
+    let mut free = 0;
+    let mut page = live().map_or(FrameLease::EMPTY, |overlay| overlay.first_node_page);
+    while page != FrameLease::EMPTY {
+        let Some(nodes) = node_page(page) else {
+            break;
+        };
+        free += nodes.nodes.iter().filter(|node| !node.active).count();
+        page = nodes.next;
+    }
+    free
+}
+
+fn fill_node_slots(free: usize, fillers: &mut u8) -> bool {
+    for _ in 0..2 * NODE_COUNT {
+        if free_node_slots() == free {
+            return true;
+        }
+        let mut name = *b"fill-aa";
+        name[5] += *fillers / 26;
+        name[6] += *fillers % 26;
+        *fillers += 1;
+        if create_file(&name, 0o600, &[]).is_none() {
+            return false;
+        }
+    }
+    false
 }

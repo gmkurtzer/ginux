@@ -430,6 +430,7 @@ pub(super) const LINUX_EPIPE: u64 = u64::MAX - 31;
 pub(super) const LINUX_EACCES: u64 = u64::MAX - 12;
 pub(super) const LINUX_EBUSY: u64 = u64::MAX - 15;
 pub(super) const LINUX_EEXIST: u64 = u64::MAX - 16;
+pub(super) const LINUX_EXDEV: u64 = u64::MAX - 17;
 pub(super) const LINUX_ENODEV: u64 = u64::MAX - 18;
 pub(super) const LINUX_ENOTDIR: u64 = u64::MAX - 19;
 pub(super) const LINUX_EISDIR: u64 = u64::MAX - 20;
