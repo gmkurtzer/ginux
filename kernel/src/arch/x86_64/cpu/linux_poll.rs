@@ -602,6 +602,18 @@ pub(super) fn yield_current_linux_process(mut caller: LinuxUserContext, result: 
     if !X86_RUNTIME.LINUX_RUNTIME_MODE.load(Ordering::SeqCst) || current_linux_process_pid() == 1 {
         return false;
     }
+    // Handing the CPU to an ancestor replaces the live thread table with the
+    // ancestor's. Another thread of this process waits on its slot in that
+    // table (blocked in FUTEX_WAIT on an application CPU, or ready to run
+    // on this one) and would lose its wakeup or enter the kernel without its
+    // process, so only a single-threaded process yields.
+    let current = current_linux_thread_slot();
+    if (0..LINUX_THREAD_LIMIT).any(|slot| {
+        Some(slot) != current
+            && X86_RUNTIME.LINUX_THREAD_STATES[slot].load(Ordering::SeqCst) != LINUX_THREAD_FREE
+    }) {
+        return false;
+    }
     caller.rax = result;
     let pid = current_linux_process_pid();
     if !refresh_live_linux_process_registry(caller) {

@@ -480,7 +480,26 @@ pub(super) fn linux_clock_nanosleep_live_return(
     let Some(current) = current_linux_thread_handle() else {
         return LINUX_ESRCH;
     };
-    let Some(target) = ready_linux_thread_handle() else {
+    let target = ready_linux_thread_handle();
+    if target.is_none() && current_linux_runtime_cpu_index() != 0 {
+        // Linux puts the sleeper to sleep until its hrtimer fires
+        // (kernel/time/hrtimer.c:2427 do_nanosleep). A thread on an
+        // application CPU must not halt below instead: it would hold the
+        // kernel entry lock, stalling every other thread of the domain, and
+        // that CPU has no timer to end the halt. Block it; the timer tick
+        // marks it ready at the deadline (expire_linux_waits) and its
+        // dispatch loop resumes it.
+        if !save_linux_thread_return_context(current, caller)
+            || !block_current_linux_thread(LINUX_THREAD_WAIT_SLEEP, 1, remaining, deadline)
+        {
+            return LINUX_EINVAL;
+        }
+        X86_RUNTIME
+            .LINUX_SLEEP_BLOCK_COUNT
+            .fetch_add(1, Ordering::SeqCst);
+        return LINUX_RETURN_TO_KERNEL;
+    }
+    let Some(target) = target else {
         // With no runnable peer, the current process is the domain's idle
         // task. Sleep in the kernel until the deadline instead of exposing an
         // implementation detail as ENOSYS. Device/timer interrupts still wake

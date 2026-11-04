@@ -39,7 +39,16 @@ pub(super) extern "sysv64" fn linux_syscall_handler(
     }
     if number == LINUX_FUTEX_SYSCALL && fast_runtime_syscall {
         let register = |index: usize| saved_registers.argument(index).unwrap_or(0);
+        let caller = LinuxUserContext {
+            registers: saved_registers,
+            rip: user_rip,
+            rsp: user_stack,
+            rflags: user_rflags,
+            rax: 0,
+            fs_base: active_fs_base(),
+        };
         if let Some(result) = linux_remote_futex_wait_fast(
+            caller,
             register(5),
             register(4),
             register(3),

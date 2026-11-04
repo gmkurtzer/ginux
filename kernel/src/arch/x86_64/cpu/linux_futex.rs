@@ -42,6 +42,7 @@ pub(super) fn write_linux_futex_profile() {
 }
 
 pub(super) fn linux_remote_futex_wait_fast(
+    caller: LinuxUserContext,
     address: u64,
     operation: u64,
     value: u64,
@@ -239,6 +240,42 @@ pub(super) fn linux_remote_futex_wait_fast(
             return finish(0);
         }
         core::hint::spin_loop();
+    }
+    if current_linux_runtime_cpu_index() != 0 {
+        // Linux FUTEX_WAIT returns 0 only after a FUTEX_WAKE dequeued the
+        // waiter and goes back to sleep after a spurious wakeup
+        // (kernel/futex/waitwake.c:735-748). An application CPU can block its
+        // thread, so turn the polling registration into a queued wait
+        // instead of returning 0 unwoken. The registration stays visible to
+        // FUTEX_WAKE until the thread is blocked, so no wake is lost.
+        let _kernel_entry = crate::sync::kernel_entry_lock();
+        let coordination = LINUX_FUTEX_COORDINATION.lock();
+        let woken = X86_RUNTIME.LINUX_THREAD_WAIT_KINDS[slot]
+            .compare_exchange(
+                LINUX_THREAD_WAIT_FUTEX,
+                LINUX_THREAD_WAIT_NONE,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_err();
+        X86_RUNTIME.LINUX_THREAD_WAIT_KEYS[slot].store(0, Ordering::Release);
+        X86_RUNTIME.LINUX_THREAD_WAIT_OUTPUTS[slot].store(0, Ordering::Release);
+        if woken {
+            return Some(0);
+        }
+        let Some(current) = current_linux_thread_handle() else {
+            return Some(LINUX_ESRCH);
+        };
+        if !save_linux_thread_return_context(current, caller)
+            || !block_current_linux_thread(LINUX_THREAD_WAIT_FUTEX, address, u64::from(u32::MAX), 0)
+        {
+            return Some(LINUX_EINVAL);
+        }
+        drop(coordination);
+        X86_RUNTIME
+            .LINUX_FUTEX_WAIT_BLOCK_COUNT
+            .fetch_add(1, Ordering::SeqCst);
+        return Some(LINUX_RETURN_TO_KERNEL);
     }
     finish(0)
 }
