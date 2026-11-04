@@ -845,6 +845,7 @@ pub(super) fn linux_interrupt_context(handle: LinuxThreadHandle) -> Option<UserF
 }
 
 pub(crate) fn expire_linux_waits_from_timer(frame: &mut UserInterruptFrame) {
+    crate::linux_socket::poll_from_timer();
     if X86_RUNTIME.LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
         && !X86_RUNTIME
             .LINUX_RUNTIME_STALLED_DIAGNOSTIC_WRITTEN

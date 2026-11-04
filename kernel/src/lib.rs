@@ -3988,6 +3988,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     if !network::initialize_runtime() {
         kernel_fail("\r\nginux: runtime network initialization failed\r\n");
     }
+    if !linux_socket::verify_network_clock_profile() {
+        kernel_fail("\r\nginux: kernel network monotonic clock invalid\r\n");
+    }
+    serial_write("\r\nginux: kernel network monotonic clock verified\r\n");
     if let Some(record) = persisted_local_record {
         let (domain_bytes, network_bytes) = persisted_local_configuration
             .split_at(arch::x86_64::cpu::PERSISTENT_DOMAIN_CONFIG_SIZE);
