@@ -40,10 +40,12 @@ mounts, identifiers, and configuration are not leaked as domain authority.
   memory, mounts, hostname, and boot-identity reads from Ginux-owned inputs.
 - [x] Add process-table snapshot projection plus negative host-PID, invalid-path,
   read-only mutation, buffer-boundary, and consistency tests.
+- [x] Implement virtual sysfs class views from domain-assigned device snapshots,
+  including virtual major/minor, network type, uevent, and CPU-online data.
+- [x] Add explicit unassigned-device exclusion and sysfs mutation-denial tests.
 
 ## Remaining work
 
-- [ ] Implement virtual sysfs and assigned-device projection.
 - [ ] Implement bounded cgroup v2 and mount/identity behavior.
 - [ ] Add consistency, permission, mutation, and host-leakage tests.
 
@@ -86,6 +88,11 @@ mounts, identifiers, and configuration are not leaked as domain authority.
 - `cargo clippy -p ginux-kernel-views --all-targets -- -D warnings` -> passed.
 - `cargo test -p ginux-process` -> all seven prior process-runtime tests
   passed after adding bounded task snapshot projection.
+- Expanded `cargo test -p ginux-kernel-views` -> three procfs/sysfs tests
+  passed, including assigned block/network projection, virtual CPU inventory,
+  unassigned host-device exclusion, and mutation denial.
+- `cargo test -p ginux-devices` -> all six device ownership and isolation
+  regressions passed after adding bounded device snapshot projection.
 
 ## Decisions and limitations
 

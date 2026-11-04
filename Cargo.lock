@@ -34,6 +34,7 @@ dependencies = [
 name = "ginux-kernel-views"
 version = "0.1.0"
 dependencies = [
+ "ginux-devices",
  "ginux-process",
 ]
 

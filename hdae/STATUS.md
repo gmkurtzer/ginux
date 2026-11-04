@@ -235,6 +235,9 @@ scope, threat model, and invariants.
   no-std kernel-view component, bounded process snapshots, virtual procfs task,
   memory, uptime, mount, hostname, and boot-identity reads, explicit read-only
   mutation denial, and host-PID exclusion tests.
+- Gate 8 virtual sysfs now projects only assigned devices with virtual
+  class/type/major/minor/uevent data and virtual CPU inventory. Unassigned
+  host-device lookup and all sysfs mutation fail explicitly.
 
 ## Open decisions and limitations
 
@@ -272,8 +275,8 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Implement Gate 8 virtual sysfs with assigned-device projection, then add the
-bounded cgroup v2 and remaining mount/namespace identity model.
+Implement the bounded Gate 8 cgroup v2 hierarchy and remaining
+mount/namespace identity model.
 
 ## Context recovery
 
@@ -281,9 +284,9 @@ bounded cgroup v2 and remaining mount/namespace identity model.
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
 - Active gate: Gate 8, virtual kernel views, authorized for execution on
-  dedicated branch `hdae/virtual-kernel-views`; procfs foundation passes and
-  sysfs/device projection is next
-- Last evidence: `cargo test -p ginux-kernel-views`, its strict clippy check,
-  and `cargo test -p ginux-process` passed on 2026-11-04
+  dedicated branch `hdae/virtual-kernel-views`; procfs and sysfs/device
+  projection pass and cgroup/mount/namespace modeling is next
+- Last evidence: three `ginux-kernel-views` tests, its strict clippy check,
+  and all six `ginux-devices` tests passed on 2026-11-04
 - Required human decision: none until the Gate 8 demonstration checkpoint; the
   Gate 9 DNF repository choice is deferred until before Gate 9 implementation

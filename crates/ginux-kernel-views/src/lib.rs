@@ -1,5 +1,6 @@
 #![no_std]
 
+use ginux_devices::{DeviceKind, DeviceView};
 use ginux_process::{TaskState, TaskView};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -38,6 +39,103 @@ pub struct ProcFs<'a> {
     memory: MemoryView,
     identity: IdentityView<'a>,
     mounts: &'a [MountView<'a>],
+}
+
+pub struct SysFs<'a> {
+    devices: &'a [DeviceView],
+    cpu_count: u32,
+}
+
+impl<'a> SysFs<'a> {
+    pub const fn new(devices: &'a [DeviceView], cpu_count: u32) -> Self {
+        Self { devices, cpu_count }
+    }
+
+    pub fn list_devices(&self, output: &mut [DeviceView]) -> usize {
+        let count = core::cmp::min(output.len(), self.devices.len());
+        output[..count].copy_from_slice(&self.devices[..count]);
+        count
+    }
+
+    pub fn read(&self, path: &[u8], output: &mut [u8]) -> Result<usize, ViewError> {
+        let mut writer = Writer::new(output);
+        if path == b"/sys/devices/system/cpu/online" {
+            if self.cpu_count == 0 {
+                return Err(ViewError::NotFound);
+            }
+            writer.byte(b'0')?;
+            if self.cpu_count > 1 {
+                writer.byte(b'-')?;
+                writer.decimal(u64::from(self.cpu_count - 1))?;
+            }
+            writer.byte(b'\n')?;
+            return Ok(writer.len);
+        }
+        let rest = path
+            .strip_prefix(b"/sys/class/")
+            .ok_or(ViewError::InvalidPath)?;
+        let first = rest
+            .iter()
+            .position(|byte| *byte == b'/')
+            .ok_or(ViewError::InvalidPath)?;
+        let class = &rest[..first];
+        let remaining = &rest[first + 1..];
+        let second = remaining
+            .iter()
+            .position(|byte| *byte == b'/')
+            .ok_or(ViewError::InvalidPath)?;
+        let name = &remaining[..second];
+        let leaf = &remaining[second + 1..];
+        let device = self
+            .devices
+            .iter()
+            .find(|device| device.name.as_bytes() == name && device_class(device.kind) == class)
+            .ok_or(ViewError::NotFound)?;
+        match leaf {
+            b"dev" if device.kind != DeviceKind::Network => {
+                writer.decimal(u64::from(device.major))?;
+                writer.byte(b':')?;
+                writer.decimal(u64::from(device.minor))?;
+                writer.byte(b'\n')?;
+            }
+            b"type" if device.kind == DeviceKind::Network => {
+                writer.bytes(b"1\n")?;
+            }
+            b"uevent" => {
+                writer.bytes(b"DEVNAME=")?;
+                writer.bytes(device.name.as_bytes())?;
+                writer.bytes(b"\nDEVTYPE=")?;
+                writer.bytes(device_type(device.kind))?;
+                writer.byte(b'\n')?;
+            }
+            _ => return Err(ViewError::NotFound),
+        }
+        Ok(writer.len)
+    }
+
+    pub fn write(&self, _path: &[u8], _input: &[u8]) -> Result<usize, ViewError> {
+        Err(ViewError::ReadOnly)
+    }
+}
+
+fn device_class(kind: DeviceKind) -> &'static [u8] {
+    match kind {
+        DeviceKind::Block => b"block",
+        DeviceKind::Network => b"net",
+        DeviceKind::Console => b"tty",
+        DeviceKind::Null | DeviceKind::Zero | DeviceKind::Random => b"misc",
+    }
+}
+
+fn device_type(kind: DeviceKind) -> &'static [u8] {
+    match kind {
+        DeviceKind::Block => b"disk",
+        DeviceKind::Network => b"net",
+        DeviceKind::Console => b"console",
+        DeviceKind::Null => b"null",
+        DeviceKind::Zero => b"zero",
+        DeviceKind::Random => b"random",
+    }
 }
 
 impl<'a> ProcFs<'a> {
@@ -260,6 +358,7 @@ impl<'a> Writer<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ginux_devices::{DeviceName, DeviceRegistry};
     use ginux_process::{Credentials, ProcessTable, TaskView};
 
     fn fixture() -> ([TaskView; 4], usize) {
@@ -367,6 +466,61 @@ mod tests {
         assert_eq!(
             procfs.read(b"/proc/not-a-pid/status", &mut output),
             Err(ViewError::InvalidPath)
+        );
+    }
+
+    #[test]
+    fn sysfs_projects_only_assigned_virtual_devices() {
+        let mut registry: DeviceRegistry<6, 2> = DeviceRegistry::new();
+        registry
+            .assign(7, 100, DeviceName::new(b"vda").unwrap(), DeviceKind::Block)
+            .unwrap();
+        registry
+            .assign(
+                7,
+                101,
+                DeviceName::new(b"net0").unwrap(),
+                DeviceKind::Network,
+            )
+            .unwrap();
+        registry
+            .assign(
+                8,
+                102,
+                DeviceName::new(b"host-only").unwrap(),
+                DeviceKind::Block,
+            )
+            .unwrap();
+        let placeholder = DeviceView {
+            name: DeviceName::new(b"none").unwrap(),
+            kind: DeviceKind::Null,
+            major: 0,
+            minor: 0,
+        };
+        let mut projected = [placeholder; 6];
+        let count = registry.views(7, &mut projected);
+        let sysfs = SysFs::new(&projected[..count], 2);
+        let mut output = [0u8; 128];
+
+        let len = sysfs
+            .read(b"/sys/class/block/vda/dev", &mut output)
+            .unwrap();
+        assert_eq!(&output[..len], b"254:0\n");
+        let len = sysfs
+            .read(b"/sys/class/net/net0/type", &mut output)
+            .unwrap();
+        assert_eq!(&output[..len], b"1\n");
+        let len = sysfs
+            .read(b"/sys/devices/system/cpu/online", &mut output)
+            .unwrap();
+        assert_eq!(&output[..len], b"0-1\n");
+        assert_eq!(
+            sysfs.read(b"/sys/class/block/host-only/dev", &mut output),
+            Err(ViewError::NotFound)
+        );
+        assert_eq!(
+            sysfs.write(b"/sys/class/block/vda/dev", b"8:0"),
+            Err(ViewError::ReadOnly)
         );
     }
 }
