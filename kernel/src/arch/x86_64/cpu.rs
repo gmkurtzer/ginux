@@ -23788,7 +23788,11 @@ fn linux_chdir(path_address: u64) -> u64 {
                     crate::linux_overlay::generation(metadata.handle),
                     Ordering::SeqCst,
                 );
-                X86_RUNTIME.ELF_PROBE_ROOTFS_CWD.store(0, Ordering::SeqCst);
+                // Relative lookups still reach the image directory below.
+                X86_RUNTIME.ELF_PROBE_ROOTFS_CWD.store(
+                    linux_lower_directory(&canonical[..length]),
+                    Ordering::SeqCst,
+                );
                 X86_RUNTIME
                     .ELF_PROBE_CWD
                     .store(LINUX_ROOT_MEASURED_DIRECTORY, Ordering::SeqCst);
@@ -23857,7 +23861,9 @@ fn linux_fchdir(descriptor: u64) -> u64 {
             X86_RUNTIME
                 .ELF_PROBE_OVERLAY_CWD
                 .store(crate::linux_overlay::generation(handle), Ordering::SeqCst);
-            X86_RUNTIME.ELF_PROBE_ROOTFS_CWD.store(0, Ordering::SeqCst);
+            X86_RUNTIME
+                .ELF_PROBE_ROOTFS_CWD
+                .store(linux_rootfs_descriptor(descriptor), Ordering::SeqCst);
             X86_RUNTIME
                 .ELF_PROBE_CWD
                 .store(state & !3, Ordering::SeqCst);
@@ -25707,6 +25713,28 @@ fn linux_rootfs_handle_hidden(handle: u16) -> bool {
         .is_some_and(|length| crate::linux_overlay::hidden(&path[..length]))
 }
 
+/// The visible image directory at canonical `path`, or 0. An overlay
+/// directory at the same path is merged with it, not opaque: Linux copies a
+/// directory up for a metadata change (fs/overlayfs/inode.c:47
+/// ovl_setattr()) without marking it opaque, and lookup only stops at an
+/// opaque upper directory (fs/overlayfs/namei.c:1144). Removed image entries
+/// carry their own whiteouts here, so the merge needs no opaque flag.
+fn linux_lower_directory(path: &[u8]) -> u16 {
+    let mut lower = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+    match crate::published_rootfs::lookup_metadata_at(crate::published_rootfs::ROOT_HANDLE, path) {
+        Some((handle, entry))
+            if entry.is_none_or(|entry| {
+                entry.kind == crate::published_rootfs::EntryKind::Directory
+            }) && crate::published_rootfs::copy_path(handle, &mut lower)
+                .is_some_and(|length| &lower[..length] == path)
+                && !crate::linux_overlay::hidden(path) =>
+        {
+            handle
+        }
+        _ => 0,
+    }
+}
+
 fn linux_overlay_descriptor_handle(descriptor: u64) -> Option<crate::linux_overlay::Handle> {
     let generation = if let Some(generation) = usize::try_from(descriptor)
         .ok()
@@ -26163,6 +26191,12 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64, mode: u64) -> u64
     }
     if let Some(metadata) = overlay_metadata {
         overlay_handle = Some(metadata.handle);
+        // Keep the image directory under a copied-up directory, so lookups
+        // relative to this descriptor and getdents still see its entries.
+        if metadata.kind == crate::linux_overlay::NodeKind::Directory {
+            rootfs_handle =
+                canonical_length.map_or(0, |length| linux_lower_directory(&canonical[..length]));
+        }
         if flags & LINUX_O_TRUNC != 0
             && (access == 0 || metadata.kind != crate::linux_overlay::NodeKind::File)
         {
@@ -37194,7 +37228,10 @@ fn linux_getdents(descriptor: u64, address: u64, count: u64, legacy: bool) -> u6
     let mut used = 0_usize;
     let next_offset;
     let rootfs_directory = linux_rootfs_descriptor(descriptor);
-    if let Some(directory) = linux_overlay_descriptor_handle(descriptor) {
+    // A copied-up image directory keeps its image handle and is listed like
+    // the image directory; only pure overlay directories use the overlay list.
+    let overlay_directory = linux_overlay_descriptor_handle(descriptor);
+    if let Some(directory) = overlay_directory.filter(|_| rootfs_directory == 0) {
         let initial = offset == 0;
         let mut cursor = if initial {
             0
@@ -37279,7 +37316,13 @@ fn linux_getdents(descriptor: u64, address: u64, count: u64, legacy: bool) -> u6
         };
         if initial {
             for (inode, next, name) in [
-                (linux_rootfs_inode(rootfs_directory), 1_i64, &b"."[..]),
+                (
+                    overlay_directory.map_or(linux_rootfs_inode(rootfs_directory), |handle| {
+                        handle.inode()
+                    }),
+                    1_i64,
+                    &b"."[..],
+                ),
                 (
                     linux_rootfs_inode(crate::published_rootfs::ROOT_HANDLE),
                     2,
