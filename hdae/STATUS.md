@@ -294,9 +294,10 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Execute Gate 8.5: preserve the standalone-kernel refs, join both histories,
-update unified project documentation, run the deterministic verification, and
-open the transition pull request for human review.
+Human review of https://github.com/gmkurtzer/ginux/pull/152. Inspect the joined
+history, userspace source tree, unified README, preserved `bootable-kernel`
+branch and `bootable-kernel-final` tag, and the Gate 8.5 evidence before
+accepting or merging the transition.
 
 ## Context recovery
 
@@ -304,12 +305,12 @@ open the transition pull request for human review.
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
 - Active gate: Gate 8.5, unified repository transition, authorized on dedicated
-  branch `codex/userspace-transition`; local implementation and complete
-  verification pass, with publication and pull-request review remaining
+  branch `codex/userspace-transition`; implementation, publication, and all
+  objective verification pass; pull request 152 awaits human review
 - Last evidence: both lineages are ancestors of the transition head; application
   source matches staging commit `2306c2e`; `make check` and unrestricted
   `ROCKY_SSH_PORT=22242 make test` passed, including all 44 component tests and
   every Rocky QEMU regression
-- Required human decision: review the transition pull request after all Gate
-  8.5 criteria pass; the Gate 9 DNF repository choice remains deferred until
-  before Gate 9 implementation
+- Required human decision: accept or request changes to pull request 152; the
+  Gate 9 DNF repository choice remains deferred until before Gate 9
+  implementation
