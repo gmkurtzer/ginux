@@ -491,6 +491,9 @@ fn host_commit_error(error: CommitError) -> HostVolumeError {
 }
 
 #[cfg(test)]
+mod crash_tests;
+
+#[cfg(test)]
 mod tests {
     extern crate std;
 
