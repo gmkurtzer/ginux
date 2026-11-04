@@ -2,7 +2,7 @@
 
 ## Source
 
-Core Ginus product requirement: each domain exposes an explicit, versioned,
+Core Ginux-us product requirement: each domain exposes an explicit, versioned,
 configurable Linux contract with logging and no unmediated host syscall effect.
 
 ## Goal

@@ -10,10 +10,11 @@ if ! docker image inspect "$ROCKY_DOMAIN_HELPER_IMAGE" >/dev/null 2>&1; then
 fi
 
 source_sha=$(shasum -a 256 "$ROCKY_SOURCE_IMAGE" | awk '{print $1}')
-if [ "${GINUS_IMAGE_FORCE:-0}" != 1 ] &&
+if [ "${GINUX_IMAGE_FORCE:-0}" != 1 ] &&
     [ -f "$ROCKY_DOMAIN_ROOTFS_PATH" ] &&
     [ -f "$ROCKY_DOMAIN_MANIFEST_PATH" ] &&
     [ -f "$ROCKY_DOMAIN_METADATA_PATH" ] &&
+    grep -Fqx 'GINUX_ROOTFS_MANIFEST_VERSION=1' "$ROCKY_DOMAIN_MANIFEST_PATH" &&
     grep -Fqx "SOURCE_SHA256=$source_sha" "$ROCKY_DOMAIN_METADATA_PATH" &&
     grep -Fqx "HELPER_IMAGE=$ROCKY_DOMAIN_HELPER_IMAGE" "$ROCKY_DOMAIN_METADATA_PATH"; then
     printf 'Rocky domain userspace already prepared: %s\n' "$ROCKY_DOMAIN_ROOTFS_PATH"

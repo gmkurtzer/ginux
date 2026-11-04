@@ -2,7 +2,7 @@
 schema_version = 1
 
 [domain]
-environment = ["GINUS_GATE=4"]
+environment = ["GINUX_GATE=4"]
 args = ["fixture-arg"]
 init = "/runtime-fixture"
 root = "rocky-10.2-x86_64"

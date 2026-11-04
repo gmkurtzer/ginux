@@ -11,8 +11,8 @@ for command in cargo gzip jq paste shasum; do
     }
 done
 
-mkdir -p "$GINUS_OCI_WORK_DIR"
-manifest_blob=$(oci_blob_path "$GINUS_OCI_MANIFEST_DIGEST")
+mkdir -p "$GINUX_OCI_WORK_DIR"
+manifest_blob=$(oci_blob_path "$GINUX_OCI_MANIFEST_DIGEST")
 layer_count=$(jq '.layers | length' "$manifest_blob")
 diff_count=$(config_digest=$(jq -er '.config.digest' "$manifest_blob") &&
     config_blob=$(oci_blob_path "$config_digest") && jq '.rootfs.diff_ids | length' "$config_blob")
@@ -20,17 +20,17 @@ test "$layer_count" -eq "$diff_count"
 config_digest=$(jq -er '.config.digest' "$manifest_blob")
 config_blob=$(oci_blob_path "$config_digest")
 
-rootfs=$GINUS_OCI_CACHE_DIR/$GINUS_OCI_ROOTFS_LAYER
-index=$GINUS_OCI_CACHE_DIR/$GINUS_OCI_ROOTFS_INDEX
-identity=$GINUS_OCI_CACHE_DIR/$GINUS_OCI_ROOTFS_IDENTITY
-rootfs_tmp=$GINUS_OCI_WORK_DIR/rootfs.tar.partial
-index_tmp=$GINUS_OCI_WORK_DIR/rootfs.index.partial
-identity_tmp=$GINUS_OCI_WORK_DIR/rootfs.env.partial
-layer_list=$GINUS_OCI_WORK_DIR/layers.tsv
+rootfs=$GINUX_OCI_CACHE_DIR/$GINUX_OCI_ROOTFS_LAYER
+index=$GINUX_OCI_CACHE_DIR/$GINUX_OCI_ROOTFS_INDEX
+identity=$GINUX_OCI_CACHE_DIR/$GINUX_OCI_ROOTFS_IDENTITY
+rootfs_tmp=$GINUX_OCI_WORK_DIR/rootfs.tar.partial
+index_tmp=$GINUX_OCI_WORK_DIR/rootfs.index.partial
+identity_tmp=$GINUX_OCI_WORK_DIR/rootfs.env.partial
+layer_list=$GINUX_OCI_WORK_DIR/layers.tsv
 
 cleanup() {
     rm -f "$rootfs_tmp" "$index_tmp" "$identity_tmp" "$layer_list" \
-        "$layer_list.media" "$layer_list.diff" "$GINUS_OCI_WORK_DIR"/*.partial
+        "$layer_list.media" "$layer_list.diff" "$GINUX_OCI_WORK_DIR"/*.partial
 }
 trap cleanup 0 HUP INT TERM
 
@@ -45,7 +45,7 @@ tab=$(printf '\t')
 while IFS="$tab" read -r layer_media_type layer_digest diff_id; do
     test "$layer_media_type" = application/vnd.oci.image.layer.v1.tar+gzip
     layer_blob=$(oci_blob_path "$layer_digest")
-    layer_tar=$GINUS_OCI_WORK_DIR/layer-$layer_number.tar
+    layer_tar=$GINUX_OCI_WORK_DIR/layer-$layer_number.tar
     layer_tmp=$layer_tar.partial
     gzip -dc "$layer_blob" > "$layer_tmp"
     actual_diff_id=sha256:$(shasum -a 256 "$layer_tmp" | awk '{print $1}')
@@ -60,15 +60,15 @@ while IFS="$tab" read -r layer_media_type layer_digest diff_id; do
 done < "$layer_list"
 test "$layer_number" -eq "$layer_count"
 
-cargo run -q -p ginus-vfs-index -- assemble "$rootfs_tmp" "$index_tmp" "$@"
+cargo run -q -p ginux-vfs-index -- assemble "$rootfs_tmp" "$index_tmp" "$@"
 mv "$rootfs_tmp" "$rootfs"
 mv "$index_tmp" "$index"
 rootfs_sha=$(shasum -a 256 "$rootfs" | awk '{print $1}')
 index_sha=$(shasum -a 256 "$index" | awk '{print $1}')
 cat > "$identity_tmp" <<EOF
 FORMAT_VERSION=1
-OCI_INDEX_DIGEST=$GINUS_OCI_INDEX_DIGEST
-OCI_MANIFEST_DIGEST=$GINUS_OCI_MANIFEST_DIGEST
+OCI_INDEX_DIGEST=$GINUX_OCI_INDEX_DIGEST
+OCI_MANIFEST_DIGEST=$GINUX_OCI_MANIFEST_DIGEST
 OCI_CONFIG_DIGEST=$config_digest
 OCI_LAYER_COUNT=$layer_count
 ROOTFS_SHA256=$rootfs_sha

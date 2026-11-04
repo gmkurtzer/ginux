@@ -2,7 +2,7 @@
 
 ## Source
 
-Approved requirement that domains receive Ginus-created `/proc`, `/sys`, and
+Approved requirement that domains receive Ginux-us-created `/proc`, `/sys`, and
 cgroup interfaces rather than host passthrough.
 
 ## Goal
@@ -14,7 +14,7 @@ mounts, identifiers, and configuration are not leaked as domain authority.
 ## Approved scope
 
 - Implement the tested `/proc` process, system, mount, memory, uptime, and
-  identity files from Ginus state.
+  identity files from Ginux-us state.
 - Implement the tested `/sys` device and kernel attribute tree from assigned
   virtual devices and contract-visible state.
 - Implement the bounded cgroup v2 hierarchy and operations required by the
@@ -45,7 +45,7 @@ mounts, identifiers, and configuration are not leaked as domain authority.
 
 ## Acceptance criteria
 
-- Managed process listings and status expose only Ginus tasks and use virtual
+- Managed process listings and status expose only Ginux-us tasks and use virtual
   identities consistent with the process runtime.
 - Sysfs exposes only assigned virtual devices and approved attributes.
 - Cgroup operations required by the systemd fixtures succeed inside the
@@ -65,7 +65,7 @@ mounts, identifiers, and configuration are not leaked as domain authority.
 - `make test-kernel-views` -> procfs, sysfs, mount, namespace, identity,
   consistency, permission, mutation, and host-leakage tests pass.
 - `make test-cgroup` -> selected systemd cgroup v2 operations pass and host
-  cgroup snapshots remain unchanged outside Ginus-owned resources.
+  cgroup snapshots remain unchanged outside Ginux-us-owned resources.
 - Host-versus-domain inventory comparison -> no unassigned host object appears
   in the managed fixture's observable results.
 - `make test` with network disabled -> exits zero.

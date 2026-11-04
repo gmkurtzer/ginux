@@ -1,8 +1,8 @@
-# Ginus HDAE Plan
+# Ginux-us HDAE Plan
 
 ## Strategy
 
-Build Ginus from the security boundary outward. First prove that unmodified
+Build Ginux-us from the security boundary outward. First prove that unmodified
 x86-64 code can run without unmediated host-syscall effects. Then add a cached
 Rocky userspace, domain configuration, Linux runtime behavior, virtual kernel
 objects, systemd compatibility, explicit contract controls, performance
@@ -34,7 +34,7 @@ replace it.
 ## Ordered gate map
 
 1. **Rocky host foundation and interception proof**: boot a normal Rocky Linux
-   10 host under QEMU TCG, run Ginus as an ordinary process, and prove matched
+   10 host under QEMU TCG, run Ginux-us as an ordinary process, and prove matched
    syscall interception and benchmark controls without replacing host systemd.
 2. **Rocky image-pipeline foundation**: reproducibly extract and verify Rocky
    filesystem content as pipeline evidence and fixtures. Gate 5 supersedes its
@@ -52,7 +52,10 @@ replace it.
    device-path benchmarks.
 7. **Process runtime**: process, thread, signal, synchronization, time,
    credential, and event behavior required by systemd.
-8. **Virtual kernel views**: Ginus-owned `/proc`, `/sys`, cgroup v2, mounts,
+7.5. **Ginux-us project rename**: rename every active project surface and the
+   command to `ginux`, preserve locked historical lineage records, and rerun
+   Gate 7 before human acceptance.
+8. **Virtual kernel views**: Ginux-us-owned `/proc`, `/sys`, cgroup v2, mounts,
    namespaces, and machine identity without host leakage.
 9. **Systemd baseline**: Rocky systemd as virtual PID 1 reaching a usable
    multi-user login, virtual PID and lockdown inspection, a bounded DNF update
@@ -60,9 +63,9 @@ replace it.
 10. **Configurable contract and audit**: versioned syscall, ioctl, device,
     filesystem, and kernel-view policy with fail-closed validation and logs.
 11. **Performance characterization and optimization**: native, conventional
-    container, and Ginus comparisons against approved budgets.
+    container, and Ginux-us comparisons against approved budgets.
 13. **Boundary hardening**: malformed ABI tests, fuzzing, escape attempts,
-    Ginus privilege reduction, recovery, performance regression, and explicit
+    Ginux-us privilege reduction, recovery, performance regression, and explicit
     limitations.
 
 Gates are stored in `hdae/gates-todo/` and remain there until they pass and are
@@ -82,7 +85,7 @@ preserving these rules:
   reviewed fixture or report is intentionally committed.
 - Each target returns nonzero when mandatory verification fails.
 - Aggregate targets never hide a failing mandatory subtarget.
-- Benchmark controls run inside the same emulated x86-64 environment as Ginus
+- Benchmark controls run inside the same emulated x86-64 environment as Ginux-us
   unless a gate explicitly documents a non-comparable host measurement.
 
 Planned public targets are:

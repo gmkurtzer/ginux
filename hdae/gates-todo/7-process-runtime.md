@@ -33,7 +33,7 @@ early helper fixtures.
 
 ## Completed work
 
-- [x] Implement the bounded Ginus process table with virtual PID, TID, parent,
+- [x] Implement the bounded Ginux-us process table with virtual PID, TID, parent,
   process-group, session, fork, clone-thread, exec epoch, exit, wait, and reap
   behavior.
 - [x] Add generation-safe internal task handles, monotonic virtual PID
@@ -65,10 +65,10 @@ early helper fixtures.
   and threads without stale identity reuse or resource leakage.
 - Signal, futex, timer, and event fixtures observe the documented Linux-style
   results, interruption, timeout, and cleanup behavior.
-- Virtual root and capabilities affect only Ginus policy and never confer host
+- Virtual root and capabilities affect only Ginux-us policy and never confer host
   credentials or capabilities.
 - Invalid PIDs, TIDs, selectors, pointers, flags, and lifecycle races fail
-  deterministically without crossing domain boundaries or crashing Ginus.
+  deterministically without crossing domain boundaries or crashing Ginux-us.
 - Blocking operations can be interrupted and domain shutdown can terminate all
   managed work within the documented test timeout.
 - Earlier VFS, device, runtime, and interception tests remain passing.
@@ -88,11 +88,11 @@ early helper fixtures.
 
 ## Evidence
 
-- `cargo test -p ginus-process` -> seven lifecycle, identity, credentials,
+- `cargo test -p ginux-process` -> seven lifecycle, identity, credentials,
   signal, futex, eventfd, exhaustion, invalid-selector, and cleanup tests
   passed, including deterministic virtual clocks, periodic timers, and event
   readiness.
-- `cargo clippy -p ginus-process --all-targets -- -D warnings` -> passed.
+- `cargo clippy -p ginux-process --all-targets -- -D warnings` -> passed.
 - `make test-process` -> passed the same deterministic component suite.
 - Expanded `make test-process` -> passed seven component tests and the Rocky
   Linux 10 QEMU fixture: 256 lifecycle cycles, virtual PID 1, stale-ID denial,
@@ -134,9 +134,9 @@ early helper fixtures.
 
 - Working branch: `hdae/process-runtime`
 - Intended base: `main`
-- Pull request: https://github.com/gmkurtzer/usshim/pull/7; dedicated branch
-  push and PR creation authorized on 2026-11-03; never merge or close without
-  explicit authorization
+- Pull request: https://github.com/gmkurtzer/ginux-us/pull/7; merged by the
+  human on 2026-11-04; merge does not substitute for this gate's explicit
+  acceptance checkpoint
 - Planned commits: process and thread lifecycle; signals, synchronization, and
   time; credentials and event interfaces; stress and cleanup verification
 - Actual commits: `440c98f` added the process-runtime foundation; `b385ed6`

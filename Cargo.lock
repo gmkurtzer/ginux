@@ -7,49 +7,49 @@ name = "baseline-runner"
 version = "0.1.0"
 
 [[package]]
-name = "ginus-core"
+name = "ginux-core"
 version = "0.1.0"
 
 [[package]]
-name = "ginus-devices"
+name = "ginux-devices"
 version = "0.1.0"
 
 [[package]]
-name = "ginus-domain"
+name = "ginux-domain"
 version = "0.1.0"
 
 [[package]]
-name = "ginus-init"
+name = "ginux-init"
 version = "0.1.0"
 dependencies = [
- "ginus-core",
- "ginus-devices",
- "ginus-domain",
- "ginus-process",
- "ginus-runtime",
- "ginus-vfs",
+ "ginux-core",
+ "ginux-devices",
+ "ginux-domain",
+ "ginux-process",
+ "ginux-runtime",
+ "ginux-vfs",
 ]
 
 [[package]]
-name = "ginus-process"
+name = "ginux-process"
 version = "0.1.0"
 
 [[package]]
-name = "ginus-runtime"
+name = "ginux-runtime"
 version = "0.1.0"
 dependencies = [
- "ginus-core",
+ "ginux-core",
 ]
 
 [[package]]
-name = "ginus-vfs"
+name = "ginux-vfs"
 version = "0.1.0"
 
 [[package]]
-name = "ginus-vfs-index"
+name = "ginux-vfs-index"
 version = "0.1.0"
 dependencies = [
- "ginus-vfs",
+ "ginux-vfs",
 ]
 
 [[package]]

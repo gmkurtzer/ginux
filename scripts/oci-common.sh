@@ -2,9 +2,9 @@
 
 . ./config/rocky-domain-oci.env
 
-GINUS_OCI_CACHE_DIR=${GINUS_OCI_CACHE_DIR_OVERRIDE:-$GINUS_OCI_CACHE_DIR}
-GINUS_OCI_BLOBS_DIR=$GINUS_OCI_CACHE_DIR/blobs/sha256
-GINUS_OCI_WORK_DIR=build/oci-work
+GINUX_OCI_CACHE_DIR=${GINUX_OCI_CACHE_DIR_OVERRIDE:-$GINUX_OCI_CACHE_DIR}
+GINUX_OCI_BLOBS_DIR=$GINUX_OCI_CACHE_DIR/blobs/sha256
+GINUX_OCI_WORK_DIR=build/oci-work
 
 oci_digest_hex() {
     case "$1" in
@@ -20,7 +20,7 @@ oci_digest_hex() {
 
 oci_blob_path() {
     hex=$(oci_digest_hex "$1") || return 1
-    printf '%s/%s\n' "$GINUS_OCI_BLOBS_DIR" "$hex"
+    printf '%s/%s\n' "$GINUX_OCI_BLOBS_DIR" "$hex"
 }
 
 oci_verify_blob() {

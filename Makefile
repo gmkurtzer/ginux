@@ -2,13 +2,13 @@ SHELL := /bin/sh
 
 X86_TARGET := x86_64-unknown-linux-gnu
 BUILD_DIR := build
-GINUS := target/$(X86_TARGET)/release/ginus
+GINUX := target/$(X86_TARGET)/release/ginux
 PAYLOAD := target/$(X86_TARGET)/release/managed-payload
 BASELINE := target/$(X86_TARGET)/release/baseline-runner
 RUNTIME_FIXTURE := target/$(X86_TARGET)/release/runtime-fixture
 PROCESS_NATIVE_FIXTURE := target/$(X86_TARGET)/release/process-native-fixture
 
-.PHONY: doctor host-image-fetch host-image-verify host-boot-test image-helper-fetch image-prepare domain-image-fetch domain-image-verify domain-image-prepare test-image test-oci-image test-oci-layers test-vfs test-native-vfs image-cache-clean build check test test-unit test-intercept test-runtime test-config test-domain test-process test-devices test-block test-network bench-baseline bench-block bench-network demo-gate-1 demo-gate-2 demo-gate-3 demo-gate-4 demo-gate-5 demo-gate-6 demo-gate-7 clean
+.PHONY: doctor host-image-fetch host-image-verify host-boot-test image-helper-fetch image-prepare domain-image-fetch domain-image-verify domain-image-prepare test-image test-oci-image test-oci-layers test-vfs test-native-vfs image-cache-clean build check-name check test test-unit test-intercept test-runtime test-config test-domain test-process test-devices test-block test-network bench-baseline bench-block bench-network demo-gate-1 demo-gate-2 demo-gate-3 demo-gate-4 demo-gate-5 demo-gate-6 demo-gate-7 clean
 
 doctor:
 	@./scripts/doctor.sh
@@ -50,34 +50,37 @@ image-cache-clean:
 	rm -rf build/cache/domain
 
 build:
-	cargo build -p ginus-init --target $(X86_TARGET) --release
+	cargo build -p ginux-init --target $(X86_TARGET) --release
 	cargo build -p managed-payload --target $(X86_TARGET) --release
 	cargo build -p baseline-runner --target $(X86_TARGET) --release
 	cargo build -p runtime-fixture --target $(X86_TARGET) --release
 	cargo build -p process-native-fixture --target $(X86_TARGET) --release
 
-check:
+check-name:
+	@./scripts/check-name.sh
+
+check: check-name
 	cargo fmt --check
-	cargo clippy -p ginus-core --all-targets -- -D warnings
-	cargo clippy -p ginus-domain --all-targets -- -D warnings
-	cargo clippy -p ginus-devices --all-targets -- -D warnings
-	cargo clippy -p ginus-init --bin ginus --target $(X86_TARGET) --release -- -D warnings
-	cargo clippy -p ginus-process --all-targets -- -D warnings
+	cargo clippy -p ginux-core --all-targets -- -D warnings
+	cargo clippy -p ginux-domain --all-targets -- -D warnings
+	cargo clippy -p ginux-devices --all-targets -- -D warnings
+	cargo clippy -p ginux-init --bin ginux --target $(X86_TARGET) --release -- -D warnings
+	cargo clippy -p ginux-process --all-targets -- -D warnings
 	cargo clippy -p managed-payload --bin managed-payload --target $(X86_TARGET) --release -- -D warnings
 	cargo clippy -p baseline-runner --bin baseline-runner --target $(X86_TARGET) --release -- -D warnings
-	cargo clippy -p ginus-runtime --all-targets -- -D warnings
-	cargo clippy -p ginus-vfs --all-targets -- -D warnings
-	cargo clippy -p ginus-vfs-index --all-targets -- -D warnings
+	cargo clippy -p ginux-runtime --all-targets -- -D warnings
+	cargo clippy -p ginux-vfs --all-targets -- -D warnings
+	cargo clippy -p ginux-vfs-index --all-targets -- -D warnings
 	cargo clippy -p runtime-fixture --bin runtime-fixture --target $(X86_TARGET) --release -- -D warnings
 	cargo clippy -p process-native-fixture --bin process-native-fixture --target $(X86_TARGET) --release -- -D warnings
 
 test-unit:
-	cargo test -p ginus-core
-	cargo test -p ginus-domain
-	cargo test -p ginus-devices
-	cargo test -p ginus-runtime
-	cargo test -p ginus-process
-	cargo test -p ginus-vfs
+	cargo test -p ginux-core
+	cargo test -p ginux-domain
+	cargo test -p ginux-devices
+	cargo test -p ginux-runtime
+	cargo test -p ginux-process
+	cargo test -p ginux-vfs
 
 test-intercept: build
 	@./scripts/with-rocky-host.sh ./scripts/test-intercept.sh
@@ -92,20 +95,20 @@ test-domain: build
 	@./scripts/with-rocky-host.sh ./scripts/test-domain.sh
 
 test-process: build
-	cargo test -p ginus-process
+	cargo test -p ginux-process
 	@./scripts/with-rocky-host.sh ./scripts/test-process.sh
 
 test-devices: build
-	cargo test -p ginus-devices registry
-	cargo test -p ginus-devices pseudo_devices
-	cargo test -p ginus-devices conflicts_ioctls
+	cargo test -p ginux-devices registry
+	cargo test -p ginux-devices pseudo_devices
+	cargo test -p ginux-devices conflicts_ioctls
 	@./scripts/with-rocky-host.sh ./scripts/test-devices.sh
 
 test-block:
-	cargo test -p ginus-devices block_
+	cargo test -p ginux-devices block_
 
 test-network:
-	cargo test -p ginus-devices network_
+	cargo test -p ginux-devices network_
 
 test-vfs: build domain-image-prepare
 	@./scripts/with-rocky-host.sh ./scripts/test-vfs.sh

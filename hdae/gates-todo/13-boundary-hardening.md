@@ -2,12 +2,12 @@
 
 ## Source
 
-Initial Ginus milestone completion and requirement for defensible limitations,
+Initial Ginux-us milestone completion and requirement for defensible limitations,
 recovery, and regression evidence.
 
 ## Goal
 
-Exercise Ginus against malformed ABI inputs and escape attempts, reduce Ginus
+Exercise Ginux-us against malformed ABI inputs and escape attempts, reduce Ginux-us
 host authority, verify recovery and performance regressions, and publish an
 honest security and compatibility boundary for the initial milestone.
 
@@ -19,7 +19,7 @@ honest security and compatibility boundary for the initial milestone.
   reproducible seed corpora and crash-artifact handling.
 - Add direct-syscall, host-descriptor, host-path, cross-object, contract-bypass,
   device-range, host-view, resource-exhaustion, and teardown escape attempts.
-- Reduce Ginus host capabilities, descriptors, filesystem visibility, and
+- Reduce Ginux-us host capabilities, descriptors, filesystem visibility, and
   syscall surface after bootstrap as far as the validated architecture permits.
 - Verify startup failure, domain crash, forced stop, audit saturation, and host
   shutdown or recovery behavior.
@@ -43,7 +43,7 @@ honest security and compatibility boundary for the initial milestone.
 ## Remaining work
 
 - [ ] Build malformed-input, fuzz, and escape suites.
-- [ ] Minimize and verify Ginus host authority.
+- [ ] Minimize and verify Ginux-us host authority.
 - [ ] Exercise recovery and cleanup behavior.
 - [ ] Run full functional, security, and benchmark regressions.
 - [ ] Publish initial security, compatibility, operations, and performance
@@ -59,7 +59,7 @@ honest security and compatibility boundary for the initial milestone.
 - Escape fixtures cannot complete unmediated host syscalls, use managed values as
   host descriptors, observe unassigned host state, exceed block ranges, weaken
   the contract, or retain resources after teardown.
-- Ginus drops or confines unneeded host capabilities, descriptors, paths, and
+- Ginux-us drops or confines unneeded host capabilities, descriptors, paths, and
   syscalls after bootstrap; the effective residual authority is documented and
   tested.
 - Failure and recovery fixtures reach their expected states without silent

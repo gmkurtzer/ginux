@@ -1,4 +1,4 @@
-use ginus_vfs::{
+use ginux_vfs::{
     encode_header, encode_record, Entry, Index, NodeKind, HEADER_SIZE, MAX_LINK, MAX_PATH,
     RECORD_SIZE,
 };
@@ -35,7 +35,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut arguments = env::args_os();
     let _program = arguments.next();
     let first = arguments.next().ok_or(
-        "usage: ginus-vfs-index ROOTFS.tar OUTPUT.index | assemble OUTPUT.tar OUTPUT.index LAYER.tar...",
+        "usage: ginux-vfs-index ROOTFS.tar OUTPUT.index | assemble OUTPUT.tar OUTPUT.index LAYER.tar...",
     )?;
     if first == "assemble" {
         let rootfs = arguments.next().ok_or("missing assembled rootfs output")?;
@@ -50,9 +50,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let output = arguments
         .next()
-        .ok_or("usage: ginus-vfs-index ROOTFS.tar OUTPUT.index")?;
+        .ok_or("usage: ginux-vfs-index ROOTFS.tar OUTPUT.index")?;
     if arguments.next().is_some() {
-        return Err("usage: ginus-vfs-index ROOTFS.tar OUTPUT.index".into());
+        return Err("usage: ginux-vfs-index ROOTFS.tar OUTPUT.index".into());
     }
     build_index_from(first.into(), output.into())
 }

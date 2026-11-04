@@ -52,7 +52,7 @@ printf '  [5/8] PASS  Provenance metadata: source and manifest hashes match\n'
 first_manifest=$ROCKY_DOMAIN_WORK_DIR/first.manifest
 cp "$ROCKY_DOMAIN_MANIFEST_PATH" "$first_manifest"
 first_manifest_sha=$manifest_sha
-GINUS_IMAGE_FORCE=1 ./scripts/prepare-rocky-domain.sh
+GINUX_IMAGE_FORCE=1 ./scripts/prepare-rocky-domain.sh
 cmp "$first_manifest" "$ROCKY_DOMAIN_MANIFEST_PATH"
 second_manifest_sha=$(shasum -a 256 "$ROCKY_DOMAIN_MANIFEST_PATH" | awk '{print $1}')
 printf '  [6/8] PASS  Repeatability: first=%s second=%s\n' \

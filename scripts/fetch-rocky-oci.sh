@@ -11,18 +11,18 @@ for command in curl jq shasum; do
     }
 done
 
-mkdir -p "$GINUS_OCI_BLOBS_DIR" "$GINUS_OCI_WORK_DIR"
-token_file=$GINUS_OCI_WORK_DIR/token.json
-layout_tmp=$GINUS_OCI_WORK_DIR/oci-layout.tmp
-index_tmp=$GINUS_OCI_WORK_DIR/index.json.tmp
+mkdir -p "$GINUX_OCI_BLOBS_DIR" "$GINUX_OCI_WORK_DIR"
+token_file=$GINUX_OCI_WORK_DIR/token.json
+layout_tmp=$GINUX_OCI_WORK_DIR/oci-layout.tmp
+index_tmp=$GINUX_OCI_WORK_DIR/index.json.tmp
 
 cleanup() {
-    rm -f "$token_file" "$layout_tmp" "$index_tmp" "$GINUS_OCI_WORK_DIR"/*.partial
+    rm -f "$token_file" "$layout_tmp" "$index_tmp" "$GINUX_OCI_WORK_DIR"/*.partial
 }
 trap cleanup 0 HUP INT TERM
 
 curl -fsSL --retry 3 \
-    "https://auth.docker.io/token?service=$GINUS_OCI_AUTH_SERVICE&scope=repository:$GINUS_OCI_REPOSITORY:pull" \
+    "https://auth.docker.io/token?service=$GINUX_OCI_AUTH_SERVICE&scope=repository:$GINUX_OCI_REPOSITORY:pull" \
     -o "$token_file"
 token=$(jq -er '.token' "$token_file")
 
@@ -34,12 +34,12 @@ fetch_object() {
     if oci_verify_blob "$digest"; then
         return 0
     fi
-    partial=$GINUS_OCI_WORK_DIR/$(oci_digest_hex "$digest").partial
+    partial=$GINUX_OCI_WORK_DIR/$(oci_digest_hex "$digest").partial
     rm -f "$partial"
     curl -fsSL --retry 3 \
         -H "Authorization: Bearer $token" \
         -H "Accept: $accept" \
-        "https://$GINUS_OCI_REGISTRY/v2/$GINUS_OCI_REPOSITORY/$endpoint/$digest" \
+        "https://$GINUX_OCI_REGISTRY/v2/$GINUX_OCI_REPOSITORY/$endpoint/$digest" \
         -o "$partial"
     actual=$(shasum -a 256 "$partial" | awk '{print $1}')
     if [ "sha256:$actual" != "$digest" ]; then
@@ -50,19 +50,19 @@ fetch_object() {
     mv "$partial" "$destination"
 }
 
-fetch_object manifests "$GINUS_OCI_INDEX_DIGEST" application/vnd.oci.image.index.v1+json
-index_blob=$(oci_blob_path "$GINUS_OCI_INDEX_DIGEST")
+fetch_object manifests "$GINUX_OCI_INDEX_DIGEST" application/vnd.oci.image.index.v1+json
+index_blob=$(oci_blob_path "$GINUX_OCI_INDEX_DIGEST")
 jq -e \
-    --arg digest "$GINUS_OCI_MANIFEST_DIGEST" \
-    --arg os "$GINUS_OCI_PLATFORM_OS" \
-    --arg arch "$GINUS_OCI_PLATFORM_ARCH" \
+    --arg digest "$GINUX_OCI_MANIFEST_DIGEST" \
+    --arg os "$GINUX_OCI_PLATFORM_OS" \
+    --arg arch "$GINUX_OCI_PLATFORM_ARCH" \
     '.schemaVersion == 2 and .mediaType == "application/vnd.oci.image.index.v1+json" and
      any(.manifests[]; .digest == $digest and .platform.os == $os and
          .platform.architecture == $arch)' \
     "$index_blob" >/dev/null
 
-fetch_object manifests "$GINUS_OCI_MANIFEST_DIGEST" application/vnd.oci.image.manifest.v1+json
-manifest_blob=$(oci_blob_path "$GINUS_OCI_MANIFEST_DIGEST")
+fetch_object manifests "$GINUX_OCI_MANIFEST_DIGEST" application/vnd.oci.image.manifest.v1+json
+manifest_blob=$(oci_blob_path "$GINUX_OCI_MANIFEST_DIGEST")
 jq -e '.schemaVersion == 2 and
        .mediaType == "application/vnd.oci.image.manifest.v1+json" and
        (.config.digest | startswith("sha256:")) and
@@ -79,11 +79,11 @@ done
 manifest_size=$(wc -c < "$manifest_blob" | tr -d ' ')
 printf '%s\n' '{"imageLayoutVersion":"1.0.0"}' > "$layout_tmp"
 jq -n \
-    --arg digest "$GINUS_OCI_MANIFEST_DIGEST" \
+    --arg digest "$GINUX_OCI_MANIFEST_DIGEST" \
     --argjson size "$manifest_size" \
-    --arg ref "docker.io/$GINUS_OCI_REPOSITORY:$GINUS_OCI_TAG" \
-    --arg os "$GINUS_OCI_PLATFORM_OS" \
-    --arg arch "$GINUS_OCI_PLATFORM_ARCH" \
+    --arg ref "docker.io/$GINUX_OCI_REPOSITORY:$GINUX_OCI_TAG" \
+    --arg os "$GINUX_OCI_PLATFORM_OS" \
+    --arg arch "$GINUX_OCI_PLATFORM_ARCH" \
     '{schemaVersion: 2, manifests: [{
       mediaType: "application/vnd.oci.image.manifest.v1+json",
       digest: $digest,
@@ -91,9 +91,9 @@ jq -n \
       annotations: {"org.opencontainers.image.ref.name": $ref},
       platform: {os: $os, architecture: $arch}
     }]}' > "$index_tmp"
-mv "$layout_tmp" "$GINUS_OCI_CACHE_DIR/oci-layout"
-mv "$index_tmp" "$GINUS_OCI_CACHE_DIR/index.json"
+mv "$layout_tmp" "$GINUX_OCI_CACHE_DIR/oci-layout"
+mv "$index_tmp" "$GINUX_OCI_CACHE_DIR/index.json"
 
 ./scripts/verify-rocky-oci.sh
 printf 'OCI_FETCH: cached=%s manifest=%s\n' \
-    "$GINUS_OCI_CACHE_DIR" "$GINUS_OCI_MANIFEST_DIGEST"
+    "$GINUX_OCI_CACHE_DIR" "$GINUX_OCI_MANIFEST_DIGEST"
