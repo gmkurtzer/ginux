@@ -43,6 +43,14 @@ pub struct DeviceName {
     len: u8,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DeviceView {
+    pub name: DeviceName,
+    pub kind: DeviceKind,
+    pub major: u32,
+    pub minor: u32,
+}
+
 impl DeviceName {
     pub fn new(value: &[u8]) -> Result<Self, DeviceError> {
         if value.is_empty()
@@ -168,6 +176,36 @@ impl<const DEVICES: usize, const FDS: usize> DeviceRegistry<DEVICES, FDS> {
                 break;
             }
             output[count] = entry.name;
+            count += 1;
+        }
+        count
+    }
+
+    pub fn views(&self, domain: u64, output: &mut [DeviceView]) -> usize {
+        let mut count = 0usize;
+        for (index, entry) in self
+            .assignments
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| entry.active && entry.domain == domain)
+        {
+            if count == output.len() {
+                break;
+            }
+            let (major, minor) = match entry.kind {
+                DeviceKind::Console => (5, 1),
+                DeviceKind::Null => (1, 3),
+                DeviceKind::Zero => (1, 5),
+                DeviceKind::Random => (1, 8),
+                DeviceKind::Block => (254, index as u32),
+                DeviceKind::Network => (0, index as u32 + 1),
+            };
+            output[count] = DeviceView {
+                name: entry.name,
+                kind: entry.kind,
+                major,
+                minor,
+            };
             count += 1;
         }
         count

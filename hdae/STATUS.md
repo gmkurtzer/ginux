@@ -231,6 +231,25 @@ scope, threat model, and invariants.
 - Human direction on 2026-11-04 accepted Gates 7, 7.5, and 7.75 and directed
   advancement to Gate 8. Repository integration into the existing Ginux project
   is deferred until the separately planned move on the following morning.
+- Gate 8 began on `hdae/virtual-kernel-views`. Its first milestone added the
+  no-std kernel-view component, bounded process snapshots, virtual procfs task,
+  memory, uptime, mount, hostname, and boot-identity reads, explicit read-only
+  mutation denial, and host-PID exclusion tests.
+- Gate 8 virtual sysfs now projects only assigned devices with virtual
+  class/type/major/minor/uevent data and virtual CPU inventory. Unassigned
+  host-device lookup and all sysfs mutation fail explicitly.
+- Gate 8 now also has a bounded cgroup v2 hierarchy and domain-owned machine,
+  boot, hostname, mount, PID, UTS, and cgroup namespace identities. Six
+  component tests cover positive systemd-style operations and negative
+  privilege, mutation, capacity, traversal, host-PID, and device leakage paths.
+- Gate 8 Rocky QEMU integration passed virtual procfs, sysfs, cgroup, and
+  identity markers while host cgroup, mount, and block inventories remained
+  byte-identical. `make demo-gate-8` passed all seven named checks.
+- Fresh aggregate `make test` passed 44 component tests, all prior-gate QEMU
+  regressions, and the Gate 8 QEMU fixture.
+- Gate 8 is delivered in open
+  https://github.com/gmkurtzer/ginux-us/pull/10 from
+  `hdae/virtual-kernel-views`.
 
 ## Open decisions and limitations
 
@@ -268,9 +287,8 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Close accepted Gates 7, 7.5, and 7.75, start Gate 8 on
-`hdae/virtual-kernel-views`, and implement its bounded virtual procfs, sysfs,
-cgroup, mount, namespace, and identity views.
+Stop for human review of `make demo-gate-8`, the passing evidence, and pull
+request 10.
 
 ## Context recovery
 
@@ -278,9 +296,9 @@ cgroup, mount, namespace, and identity views.
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
 - Active gate: Gate 8, virtual kernel views, authorized for execution on
-  dedicated branch `hdae/virtual-kernel-views`; Gates 7, 7.5, and 7.75 are
-  accepted and ready to close
-- Last evidence: Gate 7.75 `make check`, `make test`,
-  `make test-native-vfs`, and `make demo-gate-7` passed on 2026-11-04
+  dedicated branch `hdae/virtual-kernel-views`; technically passed, delivered,
+  and awaiting human review
+- Last evidence: `make check`, `make test-kernel-views`,
+  `make demo-gate-8`, and fresh aggregate `make test` passed on 2026-11-04
 - Required human decision: none until the Gate 8 demonstration checkpoint; the
   Gate 9 DNF repository choice is deferred until before Gate 9 implementation

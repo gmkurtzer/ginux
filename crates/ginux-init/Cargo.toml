@@ -12,6 +12,7 @@ path = "src/main.rs"
 ginux-core = { path = "../ginux-core" }
 ginux-domain = { path = "../ginux-domain" }
 ginux-devices = { path = "../ginux-devices" }
+ginux-kernel-views = { path = "../ginux-kernel-views" }
 ginux-runtime = { path = "../ginux-runtime" }
 ginux-process = { path = "../ginux-process" }
 ginux-vfs = { path = "../ginux-vfs" }

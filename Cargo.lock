@@ -25,9 +25,18 @@ dependencies = [
  "ginux-core",
  "ginux-devices",
  "ginux-domain",
+ "ginux-kernel-views",
  "ginux-process",
  "ginux-runtime",
  "ginux-vfs",
+]
+
+[[package]]
+name = "ginux-kernel-views"
+version = "0.1.0"
+dependencies = [
+ "ginux-devices",
+ "ginux-process",
 ]
 
 [[package]]

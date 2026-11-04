@@ -34,14 +34,29 @@ mounts, identifiers, and configuration are not leaked as domain authority.
 
 ## Completed work
 
-- [ ] None; gate not started.
+- [x] Add the no-std `ginux-kernel-views` component and workspace/test
+  integration.
+- [x] Implement bounded virtual procfs task status/stat, PID listing, uptime,
+  memory, mounts, hostname, and boot-identity reads from Ginux-owned inputs.
+- [x] Add process-table snapshot projection plus negative host-PID, invalid-path,
+  read-only mutation, buffer-boundary, and consistency tests.
+- [x] Implement virtual sysfs class views from domain-assigned device snapshots,
+  including virtual major/minor, network type, uevent, and CPU-online data.
+- [x] Add explicit unassigned-device exclusion and sysfs mutation-denial tests.
+- [x] Implement a bounded cgroup v2 hierarchy with root-only create/remove,
+  controller enablement, task attachment, memory/PID limits, events, and
+  explicit rejection of unsupported host-affecting operations.
+- [x] Implement domain-owned machine/boot/hostname and mount/PID/UTS/cgroup
+  namespace identity views with host-PID exclusion.
+- [x] Add the Rocky QEMU integration fixture with host cgroup, mount, and block
+  inventory before/after comparison.
+- [x] Add stable `make test-kernel-views`, `make test-cgroup`, aggregate
+  wiring, and the seven-check human demonstration.
+- [x] Run the fresh aggregate offline regression suite.
 
 ## Remaining work
 
-- [ ] Implement virtual procfs views.
-- [ ] Implement virtual sysfs and assigned-device projection.
-- [ ] Implement bounded cgroup v2 and mount/identity behavior.
-- [ ] Add consistency, permission, mutation, and host-leakage tests.
+- [ ] Human review and acceptance of the Gate 8 demonstration and evidence.
 
 ## Acceptance criteria
 
@@ -74,7 +89,40 @@ mounts, identifiers, and configuration are not leaked as domain authority.
 
 ## Evidence
 
-- Not run.
+- Initial `cargo test -p ginux-kernel-views` -> one assertion used an
+  incorrect fixed window width for the expected PPid line; implementation
+  output was correct and the assertion was fixed.
+- Corrected `cargo test -p ginux-kernel-views` -> two virtual procfs,
+  identity, mount, host-PID exclusion, and mutation-denial tests passed.
+- `cargo clippy -p ginux-kernel-views --all-targets -- -D warnings` -> passed.
+- `cargo test -p ginux-process` -> all seven prior process-runtime tests
+  passed after adding bounded task snapshot projection.
+- Expanded `cargo test -p ginux-kernel-views` -> three procfs/sysfs tests
+  passed, including assigned block/network projection, virtual CPU inventory,
+  unassigned host-device exclusion, and mutation denial.
+- `cargo test -p ginux-devices` -> all six device ownership and isolation
+  regressions passed after adding bounded device snapshot projection.
+- Expanded `cargo test -p ginux-kernel-views` -> six tests passed, including
+  bounded systemd-style cgroup operations, privilege/limit/busy-path failures,
+  machine identity, consistent namespace links, host-PID exclusion, and
+  read-only hostname denial.
+- Strict clippy for `ginux-kernel-views` -> passed after the cgroup and
+  identity expansion.
+- `make check` -> passed name validation, formatting, and strict workspace
+  lint including the new component and x86-64 static Ginux binary.
+- Initial x86-64 static build exposed an implicit `memmove` dependency from
+  cgroup member compaction. The compaction is now an explicit bounded loop;
+  the static build and strict lint pass without adding host-runtime linkage.
+- `make test-kernel-views` -> six component tests and the Rocky QEMU fixture
+  passed; virtual procfs/sysfs/cgroup/identity markers matched and host
+  cgroup, mount, and block-device inventories were byte-identical before/after.
+- `make demo-gate-8` -> passed all seven human-visible virtual-view,
+  leakage-denial, mutation-denial, and host-unchanged checks.
+- Fresh aggregate `make test` -> passed formatting, strict lint, 44 component
+  tests, all prior QEMU interception/runtime/config/domain/image/device/process
+  regressions, and the Gate 8 Rocky QEMU kernel-view fixture.
+- Branch `hdae/virtual-kernel-views` -> pushed; dedicated pull request 10 is
+  open at https://github.com/gmkurtzer/ginux-us/pull/10.
 
 ## Decisions and limitations
 
@@ -86,14 +134,18 @@ mounts, identifiers, and configuration are not leaked as domain authority.
 
 - Working branch: `hdae/virtual-kernel-views`
 - Intended base: `main`
-- Pull request: intended; dedicated branch push and PR creation authorized on
-  2026-11-03; never merge or close without explicit authorization
+- Pull request: https://github.com/gmkurtzer/ginux-us/pull/10; based on the
+  stacked accepted rename branch; never merge or close without explicit
+  authorization
 - Planned commits: procfs model; sysfs and device projection; cgroup and
   mount/identity model; consistency and leakage verification
-- Actual commits: pending
+- Actual commits: `51c028c` added virtual procfs; `8a16d1d` added virtual
+  sysfs/device projection; `31c098e` added cgroup and identity views;
+  `65057a6` added QEMU integration and the human demonstration; `15a3552`
+  recorded aggregate verification
 
 ## Review policy and outcome
 
 Human checkpoint because these interfaces define the kernel identity and
-authority visible to the domain. Present `make demo-gate-8`, fresh evidence,
-and the pull request before acceptance.
+authority visible to the domain. Gate 8 is technically passed and delivered;
+explicit acceptance remains before Gate 9.

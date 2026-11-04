@@ -9,10 +9,14 @@ use ginux_core::{
     SYS_WRITE,
 };
 use ginux_devices::{
-    BlockBackend, DeviceError, DeviceKind, DeviceName, DeviceRegistry, IsolatedNetwork, Partition,
-    IOCTL_CONSOLE_GET_SIZE,
+    BlockBackend, DeviceError, DeviceKind, DeviceName, DeviceRegistry, DeviceView, IsolatedNetwork,
+    Partition, IOCTL_CONSOLE_GET_SIZE,
 };
 use ginux_domain::{ConfigError, Domain, DomainConfig};
+use ginux_kernel_views::{
+    CgroupFs, IdentityFs, IdentityView, MemoryView, MountView, NamespaceView, ProcFs, SysFs,
+    ViewError,
+};
 use ginux_process::{
     Credentials, EventFd, EventPoll, FutexTable, ProcessError, ProcessTable, SignalAction,
     SignalDelivery, TimerTable, VirtualClock, EVENT_READ, EVENT_WRITE,
@@ -256,9 +260,164 @@ extern "C" fn rust_main(initial_stack: *const usize) -> ! {
             let block_path = unsafe { *argv.add(3) as *const u8 };
             let kind = unsafe { *argv.add(4) as *const u8 };
             device_bench_main(config_path, block_path, kind);
+        } else if c_string_equals(command, b"kernel-views") {
+            let config_path = unsafe { *argv.add(2) as *const u8 };
+            kernel_views_main(config_path);
         }
     }
     gate1_main()
+}
+
+fn kernel_views_main(config_path: *const u8) -> ! {
+    let config = load_config(config_path);
+    let mut domain = Domain::create(config);
+    if domain.start().is_err() {
+        kernel_views_fail(b"domain start failed");
+    }
+    let mut processes: ProcessTable<4> = ProcessTable::new();
+    let init = processes
+        .create_init(Credentials::root())
+        .unwrap_or_else(|_| kernel_views_fail(b"virtual init failed"));
+    let child = processes
+        .fork(init)
+        .unwrap_or_else(|_| kernel_views_fail(b"virtual child failed"));
+    processes
+        .credentials_mut(child)
+        .and_then(|credentials| credentials.set_uid(1000))
+        .unwrap_or_else(|_| kernel_views_fail(b"virtual credentials failed"));
+    let mut tasks = [processes.view(init).unwrap(); 4];
+    let task_count = processes.views(&mut tasks);
+    let identity = IdentityView {
+        hostname: b"gate8-domain",
+        machine_id: b"0123456789abcdef0123456789abcdef",
+        boot_id: b"11111111-2222-3333-4444-555555555555",
+    };
+    let mounts = [
+        MountView {
+            source: b"ginux-root",
+            target: b"/",
+            filesystem: b"ginuxfs",
+            options: b"ro",
+        },
+        MountView {
+            source: b"proc",
+            target: b"/proc",
+            filesystem: b"proc",
+            options: b"rw,nosuid,nodev,noexec",
+        },
+    ];
+    let procfs = ProcFs::new(
+        &tasks[..task_count],
+        child.pid,
+        12_340_000_000,
+        MemoryView {
+            total_bytes: 512 * 1024 * 1024,
+            available_bytes: 384 * 1024 * 1024,
+        },
+        identity,
+        &mounts,
+    );
+    let mut output = [0u8; 512];
+    let status_len = procfs
+        .read(b"/proc/2/status", &mut output)
+        .unwrap_or_else(|_| kernel_views_fail(b"proc status failed"));
+    if !contains(&output[..status_len], b"Pid:\t2\n")
+        || !contains(&output[..status_len], b"PPid:\t1\n")
+        || procfs.read(b"/proc/424242/status", &mut output) != Err(ViewError::NotFound)
+        || procfs.write(b"/proc/sys/kernel/hostname", b"host") != Err(ViewError::ReadOnly)
+    {
+        kernel_views_fail(b"proc isolation failed");
+    }
+    line(b"GINUX_VIEWS: proc pids=1,2 host-pid=absent mutation=denied");
+
+    let mut registry: DeviceRegistry<6, 2> = DeviceRegistry::new();
+    if registry
+        .assign(7, 100, DeviceName::new(b"vda").unwrap(), DeviceKind::Block)
+        .is_err()
+        || registry
+            .assign(
+                7,
+                101,
+                DeviceName::new(b"net0").unwrap(),
+                DeviceKind::Network,
+            )
+            .is_err()
+        || registry
+            .assign(
+                8,
+                102,
+                DeviceName::new(b"host-only").unwrap(),
+                DeviceKind::Block,
+            )
+            .is_err()
+    {
+        kernel_views_fail(b"device assignment failed");
+    }
+    let placeholder = DeviceView {
+        name: DeviceName::new(b"none").unwrap(),
+        kind: DeviceKind::Null,
+        major: 0,
+        minor: 0,
+    };
+    let mut devices = [placeholder; 6];
+    let device_count = registry.views(7, &mut devices);
+    let sysfs = SysFs::new(&devices[..device_count], 2);
+    if sysfs
+        .read(b"/sys/class/block/vda/dev", &mut output)
+        .is_err()
+        || sysfs
+            .read(b"/sys/class/net/net0/type", &mut output)
+            .is_err()
+        || sysfs.read(b"/sys/class/block/host-only/dev", &mut output) != Err(ViewError::NotFound)
+        || sysfs.write(b"/sys/class/block/vda/dev", b"8:0") != Err(ViewError::ReadOnly)
+    {
+        kernel_views_fail(b"sysfs isolation failed");
+    }
+    line(b"GINUX_VIEWS: sys devices=vda,net0 host-device=absent mutation=denied");
+
+    let mut cgroups: CgroupFs<4> = CgroupFs::new();
+    if cgroups.create(b"/system.slice", 0).is_err()
+        || cgroups
+            .write(b"/cgroup.subtree_control", b"+cpu +memory +pids\n", 0)
+            .is_err()
+        || cgroups.write(b"/system.slice/pids.max", b"4\n", 0).is_err()
+        || cgroups.attach(b"/system.slice", child.pid, 0).is_err()
+        || cgroups.create(b"/host.slice", 1000) != Err(ViewError::PermissionDenied)
+    {
+        kernel_views_fail(b"cgroup isolation failed");
+    }
+    line(b"GINUX_VIEWS: cgroup path=/system.slice pid=2 host-mutation=denied");
+
+    let identities = IdentityFs::new(
+        &tasks[..task_count],
+        identity,
+        NamespaceView {
+            mount: 101,
+            pid: 102,
+            uts: 103,
+            cgroup: 104,
+        },
+    );
+    if identities.read(b"/etc/machine-id", &mut output).is_err()
+        || identities.readlink(b"/proc/1/ns/mnt", &mut output).is_err()
+        || identities.readlink(b"/proc/424242/ns/pid", &mut output) != Err(ViewError::NotFound)
+    {
+        kernel_views_fail(b"identity isolation failed");
+    }
+    line(b"GINUX_VIEWS: identity hostname=gate8-domain namespaces=virtual host-id=absent");
+
+    if processes.shutdown(0) != 2 || processes.reap_all() != 2 || domain.task_exited(true).is_err()
+    {
+        kernel_views_fail(b"cleanup failed");
+    }
+    line(b"GATE8_VIEWS: PASS");
+    exit_process(0)
+}
+
+fn kernel_views_fail(reason: &[u8]) -> ! {
+    write_all(b"GATE8_VIEWS: FAIL: ");
+    line(reason);
+    exit_process(1)
 }
 
 fn process_main(config_path: *const u8) -> ! {
