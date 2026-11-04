@@ -134,8 +134,9 @@ early helper fixtures.
 
 - Working branch: `hdae/process-runtime`
 - Intended base: `main`
-- Pull request: intended; dedicated branch push and PR creation authorized on
-  2026-11-03; never merge or close without explicit authorization
+- Pull request: https://github.com/gmkurtzer/usshim/pull/7; dedicated branch
+  push and PR creation authorized on 2026-11-03; never merge or close without
+  explicit authorization
 - Planned commits: process and thread lifecycle; signals, synchronization, and
   time; credentials and event interfaces; stress and cleanup verification
 - Actual commits: `440c98f` added the process-runtime foundation; `b385ed6`

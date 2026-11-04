@@ -207,8 +207,9 @@ scope, threat model, and invariants.
 - Fresh `make test-runtime`, `make test-native-vfs`, `make demo-gate-7`, and
   aggregate `make test` passed. The demo reports nine named checks; the native
   regression retains fail-closed supervisor-loss and unexpected-stop evidence.
-- Gate 7 is technically passed and awaiting its dedicated branch delivery,
-  pull request, and human checkpoint review.
+- Gate 7 is technically passed and delivered in open pull request
+  https://github.com/gmkurtzer/usshim/pull/7 from `hdae/process-runtime`. It is
+  not merged or closed and is awaiting human checkpoint review.
 
 ## Open decisions and limitations
 
@@ -244,8 +245,7 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Commit and deliver the completed Gate 7 evidence, open its pull request, and
-stop for human review of `make demo-gate-7`.
+Stop for human review of pull request 7 and `make demo-gate-7`.
 
 ## Context recovery
 
@@ -253,7 +253,7 @@ stop for human review of `make demo-gate-7`.
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
 - Active gate: Gate 7, process runtime; technically passed on dedicated branch
-  `hdae/process-runtime`, awaiting delivery and human review
+  `hdae/process-runtime`, delivered in pull request 7 and awaiting human review
 - Last evidence: `make test-process`, `make test-runtime`,
   `make test-native-vfs`, `make demo-gate-7`, and aggregate `make test` passed
   on 2026-11-03
