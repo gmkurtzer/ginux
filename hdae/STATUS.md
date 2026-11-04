@@ -180,6 +180,13 @@ scope, threat model, and invariants.
   lockdown checks, and a DNF update workflow to the Gate 9 systemd milestone.
   The DNF repository source remains an explicit decision required before Gate
   9 begins and does not block Gate 7.
+- Gate 7 began on `hdae/process-runtime`. Its first milestone added a bounded
+  Ginus process table with virtual lifecycle and identity, generation-safe task
+  handles, virtual credentials and capability dropping, signal masks/queues,
+  futex and eventfd primitives, deterministic exhaustion, and shutdown cleanup.
+- `cargo test -p ginus-process`, strict clippy, and `make test-process` passed
+  six component tests. Native supervisor integration, timers/polling/epoll,
+  stress, QEMU fixtures, aggregate regression, and the demo remain incomplete.
 
 ## Open decisions and limitations
 
@@ -215,8 +222,8 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Close Gate 6, create the Gate 7 branch, and implement the bounded virtual
-process identity and lifecycle foundation.
+Connect the Gate 7 process model to managed execution, then complete timed and
+interruptible event behavior and QEMU lifecycle stress.
 
 ## Context recovery
 
@@ -229,5 +236,7 @@ process identity and lifecycle foundation.
   `make test-devices`, `make test-block`, `make test-network`,
   `make bench-block`, `make bench-network`, `make demo-gate-6`, and aggregate
   `make test` passed on 2026-11-03
+- Gate 7 component evidence: `cargo test -p ginus-process`, strict clippy, and
+  `make test-process` passed on 2026-11-03
 - Required human decision: none until the Gate 7 demonstration checkpoint; the
   Gate 9 DNF repository choice is deferred until before Gate 9 implementation

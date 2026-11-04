@@ -7,7 +7,7 @@ PAYLOAD := target/$(X86_TARGET)/release/managed-payload
 BASELINE := target/$(X86_TARGET)/release/baseline-runner
 RUNTIME_FIXTURE := target/$(X86_TARGET)/release/runtime-fixture
 
-.PHONY: doctor host-image-fetch host-image-verify host-boot-test image-helper-fetch image-prepare domain-image-fetch domain-image-verify domain-image-prepare test-image test-oci-image test-oci-layers test-vfs test-native-vfs image-cache-clean build check test test-unit test-intercept test-runtime test-config test-domain test-devices test-block test-network bench-baseline bench-block bench-network demo-gate-1 demo-gate-2 demo-gate-3 demo-gate-4 demo-gate-5 demo-gate-6 clean
+.PHONY: doctor host-image-fetch host-image-verify host-boot-test image-helper-fetch image-prepare domain-image-fetch domain-image-verify domain-image-prepare test-image test-oci-image test-oci-layers test-vfs test-native-vfs image-cache-clean build check test test-unit test-intercept test-runtime test-config test-domain test-process test-devices test-block test-network bench-baseline bench-block bench-network demo-gate-1 demo-gate-2 demo-gate-3 demo-gate-4 demo-gate-5 demo-gate-6 clean
 
 doctor:
 	@./scripts/doctor.sh
@@ -60,6 +60,7 @@ check:
 	cargo clippy -p ginus-domain --all-targets -- -D warnings
 	cargo clippy -p ginus-devices --all-targets -- -D warnings
 	cargo clippy -p ginus-init --bin ginus --target $(X86_TARGET) --release -- -D warnings
+	cargo clippy -p ginus-process --all-targets -- -D warnings
 	cargo clippy -p managed-payload --bin managed-payload --target $(X86_TARGET) --release -- -D warnings
 	cargo clippy -p baseline-runner --bin baseline-runner --target $(X86_TARGET) --release -- -D warnings
 	cargo clippy -p ginus-runtime --all-targets -- -D warnings
@@ -72,6 +73,7 @@ test-unit:
 	cargo test -p ginus-domain
 	cargo test -p ginus-devices
 	cargo test -p ginus-runtime
+	cargo test -p ginus-process
 	cargo test -p ginus-vfs
 
 test-intercept: build
@@ -85,6 +87,9 @@ test-config: build
 
 test-domain: build
 	@./scripts/with-rocky-host.sh ./scripts/test-domain.sh
+
+test-process:
+	cargo test -p ginus-process
 
 test-devices: build
 	cargo test -p ginus-devices registry

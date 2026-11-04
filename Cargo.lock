@@ -30,6 +30,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "ginus-process"
+version = "0.1.0"
+
+[[package]]
 name = "ginus-runtime"
 version = "0.1.0"
 dependencies = [

@@ -5,6 +5,7 @@ members = [
     "crates/ginus-domain",
     "crates/ginus-devices",
     "crates/ginus-init",
+    "crates/ginus-process",
     "crates/ginus-runtime",
     "crates/ginus-vfs",
     "crates/ginus-vfs-index",

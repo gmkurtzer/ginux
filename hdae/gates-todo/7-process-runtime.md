@@ -33,14 +33,24 @@ early helper fixtures.
 
 ## Completed work
 
-- [ ] None; gate not started.
+- [x] Implement the bounded Ginus process table with virtual PID, TID, parent,
+  process-group, session, fork, clone-thread, exec epoch, exit, wait, and reap
+  behavior.
+- [x] Add generation-safe internal task handles, monotonic virtual PID
+  allocation, deterministic exhaustion, invalid-child, stale-handle, shutdown,
+  and cleanup behavior.
+- [x] Implement virtual credentials, supplementary groups, capability dropping,
+  masked/pending signal delivery, bounded futex waits/wakes, and eventfd
+  counters.
 
 ## Remaining work
 
-- [ ] Implement bounded process/thread creation and lifecycle.
-- [ ] Implement signals, synchronization, time, and events.
-- [ ] Implement virtual identity, credentials, and capability behavior.
-- [ ] Add concurrency, race, invalid-selector, exhaustion, and cleanup tests.
+- [ ] Connect the model to managed native process/thread creation and syscall
+  dispatch without exposing host identities.
+- [ ] Complete signal actions/return, clocks, timers, polling, epoll, and
+  interruptible blocking behavior.
+- [ ] Add concurrency, race, repeated lifecycle stress, QEMU fixtures, and the
+  human demonstration.
 
 ## Acceptance criteria
 
@@ -71,7 +81,11 @@ early helper fixtures.
 
 ## Evidence
 
-- Not run.
+- `cargo test -p ginus-process` -> six lifecycle, identity, credentials,
+  signal, futex, eventfd, exhaustion, invalid-selector, and cleanup tests
+  passed.
+- `cargo clippy -p ginus-process --all-targets -- -D warnings` -> passed.
+- `make test-process` -> passed the same deterministic component suite.
 
 ## Decisions and limitations
 
@@ -87,7 +101,7 @@ early helper fixtures.
   2026-11-03; never merge or close without explicit authorization
 - Planned commits: process and thread lifecycle; signals, synchronization, and
   time; credentials and event interfaces; stress and cleanup verification
-- Actual commits: pending
+- Actual commits: process-runtime foundation pending commit
 
 ## Review policy and outcome
 
