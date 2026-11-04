@@ -9,14 +9,14 @@
 - Branch: `hdae/issue-66-socket-page-release`
 - Intended base: `main` at `fe48e646`
 - Active gate: Gate 48, handled socket local-page release for issue #66
-- Status: implementation and complete deterministic validation pass; delivery
-  is pending
+- Status: implementation and complete deterministic validation pass; PR #151
+  is open and awaiting exact-head CI plus its first scheduled review marker
 - Last evidence: `make check` and complete `make test` pass with exact
   multi-page kernel-frame restoration and a required boot marker
 - Open decisions or limitations: queue ownership and limits remain separate
   issue #67 work; FIN/RST semantics remain separate issue #68 work
-- Exact next action: create signed commits, push the dedicated branch, open the
-  issue-linked PR, and record its stable URL in Gate 48 and issue #66
+- Exact next action: validate PR #151 at its exact head after CI, post the
+  first-pass marker, and retain it for the subsequent hourly merge pass
 
 ## Governing outcome
 

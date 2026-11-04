@@ -32,7 +32,7 @@ so unread fast-path data cannot leak kernel frames.
 - [x] Implement shared queue cleanup on every final close path.
 - [x] Add deterministic frame-count restoration evidence.
 - [x] Run `make check` and `make test`.
-- [ ] Push a dedicated branch and open an issue-linked pull request.
+- [x] Push a dedicated branch and open an issue-linked pull request.
 
 ## Acceptance criteria
 
@@ -71,11 +71,13 @@ so unread fast-path data cannot leak kernel frames.
 
 - Working branch: `hdae/issue-66-socket-page-release`
 - Intended base: `main`
-- Pull request: intended, dedicated to issue #66
+- Pull request: [#151](https://github.com/gmkurtzer/ginux/pull/151), dedicated
+  to and closing issue #66 after merge
 - Planned commits: gate, cleanup helper, and deterministic regression;
   validation and delivery checkpoint
 - Actual commits: `b31411fe` (gate, shared cleanup helper, allocator regression,
-  and initial evidence); delivery checkpoint pending
+  and initial evidence); `ac37014a` (validation checkpoint); delivery record
+  pending
 
 ## Review policy and outcome
 
