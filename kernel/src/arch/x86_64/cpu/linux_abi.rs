@@ -437,6 +437,7 @@ pub(super) const LINUX_ENOMEM: u64 = u64::MAX - 11;
 pub(super) const LINUX_ENOSPC: u64 = u64::MAX - 27;
 pub(super) const LINUX_EFBIG: u64 = u64::MAX - 26;
 pub(super) const LINUX_ESPIPE: u64 = u64::MAX - 28;
+pub(super) const LINUX_ENXIO: u64 = u64::MAX - 5;
 pub(super) const LINUX_EMFILE: u64 = u64::MAX - 23;
 pub(super) const LINUX_EINVAL: u64 = u64::MAX - 21;
 pub(super) const LINUX_ENOTTY: u64 = u64::MAX - 24;
@@ -775,6 +776,23 @@ pub(super) const LINUX_F_SEAL_MASK: u32 = LINUX_F_SEAL_SEAL
     | LINUX_F_SEAL_WRITE
     | LINUX_F_SEAL_FUTURE_WRITE
     | LINUX_F_SEAL_EXEC;
+pub(super) const LINUX_SEEK_DATA: u64 = 3;
+pub(super) const LINUX_SEEK_HOLE: u64 = 4;
+pub(super) const LINUX_FALLOC_FL_KEEP_SIZE: u64 = 0x01;
+pub(super) const LINUX_FALLOC_FL_PUNCH_HOLE: u64 = 0x02;
+pub(super) const LINUX_FALLOC_FL_COLLAPSE_RANGE: u64 = 0x08;
+pub(super) const LINUX_FALLOC_FL_ZERO_RANGE: u64 = 0x10;
+pub(super) const LINUX_FALLOC_FL_INSERT_RANGE: u64 = 0x20;
+pub(super) const LINUX_FALLOC_FL_UNSHARE_RANGE: u64 = 0x40;
+pub(super) const LINUX_FALLOC_FL_WRITE_ZEROES: u64 = 0x80;
+pub(super) const LINUX_FALLOC_FL_MODE_MASK: u64 = LINUX_FALLOC_FL_PUNCH_HOLE
+    | LINUX_FALLOC_FL_COLLAPSE_RANGE
+    | LINUX_FALLOC_FL_ZERO_RANGE
+    | LINUX_FALLOC_FL_INSERT_RANGE
+    | LINUX_FALLOC_FL_UNSHARE_RANGE
+    | LINUX_FALLOC_FL_WRITE_ZEROES;
+pub(super) const LINUX_RWF_APPEND: u64 = 0x10;
+pub(super) const LINUX_RWF_NOAPPEND: u64 = 0x20;
 pub(super) const LINUX_FD_CLOEXEC: u8 = 1;
 pub(super) const LINUX_CLOSE_RANGE_CLOEXEC: u64 = 1 << 2;
 pub(super) const LINUX_CLOSE_RANGE_UNSHARE: u64 = 1 << 1;
