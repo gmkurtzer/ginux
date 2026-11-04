@@ -10,6 +10,18 @@ permissions:
   contents: read
 
 jobs:
+  full-integration:
+    runs-on: macos-15-intel
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - run: brew install qemu
+      - run: rustup target add x86_64-unknown-uefi x86_64-unknown-none
+      - name: Full deterministic QEMU integration
+        run: make test
+        env:
+          GINUX_BOOT_TIMEOUT_SECONDS: 300
+
   detached-domains:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
