@@ -1,4 +1,4 @@
-# Ginux-us
+# Ginux
 
 **Ginux Userspace**: a configurable userspace kernel that runs isolated Linux
 compatibility domains behind explicit, versioned kernel contracts.
@@ -10,7 +10,7 @@ The project is being developed through HDAE gates. See
 ## Gate 1 development proof
 
 The first gate runs on a macOS arm64 machine and boots a normal Rocky Linux 10
-x86-64 host under QEMU TCG. Rocky systemd remains real PID 1. Ginux-us runs as an
+x86-64 host under QEMU TCG. Rocky systemd remains real PID 1. Ginux runs as an
 ordinary Rocky process, starts a fixed unmodified managed ELF, and uses one
 dispatcher to emulate, mediate, or deny its syscalls without letting the
 syscall execute directly.

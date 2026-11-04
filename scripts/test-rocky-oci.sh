@@ -14,7 +14,7 @@ identity=$GINUX_OCI_CACHE_DIR/$GINUX_OCI_ROOTFS_IDENTITY
 test -s "$rootfs"
 test -s "$index"
 test -s "$identity"
-printf '%s\n' '  [2/7] PASS  verified OCI layers assembled into immutable Ginux-us root and index'
+printf '%s\n' '  [2/7] PASS  verified OCI layers assembled into immutable Ginux root and index'
 
 first_index_sha=$(shasum -a 256 "$index" | awk '{print $1}')
 ./scripts/prepare-rocky-oci.sh >/dev/null

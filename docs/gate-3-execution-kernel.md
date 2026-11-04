@@ -1,14 +1,14 @@
 # Gate 3 execution kernel
 
-Gate 3 establishes the security-focused execution baseline. Ginux-us parses a
+Gate 3 establishes the security-focused execution baseline. Ginux parses a
 bounded static ELF64 x86-64 file into a fixed virtual address space represented
-entirely by Ginux-us-owned bytes and page-permission metadata. It builds the Linux
+entirely by Ginux-owned bytes and page-permission metadata. It builds the Linux
 x86-64 initial stack and interprets the fixture's machine instructions.
 
-A managed `syscall` instruction is an interpreter event. Ginux-us sends the
+A managed `syscall` instruction is an interpreter event. Ginux sends the
 request through the central dispatcher and records an audit decision. It never
 executes the equivalent host syscall on behalf of the managed program. Managed
-addresses are validated offsets into the Ginux-us address space and are never
+addresses are validated offsets into the Ginux address space and are never
 dereferenced as host pointers.
 
 The approved fixture uses the ordinary Linux x86-64 syscall ABI to write its

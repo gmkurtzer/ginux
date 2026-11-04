@@ -2,7 +2,7 @@
 set -eu
 
 printf '%s\n' 'Gate 3 scope: load and interpret a bounded static Linux x86-64 ELF.'
-printf '%s\n' 'Managed registers and memory are Ginux-us data; guest syscall instructions'
+printf '%s\n' 'Managed registers and memory are Ginux data; guest syscall instructions'
 printf '%s\n' 'become internal dispatch events and never execute on the host.'
 printf '%s\n' ''
 
@@ -16,9 +16,9 @@ printf '%s\n' 'Negative ELF-loading case:'
 cat build/gate3-malformed.log
 printf '%s\n' ''
 printf '%s\n' 'Gate 3 verified:'
-printf '%s\n' '  - Ginux-us loaded a standard static ELF64 x86-64 program from bytes'
-printf '%s\n' '  - Ginux-us built argc/argv/environment and enforced page permissions'
-printf '%s\n' '  - managed output was copied from validated Ginux-us memory'
+printf '%s\n' '  - Ginux loaded a standard static ELF64 x86-64 program from bytes'
+printf '%s\n' '  - Ginux built argc/argv/environment and enforced page permissions'
+printf '%s\n' '  - managed output was copied from validated Ginux memory'
 printf '%s\n' '  - known syscalls were emulated/mediated and syscall 999 returned ENOSYS'
 printf '%s\n' '  - malformed ELF input was rejected without running managed code'
 printf '%s\n' ''

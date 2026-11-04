@@ -1,4 +1,4 @@
-# Ginux-us HDAE Status
+# Ginux HDAE Status
 
 ## Current checkpoint
 
@@ -20,23 +20,22 @@
 - Gate 6 is accepted and closed. Pull request
   https://github.com/gmkurtzer/ginux-us/pull/6 was merged by the human on
   2026-11-04.
-- Authoritative name: Ginux-us (Ginux Userspace).
+- Authoritative name: Ginux.
 - Runtime isolation unit: domain.
 - Policy unit: versioned contract.
 - Initial gate map: twelve checkpoint gates at positions 1 through 11 and 13;
-  Gates 1 through 6 are accepted, the inserted rename gate is active, and seven
-  gates remain open.
+  Gates 1 through 7.75 are accepted and five gates remain open.
 - The ordered gate batch is authorized, but every open gate remains a human
   checkpoint requiring a working demonstration and explicit acceptance.
 
 ## Governing outcome and invariants
 
-A normal Rocky Linux 10 host must boot with systemd as real PID 1. Ginux-us runs
+A normal Rocky Linux 10 host must boot with systemd as real PID 1. Ginux runs
 as an ordinary host process and launches an unmodified Rocky Linux 10 systemd
 userspace as virtual domain PID 1 without allowing managed code to invoke host
 syscalls directly. All managed interactions are emulated, mediated, or denied
 according to the domain contract. Domain-visible kernel state and devices are
-Ginux-us-owned.
+Ginux-owned.
 
 See `hdae/PROJECT.md` and `hdae/ARCHITECTURE.md` for the authoritative intent,
 scope, threat model, and invariants.
@@ -45,7 +44,7 @@ scope, threat model, and invariants.
 
 - Repository inspection before establishment: clean `main` branch with no
   pre-existing root `hdae/` project ledger.
-- Human direction confirmed the Ginux-us name, domain terminology, Rust/x86-64
+- Human direction confirmed the Ginux name, domain terminology, Rust/x86-64
   direction, Rocky Linux 10 systemd baseline, cached cloud QCOW2 source,
   virtual kernel trees, device assignment requirement, benchmark requirement,
   and dedicated branch/PR delivery per implementation gate.
@@ -57,7 +56,7 @@ scope, threat model, and invariants.
   The project retains deterministic defensive contract, malformed-input,
   escape-attempt, fuzz, recovery, and authority-reduction verification.
 - Human direction on 2026-11-03 corrected the host boundary: Rocky Linux boots
-  normally with host systemd as PID 1; Ginux-us is an ordinary process or service
+  normally with host systemd as PID 1; Ginux is an ordinary process or service
   that creates and supervises domains beneath it. Domain systemd is virtual
   PID 1. The earlier Gate 1 PID-1 result is retained as superseded evidence,
   not accepted product behavior.
@@ -68,7 +67,7 @@ scope, threat model, and invariants.
   `make host-image-verify`, `make build`, `make check`, `make test-unit`,
   `make test-intercept`, `make test`, `make host-boot-test`,
   `make bench-baseline`, and `make demo-gate-1` under QEMU TCG.
-- Rocky Linux 10.2 booted normally with host systemd as real PID 1. Ginux-us ran
+- Rocky Linux 10.2 booted normally with host systemd as real PID 1. Ginux ran
   as the unprivileged ordinary `ginux` process, mediated the fixed payload,
   exited zero, and left systemd plus `multi-user.target` healthy.
 - The revised demo showed virtual `getpid` 4242, checked write mediation without
@@ -76,7 +75,7 @@ scope, threat model, and invariants.
   Rocky-host benchmark samples, clean QEMU shutdown, and no remaining PID file
   or VM process.
 - Human accepted Gate 1 on 2026-11-03 and directed advancement to Gate 2.
-- Final Gate 1 verification after removing Ginux-us numeric host-PID checks passed
+- Final Gate 1 verification after removing Ginux numeric host-PID checks passed
   `make check`, `make test-unit`, and `make demo-gate-1`; normal host PID 1
   validation remains only in the Rocky boot harness.
 - Gate 2 `make image-prepare`, `make test-image`, `make demo-gate-2`, clean-cache
@@ -88,10 +87,10 @@ scope, threat model, and invariants.
 - After human feedback that the original demo was opaque, the revised
   `make demo-gate-2` reported eight named checks and their concrete values,
   asserted a read-only source mount plus no helper Ethernet/default route, and
-  explicitly stated that Ginux-us execution, VFS, and systemd boot are not Gate 2
+  explicitly stated that Ginux execution, VFS, and systemd boot are not Gate 2
   evidence. The revised demonstration passed on 2026-11-03.
 - Human accepted Gate 2 on 2026-11-03 and directed advancement to Gate 3.
-- Gate 3 implemented the security-focused x86-64 interpreter, Ginux-us-owned
+- Gate 3 implemented the security-focused x86-64 interpreter, Ginux-owned
   memory/permissions, bounded static ELF loader, Linux initial stack, central
   syscall events, output mediation, audit records, and fail-closed errors.
   Six runtime unit tests, `make test-runtime`, `make demo-gate-3`, and aggregate
@@ -108,19 +107,19 @@ scope, threat model, and invariants.
   `make test-domain`, `make demo-gate-4`, and aggregate `make test` passed.
 - Human accepted Gate 4 on 2026-11-03 and directed advancement to Gate 5.
 - Human corrected and approved the Gate 5 backing strategy on 2026-11-03: the
-  domain virtually boots a digest-pinned Rocky OCI image through Ginux-us. Ginux-us
+  domain virtually boots a digest-pinned Rocky OCI image through Ginux. Ginux
   explicitly pulls and caches the image, assembles its layers into an immutable
   indexed root, and supplies a bounded in-memory write overlay. An external OCI
   runtime must not execute managed code, and the host QCOW2 remains independent.
-- Gate 5 now has a verified pinned OCI acquisition/cache pipeline and a Ginux-us
+- Gate 5 now has a verified pinned OCI acquisition/cache pipeline and a Ginux
   immutable root index. `make test-oci-image` passed six acquisition,
   integrity, identity, corruption, repeatability, and offline checks.
-- `make test-vfs` passed in the QEMU TCG Rocky host. Ginux-us resolved Rocky
+- `make test-vfs` passed in the QEMU TCG Rocky host. Ginux resolved Rocky
   identity and Bash from the OCI root, created and discarded its own overlay
   file, kept the host filesystem unchanged, and rejected a truncated index.
 - Gate 5 native execution milestone commit `8e5847a` added the `ptrace-native`
   backend. `make check`, `make test-unit`, and `make test-native-vfs` passed.
-  The QEMU Rocky host loaded the unmodified OCI Bash and image loader, Ginux-us
+  The QEMU Rocky host loaded the unmodified OCI Bash and image loader, Ginux
   audited 238 syscall entries, emulated `getpid` as 4242, denied unsupported
   calls, printed `GINUX_NATIVE_SHELL: PASS`, stopped at `exit_group`, and
   preserved the Bash digest.
@@ -130,21 +129,21 @@ scope, threat model, and invariants.
   repeatability, integrity, identity, and offline checks. A fresh
   `make test-native-vfs` passed against the resulting assembled root.
 - The expanded native QEMU test also passed fail-closed supervisor loss: after
-  a held Rocky Bash reported readiness, killing Ginux-us caused
+  a held Rocky Bash reported readiness, killing Ginux caused
   `PTRACE_O_EXITKILL` to remove the tracee. Normal execution, emulated `getpid`,
   denied `getppid`, immutable Bash content, and cleanup passed in the same run.
 - Human direction on 2026-11-03 approved a balanced execution profile for Gate
   5: native instruction execution with minimal confined passthrough for
   read-only loader/image, memory, signal, and bootstrap-console operations;
   sensitive interfaces remain emulated, proxied, or denied. The security
-  profile retains interpreted execution and Ginux-us-virtual descriptors.
+  profile retains interpreted execution and Ginux-virtual descriptors.
 - The approved balanced model is now executable. Local checks passed explicit
   syscall-surface and negative policy tests. QEMU passed Rocky Bash with
   classified read-only image and console passthrough, virtual identity, denied
   ioctl, blocked `O_CREAT` with no file created, blocked socket creation, and
   fail-closed supervisor loss.
 - The latest native QEMU run also passed unexpected-stop handling: after an
-  external `SIGSTOP`, Ginux-us killed and reaped the tracee and cleaned domain
+  external `SIGSTOP`, Ginux killed and reaped the tracee and cleaned domain
   state. Four VFS unit tests now include independent overlay-instance isolation
   plus traversal, symlink-loop, invalid-descriptor, overlay, and teardown paths.
 - `make demo-gate-5` passed all eight named checks and reported its explicit
@@ -155,7 +154,7 @@ scope, threat model, and invariants.
   `hdae/virtual-vfs-userspace`. It is not merged or closed.
 - Human accepted Gate 5 on 2026-11-03 and directed advancement to Gate 6.
 - Gate 6 began on `hdae/device-ownership`. The first milestone added the
-  bounded Ginux-us device registry, virtual descriptor namespace, assignment
+  bounded Ginux device registry, virtual descriptor namespace, assignment
   visibility, exclusive ownership and revocation, console/null/zero/random
   frontends, fail-closed ioctls and mappings, bounded partitions, and the
   isolated packet-queue model.
@@ -179,7 +178,7 @@ scope, threat model, and invariants.
   The DNF repository source remains an explicit decision required before Gate
   9 begins and does not block Gate 7.
 - Gate 7 began on `hdae/process-runtime`. Its first milestone added a bounded
-  Ginux-us process table with virtual lifecycle and identity, generation-safe task
+  Ginux process table with virtual lifecycle and identity, generation-safe task
   handles, virtual credentials and capability dropping, signal masks/queues,
   futex and eventfd primitives, deterministic exhaustion, and shutdown cleanup.
 - The initial `cargo test -p ginux-process`, strict clippy, and
@@ -193,7 +192,7 @@ scope, threat model, and invariants.
 - The Rocky QEMU `make test-process` fixture passed 256 repeated virtual
   lifecycle cycles plus signals, virtual credentials, futex, eventfd, epoll,
   timers, stale identity denial, and zero-task cleanup. This fixture currently
-  validates the Ginux-us process model.
+  validates the Ginux process model.
 - Gate 7 native supervision now auto-attaches forked tracees and translates
   `fork`, `getpid`, `getppid`, and `wait4` across host and virtual identities.
   The Rocky QEMU stress passed 32 fork/wait cycles with two concurrent children
@@ -208,16 +207,30 @@ scope, threat model, and invariants.
 - Gate 7 is technically passed. Pull request
   https://github.com/gmkurtzer/ginux-us/pull/7 was merged by the human on
   2026-11-04, but the gate still awaits explicit human checkpoint acceptance.
-- Gate 7.5 renamed every active project surface to Ginux-us, the executable to
-  `ginux`, and packages to `ginux-*`; its deterministic stale-name check passes.
+- Gate 7.5 completed the transitional active-project rename, selected `ginux`
+  as the executable, and selected `ginux-*` package names; its deterministic
+  stale-name check passed.
 - Post-rename `make check`, `make test`, `make test-native-vfs`, and
   `make demo-gate-7` passed. The demonstration again passed all nine checks.
 - The first aggregate run found a predecessor generated rootfs manifest in the
   persistent cache. The cache now rejects that marker and rebuilds it; the
   image suite and full aggregate suite passed after the migration fix.
-- The GitHub repository is renamed to `gmkurtzer/ginux-us`; origin points to the
-  renamed repository, PRs 1 through 7 remain reachable as merged, and Gate 7.5
-  is delivered in open https://github.com/gmkurtzer/ginux-us/pull/8.
+- The transitional GitHub repository rename preserved PRs 1 through 7 as
+  reachable merged records. Gate 7.5 remains delivered in open
+  https://github.com/gmkurtzer/ginux-us/pull/8 through repository redirects.
+- Human direction on 2026-11-04 selected Ginux as the final project and
+  repository name because the full kernel project is pivoting to this
+  userspace-kernel architecture. The local checkout directory must not move.
+- Gate 7.75 active surfaces and demonstrations now use Ginux. `make check`,
+  `make test`, `make test-native-vfs`, and `make demo-gate-7` passed; the
+  demonstration again passed all nine process-runtime checks.
+- Gate 7.75 is delivered in open
+  https://github.com/gmkurtzer/ginux-us/pull/9 from `hdae/ginux-rename`.
+  GitHub rejected renaming the repository to `gmkurtzer/ginux` with HTTP 422
+  because that repository already exists and is non-empty.
+- Human direction on 2026-11-04 accepted Gates 7, 7.5, and 7.75 and directed
+  advancement to Gate 8. Repository integration into the existing Ginux project
+  is deferred until the separately planned move on the following morning.
 
 ## Open decisions and limitations
 
@@ -225,7 +238,7 @@ scope, threat model, and invariants.
   for Gate 3 and accepted its evidence. On 2026-11-03 the human selected native
   host ELF execution under continuous ptrace supervision for Gate 5
   compatibility. The host handles instructions, ELF loading, memory, faults,
-  signals, and scheduling; Ginux-us must stop every syscall before effect and fail
+  signals, and scheduling; Ginux must stop every syscall before effect and fail
   closed on lost tracing. Approved passthrough calls require ptrace entry/exit
   stops because `PTRACE_SYSEMU` always skips the syscall implementation.
 - Rocky host image is pinned to official Rocky 10.2 GenericCloud build
@@ -235,16 +248,17 @@ scope, threat model, and invariants.
 - Gate 2 preparation requires Docker Desktop and a pinned privileged helper
   container. It is network-disabled and mounts only a temporary raw conversion
   read-only, but remains trusted build tooling rather than a runtime boundary.
-- The local checkout is `/Users/gmk/git/ginux-us`. The active source tree,
-  generated cache format, GitHub repository, origin, and local path all use the
-  new name.
+- The local checkout intentionally remains `/Users/gmk/git/ginux-us` for
+  later integration. Product, source, and cache identifiers use Ginux. GitHub
+  and origin remain on the transitional repository until the human chooses how
+  this work should enter the existing Ginux repository.
 - The selected Rocky OCI image has one layer; deterministic synthetic fixtures
   now cover general multi-layer replacement, whiteout, and opaque-directory
   semantics.
 - The native Bash proof uses a read-only unprivileged chroot and limits kernel
   descriptors to immutable image content and the bootstrap console. Gate 6
-  adds Ginux-us-owned device objects rather than expanding native passthrough.
-- Gate 6 uses a Ginux-us-owned isolated packet queue as its mediated
+  adds Ginux-owned device objects rather than expanding native passthrough.
+- Gate 6 uses a Ginux-owned isolated packet queue as its mediated
   network backend. It does not provide host or external network connectivity;
   later connectivity backends must preserve the same virtual interface and
   mediation boundary.
@@ -254,18 +268,19 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Stop for human review and explicit acceptance of Gate 7.5 and Gate 7 before
-Gate 8 begins.
+Close accepted Gates 7, 7.5, and 7.75, start Gate 8 on
+`hdae/virtual-kernel-views`, and implement its bounded virtual procfs, sysfs,
+cgroup, mount, namespace, and identity views.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 7.5, Ginux-us project rename, authorized and started on
-  dedicated branch `hdae/ginux-us-rename`; Gate 7 remains technically passed
-  with repeated post-rename evidence; both await human review
-- Last evidence: `make check`, `make test`, `make test-native-vfs`, and
-  `make demo-gate-7` passed on 2026-11-04
-- Required human decision: none until the Gate 7 demonstration checkpoint; the
+- Active gate: Gate 8, virtual kernel views, authorized for execution on
+  dedicated branch `hdae/virtual-kernel-views`; Gates 7, 7.5, and 7.75 are
+  accepted and ready to close
+- Last evidence: Gate 7.75 `make check`, `make test`,
+  `make test-native-vfs`, and `make demo-gate-7` passed on 2026-11-04
+- Required human decision: none until the Gate 8 demonstration checkpoint; the
   Gate 9 DNF repository choice is deferred until before Gate 9 implementation

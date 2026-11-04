@@ -1,7 +1,7 @@
 # Gate 2 Rocky domain-userspace pipeline
 
 Gate 2 turns the checksum-pinned Rocky 10.2 GenericCloud QCOW2 from Gate 1
-into an offline domain-userspace artifact. The source disk is data: Ginux-us does
+into an offline domain-userspace artifact. The source disk is data: Ginux does
 not boot its kernel to prepare or run the domain.
 
 ## Preparation boundary
@@ -16,7 +16,7 @@ read-only, and writes two cache artifacts:
   SHA-256 values.
 
 This helper kernel is tooling, not the Rocky kernel stored in the source image
-and not a Ginux-us workload boundary. The helper receives no network access.
+and not a Ginux workload boundary. The helper receives no network access.
 Preparation never modifies the source QCOW2.
 
 The helper image is pinned in `config/rocky-domain-image.env`. Fetch it once,
@@ -57,5 +57,5 @@ artifacts, Rocky userspace identity, required runtime inputs, provenance,
 repeatability, cache/Git policy, and corrupt/missing-source failure paths. It
 also verifies that the extraction mount is read-only and that the helper has
 neither an Ethernet interface nor a default route. The final summary explicitly
-states that Gate 2 does not test Ginux-us execution, Ginux-us VFS behavior, or booting
-systemd under Ginux-us; those belong to later gates.
+states that Gate 2 does not test Ginux execution, Ginux VFS behavior, or booting
+systemd under Ginux; those belong to later gates.

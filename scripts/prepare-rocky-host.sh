@@ -22,7 +22,7 @@ cat > build/rocky-seed/user-data <<EOF
 users:
   - default
   - name: ginux
-    gecos: Ginux-us Gate 1
+    gecos: Ginux Gate 1
     groups: [wheel]
     shell: /bin/bash
     sudo: ["ALL=(ALL) NOPASSWD:ALL"]

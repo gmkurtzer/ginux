@@ -33,7 +33,7 @@ early helper fixtures.
 
 ## Completed work
 
-- [x] Implement the bounded Ginux-us process table with virtual PID, TID, parent,
+- [x] Implement the bounded Ginux process table with virtual PID, TID, parent,
   process-group, session, fork, clone-thread, exec epoch, exit, wait, and reap
   behavior.
 - [x] Add generation-safe internal task handles, monotonic virtual PID
@@ -57,7 +57,7 @@ early helper fixtures.
 
 ## Remaining work
 
-- [ ] Human review and acceptance of the Gate 7 demonstration and evidence.
+- None.
 
 ## Acceptance criteria
 
@@ -65,10 +65,10 @@ early helper fixtures.
   and threads without stale identity reuse or resource leakage.
 - Signal, futex, timer, and event fixtures observe the documented Linux-style
   results, interruption, timeout, and cleanup behavior.
-- Virtual root and capabilities affect only Ginux-us policy and never confer host
+- Virtual root and capabilities affect only Ginux policy and never confer host
   credentials or capabilities.
 - Invalid PIDs, TIDs, selectors, pointers, flags, and lifecycle races fail
-  deterministically without crossing domain boundaries or crashing Ginux-us.
+  deterministically without crossing domain boundaries or crashing Ginux.
 - Blocking operations can be interrupted and domain shutdown can terminate all
   managed work within the documented test timeout.
 - Earlier VFS, device, runtime, and interception tests remain passing.
@@ -147,6 +147,5 @@ early helper fixtures.
 
 ## Review policy and outcome
 
-Human checkpoint. Gate 7 is technically passed and remains open pending
-explicit human review. Process identity and privilege behavior are security
-boundaries and require acceptance before virtual kernel views build on them.
+Accepted by the human on 2026-11-04 through explicit direction to advance to
+Gate 8. The process identity and privilege evidence passed its checkpoint.

@@ -23,5 +23,5 @@ if grep -Fq 'UNMEDIATED_PAYLOAD_WRITE' "$log"; then
     exit 1
 fi
 rocky_ssh 'test "$(cat /proc/1/comm)" = systemd; systemctl is-active --quiet multi-user.target'
-printf '%s\n' 'HOST: healthy after Ginux-us exit' >> "$log"
+printf '%s\n' 'HOST: healthy after Ginux exit' >> "$log"
 printf '%s\n' 'test-intercept: PASS'

@@ -5,7 +5,9 @@ old_title=$(printf '%s%s' 'Gi' 'nus')
 old_lower=$(printf '%s%s' 'gi' 'nus')
 old_upper=$(printf '%s%s' 'GI' 'NUS')
 old_repo=$(printf '%s%s' 'us' 'shim')
-pattern="$old_title|$old_lower|$old_upper|$old_repo"
+transition_title=$(printf '%s%s' 'Ginux' '-us')
+transition_lower=$(printf '%s%s' 'ginux' '-us')
+pattern="$old_title|$old_lower|$old_upper|$old_repo|$transition_title|$transition_lower"
 
 set +e
 matches=$(rg -n \
@@ -15,8 +17,9 @@ matches=$(rg -n \
     --glob '!.git/**' \
     --glob '!hdae/gates-done/**' \
     --glob '!hdae/gates-todo/7.5-ginux-us-rename.md' \
+    --glob '!hdae/gates-todo/7.75-ginux-rename.md' \
     --glob '!scripts/check-name.sh' \
-    "$pattern" .)
+    "$pattern" . | grep -v -E '/Users/gmk/git/ginux-us|hdae/ginux-us-rename|github.com/gmkurtzer/ginux-us/')
 status=$?
 set -e
 
@@ -36,6 +39,7 @@ paths=$(find . \
     -path './build' -prune -o \
     -path './target' -prune -o \
     -path './hdae/gates-done' -prune -o \
+    -path './hdae/gates-todo/7.5-ginux-us-rename.md' -prune -o \
     -print | grep -E "$pattern")
 status=$?
 set -e
@@ -50,4 +54,4 @@ case "$status" in
     *) exit "$status" ;;
 esac
 
-printf '%s\n' 'check-name: PASS (active project is Ginux-us; command is ginux)'
+printf '%s\n' 'check-name: PASS (active project is Ginux; command is ginux)'
