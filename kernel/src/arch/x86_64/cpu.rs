@@ -25443,6 +25443,7 @@ fn linux_overlay_stat(metadata: crate::linux_overlay::Metadata) -> [u8; LINUX_ST
         crate::linux_overlay::NodeKind::Directory => 0o040000,
         crate::linux_overlay::NodeKind::Symlink => 0o120000,
         crate::linux_overlay::NodeKind::Fifo => 0o010000,
+        crate::linux_overlay::NodeKind::Socket => 0o140000,
     };
     let mut stat = linux_stat(kind | metadata.mode, metadata.handle.inode());
     stat[48..56].copy_from_slice(&(metadata.size as u64).to_ne_bytes());
@@ -25729,6 +25730,12 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64, mode: u64) -> u64
             Some(crate::linux_overlay::NodeKind::Fifo) => {
                 return linux_open_named_fifo(flags, handle);
             }
+            Some(crate::linux_overlay::NodeKind::Socket) if flags & LINUX_O_PATH != 0 => {
+                LINUX_FILE_TMP_SCRATCH
+            }
+            // A socket inode has no open method (Linux's no_open_fops,
+            // fs/inode.c init_special_inode): connect(2) reaches it instead.
+            Some(crate::linux_overlay::NodeKind::Socket) => return LINUX_ENXIO,
             None => return LINUX_ENOENT,
         }
     } else if path == b"/etc/resolv.conf" {
@@ -26163,7 +26170,9 @@ fn linux_open_by_handle_at(mount_descriptor: u64, handle_address: u64, flags: u6
         crate::linux_overlay::NodeKind::File | crate::linux_overlay::NodeKind::Symlink => {
             LINUX_FILE_TMP_SCRATCH
         }
-        crate::linux_overlay::NodeKind::Fifo => return LINUX_EOPNOTSUPP,
+        crate::linux_overlay::NodeKind::Fifo | crate::linux_overlay::NodeKind::Socket => {
+            return LINUX_EOPNOTSUPP;
+        }
     };
     let index = (descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize;
     X86_RUNTIME.ELF_PROBE_DEVICE_DESCRIPTORS[index]
@@ -26441,12 +26450,13 @@ fn linux_mknodat(directory: u64, path_address: u64, mode: u64, device: u64) -> u
     const S_IFCHR: u64 = 0o020000;
     const S_IFBLK: u64 = 0o060000;
     const S_IFREG: u64 = 0o100000;
+    const S_IFSOCK: u64 = 0o140000;
 
     let kind = mode & S_IFMT;
     if matches!(kind, S_IFCHR | S_IFBLK) {
         return LINUX_EPERM;
     }
-    if !matches!(kind, 0 | S_IFREG | S_IFIFO) {
+    if !matches!(kind, 0 | S_IFREG | S_IFIFO | S_IFSOCK) {
         return LINUX_EINVAL;
     }
     let mut path = [0_u8; crate::linux_overlay::PATH_CAPACITY];
@@ -26473,6 +26483,8 @@ fn linux_mknodat(directory: u64, path_address: u64, mode: u64, device: u64) -> u
         (mode as u32) & 0o7777 & !(X86_RUNTIME.ELF_PROBE_UMASK.load(Ordering::SeqCst) as u32);
     let created = if kind == S_IFIFO {
         crate::linux_overlay::create_fifo(path, permissions)
+    } else if kind == S_IFSOCK {
+        crate::linux_overlay::create_socket(path, permissions)
     } else {
         crate::linux_overlay::create_file(path, permissions, &[])
     };
@@ -26577,6 +26589,9 @@ fn linux_linkat(
             }
             crate::linux_overlay::NodeKind::Fifo => {
                 crate::linux_overlay::create_fifo(destination, source.mode)
+            }
+            crate::linux_overlay::NodeKind::Socket => {
+                crate::linux_overlay::create_socket(destination, source.mode)
             }
             crate::linux_overlay::NodeKind::Directory => None,
         };
@@ -27653,6 +27668,7 @@ fn linux_statx(directory: u64, path_address: u64, flags: u64, mask: u64, stat_ad
                 crate::linux_overlay::NodeKind::Directory => 0o040000,
                 crate::linux_overlay::NodeKind::Symlink => 0o120000,
                 crate::linux_overlay::NodeKind::Fifo => 0o010000,
+                crate::linux_overlay::NodeKind::Socket => 0o140000,
             } | metadata.mode;
             let size = metadata.size as u64;
             let mut stat = [0_u8; 256];
@@ -27800,6 +27816,7 @@ fn linux_socket_error(error: crate::linux_socket::Error) -> u64 {
         crate::linux_socket::Error::NotConnected => LINUX_ENOTCONN,
         crate::linux_socket::Error::BrokenPipe => LINUX_EPIPE,
         crate::linux_socket::Error::Reset => LINUX_ECONNRESET,
+        crate::linux_socket::Error::Refused => LINUX_ECONNREFUSED,
     }
 }
 
@@ -28052,6 +28069,56 @@ fn linux_unix_socket_path(address: u64, length: u64, output: &mut [u8; 108]) -> 
     Ok(path_length)
 }
 
+/// bind(2) of a Unix socket to a pathname makes a socket inode there, as
+/// Linux's unix_bind_bsd (net/unix/af_unix.c) mknods one: anything already at
+/// the path is EADDRINUSE, a missing parent ENOENT. The file stays when the
+/// socket closes; unlink(2) removes it.
+fn linux_unix_bind_path(slot: u8, path: &[u8]) -> u64 {
+    let mut canonical = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+    let length = match linux_canonical_path_at(u64::from(LINUX_AT_FDCWD), path, &mut canonical) {
+        Ok(length) => length,
+        Err(error) => return error,
+    };
+    let canonical = &canonical[..length];
+    if crate::linux_overlay::lookup(canonical).is_some()
+        || linux_rootfs_metadata_path_at(u64::from(LINUX_AT_FDCWD), path).is_some()
+    {
+        return LINUX_EADDRINUSE;
+    }
+    if !linux_overlay_parent_exists(canonical) {
+        return LINUX_ENOENT;
+    }
+    let mode = 0o777 & !(X86_RUNTIME.ELF_PROBE_UMASK.load(Ordering::SeqCst) as u32);
+    let Some(handle) = crate::linux_overlay::create_socket(canonical, mode) else {
+        return LINUX_ENOSPC;
+    };
+    match crate::linux_socket::bind_unix(slot, path, Some(handle.inode())) {
+        Ok(()) => 0,
+        Err(error) => {
+            // An already bound socket: Linux unlinks the inode it made.
+            let _ = crate::linux_overlay::unlink(handle);
+            linux_socket_error(error)
+        }
+    }
+}
+
+/// The inode of the socket file connect(2) names: a missing path is ENOENT,
+/// anything but a socket file ECONNREFUSED (unix_find_bsd).
+fn linux_unix_socket_file(path: &[u8]) -> Result<u64, u64> {
+    let mut canonical = [0_u8; crate::linux_overlay::PATH_CAPACITY];
+    let length = linux_canonical_path_at(u64::from(LINUX_AT_FDCWD), path, &mut canonical)?;
+    match crate::linux_overlay::lookup(&canonical[..length]) {
+        Some(metadata) if metadata.kind == crate::linux_overlay::NodeKind::Socket => {
+            Ok(metadata.handle.inode())
+        }
+        Some(_) => Err(LINUX_ECONNREFUSED),
+        None if linux_rootfs_metadata_path_at(u64::from(LINUX_AT_FDCWD), path).is_some() => {
+            Err(LINUX_ECONNREFUSED)
+        }
+        None => Err(LINUX_ENOENT),
+    }
+}
+
 fn linux_socket_bind(descriptor: u64, address: u64, length: u64) -> u64 {
     let Some(slot) = linux_socket_slot(descriptor) else {
         return LINUX_EBADF;
@@ -28062,8 +28129,11 @@ fn linux_socket_bind(descriptor: u64, address: u64, length: u64) -> u64 {
             Ok(length) => length,
             Err(error) => return error,
         };
-        return crate::linux_socket::bind_unix(slot, &path[..path_length])
-            .map_or_else(linux_socket_error, |()| 0);
+        if path[0] == 0 {
+            return crate::linux_socket::bind_unix(slot, &path[..path_length], None)
+                .map_or_else(linux_socket_error, |()| 0);
+        }
+        return linux_unix_bind_path(slot, &path[..path_length]);
     }
     let (address, port) = match linux_socket_bind_address(address, length) {
         Ok(endpoint) => endpoint,
@@ -28152,7 +28222,15 @@ fn linux_socket_connect(descriptor: u64, address: u64, length: u64) -> u64 {
             Ok(length) => length,
             Err(error) => return error,
         };
-        return crate::linux_socket::connect_unix(slot, &path[..path_length])
+        let inode = if path[0] == 0 {
+            None
+        } else {
+            match linux_unix_socket_file(&path[..path_length]) {
+                Ok(inode) => Some(inode),
+                Err(error) => return error,
+            }
+        };
+        return crate::linux_socket::connect_unix(slot, &path[..path_length], inode)
             .map_or_else(linux_socket_error, |()| 0);
     }
     let endpoint = match linux_socket_address(address, length) {
@@ -36101,6 +36179,7 @@ fn linux_getdents(descriptor: u64, address: u64, count: u64, legacy: bool) -> u6
                 crate::linux_overlay::NodeKind::Directory => 4,
                 crate::linux_overlay::NodeKind::Symlink => 10,
                 crate::linux_overlay::NodeKind::Fifo => 1,
+                crate::linux_overlay::NodeKind::Socket => 12,
             };
             let Some(cookie) = child.next_cursor.checked_add(2) else {
                 return LINUX_EINVAL;

@@ -20,6 +20,8 @@ pub(crate) enum NodeKind {
     Directory,
     Symlink,
     Fifo,
+    /// The inode a pathname AF_UNIX socket is bound to (S_IFSOCK).
+    Socket,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -546,6 +548,10 @@ pub(crate) fn create_fifo(path: &[u8], mode: u32) -> Option<Handle> {
     create(path, NodeKind::Fifo, mode, &[])
 }
 
+pub(crate) fn create_socket(path: &[u8], mode: u32) -> Option<Handle> {
+    create(path, NodeKind::Socket, mode, &[])
+}
+
 pub(crate) fn fifo_socket(handle: Handle) -> Option<u8> {
     let node = node(handle)?;
     (node.kind == NodeKind::Fifo)
@@ -679,7 +685,10 @@ pub(crate) fn whiteout(path: &[u8]) -> bool {
 
 pub(crate) fn read(handle: Handle, offset: usize, output: &mut [u8]) -> Option<usize> {
     let node = node_mut(handle)?;
-    if matches!(node.kind, NodeKind::Directory | NodeKind::Fifo) {
+    if matches!(
+        node.kind,
+        NodeKind::Directory | NodeKind::Fifo | NodeKind::Socket
+    ) {
         return None;
     }
     let start = offset.min(node.size);
@@ -718,7 +727,10 @@ pub(crate) fn write(handle: Handle, offset: usize, input: &[u8]) -> Option<usize
         return Some(0);
     }
     let node = node_mut(handle)?;
-    if matches!(node.kind, NodeKind::Directory | NodeKind::Fifo) {
+    if matches!(
+        node.kind,
+        NodeKind::Directory | NodeKind::Fifo | NodeKind::Socket
+    ) {
         return None;
     }
     ensure_data_pages(node, end.div_ceil(DATA_CAPACITY))?;

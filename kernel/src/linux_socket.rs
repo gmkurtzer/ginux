@@ -83,6 +83,7 @@ pub(crate) enum Error {
     NotConnected,
     BrokenPipe,
     Reset,
+    Refused,
 }
 
 #[derive(Clone, Copy)]
@@ -194,6 +195,7 @@ struct SocketRuntimeOwner {
     unix_socket_types: UnsafeCell<[u8; SLOT_COUNT]>,
     unix_path_lengths: UnsafeCell<[u8; SLOT_COUNT]>,
     unix_paths: UnsafeCell<[[u8; UNIX_PATH_CAPACITY]; SLOT_COUNT]>,
+    unix_inodes: UnsafeCell<[u64; SLOT_COUNT]>,
     unix_inflight_rights: UnsafeCell<usize>,
     socket_storage: UnsafeCell<[SocketStorage<'static>; SLOT_COUNT]>,
     tcp_rx: UnsafeCell<[[u8; TCP_BUFFER_SIZE]; SLOT_COUNT]>,
@@ -213,6 +215,7 @@ static SOCKET_RUNTIME_OWNER: SocketRuntimeOwner = SocketRuntimeOwner {
     unix_socket_types: UnsafeCell::new([0; SLOT_COUNT]),
     unix_path_lengths: UnsafeCell::new([0; SLOT_COUNT]),
     unix_paths: UnsafeCell::new([[0; UNIX_PATH_CAPACITY]; SLOT_COUNT]),
+    unix_inodes: UnsafeCell::new([0; SLOT_COUNT]),
     unix_inflight_rights: UnsafeCell::new(0),
     socket_storage: UnsafeCell::new([SocketStorage::EMPTY; SLOT_COUNT]),
     tcp_rx: UnsafeCell::new([[0; TCP_BUFFER_SIZE]; SLOT_COUNT]),
@@ -248,6 +251,7 @@ owner_field!(
     unix_paths,
     [[u8; UNIX_PATH_CAPACITY]; SLOT_COUNT]
 );
+owner_field!(unix_inodes, unix_inodes, [u64; SLOT_COUNT]);
 owner_field!(unix_inflight_rights_state, unix_inflight_rights, usize);
 owner_field!(
     socket_storage,
@@ -458,6 +462,7 @@ pub(crate) fn open_unix(socket_type: u8) -> Result<u8, Error> {
         unix_socket_types()[slot] = socket_type;
         unix_path_lengths()[slot] = 0;
         unix_paths()[slot].fill(0);
+        unix_inodes()[slot] = 0;
     }
     Ok(slot as u8)
 }
@@ -477,7 +482,11 @@ pub(crate) fn socket_type(slot: u8) -> Option<u8> {
     }
 }
 
-pub(crate) fn bind_unix(slot: u8, path: &[u8]) -> Result<(), Error> {
+/// Binds Unix socket `slot` to `path`. A pathname name passes the `inode` of
+/// the socket file made for it: the filesystem then decides whether the name
+/// is in use (EADDRINUSE from mknod), and connect finds the socket by that
+/// inode, as Linux's unix_find_socket_byinode. An abstract name has none.
+pub(crate) fn bind_unix(slot: u8, path: &[u8], inode: Option<u64>) -> Result<(), Error> {
     let index = usize::from(slot);
     if path.is_empty() || path.len() > UNIX_PATH_CAPACITY {
         return Err(Error::Invalid);
@@ -501,17 +510,23 @@ pub(crate) fn bind_unix(slot: u8, path: &[u8]) -> Result<(), Error> {
                     && unix_paths()[candidate][..path.len()] == *path
             })
     };
-    if in_use {
+    if inode.is_none() && in_use {
         return Err(Error::AddressInUse);
     }
     unsafe {
         unix_paths()[index][..path.len()].copy_from_slice(path);
         unix_path_lengths()[index] = path.len() as u8;
+        unix_inodes()[index] = inode.unwrap_or(0);
     }
     Ok(())
 }
 
-pub(crate) fn connect_unix(slot: u8, path: &[u8]) -> Result<(), Error> {
+/// Connects Unix socket `slot` to the socket bound to the socket file
+/// `inode`, or for an abstract name (`inode` None) to the one bound to `path`.
+/// No such socket, or a stream one that does not listen, refuses
+/// (ECONNREFUSED, net/unix/af_unix.c unix_find_bsd, unix_find_abstract and
+/// unix_stream_connect).
+pub(crate) fn connect_unix(slot: u8, path: &[u8], inode: Option<u64>) -> Result<(), Error> {
     let index = usize::from(slot);
     let state = unsafe { socket_slots().get(index).copied() }
         .filter(|state| state.occupied && state.kind == Kind::Unix)
@@ -526,23 +541,30 @@ pub(crate) fn connect_unix(slot: u8, path: &[u8]) -> Result<(), Error> {
             .enumerate()
             .find(|(candidate, length)| {
                 *candidate != index
-                    && usize::from(**length) == path.len()
                     && socket_slots()[*candidate].occupied
                     && socket_slots()[*candidate].owner == owner
                     && socket_slots()[*candidate].kind == Kind::Unix
                     && unix_socket_types()[*candidate] == unix_socket_types()[index]
-                    && unix_paths()[*candidate][..path.len()] == *path
+                    && match inode {
+                        Some(inode) => unix_inodes()[*candidate] == inode,
+                        None => {
+                            usize::from(**length) == path.len()
+                                && unix_paths()[*candidate][..path.len()] == *path
+                        }
+                    }
             })
             .map(|(candidate, _)| candidate)
     }
-    .ok_or(Error::NotConnected)?;
+    .ok_or(Error::Refused)?;
     if unsafe { unix_socket_types()[index] } == 2 {
         unsafe { socket_slots()[index].peer = Some(peer as u8) };
         return Ok(());
     }
     let listener = unsafe { socket_slots()[peer] };
-    if !listener.listening || usize::from(listener.pending_length) >= usize::from(listener.backlog)
-    {
+    if !listener.listening {
+        return Err(Error::Refused);
+    }
+    if usize::from(listener.pending_length) >= usize::from(listener.backlog) {
         return Err(Error::WouldBlock);
     }
     let accepted = unsafe { socket_slots().iter().position(|state| !state.occupied) }
@@ -697,6 +719,8 @@ pub(crate) fn open_pair(socket_type: u8) -> Result<(u8, u8), Error> {
         unix_path_lengths()[second] = 0;
         unix_paths()[first].fill(0);
         unix_paths()[second].fill(0);
+        unix_inodes()[first] = 0;
+        unix_inodes()[second] = 0;
     }
     Ok((first as u8, second as u8))
 }
@@ -750,6 +774,7 @@ pub(crate) fn close(slot: u8) -> bool {
             unix_socket_types()[index] = 0;
             unix_path_lengths()[index] = 0;
             unix_paths()[index].fill(0);
+            unix_inodes()[index] = 0;
             for candidate in socket_slots() {
                 if !candidate.occupied {
                     continue;
