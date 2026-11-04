@@ -1,0 +1,18 @@
+[package]
+name = "ginux-init"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[[bin]]
+name = "ginux"
+path = "src/main.rs"
+
+[dependencies]
+ginux-core = { path = "../ginux-core" }
+ginux-domain = { path = "../ginux-domain" }
+ginux-devices = { path = "../ginux-devices" }
+ginux-kernel-views = { path = "../ginux-kernel-views" }
+ginux-runtime = { path = "../ginux-runtime" }
+ginux-process = { path = "../ginux-process" }
+ginux-vfs = { path = "../ginux-vfs" }

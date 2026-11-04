@@ -1,9 +1,0 @@
-[toolchain]
-# Pinned nightly: the exact toolchain date used for the verification runs
-# recorded on issue #58. rustup auto-installs it (plus the two components
-# below) on first use inside fuzz/. The repo root toolchain (1.99.0, UEFI
-# target) is unaffected outside this directory.
-channel = "nightly-2026-11-02"
-profile = "minimal"
-components = ["rust-src", "llvm-tools-preview"]
-targets = ["x86_64-unknown-linux-gnu"]

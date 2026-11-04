@@ -81,13 +81,19 @@ The path is authoritative metadata:
 - `gates-deferred/` means the human intentionally postponed it and the file
   records why and what should cause reconsideration.
 
+Files in `gates-done/` are locked historical records. Never edit, rename,
+reorder, or delete them. A correction, regression, or follow-up discovered
+after closure belongs in a new gate. A closed gate may be reopened only at the
+human's explicit direction: first move its unchanged file from `gates-done/` to
+`gates-todo/`, then record and perform the newly approved work there.
+
 The filename is `<decimal-position>-<short-slug>.md`. Use integers for ordinary
 appends and a decimal midpoint for insertion. For example, insert `1.5-auth.md`
 between `1-foundation.md` and `2-api.md`; further insertions may use `1.25` or
 `1.75`. Use only digits and one decimal point, remove unnecessary trailing
 zeros, and never reuse a position. Do not add `id`, lifecycle, or order fields
-that repeat the path. If an existing gate must be reordered, rename only that
-gate.
+that repeat the path. If an open or deferred gate must be reordered, rename
+only that gate; never reorder a closed gate.
 
 Run these commands from the repository root. List every gate in execution order:
 
@@ -126,12 +132,17 @@ alone leaves a gate in `gates-todo/`. Move it to `gates-done/` only after human
 acceptance at a checkpoint or automatic closure authorized by the confirmed
 batch policy. Move it to `gates-deferred/` only after explicit deferral,
 retaining the same filename, and return it to `gates-todo/` when the recorded
-condition is met.
+condition is met. Never use insertion or reordering as a reason to rename a
+locked gate in `gates-done/`; decimal positions allow new gates to be inserted
+without modifying closed records.
 
 The gate body owns substantive information, not routing metadata:
 
 ```markdown
 # <Gate name>
+
+## Source
+<Originating issue or pull request when applicable; otherwise not applicable.>
 
 ## Goal
 <Observable outcome.>
@@ -325,11 +336,47 @@ why, use the most objective repeatable evidence available, and identify any
 human judgment or external dependency. Human acceptance evaluates direction
 and subjective quality; it does not replace reasonable automated checks.
 
+## Defects discovered during gate execution
+
+Finding an out-of-scope defect is useful evidence, not permission to fix it and
+not a reason to leave the human with an undefined scope decision. First record
+the reproduction, observed result, expected result, impact, and relationship to
+the active gate. If the defect blocks a criterion, mark that criterion and the
+gate partial or blocked precisely; do not report the active gate as passed.
+
+When the defect blocks acceptance, requires more than a small bounded loop, or
+needs its own durable regression evidence, propose a new corrective gate by
+default. The proposal must include:
+
+- a concrete name and numeric placement based on its dependency relationship;
+- the observable fix and why it is separate from the active gate;
+- approved scope, non-goals, and affected architecture or compatibility
+  boundaries;
+- a deterministic reproduction and criterion-by-criterion verification plan;
+- regression checks for both the defect and the interrupted gate;
+- the active gate's blocked, deferred, or resume-after relationship;
+- branch, pull-request, and commit strategy; and
+- checkpoint or delegated review policy.
+
+Present that draft with a direct offer to create and execute the gate. Existing
+gate or batch approval does not authorize it. If the human approves, persist the
+new gate, finish any unresolved alignment, and begin work without requiring the
+human to restate the diagnosis. If the human instead chooses to expand the
+existing open gate, update its scope, criteria, plan, and review policy before
+implementation. Never expand or otherwise modify a gate in `gates-done/`; a
+closed gate always requires a new follow-up gate unless the human explicitly
+reopens it under the locked-gate procedure.
+
 ## Delivery strategy and commit structure
 
 Every newly created gate records how its work will be delivered. Ask the human
 whether the gate should use the current branch or a dedicated branch intended
 for a pull request, unless an explicit choice already covers that exact gate.
+Do not ask this question for work originating from issue or pull-request review:
+it always uses a dedicated branch intended for a new pull request. Record the
+source item in the gate and reference it in the pull request. Use a closing
+keyword only when the work fully resolves an issue and closure is authorized;
+otherwise use a non-closing reference.
 Record:
 
 - working branch and intended base branch when relevant;
@@ -343,7 +390,9 @@ large gates. Each commit should have one understandable purpose and leave the
 tree testable when practical. Do not create noisy partial commits or split one
 tightly coupled behavior merely to increase commit count. Repository rules for
 sign-off, authorship, testing, and publication remain authoritative. A branch
-choice does not authorize pushing or opening a pull request.
+choice does not authorize pushing or opening a pull request unless an applicable
+scheduled-review gate policy explicitly grants those actions for that dedicated
+branch.
 
 ## Human gate-alignment conversation
 
@@ -358,6 +407,18 @@ sequence:
 4. show the coverage review below;
 5. ask what is missing or incorrectly scoped; and
 6. ask which gates may run as one batch and where human review is required.
+
+For a scheduled PR/issue review operating under a human-confirmed standing gate
+policy, perform and persist steps 1 through 5 without pausing. The saved policy
+replaces step 6 for qualifying work. Proceed autonomously unless a meaningful
+blocker requires human direction: ambiguous product or architecture intent,
+security or privacy risk, missing permission or credentials, scope outside the
+policy, destructive or irreversible impact, materially conflicting evidence,
+or failed verification with no credible safe in-scope path. Routine gate,
+branch, commit, and deterministic-test choices are not blockers.
+When safe, persist the gate and blocker before stopping. For private security
+findings, record only a sanitized reference and checkpoint; never put
+confidential vulnerability details in a public repository.
 
 The coverage review considers each relevant surface:
 
@@ -415,6 +476,14 @@ failure cannot invalidate them. At the end, report each gate's passed, closed,
 failed, blocked, deferred, or still-open state and the evidence supporting it.
 Batch confirmation expires when the included gates finish or the agreed scope
 or checkpoint map changes.
+
+A scheduled PR/issue review may instead use a human-confirmed standing
+delegation for future gates matching its exact repository, issue classes, scope,
+risk, validation, delivery, and review boundaries. For each qualifying item,
+derive and persist the gate and checkpoint policy, then execute without another
+approval prompt. Stop when the item falls outside that delegation or meets a
+meaningful blocker defined above. This standing policy does not authorize
+unlisted external actions or weaken any acceptance criterion.
 
 ## Closed-loop execution
 

@@ -1,0 +1,9 @@
+[package]
+name = "process-native-fixture"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[[bin]]
+name = "process-native-fixture"
+path = "src/main.rs"

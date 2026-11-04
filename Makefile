@@ -1,422 +1,165 @@
-SHELL := /bin/bash
+SHELL := /bin/sh
 
-TARGET := x86_64-unknown-uefi
-PROFILE ?= release
-CARGO_PROFILE_FLAG := $(if $(filter release,$(PROFILE)),--release,)
-EFI_SOURCE := target/$(TARGET)/$(PROFILE)/ginux-boot.efi
-ESP_DIR := build/esp
-EFI_DESTINATION := $(ESP_DIR)/EFI/BOOT/BOOTX64.EFI
-LINUX_PROBE := build/linux-probe.elf
-LINUX_DYNAMIC_DIR := build/linux-dynamic
-VOLUME_SERVICE := target/x86_64-unknown-none/$(PROFILE)/ginux-volume-service-runtime
-CONTROLLER_RUNTIME := target/x86_64-unknown-none/$(PROFILE)/ginux-controller-runtime
-NETWORK_SERVICE := target/x86_64-unknown-none/$(PROFILE)/ginux-network-service-runtime
-PROTOCOL_SERVICE := target/x86_64-unknown-none/$(PROFILE)/ginux-protocol-service-runtime
-GRAPHICS_SERVICE := target/x86_64-unknown-none/$(PROFILE)/ginux-graphics-service-runtime
-INITRAMFS := build/initramfs-v0.cpio
-SYSTEM_PROFILE := profiles/minimal-system-v0/profile.tsv
+X86_TARGET := x86_64-unknown-linux-gnu
+BUILD_DIR := build
+GINUX := target/$(X86_TARGET)/release/ginux
+PAYLOAD := target/$(X86_TARGET)/release/managed-payload
+BASELINE := target/$(X86_TARGET)/release/baseline-runner
+RUNTIME_FIXTURE := target/$(X86_TARGET)/release/runtime-fixture
+PROCESS_NATIVE_FIXTURE := target/$(X86_TARGET)/release/process-native-fixture
 
-.DEFAULT_GOAL := help
-
-.PHONY: help doctor manifest system-image test-alpine test-rocky-shell test-rocky-dnf test-multi-domain test-linux-abi test-linux-runtime test-storage test-oci-cache test-smp test-rocky-smp-futex test-rocky-smp-shared-page test-rocky-smp-thread-context probe-rocky-systemd test-rocky-systemd test-rocky-detached test-domain-responsiveness test-controller-graphics-runtime test-controller-display-input test-native-display-protocol test-controller-seat-leases test-native-windowing test-native-windowing-screenshots test-graphical-controller test-controller-console test-domain-display-bridge test-linux-wayland-domain test-domain-desktop-experience test-controller-desktop-recovery test-controller-desktop-stress test-controller-desktop-visible test-controller-desktop-latency test-controller-desktop-all test-controller-desktop-performance run-gui benchmark-rocky-systemd benchmark-prepare-linux benchmark-prepare-ginux benchmark-linux-comparison benchmark-ginux-boot benchmark-boot-comparison benchmark-ginux-sysbench benchmark-compare benchmark-topology-matrix benchmark-topology-compare profile-rocky-systemd rocky-image rocky-image-check linux-probe controller-runtime network-service protocol-service graphics-service volume-service abi-conformance architecture-check linux-compat-check build build-verification build-linux-profile run reset-storage test test-qemu-smoke test-efi-load-above-4g test-c1 test-c2 fmt gate clean
-
-help:
-	@echo "Ginux development targets"
-	@echo
-	@echo "  make doctor  Check the local development prerequisites"
-	@echo "  make manifest Regenerate the signed development boot inputs"
-	@echo "  make system-image Build the pinned minimal system-container candidate"
-	@echo "  make test-alpine Download Alpine at runtime and verify its real shell in QEMU"
-	@echo "  make test-rocky-shell Download Rocky at runtime and verify its glibc shell in QEMU"
-	@echo "  make test-rocky-dnf   Download Rocky and verify a real dnf update in QEMU"
-	@echo "  make test-multi-domain Run concurrent Alpine and Rocky domains in QEMU"
-	@echo "  make probe-rocky-systemd Probe Rocky systemd and verify the documented next blocker"
-	@echo "  make test-rocky-systemd  Verify cold and cached warm Rocky systemd login boots"
-	@echo "  make test-rocky-detached Verify detached Rocky start returns to the controller"
-	@echo "  make test-domain-responsiveness Verify controller latency under detached Linux work"
-	@echo "  make benchmark-rocky-systemd Benchmark warm Rocky init (3 s gate on KVM)"
-	@echo "  make benchmark-boot-comparison Compare matched QEMU-to-multi-user boot times"
-	@echo "  make benchmark-prepare-linux Prepare the pinned Rocky Linux comparison image"
-	@echo "  make benchmark-linux-comparison Run Rocky Linux boot and sysbench measurements"
-	@echo "  make benchmark-prepare-ginux Build and seed the matched Ginux sysbench image"
-	@echo "  make benchmark-ginux-sysbench Run the matching workload under Ginux"
-	@echo "  make benchmark-compare Verify matched benchmark inputs and show result paths"
-	@echo "  make benchmark-topology-matrix Compare Linux/Ginux at 1, 2, and 4 vCPUs"
-	@echo "  make profile-rocky-systemd   Profile Rocky init inside the Ginux kernel"
-	@echo "  make rocky-image Fetch and export the pinned Rocky 10 x86-64 system image"
-	@echo "  make rocky-image-check Verify the prepared Rocky image without downloading"
-	@echo "  make linux-probe Build the static probe and dynamic Linux ELF fixtures"
-	@echo "  make controller-runtime Build the embedded Linux-ABI ring-3 controller"
-	@echo "  make network-service Build the freestanding isolated network service"
-	@echo "  make protocol-service Build the freestanding isolated protocol service"
-	@echo "  make graphics-service Build the freestanding graphical controller service"
-	@echo "  make volume-service Build the freestanding isolated volume service"
-	@echo "  make abi-conformance Compile the public native ABI as freestanding C"
-	@echo "  make architecture-check Check architecture and roadmap consistency"
-	@echo "  make linux-compat-check Validate the Linux syscall compatibility ledger"
-	@echo "  make test-linux-abi     Run the complete controller Linux ABI report"
-	@echo "  make test-linux-runtime Verify ELF, loader, PIE, TLS, heap, and memory behavior"
-	@echo "  make build   Build the x86-64 UEFI image"
-	@echo "  make run     Build Ginux and boot it in headless QEMU"
-	@echo "  make reset-storage Delete the default persistent volume"
-	@echo "  make test-storage Verify fresh, recovered, and reset persistent boots"
-	@echo "  make test-oci-cache Verify OCI layers are reused after reboot"
-	@echo "  make test    Build and verify the automated QEMU boot test"
-	@echo "  make test-qemu-smoke Boot the normal image once and verify core integration"
-	@echo "  make test-efi-load-above-4g Verify the EFI image is relocated below 4 GiB at 8 GiB RAM"
-	@echo "  make test-smp Qualify 1/2/4 CPUs and repeat the two-CPU stress run"
-	@echo "  make test-rocky-smp-futex Verify two-CPU private-futex compatibility"
-	@echo "  make test-rocky-smp-shared-page Verify 2/4-vCPU shared writable pages"
-	@echo "  make test-rocky-smp-thread-context Verify 2/4-vCPU thread context integrity"
-	@echo "  make test-controller-desktop-all Qualify the complete native desktop path"
-	@echo "  make test-controller-desktop-performance Measure desktop responsiveness budgets"
-	@echo "  make test-controller-desktop-visible Verify pixels from a running QEMU framebuffer"
-	@echo "  make test-controller-desktop-latency Verify real QEMU interaction latency"
-	@echo "  make run-gui                 Open the native controller GUI in QEMU"
-	@echo "  make test-c1 Build and verify the interactive controller console"
-	@echo "  make test-c2 Verify configured domain lifecycle management"
-	@echo "  make check   Run formatting and lint checks"
-	@echo "  make fmt     Format Rust sources"
-	@echo "  make gate    Run the clean reproducible build and QEMU test gate"
-	@echo "  make clean   Remove generated build artifacts"
+.PHONY: doctor host-image-fetch host-image-verify host-boot-test image-helper-fetch image-prepare domain-image-fetch domain-image-verify domain-image-prepare test-image test-oci-image test-oci-layers test-vfs test-native-vfs image-cache-clean build check-name check test test-unit test-intercept test-runtime test-config test-domain test-process test-devices test-kernel-views test-cgroup test-block test-network bench-baseline bench-block bench-network demo-gate-1 demo-gate-2 demo-gate-3 demo-gate-4 demo-gate-5 demo-gate-6 demo-gate-7 demo-gate-8 clean
 
 doctor:
-	@tools/qemu/doctor.sh
-
-manifest: linux-probe controller-runtime network-service protocol-service graphics-service volume-service
-	@mkdir -p "$(dir $(INITRAMFS))"
-	@cargo run --quiet --package ginux-manifest-tool -- boot/manifest-v0.conf control-plane/bootstrap.hex "$(INITRAMFS)" "$(LINUX_DYNAMIC_DIR)" "$(CONTROLLER_RUNTIME)" "$(NETWORK_SERVICE)" "$(PROTOCOL_SERVICE)" "$(VOLUME_SERVICE)" "$(GRAPHICS_SERVICE)" "$(SYSTEM_PROFILE)" boot/efi/src/generated_boot.rs
-	@test -s "$(INITRAMFS)"
-
-system-image: manifest
-	@echo "Built $(INITRAMFS) from $(SYSTEM_PROFILE)"
-
-rocky-image:
-	@tools/images/prepare-rocky.sh fetch
-
-rocky-image-check:
-	@tools/images/prepare-rocky.sh check
-
-linux-probe:
-	@mkdir -p "$(dir $(LINUX_PROBE))"
-	@GINUX_LINUX_PROBE_EXPORT="$(abspath $(LINUX_PROBE))" GINUX_LINUX_DYNAMIC_EXPORT_DIR="$(abspath $(LINUX_DYNAMIC_DIR))" cargo build --package ginux-kernel --target $(TARGET) $(CARGO_PROFILE_FLAG)
-	@test -f "$(LINUX_PROBE)"
-	@test -f "$(LINUX_DYNAMIC_DIR)/linux-linked-main.elf"
-	@test -f "$(LINUX_DYNAMIC_DIR)/linux-linked-graph-main.elf"
-	@test -f "$(LINUX_DYNAMIC_DIR)/libginux.so"
-	@test -f "$(LINUX_DYNAMIC_DIR)/libginux-aux.so"
-	@test -f "$(LINUX_DYNAMIC_DIR)/ld-ginux.so"
-	@test -f "$(LINUX_DYNAMIC_DIR)/linux-exec-second.elf"
-	@test -f "$(LINUX_DYNAMIC_DIR)/linux-signal-probe.elf"
-	@test -f "$(LINUX_DYNAMIC_DIR)/linux-conformance.elf"
-	@test -f "$(LINUX_DYNAMIC_DIR)/linux-system-init.elf"
-	@echo "Built $(LINUX_PROBE) and $(LINUX_DYNAMIC_DIR)"
-
-volume-service:
-	@cargo build --package ginux-volume-service-runtime --target x86_64-unknown-none $(CARGO_PROFILE_FLAG)
-	@test -f "$(VOLUME_SERVICE)"
-	@echo "Built $(VOLUME_SERVICE)"
-
-controller-runtime:
-	@cargo build --package ginux-controller-runtime --target x86_64-unknown-none $(CARGO_PROFILE_FLAG)
-	@test -f "$(CONTROLLER_RUNTIME)"
-	@echo "Built $(CONTROLLER_RUNTIME)"
-
-network-service:
-	@cargo build --package ginux-network-service-runtime --target x86_64-unknown-none $(CARGO_PROFILE_FLAG)
-	@test -f "$(NETWORK_SERVICE)"
-	@echo "Built $(NETWORK_SERVICE)"
-
-protocol-service:
-	@cargo build --package ginux-protocol-service-runtime --target x86_64-unknown-none $(CARGO_PROFILE_FLAG)
-	@test -f "$(PROTOCOL_SERVICE)"
-	@echo "Built $(PROTOCOL_SERVICE)"
-
-graphics-service:
-	@cargo build --package ginux-graphics-service-runtime --target x86_64-unknown-none $(CARGO_PROFILE_FLAG)
-	@test -f "$(GRAPHICS_SERVICE)"
-	@echo "Built $(GRAPHICS_SERVICE)"
-
-abi-conformance:
-	@clang -target x86_64-none-elf -std=c11 -ffreestanding -fsyntax-only \
-		-Wall -Wextra -Werror -I. tests/abi/native-service-v0.c
-	@echo "Native service ABI C conformance passed"
-
-build: manifest
-	@echo "Building Ginux for $(TARGET) ($(PROFILE))"
-	@GINUX_LINUX_PROBE_EXPORT="$(abspath $(LINUX_PROBE))" GINUX_LINUX_DYNAMIC_EXPORT_DIR="$(abspath $(LINUX_DYNAMIC_DIR))" cargo build --package ginux-boot --target $(TARGET) $(CARGO_PROFILE_FLAG)
-	@mkdir -p "$(dir $(EFI_DESTINATION))"
-	@cp "$(EFI_SOURCE)" "$(EFI_DESTINATION)"
-	@echo "Built $(EFI_DESTINATION)"
-
-build-verification: manifest
-	@echo "Building Ginux verification boot for $(TARGET) ($(PROFILE))"
-	@GINUX_LINUX_PROBE_EXPORT="$(abspath $(LINUX_PROBE))" GINUX_LINUX_DYNAMIC_EXPORT_DIR="$(abspath $(LINUX_DYNAMIC_DIR))" cargo build --package ginux-boot --features verification-boot --target $(TARGET) $(CARGO_PROFILE_FLAG)
-	@mkdir -p "$(dir $(EFI_DESTINATION))"
-	@cp "$(EFI_SOURCE)" "$(EFI_DESTINATION)"
-	@echo "Built verification image $(EFI_DESTINATION)"
-
-build-linux-profile: manifest
-	@echo "Building Ginux Linux boot profiler for $(TARGET) ($(PROFILE))"
-	@GINUX_LINUX_PROBE_EXPORT="$(abspath $(LINUX_PROBE))" GINUX_LINUX_DYNAMIC_EXPORT_DIR="$(abspath $(LINUX_DYNAMIC_DIR))" cargo build --package ginux-boot --features linux-boot-profile --target $(TARGET) $(CARGO_PROFILE_FLAG)
-	@mkdir -p "$(dir $(EFI_DESTINATION))"
-	@cp "$(EFI_SOURCE)" "$(EFI_DESTINATION)"
-	@echo "Built profiling image $(EFI_DESTINATION)"
-
-test-alpine: build
-	@tests/qemu/alpine-shell.sh
-
-test-rocky-shell: build
-	@tests/qemu/rocky-shell.sh
-
-test-rocky-dnf: build
-	@tests/qemu/rocky-dnf.sh
-
-test-multi-domain: build
-	@tests/qemu/multi-domain.sh
-
-probe-rocky-systemd: build
-	@tests/qemu/rocky-systemd.sh
-
-test-rocky-systemd: build
-	@tests/qemu/rocky-systemd.sh
-	@GINUX_REQUIRE_OCI_CACHE_HIT=1 tests/qemu/rocky-systemd.sh
-	@GINUX_ROCKY_START_MODE=detached-return GINUX_REQUIRE_OCI_CACHE_HIT=1 tests/qemu/rocky-systemd.sh
+	@./scripts/doctor.sh
+
+host-image-fetch:
+	@./scripts/fetch-rocky-host.sh
+
+host-image-verify:
+	@./scripts/verify-rocky-host.sh
+
+host-boot-test: build
+	@./scripts/with-rocky-host.sh ./scripts/check-rocky-host.sh
+
+image-helper-fetch:
+	@./scripts/fetch-rocky-domain-helper.sh
+
+image-prepare:
+	@./scripts/prepare-rocky-domain.sh
 
-test-rocky-detached: build
-	@GINUX_ROCKY_START_MODE=detached-return GINUX_REQUIRE_OCI_CACHE_HIT=1 tests/qemu/rocky-systemd.sh
+domain-image-fetch:
+	@./scripts/fetch-rocky-oci.sh
 
-test-domain-responsiveness: build
-	@GINUX_ROCKY_START_MODE=responsive GINUX_REQUIRE_OCI_CACHE_HIT=1 tests/qemu/rocky-systemd.sh
+domain-image-verify:
+	@./scripts/verify-rocky-oci.sh
 
-benchmark-rocky-systemd: build
-	@accelerator="$${QEMU_ACCEL:-$$(source tools/qemu/common.sh; default_accelerator)}"; \
-	if [[ "$$accelerator" == kvm ]]; then budget=3000; else budget=; fi; \
-	echo "Benchmarking Rocky systemd with QEMU/$$accelerator$${budget:+ (budget: $${budget} ms)}"; \
-	GINUX_VERIFY_LOGIN_SHELL=1 GINUX_REQUIRE_OCI_CACHE_HIT=1 \
-	GINUX_MAX_LINUX_INIT_MS="$$budget" tests/qemu/rocky-systemd.sh
+domain-image-prepare:
+	@./scripts/prepare-rocky-oci.sh
 
-benchmark-prepare-linux:
-	@tools/benchmarks/prepare-rocky-linux.sh
+test-image:
+	@./scripts/test-rocky-domain.sh
 
-benchmark-linux-comparison:
-	@tools/benchmarks/run-rocky-linux.sh
+test-oci-image:
+	@./scripts/test-rocky-oci.sh
 
-benchmark-prepare-ginux:
-	@tools/benchmarks/prepare-ginux-sysbench.sh
+test-oci-layers:
+	@./scripts/test-oci-layers.sh
 
-benchmark-ginux-boot: build
-	@tools/benchmarks/run-ginux-boot.sh
+image-cache-clean:
+	rm -rf build/cache/domain
 
-benchmark-boot-comparison: build benchmark-prepare-linux
-	@BENCHMARK_BOOT_ONLY=1 tools/benchmarks/run-rocky-linux.sh
-	@tools/benchmarks/run-ginux-boot.sh
-	@tools/benchmarks/summarize-boot.sh
+build:
+	cargo build -p ginux-init --target $(X86_TARGET) --release
+	cargo build -p managed-payload --target $(X86_TARGET) --release
+	cargo build -p baseline-runner --target $(X86_TARGET) --release
+	cargo build -p runtime-fixture --target $(X86_TARGET) --release
+	cargo build -p process-native-fixture --target $(X86_TARGET) --release
 
-benchmark-ginux-sysbench: build
-	@tools/benchmarks/run-ginux.sh
+check-name:
+	@./scripts/check-name.sh
 
-benchmark-compare:
-	@tools/benchmarks/compare.sh
+check: check-name
+	cargo fmt --check
+	cargo clippy -p ginux-core --all-targets -- -D warnings
+	cargo clippy -p ginux-domain --all-targets -- -D warnings
+	cargo clippy -p ginux-devices --all-targets -- -D warnings
+	cargo clippy -p ginux-init --bin ginux --target $(X86_TARGET) --release -- -D warnings
+	cargo clippy -p ginux-kernel-views --all-targets -- -D warnings
+	cargo clippy -p ginux-process --all-targets -- -D warnings
+	cargo clippy -p managed-payload --bin managed-payload --target $(X86_TARGET) --release -- -D warnings
+	cargo clippy -p baseline-runner --bin baseline-runner --target $(X86_TARGET) --release -- -D warnings
+	cargo clippy -p ginux-runtime --all-targets -- -D warnings
+	cargo clippy -p ginux-vfs --all-targets -- -D warnings
+	cargo clippy -p ginux-vfs-index --all-targets -- -D warnings
+	cargo clippy -p runtime-fixture --bin runtime-fixture --target $(X86_TARGET) --release -- -D warnings
+	cargo clippy -p process-native-fixture --bin process-native-fixture --target $(X86_TARGET) --release -- -D warnings
 
-benchmark-topology-matrix: build
-	@tools/benchmarks/run-topology-matrix.sh
+test-unit:
+	cargo test -p ginux-core
+	cargo test -p ginux-domain
+	cargo test -p ginux-devices
+	cargo test -p ginux-runtime
+	cargo test -p ginux-process
+	cargo test -p ginux-vfs
+	cargo test -p ginux-kernel-views
 
-benchmark-topology-compare:
-	@tools/benchmarks/summarize-topology-matrix.py
+test-intercept: build
+	@./scripts/with-rocky-host.sh ./scripts/test-intercept.sh
 
-profile-rocky-systemd: build-linux-profile
-	@GINUX_REQUIRE_OCI_CACHE_HIT=1 tests/qemu/rocky-systemd.sh
+test-runtime: build
+	@./scripts/with-rocky-host.sh ./scripts/test-runtime.sh
 
-run: build
-	@tools/qemu/run.sh
+test-config: build
+	@./scripts/with-rocky-host.sh ./scripts/test-config.sh
 
-reset-storage:
-	@rm -f build/qemu/volume.raw
-	@echo "Removed build/qemu/volume.raw; the next make run starts clean."
+test-domain: build
+	@./scripts/with-rocky-host.sh ./scripts/test-domain.sh
 
-test-storage: build
-	@tests/qemu/persistent-storage.sh
+test-process: build
+	cargo test -p ginux-process
+	@./scripts/with-rocky-host.sh ./scripts/test-process.sh
 
-test-oci-cache: build
-	@tests/qemu/oci-cache.sh
+test-devices: build
+	cargo test -p ginux-devices registry
+	cargo test -p ginux-devices pseudo_devices
+	cargo test -p ginux-devices conflicts_ioctls
+	@./scripts/with-rocky-host.sh ./scripts/test-devices.sh
 
-test: build-verification
-	@tests/qemu/boot.sh
+test-kernel-views:
+	cargo test -p ginux-kernel-views
+	@./scripts/with-rocky-host.sh ./scripts/test-kernel-views.sh
 
-test-controller-graphics-runtime: build-verification
-	@tests/qemu/boot.sh
+test-cgroup:
+	cargo test -p ginux-kernel-views cgroup::
 
-test-controller-display-input: build-verification
-	@tests/qemu/boot.sh
+test-block:
+	cargo test -p ginux-devices block_
 
-test-native-display-protocol: build-verification
-	@cargo test --package ginux-display-protocol
-	@tests/qemu/boot.sh
+test-network:
+	cargo test -p ginux-devices network_
 
-test-controller-seat-leases: build-verification
-	@cargo test --package ginux-display-protocol
-	@tests/qemu/boot.sh
+test-vfs: build domain-image-prepare
+	@./scripts/with-rocky-host.sh ./scripts/test-vfs.sh
 
-test-native-windowing: build-verification
-	@cargo test --package ginux-windowing
-	@tests/qemu/boot.sh
+test-native-vfs: build domain-image-prepare
+	@./scripts/with-rocky-host.sh ./scripts/test-native-vfs.sh
 
-test-native-windowing-screenshots:
-	@cargo test --package ginux-windowing deterministic_screenshot_matches_exact_fixture
+test: check test-unit test-intercept test-runtime test-config test-domain test-image test-devices test-process test-kernel-views
 
-test-graphical-controller: build-verification
-	@cargo test --package ginux-controller-ui
-	@tests/qemu/boot.sh
+bench-baseline: build
+	@./scripts/with-rocky-host.sh ./scripts/bench-baseline.sh
 
-test-controller-console: test-c1
+bench-block: build
+	@./scripts/with-rocky-host.sh ./scripts/bench-devices.sh block
 
-test-domain-display-bridge: build-verification
-	@cargo test --package ginux-domain-display
-	@tests/qemu/boot.sh
+bench-network: build
+	@./scripts/with-rocky-host.sh ./scripts/bench-devices.sh network
 
-test-linux-wayland-domain: build-verification
-	@cargo test --package ginux-wayland-domain
-	@tests/qemu/boot.sh
+demo-gate-1: doctor build
+	@./scripts/with-rocky-host.sh ./scripts/demo-gate-1.sh
 
-test-domain-desktop-experience: build-verification
-	@cargo test --package ginux-domain-presentation
-	@tests/qemu/boot.sh
+demo-gate-2: doctor
+	@./scripts/demo-gate-2.sh
 
-test-controller-desktop-recovery: build-verification
-	@cargo test --package ginux-desktop-recovery
-	@tests/qemu/boot.sh
+demo-gate-3: doctor build
+	@./scripts/with-rocky-host.sh ./scripts/demo-gate-3.sh
 
-test-controller-desktop-stress: build-verification
-	@cargo test --package ginux-desktop-recovery repeated_multi_component_lifecycle_has_constant_resource_bounds
-	@GINUX_DESKTOP_STRESS_RUNS=2 tests/qemu/controller-desktop-stress.sh
+demo-gate-4: doctor build
+	@./scripts/with-rocky-host.sh ./scripts/demo-gate-4.sh
 
-test-controller-desktop-visible: build
+demo-gate-5: doctor build domain-image-prepare
+	@./scripts/with-rocky-host.sh ./scripts/demo-gate-5.sh
 
-	@tests/qemu/controller-desktop-visible.sh
-
-test-controller-desktop-latency: test-controller-desktop-visible
-	@test -s build/qualification/controller-desktop/latency-summary.txt
-
-test-controller-desktop-all: build-verification
-	@cargo test --package ginux-display-protocol
-	@cargo test --package ginux-windowing
-	@cargo test --package ginux-controller-ui
-	@cargo test --package ginux-domain-display
-	@cargo test --package ginux-wayland-domain
-	@cargo test --package ginux-domain-presentation
-	@cargo test --package ginux-desktop-recovery
-	@tests/qemu/boot.sh
-	@GINUX_DESKTOP_STRESS_RUNS=1 tests/qemu/controller-desktop-stress.sh
-	@$(MAKE) test-controller-desktop-visible
-
-test-controller-desktop-performance:
-	@mkdir -p build/qualification
-	@cargo run --quiet --release --package ginux-desktop-qualification | tee build/qualification/controller-desktop-performance.txt
-
-run-gui: build
-	@GINUX_QEMU_DISPLAY="$${GINUX_QEMU_DISPLAY:-cocoa}" tools/qemu/run.sh
-
-test-qemu-smoke: build
-	@tests/qemu/smoke.sh
-
-test-efi-load-above-4g: build
-	@tests/qemu/efi-load-above-4g.sh
-
-test-smp: build-verification
-	@tests/qemu/smp-matrix.sh
-
-test-rocky-smp-futex: build
-	@tests/qemu/rocky-smp-futex.sh
-
-test-rocky-smp-shared-page: build
-	@tests/qemu/rocky-smp-shared-page.sh
-
-test-rocky-smp-thread-context: build
-	@tests/qemu/rocky-smp-thread-context.sh
-
-test-linux-runtime: test
-
-test-c1: build
-	@tests/qemu/controller-console.sh
-
-test-c2: test-c1
-	@tests/config/container-config.sh
-
-architecture-check:
-	@bash tools/architecture/check.sh
-
-linux-compat-check:
-	@bash tools/architecture/check-linux-compat.sh
-
-test-linux-abi: build
-	@tests/qemu/linux-abi-report.sh
-
-.PHONY: check-pe check-scheduler check-file-lock
-check-scheduler:
-	@mkdir -p build
-	@rustc --edition=2021 --test -D warnings tests/host/scheduler.rs -o build/scheduler-tests
-	@build/scheduler-tests
-
-check-pe:
-	@mkdir -p build
-	@rustc --edition=2021 --test -D warnings kernel/src/pe.rs -o build/pe-tests
-	@build/pe-tests
-
-check-file-lock:
-	@mkdir -p build
-	@rustc --edition=2021 --test -D warnings kernel/src/linux_file_lock.rs -o build/file-lock-tests
-	@build/file-lock-tests
-
-check: manifest architecture-check linux-compat-check
-	@$(MAKE) abi-conformance
-	@cargo fmt --all -- --check
-	@$(MAKE) check-pe
-	@$(MAKE) check-file-lock
-	@$(MAKE) check-scheduler
-	@cargo clippy --package ginux-boot --target $(TARGET) -- -D warnings
-	@cargo clippy --package ginux-kernel --target x86_64-unknown-none -- -D warnings
-	@cargo clippy --package ginux-native-abi -- -D warnings
-	@cargo test --package ginux-native-abi
-	@cargo clippy --package ginux-kernel-policy -- -D warnings
-	@cargo test --package ginux-kernel-policy
-	@cargo clippy --package ginux-command -- -D warnings
-	@cargo test --package ginux-command
-	@cargo clippy --package ginux-oci -- -D warnings
-	@cargo test --package ginux-oci
-	@cargo test --release --package ginux-oci release_profile_traps_size_overflow
-	@cargo clippy --package ginux-oci-cache -- -D warnings
-	@cargo test --package ginux-oci-cache
-	@cargo clippy --package ginux-image-store -- -D warnings
-	@cargo test --package ginux-image-store
-	@cargo clippy --package ginux-runtime-memory -- -D warnings
-	@cargo test --package ginux-runtime-memory
-	@cargo clippy --package ginux-controller-runtime --target x86_64-unknown-none -- -D warnings
-	@cargo clippy --package ginux-protocol-state -- -D warnings
-	@cargo test --package ginux-protocol-state
-	@cargo clippy --package ginux-volume-format -- -D warnings
-	@cargo test --package ginux-volume-format
-	@cargo clippy --package ginux-volume-service -- -D warnings
-	@cargo test --package ginux-volume-service
-	@cargo clippy --package ginux-network-service-runtime --target x86_64-unknown-none -- -D warnings
-	@cargo clippy --package ginux-protocol-service-runtime --target x86_64-unknown-none -- -D warnings
-	@cargo clippy --package ginux-graphics-service-runtime --target x86_64-unknown-none -- -D warnings
-	@cargo clippy --package ginux-volume-service-runtime --target x86_64-unknown-none -- -D warnings
-	@cargo clippy --package ginux-manifest-tool -- -D warnings
-
-fmt: manifest
-	@cargo fmt --all
-
-gate:
-	@$(MAKE) fmt
-	@$(MAKE) clean
-	@$(MAKE) check
-	@$(MAKE) test-c2
-	@$(MAKE) test
-	@git diff --check
-	@echo "Clean build and QEMU test gate passed"
+demo-gate-6: doctor build
+	@./scripts/with-rocky-host.sh ./scripts/demo-gate-6.sh
+
+demo-gate-7: doctor build
+	@./scripts/with-rocky-host.sh ./scripts/demo-gate-7.sh
+
+demo-gate-8: doctor build
+	@./scripts/with-rocky-host.sh ./scripts/demo-gate-8.sh
 
 clean:
-	@cargo clean
-	@rm -rf build
-	@echo "Removed generated build artifacts"
+	cargo clean
+	@./scripts/clean-build.sh

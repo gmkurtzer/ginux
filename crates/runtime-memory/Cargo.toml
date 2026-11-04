@@ -1,8 +1,0 @@
-[package]
-name = "ginux-runtime-memory"
-version = "0.1.0"
-edition = "2021"
-license.workspace = true
-publish = false
-
-[dependencies]

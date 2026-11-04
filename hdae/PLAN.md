@@ -1,56 +1,155 @@
-# Native Controller Desktop Plan
+# Ginux HDAE Plan
 
-## Delivery strategy
+## Strategy
 
-- Working branch: `codex/controller-desktop`
-- Intended base: `main`
-- Pull request: one integrated pull request for Gates 19–31
-- Origin: design discussion prompted by GitHub issue #12; no contributor code is
-  merged by this plan
-- Commit policy: signed, coherent commits at gate boundaries where practical
-- Push policy: no push without current user authorization
+Build Ginux from the security boundary outward. First prove that unmodified
+x86-64 code can run without unmediated host-syscall effects. Then add a cached
+Rocky userspace, domain configuration, Linux runtime behavior, virtual kernel
+objects, systemd compatibility, explicit contract controls, performance
+evidence, and boundary hardening.
 
-The single-PR exception is deliberate: the native display protocol, compositor,
-window system, controller application, domain bridge, and Linux presentation
-path form one vertical feature and cannot be reviewed honestly as independent
-product deliveries.
+Every implementation gate uses a dedicated `hdae/<gate-slug>` branch based on
+`main` and is intended for its own pull request. Local commits must be signed
+off. The human authorized pushing each dedicated gate branch and opening its
+pull request on 2026-11-03. This does not authorize pushing directly to `main`,
+merging, or closing a pull request.
 
-## Gate sequence
+The human authorized the twelve remaining gates (positions 1 through 11 and
+13) as one ordered batch on 2026-11-03. Position 12 was removed at the human's
+direction because a public-exploit reproduction is not required for this
+constructive project. All twelve gates remain human checkpoints: after each
+gate passes, update the evidence, push its dedicated branch, open or update its
+pull request, run the human demonstration, and stop for acceptance before
+advancing. Batch authorization does not permit advancing past an unaccepted
+checkpoint, weakening criteria, expanding scope, or resolving a material
+architecture decision silently.
 
-| Gate | Purpose | Depends on | Review |
-|---:|---|---|---|
-| 19 | Fix controller desktop architecture and trust model | Existing kernel/controller baseline | Accepted |
-| 20 | Establish a graphical ring-3 controller runtime | 19 | Delegated |
-| 21 | Add framebuffer and input device support | 20 | Delegated |
-| 22 | Implement the native display protocol | 20, 21 | Delegated |
-| 23 | Implement seats, focus, and resource leases | 22 | Delegated |
-| 24 | Build the native windowing system and toolkit | 23 | Delegated |
-| 25 | Build the graphical controller application | 24 | Delegated |
-| 26 | Bridge virtual display and input into domains | 23 | Delegated |
-| 27 | Run a minimal Wayland environment in a Linux domain | 26 | Delegated |
-| 28 | Deliver windowed and full-screen domain presentation | 24, 25, 27 | Delegated |
-| 29 | Harden lifecycle and failure recovery | 28 | Delegated |
-| 30 | Qualify performance, isolation, UX, and documentation | 29 | Delegated batch end |
-| 31 | Refine and qualify native visual design and interaction | 30 | Accepted |
+Every gate must provide a working human demonstration through
+`make demo-gate-N`, where `N` is the gate position. The target must document
+prerequisites, state what the human should observe, return nonzero when its
+machine-checkable checks fail, and clean up or provide an explicit cleanup
+target. A demonstration supplements automated acceptance evidence; it does not
+replace it.
 
-## Execution policy
+## Ordered gate map
 
-The human accepted Gate 19 and then delegated continuous execution and closure
-of Gates 20–30 on 2026-10-31. Gate 31 was added as a human visual checkpoint and
-accepted on 2026-11-01 after all objective evidence passed. A gate closes only
-after every criterion has fresh evidence. Stop for a clarification that
-materially affects behavior, a failed dependency with no safe in-scope path,
-changed architecture, scope expansion, or a new consequential security
-decision.
+1. **Rocky host foundation and interception proof**: boot a normal Rocky Linux
+   10 host under QEMU TCG, run Ginux as an ordinary process, and prove matched
+   syscall interception and benchmark controls without replacing host systemd.
+2. **Rocky image-pipeline foundation**: reproducibly extract and verify Rocky
+   filesystem content as pipeline evidence and fixtures. Gate 5 supersedes its
+   cloud-image-derived domain root with the approved OCI domain-image path.
+3. **Execution kernel**: address spaces, ELF loading, syscall ABI, central
+   dispatch, and small unmodified programs.
+4. **Domain configuration and lifecycle**: versioned configuration,
+   normalization, create/start/inspect/stop, resources, and failure behavior.
+5. **OCI-backed virtual VFS and native dynamic userspace**: explicit OCI
+   acquisition, verified cached layers, virtual descriptors, immutable root and
+   writable overlay, and a Rocky shell executed with the balanced profile under
+   continuous ptrace syscall-entry/exit supervision.
+6. **Device ownership and virtual hardware**: virtual `/dev`, console, block
+   or bounded partition, virtual networking, exclusivity, revocation, and
+   device-path benchmarks.
+7. **Process runtime**: process, thread, signal, synchronization, time,
+   credential, and event behavior required by systemd.
+7.5. **Transitional project rename**: complete the first active-project rename,
+   select `ginux` as the command, preserve locked historical lineage records,
+   and rerun Gate 7 before human acceptance.
+7.75. **Ginux final project rename**: rename active product and repository
+   surfaces to Ginux while retaining the transitional checkout until the
+   unified repository transition.
+8. **Virtual kernel views**: Ginux-owned `/proc`, `/sys`, cgroup v2, mounts,
+   namespaces, and machine identity without host leakage.
+8.5. **Unified repository transition**: preserve the final standalone kernel
+   as `bootable-kernel`, join its history to the accepted userspace-kernel
+   lineage, and deliver the userspace tree through a pull request to Ginux
+   `main`.
+9. **Systemd baseline**: Rocky systemd as virtual PID 1 reaching a usable
+   multi-user login, virtual PID and lockdown inspection, a bounded DNF update
+   workflow, and controlled shutdown.
+10. **Configurable contract and audit**: versioned syscall, ioctl, device,
+    filesystem, and kernel-view policy with fail-closed validation and logs.
+11. **Performance characterization and optimization**: native, conventional
+    container, and Ginux comparisons against approved budgets.
+13. **Boundary hardening**: malformed ABI tests, fuzzing, escape attempts,
+    Ginux privilege reduction, recovery, performance regression, and explicit
+    limitations.
 
-## Coverage
+Gates are stored in `hdae/gates-todo/` and remain there until they pass and are
+accepted at their checkpoint. Closed gate records move unchanged to
+`hdae/gates-done/`. Intentionally postponed gates move to
+`hdae/gates-deferred/` only with a recorded reason and return condition.
 
-- Function and failure paths: Gates 20–29.
-- Deterministic tests and regressions: every gate, consolidated by Gate 30.
-- Operator and developer workflows: Gates 24, 25, 28, and 30.
-- Documentation and examples: Gates 19 and 30.
-- Compatibility: Gate 27; broader desktop environments are explicitly deferred.
-- Persistence and migration: no persistent desktop state in this iteration.
-- Recovery and maintenance: Gate 29.
-- Performance and security boundaries: Gates 19, 23, 29, and 30.
-- Privacy: not applicable beyond preventing cross-domain display/input leakage.
+## Build and verification interface
+
+Gate 1 establishes the top-level Makefile. Later gates add stable targets while
+preserving these rules:
+
+- `make test` is deterministic and requires no network access.
+- Only an explicit acquisition target such as `make image-fetch` may download
+  external content.
+- Cached images and generated benchmark data stay out of Git unless a small,
+  reviewed fixture or report is intentionally committed.
+- Each target returns nonzero when mandatory verification fails.
+- Aggregate targets never hide a failing mandatory subtarget.
+- Benchmark controls run inside the same emulated x86-64 environment as Ginux
+  unless a gate explicitly documents a non-comparable host measurement.
+
+Planned public targets are:
+
+```text
+make doctor
+make build
+make check
+make test
+make test-unit
+make test-intercept
+make image-fetch
+make image-verify
+make image-prepare
+make test-image
+make test-runtime
+make test-config
+make test-domain
+make test-vfs
+make test-process
+make test-devices
+make test-block
+make test-network
+make test-kernel-views
+make test-cgroup
+make test-systemd
+make test-contract
+make test-security
+make test-recovery
+make bench-baseline
+make bench
+make bench-compare
+make bench-block
+make bench-network
+make bench-report
+make demo-gate-N
+```
+
+Targets become mandatory only in the gate that introduces them. Gate records
+define their expected result.
+
+## Traceability
+
+- Kernel-exposure control is proven by Gates 1, 3, 10, and 13.
+- General systemd compatibility is built by Gates 2, 3, 5, 7, 8, and 9.
+- Per-domain configuration and ownership are built by Gates 4, 6, 8, and 10.
+- Device mediation is built and measured by Gates 6, 10, 11, and 13.
+- Performance is measured from Gate 1 and judged in Gates 9, 11, and 13.
+- Reproducibility and offline testing are established by Gates 1 and 2 and
+  remain regression criteria for every later gate.
+
+## Deferred roadmap
+
+After the initial twelve gates, Gate 14 preserves the Unicorn Engine execution
+backend as a concrete alternative to native ptrace execution. Other likely
+milestones include multiple concurrent
+domains, conventional containers within a domain, network and storage backend
+expansion, physical-device assignment with a separately reviewed IOMMU/VFIO
+model, non-x86 architectures, live lifecycle controls, distribution expansion,
+and production operational hardening. None is authorized by this plan.

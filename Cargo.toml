@@ -1,47 +1,24 @@
 [workspace]
 members = [
-    "boot/efi",
-    "control-plane/runtime",
-    "crates/command",
-    "crates/controller-ui",
-    "crates/desktop-recovery",
-    "crates/display-protocol",
-    "crates/domain-display",
-    "crates/domain-presentation",
-    "crates/wayland-domain",
-    "crates/windowing",
-    "crates/image-store",
-    "crates/kernel-policy",
-    "crates/native-abi",
-    "crates/oci",
-    "crates/oci-cache",
-    "crates/protocol-state",
-    "crates/runtime-memory",
-    "crates/volume-format",
-    "crates/volume-service",
-    "kernel",
-    "services/graphics",
-    "services/network",
-    "services/protocol",
-    "services/volume",
-    "tools/manifest-tool",
-    "tools/desktop-qualification",
+    "crates/baseline-runner",
+    "crates/ginux-core",
+    "crates/ginux-domain",
+    "crates/ginux-devices",
+    "crates/ginux-init",
+    "crates/ginux-kernel-views",
+    "crates/ginux-process",
+    "crates/ginux-runtime",
+    "crates/ginux-vfs",
+    "crates/ginux-vfs-index",
+    "crates/managed-payload",
+    "crates/process-native-fixture",
+    "crates/runtime-fixture",
 ]
 resolver = "2"
-
-[workspace.package]
-license = "Apache-2.0"
-
-[profile.dev]
-panic = "abort"
 
 [profile.release]
 codegen-units = 1
 lto = true
 opt-level = "s"
-overflow-checks = true
 panic = "abort"
 strip = true
-
-[profile.release.package.ginux-controller-runtime]
-opt-level = "z"

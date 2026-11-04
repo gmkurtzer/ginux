@@ -97,6 +97,17 @@ user before continuing any affected implementation, verification, acceptance,
 or gate transition; only unrelated work that cannot prejudge the answer may
 continue.
 
+When user, automation, skill, repository, or global agent instructions conflict,
+identify the conflicting sources and explain their practical effect instead of
+silently choosing one or merely stopping. Continue to obey the prevailing
+higher-priority instruction, and ask the user how they want the mutable
+lower-priority instruction resolved. When the user authorizes the correction
+and it is in scope, update the source instruction yourself and then reload the
+applicable instructions before resuming. If you cannot change it, give the user
+the exact file, setting, or policy location and the smallest clear change or
+command needed. State plainly when a system, developer, safety, permission, or
+other higher-priority constraint cannot be overridden by user guidance.
+
 ## Converge without spinning
 
 Continue the autonomous inner loop while the approved request or gate is
@@ -114,6 +125,25 @@ is disproportionate to the gate; or no credible in-scope alternative remains.
 Report the attempts, evidence, alternatives, and recommendation, and persist the
 checkpoint. Difficulty alone is not a blocker; exhaust sensible bounded
 alternatives first.
+
+## Turn discovered defects into proposed gates
+
+When execution exposes a credible defect outside the approved gate, do not
+silently fix it or stop at a vague scope question. Preserve the reproduction,
+impact, and blocking relationship in the active checkpoint, then draft the
+smallest corrective gate when the defect blocks acceptance, needs multiple
+loops, or requires durable verification. Show its proposed position and
+dependencies, goal, scope and non-goals, deterministic acceptance evidence,
+delivery strategy, and review policy. Recommend whether the active gate should
+remain blocked, be deferred, or resume after the corrective gate.
+
+Prefer a new gate so the original approval and evidence remain intact. Expand
+an existing open gate only when the human explicitly chooses that option after
+seeing the scope and verification changes; never modify a closed gate. Ask the
+human whether to create and execute the proposed corrective gate. Prior approval
+of the active gate or batch does not authorize the new work. After approval,
+create the gate, complete any remaining alignment, and execute it through the
+normal HDAE loop instead of waiting for the human to restate the bug.
 
 ## Recover context before continuing
 
@@ -144,7 +174,10 @@ Keep completed work, remaining work, criteria, verification plan, evidence,
 decisions, limitations, and review policy in that gate file. A technically
 passed gate remains in `gates-todo/` until it reaches its confirmed review
 boundary: explicit human acceptance for a checkpoint gate or automatic closure
-for a delegated gate.
+for a delegated gate. Every file in `gates-done/` is a locked historical
+record: never edit, rename, reorder, or delete it. If later work is needed,
+create a new gate. Only an explicit human direction may reopen a closed gate;
+move the unchanged file to `gates-todo/` before making any modification.
 Move a gate to `gates-deferred/` only with the reason and return condition
 recorded; move it back to `gates-todo/` when reactivated. Read the gate-ledger
 procedure and shell commands in
@@ -224,13 +257,43 @@ the choice in the gate file before implementation, including the working
 branch, intended base branch when relevant, and whether a pull request is
 intended.
 
+Work originating from an issue or pull-request review is an exception: always
+create a dedicated branch intended for a new pull request, and do not offer the
+current branch as an option. Record the originating issue or pull request in the
+gate and reference it in the new pull request. Name the branch
+`hdae/<descriptive-slug>` unless the human or repository defines another branch
+prefix. Use a closing keyword only when
+the work fully resolves an issue and the human's policy permits closure;
+otherwise use a non-closing reference. A saved automatic-management or
+proactive-remediation policy authorizes pushing the dedicated branch and
+opening or updating its pull request as routine delivery; do not ask again.
+Never push directly to the repository's default branch, including `main`, and
+never close or merge a pull request.
+
+Use one gate, one dedicated branch, and one pull request for each independently
+reviewable issue fix. Do not put unrelated gates or issues on the same branch or
+pull request. Combine related issues into one gate and pull request only when
+they share the same root cause or inseparable change and verification set;
+record that relationship and the reason separate delivery would be misleading
+or unsafe in the gate.
+
+Under an automatic-management or proactive-remediation policy, local commits
+are not delivery and do not complete the gate. Finish the loop by pushing the
+dedicated branch, opening or updating the pull request, recording its stable URL
+in the gate, and notifying the human. Keep the gate in `gates-todo/` and report
+delivery as incomplete if the remote branch or pull request is missing. Retry a
+recoverable delivery failure with a materially different action; stop only for
+a meaningful credential, permission, provider, or policy blocker.
+
 Plan commits as part of the gate. A gate is large when it contains multiple
 independently reviewable changes, components, migrations, or risk boundaries.
 Use multiple coherent commits for such a gate so each commit has one clear
 purpose and is testable where practical. Do not split tightly coupled work into
 artificial commits. Record the planned commits before work and the actual
 commits or material deviations before closure. Follow repository signing and
-commit conventions, and never infer permission to push or open a pull request.
+commit conventions. Outside an automatic-management or proactive-remediation
+policy, use only an explicit current authorization to push or open a pull
+request.
 
 ## Align batches and checkpoints
 
@@ -252,12 +315,23 @@ permission. If the conversation already confirms the exact batch and map, do
 not ask again. Read the multi-gate procedure in
 [references/hdae-method.md](references/hdae-method.md) before running a batch.
 
+A scheduled `$pr-issue-review` task may instead carry a human-confirmed standing
+delegation for a narrowly defined class of future issue- or PR-originated gates.
+Within that recorded repository, risk, scope, validation, delivery, and review
+policy, create and execute qualifying gates without requesting approval again.
+This is not a general batch authorization and does not extend beyond the saved
+policy.
+
 ## Mandatory gate alignment
 
 This section applies only after the work has been determined to require a gate.
 Before implementation, align the gates with the human. Skip this only when the
 current conversation already contains explicit approval of the exact gate or
-batch, its acceptance criteria, and its checkpoint map.
+batch, its acceptance criteria, and its checkpoint map, or when a scheduled
+`$pr-issue-review` task has an applicable standing delegation as described
+above. Under that delegation, perform and persist the same alignment analysis,
+but do not pause merely to ask the human to approve the derived gate, branch,
+criteria, plan, or checkpoint map.
 
 1. Restate the outcome and important constraints in plain language.
 2. Ask focused questions about missing product behavior, architecture,
@@ -278,6 +352,21 @@ batch, its acceptance criteria, and its checkpoint map.
    gates may run, and where should I stop for review?”
 7. Wait for approval. Do not treat silence, general enthusiasm, or approval of
    the overall idea as approval of a gate batch or checkpoint map.
+
+For a delegated scheduled review, replace steps 6 and 7 with autonomous
+execution unless a meaningful blocker exists. Meaningful blockers include an
+ambiguous product or architecture decision, nonpublic security or privacy risk
+that cannot be handled safely under the saved policy, missing credentials or
+permission, work outside the saved scope or risk policy,
+destructive or irreversible impact, conflicting evidence that changes the
+intended result, or failed verification with no credible safe in-scope path.
+Gate numbering, the required dedicated branch, routine commit planning, and
+deterministic test selection are not blockers. Report and ask one focused
+question only when a blocker actually requires human direction. When safe,
+persist the gate and blocker before stopping so the work is not lost. Do not
+write confidential vulnerability details to a public repository; use a
+sanitized gate reference or stop before writing when even that would disclose
+the issue.
 
 When creating or revising a gate, maximize deterministic verification. Map
 every acceptance criterion to an automated test, command, or reproducible
