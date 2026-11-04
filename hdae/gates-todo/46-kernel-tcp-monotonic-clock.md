@@ -34,7 +34,7 @@ traffic cannot accelerate protocol timers and idle wall time is not discarded.
 - [x] Implement calibrated monotonic time and timer-driven polling.
 - [x] Add deterministic regression evidence.
 - [x] Run `make check` and `make test`.
-- [ ] Push the dedicated branch and open a pull request linked to issue #71.
+- [x] Push the dedicated branch and open a pull request linked to issue #71.
 
 ## Acceptance criteria
 
@@ -77,11 +77,12 @@ traffic cannot accelerate protocol timers and idle wall time is not discarded.
 
 - Working branch: `hdae/issue-71-tcp-clock`
 - Intended base: `main`
-- Pull request: intended, dedicated to issue #71
+- Pull request: [#100](https://github.com/gmkurtzer/ginux/pull/100), dedicated
+  to and closing issue #71 after merge
 - Planned commits: gate and implementation with deterministic regression;
   verification evidence and delivery checkpoint
 - Actual commits: `8407d4d0` (gate, implementation, regression, and initial
-  evidence); delivery checkpoint pending
+  evidence); `94ef74b1` (validation checkpoint); delivery record pending
 
 ## Review policy and outcome
 

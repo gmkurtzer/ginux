@@ -9,15 +9,15 @@
 - Branch: `hdae/issue-71-tcp-clock`
 - Intended base: `main` at `fe48e646`
 - Active gate: Gate 46, kernel TCP monotonic clock for issue #71
-- Status: implementation and deterministic verification pass; delivery is
-  pending
+- Status: implementation and deterministic verification pass; PR #100 is open
+  and awaiting exact-head CI plus the first scheduled validation marker
 - Last evidence: `make check` and complete `make test` pass after replacing the
   API-call counter with calibrated TSC milliseconds and adding timer-driven
   network polling. The boot harness required the new monotonic-clock marker.
 - Open decisions or limitations: timeout durations remain separate policy work
   in issues #64 and #65; no product decision is required for this prerequisite
-- Exact next action: create signed commits, push the dedicated branch, open the
-  issue-linked PR, and record its stable URL in Gate 46 and issue #71
+- Exact next action: validate PR #100 at its exact current head after CI, post
+  the first-pass marker, and retain it for the subsequent hourly merge pass
 
 ## Governing outcome
 
