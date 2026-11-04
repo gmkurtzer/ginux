@@ -33,7 +33,7 @@ early helper fixtures.
 
 ## Completed work
 
-- [x] Implement the bounded Ginux-us process table with virtual PID, TID, parent,
+- [x] Implement the bounded Ginux process table with virtual PID, TID, parent,
   process-group, session, fork, clone-thread, exec epoch, exit, wait, and reap
   behavior.
 - [x] Add generation-safe internal task handles, monotonic virtual PID
@@ -65,10 +65,10 @@ early helper fixtures.
   and threads without stale identity reuse or resource leakage.
 - Signal, futex, timer, and event fixtures observe the documented Linux-style
   results, interruption, timeout, and cleanup behavior.
-- Virtual root and capabilities affect only Ginux-us policy and never confer host
+- Virtual root and capabilities affect only Ginux policy and never confer host
   credentials or capabilities.
 - Invalid PIDs, TIDs, selectors, pointers, flags, and lifecycle races fail
-  deterministically without crossing domain boundaries or crashing Ginux-us.
+  deterministically without crossing domain boundaries or crashing Ginux.
 - Blocking operations can be interrupted and domain shutdown can terminate all
   managed work within the documented test timeout.
 - Earlier VFS, device, runtime, and interception tests remain passing.
@@ -134,7 +134,7 @@ early helper fixtures.
 
 - Working branch: `hdae/process-runtime`
 - Intended base: `main`
-- Pull request: https://github.com/gmkurtzer/ginux-us/pull/7; merged by the
+- Pull request: https://github.com/gmkurtzer/ginux/pull/7; merged by the
   human on 2026-11-04; merge does not substitute for this gate's explicit
   acceptance checkpoint
 - Planned commits: process and thread lifecycle; signals, synchronization, and

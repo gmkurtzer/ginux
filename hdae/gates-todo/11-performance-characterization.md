@@ -2,12 +2,12 @@
 
 ## Source
 
-Approved requirement that Ginux-us quantify and minimize overhead without
+Approved requirement that Ginux quantify and minimize overhead without
 weakening mediation.
 
 ## Goal
 
-Produce reproducible native, conventional-container, and Ginux-us comparisons,
+Produce reproducible native, conventional-container, and Ginux comparisons,
 agree on explicit performance budgets, and optimize material overhead while
 preserving every security invariant and compatibility criterion.
 
@@ -16,11 +16,11 @@ preserving every security invariant and compatibility criterion.
 - Define matched CPU, memory, syscall, process, filesystem, block, network,
   systemd boot, and idle workloads using the same Rocky userspace where
   practical.
-- Record hardware, host kernel, Ginux-us commit, image identity, configuration,
+- Record hardware, host kernel, Ginux commit, image identity, configuration,
   contract, repetitions, warmup, variance, and raw measurements.
 - Set numeric acceptance budgets with human review after baseline evidence and
   before optimization claims are judged.
-- Profile Ginux-us and optimize the highest-impact in-scope paths.
+- Profile Ginux and optimize the highest-impact in-scope paths.
 - Add benchmark comparison and report generation suitable for regression use.
 - Rerun functional, security-boundary, and systemd suites after optimizations.
 
@@ -66,7 +66,7 @@ preserving every security invariant and compatibility criterion.
 
 - `make bench-baseline` -> emits matched native and conventional-container
   control records.
-- `make bench` -> emits Ginux-us records for all mandatory workloads.
+- `make bench` -> emits Ginux records for all mandatory workloads.
 - `make bench-compare` -> checks result compatibility and approved numeric
   budgets, returning nonzero for mandatory regressions.
 - `make bench-report` -> generates the versioned summary from raw results.

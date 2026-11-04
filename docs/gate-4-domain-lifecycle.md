@@ -20,7 +20,7 @@ descriptors. Their operational backends arrive in Gate 6.
 
 The parser intentionally accepts the documented TOML subset: basic quoted
 strings, decimal integers, arrays of basic strings, comments, and the named
-tables in the schema. TOML features outside that subset fail closed. Ginux-us
+tables in the schema. TOML features outside that subset fail closed. Ginux
 prints one canonical effective configuration regardless of harmless input
 ordering, whitespace, or comments.
 
@@ -33,8 +33,8 @@ created -> starting -> running -> stopping -> stopped
 ```
 
 Startup and runtime failures release all acquired resources. Repeated stop or
-invalid transitions are rejected. One Ginux-us host process owns one domain in
-the initial milestone; Ginux-us never becomes host PID 1.
+invalid transitions are rejected. One Ginux host process owns one domain in
+the initial milestone; Ginux never becomes host PID 1.
 
 Run the human checkpoint with:
 

@@ -8,7 +8,7 @@ verification, and a DNF update workflow as milestone evidence.
 
 ## Goal
 
-Boot the prepared Rocky Linux 10 systemd binary as virtual PID 1 in one Ginux-us
+Boot the prepared Rocky Linux 10 systemd binary as virtual PID 1 in one Ginux
 domain, reach a usable multi-user login prompt, inspect its virtual process
 tree and security boundary, complete a bounded DNF update workflow, and perform
 a controlled shutdown.
@@ -69,7 +69,7 @@ a controlled shutdown.
 - Boot evidence records duration, peak and idle resource measurements, and
   environment metadata without yet asserting final performance budgets.
 - Every earlier mandatory suite remains passing.
-- A human can authenticate at the Ginux-us-owned console, obtain a managed shell,
+- A human can authenticate at the Ginux-owned console, obtain a managed shell,
   inspect a domain-only PID tree with systemd as PID 1, and cannot observe or
   signal host-only processes.
 - The logged-in shell passes the named lockdown probes for host paths,

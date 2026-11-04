@@ -1981,7 +1981,7 @@ fn supervise(pid: usize) -> ! {
             fail(b"wait4 failed");
         }
         if !stopped(status) {
-            fail(b"payload exited outside Ginux-us dispatch");
+            fail(b"payload exited outside Ginux dispatch");
         }
 
         let signal = ((status >> 8) & 0xff) as u8;
