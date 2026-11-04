@@ -14,6 +14,7 @@ if [ "${GINUX_IMAGE_FORCE:-0}" != 1 ] &&
     [ -f "$ROCKY_DOMAIN_ROOTFS_PATH" ] &&
     [ -f "$ROCKY_DOMAIN_MANIFEST_PATH" ] &&
     [ -f "$ROCKY_DOMAIN_METADATA_PATH" ] &&
+    grep -Fqx 'GINUX_ROOTFS_MANIFEST_VERSION=1' "$ROCKY_DOMAIN_MANIFEST_PATH" &&
     grep -Fqx "SOURCE_SHA256=$source_sha" "$ROCKY_DOMAIN_METADATA_PATH" &&
     grep -Fqx "HELPER_IMAGE=$ROCKY_DOMAIN_HELPER_IMAGE" "$ROCKY_DOMAIN_METADATA_PATH"; then
     printf 'Rocky domain userspace already prepared: %s\n' "$ROCKY_DOMAIN_ROOTFS_PATH"
