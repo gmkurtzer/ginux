@@ -1,0 +1,35 @@
+# The order and whitespace differ from config/domain-gate4.toml.
+schema_version = 1
+
+[domain]
+environment = ["GINUS_GATE=4"]
+args = ["fixture-arg"]
+init = "/runtime-fixture"
+root = "rocky-10.2-x86_64"
+id = "gate4-demo"
+
+[execution]
+backend = "interpreter"
+profile = "security"
+
+[resources]
+memory_mib = 128
+vcpus = 1
+
+[devices]
+assignments = []
+
+[storage]
+assignments = []
+
+[contract]
+profile = "gate4-static"
+
+[failure]
+policy = "stop"
+
+[audit]
+mode = "stderr"
+
+[network]
+backend = "none"

@@ -142,7 +142,6 @@ and idle overhead.
 ## Important open decisions
 
 - Rocky QCOW2 version, checksum, preparation tool, and virtual-root backing.
-- Configuration serialization format and command-line interface.
 - Initial network backend and packet mediation boundary.
 - Numeric performance budgets, set from reproducible baseline evidence before
   Gate 11 begins.
@@ -151,3 +150,6 @@ and idle overhead.
 Changing a security invariant or resolving an open decision with material
 architectural impact requires human review and an update to the affected open
 gate before implementation continues.
+
+Gate 4 selected strict, versioned TOML as the operator-facing domain
+configuration format with human approval on 2026-11-03.

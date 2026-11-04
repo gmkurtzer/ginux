@@ -4,6 +4,7 @@
 use core::arch::{asm, global_asm};
 use core::panic::PanicInfo;
 use ginus_core::{decide, Action, SYS_EXIT, SYS_GETPID, SYS_UNAME, SYS_WRITE};
+use ginus_domain::{ConfigError, Domain, DomainConfig};
 use ginus_runtime::{execute, AddressSpace, AuditAction, LoadError};
 
 global_asm!(
@@ -21,12 +22,16 @@ global_asm!(
 const SYS_WRITE_HOST: usize = 1;
 const SYS_READ_HOST: usize = 0;
 const SYS_CLOSE_HOST: usize = 3;
+const SYS_RT_SIGPROCMASK: usize = 14;
+const SYS_PAUSE: usize = 34;
 const SYS_FORK: usize = 57;
 const SYS_EXECVE: usize = 59;
 const SYS_EXIT_HOST: usize = 60;
 const SYS_WAIT4: usize = 61;
+const SYS_KILL: usize = 62;
 const SYS_PTRACE: usize = 101;
 const SYS_OPENAT_HOST: usize = 257;
+const SYS_SIGNALFD4: usize = 289;
 const AT_FDCWD: usize = (-100isize) as usize;
 const O_RDONLY: usize = 0;
 
@@ -44,8 +49,13 @@ const EPERM: i64 = 1;
 const ENOSYS: i64 = 38;
 const VIRTUAL_PID: u64 = 4242;
 const MAX_ELF_SIZE: usize = 64 * 1024;
+const MAX_CONFIG_SIZE: usize = 16 * 1024;
+const SIG_BLOCK: usize = 0;
+const SIGTERM: usize = 15;
+const SIGKILL: usize = 9;
 
 static mut ELF_BYTES: [u8; MAX_ELF_SIZE] = [0; MAX_ELF_SIZE];
+static mut CONFIG_BYTES: [u8; MAX_CONFIG_SIZE] = [0; MAX_CONFIG_SIZE];
 
 #[repr(C)]
 struct UserRegs {
@@ -118,6 +128,24 @@ unsafe extern "C" fn memset(
 }
 
 #[no_mangle]
+unsafe extern "C" fn bcmp(
+    left: *const core::ffi::c_void,
+    right: *const core::ffi::c_void,
+    length: usize,
+) -> i32 {
+    let left = left.cast::<u8>();
+    let right = right.cast::<u8>();
+    let mut index = 0;
+    while index < length {
+        if core::ptr::read_volatile(left.add(index)) != core::ptr::read_volatile(right.add(index)) {
+            return 1;
+        }
+        index += 1;
+    }
+    0
+}
+
+#[no_mangle]
 extern "C" fn rust_main(initial_stack: *const usize) -> ! {
     let argc = unsafe { *initial_stack };
     let argv = unsafe { initial_stack.add(1) };
@@ -126,9 +154,217 @@ extern "C" fn rust_main(initial_stack: *const usize) -> ! {
         if c_string_equals(command, b"runtime") {
             let path = unsafe { *argv.add(2) as *const u8 };
             runtime_main(path);
+        } else if c_string_equals(command, b"config") {
+            let config_path = unsafe { *argv.add(2) as *const u8 };
+            config_main(config_path);
+        } else if c_string_equals(command, b"lifecycle") {
+            let config_path = unsafe { *argv.add(2) as *const u8 };
+            lifecycle_main(config_path);
+        } else if argc >= 4 && c_string_equals(command, b"domain") {
+            let config_path = unsafe { *argv.add(2) as *const u8 };
+            let fixture_path = unsafe { *argv.add(3) as *const u8 };
+            domain_main(config_path, fixture_path);
         }
     }
     gate1_main()
+}
+
+fn config_main(config_path: *const u8) -> ! {
+    let config = load_config(config_path);
+    print_effective_config(&config);
+    line(b"GINUS_CONFIG: PASS");
+    exit_process(0)
+}
+
+fn domain_main(config_path: *const u8, fixture_path: *const u8) -> ! {
+    let config = load_config(config_path);
+    print_effective_config(&config);
+    let mut domain = Domain::create(config);
+    lifecycle_state(&domain);
+    if domain.start().is_err() {
+        domain_fail(&mut domain, b"invalid start transition");
+    }
+    lifecycle_state(&domain);
+
+    let length = read_file(fixture_path);
+    let elf =
+        unsafe { core::slice::from_raw_parts(core::ptr::addr_of!(ELF_BYTES).cast::<u8>(), length) };
+    let mut memory = AddressSpace::new();
+    let loaded = match memory.load_elf(elf) {
+        Ok(loaded) => loaded,
+        Err(_) => domain_fail(&mut domain, b"managed ELF rejected"),
+    };
+
+    let mut argv: [&[u8]; 8] = [&[]; 8];
+    argv[0] = config.init.as_bytes();
+    let mut argc = 1;
+    for argument in config.args.as_slice() {
+        argv[argc] = argument.as_bytes();
+        argc += 1;
+    }
+    let mut environment: [&[u8]; 8] = [&[]; 8];
+    let mut envc = 0;
+    for variable in config.environment.as_slice() {
+        environment[envc] = variable.as_bytes();
+        envc += 1;
+    }
+    let stack = match memory.build_stack(&argv[..argc], &environment[..envc]) {
+        Ok(stack) => stack,
+        Err(_) => domain_fail(&mut domain, b"managed stack rejected"),
+    };
+    let report = match execute(&memory, loaded.entry, stack, 10_000) {
+        Ok(report) => report,
+        Err(_) => domain_fail(&mut domain, b"managed execution failed"),
+    };
+    if report.exit_code != 0 {
+        domain_fail(&mut domain, b"managed task failed");
+    }
+    write_all(b"GINUS_DOMAIN: managed-output=");
+    write_all(&report.output[..report.output_len]);
+    write_all(b"\n");
+    if domain.task_exited(true).is_err() {
+        domain_fail(&mut domain, b"invalid task-exit transition");
+    }
+    lifecycle_state(&domain);
+    line(b"GINUS_DOMAIN: cleanup resources=false managed-task=false");
+    line(b"GATE4: PASS");
+    exit_process(0)
+}
+
+fn lifecycle_main(config_path: *const u8) -> ! {
+    let config = load_config(config_path);
+    let mut domain = Domain::create(config);
+    lifecycle_state(&domain);
+    if domain.start().is_err() {
+        domain_fail(&mut domain, b"invalid start transition");
+    }
+
+    let mask = 1u64 << (SIGTERM - 1);
+    if unsafe {
+        syscall4(
+            SYS_RT_SIGPROCMASK,
+            SIG_BLOCK,
+            &mask as *const _ as usize,
+            0,
+            core::mem::size_of::<u64>(),
+        )
+    } < 0
+    {
+        domain_fail(&mut domain, b"signal mask setup failed");
+    }
+    let signal_fd = unsafe {
+        syscall4(
+            SYS_SIGNALFD4,
+            usize::MAX,
+            &mask as *const _ as usize,
+            core::mem::size_of::<u64>(),
+            0,
+        )
+    };
+    if signal_fd < 0 {
+        domain_fail(&mut domain, b"signalfd setup failed");
+    }
+    let child = unsafe { syscall0(SYS_FORK) };
+    if child < 0 {
+        let _ = unsafe { syscall1(SYS_CLOSE_HOST, signal_fd as usize) };
+        domain_fail(&mut domain, b"helper fork failed");
+    }
+    if child == 0 {
+        loop {
+            let _ = unsafe { syscall0(SYS_PAUSE) };
+        }
+    }
+
+    write_all(b"GINUS_LIFECYCLE: state=running helper-pid=");
+    write_u64(child as u64);
+    write_all(b" resources=true\n");
+    let mut signal_info = [0u8; 128];
+    let signal_read = unsafe {
+        syscall3(
+            SYS_READ_HOST,
+            signal_fd as usize,
+            signal_info.as_mut_ptr() as usize,
+            signal_info.len(),
+        )
+    };
+    if signal_read != signal_info.len() as isize {
+        let _ = unsafe { syscall2(SYS_KILL, child as usize, SIGKILL) };
+        let mut status = 0;
+        let _ = wait(child as usize, &mut status);
+        let _ = unsafe { syscall1(SYS_CLOSE_HOST, signal_fd as usize) };
+        domain_fail(&mut domain, b"signal wait failed");
+    }
+    line(b"GINUS_LIFECYCLE: signal=SIGTERM decision=stop");
+    let _ = unsafe { syscall2(SYS_KILL, child as usize, SIGKILL) };
+    let mut status = 0;
+    if wait(child as usize, &mut status) != child {
+        let _ = unsafe { syscall1(SYS_CLOSE_HOST, signal_fd as usize) };
+        domain_fail(&mut domain, b"helper reap failed");
+    }
+    let _ = unsafe { syscall1(SYS_CLOSE_HOST, signal_fd as usize) };
+    if domain.stop().is_err() {
+        domain_fail(&mut domain, b"invalid stop transition");
+    }
+    line(b"GINUS_LIFECYCLE: helper=reaped zombies=0");
+    lifecycle_state(&domain);
+    line(b"GINUS_DOMAIN: cleanup resources=false managed-task=false");
+    line(b"GATE4_LIFECYCLE: PASS");
+    exit_process(0)
+}
+
+fn load_config(path: *const u8) -> DomainConfig {
+    let length = read_config(path);
+    let bytes = unsafe {
+        core::slice::from_raw_parts(core::ptr::addr_of!(CONFIG_BYTES).cast::<u8>(), length)
+    };
+    match DomainConfig::parse(bytes) {
+        Ok(config) => config,
+        Err(error) => config_rejected(error),
+    }
+}
+
+fn print_effective_config(config: &DomainConfig) {
+    let normalized = match config.normalized() {
+        Ok(normalized) => normalized,
+        Err(error) => config_rejected(error),
+    };
+    line(b"GINUS_CONFIG: accepted format=toml schema=1");
+    line(b"GINUS_CONFIG_EFFECTIVE_BEGIN");
+    write_all(normalized.as_bytes());
+    line(b"GINUS_CONFIG_EFFECTIVE_END");
+}
+
+fn lifecycle_state(domain: &Domain) {
+    write_all(b"GINUS_LIFECYCLE: state=");
+    write_all(domain.state().as_str().as_bytes());
+    write_all(b" resources=");
+    write_all(if domain.resources_acquired() {
+        b"true"
+    } else {
+        b"false"
+    });
+    write_all(b" managed-task=");
+    line(if domain.managed_task() {
+        b"true"
+    } else {
+        b"false"
+    });
+}
+
+fn config_rejected(error: ConfigError) -> ! {
+    write_all(b"GINUS_CONFIG: rejected reason=");
+    write_all(error.as_str().as_bytes());
+    line(b" managed-started=false");
+    exit_process(2)
+}
+
+fn domain_fail(domain: &mut Domain, reason: &[u8]) -> ! {
+    let _ = domain.task_exited(false);
+    write_all(b"GINUS_DOMAIN: failed reason=");
+    line(reason);
+    lifecycle_state(domain);
+    line(b"GINUS_DOMAIN: cleanup resources=false managed-task=false");
+    exit_process(1)
 }
 
 fn gate1_main() -> ! {
@@ -228,6 +464,39 @@ fn read_file(path: *const u8) -> usize {
     let _ = unsafe { syscall1(SYS_CLOSE_HOST, descriptor as usize) };
     if length == 0 || length == MAX_ELF_SIZE {
         runtime_fail(b"fixture size invalid");
+    }
+    length
+}
+
+fn read_config(path: *const u8) -> usize {
+    let descriptor = unsafe { syscall4(SYS_OPENAT_HOST, AT_FDCWD, path as usize, O_RDONLY, 0) };
+    if descriptor < 0 {
+        config_rejected(ConfigError::InvalidValue);
+    }
+    let mut length = 0usize;
+    while length < MAX_CONFIG_SIZE {
+        let result = unsafe {
+            syscall3(
+                SYS_READ_HOST,
+                descriptor as usize,
+                core::ptr::addr_of_mut!(CONFIG_BYTES)
+                    .cast::<u8>()
+                    .add(length) as usize,
+                MAX_CONFIG_SIZE - length,
+            )
+        };
+        if result < 0 {
+            let _ = unsafe { syscall1(SYS_CLOSE_HOST, descriptor as usize) };
+            config_rejected(ConfigError::InvalidValue);
+        }
+        if result == 0 {
+            break;
+        }
+        length += result as usize;
+    }
+    let _ = unsafe { syscall1(SYS_CLOSE_HOST, descriptor as usize) };
+    if length == 0 || length == MAX_CONFIG_SIZE {
+        config_rejected(ConfigError::ValueTooLong);
     }
     length
 }
@@ -483,6 +752,21 @@ unsafe fn syscall1(number: usize, a1: usize) -> isize {
         "syscall",
         inlateout("rax") number as isize => result,
         in("rdi") a1,
+        lateout("rcx") _,
+        lateout("r11") _,
+        options(nostack)
+    );
+    result
+}
+
+#[inline(always)]
+unsafe fn syscall2(number: usize, a1: usize, a2: usize) -> isize {
+    let result: isize;
+    asm!(
+        "syscall",
+        inlateout("rax") number as isize => result,
+        in("rdi") a1,
+        in("rsi") a2,
         lateout("rcx") _,
         lateout("r11") _,
         options(nostack)

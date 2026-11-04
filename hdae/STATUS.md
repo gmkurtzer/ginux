@@ -11,14 +11,17 @@
   `hdae/execution-kernel`, stacked on the accepted Gate 2 state while its
   intended eventual base remains `main`, in open
   https://github.com/gmkurtzer/usshim/pull/3.
+- Gate 4 is accepted and closed. It remains delivered on dedicated branch
+  `hdae/domain-config-lifecycle`, stacked on the accepted Gate 3 state while
+  its intended eventual base remains `main`, in open
+  https://github.com/gmkurtzer/usshim/pull/4.
 - Authoritative name: Ginus (Ginux Userspace).
 - Runtime isolation unit: domain.
 - Policy unit: versioned contract.
-- Initial gate map: twelve checkpoint gates under `hdae/gates-todo/` at
-  positions 1 through 11 and 13.
-- The twelve remaining gates are authorized as an ordered batch, but each
-  remains a human checkpoint requiring a working demonstration and explicit
-  acceptance.
+- Initial gate map: twelve checkpoint gates at positions 1 through 11 and 13;
+  Gates 1 through 4 are accepted and eight gates remain open.
+- The ordered gate batch is authorized, but every open gate remains a human
+  checkpoint requiring a working demonstration and explicit acceptance.
 
 ## Governing outcome and invariants
 
@@ -89,20 +92,25 @@ scope, threat model, and invariants.
   `make test` passed. The interpreted fixture emitted its argument/environment,
   syscall 999 returned `-ENOSYS`, virtual `getpid` returned 4242, exit returned
   zero, and a truncated ELF was rejected before execution.
-- Human accepted Gate 3 on 2026-11-03. Gate 4 has not started.
+- Human accepted Gate 3 on 2026-11-03.
+- Human authorized Gate 4 on 2026-11-03 and approved strict, versioned TOML as
+  its operator-facing configuration format.
+- Gate 4 implemented strict versioned TOML parsing and normalization, complete
+  fail-closed validation, immutable effective configuration, a single-domain
+  lifecycle, managed fixture execution, failure cleanup, signal-driven stop,
+  and helper reaping. Seven domain unit tests, `make test-config`,
+  `make test-domain`, `make demo-gate-4`, and aggregate `make test` passed.
+- Human accepted Gate 4 on 2026-11-03 and directed advancement to Gate 5.
 
 ## Open decisions and limitations
 
 - Human direction selected the security-focused full x86-64 interpreter as the
-  Gate 3 baseline. Managed memory and registers are Ginus data, and managed
-  `syscall` instructions become internal events. Gate 4 will expose execution
-  profile/backend selection so future performance-focused domains can make a
-  different, explicitly documented trust tradeoff.
+  Gate 3 baseline. Gate 4 exposes execution profile/backend selection but
+  rejects the performance profile until a separately reviewed backend exists.
 - Rocky host image is pinned to official Rocky 10.2 GenericCloud build
   10.2-20260525.0. Gate 2 selected a pinned, network-disabled
   Docker/LinuxKit helper that mounts a temporary raw conversion read-only;
-  configuration syntax, network backend, and performance budgets remain
-  later-gate decisions.
+  network backend and performance budgets remain later-gate decisions.
 - Gate 2 preparation requires Docker Desktop and a pinned privileged helper
   container. It is network-disabled and mounts only a temporary raw conversion
   read-only, but remains trusted build tooling rather than a runtime boundary.
@@ -111,16 +119,17 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Provide the requested complete gate summary. Do not begin Gate 4 until the
-human explicitly directs advancement.
+Resolve Gate 5's virtual-root backing decision with the human, then begin the
+approved Gate 5 implementation on `hdae/virtual-vfs-userspace`.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: none; Gate 3 is accepted and closed, and Gate 4 is the next
-  planned checkpoint but has not started
-- Last evidence: Gate 3 demo and complete aggregate regression suite passed on
+- Active gate: Gate 5, virtual VFS and dynamic userspace; authorized, backing
+  decision pending before implementation
+- Last evidence: Gate 4 demo and complete aggregate regression suite passed on
   2026-11-03
-- Required human decision: whether to begin Gate 4
+- Required human decision: select the Gate 5 immutable-base and disposable-
+  overlay backing strategy

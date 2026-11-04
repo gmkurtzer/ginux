@@ -2,6 +2,7 @@
 members = [
     "crates/baseline-runner",
     "crates/ginus-core",
+    "crates/ginus-domain",
     "crates/ginus-init",
     "crates/ginus-runtime",
     "crates/managed-payload",
