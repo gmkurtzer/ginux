@@ -80,7 +80,8 @@ traffic cannot accelerate protocol timers and idle wall time is not discarded.
 - Pull request: intended, dedicated to issue #71
 - Planned commits: gate and implementation with deterministic regression;
   verification evidence and delivery checkpoint
-- Actual commits: pending signed implementation/evidence commit
+- Actual commits: `8407d4d0` (gate, implementation, regression, and initial
+  evidence); delivery checkpoint pending
 
 ## Review policy and outcome
 
