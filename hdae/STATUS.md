@@ -184,9 +184,14 @@ scope, threat model, and invariants.
   Ginus process table with virtual lifecycle and identity, generation-safe task
   handles, virtual credentials and capability dropping, signal masks/queues,
   futex and eventfd primitives, deterministic exhaustion, and shutdown cleanup.
-- `cargo test -p ginus-process`, strict clippy, and `make test-process` passed
-  six component tests. Native supervisor integration, timers/polling/epoll,
-  stress, QEMU fixtures, aggregate regression, and the demo remain incomplete.
+- The initial `cargo test -p ginus-process`, strict clippy, and
+  `make test-process` run passed six component tests. Native supervisor
+  integration, stress, QEMU fixtures, aggregate regression, and the demo remain
+  incomplete.
+- The second Gate 7 milestone added signal dispositions and exec reset,
+  monotonic/realtime clocks, one-shot and periodic timers, and bounded
+  epoll-style event readiness. Seven process-component tests and strict clippy
+  passed; native integration and interruption semantics remain incomplete.
 
 ## Open decisions and limitations
 

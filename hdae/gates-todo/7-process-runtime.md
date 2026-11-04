@@ -42,13 +42,15 @@ early helper fixtures.
 - [x] Implement virtual credentials, supplementary groups, capability dropping,
   masked/pending signal delivery, bounded futex waits/wakes, and eventfd
   counters.
+- [x] Implement virtual signal dispositions, exec reset semantics, monotonic and
+  realtime clocks, one-shot/periodic timers, and bounded epoll-style readiness.
 
 ## Remaining work
 
 - [ ] Connect the model to managed native process/thread creation and syscall
   dispatch without exposing host identities.
-- [ ] Complete signal actions/return, clocks, timers, polling, epoll, and
-  interruptible blocking behavior.
+- [ ] Connect signal frames/return and blocking interruption to managed native
+  execution.
 - [ ] Add concurrency, race, repeated lifecycle stress, QEMU fixtures, and the
   human demonstration.
 
@@ -81,9 +83,10 @@ early helper fixtures.
 
 ## Evidence
 
-- `cargo test -p ginus-process` -> six lifecycle, identity, credentials,
+- `cargo test -p ginus-process` -> seven lifecycle, identity, credentials,
   signal, futex, eventfd, exhaustion, invalid-selector, and cleanup tests
-  passed.
+  passed, including deterministic virtual clocks, periodic timers, and event
+  readiness.
 - `cargo clippy -p ginus-process --all-targets -- -D warnings` -> passed.
 - `make test-process` -> passed the same deterministic component suite.
 
@@ -101,7 +104,8 @@ early helper fixtures.
   2026-11-03; never merge or close without explicit authorization
 - Planned commits: process and thread lifecycle; signals, synchronization, and
   time; credentials and event interfaces; stress and cleanup verification
-- Actual commits: process-runtime foundation pending commit
+- Actual commits: `440c98f` added the process-runtime foundation; virtual time,
+  signal-action, and event milestone pending commit
 
 ## Review policy and outcome
 

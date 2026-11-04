@@ -24,6 +24,15 @@ pub enum ProcessError {
     FutexFull,
     TimerFull,
     InvalidTimer,
+    EventLimit,
+    InvalidEvent,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SignalAction {
+    Default,
+    Ignore,
+    Handler(u64),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -129,6 +138,7 @@ struct Task {
     signal_mask: u64,
     pending_signals: u64,
     exec_epoch: u32,
+    signal_actions: [SignalAction; MAX_SIGNAL as usize],
 }
 
 impl Task {
@@ -148,6 +158,7 @@ impl Task {
             signal_mask: 0,
             pending_signals: 0,
             exec_epoch: 0,
+            signal_actions: [SignalAction::Default; MAX_SIGNAL as usize],
         }
     }
 }
@@ -239,6 +250,7 @@ impl<const TASKS: usize> ProcessTable<TASKS> {
             signal_mask: 0,
             pending_signals: 0,
             exec_epoch: 0,
+            signal_actions: [SignalAction::Default; MAX_SIGNAL as usize],
         };
         Ok(id)
     }
@@ -305,6 +317,11 @@ impl<const TASKS: usize> ProcessTable<TASKS> {
         }
         task.pending_signals = 0;
         task.signal_mask = 0;
+        for action in &mut task.signal_actions {
+            if *action != SignalAction::Ignore {
+                *action = SignalAction::Default;
+            }
+        }
         task.exec_epoch = task
             .exec_epoch
             .checked_add(1)
@@ -403,6 +420,28 @@ impl<const TASKS: usize> ProcessTable<TASKS> {
         Ok(())
     }
 
+    pub fn set_signal_action(
+        &mut self,
+        id: TaskId,
+        signal: u8,
+        action: SignalAction,
+    ) -> Result<(), ProcessError> {
+        if signal == 0 || signal > MAX_SIGNAL || matches!(signal, 9 | 19) {
+            return Err(ProcessError::InvalidSignal);
+        }
+        let index = self.index(id)?;
+        self.tasks[index].signal_actions[signal as usize - 1] = action;
+        Ok(())
+    }
+
+    pub fn signal_action(&self, id: TaskId, signal: u8) -> Result<SignalAction, ProcessError> {
+        if signal == 0 || signal > MAX_SIGNAL {
+            return Err(ProcessError::InvalidSignal);
+        }
+        let index = self.index(id)?;
+        Ok(self.tasks[index].signal_actions[signal as usize - 1])
+    }
+
     pub fn next_signal(&mut self, id: TaskId) -> Result<Option<u8>, ProcessError> {
         let index = self.index(id)?;
         let deliverable = self.tasks[index].pending_signals & !self.tasks[index].signal_mask;
@@ -438,6 +477,261 @@ impl<const TASKS: usize> ProcessTable<TASKS> {
 
     pub fn active(&self) -> usize {
         self.tasks.iter().filter(|task| task.occupied).count()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct VirtualClock {
+    monotonic_ns: u64,
+    realtime_offset_ns: i64,
+}
+
+impl Default for VirtualClock {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl VirtualClock {
+    pub const fn new() -> Self {
+        Self {
+            monotonic_ns: 0,
+            realtime_offset_ns: 0,
+        }
+    }
+
+    pub const fn monotonic_ns(&self) -> u64 {
+        self.monotonic_ns
+    }
+
+    pub fn realtime_ns(&self) -> Result<u64, ProcessError> {
+        if self.realtime_offset_ns >= 0 {
+            self.monotonic_ns
+                .checked_add(self.realtime_offset_ns as u64)
+                .ok_or(ProcessError::CounterOverflow)
+        } else {
+            self.monotonic_ns
+                .checked_sub(self.realtime_offset_ns.unsigned_abs())
+                .ok_or(ProcessError::InvalidTimer)
+        }
+    }
+
+    pub fn set_realtime_ns(&mut self, value: u64) -> Result<(), ProcessError> {
+        let difference = value as i128 - self.monotonic_ns as i128;
+        self.realtime_offset_ns = difference
+            .try_into()
+            .map_err(|_| ProcessError::InvalidTimer)?;
+        Ok(())
+    }
+
+    pub fn advance(&mut self, nanoseconds: u64) -> Result<u64, ProcessError> {
+        self.monotonic_ns = self
+            .monotonic_ns
+            .checked_add(nanoseconds)
+            .ok_or(ProcessError::CounterOverflow)?;
+        Ok(self.monotonic_ns)
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Timer {
+    active: bool,
+    id: u32,
+    deadline_ns: u64,
+    interval_ns: u64,
+    expirations: u64,
+}
+
+impl Timer {
+    const fn empty() -> Self {
+        Self {
+            active: false,
+            id: 0,
+            deadline_ns: 0,
+            interval_ns: 0,
+            expirations: 0,
+        }
+    }
+}
+
+pub struct TimerTable<const TIMERS: usize> {
+    timers: [Timer; TIMERS],
+    next_id: u32,
+}
+
+impl<const TIMERS: usize> Default for TimerTable<TIMERS> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<const TIMERS: usize> TimerTable<TIMERS> {
+    pub const fn new() -> Self {
+        Self {
+            timers: [Timer::empty(); TIMERS],
+            next_id: 1,
+        }
+    }
+
+    pub fn create(&mut self) -> Result<u32, ProcessError> {
+        let timer = self
+            .timers
+            .iter_mut()
+            .find(|timer| !timer.active)
+            .ok_or(ProcessError::TimerFull)?;
+        let id = self.next_id;
+        self.next_id = self.next_id.checked_add(1).ok_or(ProcessError::TimerFull)?;
+        *timer = Timer {
+            active: true,
+            id,
+            deadline_ns: 0,
+            interval_ns: 0,
+            expirations: 0,
+        };
+        Ok(id)
+    }
+
+    fn timer_mut(&mut self, id: u32) -> Result<&mut Timer, ProcessError> {
+        self.timers
+            .iter_mut()
+            .find(|timer| timer.active && timer.id == id)
+            .ok_or(ProcessError::InvalidTimer)
+    }
+
+    pub fn arm(
+        &mut self,
+        id: u32,
+        now_ns: u64,
+        initial_ns: u64,
+        interval_ns: u64,
+    ) -> Result<(), ProcessError> {
+        if initial_ns == 0 {
+            return Err(ProcessError::InvalidTimer);
+        }
+        let timer = self.timer_mut(id)?;
+        timer.deadline_ns = now_ns
+            .checked_add(initial_ns)
+            .ok_or(ProcessError::InvalidTimer)?;
+        timer.interval_ns = interval_ns;
+        timer.expirations = 0;
+        Ok(())
+    }
+
+    pub fn update(&mut self, now_ns: u64) {
+        for timer in &mut self.timers {
+            if !timer.active || timer.deadline_ns == 0 || now_ns < timer.deadline_ns {
+                continue;
+            }
+            match (now_ns - timer.deadline_ns).checked_div(timer.interval_ns) {
+                None => {
+                    timer.expirations = timer.expirations.saturating_add(1);
+                    timer.deadline_ns = 0;
+                }
+                Some(periods) => {
+                    let count = 1 + periods;
+                    timer.expirations = timer.expirations.saturating_add(count);
+                    timer.deadline_ns = timer
+                        .deadline_ns
+                        .saturating_add(count.saturating_mul(timer.interval_ns));
+                }
+            }
+        }
+    }
+
+    pub fn read(&mut self, id: u32) -> Result<u64, ProcessError> {
+        let timer = self.timer_mut(id)?;
+        if timer.expirations == 0 {
+            return Err(ProcessError::WouldBlock);
+        }
+        let count = timer.expirations;
+        timer.expirations = 0;
+        Ok(count)
+    }
+
+    pub fn close(&mut self, id: u32) -> Result<(), ProcessError> {
+        *self.timer_mut(id)? = Timer::empty();
+        Ok(())
+    }
+}
+
+pub const EVENT_READ: u32 = 1;
+pub const EVENT_WRITE: u32 = 2;
+
+#[derive(Clone, Copy)]
+struct EventInterest {
+    active: bool,
+    descriptor: u32,
+    events: u32,
+}
+
+impl EventInterest {
+    const fn empty() -> Self {
+        Self {
+            active: false,
+            descriptor: 0,
+            events: 0,
+        }
+    }
+}
+
+pub struct EventPoll<const ENTRIES: usize> {
+    entries: [EventInterest; ENTRIES],
+}
+
+impl<const ENTRIES: usize> Default for EventPoll<ENTRIES> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<const ENTRIES: usize> EventPoll<ENTRIES> {
+    pub const fn new() -> Self {
+        Self {
+            entries: [EventInterest::empty(); ENTRIES],
+        }
+    }
+
+    pub fn add(&mut self, descriptor: u32, events: u32) -> Result<(), ProcessError> {
+        if descriptor == 0 || events == 0 || events & !(EVENT_READ | EVENT_WRITE) != 0 {
+            return Err(ProcessError::InvalidEvent);
+        }
+        if self
+            .entries
+            .iter()
+            .any(|entry| entry.active && entry.descriptor == descriptor)
+        {
+            return Err(ProcessError::InvalidEvent);
+        }
+        let entry = self
+            .entries
+            .iter_mut()
+            .find(|entry| !entry.active)
+            .ok_or(ProcessError::EventLimit)?;
+        *entry = EventInterest {
+            active: true,
+            descriptor,
+            events,
+        };
+        Ok(())
+    }
+
+    pub fn ready(&self, descriptor: u32, available: u32) -> Result<u32, ProcessError> {
+        let entry = self
+            .entries
+            .iter()
+            .find(|entry| entry.active && entry.descriptor == descriptor)
+            .ok_or(ProcessError::InvalidEvent)?;
+        Ok(entry.events & available)
+    }
+
+    pub fn remove(&mut self, descriptor: u32) -> Result<(), ProcessError> {
+        let entry = self
+            .entries
+            .iter_mut()
+            .find(|entry| entry.active && entry.descriptor == descriptor)
+            .ok_or(ProcessError::InvalidEvent)?;
+        *entry = EventInterest::empty();
+        Ok(())
     }
 }
 
@@ -636,6 +930,19 @@ mod tests {
         table.set_signal_mask(init, 0).unwrap();
         assert_eq!(table.next_signal(init), Ok(Some(15)));
         assert_eq!(table.signal(init, 65), Err(ProcessError::InvalidSignal));
+        table
+            .set_signal_action(init, 10, SignalAction::Handler(0x4000))
+            .unwrap();
+        assert_eq!(
+            table.signal_action(init, 10),
+            Ok(SignalAction::Handler(0x4000))
+        );
+        table.exec(init).unwrap();
+        assert_eq!(table.signal_action(init, 10), Ok(SignalAction::Default));
+        assert_eq!(
+            table.set_signal_action(init, 9, SignalAction::Ignore),
+            Err(ProcessError::InvalidSignal)
+        );
     }
 
     #[test]
@@ -670,5 +977,27 @@ mod tests {
         assert_eq!(table.reap_all(), 2);
         assert_eq!(table.active(), 0);
         assert_eq!(table.view(child), Err(ProcessError::InvalidTask));
+    }
+
+    #[test]
+    fn virtual_clocks_timers_and_epoll_are_deterministic() {
+        let mut clock = VirtualClock::new();
+        clock.set_realtime_ns(1_000_000).unwrap();
+        assert_eq!(clock.advance(100), Ok(100));
+        assert_eq!(clock.realtime_ns(), Ok(1_000_100));
+
+        let mut timers: TimerTable<2> = TimerTable::new();
+        let timer = timers.create().unwrap();
+        timers.arm(timer, clock.monotonic_ns(), 50, 25).unwrap();
+        timers.update(clock.advance(125).unwrap());
+        assert_eq!(timers.read(timer), Ok(4));
+        assert_eq!(timers.read(timer), Err(ProcessError::WouldBlock));
+        timers.close(timer).unwrap();
+
+        let mut poll: EventPoll<2> = EventPoll::new();
+        poll.add(7, EVENT_READ | EVENT_WRITE).unwrap();
+        assert_eq!(poll.ready(7, EVENT_READ), Ok(EVENT_READ));
+        assert_eq!(poll.ready(8, EVENT_READ), Err(ProcessError::InvalidEvent));
+        poll.remove(7).unwrap();
     }
 }
