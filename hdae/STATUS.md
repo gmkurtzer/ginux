@@ -264,6 +264,32 @@ scope, threat model, and invariants.
   `2306c2e`; the human accepted its demonstration and evidence on 2026-11-04.
 - Both repositories were fetched after that merge and verified to have no open
   pull requests or issues. The final standalone-kernel commit is `4d4a53bb`.
+- Gate 9 now boots the pinned Rocky 10 UBI init userspace through systemd as
+  virtual PID 1, reaches managed `console-getty.service`, `getty.target`, and
+  `multi-user.target` within the 50-second readiness bound, authenticates root
+  through `pam_unix`, and runs the resulting shell as a supervised domain task.
+- Shared networking passed outbound DNS/HTTPS and inbound
+  bind/listen/accept/address-conflict checks. Rocky's enabled upstream
+  `baseos`, `appstream`, and `extras` repositories completed a real
+  `dnf -y update` of 58 packages in the disposable root; DNF printed
+  `Complete!`, the immutable OCI cache remained unchanged, and systemd powered
+  off through the bounded virtual lifecycle path.
+- `make test-systemd` passed three restricted-network cached-image boots plus
+  a deterministic failed-DNF transaction, configured startup failure, and
+  controlled teardown. The failed transaction left the sorted `rpm -qa`
+  package set readable, nonempty, and unchanged and did not change the cached
+  OCI rootfs SHA-256. `make bench`
+  recorded 14,772 ms boot-to-login, 19,668 KiB peak traced-tree RSS,
+  14,716 KiB login-ready RSS, 37 peak managed tasks, and 4 idle virtual
+  `/proc` entries under Rocky 10.2 x86-64 QEMU TCG with two vCPUs.
+- Fresh `make check`, aggregate `make test`, `make test-native-vfs`, and
+  `make test-oci-image` passed. The aggregate includes 46 component tests and
+  all mandatory earlier-gate QEMU regressions. The native-VFS regression was
+  updated to require the virtual PID field introduced by multi-task audit.
+- `make demo-gate-9` passed all eight named operator checks after its live DNF
+  watchdog was sized to observed TCG variance. Gate 9 is technically passed on
+  the local `hdae/systemd-baseline` branch and awaits human checkpoint review;
+  it has not been pushed and no pull request has been opened.
 
 ## Open decisions and limitations
 
@@ -301,10 +327,9 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Extend the passing authenticated shell probe with live shared-network DNS and
-TCP evidence, normal inbound bind/conflict behavior, and Rocky's enabled
-default-repository `dnf -y update`; then add controlled shutdown, repeated and
-failure runs, and resource measurements.
+Present the technically passed Gate 9 evidence and `make demo-gate-9` result for
+human checkpoint acceptance. Push the dedicated branch and open its pull
+request only after explicit current authorization.
 
 ## Context recovery
 
@@ -312,17 +337,20 @@ failure runs, and resource measurements.
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
 - Active gate: Gate 9, systemd baseline, authorized on dedicated branch
-  `hdae/systemd-baseline`; implementation is partial
-- Last evidence: core and process tests, strict init clippy, and the init
-  release build passed. The Rocky-host probe advanced unmodified Rocky systemd
-  to `multi-user.target`, authenticated root through `pam_unix`, executed the
-  logged-in managed shell as virtual PID 34 with UID/GID 0, passed host-path,
-  descriptor, device, mount, and namespace lockdown checks, and returned to
-  the login prompt. Gate 7 process and Gate 5 native tracing,
-  supervisor-loss, unexpected-stop, and immutable-image regressions passed.
+  `hdae/systemd-baseline`; technically passed, awaiting human checkpoint
+  acceptance and explicit remote-delivery authorization
+- Last evidence: `make demo-gate-9` passed all 8 checks. `make test-systemd`,
+  `make test-systemd-live`, `make bench`, `make check`, `make test`,
+  `make test-native-vfs`, and `make test-oci-image` passed with the exact
+  measurements and limitations recorded in the Gate 9 ledger. The latest
+  `make test-systemd` also passed the deterministic DNF-failure,
+  unchanged-readable-RPM-package-set, immutable-base, clean-shutdown, and
+  configured-startup-failure checks.
 - Approved network direction: Gate 9 defaults to full host-shared inbound and
   outbound networking with normal host routing and bind conflicts, under Ginux
   mediation and audit. Gate 9.5 adds comprehensive domain configuration,
   network selection, port controls, and translation.
-- Required human decision: none for Gate 9. Gate 9.5 must resolve pre-boot hook
-  execution context and authority before implementing hooks.
+- Required human decision: accept or reject Gate 9 at its checkpoint, and
+  separately authorize branch push and pull-request creation if desired. Gate
+  9.5 must resolve pre-boot hook execution context and authority before
+  implementing hooks.

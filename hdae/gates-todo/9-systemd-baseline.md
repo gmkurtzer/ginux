@@ -61,16 +61,25 @@ a controlled shutdown.
 - [x] Reach the Ginux-owned login console, authenticate through `pam_unix`,
   execute commands in the managed shell, and verify virtual identity, process
   visibility, and the initial lockdown probes.
+- [x] Mediate shared DNS, HTTPS, bind, listen, accept, and normal address
+  conflicts without an unchecked managed syscall path.
+- [x] Complete Rocky's enabled upstream-repository `dnf -y update` against a
+  disposable domain root while preserving the immutable OCI base.
+- [x] Translate authenticated systemd poweroff into bounded domain shutdown
+  and verify supervisor cleanup.
+- [x] Add restricted-network cold, warm, repeat, configured-failure, benchmark,
+  live-update, and operator demonstration targets.
+- [x] Add a deterministic failed-DNF transaction check that verifies the RPM
+  package set remains readable and unchanged, managed shutdown completes, and
+  the cached OCI base remains byte-identical.
+- [x] Give the pinned systemd OCI image its own explicit fetch, verify, and
+  prepare targets and make every Gate 9 target depend on that exact cache.
 
 ## Remaining work
 
-- [ ] Define the exact image, units, readiness marker, timeout, and shutdown
-  result.
-- [ ] Integrate systemd and close bounded compatibility gaps.
-- [ ] Add repeatable boot, failure diagnostics, and shutdown verification.
-- [ ] Capture baseline boot resource and timing measurements.
-- [ ] Demonstrate login, virtual PID inspection, lockdown probes, and the
-  bounded DNF transaction.
+- [ ] Human checkpoint review and acceptance.
+- [ ] Push the dedicated branch and open the intended pull request when the
+  human explicitly requests remote delivery.
 
 ## Acceptance criteria
 
@@ -111,8 +120,10 @@ a controlled shutdown.
 ## Verification plan
 
 - `make test-systemd` -> cold boot, warm boot, repeated boot, readiness,
-  login, virtual PID inventory, lockdown probes, configured failure, live
-  upstream DNF transaction, and controlled shutdown cases pass.
+  login, virtual PID inventory, lockdown probes, configured failure, and
+  controlled shutdown pass with external networking disabled.
+- `make test-systemd-live` -> shared networking and the live upstream
+  `dnf -y update` transaction pass.
 - Offline boot subtest with external network disabled and the domain image
   already prepared -> reaches readiness and exits zero without an acquisition
   request; the live DNF subtest is explicitly excluded from this offline case.
@@ -165,11 +176,60 @@ a controlled shutdown.
   record; host paths and protected descriptors were hidden; unassigned KVM and
   block devices were absent; mount and namespace creation were denied; exiting
   returned to the login prompt.
+- `make test-systemd` -> three fresh cached-image boots passed with external
+  networking disabled. Each reached the managed login, authenticated, ran
+  virtual PID and lockdown checks, and shut down through the virtual poweroff
+  path. A forced unreachable-repository DNF transaction failed as intended,
+  the sorted `rpm -qa` package set remained readable, nonempty, and identical,
+  controlled shutdown completed, and the cached OCI rootfs SHA-256 was
+  unchanged. The configured missing-init case exited nonzero with one
+  deterministic diagnosis, no shell fallback, and no retained managed task or
+  resource.
+- `make bench` -> on macOS arm64 using Rocky 10.2 x86-64 under QEMU TCG with
+  two vCPUs and 2048 MiB host memory: 14,772 ms boot-to-login, 29,577 ms total
+  instrumented runtime, 19,668 KiB peak traced-tree RSS, 14,716 KiB
+  login-ready RSS, 4 peak sampled host processes, 37 peak Ginux-managed tasks,
+  and 4 idle domain `/proc` entries. These are observations, not budgets.
+- `make test-systemd-live` -> shared DNS/HTTPS and bind/listen/accept/conflict
+  checks passed; enabled `baseos`, `appstream`, and `extras` repositories
+  selected Rocky mirror infrastructure; metadata was current at the recorded
+  run; 58 packages were upgraded; DNF printed `Complete!`; systemd then
+  powered off and Ginux reported `GINUX_NATIVE_CHECK: PASS`. The run took
+  872,979 ms and audited 1,035,090 managed syscalls under TCG.
+- `make check` -> formatting and strict lint passed for every workspace
+  component and x86-64 fixture.
+- `make test` -> all 46 component tests and the interception, runtime,
+  configuration, domain, image, device, process, and virtual-kernel-view QEMU
+  regressions passed.
+- `make test-native-vfs` -> native shell, mutation/network denial,
+  supervisor-loss termination, unexpected-stop cleanup, and immutable Bash
+  checks passed after the assertions were updated to require virtual PID audit
+  identity.
+- `make test-oci-image` -> all 7 digest, assembly, repeatability, identity,
+  corruption, offline, and layer-semantics checks passed.
+- `make demo-gate-9` -> all 8 documented operator checks passed: systemd as
+  virtual PID 1, multi-user readiness, authenticated managed shell, virtual
+  PID/lockdown visibility, shared networking, upstream DNF update, controlled
+  systemd poweroff, and clean Ginux teardown.
 
 ## Decisions and limitations
 
 - The exact enabled unit set and readiness marker are recorded before this gate
   executes and become the named compatibility claim.
+- The validated image is `rockylinux/rockylinux:10-ubi-init`, pinned to OCI
+  index `sha256:81a2afe3645266b059214fc91bff27c5a51862abc61bf244b867e51d1093567c`
+  and linux/amd64 manifest
+  `sha256:7a18ce2c9c1e0d8735f3e72685f9666150af25036e7f7b5ee4eede3754496f8c`.
+  Ginux launches `/sbin/init --system --unit=multi-user.target`; the named
+  readiness evidence is systemd's managed `console-getty.service`,
+  `getty.target`, and `multi-user.target` sequence ending in
+  `Reached target multi-user.target - Multi-User System.`, followed by the
+  Rocky login prompt. Boot readiness has a 50-second timeout; the upstream DNF
+  transaction has an independent 1,800-second TCG watchdog.
+- The expected shutdown result is systemd's `Powering off.`, a validated
+  virtual-PID-1 reboot request translated to domain shutdown, zero exit,
+  `GINUX_NATIVE_CHECK: PASS`, and removal of the disposable domain root by the
+  harness.
 - Human direction on 2026-11-04 selected Rocky Linux's enabled default upstream
   repositories and an actual `dnf -y update`, rather than a cached local
   repository fixture.
@@ -187,10 +247,16 @@ a controlled shutdown.
 - The first systemd baseline identifies bounded mount compatibility and
   multi-task supervision as the next required implementation tranche. The
   probe is partial evidence only; it does not satisfy readiness or login.
-- Reaching `multi-user.target` establishes the first boot milestone, but does
-  not yet satisfy Gate 9: authenticated login, explicit readiness, live shared
-  networking and DNF, measurements, controlled shutdown, and complete
-  regression evidence remain open.
+- Reaching `multi-user.target` does not claim that every started unit is
+  healthy. The minimal UBI userspace still emits expected warnings and
+  unavailable-service failures, including its absent D-Bus broker execution
+  path; Gate 9 claims only the named readiness, login, network, update, and
+  shutdown workflow.
+- DNF modifies only the freshly extracted disposable domain root. Every test
+  re-extracts the digest-verified OCI cache, and the OCI regression confirms
+  that cached base content remains immutable and repeatable. The deterministic
+  DNF failure check additionally verifies an unchanged readable RPM package
+  set and an unchanged cached-root hash after failure and domain teardown.
 - New architecture needs discovered during convergence require human direction
   or a corrective gate rather than silent scope expansion.
 
@@ -204,10 +270,18 @@ a controlled shutdown.
   tranches; readiness, failure, shutdown, and measurement evidence
 - Actual commits: `daca8006` (pinned systemd baseline and probe); `8af72885`
   (virtual bootstrap compatibility); `e595fc28` (multi-task supervision);
-  authenticated-console and lockdown tranche pending commit
+  `f9920311` (authenticated console and lockdown); `9265509d` (shared network
+  and DNF mediation); `707581cd` (RPM filesystem operations); `69988717`
+  (disposable write backing); `07630954` (controlled shutdown); `a93024b6`
+  (repeat/failure/measurement harness); `c2d24a00` (machine-readable benchmark
+  measurements); `d83995dd` (virtual-PID audit regression); `35e3763c`
+  (bounded DNF watchdog); `598b9821` (failed-DNF consistency evidence and exact
+  systemd-image targets)
 
 ## Review policy and outcome
 
-Human checkpoint. Systemd readiness is the principal compatibility milestone
-and its exact meaning and evidence require explicit acceptance. Present
-`make demo-gate-9`, fresh evidence, and the pull request before acceptance.
+Technically passed on 2026-11-05; human acceptance remains required. Systemd
+readiness is the principal compatibility milestone and its exact meaning and
+evidence require explicit acceptance. The local `make demo-gate-9` evidence is
+complete. Remote branch push and pull-request creation remain intentionally
+pending explicit current authorization under repository policy.
