@@ -535,10 +535,30 @@ fn process_native_main(config_path: *const u8, fixture_path: *const u8) -> ! {
 
 fn process_native_tracee(fixture_path: *const u8) -> ! {
     const SYS_CLOSE_RANGE: usize = 436;
+    const SYS_RT_SIGACTION: usize = 13;
+    const SYS_SETRLIMIT: usize = 160;
+    const RLIMIT_CORE: usize = 4;
+    const SIGPIPE: usize = 13;
     if unsafe { syscall3(SYS_CLOSE_RANGE, 3, u32::MAX as usize, 0) } < 0 {
         native_tracee_setup_fail(132);
     }
-    if unsafe { syscall4(SYS_PTRACE, PTRACE_TRACEME, 0, 0, 0) } < 0
+    // Forwarded core-dumping signals must not make the host write a core
+    // of a domain task; the tracee cannot raise the limit (setrlimit and
+    // prlimit64 are `-ENOSYS` in this lane). SIGPIPE starts at its default
+    // action whatever the launcher ignored, as exec keeps `SIG_IGN`.
+    let no_core = [0usize; 2];
+    let default_action = [0usize; 4];
+    if unsafe { syscall2(SYS_SETRLIMIT, RLIMIT_CORE, no_core.as_ptr() as usize) } < 0
+        || unsafe {
+            syscall4(
+                SYS_RT_SIGACTION,
+                SIGPIPE,
+                default_action.as_ptr() as usize,
+                0,
+                8,
+            )
+        } < 0
+        || unsafe { syscall4(SYS_PTRACE, PTRACE_TRACEME, 0, 0, 0) } < 0
         || unsafe { syscall5(SYS_PRCTL, PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) } < 0
     {
         native_tracee_setup_fail(130);
@@ -1108,8 +1128,11 @@ fn supervise_process_native(root_host_pid: usize, domain: &mut Domain) -> ! {
         }
         // A forwarded termination signal first arrives as a delivery stop
         // for the task: forward normal termination signals, including
-        // self-signals and delivery to a sibling in the target group.
-        if signal == SIGINT as u8 || signal == SIGTERM as u8 {
+        // self-signals and delivery to a sibling in the target group, and
+        // the kernel-generated fatal signals (SIGPIPE, SIGSEGV, ...). No
+        // handler can exist, so the default action kills the task and its
+        // death reaches the virtual table through the exit path above.
+        if fatal_default_signal(signal) {
             write_all(b"GINUX_NATIVE_PROCESS_AUDIT: terminating signal=");
             write_u64(signal as u64);
             write_all(b" virtual-pid=");
@@ -1671,16 +1694,21 @@ fn supervise_process_native(root_host_pid: usize, domain: &mut Domain) -> ! {
                                 registers.orig_rax = u64::MAX;
                             }
                             Some(view)
-                                if view.id.pid != view.tgid
+                                if !(0..=64).contains(&(signal as i32))
+                                    || view.id.pid != view.tgid
                                     || (signal != 0
                                         && signal != SIGINT as u64
                                         && signal != SIGTERM as u64
                                         && signal != SIGKILL as u64) =>
                             {
-                                // Signals to thread-group members would hit
-                                // the whole host group, and only the normal
+                                // Numbers outside the signal range are invalid
+                                // arguments for any existing target, as on
+                                // Linux. Signals to thread-group members would
+                                // hit the whole host group, and only the normal
                                 // termination signals have a managed meaning.
-                                current.result = if view.id.pid != view.tgid {
+                                current.result = if !(0..=64).contains(&(signal as i32)) {
+                                    -EINVAL
+                                } else if view.id.pid != view.tgid {
                                     -EPERM
                                 } else {
                                     -ENOSYS
@@ -1800,6 +1828,21 @@ fn supervise_process_native(root_host_pid: usize, domain: &mut Domain) -> ! {
             process_native_fail(domain, root_host_pid, b"process syscall dispatch failed");
         }
     }
+}
+
+/// Signals whose default action terminates the task (with or without a
+/// core dump). Forwarding a delivery stop for one runs no workload code
+/// only because `rt_sigaction` stays `-ENOSYS` in this lane and exec resets
+/// inherited handlers: no handler can exist, so the task dies (or, under an
+/// inherited `SIG_IGN`, carries on as on Linux). Mediating `rt_sigaction`
+/// must revisit this. SIGKILL never stops; SIGCHLD and SIGSTOP have their
+/// own paths. SIGCONT, SIGTSTP, SIGTTIN, SIGTTOU, SIGURG and SIGWINCH are not
+/// forwarded and still fail the domain, although Linux stops the task or
+/// ignores them by default. SIGTRAP stays out: a plain trap stop may be the supervisor's
+/// fork-result breakpoint hit by a sibling thread of the forking parent,
+/// which must fail the domain instead of passing as a workload crash.
+fn fatal_default_signal(signal: u8) -> bool {
+    matches!(signal, 1..=4 | 6..=8 | 10..=16 | 24..=27 | 29..=64)
 }
 
 fn group_exec_pending(

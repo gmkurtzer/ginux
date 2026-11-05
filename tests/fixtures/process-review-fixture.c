@@ -180,6 +180,33 @@ long probe_main(word *stack) {
     int status=0;
     show("signal wait=",call3(61,child,(word)&status,0));
     show("signal status=",status);
+#elif defined(CASE_sigpipe)
+    long child=call3(57,0,0,0);
+    if(!child) {
+        // Writing to a pipe without readers raises SIGPIPE in the writer.
+        if(call3(22,(word)descriptors,0,0))return 10;
+        call3(3,descriptors[0],0,0);
+        show("sigpipe write=",call3(1,descriptors[1],(word)"x",1));
+        return 99;
+    }
+    int status=0;
+    show("sigpipe wait=",call3(61,child,(word)&status,0));
+    show("sigpipe status=",status);
+#elif defined(CASE_segv)
+    long child=call3(57,0,0,0);
+    if(!child) {
+        static int *volatile null_pointer;
+        *null_pointer=1;
+        return 99;
+    }
+    int status=0;
+    show("segv wait=",call3(61,child,(word)&status,0));
+    show("segv status=",status);
+#elif defined(CASE_kill_badsig)
+    long pid=call3(39,0,0,0);
+    show("kill signal 65=",call3(62,pid,65,0));
+    show("kill signal -1=",call3(62,pid,(word)-1,0));
+    show("kill missing pid signal 65=",call3(62,77,65,0));
 #elif defined(CASE_nonblocking_wait)
     call3(22,(word)descriptors,0,0);
     long child=call3(57,0,0,0);
