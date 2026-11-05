@@ -6,6 +6,7 @@ set -eu
 domain_log=build/gate4-domain.log
 failure_log=build/gate4-domain-failure.log
 lifecycle_log=build/gate4-lifecycle.log
+rerun_log=build/gate4-domain-rerun.log
 
 ./scripts/check-rocky-host.sh
 rocky_scp \
@@ -42,5 +43,8 @@ grep -Fqx 'GINUX_LIFECYCLE: helper=reaped zombies=0' "$lifecycle_log"
 grep -Fqx 'GINUX_LIFECYCLE: state=stopped resources=false managed-task=false' "$lifecycle_log"
 grep -Fqx 'GATE4_LIFECYCLE: PASS' "$lifecycle_log"
 
-rocky_ssh '/var/tmp/ginux domain /var/tmp/gate4-valid.toml /var/tmp/ginux-runtime-fixture >/dev/null; rm -f /var/tmp/ginux /var/tmp/ginux-runtime-fixture /var/tmp/ginux-runtime-malformed /var/tmp/gate4-valid.toml /var/tmp/gate4-lifecycle.log'
+# Reusable after the failure and stop cases: the last run must pass too.
+rocky_ssh '/var/tmp/ginux domain /var/tmp/gate4-valid.toml /var/tmp/ginux-runtime-fixture' > "$rerun_log" 2>&1
+grep -Fqx 'GATE4: PASS' "$rerun_log"
+rocky_ssh 'rm -f /var/tmp/ginux /var/tmp/ginux-runtime-fixture /var/tmp/ginux-runtime-malformed /var/tmp/gate4-valid.toml /var/tmp/gate4-lifecycle.log'
 printf '%s\n' 'test-domain: PASS'

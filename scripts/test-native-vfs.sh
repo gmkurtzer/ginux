@@ -27,6 +27,8 @@ grep -Fqx 'GINUX_NATIVE_CHECK: PASS' "$native_log"
 grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ phase=entry syscall=[0-9]+ action=(mediate|emulate|deny)' "$native_log"
 grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ phase=entry syscall=39 action=emulate surface=virtual-identity result=4242$' "$native_log"
 grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ phase=entry syscall=110 action=emulate surface=virtual-identity result=1$' "$native_log"
+grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ phase=entry syscall=102 action=emulate surface=virtual-identity result=0$' "$native_log"
+grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ phase=entry syscall=104 action=emulate surface=virtual-identity result=0$' "$native_log"
 grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ phase=entry syscall=16 action=deny result=-38$' "$native_log"
 grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ phase=entry syscall=257 action=mediate surface=immutable-image result=pending$' "$native_log"
 grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ phase=entry syscall=1 action=mediate surface=bootstrap-console result=pending$' "$native_log"
@@ -55,7 +57,7 @@ done
 test "$ready" -eq 1
 tracee_pid=$(rocky_ssh "pgrep -P '$hold_pid' -x bash")
 case "$tracee_pid" in *[!0-9]*|'') printf '%s\n' 'invalid held tracee PID' >&2; exit 1 ;; esac
-rocky_ssh "sudo kill -9 '$hold_pid'; attempt=0; while sudo kill -0 '$tracee_pid' 2>/dev/null; do attempt=\$((attempt + 1)); test \$attempt -lt 50; sleep 0.1; done"
+rocky_ssh "sudo kill -9 '$hold_pid'; attempt=0; while sudo kill -0 '$tracee_pid' 2>/dev/null; do attempt=\$((attempt + 1)); test \$attempt -lt 50 || exit 1; sleep 0.1; done"
 if rocky_ssh "sudo kill -0 '$tracee_pid'" >/dev/null 2>&1; then
     printf '%s\n' 'tracee survived supervisor loss' >&2
     exit 1
