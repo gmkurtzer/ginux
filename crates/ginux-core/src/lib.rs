@@ -12,6 +12,8 @@ pub const SYS_GETEUID: u64 = 107;
 pub const SYS_GETEGID: u64 = 108;
 pub const SYS_GETPPID: u64 = 110;
 pub const SYS_GETPGRP: u64 = 111;
+pub const SYS_FUTEX: u64 = 202;
+pub const SYS_SET_TID_ADDRESS: u64 = 218;
 pub const SYS_EXIT_GROUP: u64 = 231;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -82,14 +84,42 @@ pub const fn decide_balanced(syscall: u64) -> Decision {
     Decision { syscall, action }
 }
 
+/// The virtual pid of the single task in the balanced contract. The task
+/// has no threads (thread creation is denied), so it is also its tid.
+pub const BALANCED_VIRTUAL_PID: i64 = 4242;
+
 pub const fn balanced_identity_result(syscall: u64) -> Option<i64> {
     match syscall {
-        SYS_GETPID => Some(4242),
+        SYS_GETPID => Some(BALANCED_VIRTUAL_PID),
         SYS_GETPPID => Some(1),
-        SYS_GETPGRP => Some(4242),
+        SYS_GETPGRP => Some(BALANCED_VIRTUAL_PID),
         SYS_GETUID | SYS_GETGID | SYS_GETEUID | SYS_GETEGID => Some(0),
         _ => None,
     }
+}
+
+/// Result reported for a mediated call whose host result is the caller's
+/// host tid. `set_tid_address` executes on the host for its clear-on-exit
+/// registration, but its return value is the caller's tid, so the task
+/// sees its virtual tid instead. `None` keeps the host result.
+pub const fn balanced_mediated_result(syscall: u64) -> Option<i64> {
+    match syscall {
+        SYS_SET_TID_ADDRESS => Some(BALANCED_VIRTUAL_PID),
+        _ => None,
+    }
+}
+
+/// Whether a futex operation word selects a priority-inheritance operation.
+/// PI futexes keep the owner's tid in the futex word: `FUTEX_LOCK_PI`,
+/// `FUTEX_LOCK_PI2` and `FUTEX_TRYLOCK_PI` store the caller's host tid in
+/// workload memory, and `FUTEX_UNLOCK_PI` and the requeue-PI operations
+/// compare the word against it. The command is classified by its low 7 bits
+/// alone, so any combination of flag bits above it is covered:
+/// `FUTEX_PRIVATE_FLAG` and `FUTEX_CLOCK_REALTIME`, and the additional flag
+/// bits newer kernels accept.
+pub const fn futex_priority_inheritance(op: u64) -> bool {
+    const FUTEX_COMMAND: u64 = 0x7f;
+    matches!(op & FUTEX_COMMAND, 6..=8 | 11..=13)
 }
 
 pub const fn balanced_arguments_allowed(syscall: u64, arg0: u64, arg1: u64, arg2: u64) -> bool {
@@ -116,6 +146,7 @@ pub const fn balanced_arguments_allowed(syscall: u64, arg0: u64, arg1: u64, arg2
         302 => arg0 == 0 && arg1 <= 15,
         318 => arg2 <= 256,
         SYS_WAIT4 => arg0 == u64::MAX || arg0 > 0,
+        SYS_FUTEX => !futex_priority_inheritance(arg1),
         _ => true,
     }
 }
@@ -168,6 +199,62 @@ mod tests {
         assert_eq!(balanced_surface(16), BalancedSurface::Denied);
         assert_eq!(balanced_surface(41), BalancedSurface::Denied);
         assert_eq!(balanced_surface(105), BalancedSurface::Denied);
+    }
+
+    #[test]
+    fn balanced_contract_reports_the_virtual_tid() {
+        // set_tid_address stays mediated for its clear-on-exit registration,
+        // but reports the same virtual id as getpid instead of the host tid.
+        assert_eq!(decide_balanced(SYS_SET_TID_ADDRESS).action, Action::Mediate);
+        assert!(balanced_arguments_allowed(
+            SYS_SET_TID_ADDRESS,
+            0x1000,
+            0,
+            0
+        ));
+        assert_eq!(
+            balanced_mediated_result(SYS_SET_TID_ADDRESS),
+            balanced_identity_result(SYS_GETPID)
+        );
+        for syscall in [0, 1, 9, SYS_FUTEX, SYS_WAIT4, 273, 334] {
+            assert_eq!(balanced_mediated_result(syscall), None);
+        }
+    }
+
+    #[test]
+    fn balanced_contract_rejects_priority_inheritance_futexes() {
+        const PRIVATE: u64 = 128;
+        const CLOCK_REALTIME: u64 = 256;
+        // LOCK_PI, UNLOCK_PI, TRYLOCK_PI, WAIT_REQUEUE_PI, CMP_REQUEUE_PI,
+        // LOCK_PI2 keep the owner's host tid in the futex word.
+        for command in [6, 7, 8, 11, 12, 13] {
+            for op in [
+                command,
+                command | PRIVATE,
+                command | CLOCK_REALTIME,
+                command | PRIVATE | CLOCK_REALTIME,
+                command | PRIVATE | 512,
+                command | PRIVATE | 1024,
+                command | 1 << 20,
+                // Register bits above the 32-bit operation word.
+                command | 0xffff_ffff_0000_0000,
+            ] {
+                assert!(futex_priority_inheritance(op), "{op:#x}");
+                assert!(!balanced_arguments_allowed(SYS_FUTEX, 0x1000, op, 0));
+            }
+        }
+        // WAIT, WAKE, FD, REQUEUE, CMP_REQUEUE, WAKE_OP, WAIT_BITSET,
+        // WAKE_BITSET and unknown commands stay mediated.
+        for command in [0, 1, 2, 3, 4, 5, 9, 10, 14, 0x46] {
+            for op in [
+                command,
+                command | PRIVATE,
+                command | PRIVATE | CLOCK_REALTIME,
+            ] {
+                assert!(!futex_priority_inheritance(op), "{op:#x}");
+                assert!(balanced_arguments_allowed(SYS_FUTEX, 0x1000, op, 0));
+            }
+        }
     }
 
     #[test]

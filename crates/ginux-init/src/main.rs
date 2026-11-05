@@ -4,8 +4,8 @@
 use core::arch::global_asm;
 use core::panic::PanicInfo;
 use ginux_core::{
-    balanced_identity_result, balanced_surface, decide, Action, SYS_EXIT, SYS_EXIT_GROUP,
-    SYS_GETPID, SYS_UNAME, SYS_WRITE,
+    balanced_identity_result, balanced_mediated_result, balanced_surface, decide, Action, SYS_EXIT,
+    SYS_EXIT_GROUP, SYS_GETPID, SYS_UNAME, SYS_WRITE,
 };
 
 mod channel_hooks;
@@ -3174,6 +3174,12 @@ fn supervise_native(pid: usize, domain: &mut Domain) -> ! {
                 write_all(b"mediate surface=");
                 line(balanced_surface_name(balanced_surface(syscall)));
                 awaiting_exit = true;
+                // A host result that is the caller's host tid is replaced
+                // at the exit stop.
+                if let Some(result) = balanced_mediated_result(syscall) {
+                    override_exit = true;
+                    override_result = result;
+                }
                 if ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0 {
                     native_fail(domain, pid, b"native mediated syscall failed");
                 }

@@ -49,6 +49,21 @@ static void print(const char *value)
     call3(1, 1, (word)"\n", 1);
 }
 
+/* "label<decimal value>\n" in one write. */
+static void print_number(const char *label, long value)
+{
+    char line[64];
+    char digits[24];
+    word used = 0, at = sizeof digits;
+    word magnitude = value < 0 ? -(word)value : (word)value;
+    do digits[--at] = '0' + magnitude % 10; while (magnitude /= 10);
+    if (value < 0) digits[--at] = '-';
+    while (*label && used < sizeof line - 26) line[used++] = *label++;
+    while (at < sizeof digits) line[used++] = digits[at++];
+    line[used++] = '\n';
+    call3(1, 1, (word)line, used);
+}
+
 static word number(const char *value)
 {
     word result = 0;
@@ -122,6 +137,25 @@ long launch_fixture_main(word *stack)
             }
         }
         return 83;
+    }
+    case 'v': {
+        /* Thread identity: set_tid_address returns the caller's tid, which
+         * for a single-threaded task equals getpid, and FUTEX_LOCK_PI on a
+         * free word stores the caller's tid in it, also with flag bits above
+         * the command (1024). Neither may expose the host tid next to the
+         * virtual pid. */
+        static int clear_tid;
+        static int pi_word;
+        static int pi_flags_word;
+        print_number("set_tid_address=", call3(218, (word)&clear_tid, 0, 0));
+        print_number("getpid=", call3(39, 0, 0, 0));
+        print_number("gettid=", call3(186, 0, 0, 0));
+        print_number("futex_lock_pi=", call4(202, (word)&pi_word, 6 | 128, 0, 0));
+        print_number("pi_word=", pi_word);
+        print_number("futex_lock_pi_flags=",
+                     call4(202, (word)&pi_flags_word, 6 | 128 | 1024, 0, 0));
+        print_number("pi_flags_word=", pi_flags_word);
+        return 0;
     }
     default: return 98;
     }

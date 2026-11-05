@@ -4,7 +4,10 @@
 //! input-file staging. Workload definitions stay with the entry points in
 //! `main.rs`; `launch` runs the executable and arguments from domain config.
 
-use ginux_core::{balanced_identity_result, balanced_surface, Action, SYS_EXIT, SYS_EXIT_GROUP};
+use ginux_core::{
+    balanced_identity_result, balanced_mediated_result, balanced_surface, Action, SYS_EXIT,
+    SYS_EXIT_GROUP,
+};
 use ginux_domain::{ConfigError, Domain, DomainConfig, ExecutionBackend, ExecutionProfile};
 
 use crate::dispatch::{
@@ -1033,6 +1036,12 @@ fn supervise_launch(pid: usize, domain: &mut Domain) -> ! {
                 audit_write(b"mediate surface=");
                 audit_line(balanced_surface_name(balanced_surface(syscall)));
                 awaiting_exit = true;
+                // A host result that is the caller's host tid is replaced
+                // at the exit stop.
+                if let Some(result) = balanced_mediated_result(syscall) {
+                    override_exit = true;
+                    override_result = result;
+                }
                 if ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0 {
                     launch_fail(domain, pid, b"launch mediated syscall failed");
                 }

@@ -40,6 +40,17 @@ def main():
         check("fork denied", code == 0 and "GINUX_FIXTURE: fork=-38\n" in out
               and "unsupervised child ran" not in out and "GINUX_NATIVE_CHECK: PASS" in out, code, out)
 
+        # The thread identity matches the virtual pid: set_tid_address returns
+        # it instead of the host tid, and PI futexes, which would store the
+        # host tid in the futex word, are denied.
+        code, out = run("virtual-tid")
+        fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
+        check("thread identity is virtual", code == 0 and fixture == [
+            "GINUX_FIXTURE: set_tid_address=4242", "GINUX_FIXTURE: getpid=4242",
+            "GINUX_FIXTURE: gettid=-38", "GINUX_FIXTURE: futex_lock_pi=-1",
+            "GINUX_FIXTURE: pi_word=0", "GINUX_FIXTURE: futex_lock_pi_flags=-1",
+            "GINUX_FIXTURE: pi_flags_word=0"] and "GINUX_NATIVE_CHECK: PASS" in out, code, out)
+
         # A plain SIGTRAP stop is not a syscall stop; supervision must fail
         # closed instead of treating the next syscall entry as an exit.
         code, out = run("trap")
