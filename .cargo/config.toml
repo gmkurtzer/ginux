@@ -1,6 +1,8 @@
 [target.x86_64-unknown-linux-gnu]
-linker = "rust-lld"
+# Keep the freestanding linker in target-only flags. A target linker setting
+# also affects host build scripts when the host is x86-64 Linux.
 rustflags = [
+    "-C", "linker=rust-lld",
     "-C", "link-arg=-nostdlib",
     "-C", "link-arg=-static",
     "-C", "link-arg=-no-pie",
