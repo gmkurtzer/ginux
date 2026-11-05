@@ -183,4 +183,54 @@ if tar --version 2>/dev/null | grep -q 'GNU tar'; then
 else
     printf '%s\n' 'test-oci-layers: skipping GNU long-name case (needs GNU tar)'
 fi
-printf '%s\n' 'test-oci-layers: PASS (replacement, whiteout, opaque directory, hard links, repeatability, truncation, duplicates, GNU long names)'
+
+# GNU sparse files (tar --sparse) store only their data regions, and PAX
+# formats 0.1 and 1.0 put them under a GNUSparseFile.<pid> path. Both modes
+# must reject them instead of indexing a wrong name, size and content. A
+# --sparse archive without sparse members stays accepted.
+sparse_cases=
+if tar --version 2>/dev/null | grep -q 'GNU tar'; then
+    sparse=$work/sparse
+    mkdir -p "$sparse/usr/bin" "$sparse/usr/lib64" "$sparse/opt"
+    cp "$base/usr/bin/bash" "$sparse/usr/bin/bash"
+    cp "$base/usr/lib64/ld-linux-x86-64.so.2" "$base/usr/lib64/libc.so.6" "$sparse/usr/lib64/"
+    tar --sparse --format=posix -cf "$work/dense.tar" -C "$sparse" .
+    cargo run -q -p ginux-vfs-index -- "$work/dense.tar" "$work/dense.index" >/dev/null
+    # Six data regions: a GNU-format S header holds four, the rest go to an
+    # extension block.
+    for region in 0 1 2 3 4 5; do
+        printf 'region-%s\n' "$region" |
+            dd of="$sparse/opt/holes" bs=1 seek=$((region * 65536)) conv=notrunc 2>/dev/null
+    done
+    tar --sparse --format=posix -cf "$work/sparse-1.0.tar" -C "$sparse" .
+    tar --sparse --format=posix --sparse-version=0.0 -cf "$work/sparse-0.0.tar" -C "$sparse" .
+    tar --sparse --format=posix --sparse-version=0.1 -cf "$work/sparse-0.1.tar" -C "$sparse" .
+    tar --sparse --format=gnu -cf "$work/sparse-gnu.tar" -C "$sparse" .
+    if grep -aq 'GNU\.sparse\.' "$work/sparse-1.0.tar"; then
+        for archive in sparse-1.0 sparse-0.1 sparse-0.0 sparse-gnu; do
+            for mode in plain assemble; do
+                if [ "$mode" = plain ]; then
+                    set -- "$work/$archive.tar" "$work/$archive.index"
+                else
+                    set -- assemble "$work/$archive-rootfs.tar" "$work/$archive.index" "$work/$archive.tar"
+                fi
+                if cargo run -q -p ginux-vfs-index -- "$@" >/dev/null 2>"$work/sparse.err"; then
+                    printf '%s\n' "$mode mode accepted GNU sparse file in $archive.tar" >&2
+                    exit 1
+                fi
+                if ! grep -Fq 'GNU sparse files are unsupported' "$work/sparse.err" ||
+                    ! grep -Fq /opt/holes "$work/sparse.err"; then
+                    printf '%s\n' "$mode mode failed on $archive.tar without naming the sparse file:" >&2
+                    cat "$work/sparse.err" >&2
+                    exit 1
+                fi
+            done
+        done
+        sparse_cases=', GNU sparse files'
+    else
+        printf '%s\n' 'test-oci-layers: skipping GNU sparse case (file system made no holes)'
+    fi
+else
+    printf '%s\n' 'test-oci-layers: skipping GNU sparse case (needs GNU tar)'
+fi
+printf '%s\n' "test-oci-layers: PASS (replacement, whiteout, opaque directory, hard links, repeatability, truncation, duplicates, GNU long names$sparse_cases)"
