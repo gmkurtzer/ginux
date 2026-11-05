@@ -92,7 +92,7 @@ expect {
     timeout { puts stderr "shared network bind check timed out"; exit 96 }
     eof { puts stderr "managed shell exited during bind check"; exit 97 }
 }
-set timeout 900
+set timeout 1800
 expect {
     -re {GINUX_DNF_UPDATE: (PASS|SKIPPED)} {}
     timeout { puts stderr "dnf update timed out"; exit 98 }
