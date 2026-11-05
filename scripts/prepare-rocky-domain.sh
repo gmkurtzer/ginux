@@ -9,6 +9,17 @@ if ! docker image inspect "$ROCKY_DOMAIN_HELPER_IMAGE" >/dev/null 2>&1; then
     exit 2
 fi
 
+# The cache is reused only if the rootfs and manifest still match the hashes
+# recorded when they were prepared; otherwise prepare again from the source.
+cached_artifact_matches() {
+    if grep -Fqx "$1=$(shasum -a 256 "$2" | awk '{print $1}')" "$ROCKY_DOMAIN_METADATA_PATH"; then
+        return 0
+    fi
+    printf 'cached %s does not match %s in %s; preparing again\n' \
+        "$2" "$1" "$ROCKY_DOMAIN_METADATA_PATH" >&2
+    return 1
+}
+
 source_sha=$(shasum -a 256 "$ROCKY_SOURCE_IMAGE" | awk '{print $1}')
 if [ "${GINUX_IMAGE_FORCE:-0}" != 1 ] &&
     [ -f "$ROCKY_DOMAIN_ROOTFS_PATH" ] &&
@@ -16,7 +27,9 @@ if [ "${GINUX_IMAGE_FORCE:-0}" != 1 ] &&
     [ -f "$ROCKY_DOMAIN_METADATA_PATH" ] &&
     grep -Fqx 'GINUX_ROOTFS_MANIFEST_VERSION=1' "$ROCKY_DOMAIN_MANIFEST_PATH" &&
     grep -Fqx "SOURCE_SHA256=$source_sha" "$ROCKY_DOMAIN_METADATA_PATH" &&
-    grep -Fqx "HELPER_IMAGE=$ROCKY_DOMAIN_HELPER_IMAGE" "$ROCKY_DOMAIN_METADATA_PATH"; then
+    grep -Fqx "HELPER_IMAGE=$ROCKY_DOMAIN_HELPER_IMAGE" "$ROCKY_DOMAIN_METADATA_PATH" &&
+    cached_artifact_matches MANIFEST_SHA256 "$ROCKY_DOMAIN_MANIFEST_PATH" &&
+    cached_artifact_matches ROOTFS_SHA256 "$ROCKY_DOMAIN_ROOTFS_PATH"; then
     printf 'Rocky domain userspace already prepared: %s\n' "$ROCKY_DOMAIN_ROOTFS_PATH"
     exit 0
 fi
