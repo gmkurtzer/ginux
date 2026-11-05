@@ -64,9 +64,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn build_index_from(input: PathBuf, output: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     let mut source = File::open(input)?;
     let source_len = source.metadata()?.len();
-    let mut entries = scan_tar(&mut source, source_len)?;
-    entries.sort_by(|left, right| left.path.cmp(&right.path));
-    entries.dedup_by(|left, right| left.path == right.path);
+    let entries = scan_tar(&mut source, source_len)?;
     if entries.len() > u32::MAX as usize {
         return Err("too many rootfs entries".into());
     }
@@ -182,6 +180,18 @@ fn write_hardlink_as_file(
         let pax_size = parse_octal(&pax_header[124..136])?;
         let mut data = vec![0u8; usize::try_from(pax_size).map_err(|_| "PAX record too large")?];
         source.read_exact(&mut data)?;
+        offset += 512 + pax_size.div_ceil(512) * 512;
+        match pax_header[156] {
+            // A GNU long link name is the link's target name: drop it.
+            b'K' => continue,
+            b'L' => {
+                destination.write_all(&pax_header)?;
+                destination.write_all(&data)?;
+                destination.write_all(&vec![0u8; (512 - data.len() % 512) % 512])?;
+                continue;
+            }
+            _ => {}
+        }
         // A regular file must not carry the link's target name.
         let mut kept = Vec::with_capacity(data.len());
         let mut start = 0usize;
@@ -202,7 +212,6 @@ fn write_hardlink_as_file(
             destination.write_all(&kept)?;
             destination.write_all(&vec![0u8; (512 - kept.len() % 512) % 512])?;
         }
-        offset += 512 + pax_size.div_ceil(512) * 512;
     }
     source.seek(SeekFrom::Start(header_offset))?;
     let mut header = [0u8; 512];
@@ -239,11 +248,13 @@ fn scan_layer(
     let mut pending_offset: Option<u64> = None;
     let mut pax_path: Option<Vec<u8>> = None;
     let mut pax_link: Option<Vec<u8>> = None;
+    let mut ended = false;
     while offset + 512 <= source_len {
         source.seek(SeekFrom::Start(offset))?;
         let mut header = [0u8; 512];
         source.read_exact(&mut header)?;
         if header.iter().all(|byte| *byte == 0) {
+            ended = true;
             break;
         }
         verify_checksum(&header)?;
@@ -258,20 +269,13 @@ fn scan_layer(
         }
         match header[156] {
             b'g' => return Err("global PAX headers are unsupported in OCI layers".into()),
-            b'x' => {
+            // PAX extended headers and GNU long names belong to the next
+            // entry and are copied with it.
+            b'x' | b'L' | b'K' => {
                 if pending_offset.is_none() {
                     pending_offset = Some(offset);
                 }
-                let size_usize = usize::try_from(size).map_err(|_| "PAX record too large")?;
-                let mut data = vec![0u8; size_usize];
-                source.read_exact(&mut data)?;
-                for (key, value) in parse_pax(&data)? {
-                    if key == b"path" {
-                        pax_path = Some(value.to_vec());
-                    } else if key == b"linkpath" {
-                        pax_link = Some(value.to_vec());
-                    }
-                }
+                read_extension(source, header[156], size, &mut pax_path, &mut pax_link)?;
             }
             kind => {
                 let path = pax_path.take().unwrap_or_else(|| header_path(&header));
@@ -317,8 +321,13 @@ fn scan_layer(
         }
         offset = end;
     }
+    // Without an end-of-archive block the archive was cut inside a header
+    // or at an entry boundary.
+    if !ended {
+        return Err("truncated tar: no end-of-archive block".into());
+    }
     if pending_offset.is_some() {
-        return Err("OCI layer ends with an unattached PAX header".into());
+        return Err("OCI layer ends with an unattached PAX or GNU long-name header".into());
     }
     Ok(records)
 }
@@ -346,12 +355,19 @@ fn whiteout(record: &LayerRecord) -> Option<(Vec<u8>, bool)> {
     Some((target, false))
 }
 
-fn remove_descendants(merged: &mut BTreeMap<Vec<u8>, LayerRecord>, path: &[u8]) {
+fn remove_descendants<T>(merged: &mut BTreeMap<Vec<u8>, T>, path: &[u8]) {
     let mut prefix = path.to_vec();
     if prefix != b"/" {
         prefix.push(b'/');
     }
-    merged.retain(|candidate, _| !candidate.starts_with(&prefix));
+    let descendants = merged
+        .range(prefix.clone()..)
+        .take_while(|(candidate, _)| candidate.starts_with(&prefix))
+        .map(|(candidate, _)| candidate.clone())
+        .collect::<Vec<_>>();
+    for candidate in descendants {
+        merged.remove(&candidate);
+    }
 }
 
 fn verify_index(source: &mut File, mut index_file: File) -> Result<(), Box<dyn std::error::Error>> {
@@ -390,32 +406,34 @@ fn scan_tar(
     source: &mut File,
     source_len: u64,
 ) -> Result<Vec<OwnedEntry>, Box<dyn std::error::Error>> {
-    let mut entries = Vec::new();
+    // Later entries replace earlier ones with the same path, as on
+    // extraction and in assemble_layers.
+    let mut entries = BTreeMap::<Vec<u8>, OwnedEntry>::new();
     let mut offset = 0u64;
     let mut pax_path: Option<Vec<u8>> = None;
     let mut pax_link: Option<Vec<u8>> = None;
+    let mut ended = false;
     while offset + 512 <= source_len {
         source.seek(SeekFrom::Start(offset))?;
         let mut header = [0u8; 512];
         source.read_exact(&mut header)?;
         if header.iter().all(|byte| *byte == 0) {
+            ended = true;
             break;
         }
         verify_checksum(&header)?;
         let size = parse_octal(&header[124..136])?;
         let data_offset = offset + 512;
+        let padded = size.checked_add(511).ok_or("tar size overflow")? / 512 * 512;
+        let end = data_offset
+            .checked_add(padded)
+            .ok_or("tar offset overflow")?;
+        if end > source_len {
+            return Err("truncated rootfs tar entry".into());
+        }
         let kind = header[156];
-        if kind == b'x' || kind == b'g' {
-            let size_usize = usize::try_from(size).map_err(|_| "PAX record too large")?;
-            let mut data = vec![0u8; size_usize];
-            source.read_exact(&mut data)?;
-            for (key, value) in parse_pax(&data)? {
-                if key == b"path" {
-                    pax_path = Some(value.to_vec());
-                } else if key == b"linkpath" {
-                    pax_link = Some(value.to_vec());
-                }
-            }
+        if matches!(kind, b'x' | b'g' | b'L' | b'K') {
+            read_extension(source, kind, size, &mut pax_path, &mut pax_link)?;
         } else {
             let path = pax_path.take().unwrap_or_else(|| header_path(&header));
             let link = pax_link
@@ -437,9 +455,10 @@ fn scan_tar(
             // A hard link shares the data of an earlier regular file.
             let (node_kind, size, data_offset, link) = if kind == b'1' {
                 let target = normalize_archive_path(&link)?;
-                match entries.iter().rev().find(|entry: &&OwnedEntry| {
-                    entry.path == target && entry.kind == NodeKind::File
-                }) {
+                match entries
+                    .get(&target)
+                    .filter(|entry| entry.kind == NodeKind::File)
+                {
                     Some(target) => (node_kind, target.size, target.data_offset, Vec::new()),
                     None => {
                         eprintln!(
@@ -460,7 +479,10 @@ fn scan_tar(
                     )
                     .into());
                 }
-                entries.push(OwnedEntry {
+                if node_kind != NodeKind::Directory {
+                    remove_descendants(&mut entries, &path);
+                }
+                let entry = OwnedEntry {
                     path,
                     kind: node_kind,
                     mode: parse_octal(&header[100..108])? as u32,
@@ -469,27 +491,59 @@ fn scan_tar(
                     size: if node_kind == NodeKind::File { size } else { 0 },
                     data_offset,
                     link,
-                });
+                };
+                entries.insert(entry.path.clone(), entry);
             }
         }
-        let padded = size.checked_add(511).ok_or("tar size overflow")? / 512 * 512;
-        offset = data_offset
-            .checked_add(padded)
-            .ok_or("tar offset overflow")?;
+        offset = end;
     }
-    if !entries.iter().any(|entry| entry.path == b"/") {
-        entries.push(OwnedEntry {
-            path: b"/".to_vec(),
-            kind: NodeKind::Directory,
-            mode: 0o755,
-            uid: 0,
-            gid: 0,
-            size: 0,
-            data_offset: 0,
-            link: Vec::new(),
-        });
+    // Without an end-of-archive block the archive was cut inside a header
+    // or at an entry boundary.
+    if !ended {
+        return Err("truncated tar: no end-of-archive block".into());
     }
-    Ok(entries)
+    entries.entry(b"/".to_vec()).or_insert_with(|| OwnedEntry {
+        path: b"/".to_vec(),
+        kind: NodeKind::Directory,
+        mode: 0o755,
+        uid: 0,
+        gid: 0,
+        size: 0,
+        data_offset: 0,
+        link: Vec::new(),
+    });
+    Ok(entries.into_values().collect())
+}
+
+/// Read the data of a PAX extended header (`x`, `g`) or a GNU long name
+/// (`L`) or long link name (`K`) record and apply its path and link name to
+/// the next entry. If an entry has both a PAX path and a GNU long name, the
+/// record closer to the entry wins, as in libarchive.
+fn read_extension(
+    source: &mut File,
+    kind: u8,
+    size: u64,
+    path: &mut Option<Vec<u8>>,
+    link: &mut Option<Vec<u8>>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let size = usize::try_from(size).map_err(|_| "PAX record too large")?;
+    let mut data = vec![0u8; size];
+    source.read_exact(&mut data)?;
+    match kind {
+        // GNU long names end at the first NUL, as in GNU tar and libarchive.
+        b'L' => *path = Some(field(&data).to_vec()),
+        b'K' => *link = Some(field(&data).to_vec()),
+        _ => {
+            for (key, value) in parse_pax(&data)? {
+                if key == b"path" {
+                    *path = Some(value.to_vec());
+                } else if key == b"linkpath" {
+                    *link = Some(value.to_vec());
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn field(bytes: &[u8]) -> &[u8] {
