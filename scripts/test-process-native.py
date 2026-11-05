@@ -38,6 +38,7 @@ def main():
         "thread_segv": [b"thread segv wait=2", b"thread segv status=11"],
         "thread_term": [b"thread term kill=0", b"thread term wait=2", b"thread term status=15"],
         "parked_kill": [b"parked kill wait=2", b"parked kill status=11"],
+        "parked_term": [b"parked term kill=0", b"parked term wait=2", b"parked term status=15"],
         "alias_writes": [b"plain stdin write=-38", b"dup stdin write=-38", b"dup alias write=-38",
                          b"dup2 stdin write=-38", b"dup3 stdin write=-38", b"fcntl dupfd stdin write=-38",
                          b"fcntl dupfd-cloexec stdin write=-38", b"stdin over stdout write=-38",
@@ -62,7 +63,7 @@ def main():
                 repetitions = 100 if mode == "legacy" else 20 if mode in (
                     "thread_exec", "exec_failure", "thread_reuse", "clone_tid", "vfork",
                     "concurrent_wait", "remaining_wait", "sigpipe", "segv", "thread_segv",
-                    "thread_term", "parked_kill"
+                    "thread_term", "parked_kill", "parked_term"
                 ) else 1
                 deferred_stops = 0
                 for run in range(repetitions):
