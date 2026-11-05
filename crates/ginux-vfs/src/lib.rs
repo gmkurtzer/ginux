@@ -492,23 +492,43 @@ impl<'a, R: BaseReader, const FILES: usize, const FILE_SIZE: usize, const FDS: u
 
     pub fn close(&mut self, descriptor: i32) -> Result<(), VfsError> {
         let slot = self.descriptor(descriptor)?;
+        let state = self.descriptors[slot];
         self.descriptors[slot] = Descriptor::empty();
+        if state.overlay {
+            self.release_unlinked(state.object);
+        }
         Ok(())
     }
 
     pub fn close_on_exec(&mut self) {
-        for descriptor in &mut self.descriptors {
-            if descriptor.open && descriptor.close_on_exec {
-                *descriptor = Descriptor::empty();
+        for slot in 0..FDS {
+            if self.descriptors[slot].open && self.descriptors[slot].close_on_exec {
+                let _ = self.close(slot as i32 + 3);
             }
+        }
+    }
+
+    fn referenced(&self, object: usize) -> bool {
+        self.descriptors
+            .iter()
+            .any(|fd| fd.open && fd.overlay && fd.object == object)
+    }
+
+    fn release_unlinked(&mut self, object: usize) {
+        if self.overlay[object].state == 2 && !self.referenced(object) {
+            self.overlay[object].data.fill(0);
+            self.overlay[object].len = 0;
         }
     }
 
     pub fn unlink(&mut self, path: &[u8]) -> Result<(), VfsError> {
         let path = normalize(path)?;
         if let Some(index) = self.find_overlay(path.as_bytes()) {
+            if self.overlay[index].state == 2 {
+                return Err(VfsError::NotFound);
+            }
             self.overlay[index].state = 2;
-            self.overlay[index].len = 0;
+            self.release_unlinked(index);
             return Ok(());
         }
         let entry = self.index.resolve(path.as_bytes())?;
@@ -543,18 +563,41 @@ impl<'a, R: BaseReader, const FILES: usize, const FILE_SIZE: usize, const FDS: u
     fn find_overlay(&self, path: &[u8]) -> Option<usize> {
         self.overlay
             .iter()
-            .position(|entry| entry.state != 0 && entry.path.as_bytes() == path)
+            .position(|entry| entry.state == 1 && entry.path.as_bytes() == path)
+            .or_else(|| {
+                self.overlay
+                    .iter()
+                    .position(|entry| entry.state == 2 && entry.path.as_bytes() == path)
+            })
     }
 
     fn allocate_overlay(&self) -> Result<usize, VfsError> {
         self.overlay
             .iter()
             .position(|entry| entry.state == 0)
+            .or_else(|| {
+                self.overlay.iter().enumerate().position(|(slot, entry)| {
+                    entry.state == 2
+                        && !self.referenced(slot)
+                        && (self.index.resolve(entry.path.as_bytes()) == Err(VfsError::NotFound)
+                            || self.overlay.iter().enumerate().any(|(other, candidate)| {
+                                other != slot
+                                    && candidate.state != 0
+                                    && candidate.path.as_bytes() == entry.path.as_bytes()
+                            }))
+                })
+            })
             .ok_or(VfsError::OverlayLimit)
     }
 
     fn create_overlay(&mut self, path: Path, mode: u32) -> Result<usize, VfsError> {
-        let index = self.allocate_overlay()?;
+        // A whiteout can become the same live name again only after its old
+        // descriptions close. Whiteouts for other image names remain reserved.
+        let index = match self.find_overlay(path.as_bytes()) {
+            Some(slot) if self.overlay[slot].state == 2 && !self.referenced(slot) => slot,
+            _ => self.allocate_overlay()?,
+        };
+        self.overlay[index].data.fill(0);
         self.overlay[index].state = 1;
         self.overlay[index].path = path;
         self.overlay[index].mode = mode;
@@ -866,6 +909,109 @@ mod tests {
             vfs.open(b"/missing/file", O_WRITE | O_CREATE),
             Err(VfsError::NotFound)
         );
+    }
+
+    #[test]
+    fn unlink_retains_open_bytes_and_recreated_names_are_independent() {
+        let bytes = index_bytes();
+        let mut vfs: VirtualFs<'_, Reader, 3, 32, 4> =
+            VirtualFs::new(Index::new(&bytes).unwrap(), Reader(*b"BASETOOL"));
+        let writer = vfs.open(b"/usr/new", O_WRITE | O_CREATE).unwrap();
+        vfs.write(writer, b"old").unwrap();
+        vfs.close(writer).unwrap();
+        let old = vfs.open(b"/usr/new", O_READ).unwrap();
+        let alias = vfs.duplicate(old, true).unwrap();
+        vfs.unlink(b"/usr/new").unwrap();
+        assert_eq!(vfs.unlink(b"/usr/new"), Err(VfsError::NotFound));
+        assert_eq!(vfs.open(b"/usr/new", O_READ), Err(VfsError::NotFound));
+        let fresh = vfs.open(b"/usr/new", O_WRITE | O_CREATE).unwrap();
+        vfs.write(fresh, b"new").unwrap();
+        vfs.close(fresh).unwrap();
+        let fresh = vfs.open(b"/usr/new", O_READ).unwrap();
+        let mut output = [0; 3];
+        assert_eq!(vfs.read(fresh, &mut output), Ok(3));
+        assert_eq!(&output, b"new");
+        assert_eq!(vfs.read(old, &mut output), Ok(3));
+        assert_eq!(&output, b"old");
+        vfs.close(old).unwrap();
+        assert_eq!(vfs.read(alias, &mut output), Ok(3));
+        assert_eq!(&output, b"old");
+        vfs.close_on_exec();
+        assert_eq!(vfs.close(alias), Err(VfsError::InvalidDescriptor));
+        vfs.close(fresh).unwrap();
+    }
+
+    #[test]
+    fn closed_unlinked_slots_are_reusable_without_losing_image_whiteouts() {
+        let bytes = index_bytes();
+        let mut vfs: VirtualFs<'_, Reader, 2, 32, 2> =
+            VirtualFs::new(Index::new(&bytes).unwrap(), Reader(*b"BASETOOL"));
+        vfs.unlink(b"/base").unwrap();
+        for _ in 0..8 {
+            let fd = vfs.open(b"/usr/new", O_WRITE | O_CREATE).unwrap();
+            vfs.write(fd, b"fresh").unwrap();
+            vfs.unlink(b"/usr/new").unwrap();
+            // Open references keep the deleted slot occupied.
+            assert_eq!(
+                vfs.open(b"/usr/other", O_WRITE | O_CREATE),
+                Err(VfsError::OverlayLimit)
+            );
+            vfs.close(fd).unwrap();
+            let fd = vfs.open(b"/usr/other", O_WRITE | O_CREATE).unwrap();
+            vfs.close(fd).unwrap();
+            vfs.unlink(b"/usr/other").unwrap();
+            assert_eq!(vfs.open(b"/base", O_READ), Err(VfsError::NotFound));
+        }
+        assert_eq!(vfs.overlay_files(), 0);
+    }
+
+    #[test]
+    fn recycling_slots_preserves_whiteouts_below_image_symlinks() {
+        let bytes = index_bytes();
+        let mut vfs: VirtualFs<'_, Reader, 2, 32, 2> =
+            VirtualFs::new(Index::new(&bytes).unwrap(), Reader(*b"BASETOOL"));
+        let fd = vfs.open(b"/bin/tool", O_READ | O_WRITE).unwrap();
+        vfs.unlink(b"/bin/tool").unwrap();
+        vfs.close(fd).unwrap();
+        for path in [b"/usr/one", b"/usr/two", b"/usr/end"] {
+            let fd = vfs.open(path, O_CREATE | O_WRITE).unwrap();
+            vfs.close(fd).unwrap();
+            assert_eq!(vfs.open(b"/bin/tool", O_READ), Err(VfsError::NotFound));
+            vfs.unlink(path).unwrap();
+        }
+    }
+
+    #[test]
+    fn replacing_an_open_image_copy_does_not_leak_redundant_whiteouts() {
+        let bytes = index_bytes();
+        let mut vfs: VirtualFs<'_, Reader, 2, 32, 3> =
+            VirtualFs::new(Index::new(&bytes).unwrap(), Reader(*b"BASETOOL"));
+        let old = vfs.open(b"/base", O_READ | O_WRITE).unwrap();
+        vfs.write(old, b"old!").unwrap();
+        let reader = vfs.open(b"/base", O_READ).unwrap();
+        vfs.unlink(b"/base").unwrap();
+        let replacement = vfs.open(b"/base", O_WRITE | O_CREATE).unwrap();
+        vfs.write(replacement, b"new!").unwrap();
+        vfs.close(replacement).unwrap();
+        let mut output = [0; 4];
+        assert_eq!(vfs.read(reader, &mut output), Ok(4));
+        assert_eq!(&output, b"old!");
+        vfs.close(reader).unwrap();
+        vfs.close(old).unwrap();
+        // The old image-name whiteout is redundant while its replacement exists.
+        let extra = vfs.open(b"/usr/extra", O_CREATE | O_WRITE).unwrap();
+        vfs.close(extra).unwrap();
+        vfs.unlink(b"/usr/extra").unwrap();
+        vfs.unlink(b"/base").unwrap();
+        assert_eq!(vfs.open(b"/base", O_READ), Err(VfsError::NotFound));
+        for _ in 0..4 {
+            let fd = vfs.open(b"/base", O_CREATE | O_WRITE).unwrap();
+            vfs.close(fd).unwrap();
+            vfs.unlink(b"/base").unwrap();
+        }
+        let extra = vfs.open(b"/usr/extra", O_CREATE | O_WRITE).unwrap();
+        vfs.close(extra).unwrap();
+        assert_eq!(vfs.open(b"/base", O_READ), Err(VfsError::NotFound));
     }
 
     #[test]
