@@ -335,7 +335,8 @@ fn write_status(task: TaskView, writer: &mut Writer<'_>) -> Result<(), ViewError
     writer.bytes(b"\nState:\t")?;
     writer.bytes(match task.state {
         TaskState::Running => b"R (running)",
-        TaskState::Exited(_) => b"Z (zombie)",
+        // Signaled-but-unreaped tasks are zombies like exited ones.
+        TaskState::Exited(_) | TaskState::Signaled(_) => b"Z (zombie)",
     })?;
     writer.bytes(b"\nTgid:\t")?;
     writer.decimal(u64::from(task.tgid))?;
@@ -365,7 +366,7 @@ fn write_stat(task: TaskView, writer: &mut Writer<'_>) -> Result<(), ViewError> 
     })?;
     writer.byte(match task.state {
         TaskState::Running => b'R',
-        TaskState::Exited(_) => b'Z',
+        TaskState::Exited(_) | TaskState::Signaled(_) => b'Z',
     })?;
     writer.byte(b' ')?;
     writer.decimal(u64::from(task.parent))?;

@@ -2,9 +2,11 @@
 //!
 //! Single owner for entry classification and the contract decision used by
 //! the supervision loops. Lane hooks live in disjoint files
-//! (`process_hooks`, `fs_hooks`, `channel_hooks`) and currently all decline,
-//! so every entry falls through to the existing balanced-contract decision
-//! with byte-identical behavior.
+//! (`process_hooks`, `fs_hooks`, `channel_hooks`). The process lane claims
+//! the fork/vfork/clone/exec entries but emulates nothing for them, so
+//! `decide_native` still falls through to the existing balanced-contract
+//! decision with byte-identical behavior; the process-native supervision
+//! loop consumes `process_entry` and mediates those entries itself.
 
 use ginux_core::{balanced_arguments_allowed, decide_balanced, BalancedSurface, Decision};
 
