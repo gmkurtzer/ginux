@@ -1113,27 +1113,12 @@ impl<const WAITERS: usize> FutexTable<WAITERS> {
     }
 }
 
-/// G05a descriptor tracking: pipe pairs, dups, and close-on-exec ends as
-/// supervisor-owned domain objects.
+/// Descriptor kinds tracked by native process supervision.
 ///
-/// The supervision loop lets descriptor syscalls execute on the host: pipe
-/// pairs, dups, and closes are real kernel objects, so data flows, offsets
-/// stay shared, and close-on-exec closes happen in the kernel. The loop
-/// mirrors every outcome here so it can gate reads/writes to domain objects,
-/// drop close-on-exec ends at exec, and inherit ends across fork/clone. No
-/// supervisor descriptor is ever handed to a tracee: every tracked fd is the
-/// tracee's own host fd, created by its own syscalls under supervision.
-///
-/// Inheritance copies the parent's entries and retains each pipe end; the
-/// host duplicated the same table with the address space, so the mirror
-/// agrees. CLONE_FILES shares one table and exec first unshares it.
-/// Task death releases entries only when the last table owner exits,
-/// matching the host's descriptor lifetime.
-///
-/// LIMIT (merge with the G07 lineage): this mirror tracks pipe and dup ends
-/// only. The G07 file-descriptor table lives on its own branch; at merge
-/// the two converge into one descriptor table (open-file kinds join here,
-/// dup must cross both kinds, and a single close path must release both).
+/// The host performs pipe, dup, and close operations. `PipeSpace` mirrors
+/// their results to validate descriptor access and follow fork, CLONE_FILES,
+/// exec, and task exit. It tracks pipe ends and aliases of inherited stdio;
+/// ordinary file descriptors are not represented.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FdKind {
     PipeRead,

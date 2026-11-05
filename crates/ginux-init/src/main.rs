@@ -580,7 +580,7 @@ fn supervise_process_native(root_host_pid: usize, domain: &mut Domain) -> ! {
         native_fail(domain, root_host_pid, b"process ptrace options failed");
     }
     let mut processes: ProcessTable<8> = ProcessTable::new();
-    // G05a descriptor mirror: pipe pairs, dups, and close-on-exec ends as
+    // Descriptor mirror: pipe pairs, dups, and close-on-exec ends as
     // supervisor-owned domain objects, keyed by virtual pid. Every mutation
     // below follows a host outcome the loop observed.
     let mut pipes: PipeSpace<8, 16, 16> = PipeSpace::new();
@@ -725,7 +725,7 @@ fn supervise_process_native(root_host_pid: usize, domain: &mut Domain) -> ! {
             if recorded.is_err() {
                 process_native_fail(domain, root_host_pid, b"virtual exit failed");
             }
-            // G05a: the host closed every descriptor with the task. Release
+            // The host closed every descriptor with the task. Release
             // the mirror's ends now, so the pipe objects die their last
             // close here and no stale write end can hide an EOF elsewhere.
             pipes.release_task(task.virtual_id.pid);
@@ -785,7 +785,7 @@ fn supervise_process_native(root_host_pid: usize, domain: &mut Domain) -> ! {
                 process_native_fail(domain, root_host_pid, b"native process fixture failed");
             }
             if root_exited && !tasks.iter().flatten().any(|entry| entry.tracing) {
-                // G05a leak audit: every end died with its task (last close
+                // Descriptor leak audit: every end died with its task (last close
                 // is the host's), so no pipe object may survive full reap.
                 write_all(b"GINUX_NATIVE_PROCESS_AUDIT: descriptors live-pipes=");
                 write_u64(pipes.active_pipes() as u64);
@@ -1159,7 +1159,7 @@ fn supervise_process_native(root_host_pid: usize, domain: &mut Domain) -> ! {
             let restore_translated_argument =
                 matches!(current.syscall, 62 | 274) && current.translated_rdi != 0;
             if current.desc_syscall != 0 && !current.override_result {
-                // G05a descriptor exit: the host executed, so the tracee
+                // Descriptor exit: the host executed, so the tracee
                 // keeps the real host result. The mirror follows the
                 // outcome; failures leave it untouched.
                 let desc_result = registers.rax as i64;
@@ -1717,7 +1717,7 @@ fn supervise_process_native(root_host_pid: usize, domain: &mut Domain) -> ! {
                     }
                 }
                 SYS_READ => {
-                    // G05a managed read: pre-supervision stdio and tracked
+                    // Managed read: pre-supervision stdio and tracked
                     // pipe ends execute on the host; anything else is not a
                     // domain object and fails closed.
                     let tracked = pipes
@@ -1730,7 +1730,7 @@ fn supervise_process_native(root_host_pid: usize, domain: &mut Domain) -> ! {
                     }
                 }
                 1 => {
-                    // G05a managed write: the existing bounded console path
+                    // Managed write: the existing bounded console path
                     // is unchanged; tracked pipe ends execute regardless of
                     // length so shell pipelines move arbitrary bytes. Beyond
                     // that the old denial shape stays (ENOSYS for stdio with
@@ -1750,7 +1750,7 @@ fn supervise_process_native(root_host_pid: usize, domain: &mut Domain) -> ! {
                     }
                 }
                 SYS_PIPE | SYS_DUP | SYS_DUP2 | SYS_CLOSE | SYS_FCNTL | SYS_DUP3 | SYS_PIPE2 => {
-                    // G05a descriptor mediation: flag shapes the mirror
+                    // Descriptor mediation: flag shapes the mirror
                     // cannot represent fail here before the host runs.
                     // Everything else executes on the host and the exit stop
                     // below mirrors the outcome.

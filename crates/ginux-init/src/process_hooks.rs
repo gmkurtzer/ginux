@@ -1,69 +1,15 @@
-//! Native process-lane dispatch hooks.
+//! Syscall validation for native process supervision.
 //!
-//! Owner: G-process lane. G03 mediates the raw fork entry through the
-//! supervision loop's fork-event path; G03a extends the same path to the
-//! remaining libc process-creation variants. Raw `clone` (56) is what glibc
-//! `fork()` emits, and the `posix_spawn`/`system` fallback after a denied
-//! `clone3` is `clone` with `CLONE_VM|CLONE_VFORK`; raw `vfork` (58) is the
-//! classic third spelling. All three create ordinary parent/child process
-//! pairs, so the host call executes and the supervisor creates the virtual
-//! child from the corresponding `PTRACE_EVENT_*` stop, rewriting the
-//! parent's observed result to the virtual pid. `clone` with `CLONE_VM`
-//! but without `CLONE_VFORK` shares the parent's memory concurrently and
-//! fails explicitly with `-ENOSYS` with no host child created. `clone3`
-//! (435) is left for a follow-up and keeps the existing explicit `-ENOSYS`
-//! denial, which is what makes glibc fall back to `clone`.
+//! The `process-native` loop runs supported fork, clone, vfork, and exec
+//! calls under ptrace, then records their outcomes in `ProcessTable`.
+//! Unsupported clone flags and execveat forms return ENOSYS before execution.
+//! Clone3 is unsupported.
 //!
-//! G03b extends the same path to executable replacement. `execve` (59) and
-//! the plain `execveat` variant (dirfd `AT_FDCWD`, zero flags) execute on the
-//! host with supervision still attached; the supervisor records the virtual
-//! transition from the `PTRACE_EVENT_EXEC` stop, so the task keeps its
-//! virtual identity (same pid, bumped exec epoch, reset signal state) and is
-//! never detached. Other `execveat` shapes need descriptor-table plumbing
-//! from G05a/G07 and fail explicitly with `-ENOSYS` without executing.
-//!
-//! G04 extends the same path to thread creation. `clone` carrying
-//! `CLONE_THREAD` in the supported shape (shared memory and signal handlers,
-//! no exit signal, no reparenting, no host namespaces, no untraceable
-//! children; see [`thread_supported`]) executes on the host and the
-//! supervisor creates the virtual thread from the `PTRACE_EVENT_CLONE` stop
-//! through the existing [`ginux_process::ProcessTable::clone_thread`] managed
-//! path: no parallel task model. The parent's observed return value and its
-//! parent-tid cell are rewritten to the virtual tid, `gettid` (186) is
-//! translated like `getpid`, and thread exit drops the host slot (threads
-//! are joined over a futex, never reaped by `wait4`). Thread-local state the
-//! C library needs around creation — TLS base (`arch_prctl`), the
-//! exit-clear registration (`set_tid_address`, tid translated at the exit
-//! stop), futex wait/wake on the thread group's own shared memory, robust
-//! lists, and `rseq` — is mediated on the host: it touches only the calling
-//! thread or its group's memory, so it is not a host escape. Thread shapes
-//! outside [`thread_supported`] fail explicitly with `-ENOSYS` and never
-//! execute.
-//!
-//! G05 owns child waits and termination signals in the supervision loop
-//! (not in this lane hook, which stays synchronous): `wait4` (61) is fully
-//! emulated against the process table — blocking waits park the caller
-//! until a matching exit or signal death wakes it, `WNOHANG` returns zero,
-//! unknown options fail with `-EINVAL`, stale selectors with `-ECHILD` —
-//! and `kill` (62) forwards the normal termination signals to the
-//! translated host task while signal deaths are recorded as signaled
-//! outcomes with SIGCHLD queued for the parent.
-//!
-//! G05a owns inherited pipes and close-on-exec descriptors, also in the
-//! supervision loop after the wait/kill precedent (no lane-hook claim, so
-//! the other supervision loops keep byte-identical behavior). `pipe` (22)
-//! and `pipe2` (293) execute on the host and the loop mirrors the pair as
-//! supervisor-owned domain objects; `dup` (32), `dup2` (33), `dup3` (292),
-//! and the `fcntl` (72) duplication/flag subset execute the same way with
-//! shared-offset and close-on-exec semantics carried by the host, while
-//! `close` (3) always executes and the mirror drops the entry. Reads and
-//! writes execute only for stdio and tracked ends. Flag shapes the mirror
-//! cannot represent fail here before the host runs: `pipe2` accepts only
-//! `O_CLOEXEC|O_NONBLOCK` (`O_DIRECT` and anything else get `-EINVAL`),
-//! `dup3` accepts only `O_CLOEXEC` (`-EINVAL` otherwise), and only the
-//! `F_DUPFD`/`F_GETFD`/`F_SETFD`/`F_DUPFD_CLOEXEC` `fcntl` commands run
-//! (anything else gets `-ENOSYS`). Fork/clone inheritance and exec scrub
-//! live in the loop next to the fork-event and exec-event paths.
+//! The loop also handles virtual identities, blocking/nonblocking child
+//! waits, termination signals, and descriptor inheritance. Pipes and stdio
+//! aliases are mirrored in `PipeSpace`; ordinary file opens are unsupported.
+//! Signal handlers, job control, and PI futex operations are unsupported.
+//! These hooks do not enable process creation in configured `launch`.
 
 use crate::supervisor::{ENOSYS, SYS_FORK};
 
@@ -79,10 +25,11 @@ pub const SYS_EXECVEAT: u64 = 322;
 /// `AT_FDCWD` dirfd: resolve the path against the working directory.
 pub const AT_FDCWD: u64 = (-100i64) as u64;
 
-/// `CLONE_THREAD` flag (bit 16): thread-group creation belongs to G04.
+/// Share the descriptor table when cloning.
 pub const CLONE_FILES: u64 = 0x0000_0400;
 pub const CLONE_PARENT_SETTID: u64 = 0x0010_0000;
 pub const CLONE_CHILD_SETTID: u64 = 0x0100_0000;
+/// `CLONE_THREAD` flag (bit 16): create a thread-group member.
 pub const CLONE_THREAD: u64 = 0x0001_0000;
 /// `CLONE_VM` flag (bit 8): child shares the parent's address space.
 pub const CLONE_VM: u64 = 0x0000_0100;
@@ -201,8 +148,7 @@ pub const PTRACE_O_TRACEVFORK: usize = 1 << PTRACE_EVENT_VFORK;
 
 /// Lane membership by syscall number: the three process-creation entries
 /// plus the two executable-replacement entries belong to the process lane.
-/// Other entries stay with the supervision loop's existing match until their
-/// owning tasks claim them.
+/// Other entries are handled directly by the supervision loop.
 pub fn claims(syscall: u64) -> bool {
     syscall == SYS_FORK as u64
         || syscall == SYS_CLONE
@@ -237,18 +183,9 @@ pub fn thread_supported(flags: u64) -> bool {
         && flags & CLONE_EXIT_SIGNAL_MASK == 0
 }
 
-/// Emulated result when this lane handles the entry. Process creation,
-/// supported thread creation, and executable replacement are mediated, not
-/// emulated: `None` falls through to the supervision loop, which lets the
-/// host call execute and translates the outcome via the fork-event, clone
-/// thread-event, or exec-event path. Three `clone` shapes never execute and
-/// fail explicitly with `-ENOSYS`: unsupported thread creation
-/// (`CLONE_THREAD` set but outside [`thread_supported`]) and concurrent
-/// address-space sharing (`CLONE_VM` without `CLONE_VFORK`, which has no
-/// managed-task representation because the child runs alongside the parent
-/// in the same memory). `execveat` shapes beyond the plain variant are gated
-/// by [`exec_mediated`], which the supervision loop consults because it sees
-/// the flags register this hook does not receive.
+/// Reject unsupported clone flags and concurrent address-space sharing
+/// outside a thread group. `None` lets the supervision loop handle the call;
+/// it is not permission for other callers to execute a host syscall.
 pub fn claim(syscall: u64, rdi: u64, _rsi: u64, _rdx: u64) -> Option<i64> {
     if syscall == SYS_CLONE {
         // Accept only the flags represented by managed process ownership.
@@ -289,8 +226,7 @@ pub fn claim(syscall: u64, rdi: u64, _rsi: u64, _rdx: u64) -> Option<i64> {
 /// Plain `execve` and `execveat(AT_FDCWD, path, argv, envp, 0)` are mediated:
 /// the host kernel performs shebang and loader transitions with the tracee
 /// still attached. Any other `execveat` shape (non-CWD dirfd, or nonzero
-/// flags such as `AT_EMPTY_PATH`) needs descriptor-table plumbing from
-/// G05a/G07 and is denied so it never executes on the host.
+/// flags such as `AT_EMPTY_PATH`) is unsupported and never executes on the host.
 pub fn exec_mediated(syscall: u64, dirfd: u64, flags: u64) -> bool {
     if syscall == SYS_EXECVE {
         return true;

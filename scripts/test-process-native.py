@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise process-native against existing native binaries; no mocks or unit tests."""
+"""Exercise process-native against existing native binaries."""
 import os
 from pathlib import Path
 import signal
