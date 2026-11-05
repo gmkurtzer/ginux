@@ -58,7 +58,7 @@ Host Linux kernel
                  |- virtual descriptors and kernel views
                  |- assigned devices and resources
                  `- managed Rocky Linux userspace
-                      `- domain systemd (virtual PID 1, planned Gate 9)
+                      `- domain systemd (virtual PID 1)
 ```
 
 Ginux supervises native x86-64 programs and intercepts managed syscalls before
@@ -79,10 +79,16 @@ The current implementation includes:
   models;
 - virtual devices with explicit assignment, ownership, and revocation; and
 - bounded virtual `/proc`, `/sys`, cgroup v2, mount, namespace, machine, and
-  boot-identity views.
+  boot-identity views;
+- a host-shared network backend that remains syscall-mediated; and
+- a pinned Rocky Linux 10 systemd baseline that reaches `multi-user.target`,
+  authenticates a managed console login, updates through Rocky's enabled
+  repositories, and shuts the domain down cleanly.
 
-Gate 8 is complete. Booting Rocky Linux systemd as virtual PID 1 is the next
-planned compatibility gate; it is not yet a current claim.
+This is a named compatibility baseline, not a claim of complete Linux or
+systemd compatibility. Its exact image, readiness marker, tests, evidence, and
+limitations are recorded in
+[`hdae/gates-todo/9-systemd-baseline.md`](hdae/gates-todo/9-systemd-baseline.md).
 
 ## Relationship to other systems
 
@@ -119,6 +125,7 @@ Prepare the pinned assets with explicit network operations:
 make host-image-fetch
 make image-helper-fetch
 make domain-image-fetch
+make systemd-image-fetch
 ```
 
 Build and run the deterministic suite offline after the caches are populated:
@@ -132,8 +139,15 @@ make test
 Inspect the latest completed capability directly:
 
 ```sh
-make demo-gate-8
+make test-systemd       # cached image, external networking disabled
+make bench              # systemd timing and resource observations
+make test-systemd-live  # shared network plus real upstream dnf -y update
+make demo-gate-9        # complete visible Gate 9 workflow
 ```
+
+The live test and demonstration use external Rocky repositories and can take
+many minutes under QEMU TCG because every managed syscall is intercepted and
+audited. The offline systemd test uses only the prepared, digest-pinned cache.
 
 Individual component and gate targets are documented in the `Makefile` and the
 corresponding files under [`docs/`](docs/) and [`hdae/`](hdae/).

@@ -94,7 +94,7 @@ expect {
 }
 set timeout 1800
 expect {
-    -re {GINUX_DNF_UPDATE: (PASS|SKIPPED)} {}
+    -re {GINUX_DNF_UPDATE: (PASS|SKIPPED|FAILURE-PASS)} {}
     timeout { puts stderr "dnf update timed out"; exit 98 }
     eof { puts stderr "managed shell exited during dnf update"; exit 99 }
 }

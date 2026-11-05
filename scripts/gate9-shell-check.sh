@@ -41,7 +41,20 @@ else
 
     /usr/local/sbin/ginux-gate9-network-check
 fi
-if test -e /run/ginux-skip-dnf; then
+if test -e /run/ginux-fail-dnf; then
+    printf '%s\n' 'GINUX_DNF_UPDATE: FAILURE-BEGIN'
+    rpm -qa | LC_ALL=C sort >/tmp/ginux-rpmdb-before-failure
+    if dnf -y --disablerepo='*' \
+        --repofrompath=ginux-failure,http://127.0.0.1:1/ginux-missing \
+        --setopt=timeout=1 --setopt=retries=0 makecache
+    then
+        exit 92
+    fi
+    rpm -qa | LC_ALL=C sort >/tmp/ginux-rpmdb-after-failure
+    test -s /tmp/ginux-rpmdb-after-failure
+    cmp -s /tmp/ginux-rpmdb-before-failure /tmp/ginux-rpmdb-after-failure
+    printf '%s\n' 'GINUX_DNF_UPDATE: FAILURE-PASS'
+elif test -e /run/ginux-skip-dnf; then
     printf '%s\n' 'GINUX_DNF_UPDATE: SKIPPED'
 else
     printf '%s\n' 'GINUX_DNF_UPDATE: BEGIN'
