@@ -401,7 +401,9 @@ impl Cpu {
         let opcode = bytes[index];
         index += 1;
         match opcode {
-            0x90 => {}
+            // 0x90 is NOP only without REX.B; with it, it is xchg with r8..r15,
+            // which the interpreter does not implement, so fail closed.
+            0x90 if rex & 1 == 0 => {}
             0xb8..=0xbf if rex & 8 != 0 => {
                 let register = (opcode - 0xb8) as usize + if rex & 1 != 0 { 8 } else { 0 };
                 self.registers[register] =
@@ -590,7 +592,9 @@ pub fn execute(
             Action::Emulate if request.number == SYS_EXIT => {
                 let result = request.args[0] as i32 as i64;
                 push_audit(&mut report, request.number, AuditAction::Emulate, result)?;
-                report.exit_code = result as i32;
+                // Linux reports only the low 8 bits of the exit status; the
+                // audit record keeps the argument as passed.
+                report.exit_code = (request.args[0] & 0xff) as i32;
                 return Ok(report);
             }
             Action::Mediate if request.number == SYS_WRITE => {
@@ -798,5 +802,43 @@ mod tests {
             execute(&memory, loaded.entry, stack, 10),
             Err(RunError::Cpu(CpuError::UnsupportedInstruction))
         ));
+    }
+
+    #[test]
+    fn rex_b_0x90_fails_closed_instead_of_running_as_nop() {
+        // 90 with any REX prefix but REX.B is NOP; 49 90 is xchg %rax,%r8 and
+        // 41 90 is xchg %eax,%r8d, which are not implemented and must not be
+        // skipped.
+        for (code, expected) in [
+            (&[0x90][..], Ok(Step::Continue)),
+            (&[0x40, 0x90][..], Ok(Step::Continue)),
+            (&[0x42, 0x90][..], Ok(Step::Continue)),
+            (&[0x44, 0x90][..], Ok(Step::Continue)),
+            (&[0x48, 0x90][..], Ok(Step::Continue)),
+            (&[0x49, 0x90][..], Err(CpuError::UnsupportedInstruction)),
+            (&[0x41, 0x90][..], Err(CpuError::UnsupportedInstruction)),
+        ] {
+            let mut memory = AddressSpace::new();
+            let loaded = memory.load_elf(&elf_with(code, 5)).unwrap();
+            let stack = memory.build_stack(&[b"fixture"], &[]).unwrap();
+            let mut cpu = Cpu::new(loaded.entry, stack);
+            assert_eq!(cpu.step(&memory), expected);
+        }
+    }
+
+    #[test]
+    fn exit_status_is_truncated_to_8_bits() {
+        // mov $60,%rax ; mov $status,%rdi ; syscall
+        for (status, expected) in [(42u32, 42), (256, 0), (257, 1), (0xffff_ffff, 255)] {
+            let s = status.to_le_bytes();
+            let code = [
+                0x48, 0xc7, 0xc0, 60, 0, 0, 0, 0x48, 0xc7, 0xc7, s[0], s[1], s[2], s[3], 0x0f, 0x05,
+            ];
+            let mut memory = AddressSpace::new();
+            let loaded = memory.load_elf(&elf_with(&code, 5)).unwrap();
+            let stack = memory.build_stack(&[b"fixture"], &[]).unwrap();
+            let report = execute(&memory, loaded.entry, stack, 100).unwrap();
+            assert_eq!(report.exit_code, expected);
+        }
     }
 }
