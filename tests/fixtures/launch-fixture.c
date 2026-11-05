@@ -10,6 +10,32 @@ static long call3(long number, word a, word b, word c)
     return result;
 }
 
+static long call4(long number, word a, word b, word c, word d)
+{
+    long result;
+    register word r10 __asm__("r10") = d;
+    __asm__ volatile("syscall" : "=a"(result)
+                     : "a"(number), "D"(a), "S"(b), "d"(c), "r"(r10)
+                     : "rcx", "r11", "memory");
+    return result;
+}
+
+/* Signal return trampoline (SA_RESTORER), as libc provides it. */
+void launch_fixture_restore(void);
+__asm__(".global launch_fixture_restore\n"
+        "launch_fixture_restore:\n"
+        "mov $15, %eax\n"
+        "syscall\n"
+        "ud2\n");
+
+static volatile int handled;
+
+static void on_signal(int signal)
+{
+    (void)signal;
+    handled = 1;
+}
+
 static word length(const char *value)
 {
     word count = 0;
@@ -68,6 +94,17 @@ long launch_fixture_main(word *stack)
     case 'b':
         for (word i = 0; i < 4000; ++i) call3(39, 0, 0, 0);
         return 0;
+    case 'h': {
+        /* SIGTRAP handler installed with rt_sigaction; it must return through
+         * rt_sigreturn and resume after the int3. */
+        struct { word handler, flags, restorer, mask; } action = {
+            (word)on_signal, 0x04000000 /* SA_RESTORER */, (word)launch_fixture_restore, 0};
+        if (call4(13, 5, (word)&action, 0, 8) != 0) return 86;
+        __asm__ volatile("int3");
+        if (!handled) return 87;
+        print("handled");
+        return 0;
+    }
     case 'l': {
         /* opendir("."): openat(AT_FDCWD, ".", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) */
         char buffer[1024];
