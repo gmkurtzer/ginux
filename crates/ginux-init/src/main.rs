@@ -2920,8 +2920,11 @@ fn supervise_native(pid: usize, domain: &mut Domain) -> ! {
         if wait(pid, &mut status) < 0 || !stopped(status) {
             native_fail(domain, pid, b"native tracee escaped supervision");
         }
+        // With PTRACE_O_TRACESYSGOOD every syscall stop reports SIGTRAP | 0x80.
+        // Any other stop, such as a plain SIGTRAP from int3, would otherwise
+        // be taken as a syscall stop and swap entry and exit tracking.
         let signal = ((status >> 8) & 0xff) as u8;
-        if signal != (5 | 0x80) && signal != 5 {
+        if signal != (5 | 0x80) {
             native_fail(domain, pid, b"unexpected native trace stop");
         }
         let mut registers = core::mem::MaybeUninit::<UserRegs>::uninit();
@@ -2950,6 +2953,21 @@ fn supervise_native(pid: usize, domain: &mut Domain) -> ! {
             continue;
         }
 
+        // int 0x80 uses the i386 syscall table even from a 64-bit ELF (2 is
+        // fork there, open here). Never classify it with x86-64 numbers.
+        const PTRACE_GET_SYSCALL_INFO: usize = 0x420e;
+        let mut syscall_info = [0u64; 11];
+        if ptrace(
+            PTRACE_GET_SYSCALL_INFO,
+            pid,
+            core::mem::size_of_val(&syscall_info),
+            syscall_info.as_mut_ptr() as usize,
+        ) < 24
+            || syscall_info[0] as u8 != 1
+            || (syscall_info[0] >> 32) as u32 != 0xc000003e
+        {
+            native_fail(domain, pid, b"native requires the x86-64 syscall ABI");
+        }
         sequence += 1;
         let syscall = registers.orig_rax;
         let decision = match decide_native(syscall, registers.rdi, registers.rsi, registers.rdx) {

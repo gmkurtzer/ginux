@@ -976,14 +976,7 @@ fn supervise_launch(pid: usize, domain: &mut Domain) -> ! {
         sequence += 1;
         let syscall = registers.orig_rax;
         let decision = match decide_native(syscall, registers.rdi, registers.rsi, registers.rdx) {
-            NativeDecision::Contract(mut decision) => {
-                // Native process ownership is not implemented on this path.
-                // A host fork would create an unsupervised child.
-                if syscall == ginux_core::SYS_FORK {
-                    decision.action = Action::Deny(38);
-                }
-                decision
-            }
+            NativeDecision::Contract(decision) => decision,
             NativeDecision::Hooked { lane, result } => {
                 let lane_name: &[u8] = match lane {
                     crate::dispatch::Lane::Process => b"process",
