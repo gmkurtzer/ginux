@@ -3369,18 +3369,30 @@ fn tracee() -> ! {
     }
 }
 
+fn supervise_setup_fail(pid: usize, reason: &[u8]) -> ! {
+    // kill(2) instead of PTRACE_KILL: the same policy that failed the ptrace
+    // setup may also refuse PTRACE_KILL, and the reap below would then block.
+    let _ = unsafe { syscall2(SYS_KILL, pid, SIGKILL) };
+    let mut status = 0i32;
+    let _ = wait(pid, &mut status);
+    fail(reason)
+}
+
 fn supervise(pid: usize) -> ! {
     let mut status = 0i32;
     if wait(pid, &mut status) < 0 || !stopped(status) {
         fail(b"payload did not stop after exec");
     }
 
+    // Until PTRACE_O_EXITKILL is in place, exiting would detach the stopped
+    // payload and let it run untraced. Both setup failures kill and reap it
+    // before reporting, so it never runs past its stop after execve.
     let options = PTRACE_O_TRACESYSGOOD | PTRACE_O_EXITKILL;
     if ptrace(PTRACE_SETOPTIONS, pid, 0, options) < 0 {
-        fail(b"PTRACE_SETOPTIONS failed");
+        supervise_setup_fail(pid, b"PTRACE_SETOPTIONS failed");
     }
     if ptrace(PTRACE_SYSEMU, pid, 0, 0) < 0 {
-        fail(b"PTRACE_SYSEMU unavailable");
+        supervise_setup_fail(pid, b"PTRACE_SYSEMU unavailable");
     }
 
     let mut saw_getpid = false;
