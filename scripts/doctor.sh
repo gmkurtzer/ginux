@@ -2,7 +2,7 @@
 set -eu
 
 missing=0
-for command in cargo rustc rustup qemu-system-x86_64 qemu-img ssh scp ssh-keygen hdiutil shasum docker curl jq gzip; do
+for command in cargo rustc rustup rg qemu-system-x86_64 qemu-img ssh scp ssh-keygen hdiutil shasum docker curl jq gzip; do
     if command -v "$command" >/dev/null 2>&1; then
         printf 'doctor: %-24s ok\n' "$command"
     else
