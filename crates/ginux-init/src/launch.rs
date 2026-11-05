@@ -7,15 +7,16 @@
 use ginux_core::{balanced_identity_result, balanced_surface, Action, SYS_EXIT, SYS_EXIT_GROUP};
 use ginux_domain::{ConfigError, Domain, DomainConfig};
 
-use crate::dispatch::{balanced_surface_name, decide_native, native_arguments_allowed, NativeDecision};
+use crate::dispatch::{
+    balanced_surface_name, decide_native, native_arguments_allowed, NativeDecision,
+};
 use crate::supervisor::{
     exit_process, line, ptrace, stopped, syscall0, syscall1, syscall2, syscall3, syscall4,
-    syscall5, wait, write_all, AT_FDCWD, DOMAIN_GID, DOMAIN_UID, O_RDONLY, PR_SET_NO_NEW_PRIVS,
-    PTRACE_GETREGS, PTRACE_KILL, PTRACE_O_EXITKILL, PTRACE_O_TRACESYSGOOD, PTRACE_SETOPTIONS,
-    PTRACE_SETREGS, PTRACE_SYSCALL, PTRACE_TRACEME, SYS_CHDIR, SYS_CHROOT, SYS_CLOSE_HOST,
-    SYS_EXECVE, SYS_EXIT_HOST, SYS_FORK, SYS_FSYNC, SYS_OPENAT_HOST, SYS_PRCTL, SYS_PTRACE,
-    SYS_READ_HOST,
-    SYS_SETGID, SYS_SETGROUPS, SYS_SETUID, SYS_WRITE_HOST, UserRegs,
+    syscall5, wait, write_all, UserRegs, AT_FDCWD, DOMAIN_GID, DOMAIN_UID, O_RDONLY,
+    PR_SET_NO_NEW_PRIVS, PTRACE_GETREGS, PTRACE_KILL, PTRACE_O_EXITKILL, PTRACE_O_TRACESYSGOOD,
+    PTRACE_SETOPTIONS, PTRACE_SETREGS, PTRACE_SYSCALL, PTRACE_TRACEME, SYS_CHDIR, SYS_CHROOT,
+    SYS_CLOSE_HOST, SYS_EXECVE, SYS_EXIT_HOST, SYS_FORK, SYS_FSYNC, SYS_OPENAT_HOST, SYS_PRCTL,
+    SYS_PTRACE, SYS_READ_HOST, SYS_SETGID, SYS_SETGROUPS, SYS_SETUID, SYS_WRITE_HOST,
 };
 
 pub const MAX_ELF_SIZE: usize = 64 * 1024;
@@ -105,7 +106,7 @@ pub fn parse_argv(argc: usize, argv: *const usize) -> Option<Command> {
             Some(Command::Launch(config_path, root_path, core::ptr::null()))
         } else if argc == 6
             && c_string_equals(unsafe { *argv.add(4) as *const u8 }, b"--result-file")
-            && unsafe { *( *argv.add(5) as *const u8) } != 0
+            && unsafe { *(*argv.add(5) as *const u8) } != 0
         {
             let result_path = unsafe { *argv.add(5) as *const u8 };
             Some(Command::Launch(config_path, root_path, result_path))
@@ -379,14 +380,8 @@ fn stage_launch(config: &DomainConfig) {
     }
     let mut argc = 1usize;
     for argument in config.args.as_slice() {
-        let slot =
-            unsafe { core::ptr::addr_of_mut!(LAUNCH_ARGS[(argc - 1) * 129]).cast::<u8>() };
-        let staged = stage_nul(
-            slot,
-            129,
-            argument.as_bytes(),
-            b"domain arg staging failed",
-        );
+        let slot = unsafe { core::ptr::addr_of_mut!(LAUNCH_ARGS[(argc - 1) * 129]).cast::<u8>() };
+        let staged = stage_nul(slot, 129, argument.as_bytes(), b"domain arg staging failed");
         unsafe {
             core::ptr::addr_of_mut!(LAUNCH_ARGV[argc]).write(staged);
         }
@@ -493,7 +488,9 @@ fn stage_result_path(path: *const u8) {
             core::ptr::addr_of_mut!(RESULT_PATH).cast::<u8>(),
             length,
         );
-        *core::ptr::addr_of_mut!(RESULT_PATH).cast::<u8>().add(length) = 0;
+        *core::ptr::addr_of_mut!(RESULT_PATH)
+            .cast::<u8>()
+            .add(length) = 0;
         RESULT_LEN = length;
         RESULT_WANTED = true;
     }
@@ -674,7 +671,7 @@ fn write_completion_result(outcome: u8, has_code: bool, code: u64, has_signal: b
         position = push_bytes(&mut record, position, b"null");
     }
     position = push_bytes(&mut record, position, b",\"generation\":null}\n");
-    let path = core::ptr::addr_of!(RESULT_PATH).cast::<u8>() as *const u8;
+    let path = core::ptr::addr_of!(RESULT_PATH).cast::<u8>();
     const OPEN_FLAGS: usize = 1 | 64 | 128;
     let descriptor =
         unsafe { syscall4(SYS_OPENAT_HOST, AT_FDCWD, path as usize, OPEN_FLAGS, 0o644) };
@@ -731,7 +728,10 @@ fn launch_tracee(root_path: *const u8) -> ! {
         );
     }
     if unsafe { syscall1(SYS_CHDIR, ROOT.as_ptr() as usize) } < 0 {
-        tracee_setup_fail(b"ginux: launch bootstrap failed: root directory unavailable\n", 121);
+        tracee_setup_fail(
+            b"ginux: launch bootstrap failed: root directory unavailable\n",
+            121,
+        );
     }
     let workdir = core::ptr::addr_of!(LAUNCH_WORKDIR).cast::<u8>();
     let _ = unsafe { syscall3(SYS_MKDIRAT, AT_FDCWD, workdir as usize, 0o755) };
@@ -748,13 +748,22 @@ fn launch_tracee(root_path: *const u8) -> ! {
         );
     }
     if unsafe { syscall1(SYS_SETGID, DOMAIN_GID) } < 0 {
-        tracee_setup_fail(b"ginux: launch bootstrap failed: group privilege drop failed\n", 124);
+        tracee_setup_fail(
+            b"ginux: launch bootstrap failed: group privilege drop failed\n",
+            124,
+        );
     }
     if unsafe { syscall1(SYS_SETUID, DOMAIN_UID) } < 0 {
-        tracee_setup_fail(b"ginux: launch bootstrap failed: user privilege drop failed\n", 125);
+        tracee_setup_fail(
+            b"ginux: launch bootstrap failed: user privilege drop failed\n",
+            125,
+        );
     }
     if unsafe { syscall5(SYS_PRCTL, PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) } < 0 {
-        tracee_setup_fail(b"ginux: launch bootstrap failed: no-new-privileges failed\n", 126);
+        tracee_setup_fail(
+            b"ginux: launch bootstrap failed: no-new-privileges failed\n",
+            126,
+        );
     }
     if unsafe { syscall1(SYS_CHDIR, workdir as usize) } < 0 {
         tracee_setup_fail(
