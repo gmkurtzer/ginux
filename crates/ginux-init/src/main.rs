@@ -53,7 +53,7 @@ use ginux_kernel_views::{
     ViewError,
 };
 use ginux_process::{
-    ChildStatus, Credentials, EventFd, EventPoll, FutexTable, PipeSpace, ProcessError,
+    ChildStatus, Credentials, EventFd, EventPoll, FdKind, FutexTable, PipeSpace, ProcessError,
     ProcessTable, SignalAction, SignalDelivery, TaskState, TimerTable, VirtualClock, WaitTarget,
     EVENT_READ, EVENT_WRITE, WAIT_ALLOWED_OPTIONS, WNOHANG,
 };
@@ -1923,19 +1923,24 @@ fn supervise_process_native(root_host_pid: usize, domain: &mut Domain) -> ! {
                 1 => {
                     // Managed write: the existing bounded console path
                     // is unchanged; tracked pipe ends execute regardless of
-                    // length so shell pipelines move arbitrary bytes. Beyond
-                    // that the old denial shape stays (ENOSYS for stdio with
-                    // an overlong write, EBADF past it).
-                    if !(matches!(registers.rdi, 1 | 2) && registers.rdx <= 4096
-                        || pipes
-                            .lookup(current.virtual_id.pid, registers.rdi as u32)
-                            .is_some())
-                    {
-                        current.result = if matches!(registers.rdi, 0..=2) {
-                            -ENOSYS
-                        } else {
-                            -EBADF
-                        };
+                    // length so shell pipelines move arbitrary bytes. A stdio
+                    // alias (dup, dup2, dup3, F_DUPFD) follows the rule of the
+                    // stdio it names, so it cannot widen it. Beyond that the
+                    // old denial shape stays (ENOSYS for stdio with an
+                    // overlong write, EBADF past it).
+                    let stdio = match pipes.lookup(current.virtual_id.pid, registers.rdi as u32) {
+                        Some(entry) if entry.kind == FdKind::External => Some(entry.origin as u64),
+                        Some(_) => None,
+                        None => Some(registers.rdi),
+                    };
+                    let denied = match stdio {
+                        Some(1 | 2) if registers.rdx <= 4096 => None,
+                        Some(0..=2) => Some(-ENOSYS),
+                        Some(_) => Some(-EBADF),
+                        None => None,
+                    };
+                    if let Some(result) = denied {
+                        current.result = result;
                         current.override_result = true;
                         registers.orig_rax = u64::MAX;
                     }
