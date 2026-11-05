@@ -39,7 +39,7 @@ use crate::supervisor::{
     PTRACE_O_TRACEFORK, PTRACE_O_TRACESYSGOOD, PTRACE_PEEKTEXT, PTRACE_POKETEXT, PTRACE_SETOPTIONS,
     PTRACE_SETREGS, PTRACE_SYSCALL, PTRACE_SYSEMU, PTRACE_TRACEME, SIGCHLD, SIGINT, SIGKILL,
     SIGTERM, SIG_BLOCK, SYS_CHDIR, SYS_CHROOT, SYS_CLOCK_GETTIME, SYS_CLOSE_HOST, SYS_EXECVE,
-    SYS_EXIT_HOST, SYS_FORK, SYS_FSYNC, SYS_KILL, SYS_OPENAT_HOST, SYS_PAUSE, SYS_PRCTL,
+    SYS_EXIT_HOST, SYS_FORK, SYS_FSTAT, SYS_FSYNC, SYS_KILL, SYS_OPENAT_HOST, SYS_PAUSE, SYS_PRCTL,
     SYS_PREAD64, SYS_PTRACE, SYS_PWRITE64, SYS_READ_HOST, SYS_RT_SIGPROCMASK, SYS_SETGID,
     SYS_SETGROUPS, SYS_SETUID, SYS_SIGNALFD4, SYS_WAIT4, VIRTUAL_PID,
 };
@@ -2095,6 +2095,29 @@ struct HostBlock {
     len: u64,
 }
 
+/// Partition the devices gate and the block benchmark place on the backing file.
+const BLOCK_PARTITION_START: u64 = 1024;
+const BLOCK_PARTITION_LEN: u64 = 2048;
+
+impl HostBlock {
+    /// Wraps an open backing file, taking its length from `fstat`. Fails with
+    /// `stat_reason` if the size cannot be read and with `size_reason` if the
+    /// file does not cover the partition, before anything is written to it.
+    fn open(descriptor: usize, stat_reason: &[u8], size_reason: &[u8]) -> Self {
+        // struct stat on x86_64 is 144 bytes; st_size is the 64-bit field at
+        // byte offset 48.
+        let mut stat = [0u64; 18];
+        if unsafe { syscall2(SYS_FSTAT, descriptor, stat.as_mut_ptr() as usize) } != 0 {
+            device_fail(stat_reason);
+        }
+        let len = stat[6];
+        if len < BLOCK_PARTITION_START + BLOCK_PARTITION_LEN {
+            device_fail(size_reason);
+        }
+        Self { descriptor, len }
+    }
+}
+
 impl BlockBackend for HostBlock {
     fn len(&self) -> u64 {
         self.len
@@ -2215,11 +2238,12 @@ fn devices_main(config_path: *const u8, block_path: *const u8) -> ! {
     if host_descriptor < 0 {
         device_fail(b"block backend open failed");
     }
-    let backend = HostBlock {
-        descriptor: host_descriptor as usize,
-        len: 4096,
-    };
-    let mut partition = Partition::new(backend, 1024, 2048, false)
+    let backend = HostBlock::open(
+        host_descriptor as usize,
+        b"block backend stat failed",
+        b"block backend smaller than partition",
+    );
+    let mut partition = Partition::new(backend, BLOCK_PARTITION_START, BLOCK_PARTITION_LEN, false)
         .unwrap_or_else(|_| device_fail(b"partition creation failed"));
     if partition.write_at(0, b"GINUX-BLOCK").is_err() || partition.flush().is_err() {
         device_fail(b"partition write failed");
@@ -2322,12 +2346,14 @@ fn device_bench_main(config_path: *const u8, block_path: *const u8, kind: *const
         if descriptor < 0 {
             device_fail(b"benchmark block open failed");
         }
-        let backend = HostBlock {
-            descriptor: descriptor as usize,
-            len: 4096,
-        };
-        let mut partition = Partition::new(backend, 1024, 2048, false)
-            .unwrap_or_else(|_| device_fail(b"benchmark partition failed"));
+        let backend = HostBlock::open(
+            descriptor as usize,
+            b"benchmark block stat failed",
+            b"benchmark block backend smaller than partition",
+        );
+        let mut partition =
+            Partition::new(backend, BLOCK_PARTITION_START, BLOCK_PARTITION_LEN, false)
+                .unwrap_or_else(|_| device_fail(b"benchmark partition failed"));
         let data = [0x5au8; 256];
         let mut output = [0u8; 256];
         let wall_start = clock_nanoseconds(CLOCK_MONOTONIC);
@@ -2340,14 +2366,14 @@ fn device_bench_main(config_path: *const u8, block_path: *const u8, kind: *const
                 device_fail(b"benchmark block I/O failed");
             }
         }
+        // Stop the clocks before close(), which flushes: the fsync is not one
+        // of the measured read/write operations.
+        let wall_ns = clock_nanoseconds(CLOCK_MONOTONIC) - wall_start;
+        let cpu_ns = clock_nanoseconds(CLOCK_PROCESS_CPUTIME_ID) - cpu_start;
         if partition.close().is_err() {
             device_fail(b"benchmark block close failed");
         }
-        (
-            repetitions * 512,
-            clock_nanoseconds(CLOCK_MONOTONIC) - wall_start,
-            clock_nanoseconds(CLOCK_PROCESS_CPUTIME_ID) - cpu_start,
-        )
+        (repetitions * 512, wall_ns, cpu_ns)
     } else if c_string_equals(kind, b"network") {
         if config.network_backend != ginux_domain::NetworkBackend::Mediated {
             device_fail(b"network benchmark assignment missing");
