@@ -81,6 +81,7 @@ def main():
         invoke(["handler"], 0, "exited", stdout=b"handled\n")
         invoke(["segv"], 139, "signaled")
         invoke(["fork"], 0, "exited")
+        invoke(["poll"], 0, "exited")
         invoke(["int80"], 1, "supervisor-error")
         invoke(["descriptor"], 0, "exited")
         invoke(["list"], 0, "exited", stdout=b"input\n")

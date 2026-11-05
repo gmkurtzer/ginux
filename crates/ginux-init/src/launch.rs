@@ -1029,7 +1029,7 @@ fn supervise_launch(pid: usize, domain: &mut Domain) -> ! {
                     launch_fail(domain, pid, b"launch exit resume failed");
                 }
             }
-            Action::Mediate if native_arguments_allowed(syscall, &registers) => {
+            Action::Mediate if native_arguments_allowed(pid, syscall, &registers) => {
                 audit_write(b"mediate surface=");
                 audit_line(balanced_surface_name(balanced_surface(syscall)));
                 awaiting_exit = true;

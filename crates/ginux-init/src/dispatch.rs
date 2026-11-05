@@ -86,7 +86,12 @@ pub fn process_entry(syscall: u64, rdi: u64, rsi: u64, rdx: u64) -> Option<i64> 
     crate::process_hooks::claim(syscall, rdi, rsi, rdx)
 }
 
-pub fn native_arguments_allowed(syscall: u64, registers: &UserRegs) -> bool {
+pub fn native_arguments_allowed(pid: usize, syscall: u64, registers: &UserRegs) -> bool {
+    if syscall == ginux_core::SYS_POLL
+        && !crate::channel_hooks::bootstrap_poll_allowed(pid, registers.rdi, registers.rsi)
+    {
+        return false;
+    }
     balanced_arguments_allowed(syscall, registers.rdi, registers.rsi, registers.rdx)
 }
 

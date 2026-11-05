@@ -3028,7 +3028,7 @@ fn supervise_native(pid: usize, domain: &mut Domain) -> ! {
                 line(b"GINUX_NATIVE_CHECK: PASS");
                 exit_process(0)
             }
-            Action::Mediate if native_arguments_allowed(syscall, &registers) => {
+            Action::Mediate if native_arguments_allowed(pid, syscall, &registers) => {
                 write_all(b"mediate surface=");
                 line(balanced_surface_name(balanced_surface(syscall)));
                 awaiting_exit = true;
