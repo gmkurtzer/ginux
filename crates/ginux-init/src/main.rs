@@ -21,7 +21,7 @@ use crate::dispatch::{
 };
 use crate::launch::{
     c_string_equals, launch_main, launch_usage, load_config, parse_argv, print_effective_config,
-    read_file, read_index, Command, ELF_BYTES, VFS_INDEX_BYTES,
+    read_file, read_index, usage, Command, ELF_BYTES, VFS_INDEX_BYTES,
 };
 use crate::process_hooks::{
     dup3_flags_valid, exec_mediated, fcntl_supported, pipe2_flags_valid, thread_supported,
@@ -177,6 +177,7 @@ extern "C" fn rust_main(initial_stack: *const usize) -> ! {
             launch_main(config_path, root_path, result_path)
         }
         Some(Command::LaunchUsage) => launch_usage(),
+        Some(Command::Usage) => usage(),
         None => gate1_main(),
     }
 }

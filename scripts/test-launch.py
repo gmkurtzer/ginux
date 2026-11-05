@@ -172,6 +172,12 @@ def main():
             if proc.returncode != 2 or proc.stdout or b"launch usage" not in proc.stderr:
                 raise RuntimeError(f"invalid launch argv ran a workload: {proc!r}")
         print("PASS incomplete launch commands report usage without running a demo")
+        for args in (["config"], ["native", "config"], ["devices", "config"], ["confg", "x.toml"],
+                     ["--help"], ["help"]):
+            proc = subprocess.run([binary, *args], capture_output=True, timeout=10)
+            if proc.returncode != 2 or proc.stdout or b"ginux: usage:" not in proc.stderr:
+                raise RuntimeError(f"unknown or incomplete argv ran the demonstration: {proc!r}")
+        print("PASS unknown and incomplete commands report usage without running a demo")
         # Exercise the bootstrap failure in a real unprivileged process.
         work.chmod(0o755)
         config_path = work / "unprivileged.toml"
