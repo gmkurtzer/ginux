@@ -466,6 +466,12 @@ static mut RESULT_FD: isize = -1;
 
 static mut AUDIT_BYTES: usize = 0;
 static mut AUDIT_CAPPED: bool = false;
+// One audit record is staged here and written whole once its newline
+// arrives, so the budget never splits a record and the truncation notice
+// always starts its own line.
+const AUDIT_RECORD_CAPACITY: usize = 256;
+static mut AUDIT_RECORD: [u8; AUDIT_RECORD_CAPACITY] = [0; AUDIT_RECORD_CAPACITY];
+static mut AUDIT_RECORD_LEN: usize = 0;
 
 const OUTCOME_EXITED: u8 = 0;
 const OUTCOME_SIGNALED: u8 = 1;
@@ -601,18 +607,43 @@ pub fn launch_usage() -> ! {
 }
 
 fn audit_write(bytes: &[u8]) {
-    unsafe {
+    let record = unsafe {
         if AUDIT_CAPPED {
             return;
         }
-        if AUDIT_BYTES + bytes.len() > AUDIT_BYTE_BUDGET {
-            AUDIT_CAPPED = true;
-            write_stderr(b"ginux: audit truncated budget=65536\n");
+        let start = AUDIT_RECORD_LEN;
+        if start + bytes.len() > AUDIT_RECORD_CAPACITY {
+            // No record is this long; stop auditing rather than split one.
+            audit_cap();
             return;
         }
-        AUDIT_BYTES += bytes.len();
+        let record = core::slice::from_raw_parts_mut(
+            core::ptr::addr_of_mut!(AUDIT_RECORD).cast::<u8>(),
+            AUDIT_RECORD_CAPACITY,
+        );
+        record[start..start + bytes.len()].copy_from_slice(bytes);
+        AUDIT_RECORD_LEN = start + bytes.len();
+        if bytes.last() != Some(&b'\n') {
+            return;
+        }
+        let length = AUDIT_RECORD_LEN;
+        AUDIT_RECORD_LEN = 0;
+        if AUDIT_BYTES + length > AUDIT_BYTE_BUDGET {
+            audit_cap();
+            return;
+        }
+        AUDIT_BYTES += length;
+        &record[..length]
+    };
+    write_stderr(record);
+}
+
+fn audit_cap() {
+    unsafe {
+        AUDIT_CAPPED = true;
+        AUDIT_RECORD_LEN = 0;
     }
-    write_stderr(bytes);
+    write_stderr(b"ginux: audit truncated budget=65536\n");
 }
 
 fn audit_line(message: &[u8]) {
