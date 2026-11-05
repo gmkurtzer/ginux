@@ -24,8 +24,8 @@ grep -Fqx 'GATE7_PROCESS: PASS' "$log"
 rocky_ssh 'chmod 0755 /var/tmp/process-native-fixture; /var/tmp/ginux process-native /var/tmp/gate7.toml /var/tmp/process-native-fixture' >> "$log" 2>&1
 grep -Fqx 'GINUX_NATIVE_PARENT: PASS' "$log"
 grep -Fqx 'GINUX_NATIVE_PROCESS: virtual-init=1 host-pid=unexposed ptrace=attached' "$log"
-grep -Fqx 'GINUX_NATIVE_PROCESS: fork=mediated iterations=32 concurrent-children=2 child=ptrace-attached pid-translation=PASS' "$log"
-grep -Fqx 'GINUX_NATIVE_PROCESS: wait=translated child-exits=32 exit-status=23 tasks=0 cleanup=PASS' "$log"
+grep -Fqx 'GINUX_NATIVE_PROCESS: fork=mediated child=ptrace-attached pid-translation=PASS' "$log"
+grep -Fqx 'GINUX_NATIVE_PROCESS: wait=translated child-status=real tasks=0 cleanup=PASS' "$log"
 grep -Fqx 'GATE7_NATIVE_PROCESS: PASS' "$log"
 
 rocky_ssh 'rm -f /var/tmp/ginux /var/tmp/gate7.toml /var/tmp/process-native-fixture'

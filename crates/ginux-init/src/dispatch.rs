@@ -1,10 +1,8 @@
 //! Shared native-syscall dispatch wiring.
 //!
-//! Single owner for entry classification and the contract decision used by
-//! the supervision loops. Lane hooks live in disjoint files
-//! (`process_hooks`, `fs_hooks`, `channel_hooks`) and currently all decline,
-//! so every entry falls through to the existing balanced-contract decision
-//! with byte-identical behavior.
+//! Classifies syscall entries and applies hook validation before the shared
+//! balanced contract. The process-native loop uses `process_entry` directly
+//! and mediates supported process calls through its own event loop.
 
 use ginux_core::{balanced_arguments_allowed, decide_balanced, BalancedSurface, Decision};
 
@@ -18,8 +16,7 @@ pub enum Lane {
     Contract,
 }
 
-/// Classify an entry by number for future lane wiring. All lanes decline
-/// today, so this always returns `Lane::Contract`.
+/// Route process entries to their hook and unclaimed entries to the contract.
 pub fn classify(syscall: u64) -> Lane {
     if crate::process_hooks::claims(syscall) {
         Lane::Process

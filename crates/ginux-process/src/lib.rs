@@ -7,6 +7,8 @@ pub const CAP_SYS_ADMIN: u64 = 1 << 21;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ProcessError {
     TableFull,
+    DescriptorFull,
+    PipeFull,
     InvalidTask,
     StaleTask,
     InvalidParent,
@@ -58,6 +60,8 @@ impl TaskId {
 pub enum TaskState {
     Running,
     Exited(i32),
+    /// Terminated by an unhandled signal (number, no core dump tracking).
+    Signaled(u8),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -186,10 +190,61 @@ pub struct TaskView {
     pub exec_epoch: u32,
 }
 
+/// `wait4` option bits the managed wait path understands. `WNOHANG`,
+/// `WUNTRACED`, and `WCONTINUED` match Linux; the `__W*` thread-selection
+/// bits are accepted and have no effect because thread-group members are
+/// joined over a futex and never reaped by `wait`. Any other bit is an
+/// explicit caller error. Job-control stops are not mediated, so no stopped
+/// or continued child is ever produced; accepting `WUNTRACED`/`WCONTINUED`
+/// only keeps libc callers that pass them from failing.
+pub const WNOHANG: u32 = 1;
+pub const WUNTRACED: u32 = 2;
+pub const WCONTINUED: u32 = 8;
+pub const WAIT_THREAD_FLAGS: u32 = 0x2000_0000 | 0x4000_0000 | 0x8000_0000;
+pub const WAIT_ALLOWED_OPTIONS: u32 = WNOHANG | WUNTRACED | WCONTINUED | WAIT_THREAD_FLAGS;
+
+/// Which children a `wait` call selects. Matches `wait4` pid semantics:
+/// any child, the caller's process group (`wait4` pid 0, resolved by the
+/// caller), one process group, or one specific child pid.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WaitTarget {
+    Any,
+    Group(u32),
+    Specific(u32),
+}
+
+/// How a reaped child terminated: an exit code or a fatal signal number.
+/// Encodes to the Linux wait status word with [`ChildStatus::word`].
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ChildStatus {
+    Exited(i32),
+    Signaled(u8),
+}
+
+impl ChildStatus {
+    /// Linux wait status word: exit code in bits 8-15, signal number in
+    /// bits 0-6 with no core-dump bit.
+    pub const fn word(self) -> u32 {
+        match self {
+            ChildStatus::Exited(code) => ((code as u32) & 0xff) << 8,
+            ChildStatus::Signaled(signal) => (signal as u32) & 0x7f,
+        }
+    }
+
+    /// Shell-style summary (`128 + signal` for signaled children) for
+    /// diagnostics that previously only carried exit codes.
+    pub const fn shell_code(self) -> i32 {
+        match self {
+            ChildStatus::Exited(code) => code,
+            ChildStatus::Signaled(signal) => 128 + signal as i32,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct WaitResult {
     pub child: TaskId,
-    pub status: i32,
+    pub status: ChildStatus,
 }
 
 pub struct ProcessTable<const TASKS: usize> {
@@ -280,6 +335,25 @@ impl<const TASKS: usize> ProcessTable<TASKS> {
         }
     }
 
+    /// Latest view for a virtual pid in any occupied state, or `None` once
+    /// reaped. Selector validation uses this; pids are never reused within
+    /// a table, so no generation check applies.
+    pub fn lookup(&self, pid: u32) -> Option<TaskView> {
+        self.tasks
+            .iter()
+            .find(|task| task.occupied && task.id.pid == pid)
+            .map(|task| TaskView {
+                id: task.id,
+                tgid: task.tgid,
+                parent: task.parent,
+                process_group: task.process_group,
+                session: task.session,
+                state: task.state,
+                credentials: task.credentials,
+                exec_epoch: task.exec_epoch,
+            })
+    }
+
     pub fn view(&self, id: TaskId) -> Result<TaskView, ProcessError> {
         let task = self.tasks[self.index(id)?];
         Ok(TaskView {
@@ -300,7 +374,7 @@ impl<const TASKS: usize> ProcessTable<TASKS> {
             return Err(ProcessError::InvalidParent);
         }
         self.allocate(
-            parent.id.pid,
+            parent.tgid,
             0,
             parent.process_group,
             parent.session,
@@ -353,26 +427,116 @@ impl<const TASKS: usize> ProcessTable<TASKS> {
         Ok(())
     }
 
+    /// Retire a dead thread immediately; only process leaders are waitable.
+    pub fn reap_thread(&mut self, id: TaskId) -> Result<(), ProcessError> {
+        let index = self.index(id)?;
+        let task = self.tasks[index];
+        if task.id.pid == task.tgid || task.state == TaskState::Running {
+            return Err(ProcessError::InvalidState);
+        }
+        self.tasks[index] = Task::empty();
+        Ok(())
+    }
+
+    /// Linux exec collapses a thread group into its leader's identity.
+    pub fn exec_group(&mut self, caller: TaskId) -> Result<(TaskId, u32), ProcessError> {
+        let caller_index = self.index(caller)?;
+        let mut replacement = self.tasks[caller_index];
+        let leader_index = self
+            .tasks
+            .iter()
+            .position(|task| task.occupied && task.id.pid == replacement.tgid)
+            .ok_or(ProcessError::InvalidTask)?;
+        let leader = self.tasks[leader_index];
+        replacement.id = leader.id;
+        replacement.parent = leader.parent;
+        replacement.state = TaskState::Running;
+        replacement.exec_epoch = leader.exec_epoch;
+        for task in &mut self.tasks {
+            if task.occupied && task.tgid == leader.id.pid {
+                *task = Task::empty();
+            }
+        }
+        self.tasks[leader_index] = replacement;
+        let epoch = self.exec(leader.id)?;
+        Ok((leader.id, epoch))
+    }
+
+    /// Record termination by an unhandled signal. The task must be running;
+    /// zombies keep whatever outcome they already reported.
+    pub fn signaled(&mut self, id: TaskId, signal: u8) -> Result<(), ProcessError> {
+        if signal == 0 || signal > MAX_SIGNAL {
+            return Err(ProcessError::InvalidSignal);
+        }
+        let index = self.index(id)?;
+        if self.tasks[index].state != TaskState::Running {
+            return Err(ProcessError::InvalidState);
+        }
+        self.tasks[index].state = TaskState::Signaled(signal);
+        Ok(())
+    }
+
+    fn is_waitable_child(&self, task: &Task, parent_pid: u32, target: WaitTarget) -> bool {
+        // Thread-group members are joined over a futex, never reaped: only
+        // leaders (tgid == pid) are waitable children.
+        task.occupied
+            && task.parent == parent_pid
+            && task.id.pid == task.tgid
+            && match target {
+                WaitTarget::Any => true,
+                WaitTarget::Group(group) => task.process_group == group,
+                WaitTarget::Specific(pid) => task.id.pid == pid,
+            }
+    }
+
+    /// Whether the caller has any unwaited-for child matching the target,
+    /// running or already reportable. The supervision loop maps "none" to
+    /// `ECHILD` even for blocking waits, matching the kernel.
+    pub fn has_waitable_child(
+        &self,
+        parent: TaskId,
+        target: WaitTarget,
+    ) -> Result<bool, ProcessError> {
+        let parent_index = self.index(parent)?;
+        if self.tasks[parent_index].state != TaskState::Running {
+            return Err(ProcessError::InvalidState);
+        }
+        let parent_pid = self.tasks[parent_index].tgid;
+        Ok(self
+            .tasks
+            .iter()
+            .any(|task| self.is_waitable_child(task, parent_pid, target)))
+    }
+
+    /// Reap one reportable child: exited or signaled. Threads are never
+    /// reportable (`NotChild` for a specific thread pid). A specific pid
+    /// that names no child is `NotChild`; anything else with nothing
+    /// reportable yet is `NoExitedChild`, which the supervisor turns into a
+    /// parked blocking wait or a zero `WNOHANG` return. `options` is
+    /// accepted for interface symmetry and currently only selects which
+    /// outcomes exist; no stopped or continued state is produced because
+    /// job-control stops are not mediated.
     pub fn wait(
         &mut self,
         parent: TaskId,
-        selected: Option<u32>,
+        target: WaitTarget,
+        _options: u32,
     ) -> Result<WaitResult, ProcessError> {
         let parent_index = self.index(parent)?;
         if self.tasks[parent_index].state != TaskState::Running {
             return Err(ProcessError::InvalidState);
         }
-        let parent_pid = parent.pid;
+        let parent_pid = self.tasks[parent_index].tgid;
         let child = self.tasks.iter().position(|task| {
-            task.occupied
-                && task.parent == parent_pid
-                && selected.is_none_or(|pid| task.id.pid == pid)
-                && matches!(task.state, TaskState::Exited(_))
+            self.is_waitable_child(task, parent_pid, target)
+                && matches!(task.state, TaskState::Exited(_) | TaskState::Signaled(_))
         });
         if let Some(index) = child {
             let task = self.tasks[index];
-            let TaskState::Exited(status) = task.state else {
-                return Err(ProcessError::InvalidState);
+            let status = match task.state {
+                TaskState::Exited(code) => ChildStatus::Exited(code),
+                TaskState::Signaled(signal) => ChildStatus::Signaled(signal),
+                _ => return Err(ProcessError::InvalidState),
             };
             self.tasks[index] = Task::empty();
             return Ok(WaitResult {
@@ -380,12 +544,13 @@ impl<const TASKS: usize> ProcessTable<TASKS> {
                 status,
             });
         }
-        if let Some(pid) = selected {
-            if !self
-                .tasks
-                .iter()
-                .any(|task| task.occupied && task.parent == parent_pid && task.id.pid == pid)
-            {
+        if let WaitTarget::Specific(pid) = target {
+            if !self.tasks.iter().any(|task| {
+                task.occupied
+                    && task.parent == parent_pid
+                    && task.id.pid == pid
+                    && task.id.pid == task.tgid
+            }) {
                 return Err(ProcessError::NotChild);
             }
         }
@@ -522,7 +687,8 @@ impl<const TASKS: usize> ProcessTable<TASKS> {
     pub fn reap_all(&mut self) -> usize {
         let mut reaped = 0;
         for task in &mut self.tasks {
-            if task.occupied && matches!(task.state, TaskState::Exited(_)) {
+            if task.occupied && matches!(task.state, TaskState::Exited(_) | TaskState::Signaled(_))
+            {
                 *task = Task::empty();
                 reaped += 1;
             }
@@ -947,6 +1113,431 @@ impl<const WAITERS: usize> FutexTable<WAITERS> {
     }
 }
 
+/// Descriptor kinds tracked by native process supervision.
+///
+/// The host performs pipe, dup, and close operations. `PipeSpace` mirrors
+/// their results to validate descriptor access and follow fork, CLONE_FILES,
+/// exec, and task exit. It tracks pipe ends and aliases of inherited stdio;
+/// ordinary file descriptors are not represented.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FdKind {
+    PipeRead,
+    PipeWrite,
+    External,
+}
+
+/// One tracked descriptor: the tracee-visible fd number, what it names, the
+/// pipe object id (`0` for [`FdKind::External` aliases of pre-supervision
+/// stdio), and whether exec closes it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FdEntry {
+    pub fd: u32,
+    pub kind: FdKind,
+    pub pipe: u32,
+    pub cloexec: bool,
+}
+
+#[derive(Clone, Copy)]
+struct PipeObject {
+    live: bool,
+    ends: u32,
+}
+
+impl PipeObject {
+    const fn empty() -> Self {
+        Self {
+            live: false,
+            ends: 0,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct TaskDescriptors<const FDS: usize, const MEMBERS: usize> {
+    used: bool,
+    members: [u32; MEMBERS],
+    entries: [Option<FdEntry>; FDS],
+}
+
+impl<const FDS: usize, const MEMBERS: usize> TaskDescriptors<FDS, MEMBERS> {
+    const fn empty() -> Self {
+        Self {
+            used: false,
+            members: [0; MEMBERS],
+            entries: [None; FDS],
+        }
+    }
+}
+
+/// Supervisor-owned descriptor mirror: per-task fd entries plus the pipe
+/// objects they name. Keyed by virtual pid; sized to the supervision loop's
+/// task table. Every mutation follows a host outcome the loop observed, so
+/// the mirror never invents a descriptor the kernel does not have.
+pub struct PipeSpace<const TASKS: usize, const FDS: usize, const PIPES: usize> {
+    tasks: [TaskDescriptors<FDS, TASKS>; TASKS],
+    pipes: [PipeObject; PIPES],
+}
+
+impl<const TASKS: usize, const FDS: usize, const PIPES: usize> Default
+    for PipeSpace<TASKS, FDS, PIPES>
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<const TASKS: usize, const FDS: usize, const PIPES: usize> PipeSpace<TASKS, FDS, PIPES> {
+    pub const fn new() -> Self {
+        Self {
+            tasks: [TaskDescriptors::empty(); TASKS],
+            pipes: [PipeObject::empty(); PIPES],
+        }
+    }
+
+    fn task_index(&self, task: u32) -> Option<usize> {
+        self.tasks
+            .iter()
+            .position(|slot| slot.used && slot.members.contains(&task))
+    }
+
+    fn task_or_alloc(&mut self, task: u32) -> Result<usize, ProcessError> {
+        if let Some(index) = self.task_index(task) {
+            return Ok(index);
+        }
+        let index = self
+            .tasks
+            .iter()
+            .position(|slot| !slot.used)
+            .ok_or(ProcessError::TableFull)?;
+        self.tasks[index].used = true;
+        self.tasks[index].members[0] = task;
+        Ok(index)
+    }
+
+    fn pipe_alloc(&mut self) -> Result<usize, ProcessError> {
+        self.pipes
+            .iter()
+            .position(|pipe| !pipe.live)
+            .ok_or(ProcessError::PipeFull)
+    }
+
+    fn retain(&mut self, pipe: u32) {
+        if pipe == 0 {
+            return;
+        }
+        let index = pipe as usize - 1;
+        if index < PIPES && self.pipes[index].live {
+            self.pipes[index].ends += 1;
+        }
+    }
+
+    fn release(&mut self, entry: FdEntry) {
+        if entry.kind == FdKind::External || entry.pipe == 0 {
+            return;
+        }
+        let index = entry.pipe as usize - 1;
+        if index < PIPES && self.pipes[index].live && self.pipes[index].ends > 0 {
+            self.pipes[index].ends -= 1;
+            if self.pipes[index].ends == 0 {
+                self.pipes[index] = PipeObject::empty();
+            }
+        }
+    }
+
+    fn evict(&mut self, slot: usize, fd: u32) {
+        if let Some(position) = self.tasks[slot]
+            .entries
+            .iter()
+            .position(|entry| entry.is_some_and(|entry| entry.fd == fd))
+        {
+            if let Some(previous) = self.tasks[slot].entries[position].take() {
+                self.release(previous);
+            }
+        }
+    }
+
+    /// What a task's descriptor names, or `None` for untracked numbers
+    /// (stdio the tracee held before supervision, or nothing at all). The
+    /// supervision loop gates reads/writes on this: tracked ends and stdio
+    /// execute on the host, anything else fails closed.
+    pub fn lookup(&self, task: u32, fd: u32) -> Option<FdEntry> {
+        let index = self.task_index(task)?;
+        self.tasks[index].entries.iter().find_map(|entry| {
+            entry.and_then(|entry| if entry.fd == fd { Some(entry) } else { None })
+        })
+    }
+
+    /// Record a pipe pair the host just created. Both numbers must be fresh:
+    /// the kernel returns the lowest free descriptors, so a tracked number
+    /// here means the mirror is corrupt and the loop must fail honestly.
+    pub fn create_pipe(
+        &mut self,
+        task: u32,
+        read_fd: u32,
+        write_fd: u32,
+        cloexec: bool,
+    ) -> Result<u32, ProcessError> {
+        if self.lookup(task, read_fd).is_some() || self.lookup(task, write_fd).is_some() {
+            return Err(ProcessError::InvalidState);
+        }
+        let slot = self.task_or_alloc(task)?;
+        let free = self.tasks[slot]
+            .entries
+            .iter()
+            .filter(|entry| entry.is_none())
+            .count();
+        if free < 2 {
+            return Err(ProcessError::DescriptorFull);
+        }
+        let pipe = self.pipe_alloc()?;
+        let id = pipe as u32 + 1;
+        self.pipes[pipe] = PipeObject {
+            live: true,
+            ends: 2,
+        };
+        let mut placed = 0;
+        for entry in self.tasks[slot].entries.iter_mut() {
+            if entry.is_none() {
+                *entry = Some(if placed == 0 {
+                    FdEntry {
+                        fd: read_fd,
+                        kind: FdKind::PipeRead,
+                        pipe: id,
+                        cloexec,
+                    }
+                } else {
+                    FdEntry {
+                        fd: write_fd,
+                        kind: FdKind::PipeWrite,
+                        pipe: id,
+                        cloexec,
+                    }
+                });
+                placed += 1;
+                if placed == 2 {
+                    break;
+                }
+            }
+        }
+        Ok(id)
+    }
+
+    /// Record a duplication the host just performed: `dup`, `dup2`, `dup3`,
+    /// or `fcntl` `F_DUPFD`/`F_DUPFD_CLOEXEC`. The source is either a tracked
+    /// end (same object, retained) or pre-supervision stdio (an
+    /// [`FdKind::External`] alias). A previous occupant at the target number
+    /// is closed first, exactly like the kernel did. `old == new` is a
+    /// no-op: host success already proved the number valid.
+    pub fn duplicate(
+        &mut self,
+        task: u32,
+        old_fd: u32,
+        new_fd: u32,
+        cloexec: bool,
+    ) -> Result<(), ProcessError> {
+        if old_fd == new_fd {
+            return Ok(());
+        }
+        let source = match self.lookup(task, old_fd) {
+            Some(entry) => FdEntry {
+                fd: new_fd,
+                kind: entry.kind,
+                pipe: entry.pipe,
+                cloexec,
+            },
+            None if old_fd <= 2 => FdEntry {
+                fd: new_fd,
+                kind: FdKind::External,
+                pipe: 0,
+                cloexec,
+            },
+            None => return Err(ProcessError::InvalidState),
+        };
+        let slot = self.task_or_alloc(task)?;
+        let occupied = self.tasks[slot]
+            .entries
+            .iter()
+            .any(|entry| entry.is_some_and(|entry| entry.fd == new_fd));
+        if !occupied && self.tasks[slot].entries.iter().all(|entry| entry.is_some()) {
+            return Err(ProcessError::DescriptorFull);
+        }
+        self.evict(slot, new_fd);
+        if source.pipe != 0 {
+            self.retain(source.pipe);
+        }
+        let position = self.tasks[slot]
+            .entries
+            .iter()
+            .position(|entry| entry.is_none())
+            .ok_or(ProcessError::DescriptorFull)?;
+        self.tasks[slot].entries[position] = Some(source);
+        Ok(())
+    }
+
+    /// Drop one descriptor after the host closed it. Returns whether a
+    /// tracked end was released; untracked numbers (plain stdio closes the
+    /// host also performed) are a silent no-op.
+    pub fn close(&mut self, task: u32, fd: u32) -> Result<bool, ProcessError> {
+        let Some(slot) = self.task_index(task) else {
+            return Ok(false);
+        };
+        let Some(position) = self.tasks[slot]
+            .entries
+            .iter()
+            .position(|entry| entry.is_some_and(|entry| entry.fd == fd))
+        else {
+            return Ok(false);
+        };
+        if let Some(entry) = self.tasks[slot].entries[position].take() {
+            self.release(entry);
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    /// Follow an `F_SETFD` the host performed. Untracked numbers have no
+    /// mirror entry and need none: the kernel holds their real flag.
+    pub fn set_cloexec(&mut self, task: u32, fd: u32, cloexec: bool) -> Result<(), ProcessError> {
+        let Some(slot) = self.task_index(task) else {
+            return Ok(());
+        };
+        for entry in self.tasks[slot].entries.iter_mut().flatten() {
+            if entry.fd == fd {
+                entry.cloexec = cloexec;
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    /// Copy the host descriptor table on fork (without CLONE_FILES).
+    pub fn inherit(&mut self, child: u32, parent: u32) -> Result<(), ProcessError> {
+        let Some(parent_slot) = self.task_index(parent) else {
+            return Ok(());
+        };
+        let entries = self.tasks[parent_slot].entries;
+        self.release_task(child);
+        let child_slot = self.task_or_alloc(child)?;
+        self.tasks[child_slot].entries = entries;
+        for entry in entries.iter().flatten() {
+            self.retain(entry.pipe);
+        }
+        Ok(())
+    }
+
+    /// CLONE_FILES shares one table, including mutations made after clone.
+    pub fn share(&mut self, child: u32, parent: u32) -> Result<(), ProcessError> {
+        let slot = self.task_or_alloc(parent)?;
+        let member = self.tasks[slot]
+            .members
+            .iter_mut()
+            .find(|member| **member == 0)
+            .ok_or(ProcessError::TableFull)?;
+        *member = child;
+        Ok(())
+    }
+
+    /// Exec unshares files before closing CLOEXEC descriptors.
+    pub fn unshare(&mut self, task: u32) -> Result<(), ProcessError> {
+        let Some(slot) = self.task_index(task) else {
+            return Ok(());
+        };
+        if self.tasks[slot]
+            .members
+            .iter()
+            .filter(|member| **member != 0)
+            .count()
+            > 1
+        {
+            self.inherit(task, task)?;
+        }
+        Ok(())
+    }
+
+    /// Follow the host tid change when a non-leader thread executes.
+    pub fn rename_task(&mut self, old: u32, new: u32) {
+        if let Some(slot) = self.task_index(old) {
+            for member in &mut self.tasks[slot].members {
+                if *member == old {
+                    *member = new;
+                }
+            }
+        }
+    }
+
+    /// Drop every close-on-exec end after the host closed them during
+    /// executable replacement, after unsharing the exec'ing task's table.
+    /// Returns the count dropped for the audit line.
+    pub fn exec_scrub(&mut self, task: u32) -> u32 {
+        let Some(slot) = self.task_index(task) else {
+            return 0;
+        };
+        let mut closed = [None; FDS];
+        let mut count = 0;
+        for entry in self.tasks[slot].entries.iter_mut() {
+            if entry.is_some_and(|entry| entry.cloexec) {
+                closed[count] = entry.take();
+                count += 1;
+            }
+        }
+        for entry in closed.iter().take(count).flatten() {
+            self.release(*entry);
+        }
+        count as u32
+    }
+
+    /// Release one table owner; descriptors survive while another owner lives.
+    pub fn release_task(&mut self, task: u32) {
+        let Some(slot) = self.task_index(task) else {
+            return;
+        };
+        for member in &mut self.tasks[slot].members {
+            if *member == task {
+                *member = 0;
+            }
+        }
+        if self.tasks[slot].members.iter().any(|member| *member != 0) {
+            return;
+        }
+        let entries = self.tasks[slot].entries;
+        for entry in entries.iter().flatten() {
+            self.release(*entry);
+        }
+        self.tasks[slot] = TaskDescriptors::empty();
+    }
+
+    /// Ends still open on a pipe object: the last-close check. Unknown or
+    /// reaped pipes report zero.
+    pub fn pipe_ends(&self, pipe: u32) -> u32 {
+        if pipe == 0 {
+            return 0;
+        }
+        let index = pipe as usize - 1;
+        if index < PIPES && self.pipes[index].live {
+            self.pipes[index].ends
+        } else {
+            0
+        }
+    }
+
+    /// Live pipe objects, for leak-check diagnostics.
+    pub fn active_pipes(&self) -> usize {
+        self.pipes.iter().filter(|pipe| pipe.live).count()
+    }
+
+    /// Tracked descriptors held by one task, for leak-check diagnostics.
+    pub fn task_fds(&self, task: u32) -> usize {
+        let Some(slot) = self.task_index(task) else {
+            return 0;
+        };
+        self.tasks[slot]
+            .entries
+            .iter()
+            .filter(|entry| entry.is_some())
+            .count()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -960,7 +1551,13 @@ mod tests {
         assert_eq!(table.view(child).unwrap().parent, 1);
         assert_eq!(table.exec(child), Ok(1));
         table.exit(child, 17).unwrap();
-        assert_eq!(table.wait(init, Some(child.pid)).unwrap().status, 17);
+        assert_eq!(
+            table
+                .wait(init, WaitTarget::Specific(child.pid), 0)
+                .unwrap()
+                .status,
+            ChildStatus::Exited(17)
+        );
         assert_eq!(table.view(child), Err(ProcessError::InvalidTask));
         let replacement = table.fork(init).unwrap();
         assert_ne!(replacement, child);
@@ -1057,7 +1654,7 @@ mod tests {
         let child = table.fork(init).unwrap();
         assert_eq!(table.fork(init), Err(ProcessError::TableFull));
         assert_eq!(
-            table.wait(child, Some(init.pid)),
+            table.wait(child, WaitTarget::Specific(init.pid), 0),
             Err(ProcessError::NotChild)
         );
         assert_eq!(table.shutdown(137), 2);

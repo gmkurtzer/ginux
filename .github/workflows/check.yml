@@ -24,5 +24,6 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - run: rustup target add x86_64-unknown-linux-gnu
-      - run: make build build-launch-fixture
+      - run: make build build-launch-fixture build-process-fixtures
       - run: sudo make test-launch
+      - run: make test-process-native

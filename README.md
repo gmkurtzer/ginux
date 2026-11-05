@@ -236,3 +236,34 @@ make build
 make build-launch-fixture
 sudo make test-launch
 ```
+
+## Native process scenarios
+
+The separate `process-native <config> <executable>` command exercises native
+fork, clone, vfork, exec, threads, waits, termination signals, and pipes. It
+executes a trusted host fixture as the caller, without chroot; it does not
+require root on a host that permits tracing child processes. Configured
+`launch` remains a separate entry point and does not yet use this process loop.
+
+Process creation returns virtual identities, including clone TID cells.
+Untraced, reparenting, namespace, and unsupported clone flags are denied.
+Thread slots are reclaimed on exit. `CLONE_FILES` shares one descriptor table;
+ordinary fork copies it, and exec unshares it before closing CLOEXEC entries.
+Worker-thread exec preserves the group's process identity. Inherited host
+files above stderr are closed before execution. PI futex operations and queries
+for another task's robust list are unsupported.
+
+Build the fixtures explicitly, then run their independent scenarios:
+
+```sh
+make build build-process-fixtures
+make test-process-native
+make test-process-native SCENARIO=shared_pipe
+make test-process-native SCENARIO=thread_exec
+```
+
+The scenarios consume existing binaries under `.artifacts/process`, including
+checks for syscall ABI dispatch, clone restrictions, descriptor inheritance,
+thread reuse, successful and failed worker exec, signals, wait-status writes,
+nonblocking waits, and vfork. The existing native fork fixture also runs. These
+checks do not claim complete libc, job-control, or systemd compatibility.
