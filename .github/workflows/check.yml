@@ -9,7 +9,6 @@ permissions:
   contents: read
 
 jobs:
-  # Preserve the required status context while using static validation only.
   static-and-unit:
     runs-on: macos-15-intel
     steps:
@@ -18,6 +17,7 @@ jobs:
       - run: rustup component add clippy rustfmt
       - run: rustup target add x86_64-unknown-linux-gnu
       - run: make check
+      - run: make test-unit
 
   launch-integration:
     runs-on: ubuntu-24.04

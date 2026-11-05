@@ -946,3 +946,145 @@ impl<const WAITERS: usize> FutexTable<WAITERS> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn process_lifecycle_uses_virtual_generation_safe_identity() {
+        let mut table: ProcessTable<4> = ProcessTable::new();
+        let init = table.create_init(Credentials::root()).unwrap();
+        assert_eq!(init.pid, 1);
+        let child = table.fork(init).unwrap();
+        assert_eq!(table.view(child).unwrap().parent, 1);
+        assert_eq!(table.exec(child), Ok(1));
+        table.exit(child, 17).unwrap();
+        assert_eq!(table.wait(init, Some(child.pid)).unwrap().status, 17);
+        assert_eq!(table.view(child), Err(ProcessError::InvalidTask));
+        let replacement = table.fork(init).unwrap();
+        assert_ne!(replacement, child);
+        assert!(replacement.pid > child.pid);
+    }
+
+    #[test]
+    fn threads_groups_and_sessions_remain_virtual() {
+        let mut table: ProcessTable<8> = ProcessTable::new();
+        let init = table.create_init(Credentials::root()).unwrap();
+        let child = table.fork(init).unwrap();
+        let thread = table.clone_thread(child).unwrap();
+        assert_eq!(table.view(thread).unwrap().tgid, child.pid);
+        table.set_process_group(child, 77).unwrap();
+        assert_eq!(table.create_session(child), Ok(child.pid));
+        assert_eq!(table.view(child).unwrap().session, child.pid);
+    }
+
+    #[test]
+    fn virtual_credentials_never_require_host_privilege() {
+        let mut table: ProcessTable<4> = ProcessTable::new();
+        let init = table.create_init(Credentials::root()).unwrap();
+        let child = table.fork(init).unwrap();
+        let credentials = table.credentials_mut(child).unwrap();
+        credentials.set_groups(&[10, 20]).unwrap();
+        credentials.drop_capabilities(CAP_SYS_ADMIN);
+        credentials.set_gid(1000).unwrap();
+        credentials.set_uid(1000).unwrap();
+        assert_eq!(credentials.groups(), &[10, 20]);
+        assert_eq!(credentials.capabilities, 0);
+        assert_eq!(credentials.set_uid(0), Err(ProcessError::PermissionDenied));
+    }
+
+    #[test]
+    fn signals_are_masked_queued_and_delivered_deterministically() {
+        let mut table: ProcessTable<2> = ProcessTable::new();
+        let init = table.create_init(Credentials::root()).unwrap();
+        table.set_signal_mask(init, 1 << (15 - 1)).unwrap();
+        table.signal(init, 15).unwrap();
+        table.signal(init, 2).unwrap();
+        assert_eq!(table.next_signal(init), Ok(Some(2)));
+        assert_eq!(table.next_signal(init), Ok(None));
+        table.set_signal_mask(init, 0).unwrap();
+        assert_eq!(table.next_signal(init), Ok(Some(15)));
+        assert_eq!(table.signal(init, 65), Err(ProcessError::InvalidSignal));
+        table
+            .set_signal_action(init, 10, SignalAction::Handler(0x4000))
+            .unwrap();
+        assert_eq!(
+            table.signal_action(init, 10),
+            Ok(SignalAction::Handler(0x4000))
+        );
+        table.signal(init, 10).unwrap();
+        assert_eq!(table.blocking_interrupted(init), Ok(true));
+        assert_eq!(
+            table.begin_signal(init),
+            Ok(Some(SignalDelivery::Handler {
+                signal: 10,
+                address: 0x4000,
+            }))
+        );
+        table.signal_return(init).unwrap();
+        assert_eq!(table.signal_return(init), Err(ProcessError::InvalidState));
+        table.exec(init).unwrap();
+        assert_eq!(table.signal_action(init, 10), Ok(SignalAction::Default));
+        assert_eq!(
+            table.set_signal_action(init, 9, SignalAction::Ignore),
+            Err(ProcessError::InvalidSignal)
+        );
+    }
+
+    #[test]
+    fn eventfd_and_futex_have_bounded_linux_style_results() {
+        let mut event = EventFd::new(0, false);
+        assert_eq!(event.read(), Err(ProcessError::WouldBlock));
+        event.write(7).unwrap();
+        assert_eq!(event.read(), Ok(7));
+
+        let mut table: ProcessTable<3> = ProcessTable::new();
+        let init = table.create_init(Credentials::root()).unwrap();
+        let child = table.fork(init).unwrap();
+        let mut futex: FutexTable<2> = FutexTable::new();
+        futex.wait(child, 0x1000, 4, 4).unwrap();
+        let mut woken = [init; 2];
+        assert_eq!(futex.wake(0x1000, 1, &mut woken), Ok(1));
+        assert_eq!(woken[0], child);
+        assert_eq!(futex.wait(child, 3, 1, 1), Err(ProcessError::InvalidFutex));
+    }
+
+    #[test]
+    fn exhaustion_invalid_wait_and_shutdown_cleanup_fail_closed() {
+        let mut table: ProcessTable<2> = ProcessTable::new();
+        let init = table.create_init(Credentials::root()).unwrap();
+        let child = table.fork(init).unwrap();
+        assert_eq!(table.fork(init), Err(ProcessError::TableFull));
+        assert_eq!(
+            table.wait(child, Some(init.pid)),
+            Err(ProcessError::NotChild)
+        );
+        assert_eq!(table.shutdown(137), 2);
+        assert_eq!(table.reap_all(), 2);
+        assert_eq!(table.active(), 0);
+        assert_eq!(table.view(child), Err(ProcessError::InvalidTask));
+    }
+
+    #[test]
+    fn virtual_clocks_timers_and_epoll_are_deterministic() {
+        let mut clock = VirtualClock::new();
+        clock.set_realtime_ns(1_000_000).unwrap();
+        assert_eq!(clock.advance(100), Ok(100));
+        assert_eq!(clock.realtime_ns(), Ok(1_000_100));
+
+        let mut timers: TimerTable<2> = TimerTable::new();
+        let timer = timers.create().unwrap();
+        timers.arm(timer, clock.monotonic_ns(), 50, 25).unwrap();
+        timers.update(clock.advance(125).unwrap());
+        assert_eq!(timers.read(timer), Ok(4));
+        assert_eq!(timers.read(timer), Err(ProcessError::WouldBlock));
+        timers.close(timer).unwrap();
+
+        let mut poll: EventPoll<2> = EventPoll::new();
+        poll.add(7, EVENT_READ | EVENT_WRITE).unwrap();
+        assert_eq!(poll.ready(7, EVENT_READ), Ok(EVENT_READ));
+        assert_eq!(poll.ready(8, EVENT_READ), Err(ProcessError::InvalidEvent));
+        poll.remove(7).unwrap();
+    }
+}

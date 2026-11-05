@@ -862,3 +862,178 @@ impl Domain {
         self.resources_acquired = false;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    extern crate std;
+
+    use super::*;
+
+    const VALID: &str = r#"
+schema_version = 1
+[domain]
+id = "demo"
+root = "rocky-10.2"
+init = "/runtime-fixture"
+args = ["fixture-arg"]
+environment = ["GINUX_GATE=4"]
+[resources]
+vcpus = 1
+memory_mib = 128
+[execution]
+profile = "security"
+backend = "interpreter"
+[contract]
+profile = "gate4-static"
+[storage]
+assignments = []
+[devices]
+assignments = []
+[network]
+backend = "none"
+[audit]
+mode = "stderr"
+[failure]
+policy = "stop"
+"#;
+
+    #[test]
+    fn parses_and_normalizes_versioned_config() {
+        let config = DomainConfig::parse(VALID.as_bytes()).unwrap();
+        assert_eq!(config.schema_version, 1);
+        assert_eq!(config.id.as_bytes(), b"demo");
+        assert_eq!(config.execution_profile, ExecutionProfile::Security);
+        let normalized = config.normalized().unwrap();
+        let reparsed = DomainConfig::parse(normalized.as_bytes()).unwrap();
+        assert_eq!(reparsed, config);
+    }
+
+    #[test]
+    fn input_order_and_comments_do_not_change_effective_config() {
+        let commented = VALID.replace(
+            "schema_version = 1\n[domain]",
+            "# operator comment\nschema_version = 1\n[domain]",
+        );
+        let resources = "[resources]\nvcpus = 1\nmemory_mib = 128\n";
+        let execution = "[execution]\nprofile = \"security\"\nbackend = \"interpreter\"\n";
+        let reordered = commented
+            .replace(resources, "GATE4_SECTION_PLACEHOLDER\n")
+            .replace(execution, resources)
+            .replace("GATE4_SECTION_PLACEHOLDER\n", execution);
+        let first = DomainConfig::parse(VALID.as_bytes()).unwrap();
+        let second = DomainConfig::parse(reordered.as_bytes()).unwrap();
+        assert_eq!(
+            first.normalized().unwrap().as_bytes(),
+            second.normalized().unwrap().as_bytes()
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_duplicate_and_missing_fields() {
+        let unknown = VALID.replace("id = \"demo\"", "id = \"demo\"\nhost_path = \"/etc\"");
+        assert_eq!(
+            DomainConfig::parse(unknown.as_bytes()),
+            Err(ConfigError::UnknownField)
+        );
+        let duplicate = VALID.replace("id = \"demo\"", "id = \"demo\"\nid = \"again\"");
+        assert_eq!(
+            DomainConfig::parse(duplicate.as_bytes()),
+            Err(ConfigError::DuplicateField)
+        );
+        let missing = VALID.replace("memory_mib = 128\n", "");
+        assert_eq!(
+            DomainConfig::parse(missing.as_bytes()),
+            Err(ConfigError::MissingField)
+        );
+    }
+
+    #[test]
+    fn rejects_unsupported_execution_before_start() {
+        let performance = VALID.replace("profile = \"security\"", "profile = \"performance\"");
+        assert_eq!(
+            DomainConfig::parse(performance.as_bytes()),
+            Err(ConfigError::UnsupportedExecution)
+        );
+    }
+
+    #[test]
+    fn accepts_native_ptrace_execution_pair() {
+        let native = VALID
+            .replace("profile = \"security\"", "profile = \"balanced\"")
+            .replace("backend = \"interpreter\"", "backend = \"ptrace-native\"");
+        let config = DomainConfig::parse(native.as_bytes()).unwrap();
+        assert_eq!(config.execution_profile, ExecutionProfile::Balanced);
+        assert_eq!(config.execution_backend, ExecutionBackend::PtraceNative);
+    }
+
+    #[test]
+    fn accepts_mediated_network_without_host_authority() {
+        let mediated = VALID
+            .replace(
+                "assignments = []\n[network]",
+                "assignments = [\"net0\"]\n[network]",
+            )
+            .replace("backend = \"none\"", "backend = \"mediated\"");
+        let config = DomainConfig::parse(mediated.as_bytes()).unwrap();
+        assert_eq!(config.network_backend, NetworkBackend::Mediated);
+        assert_eq!(config.devices.as_slice()[0].as_bytes(), b"net0");
+    }
+
+    #[test]
+    fn rejects_implicit_host_authority() {
+        let host_root = VALID.replace("root = \"rocky-10.2\"", "root = \"/host/root\"");
+        assert_eq!(
+            DomainConfig::parse(host_root.as_bytes()),
+            Err(ConfigError::HostAuthority)
+        );
+        let traversal = VALID.replace("assignments = []", "assignments = [\"../disk\"]");
+        assert_eq!(
+            DomainConfig::parse(traversal.as_bytes()),
+            Err(ConfigError::HostAuthority)
+        );
+    }
+
+    #[test]
+    fn accepts_digest_pinned_oci_root_reference() {
+        let oci = VALID.replace(
+            "root = \"rocky-10.2\"",
+            "root = \"docker.io/rockylinux/rockylinux@sha256:e372170ca863\"",
+        );
+        let config = DomainConfig::parse(oci.as_bytes()).unwrap();
+        assert_eq!(
+            config.root.as_bytes(),
+            b"docker.io/rockylinux/rockylinux@sha256:e372170ca863"
+        );
+    }
+
+    #[test]
+    fn lifecycle_reaches_only_documented_states_and_cleans_up() {
+        let config = DomainConfig::parse(VALID.as_bytes()).unwrap();
+        let mut domain = Domain::create(config);
+        assert_eq!(domain.state(), DomainState::Created);
+        domain.start().unwrap();
+        assert_eq!(domain.state(), DomainState::Running);
+        assert!(domain.resources_acquired());
+        assert!(domain.managed_task());
+        domain.stop().unwrap();
+        assert_eq!(domain.state(), DomainState::Stopped);
+        assert!(!domain.resources_acquired());
+        assert!(!domain.managed_task());
+        assert_eq!(domain.stop(), Err(LifecycleError::InvalidTransition));
+    }
+
+    #[test]
+    fn startup_and_task_failure_release_resources() {
+        let config = DomainConfig::parse(VALID.as_bytes()).unwrap();
+        let mut startup = Domain::create(config);
+        startup.startup_failed().unwrap();
+        assert_eq!(startup.state(), DomainState::Failed);
+        assert!(!startup.resources_acquired());
+        let mut runtime = Domain::create(config);
+        runtime.start().unwrap();
+        runtime.task_exited(false).unwrap();
+        assert_eq!(runtime.state(), DomainState::Failed);
+        assert!(!runtime.resources_acquired());
+        assert!(!runtime.managed_task());
+    }
+}

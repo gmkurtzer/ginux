@@ -621,3 +621,189 @@ fn read_u64(bytes: &[u8], offset: usize) -> Result<u64, VfsError> {
         .ok_or(VfsError::InvalidIndex)?;
     Ok(u64::from_le_bytes(value.try_into().unwrap()))
 }
+
+#[cfg(test)]
+mod tests {
+    extern crate std;
+    use super::*;
+    use std::vec::Vec;
+
+    fn index_bytes() -> Vec<u8> {
+        let records = [
+            Entry {
+                path: b"/",
+                kind: NodeKind::Directory,
+                mode: 0o755,
+                uid: 0,
+                gid: 0,
+                size: 0,
+                data_offset: 0,
+                link: b"",
+            },
+            Entry {
+                path: b"/base",
+                kind: NodeKind::File,
+                mode: 0o644,
+                uid: 0,
+                gid: 0,
+                size: 4,
+                data_offset: 0,
+                link: b"",
+            },
+            Entry {
+                path: b"/bin",
+                kind: NodeKind::Symlink,
+                mode: 0o777,
+                uid: 0,
+                gid: 0,
+                size: 0,
+                data_offset: 0,
+                link: b"usr/bin",
+            },
+            Entry {
+                path: b"/loop",
+                kind: NodeKind::Symlink,
+                mode: 0o777,
+                uid: 0,
+                gid: 0,
+                size: 0,
+                data_offset: 0,
+                link: b"loop",
+            },
+            Entry {
+                path: b"/usr",
+                kind: NodeKind::Directory,
+                mode: 0o755,
+                uid: 0,
+                gid: 0,
+                size: 0,
+                data_offset: 0,
+                link: b"",
+            },
+            Entry {
+                path: b"/usr/bin",
+                kind: NodeKind::Directory,
+                mode: 0o755,
+                uid: 0,
+                gid: 0,
+                size: 0,
+                data_offset: 0,
+                link: b"",
+            },
+            Entry {
+                path: b"/usr/bin/sh",
+                kind: NodeKind::Symlink,
+                mode: 0o777,
+                uid: 0,
+                gid: 0,
+                size: 0,
+                data_offset: 0,
+                link: b"tool",
+            },
+            Entry {
+                path: b"/usr/bin/tool",
+                kind: NodeKind::File,
+                mode: 0o755,
+                uid: 0,
+                gid: 0,
+                size: 4,
+                data_offset: 4,
+                link: b"",
+            },
+        ];
+        let mut bytes = Vec::new();
+        let mut header = [0u8; HEADER_SIZE];
+        encode_header(records.len() as u32, &mut header);
+        bytes.extend_from_slice(&header);
+        for entry in records {
+            let mut record = [0u8; RECORD_SIZE];
+            encode_record(entry, &mut record).unwrap();
+            bytes.extend_from_slice(&record);
+        }
+        bytes
+    }
+
+    struct Reader([u8; 8]);
+    impl BaseReader for Reader {
+        fn read_at(&mut self, offset: u64, output: &mut [u8]) -> Result<(), VfsError> {
+            let offset = offset as usize;
+            output.copy_from_slice(&self.0[offset..offset + output.len()]);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn validates_lookup_and_symlink_components() {
+        let bytes = index_bytes();
+        let index = Index::new(&bytes).unwrap();
+        assert_eq!(index.resolve(b"/bin/./sh").unwrap().path, b"/usr/bin/tool");
+        assert_eq!(index.resolve(b"/loop"), Err(VfsError::SymlinkLoop));
+        assert_eq!(index.resolve(b"/../../base"), Err(VfsError::InvalidPath));
+    }
+
+    #[test]
+    fn descriptors_never_equal_base_authority_and_overlay_is_disposable() {
+        let bytes = index_bytes();
+        let index = Index::new(&bytes).unwrap();
+        let mut vfs: VirtualFs<'_, Reader, 4, 32, 4> = VirtualFs::new(index, Reader(*b"BASETOOL"));
+        let descriptor = vfs.open(b"/base", O_READ).unwrap();
+        assert_eq!(descriptor, 3);
+        let mut output = [0u8; 4];
+        assert_eq!(vfs.read(descriptor, &mut output).unwrap(), 4);
+        assert_eq!(&output, b"BASE");
+        vfs.close(descriptor).unwrap();
+        let descriptor = vfs.open(b"/base", O_READ | O_WRITE).unwrap();
+        vfs.write(descriptor, b"edit").unwrap();
+        assert_eq!(vfs.overlay_files(), 1);
+        assert_eq!(&vfs.reader.0[..4], b"BASE");
+        let duplicate = vfs.duplicate(descriptor, true).unwrap();
+        vfs.close_on_exec();
+        assert_eq!(vfs.close(duplicate), Err(VfsError::InvalidDescriptor));
+        vfs.teardown();
+        assert_eq!(vfs.overlay_files(), 0);
+    }
+
+    #[test]
+    fn create_unlink_and_failures_are_deterministic() {
+        let bytes = index_bytes();
+        let index = Index::new(&bytes).unwrap();
+        let mut vfs: VirtualFs<'_, Reader, 4, 8, 4> = VirtualFs::new(index, Reader(*b"BASETOOL"));
+        let descriptor = vfs.open(b"/usr/new", O_WRITE | O_CREATE).unwrap();
+        vfs.write(descriptor, b"new").unwrap();
+        assert_eq!(
+            vfs.read(descriptor, &mut [0u8; 1]),
+            Err(VfsError::PermissionDenied)
+        );
+        assert_eq!(vfs.close(99), Err(VfsError::InvalidDescriptor));
+        vfs.unlink(b"/base").unwrap();
+        assert_eq!(vfs.open(b"/base", O_READ), Err(VfsError::NotFound));
+        assert_eq!(
+            vfs.open(b"/missing/file", O_WRITE | O_CREATE),
+            Err(VfsError::NotFound)
+        );
+    }
+
+    #[test]
+    fn overlays_are_isolated_between_domain_instances() {
+        let bytes = index_bytes();
+        let mut first: VirtualFs<'_, Reader, 4, 32, 4> =
+            VirtualFs::new(Index::new(&bytes).unwrap(), Reader(*b"BASETOOL"));
+        let mut second: VirtualFs<'_, Reader, 4, 32, 4> =
+            VirtualFs::new(Index::new(&bytes).unwrap(), Reader(*b"BASETOOL"));
+
+        let first_base = first.open(b"/base", O_READ | O_WRITE).unwrap();
+        first.write(first_base, b"edit").unwrap();
+        let first_new = first.open(b"/usr/new", O_WRITE | O_CREATE).unwrap();
+        first.write(first_new, b"private").unwrap();
+
+        let second_base = second.open(b"/base", O_READ).unwrap();
+        let mut output = [0u8; 4];
+        assert_eq!(second.read(second_base, &mut output), Ok(4));
+        assert_eq!(&output, b"BASE");
+        assert_eq!(second.open(b"/usr/new", O_READ), Err(VfsError::NotFound));
+
+        first.teardown();
+        assert_eq!(first.overlay_files(), 0);
+        assert_eq!(second.overlay_files(), 0);
+    }
+}

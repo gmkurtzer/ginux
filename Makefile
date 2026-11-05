@@ -8,7 +8,7 @@ BASELINE := target/$(X86_TARGET)/release/baseline-runner
 RUNTIME_FIXTURE := target/$(X86_TARGET)/release/runtime-fixture
 PROCESS_NATIVE_FIXTURE := target/$(X86_TARGET)/release/process-native-fixture
 
-.PHONY: doctor host-image-fetch host-image-verify host-boot-test image-helper-fetch image-prepare domain-image-fetch domain-image-verify domain-image-prepare test-image test-oci-image test-oci-layers test-vfs test-native-vfs image-cache-clean build check-name check test test-intercept test-runtime test-config test-domain test-process test-devices test-kernel-views bench-baseline bench-block bench-network demo-gate-1 demo-gate-2 demo-gate-3 demo-gate-4 demo-gate-5 demo-gate-6 demo-gate-7 demo-gate-8 build-launch-fixture test-launch clean
+.PHONY: doctor host-image-fetch host-image-verify host-boot-test image-helper-fetch image-prepare domain-image-fetch domain-image-verify domain-image-prepare test-image test-oci-image test-oci-layers test-vfs test-native-vfs image-cache-clean build check-name check test test-unit test-intercept test-runtime test-config test-domain test-process test-devices test-kernel-views test-cgroup test-block test-network bench-baseline bench-block bench-network demo-gate-1 demo-gate-2 demo-gate-3 demo-gate-4 demo-gate-5 demo-gate-6 demo-gate-7 demo-gate-8 clean
 
 doctor:
 	@./scripts/doctor.sh
@@ -56,31 +56,33 @@ build:
 	cargo build -p runtime-fixture --target $(X86_TARGET) --release
 	cargo build -p process-native-fixture --target $(X86_TARGET) --release
 
-build-launch-fixture:
-	mkdir -p .artifacts/launch
-	$(CC) -nostdlib -static -fno-stack-protector -fno-builtin -O2 -Wall -Wextra -Werror tests/fixtures/launch-fixture.c -o .artifacts/launch/launch-fixture
-
-test-launch:
-	python3 scripts/test-launch.py $(GINUX) .artifacts/launch/launch-fixture
-
 check-name:
 	@./scripts/check-name.sh
 
 check: check-name
 	cargo fmt --check
-	cargo clippy -p ginux-core --lib -- -D warnings
-	cargo clippy -p ginux-domain --lib -- -D warnings
-	cargo clippy -p ginux-devices --lib -- -D warnings
+	cargo clippy -p ginux-core --all-targets -- -D warnings
+	cargo clippy -p ginux-domain --all-targets -- -D warnings
+	cargo clippy -p ginux-devices --all-targets -- -D warnings
 	cargo clippy -p ginux-init --bin ginux --target $(X86_TARGET) --release -- -D warnings
-	cargo clippy -p ginux-kernel-views --lib -- -D warnings
-	cargo clippy -p ginux-process --lib -- -D warnings
+	cargo clippy -p ginux-kernel-views --all-targets -- -D warnings
+	cargo clippy -p ginux-process --all-targets -- -D warnings
 	cargo clippy -p managed-payload --bin managed-payload --target $(X86_TARGET) --release -- -D warnings
 	cargo clippy -p baseline-runner --bin baseline-runner --target $(X86_TARGET) --release -- -D warnings
-	cargo clippy -p ginux-runtime --lib -- -D warnings
-	cargo clippy -p ginux-vfs --lib -- -D warnings
-	cargo clippy -p ginux-vfs-index --bin ginux-vfs-index -- -D warnings
+	cargo clippy -p ginux-runtime --all-targets -- -D warnings
+	cargo clippy -p ginux-vfs --all-targets -- -D warnings
+	cargo clippy -p ginux-vfs-index --all-targets -- -D warnings
 	cargo clippy -p runtime-fixture --bin runtime-fixture --target $(X86_TARGET) --release -- -D warnings
 	cargo clippy -p process-native-fixture --bin process-native-fixture --target $(X86_TARGET) --release -- -D warnings
+
+test-unit:
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-core
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-domain
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-devices
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-runtime
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-process
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-vfs
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-kernel-views
 
 test-intercept: build
 	@./scripts/with-rocky-host.sh ./scripts/test-intercept.sh
@@ -95,13 +97,27 @@ test-domain: build
 	@./scripts/with-rocky-host.sh ./scripts/test-domain.sh
 
 test-process: build
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-process
 	@./scripts/with-rocky-host.sh ./scripts/test-process.sh
 
 test-devices: build
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-devices registry
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-devices pseudo_devices
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-devices conflicts_ioctls
 	@./scripts/with-rocky-host.sh ./scripts/test-devices.sh
 
 test-kernel-views:
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-kernel-views
 	@./scripts/with-rocky-host.sh ./scripts/test-kernel-views.sh
+
+test-cgroup:
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-kernel-views cgroup::
+
+test-block:
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-devices block_
+
+test-network:
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-devices network_
 
 test-vfs: build domain-image-prepare
 	@./scripts/with-rocky-host.sh ./scripts/test-vfs.sh
@@ -109,7 +125,7 @@ test-vfs: build domain-image-prepare
 test-native-vfs: build domain-image-prepare
 	@./scripts/with-rocky-host.sh ./scripts/test-native-vfs.sh
 
-test: check test-intercept test-runtime test-config test-domain test-image test-devices test-process test-kernel-views
+test: check test-unit test-intercept test-runtime test-config test-domain test-image test-devices test-process test-kernel-views
 
 bench-baseline: build
 	@./scripts/with-rocky-host.sh ./scripts/bench-baseline.sh
@@ -147,3 +163,11 @@ demo-gate-8: doctor build
 clean:
 	cargo clean
 	@./scripts/clean-build.sh
+
+.PHONY: build-launch-fixture test-launch
+build-launch-fixture:
+	mkdir -p .artifacts/launch
+	$(CC) -nostdlib -static -fno-stack-protector -fno-builtin -O2 -Wall -Wextra -Werror tests/fixtures/launch-fixture.c -o .artifacts/launch/launch-fixture
+
+test-launch:
+	python3 scripts/test-launch.py $(GINUX) .artifacts/launch/launch-fixture

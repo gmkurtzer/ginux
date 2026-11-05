@@ -491,3 +491,194 @@ impl<const FRAMES: usize> IsolatedNetwork<FRAMES> {
         self.closed = true;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    extern crate std;
+
+    use super::*;
+    use std::vec;
+    use std::vec::Vec;
+
+    struct MemoryBlock {
+        bytes: Vec<u8>,
+        flushes: usize,
+        closed: bool,
+    }
+
+    impl BlockBackend for MemoryBlock {
+        fn len(&self) -> u64 {
+            self.bytes.len() as u64
+        }
+        fn read_at(&mut self, offset: u64, output: &mut [u8]) -> Result<(), DeviceError> {
+            let start = offset as usize;
+            let end = start
+                .checked_add(output.len())
+                .ok_or(DeviceError::OutOfRange)?;
+            let source = self.bytes.get(start..end).ok_or(DeviceError::OutOfRange)?;
+            output.copy_from_slice(source);
+            Ok(())
+        }
+        fn write_at(&mut self, offset: u64, input: &[u8]) -> Result<(), DeviceError> {
+            let start = offset as usize;
+            let end = start
+                .checked_add(input.len())
+                .ok_or(DeviceError::OutOfRange)?;
+            let destination = self
+                .bytes
+                .get_mut(start..end)
+                .ok_or(DeviceError::OutOfRange)?;
+            destination.copy_from_slice(input);
+            Ok(())
+        }
+        fn flush(&mut self) -> Result<(), DeviceError> {
+            self.flushes += 1;
+            Ok(())
+        }
+        fn close(&mut self) -> Result<(), DeviceError> {
+            self.closed = true;
+            Ok(())
+        }
+    }
+
+    fn block() -> MemoryBlock {
+        MemoryBlock {
+            bytes: vec![0; 64],
+            flushes: 0,
+            closed: false,
+        }
+    }
+
+    #[test]
+    fn registry_projects_only_assigned_devices_and_uses_virtual_handles() {
+        let mut registry: DeviceRegistry<8, 8> = DeviceRegistry::new();
+        registry
+            .assign(1, 10, DeviceName::new(b"null").unwrap(), DeviceKind::Null)
+            .unwrap();
+        registry
+            .assign(2, 11, DeviceName::new(b"zero").unwrap(), DeviceKind::Zero)
+            .unwrap();
+        let mut visible = [DeviceName::new(b"unused").unwrap(); 4];
+        assert_eq!(registry.visible(1, &mut visible), 1);
+        assert_eq!(visible[0].as_bytes(), b"null");
+        assert_eq!(registry.open(1, b"zero"), Err(DeviceError::NotAssigned));
+        let fd = registry.open(1, b"null").unwrap();
+        assert_eq!(fd, 0x4000_0000);
+        assert_eq!(registry.write(1, fd, b"discard"), Ok(7));
+        assert_eq!(
+            registry.write(2, fd, b"escape"),
+            Err(DeviceError::InvalidDescriptor)
+        );
+    }
+
+    #[test]
+    fn pseudo_devices_and_console_are_ginux_owned() {
+        let mut registry: DeviceRegistry<8, 8> = DeviceRegistry::new();
+        for (backend, name, kind) in [
+            (1, b"console".as_slice(), DeviceKind::Console),
+            (2, b"null", DeviceKind::Null),
+            (3, b"zero", DeviceKind::Zero),
+            (4, b"random", DeviceKind::Random),
+        ] {
+            registry
+                .assign(7, backend, DeviceName::new(name).unwrap(), kind)
+                .unwrap();
+        }
+        let zero = registry.open(7, b"zero").unwrap();
+        let mut bytes = [9; 8];
+        assert_eq!(registry.read(7, zero, &mut bytes), Ok(8));
+        assert_eq!(bytes, [0; 8]);
+        let random = registry.open(7, b"random").unwrap();
+        registry.read(7, random, &mut bytes).unwrap();
+        assert_ne!(bytes, [0; 8]);
+        let console = registry.open(7, b"console").unwrap();
+        let mut size = [0; 8];
+        registry
+            .ioctl(7, console, IOCTL_CONSOLE_GET_SIZE, &mut size)
+            .unwrap();
+        assert_eq!(&size[..4], &[24, 0, 80, 0]);
+    }
+
+    #[test]
+    fn conflicts_ioctls_mappings_and_revoke_fail_closed() {
+        let mut registry: DeviceRegistry<4, 4> = DeviceRegistry::new();
+        registry
+            .assign(
+                1,
+                77,
+                DeviceName::new(b"console").unwrap(),
+                DeviceKind::Console,
+            )
+            .unwrap();
+        assert_eq!(
+            registry.assign(
+                2,
+                77,
+                DeviceName::new(b"tty0").unwrap(),
+                DeviceKind::Console
+            ),
+            Err(DeviceError::AssignmentConflict)
+        );
+        let fd = registry.open(1, b"console").unwrap();
+        assert_eq!(
+            registry.ioctl(1, fd, IOCTL_CONSOLE_GET_SIZE, &mut [0; 7]),
+            Err(DeviceError::InvalidPayload)
+        );
+        assert_eq!(
+            registry.ioctl(1, fd, 0xdead, &mut []),
+            Err(DeviceError::UnknownIoctl)
+        );
+        assert_eq!(registry.map(1, fd), Err(DeviceError::DirectMappingDenied));
+        registry.revoke(1);
+        assert_eq!(
+            registry.write(1, fd, b"x"),
+            Err(DeviceError::InvalidDescriptor)
+        );
+        registry
+            .assign(
+                2,
+                77,
+                DeviceName::new(b"tty0").unwrap(),
+                DeviceKind::Console,
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn block_partition_confines_reads_and_writes() {
+        let mut partition = Partition::new(block(), 16, 16, false).unwrap();
+        partition.write_at(0, b"inside").unwrap();
+        let mut value = [0; 6];
+        partition.read_at(0, &mut value).unwrap();
+        assert_eq!(&value, b"inside");
+        assert_eq!(partition.write_at(15, b"xx"), Err(DeviceError::OutOfRange));
+        assert_eq!(
+            partition.read_at(16, &mut [0; 1]),
+            Err(DeviceError::OutOfRange)
+        );
+    }
+
+    #[test]
+    fn block_read_only_flush_and_close_policy() {
+        let mut read_only = Partition::new(block(), 0, 32, true).unwrap();
+        assert_eq!(read_only.write_at(0, b"x"), Err(DeviceError::ReadOnly));
+        read_only.flush().unwrap();
+        read_only.close().unwrap();
+        assert_eq!(read_only.read_at(0, &mut [0; 1]), Err(DeviceError::Closed));
+        assert_eq!(read_only.close(), Err(DeviceError::Closed));
+    }
+
+    #[test]
+    fn network_is_isolated_bounded_and_revocable() {
+        let mut network: IsolatedNetwork<2> = IsolatedNetwork::new();
+        network.send(b"packet-one").unwrap();
+        network.send(b"packet-two").unwrap();
+        assert_eq!(network.send(b"packet-three"), Err(DeviceError::QueueFull));
+        let mut output = [0; 32];
+        let size = network.receive(&mut output).unwrap();
+        assert_eq!(&output[..size], b"packet-one");
+        assert_eq!(network.control(1), Err(DeviceError::UnknownIoctl));
+        network.close();
+        assert_eq!(network.send(b"after-close"), Err(DeviceError::Closed));
+    }
+}

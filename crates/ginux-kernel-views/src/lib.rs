@@ -425,3 +425,212 @@ impl<'a> Writer<'a> {
         self.byte(b'0' + (value % 10) as u8)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ginux_devices::{DeviceName, DeviceRegistry};
+    use ginux_process::{Credentials, ProcessTable, TaskView};
+
+    fn fixture() -> ([TaskView; 4], usize) {
+        let mut table: ProcessTable<4> = ProcessTable::new();
+        let init = table.create_init(Credentials::root()).unwrap();
+        let child = table.fork(init).unwrap();
+        table.credentials_mut(child).unwrap().set_uid(1000).unwrap();
+        let mut views = [table.view(init).unwrap(); 4];
+        let count = table.views(&mut views);
+        (views, count)
+    }
+
+    #[test]
+    fn procfs_exposes_only_virtual_tasks_and_identity() {
+        let (tasks, count) = fixture();
+        let mounts = [
+            MountView {
+                source: b"ginux-root",
+                target: b"/",
+                filesystem: b"ginuxfs",
+                options: b"ro",
+            },
+            MountView {
+                source: b"proc",
+                target: b"/proc",
+                filesystem: b"proc",
+                options: b"rw,nosuid,nodev,noexec",
+            },
+        ];
+        let procfs = ProcFs::new(
+            &tasks[..count],
+            2,
+            12_340_000_000,
+            MemoryView {
+                total_bytes: 512 * 1024 * 1024,
+                available_bytes: 384 * 1024 * 1024,
+            },
+            IdentityView {
+                hostname: b"domain-a",
+                machine_id: b"0123456789abcdef0123456789abcdef",
+                boot_id: b"11111111-2222-3333-4444-555555555555",
+            },
+            &mounts,
+        );
+        let mut pids = [0u32; 4];
+        assert_eq!(procfs.list_pids(&mut pids), 2);
+        assert_eq!(&pids[..2], &[1, 2]);
+
+        let mut output = [0u8; 512];
+        let len = procfs.read(b"/proc/2/status", &mut output).unwrap();
+        let status = &output[..len];
+        assert!(status.windows(7).any(|value| value == b"Pid:\t2\n"));
+        assert!(status.windows(8).any(|value| value == b"PPid:\t1\n"));
+        assert!(status.windows(9).any(|value| value == b"Uid:\t1000"));
+        assert_eq!(
+            procfs
+                .read(b"/proc/424242/status", &mut output)
+                .unwrap_err(),
+            ViewError::NotFound
+        );
+        let len = procfs
+            .read(b"/proc/sys/kernel/random/boot_id", &mut output)
+            .unwrap();
+        assert_eq!(&output[..len], b"11111111-2222-3333-4444-555555555555\n");
+    }
+
+    #[test]
+    fn procfs_system_views_are_bounded_consistent_and_read_only() {
+        let (tasks, count) = fixture();
+        let mounts = [MountView {
+            source: b"proc",
+            target: b"/proc",
+            filesystem: b"proc",
+            options: b"rw,nosuid,nodev,noexec",
+        }];
+        let procfs = ProcFs::new(
+            &tasks[..count],
+            1,
+            12_340_000_000,
+            MemoryView {
+                total_bytes: 512 * 1024 * 1024,
+                available_bytes: 384 * 1024 * 1024,
+            },
+            IdentityView {
+                hostname: b"domain-a",
+                machine_id: b"0123456789abcdef0123456789abcdef",
+                boot_id: b"11111111-2222-3333-4444-555555555555",
+            },
+            &mounts,
+        );
+        let mut output = [0u8; 512];
+        let len = procfs.read(b"/proc/uptime", &mut output).unwrap();
+        assert_eq!(&output[..len], b"12.34 0.00\n");
+        let len = procfs.read(b"/proc/meminfo", &mut output).unwrap();
+        assert!(output[..len]
+            .windows(19)
+            .any(|value| value == b"MemTotal:       524"));
+        let len = procfs.read(b"/proc/self/mounts", &mut output).unwrap();
+        assert_eq!(
+            &output[..len],
+            b"proc /proc proc rw,nosuid,nodev,noexec 0 0\n"
+        );
+        assert_eq!(
+            procfs.write(b"/proc/sys/kernel/hostname", b"host"),
+            Err(ViewError::ReadOnly)
+        );
+        assert_eq!(
+            procfs.read(b"/proc/not-a-pid/status", &mut output),
+            Err(ViewError::InvalidPath)
+        );
+    }
+
+    #[test]
+    fn sysfs_projects_only_assigned_virtual_devices() {
+        let mut registry: DeviceRegistry<6, 2> = DeviceRegistry::new();
+        registry
+            .assign(7, 100, DeviceName::new(b"vda").unwrap(), DeviceKind::Block)
+            .unwrap();
+        registry
+            .assign(
+                7,
+                101,
+                DeviceName::new(b"net0").unwrap(),
+                DeviceKind::Network,
+            )
+            .unwrap();
+        registry
+            .assign(
+                8,
+                102,
+                DeviceName::new(b"host-only").unwrap(),
+                DeviceKind::Block,
+            )
+            .unwrap();
+        let placeholder = DeviceView {
+            name: DeviceName::new(b"none").unwrap(),
+            kind: DeviceKind::Null,
+            major: 0,
+            minor: 0,
+        };
+        let mut projected = [placeholder; 6];
+        let count = registry.views(7, &mut projected);
+        let sysfs = SysFs::new(&projected[..count], 2);
+        let mut output = [0u8; 128];
+
+        let len = sysfs
+            .read(b"/sys/class/block/vda/dev", &mut output)
+            .unwrap();
+        assert_eq!(&output[..len], b"254:0\n");
+        let len = sysfs
+            .read(b"/sys/class/net/net0/type", &mut output)
+            .unwrap();
+        assert_eq!(&output[..len], b"1\n");
+        let len = sysfs
+            .read(b"/sys/devices/system/cpu/online", &mut output)
+            .unwrap();
+        assert_eq!(&output[..len], b"0-1\n");
+        assert_eq!(
+            sysfs.read(b"/sys/class/block/host-only/dev", &mut output),
+            Err(ViewError::NotFound)
+        );
+        assert_eq!(
+            sysfs.write(b"/sys/class/block/vda/dev", b"8:0"),
+            Err(ViewError::ReadOnly)
+        );
+    }
+
+    #[test]
+    fn identity_and_namespaces_are_domain_owned_and_consistent() {
+        let (tasks, count) = fixture();
+        let identity = IdentityView {
+            hostname: b"domain-a",
+            machine_id: b"0123456789abcdef0123456789abcdef",
+            boot_id: b"11111111-2222-3333-4444-555555555555",
+        };
+        let identities = IdentityFs::new(
+            &tasks[..count],
+            identity,
+            NamespaceView {
+                mount: 101,
+                pid: 102,
+                uts: 103,
+                cgroup: 104,
+            },
+        );
+        let mut output = [0u8; 128];
+        let len = identities.read(b"/etc/machine-id", &mut output).unwrap();
+        assert_eq!(&output[..len], b"0123456789abcdef0123456789abcdef\n");
+        let len = identities.readlink(b"/proc/1/ns/mnt", &mut output).unwrap();
+        assert_eq!(&output[..len], b"mnt:[101]");
+        let len = identities
+            .readlink(b"/proc/2/ns/cgroup", &mut output)
+            .unwrap();
+        assert_eq!(&output[..len], b"cgroup:[104]");
+        assert_eq!(
+            identities.readlink(b"/proc/424242/ns/pid", &mut output),
+            Err(ViewError::NotFound)
+        );
+        assert_eq!(
+            identities.write(b"/etc/hostname", b"host-name"),
+            Err(ViewError::ReadOnly)
+        );
+    }
+}

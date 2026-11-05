@@ -345,3 +345,57 @@ impl<'a> ByteWriter<'a> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bounded_hierarchy_supports_systemd_style_operations() {
+        let mut cgroups: CgroupFs<4> = CgroupFs::new();
+        cgroups.create(b"/system.slice", 0).unwrap();
+        cgroups
+            .write(b"/cgroup.subtree_control", b"+cpu +memory +pids\n", 0)
+            .unwrap();
+        cgroups
+            .write(b"/system.slice/memory.max", b"1048576\n", 0)
+            .unwrap();
+        cgroups.write(b"/system.slice/pids.max", b"4\n", 0).unwrap();
+        cgroups
+            .write(b"/system.slice/cgroup.procs", b"2\n", 0)
+            .unwrap();
+
+        let mut output = [0u8; 128];
+        let len = cgroups
+            .read(b"/system.slice/cgroup.procs", &mut output)
+            .unwrap();
+        assert_eq!(&output[..len], b"2\n");
+        let len = cgroups
+            .read(b"/system.slice/memory.max", &mut output)
+            .unwrap();
+        assert_eq!(&output[..len], b"1048576\n");
+        let len = cgroups.read(b"/cgroup.events", &mut output).unwrap();
+        assert_eq!(&output[..len], b"populated 0\nfrozen 0\n");
+    }
+
+    #[test]
+    fn cgroup_mutation_is_virtual_bounded_and_privileged() {
+        let mut cgroups: CgroupFs<2> = CgroupFs::new();
+        assert_eq!(
+            cgroups.create(b"/host.slice", 1000),
+            Err(ViewError::PermissionDenied)
+        );
+        cgroups.create(b"/domain.slice", 0).unwrap();
+        assert_eq!(
+            cgroups.create(b"/another.slice", 0),
+            Err(ViewError::LimitExceeded)
+        );
+        assert_eq!(
+            cgroups.write(b"/domain.slice/cgroup.freeze", b"1\n", 0),
+            Err(ViewError::ReadOnly)
+        );
+        cgroups.attach(b"/domain.slice", 7, 0).unwrap();
+        assert_eq!(cgroups.remove(b"/domain.slice", 0), Err(ViewError::Busy));
+        assert_eq!(cgroups.create(b"/../host", 0), Err(ViewError::InvalidPath));
+    }
+}
