@@ -1855,6 +1855,7 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descripto
         .unwrap_or_else(|_| native_fail(domain, pid, b"native virtual init failed"));
     let mut tasks: [Option<NativeSupervisorTask>; 128] = [None; 128];
     let mut pending_child_stops = [0usize; 16];
+    let mut peak_managed_tasks = 1usize;
     tasks[0] = Some(NativeSupervisorTask {
         host_pid: pid,
         virtual_id: root_virtual,
@@ -1931,6 +1932,9 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descripto
                     domain_fail(domain, b"native exit transition failed");
                 }
                 line(b"GINUX_NATIVE: supervisor=attached direct-unsupervised-syscalls=0");
+                write_all(b"GINUX_NATIVE_MEASURE: peak-managed-tasks=");
+                write_u64(peak_managed_tasks as u64);
+                write_all(b"\n");
                 if exit_status == 0 {
                     line(b"GINUX_NATIVE_CHECK: PASS");
                 }
@@ -1996,6 +2000,7 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descripto
                 initial_stop_pending: pending_child_slot.is_none(),
                 tracing: true,
             });
+            peak_managed_tasks = core::cmp::max(peak_managed_tasks, processes.active());
             if let Some(pending_slot) = pending_child_slot {
                 pending_child_stops[pending_slot] = 0;
                 let _ = ptrace(PTRACE_SETOPTIONS, child_host_pid, 0, options);

@@ -26,14 +26,21 @@ if unshare -m true 2>/dev/null; then
 fi
 printf '%s\n' 'GINUX_LOCKDOWN_NAMESPACE: BLOCKED'
 
-getent ahostsv4 dl.rockylinux.org >/tmp/ginux-rocky-addresses
-test -s /tmp/ginux-rocky-addresses
-curl --fail --silent --show-error --head --max-time 30 \
-    https://dl.rockylinux.org/pub/rocky/ >/tmp/ginux-rocky-headers
-test -s /tmp/ginux-rocky-headers
-printf '%s\n' 'GINUX_NETWORK_DNS_HTTPS: PASS'
+set -- /proc/[0-9]*
+printf 'GINUX_MEASURE: idle-managed-proc-entries=%s\n' "$#"
+if test -e /run/ginux-skip-network; then
+    printf '%s\n' 'GINUX_NETWORK_DNS_HTTPS: SKIPPED'
+    printf '%s\n' 'GINUX_NETWORK_BIND_ACCEPT_CONFLICT: SKIPPED'
+else
+    getent ahostsv4 dl.rockylinux.org >/tmp/ginux-rocky-addresses
+    test -s /tmp/ginux-rocky-addresses
+    curl --fail --silent --show-error --head --max-time 30 \
+        https://dl.rockylinux.org/pub/rocky/ >/tmp/ginux-rocky-headers
+    test -s /tmp/ginux-rocky-headers
+    printf '%s\n' 'GINUX_NETWORK_DNS_HTTPS: PASS'
 
-/usr/local/sbin/ginux-gate9-network-check
+    /usr/local/sbin/ginux-gate9-network-check
+fi
 if test -e /run/ginux-skip-dnf; then
     printf '%s\n' 'GINUX_DNF_UPDATE: SKIPPED'
 else

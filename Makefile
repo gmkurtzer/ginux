@@ -8,7 +8,7 @@ BASELINE := target/$(X86_TARGET)/release/baseline-runner
 RUNTIME_FIXTURE := target/$(X86_TARGET)/release/runtime-fixture
 PROCESS_NATIVE_FIXTURE := target/$(X86_TARGET)/release/process-native-fixture
 
-.PHONY: doctor host-image-fetch host-image-verify host-boot-test image-helper-fetch image-prepare domain-image-fetch domain-image-verify domain-image-prepare test-image test-oci-image test-oci-layers test-vfs test-native-vfs image-cache-clean build check-name check test test-unit test-intercept test-runtime test-config test-domain test-process test-devices test-kernel-views test-cgroup test-block test-network bench-baseline bench-block bench-network demo-gate-1 demo-gate-2 demo-gate-3 demo-gate-4 demo-gate-5 demo-gate-6 demo-gate-7 demo-gate-8 clean
+.PHONY: doctor host-image-fetch host-image-verify host-boot-test image-helper-fetch image-prepare domain-image-fetch domain-image-verify domain-image-prepare test-image test-oci-image test-oci-layers test-vfs test-native-vfs image-cache-clean build check-name check test test-unit test-intercept test-runtime test-config test-domain test-process test-devices test-kernel-views test-systemd test-systemd-live test-cgroup test-block test-network bench bench-baseline bench-block bench-network demo-gate-1 demo-gate-2 demo-gate-3 demo-gate-4 demo-gate-5 demo-gate-6 demo-gate-7 demo-gate-8 demo-gate-9 clean
 
 doctor:
 	@./scripts/doctor.sh
@@ -110,6 +110,12 @@ test-kernel-views:
 	cargo test -p ginux-kernel-views
 	@./scripts/with-rocky-host.sh ./scripts/test-kernel-views.sh
 
+test-systemd: build domain-image-prepare
+	@ROCKY_NETWORK_RESTRICT=on ./scripts/with-rocky-host.sh ./scripts/test-systemd.sh
+
+test-systemd-live: build domain-image-prepare
+	@ROCKY_NETWORK_RESTRICT=off ./scripts/with-rocky-host.sh ./scripts/test-systemd-live.sh
+
 test-cgroup:
 	cargo test -p ginux-kernel-views cgroup::
 
@@ -136,6 +142,9 @@ bench-block: build
 bench-network: build
 	@./scripts/with-rocky-host.sh ./scripts/bench-devices.sh network
 
+bench: build domain-image-prepare
+	@ROCKY_NETWORK_RESTRICT=on ./scripts/with-rocky-host.sh ./scripts/bench-systemd.sh
+
 demo-gate-1: doctor build
 	@./scripts/with-rocky-host.sh ./scripts/demo-gate-1.sh
 
@@ -159,6 +168,9 @@ demo-gate-7: doctor build
 
 demo-gate-8: doctor build
 	@./scripts/with-rocky-host.sh ./scripts/demo-gate-8.sh
+
+demo-gate-9: doctor build domain-image-prepare
+	@ROCKY_NETWORK_RESTRICT=off ./scripts/with-rocky-host.sh ./scripts/demo-gate-9.sh
 
 clean:
 	cargo clean

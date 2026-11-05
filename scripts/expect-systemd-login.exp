@@ -11,6 +11,7 @@ set user [lindex $argv 2]
 set domain_root [lindex $argv 3]
 set log [lindex $argv 4]
 set timeout 50
+set started_ms [clock milliseconds]
 
 log_file -noappend $log
 spawn ssh -tt -i $key -p $port -o BatchMode=yes -o ConnectTimeout=5 -o IdentitiesOnly=yes -o LogLevel=ERROR -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$user@127.0.0.1" "sudo /var/tmp/ginux native /var/tmp/gate9.toml $domain_root systemd"
@@ -20,6 +21,9 @@ expect {
     timeout { puts stderr "systemd login prompt timed out"; exit 70 }
     eof { puts stderr "systemd exited before login prompt"; exit 71 }
 }
+set ready_ms [clock milliseconds]
+set boot_ms [expr {$ready_ms - $started_ms}]
+send_log "GINUX_MEASURE: boot-to-login-ms=$boot_ms\n"
 send -- "root\r"
 
 expect {
@@ -72,12 +76,12 @@ expect {
     eof { puts stderr "managed shell exited during namespace check"; exit 93 }
 }
 expect {
-    -re {GINUX_NETWORK_DNS_HTTPS: PASS} {}
+    -re {GINUX_NETWORK_DNS_HTTPS: (PASS|SKIPPED)} {}
     timeout { puts stderr "shared network DNS/HTTPS check timed out"; exit 94 }
     eof { puts stderr "managed shell exited during network check"; exit 95 }
 }
 expect {
-    -re {GINUX_NETWORK_BIND_ACCEPT_CONFLICT: PASS} {}
+    -re {GINUX_NETWORK_BIND_ACCEPT_CONFLICT: (PASS|SKIPPED)} {}
     timeout { puts stderr "shared network bind check timed out"; exit 96 }
     eof { puts stderr "managed shell exited during bind check"; exit 97 }
 }
@@ -110,5 +114,8 @@ expect {
     timeout { puts stderr "clean domain shutdown result timed out"; exit 100 }
     eof { puts stderr "domain shutdown result missing"; exit 101 }
 }
+set stopped_ms [clock milliseconds]
+set total_ms [expr {$stopped_ms - $started_ms}]
+send_log "GINUX_MEASURE: total-runtime-ms=$total_ms\n"
 expect eof
 exit 0
