@@ -31,5 +31,22 @@ test -z "$outside"
 outside=$(rocky_ssh 'dd if=/var/tmp/ginux-block.img bs=1 skip=3072 count=1024 status=none | od -An -v -tu1 | tr -d " 0\n"')
 test -z "$outside"
 
-rocky_ssh 'rm -f /var/tmp/ginux /var/tmp/gate6.toml /var/tmp/ginux-block.img'
+# A backing file that does not cover the partition (1024 + 2048 bytes) must
+# fail the gate before anything is written to it.
+for size in 0 1024 3071; do
+    small_log="build/gate6-devices-small-$size.log"
+    if rocky_ssh "truncate -s $size /var/tmp/ginux-small.img; /var/tmp/ginux devices /var/tmp/gate6.toml /var/tmp/ginux-small.img" > "$small_log" 2>&1; then
+        printf 'test-devices: %s-byte block backend accepted\n' "$size" >&2
+        exit 1
+    fi
+    grep -Fqx 'GATE6_DEVICES: FAIL: block backend smaller than partition' "$small_log"
+    if grep -Fqx 'GATE6_DEVICES: PASS' "$small_log"; then
+        printf 'test-devices: %s-byte block backend reported PASS\n' "$size" >&2
+        exit 1
+    fi
+    small_size=$(rocky_ssh 'stat -c %s /var/tmp/ginux-small.img')
+    test "$small_size" = "$size"
+done
+
+rocky_ssh 'rm -f /var/tmp/ginux /var/tmp/gate6.toml /var/tmp/ginux-block.img /var/tmp/ginux-small.img'
 printf '%s\n' 'test-devices: PASS'

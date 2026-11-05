@@ -9,6 +9,7 @@ use core::arch::asm;
 pub const SYS_WRITE_HOST: usize = 1;
 pub const SYS_READ_HOST: usize = 0;
 pub const SYS_CLOSE_HOST: usize = 3;
+pub const SYS_FSTAT: usize = 5;
 pub const SYS_RT_SIGPROCMASK: usize = 14;
 pub const SYS_PREAD64: usize = 17;
 pub const SYS_PWRITE64: usize = 18;
