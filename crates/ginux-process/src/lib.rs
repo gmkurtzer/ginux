@@ -3,6 +3,8 @@
 pub const MAX_GROUPS: usize = 8;
 pub const MAX_SIGNAL: u8 = 64;
 pub const CAP_SYS_ADMIN: u64 = 1 << 21;
+/// SIGKILL and SIGSTOP: never blockable and never caught or ignored.
+const UNBLOCKABLE_SIGNALS: u64 = (1 << (9 - 1)) | (1 << (19 - 1));
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ProcessError {
@@ -373,13 +375,23 @@ impl<const TASKS: usize> ProcessTable<TASKS> {
         if parent.state != TaskState::Running {
             return Err(ProcessError::InvalidParent);
         }
-        self.allocate(
+        let child = self.allocate(
             parent.tgid,
             0,
             parent.process_group,
             parent.session,
             parent.credentials,
-        )
+        )?;
+        // Linux fork copies the signal mask and dispositions (including an
+        // active handler frame on the copied stack); the child's pending set
+        // starts empty.
+        let index = self.index(child)?;
+        let task = &mut self.tasks[index];
+        task.signal_mask = parent.signal_mask;
+        task.signal_actions = parent.signal_actions;
+        task.signal_frame_active = parent.signal_frame_active;
+        task.saved_signal_mask = parent.saved_signal_mask;
+        Ok(child)
     }
 
     pub fn clone_thread(&mut self, leader: TaskId) -> Result<TaskId, ProcessError> {
@@ -402,8 +414,9 @@ impl<const TASKS: usize> ProcessTable<TASKS> {
         if task.state != TaskState::Running {
             return Err(ProcessError::InvalidState);
         }
-        task.pending_signals = 0;
-        task.signal_mask = 0;
+        // Linux execve keeps the pending set and the signal mask, resets
+        // caught signals to their default action, and keeps ignored ones.
+        // The new image has no handler frame to return from.
         task.signal_frame_active = false;
         task.saved_signal_mask = 0;
         for action in &mut task.signal_actions {
@@ -584,7 +597,8 @@ impl<const TASKS: usize> ProcessTable<TASKS> {
 
     pub fn set_signal_mask(&mut self, id: TaskId, mask: u64) -> Result<(), ProcessError> {
         let index = self.index(id)?;
-        self.tasks[index].signal_mask = mask;
+        // Linux silently drops SIGKILL and SIGSTOP from any requested mask.
+        self.tasks[index].signal_mask = mask & !UNBLOCKABLE_SIGNALS;
         Ok(())
     }
 
@@ -606,7 +620,7 @@ impl<const TASKS: usize> ProcessTable<TASKS> {
         signal: u8,
         action: SignalAction,
     ) -> Result<(), ProcessError> {
-        if signal == 0 || signal > MAX_SIGNAL || matches!(signal, 9 | 19) {
+        if signal == 0 || signal > MAX_SIGNAL || UNBLOCKABLE_SIGNALS & (1u64 << (signal - 1)) != 0 {
             return Err(ProcessError::InvalidSignal);
         }
         let index = self.index(id)?;
@@ -1627,6 +1641,106 @@ mod tests {
             table.set_signal_action(init, 9, SignalAction::Ignore),
             Err(ProcessError::InvalidSignal)
         );
+    }
+
+    #[test]
+    fn sigkill_and_sigstop_cannot_be_blocked() {
+        let mut table: ProcessTable<2> = ProcessTable::new();
+        let init = table.create_init(Credentials::root()).unwrap();
+        table.set_signal_mask(init, u64::MAX).unwrap();
+        table.signal(init, 15).unwrap();
+        table.signal(init, 19).unwrap();
+        table.signal(init, 9).unwrap();
+        assert_eq!(table.blocking_interrupted(init), Ok(true));
+        assert_eq!(table.next_signal(init), Ok(Some(9)));
+        assert_eq!(table.next_signal(init), Ok(Some(19)));
+        assert_eq!(table.next_signal(init), Ok(None));
+    }
+
+    #[test]
+    fn fork_inherits_signal_mask_and_dispositions_but_not_pending() {
+        let mut table: ProcessTable<4> = ProcessTable::new();
+        let init = table.create_init(Credentials::root()).unwrap();
+        table.set_signal_mask(init, 1 << (15 - 1)).unwrap();
+        table
+            .set_signal_action(init, 10, SignalAction::Handler(0x4000))
+            .unwrap();
+        table
+            .set_signal_action(init, 13, SignalAction::Ignore)
+            .unwrap();
+        table.signal(init, 2).unwrap();
+        let child = table.fork(init).unwrap();
+        assert_eq!(
+            table.signal_action(child, 10),
+            Ok(SignalAction::Handler(0x4000))
+        );
+        assert_eq!(table.signal_action(child, 13), Ok(SignalAction::Ignore));
+        assert_eq!(table.blocking_interrupted(child), Ok(false));
+        assert_eq!(table.next_signal(child), Ok(None));
+        table.signal(child, 15).unwrap();
+        assert_eq!(table.next_signal(child), Ok(None));
+
+        // A fork inside a handler leaves the child on the same handler
+        // frame, so its sigreturn restores the copied pre-handler mask.
+        table.signal(init, 10).unwrap();
+        assert_eq!(table.next_signal(init), Ok(Some(2)));
+        assert_eq!(
+            table.begin_signal(init),
+            Ok(Some(SignalDelivery::Handler {
+                signal: 10,
+                address: 0x4000,
+            }))
+        );
+        let handler_child = table.fork(init).unwrap();
+        table.signal(handler_child, 10).unwrap();
+        assert_eq!(table.next_signal(handler_child), Ok(None));
+        assert_eq!(table.signal_return(handler_child), Ok(()));
+        assert_eq!(table.next_signal(handler_child), Ok(Some(10)));
+    }
+
+    #[test]
+    fn exec_keeps_pending_signals_and_mask() {
+        let mut table: ProcessTable<2> = ProcessTable::new();
+        let init = table.create_init(Credentials::root()).unwrap();
+        table.set_signal_mask(init, 1 << (15 - 1)).unwrap();
+        table
+            .set_signal_action(init, 10, SignalAction::Handler(0x4000))
+            .unwrap();
+        table
+            .set_signal_action(init, 13, SignalAction::Ignore)
+            .unwrap();
+        table.signal(init, 15).unwrap();
+        table.signal(init, 10).unwrap();
+        assert_eq!(table.exec(init), Ok(1));
+        assert_eq!(table.signal_action(init, 10), Ok(SignalAction::Default));
+        assert_eq!(table.signal_action(init, 13), Ok(SignalAction::Ignore));
+        assert_eq!(table.next_signal(init), Ok(Some(10)));
+        assert_eq!(table.next_signal(init), Ok(None));
+        table.set_signal_mask(init, 0).unwrap();
+        assert_eq!(table.next_signal(init), Ok(Some(15)));
+    }
+
+    #[test]
+    fn exec_inside_handler_keeps_current_mask_and_drops_frame() {
+        let mut table: ProcessTable<2> = ProcessTable::new();
+        let init = table.create_init(Credentials::root()).unwrap();
+        table
+            .set_signal_action(init, 10, SignalAction::Handler(0x4000))
+            .unwrap();
+        table.signal(init, 10).unwrap();
+        assert_eq!(
+            table.begin_signal(init),
+            Ok(Some(SignalDelivery::Handler {
+                signal: 10,
+                address: 0x4000,
+            }))
+        );
+        assert_eq!(table.exec(init), Ok(1));
+        assert_eq!(table.signal_return(init), Err(ProcessError::InvalidState));
+        table.signal(init, 10).unwrap();
+        assert_eq!(table.next_signal(init), Ok(None));
+        table.set_signal_mask(init, 0).unwrap();
+        assert_eq!(table.next_signal(init), Ok(Some(10)));
     }
 
     #[test]
