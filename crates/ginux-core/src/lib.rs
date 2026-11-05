@@ -98,8 +98,11 @@ pub const fn balanced_arguments_allowed(syscall: u64, arg0: u64, arg1: u64, arg2
     const O_EXCL: u64 = 0o200;
     const O_TRUNC: u64 = 0o1000;
     const O_APPEND: u64 = 0o2000;
-    const O_TMPFILE: u64 = 0o20200000;
-    const MUTATING_OPEN_FLAGS: u64 = O_CREAT | O_EXCL | O_TRUNC | O_APPEND | O_TMPFILE;
+    // O_TMPFILE is __O_TMPFILE | O_DIRECTORY. Only the __O_TMPFILE bit marks
+    // a mutating open; masking the composite also rejected a plain
+    // O_DIRECTORY, which glibc opendir() always passes.
+    const O_TMPFILE_BIT: u64 = 0o20000000;
+    const MUTATING_OPEN_FLAGS: u64 = O_CREAT | O_EXCL | O_TRUNC | O_APPEND | O_TMPFILE_BIT;
     const PROT_WRITE: u64 = 2;
     const PROT_EXEC: u64 = 4;
     match syscall {
@@ -161,5 +164,37 @@ mod tests {
         assert_eq!(balanced_surface(16), BalancedSurface::Denied);
         assert_eq!(balanced_surface(41), BalancedSurface::Denied);
         assert_eq!(balanced_surface(105), BalancedSurface::Denied);
+    }
+
+    #[test]
+    fn balanced_contract_allows_read_only_directory_opens() {
+        const AT_FDCWD: u64 = -100i64 as u64;
+        const O_WRONLY: u64 = 1;
+        const O_RDWR: u64 = 2;
+        const O_CREAT: u64 = 0o100;
+        const O_TRUNC: u64 = 0o1000;
+        const O_APPEND: u64 = 0o2000;
+        const O_NONBLOCK: u64 = 0o4000;
+        const O_DIRECTORY: u64 = 0o200000;
+        const O_CLOEXEC: u64 = 0o2000000;
+        const O_TMPFILE: u64 = 0o20200000;
+        // glibc opendir(): openat(AT_FDCWD, path, O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY)
+        let opendir = O_NONBLOCK | O_CLOEXEC | O_DIRECTORY;
+        assert!(balanced_arguments_allowed(257, AT_FDCWD, 0x1000, opendir));
+        assert!(balanced_arguments_allowed(2, 0x1000, O_DIRECTORY, 0));
+        // O_DIRECTORY does not unlock anything mutating, and O_TMPFILE stays
+        // denied with or without its O_DIRECTORY bit.
+        for flags in [
+            O_DIRECTORY | O_WRONLY,
+            O_DIRECTORY | O_RDWR,
+            O_DIRECTORY | O_CREAT,
+            O_DIRECTORY | O_TRUNC,
+            O_DIRECTORY | O_APPEND,
+            O_TMPFILE,
+            O_TMPFILE & !O_DIRECTORY,
+        ] {
+            assert!(!balanced_arguments_allowed(257, AT_FDCWD, 0x1000, flags));
+            assert!(!balanced_arguments_allowed(2, 0x1000, flags, 0));
+        }
     }
 }

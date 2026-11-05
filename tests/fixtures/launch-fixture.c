@@ -68,6 +68,24 @@ long launch_fixture_main(word *stack)
     case 'b':
         for (word i = 0; i < 4000; ++i) call3(39, 0, 0, 0);
         return 0;
+    case 'l': {
+        /* opendir("."): openat(AT_FDCWD, ".", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) */
+        char buffer[1024];
+        long fd = call3(257, (word)-100, (word)".", 0204000 | 02000000);
+        if (fd < 0) return 81;
+        long count = call3(217, fd, (word)buffer, sizeof buffer);
+        if (count <= 0) return 82;
+        /* struct linux_dirent64: d_ino 8, d_off 8, d_reclen 2, d_type 1, d_name */
+        for (long at = 0; at < count; at += *(unsigned short *)(buffer + at + 16)) {
+            const char *name = buffer + at + 19;
+            if (name[0] == 'i' && name[1] == 'n' && name[2] == 'p' && name[3] == 'u'
+                && name[4] == 't' && name[5] == 0) {
+                print(name);
+                return 0;
+            }
+        }
+        return 83;
+    }
     default: return 98;
     }
 }
