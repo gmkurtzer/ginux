@@ -2,13 +2,13 @@
 //!
 //! Owner: G-files/channel adapter lane (serialized with G-files changes).
 //! Balanced bootstrap polling validates the tracee's descriptor array before
-//! a nonblocking console-readiness query. The generic opaque transport the
+//! a bounded console-readiness query. The generic opaque transport the
 //! worker-protocol frames ride on is still awaiting integration.
 
 use crate::supervisor::{ptrace, PTRACE_PEEKDATA};
 
 /// Only the three assigned bootstrap descriptors (and ignored negative slots)
-/// may appear in a bounded zero-time poll. The kernel supplies readiness and
+/// may appear in a bounded poll. The kernel supplies readiness and
 /// POLLNVAL for closed descriptors; no descriptor is created or transferred.
 pub fn bootstrap_poll_allowed(pid: usize, address: u64, count: u64) -> bool {
     if count > ginux_core::MAX_BOOTSTRAP_POLL_FDS {
