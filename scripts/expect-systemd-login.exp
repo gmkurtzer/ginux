@@ -1,0 +1,88 @@
+#!/usr/bin/expect -f
+
+if {$argc != 5} {
+    puts stderr "usage: expect-systemd-login.exp <key> <port> <user> <domain-root> <log>"
+    exit 64
+}
+
+set key [lindex $argv 0]
+set port [lindex $argv 1]
+set user [lindex $argv 2]
+set domain_root [lindex $argv 3]
+set log [lindex $argv 4]
+set timeout 50
+
+log_file -noappend $log
+spawn ssh -tt -i $key -p $port -o BatchMode=yes -o ConnectTimeout=5 -o IdentitiesOnly=yes -o LogLevel=ERROR -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$user@127.0.0.1" "sudo /var/tmp/ginux native /var/tmp/gate9.toml $domain_root systemd"
+
+expect {
+    -re {login:} {}
+    timeout { puts stderr "systemd login prompt timed out"; exit 70 }
+    eof { puts stderr "systemd exited before login prompt"; exit 71 }
+}
+send -- "root\r"
+
+expect {
+    -re {Password:} {}
+    timeout { puts stderr "systemd password prompt timed out"; exit 72 }
+    eof { puts stderr "login exited before password prompt"; exit 73 }
+}
+send -- "ginux\r"
+
+expect {
+    -re {\[root@ginux [^]]+\]# } {}
+    timeout { puts stderr "authenticated shell prompt timed out"; exit 74 }
+    eof { puts stderr "login exited before authenticated shell"; exit 75 }
+}
+send -- "/usr/local/sbin/ginux-gate9-check\n"
+
+expect {
+    -re {GINUX_AUTHENTICATED} {}
+    timeout { puts stderr "managed shell checks timed out"; exit 76 }
+    eof { puts stderr "managed shell exited before checks completed"; exit 77 }
+}
+expect {
+    -re {uid=0\(root\).*gid=0\(root\)} {}
+    timeout { puts stderr "virtual root identity check timed out"; exit 80 }
+    eof { puts stderr "managed shell exited before identity check"; exit 81 }
+}
+expect {
+    -re {[0-9]+ \([^)]+\) [A-Z] [0-9]+} {}
+    timeout { puts stderr "virtual proc stat check timed out"; exit 82 }
+    eof { puts stderr "managed shell exited before proc check"; exit 83 }
+}
+expect {
+    -re {GINUX_LOCKDOWN_HOST_PATHS: BLOCKED} {}
+    timeout { puts stderr "host path lockdown check timed out"; exit 86 }
+    eof { puts stderr "managed shell exited during host path check"; exit 87 }
+}
+expect {
+    -re {GINUX_LOCKDOWN_DEVICES: BLOCKED} {}
+    timeout { puts stderr "device lockdown check timed out"; exit 88 }
+    eof { puts stderr "managed shell exited during device check"; exit 89 }
+}
+expect {
+    -re {GINUX_LOCKDOWN_MOUNT: BLOCKED} {}
+    timeout { puts stderr "mount lockdown check timed out"; exit 90 }
+    eof { puts stderr "managed shell exited during mount check"; exit 91 }
+}
+expect {
+    -re {GINUX_LOCKDOWN_NAMESPACE: BLOCKED} {}
+    timeout { puts stderr "namespace lockdown check timed out"; exit 92 }
+    eof { puts stderr "managed shell exited during namespace check"; exit 93 }
+}
+expect {
+    -re {GINUX_SHELL_CHECK_DONE} {}
+    timeout { puts stderr "managed shell completion timed out"; exit 84 }
+    eof { puts stderr "managed shell exited before checks completed"; exit 85 }
+}
+send -- "exit\n"
+
+expect {
+    -re {login:} {}
+    timeout { puts stderr "login prompt did not return after shell exit"; exit 78 }
+    eof { puts stderr "systemd exited after shell exit"; exit 79 }
+}
+send -- "\003"
+expect eof
+exit 0

@@ -301,9 +301,10 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Turn the multi-user milestone into explicit readiness and a usable authenticated
-console path, then verify the logged-in shell remains a managed virtual process
-before adding the live shared-network DNF workflow and controlled shutdown.
+Extend the passing authenticated shell probe with live shared-network DNS and
+TCP evidence, normal inbound bind/conflict behavior, and Rocky's enabled
+default-repository `dnf -y update`; then add controlled shutdown, repeated and
+failure runs, and resource measurements.
 
 ## Context recovery
 
@@ -312,10 +313,12 @@ before adding the live shared-network DNF workflow and controlled shutdown.
 - Reload after context shift: required
 - Active gate: Gate 9, systemd baseline, authorized on dedicated branch
   `hdae/systemd-baseline`; implementation is partial
-- Last evidence: core tests, strict init clippy, and the init release build
-  passed. The Rocky-host probe advanced unmodified Rocky systemd through
-  virtual mount, identity, console, event, timer, cgroup, generators, and
-  services to `multi-user.target`. Gate 7 process and Gate 5 native tracing,
+- Last evidence: core and process tests, strict init clippy, and the init
+  release build passed. The Rocky-host probe advanced unmodified Rocky systemd
+  to `multi-user.target`, authenticated root through `pam_unix`, executed the
+  logged-in managed shell as virtual PID 34 with UID/GID 0, passed host-path,
+  descriptor, device, mount, and namespace lockdown checks, and returned to
+  the login prompt. Gate 7 process and Gate 5 native tracing,
   supervisor-loss, unexpected-stop, and immutable-image regressions passed.
 - Approved network direction: Gate 9 defaults to full host-shared inbound and
   outbound networking with normal host routing and bind conflicts, under Ginux

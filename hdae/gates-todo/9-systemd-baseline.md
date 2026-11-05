@@ -58,6 +58,9 @@ a controlled shutdown.
   compatibility through manager initialization.
 - [x] Add bounded multi-task tracing, virtual PID and wait translation, child
   attach ordering, and supervised signal delivery through `multi-user.target`.
+- [x] Reach the Ginux-owned login console, authenticate through `pam_unix`,
+  execute commands in the managed shell, and verify virtual identity, process
+  visibility, and the initial lockdown probes.
 
 ## Remaining work
 
@@ -155,6 +158,13 @@ a controlled shutdown.
 - `ROCKY_SSH_PORT=22317 ./scripts/with-rocky-host.sh
   ./scripts/test-native-vfs.sh` -> native shell, denial probes, supervisor-loss,
   unexpected-stop cleanup, and immutable-image regression all passed.
+- `ROCKY_SSH_PORT=22371 ./scripts/with-rocky-host.sh
+  ./scripts/probe-systemd.sh` -> systemd reached `multi-user.target`; root
+  authenticated through the disposable test profile; the managed shell
+  reported virtual PID 34, parent 26, UID/GID 0, and its domain-local proc
+  record; host paths and protected descriptors were hidden; unassigned KVM and
+  block devices were absent; mount and namespace creation were denied; exiting
+  returned to the login prompt.
 
 ## Decisions and limitations
 
@@ -193,7 +203,8 @@ a controlled shutdown.
 - Planned commits: systemd boot profile and harness; bounded compatibility
   tranches; readiness, failure, shutdown, and measurement evidence
 - Actual commits: `daca8006` (pinned systemd baseline and probe); `8af72885`
-  (virtual bootstrap compatibility); current multi-task tranche pending commit
+  (virtual bootstrap compatibility); `e595fc28` (multi-task supervision);
+  authenticated-console and lockdown tranche pending commit
 
 ## Review policy and outcome
 
