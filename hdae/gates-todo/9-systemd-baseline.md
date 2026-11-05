@@ -56,6 +56,8 @@ a controlled shutdown.
 - [x] Establish the first real systemd failure baseline under supervision.
 - [x] Add bounded virtual mount, identity, console, event, timer, and cgroup
   compatibility through manager initialization.
+- [x] Add bounded multi-task tracing, virtual PID and wait translation, child
+  attach ordering, and supervised signal delivery through `multi-user.target`.
 
 ## Remaining work
 
@@ -142,6 +144,17 @@ a controlled shutdown.
   surface was added; the balanced profile still denies that surface.
 - Strict `ginux-init` release clippy and build passed after the compatibility
   tranche.
+- `ROCKY_SSH_PORT=22314 ./scripts/with-rocky-host.sh
+  ./scripts/probe-systemd.sh` -> systemd created and supervised its generator
+  and service descendants, exposed virtual PIDs, and reached
+  `multi-user.target`; it remained alive until the probe's bounded timeout.
+- `ROCKY_SSH_PORT=22315 ./scripts/with-rocky-host.sh sh -c
+  './scripts/test-process.sh && ./scripts/test-native-vfs.sh'` -> Gate 7 process
+  regression passed; the Gate 5 native suite exposed an overbroad initial-stop
+  classification that was corrected.
+- `ROCKY_SSH_PORT=22317 ./scripts/with-rocky-host.sh
+  ./scripts/test-native-vfs.sh` -> native shell, denial probes, supervisor-loss,
+  unexpected-stop cleanup, and immutable-image regression all passed.
 
 ## Decisions and limitations
 
@@ -164,6 +177,10 @@ a controlled shutdown.
 - The first systemd baseline identifies bounded mount compatibility and
   multi-task supervision as the next required implementation tranche. The
   probe is partial evidence only; it does not satisfy readiness or login.
+- Reaching `multi-user.target` establishes the first boot milestone, but does
+  not yet satisfy Gate 9: authenticated login, explicit readiness, live shared
+  networking and DNF, measurements, controlled shutdown, and complete
+  regression evidence remain open.
 - New architecture needs discovered during convergence require human direction
   or a corrective gate rather than silent scope expansion.
 
@@ -175,8 +192,8 @@ a controlled shutdown.
   2026-11-03; never merge or close without explicit authorization
 - Planned commits: systemd boot profile and harness; bounded compatibility
   tranches; readiness, failure, shutdown, and measurement evidence
-- Actual commits: `daca8006` (pinned systemd baseline and probe); current
-  compatibility tranche pending commit
+- Actual commits: `daca8006` (pinned systemd baseline and probe); `8af72885`
+  (virtual bootstrap compatibility); current multi-task tranche pending commit
 
 ## Review policy and outcome
 

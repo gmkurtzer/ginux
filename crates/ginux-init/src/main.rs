@@ -19,7 +19,7 @@ use ginux_kernel_views::{
 };
 use ginux_process::{
     Credentials, EventFd, EventPoll, FutexTable, ProcessError, ProcessTable, SignalAction,
-    SignalDelivery, TimerTable, VirtualClock, EVENT_READ, EVENT_WRITE,
+    SignalDelivery, TaskId, TimerTable, VirtualClock, EVENT_READ, EVENT_WRITE,
 };
 use ginux_runtime::{execute, AddressSpace, AuditAction, LoadError};
 use ginux_vfs::{BaseReader, Index, VfsError, VirtualFs, O_CREATE, O_READ, O_WRITE};
@@ -1596,6 +1596,25 @@ fn native_tracee_setup_fail(code: usize) -> ! {
     }
 }
 
+#[derive(Clone, Copy)]
+struct NativeSupervisorTask {
+    host_pid: usize,
+    virtual_id: TaskId,
+    awaiting_exit: bool,
+    override_exit: bool,
+    override_result: i64,
+    pending_console_open: bool,
+    console_fd: i64,
+    syscall: u64,
+    translated_rdi: u64,
+    waitid_info: u64,
+    fork_result_pending: u32,
+    fork_breakpoint_rip: usize,
+    fork_breakpoint_word: usize,
+    initial_stop_pending: bool,
+    tracing: bool,
+}
+
 fn supervise_native(pid: usize, domain: &mut Domain, mode: usize) -> ! {
     let mut status = 0i32;
     if wait(pid, &mut status) < 0 {
@@ -1625,15 +1644,90 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize) -> ! {
     }
 
     let mut sequence = 0u64;
-    let mut awaiting_exit = false;
-    let mut override_exit = false;
-    let mut override_result = 0i64;
-    let mut pending_console_open = false;
-    let mut console_fd = -1i64;
+    let mut processes: ProcessTable<128> = ProcessTable::new();
+    let root_virtual = processes
+        .create_init(Credentials::unprivileged(
+            DOMAIN_UID as u32,
+            DOMAIN_GID as u32,
+        ))
+        .unwrap_or_else(|_| native_fail(domain, pid, b"native virtual init failed"));
+    let mut tasks: [Option<NativeSupervisorTask>; 128] = [None; 128];
+    let mut pending_child_stops = [0usize; 16];
+    tasks[0] = Some(NativeSupervisorTask {
+        host_pid: pid,
+        virtual_id: root_virtual,
+        awaiting_exit: false,
+        override_exit: false,
+        override_result: 0,
+        pending_console_open: false,
+        console_fd: -1,
+        syscall: 0,
+        translated_rdi: 0,
+        waitid_info: 0,
+        fork_result_pending: 0,
+        fork_breakpoint_rip: 0,
+        fork_breakpoint_word: 0,
+        initial_stop_pending: false,
+        tracing: true,
+    });
     loop {
         status = 0;
-        if wait(pid, &mut status) < 0 || !stopped(status) {
-            native_fail(domain, pid, b"native tracee escaped supervision");
+        let waited = unsafe {
+            syscall4(
+                SYS_WAIT4,
+                (-1isize) as usize,
+                &mut status as *mut _ as usize,
+                0,
+                0,
+            )
+        };
+        if waited <= 0 {
+            native_fail(domain, pid, b"native wait-any failed");
+        }
+        let host_pid = waited as usize;
+        let task_index = tasks
+            .iter()
+            .position(|task| task.is_some_and(|task| task.host_pid == host_pid));
+        let Some(task_index) = task_index else {
+            let initial_child_stop = stopped(status) && ((status >> 8) & 0xff) as u8 == 19;
+            let Some(pending_slot) = pending_child_stops.iter_mut().find(|child| **child == 0)
+            else {
+                native_fail(domain, pid, b"pending native child table full");
+            };
+            if initial_child_stop {
+                *pending_slot = host_pid;
+                continue;
+            }
+            native_fail(domain, pid, b"unknown native tracee");
+        };
+        let mut task = tasks[task_index].unwrap();
+        if !stopped(status) {
+            let exit_status = if status & 0x7f == 0 {
+                status >> 8
+            } else {
+                128 + (status & 0x7f)
+            };
+            if processes.exit(task.virtual_id, exit_status).is_err() {
+                native_fail(domain, pid, b"native virtual exit failed");
+            }
+            task.tracing = false;
+            tasks[task_index] = Some(task);
+            if task.virtual_id == root_virtual {
+                for descendant in tasks.iter().flatten() {
+                    if descendant.tracing {
+                        let _ = ptrace(PTRACE_KILL, descendant.host_pid, 0, 0);
+                    }
+                }
+                if domain.task_exited(exit_status == 0).is_err() {
+                    domain_fail(domain, b"native exit transition failed");
+                }
+                line(b"GINUX_NATIVE: supervisor=attached direct-unsupervised-syscalls=0");
+                if exit_status == 0 {
+                    line(b"GINUX_NATIVE_CHECK: PASS");
+                }
+                exit_process(exit_status as usize)
+            }
+            continue;
         }
         let signal = ((status >> 8) & 0xff) as u8;
         let event = ((status as usize) >> 16) & 0xffff;
@@ -1641,33 +1735,249 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize) -> ! {
             event,
             PTRACE_EVENT_FORK | PTRACE_EVENT_VFORK | PTRACE_EVENT_CLONE
         ) {
-            let mut child = 0usize;
-            let _ = ptrace(PTRACE_GETEVENTMSG, pid, 0, &mut child as *mut _ as usize);
-            if child != 0 {
-                let _ = ptrace(PTRACE_KILL, child, 0, 0);
+            let mut child_host_pid = 0usize;
+            if ptrace(
+                PTRACE_GETEVENTMSG,
+                host_pid,
+                0,
+                &mut child_host_pid as *mut _ as usize,
+            ) < 0
+                || child_host_pid == 0
+            {
+                native_fail(domain, pid, b"native child event read failed");
             }
-            native_fail(
-                domain,
-                pid,
-                b"managed descendant requires multi-task supervision",
-            );
+            let child_virtual = if event == PTRACE_EVENT_CLONE {
+                processes.clone_thread(task.virtual_id)
+            } else {
+                processes.fork(task.virtual_id)
+            }
+            .unwrap_or_else(|_| native_fail(domain, pid, b"native virtual child failed"));
+            let Some(child_slot) = tasks.iter().position(Option::is_none) else {
+                native_fail(domain, pid, b"native task table full");
+            };
+            let pending_child_slot = pending_child_stops
+                .iter()
+                .position(|child| *child == child_host_pid);
+            tasks[child_slot] = Some(NativeSupervisorTask {
+                host_pid: child_host_pid,
+                virtual_id: child_virtual,
+                awaiting_exit: false,
+                override_exit: false,
+                override_result: 0,
+                pending_console_open: false,
+                console_fd: task.console_fd,
+                syscall: 0,
+                translated_rdi: 0,
+                waitid_info: 0,
+                fork_result_pending: 0,
+                fork_breakpoint_rip: 0,
+                fork_breakpoint_word: 0,
+                initial_stop_pending: pending_child_slot.is_none(),
+                tracing: true,
+            });
+            if let Some(pending_slot) = pending_child_slot {
+                pending_child_stops[pending_slot] = 0;
+                let _ = ptrace(PTRACE_SETOPTIONS, child_host_pid, 0, options);
+                if ptrace(PTRACE_SYSCALL, child_host_pid, 0, 0) < 0 {
+                    native_fail(domain, pid, b"pending native child resume failed");
+                }
+            }
+            let mut parent_registers = core::mem::MaybeUninit::<UserRegs>::uninit();
+            if ptrace(
+                PTRACE_GETREGS,
+                host_pid,
+                0,
+                parent_registers.as_mut_ptr() as usize,
+            ) < 0
+            {
+                native_fail(domain, pid, b"native fork registers failed");
+            }
+            let parent_registers = unsafe { parent_registers.assume_init() };
+            let breakpoint_rip = parent_registers.rip as usize;
+            let mut breakpoint_word = 0usize;
+            if ptrace(
+                PTRACE_PEEKTEXT,
+                host_pid,
+                breakpoint_rip,
+                &mut breakpoint_word as *mut _ as usize,
+            ) < 0
+                || ptrace(
+                    PTRACE_POKETEXT,
+                    host_pid,
+                    breakpoint_rip,
+                    (breakpoint_word & !0xff) | 0xcc,
+                ) < 0
+            {
+                native_fail(domain, pid, b"native fork breakpoint failed");
+            }
+            task.awaiting_exit = false;
+            task.override_exit = false;
+            task.fork_result_pending = child_virtual.pid;
+            task.fork_breakpoint_rip = breakpoint_rip;
+            task.fork_breakpoint_word = breakpoint_word;
+            tasks[task_index] = Some(task);
+            if ptrace(PTRACE_CONT, host_pid, 0, 0) < 0 {
+                native_fail(domain, pid, b"native parent resume after child failed");
+            }
+            continue;
         }
-        if event != 0 && event != PTRACE_EVENT_EXEC {
+        if event == PTRACE_EVENT_EXEC {
+            let _ = processes.exec(task.virtual_id);
+            tasks[task_index] = Some(task);
+            if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
+                native_fail(domain, pid, b"native resume after exec failed");
+            }
+            continue;
+        }
+        if event != 0 {
             native_fail(domain, pid, b"unexpected native ptrace event");
         }
+        if signal == 19 {
+            if !task.initial_stop_pending {
+                native_fail(domain, pid, b"unexpected native trace stop");
+            }
+            task.initial_stop_pending = false;
+            tasks[task_index] = Some(task);
+            let _ = ptrace(PTRACE_SETOPTIONS, host_pid, 0, options);
+            if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
+                native_fail(domain, pid, b"native child initial resume failed");
+            }
+            continue;
+        }
+        if signal == 17 {
+            if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
+                native_fail(domain, pid, b"native SIGCHLD resume failed");
+            }
+            continue;
+        }
+        if signal == 5 && task.fork_result_pending != 0 {
+            let mut parent_registers = core::mem::MaybeUninit::<UserRegs>::uninit();
+            if ptrace(
+                PTRACE_GETREGS,
+                host_pid,
+                0,
+                parent_registers.as_mut_ptr() as usize,
+            ) < 0
+            {
+                native_fail(domain, pid, b"native fork result read failed");
+            }
+            let mut parent_registers = unsafe { parent_registers.assume_init() };
+            if ptrace(
+                PTRACE_POKETEXT,
+                host_pid,
+                task.fork_breakpoint_rip,
+                task.fork_breakpoint_word,
+            ) < 0
+            {
+                native_fail(domain, pid, b"native fork breakpoint restore failed");
+            }
+            parent_registers.rip = task.fork_breakpoint_rip as u64;
+            parent_registers.rax = task.fork_result_pending as u64;
+            if ptrace(
+                PTRACE_SETREGS,
+                host_pid,
+                0,
+                &parent_registers as *const _ as usize,
+            ) < 0
+            {
+                native_fail(domain, pid, b"native fork result translation failed");
+            }
+            task.fork_result_pending = 0;
+            task.fork_breakpoint_rip = 0;
+            task.fork_breakpoint_word = 0;
+            tasks[task_index] = Some(task);
+            if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
+                native_fail(
+                    domain,
+                    pid,
+                    b"native parent resume after translation failed",
+                );
+            }
+            continue;
+        }
         if signal != (5 | 0x80) && signal != 5 {
-            native_fail(domain, pid, b"unexpected native trace stop");
+            write_all(b"GINUX_NATIVE: unexpected-signal=");
+            write_u64(signal as u64);
+            write_all(b" event=");
+            write_u64(event as u64);
+            write_all(b" host-pid=");
+            write_u64(host_pid as u64);
+            write_all(b" virtual-pid=");
+            write_u64(task.virtual_id.pid as u64);
+            write_all(b"\n");
+            tasks[task_index] = Some(task);
+            if ptrace(PTRACE_SYSCALL, host_pid, 0, signal as usize) < 0 {
+                native_fail(domain, pid, b"native signal delivery failed");
+            }
+            continue;
         }
         let mut registers = core::mem::MaybeUninit::<UserRegs>::uninit();
-        if ptrace(PTRACE_GETREGS, pid, 0, registers.as_mut_ptr() as usize) < 0 {
+        if ptrace(PTRACE_GETREGS, host_pid, 0, registers.as_mut_ptr() as usize) < 0 {
             native_fail(domain, pid, b"native register read failed");
         }
         let mut registers = unsafe { registers.assume_init() };
 
-        if awaiting_exit {
-            if override_exit {
-                registers.rax = override_result as u64;
-                if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0 {
+        if task.awaiting_exit {
+            if task.syscall == 247 && registers.rax as i64 == 0 && task.waitid_info != 0 {
+                let mut identity = 0u64;
+                if ptrace(
+                    PTRACE_PEEKDATA,
+                    host_pid,
+                    task.waitid_info as usize + 16,
+                    &mut identity as *mut _ as usize,
+                ) < 0
+                {
+                    native_fail(domain, pid, b"native waitid result read failed");
+                }
+                let waited_host = identity as u32 as usize;
+                if waited_host != 0 {
+                    let Some(waited_task) = tasks
+                        .iter()
+                        .flatten()
+                        .find(|candidate| candidate.host_pid == waited_host)
+                        .copied()
+                    else {
+                        native_fail(domain, pid, b"native waitid result unknown");
+                    };
+                    let translated =
+                        (identity & !u32::MAX as u64) | u64::from(waited_task.virtual_id.pid);
+                    if ptrace(
+                        PTRACE_POKEDATA,
+                        host_pid,
+                        task.waitid_info as usize + 16,
+                        translated as usize,
+                    ) < 0
+                    {
+                        native_fail(domain, pid, b"native waitid result translation failed");
+                    }
+                }
+            }
+            if task.syscall == 61 && registers.rax as i64 > 0 {
+                let waited_host = registers.rax as usize;
+                let Some(waited_task) = tasks
+                    .iter()
+                    .flatten()
+                    .find(|candidate| candidate.host_pid == waited_host)
+                    .copied()
+                else {
+                    native_fail(domain, pid, b"native wait result unknown");
+                };
+                registers.rax = waited_task.virtual_id.pid as u64;
+                task.override_exit = true;
+                if let Some(waited_slot) = tasks.iter_mut().find(|candidate| {
+                    candidate.is_some_and(|candidate| candidate.host_pid == waited_host)
+                }) {
+                    *waited_slot = None;
+                }
+            }
+            if task.translated_rdi != 0 {
+                registers.rdi = task.translated_rdi;
+            }
+            if task.override_exit {
+                if task.syscall != 61 || registers.rax as i64 <= 0 {
+                    registers.rax = task.override_result as u64;
+                }
+                if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0 {
                     native_fail(domain, pid, b"native result override failed");
                 }
             }
@@ -1676,13 +1986,16 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize) -> ! {
             write_all(b" phase=exit result=");
             write_i64(registers.rax as i64);
             write_all(b"\n");
-            if pending_console_open {
-                console_fd = registers.rax as i64;
-                pending_console_open = false;
+            if task.pending_console_open {
+                task.console_fd = registers.rax as i64;
+                task.pending_console_open = false;
             }
-            awaiting_exit = false;
-            override_exit = false;
-            if ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0 {
+            task.awaiting_exit = false;
+            task.override_exit = false;
+            task.translated_rdi = 0;
+            task.waitid_info = 0;
+            tasks[task_index] = Some(task);
+            if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
                 native_fail(domain, pid, b"native resume failed");
             }
             continue;
@@ -1690,6 +2003,7 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize) -> ! {
 
         sequence += 1;
         let syscall = registers.orig_rax;
+        task.syscall = syscall;
         let shared_network = mode == 3 && domain.config().network_backend == NetworkBackend::Shared;
         let decision = if mode == 3 {
             decide_systemd(syscall, shared_network)
@@ -1702,26 +2016,45 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize) -> ! {
         write_u64(syscall);
         if mode == 3 && syscall == 257 {
             write_all(b" path=");
-            write_tracee_string(pid, registers.rsi as usize);
+            write_tracee_string(host_pid, registers.rsi as usize);
         } else if mode == 3 && syscall == 16 {
             write_all(b" fd=");
             write_u64(registers.rdi);
             write_all(b" request=");
             write_u64(registers.rsi);
+        } else if mode == 3 && syscall == 247 {
+            write_all(b" idtype=");
+            write_u64(registers.rdi);
+            write_all(b" id=");
+            write_u64(registers.rsi);
+            write_all(b" options=");
+            write_u64(registers.r10);
         }
         write_all(b" action=");
         match decision.action {
             Action::Emulate if native_identity_result(syscall, mode).is_some() => {
-                let result = native_identity_result(syscall, mode).unwrap_or(0);
+                let result = if mode == 3 {
+                    let view = processes
+                        .view(task.virtual_id)
+                        .unwrap_or_else(|_| native_fail(domain, pid, b"native identity failed"));
+                    match syscall {
+                        SYS_GETPID => view.id.pid as i64,
+                        ginux_core::SYS_GETPPID => view.parent as i64,
+                        ginux_core::SYS_GETPGRP => view.process_group as i64,
+                        _ => native_identity_result(syscall, mode).unwrap_or(0),
+                    }
+                } else {
+                    native_identity_result(syscall, mode).unwrap_or(0)
+                };
                 write_all(b"emulate surface=virtual-identity result=");
                 write_i64(result);
                 write_all(b"\n");
                 registers.orig_rax = u64::MAX;
-                awaiting_exit = true;
-                override_exit = true;
-                override_result = result;
-                if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0
-                    || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0
+                task.awaiting_exit = true;
+                task.override_exit = true;
+                task.override_result = result;
+                if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
                 {
                     native_fail(domain, pid, b"native getpid emulation failed");
                 }
@@ -1734,89 +2067,88 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize) -> ! {
                 write_uts_field(&mut uts, 3, b"#1 Ginux");
                 write_uts_field(&mut uts, 4, b"x86_64");
                 write_uts_field(&mut uts, 5, b"localdomain");
-                let allowed = write_tracee_bytes(pid, registers.rdi as usize, &uts);
+                let allowed = write_tracee_bytes(host_pid, registers.rdi as usize, &uts);
                 write_all(b"emulate surface=virtual-identity result=");
                 write_i64(if allowed { 0 } else { -EPERM });
                 write_all(b"\n");
                 registers.orig_rax = u64::MAX;
-                awaiting_exit = true;
-                override_exit = true;
-                override_result = if allowed { 0 } else { -EPERM };
-                if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0
-                    || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0
+                task.awaiting_exit = true;
+                task.override_exit = true;
+                task.override_result = if allowed { 0 } else { -EPERM };
+                if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
                 {
                     native_fail(domain, pid, b"native uname emulation failed");
                 }
             }
             Action::Emulate if mode == 3 && matches!(syscall, 165 | 166) => {
-                let proc_mount = tracee_string_equals(pid, registers.rdi as usize, b"proc")
-                    && tracee_string_equals(pid, registers.rdx as usize, b"proc");
-                let sysfs_mount = tracee_string_equals(pid, registers.rdi as usize, b"sysfs")
-                    && tracee_string_equals(pid, registers.rdx as usize, b"sysfs");
-                let dev_mount = tracee_string_equals(pid, registers.rdi as usize, b"devtmpfs")
-                    && tracee_string_equals(pid, registers.rdx as usize, b"devtmpfs");
-                let tmpfs_mount = tracee_string_equals(pid, registers.rdi as usize, b"tmpfs")
-                    && tracee_string_equals(pid, registers.rdx as usize, b"tmpfs");
-                let cgroup_mount = tracee_string_equals(pid, registers.rdi as usize, b"cgroup2")
-                    && tracee_string_equals(pid, registers.rdx as usize, b"cgroup2");
+                let proc_mount = tracee_string_equals(host_pid, registers.rdi as usize, b"proc")
+                    && tracee_string_equals(host_pid, registers.rdx as usize, b"proc");
+                let sysfs_mount = tracee_string_equals(host_pid, registers.rdi as usize, b"sysfs")
+                    && tracee_string_equals(host_pid, registers.rdx as usize, b"sysfs");
+                let dev_mount = tracee_string_equals(host_pid, registers.rdi as usize, b"devtmpfs")
+                    && tracee_string_equals(host_pid, registers.rdx as usize, b"devtmpfs");
+                let tmpfs_mount = tracee_string_equals(host_pid, registers.rdi as usize, b"tmpfs")
+                    && tracee_string_equals(host_pid, registers.rdx as usize, b"tmpfs");
+                let cgroup_mount =
+                    tracee_string_equals(host_pid, registers.rdi as usize, b"cgroup2")
+                        && tracee_string_equals(host_pid, registers.rdx as usize, b"cgroup2");
                 let legacy_cgroup_mount =
-                    tracee_string_equals(pid, registers.rdi as usize, b"cgroup")
-                        && tracee_string_equals(pid, registers.rdx as usize, b"cgroup");
+                    tracee_string_equals(host_pid, registers.rdi as usize, b"cgroup")
+                        && tracee_string_equals(host_pid, registers.rdx as usize, b"cgroup");
                 let type_ok = proc_mount
                     || sysfs_mount
                     || dev_mount
                     || tmpfs_mount
                     || cgroup_mount
                     || legacy_cgroup_mount;
-                let target_ok = tracee_decimal_fd_path(pid, registers.rsi as usize)
-                    || (proc_mount && tracee_string_equals(pid, registers.rsi as usize, b"/proc"));
+                let target_ok = tracee_decimal_fd_path(host_pid, registers.rsi as usize)
+                    || (proc_mount
+                        && tracee_string_equals(host_pid, registers.rsi as usize, b"/proc"));
                 let allowed = if syscall == 165 {
                     target_ok && type_ok
                 } else {
-                    tracee_decimal_fd_path(pid, registers.rdi as usize)
+                    tracee_decimal_fd_path(host_pid, registers.rdi as usize)
                 };
                 write_all(b"emulate surface=virtual-mount result=");
                 write_i64(if allowed { 0 } else { -EPERM });
                 write_all(b"\n");
                 registers.orig_rax = u64::MAX;
-                awaiting_exit = true;
-                override_exit = true;
-                override_result = if allowed { 0 } else { -EPERM };
-                if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0
-                    || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0
+                task.awaiting_exit = true;
+                task.override_exit = true;
+                task.override_result = if allowed { 0 } else { -EPERM };
+                if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
                 {
                     native_fail(domain, pid, b"native virtual mount emulation failed");
                 }
             }
             Action::Emulate if syscall == SYS_EXIT || syscall == SYS_EXIT_GROUP => {
-                line(b"emulate result=domain-stop");
-                let _ = ptrace(PTRACE_KILL, pid, 0, 0);
-                let _ = wait(pid, &mut status);
-                if domain.task_exited(true).is_err() {
-                    domain_fail(domain, b"native exit transition failed");
+                line(b"mediate surface=lifecycle result=pending");
+                task.awaiting_exit = false;
+                task.override_exit = false;
+                if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
+                    native_fail(domain, pid, b"native lifecycle resume failed");
                 }
-                line(b"GINUX_NATIVE: supervisor=attached direct-unsupervised-syscalls=0");
-                line(b"GINUX_NATIVE_CHECK: PASS");
-                exit_process(0)
             }
             Action::Mediate
                 if mode == 3
                     && syscall == 16
-                    && registers.rdi as i64 == console_fd
+                    && registers.rdi as i64 == task.console_fd
                     && registers.rsi == 21_505 =>
             {
                 let mut termios = [0u8; 36];
                 termios[12..16].copy_from_slice(&0x0bu32.to_ne_bytes());
-                let allowed = write_tracee_bytes(pid, registers.rdx as usize, &termios);
+                let allowed = write_tracee_bytes(host_pid, registers.rdx as usize, &termios);
                 write_all(b"emulate surface=virtual-console result=");
                 write_i64(if allowed { 0 } else { -EPERM });
                 write_all(b"\n");
                 registers.orig_rax = u64::MAX;
-                awaiting_exit = true;
-                override_exit = true;
-                override_result = if allowed { 0 } else { -EPERM };
-                if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0
-                    || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0
+                task.awaiting_exit = true;
+                task.override_exit = true;
+                task.override_result = if allowed { 0 } else { -EPERM };
+                if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
                 {
                     native_fail(domain, pid, b"native virtual console ioctl failed");
                 }
@@ -1824,41 +2156,44 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize) -> ! {
             Action::Mediate
                 if mode == 3
                     && matches!(syscall, 1 | 20)
-                    && registers.rdi as i64 == console_fd
+                    && registers.rdi as i64 == task.console_fd
                     && ((syscall == 1 && registers.rdx <= 4096)
                         || (syscall == 20 && registers.rdx <= 16)) =>
             {
                 line(b"mediate surface=virtual-console result=pending");
-                awaiting_exit = true;
-                if ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0 {
+                task.awaiting_exit = true;
+                if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
                     native_fail(domain, pid, b"native virtual console write failed");
                 }
             }
             Action::Mediate
                 if mode == 3
                     && syscall == 137
-                    && (tracee_string_equals(pid, registers.rdi as usize, b"/sys/fs/cgroup")
-                        || tracee_string_equals(
-                            pid,
-                            registers.rdi as usize,
-                            b"/sys/fs/cgroup/",
-                        )) =>
+                    && (tracee_string_equals(
+                        host_pid,
+                        registers.rdi as usize,
+                        b"/sys/fs/cgroup",
+                    ) || tracee_string_equals(
+                        host_pid,
+                        registers.rdi as usize,
+                        b"/sys/fs/cgroup/",
+                    )) =>
             {
                 let mut statfs = [0u8; 120];
                 statfs[..8].copy_from_slice(&0x6367_7270u64.to_ne_bytes());
                 statfs[8..16].copy_from_slice(&4096u64.to_ne_bytes());
                 statfs[64..72].copy_from_slice(&255u64.to_ne_bytes());
                 statfs[72..80].copy_from_slice(&4096u64.to_ne_bytes());
-                let allowed = write_tracee_bytes(pid, registers.rsi as usize, &statfs);
+                let allowed = write_tracee_bytes(host_pid, registers.rsi as usize, &statfs);
                 write_all(b"emulate surface=virtual-cgroup result=");
                 write_i64(if allowed { 0 } else { -EPERM });
                 write_all(b"\n");
                 registers.orig_rax = u64::MAX;
-                awaiting_exit = true;
-                override_exit = true;
-                override_result = if allowed { 0 } else { -EPERM };
-                if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0
-                    || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0
+                task.awaiting_exit = true;
+                task.override_exit = true;
+                task.override_result = if allowed { 0 } else { -EPERM };
+                if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
                 {
                     native_fail(domain, pid, b"native virtual cgroup statfs failed");
                 }
@@ -1868,11 +2203,11 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize) -> ! {
             {
                 line(b"mediate surface=virtual-device result=protected");
                 registers.orig_rax = u64::MAX;
-                awaiting_exit = true;
-                override_exit = true;
-                override_result = 0;
-                if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0
-                    || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0
+                task.awaiting_exit = true;
+                task.override_exit = true;
+                task.override_result = 0;
+                if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
                 {
                     native_fail(domain, pid, b"native protected device close failed");
                 }
@@ -1880,10 +2215,15 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize) -> ! {
             Action::Mediate
                 if mode == 3
                     && syscall == 257
-                    && (tracee_string_equals(pid, registers.rsi as usize, b"/dev/null")
-                        || tracee_string_equals(pid, registers.rsi as usize, b"/dev/console")) =>
+                    && (tracee_string_equals(host_pid, registers.rsi as usize, b"/dev/null")
+                        || tracee_string_equals(
+                            host_pid,
+                            registers.rsi as usize,
+                            b"/dev/console",
+                        )) =>
             {
-                let null_device = tracee_string_equals(pid, registers.rsi as usize, b"/dev/null");
+                let null_device =
+                    tracee_string_equals(host_pid, registers.rsi as usize, b"/dev/null");
                 let source = if null_device {
                     DOMAIN_NULL_FD
                 } else if registers.rdx & 3 == 1 {
@@ -1891,37 +2231,103 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize) -> ! {
                 } else {
                     0
                 };
-                pending_console_open = !null_device;
+                task.pending_console_open = !null_device;
                 line(b"mediate surface=virtual-device result=pending");
                 registers.orig_rax = SYS_DUP_HOST as u64;
                 registers.rdi = source as u64;
-                awaiting_exit = true;
-                if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0
-                    || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0
+                task.awaiting_exit = true;
+                if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
                 {
                     native_fail(domain, pid, b"native virtual device open failed");
                 }
             }
             Action::Mediate if native_arguments_allowed(syscall, &registers, mode) => {
+                if mode == 3 && syscall == 247 {
+                    task.waitid_info = registers.rdx;
+                    if registers.rdi == 1 && registers.rsi != 0 {
+                        let selected = registers.rsi as u32;
+                        let Some(target) = tasks
+                            .iter()
+                            .flatten()
+                            .find(|candidate| candidate.virtual_id.pid == selected)
+                        else {
+                            task.awaiting_exit = true;
+                            task.override_exit = true;
+                            task.override_result = -EPERM;
+                            registers.orig_rax = u64::MAX;
+                            tasks[task_index] = Some(task);
+                            if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize)
+                                < 0
+                                || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
+                            {
+                                native_fail(domain, pid, b"native invalid waitid denial failed");
+                            }
+                            continue;
+                        };
+                        registers.rsi = target.host_pid as u64;
+                        if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                        {
+                            native_fail(domain, pid, b"native waitid selector translation failed");
+                        }
+                    } else if registers.rdi != 0 {
+                        task.awaiting_exit = true;
+                        task.override_exit = true;
+                        task.override_result = -EPERM;
+                        registers.orig_rax = u64::MAX;
+                        tasks[task_index] = Some(task);
+                        if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                            || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
+                        {
+                            native_fail(domain, pid, b"native unsupported waitid denial failed");
+                        }
+                        continue;
+                    }
+                }
+                if mode == 3 && syscall == 61 && registers.rdi != u64::MAX {
+                    let selected = registers.rdi as u32;
+                    let Some(target) = tasks
+                        .iter()
+                        .flatten()
+                        .find(|candidate| candidate.virtual_id.pid == selected)
+                    else {
+                        task.awaiting_exit = true;
+                        task.override_exit = true;
+                        task.override_result = -EPERM;
+                        registers.orig_rax = u64::MAX;
+                        tasks[task_index] = Some(task);
+                        if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                            || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
+                        {
+                            native_fail(domain, pid, b"native invalid wait denial failed");
+                        }
+                        continue;
+                    };
+                    task.translated_rdi = registers.rdi;
+                    registers.rdi = target.host_pid as u64;
+                    if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0 {
+                        native_fail(domain, pid, b"native wait selector translation failed");
+                    }
+                }
                 write_all(b"mediate surface=");
                 line(balanced_surface_name(if mode == 3 {
                     systemd_surface(syscall, shared_network)
                 } else {
                     balanced_surface(syscall)
                 }));
-                awaiting_exit = true;
-                if ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0 {
+                task.awaiting_exit = true;
+                if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
                     native_fail(domain, pid, b"native mediated syscall failed");
                 }
             }
             Action::Mediate => {
                 line(b"deny result=-1 reason=invalid-arguments");
                 registers.orig_rax = u64::MAX;
-                awaiting_exit = true;
-                override_exit = true;
-                override_result = -EPERM;
-                if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0
-                    || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0
+                task.awaiting_exit = true;
+                task.override_exit = true;
+                task.override_result = -EPERM;
+                if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
                 {
                     native_fail(domain, pid, b"native argument denial failed");
                 }
@@ -1931,17 +2337,18 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize) -> ! {
                 write_u64(errno as u64);
                 write_all(b"\n");
                 registers.orig_rax = u64::MAX;
-                awaiting_exit = true;
-                override_exit = true;
-                override_result = -(errno as i64);
-                if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0
-                    || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0
+                task.awaiting_exit = true;
+                task.override_exit = true;
+                task.override_result = -(errno as i64);
+                if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
                 {
                     native_fail(domain, pid, b"native syscall denial failed");
                 }
             }
             _ => native_fail(domain, pid, b"invalid native contract decision"),
         }
+        tasks[task_index] = Some(task);
     }
 }
 
@@ -1961,8 +2368,9 @@ fn native_identity_result(syscall: u64, mode: usize) -> Option<i64> {
 fn native_arguments_allowed(syscall: u64, registers: &UserRegs, mode: usize) -> bool {
     if mode == 3 {
         match syscall {
-            1 | 2 | 16 | 59 | 80 | 83 | 95 | 125 | 126 | 137 | 157 | 213 | 232 | 233 | 253
-            | 254 | 255 | 257 | 258 | 281 | 283 | 286 | 287 | 289 | 291 | 294 | 441 => true,
+            1 | 2 | 16 | 56 | 57 | 58 | 59 | 61 | 80 | 83 | 95 | 125 | 126 | 137 | 157 | 213
+            | 232 | 233 | 247 | 253 | 254 | 255 | 257 | 258 | 281 | 283 | 286 | 287 | 289 | 291
+            | 294 | 435 | 441 => true,
             _ if ginux_core::is_shared_network_syscall(syscall) => true,
             _ => balanced_arguments_allowed(syscall, registers.rdi, registers.rsi, registers.rdx),
         }

@@ -29,4 +29,6 @@ printf 'systemd baseline exit: %s\n' "$status"
 tail -n 40 "$log"
 rocky_ssh 'sudo rm -rf /var/lib/ginux/domains/gate9; rm -f /var/tmp/ginux /var/tmp/gate9.toml /var/tmp/ginux-oci-rootfs.tar'
 
-test "$status" -ne 124
+test "$status" -eq 124
+grep -Fq 'Reached target multi-user.target - Multi-User System.' "$log"
+printf '%s\n' 'systemd multi-user baseline: PASS (remained supervised until bounded timeout)'

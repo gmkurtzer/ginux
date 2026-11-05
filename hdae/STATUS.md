@@ -35,8 +35,9 @@
   volumes, access, identity, resources, devices, and pre-boot hooks.
 - Gate 9 implementation is active. The pinned Rocky init image, systemd launch
   profile, virtual PID 1 identity, disposable root, shared-network contract,
-  and reproducible Rocky-host probe are implemented locally on
-  `hdae/systemd-baseline`.
+  bounded multi-task supervision, and reproducible Rocky-host probe are
+  implemented locally on `hdae/systemd-baseline`. Unmodified Rocky systemd now
+  reaches `multi-user.target` and remains supervised.
 - The ordered gate batch is authorized, but every open gate remains a human
   checkpoint requiring a working demonstration and explicit acceptance.
 
@@ -300,9 +301,9 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Add bounded multi-task supervision for systemd `clone` and its managed
-descendants, reusing Gate 7 virtual PID, wait, and fail-closed tracing
-semantics; then rerun the Rocky probe to the next deterministic boundary.
+Turn the multi-user milestone into explicit readiness and a usable authenticated
+console path, then verify the logged-in shell remains a managed virtual process
+before adding the live shared-network DNF workflow and controlled shutdown.
 
 ## Context recovery
 
@@ -312,9 +313,10 @@ semantics; then rerun the Rocky probe to the next deterministic boundary.
 - Active gate: Gate 9, systemd baseline, authorized on dedicated branch
   `hdae/systemd-baseline`; implementation is partial
 - Last evidence: core tests, strict init clippy, and the init release build
-  passed. The Rocky-host probe advanced the unmodified Rocky systemd through
-  virtual mount, identity, console, event, timer, and cgroup initialization;
-  it now stops at unsupported `clone` while starting `(sd-gens)`.
+  passed. The Rocky-host probe advanced unmodified Rocky systemd through
+  virtual mount, identity, console, event, timer, cgroup, generators, and
+  services to `multi-user.target`. Gate 7 process and Gate 5 native tracing,
+  supervisor-loss, unexpected-stop, and immutable-image regressions passed.
 - Approved network direction: Gate 9 defaults to full host-shared inbound and
   outbound networking with normal host routing and bind conflicts, under Ginux
   mediation and audit. Gate 9.5 adds comprehensive domain configuration,
