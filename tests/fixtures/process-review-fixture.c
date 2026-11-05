@@ -301,6 +301,35 @@ long probe_main(word *stack) {
     long result;
     __asm__ volatile("syscall" : "=a"(result) : "a"(311),"D"(0),"S"(0),"d"(0),"r"(r10),"r"(r8),"r"(r9) : "rcx","r11","memory");
     show("process_vm_writev(311)=",result);
+#elif defined(CASE_alias_writes)
+    // Every alias keeps the write rule of the stdio descriptor it names:
+    // stdin stays unwritable, stdout keeps the console bound.
+    static char large[4097];
+    show("plain stdin write=",call3(1,0,(word)"via-0\n",6));
+    show("plain stdout write 4097=",call3(1,1,(word)large,sizeof large));
+    long alias=call3(32,0,0,0);
+    show("dup stdin write=",call3(1,alias,(word)"via-dup\n",8));
+    long chained=call3(32,alias,0,0);
+    show("dup alias write=",call3(1,chained,(word)"via-dup-dup\n",12));
+    call3(33,0,7,0);
+    show("dup2 stdin write=",call3(1,7,(word)"via-dup2\n",9));
+    call3(292,0,8,0x80000);
+    show("dup3 stdin write=",call3(1,8,(word)"via-dup3\n",9));
+    long fcntl_alias=call3(72,0,0,10);
+    show("fcntl dupfd stdin write=",call3(1,fcntl_alias,(word)"via-dupfd\n",10));
+    long cloexec_alias=call3(72,0,1030,10);
+    show("fcntl dupfd-cloexec stdin write=",call3(1,cloexec_alias,(word)"via-dupfd-cloexec\n",18));
+    long saved=call3(32,1,0,0);
+    call3(33,0,1,0);
+    long over=call3(1,1,(word)"via-1\n",6);
+    call3(33,saved,1,0);
+    show("stdin over stdout write=",over);
+    show("stdout alias write=",call3(1,saved,(word)"stdout alias ok\n",16));
+    show("stdout alias write 4097=",call3(1,saved,(word)large,sizeof large));
+    show("restored stdout write 4097=",call3(1,1,(word)large,sizeof large));
+    long stderr_alias=call3(32,2,0,0);
+    show("stderr alias write=",call3(1,stderr_alias,(word)"stderr alias ok\n",16));
+    show("stderr alias write 4097=",call3(1,stderr_alias,(word)large,sizeof large));
 #endif
     return 0;
 }
