@@ -248,6 +248,7 @@ fn scan_layer(
     let mut pending_offset: Option<u64> = None;
     let mut pax_path: Option<Vec<u8>> = None;
     let mut pax_link: Option<Vec<u8>> = None;
+    let mut sparse: Option<Vec<u8>> = None;
     let mut ended = false;
     while offset + 512 <= source_len {
         source.seek(SeekFrom::Start(offset))?;
@@ -275,11 +276,19 @@ fn scan_layer(
                 if pending_offset.is_none() {
                     pending_offset = Some(offset);
                 }
-                read_extension(source, header[156], size, &mut pax_path, &mut pax_link)?;
+                read_extension(
+                    source,
+                    header[156],
+                    size,
+                    &mut pax_path,
+                    &mut pax_link,
+                    &mut sparse,
+                )?;
             }
             kind => {
                 let path = pax_path.take().unwrap_or_else(|| header_path(&header));
                 let path = normalize_archive_path(&path)?;
+                reject_sparse(sparse.take(), kind, &path)?;
                 let link = pax_link
                     .take()
                     .unwrap_or_else(|| field(&header[157..257]).to_vec());
@@ -412,6 +421,7 @@ fn scan_tar(
     let mut offset = 0u64;
     let mut pax_path: Option<Vec<u8>> = None;
     let mut pax_link: Option<Vec<u8>> = None;
+    let mut sparse: Option<Vec<u8>> = None;
     let mut ended = false;
     while offset + 512 <= source_len {
         source.seek(SeekFrom::Start(offset))?;
@@ -433,7 +443,14 @@ fn scan_tar(
         }
         let kind = header[156];
         if matches!(kind, b'x' | b'g' | b'L' | b'K') {
-            read_extension(source, kind, size, &mut pax_path, &mut pax_link)?;
+            read_extension(
+                source,
+                kind,
+                size,
+                &mut pax_path,
+                &mut pax_link,
+                &mut sparse,
+            )?;
         } else {
             let path = pax_path.take().unwrap_or_else(|| header_path(&header));
             let link = pax_link
@@ -446,6 +463,7 @@ fn scan_tar(
                 Vec::new()
             };
             let path = normalize_archive_path(&path)?;
+            reject_sparse(sparse.take(), kind, &path)?;
             let node_kind = match kind {
                 0 | b'0' | b'1' | b'7' => Some(NodeKind::File),
                 b'5' => Some(NodeKind::Directory),
@@ -518,13 +536,17 @@ fn scan_tar(
 /// Read the data of a PAX extended header (`x`, `g`) or a GNU long name
 /// (`L`) or long link name (`K`) record and apply its path and link name to
 /// the next entry. If an entry has both a PAX path and a GNU long name, the
-/// record closer to the entry wins, as in libarchive.
+/// record closer to the entry wins, as in libarchive. A `GNU.sparse.*` key
+/// in an `x` header marks the next entry as a GNU sparse file; `sparse` then
+/// holds the value of `GNU.sparse.name`, or nothing if the header has no
+/// such key.
 fn read_extension(
     source: &mut File,
     kind: u8,
     size: u64,
     path: &mut Option<Vec<u8>>,
     link: &mut Option<Vec<u8>>,
+    sparse: &mut Option<Vec<u8>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let size = usize::try_from(size).map_err(|_| "PAX record too large")?;
     let mut data = vec![0u8; size];
@@ -539,11 +561,39 @@ fn read_extension(
                     *path = Some(value.to_vec());
                 } else if key == b"linkpath" {
                     *link = Some(value.to_vec());
+                } else if kind == b'x' && key == b"GNU.sparse.name" {
+                    *sparse = Some(value.to_vec());
+                } else if kind == b'x' && key.starts_with(b"GNU.sparse.") && sparse.is_none() {
+                    *sparse = Some(Vec::new());
                 }
             }
         }
     }
     Ok(())
+}
+
+/// Reject a GNU sparse file: an old GNU `S` entry or an entry with
+/// `GNU.sparse.*` PAX keys (`tar --sparse`). Its tar data holds only the
+/// stored data regions (in PAX format 1.0 after a sparse map), not the file
+/// content, and PAX formats 0.1 and 1.0 store it under a
+/// `GNUSparseFile.<pid>` placeholder path, so the index cannot serve it.
+fn reject_sparse(
+    sparse: Option<Vec<u8>>,
+    kind: u8,
+    path: &[u8],
+) -> Result<(), Box<dyn std::error::Error>> {
+    if sparse.is_none() && kind != b'S' {
+        return Ok(());
+    }
+    let name = match sparse.filter(|name| !name.is_empty()) {
+        Some(name) => normalize_archive_path(&name)?,
+        None => path.to_vec(),
+    };
+    Err(format!(
+        "GNU sparse files are unsupported (create the tar without --sparse): {}",
+        String::from_utf8_lossy(&name)
+    )
+    .into())
 }
 
 fn field(bytes: &[u8]) -> &[u8] {
