@@ -25,4 +25,17 @@ if unshare -m true 2>/dev/null; then
     exit 91
 fi
 printf '%s\n' 'GINUX_LOCKDOWN_NAMESPACE: BLOCKED'
+
+getent ahostsv4 dl.rockylinux.org >/tmp/ginux-rocky-addresses
+test -s /tmp/ginux-rocky-addresses
+curl --fail --silent --show-error --head --max-time 30 \
+    https://dl.rockylinux.org/pub/rocky/ >/tmp/ginux-rocky-headers
+test -s /tmp/ginux-rocky-headers
+printf '%s\n' 'GINUX_NETWORK_DNS_HTTPS: PASS'
+
+/usr/local/sbin/ginux-gate9-network-check
+printf '%s\n' 'GINUX_DNF_UPDATE: BEGIN'
+dnf -v repolist --enabled
+dnf -v -y update
+printf '%s\n' 'GINUX_DNF_UPDATE: PASS'
 printf '%s\n' 'GINUX_SHELL_CHECK_DONE'

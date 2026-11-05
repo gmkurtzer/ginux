@@ -19,6 +19,8 @@ pub const SYS_SETRESUID: u64 = 117;
 pub const SYS_SETRESGID: u64 = 119;
 pub const SYS_GETPPID: u64 = 110;
 pub const SYS_GETPGRP: u64 = 111;
+pub const SYS_GETPRIORITY: u64 = 140;
+pub const SYS_SETPRIORITY: u64 = 141;
 pub const SYS_GETTID: u64 = 186;
 pub const SYS_EXIT_GROUP: u64 = 231;
 pub const SYS_UNLINKAT: u64 = 263;
@@ -77,14 +79,14 @@ pub const fn decide_systemd(syscall: u64, shared_network: bool) -> Decision {
         };
     }
     let action = match syscall {
-        63 | 93 | 109 | 112 | 153 | 165 | 166 | SYS_GETTID | SYS_SETUID | SYS_SETGID
-        | SYS_SETREUID | SYS_SETREGID | SYS_SETGROUPS | SYS_SETRESUID | SYS_SETRESGID => {
-            Action::Emulate
-        }
-        16 | 32 | 33 | 56 | 57 | 58 | 59 | 61 | 80 | 83 | 84 | 88 | 91 | 95 | 125 | 126 | 137
-        | 157 | 193 | 213 | 232 | 233 | 247 | 253 | 254 | 255 | 258 | SYS_UNLINKAT
-        | SYS_RENAMEAT | SYS_SYMLINKAT | SYS_READLINKAT | 270 | 271 | 281 | 283 | 286 | 287
-        | 289 | 291 | 292 | 293 | 294 | SYS_MEMFD_CREATE | 435 | SYS_CLOSE_RANGE | 441 => {
+        63 | 92 | 93 | 94 | 109 | 112 | 153 | 165 | 166 | 260 | SYS_GETPRIORITY
+        | SYS_SETPRIORITY | SYS_GETTID | SYS_SETUID | SYS_SETGID | SYS_SETREUID | SYS_SETREGID
+        | SYS_SETGROUPS | SYS_SETRESUID | SYS_SETRESGID => Action::Emulate,
+        7 | 16 | 18 | 25 | 32 | 33 | 56 | 57 | 58 | 59 | 61 | 73 | 74 | 75 | 76 | 77 | 79 | 80
+        | 81 | 82 | 83 | 84 | 87 | 88 | 90 | 91 | 95 | 125 | 126 | 137 | 157 | 190 | 193 | 196
+        | 199 | 213 | 232 | 233 | 247 | 253 | 254 | 255 | 258 | SYS_UNLINKAT | SYS_RENAMEAT
+        | SYS_SYMLINKAT | SYS_READLINKAT | 270 | 271 | 280 | 281 | 283 | 286 | 287 | 289 | 290
+        | 291 | 292 | 293 | 294 | 306 | SYS_MEMFD_CREATE | 435 | SYS_CLOSE_RANGE | 441 => {
             Action::Mediate
         }
         _ => decide_balanced(syscall).action,
@@ -95,14 +97,38 @@ pub const fn decide_systemd(syscall: u64, shared_network: bool) -> Decision {
 pub const fn systemd_surface(syscall: u64, shared_network: bool) -> BalancedSurface {
     if shared_network && is_shared_network_syscall(syscall) {
         BalancedSurface::Network
+    } else if matches!(syscall, SYS_GETPRIORITY | SYS_SETPRIORITY) {
+        BalancedSurface::VirtualIdentity
     } else if matches!(
         syscall,
-        84 | 88 | 91 | SYS_UNLINKAT | SYS_RENAMEAT | SYS_SYMLINKAT
+        18 | 73
+            | 74
+            | 75
+            | 76
+            | 77
+            | 82
+            | 84
+            | 87
+            | 88
+            | 90
+            | 91
+            | 92
+            | 93
+            | 94
+            | 190
+            | 196
+            | 199
+            | 260
+            | 280
+            | 306
+            | SYS_UNLINKAT
+            | SYS_RENAMEAT
+            | SYS_SYMLINKAT
     ) {
         BalancedSurface::DomainWrite
-    } else if matches!(syscall, 93 | 153) {
+    } else if syscall == 153 {
         BalancedSurface::Console
-    } else if syscall == SYS_MEMFD_CREATE {
+    } else if matches!(syscall, 25 | SYS_MEMFD_CREATE) {
         BalancedSurface::Memory
     } else if matches!(
         syscall,
@@ -119,11 +145,14 @@ pub const fn systemd_surface(syscall: u64, shared_network: bool) -> BalancedSurf
         BalancedSurface::ImageRead
     } else if matches!(
         syscall,
-        32 | 33
+        7 | 32
+            | 33
             | 56
             | 57
             | 58
             | 61
+            | 79
+            | 81
             | 109
             | 112
             | 213
@@ -140,6 +169,7 @@ pub const fn systemd_surface(syscall: u64, shared_network: bool) -> BalancedSurf
             | 286
             | 287
             | 289
+            | 290
             | 291
             | 292
             | 293
@@ -275,6 +305,22 @@ mod tests {
         assert_eq!(decide_systemd(41, true).action, Action::Mediate);
         assert_eq!(systemd_surface(42, true), BalancedSurface::Network);
         assert_eq!(decide_systemd(59, true).action, Action::Mediate);
+        assert_eq!(
+            decide_systemd(SYS_GETPRIORITY, true).action,
+            Action::Emulate
+        );
+        assert_eq!(
+            systemd_surface(SYS_GETPRIORITY, true),
+            BalancedSurface::VirtualIdentity
+        );
+        assert_eq!(
+            decide_systemd(SYS_SETPRIORITY, true).action,
+            Action::Emulate
+        );
+        assert_eq!(
+            systemd_surface(SYS_SETPRIORITY, true),
+            BalancedSurface::VirtualIdentity
+        );
         assert_eq!(decide_systemd(165, true).action, Action::Emulate);
         assert_eq!(decide_systemd(166, true).action, Action::Emulate);
         assert_eq!(decide_systemd(63, true).action, Action::Emulate);
@@ -288,13 +334,17 @@ mod tests {
         assert_eq!(decide_systemd(109, true).action, Action::Emulate);
         assert_eq!(systemd_surface(109, true), BalancedSurface::Task);
         assert_eq!(decide_systemd(93, true).action, Action::Emulate);
-        assert_eq!(systemd_surface(93, true), BalancedSurface::Console);
+        assert_eq!(systemd_surface(93, true), BalancedSurface::DomainWrite);
         assert_eq!(decide_systemd(153, true).action, Action::Emulate);
         assert_eq!(systemd_surface(153, true), BalancedSurface::Console);
         assert_eq!(decide_systemd(91, true).action, Action::Mediate);
         assert_eq!(systemd_surface(91, true), BalancedSurface::DomainWrite);
         assert_eq!(decide_systemd(270, true).action, Action::Mediate);
         assert_eq!(systemd_surface(270, true), BalancedSurface::Task);
+        assert_eq!(decide_systemd(290, true).action, Action::Mediate);
+        assert_eq!(systemd_surface(290, true), BalancedSurface::Task);
+        assert_eq!(decide_systemd(7, true).action, Action::Mediate);
+        assert_eq!(systemd_surface(7, true), BalancedSurface::Task);
         assert_eq!(decide_systemd(271, true).action, Action::Mediate);
         assert_eq!(systemd_surface(271, true), BalancedSurface::Task);
         assert_eq!(decide_systemd(292, true).action, Action::Mediate);
@@ -305,6 +355,29 @@ mod tests {
         assert_eq!(systemd_surface(32, true), BalancedSurface::Task);
         assert_eq!(decide_systemd(33, true).action, Action::Mediate);
         assert_eq!(systemd_surface(33, true), BalancedSurface::Task);
+        assert_eq!(decide_systemd(77, true).action, Action::Mediate);
+        assert_eq!(systemd_surface(77, true), BalancedSurface::DomainWrite);
+        assert_eq!(systemd_surface(18, true), BalancedSurface::DomainWrite);
+        assert_eq!(systemd_surface(73, true), BalancedSurface::DomainWrite);
+        assert_eq!(systemd_surface(74, true), BalancedSurface::DomainWrite);
+        assert_eq!(systemd_surface(75, true), BalancedSurface::DomainWrite);
+        assert_eq!(systemd_surface(76, true), BalancedSurface::DomainWrite);
+        assert_eq!(systemd_surface(90, true), BalancedSurface::DomainWrite);
+        assert_eq!(systemd_surface(92, true), BalancedSurface::DomainWrite);
+        assert_eq!(systemd_surface(93, true), BalancedSurface::DomainWrite);
+        assert_eq!(systemd_surface(94, true), BalancedSurface::DomainWrite);
+        assert_eq!(systemd_surface(260, true), BalancedSurface::DomainWrite);
+        assert_eq!(systemd_surface(280, true), BalancedSurface::DomainWrite);
+        assert_eq!(systemd_surface(306, true), BalancedSurface::DomainWrite);
+        assert_eq!(systemd_surface(79, true), BalancedSurface::Task);
+        assert_eq!(systemd_surface(81, true), BalancedSurface::Task);
+        assert_eq!(systemd_surface(190, true), BalancedSurface::DomainWrite);
+        assert_eq!(systemd_surface(196, true), BalancedSurface::DomainWrite);
+        assert_eq!(systemd_surface(199, true), BalancedSurface::DomainWrite);
+        assert_eq!(decide_systemd(25, true).action, Action::Mediate);
+        assert_eq!(systemd_surface(25, true), BalancedSurface::Memory);
+        assert_eq!(systemd_surface(82, true), BalancedSurface::DomainWrite);
+        assert_eq!(systemd_surface(87, true), BalancedSurface::DomainWrite);
         assert_eq!(systemd_surface(84, true), BalancedSurface::DomainWrite);
         assert_eq!(systemd_surface(193, true), BalancedSurface::ImageRead);
         assert_eq!(

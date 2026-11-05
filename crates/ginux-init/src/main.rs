@@ -2003,6 +2003,19 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descripto
                     native_fail(domain, pid, b"pending native child resume failed");
                 }
             }
+            if event == PTRACE_EVENT_VFORK {
+                task.awaiting_exit = true;
+                task.override_exit = true;
+                task.override_result = child_virtual.pid as i64;
+                task.fork_result_pending = 0;
+                task.fork_breakpoint_rip = 0;
+                task.fork_breakpoint_word = 0;
+                tasks[task_index] = Some(task);
+                if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
+                    native_fail(domain, pid, b"native vfork parent resume failed");
+                }
+                continue;
+            }
             let mut parent_registers = core::mem::MaybeUninit::<UserRegs>::uninit();
             if ptrace(
                 PTRACE_GETREGS,
@@ -2361,6 +2374,41 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descripto
                     native_fail(domain, pid, b"native getpid emulation failed");
                 }
             }
+            Action::Emulate if mode == 3 && syscall == ginux_core::SYS_GETPRIORITY => {
+                let self_process = registers.rdi == 0
+                    && (registers.rsi == 0 || registers.rsi == u64::from(task.virtual_id.pid));
+                let result = if self_process { 20 } else { -EPERM };
+                write_all(b"emulate surface=virtual-priority result=");
+                write_i64(result);
+                write_all(b"\n");
+                registers.orig_rax = u64::MAX;
+                task.awaiting_exit = true;
+                task.override_exit = true;
+                task.override_result = result;
+                if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
+                {
+                    native_fail(domain, pid, b"native priority emulation failed");
+                }
+            }
+            Action::Emulate if mode == 3 && syscall == ginux_core::SYS_SETPRIORITY => {
+                let no_op_self = registers.rdi == 0
+                    && (registers.rsi == 0 || registers.rsi == u64::from(task.virtual_id.pid))
+                    && registers.rdx == 0;
+                let result = if no_op_self { 0 } else { -EPERM };
+                write_all(b"emulate surface=virtual-priority result=");
+                write_i64(result);
+                write_all(b"\n");
+                registers.orig_rax = u64::MAX;
+                task.awaiting_exit = true;
+                task.override_exit = true;
+                task.override_result = result;
+                if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
+                {
+                    native_fail(domain, pid, b"native priority update emulation failed");
+                }
+            }
             Action::Emulate if mode == 3 && syscall == 63 => {
                 let mut uts = [0u8; 65 * 6];
                 write_uts_field(&mut uts, 0, b"Linux");
@@ -2597,19 +2645,38 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descripto
                     native_fail(domain, pid, b"native virtual credential update failed");
                 }
             }
-            Action::Emulate if mode == 3 && syscall == 93 => {
-                let allowed = registers.rdi <= 2 && registers.rsi == 0 && registers.rdx == 0;
-                write_all(b"emulate surface=virtual-console-owner result=");
-                write_i64(if allowed { 0 } else { -EPERM });
+            Action::Emulate if mode == 3 && matches!(syscall, 92 | 93 | 94 | 260) => {
+                let root = processes
+                    .view(task.virtual_id)
+                    .is_ok_and(|view| view.credentials.uid == 0);
+                let allowed = match syscall {
+                    92 | 94 => tracee_string_bounded(host_pid, registers.rdi as usize, false),
+                    93 => registers.rdi < DOMAIN_NULL_FD as u64,
+                    260 => {
+                        let directory = registers.rdi == (-100i64) as u64
+                            || registers.rdi < DOMAIN_NULL_FD as u64;
+                        let flags = registers.r8;
+                        directory
+                            && flags & !(0x100 | 0x1000) == 0
+                            && tracee_string_bounded(
+                                host_pid,
+                                registers.rsi as usize,
+                                flags & 0x1000 != 0,
+                            )
+                    }
+                    _ => false,
+                };
+                write_all(b"emulate surface=virtual-file-owner result=");
+                write_i64(if root && allowed { 0 } else { -EPERM });
                 write_all(b"\n");
                 registers.orig_rax = u64::MAX;
                 task.awaiting_exit = true;
                 task.override_exit = true;
-                task.override_result = if allowed { 0 } else { -EPERM };
+                task.override_result = if root && allowed { 0 } else { -EPERM };
                 if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
                     || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
                 {
-                    native_fail(domain, pid, b"native virtual console fchown failed");
+                    native_fail(domain, pid, b"native virtual file ownership failed");
                 }
             }
             Action::Mediate if mode == 3 && syscall == 91 && registers.rdi <= 2 => {
@@ -3209,8 +3276,32 @@ fn native_arguments_allowed(syscall: u64, registers: &UserRegs, mode: usize) -> 
         match syscall {
             293 => registers.rdi != 0 && registers.rsi & !(0x8_0000 | 0x800) == 0,
             ginux_core::SYS_CLOSE_RANGE => true,
+            0 => registers.rdi < DOMAIN_NULL_FD as u64 && registers.rdx <= 64 * 1024 * 1024,
+            18 => registers.rdi < DOMAIN_NULL_FD as u64 && registers.rdx <= 1024 * 1024,
+            25 => {
+                registers.rsi <= 1024 * 1024 * 1024
+                    && registers.rdx <= 1024 * 1024 * 1024
+                    && registers.r10 & !1 == 0
+            }
+            73 => registers.rdi < DOMAIN_NULL_FD as u64 && registers.rsi & !15 == 0,
+            74 | 75 => registers.rdi < DOMAIN_NULL_FD as u64,
+            77 => registers.rdi < DOMAIN_NULL_FD as u64,
+            79 => registers.rdi != 0 && registers.rsi <= 4096,
+            81 | 306 => registers.rdi < DOMAIN_NULL_FD as u64,
+            280 => {
+                (registers.rdi == (-100i64) as u64 || registers.rdi < DOMAIN_NULL_FD as u64)
+                    && registers.r10 & !(0x100 | 0x1000) == 0
+            }
+            190 => {
+                registers.rdi < DOMAIN_NULL_FD as u64
+                    && registers.r10 <= 64 * 1024
+                    && registers.r8 <= 2
+            }
+            196 => registers.rdi < DOMAIN_NULL_FD as u64 && registers.rdx <= 64 * 1024,
+            199 => registers.rdi < DOMAIN_NULL_FD as u64,
             1
             | 2
+            | 7
             | 16
             | 20
             | 32
@@ -3219,10 +3310,14 @@ fn native_arguments_allowed(syscall: u64, registers: &UserRegs, mode: usize) -> 
             | 58
             | 59
             | 61
+            | 76
             | 80
+            | 82
             | 83
             | 84
+            | 87
             | 88
+            | 90
             | 91
             | 95
             | 112
@@ -3251,6 +3346,7 @@ fn native_arguments_allowed(syscall: u64, registers: &UserRegs, mode: usize) -> 
             | 286
             | 287
             | 289
+            | 290
             | 291
             | 294
             | ginux_core::SYS_MEMFD_CREATE
@@ -3869,6 +3965,35 @@ fn tracee_string_equals(pid: usize, address: usize, expected: &[u8]) -> bool {
                 return false;
             }
             offset += 1;
+        }
+    }
+    false
+}
+
+fn tracee_string_bounded(pid: usize, address: usize, allow_empty: bool) -> bool {
+    if address == 0 {
+        return false;
+    }
+    let mut offset = 0usize;
+    while offset < 4096 {
+        let mut word = 0u64;
+        if ptrace(
+            PTRACE_PEEKDATA,
+            pid,
+            address.saturating_add(offset),
+            &mut word as *mut _ as usize,
+        ) < 0
+        {
+            return false;
+        }
+        for byte in word.to_ne_bytes() {
+            if byte == 0 {
+                return allow_empty || offset != 0;
+            }
+            offset += 1;
+            if offset >= 4096 {
+                return false;
+            }
         }
     }
     false

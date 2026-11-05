@@ -72,6 +72,22 @@ expect {
     eof { puts stderr "managed shell exited during namespace check"; exit 93 }
 }
 expect {
+    -re {GINUX_NETWORK_DNS_HTTPS: PASS} {}
+    timeout { puts stderr "shared network DNS/HTTPS check timed out"; exit 94 }
+    eof { puts stderr "managed shell exited during network check"; exit 95 }
+}
+expect {
+    -re {GINUX_NETWORK_BIND_ACCEPT_CONFLICT: PASS} {}
+    timeout { puts stderr "shared network bind check timed out"; exit 96 }
+    eof { puts stderr "managed shell exited during bind check"; exit 97 }
+}
+set timeout 900
+expect {
+    -re {GINUX_DNF_UPDATE: PASS} {}
+    timeout { puts stderr "dnf update timed out"; exit 98 }
+    eof { puts stderr "managed shell exited during dnf update"; exit 99 }
+}
+expect {
     -re {GINUX_SHELL_CHECK_DONE} {}
     timeout { puts stderr "managed shell completion timed out"; exit 84 }
     eof { puts stderr "managed shell exited before checks completed"; exit 85 }

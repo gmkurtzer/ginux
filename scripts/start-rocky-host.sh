@@ -14,6 +14,14 @@ if [ -f "$ROCKY_PID_FILE" ]; then
 fi
 
 ./scripts/prepare-rocky-host.sh
+network_restrict=${ROCKY_NETWORK_RESTRICT:-on}
+case "$network_restrict" in
+    on|off) ;;
+    *)
+        printf 'ROCKY_NETWORK_RESTRICT must be on or off\n' >&2
+        exit 2
+        ;;
+esac
 base=$(pwd -P)/build/cache/rocky/$ROCKY_IMAGE_NAME
 overlay=build/rocky-host-overlay.qcow2
 rm -f "$overlay" "$ROCKY_SERIAL_LOG"
@@ -33,13 +41,16 @@ qemu-system-x86_64 \
     -no-reboot \
     -drive "if=virtio,format=qcow2,file=$overlay" \
     -drive "if=ide,media=cdrom,readonly=on,format=raw,file=build/rocky-seed.iso" \
-    -netdev "user,id=net0,restrict=on,hostfwd=tcp:127.0.0.1:$ROCKY_SSH_PORT-:22" \
+    -netdev "user,id=net0,restrict=$network_restrict,hostfwd=tcp:127.0.0.1:$ROCKY_SSH_PORT-:22" \
     -device virtio-net-pci,netdev=net0
 
 attempt=0
 while [ "$attempt" -lt 120 ]; do
     if rocky_ssh true >/dev/null 2>&1; then
         rocky_ssh 'sudo cloud-init status --wait >/dev/null'
+        if [ "$network_restrict" = off ]; then
+            rocky_ssh "sudo ip route replace default via 10.0.2.2 dev enp0s2; printf '%s\n' 'nameserver 10.0.2.3' | sudo tee /etc/resolv.conf >/dev/null"
+        fi
         printf '%s\n' 'Rocky host SSH and cloud-init ready'
         exit 0
     fi
