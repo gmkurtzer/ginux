@@ -12,6 +12,8 @@ pub const VIRTUAL_PID: u64 = 4242;
 pub const MAX_AUDIT: usize = 32;
 pub const MAX_OUTPUT: usize = 4096;
 
+const AT_NULL: u64 = 0;
+const AT_PAGESZ: u64 = 6;
 const PERM_READ: u8 = 1;
 const PERM_WRITE: u8 = 2;
 const PERM_EXEC: u8 = 4;
@@ -212,6 +214,16 @@ impl AddressSpace {
             argv_addresses[index] = cursor;
         }
         cursor &= !15;
+        // Everything pushed from here on (auxv, envp and argv with their NULL
+        // terminators, argc) must leave rsp 16-byte aligned at entry (x86-64
+        // SysV ABI, section 3.4.1).
+        if (argv.len() + env.len()) & 1 == 0 {
+            cursor = self.push_u64(cursor, 0)?;
+        }
+        cursor = self.push_u64(cursor, 0)?;
+        cursor = self.push_u64(cursor, AT_NULL)?;
+        cursor = self.push_u64(cursor, PAGE_SIZE as u64)?;
+        cursor = self.push_u64(cursor, AT_PAGESZ)?;
         cursor = self.push_u64(cursor, 0)?;
         for address in env_addresses[..env.len()].iter().rev() {
             cursor = self.push_u64(cursor, *address)?;
@@ -743,6 +755,56 @@ mod tests {
         memory.read(environment, &mut environment_bytes).unwrap();
         assert_eq!(&argument_bytes, b"argument");
         assert_eq!(&environment_bytes, b"KEY=value");
+    }
+
+    const STACK_VALUES: [&[u8]; 4] = [b"a", b"bb", b"ccc", b"dddd"];
+
+    fn stack_with(argc: usize, envc: usize) -> (AddressSpace, u64) {
+        let mut memory = AddressSpace::new();
+        memory.load_elf(&elf_with(&[0x90], 5)).unwrap();
+        let stack = memory
+            .build_stack(&STACK_VALUES[..argc], &STACK_VALUES[..envc])
+            .unwrap();
+        (memory, stack)
+    }
+
+    #[test]
+    fn initial_stack_is_16_byte_aligned_at_entry() {
+        for argc in 0..=3 {
+            for envc in 0..=3 {
+                let (memory, stack) = stack_with(argc, envc);
+                assert_eq!(stack % 16, 0, "argc={argc} envc={envc}");
+                assert_eq!(memory.read_u64(stack).unwrap(), argc as u64);
+            }
+        }
+    }
+
+    #[test]
+    fn initial_stack_has_auxv_terminated_by_at_null() {
+        for argc in 0..=3 {
+            for envc in 0..=3 {
+                let (memory, stack) = stack_with(argc, envc);
+                let argv_end = stack + 8 + argc as u64 * 8;
+                assert_eq!(memory.read_u64(argv_end).unwrap(), 0);
+                let envp_end = argv_end + 8 + envc as u64 * 8;
+                assert_eq!(memory.read_u64(envp_end).unwrap(), 0);
+                let mut entry = envp_end + 8;
+                let mut page_size = None;
+                loop {
+                    let key = memory.read_u64(entry).unwrap();
+                    let value = memory.read_u64(entry + 8).unwrap();
+                    if key == AT_NULL {
+                        assert_eq!(value, 0, "argc={argc} envc={envc}");
+                        break;
+                    }
+                    if key == AT_PAGESZ {
+                        page_size = Some(value);
+                    }
+                    entry += 16;
+                }
+                assert_eq!(page_size, Some(PAGE_SIZE as u64), "argc={argc} envc={envc}");
+            }
+        }
     }
 
     #[test]
