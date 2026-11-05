@@ -18,6 +18,11 @@ def main():
     template = (Path(__file__).resolve().parent.parent / "config/domain-gate5.toml").read_text()
     with tempfile.TemporaryDirectory(prefix="ginux-launch-") as directory:
         work = Path(directory)
+        # CI checkouts may live below a private home directory. The
+        # unprivileged bootstrap probe must be able to execute the binary.
+        shutil.copyfile(binary, work / "ginux")
+        (work / "ginux").chmod(0o755)
+        binary = str(work / "ginux")
         root = work / "root"
         (root / "bin").mkdir(parents=True)
         (root / "work").mkdir()
