@@ -10,16 +10,25 @@ transition_lower=$(printf '%s%s' 'ginux' '-us')
 pattern="$old_title|$old_lower|$old_upper|$old_repo|$transition_title|$transition_lower"
 
 set +e
-matches=$(rg -n \
+# Run the search on its own: in a pipeline the status would come from the
+# filter, and a missing or failing rg would read as "no matches".
+found=$(rg -n \
     --hidden \
     --glob '!build/**' \
     --glob '!target/**' \
+    --glob '!.artifacts/**' \
     --glob '!.git/**' \
     --glob '!hdae/gates-done/**' \
     --glob '!hdae/gates-todo/7.5-ginux-us-rename.md' \
     --glob '!hdae/gates-todo/7.75-ginux-rename.md' \
     --glob '!scripts/check-name.sh' \
-    "$pattern" . | grep -v -E '/Users/gmk/git/ginux-us|hdae/ginux-us-rename|github.com/gmkurtzer/ginux-us/')
+    "$pattern" .)
+status=$?
+if [ "$status" -gt 1 ]; then
+    printf '%s\n' "check-name: rg failed with status $status" >&2
+    exit 2
+fi
+matches=$(printf '%s\n' "$found" | grep -v -E '/Users/gmk/git/ginux-us|hdae/ginux-us-rename|github.com/gmkurtzer/ginux-us/|^$')
 status=$?
 set -e
 
@@ -34,13 +43,20 @@ case "$status" in
 esac
 
 set +e
-paths=$(find . \
+all_paths=$(find . \
     -path './.git' -prune -o \
     -path './build' -prune -o \
     -path './target' -prune -o \
+    -path './.artifacts' -prune -o \
     -path './hdae/gates-done' -prune -o \
     -path './hdae/gates-todo/7.5-ginux-us-rename.md' -prune -o \
-    -print | grep -E "$pattern")
+    -print)
+status=$?
+if [ "$status" -ne 0 ]; then
+    printf '%s\n' "check-name: find failed with status $status" >&2
+    exit 2
+fi
+paths=$(printf '%s\n' "$all_paths" | grep -E "$pattern")
 status=$?
 set -e
 
