@@ -8,6 +8,7 @@ rootfs=$GINUX_OCI_CACHE_DIR/$GINUX_OCI_ROOTFS_LAYER
 index=$GINUX_OCI_CACHE_DIR/$GINUX_OCI_ROOTFS_INDEX
 vfs_log=build/gate5-vfs.log
 failure_log=build/gate5-vfs-failure.log
+missing_log=build/gate5-vfs-missing.log
 
 ./scripts/check-rocky-host.sh
 rocky_scp target/x86_64-unknown-linux-gnu/release/ginux \
@@ -36,6 +37,15 @@ if rocky_ssh '/var/tmp/ginux vfs /var/tmp/gate5.toml /var/tmp/ginux-oci-rootfs.t
 fi
 grep -Fqx 'GINUX_DOMAIN: failed reason=invalid VFS index' "$failure_log"
 grep -Fqx 'GINUX_DOMAIN: cleanup resources=false managed-task=false' "$failure_log"
+
+rocky_ssh 'rm -f /var/tmp/ginux-oci-rootfs-missing.index'
+if rocky_ssh '/var/tmp/ginux vfs /var/tmp/gate5.toml /var/tmp/ginux-oci-rootfs.tar /var/tmp/ginux-oci-rootfs-missing.index' > "$missing_log" 2>&1; then
+    printf '%s\n' 'missing VFS index was incorrectly accepted' >&2
+    exit 1
+fi
+grep -Fqx 'GINUX_DOMAIN: failed reason=VFS index open failed' "$missing_log"
+grep -Fqx 'GINUX_LIFECYCLE: state=failed resources=false managed-task=false' "$missing_log"
+grep -Fqx 'GINUX_DOMAIN: cleanup resources=false managed-task=false' "$missing_log"
 
 rocky_ssh 'rm -f /var/tmp/ginux /var/tmp/gate5.toml /var/tmp/ginux-oci-rootfs.tar /var/tmp/ginux-oci-rootfs.index /var/tmp/ginux-oci-rootfs-bad.index'
 printf '%s\n' 'test-vfs: PASS'
