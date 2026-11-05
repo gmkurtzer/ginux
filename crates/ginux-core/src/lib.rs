@@ -55,7 +55,7 @@ pub const fn balanced_surface(syscall: u64) -> BalancedSurface {
             BalancedSurface::ImageRead
         }
         9 | 10 | 11 | 12 | 28 => BalancedSurface::Memory,
-        13 | 14 | SYS_FORK | SYS_WAIT4 | 99 | 158 | 202 | 218 | 273 | 302 | 334 => {
+        13 | 14 | 15 | SYS_FORK | SYS_WAIT4 | 99 | 158 | 202 | 218 | 273 | 302 | 334 => {
             BalancedSurface::Task
         }
         1 | 20 => BalancedSurface::Console,
@@ -147,6 +147,10 @@ mod tests {
         assert_eq!(balanced_surface(1), BalancedSurface::Console);
         assert_eq!(balanced_surface(SYS_FORK), BalancedSurface::Task);
         assert_eq!(balanced_surface(SYS_WAIT4), BalancedSurface::Task);
+        // rt_sigaction and rt_sigprocmask without rt_sigreturn would let a
+        // handler run but never return.
+        assert_eq!(balanced_surface(15), BalancedSurface::Task);
+        assert_eq!(decide_balanced(15).action, Action::Mediate);
         assert_eq!(decide_balanced(0).action, Action::Mediate);
         assert_eq!(decide_balanced(SYS_GETPID).action, Action::Emulate);
         assert_eq!(balanced_identity_result(SYS_GETUID), Some(0));

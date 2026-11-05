@@ -77,6 +77,7 @@ def main():
                changes={"args = [": 'workdir = "/"\nargs = ['})
         invoke(["exit"], 0, "exited", changes={"args = [": 'workdir = "/work/a..b"\nargs = ['})
         invoke(["trap"], 133, "signaled")
+        invoke(["handler"], 0, "exited", stdout=b"handled\n")
         invoke(["segv"], 139, "signaled")
         invoke(["fork"], 0, "exited")
         invoke(["int80"], 1, "supervisor-error")
