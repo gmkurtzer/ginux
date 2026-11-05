@@ -13,8 +13,12 @@ if [ -f "$ROCKY_PID_FILE" ]; then
     rm -f "$ROCKY_PID_FILE"
 fi
 
-./scripts/prepare-rocky-host.sh
-base=$(pwd -P)/build/cache/rocky/$ROCKY_IMAGE_NAME
+base=${ROCKY_IMAGE_PATH:-build/cache/rocky/$ROCKY_IMAGE_NAME}
+case $base in
+    /*) ;;
+    *) base=$(pwd -P)/$base ;;
+esac
+ROCKY_IMAGE_PATH=$base ./scripts/prepare-rocky-host.sh
 overlay=build/rocky-host-overlay.qcow2
 rm -f "$overlay" "$ROCKY_SERIAL_LOG"
 qemu-img create -q -f qcow2 -F qcow2 -b "$base" "$overlay"
