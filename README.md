@@ -235,6 +235,7 @@ The focused Linux integration scenario consumes existing binaries:
 make build
 make build-launch-fixture
 sudo make test-launch
+sudo make test-native-supervision
 ```
 
 ## Native process scenarios
