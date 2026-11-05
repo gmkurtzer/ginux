@@ -44,9 +44,36 @@ pub enum BalancedSurface {
     Task,
     Console,
     Random,
+    Network,
     VirtualIdentity,
     Lifecycle,
     Denied,
+}
+
+pub const fn is_shared_network_syscall(syscall: u64) -> bool {
+    matches!(syscall, 41..=55 | 288 | 299 | 307)
+}
+
+pub const fn decide_systemd(syscall: u64, shared_network: bool) -> Decision {
+    if shared_network && is_shared_network_syscall(syscall) {
+        return Decision {
+            syscall,
+            action: Action::Mediate,
+        };
+    }
+    let action = match syscall {
+        16 | 59 | 95 | 125 | 126 | 137 | 157 => Action::Mediate,
+        _ => decide_balanced(syscall).action,
+    };
+    Decision { syscall, action }
+}
+
+pub const fn systemd_surface(syscall: u64, shared_network: bool) -> BalancedSurface {
+    if shared_network && is_shared_network_syscall(syscall) {
+        BalancedSurface::Network
+    } else {
+        balanced_surface(syscall)
+    }
 }
 
 pub const fn balanced_surface(syscall: u64) -> BalancedSurface {
@@ -161,5 +188,14 @@ mod tests {
         assert_eq!(balanced_surface(16), BalancedSurface::Denied);
         assert_eq!(balanced_surface(41), BalancedSurface::Denied);
         assert_eq!(balanced_surface(105), BalancedSurface::Denied);
+    }
+
+    #[test]
+    fn systemd_contract_adds_shared_network_without_changing_balanced_policy() {
+        assert_eq!(decide_balanced(41).action, Action::Deny(38));
+        assert_eq!(decide_systemd(41, false).action, Action::Deny(38));
+        assert_eq!(decide_systemd(41, true).action, Action::Mediate);
+        assert_eq!(systemd_surface(42, true), BalancedSurface::Network);
+        assert_eq!(decide_systemd(59, true).action, Action::Mediate);
     }
 }

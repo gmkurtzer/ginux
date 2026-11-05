@@ -48,7 +48,12 @@ a controlled shutdown.
 
 ## Completed work
 
-- [ ] None; gate not started.
+- [x] Pin and verify the Rocky Linux 10 UBI init image and prepare its OCI
+  filesystem through the existing immutable cache pipeline.
+- [x] Add the explicit Gate 9 systemd launch profile, virtual PID 1 identity,
+  writable disposable domain root, shared-network contract classification,
+  and a reproducible Rocky-host probe.
+- [x] Establish the first real systemd failure baseline under supervision.
 
 ## Remaining work
 
@@ -114,7 +119,18 @@ a controlled shutdown.
 
 ## Evidence
 
-- Not run.
+- `cargo test -p ginux-core` -> 6 tests passed, including the shared-network
+  systemd contract while the earlier balanced contract continued to deny
+  sockets.
+- `cargo test -p ginux-domain` -> 11 tests passed, including strict parsing and
+  normalization of `network.backend = "shared"`.
+- `cargo clippy -p ginux-init --bin ginux --target
+  x86_64-unknown-linux-gnu --release -- -D warnings` and the matching release
+  build passed.
+- `./scripts/with-rocky-host.sh ./scripts/probe-systemd.sh` -> the unmodified
+  Rocky `/sbin/init` ran as virtual PID 1 under continuous syscall supervision,
+  reached its attempt to mount `/run`, received `ENOSYS` for the unsupported
+  tmpfs mount, and exited deterministically rather than bypassing Ginux.
 
 ## Decisions and limitations
 
@@ -134,6 +150,9 @@ a controlled shutdown.
 - Interface/source-address selection, port allow/deny policy, and port
   translation are approved as Gate 9.5 rather than being folded into this
   systemd gate.
+- The first systemd baseline identifies bounded mount compatibility and
+  multi-task supervision as the next required implementation tranche. The
+  probe is partial evidence only; it does not satisfy readiness or login.
 - New architecture needs discovered during convergence require human direction
   or a corrective gate rather than silent scope expansion.
 

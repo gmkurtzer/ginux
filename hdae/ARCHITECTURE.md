@@ -174,8 +174,14 @@ descriptors or an unmediated syscall path.
 
 Gate 9.5 adds explicit selection of a host interface or source address,
 ingress and egress policy, and port translation such as host
-`device-or-address:8080` to domain port `80`. These controls use the same
-network frontend rather than creating a separate compatibility path.
+`device-or-address:8080` to domain port `80`. Selecting an attachment such as
+`eth0:1` gives the domain the normal shared use of that complete host network
+attachment; it does not reserve the attachment or create an isolated network.
+Two domains attached to the same host network therefore behave like two host
+applications, including first-successful-bind ownership. Translation is the
+explicit exception: Ginux owns the selected external address and port and
+routes it to the configured domain port. These controls use the same network
+frontend rather than creating a separate compatibility path.
 
 ### Configuration and lifecycle
 

@@ -90,6 +90,7 @@ pub enum ExecutionBackend {
 pub enum NetworkBackend {
     None,
     Mediated,
+    Shared,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -370,6 +371,7 @@ impl DomainConfig {
         output.quoted(match self.network_backend {
             NetworkBackend::None => b"none",
             NetworkBackend::Mediated => b"mediated",
+            NetworkBackend::Shared => b"shared",
         })?;
         output.raw(b"\n\n[audit]\nmode = ")?;
         output.quoted(match self.audit_mode {
@@ -554,6 +556,7 @@ fn parse_field(
             builder.network_backend = match parse_string::<32>(value)?.as_bytes() {
                 b"none" => NetworkBackend::None,
                 b"mediated" => NetworkBackend::Mediated,
+                b"shared" => NetworkBackend::Shared,
                 _ => return Err(ConfigError::InvalidValue),
             };
         }
@@ -958,6 +961,19 @@ policy = "stop"
         let config = DomainConfig::parse(mediated.as_bytes()).unwrap();
         assert_eq!(config.network_backend, NetworkBackend::Mediated);
         assert_eq!(config.devices.as_slice()[0].as_bytes(), b"net0");
+    }
+
+    #[test]
+    fn accepts_host_shared_network_as_an_explicit_backend() {
+        let shared = VALID.replace("backend = \"none\"", "backend = \"shared\"");
+        let config = DomainConfig::parse(shared.as_bytes()).unwrap();
+        assert_eq!(config.network_backend, NetworkBackend::Shared);
+        assert!(config
+            .normalized()
+            .unwrap()
+            .as_bytes()
+            .windows(b"backend = \"shared\"".len())
+            .any(|window| window == b"backend = \"shared\""));
     }
 
     #[test]

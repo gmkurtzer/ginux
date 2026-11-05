@@ -1,6 +1,7 @@
 #!/bin/sh
 
-. ./config/rocky-domain-oci.env
+GINUX_OCI_CONFIG_FILE=${GINUX_OCI_CONFIG_FILE:-./config/rocky-domain-oci.env}
+. "$GINUX_OCI_CONFIG_FILE"
 
 GINUX_OCI_CACHE_DIR=${GINUX_OCI_CACHE_DIR_OVERRIDE:-$GINUX_OCI_CACHE_DIR}
 GINUX_OCI_BLOBS_DIR=$GINUX_OCI_CACHE_DIR/blobs/sha256

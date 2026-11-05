@@ -5,14 +5,14 @@ use core::arch::{asm, global_asm};
 use core::panic::PanicInfo;
 use ginux_core::{
     balanced_arguments_allowed, balanced_identity_result, balanced_surface, decide,
-    decide_balanced, Action, BalancedSurface, SYS_EXIT, SYS_EXIT_GROUP, SYS_GETPID, SYS_UNAME,
-    SYS_WRITE,
+    decide_balanced, decide_systemd, systemd_surface, Action, BalancedSurface, SYS_EXIT,
+    SYS_EXIT_GROUP, SYS_GETPID, SYS_UNAME, SYS_WRITE,
 };
 use ginux_devices::{
     BlockBackend, DeviceError, DeviceKind, DeviceName, DeviceRegistry, DeviceView, IsolatedNetwork,
     Partition, IOCTL_CONSOLE_GET_SIZE,
 };
-use ginux_domain::{ConfigError, Domain, DomainConfig};
+use ginux_domain::{ConfigError, Domain, DomainConfig, NetworkBackend};
 use ginux_kernel_views::{
     CgroupFs, IdentityFs, IdentityView, MemoryView, MountView, NamespaceView, ProcFs, SysFs,
     ViewError,
@@ -79,8 +79,14 @@ const PTRACE_SETOPTIONS: usize = 0x4200;
 const PTRACE_GETEVENTMSG: usize = 0x4201;
 const PTRACE_O_TRACESYSGOOD: usize = 1;
 const PTRACE_O_TRACEFORK: usize = 1 << 1;
+const PTRACE_O_TRACEVFORK: usize = 1 << 2;
+const PTRACE_O_TRACECLONE: usize = 1 << 3;
+const PTRACE_O_TRACEEXEC: usize = 1 << 4;
 const PTRACE_O_EXITKILL: usize = 1 << 20;
 const PTRACE_EVENT_FORK: usize = 1;
+const PTRACE_EVENT_VFORK: usize = 2;
+const PTRACE_EVENT_CLONE: usize = 3;
+const PTRACE_EVENT_EXEC: usize = 4;
 
 const EPERM: i64 = 1;
 const ENOSYS: i64 = 38;
@@ -236,6 +242,9 @@ extern "C" fn rust_main(initial_stack: *const usize) -> ! {
                 1
             } else if argc >= 5 && c_string_equals(unsafe { *argv.add(4) as *const u8 }, b"probe") {
                 2
+            } else if argc >= 5 && c_string_equals(unsafe { *argv.add(4) as *const u8 }, b"systemd")
+            {
+                3
             } else {
                 0
             };
@@ -1458,7 +1467,7 @@ fn native_main(config_path: *const u8, root_path: *const u8, mode: usize) -> ! {
     if child == 0 {
         native_tracee(root_path, mode);
     }
-    supervise_native(child as usize, &mut domain)
+    supervise_native(child as usize, &mut domain, mode)
 }
 
 fn native_tracee(root_path: *const u8, mode: usize) -> ! {
@@ -1470,6 +1479,9 @@ fn native_tracee(root_path: *const u8, mode: usize) -> ! {
     static COMMAND: &[u8] = b"printf 'GINUX_NATIVE_SHELL: PASS\\n'\0";
     static HOLD_COMMAND: &[u8] = b"printf 'GINUX_NATIVE_HOLD: READY\\n'; while :; do :; done\0";
     static PROBE_COMMAND: &[u8] = b"if : > /tmp/ginux-mutation; then exit 90; else printf 'GINUX_BALANCED_MUTATION: BLOCKED\\n'; fi; if exec 9<>/dev/tcp/127.0.0.1/9; then exit 91; else printf 'GINUX_BALANCED_NETWORK: BLOCKED\\n'; fi\0";
+    static SYSTEMD: &[u8] = b"/sbin/init\0";
+    static SYSTEMD_ARG1: &[u8] = b"--system\0";
+    static SYSTEMD_ARG2: &[u8] = b"--unit=multi-user.target\0";
     static ENV_PATH: &[u8] = b"PATH=/usr/bin:/bin\0";
     static ENV_HOME: &[u8] = b"HOME=/\0";
     static ENV_LOCALE: &[u8] = b"LC_ALL=C\0";
@@ -1480,6 +1492,11 @@ fn native_tracee(root_path: *const u8, mode: usize) -> ! {
     }
     if unsafe { syscall1(SYS_CHDIR, ROOT.as_ptr() as usize) } < 0 {
         native_tracee_setup_fail(121);
+    }
+    let mut inherited = 3usize;
+    while inherited < 256 {
+        let _ = unsafe { syscall1(SYS_CLOSE_HOST, inherited) };
+        inherited += 1;
     }
     if unsafe { syscall4(SYS_PTRACE, PTRACE_TRACEME, 0, 0, 0) } < 0 {
         native_tracee_setup_fail(122);
@@ -1496,7 +1513,7 @@ fn native_tracee(root_path: *const u8, mode: usize) -> ! {
     if unsafe { syscall5(SYS_PRCTL, PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) } < 0 {
         native_tracee_setup_fail(126);
     }
-    let argv = [
+    let bash_argv = [
         BASH.as_ptr(),
         ARG1.as_ptr(),
         ARG2.as_ptr(),
@@ -1506,6 +1523,12 @@ fn native_tracee(root_path: *const u8, mode: usize) -> ! {
             2 => PROBE_COMMAND.as_ptr(),
             _ => COMMAND.as_ptr(),
         },
+        core::ptr::null(),
+    ];
+    let systemd_argv = [
+        SYSTEMD.as_ptr(),
+        SYSTEMD_ARG1.as_ptr(),
+        SYSTEMD_ARG2.as_ptr(),
         core::ptr::null(),
     ];
     let environment = [
@@ -1518,8 +1541,16 @@ fn native_tracee(root_path: *const u8, mode: usize) -> ! {
     unsafe {
         syscall3(
             SYS_EXECVE,
-            BASH.as_ptr() as usize,
-            argv.as_ptr() as usize,
+            if mode == 3 {
+                SYSTEMD.as_ptr() as usize
+            } else {
+                BASH.as_ptr() as usize
+            },
+            if mode == 3 {
+                systemd_argv.as_ptr() as usize
+            } else {
+                bash_argv.as_ptr() as usize
+            },
             environment.as_ptr() as usize,
         );
         syscall1(SYS_EXIT_HOST, 127);
@@ -1536,7 +1567,7 @@ fn native_tracee_setup_fail(code: usize) -> ! {
     }
 }
 
-fn supervise_native(pid: usize, domain: &mut Domain) -> ! {
+fn supervise_native(pid: usize, domain: &mut Domain, mode: usize) -> ! {
     let mut status = 0i32;
     if wait(pid, &mut status) < 0 {
         native_fail(domain, pid, b"native tracee wait after exec failed");
@@ -1547,12 +1578,22 @@ fn supervise_native(pid: usize, domain: &mut Domain) -> ! {
         write_all(b"\n");
         native_fail(domain, pid, b"native tracee did not stop after exec");
     }
-    let options = PTRACE_O_TRACESYSGOOD | PTRACE_O_EXITKILL;
+    let options = PTRACE_O_TRACESYSGOOD
+        | PTRACE_O_TRACEFORK
+        | PTRACE_O_TRACEVFORK
+        | PTRACE_O_TRACECLONE
+        | PTRACE_O_TRACEEXEC
+        | PTRACE_O_EXITKILL;
     if ptrace(PTRACE_SETOPTIONS, pid, 0, options) < 0 || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0 {
         native_fail(domain, pid, b"native ptrace setup failed");
     }
-    line(b"GINUX_NATIVE: backend=ptrace-native profile=balanced elf-loader=host contract=gate5-balanced");
-    line(b"GINUX_NATIVE: tracee-uid=1000 tracee-gid=1000 root=oci-read-only");
+    if mode == 3 {
+        line(b"GINUX_NATIVE: backend=ptrace-native profile=balanced elf-loader=host contract=gate9-systemd");
+        line(b"GINUX_NATIVE: virtual-pid=1 virtual-ppid=0 root=oci-overlay");
+    } else {
+        line(b"GINUX_NATIVE: backend=ptrace-native profile=balanced elf-loader=host contract=gate5-balanced");
+        line(b"GINUX_NATIVE: tracee-uid=1000 tracee-gid=1000 root=oci-read-only");
+    }
 
     let mut sequence = 0u64;
     let mut awaiting_exit = false;
@@ -1564,6 +1605,25 @@ fn supervise_native(pid: usize, domain: &mut Domain) -> ! {
             native_fail(domain, pid, b"native tracee escaped supervision");
         }
         let signal = ((status >> 8) & 0xff) as u8;
+        let event = ((status as usize) >> 16) & 0xffff;
+        if matches!(
+            event,
+            PTRACE_EVENT_FORK | PTRACE_EVENT_VFORK | PTRACE_EVENT_CLONE
+        ) {
+            let mut child = 0usize;
+            let _ = ptrace(PTRACE_GETEVENTMSG, pid, 0, &mut child as *mut _ as usize);
+            if child != 0 {
+                let _ = ptrace(PTRACE_KILL, child, 0, 0);
+            }
+            native_fail(
+                domain,
+                pid,
+                b"managed descendant requires multi-task supervision",
+            );
+        }
+        if event != 0 && event != PTRACE_EVENT_EXEC {
+            native_fail(domain, pid, b"unexpected native ptrace event");
+        }
         if signal != (5 | 0x80) && signal != 5 {
             native_fail(domain, pid, b"unexpected native trace stop");
         }
@@ -1595,15 +1655,20 @@ fn supervise_native(pid: usize, domain: &mut Domain) -> ! {
 
         sequence += 1;
         let syscall = registers.orig_rax;
-        let decision = decide_balanced(syscall);
+        let shared_network = mode == 3 && domain.config().network_backend == NetworkBackend::Shared;
+        let decision = if mode == 3 {
+            decide_systemd(syscall, shared_network)
+        } else {
+            decide_balanced(syscall)
+        };
         write_all(b"GINUX_NATIVE_AUDIT: sequence=");
         write_u64(sequence);
         write_all(b" phase=entry syscall=");
         write_u64(syscall);
         write_all(b" action=");
         match decision.action {
-            Action::Emulate if balanced_identity_result(syscall).is_some() => {
-                let result = balanced_identity_result(syscall).unwrap_or(0);
+            Action::Emulate if native_identity_result(syscall, mode).is_some() => {
+                let result = native_identity_result(syscall, mode).unwrap_or(0);
                 write_all(b"emulate surface=virtual-identity result=");
                 write_i64(result);
                 write_all(b"\n");
@@ -1628,9 +1693,13 @@ fn supervise_native(pid: usize, domain: &mut Domain) -> ! {
                 line(b"GINUX_NATIVE_CHECK: PASS");
                 exit_process(0)
             }
-            Action::Mediate if native_arguments_allowed(syscall, &registers) => {
+            Action::Mediate if native_arguments_allowed(syscall, &registers, mode) => {
                 write_all(b"mediate surface=");
-                line(balanced_surface_name(balanced_surface(syscall)));
+                line(balanced_surface_name(if mode == 3 {
+                    systemd_surface(syscall, shared_network)
+                } else {
+                    balanced_surface(syscall)
+                }));
                 awaiting_exit = true;
                 if ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0 {
                     native_fail(domain, pid, b"native mediated syscall failed");
@@ -1667,8 +1736,29 @@ fn supervise_native(pid: usize, domain: &mut Domain) -> ! {
     }
 }
 
-fn native_arguments_allowed(syscall: u64, registers: &UserRegs) -> bool {
-    balanced_arguments_allowed(syscall, registers.rdi, registers.rsi, registers.rdx)
+fn native_identity_result(syscall: u64, mode: usize) -> Option<i64> {
+    if mode == 3 {
+        match syscall {
+            SYS_GETPID => Some(1),
+            ginux_core::SYS_GETPPID => Some(0),
+            ginux_core::SYS_GETPGRP => Some(1),
+            _ => balanced_identity_result(syscall),
+        }
+    } else {
+        balanced_identity_result(syscall)
+    }
+}
+
+fn native_arguments_allowed(syscall: u64, registers: &UserRegs, mode: usize) -> bool {
+    if mode == 3 {
+        match syscall {
+            1 | 2 | 16 | 59 | 95 | 125 | 126 | 137 | 157 | 257 => true,
+            _ if ginux_core::is_shared_network_syscall(syscall) => true,
+            _ => balanced_arguments_allowed(syscall, registers.rdi, registers.rsi, registers.rdx),
+        }
+    } else {
+        balanced_arguments_allowed(syscall, registers.rdi, registers.rsi, registers.rdx)
+    }
 }
 
 fn balanced_surface_name(surface: BalancedSurface) -> &'static [u8] {
@@ -1678,6 +1768,7 @@ fn balanced_surface_name(surface: BalancedSurface) -> &'static [u8] {
         BalancedSurface::Task => b"task result=pending",
         BalancedSurface::Console => b"bootstrap-console result=pending",
         BalancedSurface::Random => b"random result=pending",
+        BalancedSurface::Network => b"shared-network result=pending",
         BalancedSurface::VirtualIdentity | BalancedSurface::Lifecycle | BalancedSurface::Denied => {
             b"invalid result=denied"
         }

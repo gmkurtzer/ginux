@@ -43,7 +43,10 @@ set --
 layer_number=0
 tab=$(printf '\t')
 while IFS="$tab" read -r layer_media_type layer_digest diff_id; do
-    test "$layer_media_type" = application/vnd.oci.image.layer.v1.tar+gzip
+    case "$layer_media_type" in
+        application/vnd.oci.image.layer.v1.tar+gzip|application/vnd.docker.image.rootfs.diff.tar.gzip) ;;
+        *) printf 'unsupported image layer media type: %s\n' "$layer_media_type" >&2; exit 1 ;;
+    esac
     layer_blob=$(oci_blob_path "$layer_digest")
     layer_tar=$GINUX_OCI_WORK_DIR/layer-$layer_number.tar
     layer_tmp=$layer_tar.partial

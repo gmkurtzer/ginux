@@ -50,21 +50,24 @@ fetch_object() {
     mv "$partial" "$destination"
 }
 
-fetch_object manifests "$GINUX_OCI_INDEX_DIGEST" application/vnd.oci.image.index.v1+json
+fetch_object manifests "$GINUX_OCI_INDEX_DIGEST" "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json"
 index_blob=$(oci_blob_path "$GINUX_OCI_INDEX_DIGEST")
 jq -e \
     --arg digest "$GINUX_OCI_MANIFEST_DIGEST" \
     --arg os "$GINUX_OCI_PLATFORM_OS" \
     --arg arch "$GINUX_OCI_PLATFORM_ARCH" \
-    '.schemaVersion == 2 and .mediaType == "application/vnd.oci.image.index.v1+json" and
+    '.schemaVersion == 2 and
+     (.mediaType == "application/vnd.oci.image.index.v1+json" or
+      .mediaType == "application/vnd.docker.distribution.manifest.list.v2+json") and
      any(.manifests[]; .digest == $digest and .platform.os == $os and
          .platform.architecture == $arch)' \
     "$index_blob" >/dev/null
 
-fetch_object manifests "$GINUX_OCI_MANIFEST_DIGEST" application/vnd.oci.image.manifest.v1+json
+fetch_object manifests "$GINUX_OCI_MANIFEST_DIGEST" "application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json"
 manifest_blob=$(oci_blob_path "$GINUX_OCI_MANIFEST_DIGEST")
 jq -e '.schemaVersion == 2 and
-       .mediaType == "application/vnd.oci.image.manifest.v1+json" and
+       (.mediaType == "application/vnd.oci.image.manifest.v1+json" or
+        .mediaType == "application/vnd.docker.distribution.manifest.v2+json") and
        (.config.digest | startswith("sha256:")) and
        all(.layers[]; .digest | startswith("sha256:"))' \
     "$manifest_blob" >/dev/null
@@ -77,15 +80,17 @@ jq -r '.layers[].digest' "$manifest_blob" | while IFS= read -r layer_digest; do
 done
 
 manifest_size=$(wc -c < "$manifest_blob" | tr -d ' ')
+manifest_media_type=$(jq -er '.mediaType' "$manifest_blob")
 printf '%s\n' '{"imageLayoutVersion":"1.0.0"}' > "$layout_tmp"
 jq -n \
     --arg digest "$GINUX_OCI_MANIFEST_DIGEST" \
     --argjson size "$manifest_size" \
+    --arg media_type "$manifest_media_type" \
     --arg ref "docker.io/$GINUX_OCI_REPOSITORY:$GINUX_OCI_TAG" \
     --arg os "$GINUX_OCI_PLATFORM_OS" \
     --arg arch "$GINUX_OCI_PLATFORM_ARCH" \
     '{schemaVersion: 2, manifests: [{
-      mediaType: "application/vnd.oci.image.manifest.v1+json",
+      mediaType: $media_type,
       digest: $digest,
       size: $size,
       annotations: {"org.opencontainers.image.ref.name": $ref},

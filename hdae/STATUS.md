@@ -33,6 +33,10 @@
 - Gate 9.5 was added and authorized on 2026-11-04 for comprehensive domain
   configuration, CLI overrides, network selection and policy, port translation,
   volumes, access, identity, resources, devices, and pre-boot hooks.
+- Gate 9 implementation is active. The pinned Rocky init image, systemd launch
+  profile, virtual PID 1 identity, disposable root, shared-network contract,
+  and reproducible Rocky-host probe are implemented locally on
+  `hdae/systemd-baseline`.
 - The ordered gate batch is authorized, but every open gate remains a human
   checkpoint requiring a working demonstration and explicit acceptance.
 
@@ -296,9 +300,9 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Establish the exact systemd unit profile, readiness marker, timeout, shutdown
-result, and current failure baseline, then implement Gate 9's approved
-host-shared network backend and live upstream DNF workflow.
+Commit the reproducible systemd baseline, then add bounded multi-task
+supervision and the minimum virtual mount behavior required for systemd to
+create its managed descendants without bypassing Ginux.
 
 ## Context recovery
 
@@ -306,10 +310,11 @@ host-shared network backend and live upstream DNF workflow.
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
 - Active gate: Gate 9, systemd baseline, authorized on dedicated branch
-  `hdae/systemd-baseline`; implementation has not started
-- Last evidence: pull request 152 merged as `d337713b`; local `main` was
-  fast-forwarded to that commit; Gate 8.5 was closed; and Gate 9 was selected
-  on 2026-11-04
+  `hdae/systemd-baseline`; implementation is partial
+- Last evidence: core and domain unit suites, strict init clippy, and the init
+  release build passed. The Rocky-host probe ran the unmodified Rocky systemd
+  as virtual PID 1 and stopped deterministically at unsupported tmpfs mount
+  setup for `/run`.
 - Approved network direction: Gate 9 defaults to full host-shared inbound and
   outbound networking with normal host routing and bind conflicts, under Ginux
   mediation and audit. Gate 9.5 adds comprehensive domain configuration,
