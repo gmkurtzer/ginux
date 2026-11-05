@@ -97,6 +97,15 @@ test-unit:
 test-intercept: build
 	@./scripts/with-rocky-host.sh ./scripts/test-intercept.sh
 
+.PHONY: build-gate1-fixture test-gate1-setup
+build-gate1-fixture:
+	mkdir -p .artifacts/gate1
+	$(CC) -nostdlib -static -fno-stack-protector -fno-builtin -O2 -Wall -Wextra -Werror -DDENY_PTRACE tests/fixtures/gate1-setup-fixture.c -o .artifacts/gate1/deny-ptrace
+	$(CC) -nostdlib -static -fno-stack-protector -fno-builtin -O2 -Wall -Wextra -Werror tests/fixtures/gate1-setup-fixture.c -o .artifacts/gate1/payload
+
+test-gate1-setup:
+	python3 scripts/test-gate1-setup.py $(GINUX) .artifacts/gate1/deny-ptrace .artifacts/gate1/payload
+
 test-runtime: build
 	@./scripts/with-rocky-host.sh ./scripts/test-runtime.sh
 
