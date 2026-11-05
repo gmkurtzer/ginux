@@ -23,9 +23,21 @@ static char child_stack[16384] __attribute__((aligned(16)));
 static int alive;
 static int parent_tid, child_tid;
 static char exec_path[1024];
+#if defined(CASE_concurrent_wait) || defined(CASE_remaining_wait)
+static volatile int ready, completed;
+static long selected_child;
+static char second_stack[16384] __attribute__((aligned(16)));
+#endif
 extern long make_thread(word flags, void *stack, word ptid, word ctid);
 void thread_body(void) {
-#if defined(CASE_thread_reuse)
+#if defined(CASE_concurrent_wait) || defined(CASE_remaining_wait)
+    int status=0x12345678;
+    __atomic_add_fetch(&ready,1,__ATOMIC_SEQ_CST);
+    long result=call3(61,selected_child,(word)&status,0);
+    if(result==-10 && status!=0x12345678)call3(231,20,0,0);
+    show("concurrent wait result=",result);
+    __atomic_add_fetch(&completed,1,__ATOMIC_SEQ_CST);
+#elif defined(CASE_thread_reuse)
     __atomic_store_n(&done,1,__ATOMIC_RELEASE);
 #elif defined(CASE_thread_exec) || defined(CASE_exec_failure)
     char *argv[]={exec_path,0};
@@ -61,7 +73,40 @@ long probe_main(word *stack) {
     const char suffix[]="process-exec-target";
 #endif
     for(word j=0;j<sizeof suffix;j++)exec_path[last+j]=suffix[j];
-#if defined(CASE_syscall_abi)
+#if defined(CASE_concurrent_wait) || defined(CASE_remaining_wait)
+    if(call3(22,(word)descriptors,0,0))return 10;
+    selected_child=call3(57,0,0,0);
+    if(!selected_child) {
+        char byte;
+        call3(0,descriptors[0],(word)&byte,1);
+        return 0;
+    }
+    if(selected_child<0)return 11;
+#if defined(CASE_remaining_wait)
+    // Any-child waiters must keep waiting while another child is alive.
+    long second=call3(57,0,0,0);
+    if(!second) {
+        char byte;
+        call3(0,descriptors[0],(word)&byte,1);
+        return 0;
+    }
+    if(second<0)return 12;
+    selected_child=-1;
+#endif
+    if(make_thread(0x10f00,child_stack+sizeof child_stack,0,0)<0)return 13;
+    if(make_thread(0x10f00,second_stack+sizeof second_stack,0,0)<0)return 14;
+    while(__atomic_load_n(&ready,__ATOMIC_SEQ_CST)<2)call3(186,0,0,0);
+    // Give both workers time to enter wait before releasing a child.
+    for(int i=0;i<100;i++)call3(186,0,0,0);
+    call3(1,descriptors[1],(word)"x",1);
+#if defined(CASE_remaining_wait)
+    while(__atomic_load_n(&completed,__ATOMIC_SEQ_CST)<1)call3(186,0,0,0);
+    for(int i=0;i<100;i++)call3(186,0,0,0);
+    if(__atomic_load_n(&completed,__ATOMIC_SEQ_CST)!=1)return 15;
+    call3(1,descriptors[1],(word)"x",1);
+#endif
+    while(__atomic_load_n(&completed,__ATOMIC_SEQ_CST)<2)call3(186,0,0,0);
+#elif defined(CASE_syscall_abi)
     show("set_tid_address(218)=",call3(218,(word)&done,0,0));
     show("set_robust_list(273)=",call3(273,0,24,0));
     show("rseq(334)=",call3(334,0,0,0));

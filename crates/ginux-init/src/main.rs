@@ -1897,37 +1897,47 @@ fn wake_waiters_for_child(
             index += 1;
             continue;
         }
-        let target = resolve_wait_target(entry.wait_selector, processes, entry.virtual_id);
-        let done = target.and_then(|target| {
-            processes
-                .wait(entry.virtual_id, target, entry.wait_options)
-                .ok()
-        });
-        let Some(done) = done else {
-            index += 1;
-            continue;
+        // Another waiter may have consumed the last matching child during
+        // this wakeup pass. That ends this wait with ECHILD; only a wait
+        // with a remaining, non-reportable child should stay parked.
+        let result = if let Some(target) =
+            resolve_wait_target(entry.wait_selector, processes, entry.virtual_id)
+        {
+            let done = match processes.wait(entry.virtual_id, target, entry.wait_options) {
+                Ok(done) => done,
+                Err(ProcessError::NoExitedChild) => {
+                    index += 1;
+                    continue;
+                }
+                Err(_) => process_native_fail(domain, root_host_pid, b"wait wakeup failed"),
+            };
+            if entry.wait_status != 0
+                && store_tracee_status(entry.host_pid, entry.wait_status, done.status.word())
+                    .is_err()
+            {
+                process_native_fail(domain, root_host_pid, b"wait status store failed");
+            }
+            if entry.wait_rusage != 0
+                && zero_tracee_rusage(entry.host_pid, entry.wait_rusage).is_err()
+            {
+                process_native_fail(domain, root_host_pid, b"wait rusage store failed");
+            }
+            clear_host_slot(tasks, done.child);
+            write_all(b"GINUX_NATIVE_PROCESS_AUDIT: wait wakeup caller=");
+            write_u64(entry.virtual_id.pid as u64);
+            write_all(b" child=");
+            write_u64(done.child.pid as u64);
+            write_all(b" status=");
+            write_i64(done.status.shell_code() as i64);
+            write_all(b"\n");
+            done.child.pid as i64
+        } else {
+            -ECHILD
         };
-        if entry.wait_status != 0
-            && store_tracee_status(entry.host_pid, entry.wait_status, done.status.word()).is_err()
-        {
-            process_native_fail(domain, root_host_pid, b"wait status store failed");
-        }
-        if entry.wait_rusage != 0 && zero_tracee_rusage(entry.host_pid, entry.wait_rusage).is_err()
-        {
-            process_native_fail(domain, root_host_pid, b"wait rusage store failed");
-        }
-        clear_host_slot(tasks, done.child);
-        write_all(b"GINUX_NATIVE_PROCESS_AUDIT: wait wakeup caller=");
-        write_u64(entry.virtual_id.pid as u64);
-        write_all(b" child=");
-        write_u64(done.child.pid as u64);
-        write_all(b" status=");
-        write_i64(done.status.shell_code() as i64);
-        write_all(b"\n");
         if let Some(slot) = tasks[index].as_mut() {
             slot.wait_pending = false;
             slot.override_result = true;
-            slot.result = done.child.pid as i64;
+            slot.result = result;
         }
         // The exit stop queued for this parked entry applies the pid result;
         // resume carrying the host SIGCHLD so delivery is observed.

@@ -29,6 +29,8 @@ def main():
         "clone_tid": [b"parent tid cell=2", b"child tid cell=2", b"child gettid=2", b"clone return=2", b"clone wait=2"],
         "child_signal": [b"signal wait=2", b"signal status=15"],
         "nonblocking_wait": [b"nonblocking wait=0", b"blocking wait=2"],
+        "concurrent_wait": [b"concurrent wait result=2", b"concurrent wait result=-10"],
+        "remaining_wait": [b"concurrent wait result=2", b"concurrent wait result=3"],
         "vfork": [b"vfork return=2", b"vfork wait=2", b"vfork status=10752"],
     }
     with tempfile.TemporaryDirectory(prefix="ginux-process-") as directory:
@@ -46,7 +48,8 @@ def main():
                     raise RuntimeError(f"unknown scenario {mode}")
                 path = legacy if mode == "legacy" else f"{fixtures}/{mode}"
                 repetitions = 100 if mode == "legacy" else 20 if mode in (
-                    "thread_exec", "exec_failure", "thread_reuse", "clone_tid", "vfork"
+                    "thread_exec", "exec_failure", "thread_reuse", "clone_tid", "vfork",
+                    "concurrent_wait", "remaining_wait"
                 ) else 1
                 deferred_stops = 0
                 for run in range(repetitions):
@@ -69,6 +72,8 @@ def main():
                         raise RuntimeError(f"scenario {mode}: exit={proc.returncode}\n{out!r}\n{err!r}")
                     if b"untraced child" in out or b"controlled sentinel" in out:
                         raise RuntimeError(f"scenario {mode} escaped supervision: {out!r}")
+                    if mode in ("concurrent_wait", "remaining_wait") and out.count(b"wait parked caller=") != 2:
+                        raise RuntimeError(f"scenario {mode} did not exercise two parked waiters: {out!r}")
                     deferred = out.count(b"newborn-stop=deferred")
                     if deferred != out.count(b"newborn-stop=registered"):
                         raise RuntimeError(f"scenario {mode} left a child stop unregistered: {out!r}")
