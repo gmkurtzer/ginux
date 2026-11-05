@@ -62,7 +62,9 @@ pub const fn decide_systemd(syscall: u64, shared_network: bool) -> Decision {
         };
     }
     let action = match syscall {
-        16 | 59 | 95 | 125 | 126 | 137 | 157 => Action::Mediate,
+        63 | 165 | 166 => Action::Emulate,
+        16 | 59 | 80 | 83 | 95 | 125 | 126 | 137 | 157 | 213 | 232 | 233 | 253 | 254 | 255
+        | 258 | 281 | 283 | 286 | 287 | 289 | 291 | 294 | 441 => Action::Mediate,
         _ => decide_balanced(syscall).action,
     };
     Decision { syscall, action }
@@ -71,6 +73,11 @@ pub const fn decide_systemd(syscall: u64, shared_network: bool) -> Decision {
 pub const fn systemd_surface(syscall: u64, shared_network: bool) -> BalancedSurface {
     if shared_network && is_shared_network_syscall(syscall) {
         BalancedSurface::Network
+    } else if matches!(
+        syscall,
+        213 | 232 | 233 | 253 | 254 | 255 | 281 | 283 | 286 | 287 | 289 | 291 | 294 | 441
+    ) {
+        BalancedSurface::Task
     } else {
         balanced_surface(syscall)
     }
@@ -197,5 +204,17 @@ mod tests {
         assert_eq!(decide_systemd(41, true).action, Action::Mediate);
         assert_eq!(systemd_surface(42, true), BalancedSurface::Network);
         assert_eq!(decide_systemd(59, true).action, Action::Mediate);
+        assert_eq!(decide_systemd(165, true).action, Action::Emulate);
+        assert_eq!(decide_systemd(166, true).action, Action::Emulate);
+        assert_eq!(decide_systemd(63, true).action, Action::Emulate);
+        assert_eq!(decide_systemd(291, true).action, Action::Mediate);
+        assert_eq!(decide_systemd(289, true).action, Action::Mediate);
+        assert_eq!(decide_systemd(294, true).action, Action::Mediate);
+        assert_eq!(decide_systemd(283, true).action, Action::Mediate);
+        assert_eq!(decide_balanced(63).action, Action::Deny(38));
+        assert_eq!(decide_balanced(291).action, Action::Deny(38));
+        assert_eq!(decide_balanced(289).action, Action::Deny(38));
+        assert_eq!(decide_balanced(294).action, Action::Deny(38));
+        assert_eq!(decide_balanced(283).action, Action::Deny(38));
     }
 }

@@ -54,6 +54,8 @@ a controlled shutdown.
   writable disposable domain root, shared-network contract classification,
   and a reproducible Rocky-host probe.
 - [x] Establish the first real systemd failure baseline under supervision.
+- [x] Add bounded virtual mount, identity, console, event, timer, and cgroup
+  compatibility through manager initialization.
 
 ## Remaining work
 
@@ -131,6 +133,15 @@ a controlled shutdown.
   Rocky `/sbin/init` ran as virtual PID 1 under continuous syscall supervision,
   reached its attempt to mount `/run`, received `ENOSYS` for the unsupported
   tmpfs mount, and exited deterministically rather than bypassing Ginux.
+- `ROCKY_SSH_PORT=22309 ./scripts/with-rocky-host.sh
+  ./scripts/probe-systemd.sh` -> virtual mount, uname, console, epoll,
+  signalfd, inotify, timerfd, and cgroup compatibility advanced systemd to
+  manager startup; the next deterministic blocker is supervised `clone` for
+  the `(sd-gens)` generator process.
+- `cargo test -p ginux-core` -> 6 tests passed after the systemd-only timerfd
+  surface was added; the balanced profile still denies that surface.
+- Strict `ginux-init` release clippy and build passed after the compatibility
+  tranche.
 
 ## Decisions and limitations
 
@@ -164,7 +175,8 @@ a controlled shutdown.
   2026-11-03; never merge or close without explicit authorization
 - Planned commits: systemd boot profile and harness; bounded compatibility
   tranches; readiness, failure, shutdown, and measurement evidence
-- Actual commits: pending
+- Actual commits: `daca8006` (pinned systemd baseline and probe); current
+  compatibility tranche pending commit
 
 ## Review policy and outcome
 

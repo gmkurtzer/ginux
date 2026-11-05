@@ -39,6 +39,8 @@ global_asm!(
 const SYS_WRITE_HOST: usize = 1;
 const SYS_READ_HOST: usize = 0;
 const SYS_CLOSE_HOST: usize = 3;
+const SYS_DUP_HOST: usize = 32;
+const SYS_FCNTL_HOST: usize = 72;
 const SYS_RT_SIGPROCMASK: usize = 14;
 const SYS_PREAD64: usize = 17;
 const SYS_PWRITE64: usize = 18;
@@ -68,6 +70,7 @@ const CLOCK_PROCESS_CPUTIME_ID: usize = 2;
 const PTRACE_TRACEME: usize = 0;
 const PTRACE_PEEKTEXT: usize = 1;
 const PTRACE_POKETEXT: usize = 4;
+const PTRACE_POKEDATA: usize = 5;
 const PTRACE_CONT: usize = 7;
 const PTRACE_PEEKDATA: usize = 2;
 const PTRACE_KILL: usize = 8;
@@ -100,6 +103,7 @@ const SIGKILL: usize = 9;
 const PR_SET_NO_NEW_PRIVS: usize = 38;
 const DOMAIN_UID: usize = 1000;
 const DOMAIN_GID: usize = 1000;
+const DOMAIN_NULL_FD: usize = 240;
 
 static mut ELF_BYTES: [u8; MAX_ELF_SIZE] = [0; MAX_ELF_SIZE];
 static mut CONFIG_BYTES: [u8; MAX_CONFIG_SIZE] = [0; MAX_CONFIG_SIZE];
@@ -1486,6 +1490,27 @@ fn native_tracee(root_path: *const u8, mode: usize) -> ! {
     static ENV_HOME: &[u8] = b"HOME=/\0";
     static ENV_LOCALE: &[u8] = b"LC_ALL=C\0";
     static ENV_CONTAINER: &[u8] = b"container=ginux\0";
+    static ENV_SYSTEMD_LOG_LEVEL: &[u8] = b"SYSTEMD_LOG_LEVEL=debug\0";
+    static ENV_SYSTEMD_LOG_TARGET: &[u8] = b"SYSTEMD_LOG_TARGET=console\0";
+    static HOST_DEV_NULL: &[u8] = b"/dev/null\0";
+
+    let null_fd = unsafe {
+        syscall4(
+            SYS_OPENAT_HOST,
+            AT_FDCWD,
+            HOST_DEV_NULL.as_ptr() as usize,
+            O_RDWR,
+            0,
+        )
+    };
+    if null_fd < 0 {
+        native_tracee_setup_fail(119);
+    }
+    let protected_null = unsafe { syscall3(SYS_FCNTL_HOST, null_fd as usize, 0, DOMAIN_NULL_FD) };
+    let _ = unsafe { syscall1(SYS_CLOSE_HOST, null_fd as usize) };
+    if protected_null != DOMAIN_NULL_FD as isize {
+        native_tracee_setup_fail(119);
+    }
 
     if unsafe { syscall1(SYS_CHROOT, root_path as usize) } < 0 {
         native_tracee_setup_fail(120);
@@ -1495,7 +1520,9 @@ fn native_tracee(root_path: *const u8, mode: usize) -> ! {
     }
     let mut inherited = 3usize;
     while inherited < 256 {
-        let _ = unsafe { syscall1(SYS_CLOSE_HOST, inherited) };
+        if inherited != DOMAIN_NULL_FD {
+            let _ = unsafe { syscall1(SYS_CLOSE_HOST, inherited) };
+        }
         inherited += 1;
     }
     if unsafe { syscall4(SYS_PTRACE, PTRACE_TRACEME, 0, 0, 0) } < 0 {
@@ -1536,6 +1563,8 @@ fn native_tracee(root_path: *const u8, mode: usize) -> ! {
         ENV_HOME.as_ptr(),
         ENV_LOCALE.as_ptr(),
         ENV_CONTAINER.as_ptr(),
+        ENV_SYSTEMD_LOG_LEVEL.as_ptr(),
+        ENV_SYSTEMD_LOG_TARGET.as_ptr(),
         core::ptr::null(),
     ];
     unsafe {
@@ -1599,6 +1628,8 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize) -> ! {
     let mut awaiting_exit = false;
     let mut override_exit = false;
     let mut override_result = 0i64;
+    let mut pending_console_open = false;
+    let mut console_fd = -1i64;
     loop {
         status = 0;
         if wait(pid, &mut status) < 0 || !stopped(status) {
@@ -1645,6 +1676,10 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize) -> ! {
             write_all(b" phase=exit result=");
             write_i64(registers.rax as i64);
             write_all(b"\n");
+            if pending_console_open {
+                console_fd = registers.rax as i64;
+                pending_console_open = false;
+            }
             awaiting_exit = false;
             override_exit = false;
             if ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0 {
@@ -1665,6 +1700,15 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize) -> ! {
         write_u64(sequence);
         write_all(b" phase=entry syscall=");
         write_u64(syscall);
+        if mode == 3 && syscall == 257 {
+            write_all(b" path=");
+            write_tracee_string(pid, registers.rsi as usize);
+        } else if mode == 3 && syscall == 16 {
+            write_all(b" fd=");
+            write_u64(registers.rdi);
+            write_all(b" request=");
+            write_u64(registers.rsi);
+        }
         write_all(b" action=");
         match decision.action {
             Action::Emulate if native_identity_result(syscall, mode).is_some() => {
@@ -1682,6 +1726,68 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize) -> ! {
                     native_fail(domain, pid, b"native getpid emulation failed");
                 }
             }
+            Action::Emulate if mode == 3 && syscall == 63 => {
+                let mut uts = [0u8; 65 * 6];
+                write_uts_field(&mut uts, 0, b"Linux");
+                write_uts_field(&mut uts, 1, b"ginux");
+                write_uts_field(&mut uts, 2, b"6.12.0-ginux");
+                write_uts_field(&mut uts, 3, b"#1 Ginux");
+                write_uts_field(&mut uts, 4, b"x86_64");
+                write_uts_field(&mut uts, 5, b"localdomain");
+                let allowed = write_tracee_bytes(pid, registers.rdi as usize, &uts);
+                write_all(b"emulate surface=virtual-identity result=");
+                write_i64(if allowed { 0 } else { -EPERM });
+                write_all(b"\n");
+                registers.orig_rax = u64::MAX;
+                awaiting_exit = true;
+                override_exit = true;
+                override_result = if allowed { 0 } else { -EPERM };
+                if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0
+                {
+                    native_fail(domain, pid, b"native uname emulation failed");
+                }
+            }
+            Action::Emulate if mode == 3 && matches!(syscall, 165 | 166) => {
+                let proc_mount = tracee_string_equals(pid, registers.rdi as usize, b"proc")
+                    && tracee_string_equals(pid, registers.rdx as usize, b"proc");
+                let sysfs_mount = tracee_string_equals(pid, registers.rdi as usize, b"sysfs")
+                    && tracee_string_equals(pid, registers.rdx as usize, b"sysfs");
+                let dev_mount = tracee_string_equals(pid, registers.rdi as usize, b"devtmpfs")
+                    && tracee_string_equals(pid, registers.rdx as usize, b"devtmpfs");
+                let tmpfs_mount = tracee_string_equals(pid, registers.rdi as usize, b"tmpfs")
+                    && tracee_string_equals(pid, registers.rdx as usize, b"tmpfs");
+                let cgroup_mount = tracee_string_equals(pid, registers.rdi as usize, b"cgroup2")
+                    && tracee_string_equals(pid, registers.rdx as usize, b"cgroup2");
+                let legacy_cgroup_mount =
+                    tracee_string_equals(pid, registers.rdi as usize, b"cgroup")
+                        && tracee_string_equals(pid, registers.rdx as usize, b"cgroup");
+                let type_ok = proc_mount
+                    || sysfs_mount
+                    || dev_mount
+                    || tmpfs_mount
+                    || cgroup_mount
+                    || legacy_cgroup_mount;
+                let target_ok = tracee_decimal_fd_path(pid, registers.rsi as usize)
+                    || (proc_mount && tracee_string_equals(pid, registers.rsi as usize, b"/proc"));
+                let allowed = if syscall == 165 {
+                    target_ok && type_ok
+                } else {
+                    tracee_decimal_fd_path(pid, registers.rdi as usize)
+                };
+                write_all(b"emulate surface=virtual-mount result=");
+                write_i64(if allowed { 0 } else { -EPERM });
+                write_all(b"\n");
+                registers.orig_rax = u64::MAX;
+                awaiting_exit = true;
+                override_exit = true;
+                override_result = if allowed { 0 } else { -EPERM };
+                if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0
+                {
+                    native_fail(domain, pid, b"native virtual mount emulation failed");
+                }
+            }
             Action::Emulate if syscall == SYS_EXIT || syscall == SYS_EXIT_GROUP => {
                 line(b"emulate result=domain-stop");
                 let _ = ptrace(PTRACE_KILL, pid, 0, 0);
@@ -1692,6 +1798,109 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize) -> ! {
                 line(b"GINUX_NATIVE: supervisor=attached direct-unsupervised-syscalls=0");
                 line(b"GINUX_NATIVE_CHECK: PASS");
                 exit_process(0)
+            }
+            Action::Mediate
+                if mode == 3
+                    && syscall == 16
+                    && registers.rdi as i64 == console_fd
+                    && registers.rsi == 21_505 =>
+            {
+                let mut termios = [0u8; 36];
+                termios[12..16].copy_from_slice(&0x0bu32.to_ne_bytes());
+                let allowed = write_tracee_bytes(pid, registers.rdx as usize, &termios);
+                write_all(b"emulate surface=virtual-console result=");
+                write_i64(if allowed { 0 } else { -EPERM });
+                write_all(b"\n");
+                registers.orig_rax = u64::MAX;
+                awaiting_exit = true;
+                override_exit = true;
+                override_result = if allowed { 0 } else { -EPERM };
+                if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0
+                {
+                    native_fail(domain, pid, b"native virtual console ioctl failed");
+                }
+            }
+            Action::Mediate
+                if mode == 3
+                    && matches!(syscall, 1 | 20)
+                    && registers.rdi as i64 == console_fd
+                    && ((syscall == 1 && registers.rdx <= 4096)
+                        || (syscall == 20 && registers.rdx <= 16)) =>
+            {
+                line(b"mediate surface=virtual-console result=pending");
+                awaiting_exit = true;
+                if ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0 {
+                    native_fail(domain, pid, b"native virtual console write failed");
+                }
+            }
+            Action::Mediate
+                if mode == 3
+                    && syscall == 137
+                    && (tracee_string_equals(pid, registers.rdi as usize, b"/sys/fs/cgroup")
+                        || tracee_string_equals(
+                            pid,
+                            registers.rdi as usize,
+                            b"/sys/fs/cgroup/",
+                        )) =>
+            {
+                let mut statfs = [0u8; 120];
+                statfs[..8].copy_from_slice(&0x6367_7270u64.to_ne_bytes());
+                statfs[8..16].copy_from_slice(&4096u64.to_ne_bytes());
+                statfs[64..72].copy_from_slice(&255u64.to_ne_bytes());
+                statfs[72..80].copy_from_slice(&4096u64.to_ne_bytes());
+                let allowed = write_tracee_bytes(pid, registers.rsi as usize, &statfs);
+                write_all(b"emulate surface=virtual-cgroup result=");
+                write_i64(if allowed { 0 } else { -EPERM });
+                write_all(b"\n");
+                registers.orig_rax = u64::MAX;
+                awaiting_exit = true;
+                override_exit = true;
+                override_result = if allowed { 0 } else { -EPERM };
+                if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0
+                {
+                    native_fail(domain, pid, b"native virtual cgroup statfs failed");
+                }
+            }
+            Action::Mediate
+                if mode == 3 && syscall == 3 && registers.rdi as usize == DOMAIN_NULL_FD =>
+            {
+                line(b"mediate surface=virtual-device result=protected");
+                registers.orig_rax = u64::MAX;
+                awaiting_exit = true;
+                override_exit = true;
+                override_result = 0;
+                if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0
+                {
+                    native_fail(domain, pid, b"native protected device close failed");
+                }
+            }
+            Action::Mediate
+                if mode == 3
+                    && syscall == 257
+                    && (tracee_string_equals(pid, registers.rsi as usize, b"/dev/null")
+                        || tracee_string_equals(pid, registers.rsi as usize, b"/dev/console")) =>
+            {
+                let null_device = tracee_string_equals(pid, registers.rsi as usize, b"/dev/null");
+                let source = if null_device {
+                    DOMAIN_NULL_FD
+                } else if registers.rdx & 3 == 1 {
+                    1
+                } else {
+                    0
+                };
+                pending_console_open = !null_device;
+                line(b"mediate surface=virtual-device result=pending");
+                registers.orig_rax = SYS_DUP_HOST as u64;
+                registers.rdi = source as u64;
+                awaiting_exit = true;
+                if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0
+                {
+                    native_fail(domain, pid, b"native virtual device open failed");
+                }
             }
             Action::Mediate if native_arguments_allowed(syscall, &registers, mode) => {
                 write_all(b"mediate surface=");
@@ -1752,7 +1961,8 @@ fn native_identity_result(syscall: u64, mode: usize) -> Option<i64> {
 fn native_arguments_allowed(syscall: u64, registers: &UserRegs, mode: usize) -> bool {
     if mode == 3 {
         match syscall {
-            1 | 2 | 16 | 59 | 95 | 125 | 126 | 137 | 157 | 257 => true,
+            1 | 2 | 16 | 59 | 80 | 83 | 95 | 125 | 126 | 137 | 157 | 213 | 232 | 233 | 253
+            | 254 | 255 | 257 | 258 | 281 | 283 | 286 | 287 | 289 | 291 | 294 | 441 => true,
             _ if ginux_core::is_shared_network_syscall(syscall) => true,
             _ => balanced_arguments_allowed(syscall, registers.rdi, registers.rsi, registers.rdx),
         }
@@ -2316,6 +2526,149 @@ fn ptrace(request: usize, pid: usize, addr: usize, data: usize) -> isize {
 fn read_tracee_word(pid: usize, address: usize) -> bool {
     let mut word = 0u64;
     ptrace(PTRACE_PEEKDATA, pid, address, &mut word as *mut _ as usize) >= 0
+}
+
+fn tracee_string_equals(pid: usize, address: usize, expected: &[u8]) -> bool {
+    if address == 0 {
+        return false;
+    }
+    let mut offset = 0usize;
+    while offset <= expected.len() {
+        let mut word = 0u64;
+        if ptrace(
+            PTRACE_PEEKDATA,
+            pid,
+            address.saturating_add(offset),
+            &mut word as *mut _ as usize,
+        ) < 0
+        {
+            return false;
+        }
+        let bytes = word.to_ne_bytes();
+        for byte in bytes {
+            if offset == expected.len() {
+                return byte == 0;
+            }
+            if byte != expected[offset] {
+                return false;
+            }
+            offset += 1;
+        }
+    }
+    false
+}
+
+fn write_uts_field(output: &mut [u8; 65 * 6], field: usize, value: &[u8]) {
+    let start = field * 65;
+    let count = core::cmp::min(value.len(), 64);
+    output[start..start + count].copy_from_slice(&value[..count]);
+}
+
+fn write_tracee_bytes(pid: usize, address: usize, input: &[u8]) -> bool {
+    if address == 0 {
+        return false;
+    }
+    let mut offset = 0usize;
+    while offset < input.len() {
+        let count = core::cmp::min(8, input.len() - offset);
+        let mut bytes = if count == 8 {
+            [0u8; 8]
+        } else {
+            let mut existing = 0u64;
+            if ptrace(
+                PTRACE_PEEKDATA,
+                pid,
+                address.saturating_add(offset),
+                &mut existing as *mut _ as usize,
+            ) < 0
+            {
+                return false;
+            }
+            existing.to_ne_bytes()
+        };
+        bytes[..count].copy_from_slice(&input[offset..offset + count]);
+        if ptrace(
+            PTRACE_POKEDATA,
+            pid,
+            address.saturating_add(offset),
+            u64::from_ne_bytes(bytes) as usize,
+        ) < 0
+        {
+            return false;
+        }
+        offset += count;
+    }
+    true
+}
+
+fn tracee_decimal_fd_path(pid: usize, address: usize) -> bool {
+    const PREFIX: &[u8] = b"/proc/self/fd/";
+    if address == 0 {
+        return false;
+    }
+    let mut bytes = [0u8; 32];
+    let mut offset = 0usize;
+    while offset < bytes.len() {
+        let mut word = 0u64;
+        if ptrace(
+            PTRACE_PEEKDATA,
+            pid,
+            address.saturating_add(offset),
+            &mut word as *mut _ as usize,
+        ) < 0
+        {
+            return false;
+        }
+        for byte in word.to_ne_bytes() {
+            if byte == 0 {
+                return offset > PREFIX.len()
+                    && bytes[..PREFIX.len()] == *PREFIX
+                    && bytes[PREFIX.len()..offset].iter().all(u8::is_ascii_digit);
+            }
+            bytes[offset] = byte;
+            offset += 1;
+            if offset >= bytes.len() {
+                return false;
+            }
+        }
+    }
+    false
+}
+
+fn write_tracee_string(pid: usize, address: usize) {
+    if address == 0 {
+        write_all(b"(null)");
+        return;
+    }
+    let mut offset = 0usize;
+    while offset < 256 {
+        let mut word = 0u64;
+        if ptrace(
+            PTRACE_PEEKDATA,
+            pid,
+            address.saturating_add(offset),
+            &mut word as *mut _ as usize,
+        ) < 0
+        {
+            write_all(b"(unreadable)");
+            return;
+        }
+        for byte in word.to_ne_bytes() {
+            if byte == 0 {
+                return;
+            }
+            if byte.is_ascii_graphic() || byte == b' ' {
+                let printable = [byte];
+                write_all(&printable);
+            } else {
+                write_all(b"?");
+            }
+            offset += 1;
+            if offset >= 256 {
+                return;
+            }
+        }
+    }
 }
 
 fn line(message: &[u8]) {
