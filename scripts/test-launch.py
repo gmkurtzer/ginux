@@ -66,6 +66,12 @@ def main():
             invoke(["exit", str(code)], code, "exited")
         invoke(["args", "one two", ""], 0, "exited", env=["GREETING=hello world", "EMPTY="],
                stdout=b"one two\n\nGREETING=hello world\nEMPTY=\n")
+        # Largest documented argv/environment, mostly quotes and backslashes,
+        # so the normalized configuration exceeds 4 KiB.
+        big_args = [("q\"b\\" * 32)[:128] for _ in range(6)]
+        big_env = [f"BIG{i}=" + ("\"\\" * 128)[:251] for i in range(8)]
+        invoke(["args", *big_args], 0, "exited", env=big_env,
+               stdout="".join(f"{line}\n" for line in big_args + big_env).encode())
         invoke(["cwd"], 0, "exited", stdout=b"configured working directory\n")
         invoke(["cwd"], 0, "exited", stdout=b"root working directory\n",
                changes={"args = [": 'workdir = "/"\nargs = ['})
