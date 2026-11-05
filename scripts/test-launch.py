@@ -84,6 +84,12 @@ def main():
         invoke(["int80"], 1, "supervisor-error")
         invoke(["descriptor"], 0, "exited")
         invoke(["list"], 0, "exited", stdout=b"input\n")
+        # The thread identity matches the virtual pid: set_tid_address returns
+        # it instead of the host tid, and PI futexes, which would store the
+        # host tid in the futex word, are denied.
+        invoke(["virtual-tid"], 0, "exited",
+               stdout=b"set_tid_address=4242\ngetpid=4242\ngettid=-38\nfutex_lock_pi=-1\n"
+               b"pi_word=0\nfutex_lock_pi_flags=-1\npi_flags_word=0\n")
         with (work / "secret").open("w+b") as secret:
             secret.write(b"host-only data")
             secret.flush()
