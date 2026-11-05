@@ -29,6 +29,10 @@ struct LayerRecord {
     kind: u8,
     record_offset: u64,
     record_len: u64,
+    /// For a hard link: data offset and size of its target in the same layer.
+    /// The link is written out as a regular file with that content, so it
+    /// keeps the target's data even if a later layer replaces the target.
+    hardlink: Option<(u64, u64)>,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -125,7 +129,7 @@ fn assemble_layers(
             if whiteout(&record).is_some() {
                 continue;
             }
-            if !matches!(record.kind, 0 | b'0' | b'2' | b'5' | b'7') {
+            if !matches!(record.kind, 0 | b'0' | b'1' | b'2' | b'5' | b'7') {
                 continue;
             }
             if !matches!(record.kind, b'5') {
@@ -141,6 +145,10 @@ fn assemble_layers(
         let source = layers
             .get_mut(record.layer)
             .ok_or("invalid layer record source")?;
+        if let Some((data_offset, size)) = record.hardlink {
+            write_hardlink_as_file(source, record, data_offset, size, &mut destination)?;
+            continue;
+        }
         source.seek(SeekFrom::Start(record.record_offset))?;
         let copied = copy(&mut source.take(record.record_len), &mut destination)?;
         if copied != record.record_len {
@@ -152,15 +160,85 @@ fn assemble_layers(
     Ok(())
 }
 
+/// Write a hard-link record as a regular file: its PAX headers without
+/// `linkpath`, its ustar header with type `0`, the target's size and no link
+/// name, then the target's data from the same layer.
+fn write_hardlink_as_file(
+    source: &mut File,
+    record: &LayerRecord,
+    data_offset: u64,
+    size: u64,
+    destination: &mut File,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if size > 0o77777777777 {
+        return Err("hard-link target too large for a ustar size field".into());
+    }
+    let header_offset = record.record_offset + record.record_len - 512;
+    let mut offset = record.record_offset;
+    while offset < header_offset {
+        source.seek(SeekFrom::Start(offset))?;
+        let mut pax_header = [0u8; 512];
+        source.read_exact(&mut pax_header)?;
+        let pax_size = parse_octal(&pax_header[124..136])?;
+        let mut data = vec![0u8; usize::try_from(pax_size).map_err(|_| "PAX record too large")?];
+        source.read_exact(&mut data)?;
+        // A regular file must not carry the link's target name.
+        let mut kept = Vec::with_capacity(data.len());
+        let mut start = 0usize;
+        for (key, _) in parse_pax(&data)? {
+            let space = data[start..]
+                .iter()
+                .position(|byte| *byte == b' ')
+                .ok_or("invalid PAX length")?;
+            let length = std::str::from_utf8(&data[start..start + space])?.parse::<usize>()?;
+            if key != b"linkpath" {
+                kept.extend_from_slice(&data[start..start + length]);
+            }
+            start += length;
+        }
+        if !kept.is_empty() {
+            set_size_and_checksum(&mut pax_header, kept.len() as u64);
+            destination.write_all(&pax_header)?;
+            destination.write_all(&kept)?;
+            destination.write_all(&vec![0u8; (512 - kept.len() % 512) % 512])?;
+        }
+        offset += 512 + pax_size.div_ceil(512) * 512;
+    }
+    source.seek(SeekFrom::Start(header_offset))?;
+    let mut header = [0u8; 512];
+    source.read_exact(&mut header)?;
+    header[156] = b'0';
+    header[157..257].fill(0);
+    set_size_and_checksum(&mut header, size);
+    destination.write_all(&header)?;
+    source.seek(SeekFrom::Start(data_offset))?;
+    if copy(&mut (&mut *source).take(size), destination)? != size {
+        return Err("truncated hard-link target data".into());
+    }
+    let padding = (512 - size % 512) % 512;
+    destination.write_all(&vec![0u8; padding as usize])?;
+    Ok(())
+}
+
+fn set_size_and_checksum(header: &mut [u8; 512], size: u64) {
+    header[124..136].copy_from_slice(format!("{size:011o}\0").as_bytes());
+    header[148..156].fill(b' ');
+    let checksum: u64 = header.iter().map(|byte| u64::from(*byte)).sum();
+    header[148..156].copy_from_slice(format!("{checksum:06o}\0 ").as_bytes());
+}
+
 fn scan_layer(
     source: &mut File,
     source_len: u64,
     layer: usize,
 ) -> Result<Vec<LayerRecord>, Box<dyn std::error::Error>> {
     let mut records = Vec::new();
+    // Regular files seen so far in this layer: path -> (data offset, size).
+    let mut files = BTreeMap::<Vec<u8>, (u64, u64)>::new();
     let mut offset = 0u64;
     let mut pending_offset: Option<u64> = None;
     let mut pax_path: Option<Vec<u8>> = None;
+    let mut pax_link: Option<Vec<u8>> = None;
     while offset + 512 <= source_len {
         source.seek(SeekFrom::Start(offset))?;
         let mut header = [0u8; 512];
@@ -190,12 +268,42 @@ fn scan_layer(
                 for (key, value) in parse_pax(&data)? {
                     if key == b"path" {
                         pax_path = Some(value.to_vec());
+                    } else if key == b"linkpath" {
+                        pax_link = Some(value.to_vec());
                     }
                 }
             }
             kind => {
                 let path = pax_path.take().unwrap_or_else(|| header_path(&header));
                 let path = normalize_archive_path(&path)?;
+                let link = pax_link
+                    .take()
+                    .unwrap_or_else(|| field(&header[157..257]).to_vec());
+                let hardlink = match kind {
+                    0 | b'0' | b'7' => {
+                        files.insert(path.clone(), (data_offset, size));
+                        None
+                    }
+                    b'1' => {
+                        let target = files.get(&normalize_archive_path(&link)?).copied();
+                        if target.is_none() {
+                            eprintln!(
+                                "WARNING: dropping hard link {}: target is not an earlier regular file in its layer",
+                                String::from_utf8_lossy(&path)
+                            );
+                            pending_offset = None;
+                            offset = end;
+                            continue;
+                        }
+                        target
+                    }
+                    _ => None,
+                };
+                if kind == b'1' {
+                    if let Some(target) = hardlink {
+                        files.insert(path.clone(), target);
+                    }
+                }
                 let record_offset = pending_offset.take().unwrap_or(offset);
                 records.push(LayerRecord {
                     layer,
@@ -203,6 +311,7 @@ fn scan_layer(
                     kind,
                     record_offset,
                     record_len: end - record_offset,
+                    hardlink,
                 });
             }
         }
@@ -312,12 +421,36 @@ fn scan_tar(
             let link = pax_link
                 .take()
                 .unwrap_or_else(|| field(&header[157..257]).to_vec());
+            // Only symlinks and hard links carry a link name.
+            let link = if matches!(kind, b'1' | b'2') {
+                link
+            } else {
+                Vec::new()
+            };
             let path = normalize_archive_path(&path)?;
             let node_kind = match kind {
-                0 | b'0' | b'7' => Some(NodeKind::File),
+                0 | b'0' | b'1' | b'7' => Some(NodeKind::File),
                 b'5' => Some(NodeKind::Directory),
                 b'2' => Some(NodeKind::Symlink),
                 _ => None,
+            };
+            // A hard link shares the data of an earlier regular file.
+            let (node_kind, size, data_offset, link) = if kind == b'1' {
+                let target = normalize_archive_path(&link)?;
+                match entries.iter().rev().find(|entry: &&OwnedEntry| {
+                    entry.path == target && entry.kind == NodeKind::File
+                }) {
+                    Some(target) => (node_kind, target.size, target.data_offset, Vec::new()),
+                    None => {
+                        eprintln!(
+                            "WARNING: dropping hard link {}: target is not an earlier regular file",
+                            String::from_utf8_lossy(&path)
+                        );
+                        (None, 0, 0, Vec::new())
+                    }
+                }
+            } else {
+                (node_kind, size, data_offset, link)
             };
             if let Some(node_kind) = node_kind {
                 if path.len() > MAX_PATH || link.len() > MAX_LINK {
