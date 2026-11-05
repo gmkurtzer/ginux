@@ -188,3 +188,51 @@ the `G` officially stands for GPT.
 
 Ginux is available under the Apache License 2.0. See [`LICENSE`](LICENSE) and
 [`NOTICE`](NOTICE).
+
+## Configured native launch
+
+On x86-64 Linux, `ginux launch <config> <root> [--result-file <fresh host path>]`
+executes `[domain].init` with the configured arguments and environment inside
+the supplied host root directory. The bootstrap requires chroot and credential
+change privileges, and a kernel with `close_range` (Linux 5.9 or later).
+It drops to UID/GID 1000 before executing the workload. The configuration must
+select `profile = "balanced"` and `backend = "ptrace-native"`; storage and device
+assignments are not implemented by this command and are rejected.
+
+`[domain].workdir` is optional and defaults to `/work`; `/` is also supported.
+The bootstrap creates the working directory if its parent exists, then enters
+it after dropping privileges. Init and working-directory paths are limited to
+128 bytes and must be absolute without `..` path components. Up to seven
+arguments of 128 bytes each and eight `NAME=value` environment entries of
+256 bytes each are accepted. Invalid or oversized input fails before launch.
+
+Workload stdout stays separate from supervisor diagnostics on stderr. Only
+stdin, stdout, and stderr are inherited by the workload. The launcher returns
+the workload exit code, or `128 + signal` for signal termination. Startup
+failure returns 2; supervision or result-writing failure returns 1. Native
+fork, clone, and subsequent exec are unsupported; fork returns `ENOSYS` until
+child supervision is implemented. Non-x86-64 syscall ABIs and job-control
+group stops fail explicitly. Audit output is capped at 64 KiB plus a truncation
+notice. This path does not implement resource quotas from the domain metadata.
+
+When requested, the result file is reserved exclusively before launch, with
+mode 0600 and a maximum path length of 512 bytes. Existing files are never
+overwritten. After completion, it contains one synced JSON object:
+
+```json
+{"version":1,"outcome":"exited","code":0,"signal":null,"generation":null}
+```
+
+`outcome` is `exited`, `signaled`, or `supervisor-error`; only the relevant
+`code` or `signal` is populated. Storage generations are not implemented, so
+`generation` is null. A missing, empty, or malformed result is a protocol failure.
+A failure to write, sync, or close the result returns 1 even if the workload
+succeeded. Consumers should wait for launcher completion before reading it.
+
+The focused Linux integration scenario consumes existing binaries:
+
+```sh
+make build
+make build-launch-fixture
+sudo make test-launch
+```

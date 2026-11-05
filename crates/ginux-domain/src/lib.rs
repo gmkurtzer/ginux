@@ -112,6 +112,7 @@ pub struct DomainConfig {
     pub init: Text<128>,
     pub args: TextList<7, 128>,
     pub environment: TextList<8, 256>,
+    pub workdir: Text<128>,
     pub vcpus: u64,
     pub memory_mib: u64,
     pub execution_profile: ExecutionProfile,
@@ -189,6 +190,7 @@ struct ConfigBuilder {
     init: Text<128>,
     args: TextList<7, 128>,
     environment: TextList<8, 256>,
+    workdir: Text<128>,
     vcpus: u64,
     memory_mib: u64,
     execution_profile: ExecutionProfile,
@@ -211,6 +213,7 @@ impl ConfigBuilder {
             init: Text::empty(),
             args: TextList::empty(),
             environment: TextList::empty(),
+            workdir: Text::empty(),
             vcpus: 0,
             memory_mib: 0,
             execution_profile: ExecutionProfile::Security,
@@ -234,9 +237,15 @@ impl ConfigBuilder {
 
     fn finish(self) -> Result<DomainConfig, ConfigError> {
         const REQUIRED: u32 = (1 << 16) - 1;
-        if self.seen != REQUIRED {
+        const WORKDIR_BIT: u32 = 1 << 16;
+        if self.seen & REQUIRED != REQUIRED {
             return Err(ConfigError::MissingField);
         }
+        let workdir = if self.seen & WORKDIR_BIT != 0 {
+            self.workdir
+        } else {
+            Text::from_bytes(b"/work").map_err(|_| ConfigError::InvalidValue)?
+        };
         let config = DomainConfig {
             schema_version: self.schema_version,
             id: self.id,
@@ -244,6 +253,7 @@ impl ConfigBuilder {
             init: self.init,
             args: self.args,
             environment: self.environment,
+            workdir,
             vcpus: self.vcpus,
             memory_mib: self.memory_mib,
             execution_profile: self.execution_profile,
@@ -296,6 +306,9 @@ impl DomainConfig {
         validate_identifier(self.id.as_bytes())?;
         validate_reference(self.root.as_bytes())?;
         validate_domain_path(self.init.as_bytes())?;
+        if self.workdir.as_bytes() != b"/" {
+            validate_domain_path(self.workdir.as_bytes())?;
+        }
         validate_identifier(self.contract_profile.as_bytes())?;
         if !(1..=64).contains(&self.vcpus) || !(16..=1_048_576).contains(&self.memory_mib) {
             return Err(ConfigError::InvalidValue);
@@ -344,6 +357,8 @@ impl DomainConfig {
         output.list(self.args.as_slice())?;
         output.raw(b"\nenvironment = ")?;
         output.list(self.environment.as_slice())?;
+        output.raw(b"\nworkdir = ")?;
+        output.quoted(self.workdir.as_bytes())?;
         output.raw(b"\n\n[resources]\nvcpus = ")?;
         output.number(self.vcpus)?;
         output.raw(b"\nmemory_mib = ")?;
@@ -510,6 +525,10 @@ fn parse_field(
         (Section::Domain, b"environment") => {
             builder.mark(1 << 5)?;
             builder.environment = parse_list(value)?;
+        }
+        (Section::Domain, b"workdir") => {
+            builder.mark(1 << 16)?;
+            builder.workdir = parse_string(value)?;
         }
         (Section::Resources, b"vcpus") => {
             builder.mark(1 << 6)?;
@@ -726,7 +745,7 @@ fn validate_reference(bytes: &[u8]) -> Result<(), ConfigError> {
 fn validate_domain_path(bytes: &[u8]) -> Result<(), ConfigError> {
     if bytes.len() < 2
         || bytes[0] != b'/'
-        || bytes.windows(2).any(|window| window == b"..")
+        || bytes.split(|byte| *byte == b'/').any(|part| part == b"..")
         || bytes.contains(&0)
     {
         return Err(ConfigError::InvalidValue);

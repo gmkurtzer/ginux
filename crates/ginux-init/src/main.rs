@@ -1,18 +1,45 @@
 #![no_std]
 #![no_main]
 
-use core::arch::{asm, global_asm};
+use core::arch::global_asm;
 use core::panic::PanicInfo;
 use ginux_core::{
-    balanced_arguments_allowed, balanced_identity_result, balanced_surface, decide,
-    decide_balanced, Action, BalancedSurface, SYS_EXIT, SYS_EXIT_GROUP, SYS_GETPID, SYS_UNAME,
-    SYS_WRITE,
+    balanced_identity_result, balanced_surface, decide, Action, SYS_EXIT, SYS_EXIT_GROUP,
+    SYS_GETPID, SYS_UNAME, SYS_WRITE,
+};
+
+mod channel_hooks;
+mod dispatch;
+mod fs_hooks;
+mod launch;
+mod process_hooks;
+mod supervisor;
+
+use crate::dispatch::{
+    balanced_surface_name, decide_native, native_arguments_allowed, process_entry, Lane,
+    NativeDecision,
+};
+use crate::launch::{
+    c_string_equals, launch_main, launch_usage, load_config, parse_argv, print_effective_config,
+    read_file, read_index, Command, ELF_BYTES, VFS_INDEX_BYTES,
+};
+use crate::supervisor::{
+    exit_process, line, ptrace, read_tracee_word, stopped, syscall0, syscall1, syscall2, syscall3,
+    syscall4, syscall5, wait, write_all, write_i64, write_u64, UserRegs, AT_FDCWD, CLOCK_MONOTONIC,
+    CLOCK_PROCESS_CPUTIME_ID, DOMAIN_GID, DOMAIN_UID, ENOSYS, EPERM, O_RDONLY, O_RDWR,
+    PR_SET_NO_NEW_PRIVS, PTRACE_CONT, PTRACE_EVENT_FORK, PTRACE_GETEVENTMSG, PTRACE_GETREGS,
+    PTRACE_KILL, PTRACE_O_EXITKILL, PTRACE_O_TRACEFORK, PTRACE_O_TRACESYSGOOD, PTRACE_PEEKTEXT,
+    PTRACE_POKETEXT, PTRACE_SETOPTIONS, PTRACE_SETREGS, PTRACE_SYSCALL, PTRACE_SYSEMU,
+    PTRACE_TRACEME, SIGKILL, SIGTERM, SIG_BLOCK, SYS_CHDIR, SYS_CHROOT, SYS_CLOCK_GETTIME,
+    SYS_CLOSE_HOST, SYS_EXECVE, SYS_EXIT_HOST, SYS_FORK, SYS_FSYNC, SYS_KILL, SYS_OPENAT_HOST,
+    SYS_PAUSE, SYS_PRCTL, SYS_PREAD64, SYS_PTRACE, SYS_PWRITE64, SYS_READ_HOST, SYS_RT_SIGPROCMASK,
+    SYS_SETGID, SYS_SETGROUPS, SYS_SETUID, SYS_SIGNALFD4, SYS_WAIT4, VIRTUAL_PID,
 };
 use ginux_devices::{
     BlockBackend, DeviceError, DeviceKind, DeviceName, DeviceRegistry, DeviceView, IsolatedNetwork,
     Partition, IOCTL_CONSOLE_GET_SIZE,
 };
-use ginux_domain::{ConfigError, Domain, DomainConfig};
+use ginux_domain::Domain;
 use ginux_kernel_views::{
     CgroupFs, IdentityFs, IdentityView, MemoryView, MountView, NamespaceView, ProcFs, SysFs,
     ViewError,
@@ -35,100 +62,6 @@ global_asm!(
     "ud2",
     options(att_syntax)
 );
-
-const SYS_WRITE_HOST: usize = 1;
-const SYS_READ_HOST: usize = 0;
-const SYS_CLOSE_HOST: usize = 3;
-const SYS_RT_SIGPROCMASK: usize = 14;
-const SYS_PREAD64: usize = 17;
-const SYS_PWRITE64: usize = 18;
-const SYS_FSYNC: usize = 74;
-const SYS_CLOCK_GETTIME: usize = 228;
-const SYS_CHDIR: usize = 80;
-const SYS_SETGID: usize = 106;
-const SYS_SETUID: usize = 105;
-const SYS_SETGROUPS: usize = 116;
-const SYS_PRCTL: usize = 157;
-const SYS_CHROOT: usize = 161;
-const SYS_PAUSE: usize = 34;
-const SYS_FORK: usize = 57;
-const SYS_EXECVE: usize = 59;
-const SYS_EXIT_HOST: usize = 60;
-const SYS_WAIT4: usize = 61;
-const SYS_KILL: usize = 62;
-const SYS_PTRACE: usize = 101;
-const SYS_OPENAT_HOST: usize = 257;
-const SYS_SIGNALFD4: usize = 289;
-const AT_FDCWD: usize = (-100isize) as usize;
-const O_RDONLY: usize = 0;
-const O_RDWR: usize = 2;
-const CLOCK_MONOTONIC: usize = 1;
-const CLOCK_PROCESS_CPUTIME_ID: usize = 2;
-
-const PTRACE_TRACEME: usize = 0;
-const PTRACE_PEEKTEXT: usize = 1;
-const PTRACE_POKETEXT: usize = 4;
-const PTRACE_CONT: usize = 7;
-const PTRACE_PEEKDATA: usize = 2;
-const PTRACE_KILL: usize = 8;
-const PTRACE_GETREGS: usize = 12;
-const PTRACE_SETREGS: usize = 13;
-const PTRACE_SYSCALL: usize = 24;
-const PTRACE_SYSEMU: usize = 31;
-const PTRACE_SETOPTIONS: usize = 0x4200;
-const PTRACE_GETEVENTMSG: usize = 0x4201;
-const PTRACE_O_TRACESYSGOOD: usize = 1;
-const PTRACE_O_TRACEFORK: usize = 1 << 1;
-const PTRACE_O_EXITKILL: usize = 1 << 20;
-const PTRACE_EVENT_FORK: usize = 1;
-
-const EPERM: i64 = 1;
-const ENOSYS: i64 = 38;
-const VIRTUAL_PID: u64 = 4242;
-const MAX_ELF_SIZE: usize = 64 * 1024;
-const MAX_CONFIG_SIZE: usize = 16 * 1024;
-const MAX_VFS_INDEX_SIZE: usize = 8 * 1024 * 1024;
-const SIG_BLOCK: usize = 0;
-const SIGTERM: usize = 15;
-const SIGKILL: usize = 9;
-const PR_SET_NO_NEW_PRIVS: usize = 38;
-const DOMAIN_UID: usize = 1000;
-const DOMAIN_GID: usize = 1000;
-
-static mut ELF_BYTES: [u8; MAX_ELF_SIZE] = [0; MAX_ELF_SIZE];
-static mut CONFIG_BYTES: [u8; MAX_CONFIG_SIZE] = [0; MAX_CONFIG_SIZE];
-static mut VFS_INDEX_BYTES: [u8; MAX_VFS_INDEX_SIZE] = [0; MAX_VFS_INDEX_SIZE];
-
-#[repr(C)]
-struct UserRegs {
-    r15: u64,
-    r14: u64,
-    r13: u64,
-    r12: u64,
-    rbp: u64,
-    rbx: u64,
-    r11: u64,
-    r10: u64,
-    r9: u64,
-    r8: u64,
-    rax: u64,
-    rcx: u64,
-    rdx: u64,
-    rsi: u64,
-    rdi: u64,
-    orig_rax: u64,
-    rip: u64,
-    cs: u64,
-    eflags: u64,
-    rsp: u64,
-    ss: u64,
-    fs_base: u64,
-    gs_base: u64,
-    ds: u64,
-    es: u64,
-    fs: u64,
-    gs: u64,
-}
 
 #[panic_handler]
 fn panic(_info: &PanicInfo<'_>) -> ! {
@@ -211,61 +144,32 @@ unsafe extern "C" fn memcmp(
 extern "C" fn rust_main(initial_stack: *const usize) -> ! {
     let argc = unsafe { *initial_stack };
     let argv = unsafe { initial_stack.add(1) };
-    if argc >= 3 {
-        let command = unsafe { *argv.add(1) as *const u8 };
-        if c_string_equals(command, b"runtime") {
-            let path = unsafe { *argv.add(2) as *const u8 };
-            runtime_main(path);
-        } else if c_string_equals(command, b"config") {
-            let config_path = unsafe { *argv.add(2) as *const u8 };
-            config_main(config_path);
-        } else if c_string_equals(command, b"lifecycle") {
-            let config_path = unsafe { *argv.add(2) as *const u8 };
-            lifecycle_main(config_path);
-        } else if argc >= 5 && c_string_equals(command, b"vfs") {
-            let config_path = unsafe { *argv.add(2) as *const u8 };
-            let rootfs_path = unsafe { *argv.add(3) as *const u8 };
-            let index_path = unsafe { *argv.add(4) as *const u8 };
-            vfs_main(config_path, rootfs_path, index_path);
-        } else if argc >= 4 && c_string_equals(command, b"native") {
-            let config_path = unsafe { *argv.add(2) as *const u8 };
-            let root_path = unsafe { *argv.add(3) as *const u8 };
-            let mode = if argc >= 5
-                && c_string_equals(unsafe { *argv.add(4) as *const u8 }, b"hold")
-            {
-                1
-            } else if argc >= 5 && c_string_equals(unsafe { *argv.add(4) as *const u8 }, b"probe") {
-                2
-            } else {
-                0
-            };
-            native_main(config_path, root_path, mode);
-        } else if argc >= 4 && c_string_equals(command, b"domain") {
-            let config_path = unsafe { *argv.add(2) as *const u8 };
-            let fixture_path = unsafe { *argv.add(3) as *const u8 };
-            domain_main(config_path, fixture_path);
-        } else if c_string_equals(command, b"process") {
-            let config_path = unsafe { *argv.add(2) as *const u8 };
-            process_main(config_path);
-        } else if argc >= 4 && c_string_equals(command, b"process-native") {
-            let config_path = unsafe { *argv.add(2) as *const u8 };
-            let fixture_path = unsafe { *argv.add(3) as *const u8 };
-            process_native_main(config_path, fixture_path);
-        } else if argc >= 4 && c_string_equals(command, b"devices") {
-            let config_path = unsafe { *argv.add(2) as *const u8 };
-            let block_path = unsafe { *argv.add(3) as *const u8 };
-            devices_main(config_path, block_path);
-        } else if argc >= 5 && c_string_equals(command, b"device-bench") {
-            let config_path = unsafe { *argv.add(2) as *const u8 };
-            let block_path = unsafe { *argv.add(3) as *const u8 };
-            let kind = unsafe { *argv.add(4) as *const u8 };
-            device_bench_main(config_path, block_path, kind);
-        } else if c_string_equals(command, b"kernel-views") {
-            let config_path = unsafe { *argv.add(2) as *const u8 };
-            kernel_views_main(config_path);
+    match parse_argv(argc, argv) {
+        Some(Command::Runtime(path)) => runtime_main(path),
+        Some(Command::Config(config_path)) => config_main(config_path),
+        Some(Command::Lifecycle(config_path)) => lifecycle_main(config_path),
+        Some(Command::Vfs(config_path, rootfs_path, index_path)) => {
+            vfs_main(config_path, rootfs_path, index_path)
         }
+        Some(Command::Native(config_path, root_path, mode)) => {
+            native_main(config_path, root_path, mode)
+        }
+        Some(Command::Domain(config_path, fixture_path)) => domain_main(config_path, fixture_path),
+        Some(Command::Process(config_path)) => process_main(config_path),
+        Some(Command::ProcessNative(config_path, fixture_path)) => {
+            process_native_main(config_path, fixture_path)
+        }
+        Some(Command::Devices(config_path, block_path)) => devices_main(config_path, block_path),
+        Some(Command::DeviceBench(config_path, block_path, kind)) => {
+            device_bench_main(config_path, block_path, kind)
+        }
+        Some(Command::KernelViews(config_path)) => kernel_views_main(config_path),
+        Some(Command::Launch(config_path, root_path, result_path)) => {
+            launch_main(config_path, root_path, result_path)
+        }
+        Some(Command::LaunchUsage) => launch_usage(),
+        None => gate1_main(),
     }
-    gate1_main()
 }
 
 fn kernel_views_main(config_path: *const u8) -> ! {
@@ -929,45 +833,56 @@ fn supervise_process_native(root_host_pid: usize, domain: &mut Domain) -> ! {
 
         current.syscall = registers.orig_rax;
         current.awaiting_exit = true;
-        match registers.orig_rax {
-            39 | 110 => {
-                let view = processes.view(current.virtual_id).unwrap_or_else(|_| {
-                    process_native_fail(domain, root_host_pid, b"identity lookup failed")
-                });
-                current.result = if registers.orig_rax == 39 {
-                    view.id.pid as i64
-                } else {
-                    view.parent as i64
-                };
-                current.override_result = true;
-                registers.orig_rax = u64::MAX;
-            }
-            57 => {}
-            61 => {
-                if registers.rdi != u64::MAX {
-                    let virtual_pid = registers.rdi as u32;
-                    let Some(target) = tasks
-                        .iter()
-                        .flatten()
-                        .find(|entry| entry.virtual_id.pid == virtual_pid)
-                    else {
-                        write_all(b"GINUX_NATIVE_PROCESS_AUDIT: invalid-wait-selector=");
-                        write_u64(virtual_pid as u64);
-                        write_all(b" caller=");
-                        write_u64(current.virtual_id.pid as u64);
-                        write_all(b"\n");
-                        process_native_fail(domain, root_host_pid, b"wait selector invalid");
+        if let Some(result) = process_entry(
+            registers.orig_rax,
+            registers.rdi,
+            registers.rsi,
+            registers.rdx,
+        ) {
+            current.result = result;
+            current.override_result = true;
+            registers.orig_rax = u64::MAX;
+        } else {
+            match registers.orig_rax {
+                39 | 110 => {
+                    let view = processes.view(current.virtual_id).unwrap_or_else(|_| {
+                        process_native_fail(domain, root_host_pid, b"identity lookup failed")
+                    });
+                    current.result = if registers.orig_rax == 39 {
+                        view.id.pid as i64
+                    } else {
+                        view.parent as i64
                     };
-                    current.translated_rdi = registers.rdi;
-                    registers.rdi = target.host_pid as u64;
+                    current.override_result = true;
+                    registers.orig_rax = u64::MAX;
                 }
-            }
-            1 if matches!(registers.rdi, 1 | 2) && registers.rdx <= 4096 => {}
-            60 | 231 => {}
-            _ => {
-                current.result = -ENOSYS;
-                current.override_result = true;
-                registers.orig_rax = u64::MAX;
+                57 => {}
+                61 => {
+                    if registers.rdi != u64::MAX {
+                        let virtual_pid = registers.rdi as u32;
+                        let Some(target) = tasks
+                            .iter()
+                            .flatten()
+                            .find(|entry| entry.virtual_id.pid == virtual_pid)
+                        else {
+                            write_all(b"GINUX_NATIVE_PROCESS_AUDIT: invalid-wait-selector=");
+                            write_u64(virtual_pid as u64);
+                            write_all(b" caller=");
+                            write_u64(current.virtual_id.pid as u64);
+                            write_all(b"\n");
+                            process_native_fail(domain, root_host_pid, b"wait selector invalid");
+                        };
+                        current.translated_rdi = registers.rdi;
+                        registers.rdi = target.host_pid as u64;
+                    }
+                }
+                1 if matches!(registers.rdi, 1 | 2) && registers.rdx <= 4096 => {}
+                60 | 231 => {}
+                _ => {
+                    current.result = -ENOSYS;
+                    current.override_result = true;
+                    registers.orig_rax = u64::MAX;
+                }
             }
         }
         tasks[task_index] = Some(current);
@@ -1595,7 +1510,32 @@ fn supervise_native(pid: usize, domain: &mut Domain) -> ! {
 
         sequence += 1;
         let syscall = registers.orig_rax;
-        let decision = decide_balanced(syscall);
+        let decision = match decide_native(syscall, registers.rdi, registers.rsi, registers.rdx) {
+            NativeDecision::Contract(decision) => decision,
+            NativeDecision::Hooked { lane, result } => {
+                let lane_name: &[u8] = match lane {
+                    Lane::Process => b"process",
+                    Lane::Filesystem => b"filesystem",
+                    Lane::Channel => b"channel",
+                    Lane::Contract => b"contract",
+                };
+                write_all(b"emulate surface=lane-");
+                write_all(lane_name);
+                write_all(b" result=");
+                write_i64(result);
+                write_all(b"\n");
+                registers.orig_rax = u64::MAX;
+                awaiting_exit = true;
+                override_exit = true;
+                override_result = result;
+                if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0
+                {
+                    native_fail(domain, pid, b"native lane emulation failed");
+                }
+                continue;
+            }
+        };
         write_all(b"GINUX_NATIVE_AUDIT: sequence=");
         write_u64(sequence);
         write_all(b" phase=entry syscall=");
@@ -1663,23 +1603,6 @@ fn supervise_native(pid: usize, domain: &mut Domain) -> ! {
                 }
             }
             _ => native_fail(domain, pid, b"invalid native contract decision"),
-        }
-    }
-}
-
-fn native_arguments_allowed(syscall: u64, registers: &UserRegs) -> bool {
-    balanced_arguments_allowed(syscall, registers.rdi, registers.rsi, registers.rdx)
-}
-
-fn balanced_surface_name(surface: BalancedSurface) -> &'static [u8] {
-    match surface {
-        BalancedSurface::ImageRead => b"immutable-image result=pending",
-        BalancedSurface::Memory => b"memory result=pending",
-        BalancedSurface::Task => b"task result=pending",
-        BalancedSurface::Console => b"bootstrap-console result=pending",
-        BalancedSurface::Random => b"random result=pending",
-        BalancedSurface::VirtualIdentity | BalancedSurface::Lifecycle | BalancedSurface::Denied => {
-            b"invalid result=denied"
         }
     }
 }
@@ -1834,28 +1757,6 @@ fn lifecycle_main(config_path: *const u8) -> ! {
     exit_process(0)
 }
 
-fn load_config(path: *const u8) -> DomainConfig {
-    let length = read_config(path);
-    let bytes = unsafe {
-        core::slice::from_raw_parts(core::ptr::addr_of!(CONFIG_BYTES).cast::<u8>(), length)
-    };
-    match DomainConfig::parse(bytes) {
-        Ok(config) => config,
-        Err(error) => config_rejected(error),
-    }
-}
-
-fn print_effective_config(config: &DomainConfig) {
-    let normalized = match config.normalized() {
-        Ok(normalized) => normalized,
-        Err(error) => config_rejected(error),
-    };
-    line(b"GINUX_CONFIG: accepted format=toml schema=1");
-    line(b"GINUX_CONFIG_EFFECTIVE_BEGIN");
-    write_all(normalized.as_bytes());
-    line(b"GINUX_CONFIG_EFFECTIVE_END");
-}
-
 fn lifecycle_state(domain: &Domain) {
     write_all(b"GINUX_LIFECYCLE: state=");
     write_all(domain.state().as_str().as_bytes());
@@ -1871,13 +1772,6 @@ fn lifecycle_state(domain: &Domain) {
     } else {
         b"false"
     });
-}
-
-fn config_rejected(error: ConfigError) -> ! {
-    write_all(b"GINUX_CONFIG: rejected reason=");
-    write_all(error.as_str().as_bytes());
-    line(b" managed-started=false");
-    exit_process(2)
 }
 
 fn domain_fail(domain: &mut Domain, reason: &[u8]) -> ! {
@@ -1959,103 +1853,6 @@ fn runtime_main(path: *const u8) -> ! {
     exit_process(0)
 }
 
-fn read_file(path: *const u8) -> usize {
-    let descriptor = unsafe { syscall4(SYS_OPENAT_HOST, AT_FDCWD, path as usize, O_RDONLY, 0) };
-    if descriptor < 0 {
-        runtime_fail(b"fixture open failed");
-    }
-    let mut length = 0usize;
-    while length < MAX_ELF_SIZE {
-        let result = unsafe {
-            syscall3(
-                SYS_READ_HOST,
-                descriptor as usize,
-                core::ptr::addr_of_mut!(ELF_BYTES).cast::<u8>().add(length) as usize,
-                MAX_ELF_SIZE - length,
-            )
-        };
-        if result < 0 {
-            let _ = unsafe { syscall1(SYS_CLOSE_HOST, descriptor as usize) };
-            runtime_fail(b"fixture read failed");
-        }
-        if result == 0 {
-            break;
-        }
-        length += result as usize;
-    }
-    let _ = unsafe { syscall1(SYS_CLOSE_HOST, descriptor as usize) };
-    if length == 0 || length == MAX_ELF_SIZE {
-        runtime_fail(b"fixture size invalid");
-    }
-    length
-}
-
-fn read_config(path: *const u8) -> usize {
-    let descriptor = unsafe { syscall4(SYS_OPENAT_HOST, AT_FDCWD, path as usize, O_RDONLY, 0) };
-    if descriptor < 0 {
-        config_rejected(ConfigError::InvalidValue);
-    }
-    let mut length = 0usize;
-    while length < MAX_CONFIG_SIZE {
-        let result = unsafe {
-            syscall3(
-                SYS_READ_HOST,
-                descriptor as usize,
-                core::ptr::addr_of_mut!(CONFIG_BYTES)
-                    .cast::<u8>()
-                    .add(length) as usize,
-                MAX_CONFIG_SIZE - length,
-            )
-        };
-        if result < 0 {
-            let _ = unsafe { syscall1(SYS_CLOSE_HOST, descriptor as usize) };
-            config_rejected(ConfigError::InvalidValue);
-        }
-        if result == 0 {
-            break;
-        }
-        length += result as usize;
-    }
-    let _ = unsafe { syscall1(SYS_CLOSE_HOST, descriptor as usize) };
-    if length == 0 || length == MAX_CONFIG_SIZE {
-        config_rejected(ConfigError::ValueTooLong);
-    }
-    length
-}
-
-fn read_index(path: *const u8) -> usize {
-    let descriptor = unsafe { syscall4(SYS_OPENAT_HOST, AT_FDCWD, path as usize, O_RDONLY, 0) };
-    if descriptor < 0 {
-        runtime_fail(b"VFS index open failed");
-    }
-    let mut length = 0usize;
-    while length < MAX_VFS_INDEX_SIZE {
-        let result = unsafe {
-            syscall3(
-                SYS_READ_HOST,
-                descriptor as usize,
-                core::ptr::addr_of_mut!(VFS_INDEX_BYTES)
-                    .cast::<u8>()
-                    .add(length) as usize,
-                MAX_VFS_INDEX_SIZE - length,
-            )
-        };
-        if result < 0 {
-            let _ = unsafe { syscall1(SYS_CLOSE_HOST, descriptor as usize) };
-            runtime_fail(b"VFS index read failed");
-        }
-        if result == 0 {
-            break;
-        }
-        length += result as usize;
-    }
-    let _ = unsafe { syscall1(SYS_CLOSE_HOST, descriptor as usize) };
-    if length == 0 || length == MAX_VFS_INDEX_SIZE {
-        runtime_fail(b"VFS index size invalid");
-    }
-    length
-}
-
 fn runtime_load_fail(error: LoadError) -> ! {
     write_all(b"GATE3: FAIL: elf rejected reason=");
     line(match error {
@@ -2079,15 +1876,6 @@ fn runtime_fail(reason: &[u8]) -> ! {
     write_all(b"GATE3: FAIL: ");
     line(reason);
     exit_process(1)
-}
-
-fn c_string_equals(value: *const u8, expected: &[u8]) -> bool {
-    for (index, byte) in expected.iter().enumerate() {
-        if unsafe { *value.add(index) } != *byte {
-            return false;
-        }
-    }
-    unsafe { *value.add(expected.len()) == 0 }
 }
 
 fn tracee() -> ! {
@@ -2210,172 +1998,8 @@ fn supervise(pid: usize) -> ! {
     }
 }
 
-fn wait(pid: usize, status: &mut i32) -> isize {
-    unsafe { syscall4(SYS_WAIT4, pid, status as *mut _ as usize, 0, 0) }
-}
-
-fn stopped(status: i32) -> bool {
-    status & 0xff == 0x7f
-}
-
-fn ptrace(request: usize, pid: usize, addr: usize, data: usize) -> isize {
-    unsafe { syscall4(SYS_PTRACE, request, pid, addr, data) }
-}
-
-fn read_tracee_word(pid: usize, address: usize) -> bool {
-    let mut word = 0u64;
-    ptrace(PTRACE_PEEKDATA, pid, address, &mut word as *mut _ as usize) >= 0
-}
-
-fn line(message: &[u8]) {
-    write_all(message);
-    write_all(b"\n");
-}
-
-fn write_all(bytes: &[u8]) {
-    let mut offset = 0;
-    while offset < bytes.len() {
-        let result = unsafe {
-            syscall3(
-                SYS_WRITE_HOST,
-                1,
-                bytes.as_ptr().add(offset) as usize,
-                bytes.len() - offset,
-            )
-        };
-        if result <= 0 {
-            return;
-        }
-        offset += result as usize;
-    }
-}
-
-fn write_u64(mut value: u64) {
-    let mut buffer = [0u8; 20];
-    let mut index = buffer.len();
-    if value == 0 {
-        write_all(b"0");
-        return;
-    }
-    while value != 0 {
-        index -= 1;
-        buffer[index] = b'0' + (value % 10) as u8;
-        value /= 10;
-    }
-    write_all(&buffer[index..]);
-}
-
-fn write_i64(value: i64) {
-    if value < 0 {
-        write_all(b"-");
-        write_u64(value.unsigned_abs());
-    } else {
-        write_u64(value as u64);
-    }
-}
-
 fn fail(reason: &[u8]) -> ! {
     write_all(b"GATE1: FAIL: ");
     line(reason);
     exit_process(1)
-}
-
-fn exit_process(code: usize) -> ! {
-    unsafe { syscall1(SYS_EXIT_HOST, code) };
-    loop {
-        core::hint::spin_loop();
-    }
-}
-
-#[inline(always)]
-unsafe fn syscall0(number: usize) -> isize {
-    let result: isize;
-    asm!(
-        "syscall",
-        inlateout("rax") number as isize => result,
-        lateout("rcx") _,
-        lateout("r11") _,
-        options(nostack)
-    );
-    result
-}
-
-#[inline(always)]
-unsafe fn syscall1(number: usize, a1: usize) -> isize {
-    let result: isize;
-    asm!(
-        "syscall",
-        inlateout("rax") number as isize => result,
-        in("rdi") a1,
-        lateout("rcx") _,
-        lateout("r11") _,
-        options(nostack)
-    );
-    result
-}
-
-#[inline(always)]
-unsafe fn syscall2(number: usize, a1: usize, a2: usize) -> isize {
-    let result: isize;
-    asm!(
-        "syscall",
-        inlateout("rax") number as isize => result,
-        in("rdi") a1,
-        in("rsi") a2,
-        lateout("rcx") _,
-        lateout("r11") _,
-        options(nostack)
-    );
-    result
-}
-
-#[inline(always)]
-unsafe fn syscall3(number: usize, a1: usize, a2: usize, a3: usize) -> isize {
-    let result: isize;
-    asm!(
-        "syscall",
-        inlateout("rax") number as isize => result,
-        in("rdi") a1,
-        in("rsi") a2,
-        in("rdx") a3,
-        lateout("rcx") _,
-        lateout("r11") _,
-        options(nostack)
-    );
-    result
-}
-
-#[inline(always)]
-unsafe fn syscall4(number: usize, a1: usize, a2: usize, a3: usize, a4: usize) -> isize {
-    let result: isize;
-    asm!(
-        "syscall",
-        inlateout("rax") number as isize => result,
-        in("rdi") a1,
-        in("rsi") a2,
-        in("rdx") a3,
-        in("r10") a4,
-        lateout("rcx") _,
-        lateout("r11") _,
-        options(nostack)
-    );
-    result
-}
-
-#[inline(always)]
-unsafe fn syscall5(number: usize, a1: usize, a2: usize, a3: usize, a4: usize, a5: usize) -> isize {
-    let result: isize;
-    asm!(
-        "syscall",
-        inlateout("rax") number as isize => result,
-        in("rdi") a1,
-        in("rsi") a2,
-        in("rdx") a3,
-        in("r10") a4,
-        in("r8") a5,
-        lateout("rcx") _,
-        lateout("r11") _,
-        options(nostack)
-    );
-    result
 }

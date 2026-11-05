@@ -76,13 +76,13 @@ check: check-name
 	cargo clippy -p process-native-fixture --bin process-native-fixture --target $(X86_TARGET) --release -- -D warnings
 
 test-unit:
-	cargo test -p ginux-core
-	cargo test -p ginux-domain
-	cargo test -p ginux-devices
-	cargo test -p ginux-runtime
-	cargo test -p ginux-process
-	cargo test -p ginux-vfs
-	cargo test -p ginux-kernel-views
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-core
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-domain
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-devices
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-runtime
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-process
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-vfs
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-kernel-views
 
 test-intercept: build
 	@./scripts/with-rocky-host.sh ./scripts/test-intercept.sh
@@ -97,27 +97,27 @@ test-domain: build
 	@./scripts/with-rocky-host.sh ./scripts/test-domain.sh
 
 test-process: build
-	cargo test -p ginux-process
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-process
 	@./scripts/with-rocky-host.sh ./scripts/test-process.sh
 
 test-devices: build
-	cargo test -p ginux-devices registry
-	cargo test -p ginux-devices pseudo_devices
-	cargo test -p ginux-devices conflicts_ioctls
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-devices registry
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-devices pseudo_devices
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-devices conflicts_ioctls
 	@./scripts/with-rocky-host.sh ./scripts/test-devices.sh
 
 test-kernel-views:
-	cargo test -p ginux-kernel-views
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-kernel-views
 	@./scripts/with-rocky-host.sh ./scripts/test-kernel-views.sh
 
 test-cgroup:
-	cargo test -p ginux-kernel-views cgroup::
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-kernel-views cgroup::
 
 test-block:
-	cargo test -p ginux-devices block_
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-devices block_
 
 test-network:
-	cargo test -p ginux-devices network_
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-devices network_
 
 test-vfs: build domain-image-prepare
 	@./scripts/with-rocky-host.sh ./scripts/test-vfs.sh
@@ -163,3 +163,11 @@ demo-gate-8: doctor build
 clean:
 	cargo clean
 	@./scripts/clean-build.sh
+
+.PHONY: build-launch-fixture test-launch
+build-launch-fixture:
+	mkdir -p .artifacts/launch
+	$(CC) -nostdlib -static -fno-stack-protector -fno-builtin -O2 -Wall -Wextra -Werror tests/fixtures/launch-fixture.c -o .artifacts/launch/launch-fixture
+
+test-launch:
+	python3 scripts/test-launch.py $(GINUX) .artifacts/launch/launch-fixture
