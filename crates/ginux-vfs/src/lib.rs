@@ -363,6 +363,15 @@ impl<'a, R: BaseReader, const FILES: usize, const FILE_SIZE: usize, const FDS: u
         if !writable && !readable {
             return Err(VfsError::PermissionDenied);
         }
+        if flags & O_TRUNC != 0 && !writable {
+            return Err(VfsError::PermissionDenied);
+        }
+        // Reserve capacity before any operation can create, copy up or truncate.
+        let slot = self
+            .descriptors
+            .iter()
+            .position(|descriptor| !descriptor.open)
+            .ok_or(VfsError::DescriptorLimit)?;
         let overlay_index = self.find_overlay(path.as_bytes());
         let object: usize;
         let overlay: bool;
@@ -407,11 +416,7 @@ impl<'a, R: BaseReader, const FILES: usize, const FILE_SIZE: usize, const FDS: u
         if overlay && flags & O_TRUNC != 0 {
             self.overlay[object].len = 0;
         }
-        let slot = self
-            .descriptors
-            .iter()
-            .position(|descriptor| !descriptor.open)
-            .ok_or(VfsError::DescriptorLimit)?;
+
         self.descriptors[slot] = Descriptor {
             open: true,
             overlay,
@@ -563,8 +568,13 @@ impl<'a, R: BaseReader, const FILES: usize, const FILE_SIZE: usize, const FDS: u
             return Err(VfsError::FileTooLarge);
         }
         let index = self.create_overlay(path, entry.mode)?;
-        self.reader
-            .read_at(entry.data_offset, &mut self.overlay[index].data[..size])?;
+        if let Err(error) = self
+            .reader
+            .read_at(entry.data_offset, &mut self.overlay[index].data[..size])
+        {
+            self.overlay[index] = OverlayFile::empty();
+            return Err(error);
+        }
         self.overlay[index].len = size;
         Ok(index)
     }
@@ -761,6 +771,81 @@ mod tests {
         assert_eq!(vfs.close(duplicate), Err(VfsError::InvalidDescriptor));
         vfs.teardown();
         assert_eq!(vfs.overlay_files(), 0);
+    }
+
+    #[test]
+    fn descriptor_exhaustion_does_not_create_copy_up_or_truncate() {
+        let bytes = index_bytes();
+        let mut vfs: VirtualFs<'_, Reader, 4, 32, 1> =
+            VirtualFs::new(Index::new(&bytes).unwrap(), Reader(*b"BASETOOL"));
+        let fd = vfs.open(b"/usr/product", O_WRITE | O_CREATE).unwrap();
+        vfs.write(fd, b"keep").unwrap();
+        vfs.close(fd).unwrap();
+        let occupied = vfs.open(b"/base", O_READ).unwrap();
+        assert_eq!(
+            vfs.open(b"/usr/product", O_WRITE | O_TRUNC),
+            Err(VfsError::DescriptorLimit)
+        );
+        assert_eq!(
+            vfs.open(b"/usr/absent", O_WRITE | O_CREATE),
+            Err(VfsError::DescriptorLimit)
+        );
+        assert_eq!(vfs.open(b"/base", O_WRITE), Err(VfsError::DescriptorLimit));
+        assert_eq!(vfs.overlay_files(), 1);
+        vfs.close(occupied).unwrap();
+        assert_eq!(vfs.open(b"/usr/absent", O_READ), Err(VfsError::NotFound));
+        let fd = vfs.open(b"/usr/product", O_READ).unwrap();
+        let mut bytes = [0; 4];
+        assert_eq!(vfs.read(fd, &mut bytes), Ok(4));
+        assert_eq!(&bytes, b"keep");
+    }
+
+    #[test]
+    fn failed_copy_up_preserves_image_contents_and_overlay_capacity() {
+        struct FailingReader(bool);
+        impl BaseReader for FailingReader {
+            fn read_at(&mut self, offset: u64, output: &mut [u8]) -> Result<(), VfsError> {
+                if self.0 {
+                    output.fill(b'x');
+                    return Err(VfsError::Io);
+                }
+                Reader(*b"BASETOOL").read_at(offset, output)
+            }
+        }
+        let bytes = index_bytes();
+        let mut vfs: VirtualFs<'_, FailingReader, 1, 32, 1> =
+            VirtualFs::new(Index::new(&bytes).unwrap(), FailingReader(true));
+        for _ in 0..3 {
+            assert_eq!(vfs.open(b"/base", O_WRITE), Err(VfsError::Io));
+            assert_eq!(vfs.overlay_files(), 0);
+        }
+        vfs.reader.0 = false;
+        let fd = vfs.open(b"/base", O_READ).unwrap();
+        let mut output = [0; 4];
+        assert_eq!(vfs.read(fd, &mut output), Ok(4));
+        assert_eq!(&output, b"BASE");
+        vfs.close(fd).unwrap();
+        let fd = vfs.open(b"/base", O_READ | O_WRITE).unwrap();
+        assert_eq!(vfs.read(fd, &mut output), Ok(4));
+        assert_eq!(&output, b"BASE");
+    }
+
+    #[test]
+    fn readonly_truncate_fails_without_changing_contents() {
+        let bytes = index_bytes();
+        let mut vfs: VirtualFs<'_, Reader, 2, 32, 2> =
+            VirtualFs::new(Index::new(&bytes).unwrap(), Reader(*b"BASETOOL"));
+        let fd = vfs.open(b"/base", O_READ | O_WRITE).unwrap();
+        vfs.write(fd, b"keep").unwrap();
+        vfs.close(fd).unwrap();
+        assert_eq!(
+            vfs.open(b"/base", O_READ | O_TRUNC),
+            Err(VfsError::PermissionDenied)
+        );
+        let fd = vfs.open(b"/base", O_READ).unwrap();
+        let mut output = [0; 4];
+        assert_eq!(vfs.read(fd, &mut output), Ok(4));
+        assert_eq!(&output, b"keep");
     }
 
     #[test]
