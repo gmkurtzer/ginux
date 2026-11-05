@@ -104,22 +104,33 @@ pub enum FailurePolicy {
     Fail,
 }
 
+// Field capacities of `DomainConfig`, shared with `NORMALIZED_CAPACITY`.
+const IDENTIFIER_BYTES: usize = 64;
+const REFERENCE_BYTES: usize = 128;
+const PATH_BYTES: usize = 128;
+const ARG_ITEMS: usize = 7;
+const ARG_BYTES: usize = 128;
+const ENVIRONMENT_ITEMS: usize = 8;
+const ENVIRONMENT_BYTES: usize = 256;
+const ASSIGNMENT_ITEMS: usize = 8;
+const ASSIGNMENT_BYTES: usize = 64;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct DomainConfig {
     pub schema_version: u64,
-    pub id: Text<64>,
-    pub root: Text<128>,
-    pub init: Text<128>,
-    pub args: TextList<7, 128>,
-    pub environment: TextList<8, 256>,
-    pub workdir: Text<128>,
+    pub id: Text<IDENTIFIER_BYTES>,
+    pub root: Text<REFERENCE_BYTES>,
+    pub init: Text<PATH_BYTES>,
+    pub args: TextList<ARG_ITEMS, ARG_BYTES>,
+    pub environment: TextList<ENVIRONMENT_ITEMS, ENVIRONMENT_BYTES>,
+    pub workdir: Text<PATH_BYTES>,
     pub vcpus: u64,
     pub memory_mib: u64,
     pub execution_profile: ExecutionProfile,
     pub execution_backend: ExecutionBackend,
-    pub contract_profile: Text<64>,
-    pub storage: TextList<8, 64>,
-    pub devices: TextList<8, 64>,
+    pub contract_profile: Text<IDENTIFIER_BYTES>,
+    pub storage: TextList<ASSIGNMENT_ITEMS, ASSIGNMENT_BYTES>,
+    pub devices: TextList<ASSIGNMENT_ITEMS, ASSIGNMENT_BYTES>,
     pub network_backend: NetworkBackend,
     pub audit_mode: AuditMode,
     pub failure_policy: FailurePolicy,
@@ -185,19 +196,19 @@ enum Section {
 struct ConfigBuilder {
     seen: u32,
     schema_version: u64,
-    id: Text<64>,
-    root: Text<128>,
-    init: Text<128>,
-    args: TextList<7, 128>,
-    environment: TextList<8, 256>,
-    workdir: Text<128>,
+    id: Text<IDENTIFIER_BYTES>,
+    root: Text<REFERENCE_BYTES>,
+    init: Text<PATH_BYTES>,
+    args: TextList<ARG_ITEMS, ARG_BYTES>,
+    environment: TextList<ENVIRONMENT_ITEMS, ENVIRONMENT_BYTES>,
+    workdir: Text<PATH_BYTES>,
     vcpus: u64,
     memory_mib: u64,
     execution_profile: ExecutionProfile,
     execution_backend: ExecutionBackend,
-    contract_profile: Text<64>,
-    storage: TextList<8, 64>,
-    devices: TextList<8, 64>,
+    contract_profile: Text<IDENTIFIER_BYTES>,
+    storage: TextList<ASSIGNMENT_ITEMS, ASSIGNMENT_BYTES>,
+    devices: TextList<ASSIGNMENT_ITEMS, ASSIGNMENT_BYTES>,
     network_backend: NetworkBackend,
     audit_mode: AuditMode,
     failure_policy: FailurePolicy,
@@ -401,15 +412,30 @@ impl DomainConfig {
     }
 }
 
+/// Text capacity of every `DomainConfig` field: id, root, init, args,
+/// environment, workdir, contract profile, storage and devices.
+const CONFIG_TEXT_BYTES: usize = IDENTIFIER_BYTES
+    + REFERENCE_BYTES
+    + PATH_BYTES
+    + ARG_ITEMS * ARG_BYTES
+    + ENVIRONMENT_ITEMS * ENVIRONMENT_BYTES
+    + PATH_BYTES
+    + IDENTIFIER_BYTES
+    + 2 * ASSIGNMENT_ITEMS * ASSIGNMENT_BYTES;
+/// Upper bound of `normalized()`: each text byte may be escaped to two
+/// bytes; 1 KiB covers quotes, list separators, numbers, keys and enums
+/// (about 500 bytes).
+const NORMALIZED_CAPACITY: usize = 2 * CONFIG_TEXT_BYTES + 1024;
+
 pub struct NormalizedConfig {
-    bytes: [u8; 4096],
+    bytes: [u8; NORMALIZED_CAPACITY],
     len: usize,
 }
 
 impl NormalizedConfig {
     const fn new() -> Self {
         Self {
-            bytes: [0; 4096],
+            bytes: [0; NORMALIZED_CAPACITY],
             len: 0,
         }
     }
@@ -906,6 +932,82 @@ policy = "stop"
         let normalized = config.normalized().unwrap();
         let reparsed = DomainConfig::parse(normalized.as_bytes()).unwrap();
         assert_eq!(reparsed, config);
+    }
+
+    #[test]
+    fn largest_accepted_config_normalizes_and_round_trips() {
+        use std::format;
+        use std::string::String;
+        use std::vec::Vec;
+        // Every field at its capacity. Fields that accept escaped bytes
+        // (paths, args, environment keys and values) are filled with quotes;
+        // numbers and enums take their longest accepted form.
+        let escaped = |count: usize| "\\\"".repeat(count);
+        let quoted_list = |items: Vec<String>| {
+            items
+                .iter()
+                .map(|item| format!("\"{item}\""))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let args = quoted_list((0..ARG_ITEMS).map(|_| escaped(ARG_BYTES)).collect());
+        let environment = quoted_list(
+            (0..ENVIRONMENT_ITEMS)
+                .map(|_| format!("{}={}", escaped(1), escaped(ENVIRONMENT_BYTES - 2)))
+                .collect(),
+        );
+        let assignments = quoted_list(
+            (0..ASSIGNMENT_ITEMS)
+                .map(|i| format!("{}{i}", "d".repeat(ASSIGNMENT_BYTES - 1)))
+                .collect(),
+        );
+        let text = VALID
+            .replace(
+                "id = \"demo\"",
+                &format!("id = \"{}\"", "i".repeat(IDENTIFIER_BYTES)),
+            )
+            .replace(
+                "root = \"rocky-10.2\"",
+                &format!("root = \"{}\"", "r".repeat(REFERENCE_BYTES)),
+            )
+            .replace(
+                "init = \"/runtime-fixture\"",
+                &format!(
+                    "init = \"/{}\"\nworkdir = \"/{}\"",
+                    escaped(PATH_BYTES - 1),
+                    escaped(PATH_BYTES - 1)
+                ),
+            )
+            .replace("args = [\"fixture-arg\"]", &format!("args = [{args}]"))
+            .replace(
+                "environment = [\"GINUX_GATE=4\"]",
+                &format!("environment = [{environment}]"),
+            )
+            .replace(
+                "profile = \"gate4-static\"",
+                &format!("profile = \"{}\"", "c".repeat(IDENTIFIER_BYTES)),
+            )
+            .replace(
+                "assignments = []",
+                &format!("assignments = [{assignments}]"),
+            )
+            .replace("vcpus = 1", "vcpus = 64")
+            .replace("memory_mib = 128", "memory_mib = 1048576")
+            .replace("profile = \"security\"", "profile = \"performance\"")
+            .replace("backend = \"interpreter\"", "backend = \"ptrace-native\"")
+            .replace("backend = \"none\"", "backend = \"mediated\"")
+            .replace("mode = \"stderr\"", "mode = \"disabled\"");
+        let config = DomainConfig::parse(text.as_bytes()).unwrap();
+        assert_eq!(config.args.as_slice().len(), ARG_ITEMS);
+        assert_eq!(config.environment.as_slice().len(), ENVIRONMENT_ITEMS);
+        assert_eq!(config.devices.as_slice().len(), ASSIGNMENT_ITEMS);
+        assert_eq!(config.vcpus, 64);
+        assert_eq!(config.network_backend, NetworkBackend::Mediated);
+        assert_eq!(config.audit_mode, AuditMode::Disabled);
+        let normalized = config.normalized().unwrap();
+        // The former fixed 4096-byte buffer could not hold this.
+        assert!(normalized.as_bytes().len() > 4096);
+        assert_eq!(DomainConfig::parse(normalized.as_bytes()).unwrap(), config);
     }
 
     #[test]
