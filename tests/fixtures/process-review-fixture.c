@@ -159,6 +159,10 @@ long probe_main(word *stack) {
     show("dup inherited fd=",fd);
     show("read alias=",call3(0,fd,(word)buffer,20));
     call3(1,1,(word)buffer,20);
+    // close always runs on the host, so this reports whether the launcher's
+    // descriptor 9 reached the tracee at all; the reads above are also
+    // denied by the supervisor's gates and cannot tell.
+    show("inherited close=",call3(3,9,0,0));
 #elif defined(CASE_thread_exec)
     show("exec thread=",make_thread(0x10f00,child_stack+sizeof child_stack,0,0));
     for(;;)call3(186,0,0,0);

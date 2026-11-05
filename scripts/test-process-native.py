@@ -20,7 +20,7 @@ def main():
         "wait_status": [b"unaligned wait result=2", b"status byte 7=0", b"status byte 8=42"],
         "thread_reuse": [b"sequential thread=33"],
         "denied_host_memory": [b"process_vm_writev(311)=-38"],
-        "inherited_fds": [b"inherited read=-9", b"dup inherited fd=-9", b"read alias=-9"],
+        "inherited_fds": [b"inherited read=-9", b"dup inherited fd=-9", b"read alias=-9", b"inherited close=-9"],
         "thread_exec": [b"exec-success", b"exec-complete virtual-pid=1"],
         "unused_parent_tid": [b"no-parent-settid thread=2"],
         "exec_failure": [b"thread exec result=-2", b"parent resumed=1"],
