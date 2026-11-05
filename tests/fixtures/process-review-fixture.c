@@ -49,6 +49,20 @@ void thread_body(void) {
 #elif defined(CASE_copied_files)
     show("child close=",call3(3,descriptors[1],0,0));
     __atomic_store_n(&done,1,__ATOMIC_RELEASE);
+#elif defined(CASE_thread_segv)
+    // The fault kills the whole group while the main thread is in syscalls.
+    static int *volatile null_pointer;
+    *null_pointer=1;
+#elif defined(CASE_thread_term)
+    __atomic_store_n(&done,1,__ATOMIC_RELEASE);
+    for(;;)call3(186,0,0,0);
+#elif defined(CASE_parked_kill)
+    // Release the grandchild and fault at once: its death races the group
+    // death of the parked waiter (this thread's main thread).
+    for(int i=0;i<(int)(call3(39,0,0,0)&3);i++)call3(186,0,0,0);
+    call3(1,descriptors[1],(word)"x",1);
+    static int *volatile null_pointer;
+    *null_pointer=1;
 #else
     long p=call3(22,(word)descriptors,0,0);
     show("child pipe result=",p);
@@ -202,6 +216,50 @@ long probe_main(word *stack) {
     int status=0;
     show("segv wait=",call3(61,child,(word)&status,0));
     show("segv status=",status);
+#elif defined(CASE_thread_segv)
+    long child=call3(57,0,0,0);
+    if(!child) {
+        if(make_thread(0x10f00,child_stack+sizeof child_stack,0,0)<0)return 10;
+        for(;;)call3(39,0,0,0);
+    }
+    int status=0;
+    show("thread segv wait=",call3(61,child,(word)&status,0));
+    show("thread segv status=",status);
+#elif defined(CASE_thread_term)
+    if(call3(22,(word)descriptors,0,0))return 10;
+    long child=call3(57,0,0,0);
+    if(!child) {
+        if(make_thread(0x10f00,child_stack+sizeof child_stack,0,0)<0)return 11;
+        while(!__atomic_load_n(&done,__ATOMIC_ACQUIRE))call3(39,0,0,0);
+        call3(1,descriptors[1],(word)"x",1);
+        for(;;)call3(39,0,0,0);
+    }
+    // Signal the child only once both of its threads are making syscalls.
+    char byte=0;
+    if(call3(0,descriptors[0],(word)&byte,1)!=1)return 12;
+    show("thread term kill=",call3(62,child,15,0));
+    int status=0;
+    show("thread term wait=",call3(61,child,(word)&status,0));
+    show("thread term status=",status);
+#elif defined(CASE_parked_kill)
+    long middle=call3(57,0,0,0);
+    if(!middle) {
+        if(call3(22,(word)descriptors,0,0))return 20;
+        long grandchild=call3(57,0,0,0);
+        if(!grandchild) {
+            char byte;
+            call3(0,descriptors[0],(word)&byte,1);
+            return 0;
+        }
+        if(make_thread(0x10f00,child_stack+sizeof child_stack,0,0)<0)return 21;
+        // The main thread parks in wait4 while its thread faults.
+        int inner=0;
+        call3(61,grandchild,(word)&inner,0);
+        return 22;
+    }
+    int status=0;
+    show("parked kill wait=",call3(61,middle,(word)&status,0));
+    show("parked kill status=",status);
 #elif defined(CASE_kill_badsig)
     long pid=call3(39,0,0,0);
     show("kill signal 65=",call3(62,pid,65,0));

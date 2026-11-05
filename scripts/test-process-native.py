@@ -35,6 +35,9 @@ def main():
         "sigpipe": [b"sigpipe wait=2", b"sigpipe status=13"],
         "segv": [b"segv wait=2", b"segv status=11"],
         "kill_badsig": [b"kill signal 65=-22", b"kill signal -1=-22", b"kill missing pid signal 65=-3"],
+        "thread_segv": [b"thread segv wait=2", b"thread segv status=11"],
+        "thread_term": [b"thread term kill=0", b"thread term wait=2", b"thread term status=15"],
+        "parked_kill": [b"parked kill wait=2", b"parked kill status=11"],
     }
     with tempfile.TemporaryDirectory(prefix="ginux-process-") as directory:
         sentinel = Path(directory) / "sentinel"
@@ -52,7 +55,8 @@ def main():
                 path = legacy if mode == "legacy" else f"{fixtures}/{mode}"
                 repetitions = 100 if mode == "legacy" else 20 if mode in (
                     "thread_exec", "exec_failure", "thread_reuse", "clone_tid", "vfork",
-                    "concurrent_wait", "remaining_wait", "sigpipe", "segv"
+                    "concurrent_wait", "remaining_wait", "sigpipe", "segv", "thread_segv",
+                    "thread_term", "parked_kill"
                 ) else 1
                 deferred_stops = 0
                 for run in range(repetitions):
