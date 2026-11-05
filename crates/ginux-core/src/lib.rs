@@ -25,6 +25,7 @@ pub const SYS_GETTID: u64 = 186;
 pub const SYS_EXIT_GROUP: u64 = 231;
 pub const SYS_UNLINKAT: u64 = 263;
 pub const SYS_RENAMEAT: u64 = 264;
+pub const SYS_LINKAT: u64 = 265;
 pub const SYS_SYMLINKAT: u64 = 266;
 pub const SYS_READLINKAT: u64 = 267;
 pub const SYS_MEMFD_CREATE: u64 = 319;
@@ -85,10 +86,9 @@ pub const fn decide_systemd(syscall: u64, shared_network: bool) -> Decision {
         7 | 16 | 18 | 25 | 32 | 33 | 56 | 57 | 58 | 59 | 61 | 73 | 74 | 75 | 76 | 77 | 79 | 80
         | 81 | 82 | 83 | 84 | 87 | 88 | 90 | 91 | 95 | 125 | 126 | 137 | 157 | 190 | 193 | 196
         | 199 | 213 | 232 | 233 | 247 | 253 | 254 | 255 | 258 | SYS_UNLINKAT | SYS_RENAMEAT
-        | SYS_SYMLINKAT | SYS_READLINKAT | 270 | 271 | 280 | 281 | 283 | 286 | 287 | 289 | 290
-        | 291 | 292 | 293 | 294 | 306 | SYS_MEMFD_CREATE | 435 | SYS_CLOSE_RANGE | 441 => {
-            Action::Mediate
-        }
+        | SYS_LINKAT | SYS_SYMLINKAT | SYS_READLINKAT | 270 | 271 | 280 | 281 | 283 | 286 | 287
+        | 289 | 290 | 291 | 292 | 293 | 294 | 306 | SYS_MEMFD_CREATE | 435 | SYS_CLOSE_RANGE
+        | 441 => Action::Mediate,
         _ => decide_balanced(syscall).action,
     };
     Decision { syscall, action }
@@ -123,6 +123,7 @@ pub const fn systemd_surface(syscall: u64, shared_network: bool) -> BalancedSurf
             | 306
             | SYS_UNLINKAT
             | SYS_RENAMEAT
+            | SYS_LINKAT
             | SYS_SYMLINKAT
     ) {
         BalancedSurface::DomainWrite
@@ -410,6 +411,7 @@ mod tests {
         assert_eq!(decide_systemd(88, true).action, Action::Mediate);
         assert_eq!(decide_systemd(SYS_UNLINKAT, true).action, Action::Mediate);
         assert_eq!(decide_systemd(SYS_RENAMEAT, true).action, Action::Mediate);
+        assert_eq!(decide_systemd(SYS_LINKAT, true).action, Action::Mediate);
         assert_eq!(decide_systemd(SYS_SYMLINKAT, true).action, Action::Mediate);
         assert_eq!(
             decide_systemd(SYS_MEMFD_CREATE, true).action,
@@ -430,6 +432,10 @@ mod tests {
             BalancedSurface::DomainWrite
         );
         assert_eq!(
+            systemd_surface(SYS_LINKAT, true),
+            BalancedSurface::DomainWrite
+        );
+        assert_eq!(
             systemd_surface(SYS_SYMLINKAT, true),
             BalancedSurface::DomainWrite
         );
@@ -437,6 +443,7 @@ mod tests {
         assert_eq!(decide_balanced(88).action, Action::Deny(38));
         assert_eq!(decide_balanced(SYS_UNLINKAT).action, Action::Deny(38));
         assert_eq!(decide_balanced(SYS_RENAMEAT).action, Action::Deny(38));
+        assert_eq!(decide_balanced(SYS_LINKAT).action, Action::Deny(38));
         assert_eq!(decide_balanced(SYS_SYMLINKAT).action, Action::Deny(38));
         assert_eq!(decide_balanced(SYS_MEMFD_CREATE).action, Action::Deny(38));
         assert_eq!(decide_balanced(SYS_GETTID).action, Action::Deny(38));

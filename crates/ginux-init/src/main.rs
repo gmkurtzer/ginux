@@ -2653,7 +2653,7 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descripto
                     92 | 94 => tracee_string_bounded(host_pid, registers.rdi as usize, false),
                     93 => registers.rdi < DOMAIN_NULL_FD as u64,
                     260 => {
-                        let directory = registers.rdi == (-100i64) as u64
+                        let directory = registers.rdi as u32 == (-100i32) as u32
                             || registers.rdi < DOMAIN_NULL_FD as u64;
                         let flags = registers.r8;
                         directory
@@ -3289,8 +3289,15 @@ fn native_arguments_allowed(syscall: u64, registers: &UserRegs, mode: usize) -> 
             79 => registers.rdi != 0 && registers.rsi <= 4096,
             81 | 306 => registers.rdi < DOMAIN_NULL_FD as u64,
             280 => {
-                (registers.rdi == (-100i64) as u64 || registers.rdi < DOMAIN_NULL_FD as u64)
+                (registers.rdi as u32 == (-100i32) as u32 || registers.rdi < DOMAIN_NULL_FD as u64)
                     && registers.r10 & !(0x100 | 0x1000) == 0
+            }
+            ginux_core::SYS_LINKAT => {
+                let old_directory = registers.rdi as u32 == (-100i32) as u32
+                    || registers.rdi < DOMAIN_NULL_FD as u64;
+                let new_directory = registers.rdx as u32 == (-100i32) as u32
+                    || registers.rdx < DOMAIN_NULL_FD as u64;
+                old_directory && new_directory && registers.r8 & !(0x1000 | 0x400) == 0
             }
             190 => {
                 registers.rdi < DOMAIN_NULL_FD as u64
