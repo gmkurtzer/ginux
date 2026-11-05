@@ -2476,8 +2476,11 @@ fn store_tracee_tid(host_pid: usize, user_tid: usize, tid: u32) -> Result<(), ()
     poke_tracee_bytes(host_pid, user_tid, &tid.to_le_bytes()).map_err(|_| ())
 }
 
-fn process_native_fail(domain: &mut Domain, root_pid: usize, reason: &[u8]) -> ! {
-    let _ = ptrace(PTRACE_KILL, root_pid, 0, 0);
+fn process_native_fail(domain: &mut Domain, _root_pid: usize, reason: &[u8]) -> ! {
+    // Every caller runs after PTRACE_SETOPTIONS set PTRACE_O_EXITKILL, which
+    // fork, vfork and clone children inherit, so the exit below kills every
+    // tracee. No kill or reap of its own: the root may already be reaped (its
+    // pid free for reuse), and traced threads may still hold its group open.
     domain_fail(domain, reason)
 }
 
@@ -3186,8 +3189,7 @@ fn supervise_native(pid: usize, domain: &mut Domain) -> ! {
             }
             Action::Emulate if syscall == SYS_EXIT || syscall == SYS_EXIT_GROUP => {
                 line(b"emulate result=domain-stop");
-                let _ = ptrace(PTRACE_KILL, pid, 0, 0);
-                let _ = wait(pid, &mut status);
+                kill_tracee(pid);
                 if domain.task_exited(true).is_err() {
                     domain_fail(domain, b"native exit transition failed");
                 }
@@ -3241,10 +3243,38 @@ fn supervise_native(pid: usize, domain: &mut Domain) -> ! {
 }
 
 fn native_fail(domain: &mut Domain, pid: usize, reason: &[u8]) -> ! {
-    let _ = ptrace(PTRACE_KILL, pid, 0, 0);
-    let mut status = 0;
-    let _ = wait(pid, &mut status);
+    kill_tracee(pid);
     domain_fail(domain, reason)
+}
+
+/// Ends a traced child with `kill(2)` and `SIGKILL` and reaps it, as
+/// `launch_fail` does. `PTRACE_KILL` only as a fallback: a seccomp policy that
+/// refuses ptrace requests may refuse it as well, and the reap would then block
+/// with the tracee left in its stop (and running on, untraced, once the
+/// supervisor is gone before `PTRACE_O_EXITKILL` is set).
+///
+/// Some callers have already reaped the child with the wait that reported it
+/// gone. A nonblocking wait first tells them apart: it fails once the child is
+/// reaped and reaps it if it has exited, so `kill(2)` only targets a child that
+/// is still ours and whose pid cannot have been reused.
+fn kill_tracee(pid: usize) {
+    let mut status = 0i32;
+    let reaped = unsafe {
+        syscall4(
+            SYS_WAIT4,
+            pid,
+            &mut status as *mut _ as usize,
+            WNOHANG as usize,
+            0,
+        )
+    };
+    if reaped < 0 || (reaped as usize == pid && !stopped(status)) {
+        return;
+    }
+    if unsafe { syscall2(SYS_KILL, pid, SIGKILL) } < 0 {
+        let _ = ptrace(PTRACE_KILL, pid, 0, 0);
+    }
+    let _ = wait(pid, &mut status);
 }
 
 fn config_main(config_path: *const u8) -> ! {
@@ -3538,11 +3568,7 @@ fn tracee() -> ! {
 }
 
 fn supervise_setup_fail(pid: usize, reason: &[u8]) -> ! {
-    // kill(2) instead of PTRACE_KILL: the same policy that failed the ptrace
-    // setup may also refuse PTRACE_KILL, and the reap below would then block.
-    let _ = unsafe { syscall2(SYS_KILL, pid, SIGKILL) };
-    let mut status = 0i32;
-    let _ = wait(pid, &mut status);
+    kill_tracee(pid);
     fail(reason)
 }
 
@@ -3615,8 +3641,7 @@ fn supervise(pid: usize) -> ! {
             }
             Action::Emulate if decision.syscall == SYS_EXIT => {
                 let success = regs.rdi == 0 && saw_getpid && saw_write && saw_uname;
-                let _ = ptrace(PTRACE_KILL, pid, 0, 0);
-                let _ = wait(pid, &mut status);
+                kill_tracee(pid);
                 if success {
                     line(b"GINUX: direct-host-syscall bypass=not-observed");
                     line(b"GATE1: PASS");
