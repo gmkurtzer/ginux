@@ -264,6 +264,34 @@ long probe_main(word *stack) {
     int status=0;
     show("parked kill wait=",call3(61,middle,(word)&status,0));
     show("parked kill status=",status);
+#elif defined(CASE_parked_term)
+    static int ready[2];
+    if(call3(22,(word)ready,0,0))return 10;
+    long middle=call3(57,0,0,0);
+    if(!middle) {
+        if(call3(22,(word)descriptors,0,0))return 20;
+        long grandchild=call3(57,0,0,0);
+        if(!grandchild) {
+            // Reads EOF once the middle task dies with the last write end.
+            char byte;
+            call3(3,descriptors[1],0,0);
+            call3(0,descriptors[0],(word)&byte,1);
+            return 0;
+        }
+        call3(3,descriptors[0],0,0);
+        call3(1,ready[1],(word)"x",1);
+        // Parks in wait4 until the parent's SIGTERM ends it.
+        call3(61,grandchild,0,0);
+        return 21;
+    }
+    char byte=0;
+    if(call3(0,ready[0],(word)&byte,1)!=1)return 11;
+    // Give the middle task time to park after its ready byte.
+    for(int i=0;i<100;i++)call3(186,0,0,0);
+    show("parked term kill=",call3(62,middle,15,0));
+    int status=0;
+    show("parked term wait=",call3(61,middle,(word)&status,0));
+    show("parked term status=",status);
 #elif defined(CASE_kill_badsig)
     long pid=call3(39,0,0,0);
     show("kill signal 65=",call3(62,pid,65,0));

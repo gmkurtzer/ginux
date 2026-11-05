@@ -493,6 +493,13 @@ struct NativeProcessTask {
     wait_options: u32,
     wait_status: usize,
     wait_rusage: usize,
+    /// A termination signal interrupted this task's `wait4` (parked or about
+    /// to park): the skipped call's exit stop rewinds it to its `syscall`
+    /// instruction, so the pending signal is delivered first and an ignored
+    /// one leaves the wait blocking, as on Linux. Always restarting is right
+    /// only because no handler can exist (`rt_sigaction` is `-ENOSYS` in this
+    /// lane); with a handler Linux returns `-EINTR` unless `SA_RESTART` is set.
+    wait_restart: bool,
     fork_result_pending: u32,
     fork_breakpoint_rip: usize,
     fork_breakpoint_word: usize,
@@ -647,6 +654,7 @@ fn supervise_process_native(root_host_pid: usize, domain: &mut Domain) -> ! {
         wait_options: 0,
         wait_status: 0,
         wait_rusage: 0,
+        wait_restart: false,
         killed: false,
     });
     let mut root_exited = false;
@@ -916,6 +924,7 @@ fn supervise_process_native(root_host_pid: usize, domain: &mut Domain) -> ! {
                 wait_options: 0,
                 wait_status: 0,
                 wait_rusage: 0,
+                wait_restart: false,
                 killed: false,
             });
             tasks[child_slot].as_mut().unwrap().child_tid = task.clone_ctid;
@@ -1548,13 +1557,18 @@ fn supervise_process_native(root_host_pid: usize, domain: &mut Domain) -> ! {
                 }
                 current.exec_pending = false;
                 current.exec_event_seen = false;
+            } else if current.wait_restart {
+                // Interrupted wait: back over the two-byte `syscall` with
+                // the number restored; the arguments stayed untouched.
+                registers.rip -= 2;
+                registers.rax = current.syscall;
             } else if current.override_result {
                 registers.rax = current.result as u64;
             }
             if restore_translated_argument {
                 registers.rdi = current.translated_rdi;
             }
-            if (current.override_result || restore_translated_argument)
+            if (current.override_result || current.wait_restart || restore_translated_argument)
                 && ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
             {
                 killed_or_fail(
@@ -1566,8 +1580,24 @@ fn supervise_process_native(root_host_pid: usize, domain: &mut Domain) -> ! {
                 );
                 continue;
             }
+            // A SIGINT or SIGTERM the host accepted stays pending in a waiter
+            // of the target group parked at its entry stop; resume those.
+            if current.syscall == 62
+                && restore_translated_argument
+                && registers.rax == 0
+                && (registers.rsi == SIGINT as u64 || registers.rsi == SIGTERM as u64)
+            {
+                interrupt_parked_waiters(
+                    domain,
+                    root_host_pid,
+                    &processes,
+                    &mut tasks,
+                    current.translated_rdi as u32,
+                );
+            }
             current.awaiting_exit = false;
             current.override_result = false;
+            current.wait_restart = false;
             current.translated_rdi = 0;
             current.fork_variant_event = 0;
             current.created_virtual = 0;
@@ -1782,6 +1812,17 @@ fn supervise_process_native(root_host_pid: usize, domain: &mut Domain) -> ! {
                                     current.result = 0;
                                     current.override_result = true;
                                     registers.orig_rax = u64::MAX;
+                                } else if termination_pending(host_pid) {
+                                    // A termination signal is already queued:
+                                    // skip and restart the call instead of
+                                    // parking, so the signal is delivered.
+                                    current.wait_restart = true;
+                                    registers.orig_rax = u64::MAX;
+                                    write_all(
+                                        b"GINUX_NATIVE_PROCESS_AUDIT: wait interrupted caller=",
+                                    );
+                                    write_u64(current.virtual_id.pid as u64);
+                                    write_all(b"\n");
                                 } else {
                                     // Blocking wait with nothing reportable
                                     // yet: park the caller at this entry stop
@@ -2061,6 +2102,102 @@ fn killed_or_fail(
 ) {
     if !mark_killed(tasks, index) {
         process_native_fail(domain, root_host_pid, reason);
+    }
+}
+
+/// Whether a signal that is not blocked and whose default action terminates
+/// the task is queued for the stopped host task, privately or for its whole
+/// thread group. A blocked signal stays queued without interrupting the wait,
+/// so counting it would restart the call forever. An unreadable mask keeps
+/// the plain park.
+fn termination_pending(host_pid: usize) -> bool {
+    const PTRACE_PEEKSIGINFO: usize = 0x4209;
+    const PTRACE_GETSIGMASK: usize = 0x420a;
+    const PTRACE_PEEKSIGINFO_SHARED: u32 = 1;
+    #[repr(C)]
+    struct PeekSiginfoArgs {
+        offset: u64,
+        flags: u32,
+        count: i32,
+    }
+    let mut blocked = 0u64;
+    if ptrace(
+        PTRACE_GETSIGMASK,
+        host_pid,
+        core::mem::size_of_val(&blocked),
+        &mut blocked as *mut _ as usize,
+    ) < 0
+    {
+        return false;
+    }
+    let mut info = [0i32; 32];
+    for flags in [0, PTRACE_PEEKSIGINFO_SHARED] {
+        let mut offset = 0;
+        loop {
+            let arguments = PeekSiginfoArgs {
+                offset,
+                flags,
+                count: 1,
+            };
+            if ptrace(
+                PTRACE_PEEKSIGINFO,
+                host_pid,
+                &arguments as *const _ as usize,
+                info.as_mut_ptr() as usize,
+            ) != 1
+            {
+                break;
+            }
+            if (1..=64).contains(&info[0])
+                && blocked & (1u64 << (info[0] - 1)) == 0
+                && fatal_default_signal(info[0] as u8)
+            {
+                return true;
+            }
+            offset += 1;
+        }
+    }
+    false
+}
+
+/// Resume every `wait4` waiter of thread group `tgid` parked at its entry
+/// stop, after a SIGINT or SIGTERM was sent to that group. Only SIGKILL ends
+/// a ptrace stop by itself, so a parked waiter would hold any other signal
+/// pending forever. Each resumed waiter skips its call, and its exit stop
+/// restarts it (see `wait_restart`): the signal is delivered on the way back
+/// to user space and kills the task through the usual forwarding, or,
+/// ignored, lets the wait park again. Tasks of the group that are not parked
+/// are left alone; they take the signal on their own.
+fn interrupt_parked_waiters(
+    domain: &mut Domain,
+    root_host_pid: usize,
+    processes: &ProcessTable<8>,
+    tasks: &mut [Option<NativeProcessTask>; 8],
+    tgid: u32,
+) {
+    for index in 0..tasks.len() {
+        let Some(entry) = tasks[index] else {
+            continue;
+        };
+        if !entry.wait_pending
+            || !entry.tracing
+            || entry.killed
+            || !processes
+                .view(entry.virtual_id)
+                .is_ok_and(|view| view.tgid == tgid)
+        {
+            continue;
+        }
+        if let Some(slot) = tasks[index].as_mut() {
+            slot.wait_pending = false;
+            slot.wait_restart = true;
+        }
+        write_all(b"GINUX_NATIVE_PROCESS_AUDIT: wait interrupted caller=");
+        write_u64(entry.virtual_id.pid as u64);
+        write_all(b"\n");
+        if ptrace(PTRACE_SYSCALL, entry.host_pid, 0, 0) < 0 && !mark_killed(tasks, index) {
+            process_native_fail(domain, root_host_pid, b"wait interrupt resume failed");
+        }
     }
 }
 
