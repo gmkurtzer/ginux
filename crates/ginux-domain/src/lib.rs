@@ -306,7 +306,9 @@ impl DomainConfig {
         validate_identifier(self.id.as_bytes())?;
         validate_reference(self.root.as_bytes())?;
         validate_domain_path(self.init.as_bytes())?;
-        validate_domain_path(self.workdir.as_bytes())?;
+        if self.workdir.as_bytes() != b"/" {
+            validate_domain_path(self.workdir.as_bytes())?;
+        }
         validate_identifier(self.contract_profile.as_bytes())?;
         if !(1..=64).contains(&self.vcpus) || !(16..=1_048_576).contains(&self.memory_mib) {
             return Err(ConfigError::InvalidValue);
@@ -743,7 +745,7 @@ fn validate_reference(bytes: &[u8]) -> Result<(), ConfigError> {
 fn validate_domain_path(bytes: &[u8]) -> Result<(), ConfigError> {
     if bytes.len() < 2
         || bytes[0] != b'/'
-        || bytes.windows(2).any(|window| window == b"..")
+        || bytes.split(|byte| *byte == b'/').any(|part| part == b"..")
         || bytes.contains(&0)
     {
         return Err(ConfigError::InvalidValue);
