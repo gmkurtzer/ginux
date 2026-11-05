@@ -75,6 +75,7 @@ def main():
         invoke(["fork"], 0, "exited")
         invoke(["int80"], 1, "supervisor-error")
         invoke(["descriptor"], 0, "exited")
+        invoke(["list"], 0, "exited", stdout=b"input\n")
         with (work / "secret").open("w+b") as secret:
             secret.write(b"host-only data")
             secret.flush()
