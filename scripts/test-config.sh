@@ -37,6 +37,13 @@ grep -Fqx 'GINUX_CONFIG: accepted format=toml schema=1' "$valid_log"
 grep -Fqx 'GINUX_CONFIG: PASS' "$valid_log"
 sed -n '/^GINUX_CONFIG_EFFECTIVE_BEGIN$/,/^GINUX_CONFIG_EFFECTIVE_END$/p' "$valid_log" > "$valid_effective"
 sed -n '/^GINUX_CONFIG_EFFECTIVE_BEGIN$/,/^GINUX_CONFIG_EFFECTIVE_END$/p' "$equivalent_log" > "$equivalent_effective"
+grep -Fqx 'GINUX_CONFIG: accepted format=toml schema=1' "$equivalent_log"
+grep -Fqx 'GINUX_CONFIG: PASS' "$equivalent_log"
+# An absent effective-config block would make cmp compare two empty files.
+for effective in "$valid_effective" "$equivalent_effective"; do
+    grep -Fqx 'GINUX_CONFIG_EFFECTIVE_BEGIN' "$effective"
+    grep -Fqx 'GINUX_CONFIG_EFFECTIVE_END' "$effective"
+done
 cmp "$valid_effective" "$equivalent_effective"
 
 if rocky_ssh '/var/tmp/ginux config /var/tmp/gate4-unknown.toml' > "$unknown_log" 2>&1; then

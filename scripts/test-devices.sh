@@ -22,7 +22,13 @@ grep -Fqx 'GATE6_DEVICES: PASS' "$log"
 
 block_value=$(rocky_ssh 'dd if=/var/tmp/ginux-block.img bs=1 skip=1024 count=11 status=none')
 test "$block_value" = 'GINUX-BLOCK'
+# The image must keep its size, or the dd reads below check nothing.
+test "$(rocky_ssh 'stat -c %s /var/tmp/ginux-block.img')" = 4096
+# The partition is bytes 1024..3071; both sides must stay zero. The bounds
+# probe writes at partition offset 2047, so a leak would land past 3071.
 outside=$(rocky_ssh 'dd if=/var/tmp/ginux-block.img bs=1 count=1024 status=none | od -An -v -tu1 | tr -d " 0\n"')
+test -z "$outside"
+outside=$(rocky_ssh 'dd if=/var/tmp/ginux-block.img bs=1 skip=3072 count=1024 status=none | od -An -v -tu1 | tr -d " 0\n"')
 test -z "$outside"
 
 rocky_ssh 'rm -f /var/tmp/ginux /var/tmp/gate6.toml /var/tmp/ginux-block.img'
