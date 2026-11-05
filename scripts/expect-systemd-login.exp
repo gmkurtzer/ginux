@@ -1,7 +1,7 @@
 #!/usr/bin/expect -f
 
-if {$argc != 5} {
-    puts stderr "usage: expect-systemd-login.exp <key> <port> <user> <domain-root> <log>"
+if {$argc != 6} {
+    puts stderr "usage: expect-systemd-login.exp <key> <port> <user> <domain-root> <log> <measurements>"
     exit 64
 }
 
@@ -10,6 +10,7 @@ set port [lindex $argv 1]
 set user [lindex $argv 2]
 set domain_root [lindex $argv 3]
 set log [lindex $argv 4]
+set measurements [lindex $argv 5]
 set timeout 50
 set started_ms [clock milliseconds]
 
@@ -24,6 +25,12 @@ expect {
 set ready_ms [clock milliseconds]
 set boot_ms [expr {$ready_ms - $started_ms}]
 send_log "GINUX_MEASURE: boot-to-login-ms=$boot_ms\n"
+set measure_file [open $measurements w]
+puts $measure_file "GINUX_MEASURE: boot-to-login-ms=$boot_ms"
+flush $measure_file
+if {[info exists env(GINUX_GATE9_LOGIN_SETTLE)]} {
+    after [expr {$env(GINUX_GATE9_LOGIN_SETTLE) * 1000}]
+}
 send -- "root\r"
 
 expect {
@@ -117,5 +124,7 @@ expect {
 set stopped_ms [clock milliseconds]
 set total_ms [expr {$stopped_ms - $started_ms}]
 send_log "GINUX_MEASURE: total-runtime-ms=$total_ms\n"
+puts $measure_file "GINUX_MEASURE: total-runtime-ms=$total_ms"
+close $measure_file
 expect eof
 exit 0

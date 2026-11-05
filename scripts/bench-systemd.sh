@@ -32,7 +32,8 @@ sample_tree() {
         }'"
 }
 
-GINUX_GATE9_DNF=off GINUX_GATE9_NETWORK=off ./scripts/probe-systemd.sh \
+GINUX_GATE9_DNF=off GINUX_GATE9_NETWORK=off GINUX_GATE9_LOGIN_SETTLE=3 \
+    ./scripts/probe-systemd.sh \
     >"$driver_log" 2>&1 &
 probe_pid=$!
 cleanup() {
@@ -52,9 +53,9 @@ while kill -0 "$probe_pid" 2>/dev/null; do
         cpu=$3
         test "$processes" -le "$peak_processes" || peak_processes=$processes
         test "$rss" -le "$peak_rss" || peak_rss=$rss
-        peak_cpu=$(awk -v old="$peak_cpu" -v new="$cpu" 'BEGIN { print new > old ? new : old }')
+        peak_cpu=$(awk -v old="$peak_cpu" -v new="$cpu" 'BEGIN { print (new > old ? new : old) }')
         if test "$idle_rss" -eq 0 &&
-            grep -Fq 'GINUX_AUTHENTICATED' build/gate9-systemd-baseline.log 2>/dev/null
+            test -s build/gate9-systemd-measurements.txt
         then
             idle_rss=$rss
         fi
@@ -64,11 +65,15 @@ done
 wait "$probe_pid"
 trap - HUP INT TERM
 
-boot_ms=$(sed -n 's/^GINUX_MEASURE: boot-to-login-ms=//p' build/gate9-systemd-baseline.log | tail -n 1)
-total_ms=$(sed -n 's/^GINUX_MEASURE: total-runtime-ms=//p' build/gate9-systemd-baseline.log | tail -n 1)
-idle_entries=$(sed -n 's/^GINUX_MEASURE: idle-managed-proc-entries=//p' build/gate9-systemd-baseline.log | tail -n 1)
-peak_tasks=$(sed -n 's/^GINUX_NATIVE_MEASURE: peak-managed-tasks=//p' build/gate9-systemd-baseline.log | tail -n 1)
-test -n "$boot_ms" && test -n "$total_ms" && test -n "$peak_tasks"
+boot_ms=$(sed -n 's/^GINUX_MEASURE: boot-to-login-ms=//p' build/gate9-systemd-measurements.txt | tail -n 1)
+total_ms=$(sed -n 's/^GINUX_MEASURE: total-runtime-ms=//p' build/gate9-systemd-measurements.txt | tail -n 1)
+idle_entries=$(sed -n 's/^GINUX_MEASURE: idle-managed-proc-entries=//p' build/gate9-systemd-baseline.log | tail -n 1 | tr -d '\r')
+peak_tasks=$(sed -n 's/^GINUX_NATIVE_MEASURE: peak-managed-tasks=//p' build/gate9-systemd-baseline.log | tail -n 1 | tr -d '\r')
+test -n "$boot_ms"
+test -n "$total_ms"
+test -n "$idle_rss"
+test "$idle_rss" -gt 0
+test -n "$peak_tasks"
 
 {
     printf '%s\n' 'GINUX_SYSTEMD_BENCH: environment=Rocky-10.2-x86_64 qemu=TCG vcpus=2 memory-mib=2048 network=restricted dnf=skipped'

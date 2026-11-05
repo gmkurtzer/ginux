@@ -9,6 +9,7 @@ export GINUX_OCI_CONFIG_FILE
 rootfs=$GINUX_OCI_CACHE_DIR/$GINUX_OCI_ROOTFS_LAYER
 domain_root=/var/lib/ginux/domains/gate9/root
 log=build/gate9-systemd-baseline.log
+measurements=build/gate9-systemd-measurements.txt
 gate9_dnf=${GINUX_GATE9_DNF:-on}
 gate9_network=${GINUX_GATE9_NETWORK:-on}
 case $gate9_dnf in
@@ -40,9 +41,10 @@ if test "$gate9_network" = off; then
     rocky_ssh "sudo touch '$domain_root/run/ginux-skip-network'; sudo chown 1000:1000 '$domain_root/run/ginux-skip-network'"
 fi
 
+rm -f "$measurements"
 set +e
 ./scripts/expect-systemd-login.exp \
-    "$ROCKY_KEY" "$ROCKY_SSH_PORT" "$ROCKY_SSH_USER" "$domain_root" "$log" \
+    "$ROCKY_KEY" "$ROCKY_SSH_PORT" "$ROCKY_SSH_USER" "$domain_root" "$log" "$measurements" \
     >/dev/null
 status=$?
 set -e
@@ -73,4 +75,6 @@ fi
 grep -Fq 'GINUX_SHELL_CHECK_DONE' "$log"
 grep -Fq 'translate surface=virtual-poweroff result=domain-shutdown' "$log"
 grep -Fq 'GINUX_NATIVE_CHECK: PASS' "$log"
+grep -Fq 'GINUX_MEASURE: boot-to-login-ms=' "$measurements"
+grep -Fq 'GINUX_MEASURE: total-runtime-ms=' "$measurements"
 printf '%s\n' 'systemd login baseline: PASS (authenticated managed shell and controlled shutdown)'
