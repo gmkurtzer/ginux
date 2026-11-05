@@ -21,6 +21,7 @@ pub const SYS_GETPPID: u64 = 110;
 pub const SYS_GETPGRP: u64 = 111;
 pub const SYS_GETPRIORITY: u64 = 140;
 pub const SYS_SETPRIORITY: u64 = 141;
+pub const SYS_REBOOT: u64 = 169;
 pub const SYS_GETTID: u64 = 186;
 pub const SYS_EXIT_GROUP: u64 = 231;
 pub const SYS_UNLINKAT: u64 = 263;
@@ -82,13 +83,13 @@ pub const fn decide_systemd(syscall: u64, shared_network: bool) -> Decision {
     let action = match syscall {
         63 | 92 | 93 | 94 | 109 | 112 | 153 | 165 | 166 | 260 | SYS_GETPRIORITY
         | SYS_SETPRIORITY | SYS_GETTID | SYS_SETUID | SYS_SETGID | SYS_SETREUID | SYS_SETREGID
-        | SYS_SETGROUPS | SYS_SETRESUID | SYS_SETRESGID => Action::Emulate,
-        7 | 16 | 18 | 25 | 32 | 33 | 56 | 57 | 58 | 59 | 61 | 73 | 74 | 75 | 76 | 77 | 79 | 80
-        | 81 | 82 | 83 | 84 | 87 | 88 | 90 | 91 | 95 | 125 | 126 | 137 | 157 | 190 | 193 | 196
-        | 199 | 213 | 232 | 233 | 247 | 253 | 254 | 255 | 258 | SYS_UNLINKAT | SYS_RENAMEAT
-        | SYS_LINKAT | SYS_SYMLINKAT | SYS_READLINKAT | 270 | 271 | 280 | 281 | 283 | 286 | 287
-        | 289 | 290 | 291 | 292 | 293 | 294 | 306 | SYS_MEMFD_CREATE | 435 | SYS_CLOSE_RANGE
-        | 441 => Action::Mediate,
+        | SYS_SETGROUPS | SYS_SETRESUID | SYS_SETRESGID | SYS_REBOOT => Action::Emulate,
+        7 | 16 | 18 | 25 | 32 | 33 | 56 | 57 | 58 | 59 | 61 | 62 | 73 | 74 | 75 | 76 | 77 | 79
+        | 80 | 81 | 82 | 83 | 84 | 87 | 88 | 90 | 91 | 95 | 125 | 126 | 137 | 157 | 190 | 193
+        | 196 | 199 | 213 | 232 | 233 | 247 | 253 | 254 | 255 | 258 | SYS_UNLINKAT
+        | SYS_RENAMEAT | SYS_LINKAT | SYS_SYMLINKAT | SYS_READLINKAT | 270 | 271 | 280 | 281
+        | 283 | 286 | 287 | 289 | 290 | 291 | 292 | 293 | 294 | 306 | SYS_MEMFD_CREATE | 435
+        | SYS_CLOSE_RANGE | 441 => Action::Mediate,
         _ => decide_balanced(syscall).action,
     };
     Decision { syscall, action }
@@ -97,6 +98,8 @@ pub const fn decide_systemd(syscall: u64, shared_network: bool) -> Decision {
 pub const fn systemd_surface(syscall: u64, shared_network: bool) -> BalancedSurface {
     if shared_network && is_shared_network_syscall(syscall) {
         BalancedSurface::Network
+    } else if syscall == SYS_REBOOT {
+        BalancedSurface::Lifecycle
     } else if matches!(syscall, SYS_GETPRIORITY | SYS_SETPRIORITY) {
         BalancedSurface::VirtualIdentity
     } else if matches!(
@@ -152,6 +155,7 @@ pub const fn systemd_surface(syscall: u64, shared_network: bool) -> BalancedSurf
             | 57
             | 58
             | 61
+            | 62
             | 79
             | 81
             | 109
@@ -330,6 +334,8 @@ mod tests {
         assert_eq!(decide_systemd(294, true).action, Action::Mediate);
         assert_eq!(decide_systemd(283, true).action, Action::Mediate);
         assert_eq!(decide_systemd(56, true).action, Action::Mediate);
+        assert_eq!(decide_systemd(62, true).action, Action::Mediate);
+        assert_eq!(systemd_surface(62, true), BalancedSurface::Task);
         assert_eq!(decide_systemd(112, true).action, Action::Emulate);
         assert_eq!(systemd_surface(112, true), BalancedSurface::Task);
         assert_eq!(decide_systemd(109, true).action, Action::Emulate);
@@ -338,6 +344,12 @@ mod tests {
         assert_eq!(systemd_surface(93, true), BalancedSurface::DomainWrite);
         assert_eq!(decide_systemd(153, true).action, Action::Emulate);
         assert_eq!(systemd_surface(153, true), BalancedSurface::Console);
+        assert_eq!(decide_systemd(SYS_REBOOT, true).action, Action::Emulate);
+        assert_eq!(
+            systemd_surface(SYS_REBOOT, true),
+            BalancedSurface::Lifecycle
+        );
+        assert_eq!(decide_balanced(SYS_REBOOT).action, Action::Deny(38));
         assert_eq!(decide_systemd(91, true).action, Action::Mediate);
         assert_eq!(systemd_surface(91, true), BalancedSurface::DomainWrite);
         assert_eq!(decide_systemd(270, true).action, Action::Mediate);
@@ -453,6 +465,7 @@ mod tests {
         assert_eq!(decide_balanced(294).action, Action::Deny(38));
         assert_eq!(decide_balanced(283).action, Action::Deny(38));
         assert_eq!(decide_balanced(56).action, Action::Deny(38));
+        assert_eq!(decide_balanced(62).action, Action::Deny(38));
         assert_eq!(decide_balanced(435).action, Action::Deny(38));
         assert_eq!(decide_balanced(247).action, Action::Deny(38));
     }

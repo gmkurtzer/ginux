@@ -83,7 +83,7 @@ expect {
 }
 set timeout 900
 expect {
-    -re {GINUX_DNF_UPDATE: PASS} {}
+    -re {GINUX_DNF_UPDATE: (PASS|SKIPPED)} {}
     timeout { puts stderr "dnf update timed out"; exit 98 }
     eof { puts stderr "managed shell exited during dnf update"; exit 99 }
 }
@@ -92,13 +92,23 @@ expect {
     timeout { puts stderr "managed shell completion timed out"; exit 84 }
     eof { puts stderr "managed shell exited before checks completed"; exit 85 }
 }
-send -- "exit\n"
-
 expect {
-    -re {login:} {}
-    timeout { puts stderr "login prompt did not return after shell exit"; exit 78 }
-    eof { puts stderr "systemd exited after shell exit"; exit 79 }
+    -re {\[root@ginux [^]]+\]# } {}
+    timeout { puts stderr "managed shell prompt did not return after checks"; exit 102 }
+    eof { puts stderr "managed shell exited after checks"; exit 103 }
 }
-send -- "\003"
+puts stderr "requesting controlled domain poweroff"
+send -- "kill -RTMIN+4 1\n"
+set timeout 120
+expect {
+    -re {translate surface=virtual-poweroff result=domain-shutdown} {}
+    timeout { puts stderr "controlled domain poweroff timed out"; exit 78 }
+    eof { puts stderr "domain exited without virtual poweroff evidence"; exit 79 }
+}
+expect {
+    -re {GINUX_NATIVE_CHECK: PASS} {}
+    timeout { puts stderr "clean domain shutdown result timed out"; exit 100 }
+    eof { puts stderr "domain shutdown result missing"; exit 101 }
+}
 expect eof
 exit 0

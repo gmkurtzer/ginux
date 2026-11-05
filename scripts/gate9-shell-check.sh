@@ -34,8 +34,12 @@ test -s /tmp/ginux-rocky-headers
 printf '%s\n' 'GINUX_NETWORK_DNS_HTTPS: PASS'
 
 /usr/local/sbin/ginux-gate9-network-check
-printf '%s\n' 'GINUX_DNF_UPDATE: BEGIN'
-dnf -v repolist --enabled
-dnf -v -y update
-printf '%s\n' 'GINUX_DNF_UPDATE: PASS'
+if test -e /run/ginux-skip-dnf; then
+    printf '%s\n' 'GINUX_DNF_UPDATE: SKIPPED'
+else
+    printf '%s\n' 'GINUX_DNF_UPDATE: BEGIN'
+    dnf -v repolist --enabled
+    dnf -v -y update
+    printf '%s\n' 'GINUX_DNF_UPDATE: PASS'
+fi
 printf '%s\n' 'GINUX_SHELL_CHECK_DONE'

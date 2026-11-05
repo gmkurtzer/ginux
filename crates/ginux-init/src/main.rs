@@ -2338,6 +2338,11 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descripto
             write_i64(registers.rdi as i64);
             write_all(b" options=");
             write_u64(registers.r10);
+        } else if mode == 3 && syscall == 62 {
+            write_all(b" target=");
+            write_i64(registers.rdi as i64);
+            write_all(b" signal=");
+            write_u64(registers.rsi);
         }
         write_all(b" action=");
         match decision.action {
@@ -2407,6 +2412,37 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descripto
                     || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
                 {
                     native_fail(domain, pid, b"native priority update emulation failed");
+                }
+            }
+            Action::Emulate if mode == 3 && syscall == ginux_core::SYS_REBOOT => {
+                const LINUX_REBOOT_MAGIC1: u64 = 0xfee1_dead;
+                const LINUX_REBOOT_MAGIC2: u64 = 0x2812_1969;
+                const LINUX_REBOOT_CMD_POWER_OFF: u64 = 0x4321_fedc;
+                let root_init = task.virtual_id == root_virtual
+                    && processes
+                        .view(task.virtual_id)
+                        .is_ok_and(|view| view.credentials.uid == 0);
+                let allowed = root_init
+                    && registers.rdi == LINUX_REBOOT_MAGIC1
+                    && registers.rsi == LINUX_REBOOT_MAGIC2
+                    && registers.rdx == LINUX_REBOOT_CMD_POWER_OFF;
+                if allowed {
+                    line(b"translate surface=virtual-poweroff result=domain-shutdown");
+                    registers.orig_rax = ginux_core::SYS_EXIT_GROUP;
+                    registers.rdi = 0;
+                    task.awaiting_exit = false;
+                    task.override_exit = false;
+                } else {
+                    line(b"deny result=-1 reason=invalid-virtual-poweroff");
+                    registers.orig_rax = u64::MAX;
+                    task.awaiting_exit = true;
+                    task.override_exit = true;
+                    task.override_result = -EPERM;
+                }
+                if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
+                {
+                    native_fail(domain, pid, b"native virtual poweroff failed");
                 }
             }
             Action::Emulate if mode == 3 && syscall == 63 => {
@@ -2712,6 +2748,37 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descripto
                 task.override_exit = false;
                 if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
                     native_fail(domain, pid, b"native lifecycle resume failed");
+                }
+            }
+            Action::Mediate if mode == 3 && syscall == 62 => {
+                const SYSTEMD_SIGRTMIN_POWER_OFF: u64 = 38;
+                let root = processes
+                    .view(task.virtual_id)
+                    .is_ok_and(|view| view.credentials.uid == 0);
+                let allowed = root
+                    && registers.rdi == u64::from(root_virtual.pid)
+                    && registers.rsi == SYSTEMD_SIGRTMIN_POWER_OFF;
+                if allowed {
+                    line(b"mediate surface=virtual-systemd-poweroff result=pending");
+                    task.translated_rdi = registers.rdi;
+                    registers.rdi = pid as u64;
+                    task.awaiting_exit = true;
+                    if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                        || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
+                    {
+                        native_fail(domain, pid, b"native systemd poweroff signal failed");
+                    }
+                } else {
+                    line(b"deny result=-1 reason=invalid-virtual-signal");
+                    registers.orig_rax = u64::MAX;
+                    task.awaiting_exit = true;
+                    task.override_exit = true;
+                    task.override_result = -EPERM;
+                    if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                        || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
+                    {
+                        native_fail(domain, pid, b"native virtual signal denial failed");
+                    }
                 }
             }
             Action::Mediate
@@ -3317,6 +3384,7 @@ fn native_arguments_allowed(syscall: u64, registers: &UserRegs, mode: usize) -> 
             | 58
             | 59
             | 61
+            | 62
             | 76
             | 80
             | 82
