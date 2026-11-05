@@ -2677,7 +2677,8 @@ fn vfs_main(config_path: *const u8, rootfs_path: *const u8, index_path: *const u
     if domain.start().is_err() {
         domain_fail(&mut domain, b"invalid start transition");
     }
-    let index_length = read_index(index_path);
+    let index_length =
+        read_index(index_path).unwrap_or_else(|reason| domain_fail(&mut domain, reason));
     let index_bytes = unsafe {
         core::slice::from_raw_parts(
             core::ptr::addr_of!(VFS_INDEX_BYTES).cast::<u8>(),
@@ -3072,7 +3073,7 @@ fn domain_main(config_path: *const u8, fixture_path: *const u8) -> ! {
     }
     lifecycle_state(&domain);
 
-    let length = read_file(fixture_path);
+    let length = read_file(fixture_path).unwrap_or_else(|reason| domain_fail(&mut domain, reason));
     let elf =
         unsafe { core::slice::from_raw_parts(core::ptr::addr_of!(ELF_BYTES).cast::<u8>(), length) };
     let mut memory = AddressSpace::new();
@@ -3240,7 +3241,7 @@ fn gate1_main() -> ! {
 
 fn runtime_main(path: *const u8) -> ! {
     line(b"GINUX_RUNTIME: backend=x86_64-interpreter");
-    let length = read_file(path);
+    let length = read_file(path).unwrap_or_else(|reason| runtime_fail(reason));
     let elf =
         unsafe { core::slice::from_raw_parts(core::ptr::addr_of!(ELF_BYTES).cast::<u8>(), length) };
     let mut memory = AddressSpace::new();

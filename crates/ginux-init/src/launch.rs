@@ -155,11 +155,11 @@ pub fn config_rejected(error: ConfigError) -> ! {
     exit_process(2)
 }
 
-pub fn read_file(path: *const u8) -> usize {
+pub fn read_file(path: *const u8) -> Result<usize, &'static [u8]> {
     use crate::supervisor::{syscall1, syscall3, syscall4};
     let descriptor = unsafe { syscall4(SYS_OPENAT_HOST, AT_FDCWD, path as usize, O_RDONLY, 0) };
     if descriptor < 0 {
-        runtime_fail(b"fixture open failed");
+        return Err(b"fixture open failed");
     }
     let mut length = 0usize;
     while length < MAX_ELF_SIZE {
@@ -173,7 +173,7 @@ pub fn read_file(path: *const u8) -> usize {
         };
         if result < 0 {
             let _ = unsafe { syscall1(SYS_CLOSE_HOST, descriptor as usize) };
-            runtime_fail(b"fixture read failed");
+            return Err(b"fixture read failed");
         }
         if result == 0 {
             break;
@@ -182,9 +182,9 @@ pub fn read_file(path: *const u8) -> usize {
     }
     let _ = unsafe { syscall1(SYS_CLOSE_HOST, descriptor as usize) };
     if length == 0 || length == MAX_ELF_SIZE {
-        runtime_fail(b"fixture size invalid");
+        return Err(b"fixture size invalid");
     }
-    length
+    Ok(length)
 }
 
 pub fn read_config(path: *const u8) -> usize {
@@ -221,11 +221,11 @@ pub fn read_config(path: *const u8) -> usize {
     length
 }
 
-pub fn read_index(path: *const u8) -> usize {
+pub fn read_index(path: *const u8) -> Result<usize, &'static [u8]> {
     use crate::supervisor::{syscall1, syscall3, syscall4};
     let descriptor = unsafe { syscall4(SYS_OPENAT_HOST, AT_FDCWD, path as usize, O_RDONLY, 0) };
     if descriptor < 0 {
-        runtime_fail(b"VFS index open failed");
+        return Err(b"VFS index open failed");
     }
     let mut length = 0usize;
     while length < MAX_VFS_INDEX_SIZE {
@@ -241,7 +241,7 @@ pub fn read_index(path: *const u8) -> usize {
         };
         if result < 0 {
             let _ = unsafe { syscall1(SYS_CLOSE_HOST, descriptor as usize) };
-            runtime_fail(b"VFS index read failed");
+            return Err(b"VFS index read failed");
         }
         if result == 0 {
             break;
@@ -250,15 +250,9 @@ pub fn read_index(path: *const u8) -> usize {
     }
     let _ = unsafe { syscall1(SYS_CLOSE_HOST, descriptor as usize) };
     if length == 0 || length == MAX_VFS_INDEX_SIZE {
-        runtime_fail(b"VFS index size invalid");
+        return Err(b"VFS index size invalid");
     }
-    length
-}
-
-fn runtime_fail(reason: &[u8]) -> ! {
-    write_all(b"GATE3: FAIL: ");
-    line(reason);
-    exit_process(1)
+    Ok(length)
 }
 
 pub fn c_string_equals(value: *const u8, expected: &[u8]) -> bool {
