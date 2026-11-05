@@ -63,7 +63,7 @@ build-process-fixtures:
 	done
 	$(CC) -nostdlib -static tests/fixtures/process-exec-target.S -o .artifacts/process/process-exec-target
 
-test-process-native:
+test-process-native: build build-process-fixtures
 	python3 scripts/test-process-native.py $(GINUX) .artifacts/process $(PROCESS_NATIVE_FIXTURE) $(SCENARIO)
 
 check-name:
@@ -116,7 +116,7 @@ test-devices: build
 	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-devices conflicts_ioctls
 	@./scripts/with-rocky-host.sh ./scripts/test-devices.sh
 
-test-kernel-views:
+test-kernel-views: build
 	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-kernel-views
 	@./scripts/with-rocky-host.sh ./scripts/test-kernel-views.sh
 
