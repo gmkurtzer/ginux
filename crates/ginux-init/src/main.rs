@@ -20,8 +20,8 @@ use crate::dispatch::{
     NativeDecision,
 };
 use crate::launch::{
-    c_string_equals, launch_main, load_config, parse_argv, print_effective_config, read_file,
-    read_index, Command, ELF_BYTES, VFS_INDEX_BYTES,
+    c_string_equals, launch_main, launch_usage, load_config, parse_argv, print_effective_config,
+    read_file, read_index, Command, ELF_BYTES, VFS_INDEX_BYTES,
 };
 use crate::supervisor::{
     exit_process, line, ptrace, read_tracee_word, stopped, syscall0, syscall1, syscall2, syscall3,
@@ -164,7 +164,10 @@ extern "C" fn rust_main(initial_stack: *const usize) -> ! {
             device_bench_main(config_path, block_path, kind)
         }
         Some(Command::KernelViews(config_path)) => kernel_views_main(config_path),
-        Some(Command::Launch(config_path, root_path)) => launch_main(config_path, root_path),
+        Some(Command::Launch(config_path, root_path, result_path)) => {
+            launch_main(config_path, root_path, result_path)
+        }
+        Some(Command::LaunchUsage) => launch_usage(),
         None => gate1_main(),
     }
 }

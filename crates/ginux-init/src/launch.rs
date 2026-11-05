@@ -13,7 +13,8 @@ use crate::supervisor::{
     syscall5, wait, write_all, AT_FDCWD, DOMAIN_GID, DOMAIN_UID, O_RDONLY, PR_SET_NO_NEW_PRIVS,
     PTRACE_GETREGS, PTRACE_KILL, PTRACE_O_EXITKILL, PTRACE_O_TRACESYSGOOD, PTRACE_SETOPTIONS,
     PTRACE_SETREGS, PTRACE_SYSCALL, PTRACE_TRACEME, SYS_CHDIR, SYS_CHROOT, SYS_CLOSE_HOST,
-    SYS_EXECVE, SYS_EXIT_HOST, SYS_FORK, SYS_OPENAT_HOST, SYS_PRCTL, SYS_PTRACE, SYS_READ_HOST,
+    SYS_EXECVE, SYS_EXIT_HOST, SYS_FORK, SYS_FSYNC, SYS_OPENAT_HOST, SYS_PRCTL, SYS_PTRACE,
+    SYS_READ_HOST,
     SYS_SETGID, SYS_SETGROUPS, SYS_SETUID, SYS_WRITE_HOST, UserRegs,
 };
 
@@ -38,7 +39,8 @@ pub enum Command {
     Devices(*const u8, *const u8),
     DeviceBench(*const u8, *const u8, *const u8),
     KernelViews(*const u8),
-    Launch(*const u8, *const u8),
+    Launch(*const u8, *const u8, *const u8),
+    LaunchUsage,
 }
 
 /// Decode `argv` exactly as the previous inline chain did; `None` selects the
@@ -99,7 +101,17 @@ pub fn parse_argv(argc: usize, argv: *const usize) -> Option<Command> {
     } else if argc >= 4 && c_string_equals(command, b"launch") {
         let config_path = unsafe { *argv.add(2) as *const u8 };
         let root_path = unsafe { *argv.add(3) as *const u8 };
-        Some(Command::Launch(config_path, root_path))
+        if argc == 4 {
+            Some(Command::Launch(config_path, root_path, core::ptr::null()))
+        } else if argc == 6
+            && c_string_equals(unsafe { *argv.add(4) as *const u8 }, b"--result-file")
+            && unsafe { *( *argv.add(5) as *const u8) } != 0
+        {
+            let result_path = unsafe { *argv.add(5) as *const u8 };
+            Some(Command::Launch(config_path, root_path, result_path))
+        } else {
+            Some(Command::LaunchUsage)
+        }
     } else {
         None
     }
@@ -274,10 +286,11 @@ static mut LAUNCH_WORKDIR: [u8; 129] = [0; 129];
 static mut LAUNCH_ARGV: [*const u8; 9] = [core::ptr::null(); 9];
 static mut LAUNCH_ENVP: [*const u8; 9] = [core::ptr::null(); 9];
 
-pub fn launch_main(config_path: *const u8, root_path: *const u8) -> ! {
-    let config = load_config(config_path);
+pub fn launch_main(config_path: *const u8, root_path: *const u8, result_path: *const u8) -> ! {
+    stage_result_path(result_path);
+    let config = launch_load_config(config_path);
     launch_validate(&config);
-    print_effective_config(&config);
+    print_launch_config(&config);
     let mut domain = Domain::create(config);
     if domain.start().is_err() {
         launch_domain_fail(&mut domain, b"invalid launch start transition");
@@ -418,6 +431,297 @@ fn stage_nul(buffer: *mut u8, capacity: usize, value: &[u8], reason: &[u8]) -> *
     buffer as *const u8
 }
 
+// ---- G02: faithful workload completion and streams ----
+//
+// `--result-file <fresh host path>` (Ginux-owned): after teardown the
+// supervisor writes exactly one JSON object to that host-side path:
+// {"version":1,"outcome":"exited|signaled|supervisor-error",
+//  "code":<i64|null>,"signal":<u64|null>,"generation":null}.
+// `generation` is null until G12a generations exist. The launcher exit code
+// mirrors the workload exit code when the supervisor is healthy (low 8 bits,
+// as wait reports it); a terminating signal exits 128+signo (classic shell
+// convention); supervisor failure exits 1; startup failure exits 2. The
+// result file is authoritative; a missing or malformed result file is a
+// protocol failure, never success. The file is created with O_CREAT|O_EXCL
+// so a non-fresh path fails explicitly instead of being overwritten.
+//
+// Streams: workload stdout is the tracee's own fd 1, never written by the
+// supervisor (the effective-config echo moved to stderr on this path, and
+// every audit/diagnostic line below carries the `ginux:` prefix on fd 2).
+// Audit volume is bounded (see AUDIT_BYTE_BUDGET).
+//
+// Startup-failure choice (stated): when --result-file was supplied, startup
+// failures (bad config, invalid args, bootstrap unavailable) also write
+// outcome=supervisor-error and exit 2. Without the flag no file is created.
+
+pub const MAX_RESULT_PATH_LEN: usize = 512;
+pub const AUDIT_BYTE_BUDGET: usize = 64 * 1024;
+
+static mut RESULT_PATH: [u8; 513] = [0; 513];
+static mut RESULT_LEN: usize = 0;
+static mut RESULT_WANTED: bool = false;
+
+static mut AUDIT_BYTES: usize = 0;
+static mut AUDIT_CAPPED: bool = false;
+
+const OUTCOME_EXITED: u8 = 0;
+const OUTCOME_SIGNALED: u8 = 1;
+const OUTCOME_SUPERVISOR_ERROR: u8 = 2;
+
+fn c_string_len(value: *const u8) -> usize {
+    // Volatile reads: keep LLVM from folding this NUL scan into a `strlen`
+    // call, which the freestanding `-nostdlib -static` link does not provide
+    // (see the volatile shims in `main.rs`).
+    let mut length = 0usize;
+    while unsafe { core::ptr::read_volatile(value.add(length)) } != 0 {
+        length += 1;
+    }
+    length
+}
+
+fn stage_result_path(path: *const u8) {
+    if path.is_null() {
+        return;
+    }
+    let length = c_string_len(path);
+    if length == 0 || length > MAX_RESULT_PATH_LEN {
+        launch_startup_fail(b"result-file path length invalid");
+    }
+    unsafe {
+        core::ptr::copy_nonoverlapping(
+            path,
+            core::ptr::addr_of_mut!(RESULT_PATH).cast::<u8>(),
+            length,
+        );
+        *core::ptr::addr_of_mut!(RESULT_PATH).cast::<u8>().add(length) = 0;
+        RESULT_LEN = length;
+        RESULT_WANTED = true;
+    }
+}
+
+fn launch_rejected(reason: &str) -> ! {
+    write_stderr(b"ginux: launch config rejected reason=");
+    write_stderr(reason.as_bytes());
+    write_stderr(b"\n");
+    write_completion_result(OUTCOME_SUPERVISOR_ERROR, false, 0, false, 0);
+    exit_process(2)
+}
+
+fn launch_read_config(path: *const u8) -> usize {
+    let descriptor = unsafe { syscall4(SYS_OPENAT_HOST, AT_FDCWD, path as usize, O_RDONLY, 0) };
+    if descriptor < 0 {
+        launch_rejected("config open failed");
+    }
+    let mut length = 0usize;
+    while length < MAX_CONFIG_SIZE {
+        let result = unsafe {
+            syscall3(
+                SYS_READ_HOST,
+                descriptor as usize,
+                core::ptr::addr_of_mut!(CONFIG_BYTES)
+                    .cast::<u8>()
+                    .add(length) as usize,
+                MAX_CONFIG_SIZE - length,
+            )
+        };
+        if result < 0 {
+            let _ = unsafe { syscall1(SYS_CLOSE_HOST, descriptor as usize) };
+            launch_rejected("config read failed");
+        }
+        if result == 0 {
+            break;
+        }
+        length += result as usize;
+    }
+    let _ = unsafe { syscall1(SYS_CLOSE_HOST, descriptor as usize) };
+    if length == 0 || length == MAX_CONFIG_SIZE {
+        launch_rejected("config size invalid");
+    }
+    length
+}
+
+fn launch_load_config(path: *const u8) -> DomainConfig {
+    let length = launch_read_config(path);
+    let bytes = unsafe {
+        core::slice::from_raw_parts(core::ptr::addr_of!(CONFIG_BYTES).cast::<u8>(), length)
+    };
+    match DomainConfig::parse(bytes) {
+        Ok(config) => config,
+        Err(error) => launch_rejected(error.as_str()),
+    }
+}
+
+fn print_launch_config(config: &DomainConfig) {
+    let normalized = match config.normalized() {
+        Ok(normalized) => normalized,
+        Err(error) => launch_rejected(error.as_str()),
+    };
+    line_stderr(b"GINUX_CONFIG: accepted format=toml schema=1");
+    line_stderr(b"GINUX_CONFIG_EFFECTIVE_BEGIN");
+    write_stderr(normalized.as_bytes());
+    line_stderr(b"GINUX_CONFIG_EFFECTIVE_END");
+}
+
+pub fn launch_usage() -> ! {
+    line_stderr(b"ginux: launch usage: launch <config> <root> [--result-file <fresh host path>]");
+    exit_process(2)
+}
+
+fn audit_write(bytes: &[u8]) {
+    unsafe {
+        if AUDIT_CAPPED {
+            return;
+        }
+        if AUDIT_BYTES + bytes.len() > AUDIT_BYTE_BUDGET {
+            AUDIT_CAPPED = true;
+            write_stderr(b"ginux: audit truncated budget=65536\n");
+            return;
+        }
+        AUDIT_BYTES += bytes.len();
+    }
+    write_stderr(bytes);
+}
+
+fn audit_line(message: &[u8]) {
+    audit_write(message);
+    audit_write(b"\n");
+}
+
+fn audit_u64(mut value: u64) {
+    let mut buffer = [0u8; 20];
+    let mut index = buffer.len();
+    if value == 0 {
+        audit_write(b"0");
+        return;
+    }
+    while value != 0 {
+        index -= 1;
+        buffer[index] = b'0' + (value % 10) as u8;
+        value /= 10;
+    }
+    audit_write(&buffer[index..]);
+}
+
+fn audit_i64(value: i64) {
+    if value < 0 {
+        audit_write(b"-");
+        audit_u64(value.unsigned_abs());
+    } else {
+        audit_u64(value as u64);
+    }
+}
+
+fn push_u64(buffer: &mut [u8], mut position: usize, mut value: u64) -> usize {
+    let mut digits = [0u8; 20];
+    let mut count = 0usize;
+    if value == 0 {
+        digits[0] = b'0';
+        count = 1;
+    } else {
+        while value != 0 {
+            digits[count] = b'0' + (value % 10) as u8;
+            count += 1;
+            value /= 10;
+        }
+    }
+    let mut index = count;
+    while index > 0 {
+        index -= 1;
+        if position < buffer.len() {
+            buffer[position] = digits[index];
+            position += 1;
+        }
+    }
+    position
+}
+
+fn push_bytes(buffer: &mut [u8], mut position: usize, bytes: &[u8]) -> usize {
+    for byte in bytes {
+        if position < buffer.len() {
+            buffer[position] = *byte;
+            position += 1;
+        }
+    }
+    position
+}
+
+fn write_completion_result(outcome: u8, has_code: bool, code: u64, has_signal: bool, signal: u64) {
+    if unsafe { !RESULT_WANTED } {
+        return;
+    }
+    let mut record = [0u8; 160];
+    let mut position = 0usize;
+    position = push_bytes(&mut record, position, b"{\"version\":1,\"outcome\":\"");
+    position = push_bytes(
+        &mut record,
+        position,
+        match outcome {
+            OUTCOME_SIGNALED => b"signaled",
+            OUTCOME_SUPERVISOR_ERROR => b"supervisor-error",
+            _ => b"exited",
+        },
+    );
+    position = push_bytes(&mut record, position, b"\",\"code\":");
+    if has_code {
+        position = push_u64(&mut record, position, code);
+    } else {
+        position = push_bytes(&mut record, position, b"null");
+    }
+    position = push_bytes(&mut record, position, b",\"signal\":");
+    if has_signal {
+        position = push_u64(&mut record, position, signal);
+    } else {
+        position = push_bytes(&mut record, position, b"null");
+    }
+    position = push_bytes(&mut record, position, b",\"generation\":null}\n");
+    let path = core::ptr::addr_of!(RESULT_PATH).cast::<u8>() as *const u8;
+    const OPEN_FLAGS: usize = 1 | 64 | 128;
+    let descriptor =
+        unsafe { syscall4(SYS_OPENAT_HOST, AT_FDCWD, path as usize, OPEN_FLAGS, 0o644) };
+    if descriptor < 0 {
+        write_stderr(b"ginux: result-file unavailable: host path is not fresh or not creatable\n");
+        return;
+    }
+    let mut offset = 0usize;
+    while offset < position {
+        let written = unsafe {
+            syscall3(
+                SYS_WRITE_HOST,
+                descriptor as usize,
+                record.as_ptr().add(offset) as usize,
+                position - offset,
+            )
+        };
+        if written <= 0 {
+            write_stderr(b"ginux: result-file write failed\n");
+            break;
+        }
+        offset += written as usize;
+    }
+    unsafe {
+        syscall1(SYS_FSYNC, descriptor as usize);
+        syscall1(SYS_CLOSE_HOST, descriptor as usize);
+    }
+}
+
+fn finish_exited(code: u64) {
+    line_stderr(b"ginux: launch supervisor=attached direct-unsupervised-syscalls=0");
+    write_stderr(b"ginux: launch complete workload-exit-code=");
+    write_stderr_u64(code);
+    write_stderr(b"\n");
+    write_completion_result(OUTCOME_EXITED, true, code, false, 0);
+    exit_process(code as usize)
+}
+
+fn finish_signaled(signal: u64) {
+    line_stderr(b"ginux: launch supervisor=attached direct-unsupervised-syscalls=0");
+    write_stderr(b"ginux: launch complete workload-signal=");
+    write_stderr_u64(signal);
+    write_stderr(b"\n");
+    write_completion_result(OUTCOME_SIGNALED, false, 0, true, signal);
+    exit_process(128 + signal as usize)
+}
+
 fn launch_tracee(root_path: *const u8) -> ! {
     static ROOT: &[u8] = b"/\0";
     if unsafe { syscall1(SYS_CHROOT, root_path as usize) } < 0 {
@@ -505,12 +809,35 @@ fn supervise_launch(pid: usize, domain: &mut Domain) -> ! {
     let mut override_result = 0i64;
     loop {
         status = 0;
-        if wait(pid, &mut status) < 0 || !stopped(status) {
-            launch_fail(domain, pid, b"launch tracee escaped supervision");
+        if wait(pid, &mut status) < 0 {
+            launch_fail(domain, pid, b"launch tracee wait failed");
         }
-        let signal = ((status >> 8) & 0xff) as u8;
-        if signal != (5 | 0x80) && signal != 5 {
-            launch_fail(domain, pid, b"unexpected launch trace stop");
+        if stopped(status) {
+            let signal = ((status >> 8) & 0xff) as u8;
+            if signal != (5 | 0x80) && signal != 5 {
+                // Signal-delivery stop, not a syscall trap: forward the
+                // signal and keep supervising so a terminating signal is
+                // reported as outcome=signaled below.
+                audit_write(b"ginux: audit phase=signal-forwarded signal=");
+                audit_u64(signal as u64);
+                audit_write(b"\n");
+                if ptrace(PTRACE_SYSCALL, pid, 0, signal as usize) < 0 {
+                    launch_fail(domain, pid, b"launch signal forward failed");
+                }
+                continue;
+            }
+        } else if launch_exited(status) {
+            let code = launch_exit_code(status) as u64;
+            if domain.task_exited(true).is_err() {
+                launch_fail(domain, pid, b"invalid launch exit transition");
+            }
+            finish_exited(code);
+        } else if launch_signaled(status) {
+            let signal = launch_term_signal(status) as u64;
+            let _ = domain.task_exited(false);
+            finish_signaled(signal);
+        } else {
+            launch_fail(domain, pid, b"launch tracee escaped supervision");
         }
         let mut registers = core::mem::MaybeUninit::<UserRegs>::uninit();
         if ptrace(PTRACE_GETREGS, pid, 0, registers.as_mut_ptr() as usize) < 0 {
@@ -525,11 +852,11 @@ fn supervise_launch(pid: usize, domain: &mut Domain) -> ! {
                     launch_fail(domain, pid, b"launch result override failed");
                 }
             }
-            write_stderr(b"ginux: audit sequence=");
-            write_stderr_u64(sequence);
-            write_stderr(b" phase=exit result=");
-            write_stderr_i64(registers.rax as i64);
-            write_stderr(b"\n");
+            audit_write(b"ginux: audit sequence=");
+            audit_u64(sequence);
+            audit_write(b" phase=exit result=");
+            audit_i64(registers.rax as i64);
+            audit_write(b"\n");
             awaiting_exit = false;
             override_exit = false;
             if ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0 {
@@ -549,11 +876,11 @@ fn supervise_launch(pid: usize, domain: &mut Domain) -> ! {
                     crate::dispatch::Lane::Channel => b"channel",
                     crate::dispatch::Lane::Contract => b"contract",
                 };
-                write_stderr(b"ginux: emulate surface=lane-");
-                write_stderr(lane_name);
-                write_stderr(b" result=");
-                write_stderr_i64(result);
-                write_stderr(b"\n");
+                audit_write(b"ginux: emulate surface=lane-");
+                audit_write(lane_name);
+                audit_write(b" result=");
+                audit_i64(result);
+                audit_write(b"\n");
                 registers.orig_rax = u64::MAX;
                 awaiting_exit = true;
                 override_exit = true;
@@ -566,17 +893,17 @@ fn supervise_launch(pid: usize, domain: &mut Domain) -> ! {
                 continue;
             }
         };
-        write_stderr(b"ginux: audit sequence=");
-        write_stderr_u64(sequence);
-        write_stderr(b" phase=entry syscall=");
-        write_stderr_u64(syscall);
-        write_stderr(b" action=");
+        audit_write(b"ginux: audit sequence=");
+        audit_u64(sequence);
+        audit_write(b" phase=entry syscall=");
+        audit_u64(syscall);
+        audit_write(b" action=");
         match decision.action {
             Action::Emulate if balanced_identity_result(syscall).is_some() => {
                 let result = balanced_identity_result(syscall).unwrap_or(0);
-                write_stderr(b"emulate surface=virtual-identity result=");
-                write_stderr_i64(result);
-                write_stderr(b"\n");
+                audit_write(b"emulate surface=virtual-identity result=");
+                audit_i64(result);
+                audit_write(b"\n");
                 registers.orig_rax = u64::MAX;
                 awaiting_exit = true;
                 override_exit = true;
@@ -588,29 +915,25 @@ fn supervise_launch(pid: usize, domain: &mut Domain) -> ! {
                 }
             }
             Action::Emulate if syscall == SYS_EXIT || syscall == SYS_EXIT_GROUP => {
-                line_stderr(b"emulate result=domain-stop");
-                let code = registers.rdi;
+                audit_line(b"emulate result=domain-stop");
+                let code = registers.rdi & 0xff;
                 let _ = ptrace(PTRACE_KILL, pid, 0, 0);
                 let _ = wait(pid, &mut status);
                 if domain.task_exited(true).is_err() {
                     launch_fail(domain, pid, b"invalid launch exit transition");
                 }
-                line_stderr(b"ginux: launch supervisor=attached direct-unsupervised-syscalls=0");
-                write_stderr(b"ginux: launch complete workload-exit-code=");
-                write_stderr_u64(code);
-                write_stderr(b"\n");
-                exit_process(0)
+                finish_exited(code)
             }
             Action::Mediate if native_arguments_allowed(syscall, &registers) => {
-                write_stderr(b"mediate surface=");
-                line_stderr(balanced_surface_name(balanced_surface(syscall)));
+                audit_write(b"mediate surface=");
+                audit_line(balanced_surface_name(balanced_surface(syscall)));
                 awaiting_exit = true;
                 if ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0 {
                     launch_fail(domain, pid, b"launch mediated syscall failed");
                 }
             }
             Action::Mediate => {
-                line_stderr(b"deny result=-1 reason=invalid-arguments");
+                audit_line(b"deny result=-1 reason=invalid-arguments");
                 registers.orig_rax = u64::MAX;
                 awaiting_exit = true;
                 override_exit = true;
@@ -622,9 +945,9 @@ fn supervise_launch(pid: usize, domain: &mut Domain) -> ! {
                 }
             }
             Action::Deny(errno) => {
-                write_stderr(b"deny result=-");
-                write_stderr_u64(errno as u64);
-                write_stderr(b"\n");
+                audit_write(b"deny result=-");
+                audit_u64(errno as u64);
+                audit_write(b"\n");
                 registers.orig_rax = u64::MAX;
                 awaiting_exit = true;
                 override_exit = true;
@@ -646,6 +969,15 @@ fn launch_exited(status: i32) -> bool {
 
 fn launch_exit_code(status: i32) -> i32 {
     (status >> 8) & 0xff
+}
+
+fn launch_signaled(status: i32) -> bool {
+    let low = status & 0x7f;
+    low != 0 && low != 0x7f
+}
+
+fn launch_term_signal(status: i32) -> i32 {
+    status & 0x7f
 }
 
 fn launch_exit_reason(code: i32) -> &'static [u8] {
@@ -684,6 +1016,7 @@ fn launch_fail(domain: &mut Domain, pid: usize, reason: &[u8]) -> ! {
     write_stderr(b"ginux: launch supervision failure: ");
     write_stderr(reason);
     write_stderr(b"\n");
+    write_completion_result(OUTCOME_SUPERVISOR_ERROR, false, 0, false, 0);
     exit_process(1)
 }
 
@@ -691,6 +1024,7 @@ fn launch_startup_fail(reason: &[u8]) -> ! {
     write_stderr(b"ginux: launch startup failure: ");
     write_stderr(reason);
     write_stderr(b"\n");
+    write_completion_result(OUTCOME_SUPERVISOR_ERROR, false, 0, false, 0);
     exit_process(2)
 }
 
@@ -730,13 +1064,4 @@ fn write_stderr_u64(mut value: u64) {
         value /= 10;
     }
     write_stderr(&buffer[index..]);
-}
-
-fn write_stderr_i64(value: i64) {
-    if value < 0 {
-        write_stderr(b"-");
-        write_stderr_u64(value.unsigned_abs());
-    } else {
-        write_stderr_u64(value as u64);
-    }
 }
