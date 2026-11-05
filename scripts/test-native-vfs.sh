@@ -24,19 +24,19 @@ grep -Fqx 'GINUX_NATIVE: tracee-uid=1000 tracee-gid=1000 root=oci-read-only' "$n
 grep -Fqx 'GINUX_NATIVE_SHELL: PASS' "$native_log"
 grep -Fqx 'GINUX_NATIVE: supervisor=attached direct-unsupervised-syscalls=0' "$native_log"
 grep -Fqx 'GINUX_NATIVE_CHECK: PASS' "$native_log"
-grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ phase=entry syscall=[0-9]+ action=(mediate|emulate|deny)' "$native_log"
-grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ phase=entry syscall=39 action=emulate surface=virtual-identity result=4242$' "$native_log"
-grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ phase=entry syscall=110 action=emulate surface=virtual-identity result=1$' "$native_log"
-grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ phase=entry syscall=16 action=deny result=-38$' "$native_log"
-grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ phase=entry syscall=257 action=mediate surface=immutable-image result=pending$' "$native_log"
-grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ phase=entry syscall=1 action=mediate surface=bootstrap-console result=pending$' "$native_log"
+grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ virtual-pid=[0-9]+ phase=entry syscall=[0-9]+ action=(mediate|emulate|deny)' "$native_log"
+grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ virtual-pid=1 phase=entry syscall=39 action=emulate surface=virtual-identity result=4242$' "$native_log"
+grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ virtual-pid=1 phase=entry syscall=110 action=emulate surface=virtual-identity result=1$' "$native_log"
+grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ virtual-pid=1 phase=entry syscall=16 action=deny result=-38$' "$native_log"
+grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ virtual-pid=1 phase=entry syscall=257 action=mediate surface=immutable-image result=pending$' "$native_log"
+grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ virtual-pid=1 phase=entry syscall=1 action=mediate surface=bootstrap-console result=pending$' "$native_log"
 printf '%s\n' '  native shell: PASS (Rocky loader and Bash, balanced audit surfaces)'
 
 rocky_ssh "sudo /var/tmp/ginux native /var/tmp/gate5.toml '$domain_root' probe" > build/gate5-balanced-probe.log 2>&1
 grep -Fqx 'GINUX_BALANCED_MUTATION: BLOCKED' build/gate5-balanced-probe.log
 grep -Fqx 'GINUX_BALANCED_NETWORK: BLOCKED' build/gate5-balanced-probe.log
-grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ phase=entry syscall=257 action=deny result=-1 reason=invalid-arguments$' build/gate5-balanced-probe.log
-grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ phase=entry syscall=41 action=deny result=-38$' build/gate5-balanced-probe.log
+grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ virtual-pid=1 phase=entry syscall=257 action=deny result=-1 reason=invalid-arguments$' build/gate5-balanced-probe.log
+grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ virtual-pid=1 phase=entry syscall=41 action=deny result=-38$' build/gate5-balanced-probe.log
 rocky_ssh "test ! -e '$domain_root/tmp/ginux-mutation'"
 printf '%s\n' '  sensitive probes: PASS (mutation and networking denied before effect)'
 
