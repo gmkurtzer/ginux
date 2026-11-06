@@ -1,9 +1,10 @@
 #!/bin/sh
 set -eu
 
-. ./scripts/oci-common.sh
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+. "$script_dir/oci-common.sh"
 
-for command in jq shasum; do
+for command in jq; do
     command -v "$command" >/dev/null 2>&1 || {
         printf 'missing required command: %s\n' "$command" >&2
         exit 1

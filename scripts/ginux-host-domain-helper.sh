@@ -3,7 +3,10 @@ set -eu
 
 state_root=/var/lib/ginux
 runtime=/usr/local/libexec/ginux-runtime
-image_tar=$state_root/images/rocky-10-ubi-init-amd64-rootfs.tar
+image_tools=/usr/local/libexec/ginux-image
+image_config=$image_tools/rocky-systemd-oci.env
+image_cache=$state_root/images/rocky-10-ubi-init-amd64
+image_tar=$image_cache/rocky-10-ubi-init-amd64-rootfs.tar
 
 usage() {
     printf '%s\n' 'usage: ginux domain create NAME --config FILE' >&2
@@ -118,11 +121,25 @@ create_domain() {
     validate_name "$name"
     test -r "$config" || { printf 'configuration is not readable: %s\n' "$config" >&2; exit 66; }
     test -x "$runtime" || { printf '%s\n' 'Ginux runtime is not installed' >&2; exit 69; }
-    test -r "$image_tar" || { printf '%s\n' 'Ginux Rocky image is not installed' >&2; exit 69; }
+    test -x "$image_tools/ensure-rocky-oci.sh" || {
+        printf '%s\n' 'Ginux image acquisition support is not installed' >&2
+        exit 69
+    }
     directory=$(domain_dir "$name")
     test ! -e "$directory" || { printf '%s: already exists\n' "$name" >&2; exit 73; }
 
     "$runtime" config "$config" >/dev/null
+    configured_root=$(sed -n 's/^[[:space:]]*root[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$config")
+    expected_root=docker.io/rockylinux/rockylinux@sha256:7a18ce2c9c1e0d8735f3e72685f9666150af25036e7f7b5ee4eede3754496f8c
+    if test "$configured_root" != "$expected_root"; then
+        printf 'unsupported configured image: %s\n' "$configured_root" >&2
+        exit 65
+    fi
+    GINUX_OCI_CONFIG_FILE=$image_config \
+        GINUX_OCI_CACHE_DIR_OVERRIDE=$image_cache \
+        GINUX_OCI_WORK_DIR_OVERRIDE=$state_root/work/oci \
+        GINUX_OCI_NATIVE_ROOTFS_ONLY=1 \
+        "$image_tools/ensure-rocky-oci.sh"
     mkdir -p "$directory/root"
     install -m 600 "$config" "$directory/config.toml"
     tar -xf "$image_tar" -C "$directory/root"

@@ -1,10 +1,11 @@
 #!/bin/sh
 set -eu
 
-. ./scripts/oci-common.sh
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+. "$script_dir/oci-common.sh"
 umask 077
 
-for command in curl jq shasum; do
+for command in curl jq; do
     command -v "$command" >/dev/null 2>&1 || {
         printf 'missing required command: %s\n' "$command" >&2
         exit 1
@@ -41,7 +42,7 @@ fetch_object() {
         -H "Accept: $accept" \
         "https://$GINUX_OCI_REGISTRY/v2/$GINUX_OCI_REPOSITORY/$endpoint/$digest" \
         -o "$partial"
-    actual=$(shasum -a 256 "$partial" | awk '{print $1}')
+    actual=$(oci_sha256_file "$partial")
     if [ "sha256:$actual" != "$digest" ]; then
         printf 'digest mismatch for %s: expected %s, got sha256:%s\n' \
             "$endpoint" "$digest" "$actual" >&2
@@ -99,6 +100,6 @@ jq -n \
 mv "$layout_tmp" "$GINUX_OCI_CACHE_DIR/oci-layout"
 mv "$index_tmp" "$GINUX_OCI_CACHE_DIR/index.json"
 
-./scripts/verify-rocky-oci.sh
+"$script_dir/verify-rocky-oci.sh"
 printf 'OCI_FETCH: cached=%s manifest=%s\n' \
     "$GINUX_OCI_CACHE_DIR" "$GINUX_OCI_MANIFEST_DIGEST"

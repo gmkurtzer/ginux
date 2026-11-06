@@ -125,7 +125,7 @@ test-systemd: build systemd-image-prepare
 test-systemd-live: build systemd-image-prepare
 	@ROCKY_NETWORK_RESTRICT=off ./scripts/with-rocky-host.sh ./scripts/test-systemd-live.sh
 
-test-systemd-interactive: build systemd-image-prepare
+test-systemd-interactive: build
 	@./scripts/test-systemd-interactive.exp
 
 test-cgroup:
@@ -137,7 +137,7 @@ test-block:
 test-network:
 	cargo test -p ginux-devices network_
 
-run-host: build systemd-image-prepare
+run-host: build
 	@./scripts/run-host.sh
 
 run-systemd: run-host

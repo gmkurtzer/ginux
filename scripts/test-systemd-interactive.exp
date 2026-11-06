@@ -16,7 +16,7 @@ expect {
     timeout { puts stderr "Rocky host shell prompt timed out"; exit 72 }
     eof { puts stderr "Rocky host shell exited early"; exit 73 }
 }
-send -- "test -x /usr/local/bin/ginux && test -f /etc/ginux/examples/rocky-systemd.toml && test -f /var/lib/ginux/images/rocky-10-ubi-init-amd64-rootfs.tar && test \"\$(ginux domain list | wc -l)\" -eq 1 && printf 'GINUX_HOST_EMPTY: PASS\\n'\r"
+send -- "test -x /usr/local/bin/ginux && test -f /etc/ginux/examples/rocky-systemd.toml && test -z \"\$(sudo find /var/lib/ginux/images -mindepth 1 -maxdepth 1 -print -quit)\" && test \"\$(ginux domain list | wc -l)\" -eq 1 && printf 'GINUX_HOST_EMPTY: PASS\\n'\r"
 expect {
     -re {GINUX_HOST_EMPTY: PASS} {}
     timeout { puts stderr "installed Ginux host was not empty"; exit 74 }
