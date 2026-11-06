@@ -20,11 +20,10 @@ profile = "balanced"
 backend = "ptrace-native"
 
 [contract]
-profile = "gate9-systemd"
+profile = "gate9-systemd-v1"
 templates = ["network-client-v1"]
-allow = ["syscall:read*"]
-deny = ["ioctl:unknown*"]
-digest = "pending-gate10"
+allow = ["syscall.read*"]
+deny = ["ioctl.*"]
 
 [storage]
 assignments = ["root-overlay"]

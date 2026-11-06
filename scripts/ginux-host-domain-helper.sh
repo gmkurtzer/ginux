@@ -180,7 +180,7 @@ prepare_root() {
     printf 'none / proc rw,nosuid,nodev,noexec,relatime 0 0\n' >"$root/proc/mounts"
     printf '0.00 0.00 0.00 1/1 1\n' >"$root/proc/loadavg"
     : >"$root/proc/cpuinfo"
-    printf 'Ginux userspace kernel 0.1.0 (Linux ABI personality 6.12.0-ginux-abi1; contract gate9-systemd; x86_64)\n' >"$root/proc/version"
+    printf 'Ginux userspace kernel 0.1.0 (Linux ABI personality 6.12.0-ginux-abi1; contract gate9-systemd-v1; x86_64)\n' >"$root/proc/version"
     printf '9223372036854775807\n' >"$root/proc/sys/fs/file-max"
     printf '1048576\n' >"$root/proc/sys/fs/nr_open"
     printf '40\n' >"$root/proc/sys/kernel/cap_last_cap"

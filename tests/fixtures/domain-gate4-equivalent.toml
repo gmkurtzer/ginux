@@ -23,7 +23,7 @@ assignments = []
 assignments = []
 
 [contract]
-profile = "gate4-static"
+profile = "minimal-v1"
 
 [failure]
 policy = "stop"

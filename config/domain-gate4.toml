@@ -16,7 +16,7 @@ profile = "security"
 backend = "interpreter"
 
 [contract]
-profile = "gate4-static"
+profile = "minimal-v1"
 
 [storage]
 assignments = []

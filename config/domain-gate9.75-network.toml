@@ -19,7 +19,7 @@ profile = "balanced"
 backend = "ptrace-native"
 
 [contract]
-profile = "gate9-systemd"
+profile = "gate9-systemd-v1"
 
 [storage]
 assignments = ["root-overlay"]

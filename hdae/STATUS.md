@@ -29,14 +29,25 @@
 - Runtime isolation unit: domain.
 - Policy unit: versioned contract.
 - Initial gate map: twelve checkpoint gates at positions 1 through 11 and 13;
-  Gates 1 through 9.5 are accepted. Gate 9.75 is technically passed on its
-  dedicated branch and awaits delivery and human review.
+  Gates 1 through 9.75 are accepted and closed. Gate 10 is the active
+  checkpoint.
 - Gate 9.75 was added and authorized on 2026-11-04 for comprehensive domain
   configuration, CLI overrides, network selection and policy, port translation,
   volumes, access, identity, resources, devices, and pre-boot hooks.
-- Gate 9.75 is delivered in open pull request
-  https://github.com/gmkurtzer/ginux/pull/229 from dedicated branch
-  `hdae/domain-specification-network-controls`; it is not merged or closed.
+- Gate 9.75 was accepted and closed by the human on 2026-11-06. Pull request
+  https://github.com/gmkurtzer/ginux/pull/229 was merged as `8a475e8b`.
+- Gate 10 is technically passed on `hdae/configurable-contract` and remains a
+  human checkpoint. The versioned catalog contains 182 explicit operations;
+  normalized contracts produce immutable digests and provenance; semantic and
+  syscall decisions are enforced before host effects; and audit detail is
+  bounded to 8,192 records with logarithmic dropped-event accounting.
+- Gate 10 is delivered in open pull request
+  https://github.com/gmkurtzer/ginux/pull/231. It is not merged or accepted.
+- Fresh Gate 10 evidence passed `make test-contract`, `make check`,
+  `make test-contract-runtime`, `make test-systemd`, the Gate 9.75 network and
+  hook regressions, aggregate `make test`, and `make demo-gate-10`. The demo
+  showed strict/systemd plan differences, a real socket denial with no host
+  mutation, the audit bound, dropped-event accounting, and controlled poweroff.
 - Gate 9.75 now has a normalized typed schema and CLI override path plus passing
   Rocky QEMU evidence for interface/source selection, ingress/egress policy,
   translated port ownership, ordinary bind conflicts, network audit records,
@@ -90,16 +101,15 @@ scope, threat model, and invariants.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 9.75, domain specification and network controls, on
-  `hdae/domain-specification-network-controls`.
-- Last evidence: `make demo-gate-9.75`, `make check`, `make test-systemd`, and
-  aggregate `make test` passed. The aggregate run included process supervision
-  and virtual kernel-view integration under Rocky QEMU.
-- Open decision: none. Human direction on 2026-11-06 selected mediated
-  domain-context pre-boot hooks only. Arbitrary host-context hooks are
-  unsupported.
-- Exact next action: human review of pull request 229 and explicit Gate 9.75
-  acceptance or corrective direction.
+- Active gate: Gate 10, configurable contract and audit. Its approved delivery
+  branch is `hdae/configurable-contract`.
+- Last evidence: Gate 10 `make demo-gate-10`, `make check`, `make test-systemd`,
+  Gate 9.75 network and hook regressions, and aggregate `make test` passed under
+  Rocky QEMU after semantic-family enforcement was enabled.
+- Open decision: none. Gate 10 scope and checkpoint policy are approved.
+- Exact next action: review pull request
+  https://github.com/gmkurtzer/ginux/pull/231 and run or inspect
+  `make demo-gate-10`; Gate 10 awaits explicit human acceptance.
 
 ## Evidence
 
@@ -396,24 +406,26 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Human review of https://github.com/gmkurtzer/ginux/pull/229 followed by explicit
-Gate 9.75 acceptance or corrective direction.
+Review pull request https://github.com/gmkurtzer/ginux/pull/231 and run or inspect
+`make demo-gate-10`; Gate 10 remains open pending explicit human acceptance.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 9.75 is technically passed on
-  `hdae/domain-specification-network-controls`, is delivered in pull request
-  229, and awaits human checkpoint review.
-- Last evidence: `make demo-gate-9.75`, `make check`, `make test-systemd`, and
-  aggregate `make test` passed; the aggregate run completed process and kernel
-  view QEMU integration.
+- Active gate: Gate 10, configurable contract and audit, is technically passed
+  on `hdae/configurable-contract` and awaits pull-request delivery and human
+  acceptance.
+- Last evidence: Gate 10 passed 9 contract and 18 domain tests, strict lint,
+  real runtime denial with no host mutation, the complete systemd matrix,
+  Gate 9.75 networking and hook regressions, aggregate `make test`, and the
+  human demonstration under Rocky QEMU.
 - Approved network direction: Gate 9 defaults to full host-shared inbound and
   outbound networking with normal host routing and bind conflicts, under Ginux
   mediation and audit. Gate 9.75 adds comprehensive domain configuration,
   network selection, port controls, and translation.
-- Pull request: https://github.com/gmkurtzer/ginux/pull/229; open and awaiting
-  human checkpoint review.
-- Required human decision: accept Gate 9.75 or provide corrective direction.
+- Gate 9.75 closure: pull request 229 merged as `8a475e8b`; human accepted and
+  closed the gate on 2026-11-06.
+- Required human decision: accept Gate 10 or request revisions at pull request
+  231 after reviewing the demonstration and evidence.
