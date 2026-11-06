@@ -2,13 +2,15 @@
 #![no_main]
 
 use core::arch::global_asm;
+use core::cell::Cell;
 use core::panic::PanicInfo;
+use ginux_contract::{Action as ContractAction, AuditBudget, AuditDisposition, EffectiveContract};
 use ginux_core::{
     balanced_arguments_allowed, balanced_identity_result, balanced_mediated_result,
     balanced_surface, decide, decide_systemd, systemd_surface, Action, SYS_EXIT, SYS_EXIT_GROUP,
     SYS_GETPID, SYS_UNAME, SYS_WRITE,
 };
-use ginux_domain::HookFailurePolicy;
+use ginux_domain::{AuditMode, HookFailurePolicy};
 
 mod channel_hooks;
 mod dispatch;
@@ -3049,11 +3051,14 @@ fn native_main(
     hook_index: Option<usize>,
 ) -> ! {
     let config = load_config(config_path);
+    let contract = config
+        .effective_contract()
+        .unwrap_or_else(|error| config_rejected(error));
     if hook_index.is_some_and(|index| index >= config.pre_boot_hooks.as_slice().len()) {
         config_rejected(ginux_domain::ConfigError::InvalidValue);
     }
     print_domain_start_summary(&config);
-    let mode = if mode == 0 && config.contract_profile.as_bytes() == b"gate9-systemd" {
+    let mode = if mode == 0 && config.contract_profile.as_bytes() == b"gate9-systemd-v1" {
         3
     } else {
         mode
@@ -3090,7 +3095,13 @@ fn native_main(
         write_u64(config.access_gid);
         write_all(b"\n");
     }
-    supervise_native(child as usize, &mut domain, mode, root_descriptor as usize)
+    supervise_native(
+        child as usize,
+        &mut domain,
+        mode,
+        root_descriptor as usize,
+        contract,
+    )
 }
 
 fn native_tracee(
@@ -4514,14 +4525,73 @@ fn native_proc_write_mode(root_descriptor: usize, path: &[u8], bytes: &[u8], mod
     unsafe { syscall1(SYS_CLOSE_HOST, descriptor as usize) == 0 }
 }
 
-fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descriptor: usize) -> ! {
-    let write_all = |bytes: &[u8]| write_all_to(2, bytes);
-    let write_u64 = |value: u64| write_u64_to(2, value);
-    let write_i64 = |value: i64| write_i64_to(2, value);
-    let write_tracee_string = |pid: usize, address: usize| {
-        write_tracee_string_to(2, pid, address);
+fn supervise_native(
+    pid: usize,
+    domain: &mut Domain,
+    mode: usize,
+    root_descriptor: usize,
+    contract: EffectiveContract,
+) -> ! {
+    const AUDIT_EVENT_LIMIT: u64 = 8192;
+    const AUDIT_PREFIX: &[u8] = b"GINUX_NATIVE_AUDIT: sequence=";
+    let audit_mode = domain.config().audit_mode;
+    let audit_domain_id = domain.config().id;
+    let audit_budget = Cell::new(AuditBudget::new(AUDIT_EVENT_LIMIT));
+    let suppress_audit_record = Cell::new(false);
+    let write_all = |bytes: &[u8]| {
+        if bytes == AUDIT_PREFIX {
+            let disposition = if audit_mode == AuditMode::Disabled {
+                AuditDisposition::Drop
+            } else {
+                let mut budget = audit_budget.get();
+                let disposition = budget.admit();
+                audit_budget.set(budget);
+                disposition
+            };
+            match disposition {
+                AuditDisposition::Emit => suppress_audit_record.set(false),
+                AuditDisposition::Drop => suppress_audit_record.set(true),
+                AuditDisposition::DropAndReport(dropped) => {
+                    suppress_audit_record.set(true);
+                    write_all_to(2, b"GINUX_AUDIT_DROPPED: domain=");
+                    write_all_to(2, audit_domain_id.as_bytes());
+                    write_all_to(2, b" contract=");
+                    write_all_to(2, contract.digest());
+                    write_all_to(2, b" limit=");
+                    write_u64_to(2, AUDIT_EVENT_LIMIT);
+                    write_all_to(2, b" dropped=");
+                    write_u64_to(2, dropped);
+                    write_all_to(2, b"\n");
+                }
+            }
+        }
+        if !suppress_audit_record.get() {
+            write_all_to(2, bytes);
+        }
+        if bytes == b"\n" {
+            suppress_audit_record.set(false);
+        }
     };
-    let line = |message: &[u8]| line_to(2, message);
+    let write_u64 = |value: u64| {
+        if !suppress_audit_record.get() {
+            write_u64_to(2, value);
+        }
+    };
+    let write_i64 = |value: i64| {
+        if !suppress_audit_record.get() {
+            write_i64_to(2, value);
+        }
+    };
+    let write_tracee_string = |pid: usize, address: usize| {
+        if !suppress_audit_record.get() {
+            write_tracee_string_to(2, pid, address);
+        }
+    };
+    let line = |message: &[u8]| {
+        if !suppress_audit_record.get() {
+            line_to(2, message);
+        }
+    };
     let domain_start_ns = clock_nanoseconds(CLOCK_MONOTONIC);
     let domain_start_realtime_seconds = clock_nanoseconds(CLOCK_REALTIME) / 1_000_000_000;
 
@@ -4548,7 +4618,7 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descripto
         native_fail(domain, pid, b"native ptrace setup failed");
     }
     if mode == 3 {
-        line(b"GINUX_NATIVE: backend=ptrace-native profile=balanced elf-loader=host contract=gate9-systemd");
+        line(b"GINUX_NATIVE: backend=ptrace-native profile=balanced elf-loader=host contract=gate9-systemd-v1");
         line(b"GINUX_NATIVE: virtual-pid=1 virtual-ppid=0 root=oci-overlay");
     } else {
         line(b"GINUX_NATIVE: backend=ptrace-native profile=balanced elf-loader=host contract=gate5-balanced");
@@ -5035,8 +5105,12 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descripto
             }
             write_all(b"GINUX_NATIVE_AUDIT: sequence=");
             write_u64(sequence);
+            write_all(b" domain=");
+            write_all(audit_domain_id.as_bytes());
             write_all(b" virtual-pid=");
             write_u64(task.virtual_id.pid as u64);
+            write_all(b" contract=");
+            write_all(contract.digest());
             write_all(b" phase=exit result=");
             write_i64(registers.rax as i64);
             write_all(b"\n");
@@ -5369,7 +5443,7 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descripto
                 }
             }
         }
-        let decision = if mode == 3 {
+        let implementation_decision = if mode == 3 {
             decide_systemd(syscall, shared_network)
         } else {
             match decide_native(syscall, registers.rdi, registers.rsi, registers.rdx) {
@@ -5400,10 +5474,31 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descripto
                 }
             }
         };
+        let contract_action = contract.syscall_action(syscall);
+        let decision = match contract_action {
+            ContractAction::Deny(errno) => ginux_core::Decision {
+                syscall,
+                action: Action::Deny(errno),
+            },
+            ContractAction::Emulate | ContractAction::Mediate => implementation_decision,
+        };
         write_all(b"GINUX_NATIVE_AUDIT: sequence=");
         write_u64(sequence);
+        write_all(b" domain=");
+        write_all(audit_domain_id.as_bytes());
         write_all(b" virtual-pid=");
         write_u64(task.virtual_id.pid as u64);
+        write_all(b" contract=");
+        write_all(contract.digest());
+        write_all(b" operation=");
+        if let Some(rule) = contract.syscall_rule(syscall) {
+            write_all(rule.operation.id.as_bytes());
+            write_all(b" policy-source=");
+            write_all(rule.source.as_bytes());
+        } else {
+            write_all(b"unknown");
+            write_all(b" policy-source=default-deny");
+        }
         write_all(b" phase=entry syscall=");
         write_u64(syscall);
         if mode == 3 && syscall == 59 {

@@ -393,8 +393,9 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Create `hdae/configurable-contract` from merged Gate 9.75 `main`, establish the
-Gate 10 contract/catalog baseline, and run its initial tests.
+Commit the tested Gate 10 normalized-contract/runtime-enforcement milestone,
+then add the strict profile, effective-contract inspection, runtime denial and
+audit-flood fixtures, and Gate 10 demonstration.
 
 ## Context recovery
 
@@ -403,9 +404,9 @@ Gate 10 contract/catalog baseline, and run its initial tests.
 - Reload after context shift: required
 - Active gate: Gate 10, configurable contract and audit, is authorized to begin
   on `hdae/configurable-contract`.
-- Last evidence: `make demo-gate-9.75`, `make check`, `make test-systemd`, and
-  aggregate `make test` passed; the aggregate run completed process and kernel
-  view QEMU integration.
+- Last evidence: Gate 10 `make test-contract` passed 7 contract and 18 domain
+  tests with current generated coverage; the x86-64 release runtime built with
+  normalized contract enforcement and bounded audit integration.
 - Approved network direction: Gate 9 defaults to full host-shared inbound and
   outbound networking with normal host routing and bind conflicts, under Ginux
   mediation and audit. Gate 9.75 adds comprehensive domain configuration,

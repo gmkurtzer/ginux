@@ -7,6 +7,51 @@ pub const MAX_OPERATIONS: usize = 192;
 pub const DIGEST_HEX_BYTES: usize = 64;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AuditDisposition {
+    Emit,
+    Drop,
+    DropAndReport(u64),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AuditBudget {
+    limit: u64,
+    emitted: u64,
+    dropped: u64,
+}
+
+impl AuditBudget {
+    pub const fn new(limit: u64) -> Self {
+        Self {
+            limit,
+            emitted: 0,
+            dropped: 0,
+        }
+    }
+
+    pub fn admit(&mut self) -> AuditDisposition {
+        if self.emitted < self.limit {
+            self.emitted += 1;
+            return AuditDisposition::Emit;
+        }
+        self.dropped = self.dropped.saturating_add(1);
+        if self.dropped.is_power_of_two() {
+            AuditDisposition::DropAndReport(self.dropped)
+        } else {
+            AuditDisposition::Drop
+        }
+    }
+
+    pub const fn emitted(self) -> u64 {
+        self.emitted
+    }
+
+    pub const fn dropped(self) -> u64 {
+        self.dropped
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Action {
     Emulate,
     Mediate,
@@ -58,6 +103,25 @@ pub enum Kind {
     Signal,
     Time,
     Memory,
+}
+
+impl Kind {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Syscall => "syscall",
+            Self::Ioctl => "ioctl",
+            Self::Network => "network",
+            Self::Device => "device",
+            Self::Filesystem => "filesystem",
+            Self::Proc => "proc",
+            Self::Sys => "sys",
+            Self::Cgroup => "cgroup",
+            Self::Credential => "credential",
+            Self::Signal => "signal",
+            Self::Time => "time",
+            Self::Memory => "memory",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -688,6 +752,14 @@ pub static CATALOG: &[Operation] = &[
         "test-systemd"
     ),
     syscall!(
+        "getgid",
+        104,
+        Complete,
+        Action::Emulate,
+        "virtual credentials",
+        "test-systemd"
+    ),
+    syscall!(
         "setuid",
         105,
         Partial,
@@ -890,18 +962,18 @@ pub static CATALOG: &[Operation] = &[
     syscall!(
         "mount",
         165,
-        Denied,
-        Action::Deny(1),
-        "always denied",
-        "test-gate975-hooks"
+        Partial,
+        Action::Emulate,
+        "systemd virtual mount subset",
+        "test-systemd"
     ),
     syscall!(
         "umount2",
         166,
-        Denied,
-        Action::Deny(1),
-        "always denied",
-        "test-gate975-hooks"
+        Partial,
+        Action::Emulate,
+        "systemd virtual unmount subset",
+        "test-systemd"
     ),
     syscall!(
         "reboot",
@@ -920,19 +992,27 @@ pub static CATALOG: &[Operation] = &[
         "test-process"
     ),
     syscall!(
-        "listxattr",
-        194,
+        "fsetxattr",
+        190,
         Partial,
         Action::Mediate,
-        "domain path",
+        "domain descriptor",
         "test-systemd"
     ),
     syscall!(
-        "removexattr",
-        197,
+        "fgetxattr",
+        193,
         Partial,
         Action::Mediate,
-        "domain path",
+        "domain descriptor",
+        "test-systemd"
+    ),
+    syscall!(
+        "flistxattr",
+        196,
+        Partial,
+        Action::Mediate,
+        "domain descriptor",
         "test-systemd"
     ),
     syscall!(
@@ -1077,6 +1157,14 @@ pub static CATALOG: &[Operation] = &[
         Partial,
         Action::Emulate,
         "virtual credentials",
+        "test-systemd"
+    ),
+    syscall!(
+        "newfstatat",
+        262,
+        Partial,
+        Action::Mediate,
+        "domain path",
         "test-systemd"
     ),
     syscall!(
@@ -1528,6 +1616,33 @@ pub static CATALOG: &[Operation] = &[
         "test-runtime",
         "host VM backing"
     ),
+    operation!(
+        "device.mmio.direct",
+        Device,
+        Denied,
+        Action::Deny(1),
+        "never exposed to a domain",
+        "contract-deny-negative",
+        "direct hardware authority is prohibited"
+    ),
+    operation!(
+        "network.packet.raw",
+        Network,
+        Planned,
+        Action::Deny(38),
+        "not admitted by catalog version 1",
+        "catalog-planned-deny",
+        "future design requires a mediated packet contract"
+    ),
+    operation!(
+        "device.dma.direct",
+        Device,
+        OutOfScope,
+        Action::Deny(1),
+        "never exposed to a domain",
+        "catalog-out-of-scope-deny",
+        "userspace Ginux does not own host DMA programming"
+    ),
 ];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1625,11 +1740,15 @@ impl EffectiveContract {
     }
 
     pub fn syscall_action(&self, number: u64) -> Action {
+        self.syscall_rule(number)
+            .map(|rule| rule.action)
+            .unwrap_or(Action::Deny(38))
+    }
+
+    pub fn syscall_rule(&self, number: u64) -> Option<&EffectiveRule> {
         self.rules()
             .iter()
             .find(|rule| rule.operation.abi_number == Some(number))
-            .map(|rule| rule.action)
-            .unwrap_or(Action::Deny(38))
     }
 }
 
@@ -1914,5 +2033,41 @@ mod tests {
             .count();
         assert_eq!(selected, 2);
         assert_eq!(CATALOG_VERSION, 1);
+    }
+
+    #[test]
+    fn systemd_dispatch_and_catalog_are_consistent() {
+        for number in 0..=512 {
+            let implementation = ginux_core::decide_systemd(number, true).action;
+            let catalog = CATALOG
+                .iter()
+                .find(|operation| operation.abi_number == Some(number));
+            match (implementation, catalog) {
+                (ginux_core::Action::Deny(_), None) => {}
+                (ginux_core::Action::Emulate, Some(operation)) => {
+                    assert_eq!(operation.action, Action::Emulate, "syscall {number}");
+                }
+                (ginux_core::Action::Mediate, Some(operation)) => {
+                    assert_eq!(operation.action, Action::Mediate, "syscall {number}");
+                }
+                (ginux_core::Action::Deny(errno), Some(operation)) => {
+                    assert_eq!(operation.action, Action::Deny(errno), "syscall {number}");
+                }
+                (_, None) => panic!("implemented syscall {number} is missing from the catalog"),
+            }
+        }
+    }
+
+    #[test]
+    fn audit_budget_is_bounded_and_reports_drops_logarithmically() {
+        let mut budget = AuditBudget::new(2);
+        assert_eq!(budget.admit(), AuditDisposition::Emit);
+        assert_eq!(budget.admit(), AuditDisposition::Emit);
+        assert_eq!(budget.admit(), AuditDisposition::DropAndReport(1));
+        assert_eq!(budget.admit(), AuditDisposition::DropAndReport(2));
+        assert_eq!(budget.admit(), AuditDisposition::Drop);
+        assert_eq!(budget.admit(), AuditDisposition::DropAndReport(4));
+        assert_eq!(budget.emitted(), 2);
+        assert_eq!(budget.dropped(), 4);
     }
 }

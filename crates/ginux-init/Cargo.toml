@@ -9,6 +9,7 @@ name = "ginux"
 path = "src/main.rs"
 
 [dependencies]
+ginux-contract = { path = "../ginux-contract" }
 ginux-core = { path = "../ginux-core" }
 ginux-domain = { path = "../ginux-domain" }
 ginux-devices = { path = "../ginux-devices" }

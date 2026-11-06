@@ -16,7 +16,7 @@ profile = "balanced"
 backend = "ptrace-native"
 
 [contract]
-profile = "gate5-vfs"
+profile = "minimal-v1"
 
 [storage]
 assignments = []

@@ -73,18 +73,33 @@ decisions.
 
 ## Completed work
 
-- [ ] None; gate not started.
+- [x] Added catalog version 1 with bounded canonical operation identifiers,
+  Linux ABI numbers, implementation status, action, constraints, evidence, and
+  limitations across the approved kernel-facing interface families.
+- [x] Added deterministic deny-by-default resolution for the versioned
+  `minimal-v1` and `gate9-systemd-v1` profiles, versioned additive templates,
+  bounded selectors, explicit domain allow/deny layers, provenance, and a
+  derived immutable contract digest.
+- [x] Connected normalized domain configuration and command-line overrides to
+  transactional contract validation; unknown profiles, unmatched selectors,
+  forged derived digests, and invalid overrides fail without mutating the
+  accepted configuration.
+- [x] Connected native syscall dispatch to the resolved explicit contract so a
+  policy denial overrides implementation support while an allow cannot promote
+  an unsupported syscall.
+- [x] Generated `docs/abi-contract-coverage.md` from the catalog and added a
+  dispatcher/catalog/document consistency check.
+- [x] Added a fixed audit-event budget with logarithmic dropped-event reports;
+  structured native records carry domain and effective contract identity.
 
 ## Remaining work
 
-- [ ] Define schema, normalization, versioning, and validation.
-- [ ] Inventory the complete supported and intentionally unsupported ABI surface
-  and generate the human-readable coverage document from it.
-- [ ] Define canonical operation namespaces, bounded glob and resource-selector
-  semantics, template composition, conflict resolution, and provenance.
+- [ ] Complete resource-selector documentation and effective-contract inspection
+  output.
 - [ ] Provide versioned default templates and domain-specific override examples.
-- [ ] Connect every approved interface to contract decisions.
-- [ ] Implement bounded structured audit output and rate behavior.
+- [ ] Complete enforcement and inventory checks for non-syscall interface
+  families.
+- [ ] Exercise bounded structured audit behavior through a runtime flood fixture.
 - [ ] Add profile, bypass, malformed-policy, and log-safety tests.
 
 ## Acceptance criteria
@@ -153,7 +168,10 @@ decisions.
 
 ## Evidence
 
-- Not run.
+- `make test-contract` -> 7 contract tests and 18 domain tests passed; generated
+  documentation matched the catalog.
+- `cargo build -p ginux-init --target x86_64-unknown-linux-gnu --release` ->
+  native runtime contract enforcement and bounded audit integration built.
 
 ## Decisions and limitations
 
@@ -177,7 +195,8 @@ decisions.
 - Planned commits: ABI catalog and generated coverage document; template,
   selector, and override schema; dispatcher and backend integration; structured
   audit and bounds; profiles and security regressions
-- Actual commits: pending
+- Actual commits: `410d9e8f` (versioned operation catalog); normalized-domain,
+  runtime-enforcement, generated-document, and audit milestone pending commit
 
 ## Review policy and outcome
 

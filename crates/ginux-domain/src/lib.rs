@@ -187,6 +187,9 @@ pub enum ConfigError {
     UnsupportedExecution,
     UnsupportedBackend,
     HostAuthority,
+    InvalidContract,
+    ContractDigestMismatch,
+    DerivedField,
 }
 
 impl ConfigError {
@@ -205,6 +208,9 @@ impl ConfigError {
             Self::UnsupportedExecution => "unsupported-execution-profile",
             Self::UnsupportedBackend => "unsupported-backend",
             Self::HostAuthority => "host-authority-reference",
+            Self::InvalidContract => "invalid-contract",
+            Self::ContractDigestMismatch => "contract-digest-mismatch",
+            Self::DerivedField => "derived-field",
         }
     }
 }
@@ -343,12 +349,9 @@ impl ConfigBuilder {
         } else {
             self.id
         };
-        let contract_digest = if self.seen & CONTRACT_DIGEST_BIT != 0 {
-            self.contract_digest
-        } else {
-            Text::from_bytes(b"pending-gate10").map_err(|_| ConfigError::InvalidValue)?
-        };
-        let config = DomainConfig {
+        let supplied_contract_digest = self.contract_digest;
+        let supplied_contract_digest_set = self.seen & CONTRACT_DIGEST_BIT != 0;
+        let mut config = DomainConfig {
             schema_version: self.schema_version,
             id: self.id,
             hostname,
@@ -365,7 +368,7 @@ impl ConfigBuilder {
             contract_templates: self.contract_templates,
             contract_allow: self.contract_allow,
             contract_deny: self.contract_deny,
-            contract_digest,
+            contract_digest: Text::empty(),
             storage: self.storage,
             volumes: self.volumes,
             devices: self.devices,
@@ -387,6 +390,10 @@ impl ConfigBuilder {
             failure_policy: self.failure_policy,
         };
         config.validate()?;
+        config.refresh_contract()?;
+        if supplied_contract_digest_set && supplied_contract_digest != config.contract_digest {
+            return Err(ConfigError::ContractDigestMismatch);
+        }
         Ok(config)
     }
 }
@@ -424,6 +431,15 @@ impl DomainConfig {
     /// validation rules as file configuration. `key` is a fully-qualified
     /// schema path such as `resources.vcpus`; `value` is the TOML value only.
     pub fn apply_override(&mut self, key: &[u8], value: &[u8]) -> Result<(), ConfigError> {
+        let mut candidate = *self;
+        candidate.apply_override_inner(key, value)?;
+        candidate.validate()?;
+        candidate.refresh_contract()?;
+        *self = candidate;
+        Ok(())
+    }
+
+    fn apply_override_inner(&mut self, key: &[u8], value: &[u8]) -> Result<(), ConfigError> {
         match key {
             b"domain.id" => self.id = parse_string(value)?,
             b"domain.root" => self.root = parse_string(value)?,
@@ -454,7 +470,7 @@ impl DomainConfig {
             b"contract.templates" => self.contract_templates = parse_list(value)?,
             b"contract.allow" => self.contract_allow = parse_list(value)?,
             b"contract.deny" => self.contract_deny = parse_list(value)?,
-            b"contract.digest" => self.contract_digest = parse_string(value)?,
+            b"contract.digest" => return Err(ConfigError::DerivedField),
             b"storage.assignments" => self.storage = parse_list(value)?,
             b"volumes.assignments" => self.volumes = parse_list(value)?,
             b"devices.assignments" => self.devices = parse_list(value)?,
@@ -501,7 +517,7 @@ impl DomainConfig {
             }
             _ => return Err(ConfigError::UnknownField),
         }
-        self.validate()
+        Ok(())
     }
 
     fn validate(&self) -> Result<(), ConfigError> {
@@ -558,7 +574,8 @@ impl DomainConfig {
             .iter()
             .chain(self.contract_deny.as_slice())
         {
-            validate_selector(selector.as_bytes())?;
+            ginux_contract::validate_selector(selector.as_bytes())
+                .map_err(|_| ConfigError::InvalidContract)?;
         }
         for (index, volume) in self.volumes.as_slice().iter().enumerate() {
             validate_volume(volume.as_bytes())?;
@@ -619,6 +636,35 @@ impl DomainConfig {
                 return Err(ConfigError::InvalidValue);
             }
         }
+        Ok(())
+    }
+
+    pub fn effective_contract(&self) -> Result<ginux_contract::EffectiveContract, ConfigError> {
+        let mut templates = [&[][..]; ASSIGNMENT_ITEMS];
+        for (index, value) in self.contract_templates.as_slice().iter().enumerate() {
+            templates[index] = value.as_bytes();
+        }
+        let mut allow = [&[][..]; POLICY_ITEMS];
+        for (index, value) in self.contract_allow.as_slice().iter().enumerate() {
+            allow[index] = value.as_bytes();
+        }
+        let mut deny = [&[][..]; POLICY_ITEMS];
+        for (index, value) in self.contract_deny.as_slice().iter().enumerate() {
+            deny[index] = value.as_bytes();
+        }
+        ginux_contract::resolve(
+            self.contract_profile.as_bytes(),
+            &templates[..self.contract_templates.as_slice().len()],
+            &allow[..self.contract_allow.as_slice().len()],
+            &deny[..self.contract_deny.as_slice().len()],
+        )
+        .map_err(|_| ConfigError::InvalidContract)
+    }
+
+    fn refresh_contract(&mut self) -> Result<(), ConfigError> {
+        let effective = self.effective_contract()?;
+        self.contract_digest =
+            Text::from_bytes(effective.digest()).map_err(|_| ConfigError::InvalidContract)?;
         Ok(())
     }
 
@@ -1252,18 +1298,6 @@ fn validate_domain_path(bytes: &[u8]) -> Result<(), ConfigError> {
     Ok(())
 }
 
-fn validate_selector(bytes: &[u8]) -> Result<(), ConfigError> {
-    if bytes.is_empty()
-        || !bytes.iter().all(|byte| {
-            byte.is_ascii_alphanumeric()
-                || matches!(byte, b'-' | b'_' | b'.' | b':' | b'/' | b'@' | b'*' | b'?')
-        })
-    {
-        return Err(ConfigError::InvalidValue);
-    }
-    Ok(())
-}
-
 fn validate_network_attachment(bytes: &[u8]) -> Result<(), ConfigError> {
     if bytes.is_empty()
         || !bytes
@@ -1555,7 +1589,7 @@ memory_mib = 128
 profile = "security"
 backend = "interpreter"
 [contract]
-profile = "gate4-static"
+profile = "minimal-v1"
 [storage]
 assignments = []
 [devices]
@@ -1574,9 +1608,46 @@ policy = "stop"
         assert_eq!(config.schema_version, 1);
         assert_eq!(config.id.as_bytes(), b"demo");
         assert_eq!(config.execution_profile, ExecutionProfile::Security);
+        assert_eq!(config.contract_digest.as_bytes().len(), 64);
         let normalized = config.normalized().unwrap();
         let reparsed = DomainConfig::parse(normalized.as_bytes()).unwrap();
         assert_eq!(reparsed, config);
+    }
+
+    #[test]
+    fn contract_inputs_fail_closed_and_digest_tracks_policy() {
+        let base = DomainConfig::parse(VALID.as_bytes()).unwrap();
+        let original = base.contract_digest;
+
+        let mut changed = base;
+        changed
+            .apply_override(b"contract.allow", b"[\"syscall.clock_*\"]")
+            .unwrap();
+        assert_ne!(changed.contract_digest, original);
+        let before_rejected_override = changed;
+        assert_eq!(
+            changed.apply_override(b"contract.allow", b"[\"syscall.missing*\"]"),
+            Err(ConfigError::InvalidContract)
+        );
+        assert_eq!(changed, before_rejected_override);
+        assert_eq!(
+            changed.apply_override(b"contract.digest", b"\"forged\""),
+            Err(ConfigError::DerivedField)
+        );
+
+        let invalid_profile = VALID.replace("minimal-v1", "unversioned");
+        assert_eq!(
+            DomainConfig::parse(invalid_profile.as_bytes()),
+            Err(ConfigError::InvalidContract)
+        );
+        let mismatched = VALID.replace(
+            "[storage]",
+            "digest = \"0000000000000000000000000000000000000000000000000000000000000000\"\n[storage]",
+        );
+        assert_eq!(
+            DomainConfig::parse(mismatched.as_bytes()),
+            Err(ConfigError::ContractDigestMismatch)
+        );
     }
 
     #[test]
@@ -1627,10 +1698,6 @@ policy = "stop"
             .replace(
                 "environment = [\"GINUX_GATE=4\"]",
                 &format!("environment = [{environment}]"),
-            )
-            .replace(
-                "profile = \"gate4-static\"",
-                &format!("profile = \"{}\"", "c".repeat(IDENTIFIER_BYTES)),
             )
             .replace(
                 "assignments = []",
@@ -1751,8 +1818,8 @@ policy = "stop"
         let complete = VALID
             .replace("[resources]", "[identity]\nhostname = \"demo.example\"\n\n[resources]")
             .replace(
-                "profile = \"gate4-static\"",
-                "profile = \"gate9-systemd\"\ntemplates = [\"network-client-v1\"]\nallow = [\"syscall:read*\"]\ndeny = [\"ioctl:*\"]\ndigest = \"sha256:pending\"",
+                "profile = \"minimal-v1\"",
+                "profile = \"gate9-systemd-v1\"\ntemplates = [\"network-client-v1\"]\nallow = [\"syscall.read*\"]\ndeny = [\"ioctl.*\"]",
             )
             .replace(
                 "[devices]",

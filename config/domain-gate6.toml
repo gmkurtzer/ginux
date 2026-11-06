@@ -16,7 +16,7 @@ profile = "balanced"
 backend = "ptrace-native"
 
 [contract]
-profile = "gate6-devices"
+profile = "minimal-v1"
 
 [storage]
 assignments = ["block0"]
