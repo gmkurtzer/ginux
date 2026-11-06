@@ -13,12 +13,22 @@ import tempfile
 # built without CONFIG_CROSS_MEMORY_ATTACH (ENOSYS) or under a seccomp profile
 # that denies it (EPERM). The supervisor then falls back to ptrace writes,
 # which still fail unmapped buffers with EFAULT but write read-only memory.
-NO_VM_WRITEV = ("wait_status", "ro_status", "bad_status", "bad_rusage")
+# straddle_status and straddle_clone_tid have no such mode: the page after
+# their word is unmapped, so the store faults at the PTRACE_PEEKTEXT of that
+# page before any write, the same with and without the fallback.
+NO_VM_WRITEV = ("wait_status", "ro_status", "bad_status", "bad_rusage", "ro_clone_tid", "bad_clone_tid")
 # ro_status on the ptrace fallback (reduced fidelity): the read-only word is
 # written and the wait succeeds, as before process_vm_writev was used.
 RO_STATUS_FALLBACK = [b"nohang wait=2", b"nohang ro cell=10752", b"nohang rusage=0", b"nohang rewait=-10",
                       b"blocking wait=3", b"blocking ro cell=10752", b"blocking rusage=0",
                       b"blocking rewait=-10"]
+# ro_clone_tid on the fallback: the process and the thread are still created,
+# but the virtual tid is written into the read-only cell, as before
+# process_vm_writev was used.
+RO_CLONE_TID_FALLBACK = [b"process clone=2", b"process wait=2", b"process status=0", b"thread clone=3",
+                         b"process ro cell=2", b"child ro cell=2", b"thread ro cell=3", b"parent ro cell=3",
+                         b"process edge=30583", b"child edge=30583", b"thread edge=30583", b"parent edge=30583"]
+RO_FALLBACK = {"ro_status": RO_STATUS_FALLBACK, "ro_clone_tid": RO_CLONE_TID_FALLBACK}
 FALLBACK_AUDIT = b"tracee-write=ptrace-fallback"
 NO_VM_WRITEV_ERRNO = {"/vm-writev-enosys": 38, "/vm-writev-eperm": 1}
 
@@ -58,6 +68,13 @@ def main():
                 for line in (b" wait=-14", b" ro cell=0", b" edge=30583", b" status=" + status,
                              b" rusage=1515870810", b" rewait=-10")]
 
+    # clone ignores a tid cell the caller cannot write: the process and the
+    # thread are created and run, and the cell and its neighbors stay
+    # untouched in the parent and in the child's own copy.
+    clone_tid_skipped = [b"process clone=2", b"process wait=2", b"process status=0", b"thread clone=3",
+                         *(who + line for who in (b"process", b"child", b"thread", b"parent")
+                           for line in (b" ro cell=0", b" edge=30583"))]
+
     expected = {
         "syscall_abi": [b"set_tid_address(218)=1", b"set_robust_list(273)=0", b"rseq(334)=-22"],
         "untraced_clone": [b"parent clone result=-38", b"parent wait result=-10"],
@@ -88,6 +105,9 @@ def main():
         "bad_status": wait_fault(b"305419896"),
         "bad_rusage": wait_fault(b"10752"),
         "straddle_status": wait_fault(b"305419896"),
+        "ro_clone_tid": clone_tid_skipped,
+        "bad_clone_tid": clone_tid_skipped,
+        "straddle_clone_tid": clone_tid_skipped,
         "alias_writes": [b"plain stdin write=-38", b"dup stdin write=-38", b"dup alias write=-38",
                          b"dup2 stdin write=-38", b"dup3 stdin write=-38", b"fcntl dupfd stdin write=-38",
                          b"fcntl dupfd-cloexec stdin write=-38", b"stdin over stdout write=-38",
@@ -97,7 +117,7 @@ def main():
     }
     for suffix, errno in NO_VM_WRITEV_ERRNO.items():
         for name in NO_VM_WRITEV:
-            base = RO_STATUS_FALLBACK if name == "ro_status" else expected[name]
+            base = RO_FALLBACK.get(name, expected[name])
             expected[name + suffix] = [*base, FALLBACK_AUDIT + b" process_vm_writev=-%d" % errno]
     with tempfile.TemporaryDirectory(prefix="ginux-process-") as directory:
         sentinel = Path(directory) / "sentinel"
@@ -119,7 +139,7 @@ def main():
                     "thread_exec", "exec_failure", "thread_reuse", "clone_tid", "vfork",
                     "concurrent_wait", "remaining_wait", "sigpipe", "segv", "thread_segv",
                     "thread_term", "parked_kill", "parked_term", "ro_status", "bad_status", "bad_rusage",
-                    "straddle_status"
+                    "straddle_status", "ro_clone_tid", "bad_clone_tid", "straddle_clone_tid"
                 ) else 1
                 deferred_stops = 0
                 for run in range(repetitions):
@@ -152,13 +172,13 @@ def main():
                     # A wrapped mode must take the fallback. A plain mode takes
                     # it only where the supervisor finds process_vm_writev
                     # unavailable, which its audit line reports; ro_status
-                    # then has the reduced-fidelity result.
+                    # and ro_clone_tid then have the reduced-fidelity result.
                     fallback = FALLBACK_AUDIT in out
                     if denied and not fallback:
                         raise RuntimeError(f"scenario {mode} did not use the ptrace fallback: {out!r}")
                     required = expected.get(mode, [b"GINUX_NATIVE_PARENT: PASS"])
-                    if mode == "ro_status" and fallback:
-                        required = RO_STATUS_FALLBACK
+                    if mode in RO_FALLBACK and fallback:
+                        required = RO_FALLBACK[mode]
                     required = [*required, b"GATE7_NATIVE_PROCESS: PASS", b"descriptors live-pipes=0"]
                     if proc.returncode or any(item not in out for item in required):
                         raise RuntimeError(f"scenario {mode}: exit={proc.returncode}\n{out!r}\n{err!r}")
@@ -170,6 +190,15 @@ def main():
                             or scenario == "ro_status" and not fallback) and (
                             out.count(b"wait store fault caller=1") != 2 or out.count(b"wait parked caller=1") != 1):
                         raise RuntimeError(f"scenario {mode} did not fault both the direct and the parked wait: {out!r}")
+                    # Every skipped tid store is audited, none claims a
+                    # published thread tid: parent and child cell, for the
+                    # process and for the thread.
+                    if scenario in ("bad_clone_tid", "straddle_clone_tid") or (
+                            scenario == "ro_clone_tid" and not fallback):
+                        if out.count(b"tid store fault virtual-tid=") != 4 or b"thread-tid virtual-tid=" in out:
+                            raise RuntimeError(f"scenario {mode} did not skip all four tid stores: {out!r}")
+                    elif scenario == "ro_clone_tid" and b"tid store fault" in out:
+                        raise RuntimeError(f"scenario {mode} faulted a tid store on the fallback: {out!r}")
                     deferred = out.count(b"newborn-stop=deferred")
                     if deferred != out.count(b"newborn-stop=registered"):
                         raise RuntimeError(f"scenario {mode} left a child stop unregistered: {out!r}")

@@ -34,6 +34,11 @@ static volatile int ready, completed;
 static long selected_child;
 static char second_stack[16384] __attribute__((aligned(16)));
 #endif
+#if defined(CASE_ro_clone_tid) || defined(CASE_bad_clone_tid) || defined(CASE_straddle_clone_tid)
+static const int ro_tid_cell __attribute__((section(".rodata"), aligned(8)));
+static volatile unsigned char *tid_edge;
+static int clone_round;
+#endif
 extern long make_thread(word flags, void *stack, word ptid, word ctid);
 void thread_body(void) {
 #if defined(CASE_concurrent_wait) || defined(CASE_remaining_wait)
@@ -52,6 +57,10 @@ void thread_body(void) {
 #elif defined(CASE_clone_tid)
     show("child tid cell=",child_tid);
     show("child gettid=",call3(186,0,0,0));
+#elif defined(CASE_ro_clone_tid) || defined(CASE_bad_clone_tid) || defined(CASE_straddle_clone_tid)
+    show(clone_round?"thread ro cell=":"child ro cell=",*(volatile const int *)&ro_tid_cell);
+    show(clone_round?"thread edge=":"child edge=",tid_edge[0]|tid_edge[1]<<8);
+    __atomic_store_n(&done,1,__ATOMIC_RELEASE);
 #elif defined(CASE_copied_files)
     show("child close=",call3(3,descriptors[1],0,0));
     __atomic_store_n(&done,1,__ATOMIC_RELEASE);
@@ -347,6 +356,38 @@ long probe_main(word *stack) {
         show(round?"blocking rusage=":"nohang rusage=",usage[0]);
         show(round?"blocking rewait=":"nohang rewait=",call3(61,child,0,0));
     }
+#elif defined(CASE_ro_clone_tid) || defined(CASE_bad_clone_tid) || defined(CASE_straddle_clone_tid)
+    // clone stores the new tid like the kernel's own put_user: a parent or
+    // child tid pointer the caller cannot write is skipped, the clone still
+    // succeeds and the memory stays untouched. Round 0 creates a process
+    // (CLONE_PARENT_SETTID in the parent, CLONE_CHILD_SETTID in the child's
+    // own copy), round 1 a thread. Both pointers name the same cell.
+    extern char _end[];
+    word page_end=((word)_end+4095)&~(word)4095;
+    if(page_end-(word)_end<2)return 30;
+    tid_edge=(volatile unsigned char *)(page_end-2);
+    tid_edge[0]=0x77;
+    tid_edge[1]=0x77;
+#if defined(CASE_ro_clone_tid)
+    word cell=(word)&ro_tid_cell;
+#elif defined(CASE_bad_clone_tid)
+    word cell=0x1000;
+#else
+    // The last two bytes before the unmapped page after the bss.
+    word cell=page_end-2;
+#endif
+    long child=make_thread(0x1100011,child_stack+sizeof child_stack,cell,cell);
+    show("process clone=",child);
+    show("process ro cell=",*(volatile const int *)&ro_tid_cell);
+    show("process edge=",tid_edge[0]|tid_edge[1]<<8);
+    int status=0x12345678;
+    show("process wait=",call3(61,child,(word)&status,0));
+    show("process status=",status);
+    clone_round=1;
+    show("thread clone=",make_thread(0x1110f00,child_stack+sizeof child_stack,cell,cell));
+    while(!__atomic_load_n(&done,__ATOMIC_ACQUIRE))call3(186,0,0,0);
+    show("parent ro cell=",*(volatile const int *)&ro_tid_cell);
+    show("parent edge=",tid_edge[0]|tid_edge[1]<<8);
 #elif defined(CASE_kill_badsig)
     long pid=call3(39,0,0,0);
     show("kill signal 65=",call3(62,pid,65,0));
