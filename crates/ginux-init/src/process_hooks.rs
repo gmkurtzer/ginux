@@ -11,7 +11,12 @@
 //! Signal handlers, job control, and PI futex operations are unsupported.
 //! These hooks do not enable process creation in configured `launch`.
 
-use crate::supervisor::{ENOSYS, SYS_FORK};
+use crate::supervisor::ENOSYS;
+
+/// Guest `fork` number. This stays the x86_64 Linux number until domain
+/// mediation learns the target architecture's syscall table. The daemon's own
+/// host fork is [`crate::supervisor::host_fork`], not this constant.
+pub const SYS_FORK: u64 = 57;
 
 /// Raw clone entry: what glibc `fork()` and the `posix_spawn` fallback emit.
 pub const SYS_CLONE: u64 = 56;

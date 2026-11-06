@@ -1,7 +1,6 @@
 #![no_std]
 #![no_main]
 
-use core::arch::global_asm;
 use core::panic::PanicInfo;
 use ginux_core::{
     balanced_arguments_allowed, balanced_identity_result, balanced_mediated_result,
@@ -9,6 +8,7 @@ use ginux_core::{
     SYS_GETPID, SYS_UNAME, SYS_WRITE,
 };
 
+mod arch;
 mod channel_hooks;
 mod dispatch;
 mod fs_hooks;
@@ -29,17 +29,20 @@ use crate::process_hooks::{
     SYS_PIPE2, SYS_READ, SYS_RSEQ, SYS_SET_ROBUST_LIST, SYS_SET_TID_ADDRESS,
 };
 use crate::supervisor::{
-    exit_process, line, ptrace, read_tracee_word, stopped, syscall0, syscall1, syscall2, syscall3,
-    syscall4, syscall5, wait, write_all, write_i64, write_u64, UserRegs, AT_FDCWD, CLOCK_MONOTONIC,
-    CLOCK_PROCESS_CPUTIME_ID, DOMAIN_GID, DOMAIN_UID, EBADF, ECHILD, EINVAL, ENOSYS, EPERM, ESRCH,
-    O_RDONLY, O_RDWR, PR_SET_NO_NEW_PRIVS, PTRACE_CONT, PTRACE_EVENT_EXEC, PTRACE_EVENT_FORK,
-    PTRACE_GETEVENTMSG, PTRACE_GETREGS, PTRACE_KILL, PTRACE_O_EXITKILL, PTRACE_O_TRACEEXEC,
-    PTRACE_O_TRACEFORK, PTRACE_O_TRACESYSGOOD, PTRACE_PEEKTEXT, PTRACE_POKETEXT, PTRACE_SETOPTIONS,
-    PTRACE_SETREGS, PTRACE_SYSCALL, PTRACE_SYSEMU, PTRACE_TRACEME, SIGCHLD, SIGINT, SIGKILL,
-    SIGTERM, SIG_BLOCK, SYS_CHDIR, SYS_CHROOT, SYS_CLOCK_GETTIME, SYS_CLOSE_HOST, SYS_EXECVE,
-    SYS_EXIT_HOST, SYS_FORK, SYS_FSTAT, SYS_FSYNC, SYS_KILL, SYS_OPENAT_HOST, SYS_PAUSE, SYS_PRCTL,
-    SYS_PREAD64, SYS_PTRACE, SYS_PWRITE64, SYS_READ_HOST, SYS_RT_SIGPROCMASK, SYS_SETGID,
-    SYS_SETGROUPS, SYS_SETUID, SYS_SIGNALFD4, SYS_WAIT4, SYS_WRITE_HOST, VIRTUAL_PID,
+    exit_process, host_fork, host_pause, line, ptrace, read_tracee_word, stopped, syscall1,
+    syscall2, syscall3, syscall4, syscall5, wait, write_all, write_i64, write_u64, UserRegs,
+    AT_FDCWD, CLOCK_MONOTONIC, CLOCK_PROCESS_CPUTIME_ID, DOMAIN_GID, DOMAIN_UID, EBADF, ECHILD,
+    EINVAL, ENOSYS, EPERM, ESRCH, O_RDONLY, O_RDWR, PR_SET_NO_NEW_PRIVS, PTRACE_CONT,
+    PTRACE_EVENT_EXEC, PTRACE_EVENT_FORK, PTRACE_GETEVENTMSG, PTRACE_GETREGS, PTRACE_KILL,
+    PTRACE_O_EXITKILL, PTRACE_O_TRACEEXEC, PTRACE_O_TRACEFORK, PTRACE_O_TRACESYSGOOD,
+    PTRACE_PEEKTEXT, PTRACE_POKETEXT, PTRACE_SETOPTIONS, PTRACE_SETREGS, PTRACE_SYSCALL,
+    PTRACE_SYSEMU, PTRACE_TRACEME, SIGCHLD, SIGINT, SIGKILL, SIGTERM, SIG_BLOCK, SYS_CHDIR,
+    SYS_CHROOT, SYS_CLOCK_GETTIME, SYS_CLOSE_HOST, SYS_CLOSE_RANGE_HOST, SYS_DUP_HOST, SYS_EXECVE,
+    SYS_EXIT_HOST, SYS_FCNTL_HOST, SYS_FSTAT, SYS_FSYNC, SYS_GETDENTS64_HOST, SYS_KILL,
+    SYS_MKDIRAT_HOST, SYS_OPENAT_HOST, SYS_PRCTL, SYS_PREAD64, SYS_PTRACE, SYS_PWRITE64,
+    SYS_READ_HOST, SYS_RT_SIGACTION_HOST, SYS_RT_SIGPROCMASK, SYS_SCHED_SETAFFINITY_HOST,
+    SYS_SETGID, SYS_SETGROUPS, SYS_SETRLIMIT_HOST, SYS_SETUID, SYS_SIGNALFD4, SYS_SYMLINKAT_HOST,
+    SYS_UNLINKAT_HOST, SYS_WAIT4, SYS_WRITE_HOST, VIRTUAL_PID,
 };
 use crate::supervisor::{
     fault_errno, poke_tracee_bytes, write_tracee_bytes as write_tracee_bytes_result, EFAULT,
@@ -61,25 +64,6 @@ use ginux_process::{
 use ginux_runtime::{execute, AddressSpace, AuditAction, LoadError};
 use ginux_vfs::{BaseReader, Index, VfsError, VirtualFs, O_CREATE, O_READ, O_WRITE};
 
-global_asm!(
-    ".global _start",
-    ".type _start,@function",
-    "_start:",
-    "xor %rbp, %rbp",
-    "mov %rsp, %rdi",
-    "andq $-16, %rsp",
-    "call rust_main",
-    "ud2",
-    options(att_syntax)
-);
-
-const SYS_DUP_HOST: usize = 32;
-const SYS_FCNTL_HOST: usize = 72;
-const SYS_SCHED_SETAFFINITY_HOST: usize = 203;
-const SYS_MKDIRAT_HOST: usize = 258;
-const SYS_UNLINKAT_HOST: usize = 263;
-const SYS_SYMLINKAT_HOST: usize = 266;
-const SYS_GETDENTS64_HOST: usize = 217;
 const AT_REMOVEDIR: usize = 0x200;
 const O_WRONLY: usize = 1;
 const O_CREATE_HOST: usize = 0x40;
@@ -236,6 +220,7 @@ extern "C" fn rust_main(initial_stack: *const usize) -> ! {
             launch_main(config_path, root_path, result_path)
         }
         Some(Command::LaunchUsage) => launch_usage(),
+        Some(Command::Arch) => arch_main(),
         Some(Command::Usage) => usage(),
         None => gate1_main(),
     }
@@ -592,7 +577,7 @@ fn process_native_main(config_path: *const u8, fixture_path: *const u8) -> ! {
     if domain.start().is_err() {
         process_fail(b"native process domain start failed");
     }
-    let child = unsafe { syscall0(SYS_FORK) };
+    let child = host_fork();
     if child < 0 {
         process_fail(b"native process tracee fork failed");
     }
@@ -603,12 +588,9 @@ fn process_native_main(config_path: *const u8, fixture_path: *const u8) -> ! {
 }
 
 fn process_native_tracee(fixture_path: *const u8) -> ! {
-    const SYS_CLOSE_RANGE: usize = 436;
-    const SYS_RT_SIGACTION: usize = 13;
-    const SYS_SETRLIMIT: usize = 160;
     const RLIMIT_CORE: usize = 4;
     const SIGPIPE: usize = 13;
-    if unsafe { syscall3(SYS_CLOSE_RANGE, 3, u32::MAX as usize, 0) } < 0 {
+    if unsafe { syscall3(SYS_CLOSE_RANGE_HOST, 3, u32::MAX as usize, 0) } < 0 {
         native_tracee_setup_fail(132);
     }
     // Forwarded core-dumping signals must not make the host write a core
@@ -617,10 +599,10 @@ fn process_native_tracee(fixture_path: *const u8) -> ! {
     // action whatever the launcher ignored, as exec keeps `SIG_IGN`.
     let no_core = [0usize; 2];
     let default_action = [0usize; 4];
-    if unsafe { syscall2(SYS_SETRLIMIT, RLIMIT_CORE, no_core.as_ptr() as usize) } < 0
+    if unsafe { syscall2(SYS_SETRLIMIT_HOST, RLIMIT_CORE, no_core.as_ptr() as usize) } < 0
         || unsafe {
             syscall4(
-                SYS_RT_SIGACTION,
+                SYS_RT_SIGACTION_HOST,
                 SIGPIPE,
                 default_action.as_ptr() as usize,
                 0,
@@ -3055,7 +3037,7 @@ fn native_main(config_path: *const u8, root_path: *const u8, mode: usize) -> ! {
     if root_descriptor < 0 {
         domain_fail(&mut domain, b"native root open failed");
     }
-    let child = unsafe { syscall0(SYS_FORK) };
+    let child = host_fork();
     if child < 0 {
         domain_fail(&mut domain, b"native tracee fork failed");
     }
@@ -7168,14 +7150,14 @@ fn lifecycle_main(config_path: *const u8) -> ! {
     if signal_fd < 0 {
         domain_fail(&mut domain, b"signalfd setup failed");
     }
-    let child = unsafe { syscall0(SYS_FORK) };
+    let child = host_fork();
     if child < 0 {
         let _ = unsafe { syscall1(SYS_CLOSE_HOST, signal_fd as usize) };
         domain_fail(&mut domain, b"helper fork failed");
     }
     if child == 0 {
         loop {
-            let _ = unsafe { syscall0(SYS_PAUSE) };
+            let _ = host_pause();
         }
     }
 
@@ -7274,10 +7256,34 @@ fn domain_fail(domain: &mut Domain, reason: &[u8]) -> ! {
     exit_process(1)
 }
 
+/// Report the daemon architecture and prove the host fork/wait path.
+fn arch_main() -> ! {
+    #[cfg(target_arch = "x86_64")]
+    line(b"GINUX_ARCH: x86_64");
+    #[cfg(target_arch = "aarch64")]
+    line(b"GINUX_ARCH: aarch64");
+    let child = host_fork();
+    if child < 0 {
+        line(b"GINUX_ARCH: fork=failed");
+        exit_process(1);
+    }
+    if child == 0 {
+        exit_process(0);
+    }
+    let mut status = 0i32;
+    let waited = wait(child as usize, &mut status);
+    if waited != child || status != 0 {
+        line(b"GINUX_ARCH: fork=failed");
+        exit_process(1);
+    }
+    line(b"GINUX_ARCH: fork=ok");
+    exit_process(0)
+}
+
 fn gate1_main() -> ! {
     line(b"GINUX: interception platform=ptrace-sysemu");
 
-    let child = unsafe { syscall0(SYS_FORK) };
+    let child = host_fork();
     if child < 0 {
         fail(b"fork failed");
     }

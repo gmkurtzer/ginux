@@ -14,12 +14,13 @@ use crate::dispatch::{
     balanced_surface_name, decide_native, native_arguments_allowed, NativeDecision,
 };
 use crate::supervisor::{
-    exit_process, line, ptrace, stopped, syscall0, syscall1, syscall2, syscall3, syscall4,
+    exit_process, host_fork, line, ptrace, stopped, syscall1, syscall2, syscall3, syscall4,
     syscall5, wait, write_all, UserRegs, AT_FDCWD, DOMAIN_GID, DOMAIN_UID, O_RDONLY,
     PR_SET_NO_NEW_PRIVS, PTRACE_GETREGS, PTRACE_O_EXITKILL, PTRACE_O_TRACESYSGOOD,
     PTRACE_SETOPTIONS, PTRACE_SETREGS, PTRACE_SYSCALL, PTRACE_TRACEME, SYS_CHDIR, SYS_CHROOT,
-    SYS_CLOSE_HOST, SYS_EXECVE, SYS_EXIT_HOST, SYS_FORK, SYS_FSYNC, SYS_OPENAT_HOST, SYS_PRCTL,
-    SYS_PTRACE, SYS_READ_HOST, SYS_SETGID, SYS_SETGROUPS, SYS_SETUID, SYS_WRITE_HOST,
+    SYS_CLOSE_HOST, SYS_CLOSE_RANGE_HOST, SYS_EXECVE, SYS_EXIT_HOST, SYS_FCNTL_HOST, SYS_FSYNC,
+    SYS_LAUNCH_MKDIRAT, SYS_OPENAT_HOST, SYS_PRCTL, SYS_PTRACE, SYS_READ_HOST, SYS_SETGID,
+    SYS_SETGROUPS, SYS_SETUID, SYS_WRITE_HOST,
 };
 
 pub const MAX_ELF_SIZE: usize = 64 * 1024;
@@ -45,6 +46,7 @@ pub enum Command {
     KernelViews(*const u8),
     Launch(*const u8, *const u8, *const u8),
     LaunchUsage,
+    Arch,
     Usage,
 }
 
@@ -56,6 +58,9 @@ pub fn parse_argv(argc: usize, argv: *const usize) -> Option<Command> {
         return None;
     }
     let command = unsafe { *argv.add(1) as *const u8 };
+    if argc == 2 && c_string_equals(command, b"arch") {
+        return Some(Command::Arch);
+    }
     if c_string_equals(command, b"launch") && argc < 4 {
         return Some(Command::LaunchUsage);
     }
@@ -283,8 +288,6 @@ pub const MAX_LAUNCH_ARG_LEN: usize = 128;
 pub const MAX_LAUNCH_ENV_LEN: usize = 256;
 pub const MAX_LAUNCH_PATH_LEN: usize = 128;
 
-const SYS_MKDIRAT: usize = 259;
-
 static mut LAUNCH_EXEC: [u8; 129] = [0; 129];
 static mut LAUNCH_ARGS: [u8; 7 * 129] = [0; 7 * 129];
 static mut LAUNCH_ENV: [u8; 8 * 257] = [0; 8 * 257];
@@ -302,7 +305,7 @@ pub fn launch_main(config_path: *const u8, root_path: *const u8, result_path: *c
         launch_domain_fail(&mut domain, b"invalid launch start transition");
     }
     stage_launch(&config);
-    let child = unsafe { syscall0(SYS_FORK) };
+    let child = host_fork();
     if child < 0 {
         launch_domain_fail(&mut domain, b"launch tracee fork failed");
     }
@@ -503,9 +506,9 @@ fn stage_result_path(path: *const u8) {
     }
     if descriptor < 3 {
         // Keep the result separate from even closed stdin/stdout/stderr.
-        const SYS_FCNTL: usize = 72;
         const F_DUPFD_CLOEXEC: usize = 1030;
-        let duplicate = unsafe { syscall3(SYS_FCNTL, descriptor as usize, F_DUPFD_CLOEXEC, 3) };
+        let duplicate =
+            unsafe { syscall3(SYS_FCNTL_HOST, descriptor as usize, F_DUPFD_CLOEXEC, 3) };
         let _ = unsafe { syscall1(SYS_CLOSE_HOST, descriptor as usize) };
         if duplicate < 0 {
             launch_startup_fail(b"result-file descriptor reservation failed");
@@ -595,6 +598,7 @@ pub fn usage() -> ! {
     line_stderr(b"ginux: usage: ginux device-bench <config> <block> <kind>");
     line_stderr(b"ginux: usage: ginux vfs <config> <rootfs> <index>");
     line_stderr(b"ginux: usage: ginux launch <config> <root> [--result-file <fresh host path>]");
+    line_stderr(b"ginux: usage: ginux arch");
     exit_process(2)
 }
 
@@ -794,8 +798,7 @@ fn launch_tracee(root_path: *const u8) -> ! {
     static ROOT: &[u8] = b"/\0";
     // Host descriptors (including the result file) must not grant the
     // workload authority outside the supplied root. Only stdio is shared.
-    const SYS_CLOSE_RANGE: usize = 436;
-    if unsafe { syscall3(SYS_CLOSE_RANGE, 3, u32::MAX as usize, 0) } < 0 {
+    if unsafe { syscall3(SYS_CLOSE_RANGE_HOST, 3, u32::MAX as usize, 0) } < 0 {
         tracee_setup_fail(
             b"ginux: launch bootstrap failed: descriptor cleanup failed\n",
             129,
@@ -814,7 +817,7 @@ fn launch_tracee(root_path: *const u8) -> ! {
         );
     }
     let workdir = core::ptr::addr_of!(LAUNCH_WORKDIR).cast::<u8>();
-    let _ = unsafe { syscall3(SYS_MKDIRAT, AT_FDCWD, workdir as usize, 0o755) };
+    let _ = unsafe { syscall3(SYS_LAUNCH_MKDIRAT, AT_FDCWD, workdir as usize, 0o755) };
     if unsafe { syscall4(SYS_PTRACE, PTRACE_TRACEME, 0, 0, 0) } < 0 {
         tracee_setup_fail(
             b"ginux: launch bootstrap unavailable: ptrace traceme failed\n",

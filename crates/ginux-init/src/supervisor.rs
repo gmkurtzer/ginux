@@ -4,34 +4,17 @@
 //! supervisor console writers shared by every entry point. No workload policy
 //! lives here; dispatch decisions belong to `dispatch`.
 
-use core::arch::asm;
 use core::sync::atomic::{AtomicU8, Ordering};
 
-pub const SYS_WRITE_HOST: usize = 1;
-pub const SYS_READ_HOST: usize = 0;
-pub const SYS_CLOSE_HOST: usize = 3;
-pub const SYS_FSTAT: usize = 5;
-pub const SYS_RT_SIGPROCMASK: usize = 14;
-pub const SYS_PREAD64: usize = 17;
-pub const SYS_PWRITE64: usize = 18;
-pub const SYS_FSYNC: usize = 74;
-pub const SYS_CLOCK_GETTIME: usize = 228;
-pub const SYS_CHDIR: usize = 80;
-pub const SYS_SETGID: usize = 106;
-pub const SYS_SETUID: usize = 105;
-pub const SYS_SETGROUPS: usize = 116;
-pub const SYS_PRCTL: usize = 157;
-pub const SYS_CHROOT: usize = 161;
-pub const SYS_PAUSE: usize = 34;
-pub const SYS_FORK: usize = 57;
-pub const SYS_EXECVE: usize = 59;
-pub const SYS_EXIT_HOST: usize = 60;
-pub const SYS_WAIT4: usize = 61;
-pub const SYS_KILL: usize = 62;
-pub const SYS_PTRACE: usize = 101;
-pub const SYS_OPENAT_HOST: usize = 257;
-pub const SYS_SIGNALFD4: usize = 289;
-pub const SYS_PROCESS_VM_WRITEV: usize = 311;
+pub use crate::arch::{
+    host_fork, host_pause, syscall1, syscall2, syscall3, syscall4, syscall5, syscall6, SYS_CHDIR,
+    SYS_CHROOT, SYS_CLOCK_GETTIME, SYS_CLOSE_HOST, SYS_CLOSE_RANGE_HOST, SYS_DUP_HOST, SYS_EXECVE,
+    SYS_EXIT_HOST, SYS_FCNTL_HOST, SYS_FSTAT, SYS_FSYNC, SYS_GETDENTS64_HOST, SYS_KILL,
+    SYS_LAUNCH_MKDIRAT, SYS_MKDIRAT_HOST, SYS_OPENAT_HOST, SYS_PREAD64, SYS_PRCTL,
+    SYS_PROCESS_VM_WRITEV, SYS_PTRACE, SYS_PWRITE64, SYS_READ_HOST, SYS_RT_SIGACTION_HOST,
+    SYS_RT_SIGPROCMASK, SYS_SCHED_SETAFFINITY_HOST, SYS_SETGID, SYS_SETGROUPS, SYS_SETRLIMIT_HOST,
+    SYS_SETUID, SYS_SIGNALFD4, SYS_SYMLINKAT_HOST, SYS_UNLINKAT_HOST, SYS_WAIT4, SYS_WRITE_HOST,
+};
 pub const AT_FDCWD: usize = (-100isize) as usize;
 pub const O_RDONLY: usize = 0;
 pub const O_RDWR: usize = 2;
@@ -272,131 +255,4 @@ pub fn exit_process(code: usize) -> ! {
     loop {
         core::hint::spin_loop();
     }
-}
-
-#[inline(always)]
-pub unsafe fn syscall0(number: usize) -> isize {
-    let result: isize;
-    asm!(
-        "syscall",
-        inlateout("rax") number as isize => result,
-        lateout("rcx") _,
-        lateout("r11") _,
-        options(nostack)
-    );
-    result
-}
-
-#[inline(always)]
-pub unsafe fn syscall1(number: usize, a1: usize) -> isize {
-    let result: isize;
-    asm!(
-        "syscall",
-        inlateout("rax") number as isize => result,
-        in("rdi") a1,
-        lateout("rcx") _,
-        lateout("r11") _,
-        options(nostack)
-    );
-    result
-}
-
-#[inline(always)]
-pub unsafe fn syscall2(number: usize, a1: usize, a2: usize) -> isize {
-    let result: isize;
-    asm!(
-        "syscall",
-        inlateout("rax") number as isize => result,
-        in("rdi") a1,
-        in("rsi") a2,
-        lateout("rcx") _,
-        lateout("r11") _,
-        options(nostack)
-    );
-    result
-}
-
-#[inline(always)]
-pub unsafe fn syscall3(number: usize, a1: usize, a2: usize, a3: usize) -> isize {
-    let result: isize;
-    asm!(
-        "syscall",
-        inlateout("rax") number as isize => result,
-        in("rdi") a1,
-        in("rsi") a2,
-        in("rdx") a3,
-        lateout("rcx") _,
-        lateout("r11") _,
-        options(nostack)
-    );
-    result
-}
-
-#[inline(always)]
-pub unsafe fn syscall4(number: usize, a1: usize, a2: usize, a3: usize, a4: usize) -> isize {
-    let result: isize;
-    asm!(
-        "syscall",
-        inlateout("rax") number as isize => result,
-        in("rdi") a1,
-        in("rsi") a2,
-        in("rdx") a3,
-        in("r10") a4,
-        lateout("rcx") _,
-        lateout("r11") _,
-        options(nostack)
-    );
-    result
-}
-
-#[inline(always)]
-pub unsafe fn syscall5(
-    number: usize,
-    a1: usize,
-    a2: usize,
-    a3: usize,
-    a4: usize,
-    a5: usize,
-) -> isize {
-    let result: isize;
-    asm!(
-        "syscall",
-        inlateout("rax") number as isize => result,
-        in("rdi") a1,
-        in("rsi") a2,
-        in("rdx") a3,
-        in("r10") a4,
-        in("r8") a5,
-        lateout("rcx") _,
-        lateout("r11") _,
-        options(nostack)
-    );
-    result
-}
-
-#[inline(always)]
-pub unsafe fn syscall6(
-    number: usize,
-    a1: usize,
-    a2: usize,
-    a3: usize,
-    a4: usize,
-    a5: usize,
-    a6: usize,
-) -> isize {
-    let result: isize;
-    asm!(
-        "syscall",
-        inlateout("rax") number as isize => result,
-        in("rdi") a1,
-        in("rsi") a2,
-        in("rdx") a3,
-        in("r10") a4,
-        in("r8") a5,
-        in("r9") a6,
-        lateout("rcx") _,
-        lateout("r11") _,
-        options(nostack)
-    );
-    result
 }

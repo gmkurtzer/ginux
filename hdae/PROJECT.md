@@ -102,6 +102,8 @@ solved.
 - Arbitrary physical-device, GPU, MMIO, or DMA passthrough.
 - VFIO/IOMMU hardware assignment.
 - Multiple architectures or compatibility ABIs beyond native x86-64.
+  A later fork milestone (gates 15 through 17) adds an aarch64 build of this
+  tree. It does not reopen or weaken the initial x86-64 milestone.
 - Complete Linux conformance or support for every distribution.
 - KVM acceleration or KVM-specific domain behavior.
 - Production readiness, independent security certification, or a universal

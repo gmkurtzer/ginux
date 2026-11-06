@@ -8,7 +8,10 @@ BASELINE := target/$(X86_TARGET)/release/baseline-runner
 RUNTIME_FIXTURE := target/$(X86_TARGET)/release/runtime-fixture
 PROCESS_NATIVE_FIXTURE := target/$(X86_TARGET)/release/process-native-fixture
 
-.PHONY: doctor host-image-fetch host-image-verify host-boot-test image-helper-fetch image-prepare domain-image-fetch domain-image-verify domain-image-prepare systemd-image-fetch systemd-image-verify systemd-image-prepare test-image test-oci-image test-oci-layers test-vfs test-native-vfs image-cache-clean build check-name check test test-unit test-intercept test-runtime test-config test-domain test-process build-process-fixtures test-process-native test-devices test-kernel-views test-systemd test-systemd-live test-systemd-interactive test-cgroup test-block test-network run-host run-systemd bench bench-baseline bench-block bench-network demo-gate-1 demo-gate-2 demo-gate-3 demo-gate-4 demo-gate-5 demo-gate-6 demo-gate-7 demo-gate-8 demo-gate-9 demo-gate-9.5 clean
+ARM64_TARGET := aarch64-unknown-linux-gnu
+GINUX_ARM64 := target/$(ARM64_TARGET)/release/ginux
+
+.PHONY: doctor host-image-fetch host-image-verify host-boot-test image-helper-fetch image-prepare domain-image-fetch domain-image-verify domain-image-prepare systemd-image-fetch systemd-image-verify systemd-image-prepare test-image test-oci-image test-oci-layers test-vfs test-native-vfs image-cache-clean build build-arm64 arch-smoke arch-smoke-arm64 check-name check test test-unit test-intercept test-runtime test-config test-domain test-process build-process-fixtures test-process-native test-devices test-kernel-views test-systemd test-systemd-live test-systemd-interactive test-cgroup test-block test-network run-host run-systemd bench bench-baseline bench-block bench-network demo-gate-1 demo-gate-2 demo-gate-3 demo-gate-4 demo-gate-5 demo-gate-6 demo-gate-7 demo-gate-8 demo-gate-9 demo-gate-9.5 clean
 
 doctor:
 	@./scripts/doctor.sh
@@ -64,6 +67,15 @@ build:
 	cargo build -p baseline-runner --target $(X86_TARGET) --release
 	cargo build -p runtime-fixture --target $(X86_TARGET) --release
 	cargo build -p process-native-fixture --target $(X86_TARGET) --release
+
+build-arm64:
+	cargo build -p ginux-init --target $(ARM64_TARGET) --release
+
+arch-smoke: build
+	@./scripts/arch-smoke.sh $(GINUX) x86_64
+
+arch-smoke-arm64: build-arm64
+	@./scripts/arch-smoke.sh $(GINUX_ARM64) aarch64 qemu-aarch64-static
 
 build-process-fixtures:
 	mkdir -p .artifacts/process

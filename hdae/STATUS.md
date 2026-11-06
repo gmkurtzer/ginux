@@ -2,6 +2,11 @@
 
 ## Current checkpoint
 
+- Active fork work is the arm64 port authorized on 2026-11-06. Gate 15
+  (userspace daemon) is technically passed and awaiting human review of its
+  pull request. Gate 16 (domain mediation) is next in the authorized batch.
+  Gates 9.75, 10, 11, and 13 remain the upstream product sequence and have
+  not been started by this port.
 - Gate 1 is accepted and closed under the corrected ordinary-host-process
   architecture. Pull request https://github.com/gmkurtzer/ginux-us/pull/1 was
   merged by the human on 2026-11-04.
@@ -75,9 +80,9 @@ scope, threat model, and invariants.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: none. Gates 9 and 9.5 are accepted; Gate 9.75 is the next
-  authorized checkpoint and must begin on its dedicated branch after this
-  closure record is merged.
+- Active gate: 15, technically passed, pull request pending human review.
+  The authorized batch continues at gate 16. Gate 9.75 remains the next
+  upstream product checkpoint and is not the active fork task.
 - Last evidence: `make test-systemd-interactive` passed from a clean isolated
   overlay with `ps -ef` at 309 ms, `top -b -n 1` at 913 ms, and valid Bash
   timing fields, plus cold acquisition, offline cache reuse, retained domain
@@ -384,18 +389,20 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Merge the Gate 9/9.5 closure pull request. After the human confirms that merge,
-create `hdae/domain-specification-network-controls` from updated `main`, resolve
-the pre-boot hook execution and authority model with the human, and begin Gate
-9.75 on its dedicated branch and pull request.
+Finish gate 16 on its own branch from the gate 15 branch: aarch64 domain
+mediation (register file, ptrace regset, guest syscall numbers) while the
+x86_64 mediation path still builds. Open that stage's pull request when it
+builds. The legacy kernel is gate 17 after that. Upstream gate 9.75 stays
+queued behind human acceptance and is not this fork's next edit.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: none. Gates 9 and 9.5 are accepted and closed; Gate 9.75 is the
-  next authorized checkpoint but has not started.
+- Active gate: 15, technically passed. Gate 16 is the next authorized fork
+  stage. Gate 9.75 remains the next upstream product checkpoint and has not
+  started.
 - Last evidence: `make demo-gate-9.5`, `make test-systemd-interactive`,
   `make test-systemd`, `make test`, and `make check` passed. The isolated
   interactive run measured `ps -ef` at 309 ms and `top -b -n 1` at 913 ms,

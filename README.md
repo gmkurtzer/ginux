@@ -159,6 +159,21 @@ make check
 make test
 ```
 
+Each userspace binary targets one architecture. `make build` is the x86_64
+daemon and its x86_64 fixtures. The aarch64 daemon is a separate build:
+
+```sh
+rustup target add aarch64-unknown-linux-gnu
+make build-arm64
+make arch-smoke          # x86_64: ginux arch, then usage on stderr
+make arch-smoke-arm64    # same probe under qemu-aarch64-static
+```
+
+`ginux arch` prints `GINUX_ARCH: <arch>` and `GINUX_ARCH: fork=ok`. Domain
+mediation of a traced workload is still the x86_64 Linux ABI; the arm64
+daemon probe only exercises the daemon's own entry, write, exit, fork, and
+wait path. Fixture binaries that are x86_64 assembly stay on `make build`.
+
 Inspect the latest completed capability directly:
 
 ```sh

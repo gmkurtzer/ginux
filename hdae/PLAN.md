@@ -160,6 +160,16 @@ define their expected result.
 - Reproducibility and offline testing are established by Gates 1 and 2 and
   remain regression criteria for every later gate.
 
+## Arm64 fork port
+
+On 2026-11-06 the human authorized an aarch64 port of this fork
+(https://github.com/ericvh/ginux-arm64), ordered as gates 15, 16, and 17.
+Each stage opens its own pull request once it builds. Binaries target one
+architecture at a time. The delivery environment requires branch names
+`cursor/<slug>-2b05`, which is the recorded exception to `hdae/<slug>` for
+these three gates only. Gates 9.75, 10, 11, and 13 remain the upstream
+product sequence and are not started by this port.
+
 ## Deferred roadmap
 
 After the initial twelve gates, Gate 14 preserves the Unicorn Engine execution
