@@ -34,6 +34,10 @@
 - Gate 9.75 was added and authorized on 2026-11-04 for comprehensive domain
   configuration, CLI overrides, network selection and policy, port translation,
   volumes, access, identity, resources, devices, and pre-boot hooks.
+- Gate 9.75 now has a normalized typed schema and CLI override path plus passing
+  Rocky QEMU evidence for interface/source selection, ingress/egress policy,
+  translated port ownership, ordinary bind conflicts, network audit records,
+  payload exchange, and cleanup. Mediated domain pre-boot hooks are next.
 - Gate 11 was clarified on 2026-11-06 to require a matched native-Rocky versus
   Ginux `sysbench` matrix, native parity as the optimization goal, a default 4%
   per-workload tolerance, and automatic failure for regressions beyond the
@@ -76,20 +80,16 @@ scope, threat model, and invariants.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 9.75, domain specification and network controls. Its
-  dedicated branch is `hdae/domain-specification-network-controls`; no
-  implementation has started with the approved domain-only pre-boot hook
-  authority model.
-- Last evidence: `make test-systemd-interactive` passed from a clean isolated
-  overlay with `ps -ef` at 309 ms, `top -b -n 1` at 913 ms, and valid Bash
-  timing fields, plus cold acquisition, offline cache reuse, retained domain
-  state, and restart reuse. `make test-systemd` and aggregate `make test` also
-  passed.
+- Active gate: Gate 9.75, domain specification and network controls, on
+  `hdae/domain-specification-network-controls`.
+- Last evidence: `make test-gate975-network` passed the Gate 9.75 network
+  selection, policy, translation, conflict, audit, and cleanup matrix under
+  Rocky QEMU; 15 domain unit tests and the x86-64 runtime build also passed.
 - Open decision: none. Human direction on 2026-11-06 selected mediated
   domain-context pre-boot hooks only. Arbitrary host-context hooks are
   unsupported.
-- Exact next action: implement the normalized domain schema and CLI precedence
-  path, then proceed to network controls and mediated hook execution.
+- Exact next action: implement mediated domain-context pre-boot hook execution,
+  then verify hook ordering, authority, timeout, failure, and audit behavior.
 
 ## Evidence
 
@@ -386,22 +386,20 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Implement the Gate 9.75 normalized schema and CLI precedence path under the
-approved domain-only hook model, then proceed to network controls and mediated
-hook execution.
+Implement mediated domain-context pre-boot hooks, then complete Gate 9.75
+operator documentation, regression evidence, and demonstration.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 9.75 is active in alignment on
-  `hdae/domain-specification-network-controls`. No implementation has started.
-- Last evidence: `make demo-gate-9.5`, `make test-systemd-interactive`,
-  `make test-systemd`, `make test`, and `make check` passed. The isolated
-  interactive run measured `ps -ef` at 309 ms and `top -b -n 1` at 913 ms,
-  retained domains and OCI content across host restart, and reused the OCI
-  cache offline. The human accepted Gates 9 and 9.5 on 2026-11-06.
+- Active gate: Gate 9.75 is active on
+  `hdae/domain-specification-network-controls`.
+- Last evidence: `make test-gate975-network` passed under Rocky QEMU, including
+  source/interface selection, translated port ownership, ingress and egress
+  denial, same-port conflict, payload exchange, audit evidence, controlled
+  shutdown, and cleanup.
 - Approved network direction: Gate 9 defaults to full host-shared inbound and
   outbound networking with normal host routing and bind conflicts, under Ginux
   mediation and audit. Gate 9.75 adds comprehensive domain configuration,

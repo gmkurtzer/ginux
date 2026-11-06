@@ -49,7 +49,9 @@ use ginux_devices::{
     BlockBackend, DeviceError, DeviceKind, DeviceName, DeviceRegistry, DeviceView, IsolatedNetwork,
     Partition, IOCTL_CONSOLE_GET_SIZE,
 };
-use ginux_domain::{Domain, DomainConfig, ExecutionBackend, ExecutionProfile, NetworkBackend};
+use ginux_domain::{
+    Domain, DomainConfig, ExecutionBackend, ExecutionProfile, NetworkBackend, NetworkProtocol,
+};
 use ginux_kernel_views::{
     CgroupFs, IdentityFs, IdentityView, MemoryView, MountView, NamespaceView, ProcFs, SysFs,
     ViewError,
@@ -3212,6 +3214,11 @@ struct NativeSupervisorTask {
     console_fd: i64,
     pipe2_address: usize,
     pipe_fds: [i64; 8],
+    socket_fds: [NativeSocketFd; 16],
+    pending_socket_type: u8,
+    pending_sockaddr: usize,
+    pending_sockaddr_word: u64,
+    pending_getsockname: usize,
     proc_fds: [u64; NATIVE_PROC_FD_LIMIT / 64],
     cgroup_procs_fds: [u64; NATIVE_PROC_FD_LIMIT / 64],
     pending_cgroup_procs_open: bool,
@@ -3235,6 +3242,23 @@ struct NativeSupervisorTask {
     tracing: bool,
     limits: [[u64; 2]; 16],
 }
+
+#[derive(Clone, Copy)]
+struct NativeSocketFd {
+    fd: i64,
+    protocol: u8,
+    source_bound: bool,
+    internal_port: u16,
+    external_port: u16,
+}
+
+const EMPTY_SOCKET_FD: NativeSocketFd = NativeSocketFd {
+    fd: -1,
+    protocol: 0,
+    source_bound: false,
+    internal_port: 0,
+    external_port: 0,
+};
 
 struct NativeProcSample {
     name: [u8; 64],
@@ -4508,6 +4532,11 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descripto
         console_fd: DOMAIN_CONSOLE_FD as i64,
         pipe2_address: 0,
         pipe_fds: [-1; 8],
+        socket_fds: [EMPTY_SOCKET_FD; 16],
+        pending_socket_type: 0,
+        pending_sockaddr: 0,
+        pending_sockaddr_word: 0,
+        pending_getsockname: 0,
         proc_fds: [0; NATIVE_PROC_FD_LIMIT / 64],
         cgroup_procs_fds: [0; NATIVE_PROC_FD_LIMIT / 64],
         pending_cgroup_procs_open: false,
@@ -4671,6 +4700,11 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descripto
                 console_fd: task.console_fd,
                 pipe2_address: 0,
                 pipe_fds: task.pipe_fds,
+                socket_fds: task.socket_fds,
+                pending_socket_type: 0,
+                pending_sockaddr: 0,
+                pending_sockaddr_word: 0,
+                pending_getsockname: 0,
                 proc_fds: [0; NATIVE_PROC_FD_LIMIT / 64],
                 cgroup_procs_fds: task.cgroup_procs_fds,
                 pending_cgroup_procs_open: false,
@@ -5014,6 +5048,75 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descripto
                 }
                 task.pending_stat = 0;
             }
+            if task.syscall == 41 && registers.rax as i64 >= 0 && task.pending_socket_type != 0 {
+                let Some(slot) = task.socket_fds.iter_mut().find(|entry| entry.fd < 0) else {
+                    native_fail(domain, pid, b"native socket descriptor table full");
+                };
+                *slot = NativeSocketFd {
+                    fd: registers.rax as i64,
+                    protocol: task.pending_socket_type,
+                    source_bound: false,
+                    internal_port: 0,
+                    external_port: 0,
+                };
+            }
+            if task.syscall == 3 && registers.rax as i64 == 0 {
+                if let Some(slot) = task
+                    .socket_fds
+                    .iter_mut()
+                    .find(|entry| entry.fd == registers.rdi as i64)
+                {
+                    *slot = EMPTY_SOCKET_FD;
+                }
+            }
+            if task.syscall == 49 && registers.rax as i64 == 0 {
+                if let Some(socket) = task
+                    .socket_fds
+                    .iter_mut()
+                    .find(|entry| entry.fd == registers.rdi as i64)
+                {
+                    socket.source_bound = true;
+                }
+            }
+            if task.pending_sockaddr != 0 {
+                if ptrace(
+                    PTRACE_POKEDATA,
+                    host_pid,
+                    task.pending_sockaddr,
+                    task.pending_sockaddr_word as usize,
+                ) < 0
+                {
+                    native_fail(domain, pid, b"native translated sockaddr restore failed");
+                }
+                task.pending_sockaddr = 0;
+                task.pending_sockaddr_word = 0;
+            }
+            if task.pending_getsockname != 0 && registers.rax as i64 == 0 {
+                let internal_port = task
+                    .socket_fds
+                    .iter()
+                    .find(|entry| entry.fd == registers.rdi as i64)
+                    .map_or(0, |entry| entry.internal_port);
+                if internal_port != 0 {
+                    let mut word = 0u64;
+                    if ptrace(
+                        PTRACE_PEEKDATA,
+                        host_pid,
+                        task.pending_getsockname,
+                        &mut word as *mut _ as usize,
+                    ) < 0
+                        || ptrace(
+                            PTRACE_POKEDATA,
+                            host_pid,
+                            task.pending_getsockname,
+                            native_sockaddr_with_port(word, internal_port) as usize,
+                        ) < 0
+                    {
+                        native_fail(domain, pid, b"native getsockname translation failed");
+                    }
+                }
+                task.pending_getsockname = 0;
+            }
             if task.syscall == 293 && registers.rax as i64 == 0 && task.pipe2_address != 0 {
                 let read_fd = read_tracee_u32(host_pid, task.pipe2_address);
                 let write_fd = read_tracee_u32(host_pid, task.pipe2_address + 4);
@@ -5046,6 +5149,8 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descripto
             task.translated_rdi = 0;
             task.waitid_info = 0;
             task.pipe2_address = 0;
+            task.pending_socket_type = 0;
+            task.pending_getsockname = 0;
             task.close_range_first = -1;
             task.close_range_last = -1;
             tasks[task_index] = Some(task);
@@ -5096,6 +5201,120 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descripto
             native_fail(domain, pid, b"native proc refresh failed");
         }
         let shared_network = mode == 3 && domain.config().network_backend == NetworkBackend::Shared;
+        if shared_network && syscall == 41 {
+            task.pending_socket_type = (registers.rsi & 0xf) as u8;
+        }
+        if shared_network
+            && syscall == 51
+            && task
+                .socket_fds
+                .iter()
+                .any(|entry| entry.fd == registers.rdi as i64 && entry.external_port != 0)
+        {
+            task.pending_getsockname = registers.rsi as usize;
+        }
+        if shared_network && matches!(syscall, 42 | 49) {
+            let protocol = native_socket_protocol(&task, registers.rdi);
+            if let Some((word, port)) =
+                native_sockaddr_port(host_pid, registers.rsi as usize, registers.rdx)
+            {
+                let ingress = syscall == 49;
+                let network_protocol = match protocol {
+                    1 => Some(NetworkProtocol::Tcp),
+                    2 => Some(NetworkProtocol::Udp),
+                    _ => None,
+                };
+                if network_protocol.is_none()
+                    || !domain.config().network_allows(
+                        ingress,
+                        network_protocol.unwrap_or(NetworkProtocol::Tcp),
+                        port,
+                    )
+                {
+                    write_all(b"GINUX_NETWORK_AUDIT: action=deny direction=");
+                    write_all(if ingress { b"ingress" } else { b"egress" });
+                    write_all(b" port=");
+                    write_u64(port as u64);
+                    write_all(b" result=-");
+                    write_u64(EPERM as u64);
+                    write_all(b"\n");
+                    registers.orig_rax = u64::MAX;
+                    task.awaiting_exit = true;
+                    task.override_exit = true;
+                    task.override_result = -EPERM;
+                    tasks[task_index] = Some(task);
+                    if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                        || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
+                    {
+                        native_fail(domain, pid, b"native network policy denial failed");
+                    }
+                    continue;
+                }
+                if !ingress {
+                    if let Some(source) = domain.config().network_source_ipv4() {
+                        let socket_index = task
+                            .socket_fds
+                            .iter()
+                            .position(|entry| entry.fd == registers.rdi as i64);
+                        let source_bound =
+                            socket_index.is_some_and(|index| task.socket_fds[index].source_bound);
+                        if !source_bound {
+                            if !native_bind_socket_source(host_pid, registers.rdi as i64, source) {
+                                native_fail(domain, pid, b"native source-address bind failed");
+                            }
+                            if let Some(index) = socket_index {
+                                task.socket_fds[index].source_bound = true;
+                            }
+                            write_all(b"GINUX_NETWORK_AUDIT: action=source-bind address=");
+                            write_all(domain.config().network_source.as_bytes());
+                            write_all(b"\n");
+                        }
+                    }
+                }
+                if ingress {
+                    let mut translated = word;
+                    if let Some(source) = domain.config().network_source_ipv4() {
+                        if word >> 32 == 0 {
+                            translated = native_sockaddr_with_source(translated, source);
+                        }
+                    }
+                    if let Some(external) = domain
+                        .config()
+                        .translated_port(network_protocol.unwrap_or(NetworkProtocol::Tcp), port)
+                    {
+                        translated = native_sockaddr_with_port(translated, external);
+                        if let Some(socket) = task
+                            .socket_fds
+                            .iter_mut()
+                            .find(|entry| entry.fd == registers.rdi as i64)
+                        {
+                            socket.internal_port = port;
+                            socket.external_port = external;
+                        }
+                        write_all(b"GINUX_NETWORK_AUDIT: action=translate protocol=");
+                        write_all(if protocol == 1 { b"tcp" } else { b"udp" });
+                        write_all(b" internal=");
+                        write_u64(port as u64);
+                        write_all(b" external=");
+                        write_u64(external as u64);
+                        write_all(b"\n");
+                    }
+                    if translated != word {
+                        if ptrace(
+                            PTRACE_POKEDATA,
+                            host_pid,
+                            registers.rsi as usize,
+                            translated as usize,
+                        ) < 0
+                        {
+                            native_fail(domain, pid, b"native network translation failed");
+                        }
+                        task.pending_sockaddr = registers.rsi as usize;
+                        task.pending_sockaddr_word = word;
+                    }
+                }
+            }
+        }
         let decision = if mode == 3 {
             decide_systemd(syscall, shared_network)
         } else {
@@ -7068,6 +7287,72 @@ fn native_arguments_allowed(syscall: u64, registers: &UserRegs, mode: usize) -> 
     } else {
         balanced_arguments_allowed(syscall, registers.rdi, registers.rsi, registers.rdx)
     }
+}
+
+fn native_socket_protocol(task: &NativeSupervisorTask, fd: u64) -> u8 {
+    task.socket_fds
+        .iter()
+        .find(|entry| entry.fd == fd as i64)
+        .map_or(0, |entry| entry.protocol)
+}
+
+fn native_bind_socket_source(pid: usize, fd: i64, source: [u8; 4]) -> bool {
+    const SYS_PIDFD_OPEN: usize = 434;
+    const SYS_PIDFD_GETFD: usize = 438;
+    const SYS_BIND: usize = 49;
+    let pidfd = unsafe { syscall2(SYS_PIDFD_OPEN, pid, 0) };
+    if pidfd < 0 {
+        return false;
+    }
+    let duplicate = unsafe { syscall3(SYS_PIDFD_GETFD, pidfd as usize, fd as usize, 0) };
+    if duplicate < 0 {
+        let _ = unsafe { syscall1(SYS_CLOSE_HOST, pidfd as usize) };
+        return false;
+    }
+    let mut address = [0u8; 16];
+    address[0] = 2;
+    address[4..8].copy_from_slice(&source);
+    let result = unsafe {
+        syscall3(
+            SYS_BIND,
+            duplicate as usize,
+            address.as_ptr() as usize,
+            address.len(),
+        )
+    };
+    let _ = unsafe { syscall1(SYS_CLOSE_HOST, duplicate as usize) };
+    let _ = unsafe { syscall1(SYS_CLOSE_HOST, pidfd as usize) };
+    result == 0
+}
+
+fn native_sockaddr_port(pid: usize, address: usize, length: u64) -> Option<(u64, u16)> {
+    if address == 0 || length < 4 {
+        return None;
+    }
+    let mut word = 0u64;
+    if ptrace(PTRACE_PEEKDATA, pid, address, &mut word as *mut _ as usize) < 0 {
+        return None;
+    }
+    let family = word & 0xffff;
+    if family != 2 && family != 10 {
+        return None;
+    }
+    let port = ((((word >> 16) & 0xff) << 8) | ((word >> 24) & 0xff)) as u16;
+    Some((word, port))
+}
+
+fn native_sockaddr_with_port(word: u64, port: u16) -> u64 {
+    let network = port.to_be_bytes();
+    (word & !0xffff_0000) | (u64::from(network[0]) << 16) | (u64::from(network[1]) << 24)
+}
+
+fn native_sockaddr_with_source(word: u64, source: [u8; 4]) -> u64 {
+    let mut value = word & 0x0000_0000_ffff_ffff;
+    value |= u64::from(source[0]) << 32;
+    value |= u64::from(source[1]) << 40;
+    value |= u64::from(source[2]) << 48;
+    value |= u64::from(source[3]) << 56;
+    value
 }
 
 fn native_fail(domain: &mut Domain, pid: usize, reason: &[u8]) -> ! {

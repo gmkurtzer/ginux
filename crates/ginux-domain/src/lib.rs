@@ -94,6 +94,12 @@ pub enum NetworkBackend {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NetworkProtocol {
+    Tcp,
+    Udp,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AuditMode {
     Stderr,
     Disabled,
@@ -562,6 +568,9 @@ impl DomainConfig {
         }
         if !self.network_source.is_empty() {
             validate_network_attachment(self.network_source.as_bytes())?;
+            if self.network_source_ipv4().is_none() {
+                return Err(ConfigError::InvalidValue);
+            }
         }
         for rule in self
             .ingress_allow
@@ -697,6 +706,74 @@ impl DomainConfig {
         })?;
         output.raw(b"\n")?;
         Ok(output)
+    }
+
+    pub fn network_allows(&self, ingress: bool, protocol: NetworkProtocol, port: u16) -> bool {
+        let (allow, deny) = if ingress {
+            (&self.ingress_allow, &self.ingress_deny)
+        } else {
+            (&self.egress_allow, &self.egress_deny)
+        };
+        if deny
+            .as_slice()
+            .iter()
+            .any(|rule| network_rule_matches(rule.as_bytes(), protocol, port))
+        {
+            return false;
+        }
+        allow.as_slice().is_empty()
+            || allow
+                .as_slice()
+                .iter()
+                .any(|rule| network_rule_matches(rule.as_bytes(), protocol, port))
+    }
+
+    pub fn translated_port(&self, protocol: NetworkProtocol, internal: u16) -> Option<u16> {
+        for forward in self.port_forwards.as_slice() {
+            let mut parts = forward.as_bytes().split(|byte| *byte == b'/');
+            let forward_protocol = parts.next()?;
+            let _attachment = parts.next()?;
+            let external = parts.next()?;
+            let configured_internal = parts.next()?;
+            if parts.next().is_some() {
+                continue;
+            }
+            let protocol_matches = match protocol {
+                NetworkProtocol::Tcp => forward_protocol == b"tcp",
+                NetworkProtocol::Udp => forward_protocol == b"udp",
+            };
+            if protocol_matches && parse_port(configured_internal) == Some(internal) {
+                return parse_port(external);
+            }
+        }
+        None
+    }
+
+    pub fn network_source_ipv4(&self) -> Option<[u8; 4]> {
+        let bytes = self.network_source.as_bytes();
+        if bytes.is_empty() {
+            return None;
+        }
+        let mut output = [0u8; 4];
+        let mut parts = bytes.split(|byte| *byte == b'.');
+        for octet in &mut output {
+            let part = parts.next()?;
+            if part.is_empty() || part.len() > 3 || !part.iter().all(u8::is_ascii_digit) {
+                return None;
+            }
+            let mut value = 0u16;
+            for byte in part {
+                value = value * 10 + u16::from(*byte - b'0');
+            }
+            if value > 255 {
+                return None;
+            }
+            *octet = value as u8;
+        }
+        if parts.next().is_some() {
+            return None;
+        }
+        Some(output)
     }
 }
 
@@ -1196,6 +1273,36 @@ fn validate_port(bytes: &[u8], wildcard: bool) -> Result<(), ConfigError> {
     Ok(())
 }
 
+fn parse_port(bytes: &[u8]) -> Option<u16> {
+    if bytes.is_empty() || !bytes.iter().all(u8::is_ascii_digit) {
+        return None;
+    }
+    let mut value = 0u32;
+    for byte in bytes {
+        value = value
+            .checked_mul(10)?
+            .checked_add(u32::from(*byte - b'0'))?;
+    }
+    if value == 0 || value > u16::MAX as u32 {
+        None
+    } else {
+        Some(value as u16)
+    }
+}
+
+fn network_rule_matches(rule: &[u8], protocol: NetworkProtocol, port: u16) -> bool {
+    let Some(split) = rule.iter().position(|byte| *byte == b':') else {
+        return false;
+    };
+    let rule_protocol = &rule[..split];
+    let rule_port = &rule[split + 1..];
+    let protocol_matches = match protocol {
+        NetworkProtocol::Tcp => rule_protocol == b"tcp",
+        NetworkProtocol::Udp => rule_protocol == b"udp",
+    };
+    protocol_matches && (rule_port == b"*" || parse_port(rule_port) == Some(port))
+}
+
 fn validate_network_rule(bytes: &[u8]) -> Result<(), ConfigError> {
     let mut parts = bytes.split(|byte| *byte == b':');
     let protocol = parts.next().ok_or(ConfigError::InvalidValue)?;
@@ -1576,7 +1683,7 @@ policy = "stop"
             )
             .replace(
                 "backend = \"none\"",
-                "backend = \"shared\"\ninterface = \"eth0:1\"\nsource = \"192.0.2.10\"\ningress_allow = [\"tcp:80\"]\ningress_deny = [\"tcp:*\"]\negress_allow = [\"tcp:443\", \"udp:53\"]\negress_deny = []\nport_forwards = [\"tcp/eth0:1/8080/80\"]",
+                "backend = \"shared\"\ninterface = \"eth0:1\"\nsource = \"192.0.2.10\"\ningress_allow = [\"tcp:80\"]\ningress_deny = [\"tcp:22\"]\negress_allow = [\"tcp:443\", \"udp:53\"]\negress_deny = [\"tcp:25\"]\nport_forwards = [\"tcp/eth0:1/8080/80\"]",
             )
             .replace(
                 "[audit]",
@@ -1590,6 +1697,13 @@ policy = "stop"
             b"tcp/eth0:1/8080/80"
         );
         assert_eq!(config.pre_boot_hooks.as_slice().len(), 1);
+        assert!(config.network_allows(true, NetworkProtocol::Tcp, 80));
+        assert!(!config.network_allows(true, NetworkProtocol::Tcp, 22));
+        assert!(!config.network_allows(true, NetworkProtocol::Tcp, 81));
+        assert!(config.network_allows(false, NetworkProtocol::Udp, 53));
+        assert!(!config.network_allows(false, NetworkProtocol::Tcp, 25));
+        assert_eq!(config.translated_port(NetworkProtocol::Tcp, 80), Some(8080));
+        assert_eq!(config.translated_port(NetworkProtocol::Tcp, 81), None);
         let normalized = config.normalized().unwrap();
         assert_eq!(DomainConfig::parse(normalized.as_bytes()).unwrap(), config);
     }

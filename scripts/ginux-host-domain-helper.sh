@@ -94,6 +94,53 @@ reported_state() {
     fi
 }
 
+network_addresses() {
+    attachment=$1
+    if ip link show dev "$attachment" >/dev/null 2>&1; then
+        ip -o -4 addr show dev "$attachment"
+    else
+        ip -o -4 addr show label "$attachment"
+    fi
+}
+
+resolve_network_config() {
+    resolve_file=$1
+    resolve_interface=$(sed -n 's/^[[:space:]]*interface[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$resolve_file")
+    resolve_source=$(sed -n 's/^[[:space:]]*source[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$resolve_file")
+    resolve_addresses=
+    if test -n "$resolve_interface"; then
+        resolve_addresses=$(network_addresses "$resolve_interface") || {
+            printf 'configured network attachment is unavailable: %s\n' "$resolve_interface" >&2
+            exit 65
+        }
+        test -n "$resolve_addresses" || {
+            printf 'configured network attachment has no IPv4 address: %s\n' "$resolve_interface" >&2
+            exit 65
+        }
+    fi
+    if test -z "$resolve_source" && test -n "$resolve_addresses"; then
+        resolve_source=$(printf '%s\n' "$resolve_addresses" | awk 'NR == 1 { split($4, address, "/"); print address[1] }')
+        resolve_output=$(mktemp "$state_root/work/config.XXXXXX")
+        "$runtime" config-merge "$resolve_file" "network.source=\"$resolve_source\"" >"$resolve_output"
+        mv "$resolve_output" "$resolve_file"
+    fi
+    if test -n "$resolve_source"; then
+        if test -n "$resolve_addresses"; then
+            printf '%s\n' "$resolve_addresses" |
+                awk -v expected="$resolve_source" '{ split($4, address, "/"); if (address[1] == expected) found=1 } END { exit !found }' || {
+                    printf 'configured source address is not assigned to %s: %s\n' "$resolve_interface" "$resolve_source" >&2
+                    exit 65
+                }
+        else
+            ip -o -4 addr show |
+                awk -v expected="$resolve_source" '{ split($4, address, "/"); if (address[1] == expected) found=1 } END { exit !found }' || {
+                    printf 'configured source address is unavailable: %s\n' "$resolve_source" >&2
+                    exit 65
+                }
+        fi
+    fi
+}
+
 prepare_root() {
     root=$1
     mkdir -p \
@@ -282,6 +329,7 @@ $2"
     done
     IFS=$old_ifs
     "$runtime" config-merge "$config" "$@" "domain.id=\"$name\"" >"$effective"
+    resolve_network_config "$effective"
     configured_root=$(sed -n 's/^[[:space:]]*root[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$effective")
     expected_root=docker.io/rockylinux/rockylinux@sha256:7a18ce2c9c1e0d8735f3e72685f9666150af25036e7f7b5ee4eede3754496f8c
     if test "$configured_root" != "$expected_root"; then
