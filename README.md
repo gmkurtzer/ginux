@@ -142,16 +142,29 @@ Inspect the latest completed capability directly:
 make test-systemd       # cached image, external networking disabled
 make bench              # systemd timing and resource observations
 make test-systemd-live  # shared network plus real upstream dnf -y update
-make demo-gate-9        # interactive Rocky host and attached Ginux console
+make run-host           # general interactive Rocky host with Ginux installed
+make demo-gate-9        # Gate 9 checkpoint through the same host workflow
 ```
 
-`make demo-gate-9` boots the QEMU Rocky host and logs you into its shell with
-Ginux staged but stopped. It prints the command for you to launch manually.
-That terminal then becomes the Ginux domain console, where the test account is
-`root` with password `ginux`. Explore normally, then run `kill -RTMIN+4 1` as
-domain root to shut down systemd and return to the Rocky host. Type `exit` there
-to stop QEMU and clean up. The same workflow is also available as
-`make run-systemd`; `make test-systemd-interactive` is its automated regression.
+`make run-host` boots the QEMU Rocky host and logs you into its ordinary shell.
+Ginux is installed in `PATH`, its pinned Rocky domain image is cached, and no
+domain has been created or started. A complete first session is:
+
+```sh
+ginux domain create rocky --config /etc/ginux/examples/rocky-systemd.toml
+ginux domain list
+ginux domain status rocky
+ginux domain start rocky --attach
+```
+
+The attached terminal becomes the Ginux domain console. Log in as `root` with
+password `ginux`, explore normally, and run `kill -RTMIN+4 1` as domain root to
+shut down systemd and return to the host. Detached operation uses
+`ginux domain start rocky`, `ginux domain status rocky`, and
+`ginux domain stop rocky`. Exit the Rocky host shell to stop QEMU and clean up.
+`make demo-gate-9` uses the same operator workflow; `make run-systemd` remains
+as a compatibility alias, and `make test-systemd-interactive` is the automated
+regression.
 
 The live test and interactive demonstration enable shared external networking.
 An upstream DNF update can take many minutes under QEMU TCG because every

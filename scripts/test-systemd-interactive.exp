@@ -1,10 +1,13 @@
 #!/usr/bin/expect -f
 
-set timeout 240
-spawn ./scripts/run-systemd.sh
+if {![info exists env(ROCKY_SSH_PORT)]} {
+    set env(ROCKY_SSH_PORT) 22399
+}
+set timeout 300
+spawn ./scripts/run-host.sh
 
 expect {
-    -re {GINUX_INTERACTIVE_HOST: READY} {}
+    -re {GINUX_HOST: READY} {}
     timeout { puts stderr "interactive Rocky host timed out"; exit 70 }
     eof { puts stderr "interactive runner exited before host login"; exit 71 }
 }
@@ -13,49 +16,121 @@ expect {
     timeout { puts stderr "Rocky host shell prompt timed out"; exit 72 }
     eof { puts stderr "Rocky host shell exited early"; exit 73 }
 }
-send -- "sudo /var/tmp/ginux native /var/tmp/gate9.toml /var/lib/ginux/domains/gate9/root systemd 2>/var/tmp/ginux-systemd-audit.log\r"
+send -- "test -x /usr/local/bin/ginux && test -f /etc/ginux/examples/rocky-systemd.toml && test -f /var/lib/ginux/images/rocky-10-ubi-init-amd64-rootfs.tar && test \"\$(ginux domain list | wc -l)\" -eq 1 && printf 'GINUX_HOST_EMPTY: PASS\\n'\r"
+expect {
+    -re {GINUX_HOST_EMPTY: PASS} {}
+    timeout { puts stderr "installed Ginux host was not empty"; exit 74 }
+    eof { puts stderr "Rocky host shell exited during installation check"; exit 75 }
+}
+expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
+send -- "ginux domain create rocky --config /etc/ginux/examples/rocky-systemd.toml\r"
+expect {
+    -re {rocky: created} {}
+    timeout { puts stderr "domain creation timed out"; exit 76 }
+    eof { puts stderr "Rocky host shell exited during domain creation"; exit 77 }
+}
+expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
+send -- "ginux domain list; ginux domain status rocky\r"
+expect {
+    -re {rocky[[:space:]]+stopped} {}
+    timeout { puts stderr "created domain was not listed as stopped"; exit 78 }
+    eof { puts stderr "Rocky host shell exited during domain inspection"; exit 79 }
+}
+expect {
+    -re {state: stopped} {}
+    timeout { puts stderr "created domain status was not stopped"; exit 80 }
+    eof { puts stderr "Rocky host shell exited during status inspection"; exit 81 }
+}
+expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
+send -- "if ginux domain create rocky --config /etc/ginux/examples/rocky-systemd.toml; then echo GINUX_DUPLICATE: FAIL; else echo GINUX_DUPLICATE: PASS; fi\r"
+expect {
+    -re {GINUX_DUPLICATE: PASS} {}
+    timeout { puts stderr "duplicate domain was not rejected"; exit 82 }
+    eof { puts stderr "Rocky host shell exited during duplicate check"; exit 83 }
+}
+expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
+send -- "ginux domain start rocky --attach\r"
 
 expect {
     -re {login:} {}
-    timeout { puts stderr "interactive domain login timed out"; exit 74 }
-    eof { puts stderr "Ginux exited before domain login"; exit 75 }
+    timeout { puts stderr "interactive domain login timed out"; exit 84 }
+    eof { puts stderr "Ginux exited before domain login"; exit 85 }
 }
 send -- "root\r"
 expect {
     -re {Password:} {}
-    timeout { puts stderr "interactive domain password prompt timed out"; exit 76 }
-    eof { puts stderr "domain login exited before password"; exit 77 }
+    timeout { puts stderr "interactive domain password prompt timed out"; exit 86 }
+    eof { puts stderr "domain login exited before password"; exit 87 }
 }
 send -- "ginux\r"
 expect {
     -re {\[root@ginux [^]]+\]# } {}
-    timeout { puts stderr "interactive domain shell timed out"; exit 78 }
-    eof { puts stderr "domain shell exited early"; exit 79 }
+    timeout { puts stderr "interactive domain shell timed out"; exit 88 }
+    eof { puts stderr "domain shell exited early"; exit 89 }
 }
 send -- "printf 'GINUX_HUMAN_INTERACTIVE: PASS\\n'\r"
 expect {
     -re {GINUX_HUMAN_INTERACTIVE: PASS} {}
-    timeout { puts stderr "interactive command did not run"; exit 80 }
-    eof { puts stderr "domain exited during interactive command"; exit 81 }
+    timeout { puts stderr "interactive command did not run"; exit 90 }
+    eof { puts stderr "domain exited during interactive command"; exit 91 }
 }
 send -- "kill -RTMIN+4 1\r"
 expect {
-    -re {\[ginux@ginux-rocky [^]]+\]\$ } {}
-    timeout { puts stderr "interactive domain shutdown timed out"; exit 82 }
-    eof { puts stderr "Rocky host shell exited before return"; exit 83 }
+    -re {rocky: stopped \(status 0\)} {}
+    timeout { puts stderr "interactive domain shutdown timed out"; exit 92 }
+    eof { puts stderr "Rocky host shell exited before return"; exit 93 }
 }
-send -- "grep -Fq 'GINUX_NATIVE_CHECK: PASS' /var/tmp/ginux-systemd-audit.log && printf 'GINUX_INTERACTIVE_SHUTDOWN: PASS\\n'\r"
+expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
+send -- "grep -Fq 'GINUX_NATIVE_CHECK: PASS' /var/lib/ginux/domains/rocky/audit.log && ginux domain status rocky | grep -Fq 'state: stopped' && printf 'GINUX_INTERACTIVE_SHUTDOWN: PASS\\n'\r"
 expect {
     -re {GINUX_INTERACTIVE_SHUTDOWN: PASS} {}
-    timeout { puts stderr "interactive shutdown audit evidence missing"; exit 84 }
-    eof { puts stderr "Rocky host shell exited during audit check"; exit 85 }
+    timeout { puts stderr "interactive shutdown evidence missing"; exit 94 }
+    eof { puts stderr "Rocky host shell exited during audit check"; exit 95 }
+}
+expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
+send -- "ginux domain start rocky\r"
+expect {
+    -re {rocky: started detached} {}
+    timeout { puts stderr "detached domain start timed out"; exit 96 }
+    eof { puts stderr "Rocky host shell exited during detached start"; exit 97 }
+}
+expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
+send -- "ginux domain list; ginux domain status rocky\r"
+expect {
+    -re {rocky[[:space:]]+running[[:space:]]+[0-9]+} {}
+    timeout { puts stderr "detached domain was not listed as running"; exit 98 }
+    eof { puts stderr "Rocky host shell exited during detached inspection"; exit 99 }
+}
+expect {
+    -re {state: running} {}
+    timeout { puts stderr "detached domain status was not running"; exit 100 }
+    eof { puts stderr "Rocky host shell exited during detached status"; exit 101 }
+}
+expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
+send -- "ginux domain stop rocky\r"
+expect {
+    -re {rocky: stopped} {}
+    timeout { puts stderr "detached domain stop timed out"; exit 102 }
+    eof { puts stderr "Rocky host shell exited during detached stop"; exit 103 }
+}
+expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
+send -- "sudo sh -c 'printf \"999999 1\\n\" > /var/lib/ginux/domains/rocky/supervisor.pid'; ginux domain list; ginux domain stop rocky\r"
+expect {
+    -re {rocky[[:space:]]+stopped} {}
+    timeout { puts stderr "stale supervisor state was not reported stopped"; exit 104 }
+    eof { puts stderr "Rocky host shell exited during stale-state check"; exit 105 }
+}
+expect {
+    -re {rocky: already stopped} {}
+    timeout { puts stderr "stale supervisor state was not cleaned"; exit 106 }
+    eof { puts stderr "Rocky host shell exited during stale-state cleanup"; exit 107 }
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
 send -- "exit\r"
 expect {
     -re {Rocky host stopped} {}
-    timeout { puts stderr "interactive QEMU cleanup timed out"; exit 86 }
-    eof { puts stderr "interactive runner exited without cleanup evidence"; exit 87 }
+    timeout { puts stderr "interactive QEMU cleanup timed out"; exit 108 }
+    eof { puts stderr "interactive runner exited without cleanup evidence"; exit 109 }
 }
 expect eof
 puts "test-systemd-interactive: PASS"

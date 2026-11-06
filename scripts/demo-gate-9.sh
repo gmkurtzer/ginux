@@ -6,4 +6,4 @@ printf '%s\n' 'This opens the Rocky QEMU host and leaves every domain action to 
 printf '%s\n' 'The session remains exploratory until you shut down the domain and exit the host.'
 printf '%s\n' ''
 
-exec ./scripts/run-systemd.sh
+exec ./scripts/run-host.sh
