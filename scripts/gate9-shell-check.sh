@@ -32,12 +32,16 @@ if test -e /run/ginux-skip-network; then
     printf '%s\n' 'GINUX_NETWORK_DNS_HTTPS: SKIPPED'
     printf '%s\n' 'GINUX_NETWORK_BIND_ACCEPT_CONFLICT: SKIPPED'
 else
-    getent ahostsv4 dl.rockylinux.org >/tmp/ginux-rocky-addresses
-    test -s /tmp/ginux-rocky-addresses
-    curl --fail --silent --show-error --head --max-time 30 \
-        https://dl.rockylinux.org/pub/rocky/ >/tmp/ginux-rocky-headers
-    test -s /tmp/ginux-rocky-headers
-    printf '%s\n' 'GINUX_NETWORK_DNS_HTTPS: PASS'
+    if test -e /run/ginux-skip-external-network; then
+        printf '%s\n' 'GINUX_NETWORK_DNS_HTTPS: SKIPPED'
+    else
+        getent ahostsv4 dl.rockylinux.org >/tmp/ginux-rocky-addresses
+        test -s /tmp/ginux-rocky-addresses
+        curl --fail --silent --show-error --head --max-time 30 \
+            https://dl.rockylinux.org/pub/rocky/ >/tmp/ginux-rocky-headers
+        test -s /tmp/ginux-rocky-headers
+        printf '%s\n' 'GINUX_NETWORK_DNS_HTTPS: PASS'
+    fi
 
     /usr/local/sbin/ginux-gate9-network-check
 fi

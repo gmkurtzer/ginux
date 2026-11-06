@@ -9,7 +9,7 @@ image_cache=$state_root/images/rocky-10-ubi-init-amd64
 image_tar=$image_cache/rocky-10-ubi-init-amd64-rootfs.tar
 
 usage() {
-    printf '%s\n' 'usage: ginux domain create NAME --config FILE' >&2
+    printf '%s\n' 'usage: ginux domain create NAME --config FILE [--set KEY=TOML_VALUE]...' >&2
     printf '%s\n' '       ginux domain list' >&2
     printf '%s\n' '       ginux domain start NAME [--attach]' >&2
     printf '%s\n' '       ginux domain attach NAME' >&2
@@ -91,6 +91,55 @@ reported_state() {
         printf '%s' running
     else
         printf '%s' stopped
+    fi
+}
+
+network_addresses() {
+    attachment=$1
+    if ip link show dev "$attachment" >/dev/null 2>&1; then
+        ip -o -4 addr show dev "$attachment"
+    else
+        alias_addresses=$(ip -o -4 addr show label "$attachment")
+        test -n "$alias_addresses" || return 1
+        printf '%s\n' "$alias_addresses"
+    fi
+}
+
+resolve_network_config() {
+    resolve_file=$1
+    resolve_interface=$(sed -n 's/^[[:space:]]*interface[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$resolve_file")
+    resolve_source=$(sed -n 's/^[[:space:]]*source[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$resolve_file")
+    resolve_addresses=
+    if test -n "$resolve_interface"; then
+        resolve_addresses=$(network_addresses "$resolve_interface") || {
+            printf 'configured network attachment is unavailable: %s\n' "$resolve_interface" >&2
+            exit 65
+        }
+        test -n "$resolve_addresses" || {
+            printf 'configured network attachment has no IPv4 address: %s\n' "$resolve_interface" >&2
+            exit 65
+        }
+    fi
+    if test -z "$resolve_source" && test -n "$resolve_addresses"; then
+        resolve_source=$(printf '%s\n' "$resolve_addresses" | awk 'NR == 1 { split($4, address, "/"); print address[1] }')
+        resolve_output=$(mktemp "$state_root/work/config.XXXXXX")
+        "$runtime" config-merge "$resolve_file" "network.source=\"$resolve_source\"" >"$resolve_output"
+        mv "$resolve_output" "$resolve_file"
+    fi
+    if test -n "$resolve_source"; then
+        if test -n "$resolve_addresses"; then
+            printf '%s\n' "$resolve_addresses" |
+                awk -v expected="$resolve_source" '{ split($4, address, "/"); if (address[1] == expected) found=1 } END { exit !found }' || {
+                    printf 'configured source address is not assigned to %s: %s\n' "$resolve_interface" "$resolve_source" >&2
+                    exit 65
+                }
+        else
+            ip -o -4 addr show |
+                awk -v expected="$resolve_source" '{ split($4, address, "/"); if (address[1] == expected) found=1 } END { exit !found }' || {
+                    printf 'configured source address is unavailable: %s\n' "$resolve_source" >&2
+                    exit 65
+                }
+        fi
     fi
 }
 
@@ -239,10 +288,23 @@ prepare_root() {
 }
 
 create_domain() {
-    test "$#" -eq 3 || usage
+    test "$#" -ge 3 || usage
     name=$1
     test "$2" = --config || usage
     config=$3
+    shift 3
+    overrides=
+    while test "$#" -gt 0; do
+        test "$#" -ge 2 || usage
+        test "$1" = --set || usage
+        case $2 in
+            *=*) ;;
+            *) usage ;;
+        esac
+        overrides="$overrides
+$2"
+        shift 2
+    done
     validate_name "$name"
     test -r "$config" || { printf 'configuration is not readable: %s\n' "$config" >&2; exit 66; }
     test -x "$runtime" || { printf '%s\n' 'Ginux runtime is not installed' >&2; exit 69; }
@@ -253,8 +315,24 @@ create_domain() {
     directory=$(domain_dir "$name")
     test ! -e "$directory" || { printf '%s: already exists\n' "$name" >&2; exit 73; }
 
-    "$runtime" config "$config" >/dev/null
-    configured_root=$(sed -n 's/^[[:space:]]*root[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$config")
+    mkdir -p "$state_root/work"
+    effective=$(mktemp "$state_root/work/config.XXXXXX")
+    cleanup_effective() {
+        rm -f "$effective"
+    }
+    trap cleanup_effective 0 HUP INT TERM
+    set --
+    old_ifs=$IFS
+    IFS='
+'
+    for override in $overrides; do
+        test -n "$override" || continue
+        set -- "$@" "$override"
+    done
+    IFS=$old_ifs
+    "$runtime" config-merge "$config" "$@" "domain.id=\"$name\"" >"$effective"
+    resolve_network_config "$effective"
+    configured_root=$(sed -n 's/^[[:space:]]*root[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$effective")
     expected_root=docker.io/rockylinux/rockylinux@sha256:7a18ce2c9c1e0d8735f3e72685f9666150af25036e7f7b5ee4eede3754496f8c
     if test "$configured_root" != "$expected_root"; then
         printf 'unsupported configured image: %s\n' "$configured_root" >&2
@@ -266,9 +344,11 @@ create_domain() {
         GINUX_OCI_NATIVE_ROOTFS_ONLY=1 \
         "$image_tools/ensure-rocky-oci.sh"
     mkdir -p "$directory/root"
-    install -m 600 "$config" "$directory/config.toml"
+    install -m 600 "$effective" "$directory/config.toml"
     tar -xf "$image_tar" -C "$directory/root"
     prepare_root "$directory/root"
+    trap - 0 HUP INT TERM
+    cleanup_effective
     printf '%s: created\n' "$name"
 }
 
@@ -371,6 +451,49 @@ run_runtime() {
     directory=$(domain_dir "$name")
     test -d "$directory" || exit 66
     record_runtime "$directory" "$$"
+    hook_plan=$($runtime hook-plan "$directory/config.toml") || exit 65
+    hook_count=
+    hook_timeout=
+    hook_failure=
+    hook_extra=
+    IFS=' ' read -r hook_count hook_timeout hook_failure hook_extra <<EOF
+$hook_plan
+EOF
+    case $hook_count:$hook_timeout in
+        *[!0-9:]*|:*|*:)
+            printf '%s\n' 'invalid pre-boot hook plan' >&2
+            exit 65
+            ;;
+    esac
+    case $hook_failure:$hook_extra in
+        stop:|continue:) ;;
+        *) printf '%s\n' 'invalid pre-boot hook plan' >&2; exit 65 ;;
+    esac
+    hook_index=0
+    while test "$hook_index" -lt "$hook_count"; do
+        printf 'GINUX_HOOK_AUDIT: action=dispatch index=%s timeout=%s failure=%s context=domain\n' \
+            "$hook_index" "$hook_timeout" "$hook_failure" >&2
+        set +e
+        timeout --signal=TERM --kill-after=2 "$hook_timeout" \
+            "$runtime" native-hook "$directory/config.toml" "$directory/root" "$hook_index"
+        hook_status=$?
+        set -e
+        if test "$hook_status" -eq 0; then
+            printf 'GINUX_HOOK_AUDIT: action=complete index=%s result=pass\n' "$hook_index" >&2
+        else
+            if test "$hook_status" -eq 124 || test "$hook_status" -eq 137; then
+                hook_result=timeout
+            else
+                hook_result=failed
+            fi
+            printf 'GINUX_HOOK_AUDIT: action=complete index=%s result=%s status=%s\n' \
+                "$hook_index" "$hook_result" "$hook_status" >&2
+            if test "$hook_failure" = stop; then
+                exit "$hook_status"
+            fi
+        fi
+        hook_index=$((hook_index + 1))
+    done
     exec "$runtime" native "$directory/config.toml" "$directory/root" \
         2>>"$directory/audit.log"
 }
@@ -485,6 +608,7 @@ case $command in
     create) create_domain "$@" ;;
     list) test "$#" -eq 0 || usage; list_domains ;;
     prepare-root) test "$#" -eq 1 || usage; prepare_root "$1" ;;
+    resolve-network) test "$#" -eq 1 || usage; resolve_network_config "$1" ;;
     start) start_domain "$@" ;;
     status) status_domain "$@" ;;
     stop) stop_domain "$@" ;;

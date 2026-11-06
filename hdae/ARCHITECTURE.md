@@ -203,6 +203,16 @@ validation path. Precedence is built-in defaults, then the configuration file,
 then command-line overrides. The normalized effective configuration is
 recorded before domain startup.
 
+Gate 9.75 pre-boot hooks execute only as managed domain processes after the
+domain root and declarative resources have been prepared but before the domain
+init process begins. Hooks use the same mediated runtime, effective contract,
+virtual identity, filesystem view, devices, and network policy as the domain;
+they receive no host descriptors, paths, credentials, or helper authority.
+Host-side setup remains declarative and is performed only by reviewed Ginux
+backends. Arbitrary host-context hooks are unsupported because they would be
+root-authority extensions to the trusted computing base rather than domain
+configuration.
+
 ### Observability and benchmarking
 
 Audit events expose contract decisions and domain lifecycle without exposing
@@ -215,9 +225,6 @@ and idle overhead.
 
 - Numeric performance budgets, set from reproducible baseline evidence before
   Gate 11 begins.
-- Whether each pre-boot hook runs in the trusted host context or the mediated
-  domain context, and the authority available to each hook. Gate 9.75 must
-  resolve this before hook execution is implemented.
 
 Changing a security invariant or resolving an open decision with material
 architectural impact requires human review and an update to the affected open

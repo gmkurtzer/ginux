@@ -5,7 +5,7 @@ helper=/usr/local/libexec/ginux-domain-helper
 
 usage() {
     printf '%s\n' 'usage:' >&2
-    printf '%s\n' '  ginux domain create NAME --config FILE' >&2
+    printf '%s\n' '  ginux domain create NAME --config FILE [--set KEY=TOML_VALUE]...' >&2
     printf '%s\n' '  ginux domain list' >&2
     printf '%s\n' '  ginux domain start NAME [--attach]' >&2
     printf '%s\n' '  ginux domain attach NAME' >&2

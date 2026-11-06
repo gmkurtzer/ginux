@@ -29,10 +29,25 @@
 - Runtime isolation unit: domain.
 - Policy unit: versioned contract.
 - Initial gate map: twelve checkpoint gates at positions 1 through 11 and 13;
-  Gates 1 through 9.5 are accepted. Gate 9.75 is next but has not started.
+  Gates 1 through 9.5 are accepted. Gate 9.75 is technically passed on its
+  dedicated branch and awaits delivery and human review.
 - Gate 9.75 was added and authorized on 2026-11-04 for comprehensive domain
   configuration, CLI overrides, network selection and policy, port translation,
   volumes, access, identity, resources, devices, and pre-boot hooks.
+- Gate 9.75 is delivered in open pull request
+  https://github.com/gmkurtzer/ginux/pull/229 from dedicated branch
+  `hdae/domain-specification-network-controls`; it is not merged or closed.
+- Gate 9.75 now has a normalized typed schema and CLI override path plus passing
+  Rocky QEMU evidence for interface/source selection, ingress/egress policy,
+  translated port ownership, ordinary bind conflicts, network audit records,
+  payload exchange, and cleanup. Its domain-only pre-boot hooks now also pass
+  ordered execution, mediation, mount denial, stop/continue failure handling,
+  timeout, init suppression, and audit tests under Rocky QEMU.
+- The combined `make demo-gate-9.75` checkpoint passes the complete schema and
+  negative validation matrix, source/interface resolution, network policy and
+  translation, conflicts and cleanup, and mediated hook behavior. Strict
+  `make check`, the complete `make test-systemd` matrix, and aggregate
+  `make test` also pass.
 - Gate 11 was clarified on 2026-11-06 to require a matched native-Rocky versus
   Ginux `sysbench` matrix, native parity as the optimization goal, a default 4%
   per-workload tolerance, and automatic failure for regressions beyond the
@@ -75,19 +90,16 @@ scope, threat model, and invariants.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: none. Gates 9 and 9.5 are accepted; Gate 9.75 is the next
-  authorized checkpoint and must begin on its dedicated branch after this
-  closure record is merged.
-- Last evidence: `make test-systemd-interactive` passed from a clean isolated
-  overlay with `ps -ef` at 309 ms, `top -b -n 1` at 913 ms, and valid Bash
-  timing fields, plus cold acquisition, offline cache reuse, retained domain
-  state, and restart reuse. `make test-systemd` and aggregate `make test` also
-  passed.
-- Open decision: Gate 9.75 must resolve the pre-boot hook execution context and
-  authority model before implementing hooks.
-- Exact next action: merge the Gate 9/9.5 closure pull request, then create
-  `hdae/domain-specification-network-controls` from updated `main` and begin
-  Gate 9.75 alignment with the pre-boot hook decision.
+- Active gate: Gate 9.75, domain specification and network controls, on
+  `hdae/domain-specification-network-controls`.
+- Last evidence: `make demo-gate-9.75`, `make check`, `make test-systemd`, and
+  aggregate `make test` passed. The aggregate run included process supervision
+  and virtual kernel-view integration under Rocky QEMU.
+- Open decision: none. Human direction on 2026-11-06 selected mediated
+  domain-context pre-boot hooks only. Arbitrary host-context hooks are
+  unsupported.
+- Exact next action: human review of pull request 229 and explicit Gate 9.75
+  acceptance or corrective direction.
 
 ## Evidence
 
@@ -384,27 +396,24 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Merge the Gate 9/9.5 closure pull request. After the human confirms that merge,
-create `hdae/domain-specification-network-controls` from updated `main`, resolve
-the pre-boot hook execution and authority model with the human, and begin Gate
-9.75 on its dedicated branch and pull request.
+Human review of https://github.com/gmkurtzer/ginux/pull/229 followed by explicit
+Gate 9.75 acceptance or corrective direction.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: none. Gates 9 and 9.5 are accepted and closed; Gate 9.75 is the
-  next authorized checkpoint but has not started.
-- Last evidence: `make demo-gate-9.5`, `make test-systemd-interactive`,
-  `make test-systemd`, `make test`, and `make check` passed. The isolated
-  interactive run measured `ps -ef` at 309 ms and `top -b -n 1` at 913 ms,
-  retained domains and OCI content across host restart, and reused the OCI
-  cache offline. The human accepted Gates 9 and 9.5 on 2026-11-06.
+- Active gate: Gate 9.75 is technically passed on
+  `hdae/domain-specification-network-controls`, is delivered in pull request
+  229, and awaits human checkpoint review.
+- Last evidence: `make demo-gate-9.75`, `make check`, `make test-systemd`, and
+  aggregate `make test` passed; the aggregate run completed process and kernel
+  view QEMU integration.
 - Approved network direction: Gate 9 defaults to full host-shared inbound and
   outbound networking with normal host routing and bind conflicts, under Ginux
   mediation and audit. Gate 9.75 adds comprehensive domain configuration,
   network selection, port controls, and translation.
-- Required human decision: merge the closure pull request. Gate 9.75 must then
-  resolve pre-boot hook execution context and authority before implementing
-  hooks.
+- Pull request: https://github.com/gmkurtzer/ginux/pull/229; open and awaiting
+  human checkpoint review.
+- Required human decision: accept Gate 9.75 or provide corrective direction.

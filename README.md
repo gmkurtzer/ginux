@@ -183,6 +183,13 @@ ginux domain status rocky
 ginux domain start rocky --attach
 ```
 
+The domain specification also supports typed CLI overrides, network
+interface/source selection, ingress and egress port policy, translated ports,
+volumes, virtual identity, and ordered pre-boot hooks. Hooks run only as
+mediated domain processes; Ginux does not support arbitrary host-context hooks.
+See [Gate 9.75 domain specification](docs/gate-9.75-domain-specification.md)
+for the schema, precedence rules, examples, and verification targets.
+
 The attached terminal becomes the Ginux domain console. Log in as `root` with
 password `ginux`, explore normally, press `Ctrl-]` to detach while leaving the
 domain running, and run `kill -RTMIN+4 1` as domain root to
