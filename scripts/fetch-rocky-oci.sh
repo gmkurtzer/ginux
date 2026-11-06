@@ -31,17 +31,32 @@ fetch_object() {
     endpoint=$1
     digest=$2
     accept=$3
+    label=${4:-object}
+    size=${5:-unknown}
     destination=$(oci_blob_path "$digest")
     if oci_verify_blob "$digest"; then
+        if [ "$label" != object ]; then
+            printf 'OCI_FETCH: cached %s digest=%s size=%s\n' "$label" "$digest" "$size"
+        fi
         return 0
     fi
     partial=$GINUX_OCI_WORK_DIR/$(oci_digest_hex "$digest").partial
     rm -f "$partial"
-    curl -fsSL --retry 3 \
-        -H "Authorization: Bearer $token" \
-        -H "Accept: $accept" \
-        "https://$GINUX_OCI_REGISTRY/v2/$GINUX_OCI_REPOSITORY/$endpoint/$digest" \
-        -o "$partial"
+    if [ "$label" = object ]; then
+        curl -fsSL --retry 3 \
+            -H "Authorization: Bearer $token" \
+            -H "Accept: $accept" \
+            "https://$GINUX_OCI_REGISTRY/v2/$GINUX_OCI_REPOSITORY/$endpoint/$digest" \
+            -o "$partial"
+    else
+        printf 'OCI_FETCH: downloading %s digest=%s size=%s bytes\n' "$label" "$digest" "$size"
+        curl -fL --retry 3 --progress-bar --show-error \
+            -H "Authorization: Bearer $token" \
+            -H "Accept: $accept" \
+            "https://$GINUX_OCI_REGISTRY/v2/$GINUX_OCI_REPOSITORY/$endpoint/$digest" \
+            -o "$partial"
+        printf 'OCI_FETCH: downloaded %s digest=%s size=%s bytes\n' "$label" "$digest" "$size"
+    fi
     actual=$(oci_sha256_file "$partial")
     if [ "sha256:$actual" != "$digest" ]; then
         printf 'digest mismatch for %s: expected %s, got sha256:%s\n' \
@@ -74,10 +89,17 @@ jq -e '.schemaVersion == 2 and
     "$manifest_blob" >/dev/null
 
 config_digest=$(jq -er '.config.digest' "$manifest_blob")
-fetch_object blobs "$config_digest" application/octet-stream
+config_size=$(jq -er '.config.size' "$manifest_blob")
+fetch_object blobs "$config_digest" application/octet-stream config "$config_size"
 
-jq -r '.layers[].digest' "$manifest_blob" | while IFS= read -r layer_digest; do
-    fetch_object blobs "$layer_digest" application/octet-stream
+layer_total=$(jq -er '.layers | length' "$manifest_blob")
+layer_number=0
+tab=$(printf '\t')
+jq -r '.layers[] | [.digest, .size] | @tsv' "$manifest_blob" |
+while IFS="$tab" read -r layer_digest layer_size; do
+    layer_number=$((layer_number + 1))
+    fetch_object blobs "$layer_digest" application/octet-stream \
+        "layer $layer_number/$layer_total" "$layer_size"
 done
 
 manifest_size=$(wc -c < "$manifest_blob" | tr -d ' ')

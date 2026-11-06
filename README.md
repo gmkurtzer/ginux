@@ -147,8 +147,11 @@ make demo-gate-9        # Gate 9 checkpoint through the same host workflow
 ```
 
 `make run-host` boots the QEMU Rocky host and logs you into its ordinary shell.
-Ginux is installed in `PATH`, its pinned Rocky domain image is cached, and no
-domain has been created or started. A complete first session is:
+Ginux is installed in `PATH`. The first `domain create` downloads and verifies
+the pinned Rocky OCI image with live per-layer progress; later creates reuse the
+cache. The writable Rocky host overlay persists across `make run-host` sessions,
+so cached images, domain definitions, roots, and stopped status remain available.
+A complete first session is:
 
 ```sh
 ginux domain create rocky --config /etc/ginux/examples/rocky-systemd.toml
@@ -162,10 +165,11 @@ password `ginux`, explore normally, press `Ctrl-]` to detach while leaving the
 domain running, and run `kill -RTMIN+4 1` as domain root to
 shut down systemd and return to the host. Detached operation uses
 `ginux domain start rocky`, `ginux domain status rocky`, and
-`ginux domain stop rocky`. Exit the Rocky host shell to stop QEMU and clean up.
-`make demo-gate-9` uses the same operator workflow; `make run-systemd` remains
-as a compatibility alias, and `make test-systemd-interactive` is the automated
-regression.
+`ginux domain stop rocky`. Exit the Rocky host shell to stop QEMU cleanly.
+This stops the VM without deleting its persistent overlay; `make clean` resets
+that host state. `make demo-gate-9` uses the same operator workflow;
+`make run-systemd` remains as a compatibility alias, and
+`make test-systemd-interactive` is the automated regression.
 
 The live test and interactive demonstration enable shared external networking.
 An upstream DNF update can take many minutes under QEMU TCG because every

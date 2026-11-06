@@ -3,8 +3,9 @@
 ROCKY_SSH_PORT=${ROCKY_SSH_PORT:-22222}
 ROCKY_SSH_USER=ginux
 ROCKY_KEY=build/cache/rocky/gate1_ed25519
-ROCKY_PID_FILE=build/rocky-host.pid
-ROCKY_SERIAL_LOG=build/rocky-host-serial.log
+ROCKY_PID_FILE=${ROCKY_PID_FILE:-build/rocky-host.pid}
+ROCKY_SERIAL_LOG=${ROCKY_SERIAL_LOG:-build/rocky-host-serial.log}
+ROCKY_OVERLAY_DISK=${ROCKY_OVERLAY_DISK:-build/rocky-host-overlay.qcow2}
 
 rocky_ssh() {
     ssh \

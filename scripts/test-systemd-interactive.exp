@@ -1,8 +1,11 @@
 #!/usr/bin/expect -f
 
-if {![info exists env(ROCKY_SSH_PORT)]} {
-    set env(ROCKY_SSH_PORT) 22399
-}
+set env(ROCKY_SSH_PORT) 22409
+set env(ROCKY_PID_FILE) build/rocky-test-host.pid
+set env(ROCKY_SERIAL_LOG) build/rocky-test-host-serial.log
+set env(ROCKY_OVERLAY_DISK) build/rocky-test-host-overlay.qcow2
+file delete -force $env(ROCKY_PID_FILE) $env(ROCKY_SERIAL_LOG) \
+    $env(ROCKY_OVERLAY_DISK)
 set timeout 300
 spawn ./scripts/run-host.sh
 
@@ -49,6 +52,21 @@ expect {
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
 send -- "ginux domain create rocky --config /etc/ginux/examples/rocky-systemd.toml\r"
+expect {
+    -re {OCI_CACHE: miss} {}
+    timeout { puts stderr "first domain creation did not report an OCI cache miss"; exit 159 }
+    eof { puts stderr "Rocky host shell exited before image acquisition"; exit 160 }
+}
+expect {
+    -re {OCI_FETCH: downloading layer [0-9]+/[0-9]+ digest=sha256:[0-9a-f]+ size=[0-9]+ bytes} {}
+    timeout { puts stderr "OCI layer download progress did not begin"; exit 161 }
+    eof { puts stderr "Rocky host shell exited during layer acquisition"; exit 162 }
+}
+expect {
+    -re {OCI_FETCH: downloaded layer [0-9]+/[0-9]+ digest=sha256:[0-9a-f]+ size=[0-9]+ bytes} {}
+    timeout { puts stderr "OCI layer download completion was not reported"; exit 163 }
+    eof { puts stderr "Rocky host shell exited during layer acquisition"; exit 164 }
+}
 expect {
     -re {rocky: created} {}
     timeout { puts stderr "domain creation timed out"; exit 76 }
@@ -168,7 +186,7 @@ expect {
     eof { puts stderr "domain exited during proc identity check"; exit 158 }
 }
 expect -re {\[root@ginux [^]]+\]# }
-send -- "ps -eo pid=,comm= >/tmp/ginux-ps && grep -q systemd /tmp/ginux-ps && grep -Eq '[[:space:]]bash$' /tmp/ginux-ps && grep -Eq '[[:space:]]ps$' /tmp/ginux-ps && printf 'GINUX_PROC_%s\\n' 'PS: PASS'\r"
+send -- "ps -eo pid=,comm= >/tmp/ginux-ps && grep -q systemd /tmp/ginux-ps && grep -Eq '\[\[:space:\]\]bash$' /tmp/ginux-ps && grep -Eq '\[\[:space:\]\]ps$' /tmp/ginux-ps && printf 'GINUX_PROC_%s\\n' 'PS: PASS'\r"
 expect {
     -re {GINUX_PROC_PS: PASS} {}
     timeout { puts stderr "ps did not report systemd, Bash, and its own transient process"; exit 119 }
@@ -277,5 +295,39 @@ expect {
     eof { puts stderr "interactive runner exited without cleanup evidence"; exit 109 }
 }
 expect eof
+
+spawn ./scripts/run-host.sh
+expect {
+    -re {reusing persistent host disk overlay} {}
+    timeout { puts stderr "second host did not reuse its persistent state"; exit 165 }
+    eof { puts stderr "second host exited before persistent state reuse"; exit 166 }
+}
+expect {
+    -re {GINUX_HOST: READY} {}
+    timeout { puts stderr "second Rocky host timed out"; exit 167 }
+    eof { puts stderr "second host exited before login"; exit 168 }
+}
+expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
+send -- "test -n \"\$(sudo find /var/lib/ginux/images -mindepth 1 -maxdepth 1 -print -quit)\" && ginux domain status rocky | grep -Fq 'state: stopped' && sudo unshare -n /usr/local/bin/ginux domain create restart-cache --config /etc/ginux/examples/rocky-systemd.toml\r"
+expect {
+    -re {OCI_CACHE: hit} {}
+    timeout { puts stderr "OCI cache or domain state did not persist across Rocky host sessions"; exit 169 }
+    eof { puts stderr "second host exited during persistent state check"; exit 170 }
+}
+expect {
+    -re {restart-cache: created} {}
+    timeout { puts stderr "cached domain creation on the second host timed out"; exit 171 }
+    eof { puts stderr "second host exited during cached domain creation"; exit 172 }
+}
+expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
+send -- "exit\r"
+expect {
+    -re {Rocky host stopped} {}
+    timeout { puts stderr "second QEMU cleanup timed out"; exit 173 }
+    eof { puts stderr "second runner exited without cleanup evidence"; exit 174 }
+}
+expect eof
+file delete -force $env(ROCKY_PID_FILE) $env(ROCKY_SERIAL_LOG) \
+    $env(ROCKY_OVERLAY_DISK)
 puts "test-systemd-interactive: PASS"
 exit 0

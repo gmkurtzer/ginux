@@ -29,7 +29,7 @@ ROCKY_NETWORK_RESTRICT=off ./scripts/start-rocky-host.sh
 ./scripts/install-ginux-host.sh
 
 printf '%s\n' ''
-printf '%s\n' 'Rocky QEMU host ready. Ginux is installed; no domain exists or is running.'
+printf '%s\n' 'Rocky QEMU host ready. Ginux is installed; host cache and domains persist across runs.'
 printf '%s\n' ''
 printf '%s\n' 'Example workflow:'
 printf '%s\n' '  ginux domain create rocky --config /etc/ginux/examples/rocky-systemd.toml'

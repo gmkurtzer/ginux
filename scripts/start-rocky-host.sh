@@ -29,10 +29,16 @@ case "$network_restrict" in
         ;;
 esac
 base=$(pwd -P)/build/cache/rocky/$ROCKY_IMAGE_NAME
-overlay=build/rocky-host-overlay.qcow2
-host_progress 'creating disposable disk overlay'
-rm -f "$overlay" "$ROCKY_SERIAL_LOG"
-qemu-img create -q -f qcow2 -F qcow2 -b "$base" "$overlay"
+overlay=$ROCKY_OVERLAY_DISK
+mkdir -p "$(dirname "$overlay")" "$(dirname "$ROCKY_PID_FILE")" \
+    "$(dirname "$ROCKY_SERIAL_LOG")"
+if [ -f "$overlay" ]; then
+    host_progress "reusing persistent host disk overlay $overlay"
+else
+    host_progress "creating persistent host disk overlay $overlay"
+    qemu-img create -q -f qcow2 -F qcow2 -b "$base" "$overlay"
+fi
+rm -f "$ROCKY_SERIAL_LOG"
 
 host_progress 'starting x86-64 QEMU (TCG, 2 vCPUs)'
 qemu-system-x86_64 \
@@ -57,7 +63,16 @@ attempt=0
 while [ "$attempt" -lt 120 ]; do
     if rocky_ssh true >/dev/null 2>&1; then
         host_progress 'SSH ready; waiting for cloud-init'
-        rocky_ssh 'sudo cloud-init status --wait >/dev/null'
+        cloud_attempt=0
+        while ! rocky_ssh 'sudo cloud-init status --wait >/dev/null'; do
+            cloud_attempt=$((cloud_attempt + 1))
+            if [ "$cloud_attempt" -ge 12 ]; then
+                printf '%s\n' 'Rocky cloud-init connection did not stabilize' >&2
+                exit 1
+            fi
+            host_progress 'cloud-init SSH session reset; retrying'
+            sleep 5
+        done
         if [ "$network_restrict" = off ]; then
             host_progress 'cloud-init ready; enabling guest network access'
             rocky_ssh "sudo ip route replace default via 10.0.2.2 dev enp0s2; printf '%s\n' 'nameserver 10.0.2.3' | sudo tee /etc/resolv.conf >/dev/null"

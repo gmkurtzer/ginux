@@ -43,6 +43,11 @@
   bounded multi-task supervision, and reproducible Rocky-host probe are
   implemented locally on `hdae/systemd-baseline`. Unmodified Rocky systemd now
   reaches `multi-user.target` and remains supervised.
+- Gate 9.5 now also reuses the writable Rocky host overlay across
+  `make run-host` sessions, preserving verified OCI image content, domain
+  definitions, roots, and status, and reports live layer-download progress.
+  Shell syntax, diff checks, `make check`, `make test-unit`, and the isolated
+  two-host `make test-systemd-interactive` regression pass.
 - The ordered gate batch is authorized, but every open gate remains a human
   checkpoint requiring a working demonstration and explicit acceptance.
 
@@ -57,6 +62,24 @@ Ginux-owned.
 
 See `hdae/PROJECT.md` and `hdae/ARCHITECTURE.md` for the authoritative intent,
 scope, threat model, and invariants.
+
+## Resumption
+
+- Active skill: `hdae-development`
+- Skill path: `.agents/skills/hdae-development/SKILL.md`
+- Reload after context shift: required
+- Active gate: Gate 9.5, technically passed and pending the final human
+  checkpoint
+- Last evidence: `make test-systemd-interactive` passed from a clean isolated
+  overlay with a cold cache miss and live layer progress, same-session offline
+  cache hit, retained domain state after host restart, and a second-session
+  offline cache hit; shell syntax checks, `git diff --check`, `make check`, and
+  `make test-unit` also passed
+- Open limitation: none; the regression uses isolated port and state paths and
+  must not stop or modify a developer VM
+- Exact next action: present the updated `make run-host` workflow for the human
+  checkpoint; the human should confirm that repeated runs retain domains and
+  avoid re-downloading the OCI image
 
 ## Evidence
 
