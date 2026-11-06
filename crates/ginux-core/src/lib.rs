@@ -31,6 +31,8 @@ pub const SYS_SYMLINKAT: u64 = 266;
 pub const SYS_READLINKAT: u64 = 267;
 pub const SYS_MEMFD_CREATE: u64 = 319;
 pub const SYS_CLOSE_RANGE: u64 = 436;
+pub const SYS_PIDFD_OPEN: u64 = 434;
+pub const SYS_PIDFD_SEND_SIGNAL: u64 = 424;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Action {
@@ -84,12 +86,86 @@ pub const fn decide_systemd(syscall: u64, shared_network: bool) -> Decision {
         63 | 92 | 93 | 94 | 109 | 112 | 153 | 165 | 166 | 260 | SYS_GETPRIORITY
         | SYS_SETPRIORITY | SYS_GETTID | SYS_SETUID | SYS_SETGID | SYS_SETREUID | SYS_SETREGID
         | SYS_SETGROUPS | SYS_SETRESUID | SYS_SETRESGID | SYS_REBOOT => Action::Emulate,
-        7 | 16 | 18 | 25 | 32 | 33 | 56 | 57 | 58 | 59 | 61 | 62 | 73 | 74 | 75 | 76 | 77 | 79
-        | 80 | 81 | 82 | 83 | 84 | 87 | 88 | 90 | 91 | 95 | 125 | 126 | 137 | 157 | 190 | 193
-        | 196 | 199 | 213 | 228 | 230 | 232 | 233 | 247 | 253 | 254 | 255 | 258 | SYS_UNLINKAT
-        | SYS_RENAMEAT | SYS_LINKAT | SYS_SYMLINKAT | SYS_READLINKAT | 270 | 271 | 280 | 281
-        | 283 | 286 | 287 | 289 | 290 | 291 | 292 | 293 | 294 | 306 | SYS_MEMFD_CREATE | 435
-        | SYS_CLOSE_RANGE | 441 => Action::Mediate,
+        7
+        | 15
+        | 16
+        | 18
+        | 25
+        | 32
+        | 33
+        | 56
+        | 57
+        | 58
+        | 59
+        | 61
+        | 62
+        | 73
+        | 74
+        | 75
+        | 76
+        | 77
+        | 79
+        | 80
+        | 81
+        | 82
+        | 83
+        | 84
+        | 87
+        | 88
+        | 90
+        | 91
+        | 95
+        | 125
+        | 126
+        | 137
+        | 138
+        | 157
+        | 190
+        | 193
+        | 128
+        | 133
+        | 135
+        | 196
+        | 199
+        | 213
+        | 228
+        | 230
+        | 232
+        | 233
+        | 247
+        | 253
+        | 254
+        | 255
+        | 258
+        | 259
+        | SYS_UNLINKAT
+        | SYS_RENAMEAT
+        | SYS_LINKAT
+        | SYS_SYMLINKAT
+        | SYS_READLINKAT
+        | 270
+        | 271
+        | 280
+        | 281
+        | 283
+        | 285
+        | 286
+        | 287
+        | 289
+        | 290
+        | 291
+        | 292
+        | 293
+        | 294
+        | 306
+        | 317
+        | SYS_MEMFD_CREATE
+        | SYS_PIDFD_SEND_SIGNAL
+        | SYS_PIDFD_OPEN
+        | 435
+        | SYS_CLOSE_RANGE
+        | 441
+        | 452 => Action::Mediate,
         _ => decide_balanced(syscall).action,
     };
     Decision { syscall, action }
@@ -118,11 +194,14 @@ pub const fn systemd_surface(syscall: u64, shared_network: bool) -> BalancedSurf
             | 92
             | 93
             | 94
+            | 133
             | 190
             | 196
             | 199
+            | 259
             | 260
             | 280
+            | 285
             | 306
             | SYS_UNLINKAT
             | SYS_RENAMEAT
@@ -149,7 +228,8 @@ pub const fn systemd_surface(syscall: u64, shared_network: bool) -> BalancedSurf
         BalancedSurface::ImageRead
     } else if matches!(
         syscall,
-        7 | 32
+        7 | 15
+            | 32
             | 33
             | 56
             | 57
@@ -160,6 +240,8 @@ pub const fn systemd_surface(syscall: u64, shared_network: bool) -> BalancedSurf
             | 81
             | 109
             | 112
+            | 128
+            | 135
             | 213
             | 228
             | 230
@@ -181,11 +263,19 @@ pub const fn systemd_surface(syscall: u64, shared_network: bool) -> BalancedSurf
             | 292
             | 293
             | 294
+            | 317
+            | SYS_PIDFD_SEND_SIGNAL
+            | SYS_PIDFD_OPEN
             | 435
             | SYS_CLOSE_RANGE
             | 441
+            | 452
     ) {
-        BalancedSurface::Task
+        if syscall == 452 {
+            BalancedSurface::DomainWrite
+        } else {
+            BalancedSurface::Task
+        }
     } else {
         balanced_surface(syscall)
     }
@@ -422,6 +512,14 @@ mod tests {
             BalancedSurface::Task
         );
         assert_eq!(decide_systemd(435, true).action, Action::Mediate);
+        assert_eq!(decide_systemd(SYS_PIDFD_OPEN, true).action, Action::Mediate);
+        assert_eq!(systemd_surface(SYS_PIDFD_OPEN, true), BalancedSurface::Task);
+        assert_eq!(
+            decide_systemd(SYS_PIDFD_SEND_SIGNAL, true).action,
+            Action::Mediate
+        );
+        assert_eq!(decide_systemd(452, true).action, Action::Mediate);
+        assert_eq!(systemd_surface(452, true), BalancedSurface::DomainWrite);
         assert_eq!(decide_systemd(247, true).action, Action::Mediate);
         assert_eq!(decide_systemd(SYS_READLINKAT, true).action, Action::Mediate);
         assert_eq!(decide_systemd(88, true).action, Action::Mediate);

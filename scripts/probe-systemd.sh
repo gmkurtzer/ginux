@@ -18,6 +18,8 @@ set +e
 status=$?
 set -e
 
+rocky_ssh "sudo cat /var/tmp/ginux-gate9-audit.log" >>"$log" 2>/dev/null || true
+
 printf 'systemd baseline exit: %s\n' "$status"
 tail -n 40 "$log"
 ./scripts/cleanup-systemd-domain.sh >/dev/null

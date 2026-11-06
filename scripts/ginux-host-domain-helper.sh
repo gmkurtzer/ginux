@@ -102,14 +102,23 @@ prepare_root() {
         "$root/proc/1" \
         "$root/proc/self/fd" \
         "$root/proc/sys/fs" \
+        "$root/proc/sys/kernel" \
+        "$root/proc/sys/kernel/random" \
+        "$root/proc/pressure" \
+        "$root/sys/kernel/security" \
         "$root/sys/fs/cgroup/systemd" \
         "$root/sys/fs/cgroup/init.scope" \
+        "$root/sys/fs/cgroup/system.slice" \
         "$root/sys/fs/cgroup/system.slice/console-getty.service" \
         "$root/sys/fs/cgroup/system.slice/systemd-user-sessions.service" \
         "$root/dev/shm" \
         "$root/dev/pts" \
+        "$root/run/log/journal" \
+        "$root/run/systemd/journal" \
+        "$root/run/systemd/propagate/.os-release-stage" \
         "$root/usr/local/sbin"
     touch "$root/etc/resolv.conf"
+    rm -f "$root/run/initctl"
     if test -e /etc/resolv.conf; then
         cp /etc/resolv.conf "$root/etc/resolv.conf"
     fi
@@ -124,11 +133,20 @@ prepare_root() {
     printf 'Linux version 6.12.0-ginux (ginux)\n' >"$root/proc/version"
     printf '9223372036854775807\n' >"$root/proc/sys/fs/file-max"
     printf '1048576\n' >"$root/proc/sys/fs/nr_open"
+    printf '40\n' >"$root/proc/sys/kernel/cap_last_cap"
+    printf 'ginux\n' >"$root/proc/sys/kernel/hostname"
+    printf '4e45c53e-0e6a-4fb8-9f25-e0f11b40db9a\n' \
+        >"$root/proc/sys/kernel/random/boot_id"
+    printf 'some avg10=0.00 avg60=0.00 avg300=0.00 total=0\n' >"$root/proc/pressure/cpu"
+    : >"$root/sys/kernel/security/lsm"
     printf 'cpu memory pids\n' >"$root/sys/fs/cgroup/cgroup.controllers"
     touch \
         "$root/sys/fs/cgroup/cgroup.procs" \
         "$root/sys/fs/cgroup/cgroup.subtree_control" \
         "$root/sys/fs/cgroup/init.scope/cgroup.procs" \
+        "$root/sys/fs/cgroup/system.slice/cgroup.procs" \
+        "$root/sys/fs/cgroup/system.slice/cgroup.events" \
+        "$root/sys/fs/cgroup/system.slice/cgroup.kill" \
         "$root/sys/fs/cgroup/system.slice/console-getty.service/cgroup.procs" \
         "$root/sys/fs/cgroup/system.slice/console-getty.service/cgroup.events" \
         "$root/sys/fs/cgroup/system.slice/systemd-user-sessions.service/cgroup.procs" \
@@ -143,16 +161,62 @@ prepare_root() {
             "$service_cgroup/cgroup.events" \
             "$service_cgroup/cgroup.kill"
     done
-    mkdir -p "$root/sys/fs/cgroup/system-modprobe.slice/modprobe@configfs.service"
+    mkdir -p \
+        "$root/sys/fs/cgroup/system.slice/system-modprobe.slice" \
+        "$root/sys/fs/cgroup/system.slice/system-modprobe.slice/modprobe@configfs.service"
     touch \
-        "$root/sys/fs/cgroup/system-modprobe.slice/modprobe@configfs.service/cgroup.procs" \
-        "$root/sys/fs/cgroup/system-modprobe.slice/modprobe@configfs.service/cgroup.events" \
-        "$root/sys/fs/cgroup/system-modprobe.slice/modprobe@configfs.service/cgroup.kill"
-    test -p "$root/run/initctl" || mkfifo "$root/run/initctl"
-    if test ! -e "$root/etc/localtime" && test ! -L "$root/etc/localtime"; then
-        ln -s /usr/share/zoneinfo/UTC "$root/etc/localtime"
-    fi
-    mknod -m 600 "$root/dev/console" c 5 0
+        "$root/sys/fs/cgroup/system.slice/system-modprobe.slice/cgroup.procs" \
+        "$root/sys/fs/cgroup/system.slice/system-modprobe.slice/cgroup.events" \
+        "$root/sys/fs/cgroup/system.slice/system-modprobe.slice/cgroup.kill" \
+        "$root/sys/fs/cgroup/system.slice/system-modprobe.slice/modprobe@configfs.service/cgroup.procs" \
+        "$root/sys/fs/cgroup/system.slice/system-modprobe.slice/modprobe@configfs.service/cgroup.events" \
+        "$root/sys/fs/cgroup/system.slice/system-modprobe.slice/modprobe@configfs.service/cgroup.kill"
+    cp --remove-destination /usr/share/zoneinfo/UTC "$root/etc/localtime"
+    for device_spec in 'console 5 0 600' 'null 1 3 666' 'zero 1 5 666' 'random 1 8 666' 'urandom 1 9 666'; do
+        set -- $device_spec
+        test -e "$root/dev/$1" || mknod -m "$4" "$root/dev/$1" c "$2" "$3"
+    done
+    # The minimal OCI image intentionally omits these optional host services.
+    # Use ordinary drop-ins instead of /dev/null masks: Ginux virtualizes the
+    # domain path view, so an explicit false condition is both observable and
+    # independent of absolute-symlink resolution.
+    for unit in \
+        dbus-broker.service \
+        dbus.service \
+        dbus.socket \
+        modprobe@.service \
+        systemd-userdbd.service \
+        systemd-userdbd.socket
+    do
+        rm -f "$root/etc/systemd/system/$unit"
+        mkdir -p "$root/etc/systemd/system/$unit.d"
+        printf '%s\n' \
+            '[Unit]' \
+            'ConditionPathExists=/run/ginux-enable-optional-service' \
+            >"$root/etc/systemd/system/$unit.d/90-ginux-minimal-image.conf"
+    done
+    # This minimal image has no UTMP database. Remove the image-provided wants
+    # instead of condition-skipping the prerequisite and producing a dependency
+    # failure for the runlevel recorder.
+    rm -f \
+        "$root/usr/lib/systemd/system/sysinit.target.wants/systemd-update-utmp.service" \
+        "$root/usr/lib/systemd/system/graphical.target.wants/systemd-update-utmp-runlevel.service" \
+        "$root/usr/lib/systemd/system/multi-user.target.wants/systemd-update-utmp-runlevel.service" \
+        "$root/usr/lib/systemd/system/rescue.target.wants/systemd-update-utmp-runlevel.service"
+    # Network access is already mediated by Ginux. Do not ask systemd to add a
+    # second cgroup/BPF firewall that this virtual kernel does not expose.
+    mkdir -p "$root/etc/systemd/system/systemd-journald.service.d"
+    printf '%s\n' \
+        '[Service]' \
+        'IPAddressDeny=' \
+        >"$root/etc/systemd/system/systemd-journald.service.d/90-ginux-network.conf"
+    rm -f \
+        "$root/etc/systemd/system/systemd-initctl.service" \
+        "$root/etc/systemd/system/systemd-initctl.socket"
+    printf '%s\n' \
+        '[Unit]' \
+        'Description=Keyboard Request Target' \
+        'DefaultDependencies=no' >"$root/etc/systemd/system/kbrequest.target"
     ln -s / "$root/proc/1/root"
     rm -f "$root/etc/systemd/system/getty.target" "$root/etc/systemd/system/console-getty.service"
     ln -sf /usr/lib/systemd/system/console-getty.service \
@@ -404,6 +468,7 @@ case $command in
     attach) attach_domain "$@" ;;
     create) create_domain "$@" ;;
     list) test "$#" -eq 0 || usage; list_domains ;;
+    prepare-root) test "$#" -eq 1 || usage; prepare_root "$1" ;;
     start) start_domain "$@" ;;
     status) status_domain "$@" ;;
     stop) stop_domain "$@" ;;
