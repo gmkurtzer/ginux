@@ -84,6 +84,13 @@ replace it.
    evidence.
 10. **Configurable contract and audit**: versioned syscall, ioctl, device,
     filesystem, and kernel-view policy with fail-closed validation and logs.
+10.25. **Instance terminology migration**: cleanly replace the active `domain`
+    product vocabulary with `instance` across CLI, configuration, code,
+    persistence, audit, tests, and documentation without legacy aliases.
+10.5. **Intuitive contract configuration and UX**: make the complete contract
+    self-contained in one instance recipe using human access verbs, resource
+    namespaces, bounded globs, deterministic deny precedence, and explanatory
+    CLI workflows compiled into the Gate 10 enforcement table.
 11. **Performance characterization and optimization**: native, conventional
     container, and Ginux comparisons against approved budgets.
 13. **Boundary hardening**: malformed ABI tests, fuzzing, escape attempts,
