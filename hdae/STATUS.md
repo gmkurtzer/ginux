@@ -298,6 +298,20 @@ scope, threat model, and invariants.
   and QEMU cleanup. Fresh `make check` and `make test-systemd` also passed after
   the staging refactor and console/audit separation. Gate 9 remains partial
   until the human runs and judges it.
+- Human review on 2026-11-05 further clarified that the host must be a general
+  Ginux development environment, not a Gate-specific staged demonstration.
+  It must install Ginux in `PATH`, begin with no domain, and expose minimum
+  persistent `ginux domain create/list/start/status/stop` commands including
+  attached and detached starts. Gate 9 remains partial while that approved
+  operator workflow is implemented and verified.
+- The general-host workflow is now implemented. Fresh
+  `make test-systemd-interactive` began with no domains, created and inspected
+  `rocky` through the installed `ginux` command, rejected duplicate creation,
+  reached an authenticated attached console, returned after controlled
+  shutdown, exercised detached start/status/stop, detected stale PID identity,
+  and cleaned up the VM. Fresh `make check`, `make test-systemd`, and aggregate
+  `make test` also passed. Gate 9 is technically passed and awaits the human
+  demonstration and checkpoint judgment.
 
 ## Open decisions and limitations
 
@@ -335,9 +349,9 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Have the human run `make demo-gate-9`, explore the domain interactively, and
-accept or reject Gate 9. Push the dedicated branch and open its pull request
-only after explicit current authorization.
+Have the human run `make run-host`, explore the installed `ginux domain`
+lifecycle, and accept or reject Gate 9. Push the dedicated branch and open its
+pull request only after explicit current authorization.
 
 ## Context recovery
 
@@ -345,8 +359,7 @@ only after explicit current authorization.
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
 - Active gate: Gate 9, systemd baseline, authorized on dedicated branch
-  `hdae/systemd-baseline`; partial pending human testing of the implemented
-  interactive workflow
+  `hdae/systemd-baseline`; technically passed and awaiting human checkpoint
 - Last evidence: `make demo-gate-9` passed all 8 checks. `make test-systemd`,
   `make test-systemd-live`, `make bench`, `make check`, `make test`,
   `make test-native-vfs`, and `make test-oci-image` passed with the exact
@@ -355,11 +368,15 @@ only after explicit current authorization.
   and the latest `make test-systemd` also passed the deterministic DNF-failure,
   unchanged-readable-RPM-package-set, immutable-base, clean-shutdown, and
   configured-startup-failure checks after console/audit separation.
+  Fresh `make test-systemd-interactive`, `make check`, `make test-systemd`, and
+  aggregate `make test` passed after the general host and installed controller
+  were implemented.
 - Approved network direction: Gate 9 defaults to full host-shared inbound and
   outbound networking with normal host routing and bind conflicts, under Ginux
   mediation and audit. Gate 9.5 adds comprehensive domain configuration,
   network selection, port controls, and translation.
-- Required human decision: run `make demo-gate-9`, exercise and judge the
-  interactive workflow, and accept or reject Gate 9. Separately authorize
-  branch push and pull-request creation if desired. Gate 9.5 must resolve
-  pre-boot hook execution context and authority before implementing hooks.
+- Required human decision: exercise and judge the general host and controller
+  workflow after implementation, then accept or reject Gate 9. Separately
+  authorize branch push and pull-request creation if desired. Gate 9.5 must
+  resolve pre-boot hook execution context and authority before implementing
+  hooks.

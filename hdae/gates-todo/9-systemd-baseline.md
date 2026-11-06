@@ -35,6 +35,13 @@ a controlled shutdown.
   is configured. It uses the host's default routing, source-address selection,
   and socket namespace for both outbound and inbound operations while retaining
   Ginux interception, validation, mediation, and audit.
+- Provide a general Rocky QEMU development host with Ginux installed in
+  `PATH`, the pinned domain image cached, and no domain implicitly created or
+  started.
+- Provide the minimum operator-facing lifecycle commands: `ginux domain
+  create`, `list`, `start`, `status`, and `stop`; `start --attach` must connect
+  the terminal to the domain console while detached start returns control to
+  the host.
 
 ## Non-goals
 
@@ -80,6 +87,12 @@ a controlled shutdown.
 - [x] Add an automated regression for the exact host login, manual launch,
   domain login, arbitrary command, controlled shutdown, return, and cleanup
   sequence.
+- [x] Replace the Gate-specific host entry with a general `make run-host` that
+  installs Ginux and cached image assets but creates no domain.
+- [x] Implement and verify the minimum persistent `ginux domain` lifecycle,
+  including attached and detached starts and stale-state detection.
+- [x] Update the human demonstration to use the installed controller rather
+  than a pre-staged low-level native command.
 
 ## Remaining work
 
@@ -123,10 +136,13 @@ a controlled shutdown.
   log in at multi-user, inspect managed services and PIDs, run the lockdown and
   DNF checks, and shut down cleanly.
 - A human-operated target boots the QEMU Rocky host, logs the operator into its
-  shell, and requires the operator to start Ginux manually. The attached domain
-  console remains available for exploratory use until the operator shuts down
-  systemd, after which control returns to the Rocky host and exiting cleans up
-  the VM.
+  shell with no domain present. The operator can create, inspect, start, attach
+  to, stop, and list domains through the installed `ginux domain` interface.
+  Attached console use remains exploratory until shutdown returns control to
+  the host; exiting the host cleans up the VM.
+- Detached start records enough lifecycle state for `list`, `status`, and
+  `stop` to report and control the domain without relying on the invoking
+  shell. Stale state is detected and reported as stopped rather than running.
 
 ## Verification plan
 
@@ -136,9 +152,10 @@ a controlled shutdown.
 - `make test-systemd-live` -> shared networking and the live upstream
   `dnf -y update` transaction pass.
 - `make test-systemd-interactive` -> the real interactive runner reaches the
-  Rocky host shell with Ginux stopped, accepts the documented manual launch,
-  authenticates to the domain, runs an arbitrary command, shuts systemd down,
-  returns to the host, preserves audit evidence, and cleans up QEMU.
+  Rocky host shell with no domain, creates one through `ginux domain`, checks
+  list/status, starts it with `--attach`, authenticates, runs an arbitrary
+  command, shuts systemd down, returns to the host, preserves audit evidence,
+  verifies stopped state, and cleans up QEMU.
 - Offline boot subtest with external network disabled and the domain image
   already prepared -> reaches readiness and exits zero without an acquisition
   request; the live DNF subtest is explicitly excluded from this offline case.
@@ -236,6 +253,16 @@ a controlled shutdown.
 - Fresh `make test-systemd` passed cold, warm, repeated, offline,
   deterministic-DNF-failure, configured-startup-failure, and controlled
   shutdown checks after the staging refactor and console/audit separation.
+- Fresh `make test-systemd-interactive` passed the general-host workflow: the
+  host began with no domains; `ginux domain create/list/status` worked;
+  duplicate creation failed; attached start reached login and returned after
+  controlled shutdown; detached start reported running and stopped; stale PID
+  identity reported stopped; and exiting the host cleaned up QEMU.
+- Fresh `make check`, `make test-systemd`, and aggregate `make test` passed
+  after the controller and host workflow changes. The offline systemd suite
+  again passed cold, warm, repeated, DNF-failure, startup-failure, and shutdown
+  checks; the aggregate suite passed all 46 component tests and mandatory QEMU
+  regressions.
 
 ## Decisions and limitations
 
@@ -282,6 +309,12 @@ a controlled shutdown.
   that cached base content remains immutable and repeatable. The deterministic
   DNF failure check additionally verifies an unchanged readable RPM package
   set and an unchanged cached-root hash after failure and domain teardown.
+- The first operator controller is intentionally bounded to
+  `create/list/start/status/stop` and one installed Rocky systemd example.
+  Broader typed domain options and CLI overrides remain Gate 9.5 work.
+- Detached lifecycle state records both the supervisor PID and its Linux start
+  time. Missing, exited, zombie, malformed, or PID-reused state reports stopped
+  instead of controlling an unrelated process.
 - New architecture needs discovered during convergence require human direction
   or a corrective gate rather than silent scope expansion.
 
@@ -301,13 +334,14 @@ a controlled shutdown.
   (repeat/failure/measurement harness); `c2d24a00` (machine-readable benchmark
   measurements); `d83995dd` (virtual-PID audit regression); `35e3763c`
   (bounded DNF watchdog); `598b9821` (failed-DNF consistency evidence and exact
-  systemd-image targets)
+  systemd-image targets); `1d90364b` (interactive demonstration); `64510197`
+  (general host and persistent operator lifecycle)
 
 ## Review policy and outcome
 
-Partial pending the human checkpoint. The genuinely interactive QEMU-host and
-domain-console workflow is implemented and its exact sequence has automated
-regression evidence, but that evidence does not substitute for the operator
-running `make demo-gate-9` and judging the experience. Remote branch push and
-pull-request creation remain intentionally pending explicit current
-authorization under repository policy.
+Technically passed pending the human checkpoint. The general Rocky QEMU host,
+installed controller, persistent lifecycle, attached console, detached
+operation, and stale-state behavior have fresh automated evidence. Automated
+evidence does not substitute for the operator running the final workflow and
+judging the experience. Remote branch push and pull-request creation remain
+intentionally pending explicit current authorization under repository policy.
