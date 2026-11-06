@@ -161,10 +161,10 @@ expect {
     eof { puts stderr "domain exited during background job"; exit 118 }
 }
 expect -re {\[root@ginux [^]]+\]# }
-send -- "ps -ef >/tmp/ginux-ps && grep -q systemd /tmp/ginux-ps && printf 'GINUX_PROC_%s\\n' 'PS: PASS'\r"
+send -- "ps -eo pid=,comm= >/tmp/ginux-ps && grep -q systemd /tmp/ginux-ps && grep -Eq '[[:space:]]bash$' /tmp/ginux-ps && grep -Eq '[[:space:]]ps$' /tmp/ginux-ps && printf 'GINUX_PROC_%s\\n' 'PS: PASS'\r"
 expect {
     -re {GINUX_PROC_PS: PASS} {}
-    timeout { puts stderr "ps did not read the synthetic procfs"; exit 119 }
+    timeout { puts stderr "ps did not report systemd, Bash, and its own transient process"; exit 119 }
     eof { puts stderr "domain exited during ps check"; exit 120 }
 }
 expect -re {\[root@ginux [^]]+\]# }
@@ -173,6 +173,13 @@ expect {
     -re {GINUX_PROC_SELF: PASS} {}
     timeout { puts stderr "proc self status or cmdline was unusable"; exit 121 }
     eof { puts stderr "domain exited during proc self check"; exit 122 }
+}
+expect -re {\[root@ginux [^]]+\]# }
+send -- "sh -c 'while :; do :; done' & busy=\$!; sleep 1; before=\$(awk '{print \$14+\$15}' /proc/\$busy/stat); rss=\$(awk '{print \$24}' /proc/\$busy/stat); statm_rss=\$(awk '{print \$2}' /proc/\$busy/statm); sleep 1; after=\$(awk '{print \$14+\$15}' /proc/\$busy/stat); top -b -d 1 -n 2 >/tmp/ginux-top; kill \$busy; wait \$busy 2>/dev/null || true; test \"\$before\" -ge 0 && test \"\$after\" -gt \"\$before\" && test \"\$rss\" -gt 0 && test \"\$statm_rss\" -gt 0 && grep -q '%CPU' /tmp/ginux-top && printf 'GINUX_PROC_%s\\n' 'ACCOUNTING: PASS'\r"
+expect {
+    -re {GINUX_PROC_ACCOUNTING: PASS} {}
+    timeout { puts stderr "proc CPU or memory accounting did not update for top-compatible reads"; exit 155 }
+    eof { puts stderr "domain exited during proc accounting check"; exit 156 }
 }
 expect -re {\[root@ginux [^]]+\]# }
 send -- "\035"

@@ -355,11 +355,12 @@ scope, threat model, and invariants.
 ## Exact next action
 
 After the human exits the currently running Rocky host, rerun
-`make test-systemd-interactive` to verify the new timed host-start progress,
-concise domain-start summary, attach-mode message, and transcript-banner
-removal. Then present the updated `make run-host` workflow for acceptance. Do
-not advance to Gate 9.75, push the branch, or open a pull request without
-explicit direction.
+`make test-systemd-interactive`. It now verifies the timed host-start progress,
+concise domain-start summary, attach-mode message, transcript-banner removal,
+live Bash and transient `ps` identities, and changing CPU/RSS accounting usable
+by `top`. Then rerun the required Gate 9.5 matrix and present the updated
+`make run-host` workflow for acceptance. Do not advance to Gate 9.75, push the
+branch, or open a pull request without explicit direction.
 
 ## Context recovery
 
@@ -377,9 +378,12 @@ explicit direction.
   audit found zero unexpected compatibility diagnostics and narrowly
   allowlisted the single accurate optional BPF-LSM message. The subsequent
   reporting and console-polish change passed `make check`, `make test-unit`,
-  shell syntax checks, the release build, and `git diff --check`; its clean
-  QEMU lifecycle rerun is pending because the human's host PID 87517 is still
-  active and must not be interrupted.
+  shell syntax checks, the release build, and `git diff --check`. The subsequent
+  procfs correction now compiles cleanly and passes `make check` and
+  `make test-unit`; its interactive regression checks Bash and transient `ps`
+  identity plus live `/proc/<pid>/stat`, `statm`, and `top` accounting. The clean
+  QEMU lifecycle rerun is pending because the human's host still owns SSH port
+  22399 and must not be interrupted.
 - Approved network direction: Gate 9 defaults to full host-shared inbound and
   outbound networking with normal host routing and bind conflicts, under Ginux
   mediation and audit. Gate 9.75 adds comprehensive domain configuration,

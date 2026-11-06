@@ -83,6 +83,7 @@ const MS_REMOUNT: u64 = 32;
 const MS_BIND: u64 = 4096;
 const MS_MOVE: u64 = 8192;
 const MS_REC: u64 = 16384;
+const CLOCK_REALTIME: usize = 0;
 const CLOCK_MONOTONIC: usize = 1;
 const CLOCK_PROCESS_CPUTIME_ID: usize = 2;
 
@@ -1650,6 +1651,7 @@ fn native_tracee_setup_fail(code: usize) -> ! {
 struct NativeSupervisorTask {
     host_pid: usize,
     virtual_id: TaskId,
+    start_ticks: u64,
     awaiting_exit: bool,
     override_exit: bool,
     override_result: i64,
@@ -1681,6 +1683,38 @@ struct NativeSupervisorTask {
     limits: [[u64; 2]; 16],
 }
 
+struct NativeProcSample {
+    name: [u8; 64],
+    name_len: usize,
+    cmdline: [u8; 256],
+    cmdline_len: usize,
+    state: u8,
+    minflt: u64,
+    cminflt: u64,
+    majflt: u64,
+    cmajflt: u64,
+    utime: u64,
+    stime: u64,
+    cutime: i64,
+    cstime: i64,
+    priority: i64,
+    nice: i64,
+    threads: u64,
+    starttime: u64,
+    vsize: u64,
+    rss_pages: i64,
+}
+
+impl NativeProcSample {
+    fn name(&self) -> &[u8] {
+        &self.name[..self.name_len]
+    }
+
+    fn cmdline(&self) -> &[u8] {
+        &self.cmdline[..self.cmdline_len]
+    }
+}
+
 fn native_default_limits() -> [[u64; 2]; 16] {
     let mut limits = [[u64::MAX; 2]; 16];
     limits[3] = [8 * 1024 * 1024, u64::MAX];
@@ -1690,11 +1724,17 @@ fn native_default_limits() -> [[u64; 2]; 16] {
     limits
 }
 
-fn native_proc_materialize(root_descriptor: usize, task: TaskView, name: &[u8]) -> bool {
+fn native_proc_materialize(
+    root_descriptor: usize,
+    task: TaskView,
+    host_pid: usize,
+    start_ticks: u64,
+) -> Option<NativeProcSample> {
+    let mut sample = native_proc_sample(host_pid)?;
+    sample.starttime = start_ticks;
+    let name = sample.name();
     let mut path = [0u8; 64];
-    let Some(_) = native_proc_path(task.id.pid, b"", &mut path) else {
-        return false;
-    };
+    native_proc_path(task.id.pid, b"", &mut path)?;
     let mkdir_result = unsafe {
         syscall3(
             SYS_MKDIRAT_HOST,
@@ -1704,11 +1744,9 @@ fn native_proc_materialize(root_descriptor: usize, task: TaskView, name: &[u8]) 
         )
     };
     if mkdir_result < 0 && mkdir_result != -17 {
-        return false;
+        return None;
     }
-    let Some(_) = native_proc_path(task.id.pid, b"/fdinfo", &mut path) else {
-        return false;
-    };
+    native_proc_path(task.id.pid, b"/fdinfo", &mut path)?;
     let mkdir_result = unsafe {
         syscall3(
             SYS_MKDIRAT_HOST,
@@ -1718,11 +1756,9 @@ fn native_proc_materialize(root_descriptor: usize, task: TaskView, name: &[u8]) 
         )
     };
     if mkdir_result < 0 && mkdir_result != -17 {
-        return false;
+        return None;
     }
-    let Some(_) = native_proc_path(task.id.pid, b"/fd", &mut path) else {
-        return false;
-    };
+    native_proc_path(task.id.pid, b"/fd", &mut path)?;
     let mkdir_result = unsafe {
         syscall3(
             SYS_MKDIRAT_HOST,
@@ -1732,77 +1768,80 @@ fn native_proc_materialize(root_descriptor: usize, task: TaskView, name: &[u8]) 
         )
     };
     if mkdir_result < 0 && mkdir_result != -17 {
-        return false;
+        return None;
     }
 
     let mut stat = [0u8; 384];
-    let Some(stat_len) = native_proc_stat(task, name, &mut stat) else {
-        return false;
-    };
-    let Some(_) = native_proc_path(task.id.pid, b"/stat", &mut path) else {
-        return false;
-    };
+    let stat_len = native_proc_stat(task, &sample, &mut stat)?;
+    native_proc_path(task.id.pid, b"/stat", &mut path)?;
     if !native_proc_write(root_descriptor, &path, &stat[..stat_len]) {
-        return false;
+        return None;
     }
 
-    let Some(_) = native_proc_path(task.id.pid, b"/comm", &mut path) else {
-        return false;
-    };
+    let mut statm = [0u8; 128];
+    let mut statm_len = 0usize;
+    let size_pages = sample.vsize / 4096;
+    let resident_pages = sample.rss_pages.max(0) as u64;
+    if native_buffer_append_u64(&mut statm, &mut statm_len, size_pages).is_none()
+        || native_buffer_append(&mut statm, &mut statm_len, b" ").is_none()
+        || native_buffer_append_u64(&mut statm, &mut statm_len, resident_pages).is_none()
+        || native_buffer_append(&mut statm, &mut statm_len, b" 0 0 0 ").is_none()
+        || native_buffer_append_u64(
+            &mut statm,
+            &mut statm_len,
+            size_pages.saturating_sub(resident_pages),
+        )
+        .is_none()
+        || native_buffer_append(&mut statm, &mut statm_len, b" 0\n").is_none()
+    {
+        return None;
+    }
+    native_proc_path(task.id.pid, b"/statm", &mut path)?;
+    if !native_proc_write(root_descriptor, &path, &statm[..statm_len]) {
+        return None;
+    }
+
+    native_proc_path(task.id.pid, b"/comm", &mut path)?;
     let mut comm = [0u8; 64];
     let mut comm_len = 0usize;
     if native_buffer_append(&mut comm, &mut comm_len, name).is_none()
         || native_buffer_append(&mut comm, &mut comm_len, b"\n").is_none()
         || !native_proc_write(root_descriptor, &path, &comm[..comm_len])
     {
-        return false;
+        return None;
     }
 
-    let Some(_) = native_proc_path(task.id.pid, b"/cgroup", &mut path) else {
-        return false;
-    };
+    native_proc_path(task.id.pid, b"/cgroup", &mut path)?;
     if !native_proc_write(root_descriptor, &path, b"0::/\n") {
-        return false;
+        return None;
     }
 
-    let mut status = [0u8; 512];
-    let Some(status_len) = native_proc_status(task, name, &mut status) else {
-        return false;
-    };
-    let Some(_) = native_proc_path(task.id.pid, b"/status", &mut path) else {
-        return false;
-    };
+    let mut status = [0u8; 768];
+    let status_len = native_proc_status(task, &sample, &mut status)?;
+    native_proc_path(task.id.pid, b"/status", &mut path)?;
     if !native_proc_write(root_descriptor, &path, &status[..status_len]) {
-        return false;
+        return None;
     }
 
-    let Some(_) = native_proc_path(task.id.pid, b"/cmdline", &mut path) else {
-        return false;
-    };
-    let mut cmdline = [0u8; 128];
-    let mut cmdline_len = 0usize;
-    if !(native_buffer_append(&mut cmdline, &mut cmdline_len, name).is_some()
-        && native_buffer_append(&mut cmdline, &mut cmdline_len, b"\0").is_some()
-        && native_proc_write(root_descriptor, &path, &cmdline[..cmdline_len]))
-    {
-        return false;
+    native_proc_path(task.id.pid, b"/cmdline", &mut path)?;
+    if !native_proc_write(root_descriptor, &path, sample.cmdline()) {
+        return None;
     }
 
-    let Some(_) = native_proc_path(task.id.pid, b"/oom_score_adj", &mut path) else {
-        return false;
-    };
+    native_proc_path(task.id.pid, b"/oom_score_adj", &mut path)?;
     if !native_proc_write_mode(root_descriptor, &path, b"0\n", 0o644) {
-        return false;
+        return None;
     }
 
-    let Some(_) = native_proc_path(task.id.pid, b"/mountinfo", &mut path) else {
-        return false;
-    };
-    native_proc_write(
+    native_proc_path(task.id.pid, b"/mountinfo", &mut path)?;
+    if !native_proc_write(
         root_descriptor,
         &path,
         b"1 0 0:1 / / rw,nosuid,nodev - proc proc rw\n",
-    )
+    ) {
+        return None;
+    }
+    Some(sample)
 }
 
 fn native_proc_remove(root_descriptor: usize, pid: u32) {
@@ -2189,30 +2228,190 @@ fn native_proc_path(pid: u32, suffix: &[u8], output: &mut [u8]) -> Option<usize>
     Some(length)
 }
 
-fn native_proc_stat(task: TaskView, name: &[u8], output: &mut [u8]) -> Option<usize> {
+fn native_host_proc_read(host_pid: usize, leaf: &[u8], output: &mut [u8]) -> Option<usize> {
+    let mut path = [0u8; 96];
+    let mut length = 0usize;
+    native_buffer_append(&mut path, &mut length, b"/proc/")?;
+    native_buffer_append_u64(&mut path, &mut length, host_pid as u64)?;
+    native_buffer_append(&mut path, &mut length, b"/")?;
+    native_buffer_append(&mut path, &mut length, leaf)?;
+    if length >= path.len() {
+        return None;
+    }
+    path[length] = 0;
+    let descriptor = unsafe {
+        syscall4(
+            SYS_OPENAT_HOST,
+            AT_FDCWD,
+            path.as_ptr() as usize,
+            O_RDONLY,
+            0,
+        )
+    };
+    if descriptor < 0 {
+        return None;
+    }
+    let count = unsafe {
+        syscall3(
+            SYS_READ_HOST,
+            descriptor as usize,
+            output.as_mut_ptr() as usize,
+            output.len(),
+        )
+    };
+    let _ = unsafe { syscall1(SYS_CLOSE_HOST, descriptor as usize) };
+    (count >= 0).then_some(count as usize)
+}
+
+fn native_parse_u64(input: &[u8]) -> Option<u64> {
+    if input.is_empty() || !input.iter().all(u8::is_ascii_digit) {
+        return None;
+    }
+    input.iter().try_fold(0u64, |value, byte| {
+        value.checked_mul(10)?.checked_add(u64::from(*byte - b'0'))
+    })
+}
+
+fn native_parse_i64(input: &[u8]) -> Option<i64> {
+    let (negative, digits) = match input.first() {
+        Some(b'-') => (true, &input[1..]),
+        Some(b'+') => (false, &input[1..]),
+        Some(_) => (false, input),
+        None => return None,
+    };
+    let value = native_parse_u64(digits)?;
+    if negative {
+        i64::try_from(value).ok()?.checked_neg()
+    } else {
+        i64::try_from(value).ok()
+    }
+}
+
+fn native_proc_sample(host_pid: usize) -> Option<NativeProcSample> {
+    let mut stat = [0u8; 1024];
+    let stat_len = native_host_proc_read(host_pid, b"stat", &mut stat)?;
+    let stat = &stat[..stat_len];
+    let name_start = stat.iter().position(|byte| *byte == b'(')?.checked_add(1)?;
+    let name_end = stat.iter().rposition(|byte| *byte == b')')?;
+    if name_end <= name_start || name_end.checked_add(3)? > stat.len() {
+        return None;
+    }
+    let tail = &stat[name_end + 2..];
+    let state = *tail.first()?;
+    if tail.get(1) != Some(&b' ') {
+        return None;
+    }
+    let mut fields = [&[][..]; 21];
+    let mut count = 0usize;
+    for field in tail[2..]
+        .split(|byte| *byte == b' ' || *byte == b'\n')
+        .filter(|field| !field.is_empty())
+    {
+        if count == fields.len() {
+            break;
+        }
+        fields[count] = field;
+        count += 1;
+    }
+    if count != fields.len() {
+        return None;
+    }
+
+    let source_name = &stat[name_start..name_end];
+    let mut name = [0u8; 64];
+    let name_len = core::cmp::min(source_name.len(), name.len());
+    name[..name_len].copy_from_slice(&source_name[..name_len]);
+
+    let mut cmdline = [0u8; 256];
+    let mut cmdline_len = native_host_proc_read(host_pid, b"cmdline", &mut cmdline)?;
+    if cmdline_len == 0 {
+        cmdline[..name_len].copy_from_slice(&name[..name_len]);
+        cmdline_len = name_len;
+        if cmdline_len < cmdline.len() {
+            cmdline[cmdline_len] = 0;
+            cmdline_len += 1;
+        }
+    }
+
+    Some(NativeProcSample {
+        name,
+        name_len,
+        cmdline,
+        cmdline_len,
+        state,
+        minflt: native_parse_u64(fields[6])?,
+        cminflt: native_parse_u64(fields[7])?,
+        majflt: native_parse_u64(fields[8])?,
+        cmajflt: native_parse_u64(fields[9])?,
+        utime: native_parse_u64(fields[10])?,
+        stime: native_parse_u64(fields[11])?,
+        cutime: native_parse_i64(fields[12])?,
+        cstime: native_parse_i64(fields[13])?,
+        priority: native_parse_i64(fields[14])?,
+        nice: native_parse_i64(fields[15])?,
+        threads: native_parse_u64(fields[16])?,
+        starttime: native_parse_u64(fields[18])?,
+        vsize: native_parse_u64(fields[19])?,
+        rss_pages: native_parse_i64(fields[20])?,
+    })
+}
+
+fn native_proc_stat(task: TaskView, sample: &NativeProcSample, output: &mut [u8]) -> Option<usize> {
     let mut length = 0usize;
     native_buffer_append_u32(output, &mut length, task.id.pid)?;
     native_buffer_append(output, &mut length, b" (")?;
-    native_buffer_append(output, &mut length, name)?;
-    native_buffer_append(output, &mut length, b") S ")?;
+    native_buffer_append(output, &mut length, sample.name())?;
+    native_buffer_append(output, &mut length, b") ")?;
+    native_buffer_append(output, &mut length, &[sample.state])?;
+    native_buffer_append(output, &mut length, b" ")?;
     native_buffer_append_u32(output, &mut length, task.parent)?;
     native_buffer_append(output, &mut length, b" ")?;
     native_buffer_append_u32(output, &mut length, task.process_group)?;
     native_buffer_append(output, &mut length, b" ")?;
     native_buffer_append_u32(output, &mut length, task.session)?;
+    native_buffer_append(output, &mut length, b" 0 -1 0 ")?;
+    for value in [sample.minflt, sample.cminflt, sample.majflt, sample.cmajflt] {
+        native_buffer_append_u64(output, &mut length, value)?;
+        native_buffer_append(output, &mut length, b" ")?;
+    }
+    native_buffer_append_u64(output, &mut length, sample.utime)?;
+    native_buffer_append(output, &mut length, b" ")?;
+    native_buffer_append_u64(output, &mut length, sample.stime)?;
+    native_buffer_append(output, &mut length, b" ")?;
+    native_buffer_append_i64(output, &mut length, sample.cutime)?;
+    native_buffer_append(output, &mut length, b" ")?;
+    native_buffer_append_i64(output, &mut length, sample.cstime)?;
+    native_buffer_append(output, &mut length, b" ")?;
+    native_buffer_append_i64(output, &mut length, sample.priority)?;
+    native_buffer_append(output, &mut length, b" ")?;
+    native_buffer_append_i64(output, &mut length, sample.nice)?;
+    native_buffer_append(output, &mut length, b" ")?;
+    native_buffer_append_u64(output, &mut length, sample.threads)?;
+    native_buffer_append(output, &mut length, b" 0 ")?;
+    native_buffer_append_u64(output, &mut length, sample.starttime)?;
+    native_buffer_append(output, &mut length, b" ")?;
+    native_buffer_append_u64(output, &mut length, sample.vsize)?;
+    native_buffer_append(output, &mut length, b" ")?;
+    native_buffer_append_i64(output, &mut length, sample.rss_pages)?;
     native_buffer_append(
         output,
         &mut length,
-        b" 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 17 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n",
+        b" 0 0 0 0 0 0 0 0 0 0 0 0 0 0 17 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n",
     )?;
     Some(length)
 }
 
-fn native_proc_status(task: TaskView, name: &[u8], output: &mut [u8]) -> Option<usize> {
+fn native_proc_status(
+    task: TaskView,
+    sample: &NativeProcSample,
+    output: &mut [u8],
+) -> Option<usize> {
     let mut length = 0usize;
     native_buffer_append(output, &mut length, b"Name:\t")?;
-    native_buffer_append(output, &mut length, name)?;
-    native_buffer_append(output, &mut length, b"\nState:\tS (sleeping)\nTgid:\t")?;
+    native_buffer_append(output, &mut length, sample.name())?;
+    native_buffer_append(output, &mut length, b"\nState:\t")?;
+    native_buffer_append(output, &mut length, &[sample.state])?;
+    native_buffer_append(output, &mut length, b"\nTgid:\t")?;
     native_buffer_append_u32(output, &mut length, task.tgid)?;
     native_buffer_append(output, &mut length, b"\nPid:\t")?;
     native_buffer_append_u32(output, &mut length, task.id.pid)?;
@@ -2236,7 +2435,17 @@ fn native_proc_status(task: TaskView, name: &[u8], output: &mut [u8]) -> Option<
     native_buffer_append_u32(output, &mut length, task.process_group)?;
     native_buffer_append(output, &mut length, b"\nNSsid:\t")?;
     native_buffer_append_u32(output, &mut length, task.session)?;
-    native_buffer_append(output, &mut length, b"\nThreads:\t1\n\n")?;
+    native_buffer_append(output, &mut length, b"\nThreads:\t")?;
+    native_buffer_append_u64(output, &mut length, sample.threads)?;
+    native_buffer_append(output, &mut length, b"\nVmSize:\t")?;
+    native_buffer_append_u64(output, &mut length, sample.vsize / 1024)?;
+    native_buffer_append(output, &mut length, b" kB\nVmRSS:\t")?;
+    native_buffer_append_i64(
+        output,
+        &mut length,
+        sample.rss_pages.saturating_mul(4).max(0),
+    )?;
+    native_buffer_append(output, &mut length, b" kB\n\n")?;
     Some(length)
 }
 
@@ -2262,6 +2471,166 @@ fn native_buffer_append_u32(output: &mut [u8], length: &mut usize, mut value: u3
         value /= 10;
     }
     native_buffer_append(output, length, &digits[start..])
+}
+
+fn native_buffer_append_u64(output: &mut [u8], length: &mut usize, mut value: u64) -> Option<()> {
+    let mut digits = [0u8; 20];
+    let mut start = digits.len();
+    if value == 0 {
+        return native_buffer_append(output, length, b"0");
+    }
+    while value != 0 {
+        start -= 1;
+        digits[start] = b'0' + (value % 10) as u8;
+        value /= 10;
+    }
+    native_buffer_append(output, length, &digits[start..])
+}
+
+fn native_buffer_append_i64(output: &mut [u8], length: &mut usize, value: i64) -> Option<()> {
+    if value < 0 {
+        native_buffer_append(output, length, b"-")?;
+    }
+    native_buffer_append_u64(output, length, value.unsigned_abs())
+}
+
+fn native_buffer_append_hundredths(
+    output: &mut [u8],
+    length: &mut usize,
+    value: u64,
+) -> Option<()> {
+    native_buffer_append(output, length, &[b'0' + ((value / 10) % 10) as u8])?;
+    native_buffer_append(output, length, &[b'0' + (value % 10) as u8])
+}
+
+fn native_proc_refresh_all(
+    root_descriptor: usize,
+    processes: &ProcessTable<128>,
+    tasks: &[Option<NativeSupervisorTask>; 128],
+    domain_start_ns: u64,
+    domain_start_realtime_seconds: u64,
+    vcpus: u64,
+    memory_mib: u64,
+) -> bool {
+    const TICKS_PER_SECOND: u64 = 100;
+    const NANOS_PER_TICK: u64 = 1_000_000_000 / TICKS_PER_SECOND;
+    let now_ns = clock_nanoseconds(CLOCK_MONOTONIC);
+    let elapsed_ns = now_ns.saturating_sub(domain_start_ns);
+    let elapsed_ticks = elapsed_ns / NANOS_PER_TICK;
+    let mut user_ticks = 0u64;
+    let mut system_ticks = 0u64;
+    let mut rss_pages = 0u64;
+    let mut active = 0u64;
+    let mut last_pid = 1u32;
+
+    for supervisor_task in tasks.iter().flatten().filter(|task| task.tracing) {
+        let Ok(view) = processes.view(supervisor_task.virtual_id) else {
+            return false;
+        };
+        let Some(sample) = native_proc_materialize(
+            root_descriptor,
+            view,
+            supervisor_task.host_pid,
+            supervisor_task.start_ticks,
+        ) else {
+            return false;
+        };
+        user_ticks = user_ticks.saturating_add(sample.utime);
+        system_ticks = system_ticks.saturating_add(sample.stime);
+        if view.tgid == view.id.pid {
+            rss_pages = rss_pages.saturating_add(sample.rss_pages.max(0) as u64);
+        }
+        active = active.saturating_add(1);
+        last_pid = core::cmp::max(last_pid, view.id.pid);
+    }
+
+    let total_ticks = elapsed_ticks.saturating_mul(core::cmp::max(vcpus, 1));
+    let busy_ticks = user_ticks.saturating_add(system_ticks);
+    let idle_ticks = total_ticks.saturating_sub(busy_ticks);
+    let mut stat = [0u8; 512];
+    let mut length = 0usize;
+    if native_buffer_append(&mut stat, &mut length, b"cpu  ").is_none()
+        || native_buffer_append_u64(&mut stat, &mut length, user_ticks).is_none()
+        || native_buffer_append(&mut stat, &mut length, b" 0 ").is_none()
+        || native_buffer_append_u64(&mut stat, &mut length, system_ticks).is_none()
+        || native_buffer_append(&mut stat, &mut length, b" ").is_none()
+        || native_buffer_append_u64(&mut stat, &mut length, idle_ticks).is_none()
+        || native_buffer_append(&mut stat, &mut length, b" 0 0 0 0 0 0\nbtime ").is_none()
+        || native_buffer_append_u64(&mut stat, &mut length, domain_start_realtime_seconds).is_none()
+        || native_buffer_append(&mut stat, &mut length, b"\nprocesses ").is_none()
+        || native_buffer_append_u64(&mut stat, &mut length, u64::from(last_pid)).is_none()
+        || native_buffer_append(&mut stat, &mut length, b"\nprocs_running ").is_none()
+        || native_buffer_append_u64(&mut stat, &mut length, active).is_none()
+        || native_buffer_append(&mut stat, &mut length, b"\nprocs_blocked 0\n").is_none()
+        || !native_proc_write(root_descriptor, b"proc/stat\0", &stat[..length])
+    {
+        return false;
+    }
+
+    let elapsed_hundredths = elapsed_ns / 10_000_000;
+    let idle_hundredths = idle_ticks;
+    let mut uptime = [0u8; 96];
+    length = 0;
+    if native_buffer_append_u64(&mut uptime, &mut length, elapsed_hundredths / 100).is_none()
+        || native_buffer_append(&mut uptime, &mut length, b".").is_none()
+        || native_buffer_append_hundredths(&mut uptime, &mut length, elapsed_hundredths % 100)
+            .is_none()
+        || native_buffer_append(&mut uptime, &mut length, b" ").is_none()
+        || native_buffer_append_u64(&mut uptime, &mut length, idle_hundredths / 100).is_none()
+        || native_buffer_append(&mut uptime, &mut length, b".").is_none()
+        || native_buffer_append_hundredths(&mut uptime, &mut length, idle_hundredths % 100)
+            .is_none()
+        || native_buffer_append(&mut uptime, &mut length, b"\n").is_none()
+        || !native_proc_write(root_descriptor, b"proc/uptime\0", &uptime[..length])
+    {
+        return false;
+    }
+
+    let total_kib = memory_mib.saturating_mul(1024);
+    let used_kib = rss_pages.saturating_mul(4);
+    let available_kib = total_kib.saturating_sub(used_kib);
+    let mut meminfo = [0u8; 512];
+    length = 0;
+    for (label, value) in [
+        (b"MemTotal:       ".as_slice(), total_kib),
+        (b"MemFree:        ".as_slice(), available_kib),
+        (b"MemAvailable:   ".as_slice(), available_kib),
+        (b"Buffers:        ".as_slice(), 0),
+        (b"Cached:         ".as_slice(), 0),
+        (b"SwapCached:     ".as_slice(), 0),
+        (b"Active:         ".as_slice(), used_kib),
+        (b"Inactive:       ".as_slice(), 0),
+        (b"SwapTotal:      ".as_slice(), 0),
+        (b"SwapFree:       ".as_slice(), 0),
+        (b"SReclaimable:   ".as_slice(), 0),
+        (b"Shmem:          ".as_slice(), 0),
+    ] {
+        if native_buffer_append(&mut meminfo, &mut length, label).is_none()
+            || native_buffer_append_u64(&mut meminfo, &mut length, value).is_none()
+            || native_buffer_append(&mut meminfo, &mut length, b" kB\n").is_none()
+        {
+            return false;
+        }
+    }
+    if !native_proc_write(root_descriptor, b"proc/meminfo\0", &meminfo[..length]) {
+        return false;
+    }
+
+    let mut loadavg = [0u8; 96];
+    length = 0;
+    if native_buffer_append(&mut loadavg, &mut length, b"0.00 0.00 0.00 ").is_none()
+        || native_buffer_append_u64(&mut loadavg, &mut length, active).is_none()
+        || native_buffer_append(&mut loadavg, &mut length, b"/").is_none()
+        || native_buffer_append_u64(&mut loadavg, &mut length, active).is_none()
+        || native_buffer_append(&mut loadavg, &mut length, b" ").is_none()
+        || native_buffer_append_u64(&mut loadavg, &mut length, u64::from(last_pid)).is_none()
+        || native_buffer_append(&mut loadavg, &mut length, b"\n").is_none()
+        || !native_proc_write(root_descriptor, b"proc/loadavg\0", &loadavg[..length])
+    {
+        return false;
+    }
+
+    true
 }
 
 fn native_proc_write(root_descriptor: usize, path: &[u8], bytes: &[u8]) -> bool {
@@ -2308,6 +2677,8 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descripto
         write_tracee_string_to(2, pid, address);
     };
     let line = |message: &[u8]| line_to(2, message);
+    let domain_start_ns = clock_nanoseconds(CLOCK_MONOTONIC);
+    let domain_start_realtime_seconds = clock_nanoseconds(CLOCK_REALTIME) / 1_000_000_000;
 
     let mut status = 0i32;
     if wait(pid, &mut status) < 0 {
@@ -2352,6 +2723,7 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descripto
     tasks[0] = Some(NativeSupervisorTask {
         host_pid: pid,
         virtual_id: root_virtual,
+        start_ticks: 0,
         awaiting_exit: false,
         override_exit: false,
         override_result: 0,
@@ -2386,7 +2758,7 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descripto
         let root_view = processes
             .view(root_virtual)
             .unwrap_or_else(|_| native_fail(domain, pid, b"native root proc view failed"));
-        if !native_proc_materialize(root_descriptor, root_view, b"systemd") {
+        if native_proc_materialize(root_descriptor, root_view, pid, 0).is_none() {
             native_fail(domain, pid, b"native root proc materialization failed");
         }
     }
@@ -2480,11 +2852,20 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descripto
                 processes.fork(task.virtual_id)
             }
             .unwrap_or_else(|_| native_fail(domain, pid, b"native virtual child failed"));
+            let child_start_ticks =
+                clock_nanoseconds(CLOCK_MONOTONIC).saturating_sub(domain_start_ns) / 10_000_000;
             if mode == 3 {
                 let child_view = processes.view(child_virtual).unwrap_or_else(|_| {
                     native_fail(domain, pid, b"native virtual child view failed")
                 });
-                if !native_proc_materialize(root_descriptor, child_view, b"ginux-task") {
+                if native_proc_materialize(
+                    root_descriptor,
+                    child_view,
+                    child_host_pid,
+                    child_start_ticks,
+                )
+                .is_none()
+                {
                     native_fail(domain, pid, b"native virtual proc materialization failed");
                 }
             }
@@ -2497,6 +2878,7 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descripto
             tasks[child_slot] = Some(NativeSupervisorTask {
                 host_pid: child_host_pid,
                 virtual_id: child_virtual,
+                start_ticks: child_start_ticks,
                 awaiting_exit: false,
                 override_exit: false,
                 override_result: 0,
@@ -2593,7 +2975,9 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descripto
                 let task_view = processes
                     .view(task.virtual_id)
                     .unwrap_or_else(|_| native_fail(domain, pid, b"native exec view failed"));
-                if !native_proc_materialize(root_descriptor, task_view, b"systemd-executor") {
+                if native_proc_materialize(root_descriptor, task_view, host_pid, task.start_ticks)
+                    .is_none()
+                {
                     native_fail(domain, pid, b"native exec proc update failed");
                 }
             }
@@ -2882,6 +3266,23 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descripto
         sequence += 1;
         let syscall = registers.orig_rax;
         task.syscall = syscall;
+        let proc_open = mode == 3
+            && syscall == 257
+            && (tracee_string_equals(host_pid, registers.rsi as usize, b"/proc")
+                || tracee_string_starts_with(host_pid, registers.rsi as usize, b"/proc/"));
+        if proc_open
+            && !native_proc_refresh_all(
+                root_descriptor,
+                &processes,
+                &tasks,
+                domain_start_ns,
+                domain_start_realtime_seconds,
+                domain.config().vcpus,
+                domain.config().memory_mib,
+            )
+        {
+            native_fail(domain, pid, b"native proc refresh failed");
+        }
         let shared_network = mode == 3 && domain.config().network_backend == NetworkBackend::Shared;
         let decision = if mode == 3 {
             decide_systemd(syscall, shared_network)
@@ -3415,7 +3816,14 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descripto
                     let task_view = processes.view(task.virtual_id).unwrap_or_else(|_| {
                         native_fail(domain, pid, b"native session view failed")
                     });
-                    if !native_proc_materialize(root_descriptor, task_view, b"systemd-executor") {
+                    if native_proc_materialize(
+                        root_descriptor,
+                        task_view,
+                        host_pid,
+                        task.start_ticks,
+                    )
+                    .is_none()
+                    {
                         native_fail(domain, pid, b"native session proc update failed");
                     }
                 }
@@ -3445,7 +3853,22 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descripto
                     let task_view = processes.view(changed_task).unwrap_or_else(|_| {
                         native_fail(domain, pid, b"native process group view failed")
                     });
-                    if !native_proc_materialize(root_descriptor, task_view, b"login") {
+                    let changed_supervisor = tasks
+                        .iter()
+                        .flatten()
+                        .find(|candidate| candidate.virtual_id == changed_task)
+                        .copied()
+                        .unwrap_or_else(|| {
+                            native_fail(domain, pid, b"native process group task missing")
+                        });
+                    if native_proc_materialize(
+                        root_descriptor,
+                        task_view,
+                        changed_supervisor.host_pid,
+                        changed_supervisor.start_ticks,
+                    )
+                    .is_none()
+                    {
                         native_fail(domain, pid, b"native process group proc update failed");
                     }
                     0
