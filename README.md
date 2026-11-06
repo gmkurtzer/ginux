@@ -90,6 +90,29 @@ systemd compatibility. Its exact image, readiness marker, tests, evidence, and
 limitations are recorded in
 [`hdae/gates-todo/9-systemd-baseline.md`](hdae/gates-todo/9-systemd-baseline.md).
 
+### Agent containment research
+
+Ginux is also being tested as a containment boundary for AI agents and other
+automated software that can execute commands, modify files, open network
+connections, and start additional processes. Instead of giving an agent the
+host's complete Linux ABI, an operator can place its process tree inside a
+domain whose kernel contract exposes only the operations and virtual resources
+required for the task.
+
+The research goal is a reviewable boundary spanning syscalls, ioctls,
+filesystems, devices, networking, process authority, and virtual `/proc` and
+`/sys` state. For example, a contract may allow an agent to read time, inspect
+its own processes, and modify one assigned workspace while denying clock
+changes, host filesystem access, unapproved network listeners, and unrelated
+devices. Ginux can then audit the contract decisions made while the agent and
+its child processes run.
+
+This is an active verification target, not a claim that Ginux is currently a
+production-grade agent sandbox. The contract inventory, configurable policy,
+adversarial tests, performance costs, and escape boundaries are tracked through
+the HDAE gates and must be demonstrated before stronger containment claims are
+made.
+
 ## Relationship to other systems
 
 The userspace-kernel idea is established research and engineering territory.
@@ -191,6 +214,12 @@ Ginux is research software. It has not received independent security
 certification, does not provide complete Linux compatibility, and is not ready
 for production workloads. Unknown contract operations fail closed, but current
 coverage and guarantees are limited to the tested gates.
+
+For agent containment, the protected object is the host and any authority not
+explicitly assigned to the domain. Ginux constrains the Linux processes in
+which an agent and its tools execute; it does not inspect model reasoning,
+secure an external model provider, or make untrusted code safe outside the
+enforced domain boundary.
 
 The full intent, threat model, invariants, and gate plan live in:
 
