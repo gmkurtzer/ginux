@@ -105,6 +105,12 @@ pub enum FailurePolicy {
     Fail,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HookFailurePolicy {
+    Stop,
+    Continue,
+}
+
 // Field capacities of `DomainConfig`, shared with `NORMALIZED_CAPACITY`.
 const IDENTIFIER_BYTES: usize = 64;
 const REFERENCE_BYTES: usize = 128;
@@ -115,11 +121,16 @@ const ENVIRONMENT_ITEMS: usize = 8;
 const ENVIRONMENT_BYTES: usize = 256;
 const ASSIGNMENT_ITEMS: usize = 8;
 const ASSIGNMENT_BYTES: usize = 64;
+const POLICY_ITEMS: usize = 16;
+const POLICY_BYTES: usize = 128;
+const HOOK_ITEMS: usize = 8;
+const HOOK_BYTES: usize = 256;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct DomainConfig {
     pub schema_version: u64,
     pub id: Text<IDENTIFIER_BYTES>,
+    pub hostname: Text<IDENTIFIER_BYTES>,
     pub root: Text<REFERENCE_BYTES>,
     pub init: Text<PATH_BYTES>,
     pub args: TextList<ARG_ITEMS, ARG_BYTES>,
@@ -130,9 +141,27 @@ pub struct DomainConfig {
     pub execution_profile: ExecutionProfile,
     pub execution_backend: ExecutionBackend,
     pub contract_profile: Text<IDENTIFIER_BYTES>,
+    pub contract_templates: TextList<ASSIGNMENT_ITEMS, ASSIGNMENT_BYTES>,
+    pub contract_allow: TextList<POLICY_ITEMS, POLICY_BYTES>,
+    pub contract_deny: TextList<POLICY_ITEMS, POLICY_BYTES>,
+    pub contract_digest: Text<REFERENCE_BYTES>,
     pub storage: TextList<ASSIGNMENT_ITEMS, ASSIGNMENT_BYTES>,
+    pub volumes: TextList<ASSIGNMENT_ITEMS, POLICY_BYTES>,
     pub devices: TextList<ASSIGNMENT_ITEMS, ASSIGNMENT_BYTES>,
     pub network_backend: NetworkBackend,
+    pub network_interface: Text<IDENTIFIER_BYTES>,
+    pub network_source: Text<IDENTIFIER_BYTES>,
+    pub ingress_allow: TextList<POLICY_ITEMS, POLICY_BYTES>,
+    pub ingress_deny: TextList<POLICY_ITEMS, POLICY_BYTES>,
+    pub egress_allow: TextList<POLICY_ITEMS, POLICY_BYTES>,
+    pub egress_deny: TextList<POLICY_ITEMS, POLICY_BYTES>,
+    pub port_forwards: TextList<ASSIGNMENT_ITEMS, POLICY_BYTES>,
+    pub access_uid: u64,
+    pub access_gid: u64,
+    pub pre_boot_hooks: TextList<HOOK_ITEMS, HOOK_BYTES>,
+    pub hook_timeout_seconds: u64,
+    pub hook_failure_policy: HookFailurePolicy,
+    pub stop_timeout_seconds: u64,
     pub audit_mode: AuditMode,
     pub failure_policy: FailurePolicy,
 }
@@ -184,20 +213,26 @@ impl fmt::Display for ConfigError {
 enum Section {
     Root,
     Domain,
+    Identity,
     Resources,
     Execution,
     Contract,
     Storage,
+    Volumes,
     Devices,
     Network,
+    Access,
+    Hooks,
+    Lifecycle,
     Audit,
     Failure,
 }
 
 struct ConfigBuilder {
-    seen: u32,
+    seen: u64,
     schema_version: u64,
     id: Text<IDENTIFIER_BYTES>,
+    hostname: Text<IDENTIFIER_BYTES>,
     root: Text<REFERENCE_BYTES>,
     init: Text<PATH_BYTES>,
     args: TextList<ARG_ITEMS, ARG_BYTES>,
@@ -208,9 +243,27 @@ struct ConfigBuilder {
     execution_profile: ExecutionProfile,
     execution_backend: ExecutionBackend,
     contract_profile: Text<IDENTIFIER_BYTES>,
+    contract_templates: TextList<ASSIGNMENT_ITEMS, ASSIGNMENT_BYTES>,
+    contract_allow: TextList<POLICY_ITEMS, POLICY_BYTES>,
+    contract_deny: TextList<POLICY_ITEMS, POLICY_BYTES>,
+    contract_digest: Text<REFERENCE_BYTES>,
     storage: TextList<ASSIGNMENT_ITEMS, ASSIGNMENT_BYTES>,
+    volumes: TextList<ASSIGNMENT_ITEMS, POLICY_BYTES>,
     devices: TextList<ASSIGNMENT_ITEMS, ASSIGNMENT_BYTES>,
     network_backend: NetworkBackend,
+    network_interface: Text<IDENTIFIER_BYTES>,
+    network_source: Text<IDENTIFIER_BYTES>,
+    ingress_allow: TextList<POLICY_ITEMS, POLICY_BYTES>,
+    ingress_deny: TextList<POLICY_ITEMS, POLICY_BYTES>,
+    egress_allow: TextList<POLICY_ITEMS, POLICY_BYTES>,
+    egress_deny: TextList<POLICY_ITEMS, POLICY_BYTES>,
+    port_forwards: TextList<ASSIGNMENT_ITEMS, POLICY_BYTES>,
+    access_uid: u64,
+    access_gid: u64,
+    pre_boot_hooks: TextList<HOOK_ITEMS, HOOK_BYTES>,
+    hook_timeout_seconds: u64,
+    hook_failure_policy: HookFailurePolicy,
+    stop_timeout_seconds: u64,
     audit_mode: AuditMode,
     failure_policy: FailurePolicy,
 }
@@ -221,6 +274,7 @@ impl ConfigBuilder {
             seen: 0,
             schema_version: 0,
             id: Text::empty(),
+            hostname: Text::empty(),
             root: Text::empty(),
             init: Text::empty(),
             args: TextList::empty(),
@@ -231,15 +285,33 @@ impl ConfigBuilder {
             execution_profile: ExecutionProfile::Security,
             execution_backend: ExecutionBackend::Interpreter,
             contract_profile: Text::empty(),
+            contract_templates: TextList::empty(),
+            contract_allow: TextList::empty(),
+            contract_deny: TextList::empty(),
+            contract_digest: Text::empty(),
             storage: TextList::empty(),
+            volumes: TextList::empty(),
             devices: TextList::empty(),
             network_backend: NetworkBackend::None,
+            network_interface: Text::empty(),
+            network_source: Text::empty(),
+            ingress_allow: TextList::empty(),
+            ingress_deny: TextList::empty(),
+            egress_allow: TextList::empty(),
+            egress_deny: TextList::empty(),
+            port_forwards: TextList::empty(),
+            access_uid: 0,
+            access_gid: 0,
+            pre_boot_hooks: TextList::empty(),
+            hook_timeout_seconds: 30,
+            hook_failure_policy: HookFailurePolicy::Stop,
+            stop_timeout_seconds: 30,
             audit_mode: AuditMode::Stderr,
             failure_policy: FailurePolicy::Stop,
         }
     }
 
-    fn mark(&mut self, bit: u32) -> Result<(), ConfigError> {
+    fn mark(&mut self, bit: u64) -> Result<(), ConfigError> {
         if self.seen & bit != 0 {
             return Err(ConfigError::DuplicateField);
         }
@@ -248,8 +320,10 @@ impl ConfigBuilder {
     }
 
     fn finish(self) -> Result<DomainConfig, ConfigError> {
-        const REQUIRED: u32 = (1 << 16) - 1;
-        const WORKDIR_BIT: u32 = 1 << 16;
+        const REQUIRED: u64 = (1 << 16) - 1;
+        const WORKDIR_BIT: u64 = 1 << 16;
+        const HOSTNAME_BIT: u64 = 1 << 17;
+        const CONTRACT_DIGEST_BIT: u64 = 1 << 21;
         if self.seen & REQUIRED != REQUIRED {
             return Err(ConfigError::MissingField);
         }
@@ -258,9 +332,20 @@ impl ConfigBuilder {
         } else {
             Text::from_bytes(b"/work").map_err(|_| ConfigError::InvalidValue)?
         };
+        let hostname = if self.seen & HOSTNAME_BIT != 0 {
+            self.hostname
+        } else {
+            self.id
+        };
+        let contract_digest = if self.seen & CONTRACT_DIGEST_BIT != 0 {
+            self.contract_digest
+        } else {
+            Text::from_bytes(b"pending-gate10").map_err(|_| ConfigError::InvalidValue)?
+        };
         let config = DomainConfig {
             schema_version: self.schema_version,
             id: self.id,
+            hostname,
             root: self.root,
             init: self.init,
             args: self.args,
@@ -271,9 +356,27 @@ impl ConfigBuilder {
             execution_profile: self.execution_profile,
             execution_backend: self.execution_backend,
             contract_profile: self.contract_profile,
+            contract_templates: self.contract_templates,
+            contract_allow: self.contract_allow,
+            contract_deny: self.contract_deny,
+            contract_digest,
             storage: self.storage,
+            volumes: self.volumes,
             devices: self.devices,
             network_backend: self.network_backend,
+            network_interface: self.network_interface,
+            network_source: self.network_source,
+            ingress_allow: self.ingress_allow,
+            ingress_deny: self.ingress_deny,
+            egress_allow: self.egress_allow,
+            egress_deny: self.egress_deny,
+            port_forwards: self.port_forwards,
+            access_uid: self.access_uid,
+            access_gid: self.access_gid,
+            pre_boot_hooks: self.pre_boot_hooks,
+            hook_timeout_seconds: self.hook_timeout_seconds,
+            hook_failure_policy: self.hook_failure_policy,
+            stop_timeout_seconds: self.stop_timeout_seconds,
             audit_mode: self.audit_mode,
             failure_policy: self.failure_policy,
         };
@@ -311,6 +414,90 @@ impl DomainConfig {
         builder.finish()
     }
 
+    /// Apply one command-line override using the same TOML value parsers and
+    /// validation rules as file configuration. `key` is a fully-qualified
+    /// schema path such as `resources.vcpus`; `value` is the TOML value only.
+    pub fn apply_override(&mut self, key: &[u8], value: &[u8]) -> Result<(), ConfigError> {
+        match key {
+            b"domain.id" => self.id = parse_string(value)?,
+            b"domain.root" => self.root = parse_string(value)?,
+            b"domain.init" => self.init = parse_string(value)?,
+            b"domain.args" => self.args = parse_list(value)?,
+            b"domain.environment" => self.environment = parse_list(value)?,
+            b"domain.workdir" => self.workdir = parse_string(value)?,
+            b"identity.hostname" => self.hostname = parse_string(value)?,
+            b"resources.vcpus" => self.vcpus = parse_u64(value)?,
+            b"resources.memory_mib" => self.memory_mib = parse_u64(value)?,
+            b"execution.profile" => {
+                self.execution_profile = match parse_string::<32>(value)?.as_bytes() {
+                    b"security" => ExecutionProfile::Security,
+                    b"balanced" => ExecutionProfile::Balanced,
+                    b"performance" => ExecutionProfile::Performance,
+                    _ => return Err(ConfigError::InvalidValue),
+                }
+            }
+            b"execution.backend" => {
+                self.execution_backend = match parse_string::<32>(value)?.as_bytes() {
+                    b"interpreter" => ExecutionBackend::Interpreter,
+                    b"ptrace-sysemu" => ExecutionBackend::PtraceSysemu,
+                    b"ptrace-native" => ExecutionBackend::PtraceNative,
+                    _ => return Err(ConfigError::InvalidValue),
+                }
+            }
+            b"contract.profile" => self.contract_profile = parse_string(value)?,
+            b"contract.templates" => self.contract_templates = parse_list(value)?,
+            b"contract.allow" => self.contract_allow = parse_list(value)?,
+            b"contract.deny" => self.contract_deny = parse_list(value)?,
+            b"contract.digest" => self.contract_digest = parse_string(value)?,
+            b"storage.assignments" => self.storage = parse_list(value)?,
+            b"volumes.assignments" => self.volumes = parse_list(value)?,
+            b"devices.assignments" => self.devices = parse_list(value)?,
+            b"network.backend" => {
+                self.network_backend = match parse_string::<32>(value)?.as_bytes() {
+                    b"none" => NetworkBackend::None,
+                    b"mediated" => NetworkBackend::Mediated,
+                    b"shared" => NetworkBackend::Shared,
+                    _ => return Err(ConfigError::InvalidValue),
+                }
+            }
+            b"network.interface" => self.network_interface = parse_string(value)?,
+            b"network.source" => self.network_source = parse_string(value)?,
+            b"network.ingress_allow" => self.ingress_allow = parse_list(value)?,
+            b"network.ingress_deny" => self.ingress_deny = parse_list(value)?,
+            b"network.egress_allow" => self.egress_allow = parse_list(value)?,
+            b"network.egress_deny" => self.egress_deny = parse_list(value)?,
+            b"network.port_forwards" => self.port_forwards = parse_list(value)?,
+            b"access.uid" => self.access_uid = parse_u64(value)?,
+            b"access.gid" => self.access_gid = parse_u64(value)?,
+            b"hooks.pre_boot" => self.pre_boot_hooks = parse_list(value)?,
+            b"hooks.timeout_seconds" => self.hook_timeout_seconds = parse_u64(value)?,
+            b"hooks.failure" => {
+                self.hook_failure_policy = match parse_string::<32>(value)?.as_bytes() {
+                    b"stop" => HookFailurePolicy::Stop,
+                    b"continue" => HookFailurePolicy::Continue,
+                    _ => return Err(ConfigError::InvalidValue),
+                }
+            }
+            b"lifecycle.stop_timeout_seconds" => self.stop_timeout_seconds = parse_u64(value)?,
+            b"audit.mode" => {
+                self.audit_mode = match parse_string::<32>(value)?.as_bytes() {
+                    b"stderr" => AuditMode::Stderr,
+                    b"disabled" => AuditMode::Disabled,
+                    _ => return Err(ConfigError::InvalidValue),
+                }
+            }
+            b"failure.policy" => {
+                self.failure_policy = match parse_string::<32>(value)?.as_bytes() {
+                    b"stop" => FailurePolicy::Stop,
+                    b"fail" => FailurePolicy::Fail,
+                    _ => return Err(ConfigError::InvalidValue),
+                }
+            }
+            _ => return Err(ConfigError::UnknownField),
+        }
+        self.validate()
+    }
+
     fn validate(&self) -> Result<(), ConfigError> {
         if self.schema_version != SCHEMA_VERSION {
             return Err(ConfigError::UnsupportedSchema);
@@ -322,7 +509,20 @@ impl DomainConfig {
             validate_domain_path(self.workdir.as_bytes())?;
         }
         validate_identifier(self.contract_profile.as_bytes())?;
+        validate_identifier(self.hostname.as_bytes())?;
+        if !self.contract_digest.is_empty() {
+            validate_reference(self.contract_digest.as_bytes())?;
+        }
         if !(1..=64).contains(&self.vcpus) || !(16..=1_048_576).contains(&self.memory_mib) {
+            return Err(ConfigError::InvalidValue);
+        }
+        if self.access_uid > u32::MAX as u64
+            || self.access_gid > u32::MAX as u64
+            || self.hook_timeout_seconds == 0
+            || self.hook_timeout_seconds > 3600
+            || self.stop_timeout_seconds == 0
+            || self.stop_timeout_seconds > 3600
+        {
             return Err(ConfigError::InvalidValue);
         }
         let supported_execution = matches!(
@@ -342,8 +542,53 @@ impl DomainConfig {
             .as_slice()
             .iter()
             .chain(self.devices.as_slice())
+            .chain(self.contract_templates.as_slice())
         {
             validate_reference(value.as_bytes())?;
+        }
+        for selector in self
+            .contract_allow
+            .as_slice()
+            .iter()
+            .chain(self.contract_deny.as_slice())
+        {
+            validate_selector(selector.as_bytes())?;
+        }
+        for volume in self.volumes.as_slice() {
+            validate_volume(volume.as_bytes())?;
+        }
+        if !self.network_interface.is_empty() {
+            validate_network_attachment(self.network_interface.as_bytes())?;
+        }
+        if !self.network_source.is_empty() {
+            validate_network_attachment(self.network_source.as_bytes())?;
+        }
+        for rule in self
+            .ingress_allow
+            .as_slice()
+            .iter()
+            .chain(self.ingress_deny.as_slice())
+            .chain(self.egress_allow.as_slice())
+            .chain(self.egress_deny.as_slice())
+        {
+            validate_network_rule(rule.as_bytes())?;
+        }
+        for forward in self.port_forwards.as_slice() {
+            validate_port_forward(forward.as_bytes())?;
+        }
+        for hook in self.pre_boot_hooks.as_slice() {
+            validate_domain_command(hook.as_bytes())?;
+        }
+        if self.network_backend != NetworkBackend::Shared
+            && (!self.network_interface.is_empty()
+                || !self.network_source.is_empty()
+                || !self.ingress_allow.as_slice().is_empty()
+                || !self.ingress_deny.as_slice().is_empty()
+                || !self.egress_allow.as_slice().is_empty()
+                || !self.egress_deny.as_slice().is_empty()
+                || !self.port_forwards.as_slice().is_empty())
+        {
+            return Err(ConfigError::InvalidValue);
         }
         for value in self.environment.as_slice() {
             let bytes = value.as_bytes();
@@ -371,6 +616,8 @@ impl DomainConfig {
         output.list(self.environment.as_slice())?;
         output.raw(b"\nworkdir = ")?;
         output.quoted(self.workdir.as_bytes())?;
+        output.raw(b"\n\n[identity]\nhostname = ")?;
+        output.quoted(self.hostname.as_bytes())?;
         output.raw(b"\n\n[resources]\nvcpus = ")?;
         output.number(self.vcpus)?;
         output.raw(b"\nmemory_mib = ")?;
@@ -389,8 +636,18 @@ impl DomainConfig {
         })?;
         output.raw(b"\n\n[contract]\nprofile = ")?;
         output.quoted(self.contract_profile.as_bytes())?;
+        output.raw(b"\ntemplates = ")?;
+        output.list(self.contract_templates.as_slice())?;
+        output.raw(b"\nallow = ")?;
+        output.list(self.contract_allow.as_slice())?;
+        output.raw(b"\ndeny = ")?;
+        output.list(self.contract_deny.as_slice())?;
+        output.raw(b"\ndigest = ")?;
+        output.quoted(self.contract_digest.as_bytes())?;
         output.raw(b"\n\n[storage]\nassignments = ")?;
         output.list(self.storage.as_slice())?;
+        output.raw(b"\n\n[volumes]\nassignments = ")?;
+        output.list(self.volumes.as_slice())?;
         output.raw(b"\n\n[devices]\nassignments = ")?;
         output.list(self.devices.as_slice())?;
         output.raw(b"\n\n[network]\nbackend = ")?;
@@ -399,6 +656,35 @@ impl DomainConfig {
             NetworkBackend::Mediated => b"mediated",
             NetworkBackend::Shared => b"shared",
         })?;
+        output.raw(b"\ninterface = ")?;
+        output.quoted(self.network_interface.as_bytes())?;
+        output.raw(b"\nsource = ")?;
+        output.quoted(self.network_source.as_bytes())?;
+        output.raw(b"\ningress_allow = ")?;
+        output.list(self.ingress_allow.as_slice())?;
+        output.raw(b"\ningress_deny = ")?;
+        output.list(self.ingress_deny.as_slice())?;
+        output.raw(b"\negress_allow = ")?;
+        output.list(self.egress_allow.as_slice())?;
+        output.raw(b"\negress_deny = ")?;
+        output.list(self.egress_deny.as_slice())?;
+        output.raw(b"\nport_forwards = ")?;
+        output.list(self.port_forwards.as_slice())?;
+        output.raw(b"\n\n[access]\nuid = ")?;
+        output.number(self.access_uid)?;
+        output.raw(b"\ngid = ")?;
+        output.number(self.access_gid)?;
+        output.raw(b"\n\n[hooks]\npre_boot = ")?;
+        output.list(self.pre_boot_hooks.as_slice())?;
+        output.raw(b"\ntimeout_seconds = ")?;
+        output.number(self.hook_timeout_seconds)?;
+        output.raw(b"\nfailure = ")?;
+        output.quoted(match self.hook_failure_policy {
+            HookFailurePolicy::Stop => b"stop",
+            HookFailurePolicy::Continue => b"continue",
+        })?;
+        output.raw(b"\n\n[lifecycle]\nstop_timeout_seconds = ")?;
+        output.number(self.stop_timeout_seconds)?;
         output.raw(b"\n\n[audit]\nmode = ")?;
         output.quoted(match self.audit_mode {
             AuditMode::Stderr => b"stderr",
@@ -417,17 +703,26 @@ impl DomainConfig {
 /// Text capacity of every `DomainConfig` field: id, root, init, args,
 /// environment, workdir, contract profile, storage and devices.
 const CONFIG_TEXT_BYTES: usize = IDENTIFIER_BYTES
+    + IDENTIFIER_BYTES
     + REFERENCE_BYTES
     + PATH_BYTES
     + ARG_ITEMS * ARG_BYTES
     + ENVIRONMENT_ITEMS * ENVIRONMENT_BYTES
     + PATH_BYTES
     + IDENTIFIER_BYTES
-    + 2 * ASSIGNMENT_ITEMS * ASSIGNMENT_BYTES;
+    + ASSIGNMENT_ITEMS * ASSIGNMENT_BYTES
+    + 2 * POLICY_ITEMS * POLICY_BYTES
+    + REFERENCE_BYTES
+    + 2 * ASSIGNMENT_ITEMS * ASSIGNMENT_BYTES
+    + ASSIGNMENT_ITEMS * POLICY_BYTES
+    + 2 * IDENTIFIER_BYTES
+    + 4 * POLICY_ITEMS * POLICY_BYTES
+    + ASSIGNMENT_ITEMS * POLICY_BYTES
+    + HOOK_ITEMS * HOOK_BYTES;
 /// Upper bound of `normalized()`: each text byte may be escaped to two
 /// bytes; 1 KiB covers quotes, list separators, numbers, keys and enums
 /// (about 500 bytes).
-const NORMALIZED_CAPACITY: usize = 2 * CONFIG_TEXT_BYTES + 1024;
+const NORMALIZED_CAPACITY: usize = 2 * CONFIG_TEXT_BYTES + 4096;
 
 pub struct NormalizedConfig {
     bytes: [u8; NORMALIZED_CAPACITY],
@@ -511,12 +806,17 @@ fn parse_section(line: &[u8]) -> Result<Section, ConfigError> {
     }
     match &line[1..line.len() - 1] {
         b"domain" => Ok(Section::Domain),
+        b"identity" => Ok(Section::Identity),
         b"resources" => Ok(Section::Resources),
         b"execution" => Ok(Section::Execution),
         b"contract" => Ok(Section::Contract),
         b"storage" => Ok(Section::Storage),
+        b"volumes" => Ok(Section::Volumes),
         b"devices" => Ok(Section::Devices),
         b"network" => Ok(Section::Network),
+        b"access" => Ok(Section::Access),
+        b"hooks" => Ok(Section::Hooks),
+        b"lifecycle" => Ok(Section::Lifecycle),
         b"audit" => Ok(Section::Audit),
         b"failure" => Ok(Section::Failure),
         _ => Err(ConfigError::UnknownSection),
@@ -558,6 +858,10 @@ fn parse_field(
             builder.mark(1 << 16)?;
             builder.workdir = parse_string(value)?;
         }
+        (Section::Identity, b"hostname") => {
+            builder.mark(1 << 17)?;
+            builder.hostname = parse_string(value)?;
+        }
         (Section::Resources, b"vcpus") => {
             builder.mark(1 << 6)?;
             builder.vcpus = parse_u64(value)?;
@@ -588,9 +892,29 @@ fn parse_field(
             builder.mark(1 << 10)?;
             builder.contract_profile = parse_string(value)?;
         }
+        (Section::Contract, b"templates") => {
+            builder.mark(1 << 18)?;
+            builder.contract_templates = parse_list(value)?;
+        }
+        (Section::Contract, b"allow") => {
+            builder.mark(1 << 19)?;
+            builder.contract_allow = parse_list(value)?;
+        }
+        (Section::Contract, b"deny") => {
+            builder.mark(1 << 20)?;
+            builder.contract_deny = parse_list(value)?;
+        }
+        (Section::Contract, b"digest") => {
+            builder.mark(1 << 21)?;
+            builder.contract_digest = parse_string(value)?;
+        }
         (Section::Storage, b"assignments") => {
             builder.mark(1 << 11)?;
             builder.storage = parse_list(value)?;
+        }
+        (Section::Volumes, b"assignments") => {
+            builder.mark(1 << 22)?;
+            builder.volumes = parse_list(value)?;
         }
         (Section::Devices, b"assignments") => {
             builder.mark(1 << 12)?;
@@ -604,6 +928,62 @@ fn parse_field(
                 b"shared" => NetworkBackend::Shared,
                 _ => return Err(ConfigError::InvalidValue),
             };
+        }
+        (Section::Network, b"interface") => {
+            builder.mark(1 << 23)?;
+            builder.network_interface = parse_string(value)?;
+        }
+        (Section::Network, b"source") => {
+            builder.mark(1 << 24)?;
+            builder.network_source = parse_string(value)?;
+        }
+        (Section::Network, b"ingress_allow") => {
+            builder.mark(1 << 25)?;
+            builder.ingress_allow = parse_list(value)?;
+        }
+        (Section::Network, b"ingress_deny") => {
+            builder.mark(1 << 26)?;
+            builder.ingress_deny = parse_list(value)?;
+        }
+        (Section::Network, b"egress_allow") => {
+            builder.mark(1 << 27)?;
+            builder.egress_allow = parse_list(value)?;
+        }
+        (Section::Network, b"egress_deny") => {
+            builder.mark(1 << 28)?;
+            builder.egress_deny = parse_list(value)?;
+        }
+        (Section::Network, b"port_forwards") => {
+            builder.mark(1 << 29)?;
+            builder.port_forwards = parse_list(value)?;
+        }
+        (Section::Access, b"uid") => {
+            builder.mark(1 << 30)?;
+            builder.access_uid = parse_u64(value)?;
+        }
+        (Section::Access, b"gid") => {
+            builder.mark(1 << 31)?;
+            builder.access_gid = parse_u64(value)?;
+        }
+        (Section::Hooks, b"pre_boot") => {
+            builder.mark(1u64 << 32)?;
+            builder.pre_boot_hooks = parse_list(value)?;
+        }
+        (Section::Hooks, b"timeout_seconds") => {
+            builder.mark(1u64 << 33)?;
+            builder.hook_timeout_seconds = parse_u64(value)?;
+        }
+        (Section::Hooks, b"failure") => {
+            builder.mark(1u64 << 34)?;
+            builder.hook_failure_policy = match parse_string::<32>(value)?.as_bytes() {
+                b"stop" => HookFailurePolicy::Stop,
+                b"continue" => HookFailurePolicy::Continue,
+                _ => return Err(ConfigError::InvalidValue),
+            };
+        }
+        (Section::Lifecycle, b"stop_timeout_seconds") => {
+            builder.mark(1u64 << 35)?;
+            builder.stop_timeout_seconds = parse_u64(value)?;
         }
         (Section::Audit, b"mode") => {
             builder.mark(1 << 14)?;
@@ -780,6 +1160,91 @@ fn validate_domain_path(bytes: &[u8]) -> Result<(), ConfigError> {
         return Err(ConfigError::InvalidValue);
     }
     Ok(())
+}
+
+fn validate_selector(bytes: &[u8]) -> Result<(), ConfigError> {
+    if bytes.is_empty()
+        || !bytes.iter().all(|byte| {
+            byte.is_ascii_alphanumeric()
+                || matches!(byte, b'-' | b'_' | b'.' | b':' | b'/' | b'@' | b'*' | b'?')
+        })
+    {
+        return Err(ConfigError::InvalidValue);
+    }
+    Ok(())
+}
+
+fn validate_network_attachment(bytes: &[u8]) -> Result<(), ConfigError> {
+    if bytes.is_empty()
+        || !bytes
+            .iter()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b':'))
+    {
+        return Err(ConfigError::InvalidValue);
+    }
+    Ok(())
+}
+
+fn validate_port(bytes: &[u8], wildcard: bool) -> Result<(), ConfigError> {
+    if wildcard && bytes == b"*" {
+        return Ok(());
+    }
+    let port = parse_u64(bytes)?;
+    if port == 0 || port > 65_535 {
+        return Err(ConfigError::InvalidValue);
+    }
+    Ok(())
+}
+
+fn validate_network_rule(bytes: &[u8]) -> Result<(), ConfigError> {
+    let mut parts = bytes.split(|byte| *byte == b':');
+    let protocol = parts.next().ok_or(ConfigError::InvalidValue)?;
+    let port = parts.next().ok_or(ConfigError::InvalidValue)?;
+    if parts.next().is_some() || !matches!(protocol, b"tcp" | b"udp") {
+        return Err(ConfigError::InvalidValue);
+    }
+    validate_port(port, true)
+}
+
+fn validate_port_forward(bytes: &[u8]) -> Result<(), ConfigError> {
+    let mut parts = bytes.split(|byte| *byte == b'/');
+    let protocol = parts.next().ok_or(ConfigError::InvalidValue)?;
+    let attachment = parts.next().ok_or(ConfigError::InvalidValue)?;
+    let external = parts.next().ok_or(ConfigError::InvalidValue)?;
+    let internal = parts.next().ok_or(ConfigError::InvalidValue)?;
+    if parts.next().is_some() || !matches!(protocol, b"tcp" | b"udp") {
+        return Err(ConfigError::InvalidValue);
+    }
+    validate_network_attachment(attachment)?;
+    validate_port(external, false)?;
+    validate_port(internal, false)
+}
+
+fn validate_volume(bytes: &[u8]) -> Result<(), ConfigError> {
+    let mut parts = bytes.split(|byte| *byte == b':');
+    let source = parts.next().ok_or(ConfigError::InvalidValue)?;
+    let target = parts.next().ok_or(ConfigError::InvalidValue)?;
+    let mode = parts.next().ok_or(ConfigError::InvalidValue)?;
+    if parts.next().is_some() || !matches!(mode, b"ro" | b"rw") {
+        return Err(ConfigError::InvalidValue);
+    }
+    validate_domain_path(source)?;
+    validate_domain_path(target)
+}
+
+fn validate_domain_command(bytes: &[u8]) -> Result<(), ConfigError> {
+    let executable = bytes
+        .split(|byte| byte.is_ascii_whitespace())
+        .next()
+        .ok_or(ConfigError::InvalidValue)?;
+    if executable.is_empty()
+        || bytes.contains(&0)
+        || bytes.contains(&b'\n')
+        || bytes.contains(&b'\r')
+    {
+        return Err(ConfigError::InvalidValue);
+    }
+    validate_domain_path(executable)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1095,6 +1560,84 @@ policy = "stop"
             .as_bytes()
             .windows(b"backend = \"shared\"".len())
             .any(|window| window == b"backend = \"shared\""));
+    }
+
+    #[test]
+    fn parses_complete_gate975_schema_and_round_trips() {
+        let complete = VALID
+            .replace("[resources]", "[identity]\nhostname = \"demo.example\"\n\n[resources]")
+            .replace(
+                "profile = \"gate4-static\"",
+                "profile = \"gate9-systemd\"\ntemplates = [\"network-client-v1\"]\nallow = [\"syscall:read*\"]\ndeny = [\"ioctl:*\"]\ndigest = \"sha256:pending\"",
+            )
+            .replace(
+                "[devices]",
+                "[volumes]\nassignments = [\"/srv/data:/data:ro\"]\n\n[devices]",
+            )
+            .replace(
+                "backend = \"none\"",
+                "backend = \"shared\"\ninterface = \"eth0:1\"\nsource = \"192.0.2.10\"\ningress_allow = [\"tcp:80\"]\ningress_deny = [\"tcp:*\"]\negress_allow = [\"tcp:443\", \"udp:53\"]\negress_deny = []\nport_forwards = [\"tcp/eth0:1/8080/80\"]",
+            )
+            .replace(
+                "[audit]",
+                "[access]\nuid = 1000\ngid = 1000\n\n[hooks]\npre_boot = [\"/usr/local/sbin/prepare-domain --safe\"]\ntimeout_seconds = 20\nfailure = \"stop\"\n\n[lifecycle]\nstop_timeout_seconds = 45\n\n[audit]",
+            );
+        let config = DomainConfig::parse(complete.as_bytes()).unwrap();
+        assert_eq!(config.hostname.as_bytes(), b"demo.example");
+        assert_eq!(config.network_interface.as_bytes(), b"eth0:1");
+        assert_eq!(
+            config.port_forwards.as_slice()[0].as_bytes(),
+            b"tcp/eth0:1/8080/80"
+        );
+        assert_eq!(config.pre_boot_hooks.as_slice().len(), 1);
+        let normalized = config.normalized().unwrap();
+        assert_eq!(DomainConfig::parse(normalized.as_bytes()).unwrap(), config);
+    }
+
+    #[test]
+    fn command_line_overrides_use_typed_validation() {
+        let mut config = DomainConfig::parse(VALID.as_bytes()).unwrap();
+        config.apply_override(b"resources.vcpus", b"4").unwrap();
+        config
+            .apply_override(b"identity.hostname", b"\"override.example\"")
+            .unwrap();
+        config
+            .apply_override(b"network.backend", b"\"shared\"")
+            .unwrap();
+        config
+            .apply_override(b"network.port_forwards", b"[\"tcp/127.0.0.1/8080/80\"]")
+            .unwrap();
+        assert_eq!(config.vcpus, 4);
+        assert_eq!(config.hostname.as_bytes(), b"override.example");
+        assert_eq!(config.port_forwards.as_slice().len(), 1);
+        assert_eq!(
+            config.apply_override(b"network.interface", b"\"bad interface\""),
+            Err(ConfigError::InvalidValue)
+        );
+        assert_eq!(
+            config.apply_override(b"unknown.field", b"\"value\""),
+            Err(ConfigError::UnknownField)
+        );
+    }
+
+    #[test]
+    fn rejects_network_controls_without_shared_backend_and_host_hooks() {
+        let invalid_network = VALID.replace(
+            "backend = \"none\"",
+            "backend = \"none\"\ninterface = \"eth0\"",
+        );
+        assert_eq!(
+            DomainConfig::parse(invalid_network.as_bytes()),
+            Err(ConfigError::InvalidValue)
+        );
+        let host_hook = VALID.replace(
+            "[audit]",
+            "[hooks]\npre_boot = [\"host:/usr/local/sbin/setup\"]\ntimeout_seconds = 30\nfailure = \"stop\"\n\n[audit]",
+        );
+        assert_eq!(
+            DomainConfig::parse(host_hook.as_bytes()),
+            Err(ConfigError::InvalidValue)
+        );
     }
 
     #[test]

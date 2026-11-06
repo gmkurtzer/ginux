@@ -18,8 +18,9 @@ mod supervisor;
 
 use crate::dispatch::{balanced_surface_name, decide_native, process_entry, Lane, NativeDecision};
 use crate::launch::{
-    c_string_equals, launch_main, launch_usage, load_config, parse_argv, print_effective_config,
-    read_file, read_index, usage, Command, ELF_BYTES, VFS_INDEX_BYTES,
+    c_string_bytes, c_string_equals, config_rejected, launch_main, launch_usage, load_config,
+    parse_argv, print_effective_config, read_file, read_index, usage, Command, ELF_BYTES,
+    VFS_INDEX_BYTES,
 };
 use crate::process_hooks::{
     dup3_flags_valid, exec_mediated, fcntl_supported, pipe2_flags_valid, thread_supported,
@@ -215,6 +216,9 @@ extern "C" fn rust_main(initial_stack: *const usize) -> ! {
     match parse_argv(argc, argv) {
         Some(Command::Runtime(path)) => runtime_main(path),
         Some(Command::Config(config_path)) => config_main(config_path),
+        Some(Command::ConfigMerge(config_path, count, overrides)) => {
+            config_merge_main(config_path, count, overrides)
+        }
         Some(Command::Lifecycle(config_path)) => lifecycle_main(config_path),
         Some(Command::Vfs(config_path, rootfs_path, index_path)) => {
             vfs_main(config_path, rootfs_path, index_path)
@@ -7077,6 +7081,33 @@ fn config_main(config_path: *const u8) -> ! {
     let config = load_config(config_path);
     print_effective_config(&config);
     line(b"GINUX_CONFIG: PASS");
+    exit_process(0)
+}
+
+fn config_merge_main(config_path: *const u8, count: usize, overrides: *const usize) -> ! {
+    let mut config = load_config(config_path);
+    let mut index = 0usize;
+    while index < count {
+        let argument = unsafe { *overrides.add(index) as *const u8 };
+        let bytes = c_string_bytes(argument, 1024).unwrap_or_else(|error| config_rejected(error));
+        let equals = bytes
+            .iter()
+            .position(|byte| *byte == b'=')
+            .unwrap_or_else(|| config_rejected(ginux_domain::ConfigError::InvalidSyntax));
+        let key = &bytes[..equals];
+        let value = &bytes[equals + 1..];
+        if key.is_empty() || value.is_empty() {
+            config_rejected(ginux_domain::ConfigError::InvalidSyntax);
+        }
+        config
+            .apply_override(key, value)
+            .unwrap_or_else(|error| config_rejected(error));
+        index += 1;
+    }
+    let normalized = config
+        .normalized()
+        .unwrap_or_else(|error| config_rejected(error));
+    write_all(normalized.as_bytes());
     exit_process(0)
 }
 

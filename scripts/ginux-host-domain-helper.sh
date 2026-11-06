@@ -9,7 +9,7 @@ image_cache=$state_root/images/rocky-10-ubi-init-amd64
 image_tar=$image_cache/rocky-10-ubi-init-amd64-rootfs.tar
 
 usage() {
-    printf '%s\n' 'usage: ginux domain create NAME --config FILE' >&2
+    printf '%s\n' 'usage: ginux domain create NAME --config FILE [--set KEY=TOML_VALUE]...' >&2
     printf '%s\n' '       ginux domain list' >&2
     printf '%s\n' '       ginux domain start NAME [--attach]' >&2
     printf '%s\n' '       ginux domain attach NAME' >&2
@@ -239,10 +239,23 @@ prepare_root() {
 }
 
 create_domain() {
-    test "$#" -eq 3 || usage
+    test "$#" -ge 3 || usage
     name=$1
     test "$2" = --config || usage
     config=$3
+    shift 3
+    overrides=
+    while test "$#" -gt 0; do
+        test "$#" -ge 2 || usage
+        test "$1" = --set || usage
+        case $2 in
+            *=*) ;;
+            *) usage ;;
+        esac
+        overrides="$overrides
+$2"
+        shift 2
+    done
     validate_name "$name"
     test -r "$config" || { printf 'configuration is not readable: %s\n' "$config" >&2; exit 66; }
     test -x "$runtime" || { printf '%s\n' 'Ginux runtime is not installed' >&2; exit 69; }
@@ -253,8 +266,23 @@ create_domain() {
     directory=$(domain_dir "$name")
     test ! -e "$directory" || { printf '%s: already exists\n' "$name" >&2; exit 73; }
 
-    "$runtime" config "$config" >/dev/null
-    configured_root=$(sed -n 's/^[[:space:]]*root[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$config")
+    mkdir -p "$state_root/work"
+    effective=$(mktemp "$state_root/work/config.XXXXXX")
+    cleanup_effective() {
+        rm -f "$effective"
+    }
+    trap cleanup_effective 0 HUP INT TERM
+    set --
+    old_ifs=$IFS
+    IFS='
+'
+    for override in $overrides; do
+        test -n "$override" || continue
+        set -- "$@" "$override"
+    done
+    IFS=$old_ifs
+    "$runtime" config-merge "$config" "$@" "domain.id=\"$name\"" >"$effective"
+    configured_root=$(sed -n 's/^[[:space:]]*root[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$effective")
     expected_root=docker.io/rockylinux/rockylinux@sha256:7a18ce2c9c1e0d8735f3e72685f9666150af25036e7f7b5ee4eede3754496f8c
     if test "$configured_root" != "$expected_root"; then
         printf 'unsupported configured image: %s\n' "$configured_root" >&2
@@ -266,9 +294,11 @@ create_domain() {
         GINUX_OCI_NATIVE_ROOTFS_ONLY=1 \
         "$image_tools/ensure-rocky-oci.sh"
     mkdir -p "$directory/root"
-    install -m 600 "$config" "$directory/config.toml"
+    install -m 600 "$effective" "$directory/config.toml"
     tar -xf "$image_tar" -C "$directory/root"
     prepare_root "$directory/root"
+    trap - 0 HUP INT TERM
+    cleanup_effective
     printf '%s: created\n' "$name"
 }
 

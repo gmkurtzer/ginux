@@ -34,6 +34,7 @@ pub static mut VFS_INDEX_BYTES: [u8; MAX_VFS_INDEX_SIZE] = [0; MAX_VFS_INDEX_SIZ
 pub enum Command {
     Runtime(*const u8),
     Config(*const u8),
+    ConfigMerge(*const u8, usize, *const usize),
     Lifecycle(*const u8),
     Vfs(*const u8, *const u8, *const u8),
     Native(*const u8, *const u8, usize),
@@ -68,6 +69,11 @@ pub fn parse_argv(argc: usize, argv: *const usize) -> Option<Command> {
     } else if c_string_equals(command, b"config") {
         let config_path = unsafe { *argv.add(2) as *const u8 };
         Some(Command::Config(config_path))
+    } else if c_string_equals(command, b"config-merge") {
+        let config_path = unsafe { *argv.add(2) as *const u8 };
+        Some(Command::ConfigMerge(config_path, argc - 3, unsafe {
+            argv.add(3)
+        }))
     } else if c_string_equals(command, b"lifecycle") {
         let config_path = unsafe { *argv.add(2) as *const u8 };
         Some(Command::Lifecycle(config_path))
@@ -265,6 +271,17 @@ pub fn c_string_equals(value: *const u8, expected: &[u8]) -> bool {
         }
     }
     unsafe { *value.add(expected.len()) == 0 }
+}
+
+pub fn c_string_bytes(value: *const u8, limit: usize) -> Result<&'static [u8], ConfigError> {
+    let mut length = 0usize;
+    while length < limit {
+        if unsafe { *value.add(length) } == 0 {
+            return Ok(unsafe { core::slice::from_raw_parts(value, length) });
+        }
+        length += 1;
+    }
+    Err(ConfigError::ValueTooLong)
 }
 
 // ---- G01: configured native launch ----
