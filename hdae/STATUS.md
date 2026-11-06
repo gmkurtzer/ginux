@@ -33,6 +33,11 @@
 - Gate 9.75 was added and authorized on 2026-11-04 for comprehensive domain
   configuration, CLI overrides, network selection and policy, port translation,
   volumes, access, identity, resources, devices, and pre-boot hooks.
+- Gate 11 was clarified on 2026-11-06 to require a matched native-Rocky versus
+  Ginux `sysbench` matrix, native parity as the optimization goal, a default 4%
+  per-workload tolerance, and automatic failure for regressions beyond the
+  approved native or accepted-Ginux baseline. It remains sequenced after Gates
+  9.75 and 10 and has not started.
 - Gate 9 is technically passed but its human checkpoint exposed corrective
   work now authorized as Gate 9.5. Gate 9.5 is active on
   `hdae/systemd-usability`; Gate 9 acceptance remains pending until the
