@@ -43,6 +43,7 @@ use crate::supervisor::{
     SYS_PREAD64, SYS_PTRACE, SYS_PWRITE64, SYS_READ_HOST, SYS_RT_SIGPROCMASK, SYS_SETGID,
     SYS_SETGROUPS, SYS_SETUID, SYS_SIGNALFD4, SYS_WAIT4, VIRTUAL_PID,
 };
+use crate::supervisor::{fault_errno, poke_tracee_bytes, write_tracee_bytes, EFAULT};
 use ginux_devices::{
     BlockBackend, DeviceError, DeviceKind, DeviceName, DeviceRegistry, DeviceView, IsolatedNetwork,
     Partition, IOCTL_CONSOLE_GET_SIZE,
@@ -1764,41 +1765,40 @@ fn supervise_process_native(root_host_pid: usize, domain: &mut Domain) -> ! {
                             Ok(done) => {
                                 // The virtual child is reaped: drop its host
                                 // slot before the stores, which a killed
-                                // caller may skip.
+                                // caller may skip. As on Linux, the child
+                                // stays reaped when a store faults.
                                 clear_host_slot(&mut tasks, done.child);
-                                if status_ptr != 0
-                                    && store_tracee_status(host_pid, status_ptr, done.status.word())
-                                        .is_err()
-                                {
-                                    killed_or_fail(
-                                        &mut tasks,
-                                        task_index,
-                                        domain,
-                                        root_host_pid,
-                                        b"wait status store failed",
-                                    );
-                                    continue;
+                                match store_wait_results(
+                                    host_pid,
+                                    status_ptr,
+                                    rusage_ptr,
+                                    done.status.word(),
+                                ) {
+                                    Ok(()) => {
+                                        write_all(b"GINUX_NATIVE_PROCESS_AUDIT: wait selector=");
+                                        write_i64(selector);
+                                        write_all(b" virtual-result=");
+                                        write_u64(done.child.pid as u64);
+                                        write_all(b" status=");
+                                        write_i64(done.status.shell_code() as i64);
+                                        write_all(b"\n");
+                                        current.result = done.child.pid as i64;
+                                    }
+                                    Err(error) if error == -EFAULT => {
+                                        write_wait_fault(current.virtual_id.pid, done.child.pid);
+                                        current.result = -EFAULT;
+                                    }
+                                    Err(_) => {
+                                        killed_or_fail(
+                                            &mut tasks,
+                                            task_index,
+                                            domain,
+                                            root_host_pid,
+                                            b"wait result store failed",
+                                        );
+                                        continue;
+                                    }
                                 }
-                                if rusage_ptr != 0
-                                    && zero_tracee_rusage(host_pid, rusage_ptr).is_err()
-                                {
-                                    killed_or_fail(
-                                        &mut tasks,
-                                        task_index,
-                                        domain,
-                                        root_host_pid,
-                                        b"wait rusage store failed",
-                                    );
-                                    continue;
-                                }
-                                write_all(b"GINUX_NATIVE_PROCESS_AUDIT: wait selector=");
-                                write_i64(selector);
-                                write_all(b" virtual-result=");
-                                write_u64(done.child.pid as u64);
-                                write_all(b" status=");
-                                write_i64(done.status.shell_code() as i64);
-                                write_all(b"\n");
-                                current.result = done.child.pid as i64;
                                 current.override_result = true;
                                 registers.orig_rax = u64::MAX;
                             }
@@ -2312,35 +2312,37 @@ fn wake_waiters_for_child(
                 Err(_) => process_native_fail(domain, root_host_pid, b"wait wakeup failed"),
             };
             clear_host_slot(tasks, done.child);
-            if entry.wait_status != 0
-                && store_tracee_status(entry.host_pid, entry.wait_status, done.status.word())
-                    .is_err()
-            {
-                // A parked waiter killed by its own group exit only awaits
-                // its death report now, like a killed task in the main loop.
-                if !mark_killed(tasks, index) {
-                    process_native_fail(domain, root_host_pid, b"wait status store failed");
+            match store_wait_results(
+                entry.host_pid,
+                entry.wait_status,
+                entry.wait_rusage,
+                done.status.word(),
+            ) {
+                Ok(()) => {
+                    write_all(b"GINUX_NATIVE_PROCESS_AUDIT: wait wakeup caller=");
+                    write_u64(entry.virtual_id.pid as u64);
+                    write_all(b" child=");
+                    write_u64(done.child.pid as u64);
+                    write_all(b" status=");
+                    write_i64(done.status.shell_code() as i64);
+                    write_all(b"\n");
+                    done.child.pid as i64
                 }
-                index += 1;
-                continue;
-            }
-            if entry.wait_rusage != 0
-                && zero_tracee_rusage(entry.host_pid, entry.wait_rusage).is_err()
-            {
-                if !mark_killed(tasks, index) {
-                    process_native_fail(domain, root_host_pid, b"wait rusage store failed");
+                Err(error) if error == -EFAULT => {
+                    write_wait_fault(entry.virtual_id.pid, done.child.pid);
+                    -EFAULT
                 }
-                index += 1;
-                continue;
+                Err(_) => {
+                    // A parked waiter killed by its own group exit only
+                    // awaits its death report now, like a killed task in the
+                    // main loop.
+                    if !mark_killed(tasks, index) {
+                        process_native_fail(domain, root_host_pid, b"wait result store failed");
+                    }
+                    index += 1;
+                    continue;
+                }
             }
-            write_all(b"GINUX_NATIVE_PROCESS_AUDIT: wait wakeup caller=");
-            write_u64(entry.virtual_id.pid as u64);
-            write_all(b" child=");
-            write_u64(done.child.pid as u64);
-            write_all(b" status=");
-            write_i64(done.status.shell_code() as i64);
-            write_all(b"\n");
-            done.child.pid as i64
         } else {
             -ECHILD
         };
@@ -2393,62 +2395,85 @@ fn read_tracee_pipefds(host_pid: usize, user_pipefd: usize) -> Result<(u32, u32)
     ))
 }
 
-/// Store the full Linux wait status word for the reaped virtual child into
-/// the parent's `wait4` status slot, without touching neighboring tracee
-/// memory. Exited children report the code in bits 8-15; signaled children
-/// report the signal number in bits 0-6 with no core-dump bit.
-fn store_tracee_status(host_pid: usize, user_status: usize, value: u32) -> Result<(), ()> {
-    // A valid int pointer may straddle two ptrace words. Preserve every
-    // neighboring byte and write all four bytes, including that second word.
-    for (offset, byte) in value.to_le_bytes().iter().enumerate() {
-        let address = user_status.checked_add(offset).ok_or(())?;
-        let aligned = address & !0x7;
-        let shift = (address & 0x7) * 8;
-        let mut word = 0usize;
-        if ptrace(
-            PTRACE_PEEKTEXT,
-            host_pid,
-            aligned,
-            &mut word as *mut _ as usize,
-        ) < 0
-        {
-            return Err(());
-        }
-        let merged = (word & !(0xffusize << shift)) | ((*byte as usize) << shift);
-        if ptrace(PTRACE_POKETEXT, host_pid, aligned, merged) < 0 {
-            return Err(());
-        }
+/// Store a completed wait into the caller's `wait4` buffers as the kernel
+/// does after reaping the child: the full status word first, then the
+/// `rusage`, each skipped for a null pointer. Exited children report the code
+/// in bits 8-15; signaled children report the signal number in bits 0-6 with
+/// no core-dump bit. Without usage accounting the honest bounded `rusage`
+/// content is zeros. Both stores go through [`write_tracee_bytes`] and so
+/// honor the caller's page protections (except on its ptrace fallback, where
+/// only unmapped memory faults): a buffer the caller cannot write fails with
+/// `-EFAULT`, and a failed status store skips the `rusage`. Like the
+/// kernel's copy, a faulting `rusage` keeps the bytes before the fault.
+fn store_wait_results(
+    host_pid: usize,
+    user_status: usize,
+    user_rusage: usize,
+    status: u32,
+) -> Result<(), i64> {
+    const RUSAGE_BYTES: usize = 144;
+    if user_status != 0 {
+        store_tracee_status(host_pid, user_status, status)?;
+    }
+    if user_rusage != 0 {
+        write_tracee_bytes(host_pid, user_rusage, &[0; RUSAGE_BYTES])?;
     }
     Ok(())
 }
 
-/// Zero the caller's `rusage` buffer after a managed wait. The kernel would
-/// fill resource usage here; without usage accounting the honest bounded
-/// content is zeros. `rusage` is 8-byte aligned in practice; an unaligned
-/// buffer fails explicitly rather than tearing neighbors.
-fn zero_tracee_rusage(host_pid: usize, user_rusage: usize) -> Result<(), ()> {
-    const RUSAGE_BYTES: usize = 144;
-    let mut offset = 0;
-    while offset < RUSAGE_BYTES {
-        let address = user_rusage + offset;
-        if address & 0x7 != 0 {
-            return Err(());
-        }
-        if ptrace(PTRACE_POKETEXT, host_pid, address, 0) < 0 {
-            return Err(());
-        }
-        offset += 8;
+/// Store the status word all or nothing, as the kernel's single 4-byte
+/// store does. A word that crosses a page boundary is written in two parts,
+/// the second page first: if that part faults nothing is written, and if the
+/// first page then faults, the second part gets its previous bytes back.
+fn store_tracee_status(host_pid: usize, user_status: usize, status: u32) -> Result<(), i64> {
+    const PAGE_SIZE: usize = 4096;
+    let bytes = status.to_le_bytes();
+    let head = PAGE_SIZE - (user_status & (PAGE_SIZE - 1));
+    if head >= bytes.len() {
+        return write_tracee_bytes(host_pid, user_status, &bytes);
+    }
+    let Some(tail) = user_status.checked_add(head) else {
+        return Err(-EFAULT);
+    };
+    // The page-aligned tail starts a ptrace word; a page that cannot be read
+    // cannot be written either.
+    let mut previous = 0usize;
+    let read = ptrace(
+        PTRACE_PEEKTEXT,
+        host_pid,
+        tail,
+        &mut previous as *mut _ as usize,
+    );
+    if read < 0 {
+        return Err(fault_errno(read as i64));
+    }
+    write_tracee_bytes(host_pid, tail, &bytes[head..])?;
+    if let Err(error) = write_tracee_bytes(host_pid, user_status, &bytes[..head]) {
+        let _ = write_tracee_bytes(
+            host_pid,
+            tail,
+            &previous.to_le_bytes()[..bytes.len() - head],
+        );
+        return Err(error);
     }
     Ok(())
+}
+
+fn write_wait_fault(caller: u32, child: u32) {
+    write_all(b"GINUX_NATIVE_PROCESS_AUDIT: wait store fault caller=");
+    write_u64(caller as u64);
+    write_all(b" reaped=");
+    write_u64(child as u64);
+    write_all(b"\n");
 }
 
 /// Publish the virtual tid into the tracee's parent-tid cell. The host
 /// kernel stored the host tid there during `clone` with
 /// `CLONE_PARENT_SETTID`; thread identity requires the parent to observe the
-/// virtual tid instead. Same aligned-word technique as
-/// [`store_tracee_status`], but for one 4-byte tid cell.
+/// virtual tid instead. A valid int pointer may straddle two ptrace words;
+/// [`poke_tracee_bytes`] preserves every neighboring byte.
 fn store_tracee_tid(host_pid: usize, user_tid: usize, tid: u32) -> Result<(), ()> {
-    store_tracee_status(host_pid, user_tid, tid)
+    poke_tracee_bytes(host_pid, user_tid, &tid.to_le_bytes()).map_err(|_| ())
 }
 
 fn process_native_fail(domain: &mut Domain, root_pid: usize, reason: &[u8]) -> ! {

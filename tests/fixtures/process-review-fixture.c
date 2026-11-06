@@ -6,6 +6,12 @@ static long call3(long n, word a, word b, word c) {
     __asm__ volatile("syscall" : "=a"(r) : "a"(n), "D"(a), "S"(b), "d"(c), "r"(r10), "r"(r8), "r"(r9) : "rcx","r11","memory");
     return r;
 }
+static long __attribute__((unused)) call4(long n, word a, word b, word c, word d) {
+    long r;
+    register word r10 __asm__("r10")=d, r8 __asm__("r8")=0, r9 __asm__("r9")=0;
+    __asm__ volatile("syscall" : "=a"(r) : "a"(n), "D"(a), "S"(b), "d"(c), "r"(r10), "r"(r8), "r"(r9) : "rcx","r11","memory");
+    return r;
+}
 static void show(const char *label, long value) {
     char buffer[128], digits[32];
     word n=0, count=0;
@@ -292,6 +298,55 @@ long probe_main(word *stack) {
     int status=0;
     show("parked term wait=",call3(61,middle,(word)&status,0));
     show("parked term status=",status);
+#elif defined(CASE_ro_status) || defined(CASE_bad_status) || defined(CASE_bad_rusage) || \
+    defined(CASE_straddle_status)
+    // wait4 stores like the kernel's own copy to user memory: a status or
+    // rusage pointer the caller cannot write fails with EFAULT after the
+    // child is reaped, the status before the rusage, and a failed status
+    // store leaves the rusage and the status word untouched. The first round
+    // finds the child exited (WNOHANG), the second parks while the child
+    // spins in syscalls.
+    static const int ro_cell __attribute__((section(".rodata"), aligned(8)));
+    static int usage[36];
+    const word unmapped=0x1000;
+    // The last two bytes before the unmapped page after the bss: a status
+    // word there crosses into memory the caller cannot write.
+    extern char _end[];
+    word page_end=((word)_end+4095)&~(word)4095;
+    if(page_end-(word)_end<2)return 30;
+    volatile unsigned char *edge=(volatile unsigned char *)(page_end-2);
+    for(int round=0;round<2;round++) {
+        for(int i=0;i<36;i++)usage[i]=0x5a5a5a5a;
+        edge[0]=0x77;
+        edge[1]=0x77;
+        long child=call3(57,0,0,0);
+        if(!child) {
+            for(int i=0;round && i<100;i++)call3(186,0,0,0);
+            return 42;
+        }
+        int status=0x12345678;
+#if defined(CASE_ro_status)
+        word status_ptr=(word)&ro_cell, rusage_ptr=(word)usage;
+#elif defined(CASE_bad_status)
+        word status_ptr=unmapped, rusage_ptr=(word)usage;
+#elif defined(CASE_straddle_status)
+        word status_ptr=page_end-2, rusage_ptr=(word)usage;
+#else
+        word status_ptr=(word)&status, rusage_ptr=unmapped;
+#endif
+        long result;
+        if(round) {
+            result=call4(61,child,status_ptr,0,rusage_ptr);
+        } else {
+            while(!(result=call4(61,child,status_ptr,1,rusage_ptr)))call3(186,0,0,0);
+        }
+        show(round?"blocking wait=":"nohang wait=",result);
+        show(round?"blocking ro cell=":"nohang ro cell=",*(volatile const int *)&ro_cell);
+        show(round?"blocking edge=":"nohang edge=",edge[0]|edge[1]<<8);
+        show(round?"blocking status=":"nohang status=",status);
+        show(round?"blocking rusage=":"nohang rusage=",usage[0]);
+        show(round?"blocking rewait=":"nohang rewait=",call3(61,child,0,0));
+    }
 #elif defined(CASE_kill_badsig)
     long pid=call3(39,0,0,0);
     show("kill signal 65=",call3(62,pid,65,0));
