@@ -2748,8 +2748,8 @@ fn devices_main(config_path: *const u8, block_path: *const u8) -> ! {
         device_fail(b"network send failed");
     }
     let mut packet = [0u8; 64];
-    if network.receive(&mut packet) != Ok(13)
-        || &packet[..13] != b"instance-packet"
+    if network.receive(&mut packet) != Ok(15)
+        || &packet[..15] != b"instance-packet"
         || network.control(1).is_ok()
     {
         device_fail(b"network mediation failed");
