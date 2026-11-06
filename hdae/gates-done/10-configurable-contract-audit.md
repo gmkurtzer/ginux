@@ -103,7 +103,7 @@ decisions.
 
 ## Remaining work
 
-- [ ] Human review and acceptance of the Gate 10 demonstration and pull request.
+- None.
 
 ## Acceptance criteria
 
@@ -231,5 +231,7 @@ decisions.
 Human checkpoint because this gate defines the operator-visible security
 contract and the evidence used for later kernel-exposure claims. Present
 `make demo-gate-10`, fresh evidence, and the pull request before acceptance.
-The implementation is technically passed and remains open pending that review.
-Pull request 231 is open and unmerged.
+The human accepted and closed Gate 10 on 2026-11-06 after reviewing the
+implementation summary, configuration surfaces, and evidence. Pull request 231
+remains open and unmerged for repository delivery; acceptance does not
+authorize the agent to merge it.
