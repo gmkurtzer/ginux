@@ -449,6 +449,49 @@ run_runtime() {
     directory=$(domain_dir "$name")
     test -d "$directory" || exit 66
     record_runtime "$directory" "$$"
+    hook_plan=$($runtime hook-plan "$directory/config.toml") || exit 65
+    hook_count=
+    hook_timeout=
+    hook_failure=
+    hook_extra=
+    IFS=' ' read -r hook_count hook_timeout hook_failure hook_extra <<EOF
+$hook_plan
+EOF
+    case $hook_count:$hook_timeout in
+        *[!0-9:]*|:*|*:)
+            printf '%s\n' 'invalid pre-boot hook plan' >&2
+            exit 65
+            ;;
+    esac
+    case $hook_failure:$hook_extra in
+        stop:|continue:) ;;
+        *) printf '%s\n' 'invalid pre-boot hook plan' >&2; exit 65 ;;
+    esac
+    hook_index=0
+    while test "$hook_index" -lt "$hook_count"; do
+        printf 'GINUX_HOOK_AUDIT: action=dispatch index=%s timeout=%s failure=%s context=domain\n' \
+            "$hook_index" "$hook_timeout" "$hook_failure" >&2
+        set +e
+        timeout --signal=TERM --kill-after=2 "$hook_timeout" \
+            "$runtime" native-hook "$directory/config.toml" "$directory/root" "$hook_index"
+        hook_status=$?
+        set -e
+        if test "$hook_status" -eq 0; then
+            printf 'GINUX_HOOK_AUDIT: action=complete index=%s result=pass\n' "$hook_index" >&2
+        else
+            if test "$hook_status" -eq 124 || test "$hook_status" -eq 137; then
+                hook_result=timeout
+            else
+                hook_result=failed
+            fi
+            printf 'GINUX_HOOK_AUDIT: action=complete index=%s result=%s status=%s\n' \
+                "$hook_index" "$hook_result" "$hook_status" >&2
+            if test "$hook_failure" = stop; then
+                exit "$hook_status"
+            fi
+        fi
+        hook_index=$((hook_index + 1))
+    done
     exec "$runtime" native "$directory/config.toml" "$directory/root" \
         2>>"$directory/audit.log"
 }

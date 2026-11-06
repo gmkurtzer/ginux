@@ -8,6 +8,7 @@ use ginux_core::{
     balanced_surface, decide, decide_systemd, systemd_surface, Action, SYS_EXIT, SYS_EXIT_GROUP,
     SYS_GETPID, SYS_UNAME, SYS_WRITE,
 };
+use ginux_domain::HookFailurePolicy;
 
 mod channel_hooks;
 mod dispatch;
@@ -221,12 +222,16 @@ extern "C" fn rust_main(initial_stack: *const usize) -> ! {
         Some(Command::ConfigMerge(config_path, count, overrides)) => {
             config_merge_main(config_path, count, overrides)
         }
+        Some(Command::HookPlan(config_path)) => hook_plan_main(config_path),
         Some(Command::Lifecycle(config_path)) => lifecycle_main(config_path),
         Some(Command::Vfs(config_path, rootfs_path, index_path)) => {
             vfs_main(config_path, rootfs_path, index_path)
         }
         Some(Command::Native(config_path, root_path, mode)) => {
-            native_main(config_path, root_path, mode)
+            native_main(config_path, root_path, mode, None)
+        }
+        Some(Command::NativeHook(config_path, root_path, index)) => {
+            native_main(config_path, root_path, 3, Some(index))
         }
         Some(Command::Domain(config_path, fixture_path)) => domain_main(config_path, fixture_path),
         Some(Command::Process(config_path)) => process_main(config_path),
@@ -3037,8 +3042,16 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
             .any(|window| window == needle)
 }
 
-fn native_main(config_path: *const u8, root_path: *const u8, mode: usize) -> ! {
+fn native_main(
+    config_path: *const u8,
+    root_path: *const u8,
+    mode: usize,
+    hook_index: Option<usize>,
+) -> ! {
     let config = load_config(config_path);
+    if hook_index.is_some_and(|index| index >= config.pre_boot_hooks.as_slice().len()) {
+        config_rejected(ginux_domain::ConfigError::InvalidValue);
+    }
     print_domain_start_summary(&config);
     let mode = if mode == 0 && config.contract_profile.as_bytes() == b"gate9-systemd" {
         3
@@ -3066,17 +3079,32 @@ fn native_main(config_path: *const u8, root_path: *const u8, mode: usize) -> ! {
         domain_fail(&mut domain, b"native tracee fork failed");
     }
     if child == 0 {
-        native_tracee(root_path, mode, &config);
+        native_tracee(root_path, mode, hook_index, &config);
+    }
+    if let Some(index) = hook_index {
+        write_all(b"GINUX_HOOK_AUDIT: action=start index=");
+        write_u64(index as u64);
+        write_all(b" context=domain mediated=true uid=");
+        write_u64(config.access_uid);
+        write_all(b" gid=");
+        write_u64(config.access_gid);
+        write_all(b"\n");
     }
     supervise_native(child as usize, &mut domain, mode, root_descriptor as usize)
 }
 
-fn native_tracee(root_path: *const u8, mode: usize, config: &DomainConfig) -> ! {
+fn native_tracee(
+    root_path: *const u8,
+    mode: usize,
+    hook_index: Option<usize>,
+    config: &DomainConfig,
+) -> ! {
     static ROOT: &[u8] = b"/\0";
     static BASH: &[u8] = b"/usr/bin/bash\0";
     static ARG1: &[u8] = b"--noprofile\0";
     static ARG2: &[u8] = b"--norc\0";
     static ARG3: &[u8] = b"-c\0";
+    static SH: &[u8] = b"/bin/sh\0";
     static COMMAND: &[u8] = b"printf 'GINUX_NATIVE_SHELL: PASS\\n'\0";
     static HOLD_COMMAND: &[u8] = b"printf 'GINUX_NATIVE_HOLD: READY\\n'; while :; do :; done\0";
     static PROBE_COMMAND: &[u8] = b"if : > /tmp/ginux-mutation; then exit 90; else printf 'GINUX_BALANCED_MUTATION: BLOCKED\\n'; fi; if exec 9<>/dev/tcp/127.0.0.1/9; then exit 91; else printf 'GINUX_BALANCED_NETWORK: BLOCKED\\n'; fi\0";
@@ -3165,15 +3193,34 @@ fn native_tracee(root_path: *const u8, mode: usize, config: &DomainConfig) -> ! 
         copy_c_string(variable.as_bytes(), &mut configured_environment[index]);
         environment[index + 3] = configured_environment[index].as_ptr();
     }
+    let mut hook_command = [0u8; 257];
+    let hook_argv = if let Some(index) = hook_index {
+        copy_c_string(
+            config.pre_boot_hooks.as_slice()[index].as_bytes(),
+            &mut hook_command,
+        );
+        [
+            SH.as_ptr(),
+            ARG3.as_ptr(),
+            hook_command.as_ptr(),
+            core::ptr::null(),
+        ]
+    } else {
+        [core::ptr::null(); 4]
+    };
     unsafe {
         syscall3(
             SYS_EXECVE,
-            if mode == 3 {
+            if hook_index.is_some() {
+                SH.as_ptr() as usize
+            } else if mode == 3 {
                 configured_init.as_ptr() as usize
             } else {
                 BASH.as_ptr() as usize
             },
-            if mode == 3 {
+            if hook_index.is_some() {
+                hook_argv.as_ptr() as usize
+            } else if mode == 3 {
                 configured_argv.as_ptr() as usize
             } else {
                 bash_argv.as_ptr() as usize
@@ -4511,7 +4558,14 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descripto
     let mut sequence = 0u64;
     let mut processes: ProcessTable<128> = ProcessTable::new();
     let virtual_credentials = if mode == 3 {
-        Credentials::root()
+        if domain.config().access_uid == 0 && domain.config().access_gid == 0 {
+            Credentials::root()
+        } else {
+            Credentials::unprivileged(
+                domain.config().access_uid as u32,
+                domain.config().access_gid as u32,
+            )
+        }
     } else {
         Credentials::unprivileged(DOMAIN_UID as u32, DOMAIN_GID as u32)
     };
@@ -7393,6 +7447,19 @@ fn config_merge_main(config_path: *const u8, count: usize, overrides: *const usi
         .normalized()
         .unwrap_or_else(|error| config_rejected(error));
     write_all(normalized.as_bytes());
+    exit_process(0)
+}
+
+fn hook_plan_main(config_path: *const u8) -> ! {
+    let config = load_config(config_path);
+    write_u64(config.pre_boot_hooks.as_slice().len() as u64);
+    write_all(b" ");
+    write_u64(config.hook_timeout_seconds);
+    write_all(b" ");
+    line(match config.hook_failure_policy {
+        HookFailurePolicy::Stop => b"stop",
+        HookFailurePolicy::Continue => b"continue",
+    });
     exit_process(0)
 }
 

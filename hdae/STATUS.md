@@ -37,7 +37,9 @@
 - Gate 9.75 now has a normalized typed schema and CLI override path plus passing
   Rocky QEMU evidence for interface/source selection, ingress/egress policy,
   translated port ownership, ordinary bind conflicts, network audit records,
-  payload exchange, and cleanup. Mediated domain pre-boot hooks are next.
+  payload exchange, and cleanup. Its domain-only pre-boot hooks now also pass
+  ordered execution, mediation, mount denial, stop/continue failure handling,
+  timeout, init suppression, and audit tests under Rocky QEMU.
 - Gate 11 was clarified on 2026-11-06 to require a matched native-Rocky versus
   Ginux `sysbench` matrix, native parity as the optimization goal, a default 4%
   per-workload tolerance, and automatic failure for regressions beyond the
@@ -82,14 +84,15 @@ scope, threat model, and invariants.
 - Reload after context shift: required
 - Active gate: Gate 9.75, domain specification and network controls, on
   `hdae/domain-specification-network-controls`.
-- Last evidence: `make test-gate975-network` passed the Gate 9.75 network
-  selection, policy, translation, conflict, audit, and cleanup matrix under
-  Rocky QEMU; 15 domain unit tests and the x86-64 runtime build also passed.
+- Last evidence: `make test-gate975-hooks` passed ordered mediated hooks,
+  authority denial, stop/continue behavior, timeout, init suppression, and
+  cleanup under Rocky QEMU. `make test-gate975-network`, 15 domain unit tests,
+  and the x86-64 runtime build also passed.
 - Open decision: none. Human direction on 2026-11-06 selected mediated
   domain-context pre-boot hooks only. Arbitrary host-context hooks are
   unsupported.
-- Exact next action: implement mediated domain-context pre-boot hook execution,
-  then verify hook ordering, authority, timeout, failure, and audit behavior.
+- Exact next action: complete negative configuration coverage and operator
+  documentation, then run Gate 9.75 systemd and aggregate regressions.
 
 ## Evidence
 
@@ -386,8 +389,8 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Implement mediated domain-context pre-boot hooks, then complete Gate 9.75
-operator documentation, regression evidence, and demonstration.
+Complete Gate 9.75 negative configuration coverage and operator documentation,
+then run systemd and aggregate regressions and the final demonstration.
 
 ## Context recovery
 
@@ -396,10 +399,9 @@ operator documentation, regression evidence, and demonstration.
 - Reload after context shift: required
 - Active gate: Gate 9.75 is active on
   `hdae/domain-specification-network-controls`.
-- Last evidence: `make test-gate975-network` passed under Rocky QEMU, including
-  source/interface selection, translated port ownership, ingress and egress
-  denial, same-port conflict, payload exchange, audit evidence, controlled
-  shutdown, and cleanup.
+- Last evidence: `make test-gate975-hooks` and `make test-gate975-network`
+  passed under Rocky QEMU, covering mediated hooks and the network selection,
+  policy, translation, conflict, audit, controlled-shutdown, and cleanup matrix.
 - Approved network direction: Gate 9 defaults to full host-shared inbound and
   outbound networking with normal host routing and bind conflicts, under Ginux
   mediation and audit. Gate 9.75 adds comprehensive domain configuration,

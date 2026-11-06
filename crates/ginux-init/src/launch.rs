@@ -35,9 +35,11 @@ pub enum Command {
     Runtime(*const u8),
     Config(*const u8),
     ConfigMerge(*const u8, usize, *const usize),
+    HookPlan(*const u8),
     Lifecycle(*const u8),
     Vfs(*const u8, *const u8, *const u8),
     Native(*const u8, *const u8, usize),
+    NativeHook(*const u8, *const u8, usize),
     Domain(*const u8, *const u8),
     Process(*const u8),
     ProcessNative(*const u8, *const u8),
@@ -74,6 +76,9 @@ pub fn parse_argv(argc: usize, argv: *const usize) -> Option<Command> {
         Some(Command::ConfigMerge(config_path, argc - 3, unsafe {
             argv.add(3)
         }))
+    } else if c_string_equals(command, b"hook-plan") {
+        let config_path = unsafe { *argv.add(2) as *const u8 };
+        Some(Command::HookPlan(config_path))
     } else if c_string_equals(command, b"lifecycle") {
         let config_path = unsafe { *argv.add(2) as *const u8 };
         Some(Command::Lifecycle(config_path))
@@ -93,6 +98,11 @@ pub fn parse_argv(argc: usize, argv: *const usize) -> Option<Command> {
             0
         };
         Some(Command::Native(config_path, root_path, mode))
+    } else if argc >= 5 && c_string_equals(command, b"native-hook") {
+        let config_path = unsafe { *argv.add(2) as *const u8 };
+        let root_path = unsafe { *argv.add(3) as *const u8 };
+        let index = parse_decimal_c_string(unsafe { *argv.add(4) as *const u8 })?;
+        Some(Command::NativeHook(config_path, root_path, index))
     } else if argc >= 4 && c_string_equals(command, b"domain") {
         let config_path = unsafe { *argv.add(2) as *const u8 };
         let fixture_path = unsafe { *argv.add(3) as *const u8 };
@@ -133,6 +143,20 @@ pub fn parse_argv(argc: usize, argv: *const usize) -> Option<Command> {
     } else {
         Some(Command::Usage)
     }
+}
+
+fn parse_decimal_c_string(value: *const u8) -> Option<usize> {
+    let bytes = c_string_bytes(value, 20).ok()?;
+    if bytes.is_empty() || !bytes.iter().all(u8::is_ascii_digit) {
+        return None;
+    }
+    let mut result = 0usize;
+    for byte in bytes {
+        result = result
+            .checked_mul(10)?
+            .checked_add(usize::from(*byte - b'0'))?;
+    }
+    Some(result)
 }
 
 pub fn load_config(path: *const u8) -> DomainConfig {
