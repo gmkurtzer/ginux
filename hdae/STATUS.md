@@ -358,7 +358,9 @@ After the human exits the currently running Rocky host, rerun
 `make test-systemd-interactive`. It now verifies the timed host-start progress,
 concise domain-start summary, attach-mode message, transcript-banner removal,
 live Bash and transient `ps` identities, and changing CPU/RSS accounting usable
-by `top`. Then rerun the required Gate 9.5 matrix and present the updated
+by `top`. It also verifies the Ginux userspace-kernel UTS/proc identity and a
+host-derived `/proc/cpuinfo` restricted to the domain's affinity-constrained
+vCPU count. Then rerun the required Gate 9.5 matrix and present the updated
 `make run-host` workflow for acceptance. Do not advance to Gate 9.75, push the
 branch, or open a pull request without explicit direction.
 

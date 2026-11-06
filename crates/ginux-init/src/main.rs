@@ -61,6 +61,7 @@ const SYS_EXIT_HOST: usize = 60;
 const SYS_WAIT4: usize = 61;
 const SYS_KILL: usize = 62;
 const SYS_PTRACE: usize = 101;
+const SYS_SCHED_SETAFFINITY_HOST: usize = 203;
 const SYS_OPENAT_HOST: usize = 257;
 const SYS_MKDIRAT_HOST: usize = 258;
 const SYS_UNLINKAT_HOST: usize = 263;
@@ -86,6 +87,8 @@ const MS_REC: u64 = 16384;
 const CLOCK_REALTIME: usize = 0;
 const CLOCK_MONOTONIC: usize = 1;
 const CLOCK_PROCESS_CPUTIME_ID: usize = 2;
+const GINUX_ABI_RELEASE: &[u8] = b"6.12.0-ginux-abi1";
+const GINUX_VERSION: &str = concat!("Ginux userspace kernel ", env!("CARGO_PKG_VERSION"));
 
 const PTRACE_TRACEME: usize = 0;
 const PTRACE_PEEKTEXT: usize = 1;
@@ -2239,6 +2242,10 @@ fn native_host_proc_read(host_pid: usize, leaf: &[u8], output: &mut [u8]) -> Opt
         return None;
     }
     path[length] = 0;
+    native_host_file_read(&path, output)
+}
+
+fn native_host_file_read(path: &[u8], output: &mut [u8]) -> Option<usize> {
     let descriptor = unsafe {
         syscall4(
             SYS_OPENAT_HOST,
@@ -2251,16 +2258,100 @@ fn native_host_proc_read(host_pid: usize, leaf: &[u8], output: &mut [u8]) -> Opt
     if descriptor < 0 {
         return None;
     }
-    let count = unsafe {
-        syscall3(
-            SYS_READ_HOST,
-            descriptor as usize,
-            output.as_mut_ptr() as usize,
-            output.len(),
-        )
-    };
+    let mut length = 0usize;
+    while length < output.len() {
+        let count = unsafe {
+            syscall3(
+                SYS_READ_HOST,
+                descriptor as usize,
+                output.as_mut_ptr().add(length) as usize,
+                output.len() - length,
+            )
+        };
+        if count < 0 {
+            let _ = unsafe { syscall1(SYS_CLOSE_HOST, descriptor as usize) };
+            return None;
+        }
+        if count == 0 {
+            break;
+        }
+        length = length.checked_add(count as usize)?;
+    }
     let _ = unsafe { syscall1(SYS_CLOSE_HOST, descriptor as usize) };
-    (count >= 0).then_some(count as usize)
+    Some(length)
+}
+
+fn native_proc_write_identity(root_descriptor: usize, contract_profile: &[u8]) -> bool {
+    let mut banner = [0u8; 256];
+    let mut length = 0usize;
+    let mut release_line = [0u8; 64];
+    let mut release_len = 0usize;
+    let mut version_line = [0u8; 128];
+    let mut version_len = 0usize;
+    if native_buffer_append(&mut release_line, &mut release_len, GINUX_ABI_RELEASE).is_none()
+        || native_buffer_append(&mut release_line, &mut release_len, b"\n").is_none()
+        || native_buffer_append(
+            &mut version_line,
+            &mut version_len,
+            GINUX_VERSION.as_bytes(),
+        )
+        .is_none()
+        || native_buffer_append(&mut version_line, &mut version_len, b"\n").is_none()
+    {
+        return false;
+    }
+    if native_buffer_append(&mut banner, &mut length, GINUX_VERSION.as_bytes()).is_none()
+        || native_buffer_append(&mut banner, &mut length, b" (Linux ABI personality ").is_none()
+        || native_buffer_append(&mut banner, &mut length, GINUX_ABI_RELEASE).is_none()
+        || native_buffer_append(&mut banner, &mut length, b"; contract ").is_none()
+        || native_buffer_append(&mut banner, &mut length, contract_profile).is_none()
+        || native_buffer_append(&mut banner, &mut length, b"; x86_64)\n").is_none()
+        || !native_proc_write(root_descriptor, b"proc/version\0", &banner[..length])
+        || !native_proc_write(root_descriptor, b"proc/sys/kernel/ostype\0", b"Linux\n")
+        || !native_proc_write(
+            root_descriptor,
+            b"proc/sys/kernel/osrelease\0",
+            &release_line[..release_len],
+        )
+        || !native_proc_write(
+            root_descriptor,
+            b"proc/sys/kernel/version\0",
+            &version_line[..version_len],
+        )
+    {
+        return false;
+    }
+    true
+}
+
+fn native_proc_copy_cpuinfo(root_descriptor: usize, vcpus: u64) -> bool {
+    let Ok(vcpus) = usize::try_from(vcpus) else {
+        return false;
+    };
+    let mut cpuinfo = [0u8; 256 * 1024];
+    let Some(input_len) = native_host_file_read(b"/proc/cpuinfo\0", &mut cpuinfo) else {
+        return false;
+    };
+    let mut input_offset = 0usize;
+    let mut output_len = 0usize;
+    let mut processors = 0usize;
+    while input_offset < input_len && processors < vcpus {
+        let remaining = &cpuinfo[input_offset..input_len];
+        let block_len = remaining
+            .windows(2)
+            .position(|window| window == b"\n\n")
+            .map_or(remaining.len(), |offset| offset + 2);
+        let block_end = input_offset + block_len;
+        if cpuinfo[input_offset..block_end].starts_with(b"processor") {
+            cpuinfo.copy_within(input_offset..block_end, output_len);
+            output_len += block_len;
+            processors += 1;
+        }
+        input_offset = block_end;
+    }
+    processors == vcpus
+        && output_len != 0
+        && native_proc_write(root_descriptor, b"proc/cpuinfo\0", &cpuinfo[..output_len])
 }
 
 fn native_parse_u64(input: &[u8]) -> Option<u64> {
@@ -2690,6 +2781,9 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descripto
         write_all(b"\n");
         native_fail(domain, pid, b"native tracee did not stop after exec");
     }
+    if mode == 3 && !native_limit_cpus(pid, domain.config().vcpus) {
+        native_fail(domain, pid, b"native vcpu affinity failed");
+    }
     let options = PTRACE_O_TRACESYSGOOD
         | PTRACE_O_TRACEFORK
         | PTRACE_O_TRACEVFORK
@@ -2755,6 +2849,11 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descripto
         limits: native_default_limits(),
     });
     if mode == 3 {
+        if !native_proc_write_identity(root_descriptor, domain.config().contract_profile.as_bytes())
+            || !native_proc_copy_cpuinfo(root_descriptor, domain.config().vcpus)
+        {
+            native_fail(domain, pid, b"native proc identity materialization failed");
+        }
         let root_view = processes
             .view(root_virtual)
             .unwrap_or_else(|_| native_fail(domain, pid, b"native root proc view failed"));
@@ -3727,8 +3826,8 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descripto
                 let mut uts = [0u8; 65 * 6];
                 write_uts_field(&mut uts, 0, b"Linux");
                 write_uts_field(&mut uts, 1, b"ginux");
-                write_uts_field(&mut uts, 2, b"6.12.0-ginux");
-                write_uts_field(&mut uts, 3, b"#1 Ginux");
+                write_uts_field(&mut uts, 2, GINUX_ABI_RELEASE);
+                write_uts_field(&mut uts, 3, GINUX_VERSION.as_bytes());
                 write_uts_field(&mut uts, 4, b"x86_64");
                 write_uts_field(&mut uts, 5, b"localdomain");
                 let allowed = write_tracee_bytes(host_pid, registers.rdi as usize, &uts);
@@ -5794,6 +5893,25 @@ fn supervise(pid: usize) -> ! {
 
 fn wait(pid: usize, status: &mut i32) -> isize {
     unsafe { syscall4(SYS_WAIT4, pid, status as *mut _ as usize, 0, 0) }
+}
+
+fn native_limit_cpus(pid: usize, vcpus: u64) -> bool {
+    if vcpus == 0 || vcpus > 64 {
+        return false;
+    }
+    let mask = if vcpus == 64 {
+        u64::MAX
+    } else {
+        (1u64 << vcpus) - 1
+    };
+    unsafe {
+        syscall3(
+            SYS_SCHED_SETAFFINITY_HOST,
+            pid,
+            core::mem::size_of::<u64>(),
+            &mask as *const _ as usize,
+        ) >= 0
+    }
 }
 
 fn stopped(status: i32) -> bool {
