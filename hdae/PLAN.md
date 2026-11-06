@@ -24,6 +24,13 @@ advancing. Batch authorization does not permit advancing past an unaccepted
 checkpoint, weakening criteria, expanding scope, or resolving a material
 architecture decision silently.
 
+On 2026-11-05 the human inserted and authorized corrective Gate 9.5 after
+hands-on Gate 9 testing. It moves image acquisition into domain creation,
+repairs shell job control and procfs compatibility, makes launch configuration
+authoritative, adds persistent attach/detach, and cleans Ginux-caused systemd
+diagnostics. The previously numbered domain-specification gate moved, while
+still open, to position 9.75.
+
 Every gate must provide a working human demonstration through
 `make demo-gate-N`, where `N` is the gate position. The target must document
 prerequisites, state what the human should observe, return nonzero when its
@@ -65,8 +72,16 @@ replace it.
    lineage, and deliver the userspace tree through a pull request to Ginux
    `main`.
 9. **Systemd baseline**: Rocky systemd as virtual PID 1 reaching a usable
-   multi-user login, virtual PID and lockdown inspection, a bounded DNF update
-   workflow, and controlled shutdown.
+   multi-user login, virtual PID and lockdown inspection, host-shared networking,
+   a live upstream DNF update workflow, and controlled shutdown.
+9.5. **Systemd usability and operator lifecycle**: create-time OCI acquisition,
+   configuration-derived launch, Bash job control, Ginux-owned procfs,
+   persistent attach/detach, and clean systemd compatibility diagnostics.
+9.75. **Domain specification and network controls**: comprehensive versioned
+   domain configuration, deterministic file/CLI precedence, interface and
+   source-address selection, ingress and egress controls, port translation,
+   volumes, access, identity, resources, devices, hooks, and effective-config
+   evidence.
 10. **Configurable contract and audit**: versioned syscall, ioctl, device,
     filesystem, and kernel-view policy with fail-closed validation and logs.
 11. **Performance characterization and optimization**: native, conventional
@@ -138,7 +153,8 @@ define their expected result.
 
 - Kernel-exposure control is proven by Gates 1, 3, 10, and 13.
 - General systemd compatibility is built by Gates 2, 3, 5, 7, 8, and 9.
-- Per-domain configuration and ownership are built by Gates 4, 6, 8, and 10.
+- Per-domain configuration and ownership are built by Gates 4, 6, 8, 9.75, and
+  10.
 - Device mediation is built and measured by Gates 6, 10, 11, and 13.
 - Performance is measured from Gate 1 and judged in Gates 9, 11, and 13.
 - Reproducibility and offline testing are established by Gates 1 and 2 and

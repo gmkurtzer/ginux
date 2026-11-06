@@ -8,6 +8,8 @@ equivalent_log=build/gate4-config-equivalent.log
 unknown_log=build/gate4-config-unknown.log
 performance_log=build/gate4-config-performance.log
 host_path_log=build/gate4-config-host-path.log
+missing_init_log=build/gate9-config-missing-init.log
+invalid_init_log=build/gate9-config-invalid-init.log
 valid_effective=build/gate4-config-valid.effective
 equivalent_effective=build/gate4-config-equivalent.effective
 
@@ -33,6 +35,7 @@ rocky_scp \
 
 rocky_ssh 'chmod 0755 /var/tmp/ginux; /var/tmp/ginux config /var/tmp/gate4-valid.toml' > "$valid_log" 2>&1
 rocky_ssh '/var/tmp/ginux config /var/tmp/gate4-equivalent.toml' > "$equivalent_log" 2>&1
+rocky_ssh "sed '/^init =/d' /var/tmp/gate4-valid.toml > /var/tmp/gate9-missing-init.toml; sed 's#init = \"/runtime-fixture\"#init = \"relative-init\"#' /var/tmp/gate4-valid.toml > /var/tmp/gate9-invalid-init.toml"
 grep -Fqx 'GINUX_CONFIG: accepted format=toml schema=1' "$valid_log"
 grep -Fqx 'GINUX_CONFIG: PASS' "$valid_log"
 sed -n '/^GINUX_CONFIG_EFFECTIVE_BEGIN$/,/^GINUX_CONFIG_EFFECTIVE_END$/p' "$valid_log" > "$valid_effective"
@@ -64,5 +67,17 @@ if rocky_ssh '/var/tmp/ginux config /var/tmp/gate4-host-path.toml' > "$host_path
 fi
 grep -Fqx 'GINUX_CONFIG: rejected reason=host-authority-reference managed-started=false' "$host_path_log"
 
-rocky_ssh 'rm -f /var/tmp/ginux /var/tmp/gate4-*.toml'
+if rocky_ssh '/var/tmp/ginux config /var/tmp/gate9-missing-init.toml' > "$missing_init_log" 2>&1; then
+    printf '%s\n' 'missing domain init was incorrectly accepted' >&2
+    exit 1
+fi
+grep -Fqx 'GINUX_CONFIG: rejected reason=missing-field managed-started=false' "$missing_init_log"
+
+if rocky_ssh '/var/tmp/ginux config /var/tmp/gate9-invalid-init.toml' > "$invalid_init_log" 2>&1; then
+    printf '%s\n' 'relative domain init was incorrectly accepted' >&2
+    exit 1
+fi
+grep -Fqx 'GINUX_CONFIG: rejected reason=invalid-value managed-started=false' "$invalid_init_log"
+
+rocky_ssh 'rm -f /var/tmp/ginux /var/tmp/gate4-*.toml /var/tmp/gate9-*-init.toml'
 printf '%s\n' 'test-config: PASS'

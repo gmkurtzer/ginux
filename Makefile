@@ -8,7 +8,7 @@ BASELINE := target/$(X86_TARGET)/release/baseline-runner
 RUNTIME_FIXTURE := target/$(X86_TARGET)/release/runtime-fixture
 PROCESS_NATIVE_FIXTURE := target/$(X86_TARGET)/release/process-native-fixture
 
-.PHONY: doctor host-image-fetch host-image-verify host-boot-test image-helper-fetch image-prepare domain-image-fetch domain-image-verify domain-image-prepare test-image test-oci-image test-oci-layers test-vfs test-native-vfs image-cache-clean build check-name check test test-unit test-intercept test-runtime test-config test-domain test-process test-devices test-kernel-views test-cgroup test-block test-network bench-baseline bench-block bench-network demo-gate-1 demo-gate-2 demo-gate-3 demo-gate-4 demo-gate-5 demo-gate-6 demo-gate-7 demo-gate-8 clean build-process-fixtures test-process-native
+.PHONY: doctor host-image-fetch host-image-verify host-boot-test image-helper-fetch image-prepare domain-image-fetch domain-image-verify domain-image-prepare systemd-image-fetch systemd-image-verify systemd-image-prepare test-image test-oci-image test-oci-layers test-vfs test-native-vfs image-cache-clean build check-name check test test-unit test-intercept test-runtime test-config test-domain test-process build-process-fixtures test-process-native test-devices test-kernel-views test-systemd test-systemd-live test-systemd-interactive test-cgroup test-block test-network run-host run-systemd bench bench-baseline bench-block bench-network demo-gate-1 demo-gate-2 demo-gate-3 demo-gate-4 demo-gate-5 demo-gate-6 demo-gate-7 demo-gate-8 demo-gate-9 demo-gate-9.5 clean
 
 doctor:
 	@./scripts/doctor.sh
@@ -36,6 +36,15 @@ domain-image-verify:
 
 domain-image-prepare:
 	@./scripts/prepare-rocky-oci.sh
+
+systemd-image-fetch:
+	@GINUX_OCI_CONFIG_FILE=./config/rocky-systemd-oci.env ./scripts/fetch-rocky-oci.sh
+
+systemd-image-verify:
+	@GINUX_OCI_CONFIG_FILE=./config/rocky-systemd-oci.env ./scripts/verify-rocky-oci.sh
+
+systemd-image-prepare:
+	@GINUX_OCI_CONFIG_FILE=./config/rocky-systemd-oci.env ./scripts/prepare-rocky-oci.sh
 
 test-image:
 	@./scripts/test-rocky-domain.sh
@@ -129,6 +138,15 @@ test-kernel-views: build
 	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-kernel-views
 	@./scripts/with-rocky-host.sh ./scripts/test-kernel-views.sh
 
+test-systemd: build systemd-image-prepare
+	@ROCKY_NETWORK_RESTRICT=on ./scripts/with-rocky-host.sh ./scripts/test-systemd.sh
+
+test-systemd-live: build systemd-image-prepare
+	@ROCKY_NETWORK_RESTRICT=off ./scripts/with-rocky-host.sh ./scripts/test-systemd-live.sh
+
+test-systemd-interactive: build
+	@./scripts/test-systemd-interactive.exp
+
 test-cgroup:
 	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-kernel-views cgroup::
 
@@ -137,6 +155,11 @@ test-block:
 
 test-network:
 	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-devices network_
+
+run-host: build
+	@./scripts/run-host.sh
+
+run-systemd: run-host
 
 test-vfs: build domain-image-prepare
 	@./scripts/with-rocky-host.sh ./scripts/test-vfs.sh
@@ -154,6 +177,9 @@ bench-block: build
 
 bench-network: build
 	@./scripts/with-rocky-host.sh ./scripts/bench-devices.sh network
+
+bench: build systemd-image-prepare
+	@ROCKY_NETWORK_RESTRICT=on ./scripts/with-rocky-host.sh ./scripts/bench-systemd.sh
 
 demo-gate-1: doctor build
 	@./scripts/with-rocky-host.sh ./scripts/demo-gate-1.sh
@@ -176,8 +202,15 @@ demo-gate-6: doctor build
 demo-gate-7: doctor build
 	@./scripts/with-rocky-host.sh ./scripts/demo-gate-7.sh
 
+demo-gate-9.5: doctor build
+	@./scripts/test-systemd-interactive.exp
+	@printf '%s\n' 'GATE9.5: PASS (create-time OCI cache, configured init, job control, procfs, attach lifecycle, shutdown)'
+
 demo-gate-8: doctor build
 	@./scripts/with-rocky-host.sh ./scripts/demo-gate-8.sh
+
+demo-gate-9: doctor build systemd-image-prepare
+	@./scripts/demo-gate-9.sh
 
 clean:
 	cargo clean

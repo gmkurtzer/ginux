@@ -8,20 +8,42 @@ weakening mediation.
 ## Goal
 
 Produce reproducible native, conventional-container, and Ginux comparisons,
-agree on explicit performance budgets, and optimize material overhead while
-preserving every security invariant and compatibility criterion.
+make native Rocky execution the primary control, and optimize Ginux until
+mandatory workloads reach native parity or remain within the explicitly
+approved tolerance while preserving every security invariant and compatibility
+criterion.
 
 ## Approved scope
 
 - Define matched CPU, memory, syscall, process, filesystem, block, network,
   systemd boot, and idle workloads using the same Rocky userspace where
   practical.
+- Run the same `sysbench` binary with identical arguments for CPU, memory,
+  threads, and mutex workloads directly on the Rocky host and inside a Ginux
+  domain. Include matched 1-, 2-, and 4-vCPU runs where the workload supports
+  parallelism; retain single-thread results at every CPU count so scaling and
+  fixed mediation costs remain distinguishable.
+- Run both sides inside the same Rocky QEMU host session, with matched CPU
+  affinity, memory limits, filesystem state, warmup, and background load, so
+  the comparison measures Ginux overhead rather than different virtual
+  machines or host conditions.
 - Record hardware, host kernel, Ginux commit, image identity, configuration,
   contract, repetitions, warmup, variance, and raw measurements.
-- Set numeric acceptance budgets with human review after baseline evidence and
-  before optimization claims are judged.
+- Use native execution as 1.00x. Success is parity with or better than native.
+  The initial mandatory tolerance is no more than 4% slower than native for
+  throughput or 4% higher than native for latency and elapsed time. A result
+  outside that tolerance fails the workload and requires profiling and an
+  optimization attempt; it cannot be averaged away by faster unrelated tests.
+- Permit a workload-specific exception only after human review of the raw
+  baseline, the unavoidable mediation cost, and the proposed numeric budget.
+  Record the exception in this gate before using it; never silently loosen a
+  threshold after observing a failure.
 - Profile Ginux and optimize the highest-impact in-scope paths.
 - Add benchmark comparison and report generation suitable for regression use.
+- Preserve the approved native result set as a versioned baseline. Subsequent
+  benchmark runs must flag both native-to-Ginux budget failures and regressions
+  against the last accepted Ginux result, with environment incompatibility
+  reported separately from a performance change.
 - Rerun functional, security-boundary, and systemd suites after optimizations.
 
 ## Non-goals
@@ -40,21 +62,36 @@ preserving every security invariant and compatibility criterion.
 ## Remaining work
 
 - [ ] Finalize matched benchmark protocols and budgets from prior evidence.
+- [ ] Package or install one pinned `sysbench` build for use by both the native
+  control and Ginux domain, and verify its identity before every comparison.
 - [ ] Implement comparison and report automation.
 - [ ] Collect statistically useful baseline results.
 - [ ] Profile and optimize material overhead.
+- [ ] Persist the accepted baseline and add automatic per-workload regression
+  checks to the normal performance test target.
 - [ ] Run full regression and document remaining costs.
 
 ## Acceptance criteria
 
 - Each benchmark compares semantically matched work and clearly labels any
   unavoidable difference.
+- Native Rocky and Ginux use the same executable, workload parameters, input
+  data, CPU count, affinity, memory limit, warmup, and host session. The report
+  shows the native value, Ginux value, ratio, percentage difference, variance,
+  and pass/fail result for every row.
+- Mandatory `sysbench` CPU, memory, threads, and mutex comparisons cover 1, 2,
+  and 4 vCPUs where applicable. A single-thread control is retained at each
+  allocation, and no aggregate score can conceal a failing row.
 - Raw results and the generated report contain enough environment and protocol
   metadata for another operator to reproduce the run.
-- Numeric budgets for every mandatory workload are recorded in this open gate
-  and approved before they are used to pass or fail the optimized result.
+- Success is native parity or better. Unless a workload-specific exception is
+  approved and recorded in advance, each mandatory row must be within 4% of
+  native in the unfavorable direction.
 - Final results satisfy all approved mandatory budgets, or the gate is reported
   failed or partial rather than weakening a threshold silently.
+- A deliberately perturbed fixture proves that `make bench-compare` exits
+  nonzero when either the native budget or accepted Ginux regression budget is
+  exceeded.
 - Optimizations preserve all architecture invariants and every mandatory
   functional and security regression.
 - The report identifies fixed overhead, workload-sensitive overhead, variance,
@@ -68,8 +105,13 @@ preserving every security invariant and compatibility criterion.
   control records.
 - `make bench` -> emits Ginux records for all mandatory workloads.
 - `make bench-compare` -> checks result compatibility and approved numeric
-  budgets, returning nonzero for mandatory regressions.
+  budgets, returning nonzero for any mandatory row more than 4% behind native
+  or beyond its separately approved workload budget, and for material
+  regressions from the accepted Ginux baseline.
 - `make bench-report` -> generates the versioned summary from raw results.
+- Sysbench matrix -> runs the pinned binary and identical CPU, memory, threads,
+  and mutex commands natively and through Ginux at matched CPU allocations;
+  the report contains one directly comparable row per workload and CPU count.
 - `make bench-block` and `make bench-network` -> device-path measurements are
   included in comparison evidence.
 - `make test test-systemd test-contract test-security` -> all available
@@ -83,11 +125,15 @@ preserving every security invariant and compatibility criterion.
 
 ## Decisions and limitations
 
-- Numeric budgets are intentionally unresolved until Gate 1 and later path
-  measurements provide evidence. Human approval is required before this gate's
-  optimization phase treats them as acceptance thresholds.
+- Human direction on 2026-11-06 established a default 4% mandatory tolerance
+  and native parity as the optimization goal. Workload-specific exceptions
+  remain unresolved until matched baseline evidence exists; human approval is
+  required before any exception can replace that default.
 - CPU-bound overhead is expected to differ materially from syscall-, process-,
   storage-, and network-heavy overhead; results remain per workload.
+- Native means an ordinary process running directly on the Rocky host kernel,
+  not a second VM. The conventional-container result provides context but does
+  not replace the native control or relax the Ginux threshold.
 
 ## Delivery strategy
 

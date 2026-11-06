@@ -10,11 +10,31 @@ pub const SYS_GETUID: u64 = 102;
 pub const SYS_GETGID: u64 = 104;
 pub const SYS_GETEUID: u64 = 107;
 pub const SYS_GETEGID: u64 = 108;
+pub const SYS_SETUID: u64 = 105;
+pub const SYS_SETGID: u64 = 106;
+pub const SYS_SETREUID: u64 = 113;
+pub const SYS_SETREGID: u64 = 114;
+pub const SYS_SETGROUPS: u64 = 116;
+pub const SYS_SETRESUID: u64 = 117;
+pub const SYS_SETRESGID: u64 = 119;
 pub const SYS_GETPPID: u64 = 110;
 pub const SYS_GETPGRP: u64 = 111;
 pub const SYS_FUTEX: u64 = 202;
 pub const SYS_SET_TID_ADDRESS: u64 = 218;
+pub const SYS_GETPRIORITY: u64 = 140;
+pub const SYS_SETPRIORITY: u64 = 141;
+pub const SYS_REBOOT: u64 = 169;
+pub const SYS_GETTID: u64 = 186;
 pub const SYS_EXIT_GROUP: u64 = 231;
+pub const SYS_UNLINKAT: u64 = 263;
+pub const SYS_RENAMEAT: u64 = 264;
+pub const SYS_LINKAT: u64 = 265;
+pub const SYS_SYMLINKAT: u64 = 266;
+pub const SYS_READLINKAT: u64 = 267;
+pub const SYS_MEMFD_CREATE: u64 = 319;
+pub const SYS_CLOSE_RANGE: u64 = 436;
+pub const SYS_PIDFD_OPEN: u64 = 434;
+pub const SYS_PIDFD_SEND_SIGNAL: u64 = 424;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Action {
@@ -42,13 +62,225 @@ pub const fn decide(syscall: u64) -> Decision {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BalancedSurface {
     ImageRead,
+    DomainWrite,
     Memory,
     Task,
     Console,
     Random,
+    Network,
     VirtualIdentity,
     Lifecycle,
     Denied,
+}
+
+pub const fn is_shared_network_syscall(syscall: u64) -> bool {
+    matches!(syscall, 41..=55 | 288 | 299 | 307)
+}
+
+pub const fn decide_systemd(syscall: u64, shared_network: bool) -> Decision {
+    if shared_network && is_shared_network_syscall(syscall) {
+        return Decision {
+            syscall,
+            action: Action::Mediate,
+        };
+    }
+    let action = match syscall {
+        63 | 92 | 93 | 94 | 109 | 112 | 153 | 165 | 166 | 260 | SYS_GETPRIORITY
+        | SYS_SETPRIORITY | SYS_GETTID | SYS_SETUID | SYS_SETGID | SYS_SETREUID | SYS_SETREGID
+        | SYS_SETGROUPS | SYS_SETRESUID | SYS_SETRESGID | SYS_REBOOT => Action::Emulate,
+        7
+        | 15
+        | 16
+        | 18
+        | 25
+        | 32
+        | 33
+        | 56
+        | 57
+        | 58
+        | 59
+        | 61
+        | 62
+        | 73
+        | 74
+        | 75
+        | 76
+        | 77
+        | 79
+        | 80
+        | 81
+        | 82
+        | 83
+        | 84
+        | 87
+        | 88
+        | 90
+        | 91
+        | 95
+        | 125
+        | 126
+        | 137
+        | 138
+        | 157
+        | 190
+        | 193
+        | 128
+        | 133
+        | 135
+        | 196
+        | 199
+        | 213
+        | 228
+        | 230
+        | 232
+        | 233
+        | 247
+        | 253
+        | 254
+        | 255
+        | 258
+        | 259
+        | SYS_UNLINKAT
+        | SYS_RENAMEAT
+        | SYS_LINKAT
+        | SYS_SYMLINKAT
+        | SYS_READLINKAT
+        | 270
+        | 271
+        | 280
+        | 281
+        | 283
+        | 285
+        | 286
+        | 287
+        | 289
+        | 290
+        | 291
+        | 292
+        | 293
+        | 294
+        | 306
+        | 317
+        | SYS_MEMFD_CREATE
+        | SYS_PIDFD_SEND_SIGNAL
+        | SYS_PIDFD_OPEN
+        | 435
+        | SYS_CLOSE_RANGE
+        | 441
+        | 452 => Action::Mediate,
+        _ => decide_balanced(syscall).action,
+    };
+    Decision { syscall, action }
+}
+
+pub const fn systemd_surface(syscall: u64, shared_network: bool) -> BalancedSurface {
+    if shared_network && is_shared_network_syscall(syscall) {
+        BalancedSurface::Network
+    } else if syscall == SYS_REBOOT {
+        BalancedSurface::Lifecycle
+    } else if matches!(syscall, SYS_GETPRIORITY | SYS_SETPRIORITY) {
+        BalancedSurface::VirtualIdentity
+    } else if matches!(
+        syscall,
+        18 | 73
+            | 74
+            | 75
+            | 76
+            | 77
+            | 82
+            | 84
+            | 87
+            | 88
+            | 90
+            | 91
+            | 92
+            | 93
+            | 94
+            | 133
+            | 190
+            | 196
+            | 199
+            | 259
+            | 260
+            | 280
+            | 285
+            | 306
+            | SYS_UNLINKAT
+            | SYS_RENAMEAT
+            | SYS_LINKAT
+            | SYS_SYMLINKAT
+    ) {
+        BalancedSurface::DomainWrite
+    } else if syscall == 153 {
+        BalancedSurface::Console
+    } else if matches!(syscall, 25 | SYS_MEMFD_CREATE) {
+        BalancedSurface::Memory
+    } else if matches!(
+        syscall,
+        SYS_SETUID
+            | SYS_SETGID
+            | SYS_SETREUID
+            | SYS_SETREGID
+            | SYS_SETGROUPS
+            | SYS_SETRESUID
+            | SYS_SETRESGID
+    ) {
+        BalancedSurface::VirtualIdentity
+    } else if matches!(syscall, 193 | SYS_READLINKAT) {
+        BalancedSurface::ImageRead
+    } else if matches!(
+        syscall,
+        7 | 15
+            | 32
+            | 33
+            | 56
+            | 57
+            | 58
+            | 61
+            | 62
+            | 79
+            | 81
+            | 109
+            | 112
+            | 128
+            | 135
+            | 213
+            | 228
+            | 230
+            | 232
+            | 233
+            | 247
+            | 253
+            | 254
+            | 255
+            | 270
+            | 271
+            | 281
+            | 283
+            | 286
+            | 287
+            | 289
+            | 290
+            | 291
+            | 292
+            | 293
+            | 294
+            | 317
+            | SYS_PIDFD_SEND_SIGNAL
+            | SYS_PIDFD_OPEN
+            | 435
+            | SYS_CLOSE_RANGE
+            | 441
+            | 452
+    ) {
+        if syscall == 452 {
+            BalancedSurface::DomainWrite
+        } else {
+            BalancedSurface::Task
+        }
+    } else {
+        balanced_surface(syscall)
+    }
 }
 
 pub const fn balanced_surface(syscall: u64) -> BalancedSurface {
@@ -57,7 +289,7 @@ pub const fn balanced_surface(syscall: u64) -> BalancedSurface {
             BalancedSurface::ImageRead
         }
         9 | 10 | 11 | 12 | 28 => BalancedSurface::Memory,
-        13 | 14 | 15 | SYS_FORK | SYS_WAIT4 | 99 | 158 | 202 | 218 | 273 | 302 | 334 => {
+        13 | 14 | 15 | SYS_FORK | SYS_WAIT4 | 98 | 99 | 100 | 158 | 202 | 218 | 273 | 302 | 334 => {
             BalancedSurface::Task
         }
         1 | 20 => BalancedSurface::Console,
@@ -287,5 +519,186 @@ mod tests {
             assert!(!balanced_arguments_allowed(257, AT_FDCWD, 0x1000, flags));
             assert!(!balanced_arguments_allowed(2, 0x1000, flags, 0));
         }
+    }
+
+    #[test]
+    fn systemd_contract_adds_shared_network_without_changing_balanced_policy() {
+        assert_eq!(decide_balanced(41).action, Action::Deny(38));
+        assert_eq!(decide_systemd(41, false).action, Action::Deny(38));
+        assert_eq!(decide_systemd(41, true).action, Action::Mediate);
+        assert_eq!(systemd_surface(42, true), BalancedSurface::Network);
+        assert_eq!(decide_systemd(59, true).action, Action::Mediate);
+        assert_eq!(
+            decide_systemd(SYS_GETPRIORITY, true).action,
+            Action::Emulate
+        );
+        assert_eq!(
+            systemd_surface(SYS_GETPRIORITY, true),
+            BalancedSurface::VirtualIdentity
+        );
+        assert_eq!(
+            decide_systemd(SYS_SETPRIORITY, true).action,
+            Action::Emulate
+        );
+        assert_eq!(
+            systemd_surface(SYS_SETPRIORITY, true),
+            BalancedSurface::VirtualIdentity
+        );
+        assert_eq!(decide_systemd(165, true).action, Action::Emulate);
+        assert_eq!(decide_systemd(166, true).action, Action::Emulate);
+        assert_eq!(decide_systemd(63, true).action, Action::Emulate);
+        assert_eq!(decide_systemd(291, true).action, Action::Mediate);
+        assert_eq!(decide_systemd(289, true).action, Action::Mediate);
+        assert_eq!(decide_systemd(294, true).action, Action::Mediate);
+        assert_eq!(decide_systemd(283, true).action, Action::Mediate);
+        assert_eq!(decide_systemd(56, true).action, Action::Mediate);
+        assert_eq!(decide_systemd(62, true).action, Action::Mediate);
+        assert_eq!(systemd_surface(62, true), BalancedSurface::Task);
+        assert_eq!(decide_systemd(112, true).action, Action::Emulate);
+        assert_eq!(systemd_surface(112, true), BalancedSurface::Task);
+        assert_eq!(decide_systemd(109, true).action, Action::Emulate);
+        assert_eq!(systemd_surface(109, true), BalancedSurface::Task);
+        assert_eq!(decide_systemd(93, true).action, Action::Emulate);
+        assert_eq!(systemd_surface(93, true), BalancedSurface::DomainWrite);
+        assert_eq!(decide_systemd(153, true).action, Action::Emulate);
+        assert_eq!(systemd_surface(153, true), BalancedSurface::Console);
+        assert_eq!(decide_systemd(SYS_REBOOT, true).action, Action::Emulate);
+        assert_eq!(
+            systemd_surface(SYS_REBOOT, true),
+            BalancedSurface::Lifecycle
+        );
+        assert_eq!(decide_balanced(SYS_REBOOT).action, Action::Deny(38));
+        assert_eq!(decide_systemd(91, true).action, Action::Mediate);
+        assert_eq!(systemd_surface(91, true), BalancedSurface::DomainWrite);
+        assert_eq!(decide_systemd(270, true).action, Action::Mediate);
+        assert_eq!(systemd_surface(270, true), BalancedSurface::Task);
+        assert_eq!(decide_systemd(290, true).action, Action::Mediate);
+        assert_eq!(systemd_surface(290, true), BalancedSurface::Task);
+        assert_eq!(decide_systemd(7, true).action, Action::Mediate);
+        assert_eq!(systemd_surface(7, true), BalancedSurface::Task);
+        assert_eq!(decide_systemd(100, true).action, Action::Mediate);
+        assert_eq!(systemd_surface(100, true), BalancedSurface::Task);
+        assert_eq!(decide_systemd(98, true).action, Action::Mediate);
+        assert_eq!(systemd_surface(98, true), BalancedSurface::Task);
+        assert_eq!(decide_systemd(228, true).action, Action::Mediate);
+        assert_eq!(systemd_surface(228, true), BalancedSurface::Task);
+        assert_eq!(decide_systemd(271, true).action, Action::Mediate);
+        assert_eq!(systemd_surface(271, true), BalancedSurface::Task);
+        assert_eq!(decide_systemd(292, true).action, Action::Mediate);
+        assert_eq!(systemd_surface(292, true), BalancedSurface::Task);
+        assert_eq!(decide_systemd(293, true).action, Action::Mediate);
+        assert_eq!(systemd_surface(293, true), BalancedSurface::Task);
+        assert_eq!(decide_systemd(32, true).action, Action::Mediate);
+        assert_eq!(systemd_surface(32, true), BalancedSurface::Task);
+        assert_eq!(decide_systemd(33, true).action, Action::Mediate);
+        assert_eq!(systemd_surface(33, true), BalancedSurface::Task);
+        assert_eq!(decide_systemd(77, true).action, Action::Mediate);
+        assert_eq!(systemd_surface(77, true), BalancedSurface::DomainWrite);
+        assert_eq!(systemd_surface(18, true), BalancedSurface::DomainWrite);
+        assert_eq!(systemd_surface(73, true), BalancedSurface::DomainWrite);
+        assert_eq!(systemd_surface(74, true), BalancedSurface::DomainWrite);
+        assert_eq!(systemd_surface(75, true), BalancedSurface::DomainWrite);
+        assert_eq!(systemd_surface(76, true), BalancedSurface::DomainWrite);
+        assert_eq!(systemd_surface(90, true), BalancedSurface::DomainWrite);
+        assert_eq!(systemd_surface(92, true), BalancedSurface::DomainWrite);
+        assert_eq!(systemd_surface(93, true), BalancedSurface::DomainWrite);
+        assert_eq!(systemd_surface(94, true), BalancedSurface::DomainWrite);
+        assert_eq!(systemd_surface(260, true), BalancedSurface::DomainWrite);
+        assert_eq!(systemd_surface(280, true), BalancedSurface::DomainWrite);
+        assert_eq!(systemd_surface(306, true), BalancedSurface::DomainWrite);
+        assert_eq!(systemd_surface(79, true), BalancedSurface::Task);
+        assert_eq!(systemd_surface(81, true), BalancedSurface::Task);
+        assert_eq!(systemd_surface(190, true), BalancedSurface::DomainWrite);
+        assert_eq!(systemd_surface(196, true), BalancedSurface::DomainWrite);
+        assert_eq!(systemd_surface(199, true), BalancedSurface::DomainWrite);
+        assert_eq!(decide_systemd(25, true).action, Action::Mediate);
+        assert_eq!(systemd_surface(25, true), BalancedSurface::Memory);
+        assert_eq!(systemd_surface(82, true), BalancedSurface::DomainWrite);
+        assert_eq!(systemd_surface(87, true), BalancedSurface::DomainWrite);
+        assert_eq!(systemd_surface(84, true), BalancedSurface::DomainWrite);
+        assert_eq!(systemd_surface(193, true), BalancedSurface::ImageRead);
+        assert_eq!(
+            systemd_surface(SYS_SETUID, true),
+            BalancedSurface::VirtualIdentity
+        );
+        assert_eq!(
+            systemd_surface(SYS_SETGID, true),
+            BalancedSurface::VirtualIdentity
+        );
+        assert_eq!(
+            systemd_surface(SYS_SETGROUPS, true),
+            BalancedSurface::VirtualIdentity
+        );
+        assert_eq!(
+            systemd_surface(SYS_SETREUID, true),
+            BalancedSurface::VirtualIdentity
+        );
+        assert_eq!(
+            systemd_surface(SYS_SETREGID, true),
+            BalancedSurface::VirtualIdentity
+        );
+        assert_eq!(
+            systemd_surface(SYS_CLOSE_RANGE, true),
+            BalancedSurface::Task
+        );
+        assert_eq!(decide_systemd(435, true).action, Action::Mediate);
+        assert_eq!(decide_systemd(SYS_PIDFD_OPEN, true).action, Action::Mediate);
+        assert_eq!(systemd_surface(SYS_PIDFD_OPEN, true), BalancedSurface::Task);
+        assert_eq!(
+            decide_systemd(SYS_PIDFD_SEND_SIGNAL, true).action,
+            Action::Mediate
+        );
+        assert_eq!(decide_systemd(452, true).action, Action::Mediate);
+        assert_eq!(systemd_surface(452, true), BalancedSurface::DomainWrite);
+        assert_eq!(decide_systemd(247, true).action, Action::Mediate);
+        assert_eq!(decide_systemd(SYS_READLINKAT, true).action, Action::Mediate);
+        assert_eq!(decide_systemd(88, true).action, Action::Mediate);
+        assert_eq!(decide_systemd(SYS_UNLINKAT, true).action, Action::Mediate);
+        assert_eq!(decide_systemd(SYS_RENAMEAT, true).action, Action::Mediate);
+        assert_eq!(decide_systemd(SYS_LINKAT, true).action, Action::Mediate);
+        assert_eq!(decide_systemd(SYS_SYMLINKAT, true).action, Action::Mediate);
+        assert_eq!(
+            decide_systemd(SYS_MEMFD_CREATE, true).action,
+            Action::Mediate
+        );
+        assert_eq!(decide_systemd(SYS_GETTID, true).action, Action::Emulate);
+        assert_eq!(
+            systemd_surface(SYS_READLINKAT, true),
+            BalancedSurface::ImageRead
+        );
+        assert_eq!(systemd_surface(88, true), BalancedSurface::DomainWrite);
+        assert_eq!(
+            systemd_surface(SYS_UNLINKAT, true),
+            BalancedSurface::DomainWrite
+        );
+        assert_eq!(
+            systemd_surface(SYS_RENAMEAT, true),
+            BalancedSurface::DomainWrite
+        );
+        assert_eq!(
+            systemd_surface(SYS_LINKAT, true),
+            BalancedSurface::DomainWrite
+        );
+        assert_eq!(
+            systemd_surface(SYS_SYMLINKAT, true),
+            BalancedSurface::DomainWrite
+        );
+        assert_eq!(decide_balanced(SYS_READLINKAT).action, Action::Deny(38));
+        assert_eq!(decide_balanced(88).action, Action::Deny(38));
+        assert_eq!(decide_balanced(SYS_UNLINKAT).action, Action::Deny(38));
+        assert_eq!(decide_balanced(SYS_RENAMEAT).action, Action::Deny(38));
+        assert_eq!(decide_balanced(SYS_LINKAT).action, Action::Deny(38));
+        assert_eq!(decide_balanced(SYS_SYMLINKAT).action, Action::Deny(38));
+        assert_eq!(decide_balanced(SYS_MEMFD_CREATE).action, Action::Deny(38));
+        assert_eq!(decide_balanced(SYS_GETTID).action, Action::Deny(38));
+        assert_eq!(decide_balanced(63).action, Action::Deny(38));
+        assert_eq!(decide_balanced(291).action, Action::Deny(38));
+        assert_eq!(decide_balanced(289).action, Action::Deny(38));
+        assert_eq!(decide_balanced(294).action, Action::Deny(38));
+        assert_eq!(decide_balanced(283).action, Action::Deny(38));
+        assert_eq!(decide_balanced(56).action, Action::Deny(38));
+        assert_eq!(decide_balanced(62).action, Action::Deny(38));
+        assert_eq!(decide_balanced(435).action, Action::Deny(38));
+        assert_eq!(decide_balanced(247).action, Action::Deny(38));
     }
 }

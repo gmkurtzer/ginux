@@ -29,8 +29,39 @@
 - Runtime isolation unit: domain.
 - Policy unit: versioned contract.
 - Initial gate map: twelve checkpoint gates at positions 1 through 11 and 13;
-  Gates 1 through 8 are accepted. Gate 8.5 is the active repository transition
-  checkpoint before Gate 9.
+  Gates 1 through 8.5 are accepted. Gate 9 is the active systemd baseline.
+- Gate 9.75 was added and authorized on 2026-11-04 for comprehensive domain
+  configuration, CLI overrides, network selection and policy, port translation,
+  volumes, access, identity, resources, devices, and pre-boot hooks.
+- Gate 11 was clarified on 2026-11-06 to require a matched native-Rocky versus
+  Ginux `sysbench` matrix, native parity as the optimization goal, a default 4%
+  per-workload tolerance, and automatic failure for regressions beyond the
+  approved native or accepted-Ginux baseline. It remains sequenced after Gates
+  9.75 and 10 and has not started.
+- Gates 9.75 and 10 were clarified on 2026-11-06 to support versioned default
+  contract templates, bounded glob and resource selectors, deterministic TOML
+  overrides, and expansion against a pinned operation catalog. Gate 10 must
+  also produce a generated ABI coverage document that tracks implemented,
+  partial, denied, planned, and excluded kernel/userspace interfaces without
+  allowing catalog growth to broaden an old contract silently.
+- Gate 9 is technically passed but its human checkpoint exposed corrective
+  work now authorized as Gate 9.5. Gate 9.5 is active on
+  `hdae/systemd-usability`; Gate 9 acceptance remains pending until the
+  create-time image, configuration-derived launch, proc/job-control,
+  attach/detach, and boot-diagnostic criteria pass. The pinned Rocky init image,
+  systemd launch
+  profile, virtual PID 1 identity, disposable root, shared-network contract,
+  bounded multi-task supervision, and reproducible Rocky-host probe are
+  implemented locally on `hdae/systemd-baseline`. Unmodified Rocky systemd now
+  reaches `multi-user.target` and remains supervised.
+- Gate 9.5 now also reuses the writable Rocky host overlay across
+  `make run-host` sessions, preserving verified OCI image content, domain
+  definitions, roots, and status, and reports live layer-download progress.
+  Synthetic proc refresh is now path-targeted rather than rebuilding the whole
+  proc tree for each open. In a clean QEMU run, `ps -ef` fell from the human's
+  1.871-second reproduction to 309 ms, a single `top` refresh took 913 ms, and
+  Bash reported valid child user/system timing. The complete interactive,
+  systemd, and aggregate test matrices pass.
 - The ordered gate batch is authorized, but every open gate remains a human
   checkpoint requiring a working demonstration and explicit acceptance.
 
@@ -45,6 +76,24 @@ Ginux-owned.
 
 See `hdae/PROJECT.md` and `hdae/ARCHITECTURE.md` for the authoritative intent,
 scope, threat model, and invariants.
+
+## Resumption
+
+- Active skill: `hdae-development`
+- Skill path: `.agents/skills/hdae-development/SKILL.md`
+- Reload after context shift: required
+- Active gate: Gate 9.5, technically passed and pending the final human
+  checkpoint
+- Last evidence: `make test-systemd-interactive` passed from a clean isolated
+  overlay with `ps -ef` at 309 ms, `top -b -n 1` at 913 ms, and valid Bash
+  timing fields, plus cold acquisition, offline cache reuse, retained domain
+  state, and restart reuse. `make test-systemd` and aggregate `make test` also
+  passed.
+- Open limitation: none; the regression uses isolated port and state paths and
+  must not stop or modify a developer VM
+- Exact next action: present the updated `make run-host` workflow for the human
+  checkpoint; the human should confirm that repeated runs retain domains and
+  avoid re-downloading the OCI image
 
 ## Evidence
 
@@ -257,6 +306,54 @@ scope, threat model, and invariants.
   `2306c2e`; the human accepted its demonstration and evidence on 2026-11-04.
 - Both repositories were fetched after that merge and verified to have no open
   pull requests or issues. The final standalone-kernel commit is `4d4a53bb`.
+- Gate 9 now boots the pinned Rocky 10 UBI init userspace through systemd as
+  virtual PID 1, reaches managed `console-getty.service`, `getty.target`, and
+  `multi-user.target` within the 50-second readiness bound, authenticates root
+  through `pam_unix`, and runs the resulting shell as a supervised domain task.
+- Shared networking passed outbound DNS/HTTPS and inbound
+  bind/listen/accept/address-conflict checks. Rocky's enabled upstream
+  `baseos`, `appstream`, and `extras` repositories completed a real
+  `dnf -y update` of 58 packages in the disposable root; DNF printed
+  `Complete!`, the immutable OCI cache remained unchanged, and systemd powered
+  off through the bounded virtual lifecycle path.
+- `make test-systemd` passed three restricted-network cached-image boots plus
+  a deterministic failed-DNF transaction, configured startup failure, and
+  controlled teardown. The failed transaction left the sorted `rpm -qa`
+  package set readable, nonempty, and unchanged and did not change the cached
+  OCI rootfs SHA-256. `make bench`
+  recorded 14,772 ms boot-to-login, 19,668 KiB peak traced-tree RSS,
+  14,716 KiB login-ready RSS, 37 peak managed tasks, and 4 idle virtual
+  `/proc` entries under Rocky 10.2 x86-64 QEMU TCG with two vCPUs.
+- Fresh `make check`, aggregate `make test`, `make test-native-vfs`, and
+  `make test-oci-image` passed. The aggregate includes 46 component tests and
+  all mandatory earlier-gate QEMU regressions. The native-VFS regression was
+  updated to require the virtual PID field introduced by multi-task audit.
+- `make demo-gate-9` passed all eight automated checks after its live DNF
+  watchdog was sized to observed TCG variance. Human review then clarified
+  that this Expect-driven transcript is regression evidence, not the required
+  human demonstration.
+- The corrected `make demo-gate-9` now boots and logs the operator into the
+  QEMU Rocky host with Ginux stopped, prints the manual launch command, attaches
+  the terminal to the domain login and shell, and returns to the host after
+  controlled shutdown. `make test-systemd-interactive` passed that exact path,
+  including arbitrary command execution, retained audit evidence, host exit,
+  and QEMU cleanup. Fresh `make check` and `make test-systemd` also passed after
+  the staging refactor and console/audit separation. Gate 9 remains partial
+  until the human runs and judges it.
+- Human review on 2026-11-05 further clarified that the host must be a general
+  Ginux development environment, not a Gate-specific staged demonstration.
+  It must install Ginux in `PATH`, begin with no domain, and expose minimum
+  persistent `ginux domain create/list/start/status/stop` commands including
+  attached and detached starts. Gate 9 remains partial while that approved
+  operator workflow is implemented and verified.
+- The general-host workflow is now implemented. Fresh
+  `make test-systemd-interactive` began with no domains, created and inspected
+  `rocky` through the installed `ginux` command, rejected duplicate creation,
+  reached an authenticated attached console, returned after controlled
+  shutdown, exercised detached start/status/stop, detected stale PID identity,
+  and cleaned up the VM. Fresh `make check`, `make test-systemd`, and aggregate
+  `make test` also passed. Gate 9 is technically passed and awaits the human
+  demonstration and checkpoint judgment.
 
 ## Open decisions and limitations
 
@@ -274,10 +371,10 @@ scope, threat model, and invariants.
 - Gate 2 preparation requires Docker Desktop and a pinned privileged helper
   container. It is network-disabled and mounts only a temporary raw conversion
   read-only, but remains trusted build tooling rather than a runtime boundary.
-- Product, source, and cache identifiers use Ginux. Gate 8.5 is moving this
-  accepted userspace-kernel lineage into the existing Ginux repository while
-  retaining the separate checkout and repository until a later archival
-  decision.
+- Product, source, and cache identifiers use Ginux. Gate 8.5 joined the
+  accepted userspace-kernel lineage into this repository as `d337713b`; the
+  final standalone kernel remains preserved on `bootable-kernel` and
+  `bootable-kernel-final`.
 - The selected Rocky OCI image has one layer; deterministic synthetic fixtures
   now cover general multi-layer replacement, whiteout, and opaque-directory
   semantics.
@@ -294,24 +391,42 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Human review of https://github.com/gmkurtzer/ginux/pull/152. Inspect the joined
-history, userspace source tree, unified README, preserved `bootable-kernel`
-branch and `bootable-kernel-final` tag, and the Gate 8.5 evidence before
-accepting or merging the transition.
+Present the corrected `make run-host` workflow and measured proc performance
+for the human checkpoint. The human should exercise `ps`, `top`, and shell
+timing interactively and accept or reject Gates 9 and 9.5. Do not advance to
+Gate 9.75, push the branch, or open a pull request without explicit direction.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 8.5, unified repository transition, authorized on dedicated
-  branch `codex/userspace-transition`; implementation, publication, and all
-  objective verification pass; pull request 152 awaits human review
-- Last evidence: both lineages are ancestors of the transition head; application
-  source matches staging commit `2306c2e`; `make check` and unrestricted
-  `ROCKY_SSH_PORT=22242 make test` passed, including all 44 component tests and
-  every Rocky QEMU regression; GitHub Actions run 41926232434 passed the
-  replacement userspace `make check` and `make test-unit` job
-- Required human decision: accept or request changes to pull request 152; the
-  Gate 9 DNF repository choice remains deferred until before Gate 9
-  implementation
+- Active gate: Gate 9.5, systemd usability and operator lifecycle, technically
+  passed on dedicated stacked branch `hdae/systemd-usability`; Gates 9 and 9.5
+  remain unaccepted pending the human checkpoint
+- Last evidence: `make demo-gate-9.5` passed empty-cache create-time OCI
+  acquisition, network-disabled cache reuse, configuration-derived runtime,
+  login, Bash job control, procfs, detach, reattach, shutdown, detached
+  lifecycle, and stale-state checks. Fresh `make check`, `make test-systemd`,
+  aggregate `make test`, and expanded `make test-config` passed. The console
+  audit found zero unexpected compatibility diagnostics and narrowly
+  allowlisted the single accurate optional BPF-LSM message. The subsequent
+  reporting and console-polish change passed `make check`, `make test-unit`,
+  shell syntax checks, the release build, and `git diff --check`. The subsequent
+  procfs correction now compiles cleanly and passes `make check` and
+  `make test-unit`; its interactive regression checks Bash and transient `ps`
+  identity plus live `/proc/<pid>/stat`, `statm`, and `top` accounting. The clean
+  QEMU lifecycle rerun is pending because the human's host still owns SSH port
+  22399 and must not be interrupted. The subsequent UTS/proc/cpuinfo identity
+  work passes the exact static release link and `make check`; a required
+  no-libc `memmove` implementation fixed the `copy_within` linker failure found
+  by `make run-host`.
+- Approved network direction: Gate 9 defaults to full host-shared inbound and
+  outbound networking with normal host routing and bind conflicts, under Ginux
+  mediation and audit. Gate 9.75 adds comprehensive domain configuration,
+  network selection, port controls, and translation.
+- Required human decision: none during the approved autonomous implementation.
+  At the final checkpoint, exercise and judge the corrected general-host
+  workflow and accept or reject Gates 9 and 9.5. Separately authorize branch
+  push and pull-request creation if desired. Gate 9.75 must resolve pre-boot
+  hook execution context and authority before implementing hooks.
