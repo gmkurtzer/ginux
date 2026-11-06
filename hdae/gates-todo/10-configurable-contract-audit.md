@@ -216,13 +216,15 @@ decisions.
 - Working branch: `hdae/configurable-contract`
 - Intended base: `main`
 - Pull request: intended; dedicated branch push and PR creation authorized on
-  2026-11-03; never merge or close without explicit authorization
+  2026-11-03; delivered as https://github.com/gmkurtzer/ginux/pull/231;
+  never merge or close without explicit authorization
 - Planned commits: ABI catalog and generated coverage document; template,
   selector, and override schema; dispatcher and backend integration; structured
   audit and bounds; profiles and security regressions
 - Actual commits: `410d9e8f` (versioned operation catalog), `7f0eeab6`
   (normalized domain contracts), `25221a0b` (profiles and bounded audit), and
-  `fb559dc6` (semantic family enforcement); final evidence record pending
+  `fb559dc6` (semantic family enforcement), and `dfeeaaa5` (final verification
+  evidence)
 
 ## Review policy and outcome
 
@@ -230,3 +232,4 @@ Human checkpoint because this gate defines the operator-visible security
 contract and the evidence used for later kernel-exposure claims. Present
 `make demo-gate-10`, fresh evidence, and the pull request before acceptance.
 The implementation is technically passed and remains open pending that review.
+Pull request 231 is open and unmerged.

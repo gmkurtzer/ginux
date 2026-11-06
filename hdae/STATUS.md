@@ -41,6 +41,8 @@
   normalized contracts produce immutable digests and provenance; semantic and
   syscall decisions are enforced before host effects; and audit detail is
   bounded to 8,192 records with logarithmic dropped-event accounting.
+- Gate 10 is delivered in open pull request
+  https://github.com/gmkurtzer/ginux/pull/231. It is not merged or accepted.
 - Fresh Gate 10 evidence passed `make test-contract`, `make check`,
   `make test-contract-runtime`, `make test-systemd`, the Gate 9.75 network and
   hook regressions, aggregate `make test`, and `make demo-gate-10`. The demo
@@ -105,9 +107,9 @@ scope, threat model, and invariants.
   Gate 9.75 network and hook regressions, and aggregate `make test` passed under
   Rocky QEMU after semantic-family enforcement was enabled.
 - Open decision: none. Gate 10 scope and checkpoint policy are approved.
-- Exact next action: commit the final Gate 10 evidence, push
-  `hdae/configurable-contract`, open its pull request against `main`, record the
-  stable URL, and stop for human review and acceptance.
+- Exact next action: review pull request
+  https://github.com/gmkurtzer/ginux/pull/231 and run or inspect
+  `make demo-gate-10`; Gate 10 awaits explicit human acceptance.
 
 ## Evidence
 
@@ -404,9 +406,8 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Commit the final Gate 10 evidence, push `hdae/configurable-contract`, open its
-pull request against `main`, record the stable URL, and stop for human review
-and acceptance.
+Review pull request https://github.com/gmkurtzer/ginux/pull/231 and run or inspect
+`make demo-gate-10`; Gate 10 remains open pending explicit human acceptance.
 
 ## Context recovery
 
@@ -426,5 +427,5 @@ and acceptance.
   network selection, port controls, and translation.
 - Gate 9.75 closure: pull request 229 merged as `8a475e8b`; human accepted and
   closed the gate on 2026-11-06.
-- Required human decision: none until the Gate 10 demonstration and pull
-  request checkpoint.
+- Required human decision: accept Gate 10 or request revisions at pull request
+  231 after reviewing the demonstration and evidence.
