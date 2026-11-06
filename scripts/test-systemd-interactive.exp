@@ -1,0 +1,62 @@
+#!/usr/bin/expect -f
+
+set timeout 240
+spawn ./scripts/run-systemd.sh
+
+expect {
+    -re {GINUX_INTERACTIVE_HOST: READY} {}
+    timeout { puts stderr "interactive Rocky host timed out"; exit 70 }
+    eof { puts stderr "interactive runner exited before host login"; exit 71 }
+}
+expect {
+    -re {\[ginux@ginux-rocky [^]]+\]\$ } {}
+    timeout { puts stderr "Rocky host shell prompt timed out"; exit 72 }
+    eof { puts stderr "Rocky host shell exited early"; exit 73 }
+}
+send -- "sudo /var/tmp/ginux native /var/tmp/gate9.toml /var/lib/ginux/domains/gate9/root systemd 2>/var/tmp/ginux-systemd-audit.log\r"
+
+expect {
+    -re {login:} {}
+    timeout { puts stderr "interactive domain login timed out"; exit 74 }
+    eof { puts stderr "Ginux exited before domain login"; exit 75 }
+}
+send -- "root\r"
+expect {
+    -re {Password:} {}
+    timeout { puts stderr "interactive domain password prompt timed out"; exit 76 }
+    eof { puts stderr "domain login exited before password"; exit 77 }
+}
+send -- "ginux\r"
+expect {
+    -re {\[root@ginux [^]]+\]# } {}
+    timeout { puts stderr "interactive domain shell timed out"; exit 78 }
+    eof { puts stderr "domain shell exited early"; exit 79 }
+}
+send -- "printf 'GINUX_HUMAN_INTERACTIVE: PASS\\n'\r"
+expect {
+    -re {GINUX_HUMAN_INTERACTIVE: PASS} {}
+    timeout { puts stderr "interactive command did not run"; exit 80 }
+    eof { puts stderr "domain exited during interactive command"; exit 81 }
+}
+send -- "kill -RTMIN+4 1\r"
+expect {
+    -re {\[ginux@ginux-rocky [^]]+\]\$ } {}
+    timeout { puts stderr "interactive domain shutdown timed out"; exit 82 }
+    eof { puts stderr "Rocky host shell exited before return"; exit 83 }
+}
+send -- "grep -Fq 'GINUX_NATIVE_CHECK: PASS' /var/tmp/ginux-systemd-audit.log && printf 'GINUX_INTERACTIVE_SHUTDOWN: PASS\\n'\r"
+expect {
+    -re {GINUX_INTERACTIVE_SHUTDOWN: PASS} {}
+    timeout { puts stderr "interactive shutdown audit evidence missing"; exit 84 }
+    eof { puts stderr "Rocky host shell exited during audit check"; exit 85 }
+}
+expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
+send -- "exit\r"
+expect {
+    -re {Rocky host stopped} {}
+    timeout { puts stderr "interactive QEMU cleanup timed out"; exit 86 }
+    eof { puts stderr "interactive runner exited without cleanup evidence"; exit 87 }
+}
+expect eof
+puts "test-systemd-interactive: PASS"
+exit 0

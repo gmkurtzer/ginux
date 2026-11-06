@@ -1816,6 +1816,14 @@ fn native_proc_write(root_descriptor: usize, path: &[u8], bytes: &[u8]) -> bool 
 }
 
 fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descriptor: usize) -> ! {
+    let write_all = |bytes: &[u8]| write_all_to(2, bytes);
+    let write_u64 = |value: u64| write_u64_to(2, value);
+    let write_i64 = |value: i64| write_i64_to(2, value);
+    let write_tracee_string = |pid: usize, address: usize| {
+        write_tracee_string_to(2, pid, address);
+    };
+    let line = |message: &[u8]| line_to(2, message);
+
     let mut status = 0i32;
     if wait(pid, &mut status) < 0 {
         native_fail(domain, pid, b"native tracee wait after exec failed");
@@ -4194,9 +4202,9 @@ fn tracee_decimal_fd_path(pid: usize, address: usize) -> bool {
     false
 }
 
-fn write_tracee_string(pid: usize, address: usize) {
+fn write_tracee_string_to(fd: usize, pid: usize, address: usize) {
     if address == 0 {
-        write_all(b"(null)");
+        write_all_to(fd, b"(null)");
         return;
     }
     let mut offset = 0usize;
@@ -4209,7 +4217,7 @@ fn write_tracee_string(pid: usize, address: usize) {
             &mut word as *mut _ as usize,
         ) < 0
         {
-            write_all(b"(unreadable)");
+            write_all_to(fd, b"(unreadable)");
             return;
         }
         for byte in word.to_ne_bytes() {
@@ -4218,9 +4226,9 @@ fn write_tracee_string(pid: usize, address: usize) {
             }
             if byte.is_ascii_graphic() || byte == b' ' {
                 let printable = [byte];
-                write_all(&printable);
+                write_all_to(fd, &printable);
             } else {
-                write_all(b"?");
+                write_all_to(fd, b"?");
             }
             offset += 1;
             if offset >= 256 {
@@ -4231,17 +4239,21 @@ fn write_tracee_string(pid: usize, address: usize) {
 }
 
 fn line(message: &[u8]) {
-    write_all(message);
-    write_all(b"\n");
+    line_to(1, message);
 }
 
-fn write_all(bytes: &[u8]) {
+fn line_to(fd: usize, message: &[u8]) {
+    write_all_to(fd, message);
+    write_all_to(fd, b"\n");
+}
+
+fn write_all_to(fd: usize, bytes: &[u8]) {
     let mut offset = 0;
     while offset < bytes.len() {
         let result = unsafe {
             syscall3(
                 SYS_WRITE_HOST,
-                1,
+                fd,
                 bytes.as_ptr().add(offset) as usize,
                 bytes.len() - offset,
             )
@@ -4253,11 +4265,15 @@ fn write_all(bytes: &[u8]) {
     }
 }
 
-fn write_u64(mut value: u64) {
+fn write_all(bytes: &[u8]) {
+    write_all_to(1, bytes);
+}
+
+fn write_u64_to(fd: usize, mut value: u64) {
     let mut buffer = [0u8; 20];
     let mut index = buffer.len();
     if value == 0 {
-        write_all(b"0");
+        write_all_to(fd, b"0");
         return;
     }
     while value != 0 {
@@ -4265,16 +4281,24 @@ fn write_u64(mut value: u64) {
         buffer[index] = b'0' + (value % 10) as u8;
         value /= 10;
     }
-    write_all(&buffer[index..]);
+    write_all_to(fd, &buffer[index..]);
+}
+
+fn write_u64(value: u64) {
+    write_u64_to(1, value);
+}
+
+fn write_i64_to(fd: usize, value: i64) {
+    if value < 0 {
+        write_all_to(fd, b"-");
+        write_u64_to(fd, value.unsigned_abs());
+    } else {
+        write_u64_to(fd, value as u64);
+    }
 }
 
 fn write_i64(value: i64) {
-    if value < 0 {
-        write_all(b"-");
-        write_u64(value.unsigned_abs());
-    } else {
-        write_u64(value as u64);
-    }
+    write_i64_to(1, value);
 }
 
 fn fail(reason: &[u8]) -> ! {

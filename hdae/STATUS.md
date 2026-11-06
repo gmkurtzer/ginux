@@ -286,10 +286,18 @@ scope, threat model, and invariants.
   `make test-oci-image` passed. The aggregate includes 46 component tests and
   all mandatory earlier-gate QEMU regressions. The native-VFS regression was
   updated to require the virtual PID field introduced by multi-task audit.
-- `make demo-gate-9` passed all eight named operator checks after its live DNF
-  watchdog was sized to observed TCG variance. Gate 9 is technically passed on
-  the local `hdae/systemd-baseline` branch and awaits human checkpoint review;
-  it has not been pushed and no pull request has been opened.
+- `make demo-gate-9` passed all eight automated checks after its live DNF
+  watchdog was sized to observed TCG variance. Human review then clarified
+  that this Expect-driven transcript is regression evidence, not the required
+  human demonstration.
+- The corrected `make demo-gate-9` now boots and logs the operator into the
+  QEMU Rocky host with Ginux stopped, prints the manual launch command, attaches
+  the terminal to the domain login and shell, and returns to the host after
+  controlled shutdown. `make test-systemd-interactive` passed that exact path,
+  including arbitrary command execution, retained audit evidence, host exit,
+  and QEMU cleanup. Fresh `make check` and `make test-systemd` also passed after
+  the staging refactor and console/audit separation. Gate 9 remains partial
+  until the human runs and judges it.
 
 ## Open decisions and limitations
 
@@ -327,9 +335,9 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Present the technically passed Gate 9 evidence and `make demo-gate-9` result for
-human checkpoint acceptance. Push the dedicated branch and open its pull
-request only after explicit current authorization.
+Have the human run `make demo-gate-9`, explore the domain interactively, and
+accept or reject Gate 9. Push the dedicated branch and open its pull request
+only after explicit current authorization.
 
 ## Context recovery
 
@@ -337,20 +345,21 @@ request only after explicit current authorization.
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
 - Active gate: Gate 9, systemd baseline, authorized on dedicated branch
-  `hdae/systemd-baseline`; technically passed, awaiting human checkpoint
-  acceptance and explicit remote-delivery authorization
+  `hdae/systemd-baseline`; partial pending human testing of the implemented
+  interactive workflow
 - Last evidence: `make demo-gate-9` passed all 8 checks. `make test-systemd`,
   `make test-systemd-live`, `make bench`, `make check`, `make test`,
   `make test-native-vfs`, and `make test-oci-image` passed with the exact
   measurements and limitations recorded in the Gate 9 ledger. The latest
-  `make test-systemd` also passed the deterministic DNF-failure,
+  `make test-systemd-interactive` passed the manual-launch interaction sequence,
+  and the latest `make test-systemd` also passed the deterministic DNF-failure,
   unchanged-readable-RPM-package-set, immutable-base, clean-shutdown, and
-  configured-startup-failure checks.
+  configured-startup-failure checks after console/audit separation.
 - Approved network direction: Gate 9 defaults to full host-shared inbound and
   outbound networking with normal host routing and bind conflicts, under Ginux
   mediation and audit. Gate 9.5 adds comprehensive domain configuration,
   network selection, port controls, and translation.
-- Required human decision: accept or reject Gate 9 at its checkpoint, and
-  separately authorize branch push and pull-request creation if desired. Gate
-  9.5 must resolve pre-boot hook execution context and authority before
-  implementing hooks.
+- Required human decision: run `make demo-gate-9`, exercise and judge the
+  interactive workflow, and accept or reject Gate 9. Separately authorize
+  branch push and pull-request creation if desired. Gate 9.5 must resolve
+  pre-boot hook execution context and authority before implementing hooks.

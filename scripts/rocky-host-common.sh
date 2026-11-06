@@ -31,3 +31,16 @@ rocky_scp() {
         -o UserKnownHostsFile=/dev/null \
         "$@"
 }
+
+rocky_ssh_tty() {
+    ssh -tt \
+        -i "$ROCKY_KEY" \
+        -p "$ROCKY_SSH_PORT" \
+        -o BatchMode=yes \
+        -o ConnectTimeout=5 \
+        -o IdentitiesOnly=yes \
+        -o LogLevel=ERROR \
+        -o StrictHostKeyChecking=no \
+        -o UserKnownHostsFile=/dev/null \
+        "$ROCKY_SSH_USER@127.0.0.1" "$@"
+}

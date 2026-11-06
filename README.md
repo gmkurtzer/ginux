@@ -142,12 +142,21 @@ Inspect the latest completed capability directly:
 make test-systemd       # cached image, external networking disabled
 make bench              # systemd timing and resource observations
 make test-systemd-live  # shared network plus real upstream dnf -y update
-make demo-gate-9        # complete visible Gate 9 workflow
+make demo-gate-9        # interactive Rocky host and attached Ginux console
 ```
 
-The live test and demonstration use external Rocky repositories and can take
-many minutes under QEMU TCG because every managed syscall is intercepted and
-audited. The offline systemd test uses only the prepared, digest-pinned cache.
+`make demo-gate-9` boots the QEMU Rocky host and logs you into its shell with
+Ginux staged but stopped. It prints the command for you to launch manually.
+That terminal then becomes the Ginux domain console, where the test account is
+`root` with password `ginux`. Explore normally, then run `kill -RTMIN+4 1` as
+domain root to shut down systemd and return to the Rocky host. Type `exit` there
+to stop QEMU and clean up. The same workflow is also available as
+`make run-systemd`; `make test-systemd-interactive` is its automated regression.
+
+The live test and interactive demonstration enable shared external networking.
+An upstream DNF update can take many minutes under QEMU TCG because every
+managed syscall is intercepted and audited. The offline systemd test uses only
+the prepared, digest-pinned cache.
 
 Individual component and gate targets are documented in the `Makefile` and the
 corresponding files under [`docs/`](docs/) and [`hdae/`](hdae/).

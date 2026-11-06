@@ -8,7 +8,7 @@ BASELINE := target/$(X86_TARGET)/release/baseline-runner
 RUNTIME_FIXTURE := target/$(X86_TARGET)/release/runtime-fixture
 PROCESS_NATIVE_FIXTURE := target/$(X86_TARGET)/release/process-native-fixture
 
-.PHONY: doctor host-image-fetch host-image-verify host-boot-test image-helper-fetch image-prepare domain-image-fetch domain-image-verify domain-image-prepare systemd-image-fetch systemd-image-verify systemd-image-prepare test-image test-oci-image test-oci-layers test-vfs test-native-vfs image-cache-clean build check-name check test test-unit test-intercept test-runtime test-config test-domain test-process test-devices test-kernel-views test-systemd test-systemd-live test-cgroup test-block test-network bench bench-baseline bench-block bench-network demo-gate-1 demo-gate-2 demo-gate-3 demo-gate-4 demo-gate-5 demo-gate-6 demo-gate-7 demo-gate-8 demo-gate-9 clean
+.PHONY: doctor host-image-fetch host-image-verify host-boot-test image-helper-fetch image-prepare domain-image-fetch domain-image-verify domain-image-prepare systemd-image-fetch systemd-image-verify systemd-image-prepare test-image test-oci-image test-oci-layers test-vfs test-native-vfs image-cache-clean build check-name check test test-unit test-intercept test-runtime test-config test-domain test-process test-devices test-kernel-views test-systemd test-systemd-live test-systemd-interactive test-cgroup test-block test-network run-systemd bench bench-baseline bench-block bench-network demo-gate-1 demo-gate-2 demo-gate-3 demo-gate-4 demo-gate-5 demo-gate-6 demo-gate-7 demo-gate-8 demo-gate-9 clean
 
 doctor:
 	@./scripts/doctor.sh
@@ -125,6 +125,9 @@ test-systemd: build systemd-image-prepare
 test-systemd-live: build systemd-image-prepare
 	@ROCKY_NETWORK_RESTRICT=off ./scripts/with-rocky-host.sh ./scripts/test-systemd-live.sh
 
+test-systemd-interactive: build systemd-image-prepare
+	@./scripts/test-systemd-interactive.exp
+
 test-cgroup:
 	cargo test -p ginux-kernel-views cgroup::
 
@@ -133,6 +136,9 @@ test-block:
 
 test-network:
 	cargo test -p ginux-devices network_
+
+run-systemd: build systemd-image-prepare
+	@./scripts/run-systemd.sh
 
 test-vfs: build domain-image-prepare
 	@./scripts/with-rocky-host.sh ./scripts/test-vfs.sh
@@ -179,7 +185,7 @@ demo-gate-8: doctor build
 	@./scripts/with-rocky-host.sh ./scripts/demo-gate-8.sh
 
 demo-gate-9: doctor build systemd-image-prepare
-	@ROCKY_NETWORK_RESTRICT=off ./scripts/with-rocky-host.sh ./scripts/demo-gate-9.sh
+	@./scripts/demo-gate-9.sh
 
 clean:
 	cargo clean

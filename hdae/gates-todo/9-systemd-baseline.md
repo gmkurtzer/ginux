@@ -74,6 +74,12 @@ a controlled shutdown.
   the cached OCI base remains byte-identical.
 - [x] Give the pinned systemd OCI image its own explicit fetch, verify, and
   prepare targets and make every Gate 9 target depend on that exact cache.
+- [x] Provide a human-operated QEMU workflow that logs the operator into the
+  Rocky host, leaves Ginux stopped until manual launch, attaches the terminal
+  to the domain console, and returns to the host after domain shutdown.
+- [x] Add an automated regression for the exact host login, manual launch,
+  domain login, arbitrary command, controlled shutdown, return, and cleanup
+  sequence.
 
 ## Remaining work
 
@@ -116,6 +122,11 @@ a controlled shutdown.
 - `make demo-gate-9` lets a human watch Rocky systemd run as virtual PID 1,
   log in at multi-user, inspect managed services and PIDs, run the lockdown and
   DNF checks, and shut down cleanly.
+- A human-operated target boots the QEMU Rocky host, logs the operator into its
+  shell, and requires the operator to start Ginux manually. The attached domain
+  console remains available for exploratory use until the operator shuts down
+  systemd, after which control returns to the Rocky host and exiting cleans up
+  the VM.
 
 ## Verification plan
 
@@ -124,6 +135,10 @@ a controlled shutdown.
   controlled shutdown pass with external networking disabled.
 - `make test-systemd-live` -> shared networking and the live upstream
   `dnf -y update` transaction pass.
+- `make test-systemd-interactive` -> the real interactive runner reaches the
+  Rocky host shell with Ginux stopped, accepts the documented manual launch,
+  authenticates to the domain, runs an arbitrary command, shuts systemd down,
+  returns to the host, preserves audit evidence, and cleans up QEMU.
 - Offline boot subtest with external network disabled and the domain image
   already prepared -> reaches readiness and exits zero without an acquisition
   request; the live DNF subtest is explicitly excluded from this offline case.
@@ -211,6 +226,16 @@ a controlled shutdown.
   virtual PID 1, multi-user readiness, authenticated managed shell, virtual
   PID/lockdown visibility, shared networking, upstream DNF update, controlled
   systemd poweroff, and clean Ginux teardown.
+- `make test-systemd-interactive` -> passed the exact operator path: Rocky QEMU
+  host login, manual Ginux launch, domain `root` authentication, arbitrary
+  shell command, virtual-PID-1 poweroff, return to the Rocky shell, audit-log
+  validation, host exit, and QEMU cleanup. Native supervisor diagnostics and
+  syscall audit were separated from the attached domain console and retained
+  in `/var/tmp/ginux-systemd-audit.log` for inspection.
+- Fresh `make check` passed formatting and strict lint for the full workspace.
+- Fresh `make test-systemd` passed cold, warm, repeated, offline,
+  deterministic-DNF-failure, configured-startup-failure, and controlled
+  shutdown checks after the staging refactor and console/audit separation.
 
 ## Decisions and limitations
 
@@ -280,8 +305,9 @@ a controlled shutdown.
 
 ## Review policy and outcome
 
-Technically passed on 2026-11-05; human acceptance remains required. Systemd
-readiness is the principal compatibility milestone and its exact meaning and
-evidence require explicit acceptance. The local `make demo-gate-9` evidence is
-complete. Remote branch push and pull-request creation remain intentionally
-pending explicit current authorization under repository policy.
+Partial pending the human checkpoint. The genuinely interactive QEMU-host and
+domain-console workflow is implemented and its exact sequence has automated
+regression evidence, but that evidence does not substitute for the operator
+running `make demo-gate-9` and judging the experience. Remote branch push and
+pull-request creation remain intentionally pending explicit current
+authorization under repository policy.
