@@ -29,7 +29,8 @@
 - Runtime isolation unit: domain.
 - Policy unit: versioned contract.
 - Initial gate map: twelve checkpoint gates at positions 1 through 11 and 13;
-  Gates 1 through 9.5 are accepted. Gate 9.75 is next but has not started.
+  Gates 1 through 9.5 are accepted. Gate 9.75 is active in alignment on its
+  dedicated branch.
 - Gate 9.75 was added and authorized on 2026-11-04 for comprehensive domain
   configuration, CLI overrides, network selection and policy, port translation,
   volumes, access, identity, resources, devices, and pre-boot hooks.
@@ -75,19 +76,23 @@ scope, threat model, and invariants.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: none. Gates 9 and 9.5 are accepted; Gate 9.75 is the next
-  authorized checkpoint and must begin on its dedicated branch after this
-  closure record is merged.
+- Active gate: Gate 9.75, domain specification and network controls. Its
+  dedicated branch is `hdae/domain-specification-network-controls`; no
+  implementation has started because the pre-boot hook authority model needs
+  human direction first.
 - Last evidence: `make test-systemd-interactive` passed from a clean isolated
   overlay with `ps -ef` at 309 ms, `top -b -n 1` at 913 ms, and valid Bash
   timing fields, plus cold acquisition, offline cache reuse, retained domain
   state, and restart reuse. `make test-systemd` and aggregate `make test` also
   passed.
-- Open decision: Gate 9.75 must resolve the pre-boot hook execution context and
-  authority model before implementing hooks.
-- Exact next action: merge the Gate 9/9.5 closure pull request, then create
-  `hdae/domain-specification-network-controls` from updated `main` and begin
-  Gate 9.75 alignment with the pre-boot hook decision.
+- Open decision: choose whether Gate 9.75 supports only mediated
+  domain-context pre-boot hooks, or also supports explicitly trusted
+  host-context hooks. The current privileged helper assembles domain roots and
+  launches the runtime as root, so a host-context hook would become part of
+  Ginux's trusted computing base and could exercise arbitrary host authority.
+- Exact next action: obtain the human's pre-boot hook authority decision,
+  record it in the open gate and architecture, then implement the normalized
+  domain schema and CLI precedence path.
 
 ## Evidence
 
@@ -384,18 +389,17 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Merge the Gate 9/9.5 closure pull request. After the human confirms that merge,
-create `hdae/domain-specification-network-controls` from updated `main`, resolve
-the pre-boot hook execution and authority model with the human, and begin Gate
-9.75 on its dedicated branch and pull request.
+Resolve the Gate 9.75 pre-boot hook execution and authority model with the
+human. Record the selected model in the gate and architecture before any hook
+execution is implemented, then begin the normalized schema and CLI work.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: none. Gates 9 and 9.5 are accepted and closed; Gate 9.75 is the
-  next authorized checkpoint but has not started.
+- Active gate: Gate 9.75 is active in alignment on
+  `hdae/domain-specification-network-controls`. No implementation has started.
 - Last evidence: `make demo-gate-9.5`, `make test-systemd-interactive`,
   `make test-systemd`, `make test`, and `make check` passed. The isolated
   interactive run measured `ps -ef` at 309 ms and `top -b -n 1` at 913 ms,
@@ -405,6 +409,6 @@ the pre-boot hook execution and authority model with the human, and begin Gate
   outbound networking with normal host routing and bind conflicts, under Ginux
   mediation and audit. Gate 9.75 adds comprehensive domain configuration,
   network selection, port controls, and translation.
-- Required human decision: merge the closure pull request. Gate 9.75 must then
-  resolve pre-boot hook execution context and authority before implementing
-  hooks.
+- Required human decision: select mediated domain-context hooks only, or add
+  an explicitly trusted host-context hook class with host-root authority and
+  the corresponding security restrictions.
