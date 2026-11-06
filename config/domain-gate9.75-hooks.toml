@@ -1,0 +1,43 @@
+schema_version = 1
+
+[domain]
+id = "gate975-hooks"
+root = "docker.io/rockylinux/rockylinux@sha256:7a18ce2c9c1e0d8735f3e72685f9666150af25036e7f7b5ee4eede3754496f8c"
+init = "/bin/sh"
+args = ["-c", "test \"$(cat /run/ginux-hook-order)\" = onetwo"]
+environment = ["container=ginux"]
+
+[resources]
+vcpus = 2
+memory_mib = 1024
+
+[execution]
+profile = "balanced"
+backend = "ptrace-native"
+
+[contract]
+profile = "gate9-systemd-v1"
+
+[storage]
+assignments = ["root-overlay"]
+
+[devices]
+assignments = ["console", "null", "zero", "random"]
+
+[network]
+backend = "none"
+
+[access]
+uid = 0
+gid = 0
+
+[hooks]
+pre_boot = ["/usr/bin/printf one > /run/ginux-hook-order", "/usr/bin/mount -t tmpfs none /mnt || /usr/bin/printf two >> /run/ginux-hook-order"]
+timeout_seconds = 5
+failure = "stop"
+
+[audit]
+mode = "stderr"
+
+[failure]
+policy = "stop"

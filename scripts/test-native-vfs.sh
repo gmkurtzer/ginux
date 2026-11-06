@@ -19,26 +19,26 @@ rocky_scp "$rootfs" \
 rocky_ssh "set -eu; sudo rm -rf /var/lib/ginux/domains/gate5; sudo mkdir -p '$domain_root'; sudo tar -xf /var/tmp/ginux-oci-rootfs.tar -C '$domain_root'; sudo chmod -R a-w /var/lib/ginux/domains/gate5; test -x '$domain_root/usr/bin/bash'; test -x '$domain_root/usr/lib64/ld-linux-x86-64.so.2'; sha256sum '$domain_root/usr/bin/bash'" > build/gate5-bash-before.sha256
 
 rocky_ssh "sudo /var/tmp/ginux native /var/tmp/gate5.toml '$domain_root'" > "$native_log" 2>&1
-grep -Fqx 'GINUX_NATIVE: backend=ptrace-native profile=balanced elf-loader=host contract=gate5-balanced' "$native_log"
+grep -Fqx 'GINUX_NATIVE: backend=ptrace-native profile=balanced elf-loader=host contract=gate5-balanced-v1' "$native_log"
 grep -Fqx 'GINUX_NATIVE: tracee-uid=1000 tracee-gid=1000 root=oci-read-only' "$native_log"
 grep -Fqx 'GINUX_NATIVE_SHELL: PASS' "$native_log"
 grep -Fqx 'GINUX_NATIVE: supervisor=attached direct-unsupervised-syscalls=0' "$native_log"
 grep -Fqx 'GINUX_NATIVE_CHECK: PASS' "$native_log"
-grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ phase=entry syscall=[0-9]+ action=(mediate|emulate|deny)' "$native_log"
-grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ phase=entry syscall=39 action=emulate surface=virtual-identity result=4242$' "$native_log"
-grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ phase=entry syscall=110 action=emulate surface=virtual-identity result=1$' "$native_log"
-grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ phase=entry syscall=102 action=emulate surface=virtual-identity result=0$' "$native_log"
-grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ phase=entry syscall=104 action=emulate surface=virtual-identity result=0$' "$native_log"
-grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ phase=entry syscall=16 action=deny result=-38$' "$native_log"
-grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ phase=entry syscall=257 action=mediate surface=immutable-image result=pending$' "$native_log"
-grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ phase=entry syscall=1 action=mediate surface=bootstrap-console result=pending$' "$native_log"
+grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ domain=gate5-demo .*phase=entry syscall=[0-9]+ action=(mediate|emulate|deny)' "$native_log"
+grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ domain=gate5-demo .*phase=entry syscall=39 action=emulate surface=virtual-identity result=4242$' "$native_log"
+grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ domain=gate5-demo .*phase=entry syscall=110 action=emulate surface=virtual-identity result=1$' "$native_log"
+grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ domain=gate5-demo .*phase=entry syscall=102 action=emulate surface=virtual-identity result=0$' "$native_log"
+grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ domain=gate5-demo .*phase=entry syscall=104 action=emulate surface=virtual-identity result=0$' "$native_log"
+grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ domain=gate5-demo .*phase=entry syscall=16 action=deny result=-38$' "$native_log"
+grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ domain=gate5-demo .*phase=entry syscall=257 action=mediate surface=immutable-image result=pending$' "$native_log"
+grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ domain=gate5-demo .*phase=entry syscall=1 action=mediate surface=bootstrap-console result=pending$' "$native_log"
 printf '%s\n' '  native shell: PASS (Rocky loader and Bash, balanced audit surfaces)'
 
 rocky_ssh "sudo /var/tmp/ginux native /var/tmp/gate5.toml '$domain_root' probe" > build/gate5-balanced-probe.log 2>&1
 grep -Fqx 'GINUX_BALANCED_MUTATION: BLOCKED' build/gate5-balanced-probe.log
 grep -Fqx 'GINUX_BALANCED_NETWORK: BLOCKED' build/gate5-balanced-probe.log
-grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ phase=entry syscall=257 action=deny result=-1 reason=invalid-arguments$' build/gate5-balanced-probe.log
-grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ phase=entry syscall=41 action=deny result=-38$' build/gate5-balanced-probe.log
+grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ domain=gate5-demo .*phase=entry syscall=257 action=deny result=-1 reason=invalid-arguments$' build/gate5-balanced-probe.log
+grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ domain=gate5-demo .*phase=entry syscall=41 action=deny result=-38$' build/gate5-balanced-probe.log
 rocky_ssh "test ! -e '$domain_root/tmp/ginux-mutation'"
 printf '%s\n' '  sensitive probes: PASS (mutation and networking denied before effect)'
 

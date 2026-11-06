@@ -579,6 +579,43 @@ impl<const TASKS: usize> ProcessTable<TASKS> {
         Ok(())
     }
 
+    pub fn set_process_group_for(
+        &mut self,
+        caller: TaskId,
+        target_pid: u32,
+        group: u32,
+    ) -> Result<TaskId, ProcessError> {
+        let caller_index = self.index(caller)?;
+        let caller_task = self.tasks[caller_index];
+        let target_pid = if target_pid == 0 {
+            caller_task.id.pid
+        } else {
+            target_pid
+        };
+        let target_index = self
+            .tasks
+            .iter()
+            .position(|task| task.occupied && task.id.pid == target_pid)
+            .ok_or(ProcessError::InvalidTask)?;
+        let target = self.tasks[target_index];
+        if target.id != caller && target.parent != caller_task.id.pid {
+            return Err(ProcessError::PermissionDenied);
+        }
+        if target.session != caller_task.session || target.session == target.id.pid {
+            return Err(ProcessError::PermissionDenied);
+        }
+        let group = if group == 0 { target.id.pid } else { group };
+        let group_exists = group == target.id.pid
+            || self.tasks.iter().any(|task| {
+                task.occupied && task.session == target.session && task.process_group == group
+            });
+        if !group_exists {
+            return Err(ProcessError::PermissionDenied);
+        }
+        self.tasks[target_index].process_group = group;
+        Ok(target.id)
+    }
+
     pub fn create_session(&mut self, id: TaskId) -> Result<u32, ProcessError> {
         let index = self.index(id)?;
         let pid = self.tasks[index].id.pid;
@@ -1142,12 +1179,15 @@ pub enum FdKind {
 
 /// One tracked descriptor: the tracee-visible fd number, what it names, the
 /// pipe object id (`0` for [`FdKind::External` aliases of pre-supervision
-/// stdio), and whether exec closes it.
+/// stdio), the stdio number an [`FdKind::External`] alias names (`0` for
+/// pipe ends), and whether exec closes it. The origin survives chained
+/// duplication, so an alias keeps the access rule of the stdio it names.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct FdEntry {
     pub fd: u32,
     pub kind: FdKind,
     pub pipe: u32,
+    pub origin: u32,
     pub cloexec: bool,
 }
 
@@ -1273,7 +1313,8 @@ impl<const TASKS: usize, const FDS: usize, const PIPES: usize> PipeSpace<TASKS, 
     /// What a task's descriptor names, or `None` for untracked numbers
     /// (stdio the tracee held before supervision, or nothing at all). The
     /// supervision loop gates reads/writes on this: tracked ends and stdio
-    /// execute on the host, anything else fails closed.
+    /// execute on the host, writes through a stdio alias follow the rule of
+    /// its [`FdEntry::origin`], anything else fails closed.
     pub fn lookup(&self, task: u32, fd: u32) -> Option<FdEntry> {
         let index = self.task_index(task)?;
         self.tasks[index].entries.iter().find_map(|entry| {
@@ -1317,6 +1358,7 @@ impl<const TASKS: usize, const FDS: usize, const PIPES: usize> PipeSpace<TASKS, 
                         fd: read_fd,
                         kind: FdKind::PipeRead,
                         pipe: id,
+                        origin: 0,
                         cloexec,
                     }
                 } else {
@@ -1324,6 +1366,7 @@ impl<const TASKS: usize, const FDS: usize, const PIPES: usize> PipeSpace<TASKS, 
                         fd: write_fd,
                         kind: FdKind::PipeWrite,
                         pipe: id,
+                        origin: 0,
                         cloexec,
                     }
                 });
@@ -1357,12 +1400,14 @@ impl<const TASKS: usize, const FDS: usize, const PIPES: usize> PipeSpace<TASKS, 
                 fd: new_fd,
                 kind: entry.kind,
                 pipe: entry.pipe,
+                origin: entry.origin,
                 cloexec,
             },
             None if old_fd <= 2 => FdEntry {
                 fd: new_fd,
                 kind: FdKind::External,
                 pipe: 0,
+                origin: old_fd,
                 cloexec,
             },
             None => return Err(ProcessError::InvalidState),
@@ -1591,6 +1636,24 @@ mod tests {
     }
 
     #[test]
+    fn parent_establishes_child_job_control_group() {
+        let mut table: ProcessTable<8> = ProcessTable::new();
+        let init = table.create_init(Credentials::root()).unwrap();
+        let shell = table.fork(init).unwrap();
+        let job = table.fork(shell).unwrap();
+        assert_eq!(
+            table.set_process_group_for(shell, job.pid, job.pid),
+            Ok(job)
+        );
+        assert_eq!(table.view(job).unwrap().process_group, job.pid);
+        assert_eq!(table.set_process_group_for(job, 0, 0), Ok(job));
+        assert_eq!(
+            table.set_process_group_for(init, job.pid, job.pid),
+            Err(ProcessError::PermissionDenied)
+        );
+    }
+
+    #[test]
     fn virtual_credentials_never_require_host_privilege() {
         let mut table: ProcessTable<4> = ProcessTable::new();
         let init = table.create_init(Credentials::root()).unwrap();
@@ -1797,5 +1860,30 @@ mod tests {
         assert_eq!(poll.ready(7, EVENT_READ), Ok(EVENT_READ));
         assert_eq!(poll.ready(8, EVENT_READ), Err(ProcessError::InvalidEvent));
         poll.remove(7).unwrap();
+    }
+
+    #[test]
+    fn stdio_aliases_keep_their_origin() {
+        let mut pipes: PipeSpace<2, 8, 2> = PipeSpace::new();
+        let origin = |pipes: &PipeSpace<2, 8, 2>, task, fd| {
+            pipes
+                .lookup(task, fd)
+                .map(|entry| (entry.kind, entry.origin))
+        };
+        pipes.duplicate(1, 0, 3, false).unwrap();
+        pipes.duplicate(1, 3, 4, true).unwrap();
+        pipes.duplicate(1, 1, 5, false).unwrap();
+        pipes.duplicate(1, 0, 1, false).unwrap();
+        assert_eq!(origin(&pipes, 1, 3), Some((FdKind::External, 0)));
+        assert_eq!(origin(&pipes, 1, 4), Some((FdKind::External, 0)));
+        assert_eq!(origin(&pipes, 1, 1), Some((FdKind::External, 0)));
+        pipes.duplicate(1, 5, 1, false).unwrap();
+        assert_eq!(origin(&pipes, 1, 1), Some((FdKind::External, 1)));
+        pipes.inherit(2, 1).unwrap();
+        assert_eq!(origin(&pipes, 2, 4), Some((FdKind::External, 0)));
+        assert_eq!(origin(&pipes, 2, 1), Some((FdKind::External, 1)));
+        pipes.create_pipe(1, 6, 7, false).unwrap();
+        pipes.duplicate(1, 7, 0, false).unwrap();
+        assert_eq!(origin(&pipes, 1, 0), Some((FdKind::PipeWrite, 0)));
     }
 }

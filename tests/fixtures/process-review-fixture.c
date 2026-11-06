@@ -6,6 +6,12 @@ static long call3(long n, word a, word b, word c) {
     __asm__ volatile("syscall" : "=a"(r) : "a"(n), "D"(a), "S"(b), "d"(c), "r"(r10), "r"(r8), "r"(r9) : "rcx","r11","memory");
     return r;
 }
+static long __attribute__((unused)) call4(long n, word a, word b, word c, word d) {
+    long r;
+    register word r10 __asm__("r10")=d, r8 __asm__("r8")=0, r9 __asm__("r9")=0;
+    __asm__ volatile("syscall" : "=a"(r) : "a"(n), "D"(a), "S"(b), "d"(c), "r"(r10), "r"(r8), "r"(r9) : "rcx","r11","memory");
+    return r;
+}
 static void show(const char *label, long value) {
     char buffer[128], digits[32];
     word n=0, count=0;
@@ -264,6 +270,83 @@ long probe_main(word *stack) {
     int status=0;
     show("parked kill wait=",call3(61,middle,(word)&status,0));
     show("parked kill status=",status);
+#elif defined(CASE_parked_term)
+    static int ready[2];
+    if(call3(22,(word)ready,0,0))return 10;
+    long middle=call3(57,0,0,0);
+    if(!middle) {
+        if(call3(22,(word)descriptors,0,0))return 20;
+        long grandchild=call3(57,0,0,0);
+        if(!grandchild) {
+            // Reads EOF once the middle task dies with the last write end.
+            char byte;
+            call3(3,descriptors[1],0,0);
+            call3(0,descriptors[0],(word)&byte,1);
+            return 0;
+        }
+        call3(3,descriptors[0],0,0);
+        call3(1,ready[1],(word)"x",1);
+        // Parks in wait4 until the parent's SIGTERM ends it.
+        call3(61,grandchild,0,0);
+        return 21;
+    }
+    char byte=0;
+    if(call3(0,ready[0],(word)&byte,1)!=1)return 11;
+    // Give the middle task time to park after its ready byte.
+    for(int i=0;i<100;i++)call3(186,0,0,0);
+    show("parked term kill=",call3(62,middle,15,0));
+    int status=0;
+    show("parked term wait=",call3(61,middle,(word)&status,0));
+    show("parked term status=",status);
+#elif defined(CASE_ro_status) || defined(CASE_bad_status) || defined(CASE_bad_rusage) || \
+    defined(CASE_straddle_status)
+    // wait4 stores like the kernel's own copy to user memory: a status or
+    // rusage pointer the caller cannot write fails with EFAULT after the
+    // child is reaped, the status before the rusage, and a failed status
+    // store leaves the rusage and the status word untouched. The first round
+    // finds the child exited (WNOHANG), the second parks while the child
+    // spins in syscalls.
+    static const int ro_cell __attribute__((section(".rodata"), aligned(8)));
+    static int usage[36];
+    const word unmapped=0x1000;
+    // The last two bytes before the unmapped page after the bss: a status
+    // word there crosses into memory the caller cannot write.
+    extern char _end[];
+    word page_end=((word)_end+4095)&~(word)4095;
+    if(page_end-(word)_end<2)return 30;
+    volatile unsigned char *edge=(volatile unsigned char *)(page_end-2);
+    for(int round=0;round<2;round++) {
+        for(int i=0;i<36;i++)usage[i]=0x5a5a5a5a;
+        edge[0]=0x77;
+        edge[1]=0x77;
+        long child=call3(57,0,0,0);
+        if(!child) {
+            for(int i=0;round && i<100;i++)call3(186,0,0,0);
+            return 42;
+        }
+        int status=0x12345678;
+#if defined(CASE_ro_status)
+        word status_ptr=(word)&ro_cell, rusage_ptr=(word)usage;
+#elif defined(CASE_bad_status)
+        word status_ptr=unmapped, rusage_ptr=(word)usage;
+#elif defined(CASE_straddle_status)
+        word status_ptr=page_end-2, rusage_ptr=(word)usage;
+#else
+        word status_ptr=(word)&status, rusage_ptr=unmapped;
+#endif
+        long result;
+        if(round) {
+            result=call4(61,child,status_ptr,0,rusage_ptr);
+        } else {
+            while(!(result=call4(61,child,status_ptr,1,rusage_ptr)))call3(186,0,0,0);
+        }
+        show(round?"blocking wait=":"nohang wait=",result);
+        show(round?"blocking ro cell=":"nohang ro cell=",*(volatile const int *)&ro_cell);
+        show(round?"blocking edge=":"nohang edge=",edge[0]|edge[1]<<8);
+        show(round?"blocking status=":"nohang status=",status);
+        show(round?"blocking rusage=":"nohang rusage=",usage[0]);
+        show(round?"blocking rewait=":"nohang rewait=",call3(61,child,0,0));
+    }
 #elif defined(CASE_kill_badsig)
     long pid=call3(39,0,0,0);
     show("kill signal 65=",call3(62,pid,65,0));
@@ -301,6 +384,35 @@ long probe_main(word *stack) {
     long result;
     __asm__ volatile("syscall" : "=a"(result) : "a"(311),"D"(0),"S"(0),"d"(0),"r"(r10),"r"(r8),"r"(r9) : "rcx","r11","memory");
     show("process_vm_writev(311)=",result);
+#elif defined(CASE_alias_writes)
+    // Every alias keeps the write rule of the stdio descriptor it names:
+    // stdin stays unwritable, stdout keeps the console bound.
+    static char large[4097];
+    show("plain stdin write=",call3(1,0,(word)"via-0\n",6));
+    show("plain stdout write 4097=",call3(1,1,(word)large,sizeof large));
+    long alias=call3(32,0,0,0);
+    show("dup stdin write=",call3(1,alias,(word)"via-dup\n",8));
+    long chained=call3(32,alias,0,0);
+    show("dup alias write=",call3(1,chained,(word)"via-dup-dup\n",12));
+    call3(33,0,7,0);
+    show("dup2 stdin write=",call3(1,7,(word)"via-dup2\n",9));
+    call3(292,0,8,0x80000);
+    show("dup3 stdin write=",call3(1,8,(word)"via-dup3\n",9));
+    long fcntl_alias=call3(72,0,0,10);
+    show("fcntl dupfd stdin write=",call3(1,fcntl_alias,(word)"via-dupfd\n",10));
+    long cloexec_alias=call3(72,0,1030,10);
+    show("fcntl dupfd-cloexec stdin write=",call3(1,cloexec_alias,(word)"via-dupfd-cloexec\n",18));
+    long saved=call3(32,1,0,0);
+    call3(33,0,1,0);
+    long over=call3(1,1,(word)"via-1\n",6);
+    call3(33,saved,1,0);
+    show("stdin over stdout write=",over);
+    show("stdout alias write=",call3(1,saved,(word)"stdout alias ok\n",16));
+    show("stdout alias write 4097=",call3(1,saved,(word)large,sizeof large));
+    show("restored stdout write 4097=",call3(1,1,(word)large,sizeof large));
+    long stderr_alias=call3(32,2,0,0);
+    show("stderr alias write=",call3(1,stderr_alias,(word)"stderr alias ok\n",16));
+    show("stderr alias write 4097=",call3(1,stderr_alias,(word)large,sizeof large));
 #endif
     return 0;
 }

@@ -16,7 +16,7 @@ profile = "balanced"
 backend = "ptrace-native"
 
 [contract]
-profile = "gate7-process"
+profile = "minimal-v1"
 
 [storage]
 assignments = []

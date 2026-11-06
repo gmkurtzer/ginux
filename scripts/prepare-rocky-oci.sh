@@ -1,10 +1,11 @@
 #!/bin/sh
 set -eu
 
-. ./scripts/oci-common.sh
+. "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)/oci-common.sh"
 
-./scripts/verify-rocky-oci.sh
-for command in cargo gzip jq paste shasum; do
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+"$script_dir/verify-rocky-oci.sh"
+for command in gzip jq paste; do
     command -v "$command" >/dev/null 2>&1 || {
         printf 'missing required command: %s\n' "$command" >&2
         exit 1
@@ -43,12 +44,15 @@ set --
 layer_number=0
 tab=$(printf '\t')
 while IFS="$tab" read -r layer_media_type layer_digest diff_id; do
-    test "$layer_media_type" = application/vnd.oci.image.layer.v1.tar+gzip
+    case "$layer_media_type" in
+        application/vnd.oci.image.layer.v1.tar+gzip|application/vnd.docker.image.rootfs.diff.tar.gzip) ;;
+        *) printf 'unsupported image layer media type: %s\n' "$layer_media_type" >&2; exit 1 ;;
+    esac
     layer_blob=$(oci_blob_path "$layer_digest")
     layer_tar=$GINUX_OCI_WORK_DIR/layer-$layer_number.tar
     layer_tmp=$layer_tar.partial
     gzip -dc "$layer_blob" > "$layer_tmp"
-    actual_diff_id=sha256:$(shasum -a 256 "$layer_tmp" | awk '{print $1}')
+    actual_diff_id=sha256:$(oci_sha256_file "$layer_tmp")
     if [ "$actual_diff_id" != "$diff_id" ]; then
         printf 'uncompressed OCI layer mismatch: expected %s, got %s\n' \
             "$diff_id" "$actual_diff_id" >&2
@@ -60,11 +64,19 @@ while IFS="$tab" read -r layer_media_type layer_digest diff_id; do
 done < "$layer_list"
 test "$layer_number" -eq "$layer_count"
 
-cargo run -q -p ginux-vfs-index -- assemble "$rootfs_tmp" "$index_tmp" "$@"
+if test -n "${GINUX_VFS_INDEX-}"; then
+    "$GINUX_VFS_INDEX" assemble "$rootfs_tmp" "$index_tmp" "$@"
+else
+    command -v cargo >/dev/null 2>&1 || {
+        printf '%s\n' 'missing required command: cargo' >&2
+        exit 1
+    }
+    cargo run -q -p ginux-vfs-index -- assemble "$rootfs_tmp" "$index_tmp" "$@"
+fi
 mv "$rootfs_tmp" "$rootfs"
 mv "$index_tmp" "$index"
-rootfs_sha=$(shasum -a 256 "$rootfs" | awk '{print $1}')
-index_sha=$(shasum -a 256 "$index" | awk '{print $1}')
+rootfs_sha=$(oci_sha256_file "$rootfs")
+index_sha=$(oci_sha256_file "$index")
 cat > "$identity_tmp" <<EOF
 FORMAT_VERSION=1
 OCI_INDEX_DIGEST=$GINUX_OCI_INDEX_DIGEST

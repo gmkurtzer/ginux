@@ -163,6 +163,26 @@ host socket or TUN/TAP descriptor and deliberately has no external
 connectivity. A later connectivity backend must preserve the same virtual
 interface and explicit packet-mediation boundary.
 
+Gate 9 adds the first externally connected backend. Its default `shared` mode
+uses the host network and normal host routing, source-address selection, and
+socket namespace. With no network configuration, domain sockets behave like
+other host applications: outbound and inbound operations are available, and
+normal bind conflicts apply, so the first successful bind owns an address and
+port. Ginux still intercepts, validates, mediates, and audits every managed
+network operation; managed code does not receive unchecked supervisor
+descriptors or an unmediated syscall path.
+
+Gate 9.75 adds explicit selection of a host interface or source address,
+ingress and egress policy, and port translation such as host
+`device-or-address:8080` to domain port `80`. Selecting an attachment such as
+`eth0:1` gives the domain the normal shared use of that complete host network
+attachment; it does not reserve the attachment or create an isolated network.
+Two domains attached to the same host network therefore behave like two host
+applications, including first-successful-bind ownership. Translation is the
+explicit exception: Ginux owns the selected external address and port and
+routes it to the configured domain port. These controls use the same network
+frontend rather than creating a separate compatibility path.
+
 ### Configuration and lifecycle
 
 Each domain has a versioned configuration containing identity, root image,
@@ -173,6 +193,25 @@ boundary explicit. Ginux validates and normalizes the complete configuration
 before starting managed code. The effective configuration is immutable
 evidence for that domain instance; mutable runtime controls, if later added,
 require explicit authorization and audit semantics.
+
+Gate 9.75 expands this into the comprehensive domain specification. It includes
+hostname, access, volumes and host mappings, network attachment and port
+policy, resources, devices, contract and audit behavior, failure policy, and
+pre-boot hooks with an explicitly defined execution context. Command-line
+arguments may override file values through one typed normalization and
+validation path. Precedence is built-in defaults, then the configuration file,
+then command-line overrides. The normalized effective configuration is
+recorded before domain startup.
+
+Gate 9.75 pre-boot hooks execute only as managed domain processes after the
+domain root and declarative resources have been prepared but before the domain
+init process begins. Hooks use the same mediated runtime, effective contract,
+virtual identity, filesystem view, devices, and network policy as the domain;
+they receive no host descriptors, paths, credentials, or helper authority.
+Host-side setup remains declarative and is performed only by reviewed Ginux
+backends. Arbitrary host-context hooks are unsupported because they would be
+root-authority extensions to the trusted computing base rather than domain
+configuration.
 
 ### Observability and benchmarking
 

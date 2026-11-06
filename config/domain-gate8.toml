@@ -16,7 +16,7 @@ profile = "balanced"
 backend = "ptrace-native"
 
 [contract]
-profile = "gate8-kernel-views"
+profile = "minimal-v1"
 
 [storage]
 assignments = ["vda"]

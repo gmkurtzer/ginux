@@ -12,6 +12,16 @@ static long call3(long number, word a, word b, word c)
     return result;
 }
 
+static long call4(long number, word a, word b, word c, word d)
+{
+    long result;
+    register word r10 __asm__("r10") = d;
+    __asm__ volatile("syscall" : "=a"(result)
+                     : "a"(number), "D"(a), "S"(b), "d"(c), "r"(r10)
+                     : "rcx", "r11", "memory");
+    return result;
+}
+
 static void print(const char *value)
 {
     word count = 0;
@@ -70,6 +80,25 @@ long native_fixture_main(void)
             return 0;
         }
         print_result("GINUX_FIXTURE: int80-fork=", pid);
+        return 0;
+    }
+    case 'v': {
+        /* Thread identity: set_tid_address returns the caller's tid, which
+         * for a single-threaded task equals getpid, and FUTEX_LOCK_PI on a
+         * free word stores the caller's tid in it, also with flag bits above
+         * the command (1024). Neither may expose the host tid next to the
+         * virtual pid. */
+        static int clear_tid;
+        static int pi_word;
+        static int pi_flags_word;
+        print_result("GINUX_FIXTURE: set_tid_address=", call3(218, (word)&clear_tid, 0, 0));
+        print_result("GINUX_FIXTURE: getpid=", call3(39, 0, 0, 0));
+        print_result("GINUX_FIXTURE: gettid=", call3(186, 0, 0, 0));
+        print_result("GINUX_FIXTURE: futex_lock_pi=", call4(202, (word)&pi_word, 6 | 128, 0, 0));
+        print_result("GINUX_FIXTURE: pi_word=", pi_word);
+        print_result("GINUX_FIXTURE: futex_lock_pi_flags=",
+                     call4(202, (word)&pi_flags_word, 6 | 128 | 1024, 0, 0));
+        print_result("GINUX_FIXTURE: pi_flags_word=", pi_flags_word);
         return 0;
     }
     default:

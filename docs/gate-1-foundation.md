@@ -106,6 +106,12 @@ nonzero if Rocky or cloud-init does not become ready, host PID 1 is not
 systemd, an expected Ginux line is missing, the marker appears, host health is
 lost, or VM cleanup fails.
 
+`make build-gate1-fixture` and `sudo make test-gate1-setup` check the setup
+failure path on any x86-64 Linux host without the Rocky VM: a seccomp filter
+fails `PTRACE_SETOPTIONS` or `PTRACE_SYSEMU` for the supervisor, and the test
+requires `GATE1: FAIL` and that the payload never runs past its stop after
+`execve`.
+
 ## Baseline benchmark method
 
 `make bench-baseline` runs the same three workloads inside the Rocky VM:

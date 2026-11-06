@@ -1,0 +1,63 @@
+schema_version = 1
+
+[domain]
+id = "gate975-demo"
+root = "docker.io/rockylinux/rockylinux@sha256:7a18ce2c9c1e0d8735f3e72685f9666150af25036e7f7b5ee4eede3754496f8c"
+init = "/sbin/init"
+args = ["--system", "--unit=multi-user.target"]
+environment = ["container=ginux"]
+workdir = "/"
+
+[identity]
+hostname = "gate975-demo"
+
+[resources]
+vcpus = 2
+memory_mib = 1024
+
+[execution]
+profile = "balanced"
+backend = "ptrace-native"
+
+[contract]
+profile = "gate9-systemd-v1"
+templates = ["network-client-v1"]
+allow = ["syscall.read*"]
+deny = ["ioctl.*"]
+
+[storage]
+assignments = ["root-overlay"]
+
+[volumes]
+assignments = ["/srv/ginux-data:/data:ro"]
+
+[devices]
+assignments = ["console", "null", "zero", "random", "net0"]
+
+[network]
+backend = "shared"
+interface = "eth0:1"
+source = "192.0.2.10"
+ingress_allow = ["tcp:80"]
+ingress_deny = ["tcp:22"]
+egress_allow = ["tcp:443", "udp:53"]
+egress_deny = ["tcp:25"]
+port_forwards = ["tcp/eth0:1/8080/80"]
+
+[access]
+uid = 0
+gid = 0
+
+[hooks]
+pre_boot = ["/usr/local/sbin/prepare-domain --safe"]
+timeout_seconds = 20
+failure = "stop"
+
+[lifecycle]
+stop_timeout_seconds = 30
+
+[audit]
+mode = "stderr"
+
+[failure]
+policy = "stop"

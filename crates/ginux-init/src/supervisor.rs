@@ -5,6 +5,7 @@
 //! lives here; dispatch decisions belong to `dispatch`.
 
 use core::arch::asm;
+use core::sync::atomic::{AtomicU8, Ordering};
 
 pub const SYS_WRITE_HOST: usize = 1;
 pub const SYS_READ_HOST: usize = 0;
@@ -30,6 +31,7 @@ pub const SYS_KILL: usize = 62;
 pub const SYS_PTRACE: usize = 101;
 pub const SYS_OPENAT_HOST: usize = 257;
 pub const SYS_SIGNALFD4: usize = 289;
+pub const SYS_PROCESS_VM_WRITEV: usize = 311;
 pub const AT_FDCWD: usize = (-100isize) as usize;
 pub const O_RDONLY: usize = 0;
 pub const O_RDWR: usize = 2;
@@ -59,6 +61,9 @@ pub const EPERM: i64 = 1;
 pub const ESRCH: i64 = 3;
 pub const EBADF: i64 = 9;
 pub const ECHILD: i64 = 10;
+pub const EIO: i64 = 5;
+pub const EFAULT: i64 = 14;
+pub const EACCES: i64 = 13;
 pub const EINVAL: i64 = 22;
 pub const ENOSYS: i64 = 38;
 pub const VIRTUAL_PID: u64 = 4242;
@@ -117,6 +122,102 @@ pub fn ptrace(request: usize, pid: usize, addr: usize, data: usize) -> isize {
 pub fn read_tracee_word(pid: usize, address: usize) -> bool {
     let mut word = 0u64;
     ptrace(PTRACE_PEEKDATA, pid, address, &mut word as *mut _ as usize) >= 0
+}
+
+/// Whether `process_vm_writev` works for this supervisor: unknown until the
+/// first answer, then cached. Kernels built without
+/// `CONFIG_CROSS_MEMORY_ATTACH` return `ENOSYS`; a custom seccomp profile can
+/// return `EPERM`.
+static VM_WRITE: AtomicU8 = AtomicU8::new(VM_WRITE_UNKNOWN);
+const VM_WRITE_UNKNOWN: u8 = 0;
+const VM_WRITE_AVAILABLE: u8 = 1;
+const VM_WRITE_DENIED: u8 = 2;
+
+/// Copy `bytes` into tracee memory at `address` the way the kernel's own copy
+/// to user memory would: a read-only or unmapped range fails with `-EFAULT`,
+/// and the bytes before the first unwritable one are written. This uses
+/// `process_vm_writev`, which honors the tracee's page protections.
+///
+/// If that call is unavailable (`ENOSYS`, `EPERM` or `EACCES` on its first
+/// use), every later copy falls back to [`poke_tracee_bytes`] with reduced
+/// fidelity: an unmapped range still fails with `-EFAULT`, but read-only
+/// memory is written, because ptrace writes ignore page protections.
+/// Returns the negative errno on failure.
+pub fn write_tracee_bytes(pid: usize, address: usize, bytes: &[u8]) -> Result<(), i64> {
+    let state = VM_WRITE.load(Ordering::Relaxed);
+    if state != VM_WRITE_DENIED {
+        let local = [bytes.as_ptr() as usize, bytes.len()];
+        let remote = [address, bytes.len()];
+        let written = unsafe {
+            syscall6(
+                SYS_PROCESS_VM_WRITEV,
+                pid,
+                local.as_ptr() as usize,
+                1,
+                remote.as_ptr() as usize,
+                1,
+                0,
+            )
+        } as i64;
+        let unavailable = matches!(-written, ENOSYS | EPERM | EACCES);
+        if !unavailable || state == VM_WRITE_AVAILABLE {
+            if written >= 0 {
+                VM_WRITE.store(VM_WRITE_AVAILABLE, Ordering::Relaxed);
+            }
+            return if written == bytes.len() as i64 {
+                Ok(())
+            } else if written < 0 {
+                Err(written)
+            } else {
+                Err(-EFAULT)
+            };
+        }
+        VM_WRITE.store(VM_WRITE_DENIED, Ordering::Relaxed);
+        write_all(b"GINUX_SUPERVISOR_AUDIT: tracee-write=ptrace-fallback process_vm_writev=");
+        write_i64(written);
+        write_all(b"\n");
+    }
+    poke_tracee_bytes(pid, address, bytes).map_err(fault_errno)
+}
+
+/// Map a failed ptrace access to the errno a user copy would report: an
+/// unmapped address (`EIO` or `EFAULT`) is `-EFAULT`; anything else, such as
+/// `ESRCH` for a tracee that is gone, stays as it is.
+pub fn fault_errno(error: i64) -> i64 {
+    if error == -EIO || error == -EFAULT {
+        -EFAULT
+    } else {
+        error
+    }
+}
+
+/// Merge `bytes` into the tracee's aligned words with `PTRACE_PEEKDATA` and
+/// `PTRACE_POKEDATA`, preserving every neighboring byte. Ptrace writes ignore
+/// page protections. Returns the raw negative errno of the first failed
+/// access; the words before it are written.
+pub fn poke_tracee_bytes(pid: usize, address: usize, bytes: &[u8]) -> Result<(), i64> {
+    let mut index = 0;
+    while index < bytes.len() {
+        let current = address.checked_add(index).ok_or(-EFAULT)?;
+        let aligned = current & !0x7;
+        let mut word = 0usize;
+        let result = ptrace(PTRACE_PEEKDATA, pid, aligned, &mut word as *mut _ as usize);
+        if result < 0 {
+            return Err(result as i64);
+        }
+        let mut lanes = word.to_le_bytes();
+        let mut lane = current - aligned;
+        while lane < 8 && index < bytes.len() {
+            lanes[lane] = bytes[index];
+            lane += 1;
+            index += 1;
+        }
+        let result = ptrace(PTRACE_POKETEXT, pid, aligned, usize::from_le_bytes(lanes));
+        if result < 0 {
+            return Err(result as i64);
+        }
+    }
+    Ok(())
 }
 
 pub fn line(message: &[u8]) {
@@ -266,6 +367,33 @@ pub unsafe fn syscall5(
         in("rdx") a3,
         in("r10") a4,
         in("r8") a5,
+        lateout("rcx") _,
+        lateout("r11") _,
+        options(nostack)
+    );
+    result
+}
+
+#[inline(always)]
+pub unsafe fn syscall6(
+    number: usize,
+    a1: usize,
+    a2: usize,
+    a3: usize,
+    a4: usize,
+    a5: usize,
+    a6: usize,
+) -> isize {
+    let result: isize;
+    asm!(
+        "syscall",
+        inlateout("rax") number as isize => result,
+        in("rdi") a1,
+        in("rsi") a2,
+        in("rdx") a3,
+        in("r10") a4,
+        in("r8") a5,
+        in("r9") a6,
         lateout("rcx") _,
         lateout("r11") _,
         options(nostack)

@@ -4,7 +4,10 @@
 //! input-file staging. Workload definitions stay with the entry points in
 //! `main.rs`; `launch` runs the executable and arguments from domain config.
 
-use ginux_core::{balanced_identity_result, balanced_surface, Action, SYS_EXIT, SYS_EXIT_GROUP};
+use ginux_core::{
+    balanced_identity_result, balanced_mediated_result, balanced_surface, Action, SYS_EXIT,
+    SYS_EXIT_GROUP,
+};
 use ginux_domain::{ConfigError, Domain, DomainConfig, ExecutionBackend, ExecutionProfile};
 
 use crate::dispatch::{
@@ -31,9 +34,13 @@ pub static mut VFS_INDEX_BYTES: [u8; MAX_VFS_INDEX_SIZE] = [0; MAX_VFS_INDEX_SIZ
 pub enum Command {
     Runtime(*const u8),
     Config(*const u8),
+    ConfigMerge(*const u8, usize, *const usize),
+    ContractPlan(*const u8),
+    HookPlan(*const u8),
     Lifecycle(*const u8),
     Vfs(*const u8, *const u8, *const u8),
     Native(*const u8, *const u8, usize),
+    NativeHook(*const u8, *const u8, usize),
     Domain(*const u8, *const u8),
     Process(*const u8),
     ProcessNative(*const u8, *const u8),
@@ -65,6 +72,17 @@ pub fn parse_argv(argc: usize, argv: *const usize) -> Option<Command> {
     } else if c_string_equals(command, b"config") {
         let config_path = unsafe { *argv.add(2) as *const u8 };
         Some(Command::Config(config_path))
+    } else if c_string_equals(command, b"config-merge") {
+        let config_path = unsafe { *argv.add(2) as *const u8 };
+        Some(Command::ConfigMerge(config_path, argc - 3, unsafe {
+            argv.add(3)
+        }))
+    } else if c_string_equals(command, b"contract-plan") {
+        let config_path = unsafe { *argv.add(2) as *const u8 };
+        Some(Command::ContractPlan(config_path))
+    } else if c_string_equals(command, b"hook-plan") {
+        let config_path = unsafe { *argv.add(2) as *const u8 };
+        Some(Command::HookPlan(config_path))
     } else if c_string_equals(command, b"lifecycle") {
         let config_path = unsafe { *argv.add(2) as *const u8 };
         Some(Command::Lifecycle(config_path))
@@ -84,6 +102,11 @@ pub fn parse_argv(argc: usize, argv: *const usize) -> Option<Command> {
             0
         };
         Some(Command::Native(config_path, root_path, mode))
+    } else if argc >= 5 && c_string_equals(command, b"native-hook") {
+        let config_path = unsafe { *argv.add(2) as *const u8 };
+        let root_path = unsafe { *argv.add(3) as *const u8 };
+        let index = parse_decimal_c_string(unsafe { *argv.add(4) as *const u8 })?;
+        Some(Command::NativeHook(config_path, root_path, index))
     } else if argc >= 4 && c_string_equals(command, b"domain") {
         let config_path = unsafe { *argv.add(2) as *const u8 };
         let fixture_path = unsafe { *argv.add(3) as *const u8 };
@@ -124,6 +147,20 @@ pub fn parse_argv(argc: usize, argv: *const usize) -> Option<Command> {
     } else {
         Some(Command::Usage)
     }
+}
+
+fn parse_decimal_c_string(value: *const u8) -> Option<usize> {
+    let bytes = c_string_bytes(value, 20).ok()?;
+    if bytes.is_empty() || !bytes.iter().all(u8::is_ascii_digit) {
+        return None;
+    }
+    let mut result = 0usize;
+    for byte in bytes {
+        result = result
+            .checked_mul(10)?
+            .checked_add(usize::from(*byte - b'0'))?;
+    }
+    Some(result)
 }
 
 pub fn load_config(path: *const u8) -> DomainConfig {
@@ -262,6 +299,17 @@ pub fn c_string_equals(value: *const u8, expected: &[u8]) -> bool {
         }
     }
     unsafe { *value.add(expected.len()) == 0 }
+}
+
+pub fn c_string_bytes(value: *const u8, limit: usize) -> Result<&'static [u8], ConfigError> {
+    let mut length = 0usize;
+    while length < limit {
+        if unsafe { *value.add(length) } == 0 {
+            return Ok(unsafe { core::slice::from_raw_parts(value, length) });
+        }
+        length += 1;
+    }
+    Err(ConfigError::ValueTooLong)
 }
 
 // ---- G01: configured native launch ----
@@ -584,7 +632,9 @@ fn print_launch_config(config: &DomainConfig) {
 
 pub fn usage() -> ! {
     line_stderr(b"ginux: usage: ginux (no arguments: interception demonstration)");
-    line_stderr(b"ginux: usage: ginux config|lifecycle|process|kernel-views <config>");
+    line_stderr(
+        b"ginux: usage: ginux config|contract-plan|lifecycle|process|kernel-views <config>",
+    );
     line_stderr(b"ginux: usage: ginux runtime <elf>");
     line_stderr(b"ginux: usage: ginux domain|process-native <config> <fixture>");
     line_stderr(b"ginux: usage: ginux native <config> <root> [hold|probe]");
@@ -1033,6 +1083,12 @@ fn supervise_launch(pid: usize, domain: &mut Domain) -> ! {
                 audit_write(b"mediate surface=");
                 audit_line(balanced_surface_name(balanced_surface(syscall)));
                 awaiting_exit = true;
+                // A host result that is the caller's host tid is replaced
+                // at the exit stop.
+                if let Some(result) = balanced_mediated_result(syscall) {
+                    override_exit = true;
+                    override_result = result;
+                }
                 if ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0 {
                     launch_fail(domain, pid, b"launch mediated syscall failed");
                 }

@@ -58,7 +58,7 @@ Host Linux kernel
                  |- virtual descriptors and kernel views
                  |- assigned devices and resources
                  `- managed Rocky Linux userspace
-                      `- domain systemd (virtual PID 1, planned Gate 9)
+                      `- domain systemd (virtual PID 1)
 ```
 
 Ginux supervises native x86-64 programs and intercepts managed syscalls before
@@ -79,10 +79,39 @@ The current implementation includes:
   models;
 - virtual devices with explicit assignment, ownership, and revocation; and
 - bounded virtual `/proc`, `/sys`, cgroup v2, mount, namespace, machine, and
-  boot-identity views.
+  boot-identity views;
+- a host-shared network backend that remains syscall-mediated; and
+- a pinned Rocky Linux 10 systemd baseline that reaches `multi-user.target`,
+  authenticates a managed console login, updates through Rocky's enabled
+  repositories, and shuts the domain down cleanly.
 
-Gate 8 is complete. Booting Rocky Linux systemd as virtual PID 1 is the next
-planned compatibility gate; it is not yet a current claim.
+This is a named compatibility baseline, not a claim of complete Linux or
+systemd compatibility. Its exact image, readiness marker, tests, evidence, and
+limitations are recorded in
+[`hdae/gates-todo/9-systemd-baseline.md`](hdae/gates-todo/9-systemd-baseline.md).
+
+### Agent containment research
+
+Ginux is also being tested as a containment boundary for AI agents and other
+automated software that can execute commands, modify files, open network
+connections, and start additional processes. Instead of giving an agent the
+host's complete Linux ABI, an operator can place its process tree inside a
+domain whose kernel contract exposes only the operations and virtual resources
+required for the task.
+
+The research goal is a reviewable boundary spanning syscalls, ioctls,
+filesystems, devices, networking, process authority, and virtual `/proc` and
+`/sys` state. For example, a contract may allow an agent to read time, inspect
+its own processes, and modify one assigned workspace while denying clock
+changes, host filesystem access, unapproved network listeners, and unrelated
+devices. Ginux can then audit the contract decisions made while the agent and
+its child processes run.
+
+This is an active verification target, not a claim that Ginux is currently a
+production-grade agent sandbox. The contract inventory, configurable policy,
+adversarial tests, performance costs, and escape boundaries are tracked through
+the HDAE gates and must be demonstrated before stronger containment claims are
+made.
 
 ## Relationship to other systems
 
@@ -119,6 +148,7 @@ Prepare the pinned assets with explicit network operations:
 make host-image-fetch
 make image-helper-fetch
 make domain-image-fetch
+make systemd-image-fetch
 ```
 
 Build and run the deterministic suite offline after the caches are populated:
@@ -132,8 +162,49 @@ make test
 Inspect the latest completed capability directly:
 
 ```sh
-make demo-gate-8
+make test-systemd       # cached image, external networking disabled
+make bench              # systemd timing and resource observations
+make test-systemd-live  # shared network plus real upstream dnf -y update
+make run-host           # general interactive Rocky host with Ginux installed
+make demo-gate-9        # Gate 9 checkpoint through the same host workflow
 ```
+
+`make run-host` boots the QEMU Rocky host and logs you into its ordinary shell.
+Ginux is installed in `PATH`. The first `domain create` downloads and verifies
+the pinned Rocky OCI image with live per-layer progress; later creates reuse the
+cache. The writable Rocky host overlay persists across `make run-host` sessions,
+so cached images, domain definitions, roots, and stopped status remain available.
+A complete first session is:
+
+```sh
+ginux domain create rocky --config /etc/ginux/examples/rocky-systemd.toml
+ginux domain list
+ginux domain status rocky
+ginux domain start rocky --attach
+```
+
+The domain specification also supports typed CLI overrides, network
+interface/source selection, ingress and egress port policy, translated ports,
+volumes, virtual identity, and ordered pre-boot hooks. Hooks run only as
+mediated domain processes; Ginux does not support arbitrary host-context hooks.
+See [Gate 9.75 domain specification](docs/gate-9.75-domain-specification.md)
+for the schema, precedence rules, examples, and verification targets.
+
+The attached terminal becomes the Ginux domain console. Log in as `root` with
+password `ginux`, explore normally, press `Ctrl-]` to detach while leaving the
+domain running, and run `kill -RTMIN+4 1` as domain root to
+shut down systemd and return to the host. Detached operation uses
+`ginux domain start rocky`, `ginux domain status rocky`, and
+`ginux domain stop rocky`. Exit the Rocky host shell to stop QEMU cleanly.
+This stops the VM without deleting its persistent overlay; `make clean` resets
+that host state. `make demo-gate-9` uses the same operator workflow;
+`make run-systemd` remains as a compatibility alias, and
+`make test-systemd-interactive` is the automated regression.
+
+The live test and interactive demonstration enable shared external networking.
+An upstream DNF update can take many minutes under QEMU TCG because every
+managed syscall is intercepted and audited. The offline systemd test uses only
+the prepared, digest-pinned cache.
 
 Individual component and gate targets are documented in the `Makefile` and the
 corresponding files under [`docs/`](docs/) and [`hdae/`](hdae/).
@@ -150,6 +221,12 @@ Ginux is research software. It has not received independent security
 certification, does not provide complete Linux compatibility, and is not ready
 for production workloads. Unknown contract operations fail closed, but current
 coverage and guarantees are limited to the tested gates.
+
+For agent containment, the protected object is the host and any authority not
+explicitly assigned to the domain. Ginux constrains the Linux processes in
+which an agent and its tools execute; it does not inspect model reasoning,
+secure an external model provider, or make untrusted code safe outside the
+enforced domain boundary.
 
 The full intent, threat model, invariants, and gate plan live in:
 
@@ -241,6 +318,8 @@ The focused Linux integration scenario consumes existing binaries:
 ```sh
 make build
 make build-launch-fixture
+make build-gate1-fixture
+sudo make test-gate1-setup
 sudo make test-launch
 sudo make test-native-supervision
 ```
