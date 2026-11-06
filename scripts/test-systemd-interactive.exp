@@ -30,6 +30,32 @@ expect {
     eof { puts stderr "Rocky host shell exited during domain creation"; exit 77 }
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
+send -- "sudo test -s /var/lib/ginux/images/rocky-10-ubi-init-amd64/rocky-10-ubi-init-amd64-rootfs.tar && printf 'GINUX_CREATE_%s\\n' 'ACQUIRE: PASS'\r"
+expect {
+    -re {GINUX_CREATE_ACQUIRE: PASS} {}
+    timeout { puts stderr "create-time image acquisition was not cached"; exit 129 }
+    eof { puts stderr "Rocky host shell exited during acquisition check"; exit 130 }
+}
+expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
+send -- "sudo unshare -n /usr/local/bin/ginux domain create cache-check --config /etc/ginux/examples/rocky-systemd.toml\r"
+expect {
+    -re {OCI_CACHE: hit} {}
+    timeout { puts stderr "offline create did not report an OCI cache hit"; exit 131 }
+    eof { puts stderr "Rocky host shell exited during offline cache check"; exit 132 }
+}
+expect {
+    -re {cache-check: created} {}
+    timeout { puts stderr "offline cached domain creation timed out"; exit 133 }
+    eof { puts stderr "Rocky host shell exited during cached creation"; exit 134 }
+}
+expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
+send -- "sudo rm -rf /var/lib/ginux/domains/cache-check; printf 'GINUX_CREATE_%s\\n' 'CACHE_REUSE: PASS'\r"
+expect {
+    -re {GINUX_CREATE_CACHE_REUSE: PASS} {}
+    timeout { puts stderr "cached-domain cleanup timed out"; exit 135 }
+    eof { puts stderr "Rocky host shell exited during cached-domain cleanup"; exit 136 }
+}
+expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
 send -- "ginux domain list; ginux domain status rocky\r"
 expect {
     -re {rocky[[:space:]]+stopped} {}
@@ -165,6 +191,13 @@ expect {
     -re {state: running} {}
     timeout { puts stderr "detached domain status was not running"; exit 100 }
     eof { puts stderr "Rocky host shell exited during detached status"; exit 101 }
+}
+expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
+send -- "runtime=\$(sudo awk '{print \$1}' /var/lib/ginux/domains/rocky/runtime.pid); args=\$(ps -o args= -p \"\$runtime\"); case \"\$args\" in *' systemd') exit 1;; esac; sudo grep -Fq 'init = \"/sbin/init\"' /var/lib/ginux/domains/rocky/config.toml && sudo grep -Fq 'args = \[\"--system\", \"--unit=multi-user.target\"\]' /var/lib/ginux/domains/rocky/config.toml && printf 'GINUX_RUNTIME_%s\\n' 'CONFIG: PASS'\r"
+expect {
+    -re {GINUX_RUNTIME_CONFIG: PASS} {}
+    timeout { puts stderr "runtime launch was not configuration-derived"; exit 137 }
+    eof { puts stderr "Rocky host shell exited during runtime argument check"; exit 138 }
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
 send -- "ginux domain stop rocky\r"

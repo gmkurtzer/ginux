@@ -1979,9 +1979,7 @@ fn native_pidfd_host_target(caller_host_pid: usize, fd: usize) -> Option<usize> 
     }
 
     let host_info = &host_info[..count as usize];
-    let Some(pid_field) = host_info.windows(5).position(|field| field == b"Pid:\t") else {
-        return None;
-    };
+    let pid_field = host_info.windows(5).position(|field| field == b"Pid:\t")?;
     let mut target_host_pid = 0usize;
     let mut digits = 0usize;
     for byte in &host_info[pid_field + 5..] {
@@ -2995,7 +2993,7 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descripto
             write_u64(registers.rdx);
             write_all(b" argument4=");
             write_u64(registers.r10);
-        } else if mode == 3 && matches!(syscall, 253 | 254 | 255) {
+        } else if mode == 3 && matches!(syscall, 253..=255) {
             write_all(b" fd=");
             write_u64(registers.rdi);
             write_all(b" path-or-flags=");

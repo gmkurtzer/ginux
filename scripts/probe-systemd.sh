@@ -18,6 +18,7 @@ set +e
 status=$?
 set -e
 
+./scripts/check-systemd-console.sh "$log" "$gate9_dnf"
 rocky_ssh "sudo cat /var/tmp/ginux-gate9-audit.log" >>"$log" 2>/dev/null || true
 
 printf 'systemd baseline exit: %s\n' "$status"
