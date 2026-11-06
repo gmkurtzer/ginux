@@ -236,6 +236,7 @@ make build
 make build-launch-fixture
 make build-gate1-fixture
 sudo make test-gate1-setup
+sudo make test-tracee-kill
 sudo make test-launch
 sudo make test-native-supervision
 ```
