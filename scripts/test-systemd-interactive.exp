@@ -74,6 +74,44 @@ expect {
     timeout { puts stderr "interactive command did not run"; exit 90 }
     eof { puts stderr "domain exited during interactive command"; exit 91 }
 }
+send -- "/bin/true && printf 'GINUX_JOB_%s\\n' 'SIMPLE: PASS'\r"
+expect {
+    -re {child setpgid .*Operation not permitted} { puts stderr "simple command emitted a setpgid warning"; exit 110 }
+    -re {GINUX_JOB_SIMPLE: PASS} {}
+    timeout { puts stderr "simple external command did not complete"; exit 111 }
+    eof { puts stderr "domain exited during simple command"; exit 112 }
+}
+expect -re {\[root@ginux [^]]+\]# }
+send -- "printf x | cat >/dev/null && printf 'GINUX_JOB_%s\\n' 'PIPELINE: PASS'\r"
+expect {
+    -re {child setpgid .*Operation not permitted} { puts stderr "pipeline emitted a setpgid warning"; exit 113 }
+    -re {GINUX_JOB_PIPELINE: PASS} {}
+    timeout { puts stderr "pipeline did not complete"; exit 114 }
+    eof { puts stderr "domain exited during pipeline"; exit 115 }
+}
+expect -re {\[root@ginux [^]]+\]# }
+send -- "/bin/true & job=\$!; wait \$job && printf 'GINUX_JOB_%s\\n' 'BACKGROUND: PASS'\r"
+expect {
+    -re {child setpgid .*Operation not permitted} { puts stderr "background job emitted a setpgid warning"; exit 116 }
+    -re {GINUX_JOB_BACKGROUND: PASS} {}
+    timeout { puts stderr "background job did not complete"; exit 117 }
+    eof { puts stderr "domain exited during background job"; exit 118 }
+}
+expect -re {\[root@ginux [^]]+\]# }
+send -- "ps -ef >/tmp/ginux-ps && grep -q systemd /tmp/ginux-ps && printf 'GINUX_PROC_%s\\n' 'PS: PASS'\r"
+expect {
+    -re {GINUX_PROC_PS: PASS} {}
+    timeout { puts stderr "ps did not read the synthetic procfs"; exit 119 }
+    eof { puts stderr "domain exited during ps check"; exit 120 }
+}
+expect -re {\[root@ginux [^]]+\]# }
+send -- "cat /proc/self/status >/tmp/ginux-self-status && cat /proc/self/cmdline >/tmp/ginux-self-cmdline && grep -q '^Pid:' /tmp/ginux-self-status && grep -q '^NSpgid:' /tmp/ginux-self-status && test -s /tmp/ginux-self-cmdline && printf 'GINUX_PROC_%s\\n' 'SELF: PASS'\r"
+expect {
+    -re {GINUX_PROC_SELF: PASS} {}
+    timeout { puts stderr "proc self status or cmdline was unusable"; exit 121 }
+    eof { puts stderr "domain exited during proc self check"; exit 122 }
+}
+expect -re {\[root@ginux [^]]+\]# }
 send -- "kill -RTMIN+4 1\r"
 expect {
     -re {rocky: stopped \(status 0\)} {}

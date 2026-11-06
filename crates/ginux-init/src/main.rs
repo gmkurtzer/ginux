@@ -1661,11 +1661,35 @@ struct NativeSupervisorTask {
     fork_breakpoint_word: usize,
     initial_stop_pending: bool,
     tracing: bool,
+    limits: [[u64; 2]; 16],
+}
+
+fn native_default_limits() -> [[u64; 2]; 16] {
+    let mut limits = [[u64::MAX; 2]; 16];
+    limits[3] = [8 * 1024 * 1024, u64::MAX];
+    limits[6] = [4096, 4096];
+    limits[7] = [4096, 4096];
+    limits[8] = [64 * 1024, 64 * 1024];
+    limits
 }
 
 fn native_proc_materialize(root_descriptor: usize, task: TaskView, name: &[u8]) -> bool {
     let mut path = [0u8; 64];
     let Some(_) = native_proc_path(task.id.pid, b"", &mut path) else {
+        return false;
+    };
+    let mkdir_result = unsafe {
+        syscall3(
+            SYS_MKDIRAT_HOST,
+            root_descriptor,
+            path.as_ptr() as usize,
+            0o555,
+        )
+    };
+    if mkdir_result < 0 && mkdir_result != -17 {
+        return false;
+    }
+    let Some(_) = native_proc_path(task.id.pid, b"/fd", &mut path) else {
         return false;
     };
     let mkdir_result = unsafe {
@@ -1706,12 +1730,40 @@ fn native_proc_materialize(root_descriptor: usize, task: TaskView, name: &[u8]) 
     let Some(_) = native_proc_path(task.id.pid, b"/cgroup", &mut path) else {
         return false;
     };
-    native_proc_write(root_descriptor, &path, b"0::/\n")
+    if !native_proc_write(root_descriptor, &path, b"0::/\n") {
+        return false;
+    }
+
+    let mut status = [0u8; 512];
+    let Some(status_len) = native_proc_status(task, name, &mut status) else {
+        return false;
+    };
+    let Some(_) = native_proc_path(task.id.pid, b"/status", &mut path) else {
+        return false;
+    };
+    if !native_proc_write(root_descriptor, &path, &status[..status_len]) {
+        return false;
+    }
+
+    let Some(_) = native_proc_path(task.id.pid, b"/cmdline", &mut path) else {
+        return false;
+    };
+    let mut cmdline = [0u8; 128];
+    let mut cmdline_len = 0usize;
+    native_buffer_append(&mut cmdline, &mut cmdline_len, name).is_some()
+        && native_buffer_append(&mut cmdline, &mut cmdline_len, b"\0").is_some()
+        && native_proc_write(root_descriptor, &path, &cmdline[..cmdline_len])
 }
 
 fn native_proc_remove(root_descriptor: usize, pid: u32) {
     let mut path = [0u8; 64];
-    for suffix in [b"/stat".as_slice(), b"/comm", b"/cgroup"] {
+    for suffix in [
+        b"/stat".as_slice(),
+        b"/comm",
+        b"/cgroup",
+        b"/status",
+        b"/cmdline",
+    ] {
         if native_proc_path(pid, suffix, &mut path).is_some() {
             let _ = unsafe {
                 syscall3(
@@ -1722,6 +1774,16 @@ fn native_proc_remove(root_descriptor: usize, pid: u32) {
                 )
             };
         }
+    }
+    if native_proc_path(pid, b"/fd", &mut path).is_some() {
+        let _ = unsafe {
+            syscall3(
+                SYS_UNLINKAT_HOST,
+                root_descriptor,
+                path.as_ptr() as usize,
+                AT_REMOVEDIR,
+            )
+        };
     }
     if native_proc_path(pid, b"", &mut path).is_some() {
         let _ = unsafe {
@@ -1763,6 +1825,38 @@ fn native_proc_stat(task: TaskView, name: &[u8], output: &mut [u8]) -> Option<us
         &mut length,
         b" 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 17 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n",
     )?;
+    Some(length)
+}
+
+fn native_proc_status(task: TaskView, name: &[u8], output: &mut [u8]) -> Option<usize> {
+    let mut length = 0usize;
+    native_buffer_append(output, &mut length, b"Name:\t")?;
+    native_buffer_append(output, &mut length, name)?;
+    native_buffer_append(output, &mut length, b"\nState:\tS (sleeping)\nTgid:\t")?;
+    native_buffer_append_u32(output, &mut length, task.tgid)?;
+    native_buffer_append(output, &mut length, b"\nPid:\t")?;
+    native_buffer_append_u32(output, &mut length, task.id.pid)?;
+    native_buffer_append(output, &mut length, b"\nPPid:\t")?;
+    native_buffer_append_u32(output, &mut length, task.parent)?;
+    native_buffer_append(output, &mut length, b"\nTracerPid:\t0\nUid:\t")?;
+    for _ in 0..4 {
+        native_buffer_append_u32(output, &mut length, task.credentials.uid)?;
+        native_buffer_append(output, &mut length, b"\t")?;
+    }
+    native_buffer_append(output, &mut length, b"\nGid:\t")?;
+    for _ in 0..4 {
+        native_buffer_append_u32(output, &mut length, task.credentials.gid)?;
+        native_buffer_append(output, &mut length, b"\t")?;
+    }
+    native_buffer_append(output, &mut length, b"\nGroups:\t\nNStgid:\t")?;
+    native_buffer_append_u32(output, &mut length, task.tgid)?;
+    native_buffer_append(output, &mut length, b"\nNSpid:\t")?;
+    native_buffer_append_u32(output, &mut length, task.id.pid)?;
+    native_buffer_append(output, &mut length, b"\nNSpgid:\t")?;
+    native_buffer_append_u32(output, &mut length, task.process_group)?;
+    native_buffer_append(output, &mut length, b"\nNSsid:\t")?;
+    native_buffer_append_u32(output, &mut length, task.session)?;
+    native_buffer_append(output, &mut length, b"\nThreads:\t1\n\n")?;
     Some(length)
 }
 
@@ -1891,7 +1985,16 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descripto
         fork_breakpoint_word: 0,
         initial_stop_pending: false,
         tracing: true,
+        limits: native_default_limits(),
     });
+    if mode == 3 {
+        let root_view = processes
+            .view(root_virtual)
+            .unwrap_or_else(|_| native_fail(domain, pid, b"native root proc view failed"));
+        if !native_proc_materialize(root_descriptor, root_view, b"systemd") {
+            native_fail(domain, pid, b"native root proc materialization failed");
+        }
+    }
     loop {
         status = 0;
         let waited = unsafe {
@@ -2014,6 +2117,7 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descripto
                 fork_breakpoint_word: 0,
                 initial_stop_pending: pending_child_slot.is_none(),
                 tracing: true,
+                limits: task.limits,
             });
             peak_managed_tasks = core::cmp::max(peak_managed_tasks, processes.active());
             if let Some(pending_slot) = pending_child_slot {
@@ -2364,6 +2468,17 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descripto
             write_all(b" signal=");
             write_u64(registers.rsi);
         }
+        let mut proc_self_path = [0u8; 128];
+        let proc_self_path_len = if mode == 3 && syscall == 257 {
+            translate_proc_self_path(
+                host_pid,
+                registers.rsi as usize,
+                task.virtual_id.pid,
+                &mut proc_self_path,
+            )
+        } else {
+            None
+        };
         write_all(b" action=");
         match decision.action {
             Action::Emulate if native_identity_result(syscall, mode).is_some() => {
@@ -2432,6 +2547,59 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descripto
                     || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
                 {
                     native_fail(domain, pid, b"native priority update emulation failed");
+                }
+            }
+            Action::Mediate if mode == 3 && syscall == 302 => {
+                let self_process =
+                    registers.rdi == 0 || registers.rdi == u64::from(task.virtual_id.pid);
+                let resource = usize::try_from(registers.rsi).unwrap_or(usize::MAX);
+                let old_limit = if resource < task.limits.len() {
+                    task.limits[resource]
+                } else {
+                    [0; 2]
+                };
+                let result = if !self_process {
+                    -EPERM
+                } else if resource >= task.limits.len() {
+                    -22
+                } else if registers.rdx != 0 {
+                    if let Some(new_limit) = read_tracee_u64_pair(host_pid, registers.rdx as usize)
+                    {
+                        if new_limit[0] > new_limit[1] {
+                            -22
+                        } else {
+                            task.limits[resource] = new_limit;
+                            0
+                        }
+                    } else {
+                        -14
+                    }
+                } else {
+                    0
+                };
+                let result = if result == 0 && registers.r10 != 0 {
+                    let mut encoded = [0u8; 16];
+                    encoded[..8].copy_from_slice(&old_limit[0].to_ne_bytes());
+                    encoded[8..].copy_from_slice(&old_limit[1].to_ne_bytes());
+                    if write_tracee_bytes(host_pid, registers.r10 as usize, &encoded) {
+                        0
+                    } else {
+                        -14
+                    }
+                } else {
+                    result
+                };
+                write_all(b"emulate surface=virtual-rlimit result=");
+                write_i64(result);
+                write_all(b"\n");
+                registers.orig_rax = u64::MAX;
+                task.awaiting_exit = true;
+                task.override_exit = true;
+                task.override_result = result;
+                if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
+                {
+                    native_fail(domain, pid, b"native rlimit emulation failed");
                 }
             }
             Action::Emulate if mode == 3 && syscall == ginux_core::SYS_REBOOT => {
@@ -2569,22 +2737,25 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descripto
                 }
             }
             Action::Emulate if mode == 3 && syscall == 109 => {
-                let result = if registers.rdi == 0 && registers.rsi == 0 {
-                    processes
-                        .set_process_group(task.virtual_id, task.virtual_id.pid)
-                        .map(|_| 0)
-                        .unwrap_or(-EPERM)
-                } else {
-                    -EPERM
-                };
-                if result == 0 {
-                    let task_view = processes.view(task.virtual_id).unwrap_or_else(|_| {
+                let changed_task = u32::try_from(registers.rdi)
+                    .ok()
+                    .zip(u32::try_from(registers.rsi).ok())
+                    .and_then(|(target, group)| {
+                        processes
+                            .set_process_group_for(task.virtual_id, target, group)
+                            .ok()
+                    });
+                let result = if let Some(changed_task) = changed_task {
+                    let task_view = processes.view(changed_task).unwrap_or_else(|_| {
                         native_fail(domain, pid, b"native process group view failed")
                     });
                     if !native_proc_materialize(root_descriptor, task_view, b"login") {
                         native_fail(domain, pid, b"native process group proc update failed");
                     }
-                }
+                    0
+                } else {
+                    -EPERM
+                };
                 write_all(b"emulate surface=virtual-process-group result=");
                 write_i64(result);
                 write_all(b"\n");
@@ -3060,23 +3231,34 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descripto
             Action::Mediate
                 if mode == 3
                     && syscall == 137
-                    && (tracee_string_equals(
-                        host_pid,
-                        registers.rdi as usize,
-                        b"/sys/fs/cgroup",
-                    ) || tracee_string_equals(
-                        host_pid,
-                        registers.rdi as usize,
-                        b"/sys/fs/cgroup/",
-                    )) =>
+                    && (tracee_string_equals(host_pid, registers.rdi as usize, b"/proc")
+                        || tracee_string_equals(host_pid, registers.rdi as usize, b"/proc/")
+                        || tracee_string_equals(
+                            host_pid,
+                            registers.rdi as usize,
+                            b"/sys/fs/cgroup",
+                        )
+                        || tracee_string_equals(
+                            host_pid,
+                            registers.rdi as usize,
+                            b"/sys/fs/cgroup/",
+                        )) =>
             {
                 let mut statfs = [0u8; 120];
-                statfs[..8].copy_from_slice(&0x6367_7270u64.to_ne_bytes());
+                let procfs = tracee_string_equals(host_pid, registers.rdi as usize, b"/proc")
+                    || tracee_string_equals(host_pid, registers.rdi as usize, b"/proc/");
+                statfs[..8].copy_from_slice(
+                    &(if procfs { 0x9fa0u64 } else { 0x6367_7270u64 }).to_ne_bytes(),
+                );
                 statfs[8..16].copy_from_slice(&4096u64.to_ne_bytes());
                 statfs[64..72].copy_from_slice(&255u64.to_ne_bytes());
                 statfs[72..80].copy_from_slice(&4096u64.to_ne_bytes());
                 let allowed = write_tracee_bytes(host_pid, registers.rsi as usize, &statfs);
-                write_all(b"emulate surface=virtual-cgroup result=");
+                write_all(if procfs {
+                    b"emulate surface=virtual-procfs result="
+                } else {
+                    b"emulate surface=virtual-cgroup result="
+                });
                 write_i64(if allowed { 0 } else { -EPERM });
                 write_all(b"\n");
                 registers.orig_rax = u64::MAX;
@@ -3159,6 +3341,21 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descripto
                     || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
                 {
                     native_fail(domain, pid, b"native virtual device open failed");
+                }
+            }
+            Action::Mediate if mode == 3 && syscall == 257 && proc_self_path_len.is_some() => {
+                let path_address = (registers.rsp as usize).saturating_sub(512);
+                let path_len = proc_self_path_len.unwrap_or(0);
+                if !write_tracee_bytes(host_pid, path_address, &proc_self_path[..=path_len]) {
+                    native_fail(domain, pid, b"native proc self path translation failed");
+                }
+                write_all(b"translate surface=virtual-proc-self result=pending\n");
+                registers.rsi = path_address as u64;
+                task.awaiting_exit = true;
+                if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
+                {
+                    native_fail(domain, pid, b"native proc self open failed");
                 }
             }
             Action::Mediate if mode == 3 && syscall == 293 => {
@@ -4132,6 +4329,52 @@ fn tracee_single_component_below(pid: usize, address: usize, prefix: &[u8]) -> b
     false
 }
 
+fn translate_proc_self_path(
+    host_pid: usize,
+    address: usize,
+    virtual_pid: u32,
+    output: &mut [u8],
+) -> Option<usize> {
+    const PREFIX: &[u8] = b"/proc/self/";
+    let mut input = [0u8; 96];
+    let mut length = 0usize;
+    while length < input.len() {
+        let mut word = 0u64;
+        if ptrace(
+            PTRACE_PEEKDATA,
+            host_pid,
+            address.saturating_add(length),
+            &mut word as *mut _ as usize,
+        ) < 0
+        {
+            return None;
+        }
+        for byte in word.to_ne_bytes() {
+            if byte == 0 {
+                if length <= PREFIX.len() || input[..PREFIX.len()] != *PREFIX {
+                    return None;
+                }
+                let mut output_len = 0usize;
+                native_buffer_append(output, &mut output_len, b"/proc/")?;
+                native_buffer_append_u32(output, &mut output_len, virtual_pid)?;
+                native_buffer_append(output, &mut output_len, b"/")?;
+                native_buffer_append(output, &mut output_len, &input[PREFIX.len()..length])?;
+                if output_len >= output.len() {
+                    return None;
+                }
+                output[output_len] = 0;
+                return Some(output_len);
+            }
+            input[length] = byte;
+            length += 1;
+            if length >= input.len() {
+                return None;
+            }
+        }
+    }
+    None
+}
+
 fn write_uts_field(output: &mut [u8; 65 * 6], field: usize, value: &[u8]) {
     let start = field * 65;
     let count = core::cmp::min(value.len(), 64);
@@ -4173,6 +4416,25 @@ fn write_tracee_bytes(pid: usize, address: usize, input: &[u8]) -> bool {
         offset += count;
     }
     true
+}
+
+fn read_tracee_u64_pair(pid: usize, address: usize) -> Option<[u64; 2]> {
+    if address == 0 {
+        return None;
+    }
+    let mut values = [0u64; 2];
+    for (index, value) in values.iter_mut().enumerate() {
+        if ptrace(
+            PTRACE_PEEKDATA,
+            pid,
+            address.saturating_add(index * 8),
+            value as *mut _ as usize,
+        ) < 0
+        {
+            return None;
+        }
+    }
+    Some(values)
 }
 
 fn tracee_decimal_fd_path(pid: usize, address: usize) -> bool {

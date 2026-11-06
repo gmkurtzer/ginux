@@ -86,7 +86,7 @@ pub const fn decide_systemd(syscall: u64, shared_network: bool) -> Decision {
         | SYS_SETGROUPS | SYS_SETRESUID | SYS_SETRESGID | SYS_REBOOT => Action::Emulate,
         7 | 16 | 18 | 25 | 32 | 33 | 56 | 57 | 58 | 59 | 61 | 62 | 73 | 74 | 75 | 76 | 77 | 79
         | 80 | 81 | 82 | 83 | 84 | 87 | 88 | 90 | 91 | 95 | 125 | 126 | 137 | 157 | 190 | 193
-        | 196 | 199 | 213 | 228 | 232 | 233 | 247 | 253 | 254 | 255 | 258 | SYS_UNLINKAT
+        | 196 | 199 | 213 | 228 | 230 | 232 | 233 | 247 | 253 | 254 | 255 | 258 | SYS_UNLINKAT
         | SYS_RENAMEAT | SYS_LINKAT | SYS_SYMLINKAT | SYS_READLINKAT | 270 | 271 | 280 | 281
         | 283 | 286 | 287 | 289 | 290 | 291 | 292 | 293 | 294 | 306 | SYS_MEMFD_CREATE | 435
         | SYS_CLOSE_RANGE | 441 => Action::Mediate,
@@ -162,6 +162,7 @@ pub const fn systemd_surface(syscall: u64, shared_network: bool) -> BalancedSurf
             | 112
             | 213
             | 228
+            | 230
             | 232
             | 233
             | 247

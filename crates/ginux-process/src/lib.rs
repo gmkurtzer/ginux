@@ -401,6 +401,43 @@ impl<const TASKS: usize> ProcessTable<TASKS> {
         Ok(())
     }
 
+    pub fn set_process_group_for(
+        &mut self,
+        caller: TaskId,
+        target_pid: u32,
+        group: u32,
+    ) -> Result<TaskId, ProcessError> {
+        let caller_index = self.index(caller)?;
+        let caller_task = self.tasks[caller_index];
+        let target_pid = if target_pid == 0 {
+            caller_task.id.pid
+        } else {
+            target_pid
+        };
+        let target_index = self
+            .tasks
+            .iter()
+            .position(|task| task.occupied && task.id.pid == target_pid)
+            .ok_or(ProcessError::InvalidTask)?;
+        let target = self.tasks[target_index];
+        if target.id != caller && target.parent != caller_task.id.pid {
+            return Err(ProcessError::PermissionDenied);
+        }
+        if target.session != caller_task.session || target.session == target.id.pid {
+            return Err(ProcessError::PermissionDenied);
+        }
+        let group = if group == 0 { target.id.pid } else { group };
+        let group_exists = group == target.id.pid
+            || self.tasks.iter().any(|task| {
+                task.occupied && task.session == target.session && task.process_group == group
+            });
+        if !group_exists {
+            return Err(ProcessError::PermissionDenied);
+        }
+        self.tasks[target_index].process_group = group;
+        Ok(target.id)
+    }
+
     pub fn create_session(&mut self, id: TaskId) -> Result<u32, ProcessError> {
         let index = self.index(id)?;
         let pid = self.tasks[index].id.pid;
@@ -977,6 +1014,24 @@ mod tests {
         table.set_process_group(child, 77).unwrap();
         assert_eq!(table.create_session(child), Ok(child.pid));
         assert_eq!(table.view(child).unwrap().session, child.pid);
+    }
+
+    #[test]
+    fn parent_establishes_child_job_control_group() {
+        let mut table: ProcessTable<8> = ProcessTable::new();
+        let init = table.create_init(Credentials::root()).unwrap();
+        let shell = table.fork(init).unwrap();
+        let job = table.fork(shell).unwrap();
+        assert_eq!(
+            table.set_process_group_for(shell, job.pid, job.pid),
+            Ok(job)
+        );
+        assert_eq!(table.view(job).unwrap().process_group, job.pid);
+        assert_eq!(table.set_process_group_for(job, 0, 0), Ok(job));
+        assert_eq!(
+            table.set_process_group_for(init, job.pid, job.pid),
+            Err(ProcessError::PermissionDenied)
+        );
     }
 
     #[test]
