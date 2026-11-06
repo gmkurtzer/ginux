@@ -5485,7 +5485,54 @@ fn supervise_native(
                 }
             }
         };
-        let contract_action = contract.syscall_action(syscall);
+        let semantic_operation = if mode == 3 && syscall == 257 {
+            if tracee_string_starts_with(host_pid, registers.rsi as usize, b"/proc") {
+                Some("proc.process.read")
+            } else if tracee_string_starts_with(host_pid, registers.rsi as usize, b"/sys/fs/cgroup")
+            {
+                Some("cgroup.virtual.manage")
+            } else if tracee_string_starts_with(host_pid, registers.rsi as usize, b"/sys") {
+                Some("sys.device.read")
+            } else if registers.rdx & 3 != 0
+                || registers.rdx & (O_CREATE_HOST | O_TRUNC_HOST) as u64 != 0
+            {
+                Some("filesystem.path.write")
+            } else {
+                Some("filesystem.path.read")
+            }
+        } else if syscall == 16 && registers.rsi == 0x5413 {
+            Some("ioctl.tty.get_winsize")
+        } else if syscall == 0 && registers.rdi as i64 == task.console_fd {
+            Some("device.console.read")
+        } else if syscall == 1 && registers.rdi as i64 == task.console_fd {
+            Some("device.console.write")
+        } else if mode == 3 && matches!(syscall, 42 | 49) {
+            match (native_socket_protocol(&task, registers.rdi), syscall) {
+                (1, 42) => Some("network.inet.tcp.connect"),
+                (1, 49) => Some("network.inet.tcp.bind"),
+                (2, 42) => Some("network.inet.udp.connect"),
+                (2, 49) => Some("network.inet.udp.bind"),
+                _ => None,
+            }
+        } else if matches!(syscall, 9..=12) {
+            Some("memory.virtual.manage")
+        } else if matches!(syscall, 13 | 14 | 62 | 127..=130 | 289) {
+            Some("signal.virtual.deliver")
+        } else if matches!(syscall, 96 | 228 | 229) {
+            Some("time.clock.read")
+        } else if matches!(syscall, 105 | 106 | 116 | 117 | 119 | 122 | 123) {
+            Some("credential.virtual.set")
+        } else {
+            None
+        };
+        let semantic_rule = semantic_operation.and_then(|id| contract.operation_rule(id));
+        let syscall_rule = contract.syscall_rule(syscall);
+        let contract_rule = semantic_rule
+            .filter(|rule| matches!(rule.action, ContractAction::Deny(_)))
+            .or(syscall_rule);
+        let contract_action = contract_rule
+            .map(|rule| rule.action)
+            .unwrap_or(ContractAction::Deny(38));
         let decision = match contract_action {
             ContractAction::Deny(errno) => ginux_core::Decision {
                 syscall,
@@ -5502,7 +5549,7 @@ fn supervise_native(
         write_all(b" contract=");
         write_all(contract.digest());
         write_all(b" operation=");
-        if let Some(rule) = contract.syscall_rule(syscall) {
+        if let Some(rule) = contract_rule {
             write_all(rule.operation.id.as_bytes());
             write_all(b" policy-source=");
             write_all(rule.source.as_bytes());

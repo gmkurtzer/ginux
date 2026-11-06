@@ -1750,6 +1750,10 @@ impl EffectiveContract {
             .iter()
             .find(|rule| rule.operation.abi_number == Some(number))
     }
+
+    pub fn operation_rule(&self, id: &str) -> Option<&EffectiveRule> {
+        self.rules().iter().find(|rule| rule.operation.id == id)
+    }
 }
 
 pub fn validate_catalog() -> Result<(), ContractError> {
@@ -2021,6 +2025,32 @@ mod tests {
         assert_eq!(first.digest(), second.digest());
         assert_eq!(first.syscall_action(42), Action::Deny(1));
         assert_eq!(first.syscall_action(228), Action::Mediate);
+    }
+
+    #[test]
+    fn semantic_deny_does_not_rewrite_unrelated_syscall_authority() {
+        let contract = resolve(
+            b"gate9-systemd-v1",
+            &[],
+            &[],
+            &[b"network.inet.tcp.connect"],
+        )
+        .unwrap();
+        assert_eq!(contract.syscall_action(42), Action::Mediate);
+        assert_eq!(
+            contract
+                .operation_rule("network.inet.tcp.connect")
+                .unwrap()
+                .action,
+            Action::Deny(1)
+        );
+        assert_eq!(
+            contract
+                .operation_rule("network.inet.udp.connect")
+                .unwrap()
+                .action,
+            Action::Mediate
+        );
     }
 
     #[test]
