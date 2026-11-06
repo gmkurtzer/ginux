@@ -16,7 +16,7 @@ rocky_scp "$rootfs" \
     "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/ginux-oci-rootfs.tar"
 
 rocky_ssh "set -eu; sudo rm -rf /var/lib/ginux/domains/gate9-failure; sudo mkdir -p '$domain_root'; sudo tar -xf /var/tmp/ginux-oci-rootfs.tar -C '$domain_root'; sudo chown -R 1000:1000 '$domain_root'; sudo find '$domain_root' -type d -exec chmod u+w {} +"
-status=$(rocky_ssh 'set +e; /var/tmp/ginux native /var/tmp/gate9-failure.toml /var/lib/ginux/domains/gate9-failure/root systemd >/var/tmp/gate9-failure.log 2>&1; result=$?; printf "%s\n" "$result"')
+status=$(rocky_ssh 'set +e; /var/tmp/ginux native /var/tmp/gate9-failure.toml /var/lib/ginux/domains/gate9-failure/root >/var/tmp/gate9-failure.log 2>&1; result=$?; printf "%s\n" "$result"')
 rocky_ssh 'cat /var/tmp/gate9-failure.log' >"$log"
 
 test "$status" -ne 0

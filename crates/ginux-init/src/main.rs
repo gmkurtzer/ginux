@@ -262,9 +262,6 @@ extern "C" fn rust_main(initial_stack: *const usize) -> ! {
                 1
             } else if argc >= 5 && c_string_equals(unsafe { *argv.add(4) as *const u8 }, b"probe") {
                 2
-            } else if argc >= 5 && c_string_equals(unsafe { *argv.add(4) as *const u8 }, b"systemd")
-            {
-                3
             } else {
                 0
             };
@@ -1481,6 +1478,11 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
 fn native_main(config_path: *const u8, root_path: *const u8, mode: usize) -> ! {
     let config = load_config(config_path);
     print_effective_config(&config);
+    let mode = if mode == 0 && config.contract_profile.as_bytes() == b"gate9-systemd" {
+        3
+    } else {
+        mode
+    };
     let mut domain = Domain::create(config);
     if domain.start().is_err() {
         domain_fail(&mut domain, b"invalid native start transition");
@@ -1502,12 +1504,12 @@ fn native_main(config_path: *const u8, root_path: *const u8, mode: usize) -> ! {
         domain_fail(&mut domain, b"native tracee fork failed");
     }
     if child == 0 {
-        native_tracee(root_path, mode);
+        native_tracee(root_path, mode, &config);
     }
     supervise_native(child as usize, &mut domain, mode, root_descriptor as usize)
 }
 
-fn native_tracee(root_path: *const u8, mode: usize) -> ! {
+fn native_tracee(root_path: *const u8, mode: usize, config: &DomainConfig) -> ! {
     static ROOT: &[u8] = b"/\0";
     static BASH: &[u8] = b"/usr/bin/bash\0";
     static ARG1: &[u8] = b"--noprofile\0";
@@ -1516,15 +1518,9 @@ fn native_tracee(root_path: *const u8, mode: usize) -> ! {
     static COMMAND: &[u8] = b"printf 'GINUX_NATIVE_SHELL: PASS\\n'\0";
     static HOLD_COMMAND: &[u8] = b"printf 'GINUX_NATIVE_HOLD: READY\\n'; while :; do :; done\0";
     static PROBE_COMMAND: &[u8] = b"if : > /tmp/ginux-mutation; then exit 90; else printf 'GINUX_BALANCED_MUTATION: BLOCKED\\n'; fi; if exec 9<>/dev/tcp/127.0.0.1/9; then exit 91; else printf 'GINUX_BALANCED_NETWORK: BLOCKED\\n'; fi\0";
-    static SYSTEMD: &[u8] = b"/sbin/init\0";
-    static SYSTEMD_ARG1: &[u8] = b"--system\0";
-    static SYSTEMD_ARG2: &[u8] = b"--unit=multi-user.target\0";
     static ENV_PATH: &[u8] = b"PATH=/usr/bin:/bin\0";
     static ENV_HOME: &[u8] = b"HOME=/\0";
     static ENV_LOCALE: &[u8] = b"LC_ALL=C\0";
-    static ENV_CONTAINER: &[u8] = b"container=ginux\0";
-    static ENV_SYSTEMD_LOG_LEVEL: &[u8] = b"SYSTEMD_LOG_LEVEL=debug\0";
-    static ENV_SYSTEMD_LOG_TARGET: &[u8] = b"SYSTEMD_LOG_TARGET=console\0";
     static HOST_DEV_NULL: &[u8] = b"/dev/null\0";
 
     let null_fd = unsafe {
@@ -1589,31 +1585,34 @@ fn native_tracee(root_path: *const u8, mode: usize) -> ! {
         },
         core::ptr::null(),
     ];
-    let systemd_argv = [
-        SYSTEMD.as_ptr(),
-        SYSTEMD_ARG1.as_ptr(),
-        SYSTEMD_ARG2.as_ptr(),
-        core::ptr::null(),
-    ];
-    let environment = [
-        ENV_PATH.as_ptr(),
-        ENV_HOME.as_ptr(),
-        ENV_LOCALE.as_ptr(),
-        ENV_CONTAINER.as_ptr(),
-        ENV_SYSTEMD_LOG_LEVEL.as_ptr(),
-        ENV_SYSTEMD_LOG_TARGET.as_ptr(),
-        core::ptr::null(),
-    ];
+    let mut configured_init = [0u8; 129];
+    copy_c_string(config.init.as_bytes(), &mut configured_init);
+    let mut configured_args = [[0u8; 129]; 7];
+    let mut configured_argv = [core::ptr::null::<u8>(); 9];
+    configured_argv[0] = configured_init.as_ptr();
+    for (index, argument) in config.args.as_slice().iter().enumerate() {
+        copy_c_string(argument.as_bytes(), &mut configured_args[index]);
+        configured_argv[index + 1] = configured_args[index].as_ptr();
+    }
+    let mut configured_environment = [[0u8; 257]; 8];
+    let mut environment = [core::ptr::null::<u8>(); 12];
+    environment[0] = ENV_PATH.as_ptr();
+    environment[1] = ENV_HOME.as_ptr();
+    environment[2] = ENV_LOCALE.as_ptr();
+    for (index, variable) in config.environment.as_slice().iter().enumerate() {
+        copy_c_string(variable.as_bytes(), &mut configured_environment[index]);
+        environment[index + 3] = configured_environment[index].as_ptr();
+    }
     unsafe {
         syscall3(
             SYS_EXECVE,
             if mode == 3 {
-                SYSTEMD.as_ptr() as usize
+                configured_init.as_ptr() as usize
             } else {
                 BASH.as_ptr() as usize
             },
             if mode == 3 {
-                systemd_argv.as_ptr() as usize
+                configured_argv.as_ptr() as usize
             } else {
                 bash_argv.as_ptr() as usize
             },
@@ -1624,6 +1623,14 @@ fn native_tracee(root_path: *const u8, mode: usize) -> ! {
     loop {
         core::hint::spin_loop();
     }
+}
+
+fn copy_c_string(source: &[u8], destination: &mut [u8]) {
+    if source.len() >= destination.len() {
+        native_tracee_setup_fail(118);
+    }
+    destination[..source.len()].copy_from_slice(source);
+    destination[source.len()] = 0;
 }
 
 fn native_tracee_setup_fail(code: usize) -> ! {

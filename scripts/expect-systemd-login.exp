@@ -15,7 +15,7 @@ set timeout 50
 set started_ms [clock milliseconds]
 
 log_file -noappend $log
-spawn ssh -tt -i $key -p $port -o BatchMode=yes -o ConnectTimeout=5 -o IdentitiesOnly=yes -o LogLevel=ERROR -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$user@127.0.0.1" "sudo /var/tmp/ginux native /var/tmp/gate9.toml $domain_root systemd"
+spawn ssh -tt -i $key -p $port -o BatchMode=yes -o ConnectTimeout=5 -o IdentitiesOnly=yes -o LogLevel=ERROR -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$user@127.0.0.1" "sudo /var/tmp/ginux native /var/tmp/gate9.toml $domain_root"
 
 expect {
     -re {login:} {}

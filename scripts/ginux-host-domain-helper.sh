@@ -189,7 +189,7 @@ start_domain() {
     rm -f "$directory/supervisor.pid"
     : >"$directory/audit.log"
 
-    nohup "$runtime" native "$directory/config.toml" "$directory/root" systemd \
+    nohup "$runtime" native "$directory/config.toml" "$directory/root" \
         >"$directory/console.log" 2>"$directory/audit.log" </dev/null &
     pid=$!
     record_supervisor "$directory" "$pid"
@@ -217,7 +217,7 @@ attach_domain() {
     : >"$directory/audit.log"
     record_supervisor "$directory" "$$"
     printf '%s: starting attached (supervisor pid %s)\n' "$name" "$$"
-    exec "$runtime" native "$directory/config.toml" "$directory/root" systemd \
+    exec "$runtime" native "$directory/config.toml" "$directory/root" \
         2>"$directory/audit.log"
 }
 
