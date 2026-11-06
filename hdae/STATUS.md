@@ -36,6 +36,16 @@
   volumes, access, identity, resources, devices, and pre-boot hooks.
 - Gate 9.75 was accepted and closed by the human on 2026-11-06. Pull request
   https://github.com/gmkurtzer/ginux/pull/229 was merged as `8a475e8b`.
+- Gate 10 is technically passed on `hdae/configurable-contract` and remains a
+  human checkpoint. The versioned catalog contains 182 explicit operations;
+  normalized contracts produce immutable digests and provenance; semantic and
+  syscall decisions are enforced before host effects; and audit detail is
+  bounded to 8,192 records with logarithmic dropped-event accounting.
+- Fresh Gate 10 evidence passed `make test-contract`, `make check`,
+  `make test-contract-runtime`, `make test-systemd`, the Gate 9.75 network and
+  hook regressions, aggregate `make test`, and `make demo-gate-10`. The demo
+  showed strict/systemd plan differences, a real socket denial with no host
+  mutation, the audit bound, dropped-event accounting, and controlled poweroff.
 - Gate 9.75 now has a normalized typed schema and CLI override path plus passing
   Rocky QEMU evidence for interface/source selection, ingress/egress policy,
   translated port ownership, ordinary bind conflicts, network audit records,
@@ -91,12 +101,13 @@ scope, threat model, and invariants.
 - Reload after context shift: required
 - Active gate: Gate 10, configurable contract and audit. Its approved delivery
   branch is `hdae/configurable-contract`.
-- Last evidence: `make demo-gate-9.75`, `make check`, `make test-systemd`, and
-  aggregate `make test` passed. The aggregate run included process supervision
-  and virtual kernel-view integration under Rocky QEMU.
+- Last evidence: Gate 10 `make demo-gate-10`, `make check`, `make test-systemd`,
+  Gate 9.75 network and hook regressions, and aggregate `make test` passed under
+  Rocky QEMU after semantic-family enforcement was enabled.
 - Open decision: none. Gate 10 scope and checkpoint policy are approved.
-- Exact next action: create `hdae/configurable-contract` from merged Gate 9.75
-  `main`, establish the contract/catalog baseline, and run its initial tests.
+- Exact next action: commit the final Gate 10 evidence, push
+  `hdae/configurable-contract`, open its pull request against `main`, record the
+  stable URL, and stop for human review and acceptance.
 
 ## Evidence
 
@@ -393,20 +404,22 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Commit the tested Gate 10 normalized-contract/runtime-enforcement milestone,
-then add the strict profile, effective-contract inspection, runtime denial and
-audit-flood fixtures, and Gate 10 demonstration.
+Commit the final Gate 10 evidence, push `hdae/configurable-contract`, open its
+pull request against `main`, record the stable URL, and stop for human review
+and acceptance.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 10, configurable contract and audit, is authorized to begin
-  on `hdae/configurable-contract`.
-- Last evidence: Gate 10 `make test-contract` passed 7 contract and 18 domain
-  tests with current generated coverage; the x86-64 release runtime built with
-  normalized contract enforcement and bounded audit integration.
+- Active gate: Gate 10, configurable contract and audit, is technically passed
+  on `hdae/configurable-contract` and awaits pull-request delivery and human
+  acceptance.
+- Last evidence: Gate 10 passed 9 contract and 18 domain tests, strict lint,
+  real runtime denial with no host mutation, the complete systemd matrix,
+  Gate 9.75 networking and hook regressions, aggregate `make test`, and the
+  human demonstration under Rocky QEMU.
 - Approved network direction: Gate 9 defaults to full host-shared inbound and
   outbound networking with normal host routing and bind conflicts, under Ginux
   mediation and audit. Gate 9.75 adds comprehensive domain configuration,

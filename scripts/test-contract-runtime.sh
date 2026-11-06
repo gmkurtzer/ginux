@@ -19,8 +19,10 @@ rocky_scp "$rootfs" \
 rocky_ssh "set -eu; sudo rm -rf /var/lib/ginux/domains/gate10; sudo mkdir -p '$domain_root'; sudo tar -xf /var/tmp/ginux-oci-rootfs.tar -C '$domain_root'; sudo chmod -R a-w /var/lib/ginux/domains/gate10"
 rocky_ssh "sudo /var/tmp/ginux native /var/tmp/gate10.toml '$domain_root' probe" >"$log" 2>&1
 
-grep -Fqx 'GINUX_BALANCED_MUTATION: BLOCKED' "$log"
-grep -Fqx 'GINUX_BALANCED_NETWORK: BLOCKED' "$log"
+# The managed stdout marker and supervisor stderr audit can share the attached
+# console.  Assert the complete marker without requiring it to own the line.
+grep -Fq 'GINUX_BALANCED_MUTATION: BLOCKED' "$log"
+grep -Fq 'GINUX_BALANCED_NETWORK: BLOCKED' "$log"
 grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ domain=gate10-deny-socket .*operation=syscall.socket policy-source=domain-deny phase=entry syscall=41 action=deny result=-1$' "$log"
 rocky_ssh "test ! -e '$domain_root/tmp/ginux-mutation'"
 

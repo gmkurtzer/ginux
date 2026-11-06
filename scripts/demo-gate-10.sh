@@ -13,6 +13,7 @@ grep 'operation=syscall.socket policy-source=domain-deny .* action=deny' \
 printf '%s\n' 'host mutation: absent'
 
 printf '%s\n' 'Gate 10 bounded systemd audit'
+grep -m1 ' action=mediate ' build/gate9-systemd-cold.log
 records=$(grep -c '^GINUX_NATIVE_AUDIT:' build/gate9-systemd-cold.log)
 printf 'detailed records: %s (limit 8192)\n' "$records"
 grep '^GINUX_AUDIT_DROPPED:' build/gate9-systemd-cold.log | tail -1

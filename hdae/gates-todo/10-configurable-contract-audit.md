@@ -91,16 +91,19 @@ decisions.
   dispatcher/catalog/document consistency check.
 - [x] Added a fixed audit-event budget with logarithmic dropped-event reports;
   structured native records carry domain and effective contract identity.
+- [x] Added `ginux contract-plan` effective-contract inspection plus operator
+  documentation for selector precedence, typed resource constraints, profiles,
+  templates, examples, provenance, digests, and audit bounds.
+- [x] Connected semantic filesystem, virtual-tree, ioctl, device, networking,
+  memory, signal, time, and credential families to native enforcement without
+  allowing a semantic grant to promote an unsupported syscall.
+- [x] Added strict and systemd profile fixtures, real Rocky runtime denial and
+  host-mutation checks, malformed-policy and immutable-contract tests, bounded
+  audit-flood evidence, and the Gate 10 human demonstration.
 
 ## Remaining work
 
-- [ ] Complete resource-selector documentation and effective-contract inspection
-  output.
-- [ ] Provide versioned default templates and domain-specific override examples.
-- [ ] Complete enforcement and inventory checks for non-syscall interface
-  families.
-- [ ] Exercise bounded structured audit behavior through a runtime flood fixture.
-- [ ] Add profile, bypass, malformed-policy, and log-safety tests.
+- [ ] Human review and acceptance of the Gate 10 demonstration and pull request.
 
 ## Acceptance criteria
 
@@ -168,10 +171,29 @@ decisions.
 
 ## Evidence
 
-- `make test-contract` -> 7 contract tests and 18 domain tests passed; generated
-  documentation matched the catalog.
+- `make test-contract` -> 9 contract tests and 18 domain tests passed; generated
+  documentation matched the 182-operation catalog.
 - `cargo build -p ginux-init --target x86_64-unknown-linux-gnu --release` ->
   native runtime contract enforcement and bounded audit integration built.
+- `make check` -> formatting and strict lint passed across every workspace
+  component and x86-64 fixture.
+- `ROCKY_SSH_PORT=22231 make test-contract-runtime` -> the configured domain
+  denial blocked `socket`, produced the structured `domain-deny` audit record,
+  and left no host mutation.
+- `ROCKY_SSH_PORT=22232 make test-systemd` -> cold, warm, repeat, offline, DNF
+  failure, configured-startup failure, audit bound, and shutdown checks passed.
+- `ROCKY_SSH_PORT=22233 make test-gate975-network` and
+  `ROCKY_SSH_PORT=22234 make test-gate975-hooks` -> accepted networking,
+  translation, policy, and mediated hook behavior remained passing.
+- `ROCKY_SSH_PORT=22235 make test` -> all 83 component tests and every mandatory
+  QEMU interception, runtime, configuration, domain, image, device, process,
+  and virtual-kernel-view regression passed.
+- `ROCKY_SSH_PORT=22237 make demo-gate-10` -> passed after the demonstration
+  exposed and corrected a console-interleaving assumption in its marker check.
+  It displayed distinct strict and systemd plans, the enforced socket denial,
+  absent host mutation, an actual mediated systemd operation, exactly 8,192
+  detailed audit records, logarithmic dropped-event accounting through 65,536
+  drops, and controlled poweroff.
 
 ## Decisions and limitations
 
@@ -185,6 +207,9 @@ decisions.
   that cannot be described solely through a higher-level capability bundle.
 - Runtime policy changes are deferred because they require authority,
   synchronization, and audit rules not approved here.
+- The catalog documents bounded Linux-compatible behavior rather than claiming
+  complete Linux ABI coverage; `partial`, `planned`, and `out-of-scope` entries
+  remain explicit gaps.
 
 ## Delivery strategy
 
@@ -195,11 +220,13 @@ decisions.
 - Planned commits: ABI catalog and generated coverage document; template,
   selector, and override schema; dispatcher and backend integration; structured
   audit and bounds; profiles and security regressions
-- Actual commits: `410d9e8f` (versioned operation catalog); normalized-domain,
-  runtime-enforcement, generated-document, and audit milestone pending commit
+- Actual commits: `410d9e8f` (versioned operation catalog), `7f0eeab6`
+  (normalized domain contracts), `25221a0b` (profiles and bounded audit), and
+  `fb559dc6` (semantic family enforcement); final evidence record pending
 
 ## Review policy and outcome
 
 Human checkpoint because this gate defines the operator-visible security
 contract and the evidence used for later kernel-exposure claims. Present
 `make demo-gate-10`, fresh evidence, and the pull request before acceptance.
+The implementation is technically passed and remains open pending that review.
