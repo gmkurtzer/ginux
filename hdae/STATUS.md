@@ -385,7 +385,10 @@ branch, or open a pull request without explicit direction.
   `make test-unit`; its interactive regression checks Bash and transient `ps`
   identity plus live `/proc/<pid>/stat`, `statm`, and `top` accounting. The clean
   QEMU lifecycle rerun is pending because the human's host still owns SSH port
-  22399 and must not be interrupted.
+  22399 and must not be interrupted. The subsequent UTS/proc/cpuinfo identity
+  work passes the exact static release link and `make check`; a required
+  no-libc `memmove` implementation fixed the `copy_within` linker failure found
+  by `make run-host`.
 - Approved network direction: Gate 9 defaults to full host-shared inbound and
   outbound networking with normal host routing and bind conflicts, under Ginux
   mediation and audit. Gate 9.75 adds comprehensive domain configuration,

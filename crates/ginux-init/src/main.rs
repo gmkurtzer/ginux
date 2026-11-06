@@ -191,6 +191,36 @@ unsafe extern "C" fn memcpy(
 }
 
 #[no_mangle]
+unsafe extern "C" fn memmove(
+    destination: *mut core::ffi::c_void,
+    source: *const core::ffi::c_void,
+    length: usize,
+) -> *mut core::ffi::c_void {
+    let destination_bytes = destination.cast::<u8>();
+    let source_bytes = source.cast::<u8>();
+    if (destination_bytes as usize) <= (source_bytes as usize) {
+        let mut index = 0usize;
+        while index < length {
+            core::ptr::write_volatile(
+                destination_bytes.add(index),
+                core::ptr::read_volatile(source_bytes.add(index)),
+            );
+            index += 1;
+        }
+    } else {
+        let mut index = length;
+        while index != 0 {
+            index -= 1;
+            core::ptr::write_volatile(
+                destination_bytes.add(index),
+                core::ptr::read_volatile(source_bytes.add(index)),
+            );
+        }
+    }
+    destination
+}
+
+#[no_mangle]
 unsafe extern "C" fn memset(
     destination: *mut core::ffi::c_void,
     value: i32,
