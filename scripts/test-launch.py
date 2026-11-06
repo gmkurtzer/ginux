@@ -77,6 +77,10 @@ def main():
         invoke(["cwd"], 0, "exited", stdout=b"root working directory\n",
                changes={"args = [": 'workdir = "/"\nargs = ['})
         invoke(["exit"], 0, "exited", changes={"args = [": 'workdir = "/work/a..b"\nargs = ['})
+        # The default /work already exists in this root; a missing workdir must be created.
+        invoke(["exit"], 0, "exited", changes={"args = [": 'workdir = "/created-workdir"\nargs = ['})
+        if not (root / "created-workdir").is_dir():
+            raise RuntimeError("missing workload directory was not created as a directory")
         invoke(["trap"], 133, "signaled")
         invoke(["handler"], 0, "exited", stdout=b"handled\n")
         invoke(["segv"], 139, "signaled")
