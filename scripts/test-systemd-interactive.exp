@@ -112,6 +112,28 @@ expect {
     eof { puts stderr "domain exited during proc self check"; exit 122 }
 }
 expect -re {\[root@ginux [^]]+\]# }
+send -- "\035"
+expect {
+    -re {rocky: detached; domain remains running} {}
+    timeout { puts stderr "Ctrl-] did not detach from the live domain"; exit 123 }
+    eof { puts stderr "host session exited during detach"; exit 124 }
+}
+expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
+send -- "ginux domain status rocky | grep -Fq 'state: running' && printf 'GINUX_ATTACH_%s\\n' 'DETACH: PASS'\r"
+expect {
+    -re {GINUX_ATTACH_DETACH: PASS} {}
+    timeout { puts stderr "detached domain did not remain running"; exit 125 }
+    eof { puts stderr "host session exited during detached status check"; exit 126 }
+}
+expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
+send -- "ginux domain attach rocky\r"
+after 1000
+send -- "printf 'GINUX_ATTACH_%s\\n' 'REATTACH: PASS'\r"
+expect {
+    -re {GINUX_ATTACH_REATTACH: PASS} {}
+    timeout { puts stderr "reattached console did not accept input"; exit 127 }
+    eof { puts stderr "host session exited during reattach"; exit 128 }
+}
 send -- "kill -RTMIN+4 1\r"
 expect {
     -re {rocky: stopped \(status 0\)} {}

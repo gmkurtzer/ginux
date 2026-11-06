@@ -12,6 +12,7 @@ usage() {
     printf '%s\n' 'usage: ginux domain create NAME --config FILE' >&2
     printf '%s\n' '       ginux domain list' >&2
     printf '%s\n' '       ginux domain start NAME [--attach]' >&2
+    printf '%s\n' '       ginux domain attach NAME' >&2
     printf '%s\n' '       ginux domain status NAME' >&2
     printf '%s\n' '       ginux domain stop NAME' >&2
     exit 64
@@ -56,6 +57,33 @@ record_supervisor() {
     record_pid=$2
     record_start=$(awk '{ print $22 }' "/proc/$record_pid/stat")
     printf '%s %s\n' "$record_pid" "$record_start" >"$record_directory/supervisor.pid"
+}
+
+record_runtime() {
+    record_directory=$1
+    record_pid=$2
+    record_start=$(awk '{ print $22 }' "/proc/$record_pid/stat")
+    printf '%s %s\n' "$record_pid" "$record_start" >"$record_directory/runtime.pid"
+}
+
+runtime_identity() {
+    runtime_directory=$(domain_dir "$1")
+    runtime_file=$runtime_directory/runtime.pid
+    test -f "$runtime_file" || return 1
+    runtime_pid=
+    runtime_start=
+    runtime_extra=
+    IFS=' ' read -r runtime_pid runtime_start runtime_extra <"$runtime_file" || return 1
+    test -z "$runtime_extra" || return 1
+    case $runtime_pid:$runtime_start in
+        *[!0-9:]*|:*) return 1 ;;
+    esac
+    test -r "/proc/$runtime_pid/stat" || return 1
+    runtime_state=$(awk '{ print $3 }' "/proc/$runtime_pid/stat")
+    runtime_actual_start=$(awk '{ print $22 }' "/proc/$runtime_pid/stat")
+    test "$runtime_state" != Z || return 1
+    test "$runtime_actual_start" = "$runtime_start" || return 1
+    printf '%s\n' "$runtime_pid"
 }
 
 reported_state() {
@@ -215,11 +243,16 @@ start_domain() {
         printf '%s: already running\n' "$name" >&2
         exit 73
     fi
-    rm -f "$directory/supervisor.pid"
+    rm -f \
+        "$directory/supervisor.pid" \
+        "$directory/runtime.pid" \
+        "$directory/exit.status" \
+        "$directory/console.in"
+    mkfifo -m 600 "$directory/console.in"
     : >"$directory/audit.log"
+    : >"$directory/console.log"
 
-    nohup "$runtime" native "$directory/config.toml" "$directory/root" \
-        >"$directory/console.log" 2>"$directory/audit.log" </dev/null &
+    nohup "$0" supervise "$name" >/dev/null 2>&1 </dev/null &
     pid=$!
     record_supervisor "$directory" "$pid"
     sleep 1
@@ -232,34 +265,99 @@ start_domain() {
     printf '%s: started detached (supervisor pid %s)\n' "$name" "$pid"
 }
 
+supervise_domain() {
+    test "$#" -eq 1 || usage
+    name=$1
+    validate_name "$name"
+    directory=$(domain_dir "$name")
+    test -d "$directory" || { printf '%s: not found\n' "$name" >&2; exit 66; }
+    exec 9<>"$directory/console.in"
+    set +e
+    script -qefE never -c "$0 run-runtime $name" "$directory/console.log" \
+        <&9 >/dev/null 2>>"$directory/audit.log" &
+    console_pid=$!
+    wait "$console_pid"
+    status=$?
+    set -e
+    printf '%s\n' "$status" >"$directory/exit.status"
+    rm -f "$directory/runtime.pid" "$directory/supervisor.pid"
+    exit "$status"
+}
+
+run_runtime() {
+    test "$#" -eq 1 || usage
+    name=$1
+    validate_name "$name"
+    directory=$(domain_dir "$name")
+    test -d "$directory" || exit 66
+    record_runtime "$directory" "$$"
+    exec "$runtime" native "$directory/config.toml" "$directory/root" \
+        2>>"$directory/audit.log"
+}
+
 attach_domain() {
     test "$#" -eq 1 || usage
     name=$1
     validate_name "$name"
     directory=$(domain_dir "$name")
     test -d "$directory" || { printf '%s: not found\n' "$name" >&2; exit 66; }
-    if supervisor_identity "$name" >/dev/null; then
-        printf '%s: already running\n' "$name" >&2
-        exit 73
-    fi
-    rm -f "$directory/supervisor.pid"
-    : >"$directory/audit.log"
-    record_supervisor "$directory" "$$"
-    printf '%s: starting attached (supervisor pid %s)\n' "$name" "$$"
-    exec "$runtime" native "$directory/config.toml" "$directory/root" \
-        2>"$directory/audit.log"
-}
+    supervisor_pid=$(supervisor_identity "$name") || {
+        printf '%s: not running\n' "$name" >&2
+        exit 69
+    }
+    test -p "$directory/console.in" || {
+        printf '%s: console is unavailable\n' "$name" >&2
+        exit 69
+    }
 
-finish_domain() {
-    test "$#" -eq 2 || usage
-    name=$1
-    status=$2
-    validate_name "$name"
-    case $status in ''|*[!0-9]*) usage ;; esac
-    directory=$(domain_dir "$name")
-    test -d "$directory" || { printf '%s: not found\n' "$name" >&2; exit 66; }
-    rm -f "$directory/supervisor.pid"
-    printf '%s: stopped (status %s)\n' "$name" "$status"
+    detach_marker=$directory/attach.$$.detach
+    rm -f "$detach_marker"
+    saved_tty=$(stty -g)
+    exec 7<&0
+    tail -n 80 -F "$directory/console.log" &
+    tail_pid=$!
+    reader_pid=
+    cleanup_attach() {
+        trap - 0 HUP INT TERM
+        kill "$tail_pid" ${reader_pid:+"$reader_pid"} 2>/dev/null || true
+        wait "$tail_pid" ${reader_pid:+"$reader_pid"} 2>/dev/null || true
+        exec 7<&-
+        stty "$saved_tty"
+        rm -f "$detach_marker"
+    }
+    trap cleanup_attach 0 HUP INT TERM
+    stty raw -echo
+    (
+        exec 8>"$directory/console.in"
+        detach=$(printf '\035')
+        while IFS= read -r -n 1 character <&7; do
+            if test "$character" = "$detach"; then
+                : >"$detach_marker"
+                exit 0
+            fi
+            if test -n "$character"; then
+                printf '%s' "$character" >&8
+            else
+                printf '\n' >&8
+            fi
+        done
+    ) &
+    reader_pid=$!
+
+    while kill -0 "$supervisor_pid" 2>/dev/null && test ! -e "$detach_marker"; do
+        sleep 1
+    done
+    detached=false
+    test -e "$detach_marker" && detached=true
+    cleanup_attach
+    trap - 0 HUP INT TERM
+    if test "$detached" = true; then
+        printf '\n%s: detached; domain remains running\n' "$name"
+    else
+        status=unknown
+        test -r "$directory/exit.status" && status=$(cat "$directory/exit.status")
+        printf '\n%s: stopped (status %s)\n' "$name" "$status"
+    fi
 }
 
 stop_domain() {
@@ -274,7 +372,11 @@ stop_domain() {
         return
     fi
 
-    root_pid=$(pgrep -P "$pid" | sed -n '1p' || true)
+    runtime_pid=$(runtime_identity "$name" || true)
+    root_pid=
+    if test -n "$runtime_pid"; then
+        root_pid=$(pgrep -P "$runtime_pid" | sed -n '1p' || true)
+    fi
     if test -n "$root_pid"; then
         kill -RTMIN+4 "$root_pid" 2>/dev/null || true
     fi
@@ -290,7 +392,7 @@ stop_domain() {
     if kill -0 "$pid" 2>/dev/null; then
         kill -KILL "$pid" 2>/dev/null || true
     fi
-    rm -f "$directory/supervisor.pid"
+    rm -f "$directory/supervisor.pid" "$directory/runtime.pid"
     printf '%s: stopped\n' "$name"
 }
 
@@ -301,10 +403,11 @@ shift
 case $command in
     attach) attach_domain "$@" ;;
     create) create_domain "$@" ;;
-    finish) finish_domain "$@" ;;
     list) test "$#" -eq 0 || usage; list_domains ;;
     start) start_domain "$@" ;;
     status) status_domain "$@" ;;
     stop) stop_domain "$@" ;;
+    run-runtime) run_runtime "$@" ;;
+    supervise) supervise_domain "$@" ;;
     *) usage ;;
 esac

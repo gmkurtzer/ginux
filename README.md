@@ -158,7 +158,8 @@ ginux domain start rocky --attach
 ```
 
 The attached terminal becomes the Ginux domain console. Log in as `root` with
-password `ginux`, explore normally, and run `kill -RTMIN+4 1` as domain root to
+password `ginux`, explore normally, press `Ctrl-]` to detach while leaving the
+domain running, and run `kill -RTMIN+4 1` as domain root to
 shut down systemd and return to the host. Detached operation uses
 `ginux domain start rocky`, `ginux domain status rocky`, and
 `ginux domain stop rocky`. Exit the Rocky host shell to stop QEMU and clean up.
