@@ -99,7 +99,9 @@ network_addresses() {
     if ip link show dev "$attachment" >/dev/null 2>&1; then
         ip -o -4 addr show dev "$attachment"
     else
-        ip -o -4 addr show label "$attachment"
+        alias_addresses=$(ip -o -4 addr show label "$attachment")
+        test -n "$alias_addresses" || return 1
+        printf '%s\n' "$alias_addresses"
     fi
 }
 
@@ -606,6 +608,7 @@ case $command in
     create) create_domain "$@" ;;
     list) test "$#" -eq 0 || usage; list_domains ;;
     prepare-root) test "$#" -eq 1 || usage; prepare_root "$1" ;;
+    resolve-network) test "$#" -eq 1 || usage; resolve_network_config "$1" ;;
     start) start_domain "$@" ;;
     status) status_domain "$@" ;;
     stop) stop_domain "$@" ;;

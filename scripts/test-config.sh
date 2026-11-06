@@ -13,6 +13,9 @@ invalid_init_log=build/gate9-config-invalid-init.log
 gate975_log=build/gate975-config.log
 gate975_override_log=build/gate975-config-override.log
 gate975_invalid_log=build/gate975-config-invalid.log
+gate975_conflict_log=build/gate975-config-conflict.log
+gate975_volume_log=build/gate975-config-volume.log
+gate975_hook_log=build/gate975-config-hook.log
 valid_effective=build/gate4-config-valid.effective
 equivalent_effective=build/gate4-config-equivalent.effective
 
@@ -102,6 +105,24 @@ if rocky_ssh "/var/tmp/ginux config-merge /var/tmp/gate975.toml 'network.interfa
     exit 1
 fi
 grep -Fqx 'GINUX_CONFIG: rejected reason=invalid-value managed-started=false' "$gate975_invalid_log"
+
+if rocky_ssh "/var/tmp/ginux config-merge /var/tmp/gate975.toml 'network.port_forwards=[\"tcp/lo/8080/80\",\"tcp/lo/8080/81\"]'" >"$gate975_conflict_log" 2>&1; then
+    printf '%s\n' 'conflicting port mappings were incorrectly accepted' >&2
+    exit 1
+fi
+grep -Fqx 'GINUX_CONFIG: rejected reason=invalid-value managed-started=false' "$gate975_conflict_log"
+
+if rocky_ssh "/var/tmp/ginux config-merge /var/tmp/gate975.toml 'volumes.assignments=[\"/proc:/data:ro\"]'" >"$gate975_volume_log" 2>&1; then
+    printf '%s\n' 'unsafe virtual-tree volume mapping was incorrectly accepted' >&2
+    exit 1
+fi
+grep -Fqx 'GINUX_CONFIG: rejected reason=host-authority-reference managed-started=false' "$gate975_volume_log"
+
+if rocky_ssh "/var/tmp/ginux config-merge /var/tmp/gate975.toml 'hooks.pre_boot=[\"host:/usr/local/sbin/setup\"]'" >"$gate975_hook_log" 2>&1; then
+    printf '%s\n' 'host-context hook was incorrectly accepted' >&2
+    exit 1
+fi
+grep -Fqx 'GINUX_CONFIG: rejected reason=invalid-value managed-started=false' "$gate975_hook_log"
 
 rocky_ssh 'rm -f /var/tmp/ginux /var/tmp/gate4-*.toml /var/tmp/gate9-*-init.toml /var/tmp/gate975.toml'
 printf '%s\n' 'test-config: PASS'

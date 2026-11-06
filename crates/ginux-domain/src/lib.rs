@@ -298,7 +298,7 @@ impl ConfigBuilder {
             storage: TextList::empty(),
             volumes: TextList::empty(),
             devices: TextList::empty(),
-            network_backend: NetworkBackend::None,
+            network_backend: NetworkBackend::Shared,
             network_interface: Text::empty(),
             network_source: Text::empty(),
             ingress_allow: TextList::empty(),
@@ -326,7 +326,7 @@ impl ConfigBuilder {
     }
 
     fn finish(self) -> Result<DomainConfig, ConfigError> {
-        const REQUIRED: u64 = (1 << 16) - 1;
+        const REQUIRED: u64 = ((1 << 16) - 1) & !(1 << 13);
         const WORKDIR_BIT: u64 = 1 << 16;
         const HOSTNAME_BIT: u64 = 1 << 17;
         const CONTRACT_DIGEST_BIT: u64 = 1 << 21;
@@ -560,8 +560,15 @@ impl DomainConfig {
         {
             validate_selector(selector.as_bytes())?;
         }
-        for volume in self.volumes.as_slice() {
+        for (index, volume) in self.volumes.as_slice().iter().enumerate() {
             validate_volume(volume.as_bytes())?;
+            let target = volume_target(volume.as_bytes()).ok_or(ConfigError::InvalidValue)?;
+            if self.volumes.as_slice()[..index]
+                .iter()
+                .any(|existing| volume_target(existing.as_bytes()) == Some(target))
+            {
+                return Err(ConfigError::InvalidValue);
+            }
         }
         if !self.network_interface.is_empty() {
             validate_network_attachment(self.network_interface.as_bytes())?;
@@ -582,8 +589,14 @@ impl DomainConfig {
         {
             validate_network_rule(rule.as_bytes())?;
         }
-        for forward in self.port_forwards.as_slice() {
+        for (index, forward) in self.port_forwards.as_slice().iter().enumerate() {
             validate_port_forward(forward.as_bytes())?;
+            if self.port_forwards.as_slice()[..index]
+                .iter()
+                .any(|existing| port_forward_conflicts(existing.as_bytes(), forward.as_bytes()))
+            {
+                return Err(ConfigError::InvalidValue);
+            }
         }
         for hook in self.pre_boot_hooks.as_slice() {
             validate_domain_command(hook.as_bytes())?;
@@ -1327,6 +1340,34 @@ fn validate_port_forward(bytes: &[u8]) -> Result<(), ConfigError> {
     validate_port(internal, false)
 }
 
+type PortForwardParts<'a> = (&'a [u8], &'a [u8], &'a [u8], &'a [u8]);
+
+fn port_forward_parts(bytes: &[u8]) -> Option<PortForwardParts<'_>> {
+    let mut parts = bytes.split(|byte| *byte == b'/');
+    let result = (parts.next()?, parts.next()?, parts.next()?, parts.next()?);
+    if parts.next().is_some() {
+        None
+    } else {
+        Some(result)
+    }
+}
+
+fn port_forward_conflicts(left: &[u8], right: &[u8]) -> bool {
+    let Some((left_protocol, left_attachment, left_external, left_internal)) =
+        port_forward_parts(left)
+    else {
+        return true;
+    };
+    let Some((right_protocol, right_attachment, right_external, right_internal)) =
+        port_forward_parts(right)
+    else {
+        return true;
+    };
+    left_protocol == right_protocol
+        && ((left_attachment == right_attachment && left_external == right_external)
+            || left_internal == right_internal)
+}
+
 fn validate_volume(bytes: &[u8]) -> Result<(), ConfigError> {
     let mut parts = bytes.split(|byte| *byte == b':');
     let source = parts.next().ok_or(ConfigError::InvalidValue)?;
@@ -1336,7 +1377,36 @@ fn validate_volume(bytes: &[u8]) -> Result<(), ConfigError> {
         return Err(ConfigError::InvalidValue);
     }
     validate_domain_path(source)?;
-    validate_domain_path(target)
+    validate_domain_path(target)?;
+    if source == b"/"
+        || target == b"/"
+        || protected_virtual_path(source)
+        || protected_virtual_path(target)
+    {
+        return Err(ConfigError::HostAuthority);
+    }
+    Ok(())
+}
+
+fn volume_target(bytes: &[u8]) -> Option<&[u8]> {
+    let mut parts = bytes.split(|byte| *byte == b':');
+    parts.next()?;
+    let target = parts.next()?;
+    parts.next()?;
+    if parts.next().is_some() {
+        None
+    } else {
+        Some(target)
+    }
+}
+
+fn protected_virtual_path(path: &[u8]) -> bool {
+    [b"/proc".as_slice(), b"/sys", b"/dev", b"/run/ginux"]
+        .iter()
+        .any(|protected| {
+            path == *protected
+                || (path.starts_with(protected) && path.get(protected.len()).copied() == Some(b'/'))
+        })
 }
 
 fn validate_domain_command(bytes: &[u8]) -> Result<(), ConfigError> {
@@ -1670,6 +1740,13 @@ policy = "stop"
     }
 
     #[test]
+    fn defaults_omitted_network_to_host_shared() {
+        let without_network = VALID.replace("[network]\nbackend = \"none\"\n", "");
+        let config = DomainConfig::parse(without_network.as_bytes()).unwrap();
+        assert_eq!(config.network_backend, NetworkBackend::Shared);
+    }
+
+    #[test]
     fn parses_complete_gate975_schema_and_round_trips() {
         let complete = VALID
             .replace("[resources]", "[identity]\nhostname = \"demo.example\"\n\n[resources]")
@@ -1750,6 +1827,45 @@ policy = "stop"
         );
         assert_eq!(
             DomainConfig::parse(host_hook.as_bytes()),
+            Err(ConfigError::InvalidValue)
+        );
+    }
+
+    #[test]
+    fn rejects_conflicting_ports_and_unsafe_or_duplicate_volumes() {
+        let duplicate_external = VALID.replace(
+            "backend = \"none\"",
+            "backend = \"shared\"\nport_forwards = [\"tcp/lo/8080/80\", \"tcp/lo/8080/81\"]",
+        );
+        assert_eq!(
+            DomainConfig::parse(duplicate_external.as_bytes()),
+            Err(ConfigError::InvalidValue)
+        );
+
+        let duplicate_internal = VALID.replace(
+            "backend = \"none\"",
+            "backend = \"shared\"\nport_forwards = [\"tcp/lo/8080/80\", \"tcp/lo/8081/80\"]",
+        );
+        assert_eq!(
+            DomainConfig::parse(duplicate_internal.as_bytes()),
+            Err(ConfigError::InvalidValue)
+        );
+
+        let unsafe_volume = VALID.replace(
+            "[devices]",
+            "[volumes]\nassignments = [\"/proc:/data:ro\"]\n\n[devices]",
+        );
+        assert_eq!(
+            DomainConfig::parse(unsafe_volume.as_bytes()),
+            Err(ConfigError::HostAuthority)
+        );
+
+        let duplicate_target = VALID.replace(
+            "[devices]",
+            "[volumes]\nassignments = [\"/srv/one:/data:ro\", \"/srv/two:/data:rw\"]\n\n[devices]",
+        );
+        assert_eq!(
+            DomainConfig::parse(duplicate_target.as_bytes()),
             Err(ConfigError::InvalidValue)
         );
     }
