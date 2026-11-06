@@ -172,7 +172,7 @@ port. Ginux still intercepts, validates, mediates, and audits every managed
 network operation; managed code does not receive unchecked supervisor
 descriptors or an unmediated syscall path.
 
-Gate 9.5 adds explicit selection of a host interface or source address,
+Gate 9.75 adds explicit selection of a host interface or source address,
 ingress and egress policy, and port translation such as host
 `device-or-address:8080` to domain port `80`. Selecting an attachment such as
 `eth0:1` gives the domain the normal shared use of that complete host network
@@ -194,7 +194,7 @@ before starting managed code. The effective configuration is immutable
 evidence for that domain instance; mutable runtime controls, if later added,
 require explicit authorization and audit semantics.
 
-Gate 9.5 expands this into the comprehensive domain specification. It includes
+Gate 9.75 expands this into the comprehensive domain specification. It includes
 hostname, access, volumes and host mappings, network attachment and port
 policy, resources, devices, contract and audit behavior, failure policy, and
 pre-boot hooks with an explicitly defined execution context. Command-line
@@ -216,7 +216,7 @@ and idle overhead.
 - Numeric performance budgets, set from reproducible baseline evidence before
   Gate 11 begins.
 - Whether each pre-boot hook runs in the trusted host context or the mediated
-  domain context, and the authority available to each hook. Gate 9.5 must
+  domain context, and the authority available to each hook. Gate 9.75 must
   resolve this before hook execution is implemented.
 
 Changing a security invariant or resolving an open decision with material

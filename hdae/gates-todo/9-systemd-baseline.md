@@ -48,7 +48,7 @@ a controlled shutdown.
 - Booting every Rocky service, arbitrary distributions, graphical targets,
   real hardware discovery, or production service coverage.
 - Per-interface or source-address selection, ingress/egress port policy, and
-  port translation; these are Gate 9.5 work.
+  port translation; these are Gate 9.75 work.
 - Weakening contract, device, or host-leakage invariants merely to satisfy a
   systemd probe.
 - Declaring general Linux or systemd compatibility from one target.
@@ -294,7 +294,7 @@ a controlled shutdown.
   namespace and routing; the first successful bind wins. Ginux mediation and
   audit remain mandatory.
 - Interface/source-address selection, port allow/deny policy, and port
-  translation are approved as Gate 9.5 rather than being folded into this
+  translation are approved as Gate 9.75 rather than being folded into this
   systemd gate.
 - The first systemd baseline identifies bounded mount compatibility and
   multi-task supervision as the next required implementation tranche. The
@@ -311,7 +311,7 @@ a controlled shutdown.
   set and an unchanged cached-root hash after failure and domain teardown.
 - The first operator controller is intentionally bounded to
   `create/list/start/status/stop` and one installed Rocky systemd example.
-  Broader typed domain options and CLI overrides remain Gate 9.5 work.
+  Broader typed domain options and CLI overrides remain Gate 9.75 work.
 - Detached lifecycle state records both the supervisor PID and its Linux start
   time. Missing, exited, zombie, malformed, or PID-reused state reports stopped
   instead of controlling an unrelated process.

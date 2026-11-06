@@ -30,10 +30,15 @@
 - Policy unit: versioned contract.
 - Initial gate map: twelve checkpoint gates at positions 1 through 11 and 13;
   Gates 1 through 8.5 are accepted. Gate 9 is the active systemd baseline.
-- Gate 9.5 was added and authorized on 2026-11-04 for comprehensive domain
+- Gate 9.75 was added and authorized on 2026-11-04 for comprehensive domain
   configuration, CLI overrides, network selection and policy, port translation,
   volumes, access, identity, resources, devices, and pre-boot hooks.
-- Gate 9 implementation is active. The pinned Rocky init image, systemd launch
+- Gate 9 is technically passed but its human checkpoint exposed corrective
+  work now authorized as Gate 9.5. Gate 9.5 is active on
+  `hdae/systemd-usability`; Gate 9 acceptance remains pending until the
+  create-time image, configuration-derived launch, proc/job-control,
+  attach/detach, and boot-diagnostic criteria pass. The pinned Rocky init image,
+  systemd launch
   profile, virtual PID 1 identity, disposable root, shared-network contract,
   bounded multi-task supervision, and reproducible Rocky-host probe are
   implemented locally on `hdae/systemd-baseline`. Unmodified Rocky systemd now
@@ -349,17 +354,20 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Have the human run `make run-host`, explore the installed `ginux domain`
-lifecycle, and accept or reject Gate 9. Push the dedicated branch and open its
-pull request only after explicit current authorization.
+Implement Gate 9.5 criterion 1: remove OCI preparation and image copying from
+`make run-host`, then move verified acquisition and cache reuse into
+`ginux domain create`. Continue through the approved Gate 9.5 implementation
+and test matrix without further checkpoints unless a new architectural decision
+is required.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 9, systemd baseline, authorized on dedicated branch
-  `hdae/systemd-baseline`; technically passed and awaiting human checkpoint
+- Active gate: Gate 9.5, systemd usability and operator lifecycle, authorized
+  on dedicated stacked branch `hdae/systemd-usability`; Gate 9 remains
+  technically passed but unaccepted pending this corrective work
 - Last evidence: `make demo-gate-9` passed all 8 checks. `make test-systemd`,
   `make test-systemd-live`, `make bench`, `make check`, `make test`,
   `make test-native-vfs`, and `make test-oci-image` passed with the exact
@@ -373,10 +381,10 @@ pull request only after explicit current authorization.
   were implemented.
 - Approved network direction: Gate 9 defaults to full host-shared inbound and
   outbound networking with normal host routing and bind conflicts, under Ginux
-  mediation and audit. Gate 9.5 adds comprehensive domain configuration,
+  mediation and audit. Gate 9.75 adds comprehensive domain configuration,
   network selection, port controls, and translation.
-- Required human decision: exercise and judge the general host and controller
-  workflow after implementation, then accept or reject Gate 9. Separately
-  authorize branch push and pull-request creation if desired. Gate 9.5 must
-  resolve pre-boot hook execution context and authority before implementing
-  hooks.
+- Required human decision: none during the approved autonomous implementation.
+  At the final checkpoint, exercise and judge the corrected general-host
+  workflow and accept or reject Gates 9 and 9.5. Separately authorize branch
+  push and pull-request creation if desired. Gate 9.75 must resolve pre-boot
+  hook execution context and authority before implementing hooks.
