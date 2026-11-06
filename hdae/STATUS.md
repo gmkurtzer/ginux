@@ -38,6 +38,12 @@
   per-workload tolerance, and automatic failure for regressions beyond the
   approved native or accepted-Ginux baseline. It remains sequenced after Gates
   9.75 and 10 and has not started.
+- Gates 9.75 and 10 were clarified on 2026-11-06 to support versioned default
+  contract templates, bounded glob and resource selectors, deterministic TOML
+  overrides, and expansion against a pinned operation catalog. Gate 10 must
+  also produce a generated ABI coverage document that tracks implemented,
+  partial, denied, planned, and excluded kernel/userspace interfaces without
+  allowing catalog growth to broaden an old contract silently.
 - Gate 9 is technically passed but its human checkpoint exposed corrective
   work now authorized as Gate 9.5. Gate 9.5 is active on
   `hdae/systemd-usability`; Gate 9 acceptance remains pending until the
