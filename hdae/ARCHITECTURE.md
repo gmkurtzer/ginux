@@ -191,7 +191,7 @@ storage, devices, networking, audit behavior, and failure policy. The
 execution profile makes the performance/security tradeoff and backend trust
 boundary explicit. Ginux validates and normalizes the complete configuration
 before starting managed code. The effective configuration is immutable
-evidence for that instance instance; mutable runtime controls, if later added,
+evidence for that instance; mutable runtime controls, if later added,
 require explicit authorization and audit semantics.
 
 Gate 9.75 expands this into the comprehensive instance specification. It includes

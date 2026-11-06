@@ -60,7 +60,7 @@ if rocky_ssh '/var/tmp/ginux config /var/tmp/gate1025-legacy.toml' >"$legacy_sch
     printf '%s\n' 'legacy configuration table was incorrectly accepted' >&2
     exit 1
 fi
-grep -Fqx 'GINUX_CONFIG: rejected reason=unknown-field managed-started=false' "$legacy_schema_log"
+grep -Fqx 'GINUX_CONFIG: rejected reason=unknown-section managed-started=false' "$legacy_schema_log"
 rocky_ssh "sed '/^init =/d' /var/tmp/gate4-valid.toml > /var/tmp/gate9-missing-init.toml; sed 's#init = \"/runtime-fixture\"#init = \"relative-init\"#' /var/tmp/gate4-valid.toml > /var/tmp/gate9-invalid-init.toml"
 grep -Fqx 'GINUX_CONFIG: accepted format=toml schema=1' "$valid_log"
 grep -Fqx 'GINUX_CONFIG: PASS' "$valid_log"
