@@ -19,6 +19,7 @@ gate975_hook_log=build/gate975-config-hook.log
 contract_plan_log=build/gate10-contract-plan.log
 contract_systemd_plan_log=build/gate10-contract-systemd-plan.log
 contract_invalid_log=build/gate10-contract-invalid.log
+legacy_schema_log=build/gate1025-legacy-schema.log
 valid_effective=build/gate4-config-valid.effective
 equivalent_effective=build/gate4-config-equivalent.effective
 
@@ -53,6 +54,13 @@ rocky_scp \
 
 rocky_ssh 'chmod 0755 /var/tmp/ginux; /var/tmp/ginux config /var/tmp/gate4-valid.toml' > "$valid_log" 2>&1
 rocky_ssh '/var/tmp/ginux config /var/tmp/gate4-equivalent.toml' > "$equivalent_log" 2>&1
+legacy_table=$(printf '\144\157\155\141\151\156')
+rocky_ssh "sed 's/^\\[instance\\]$/[$legacy_table]/' /var/tmp/gate4-valid.toml > /var/tmp/gate1025-legacy.toml"
+if rocky_ssh '/var/tmp/ginux config /var/tmp/gate1025-legacy.toml' >"$legacy_schema_log" 2>&1; then
+    printf '%s\n' 'legacy configuration table was incorrectly accepted' >&2
+    exit 1
+fi
+grep -Fqx 'GINUX_CONFIG: rejected reason=unknown-field managed-started=false' "$legacy_schema_log"
 rocky_ssh "sed '/^init =/d' /var/tmp/gate4-valid.toml > /var/tmp/gate9-missing-init.toml; sed 's#init = \"/runtime-fixture\"#init = \"relative-init\"#' /var/tmp/gate4-valid.toml > /var/tmp/gate9-invalid-init.toml"
 grep -Fqx 'GINUX_CONFIG: accepted format=toml schema=1' "$valid_log"
 grep -Fqx 'GINUX_CONFIG: PASS' "$valid_log"
@@ -149,5 +157,5 @@ if rocky_ssh "/var/tmp/ginux config-merge /var/tmp/gate975.toml 'hooks.pre_boot=
 fi
 grep -Fqx 'GINUX_CONFIG: rejected reason=invalid-value managed-started=false' "$gate975_hook_log"
 
-rocky_ssh 'rm -f /var/tmp/ginux /var/tmp/gate4-*.toml /var/tmp/gate9-*-init.toml /var/tmp/gate975.toml /var/tmp/gate10-strict.toml /var/tmp/gate10-systemd.toml'
+rocky_ssh 'rm -f /var/tmp/ginux /var/tmp/gate4-*.toml /var/tmp/gate9-*-init.toml /var/tmp/gate975.toml /var/tmp/gate10-strict.toml /var/tmp/gate10-systemd.toml /var/tmp/gate1025-legacy.toml'
 printf '%s\n' 'test-config: PASS'

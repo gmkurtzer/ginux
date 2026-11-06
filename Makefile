@@ -8,7 +8,7 @@ BASELINE := target/$(X86_TARGET)/release/baseline-runner
 RUNTIME_FIXTURE := target/$(X86_TARGET)/release/runtime-fixture
 PROCESS_NATIVE_FIXTURE := target/$(X86_TARGET)/release/process-native-fixture
 
-.PHONY: doctor host-image-fetch host-image-verify host-boot-test image-helper-fetch image-prepare instance-image-fetch instance-image-verify instance-image-prepare systemd-image-fetch systemd-image-verify systemd-image-prepare test-image test-oci-image test-oci-layers test-vfs test-native-vfs image-cache-clean build check-name check contract-doc test-contract test-contract-runtime test test-unit test-intercept test-runtime test-config test-instance test-process build-process-fixtures test-process-native test-devices test-kernel-views test-systemd test-systemd-live test-systemd-interactive test-gate975-network test-gate975-hooks test-cgroup test-block test-network run-host run-systemd bench bench-baseline bench-block bench-network demo-gate-1 demo-gate-2 demo-gate-3 demo-gate-4 demo-gate-5 demo-gate-6 demo-gate-7 demo-gate-8 demo-gate-9 demo-gate-9.5 demo-gate-9.75 demo-gate-10 clean
+.PHONY: doctor host-image-fetch host-image-verify host-boot-test image-helper-fetch image-prepare instance-image-fetch instance-image-verify instance-image-prepare systemd-image-fetch systemd-image-verify systemd-image-prepare test-image test-oci-image test-oci-layers test-vfs test-native-vfs image-cache-clean build check-name check-instance-terminology check contract-doc test-contract test-contract-runtime test test-unit test-intercept test-runtime test-config test-instance test-instance-terminology test-process build-process-fixtures test-process-native test-devices test-kernel-views test-systemd test-systemd-live test-systemd-interactive test-gate975-network test-gate975-hooks test-cgroup test-block test-network run-host run-systemd bench bench-baseline bench-block bench-network demo-gate-1 demo-gate-2 demo-gate-3 demo-gate-4 demo-gate-5 demo-gate-6 demo-gate-7 demo-gate-8 demo-gate-9 demo-gate-9.5 demo-gate-9.75 demo-gate-10 demo-gate-10.25 clean
 
 doctor:
 	@./scripts/doctor.sh
@@ -78,7 +78,10 @@ test-process-native: build build-process-fixtures
 check-name:
 	@./scripts/check-name.sh
 
-check: check-name
+check-instance-terminology:
+	@./scripts/check-instance-terminology.sh
+
+check: check-name check-instance-terminology
 	cargo fmt --check
 	cargo clippy -p ginux-contract --all-targets -- -D warnings
 	cargo clippy -p ginux-core --all-targets -- -D warnings
@@ -135,6 +138,9 @@ test-config: build
 
 test-instance: build
 	@./scripts/with-rocky-host.sh ./scripts/test-instance.sh
+
+test-instance-terminology:
+	@./scripts/test-instance-terminology.sh
 
 test-process: build
 	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-process
@@ -239,6 +245,11 @@ demo-gate-10: doctor
 	@$(MAKE) test-contract-runtime
 	@$(MAKE) test-systemd
 	@./scripts/demo-gate-10.sh
+
+demo-gate-10.25: doctor check-instance-terminology
+	@$(MAKE) test-config
+	@./scripts/test-systemd-interactive.exp
+	@printf '%s\n' 'GATE10.25: PASS (instance CLI, schema, persistence, lifecycle, and clean-break rejection)'
 
 clean:
 	cargo clean
