@@ -4834,7 +4834,10 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descripto
             }
             continue;
         }
-        if signal != (5 | 0x80) && signal != 5 {
+        if signal == 5 {
+            native_fail(domain, pid, b"unexpected native trace stop");
+        }
+        if signal != (5 | 0x80) {
             write_all(b"GINUX_NATIVE: unexpected-signal=");
             write_u64(signal as u64);
             write_all(b" event=");
