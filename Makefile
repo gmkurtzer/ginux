@@ -94,6 +94,9 @@ test-unit:
 	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-vfs
 	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-kernel-views
 
+test-release-overflow:
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test --release -p ginux-vfs-index --test overflow_checks_release
+
 test-intercept: build
 	@./scripts/with-rocky-host.sh ./scripts/test-intercept.sh
 
