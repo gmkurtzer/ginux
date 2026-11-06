@@ -41,9 +41,8 @@
   normalized contracts produce immutable digests and provenance; semantic and
   syscall decisions are enforced before host effects; and audit detail is
   bounded to 8,192 records with logarithmic dropped-event accounting.
-- Gate 10 is delivered in open pull request
-  https://github.com/gmkurtzer/ginux/pull/231. The human accepted the gate on
-  2026-11-06, but the pull request remains unmerged.
+- Gate 10 pull request https://github.com/gmkurtzer/ginux/pull/231 was accepted
+  and merged by the human as `ff926d0c` on 2026-11-06.
 - Fresh Gate 10 evidence passed `make test-contract`, `make check`,
   `make test-contract-runtime`, `make test-systemd`, the Gate 9.75 network and
   hook regressions, aggregate `make test`, and `make demo-gate-10`. The demo
@@ -82,6 +81,16 @@
   1.871-second reproduction to 309 ms, a single `top` refresh took 913 ms, and
   Bash reported valid child user/system timing. The complete interactive,
   systemd, and aggregate test matrices pass.
+- Gate 10.25 implementation is complete on `hdae/domain-to-instance` and ready
+  for its pull-request checkpoint. The active product now uses `instance`
+  consistently across CLI, schema, Rust APIs, persistence, audit, tests, and
+  documentation; there are no compatibility aliases. Static checks reject
+  stale terminology, and the legacy CLI noun and TOML table fail closed.
+- Fresh Gate 10.25 evidence passed `make check`, `make test-contract`,
+  `make test-unit`, a clean aggregate `make test`, `make test-systemd`, Gate
+  9.75 network and hook regressions, and `make demo-gate-10.25`. The demo
+  booted Rocky systemd, exercised the complete instance lifecycle, verified
+  `/var/lib/ginux/instances`, and returned cleanly to the host.
 - The ordered gate batch is authorized, but every open gate remains a human
   checkpoint requiring a working demonstration and explicit acceptance.
 
@@ -105,13 +114,13 @@ scope, threat model, and invariants.
 - Active gate: Gate 10.25, instance terminology migration, is authorized and
   active on `hdae/domain-to-instance`. Gate 10.5 is approved but waits for the
   Gate 10.25 human checkpoint and merge.
-- Last evidence: Gate 10 `make demo-gate-10`, `make check`, `make test-systemd`,
-  Gate 9.75 network and hook regressions, and aggregate `make test` passed under
-  Rocky QEMU after semantic-family enforcement was enabled.
+- Last evidence: Gate 10.25 `make demo-gate-10.25`, `make check`, targeted
+  systemd/network/hook tests, and a clean aggregate `make test` passed under
+  Rocky QEMU after the clean-break rename.
 - Open decision: none for Gate 10.25. Gate 10.5 migration details will be
   finalized after the terminology dependency is accepted.
-- Exact next action: classify the active `instance` inventory, implement the
-  clean-break instance terminology migration, and run its staged checks.
+- Exact next action: push the Gate 10.25 branch, open its pull request, and stop
+  for human acceptance before beginning Gate 10.5.
 
 ## Evidence
 
@@ -408,8 +417,8 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Implement and verify Gate 10.25 on `hdae/domain-to-instance`, deliver its pull
-request, and stop for human acceptance before beginning Gate 10.5.
+Deliver the completed Gate 10.25 pull request from `hdae/domain-to-instance`
+and stop for human acceptance before beginning Gate 10.5.
 
 ## Context recovery
 
@@ -418,10 +427,9 @@ request, and stop for human acceptance before beginning Gate 10.5.
 - Reload after context shift: required
 - Active gate: Gate 10.25, instance terminology migration, is authorized on
   `hdae/domain-to-instance`; Gate 10.5 is approved but dependency-blocked.
-- Last evidence: Gate 10 passed 9 contract and 18 instance tests, strict lint,
-  real runtime denial with no host mutation, the complete systemd matrix,
-  Gate 9.75 networking and hook regressions, aggregate `make test`, and the
-  human demonstration under Rocky QEMU.
+- Last evidence: Gate 10.25 passed strict lint, 9 contract and 18 instance
+  tests, a clean aggregate `make test`, the complete systemd matrix, Gate 9.75
+  networking and hook regressions, and its human-visible Rocky QEMU demo.
 - Approved network direction: Gate 9 defaults to full host-shared inbound and
   outbound networking with normal host routing and bind conflicts, under Ginux
   mediation and audit. Gate 9.75 adds comprehensive instance configuration,

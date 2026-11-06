@@ -84,7 +84,7 @@ replace it.
    evidence.
 10. **Configurable contract and audit**: versioned syscall, ioctl, device,
     filesystem, and kernel-view policy with fail-closed validation and logs.
-10.25. **Instance terminology migration**: cleanly replace the active `instance`
+10.25. **Instance terminology migration**: cleanly replace the active `domain`
     product vocabulary with `instance` across CLI, configuration, code,
     persistence, audit, tests, and documentation without legacy aliases.
 10.5. **Intuitive contract configuration and UX**: make the complete contract
