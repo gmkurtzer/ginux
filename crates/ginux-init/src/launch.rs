@@ -14,13 +14,13 @@ use crate::dispatch::{
     balanced_surface_name, decide_native, native_arguments_allowed, NativeDecision,
 };
 use crate::supervisor::{
-    exit_process, host_fork, line, ptrace, stopped, syscall1, syscall2, syscall3, syscall4,
-    syscall5, wait, write_all, UserRegs, AT_FDCWD, DOMAIN_GID, DOMAIN_UID, O_RDONLY,
-    PR_SET_NO_NEW_PRIVS, PTRACE_GETREGS, PTRACE_O_EXITKILL, PTRACE_O_TRACESYSGOOD,
-    PTRACE_SETOPTIONS, PTRACE_SETREGS, PTRACE_SYSCALL, PTRACE_TRACEME, SYS_CHDIR, SYS_CHROOT,
-    SYS_CLOSE_HOST, SYS_CLOSE_RANGE_HOST, SYS_EXECVE, SYS_EXIT_HOST, SYS_FCNTL_HOST, SYS_FSYNC,
-    SYS_LAUNCH_MKDIRAT, SYS_OPENAT_HOST, SYS_PRCTL, SYS_PTRACE, SYS_READ_HOST, SYS_SETGID,
-    SYS_SETGROUPS, SYS_SETUID, SYS_WRITE_HOST,
+    exit_process, host_fork, line, ptrace, read_user_regs, stopped, syscall1, syscall2, syscall3,
+    syscall4, syscall5, wait, write_all, write_user_regs, UserRegs, ABI_REJECT_LAUNCH, AT_FDCWD,
+    AUDIT_ARCH, DOMAIN_GID, DOMAIN_UID, O_RDONLY, PR_SET_NO_NEW_PRIVS, PTRACE_O_EXITKILL,
+    PTRACE_O_TRACESYSGOOD, PTRACE_SETOPTIONS, PTRACE_SYSCALL, PTRACE_TRACEME, SYS_CHDIR,
+    SYS_CHROOT, SYS_CLOSE_HOST, SYS_CLOSE_RANGE_HOST, SYS_EXECVE, SYS_EXIT_HOST, SYS_FCNTL_HOST,
+    SYS_FSYNC, SYS_LAUNCH_MKDIRAT, SYS_OPENAT_HOST, SYS_PRCTL, SYS_PTRACE, SYS_READ_HOST,
+    SYS_SETGID, SYS_SETGROUPS, SYS_SETUID, SYS_WRITE_HOST,
 };
 
 pub const MAX_ELF_SIZE: usize = 64 * 1024;
@@ -939,7 +939,7 @@ fn supervise_launch(pid: usize, domain: &mut Domain) -> ! {
             launch_fail(domain, pid, b"launch tracee escaped supervision");
         }
         let mut registers = core::mem::MaybeUninit::<UserRegs>::uninit();
-        if ptrace(PTRACE_GETREGS, pid, 0, registers.as_mut_ptr() as usize) < 0 {
+        if read_user_regs(pid, 0, registers.as_mut_ptr() as usize) < 0 {
             launch_fail(domain, pid, b"launch register read failed");
         }
         let mut registers = unsafe { registers.assume_init() };
@@ -947,7 +947,7 @@ fn supervise_launch(pid: usize, domain: &mut Domain) -> ! {
         if awaiting_exit {
             if override_exit {
                 registers.rax = override_result as u64;
-                if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0 {
+                if write_user_regs(pid, 0, &registers as *const _ as usize) < 0 {
                     launch_fail(domain, pid, b"launch result override failed");
                 }
             }
@@ -975,9 +975,9 @@ fn supervise_launch(pid: usize, domain: &mut Domain) -> ! {
             syscall_info.as_mut_ptr() as usize,
         ) < 24
             || syscall_info[0] as u8 != 1
-            || (syscall_info[0] >> 32) as u32 != 0xc000003e
+            || (syscall_info[0] >> 32) as u32 != AUDIT_ARCH
         {
-            launch_fail(domain, pid, b"launch requires the x86-64 syscall ABI");
+            launch_fail(domain, pid, ABI_REJECT_LAUNCH);
         }
         sequence += 1;
         let syscall = registers.orig_rax;
@@ -999,7 +999,7 @@ fn supervise_launch(pid: usize, domain: &mut Domain) -> ! {
                 awaiting_exit = true;
                 override_exit = true;
                 override_result = result;
-                if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0
+                if write_user_regs(pid, 0, &registers as *const _ as usize) < 0
                     || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0
                 {
                     launch_fail(domain, pid, b"launch lane emulation failed");
@@ -1022,7 +1022,7 @@ fn supervise_launch(pid: usize, domain: &mut Domain) -> ! {
                 awaiting_exit = true;
                 override_exit = true;
                 override_result = result;
-                if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0
+                if write_user_regs(pid, 0, &registers as *const _ as usize) < 0
                     || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0
                 {
                     launch_fail(domain, pid, b"launch getpid emulation failed");
@@ -1055,7 +1055,7 @@ fn supervise_launch(pid: usize, domain: &mut Domain) -> ! {
                 awaiting_exit = true;
                 override_exit = true;
                 override_result = -1;
-                if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0
+                if write_user_regs(pid, 0, &registers as *const _ as usize) < 0
                     || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0
                 {
                     launch_fail(domain, pid, b"launch argument denial failed");
@@ -1069,7 +1069,7 @@ fn supervise_launch(pid: usize, domain: &mut Domain) -> ! {
                 awaiting_exit = true;
                 override_exit = true;
                 override_result = -(errno as i64);
-                if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0
+                if write_user_regs(pid, 0, &registers as *const _ as usize) < 0
                     || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0
                 {
                     launch_fail(domain, pid, b"launch syscall denial failed");

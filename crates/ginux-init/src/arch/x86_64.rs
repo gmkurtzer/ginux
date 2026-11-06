@@ -163,6 +163,31 @@ pub unsafe fn syscall5(
     result
 }
 
+pub const AUDIT_ARCH: u32 = 0xc000_003e;
+pub const ABI_REJECT_PROCESS: &[u8] = b"process requires the x86-64 syscall ABI";
+pub const ABI_REJECT_NATIVE: &[u8] = b"native requires the x86-64 syscall ABI";
+pub const ABI_REJECT_LAUNCH: &[u8] = b"launch requires the x86-64 syscall ABI";
+const SYSCALL_INSN_LEN: u64 = 2;
+
+pub fn read_user_regs(pid: usize, addr: usize, data: usize) -> isize {
+    crate::supervisor::ptrace(crate::supervisor::PTRACE_GETREGS, pid, addr, data)
+}
+
+pub fn write_user_regs(pid: usize, addr: usize, data: usize) -> isize {
+    crate::supervisor::ptrace(crate::supervisor::PTRACE_SETREGS, pid, addr, data)
+}
+
+/// Plant an `int3` in the low byte of a peeked instruction word.
+pub fn breakpoint_trap_word(word: usize) -> usize {
+    (word & !0xff) | 0xcc
+}
+
+/// Rewind the x86_64 `syscall` instruction and restore its number in `rax`.
+pub fn prepare_syscall_restart(regs: &mut crate::supervisor::UserRegs, syscall: u64) {
+    regs.rip = regs.rip.wrapping_sub(SYSCALL_INSN_LEN);
+    regs.rax = syscall;
+}
+
 #[inline(always)]
 pub unsafe fn syscall6(
     number: usize,

@@ -3,10 +3,10 @@
 ## Current checkpoint
 
 - Active fork work is the arm64 port authorized on 2026-11-06. Gate 15
-  (userspace daemon) is technically passed and awaiting human review of its
-  pull request. Gate 16 (domain mediation) is next in the authorized batch.
-  Gates 9.75, 10, 11, and 13 remain the upstream product sequence and have
-  not been started by this port.
+  (userspace daemon) and gate 16 (domain mediation) are technically passed
+  and awaiting human review of their pull requests. Gate 17 (legacy kernel)
+  is next in the authorized batch. Gates 9.75, 10, 11, and 13 remain the
+  upstream product sequence and have not been started by this port.
 - Gate 1 is accepted and closed under the corrected ordinary-host-process
   architecture. Pull request https://github.com/gmkurtzer/ginux-us/pull/1 was
   merged by the human on 2026-11-04.
@@ -80,8 +80,8 @@ scope, threat model, and invariants.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: 15, technically passed, pull request pending human review.
-  The authorized batch continues at gate 16. Gate 9.75 remains the next
+- Active gate: 16, technically passed, pull request pending human review.
+  The authorized batch continues at gate 17. Gate 9.75 remains the next
   upstream product checkpoint and is not the active fork task.
 - Last evidence: `make test-systemd-interactive` passed from a clean isolated
   overlay with `ps -ef` at 309 ms, `top -b -n 1` at 913 ms, and valid Bash
@@ -389,18 +389,18 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Finish gate 16 on its own branch from the gate 15 branch: aarch64 domain
-mediation (register file, ptrace regset, guest syscall numbers) while the
-x86_64 mediation path still builds. Open that stage's pull request when it
-builds. The legacy kernel is gate 17 after that. Upstream gate 9.75 stays
-queued behind human acceptance and is not this fork's next edit.
+Start gate 17 from this branch: bring upstream `bootable-kernel` /
+`bootable-kernel-final` into the fork without dropping the userspace tree,
+and port that legacy kernel to `qemu-system-aarch64`. Open its pull request
+when it builds. Upstream gate 9.75 stays queued and is not this fork's next
+edit.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: 15, technically passed. Gate 16 is the next authorized fork
+- Active gate: 16, technically passed. Gate 17 is the next authorized fork
   stage. Gate 9.75 remains the next upstream product checkpoint and has not
   started.
 - Last evidence: `make demo-gate-9.5`, `make test-systemd-interactive`,

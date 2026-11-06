@@ -169,10 +169,18 @@ make arch-smoke          # x86_64: ginux arch, then usage on stderr
 make arch-smoke-arm64    # same probe under qemu-aarch64-static
 ```
 
-`ginux arch` prints `GINUX_ARCH: <arch>` and `GINUX_ARCH: fork=ok`. Domain
-mediation of a traced workload is still the x86_64 Linux ABI; the arm64
-daemon probe only exercises the daemon's own entry, write, exit, fork, and
-wait path. Fixture binaries that are x86_64 assembly stay on `make build`.
+`ginux arch` prints `GINUX_ARCH: <arch>` and `GINUX_ARCH: fork=ok`. That probe
+exercises the daemon's own entry, write, exit, fork, and wait path.
+
+Domain mediation on aarch64 reads `PTRACE_GETREGSET` (`NT_PRSTATUS` and
+`NT_ARM_SYSTEM_CALL`) and translates the generic syscall numbers to the
+x86_64 numbers the contract already uses, then translates them back before a
+host syscall runs. `fork` has no aarch64 entry, so a traced `fork` cannot be
+restarted as a host `fork`; traced process creation is `clone`. The security
+interpreter still decodes x86_64 ELF. Fixture binaries that are x86_64
+assembly stay on `make build`. An aarch64 kernel is required to execute this
+mediation path; `qemu-aarch64-static` on an x86_64 host cannot ptrace an
+aarch64 tracee.
 
 Inspect the latest completed capability directly:
 

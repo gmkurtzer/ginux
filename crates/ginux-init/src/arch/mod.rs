@@ -1,10 +1,10 @@
 //! Architecture-specific daemon entry and host syscall ABI.
 //!
 //! One binary targets one architecture. x86_64 and aarch64 each own their
-//! startup sequence, syscall instruction, and host syscall numbers. Domain
-//! mediation of a traced workload stays in the supervisor and uses the
-//! x86_64 Linux register and syscall vocabulary until the arm64 mediation
-//! stage replaces it.
+//! startup sequence, syscall instruction, host syscall numbers, and ptrace
+//! register file. Domain decisions stay in x86_64 syscall numbers. The
+//! aarch64 file translates `user_pt_regs` and the generic syscall table at
+//! the ptrace boundary.
 
 #[cfg(target_arch = "x86_64")]
 mod x86_64;

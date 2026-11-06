@@ -1,5 +1,8 @@
 #![no_std]
 
+mod syscall_map;
+pub use syscall_map::{to_aarch64, to_x86};
+
 pub const SYS_WRITE: u64 = 1;
 pub const SYS_GETPID: u64 = 39;
 pub const SYS_FORK: u64 = 57;
