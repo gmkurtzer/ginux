@@ -100,4 +100,6 @@ EOF
 mv "$identity_tmp" "$identity"
 trap - 0 HUP INT TERM
 cleanup
-printf 'OCI_PREPARE: rootfs=%s layers=%s whiteouts=applied\n' "$rootfs" "$layer_count"
+if ! oci_human_output; then
+    printf 'OCI_PREPARE: rootfs=%s layers=%s whiteouts=applied\n' "$rootfs" "$layer_count"
+fi

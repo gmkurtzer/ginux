@@ -338,18 +338,22 @@ $2"
         printf 'unsupported configured image: %s\n' "$configured_root" >&2
         exit 65
     fi
+    printf 'Creating instance "%s"\n' "$name"
     GINUX_OCI_CONFIG_FILE=$image_config \
         GINUX_OCI_CACHE_DIR_OVERRIDE=$image_cache \
         GINUX_OCI_WORK_DIR_OVERRIDE=$state_root/work/oci \
         GINUX_OCI_NATIVE_ROOTFS_ONLY=1 \
+        GINUX_OCI_OUTPUT=human \
         "$image_tools/ensure-rocky-oci.sh"
+    printf '  Preparing instance... '
     mkdir -p "$directory/root"
     install -m 600 "$effective" "$directory/config.toml"
     tar -xf "$image_tar" -C "$directory/root"
     prepare_root "$directory/root"
+    printf 'done\n'
     trap - 0 HUP INT TERM
     cleanup_effective
-    printf '%s: created\n' "$name"
+    printf 'Instance "%s" created.\n' "$name"
 }
 
 list_instances() {

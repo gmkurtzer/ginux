@@ -1,6 +1,8 @@
 #!/usr/bin/expect -f
 
-set env(ROCKY_SSH_PORT) 22409
+if {![info exists env(ROCKY_SSH_PORT)]} {
+    set env(ROCKY_SSH_PORT) 22409
+}
 set env(ROCKY_PID_FILE) build/rocky-test-host.pid
 set env(ROCKY_SERIAL_LOG) build/rocky-test-host-serial.log
 set env(ROCKY_OVERLAY_DISK) build/rocky-test-host-overlay.qcow2
@@ -53,22 +55,27 @@ expect {
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
 send -- "ginux instance create rocky --config /etc/ginux/examples/rocky-systemd.toml\r"
 expect {
-    -re {OCI_CACHE: miss} {}
+    -re {Creating instance "rocky"} {}
+    timeout { puts stderr "first instance creation did not begin"; exit 159 }
+    eof { puts stderr "Rocky host shell exited before image acquisition"; exit 160 }
+}
+expect {
+    -re {  Cache: miss} {}
     timeout { puts stderr "first instance creation did not report an OCI cache miss"; exit 159 }
     eof { puts stderr "Rocky host shell exited before image acquisition"; exit 160 }
 }
 expect {
-    -re {OCI_FETCH: downloading layer [0-9]+/[0-9]+ digest=sha256:[0-9a-f]+ size=[0-9]+ bytes} {}
+    -re {Layer 1/[0-9]+} {}
     timeout { puts stderr "OCI layer download progress did not begin"; exit 161 }
     eof { puts stderr "Rocky host shell exited during layer acquisition"; exit 162 }
 }
 expect {
-    -re {OCI_FETCH: downloaded layer [0-9]+/[0-9]+ digest=sha256:[0-9a-f]+ size=[0-9]+ bytes} {}
+    -re {  Verification: passed} {}
     timeout { puts stderr "OCI layer download completion was not reported"; exit 163 }
     eof { puts stderr "Rocky host shell exited during layer acquisition"; exit 164 }
 }
 expect {
-    -re {rocky: created} {}
+    -re {Instance "rocky" created.} {}
     timeout { puts stderr "instance creation timed out"; exit 76 }
     eof { puts stderr "Rocky host shell exited during instance creation"; exit 77 }
 }
@@ -82,12 +89,12 @@ expect {
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
 send -- "sudo unshare -n /usr/local/bin/ginux instance create cache-check --config /etc/ginux/examples/rocky-systemd.toml\r"
 expect {
-    -re {OCI_CACHE: hit} {}
+    -re {  Cache: hit} {}
     timeout { puts stderr "offline create did not report an OCI cache hit"; exit 131 }
     eof { puts stderr "Rocky host shell exited during offline cache check"; exit 132 }
 }
 expect {
-    -re {cache-check: created} {}
+    -re {Instance "cache-check" created.} {}
     timeout { puts stderr "offline cached instance creation timed out"; exit 133 }
     eof { puts stderr "Rocky host shell exited during cached creation"; exit 134 }
 }
@@ -322,12 +329,12 @@ expect {
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
 send -- "test -n \"\$(sudo find /var/lib/ginux/images -mindepth 1 -maxdepth 1 -print -quit)\" && ginux instance status rocky | grep -Fq 'state: stopped' && sudo unshare -n /usr/local/bin/ginux instance create restart-cache --config /etc/ginux/examples/rocky-systemd.toml\r"
 expect {
-    -re {OCI_CACHE: hit} {}
+    -re {  Cache: hit} {}
     timeout { puts stderr "OCI cache or instance state did not persist across Rocky host sessions"; exit 169 }
     eof { puts stderr "second host exited during persistent state check"; exit 170 }
 }
 expect {
-    -re {restart-cache: created} {}
+    -re {Instance "restart-cache" created.} {}
     timeout { puts stderr "cached instance creation on the second host timed out"; exit 171 }
     eof { puts stderr "second host exited during cached instance creation"; exit 172 }
 }

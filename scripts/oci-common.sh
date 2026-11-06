@@ -6,6 +6,27 @@ GINUX_OCI_CONFIG_FILE=${GINUX_OCI_CONFIG_FILE:-./config/rocky-instance-oci.env}
 GINUX_OCI_CACHE_DIR=${GINUX_OCI_CACHE_DIR_OVERRIDE:-$GINUX_OCI_CACHE_DIR}
 GINUX_OCI_BLOBS_DIR=$GINUX_OCI_CACHE_DIR/blobs/sha256
 GINUX_OCI_WORK_DIR=${GINUX_OCI_WORK_DIR_OVERRIDE:-build/oci-work}
+GINUX_OCI_OUTPUT=${GINUX_OCI_OUTPUT:-diagnostic}
+
+oci_human_output() {
+    test "$GINUX_OCI_OUTPUT" = human
+}
+
+oci_human_bytes() {
+    awk -v bytes="$1" 'BEGIN {
+        split("B KiB MiB GiB", units, " ")
+        unit = 1
+        while (bytes >= 1024 && unit < 4) {
+            bytes /= 1024
+            unit++
+        }
+        if (unit == 1) {
+            printf "%.0f %s", bytes, units[unit]
+        } else {
+            printf "%.1f %s", bytes, units[unit]
+        }
+    }'
+}
 
 oci_sha256_file() {
     if command -v sha256sum >/dev/null 2>&1; then

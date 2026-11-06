@@ -30,19 +30,39 @@ prepared_cache_valid() {
 }
 
 if prepared_cache_valid; then
-    printf 'OCI_CACHE: hit image=docker.io/%s@%s rootfs=%s\n' \
-        "$GINUX_OCI_REPOSITORY" "$GINUX_OCI_MANIFEST_DIGEST" "$rootfs"
+    if oci_human_output; then
+        printf '  Image: docker.io/%s:%s (%s/%s)\n' \
+            "$GINUX_OCI_REPOSITORY" "$GINUX_OCI_TAG" \
+            "$GINUX_OCI_PLATFORM_OS" "$GINUX_OCI_PLATFORM_ARCH"
+        printf '  Cache: hit\n'
+    else
+        printf 'OCI_CACHE: hit image=docker.io/%s@%s rootfs=%s\n' \
+            "$GINUX_OCI_REPOSITORY" "$GINUX_OCI_MANIFEST_DIGEST" "$rootfs"
+    fi
     exit 0
 fi
 
-printf 'OCI_CACHE: miss image=docker.io/%s@%s\n' \
-    "$GINUX_OCI_REPOSITORY" "$GINUX_OCI_MANIFEST_DIGEST"
+if oci_human_output; then
+    printf '  Image: docker.io/%s:%s (%s/%s)\n' \
+        "$GINUX_OCI_REPOSITORY" "$GINUX_OCI_TAG" \
+        "$GINUX_OCI_PLATFORM_OS" "$GINUX_OCI_PLATFORM_ARCH"
+    printf '  Cache: miss\n'
+else
+    printf 'OCI_CACHE: miss image=docker.io/%s@%s\n' \
+        "$GINUX_OCI_REPOSITORY" "$GINUX_OCI_MANIFEST_DIGEST"
+fi
 "$script_dir/fetch-rocky-oci.sh"
+oci_human_output && printf '  Verification: passed\n'
 if test "$rootfs_only" = 1; then
+    oci_human_output && printf '  Preparing image... '
     "$script_dir/prepare-rocky-oci-rootfs.sh"
 else
+    oci_human_output && printf '  Preparing image... '
     "$script_dir/prepare-rocky-oci.sh"
 fi
+oci_human_output && printf 'done\n'
 prepared_cache_valid
-printf 'OCI_CACHE: ready image=docker.io/%s@%s rootfs=%s\n' \
-    "$GINUX_OCI_REPOSITORY" "$GINUX_OCI_MANIFEST_DIGEST" "$rootfs"
+if ! oci_human_output; then
+    printf 'OCI_CACHE: ready image=docker.io/%s@%s rootfs=%s\n' \
+        "$GINUX_OCI_REPOSITORY" "$GINUX_OCI_MANIFEST_DIGEST" "$rootfs"
+fi
