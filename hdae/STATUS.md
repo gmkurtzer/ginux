@@ -34,6 +34,9 @@
 - Gate 9.75 was added and authorized on 2026-11-04 for comprehensive domain
   configuration, CLI overrides, network selection and policy, port translation,
   volumes, access, identity, resources, devices, and pre-boot hooks.
+- Gate 9.75 is delivered in open pull request
+  https://github.com/gmkurtzer/ginux/pull/229 from dedicated branch
+  `hdae/domain-specification-network-controls`; it is not merged or closed.
 - Gate 9.75 now has a normalized typed schema and CLI override path plus passing
   Rocky QEMU evidence for interface/source selection, ingress/egress policy,
   translated port ownership, ordinary bind conflicts, network audit records,
@@ -95,8 +98,8 @@ scope, threat model, and invariants.
 - Open decision: none. Human direction on 2026-11-06 selected mediated
   domain-context pre-boot hooks only. Arbitrary host-context hooks are
   unsupported.
-- Exact next action: commit the final evidence, push the dedicated branch, and
-  open the checkpoint pull request for human review.
+- Exact next action: human review of pull request 229 and explicit Gate 9.75
+  acceptance or corrective direction.
 
 ## Evidence
 
@@ -393,8 +396,8 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Commit the final evidence, then deliver the dedicated Gate 9.75 branch and pull
-request for human review.
+Human review of https://github.com/gmkurtzer/ginux/pull/229 followed by explicit
+Gate 9.75 acceptance or corrective direction.
 
 ## Context recovery
 
@@ -402,8 +405,8 @@ request for human review.
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
 - Active gate: Gate 9.75 is technically passed on
-  `hdae/domain-specification-network-controls` and awaits delivery and human
-  checkpoint review.
+  `hdae/domain-specification-network-controls`, is delivered in pull request
+  229, and awaits human checkpoint review.
 - Last evidence: `make demo-gate-9.75`, `make check`, `make test-systemd`, and
   aggregate `make test` passed; the aggregate run completed process and kernel
   view QEMU integration.
@@ -411,5 +414,6 @@ request for human review.
   outbound networking with normal host routing and bind conflicts, under Ginux
   mediation and audit. Gate 9.75 adds comprehensive domain configuration,
   network selection, port controls, and translation.
-- Required human decision: none until the Gate 9.75 demonstration and pull
-  request checkpoint.
+- Pull request: https://github.com/gmkurtzer/ginux/pull/229; open and awaiting
+  human checkpoint review.
+- Required human decision: accept Gate 9.75 or provide corrective direction.
