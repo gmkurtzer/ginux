@@ -82,7 +82,7 @@
   Bash reported valid child user/system timing. The complete interactive,
   systemd, and aggregate test matrices pass.
 - Gate 10.25 implementation is complete on `hdae/domain-to-instance` and ready
-  for its pull-request checkpoint. The active product now uses `instance`
+  for review in https://github.com/gmkurtzer/ginux/pull/235. The active product now uses `instance`
   consistently across CLI, schema, Rust APIs, persistence, audit, tests, and
   documentation; there are no compatibility aliases. Static checks reject
   stale terminology, and the legacy CLI noun and TOML table fail closed.
