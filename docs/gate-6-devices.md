@@ -8,11 +8,11 @@ make demo-gate-6
 
 The target boots the cached Rocky Linux 10 x86-64 host under QEMU TCG and
 runs Ginux as an ordinary host process. Ginux reads
-`config/domain-gate6.toml`, projects only its six assigned virtual devices,
+`config/instance-gate6.toml`, projects only its six assigned virtual devices,
 and exercises the console, pseudo-device, bounded block-partition, and isolated
 network frontends.
 
-The disposable 4096-byte block backing is opened only by Ginux. The domain
+The disposable 4096-byte block backing is opened only by Ginux. The instance
 view begins at byte 1024 and is 2048 bytes long. The demonstration checks a
 successful write, read, flush, and close; rejects a write crossing the end;
 and independently confirms bytes before the partition remain zero.

@@ -15,6 +15,6 @@ rm -rf \
     build/bench-baseline.log \
     build/bench-baseline.csv \
     build/bench-baseline-summary.csv \
-    build/rocky-domain-work
+    build/rocky-instance-work
 
 printf '%s\n' 'cleaned generated artifacts; retained build/cache'

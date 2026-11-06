@@ -1,23 +1,23 @@
-# Configurable domain contract
+# Configurable instance contract
 
-Ginux resolves each domain's versioned contract before managed code starts.
+Ginux resolves each instance's versioned contract before managed code starts.
 Runtime enforcement receives only the resulting explicit operation table and
 its deterministic digest; it never evaluates templates or wildcards while a
-domain is running.
+instance is running.
 
 ## Resolution order
 
 1. Catalog-version default deny.
 2. One versioned base profile.
 3. Ordered versioned templates.
-4. Domain `allow` selectors.
-5. Domain `deny` selectors.
+4. Instance `allow` selectors.
+5. Instance `deny` selectors.
 6. Validated command-line overrides, followed by complete re-resolution.
 
 Later layers win. Within one layer, selectors are applied in listed order.
 Exact selectors match one canonical operation; a selector may contain one `*`
-wildcard and must match at least one operation. Domain denies are deliberately
-final, so an allow cannot undo a domain deny. Unknown profiles or templates,
+wildcard and must match at least one operation. Instance denies are deliberately
+final, so an allow cannot undo an instance-level deny. Unknown profiles or templates,
 unversioned names, malformed or empty selectors, unmatched selectors, and a
 supplied digest that differs from the derived digest fail before startup.
 
@@ -44,19 +44,19 @@ deny = ["syscall.clock_settime"]
 ```
 
 `ginux contract-plan CONFIG` prints the catalog version, digest, and every
-explicit rule with its final action and provenance. The normalized domain
+explicit rule with its final action and provenance. The normalized instance
 configuration stores the derived digest; operators do not set it through a
 command-line override.
 
 ## Resource constraints
 
-Canonical operation selectors choose authority families. Typed domain fields
+Canonical operation selectors choose authority families. Typed instance fields
 constrain resources within those families:
 
 - network rules use validated direction, protocol, CIDR/address, and bounded
   port ranges;
 - port forwarding uses explicit protocol and internal/external ports;
-- volume assignments use component-aware absolute domain paths and validated
+- volume assignments use component-aware absolute instance paths and validated
   host sources;
 - device assignments name registry-owned virtual devices;
 - syscall and ioctl implementations validate their operation-specific
@@ -69,8 +69,8 @@ normalization.
 ## Audit bounds
 
 `audit.mode = "stderr"` emits structured native decision records containing
-the domain, contract digest, canonical operation, provenance, action, and
-result. A domain emits at most 8,192 detailed native audit records. Further
+the instance, contract digest, canonical operation, provenance, action, and
+result. A instance emits at most 8,192 detailed native audit records. Further
 records are dropped without buffering; dropped counts are reported at powers
 of two, bounding summary growth to at most 64 lines over a `u64` lifetime.
 `audit.mode = "disabled"` suppresses these records. Audit output never grants

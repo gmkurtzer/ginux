@@ -6,17 +6,17 @@
 Host Linux kernel
   `- Rocky Linux host systemd: real host PID 1
        `- ginux: trusted ordinary host process and userspace kernel
-            `- domain
+            `- instance
                  |- versioned contract and normalized configuration
                  |- virtual CPU contexts and address spaces
                  |- virtual processes, descriptors, devices, and kernel views
-                 `- Rocky Linux systemd: virtual domain PID 1
+                 `- Rocky Linux systemd: virtual instance PID 1
                       `- managed services and processes
 ```
 
 The host boots and operates normally without Ginux replacing its init. Ginux
 remains resident after an operator or host service starts it; it does not
-install restrictions and then disappear. Domain systemd and its descendants
+install restrictions and then disappear. Instance systemd and its descendants
 execute as managed code and see a Linux-compatible interface implemented by
 Ginux.
 
@@ -25,18 +25,18 @@ Ginux.
 1. No managed syscall instruction may complete as an unmediated host syscall.
 2. Every managed syscall stops before execution and enters one central Ginux
    dispatch path before any host effect occurs.
-3. Dispatch first resolves the domain contract, then emulates, performs a
+3. Dispatch first resolves the instance contract, then emulates, performs a
    mediated host operation, or denies the request.
 4. Managed pointers, structures, strings, and ioctl payloads are copied through
    the active backend's controlled memory-access path and validated before use.
 5. Security-profile descriptor numbers resolve only to Ginux objects. The
    balanced native profile may use kernel descriptors solely for immutable OCI
    image content and an explicitly assigned bootstrap console inside a private
-   domain filesystem view. Their use remains syscall-mediated; supervisor or
+   instance filesystem view. Their use remains syscall-mediated; supervisor or
    unrelated host descriptors and host paths are never disclosed.
 6. `/dev`, `/proc`, `/sys`, cgroups, mounts, process identities, and machine
    identity are derived from Ginux state.
-7. Device assignment is explicit and exclusive by default. Domain teardown
+7. Device assignment is explicit and exclusive by default. Instance teardown
    revokes its authority and releases its resources.
 8. Direct device memory, MMIO, DMA, and unknown ioctls are unavailable unless a
    later contract explicitly introduces a separately reviewed safe mechanism.
@@ -49,10 +49,10 @@ Ginux.
 ### Host integration
 
 Ginux is an ordinary Rocky host executable. It validates host prerequisites
-and domain configuration, initializes logging and recovery behavior, opens
-only the host resources needed by configured backends, and starts the domain.
+and instance configuration, initializes logging and recovery behavior, opens
+only the host resources needed by configured backends, and starts the instance.
 Host systemd may supervise Ginux as a service, but manual invocation is the
-Gate 1 baseline. Ginux failure stops its domains without replacing or shutting
+Gate 1 baseline. Ginux failure stops its instances without replacing or shutting
 down the host init system.
 
 ### Execution platform
@@ -61,13 +61,13 @@ Development and verification run on a macOS arm64 host through QEMU TCG
 emulating a normally booted Rocky Linux 10 x86-64 host. Host systemd remains
 real PID 1 and Ginux runs as an ordinary process inside that environment.
 Ginux acts as the application kernel for its managed userspace rather than
-booting another guest Linux kernel beneath the domain. Gate 5 uses native
+booting another guest Linux kernel beneath the instance. Gate 5 uses native
 x86-64 execution supervised by ptrace syscall-entry and syscall-exit stops: the
 host kernel loads the ELF and its interpreter, the host CPU executes
 instructions, and every managed syscall stops before its kernel implementation
 runs. Ginux may then emulate or deny it by replacing the syscall before effect,
 or allow a validated operation to execute and observe its exit. Losing
-supervision terminates the tracee and fails the domain closed. Gate 1's
+supervision terminates the tracee and fails the instance closed. Gate 1's
 `PTRACE_SYSEMU` proof remains the strict no-host-effect interception fixture;
 it cannot by itself execute an approved syscall.
 
@@ -86,7 +86,7 @@ Execution profile and syscall action are separate choices:
   or denied, and descriptors remain Ginux-virtual.
 - **Balanced:** the host executes instructions under ptrace. A minimal,
   validated set of read-only loader, immutable-image, memory, signal, and
-  bootstrap-console operations may continue inside a private domain view.
+  bootstrap-console operations may continue inside a private instance view.
   Writable storage, devices, networking, ioctls, credentials, and virtual
   kernel state are emulated, proxied through Ginux objects, or denied.
 - **Performance:** native execution may use a broader validated passthrough set,
@@ -96,18 +96,18 @@ Gate 5 implements the balanced profile. Backend selection may later be made per
 process, but mixed interpreter/native process semantics are not part of this
 gate.
 
-### Domain memory and task model
+### Instance memory and task model
 
-Ginux owns the domain's virtual identities, descriptors, devices, contract, and
+Ginux owns the instance's virtual identities, descriptors, devices, contract, and
 lifecycle. With native ptrace supervision, host tracees provide address spaces
 and tasks under continuous Ginux supervision; their host identities and
-addresses are never exposed as domain authority. Ginux copies and validates
+addresses are never exposed as instance authority. Ginux copies and validates
 tracee memory before mediation. In interpreter backends, managed virtual
 addresses instead index only Ginux-owned memory and permission metadata.
 
 ### Contract dispatcher
 
-Every syscall and ioctl resolves through a versioned domain contract. A
+Every syscall and ioctl resolves through a versioned instance contract. A
 decision has one of these effects:
 
 - **Emulate:** answer entirely from Ginux state.
@@ -115,7 +115,7 @@ decision has one of these effects:
   Ginux-owned host operation.
 - **Deny:** return the configured Linux-compatible error or terminate the
   managed task when policy requires it.
-- **Audit:** record the decision, relevant normalized arguments, result, domain
+- **Audit:** record the decision, relevant normalized arguments, result, instance
   identity, and contract version without leaking secrets.
 
 There is no unchecked direct-continue action. Balanced and performance
@@ -124,30 +124,30 @@ validation, and their exits are observed and audited.
 
 ### Virtual VFS and image backend
 
-The initial domain root is a digest-pinned Rocky Linux 10 OCI image. An explicit
+The initial instance root is a digest-pinned Rocky Linux 10 OCI image. An explicit
 acquisition operation pulls and verifies its manifest, configuration, and
 layers into a host-owned cache outside Git. Ginux deterministically assembles
 the layers into an immutable indexed virtual root and adds a bounded,
-domain-local writable overlay. The OCI configuration supplies launch metadata,
+instance-local writable overlay. The OCI configuration supplies launch metadata,
 but Ginux—not `runc`, `crun`, `containerd`, or another OCI runtime—constructs
 the execution view and supervises native loading through ptrace syscall stops.
 Managed code
-receives neither host paths nor host descriptors. Ordinary domain starts and
+receives neither host paths nor host descriptors. Ordinary instance starts and
 tests require no network access.
 
 ### Virtual kernel filesystems
 
 - `/dev` resolves names to Ginux device objects.
-- `/proc` describes Ginux-managed processes and domain state.
+- `/proc` describes Ginux-managed processes and instance state.
 - `/sys` describes only contract-visible virtual devices and attributes.
 - `/sys/fs/cgroup` provides the cgroup v2 behavior required by the validated
   systemd baseline.
 
-Host trees are not bind-mounted into the domain.
+Host trees are not bind-mounted into the instance.
 
 ### Device model
 
-A domain configuration assigns device frontends to Ginux-controlled backends.
+An instance configuration assigns device frontends to Ginux-controlled backends.
 Initial device classes include console and pseudo-devices, a file-backed block
 device or bounded partition view, and a virtual network interface. Ginux owns
 backend handles and mediates reads, writes, ioctls, mappings, and lifecycle.
@@ -165,7 +165,7 @@ interface and explicit packet-mediation boundary.
 
 Gate 9 adds the first externally connected backend. Its default `shared` mode
 uses the host network and normal host routing, source-address selection, and
-socket namespace. With no network configuration, domain sockets behave like
+socket namespace. With no network configuration, sockets owned by an instance behave like
 other host applications: outbound and inbound operations are available, and
 normal bind conflicts apply, so the first successful bind owns an address and
 port. Ginux still intercepts, validates, mediates, and audits every managed
@@ -174,48 +174,48 @@ descriptors or an unmediated syscall path.
 
 Gate 9.75 adds explicit selection of a host interface or source address,
 ingress and egress policy, and port translation such as host
-`device-or-address:8080` to domain port `80`. Selecting an attachment such as
-`eth0:1` gives the domain the normal shared use of that complete host network
+`device-or-address:8080` to instance port `80`. Selecting an attachment such as
+`eth0:1` gives the instance the normal shared use of that complete host network
 attachment; it does not reserve the attachment or create an isolated network.
-Two domains attached to the same host network therefore behave like two host
+Two instances attached to the same host network therefore behave like two host
 applications, including first-successful-bind ownership. Translation is the
 explicit exception: Ginux owns the selected external address and port and
-routes it to the configured domain port. These controls use the same network
+routes it to the configured instance port. These controls use the same network
 frontend rather than creating a separate compatibility path.
 
 ### Configuration and lifecycle
 
-Each domain has a versioned configuration containing identity, root image,
+Each instance has a versioned configuration containing identity, root image,
 init, environment, resource limits, execution profile, contract profile,
 storage, devices, networking, audit behavior, and failure policy. The
 execution profile makes the performance/security tradeoff and backend trust
 boundary explicit. Ginux validates and normalizes the complete configuration
 before starting managed code. The effective configuration is immutable
-evidence for that domain instance; mutable runtime controls, if later added,
+evidence for that instance instance; mutable runtime controls, if later added,
 require explicit authorization and audit semantics.
 
-Gate 9.75 expands this into the comprehensive domain specification. It includes
+Gate 9.75 expands this into the comprehensive instance specification. It includes
 hostname, access, volumes and host mappings, network attachment and port
 policy, resources, devices, contract and audit behavior, failure policy, and
 pre-boot hooks with an explicitly defined execution context. Command-line
 arguments may override file values through one typed normalization and
 validation path. Precedence is built-in defaults, then the configuration file,
 then command-line overrides. The normalized effective configuration is
-recorded before domain startup.
+recorded before instance startup.
 
-Gate 9.75 pre-boot hooks execute only as managed domain processes after the
-domain root and declarative resources have been prepared but before the domain
+Gate 9.75 pre-boot hooks execute only as managed instance processes after the
+instance root and declarative resources have been prepared but before the instance
 init process begins. Hooks use the same mediated runtime, effective contract,
-virtual identity, filesystem view, devices, and network policy as the domain;
+virtual identity, filesystem view, devices, and network policy as the instance;
 they receive no host descriptors, paths, credentials, or helper authority.
 Host-side setup remains declarative and is performed only by reviewed Ginux
 backends. Arbitrary host-context hooks are unsupported because they would be
-root-authority extensions to the trusted computing base rather than domain
+root-authority extensions to the trusted computing base rather than protection-domain
 configuration.
 
 ### Observability and benchmarking
 
-Audit events expose contract decisions and domain lifecycle without exposing
+Audit events expose contract decisions and instance lifecycle without exposing
 host authority. Benchmarks compare identical workloads natively, in a
 conventional container, and under Ginux. The suite covers CPU, memory, syscall
 latency, process operations, filesystem and block I/O, networking, boot time,
@@ -240,10 +240,10 @@ standalone kernel remains on `bootable-kernel` and at
 userspace-kernel line. The human approved preserving accepted gate records and
 existing Git history as immutable lineage evidence on 2026-11-04.
 
-Gate 4 selected strict, versioned TOML as the operator-facing domain
+Gate 4 selected strict, versioned TOML as the operator-facing instance
 configuration format with human approval on 2026-11-03.
 
-Gate 5 selected a digest-pinned OCI image as the domain root filesystem, with
+Gate 5 selected a digest-pinned OCI image as the instance root filesystem, with
 Ginux acting as the userspace kernel and runtime. The image is pulled only by
 an explicit acquisition operation, cached outside Git, assembled into an
 immutable indexed virtual root, and paired with a bounded in-memory write
@@ -259,5 +259,5 @@ deferred alternative backend, not a discarded design.
 
 Gate 5 selected the balanced execution profile with human approval on
 2026-11-03. Native tracees may hold kernel descriptors only for immutable image
-content and an assigned bootstrap console within a private domain filesystem
+content and an assigned bootstrap console within a private instance filesystem
 view. Security-sensitive interfaces remain virtualized, proxied, or denied.

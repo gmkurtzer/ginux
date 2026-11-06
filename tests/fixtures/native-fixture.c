@@ -1,6 +1,6 @@
 /* Freestanding x86-64 workload installed as /usr/bin/bash for `ginux native`
  * supervision checks. `native` always runs bash with fixed arguments, so the
- * scenario is read from /scenario in the domain root. */
+ * scenario is read from /scenario in the instance root. */
 typedef unsigned long word;
 
 static long call3(long number, word a, word b, word c)

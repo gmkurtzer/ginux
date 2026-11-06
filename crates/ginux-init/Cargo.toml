@@ -11,7 +11,7 @@ path = "src/main.rs"
 [dependencies]
 ginux-contract = { path = "../ginux-contract" }
 ginux-core = { path = "../ginux-core" }
-ginux-domain = { path = "../ginux-domain" }
+ginux-instance = { path = "../ginux-instance" }
 ginux-devices = { path = "../ginux-devices" }
 ginux-kernel-views = { path = "../ginux-kernel-views" }
 ginux-runtime = { path = "../ginux-runtime" }

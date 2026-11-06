@@ -73,8 +73,8 @@ pub const SIGTERM: usize = 15;
 pub const SIGKILL: usize = 9;
 pub const SIGCHLD: usize = 17;
 pub const PR_SET_NO_NEW_PRIVS: usize = 38;
-pub const DOMAIN_UID: usize = 1000;
-pub const DOMAIN_GID: usize = 1000;
+pub const INSTANCE_UID: usize = 1000;
+pub const INSTANCE_GID: usize = 1000;
 
 #[repr(C)]
 pub struct UserRegs {

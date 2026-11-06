@@ -3,7 +3,7 @@
 ## Name and terminology
 
 **Ginux** is a configurable userspace kernel that runs isolated Linux
-compatibility **domains**. Each domain is governed by a versioned **contract**
+compatibility **instances**. Each instance is governed by a versioned **contract**
 describing the kernel-facing interfaces that it may observe and use.
 
 ## Problem
@@ -34,10 +34,10 @@ rather than an all-or-nothing inheritance from the host kernel.
 The initial milestone will boot a normal Rocky Linux 10 host with systemd as
 the real host PID 1, install Ginux as an ordinary host executable, and run an
 unmodified Rocky Linux 10 systemd userspace as virtual PID 1 inside one Ginux
-domain. Ginux remains resident as the userspace kernel for the processes it
+instance. Ginux remains resident as the userspace kernel for the processes it
 launches. The Rocky host boots from an official, checksum-pinned cloud QCOW2
-image. Each domain virtually boots a digest-pinned Rocky OCI image as its root
-filesystem; Ginux pulls and caches that image explicitly so ordinary domain
+image. Each instance virtually boots a digest-pinned Rocky OCI image as its root
+filesystem; Ginux pulls and caches that image explicitly so ordinary instance
 starts and tests do not require network access.
 
 The milestone succeeds when:
@@ -45,8 +45,8 @@ The milestone succeeds when:
 1. no managed x86-64 syscall completes against the host without a Ginux
    contract decision;
 2. systemd reproducibly reaches the defined multi-user readiness marker;
-3. the domain sees Ginux-owned `/dev`, `/proc`, `/sys`, and cgroup interfaces;
-4. domain configuration selects its image, resources, devices, contract, and
+3. the instance sees Ginux-owned `/dev`, `/proc`, `/sys`, and cgroup interfaces;
+4. instance configuration selects its image, resources, devices, contract, and
    audit behavior;
 5. reproducible benchmarks quantify CPU, memory, syscall, process, storage,
    network, and boot overhead against native and conventional-container
@@ -55,10 +55,10 @@ The milestone succeeds when:
 ## Threat model
 
 The primary adversary controls an unprivileged or privileged process inside a
-domain and may supply malicious binaries, syscall arguments, ioctl payloads,
+instance and may supply malicious binaries, syscall arguments, ioctl payloads,
 filesystem content, network traffic, races, and process interactions. The
-adversary attempts to escape the domain, reach unintended host state, exploit
-the host kernel, weaken the domain contract, or interfere with another domain.
+adversary attempts to escape the instance, reach unintended host state, exploit
+the host kernel, weaken the instance contract, or interfere with another instance.
 
 The host kernel, hardware, Ginux binary and approved configuration, boot chain,
 and operator are initially trusted. Hardware side channels, a compromised host
@@ -83,14 +83,14 @@ solved.
   while limiting passthrough to a minimal confined loader/memory surface; and
   `performance` may permit a broader validated native surface after later
   measurement and review.
-- One Rocky Linux 10 systemd domain from a cached, digest-pinned OCI image.
+- One Rocky Linux 10 systemd instance from a cached, digest-pinned OCI image.
 - Linux ABI interception, emulation, mediated host operations, denial, and
   audit logging.
-- Domain-owned processes, address spaces, file descriptors, virtual kernel
+- Instance-owned processes, address spaces, file descriptors, virtual kernel
   views, configuration, resources, and lifecycle.
 - Virtual console, pseudo-devices, file-backed block devices or bounded
   partitions, an initial host-shared network backend, and later explicit
-  per-domain network selection and policy.
+  per-instance network selection and policy.
 - Deterministic Makefile targets for build, checks, tests, image preparation,
   defensive boundary verification, and benchmarks.
 
@@ -103,10 +103,10 @@ solved.
 - VFIO/IOMMU hardware assignment.
 - Multiple architectures or compatibility ABIs beyond native x86-64.
 - Complete Linux conformance or support for every distribution.
-- KVM acceleration or KVM-specific domain behavior.
+- KVM acceleration or KVM-specific instance behavior.
 - Production readiness, independent security certification, or a universal
   claim that all kernel exploits are prevented.
-- Multiple domains, containers within a domain, live migration, or distributed
+- Multiple instances, containers within an instance, live migration, or distributed
   orchestration. The architecture must not prevent these later milestones.
 
 ## Product principles
@@ -116,10 +116,10 @@ solved.
   are validated before the native backend may resume it; it never means an
   unchecked syscall, descriptor, pointer, or ioctl payload.
 - Unknown contract operations fail closed and produce useful audit evidence.
-- Domain-visible kernel state is Ginux state, not an accidental view of host
+- Instance-visible kernel state is Ginux state, not an accidental view of host
   `/proc`, `/sys`, `/dev`, or cgroups.
 - Device and resource ownership is explicit, exclusive by default, revocable,
-  and bound to domain lifecycle.
+  and bound to instance lifecycle.
 - Host-shared networking still passes through Ginux mediation. Sharing the
   host socket namespace does not create an unchecked syscall path.
 - Compatibility claims are tied to executable tests and named environments.

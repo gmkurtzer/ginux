@@ -8,7 +8,7 @@ BASELINE := target/$(X86_TARGET)/release/baseline-runner
 RUNTIME_FIXTURE := target/$(X86_TARGET)/release/runtime-fixture
 PROCESS_NATIVE_FIXTURE := target/$(X86_TARGET)/release/process-native-fixture
 
-.PHONY: doctor host-image-fetch host-image-verify host-boot-test image-helper-fetch image-prepare domain-image-fetch domain-image-verify domain-image-prepare systemd-image-fetch systemd-image-verify systemd-image-prepare test-image test-oci-image test-oci-layers test-vfs test-native-vfs image-cache-clean build check-name check contract-doc test-contract test-contract-runtime test test-unit test-intercept test-runtime test-config test-domain test-process build-process-fixtures test-process-native test-devices test-kernel-views test-systemd test-systemd-live test-systemd-interactive test-gate975-network test-gate975-hooks test-cgroup test-block test-network run-host run-systemd bench bench-baseline bench-block bench-network demo-gate-1 demo-gate-2 demo-gate-3 demo-gate-4 demo-gate-5 demo-gate-6 demo-gate-7 demo-gate-8 demo-gate-9 demo-gate-9.5 demo-gate-9.75 demo-gate-10 clean
+.PHONY: doctor host-image-fetch host-image-verify host-boot-test image-helper-fetch image-prepare instance-image-fetch instance-image-verify instance-image-prepare systemd-image-fetch systemd-image-verify systemd-image-prepare test-image test-oci-image test-oci-layers test-vfs test-native-vfs image-cache-clean build check-name check contract-doc test-contract test-contract-runtime test test-unit test-intercept test-runtime test-config test-instance test-process build-process-fixtures test-process-native test-devices test-kernel-views test-systemd test-systemd-live test-systemd-interactive test-gate975-network test-gate975-hooks test-cgroup test-block test-network run-host run-systemd bench bench-baseline bench-block bench-network demo-gate-1 demo-gate-2 demo-gate-3 demo-gate-4 demo-gate-5 demo-gate-6 demo-gate-7 demo-gate-8 demo-gate-9 demo-gate-9.5 demo-gate-9.75 demo-gate-10 clean
 
 doctor:
 	@./scripts/doctor.sh
@@ -23,18 +23,18 @@ host-boot-test: build
 	@./scripts/with-rocky-host.sh ./scripts/check-rocky-host.sh
 
 image-helper-fetch:
-	@./scripts/fetch-rocky-domain-helper.sh
+	@./scripts/fetch-rocky-instance-helper.sh
 
 image-prepare:
-	@./scripts/prepare-rocky-domain.sh
+	@./scripts/prepare-rocky-instance.sh
 
-domain-image-fetch:
+instance-image-fetch:
 	@./scripts/fetch-rocky-oci.sh
 
-domain-image-verify:
+instance-image-verify:
 	@./scripts/verify-rocky-oci.sh
 
-domain-image-prepare:
+instance-image-prepare:
 	@./scripts/prepare-rocky-oci.sh
 
 systemd-image-fetch:
@@ -47,7 +47,7 @@ systemd-image-prepare:
 	@GINUX_OCI_CONFIG_FILE=./config/rocky-systemd-oci.env ./scripts/prepare-rocky-oci.sh
 
 test-image:
-	@./scripts/test-rocky-domain.sh
+	@./scripts/test-rocky-instance.sh
 
 test-oci-image:
 	@./scripts/test-rocky-oci.sh
@@ -56,7 +56,7 @@ test-oci-layers:
 	@./scripts/test-oci-layers.sh
 
 image-cache-clean:
-	rm -rf build/cache/domain
+	rm -rf build/cache/instance
 
 build:
 	cargo build -p ginux-init --target $(X86_TARGET) --release
@@ -82,7 +82,7 @@ check: check-name
 	cargo fmt --check
 	cargo clippy -p ginux-contract --all-targets -- -D warnings
 	cargo clippy -p ginux-core --all-targets -- -D warnings
-	cargo clippy -p ginux-domain --all-targets -- -D warnings
+	cargo clippy -p ginux-instance --all-targets -- -D warnings
 	cargo clippy -p ginux-devices --all-targets -- -D warnings
 	cargo clippy -p ginux-init --bin ginux --target $(X86_TARGET) --release -- -D warnings
 	cargo clippy -p ginux-kernel-views --all-targets -- -D warnings
@@ -99,16 +99,16 @@ contract-doc:
 	cargo run -q -p ginux-contract --bin contract-doc -- --write docs/abi-contract-coverage.md
 
 test-contract:
-	cargo test -p ginux-contract -p ginux-domain
+	cargo test -p ginux-contract -p ginux-instance
 	cargo run -q -p ginux-contract --bin contract-doc -- --check docs/abi-contract-coverage.md
 
-test-contract-runtime: build domain-image-prepare
+test-contract-runtime: build instance-image-prepare
 	@./scripts/with-rocky-host.sh ./scripts/test-contract-runtime.sh
 
 test-unit:
 	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-core
 	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-contract
-	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-domain
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-instance
 	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-devices
 	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-runtime
 	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-process
@@ -133,8 +133,8 @@ test-runtime: build
 test-config: build
 	@./scripts/with-rocky-host.sh ./scripts/test-config.sh
 
-test-domain: build
-	@./scripts/with-rocky-host.sh ./scripts/test-domain.sh
+test-instance: build
+	@./scripts/with-rocky-host.sh ./scripts/test-instance.sh
 
 test-process: build
 	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-process
@@ -179,13 +179,13 @@ run-host: build
 
 run-systemd: run-host
 
-test-vfs: build domain-image-prepare
+test-vfs: build instance-image-prepare
 	@./scripts/with-rocky-host.sh ./scripts/test-vfs.sh
 
-test-native-vfs: build domain-image-prepare
+test-native-vfs: build instance-image-prepare
 	@./scripts/with-rocky-host.sh ./scripts/test-native-vfs.sh
 
-test: check test-unit test-intercept test-runtime test-config test-domain test-image test-devices test-process test-kernel-views
+test: check test-unit test-intercept test-runtime test-config test-instance test-image test-devices test-process test-kernel-views
 
 bench-baseline: build
 	@./scripts/with-rocky-host.sh ./scripts/bench-baseline.sh
@@ -211,7 +211,7 @@ demo-gate-3: doctor build
 demo-gate-4: doctor build
 	@./scripts/with-rocky-host.sh ./scripts/demo-gate-4.sh
 
-demo-gate-5: doctor build domain-image-prepare
+demo-gate-5: doctor build instance-image-prepare
 	@./scripts/with-rocky-host.sh ./scripts/demo-gate-5.sh
 
 demo-gate-6: doctor build

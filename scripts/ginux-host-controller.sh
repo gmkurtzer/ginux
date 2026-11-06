@@ -1,21 +1,21 @@
 #!/bin/sh
 set -eu
 
-helper=/usr/local/libexec/ginux-domain-helper
+helper=/usr/local/libexec/ginux-instance-helper
 
 usage() {
     printf '%s\n' 'usage:' >&2
-    printf '%s\n' '  ginux domain create NAME --config FILE [--set KEY=TOML_VALUE]...' >&2
-    printf '%s\n' '  ginux domain list' >&2
-    printf '%s\n' '  ginux domain start NAME [--attach]' >&2
-    printf '%s\n' '  ginux domain attach NAME' >&2
-    printf '%s\n' '  ginux domain status NAME' >&2
-    printf '%s\n' '  ginux domain stop NAME' >&2
+    printf '%s\n' '  ginux instance create NAME --config FILE [--set KEY=TOML_VALUE]...' >&2
+    printf '%s\n' '  ginux instance list' >&2
+    printf '%s\n' '  ginux instance start NAME [--attach]' >&2
+    printf '%s\n' '  ginux instance attach NAME' >&2
+    printf '%s\n' '  ginux instance status NAME' >&2
+    printf '%s\n' '  ginux instance stop NAME' >&2
     exit 64
 }
 
 test "$#" -ge 2 || usage
-test "$1" = domain || usage
+test "$1" = instance || usage
 shift
 
 command=$1

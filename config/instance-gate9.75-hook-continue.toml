@@ -1,0 +1,43 @@
+schema_version = 1
+
+[instance]
+id = "gate975-hook-continue"
+root = "docker.io/rockylinux/rockylinux@sha256:7a18ce2c9c1e0d8735f3e72685f9666150af25036e7f7b5ee4eede3754496f8c"
+init = "/usr/bin/test"
+args = ["-f", "/run/ginux-hook-continued"]
+environment = ["container=ginux"]
+
+[resources]
+vcpus = 1
+memory_mib = 256
+
+[execution]
+profile = "balanced"
+backend = "ptrace-native"
+
+[contract]
+profile = "gate9-systemd-v1"
+
+[storage]
+assignments = ["root-overlay"]
+
+[devices]
+assignments = ["null", "zero", "random"]
+
+[network]
+backend = "none"
+
+[access]
+uid = 0
+gid = 0
+
+[hooks]
+pre_boot = ["/usr/bin/false", "/usr/bin/touch /run/ginux-hook-continued"]
+timeout_seconds = 5
+failure = "continue"
+
+[audit]
+mode = "stderr"
+
+[failure]
+policy = "stop"

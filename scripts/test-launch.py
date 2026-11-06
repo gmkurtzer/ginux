@@ -16,7 +16,7 @@ def main():
     if len(sys.argv) != 3 or os.geteuid() != 0:
         sys.exit("usage (as root): test-launch.py <ginux binary> <launch fixture>")
     binary, fixture = (str(Path(arg).resolve()) for arg in sys.argv[1:])
-    template = (Path(__file__).resolve().parent.parent / "config/domain-gate5.toml").read_text()
+    template = (Path(__file__).resolve().parent.parent / "config/instance-gate5.toml").read_text()
     with tempfile.TemporaryDirectory(prefix="ginux-launch-") as directory:
         work = Path(directory)
         # CI checkouts may live below a private home directory. The

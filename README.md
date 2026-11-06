@@ -1,7 +1,7 @@
 # Ginux
 
 **Ginux is a configurable userspace kernel for isolated Linux compatibility
-domains.** It runs as an ordinary Linux process and places an explicit,
+instances.** It runs as an ordinary Linux process and places an explicit,
 versioned contract between managed workloads and the host kernel.
 
 > [!IMPORTANT]
@@ -31,12 +31,12 @@ preserve a broad userspace ABI; as Linus Torvalds put it, **“And we simply do
 not break user space.”** The
 [kernel regression documentation](https://docs.kernel.org/process/handling-regressions.html)
 records that rule. Ginux can sit above Linux and deliberately offer a smaller
-contract to each managed domain. Before a managed syscall has a host effect,
+contract to each managed instance. Before a managed syscall has a host effect,
 Ginux decides whether to emulate it, perform a validated mediated operation,
 or deny it.
 
 Put bluntly: **Linux must not break userspace; Ginux is designed to break the
-full Linux ABI guarantee deliberately and selectively.** A domain receives
+full Linux ABI guarantee deliberately and selectively.** A instance receives
 only the capabilities and interface behavior its approved workload requires.
 Every departure is intended to be explicit, versioned, reviewable, and tested,
 rather than accidental incompatibility.
@@ -53,16 +53,16 @@ into a product.
 Host Linux kernel
   `- host systemd (real PID 1)
        `- ginux (ordinary trusted host process)
-            `- domain contract
+            `- instance contract
                  |- virtual processes and identities
                  |- virtual descriptors and kernel views
                  |- assigned devices and resources
                  `- managed Rocky Linux userspace
-                      `- domain systemd (virtual PID 1)
+                      `- instance systemd (virtual PID 1)
 ```
 
 Ginux supervises native x86-64 programs and intercepts managed syscalls before
-their host effect. Its central dispatcher resolves the domain contract and
+their host effect. Its central dispatcher resolves the instance contract and
 chooses one of three outcomes:
 
 - **Emulate:** answer entirely from Ginux-owned state.
@@ -73,7 +73,7 @@ chooses one of three outcomes:
 The current implementation includes:
 
 - a security-focused x86-64 interpreter and a balanced native ptrace backend;
-- strict, versioned domain configuration and lifecycle;
+- strict, versioned instance configuration and lifecycle;
 - a digest-pinned OCI root, immutable filesystem index, and bounded overlay;
 - Ginux-owned process, credential, signal, synchronization, timer, and event
   models;
@@ -83,7 +83,7 @@ The current implementation includes:
 - a host-shared network backend that remains syscall-mediated; and
 - a pinned Rocky Linux 10 systemd baseline that reaches `multi-user.target`,
   authenticates a managed console login, updates through Rocky's enabled
-  repositories, and shuts the domain down cleanly.
+  repositories, and shuts the instance down cleanly.
 
 This is a named compatibility baseline, not a claim of complete Linux or
 systemd compatibility. Its exact image, readiness marker, tests, evidence, and
@@ -96,7 +96,7 @@ Ginux is also being tested as a containment boundary for AI agents and other
 automated software that can execute commands, modify files, open network
 connections, and start additional processes. Instead of giving an agent the
 host's complete Linux ABI, an operator can place its process tree inside a
-domain whose kernel contract exposes only the operations and virtual resources
+instance whose kernel contract exposes only the operations and virtual resources
 required for the task.
 
 The research goal is a reviewable boundary spanning syscalls, ioctls,
@@ -125,7 +125,7 @@ Ginux explores a particular point in that design space:
 | [gVisor](https://gvisor.dev/docs/) | Implements an application kernel in userspace | Closely related model with different compatibility and performance goals |
 | [Gramine](https://gramine.readthedocs.io/en/stable/) | Packages applications with a library OS | Uses manifests and a library-OS boundary |
 | [Proxos](https://www.usenix.org/legacy/events/osdi06/tech/ta-min.html) | Routes calls between private and commodity OSes | Makes trust placement configurable across the syscall interface |
-| **Ginux** | Gives each domain a versioned kernel contract | Treats the declared contract, virtual state, devices, resources, and lifecycle as one reviewable boundary |
+| **Ginux** | Gives each instance a versioned kernel contract | Treats the declared contract, virtual state, devices, resources, and lifecycle as one reviewable boundary |
 
 Ginux does **not** promise the complete Linux ABI. Compatibility claims apply
 only to named contracts, workloads, and executable evidence.
@@ -147,7 +147,7 @@ Prepare the pinned assets with explicit network operations:
 ```sh
 make host-image-fetch
 make image-helper-fetch
-make domain-image-fetch
+make instance-image-fetch
 make systemd-image-fetch
 ```
 
@@ -170,32 +170,32 @@ make demo-gate-9        # Gate 9 checkpoint through the same host workflow
 ```
 
 `make run-host` boots the QEMU Rocky host and logs you into its ordinary shell.
-Ginux is installed in `PATH`. The first `domain create` downloads and verifies
+Ginux is installed in `PATH`. The first `instance create` downloads and verifies
 the pinned Rocky OCI image with live per-layer progress; later creates reuse the
 cache. The writable Rocky host overlay persists across `make run-host` sessions,
-so cached images, domain definitions, roots, and stopped status remain available.
+so cached images, instance definitions, roots, and stopped status remain available.
 A complete first session is:
 
 ```sh
-ginux domain create rocky --config /etc/ginux/examples/rocky-systemd.toml
-ginux domain list
-ginux domain status rocky
-ginux domain start rocky --attach
+ginux instance create rocky --config /etc/ginux/examples/rocky-systemd.toml
+ginux instance list
+ginux instance status rocky
+ginux instance start rocky --attach
 ```
 
-The domain specification also supports typed CLI overrides, network
+The instance specification also supports typed CLI overrides, network
 interface/source selection, ingress and egress port policy, translated ports,
 volumes, virtual identity, and ordered pre-boot hooks. Hooks run only as
-mediated domain processes; Ginux does not support arbitrary host-context hooks.
-See [Gate 9.75 domain specification](docs/gate-9.75-domain-specification.md)
+mediated instance processes; Ginux does not support arbitrary host-context hooks.
+See [Gate 9.75 instance specification](docs/gate-9.75-instance-specification.md)
 for the schema, precedence rules, examples, and verification targets.
 
-The attached terminal becomes the Ginux domain console. Log in as `root` with
+The attached terminal becomes the Ginux instance console. Log in as `root` with
 password `ginux`, explore normally, press `Ctrl-]` to detach while leaving the
-domain running, and run `kill -RTMIN+4 1` as domain root to
+instance running, and run `kill -RTMIN+4 1` as instance root to
 shut down systemd and return to the host. Detached operation uses
-`ginux domain start rocky`, `ginux domain status rocky`, and
-`ginux domain stop rocky`. Exit the Rocky host shell to stop QEMU cleanly.
+`ginux instance start rocky`, `ginux instance status rocky`, and
+`ginux instance stop rocky`. Exit the Rocky host shell to stop QEMU cleanly.
 This stops the VM without deleting its persistent overlay; `make clean` resets
 that host state. `make demo-gate-9` uses the same operator workflow;
 `make run-systemd` remains as a compatibility alias, and
@@ -211,7 +211,7 @@ corresponding files under [`docs/`](docs/) and [`hdae/`](hdae/).
 
 ## Security model and limitations
 
-The primary adversary controls a process inside a domain. The host kernel,
+The primary adversary controls a process inside an instance. The host kernel,
 hardware, Ginux executable and approved configuration, boot chain, and
 operator are currently trusted. The balanced native backend still relies on
 the host for ELF loading, address spaces, page faults, signals, scheduling,
@@ -223,10 +223,10 @@ for production workloads. Unknown contract operations fail closed, but current
 coverage and guarantees are limited to the tested gates.
 
 For agent containment, the protected object is the host and any authority not
-explicitly assigned to the domain. Ginux constrains the Linux processes in
+explicitly assigned to the instance. Ginux constrains the Linux processes in
 which an agent and its tools execute; it does not inspect model reasoning,
 secure an external model provider, or make untrusted code safe outside the
-enforced domain boundary.
+enforced instance boundary.
 
 The full intent, threat model, invariants, and gate plan live in:
 
@@ -269,14 +269,14 @@ Ginux is available under the Apache License 2.0. See [`LICENSE`](LICENSE) and
 ## Configured native launch
 
 On x86-64 Linux, `ginux launch <config> <root> [--result-file <fresh host path>]`
-executes `[domain].init` with the configured arguments and environment inside
+executes `[instance].init` with the configured arguments and environment inside
 the supplied host root directory. The bootstrap requires chroot and credential
 change privileges, and a kernel with `close_range` (Linux 5.9 or later).
 It drops to UID/GID 1000 before executing the workload. The configuration must
 select `profile = "balanced"` and `backend = "ptrace-native"`; storage and device
 assignments are not implemented by this command and are rejected.
 
-`[domain].workdir` is optional and defaults to `/work`; `/` is also supported.
+`[instance].workdir` is optional and defaults to `/work`; `/` is also supported.
 The bootstrap creates the working directory if its parent exists, then enters
 it after dropping privileges. Init and working-directory paths are limited to
 128 bytes and must be absolute without `..` path components. Up to seven
@@ -290,7 +290,7 @@ failure returns 2; supervision or result-writing failure returns 1. Native
 fork, clone, and subsequent exec are unsupported; fork returns `ENOSYS` until
 child supervision is implemented. Non-x86-64 syscall ABIs and job-control
 group stops fail explicitly. Audit output is capped at 64 KiB plus a truncation
-notice. This path does not implement resource quotas from the domain metadata.
+notice. This path does not implement resource quotas from the instance metadata.
 
 When requested, the result file is reserved exclusively before launch, with
 mode 0600 and a maximum path length of 512 bytes. Existing files are never
