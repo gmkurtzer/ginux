@@ -29,20 +29,21 @@
 - Runtime isolation unit: domain.
 - Policy unit: versioned contract.
 - Initial gate map: twelve checkpoint gates at positions 1 through 11 and 13;
-  Gates 1 through 9.75 are accepted and closed. Gate 10 is the active
+  Gates 1 through 10 are accepted and closed. Gate 10.5 is the active discovery
   checkpoint.
 - Gate 9.75 was added and authorized on 2026-11-04 for comprehensive domain
   configuration, CLI overrides, network selection and policy, port translation,
   volumes, access, identity, resources, devices, and pre-boot hooks.
 - Gate 9.75 was accepted and closed by the human on 2026-11-06. Pull request
   https://github.com/gmkurtzer/ginux/pull/229 was merged as `8a475e8b`.
-- Gate 10 is technically passed on `hdae/configurable-contract` and remains a
-  human checkpoint. The versioned catalog contains 182 explicit operations;
+- Gate 10 is accepted and closed on `hdae/configurable-contract`. The versioned
+  catalog contains 182 explicit operations;
   normalized contracts produce immutable digests and provenance; semantic and
   syscall decisions are enforced before host effects; and audit detail is
   bounded to 8,192 records with logarithmic dropped-event accounting.
 - Gate 10 is delivered in open pull request
-  https://github.com/gmkurtzer/ginux/pull/231. It is not merged or accepted.
+  https://github.com/gmkurtzer/ginux/pull/231. The human accepted the gate on
+  2026-11-06, but the pull request remains unmerged.
 - Fresh Gate 10 evidence passed `make test-contract`, `make check`,
   `make test-contract-runtime`, `make test-systemd`, the Gate 9.75 network and
   hook regressions, aggregate `make test`, and `make demo-gate-10`. The demo
@@ -101,15 +102,15 @@ scope, threat model, and invariants.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 10, configurable contract and audit. Its approved delivery
-  branch is `hdae/configurable-contract`.
+- Active gate: Gate 10.5, intuitive contract configuration and UI/UX, is in
+  discovery. No implementation branch or acceptance criteria are approved yet.
 - Last evidence: Gate 10 `make demo-gate-10`, `make check`, `make test-systemd`,
   Gate 9.75 network and hook regressions, and aggregate `make test` passed under
   Rocky QEMU after semantic-family enforcement was enabled.
-- Open decision: none. Gate 10 scope and checkpoint policy are approved.
-- Exact next action: review pull request
-  https://github.com/gmkurtzer/ginux/pull/231 and run or inspect
-  `make demo-gate-10`; Gate 10 awaits explicit human acceptance.
+- Open decision: Gate 10.5 interaction model, configuration abstraction,
+  generated-output ownership, and terminal versus graphical scope.
+- Exact next action: complete the Gate 10.5 discovery conversation and align
+  its scope, syntax, UX, acceptance evidence, branch, and checkpoint policy.
 
 ## Evidence
 
@@ -406,17 +407,16 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Review pull request https://github.com/gmkurtzer/ginux/pull/231 and run or inspect
-`make demo-gate-10`; Gate 10 remains open pending explicit human acceptance.
+Complete Gate 10.5 discovery and alignment. Pull request 231 remains open for
+the human to merge; Gate 10 acceptance does not authorize an agent merge.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 10, configurable contract and audit, is technically passed
-  on `hdae/configurable-contract` and awaits pull-request delivery and human
-  acceptance.
+- Active gate: Gate 10.5, intuitive contract configuration and UI/UX, is in
+  discovery and not yet authorized for implementation.
 - Last evidence: Gate 10 passed 9 contract and 18 domain tests, strict lint,
   real runtime denial with no host mutation, the complete systemd matrix,
   Gate 9.75 networking and hook regressions, aggregate `make test`, and the
@@ -427,5 +427,5 @@ Review pull request https://github.com/gmkurtzer/ginux/pull/231 and run or inspe
   network selection, port controls, and translation.
 - Gate 9.75 closure: pull request 229 merged as `8a475e8b`; human accepted and
   closed the gate on 2026-11-06.
-- Required human decision: accept Gate 10 or request revisions at pull request
-  231 after reviewing the demonstration and evidence.
+- Required human decision: define and approve the Gate 10.5 interaction model,
+  syntax, scope, acceptance evidence, and delivery strategy.
