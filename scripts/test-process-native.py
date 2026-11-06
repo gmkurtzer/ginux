@@ -84,6 +84,9 @@ def main():
         "thread_term": [b"thread term kill=0", b"thread term wait=2", b"thread term status=15"],
         "parked_kill": [b"parked kill wait=2", b"parked kill status=11"],
         "parked_term": [b"parked term kill=0", b"parked term wait=2", b"parked term status=15"],
+        "orphan_reparent": [b"orphan middle wait=2", b"orphan getppid=1", b"orphan wait=3",
+                            b"orphan status=1792"],
+        "orphan_zombie": [b"orphan middle wait=2", b"orphan wait=3", b"orphan status=1792"],
         "ro_status": wait_fault(b"305419896"),
         "bad_status": wait_fault(b"305419896"),
         "bad_rusage": wait_fault(b"10752"),
@@ -119,7 +122,7 @@ def main():
                     "thread_exec", "exec_failure", "thread_reuse", "clone_tid", "vfork",
                     "concurrent_wait", "remaining_wait", "sigpipe", "segv", "thread_segv",
                     "thread_term", "parked_kill", "parked_term", "ro_status", "bad_status", "bad_rusage",
-                    "straddle_status"
+                    "straddle_status", "orphan_reparent", "orphan_zombie"
                 ) else 1
                 deferred_stops = 0
                 for run in range(repetitions):
