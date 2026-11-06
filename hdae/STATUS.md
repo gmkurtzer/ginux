@@ -29,8 +29,8 @@
 - Runtime isolation unit: domain.
 - Policy unit: versioned contract.
 - Initial gate map: twelve checkpoint gates at positions 1 through 11 and 13;
-  Gates 1 through 9.5 are accepted. Gate 9.75 is active in alignment on its
-  dedicated branch.
+  Gates 1 through 9.5 are accepted. Gate 9.75 is technically passed on its
+  dedicated branch and awaits delivery and human review.
 - Gate 9.75 was added and authorized on 2026-11-04 for comprehensive domain
   configuration, CLI overrides, network selection and policy, port translation,
   volumes, access, identity, resources, devices, and pre-boot hooks.
@@ -43,7 +43,8 @@
 - The combined `make demo-gate-9.75` checkpoint passes the complete schema and
   negative validation matrix, source/interface resolution, network policy and
   translation, conflicts and cleanup, and mediated hook behavior. Strict
-  `make check` also passes. Systemd and aggregate regressions remain.
+  `make check`, the complete `make test-systemd` matrix, and aggregate
+  `make test` also pass.
 - Gate 11 was clarified on 2026-11-06 to require a matched native-Rocky versus
   Ginux `sysbench` matrix, native parity as the optimization goal, a default 4%
   per-workload tolerance, and automatic failure for regressions beyond the
@@ -88,14 +89,14 @@ scope, threat model, and invariants.
 - Reload after context shift: required
 - Active gate: Gate 9.75, domain specification and network controls, on
   `hdae/domain-specification-network-controls`.
-- Last evidence: `make demo-gate-9.75` passed the combined Rocky QEMU
-  configuration, network, and hook checkpoint; `make check` and 17 domain unit
-  tests passed.
+- Last evidence: `make demo-gate-9.75`, `make check`, `make test-systemd`, and
+  aggregate `make test` passed. The aggregate run included process supervision
+  and virtual kernel-view integration under Rocky QEMU.
 - Open decision: none. Human direction on 2026-11-06 selected mediated
   domain-context pre-boot hooks only. Arbitrary host-context hooks are
   unsupported.
-- Exact next action: run `make test-systemd` and `make test`, record final
-  evidence, then push the dedicated branch and open the checkpoint PR.
+- Exact next action: commit the final evidence, push the dedicated branch, and
+  open the checkpoint pull request for human review.
 
 ## Evidence
 
@@ -392,19 +393,20 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Run `make test-systemd` and `make test`, record final evidence, then deliver the
-dedicated Gate 9.75 branch and pull request for human review.
+Commit the final evidence, then deliver the dedicated Gate 9.75 branch and pull
+request for human review.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 9.75 is active on
-  `hdae/domain-specification-network-controls`.
-- Last evidence: `make demo-gate-9.75` passed the combined configuration,
-  network, and mediated-hook checkpoint under Rocky QEMU; `make check` and 17
-  domain unit tests also passed.
+- Active gate: Gate 9.75 is technically passed on
+  `hdae/domain-specification-network-controls` and awaits delivery and human
+  checkpoint review.
+- Last evidence: `make demo-gate-9.75`, `make check`, `make test-systemd`, and
+  aggregate `make test` passed; the aggregate run completed process and kernel
+  view QEMU integration.
 - Approved network direction: Gate 9 defaults to full host-shared inbound and
   outbound networking with normal host routing and bind conflicts, under Ginux
   mediation and audit. Gate 9.75 adds comprehensive domain configuration,
