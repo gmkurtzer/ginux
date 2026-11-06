@@ -27,7 +27,7 @@ esac
 
 if test "$command" = start && test "$#" -eq 2 && test "$2" = --attach; then
     name=$1
-    sudo "$helper" start "$name"
+    sudo "$helper" start "$name" --attach
     exec sudo "$helper" attach "$name"
 fi
 

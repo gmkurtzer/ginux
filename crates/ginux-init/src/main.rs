@@ -12,7 +12,9 @@ use ginux_devices::{
     BlockBackend, DeviceError, DeviceKind, DeviceName, DeviceRegistry, DeviceView, IsolatedNetwork,
     Partition, IOCTL_CONSOLE_GET_SIZE,
 };
-use ginux_domain::{ConfigError, Domain, DomainConfig, NetworkBackend};
+use ginux_domain::{
+    ConfigError, Domain, DomainConfig, ExecutionBackend, ExecutionProfile, NetworkBackend,
+};
 use ginux_kernel_views::{
     CgroupFs, IdentityFs, IdentityView, MemoryView, MountView, NamespaceView, ProcFs, SysFs,
     ViewError,
@@ -1481,7 +1483,7 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
 
 fn native_main(config_path: *const u8, root_path: *const u8, mode: usize) -> ! {
     let config = load_config(config_path);
-    print_effective_config(&config);
+    print_domain_start_summary(&config);
     let mode = if mode == 0 && config.contract_profile.as_bytes() == b"gate9-systemd" {
         3
     } else {
@@ -4978,6 +4980,39 @@ fn print_effective_config(config: &DomainConfig) {
     line(b"GINUX_CONFIG_EFFECTIVE_BEGIN");
     write_all(normalized.as_bytes());
     line(b"GINUX_CONFIG_EFFECTIVE_END");
+}
+
+fn print_domain_start_summary(config: &DomainConfig) {
+    write_all(b"GINUX_DOMAIN_START: id=");
+    write_all(config.id.as_bytes());
+    write_all(b" init=\"");
+    write_all(config.init.as_bytes());
+    for argument in config.args.as_slice() {
+        write_all(b" ");
+        write_all(argument.as_bytes());
+    }
+    write_all(b"\" resources=");
+    write_u64(config.vcpus);
+    write_all(b"-vcpu,");
+    write_u64(config.memory_mib);
+    write_all(b"-MiB execution=");
+    write_all(match config.execution_profile {
+        ExecutionProfile::Security => b"security",
+        ExecutionProfile::Balanced => b"balanced",
+        ExecutionProfile::Performance => b"performance",
+    });
+    write_all(b"/");
+    write_all(match config.execution_backend {
+        ExecutionBackend::Interpreter => b"interpreter",
+        ExecutionBackend::PtraceSysemu => b"ptrace-sysemu",
+        ExecutionBackend::PtraceNative => b"ptrace-native",
+    });
+    write_all(b" network=");
+    line(match config.network_backend {
+        NetworkBackend::None => b"none",
+        NetworkBackend::Mediated => b"mediated",
+        NetworkBackend::Shared => b"shared",
+    });
 }
 
 fn lifecycle_state(domain: &Domain) {

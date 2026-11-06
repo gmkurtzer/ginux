@@ -298,8 +298,13 @@ status_domain() {
 }
 
 start_domain() {
-    test "$#" -eq 1 || usage
+    test "$#" -ge 1 && test "$#" -le 2 || usage
     name=$1
+    start_mode=detached
+    if test "$#" -eq 2; then
+        test "$2" = --attach || usage
+        start_mode=attached
+    fi
     validate_name "$name"
     directory=$(domain_dir "$name")
     test -d "$directory" || { printf '%s: not found\n' "$name" >&2; exit 66; }
@@ -326,7 +331,11 @@ start_domain() {
             "$name" "$directory/console.log" "$directory/audit.log" >&2
         exit 70
     fi
-    printf '%s: started detached (supervisor pid %s)\n' "$name" "$pid"
+    if test "$start_mode" = attached; then
+        printf '%s: started (supervisor pid %s); attaching console\n' "$name" "$pid"
+    else
+        printf '%s: started detached (supervisor pid %s)\n' "$name" "$pid"
+    fi
 }
 
 supervise_domain() {
@@ -337,8 +346,11 @@ supervise_domain() {
     test -d "$directory" || { printf '%s: not found\n' "$name" >&2; exit 66; }
     exec 9<>"$directory/console.in"
     set +e
-    script -qefE never -c "$0 run-runtime $name" "$directory/console.log" \
-        <&9 >/dev/null 2>>"$directory/audit.log" &
+    # Let script(1) provide the pseudo-terminal, but record only the runtime
+    # stream. Its normal typescript header/footer are implementation details,
+    # not domain console output.
+    script -qefE never -c "$0 run-runtime $name" /dev/null \
+        <&9 >>"$directory/console.log" 2>>"$directory/audit.log" &
     console_pid=$!
     wait "$console_pid"
     status=$?

@@ -354,9 +354,11 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Present the technically passed Gate 9.5 evidence and exact `make run-host`
-human workflow. Wait for the human to accept or reject the operator experience;
-do not advance to Gate 9.75, push the branch, or open a pull request without
+After the human exits the currently running Rocky host, rerun
+`make test-systemd-interactive` to verify the new timed host-start progress,
+concise domain-start summary, attach-mode message, and transcript-banner
+removal. Then present the updated `make run-host` workflow for acceptance. Do
+not advance to Gate 9.75, push the branch, or open a pull request without
 explicit direction.
 
 ## Context recovery
@@ -373,7 +375,11 @@ explicit direction.
   lifecycle, and stale-state checks. Fresh `make check`, `make test-systemd`,
   aggregate `make test`, and expanded `make test-config` passed. The console
   audit found zero unexpected compatibility diagnostics and narrowly
-  allowlisted the single accurate optional BPF-LSM message.
+  allowlisted the single accurate optional BPF-LSM message. The subsequent
+  reporting and console-polish change passed `make check`, `make test-unit`,
+  shell syntax checks, the release build, and `git diff --check`; its clean
+  QEMU lifecycle rerun is pending because the human's host PID 87517 is still
+  active and must not be interrupted.
 - Approved network direction: Gate 9 defaults to full host-shared inbound and
   outbound networking with normal host routing and bind conflicts, under Ginux
   mediation and audit. Gate 9.75 adds comprehensive domain configuration,

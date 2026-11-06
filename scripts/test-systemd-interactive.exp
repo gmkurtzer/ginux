@@ -7,6 +7,31 @@ set timeout 300
 spawn ./scripts/run-host.sh
 
 expect {
+    -re {Rocky host: cloud-init seed ready} {}
+    timeout { puts stderr "Rocky host preparation progress was not reported"; exit 142 }
+    eof { puts stderr "interactive runner exited during host preparation"; exit 143 }
+}
+expect {
+    -re {Rocky host: \[[0-9]+s\] waiting for SSH} {}
+    timeout { puts stderr "Rocky SSH wait progress was not reported"; exit 144 }
+    eof { puts stderr "interactive runner exited before the SSH wait"; exit 145 }
+}
+expect {
+    -re {Rocky host: \[[0-9]+s\] SSH ready; waiting for cloud-init} {}
+    timeout { puts stderr "Rocky SSH readiness was not reported"; exit 146 }
+    eof { puts stderr "interactive runner exited before cloud-init"; exit 147 }
+}
+expect {
+    -re {Rocky host: \[[0-9]+s\] SSH and cloud-init ready} {}
+    timeout { puts stderr "Rocky cloud-init readiness was not reported"; exit 148 }
+    eof { puts stderr "interactive runner exited before host readiness"; exit 149 }
+}
+expect {
+    -re {Ginux host install: installing controller, runtime, and image tools} {}
+    timeout { puts stderr "Ginux host installation progress was not reported"; exit 150 }
+    eof { puts stderr "interactive runner exited during Ginux installation"; exit 151 }
+}
+expect {
     -re {GINUX_HOST: READY} {}
     timeout { puts stderr "interactive Rocky host timed out"; exit 70 }
     eof { puts stderr "interactive runner exited before host login"; exit 71 }
@@ -77,6 +102,18 @@ expect {
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
 send -- "ginux domain start rocky --attach\r"
 
+expect {
+    -re {rocky: started \(supervisor pid [0-9]+\); attaching console} {}
+    timeout { puts stderr "attached domain start did not report attach mode"; exit 153 }
+    eof { puts stderr "Ginux exited before attaching the domain console"; exit 154 }
+}
+expect {
+    -re {Script started on} { puts stderr "attached console exposed the script transcript header"; exit 152 }
+    -re {GINUX_CONFIG_EFFECTIVE_BEGIN} { puts stderr "attached start exposed the full effective configuration"; exit 139 }
+    -re {GINUX_DOMAIN_START: id=rocky init="/sbin/init --system --unit=multi-user.target" resources=2-vcpu,1024-MiB execution=balanced/ptrace-native network=shared} {}
+    timeout { puts stderr "interactive domain start summary timed out"; exit 140 }
+    eof { puts stderr "Ginux exited before the domain start summary"; exit 141 }
+}
 expect {
     -re {login:} {}
     timeout { puts stderr "interactive domain login timed out"; exit 84 }
