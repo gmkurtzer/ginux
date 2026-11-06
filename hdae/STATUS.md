@@ -354,31 +354,26 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Implement Gate 9.5 criterion 1: remove OCI preparation and image copying from
-`make run-host`, then move verified acquisition and cache reuse into
-`ginux domain create`. Continue through the approved Gate 9.5 implementation
-and test matrix without further checkpoints unless a new architectural decision
-is required.
+Present the technically passed Gate 9.5 evidence and exact `make run-host`
+human workflow. Wait for the human to accept or reject the operator experience;
+do not advance to Gate 9.75, push the branch, or open a pull request without
+explicit direction.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 9.5, systemd usability and operator lifecycle, authorized
-  on dedicated stacked branch `hdae/systemd-usability`; Gate 9 remains
-  technically passed but unaccepted pending this corrective work
-- Last evidence: `make demo-gate-9` passed all 8 checks. `make test-systemd`,
-  `make test-systemd-live`, `make bench`, `make check`, `make test`,
-  `make test-native-vfs`, and `make test-oci-image` passed with the exact
-  measurements and limitations recorded in the Gate 9 ledger. The latest
-  `make test-systemd-interactive` passed the manual-launch interaction sequence,
-  and the latest `make test-systemd` also passed the deterministic DNF-failure,
-  unchanged-readable-RPM-package-set, immutable-base, clean-shutdown, and
-  configured-startup-failure checks after console/audit separation.
-  Fresh `make test-systemd-interactive`, `make check`, `make test-systemd`, and
-  aggregate `make test` passed after the general host and installed controller
-  were implemented.
+- Active gate: Gate 9.5, systemd usability and operator lifecycle, technically
+  passed on dedicated stacked branch `hdae/systemd-usability`; Gates 9 and 9.5
+  remain unaccepted pending the human checkpoint
+- Last evidence: `make demo-gate-9.5` passed empty-cache create-time OCI
+  acquisition, network-disabled cache reuse, configuration-derived runtime,
+  login, Bash job control, procfs, detach, reattach, shutdown, detached
+  lifecycle, and stale-state checks. Fresh `make check`, `make test-systemd`,
+  aggregate `make test`, and expanded `make test-config` passed. The console
+  audit found zero unexpected compatibility diagnostics and narrowly
+  allowlisted the single accurate optional BPF-LSM message.
 - Approved network direction: Gate 9 defaults to full host-shared inbound and
   outbound networking with normal host routing and bind conflicts, under Ginux
   mediation and audit. Gate 9.75 adds comprehensive domain configuration,
