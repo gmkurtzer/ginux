@@ -96,9 +96,8 @@ a controlled shutdown.
 
 ## Remaining work
 
-- [ ] Human checkpoint review and acceptance.
-- [ ] Push the dedicated branch and open the intended pull request when the
-  human explicitly requests remote delivery.
+- None. The human accepted the gate on 2026-11-06 after completing the
+  interactive Gate 9 and Gate 9.5 workflow.
 
 ## Acceptance criteria
 
@@ -263,6 +262,8 @@ a controlled shutdown.
   again passed cold, warm, repeated, DNF-failure, startup-failure, and shutdown
   checks; the aggregate suite passed all 46 component tests and mandatory QEMU
   regressions.
+- Human checkpoint on 2026-11-06 -> Gate 9 accepted together with corrective
+  Gate 9.5 after the interactive operator workflow and final evidence review.
 
 ## Decisions and limitations
 
@@ -335,13 +336,11 @@ a controlled shutdown.
   measurements); `d83995dd` (virtual-PID audit regression); `35e3763c`
   (bounded DNF watchdog); `598b9821` (failed-DNF consistency evidence and exact
   systemd-image targets); `1d90364b` (interactive demonstration); `64510197`
-  (general host and persistent operator lifecycle)
+  (general host and persistent operator lifecycle). The completed Gate 9 and
+  Gate 9.5 work reached `main` through signed merge commit `a8b46d21` rather
+  than through the originally planned standalone Gate 9 pull request.
 
 ## Review policy and outcome
 
-Technically passed pending the human checkpoint. The general Rocky QEMU host,
-installed controller, persistent lifecycle, attached console, detached
-operation, and stale-state behavior have fresh automated evidence. Automated
-evidence does not substitute for the operator running the final workflow and
-judging the experience. Remote branch push and pull-request creation remain
-intentionally pending explicit current authorization under repository policy.
+Passed and accepted. The human completed the operator review and accepted Gate
+9 on 2026-11-06 together with corrective Gate 9.5. This record is closed.
