@@ -78,21 +78,18 @@ scope, threat model, and invariants.
 - Reload after context shift: required
 - Active gate: Gate 9.75, domain specification and network controls. Its
   dedicated branch is `hdae/domain-specification-network-controls`; no
-  implementation has started because the pre-boot hook authority model needs
-  human direction first.
+  implementation has started with the approved domain-only pre-boot hook
+  authority model.
 - Last evidence: `make test-systemd-interactive` passed from a clean isolated
   overlay with `ps -ef` at 309 ms, `top -b -n 1` at 913 ms, and valid Bash
   timing fields, plus cold acquisition, offline cache reuse, retained domain
   state, and restart reuse. `make test-systemd` and aggregate `make test` also
   passed.
-- Open decision: choose whether Gate 9.75 supports only mediated
-  domain-context pre-boot hooks, or also supports explicitly trusted
-  host-context hooks. The current privileged helper assembles domain roots and
-  launches the runtime as root, so a host-context hook would become part of
-  Ginux's trusted computing base and could exercise arbitrary host authority.
-- Exact next action: obtain the human's pre-boot hook authority decision,
-  record it in the open gate and architecture, then implement the normalized
-  domain schema and CLI precedence path.
+- Open decision: none. Human direction on 2026-11-06 selected mediated
+  domain-context pre-boot hooks only. Arbitrary host-context hooks are
+  unsupported.
+- Exact next action: implement the normalized domain schema and CLI precedence
+  path, then proceed to network controls and mediated hook execution.
 
 ## Evidence
 
@@ -389,9 +386,9 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Resolve the Gate 9.75 pre-boot hook execution and authority model with the
-human. Record the selected model in the gate and architecture before any hook
-execution is implemented, then begin the normalized schema and CLI work.
+Implement the Gate 9.75 normalized schema and CLI precedence path under the
+approved domain-only hook model, then proceed to network controls and mediated
+hook execution.
 
 ## Context recovery
 
@@ -409,6 +406,5 @@ execution is implemented, then begin the normalized schema and CLI work.
   outbound networking with normal host routing and bind conflicts, under Ginux
   mediation and audit. Gate 9.75 adds comprehensive domain configuration,
   network selection, port controls, and translation.
-- Required human decision: select mediated domain-context hooks only, or add
-  an explicitly trusted host-context hook class with host-root authority and
-  the corresponding security restrictions.
+- Required human decision: none until the Gate 9.75 demonstration and pull
+  request checkpoint.
