@@ -287,7 +287,7 @@ pub const fn balanced_surface(syscall: u64) -> BalancedSurface {
             BalancedSurface::ImageRead
         }
         9 | 10 | 11 | 12 | 28 => BalancedSurface::Memory,
-        13 | 14 | SYS_FORK | SYS_WAIT4 | 99 | 158 | 202 | 218 | 273 | 302 | 334 => {
+        13 | 14 | SYS_FORK | SYS_WAIT4 | 98 | 99 | 100 | 158 | 202 | 218 | 273 | 302 | 334 => {
             BalancedSurface::Task
         }
         1 | 20 => BalancedSurface::Console,
@@ -450,6 +450,10 @@ mod tests {
         assert_eq!(systemd_surface(290, true), BalancedSurface::Task);
         assert_eq!(decide_systemd(7, true).action, Action::Mediate);
         assert_eq!(systemd_surface(7, true), BalancedSurface::Task);
+        assert_eq!(decide_systemd(100, true).action, Action::Mediate);
+        assert_eq!(systemd_surface(100, true), BalancedSurface::Task);
+        assert_eq!(decide_systemd(98, true).action, Action::Mediate);
+        assert_eq!(systemd_surface(98, true), BalancedSurface::Task);
         assert_eq!(decide_systemd(228, true).action, Action::Mediate);
         assert_eq!(systemd_surface(228, true), BalancedSurface::Task);
         assert_eq!(decide_systemd(271, true).action, Action::Mediate);

@@ -193,6 +193,18 @@ expect {
     eof { puts stderr "domain exited during ps check"; exit 120 }
 }
 expect -re {\[root@ginux [^]]+\]# }
+send -- "start=\$(date +%s%N); TIMEFORMAT='%R %U %S'; { time ps -ef >/tmp/ginux-ps-timed; } 2>/tmp/ginux-time; end=\$(date +%s%N); elapsed_ms=\$(((end-start)/1000000)); timing=\$(cat /tmp/ginux-time); printf 'GINUX_PROC_MEASURE: elapsed_ms=%s timing=%s\\n' \"\$elapsed_ms\" \"\$timing\"; test \"\$elapsed_ms\" -lt 1000 && printf '%s\\n' \"\$timing\" | grep -Eq '^\[0-9\]+(\[.\]\[0-9\]+)? \[0-9\]+(\[.\]\[0-9\]+)? \[0-9\]+(\[.\]\[0-9\]+)?$' && printf 'GINUX_PROC_PERFORMANCE: PASS\\n'\r"
+expect {
+    -re {GINUX_PROC_MEASURE: elapsed_ms=([0-9]+) timing=([0-9.]+) ([0-9.]+) ([0-9.]+)} {}
+    timeout { puts stderr "ps measurement did not produce valid timing fields"; exit 165 }
+    eof { puts stderr "domain exited during proc performance measurement"; exit 166 }
+}
+expect {
+    -re {GINUX_PROC_PERFORMANCE: PASS} {}
+    timeout { puts stderr "ps exceeded the proc refresh budget or shell timing data was invalid"; exit 165 }
+    eof { puts stderr "domain exited during proc performance check"; exit 166 }
+}
+expect -re {\[root@ginux [^]]+\]# }
 send -- "cat /proc/self/status >/tmp/ginux-self-status && cat /proc/self/cmdline >/tmp/ginux-self-cmdline && grep -q '^Pid:' /tmp/ginux-self-status && grep -q '^NSpgid:' /tmp/ginux-self-status && test -s /tmp/ginux-self-cmdline && printf 'GINUX_PROC_%s\\n' 'SELF: PASS'\r"
 expect {
     -re {GINUX_PROC_SELF: PASS} {}
@@ -200,9 +212,9 @@ expect {
     eof { puts stderr "domain exited during proc self check"; exit 122 }
 }
 expect -re {\[root@ginux [^]]+\]# }
-send -- "sh -c 'while :; do :; done' & busy=\$!; sleep 1; before=\$(awk '{print \$14+\$15}' /proc/\$busy/stat); rss=\$(awk '{print \$24}' /proc/\$busy/stat); statm_rss=\$(awk '{print \$2}' /proc/\$busy/statm); sleep 1; after=\$(awk '{print \$14+\$15}' /proc/\$busy/stat); top -b -d 1 -n 2 >/tmp/ginux-top; kill \$busy; wait \$busy 2>/dev/null || true; test \"\$before\" -ge 0 && test \"\$after\" -gt \"\$before\" && test \"\$rss\" -gt 0 && test \"\$statm_rss\" -gt 0 && grep -q '%CPU' /tmp/ginux-top && printf 'GINUX_PROC_%s\\n' 'ACCOUNTING: PASS'\r"
+send -- "sh -c 'while :; do :; done' & busy=\$!; sleep 1; before=\$(awk '{print \$14+\$15}' /proc/\$busy/stat); rss=\$(awk '{print \$24}' /proc/\$busy/stat); statm_rss=\$(awk '{print \$2}' /proc/\$busy/statm); top_start=\$(date +%s%N); top -b -n 1 >/tmp/ginux-top-single; top_end=\$(date +%s%N); top_ms=\$(((top_end-top_start)/1000000)); sleep 1; after=\$(awk '{print \$14+\$15}' /proc/\$busy/stat); top -b -d 1 -n 2 >/tmp/ginux-top; kill \$busy; wait \$busy 2>/dev/null || true; test \"\$before\" -ge 0 && test \"\$after\" -gt \"\$before\" && test \"\$rss\" -gt 0 && test \"\$statm_rss\" -gt 0 && test \"\$top_ms\" -lt 1000 && grep -q '%CPU' /tmp/ginux-top-single && grep -q '%CPU' /tmp/ginux-top && printf 'GINUX_PROC_ACCOUNTING: PASS top_elapsed_ms=%s\\n' \"\$top_ms\"\r"
 expect {
-    -re {GINUX_PROC_ACCOUNTING: PASS} {}
+    -re {GINUX_PROC_ACCOUNTING: PASS top_elapsed_ms=([0-9]+)} {}
     timeout { puts stderr "proc CPU or memory accounting did not update for top-compatible reads"; exit 155 }
     eof { puts stderr "domain exited during proc accounting check"; exit 156 }
 }

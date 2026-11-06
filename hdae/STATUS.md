@@ -46,8 +46,11 @@
 - Gate 9.5 now also reuses the writable Rocky host overlay across
   `make run-host` sessions, preserving verified OCI image content, domain
   definitions, roots, and status, and reports live layer-download progress.
-  Shell syntax, diff checks, `make check`, `make test-unit`, and the isolated
-  two-host `make test-systemd-interactive` regression pass.
+  Synthetic proc refresh is now path-targeted rather than rebuilding the whole
+  proc tree for each open. In a clean QEMU run, `ps -ef` fell from the human's
+  1.871-second reproduction to 309 ms, a single `top` refresh took 913 ms, and
+  Bash reported valid child user/system timing. The complete interactive,
+  systemd, and aggregate test matrices pass.
 - The ordered gate batch is authorized, but every open gate remains a human
   checkpoint requiring a working demonstration and explicit acceptance.
 
@@ -71,10 +74,10 @@ scope, threat model, and invariants.
 - Active gate: Gate 9.5, technically passed and pending the final human
   checkpoint
 - Last evidence: `make test-systemd-interactive` passed from a clean isolated
-  overlay with a cold cache miss and live layer progress, same-session offline
-  cache hit, retained domain state after host restart, and a second-session
-  offline cache hit; shell syntax checks, `git diff --check`, `make check`, and
-  `make test-unit` also passed
+  overlay with `ps -ef` at 309 ms, `top -b -n 1` at 913 ms, and valid Bash
+  timing fields, plus cold acquisition, offline cache reuse, retained domain
+  state, and restart reuse. `make test-systemd` and aggregate `make test` also
+  passed.
 - Open limitation: none; the regression uses isolated port and state paths and
   must not stop or modify a developer VM
 - Exact next action: present the updated `make run-host` workflow for the human
@@ -377,15 +380,10 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-After the human exits the currently running Rocky host, rerun
-`make test-systemd-interactive`. It now verifies the timed host-start progress,
-concise domain-start summary, attach-mode message, transcript-banner removal,
-live Bash and transient `ps` identities, and changing CPU/RSS accounting usable
-by `top`. It also verifies the Ginux userspace-kernel UTS/proc identity and a
-host-derived `/proc/cpuinfo` restricted to the domain's affinity-constrained
-vCPU count. Then rerun the required Gate 9.5 matrix and present the updated
-`make run-host` workflow for acceptance. Do not advance to Gate 9.75, push the
-branch, or open a pull request without explicit direction.
+Present the corrected `make run-host` workflow and measured proc performance
+for the human checkpoint. The human should exercise `ps`, `top`, and shell
+timing interactively and accept or reject Gates 9 and 9.5. Do not advance to
+Gate 9.75, push the branch, or open a pull request without explicit direction.
 
 ## Context recovery
 
