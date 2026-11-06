@@ -99,7 +99,7 @@ ptrace register path and the same contract numbers.
 - Intended base: `cursor/arm64-userspace-daemon-2b05`
 - Pull request: intended on https://github.com/ericvh/ginux-arm64
 - Planned commits: mediation register file and syscall-number map.
-- Actual commits: pending
+- Actual commits: `0c31997c` Mediate aarch64 domain syscalls through the ptrace regset.
 
 ## Review policy and outcome
 
