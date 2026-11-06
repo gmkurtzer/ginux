@@ -77,7 +77,7 @@ entry path and host syscalls follow that architecture.
 - Intended base: `main`
 - Pull request: intended on https://github.com/ericvh/ginux-arm64
 - Planned commits: one commit for the daemon ABI split, probe, and build targets.
-- Actual commits: pending
+- Actual commits: `6f4a25df` Build the userspace daemon for aarch64 and x86_64.
 
 ## Review policy and outcome
 
