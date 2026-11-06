@@ -224,6 +224,7 @@ extern "C" fn rust_main(initial_stack: *const usize) -> ! {
         Some(Command::ConfigMerge(config_path, count, overrides)) => {
             config_merge_main(config_path, count, overrides)
         }
+        Some(Command::ContractPlan(config_path)) => contract_plan_main(config_path),
         Some(Command::HookPlan(config_path)) => hook_plan_main(config_path),
         Some(Command::Lifecycle(config_path)) => lifecycle_main(config_path),
         Some(Command::Vfs(config_path, rootfs_path, index_path)) => {
@@ -3058,7 +3059,11 @@ fn native_main(
         config_rejected(ginux_domain::ConfigError::InvalidValue);
     }
     print_domain_start_summary(&config);
-    let mode = if mode == 0 && config.contract_profile.as_bytes() == b"gate9-systemd-v1" {
+    let systemd_contract = matches!(
+        config.contract_profile.as_bytes(),
+        b"gate9-systemd-v1" | b"strict-v1"
+    );
+    let mode = if mode == 0 && systemd_contract {
         3
     } else {
         mode
@@ -4618,10 +4623,16 @@ fn supervise_native(
         native_fail(domain, pid, b"native ptrace setup failed");
     }
     if mode == 3 {
-        line(b"GINUX_NATIVE: backend=ptrace-native profile=balanced elf-loader=host contract=gate9-systemd-v1");
+        write_all(
+            b"GINUX_NATIVE: backend=ptrace-native profile=balanced elf-loader=host contract=",
+        );
+        line(domain.config().contract_profile.as_bytes());
         line(b"GINUX_NATIVE: virtual-pid=1 virtual-ppid=0 root=oci-overlay");
     } else {
-        line(b"GINUX_NATIVE: backend=ptrace-native profile=balanced elf-loader=host contract=gate5-balanced");
+        write_all(
+            b"GINUX_NATIVE: backend=ptrace-native profile=balanced elf-loader=host contract=",
+        );
+        line(domain.config().contract_profile.as_bytes());
         line(b"GINUX_NATIVE: tracee-uid=1000 tracee-gid=1000 root=oci-read-only");
     }
 
@@ -5916,13 +5927,19 @@ fn supervise_native(
                     && registers.rsi == LINUX_REBOOT_MAGIC2
                     && registers.rdx == LINUX_REBOOT_CMD_POWER_OFF;
                 if allowed {
-                    line(b"translate surface=virtual-poweroff result=domain-shutdown");
+                    line_to(
+                        2,
+                        b"GINUX_LIFECYCLE_AUDIT: action=translate surface=virtual-poweroff result=domain-shutdown",
+                    );
                     registers.orig_rax = ginux_core::SYS_EXIT_GROUP;
                     registers.rdi = 0;
                     task.awaiting_exit = false;
                     task.override_exit = false;
                 } else {
-                    line(b"deny result=-1 reason=invalid-virtual-poweroff");
+                    line_to(
+                        2,
+                        b"GINUX_LIFECYCLE_AUDIT: action=deny result=-1 reason=invalid-virtual-poweroff",
+                    );
                     registers.orig_rax = u64::MAX;
                     task.awaiting_exit = true;
                     task.override_exit = true;
@@ -7542,6 +7559,37 @@ fn config_merge_main(config_path: *const u8, count: usize, overrides: *const usi
         .normalized()
         .unwrap_or_else(|error| config_rejected(error));
     write_all(normalized.as_bytes());
+    exit_process(0)
+}
+
+fn contract_plan_main(config_path: *const u8) -> ! {
+    let config = load_config(config_path);
+    let contract = config
+        .effective_contract()
+        .unwrap_or_else(|error| config_rejected(error));
+    write_all(b"GINUX_CONTRACT: catalog=1 domain=");
+    write_all(config.id.as_bytes());
+    write_all(b" profile=");
+    write_all(config.contract_profile.as_bytes());
+    write_all(b" digest=");
+    write_all(contract.digest());
+    write_all(b" operations=");
+    write_u64(contract.rules().len() as u64);
+    write_all(b"\n");
+    for rule in contract.rules() {
+        write_all(b"GINUX_CONTRACT_RULE: operation=");
+        write_all(rule.operation.id.as_bytes());
+        write_all(b" action=");
+        write_all(rule.action.name().as_bytes());
+        write_all(b" provenance=");
+        write_all(rule.provenance.name().as_bytes());
+        write_all(b" source=");
+        write_all(rule.source.as_bytes());
+        write_all(b" status=");
+        write_all(rule.operation.status.name().as_bytes());
+        write_all(b"\n");
+    }
+    line(b"GINUX_CONTRACT: PASS");
     exit_process(0)
 }
 

@@ -61,7 +61,11 @@ fn render() -> String {
     }
     writeln!(output, "| **Total** | **{}** |", CATALOG.len()).unwrap();
     writeln!(output, "\n## Versioned contract inputs\n").unwrap();
-    writeln!(output, "- Base profiles: `minimal-v1`, `gate9-systemd-v1`").unwrap();
+    writeln!(
+        output,
+        "- Base profiles: `strict-v1`, `minimal-v1`, `gate5-balanced-v1`, `gate9-systemd-v1`"
+    )
+    .unwrap();
     writeln!(
         output,
         "- Additive templates: `network-client-v1`, `read-only-time-v1`, `virtual-kernel-views-v1`"

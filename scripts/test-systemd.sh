@@ -13,6 +13,10 @@ for run in cold warm repeat; do
     cp build/gate9-systemd-measurements.txt "build/gate9-systemd-$run-measurements.txt"
     grep -Fq 'GINUX_NATIVE_CHECK: PASS' "build/gate9-systemd-$run.log"
     grep -Fq 'GINUX_MEASURE: boot-to-login-ms=' "build/gate9-systemd-$run-measurements.txt"
+    audit_records=$(grep -c '^GINUX_NATIVE_AUDIT:' "build/gate9-systemd-$run.log")
+    test "$audit_records" -le 8192
+    grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ domain=gate9-systemd .*contract=[0-9a-f]{64} operation=[a-z0-9._*-]+ policy-source=[a-z0-9._*-]+ phase=entry syscall=[0-9]+ action=(mediate|emulate|deny)' "build/gate9-systemd-$run.log"
+    grep -Eq '^GINUX_AUDIT_DROPPED: domain=gate9-systemd contract=[0-9a-f]{64} limit=8192 dropped=[0-9]+$' "build/gate9-systemd-$run.log"
     printf 'systemd %s boot: PASS\n' "$run"
 done
 

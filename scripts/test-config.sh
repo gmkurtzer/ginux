@@ -16,6 +16,9 @@ gate975_invalid_log=build/gate975-config-invalid.log
 gate975_conflict_log=build/gate975-config-conflict.log
 gate975_volume_log=build/gate975-config-volume.log
 gate975_hook_log=build/gate975-config-hook.log
+contract_plan_log=build/gate10-contract-plan.log
+contract_systemd_plan_log=build/gate10-contract-systemd-plan.log
+contract_invalid_log=build/gate10-contract-invalid.log
 valid_effective=build/gate4-config-valid.effective
 equivalent_effective=build/gate4-config-equivalent.effective
 
@@ -41,6 +44,12 @@ rocky_scp \
 rocky_scp \
     config/domain-gate9.75.toml \
     "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/gate975.toml"
+rocky_scp \
+    config/domain-gate10-strict.toml \
+    "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/gate10-strict.toml"
+rocky_scp \
+    config/domain-gate9.toml \
+    "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/gate10-systemd.toml"
 
 rocky_ssh 'chmod 0755 /var/tmp/ginux; /var/tmp/ginux config /var/tmp/gate4-valid.toml' > "$valid_log" 2>&1
 rocky_ssh '/var/tmp/ginux config /var/tmp/gate4-equivalent.toml' > "$equivalent_log" 2>&1
@@ -94,6 +103,22 @@ grep -Fqx 'hostname = "gate975-demo"' "$gate975_log"
 grep -Fqx 'port_forwards = ["tcp/eth0:1/8080/80"]' "$gate975_log"
 grep -Fqx 'pre_boot = ["/usr/local/sbin/prepare-domain --safe"]' "$gate975_log"
 
+rocky_ssh '/var/tmp/ginux contract-plan /var/tmp/gate10-strict.toml' >"$contract_plan_log" 2>&1
+grep -Eq '^GINUX_CONTRACT: catalog=1 domain=gate10-strict profile=strict-v1 digest=[0-9a-f]{64} operations=[0-9]+$' "$contract_plan_log"
+grep -Fq 'operation=syscall.getpid action=emulate provenance=base-profile source=strict-v1' "$contract_plan_log"
+grep -Fq 'operation=syscall.clock_gettime action=deny provenance=default-deny source=default-deny' "$contract_plan_log"
+grep -Fqx 'GINUX_CONTRACT: PASS' "$contract_plan_log"
+rocky_ssh '/var/tmp/ginux contract-plan /var/tmp/gate10-systemd.toml' >"$contract_systemd_plan_log" 2>&1
+grep -Eq '^GINUX_CONTRACT: catalog=1 domain=gate9-systemd profile=gate9-systemd-v1 digest=[0-9a-f]{64} operations=[0-9]+$' "$contract_systemd_plan_log"
+grep -Fq 'operation=syscall.clock_gettime action=mediate provenance=base-profile source=gate9-systemd-v1' "$contract_systemd_plan_log"
+grep -Fqx 'GINUX_CONTRACT: PASS' "$contract_systemd_plan_log"
+
+if rocky_ssh "/var/tmp/ginux config-merge /var/tmp/gate10-strict.toml 'contract.allow=[\"syscall.does_not_exist*\"]'" >"$contract_invalid_log" 2>&1; then
+    printf '%s\n' 'unmatched contract selector was incorrectly accepted' >&2
+    exit 1
+fi
+grep -Fqx 'GINUX_CONFIG: rejected reason=invalid-contract managed-started=false' "$contract_invalid_log"
+
 rocky_ssh "/var/tmp/ginux config-merge /var/tmp/gate975.toml 'resources.vcpus=4' 'identity.hostname=\"override.example\"' 'network.interface=\"eth1\"'" >"$gate975_override_log" 2>&1
 grep -Fqx 'vcpus = 4' "$gate975_override_log"
 grep -Fqx 'hostname = "override.example"' "$gate975_override_log"
@@ -124,5 +149,5 @@ if rocky_ssh "/var/tmp/ginux config-merge /var/tmp/gate975.toml 'hooks.pre_boot=
 fi
 grep -Fqx 'GINUX_CONFIG: rejected reason=invalid-value managed-started=false' "$gate975_hook_log"
 
-rocky_ssh 'rm -f /var/tmp/ginux /var/tmp/gate4-*.toml /var/tmp/gate9-*-init.toml /var/tmp/gate975.toml'
+rocky_ssh 'rm -f /var/tmp/ginux /var/tmp/gate4-*.toml /var/tmp/gate9-*-init.toml /var/tmp/gate975.toml /var/tmp/gate10-strict.toml /var/tmp/gate10-systemd.toml'
 printf '%s\n' 'test-config: PASS'

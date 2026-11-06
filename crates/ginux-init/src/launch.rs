@@ -35,6 +35,7 @@ pub enum Command {
     Runtime(*const u8),
     Config(*const u8),
     ConfigMerge(*const u8, usize, *const usize),
+    ContractPlan(*const u8),
     HookPlan(*const u8),
     Lifecycle(*const u8),
     Vfs(*const u8, *const u8, *const u8),
@@ -76,6 +77,9 @@ pub fn parse_argv(argc: usize, argv: *const usize) -> Option<Command> {
         Some(Command::ConfigMerge(config_path, argc - 3, unsafe {
             argv.add(3)
         }))
+    } else if c_string_equals(command, b"contract-plan") {
+        let config_path = unsafe { *argv.add(2) as *const u8 };
+        Some(Command::ContractPlan(config_path))
     } else if c_string_equals(command, b"hook-plan") {
         let config_path = unsafe { *argv.add(2) as *const u8 };
         Some(Command::HookPlan(config_path))
@@ -628,7 +632,9 @@ fn print_launch_config(config: &DomainConfig) {
 
 pub fn usage() -> ! {
     line_stderr(b"ginux: usage: ginux (no arguments: interception demonstration)");
-    line_stderr(b"ginux: usage: ginux config|lifecycle|process|kernel-views <config>");
+    line_stderr(
+        b"ginux: usage: ginux config|contract-plan|lifecycle|process|kernel-views <config>",
+    );
     line_stderr(b"ginux: usage: ginux runtime <elf>");
     line_stderr(b"ginux: usage: ginux domain|process-native <config> <fixture>");
     line_stderr(b"ginux: usage: ginux native <config> <root> [hold|probe]");

@@ -1812,7 +1812,7 @@ pub fn resolve(
 
 fn apply_profile(effective: &mut EffectiveContract, profile: &[u8]) -> Result<(), ContractError> {
     match profile {
-        b"minimal-v1" => {
+        b"minimal-v1" | b"strict-v1" => {
             for selector in [
                 b"syscall.getpid".as_slice(),
                 b"syscall.getppid".as_slice(),
@@ -1826,16 +1826,25 @@ fn apply_profile(effective: &mut EffectiveContract, profile: &[u8]) -> Result<()
                     selector,
                     None,
                     Provenance::BaseProfile,
-                    "minimal-v1",
+                    if profile == b"strict-v1" {
+                        "strict-v1"
+                    } else {
+                        "minimal-v1"
+                    },
                 )?;
             }
         }
-        b"gate9-systemd-v1" => {
+        b"gate5-balanced-v1" | b"gate9-systemd-v1" => {
+            let source = if profile == b"gate5-balanced-v1" {
+                "gate5-balanced-v1"
+            } else {
+                "gate9-systemd-v1"
+            };
             for rule in &mut effective.rules[..effective.len] {
                 if rule.operation.status != Status::Denied {
                     rule.action = rule.operation.action;
                     rule.provenance = Provenance::BaseProfile;
-                    rule.source = "gate9-systemd-v1";
+                    rule.source = source;
                 }
             }
         }
@@ -1982,6 +1991,14 @@ mod tests {
     fn minimal_is_deny_by_default() {
         let contract = resolve(b"minimal-v1", &[], &[], &[]).unwrap();
         assert_eq!(contract.syscall_action(39), Action::Emulate);
+        assert_eq!(contract.syscall_action(41), Action::Deny(38));
+    }
+
+    #[test]
+    fn strict_profile_keeps_the_small_bootstrap_surface() {
+        let contract = resolve(b"strict-v1", &[], &[], &[]).unwrap();
+        assert_eq!(contract.syscall_action(39), Action::Emulate);
+        assert_eq!(contract.syscall_action(228), Action::Deny(38));
         assert_eq!(contract.syscall_action(41), Action::Deny(38));
     }
 

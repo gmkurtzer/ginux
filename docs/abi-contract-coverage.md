@@ -17,7 +17,7 @@ The catalog is the reviewable inventory used to normalize domain contracts. An e
 
 ## Versioned contract inputs
 
-- Base profiles: `minimal-v1`, `gate9-systemd-v1`
+- Base profiles: `strict-v1`, `minimal-v1`, `gate5-balanced-v1`, `gate9-systemd-v1`
 - Additive templates: `network-client-v1`, `read-only-time-v1`, `virtual-kernel-views-v1`
 - Overrides: bounded exact or single-wildcard canonical operation selectors
 - Runtime representation: an explicit operation table tied to catalog version `1` and a deterministic digest
