@@ -27,7 +27,7 @@ def main():
         def run(scenario):
             (root / "scenario").write_text(scenario)
             proc = subprocess.run([str(work / "ginux"), "native", str(config), str(root)],
-                                  capture_output=True, timeout=20)
+                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=20)
             return proc.returncode, proc.stdout.decode(errors="replace")
 
         def check(name, ok, code, output):
