@@ -1,6 +1,9 @@
 #![no_std]
 
 pub const SYS_WRITE: u64 = 1;
+pub const SYS_POLL: u64 = 7;
+pub const MAX_BOOTSTRAP_POLL_FDS: u64 = 16;
+pub const MAX_BOOTSTRAP_POLL_TIMEOUT_MS: u64 = 300_000;
 pub const SYS_GETPID: u64 = 39;
 pub const SYS_FORK: u64 = 57;
 pub const SYS_EXIT: u64 = 60;
@@ -292,7 +295,7 @@ pub const fn balanced_surface(syscall: u64) -> BalancedSurface {
         13 | 14 | 15 | SYS_FORK | SYS_WAIT4 | 98 | 99 | 100 | 158 | 202 | 218 | 273 | 302 | 334 => {
             BalancedSurface::Task
         }
-        1 | 20 => BalancedSurface::Console,
+        1 | SYS_POLL | 20 => BalancedSurface::Console,
         318 => BalancedSurface::Random,
         SYS_GETPID | SYS_GETUID | SYS_GETGID | SYS_GETEUID | SYS_GETEGID | SYS_GETPPID
         | SYS_GETPGRP => BalancedSurface::VirtualIdentity,
@@ -369,6 +372,9 @@ pub const fn balanced_arguments_allowed(syscall: u64, arg0: u64, arg1: u64, arg2
     const PROT_EXEC: u64 = 4;
     match syscall {
         0 => arg2 <= 1024 * 1024,
+        // The native supervisor additionally validates each descriptor in
+        // tracee memory against the assigned bootstrap console descriptors.
+        SYS_POLL => arg1 <= MAX_BOOTSTRAP_POLL_FDS && arg2 <= MAX_BOOTSTRAP_POLL_TIMEOUT_MS,
         1 => matches!(arg0, 1 | 2) && arg2 <= 4096,
         20 => matches!(arg0, 1 | 2) && arg2 <= 16,
         2 => arg1 & (O_ACCMODE | MUTATING_OPEN_FLAGS) == 0,

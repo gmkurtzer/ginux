@@ -95,6 +95,31 @@ long launch_fixture_main(word *stack)
     case 't': __asm__ volatile("int3"); return 93;
     case 's': __asm__ volatile("xor %%rax, %%rax; mov (%%rax), %%rax" ::: "rax", "memory"); return 94;
     case 'f': return call3(57, 0, 0, 0) == -38 ? 0 : 95;
+    case 'p': {
+        struct { int fd; short events, revents; } fds[3] = {
+            {0, 0, -1}, {1, 4, -1}, {-1, 0, -1}
+        };
+        long count = call3(7, (word)fds, 3, 0);
+        if (count != (fds[0].revents != 0) + (fds[1].revents != 0)
+            || fds[1].revents != 4 || fds[2].revents != 0)
+            return 101;
+        if (call3(7, 0, 0, 0) != 0) return 102;
+        if (call3(7, (word)&fds[1], 1, 300000) != 1) return 103;
+        if (call3(7, (word)fds, 3, 300001) != -1) return 111;
+        if (call3(7, 0, 0, 1) != 0) return 112;
+        if (call3(7, (word)fds, 3, (word)-1) != -1) return 104;
+        if (call3(7, (word)fds, 17, 0) != -1) return 105;
+        if (call3(7, 1, 1, 0) != -1) return 106;
+        if (call3(7, (word)-4, 2, 0) != -1) return 107;
+        fds[0].fd = 3;
+        if (call3(7, (word)fds, 1, 0) != -1) return 108;
+        if (call3(3, 0, 0, 0) != 0) return 109;
+        fds[0].fd = 0;
+        fds[0].events = 0;
+        fds[0].revents = 0;
+        if (call3(7, (word)fds, 1, 0) != 1 || fds[0].revents != 32) return 110;
+        return 0;
+    }
     case 'i':
         __asm__ volatile("int $0x80" :: "a"(20), "b"(1), "c"(0), "d"(0) : "memory");
         return 96;

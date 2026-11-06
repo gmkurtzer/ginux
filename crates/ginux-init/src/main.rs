@@ -7113,7 +7113,7 @@ fn supervise_native(
                     native_fail(domain, pid, b"native proc fd link emulation failed");
                 }
             }
-            Action::Mediate if native_arguments_allowed(syscall, &registers, mode) => {
+            Action::Mediate if native_arguments_allowed(host_pid, syscall, &registers, mode) => {
                 if cgroup_procs_path {
                     task.pending_cgroup_procs_open = true;
                 }
@@ -7368,7 +7368,7 @@ fn virtual_credential_target(current: u32, values: &[u64]) -> Option<u32> {
     Some(target.unwrap_or(current))
 }
 
-fn native_arguments_allowed(syscall: u64, registers: &UserRegs, mode: usize) -> bool {
+fn native_arguments_allowed(pid: usize, syscall: u64, registers: &UserRegs, mode: usize) -> bool {
     if mode == 3 {
         match syscall {
             ginux_core::SYS_PIDFD_OPEN => registers.rdi > 0 && registers.rsi == 0,
@@ -7498,7 +7498,7 @@ fn native_arguments_allowed(syscall: u64, registers: &UserRegs, mode: usize) -> 
             _ => balanced_arguments_allowed(syscall, registers.rdi, registers.rsi, registers.rdx),
         }
     } else {
-        balanced_arguments_allowed(syscall, registers.rdi, registers.rsi, registers.rdx)
+        crate::dispatch::native_arguments_allowed(pid, syscall, registers)
     }
 }
 

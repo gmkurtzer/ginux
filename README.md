@@ -292,6 +292,13 @@ child supervision is implemented. Non-x86-64 syscall ABIs and job-control
 group stops fail explicitly. Audit output is capped at 64 KiB plus a truncation
 notice. This path does not implement resource quotas from the domain metadata.
 
+Bootstrap-console readiness supports `poll` queries with at most 16
+slots containing descriptors 0, 1, 2 or ignored negative descriptors. The native
+supervisor validates the descriptor array before continuation. Timeouts from
+0 through 300000 ms are supported; infinite or larger waits, other descriptors,
+unreadable arrays, and oversized queries are denied. Closed
+descriptors retain the kernel's `POLLNVAL` result.
+
 When requested, the result file is reserved exclusively before launch, with
 mode 0600 and a maximum path length of 512 bytes. Existing files are never
 overwritten. After completion, it contains one synced JSON object:
