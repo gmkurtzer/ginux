@@ -29,8 +29,8 @@
 - Runtime isolation unit: instance.
 - Policy unit: versioned contract.
 - The gate map has expanded through human-directed insertions while preserving
-  numeric order; Gates 1 through 10.25 are accepted and closed. Gate 10.5 is
-  the active checkpoint.
+  numeric order; Gates 1 through 10.5 are accepted and closed. Gate 11 is the
+  active checkpoint.
 - Gate 9.75 was added and authorized on 2026-11-04 for comprehensive instance
   configuration, CLI overrides, network selection and policy, port translation,
   volumes, access, identity, resources, devices, and pre-boot hooks.
@@ -111,6 +111,15 @@
   teardown. Socket bookkeeping exhaustion is now operation-local (`EMFILE`),
   `close_range` releases tracked sockets, and the remaining interactive
   lifecycle, restart, and persistent-cache checks passed.
+- Gate 10.5 was accepted by the human on 2026-11-07 after pull request
+  https://github.com/gmkurtzer/ginux/pull/237 merged as `53a54add`. Its
+  self-contained contract UX, recursive filesystem policy, recipe-owned
+  bootstrap, set-ID/device-node controls, reduced host identity, and
+  `NoNewPrivs` backstop are closed with passing pull-request CI.
+- Gate 11 began on dedicated branch `hdae/performance-characterization` from
+  merged `main`. The first checkpoint is the unoptimized matched native Rocky
+  versus Ginux baseline; no optimization begins before that evidence is
+  presented.
 - The ordered gate batch is authorized, but every open gate remains a human
   checkpoint requiring a working demonstration and explicit acceptance.
 
@@ -131,12 +140,8 @@ scope, threat model, and invariants.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 10.5, intuitive self-contained contract configuration and
-  UX, was expanded by human direction to include recursive filesystem policy,
-  explicit set-ID/device-node controls, recipe-owned bootstrap customization,
-  and least-privileged native host identities. Implementation and fresh
-  verification are complete on
-  `hdae/intuitive-contract-ux`.
+- Active gate: Gate 11, performance characterization and optimization, is
+  active on `hdae/performance-characterization`.
 - Last evidence: `make check`, `make test-contract`, Rocky QEMU
   `make test-config`, `make test-contract-runtime`, `make test-systemd`, the
   complete aggregate `make test`, and the Gate 10.5 human demonstration pass.
@@ -165,9 +170,11 @@ scope, threat model, and invariants.
   UID/GID 65534; the production pre-exec identity reduction is unchanged.
   Pull-request `launch-integration` now passes in 33 seconds, and
   `static-and-unit` passes in 41 seconds.
-- Open decision: none for the approved Gate 10.5 expansion.
-- Exact next action: stop for human review and acceptance of pull request 237
-  before Gate 11.
+- Open decision: no workload-specific tolerance exceptions are approved; the
+  default 4% per-row budget remains authoritative until baseline review.
+- Exact next action: finalize the matched protocol and tooling, collect the
+  unoptimized native/Ginux baseline, and stop at the baseline checkpoint before
+  optimization.
 
 ## Evidence
 
@@ -464,27 +471,24 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Deliver Gate 10.5 from `hdae/intuitive-contract-ux` in its dedicated pull
-request with complete evidence, and stop for human acceptance before Gate 11.
+Collect and present the Gate 11 unoptimized matched native/Ginux baseline,
+including raw per-row evidence and protocol metadata, before optimization.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 10.5, intuitive self-contained contract configuration and
-  UX, is implemented and freshly verified on `hdae/intuitive-contract-ux` and
-  awaiting review.
-- Last evidence: strict formatting/build, 12 contract and 21 instance tests,
-  runtime deny provenance, process identity checks, the complete systemd and
-  aggregate matrices, the Gate 10.5 demonstration, and a clean interactive
-  Rocky run all pass. The interactive run includes the expanded filesystem,
-  set-ID, device-node, bootstrap, host identity, and `NoNewPrivs` criteria.
+- Active gate: Gate 11, performance characterization and optimization, is
+  active on `hdae/performance-characterization`.
+- Last evidence: Gate 10.5 pull request 237 merged as `53a54add` with passing
+  `launch-integration` and `static-and-unit` CI; the human accepted and closed
+  the gate on 2026-11-07.
 - Approved network direction: Gate 9 defaults to full host-shared inbound and
   outbound networking with normal host routing and bind conflicts, under Ginux
   mediation and audit. Gate 9.75 adds comprehensive instance configuration,
   network selection, port controls, and translation.
 - Gate 9.75 closure: pull request 229 merged as `8a475e8b`; human accepted and
   closed the gate on 2026-11-06.
-- Required human decision: review and acceptance of pull request 237 before
-  Gate 11.
+- Required human decision: review the first unoptimized Gate 11 baseline before
+  optimization or any workload-specific tolerance exception.

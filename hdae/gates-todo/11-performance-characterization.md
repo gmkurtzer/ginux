@@ -57,7 +57,9 @@ criterion.
 
 ## Completed work
 
-- [ ] None; gate not started.
+- [x] Human accepted Gate 10.5 and authorized Gate 11 execution.
+- [x] Created dedicated branch `hdae/performance-characterization` from merged
+  `main` for one Gate 11 pull request.
 
 ## Remaining work
 
