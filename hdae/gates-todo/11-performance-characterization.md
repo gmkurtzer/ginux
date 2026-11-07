@@ -87,6 +87,21 @@ criterion.
   one-vCPU row from about 3.3 to 5.3 events/s, while a temporary one-stop,
   no-op `sched_yield` experiment reached only 5.8 events/s versus about 635
   native. The semantically invalid experiment was removed.
+- [x] Added `sched_yield` to the versioned contract catalog and replaced linear
+  syscall-rule lookup with a constant-time index.
+- [x] Replaced two-stop ptrace handling for `sched_yield` with a seccomp user
+  notification broker. Every call still reaches Ginux before completion; the
+  broker rechecks the immutable contract, maps the host TID to its virtual PID,
+  emits bounded audit, and returns the mediated result without an extra host
+  yield after notification has already descheduled the caller.
+- [x] Made supervisor and broker audit records cross-process safe. A shared,
+  futex-backed mutex serializes complete records without spinning or issuing a
+  wake syscall on the uncontended path. The full audit corpus contains no
+  interleaved or malformed records.
+- [x] Exhausted the credible userspace hot-path reductions: entry-only ptrace,
+  seccomp user notification, audit disablement, contract-decision indexing,
+  broker/tracee CPU separation, same-CPU placement, removal of the redundant
+  host yield, and fixed-semantics kernel-resident diagnostics.
 
 ## Remaining work
 
@@ -97,7 +112,9 @@ criterion.
 - [ ] Implement comparison and report automation.
 - [x] Collect the initial repeated baseline results used to select profiling
   targets. Final accepted results require a longer confirmation run.
-- [ ] Profile and optimize material overhead.
+- [x] Profile and optimize the thread-yield hot path through the limit of the
+  approved userspace-dispatch architecture. The mandatory row still fails and
+  requires an architecture decision; other Gate 11 workloads remain open.
 - [ ] Persist the accepted baseline and add automatic per-workload regression
   checks to the normal performance test target.
 - [ ] Run full regression and document remaining costs.
@@ -176,6 +193,29 @@ criterion.
   native. A temporary one-stop `PTRACE_SYSEMU` no-op upper-bound experiment
   measured 5.802 versus 635.428 native. It intentionally omitted real yield
   semantics and was removed immediately after measurement.
+- `strace -c` on the original path attributed 62.55% of supervisor time to
+  3,649 `wait4` calls and 30.99% to 8,257 `ptrace` calls: 93.54% combined.
+  Seccomp-assisted entry-only ptrace reached 14.831 events/s before the user
+  notification broker replaced it.
+- The final repeated audited 1/2/4-vCPU matrix in
+  `build/gate11-final-threads/report.md` reached 20.728, 20.603, 42.321,
+  20.363, and 80.337 events/s. That is 0.030x to 0.036x native and remains a
+  mandatory failure, but the one-vCPU result is 6.28x the original audited
+  3.299 events/s.
+- A three-second, three-repetition audit-disabled diagnostic measured 21.789
+  versus 645.097 native events/s. One sysbench event contains 1,000 yields, so
+  the remaining mediated path costs about 45.9 microseconds per yield versus
+  about 1.55 microseconds natively; audit accounts for only about 5% of the
+  final audited result.
+- A temporary kernel-resident seccomp `ALLOW` diagnostic preserved the host
+  `sched_yield` behavior and measured 606.222 versus 647.075 events/s
+  (0.937x, 6.31% slower). It bypassed the required userspace dispatch and was
+  removed. A separate compiled return-success/no-yield diagnostic reached
+  1,859.211 versus 621.813 events/s but was rejected and removed because it
+  did not perform the requested yield.
+- Fresh regression evidence after the retained optimization passes
+  `make check`, `make test-contract`, `make test-native-vfs`, and the complete
+  cold/warm/repeat/DNF-failure/startup-failure/shutdown systemd suite.
 
 ## Decisions and limitations
 
@@ -192,13 +232,30 @@ criterion.
   repetitions after warmup to keep the exploratory matrix bounded. The final
   accepted baseline will use longer intervals and/or more repetitions after
   profiling stabilizes the failing paths.
-- The focused evidence shows that audit is a secondary cost and mandatory
-  ptrace interception is the dominant thread-yield cost. Even removing audit
-  and halving mediation to one stop remained about 99.1% behind native, so the
-  4% thread-yield goal has no credible path under the current requirement that
-  every managed syscall stop in the userspace supervisor. Changing that
-  boundary requires an explicit architecture decision; the gate will not hide
-  it by changing workload parameters or weakening the threshold.
+- The focused evidence shows that audit is a secondary cost and the current
+  ptrace implementation is the dominant thread-yield cost. The temporary
+  one-stop/no-op experiment did not establish that all optimized one-stop
+  implementations are exhausted: it retained the existing wait/register and
+  supervisor path and intentionally did not execute real yield semantics.
+- Human clarification on 2026-11-07 requires continued code-level profiling
+  and optimization until every credible in-scope implementation improvement is
+  exhausted. Gate 11 must not stop merely because the current tracing design
+  misses the budget. If the final implementation still cannot reach the goal,
+  alternatives must be supported by measured evidence from the exhausted
+  optimization paths.
+- Linux seccomp user notification exposes one receive ioctl and one response
+  ioctl per decision; it has no batch response operation. The measured
+  audit-disabled result therefore represents the practical ceiling for the
+  approved per-call userspace decision path, not a formatting or lookup
+  bottleneck.
+- Reaching the 4% thread-yield budget now requires one of three explicit
+  alternatives: permit a kernel-resident compiled decision for selected
+  fixed-semantics calls (and design corresponding audit), move decision/audit
+  into an in-kernel eBPF/LSM or module component, or retain userspace mediation
+  with a human-approved workload-specific budget. Native x86-64/KVM should
+  also be measured before setting a durable budget because the current macOS
+  arm64 QEMU TCG environment amplifies context-switch and seccomp costs. None
+  of these architecture or budget changes is approved by this gate.
 
 ## Delivery strategy
 

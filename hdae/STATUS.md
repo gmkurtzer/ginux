@@ -175,14 +175,25 @@ scope, threat model, and invariants.
 - Open decision: no workload-specific tolerance exceptions are approved; the
   default 4% per-row budget remains authoritative.
 - Gate 11 profiling corrected the mutex protocol; every exploratory 1/2/4-vCPU
-  mutex row now passes within 0.7% of native. Thread-yield remains architecture
-  bound: audited mediation measured 3.299 versus 651.154 native events/s;
-  disabling audit reached 5.255, and a removed one-stop/no-op diagnostic upper
-  bound reached only 5.802 versus 635.428.
-- Exact next action: obtain a human architecture decision for thread-yield:
-  preserve the no-direct-host-syscall invariant and record the mandatory row as
-  outside budget, or authorize a separately gated fast-path design that changes
-  that boundary. No workload-specific tolerance exception is approved.
+  mutex row now passes within 0.7% of native. The retained seccomp user
+  notification path improved one-vCPU thread yield from 3.299 to 20.728
+  events/s while preserving pre-effect userspace dispatch and bounded audit.
+  The repeated 1/2/4-vCPU matrix remains only 0.030x to 0.036x native and fails
+  the unchanged 4% budget.
+- Human clarification requires Gate 11 to continue through exhaustive
+  implementation-level profiling and optimization rather than stopping at the
+  first ptrace-bound result. No workload-specific tolerance exception is
+  approved.
+- The thread-yield hot path is now exhausted within the approved architecture.
+  Audit-disabled user notification reaches 21.789 versus 645.097 native;
+  receive plus response ioctl round trips dominate. A removed, exact-semantics
+  kernel-resident seccomp decision reached 0.937x native, while a removed
+  no-yield diagnostic reached 2.990x and was rejected as semantically invalid.
+- Exact next action: complete a clean committed confirmation run, then present
+  the measured architecture alternatives for human direction before choosing
+  a kernel-resident decision path, an in-kernel policy component, or an explicit
+  workload budget. Continue the remaining Gate 11 workload and regression
+  automation only after that boundary is resolved.
 
 ## Evidence
 
@@ -479,10 +490,10 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Pause Gate 11 for the human architecture decision on thread-yield. The existing
-ptrace boundary cannot credibly meet the 4% mandatory budget; any direct or
-pre-authorized fast path changes the governing invariant and requires a new or
-expanded approved gate before implementation.
+Commit and rerun the final matched matrix from a clean tree so its metadata
+names the retained source exactly. Then present the thread-yield evidence and
+architecture alternatives for human direction; the unchanged 4% budget cannot
+be met by the exhausted per-call userspace notification path.
 
 ## Context recovery
 
@@ -500,6 +511,6 @@ expanded approved gate before implementation.
   network selection, port controls, and translation.
 - Gate 9.75 closure: pull request 229 merged as `8a475e8b`; human accepted and
   closed the gate on 2026-11-06.
-- Required human decision: preserve the no-direct-host-syscall invariant and
-  leave thread-yield outside budget, or authorize a separately gated fast-path
-  architecture. Any tolerance exception still requires explicit review.
+- Required human decision: none during the clarified exhaustive Gate 11
+  optimization loop. Any scope expansion, invariant change, or tolerance
+  exception still requires explicit review.
