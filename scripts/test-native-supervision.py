@@ -24,16 +24,47 @@ def main():
         (root / "usr/bin/bash").chmod(0o755)
         work.chmod(0o755)
 
-        def run(scenario):
+        def run(scenario, stdin=None, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, **options):
             (root / "scenario").write_text(scenario)
             proc = subprocess.run([str(work / "ginux"), "native", str(config), str(root)],
-                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=20)
-            return proc.returncode, proc.stdout.decode(errors="replace")
+                                  stdin=stdin, stdout=stdout, stderr=stderr, timeout=20, **options)
+            output = (proc.stdout or b"") + (proc.stderr or b"")
+            return proc.returncode, output.decode(errors="replace")
 
         def check(name, ok, code, output):
             if not ok:
                 raise RuntimeError(f"{name}: exit={code}\n{output}")
             print(f"PASS native {name}")
+
+        # Host directories must not reach the chrooted workload: as a
+        # standard stream the instance does not start, and every other
+        # inherited descriptor is closed. A closed stream starts as before.
+        outside = work / "outside"
+        outside.mkdir()
+        directory = os.open(outside, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            for stream, reason in (("stdin", "input"), ("stdout", "output"), ("stderr", "error")):
+                code, out = run("fork", **{stream: directory})
+                # With stdout a directory the refusal has nowhere to print.
+                check(f"directory {stream} refused", code == 1
+                      and "GINUX_FIXTURE" not in out
+                      and (stream == "stdout" or f"standard {reason} is a directory" in out),
+                      code, out)
+            for number in (239, 242, 300):
+                os.dup2(directory, number, inheritable=True)
+            try:
+                code, out = run("descriptors", pass_fds=(239, 242, 300))
+            finally:
+                for number in (239, 242, 300):
+                    os.close(number)
+            check("inherited descriptors closed", code == 0
+                  and all(f"GINUX_FIXTURE: fd-{number}=-9\n" in out for number in (239, 242, 300))
+                  and "GINUX_FIXTURE: fd-240=0\n" in out and "GINUX_FIXTURE: fd-241=0\n" in out,
+                  code, out)
+        finally:
+            os.close(directory)
+        code, out = run("fork", preexec_fn=lambda: os.close(0))
+        check("closed stdin starts", code == 0 and "GINUX_FIXTURE: fork=-38\n" in out, code, out)
 
         # Without child supervision a host fork would run unsupervised.
         code, out = run("fork")
