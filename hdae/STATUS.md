@@ -91,6 +91,16 @@
   9.75 network and hook regressions, and `make demo-gate-10.25`. The demo
   booted Rocky systemd, exercised the complete instance lifecycle, verified
   `/var/lib/ginux/instances`, and returned cleanly to the host.
+- Normal `ginux instance create` output now separates operator presentation
+  from low-level OCI diagnostics. Fresh-cache creation reports one concise
+  image summary, a bounded live progress bar for each layer, verification, and
+  preparation; cache reuse omits downloads and reports the hit. Detailed
+  digests and internal paths remain available to standalone diagnostic mode.
+- Fresh output evidence passed `make check`, all seven `make test-oci-image`
+  checks, and `ROCKY_SSH_PORT=22410 make test-systemd-interactive`, including
+  cache miss, offline cache hit, persistent reuse, Rocky systemd boot, and the
+  complete instance lifecycle while the human's separate test VM remained
+  untouched.
 - The ordered gate batch is authorized, but every open gate remains a human
   checkpoint requiring a working demonstration and explicit acceptance.
 
@@ -115,12 +125,13 @@ scope, threat model, and invariants.
   active on `hdae/domain-to-instance`. Gate 10.5 is approved but waits for the
   Gate 10.25 human checkpoint and merge.
 - Last evidence: Gate 10.25 `make demo-gate-10.25`, `make check`, targeted
-  systemd/network/hook tests, and a clean aggregate `make test` passed under
-  Rocky QEMU after the clean-break rename.
+  systemd/network/hook tests, a clean aggregate `make test`, `make
+  test-oci-image`, and the final interactive Rocky cache-miss/cache-hit workflow
+  passed after the clean-break rename and CLI output cleanup.
 - Open decision: none for Gate 10.25. Gate 10.5 migration details will be
   finalized after the terminology dependency is accepted.
-- Exact next action: push the Gate 10.25 branch, open its pull request, and stop
-  for human acceptance before beginning Gate 10.5.
+- Exact next action: update pull request 235 with the verified CLI output
+  cleanup and stop for human acceptance before beginning Gate 10.5.
 
 ## Evidence
 
