@@ -138,12 +138,14 @@ scope, threat model, and invariants.
   `make test-config`, `make test-contract-runtime`, `make test-systemd`, the
   complete aggregate `make test`, and the Gate 10.5 human demonstration pass.
   The compiler covers 182 operations and reports the winning human source rule
-  in explanation and runtime audit output.
+  in explanation and runtime audit output. After review, the same lint, unit,
+  QEMU configuration, aggregate, and full demonstration evidence passed with
+  the corrected `ginux instance` interface; the removed top-level contract
+  command is a tested failure.
 - Open decision: human acceptance after the requested removal of the top-level
   `ginux contract` CLI namespace has been implemented and reverified.
-- Exact next action: replace the Gate 10.5 top-level contract commands with
-  instance-centered validation and inspection, update pull request 237, and
-  stop for human review before Gate 11.
+- Exact next action: update pull request 237 with the corrected
+  instance-centered interface and stop for human review before Gate 11.
 
 ## Evidence
 
