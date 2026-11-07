@@ -84,6 +84,22 @@ def main():
             "GINUX_FIXTURE: sigaction=0", "GINUX_FIXTURE: fork-ok=1",
             "GINUX_FIXTURE: sigchld-poll=1", "GINUX_FIXTURE: sigchld-handled=1",
             "GINUX_FIXTURE: wait-ok=1", "GINUX_FIXTURE: child-status=7"], code, out)
+        # A cgroup2 mkdir creates the interface files; a symlink planted in
+        # the tree must not take the mkdir outside the instance root.
+        (root / "sys/fs/cgroup").mkdir(parents=True, exist_ok=True)
+        (root / "sys/fs/cgroup/escape").symlink_to("/")
+        escape = Path("/ginux-cgroup-escape-check")
+        code, out = run("mkdir-cgroup", systemd_config)
+        fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
+        escaped = escape.exists()
+        if escaped:
+            escape.rmdir()
+        check("cgroup mkdir creates interface files", code == 0 and not escaped and fixture == [
+            "GINUX_FIXTURE: mkdir=0", "GINUX_FIXTURE: procs-open-ok=1",
+            "GINUX_FIXTURE: procs-write=2", "GINUX_FIXTURE: mkdir-again=-17",
+            "GINUX_FIXTURE: mkdir-via-symlink=0"]
+              and (root / "sys/fs/cgroup/ginux-test.slice/cgroup.events").exists()
+              and (root / "ginux-cgroup-escape-check").is_dir(), code, out)
     print("test-native-supervision: PASS")
 
 

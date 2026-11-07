@@ -153,6 +153,22 @@ long native_fixture_main(void)
         print_result("GINUX_FIXTURE: child-status=", (status >> 8) & 0xff);
         return 0;
     }
+    case 'm': {
+        /* mkdir in the virtual cgroup tree creates the interface files a
+         * service manager attaches through, and stays inside the instance
+         * root even through a symlink in the tree. */
+        long made = call3(83, (word)"/sys/fs/cgroup/ginux-test.slice", 0755, 0);
+        long procs = call4(257, (word)-100, (word)"/sys/fs/cgroup/ginux-test.slice/cgroup.procs",
+                           1 /* O_WRONLY */, 0);
+        print_result("GINUX_FIXTURE: mkdir=", made);
+        print_result("GINUX_FIXTURE: procs-open-ok=", procs >= 0);
+        print_result("GINUX_FIXTURE: procs-write=", procs >= 0 ? call3(1, procs, (word)"0\n", 2) : procs);
+        print_result("GINUX_FIXTURE: mkdir-again=",
+                     call3(83, (word)"/sys/fs/cgroup/ginux-test.slice", 0755, 0));
+        print_result("GINUX_FIXTURE: mkdir-via-symlink=",
+                     call3(83, (word)"/sys/fs/cgroup/escape/ginux-cgroup-escape-check", 0755, 0));
+        return 0;
+    }
     default:
         return 81;
     }
