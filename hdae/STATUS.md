@@ -29,8 +29,8 @@
 - Runtime isolation unit: instance.
 - Policy unit: versioned contract.
 - The gate map has expanded through human-directed insertions while preserving
-  numeric order; Gates 1 through 10 are accepted and closed. Gate 10.25 is the
-  active checkpoint and Gate 10.5 is approved behind it.
+  numeric order; Gates 1 through 10.25 are accepted and closed. Gate 10.5 is
+  the active checkpoint.
 - Gate 9.75 was added and authorized on 2026-11-04 for comprehensive instance
   configuration, CLI overrides, network selection and policy, port translation,
   volumes, access, identity, resources, devices, and pre-boot hooks.
@@ -81,8 +81,8 @@
   1.871-second reproduction to 309 ms, a single `top` refresh took 913 ms, and
   Bash reported valid child user/system timing. The complete interactive,
   systemd, and aggregate test matrices pass.
-- Gate 10.25 implementation is complete on `hdae/domain-to-instance` and ready
-  for review in https://github.com/gmkurtzer/ginux/pull/235. The active product now uses `instance`
+- Gate 10.25 was accepted and closed after pull request
+  https://github.com/gmkurtzer/ginux/pull/235 merged as `59e2f7aa`. The active product now uses `instance`
   consistently across CLI, schema, Rust APIs, persistence, audit, tests, and
   documentation; there are no compatibility aliases. Static checks reject
   stale terminology, and the legacy CLI noun and TOML table fail closed.
@@ -131,9 +131,8 @@ scope, threat model, and invariants.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 10.25, instance terminology migration, is authorized and
-  active on `hdae/domain-to-instance`. Gate 10.5 is approved but waits for the
-  Gate 10.25 human checkpoint and merge.
+- Active gate: Gate 10.5, intuitive self-contained contract configuration and
+  UX, is authorized and active on `hdae/intuitive-contract-ux`.
 - Last evidence: Gate 10.25 `make demo-gate-10.25`, `make check`, targeted
   systemd/network/hook tests, a clean aggregate `make test`, `make
   test-oci-image`, and the final interactive Rocky cache-miss/cache-hit workflow
@@ -142,10 +141,10 @@ scope, threat model, and invariants.
   detach/reattach behavior. A subsequent isolated run completed `dnf -y
   install vim`, kept the instance alive, and passed the full interactive
   lifecycle and restart regression.
-- Open decision: none for Gate 10.25. Gate 10.5 migration details will be
-  finalized after the terminology dependency is accepted.
-- Exact next action: update pull request 235 with the verified CLI and terminal
-  behavior fixes, then stop for human acceptance before beginning Gate 10.5.
+- Open decision: finalize the human-facing resource vocabulary and migration
+  representation without weakening the accepted Gate 10 enforcement table.
+- Exact next action: inspect the accepted Gate 10 schema, compiler, CLI, and
+  runtime surfaces, then implement the approved Gate 10.5 recipe and UX.
 
 ## Evidence
 
@@ -442,16 +441,16 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Deliver the completed Gate 10.25 pull request from `hdae/domain-to-instance`
-and stop for human acceptance before beginning Gate 10.5.
+Implement Gate 10.5 on `hdae/intuitive-contract-ux`, deliver its dedicated pull
+request with complete evidence, and stop for human acceptance before Gate 11.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 10.25, instance terminology migration, is authorized on
-  `hdae/domain-to-instance`; Gate 10.5 is approved but dependency-blocked.
+- Active gate: Gate 10.5, intuitive self-contained contract configuration and
+  UX, is authorized on `hdae/intuitive-contract-ux`.
 - Last evidence: Gate 10.25 passed strict lint, 9 contract and 18 instance
   tests, a clean aggregate `make test`, the complete systemd matrix, Gate 9.75
   networking and hook regressions, and its human-visible Rocky QEMU demo.
@@ -461,5 +460,5 @@ and stop for human acceptance before beginning Gate 10.5.
   network selection, port controls, and translation.
 - Gate 9.75 closure: pull request 229 merged as `8a475e8b`; human accepted and
   closed the gate on 2026-11-06.
-- Required human decision: none until the Gate 10.25 demonstration and pull
-  request checkpoint.
+- Required human decision: review and acceptance after the Gate 10.5
+  demonstration and pull-request checkpoint.
