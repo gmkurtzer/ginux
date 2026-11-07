@@ -59,11 +59,12 @@
   translation, conflicts and cleanup, and mediated hook behavior. Strict
   `make check`, the complete `make test-systemd` matrix, and aggregate
   `make test` also pass.
-- Gate 11 was clarified on 2026-11-06 to require a matched native-Rocky versus
-  Ginux `sysbench` matrix, native parity as the optimization goal, a default 4%
-  per-workload tolerance, and automatic failure for regressions beyond the
-  approved native or accepted-Ginux baseline. It remains sequenced after Gates
-  9.75 and 10 and has not started.
+- Gate 11 requires a matched native-Rocky versus Ginux `sysbench` matrix,
+  native parity as the optimization goal, a default 4% per-workload tolerance,
+  and automatic failure for regressions beyond the approved native or
+  accepted-Ginux baseline. Its unoptimized 1/2/4-vCPU checkpoint is complete:
+  all CPU and memory rows pass, while all thread-yield and mutex rows fail.
+  Optimization is paused at the required human baseline review.
 - Gates 9.75 and 10 were clarified on 2026-11-06 to support versioned default
   contract templates, bounded glob and resource selectors, deterministic TOML
   overrides, and expansion against a pinned operation catalog. Gate 10 must
@@ -172,9 +173,9 @@ scope, threat model, and invariants.
   `static-and-unit` passes in 41 seconds.
 - Open decision: no workload-specific tolerance exceptions are approved; the
   default 4% per-row budget remains authoritative until baseline review.
-- Exact next action: finalize the matched protocol and tooling, collect the
-  unoptimized native/Ginux baseline, and stop at the baseline checkpoint before
-  optimization.
+- Exact next action: review the unoptimized Gate 11 table and, if approved,
+  profile the thread-yield and mutex paths without weakening mediation or the
+  default 4% per-row budget.
 
 ## Evidence
 

@@ -67,14 +67,23 @@ criterion.
 - [x] Proved the controller runtime executes an arbitrary configured one-shot
   workload rather than the legacy native-shell fixture; a one-vCPU CPU probe
   completed under Ginux. This is setup evidence, not baseline evidence.
+- [x] Defined the initial matched protocol: one pinned executable, identical
+  arguments, one-GiB address-space limit, matched affinity, one warmup, three
+  alternating samples, and independent 1/2/4-vCPU fixed-thread and scaling
+  rows inside one four-vCPU Rocky QEMU session.
+- [x] Collected the unoptimized baseline checkpoint. CPU and memory passed all
+  rows; every thread and mutex row failed the default 4% budget. Optimization
+  remains paused for human review of this checkpoint.
 
 ## Remaining work
 
-- [ ] Finalize matched benchmark protocols and budgets from prior evidence.
+- [x] Finalize the initial matched benchmark protocol and default 4% budget
+  from prior evidence. Final-duration confirmation remains part of completion.
 - [x] Package or install one pinned `sysbench` build for use by both the native
   control and Ginux instance, and verify its identity before every comparison.
 - [ ] Implement comparison and report automation.
-- [ ] Collect statistically useful baseline results.
+- [x] Collect the initial repeated baseline results used to select profiling
+  targets. Final accepted results require a longer confirmation run.
 - [ ] Profile and optimize material overhead.
 - [ ] Persist the accepted baseline and add automatic per-workload regression
   checks to the normal performance test target.
@@ -130,7 +139,19 @@ criterion.
 
 ## Evidence
 
-- Not run.
+- `make bench-prepare` acquired and cached the exact Rocky/EPEL sysbench build
+  and digest-pinned Rocky instance image in a dedicated persistent benchmark
+  host overlay. `make bench-baseline` then completed offline.
+- `build/gate11/results.tsv` contains three raw samples per side and row;
+  `build/gate11/raw.tar.gz` contains the corresponding sysbench transcripts;
+  `build/gate11/metadata.txt` records the matched environment and protocol;
+  and `build/gate11/report.md` is generated from those inputs.
+- All five CPU rows passed between 0.994x and 1.012x native performance. All
+  five memory rows passed between 0.995x and 1.000x.
+- All five thread-yield rows failed between 0.005x and 0.011x native
+  performance. All five mutex rows failed between 0.703x and 0.842x.
+- This is the required pre-optimization checkpoint. No optimization has been
+  applied to these results.
 
 ## Decisions and limitations
 
@@ -143,6 +164,10 @@ criterion.
 - Native means an ordinary process running directly on the Rocky host kernel,
   not a second VM. The conventional-container result provides context but does
   not replace the native control or relax the Ginux threshold.
+- The initial checkpoint uses one-second sysbench intervals and three recorded
+  repetitions after warmup to keep the exploratory matrix bounded. The final
+  accepted baseline will use longer intervals and/or more repetitions after
+  profiling stabilizes the failing paths.
 
 ## Delivery strategy
 

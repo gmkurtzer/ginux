@@ -3,11 +3,15 @@ set -eu
 
 instance=gate11-benchmark
 config=/var/tmp/instance-gate11-benchmark.toml
-runtime=/usr/local/libexec/ginux-runtime
 directory=/var/lib/ginux/instances/$instance
 sysbench_nevra=sysbench-1.0.20-19.el10_2.x86_64
+acquire=${GINUX_BENCH_ACQUIRE:-off}
 
 if ! rpm -q --quiet "$sysbench_nevra"; then
+    if test "$acquire" != on; then
+        printf '%s\n' 'Gate 11 benchmark dependencies are absent; run make bench-prepare first' >&2
+        exit 69
+    fi
     sudo dnf -y install epel-release >/dev/null
     sudo dnf -y install "$sysbench_nevra" >/dev/null
 fi
@@ -17,7 +21,12 @@ if test -d "$directory"; then
     sudo /usr/local/libexec/ginux-instance-helper stop "$instance" >/dev/null || true
     sudo rm -rf "$directory"
 fi
-ginux instance create "$instance" "$config"
+if ! ginux instance create "$instance" "$config"; then
+    if test "$acquire" != on; then
+        printf '%s\n' 'Gate 11 instance image is absent; run make bench-prepare first' >&2
+    fi
+    exit 1
+fi
 
 root=$directory/root
 dependencies=$(ldd /usr/bin/sysbench | awk '
