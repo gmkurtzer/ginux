@@ -92,6 +92,7 @@ pub const fn decide_systemd(syscall: u64, shared_network: bool) -> Decision {
         | 15
         | 16
         | 18
+        | 24
         | 25
         | 32
         | 33
@@ -231,6 +232,7 @@ pub const fn systemd_surface(syscall: u64, shared_network: bool) -> BalancedSurf
     } else if matches!(
         syscall,
         7 | 15
+            | 24
             | 32
             | 33
             | 56
@@ -289,9 +291,8 @@ pub const fn balanced_surface(syscall: u64) -> BalancedSurface {
             BalancedSurface::ImageRead
         }
         9 | 10 | 11 | 12 | 28 => BalancedSurface::Memory,
-        13 | 14 | 15 | SYS_FORK | SYS_WAIT4 | 98 | 99 | 100 | 158 | 202 | 218 | 273 | 302 | 334 => {
-            BalancedSurface::Task
-        }
+        13 | 14 | 15 | 24 | SYS_FORK | SYS_WAIT4 | 98 | 99 | 100 | 158 | 202 | 218 | 273 | 302
+        | 334 => BalancedSurface::Task,
         1 | 20 => BalancedSurface::Console,
         318 => BalancedSurface::Random,
         SYS_GETPID | SYS_GETUID | SYS_GETGID | SYS_GETEUID | SYS_GETEGID | SYS_GETPPID

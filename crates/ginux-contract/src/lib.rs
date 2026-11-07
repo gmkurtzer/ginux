@@ -328,6 +328,14 @@ pub static CATALOG: &[Operation] = &[
         "test-native-vfs"
     ),
     syscall!(
+        "sched_yield",
+        24,
+        Complete,
+        Action::Mediate,
+        "pre-effect contract approval",
+        "bench"
+    ),
+    syscall!(
         "mremap",
         25,
         Partial,
@@ -1766,9 +1774,13 @@ const EMPTY_RULE: EffectiveRule = EffectiveRule {
     source_rule: 0,
 };
 
+const SYSCALL_RULE_SLOTS: usize = 512;
+const NO_SYSCALL_RULE: u16 = u16::MAX;
+
 #[derive(Clone, Copy)]
 pub struct EffectiveContract {
     rules: [EffectiveRule; MAX_OPERATIONS],
+    syscall_rules: [u16; SYSCALL_RULE_SLOTS],
     len: usize,
     digest: [u8; DIGEST_HEX_BYTES],
 }
@@ -1777,6 +1789,7 @@ impl EffectiveContract {
     pub const fn empty() -> Self {
         Self {
             rules: [EMPTY_RULE; MAX_OPERATIONS],
+            syscall_rules: [NO_SYSCALL_RULE; SYSCALL_RULE_SLOTS],
             len: 0,
             digest: [0; DIGEST_HEX_BYTES],
         }
@@ -1797,6 +1810,13 @@ impl EffectiveContract {
     }
 
     pub fn syscall_rule(&self, number: u64) -> Option<&EffectiveRule> {
+        if let Ok(number) = usize::try_from(number) {
+            if let Some(index) = self.syscall_rules.get(number).copied() {
+                if index != NO_SYSCALL_RULE {
+                    return self.rules.get(usize::from(index));
+                }
+            }
+        }
         self.rules()
             .iter()
             .find(|rule| rule.operation.abi_number == Some(number))
@@ -1804,6 +1824,20 @@ impl EffectiveContract {
 
     pub fn operation_rule(&self, id: &str) -> Option<&EffectiveRule> {
         self.rules().iter().find(|rule| rule.operation.id == id)
+    }
+
+    fn index_syscalls(&mut self) {
+        for index in 0..self.len {
+            let Some(number) = self.rules[index].operation.abi_number else {
+                continue;
+            };
+            let Ok(number) = usize::try_from(number) else {
+                continue;
+            };
+            if let Some(slot) = self.syscall_rules.get_mut(number) {
+                *slot = index as u16;
+            }
+        }
     }
 }
 
@@ -1840,6 +1874,7 @@ pub fn resolve(
         };
         effective.len += 1;
     }
+    effective.index_syscalls();
     apply_profile(&mut effective, profile)?;
     for template in templates {
         apply_template(&mut effective, template)?;
@@ -1879,6 +1914,7 @@ pub fn resolve_recipe(recipe: Recipe<'_>) -> Result<EffectiveContract, ContractE
         };
         effective.len += 1;
     }
+    effective.index_syscalls();
     for (verb, selectors) in [
         (AccessVerb::Read, recipe.read),
         (AccessVerb::Write, recipe.write),
@@ -2320,6 +2356,15 @@ mod tests {
         assert_eq!(contract.syscall_action(39), Action::Emulate);
         assert_eq!(contract.syscall_action(228), Action::Deny(38));
         assert_eq!(contract.syscall_action(41), Action::Deny(38));
+    }
+
+    #[test]
+    fn systemd_profile_mediates_sched_yield_through_the_index() {
+        let contract = resolve(b"gate9-systemd-v1", &[], &[], &[]).unwrap();
+        let rule = contract.syscall_rule(24).unwrap();
+        assert_eq!(rule.operation.id, "syscall.sched_yield");
+        assert_eq!(rule.action, Action::Mediate);
+        assert_eq!(contract.syscall_action(24), Action::Mediate);
     }
 
     #[test]

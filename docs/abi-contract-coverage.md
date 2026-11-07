@@ -8,12 +8,12 @@ The catalog is the reviewable inventory used to normalize instance contracts. An
 
 | Status | Operations |
 |---|---:|
-| complete | 23 |
+| complete | 24 |
 | partial | 156 |
 | denied | 1 |
 | planned | 1 |
 | out-of-scope | 1 |
-| **Total** | **182** |
+| **Total** | **183** |
 
 ## Versioned contract inputs
 
@@ -48,6 +48,7 @@ The catalog is the reviewable inventory used to normalize instance contracts. An
 | `syscall.pwrite64` | syscall | 18 | partial | mediate | bounded instance descriptor | `test-systemd` | x86-64 Linux ABI only |
 | `syscall.writev` | syscall | 20 | partial | mediate | bounded vectors | `test-systemd` | x86-64 Linux ABI only |
 | `syscall.access` | syscall | 21 | partial | mediate | instance path | `test-native-vfs` | x86-64 Linux ABI only |
+| `syscall.sched_yield` | syscall | 24 | complete | mediate | pre-effect contract approval | `bench` | x86-64 Linux ABI only |
 | `syscall.mremap` | syscall | 25 | partial | mediate | managed mapping | `test-systemd` | x86-64 Linux ABI only |
 | `syscall.madvise` | syscall | 28 | partial | mediate | managed mapping | `test-runtime` | x86-64 Linux ABI only |
 | `syscall.dup` | syscall | 32 | complete | mediate | instance descriptor | `test-systemd` | x86-64 Linux ABI only |

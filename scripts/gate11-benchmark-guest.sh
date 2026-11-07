@@ -13,6 +13,7 @@ repetitions=${GINUX_BENCH_REPETITIONS:-3}
 allocations=${GINUX_BENCH_VCPUS:-"1 2 4"}
 workloads=${GINUX_BENCH_WORKLOADS:-"cpu memory threads mutex"}
 audit_mode=${GINUX_BENCH_AUDIT_MODE:-stderr}
+supervisor_cpu=${GINUX_BENCH_SUPERVISOR_CPU:-}
 memory_bytes=1073741824
 
 case "$duration:$repetitions" in
@@ -92,14 +93,22 @@ run_one() {
         # Redirection is intentionally performed by the unprivileged driver;
         # sudo only selects the measured process identity.
         # shellcheck disable=SC2024
-        sudo -u nobody taskset -c "$cpus" prlimit --as="$memory_bytes" -- \
-            "$native_command" "$workload" "$threads" "$duration" >"$output" 2>&1
+        if ! sudo -u nobody taskset -c "$cpus" prlimit --as="$memory_bytes" -- \
+            "$native_command" "$workload" "$threads" "$duration" >"$output" 2>&1; then
+            cat "$output" >&2
+            return 1
+        fi
     else
         write_config "$workload" "$vcpus" "$threads"
         sudo truncate -s 0 "$directory/audit.log"
         # shellcheck disable=SC2024
-        sudo taskset -c "$cpus" prlimit --as="$memory_bytes" -- \
-            "$helper" run-runtime "$instance" >"$output" 2>&1
+        ginux_cpus=$cpus
+        test -z "$supervisor_cpu" || ginux_cpus=$supervisor_cpu
+        if ! sudo taskset -c "$ginux_cpus" prlimit --as="$memory_bytes" -- \
+            "$helper" run-runtime "$instance" >"$output" 2>&1; then
+            cat "$output" >&2
+            return 1
+        fi
     fi
 }
 

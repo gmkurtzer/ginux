@@ -34,6 +34,9 @@ pub const SYS_PTRACE: usize = 101;
 pub const SYS_OPENAT_HOST: usize = 257;
 pub const SYS_SIGNALFD4: usize = 289;
 pub const SYS_PROCESS_VM_WRITEV: usize = 311;
+pub const SYS_SECCOMP: usize = 317;
+pub const SYS_PIDFD_OPEN: usize = 434;
+pub const SYS_PIDFD_GETFD: usize = 438;
 pub const AT_FDCWD: usize = (-100isize) as usize;
 pub const O_RDONLY: usize = 0;
 pub const O_RDWR: usize = 2;
@@ -55,9 +58,11 @@ pub const PTRACE_GETEVENTMSG: usize = 0x4201;
 pub const PTRACE_O_TRACESYSGOOD: usize = 1;
 pub const PTRACE_O_TRACEFORK: usize = 1 << 1;
 pub const PTRACE_O_TRACEEXEC: usize = 1 << 4;
+pub const PTRACE_O_TRACESECCOMP: usize = 1 << 7;
 pub const PTRACE_O_EXITKILL: usize = 1 << 20;
 pub const PTRACE_EVENT_FORK: usize = 1;
 pub const PTRACE_EVENT_EXEC: usize = 4;
+pub const PTRACE_EVENT_SECCOMP: usize = 7;
 
 pub const EPERM: i64 = 1;
 pub const ESRCH: i64 = 3;
@@ -74,8 +79,13 @@ pub const SIG_BLOCK: usize = 0;
 pub const SIGINT: usize = 2;
 pub const SIGTERM: usize = 15;
 pub const SIGKILL: usize = 9;
+pub const SIGSTOP: usize = 19;
 pub const SIGCHLD: usize = 17;
 pub const PR_SET_NO_NEW_PRIVS: usize = 38;
+pub const SECCOMP_RET_TRACE: u32 = 0x7ff0_0000;
+pub const SECCOMP_RET_USER_NOTIF: u32 = 0x7fc0_0000;
+pub const SECCOMP_SET_MODE_FILTER: usize = 1;
+pub const SECCOMP_FILTER_FLAG_NEW_LISTENER: usize = 1 << 3;
 pub const HOST_NOBODY_UID: usize = 65_534;
 pub const HOST_NOBODY_GID: usize = 65_534;
 
@@ -83,6 +93,96 @@ pub struct ManagedHostIdentity {
     pub uid: usize,
     pub gid: usize,
     pub drop_root: bool,
+}
+
+#[repr(C)]
+pub struct SockFilter {
+    code: u16,
+    jt: u8,
+    jf: u8,
+    k: u32,
+}
+
+#[repr(C)]
+pub struct SockFprog {
+    len: u16,
+    filter: *const SockFilter,
+}
+
+/// Install the supervisor's mandatory pre-effect stop. Calls with fixed,
+/// argument-free semantics use seccomp user notification; all other calls use
+/// ptrace seccomp events. Neither path contains an allow rule, so every call
+/// still reaches Ginux before the host may execute it.
+pub fn install_trace_filter() -> isize {
+    const BPF_LD_W_ABS: u16 = 0x20;
+    const BPF_JMP_JEQ_K: u16 = 0x15;
+    const BPF_ALU_OR_K: u16 = 0x44;
+    const BPF_RET_K: u16 = 0x06;
+    const BPF_RET_A: u16 = 0x16;
+    const AUDIT_ARCH_X86_64: u32 = 0xc000_003e;
+    const INVALID_ARCH_DATA: u32 = 0xffff;
+    let filter = [
+        SockFilter {
+            code: BPF_LD_W_ABS,
+            jt: 0,
+            jf: 0,
+            k: 4,
+        },
+        SockFilter {
+            code: BPF_JMP_JEQ_K,
+            jt: 1,
+            jf: 0,
+            k: AUDIT_ARCH_X86_64,
+        },
+        SockFilter {
+            code: BPF_RET_K,
+            jt: 0,
+            jf: 0,
+            k: SECCOMP_RET_TRACE | INVALID_ARCH_DATA,
+        },
+        SockFilter {
+            code: BPF_LD_W_ABS,
+            jt: 0,
+            jf: 0,
+            k: 0,
+        },
+        SockFilter {
+            code: BPF_JMP_JEQ_K,
+            jt: 0,
+            jf: 1,
+            k: 24,
+        },
+        SockFilter {
+            code: BPF_RET_K,
+            jt: 0,
+            jf: 0,
+            k: SECCOMP_RET_USER_NOTIF,
+        },
+        SockFilter {
+            code: BPF_ALU_OR_K,
+            jt: 0,
+            jf: 0,
+            k: SECCOMP_RET_TRACE,
+        },
+        SockFilter {
+            code: BPF_RET_A,
+            jt: 0,
+            jf: 0,
+            k: 0,
+        },
+    ];
+    let program = SockFprog {
+        len: filter.len() as u16,
+        filter: filter.as_ptr(),
+    };
+    unsafe {
+        syscall3(
+            SYS_SECCOMP,
+            SECCOMP_SET_MODE_FILTER,
+            SECCOMP_FILTER_FLAG_NEW_LISTENER,
+            &program as *const _ as usize,
+        )
+    }
 }
 
 /// Select the real host identity for managed code. Virtual credentials are
