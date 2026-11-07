@@ -197,11 +197,12 @@ criterion.
   3,649 `wait4` calls and 30.99% to 8,257 `ptrace` calls: 93.54% combined.
   Seccomp-assisted entry-only ptrace reached 14.831 events/s before the user
   notification broker replaced it.
-- The final repeated audited 1/2/4-vCPU matrix in
-  `build/gate11-final-threads/report.md` reached 20.728, 20.603, 42.321,
-  20.363, and 80.337 events/s. That is 0.030x to 0.036x native and remains a
-  mandatory failure, but the one-vCPU result is 6.28x the original audited
-  3.299 events/s.
+- The clean-tree repeated audited 1/2/4-vCPU matrix in
+  `build/gate11-final-clean/report.md` reached 19.731, 19.619, 42.329,
+  19.526, and 75.861 events/s. That is 0.031x to 0.036x native and remains a
+  mandatory failure, but the one-vCPU result is 5.98x the original audited
+  3.299 events/s. Metadata identifies committed source `6de49677` and a clean
+  working tree.
 - A three-second, three-repetition audit-disabled diagnostic measured 21.789
   versus 645.097 native events/s. One sysbench event contains 1,000 yields, so
   the remaining mediated path costs about 45.9 microseconds per yield versus
@@ -216,6 +217,11 @@ criterion.
 - Fresh regression evidence after the retained optimization passes
   `make check`, `make test-contract`, `make test-native-vfs`, and the complete
   cold/warm/repeat/DNF-failure/startup-failure/shutdown systemd suite.
+- The clean matrix passed every CPU row at 0.967x to 0.978x and every mutex row
+  at 0.995x to 1.002x. One short 2-vCPU/1-thread memory row had 10.39% Ginux
+  variance and failed; a longer five-second, five-repetition confirmation in
+  `build/gate11-memory-v2t1-confirm/report.md` passed at 1.003x native with
+  1.52% Ginux variance. Its 2-thread companion also passed at 1.003x.
 
 ## Decisions and limitations
 

@@ -176,9 +176,9 @@ scope, threat model, and invariants.
   default 4% per-row budget remains authoritative.
 - Gate 11 profiling corrected the mutex protocol; every exploratory 1/2/4-vCPU
   mutex row now passes within 0.7% of native. The retained seccomp user
-  notification path improved one-vCPU thread yield from 3.299 to 20.728
+  notification path improved one-vCPU thread yield from 3.299 to 19.731
   events/s while preserving pre-effect userspace dispatch and bounded audit.
-  The repeated 1/2/4-vCPU matrix remains only 0.030x to 0.036x native and fails
+  The clean repeated 1/2/4-vCPU matrix remains only 0.031x to 0.036x native and fails
   the unchanged 4% budget.
 - Human clarification requires Gate 11 to continue through exhaustive
   implementation-level profiling and optimization rather than stopping at the
@@ -189,6 +189,10 @@ scope, threat model, and invariants.
   receive plus response ioctl round trips dominate. A removed, exact-semantics
   kernel-resident seccomp decision reached 0.937x native, while a removed
   no-yield diagnostic reached 2.990x and was rejected as semantically invalid.
+- Clean-tree Gate 11 metadata identifies commit `6de49677`. Every CPU and mutex
+  row passes. A short, high-variance 2-vCPU/1-thread memory failure was not
+  accepted at face value: a five-second, five-repetition confirmation passed at
+  1.003x native with 1.52% Ginux variance; its 2-thread companion also passed.
 - Exact next action: complete a clean committed confirmation run, then present
   the measured architecture alternatives for human direction before choosing
   a kernel-resident decision path, an in-kernel policy component, or an explicit
