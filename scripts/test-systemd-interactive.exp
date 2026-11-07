@@ -3,9 +3,15 @@
 if {![info exists env(ROCKY_SSH_PORT)]} {
     set env(ROCKY_SSH_PORT) 22409
 }
-set env(ROCKY_PID_FILE) build/rocky-test-host.pid
-set env(ROCKY_SERIAL_LOG) build/rocky-test-host-serial.log
-set env(ROCKY_OVERLAY_DISK) build/rocky-test-host-overlay.qcow2
+if {![info exists env(ROCKY_PID_FILE)]} {
+    set env(ROCKY_PID_FILE) build/rocky-test-host.pid
+}
+if {![info exists env(ROCKY_SERIAL_LOG)]} {
+    set env(ROCKY_SERIAL_LOG) build/rocky-test-host-serial.log
+}
+if {![info exists env(ROCKY_OVERLAY_DISK)]} {
+    set env(ROCKY_OVERLAY_DISK) build/rocky-test-host-overlay.qcow2
+}
 file delete -force $env(ROCKY_PID_FILE) $env(ROCKY_SERIAL_LOG) \
     $env(ROCKY_OVERLAY_DISK)
 set timeout 300
@@ -185,6 +191,17 @@ expect {
     eof { puts stderr "attached instance exited after full-screen terminal use"; exit 180 }
 }
 expect -re {\[root@ginux [^]]+\]# }
+if {[info exists env(GINUX_INTERACTIVE_DNF_INSTALL)] && $env(GINUX_INTERACTIVE_DNF_INSTALL) eq "on"} {
+    set timeout 1800
+    send -- "dnf -y install vim && printf 'GINUX_DNF_%s\\n' 'INSTALL: PASS'\r"
+    expect {
+        -re {GINUX_DNF_INSTALL: PASS} {}
+        timeout { puts stderr "dnf install vim timed out"; exit 181 }
+        eof { puts stderr "instance exited during dnf install vim"; exit 182 }
+    }
+    expect -re {\[root@ginux [^]]+\]# }
+    set timeout 120
+}
 send -- "/bin/true && printf 'GINUX_JOB_%s\\n' 'SIMPLE: PASS'\r"
 expect {
     -re {child setpgid .*Operation not permitted} { puts stderr "simple command emitted a setpgid warning"; exit 110 }

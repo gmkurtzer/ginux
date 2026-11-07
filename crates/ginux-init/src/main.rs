@@ -35,7 +35,7 @@ use crate::process_hooks::{
 use crate::supervisor::{
     exit_process, line, ptrace, read_tracee_word, stopped, syscall0, syscall1, syscall2, syscall3,
     syscall4, syscall5, wait, write_all, write_i64, write_u64, UserRegs, AT_FDCWD, CLOCK_MONOTONIC,
-    CLOCK_PROCESS_CPUTIME_ID, EBADF, ECHILD, EINVAL, ENOSYS, EPERM, ESRCH, INSTANCE_GID,
+    CLOCK_PROCESS_CPUTIME_ID, EBADF, ECHILD, EINVAL, EMFILE, ENOSYS, EPERM, ESRCH, INSTANCE_GID,
     INSTANCE_UID, O_RDONLY, O_RDWR, PR_SET_NO_NEW_PRIVS, PTRACE_CONT, PTRACE_EVENT_EXEC,
     PTRACE_EVENT_FORK, PTRACE_GETEVENTMSG, PTRACE_GETREGS, PTRACE_KILL, PTRACE_O_EXITKILL,
     PTRACE_O_TRACEEXEC, PTRACE_O_TRACEFORK, PTRACE_O_TRACESYSGOOD, PTRACE_PEEKTEXT,
@@ -108,6 +108,7 @@ const PTRACE_PEEKDATA: usize = 2;
 const INSTANCE_NULL_FD: usize = 240;
 const INSTANCE_CONSOLE_FD: usize = 241;
 const NATIVE_PROC_FD_LIMIT: usize = 512;
+const NATIVE_SOCKET_FD_LIMIT: usize = 64;
 #[panic_handler]
 fn panic(_info: &PanicInfo<'_>) -> ! {
     fail(b"panic")
@@ -3292,7 +3293,7 @@ struct NativeSupervisorTask {
     console_fd: i64,
     pipe2_address: usize,
     pipe_fds: [i64; 8],
-    socket_fds: [NativeSocketFd; 16],
+    socket_fds: [NativeSocketFd; NATIVE_SOCKET_FD_LIMIT],
     pending_socket_type: u8,
     pending_sockaddr: usize,
     pending_sockaddr_word: u64,
@@ -3313,9 +3314,6 @@ struct NativeSupervisorTask {
     syscall: u64,
     translated_rdi: u64,
     waitid_info: u64,
-    fork_result_pending: u32,
-    fork_breakpoint_rip: usize,
-    fork_breakpoint_word: usize,
     initial_stop_pending: bool,
     tracing: bool,
     limits: [[u64; 2]; 16],
@@ -4683,7 +4681,7 @@ fn supervise_native(
         console_fd: INSTANCE_CONSOLE_FD as i64,
         pipe2_address: 0,
         pipe_fds: [-1; 8],
-        socket_fds: [EMPTY_SOCKET_FD; 16],
+        socket_fds: [EMPTY_SOCKET_FD; NATIVE_SOCKET_FD_LIMIT],
         pending_socket_type: 0,
         pending_sockaddr: 0,
         pending_sockaddr_word: 0,
@@ -4704,9 +4702,6 @@ fn supervise_native(
         syscall: 0,
         translated_rdi: 0,
         waitid_info: 0,
-        fork_result_pending: 0,
-        fork_breakpoint_rip: 0,
-        fork_breakpoint_word: 0,
         initial_stop_pending: false,
         tracing: true,
         limits: native_default_limits(),
@@ -4878,9 +4873,6 @@ fn supervise_native(
                 syscall: 0,
                 translated_rdi: 0,
                 waitid_info: 0,
-                fork_result_pending: 0,
-                fork_breakpoint_rip: 0,
-                fork_breakpoint_word: 0,
                 initial_stop_pending: pending_child_slot.is_none(),
                 tracing: true,
                 limits: task.limits,
@@ -4893,54 +4885,15 @@ fn supervise_native(
                     native_fail(instance, pid, b"pending native child resume failed");
                 }
             }
-            if event == PTRACE_EVENT_VFORK {
-                task.awaiting_exit = true;
-                task.override_exit = true;
-                task.override_result = child_virtual.pid as i64;
-                task.fork_result_pending = 0;
-                task.fork_breakpoint_rip = 0;
-                task.fork_breakpoint_word = 0;
-                tasks[task_index] = Some(task);
-                if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
-                    native_fail(instance, pid, b"native vfork parent resume failed");
-                }
-                continue;
-            }
-            let mut parent_registers = core::mem::MaybeUninit::<UserRegs>::uninit();
-            if ptrace(
-                PTRACE_GETREGS,
-                host_pid,
-                0,
-                parent_registers.as_mut_ptr() as usize,
-            ) < 0
-            {
-                native_fail(instance, pid, b"native fork registers failed");
-            }
-            let parent_registers = unsafe { parent_registers.assume_init() };
-            let breakpoint_rip = parent_registers.rip as usize;
-            let mut breakpoint_word = 0usize;
-            if ptrace(
-                PTRACE_PEEKTEXT,
-                host_pid,
-                breakpoint_rip,
-                &mut breakpoint_word as *mut _ as usize,
-            ) < 0
-                || ptrace(
-                    PTRACE_POKETEXT,
-                    host_pid,
-                    breakpoint_rip,
-                    (breakpoint_word & !0xff) | 0xcc,
-                ) < 0
-            {
-                native_fail(instance, pid, b"native fork breakpoint failed");
-            }
-            task.awaiting_exit = false;
-            task.override_exit = false;
-            task.fork_result_pending = child_virtual.pid;
-            task.fork_breakpoint_rip = breakpoint_rip;
-            task.fork_breakpoint_word = breakpoint_word;
+            // Translate the host child ID at the parent's syscall-exit stop.
+            // A software breakpoint in the parent's text is unsafe here:
+            // multithreaded workloads share that text, so an unrelated
+            // sibling can hit the breakpoint and bring down the instance.
+            task.awaiting_exit = true;
+            task.override_exit = true;
+            task.override_result = child_virtual.pid as i64;
             tasks[task_index] = Some(task);
-            if ptrace(PTRACE_CONT, host_pid, 0, 0) < 0 {
+            if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
                 native_fail(instance, pid, b"native parent resume after child failed");
             }
             continue;
@@ -4981,51 +4934,6 @@ fn supervise_native(
         if signal == 17 {
             if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
                 native_fail(instance, pid, b"native SIGCHLD resume failed");
-            }
-            continue;
-        }
-        if signal == 5 && task.fork_result_pending != 0 {
-            let mut parent_registers = core::mem::MaybeUninit::<UserRegs>::uninit();
-            if ptrace(
-                PTRACE_GETREGS,
-                host_pid,
-                0,
-                parent_registers.as_mut_ptr() as usize,
-            ) < 0
-            {
-                native_fail(instance, pid, b"native fork result read failed");
-            }
-            let mut parent_registers = unsafe { parent_registers.assume_init() };
-            if ptrace(
-                PTRACE_POKETEXT,
-                host_pid,
-                task.fork_breakpoint_rip,
-                task.fork_breakpoint_word,
-            ) < 0
-            {
-                native_fail(instance, pid, b"native fork breakpoint restore failed");
-            }
-            parent_registers.rip = task.fork_breakpoint_rip as u64;
-            parent_registers.rax = task.fork_result_pending as u64;
-            if ptrace(
-                PTRACE_SETREGS,
-                host_pid,
-                0,
-                &parent_registers as *const _ as usize,
-            ) < 0
-            {
-                native_fail(instance, pid, b"native fork result translation failed");
-            }
-            task.fork_result_pending = 0;
-            task.fork_breakpoint_rip = 0;
-            task.fork_breakpoint_word = 0;
-            tasks[task_index] = Some(task);
-            if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
-                native_fail(
-                    instance,
-                    pid,
-                    b"native parent resume after translation failed",
-                );
             }
             continue;
         }
@@ -5301,6 +5209,13 @@ fn supervise_native(
                         *pipe_fd = -1;
                     }
                 }
+                for socket_fd in &mut task.socket_fds {
+                    if socket_fd.fd >= task.close_range_first
+                        && socket_fd.fd <= task.close_range_last
+                    {
+                        *socket_fd = EMPTY_SOCKET_FD;
+                    }
+                }
                 if task.close_range_first >= 0 && task.close_range_last >= 0 {
                     native_fd_clear_range(
                         &mut task.cgroup_procs_fds,
@@ -5367,7 +5282,9 @@ fn supervise_native(
         }
         let shared_network =
             mode == 3 && instance.config().network_backend == NetworkBackend::Shared;
-        if shared_network && syscall == 41 {
+        let socket_table_full =
+            shared_network && syscall == 41 && !task.socket_fds.iter().any(|entry| entry.fd < 0);
+        if shared_network && syscall == 41 && !socket_table_full {
             task.pending_socket_type = (registers.rsi & 0xf) as u8;
         }
         if shared_network
@@ -5757,6 +5674,20 @@ fn supervise_native(
         };
         write_all(b" action=");
         match decision.action {
+            Action::Mediate if socket_table_full => {
+                write_all(b"deny surface=virtual-network result=-");
+                write_u64(EMFILE as u64);
+                write_all(b" reason=descriptor-limit\n");
+                registers.orig_rax = u64::MAX;
+                task.awaiting_exit = true;
+                task.override_exit = true;
+                task.override_result = -EMFILE;
+                if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
+                {
+                    native_fail(instance, pid, b"native socket limit denial failed");
+                }
+            }
             Action::Emulate if native_identity_result(syscall, mode).is_some() => {
                 let result = if mode == 3 {
                     let view = processes

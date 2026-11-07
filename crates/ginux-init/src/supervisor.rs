@@ -65,6 +65,7 @@ pub const EIO: i64 = 5;
 pub const EFAULT: i64 = 14;
 pub const EACCES: i64 = 13;
 pub const EINVAL: i64 = 22;
+pub const EMFILE: i64 = 24;
 pub const ENOSYS: i64 = 38;
 pub const VIRTUAL_PID: u64 = 4242;
 pub const SIG_BLOCK: usize = 0;
