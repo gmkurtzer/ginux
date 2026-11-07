@@ -59,7 +59,14 @@ expect {
     eof { puts stderr "Rocky host shell exited during installation check"; exit 75 }
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
-send -- "ginux instance create rocky --config /etc/ginux/examples/rocky-systemd.toml\r"
+send -- "if ginux instance create legacy --config /etc/ginux/examples/rocky-systemd.toml; then echo GINUX_CREATE_POSITIONAL: FAIL; else echo GINUX_CREATE_POSITIONAL: PASS; fi\r"
+expect {
+    -re {GINUX_CREATE_POSITIONAL: PASS} {}
+    timeout { puts stderr "legacy --config create syntax was not rejected"; exit 166 }
+    eof { puts stderr "Rocky host shell exited during positional create check"; exit 167 }
+}
+expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
+send -- "ginux instance create rocky /etc/ginux/examples/rocky-systemd.toml\r"
 expect {
     -re {Creating instance "rocky"} {}
     timeout { puts stderr "first instance creation did not begin"; exit 159 }
@@ -93,7 +100,7 @@ expect {
     eof { puts stderr "Rocky host shell exited during acquisition check"; exit 130 }
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
-send -- "sudo unshare -n /usr/local/bin/ginux instance create cache-check --config /etc/ginux/examples/rocky-systemd.toml\r"
+send -- "sudo unshare -n /usr/local/bin/ginux instance create cache-check /etc/ginux/examples/rocky-systemd.toml\r"
 expect {
     -re {  Cache: hit} {}
     timeout { puts stderr "offline create did not report an OCI cache hit"; exit 131 }
@@ -124,7 +131,7 @@ expect {
     eof { puts stderr "Rocky host shell exited during status inspection"; exit 81 }
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
-send -- "if ginux instance create rocky --config /etc/ginux/examples/rocky-systemd.toml; then echo GINUX_DUPLICATE: FAIL; else echo GINUX_DUPLICATE: PASS; fi\r"
+send -- "if ginux instance create rocky /etc/ginux/examples/rocky-systemd.toml; then echo GINUX_DUPLICATE: FAIL; else echo GINUX_DUPLICATE: PASS; fi\r"
 expect {
     -re {GINUX_DUPLICATE: PASS} {}
     timeout { puts stderr "duplicate instance was not rejected"; exit 82 }
@@ -226,7 +233,7 @@ expect {
     eof { puts stderr "instance exited during background job"; exit 118 }
 }
 expect -re {\[root@ginux [^]]+\]# }
-send -- "test \"\$(uname -s)\" = Linux && test \"\$(uname -n)\" = ginux && test \"\$(uname -r)\" = 6.12.0-ginux-abi1 && test \"\$(uname -v)\" = 'Ginux userspace kernel 0.1.0' && grep -Fq 'Ginux userspace kernel 0.1.0 (Linux ABI personality 6.12.0-ginux-abi1; contract gate9-systemd-v1; x86_64)' /proc/version && test \"\$(grep -c '^processor' /proc/cpuinfo)\" -eq 2 && grep -q '^model name' /proc/cpuinfo && printf 'GINUX_PROC_%s\\n' 'IDENTITY: PASS'\r"
+send -- "test \"\$(uname -s)\" = Linux && test \"\$(uname -n)\" = ginux && test \"\$(uname -r)\" = 6.12.0-ginux-abi1 && test \"\$(uname -v)\" = 'Ginux userspace kernel 0.1.0' && grep -Fq 'Ginux userspace kernel 0.1.0 (Linux ABI personality 6.12.0-ginux-abi1; contract self-contained-v1; x86_64)' /proc/version && test \"\$(grep -c '^processor' /proc/cpuinfo)\" -eq 2 && grep -q '^model name' /proc/cpuinfo && printf 'GINUX_PROC_%s\\n' 'IDENTITY: PASS'\r"
 expect {
     -re {GINUX_PROC_IDENTITY: PASS} {}
     timeout { puts stderr "uname, proc version, or filtered CPU identity was incorrect"; exit 157 }
@@ -250,6 +257,41 @@ expect {
     -re {GINUX_PROC_PERFORMANCE: PASS} {}
     timeout { puts stderr "ps exceeded the proc refresh budget or shell timing data was invalid"; exit 165 }
     eof { puts stderr "instance exited during proc performance check"; exit 166 }
+}
+expect -re {\[root@ginux [^]]+\]# }
+send -- "if printf denied > /ginux-demo/read-only/new; then printf 'GINUX_POLICY_WRITE: FAIL\\n'; else printf 'GINUX_POLICY_WRITE: PASS\\n'; fi; if printf denied > /ginux-demo/read-only/child/new; then printf 'GINUX_POLICY_RECURSIVE: FAIL\\n'; else printf 'GINUX_POLICY_RECURSIVE: PASS\\n'; fi; printf allowed > /ginux-demo/read-only-other/new && printf allowed > /ginux-demo/writable/new && printf 'GINUX_POLICY_BOUNDARY: PASS\\n'\r"
+expect {
+    -re {GINUX_POLICY_WRITE: PASS} {}
+    timeout { puts stderr "direct write-deny policy was not enforced"; exit 184 }
+    eof { puts stderr "instance exited during write-deny check"; exit 185 }
+}
+expect {
+    -re {GINUX_POLICY_RECURSIVE: PASS} {}
+    timeout { puts stderr "recursive write-deny policy was not enforced"; exit 186 }
+    eof { puts stderr "instance exited during recursive write-deny check"; exit 187 }
+}
+expect {
+    -re {GINUX_POLICY_BOUNDARY: PASS} {}
+    timeout { puts stderr "write-deny path boundary blocked an allowed neighbor"; exit 188 }
+    eof { puts stderr "instance exited during write-deny boundary check"; exit 189 }
+}
+expect -re {\[root@ginux [^]]+\]# }
+send -- "ln -s /ginux-demo/read-only /ginux-demo/link; if printf denied > /ginux-demo/link/new; then printf 'GINUX_POLICY_SYMLINK: FAIL\\n'; else printf 'GINUX_POLICY_SYMLINK: PASS\\n'; fi; if chmod u+s /ginux-demo/writable/value; then printf 'GINUX_POLICY_SETID: FAIL\\n'; else printf 'GINUX_POLICY_SETID: PASS\\n'; fi; if mknod /ginux-demo/writable/device c 1 3; then printf 'GINUX_POLICY_DEVICE: FAIL\\n'; else printf 'GINUX_POLICY_DEVICE: PASS\\n'; fi; mkfifo /ginux-demo/writable/fifo && printf 'GINUX_POLICY_FIFO: PASS\\n'\r"
+foreach marker {GINUX_POLICY_SYMLINK GINUX_POLICY_SETID GINUX_POLICY_DEVICE GINUX_POLICY_FIFO} {
+    expect {
+        -re "$marker: PASS" {}
+        timeout { puts stderr "$marker check did not pass"; exit 190 }
+        eof { puts stderr "instance exited during $marker check"; exit 191 }
+    }
+}
+expect -re {\[root@ginux [^]]+\]# }
+send -- "if ln /ginux-demo/writable/value /ginux-demo/read-only/hardlink; then printf 'GINUX_POLICY_HARDLINK: FAIL\\n'; else printf 'GINUX_POLICY_HARDLINK: PASS\\n'; fi; if ln -s /tmp /ginux-demo/read-only/symlink; then printf 'GINUX_POLICY_SYMLINK_CREATE: FAIL\\n'; else printf 'GINUX_POLICY_SYMLINK_CREATE: PASS\\n'; fi\r"
+foreach marker {GINUX_POLICY_HARDLINK GINUX_POLICY_SYMLINK_CREATE} {
+    expect {
+        -re "$marker: PASS" {}
+        timeout { puts stderr "$marker check did not pass"; exit 192 }
+        eof { puts stderr "instance exited during $marker check"; exit 193 }
+    }
 }
 expect -re {\[root@ginux [^]]+\]# }
 send -- "cat /proc/self/status >/tmp/ginux-self-status && cat /proc/self/cmdline >/tmp/ginux-self-cmdline && grep -q '^Pid:' /tmp/ginux-self-status && grep -q '^NSpgid:' /tmp/ginux-self-status && test -s /tmp/ginux-self-cmdline && printf 'GINUX_PROC_%s\\n' 'SELF: PASS'\r"
@@ -278,6 +320,13 @@ expect {
     -re {GINUX_ATTACH_DETACH: PASS} {}
     timeout { puts stderr "detached instance did not remain running"; exit 125 }
     eof { puts stderr "host session exited during detached status check"; exit 126 }
+}
+expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
+send -- "runtime=\$(sudo awk '{print \$1}' /var/lib/ginux/instances/rocky/runtime.pid); tracee=\$(pgrep -P \"\$runtime\" | head -n 1); sudo awk '/^Uid:/{if (\$2 != 65534 || \$3 != 65534 || \$4 != 65534 || \$5 != 65534) exit 1} /^Gid:/{if (\$2 != 65534 || \$3 != 65534 || \$4 != 65534 || \$5 != 65534) exit 1} /^NoNewPrivs:/{if (\$2 != 1) exit 1; seen=1} END{exit !seen}' /proc/\$tracee/status && printf 'GINUX_HOST_BACKSTOP: PASS\\n'\r"
+expect {
+    -re {GINUX_HOST_BACKSTOP: PASS} {}
+    timeout { puts stderr "host UID/GID nobody or no-new-privileges backstop was absent"; exit 192 }
+    eof { puts stderr "host session exited during host backstop check"; exit 193 }
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
 send -- "stty rows 43 cols 109; ginux instance attach rocky\r"
@@ -367,7 +416,7 @@ expect {
     eof { puts stderr "second host exited before login"; exit 168 }
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
-send -- "test -n \"\$(sudo find /var/lib/ginux/images -mindepth 1 -maxdepth 1 -print -quit)\" && ginux instance status rocky | grep -Fq 'state: stopped' && sudo unshare -n /usr/local/bin/ginux instance create restart-cache --config /etc/ginux/examples/rocky-systemd.toml\r"
+send -- "test -n \"\$(sudo find /var/lib/ginux/images -mindepth 1 -maxdepth 1 -print -quit)\" && ginux instance status rocky | grep -Fq 'state: stopped' && sudo unshare -n /usr/local/bin/ginux instance create restart-cache /etc/ginux/examples/rocky-systemd.toml\r"
 expect {
     -re {  Cache: hit} {}
     timeout { puts stderr "OCI cache or instance state did not persist across Rocky host sessions"; exit 169 }

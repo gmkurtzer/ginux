@@ -17,9 +17,11 @@ The catalog is the reviewable inventory used to normalize instance contracts. An
 
 ## Versioned contract inputs
 
-- Base profiles: `strict-v1`, `minimal-v1`, `gate5-balanced-v1`, `gate9-systemd-v1`
-- Additive templates: `network-client-v1`, `read-only-time-v1`, `virtual-kernel-views-v1`
-- Overrides: bounded exact or single-wildcard canonical operation selectors
+- Primary input: one self-contained `[userspace.contract]` recipe in the instance TOML
+- Human access groups: `read`, `write`, `execute`, `connect`, `listen`, `process`, and `system`
+- Selectors: component-bounded `*` and recursive `**` over canonical resources; `fs` and `dev` are readable aliases
+- Precedence: default deny, access grants, advanced exact grants, resource denies, then advanced exact denies
+- Migration-only inputs: versioned Gate 10 profiles, templates, and canonical operation selectors remain accepted but cannot be mixed with a recipe
 - Runtime representation: an explicit operation table tied to catalog version `1` and a deterministic digest
 
 ## Operation catalog
