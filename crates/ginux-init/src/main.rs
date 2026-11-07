@@ -4960,7 +4960,15 @@ fn supervise_native(
             continue;
         }
         if signal == 17 {
-            if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
+            // The host kernel queued SIGCHLD for a managed child state change:
+            // deliver it, as the configured process path does. A parent that
+            // catches SIGCHLD with a handler (OpenRC, busybox init, shells)
+            // waits for it; systemd blocks SIGCHLD and reads a signalfd, so it
+            // never stops here.
+            write_all(b"GINUX_NATIVE_PROCESS_AUDIT: sigchld delivered parent=");
+            write_u64(task.virtual_id.pid as u64);
+            write_all(b"\n");
+            if ptrace(PTRACE_SYSCALL, host_pid, 0, 17) < 0 {
                 native_fail(instance, pid, b"native SIGCHLD resume failed");
             }
             continue;
@@ -5030,6 +5038,30 @@ fn supervise_native(
                     ) < 0
                     {
                         native_fail(instance, pid, b"native waitid result translation failed");
+                    }
+                    // A reaping waitid releases the child as wait4 does; without
+                    // this every exited child kept its process-table slot and a
+                    // native instance failed after 128 process creations.
+                    let mut code = 0u64;
+                    let reaped = registers.r10 & 0x0100_0000 == 0
+                        && ptrace(
+                            PTRACE_PEEKDATA,
+                            host_pid,
+                            task.waitid_info as usize + 8,
+                            &mut code as *mut _ as usize,
+                        ) >= 0
+                        && matches!(code as u32, 1..=3);
+                    if reaped && !waited_task.tracing {
+                        let _ = processes.wait(
+                            task.virtual_id,
+                            WaitTarget::Specific(waited_task.virtual_id.pid),
+                            0,
+                        );
+                        if let Some(waited_slot) = tasks.iter_mut().find(|candidate| {
+                            candidate.is_some_and(|candidate| candidate.host_pid == waited_host)
+                        }) {
+                            *waited_slot = None;
+                        }
                     }
                 }
             }

@@ -22,6 +22,17 @@ static long call4(long number, word a, word b, word c, word d)
     return result;
 }
 
+static long call5(long number, word a, word b, word c, word d, word e)
+{
+    long result;
+    register word r10 __asm__("r10") = d;
+    register word r8 __asm__("r8") = e;
+    __asm__ volatile("syscall" : "=a"(result)
+                     : "a"(number), "D"(a), "S"(b), "d"(c), "r"(r10), "r"(r8)
+                     : "rcx", "r11", "memory");
+    return result;
+}
+
 static void print(const char *value)
 {
     word count = 0;
@@ -43,6 +54,22 @@ static void print_result(const char *label, long value)
     line[length++] = '\n';
     call3(1, 1, (word)line, length);
 }
+
+static int sigchld_pipe = -1;
+static volatile int sigchld_seen;
+
+static void sigchld_handler(int signal)
+{
+    (void)signal;
+    sigchld_seen = 1;
+    call3(1, sigchld_pipe, (word)"c", 1);
+}
+
+void sigchld_restorer(void);
+__asm__(".global sigchld_restorer\n"
+        "sigchld_restorer:\n"
+        "mov $15, %rax\n"
+        "syscall\n");
 
 long native_fixture_main(void)
 {
@@ -99,6 +126,61 @@ long native_fixture_main(void)
         print_result("GINUX_FIXTURE: futex_lock_pi_flags=",
                      call4(202, (word)&pi_flags_word, 6 | 128 | 1024, 0, 0));
         print_result("GINUX_FIXTURE: pi_flags_word=", pi_flags_word);
+        return 0;
+    }
+    case 's': {
+        /* SIGCHLD reaches a handler (systemd profile, where fork is
+         * supervised): the parent catches SIGCHLD with a handler that writes
+         * to a pipe, as OpenRC, busybox and shells do, forks a child that
+         * exits, then polls the pipe. systemd reads SIGCHLD from a signalfd
+         * instead, so it never depends on this delivery. */
+        struct kernel_sigaction {
+            word handler, flags, restorer, mask;
+        } action = {(word)sigchld_handler, 0x04000000 /* SA_RESTORER */,
+                    (word)sigchld_restorer, 0};
+        struct pollfd_word {
+            int fd;
+            short events, revents;
+        } poll_fd;
+        int fds[2];
+        int status = 0;
+        long pid;
+        if (call4(293, (word)fds, 0, 0, 0) < 0) return 82;
+        sigchld_pipe = fds[1];
+        print_result("GINUX_FIXTURE: sigaction=", call4(13, 17, (word)&action, 0, 8));
+        pid = call3(57, 0, 0, 0);
+        if (pid == 0) return 7;
+        print_result("GINUX_FIXTURE: fork-ok=", pid > 0);
+        poll_fd.fd = fds[0];
+        poll_fd.events = 1; /* POLLIN */
+        poll_fd.revents = 0;
+        long ready;
+        /* A handler run interrupts the poll (EINTR) or makes the pipe readable. */
+        do ready = call3(7, (word)&poll_fd, 1, 2000);
+        while (ready == -4);
+        print_result("GINUX_FIXTURE: sigchld-poll=", ready);
+        print_result("GINUX_FIXTURE: sigchld-handled=", sigchld_seen);
+        print_result("GINUX_FIXTURE: wait-ok=", call4(61, -1, (word)&status, 0, 0) == pid);
+        print_result("GINUX_FIXTURE: child-status=", (status >> 8) & 0xff);
+        return 0;
+    }
+    case 'r': {
+        /* Children reaped by waitid release their process slots: more children
+         * than the native process table holds, one at a time. A WNOWAIT peek
+         * first must leave the child to be reaped. */
+        struct { int signo, error, code, pad, pid, uid, status, rest[25]; } info = {0};
+        long reaped = 0;
+        long pid = call3(57, 0, 0, 0);
+        if (pid == 0) return 0;
+        print_result("GINUX_FIXTURE: waitid-peek=", call5(247, 1, pid, (word)&info, 0x01000004, 0));
+        print_result("GINUX_FIXTURE: waitid-after-peek=", call5(247, 1, pid, (word)&info, 4, 0));
+        for (int round = 0; round < 200; ++round) {
+            pid = call3(57, 0, 0, 0);
+            if (pid == 0) return 0;
+            if (pid < 0 || call5(247, 1, pid, (word)&info, 4, 0) != 0) break;
+            ++reaped;
+        }
+        print_result("GINUX_FIXTURE: waitid-reaped=", reaped);
         return 0;
     }
     default:
