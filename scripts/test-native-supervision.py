@@ -84,6 +84,12 @@ def main():
             "GINUX_FIXTURE: sigaction=0", "GINUX_FIXTURE: fork-ok=1",
             "GINUX_FIXTURE: sigchld-poll=1", "GINUX_FIXTURE: sigchld-handled=1",
             "GINUX_FIXTURE: wait-ok=1", "GINUX_FIXTURE: child-status=7"], code, out)
+        # systemd reaps with waitid; each reaped child must free its slot.
+        code, out = run("reap-many", systemd_config)
+        fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
+        check("waitid releases reaped children", code == 0 and fixture == [
+            "GINUX_FIXTURE: waitid-peek=0", "GINUX_FIXTURE: waitid-after-peek=0",
+            "GINUX_FIXTURE: waitid-reaped=200"], code, out)
     print("test-native-supervision: PASS")
 
 

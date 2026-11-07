@@ -22,6 +22,17 @@ static long call4(long number, word a, word b, word c, word d)
     return result;
 }
 
+static long call5(long number, word a, word b, word c, word d, word e)
+{
+    long result;
+    register word r10 __asm__("r10") = d;
+    register word r8 __asm__("r8") = e;
+    __asm__ volatile("syscall" : "=a"(result)
+                     : "a"(number), "D"(a), "S"(b), "d"(c), "r"(r10), "r"(r8)
+                     : "rcx", "r11", "memory");
+    return result;
+}
+
 static void print(const char *value)
 {
     word count = 0;
@@ -151,6 +162,25 @@ long native_fixture_main(void)
         print_result("GINUX_FIXTURE: sigchld-handled=", sigchld_seen);
         print_result("GINUX_FIXTURE: wait-ok=", call4(61, -1, (word)&status, 0, 0) == pid);
         print_result("GINUX_FIXTURE: child-status=", (status >> 8) & 0xff);
+        return 0;
+    }
+    case 'r': {
+        /* Children reaped by waitid release their process slots: more children
+         * than the native process table holds, one at a time. A WNOWAIT peek
+         * first must leave the child to be reaped. */
+        struct { int signo, error, code, pad, pid, uid, status, rest[25]; } info = {0};
+        long reaped = 0;
+        long pid = call3(57, 0, 0, 0);
+        if (pid == 0) return 0;
+        print_result("GINUX_FIXTURE: waitid-peek=", call5(247, 1, pid, (word)&info, 0x01000004, 0));
+        print_result("GINUX_FIXTURE: waitid-after-peek=", call5(247, 1, pid, (word)&info, 4, 0));
+        for (int round = 0; round < 200; ++round) {
+            pid = call3(57, 0, 0, 0);
+            if (pid == 0) return 0;
+            if (pid < 0 || call5(247, 1, pid, (word)&info, 4, 0) != 0) break;
+            ++reaped;
+        }
+        print_result("GINUX_FIXTURE: waitid-reaped=", reaped);
         return 0;
     }
     default:
