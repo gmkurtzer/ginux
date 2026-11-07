@@ -77,6 +77,16 @@ criterion.
 - [x] Human approved the unoptimized baseline on 2026-11-07 and directed
   profiling and optimization toward the unchanged native-parity goal and 4%
   per-row mandatory tolerance.
+- [x] Corrected the mutex protocol to use the pinned sysbench 1.0.20 defaults
+  after proving the original approximately 15 ms run measured startup cost.
+  The corrected 1/2/4-vCPU exploratory rows all satisfy the 4% budget.
+- [x] Profiled thread-yield mediation. Syscall 24 (`sched_yield`) accounted for
+  3,801 of the first 4,097 entry records and exhausted the 8,192-record audit
+  budget in the one-vCPU run.
+- [x] Measured bounded diagnostic upper limits: disabling audit improved the
+  one-vCPU row from about 3.3 to 5.3 events/s, while a temporary one-stop,
+  no-op `sched_yield` experiment reached only 5.8 events/s versus about 635
+  native. The semantically invalid experiment was removed.
 
 ## Remaining work
 
@@ -156,6 +166,16 @@ criterion.
 - This is the required pre-optimization checkpoint. No optimization has been
   applied to these results. The human accepted this checkpoint on 2026-11-07
   as the profiling baseline without approving any tolerance exception.
+- A corrected one-repetition exploratory mutex matrix passed every row: 0.994x
+  at 1 vCPU/1 thread, 0.994x at 2 vCPUs/1 thread, 1.006x at 2/2, 0.997x at
+  4/1, and 1.006x at 4/4. Longer repeated confirmation remains required.
+- Focused one-vCPU thread-yield profiling measured 3.299 events/s through the
+  normal audited path versus 651.154 native. The audit contained 8,192 bounded
+  records (1.6 MiB); 3,801 of 4,097 recorded entries were syscall 24.
+- Diagnostic-only audit disablement measured 5.255 events/s versus 635.919
+  native. A temporary one-stop `PTRACE_SYSEMU` no-op upper-bound experiment
+  measured 5.802 versus 635.428 native. It intentionally omitted real yield
+  semantics and was removed immediately after measurement.
 
 ## Decisions and limitations
 
@@ -172,6 +192,13 @@ criterion.
   repetitions after warmup to keep the exploratory matrix bounded. The final
   accepted baseline will use longer intervals and/or more repetitions after
   profiling stabilizes the failing paths.
+- The focused evidence shows that audit is a secondary cost and mandatory
+  ptrace interception is the dominant thread-yield cost. Even removing audit
+  and halving mediation to one stop remained about 99.1% behind native, so the
+  4% thread-yield goal has no credible path under the current requirement that
+  every managed syscall stop in the userspace supervisor. Changing that
+  boundary requires an explicit architecture decision; the gate will not hide
+  it by changing workload parameters or weakening the threshold.
 
 ## Delivery strategy
 

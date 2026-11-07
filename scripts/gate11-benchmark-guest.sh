@@ -12,11 +12,13 @@ duration=${GINUX_BENCH_DURATION:-1}
 repetitions=${GINUX_BENCH_REPETITIONS:-3}
 allocations=${GINUX_BENCH_VCPUS:-"1 2 4"}
 workloads=${GINUX_BENCH_WORKLOADS:-"cpu memory threads mutex"}
+audit_mode=${GINUX_BENCH_AUDIT_MODE:-stderr}
 memory_bytes=1073741824
 
 case "$duration:$repetitions" in
     *[!0-9:]*|0:*|*:0|:*|*:) printf '%s\n' 'invalid Gate 11 duration or repetition count' >&2; exit 2 ;;
 esac
+case "$audit_mode" in stderr|disabled) ;; *) printf '%s\n' 'invalid Gate 11 audit mode' >&2; exit 2 ;; esac
 
 test -x /usr/bin/sysbench
 test -x "$directory/root/usr/bin/sysbench"
@@ -75,6 +77,7 @@ write_config() {
     args=$(toml_args "$workload" "$threads")
     sed -e "s/^vcpus = .*/vcpus = $vcpus/" \
         -e "s|^args = .*|args = $args|" \
+        -e "s/^mode = \"stderr\"/mode = \"$audit_mode\"/" \
         "$base_config" | sudo tee "$directory/config.toml" >/dev/null
 }
 

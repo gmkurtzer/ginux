@@ -174,9 +174,15 @@ scope, threat model, and invariants.
   `static-and-unit` passes in 41 seconds.
 - Open decision: no workload-specific tolerance exceptions are approved; the
   default 4% per-row budget remains authoritative.
-- Exact next action: profile the thread-yield and mutex paths, optimize the
-  highest-impact mediated operations without weakening invariants, and rerun
-  the focused matched matrix after each material change.
+- Gate 11 profiling corrected the mutex protocol; every exploratory 1/2/4-vCPU
+  mutex row now passes within 0.7% of native. Thread-yield remains architecture
+  bound: audited mediation measured 3.299 versus 651.154 native events/s;
+  disabling audit reached 5.255, and a removed one-stop/no-op diagnostic upper
+  bound reached only 5.802 versus 635.428.
+- Exact next action: obtain a human architecture decision for thread-yield:
+  preserve the no-direct-host-syscall invariant and record the mandatory row as
+  outside budget, or authorize a separately gated fast-path design that changes
+  that boundary. No workload-specific tolerance exception is approved.
 
 ## Evidence
 
@@ -473,9 +479,10 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Profile the Gate 11 thread-yield and mutex paths, optimize the highest-impact
-mediated operations without weakening invariants, and rerun the focused matched
-matrix after each material change.
+Pause Gate 11 for the human architecture decision on thread-yield. The existing
+ptrace boundary cannot credibly meet the 4% mandatory budget; any direct or
+pre-authorized fast path changes the governing invariant and requires a new or
+expanded approved gate before implementation.
 
 ## Context recovery
 
@@ -493,5 +500,6 @@ matrix after each material change.
   network selection, port controls, and translation.
 - Gate 9.75 closure: pull request 229 merged as `8a475e8b`; human accepted and
   closed the gate on 2026-11-06.
-- Required human decision: none during the approved profiling and optimization
-  loop; any workload-specific tolerance exception still requires review.
+- Required human decision: preserve the no-direct-host-syscall invariant and
+  leave thread-yield outside budget, or authorize a separately gated fast-path
+  architecture. Any tolerance exception still requires explicit review.
