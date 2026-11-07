@@ -4960,7 +4960,15 @@ fn supervise_native(
             continue;
         }
         if signal == 17 {
-            if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
+            // The host kernel queued SIGCHLD for a managed child state change:
+            // deliver it, as the configured process path does. A parent that
+            // catches SIGCHLD with a handler (OpenRC, busybox init, shells)
+            // waits for it; systemd blocks SIGCHLD and reads a signalfd, so it
+            // never stops here.
+            write_all(b"GINUX_NATIVE_PROCESS_AUDIT: sigchld delivered parent=");
+            write_u64(task.virtual_id.pid as u64);
+            write_all(b"\n");
+            if ptrace(PTRACE_SYSCALL, host_pid, 0, 17) < 0 {
                 native_fail(instance, pid, b"native SIGCHLD resume failed");
             }
             continue;
@@ -6836,6 +6844,25 @@ fn supervise_native(
                     || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
                 {
                     native_fail(instance, pid, b"native virtual console control failed");
+                }
+            }
+            Action::Mediate
+                if mode == 3 && syscall == 16 && registers.rsi & 0xc000_ffff == 0xc000_ff0b =>
+            {
+                // PIDFD_GET_INFO (Linux 6.13; the struct size in the request
+                // grows with the kernel) reports host pid, tgid, ppid and
+                // credentials. The 6.12 ABI personality has no such ioctl;
+                // callers (systemd 258+) fall back to /proc/self/fdinfo,
+                // which Ginux virtualizes.
+                write_all(b"emulate surface=virtual-pidfd-info result=-25\n");
+                registers.orig_rax = u64::MAX;
+                task.awaiting_exit = true;
+                task.override_exit = true;
+                task.override_result = -25;
+                if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
+                {
+                    native_fail(instance, pid, b"native pidfd info denial failed");
                 }
             }
             Action::Mediate
