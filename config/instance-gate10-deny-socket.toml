@@ -15,9 +15,20 @@ memory_mib = 256
 profile = "balanced"
 backend = "ptrace-native"
 
-[contract]
-profile = "gate9-systemd-v1"
-deny = ["syscall.socket"]
++[userspace.contract]
+version = 1
+catalog = 1
+default = "deny"
+read = ["**"]
+write = ["**"]
+execute = ["**"]
+connect = ["**"]
+listen = ["**"]
+process = ["**"]
+system = ["**"]
+deny = ["dev.mmio.direct", "dev.dma.direct", "network.packet.raw"]
+exact_allow = []
+exact_deny = ["syscall.socket"]
 
 [storage]
 assignments = []

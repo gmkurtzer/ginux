@@ -227,6 +227,14 @@ extern "C" fn rust_main(initial_stack: *const usize) -> ! {
             config_merge_main(config_path, count, overrides)
         }
         Some(Command::ContractPlan(config_path)) => contract_plan_main(config_path),
+        Some(Command::ContractInit(preset)) => contract_init_main(preset),
+        Some(Command::ContractCheck(config_path)) => contract_check_main(config_path),
+        Some(Command::ContractShow(config_path)) => contract_show_main(config_path),
+        Some(Command::ContractExplain(config_path, operation)) => {
+            contract_explain_main(config_path, operation)
+        }
+        Some(Command::ContractDiff(left, right)) => contract_diff_main(left, right),
+        Some(Command::ContractInspect(config_path)) => contract_inspect_main(config_path),
         Some(Command::HookPlan(config_path)) => hook_plan_main(config_path),
         Some(Command::Lifecycle(config_path)) => lifecycle_main(config_path),
         Some(Command::Vfs(config_path, rootfs_path, index_path)) => {
@@ -3061,6 +3069,14 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
             .any(|window| window == needle)
 }
 
+fn contract_label(config: &ginux_instance::InstanceConfig) -> &[u8] {
+    if config.contract_recipe_version == 0 {
+        config.contract_profile.as_bytes()
+    } else {
+        b"self-contained-v1"
+    }
+}
+
 fn native_main(
     config_path: *const u8,
     root_path: *const u8,
@@ -3078,7 +3094,8 @@ fn native_main(
     let systemd_contract = matches!(
         config.contract_profile.as_bytes(),
         b"gate9-systemd-v1" | b"strict-v1"
-    );
+    ) || (config.contract_recipe_version != 0
+        && config.init.as_bytes() == b"/sbin/init");
     let mode = if mode == 0 && systemd_contract {
         3
     } else {
@@ -4640,13 +4657,13 @@ fn supervise_native(
         write_all(
             b"GINUX_NATIVE: backend=ptrace-native profile=balanced elf-loader=host contract=",
         );
-        line(instance.config().contract_profile.as_bytes());
+        line(contract_label(instance.config()));
         line(b"GINUX_NATIVE: virtual-pid=1 virtual-ppid=0 root=oci-overlay");
     } else {
         write_all(
             b"GINUX_NATIVE: backend=ptrace-native profile=balanced elf-loader=host contract=",
         );
-        line(instance.config().contract_profile.as_bytes());
+        line(contract_label(instance.config()));
         line(b"GINUX_NATIVE: tracee-uid=1000 tracee-gid=1000 root=oci-read-only");
     }
 
@@ -4707,10 +4724,8 @@ fn supervise_native(
         limits: native_default_limits(),
     });
     if mode == 3 {
-        if !native_proc_write_identity(
-            root_descriptor,
-            instance.config().contract_profile.as_bytes(),
-        ) || !native_proc_copy_cpuinfo(root_descriptor, instance.config().vcpus)
+        if !native_proc_write_identity(root_descriptor, contract_label(instance.config()))
+            || !native_proc_copy_cpuinfo(root_descriptor, instance.config().vcpus)
         {
             native_fail(
                 instance,
@@ -5497,6 +5512,8 @@ fn supervise_native(
             write_all(rule.operation.id.as_bytes());
             write_all(b" policy-source=");
             write_all(rule.source.as_bytes());
+            write_all(b" policy-rule=");
+            write_u64(rule.source_rule as u64);
         } else {
             write_all(b"unknown");
             write_all(b" policy-source=default-deny");
@@ -7585,7 +7602,11 @@ fn contract_plan_main(config_path: *const u8) -> ! {
     write_all(b"GINUX_CONTRACT: catalog=1 instance=");
     write_all(config.id.as_bytes());
     write_all(b" profile=");
-    write_all(config.contract_profile.as_bytes());
+    if config.contract_recipe_version == 0 {
+        write_all(config.contract_profile.as_bytes());
+    } else {
+        write_all(b"self-contained-v1");
+    }
     write_all(b" digest=");
     write_all(contract.digest());
     write_all(b" operations=");
@@ -7600,11 +7621,195 @@ fn contract_plan_main(config_path: *const u8) -> ! {
         write_all(rule.provenance.name().as_bytes());
         write_all(b" source=");
         write_all(rule.source.as_bytes());
+        write_all(b" source-rule=");
+        write_u64(rule.source_rule as u64);
         write_all(b" status=");
         write_all(rule.operation.status.name().as_bytes());
         write_all(b"\n");
     }
     line(b"GINUX_CONTRACT: PASS");
+    exit_process(0)
+}
+
+fn contract_init_main(preset: *const u8) -> ! {
+    let preset = c_string_bytes(preset, 64).unwrap_or_else(|error| config_rejected(error));
+    line(b"[userspace.contract]");
+    line(b"version = 1");
+    line(b"catalog = 1");
+    line(b"default = \"deny\"");
+    if preset == b"systemd-v1" {
+        line(b"read = [\"**\"]");
+        line(b"write = [\"**\"]");
+        line(b"execute = [\"**\"]");
+        line(b"connect = [\"**\"]");
+        line(b"listen = [\"**\"]");
+        line(b"process = [\"**\"]");
+        line(b"system = [\"**\"]");
+        line(b"deny = [\"dev.mmio.direct\", \"dev.dma.direct\", \"network.packet.raw\"]");
+        line(b"exact_allow = []");
+        line(b"exact_deny = []");
+    } else if preset == b"strict-v1" {
+        line(b"read = []");
+        line(b"write = []");
+        line(b"execute = []");
+        line(b"connect = []");
+        line(b"listen = []");
+        line(b"process = []");
+        line(b"system = []");
+        line(b"deny = []");
+        line(b"exact_allow = [\"syscall.getpid\", \"syscall.getppid\", \"syscall.gettid\", \"syscall.write\", \"syscall.exit\", \"syscall.exit_group\"]");
+        line(b"exact_deny = []");
+    } else {
+        line(b"GINUX_CONTRACT: unknown preset; expected strict-v1 or systemd-v1");
+        exit_process(2)
+    }
+    exit_process(0)
+}
+
+fn contract_check_main(config_path: *const u8) -> ! {
+    let config = load_config(config_path);
+    let contract = config
+        .effective_contract()
+        .unwrap_or_else(|error| config_rejected(error));
+    write_all(b"Contract valid: instance=");
+    write_all(config.id.as_bytes());
+    write_all(b" catalog=1 digest=");
+    write_all(contract.digest());
+    write_all(b" operations=");
+    write_u64(contract.rules().len() as u64);
+    write_all(b"\n");
+    exit_process(0)
+}
+
+fn write_contract_list<const ITEMS: usize, const BYTES: usize>(
+    name: &[u8],
+    values: &ginux_instance::TextList<ITEMS, BYTES>,
+) {
+    write_all(name);
+    write_all(b" = [");
+    for (index, value) in values.as_slice().iter().enumerate() {
+        if index != 0 {
+            write_all(b", ");
+        }
+        write_all(b"\"");
+        write_all(value.as_bytes());
+        write_all(b"\"");
+    }
+    write_all(b"]\n");
+}
+
+fn contract_show_main(config_path: *const u8) -> ! {
+    let config = load_config(config_path);
+    if config.contract_recipe_version == 0 {
+        line(b"Legacy [contract] configuration; use `ginux contract init` to generate a self-contained recipe.");
+        contract_plan_main(config_path)
+    }
+    line(b"[userspace.contract]");
+    line(b"version = 1");
+    line(b"catalog = 1");
+    line(b"default = \"deny\"");
+    write_contract_list(b"read", &config.contract_read);
+    write_contract_list(b"write", &config.contract_write);
+    write_contract_list(b"execute", &config.contract_execute);
+    write_contract_list(b"connect", &config.contract_connect);
+    write_contract_list(b"listen", &config.contract_listen);
+    write_contract_list(b"process", &config.contract_process);
+    write_contract_list(b"system", &config.contract_system);
+    write_contract_list(b"deny", &config.contract_recipe_deny);
+    write_contract_list(b"exact_allow", &config.contract_exact_allow);
+    write_contract_list(b"exact_deny", &config.contract_exact_deny);
+    write_all(b"digest = \"");
+    write_all(config.contract_digest.as_bytes());
+    line(b"\"");
+    exit_process(0)
+}
+
+fn contract_explain_main(config_path: *const u8, operation: *const u8) -> ! {
+    let config = load_config(config_path);
+    let operation = c_string_bytes(operation, 128).unwrap_or_else(|error| config_rejected(error));
+    let contract = config
+        .effective_contract()
+        .unwrap_or_else(|error| config_rejected(error));
+    let Some(rule) = contract
+        .rules()
+        .iter()
+        .find(|rule| rule.operation.id.as_bytes() == operation)
+    else {
+        line(b"Contract operation is not present in catalog version 1.");
+        exit_process(2)
+    };
+    write_all(b"Operation: ");
+    line(rule.operation.id.as_bytes());
+    write_all(b"Decision: ");
+    line(rule.action.name().as_bytes());
+    write_all(b"Rule: ");
+    write_all(rule.provenance.name().as_bytes());
+    write_all(b" source=");
+    write_all(rule.source.as_bytes());
+    write_all(b" index=");
+    write_u64(rule.source_rule as u64);
+    write_all(b"\nStatus: ");
+    line(rule.operation.status.name().as_bytes());
+    write_all(b"Constraint: ");
+    line(rule.operation.constraint.as_bytes());
+    write_all(b"Limitation: ");
+    line(rule.operation.limitation.as_bytes());
+    exit_process(0)
+}
+
+fn contract_diff_main(left_path: *const u8, right_path: *const u8) -> ! {
+    let left = load_config(left_path)
+        .effective_contract()
+        .unwrap_or_else(|error| config_rejected(error));
+    let right = load_config(right_path)
+        .effective_contract()
+        .unwrap_or_else(|error| config_rejected(error));
+    let mut changes = 0u64;
+    for (left_rule, right_rule) in left.rules().iter().zip(right.rules()) {
+        if left_rule.action != right_rule.action {
+            changes += 1;
+            write_all(b"Changed: ");
+            write_all(left_rule.operation.id.as_bytes());
+            write_all(b" ");
+            write_all(left_rule.action.name().as_bytes());
+            write_all(b" -> ");
+            line(right_rule.action.name().as_bytes());
+        }
+    }
+    write_all(b"Contract differences: ");
+    write_u64(changes);
+    write_all(b"\n");
+    exit_process(0)
+}
+
+fn contract_inspect_main(config_path: *const u8) -> ! {
+    let config = load_config(config_path);
+    let contract = config
+        .effective_contract()
+        .unwrap_or_else(|error| config_rejected(error));
+    let mut emulate = 0u64;
+    let mut mediate = 0u64;
+    let mut deny = 0u64;
+    for rule in contract.rules() {
+        match rule.action {
+            ContractAction::Emulate => emulate += 1,
+            ContractAction::Mediate => mediate += 1,
+            ContractAction::Deny(_) => deny += 1,
+        }
+    }
+    write_all(b"Contract: instance=");
+    write_all(config.id.as_bytes());
+    write_all(b" catalog=1 digest=");
+    write_all(contract.digest());
+    write_all(b"\nDecisions: emulate=");
+    write_u64(emulate);
+    write_all(b" mediate=");
+    write_u64(mediate);
+    write_all(b" deny=");
+    write_u64(deny);
+    write_all(b" total=");
+    write_u64(contract.rules().len() as u64);
+    write_all(b"\n");
     exit_process(0)
 }
 

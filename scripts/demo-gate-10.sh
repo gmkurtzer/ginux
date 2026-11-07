@@ -8,7 +8,7 @@ grep '^GINUX_CONTRACT:' build/gate10-contract-systemd-plan.log | head -1
 grep 'operation=syscall.clock_gettime ' build/gate10-contract-systemd-plan.log
 
 printf '%s\n' 'Gate 10 enforced instance denial'
-grep 'operation=syscall.socket policy-source=instance-deny .* action=deny' \
+grep 'operation=syscall.socket policy-source=exact-deny .* action=deny' \
     build/gate10-contract-runtime.log | tail -1
 printf '%s\n' 'host mutation: absent'
 

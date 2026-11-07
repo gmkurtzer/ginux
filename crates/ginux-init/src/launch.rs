@@ -36,6 +36,12 @@ pub enum Command {
     Config(*const u8),
     ConfigMerge(*const u8, usize, *const usize),
     ContractPlan(*const u8),
+    ContractInit(*const u8),
+    ContractCheck(*const u8),
+    ContractShow(*const u8),
+    ContractExplain(*const u8, *const u8),
+    ContractDiff(*const u8, *const u8),
+    ContractInspect(*const u8),
     HookPlan(*const u8),
     Lifecycle(*const u8),
     Vfs(*const u8, *const u8, *const u8),
@@ -80,6 +86,26 @@ pub fn parse_argv(argc: usize, argv: *const usize) -> Option<Command> {
     } else if c_string_equals(command, b"contract-plan") {
         let config_path = unsafe { *argv.add(2) as *const u8 };
         Some(Command::ContractPlan(config_path))
+    } else if c_string_equals(command, b"contract-init") {
+        let preset = unsafe { *argv.add(2) as *const u8 };
+        Some(Command::ContractInit(preset))
+    } else if c_string_equals(command, b"contract-check") {
+        let config_path = unsafe { *argv.add(2) as *const u8 };
+        Some(Command::ContractCheck(config_path))
+    } else if c_string_equals(command, b"contract-show") {
+        let config_path = unsafe { *argv.add(2) as *const u8 };
+        Some(Command::ContractShow(config_path))
+    } else if argc >= 4 && c_string_equals(command, b"contract-explain") {
+        let config_path = unsafe { *argv.add(2) as *const u8 };
+        let operation = unsafe { *argv.add(3) as *const u8 };
+        Some(Command::ContractExplain(config_path, operation))
+    } else if argc >= 4 && c_string_equals(command, b"contract-diff") {
+        let left = unsafe { *argv.add(2) as *const u8 };
+        let right = unsafe { *argv.add(3) as *const u8 };
+        Some(Command::ContractDiff(left, right))
+    } else if c_string_equals(command, b"contract-inspect") {
+        let config_path = unsafe { *argv.add(2) as *const u8 };
+        Some(Command::ContractInspect(config_path))
     } else if c_string_equals(command, b"hook-plan") {
         let config_path = unsafe { *argv.add(2) as *const u8 };
         Some(Command::HookPlan(config_path))
@@ -638,8 +664,11 @@ fn print_launch_config(config: &InstanceConfig) {
 pub fn usage() -> ! {
     line_stderr(b"ginux: usage: ginux (no arguments: interception demonstration)");
     line_stderr(
-        b"ginux: usage: ginux config|contract-plan|lifecycle|process|kernel-views <config>",
+        b"ginux: usage: ginux config|contract-plan|contract-check|contract-show|contract-inspect|lifecycle|process|kernel-views <config>",
     );
+    line_stderr(b"ginux: usage: ginux contract-init <strict-v1|systemd-v1>");
+    line_stderr(b"ginux: usage: ginux contract-explain <config> <operation>");
+    line_stderr(b"ginux: usage: ginux contract-diff <left-config> <right-config>");
     line_stderr(b"ginux: usage: ginux runtime <elf>");
     line_stderr(b"ginux: usage: ginux instance|process-native <config> <fixture>");
     line_stderr(b"ginux: usage: ginux native <config> <root> [hold|probe]");
