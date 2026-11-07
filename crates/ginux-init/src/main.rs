@@ -4960,7 +4960,15 @@ fn supervise_native(
             continue;
         }
         if signal == 17 {
-            if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
+            // The host kernel queued SIGCHLD for a managed child state change:
+            // deliver it, as the configured process path does. A parent that
+            // catches SIGCHLD with a handler (OpenRC, busybox init, shells)
+            // waits for it; systemd blocks SIGCHLD and reads a signalfd, so it
+            // never stops here.
+            write_all(b"GINUX_NATIVE_PROCESS_AUDIT: sigchld delivered parent=");
+            write_u64(task.virtual_id.pid as u64);
+            write_all(b"\n");
+            if ptrace(PTRACE_SYSCALL, host_pid, 0, 17) < 0 {
                 native_fail(instance, pid, b"native SIGCHLD resume failed");
             }
             continue;
@@ -7399,17 +7407,33 @@ fn supervise_native(
                             );
                         }
                     } else if registers.rdi == 3 {
-                        task.awaiting_exit = true;
-                        task.override_exit = true;
-                        task.override_result = -ENOSYS;
-                        registers.orig_rax = u64::MAX;
-                        tasks[task_index] = Some(task);
-                        if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
-                            || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
-                        {
-                            native_fail(instance, pid, b"native pidfd wait denial failed");
+                        // P_PIDFD (systemd 258+ waits this way and has no
+                        // fallback): pass through when the pidfd names a
+                        // managed child of the caller; the exit stop
+                        // translates si_pid as for P_PID.
+                        let target = native_pidfd_host_target(host_pid, registers.rsi as usize)
+                            .map(|target_host| {
+                                tasks.iter().flatten().any(|candidate| {
+                                    candidate.host_pid == target_host
+                                        && processes
+                                            .view(candidate.virtual_id)
+                                            .is_ok_and(|view| view.parent == task.virtual_id.pid)
+                                })
+                            });
+                        if target != Some(true) {
+                            task.awaiting_exit = true;
+                            task.override_exit = true;
+                            task.override_result = if target.is_some() { -ECHILD } else { -EBADF };
+                            registers.orig_rax = u64::MAX;
+                            tasks[task_index] = Some(task);
+                            if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize)
+                                < 0
+                                || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
+                            {
+                                native_fail(instance, pid, b"native pidfd wait denial failed");
+                            }
+                            continue;
                         }
-                        continue;
                     } else if registers.rdi != 0 {
                         task.awaiting_exit = true;
                         task.override_exit = true;

@@ -23,10 +23,14 @@ def main():
         shutil.copyfile(fixture, root / "usr/bin/bash")
         (root / "usr/bin/bash").chmod(0o755)
         work.chmod(0o755)
+        # The systemd profile supervises fork; derive it from the same instance.
+        systemd_config = work / "systemd.toml"
+        systemd_config.write_text(config.read_text().replace(
+            'profile = "gate5-balanced-v1"', 'profile = "gate9-systemd-v1"'))
 
-        def run(scenario):
+        def run(scenario, instance=config):
             (root / "scenario").write_text(scenario)
-            proc = subprocess.run([str(work / "ginux"), "native", str(config), str(root)],
+            proc = subprocess.run([str(work / "ginux"), "native", str(instance), str(root)],
                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=20)
             return proc.returncode, proc.stdout.decode(errors="replace")
 
@@ -67,6 +71,27 @@ def main():
               and ("GINUX_INSTANCE: failed reason=native requires the x86-64 syscall ABI" in out
                    or "GINUX_INSTANCE: failed reason=unexpected native trace stop" in out),
               code, out)
+        # A parent that catches SIGCHLD with a handler, as OpenRC, busybox and
+        # shells do, must get it: the supervisor resumes the SIGCHLD stop with
+        # the signal instead of discarding it.
+        # The systemd profile execs /bin/bash and materializes /proc identity.
+        (root / "bin").symlink_to("usr/bin")
+        (root / "proc/1").mkdir(parents=True)
+        (root / "proc/sys/kernel").mkdir(parents=True)
+        code, out = run("sigchld", systemd_config)
+        fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
+        check("SIGCHLD reaches a handler", code == 0 and fixture == [
+            "GINUX_FIXTURE: sigaction=0", "GINUX_FIXTURE: fork-ok=1",
+            "GINUX_FIXTURE: sigchld-poll=1", "GINUX_FIXTURE: sigchld-handled=1",
+            "GINUX_FIXTURE: wait-ok=1", "GINUX_FIXTURE: child-status=7"], code, out)
+        # systemd 258+ waits for children through waitid(P_PIDFD), with no
+        # fallback.
+        code, out = run("pidfd-wait", systemd_config)
+        fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
+        check("waitid(P_PIDFD) reaps a managed child", code == 0 and fixture == [
+            "GINUX_FIXTURE: pidfd-open-ok=1", "GINUX_FIXTURE: waitid-self=-10",
+            "GINUX_FIXTURE: waitid-not-pidfd=-9", "GINUX_FIXTURE: waitid=0",
+            "GINUX_FIXTURE: waited-child=1", "GINUX_FIXTURE: child-status=7"], code, out)
     print("test-native-supervision: PASS")
 
 
