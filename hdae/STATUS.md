@@ -159,9 +159,13 @@ scope, threat model, and invariants.
   symlink-safe, and link-creation-safe path denial; set-ID and device-node
   denial with FIFO allowance; root-origin host UID/GID 65534 and
   `NoNewPrivs: 1`; and the complete attach, shutdown, restart, and cache flow.
+- Pull-request CI found that the Gate 1 setup-failure fixture's private
+  root-owned mode-0700 `/var/tmp` bind prevented the newly reduced host identity
+  from reaching its payload. The fixture now gives that private mount to host
+  UID/GID 65534; the production pre-exec identity reduction is unchanged.
 - Open decision: none for the approved Gate 10.5 expansion.
-- Exact next action: stop for human review and acceptance of updated pull
-  request 237 before Gate 11.
+- Exact next action: push the Gate 1 fixture correction, verify pull-request CI,
+  then stop for human review and acceptance of pull request 237 before Gate 11.
 
 ## Evidence
 
