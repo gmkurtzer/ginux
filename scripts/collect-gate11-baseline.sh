@@ -6,6 +6,8 @@ set -eu
 output_dir=${GINUX_BENCH_OUTPUT_DIR:-build/gate11}
 duration=${GINUX_BENCH_DURATION:-1}
 repetitions=${GINUX_BENCH_REPETITIONS:-3}
+allocations=${GINUX_BENCH_VCPUS:-"1 2 4"}
+workloads=${GINUX_BENCH_WORKLOADS:-"cpu memory threads mutex"}
 commit=$(git rev-parse HEAD)
 mkdir -p "$output_dir"
 
@@ -22,11 +24,13 @@ rocky_scp scripts/gate11-guest-setup.sh scripts/gate11-benchmark-guest.sh \
     "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/"
 
 rocky_ssh 'chmod 0755 /var/tmp/gate11-guest-setup.sh /var/tmp/gate11-benchmark-guest.sh /var/tmp/gate11-sysbench-command.sh; /var/tmp/gate11-guest-setup.sh'
-rocky_ssh "GINUX_BENCH_DURATION='$duration' GINUX_BENCH_REPETITIONS='$repetitions' /var/tmp/gate11-benchmark-guest.sh"
+rocky_ssh "GINUX_BENCH_DURATION='$duration' GINUX_BENCH_REPETITIONS='$repetitions' GINUX_BENCH_VCPUS='$allocations' GINUX_BENCH_WORKLOADS='$workloads' /var/tmp/gate11-benchmark-guest.sh"
 
 rocky_scp "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/gate11-results.tsv" "$output_dir/results.tsv"
 rocky_ssh 'tar -C /var/tmp -czf /var/tmp/gate11-raw.tar.gz gate11-raw'
 rocky_scp "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/gate11-raw.tar.gz" "$output_dir/raw.tar.gz"
+rocky_ssh 'sudo install -m 0644 /var/lib/ginux/instances/gate11-benchmark/audit.log /var/tmp/gate11-final-audit.log'
+rocky_scp "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/gate11-final-audit.log" "$output_dir/final-audit.log"
 
 {
     printf 'ginux_commit=%s\n' "$commit"

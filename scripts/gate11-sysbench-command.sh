@@ -20,8 +20,7 @@ case "$workload" in
             --thread-yields=1000 --thread-locks=8 run
         ;;
     mutex)
-        exec /usr/bin/sysbench mutex --threads="$threads" --mutex-num=4096 \
-            --mutex-locks=10000 --mutex-loops=1000 run
+        exec /usr/bin/sysbench mutex --threads="$threads" run
         ;;
     *) printf 'invalid workload: %s\n' "$workload" >&2; exit 2 ;;
 esac

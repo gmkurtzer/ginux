@@ -58,7 +58,10 @@ toml_args() {
                 "$threads" "$duration"
             ;;
         mutex)
-            printf '["mutex", "--threads=%s", "--mutex-num=4096", "--mutex-locks=10000", "--mutex-loops=1000", "run"]' \
+            # Use the pinned sysbench 1.0.20 mutex defaults. The earlier
+            # shortened loop completed in about 15 ms and measured fixed
+            # process startup cost rather than sustained mutex behavior.
+            printf '["mutex", "--threads=%s", "run"]' \
                 "$threads"
             ;;
         *) return 1 ;;
