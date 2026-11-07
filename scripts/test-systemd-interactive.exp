@@ -59,7 +59,14 @@ expect {
     eof { puts stderr "Rocky host shell exited during installation check"; exit 75 }
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
-send -- "ginux instance create rocky --config /etc/ginux/examples/rocky-systemd.toml\r"
+send -- "if ginux instance create legacy --config /etc/ginux/examples/rocky-systemd.toml; then echo GINUX_CREATE_POSITIONAL: FAIL; else echo GINUX_CREATE_POSITIONAL: PASS; fi\r"
+expect {
+    -re {GINUX_CREATE_POSITIONAL: PASS} {}
+    timeout { puts stderr "legacy --config create syntax was not rejected"; exit 166 }
+    eof { puts stderr "Rocky host shell exited during positional create check"; exit 167 }
+}
+expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
+send -- "ginux instance create rocky /etc/ginux/examples/rocky-systemd.toml\r"
 expect {
     -re {Creating instance "rocky"} {}
     timeout { puts stderr "first instance creation did not begin"; exit 159 }
@@ -93,7 +100,7 @@ expect {
     eof { puts stderr "Rocky host shell exited during acquisition check"; exit 130 }
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
-send -- "sudo unshare -n /usr/local/bin/ginux instance create cache-check --config /etc/ginux/examples/rocky-systemd.toml\r"
+send -- "sudo unshare -n /usr/local/bin/ginux instance create cache-check /etc/ginux/examples/rocky-systemd.toml\r"
 expect {
     -re {  Cache: hit} {}
     timeout { puts stderr "offline create did not report an OCI cache hit"; exit 131 }
@@ -124,7 +131,7 @@ expect {
     eof { puts stderr "Rocky host shell exited during status inspection"; exit 81 }
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
-send -- "if ginux instance create rocky --config /etc/ginux/examples/rocky-systemd.toml; then echo GINUX_DUPLICATE: FAIL; else echo GINUX_DUPLICATE: PASS; fi\r"
+send -- "if ginux instance create rocky /etc/ginux/examples/rocky-systemd.toml; then echo GINUX_DUPLICATE: FAIL; else echo GINUX_DUPLICATE: PASS; fi\r"
 expect {
     -re {GINUX_DUPLICATE: PASS} {}
     timeout { puts stderr "duplicate instance was not rejected"; exit 82 }
@@ -367,7 +374,7 @@ expect {
     eof { puts stderr "second host exited before login"; exit 168 }
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
-send -- "test -n \"\$(sudo find /var/lib/ginux/images -mindepth 1 -maxdepth 1 -print -quit)\" && ginux instance status rocky | grep -Fq 'state: stopped' && sudo unshare -n /usr/local/bin/ginux instance create restart-cache --config /etc/ginux/examples/rocky-systemd.toml\r"
+send -- "test -n \"\$(sudo find /var/lib/ginux/images -mindepth 1 -maxdepth 1 -print -quit)\" && ginux instance status rocky | grep -Fq 'state: stopped' && sudo unshare -n /usr/local/bin/ginux instance create restart-cache /etc/ginux/examples/rocky-systemd.toml\r"
 expect {
     -re {  Cache: hit} {}
     timeout { puts stderr "OCI cache or instance state did not persist across Rocky host sessions"; exit 169 }

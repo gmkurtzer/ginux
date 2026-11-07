@@ -177,7 +177,7 @@ so cached images, instance definitions, roots, and stopped status remain availab
 A complete first session is:
 
 ```sh
-ginux instance create rocky --config /etc/ginux/examples/rocky-systemd.toml
+ginux instance create rocky /etc/ginux/examples/rocky-systemd.toml
 ginux instance list
 ginux instance status rocky
 ginux instance start rocky --attach
@@ -198,9 +198,9 @@ separate operator object. Validate and inspect the complete instance recipe
 before launch:
 
 ```sh
-ginux instance validate --config /etc/ginux/examples/rocky-systemd.toml
-ginux instance inspect --config /etc/ginux/examples/rocky-systemd.toml
-ginux instance explain --config /etc/ginux/examples/rocky-systemd.toml filesystem.path.write
+ginux instance validate /etc/ginux/examples/rocky-systemd.toml
+ginux instance inspect /etc/ginux/examples/rocky-systemd.toml
+ginux instance explain /etc/ginux/examples/rocky-systemd.toml filesystem.path.write
 ```
 
 See [Self-contained userspace contract](docs/configurable-contract.md) for the

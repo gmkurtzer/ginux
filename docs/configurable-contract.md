@@ -69,9 +69,9 @@ or manage a separate contract object or generate detached contract fragments.
 ## Operator workflow
 
 ```sh
-ginux instance validate --config /etc/ginux/examples/rocky-systemd.toml
-ginux instance inspect --config /etc/ginux/examples/rocky-systemd.toml
-ginux instance explain --config /etc/ginux/examples/rocky-systemd.toml filesystem.path.write
+ginux instance validate /etc/ginux/examples/rocky-systemd.toml
+ginux instance inspect /etc/ginux/examples/rocky-systemd.toml
+ginux instance explain /etc/ginux/examples/rocky-systemd.toml filesystem.path.write
 ginux instance diff strict.toml rocky-systemd.toml
 ```
 

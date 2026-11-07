@@ -9,7 +9,7 @@ image_cache=$state_root/images/rocky-10-ubi-init-amd64
 image_tar=$image_cache/rocky-10-ubi-init-amd64-rootfs.tar
 
 usage() {
-    printf '%s\n' 'usage: ginux instance create NAME --config FILE [--set KEY=TOML_VALUE]...' >&2
+    printf '%s\n' 'usage: ginux instance create NAME FILE [--set KEY=TOML_VALUE]...' >&2
     printf '%s\n' '       ginux instance list' >&2
     printf '%s\n' '       ginux instance start NAME [--attach]' >&2
     printf '%s\n' '       ginux instance attach NAME' >&2
@@ -288,11 +288,10 @@ prepare_root() {
 }
 
 create_instance() {
-    test "$#" -ge 3 || usage
+    test "$#" -ge 2 || usage
     name=$1
-    test "$2" = --config || usage
-    config=$3
-    shift 3
+    config=$2
+    shift 2
     overrides=
     while test "$#" -gt 0; do
         test "$#" -ge 2 || usage

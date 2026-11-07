@@ -36,7 +36,7 @@ explanation workflow; Gate 9.75 records the remaining instance inputs.
 Create an instance from a file and override only the named values:
 
 ```sh
-ginux instance create rocky --config /etc/ginux/rocky.toml \
+ginux instance create rocky /etc/ginux/rocky.toml \
     --set resources.vcpus=4 \
     --set 'identity.hostname="build.example"' \
     --set 'network.interface="eth0"'
