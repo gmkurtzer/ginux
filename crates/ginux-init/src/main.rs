@@ -4537,6 +4537,118 @@ fn native_proc_refresh_path(
     )
 }
 
+/// mkdir in the virtual cgroup tree. A cgroup2 mkdir also creates the
+/// directory's interface files; create the ones a service manager needs to
+/// attach and watch a cgroup (Gate 9 staging pre-creates the same three for
+/// known units), owned by the managed identity so the workload can open them.
+/// `path` is the absolute instance path. The parent is resolved inside the
+/// instance root, so a symlink in the tree cannot redirect the mkdir.
+fn native_cgroup_mkdir(root_descriptor: usize, path: &[u8]) -> i64 {
+    const SYS_OPENAT2_HOST: usize = 437;
+    const SYS_FCHOWN_HOST: usize = 93;
+    const O_PATH: usize = 0x20_0000;
+    const O_DIRECTORY: usize = 0x1_0000;
+    const O_NOFOLLOW: usize = 0x2_0000;
+    const O_CLOEXEC: usize = 0x8_0000;
+    const O_EXCL: usize = 0x80;
+    const RESOLVE_NO_MAGICLINKS: u64 = 0x02;
+    const RESOLVE_IN_ROOT: u64 = 0x10;
+    const INTERFACE: [&[u8]; 3] = [b"cgroup.procs\0", b"cgroup.events\0", b"cgroup.kill\0"];
+
+    let Some(split) = path.iter().rposition(|byte| *byte == b'/') else {
+        return -EINVAL;
+    };
+    let (parent, name) = (&path[..split.max(1)], &path[split + 1..]);
+    if name.is_empty() || name == b"." || name == b".." || name.len() > 255 {
+        return -EINVAL;
+    }
+    let mut parent_path = [0u8; 512];
+    let mut name_path = [0u8; 257];
+    if parent.len() >= parent_path.len() {
+        return -36;
+    }
+    parent_path[..parent.len()].copy_from_slice(parent);
+    name_path[..name.len()].copy_from_slice(name);
+    let how: [u64; 3] = [
+        (O_PATH | O_DIRECTORY | O_CLOEXEC) as u64,
+        0,
+        RESOLVE_IN_ROOT | RESOLVE_NO_MAGICLINKS,
+    ];
+    let parent_fd = unsafe {
+        syscall4(
+            SYS_OPENAT2_HOST,
+            root_descriptor,
+            parent_path.as_ptr() as usize,
+            how.as_ptr() as usize,
+            core::mem::size_of_val(&how),
+        )
+    };
+    if parent_fd < 0 {
+        return parent_fd as i64;
+    }
+    let close = |fd: isize| {
+        let _ = unsafe { syscall1(SYS_CLOSE_HOST, fd as usize) };
+    };
+    let result = unsafe {
+        syscall3(
+            SYS_MKDIRAT_HOST,
+            parent_fd as usize,
+            name_path.as_ptr() as usize,
+            0o755,
+        )
+    };
+    if result < 0 {
+        close(parent_fd);
+        return result as i64;
+    }
+    let directory = unsafe {
+        syscall4(
+            SYS_OPENAT_HOST,
+            parent_fd as usize,
+            name_path.as_ptr() as usize,
+            O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC,
+            0,
+        )
+    };
+    close(parent_fd);
+    if directory < 0 {
+        return directory as i64;
+    }
+    let identity = managed_host_identity();
+    let _ = unsafe {
+        syscall3(
+            SYS_FCHOWN_HOST,
+            directory as usize,
+            identity.uid,
+            identity.gid,
+        )
+    };
+    for file in INTERFACE {
+        let descriptor = unsafe {
+            syscall4(
+                SYS_OPENAT_HOST,
+                directory as usize,
+                file.as_ptr() as usize,
+                O_WRONLY | O_CREATE_HOST | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
+                0o644,
+            )
+        };
+        if descriptor >= 0 {
+            let _ = unsafe {
+                syscall3(
+                    SYS_FCHOWN_HOST,
+                    descriptor as usize,
+                    identity.uid,
+                    identity.gid,
+                )
+            };
+            close(descriptor);
+        }
+    }
+    close(directory);
+    0
+}
+
 fn native_proc_write(root_descriptor: usize, path: &[u8], bytes: &[u8]) -> bool {
     native_proc_write_mode(root_descriptor, path, bytes, 0o444)
 }
@@ -4960,7 +5072,15 @@ fn supervise_native(
             continue;
         }
         if signal == 17 {
-            if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
+            // The host kernel queued SIGCHLD for a managed child state change:
+            // deliver it, as the configured process path does. A parent that
+            // catches SIGCHLD with a handler (OpenRC, busybox init, shells)
+            // waits for it; systemd blocks SIGCHLD and reads a signalfd, so it
+            // never stops here.
+            write_all(b"GINUX_NATIVE_PROCESS_AUDIT: sigchld delivered parent=");
+            write_u64(task.virtual_id.pid as u64);
+            write_all(b"\n");
+            if ptrace(PTRACE_SYSCALL, host_pid, 0, 17) < 0 {
                 native_fail(instance, pid, b"native SIGCHLD resume failed");
             }
             continue;
@@ -6452,6 +6572,45 @@ fn supervise_native(
                     || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
                 {
                     native_fail(instance, pid, b"native virtual cgroup removal failed");
+                }
+            }
+            Action::Mediate
+                if mode == 3
+                    && ((syscall == 83
+                        && tracee_string_starts_with(
+                            host_pid,
+                            registers.rdi as usize,
+                            b"/sys/fs/cgroup/",
+                        ))
+                        || (syscall == 258
+                            && registers.rdi as usize == AT_FDCWD
+                            && tracee_string_starts_with(
+                                host_pid,
+                                registers.rsi as usize,
+                                b"/sys/fs/cgroup/",
+                            ))) =>
+            {
+                let address = if syscall == 83 {
+                    registers.rdi
+                } else {
+                    registers.rsi
+                };
+                let mut path = [0u8; 512];
+                let result = match read_tracee_c_string(host_pid, address as usize, &mut path) {
+                    Some(length) => native_cgroup_mkdir(root_descriptor, &path[..length]),
+                    None => -36,
+                };
+                write_all(b"emulate surface=virtual-cgroup-create result=");
+                write_i64(result);
+                write_all(b"\n");
+                registers.orig_rax = u64::MAX;
+                task.awaiting_exit = true;
+                task.override_exit = true;
+                task.override_result = result;
+                if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
+                {
+                    native_fail(instance, pid, b"native virtual cgroup creation failed");
                 }
             }
             Action::Mediate
