@@ -19,7 +19,7 @@ pub enum Lane {
 }
 
 /// Route process entries to their hook and unclaimed entries to the contract.
-pub fn classify(syscall: u64) -> Lane {
+pub const fn classify(syscall: u64) -> Lane {
     if crate::process_hooks::claims(syscall) {
         Lane::Process
     } else if crate::fs_hooks::claims(syscall) {

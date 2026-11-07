@@ -88,11 +88,20 @@ addresses and ports, volume targets, assigned devices, virtual credentials,
 or operation-specific syscall and ioctl arguments. Those checks still run
 before any host effect.
 
-Runtime audit records contain the instance, contract digest, canonical
-operation, winning policy source, source-rule index, action, and result. Audit
-detail remains bounded to 8,192 records with logarithmic dropped-event
-reporting. The generated catalog inventory is
-[`abi-contract-coverage.md`](abi-contract-coverage.md).
+`ginux launch` enforces the contract for the operations it classifies from a
+syscall's registers and those its workload cannot reach, except clock reads,
+which the host vDSO answers without a syscall. It rejects an instance that
+explicitly denies an operation it cannot enforce, such as console input,
+`/proc` reads or a clock read; the README's launch section lists them.
+
+`ginux native` audit records contain the instance, contract digest, canonical
+operation, winning policy source, source-rule index, action, and result, bounded
+to 8,192 records with logarithmic dropped-event reporting. `ginux launch` entry
+records name the operation and the policy source and source-rule index of the
+contract rule launch applied, which the balanced policy may still override,
+within a 64 KiB audit byte budget; its header reports the instance and contract
+digest, and `audit.mode = "disabled"` suppresses its decision records. The
+generated catalog inventory is [`abi-contract-coverage.md`](abi-contract-coverage.md).
 
 ## Filesystem and elevation constraints
 

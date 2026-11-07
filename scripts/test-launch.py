@@ -84,6 +84,97 @@ def main():
         invoke(["int80"], 1, "supervisor-error")
         invoke(["descriptor"], 0, "exited")
         invoke(["list"], 0, "exited", stdout=b"input\n")
+        # Instance contract denials reach the workload with EPERM, and audit
+        # records name the rule; cwd exits 91 when its open fails.
+        profile = 'profile = "gate5-balanced-v1"'
+
+        def denied(args, code, selector, record, stdout=b""):
+            proc = invoke(args, code, "exited", stdout=stdout,
+                          changes={profile: profile + '\ndeny = ["' + selector + '"]'})
+            if not re.search(rb"^ginux: launch contract instance=\S+ digest=[0-9a-f]{64}$",
+                             proc.stderr, re.M):
+                raise RuntimeError("launch did not report the resolved contract")
+            if not re.search(rb"^ginux: audit sequence=\d+ phase=entry " + record + rb"$",
+                             proc.stderr, re.M):
+                raise RuntimeError(f"{selector}: missing audit record {record!r}")
+
+        denied(["cwd"], 91, "syscall.open",
+               rb"syscall=2 operation=syscall.open policy-source=instance-deny policy-rule=0 action=deny result=-1")
+        denied(["cwd"], 0, "syscall.write",
+               rb"syscall=1 operation=syscall.write policy-source=instance-deny policy-rule=0 action=deny result=-1")
+        # A semantic-family denial wins over the syscall's own allowance.
+        denied(["cwd"], 91, "filesystem.path.read",
+               rb"syscall=2 operation=filesystem.path.read policy-source=instance-deny policy-rule=0 "
+               rb"action=deny result=-1")
+        denied(["args", "hidden"], 0, "device.console.write",
+               rb"syscall=1 operation=device.console.write policy-source=instance-deny policy-rule=0 "
+               rb"action=deny result=-1")
+        denied(["handler"], 86, "signal.virtual.deliver",
+               rb"syscall=13 operation=signal.virtual.deliver policy-source=instance-deny policy-rule=0 "
+               rb"action=deny result=-1")
+        # A denial launch cannot enforce is refused, not accepted and ignored.
+        for selector, operation in (("device.console.read", b"device.console.read"),
+                                    ("proc.*", b"proc."),
+                                    ("syscall.clock_gettime", b"syscall.clock_gettime")):
+            proc = invoke(["exit"], 2, "supervisor-error",
+                          changes={profile: profile + '\ndeny = ["' + selector + '"]'})
+            if b"reason=unenforced-deny operation=" + operation not in proc.stderr:
+                raise RuntimeError(f"{selector}: unenforced denial was not refused: {proc.stderr!r}")
+        # A self-contained recipe's deny and exact_deny rules are enforced and
+        # refused the same way, and audit names the winning rule's index.
+        contract = '[contract]\n' + profile
+        assert contract in template
+        recipe = '[userspace.contract]\nversion = 1\ncatalog = 1\ndefault = "deny"\n' + "".join(
+            f'{group} = ["**"]\n' for group in
+            ("read", "write", "execute", "connect", "listen", "process", "system"))
+
+        def recipe_config(deny, exact_deny):
+            return {contract: recipe + f"exact_allow = []\ndeny = {json.dumps(deny)}\n"
+                    f"exact_deny = {json.dumps(exact_deny)}"}
+
+        proc = invoke(["cwd"], 91, "exited",
+                      changes=recipe_config(["syscall.getppid", "fs.path.read"], []))
+        if not re.search(rb"^ginux: audit sequence=\d+ phase=entry syscall=2 "
+                         rb"operation=filesystem.path.read policy-source=deny policy-rule=1 "
+                         rb"action=deny result=-1$", proc.stderr, re.M):
+            raise RuntimeError(f"recipe deny was not enforced: {proc.stderr[-600:]!r}")
+        proc = invoke(["cwd"], 0, "exited", changes=recipe_config([], ["syscall.write"]))
+        if not re.search(rb"^ginux: audit sequence=\d+ phase=entry syscall=1 "
+                         rb"operation=syscall.write policy-source=exact-deny policy-rule=0 "
+                         rb"action=deny result=-1$", proc.stderr, re.M):
+            raise RuntimeError(f"recipe exact_deny was not enforced: {proc.stderr[-600:]!r}")
+        # Denials of operations no launch workload reaches are enforced by
+        # construction; the first three are the example recipes' denials.
+        invoke(["exit"], 0, "exited", changes=recipe_config(
+            ["dev.mmio.direct", "dev.dma.direct", "network.packet.raw", "network.**"], []))
+        # The host vDSO answers clock reads without a syscall.
+        for deny, exact_deny, operation in ((["dev.console.read"], [], b"device.console.read"),
+                                            ([], ["proc.system.read"], b"proc.system.read"),
+                                            (["time.clock.read"], [], b"time.clock.read"),
+                                            ([], ["syscall.clock_gettime"],
+                                             b"syscall.clock_gettime")):
+            proc = invoke(["exit"], 2, "supervisor-error", changes=recipe_config(deny, exact_deny))
+            if b"reason=unenforced-deny operation=" + operation not in proc.stderr:
+                raise RuntimeError(f"{operation!r}: unenforced recipe denial was not refused: "
+                                   f"{proc.stderr!r}")
+        # Operations a profile does not grant fail with ENOSYS.
+        proc = invoke(["cwd"], 91, "exited",
+                      changes={profile: 'profile = "minimal-v1"'})
+        if not re.search(rb"^ginux: audit sequence=\d+ phase=entry syscall=2 operation=\S+ "
+                         rb"policy-source=default-deny policy-rule=0 action=deny result=-38$", proc.stderr, re.M):
+            raise RuntimeError("minimal profile did not default-deny open")
+        # An explicit syscall denial wins over a family the profile only does
+        # not grant: the operator's rule decides and is the one audited.
+        proc = invoke(["args", "hidden"], 0, "exited",
+                      changes={profile: 'profile = "minimal-v1"\ndeny = ["syscall.write"]'})
+        if not re.search(rb"^ginux: audit sequence=\d+ phase=entry syscall=1 operation=syscall.write "
+                         rb"policy-source=instance-deny policy-rule=0 action=deny result=-1$",
+                         proc.stderr, re.M):
+            raise RuntimeError("explicit syscall denial lost to a default-denied family")
+        disabled = invoke(["exit", "0"], 0, "exited",
+                          changes={'mode = "stderr"': 'mode = "disabled"'})
+        if b"ginux: audit " in disabled.stderr:
+            raise RuntimeError("disabled audit emitted decision records")
         # The thread identity matches the virtual pid: set_tid_address returns
         # it instead of the host tid, and PI futexes, which would store the
         # host tid in the futex word, are denied.
@@ -102,7 +193,8 @@ def main():
         # every syscall record before it is complete.
         lines = proc.stderr.splitlines()
         record = re.compile(rb"ginux: audit sequence=\d+ phase=(exit result=-?\d+|"
-                            rb"entry syscall=\d+ action=\S.* result=\S+)")
+                            rb"entry syscall=\d+ operation=\S+ policy-source=\S+ "
+                            rb"(policy-rule=\d+ )?action=\S.* result=\S+)")
         if (b"ginux: audit truncated budget=65536" not in lines
                 or any(line.startswith(b"ginux: audit sequence=") and not record.fullmatch(line)
                        for line in lines)):
