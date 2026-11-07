@@ -153,6 +153,26 @@ long native_fixture_main(void)
         print_result("GINUX_FIXTURE: child-status=", (status >> 8) & 0xff);
         return 0;
     }
+    case 'c': {
+        /* clone3 CLONE_INTO_CGROUP, as glibc 2.41+ posix_spawn starts every
+         * systemd 258+ service: the cgroup is a directory of the virtual tree. */
+        struct {
+            word flags, pidfd, child_tid, parent_tid, exit_signal, stack, stack_size, tls,
+                set_tid, set_tid_size, cgroup;
+        } args = {0};
+        int status = 0;
+        long cgroup = call3(2, (word)"/sys/fs/cgroup", 0x10000 /* O_DIRECTORY */, 0);
+        args.flags = 0x200000000UL; /* CLONE_INTO_CGROUP */
+        args.exit_signal = 17;
+        args.cgroup = (word)cgroup;
+        long pid = call3(435, (word)&args, sizeof args, 0);
+        if (pid == 0) return 7;
+        print_result("GINUX_FIXTURE: cgroup-open-ok=", cgroup >= 0);
+        print_result("GINUX_FIXTURE: clone3-ok=", pid > 0);
+        print_result("GINUX_FIXTURE: wait-ok=", pid > 0 && call4(61, pid, (word)&status, 0, 0) == pid);
+        print_result("GINUX_FIXTURE: child-status=", (status >> 8) & 0xff);
+        return 0;
+    }
     default:
         return 81;
     }
