@@ -163,9 +163,11 @@ scope, threat model, and invariants.
   root-owned mode-0700 `/var/tmp` bind prevented the newly reduced host identity
   from reaching its payload. The fixture now gives that private mount to host
   UID/GID 65534; the production pre-exec identity reduction is unchanged.
+  Pull-request `launch-integration` now passes in 33 seconds, and
+  `static-and-unit` passes in 41 seconds.
 - Open decision: none for the approved Gate 10.5 expansion.
-- Exact next action: push the Gate 1 fixture correction, verify pull-request CI,
-  then stop for human review and acceptance of pull request 237 before Gate 11.
+- Exact next action: stop for human review and acceptance of pull request 237
+  before Gate 11.
 
 ## Evidence
 
