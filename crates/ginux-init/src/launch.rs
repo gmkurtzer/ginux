@@ -12,7 +12,9 @@ use ginux_core::{
     balanced_identity_result, balanced_mediated_result, balanced_surface,
     is_shared_network_syscall, Action, BalancedSurface, SYS_EXIT, SYS_EXIT_GROUP,
 };
-use ginux_instance::{ConfigError, ExecutionBackend, ExecutionProfile, Instance, InstanceConfig};
+use ginux_instance::{
+    AuditMode, ConfigError, ExecutionBackend, ExecutionProfile, Instance, InstanceConfig,
+};
 
 use crate::dispatch::{
     balanced_surface_name, decide_native, native_arguments_allowed, NativeDecision,
@@ -375,6 +377,9 @@ pub fn launch_main(config_path: *const u8, root_path: *const u8, result_path: *c
     {
         launch_unenforced(rule.operation.id);
     }
+    unsafe {
+        AUDIT_DISABLED = config.audit_mode == AuditMode::Disabled;
+    }
     print_launch_config(&config);
     let mut instance = Instance::create(config);
     if instance.start().is_err() {
@@ -547,6 +552,8 @@ static mut RESULT_FD: isize = -1;
 
 static mut AUDIT_BYTES: usize = 0;
 static mut AUDIT_CAPPED: bool = false;
+// `[audit] mode = "disabled"` suppresses decision records.
+static mut AUDIT_DISABLED: bool = false;
 // One audit record is staged here and written whole once its newline
 // arrives, so the budget never splits a record and the truncation notice
 // always starts its own line.
@@ -703,7 +710,7 @@ pub fn launch_usage() -> ! {
 
 fn audit_write(bytes: &[u8]) {
     let record = unsafe {
-        if AUDIT_CAPPED {
+        if AUDIT_DISABLED || AUDIT_CAPPED {
             return;
         }
         let start = AUDIT_RECORD_LEN;

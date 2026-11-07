@@ -330,8 +330,9 @@ names the contract operation and the policy source and source-rule index of the
 contract rule applied to it (the index is 0 for every legacy `[contract]`
 selector), which may be an allowance the balanced policy then overrides; the
 launch header reports the instance and contract digest. Audit output is
-capped at 64 KiB plus a truncation notice. This path does not implement
-resource quotas from the instance metadata.
+capped at 64 KiB plus a truncation notice; `[audit] mode = "disabled"`
+suppresses decision records. This path does not implement resource quotas
+from the instance metadata.
 
 When requested, the result file is reserved exclusively before launch, with
 mode 0600 and a maximum path length of 512 bytes. Existing files are never

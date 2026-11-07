@@ -171,6 +171,10 @@ def main():
                          rb"policy-source=instance-deny policy-rule=0 action=deny result=-1$",
                          proc.stderr, re.M):
             raise RuntimeError("explicit syscall denial lost to a default-denied family")
+        disabled = invoke(["exit", "0"], 0, "exited",
+                          changes={'mode = "stderr"': 'mode = "disabled"'})
+        if b"ginux: audit " in disabled.stderr:
+            raise RuntimeError("disabled audit emitted decision records")
         # The thread identity matches the virtual pid: set_tid_address returns
         # it instead of the host tid, and PI futexes, which would store the
         # host tid in the futex word, are denied.

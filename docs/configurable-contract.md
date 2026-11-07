@@ -100,8 +100,8 @@ to 8,192 records with logarithmic dropped-event reporting. `ginux launch` entry
 records name the operation and the policy source and source-rule index of the
 contract rule launch applied, which the balanced policy may still override,
 within a 64 KiB audit byte budget; its header reports the instance and contract
-digest. The generated catalog inventory is
-[`abi-contract-coverage.md`](abi-contract-coverage.md).
+digest, and `audit.mode = "disabled"` suppresses its decision records. The
+generated catalog inventory is [`abi-contract-coverage.md`](abi-contract-coverage.md).
 
 ## Filesystem and elevation constraints
 
