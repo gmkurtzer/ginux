@@ -30,6 +30,7 @@ pub const SYS_WAIT4: usize = 61;
 pub const SYS_KILL: usize = 62;
 pub const SYS_PTRACE: usize = 101;
 pub const SYS_OPENAT_HOST: usize = 257;
+pub const SYS_MKDIRAT_HOST: usize = 258;
 pub const SYS_SIGNALFD4: usize = 289;
 pub const SYS_PROCESS_VM_WRITEV: usize = 311;
 pub const AT_FDCWD: usize = (-100isize) as usize;

@@ -18,8 +18,9 @@ use crate::supervisor::{
     syscall5, wait, write_all, UserRegs, AT_FDCWD, INSTANCE_GID, INSTANCE_UID, O_RDONLY,
     PR_SET_NO_NEW_PRIVS, PTRACE_GETREGS, PTRACE_O_EXITKILL, PTRACE_O_TRACESYSGOOD,
     PTRACE_SETOPTIONS, PTRACE_SETREGS, PTRACE_SYSCALL, PTRACE_TRACEME, SYS_CHDIR, SYS_CHROOT,
-    SYS_CLOSE_HOST, SYS_EXECVE, SYS_EXIT_HOST, SYS_FORK, SYS_FSYNC, SYS_OPENAT_HOST, SYS_PRCTL,
-    SYS_PTRACE, SYS_READ_HOST, SYS_SETGID, SYS_SETGROUPS, SYS_SETUID, SYS_WRITE_HOST,
+    SYS_CLOSE_HOST, SYS_EXECVE, SYS_EXIT_HOST, SYS_FORK, SYS_FSYNC, SYS_MKDIRAT_HOST,
+    SYS_OPENAT_HOST, SYS_PRCTL, SYS_PTRACE, SYS_READ_HOST, SYS_SETGID, SYS_SETGROUPS, SYS_SETUID,
+    SYS_WRITE_HOST,
 };
 
 pub const MAX_ELF_SIZE: usize = 64 * 1024;
@@ -327,8 +328,6 @@ pub fn c_string_bytes(value: *const u8, limit: usize) -> Result<&'static [u8], C
 pub const MAX_LAUNCH_ARG_LEN: usize = 128;
 pub const MAX_LAUNCH_ENV_LEN: usize = 256;
 pub const MAX_LAUNCH_PATH_LEN: usize = 128;
-
-const SYS_MKDIRAT: usize = 259;
 
 static mut LAUNCH_EXEC: [u8; 129] = [0; 129];
 static mut LAUNCH_ARGS: [u8; 7 * 129] = [0; 7 * 129];
@@ -866,7 +865,7 @@ fn launch_tracee(root_path: *const u8) -> ! {
         );
     }
     let workdir = core::ptr::addr_of!(LAUNCH_WORKDIR).cast::<u8>();
-    let _ = unsafe { syscall3(SYS_MKDIRAT, AT_FDCWD, workdir as usize, 0o755) };
+    let _ = unsafe { syscall3(SYS_MKDIRAT_HOST, AT_FDCWD, workdir as usize, 0o755) };
     if unsafe { syscall4(SYS_PTRACE, PTRACE_TRACEME, 0, 0, 0) } < 0 {
         tracee_setup_fail(
             b"ginux: launch bootstrap unavailable: ptrace traceme failed\n",
