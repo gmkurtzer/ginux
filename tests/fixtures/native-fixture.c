@@ -60,6 +60,19 @@ long native_fixture_main(void)
         print_result("GINUX_FIXTURE: fork=", pid);
         return 0;
     }
+    case 'o': {
+        /* owner: fcntl cannot set up signal-driven I/O; descriptor and
+         * status flags still work on the test's stdout pipe. */
+        struct { int type, pid; } owner = {1 /* F_OWNER_PID */, 0};
+        long flags = call3(72, 1, 3, 0);
+        print_result("GINUX_FIXTURE: setown=", call3(72, 1, 8, 0));
+        print_result("GINUX_FIXTURE: setown-ex=", call3(72, 1, 15, (word)&owner));
+        print_result("GINUX_FIXTURE: setsig=", call3(72, 1, 10, 15));
+        print_result("GINUX_FIXTURE: async=", call3(72, 1, 4, flags | 020000));
+        print_result("GINUX_FIXTURE: nonblock=", call3(72, 1, 4, flags | 04000));
+        call3(72, 1, 4, flags);
+        return 0;
+    }
     case 't': {
         /* A plain SIGTRAP stop between syscalls; uname stays denied before and
          * after it unless supervision has lost track of entry and exit stops. */

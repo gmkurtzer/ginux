@@ -292,7 +292,7 @@ pub static CATALOG: &[Operation] = &[
         16,
         Partial,
         Action::Mediate,
-        "cataloged request families only",
+        "cataloged request families; no signal-driven I/O",
         "test-devices"
     ),
     syscall!(
@@ -556,8 +556,8 @@ pub static CATALOG: &[Operation] = &[
         72,
         Partial,
         Action::Mediate,
-        "cataloged commands",
-        "test-systemd"
+        "commands other than signal-driven I/O",
+        "test-launch"
     ),
     syscall!(
         "flock",
