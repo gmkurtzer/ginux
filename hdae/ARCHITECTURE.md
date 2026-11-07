@@ -213,6 +213,22 @@ backends. Arbitrary host-context hooks are unsupported because they would be
 root-authority extensions to the trusted computing base rather than protection-domain
 configuration.
 
+Gate 10.5 separates virtual authority from the host execution backstop. Ginux
+continues to own instance-visible UIDs, GIDs, groups, and permission decisions.
+The native tracee itself always sets `PR_SET_NO_NEW_PRIVS`; when its runtime was
+started as host root it drops to host UID/GID 65534, and otherwise it retains
+the non-root caller's host UID/GID. Host credentials therefore cannot grant
+instance authority and provide a second containment boundary if mediation is
+imperfect.
+
+Gate 10.5 also gives trusted pre-boot commands a distinct, bounded bootstrap
+phase. They execute through the managed syscall path inside the instance root,
+with no host paths, descriptors, credentials, or unmediated operations. Final
+workload path restrictions activate only after all hooks complete, allowing the
+recipe to prepare the state that it subsequently makes read-only. One denied
+absolute directory path covers that directory and its descendants using
+component-boundary matching and confined path resolution.
+
 ### Observability and benchmarking
 
 Audit events expose contract decisions and instance lifecycle without exposing

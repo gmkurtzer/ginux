@@ -14,8 +14,8 @@ use crate::dispatch::{
     balanced_surface_name, decide_native, native_arguments_allowed, NativeDecision,
 };
 use crate::supervisor::{
-    exit_process, line, ptrace, stopped, syscall0, syscall1, syscall2, syscall3, syscall4,
-    syscall5, wait, write_all, UserRegs, AT_FDCWD, INSTANCE_GID, INSTANCE_UID, O_RDONLY,
+    exit_process, line, managed_host_identity, ptrace, stopped, syscall0, syscall1, syscall2,
+    syscall3, syscall4, syscall5, wait, write_all, UserRegs, AT_FDCWD, O_RDONLY,
     PR_SET_NO_NEW_PRIVS, PTRACE_GETREGS, PTRACE_O_EXITKILL, PTRACE_O_TRACESYSGOOD,
     PTRACE_SETOPTIONS, PTRACE_SETREGS, PTRACE_SYSCALL, PTRACE_TRACEME, SYS_CHDIR, SYS_CHROOT,
     SYS_CLOSE_HOST, SYS_EXECVE, SYS_EXIT_HOST, SYS_FORK, SYS_FSYNC, SYS_OPENAT_HOST, SYS_PRCTL,
@@ -893,23 +893,26 @@ fn launch_tracee(root_path: *const u8) -> ! {
             122,
         );
     }
-    if unsafe { syscall2(SYS_SETGROUPS, 0, 0) } < 0 {
-        tracee_setup_fail(
-            b"ginux: launch bootstrap failed: supplementary groups drop failed\n",
-            123,
-        );
-    }
-    if unsafe { syscall1(SYS_SETGID, INSTANCE_GID) } < 0 {
-        tracee_setup_fail(
-            b"ginux: launch bootstrap failed: group privilege drop failed\n",
-            124,
-        );
-    }
-    if unsafe { syscall1(SYS_SETUID, INSTANCE_UID) } < 0 {
-        tracee_setup_fail(
-            b"ginux: launch bootstrap failed: user privilege drop failed\n",
-            125,
-        );
+    let host_identity = managed_host_identity();
+    if host_identity.drop_root {
+        if unsafe { syscall2(SYS_SETGROUPS, 0, 0) } < 0 {
+            tracee_setup_fail(
+                b"ginux: launch bootstrap failed: supplementary groups drop failed\n",
+                123,
+            );
+        }
+        if unsafe { syscall1(SYS_SETGID, host_identity.gid) } < 0 {
+            tracee_setup_fail(
+                b"ginux: launch bootstrap failed: group privilege drop failed\n",
+                124,
+            );
+        }
+        if unsafe { syscall1(SYS_SETUID, host_identity.uid) } < 0 {
+            tracee_setup_fail(
+                b"ginux: launch bootstrap failed: user privilege drop failed\n",
+                125,
+            );
+        }
     }
     if unsafe { syscall5(SYS_PRCTL, PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) } < 0 {
         tracee_setup_fail(

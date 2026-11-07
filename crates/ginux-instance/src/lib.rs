@@ -136,8 +136,9 @@ const POLICY_ITEMS: usize = 16;
 const POLICY_BYTES: usize = 128;
 const CONTRACT_RULE_ITEMS: usize = 16;
 const CONTRACT_RULE_BYTES: usize = 96;
-const HOOK_ITEMS: usize = 8;
-const HOOK_BYTES: usize = 256;
+const FILESYSTEM_RULE_ITEMS: usize = 16;
+const HOOK_ITEMS: usize = 12;
+const HOOK_BYTES: usize = 512;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct InstanceConfig {
@@ -171,6 +172,9 @@ pub struct InstanceConfig {
     pub contract_exact_allow: TextList<CONTRACT_RULE_ITEMS, CONTRACT_RULE_BYTES>,
     pub contract_exact_deny: TextList<CONTRACT_RULE_ITEMS, CONTRACT_RULE_BYTES>,
     pub contract_digest: Text<REFERENCE_BYTES>,
+    pub filesystem_write_deny: TextList<FILESYSTEM_RULE_ITEMS, PATH_BYTES>,
+    pub filesystem_setid: bool,
+    pub filesystem_device_nodes: bool,
     pub storage: TextList<ASSIGNMENT_ITEMS, ASSIGNMENT_BYTES>,
     pub volumes: TextList<ASSIGNMENT_ITEMS, POLICY_BYTES>,
     pub devices: TextList<ASSIGNMENT_ITEMS, ASSIGNMENT_BYTES>,
@@ -250,6 +254,7 @@ enum Section {
     Execution,
     Contract,
     UserspaceContract,
+    UserspaceFilesystem,
     Storage,
     Volumes,
     Devices,
@@ -293,6 +298,9 @@ struct ConfigBuilder {
     contract_exact_allow: TextList<CONTRACT_RULE_ITEMS, CONTRACT_RULE_BYTES>,
     contract_exact_deny: TextList<CONTRACT_RULE_ITEMS, CONTRACT_RULE_BYTES>,
     contract_digest: Text<REFERENCE_BYTES>,
+    filesystem_write_deny: TextList<FILESYSTEM_RULE_ITEMS, PATH_BYTES>,
+    filesystem_setid: bool,
+    filesystem_device_nodes: bool,
     storage: TextList<ASSIGNMENT_ITEMS, ASSIGNMENT_BYTES>,
     volumes: TextList<ASSIGNMENT_ITEMS, POLICY_BYTES>,
     devices: TextList<ASSIGNMENT_ITEMS, ASSIGNMENT_BYTES>,
@@ -348,6 +356,9 @@ impl ConfigBuilder {
             contract_exact_allow: TextList::empty(),
             contract_exact_deny: TextList::empty(),
             contract_digest: Text::empty(),
+            filesystem_write_deny: TextList::empty(),
+            filesystem_setid: true,
+            filesystem_device_nodes: true,
             storage: TextList::empty(),
             volumes: TextList::empty(),
             devices: TextList::empty(),
@@ -438,6 +449,9 @@ impl ConfigBuilder {
             contract_exact_allow: self.contract_exact_allow,
             contract_exact_deny: self.contract_exact_deny,
             contract_digest: Text::empty(),
+            filesystem_write_deny: self.filesystem_write_deny,
+            filesystem_setid: self.filesystem_setid,
+            filesystem_device_nodes: self.filesystem_device_nodes,
             storage: self.storage,
             volumes: self.volumes,
             devices: self.devices,
@@ -559,6 +573,21 @@ impl InstanceConfig {
             b"userspace.contract.exact_allow" => self.contract_exact_allow = parse_list(value)?,
             b"userspace.contract.exact_deny" => self.contract_exact_deny = parse_list(value)?,
             b"userspace.contract.digest" => return Err(ConfigError::DerivedField),
+            b"userspace.filesystem.write_deny" => self.filesystem_write_deny = parse_list(value)?,
+            b"userspace.filesystem.setid" => {
+                self.filesystem_setid = match parse_string::<32>(value)?.as_bytes() {
+                    b"allow" => true,
+                    b"deny" => false,
+                    _ => return Err(ConfigError::InvalidValue),
+                }
+            }
+            b"userspace.filesystem.device_nodes" => {
+                self.filesystem_device_nodes = match parse_string::<32>(value)?.as_bytes() {
+                    b"allow" => true,
+                    b"deny" => false,
+                    _ => return Err(ConfigError::InvalidValue),
+                }
+            }
             b"storage.assignments" => self.storage = parse_list(value)?,
             b"volumes.assignments" => self.volumes = parse_list(value)?,
             b"devices.assignments" => self.devices = parse_list(value)?,
@@ -775,6 +804,9 @@ impl InstanceConfig {
                 return Err(ConfigError::InvalidValue);
             }
         }
+        for path in self.filesystem_write_deny.as_slice() {
+            validate_policy_path(path.as_bytes())?;
+        }
         Ok(())
     }
 
@@ -905,6 +937,20 @@ impl InstanceConfig {
             output.raw(b"\ndigest = ")?;
             output.quoted(self.contract_digest.as_bytes())?;
         }
+        output.raw(b"\n\n[userspace.filesystem]\nwrite_deny = ")?;
+        output.list(self.filesystem_write_deny.as_slice())?;
+        output.raw(b"\nsetid = ")?;
+        output.quoted(if self.filesystem_setid {
+            b"allow"
+        } else {
+            b"deny"
+        })?;
+        output.raw(b"\ndevice_nodes = ")?;
+        output.quoted(if self.filesystem_device_nodes {
+            b"allow"
+        } else {
+            b"deny"
+        })?;
         output.raw(b"\n\n[storage]\nassignments = ")?;
         output.list(self.storage.as_slice())?;
         output.raw(b"\n\n[volumes]\nassignments = ")?;
@@ -980,6 +1026,20 @@ impl InstanceConfig {
                 .any(|rule| network_rule_matches(rule.as_bytes(), protocol, port))
     }
 
+    /// Returns true when `path` is the configured denied object or one of its
+    /// descendants. Component boundaries prevent `/locked` from matching
+    /// `/locked-other`.
+    pub fn filesystem_write_denied(&self, path: &[u8]) -> bool {
+        self.filesystem_write_deny.as_slice().iter().any(|rule| {
+            let rule = rule.as_bytes();
+            path == rule
+                || (path.starts_with(rule)
+                    && rule != b"/"
+                    && path.get(rule.len()).is_some_and(|byte| *byte == b'/'))
+                || rule == b"/"
+        })
+    }
+
     pub fn translated_port(&self, protocol: NetworkProtocol, internal: u16) -> Option<u16> {
         for forward in self.port_forwards.as_slice() {
             let mut parts = forward.as_bytes().split(|byte| *byte == b'/');
@@ -1053,6 +1113,7 @@ const CONFIG_TEXT_BYTES: usize = IDENTIFIER_BYTES
     + 2 * POLICY_ITEMS * POLICY_BYTES
     + 10 * CONTRACT_RULE_ITEMS * CONTRACT_RULE_BYTES
     + REFERENCE_BYTES
+    + FILESYSTEM_RULE_ITEMS * PATH_BYTES
     + 2 * ASSIGNMENT_ITEMS * ASSIGNMENT_BYTES
     + ASSIGNMENT_ITEMS * POLICY_BYTES
     + 2 * IDENTIFIER_BYTES
@@ -1151,6 +1212,7 @@ fn parse_section(line: &[u8]) -> Result<Section, ConfigError> {
         b"execution" => Ok(Section::Execution),
         b"contract" => Ok(Section::Contract),
         b"userspace.contract" => Ok(Section::UserspaceContract),
+        b"userspace.filesystem" => Ok(Section::UserspaceFilesystem),
         b"storage" => Ok(Section::Storage),
         b"volumes" => Ok(Section::Volumes),
         b"devices" => Ok(Section::Devices),
@@ -1308,6 +1370,26 @@ fn parse_field(
         (Section::UserspaceContract, b"digest") => {
             builder.mark(1 << 21)?;
             builder.contract_digest = parse_string(value)?;
+        }
+        (Section::UserspaceFilesystem, b"write_deny") => {
+            builder.mark(1u64 << 49)?;
+            builder.filesystem_write_deny = parse_list(value)?;
+        }
+        (Section::UserspaceFilesystem, b"setid") => {
+            builder.mark(1u64 << 50)?;
+            builder.filesystem_setid = match parse_string::<32>(value)?.as_bytes() {
+                b"allow" => true,
+                b"deny" => false,
+                _ => return Err(ConfigError::InvalidValue),
+            };
+        }
+        (Section::UserspaceFilesystem, b"device_nodes") => {
+            builder.mark(1u64 << 51)?;
+            builder.filesystem_device_nodes = match parse_string::<32>(value)?.as_bytes() {
+                b"allow" => true,
+                b"deny" => false,
+                _ => return Err(ConfigError::InvalidValue),
+            };
         }
         (Section::Storage, b"assignments") => {
             builder.mark(1 << 11)?;
@@ -1557,6 +1639,18 @@ fn validate_instance_path(bytes: &[u8]) -> Result<(), ConfigError> {
         || bytes[0] != b'/'
         || bytes.split(|byte| *byte == b'/').any(|part| part == b"..")
         || bytes.contains(&0)
+    {
+        return Err(ConfigError::InvalidValue);
+    }
+    Ok(())
+}
+
+fn validate_policy_path(bytes: &[u8]) -> Result<(), ConfigError> {
+    validate_instance_path(bytes)?;
+    if bytes.len() > 1
+        && (bytes.ends_with(b"/")
+            || bytes.windows(2).any(|window| window == b"//")
+            || bytes.split(|byte| *byte == b'/').any(|part| part == b"."))
     {
         return Err(ConfigError::InvalidValue);
     }
@@ -2268,6 +2362,52 @@ policy = "stop"
             config.root.as_bytes(),
             b"docker.io/rockylinux/rockylinux@sha256:e372170ca863"
         );
+    }
+
+    #[test]
+    fn filesystem_policy_is_recursive_and_boundary_aware() {
+        use std::format;
+        let source = VALID.replace(
+            "[storage]",
+            "[userspace.filesystem]\nwrite_deny = [\"/ginux-demo/read-only\"]\nsetid = \"deny\"\ndevice_nodes = \"deny\"\n\n[storage]",
+        );
+        let config = InstanceConfig::parse(source.as_bytes()).unwrap();
+        assert!(config.filesystem_write_denied(b"/ginux-demo/read-only"));
+        assert!(config.filesystem_write_denied(b"/ginux-demo/read-only/child/value"));
+        assert!(!config.filesystem_write_denied(b"/ginux-demo/read-only-other"));
+        assert!(!config.filesystem_setid);
+        assert!(!config.filesystem_device_nodes);
+        assert_eq!(
+            InstanceConfig::parse(config.normalized().unwrap().as_bytes()).unwrap(),
+            config
+        );
+
+        for invalid in ["relative", "/path/../escape", "/path//child", "/path/"] {
+            let invalid_source = source.replace(
+                "write_deny = [\"/ginux-demo/read-only\"]",
+                &format!("write_deny = [\"{invalid}\"]"),
+            );
+            assert_eq!(
+                InstanceConfig::parse(invalid_source.as_bytes()),
+                Err(ConfigError::InvalidValue)
+            );
+        }
+    }
+
+    #[test]
+    fn rocky_recipe_owns_bootstrap_and_lockdown_policy() {
+        let config = InstanceConfig::parse(include_bytes!(
+            "../../../config/instance-rocky-systemd.toml"
+        ))
+        .unwrap();
+        assert_eq!(config.pre_boot_hooks.as_slice().len(), 10);
+        assert!(config.pre_boot_hooks.as_slice()[1]
+            .as_bytes()
+            .windows(b"$6$ginux$".len())
+            .any(|window| window == b"$6$ginux$"));
+        assert!(config.filesystem_write_denied(b"/ginux-demo/read-only/child"));
+        assert!(!config.filesystem_setid);
+        assert!(!config.filesystem_device_nodes);
     }
 
     #[test]

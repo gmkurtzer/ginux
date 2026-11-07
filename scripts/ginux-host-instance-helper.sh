@@ -224,64 +224,14 @@ prepare_root() {
         "$root/sys/fs/cgroup/system.slice/system-modprobe.slice/modprobe@configfs.service/cgroup.procs" \
         "$root/sys/fs/cgroup/system.slice/system-modprobe.slice/modprobe@configfs.service/cgroup.events" \
         "$root/sys/fs/cgroup/system.slice/system-modprobe.slice/modprobe@configfs.service/cgroup.kill"
-    cp --remove-destination /usr/share/zoneinfo/UTC "$root/etc/localtime"
     for device_spec in 'console 5 0 600' 'null 1 3 666' 'zero 1 5 666' 'random 1 8 666' 'urandom 1 9 666'; do
         set -- $device_spec
         test -e "$root/dev/$1" || mknod -m "$4" "$root/dev/$1" c "$2" "$3"
     done
-    # The minimal OCI image intentionally omits these optional host services.
-    # Use ordinary drop-ins instead of /dev/null masks: Ginux virtualizes the
-    # instance path view, so an explicit false condition is both observable and
-    # independent of absolute-symlink resolution.
-    for unit in \
-        dbus-broker.service \
-        dbus.service \
-        dbus.socket \
-        modprobe@.service \
-        systemd-userdbd.service \
-        systemd-userdbd.socket
-    do
-        rm -f "$root/etc/systemd/system/$unit"
-        mkdir -p "$root/etc/systemd/system/$unit.d"
-        printf '%s\n' \
-            '[Unit]' \
-            'ConditionPathExists=/run/ginux-enable-optional-service' \
-            >"$root/etc/systemd/system/$unit.d/90-ginux-minimal-image.conf"
-    done
-    # This minimal image has no UTMP database. Remove the image-provided wants
-    # instead of condition-skipping the prerequisite and producing a dependency
-    # failure for the runlevel recorder.
-    rm -f \
-        "$root/usr/lib/systemd/system/sysinit.target.wants/systemd-update-utmp.service" \
-        "$root/usr/lib/systemd/system/graphical.target.wants/systemd-update-utmp-runlevel.service" \
-        "$root/usr/lib/systemd/system/multi-user.target.wants/systemd-update-utmp-runlevel.service" \
-        "$root/usr/lib/systemd/system/rescue.target.wants/systemd-update-utmp-runlevel.service"
-    # Network access is already mediated by Ginux. Do not ask systemd to add a
-    # second cgroup/BPF firewall that this virtual kernel does not expose.
-    mkdir -p "$root/etc/systemd/system/systemd-journald.service.d"
-    printf '%s\n' \
-        '[Service]' \
-        'IPAddressDeny=' \
-        >"$root/etc/systemd/system/systemd-journald.service.d/90-ginux-network.conf"
-    rm -f \
-        "$root/etc/systemd/system/systemd-initctl.service" \
-        "$root/etc/systemd/system/systemd-initctl.socket"
-    printf '%s\n' \
-        '[Unit]' \
-        'Description=Keyboard Request Target' \
-        'DefaultDependencies=no' >"$root/etc/systemd/system/kbrequest.target"
     ln -s / "$root/proc/1/root"
-    rm -f "$root/etc/systemd/system/getty.target" "$root/etc/systemd/system/console-getty.service"
-    ln -sf /usr/lib/systemd/system/console-getty.service \
-        "$root/etc/systemd/system/getty.target.wants/console-getty.service"
-    printf '%s\n' \
-        '#%PAM-1.0' \
-        'auth required pam_unix.so' \
-        'account required pam_unix.so' \
-        'password required pam_unix.so' \
-        'session required pam_unix.so' >"$root/etc/pam.d/login"
-    printf 'root:ginux\n' | chroot "$root" /usr/sbin/chpasswd
-    chown -R 1000:1000 "$root"
+    # The runtime drops root-launched workloads to the host nobody identity.
+    # Ginux maintains instance-visible credentials independently.
+    chown -R 65534:65534 "$root"
     find "$root" -type d -exec chmod u+w {} +
     chmod 600 "$root/etc/shadow"
     test -x "$root/sbin/init"

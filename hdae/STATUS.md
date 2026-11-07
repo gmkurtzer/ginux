@@ -132,7 +132,10 @@ scope, threat model, and invariants.
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
 - Active gate: Gate 10.5, intuitive self-contained contract configuration and
-  UX, is implemented and ready for human review on
+  UX, was expanded by human direction to include recursive filesystem policy,
+  explicit set-ID/device-node controls, recipe-owned bootstrap customization,
+  and least-privileged native host identities. Implementation and fresh
+  verification are complete on
   `hdae/intuitive-contract-ux`.
 - Last evidence: `make check`, `make test-contract`, Rocky QEMU
   `make test-config`, `make test-contract-runtime`, `make test-systemd`, the
@@ -148,11 +151,17 @@ scope, threat model, and invariants.
   isolated Rocky QEMU `make test-config` pass. The interactive Rocky workflow
   also rejected legacy create syntax and completed positional creation, cache
   reuse, and systemd boot before its later proc identity check timed out.
-- Open decision: human acceptance after the requested removal of the top-level
-  `ginux contract` CLI namespace and positional configuration correction have
-  been implemented and reverified.
-- Exact next action: update pull request 237 with the corrected
-  instance-centered interface and stop for human review before Gate 11.
+- The expanded Gate 10.5 implementation now passes strict formatting/build,
+  all 21 instance tests, `make check`, `make test-contract`,
+  `make test-contract-runtime`, `make test-process`, `make test-systemd`,
+  aggregate `make test`, and `make demo-gate-10.5`. A clean isolated Rocky
+  interactive run additionally proves recipe-owned bootstrap; recursive,
+  symlink-safe, and link-creation-safe path denial; set-ID and device-node
+  denial with FIFO allowance; root-origin host UID/GID 65534 and
+  `NoNewPrivs: 1`; and the complete attach, shutdown, restart, and cache flow.
+- Open decision: none for the approved Gate 10.5 expansion.
+- Exact next action: commit and update pull request 237, then stop for human
+  review before Gate 11.
 
 ## Evidence
 
@@ -458,16 +467,18 @@ request with complete evidence, and stop for human acceptance before Gate 11.
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
 - Active gate: Gate 10.5, intuitive self-contained contract configuration and
-  UX, is implemented on `hdae/intuitive-contract-ux` and awaiting review.
-- Last evidence: strict lint, 12 contract and 19 instance tests, self-contained
-  preset validation, runtime deny provenance, the complete systemd matrix, a
-  clean aggregate `make test`, and the human-readable Gate 10.5 demonstration
-  all pass.
+  UX, is implemented and freshly verified on `hdae/intuitive-contract-ux` and
+  awaiting review.
+- Last evidence: strict formatting/build, 12 contract and 21 instance tests,
+  runtime deny provenance, process identity checks, the complete systemd and
+  aggregate matrices, the Gate 10.5 demonstration, and a clean interactive
+  Rocky run all pass. The interactive run includes the expanded filesystem,
+  set-ID, device-node, bootstrap, host identity, and `NoNewPrivs` criteria.
 - Approved network direction: Gate 9 defaults to full host-shared inbound and
   outbound networking with normal host routing and bind conflicts, under Ginux
   mediation and audit. Gate 9.75 adds comprehensive instance configuration,
   network selection, port controls, and translation.
 - Gate 9.75 closure: pull request 229 merged as `8a475e8b`; human accepted and
   closed the gate on 2026-11-06.
-- Required human decision: review and acceptance after the corrected Gate 10.5
-  instance-centered CLI demonstration and pull-request checkpoint.
+- Required human decision: review and acceptance of pull request 237 before
+  Gate 11.

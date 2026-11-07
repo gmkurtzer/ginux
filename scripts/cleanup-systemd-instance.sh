@@ -3,5 +3,5 @@ set -eu
 
 . ./scripts/rocky-host-common.sh
 
-rocky_ssh 'sudo rm -rf /var/lib/ginux/instances/gate9; rm -f /var/tmp/ginux /var/tmp/gate9.toml /var/tmp/ginux-oci-rootfs.tar /var/tmp/ginux-gate9-check /var/tmp/ginux-gate9-network-check /var/tmp/ginux-systemd-audit.log'
+rocky_ssh 'sudo rm -rf /var/lib/ginux/instances/gate9; sudo rm -f /var/tmp/ginux /var/tmp/gate9.toml /var/tmp/ginux-oci-rootfs.tar /var/tmp/ginux-gate9-check /var/tmp/ginux-gate9-network-check /var/tmp/ginux-host-instance-helper /var/tmp/ginux-host-instance-helper-installed /var/tmp/ginux-systemd-audit.log'
 printf '%s\n' 'GINUX_GATE9_CLEANUP: PASS'

@@ -30,6 +30,15 @@ deny = ["dev.mmio.direct", "dev.dma.direct", "network.packet.raw"]
 exact_allow = []
 exact_deny = []
 
+[userspace.filesystem]
+# A directory rule applies to the directory and all descendants, but not a
+# neighboring prefix such as /ginux-demo/read-only-other.
+write_deny = ["/ginux-demo/read-only"]
+# These controls remove elevation semantics and block character/block device
+# creation. Ordinary FIFO creation remains governed by the contract.
+setid = "deny"
+device_nodes = "deny"
+
 [storage]
 assignments = ["root-overlay"]
 
@@ -38,6 +47,15 @@ assignments = ["console", "null", "zero", "random", "net0"]
 
 [network]
 backend = "shared"
+
+[hooks]
+# Pre-boot commands run inside the mediated instance root before the final
+# filesystem restrictions activate. This example sets the temporary root
+# password to "ginux", creates policy test paths, and adapts the minimal Rocky
+# image for systemd. Production recipes should supply credentials differently.
+pre_boot = ["/usr/bin/cp --remove-destination /usr/share/zoneinfo/UTC /etc/localtime", "/usr/bin/awk -F: -v OFS=: -v h='$6$ginux$5fZDUU2yskfStn1c0m2HsJ06zu3nvK7qFBLD476WxfLLpR6BrDTmG6qNrx0C./uhKIKvTQgrHwXxjSXdyBnBo0' '{if ($1 == \"root\") $2=h; print}' /etc/shadow > /etc/.shadow.ginux", "/usr/bin/cat /etc/.shadow.ginux > /etc/shadow", "/usr/bin/rm -f /etc/.shadow.ginux", "/usr/bin/awk -F: '$1 == \"root\" && $2 != \"\" {found=1} END {exit !found}' /etc/shadow", "/usr/bin/mkdir -p /ginux-demo/read-only/child /ginux-demo/writable /ginux-demo/read-only-other; /usr/bin/printf protected > /ginux-demo/read-only/child/value; /usr/bin/printf writable > /ginux-demo/writable/value", "/usr/bin/sh -c 'for u in dbus-broker.service dbus.service dbus.socket modprobe@.service systemd-userdbd.service systemd-userdbd.socket; do rm -f /etc/systemd/system/$u; mkdir -p /etc/systemd/system/$u.d; printf \"[Unit]\\nConditionPathExists=/run/ginux-enable-optional-service\\n\" > /etc/systemd/system/$u.d/90-ginux-minimal-image.conf; done'", "/usr/bin/rm -f /usr/lib/systemd/system/sysinit.target.wants/systemd-update-utmp.service /usr/lib/systemd/system/graphical.target.wants/systemd-update-utmp-runlevel.service /usr/lib/systemd/system/multi-user.target.wants/systemd-update-utmp-runlevel.service /usr/lib/systemd/system/rescue.target.wants/systemd-update-utmp-runlevel.service /etc/systemd/system/systemd-initctl.service /etc/systemd/system/systemd-initctl.socket", "/usr/bin/mkdir -p /etc/systemd/system/systemd-journald.service.d; /usr/bin/printf '[Service]\\nIPAddressDeny=\\n' > /etc/systemd/system/systemd-journald.service.d/90-ginux-network.conf; /usr/bin/printf '[Unit]\\nDescription=Keyboard Request Target\\nDefaultDependencies=no\\n' > /etc/systemd/system/kbrequest.target", "/usr/bin/rm -f /etc/systemd/system/getty.target /etc/systemd/system/console-getty.service; /usr/bin/ln -sf /usr/lib/systemd/system/console-getty.service /etc/systemd/system/getty.target.wants/console-getty.service; /usr/bin/printf '#%%PAM-1.0\\nauth required pam_unix.so\\naccount required pam_unix.so\\npassword required pam_unix.so\\nsession required pam_unix.so\\n' > /etc/pam.d/login"]
+timeout_seconds = 30
+failure = "stop"
 
 [audit]
 mode = "stderr"
