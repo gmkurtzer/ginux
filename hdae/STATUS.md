@@ -132,19 +132,17 @@ scope, threat model, and invariants.
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
 - Active gate: Gate 10.5, intuitive self-contained contract configuration and
-  UX, is authorized and active on `hdae/intuitive-contract-ux`.
-- Last evidence: Gate 10.25 `make demo-gate-10.25`, `make check`, targeted
-  systemd/network/hook tests, a clean aggregate `make test`, `make
-  test-oci-image`, and the final interactive Rocky cache-miss/cache-hit workflow
-  passed after the clean-break rename and CLI output cleanup. The interactive
-  regression also passed terminal-size propagation, `vi` use, and resized
-  detach/reattach behavior. A subsequent isolated run completed `dnf -y
-  install vim`, kept the instance alive, and passed the full interactive
-  lifecycle and restart regression.
-- Open decision: finalize the human-facing resource vocabulary and migration
-  representation without weakening the accepted Gate 10 enforcement table.
-- Exact next action: inspect the accepted Gate 10 schema, compiler, CLI, and
-  runtime surfaces, then implement the approved Gate 10.5 recipe and UX.
+  UX, is implemented and ready for human review on
+  `hdae/intuitive-contract-ux`.
+- Last evidence: `make check`, `make test-contract`, Rocky QEMU
+  `make test-config`, `make test-contract-runtime`, `make test-systemd`, the
+  complete aggregate `make test`, and the Gate 10.5 human demonstration pass.
+  The compiler covers 182 operations and reports the winning human source rule
+  in explanation and runtime audit output.
+- Open decision: human acceptance or requested revisions for the Gate 10.5
+  configuration and CLI UX.
+- Exact next action: open the dedicated Gate 10.5 pull request and stop for
+  human review before Gate 11.
 
 ## Evidence
 
@@ -441,7 +439,7 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Implement Gate 10.5 on `hdae/intuitive-contract-ux`, deliver its dedicated pull
+Deliver Gate 10.5 from `hdae/intuitive-contract-ux` in its dedicated pull
 request with complete evidence, and stop for human acceptance before Gate 11.
 
 ## Context recovery
@@ -450,10 +448,11 @@ request with complete evidence, and stop for human acceptance before Gate 11.
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
 - Active gate: Gate 10.5, intuitive self-contained contract configuration and
-  UX, is authorized on `hdae/intuitive-contract-ux`.
-- Last evidence: Gate 10.25 passed strict lint, 9 contract and 18 instance
-  tests, a clean aggregate `make test`, the complete systemd matrix, Gate 9.75
-  networking and hook regressions, and its human-visible Rocky QEMU demo.
+  UX, is implemented on `hdae/intuitive-contract-ux` and awaiting review.
+- Last evidence: strict lint, 12 contract and 19 instance tests, self-contained
+  preset validation, runtime deny provenance, the complete systemd matrix, a
+  clean aggregate `make test`, and the human-readable Gate 10.5 demonstration
+  all pass.
 - Approved network direction: Gate 9 defaults to full host-shared inbound and
   outbound networking with normal host routing and bind conflicts, under Ginux
   mediation and audit. Gate 9.75 adds comprehensive instance configuration,
