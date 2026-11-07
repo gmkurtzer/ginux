@@ -153,6 +153,19 @@ long native_fixture_main(void)
         print_result("GINUX_FIXTURE: child-status=", (status >> 8) & 0xff);
         return 0;
     }
+    case 'g': {
+        /* PIDFD_GET_INFO (Linux 6.13) would report the child's host pid and
+         * credentials; the 6.12 ABI personality has no such ioctl. */
+        word info[8] = {1 /* PIDFD_INFO_PID */};
+        int status = 0;
+        long pid = call3(57, 0, 0, 0);
+        if (pid == 0) return 0;
+        long pidfd = call3(434, pid, 0, 0);
+        print_result("GINUX_FIXTURE: pidfd-open-ok=", pidfd >= 0);
+        print_result("GINUX_FIXTURE: pidfd-info=", call3(16, pidfd, 0xc040ff0b, (word)info));
+        print_result("GINUX_FIXTURE: wait-ok=", call4(61, pid, (word)&status, 0, 0) == pid);
+        return 0;
+    }
     default:
         return 81;
     }
