@@ -137,6 +137,19 @@ rocky_ssh '/var/tmp/ginux contract-init systemd-v1' >"$contract_init_log" 2>&1
 grep -Fqx '[userspace.contract]' "$contract_init_log"
 grep -Fqx 'default = "deny"' "$contract_init_log"
 grep -Fqx 'read = ["**"]' "$contract_init_log"
+rocky_scp "$contract_init_log" "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/generated-contract.toml"
+rocky_ssh 'awk '\''
+    /^\[userspace.contract\]$/ {
+        while ((getline line < "/var/tmp/generated-contract.toml") > 0) print line
+        close("/var/tmp/generated-contract.toml")
+        skip = 1
+        next
+    }
+    skip && /^\[storage\]$/ { skip = 0 }
+    !skip { print }
+'\'' /var/tmp/gate10-systemd.toml > /var/tmp/generated-instance.toml'
+rocky_ssh '/var/tmp/ginux contract-check /var/tmp/generated-instance.toml > /var/tmp/generated-contract-check.log 2>&1'
+rocky_ssh "grep -Eq '^Contract valid: instance=rocky catalog=1 digest=[0-9a-f]{64} operations=[0-9]+$' /var/tmp/generated-contract-check.log"
 rocky_ssh '/var/tmp/ginux contract-check /var/tmp/gate10-systemd.toml' >"$contract_check_log" 2>&1
 grep -Eq '^Contract valid: instance=rocky catalog=1 digest=[0-9a-f]{64} operations=[0-9]+$' "$contract_check_log"
 rocky_ssh '/var/tmp/ginux contract-show /var/tmp/gate10-systemd.toml' >"$contract_show_log" 2>&1
@@ -180,5 +193,5 @@ if rocky_ssh "/var/tmp/ginux config-merge /var/tmp/gate975.toml 'hooks.pre_boot=
 fi
 grep -Fqx 'GINUX_CONFIG: rejected reason=invalid-value managed-started=false' "$gate975_hook_log"
 
-rocky_ssh 'rm -f /var/tmp/ginux /var/tmp/gate4-*.toml /var/tmp/gate9-*-init.toml /var/tmp/gate975.toml /var/tmp/gate10-strict.toml /var/tmp/gate10-systemd.toml /var/tmp/gate1025-legacy.toml'
+rocky_ssh 'rm -f /var/tmp/ginux /var/tmp/gate4-*.toml /var/tmp/gate9-*-init.toml /var/tmp/gate975.toml /var/tmp/gate10-strict.toml /var/tmp/gate10-systemd.toml /var/tmp/gate1025-legacy.toml /var/tmp/generated-contract.toml /var/tmp/generated-instance.toml /var/tmp/generated-contract-check.log'
 printf '%s\n' 'test-config: PASS'

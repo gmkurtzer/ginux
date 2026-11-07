@@ -1,80 +1,97 @@
-# Configurable instance contract
+# Self-contained userspace contract
 
-Ginux resolves each instance's versioned contract before managed code starts.
-Runtime enforcement receives only the resulting explicit operation table and
-its deterministic digest; it never evaluates templates or wildcards while a
-instance is running.
-
-## Resolution order
-
-1. Catalog-version default deny.
-2. One versioned base profile.
-3. Ordered versioned templates.
-4. Instance `allow` selectors.
-5. Instance `deny` selectors.
-6. Validated command-line overrides, followed by complete re-resolution.
-
-Later layers win. Within one layer, selectors are applied in listed order.
-Exact selectors match one canonical operation; a selector may contain one `*`
-wildcard and must match at least one operation. Instance denies are deliberately
-final, so an allow cannot undo an instance-level deny. Unknown profiles or templates,
-unversioned names, malformed or empty selectors, unmatched selectors, and a
-supplied digest that differs from the derived digest fail before startup.
-
-Profiles and templates are pinned to catalog version 1. Therefore an old
-selector cannot automatically grant an operation added to a later catalog:
-the configuration must be resolved and accepted against that newer catalog.
-
-## Profiles and examples
-
-- `strict-v1` exposes only the small identity, output, and exit surface needed
-  by a negative-test workload.
-- `minimal-v1` is the deny-oriented development base.
-- `gate5-balanced-v1` preserves the accepted balanced native-shell surface.
-- `gate9-systemd-v1` is the tested Rocky systemd baseline.
-- `network-client-v1`, `read-only-time-v1`, and
-  `virtual-kernel-views-v1` are additive templates.
+Every Ginux instance can carry its complete kernel/userspace contract in the
+same TOML file as its image, resources, devices, and networking. Runtime
+enforcement receives only the compiled operation table and deterministic
+digest; it never interprets globs while managed code is running.
 
 ```toml
-[contract]
-profile = "minimal-v1"
-templates = ["read-only-time-v1"]
-allow = ["network.inet.tcp.connect"]
-deny = ["syscall.clock_settime"]
+[userspace.contract]
+version = 1
+catalog = 1
+default = "deny"
+read = ["fs.**", "proc.**", "sys.**", "time.**"]
+write = ["fs.**", "dev.console.write"]
+execute = ["syscall.execve"]
+connect = ["network.**"]
+listen = []
+process = ["signal.**", "credential.**"]
+system = ["memory.**", "cgroup.**"]
+deny = ["dev.mmio.direct", "dev.dma.direct", "network.packet.raw"]
+exact_allow = []
+exact_deny = []
 ```
 
-`ginux contract-plan CONFIG` prints the catalog version, digest, and every
-explicit rule with its final action and provenance. The normalized instance
-configuration stores the derived digest; operators do not set it through a
-command-line override.
+`default` is deliberately limited to `deny`. The access groups are grants;
+`deny` always wins. `exact_allow` and `exact_deny` are an advanced escape hatch
+for one canonical catalog operation and do not accept globs. No grant can
+promote an operation marked denied, planned, or out of scope by the catalog.
 
-## Resource constraints
+## Selectors and resources
 
-Canonical operation selectors choose authority families. Typed instance fields
-constrain resources within those families:
+Selectors are expanded against the pinned catalog during configuration
+validation. `*` matches exactly one dot-separated component and `**` matches
+recursively. A wildcard must occupy its complete component, and every rule
+must match at least one operation. `fs` aliases `filesystem`; `dev` aliases
+`device`. Other roots use the catalog names directly:
 
-- network rules use validated direction, protocol, CIDR/address, and bounded
-  port ranges;
-- port forwarding uses explicit protocol and internal/external ports;
-- volume assignments use component-aware absolute instance paths and validated
-  host sources;
-- device assignments name registry-owned virtual devices;
-- syscall and ioctl implementations validate their operation-specific
-  arguments before any host effect.
+- `fs`, `proc`, `sys`, `cgroup`, and `dev`;
+- `network`, `signal`, `credential`, `time`, and `memory`; and
+- `syscall` and `ioctl` for lower-level authority that lacks a higher-level
+  resource representation.
 
-These typed fields are intentionally not arbitrary contract strings. Invalid
-CIDRs, ranges, paths, duplicate assignments, or conflicting forwards fail
-normalization.
+Each catalog operation belongs to one human access group. This makes broad
+rules such as `read = ["proc.**"]` understandable while retaining an explicit,
+reviewable operation table beneath them. Provenance records the access group
+and zero-based source-rule index that produced every decision.
 
-## Audit bounds
+## Resolution and migration
 
-`audit.mode = "stderr"` emits structured native decision records containing
-the instance, contract digest, canonical operation, provenance, action, and
-result. A instance emits at most 8,192 detailed native audit records. Further
-records are dropped without buffering; dropped counts are reported at powers
-of two, bounding summary growth to at most 64 lines over a `u64` lifetime.
-`audit.mode = "disabled"` suppresses these records. Audit output never grants
-authority and does not include arbitrary managed-memory contents.
+Resolution is deterministic:
 
-The generated operation inventory is
+1. deny every catalog operation;
+2. apply `read`, `write`, `execute`, `connect`, `listen`, `process`, and
+   `system` grants;
+3. apply `exact_allow`;
+4. apply `deny`; and
+5. apply `exact_deny`.
+
+The derived digest includes every final action and its provenance. Catalog
+version changes require explicit revalidation, so a saved recipe cannot
+silently acquire a newly cataloged operation.
+
+Gate 10 `[contract]` profiles and templates remain accepted for migration and
+regression comparison, but they cannot be mixed with `[userspace.contract]`.
+New saved examples use the self-contained form. `ginux contract init
+systemd-v1` and `ginux contract init strict-v1` print complete recipe sections;
+the generated text has no runtime preset dependency.
+
+## Operator workflow
+
+```sh
+ginux contract init systemd-v1
+ginux contract check /etc/ginux/examples/rocky-systemd.toml
+ginux contract show /etc/ginux/examples/rocky-systemd.toml
+ginux contract inspect /etc/ginux/examples/rocky-systemd.toml
+ginux contract explain /etc/ginux/examples/rocky-systemd.toml filesystem.path.write
+ginux contract diff strict.toml rocky-systemd.toml
+```
+
+`check` validates and compiles without launching an instance. `show` prints the
+saved recipe and derived digest. `inspect` summarizes final decisions.
+`explain` connects one operation to its winning human rule, constraint, and
+limitation. `diff` reports authority changes between two complete instance
+files.
+
+## Typed resource constraints and audit
+
+Contract grants never bypass the typed instance fields that constrain network
+addresses and ports, volume targets, assigned devices, virtual credentials,
+or operation-specific syscall and ioctl arguments. Those checks still run
+before any host effect.
+
+Runtime audit records contain the instance, contract digest, canonical
+operation, winning policy source, source-rule index, action, and result. Audit
+detail remains bounded to 8,192 records with logarithmic dropped-event
+reporting. The generated catalog inventory is
 [`abi-contract-coverage.md`](abi-contract-coverage.md).

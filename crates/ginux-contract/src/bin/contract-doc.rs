@@ -63,19 +63,13 @@ fn render() -> String {
     writeln!(output, "\n## Versioned contract inputs\n").unwrap();
     writeln!(
         output,
-        "- Base profiles: `strict-v1`, `minimal-v1`, `gate5-balanced-v1`, `gate9-systemd-v1`"
+        "- Primary input: one self-contained `[userspace.contract]` recipe in the instance TOML"
     )
     .unwrap();
-    writeln!(
-        output,
-        "- Additive templates: `network-client-v1`, `read-only-time-v1`, `virtual-kernel-views-v1`"
-    )
-    .unwrap();
-    writeln!(
-        output,
-        "- Overrides: bounded exact or single-wildcard canonical operation selectors"
-    )
-    .unwrap();
+    writeln!(output, "- Human access groups: `read`, `write`, `execute`, `connect`, `listen`, `process`, and `system`").unwrap();
+    writeln!(output, "- Selectors: component-bounded `*` and recursive `**` over canonical resources; `fs` and `dev` are readable aliases").unwrap();
+    writeln!(output, "- Precedence: default deny, access grants, advanced exact grants, resource denies, then advanced exact denies").unwrap();
+    writeln!(output, "- Migration-only inputs: versioned Gate 10 profiles, templates, and canonical operation selectors remain accepted but cannot be mixed with a recipe").unwrap();
     writeln!(output, "- Runtime representation: an explicit operation table tied to catalog version `{CATALOG_VERSION}` and a deterministic digest\n").unwrap();
     writeln!(output, "## Operation catalog\n").unwrap();
     writeln!(output, "| Operation | Kind | Linux ABI | Status | Default action | Constraint | Evidence | Limitation |\n|---|---|---:|---|---|---|---|---|").unwrap();

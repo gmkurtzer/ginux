@@ -15,7 +15,7 @@ memory_mib = 256
 profile = "balanced"
 backend = "ptrace-native"
 
-+[userspace.contract]
+[userspace.contract]
 version = 1
 catalog = 1
 default = "deny"
@@ -26,9 +26,9 @@ connect = ["**"]
 listen = ["**"]
 process = ["**"]
 system = ["**"]
-deny = ["dev.mmio.direct", "dev.dma.direct", "network.packet.raw"]
+deny = ["syscall.socket", "dev.mmio.direct", "dev.dma.direct", "network.packet.raw"]
 exact_allow = []
-exact_deny = ["syscall.socket"]
+exact_deny = []
 
 [storage]
 assignments = []

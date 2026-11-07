@@ -20,7 +20,7 @@ before startup.
 | `instance`, `identity` | Instance ID, hostname, image, init, arguments, environment, and work directory |
 | `resources` | Virtual CPU and memory assignment |
 | `execution` | Explicit runtime backend and security/performance profile |
-| `contract` | Base contract, additional templates, allow/deny selectors, and expanded-contract digest |
+| `userspace.contract` | Self-contained human access rules, explicit denies, catalog version, and derived digest |
 | `storage`, `volumes`, `devices` | Instance storage, reviewed host mappings, and assigned device frontends |
 | `network` | Backend, host interface/source, ingress/egress policy, and translated ports |
 | `access` | Initial virtual UID and GID |
@@ -28,8 +28,8 @@ before startup.
 | `lifecycle`, `audit`, `failure` | Stop bound, audit mode, and runtime failure behavior |
 
 [`config/instance-gate9.75.toml`](../config/instance-gate9.75.toml) is the complete
-schema example. Gate 10 owns expansion and enforcement of the contract
-selectors; Gate 9.75 records the selected inputs and immutable digest.
+schema example. Gate 10.5 owns the self-contained contract recipe and its
+explanation workflow; Gate 9.75 records the remaining instance inputs.
 
 ## Effective configuration and overrides
 

@@ -15,7 +15,7 @@ memory_mib = 1024
 profile = "balanced"
 backend = "ptrace-native"
 
-+[userspace.contract]
+[userspace.contract]
 version = 1
 catalog = 1
 default = "deny"

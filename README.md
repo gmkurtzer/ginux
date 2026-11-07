@@ -190,6 +190,20 @@ mediated instance processes; Ginux does not support arbitrary host-context hooks
 See [Gate 9.75 instance specification](docs/gate-9.75-instance-specification.md)
 for the schema, precedence rules, examples, and verification targets.
 
+The same instance file contains a self-contained `[userspace.contract]`
+recipe. Human-facing `read`, `write`, `execute`, `connect`, `listen`, `process`,
+and `system` rules use bounded `*` and recursive `**` resource selectors;
+explicit denies always win. Inspect the compiled authority before launch:
+
+```sh
+ginux contract check /etc/ginux/examples/rocky-systemd.toml
+ginux contract show /etc/ginux/examples/rocky-systemd.toml
+ginux contract explain /etc/ginux/examples/rocky-systemd.toml filesystem.path.write
+```
+
+See [Self-contained userspace contract](docs/configurable-contract.md) for the
+syntax, precedence, migration behavior, and complete CLI workflow.
+
 The attached terminal becomes the Ginux instance console. Log in as `root` with
 password `ginux`, explore normally, press `Ctrl-]` to detach while leaving the
 instance running, and run `kill -RTMIN+4 1` as instance root to
