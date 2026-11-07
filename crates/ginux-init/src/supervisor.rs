@@ -20,6 +20,8 @@ pub const SYS_CHDIR: usize = 80;
 pub const SYS_SETGID: usize = 106;
 pub const SYS_SETUID: usize = 105;
 pub const SYS_SETGROUPS: usize = 116;
+pub const SYS_GETUID: usize = 102;
+pub const SYS_GETGID: usize = 104;
 pub const SYS_PRCTL: usize = 157;
 pub const SYS_CHROOT: usize = 161;
 pub const SYS_PAUSE: usize = 34;
@@ -74,8 +76,34 @@ pub const SIGTERM: usize = 15;
 pub const SIGKILL: usize = 9;
 pub const SIGCHLD: usize = 17;
 pub const PR_SET_NO_NEW_PRIVS: usize = 38;
-pub const INSTANCE_UID: usize = 1000;
-pub const INSTANCE_GID: usize = 1000;
+pub const HOST_NOBODY_UID: usize = 65_534;
+pub const HOST_NOBODY_GID: usize = 65_534;
+
+pub struct ManagedHostIdentity {
+    pub uid: usize,
+    pub gid: usize,
+    pub drop_root: bool,
+}
+
+/// Select the real host identity for managed code. Virtual credentials are
+/// maintained separately by Ginux and never derive authority from this value.
+pub fn managed_host_identity() -> ManagedHostIdentity {
+    let uid = unsafe { syscall0(SYS_GETUID) } as usize;
+    let gid = unsafe { syscall0(SYS_GETGID) } as usize;
+    if uid == 0 {
+        ManagedHostIdentity {
+            uid: HOST_NOBODY_UID,
+            gid: HOST_NOBODY_GID,
+            drop_root: true,
+        }
+    } else {
+        ManagedHostIdentity {
+            uid,
+            gid,
+            drop_root: false,
+        }
+    }
+}
 
 #[repr(C)]
 pub struct UserRegs {

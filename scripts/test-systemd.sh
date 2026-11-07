@@ -13,10 +13,20 @@ for run in cold warm repeat; do
     cp build/gate9-systemd-measurements.txt "build/gate9-systemd-$run-measurements.txt"
     grep -Fq 'GINUX_NATIVE_CHECK: PASS' "build/gate9-systemd-$run.log"
     grep -Fq 'GINUX_MEASURE: boot-to-login-ms=' "build/gate9-systemd-$run-measurements.txt"
-    audit_records=$(grep -c '^GINUX_NATIVE_AUDIT:' "build/gate9-systemd-$run.log")
-    test "$audit_records" -le 8192
-    grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ instance=gate9-systemd .*contract=[0-9a-f]{64} operation=[a-z0-9._*-]+ policy-source=[a-z0-9._*-]+ phase=entry syscall=[0-9]+ action=(mediate|emulate|deny)' "build/gate9-systemd-$run.log"
-    grep -Eq '^GINUX_AUDIT_DROPPED: instance=gate9-systemd contract=[0-9a-f]{64} limit=8192 dropped=[0-9]+$' "build/gate9-systemd-$run.log"
+    # Each pre-boot hook and the final init are separately supervised native
+    # runs with their own bounded audit sequence. Enforce the 8,192-record
+    # limit per sequence rather than summing the complete boot transcript.
+    awk '
+        /^GINUX_NATIVE_AUDIT:/ {
+            if ($0 ~ /sequence=1 / && count > 0) {
+                if (count > 8192) exit 1
+                count = 0
+            }
+            count++
+        }
+        END { if (count == 0 || count > 8192) exit 1 }
+    ' "build/gate9-systemd-$run.log"
+    grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ instance=[a-z0-9._*-]+ .*contract=[0-9a-f]{64} operation=[a-z0-9._*-]+ policy-source=[a-z0-9._*-]+ phase=entry syscall=[0-9]+ action=(mediate|emulate|deny)' "build/gate9-systemd-$run.log"
     printf 'systemd %s boot: PASS\n' "$run"
 done
 

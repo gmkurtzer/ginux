@@ -8,7 +8,7 @@ BASELINE := target/$(X86_TARGET)/release/baseline-runner
 RUNTIME_FIXTURE := target/$(X86_TARGET)/release/runtime-fixture
 PROCESS_NATIVE_FIXTURE := target/$(X86_TARGET)/release/process-native-fixture
 
-.PHONY: doctor host-image-fetch host-image-verify host-boot-test image-helper-fetch image-prepare instance-image-fetch instance-image-verify instance-image-prepare systemd-image-fetch systemd-image-verify systemd-image-prepare test-image test-oci-image test-oci-layers test-vfs test-native-vfs image-cache-clean build check-name check-instance-terminology check contract-doc test-contract test-contract-runtime test test-unit test-intercept test-runtime test-config test-instance test-instance-terminology test-process build-process-fixtures test-process-native test-devices test-kernel-views test-systemd test-systemd-live test-systemd-interactive test-gate975-network test-gate975-hooks test-cgroup test-block test-network run-host run-systemd bench bench-baseline bench-block bench-network demo-gate-1 demo-gate-2 demo-gate-3 demo-gate-4 demo-gate-5 demo-gate-6 demo-gate-7 demo-gate-8 demo-gate-9 demo-gate-9.5 demo-gate-9.75 demo-gate-10 demo-gate-10.25 clean
+.PHONY: doctor host-image-fetch host-image-verify host-boot-test image-helper-fetch image-prepare instance-image-fetch instance-image-verify instance-image-prepare systemd-image-fetch systemd-image-verify systemd-image-prepare test-image test-oci-image test-oci-layers test-vfs test-native-vfs image-cache-clean build check-name check-instance-terminology check contract-doc test-contract test-contract-runtime test test-unit test-intercept test-runtime test-config test-instance test-instance-terminology test-process build-process-fixtures test-process-native test-devices test-kernel-views test-systemd test-systemd-live test-systemd-interactive test-gate975-network test-gate975-hooks test-cgroup test-block test-network run-host run-systemd bench bench-baseline bench-block bench-network demo-gate-1 demo-gate-2 demo-gate-3 demo-gate-4 demo-gate-5 demo-gate-6 demo-gate-7 demo-gate-8 demo-gate-9 demo-gate-9.5 demo-gate-9.75 demo-gate-10 demo-gate-10.25 demo-gate-10.5 clean
 
 doctor:
 	@./scripts/doctor.sh
@@ -250,6 +250,13 @@ demo-gate-10.25: doctor check-instance-terminology
 	@$(MAKE) test-config
 	@./scripts/test-systemd-interactive.exp
 	@printf '%s\n' 'GATE10.25: PASS (instance CLI, schema, persistence, lifecycle, and clean-break rejection)'
+
+demo-gate-10.5: doctor
+	@$(MAKE) test-contract
+	@$(MAKE) test-config
+	@$(MAKE) test-contract-runtime
+	@$(MAKE) test-systemd
+	@./scripts/demo-gate-10.5.sh
 
 clean:
 	cargo clean

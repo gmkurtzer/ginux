@@ -29,8 +29,8 @@
 - Runtime isolation unit: instance.
 - Policy unit: versioned contract.
 - The gate map has expanded through human-directed insertions while preserving
-  numeric order; Gates 1 through 10 are accepted and closed. Gate 10.25 is the
-  active checkpoint and Gate 10.5 is approved behind it.
+  numeric order; Gates 1 through 10.25 are accepted and closed. Gate 10.5 is
+  the active checkpoint.
 - Gate 9.75 was added and authorized on 2026-11-04 for comprehensive instance
   configuration, CLI overrides, network selection and policy, port translation,
   volumes, access, identity, resources, devices, and pre-boot hooks.
@@ -81,8 +81,8 @@
   1.871-second reproduction to 309 ms, a single `top` refresh took 913 ms, and
   Bash reported valid child user/system timing. The complete interactive,
   systemd, and aggregate test matrices pass.
-- Gate 10.25 implementation is complete on `hdae/domain-to-instance` and ready
-  for review in https://github.com/gmkurtzer/ginux/pull/235. The active product now uses `instance`
+- Gate 10.25 was accepted and closed after pull request
+  https://github.com/gmkurtzer/ginux/pull/235 merged as `59e2f7aa`. The active product now uses `instance`
   consistently across CLI, schema, Rust APIs, persistence, audit, tests, and
   documentation; there are no compatibility aliases. Static checks reject
   stale terminology, and the legacy CLI noun and TOML table fail closed.
@@ -131,21 +131,43 @@ scope, threat model, and invariants.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 10.25, instance terminology migration, is authorized and
-  active on `hdae/domain-to-instance`. Gate 10.5 is approved but waits for the
-  Gate 10.25 human checkpoint and merge.
-- Last evidence: Gate 10.25 `make demo-gate-10.25`, `make check`, targeted
-  systemd/network/hook tests, a clean aggregate `make test`, `make
-  test-oci-image`, and the final interactive Rocky cache-miss/cache-hit workflow
-  passed after the clean-break rename and CLI output cleanup. The interactive
-  regression also passed terminal-size propagation, `vi` use, and resized
-  detach/reattach behavior. A subsequent isolated run completed `dnf -y
-  install vim`, kept the instance alive, and passed the full interactive
-  lifecycle and restart regression.
-- Open decision: none for Gate 10.25. Gate 10.5 migration details will be
-  finalized after the terminology dependency is accepted.
-- Exact next action: update pull request 235 with the verified CLI and terminal
-  behavior fixes, then stop for human acceptance before beginning Gate 10.5.
+- Active gate: Gate 10.5, intuitive self-contained contract configuration and
+  UX, was expanded by human direction to include recursive filesystem policy,
+  explicit set-ID/device-node controls, recipe-owned bootstrap customization,
+  and least-privileged native host identities. Implementation and fresh
+  verification are complete on
+  `hdae/intuitive-contract-ux`.
+- Last evidence: `make check`, `make test-contract`, Rocky QEMU
+  `make test-config`, `make test-contract-runtime`, `make test-systemd`, the
+  complete aggregate `make test`, and the Gate 10.5 human demonstration pass.
+  The compiler covers 182 operations and reports the winning human source rule
+  in explanation and runtime audit output. After review, the same lint, unit,
+  QEMU configuration, aggregate, and full demonstration evidence passed with
+  the corrected `ginux instance` interface; the removed top-level contract
+  command is a tested failure.
+- The final CLI correction makes required configuration files positional:
+  `instance create NAME FILE`, `validate FILE`, `inspect FILE`, and
+  `explain FILE OPERATION`. Fresh `make check`, `make test-contract`, and
+  isolated Rocky QEMU `make test-config` pass. The interactive Rocky workflow
+  also rejected legacy create syntax and completed positional creation, cache
+  reuse, and systemd boot before its later proc identity check timed out.
+- The expanded Gate 10.5 implementation now passes strict formatting/build,
+  all 21 instance tests, `make check`, `make test-contract`,
+  `make test-contract-runtime`, `make test-process`, `make test-systemd`,
+  aggregate `make test`, and `make demo-gate-10.5`. A clean isolated Rocky
+  interactive run additionally proves recipe-owned bootstrap; recursive,
+  symlink-safe, and link-creation-safe path denial; set-ID and device-node
+  denial with FIFO allowance; root-origin host UID/GID 65534 and
+  `NoNewPrivs: 1`; and the complete attach, shutdown, restart, and cache flow.
+- Pull-request CI found that the Gate 1 setup-failure fixture's private
+  root-owned mode-0700 `/var/tmp` bind prevented the newly reduced host identity
+  from reaching its payload. The fixture now gives that private mount to host
+  UID/GID 65534; the production pre-exec identity reduction is unchanged.
+  Pull-request `launch-integration` now passes in 33 seconds, and
+  `static-and-unit` passes in 41 seconds.
+- Open decision: none for the approved Gate 10.5 expansion.
+- Exact next action: stop for human review and acceptance of pull request 237
+  before Gate 11.
 
 ## Evidence
 
@@ -442,24 +464,27 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Deliver the completed Gate 10.25 pull request from `hdae/domain-to-instance`
-and stop for human acceptance before beginning Gate 10.5.
+Deliver Gate 10.5 from `hdae/intuitive-contract-ux` in its dedicated pull
+request with complete evidence, and stop for human acceptance before Gate 11.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 10.25, instance terminology migration, is authorized on
-  `hdae/domain-to-instance`; Gate 10.5 is approved but dependency-blocked.
-- Last evidence: Gate 10.25 passed strict lint, 9 contract and 18 instance
-  tests, a clean aggregate `make test`, the complete systemd matrix, Gate 9.75
-  networking and hook regressions, and its human-visible Rocky QEMU demo.
+- Active gate: Gate 10.5, intuitive self-contained contract configuration and
+  UX, is implemented and freshly verified on `hdae/intuitive-contract-ux` and
+  awaiting review.
+- Last evidence: strict formatting/build, 12 contract and 21 instance tests,
+  runtime deny provenance, process identity checks, the complete systemd and
+  aggregate matrices, the Gate 10.5 demonstration, and a clean interactive
+  Rocky run all pass. The interactive run includes the expanded filesystem,
+  set-ID, device-node, bootstrap, host identity, and `NoNewPrivs` criteria.
 - Approved network direction: Gate 9 defaults to full host-shared inbound and
   outbound networking with normal host routing and bind conflicts, under Ginux
   mediation and audit. Gate 9.75 adds comprehensive instance configuration,
   network selection, port controls, and translation.
 - Gate 9.75 closure: pull request 229 merged as `8a475e8b`; human accepted and
   closed the gate on 2026-11-06.
-- Required human decision: none until the Gate 10.25 demonstration and pull
-  request checkpoint.
+- Required human decision: review and acceptance of pull request 237 before
+  Gate 11.
