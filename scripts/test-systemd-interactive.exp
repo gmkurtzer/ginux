@@ -125,7 +125,7 @@ expect {
     eof { puts stderr "Rocky host shell exited during duplicate check"; exit 83 }
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
-send -- "ginux instance start rocky --attach\r"
+send -- "stty rows 37 cols 101; ginux instance start rocky --attach\r"
 
 expect {
     -re {rocky: started \(supervisor pid [0-9]+\); attaching console} {}
@@ -162,6 +162,29 @@ expect {
     timeout { puts stderr "interactive command did not run"; exit 90 }
     eof { puts stderr "instance exited during interactive command"; exit 91 }
 }
+expect -re {\[root@ginux [^]]+\]# }
+send -- "test \"\$(stty size)\" = '37 101' && printf 'GINUX_TTY_%s\\n' 'SIZE: PASS'\r"
+expect {
+    -re {GINUX_TTY_SIZE: PASS} {}
+    timeout { puts stderr "attached instance did not inherit terminal size"; exit 175 }
+    eof { puts stderr "attached instance exited during terminal-size check"; exit 176 }
+}
+expect -re {\[root@ginux [^]]+\]# }
+send -- "vi /tmp/ginux-terminal-size-test\r"
+after 1000
+send -- "\033:q!\r"
+expect {
+    -re {\[root@ginux [^]]+\]# } {}
+    timeout { puts stderr "vi did not return to the attached instance shell"; exit 177 }
+    eof { puts stderr "attached instance exited while closing vi"; exit 178 }
+}
+send -- "test \"\$(stty size)\" = '37 101' && printf 'GINUX_TTY_%s\\n' 'FULLSCREEN: PASS'\r"
+expect {
+    -re {GINUX_TTY_FULLSCREEN: PASS} {}
+    timeout { puts stderr "full-screen terminal use changed the instance geometry"; exit 179 }
+    eof { puts stderr "attached instance exited after full-screen terminal use"; exit 180 }
+}
+expect -re {\[root@ginux [^]]+\]# }
 send -- "/bin/true && printf 'GINUX_JOB_%s\\n' 'SIMPLE: PASS'\r"
 expect {
     -re {child setpgid .*Operation not permitted} { puts stderr "simple command emitted a setpgid warning"; exit 110 }
@@ -240,9 +263,9 @@ expect {
     eof { puts stderr "host session exited during detached status check"; exit 126 }
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
-send -- "ginux instance attach rocky\r"
+send -- "stty rows 43 cols 109; ginux instance attach rocky\r"
 after 1000
-send -- "printf 'GINUX_ATTACH_%s\\n' 'REATTACH: PASS'\r"
+send -- "test \"\$(stty size)\" = '43 109' && printf 'GINUX_ATTACH_%s\\n' 'REATTACH: PASS'\r"
 expect {
     -re {GINUX_ATTACH_REATTACH: PASS} {}
     timeout { puts stderr "reattached console did not accept input"; exit 127 }

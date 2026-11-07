@@ -524,8 +524,28 @@ attach_instance() {
     tail -n 80 -F "$directory/console.log" &
     tail_pid=$!
     reader_pid=
+    sync_console_size() {
+        size=$(stty size 2>/dev/null) || return 0
+        rows=
+        columns=
+        extra=
+        IFS=' ' read -r rows columns extra <<EOF
+$size
+EOF
+        case "$rows:$columns:$extra" in
+            *[!0-9:]*|0:*|*:0:*|*:*:?*) return 0 ;;
+        esac
+        attached_runtime=$(runtime_identity "$name" || true)
+        test -n "$attached_runtime" || return 0
+        runtime_tty=$(readlink "/proc/$attached_runtime/fd/0" 2>/dev/null || true)
+        case "$runtime_tty" in
+            /dev/pts/[0-9]*)
+                stty -F "$runtime_tty" rows "$rows" cols "$columns" 2>/dev/null || true
+                ;;
+        esac
+    }
     cleanup_attach() {
-        trap - 0 HUP INT TERM
+        trap - 0 HUP INT TERM WINCH
         kill "$tail_pid" ${reader_pid:+"$reader_pid"} 2>/dev/null || true
         wait "$tail_pid" ${reader_pid:+"$reader_pid"} 2>/dev/null || true
         exec 7<&-
@@ -533,6 +553,8 @@ attach_instance() {
         rm -f "$detach_marker"
     }
     trap cleanup_attach 0 HUP INT TERM
+    trap 'sync_console_size' WINCH
+    sync_console_size
     stty raw -echo
     (
         exec 8>"$directory/console.in"
