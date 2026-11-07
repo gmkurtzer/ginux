@@ -60,11 +60,18 @@ criterion.
 - [x] Human accepted Gate 10.5 and authorized Gate 11 execution.
 - [x] Created dedicated branch `hdae/performance-characterization` from merged
   `main` for one Gate 11 pull request.
+- [x] Pinned Rocky/EPEL `sysbench-1.0.20-19.el10_2.x86_64`, staged the exact
+  executable and resolved Rocky libraries into the instance, and verified
+  matching SHA-256
+  `7cf6b71521436bd32a8ab197851035ff1632bee383fec5a35468d61969e7c18d`.
+- [x] Proved the controller runtime executes an arbitrary configured one-shot
+  workload rather than the legacy native-shell fixture; a one-vCPU CPU probe
+  completed under Ginux. This is setup evidence, not baseline evidence.
 
 ## Remaining work
 
 - [ ] Finalize matched benchmark protocols and budgets from prior evidence.
-- [ ] Package or install one pinned `sysbench` build for use by both the native
+- [x] Package or install one pinned `sysbench` build for use by both the native
   control and Ginux instance, and verify its identity before every comparison.
 - [ ] Implement comparison and report automation.
 - [ ] Collect statistically useful baseline results.
