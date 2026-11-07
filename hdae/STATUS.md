@@ -160,8 +160,8 @@ scope, threat model, and invariants.
   denial with FIFO allowance; root-origin host UID/GID 65534 and
   `NoNewPrivs: 1`; and the complete attach, shutdown, restart, and cache flow.
 - Open decision: none for the approved Gate 10.5 expansion.
-- Exact next action: update pull request 237 with commit `39731fc2` and the
-  expanded evidence, then stop for human review before Gate 11.
+- Exact next action: stop for human review and acceptance of updated pull
+  request 237 before Gate 11.
 
 ## Evidence
 
