@@ -139,10 +139,11 @@ scope, threat model, and invariants.
   complete aggregate `make test`, and the Gate 10.5 human demonstration pass.
   The compiler covers 182 operations and reports the winning human source rule
   in explanation and runtime audit output.
-- Open decision: human acceptance or requested revisions for the Gate 10.5
-  configuration and CLI UX.
-- Exact next action: open the dedicated Gate 10.5 pull request and stop for
-  human review before Gate 11.
+- Open decision: human acceptance after the requested removal of the top-level
+  `ginux contract` CLI namespace has been implemented and reverified.
+- Exact next action: replace the Gate 10.5 top-level contract commands with
+  instance-centered validation and inspection, update pull request 237, and
+  stop for human review before Gate 11.
 
 ## Evidence
 
@@ -459,5 +460,5 @@ request with complete evidence, and stop for human acceptance before Gate 11.
   network selection, port controls, and translation.
 - Gate 9.75 closure: pull request 229 merged as `8a475e8b`; human accepted and
   closed the gate on 2026-11-06.
-- Required human decision: review and acceptance after the Gate 10.5
-  demonstration and pull-request checkpoint.
+- Required human decision: review and acceptance after the corrected Gate 10.5
+  instance-centered CLI demonstration and pull-request checkpoint.

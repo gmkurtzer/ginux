@@ -226,15 +226,13 @@ extern "C" fn rust_main(initial_stack: *const usize) -> ! {
         Some(Command::ConfigMerge(config_path, count, overrides)) => {
             config_merge_main(config_path, count, overrides)
         }
-        Some(Command::ContractPlan(config_path)) => contract_plan_main(config_path),
-        Some(Command::ContractInit(preset)) => contract_init_main(preset),
-        Some(Command::ContractCheck(config_path)) => contract_check_main(config_path),
-        Some(Command::ContractShow(config_path)) => contract_show_main(config_path),
-        Some(Command::ContractExplain(config_path, operation)) => {
-            contract_explain_main(config_path, operation)
+        Some(Command::InstancePlan(config_path)) => instance_plan_main(config_path),
+        Some(Command::InstanceValidate(config_path)) => instance_validate_main(config_path),
+        Some(Command::InstanceExplain(config_path, operation)) => {
+            instance_explain_main(config_path, operation)
         }
-        Some(Command::ContractDiff(left, right)) => contract_diff_main(left, right),
-        Some(Command::ContractInspect(config_path)) => contract_inspect_main(config_path),
+        Some(Command::InstanceDiff(left, right)) => instance_diff_main(left, right),
+        Some(Command::InstanceInspect(config_path)) => instance_inspect_main(config_path),
         Some(Command::HookPlan(config_path)) => hook_plan_main(config_path),
         Some(Command::Lifecycle(config_path)) => lifecycle_main(config_path),
         Some(Command::Vfs(config_path, rootfs_path, index_path)) => {
@@ -7594,7 +7592,7 @@ fn config_merge_main(config_path: *const u8, count: usize, overrides: *const usi
     exit_process(0)
 }
 
-fn contract_plan_main(config_path: *const u8) -> ! {
+fn instance_plan_main(config_path: *const u8) -> ! {
     let config = load_config(config_path);
     let contract = config
         .effective_contract()
@@ -7631,42 +7629,7 @@ fn contract_plan_main(config_path: *const u8) -> ! {
     exit_process(0)
 }
 
-fn contract_init_main(preset: *const u8) -> ! {
-    let preset = c_string_bytes(preset, 64).unwrap_or_else(|error| config_rejected(error));
-    line(b"[userspace.contract]");
-    line(b"version = 1");
-    line(b"catalog = 1");
-    line(b"default = \"deny\"");
-    if preset == b"systemd-v1" {
-        line(b"read = [\"**\"]");
-        line(b"write = [\"**\"]");
-        line(b"execute = [\"**\"]");
-        line(b"connect = [\"**\"]");
-        line(b"listen = [\"**\"]");
-        line(b"process = [\"**\"]");
-        line(b"system = [\"**\"]");
-        line(b"deny = [\"dev.mmio.direct\", \"dev.dma.direct\", \"network.packet.raw\"]");
-        line(b"exact_allow = []");
-        line(b"exact_deny = []");
-    } else if preset == b"strict-v1" {
-        line(b"read = []");
-        line(b"write = []");
-        line(b"execute = []");
-        line(b"connect = []");
-        line(b"listen = []");
-        line(b"process = []");
-        line(b"system = []");
-        line(b"deny = []");
-        line(b"exact_allow = [\"syscall.getpid\", \"syscall.getppid\", \"syscall.gettid\", \"syscall.write\", \"syscall.exit\", \"syscall.exit_group\"]");
-        line(b"exact_deny = []");
-    } else {
-        line(b"GINUX_CONTRACT: unknown preset; expected strict-v1 or systemd-v1");
-        exit_process(2)
-    }
-    exit_process(0)
-}
-
-fn contract_check_main(config_path: *const u8) -> ! {
+fn instance_validate_main(config_path: *const u8) -> ! {
     let config = load_config(config_path);
     let contract = config
         .effective_contract()
@@ -7681,50 +7644,7 @@ fn contract_check_main(config_path: *const u8) -> ! {
     exit_process(0)
 }
 
-fn write_contract_list<const ITEMS: usize, const BYTES: usize>(
-    name: &[u8],
-    values: &ginux_instance::TextList<ITEMS, BYTES>,
-) {
-    write_all(name);
-    write_all(b" = [");
-    for (index, value) in values.as_slice().iter().enumerate() {
-        if index != 0 {
-            write_all(b", ");
-        }
-        write_all(b"\"");
-        write_all(value.as_bytes());
-        write_all(b"\"");
-    }
-    write_all(b"]\n");
-}
-
-fn contract_show_main(config_path: *const u8) -> ! {
-    let config = load_config(config_path);
-    if config.contract_recipe_version == 0 {
-        line(b"Legacy [contract] configuration; use `ginux contract init` to generate a self-contained recipe.");
-        contract_plan_main(config_path)
-    }
-    line(b"[userspace.contract]");
-    line(b"version = 1");
-    line(b"catalog = 1");
-    line(b"default = \"deny\"");
-    write_contract_list(b"read", &config.contract_read);
-    write_contract_list(b"write", &config.contract_write);
-    write_contract_list(b"execute", &config.contract_execute);
-    write_contract_list(b"connect", &config.contract_connect);
-    write_contract_list(b"listen", &config.contract_listen);
-    write_contract_list(b"process", &config.contract_process);
-    write_contract_list(b"system", &config.contract_system);
-    write_contract_list(b"deny", &config.contract_recipe_deny);
-    write_contract_list(b"exact_allow", &config.contract_exact_allow);
-    write_contract_list(b"exact_deny", &config.contract_exact_deny);
-    write_all(b"digest = \"");
-    write_all(config.contract_digest.as_bytes());
-    line(b"\"");
-    exit_process(0)
-}
-
-fn contract_explain_main(config_path: *const u8, operation: *const u8) -> ! {
+fn instance_explain_main(config_path: *const u8, operation: *const u8) -> ! {
     let config = load_config(config_path);
     let operation = c_string_bytes(operation, 128).unwrap_or_else(|error| config_rejected(error));
     let contract = config
@@ -7757,7 +7677,7 @@ fn contract_explain_main(config_path: *const u8, operation: *const u8) -> ! {
     exit_process(0)
 }
 
-fn contract_diff_main(left_path: *const u8, right_path: *const u8) -> ! {
+fn instance_diff_main(left_path: *const u8, right_path: *const u8) -> ! {
     let left = load_config(left_path)
         .effective_contract()
         .unwrap_or_else(|error| config_rejected(error));
@@ -7782,7 +7702,7 @@ fn contract_diff_main(left_path: *const u8, right_path: *const u8) -> ! {
     exit_process(0)
 }
 
-fn contract_inspect_main(config_path: *const u8) -> ! {
+fn instance_inspect_main(config_path: *const u8) -> ! {
     let config = load_config(config_path);
     let contract = config
         .effective_contract()

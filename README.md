@@ -193,12 +193,14 @@ for the schema, precedence rules, examples, and verification targets.
 The same instance file contains a self-contained `[userspace.contract]`
 recipe. Human-facing `read`, `write`, `execute`, `connect`, `listen`, `process`,
 and `system` rules use bounded `*` and recursive `**` resource selectors;
-explicit denies always win. Inspect the compiled authority before launch:
+explicit denies always win. The contract is part of the instance rather than a
+separate operator object. Validate and inspect the complete instance recipe
+before launch:
 
 ```sh
-ginux contract check /etc/ginux/examples/rocky-systemd.toml
-ginux contract show /etc/ginux/examples/rocky-systemd.toml
-ginux contract explain /etc/ginux/examples/rocky-systemd.toml filesystem.path.write
+ginux instance validate --config /etc/ginux/examples/rocky-systemd.toml
+ginux instance inspect --config /etc/ginux/examples/rocky-systemd.toml
+ginux instance explain --config /etc/ginux/examples/rocky-systemd.toml filesystem.path.write
 ```
 
 See [Self-contained userspace contract](docs/configurable-contract.md) for the

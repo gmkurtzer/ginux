@@ -60,28 +60,26 @@ The derived digest includes every final action and its provenance. Catalog
 version changes require explicit revalidation, so a saved recipe cannot
 silently acquire a newly cataloged operation.
 
-Gate 10 `[contract]` profiles and templates remain accepted for migration and
-regression comparison, but they cannot be mixed with `[userspace.contract]`.
-New saved examples use the self-contained form. `ginux contract init
-systemd-v1` and `ginux contract init strict-v1` print complete recipe sections;
-the generated text has no runtime preset dependency.
+Gate 10 `[contract]` profiles and templates remain accepted internally for
+migration and regression comparison, but they cannot be mixed with
+`[userspace.contract]`. New saved examples use the self-contained form. Copy a
+complete example instance recipe as the starting point; Ginux does not create
+or manage a separate contract object or generate detached contract fragments.
 
 ## Operator workflow
 
 ```sh
-ginux contract init systemd-v1
-ginux contract check /etc/ginux/examples/rocky-systemd.toml
-ginux contract show /etc/ginux/examples/rocky-systemd.toml
-ginux contract inspect /etc/ginux/examples/rocky-systemd.toml
-ginux contract explain /etc/ginux/examples/rocky-systemd.toml filesystem.path.write
-ginux contract diff strict.toml rocky-systemd.toml
+ginux instance validate --config /etc/ginux/examples/rocky-systemd.toml
+ginux instance inspect --config /etc/ginux/examples/rocky-systemd.toml
+ginux instance explain --config /etc/ginux/examples/rocky-systemd.toml filesystem.path.write
+ginux instance diff strict.toml rocky-systemd.toml
 ```
 
-`check` validates and compiles without launching an instance. `show` prints the
-saved recipe and derived digest. `inspect` summarizes final decisions.
-`explain` connects one operation to its winning human rule, constraint, and
-limitation. `diff` reports authority changes between two complete instance
-files.
+`validate` parses and compiles the complete recipe without launching an
+instance. `inspect` summarizes its final decisions and digest. `explain`
+connects one operation to its winning human rule, constraint, and limitation.
+`diff` reports authority changes between two complete instance files. The old
+top-level `ginux contract` command is intentionally unsupported.
 
 ## Typed resource constraints and audit
 
