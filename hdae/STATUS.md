@@ -142,8 +142,15 @@ scope, threat model, and invariants.
   QEMU configuration, aggregate, and full demonstration evidence passed with
   the corrected `ginux instance` interface; the removed top-level contract
   command is a tested failure.
+- The final CLI correction makes required configuration files positional:
+  `instance create NAME FILE`, `validate FILE`, `inspect FILE`, and
+  `explain FILE OPERATION`. Fresh `make check`, `make test-contract`, and
+  isolated Rocky QEMU `make test-config` pass. The interactive Rocky workflow
+  also rejected legacy create syntax and completed positional creation, cache
+  reuse, and systemd boot before its later proc identity check timed out.
 - Open decision: human acceptance after the requested removal of the top-level
-  `ginux contract` CLI namespace has been implemented and reverified.
+  `ginux contract` CLI namespace and positional configuration correction have
+  been implemented and reverified.
 - Exact next action: update pull request 237 with the corrected
   instance-centered interface and stop for human review before Gate 11.
 
