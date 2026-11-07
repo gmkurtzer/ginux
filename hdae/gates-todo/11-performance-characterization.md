@@ -73,7 +73,10 @@ criterion.
   rows inside one four-vCPU Rocky QEMU session.
 - [x] Collected the unoptimized baseline checkpoint. CPU and memory passed all
   rows; every thread and mutex row failed the default 4% budget. Optimization
-  remains paused for human review of this checkpoint.
+  was paused for human review of this checkpoint.
+- [x] Human approved the unoptimized baseline on 2026-11-07 and directed
+  profiling and optimization toward the unchanged native-parity goal and 4%
+  per-row mandatory tolerance.
 
 ## Remaining work
 
@@ -151,7 +154,8 @@ criterion.
 - All five thread-yield rows failed between 0.005x and 0.011x native
   performance. All five mutex rows failed between 0.703x and 0.842x.
 - This is the required pre-optimization checkpoint. No optimization has been
-  applied to these results.
+  applied to these results. The human accepted this checkpoint on 2026-11-07
+  as the profiling baseline without approving any tolerance exception.
 
 ## Decisions and limitations
 

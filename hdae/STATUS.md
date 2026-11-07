@@ -64,7 +64,8 @@
   and automatic failure for regressions beyond the approved native or
   accepted-Ginux baseline. Its unoptimized 1/2/4-vCPU checkpoint is complete:
   all CPU and memory rows pass, while all thread-yield and mutex rows fail.
-  Optimization is paused at the required human baseline review.
+  The human approved that baseline on 2026-11-07; profiling and optimization
+  are now active with the default 4% budget unchanged.
 - Gates 9.75 and 10 were clarified on 2026-11-06 to support versioned default
   contract templates, bounded glob and resource selectors, deterministic TOML
   overrides, and expansion against a pinned operation catalog. Gate 10 must
@@ -172,10 +173,10 @@ scope, threat model, and invariants.
   Pull-request `launch-integration` now passes in 33 seconds, and
   `static-and-unit` passes in 41 seconds.
 - Open decision: no workload-specific tolerance exceptions are approved; the
-  default 4% per-row budget remains authoritative until baseline review.
-- Exact next action: review the unoptimized Gate 11 table and, if approved,
-  profile the thread-yield and mutex paths without weakening mediation or the
-  default 4% per-row budget.
+  default 4% per-row budget remains authoritative.
+- Exact next action: profile the thread-yield and mutex paths, optimize the
+  highest-impact mediated operations without weakening invariants, and rerun
+  the focused matched matrix after each material change.
 
 ## Evidence
 
@@ -472,8 +473,9 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Collect and present the Gate 11 unoptimized matched native/Ginux baseline,
-including raw per-row evidence and protocol metadata, before optimization.
+Profile the Gate 11 thread-yield and mutex paths, optimize the highest-impact
+mediated operations without weakening invariants, and rerun the focused matched
+matrix after each material change.
 
 ## Context recovery
 
@@ -491,5 +493,5 @@ including raw per-row evidence and protocol metadata, before optimization.
   network selection, port controls, and translation.
 - Gate 9.75 closure: pull request 229 merged as `8a475e8b`; human accepted and
   closed the gate on 2026-11-06.
-- Required human decision: review the first unoptimized Gate 11 baseline before
-  optimization or any workload-specific tolerance exception.
+- Required human decision: none during the approved profiling and optimization
+  loop; any workload-specific tolerance exception still requires review.
