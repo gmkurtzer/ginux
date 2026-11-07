@@ -4960,7 +4960,15 @@ fn supervise_native(
             continue;
         }
         if signal == 17 {
-            if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
+            // The host kernel queued SIGCHLD for a managed child state change:
+            // deliver it, as the configured process path does. A parent that
+            // catches SIGCHLD with a handler (OpenRC, busybox init, shells)
+            // waits for it; systemd blocks SIGCHLD and reads a signalfd, so it
+            // never stops here.
+            write_all(b"GINUX_NATIVE_PROCESS_AUDIT: sigchld delivered parent=");
+            write_u64(task.virtual_id.pid as u64);
+            write_all(b"\n");
+            if ptrace(PTRACE_SYSCALL, host_pid, 0, 17) < 0 {
                 native_fail(instance, pid, b"native SIGCHLD resume failed");
             }
             continue;
@@ -7306,6 +7314,25 @@ fn supervise_native(
                 }
                 if mode == 3 && syscall == 5 {
                     task.pending_stat = registers.rsi as usize;
+                }
+                // clone3 CLONE_INTO_CGROUP names a Ginux-virtual cgroup
+                // directory, which the host kernel rejects (EBADF). glibc 2.41+
+                // posix_spawn uses it, so systemd 258+ spawns every service
+                // this way. Start the child in the parent's host cgroup.
+                const CLONE_INTO_CGROUP: u64 = 0x2_0000_0000;
+                if mode == 3 && syscall == 435 && registers.rsi >= 88 {
+                    if let Some([flags, _]) = read_tracee_u64_pair(host_pid, registers.rdi as usize)
+                    {
+                        if flags & CLONE_INTO_CGROUP != 0
+                            && !write_tracee_bytes(
+                                host_pid,
+                                registers.rdi as usize,
+                                &(flags & !CLONE_INTO_CGROUP).to_ne_bytes(),
+                            )
+                        {
+                            native_fail(instance, pid, b"native clone3 cgroup translation failed");
+                        }
+                    }
                 }
                 if mode == 3 && syscall == ginux_core::SYS_PIDFD_OPEN {
                     let selected = registers.rdi as u32;
