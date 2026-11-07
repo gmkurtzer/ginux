@@ -5,7 +5,7 @@
 //! supervisor keeps its existing behavior byte-identical.
 
 /// Lane membership by syscall number. Reserved for G06+.
-pub fn claims(syscall: u64) -> bool {
+pub const fn claims(syscall: u64) -> bool {
     let _ = syscall;
     false
 }
