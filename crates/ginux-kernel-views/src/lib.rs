@@ -469,7 +469,7 @@ mod tests {
                 available_bytes: 384 * 1024 * 1024,
             },
             IdentityView {
-                hostname: b"domain-a",
+                hostname: b"instance-a",
                 machine_id: b"0123456789abcdef0123456789abcdef",
                 boot_id: b"11111111-2222-3333-4444-555555555555",
             },
@@ -515,7 +515,7 @@ mod tests {
                 available_bytes: 384 * 1024 * 1024,
             },
             IdentityView {
-                hostname: b"domain-a",
+                hostname: b"instance-a",
                 machine_id: b"0123456789abcdef0123456789abcdef",
                 boot_id: b"11111111-2222-3333-4444-555555555555",
             },
@@ -599,10 +599,10 @@ mod tests {
     }
 
     #[test]
-    fn identity_and_namespaces_are_domain_owned_and_consistent() {
+    fn identity_and_namespaces_are_instance_owned_and_consistent() {
         let (tasks, count) = fixture();
         let identity = IdentityView {
-            hostname: b"domain-a",
+            hostname: b"instance-a",
             machine_id: b"0123456789abcdef0123456789abcdef",
             boot_id: b"11111111-2222-3333-4444-555555555555",
         };

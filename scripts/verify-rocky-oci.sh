@@ -55,6 +55,8 @@ $(jq -r '.layers[] | [.digest, (.size | tostring), .mediaType] | join(" ")' "$ma
 EOF
 test "$layer_count" -gt 0
 
-printf 'OCI_VERIFY: image=docker.io/%s:%s platform=%s/%s layers=%s manifest=%s\n' \
-    "$GINUX_OCI_REPOSITORY" "$GINUX_OCI_TAG" "$GINUX_OCI_PLATFORM_OS" \
-    "$GINUX_OCI_PLATFORM_ARCH" "$layer_count" "$GINUX_OCI_MANIFEST_DIGEST"
+if ! oci_human_output; then
+    printf 'OCI_VERIFY: image=docker.io/%s:%s platform=%s/%s layers=%s manifest=%s\n' \
+        "$GINUX_OCI_REPOSITORY" "$GINUX_OCI_TAG" "$GINUX_OCI_PLATFORM_OS" \
+        "$GINUX_OCI_PLATFORM_ARCH" "$layer_count" "$GINUX_OCI_MANIFEST_DIGEST"
+fi

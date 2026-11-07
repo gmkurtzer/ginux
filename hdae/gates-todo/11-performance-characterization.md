@@ -20,7 +20,7 @@ criterion.
   practical.
 - Run the same `sysbench` binary with identical arguments for CPU, memory,
   threads, and mutex workloads directly on the Rocky host and inside a Ginux
-  domain. Include matched 1-, 2-, and 4-vCPU runs where the workload supports
+  instance. Include matched 1-, 2-, and 4-vCPU runs where the workload supports
   parallelism; retain single-thread results at every CPU count so scaling and
   fixed mediation costs remain distinguishable.
 - Run both sides inside the same Rocky QEMU host session, with matched CPU
@@ -52,7 +52,7 @@ criterion.
 - Comparing unmatched workloads or hiding unfavorable results.
 - Bypassing interception, validation, virtual objects, audit requirements, or
   isolation to improve a benchmark.
-- Production-scale capacity, multi-domain density, or hardware acceleration not
+- Production-scale capacity, multi-instance density, or hardware acceleration not
   already in scope.
 
 ## Completed work
@@ -63,7 +63,7 @@ criterion.
 
 - [ ] Finalize matched benchmark protocols and budgets from prior evidence.
 - [ ] Package or install one pinned `sysbench` build for use by both the native
-  control and Ginux domain, and verify its identity before every comparison.
+  control and Ginux instance, and verify its identity before every comparison.
 - [ ] Implement comparison and report automation.
 - [ ] Collect statistically useful baseline results.
 - [ ] Profile and optimize material overhead.

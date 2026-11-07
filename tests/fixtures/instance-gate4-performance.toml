@@ -1,0 +1,34 @@
+schema_version = 1
+
+[instance]
+id = "gate4-performance"
+root = "rocky-10.2-x86_64"
+init = "/runtime-fixture"
+args = ["fixture-arg"]
+environment = ["GINUX_GATE=4"]
+
+[resources]
+vcpus = 1
+memory_mib = 128
+
+[execution]
+profile = "performance"
+backend = "ptrace-sysemu"
+
+[contract]
+profile = "minimal-v1"
+
+[storage]
+assignments = []
+
+[devices]
+assignments = []
+
+[network]
+backend = "none"
+
+[audit]
+mode = "stderr"
+
+[failure]
+policy = "stop"

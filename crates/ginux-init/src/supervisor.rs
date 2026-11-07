@@ -65,6 +65,7 @@ pub const EIO: i64 = 5;
 pub const EFAULT: i64 = 14;
 pub const EACCES: i64 = 13;
 pub const EINVAL: i64 = 22;
+pub const EMFILE: i64 = 24;
 pub const ENOSYS: i64 = 38;
 pub const VIRTUAL_PID: u64 = 4242;
 pub const SIG_BLOCK: usize = 0;
@@ -73,8 +74,8 @@ pub const SIGTERM: usize = 15;
 pub const SIGKILL: usize = 9;
 pub const SIGCHLD: usize = 17;
 pub const PR_SET_NO_NEW_PRIVS: usize = 38;
-pub const DOMAIN_UID: usize = 1000;
-pub const DOMAIN_GID: usize = 1000;
+pub const INSTANCE_UID: usize = 1000;
+pub const INSTANCE_GID: usize = 1000;
 
 #[repr(C)]
 pub struct UserRegs {

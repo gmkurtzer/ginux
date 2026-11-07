@@ -26,23 +26,23 @@
   https://github.com/gmkurtzer/ginux-us/pull/10 was merged as `2306c2e`, and
   the human confirmed the gate complete on 2026-11-04.
 - Authoritative name: Ginux.
-- Runtime isolation unit: domain.
+- Runtime isolation unit: instance.
 - Policy unit: versioned contract.
-- Initial gate map: twelve checkpoint gates at positions 1 through 11 and 13;
-  Gates 1 through 9.75 are accepted and closed. Gate 10 is the active
-  checkpoint.
-- Gate 9.75 was added and authorized on 2026-11-04 for comprehensive domain
+- The gate map has expanded through human-directed insertions while preserving
+  numeric order; Gates 1 through 10 are accepted and closed. Gate 10.25 is the
+  active checkpoint and Gate 10.5 is approved behind it.
+- Gate 9.75 was added and authorized on 2026-11-04 for comprehensive instance
   configuration, CLI overrides, network selection and policy, port translation,
   volumes, access, identity, resources, devices, and pre-boot hooks.
 - Gate 9.75 was accepted and closed by the human on 2026-11-06. Pull request
   https://github.com/gmkurtzer/ginux/pull/229 was merged as `8a475e8b`.
-- Gate 10 is technically passed on `hdae/configurable-contract` and remains a
-  human checkpoint. The versioned catalog contains 182 explicit operations;
+- Gate 10 is accepted and closed on `hdae/configurable-contract`. The versioned
+  catalog contains 182 explicit operations;
   normalized contracts produce immutable digests and provenance; semantic and
   syscall decisions are enforced before host effects; and audit detail is
   bounded to 8,192 records with logarithmic dropped-event accounting.
-- Gate 10 is delivered in open pull request
-  https://github.com/gmkurtzer/ginux/pull/231. It is not merged or accepted.
+- Gate 10 pull request https://github.com/gmkurtzer/ginux/pull/231 was accepted
+  and merged by the human as `ff926d0c` on 2026-11-06.
 - Fresh Gate 10 evidence passed `make test-contract`, `make check`,
   `make test-contract-runtime`, `make test-systemd`, the Gate 9.75 network and
   hook regressions, aggregate `make test`, and `make demo-gate-10`. The demo
@@ -51,7 +51,7 @@
 - Gate 9.75 now has a normalized typed schema and CLI override path plus passing
   Rocky QEMU evidence for interface/source selection, ingress/egress policy,
   translated port ownership, ordinary bind conflicts, network audit records,
-  payload exchange, and cleanup. Its domain-only pre-boot hooks now also pass
+  payload exchange, and cleanup. Its instance-only pre-boot hooks now also pass
   ordered execution, mediation, mount denial, stop/continue failure handling,
   timeout, init suppression, and audit tests under Rocky QEMU.
 - The combined `make demo-gate-9.75` checkpoint passes the complete schema and
@@ -74,13 +74,43 @@
   accepted by the human on 2026-11-06. Their complete implementation reached
   `main` through signed merge commit `a8b46d21` and is now closed.
 - Gate 9.5 reuses the writable Rocky host overlay across
-  `make run-host` sessions, preserving verified OCI image content, domain
+  `make run-host` sessions, preserving verified OCI image content, instance
   definitions, roots, and status, and reports live layer-download progress.
   Synthetic proc refresh is now path-targeted rather than rebuilding the whole
   proc tree for each open. In a clean QEMU run, `ps -ef` fell from the human's
   1.871-second reproduction to 309 ms, a single `top` refresh took 913 ms, and
   Bash reported valid child user/system timing. The complete interactive,
   systemd, and aggregate test matrices pass.
+- Gate 10.25 implementation is complete on `hdae/domain-to-instance` and ready
+  for review in https://github.com/gmkurtzer/ginux/pull/235. The active product now uses `instance`
+  consistently across CLI, schema, Rust APIs, persistence, audit, tests, and
+  documentation; there are no compatibility aliases. Static checks reject
+  stale terminology, and the legacy CLI noun and TOML table fail closed.
+- Fresh Gate 10.25 evidence passed `make check`, `make test-contract`,
+  `make test-unit`, a clean aggregate `make test`, `make test-systemd`, Gate
+  9.75 network and hook regressions, and `make demo-gate-10.25`. The demo
+  booted Rocky systemd, exercised the complete instance lifecycle, verified
+  `/var/lib/ginux/instances`, and returned cleanly to the host.
+- Normal `ginux instance create` output now separates operator presentation
+  from low-level OCI diagnostics. Fresh-cache creation reports one concise
+  image summary, a bounded live progress bar for each layer, verification, and
+  preparation; cache reuse omits downloads and reports the hit. Detailed
+  digests and internal paths remain available to standalone diagnostic mode.
+- Fresh output evidence passed `make check`, all seven `make test-oci-image`
+  checks, and `ROCKY_SSH_PORT=22410 make test-systemd-interactive`, including
+  cache miss, offline cache hit, persistent reuse, Rocky systemd boot, and the
+  complete instance lifecycle while the human's separate test VM remained
+  untouched.
+- Attached instance consoles now inherit the host terminal geometry and track
+  `SIGWINCH` changes. Fresh interactive evidence passed at `37x101`, opened and
+  exited `vi` without corrupting the size, then detached and reattached at
+  `43x109`; `make check` and the complete Rocky interactive workflow passed.
+- Native child-ID translation no longer injects a software breakpoint into
+  shared workload text. An isolated interactive Rocky regression completed
+  `dnf -y install vim` without the reported unexpected trace stop or instance
+  teardown. Socket bookkeeping exhaustion is now operation-local (`EMFILE`),
+  `close_range` releases tracked sockets, and the remaining interactive
+  lifecycle, restart, and persistent-cache checks passed.
 - The ordered gate batch is authorized, but every open gate remains a human
   checkpoint requiring a working demonstration and explicit acceptance.
 
@@ -88,9 +118,9 @@
 
 A normal Rocky Linux 10 host must boot with systemd as real PID 1. Ginux runs
 as an ordinary host process and launches an unmodified Rocky Linux 10 systemd
-userspace as virtual domain PID 1 without allowing managed code to invoke host
+userspace as virtual instance PID 1 without allowing managed code to invoke host
 syscalls directly. All managed interactions are emulated, mediated, or denied
-according to the domain contract. Domain-visible kernel state and devices are
+according to the instance contract. Instance-visible kernel state and devices are
 Ginux-owned.
 
 See `hdae/PROJECT.md` and `hdae/ARCHITECTURE.md` for the authoritative intent,
@@ -101,21 +131,27 @@ scope, threat model, and invariants.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 10, configurable contract and audit. Its approved delivery
-  branch is `hdae/configurable-contract`.
-- Last evidence: Gate 10 `make demo-gate-10`, `make check`, `make test-systemd`,
-  Gate 9.75 network and hook regressions, and aggregate `make test` passed under
-  Rocky QEMU after semantic-family enforcement was enabled.
-- Open decision: none. Gate 10 scope and checkpoint policy are approved.
-- Exact next action: review pull request
-  https://github.com/gmkurtzer/ginux/pull/231 and run or inspect
-  `make demo-gate-10`; Gate 10 awaits explicit human acceptance.
+- Active gate: Gate 10.25, instance terminology migration, is authorized and
+  active on `hdae/domain-to-instance`. Gate 10.5 is approved but waits for the
+  Gate 10.25 human checkpoint and merge.
+- Last evidence: Gate 10.25 `make demo-gate-10.25`, `make check`, targeted
+  systemd/network/hook tests, a clean aggregate `make test`, `make
+  test-oci-image`, and the final interactive Rocky cache-miss/cache-hit workflow
+  passed after the clean-break rename and CLI output cleanup. The interactive
+  regression also passed terminal-size propagation, `vi` use, and resized
+  detach/reattach behavior. A subsequent isolated run completed `dnf -y
+  install vim`, kept the instance alive, and passed the full interactive
+  lifecycle and restart regression.
+- Open decision: none for Gate 10.25. Gate 10.5 migration details will be
+  finalized after the terminology dependency is accepted.
+- Exact next action: update pull request 235 with the verified CLI and terminal
+  behavior fixes, then stop for human acceptance before beginning Gate 10.5.
 
 ## Evidence
 
 - Repository inspection before establishment: clean `main` branch with no
   pre-existing root `hdae/` project ledger.
-- Human direction confirmed the Ginux name, domain terminology, Rust/x86-64
+- Human direction confirmed the Ginux name, instance terminology, Rust/x86-64
   direction, Rocky Linux 10 systemd baseline, cached cloud QCOW2 source,
   virtual kernel trees, device assignment requirement, benchmark requirement,
   and dedicated branch/PR delivery per implementation gate.
@@ -128,7 +164,7 @@ scope, threat model, and invariants.
   escape-attempt, fuzz, recovery, and authority-reduction verification.
 - Human direction on 2026-11-03 corrected the host boundary: Rocky Linux boots
   normally with host systemd as PID 1; Ginux is an ordinary process or service
-  that creates and supervises domains beneath it. Domain systemd is virtual
+  that creates and supervises instances beneath it. Instance systemd is virtual
   PID 1. The earlier Gate 1 PID-1 result is retained as superseded evidence,
   not accepted product behavior.
 - Coverage review: functionality, failure behavior, deterministic tests, user
@@ -172,13 +208,13 @@ scope, threat model, and invariants.
 - Human authorized Gate 4 on 2026-11-03 and approved strict, versioned TOML as
   its operator-facing configuration format.
 - Gate 4 implemented strict versioned TOML parsing and normalization, complete
-  fail-closed validation, immutable effective configuration, a single-domain
+  fail-closed validation, immutable effective configuration, a single-instance
   lifecycle, managed fixture execution, failure cleanup, signal-driven stop,
-  and helper reaping. Seven domain unit tests, `make test-config`,
-  `make test-domain`, `make demo-gate-4`, and aggregate `make test` passed.
+  and helper reaping. Seven instance unit tests, `make test-config`,
+  `make test-instance`, `make demo-gate-4`, and aggregate `make test` passed.
 - Human accepted Gate 4 on 2026-11-03 and directed advancement to Gate 5.
 - Human corrected and approved the Gate 5 backing strategy on 2026-11-03: the
-  domain virtually boots a digest-pinned Rocky OCI image through Ginux. Ginux
+  instance virtually boots a digest-pinned Rocky OCI image through Ginux. Ginux
   explicitly pulls and caches the image, assembles its layers into an immutable
   indexed root, and supplies a bounded in-memory write overlay. An external OCI
   runtime must not execute managed code, and the host QCOW2 remains independent.
@@ -214,12 +250,12 @@ scope, threat model, and invariants.
   ioctl, blocked `O_CREAT` with no file created, blocked socket creation, and
   fail-closed supervisor loss.
 - The latest native QEMU run also passed unexpected-stop handling: after an
-  external `SIGSTOP`, Ginux killed and reaped the tracee and cleaned domain
+  external `SIGSTOP`, Ginux killed and reaped the tracee and cleaned instance
   state. Four VFS unit tests now include independent overlay-instance isolation
   plus traversal, symlink-loop, invalid-descriptor, overlay, and teardown paths.
 - `make demo-gate-5` passed all eight named checks and reported its explicit
   non-claims. A fresh aggregate `make test` also passed all earlier-gate lint,
-  unit, QEMU interception/runtime/config/domain, and image-pipeline regressions.
+  unit, QEMU interception/runtime/config/instance, and image-pipeline regressions.
 - Gate 5 is delivered in open pull request
   https://github.com/gmkurtzer/ginux-us/pull/5 from dedicated branch
   `hdae/virtual-vfs-userspace`. It is not merged or closed.
@@ -309,7 +345,7 @@ scope, threat model, and invariants.
 - Gate 8 virtual sysfs now projects only assigned devices with virtual
   class/type/major/minor/uevent data and virtual CPU inventory. Unassigned
   host-device lookup and all sysfs mutation fail explicitly.
-- Gate 8 now also has a bounded cgroup v2 hierarchy and domain-owned machine,
+- Gate 8 now also has a bounded cgroup v2 hierarchy and instance-owned machine,
   boot, hostname, mount, PID, UTS, and cgroup namespace identities. Six
   component tests cover positive systemd-style operations and negative
   privilege, mutation, capacity, traversal, host-PID, and device leakage paths.
@@ -325,7 +361,7 @@ scope, threat model, and invariants.
 - Gate 9 now boots the pinned Rocky 10 UBI init userspace through systemd as
   virtual PID 1, reaches managed `console-getty.service`, `getty.target`, and
   `multi-user.target` within the 50-second readiness bound, authenticates root
-  through `pam_unix`, and runs the resulting shell as a supervised domain task.
+  through `pam_unix`, and runs the resulting shell as a supervised instance task.
 - Shared networking passed outbound DNS/HTTPS and inbound
   bind/listen/accept/address-conflict checks. Rocky's enabled upstream
   `baseos`, `appstream`, and `extras` repositories completed a real
@@ -350,7 +386,7 @@ scope, threat model, and invariants.
   human demonstration.
 - The corrected `make demo-gate-9` now boots and logs the operator into the
   QEMU Rocky host with Ginux stopped, prints the manual launch command, attaches
-  the terminal to the domain login and shell, and returns to the host after
+  the terminal to the instance login and shell, and returns to the host after
   controlled shutdown. `make test-systemd-interactive` passed that exact path,
   including arbitrary command execution, retained audit evidence, host exit,
   and QEMU cleanup. Fresh `make check` and `make test-systemd` also passed after
@@ -358,11 +394,11 @@ scope, threat model, and invariants.
   remained partial pending human judgment.
 - Human review on 2026-11-05 further clarified that the host must be a general
   Ginux development environment, not a Gate-specific staged demonstration.
-  It must install Ginux in `PATH`, begin with no domain, and expose minimum
-  persistent `ginux domain create/list/start/status/stop` commands including
+  It must install Ginux in `PATH`, begin with no instance, and expose minimum
+  persistent `ginux instance create/list/start/status/stop` commands including
   attached and detached starts. This created corrective Gate 9.5.
 - The general-host workflow is now implemented. Fresh
-  `make test-systemd-interactive` began with no domains, created and inspected
+  `make test-systemd-interactive` began with no instances, created and inspected
   `rocky` through the installed `ginux` command, rejected duplicate creation,
   reached an authenticated attached console, returned after controlled
   shutdown, exercised detached start/status/stop, detected stale PID identity,
@@ -406,26 +442,24 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Review pull request https://github.com/gmkurtzer/ginux/pull/231 and run or inspect
-`make demo-gate-10`; Gate 10 remains open pending explicit human acceptance.
+Deliver the completed Gate 10.25 pull request from `hdae/domain-to-instance`
+and stop for human acceptance before beginning Gate 10.5.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 10, configurable contract and audit, is technically passed
-  on `hdae/configurable-contract` and awaits pull-request delivery and human
-  acceptance.
-- Last evidence: Gate 10 passed 9 contract and 18 domain tests, strict lint,
-  real runtime denial with no host mutation, the complete systemd matrix,
-  Gate 9.75 networking and hook regressions, aggregate `make test`, and the
-  human demonstration under Rocky QEMU.
+- Active gate: Gate 10.25, instance terminology migration, is authorized on
+  `hdae/domain-to-instance`; Gate 10.5 is approved but dependency-blocked.
+- Last evidence: Gate 10.25 passed strict lint, 9 contract and 18 instance
+  tests, a clean aggregate `make test`, the complete systemd matrix, Gate 9.75
+  networking and hook regressions, and its human-visible Rocky QEMU demo.
 - Approved network direction: Gate 9 defaults to full host-shared inbound and
   outbound networking with normal host routing and bind conflicts, under Ginux
-  mediation and audit. Gate 9.75 adds comprehensive domain configuration,
+  mediation and audit. Gate 9.75 adds comprehensive instance configuration,
   network selection, port controls, and translation.
 - Gate 9.75 closure: pull request 229 merged as `8a475e8b`; human accepted and
   closed the gate on 2026-11-06.
-- Required human decision: accept Gate 10 or request revisions at pull request
-  231 after reviewing the demonstration and evidence.
+- Required human decision: none until the Gate 10.25 demonstration and pull
+  request checkpoint.

@@ -32,7 +32,7 @@ host ELF, memory, signal, fault, scheduling, or ptrace surface is unacceptable.
 - Map OCI-backed executable content and writable memory into an engine owned by
   Ginux rather than a native host tracee.
 - Hook x86-64 `syscall` instructions into the existing Ginux dispatcher.
-- Reuse domain configuration, virtual VFS, descriptors, contracts, devices,
+- Reuse instance configuration, virtual VFS, descriptors, contracts, devices,
   kernel views, lifecycle, and audit semantics across both backends.
 - Define explicit backend selection and fail closed when the requested backend
   is unavailable.
@@ -50,7 +50,7 @@ host ELF, memory, signal, fault, scheduling, or ptrace surface is unacceptable.
   with equivalent observable Ginux syscall decisions.
 - A Unicorn-managed `syscall` cannot enter the host syscall implementation.
 - Managed memory and register state remain engine/Ginux-owned and host pointers
-  are not accepted as domain authority.
+  are not accepted as instance authority.
 - Backend-differential tests identify semantic mismatches deterministically.
 - Benchmarks quantify compatibility and overhead relative to native
   native ptrace supervision.

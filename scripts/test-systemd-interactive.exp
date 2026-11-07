@@ -1,9 +1,17 @@
 #!/usr/bin/expect -f
 
-set env(ROCKY_SSH_PORT) 22409
-set env(ROCKY_PID_FILE) build/rocky-test-host.pid
-set env(ROCKY_SERIAL_LOG) build/rocky-test-host-serial.log
-set env(ROCKY_OVERLAY_DISK) build/rocky-test-host-overlay.qcow2
+if {![info exists env(ROCKY_SSH_PORT)]} {
+    set env(ROCKY_SSH_PORT) 22409
+}
+if {![info exists env(ROCKY_PID_FILE)]} {
+    set env(ROCKY_PID_FILE) build/rocky-test-host.pid
+}
+if {![info exists env(ROCKY_SERIAL_LOG)]} {
+    set env(ROCKY_SERIAL_LOG) build/rocky-test-host-serial.log
+}
+if {![info exists env(ROCKY_OVERLAY_DISK)]} {
+    set env(ROCKY_OVERLAY_DISK) build/rocky-test-host-overlay.qcow2
+}
 file delete -force $env(ROCKY_PID_FILE) $env(ROCKY_SERIAL_LOG) \
     $env(ROCKY_OVERLAY_DISK)
 set timeout 300
@@ -44,33 +52,38 @@ expect {
     timeout { puts stderr "Rocky host shell prompt timed out"; exit 72 }
     eof { puts stderr "Rocky host shell exited early"; exit 73 }
 }
-send -- "test -x /usr/local/bin/ginux && test -f /etc/ginux/examples/rocky-systemd.toml && test -z \"\$(sudo find /var/lib/ginux/images -mindepth 1 -maxdepth 1 -print -quit)\" && test \"\$(ginux domain list | wc -l)\" -eq 1 && printf 'GINUX_HOST_EMPTY: PASS\\n'\r"
+send -- "test -x /usr/local/bin/ginux && test -f /etc/ginux/examples/rocky-systemd.toml && test -z \"\$(sudo find /var/lib/ginux/images -mindepth 1 -maxdepth 1 -print -quit)\" && test \"\$(ginux instance list | wc -l)\" -eq 1 && printf 'GINUX_HOST_EMPTY: PASS\\n'\r"
 expect {
     -re {GINUX_HOST_EMPTY: PASS} {}
     timeout { puts stderr "installed Ginux host was not empty"; exit 74 }
     eof { puts stderr "Rocky host shell exited during installation check"; exit 75 }
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
-send -- "ginux domain create rocky --config /etc/ginux/examples/rocky-systemd.toml\r"
+send -- "ginux instance create rocky --config /etc/ginux/examples/rocky-systemd.toml\r"
 expect {
-    -re {OCI_CACHE: miss} {}
-    timeout { puts stderr "first domain creation did not report an OCI cache miss"; exit 159 }
+    -re {Creating instance "rocky"} {}
+    timeout { puts stderr "first instance creation did not begin"; exit 159 }
     eof { puts stderr "Rocky host shell exited before image acquisition"; exit 160 }
 }
 expect {
-    -re {OCI_FETCH: downloading layer [0-9]+/[0-9]+ digest=sha256:[0-9a-f]+ size=[0-9]+ bytes} {}
+    -re {  Cache: miss} {}
+    timeout { puts stderr "first instance creation did not report an OCI cache miss"; exit 159 }
+    eof { puts stderr "Rocky host shell exited before image acquisition"; exit 160 }
+}
+expect {
+    -re {Layer 1/[0-9]+} {}
     timeout { puts stderr "OCI layer download progress did not begin"; exit 161 }
     eof { puts stderr "Rocky host shell exited during layer acquisition"; exit 162 }
 }
 expect {
-    -re {OCI_FETCH: downloaded layer [0-9]+/[0-9]+ digest=sha256:[0-9a-f]+ size=[0-9]+ bytes} {}
+    -re {  Verification: passed} {}
     timeout { puts stderr "OCI layer download completion was not reported"; exit 163 }
     eof { puts stderr "Rocky host shell exited during layer acquisition"; exit 164 }
 }
 expect {
-    -re {rocky: created} {}
-    timeout { puts stderr "domain creation timed out"; exit 76 }
-    eof { puts stderr "Rocky host shell exited during domain creation"; exit 77 }
+    -re {Instance "rocky" created.} {}
+    timeout { puts stderr "instance creation timed out"; exit 76 }
+    eof { puts stderr "Rocky host shell exited during instance creation"; exit 77 }
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
 send -- "sudo test -s /var/lib/ginux/images/rocky-10-ubi-init-amd64/rocky-10-ubi-init-amd64-rootfs.tar && printf 'GINUX_CREATE_%s\\n' 'ACQUIRE: PASS'\r"
@@ -80,87 +93,121 @@ expect {
     eof { puts stderr "Rocky host shell exited during acquisition check"; exit 130 }
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
-send -- "sudo unshare -n /usr/local/bin/ginux domain create cache-check --config /etc/ginux/examples/rocky-systemd.toml\r"
+send -- "sudo unshare -n /usr/local/bin/ginux instance create cache-check --config /etc/ginux/examples/rocky-systemd.toml\r"
 expect {
-    -re {OCI_CACHE: hit} {}
+    -re {  Cache: hit} {}
     timeout { puts stderr "offline create did not report an OCI cache hit"; exit 131 }
     eof { puts stderr "Rocky host shell exited during offline cache check"; exit 132 }
 }
 expect {
-    -re {cache-check: created} {}
-    timeout { puts stderr "offline cached domain creation timed out"; exit 133 }
+    -re {Instance "cache-check" created.} {}
+    timeout { puts stderr "offline cached instance creation timed out"; exit 133 }
     eof { puts stderr "Rocky host shell exited during cached creation"; exit 134 }
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
-send -- "sudo rm -rf /var/lib/ginux/domains/cache-check; printf 'GINUX_CREATE_%s\\n' 'CACHE_REUSE: PASS'\r"
+send -- "sudo rm -rf /var/lib/ginux/instances/cache-check; printf 'GINUX_CREATE_%s\\n' 'CACHE_REUSE: PASS'\r"
 expect {
     -re {GINUX_CREATE_CACHE_REUSE: PASS} {}
-    timeout { puts stderr "cached-domain cleanup timed out"; exit 135 }
-    eof { puts stderr "Rocky host shell exited during cached-domain cleanup"; exit 136 }
+    timeout { puts stderr "cached-instance cleanup timed out"; exit 135 }
+    eof { puts stderr "Rocky host shell exited during cached-instance cleanup"; exit 136 }
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
-send -- "ginux domain list; ginux domain status rocky\r"
+send -- "ginux instance list; ginux instance status rocky\r"
 expect {
     -re {rocky[[:space:]]+stopped} {}
-    timeout { puts stderr "created domain was not listed as stopped"; exit 78 }
-    eof { puts stderr "Rocky host shell exited during domain inspection"; exit 79 }
+    timeout { puts stderr "created instance was not listed as stopped"; exit 78 }
+    eof { puts stderr "Rocky host shell exited during instance inspection"; exit 79 }
 }
 expect {
     -re {state: stopped} {}
-    timeout { puts stderr "created domain status was not stopped"; exit 80 }
+    timeout { puts stderr "created instance status was not stopped"; exit 80 }
     eof { puts stderr "Rocky host shell exited during status inspection"; exit 81 }
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
-send -- "if ginux domain create rocky --config /etc/ginux/examples/rocky-systemd.toml; then echo GINUX_DUPLICATE: FAIL; else echo GINUX_DUPLICATE: PASS; fi\r"
+send -- "if ginux instance create rocky --config /etc/ginux/examples/rocky-systemd.toml; then echo GINUX_DUPLICATE: FAIL; else echo GINUX_DUPLICATE: PASS; fi\r"
 expect {
     -re {GINUX_DUPLICATE: PASS} {}
-    timeout { puts stderr "duplicate domain was not rejected"; exit 82 }
+    timeout { puts stderr "duplicate instance was not rejected"; exit 82 }
     eof { puts stderr "Rocky host shell exited during duplicate check"; exit 83 }
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
-send -- "ginux domain start rocky --attach\r"
+send -- "stty rows 37 cols 101; ginux instance start rocky --attach\r"
 
 expect {
     -re {rocky: started \(supervisor pid [0-9]+\); attaching console} {}
-    timeout { puts stderr "attached domain start did not report attach mode"; exit 153 }
-    eof { puts stderr "Ginux exited before attaching the domain console"; exit 154 }
+    timeout { puts stderr "attached instance start did not report attach mode"; exit 153 }
+    eof { puts stderr "Ginux exited before attaching the instance console"; exit 154 }
 }
 expect {
     -re {Script started on} { puts stderr "attached console exposed the script transcript header"; exit 152 }
     -re {GINUX_CONFIG_EFFECTIVE_BEGIN} { puts stderr "attached start exposed the full effective configuration"; exit 139 }
-    -re {GINUX_DOMAIN_START: id=rocky init="/sbin/init --system --unit=multi-user.target" resources=2-vcpu,1024-MiB execution=balanced/ptrace-native network=shared} {}
-    timeout { puts stderr "interactive domain start summary timed out"; exit 140 }
-    eof { puts stderr "Ginux exited before the domain start summary"; exit 141 }
+    -re {GINUX_INSTANCE_START: id=rocky init="/sbin/init --system --unit=multi-user.target" resources=2-vcpu,1024-MiB execution=balanced/ptrace-native network=shared} {}
+    timeout { puts stderr "interactive instance start summary timed out"; exit 140 }
+    eof { puts stderr "Ginux exited before the instance start summary"; exit 141 }
 }
 expect {
     -re {login:} {}
-    timeout { puts stderr "interactive domain login timed out"; exit 84 }
-    eof { puts stderr "Ginux exited before domain login"; exit 85 }
+    timeout { puts stderr "interactive instance login timed out"; exit 84 }
+    eof { puts stderr "Ginux exited before instance login"; exit 85 }
 }
 send -- "root\r"
 expect {
     -re {Password:} {}
-    timeout { puts stderr "interactive domain password prompt timed out"; exit 86 }
-    eof { puts stderr "domain login exited before password"; exit 87 }
+    timeout { puts stderr "interactive instance password prompt timed out"; exit 86 }
+    eof { puts stderr "instance login exited before password"; exit 87 }
 }
 send -- "ginux\r"
 expect {
     -re {\[root@ginux [^]]+\]# } {}
-    timeout { puts stderr "interactive domain shell timed out"; exit 88 }
-    eof { puts stderr "domain shell exited early"; exit 89 }
+    timeout { puts stderr "interactive instance shell timed out"; exit 88 }
+    eof { puts stderr "instance shell exited early"; exit 89 }
 }
 send -- "printf 'GINUX_HUMAN_INTERACTIVE: PASS\\n'\r"
 expect {
     -re {GINUX_HUMAN_INTERACTIVE: PASS} {}
     timeout { puts stderr "interactive command did not run"; exit 90 }
-    eof { puts stderr "domain exited during interactive command"; exit 91 }
+    eof { puts stderr "instance exited during interactive command"; exit 91 }
+}
+expect -re {\[root@ginux [^]]+\]# }
+send -- "test \"\$(stty size)\" = '37 101' && printf 'GINUX_TTY_%s\\n' 'SIZE: PASS'\r"
+expect {
+    -re {GINUX_TTY_SIZE: PASS} {}
+    timeout { puts stderr "attached instance did not inherit terminal size"; exit 175 }
+    eof { puts stderr "attached instance exited during terminal-size check"; exit 176 }
+}
+expect -re {\[root@ginux [^]]+\]# }
+send -- "vi /tmp/ginux-terminal-size-test\r"
+after 1000
+send -- "\033:q!\r"
+expect {
+    -re {\[root@ginux [^]]+\]# } {}
+    timeout { puts stderr "vi did not return to the attached instance shell"; exit 177 }
+    eof { puts stderr "attached instance exited while closing vi"; exit 178 }
+}
+send -- "test \"\$(stty size)\" = '37 101' && printf 'GINUX_TTY_%s\\n' 'FULLSCREEN: PASS'\r"
+expect {
+    -re {GINUX_TTY_FULLSCREEN: PASS} {}
+    timeout { puts stderr "full-screen terminal use changed the instance geometry"; exit 179 }
+    eof { puts stderr "attached instance exited after full-screen terminal use"; exit 180 }
+}
+expect -re {\[root@ginux [^]]+\]# }
+if {[info exists env(GINUX_INTERACTIVE_DNF_INSTALL)] && $env(GINUX_INTERACTIVE_DNF_INSTALL) eq "on"} {
+    set timeout 1800
+    send -- "dnf -y install vim && printf 'GINUX_DNF_%s\\n' 'INSTALL: PASS'\r"
+    expect {
+        -re {GINUX_DNF_INSTALL: PASS} {}
+        timeout { puts stderr "dnf install vim timed out"; exit 181 }
+        eof { puts stderr "instance exited during dnf install vim"; exit 182 }
+    }
+    expect -re {\[root@ginux [^]]+\]# }
+    set timeout 120
 }
 send -- "/bin/true && printf 'GINUX_JOB_%s\\n' 'SIMPLE: PASS'\r"
 expect {
     -re {child setpgid .*Operation not permitted} { puts stderr "simple command emitted a setpgid warning"; exit 110 }
     -re {GINUX_JOB_SIMPLE: PASS} {}
     timeout { puts stderr "simple external command did not complete"; exit 111 }
-    eof { puts stderr "domain exited during simple command"; exit 112 }
+    eof { puts stderr "instance exited during simple command"; exit 112 }
 }
 expect -re {\[root@ginux [^]]+\]# }
 send -- "printf x | cat >/dev/null && printf 'GINUX_JOB_%s\\n' 'PIPELINE: PASS'\r"
@@ -168,7 +215,7 @@ expect {
     -re {child setpgid .*Operation not permitted} { puts stderr "pipeline emitted a setpgid warning"; exit 113 }
     -re {GINUX_JOB_PIPELINE: PASS} {}
     timeout { puts stderr "pipeline did not complete"; exit 114 }
-    eof { puts stderr "domain exited during pipeline"; exit 115 }
+    eof { puts stderr "instance exited during pipeline"; exit 115 }
 }
 expect -re {\[root@ginux [^]]+\]# }
 send -- "/bin/true & job=\$!; wait \$job && printf 'GINUX_JOB_%s\\n' 'BACKGROUND: PASS'\r"
@@ -176,66 +223,66 @@ expect {
     -re {child setpgid .*Operation not permitted} { puts stderr "background job emitted a setpgid warning"; exit 116 }
     -re {GINUX_JOB_BACKGROUND: PASS} {}
     timeout { puts stderr "background job did not complete"; exit 117 }
-    eof { puts stderr "domain exited during background job"; exit 118 }
+    eof { puts stderr "instance exited during background job"; exit 118 }
 }
 expect -re {\[root@ginux [^]]+\]# }
 send -- "test \"\$(uname -s)\" = Linux && test \"\$(uname -n)\" = ginux && test \"\$(uname -r)\" = 6.12.0-ginux-abi1 && test \"\$(uname -v)\" = 'Ginux userspace kernel 0.1.0' && grep -Fq 'Ginux userspace kernel 0.1.0 (Linux ABI personality 6.12.0-ginux-abi1; contract gate9-systemd-v1; x86_64)' /proc/version && test \"\$(grep -c '^processor' /proc/cpuinfo)\" -eq 2 && grep -q '^model name' /proc/cpuinfo && printf 'GINUX_PROC_%s\\n' 'IDENTITY: PASS'\r"
 expect {
     -re {GINUX_PROC_IDENTITY: PASS} {}
     timeout { puts stderr "uname, proc version, or filtered CPU identity was incorrect"; exit 157 }
-    eof { puts stderr "domain exited during proc identity check"; exit 158 }
+    eof { puts stderr "instance exited during proc identity check"; exit 158 }
 }
 expect -re {\[root@ginux [^]]+\]# }
 send -- "ps -eo pid=,comm= >/tmp/ginux-ps && grep -q systemd /tmp/ginux-ps && grep -Eq '\[\[:space:\]\]bash$' /tmp/ginux-ps && grep -Eq '\[\[:space:\]\]ps$' /tmp/ginux-ps && printf 'GINUX_PROC_%s\\n' 'PS: PASS'\r"
 expect {
     -re {GINUX_PROC_PS: PASS} {}
     timeout { puts stderr "ps did not report systemd, Bash, and its own transient process"; exit 119 }
-    eof { puts stderr "domain exited during ps check"; exit 120 }
+    eof { puts stderr "instance exited during ps check"; exit 120 }
 }
 expect -re {\[root@ginux [^]]+\]# }
 send -- "start=\$(date +%s%N); TIMEFORMAT='%R %U %S'; { time ps -ef >/tmp/ginux-ps-timed; } 2>/tmp/ginux-time; end=\$(date +%s%N); elapsed_ms=\$(((end-start)/1000000)); timing=\$(cat /tmp/ginux-time); printf 'GINUX_PROC_MEASURE: elapsed_ms=%s timing=%s\\n' \"\$elapsed_ms\" \"\$timing\"; test \"\$elapsed_ms\" -lt 1000 && printf '%s\\n' \"\$timing\" | grep -Eq '^\[0-9\]+(\[.\]\[0-9\]+)? \[0-9\]+(\[.\]\[0-9\]+)? \[0-9\]+(\[.\]\[0-9\]+)?$' && printf 'GINUX_PROC_PERFORMANCE: PASS\\n'\r"
 expect {
     -re {GINUX_PROC_MEASURE: elapsed_ms=([0-9]+) timing=([0-9.]+) ([0-9.]+) ([0-9.]+)} {}
     timeout { puts stderr "ps measurement did not produce valid timing fields"; exit 165 }
-    eof { puts stderr "domain exited during proc performance measurement"; exit 166 }
+    eof { puts stderr "instance exited during proc performance measurement"; exit 166 }
 }
 expect {
     -re {GINUX_PROC_PERFORMANCE: PASS} {}
     timeout { puts stderr "ps exceeded the proc refresh budget or shell timing data was invalid"; exit 165 }
-    eof { puts stderr "domain exited during proc performance check"; exit 166 }
+    eof { puts stderr "instance exited during proc performance check"; exit 166 }
 }
 expect -re {\[root@ginux [^]]+\]# }
 send -- "cat /proc/self/status >/tmp/ginux-self-status && cat /proc/self/cmdline >/tmp/ginux-self-cmdline && grep -q '^Pid:' /tmp/ginux-self-status && grep -q '^NSpgid:' /tmp/ginux-self-status && test -s /tmp/ginux-self-cmdline && printf 'GINUX_PROC_%s\\n' 'SELF: PASS'\r"
 expect {
     -re {GINUX_PROC_SELF: PASS} {}
     timeout { puts stderr "proc self status or cmdline was unusable"; exit 121 }
-    eof { puts stderr "domain exited during proc self check"; exit 122 }
+    eof { puts stderr "instance exited during proc self check"; exit 122 }
 }
 expect -re {\[root@ginux [^]]+\]# }
 send -- "sh -c 'while :; do :; done' & busy=\$!; sleep 1; before=\$(awk '{print \$14+\$15}' /proc/\$busy/stat); rss=\$(awk '{print \$24}' /proc/\$busy/stat); statm_rss=\$(awk '{print \$2}' /proc/\$busy/statm); top_start=\$(date +%s%N); top -b -n 1 >/tmp/ginux-top-single; top_end=\$(date +%s%N); top_ms=\$(((top_end-top_start)/1000000)); sleep 1; after=\$(awk '{print \$14+\$15}' /proc/\$busy/stat); top -b -d 1 -n 2 >/tmp/ginux-top; kill \$busy; wait \$busy 2>/dev/null || true; test \"\$before\" -ge 0 && test \"\$after\" -gt \"\$before\" && test \"\$rss\" -gt 0 && test \"\$statm_rss\" -gt 0 && test \"\$top_ms\" -lt 1000 && grep -q '%CPU' /tmp/ginux-top-single && grep -q '%CPU' /tmp/ginux-top && printf 'GINUX_PROC_ACCOUNTING: PASS top_elapsed_ms=%s\\n' \"\$top_ms\"\r"
 expect {
     -re {GINUX_PROC_ACCOUNTING: PASS top_elapsed_ms=([0-9]+)} {}
     timeout { puts stderr "proc CPU or memory accounting did not update for top-compatible reads"; exit 155 }
-    eof { puts stderr "domain exited during proc accounting check"; exit 156 }
+    eof { puts stderr "instance exited during proc accounting check"; exit 156 }
 }
 expect -re {\[root@ginux [^]]+\]# }
 send -- "\035"
 expect {
-    -re {rocky: detached; domain remains running} {}
-    timeout { puts stderr "Ctrl-] did not detach from the live domain"; exit 123 }
+    -re {rocky: detached; instance remains running} {}
+    timeout { puts stderr "Ctrl-] did not detach from the live instance"; exit 123 }
     eof { puts stderr "host session exited during detach"; exit 124 }
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
-send -- "ginux domain status rocky | grep -Fq 'state: running' && printf 'GINUX_ATTACH_%s\\n' 'DETACH: PASS'\r"
+send -- "ginux instance status rocky | grep -Fq 'state: running' && printf 'GINUX_ATTACH_%s\\n' 'DETACH: PASS'\r"
 expect {
     -re {GINUX_ATTACH_DETACH: PASS} {}
-    timeout { puts stderr "detached domain did not remain running"; exit 125 }
+    timeout { puts stderr "detached instance did not remain running"; exit 125 }
     eof { puts stderr "host session exited during detached status check"; exit 126 }
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
-send -- "ginux domain attach rocky\r"
+send -- "stty rows 43 cols 109; ginux instance attach rocky\r"
 after 1000
-send -- "printf 'GINUX_ATTACH_%s\\n' 'REATTACH: PASS'\r"
+send -- "test \"\$(stty size)\" = '43 109' && printf 'GINUX_ATTACH_%s\\n' 'REATTACH: PASS'\r"
 expect {
     -re {GINUX_ATTACH_REATTACH: PASS} {}
     timeout { puts stderr "reattached console did not accept input"; exit 127 }
@@ -244,51 +291,51 @@ expect {
 send -- "kill -RTMIN+4 1\r"
 expect {
     -re {rocky: stopped \(status 0\)} {}
-    timeout { puts stderr "interactive domain shutdown timed out"; exit 92 }
+    timeout { puts stderr "interactive instance shutdown timed out"; exit 92 }
     eof { puts stderr "Rocky host shell exited before return"; exit 93 }
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
-send -- "grep -Fq 'GINUX_NATIVE_CHECK: PASS' /var/lib/ginux/domains/rocky/audit.log && ginux domain status rocky | grep -Fq 'state: stopped' && printf 'GINUX_INTERACTIVE_SHUTDOWN: PASS\\n'\r"
+send -- "grep -Fq 'GINUX_NATIVE_CHECK: PASS' /var/lib/ginux/instances/rocky/audit.log && ginux instance status rocky | grep -Fq 'state: stopped' && printf 'GINUX_INTERACTIVE_SHUTDOWN: PASS\\n'\r"
 expect {
     -re {GINUX_INTERACTIVE_SHUTDOWN: PASS} {}
     timeout { puts stderr "interactive shutdown evidence missing"; exit 94 }
     eof { puts stderr "Rocky host shell exited during audit check"; exit 95 }
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
-send -- "ginux domain start rocky\r"
+send -- "ginux instance start rocky\r"
 expect {
     -re {rocky: started detached} {}
-    timeout { puts stderr "detached domain start timed out"; exit 96 }
+    timeout { puts stderr "detached instance start timed out"; exit 96 }
     eof { puts stderr "Rocky host shell exited during detached start"; exit 97 }
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
-send -- "ginux domain list; ginux domain status rocky\r"
+send -- "ginux instance list; ginux instance status rocky\r"
 expect {
     -re {rocky[[:space:]]+running[[:space:]]+[0-9]+} {}
-    timeout { puts stderr "detached domain was not listed as running"; exit 98 }
+    timeout { puts stderr "detached instance was not listed as running"; exit 98 }
     eof { puts stderr "Rocky host shell exited during detached inspection"; exit 99 }
 }
 expect {
     -re {state: running} {}
-    timeout { puts stderr "detached domain status was not running"; exit 100 }
+    timeout { puts stderr "detached instance status was not running"; exit 100 }
     eof { puts stderr "Rocky host shell exited during detached status"; exit 101 }
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
-send -- "runtime=\$(sudo awk '{print \$1}' /var/lib/ginux/domains/rocky/runtime.pid); args=\$(ps -o args= -p \"\$runtime\"); case \"\$args\" in *' systemd') exit 1;; esac; sudo grep -Fq 'init = \"/sbin/init\"' /var/lib/ginux/domains/rocky/config.toml && sudo grep -Fq 'args = \[\"--system\", \"--unit=multi-user.target\"\]' /var/lib/ginux/domains/rocky/config.toml && printf 'GINUX_RUNTIME_%s\\n' 'CONFIG: PASS'\r"
+send -- "runtime=\$(sudo awk '{print \$1}' /var/lib/ginux/instances/rocky/runtime.pid); args=\$(ps -o args= -p \"\$runtime\"); case \"\$args\" in *' systemd') exit 1;; esac; sudo grep -Fq 'init = \"/sbin/init\"' /var/lib/ginux/instances/rocky/config.toml && sudo grep -Fq 'args = \[\"--system\", \"--unit=multi-user.target\"\]' /var/lib/ginux/instances/rocky/config.toml && printf 'GINUX_RUNTIME_%s\\n' 'CONFIG: PASS'\r"
 expect {
     -re {GINUX_RUNTIME_CONFIG: PASS} {}
     timeout { puts stderr "runtime launch was not configuration-derived"; exit 137 }
     eof { puts stderr "Rocky host shell exited during runtime argument check"; exit 138 }
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
-send -- "ginux domain stop rocky\r"
+send -- "ginux instance stop rocky\r"
 expect {
     -re {rocky: stopped} {}
-    timeout { puts stderr "detached domain stop timed out"; exit 102 }
+    timeout { puts stderr "detached instance stop timed out"; exit 102 }
     eof { puts stderr "Rocky host shell exited during detached stop"; exit 103 }
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
-send -- "sudo sh -c 'printf \"999999 1\\n\" > /var/lib/ginux/domains/rocky/supervisor.pid'; ginux domain list; ginux domain stop rocky\r"
+send -- "sudo sh -c 'printf \"999999 1\\n\" > /var/lib/ginux/instances/rocky/supervisor.pid'; ginux instance list; ginux instance stop rocky\r"
 expect {
     -re {rocky[[:space:]]+stopped} {}
     timeout { puts stderr "stale supervisor state was not reported stopped"; exit 104 }
@@ -320,16 +367,16 @@ expect {
     eof { puts stderr "second host exited before login"; exit 168 }
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
-send -- "test -n \"\$(sudo find /var/lib/ginux/images -mindepth 1 -maxdepth 1 -print -quit)\" && ginux domain status rocky | grep -Fq 'state: stopped' && sudo unshare -n /usr/local/bin/ginux domain create restart-cache --config /etc/ginux/examples/rocky-systemd.toml\r"
+send -- "test -n \"\$(sudo find /var/lib/ginux/images -mindepth 1 -maxdepth 1 -print -quit)\" && ginux instance status rocky | grep -Fq 'state: stopped' && sudo unshare -n /usr/local/bin/ginux instance create restart-cache --config /etc/ginux/examples/rocky-systemd.toml\r"
 expect {
-    -re {OCI_CACHE: hit} {}
-    timeout { puts stderr "OCI cache or domain state did not persist across Rocky host sessions"; exit 169 }
+    -re {  Cache: hit} {}
+    timeout { puts stderr "OCI cache or instance state did not persist across Rocky host sessions"; exit 169 }
     eof { puts stderr "second host exited during persistent state check"; exit 170 }
 }
 expect {
-    -re {restart-cache: created} {}
-    timeout { puts stderr "cached domain creation on the second host timed out"; exit 171 }
-    eof { puts stderr "second host exited during cached domain creation"; exit 172 }
+    -re {Instance "restart-cache" created.} {}
+    timeout { puts stderr "cached instance creation on the second host timed out"; exit 171 }
+    eof { puts stderr "second host exited during cached instance creation"; exit 172 }
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
 send -- "exit\r"

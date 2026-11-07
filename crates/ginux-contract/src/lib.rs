@@ -188,7 +188,7 @@ pub static CATALOG: &[Operation] = &[
         2,
         Partial,
         Action::Mediate,
-        "domain path and validated flags",
+        "instance path and validated flags",
         "test-native-vfs"
     ),
     syscall!(
@@ -196,7 +196,7 @@ pub static CATALOG: &[Operation] = &[
         3,
         Complete,
         Action::Mediate,
-        "domain descriptor",
+        "instance descriptor",
         "test-systemd"
     ),
     syscall!(
@@ -204,7 +204,7 @@ pub static CATALOG: &[Operation] = &[
         4,
         Partial,
         Action::Mediate,
-        "domain path",
+        "instance path",
         "test-systemd"
     ),
     syscall!(
@@ -212,7 +212,7 @@ pub static CATALOG: &[Operation] = &[
         5,
         Partial,
         Action::Mediate,
-        "domain descriptor",
+        "instance descriptor",
         "test-systemd"
     ),
     syscall!(
@@ -228,7 +228,7 @@ pub static CATALOG: &[Operation] = &[
         8,
         Complete,
         Action::Mediate,
-        "domain descriptor",
+        "instance descriptor",
         "test-systemd"
     ),
     syscall!(
@@ -300,7 +300,7 @@ pub static CATALOG: &[Operation] = &[
         17,
         Partial,
         Action::Mediate,
-        "bounded domain descriptor",
+        "bounded instance descriptor",
         "test-native-vfs"
     ),
     syscall!(
@@ -308,7 +308,7 @@ pub static CATALOG: &[Operation] = &[
         18,
         Partial,
         Action::Mediate,
-        "bounded domain descriptor",
+        "bounded instance descriptor",
         "test-systemd"
     ),
     syscall!(
@@ -324,7 +324,7 @@ pub static CATALOG: &[Operation] = &[
         21,
         Partial,
         Action::Mediate,
-        "domain path",
+        "instance path",
         "test-native-vfs"
     ),
     syscall!(
@@ -348,7 +348,7 @@ pub static CATALOG: &[Operation] = &[
         32,
         Complete,
         Action::Mediate,
-        "domain descriptor",
+        "instance descriptor",
         "test-systemd"
     ),
     syscall!(
@@ -356,7 +356,7 @@ pub static CATALOG: &[Operation] = &[
         33,
         Complete,
         Action::Mediate,
-        "domain descriptor",
+        "instance descriptor",
         "test-systemd"
     ),
     syscall!(
@@ -428,7 +428,7 @@ pub static CATALOG: &[Operation] = &[
         48,
         Partial,
         Action::Mediate,
-        "domain socket",
+        "socket owned by instance",
         "test-gate975-network"
     ),
     syscall!(
@@ -444,7 +444,7 @@ pub static CATALOG: &[Operation] = &[
         50,
         Partial,
         Action::Mediate,
-        "domain socket",
+        "socket owned by instance",
         "test-gate975-network"
     ),
     syscall!(
@@ -460,7 +460,7 @@ pub static CATALOG: &[Operation] = &[
         52,
         Partial,
         Action::Mediate,
-        "domain socket",
+        "socket owned by instance",
         "test-gate975-network"
     ),
     syscall!(
@@ -468,7 +468,7 @@ pub static CATALOG: &[Operation] = &[
         53,
         Partial,
         Action::Mediate,
-        "local domain only",
+        "local instance only",
         "test-systemd"
     ),
     syscall!(
@@ -516,7 +516,7 @@ pub static CATALOG: &[Operation] = &[
         59,
         Partial,
         Action::Mediate,
-        "domain path and environment",
+        "instance path and environment",
         "test-systemd"
     ),
     syscall!(
@@ -564,7 +564,7 @@ pub static CATALOG: &[Operation] = &[
         73,
         Partial,
         Action::Mediate,
-        "domain descriptor",
+        "instance descriptor",
         "test-systemd"
     ),
     syscall!(
@@ -572,7 +572,7 @@ pub static CATALOG: &[Operation] = &[
         74,
         Complete,
         Action::Mediate,
-        "domain descriptor",
+        "instance descriptor",
         "test-systemd"
     ),
     syscall!(
@@ -580,7 +580,7 @@ pub static CATALOG: &[Operation] = &[
         75,
         Complete,
         Action::Mediate,
-        "domain descriptor",
+        "instance descriptor",
         "test-systemd"
     ),
     syscall!(
@@ -588,7 +588,7 @@ pub static CATALOG: &[Operation] = &[
         76,
         Partial,
         Action::Mediate,
-        "domain path",
+        "instance path",
         "test-systemd"
     ),
     syscall!(
@@ -596,7 +596,7 @@ pub static CATALOG: &[Operation] = &[
         77,
         Partial,
         Action::Mediate,
-        "domain descriptor",
+        "instance descriptor",
         "test-systemd"
     ),
     syscall!(
@@ -604,7 +604,7 @@ pub static CATALOG: &[Operation] = &[
         79,
         Complete,
         Action::Mediate,
-        "domain path",
+        "instance path",
         "test-systemd"
     ),
     syscall!(
@@ -612,7 +612,7 @@ pub static CATALOG: &[Operation] = &[
         80,
         Partial,
         Action::Mediate,
-        "domain path",
+        "instance path",
         "test-systemd"
     ),
     syscall!(
@@ -620,7 +620,7 @@ pub static CATALOG: &[Operation] = &[
         81,
         Partial,
         Action::Mediate,
-        "domain descriptor",
+        "instance descriptor",
         "test-systemd"
     ),
     syscall!(
@@ -628,7 +628,7 @@ pub static CATALOG: &[Operation] = &[
         82,
         Partial,
         Action::Mediate,
-        "domain paths",
+        "instance paths",
         "test-systemd"
     ),
     syscall!(
@@ -636,7 +636,7 @@ pub static CATALOG: &[Operation] = &[
         83,
         Partial,
         Action::Mediate,
-        "domain path",
+        "instance path",
         "test-systemd"
     ),
     syscall!(
@@ -644,7 +644,7 @@ pub static CATALOG: &[Operation] = &[
         84,
         Partial,
         Action::Mediate,
-        "domain path",
+        "instance path",
         "test-systemd"
     ),
     syscall!(
@@ -652,7 +652,7 @@ pub static CATALOG: &[Operation] = &[
         87,
         Partial,
         Action::Mediate,
-        "domain path",
+        "instance path",
         "test-systemd"
     ),
     syscall!(
@@ -660,7 +660,7 @@ pub static CATALOG: &[Operation] = &[
         88,
         Partial,
         Action::Mediate,
-        "domain paths",
+        "instance paths",
         "test-systemd"
     ),
     syscall!(
@@ -668,7 +668,7 @@ pub static CATALOG: &[Operation] = &[
         89,
         Partial,
         Action::Mediate,
-        "domain path",
+        "instance path",
         "test-native-vfs"
     ),
     syscall!(
@@ -676,7 +676,7 @@ pub static CATALOG: &[Operation] = &[
         90,
         Partial,
         Action::Mediate,
-        "domain path and bounded mode",
+        "instance path and bounded mode",
         "test-systemd"
     ),
     syscall!(
@@ -684,7 +684,7 @@ pub static CATALOG: &[Operation] = &[
         91,
         Partial,
         Action::Mediate,
-        "domain descriptor and bounded mode",
+        "instance descriptor and bounded mode",
         "test-systemd"
     ),
     syscall!(
@@ -716,7 +716,7 @@ pub static CATALOG: &[Operation] = &[
         95,
         Complete,
         Action::Mediate,
-        "domain process",
+        "instance process",
         "test-systemd"
     ),
     syscall!(
@@ -908,7 +908,7 @@ pub static CATALOG: &[Operation] = &[
         137,
         Partial,
         Action::Mediate,
-        "domain path",
+        "instance path",
         "test-systemd"
     ),
     syscall!(
@@ -916,7 +916,7 @@ pub static CATALOG: &[Operation] = &[
         138,
         Partial,
         Action::Mediate,
-        "domain descriptor",
+        "instance descriptor",
         "test-systemd"
     ),
     syscall!(
@@ -980,7 +980,7 @@ pub static CATALOG: &[Operation] = &[
         169,
         Partial,
         Action::Emulate,
-        "domain shutdown only",
+        "instance shutdown only",
         "test-systemd"
     ),
     syscall!(
@@ -996,7 +996,7 @@ pub static CATALOG: &[Operation] = &[
         190,
         Partial,
         Action::Mediate,
-        "domain descriptor",
+        "instance descriptor",
         "test-systemd"
     ),
     syscall!(
@@ -1004,7 +1004,7 @@ pub static CATALOG: &[Operation] = &[
         193,
         Partial,
         Action::Mediate,
-        "domain descriptor",
+        "instance descriptor",
         "test-systemd"
     ),
     syscall!(
@@ -1012,7 +1012,7 @@ pub static CATALOG: &[Operation] = &[
         196,
         Partial,
         Action::Mediate,
-        "domain descriptor",
+        "instance descriptor",
         "test-systemd"
     ),
     syscall!(
@@ -1020,7 +1020,7 @@ pub static CATALOG: &[Operation] = &[
         199,
         Partial,
         Action::Mediate,
-        "domain descriptor",
+        "instance descriptor",
         "test-systemd"
     ),
     syscall!(
@@ -1036,7 +1036,7 @@ pub static CATALOG: &[Operation] = &[
         213,
         Partial,
         Action::Mediate,
-        "domain descriptors",
+        "instance descriptors",
         "test-systemd"
     ),
     syscall!(
@@ -1044,7 +1044,7 @@ pub static CATALOG: &[Operation] = &[
         217,
         Partial,
         Action::Mediate,
-        "domain descriptor",
+        "instance descriptor",
         "test-systemd"
     ),
     syscall!(
@@ -1084,7 +1084,7 @@ pub static CATALOG: &[Operation] = &[
         232,
         Partial,
         Action::Mediate,
-        "domain descriptors",
+        "instance descriptors",
         "test-systemd"
     ),
     syscall!(
@@ -1092,7 +1092,7 @@ pub static CATALOG: &[Operation] = &[
         233,
         Partial,
         Action::Mediate,
-        "domain descriptors",
+        "instance descriptors",
         "test-systemd"
     ),
     syscall!(
@@ -1108,7 +1108,7 @@ pub static CATALOG: &[Operation] = &[
         253,
         Partial,
         Action::Mediate,
-        "domain filesystem",
+        "instance filesystem",
         "test-systemd"
     ),
     syscall!(
@@ -1116,7 +1116,7 @@ pub static CATALOG: &[Operation] = &[
         254,
         Partial,
         Action::Mediate,
-        "domain path",
+        "instance path",
         "test-systemd"
     ),
     syscall!(
@@ -1124,7 +1124,7 @@ pub static CATALOG: &[Operation] = &[
         255,
         Partial,
         Action::Mediate,
-        "domain descriptor",
+        "instance descriptor",
         "test-systemd"
     ),
     syscall!(
@@ -1132,7 +1132,7 @@ pub static CATALOG: &[Operation] = &[
         257,
         Partial,
         Action::Mediate,
-        "domain path and validated flags",
+        "instance path and validated flags",
         "test-native-vfs"
     ),
     syscall!(
@@ -1140,7 +1140,7 @@ pub static CATALOG: &[Operation] = &[
         258,
         Partial,
         Action::Mediate,
-        "domain path",
+        "instance path",
         "test-systemd"
     ),
     syscall!(
@@ -1164,7 +1164,7 @@ pub static CATALOG: &[Operation] = &[
         262,
         Partial,
         Action::Mediate,
-        "domain path",
+        "instance path",
         "test-systemd"
     ),
     syscall!(
@@ -1172,7 +1172,7 @@ pub static CATALOG: &[Operation] = &[
         263,
         Partial,
         Action::Mediate,
-        "domain path",
+        "instance path",
         "test-systemd"
     ),
     syscall!(
@@ -1180,7 +1180,7 @@ pub static CATALOG: &[Operation] = &[
         264,
         Partial,
         Action::Mediate,
-        "domain paths",
+        "instance paths",
         "test-systemd"
     ),
     syscall!(
@@ -1188,7 +1188,7 @@ pub static CATALOG: &[Operation] = &[
         265,
         Partial,
         Action::Mediate,
-        "domain paths",
+        "instance paths",
         "test-systemd"
     ),
     syscall!(
@@ -1196,7 +1196,7 @@ pub static CATALOG: &[Operation] = &[
         266,
         Partial,
         Action::Mediate,
-        "domain paths",
+        "instance paths",
         "test-systemd"
     ),
     syscall!(
@@ -1204,7 +1204,7 @@ pub static CATALOG: &[Operation] = &[
         267,
         Partial,
         Action::Mediate,
-        "domain path",
+        "instance path",
         "test-systemd"
     ),
     syscall!(
@@ -1236,7 +1236,7 @@ pub static CATALOG: &[Operation] = &[
         280,
         Partial,
         Action::Mediate,
-        "domain path",
+        "instance path",
         "test-systemd"
     ),
     syscall!(
@@ -1244,7 +1244,7 @@ pub static CATALOG: &[Operation] = &[
         281,
         Partial,
         Action::Mediate,
-        "domain descriptors",
+        "instance descriptors",
         "test-systemd"
     ),
     syscall!(
@@ -1260,7 +1260,7 @@ pub static CATALOG: &[Operation] = &[
         285,
         Partial,
         Action::Mediate,
-        "domain descriptor",
+        "instance descriptor",
         "test-systemd"
     ),
     syscall!(
@@ -1308,7 +1308,7 @@ pub static CATALOG: &[Operation] = &[
         291,
         Partial,
         Action::Mediate,
-        "domain descriptors",
+        "instance descriptors",
         "test-systemd"
     ),
     syscall!(
@@ -1316,7 +1316,7 @@ pub static CATALOG: &[Operation] = &[
         292,
         Complete,
         Action::Mediate,
-        "domain descriptor",
+        "instance descriptor",
         "test-systemd"
     ),
     syscall!(
@@ -1332,7 +1332,7 @@ pub static CATALOG: &[Operation] = &[
         294,
         Partial,
         Action::Mediate,
-        "domain filesystem",
+        "instance filesystem",
         "test-systemd"
     ),
     syscall!(
@@ -1356,7 +1356,7 @@ pub static CATALOG: &[Operation] = &[
         306,
         Complete,
         Action::Mediate,
-        "domain descriptor",
+        "instance descriptor",
         "test-systemd"
     ),
     syscall!(
@@ -1388,7 +1388,7 @@ pub static CATALOG: &[Operation] = &[
         319,
         Partial,
         Action::Mediate,
-        "domain memory",
+        "instance memory",
         "test-systemd"
     ),
     syscall!(
@@ -1396,7 +1396,7 @@ pub static CATALOG: &[Operation] = &[
         332,
         Partial,
         Action::Mediate,
-        "domain path",
+        "instance path",
         "test-native-vfs"
     ),
     syscall!(
@@ -1436,7 +1436,7 @@ pub static CATALOG: &[Operation] = &[
         436,
         Partial,
         Action::Mediate,
-        "bounded domain descriptors",
+        "bounded instance descriptors",
         "test-systemd"
     ),
     syscall!(
@@ -1444,7 +1444,7 @@ pub static CATALOG: &[Operation] = &[
         439,
         Partial,
         Action::Mediate,
-        "domain path",
+        "instance path",
         "test-native-vfs"
     ),
     syscall!(
@@ -1452,7 +1452,7 @@ pub static CATALOG: &[Operation] = &[
         441,
         Partial,
         Action::Mediate,
-        "domain descriptors",
+        "instance descriptors",
         "test-systemd"
     ),
     syscall!(
@@ -1460,7 +1460,7 @@ pub static CATALOG: &[Operation] = &[
         452,
         Partial,
         Action::Mediate,
-        "domain path and bounded mode",
+        "instance path and bounded mode",
         "test-systemd"
     ),
     operation!(
@@ -1531,7 +1531,7 @@ pub static CATALOG: &[Operation] = &[
         Filesystem,
         Partial,
         Action::Mediate,
-        "domain root only",
+        "instance root only",
         "test-native-vfs",
         "subset of Linux VFS"
     ),
@@ -1540,7 +1540,7 @@ pub static CATALOG: &[Operation] = &[
         Filesystem,
         Partial,
         Action::Mediate,
-        "domain overlay only",
+        "instance overlay only",
         "test-systemd",
         "subset of Linux VFS"
     ),
@@ -1576,7 +1576,7 @@ pub static CATALOG: &[Operation] = &[
         Cgroup,
         Partial,
         Action::Emulate,
-        "domain hierarchy only",
+        "instance hierarchy only",
         "test-kernel-views",
         "synthetic cgroup v2 subset"
     ),
@@ -1621,7 +1621,7 @@ pub static CATALOG: &[Operation] = &[
         Device,
         Denied,
         Action::Deny(1),
-        "never exposed to a domain",
+        "never exposed to an instance",
         "contract-deny-negative",
         "direct hardware authority is prohibited"
     ),
@@ -1639,7 +1639,7 @@ pub static CATALOG: &[Operation] = &[
         Device,
         OutOfScope,
         Action::Deny(1),
-        "never exposed to a domain",
+        "never exposed to an instance",
         "catalog-out-of-scope-deny",
         "userspace Ginux does not own host DMA programming"
     ),
@@ -1673,8 +1673,8 @@ pub enum Provenance {
     DefaultDeny,
     BaseProfile,
     Template,
-    DomainAllow,
-    DomainDeny,
+    InstanceAllow,
+    InstanceDeny,
 }
 
 impl Provenance {
@@ -1683,8 +1683,8 @@ impl Provenance {
             Self::DefaultDeny => "default-deny",
             Self::BaseProfile => "base-profile",
             Self::Template => "template",
-            Self::DomainAllow => "domain-allow",
-            Self::DomainDeny => "domain-deny",
+            Self::InstanceAllow => "instance-allow",
+            Self::InstanceDeny => "instance-deny",
         }
     }
 }
@@ -1797,8 +1797,8 @@ pub fn resolve(
             &mut effective,
             selector,
             None,
-            Provenance::DomainAllow,
-            "domain-allow",
+            Provenance::InstanceAllow,
+            "instance-allow",
         )?;
     }
     for selector in deny {
@@ -1806,8 +1806,8 @@ pub fn resolve(
             &mut effective,
             selector,
             Some(Action::Deny(1)),
-            Provenance::DomainDeny,
-            "domain-deny",
+            Provenance::InstanceDeny,
+            "instance-deny",
         )?;
     }
     effective.digest = contract_digest(&effective);
@@ -2076,7 +2076,7 @@ mod tests {
         let selected = contract
             .rules()
             .iter()
-            .filter(|rule| rule.provenance == Provenance::DomainAllow)
+            .filter(|rule| rule.provenance == Provenance::InstanceAllow)
             .count();
         assert_eq!(selected, 2);
         assert_eq!(CATALOG_VERSION, 1);

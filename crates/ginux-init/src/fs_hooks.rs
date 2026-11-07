@@ -1,6 +1,6 @@
 //! Native filesystem-lane dispatch hooks.
 //!
-//! Owner: G-files lane. Next task: G06 adds domain directory and
+//! Owner: G-files lane. Next task: G06 adds instance directory and
 //! working-directory operations. Until then every hook declines and the
 //! supervisor keeps its existing behavior byte-identical.
 

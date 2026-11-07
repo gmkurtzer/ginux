@@ -21,7 +21,7 @@ honest security and compatibility boundary for the initial milestone.
   device-range, host-view, resource-exhaustion, and teardown escape attempts.
 - Reduce Ginux host capabilities, descriptors, filesystem visibility, and
   syscall surface after bootstrap as far as the validated architecture permits.
-- Verify startup failure, domain crash, forced stop, audit saturation, and host
+- Verify startup failure, instance crash, forced stop, audit saturation, and host
   shutdown or recovery behavior.
 - Rerun functional, systemd, contract, security, and performance comparisons.
 - Document supported behavior, threat-model exclusions, known gaps, operational
@@ -32,7 +32,7 @@ honest security and compatibility boundary for the initial milestone.
 - Claiming formal verification, complete Linux compatibility, production
   readiness, independent audit, or protection from excluded threats.
 - Adding new product features, distributions, hardware backends, architectures,
-  or multi-domain orchestration.
+  or multi-instance orchestration.
 - Silently fixing material newly discovered defects outside this gate; such
   defects require corrective gates.
 
@@ -78,7 +78,7 @@ honest security and compatibility boundary for the initial milestone.
 - Documented bounded fuzz command or Make target -> completes the approved run
   with zero untriaged failures and preserves reproducible artifacts for any
   discovered defect.
-- `make test-recovery` -> startup failure, domain crash, forced stop, audit
+- `make test-recovery` -> startup failure, instance crash, forced stop, audit
   saturation, and shutdown/recovery cases pass.
 - `make test test-systemd test-contract test-security` -> all mandatory suites
   exit zero.
