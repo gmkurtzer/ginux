@@ -5335,6 +5335,7 @@ fn supervise_native(
             }
             continue;
         }
+        let mut entry_registers = None;
         let entry_syscall = if seccomp_entry {
             let mut number = 0usize;
             if ptrace(
@@ -5347,7 +5348,14 @@ fn supervise_native(
             {
                 native_fail(instance, pid, b"native requires the x86-64 syscall ABI");
             }
-            Some(number as u64)
+            let mut registers = core::mem::MaybeUninit::<UserRegs>::uninit();
+            if ptrace(PTRACE_GETREGS, host_pid, 0, registers.as_mut_ptr() as usize) < 0 {
+                native_fail(instance, pid, b"native register read failed");
+            }
+            let registers = unsafe { registers.assume_init() };
+            let syscall = registers.orig_rax;
+            entry_registers = Some(registers);
+            Some(syscall)
         } else {
             None
         };
@@ -5440,11 +5448,15 @@ fn supervise_native(
             }
             continue;
         }
-        let mut registers = core::mem::MaybeUninit::<UserRegs>::uninit();
-        if ptrace(PTRACE_GETREGS, host_pid, 0, registers.as_mut_ptr() as usize) < 0 {
-            native_fail(instance, pid, b"native register read failed");
-        }
-        let mut registers = unsafe { registers.assume_init() };
+        let mut registers = if let Some(registers) = entry_registers {
+            registers
+        } else {
+            let mut registers = core::mem::MaybeUninit::<UserRegs>::uninit();
+            if ptrace(PTRACE_GETREGS, host_pid, 0, registers.as_mut_ptr() as usize) < 0 {
+                native_fail(instance, pid, b"native register read failed");
+            }
+            unsafe { registers.assume_init() }
+        };
 
         if !seccomp_entry && !task.awaiting_exit && registers.orig_rax == u64::MAX {
             tasks[task_index] = Some(task);

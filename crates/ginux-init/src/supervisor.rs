@@ -117,11 +117,14 @@ pub struct SockFprog {
 pub fn install_trace_filter(direct_yield: bool) -> isize {
     const BPF_LD_W_ABS: u16 = 0x20;
     const BPF_JMP_JEQ_K: u16 = 0x15;
-    const BPF_ALU_OR_K: u16 = 0x44;
     const BPF_RET_K: u16 = 0x06;
-    const BPF_RET_A: u16 = 0x16;
     const AUDIT_ARCH_X86_64: u32 = 0xc000_003e;
     const INVALID_ARCH_DATA: u32 = 0xffff;
+    let yield_action = if direct_yield {
+        SECCOMP_RET_ALLOW
+    } else {
+        SECCOMP_RET_USER_NOTIF
+    };
     let paranoid_filter = [
         SockFilter {
             code: BPF_LD_W_ABS,
@@ -157,91 +160,18 @@ pub fn install_trace_filter(direct_yield: bool) -> isize {
             code: BPF_RET_K,
             jt: 0,
             jf: 0,
-            k: SECCOMP_RET_USER_NOTIF,
-        },
-        SockFilter {
-            code: BPF_ALU_OR_K,
-            jt: 0,
-            jf: 0,
-            k: SECCOMP_RET_TRACE,
-        },
-        SockFilter {
-            code: BPF_RET_A,
-            jt: 0,
-            jf: 0,
-            k: 0,
-        },
-    ];
-    // In selective mode the measured direct-safe operation must take the
-    // shortest kernel path. Checking the syscall number before the
-    // architecture saves the direct yield three BPF instructions. An x32
-    // syscall carries its ABI bit in the number and therefore cannot match
-    // the native x86-64 sched_yield number. Every nonmatching call continues
-    // through the architecture check and the existing ptrace dispatch data.
-    let selective_filter = [
-        SockFilter {
-            code: BPF_LD_W_ABS,
-            jt: 0,
-            jf: 0,
-            k: 0,
-        },
-        SockFilter {
-            code: BPF_JMP_JEQ_K,
-            jt: 0,
-            jf: 1,
-            k: 24,
+            k: yield_action,
         },
         SockFilter {
             code: BPF_RET_K,
             jt: 0,
             jf: 0,
-            k: SECCOMP_RET_ALLOW,
-        },
-        SockFilter {
-            code: BPF_LD_W_ABS,
-            jt: 0,
-            jf: 0,
-            k: 4,
-        },
-        SockFilter {
-            code: BPF_JMP_JEQ_K,
-            jt: 1,
-            jf: 0,
-            k: AUDIT_ARCH_X86_64,
-        },
-        SockFilter {
-            code: BPF_RET_K,
-            jt: 0,
-            jf: 0,
-            k: SECCOMP_RET_TRACE | INVALID_ARCH_DATA,
-        },
-        SockFilter {
-            code: BPF_LD_W_ABS,
-            jt: 0,
-            jf: 0,
-            k: 0,
-        },
-        SockFilter {
-            code: BPF_ALU_OR_K,
-            jt: 0,
-            jf: 0,
             k: SECCOMP_RET_TRACE,
         },
-        SockFilter {
-            code: BPF_RET_A,
-            jt: 0,
-            jf: 0,
-            k: 0,
-        },
     ];
-    let filter = if direct_yield {
-        &selective_filter[..]
-    } else {
-        &paranoid_filter[..]
-    };
     let program = SockFprog {
-        len: filter.len() as u16,
-        filter: filter.as_ptr(),
+        len: paranoid_filter.len() as u16,
+        filter: paranoid_filter.as_ptr(),
     };
     unsafe {
         syscall3(
@@ -274,6 +204,7 @@ pub fn managed_host_identity() -> ManagedHostIdentity {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct UserRegs {
     pub r15: u64,
     pub r14: u64,

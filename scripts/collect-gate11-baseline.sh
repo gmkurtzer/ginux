@@ -40,15 +40,9 @@ if grep -Eq 'operation=syscall\.sched_yield|syscall=24([[:space:]]|$)' "$output_
     exit 1
 fi
 grep -Eq '^GINUX_NATIVE_AUDIT: .*action=(mediate|emulate|deny)' "$output_dir/final-audit.log"
-selective_marker=0
-for log_path in $(tar -tzf "$output_dir/raw.tar.gz" | grep '/ginux-.*\.log$'); do
-    if tar -xOzf "$output_dir/raw.tar.gz" "$log_path" 2>/dev/null |
-        grep -Fq 'GINUX_NATIVE: supervisor=attached dispatch=selective direct-safe-syscalls=1'; then
-        selective_marker=1
-        break
-    fi
-done
-if test "$selective_marker" -ne 1; then
+if ! grep -Fqx \
+    'GINUX_NATIVE: supervisor=attached dispatch=selective direct-safe-syscalls=1' \
+    "$output_dir/final-audit.log"; then
     printf '%s\n' 'selective dispatch marker missing from Ginux benchmark logs' >&2
     exit 1
 fi
