@@ -37,6 +37,11 @@ create = ["/"]
 # neighboring prefix such as /ginux-demo/read-only-other.
 deny = ["/ginux-demo/read-only"]
 
+[contract.network]
+default = "deny"
+inbound = ["tcp:*", "udp:*"]
+outbound = ["tcp:*", "udp:*"]
+
 [contract.devices]
 default = "deny"
 read = ["/dev/console", "/dev/null", "/dev/zero", "/dev/random", "/dev/urandom"]

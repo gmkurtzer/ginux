@@ -21,9 +21,9 @@ deny = ["ptrace"]
 
 [contract.filesystem]
 default = "deny"
-read = ["/**"]
-write = ["/run/**", "/tmp/**", "/var/**"]
-create = ["/run/**", "/tmp/**", "/var/**"]
+read = ["/"]
+write = ["/run", "/tmp", "/var"]
+create = ["/run", "/tmp", "/var"]
 deny = ["/ginux-demo/read-only"]
 
 [contract.network]
@@ -53,9 +53,9 @@ namespace_join = []
 
 [contract.kernel]
 default = "deny"
-proc_read = ["/**"]
+proc_read = ["/"]
 proc_write = []
-sys_read = ["/**"]
+sys_read = ["/"]
 sys_write = []
 ```
 
@@ -70,7 +70,7 @@ Their component-aware selectors use `*` for one dot-separated component and
 `**` recursively. Every selector must match the pinned catalog.
 
 `[contract.syscalls]` uses shell-style `*` over syscall names. For example,
-`open*` matches cataloged `open`, `openat`, and `openat2` syscalls. Every
+`open*` matches the cataloged `open` and `openat` syscalls. Every
 syscall selector must match at least one syscall. Expansion occurs against the
 declared catalog version, so a catalog update requires explicit revalidation
 and cannot silently enlarge an existing normalized contract.

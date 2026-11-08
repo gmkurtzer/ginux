@@ -49,17 +49,23 @@ configured through repeatable `instance create` and `instance set` flags.
   repeatable create/set flags, glob behavior, and Gate 12 checkpoint.
 - [x] Created dedicated stacked branch `hdae/contract-network-ux` from
   `hdae/performance-characterization` while pull request 249 remains open.
+- [x] Implemented and normalized the hierarchical contract schema, including
+  syscall globs, deterministic deny precedence, recursive policy paths,
+  set-ID path lists, process limits, and synthetic kernel-view policy.
+- [x] Separated host network attachment and translated ports into persistent
+  deployment state with repeatable, atomic create/set flags.
+- [x] Migrated active recipes, generated ABI coverage, benchmark tooling,
+  operator documentation, and contract/runtime assertions.
+- [x] Added Rocky integration coverage for multiple create/set flags, host
+  default attachment, portable recipe preservation, and atomic failure.
+- [x] Ran the complete configuration, instance, contract, runtime, network,
+  systemd, aggregate, and human demonstration evidence.
 
 ## Remaining work
 
-- [ ] Implement hierarchical contract parsing, validation, normalization, and
-  compilation.
-- [ ] Implement separate persistent operational network state and repeatable
-  create/set flags.
-- [ ] Migrate active recipes, tests, generated coverage, and documentation.
-- [ ] Run the complete configuration, contract, runtime, systemd, and aggregate
-  regression suites.
-- [ ] Provide a human demonstration and Gate 12 pull request.
+- [ ] Obtain human review and acceptance.
+- [ ] Push the branch and open the Gate 12 pull request when explicitly
+  authorized.
 
 ## Acceptance criteria
 
@@ -100,7 +106,29 @@ configured through repeatable `instance create` and `instance set` flags.
 
 ## Evidence
 
-- Not run.
+- `make check` -> passed formatting, static policy checks, generated-document
+  freshness, and cross-target release lint.
+- `make test-contract` -> 13 contract and 23 instance tests passed, including
+  syscall-glob expansion, unmatched-glob rejection, and deny precedence.
+- `ROCKY_SSH_PORT=22413 make test-config` -> passed the migrated schema,
+  normalization, explanation, invalid selector, and legacy-command matrix.
+- `ROCKY_SSH_PORT=22414 make test-instance` -> passed existing lifecycle
+  coverage plus repeatable create/set flags, two simultaneous forwards,
+  default attachment, portable recipe separation, and atomic failed updates.
+- `ROCKY_SSH_PORT=22415 make test-contract-runtime` -> paranoid and selective
+  denial both blocked the socket operation before its host effect while
+  preserving virtual identity.
+- `make test-network` -> passed bounded, isolated, revocable virtual-network
+  behavior.
+- `ROCKY_SSH_PORT=22419 make test-systemd` -> cold, warm, repeat, offline DNF
+  failure, configured startup failure, and controlled shutdown all passed with
+  the explicit network contract.
+- `ROCKY_SSH_PORT=22417 make test` -> complete aggregate unit and Rocky QEMU
+  regression suite passed.
+- `ROCKY_SSH_PORT=22418 make demo-gate-12` -> displayed the complete
+  hierarchical Rocky recipe, repeatable deployment commands, one compiled
+  allowed operation, one runtime-denied operation, and ended with
+  `GATE12: PASS`.
 
 ## Decisions and limitations
 
@@ -110,6 +138,10 @@ configured through repeatable `instance create` and `instance set` flags.
   catalog. Resource selectors retain their documented component-aware grammar.
 - Gate 12 changes configuration and user experience, not the enforcement
   architecture or Gate 11 performance result.
+- The runtime still materializes an internal effective `runtime.toml` from the
+  portable recipe and separate deployment state. Host interface/source and
+  translated-port fields may appear only in that derived runtime input, not in
+  the saved portable `config.toml`.
 - Because pull request 249 is still open, this branch is stacked on Gate 11 and
   must be rebased or retargeted after that dependency is resolved.
 
@@ -122,9 +154,14 @@ configured through repeatable `instance create` and `instance set` flags.
 - Planned commits: gate and architecture record; contract schema/compiler;
   operational network CLI/state; active recipe and documentation migration;
   regression and demonstration evidence
-- Actual commits: pending
+- Actual commits: `f905e9e8` gate and architecture record; `0032227d`
+  operational deployment state and CLI; `f9683745` hierarchical contract and
+  recipe migration; `438e38c6` atomic deployment integration coverage;
+  `040f8474` Gate 12 regression and demonstration target; final evidence record
+  pending
 
 ## Review policy and outcome
 
-Human checkpoint. Stop after the Gate 12 demonstration, fresh evidence, and
-pull request are ready. Do not begin Gate 12.5 without explicit approval.
+Technically passed and stopped at the human checkpoint. Human acceptance and
+explicit delivery authorization remain pending. Do not begin Gate 12.5 without
+explicit approval.

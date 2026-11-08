@@ -124,6 +124,21 @@
   presented.
 - The ordered gate batch is authorized, but every open gate remains a human
   checkpoint requiring a working demonstration and explicit acceptance.
+- Gate 12 is technically passed on `hdae/contract-network-ux`. The active
+  configuration now uses `[contract]` plus `syscalls`, `filesystem`, `network`,
+  `devices`, `privileges`, `process`, and synthetic `kernel` subsections.
+  Syscall globs compile against catalog version 2, unmatched globs fail closed,
+  and explicit deny wins.
+- Gate 12 host networking is deployment state rather than portable recipe
+  content. Both `instance create` and `instance set` accept repeatable
+  `--network` and `--forward` flags, validate the complete candidate, and
+  commit atomically. Rocky integration proves simultaneous forwards, default
+  attachment, recipe/deployment separation, and unchanged state after an
+  invalid multi-flag update.
+- Fresh Gate 12 evidence passed `make check`, `make test-contract`,
+  `make test-config`, `make test-instance`, `make test-contract-runtime`,
+  `make test-network`, the complete `make test-systemd` matrix, aggregate
+  `make test`, and `make demo-gate-12`.
 
 ## Governing outcome and invariants
 
@@ -142,8 +157,8 @@ scope, threat model, and invariants.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 11, performance characterization and optimization, is
-  active on `hdae/performance-characterization`.
+- Active gate: Gate 12, contract and instance-network UX, is technically passed
+  on stacked branch `hdae/contract-network-ux` and awaiting human review.
 - Last evidence: `make check`, `make test-contract`, Rocky QEMU
   `make test-config`, `make test-contract-runtime`, `make test-systemd`, the
   complete aggregate `make test`, and the Gate 10.5 human demonstration pass.
@@ -229,10 +244,11 @@ scope, threat model, and invariants.
   observed non-PI futexes did not materially improve the result. The residual
   selective deficit is the host seccomp/task-work floor under QEMU TCG, not a
   missed Ginux allow rule or userspace hot path.
-- Exact next action: update pull request 249 with the completed selective and
-  paranoid evidence. Gate 11 remains partial under the unchanged 4% budget;
-  do not publish an accepted baseline, merge the pull request, or close the
-  gate without human direction.
+- Exact next action: present Gate 12 for human review. Push the branch and open
+  its pull request only with explicit authorization. Keep Gate 12 in
+  `gates-todo/`, do not accept or close it, and do not begin Gate 12.5 without
+  human direction. Gate 11 remains partial in pull request 249 beneath this
+  stacked branch.
 - Human direction on 2026-11-07 resolved the Gate 11 dispatch boundary. Each
   instance will configure `paranoid` or `selective` dispatch. Paranoid preserves
   a Ginux userspace decision for every syscall. Selective directly executes
@@ -538,32 +554,31 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Implement Gate 12 on `hdae/contract-network-ux`: the hierarchical contract
-recipe and separately persisted, repeatable create/set network flags. Preserve
-Gate 11 behavior and stop at the Gate 12 human checkpoint. Do not merge or close
-pull request 249 and do not begin Gate 12.5 without explicit authorization.
+Present the technically passed Gate 12 for human review. Push
+`hdae/contract-network-ux` and open its pull request only with explicit
+authorization. Keep the gate in `gates-todo/`, do not accept or close it, and
+do not begin Gate 12.5 without human direction. Do not merge or close pull
+request 249.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active work: Gate 12, contract and instance-network UX, is authorized on
-  stacked branch `hdae/contract-network-ux`. Gate 11 remains partial on its
-  parent branch and in pull request 249.
+- Active work: Gate 12, contract and instance-network UX, is technically passed
+  on stacked branch `hdae/contract-network-ux` and awaits human review. Gate 11
+  remains partial on its parent branch and in pull request 249.
 - Delivery: pull request https://github.com/gmkurtzer/ginux/pull/249 is open
   against `main`; it must not be merged or closed without explicit human
   authorization.
-- Gate 12 delivery: dedicated stacked branch `hdae/contract-network-ux`, with a
-  separate pull request intended after implementation and fresh evidence.
-- Last evidence: clean retained commit `190a625c` removes all temporary
-  diagnostics. The final five-second, five-repetition matrix passes every CPU,
-  memory, and mutex row; all five thread rows remain 4.75% to 8.27% behind
-  native. Same-harness constant-allow and no-seccomp controls isolate the
-  residual to the host seccomp/task-work path under QEMU TCG. Fresh `make check`,
-  `make test-contract`, `make test-bench-compare`, `make test-contract-runtime`,
-  aggregate `make test`, `make test-native-vfs`, and the complete Rocky
-  `make test-systemd` matrix pass on isolated QEMU state.
+- Gate 12 delivery: dedicated stacked branch `hdae/contract-network-ux`; push
+  and a separate pull request remain pending explicit authorization.
+- Last evidence: Gate 12 passed `make check`, `make test-contract`, Rocky QEMU
+  `make test-config`, `make test-instance`, `make test-contract-runtime`,
+  `make test-network`, the complete `make test-systemd` matrix, aggregate
+  `make test`, and `make demo-gate-12`. The demo showed the complete
+  hierarchical contract, repeatable create/set flags, one allowed operation,
+  one denied operation, and atomic failed-update behavior.
 - Completed paranoid work: the benchmark harness records dispatch mode and
   rejects cross-mode baseline comparison. The retained single-broker path has
   constant-time and precomputed contract decisions, bounded audit, and no
