@@ -14,22 +14,19 @@ memory_mib = 1024
 [execution]
 profile = "balanced"
 backend = "ptrace-native"
-dispatch = "selective"
 
-[userspace.contract]
+[contract]
 version = 1
 catalog = 2
 default = "deny"
-read = ["**"]
-write = ["**"]
-execute = ["**"]
-connect = ["**"]
-listen = ["**"]
-process = ["**"]
-system = ["**"]
-deny = ["dev.mmio.direct", "dev.dma.direct", "network.packet.raw"]
-exact_allow = []
-exact_deny = []
+allow = ["*"]
+deny = ["device.mmio.direct", "device.dma.direct", "network.packet.raw"]
+
+[contract.syscalls]
+control = "selective"
+default = "deny"
+allow = ["*"]
+deny = []
 
 [storage]
 assignments = ["root-overlay"]

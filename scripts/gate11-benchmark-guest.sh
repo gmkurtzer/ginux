@@ -25,7 +25,7 @@ case "$audit_mode" in stderr|disabled) ;; *) printf '%s\n' 'invalid Gate 11 audi
 case "$capture_audit" in 0|1) ;; *) printf '%s\n' 'invalid Gate 11 audit capture mode' >&2; exit 2 ;; esac
 case "$dispatch_mode" in selective|paranoid) ;; *) printf '%s\n' 'invalid Gate 11 dispatch mode' >&2; exit 2 ;; esac
 
-grep -Fqx "dispatch = \"$dispatch_mode\"" "$base_config"
+grep -Fqx "control = \"$dispatch_mode\"" "$base_config"
 
 test -x /usr/bin/sysbench
 test -x "$directory/root/usr/bin/sysbench"

@@ -6032,17 +6032,51 @@ fn supervise_native(
                 _ => false,
             };
         let setid_policy_denied = mode == 3
-            && !instance.config().filesystem_setid
             && match syscall {
-                90 | 91 => registers.rsi & 0o6000 != 0,
-                268 | 452 => registers.rdx & 0o6000 != 0,
+                90 => native_setid_path_denied(
+                    instance.config(),
+                    root_descriptor,
+                    host_pid,
+                    AT_FDCWD as u64,
+                    registers.rdi as usize,
+                    registers.rsi,
+                ),
+                91 => native_setid_fd_denied(
+                    instance.config(),
+                    host_pid,
+                    registers.rdi as usize,
+                    registers.rsi,
+                ),
+                268 | 452 => native_setid_path_denied(
+                    instance.config(),
+                    root_descriptor,
+                    host_pid,
+                    registers.rdi,
+                    registers.rsi as usize,
+                    registers.rdx,
+                ),
                 _ => false,
             };
         let device_node_policy_denied = mode == 3
-            && !instance.config().filesystem_device_nodes
             && match syscall {
-                133 => matches!(registers.rsi & 0o170000, 0o020000 | 0o060000),
-                259 => matches!(registers.rdx & 0o170000, 0o020000 | 0o060000),
+                133 if matches!(registers.rsi & 0o170000, 0o020000 | 0o060000) => {
+                    native_device_create_denied(
+                        instance.config(),
+                        root_descriptor,
+                        host_pid,
+                        AT_FDCWD as u64,
+                        registers.rdi as usize,
+                    )
+                }
+                259 if matches!(registers.rdx & 0o170000, 0o020000 | 0o060000) => {
+                    native_device_create_denied(
+                        instance.config(),
+                        root_descriptor,
+                        host_pid,
+                        registers.rdi,
+                        registers.rsi as usize,
+                    )
+                }
                 _ => false,
             };
         let local_policy_denied =
@@ -9463,6 +9497,65 @@ fn native_write_path_denied(
         write_all(b"\n");
     }
     denied
+}
+
+fn native_setid_path_denied(
+    config: &InstanceConfig,
+    root_descriptor: usize,
+    host_pid: usize,
+    dirfd: u64,
+    address: usize,
+    mode: u64,
+) -> bool {
+    if mode & 0o6000 == 0 {
+        return false;
+    }
+    let mut path = [0u8; 512];
+    let Some(length) = native_instance_path(host_pid, dirfd, address, &mut path) else {
+        return true;
+    };
+    let mut resolved = [0u8; 512];
+    let Some(resolved_len) =
+        native_resolve_instance_path(root_descriptor, &path[..length], &mut resolved)
+    else {
+        return true;
+    };
+    config.privilege_setid_denied(
+        &resolved[..resolved_len],
+        mode & 0o4000 != 0,
+        mode & 0o2000 != 0,
+    )
+}
+
+fn native_setid_fd_denied(config: &InstanceConfig, host_pid: usize, fd: usize, mode: u64) -> bool {
+    if mode & 0o6000 == 0 {
+        return false;
+    }
+    let mut path = [0u8; 512];
+    let Some(length) = native_fd_instance_target(host_pid, fd, &mut path) else {
+        return true;
+    };
+    config.privilege_setid_denied(&path[..length], mode & 0o4000 != 0, mode & 0o2000 != 0)
+}
+
+fn native_device_create_denied(
+    config: &InstanceConfig,
+    root_descriptor: usize,
+    host_pid: usize,
+    dirfd: u64,
+    address: usize,
+) -> bool {
+    let mut path = [0u8; 512];
+    let Some(length) = native_instance_path(host_pid, dirfd, address, &mut path) else {
+        return true;
+    };
+    let mut resolved = [0u8; 512];
+    let Some(resolved_len) =
+        native_resolve_instance_path(root_descriptor, &path[..length], &mut resolved)
+    else {
+        return true;
+    };
+    config.device_create_denied(&resolved[..resolved_len])
 }
 
 fn native_link_tracee_fd_into_instance(

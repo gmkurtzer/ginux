@@ -63,13 +63,21 @@ fn render() -> String {
     writeln!(output, "\n## Versioned contract inputs\n").unwrap();
     writeln!(
         output,
-        "- Primary input: one self-contained `[userspace.contract]` recipe in the instance TOML"
+        "- Primary input: one hierarchical `[contract]` recipe in the instance TOML"
     )
     .unwrap();
-    writeln!(output, "- Human access groups: `read`, `write`, `execute`, `connect`, `listen`, `process`, and `system`").unwrap();
-    writeln!(output, "- Selectors: component-bounded `*` and recursive `**` over canonical resources; `fs` and `dev` are readable aliases").unwrap();
-    writeln!(output, "- Precedence: default deny, access grants, advanced exact grants, resource denies, then advanced exact denies").unwrap();
-    writeln!(output, "- Migration-only inputs: versioned Gate 10 profiles, templates, and canonical operation selectors remain accepted but cannot be mixed with a recipe").unwrap();
+    writeln!(output, "- Surfaces: `syscalls`, `filesystem`, `network`, `devices`, `privileges`, `process`, and synthetic `kernel` views").unwrap();
+    writeln!(output, "- Selectors: component-aware canonical operation selectors and bounded syscall-name globs compiled against this catalog").unwrap();
+    writeln!(
+        output,
+        "- Precedence: default deny, broad grants, surface-specific grants, then explicit denies"
+    )
+    .unwrap();
+    writeln!(
+        output,
+        "- Replaced inputs: `[userspace.*]` tables and execution-level dispatch fields fail closed"
+    )
+    .unwrap();
     writeln!(output, "- Runtime representation: an explicit operation table tied to catalog version `{CATALOG_VERSION}` and a deterministic digest\n").unwrap();
     writeln!(output, "## Operation catalog\n").unwrap();
     writeln!(output, "| Operation | Kind | Linux ABI | Status | Default action | Direct-safe | Constraint | Evidence | Limitation |\n|---|---|---:|---|---|---|---|---|---|").unwrap();

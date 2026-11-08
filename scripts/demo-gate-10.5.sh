@@ -2,7 +2,8 @@
 set -eu
 
 printf '%s\n' 'Gate 10.5 self-contained instance recipe'
-grep -F '[userspace.contract]' config/instance-rocky-systemd.toml
+grep -F '[contract]' config/instance-rocky-systemd.toml
+grep -F '[contract.syscalls]' config/instance-rocky-systemd.toml
 grep -F 'default = "deny"' config/instance-rocky-systemd.toml
 grep -E '^Contract valid: .* digest=[0-9a-f]{64} ' build/gate105-instance-validate.log
 

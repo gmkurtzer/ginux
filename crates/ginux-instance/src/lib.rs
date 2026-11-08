@@ -72,6 +72,20 @@ impl<const ITEMS: usize, const N: usize> TextList<ITEMS, N> {
     }
 }
 
+fn push_unique<const ITEMS: usize, const N: usize>(
+    values: &mut TextList<ITEMS, N>,
+    value: &[u8],
+) -> Result<(), ConfigError> {
+    if values
+        .as_slice()
+        .iter()
+        .any(|existing| existing.as_bytes() == value)
+    {
+        return Ok(());
+    }
+    values.push(Text::from_bytes(value)?)
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ExecutionProfile {
     Security,
@@ -143,6 +157,9 @@ const POLICY_BYTES: usize = 128;
 const CONTRACT_RULE_ITEMS: usize = 16;
 const CONTRACT_RULE_BYTES: usize = 96;
 const FILESYSTEM_RULE_ITEMS: usize = 16;
+const DEVICE_RULE_ITEMS: usize = 16;
+const PROCESS_RULE_ITEMS: usize = 16;
+const KERNEL_RULE_ITEMS: usize = 16;
 const HOOK_ITEMS: usize = 12;
 const HOOK_BYTES: usize = 512;
 
@@ -179,9 +196,26 @@ pub struct InstanceConfig {
     pub contract_exact_allow: TextList<CONTRACT_RULE_ITEMS, CONTRACT_RULE_BYTES>,
     pub contract_exact_deny: TextList<CONTRACT_RULE_ITEMS, CONTRACT_RULE_BYTES>,
     pub contract_digest: Text<REFERENCE_BYTES>,
+    pub filesystem_read: TextList<FILESYSTEM_RULE_ITEMS, PATH_BYTES>,
+    pub filesystem_write: TextList<FILESYSTEM_RULE_ITEMS, PATH_BYTES>,
+    pub filesystem_create: TextList<FILESYSTEM_RULE_ITEMS, PATH_BYTES>,
     pub filesystem_write_deny: TextList<FILESYSTEM_RULE_ITEMS, PATH_BYTES>,
-    pub filesystem_setid: bool,
+    pub privilege_setuid: TextList<FILESYSTEM_RULE_ITEMS, PATH_BYTES>,
+    pub privilege_setgid: TextList<FILESYSTEM_RULE_ITEMS, PATH_BYTES>,
     pub filesystem_device_nodes: bool,
+    pub device_read: TextList<DEVICE_RULE_ITEMS, PATH_BYTES>,
+    pub device_write: TextList<DEVICE_RULE_ITEMS, PATH_BYTES>,
+    pub device_create: TextList<DEVICE_RULE_ITEMS, PATH_BYTES>,
+    pub process_max_processes: u64,
+    pub process_max_threads: u64,
+    pub process_signals: TextList<PROCESS_RULE_ITEMS, IDENTIFIER_BYTES>,
+    pub process_ptrace: bool,
+    pub process_namespace_create: TextList<PROCESS_RULE_ITEMS, IDENTIFIER_BYTES>,
+    pub process_namespace_join: TextList<PROCESS_RULE_ITEMS, IDENTIFIER_BYTES>,
+    pub kernel_proc_read: TextList<KERNEL_RULE_ITEMS, PATH_BYTES>,
+    pub kernel_proc_write: TextList<KERNEL_RULE_ITEMS, PATH_BYTES>,
+    pub kernel_sys_read: TextList<KERNEL_RULE_ITEMS, PATH_BYTES>,
+    pub kernel_sys_write: TextList<KERNEL_RULE_ITEMS, PATH_BYTES>,
     pub storage: TextList<ASSIGNMENT_ITEMS, ASSIGNMENT_BYTES>,
     pub volumes: TextList<ASSIGNMENT_ITEMS, POLICY_BYTES>,
     pub devices: TextList<ASSIGNMENT_ITEMS, ASSIGNMENT_BYTES>,
@@ -260,8 +294,13 @@ enum Section {
     Resources,
     Execution,
     Contract,
-    UserspaceContract,
-    UserspaceFilesystem,
+    ContractSyscalls,
+    ContractFilesystem,
+    ContractNetwork,
+    ContractDevices,
+    ContractPrivileges,
+    ContractProcess,
+    ContractKernel,
     Storage,
     Volumes,
     Devices,
@@ -274,7 +313,7 @@ enum Section {
 }
 
 struct ConfigBuilder {
-    seen: u64,
+    seen: u128,
     schema_version: u64,
     id: Text<IDENTIFIER_BYTES>,
     hostname: Text<IDENTIFIER_BYTES>,
@@ -306,9 +345,26 @@ struct ConfigBuilder {
     contract_exact_allow: TextList<CONTRACT_RULE_ITEMS, CONTRACT_RULE_BYTES>,
     contract_exact_deny: TextList<CONTRACT_RULE_ITEMS, CONTRACT_RULE_BYTES>,
     contract_digest: Text<REFERENCE_BYTES>,
+    filesystem_read: TextList<FILESYSTEM_RULE_ITEMS, PATH_BYTES>,
+    filesystem_write: TextList<FILESYSTEM_RULE_ITEMS, PATH_BYTES>,
+    filesystem_create: TextList<FILESYSTEM_RULE_ITEMS, PATH_BYTES>,
     filesystem_write_deny: TextList<FILESYSTEM_RULE_ITEMS, PATH_BYTES>,
-    filesystem_setid: bool,
+    privilege_setuid: TextList<FILESYSTEM_RULE_ITEMS, PATH_BYTES>,
+    privilege_setgid: TextList<FILESYSTEM_RULE_ITEMS, PATH_BYTES>,
     filesystem_device_nodes: bool,
+    device_read: TextList<DEVICE_RULE_ITEMS, PATH_BYTES>,
+    device_write: TextList<DEVICE_RULE_ITEMS, PATH_BYTES>,
+    device_create: TextList<DEVICE_RULE_ITEMS, PATH_BYTES>,
+    process_max_processes: u64,
+    process_max_threads: u64,
+    process_signals: TextList<PROCESS_RULE_ITEMS, IDENTIFIER_BYTES>,
+    process_ptrace: bool,
+    process_namespace_create: TextList<PROCESS_RULE_ITEMS, IDENTIFIER_BYTES>,
+    process_namespace_join: TextList<PROCESS_RULE_ITEMS, IDENTIFIER_BYTES>,
+    kernel_proc_read: TextList<KERNEL_RULE_ITEMS, PATH_BYTES>,
+    kernel_proc_write: TextList<KERNEL_RULE_ITEMS, PATH_BYTES>,
+    kernel_sys_read: TextList<KERNEL_RULE_ITEMS, PATH_BYTES>,
+    kernel_sys_write: TextList<KERNEL_RULE_ITEMS, PATH_BYTES>,
     storage: TextList<ASSIGNMENT_ITEMS, ASSIGNMENT_BYTES>,
     volumes: TextList<ASSIGNMENT_ITEMS, POLICY_BYTES>,
     devices: TextList<ASSIGNMENT_ITEMS, ASSIGNMENT_BYTES>,
@@ -365,9 +421,26 @@ impl ConfigBuilder {
             contract_exact_allow: TextList::empty(),
             contract_exact_deny: TextList::empty(),
             contract_digest: Text::empty(),
+            filesystem_read: TextList::empty(),
+            filesystem_write: TextList::empty(),
+            filesystem_create: TextList::empty(),
             filesystem_write_deny: TextList::empty(),
-            filesystem_setid: true,
-            filesystem_device_nodes: true,
+            privilege_setuid: TextList::empty(),
+            privilege_setgid: TextList::empty(),
+            filesystem_device_nodes: false,
+            device_read: TextList::empty(),
+            device_write: TextList::empty(),
+            device_create: TextList::empty(),
+            process_max_processes: 4096,
+            process_max_threads: 4096,
+            process_signals: TextList::empty(),
+            process_ptrace: false,
+            process_namespace_create: TextList::empty(),
+            process_namespace_join: TextList::empty(),
+            kernel_proc_read: TextList::empty(),
+            kernel_proc_write: TextList::empty(),
+            kernel_sys_read: TextList::empty(),
+            kernel_sys_write: TextList::empty(),
             storage: TextList::empty(),
             volumes: TextList::empty(),
             devices: TextList::empty(),
@@ -390,7 +463,7 @@ impl ConfigBuilder {
         }
     }
 
-    fn mark(&mut self, bit: u64) -> Result<(), ConfigError> {
+    fn mark(&mut self, bit: u128) -> Result<(), ConfigError> {
         if self.seen & bit != 0 {
             return Err(ConfigError::DuplicateField);
         }
@@ -399,13 +472,13 @@ impl ConfigBuilder {
     }
 
     fn finish(self) -> Result<InstanceConfig, ConfigError> {
-        const REQUIRED: u64 = ((1 << 16) - 1) & !(1 << 13);
-        const WORKDIR_BIT: u64 = 1 << 16;
-        const HOSTNAME_BIT: u64 = 1 << 17;
-        const CONTRACT_DIGEST_BIT: u64 = 1 << 21;
-        const RECIPE_VERSION_BIT: u64 = 1 << 36;
-        const RECIPE_CATALOG_BIT: u64 = 1 << 37;
-        const RECIPE_DEFAULT_BIT: u64 = 1 << 38;
+        const REQUIRED: u128 = ((1 << 16) - 1) & !(1 << 13);
+        const WORKDIR_BIT: u128 = 1 << 16;
+        const HOSTNAME_BIT: u128 = 1 << 17;
+        const CONTRACT_DIGEST_BIT: u128 = 1 << 21;
+        const RECIPE_VERSION_BIT: u128 = 1 << 36;
+        const RECIPE_CATALOG_BIT: u128 = 1 << 37;
+        const RECIPE_DEFAULT_BIT: u128 = 1 << 38;
         if self.seen & REQUIRED != REQUIRED {
             return Err(ConfigError::MissingField);
         }
@@ -459,9 +532,26 @@ impl ConfigBuilder {
             contract_exact_allow: self.contract_exact_allow,
             contract_exact_deny: self.contract_exact_deny,
             contract_digest: Text::empty(),
+            filesystem_read: self.filesystem_read,
+            filesystem_write: self.filesystem_write,
+            filesystem_create: self.filesystem_create,
             filesystem_write_deny: self.filesystem_write_deny,
-            filesystem_setid: self.filesystem_setid,
+            privilege_setuid: self.privilege_setuid,
+            privilege_setgid: self.privilege_setgid,
             filesystem_device_nodes: self.filesystem_device_nodes,
+            device_read: self.device_read,
+            device_write: self.device_write,
+            device_create: self.device_create,
+            process_max_processes: self.process_max_processes,
+            process_max_threads: self.process_max_threads,
+            process_signals: self.process_signals,
+            process_ptrace: self.process_ptrace,
+            process_namespace_create: self.process_namespace_create,
+            process_namespace_join: self.process_namespace_join,
+            kernel_proc_read: self.kernel_proc_read,
+            kernel_proc_write: self.kernel_proc_write,
+            kernel_sys_read: self.kernel_sys_read,
+            kernel_sys_write: self.kernel_sys_write,
             storage: self.storage,
             volumes: self.volumes,
             devices: self.devices,
@@ -482,6 +572,7 @@ impl ConfigBuilder {
             audit_mode: self.audit_mode,
             failure_policy: self.failure_policy,
         };
+        config.derive_contract_grants()?;
         config.validate()?;
         config.refresh_contract()?;
         if supplied_contract_digest_set && supplied_contract_digest != config.contract_digest {
@@ -492,6 +583,45 @@ impl ConfigBuilder {
 }
 
 impl InstanceConfig {
+    fn derive_contract_grants(&mut self) -> Result<(), ConfigError> {
+        if !self.filesystem_read.as_slice().is_empty() {
+            push_unique(&mut self.contract_read, b"filesystem.**")?;
+        }
+        if !self.filesystem_write.as_slice().is_empty()
+            || !self.filesystem_create.as_slice().is_empty()
+        {
+            push_unique(&mut self.contract_write, b"filesystem.**")?;
+        }
+        if !self.device_read.as_slice().is_empty() {
+            push_unique(&mut self.contract_read, b"device.**")?;
+        }
+        if !self.device_write.as_slice().is_empty() || !self.device_create.as_slice().is_empty() {
+            push_unique(&mut self.contract_write, b"device.**")?;
+        }
+        if !self.ingress_allow.as_slice().is_empty() {
+            push_unique(&mut self.contract_listen, b"network.**")?;
+        }
+        if !self.egress_allow.as_slice().is_empty() {
+            push_unique(&mut self.contract_connect, b"network.**")?;
+        }
+        if !self.process_signals.as_slice().is_empty() {
+            push_unique(&mut self.contract_process, b"signal.**")?;
+        }
+        if !self.kernel_proc_read.as_slice().is_empty() {
+            push_unique(&mut self.contract_read, b"proc.**")?;
+        }
+        if !self.kernel_proc_write.as_slice().is_empty() {
+            push_unique(&mut self.contract_write, b"proc.**")?;
+        }
+        if !self.kernel_sys_read.as_slice().is_empty() {
+            push_unique(&mut self.contract_read, b"sys.**")?;
+        }
+        if !self.kernel_sys_write.as_slice().is_empty() {
+            push_unique(&mut self.contract_write, b"sys.**")?;
+        }
+        Ok(())
+    }
+
     pub fn parse(input: &[u8]) -> Result<Self, ConfigError> {
         let source = core::str::from_utf8(input).map_err(|_| ConfigError::InvalidUtf8)?;
         let mut builder = ConfigBuilder::new();
@@ -526,6 +656,12 @@ impl InstanceConfig {
     pub fn apply_override(&mut self, key: &[u8], value: &[u8]) -> Result<(), ConfigError> {
         let mut candidate = *self;
         candidate.apply_override_inner(key, value)?;
+        candidate.contract_read = TextList::empty();
+        candidate.contract_write = TextList::empty();
+        candidate.contract_connect = TextList::empty();
+        candidate.contract_listen = TextList::empty();
+        candidate.contract_process = TextList::empty();
+        candidate.derive_contract_grants()?;
         candidate.validate()?;
         candidate.refresh_contract()?;
         *self = candidate;
@@ -559,52 +695,68 @@ impl InstanceConfig {
                     _ => return Err(ConfigError::InvalidValue),
                 }
             }
-            b"execution.dispatch" => {
+            b"contract.syscalls.control" => {
                 self.dispatch_mode = match parse_string::<32>(value)?.as_bytes() {
                     b"paranoid" => DispatchMode::Paranoid,
                     b"selective" => DispatchMode::Selective,
                     _ => return Err(ConfigError::InvalidValue),
                 }
             }
-            b"contract.profile" => self.contract_profile = parse_string(value)?,
-            b"contract.templates" => self.contract_templates = parse_list(value)?,
+            b"contract.version" => self.contract_recipe_version = parse_u64(value)?,
+            b"contract.catalog" => self.contract_catalog_version = parse_u64(value)?,
+            b"contract.default" => self.contract_default = parse_contract_default(value)?,
             b"contract.allow" => self.contract_allow = parse_list(value)?,
             b"contract.deny" => self.contract_deny = parse_list(value)?,
             b"contract.digest" => return Err(ConfigError::DerivedField),
-            b"userspace.contract.version" => self.contract_recipe_version = parse_u64(value)?,
-            b"userspace.contract.catalog" => self.contract_catalog_version = parse_u64(value)?,
-            b"userspace.contract.default" => {
-                self.contract_default = match parse_string::<32>(value)?.as_bytes() {
-                    b"deny" => ContractDefault::Deny,
-                    _ => return Err(ConfigError::InvalidValue),
-                }
+            b"contract.syscalls.default" => {
+                parse_contract_default(value)?;
             }
-            b"userspace.contract.read" => self.contract_read = parse_list(value)?,
-            b"userspace.contract.write" => self.contract_write = parse_list(value)?,
-            b"userspace.contract.execute" => self.contract_execute = parse_list(value)?,
-            b"userspace.contract.connect" => self.contract_connect = parse_list(value)?,
-            b"userspace.contract.listen" => self.contract_listen = parse_list(value)?,
-            b"userspace.contract.process" => self.contract_process = parse_list(value)?,
-            b"userspace.contract.system" => self.contract_system = parse_list(value)?,
-            b"userspace.contract.deny" => self.contract_recipe_deny = parse_list(value)?,
-            b"userspace.contract.exact_allow" => self.contract_exact_allow = parse_list(value)?,
-            b"userspace.contract.exact_deny" => self.contract_exact_deny = parse_list(value)?,
-            b"userspace.contract.digest" => return Err(ConfigError::DerivedField),
-            b"userspace.filesystem.write_deny" => self.filesystem_write_deny = parse_list(value)?,
-            b"userspace.filesystem.setid" => {
-                self.filesystem_setid = match parse_string::<32>(value)?.as_bytes() {
-                    b"allow" => true,
-                    b"deny" => false,
-                    _ => return Err(ConfigError::InvalidValue),
-                }
+            b"contract.syscalls.allow" => self.contract_exact_allow = parse_syscall_list(value)?,
+            b"contract.syscalls.deny" => self.contract_exact_deny = parse_syscall_list(value)?,
+            b"contract.filesystem.default" => {
+                parse_contract_default(value)?;
             }
-            b"userspace.filesystem.device_nodes" => {
-                self.filesystem_device_nodes = match parse_string::<32>(value)?.as_bytes() {
-                    b"allow" => true,
-                    b"deny" => false,
-                    _ => return Err(ConfigError::InvalidValue),
-                }
+            b"contract.filesystem.read" => self.filesystem_read = parse_list(value)?,
+            b"contract.filesystem.write" => self.filesystem_write = parse_list(value)?,
+            b"contract.filesystem.create" => self.filesystem_create = parse_list(value)?,
+            b"contract.filesystem.deny" => self.filesystem_write_deny = parse_list(value)?,
+            b"contract.network.default" => {
+                parse_contract_default(value)?;
             }
+            b"contract.network.inbound" => self.ingress_allow = parse_list(value)?,
+            b"contract.network.outbound" => self.egress_allow = parse_list(value)?,
+            b"contract.devices.default" => {
+                parse_contract_default(value)?;
+            }
+            b"contract.devices.read" => self.device_read = parse_list(value)?,
+            b"contract.devices.write" => self.device_write = parse_list(value)?,
+            b"contract.devices.create" => {
+                self.device_create = parse_list(value)?;
+                self.filesystem_device_nodes = !self.device_create.as_slice().is_empty();
+            }
+            b"contract.privileges.default" => {
+                parse_contract_default(value)?;
+            }
+            b"contract.privileges.setuid" => self.privilege_setuid = parse_list(value)?,
+            b"contract.privileges.setgid" => self.privilege_setgid = parse_list(value)?,
+            b"contract.process.default" => {
+                parse_contract_default(value)?;
+            }
+            b"contract.process.max_processes" => self.process_max_processes = parse_u64(value)?,
+            b"contract.process.max_threads" => self.process_max_threads = parse_u64(value)?,
+            b"contract.process.signals" => self.process_signals = parse_list(value)?,
+            b"contract.process.ptrace" => self.process_ptrace = parse_allow_deny(value)?,
+            b"contract.process.namespace_create" => {
+                self.process_namespace_create = parse_list(value)?
+            }
+            b"contract.process.namespace_join" => self.process_namespace_join = parse_list(value)?,
+            b"contract.kernel.default" => {
+                parse_contract_default(value)?;
+            }
+            b"contract.kernel.proc_read" => self.kernel_proc_read = parse_list(value)?,
+            b"contract.kernel.proc_write" => self.kernel_proc_write = parse_list(value)?,
+            b"contract.kernel.sys_read" => self.kernel_sys_read = parse_list(value)?,
+            b"contract.kernel.sys_write" => self.kernel_sys_write = parse_list(value)?,
             b"storage.assignments" => self.storage = parse_list(value)?,
             b"volumes.assignments" => self.volumes = parse_list(value)?,
             b"devices.assignments" => self.devices = parse_list(value)?,
@@ -664,28 +816,10 @@ impl InstanceConfig {
         if self.workdir.as_bytes() != b"/" {
             validate_instance_path(self.workdir.as_bytes())?;
         }
-        if self.contract_recipe_version == 0 {
-            validate_identifier(self.contract_profile.as_bytes())?;
-            if self.contract_catalog_version != 0
-                || !self.contract_read.as_slice().is_empty()
-                || !self.contract_write.as_slice().is_empty()
-                || !self.contract_execute.as_slice().is_empty()
-                || !self.contract_connect.as_slice().is_empty()
-                || !self.contract_listen.as_slice().is_empty()
-                || !self.contract_process.as_slice().is_empty()
-                || !self.contract_system.as_slice().is_empty()
-                || !self.contract_recipe_deny.as_slice().is_empty()
-                || !self.contract_exact_allow.as_slice().is_empty()
-                || !self.contract_exact_deny.as_slice().is_empty()
-            {
-                return Err(ConfigError::InvalidContract);
-            }
-        } else if self.contract_recipe_version != 1
+        if self.contract_recipe_version != 1
             || self.contract_catalog_version != ginux_contract::CATALOG_VERSION as u64
             || !self.contract_profile.is_empty()
             || !self.contract_templates.as_slice().is_empty()
-            || !self.contract_allow.as_slice().is_empty()
-            || !self.contract_deny.as_slice().is_empty()
         {
             return Err(ConfigError::InvalidContract);
         }
@@ -758,7 +892,7 @@ impl InstanceConfig {
         {
             ginux_contract::validate_selector(selector.as_bytes())
                 .map_err(|_| ConfigError::InvalidContract)?;
-            if selector.as_bytes().contains(&b'*') {
+            if !selector.as_bytes().starts_with(b"syscall.") {
                 return Err(ConfigError::InvalidContract);
             }
         }
@@ -824,11 +958,48 @@ impl InstanceConfig {
         for path in self.filesystem_write_deny.as_slice() {
             validate_policy_path(path.as_bytes())?;
         }
+        for path in self
+            .filesystem_read
+            .as_slice()
+            .iter()
+            .chain(self.filesystem_write.as_slice())
+            .chain(self.filesystem_create.as_slice())
+            .chain(self.privilege_setuid.as_slice())
+            .chain(self.privilege_setgid.as_slice())
+            .chain(self.device_read.as_slice())
+            .chain(self.device_write.as_slice())
+            .chain(self.device_create.as_slice())
+            .chain(self.kernel_proc_read.as_slice())
+            .chain(self.kernel_proc_write.as_slice())
+            .chain(self.kernel_sys_read.as_slice())
+            .chain(self.kernel_sys_write.as_slice())
+        {
+            validate_policy_path(path.as_bytes())?;
+        }
+        for device in self
+            .process_signals
+            .as_slice()
+            .iter()
+            .chain(self.process_namespace_create.as_slice())
+            .chain(self.process_namespace_join.as_slice())
+        {
+            if device.as_bytes() != b"*" {
+                validate_identifier(device.as_bytes())?;
+            }
+        }
+        if self.process_max_processes == 0
+            || self.process_max_threads == 0
+            || self.process_max_threads < self.process_max_processes
+        {
+            return Err(ConfigError::InvalidValue);
+        }
         Ok(())
     }
 
     pub fn effective_contract(&self) -> Result<ginux_contract::EffectiveContract, ConfigError> {
         if self.contract_recipe_version != 0 {
+            let (allow, allow_len) = text_list_refs(&self.contract_allow);
+            let (deny_all, deny_all_len) = text_list_refs(&self.contract_deny);
             let (read, read_len) = text_list_refs(&self.contract_read);
             let (write, write_len) = text_list_refs(&self.contract_write);
             let (execute, execute_len) = text_list_refs(&self.contract_execute);
@@ -840,6 +1011,8 @@ impl InstanceConfig {
             let (exact_allow, exact_allow_len) = text_list_refs(&self.contract_exact_allow);
             let (exact_deny, exact_deny_len) = text_list_refs(&self.contract_exact_deny);
             return ginux_contract::resolve_recipe(ginux_contract::Recipe {
+                allow: &allow[..allow_len],
+                deny_all: &deny_all[..deny_all_len],
                 read: &read[..read_len],
                 write: &write[..write_len],
                 execute: &execute[..execute_len],
@@ -848,8 +1021,8 @@ impl InstanceConfig {
                 process: &process[..process_len],
                 system: &system[..system_len],
                 deny: &deny[..deny_len],
-                exact_allow: &exact_allow[..exact_allow_len],
-                exact_deny: &exact_deny[..exact_deny_len],
+                syscall_allow: &exact_allow[..exact_allow_len],
+                syscall_deny: &exact_deny[..exact_deny_len],
             })
             .map_err(|_| ConfigError::InvalidContract);
         }
@@ -915,90 +1088,95 @@ impl InstanceConfig {
             ExecutionBackend::PtraceSysemu => b"ptrace-sysemu",
             ExecutionBackend::PtraceNative => b"ptrace-native",
         })?;
-        output.raw(b"\ndispatch = ")?;
+        output.raw(b"\n\n[contract]\nversion = ")?;
+        output.number(self.contract_recipe_version)?;
+        output.raw(b"\ncatalog = ")?;
+        output.number(self.contract_catalog_version)?;
+        output.raw(b"\ndefault = \"deny\"\nallow = ")?;
+        output.list(self.contract_allow.as_slice())?;
+        output.raw(b"\ndeny = ")?;
+        output.list(self.contract_deny.as_slice())?;
+        output.raw(b"\ndigest = ")?;
+        output.quoted(self.contract_digest.as_bytes())?;
+        output.raw(b"\n\n[contract.syscalls]\ncontrol = ")?;
         output.quoted(match self.dispatch_mode {
             DispatchMode::Paranoid => b"paranoid",
             DispatchMode::Selective => b"selective",
         })?;
-        if self.contract_recipe_version == 0 {
-            output.raw(b"\n\n[contract]\nprofile = ")?;
-            output.quoted(self.contract_profile.as_bytes())?;
-            output.raw(b"\ntemplates = ")?;
-            output.list(self.contract_templates.as_slice())?;
-            output.raw(b"\nallow = ")?;
-            output.list(self.contract_allow.as_slice())?;
-            output.raw(b"\ndeny = ")?;
-            output.list(self.contract_deny.as_slice())?;
-            output.raw(b"\ndigest = ")?;
-            output.quoted(self.contract_digest.as_bytes())?;
-        } else {
-            output.raw(b"\n\n[userspace.contract]\nversion = ")?;
-            output.number(self.contract_recipe_version)?;
-            output.raw(b"\ncatalog = ")?;
-            output.number(self.contract_catalog_version)?;
-            output.raw(b"\ndefault = \"deny\"\nread = ")?;
-            output.list(self.contract_read.as_slice())?;
-            output.raw(b"\nwrite = ")?;
-            output.list(self.contract_write.as_slice())?;
-            output.raw(b"\nexecute = ")?;
-            output.list(self.contract_execute.as_slice())?;
-            output.raw(b"\nconnect = ")?;
-            output.list(self.contract_connect.as_slice())?;
-            output.raw(b"\nlisten = ")?;
-            output.list(self.contract_listen.as_slice())?;
-            output.raw(b"\nprocess = ")?;
-            output.list(self.contract_process.as_slice())?;
-            output.raw(b"\nsystem = ")?;
-            output.list(self.contract_system.as_slice())?;
-            output.raw(b"\ndeny = ")?;
-            output.list(self.contract_recipe_deny.as_slice())?;
-            output.raw(b"\nexact_allow = ")?;
-            output.list(self.contract_exact_allow.as_slice())?;
-            output.raw(b"\nexact_deny = ")?;
-            output.list(self.contract_exact_deny.as_slice())?;
-            output.raw(b"\ndigest = ")?;
-            output.quoted(self.contract_digest.as_bytes())?;
-        }
-        output.raw(b"\n\n[userspace.filesystem]\nwrite_deny = ")?;
+        output.raw(b"\ndefault = \"deny\"\nallow = ")?;
+        output.syscall_list(self.contract_exact_allow.as_slice())?;
+        output.raw(b"\ndeny = ")?;
+        output.syscall_list(self.contract_exact_deny.as_slice())?;
+        output.raw(b"\n\n[contract.filesystem]\ndefault = \"deny\"\nread = ")?;
+        output.list(self.filesystem_read.as_slice())?;
+        output.raw(b"\nwrite = ")?;
+        output.list(self.filesystem_write.as_slice())?;
+        output.raw(b"\ncreate = ")?;
+        output.list(self.filesystem_create.as_slice())?;
+        output.raw(b"\ndeny = ")?;
         output.list(self.filesystem_write_deny.as_slice())?;
-        output.raw(b"\nsetid = ")?;
-        output.quoted(if self.filesystem_setid {
+        output.raw(b"\n\n[contract.network]\ndefault = \"deny\"\ninbound = ")?;
+        output.list(self.ingress_allow.as_slice())?;
+        output.raw(b"\noutbound = ")?;
+        output.list(self.egress_allow.as_slice())?;
+        output.raw(b"\n\n[contract.devices]\ndefault = \"deny\"\nread = ")?;
+        output.list(self.device_read.as_slice())?;
+        output.raw(b"\nwrite = ")?;
+        output.list(self.device_write.as_slice())?;
+        output.raw(b"\ncreate = ")?;
+        output.list(self.device_create.as_slice())?;
+        output.raw(b"\n\n[contract.privileges]\ndefault = \"deny\"\nsetuid = ")?;
+        output.list(self.privilege_setuid.as_slice())?;
+        output.raw(b"\nsetgid = ")?;
+        output.list(self.privilege_setgid.as_slice())?;
+        output.raw(b"\n\n[contract.process]\ndefault = \"deny\"\nmax_processes = ")?;
+        output.number(self.process_max_processes)?;
+        output.raw(b"\nmax_threads = ")?;
+        output.number(self.process_max_threads)?;
+        output.raw(b"\nsignals = ")?;
+        output.list(self.process_signals.as_slice())?;
+        output.raw(b"\nptrace = ")?;
+        output.quoted(if self.process_ptrace {
             b"allow"
         } else {
             b"deny"
         })?;
-        output.raw(b"\ndevice_nodes = ")?;
-        output.quoted(if self.filesystem_device_nodes {
-            b"allow"
-        } else {
-            b"deny"
-        })?;
+        output.raw(b"\nnamespace_create = ")?;
+        output.list(self.process_namespace_create.as_slice())?;
+        output.raw(b"\nnamespace_join = ")?;
+        output.list(self.process_namespace_join.as_slice())?;
+        output.raw(b"\n\n[contract.kernel]\ndefault = \"deny\"\nproc_read = ")?;
+        output.list(self.kernel_proc_read.as_slice())?;
+        output.raw(b"\nproc_write = ")?;
+        output.list(self.kernel_proc_write.as_slice())?;
+        output.raw(b"\nsys_read = ")?;
+        output.list(self.kernel_sys_read.as_slice())?;
+        output.raw(b"\nsys_write = ")?;
+        output.list(self.kernel_sys_write.as_slice())?;
         output.raw(b"\n\n[storage]\nassignments = ")?;
         output.list(self.storage.as_slice())?;
         output.raw(b"\n\n[volumes]\nassignments = ")?;
         output.list(self.volumes.as_slice())?;
         output.raw(b"\n\n[devices]\nassignments = ")?;
         output.list(self.devices.as_slice())?;
-        output.raw(b"\n\n[network]\nbackend = ")?;
-        output.quoted(match self.network_backend {
-            NetworkBackend::None => b"none",
-            NetworkBackend::Mediated => b"mediated",
-            NetworkBackend::Shared => b"shared",
-        })?;
-        output.raw(b"\ninterface = ")?;
-        output.quoted(self.network_interface.as_bytes())?;
-        output.raw(b"\nsource = ")?;
-        output.quoted(self.network_source.as_bytes())?;
-        output.raw(b"\ningress_allow = ")?;
-        output.list(self.ingress_allow.as_slice())?;
-        output.raw(b"\ningress_deny = ")?;
-        output.list(self.ingress_deny.as_slice())?;
-        output.raw(b"\negress_allow = ")?;
-        output.list(self.egress_allow.as_slice())?;
-        output.raw(b"\negress_deny = ")?;
-        output.list(self.egress_deny.as_slice())?;
-        output.raw(b"\nport_forwards = ")?;
-        output.list(self.port_forwards.as_slice())?;
+        if self.network_backend != NetworkBackend::Shared
+            || !self.network_interface.is_empty()
+            || !self.network_source.is_empty()
+            || !self.port_forwards.as_slice().is_empty()
+        {
+            output.raw(b"\n\n[network]\nbackend = ")?;
+            output.quoted(match self.network_backend {
+                NetworkBackend::None => b"none",
+                NetworkBackend::Mediated => b"mediated",
+                NetworkBackend::Shared => b"shared",
+            })?;
+            output.raw(b"\ninterface = ")?;
+            output.quoted(self.network_interface.as_bytes())?;
+            output.raw(b"\nsource = ")?;
+            output.quoted(self.network_source.as_bytes())?;
+            output.raw(b"\nport_forwards = ")?;
+            output.list(self.port_forwards.as_slice())?;
+        }
         output.raw(b"\n\n[access]\nuid = ")?;
         output.number(self.access_uid)?;
         output.raw(b"\ngid = ")?;
@@ -1052,14 +1230,16 @@ impl InstanceConfig {
     /// descendants. Component boundaries prevent `/locked` from matching
     /// `/locked-other`.
     pub fn filesystem_write_denied(&self, path: &[u8]) -> bool {
-        self.filesystem_write_deny.as_slice().iter().any(|rule| {
-            let rule = rule.as_bytes();
-            path == rule
-                || (path.starts_with(rule)
-                    && rule != b"/"
-                    && path.get(rule.len()).is_some_and(|byte| *byte == b'/'))
-                || rule == b"/"
-        })
+        policy_path_matches(&self.filesystem_write_deny, path)
+    }
+
+    pub fn privilege_setid_denied(&self, path: &[u8], setuid: bool, setgid: bool) -> bool {
+        (setuid && !policy_path_matches(&self.privilege_setuid, path))
+            || (setgid && !policy_path_matches(&self.privilege_setgid, path))
+    }
+
+    pub fn device_create_denied(&self, path: &[u8]) -> bool {
+        !policy_path_matches(&self.device_create, path)
     }
 
     pub fn translated_port(&self, protocol: NetworkProtocol, internal: u16) -> Option<u16> {
@@ -1109,6 +1289,18 @@ impl InstanceConfig {
         }
         Some(output)
     }
+}
+
+fn policy_path_matches<const ITEMS: usize>(
+    rules: &TextList<ITEMS, PATH_BYTES>,
+    path: &[u8],
+) -> bool {
+    rules.as_slice().iter().any(|rule| {
+        let rule = rule.as_bytes();
+        path == rule
+            || rule == b"/"
+            || (path.starts_with(rule) && path.get(rule.len()).is_some_and(|byte| *byte == b'/'))
+    })
 }
 
 fn text_list_refs<const ITEMS: usize, const BYTES: usize>(
@@ -1221,6 +1413,21 @@ impl NormalizedConfig {
         }
         self.byte(b']')
     }
+
+    fn syscall_list<const N: usize>(&mut self, values: &[Text<N>]) -> Result<(), ConfigError> {
+        self.byte(b'[')?;
+        for (index, value) in values.iter().enumerate() {
+            if index != 0 {
+                self.raw(b", ")?;
+            }
+            let bytes = value.as_bytes();
+            let name = bytes
+                .strip_prefix(b"syscall.")
+                .ok_or(ConfigError::InvalidContract)?;
+            self.quoted(name)?;
+        }
+        self.byte(b']')
+    }
 }
 
 fn parse_section(line: &[u8]) -> Result<Section, ConfigError> {
@@ -1233,8 +1440,13 @@ fn parse_section(line: &[u8]) -> Result<Section, ConfigError> {
         b"resources" => Ok(Section::Resources),
         b"execution" => Ok(Section::Execution),
         b"contract" => Ok(Section::Contract),
-        b"userspace.contract" => Ok(Section::UserspaceContract),
-        b"userspace.filesystem" => Ok(Section::UserspaceFilesystem),
+        b"contract.syscalls" => Ok(Section::ContractSyscalls),
+        b"contract.filesystem" => Ok(Section::ContractFilesystem),
+        b"contract.network" => Ok(Section::ContractNetwork),
+        b"contract.devices" => Ok(Section::ContractDevices),
+        b"contract.privileges" => Ok(Section::ContractPrivileges),
+        b"contract.process" => Ok(Section::ContractProcess),
+        b"contract.kernel" => Ok(Section::ContractKernel),
         b"storage" => Ok(Section::Storage),
         b"volumes" => Ok(Section::Volumes),
         b"devices" => Ok(Section::Devices),
@@ -1313,21 +1525,18 @@ fn parse_field(
                 _ => return Err(ConfigError::InvalidValue),
             };
         }
-        (Section::Execution, b"dispatch") => {
-            builder.mark(1u64 << 52)?;
-            builder.dispatch_mode = match parse_string::<32>(value)?.as_bytes() {
-                b"paranoid" => DispatchMode::Paranoid,
-                b"selective" => DispatchMode::Selective,
-                _ => return Err(ConfigError::InvalidValue),
-            };
-        }
-        (Section::Contract, b"profile") => {
+        (Section::Contract, b"version") => {
             builder.mark(1 << 10)?;
-            builder.contract_profile = parse_string(value)?;
+            builder.mark(1u128 << 36)?;
+            builder.contract_recipe_version = parse_u64(value)?;
         }
-        (Section::Contract, b"templates") => {
-            builder.mark(1 << 18)?;
-            builder.contract_templates = parse_list(value)?;
+        (Section::Contract, b"catalog") => {
+            builder.mark(1u128 << 37)?;
+            builder.contract_catalog_version = parse_u64(value)?;
+        }
+        (Section::Contract, b"default") => {
+            builder.mark(1u128 << 38)?;
+            builder.contract_default = parse_contract_default(value)?;
         }
         (Section::Contract, b"allow") => {
             builder.mark(1 << 19)?;
@@ -1341,85 +1550,134 @@ fn parse_field(
             builder.mark(1 << 21)?;
             builder.contract_digest = parse_string(value)?;
         }
-        (Section::UserspaceContract, b"version") => {
-            builder.mark(1 << 10)?;
-            builder.mark(1u64 << 36)?;
-            builder.contract_recipe_version = parse_u64(value)?;
-        }
-        (Section::UserspaceContract, b"catalog") => {
-            builder.mark(1u64 << 37)?;
-            builder.contract_catalog_version = parse_u64(value)?;
-        }
-        (Section::UserspaceContract, b"default") => {
-            builder.mark(1u64 << 38)?;
-            builder.contract_default = match parse_string::<32>(value)?.as_bytes() {
-                b"deny" => ContractDefault::Deny,
+        (Section::ContractSyscalls, b"control") => {
+            builder.mark(1u128 << 52)?;
+            builder.dispatch_mode = match parse_string::<32>(value)?.as_bytes() {
+                b"paranoid" => DispatchMode::Paranoid,
+                b"selective" => DispatchMode::Selective,
                 _ => return Err(ConfigError::InvalidValue),
             };
         }
-        (Section::UserspaceContract, b"read") => {
-            builder.mark(1u64 << 39)?;
-            builder.contract_read = parse_list(value)?;
+        (Section::ContractSyscalls, b"default") => {
+            builder.mark(1u128 << 53)?;
+            parse_contract_default(value)?;
         }
-        (Section::UserspaceContract, b"write") => {
-            builder.mark(1u64 << 40)?;
-            builder.contract_write = parse_list(value)?;
+        (Section::ContractSyscalls, b"allow") => {
+            builder.mark(1u128 << 47)?;
+            builder.contract_exact_allow = parse_syscall_list(value)?;
         }
-        (Section::UserspaceContract, b"execute") => {
-            builder.mark(1u64 << 41)?;
-            builder.contract_execute = parse_list(value)?;
+        (Section::ContractSyscalls, b"deny") => {
+            builder.mark(1u128 << 48)?;
+            builder.contract_exact_deny = parse_syscall_list(value)?;
         }
-        (Section::UserspaceContract, b"connect") => {
-            builder.mark(1u64 << 42)?;
-            builder.contract_connect = parse_list(value)?;
+        (Section::ContractFilesystem, b"default") => {
+            builder.mark(1u128 << 54)?;
+            parse_contract_default(value)?;
         }
-        (Section::UserspaceContract, b"listen") => {
-            builder.mark(1u64 << 43)?;
-            builder.contract_listen = parse_list(value)?;
+        (Section::ContractFilesystem, b"read") => {
+            builder.mark(1u128 << 55)?;
+            builder.filesystem_read = parse_list(value)?;
         }
-        (Section::UserspaceContract, b"process") => {
-            builder.mark(1u64 << 44)?;
-            builder.contract_process = parse_list(value)?;
+        (Section::ContractFilesystem, b"write") => {
+            builder.mark(1u128 << 56)?;
+            builder.filesystem_write = parse_list(value)?;
         }
-        (Section::UserspaceContract, b"system") => {
-            builder.mark(1u64 << 45)?;
-            builder.contract_system = parse_list(value)?;
+        (Section::ContractFilesystem, b"create") => {
+            builder.mark(1u128 << 57)?;
+            builder.filesystem_create = parse_list(value)?;
         }
-        (Section::UserspaceContract, b"deny") => {
-            builder.mark(1u64 << 46)?;
-            builder.contract_recipe_deny = parse_list(value)?;
-        }
-        (Section::UserspaceContract, b"exact_allow") => {
-            builder.mark(1u64 << 47)?;
-            builder.contract_exact_allow = parse_list(value)?;
-        }
-        (Section::UserspaceContract, b"exact_deny") => {
-            builder.mark(1u64 << 48)?;
-            builder.contract_exact_deny = parse_list(value)?;
-        }
-        (Section::UserspaceContract, b"digest") => {
-            builder.mark(1 << 21)?;
-            builder.contract_digest = parse_string(value)?;
-        }
-        (Section::UserspaceFilesystem, b"write_deny") => {
-            builder.mark(1u64 << 49)?;
+        (Section::ContractFilesystem, b"deny") => {
+            builder.mark(1u128 << 49)?;
             builder.filesystem_write_deny = parse_list(value)?;
         }
-        (Section::UserspaceFilesystem, b"setid") => {
-            builder.mark(1u64 << 50)?;
-            builder.filesystem_setid = match parse_string::<32>(value)?.as_bytes() {
-                b"allow" => true,
-                b"deny" => false,
-                _ => return Err(ConfigError::InvalidValue),
-            };
+        (Section::ContractNetwork, b"default") => {
+            builder.mark(1u128 << 58)?;
+            parse_contract_default(value)?;
         }
-        (Section::UserspaceFilesystem, b"device_nodes") => {
-            builder.mark(1u64 << 51)?;
-            builder.filesystem_device_nodes = match parse_string::<32>(value)?.as_bytes() {
-                b"allow" => true,
-                b"deny" => false,
-                _ => return Err(ConfigError::InvalidValue),
-            };
+        (Section::ContractNetwork, b"inbound") => {
+            builder.mark(1u128 << 42)?;
+            builder.ingress_allow = parse_list(value)?;
+        }
+        (Section::ContractNetwork, b"outbound") => {
+            builder.mark(1u128 << 43)?;
+            builder.egress_allow = parse_list(value)?;
+        }
+        (Section::ContractDevices, b"default") => {
+            builder.mark(1u128 << 59)?;
+            parse_contract_default(value)?;
+        }
+        (Section::ContractDevices, b"read") => {
+            builder.mark(1u128 << 60)?;
+            builder.device_read = parse_list(value)?;
+        }
+        (Section::ContractDevices, b"write") => {
+            builder.mark(1u128 << 61)?;
+            builder.device_write = parse_list(value)?;
+        }
+        (Section::ContractDevices, b"create") => {
+            builder.mark(1u128 << 62)?;
+            builder.device_create = parse_list(value)?;
+            builder.filesystem_device_nodes = !builder.device_create.as_slice().is_empty();
+        }
+        (Section::ContractPrivileges, b"default") => {
+            builder.mark(1u128 << 63)?;
+            parse_contract_default(value)?;
+        }
+        (Section::ContractPrivileges, b"setuid") => {
+            builder.mark(1u128 << 64)?;
+            builder.privilege_setuid = parse_list(value)?;
+        }
+        (Section::ContractPrivileges, b"setgid") => {
+            builder.mark(1u128 << 65)?;
+            builder.privilege_setgid = parse_list(value)?;
+        }
+        (Section::ContractProcess, b"default") => {
+            builder.mark(1u128 << 66)?;
+            parse_contract_default(value)?;
+        }
+        (Section::ContractProcess, b"max_processes") => {
+            builder.mark(1u128 << 67)?;
+            builder.process_max_processes = parse_u64(value)?;
+        }
+        (Section::ContractProcess, b"max_threads") => {
+            builder.mark(1u128 << 68)?;
+            builder.process_max_threads = parse_u64(value)?;
+        }
+        (Section::ContractProcess, b"signals") => {
+            builder.mark(1u128 << 69)?;
+            builder.process_signals = parse_list(value)?;
+        }
+        (Section::ContractProcess, b"ptrace") => {
+            builder.mark(1u128 << 70)?;
+            builder.process_ptrace = parse_allow_deny(value)?;
+        }
+        (Section::ContractProcess, b"namespace_create") => {
+            builder.mark(1u128 << 71)?;
+            builder.process_namespace_create = parse_list(value)?;
+        }
+        (Section::ContractProcess, b"namespace_join") => {
+            builder.mark(1u128 << 72)?;
+            builder.process_namespace_join = parse_list(value)?;
+        }
+        (Section::ContractKernel, b"default") => {
+            builder.mark(1u128 << 73)?;
+            parse_contract_default(value)?;
+        }
+        (Section::ContractKernel, b"proc_read") => {
+            builder.mark(1u128 << 74)?;
+            builder.kernel_proc_read = parse_list(value)?;
+        }
+        (Section::ContractKernel, b"proc_write") => {
+            builder.mark(1u128 << 75)?;
+            builder.kernel_proc_write = parse_list(value)?;
+        }
+        (Section::ContractKernel, b"sys_read") => {
+            builder.mark(1u128 << 76)?;
+            builder.kernel_sys_read = parse_list(value)?;
+        }
+        (Section::ContractKernel, b"sys_write") => {
+            builder.mark(1u128 << 77)?;
+            builder.kernel_sys_write = parse_list(value)?;
         }
         (Section::Storage, b"assignments") => {
             builder.mark(1 << 11)?;
@@ -1479,15 +1737,15 @@ fn parse_field(
             builder.access_gid = parse_u64(value)?;
         }
         (Section::Hooks, b"pre_boot") => {
-            builder.mark(1u64 << 32)?;
+            builder.mark(1u128 << 32)?;
             builder.pre_boot_hooks = parse_list(value)?;
         }
         (Section::Hooks, b"timeout_seconds") => {
-            builder.mark(1u64 << 33)?;
+            builder.mark(1u128 << 33)?;
             builder.hook_timeout_seconds = parse_u64(value)?;
         }
         (Section::Hooks, b"failure") => {
-            builder.mark(1u64 << 34)?;
+            builder.mark(1u128 << 34)?;
             builder.hook_failure_policy = match parse_string::<32>(value)?.as_bytes() {
                 b"stop" => HookFailurePolicy::Stop,
                 b"continue" => HookFailurePolicy::Continue,
@@ -1495,7 +1753,7 @@ fn parse_field(
             };
         }
         (Section::Lifecycle, b"stop_timeout_seconds") => {
-            builder.mark(1u64 << 35)?;
+            builder.mark(1u128 << 35)?;
             builder.stop_timeout_seconds = parse_u64(value)?;
         }
         (Section::Audit, b"mode") => {
@@ -1531,6 +1789,21 @@ fn parse_u64(value: &[u8]) -> Result<u64, ConfigError> {
             .ok_or(ConfigError::InvalidValue)?;
     }
     Ok(number)
+}
+
+fn parse_contract_default(value: &[u8]) -> Result<ContractDefault, ConfigError> {
+    match parse_string::<32>(value)?.as_bytes() {
+        b"deny" => Ok(ContractDefault::Deny),
+        _ => Err(ConfigError::InvalidValue),
+    }
+}
+
+fn parse_allow_deny(value: &[u8]) -> Result<bool, ConfigError> {
+    match parse_string::<32>(value)?.as_bytes() {
+        b"allow" => Ok(true),
+        b"deny" => Ok(false),
+        _ => Err(ConfigError::InvalidValue),
+    }
 }
 
 fn parse_string<const N: usize>(value: &[u8]) -> Result<Text<N>, ConfigError> {
@@ -1601,6 +1874,34 @@ fn parse_list<const ITEMS: usize, const N: usize>(
         }
     }
     Ok(output)
+}
+
+fn parse_syscall_list(
+    value: &[u8],
+) -> Result<TextList<CONTRACT_RULE_ITEMS, CONTRACT_RULE_BYTES>, ConfigError> {
+    let names: TextList<CONTRACT_RULE_ITEMS, CONTRACT_RULE_BYTES> = parse_list(value)?;
+    let mut selectors = TextList::empty();
+    for name in names.as_slice() {
+        let bytes = name.as_bytes();
+        if bytes.is_empty()
+            || bytes.starts_with(b"syscall.")
+            || bytes.iter().any(|byte| {
+                !byte.is_ascii_lowercase()
+                    && !byte.is_ascii_digit()
+                    && !matches!(*byte, b'_' | b'-' | b'*')
+            })
+        {
+            return Err(ConfigError::InvalidContract);
+        }
+        let mut selector = Text::empty();
+        for byte in b"syscall.".iter().chain(bytes) {
+            selector.push(*byte)?;
+        }
+        ginux_contract::validate_selector(selector.as_bytes())
+            .map_err(|_| ConfigError::InvalidContract)?;
+        selectors.push(selector)?;
+    }
+    Ok(selectors)
 }
 
 fn strip_comment(line: &[u8]) -> Result<&[u8], ConfigError> {
@@ -1676,6 +1977,9 @@ fn validate_instance_path(bytes: &[u8]) -> Result<(), ConfigError> {
 }
 
 fn validate_policy_path(bytes: &[u8]) -> Result<(), ConfigError> {
+    if bytes == b"/" {
+        return Ok(());
+    }
     validate_instance_path(bytes)?;
     if bytes.len() > 1
         && (bytes.ends_with(b"/")
@@ -1978,7 +2282,11 @@ memory_mib = 128
 profile = "security"
 backend = "interpreter"
 [contract]
-profile = "minimal-v1"
+version = 1
+catalog = 2
+default = "deny"
+allow = []
+deny = []
 [storage]
 assignments = []
 [devices]
@@ -2010,8 +2318,8 @@ policy = "stop"
         assert_eq!(defaulted.dispatch_mode, DispatchMode::Selective);
 
         let paranoid = VALID.replace(
-            "backend = \"interpreter\"",
-            "backend = \"interpreter\"\ndispatch = \"paranoid\"",
+            "[contract]",
+            "[contract.syscalls]\ncontrol = \"paranoid\"\ndefault = \"deny\"\nallow = []\ndeny = []\n[contract]",
         );
         let paranoid = InstanceConfig::parse(paranoid.as_bytes()).unwrap();
         assert_eq!(paranoid.dispatch_mode, DispatchMode::Paranoid);
@@ -2023,8 +2331,8 @@ policy = "stop"
         );
 
         let unknown = VALID.replace(
-            "backend = \"interpreter\"",
-            "backend = \"interpreter\"\ndispatch = \"automatic\"",
+            "[contract]",
+            "[contract.syscalls]\ncontrol = \"automatic\"\n[contract]",
         );
         assert_eq!(
             InstanceConfig::parse(unknown.as_bytes()),
@@ -2035,13 +2343,16 @@ policy = "stop"
     #[test]
     fn self_contained_contract_recipe_round_trips_and_rejects_mixing() {
         let recipe = VALID.replace(
-            "[contract]\nprofile = \"minimal-v1\"",
-            "[userspace.contract]\nversion = 1\ncatalog = 2\ndefault = \"deny\"\nread = [\"fs.**\", \"proc.**\"]\nwrite = [\"fs.**\"]\nexecute = [\"syscall.execve\"]\nconnect = [\"network.**\"]\nlisten = [\"network.**\"]\nprocess = [\"signal.**\"]\nsystem = [\"syscall.getpid\"]\ndeny = [\"dev.mmio.direct\"]\nexact_allow = []\nexact_deny = []",
+            "[storage]",
+            "[contract.filesystem]\ndefault = \"deny\"\nread = [\"/\"]\nwrite = [\"/\"]\ncreate = [\"/\"]\ndeny = []\n[contract.kernel]\ndefault = \"deny\"\nproc_read = [\"/\"]\nproc_write = []\nsys_read = [\"/\"]\nsys_write = []\n[storage]",
         );
         let config = InstanceConfig::parse(recipe.as_bytes()).unwrap();
         assert_eq!(config.contract_recipe_version, 1);
         assert_eq!(config.contract_catalog_version, 2);
-        assert_eq!(config.contract_read.as_slice()[0].as_bytes(), b"fs.**");
+        assert_eq!(
+            config.contract_read.as_slice()[0].as_bytes(),
+            b"filesystem.**"
+        );
         assert_eq!(
             config
                 .effective_contract()
@@ -2057,13 +2368,10 @@ policy = "stop"
             config
         );
 
-        let mixed = recipe.replace(
-            "[storage]",
-            "[contract]\nprofile = \"minimal-v1\"\n[storage]",
-        );
+        let mixed = recipe.replace("[storage]", "[userspace.contract]\nversion = 1\n[storage]");
         assert_eq!(
             InstanceConfig::parse(mixed.as_bytes()),
-            Err(ConfigError::DuplicateField)
+            Err(ConfigError::UnknownSection)
         );
     }
 
@@ -2088,7 +2396,7 @@ policy = "stop"
             Err(ConfigError::DerivedField)
         );
 
-        let invalid_profile = VALID.replace("minimal-v1", "unversioned");
+        let invalid_profile = VALID.replace("catalog = 2", "catalog = 99");
         assert_eq!(
             InstanceConfig::parse(invalid_profile.as_bytes()),
             Err(ConfigError::InvalidContract)
@@ -2254,7 +2562,7 @@ policy = "stop"
         let shared = VALID.replace("backend = \"none\"", "backend = \"shared\"");
         let config = InstanceConfig::parse(shared.as_bytes()).unwrap();
         assert_eq!(config.network_backend, NetworkBackend::Shared);
-        assert!(config
+        assert!(!config
             .normalized()
             .unwrap()
             .as_bytes()
@@ -2270,12 +2578,12 @@ policy = "stop"
     }
 
     #[test]
-    fn parses_complete_gate975_schema_and_round_trips() {
+    fn parses_complete_hierarchical_schema_and_round_trips() {
         let complete = VALID
             .replace("[resources]", "[identity]\nhostname = \"demo.example\"\n\n[resources]")
             .replace(
-                "profile = \"minimal-v1\"",
-                "profile = \"gate9-systemd-v1\"\ntemplates = [\"network-client-v1\"]\nallow = [\"syscall.read*\"]\ndeny = [\"ioctl.*\"]",
+                "[storage]",
+                "[contract.network]\ndefault = \"deny\"\ninbound = [\"tcp:80\"]\noutbound = [\"tcp:443\", \"udp:53\"]\n\n[storage]",
             )
             .replace(
                 "[devices]",
@@ -2283,7 +2591,7 @@ policy = "stop"
             )
             .replace(
                 "backend = \"none\"",
-                "backend = \"shared\"\ninterface = \"eth0:1\"\nsource = \"192.0.2.10\"\ningress_allow = [\"tcp:80\"]\ningress_deny = [\"tcp:22\"]\negress_allow = [\"tcp:443\", \"udp:53\"]\negress_deny = [\"tcp:25\"]\nport_forwards = [\"tcp/eth0:1/8080/80\"]",
+                "backend = \"shared\"\ninterface = \"eth0:1\"\nsource = \"192.0.2.10\"\nport_forwards = [\"tcp/eth0:1/8080/80\"]",
             )
             .replace(
                 "[audit]",
@@ -2298,16 +2606,16 @@ policy = "stop"
         );
         assert_eq!(config.pre_boot_hooks.as_slice().len(), 1);
         assert!(config.network_allows(true, NetworkProtocol::Tcp, 80));
-        assert!(!config.network_allows(true, NetworkProtocol::Tcp, 22));
         assert!(!config.network_allows(true, NetworkProtocol::Tcp, 81));
         assert!(config.network_allows(false, NetworkProtocol::Udp, 53));
         assert!(!config.network_allows(false, NetworkProtocol::Tcp, 25));
         assert_eq!(config.translated_port(NetworkProtocol::Tcp, 80), Some(8080));
         assert_eq!(config.translated_port(NetworkProtocol::Tcp, 81), None);
         let normalized = config.normalized().unwrap();
+        let reparsed = InstanceConfig::parse(normalized.as_bytes()).unwrap();
         assert_eq!(
-            InstanceConfig::parse(normalized.as_bytes()).unwrap(),
-            config
+            reparsed.normalized().unwrap().as_bytes(),
+            normalized.as_bytes()
         );
     }
 
@@ -2428,13 +2736,14 @@ policy = "stop"
         use std::format;
         let source = VALID.replace(
             "[storage]",
-            "[userspace.filesystem]\nwrite_deny = [\"/ginux-demo/read-only\"]\nsetid = \"deny\"\ndevice_nodes = \"deny\"\n\n[storage]",
+            "[contract.filesystem]\ndefault = \"deny\"\nread = [\"/\"]\nwrite = [\"/\"]\ncreate = [\"/\"]\ndeny = [\"/ginux-demo/read-only\"]\n\n[contract.devices]\ndefault = \"deny\"\nread = []\nwrite = []\ncreate = []\n\n[contract.privileges]\ndefault = \"deny\"\nsetuid = []\nsetgid = []\n\n[storage]",
         );
         let config = InstanceConfig::parse(source.as_bytes()).unwrap();
         assert!(config.filesystem_write_denied(b"/ginux-demo/read-only"));
         assert!(config.filesystem_write_denied(b"/ginux-demo/read-only/child/value"));
         assert!(!config.filesystem_write_denied(b"/ginux-demo/read-only-other"));
-        assert!(!config.filesystem_setid);
+        assert!(config.privilege_setuid.as_slice().is_empty());
+        assert!(config.privilege_setgid.as_slice().is_empty());
         assert!(!config.filesystem_device_nodes);
         assert_eq!(
             InstanceConfig::parse(config.normalized().unwrap().as_bytes()).unwrap(),
@@ -2443,8 +2752,8 @@ policy = "stop"
 
         for invalid in ["relative", "/path/../escape", "/path//child", "/path/"] {
             let invalid_source = source.replace(
-                "write_deny = [\"/ginux-demo/read-only\"]",
-                &format!("write_deny = [\"{invalid}\"]"),
+                "deny = [\"/ginux-demo/read-only\"]",
+                &format!("deny = [\"{invalid}\"]"),
             );
             assert_eq!(
                 InstanceConfig::parse(invalid_source.as_bytes()),
@@ -2465,7 +2774,8 @@ policy = "stop"
             .windows(b"$6$ginux$".len())
             .any(|window| window == b"$6$ginux$"));
         assert!(config.filesystem_write_denied(b"/ginux-demo/read-only/child"));
-        assert!(!config.filesystem_setid);
+        assert!(config.privilege_setuid.as_slice().is_empty());
+        assert!(config.privilege_setgid.as_slice().is_empty());
         assert!(!config.filesystem_device_nodes);
     }
 

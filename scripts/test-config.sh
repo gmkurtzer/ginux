@@ -12,8 +12,6 @@ missing_init_log=build/gate9-config-missing-init.log
 invalid_init_log=build/gate9-config-invalid-init.log
 gate975_log=build/gate975-config.log
 gate975_override_log=build/gate975-config-override.log
-gate975_invalid_log=build/gate975-config-invalid.log
-gate975_conflict_log=build/gate975-config-conflict.log
 gate975_volume_log=build/gate975-config-volume.log
 gate975_hook_log=build/gate975-config-hook.log
 contract_plan_log=build/gate10-contract-plan.log
@@ -115,7 +113,8 @@ grep -Fqx 'GINUX_CONFIG: rejected reason=invalid-value managed-started=false' "$
 rocky_ssh '/var/tmp/ginux config /var/tmp/gate975.toml' >"$gate975_log" 2>&1
 grep -Fqx 'GINUX_CONFIG: PASS' "$gate975_log"
 grep -Fqx 'hostname = "gate975-demo"' "$gate975_log"
-grep -Fqx 'port_forwards = ["tcp/eth0:1/8080/80"]' "$gate975_log"
+grep -Fqx 'inbound = ["tcp:80"]' "$gate975_log"
+grep -Fqx 'outbound = ["tcp:443", "udp:53"]' "$gate975_log"
 grep -Fqx 'pre_boot = ["/usr/local/sbin/prepare-instance --safe"]' "$gate975_log"
 
 rocky_ssh '/var/tmp/ginux instance-plan /var/tmp/gate10-strict.toml' >"$contract_plan_log" 2>&1
@@ -128,13 +127,13 @@ grep -Eq '^GINUX_CONTRACT: catalog=2 instance=rocky profile=self-contained-v1 di
 grep -Fq 'operation=syscall.clock_gettime action=mediate provenance=recipe-allow source=system' "$contract_systemd_plan_log"
 grep -Fqx 'GINUX_CONTRACT: PASS' "$contract_systemd_plan_log"
 
-if rocky_ssh "/var/tmp/ginux config-merge /var/tmp/gate10-strict.toml 'userspace.contract.read=[\"fs.does-not-exist.**\"]'" >"$contract_invalid_log" 2>&1; then
+if rocky_ssh "/var/tmp/ginux config-merge /var/tmp/gate10-strict.toml 'contract.syscalls.allow=[\"does_not_exist_*\"]'" >"$contract_invalid_log" 2>&1; then
     printf '%s\n' 'unmatched contract selector was incorrectly accepted' >&2
     exit 1
 fi
 grep -Fqx 'GINUX_CONFIG: rejected reason=invalid-contract managed-started=false' "$contract_invalid_log"
 
-rocky_ssh "grep -Fqx '[userspace.contract]' /var/tmp/gate10-systemd.toml; ! grep -Fq '[contract]' /var/tmp/gate10-systemd.toml"
+rocky_ssh "grep -Fqx '[contract]' /var/tmp/gate10-systemd.toml; grep -Fqx '[contract.syscalls]' /var/tmp/gate10-systemd.toml; ! grep -Fq '[userspace.' /var/tmp/gate10-systemd.toml"
 rocky_ssh 'GINUX_RUNTIME=/var/tmp/ginux /var/tmp/ginux-cli instance validate /var/tmp/gate10-systemd.toml' >"$instance_validate_log" 2>&1
 grep -Eq '^Contract valid: instance=rocky catalog=2 digest=[0-9a-f]{64} operations=[0-9]+$' "$instance_validate_log"
 rocky_ssh 'GINUX_RUNTIME=/var/tmp/ginux /var/tmp/ginux-cli instance explain /var/tmp/gate10-systemd.toml filesystem.path.write' >"$instance_explain_log" 2>&1
@@ -154,23 +153,11 @@ if rocky_ssh 'GINUX_RUNTIME=/var/tmp/ginux /var/tmp/ginux-cli instance validate 
     exit 1
 fi
 
-rocky_ssh "/var/tmp/ginux config-merge /var/tmp/gate975.toml 'resources.vcpus=4' 'identity.hostname=\"override.example\"' 'network.interface=\"eth1\"'" >"$gate975_override_log" 2>&1
+rocky_ssh "/var/tmp/ginux config-merge /var/tmp/gate975.toml 'resources.vcpus=4' 'identity.hostname=\"override.example\"' 'contract.process.max_threads=2048'" >"$gate975_override_log" 2>&1
 grep -Fqx 'vcpus = 4' "$gate975_override_log"
 grep -Fqx 'hostname = "override.example"' "$gate975_override_log"
-grep -Fqx 'interface = "eth1"' "$gate975_override_log"
+grep -Fqx 'max_threads = 2048' "$gate975_override_log"
 grep -Fqx 'memory_mib = 1024' "$gate975_override_log"
-
-if rocky_ssh "/var/tmp/ginux config-merge /var/tmp/gate975.toml 'network.interface=\"bad interface\"'" >"$gate975_invalid_log" 2>&1; then
-    printf '%s\n' 'invalid command-line override was incorrectly accepted' >&2
-    exit 1
-fi
-grep -Fqx 'GINUX_CONFIG: rejected reason=invalid-value managed-started=false' "$gate975_invalid_log"
-
-if rocky_ssh "/var/tmp/ginux config-merge /var/tmp/gate975.toml 'network.port_forwards=[\"tcp/lo/8080/80\",\"tcp/lo/8080/81\"]'" >"$gate975_conflict_log" 2>&1; then
-    printf '%s\n' 'conflicting port mappings were incorrectly accepted' >&2
-    exit 1
-fi
-grep -Fqx 'GINUX_CONFIG: rejected reason=invalid-value managed-started=false' "$gate975_conflict_log"
 
 if rocky_ssh "/var/tmp/ginux config-merge /var/tmp/gate975.toml 'volumes.assignments=[\"/proc:/data:ro\"]'" >"$gate975_volume_log" 2>&1; then
     printf '%s\n' 'unsafe virtual-tree volume mapping was incorrectly accepted' >&2

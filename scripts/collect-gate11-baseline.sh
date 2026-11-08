@@ -28,7 +28,7 @@ test "$(rocky_ssh nproc)" -ge 4 || {
 }
 
 ./scripts/install-ginux-host.sh >/dev/null
-sed "s/^dispatch = \"selective\"/dispatch = \"$dispatch_mode\"/" \
+sed "s/^control = \"selective\"/control = \"$dispatch_mode\"/" \
     config/instance-gate11-benchmark.toml >"$output_dir/instance-config.toml"
 rocky_scp "$output_dir/instance-config.toml" \
     "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/instance-gate11-benchmark.toml"

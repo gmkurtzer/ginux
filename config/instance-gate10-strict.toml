@@ -15,20 +15,18 @@ memory_mib = 1024
 profile = "balanced"
 backend = "ptrace-native"
 
-[userspace.contract]
+[contract]
 version = 1
 catalog = 2
 default = "deny"
-read = []
-write = []
-execute = []
-connect = []
-listen = []
-process = []
-system = []
+allow = []
 deny = []
-exact_allow = ["syscall.getpid", "syscall.getppid", "syscall.gettid", "syscall.write", "syscall.exit", "syscall.exit_group"]
-exact_deny = []
+
+[contract.syscalls]
+control = "selective"
+default = "deny"
+allow = ["getpid", "getppid", "gettid", "write", "exit", "exit_group"]
+deny = []
 
 [storage]
 assignments = ["root-overlay"]
