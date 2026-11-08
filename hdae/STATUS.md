@@ -500,9 +500,11 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Implement and verify the approved paranoid/selective dispatch configuration,
-starting with `sched_yield` as the measured direct-safe operation. Then rerun
-the matched matrix and complete Gate 11 comparison and regression automation.
+Present the completed selective-dispatch evidence and obtain the human's Gate
+11 direction for the five thread-yield rows that remain 5.09% to 7.99% slower
+than native under x86-64 QEMU TCG. Do not publish an accepted baseline or close
+the gate until the human chooses native x86-64/KVM confirmation, a specific
+thread-only budget, or an expanded kernel-side enforcement architecture.
 
 ## Context recovery
 
@@ -510,16 +512,20 @@ the matched matrix and complete Gate 11 comparison and regression automation.
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
 - Active gate: Gate 11, performance characterization and optimization, is
-  active on `hdae/performance-characterization`.
-- Last evidence: Gate 10.5 pull request 237 merged as `53a54add` with passing
-  `launch-integration` and `static-and-unit` CI; the human accepted and closed
-  the gate on 2026-11-07.
+  partial on `hdae/performance-characterization`.
+- Last evidence: strict paranoid/selective dispatch, direct-safe
+  `sched_yield`, cache-compatible seccomp filtering, and comparison automation
+  are committed through `2a021baf`. The final five-second/five-repetition
+  matrix passes every CPU, memory, and mutex row; all five thread rows remain
+  5.09% to 7.99% slower and fail the 4% budget. Functional, contract, denial,
+  VFS, process, kernel-view, and systemd regressions pass.
 - Approved network direction: Gate 9 defaults to full host-shared inbound and
   outbound networking with normal host routing and bind conflicts, under Ginux
   mediation and audit. Gate 9.75 adds comprehensive instance configuration,
   network selection, port controls, and translation.
 - Gate 9.75 closure: pull request 229 merged as `8a475e8b`; human accepted and
   closed the gate on 2026-11-06.
-- Required human decision: none for the approved paranoid/selective Gate 11
-  implementation. Any further scope expansion, invariant change, or tolerance
-  exception still requires explicit review.
+- Required human decision: select the next Gate 11 boundary: native x86-64/KVM
+  confirmation before setting a durable budget; a thread-only tolerance of at
+  least 8%; or an explicitly scoped kernel-side enforcement component. The
+  current 4% budget remains authoritative until that decision.

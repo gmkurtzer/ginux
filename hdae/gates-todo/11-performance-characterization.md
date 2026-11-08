@@ -115,6 +115,20 @@ criterion.
   paranoid mode mediates every syscall; selective mode directly executes only
   contract-allowed, cataloged direct-safe operations; denial and complex
   semantics remain Ginux userspace responsibilities.
+- [x] Implemented strict per-instance `paranoid` and `selective` dispatch.
+  Omitted configuration defaults to paranoid and unknown values fail closed.
+- [x] Marked only `sched_yield` direct-safe in contract catalog 2. Selective
+  filters require both effective permission and that independent catalog bit;
+  every other operation remains traced through Ginux.
+- [x] Changed the selective seccomp program to the Linux allow-cache-compatible
+  instruction subset. The supervisor reads mediated syscall numbers from the
+  saved registers, preserving architecture validation and denial behavior while
+  allowing the kernel to cache direct-safe decisions.
+- [x] Added portable native-budget, accepted-baseline regression, environment
+  compatibility, deliberately perturbed fixture, and human-demo automation.
+- [x] Stabilized the process identity regression after the faster selective
+  path exposed a polling race. The test now freezes the supervisor after its
+  tracee appears and inspects the ptrace-stopped tracee deterministically.
 
 ## Remaining work
 
@@ -122,13 +136,13 @@ criterion.
   from prior evidence. Final-duration confirmation remains part of completion.
 - [x] Package or install one pinned `sysbench` build for use by both the native
   control and Ginux instance, and verify its identity before every comparison.
-- [ ] Implement comparison and report automation.
-- [ ] Implement strict `paranoid` and `selective` instance configuration,
+- [x] Implement comparison and report automation.
+- [x] Implement strict `paranoid` and `selective` instance configuration,
   defaulting existing recipes to paranoid so configuration migration cannot
   silently weaken the boundary.
-- [ ] Implement the first selective direct-safe operation (`sched_yield`) and
+- [x] Implement the first selective direct-safe operation (`sched_yield`) and
   prove that denied and complex operations still enter Ginux before effect.
-- [ ] Add mode-specific configuration, runtime, denial, audit, and performance
+- [x] Add mode-specific configuration, runtime, denial, audit, and performance
   verification.
 - [x] Collect the initial repeated baseline results used to select profiling
   targets. Final accepted results require a longer confirmation run.
@@ -136,8 +150,10 @@ criterion.
   approved userspace-dispatch architecture. The mandatory row still fails and
   requires an architecture decision; other Gate 11 workloads remain open.
 - [ ] Persist the accepted baseline and add automatic per-workload regression
-  checks to the normal performance test target.
-- [ ] Run full regression and document remaining costs.
+  checks to the normal performance test target. The checks are implemented;
+  publishing an accepted baseline is intentionally pending because five
+  mandatory rows still fail.
+- [x] Run full regression and document remaining costs.
 
 ## Acceptance criteria
 
@@ -251,6 +267,24 @@ criterion.
   variance and failed; a longer five-second, five-repetition confirmation in
   `build/gate11-memory-v2t1-confirm/report.md` passed at 1.003x native with
   1.52% Ginux variance. Its 2-thread companion also passed at 1.003x.
+- The final clean selective matrix in `build/gate11-selective-final/` used
+  five-second workloads and five repetitions at 1, 2, and 4 vCPUs. All CPU
+  rows passed at 0.996x to 1.001x, all memory rows passed at 0.969x to 1.009x,
+  and all mutex rows passed at 0.990x to 0.996x. All five thread-yield rows
+  remain mandatory failures: 0.949x, 0.932x, 0.935x, 0.949x, and 0.920x
+  native performance (5.09% to 7.99% slower).
+- Before the allow-cache-compatible filter, the stable one-vCPU thread row was
+  0.932x native. A focused post-change probe reached 0.971x; the complete final
+  matrix above is authoritative because it covers every allocation with the
+  longer repeated protocol.
+- `make test-bench-compare` passes and proves nonzero outcomes for a native
+  budget violation and an accepted-Ginux regression, plus a distinct exit 2
+  for incompatible environments. Running `scripts/bench-compare.sh` against
+  the final matrix returns 1 and names exactly the five failing thread rows.
+- Fresh retained-code verification passes `make check`, `make test-contract`,
+  `make test-contract-runtime`, `make test-native-vfs`, `make test-process`,
+  `make test-kernel-views`, and the complete `make test-systemd` cold, warm,
+  repeat, offline, DNF-failure, startup-failure, and shutdown suite.
 
 ## Decisions and limitations
 
@@ -289,6 +323,17 @@ criterion.
   Denials and complex semantics remain in Ginux. Native x86-64/KVM should also
   be measured before setting a durable budget because the current macOS arm64
   QEMU TCG environment amplifies context-switch and seccomp costs.
+- Selective `sched_yield` no longer enters the Ginux userspace dispatcher or
+  audit path. Its remaining 5.09% to 7.99% deficit is the host-kernel seccomp
+  filter/cache and task-work cost as amplified by x86-64 QEMU TCG, not contract
+  lookup, audit formatting, ptrace stops, or broker round trips.
+- A diagnostic run with `SECCOMP_FILTER_FLAG_SPEC_ALLOW` measured 0.939x native,
+  worse than the retained path, and would disable a speculative-execution
+  mitigation. It was reverted and is not an acceptable optimization.
+- No workload-specific tolerance exception has been approved. Gate 11 remains
+  partial until the human chooses whether to require native x86-64/KVM
+  confirmation, approve a thread-specific budget, or authorize a kernel-side
+  enforcement architecture beyond the approved userspace-kernel scope.
 
 ## Delivery strategy
 
@@ -298,10 +343,16 @@ criterion.
   2026-11-03; never merge or close without explicit authorization
 - Planned commits: matched benchmark protocols and budget record; comparison
   and report tooling; targeted optimizations; final regression and evidence
-- Actual commits: pending
+- Actual commits: `f8dd4497` (dispatch decision and gate record), `da7d9ba9`
+  (configuration and selective runtime), `e177f24d` (cache-compatible selective
+  filter), `efbe11f8` (budget and regression automation), `2a021baf`
+  (deterministic tracee regression)
 
 ## Review policy and outcome
 
 Human checkpoint before approving numeric budgets and again at completion. No
 performance claim is accepted solely from an aggregate score. Present
 `make demo-gate-11`, raw evidence, and the pull request before final acceptance.
+Current outcome: **partial**. The implementation and regression work are
+complete, but five mandatory thread rows exceed the unchanged 4% budget and no
+accepted baseline has been published.
