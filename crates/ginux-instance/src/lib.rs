@@ -2412,6 +2412,34 @@ policy = "stop"
     }
 
     #[test]
+    fn syscall_globs_expand_against_the_catalog_and_deny_wins() {
+        let source = VALID.replace(
+            "[storage]",
+            "[contract.syscalls]\ncontrol = \"selective\"\ndefault = \"deny\"\nallow = [\"open*\", \"read\"]\ndeny = [\"openat\"]\n[storage]",
+        );
+        let config = InstanceConfig::parse(source.as_bytes()).unwrap();
+        let effective = config.effective_contract().unwrap();
+        assert_eq!(
+            effective.operation_rule("syscall.open").unwrap().action,
+            ginux_contract::Action::Mediate
+        );
+        assert_eq!(
+            effective.operation_rule("syscall.openat").unwrap().action,
+            ginux_contract::Action::Deny(1)
+        );
+        assert_eq!(
+            InstanceConfig::parse(config.normalized().unwrap().as_bytes()).unwrap(),
+            config
+        );
+
+        let unmatched = source.replace("\"open*\"", "\"not_a_real_syscall*\"");
+        assert_eq!(
+            InstanceConfig::parse(unmatched.as_bytes()),
+            Err(ConfigError::InvalidContract)
+        );
+    }
+
+    #[test]
     fn largest_accepted_config_normalizes_and_round_trips() {
         use std::format;
         use std::string::String;
