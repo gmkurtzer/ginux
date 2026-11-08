@@ -36,24 +36,13 @@ runcmd:
 EOF
 
 rm -f build/rocky-seed.iso build/rocky-seed.iso.cdr
-if command -v hdiutil >/dev/null 2>&1; then
-    hdiutil makehybrid \
-        -quiet \
-        -iso \
-        -joliet \
-        -default-volume-name cidata \
-        -o build/rocky-seed.iso \
-        build/rocky-seed
-elif command -v genisoimage >/dev/null 2>&1; then
-    genisoimage -quiet -output build/rocky-seed.iso \
-        -volid cidata -joliet -rock build/rocky-seed
-elif command -v mkisofs >/dev/null 2>&1; then
-    mkisofs -quiet -output build/rocky-seed.iso \
-        -volid cidata -joliet -rock build/rocky-seed
-else
-    printf '%s\n' 'cloud-init seed creation requires hdiutil, genisoimage, or mkisofs' >&2
-    exit 1
-fi
+hdiutil makehybrid \
+    -quiet \
+    -iso \
+    -joliet \
+    -default-volume-name cidata \
+    -o build/rocky-seed.iso \
+    build/rocky-seed
 
 if [ -f build/rocky-seed.iso.cdr ] && [ ! -f build/rocky-seed.iso ]; then
     mv build/rocky-seed.iso.cdr build/rocky-seed.iso
