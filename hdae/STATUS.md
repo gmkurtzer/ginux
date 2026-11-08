@@ -29,8 +29,8 @@
 - Runtime isolation unit: instance.
 - Policy unit: versioned contract.
 - The gate map has expanded through human-directed insertions while preserving
-  numeric order; Gates 1 through 10.5 are accepted and closed. Gate 11 is the
-  active checkpoint.
+  numeric order; Gates 1 through 10.5 are accepted and closed. Gate 11 remains
+  partial in pull request 249, and the human authorized stacked Gate 12 work.
 - Gate 9.75 was added and authorized on 2026-11-04 for comprehensive instance
   configuration, CLI overrides, network selection and policy, port translation,
   volumes, access, identity, resources, devices, and pre-boot hooks.
@@ -538,23 +538,24 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Review pull request https://github.com/gmkurtzer/ginux/pull/249 and the completed
-selective and paranoid evidence. Selective passes every CPU, memory, and mutex
-row, while all five thread-yield allocations remain at 0.917x to 0.953x;
-paranoid reaches 0.027x to 0.035x on thread-yield. Do not publish an accepted
-baseline, merge the pull request, or close Gate 11 while these rows exceed the
-unchanged 4% budget.
+Implement Gate 12 on `hdae/contract-network-ux`: the hierarchical contract
+recipe and separately persisted, repeatable create/set network flags. Preserve
+Gate 11 behavior and stop at the Gate 12 human checkpoint. Do not merge or close
+pull request 249 and do not begin Gate 12.5 without explicit authorization.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 11, performance characterization and optimization, is
-  partial on `hdae/performance-characterization`.
+- Active work: Gate 12, contract and instance-network UX, is authorized on
+  stacked branch `hdae/contract-network-ux`. Gate 11 remains partial on its
+  parent branch and in pull request 249.
 - Delivery: pull request https://github.com/gmkurtzer/ginux/pull/249 is open
   against `main`; it must not be merged or closed without explicit human
   authorization.
+- Gate 12 delivery: dedicated stacked branch `hdae/contract-network-ux`, with a
+  separate pull request intended after implementation and fresh evidence.
 - Last evidence: clean retained commit `190a625c` removes all temporary
   diagnostics. The final five-second, five-repetition matrix passes every CPU,
   memory, and mutex row; all five thread rows remain 4.75% to 8.27% behind

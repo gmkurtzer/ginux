@@ -1,0 +1,130 @@
+# Contract and instance-network UX
+
+## Source
+
+Human review of the Gate 10.5 contract syntax and the distinction between a
+portable instance recipe and host-specific network attachment.
+
+## Goal
+
+Make one portable instance recipe clearly describe the complete userspace
+contract, while host-specific network attachment and port translation are
+configured through repeatable `instance create` and `instance set` flags.
+
+## Approved scope
+
+- Replace the active `[userspace.*]` contract schema with `[contract]` plus
+  `[contract.syscalls]`, `[contract.filesystem]`, `[contract.network]`,
+  `[contract.devices]`, `[contract.privileges]`, `[contract.process]`, and
+  `[contract.kernel]`.
+- Give each policy surface an explicit default and deterministic deny
+  precedence. Compile syscall-name globs against the pinned catalog; reject
+  unmatched, unknown, or ambiguous rules.
+- Represent setuid and setgid permission as executable-path arrays under
+  `[contract.privileges]`; an empty array permits no set-ID execution.
+- Keep `/proc` and `/sys` synthetic and Ginux-owned. Contract rules control
+  visibility and permitted operations, never host-tree passthrough.
+- Remove host interface selection and port forwarding from portable recipes.
+- Add repeatable flags to both `ginux instance create NAME FILE` and
+  `ginux instance set NAME`, including `--network ATTACHMENT` and
+  `--forward protocol=...,external_port=...,instance_port=...`.
+- Persist operational network settings separately from the portable recipe,
+  support multiple changes in one command, and default an omitted attachment
+  to the host's default network.
+- Update validation, normalization, inspection, explanation, examples,
+  documentation, and generated ABI coverage for the new model.
+- Remove the replaced active syntax without compatibility aliases.
+
+## Non-goals
+
+- Adding kernel-resident enforcement, Landlock, cgroup, namespace, or
+  capability optimizations; those belong in a separately approved Gate 12.5.
+- Changing Gate 11 performance budgets, dispatch semantics, or evidence.
+- Adding new network backends, orchestration, or live migration.
+- Editing locked historical gate records.
+
+## Completed work
+
+- [x] Human aligned and approved the schema, network ownership boundary,
+  repeatable create/set flags, glob behavior, and Gate 12 checkpoint.
+- [x] Created dedicated stacked branch `hdae/contract-network-ux` from
+  `hdae/performance-characterization` while pull request 249 remains open.
+
+## Remaining work
+
+- [ ] Implement hierarchical contract parsing, validation, normalization, and
+  compilation.
+- [ ] Implement separate persistent operational network state and repeatable
+  create/set flags.
+- [ ] Migrate active recipes, tests, generated coverage, and documentation.
+- [ ] Run the complete configuration, contract, runtime, systemd, and aggregate
+  regression suites.
+- [ ] Provide a human demonstration and Gate 12 pull request.
+
+## Acceptance criteria
+
+- A self-contained recipe expresses all approved contract surfaces with clear
+  defaults; old `[userspace.*]` contract keys fail closed.
+- Syscall globs expand deterministically against the pinned catalog, must match
+  at least one syscall, and cannot silently expand when a catalog version is
+  unchanged. Explicit deny wins over allow.
+- Filesystem and device policies use consistent read/write/create semantics;
+  setuid and setgid use executable-path arrays; process limits include both
+  processes and threads.
+- `/proc` and `/sys` remain synthetic and expose only effective-contract state.
+- Portable recipes contain no host interface, source address, or port-forward
+  ownership.
+- Create and set accept multiple repeatable network flags atomically; invalid
+  combinations change no persisted state.
+- Omitted `--network` uses the host default. Forwarding syntax names both
+  `external_port` and `instance_port`, and conflict detection remains enforced.
+- Existing systemd, lifecycle, contract-denial, and Gate 11 dispatch behavior
+  remain passing.
+
+## Verification plan
+
+- `make check` -> formatting, build, and static policy checks pass.
+- `make test-config` -> new schema and operational override matrix pass;
+  replaced syntax and invalid globs fail closed.
+- `make test-instance` -> create/set persistence, atomic multi-flag updates,
+  default attachment, and restart behavior pass.
+- `make test-contract` and `make test-contract-runtime` -> compiled decisions,
+  deny precedence, glob expansion, set-ID, device, process, and virtual-kernel
+  policies pass.
+- `make test-network` -> attachment, forwarding, conflict, and cleanup behavior
+  pass using `external_port` and `instance_port`.
+- `make test-systemd` and `make test` -> mandatory regressions exit zero.
+- `make demo-gate-12` -> a human can inspect one recipe, create an instance with
+  multiple flags, update multiple settings atomically, inspect effective state,
+  and observe one allowed and one denied contract action.
+
+## Evidence
+
+- Not run.
+
+## Decisions and limitations
+
+- The portable recipe owns guest-visible policy; host-specific attachment owns
+  deployment state and is persisted separately.
+- Character `*` globs are bounded to syscall names and compile against a pinned
+  catalog. Resource selectors retain their documented component-aware grammar.
+- Gate 12 changes configuration and user experience, not the enforcement
+  architecture or Gate 11 performance result.
+- Because pull request 249 is still open, this branch is stacked on Gate 11 and
+  must be rebased or retargeted after that dependency is resolved.
+
+## Delivery strategy
+
+- Working branch: `hdae/contract-network-ux`
+- Intended base: `hdae/performance-characterization` while pull request 249 is
+  open; retarget to `main` after Gate 11 lands
+- Pull request: intended; never merge or close without explicit authorization
+- Planned commits: gate and architecture record; contract schema/compiler;
+  operational network CLI/state; active recipe and documentation migration;
+  regression and demonstration evidence
+- Actual commits: pending
+
+## Review policy and outcome
+
+Human checkpoint. Stop after the Gate 12 demonstration, fresh evidence, and
+pull request are ready. Do not begin Gate 12.5 without explicit approval.

@@ -258,6 +258,16 @@ recipe to prepare the state that it subsequently makes read-only. One denied
 absolute directory path covers that directory and its descendants using
 component-boundary matching and confined path resolution.
 
+Gate 12 separates portable policy from deployment-specific network state. The
+instance recipe owns a hierarchical `[contract]` describing syscall,
+filesystem, network, device, privilege, process, and synthetic-kernel-view
+authority. Host interface selection and external-to-instance port translation
+are not recipe fields; repeatable `instance create` and `instance set` flags
+persist them as operational instance state. With no explicit attachment, the
+instance uses the host default network. `/proc` and `/sys` remain synthetic and
+Ginux-owned regardless of policy; policy controls visibility and operations,
+not passthrough to host kernel trees.
+
 ### Observability and benchmarking
 
 Audit events expose contract decisions and instance lifecycle without exposing
