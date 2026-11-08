@@ -14,7 +14,7 @@ memory_mib = 1024
 [execution]
 profile = "balanced"
 backend = "ptrace-native"
-dispatch = "paranoid"
+dispatch = "selective"
 
 [userspace.contract]
 version = 1

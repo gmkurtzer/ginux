@@ -18,6 +18,8 @@ by a compiled instance contract before its host effect. An instance may select
 paranoid dispatch, in which every syscall enters the Ginux userspace dispatcher,
 or selective dispatch, in which only explicitly allowed operations whose
 semantics are cataloged as transparent may execute directly in the host kernel.
+Selective dispatch is the default so ordinary instances remain lightweight;
+paranoid dispatch is an explicit opt-in for all-syscall userspace inspection.
 Denied operations and operations requiring inspection, translation, emulation,
 or virtual state always enter Ginux before completion. The goal is to make
 compatibility an explicit, configurable security contract rather than an
@@ -124,7 +126,7 @@ solved.
 - Paranoid mode sends every syscall through Ginux before completion. Selective
   mode sends every denial and every complex operation through Ginux, while its
   cataloged direct-safe allow set may execute without a synchronous userspace
-  round trip.
+  round trip. Selective is the default dispatch mode.
 - Unknown contract operations fail closed and produce useful audit evidence.
 - Instance-visible kernel state is Ginux state, not an accidental view of host
   `/proc`, `/sys`, `/dev`, or cgroups.

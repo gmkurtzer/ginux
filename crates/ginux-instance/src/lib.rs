@@ -346,7 +346,7 @@ impl ConfigBuilder {
             memory_mib: 0,
             execution_profile: ExecutionProfile::Security,
             execution_backend: ExecutionBackend::Interpreter,
-            dispatch_mode: DispatchMode::Paranoid,
+            dispatch_mode: DispatchMode::Selective,
             contract_profile: Text::empty(),
             contract_templates: TextList::empty(),
             contract_allow: TextList::empty(),
@@ -1997,7 +1997,7 @@ policy = "stop"
         assert_eq!(config.schema_version, 1);
         assert_eq!(config.id.as_bytes(), b"demo");
         assert_eq!(config.execution_profile, ExecutionProfile::Security);
-        assert_eq!(config.dispatch_mode, DispatchMode::Paranoid);
+        assert_eq!(config.dispatch_mode, DispatchMode::Selective);
         assert_eq!(config.contract_digest.as_bytes().len(), 64);
         let normalized = config.normalized().unwrap();
         let reparsed = InstanceConfig::parse(normalized.as_bytes()).unwrap();
@@ -2005,21 +2005,21 @@ policy = "stop"
     }
 
     #[test]
-    fn dispatch_mode_is_strict_and_defaults_to_paranoid() {
+    fn dispatch_mode_is_strict_and_defaults_to_selective() {
         let defaulted = InstanceConfig::parse(VALID.as_bytes()).unwrap();
-        assert_eq!(defaulted.dispatch_mode, DispatchMode::Paranoid);
+        assert_eq!(defaulted.dispatch_mode, DispatchMode::Selective);
 
-        let selective = VALID.replace(
+        let paranoid = VALID.replace(
             "backend = \"interpreter\"",
-            "backend = \"interpreter\"\ndispatch = \"selective\"",
+            "backend = \"interpreter\"\ndispatch = \"paranoid\"",
         );
-        let selective = InstanceConfig::parse(selective.as_bytes()).unwrap();
-        assert_eq!(selective.dispatch_mode, DispatchMode::Selective);
+        let paranoid = InstanceConfig::parse(paranoid.as_bytes()).unwrap();
+        assert_eq!(paranoid.dispatch_mode, DispatchMode::Paranoid);
         assert_eq!(
-            InstanceConfig::parse(selective.normalized().unwrap().as_bytes())
+            InstanceConfig::parse(paranoid.normalized().unwrap().as_bytes())
                 .unwrap()
                 .dispatch_mode,
-            DispatchMode::Selective
+            DispatchMode::Paranoid
         );
 
         let unknown = VALID.replace(

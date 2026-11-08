@@ -204,6 +204,9 @@ scope, threat model, and invariants.
   only explicitly allowed operations independently cataloged as transparent
   and direct-safe; denied and complex operations still enter Ginux, and Ginux
   returns configured denials without invoking the requested host syscall.
+- Human direction later on 2026-11-07 made selective the default for omitted
+  dispatch configuration. Paranoid remains an explicit all-syscall mediation
+  option, and the direct-safe catalog remains independently bounded.
 
 ## Evidence
 

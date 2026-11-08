@@ -176,15 +176,15 @@ Instance recipes may select the syscall dispatch model under `[execution]`:
 [execution]
 profile = "balanced"
 backend = "ptrace-native"
-dispatch = "paranoid" # or "selective"
+dispatch = "selective" # default; use "paranoid" for all-syscall mediation
 ```
 
-`paranoid` is the default and sends every syscall through the Ginux userspace
-dispatcher before completion. `selective` permits direct host execution only
+`selective` is the default and permits direct host execution only
 when the instance contract allows the operation and Ginux's versioned catalog
 independently classifies it as direct-safe. Denials, virtual state, inspection,
 translation, emulation, pointer or descriptor validation, and modified results
-remain Ginux-dispatched in both modes.
+remain Ginux-dispatched in both modes. `paranoid` is an explicit opt-in that
+sends every syscall through the Ginux userspace dispatcher before completion.
 
 `make bench-compare` checks every row against the 4% native budget and, after an
 accepted baseline is published under `benchmarks/gate11/`, against that Ginux

@@ -43,6 +43,8 @@ criterion.
   pre-effect Ginux userspace decision for every syscall. `selective` permits
   direct host execution only when the effective contract allows an operation
   and Ginux's versioned catalog marks it transparent and direct-safe.
+- Default omitted dispatch configuration to `selective` so the normal path is
+  lightweight. Keep `paranoid` as an explicit operator choice.
 - In both modes, route denials and operations requiring inspection,
   translation, emulation, virtual state, pointer or descriptor validation, or
   modified results through Ginux. A denied operation returns its configured
@@ -116,7 +118,8 @@ criterion.
   contract-allowed, cataloged direct-safe operations; denial and complex
   semantics remain Ginux userspace responsibilities.
 - [x] Implemented strict per-instance `paranoid` and `selective` dispatch.
-  Omitted configuration defaults to paranoid and unknown values fail closed.
+  Omitted configuration initially defaulted to paranoid and unknown values
+  fail closed.
 - [x] Marked only `sched_yield` direct-safe in contract catalog 2. Selective
   filters require both effective permission and that independent catalog bit;
   every other operation remains traced through Ginux.
@@ -129,6 +132,9 @@ criterion.
 - [x] Stabilized the process identity regression after the faster selective
   path exposed a polling race. The test now freezes the supervisor after its
   tracee appears and inspects the ptrace-stopped tracee deterministically.
+- [x] Human direction on 2026-11-07 changed omitted dispatch configuration to
+  selective for the lightest normal path. Paranoid remains explicit and its
+  denial/mediation regression fixtures remain mandatory.
 
 ## Remaining work
 
@@ -138,8 +144,8 @@ criterion.
   control and Ginux instance, and verify its identity before every comparison.
 - [x] Implement comparison and report automation.
 - [x] Implement strict `paranoid` and `selective` instance configuration,
-  defaulting existing recipes to paranoid so configuration migration cannot
-  silently weaken the boundary.
+  defaulting omitted configuration to selective and retaining explicit
+  paranoid recipes for all-syscall mediation tests.
 - [x] Implement the first selective direct-safe operation (`sched_yield`) and
   prove that denied and complex operations still enter Ginux before effect.
 - [x] Add mode-specific configuration, runtime, denial, audit, and performance
@@ -178,8 +184,8 @@ criterion.
   exceeded.
 - Optimizations preserve all architecture invariants and every mandatory
   functional and security regression.
-- Existing recipes normalize to paranoid dispatch unless they explicitly opt
-  into selective mode. Unknown dispatch modes fail closed.
+- Existing recipes normalize to selective dispatch unless they explicitly opt
+  into paranoid mode. Unknown dispatch modes fail closed.
 - In paranoid mode, `sched_yield` and every other syscall reach Ginux before
   completion. In selective mode, an allowed `sched_yield` executes directly,
   while a configured denial returns from Ginux with no host syscall effect and
@@ -323,6 +329,9 @@ criterion.
   Denials and complex semantics remain in Ginux. Native x86-64/KVM should also
   be measured before setting a durable budget because the current macOS arm64
   QEMU TCG environment amplifies context-switch and seccomp costs.
+- Later human direction on 2026-11-07 selected selective as the default for
+  lightweight execution. This changes only the omitted-value default; it does
+  not expand the direct-safe catalog or weaken explicit paranoid mode.
 - Selective `sched_yield` no longer enters the Ginux userspace dispatcher or
   audit path. Its remaining 5.09% to 7.99% deficit is the host-kernel seccomp
   filter/cache and task-work cost as amplified by x86-64 QEMU TCG, not contract

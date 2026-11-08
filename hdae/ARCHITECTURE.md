@@ -112,6 +112,10 @@ Dispatch mode is an independent per-instance choice:
   operations requiring inspection, translation, emulation, or virtual state
   remain userspace-dispatched. An allow rule alone never creates a direct path.
 
+Selective is the default to minimize mediation overhead. Paranoid must be
+selected explicitly when the operator requires every syscall to enter Ginux
+userspace before completion.
+
 Gate 5 implements the balanced profile. Backend selection may later be made per
 process, but mixed interpreter/native process semantics are not part of this
 gate.
