@@ -29,3 +29,28 @@ jobs:
       - run: sudo make test-native-supervision
       - run: make test-process-native
       - run: sudo make test-gate1-setup
+
+  gate11-kvm-diagnostic:
+    if: github.event_name == 'pull_request' && github.head_ref == 'hdae/performance-characterization'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+      - run: rustup target add x86_64-unknown-linux-gnu
+      - run: sudo apt-get update && sudo apt-get install -y genisoimage qemu-system-x86 qemu-utils
+      - name: Verify KVM
+        run: test -c /dev/kvm && sudo chmod 666 /dev/kvm
+      - run: make host-image-fetch
+      - name: Prepare pinned benchmark inputs
+        run: ROCKY_QEMU_ACCEL=kvm ROCKY_QEMU_CPU=host make bench-prepare
+      - name: Selective thread matrix
+        run: ROCKY_QEMU_ACCEL=kvm ROCKY_QEMU_CPU=host GINUX_BENCH_OUTPUT_DIR=build/gate11-kvm-selective GINUX_BENCH_DURATION=3 GINUX_BENCH_REPETITIONS=3 GINUX_BENCH_WORKLOADS=threads make bench-baseline
+      - name: Paranoid thread matrix
+        run: ROCKY_QEMU_ACCEL=kvm ROCKY_QEMU_CPU=host GINUX_BENCH_OUTPUT_DIR=build/gate11-kvm-paranoid GINUX_BENCH_DURATION=3 GINUX_BENCH_REPETITIONS=3 GINUX_BENCH_WORKLOADS=threads GINUX_BENCH_DISPATCH_MODE=paranoid make bench-baseline
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gate11-kvm-diagnostic
+          path: |
+            build/gate11-kvm-selective
+            build/gate11-kvm-paranoid
