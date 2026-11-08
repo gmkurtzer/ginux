@@ -9,7 +9,45 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      code: ${{ steps.classify.outputs.code }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          filter: blob:none
+      - run: make test-ci-changes
+      - name: Compare with the newest commit that passed
+        id: classify
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          TARGET_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          gh run list --repo "$GITHUB_REPOSITORY" --workflow check.yml \
+            --status success --limit 300 --json headSha --jq '.[].headSha' \
+            >"$RUNNER_TEMP/passed" || : >"$RUNNER_TEMP/passed"
+          status=0
+          ./scripts/ci-changes.sh "$HEAD_SHA" "$RUNNER_TEMP/passed" ${TARGET_SHA:+"$TARGET_SHA"} \
+            >>"$GITHUB_OUTPUT" 2>"$RUNNER_TEMP/reason" || status=$?
+          cat "$RUNNER_TEMP/reason"
+          { echo '```'; cat "$RUNNER_TEMP/reason"; echo '```'; } >>"$GITHUB_STEP_SUMMARY"
+          exit "$status"
+      - name: Name checks for documentation-only changes
+        if: steps.classify.outputs.code == 'false'
+        run: |
+          command -v rg >/dev/null || { sudo apt-get update && sudo apt-get install -y ripgrep; }
+          make check-name check-instance-terminology
+
   static-and-unit:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v5
@@ -20,6 +58,8 @@ jobs:
       - run: make test-unit
 
   launch-integration:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
