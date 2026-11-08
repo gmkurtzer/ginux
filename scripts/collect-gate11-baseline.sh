@@ -10,6 +10,7 @@ allocations=${GINUX_BENCH_VCPUS:-"1 2 4"}
 workloads=${GINUX_BENCH_WORKLOADS:-"cpu memory threads mutex"}
 audit_mode=${GINUX_BENCH_AUDIT_MODE:-stderr}
 supervisor_cpu=${GINUX_BENCH_SUPERVISOR_CPU:-}
+capture_audit=${GINUX_BENCH_CAPTURE_AUDIT:-0}
 commit=$(git rev-parse HEAD)
 tree_state=clean
 test -z "$(git status --porcelain)" || tree_state=dirty
@@ -28,7 +29,7 @@ rocky_scp scripts/gate11-guest-setup.sh scripts/gate11-benchmark-guest.sh \
     "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/"
 
 rocky_ssh 'chmod 0755 /var/tmp/gate11-guest-setup.sh /var/tmp/gate11-benchmark-guest.sh /var/tmp/gate11-sysbench-command.sh; /var/tmp/gate11-guest-setup.sh'
-rocky_ssh "GINUX_BENCH_DURATION='$duration' GINUX_BENCH_REPETITIONS='$repetitions' GINUX_BENCH_VCPUS='$allocations' GINUX_BENCH_WORKLOADS='$workloads' GINUX_BENCH_AUDIT_MODE='$audit_mode' GINUX_BENCH_SUPERVISOR_CPU='$supervisor_cpu' /var/tmp/gate11-benchmark-guest.sh"
+rocky_ssh "GINUX_BENCH_DURATION='$duration' GINUX_BENCH_REPETITIONS='$repetitions' GINUX_BENCH_VCPUS='$allocations' GINUX_BENCH_WORKLOADS='$workloads' GINUX_BENCH_AUDIT_MODE='$audit_mode' GINUX_BENCH_SUPERVISOR_CPU='$supervisor_cpu' GINUX_BENCH_CAPTURE_AUDIT='$capture_audit' /var/tmp/gate11-benchmark-guest.sh"
 
 rocky_scp "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/gate11-results.tsv" "$output_dir/results.tsv"
 rocky_ssh 'tar -C /var/tmp -czf /var/tmp/gate11-raw.tar.gz gate11-raw'
@@ -57,6 +58,7 @@ fi
     printf 'cpu_affinity=logical CPUs 0 through allocation-1\n'
     printf 'ordering=alternating native/Ginux by repetition\n'
     printf 'audit_mode=%s\n' "$audit_mode"
+    printf 'capture_per_run_audit=%s\n' "$capture_audit"
     printf 'ginux_supervisor_cpu=%s\n' "${supervisor_cpu:-shared-with-instance}"
     # Expansion belongs to the remote shell.
     # shellcheck disable=SC2016

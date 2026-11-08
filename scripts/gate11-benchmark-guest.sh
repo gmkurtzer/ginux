@@ -14,12 +14,14 @@ allocations=${GINUX_BENCH_VCPUS:-"1 2 4"}
 workloads=${GINUX_BENCH_WORKLOADS:-"cpu memory threads mutex"}
 audit_mode=${GINUX_BENCH_AUDIT_MODE:-stderr}
 supervisor_cpu=${GINUX_BENCH_SUPERVISOR_CPU:-}
+capture_audit=${GINUX_BENCH_CAPTURE_AUDIT:-0}
 memory_bytes=1073741824
 
 case "$duration:$repetitions" in
     *[!0-9:]*|0:*|*:0|:*|*:) printf '%s\n' 'invalid Gate 11 duration or repetition count' >&2; exit 2 ;;
 esac
 case "$audit_mode" in stderr|disabled) ;; *) printf '%s\n' 'invalid Gate 11 audit mode' >&2; exit 2 ;; esac
+case "$capture_audit" in 0|1) ;; *) printf '%s\n' 'invalid Gate 11 audit capture mode' >&2; exit 2 ;; esac
 
 test -x /usr/bin/sysbench
 test -x "$directory/root/usr/bin/sysbench"
@@ -108,6 +110,9 @@ run_one() {
             "$helper" run-runtime "$instance" >"$output" 2>&1; then
             cat "$output" >&2
             return 1
+        fi
+        if test "$capture_audit" = 1; then
+            sudo install -m 0644 "$directory/audit.log" "$output.audit"
         fi
     fi
 }

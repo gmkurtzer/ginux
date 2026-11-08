@@ -111,9 +111,11 @@ pub struct SockFprog {
 }
 
 /// Install the compiled instance dispatch filter. Paranoid mode routes the
-/// direct-safe yield operation through Ginux user notification. Selective mode
-/// executes that independently cataloged and contract-approved operation
-/// directly; all other calls still enter Ginux through ptrace seccomp events.
+/// direct-safe yield operation through Ginux user notification and therefore
+/// requests a notification listener. Selective mode executes that independently
+/// cataloged and contract-approved operation directly and does not create an
+/// unused listener; all other calls still enter Ginux through ptrace seccomp
+/// events.
 pub fn install_trace_filter(direct_yield: bool) -> isize {
     const BPF_LD_W_ABS: u16 = 0x20;
     const BPF_JMP_JEQ_K: u16 = 0x15;
@@ -173,11 +175,16 @@ pub fn install_trace_filter(direct_yield: bool) -> isize {
         len: paranoid_filter.len() as u16,
         filter: paranoid_filter.as_ptr(),
     };
+    let flags = if direct_yield {
+        0
+    } else {
+        SECCOMP_FILTER_FLAG_NEW_LISTENER
+    };
     unsafe {
         syscall3(
             SYS_SECCOMP,
             SECCOMP_SET_MODE_FILTER,
-            SECCOMP_FILTER_FLAG_NEW_LISTENER,
+            flags,
             &program as *const _ as usize,
         )
     }

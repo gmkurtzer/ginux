@@ -3249,7 +3249,8 @@ fn native_tracee(
     if self_pid <= 0 || unsafe { syscall2(SYS_KILL, self_pid as usize, SIGSTOP) } < 0 {
         native_tracee_setup_fail(127);
     }
-    if install_trace_filter(direct_yield) != 3 {
+    let filter_result = install_trace_filter(direct_yield);
+    if (direct_yield && filter_result != 0) || (!direct_yield && filter_result != 3) {
         native_tracee_setup_fail(128);
     }
     let bash_argv = [
