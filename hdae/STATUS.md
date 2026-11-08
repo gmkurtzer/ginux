@@ -201,9 +201,19 @@ scope, threat model, and invariants.
   until all mandatory rows pass, or until every credible in-scope path has
   produced conclusive evidence and any remaining option requires a new
   architecture decision.
-- Exact next action: collect a fresh selective baseline and per-workload
-  syscall, scheduling, and runtime profiles, then optimize the highest measured
-  cost and repeat the matched matrix.
+- The extended sweep is complete. Per-workload audit capture, scheduler and
+  `perf` counters, a direct-futex diagnostic, shared and dedicated supervisor
+  CPU placement, audit-disabled execution, and a no-tracer constant-allow
+  seccomp control exhaust the credible in-scope paths. The no-tracer control
+  alone measured 0.941x native, reproducing the residual thread deficit in the
+  host kernel's seccomp fast path under x86-64 QEMU TCG.
+- The final retained-code five-second/five-repetition matrix passes every CPU,
+  memory, and mutex row. Four thread rows fail at 0.909x to 0.935x; one
+  high-variance thread row passes at 0.968x. The unchanged 4% budget therefore
+  keeps Gate 11 partial.
+- Exact next action: present the exhausted selective-path evidence and obtain
+  the human's architecture or budget decision before publishing an accepted
+  baseline or closing Gate 11.
 - Human direction on 2026-11-07 resolved the Gate 11 dispatch boundary. Each
   instance will configure `paranoid` or `selective` dispatch. Paranoid preserves
   a Ginux userspace decision for every syscall. Selective directly executes
@@ -510,10 +520,12 @@ scope, threat model, and invariants.
 ## Exact next action
 
 Present the completed selective-dispatch evidence and obtain the human's Gate
-11 direction for the five thread-yield rows that remain 5.09% to 7.99% slower
-than native under x86-64 QEMU TCG. Do not publish an accepted baseline or close
-the gate until the human chooses native x86-64/KVM confirmation, a specific
-thread-only budget, or an expanded kernel-side enforcement architecture.
+11 direction. The retained final matrix has four thread-yield failures at
+6.49% to 9.15% slower under x86-64 QEMU TCG; independent no-tracer evidence
+shows a single constant-allow seccomp filter is itself 5.86% slower. Do not
+publish an accepted baseline or close the gate until the human chooses native
+x86-64/KVM confirmation, a specific thread-only budget, or an explicitly
+scoped kernel-side enforcement architecture.
 
 ## Context recovery
 
@@ -522,15 +534,14 @@ thread-only budget, or an expanded kernel-side enforcement architecture.
 - Reload after context shift: required
 - Active gate: Gate 11, performance characterization and optimization, is
   partial on `hdae/performance-characterization`.
-- Last evidence: strict paranoid/selective dispatch, direct-safe
-  `sched_yield`, cache-compatible seccomp filtering, and comparison automation
-  are committed through `1b79c033`, including selective as the omitted-value
-  default. The final five-second/five-repetition
-  matrix passes every CPU, memory, and mutex row; all five thread rows remain
-  5.09% to 7.99% slower and fail the 4% budget. Functional, contract, denial,
-  VFS, process, kernel-view, and systemd regressions pass; fresh default-change
-  verification includes live QEMU configuration, dual-mode contract, and full
-  Rocky systemd suites.
+- Last evidence: retained code through `811ad59c` removes the unused selective
+  listener and supports per-run audit capture. The final five-second,
+  five-repetition matrix passes every CPU, memory, and mutex row; four thread
+  rows fail at 6.49% to 9.15% behind native. A no-tracer constant-allow seccomp
+  control measured 0.941x, matching the residual. Fresh `make check`,
+  `make test-contract`, `make test-bench-compare`, `make test-contract-runtime`,
+  aggregate `make test`, `make test-native-vfs`, and the complete Rocky
+  `make test-systemd` matrix pass on isolated QEMU state.
 - Approved network direction: Gate 9 defaults to full host-shared inbound and
   outbound networking with normal host routing and bind conflicts, under Ginux
   mediation and audit. Gate 9.75 adds comprehensive instance configuration,

@@ -40,7 +40,10 @@ if grep -Eq 'operation=syscall\.sched_yield|syscall=24([[:space:]]|$)' "$output_
     printf '%s\n' 'selective sched_yield unexpectedly entered Ginux audit' >&2
     exit 1
 fi
-grep -Eq '^GINUX_NATIVE_AUDIT: .*action=(mediate|emulate|deny)' "$output_dir/final-audit.log"
+if test "$audit_mode" = stderr; then
+    grep -Eq '^GINUX_NATIVE_AUDIT: .*action=(mediate|emulate|deny)' \
+        "$output_dir/final-audit.log"
+fi
 if ! grep -Fqx \
     'GINUX_NATIVE: supervisor=attached dispatch=selective direct-safe-syscalls=1' \
     "$output_dir/final-audit.log"; then

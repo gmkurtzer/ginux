@@ -135,6 +135,11 @@ criterion.
 - [x] Human direction on 2026-11-07 changed omitted dispatch configuration to
   selective for the lightest normal path. Paranoid remains explicit and its
   denial/mediation regression fixtures remain mandatory.
+- [x] Removed the unused seccomp user-notification listener from selective
+  instances. Paranoid instances retain the listener required for their
+  userspace `sched_yield` decisions.
+- [x] Added optional per-run benchmark audit capture so syscall-path profiles
+  remain tied to the exact native/Ginux sample that produced them.
 
 ## Remaining work
 
@@ -157,10 +162,10 @@ criterion.
   requires an architecture decision; other Gate 11 workloads remain open.
 - [ ] Persist the accepted baseline and add automatic per-workload regression
   checks to the normal performance test target. The checks are implemented;
-  publishing an accepted baseline is intentionally pending because five
-  mandatory rows still fail.
+  publishing an accepted baseline is intentionally pending because four
+  mandatory rows in the final retained-code matrix still fail.
 - [x] Run full regression and document remaining costs.
-- [ ] Complete the human-authorized extended selective-mode profile sweep:
+- [x] Complete the human-authorized extended selective-mode profile sweep:
   profile every mandatory workload, apply each evidence-backed in-scope
   optimization, explore materially different credible alternatives, and run a
   final clean 1/2/4-vCPU matrix plus mandatory regressions before stopping.
@@ -300,6 +305,25 @@ criterion.
   `make test-contract-runtime`, and the complete `make test-systemd` suite pass.
   The Rocky systemd example runs selective dispatch; explicit paranoid fixtures
   continue proving all-syscall mediation and pre-effect socket denial.
+- The extended clean retained-code matrix in
+  `build/gate11-selective-exhaustive-final/` used five-second workloads and five
+  alternating repetitions. All CPU rows passed at 0.994x to 1.002x, all memory
+  rows passed at 0.992x to 1.037x, and all mutex rows passed at 0.994x to
+  0.998x. Four thread rows failed at 0.909x to 0.935x; the 4-vCPU/1-thread row
+  passed at 0.968x but does not eliminate the repeated thread-path deficit.
+- A matching audit-disabled thread matrix still measured 0.923x to 0.954x
+  native. Removing Ginux audit formatting and writes therefore does not recover
+  the residual selective-mode loss.
+- A final no-Ginux diagnostic installed one constant `SECCOMP_RET_ALLOW`
+  filter and then executed the identical one-thread workload without any
+  tracer. Its five-run median was 619.289 versus 657.868 events/s natively,
+  or 0.941x. The kernel's minimal seccomp fast path alone reproduces the
+  remaining deficit under x86-64 QEMU TCG.
+- Fresh retained-code verification passes `make check`, `make test-contract`,
+  `make test-bench-compare`, isolated Rocky QEMU `make test-contract-runtime`,
+  aggregate `make test`, `make test-native-vfs`, and the complete cold, warm,
+  repeat, offline, DNF-failure, startup-failure, and shutdown
+  `make test-systemd` matrix.
 
 ## Decisions and limitations
 
@@ -348,6 +372,26 @@ criterion.
 - A diagnostic run with `SECCOMP_FILTER_FLAG_SPEC_ALLOW` measured 0.939x native,
   worse than the retained path, and would disable a speculative-execution
   mitigation. It was reverted and is not an acceptable optimization.
+- Per-workload audit capture showed that CPU, memory, and mutex overhead is
+  limited to bounded setup and low-frequency mediated operations. Selective
+  thread runs contain no `sched_yield` audit records, confirming that the
+  benchmark hot syscall never reaches the userspace dispatcher.
+- A live tracee probe reported `Seccomp: 2` and `Seccomp_filters: 1`; the
+  residual cost is not caused by accidentally stacking multiple filters.
+- A diagnostic filter that also allowed the observed non-PI futex operations
+  directly produced zero futex audit records but did not materially improve
+  the thread matrix (0.917x to 0.936x). The broader direct-safe surface was
+  reverted because it added authority without measurable benefit.
+- Pinning the Ginux supervisor to CPU 3 while the four-vCPU workload shared
+  that CPU measured 0.927x and 0.932x. A separate five-vCPU QEMU run reserved
+  CPU 4 exclusively for the supervisor while native and Ginux workloads both
+  remained constrained to CPUs 0 through 3; all rows still measured 0.926x to
+  0.941x. Supervisor CPU contention is therefore not the residual bottleneck.
+- `perf stat` separated the scheduler effects. At one vCPU/one thread, native
+  used 80 context switches versus 1,419 for Ginux; at four vCPUs/four threads,
+  native used 277 versus 21,911. Task-clock stayed comparable. Together with
+  the zero-userspace-dispatch evidence, this localizes the remaining loss to
+  the kernel seccomp/task-work and scheduling path under QEMU TCG.
 - No workload-specific tolerance exception has been approved. Gate 11 remains
   partial until the human chooses whether to require native x86-64/KVM
   confirmation, approve a thread-specific budget, or authorize a kernel-side
@@ -369,7 +413,8 @@ criterion.
 - Actual commits: `f8dd4497` (dispatch decision and gate record), `da7d9ba9`
   (configuration and selective runtime), `e177f24d` (cache-compatible selective
   filter), `efbe11f8` (budget and regression automation), `2a021baf`
-  (deterministic tracee regression), `1b79c033` (selective dispatch default)
+  (deterministic tracee regression), `1b79c033` (selective dispatch default),
+  `811ad59c` (selective listener cleanup and audit-profile capture)
 
 ## Review policy and outcome
 
@@ -377,5 +422,5 @@ Human checkpoint before approving numeric budgets and again at completion. No
 performance claim is accepted solely from an aggregate score. Present
 `make demo-gate-11`, raw evidence, and the pull request before final acceptance.
 Current outcome: **partial**. The implementation and regression work are
-complete, but five mandatory thread rows exceed the unchanged 4% budget and no
-accepted baseline has been published.
+complete, but four mandatory thread rows in the final retained-code matrix
+exceed the unchanged 4% budget and no accepted baseline has been published.
