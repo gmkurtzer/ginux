@@ -124,7 +124,7 @@ grep -Fq 'operation=syscall.clock_gettime action=deny provenance=default-deny so
 grep -Fqx 'GINUX_CONTRACT: PASS' "$contract_plan_log"
 rocky_ssh '/var/tmp/ginux instance-plan /var/tmp/gate10-systemd.toml' >"$contract_systemd_plan_log" 2>&1
 grep -Eq '^GINUX_CONTRACT: catalog=2 instance=rocky profile=self-contained-v1 digest=[0-9a-f]{64} operations=[0-9]+$' "$contract_systemd_plan_log"
-grep -Fq 'operation=syscall.clock_gettime action=mediate provenance=recipe-allow source=system' "$contract_systemd_plan_log"
+grep -Fq 'operation=syscall.clock_gettime action=mediate provenance=exact-allow source=exact-allow' "$contract_systemd_plan_log"
 grep -Fqx 'GINUX_CONTRACT: PASS' "$contract_systemd_plan_log"
 
 if rocky_ssh "/var/tmp/ginux config-merge /var/tmp/gate10-strict.toml 'contract.syscalls.allow=[\"does_not_exist_*\"]'" >"$contract_invalid_log" 2>&1; then
@@ -138,7 +138,7 @@ rocky_ssh 'GINUX_RUNTIME=/var/tmp/ginux /var/tmp/ginux-cli instance validate /va
 grep -Eq '^Contract valid: instance=rocky catalog=2 digest=[0-9a-f]{64} operations=[0-9]+$' "$instance_validate_log"
 rocky_ssh 'GINUX_RUNTIME=/var/tmp/ginux /var/tmp/ginux-cli instance explain /var/tmp/gate10-systemd.toml filesystem.path.write' >"$instance_explain_log" 2>&1
 grep -Fqx 'Decision: mediate' "$instance_explain_log"
-grep -Fqx 'Rule: recipe-allow source=write index=0' "$instance_explain_log"
+grep -Fqx 'Rule: exact-allow source=exact-allow index=0' "$instance_explain_log"
 rocky_ssh 'GINUX_RUNTIME=/var/tmp/ginux /var/tmp/ginux-cli instance diff /var/tmp/gate10-strict.toml /var/tmp/gate10-systemd.toml' >"$instance_diff_log" 2>&1
 grep -Eq '^Contract differences: [1-9][0-9]*$' "$instance_diff_log"
 rocky_ssh 'GINUX_RUNTIME=/var/tmp/ginux /var/tmp/ginux-cli instance inspect /var/tmp/gate10-systemd.toml' >"$instance_inspect_log" 2>&1
@@ -153,10 +153,10 @@ if rocky_ssh 'GINUX_RUNTIME=/var/tmp/ginux /var/tmp/ginux-cli instance validate 
     exit 1
 fi
 
-rocky_ssh "/var/tmp/ginux config-merge /var/tmp/gate975.toml 'resources.vcpus=4' 'identity.hostname=\"override.example\"' 'contract.process.max_threads=2048'" >"$gate975_override_log" 2>&1
+rocky_ssh "/var/tmp/ginux config-merge /var/tmp/gate975.toml 'resources.vcpus=4' 'identity.hostname=\"override.example\"' 'contract.process.max_threads=8192'" >"$gate975_override_log" 2>&1
 grep -Fqx 'vcpus = 4' "$gate975_override_log"
 grep -Fqx 'hostname = "override.example"' "$gate975_override_log"
-grep -Fqx 'max_threads = 2048' "$gate975_override_log"
+grep -Fqx 'max_threads = 8192' "$gate975_override_log"
 grep -Fqx 'memory_mib = 1024' "$gate975_override_log"
 
 if rocky_ssh "/var/tmp/ginux config-merge /var/tmp/gate975.toml 'volumes.assignments=[\"/proc:/data:ro\"]'" >"$gate975_volume_log" 2>&1; then

@@ -137,7 +137,7 @@ test-config: build
 	@./scripts/with-rocky-host.sh ./scripts/test-config.sh
 
 test-instance: build
-	@./scripts/with-rocky-host.sh ./scripts/test-instance.sh
+	@./scripts/with-rocky-host.sh ./scripts/test-instance-suite.sh
 
 test-instance-terminology:
 	@./scripts/test-instance-terminology.sh

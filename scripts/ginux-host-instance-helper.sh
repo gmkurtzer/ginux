@@ -346,7 +346,10 @@ prepare_root() {
         "$root/sys/fs/cgroup/system.slice/system-modprobe.slice/modprobe@configfs.service/cgroup.events" \
         "$root/sys/fs/cgroup/system.slice/system-modprobe.slice/modprobe@configfs.service/cgroup.kill"
     for device_spec in 'console 5 0 600' 'null 1 3 666' 'zero 1 5 666' 'random 1 8 666' 'urandom 1 9 666'; do
+        device_ifs=$IFS
+        IFS=' '
         set -- $device_spec
+        IFS=$device_ifs
         test -e "$root/dev/$1" || mknod -m "$4" "$root/dev/$1" c "$2" "$3"
     done
     ln -s / "$root/proc/1/root"
@@ -367,6 +370,7 @@ create_instance() {
     create_network=
     create_network_seen=false
     create_forwards=
+    create_forward_mode=
     while test "$#" -gt 0; do
         case $1 in
             --set)
@@ -379,16 +383,25 @@ $2"
             --network)
                 test "$#" -ge 2 || usage
                 test "$create_network_seen" = false || usage
-                validate_attachment "$2" || usage
-                create_network=$2
+                case $2 in
+                    default) create_network= ;;
+                    *) validate_attachment "$2" || usage; create_network=$2 ;;
+                esac
                 create_network_seen=true
                 shift 2
                 ;;
             --forward)
                 test "$#" -ge 2 || usage
-                validate_forward "$2" || usage
-                create_forwards="$create_forwards
+                if test "$2" = none; then
+                    test -z "$create_forward_mode" || usage
+                    create_forward_mode=none
+                else
+                    test "$create_forward_mode" != none || usage
+                    validate_forward "$2" || usage
+                    create_forward_mode=list
+                    create_forwards="$create_forwards
 $2"
+                fi
                 shift 2
                 ;;
             *) usage ;;
@@ -466,6 +479,7 @@ set_instance() {
     next_forwards=$deployment_forwards
     set_network_seen=false
     set_forward_seen=false
+    set_forward_mode=
     replacement_forwards=
     while test "$#" -gt 0; do
         case $1 in
@@ -483,11 +497,14 @@ set_instance() {
             --forward)
                 test "$#" -ge 2 || usage
                 if test "$2" = none; then
-                    test "$set_forward_seen" = false || usage
+                    test -z "$set_forward_mode" || usage
                     replacement_forwards=
+                    set_forward_mode=none
                     set_forward_seen=true
                 else
+                    test "$set_forward_mode" != none || usage
                     validate_forward "$2" || usage
+                    set_forward_mode=list
                     replacement_forwards="$replacement_forwards
 $2"
                     set_forward_seen=true
