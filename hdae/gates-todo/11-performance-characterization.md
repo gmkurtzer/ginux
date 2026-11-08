@@ -466,8 +466,9 @@ criterion.
 
 - Working branch: `hdae/performance-characterization`
 - Intended base: `main`
-- Pull request: intended; dedicated branch push and PR creation authorized on
-  2026-11-03; never merge or close without explicit authorization
+- Pull request: https://github.com/gmkurtzer/ginux/pull/249; dedicated branch
+  push and PR creation authorized on 2026-11-03; never merge or close without
+  explicit authorization
 - Planned commits: matched benchmark protocols and budget record; comparison
   and report tooling; targeted optimizations; final regression and evidence
 - Actual commits: `f8dd4497` (dispatch decision and gate record), `da7d9ba9`
@@ -475,8 +476,9 @@ criterion.
   filter), `efbe11f8` (budget and regression automation), `2a021baf`
   (deterministic tracee regression), `1b79c033` (selective dispatch default),
   `811ad59c` (selective listener cleanup and audit-profile capture),
-  `a747bcfd` (exhaustive selective profiling), paranoid-mode benchmark tooling
-  and evidence (`a6fee7eb`)
+  `a747bcfd` (exhaustive selective profiling), `a6fee7eb` (paranoid-mode
+  benchmark tooling and evidence), and `7ee48be0` (paranoid profiling commit
+  record)
 
 ## Review policy and outcome
 

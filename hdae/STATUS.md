@@ -530,11 +530,12 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Present the completed selective and paranoid evidence. Selective passes every
-mandatory row except four thread-yield allocations at 0.909x to 0.935x;
-paranoid passes CPU, memory, and mutex but reaches only 0.028x to 0.037x on
-thread-yield. Do not publish an accepted baseline or close Gate 11 while these
-rows exceed the unchanged 4% budget.
+Review pull request https://github.com/gmkurtzer/ginux/pull/249 and the completed
+selective and paranoid evidence. Selective passes every mandatory row except
+four thread-yield allocations at 0.909x to 0.935x; paranoid passes CPU, memory,
+and mutex but reaches only 0.028x to 0.037x on thread-yield. Do not publish an
+accepted baseline or close Gate 11 while these rows exceed the unchanged 4%
+budget.
 
 ## Context recovery
 
@@ -543,6 +544,9 @@ rows exceed the unchanged 4% budget.
 - Reload after context shift: required
 - Active gate: Gate 11, performance characterization and optimization, is
   partial on `hdae/performance-characterization`.
+- Delivery: pull request https://github.com/gmkurtzer/ginux/pull/249 is open
+  against `main`; it must not be merged or closed without explicit human
+  authorization.
 - Last evidence: retained code through `811ad59c` removes the unused selective
   listener and supports per-run audit capture. The final five-second,
   five-repetition matrix passes every CPU, memory, and mutex row; four thread
