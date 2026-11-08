@@ -116,6 +116,8 @@ const FUTEX_WAKE: usize = 1;
 const PR_SET_PDEATHSIG: usize = 1;
 const SECCOMP_IOCTL_NOTIF_RECV: usize = 0xc050_2100;
 const SECCOMP_IOCTL_NOTIF_SEND: usize = 0xc018_2101;
+const SECCOMP_IOCTL_NOTIF_SET_FLAGS: usize = 0x4008_2104;
+const SECCOMP_USER_NOTIF_FD_SYNC_WAKE_UP: u64 = 1;
 const PROT_READ_WRITE: usize = 1 | 2;
 const MAP_SHARED_ANONYMOUS: usize = 1 | 0x20;
 const INSTANCE_NULL_FD: usize = 240;
@@ -4760,6 +4762,21 @@ fn native_yield_broker(
 ) -> ! {
     const AUDIT_EVENT_LIMIT: u64 = 8192;
     let _ = unsafe { syscall5(SYS_PRCTL, PR_SET_PDEATHSIG, SIGKILL, 0, 0, 0) };
+    let synchronous_wakeup = unsafe {
+        syscall3(
+            SYS_IOCTL_HOST,
+            listener,
+            SECCOMP_IOCTL_NOTIF_SET_FLAGS,
+            SECCOMP_USER_NOTIF_FD_SYNC_WAKE_UP as usize,
+        )
+    } == 0;
+    pid_map.lock_audit();
+    if synchronous_wakeup {
+        write_all_to(2, b"GINUX_NATIVE: notification-sync-wakeup=enabled\n");
+    } else {
+        write_all_to(2, b"GINUX_NATIVE: notification-sync-wakeup=unavailable\n");
+    }
+    pid_map.unlock_audit();
     let rule = contract
         .syscall_rule(24)
         .filter(|rule| matches!(rule.action, ContractAction::Mediate))
