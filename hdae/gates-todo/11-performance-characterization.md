@@ -476,7 +476,7 @@ criterion.
   (deterministic tracee regression), `1b79c033` (selective dispatch default),
   `811ad59c` (selective listener cleanup and audit-profile capture),
   `a747bcfd` (exhaustive selective profiling), paranoid-mode benchmark tooling
-  and evidence (pending)
+  and evidence (`a6fee7eb`)
 
 ## Review policy and outcome
 
