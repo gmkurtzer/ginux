@@ -6,7 +6,8 @@ runtime=${GINUX_RUNTIME:-/usr/local/libexec/ginux-runtime}
 
 usage() {
     printf '%s\n' 'usage:' >&2
-    printf '%s\n' '  ginux instance create NAME FILE [--set KEY=TOML_VALUE]...' >&2
+    printf '%s\n' '  ginux instance create NAME FILE [--set KEY=TOML_VALUE]... [--network ATTACHMENT] [--forward SPEC]...' >&2
+    printf '%s\n' '  ginux instance set NAME [--network ATTACHMENT] [--forward SPEC]...' >&2
     printf '%s\n' '  ginux instance list' >&2
     printf '%s\n' '  ginux instance start NAME [--attach]' >&2
     printf '%s\n' '  ginux instance attach NAME' >&2
@@ -38,7 +39,7 @@ case $command in
         test "$#" -eq 2 || usage
         exec "$runtime" instance-diff "$1" "$2"
         ;;
-    attach|create|list|start|status|stop) ;;
+    attach|create|list|set|start|status|stop) ;;
     *) usage ;;
 esac
 

@@ -9,7 +9,8 @@ image_cache=$state_root/images/rocky-10-ubi-init-amd64
 image_tar=$image_cache/rocky-10-ubi-init-amd64-rootfs.tar
 
 usage() {
-    printf '%s\n' 'usage: ginux instance create NAME FILE [--set KEY=TOML_VALUE]...' >&2
+    printf '%s\n' 'usage: ginux instance create NAME FILE [--set KEY=TOML_VALUE]... [--network ATTACHMENT] [--forward SPEC]...' >&2
+    printf '%s\n' '       ginux instance set NAME [--network ATTACHMENT] [--forward SPEC]...' >&2
     printf '%s\n' '       ginux instance list' >&2
     printf '%s\n' '       ginux instance start NAME [--attach]' >&2
     printf '%s\n' '       ginux instance attach NAME' >&2
@@ -143,6 +144,126 @@ resolve_network_config() {
     fi
 }
 
+validate_forward() {
+    forward_spec=$1
+    forward_protocol=
+    forward_external=
+    forward_instance=
+    old_ifs=$IFS
+    IFS=,
+    set -- $forward_spec
+    IFS=$old_ifs
+    test "$#" -eq 3 || return 1
+    for forward_field in "$@"; do
+        case $forward_field in
+            protocol=tcp|protocol=udp)
+                test -z "$forward_protocol" || return 1
+                forward_protocol=${forward_field#protocol=}
+                ;;
+            external_port=*)
+                test -z "$forward_external" || return 1
+                forward_external=${forward_field#external_port=}
+                ;;
+            instance_port=*)
+                test -z "$forward_instance" || return 1
+                forward_instance=${forward_field#instance_port=}
+                ;;
+            *) return 1 ;;
+        esac
+    done
+    for forward_port in "$forward_external" "$forward_instance"; do
+        case $forward_port in
+            ''|*[!0-9]*) return 1 ;;
+        esac
+        test "$forward_port" -ge 1 && test "$forward_port" -le 65535 || return 1
+    done
+    test -n "$forward_protocol"
+}
+
+validate_attachment() {
+    case ${1-} in
+        ''|*[!A-Za-z0-9_.:-]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+read_deployment() {
+    deployment_file=$1
+    deployment_network=
+    deployment_forwards=
+    test -f "$deployment_file" || return 0
+    while IFS="$(printf '\t')" read -r deployment_key deployment_value deployment_extra; do
+        test -z "$deployment_extra" || return 1
+        case $deployment_key in
+            network)
+                test -z "$deployment_network" || return 1
+                deployment_network=$deployment_value
+                ;;
+            forward)
+                validate_forward "$deployment_value" || return 1
+                deployment_forwards="$deployment_forwards
+$deployment_value"
+                ;;
+            '') ;;
+            *) return 1 ;;
+        esac
+    done <"$deployment_file"
+}
+
+write_deployment() {
+    deployment_file=$1
+    deployment_network=$2
+    deployment_forwards=$3
+    deployment_tmp=$deployment_file.tmp.$$
+    : >"$deployment_tmp"
+    if test -n "$deployment_network"; then
+        printf 'network\t%s\n' "$deployment_network" >>"$deployment_tmp"
+    fi
+    old_ifs=$IFS
+    IFS='
+'
+    for deployment_forward in $deployment_forwards; do
+        test -n "$deployment_forward" || continue
+        printf 'forward\t%s\n' "$deployment_forward" >>"$deployment_tmp"
+    done
+    IFS=$old_ifs
+    chmod 600 "$deployment_tmp"
+    mv "$deployment_tmp" "$deployment_file"
+}
+
+materialize_runtime_config() {
+    materialize_recipe=$1
+    materialize_deployment=$2
+    materialize_output=$3
+    read_deployment "$materialize_deployment" || {
+        printf '%s\n' 'invalid persisted instance deployment state' >&2
+        return 1
+    }
+    set --
+    if test -n "$deployment_network"; then
+        set -- "$@" "network.interface=\"$deployment_network\""
+    fi
+    forward_list=
+    forward_separator=
+    old_ifs=$IFS
+    IFS='
+'
+    for materialize_forward in $deployment_forwards; do
+        test -n "$materialize_forward" || continue
+        validate_forward "$materialize_forward" || return 1
+        forward_attachment=${deployment_network:-default}
+        forward_value=$forward_protocol/$forward_attachment/$forward_external/$forward_instance
+        forward_list=$forward_list$forward_separator\"$forward_value\"
+        forward_separator=', '
+    done
+    IFS=$old_ifs
+    if test -n "$forward_list"; then
+        set -- "$@" "network.port_forwards=[$forward_list]"
+    fi
+    "$runtime" config-merge "$materialize_recipe" "$@" >"$materialize_output"
+    resolve_network_config "$materialize_output"
+}
+
 prepare_root() {
     root=$1
     mkdir -p \
@@ -243,16 +364,35 @@ create_instance() {
     config=$2
     shift 2
     overrides=
+    create_network=
+    create_network_seen=false
+    create_forwards=
     while test "$#" -gt 0; do
-        test "$#" -ge 2 || usage
-        test "$1" = --set || usage
-        case $2 in
-            *=*) ;;
+        case $1 in
+            --set)
+                test "$#" -ge 2 || usage
+                case $2 in *=*) ;; *) usage ;; esac
+                overrides="$overrides
+$2"
+                shift 2
+                ;;
+            --network)
+                test "$#" -ge 2 || usage
+                test "$create_network_seen" = false || usage
+                validate_attachment "$2" || usage
+                create_network=$2
+                create_network_seen=true
+                shift 2
+                ;;
+            --forward)
+                test "$#" -ge 2 || usage
+                validate_forward "$2" || usage
+                create_forwards="$create_forwards
+$2"
+                shift 2
+                ;;
             *) usage ;;
         esac
-        overrides="$overrides
-$2"
-        shift 2
     done
     validate_name "$name"
     test -r "$config" || { printf 'configuration is not readable: %s\n' "$config" >&2; exit 66; }
@@ -280,7 +420,6 @@ $2"
     done
     IFS=$old_ifs
     "$runtime" config-merge "$config" "$@" "instance.id=\"$name\"" >"$effective"
-    resolve_network_config "$effective"
     configured_root=$(sed -n 's/^[[:space:]]*root[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$effective")
     expected_root=docker.io/rockylinux/rockylinux@sha256:7a18ce2c9c1e0d8735f3e72685f9666150af25036e7f7b5ee4eede3754496f8c
     if test "$configured_root" != "$expected_root"; then
@@ -297,12 +436,84 @@ $2"
     printf '  Preparing instance... '
     mkdir -p "$directory/root"
     install -m 600 "$effective" "$directory/config.toml"
+    write_deployment "$directory/deployment.state" "$create_network" "$create_forwards"
+    materialize_runtime_config \
+        "$directory/config.toml" "$directory/deployment.state" "$directory/runtime.toml"
     tar -xf "$image_tar" -C "$directory/root"
     prepare_root "$directory/root"
     printf 'done\n'
     trap - 0 HUP INT TERM
     cleanup_effective
     printf 'Instance "%s" created.\n' "$name"
+}
+
+set_instance() {
+    test "$#" -ge 3 || usage
+    name=$1
+    shift
+    validate_name "$name"
+    directory=$(instance_dir "$name")
+    test -d "$directory" || { printf '%s: not found\n' "$name" >&2; exit 66; }
+    if supervisor_identity "$name" >/dev/null; then
+        printf '%s: stop the instance before changing deployment settings\n' "$name" >&2
+        exit 73
+    fi
+    read_deployment "$directory/deployment.state" || {
+        printf '%s: invalid persisted deployment state\n' "$name" >&2
+        exit 65
+    }
+    next_network=$deployment_network
+    next_forwards=$deployment_forwards
+    set_network_seen=false
+    set_forward_seen=false
+    replacement_forwards=
+    while test "$#" -gt 0; do
+        case $1 in
+            --network)
+                test "$#" -ge 2 || usage
+                test "$set_network_seen" = false || usage
+                case $2 in
+                    default) next_network= ;;
+                    ''|*[!A-Za-z0-9_.:-]*) usage ;;
+                    *) next_network=$2 ;;
+                esac
+                set_network_seen=true
+                shift 2
+                ;;
+            --forward)
+                test "$#" -ge 2 || usage
+                if test "$2" = none; then
+                    test "$set_forward_seen" = false || usage
+                    replacement_forwards=
+                    set_forward_seen=true
+                else
+                    validate_forward "$2" || usage
+                    replacement_forwards="$replacement_forwards
+$2"
+                    set_forward_seen=true
+                fi
+                shift 2
+                ;;
+            *) usage ;;
+        esac
+    done
+    test "$set_network_seen" = true || test "$set_forward_seen" = true || usage
+    if test "$set_forward_seen" = true; then
+        next_forwards=$replacement_forwards
+    fi
+    candidate_deployment=$directory/deployment.state.candidate.$$
+    candidate_runtime=$directory/runtime.toml.candidate.$$
+    cleanup_candidate() {
+        rm -f "$candidate_deployment" "$candidate_runtime"
+    }
+    trap cleanup_candidate 0 HUP INT TERM
+    write_deployment "$candidate_deployment" "$next_network" "$next_forwards"
+    materialize_runtime_config \
+        "$directory/config.toml" "$candidate_deployment" "$candidate_runtime"
+    mv "$candidate_deployment" "$directory/deployment.state"
+    mv "$candidate_runtime" "$directory/runtime.toml"
+    trap - 0 HUP INT TERM
+    printf 'Instance "%s" updated.\n' "$name"
 }
 
 list_instances() {
@@ -330,8 +541,9 @@ status_instance() {
     if test "$state" = running; then
         printf 'pid: %s\n' "$(supervisor_identity "$name")"
     fi
-    printf 'config: %s\nconsole-log: %s\naudit-log: %s\n' \
-        "$directory/config.toml" "$directory/console.log" "$directory/audit.log"
+    printf 'config: %s\ndeployment: %s\nconsole-log: %s\naudit-log: %s\n' \
+        "$directory/config.toml" "$directory/deployment.state" \
+        "$directory/console.log" "$directory/audit.log"
 }
 
 start_instance() {
@@ -404,7 +616,9 @@ run_runtime() {
     directory=$(instance_dir "$name")
     test -d "$directory" || exit 66
     record_runtime "$directory" "$$"
-    hook_plan=$($runtime hook-plan "$directory/config.toml") || exit 65
+    materialize_runtime_config \
+        "$directory/config.toml" "$directory/deployment.state" "$directory/runtime.toml"
+    hook_plan=$($runtime hook-plan "$directory/runtime.toml") || exit 65
     hook_count=
     hook_timeout=
     hook_failure=
@@ -428,7 +642,7 @@ EOF
             "$hook_index" "$hook_timeout" "$hook_failure" >&2
         set +e
         timeout --signal=TERM --kill-after=2 "$hook_timeout" \
-            "$runtime" native-hook "$directory/config.toml" "$directory/root" "$hook_index"
+            "$runtime" native-hook "$directory/runtime.toml" "$directory/root" "$hook_index"
         hook_status=$?
         set -e
         if test "$hook_status" -eq 0; then
@@ -447,7 +661,7 @@ EOF
         fi
         hook_index=$((hook_index + 1))
     done
-    exec "$runtime" native "$directory/config.toml" "$directory/root" configured \
+    exec "$runtime" native "$directory/runtime.toml" "$directory/root" configured \
         2>>"$directory/audit.log"
 }
 
@@ -584,6 +798,7 @@ case $command in
     list) test "$#" -eq 0 || usage; list_instances ;;
     prepare-root) test "$#" -eq 1 || usage; prepare_root "$1" ;;
     resolve-network) test "$#" -eq 1 || usage; resolve_network_config "$1" ;;
+    set) set_instance "$@" ;;
     start) start_instance "$@" ;;
     status) status_instance "$@" ;;
     stop) stop_instance "$@" ;;
