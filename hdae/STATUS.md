@@ -518,10 +518,13 @@ thread-only budget, or an expanded kernel-side enforcement architecture.
   partial on `hdae/performance-characterization`.
 - Last evidence: strict paranoid/selective dispatch, direct-safe
   `sched_yield`, cache-compatible seccomp filtering, and comparison automation
-  are committed through `2a021baf`. The final five-second/five-repetition
+  are committed through `1b79c033`, including selective as the omitted-value
+  default. The final five-second/five-repetition
   matrix passes every CPU, memory, and mutex row; all five thread rows remain
   5.09% to 7.99% slower and fail the 4% budget. Functional, contract, denial,
-  VFS, process, kernel-view, and systemd regressions pass.
+  VFS, process, kernel-view, and systemd regressions pass; fresh default-change
+  verification includes live QEMU configuration, dual-mode contract, and full
+  Rocky systemd suites.
 - Approved network direction: Gate 9 defaults to full host-shared inbound and
   outbound networking with normal host routing and bind conflicts, under Ginux
   mediation and audit. Gate 9.75 adds comprehensive instance configuration,

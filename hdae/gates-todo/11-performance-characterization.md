@@ -291,6 +291,11 @@ criterion.
   `make test-contract-runtime`, `make test-native-vfs`, `make test-process`,
   `make test-kernel-views`, and the complete `make test-systemd` cold, warm,
   repeat, offline, DNF-failure, startup-failure, and shutdown suite.
+- After changing the omitted-value default, `make check`, `make test-contract`,
+  `make test-bench-compare`, and live QEMU `make test-config`,
+  `make test-contract-runtime`, and the complete `make test-systemd` suite pass.
+  The Rocky systemd example runs selective dispatch; explicit paranoid fixtures
+  continue proving all-syscall mediation and pre-effect socket denial.
 
 ## Decisions and limitations
 
@@ -355,7 +360,7 @@ criterion.
 - Actual commits: `f8dd4497` (dispatch decision and gate record), `da7d9ba9`
   (configuration and selective runtime), `e177f24d` (cache-compatible selective
   filter), `efbe11f8` (budget and regression automation), `2a021baf`
-  (deterministic tracee regression)
+  (deterministic tracee regression), `1b79c033` (selective dispatch default)
 
 ## Review policy and outcome
 
