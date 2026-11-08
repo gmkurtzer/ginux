@@ -28,6 +28,8 @@ ROCKY_IMAGE_PATH=$base ./scripts/prepare-rocky-host.sh
 network_restrict=${ROCKY_NETWORK_RESTRICT:-on}
 vcpus=${ROCKY_VCPUS:-2}
 memory_mib=${ROCKY_MEMORY_MIB:-2048}
+qemu_accel=${ROCKY_QEMU_ACCEL:-tcg}
+qemu_cpu=${ROCKY_QEMU_CPU:-}
 case "$network_restrict" in
     on|off) ;;
     *)
@@ -42,6 +44,20 @@ test "$vcpus" -gt 0 && test "$memory_mib" -gt 0 || {
     printf '%s\n' 'ROCKY_VCPUS and ROCKY_MEMORY_MIB must be positive integers' >&2
     exit 2
 }
+case "$qemu_accel" in
+    tcg)
+        accel_argument=tcg,thread=multi
+        test -n "$qemu_cpu" || qemu_cpu=max
+        ;;
+    kvm)
+        accel_argument=kvm
+        test -n "$qemu_cpu" || qemu_cpu=host
+        ;;
+    *)
+        printf '%s\n' 'ROCKY_QEMU_ACCEL must be tcg or kvm' >&2
+        exit 2
+        ;;
+esac
 overlay=$ROCKY_OVERLAY_DISK
 mkdir -p "$(dirname "$overlay")" "$(dirname "$ROCKY_PID_FILE")" \
     "$(dirname "$ROCKY_SERIAL_LOG")"
@@ -53,11 +69,11 @@ else
 fi
 rm -f "$ROCKY_SERIAL_LOG"
 
-host_progress "starting x86-64 QEMU (TCG, $vcpus vCPUs, $memory_mib MiB)"
+host_progress "starting x86-64 QEMU ($qemu_accel, CPU $qemu_cpu, $vcpus vCPUs, $memory_mib MiB)"
 qemu-system-x86_64 \
     -machine q35 \
-    -accel tcg,thread=multi \
-    -cpu max \
+    -accel "$accel_argument" \
+    -cpu "$qemu_cpu" \
     -smp "$vcpus" \
     -m "${memory_mib}M" \
     -display none \
