@@ -15,6 +15,7 @@ workloads=${GINUX_BENCH_WORKLOADS:-"cpu memory threads mutex"}
 audit_mode=${GINUX_BENCH_AUDIT_MODE:-stderr}
 supervisor_cpu=${GINUX_BENCH_SUPERVISOR_CPU:-}
 capture_audit=${GINUX_BENCH_CAPTURE_AUDIT:-0}
+dispatch_mode=${GINUX_BENCH_DISPATCH_MODE:-selective}
 memory_bytes=1073741824
 
 case "$duration:$repetitions" in
@@ -22,6 +23,9 @@ case "$duration:$repetitions" in
 esac
 case "$audit_mode" in stderr|disabled) ;; *) printf '%s\n' 'invalid Gate 11 audit mode' >&2; exit 2 ;; esac
 case "$capture_audit" in 0|1) ;; *) printf '%s\n' 'invalid Gate 11 audit capture mode' >&2; exit 2 ;; esac
+case "$dispatch_mode" in selective|paranoid) ;; *) printf '%s\n' 'invalid Gate 11 dispatch mode' >&2; exit 2 ;; esac
+
+grep -Fqx "dispatch = \"$dispatch_mode\"" "$base_config"
 
 test -x /usr/bin/sysbench
 test -x "$directory/root/usr/bin/sysbench"

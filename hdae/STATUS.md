@@ -207,13 +207,24 @@ scope, threat model, and invariants.
   seccomp control exhaust the credible in-scope paths. The no-tracer control
   alone measured 0.941x native, reproducing the residual thread deficit in the
   host kernel's seccomp fast path under x86-64 QEMU TCG.
+- Human direction on 2026-11-07 extends Gate 11 to paranoid mode. The next
+  phase will collect a matched paranoid matrix, profile the notification
+  broker and its audit, contract, PID-map, and scheduling costs, and test which
+  selective-mode optimizations transfer without weakening the requirement that
+  every syscall enter Ginux userspace before completion.
+- The paranoid follow-on sweep is complete. Its five-second/five-repetition
+  matrix passes every CPU, memory, and mutex row but fails all five
+  thread-yield rows at 0.028x to 0.037x native. Audit-disabled, CPU-separated,
+  and multi-broker diagnostics confirmed that seccomp notification
+  receive/response and scheduler round trips dominate; multiple receivers made
+  performance substantially worse and were reverted.
 - The final retained-code five-second/five-repetition matrix passes every CPU,
   memory, and mutex row. Four thread rows fail at 0.909x to 0.935x; one
   high-variance thread row passes at 0.968x. The unchanged 4% budget therefore
   keeps Gate 11 partial.
-- Exact next action: present the exhausted selective-path evidence and obtain
-  the human's architecture or budget decision before publishing an accepted
-  baseline or closing Gate 11.
+- Exact next action: present the completed selective and paranoid evidence.
+  Gate 11 remains partial under the unchanged 4% budget; do not publish an
+  accepted baseline or close the gate without human direction.
 - Human direction on 2026-11-07 resolved the Gate 11 dispatch boundary. Each
   instance will configure `paranoid` or `selective` dispatch. Paranoid preserves
   a Ginux userspace decision for every syscall. Selective directly executes
@@ -519,13 +530,11 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Present the completed selective-dispatch evidence and obtain the human's Gate
-11 direction. The retained final matrix has four thread-yield failures at
-6.49% to 9.15% slower under x86-64 QEMU TCG; independent no-tracer evidence
-shows a single constant-allow seccomp filter is itself 5.86% slower. Do not
-publish an accepted baseline or close the gate until the human chooses native
-x86-64/KVM confirmation, a specific thread-only budget, or an explicitly
-scoped kernel-side enforcement architecture.
+Present the completed selective and paranoid evidence. Selective passes every
+mandatory row except four thread-yield allocations at 0.909x to 0.935x;
+paranoid passes CPU, memory, and mutex but reaches only 0.028x to 0.037x on
+thread-yield. Do not publish an accepted baseline or close Gate 11 while these
+rows exceed the unchanged 4% budget.
 
 ## Context recovery
 
@@ -542,13 +551,20 @@ scoped kernel-side enforcement architecture.
   `make test-contract`, `make test-bench-compare`, `make test-contract-runtime`,
   aggregate `make test`, `make test-native-vfs`, and the complete Rocky
   `make test-systemd` matrix pass on isolated QEMU state.
+- Completed paranoid work: the benchmark harness records dispatch mode and
+  rejects cross-mode baseline comparison. The retained single-broker path has
+  constant-time and precomputed contract decisions, bounded audit, and no
+  redundant host yield. A long full matrix, audit-disabled matrix, perf
+  profile, CPU-separation test, and reverted multi-broker diagnostic exhaust
+  the credible invariant-preserving paths.
 - Approved network direction: Gate 9 defaults to full host-shared inbound and
   outbound networking with normal host routing and bind conflicts, under Ginux
   mediation and audit. Gate 9.75 adds comprehensive instance configuration,
   network selection, port controls, and translation.
 - Gate 9.75 closure: pull request 229 merged as `8a475e8b`; human accepted and
   closed the gate on 2026-11-06.
-- Required human decision: select the next Gate 11 boundary: native x86-64/KVM
-  confirmation before setting a durable budget; a thread-only tolerance of at
-  least 8%; or an explicitly scoped kernel-side enforcement component. The
-  current 4% budget remains authoritative until that decision.
+- Required human decision: choose whether Gate 11 should require native
+  x86-64/KVM confirmation, adopt mode- or workload-specific budgets, or keep
+  the current 4% threshold and leave Gate 11 partial. Any kernel-side
+  enforcement component or weakening of paranoid all-syscall userspace
+  mediation requires a separate architecture decision.

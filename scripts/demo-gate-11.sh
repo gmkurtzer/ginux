@@ -1,8 +1,10 @@
 #!/bin/sh
 set -eu
 
+dispatch_mode=${GINUX_BENCH_DISPATCH_MODE:-selective}
+
 printf '%s\n' \
-    'Gate 11 demonstration: matched native and selective-dispatch Ginux benchmarks.' \
+    "Gate 11 demonstration: matched native and $dispatch_mode-dispatch Ginux benchmarks." \
     'Prerequisite: run make bench-prepare once with network access.' \
     'This bounded run uses one-second workloads and three repetitions.' \
     'Observe: raw measurements and metadata under build/gate11, followed by' \

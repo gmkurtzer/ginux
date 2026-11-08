@@ -140,6 +140,12 @@ criterion.
   userspace `sched_yield` decisions.
 - [x] Added optional per-run benchmark audit capture so syscall-path profiles
   remain tied to the exact native/Ginux sample that produced them.
+- [x] Established a matched paranoid-dispatch benchmark matrix and profiled its
+  userspace notification, audit, contract-decision, PID-mapping, and scheduling
+  costs without permitting any syscall to complete before a Ginux decision.
+- [x] Re-evaluated each retained selective-mode optimization for paranoid mode,
+  retaining only changes that preserve all-syscall userspace mediation and
+  demonstrating rejected or ineffective alternatives with measured evidence.
 
 ## Remaining work
 
@@ -169,6 +175,9 @@ criterion.
   profile every mandatory workload, apply each evidence-backed in-scope
   optimization, explore materially different credible alternatives, and run a
   final clean 1/2/4-vCPU matrix plus mandatory regressions before stopping.
+- [x] Completed the human-authorized paranoid-mode follow-on sweep: collected the
+  full matched matrix, profiled the broker path, applied invariant-preserving
+  improvements, and rerun the matrix plus mandatory regressions.
 
 ## Acceptance criteria
 
@@ -199,6 +208,9 @@ criterion.
   completion. In selective mode, an allowed `sched_yield` executes directly,
   while a configured denial returns from Ginux with no host syscall effect and
   virtual or inspection-dependent operations remain mediated.
+- Paranoid-mode optimization evidence must identify which selective
+  improvements transfer, which do not, and why; no retained change may turn a
+  paranoid syscall into a direct kernel path.
 - The report identifies fixed overhead, workload-sensitive overhead, variance,
   known bottlenecks, and unsupported conclusions.
 - `make demo-gate-11` lets a human run a bounded comparison and inspect raw
@@ -226,6 +238,10 @@ criterion.
 - Dispatch-mode tests -> reject unknown configuration; prove paranoid
   all-syscall mediation; prove selective direct-safe execution; and prove that
   denial, translation, emulation, and inspection paths remain in Ginux.
+- Paranoid benchmark matrix -> runs the same pinned workloads, allocations,
+  affinity, memory limit, warmup, and repetitions as the selective matrix,
+  records dispatch mode as compatibility metadata, and verifies the paranoid
+  runtime marker plus mediated `sched_yield` evidence.
 
 ## Evidence
 
@@ -324,6 +340,39 @@ criterion.
   aggregate `make test`, `make test-native-vfs`, and the complete cold, warm,
   repeat, offline, DNF-failure, startup-failure, and shutdown
   `make test-systemd` matrix.
+- The explicit paranoid five-second/five-repetition matrix in
+  `build/gate11-paranoid-final/` passes all CPU rows at 1.000x to 1.009x, all
+  memory rows at 0.992x to 1.016x, and all mutex rows at 0.991x to 0.997x.
+  All five thread-yield rows fail at 0.028x to 0.037x native because every
+  repeated yield requires a Ginux userspace round trip.
+- A three-second audit-disabled paranoid thread matrix reached 0.029x to
+  0.035x native. Audit formatting and writes are therefore secondary to the
+  notification boundary and cannot recover the missing performance.
+- `perf stat` on a one-vCPU, one-thread, three-second paranoid run recorded
+  91,376 context switches for approximately 45,000 mediated yields, 2.833
+  seconds of system time, and 0.372 seconds of user time. This is approximately
+  two scheduler transitions per decision and localizes the cost below the Rust
+  contract and audit logic.
+- Pinning the broker and supervisor to CPU 3 while one- and two-vCPU workloads
+  remained on CPUs 0 and 1 measured 0.033x to 0.037x native, so CPU separation
+  did not materially change the notification cost.
+- A diagnostic with one notification receiver per configured vCPU regressed
+  the two- and four-vCPU rows to 0.010x to 0.025x because receivers contended
+  on one seccomp listener. It was reverted; the retained single broker remains
+  the fastest measured implementation.
+- Selective optimizations that transfer are already retained in paranoid mode:
+  constant-time indexed contract decisions, one precomputed yield rule,
+  bounded audit with logarithmic drop reporting, a minimal dispatch filter,
+  and removal of the redundant second host yield. Selective listener removal
+  cannot transfer because paranoid requires that listener; direct-safe
+  execution cannot transfer without violating the mode's defining invariant.
+- Benchmark collection now accepts explicit `selective` or `paranoid`
+  dispatch, writes the effective recipe into the result directory, records the
+  mode as compatibility metadata, validates the corresponding runtime marker,
+  and rejects accepted-baseline comparisons across modes.
+- Fresh paranoid-phase verification passes `make check`, `make test-contract`,
+  `make test-bench-compare`, isolated Rocky QEMU `make test-contract-runtime`,
+  and the complete aggregate `make test` suite on isolated port 22450.
 
 ## Decisions and limitations
 
@@ -401,6 +450,17 @@ criterion.
   and all security invariants remain unchanged; elapsed time does not make the
   gate pass, and any remaining architecture change still returns to human
   review.
+- Human direction on 2026-11-07 extends the open Gate 11 investigation to
+  paranoid dispatch. The same native-parity goal, 4% budget, dedicated branch,
+  checkpoint policy, and security invariants apply. Selective optimizations may
+  transfer only when every paranoid syscall still receives a pre-completion
+  Ginux userspace decision.
+- Paranoid's userspace notification cost is intentionally much larger than
+  selective's kernel-resident allow path. Linux seccomp user notification
+  requires one receive and one response ioctl plus the broker and tracee
+  wakeups for each decision. The measured two context switches per yield are
+  intrinsic to that boundary; removing them would make the operation selective
+  or require a new kernel-side enforcement architecture.
 
 ## Delivery strategy
 
@@ -414,7 +474,9 @@ criterion.
   (configuration and selective runtime), `e177f24d` (cache-compatible selective
   filter), `efbe11f8` (budget and regression automation), `2a021baf`
   (deterministic tracee regression), `1b79c033` (selective dispatch default),
-  `811ad59c` (selective listener cleanup and audit-profile capture)
+  `811ad59c` (selective listener cleanup and audit-profile capture),
+  `a747bcfd` (exhaustive selective profiling), paranoid-mode benchmark tooling
+  and evidence (pending)
 
 ## Review policy and outcome
 

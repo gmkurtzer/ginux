@@ -24,6 +24,7 @@ repetitions=3
 memory_limit_bytes=1073741824
 cpu_affinity=test-affinity
 audit_mode=stderr
+dispatch_mode=selective
 ginux_supervisor_cpu=shared-with-instance
 EOF
 }
@@ -71,6 +72,15 @@ fi
 metadata "$test_dir/incompatible.meta" other-kernel
 set +e
 ./scripts/bench-compare.sh "$test_dir/pass.tsv" "$test_dir/incompatible.meta" \
+    "$test_dir/accepted.tsv" "$test_dir/accepted.meta" >/dev/null 2>&1
+status=$?
+set -e
+test "$status" -eq 2
+
+sed 's/^dispatch_mode=selective$/dispatch_mode=paranoid/' \
+    "$test_dir/current.meta" >"$test_dir/incompatible-dispatch.meta"
+set +e
+./scripts/bench-compare.sh "$test_dir/pass.tsv" "$test_dir/incompatible-dispatch.meta" \
     "$test_dir/accepted.tsv" "$test_dir/accepted.meta" >/dev/null 2>&1
 status=$?
 set -e
