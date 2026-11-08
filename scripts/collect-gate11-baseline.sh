@@ -35,6 +35,23 @@ rocky_ssh 'tar -C /var/tmp -czf /var/tmp/gate11-raw.tar.gz gate11-raw'
 rocky_scp "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/gate11-raw.tar.gz" "$output_dir/raw.tar.gz"
 rocky_ssh 'sudo install -m 0644 /var/lib/ginux/instances/gate11-benchmark/audit.log /var/tmp/gate11-final-audit.log'
 rocky_scp "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/gate11-final-audit.log" "$output_dir/final-audit.log"
+if grep -Eq 'operation=syscall\.sched_yield|syscall=24([[:space:]]|$)' "$output_dir/final-audit.log"; then
+    printf '%s\n' 'selective sched_yield unexpectedly entered Ginux audit' >&2
+    exit 1
+fi
+grep -Eq '^GINUX_NATIVE_AUDIT: .*action=(mediate|emulate|deny)' "$output_dir/final-audit.log"
+selective_marker=0
+for log_path in $(tar -tzf "$output_dir/raw.tar.gz" | grep '/ginux-.*\.log$'); do
+    if tar -xOzf "$output_dir/raw.tar.gz" "$log_path" 2>/dev/null |
+        grep -Fq 'GINUX_NATIVE: supervisor=attached dispatch=selective direct-safe-syscalls=1'; then
+        selective_marker=1
+        break
+    fi
+done
+if test "$selective_marker" -ne 1; then
+    printf '%s\n' 'selective dispatch marker missing from Ginux benchmark logs' >&2
+    exit 1
+fi
 
 {
     printf 'ginux_commit=%s\n' "$commit"

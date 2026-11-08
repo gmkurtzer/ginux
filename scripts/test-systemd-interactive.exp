@@ -148,7 +148,7 @@ expect {
 expect {
     -re {Script started on} { puts stderr "attached console exposed the script transcript header"; exit 152 }
     -re {GINUX_CONFIG_EFFECTIVE_BEGIN} { puts stderr "attached start exposed the full effective configuration"; exit 139 }
-    -re {GINUX_INSTANCE_START: id=rocky init="/sbin/init --system --unit=multi-user.target" resources=2-vcpu,1024-MiB execution=balanced/ptrace-native network=shared} {}
+    -re {GINUX_INSTANCE_START: id=rocky init="/sbin/init --system --unit=multi-user.target" resources=2-vcpu,1024-MiB execution=balanced/ptrace-native dispatch=paranoid network=shared} {}
     timeout { puts stderr "interactive instance start summary timed out"; exit 140 }
     eof { puts stderr "Ginux exited before the instance start summary"; exit 141 }
 }

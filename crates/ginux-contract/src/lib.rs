@@ -2,7 +2,7 @@
 
 use core::fmt;
 
-pub const CATALOG_VERSION: u32 = 1;
+pub const CATALOG_VERSION: u32 = 2;
 pub const MAX_OPERATIONS: usize = 192;
 pub const DIGEST_HEX_BYTES: usize = 64;
 
@@ -131,6 +131,7 @@ pub struct Operation {
     pub abi_number: Option<u64>,
     pub status: Status,
     pub action: Action,
+    pub direct_safe: bool,
     pub constraint: &'static str,
     pub evidence: &'static str,
     pub limitation: &'static str,
@@ -144,6 +145,23 @@ macro_rules! syscall {
             abi_number: Some($number),
             status: Status::$status,
             action: $action,
+            direct_safe: false,
+            constraint: $constraint,
+            evidence: $evidence,
+            limitation: "x86-64 Linux ABI only",
+        }
+    };
+}
+
+macro_rules! direct_syscall {
+    ($name:literal, $number:literal, $status:ident, $action:expr, $constraint:literal, $evidence:literal) => {
+        Operation {
+            id: concat!("syscall.", $name),
+            kind: Kind::Syscall,
+            abi_number: Some($number),
+            status: Status::$status,
+            action: $action,
+            direct_safe: true,
             constraint: $constraint,
             evidence: $evidence,
             limitation: "x86-64 Linux ABI only",
@@ -159,6 +177,7 @@ macro_rules! operation {
             abi_number: None,
             status: Status::$status,
             action: $action,
+            direct_safe: false,
             constraint: $constraint,
             evidence: $evidence,
             limitation: $limitation,
@@ -327,7 +346,7 @@ pub static CATALOG: &[Operation] = &[
         "instance path",
         "test-native-vfs"
     ),
-    syscall!(
+    direct_syscall!(
         "sched_yield",
         24,
         Complete,
@@ -1761,6 +1780,7 @@ const EMPTY_OPERATION: Operation = Operation {
     abi_number: None,
     status: Status::Denied,
     action: Action::Deny(38),
+    direct_safe: false,
     constraint: "",
     evidence: "",
     limitation: "",
@@ -2301,6 +2321,7 @@ fn contract_digest(contract: &EffectiveContract) -> [u8; DIGEST_HEX_BYTES] {
     hash = hash_bytes(hash, &CATALOG_VERSION.to_le_bytes());
     for rule in contract.rules() {
         hash = hash_bytes(hash, rule.operation.id.as_bytes());
+        hash = hash_bytes(hash, &[rule.operation.direct_safe as u8]);
         hash = hash_bytes(hash, rule.action.name().as_bytes());
         hash = hash_bytes(hash, rule.provenance.name().as_bytes());
         hash = hash_bytes(hash, rule.source.as_bytes());
@@ -2364,6 +2385,7 @@ mod tests {
         let rule = contract.syscall_rule(24).unwrap();
         assert_eq!(rule.operation.id, "syscall.sched_yield");
         assert_eq!(rule.action, Action::Mediate);
+        assert!(rule.operation.direct_safe);
         assert_eq!(contract.syscall_action(24), Action::Mediate);
     }
 
@@ -2440,7 +2462,7 @@ mod tests {
             .filter(|rule| rule.provenance == Provenance::InstanceAllow)
             .count();
         assert_eq!(selected, 2);
-        assert_eq!(CATALOG_VERSION, 1);
+        assert_eq!(CATALOG_VERSION, 2);
     }
 
     #[test]

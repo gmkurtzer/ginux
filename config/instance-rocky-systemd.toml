@@ -14,10 +14,11 @@ memory_mib = 1024
 [execution]
 profile = "balanced"
 backend = "ptrace-native"
+dispatch = "paranoid"
 
 [userspace.contract]
 version = 1
-catalog = 1
+catalog = 2
 default = "deny"
 read = ["**"]
 write = ["**"]

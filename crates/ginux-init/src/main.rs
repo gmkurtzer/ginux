@@ -56,7 +56,8 @@ use ginux_devices::{
     Partition, IOCTL_CONSOLE_GET_SIZE,
 };
 use ginux_instance::{
-    ExecutionBackend, ExecutionProfile, Instance, InstanceConfig, NetworkBackend, NetworkProtocol,
+    DispatchMode, ExecutionBackend, ExecutionProfile, Instance, InstanceConfig, NetworkBackend,
+    NetworkProtocol,
 };
 use ginux_kernel_views::{
     CgroupFs, IdentityFs, IdentityView, MemoryView, MountView, NamespaceView, ProcFs, SysFs,
@@ -3121,6 +3122,10 @@ fn native_main(
     } else {
         mode
     };
+    let direct_yield = config.dispatch_mode == DispatchMode::Selective
+        && contract.syscall_rule(24).is_some_and(|rule| {
+            rule.operation.direct_safe && rule.action == ContractAction::Mediate
+        });
     let mut instance = Instance::create(config);
     if instance.start().is_err() {
         instance_fail(&mut instance, b"invalid native start transition");
@@ -3142,7 +3147,7 @@ fn native_main(
         instance_fail(&mut instance, b"native tracee fork failed");
     }
     if child == 0 {
-        native_tracee(root_path, mode, hook_index, &config);
+        native_tracee(root_path, mode, hook_index, &config, direct_yield);
     }
     if let Some(index) = hook_index {
         write_all(b"GINUX_HOOK_AUDIT: action=start index=");
@@ -3160,6 +3165,7 @@ fn native_main(
         root_descriptor as usize,
         contract,
         hook_index.is_some(),
+        direct_yield,
     )
 }
 
@@ -3168,6 +3174,7 @@ fn native_tracee(
     mode: usize,
     hook_index: Option<usize>,
     config: &InstanceConfig,
+    direct_yield: bool,
 ) -> ! {
     static ROOT: &[u8] = b"/\0";
     static BASH: &[u8] = b"/usr/bin/bash\0";
@@ -3242,7 +3249,7 @@ fn native_tracee(
     if self_pid <= 0 || unsafe { syscall2(SYS_KILL, self_pid as usize, SIGSTOP) } < 0 {
         native_tracee_setup_fail(127);
     }
-    if install_trace_filter() != 3 {
+    if install_trace_filter(direct_yield) != 3 {
         native_tracee_setup_fail(128);
     }
     let bash_argv = [
@@ -4779,9 +4786,6 @@ fn native_yield_broker(
             )
         };
         if received < 0 {
-            write_all_to(2, b"GINUX_YIELD_BROKER: listener-closed result=");
-            write_i64_to(2, received as i64);
-            write_all_to(2, b"\n");
             exit_process(0);
         }
         if notification.data.nr != 24 {
@@ -4878,6 +4882,7 @@ fn supervise_native(
     root_descriptor: usize,
     contract: EffectiveContract,
     bootstrap_phase: bool,
+    direct_yield: bool,
 ) -> ! {
     const AUDIT_EVENT_LIMIT: u64 = 8192;
     const AUDIT_PREFIX: &[u8] = b"GINUX_NATIVE_AUDIT: sequence=";
@@ -5146,7 +5151,11 @@ fn supervise_native(
                 if instance.task_exited(exit_status == 0).is_err() {
                     instance_fail(instance, b"native exit transition failed");
                 }
-                line(b"GINUX_NATIVE: supervisor=attached direct-unsupervised-syscalls=0");
+                if direct_yield {
+                    line(b"GINUX_NATIVE: supervisor=attached dispatch=selective direct-safe-syscalls=1");
+                } else {
+                    line(b"GINUX_NATIVE: supervisor=attached dispatch=paranoid direct-safe-syscalls=0");
+                }
                 write_all(b"GINUX_NATIVE_MEASURE: peak-managed-tasks=");
                 write_u64(peak_managed_tasks as u64);
                 write_all(b"\n");
@@ -5344,26 +5353,28 @@ fn supervise_native(
         };
 
         if task.initial_exec_pending && entry_syscall == Some(59) {
-            let listener = native_duplicate_listener(host_pid, 3);
-            if listener < 0 {
-                native_fail(instance, pid, b"native seccomp listener duplication failed");
-            }
-            let broker = unsafe { syscall0(SYS_FORK) };
-            if broker < 0 {
+            if !direct_yield {
+                let listener = native_duplicate_listener(host_pid, 3);
+                if listener < 0 {
+                    native_fail(instance, pid, b"native seccomp listener duplication failed");
+                }
+                let broker = unsafe { syscall0(SYS_FORK) };
+                if broker < 0 {
+                    let _ = unsafe { syscall1(SYS_CLOSE_HOST, listener as usize) };
+                    native_fail(instance, pid, b"native yield broker fork failed");
+                }
+                if broker == 0 {
+                    native_yield_broker(
+                        listener as usize,
+                        audit_mode,
+                        audit_instance_id.as_bytes(),
+                        &contract,
+                        pid_map,
+                    );
+                }
+                yield_broker_pid = broker as usize;
                 let _ = unsafe { syscall1(SYS_CLOSE_HOST, listener as usize) };
-                native_fail(instance, pid, b"native yield broker fork failed");
             }
-            if broker == 0 {
-                native_yield_broker(
-                    listener as usize,
-                    audit_mode,
-                    audit_instance_id.as_bytes(),
-                    &contract,
-                    pid_map,
-                );
-            }
-            yield_broker_pid = broker as usize;
-            let _ = unsafe { syscall1(SYS_CLOSE_HOST, listener as usize) };
             sequence += 1;
             task.initial_exec_pending = false;
             write_all(b"GINUX_NATIVE_AUDIT: sequence=");
@@ -8243,7 +8254,9 @@ fn instance_plan_main(config_path: *const u8) -> ! {
     let contract = config
         .effective_contract()
         .unwrap_or_else(|error| config_rejected(error));
-    write_all(b"GINUX_CONTRACT: catalog=1 instance=");
+    write_all(b"GINUX_CONTRACT: catalog=");
+    write_u64(ginux_contract::CATALOG_VERSION as u64);
+    write_all(b" instance=");
     write_all(config.id.as_bytes());
     write_all(b" profile=");
     if config.contract_recipe_version == 0 {
@@ -8282,7 +8295,9 @@ fn instance_validate_main(config_path: *const u8) -> ! {
         .unwrap_or_else(|error| config_rejected(error));
     write_all(b"Contract valid: instance=");
     write_all(config.id.as_bytes());
-    write_all(b" catalog=1 digest=");
+    write_all(b" catalog=");
+    write_u64(ginux_contract::CATALOG_VERSION as u64);
+    write_all(b" digest=");
     write_all(contract.digest());
     write_all(b" operations=");
     write_u64(contract.rules().len() as u64);
@@ -8301,7 +8316,9 @@ fn instance_explain_main(config_path: *const u8, operation: *const u8) -> ! {
         .iter()
         .find(|rule| rule.operation.id.as_bytes() == operation)
     else {
-        line(b"Contract operation is not present in catalog version 1.");
+        write_all(b"Contract operation is not present in catalog version ");
+        write_u64(ginux_contract::CATALOG_VERSION as u64);
+        line(b".");
         exit_process(2)
     };
     write_all(b"Operation: ");
@@ -8365,7 +8382,9 @@ fn instance_inspect_main(config_path: *const u8) -> ! {
     }
     write_all(b"Contract: instance=");
     write_all(config.id.as_bytes());
-    write_all(b" catalog=1 digest=");
+    write_all(b" catalog=");
+    write_u64(ginux_contract::CATALOG_VERSION as u64);
+    write_all(b" digest=");
     write_all(contract.digest());
     write_all(b"\nDecisions: emulate=");
     write_u64(emulate);
@@ -8553,6 +8572,11 @@ fn print_instance_start_summary(config: &InstanceConfig) {
         ExecutionBackend::Interpreter => b"interpreter",
         ExecutionBackend::PtraceSysemu => b"ptrace-sysemu",
         ExecutionBackend::PtraceNative => b"ptrace-native",
+    });
+    write_all(b" dispatch=");
+    write_all(match config.dispatch_mode {
+        DispatchMode::Paranoid => b"paranoid",
+        DispatchMode::Selective => b"selective",
     });
     write_all(b" network=");
     line(match config.network_backend {

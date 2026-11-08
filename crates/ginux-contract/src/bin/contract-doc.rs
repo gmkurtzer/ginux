@@ -72,7 +72,7 @@ fn render() -> String {
     writeln!(output, "- Migration-only inputs: versioned Gate 10 profiles, templates, and canonical operation selectors remain accepted but cannot be mixed with a recipe").unwrap();
     writeln!(output, "- Runtime representation: an explicit operation table tied to catalog version `{CATALOG_VERSION}` and a deterministic digest\n").unwrap();
     writeln!(output, "## Operation catalog\n").unwrap();
-    writeln!(output, "| Operation | Kind | Linux ABI | Status | Default action | Constraint | Evidence | Limitation |\n|---|---|---:|---|---|---|---|---|").unwrap();
+    writeln!(output, "| Operation | Kind | Linux ABI | Status | Default action | Direct-safe | Constraint | Evidence | Limitation |\n|---|---|---:|---|---|---|---|---|---|").unwrap();
     for entry in CATALOG {
         let abi = entry
             .abi_number
@@ -80,12 +80,13 @@ fn render() -> String {
             .unwrap_or_else(|| "—".to_string());
         writeln!(
             output,
-            "| `{}` | {} | {} | {} | {} | {} | `{}` | {} |",
+            "| `{}` | {} | {} | {} | {} | {} | {} | `{}` | {} |",
             entry.id,
             entry.kind.name(),
             abi,
             entry.status.name(),
             entry.action.name(),
+            if entry.direct_safe { "yes" } else { "no" },
             entry.constraint,
             entry.evidence,
             entry.limitation

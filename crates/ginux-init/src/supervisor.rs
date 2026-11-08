@@ -82,6 +82,7 @@ pub const SIGKILL: usize = 9;
 pub const SIGSTOP: usize = 19;
 pub const SIGCHLD: usize = 17;
 pub const PR_SET_NO_NEW_PRIVS: usize = 38;
+pub const SECCOMP_RET_ALLOW: u32 = 0x7fff_0000;
 pub const SECCOMP_RET_TRACE: u32 = 0x7ff0_0000;
 pub const SECCOMP_RET_USER_NOTIF: u32 = 0x7fc0_0000;
 pub const SECCOMP_SET_MODE_FILTER: usize = 1;
@@ -109,11 +110,11 @@ pub struct SockFprog {
     filter: *const SockFilter,
 }
 
-/// Install the supervisor's mandatory pre-effect stop. Calls with fixed,
-/// argument-free semantics use seccomp user notification; all other calls use
-/// ptrace seccomp events. Neither path contains an allow rule, so every call
-/// still reaches Ginux before the host may execute it.
-pub fn install_trace_filter() -> isize {
+/// Install the compiled instance dispatch filter. Paranoid mode routes the
+/// direct-safe yield operation through Ginux user notification. Selective mode
+/// executes that independently cataloged and contract-approved operation
+/// directly; all other calls still enter Ginux through ptrace seccomp events.
+pub fn install_trace_filter(direct_yield: bool) -> isize {
     const BPF_LD_W_ABS: u16 = 0x20;
     const BPF_JMP_JEQ_K: u16 = 0x15;
     const BPF_ALU_OR_K: u16 = 0x44;
@@ -121,7 +122,7 @@ pub fn install_trace_filter() -> isize {
     const BPF_RET_A: u16 = 0x16;
     const AUDIT_ARCH_X86_64: u32 = 0xc000_003e;
     const INVALID_ARCH_DATA: u32 = 0xffff;
-    let filter = [
+    let paranoid_filter = [
         SockFilter {
             code: BPF_LD_W_ABS,
             jt: 0,
@@ -171,6 +172,73 @@ pub fn install_trace_filter() -> isize {
             k: 0,
         },
     ];
+    // In selective mode the measured direct-safe operation must take the
+    // shortest kernel path. Checking the syscall number before the
+    // architecture saves the direct yield three BPF instructions. An x32
+    // syscall carries its ABI bit in the number and therefore cannot match
+    // the native x86-64 sched_yield number. Every nonmatching call continues
+    // through the architecture check and the existing ptrace dispatch data.
+    let selective_filter = [
+        SockFilter {
+            code: BPF_LD_W_ABS,
+            jt: 0,
+            jf: 0,
+            k: 0,
+        },
+        SockFilter {
+            code: BPF_JMP_JEQ_K,
+            jt: 0,
+            jf: 1,
+            k: 24,
+        },
+        SockFilter {
+            code: BPF_RET_K,
+            jt: 0,
+            jf: 0,
+            k: SECCOMP_RET_ALLOW,
+        },
+        SockFilter {
+            code: BPF_LD_W_ABS,
+            jt: 0,
+            jf: 0,
+            k: 4,
+        },
+        SockFilter {
+            code: BPF_JMP_JEQ_K,
+            jt: 1,
+            jf: 0,
+            k: AUDIT_ARCH_X86_64,
+        },
+        SockFilter {
+            code: BPF_RET_K,
+            jt: 0,
+            jf: 0,
+            k: SECCOMP_RET_TRACE | INVALID_ARCH_DATA,
+        },
+        SockFilter {
+            code: BPF_LD_W_ABS,
+            jt: 0,
+            jf: 0,
+            k: 0,
+        },
+        SockFilter {
+            code: BPF_ALU_OR_K,
+            jt: 0,
+            jf: 0,
+            k: SECCOMP_RET_TRACE,
+        },
+        SockFilter {
+            code: BPF_RET_A,
+            jt: 0,
+            jf: 0,
+            k: 0,
+        },
+    ];
+    let filter = if direct_yield {
+        &selective_filter[..]
+    } else {
+        &paranoid_filter[..]
+    };
     let program = SockFprog {
         len: filter.len() as u16,
         filter: filter.as_ptr(),
