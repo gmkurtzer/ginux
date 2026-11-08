@@ -218,13 +218,21 @@ scope, threat model, and invariants.
   and multi-broker diagnostics confirmed that seccomp notification
   receive/response and scheduler round trips dominate; multiple receivers made
   performance substantially worse and were reverted.
-- The final retained-code five-second/five-repetition matrix passes every CPU,
-  memory, and mutex row. Four thread rows fail at 0.909x to 0.935x; one
-  high-variance thread row passes at 0.968x. The unchanged 4% budget therefore
-  keeps Gate 11 partial.
-- Exact next action: present the completed selective and paranoid evidence.
-  Gate 11 remains partial under the unchanged 4% budget; do not publish an
-  accepted baseline or close the gate without human direction.
+- The authoritative final retained-code five-second/five-repetition matrix at
+  clean commit `190a625c` passes every CPU, memory, and mutex row. All five
+  selective thread rows fail at 0.917x to 0.953x native. The unchanged 4%
+  budget therefore keeps Gate 11 partial.
+- Same-harness controls prove why: detaching Ginux while retaining one
+  constant-allow seccomp filter still measured 0.930x to 0.952x, while
+  detaching with no seccomp filter returned stable four-vCPU controls to
+  1.003x and 0.980x native. `sched_yield` is already direct-safe and allowing
+  observed non-PI futexes did not materially improve the result. The residual
+  selective deficit is the host seccomp/task-work floor under QEMU TCG, not a
+  missed Ginux allow rule or userspace hot path.
+- Exact next action: update pull request 249 with the completed selective and
+  paranoid evidence. Gate 11 remains partial under the unchanged 4% budget;
+  do not publish an accepted baseline, merge the pull request, or close the
+  gate without human direction.
 - Human direction on 2026-11-07 resolved the Gate 11 dispatch boundary. Each
   instance will configure `paranoid` or `selective` dispatch. Paranoid preserves
   a Ginux userspace decision for every syscall. Selective directly executes
@@ -531,11 +539,11 @@ scope, threat model, and invariants.
 ## Exact next action
 
 Review pull request https://github.com/gmkurtzer/ginux/pull/249 and the completed
-selective and paranoid evidence. Selective passes every mandatory row except
-four thread-yield allocations at 0.909x to 0.935x; paranoid passes CPU, memory,
-and mutex but reaches only 0.028x to 0.037x on thread-yield. Do not publish an
-accepted baseline or close Gate 11 while these rows exceed the unchanged 4%
-budget.
+selective and paranoid evidence. Selective passes every CPU, memory, and mutex
+row, while all five thread-yield allocations remain at 0.917x to 0.953x;
+paranoid reaches 0.027x to 0.035x on thread-yield. Do not publish an accepted
+baseline, merge the pull request, or close Gate 11 while these rows exceed the
+unchanged 4% budget.
 
 ## Context recovery
 
@@ -547,11 +555,11 @@ budget.
 - Delivery: pull request https://github.com/gmkurtzer/ginux/pull/249 is open
   against `main`; it must not be merged or closed without explicit human
   authorization.
-- Last evidence: retained code through `811ad59c` removes the unused selective
-  listener and supports per-run audit capture. The final five-second,
-  five-repetition matrix passes every CPU, memory, and mutex row; four thread
-  rows fail at 6.49% to 9.15% behind native. A no-tracer constant-allow seccomp
-  control measured 0.941x, matching the residual. Fresh `make check`,
+- Last evidence: clean retained commit `190a625c` removes all temporary
+  diagnostics. The final five-second, five-repetition matrix passes every CPU,
+  memory, and mutex row; all five thread rows remain 4.75% to 8.27% behind
+  native. Same-harness constant-allow and no-seccomp controls isolate the
+  residual to the host seccomp/task-work path under QEMU TCG. Fresh `make check`,
   `make test-contract`, `make test-bench-compare`, `make test-contract-runtime`,
   aggregate `make test`, `make test-native-vfs`, and the complete Rocky
   `make test-systemd` matrix pass on isolated QEMU state.

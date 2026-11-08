@@ -146,6 +146,16 @@ criterion.
 - [x] Re-evaluated each retained selective-mode optimization for paranoid mode,
   retaining only changes that preserve all-syscall userspace mediation and
   demonstrating rejected or ineffective alternatives with measured evidence.
+- [x] Removed the temporary KVM, synchronous-wakeup, ptrace-suspension, and
+  enforcement-bypass diagnostics after they answered their bounded questions;
+  commit `190a625c` contains only that cleanup and the retained implementation
+  remains the authoritative result.
+- [x] Completed the final clean selective matrix at five seconds and five
+  alternating repetitions for every CPU, memory, thread, and mutex row at
+  1/2/4 vCPUs.
+- [x] Reconfirmed paranoid thread behavior at every 1/2/4-vCPU allocation and
+  completed fresh isolated native-VFS, contract, aggregate, comparison, and
+  full systemd lifecycle regressions against retained code.
 
 ## Remaining work
 
@@ -373,6 +383,40 @@ criterion.
 - Fresh paranoid-phase verification passes `make check`, `make test-contract`,
   `make test-bench-compare`, isolated Rocky QEMU `make test-contract-runtime`,
   and the complete aggregate `make test` suite on isolated port 22450.
+- The final clean selective matrix in
+  `build/gate11-balanced-final-v2/` identifies clean retained commit
+  `190a625c`, uses five-second workloads and five alternating repetitions, and
+  passes every CPU, memory, and mutex row. CPU is 1.013x to 1.022x native,
+  memory is 0.964x to 1.002x, and mutex is 0.993x to 0.997x. All five thread
+  rows remain mandatory failures at 0.917x to 0.953x native: 0.938x (1/1),
+  0.930x (2/1), 0.953x (2/2), 0.921x (4/1), and 0.917x (4/4).
+- The benchmark executes `sysbench threads --thread-yields=1000
+  --thread-locks=8`. `sched_yield` is therefore the sustained hot syscall and
+  accounted for 3,801 of the first 4,097 profiled entries. It is already
+  contract-allowed and compiled to direct-safe `SECCOMP_RET_ALLOW` in
+  selective mode. Allowing the observed non-PI futex operations directly
+  removed their audit records but did not materially improve the matrix.
+- A same-harness diagnostic that detached supervision after exec but retained
+  one constant-allow seccomp filter still measured only 0.930x to 0.952x on
+  the thread rows. A second same-harness diagnostic detached supervision and
+  installed no seccomp filter; its stable four-vCPU controls returned to
+  1.003x native at 4/1 and 0.980x at 4/4. Both diagnostics were reverted. This
+  isolates the remaining selective loss to the host kernel's seccomp/task-work
+  cost under authoritative x86-64 QEMU TCG, rather than Ginux contract lookup,
+  audit, ptrace, notification, or Rust execution.
+- The bounded paranoid reconfirmation in
+  `build/gate11-paranoid-confirm-v2/` measured 0.027x, 0.030x, 0.035x,
+  0.030x, and 0.033x native for the five thread rows. This matches the prior
+  full paranoid matrix and confirms that its userspace notification boundary
+  remains intentionally much more expensive than selective dispatch.
+- Fresh retained-code verification passes `make check`,
+  `make test-bench-compare`, isolated aggregate `make test`, isolated
+  `make test-contract-runtime`, isolated `make test-native-vfs`, and the full
+  isolated `make test-systemd` cold, warm, repeat, offline, DNF-failure,
+  startup-failure, and shutdown suite. Two sandboxed QEMU attempts failed
+  before guest launch because localhost forwarding could not bind; the same
+  native-VFS test passed with host networking on an isolated port, proving an
+  environment collision rather than a Ginux regression.
 
 ## Decisions and limitations
 
@@ -408,9 +452,9 @@ criterion.
 - Human direction on 2026-11-07 selected configurable dispatch: paranoid keeps
   the original all-syscall userspace path; selective compiles explicit contract
   permission plus Ginux's direct-safety classification into a direct path.
-  Denials and complex semantics remain in Ginux. Native x86-64/KVM should also
-  be measured before setting a durable budget because the current macOS arm64
-  QEMU TCG environment amplifies context-switch and seccomp costs.
+  Denials and complex semantics remain in Ginux. Later human direction made
+  x86-64 QEMU TCG the authoritative environment for this gate; temporary KVM
+  diagnostics were removed and are not acceptance evidence.
 - Later human direction on 2026-11-07 selected selective as the default for
   lightweight execution. This changes only the omitted-value default; it does
   not expand the direct-safe catalog or weaken explicit paranoid mode.
@@ -442,9 +486,10 @@ criterion.
   the zero-userspace-dispatch evidence, this localizes the remaining loss to
   the kernel seccomp/task-work and scheduling path under QEMU TCG.
 - No workload-specific tolerance exception has been approved. Gate 11 remains
-  partial until the human chooses whether to require native x86-64/KVM
-  confirmation, approve a thread-specific budget, or authorize a kernel-side
-  enforcement architecture beyond the approved userspace-kernel scope.
+  partial until the human chooses whether to approve a thread-specific TCG
+  budget, explicitly authorize an unfiltered trusted profile that relinquishes
+  contract enforcement, or authorize a host-kernel enforcement architecture
+  beyond the approved ordinary-userspace scope.
 - Human direction on 2026-11-07 authorizes up to ten hours of additional
   autonomous selective-mode profiling and optimization. The 4% per-row budget
   and all security invariants remain unchanged; elapsed time does not make the
@@ -478,7 +523,7 @@ criterion.
   `811ad59c` (selective listener cleanup and audit-profile capture),
   `a747bcfd` (exhaustive selective profiling), `a6fee7eb` (paranoid-mode
   benchmark tooling and evidence), and `7ee48be0` (paranoid profiling commit
-  record)
+  record), plus `190a625c` (remove temporary diagnostic experiments)
 
 ## Review policy and outcome
 
@@ -486,5 +531,6 @@ Human checkpoint before approving numeric budgets and again at completion. No
 performance claim is accepted solely from an aggregate score. Present
 `make demo-gate-11`, raw evidence, and the pull request before final acceptance.
 Current outcome: **partial**. The implementation and regression work are
-complete, but four mandatory thread rows in the final retained-code matrix
-exceed the unchanged 4% budget and no accepted baseline has been published.
+complete, but all five mandatory selective thread rows in the authoritative
+retained-code matrix exceed the unchanged 4% budget and no accepted baseline
+has been published.
