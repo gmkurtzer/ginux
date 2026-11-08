@@ -160,6 +160,10 @@ criterion.
   publishing an accepted baseline is intentionally pending because five
   mandatory rows still fail.
 - [x] Run full regression and document remaining costs.
+- [ ] Complete the human-authorized extended selective-mode profile sweep:
+  profile every mandatory workload, apply each evidence-backed in-scope
+  optimization, explore materially different credible alternatives, and run a
+  final clean 1/2/4-vCPU matrix plus mandatory regressions before stopping.
 
 ## Acceptance criteria
 
@@ -348,6 +352,11 @@ criterion.
   partial until the human chooses whether to require native x86-64/KVM
   confirmation, approve a thread-specific budget, or authorize a kernel-side
   enforcement architecture beyond the approved userspace-kernel scope.
+- Human direction on 2026-11-07 authorizes up to ten hours of additional
+  autonomous selective-mode profiling and optimization. The 4% per-row budget
+  and all security invariants remain unchanged; elapsed time does not make the
+  gate pass, and any remaining architecture change still returns to human
+  review.
 
 ## Delivery strategy
 

@@ -193,11 +193,17 @@ scope, threat model, and invariants.
   row passes. A short, high-variance 2-vCPU/1-thread memory failure was not
   accepted at face value: a five-second, five-repetition confirmation passed at
   1.003x native with 1.52% Ginux variance; its 2-thread companion also passed.
-- Exact next action: complete a clean committed confirmation run, then present
-  the measured architecture alternatives for human direction before choosing
-  a kernel-resident decision path, an in-kernel policy component, or an explicit
-  workload budget. Continue the remaining Gate 11 workload and regression
-  automation only after that boundary is resolved.
+- Human direction on 2026-11-07 authorizes an extended Gate 11 selective-mode
+  optimization sweep without another intermediate checkpoint. Profile every
+  mandatory workload, implement only evidence-backed optimizations, rerun the
+  complete 1/2/4-vCPU matrix after material changes, and preserve all contract,
+  denial, compatibility, and security invariants. Continue for up to ten hours,
+  until all mandatory rows pass, or until every credible in-scope path has
+  produced conclusive evidence and any remaining option requires a new
+  architecture decision.
+- Exact next action: collect a fresh selective baseline and per-workload
+  syscall, scheduling, and runtime profiles, then optimize the highest measured
+  cost and repeat the matched matrix.
 - Human direction on 2026-11-07 resolved the Gate 11 dispatch boundary. Each
   instance will configure `paranoid` or `selective` dispatch. Paranoid preserves
   a Ginux userspace decision for every syscall. Selective directly executes
