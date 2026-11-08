@@ -22,11 +22,16 @@ Ginux.
 
 ## Security invariants
 
-1. No managed syscall instruction may complete as an unmediated host syscall.
-2. Every managed syscall stops before execution and enters one central Ginux
-   dispatch path before any host effect occurs.
-3. Dispatch first resolves the instance contract, then emulates, performs a
-   mediated host operation, or denies the request.
+1. Every managed syscall is governed by the immutable instance contract and
+   selected dispatch mode before any host effect occurs.
+2. Paranoid dispatch stops every managed syscall before execution and enters
+   the central Ginux userspace dispatcher. Selective dispatch may directly
+   execute only operations that are both explicitly allowed by the effective
+   contract and cataloged by Ginux as semantically transparent and direct-safe.
+3. Denied operations and operations requiring inspection, translation,
+   emulation, virtual state, pointer or descriptor validation, or modified
+   results always stop before execution and enter the central Ginux dispatcher.
+   Ginux returns configured denials without invoking the requested host syscall.
 4. Managed pointers, structures, strings, and ioctl payloads are copied through
    the active backend's controlled memory-access path and validated before use.
 5. Security-profile descriptor numbers resolve only to Ginux objects. The
@@ -42,7 +47,9 @@ Ginux.
    later contract explicitly introduces a separately reviewed safe mechanism.
 9. Invalid contracts and unsupported security-critical configuration fail
    closed.
-10. Benchmark optimizations may change implementation but not these invariants.
+10. Benchmark optimizations may expand the reviewed catalog of direct-safe
+    operations, but may not infer direct execution merely from an allow rule or
+    weaken paranoid dispatch, denial, or complex-operation mediation.
 
 ## Major components
 
@@ -63,11 +70,14 @@ real PID 1 and Ginux runs as an ordinary process inside that environment.
 Ginux acts as the application kernel for its managed userspace rather than
 booting another guest Linux kernel beneath the instance. Gate 5 uses native
 x86-64 execution supervised by ptrace syscall-entry and syscall-exit stops: the
-host kernel loads the ELF and its interpreter, the host CPU executes
-instructions, and every managed syscall stops before its kernel implementation
-runs. Ginux may then emulate or deny it by replacing the syscall before effect,
-or allow a validated operation to execute and observe its exit. Losing
-supervision terminates the tracee and fails the instance closed. Gate 1's
+host kernel loads the ELF and its interpreter and the host CPU executes
+instructions. Gate 11 adds configurable dispatch. Paranoid mode retains a
+pre-effect Ginux userspace stop for every syscall. Selective mode compiles the
+effective contract together with Ginux's versioned direct-safety
+classification: only explicitly allowed, transparent operations execute
+directly; denied and complex operations still stop in Ginux before their host
+implementation. Losing required supervision terminates the tracee and fails
+the instance closed. Gate 1's
 `PTRACE_SYSEMU` proof remains the strict no-host-effect interception fixture;
 it cannot by itself execute an approved syscall.
 
@@ -92,6 +102,16 @@ Execution profile and syscall action are separate choices:
 - **Performance:** native execution may use a broader validated passthrough set,
   but only after explicit configuration, benchmarks, and security review.
 
+Dispatch mode is an independent per-instance choice:
+
+- **Paranoid:** every syscall enters the Ginux userspace dispatcher before it
+  can complete. This maximizes inspection and sanitization opportunities and
+  preserves the original all-syscall mediation model at its measured cost.
+- **Selective:** a syscall executes directly only when the effective contract
+  allows it and the versioned Ginux catalog marks it direct-safe. Denials and
+  operations requiring inspection, translation, emulation, or virtual state
+  remain userspace-dispatched. An allow rule alone never creates a direct path.
+
 Gate 5 implements the balanced profile. Backend selection may later be made per
 process, but mixed interpreter/native process semantics are not part of this
 gate.
@@ -107,7 +127,9 @@ addresses instead index only Ginux-owned memory and permission metadata.
 
 ### Contract dispatcher
 
-Every syscall and ioctl resolves through a versioned instance contract. A
+Every syscall and ioctl is governed by a versioned instance contract. The
+compiled dispatch plan first chooses direct-safe execution or Ginux userspace
+dispatch according to the configured dispatch mode. A userspace-dispatched
 decision has one of these effects:
 
 - **Emulate:** answer entirely from Ginux state.
@@ -118,9 +140,12 @@ decision has one of these effects:
 - **Audit:** record the decision, relevant normalized arguments, result, instance
   identity, and contract version without leaking secrets.
 
-There is no unchecked direct-continue action. Balanced and performance
-passthrough are explicit contract decisions after argument and authority
-validation, and their exits are observed and audited.
+There is no inferred direct-continue action. Selective direct execution requires
+both an explicit contract allow and a versioned catalog classification proving
+that the operation needs no argument inspection, authority validation,
+translation, emulation, virtual result, or synchronous Ginux audit. Paranoid
+mode disables the direct path. Denials are made and recorded by Ginux without
+executing the requested host syscall.
 
 ### Virtual VFS and image backend
 
@@ -186,8 +211,8 @@ frontend rather than creating a separate compatibility path.
 ### Configuration and lifecycle
 
 Each instance has a versioned configuration containing identity, root image,
-init, environment, resource limits, execution profile, contract profile,
-storage, devices, networking, audit behavior, and failure policy. The
+init, environment, resource limits, execution profile, dispatch mode, contract
+profile, storage, devices, networking, audit behavior, and failure policy. The
 execution profile makes the performance/security tradeoff and backend trust
 boundary explicit. Ginux validates and normalizes the complete configuration
 before starting managed code. The effective configuration is immutable

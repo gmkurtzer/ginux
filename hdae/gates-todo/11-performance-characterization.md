@@ -39,6 +39,14 @@ criterion.
   Record the exception in this gate before using it; never silently loosen a
   threshold after observing a failure.
 - Profile Ginux and optimize the highest-impact in-scope paths.
+- Add an instance-configured syscall dispatch mode. `paranoid` preserves a
+  pre-effect Ginux userspace decision for every syscall. `selective` permits
+  direct host execution only when the effective contract allows an operation
+  and Ginux's versioned catalog marks it transparent and direct-safe.
+- In both modes, route denials and operations requiring inspection,
+  translation, emulation, virtual state, pointer or descriptor validation, or
+  modified results through Ginux. A denied operation returns its configured
+  Linux error without invoking the requested host syscall.
 - Add benchmark comparison and report generation suitable for regression use.
 - Preserve the approved native result set as a versioned baseline. Subsequent
   benchmark runs must flag both native-to-Ginux budget failures and regressions
@@ -50,8 +58,9 @@ criterion.
 
 - Claiming universal near-native performance.
 - Comparing unmatched workloads or hiding unfavorable results.
-- Bypassing interception, validation, virtual objects, audit requirements, or
-  isolation to improve a benchmark.
+- Inferring direct execution from an allow rule without an independent
+  direct-safety classification, or bypassing required validation, virtual
+  objects, denial audit, or isolation to improve a benchmark.
 - Production-scale capacity, multi-instance density, or hardware acceleration not
   already in scope.
 
@@ -102,6 +111,10 @@ criterion.
   seccomp user notification, audit disablement, contract-decision indexing,
   broker/tracee CPU separation, same-CPU placement, removal of the redundant
   host yield, and fixed-semantics kernel-resident diagnostics.
+- [x] Human approved the configurable dispatch architecture on 2026-11-07:
+  paranoid mode mediates every syscall; selective mode directly executes only
+  contract-allowed, cataloged direct-safe operations; denial and complex
+  semantics remain Ginux userspace responsibilities.
 
 ## Remaining work
 
@@ -110,6 +123,13 @@ criterion.
 - [x] Package or install one pinned `sysbench` build for use by both the native
   control and Ginux instance, and verify its identity before every comparison.
 - [ ] Implement comparison and report automation.
+- [ ] Implement strict `paranoid` and `selective` instance configuration,
+  defaulting existing recipes to paranoid so configuration migration cannot
+  silently weaken the boundary.
+- [ ] Implement the first selective direct-safe operation (`sched_yield`) and
+  prove that denied and complex operations still enter Ginux before effect.
+- [ ] Add mode-specific configuration, runtime, denial, audit, and performance
+  verification.
 - [x] Collect the initial repeated baseline results used to select profiling
   targets. Final accepted results require a longer confirmation run.
 - [x] Profile and optimize the thread-yield hot path through the limit of the
@@ -142,6 +162,12 @@ criterion.
   exceeded.
 - Optimizations preserve all architecture invariants and every mandatory
   functional and security regression.
+- Existing recipes normalize to paranoid dispatch unless they explicitly opt
+  into selective mode. Unknown dispatch modes fail closed.
+- In paranoid mode, `sched_yield` and every other syscall reach Ginux before
+  completion. In selective mode, an allowed `sched_yield` executes directly,
+  while a configured denial returns from Ginux with no host syscall effect and
+  virtual or inspection-dependent operations remain mediated.
 - The report identifies fixed overhead, workload-sensitive overhead, variance,
   known bottlenecks, and unsupported conclusions.
 - `make demo-gate-11` lets a human run a bounded comparison and inspect raw
@@ -166,6 +192,9 @@ criterion.
   mandatory regressions exit zero after optimization.
 - `make demo-gate-11` -> performs the documented bounded benchmark comparison,
   validates approved budgets, generates the report, and exits zero.
+- Dispatch-mode tests -> reject unknown configuration; prove paranoid
+  all-syscall mediation; prove selective direct-safe execution; and prove that
+  denial, translation, emulation, and inspection paths remain in Ginux.
 
 ## Evidence
 
@@ -254,14 +283,12 @@ criterion.
   audit-disabled result therefore represents the practical ceiling for the
   approved per-call userspace decision path, not a formatting or lookup
   bottleneck.
-- Reaching the 4% thread-yield budget now requires one of three explicit
-  alternatives: permit a kernel-resident compiled decision for selected
-  fixed-semantics calls (and design corresponding audit), move decision/audit
-  into an in-kernel eBPF/LSM or module component, or retain userspace mediation
-  with a human-approved workload-specific budget. Native x86-64/KVM should
-  also be measured before setting a durable budget because the current macOS
-  arm64 QEMU TCG environment amplifies context-switch and seccomp costs. None
-  of these architecture or budget changes is approved by this gate.
+- Human direction on 2026-11-07 selected configurable dispatch: paranoid keeps
+  the original all-syscall userspace path; selective compiles explicit contract
+  permission plus Ginux's direct-safety classification into a direct path.
+  Denials and complex semantics remain in Ginux. Native x86-64/KVM should also
+  be measured before setting a durable budget because the current macOS arm64
+  QEMU TCG environment amplifies context-switch and seccomp costs.
 
 ## Delivery strategy
 

@@ -198,6 +198,12 @@ scope, threat model, and invariants.
   a kernel-resident decision path, an in-kernel policy component, or an explicit
   workload budget. Continue the remaining Gate 11 workload and regression
   automation only after that boundary is resolved.
+- Human direction on 2026-11-07 resolved the Gate 11 dispatch boundary. Each
+  instance will configure `paranoid` or `selective` dispatch. Paranoid preserves
+  a Ginux userspace decision for every syscall. Selective directly executes
+  only explicitly allowed operations independently cataloged as transparent
+  and direct-safe; denied and complex operations still enter Ginux, and Ginux
+  returns configured denials without invoking the requested host syscall.
 
 ## Evidence
 
@@ -494,10 +500,9 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Commit and rerun the final matched matrix from a clean tree so its metadata
-names the retained source exactly. Then present the thread-yield evidence and
-architecture alternatives for human direction; the unchanged 4% budget cannot
-be met by the exhausted per-call userspace notification path.
+Implement and verify the approved paranoid/selective dispatch configuration,
+starting with `sched_yield` as the measured direct-safe operation. Then rerun
+the matched matrix and complete Gate 11 comparison and regression automation.
 
 ## Context recovery
 
@@ -515,6 +520,6 @@ be met by the exhausted per-call userspace notification path.
   network selection, port controls, and translation.
 - Gate 9.75 closure: pull request 229 merged as `8a475e8b`; human accepted and
   closed the gate on 2026-11-06.
-- Required human decision: none during the clarified exhaustive Gate 11
-  optimization loop. Any scope expansion, invariant change, or tolerance
+- Required human decision: none for the approved paranoid/selective Gate 11
+  implementation. Any further scope expansion, invariant change, or tolerance
   exception still requires explicit review.
