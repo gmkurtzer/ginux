@@ -39,12 +39,12 @@ use crate::supervisor::{
     write_i64, write_u64, UserRegs, AT_FDCWD, CLOCK_MONOTONIC, CLOCK_PROCESS_CPUTIME_ID, EBADF,
     ECHILD, EINVAL, EMFILE, ENOSYS, EPERM, ESRCH, O_RDONLY, O_RDWR, PR_SET_NO_NEW_PRIVS,
     PTRACE_CONT, PTRACE_EVENT_EXEC, PTRACE_EVENT_FORK, PTRACE_EVENT_SECCOMP, PTRACE_GETEVENTMSG,
-    PTRACE_GETREGS, PTRACE_KILL, PTRACE_O_EXITKILL, PTRACE_O_TRACEEXEC, PTRACE_O_TRACEFORK,
-    PTRACE_O_TRACESECCOMP, PTRACE_O_TRACESYSGOOD, PTRACE_PEEKTEXT, PTRACE_POKETEXT,
-    PTRACE_SETOPTIONS, PTRACE_SETREGS, PTRACE_SYSCALL, PTRACE_SYSEMU, PTRACE_TRACEME, SIGCHLD,
-    SIGINT, SIGKILL, SIGSTOP, SIGTERM, SIG_BLOCK, SYS_CHDIR, SYS_CHROOT, SYS_CLOCK_GETTIME,
-    SYS_CLOSE_HOST, SYS_EXECVE, SYS_EXIT_HOST, SYS_FORK, SYS_FSTAT, SYS_FSYNC, SYS_KILL,
-    SYS_OPENAT_HOST, SYS_PAUSE, SYS_PIDFD_GETFD, SYS_PIDFD_OPEN, SYS_PRCTL, SYS_PREAD64,
+    PTRACE_GETREGS, PTRACE_KILL, PTRACE_O_EXITKILL, PTRACE_O_SUSPEND_SECCOMP, PTRACE_O_TRACEEXEC,
+    PTRACE_O_TRACEFORK, PTRACE_O_TRACESECCOMP, PTRACE_O_TRACESYSGOOD, PTRACE_PEEKTEXT,
+    PTRACE_POKETEXT, PTRACE_SETOPTIONS, PTRACE_SETREGS, PTRACE_SYSCALL, PTRACE_SYSEMU,
+    PTRACE_TRACEME, SIGCHLD, SIGINT, SIGKILL, SIGSTOP, SIGTERM, SIG_BLOCK, SYS_CHDIR, SYS_CHROOT,
+    SYS_CLOCK_GETTIME, SYS_CLOSE_HOST, SYS_EXECVE, SYS_EXIT_HOST, SYS_FORK, SYS_FSTAT, SYS_FSYNC,
+    SYS_KILL, SYS_OPENAT_HOST, SYS_PAUSE, SYS_PIDFD_GETFD, SYS_PIDFD_OPEN, SYS_PRCTL, SYS_PREAD64,
     SYS_PTRACE, SYS_PWRITE64, SYS_READ_HOST, SYS_RT_SIGPROCMASK, SYS_SETGID, SYS_SETGROUPS,
     SYS_SETUID, SYS_SIGNALFD4, SYS_WAIT4, SYS_WRITE_HOST, VIRTUAL_PID,
 };
@@ -5379,6 +5379,20 @@ fn supervise_native(
         };
 
         if task.initial_exec_pending && entry_syscall == Some(59) {
+            // Gate 11 diagnostic: preserve the ptrace relationship while
+            // suspending seccomp after the configured exec. This intentionally
+            // disables contract enforcement and must not be retained; it
+            // isolates the filter/task-work cost from ptrace scheduling cost.
+            if direct_yield
+                && ptrace(
+                    PTRACE_SETOPTIONS,
+                    host_pid,
+                    0,
+                    options | PTRACE_O_SUSPEND_SECCOMP,
+                ) < 0
+            {
+                native_fail(instance, pid, b"native seccomp suspension failed");
+            }
             if !direct_yield {
                 let listener = native_duplicate_listener(host_pid, 3);
                 if listener < 0 {

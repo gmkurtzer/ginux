@@ -60,6 +60,7 @@ pub const PTRACE_O_TRACEFORK: usize = 1 << 1;
 pub const PTRACE_O_TRACEEXEC: usize = 1 << 4;
 pub const PTRACE_O_TRACESECCOMP: usize = 1 << 7;
 pub const PTRACE_O_EXITKILL: usize = 1 << 20;
+pub const PTRACE_O_SUSPEND_SECCOMP: usize = 1 << 21;
 pub const PTRACE_EVENT_FORK: usize = 1;
 pub const PTRACE_EVENT_EXEC: usize = 4;
 pub const PTRACE_EVENT_SECCOMP: usize = 7;
