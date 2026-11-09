@@ -357,8 +357,12 @@ arguments of 128 bytes each and eight `NAME=value` environment entries of
 256 bytes each are accepted. Invalid or oversized input fails before launch.
 
 Workload stdout stays separate from supervisor diagnostics on stderr. Only
-stdin, stdout, and stderr are inherited by the workload. The launcher returns
-the workload exit code, or `128 + signal` for signal termination. Startup
+stdin, stdout, and stderr are inherited by the workload, and launch refuses to
+start when any of them is a directory or cannot be checked: a directory there
+would anchor `openat` and other `*at` calls outside the root. `ginux native`
+applies the same check and closes every other inherited descriptor with
+`close_range`, so it also needs Linux 5.9 or later. The launcher returns the
+workload exit code, or `128 + signal` for signal termination. Startup
 failure returns 2; supervision or result-writing failure returns 1. Native
 fork, clone, and subsequent exec are unsupported; fork returns `ENOSYS` until
 child supervision is implemented. Non-x86-64 syscall ABIs and job-control

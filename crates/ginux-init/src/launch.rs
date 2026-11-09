@@ -14,9 +14,9 @@ use crate::dispatch::{
     balanced_surface_name, decide_native, native_arguments_allowed, NativeDecision,
 };
 use crate::supervisor::{
-    exit_process, line, managed_host_identity, ptrace, stopped, syscall0, syscall1, syscall2,
-    syscall3, syscall4, syscall5, wait, write_all, UserRegs, AT_FDCWD, O_RDONLY,
-    PR_SET_NO_NEW_PRIVS, PTRACE_GETREGS, PTRACE_O_EXITKILL, PTRACE_O_TRACESYSGOOD,
+    exit_process, line, managed_host_identity, ptrace, standard_stream_refusal, stopped, syscall0,
+    syscall1, syscall2, syscall3, syscall4, syscall5, wait, write_all, UserRegs, AT_FDCWD,
+    O_RDONLY, PR_SET_NO_NEW_PRIVS, PTRACE_GETREGS, PTRACE_O_EXITKILL, PTRACE_O_TRACESYSGOOD,
     PTRACE_SETOPTIONS, PTRACE_SETREGS, PTRACE_SYSCALL, PTRACE_TRACEME, SYS_CHDIR, SYS_CHROOT,
     SYS_CLOSE_HOST, SYS_EXECVE, SYS_EXIT_HOST, SYS_FORK, SYS_FSYNC, SYS_OPENAT_HOST, SYS_PRCTL,
     SYS_PTRACE, SYS_READ_HOST, SYS_SETGID, SYS_SETGROUPS, SYS_SETUID, SYS_WRITE_HOST,
@@ -362,6 +362,9 @@ pub fn launch_main(config_path: *const u8, root_path: *const u8, result_path: *c
     stage_result_path(result_path);
     let config = launch_load_config(config_path);
     launch_validate(&config);
+    if let Some(reason) = standard_stream_refusal() {
+        launch_startup_fail(reason);
+    }
     print_launch_config(&config);
     let mut instance = Instance::create(config);
     if instance.start().is_err() {

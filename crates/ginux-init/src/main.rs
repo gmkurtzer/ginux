@@ -35,18 +35,18 @@ use crate::process_hooks::{
 };
 use crate::supervisor::{
     exit_process, install_trace_filter, line, managed_host_identity, ptrace, read_tracee_word,
-    stopped, syscall0, syscall1, syscall2, syscall3, syscall4, syscall5, syscall6, wait, write_all,
-    write_i64, write_u64, UserRegs, AT_FDCWD, CLOCK_MONOTONIC, CLOCK_PROCESS_CPUTIME_ID, EBADF,
-    ECHILD, EINVAL, EMFILE, ENOSYS, EPERM, ESRCH, O_RDONLY, O_RDWR, PR_SET_NO_NEW_PRIVS,
-    PTRACE_CONT, PTRACE_EVENT_EXEC, PTRACE_EVENT_FORK, PTRACE_EVENT_SECCOMP, PTRACE_GETEVENTMSG,
-    PTRACE_GETREGS, PTRACE_KILL, PTRACE_O_EXITKILL, PTRACE_O_TRACEEXEC, PTRACE_O_TRACEFORK,
-    PTRACE_O_TRACESECCOMP, PTRACE_O_TRACESYSGOOD, PTRACE_PEEKTEXT, PTRACE_POKETEXT,
-    PTRACE_SETOPTIONS, PTRACE_SETREGS, PTRACE_SYSCALL, PTRACE_SYSEMU, PTRACE_TRACEME, SIGCHLD,
-    SIGINT, SIGKILL, SIGSTOP, SIGTERM, SIG_BLOCK, SYS_CHDIR, SYS_CHROOT, SYS_CLOCK_GETTIME,
-    SYS_CLOSE_HOST, SYS_EXECVE, SYS_EXIT_HOST, SYS_FORK, SYS_FSTAT, SYS_FSYNC, SYS_KILL,
-    SYS_OPENAT_HOST, SYS_PAUSE, SYS_PIDFD_GETFD, SYS_PIDFD_OPEN, SYS_PRCTL, SYS_PREAD64,
-    SYS_PTRACE, SYS_PWRITE64, SYS_READ_HOST, SYS_RT_SIGPROCMASK, SYS_SETGID, SYS_SETGROUPS,
-    SYS_SETUID, SYS_SIGNALFD4, SYS_WAIT4, SYS_WRITE_HOST, VIRTUAL_PID,
+    standard_stream_refusal, stopped, syscall0, syscall1, syscall2, syscall3, syscall4, syscall5,
+    syscall6, wait, write_all, write_i64, write_u64, UserRegs, AT_FDCWD, CLOCK_MONOTONIC,
+    CLOCK_PROCESS_CPUTIME_ID, EBADF, ECHILD, EINVAL, EMFILE, ENOSYS, EPERM, ESRCH, O_RDONLY,
+    O_RDWR, PR_SET_NO_NEW_PRIVS, PTRACE_CONT, PTRACE_EVENT_EXEC, PTRACE_EVENT_FORK,
+    PTRACE_EVENT_SECCOMP, PTRACE_GETEVENTMSG, PTRACE_GETREGS, PTRACE_KILL, PTRACE_O_EXITKILL,
+    PTRACE_O_TRACEEXEC, PTRACE_O_TRACEFORK, PTRACE_O_TRACESECCOMP, PTRACE_O_TRACESYSGOOD,
+    PTRACE_PEEKTEXT, PTRACE_POKETEXT, PTRACE_SETOPTIONS, PTRACE_SETREGS, PTRACE_SYSCALL,
+    PTRACE_SYSEMU, PTRACE_TRACEME, SIGCHLD, SIGINT, SIGKILL, SIGSTOP, SIGTERM, SIG_BLOCK,
+    SYS_CHDIR, SYS_CHROOT, SYS_CLOCK_GETTIME, SYS_CLOSE_HOST, SYS_EXECVE, SYS_EXIT_HOST, SYS_FORK,
+    SYS_FSTAT, SYS_FSYNC, SYS_KILL, SYS_OPENAT_HOST, SYS_PAUSE, SYS_PIDFD_GETFD, SYS_PIDFD_OPEN,
+    SYS_PRCTL, SYS_PREAD64, SYS_PTRACE, SYS_PWRITE64, SYS_READ_HOST, SYS_RT_SIGPROCMASK,
+    SYS_SETGID, SYS_SETGROUPS, SYS_SETUID, SYS_SIGNALFD4, SYS_WAIT4, SYS_WRITE_HOST, VIRTUAL_PID,
 };
 use crate::supervisor::{
     fault_errno, poke_tracee_bytes, write_tracee_bytes as write_tracee_bytes_result, EFAULT,
@@ -3130,6 +3130,11 @@ fn native_main(
     if instance.start().is_err() {
         instance_fail(&mut instance, b"invalid native start transition");
     }
+    // Before any descriptor is opened here, which would take the number of
+    // a closed standard stream.
+    if let Some(reason) = standard_stream_refusal() {
+        instance_fail(&mut instance, reason);
+    }
     let root_descriptor = unsafe {
         syscall4(
             SYS_OPENAT_HOST,
@@ -3190,6 +3195,20 @@ fn native_tracee(
     static ENV_LOCALE: &[u8] = b"LC_ALL=C\0";
     static HOST_DEV_NULL: &[u8] = b"/dev/null\0";
 
+    // Inherit nothing beyond the standard streams, at any descriptor number:
+    // a descriptor left open to a host directory would anchor paths outside
+    // the root. The protected null and console descriptors are made after.
+    if unsafe {
+        syscall3(
+            ginux_core::SYS_CLOSE_RANGE as usize,
+            3,
+            u32::MAX as usize,
+            0,
+        )
+    } < 0
+    {
+        native_tracee_setup_fail(127);
+    }
     let null_fd = unsafe {
         syscall4(
             SYS_OPENAT_HOST,
@@ -3217,13 +3236,6 @@ fn native_tracee(
     }
     if unsafe { syscall1(SYS_CHDIR, ROOT.as_ptr() as usize) } < 0 {
         native_tracee_setup_fail(121);
-    }
-    let mut inherited = 3usize;
-    while inherited < 256 {
-        if inherited != INSTANCE_NULL_FD && inherited != INSTANCE_CONSOLE_FD {
-            let _ = unsafe { syscall1(SYS_CLOSE_HOST, inherited) };
-        }
-        inherited += 1;
     }
     if unsafe { syscall4(SYS_PTRACE, PTRACE_TRACEME, 0, 0, 0) } < 0 {
         native_tracee_setup_fail(122);
