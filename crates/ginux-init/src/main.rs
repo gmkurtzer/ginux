@@ -6285,6 +6285,9 @@ fn supervise_native(
             native_fail(instance, pid, b"native seccomp syscall identity mismatch");
         }
         task.syscall = syscall;
+        if syscall == 247 {
+            task.waitid_selector = registers.rsi;
+        }
         let shared_network =
             mode == 3 && instance.config().network_backend == NetworkBackend::Shared;
         let socket_table_full =
@@ -8995,7 +8998,6 @@ fn supervise_native(
                 }
                 if mode == 3 && syscall == 247 {
                     task.waitid_info = registers.rdx;
-                    task.waitid_selector = registers.rsi;
                     if registers.rdi == 1 && registers.rsi != 0 {
                         let selected = registers.rsi as u32;
                         let Some(target) = tasks.iter().flatten().find(|candidate| {

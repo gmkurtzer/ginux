@@ -171,6 +171,18 @@ long native_fixture_main(void)
         print_result("GINUX_FIXTURE: null-reaped=", reaped);
         return 0;
     }
+    case 'z': {
+        word selected = 0xfeed000000000007UL;
+        long result;
+        register word r10 __asm__("r10") = 4;
+        register word r8 __asm__("r8") = 0;
+        __asm__ volatile("syscall" : "=a"(result), "+S"(selected)
+                         : "a"(247L), "D"(1L), "d"(0L), "r"(r10), "r"(r8)
+                         : "rcx", "r11", "memory");
+        print_result("GINUX_FIXTURE: denied-waitid=", result);
+        print_result("GINUX_FIXTURE: denied-selector-preserved=", selected == 0xfeed000000000007UL);
+        return 0;
+    }
     default:
         return 81;
     }

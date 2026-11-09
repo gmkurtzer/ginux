@@ -40,7 +40,7 @@ sys_read = ["/"]
         def run(scenario, instance=config, **options):
             (root / "scenario").write_text(scenario)
             proc = subprocess.run([str(work / "ginux"), "native", str(instance), str(root)]
-                                  + (["configured"] if instance == configured else []),
+                                  + (["configured"] if instance != config else []),
                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30, **options)
             return proc.returncode, proc.stdout.decode(errors="replace")
 
@@ -96,6 +96,13 @@ sys_read = ["/"]
             "GINUX_FIXTURE: null-after-peek=0", "GINUX_FIXTURE: null-rewait=-10",
             "GINUX_FIXTURE: null-invalid-options=-22", "GINUX_FIXTURE: null-rusage-fault=-14",
             "GINUX_FIXTURE: fault-rewait=-10", "GINUX_FIXTURE: null-reaped=800"], code, out)
+        denied = work / "denied-waitid.toml"
+        denied.write_text(configured.read_text().replace('allow = ["*"]\ndeny = []',
+                                                       'allow = ["*"]\ndeny = ["waitid"]'))
+        code, out = run("zero-effects", denied)
+        fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
+        check("denied waitid preserves caller registers", code == 0 and fixture == [
+            "GINUX_FIXTURE: denied-waitid=-1", "GINUX_FIXTURE: denied-selector-preserved=1"], code, out)
     print("test-native-supervision: PASS")
 
 
