@@ -157,7 +157,8 @@
   aggregate regressions, limitations report, and human demonstration pass.
   The unchanged 4% performance criterion still fails all five authoritative
   selective thread-yield rows at 0.917x to 0.953x native, so the gate is not
-  passed.
+  passed. The stacked result is delivered in pull request
+  https://github.com/gmkurtzer/ginux/pull/255.
 
 ## Governing outcome and invariants
 
@@ -592,6 +593,9 @@ performance failure for human review. Do not merge or close any pull request.
   authority, regression, documentation, and demonstration evidence passes,
   while its inherited performance criterion fails. Gate 11 remains partial on
   its parent branch and in pull request 249.
+- Gate 13 delivery: pull request
+  https://github.com/gmkurtzer/ginux/pull/255 is open from
+  `hdae/boundary-hardening` against the Gate 12.5 branch.
 - Gate 12.25 delivery: pull request
   https://github.com/gmkurtzer/ginux/pull/253 is open from
   `hdae/top-level-instance-cli` against the Gate 12.1 branch.

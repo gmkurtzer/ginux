@@ -161,15 +161,16 @@ honest security and compatibility boundary for the initial milestone.
 
 - Working branch: `hdae/boundary-hardening`
 - Intended base: `hdae/contract-maintenance-lock`
-- Pull request: intended as a stacked PR; dedicated branch push and PR creation
-  authorized by the human's 2026-11-08 batch direction; never merge or close
-  without explicit authorization
+- Pull request: https://github.com/gmkurtzer/ginux/pull/255, stacked on Gate
+  12.5; dedicated branch push and PR creation authorized by the human's
+  2026-11-08 batch direction; never merge or close without explicit
+  authorization
 - Planned commits: malformed-input and fuzz harnesses; escape and authority
   reduction; recovery and cleanup; full regression evidence and limitations
 - Actual commits: `0b954c76` (gate start), `83b170c6` (bounded security
   fuzzing), `e6e56e96` (native supervisor authority reduction), `d6cda551`
-  (boundary and recovery verification), plus the final evidence checkpoint
-  commit
+  (boundary and recovery verification), `83f0fc99` (evidence checkpoint), plus
+  the pull-request record commit
 
 ## Review policy and outcome
 
