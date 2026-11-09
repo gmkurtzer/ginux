@@ -121,7 +121,7 @@ expect {
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
 send -- "ginux list; ginux status rocky\r"
 expect {
-    -re {rocky[[:space:]]+stopped} {}
+    -re {rocky[[:space:]]+stopped[[:space:]]+locked} {}
     timeout { puts stderr "created instance was not listed as stopped"; exit 78 }
     eof { puts stderr "Rocky host shell exited during instance inspection"; exit 79 }
 }
@@ -129,6 +129,11 @@ expect {
     -re {state: stopped} {}
     timeout { puts stderr "created instance status was not stopped"; exit 80 }
     eof { puts stderr "Rocky host shell exited during status inspection"; exit 81 }
+}
+expect {
+    -re {contract: locked} {}
+    timeout { puts stderr "created instance contract was not locked"; exit 203 }
+    eof { puts stderr "Rocky host shell exited during contract inspection"; exit 204 }
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
 send -- "ginux import rocky /etc/ginux/examples/rocky-systemd.toml && echo GINUX_REIMPORT: PASS\r"
@@ -369,6 +374,92 @@ expect {
     eof { puts stderr "Rocky host shell exited during audit check"; exit 95 }
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
+send -- "ginux unlock rocky; ginux status rocky\r"
+expect {
+    -re {Instance "rocky" contract unlocked.} {}
+    timeout { puts stderr "instance contract did not unlock"; exit 205 }
+    eof { puts stderr "Rocky host shell exited while unlocking contract"; exit 206 }
+}
+expect {
+    -re {contract: unlocked} {}
+    timeout { puts stderr "unlocked contract state was not visible"; exit 207 }
+    eof { puts stderr "Rocky host shell exited during unlocked status"; exit 208 }
+}
+expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
+send -- "ginux start rocky --attach\r"
+expect {
+    -re {WARNING: rocky is starting with its contract unlocked for maintenance.} {}
+    timeout { puts stderr "unlocked start warning was not shown"; exit 209 }
+    eof { puts stderr "Ginux exited before unlocked start warning"; exit 210 }
+}
+expect {
+    -re {login:} {}
+    timeout { puts stderr "maintenance instance login timed out"; exit 211 }
+    eof { puts stderr "Ginux exited before maintenance login"; exit 212 }
+}
+send -- "root\r"
+expect -re {Password:}
+send -- "ginux\r"
+expect {
+    -re {\[root@ginux [^]]+\]# } {}
+    timeout { puts stderr "maintenance instance shell timed out"; exit 213 }
+    eof { puts stderr "maintenance instance shell exited early"; exit 214 }
+}
+send -- "printf maintenance > /ginux-demo/read-only/maintenance && test \"\$(cat /ginux-demo/read-only/maintenance)\" = maintenance && printf 'GINUX_MAINTENANCE_WRITE: PASS\\n'\r"
+expect {
+    -re {GINUX_MAINTENANCE_WRITE: PASS} {}
+    timeout { puts stderr "unlocked maintenance write remained denied"; exit 215 }
+    eof { puts stderr "instance exited during maintenance write"; exit 216 }
+}
+expect -re {\[root@ginux [^]]+\]# }
+send -- "kill -RTMIN+4 1\r"
+expect {
+    -re {rocky: stopped \(status 0\)} {}
+    timeout { puts stderr "maintenance instance shutdown timed out"; exit 217 }
+    eof { puts stderr "host exited during maintenance shutdown"; exit 218 }
+}
+expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
+send -- "ginux lock rocky; ginux status rocky\r"
+expect {
+    -re {Instance "rocky" contract locked.} {}
+    timeout { puts stderr "instance contract did not relock"; exit 219 }
+    eof { puts stderr "Rocky host shell exited while relocking contract"; exit 220 }
+}
+expect {
+    -re {contract: locked} {}
+    timeout { puts stderr "relocked contract state was not visible"; exit 221 }
+    eof { puts stderr "Rocky host shell exited during relocked status"; exit 222 }
+}
+expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
+send -- "ginux start rocky --attach\r"
+expect {
+    -re {login:} {}
+    timeout { puts stderr "relocked instance login timed out"; exit 223 }
+    eof { puts stderr "Ginux exited before relocked login"; exit 224 }
+}
+send -- "root\r"
+expect -re {Password:}
+send -- "ginux\r"
+expect {
+    -re {\[root@ginux [^]]+\]# } {}
+    timeout { puts stderr "relocked instance shell timed out"; exit 225 }
+    eof { puts stderr "relocked instance shell exited early"; exit 226 }
+}
+send -- "if printf denied > /ginux-demo/read-only/maintenance 2>/dev/null; then printf 'GINUX_RELOCK_DENY: FAIL\\n'; else printf 'GINUX_RELOCK_DENY: PASS\\n'; fi\r"
+expect {
+    -re {GINUX_RELOCK_DENY: PASS} {}
+    -re {GINUX_RELOCK_DENY: FAIL} { puts stderr "relocked contract allowed protected write"; exit 227 }
+    timeout { puts stderr "relocked contract denial timed out"; exit 228 }
+    eof { puts stderr "instance exited during relocked contract denial"; exit 229 }
+}
+expect -re {\[root@ginux [^]]+\]# }
+send -- "kill -RTMIN+4 1\r"
+expect {
+    -re {rocky: stopped \(status 0\)} {}
+    timeout { puts stderr "relocked instance shutdown timed out"; exit 230 }
+    eof { puts stderr "host exited during relocked shutdown"; exit 231 }
+}
+expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
 send -- "ginux start rocky --audit\r"
 expect {
     -re {rocky: started detached} {}
@@ -378,7 +469,7 @@ expect {
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
 send -- "ginux list; ginux status rocky\r"
 expect {
-    -re {rocky[[:space:]]+running[[:space:]]+[0-9]+} {}
+    -re {rocky[[:space:]]+running[[:space:]]+locked[[:space:]]+[0-9]+} {}
     timeout { puts stderr "detached instance was not listed as running"; exit 98 }
     eof { puts stderr "Rocky host shell exited during detached inspection"; exit 99 }
 }
