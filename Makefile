@@ -98,6 +98,7 @@ check: check-name check-instance-terminology
 	cargo clippy -p ginux-runtime --all-targets -- -D warnings
 	cargo clippy -p ginux-vfs --all-targets -- -D warnings
 	cargo clippy -p ginux-vfs-index --all-targets -- -D warnings
+	cargo clippy -p security-fuzzer --all-targets -- -D warnings
 	cargo clippy -p runtime-fixture --bin runtime-fixture --target $(X86_TARGET) --release -- -D warnings
 	cargo clippy -p process-native-fixture --bin process-native-fixture --target $(X86_TARGET) --release -- -D warnings
 
@@ -198,6 +199,10 @@ test-native-vfs: build instance-image-prepare
 	@./scripts/with-rocky-host.sh ./scripts/test-native-vfs.sh
 
 test: check test-unit test-intercept test-runtime test-config test-instance test-image test-devices test-process test-kernel-views
+
+.PHONY: fuzz-security
+fuzz-security:
+	./scripts/fuzz-security.sh
 
 bench-prepare: build
 	@ROCKY_NETWORK_RESTRICT=off ./scripts/with-gate11-host.sh ./scripts/prepare-gate11-benchmark.sh
