@@ -14,6 +14,7 @@ memory_mib = 256
 [execution]
 profile = "balanced"
 backend = "ptrace-native"
+dispatch = "paranoid"
 
 [contract]
 profile = "gate5-balanced-v1"

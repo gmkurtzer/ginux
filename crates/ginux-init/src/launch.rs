@@ -116,6 +116,9 @@ pub fn parse_argv(argc: usize, argv: *const usize) -> Option<Command> {
             1
         } else if argc >= 5 && c_string_equals(unsafe { *argv.add(4) as *const u8 }, b"probe") {
             2
+        } else if argc >= 5 && c_string_equals(unsafe { *argv.add(4) as *const u8 }, b"configured")
+        {
+            3
         } else {
             0
         };
@@ -662,7 +665,7 @@ pub fn usage() -> ! {
     line_stderr(b"ginux: usage: ginux instance-diff <left-config> <right-config>");
     line_stderr(b"ginux: usage: ginux runtime <elf>");
     line_stderr(b"ginux: usage: ginux instance|process-native <config> <fixture>");
-    line_stderr(b"ginux: usage: ginux native <config> <root> [hold|probe]");
+    line_stderr(b"ginux: usage: ginux native <config> <root> [configured|hold|probe]");
     line_stderr(b"ginux: usage: ginux devices <config> <block>");
     line_stderr(b"ginux: usage: ginux device-bench <config> <block> <kind>");
     line_stderr(b"ginux: usage: ginux vfs <config> <rootfs> <index>");

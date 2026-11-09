@@ -17,7 +17,7 @@ backend = "ptrace-native"
 
 [userspace.contract]
 version = 1
-catalog = 1
+catalog = 2
 default = "deny"
 read = []
 write = []

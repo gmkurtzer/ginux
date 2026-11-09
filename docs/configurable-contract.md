@@ -8,7 +8,7 @@ digest; it never interprets globs while managed code is running.
 ```toml
 [userspace.contract]
 version = 1
-catalog = 1
+catalog = 2
 default = "deny"
 read = ["fs.**", "proc.**", "sys.**", "time.**"]
 write = ["fs.**", "dev.console.write"]

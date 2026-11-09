@@ -4,6 +4,7 @@
 use core::arch::global_asm;
 use core::cell::Cell;
 use core::panic::PanicInfo;
+use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use ginux_contract::{Action as ContractAction, AuditBudget, AuditDisposition, EffectiveContract};
 use ginux_core::{
     balanced_arguments_allowed, balanced_identity_result, balanced_mediated_result,
@@ -33,18 +34,19 @@ use crate::process_hooks::{
     SYS_PIPE2, SYS_READ, SYS_RSEQ, SYS_SET_ROBUST_LIST, SYS_SET_TID_ADDRESS,
 };
 use crate::supervisor::{
-    exit_process, line, managed_host_identity, ptrace, read_tracee_word, stopped, syscall0,
-    syscall1, syscall2, syscall3, syscall4, syscall5, wait, write_all, write_i64, write_u64,
-    UserRegs, AT_FDCWD, CLOCK_MONOTONIC, CLOCK_PROCESS_CPUTIME_ID, EBADF, ECHILD, EINVAL, EMFILE,
-    ENOSYS, EPERM, ESRCH, O_RDONLY, O_RDWR, PR_SET_NO_NEW_PRIVS, PTRACE_CONT, PTRACE_EVENT_EXEC,
-    PTRACE_EVENT_FORK, PTRACE_GETEVENTMSG, PTRACE_GETREGS, PTRACE_KILL, PTRACE_O_EXITKILL,
-    PTRACE_O_TRACEEXEC, PTRACE_O_TRACEFORK, PTRACE_O_TRACESYSGOOD, PTRACE_PEEKTEXT,
-    PTRACE_POKETEXT, PTRACE_SETOPTIONS, PTRACE_SETREGS, PTRACE_SYSCALL, PTRACE_SYSEMU,
-    PTRACE_TRACEME, SIGCHLD, SIGINT, SIGKILL, SIGTERM, SIG_BLOCK, SYS_CHDIR, SYS_CHROOT,
-    SYS_CLOCK_GETTIME, SYS_CLOSE_HOST, SYS_EXECVE, SYS_EXIT_HOST, SYS_FORK, SYS_FSTAT, SYS_FSYNC,
-    SYS_KILL, SYS_OPENAT_HOST, SYS_PAUSE, SYS_PRCTL, SYS_PREAD64, SYS_PTRACE, SYS_PWRITE64,
-    SYS_READ_HOST, SYS_RT_SIGPROCMASK, SYS_SETGID, SYS_SETGROUPS, SYS_SETUID, SYS_SIGNALFD4,
-    SYS_WAIT4, SYS_WRITE_HOST, VIRTUAL_PID,
+    exit_process, install_trace_filter, line, managed_host_identity, ptrace, read_tracee_word,
+    stopped, syscall0, syscall1, syscall2, syscall3, syscall4, syscall5, syscall6, wait, write_all,
+    write_i64, write_u64, UserRegs, AT_FDCWD, CLOCK_MONOTONIC, CLOCK_PROCESS_CPUTIME_ID, EBADF,
+    ECHILD, EINVAL, EMFILE, ENOSYS, EPERM, ESRCH, O_RDONLY, O_RDWR, PR_SET_NO_NEW_PRIVS,
+    PTRACE_CONT, PTRACE_EVENT_EXEC, PTRACE_EVENT_FORK, PTRACE_EVENT_SECCOMP, PTRACE_GETEVENTMSG,
+    PTRACE_GETREGS, PTRACE_KILL, PTRACE_O_EXITKILL, PTRACE_O_TRACEEXEC, PTRACE_O_TRACEFORK,
+    PTRACE_O_TRACESECCOMP, PTRACE_O_TRACESYSGOOD, PTRACE_PEEKTEXT, PTRACE_POKETEXT,
+    PTRACE_SETOPTIONS, PTRACE_SETREGS, PTRACE_SYSCALL, PTRACE_SYSEMU, PTRACE_TRACEME, SIGCHLD,
+    SIGINT, SIGKILL, SIGSTOP, SIGTERM, SIG_BLOCK, SYS_CHDIR, SYS_CHROOT, SYS_CLOCK_GETTIME,
+    SYS_CLOSE_HOST, SYS_EXECVE, SYS_EXIT_HOST, SYS_FORK, SYS_FSTAT, SYS_FSYNC, SYS_KILL,
+    SYS_OPENAT_HOST, SYS_PAUSE, SYS_PIDFD_GETFD, SYS_PIDFD_OPEN, SYS_PRCTL, SYS_PREAD64,
+    SYS_PTRACE, SYS_PWRITE64, SYS_READ_HOST, SYS_RT_SIGPROCMASK, SYS_SETGID, SYS_SETGROUPS,
+    SYS_SETUID, SYS_SIGNALFD4, SYS_WAIT4, SYS_WRITE_HOST, VIRTUAL_PID,
 };
 use crate::supervisor::{
     fault_errno, poke_tracee_bytes, write_tracee_bytes as write_tracee_bytes_result, EFAULT,
@@ -54,7 +56,8 @@ use ginux_devices::{
     Partition, IOCTL_CONSOLE_GET_SIZE,
 };
 use ginux_instance::{
-    ExecutionBackend, ExecutionProfile, Instance, InstanceConfig, NetworkBackend, NetworkProtocol,
+    DispatchMode, ExecutionBackend, ExecutionProfile, Instance, InstanceConfig, NetworkBackend,
+    NetworkProtocol,
 };
 use ginux_kernel_views::{
     CgroupFs, IdentityFs, IdentityView, MemoryView, MountView, NamespaceView, ProcFs, SysFs,
@@ -105,6 +108,16 @@ const GINUX_ABI_RELEASE: &[u8] = b"6.12.0-ginux-abi1";
 const GINUX_VERSION: &str = concat!("Ginux userspace kernel ", env!("CARGO_PKG_VERSION"));
 const PTRACE_POKEDATA: usize = 5;
 const PTRACE_PEEKDATA: usize = 2;
+const SYS_IOCTL_HOST: usize = 16;
+const SYS_MMAP_HOST: usize = 9;
+const SYS_FUTEX_HOST: usize = 202;
+const FUTEX_WAIT: usize = 0;
+const FUTEX_WAKE: usize = 1;
+const PR_SET_PDEATHSIG: usize = 1;
+const SECCOMP_IOCTL_NOTIF_RECV: usize = 0xc050_2100;
+const SECCOMP_IOCTL_NOTIF_SEND: usize = 0xc018_2101;
+const PROT_READ_WRITE: usize = 1 | 2;
+const MAP_SHARED_ANONYMOUS: usize = 1 | 0x20;
 const INSTANCE_NULL_FD: usize = 240;
 const INSTANCE_CONSOLE_FD: usize = 241;
 const NATIVE_PROC_FD_LIMIT: usize = 512;
@@ -3109,6 +3122,10 @@ fn native_main(
     } else {
         mode
     };
+    let direct_yield = config.dispatch_mode == DispatchMode::Selective
+        && contract.syscall_rule(24).is_some_and(|rule| {
+            rule.operation.direct_safe && rule.action == ContractAction::Mediate
+        });
     let mut instance = Instance::create(config);
     if instance.start().is_err() {
         instance_fail(&mut instance, b"invalid native start transition");
@@ -3130,7 +3147,7 @@ fn native_main(
         instance_fail(&mut instance, b"native tracee fork failed");
     }
     if child == 0 {
-        native_tracee(root_path, mode, hook_index, &config);
+        native_tracee(root_path, mode, hook_index, &config, direct_yield);
     }
     if let Some(index) = hook_index {
         write_all(b"GINUX_HOOK_AUDIT: action=start index=");
@@ -3148,6 +3165,7 @@ fn native_main(
         root_descriptor as usize,
         contract,
         hook_index.is_some(),
+        direct_yield,
     )
 }
 
@@ -3156,6 +3174,7 @@ fn native_tracee(
     mode: usize,
     hook_index: Option<usize>,
     config: &InstanceConfig,
+    direct_yield: bool,
 ) -> ! {
     static ROOT: &[u8] = b"/\0";
     static BASH: &[u8] = b"/usr/bin/bash\0";
@@ -3223,6 +3242,16 @@ fn native_tracee(
     }
     if unsafe { syscall5(SYS_PRCTL, PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) } < 0 {
         native_tracee_setup_fail(126);
+    }
+    // Give the parent a stop at which it can enable PTRACE_O_TRACESECCOMP
+    // before this process installs the mandatory all-syscall trace filter.
+    let self_pid = unsafe { syscall0(39) };
+    if self_pid <= 0 || unsafe { syscall2(SYS_KILL, self_pid as usize, SIGSTOP) } < 0 {
+        native_tracee_setup_fail(127);
+    }
+    let filter_result = install_trace_filter(direct_yield);
+    if (direct_yield && filter_result != 0) || (!direct_yield && filter_result != 3) {
+        native_tracee_setup_fail(128);
     }
     let bash_argv = [
         BASH.as_ptr(),
@@ -3344,6 +3373,7 @@ struct NativeSupervisorTask {
     translated_rdi: u64,
     waitid_info: u64,
     initial_stop_pending: bool,
+    initial_exec_pending: bool,
     tracing: bool,
     limits: [[u64; 2]; 16],
 }
@@ -4573,6 +4603,279 @@ fn native_proc_write_mode(root_descriptor: usize, path: &[u8], bytes: &[u8], mod
     unsafe { syscall1(SYS_CLOSE_HOST, descriptor as usize) == 0 }
 }
 
+#[repr(C)]
+struct SeccompData {
+    nr: i32,
+    arch: u32,
+    instruction_pointer: u64,
+    args: [u64; 6],
+}
+
+#[repr(C)]
+struct SeccompNotification {
+    id: u64,
+    pid: u32,
+    flags: u32,
+    data: SeccompData,
+}
+
+#[repr(C)]
+struct SeccompNotificationResponse {
+    id: u64,
+    value: i64,
+    error: i32,
+    flags: u32,
+}
+
+struct BrokerPidMap {
+    audit_lock: AtomicU32,
+    entries: [AtomicU64; 128],
+}
+
+impl BrokerPidMap {
+    fn new() -> Self {
+        Self {
+            audit_lock: AtomicU32::new(0),
+            entries: [const { AtomicU64::new(0) }; 128],
+        }
+    }
+
+    fn lock_audit(&self) {
+        if self
+            .audit_lock
+            .compare_exchange(0, 1, Ordering::Acquire, Ordering::Relaxed)
+            .is_ok()
+        {
+            return;
+        }
+        loop {
+            if self.audit_lock.swap(2, Ordering::Acquire) == 0 {
+                return;
+            }
+            let _ = unsafe {
+                syscall6(
+                    SYS_FUTEX_HOST,
+                    &self.audit_lock as *const AtomicU32 as usize,
+                    FUTEX_WAIT,
+                    2,
+                    0,
+                    0,
+                    0,
+                )
+            };
+        }
+    }
+
+    fn unlock_audit(&self) {
+        if self.audit_lock.fetch_sub(1, Ordering::Release) == 1 {
+            return;
+        }
+        self.audit_lock.store(0, Ordering::Release);
+        let _ = unsafe {
+            syscall6(
+                SYS_FUTEX_HOST,
+                &self.audit_lock as *const AtomicU32 as usize,
+                FUTEX_WAKE,
+                1,
+                0,
+                0,
+                0,
+            )
+        };
+    }
+
+    fn set(&self, host_pid: usize, virtual_pid: u32) -> bool {
+        let encoded = ((host_pid as u64) << 32) | u64::from(virtual_pid);
+        for entry in &self.entries {
+            let current = entry.load(Ordering::Acquire);
+            if current >> 32 == host_pid as u64 {
+                entry.store(encoded, Ordering::Release);
+                return true;
+            }
+            if current == 0
+                && entry
+                    .compare_exchange(0, encoded, Ordering::AcqRel, Ordering::Acquire)
+                    .is_ok()
+            {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn remove(&self, host_pid: usize) {
+        for entry in &self.entries {
+            let current = entry.load(Ordering::Acquire);
+            if current >> 32 == host_pid as u64 {
+                entry.store(0, Ordering::Release);
+                return;
+            }
+        }
+    }
+
+    fn virtual_pid(&self, host_pid: u32) -> Option<u32> {
+        self.entries.iter().find_map(|entry| {
+            let encoded = entry.load(Ordering::Acquire);
+            (encoded >> 32 == u64::from(host_pid)).then_some(encoded as u32)
+        })
+    }
+}
+
+fn native_shared_pid_map() -> Option<&'static BrokerPidMap> {
+    let address = unsafe {
+        syscall6(
+            SYS_MMAP_HOST,
+            0,
+            core::mem::size_of::<BrokerPidMap>(),
+            PROT_READ_WRITE,
+            MAP_SHARED_ANONYMOUS,
+            usize::MAX,
+            0,
+        )
+    };
+    if address < 0 {
+        return None;
+    }
+    let map = address as *mut BrokerPidMap;
+    unsafe { map.write(BrokerPidMap::new()) };
+    Some(unsafe { &*map })
+}
+
+fn native_duplicate_listener(pid: usize, descriptor: usize) -> isize {
+    let pidfd = unsafe { syscall2(SYS_PIDFD_OPEN, pid, 0) };
+    if pidfd < 0 {
+        return pidfd;
+    }
+    let listener = unsafe { syscall3(SYS_PIDFD_GETFD, pidfd as usize, descriptor, 0) };
+    let _ = unsafe { syscall1(SYS_CLOSE_HOST, pidfd as usize) };
+    listener
+}
+
+fn native_yield_broker(
+    listener: usize,
+    audit_mode: AuditMode,
+    instance_id: &[u8],
+    contract: &EffectiveContract,
+    pid_map: &BrokerPidMap,
+) -> ! {
+    const AUDIT_EVENT_LIMIT: u64 = 8192;
+    let _ = unsafe { syscall5(SYS_PRCTL, PR_SET_PDEATHSIG, SIGKILL, 0, 0, 0) };
+    let rule = contract
+        .syscall_rule(24)
+        .filter(|rule| matches!(rule.action, ContractAction::Mediate))
+        .filter(|_| matches!(decide_systemd(24, false).action, Action::Mediate))
+        .unwrap_or_else(|| exit_process(130));
+    let mut budget = AuditBudget::new(AUDIT_EVENT_LIMIT);
+    loop {
+        let mut notification = SeccompNotification {
+            id: 0,
+            pid: 0,
+            flags: 0,
+            data: SeccompData {
+                nr: 0,
+                arch: 0,
+                instruction_pointer: 0,
+                args: [0; 6],
+            },
+        };
+        let received = unsafe {
+            syscall3(
+                SYS_IOCTL_HOST,
+                listener,
+                SECCOMP_IOCTL_NOTIF_RECV,
+                &mut notification as *mut _ as usize,
+            )
+        };
+        if received < 0 {
+            exit_process(0);
+        }
+        if notification.data.nr != 24 {
+            exit_process(130);
+        }
+        let Some(virtual_pid) = pid_map.virtual_pid(notification.pid) else {
+            exit_process(133);
+        };
+        match if audit_mode == AuditMode::Disabled {
+            AuditDisposition::Drop
+        } else {
+            budget.admit()
+        } {
+            AuditDisposition::Emit => {
+                let mut record = [0u8; 512];
+                let mut length = 0usize;
+                if native_buffer_append(&mut record, &mut length, b"GINUX_NATIVE_AUDIT: sequence=")
+                    .is_none()
+                    || native_buffer_append_u64(&mut record, &mut length, notification.id).is_none()
+                    || native_buffer_append(&mut record, &mut length, b" instance=").is_none()
+                    || native_buffer_append(&mut record, &mut length, instance_id).is_none()
+                    || native_buffer_append(&mut record, &mut length, b" virtual-pid=").is_none()
+                    || native_buffer_append_u64(&mut record, &mut length, u64::from(virtual_pid))
+                        .is_none()
+                    || native_buffer_append(&mut record, &mut length, b" contract=").is_none()
+                    || native_buffer_append(&mut record, &mut length, contract.digest()).is_none()
+                    || native_buffer_append(
+                        &mut record,
+                        &mut length,
+                        b" operation=syscall.sched_yield policy-source=",
+                    )
+                    .is_none()
+                    || native_buffer_append(&mut record, &mut length, rule.source.as_bytes())
+                        .is_none()
+                    || native_buffer_append(&mut record, &mut length, b" policy-rule=").is_none()
+                    || native_buffer_append_u64(&mut record, &mut length, rule.source_rule as u64)
+                        .is_none()
+                    || native_buffer_append(
+                        &mut record,
+                        &mut length,
+                        b" phase=entry syscall=24 action=mediate surface=task-yield result=0\n",
+                    )
+                    .is_none()
+                {
+                    exit_process(131);
+                }
+                pid_map.lock_audit();
+                write_all_to(2, &record[..length]);
+                pid_map.unlock_audit();
+            }
+            AuditDisposition::Drop => {}
+            AuditDisposition::DropAndReport(dropped) => {
+                pid_map.lock_audit();
+                write_all_to(2, b"GINUX_AUDIT_DROPPED: instance=");
+                write_all_to(2, instance_id);
+                write_all_to(2, b" contract=");
+                write_all_to(2, contract.digest());
+                write_all_to(2, b" limit=");
+                write_u64_to(2, AUDIT_EVENT_LIMIT);
+                write_all_to(2, b" dropped=");
+                write_u64_to(2, dropped);
+                write_all_to(2, b"\n");
+                pid_map.unlock_audit();
+            }
+        }
+        let response = SeccompNotificationResponse {
+            id: notification.id,
+            value: 0,
+            error: 0,
+            // Receiving the notification has already descheduled the caller
+            // and let other runnable work proceed. Return Linux's defined
+            // success result directly instead of executing a second host
+            // sched_yield after the mediated yield has completed.
+            flags: 0,
+        };
+        if unsafe {
+            syscall3(
+                SYS_IOCTL_HOST,
+                listener,
+                SECCOMP_IOCTL_NOTIF_SEND,
+                &response as *const _ as usize,
+            )
+        } < 0
+        {
+            exit_process(132);
+        }
+    }
+}
+
 fn supervise_native(
     pid: usize,
     instance: &mut Instance,
@@ -4580,6 +4883,7 @@ fn supervise_native(
     root_descriptor: usize,
     contract: EffectiveContract,
     bootstrap_phase: bool,
+    direct_yield: bool,
 ) -> ! {
     const AUDIT_EVENT_LIMIT: u64 = 8192;
     const AUDIT_PREFIX: &[u8] = b"GINUX_NATIVE_AUDIT: sequence=";
@@ -4587,6 +4891,9 @@ fn supervise_native(
     let audit_instance_id = instance.config().id;
     let audit_budget = Cell::new(AuditBudget::new(AUDIT_EVENT_LIMIT));
     let suppress_audit_record = Cell::new(false);
+    let audit_locked = Cell::new(false);
+    let pid_map = native_shared_pid_map()
+        .unwrap_or_else(|| native_fail(instance, pid, b"native broker PID map failed"));
     let write_all = |bytes: &[u8]| {
         if bytes == AUDIT_PREFIX {
             let disposition = if audit_mode == AuditMode::Disabled {
@@ -4598,10 +4905,15 @@ fn supervise_native(
                 disposition
             };
             match disposition {
-                AuditDisposition::Emit => suppress_audit_record.set(false),
+                AuditDisposition::Emit => {
+                    pid_map.lock_audit();
+                    audit_locked.set(true);
+                    suppress_audit_record.set(false);
+                }
                 AuditDisposition::Drop => suppress_audit_record.set(true),
                 AuditDisposition::DropAndReport(dropped) => {
                     suppress_audit_record.set(true);
+                    pid_map.lock_audit();
                     write_all_to(2, b"GINUX_AUDIT_DROPPED: instance=");
                     write_all_to(2, audit_instance_id.as_bytes());
                     write_all_to(2, b" contract=");
@@ -4611,13 +4923,17 @@ fn supervise_native(
                     write_all_to(2, b" dropped=");
                     write_u64_to(2, dropped);
                     write_all_to(2, b"\n");
+                    pid_map.unlock_audit();
                 }
             }
         }
         if !suppress_audit_record.get() {
             write_all_to(2, bytes);
         }
-        if bytes == b"\n" {
+        if bytes.ends_with(b"\n") {
+            if audit_locked.replace(false) {
+                pid_map.unlock_audit();
+            }
             suppress_audit_record.set(false);
         }
     };
@@ -4637,9 +4953,8 @@ fn supervise_native(
         }
     };
     let line = |message: &[u8]| {
-        if !suppress_audit_record.get() {
-            line_to(2, message);
-        }
+        write_all(message);
+        write_all(b"\n");
     };
     let instance_start_ns = clock_nanoseconds(CLOCK_MONOTONIC);
     let instance_start_realtime_seconds = clock_nanoseconds(CLOCK_REALTIME) / 1_000_000_000;
@@ -4648,11 +4963,15 @@ fn supervise_native(
     if wait(pid, &mut status) < 0 {
         native_fail(instance, pid, b"native tracee wait after exec failed");
     }
-    if !stopped(status) {
-        write_all(b"GINUX_NATIVE: pre-exec-status=");
+    if !stopped(status) || ((status >> 8) & 0xff) as usize != SIGSTOP {
+        write_all(b"GINUX_NATIVE: pre-filter-status=");
         write_i64(status as i64);
         write_all(b"\n");
-        native_fail(instance, pid, b"native tracee did not stop after exec");
+        native_fail(
+            instance,
+            pid,
+            b"native tracee did not stop before filter install",
+        );
     }
     if mode == 3 && !native_limit_cpus(pid, instance.config().vcpus) {
         native_fail(instance, pid, b"native vcpu affinity failed");
@@ -4662,8 +4981,9 @@ fn supervise_native(
         | PTRACE_O_TRACEVFORK
         | PTRACE_O_TRACECLONE
         | PTRACE_O_TRACEEXEC
+        | PTRACE_O_TRACESECCOMP
         | PTRACE_O_EXITKILL;
-    if ptrace(PTRACE_SETOPTIONS, pid, 0, options) < 0 || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0 {
+    if ptrace(PTRACE_SETOPTIONS, pid, 0, options) < 0 || ptrace(PTRACE_CONT, pid, 0, 0) < 0 {
         native_fail(instance, pid, b"native ptrace setup failed");
     }
     if mode == 3 {
@@ -4697,9 +5017,13 @@ fn supervise_native(
     let root_virtual = processes
         .create_init(virtual_credentials)
         .unwrap_or_else(|_| native_fail(instance, pid, b"native virtual init failed"));
+    if !pid_map.set(pid, root_virtual.pid) {
+        native_fail(instance, pid, b"native broker PID map full");
+    }
     let mut tasks: [Option<NativeSupervisorTask>; 128] = [None; 128];
     let mut pending_child_stops = [0usize; 16];
     let mut peak_managed_tasks = 1usize;
+    let mut yield_broker_pid = 0usize;
     tasks[0] = Some(NativeSupervisorTask {
         host_pid: pid,
         virtual_id: root_virtual,
@@ -4733,6 +5057,7 @@ fn supervise_native(
         translated_rdi: 0,
         waitid_info: 0,
         initial_stop_pending: false,
+        initial_exec_pending: true,
         tracing: true,
         limits: native_default_limits(),
     });
@@ -4768,6 +5093,18 @@ fn supervise_native(
             native_fail(instance, pid, b"native wait-any failed");
         }
         let host_pid = waited as usize;
+        if host_pid == yield_broker_pid {
+            let exit_status = if status & 0x7f == 0 {
+                status >> 8
+            } else {
+                128 + (status & 0x7f)
+            };
+            yield_broker_pid = 0;
+            if exit_status != 0 {
+                native_fail(instance, pid, b"native yield broker failed");
+            }
+            continue;
+        }
         let task_index = tasks
             .iter()
             .position(|task| task.is_some_and(|task| task.host_pid == host_pid));
@@ -4793,6 +5130,7 @@ fn supervise_native(
             if processes.exit(task.virtual_id, exit_status).is_err() {
                 native_fail(instance, pid, b"native virtual exit failed");
             }
+            pid_map.remove(task.host_pid);
             if mode == 3 && task.virtual_id != root_virtual {
                 let _ =
                     native_proc_clear_fds(root_descriptor, task.virtual_id.pid, &mut task.proc_fds);
@@ -4806,10 +5144,19 @@ fn supervise_native(
                         let _ = ptrace(PTRACE_KILL, descendant.host_pid, 0, 0);
                     }
                 }
+                if yield_broker_pid != 0 {
+                    let _ = unsafe { syscall2(SYS_KILL, yield_broker_pid, SIGKILL) };
+                    let mut broker_status = 0i32;
+                    let _ = wait(yield_broker_pid, &mut broker_status);
+                }
                 if instance.task_exited(exit_status == 0).is_err() {
                     instance_fail(instance, b"native exit transition failed");
                 }
-                line(b"GINUX_NATIVE: supervisor=attached direct-unsupervised-syscalls=0");
+                if direct_yield {
+                    line(b"GINUX_NATIVE: supervisor=attached dispatch=selective direct-safe-syscalls=1");
+                } else {
+                    line(b"GINUX_NATIVE: supervisor=attached dispatch=paranoid direct-safe-syscalls=0");
+                }
                 write_all(b"GINUX_NATIVE_MEASURE: peak-managed-tasks=");
                 write_u64(peak_managed_tasks as u64);
                 write_all(b"\n");
@@ -4825,6 +5172,7 @@ fn supervise_native(
         // be taken as a syscall stop and swap entry and exit tracking.
         let signal = ((status >> 8) & 0xff) as u8;
         let event = ((status as usize) >> 16) & 0xffff;
+        let seccomp_entry = event == PTRACE_EVENT_SECCOMP;
         if matches!(
             event,
             PTRACE_EVENT_FORK | PTRACE_EVENT_VFORK | PTRACE_EVENT_CLONE
@@ -4846,6 +5194,9 @@ fn supervise_native(
                 processes.fork(task.virtual_id)
             }
             .unwrap_or_else(|_| native_fail(instance, pid, b"native virtual child failed"));
+            if !pid_map.set(child_host_pid, child_virtual.pid) {
+                native_fail(instance, pid, b"native broker PID map full");
+            }
             let child_start_ticks =
                 clock_nanoseconds(CLOCK_MONOTONIC).saturating_sub(instance_start_ns) / 10_000_000;
             if mode == 3 {
@@ -4902,6 +5253,7 @@ fn supervise_native(
                 translated_rdi: 0,
                 waitid_info: 0,
                 initial_stop_pending: pending_child_slot.is_none(),
+                initial_exec_pending: false,
                 tracing: true,
                 limits: task.limits,
             });
@@ -4909,7 +5261,7 @@ fn supervise_native(
             if let Some(pending_slot) = pending_child_slot {
                 pending_child_stops[pending_slot] = 0;
                 let _ = ptrace(PTRACE_SETOPTIONS, child_host_pid, 0, options);
-                if ptrace(PTRACE_SYSCALL, child_host_pid, 0, 0) < 0 {
+                if ptrace(PTRACE_CONT, child_host_pid, 0, 0) < 0 {
                     native_fail(instance, pid, b"pending native child resume failed");
                 }
             }
@@ -4939,12 +5291,12 @@ fn supervise_native(
                 }
             }
             tasks[task_index] = Some(task);
-            if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
+            if ptrace(PTRACE_CONT, host_pid, 0, 0) < 0 {
                 native_fail(instance, pid, b"native resume after exec failed");
             }
             continue;
         }
-        if event != 0 {
+        if event != 0 && !seccomp_entry {
             native_fail(instance, pid, b"unexpected native ptrace event");
         }
         if signal == 19 {
@@ -4954,21 +5306,21 @@ fn supervise_native(
             task.initial_stop_pending = false;
             tasks[task_index] = Some(task);
             let _ = ptrace(PTRACE_SETOPTIONS, host_pid, 0, options);
-            if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
+            if ptrace(PTRACE_CONT, host_pid, 0, 0) < 0 {
                 native_fail(instance, pid, b"native child initial resume failed");
             }
             continue;
         }
         if signal == 17 {
-            if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
+            if ptrace(PTRACE_CONT, host_pid, 0, 0) < 0 {
                 native_fail(instance, pid, b"native SIGCHLD resume failed");
             }
             continue;
         }
-        if signal == 5 {
+        if signal == 5 && !seccomp_entry {
             native_fail(instance, pid, b"unexpected native trace stop");
         }
-        if signal != (5 | 0x80) {
+        if !seccomp_entry && signal != (5 | 0x80) {
             write_all(b"GINUX_NATIVE: unexpected-signal=");
             write_u64(signal as u64);
             write_all(b" event=");
@@ -4979,26 +5331,143 @@ fn supervise_native(
             write_u64(task.virtual_id.pid as u64);
             write_all(b"\n");
             tasks[task_index] = Some(task);
-            if ptrace(PTRACE_SYSCALL, host_pid, 0, signal as usize) < 0 {
+            if ptrace(PTRACE_CONT, host_pid, 0, signal as usize) < 0 {
                 native_fail(instance, pid, b"native signal delivery failed");
             }
             continue;
         }
-        let mut registers = core::mem::MaybeUninit::<UserRegs>::uninit();
-        if ptrace(PTRACE_GETREGS, host_pid, 0, registers.as_mut_ptr() as usize) < 0 {
-            native_fail(instance, pid, b"native register read failed");
-        }
-        let mut registers = unsafe { registers.assume_init() };
+        let mut entry_registers = None;
+        let entry_syscall = if seccomp_entry {
+            let mut number = 0usize;
+            if ptrace(
+                PTRACE_GETEVENTMSG,
+                host_pid,
+                0,
+                &mut number as *mut _ as usize,
+            ) < 0
+                || number == 0xffff
+            {
+                native_fail(instance, pid, b"native requires the x86-64 syscall ABI");
+            }
+            let mut registers = core::mem::MaybeUninit::<UserRegs>::uninit();
+            if ptrace(PTRACE_GETREGS, host_pid, 0, registers.as_mut_ptr() as usize) < 0 {
+                native_fail(instance, pid, b"native register read failed");
+            }
+            let registers = unsafe { registers.assume_init() };
+            let syscall = registers.orig_rax;
+            entry_registers = Some(registers);
+            Some(syscall)
+        } else {
+            None
+        };
 
-        if !task.awaiting_exit && registers.orig_rax == u64::MAX {
+        if task.initial_exec_pending && entry_syscall == Some(59) {
+            if !direct_yield {
+                let listener = native_duplicate_listener(host_pid, 3);
+                if listener < 0 {
+                    native_fail(instance, pid, b"native seccomp listener duplication failed");
+                }
+                let broker = unsafe { syscall0(SYS_FORK) };
+                if broker < 0 {
+                    let _ = unsafe { syscall1(SYS_CLOSE_HOST, listener as usize) };
+                    native_fail(instance, pid, b"native yield broker fork failed");
+                }
+                if broker == 0 {
+                    native_yield_broker(
+                        listener as usize,
+                        audit_mode,
+                        audit_instance_id.as_bytes(),
+                        &contract,
+                        pid_map,
+                    );
+                }
+                yield_broker_pid = broker as usize;
+                let _ = unsafe { syscall1(SYS_CLOSE_HOST, listener as usize) };
+            }
+            sequence += 1;
+            task.initial_exec_pending = false;
+            write_all(b"GINUX_NATIVE_AUDIT: sequence=");
+            write_u64(sequence);
+            write_all(b" instance=");
+            write_all(audit_instance_id.as_bytes());
+            write_all(b" virtual-pid=");
+            write_u64(task.virtual_id.pid as u64);
+            write_all(b" contract=");
+            write_all(contract.digest());
+            line(b" operation=launch.configured-init policy-source=launch phase=entry syscall=59 action=mediate surface=configured-init result=pending");
             tasks[task_index] = Some(task);
-            if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
+            if ptrace(PTRACE_CONT, host_pid, 0, 0) < 0 {
+                native_fail(instance, pid, b"native configured init resume failed");
+            }
+            continue;
+        }
+
+        if entry_syscall == Some(24) {
+            let rule = contract
+                .syscall_rule(24)
+                .filter(|rule| matches!(rule.action, ContractAction::Mediate));
+            if rule.is_none() || !matches!(decide_systemd(24, false).action, Action::Mediate) {
+                native_fail(instance, pid, b"native yield contract mismatch");
+            }
+            sequence += 1;
+            write_all(AUDIT_PREFIX);
+            let mut record = [0u8; 512];
+            let mut length = 0usize;
+            let rule = rule.unwrap();
+            if native_buffer_append_u64(&mut record, &mut length, sequence).is_none()
+                || native_buffer_append(&mut record, &mut length, b" instance=").is_none()
+                || native_buffer_append(&mut record, &mut length, audit_instance_id.as_bytes())
+                    .is_none()
+                || native_buffer_append(&mut record, &mut length, b" virtual-pid=").is_none()
+                || native_buffer_append_u64(&mut record, &mut length, task.virtual_id.pid as u64)
+                    .is_none()
+                || native_buffer_append(&mut record, &mut length, b" contract=").is_none()
+                || native_buffer_append(&mut record, &mut length, contract.digest()).is_none()
+                || native_buffer_append(
+                    &mut record,
+                    &mut length,
+                    b" operation=syscall.sched_yield policy-source=",
+                )
+                .is_none()
+                || native_buffer_append(&mut record, &mut length, rule.source.as_bytes()).is_none()
+                || native_buffer_append(&mut record, &mut length, b" policy-rule=").is_none()
+                || native_buffer_append_u64(&mut record, &mut length, rule.source_rule as u64)
+                    .is_none()
+                || native_buffer_append(
+                    &mut record,
+                    &mut length,
+                    b" phase=entry syscall=24 action=mediate surface=task-yield result=0\n",
+                )
+                .is_none()
+            {
+                native_fail(instance, pid, b"native yield audit overflow");
+            }
+            write_all(&record[..length]);
+            tasks[task_index] = Some(task);
+            if ptrace(PTRACE_CONT, host_pid, 0, 0) < 0 {
+                native_fail(instance, pid, b"native yield resume failed");
+            }
+            continue;
+        }
+        let mut registers = if let Some(registers) = entry_registers {
+            registers
+        } else {
+            let mut registers = core::mem::MaybeUninit::<UserRegs>::uninit();
+            if ptrace(PTRACE_GETREGS, host_pid, 0, registers.as_mut_ptr() as usize) < 0 {
+                native_fail(instance, pid, b"native register read failed");
+            }
+            unsafe { registers.assume_init() }
+        };
+
+        if !seccomp_entry && !task.awaiting_exit && registers.orig_rax == u64::MAX {
+            tasks[task_index] = Some(task);
+            if ptrace(PTRACE_CONT, host_pid, 0, 0) < 0 {
                 native_fail(instance, pid, b"native child phase synchronization failed");
             }
             continue;
         }
 
-        if task.awaiting_exit {
+        if !seccomp_entry && task.awaiting_exit {
             if task.syscall == 247 && registers.rax as i64 == 0 && task.waitid_info != 0 {
                 let mut identity = 0u64;
                 if ptrace(
@@ -5262,29 +5731,23 @@ fn supervise_native(
             task.close_range_first = -1;
             task.close_range_last = -1;
             tasks[task_index] = Some(task);
-            if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
+            if ptrace(PTRACE_CONT, host_pid, 0, 0) < 0 {
                 native_fail(instance, pid, b"native resume failed");
             }
             continue;
         }
 
-        // int 0x80 uses the i386 syscall table even from a 64-bit ELF (2 is
-        // fork there, open here). Never classify it with x86-64 numbers.
-        const PTRACE_GET_SYSCALL_INFO: usize = 0x420e;
-        let mut syscall_info = [0u64; 11];
-        if ptrace(
-            PTRACE_GET_SYSCALL_INFO,
-            host_pid,
-            core::mem::size_of_val(&syscall_info),
-            syscall_info.as_mut_ptr() as usize,
-        ) < 24
-            || syscall_info[0] as u8 != 1
-            || (syscall_info[0] >> 32) as u32 != 0xc000003e
-        {
-            native_fail(instance, pid, b"native requires the x86-64 syscall ABI");
+        if !seccomp_entry {
+            native_fail(instance, pid, b"unexpected native syscall-exit stop");
         }
+
         sequence += 1;
-        let syscall = registers.orig_rax;
+        let syscall = entry_syscall.unwrap_or_else(|| {
+            native_fail(instance, pid, b"native syscall entry missing seccomp event")
+        });
+        if registers.orig_rax != syscall {
+            native_fail(instance, pid, b"native seccomp syscall identity mismatch");
+        }
         task.syscall = syscall;
         let proc_open = mode == 3
             && syscall == 257
@@ -6108,6 +6571,7 @@ fn supervise_native(
                     && registers.rsi == LINUX_REBOOT_MAGIC2
                     && registers.rdx == LINUX_REBOOT_CMD_POWER_OFF;
                 if allowed {
+                    write_all(b"translate surface=virtual-poweroff result=instance-shutdown\n");
                     line_to(
                         2,
                         b"GINUX_LIFECYCLE_AUDIT: action=translate surface=virtual-poweroff result=instance-shutdown",
@@ -6117,6 +6581,7 @@ fn supervise_native(
                     task.awaiting_exit = false;
                     task.override_exit = false;
                 } else {
+                    write_all(b"deny result=-1 reason=invalid-virtual-poweroff\n");
                     line_to(
                         2,
                         b"GINUX_LIFECYCLE_AUDIT: action=deny result=-1 reason=invalid-virtual-poweroff",
@@ -7629,6 +8094,7 @@ fn native_arguments_allowed(syscall: u64, registers: &UserRegs, mode: usize) -> 
             | 15
             | 16
             | 20
+            | 24
             | 32
             | 56
             | 57
@@ -7801,7 +8267,9 @@ fn instance_plan_main(config_path: *const u8) -> ! {
     let contract = config
         .effective_contract()
         .unwrap_or_else(|error| config_rejected(error));
-    write_all(b"GINUX_CONTRACT: catalog=1 instance=");
+    write_all(b"GINUX_CONTRACT: catalog=");
+    write_u64(ginux_contract::CATALOG_VERSION as u64);
+    write_all(b" instance=");
     write_all(config.id.as_bytes());
     write_all(b" profile=");
     if config.contract_recipe_version == 0 {
@@ -7840,7 +8308,9 @@ fn instance_validate_main(config_path: *const u8) -> ! {
         .unwrap_or_else(|error| config_rejected(error));
     write_all(b"Contract valid: instance=");
     write_all(config.id.as_bytes());
-    write_all(b" catalog=1 digest=");
+    write_all(b" catalog=");
+    write_u64(ginux_contract::CATALOG_VERSION as u64);
+    write_all(b" digest=");
     write_all(contract.digest());
     write_all(b" operations=");
     write_u64(contract.rules().len() as u64);
@@ -7859,7 +8329,9 @@ fn instance_explain_main(config_path: *const u8, operation: *const u8) -> ! {
         .iter()
         .find(|rule| rule.operation.id.as_bytes() == operation)
     else {
-        line(b"Contract operation is not present in catalog version 1.");
+        write_all(b"Contract operation is not present in catalog version ");
+        write_u64(ginux_contract::CATALOG_VERSION as u64);
+        line(b".");
         exit_process(2)
     };
     write_all(b"Operation: ");
@@ -7923,7 +8395,9 @@ fn instance_inspect_main(config_path: *const u8) -> ! {
     }
     write_all(b"Contract: instance=");
     write_all(config.id.as_bytes());
-    write_all(b" catalog=1 digest=");
+    write_all(b" catalog=");
+    write_u64(ginux_contract::CATALOG_VERSION as u64);
+    write_all(b" digest=");
     write_all(contract.digest());
     write_all(b"\nDecisions: emulate=");
     write_u64(emulate);
@@ -8111,6 +8585,11 @@ fn print_instance_start_summary(config: &InstanceConfig) {
         ExecutionBackend::Interpreter => b"interpreter",
         ExecutionBackend::PtraceSysemu => b"ptrace-sysemu",
         ExecutionBackend::PtraceNative => b"ptrace-native",
+    });
+    write_all(b" dispatch=");
+    write_all(match config.dispatch_mode {
+        DispatchMode::Paranoid => b"paranoid",
+        DispatchMode::Selective => b"selective",
     });
     write_all(b" network=");
     line(match config.network_backend {

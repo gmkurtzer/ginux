@@ -447,7 +447,7 @@ EOF
         fi
         hook_index=$((hook_index + 1))
     done
-    exec "$runtime" native "$directory/config.toml" "$directory/root" \
+    exec "$runtime" native "$directory/config.toml" "$directory/root" configured \
         2>>"$directory/audit.log"
 }
 

@@ -29,8 +29,8 @@
 - Runtime isolation unit: instance.
 - Policy unit: versioned contract.
 - The gate map has expanded through human-directed insertions while preserving
-  numeric order; Gates 1 through 10.25 are accepted and closed. Gate 10.5 is
-  the active checkpoint.
+  numeric order; Gates 1 through 10.5 are accepted and closed. Gate 11 is the
+  active checkpoint.
 - Gate 9.75 was added and authorized on 2026-11-04 for comprehensive instance
   configuration, CLI overrides, network selection and policy, port translation,
   volumes, access, identity, resources, devices, and pre-boot hooks.
@@ -59,11 +59,13 @@
   translation, conflicts and cleanup, and mediated hook behavior. Strict
   `make check`, the complete `make test-systemd` matrix, and aggregate
   `make test` also pass.
-- Gate 11 was clarified on 2026-11-06 to require a matched native-Rocky versus
-  Ginux `sysbench` matrix, native parity as the optimization goal, a default 4%
-  per-workload tolerance, and automatic failure for regressions beyond the
-  approved native or accepted-Ginux baseline. It remains sequenced after Gates
-  9.75 and 10 and has not started.
+- Gate 11 requires a matched native-Rocky versus Ginux `sysbench` matrix,
+  native parity as the optimization goal, a default 4% per-workload tolerance,
+  and automatic failure for regressions beyond the approved native or
+  accepted-Ginux baseline. Its unoptimized 1/2/4-vCPU checkpoint is complete:
+  all CPU and memory rows pass, while all thread-yield and mutex rows fail.
+  The human approved that baseline on 2026-11-07; profiling and optimization
+  are now active with the default 4% budget unchanged.
 - Gates 9.75 and 10 were clarified on 2026-11-06 to support versioned default
   contract templates, bounded glob and resource selectors, deterministic TOML
   overrides, and expansion against a pinned operation catalog. Gate 10 must
@@ -111,6 +113,15 @@
   teardown. Socket bookkeeping exhaustion is now operation-local (`EMFILE`),
   `close_range` releases tracked sockets, and the remaining interactive
   lifecycle, restart, and persistent-cache checks passed.
+- Gate 10.5 was accepted by the human on 2026-11-07 after pull request
+  https://github.com/gmkurtzer/ginux/pull/237 merged as `53a54add`. Its
+  self-contained contract UX, recursive filesystem policy, recipe-owned
+  bootstrap, set-ID/device-node controls, reduced host identity, and
+  `NoNewPrivs` backstop are closed with passing pull-request CI.
+- Gate 11 began on dedicated branch `hdae/performance-characterization` from
+  merged `main`. The first checkpoint is the unoptimized matched native Rocky
+  versus Ginux baseline; no optimization begins before that evidence is
+  presented.
 - The ordered gate batch is authorized, but every open gate remains a human
   checkpoint requiring a working demonstration and explicit acceptance.
 
@@ -131,12 +142,8 @@ scope, threat model, and invariants.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 10.5, intuitive self-contained contract configuration and
-  UX, was expanded by human direction to include recursive filesystem policy,
-  explicit set-ID/device-node controls, recipe-owned bootstrap customization,
-  and least-privileged native host identities. Implementation and fresh
-  verification are complete on
-  `hdae/intuitive-contract-ux`.
+- Active gate: Gate 11, performance characterization and optimization, is
+  active on `hdae/performance-characterization`.
 - Last evidence: `make check`, `make test-contract`, Rocky QEMU
   `make test-config`, `make test-contract-runtime`, `make test-systemd`, the
   complete aggregate `make test`, and the Gate 10.5 human demonstration pass.
@@ -165,9 +172,76 @@ scope, threat model, and invariants.
   UID/GID 65534; the production pre-exec identity reduction is unchanged.
   Pull-request `launch-integration` now passes in 33 seconds, and
   `static-and-unit` passes in 41 seconds.
-- Open decision: none for the approved Gate 10.5 expansion.
-- Exact next action: stop for human review and acceptance of pull request 237
-  before Gate 11.
+- Open decision: no workload-specific tolerance exceptions are approved; the
+  default 4% per-row budget remains authoritative.
+- Gate 11 profiling corrected the mutex protocol; every exploratory 1/2/4-vCPU
+  mutex row now passes within 0.7% of native. The retained seccomp user
+  notification path improved one-vCPU thread yield from 3.299 to 19.731
+  events/s while preserving pre-effect userspace dispatch and bounded audit.
+  The clean repeated 1/2/4-vCPU matrix remains only 0.031x to 0.036x native and fails
+  the unchanged 4% budget.
+- Human clarification requires Gate 11 to continue through exhaustive
+  implementation-level profiling and optimization rather than stopping at the
+  first ptrace-bound result. No workload-specific tolerance exception is
+  approved.
+- The thread-yield hot path is now exhausted within the approved architecture.
+  Audit-disabled user notification reaches 21.789 versus 645.097 native;
+  receive plus response ioctl round trips dominate. A removed, exact-semantics
+  kernel-resident seccomp decision reached 0.937x native, while a removed
+  no-yield diagnostic reached 2.990x and was rejected as semantically invalid.
+- Clean-tree Gate 11 metadata identifies commit `6de49677`. Every CPU and mutex
+  row passes. A short, high-variance 2-vCPU/1-thread memory failure was not
+  accepted at face value: a five-second, five-repetition confirmation passed at
+  1.003x native with 1.52% Ginux variance; its 2-thread companion also passed.
+- Human direction on 2026-11-07 authorizes an extended Gate 11 selective-mode
+  optimization sweep without another intermediate checkpoint. Profile every
+  mandatory workload, implement only evidence-backed optimizations, rerun the
+  complete 1/2/4-vCPU matrix after material changes, and preserve all contract,
+  denial, compatibility, and security invariants. Continue for up to ten hours,
+  until all mandatory rows pass, or until every credible in-scope path has
+  produced conclusive evidence and any remaining option requires a new
+  architecture decision.
+- The extended sweep is complete. Per-workload audit capture, scheduler and
+  `perf` counters, a direct-futex diagnostic, shared and dedicated supervisor
+  CPU placement, audit-disabled execution, and a no-tracer constant-allow
+  seccomp control exhaust the credible in-scope paths. The no-tracer control
+  alone measured 0.941x native, reproducing the residual thread deficit in the
+  host kernel's seccomp fast path under x86-64 QEMU TCG.
+- Human direction on 2026-11-07 extends Gate 11 to paranoid mode. The next
+  phase will collect a matched paranoid matrix, profile the notification
+  broker and its audit, contract, PID-map, and scheduling costs, and test which
+  selective-mode optimizations transfer without weakening the requirement that
+  every syscall enter Ginux userspace before completion.
+- The paranoid follow-on sweep is complete. Its five-second/five-repetition
+  matrix passes every CPU, memory, and mutex row but fails all five
+  thread-yield rows at 0.028x to 0.037x native. Audit-disabled, CPU-separated,
+  and multi-broker diagnostics confirmed that seccomp notification
+  receive/response and scheduler round trips dominate; multiple receivers made
+  performance substantially worse and were reverted.
+- The authoritative final retained-code five-second/five-repetition matrix at
+  clean commit `190a625c` passes every CPU, memory, and mutex row. All five
+  selective thread rows fail at 0.917x to 0.953x native. The unchanged 4%
+  budget therefore keeps Gate 11 partial.
+- Same-harness controls prove why: detaching Ginux while retaining one
+  constant-allow seccomp filter still measured 0.930x to 0.952x, while
+  detaching with no seccomp filter returned stable four-vCPU controls to
+  1.003x and 0.980x native. `sched_yield` is already direct-safe and allowing
+  observed non-PI futexes did not materially improve the result. The residual
+  selective deficit is the host seccomp/task-work floor under QEMU TCG, not a
+  missed Ginux allow rule or userspace hot path.
+- Exact next action: update pull request 249 with the completed selective and
+  paranoid evidence. Gate 11 remains partial under the unchanged 4% budget;
+  do not publish an accepted baseline, merge the pull request, or close the
+  gate without human direction.
+- Human direction on 2026-11-07 resolved the Gate 11 dispatch boundary. Each
+  instance will configure `paranoid` or `selective` dispatch. Paranoid preserves
+  a Ginux userspace decision for every syscall. Selective directly executes
+  only explicitly allowed operations independently cataloged as transparent
+  and direct-safe; denied and complex operations still enter Ginux, and Ginux
+  returns configured denials without invoking the requested host syscall.
+- Human direction later on 2026-11-07 made selective the default for omitted
+  dispatch configuration. Paranoid remains an explicit all-syscall mediation
+  option, and the direct-safe catalog remains independently bounded.
 
 ## Evidence
 
@@ -464,27 +538,45 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Deliver Gate 10.5 from `hdae/intuitive-contract-ux` in its dedicated pull
-request with complete evidence, and stop for human acceptance before Gate 11.
+Review pull request https://github.com/gmkurtzer/ginux/pull/249 and the completed
+selective and paranoid evidence. Selective passes every CPU, memory, and mutex
+row, while all five thread-yield allocations remain at 0.917x to 0.953x;
+paranoid reaches 0.027x to 0.035x on thread-yield. Do not publish an accepted
+baseline, merge the pull request, or close Gate 11 while these rows exceed the
+unchanged 4% budget.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 10.5, intuitive self-contained contract configuration and
-  UX, is implemented and freshly verified on `hdae/intuitive-contract-ux` and
-  awaiting review.
-- Last evidence: strict formatting/build, 12 contract and 21 instance tests,
-  runtime deny provenance, process identity checks, the complete systemd and
-  aggregate matrices, the Gate 10.5 demonstration, and a clean interactive
-  Rocky run all pass. The interactive run includes the expanded filesystem,
-  set-ID, device-node, bootstrap, host identity, and `NoNewPrivs` criteria.
+- Active gate: Gate 11, performance characterization and optimization, is
+  partial on `hdae/performance-characterization`.
+- Delivery: pull request https://github.com/gmkurtzer/ginux/pull/249 is open
+  against `main`; it must not be merged or closed without explicit human
+  authorization.
+- Last evidence: clean retained commit `190a625c` removes all temporary
+  diagnostics. The final five-second, five-repetition matrix passes every CPU,
+  memory, and mutex row; all five thread rows remain 4.75% to 8.27% behind
+  native. Same-harness constant-allow and no-seccomp controls isolate the
+  residual to the host seccomp/task-work path under QEMU TCG. Fresh `make check`,
+  `make test-contract`, `make test-bench-compare`, `make test-contract-runtime`,
+  aggregate `make test`, `make test-native-vfs`, and the complete Rocky
+  `make test-systemd` matrix pass on isolated QEMU state.
+- Completed paranoid work: the benchmark harness records dispatch mode and
+  rejects cross-mode baseline comparison. The retained single-broker path has
+  constant-time and precomputed contract decisions, bounded audit, and no
+  redundant host yield. A long full matrix, audit-disabled matrix, perf
+  profile, CPU-separation test, and reverted multi-broker diagnostic exhaust
+  the credible invariant-preserving paths.
 - Approved network direction: Gate 9 defaults to full host-shared inbound and
   outbound networking with normal host routing and bind conflicts, under Ginux
   mediation and audit. Gate 9.75 adds comprehensive instance configuration,
   network selection, port controls, and translation.
 - Gate 9.75 closure: pull request 229 merged as `8a475e8b`; human accepted and
   closed the gate on 2026-11-06.
-- Required human decision: review and acceptance of pull request 237 before
-  Gate 11.
+- Required human decision: choose whether Gate 11 should require native
+  x86-64/KVM confirmation, adopt mode- or workload-specific budgets, or keep
+  the current 4% threshold and leave Gate 11 partial. Any kernel-side
+  enforcement component or weakening of paranoid all-syscall userspace
+  mediation requires a separate architecture decision.

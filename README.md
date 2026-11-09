@@ -163,11 +163,34 @@ Inspect the latest completed capability directly:
 
 ```sh
 make test-systemd       # cached image, external networking disabled
-make bench              # systemd timing and resource observations
+make bench-prepare      # one-time networked setup for the pinned benchmark image
+make bench              # matched native/Ginux matrix plus mandatory budget checks
 make test-systemd-live  # shared network plus real upstream dnf -y update
 make run-host           # general interactive Rocky host with Ginux installed
 make demo-gate-9        # Gate 9 checkpoint through the same host workflow
 ```
+
+Instance recipes may select the syscall dispatch model under `[execution]`:
+
+```toml
+[execution]
+profile = "balanced"
+backend = "ptrace-native"
+dispatch = "selective" # default; use "paranoid" for all-syscall mediation
+```
+
+`selective` is the default and permits direct host execution only
+when the instance contract allows the operation and Ginux's versioned catalog
+independently classifies it as direct-safe. Denials, virtual state, inspection,
+translation, emulation, pointer or descriptor validation, and modified results
+remain Ginux-dispatched in both modes. `paranoid` is an explicit opt-in that
+sends every syscall through the Ginux userspace dispatcher before completion.
+
+`make bench-compare` checks every row against the 4% native budget and, after an
+accepted baseline is published under `benchmarks/gate11/`, against that Ginux
+baseline as well. Environment mismatches are reported separately from
+performance regressions. `make demo-gate-11` runs a bounded human-inspectable
+comparison and returns nonzero when a mandatory row misses its budget.
 
 `make run-host` boots the QEMU Rocky host and logs you into its ordinary shell.
 Ginux is installed in `PATH`. The first `instance create` downloads and verifies

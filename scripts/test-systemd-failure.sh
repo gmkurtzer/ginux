@@ -20,7 +20,7 @@ status=$(rocky_ssh 'set +e; /var/tmp/ginux native /var/tmp/gate9-failure.toml /v
 rocky_ssh 'cat /var/tmp/gate9-failure.log' >"$log"
 
 test "$status" -ne 0
-grep -Fq 'GINUX_INSTANCE: failed reason=native tracee did not stop after exec' "$log"
+grep -Fq 'GINUX_INSTANCE: failed reason=native tracee did not stop before filter install' "$log"
 grep -Fq 'GINUX_INSTANCE: cleanup resources=false managed-task=false' "$log"
 if grep -Fq 'GINUX_AUTHENTICATED' "$log"; then
     printf '%s\n' 'configured failure unexpectedly reached a shell' >&2

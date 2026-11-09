@@ -119,12 +119,12 @@ grep -Fqx 'port_forwards = ["tcp/eth0:1/8080/80"]' "$gate975_log"
 grep -Fqx 'pre_boot = ["/usr/local/sbin/prepare-instance --safe"]' "$gate975_log"
 
 rocky_ssh '/var/tmp/ginux instance-plan /var/tmp/gate10-strict.toml' >"$contract_plan_log" 2>&1
-grep -Eq '^GINUX_CONTRACT: catalog=1 instance=gate10-strict profile=self-contained-v1 digest=[0-9a-f]{64} operations=[0-9]+$' "$contract_plan_log"
+grep -Eq '^GINUX_CONTRACT: catalog=2 instance=gate10-strict profile=self-contained-v1 digest=[0-9a-f]{64} operations=[0-9]+$' "$contract_plan_log"
 grep -Fq 'operation=syscall.getpid action=emulate provenance=exact-allow source=exact-allow source-rule=0' "$contract_plan_log"
 grep -Fq 'operation=syscall.clock_gettime action=deny provenance=default-deny source=default-deny' "$contract_plan_log"
 grep -Fqx 'GINUX_CONTRACT: PASS' "$contract_plan_log"
 rocky_ssh '/var/tmp/ginux instance-plan /var/tmp/gate10-systemd.toml' >"$contract_systemd_plan_log" 2>&1
-grep -Eq '^GINUX_CONTRACT: catalog=1 instance=rocky profile=self-contained-v1 digest=[0-9a-f]{64} operations=[0-9]+$' "$contract_systemd_plan_log"
+grep -Eq '^GINUX_CONTRACT: catalog=2 instance=rocky profile=self-contained-v1 digest=[0-9a-f]{64} operations=[0-9]+$' "$contract_systemd_plan_log"
 grep -Fq 'operation=syscall.clock_gettime action=mediate provenance=recipe-allow source=system' "$contract_systemd_plan_log"
 grep -Fqx 'GINUX_CONTRACT: PASS' "$contract_systemd_plan_log"
 
@@ -136,7 +136,7 @@ grep -Fqx 'GINUX_CONFIG: rejected reason=invalid-contract managed-started=false'
 
 rocky_ssh "grep -Fqx '[userspace.contract]' /var/tmp/gate10-systemd.toml; ! grep -Fq '[contract]' /var/tmp/gate10-systemd.toml"
 rocky_ssh 'GINUX_RUNTIME=/var/tmp/ginux /var/tmp/ginux-cli instance validate /var/tmp/gate10-systemd.toml' >"$instance_validate_log" 2>&1
-grep -Eq '^Contract valid: instance=rocky catalog=1 digest=[0-9a-f]{64} operations=[0-9]+$' "$instance_validate_log"
+grep -Eq '^Contract valid: instance=rocky catalog=2 digest=[0-9a-f]{64} operations=[0-9]+$' "$instance_validate_log"
 rocky_ssh 'GINUX_RUNTIME=/var/tmp/ginux /var/tmp/ginux-cli instance explain /var/tmp/gate10-systemd.toml filesystem.path.write' >"$instance_explain_log" 2>&1
 grep -Fqx 'Decision: mediate' "$instance_explain_log"
 grep -Fqx 'Rule: recipe-allow source=write index=0' "$instance_explain_log"

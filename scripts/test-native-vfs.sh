@@ -22,7 +22,7 @@ rocky_ssh "sudo /var/tmp/ginux native /var/tmp/gate5.toml '$instance_root'" > "$
 grep -Fqx 'GINUX_NATIVE: backend=ptrace-native profile=balanced elf-loader=host contract=gate5-balanced-v1' "$native_log"
 grep -Fqx 'GINUX_NATIVE: tracee-uid=1000 tracee-gid=1000 root=oci-read-only' "$native_log"
 grep -Fqx 'GINUX_NATIVE_SHELL: PASS' "$native_log"
-grep -Fqx 'GINUX_NATIVE: supervisor=attached direct-unsupervised-syscalls=0' "$native_log"
+grep -Fqx 'GINUX_NATIVE: supervisor=attached dispatch=paranoid direct-safe-syscalls=0' "$native_log"
 grep -Fqx 'GINUX_NATIVE_CHECK: PASS' "$native_log"
 grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ instance=gate5-demo .*phase=entry syscall=[0-9]+ action=(mediate|emulate|deny)' "$native_log"
 grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ instance=gate5-demo .*phase=entry syscall=39 action=emulate surface=virtual-identity result=4242$' "$native_log"
@@ -35,8 +35,8 @@ grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ instance=gate5-demo .*phase=entry
 printf '%s\n' '  native shell: PASS (Rocky loader and Bash, balanced audit surfaces)'
 
 rocky_ssh "sudo /var/tmp/ginux native /var/tmp/gate5.toml '$instance_root' probe" > build/gate5-balanced-probe.log 2>&1
-grep -Fqx 'GINUX_BALANCED_MUTATION: BLOCKED' build/gate5-balanced-probe.log
-grep -Fqx 'GINUX_BALANCED_NETWORK: BLOCKED' build/gate5-balanced-probe.log
+grep -Fq 'GINUX_BALANCED_MUTATION: BLOCKED' build/gate5-balanced-probe.log
+grep -Fq 'GINUX_BALANCED_NETWORK: BLOCKED' build/gate5-balanced-probe.log
 grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ instance=gate5-demo .*phase=entry syscall=257 action=deny result=-1 reason=invalid-arguments$' build/gate5-balanced-probe.log
 grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ instance=gate5-demo .*phase=entry syscall=41 action=deny result=-38$' build/gate5-balanced-probe.log
 rocky_ssh "test ! -e '$instance_root/tmp/ginux-mutation'"

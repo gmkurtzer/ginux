@@ -26,6 +26,8 @@ case $base in
 esac
 ROCKY_IMAGE_PATH=$base ./scripts/prepare-rocky-host.sh
 network_restrict=${ROCKY_NETWORK_RESTRICT:-on}
+vcpus=${ROCKY_VCPUS:-2}
+memory_mib=${ROCKY_MEMORY_MIB:-2048}
 case "$network_restrict" in
     on|off) ;;
     *)
@@ -33,6 +35,13 @@ case "$network_restrict" in
         exit 2
         ;;
 esac
+case "$vcpus:$memory_mib" in
+    *[!0-9:]*|:*|*:) printf '%s\n' 'ROCKY_VCPUS and ROCKY_MEMORY_MIB must be positive integers' >&2; exit 2 ;;
+esac
+test "$vcpus" -gt 0 && test "$memory_mib" -gt 0 || {
+    printf '%s\n' 'ROCKY_VCPUS and ROCKY_MEMORY_MIB must be positive integers' >&2
+    exit 2
+}
 overlay=$ROCKY_OVERLAY_DISK
 mkdir -p "$(dirname "$overlay")" "$(dirname "$ROCKY_PID_FILE")" \
     "$(dirname "$ROCKY_SERIAL_LOG")"
@@ -44,13 +53,13 @@ else
 fi
 rm -f "$ROCKY_SERIAL_LOG"
 
-host_progress 'starting x86-64 QEMU (TCG, 2 vCPUs)'
+host_progress "starting x86-64 QEMU (TCG, $vcpus vCPUs, $memory_mib MiB)"
 qemu-system-x86_64 \
     -machine q35 \
     -accel tcg,thread=multi \
     -cpu max \
-    -smp 2 \
-    -m 2048M \
+    -smp "$vcpus" \
+    -m "${memory_mib}M" \
     -display none \
     -daemonize \
     -pidfile "$ROCKY_PID_FILE" \

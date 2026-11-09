@@ -8,7 +8,7 @@ BASELINE := target/$(X86_TARGET)/release/baseline-runner
 RUNTIME_FIXTURE := target/$(X86_TARGET)/release/runtime-fixture
 PROCESS_NATIVE_FIXTURE := target/$(X86_TARGET)/release/process-native-fixture
 
-.PHONY: doctor host-image-fetch host-image-verify host-boot-test image-helper-fetch image-prepare instance-image-fetch instance-image-verify instance-image-prepare systemd-image-fetch systemd-image-verify systemd-image-prepare test-image test-oci-image test-oci-layers test-vfs test-native-vfs image-cache-clean build check-name check-instance-terminology check contract-doc test-contract test-contract-runtime test test-unit test-intercept test-runtime test-config test-instance test-instance-terminology test-process build-process-fixtures test-process-native test-devices test-kernel-views test-systemd test-systemd-live test-systemd-interactive test-gate975-network test-gate975-hooks test-cgroup test-block test-network run-host run-systemd bench bench-baseline bench-block bench-network demo-gate-1 demo-gate-2 demo-gate-3 demo-gate-4 demo-gate-5 demo-gate-6 demo-gate-7 demo-gate-8 demo-gate-9 demo-gate-9.5 demo-gate-9.75 demo-gate-10 demo-gate-10.25 demo-gate-10.5 clean
+.PHONY: doctor host-image-fetch host-image-verify host-boot-test image-helper-fetch image-prepare instance-image-fetch instance-image-verify instance-image-prepare systemd-image-fetch systemd-image-verify systemd-image-prepare test-image test-oci-image test-oci-layers test-vfs test-native-vfs image-cache-clean build check-name check-instance-terminology check contract-doc test-contract test-contract-runtime test test-unit test-intercept test-runtime test-config test-instance test-instance-terminology test-process build-process-fixtures test-process-native test-devices test-kernel-views test-systemd test-systemd-live test-systemd-interactive test-gate975-network test-gate975-hooks test-cgroup test-block test-network test-bench-compare run-host run-systemd bench-prepare bench bench-baseline bench-compare bench-systemd bench-report bench-block bench-network demo-gate-1 demo-gate-2 demo-gate-3 demo-gate-4 demo-gate-5 demo-gate-6 demo-gate-7 demo-gate-8 demo-gate-9 demo-gate-9.5 demo-gate-9.75 demo-gate-10 demo-gate-10.25 demo-gate-10.5 demo-gate-11 clean
 
 doctor:
 	@./scripts/doctor.sh
@@ -193,8 +193,11 @@ test-native-vfs: build instance-image-prepare
 
 test: check test-unit test-intercept test-runtime test-config test-instance test-image test-devices test-process test-kernel-views
 
+bench-prepare: build
+	@ROCKY_NETWORK_RESTRICT=off ./scripts/with-gate11-host.sh ./scripts/prepare-gate11-benchmark.sh
+
 bench-baseline: build
-	@./scripts/with-rocky-host.sh ./scripts/bench-baseline.sh
+	@./scripts/with-gate11-host.sh ./scripts/collect-gate11-baseline.sh
 
 bench-block: build
 	@./scripts/with-rocky-host.sh ./scripts/bench-devices.sh block
@@ -202,8 +205,22 @@ bench-block: build
 bench-network: build
 	@./scripts/with-rocky-host.sh ./scripts/bench-devices.sh network
 
-bench: build systemd-image-prepare
+bench: bench-baseline bench-compare
+
+bench-compare:
+	@./scripts/bench-compare.sh
+
+test-bench-compare:
+	@./scripts/test-bench-compare.sh
+
+bench-systemd: build systemd-image-prepare
 	@ROCKY_NETWORK_RESTRICT=on ./scripts/with-rocky-host.sh ./scripts/bench-systemd.sh
+
+bench-report:
+	@./scripts/bench-report.sh
+
+demo-gate-11: doctor build
+	@./scripts/demo-gate-11.sh
 
 demo-gate-1: doctor build
 	@./scripts/with-rocky-host.sh ./scripts/demo-gate-1.sh
