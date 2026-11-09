@@ -139,7 +139,15 @@ long native_fixture_main(void)
         if (pid == 0) { char go; call3(0, fds[0], (word)&go, 1); return 7; }
         print_result("GINUX_FIXTURE: null-nohang=", call5(247, 1, pid, 0, 5, 0));
         call3(1, fds[1], (word)"g", 1);
-        print_result("GINUX_FIXTURE: null-peek=", call5(247, 1, pid, 0, 0x01000004, 0));
+        word selected = pid;
+        long result;
+        register word r10 __asm__("r10") = 0x01000004;
+        register word r8 __asm__("r8") = 0;
+        __asm__ volatile("syscall" : "=a"(result), "+S"(selected)
+                         : "a"(247L), "D"(1L), "d"(0L), "r"(r10), "r"(r8)
+                         : "rcx", "r11", "memory");
+        print_result("GINUX_FIXTURE: null-peek=", result);
+        print_result("GINUX_FIXTURE: null-selector-preserved=", selected == (word)pid);
         print_result("GINUX_FIXTURE: null-after-peek=", call5(247, 1, pid, 0, 4, 0));
         print_result("GINUX_FIXTURE: null-rewait=", call4(61, pid, (word)&status, 0, 0));
         pid = call3(57, 0, 0, 0);

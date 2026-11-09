@@ -92,6 +92,7 @@ sys_read = ["/"]
         fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
         check("null-siginfo waitid and private pin reuse", code == 0 and fixture == [
             "GINUX_FIXTURE: null-nohang=0", "GINUX_FIXTURE: null-peek=0",
+            "GINUX_FIXTURE: null-selector-preserved=1",
             "GINUX_FIXTURE: null-after-peek=0", "GINUX_FIXTURE: null-rewait=-10",
             "GINUX_FIXTURE: null-invalid-options=-22", "GINUX_FIXTURE: null-rusage-fault=-14",
             "GINUX_FIXTURE: fault-rewait=-10", "GINUX_FIXTURE: null-reaped=800"], code, out)

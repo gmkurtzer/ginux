@@ -3372,6 +3372,7 @@ struct NativeSupervisorTask {
     syscall: u64,
     translated_rdi: u64,
     waitid_info: u64,
+    waitid_selector: u64,
     initial_stop_pending: bool,
     initial_exec_pending: bool,
     tracing: bool,
@@ -5554,6 +5555,7 @@ fn supervise_native(
         syscall: 0,
         translated_rdi: 0,
         waitid_info: 0,
+        waitid_selector: 0,
         initial_stop_pending: false,
         initial_exec_pending: true,
         tracing: true,
@@ -5741,6 +5743,7 @@ fn supervise_native(
                 syscall: 0,
                 translated_rdi: 0,
                 waitid_info: 0,
+                waitid_selector: 0,
                 initial_stop_pending: pending_child_slot.is_none(),
                 initial_exec_pending: false,
                 tracing: true,
@@ -6052,6 +6055,15 @@ fn supervise_native(
                         };
                     }
                     *waited_slot = None;
+                }
+            }
+            if task.syscall == 247 {
+                // P_PID translates RSI internally; return its original ABI
+                // value even on errors/restarts, rather than a host PID.
+                registers.rsi = task.waitid_selector;
+                if !task.override_exit {
+                    task.override_exit = true;
+                    task.override_result = registers.rax as i64;
                 }
             }
             if task.translated_rdi != 0 {
@@ -8983,6 +8995,7 @@ fn supervise_native(
                 }
                 if mode == 3 && syscall == 247 {
                     task.waitid_info = registers.rdx;
+                    task.waitid_selector = registers.rsi;
                     if registers.rdi == 1 && registers.rsi != 0 {
                         let selected = registers.rsi as u32;
                         let Some(target) = tasks.iter().flatten().find(|candidate| {
