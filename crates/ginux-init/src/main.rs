@@ -108,6 +108,7 @@ const PTRACE_PEEKDATA: usize = 2;
 const SYS_IOCTL_HOST: usize = 16;
 const SYS_MMAP_HOST: usize = 9;
 const SYS_FUTEX_HOST: usize = 202;
+const SYS_CLOSE_RANGE_HOST: usize = 436;
 const FUTEX_WAIT: usize = 0;
 const FUTEX_WAKE: usize = 1;
 const PR_SET_PDEATHSIG: usize = 1;
@@ -5158,7 +5159,7 @@ fn native_shared_pid_map() -> Option<&'static BrokerPidMap> {
     Some(unsafe { &*map })
 }
 
-fn native_console_control_broker(pid_map: &'static BrokerPidMap) -> isize {
+fn native_console_control_broker(pid_map: &'static BrokerPidMap, root_descriptor: usize) -> isize {
     const PR_SET_PDEATHSIG: usize = 1;
     const CONTROL_FD: usize = 10;
     let child = unsafe { syscall0(SYS_FORK) };
@@ -5168,6 +5169,7 @@ fn native_console_control_broker(pid_map: &'static BrokerPidMap) -> isize {
     if unsafe { syscall2(SYS_PRCTL, PR_SET_PDEATHSIG, SIGKILL) } < 0 {
         exit_process(130);
     }
+    let _ = unsafe { syscall1(SYS_CLOSE_HOST, root_descriptor) };
     let mut command = 0u8;
     loop {
         let read = unsafe {
@@ -5447,8 +5449,11 @@ fn supervise_native(
         | PTRACE_O_TRACEEXEC
         | PTRACE_O_TRACESECCOMP
         | PTRACE_O_EXITKILL;
-    if ptrace(PTRACE_SETOPTIONS, pid, 0, options) < 0 || ptrace(PTRACE_CONT, pid, 0, 0) < 0 {
+    if ptrace(PTRACE_SETOPTIONS, pid, 0, options) < 0 {
         native_fail(instance, pid, b"native ptrace setup failed");
+    }
+    if ptrace(PTRACE_CONT, pid, 0, 0) < 0 {
+        native_fail(instance, pid, b"native ptrace resume failed");
     }
     if mode == 3 {
         write_all(
@@ -5488,14 +5493,8 @@ fn supervise_native(
         native_fail(instance, pid, b"native broker PID map full");
     }
     pid_map.set_foreground_group(root_view.process_group);
-    let control_broker_pid = if unsafe { syscall2(SYS_FCNTL as usize, 10, F_GETFD as usize) } >= 0 {
-        native_console_control_broker(pid_map)
-    } else {
-        0
-    };
-    if control_broker_pid < 0 {
-        native_fail(instance, pid, b"native console control broker failed");
-    }
+    let control_available = unsafe { syscall2(SYS_FCNTL as usize, 10, F_GETFD as usize) } >= 0;
+    let mut control_broker_pid = 0isize;
     let mut tasks: [Option<NativeSupervisorTask>; 128] = [None; 128];
     let mut virtual_kernel_fds = [EMPTY_VIRTUAL_KERNEL_FD; NATIVE_VIRTUAL_KERNEL_FD_LIMIT];
     let mut virtual_kernel_state = NativeVirtualKernelState::new();
@@ -5811,17 +5810,38 @@ fn supervise_native(
         };
 
         if task.initial_exec_pending && entry_syscall == Some(59) {
+            let mut listener = -1isize;
             if !direct_yield {
-                let listener = native_duplicate_listener(host_pid, 3);
+                listener = native_duplicate_listener(host_pid, 3);
                 if listener < 0 {
                     native_fail(instance, pid, b"native seccomp listener duplication failed");
                 }
+            }
+            reduce_native_supervisor_authority(
+                instance,
+                pid,
+                root_descriptor,
+                if listener >= 0 {
+                    listener as usize
+                } else {
+                    usize::MAX
+                },
+            );
+            if control_available {
+                control_broker_pid = native_console_control_broker(pid_map, root_descriptor);
+                if control_broker_pid < 0 {
+                    native_fail(instance, pid, b"native console control broker failed");
+                }
+            }
+            if !direct_yield {
                 let broker = unsafe { syscall0(SYS_FORK) };
                 if broker < 0 {
                     let _ = unsafe { syscall1(SYS_CLOSE_HOST, listener as usize) };
                     native_fail(instance, pid, b"native yield broker fork failed");
                 }
                 if broker == 0 {
+                    let _ = unsafe { syscall1(SYS_CLOSE_HOST, root_descriptor) };
+                    let _ = unsafe { syscall1(SYS_CLOSE_HOST, 10) };
                     native_yield_broker(
                         listener as usize,
                         audit_mode,
@@ -9076,6 +9096,49 @@ fn supervise_native(
         }
         tasks[task_index] = Some(task);
     }
+}
+
+/// Bootstrap opens the instance root and establishes tracing while privileged.
+/// Once the tracee is stopped under `PTRACE_O_EXITKILL`, the supervisor needs
+/// only stdio, the optional controller channel (fd 10), and its already-open
+/// instance-root descriptor. Drop every other inherited descriptor, host root
+/// identity, supplementary group, and privilege-gain path before resuming any
+/// managed instruction.
+fn reduce_native_supervisor_authority(
+    instance: &mut Instance,
+    pid: usize,
+    root_descriptor: usize,
+    preserved_descriptor: usize,
+) {
+    let mut descriptor = 3usize;
+    while descriptor < 256 {
+        if descriptor != root_descriptor && descriptor != preserved_descriptor && descriptor != 10 {
+            let _ = unsafe { syscall1(SYS_CLOSE_HOST, descriptor) };
+        }
+        descriptor += 1;
+    }
+    let _ = unsafe { syscall3(SYS_CLOSE_RANGE_HOST, 256, u32::MAX as usize, 0) };
+
+    let host_identity = managed_host_identity();
+    if host_identity.drop_root
+        && (unsafe { syscall2(SYS_SETGROUPS, 0, 0) } < 0
+            || unsafe { syscall1(SYS_SETGID, host_identity.gid) } < 0
+            || unsafe { syscall1(SYS_SETUID, host_identity.uid) } < 0)
+    {
+        native_fail(
+            instance,
+            pid,
+            b"native supervisor identity reduction failed",
+        );
+    }
+    if unsafe { syscall5(SYS_PRCTL, PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) } < 0 {
+        native_fail(instance, pid, b"native supervisor no-new-privileges failed");
+    }
+    write_all(b"GINUX_NATIVE_AUTHORITY: supervisor-uid=");
+    write_u64(host_identity.uid as u64);
+    write_all(b" supervisor-gid=");
+    write_u64(host_identity.gid as u64);
+    line(b" capabilities=none no-new-privileges=1 inherited-fds=bounded root=instance-only");
 }
 
 fn native_identity_result(syscall: u64, mode: usize) -> Option<i64> {
