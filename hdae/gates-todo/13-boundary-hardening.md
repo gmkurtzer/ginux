@@ -41,15 +41,27 @@ honest security and compatibility boundary for the initial milestone.
 - [x] Human authorized autonomous execution and separate pull-request delivery.
 - [x] Inventoried parser, dispatcher, escape, recovery, authority, and existing
   regression surfaces.
+- [x] Added deterministic malformed-input and bounded fuzz coverage for the
+  security-critical parsers and dispatch inputs.
+- [x] Added escape, authority, resource-exhaustion, teardown, and host-view
+  verification through the existing QEMU boundary suites.
+- [x] Reduced the post-bootstrap native supervisor to host UID/GID 65534, zero
+  effective capabilities, `NoNewPrivs`, and a bounded descriptor set.
+- [x] Exercised startup failure, supervisor loss, unexpected stops, contract
+  denial, repeated systemd boot, immutable-image failure, and controlled
+  shutdown recovery.
+- [x] Published the initial supported-claims, residual-authority,
+  compatibility, operational, security, and performance limitations report.
+- [x] Ran the complete functional, contract, security, recovery, systemd, and
+  aggregate regression suites after hardening.
 
 ## Remaining work
 
-- [ ] Build malformed-input, fuzz, and escape suites.
-- [ ] Minimize and verify Ginux host authority.
-- [ ] Exercise recovery and cleanup behavior.
-- [ ] Run full functional, security, and benchmark regressions.
-- [ ] Publish initial security, compatibility, operations, and performance
-  limitations.
+- [ ] Resolve or explicitly change the unchanged 4% Gate 11 performance
+  criterion: all five authoritative selective thread-yield rows remain below
+  the required 0.960x floor.
+- [ ] Human review and acceptance of the partial result, residual risks, and
+  scoped claims.
 
 ## Acceptance criteria
 
@@ -92,7 +104,36 @@ honest security and compatibility boundary for the initial milestone.
 
 ## Evidence
 
-- Not run.
+- `make check-security-doc` -> passed; claims, residual authority, known gaps,
+  performance limitations, and independent-review status are visible.
+- `make check` -> passed formatting, strict lint, builds, generated contract
+  documentation, and static terminology checks.
+- `GINUX_FUZZ_SECONDS=5 make fuzz-security` -> passed all eight deterministic
+  targets for five seconds each with no crash, timeout, invariant failure, or
+  retained failure artifact; each target executed more than 140,000 cases in
+  the recorded run.
+- `make test-security` -> passed malformed-input, fuzz, native authority,
+  contract-denial, block-range, virtual-view, resource-exhaustion, and teardown
+  checks.
+- `make test-recovery` -> passed supervisor-loss, unexpected-stop, contract,
+  systemd cold/warm/repeat, immutable-image failure, configured-startup
+  failure, and controlled-shutdown checks.
+- `make test-contract` -> passed 36 contract and instance tests plus generated
+  ABI coverage consistency.
+- `make test` -> passed the aggregate unit, image, interception, runtime,
+  configuration, instance, device, process, contract, and virtual-kernel-view
+  regression matrix.
+- `make demo-gate-13` -> passed deterministic fuzzing, denied host effects,
+  residual-authority inspection, supervisor-loss and unexpected-stop cleanup,
+  contract denial, and limitations-report inspection.
+- `make bench-compare` against the default stale exploratory artifact failed
+  and is not authoritative; that artifact predates the retained Gate 11
+  optimizations.
+- `scripts/bench-compare.sh build/gate11-balanced-final-v2/results.tsv
+  build/gate11-balanced-final-v2/metadata.txt /tmp/ginux-no-accepted-results
+  /tmp/ginux-no-accepted-metadata` -> failed exactly the five authoritative
+  thread-yield rows at 0.938x, 0.930x, 0.953x, 0.921x, and 0.917x against the
+  required 0.960x floor; CPU, memory, and mutex rows passed.
 
 ## Decisions and limitations
 
@@ -107,6 +148,14 @@ honest security and compatibility boundary for the initial milestone.
   or timeout leaves a reproducible artifact under `build/security-fuzz/`.
 - An independent security audit and production-readiness program remain future
   work.
+- Gate 13 is technically partial. Its security, recovery, functional,
+  documentation, and demonstration evidence passes, but the approved
+  performance criterion does not. The existing Gate 11 evidence attributes the
+  residual selective-mode thread deficit to the host seccomp/task-work floor
+  under x86-64 QEMU TCG after exhausting the approved in-scope optimizations.
+- The default `build/gate11/` result is an early exploratory matrix and must
+  not be treated as current retained-code performance. The authoritative final
+  matrix is `build/gate11-balanced-final-v2/`.
 
 ## Delivery strategy
 
@@ -117,10 +166,16 @@ honest security and compatibility boundary for the initial milestone.
   without explicit authorization
 - Planned commits: malformed-input and fuzz harnesses; escape and authority
   reduction; recovery and cleanup; full regression evidence and limitations
-- Actual commits: pending
+- Actual commits: `0b954c76` (gate start), `83b170c6` (bounded security
+  fuzzing), `e6e56e96` (native supervisor authority reduction), `d6cda551`
+  (boundary and recovery verification), plus the final evidence checkpoint
+  commit
 
 ## Review policy and outcome
 
-Human checkpoint. Present `make demo-gate-13`, fresh evidence, and the pull
-request. This gate closes the initial milestone only after explicit acceptance
-of the evidence, residual risks, and scoped claims.
+Human checkpoint. The technical result is partial because the mandatory
+performance criterion remains failed. Present `make demo-gate-13`, fresh
+evidence, the exact benchmark limitation, and the pull request. This gate
+cannot close the initial milestone unless the performance criterion passes or
+the human explicitly changes it and then accepts the evidence, residual risks,
+and scoped claims.

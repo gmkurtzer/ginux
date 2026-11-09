@@ -151,6 +151,13 @@
   materialize a bounded maintenance contract atomically, expose their state in
   lifecycle output, and warn on unlocked starts. A clean Rocky workflow proved
   denial while locked, success while unlocked, and denial again after relock.
+- Gate 13 boundary hardening is technically partial on
+  `hdae/boundary-hardening`. Its deterministic malformed-input and fuzz suite,
+  post-bootstrap supervisor authority reduction, security and recovery suites,
+  aggregate regressions, limitations report, and human demonstration pass.
+  The unchanged 4% performance criterion still fails all five authoritative
+  selective thread-yield rows at 0.917x to 0.953x native, so the gate is not
+  passed.
 
 ## Governing outcome and invariants
 
@@ -567,10 +574,9 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Implement Gate 13's fixed malformed-input and bounded fuzz matrix, then its
-escape, residual-authority, recovery, regression, limitations, and
-demonstration evidence on `hdae/boundary-hardening`. Deliver it as a stacked
-pull request against Gate 12.5. Do not merge or close any pull request.
+Commit and deliver Gate 13's partial result as a stacked pull request against
+Gate 12.5. Present the passing boundary/recovery evidence and the exact
+performance failure for human review. Do not merge or close any pull request.
 
 ## Context recovery
 
@@ -581,8 +587,10 @@ pull request against Gate 12.5. Do not merge or close any pull request.
   Gate 12.1 is technically passed and delivered in pull request 252; Gate
   12.25 is technically passed and delivered in pull request 253. Gate 12.5 is
   technically passed and delivered in pull request 254 from
-  `hdae/contract-maintenance-lock`. Gate 13 is active on
-  `hdae/boundary-hardening`, stacked on Gate 12.5. Gate 11 remains partial on
+  `hdae/contract-maintenance-lock`. Gate 13 is technically partial on
+  `hdae/boundary-hardening`, stacked on Gate 12.5: its boundary, recovery,
+  authority, regression, documentation, and demonstration evidence passes,
+  while its inherited performance criterion fails. Gate 11 remains partial on
   its parent branch and in pull request 249.
 - Gate 12.25 delivery: pull request
   https://github.com/gmkurtzer/ginux/pull/253 is open from
@@ -608,6 +616,11 @@ pull request against Gate 12.5. Do not merge or close any pull request.
   demo-gate-12.5` passed. Rocky proved locked denial, unlocked maintenance
   success, and denial after relocking while retaining mandatory host-boundary
   backstops.
+- Gate 13 evidence: `make check`, five-second-per-target `make fuzz-security`,
+  `make test-security`, `make test-recovery`, `make test-contract`, aggregate
+  `make test`, and `make demo-gate-13` pass. The authoritative
+  `build/gate11-balanced-final-v2` comparison fails only the five thread-yield
+  rows at 0.938x, 0.930x, 0.953x, 0.921x, and 0.917x versus the 0.960x floor.
 - Completed paranoid work: the benchmark harness records dispatch mode and
   rejects cross-mode baseline comparison. The retained single-broker path has
   constant-time and precomputed contract decisions, bounded audit, and no
