@@ -554,11 +554,10 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Deliver technically passed Gate 12.1 as a stacked pull request against
-`hdae/contract-network-ux`. Then execute Gate 12.25 for the top-level CLI
-restructure, Gate 12.5 for contract lock/unlock maintenance state, and Gate 13
-for boundary hardening. Use a dedicated stacked branch and pull request for
-each gate. Do not merge or close pull requests 249 or 251.
+Execute Gate 12.25 for the top-level CLI restructure, followed by Gate 12.5 for
+contract lock/unlock maintenance state and Gate 13 for boundary hardening. Use
+a dedicated stacked branch and pull request for each gate. Do not merge or
+close pull requests 249, 251, or 252.
 
 ## Context recovery
 
@@ -574,6 +573,8 @@ each gate. Do not merge or close pull requests 249 or 251.
   authorization.
 - Gate 12 delivery: pull request https://github.com/gmkurtzer/ginux/pull/251 is
   open from `hdae/contract-network-ux` against the Gate 11 branch.
+- Gate 12.1 delivery: pull request https://github.com/gmkurtzer/ginux/pull/252
+  is open from `hdae/virtual-kernel-filesystems` against the Gate 12 branch.
 - Last evidence: Gate 12.1 passed `make check`, `make test-kernel-views`,
   `make test-process`, the complete `make test-systemd` matrix, aggregate
   `make test`, and `make demo-gate-12.1`. The demo proved on-demand proc/sys
