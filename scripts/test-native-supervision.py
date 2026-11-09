@@ -24,7 +24,7 @@ def main():
         (root / "usr/bin/bash").chmod(0o755)
         work.chmod(0o755)
 
-        def run(scenario, stdin=None, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, **options):
+        def run(scenario, stdin=None, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **options):
             (root / "scenario").write_text(scenario)
             proc = subprocess.run([str(work / "ginux"), "native", str(config), str(root)],
                                   stdin=stdin, stdout=stdout, stderr=stderr, timeout=20, **options)
