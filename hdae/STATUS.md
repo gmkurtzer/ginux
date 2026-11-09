@@ -169,8 +169,8 @@ scope, threat model, and invariants.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 12.5, contract maintenance lock, is technically passed on
-  `hdae/contract-maintenance-lock` and awaits stacked pull-request delivery.
+- Active gate: Gate 12.5, contract maintenance lock, is technically passed and
+  delivered in pull request https://github.com/gmkurtzer/ginux/pull/254.
   Gate 12.25 is technically passed and delivered in pull request
   https://github.com/gmkurtzer/ginux/pull/253.
 - Last evidence: `make check`, `make test-contract`, Rocky QEMU
@@ -567,10 +567,9 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Push and open the technically passed Gate 12.5 stacked pull request against
-`hdae/top-level-instance-cli`, record its stable URL, then begin Gate 13
-boundary hardening on a dedicated branch based on Gate 12.5. Do not merge or
-close any pull request.
+Record the Gate 12.5 pull-request checkpoint, then begin Gate 13 boundary
+hardening on a dedicated branch based on Gate 12.5. Do not merge or close any
+pull request.
 
 ## Context recovery
 
@@ -580,9 +579,9 @@ close any pull request.
 - Active work: Gate 12 is technically passed and delivered in pull request 251;
   Gate 12.1 is technically passed and delivered in pull request 252; Gate
   12.25 is technically passed and delivered in pull request 253. Gate 12.5 is
-  technically passed on `hdae/contract-maintenance-lock` and awaits stacked
-  pull-request delivery. Gate 11 remains partial on its parent branch and in
-  pull request 249.
+  technically passed and delivered in pull request 254 from
+  `hdae/contract-maintenance-lock`. Gate 11 remains partial on its parent
+  branch and in pull request 249.
 - Gate 12.25 delivery: pull request
   https://github.com/gmkurtzer/ginux/pull/253 is open from
   `hdae/top-level-instance-cli` against the Gate 12.1 branch.
