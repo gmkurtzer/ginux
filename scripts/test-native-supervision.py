@@ -40,8 +40,11 @@ sys_read = ["/"]
             (root / "scenario").write_text(scenario)
             proc = subprocess.run([str(work / "ginux"), "native", str(instance), str(root)]
                                   + (["configured"] if instance == configured else []),
-                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=20)
-            return proc.returncode, proc.stdout.decode(errors="replace")
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=20)
+            # Audit records and fixture output have separate writers. Merge
+            # only after capture so a concurrent audit fragment cannot prefix
+            # an otherwise complete fixture line.
+            return proc.returncode, (proc.stdout + proc.stderr).decode(errors="replace")
 
         def check(name, ok, code, output):
             if not ok:
