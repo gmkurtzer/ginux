@@ -567,8 +567,10 @@ each gate. Do not merge or close pull requests 249 or 251.
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
 - Active work: Gate 12 is technically passed and delivered in pull request 251.
-  Gate 12.1 is the next active corrective gate. Gate 11 remains partial on its
-  parent branch and in pull request 249.
+  Gate 12.1 is active on `hdae/virtual-kernel-filesystems` and replaces the
+  disk-backed synthetic proc/sys implementation with on-demand, in-memory
+  virtual filesystems. Gate 11 remains partial on its parent branch and in pull
+  request 249.
 - Delivery: pull request https://github.com/gmkurtzer/ginux/pull/249 is open
   against `main`; it must not be merged or closed without explicit human
   authorization.

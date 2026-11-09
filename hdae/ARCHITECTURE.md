@@ -167,7 +167,11 @@ tests require no network access.
 ### Virtual kernel filesystems
 
 - `/dev` resolves names to Ginux device objects.
-- `/proc` describes Ginux-managed processes and instance state.
+- `/proc` and `/sys` are Ginux-owned, in-memory object models. Lookups,
+  directory entries, metadata, links, and file contents are generated on
+  demand from current instance state; no virtual kernel nodes are staged in
+  the instance root or persisted between starts.
+- `/proc` describes only live Ginux-managed processes and instance state.
 - `/sys` describes only contract-visible virtual devices and attributes.
 - `/sys/fs/cgroup` provides the cgroup v2 behavior required by the validated
   systemd baseline.
