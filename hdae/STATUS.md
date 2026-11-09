@@ -554,25 +554,26 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Present the technically passed Gate 12 for human review. Push
-`hdae/contract-network-ux` and open its pull request only with explicit
-authorization. Keep the gate in `gates-todo/`, do not accept or close it, and
-do not begin Gate 12.5 without human direction. Do not merge or close pull
-request 249.
+Execute the human-authorized stacked batch beginning with corrective Gate 12.1:
+replace the disk-backed synthetic `/proc` and `/sys` trees with on-demand,
+in-memory virtual filesystems. Then execute Gate 12.25 for the top-level CLI
+restructure, Gate 12.5 for contract lock/unlock maintenance state, and Gate 13
+for boundary hardening. Use a dedicated stacked branch and pull request for
+each gate. Do not merge or close pull requests 249 or 251.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active work: Gate 12, contract and instance-network UX, is technically passed
-  on stacked branch `hdae/contract-network-ux` and awaits human review. Gate 11
-  remains partial on its parent branch and in pull request 249.
+- Active work: Gate 12 is technically passed and delivered in pull request 251.
+  Gate 12.1 is the next active corrective gate. Gate 11 remains partial on its
+  parent branch and in pull request 249.
 - Delivery: pull request https://github.com/gmkurtzer/ginux/pull/249 is open
   against `main`; it must not be merged or closed without explicit human
   authorization.
-- Gate 12 delivery: dedicated stacked branch `hdae/contract-network-ux`; push
-  and a separate pull request remain pending explicit authorization.
+- Gate 12 delivery: pull request https://github.com/gmkurtzer/ginux/pull/251 is
+  open from `hdae/contract-network-ux` against the Gate 11 branch.
 - Last evidence: Gate 12 passed `make check`, `make test-contract`, Rocky QEMU
   `make test-config`, `make test-instance`, `make test-contract-runtime`,
   `make test-network`, the complete `make test-systemd` matrix, aggregate

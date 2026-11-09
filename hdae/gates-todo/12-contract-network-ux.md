@@ -64,8 +64,8 @@ configured through repeatable `instance create` and `instance set` flags.
 ## Remaining work
 
 - [ ] Obtain human review and acceptance.
-- [ ] Push the branch and open the Gate 12 pull request when explicitly
-  authorized.
+- [x] Push the branch and open the Gate 12 pull request after explicit batch
+  authorization.
 
 ## Acceptance criteria
 
@@ -150,18 +150,21 @@ configured through repeatable `instance create` and `instance set` flags.
 - Working branch: `hdae/contract-network-ux`
 - Intended base: `hdae/performance-characterization` while pull request 249 is
   open; retarget to `main` after Gate 11 lands
-- Pull request: intended; never merge or close without explicit authorization
+- Pull request: https://github.com/gmkurtzer/ginux/pull/251; never merge or
+  close without explicit authorization
 - Planned commits: gate and architecture record; contract schema/compiler;
   operational network CLI/state; active recipe and documentation migration;
   regression and demonstration evidence
 - Actual commits: `f905e9e8` gate and architecture record; `0032227d`
   operational deployment state and CLI; `f9683745` hierarchical contract and
   recipe migration; `438e38c6` atomic deployment integration coverage;
-  `040f8474` Gate 12 regression and demonstration target; final evidence record
-  pending
+  `040f8474` Gate 12 regression and demonstration target; `1d8cbc62` final
+  evidence record; `35ee4d9b`, `a2e33716`, and `e63d3f98` bounded lifecycle,
+  audit, and attached-console corrections
 
 ## Review policy and outcome
 
-Technically passed and stopped at the human checkpoint. Human acceptance and
-explicit delivery authorization remain pending. Do not begin Gate 12.5 without
-explicit approval.
+Technically passed and delivered for human review in pull request 251. Human
+acceptance remains pending. The human authorized the subsequent corrective and
+UX gate batch on 2026-11-08; later stacked gates do not imply Gate 12 acceptance
+or authorize this pull request to be merged or closed.
