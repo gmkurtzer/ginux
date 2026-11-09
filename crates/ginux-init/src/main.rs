@@ -7096,6 +7096,27 @@ fn supervise_native(
             Action::Mediate
                 if mode == 3
                     && syscall == 16
+                    && (registers.rsi as u32) & 0xc000_ffff == 0xc000_ff0b =>
+            {
+                // PIDFD_GET_INFO (Linux 6.13; the struct size in the request
+                // grows with the kernel) reports host pid, tgid, ppid and
+                // credentials. The 6.12 ABI personality has no such ioctl;
+                // callers (systemd 258+) fall back to /proc/self/fdinfo,
+                // which Ginux virtualizes.
+                write_all(b"emulate surface=virtual-pidfd-info result=-25\n");
+                registers.orig_rax = u64::MAX;
+                task.awaiting_exit = true;
+                task.override_exit = true;
+                task.override_result = -25;
+                if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
+                {
+                    native_fail(instance, pid, b"native pidfd info denial failed");
+                }
+            }
+            Action::Mediate
+                if mode == 3
+                    && syscall == 16
                     && native_virtual_kernel_fd(
                         &virtual_kernel_fds,
                         host_pid,

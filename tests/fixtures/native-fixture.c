@@ -101,6 +101,22 @@ long native_fixture_main(void)
         print_result("GINUX_FIXTURE: pi_flags_word=", pi_flags_word);
         return 0;
     }
+    case 'g': {
+        /* PIDFD_GET_INFO (Linux 6.13) would report the child's host pid and
+         * credentials; the 6.12 ABI personality has no such ioctl. */
+        word info[8] = {1 /* PIDFD_INFO_PID */};
+        int status = 0;
+        long pid = call3(57, 0, 0, 0);
+        if (pid == 0) return 0;
+        long pidfd = call3(434, pid, 0, 0);
+        print_result("GINUX_FIXTURE: pidfd-open-ok=", pidfd >= 0);
+        print_result("GINUX_FIXTURE: pidfd-info=", call3(16, pidfd, 0xc040ff0b, (word)info));
+        print_result("GINUX_FIXTURE: pidfd-info-high=", call3(16, pidfd, 0xfeed0000c008ff0bUL, (word)info));
+        print_result("GINUX_FIXTURE: pidfd-info-invalid=", call3(16, -1, 0xc080ff0b, 0));
+        print_result("GINUX_FIXTURE: unrelated-ioctl=", call3(16, -1, 0x5401, 0));
+        print_result("GINUX_FIXTURE: wait-ok=", call4(61, pid, (word)&status, 0, 0) == pid);
+        return 0;
+    }
     default:
         return 81;
     }
