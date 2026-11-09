@@ -7,7 +7,8 @@ export GINUX_OCI_CONFIG_FILE
 rootfs=$GINUX_OCI_CACHE_DIR/$GINUX_OCI_ROOTFS_LAYER
 
 for run in cold warm repeat; do
-    GINUX_GATE9_DNF=off GINUX_GATE9_NETWORK=off ./scripts/probe-systemd.sh \
+    GINUX_GATE9_AUDIT=on GINUX_GATE9_DNF=off GINUX_GATE9_NETWORK=off \
+        ./scripts/probe-systemd.sh \
         >"build/gate9-systemd-$run-driver.log"
     cp build/gate9-systemd-baseline.log "build/gate9-systemd-$run.log"
     cp build/gate9-systemd-measurements.txt "build/gate9-systemd-$run-measurements.txt"
@@ -31,7 +32,8 @@ for run in cold warm repeat; do
 done
 
 base_hash_before=$(shasum -a 256 "$rootfs")
-GINUX_GATE9_DNF=failure GINUX_GATE9_NETWORK=off ./scripts/probe-systemd.sh \
+GINUX_GATE9_AUDIT=on GINUX_GATE9_DNF=failure GINUX_GATE9_NETWORK=off \
+    ./scripts/probe-systemd.sh \
     >build/gate9-systemd-dnf-failure-driver.log
 cp build/gate9-systemd-baseline.log build/gate9-systemd-dnf-failure.log
 base_hash_after=$(shasum -a 256 "$rootfs")

@@ -167,7 +167,11 @@ tests require no network access.
 ### Virtual kernel filesystems
 
 - `/dev` resolves names to Ginux device objects.
-- `/proc` describes Ginux-managed processes and instance state.
+- `/proc` and `/sys` are Ginux-owned, in-memory object models. Lookups,
+  directory entries, metadata, links, and file contents are generated on
+  demand from current instance state; no virtual kernel nodes are staged in
+  the instance root or persisted between starts.
+- `/proc` describes only live Ginux-managed processes and instance state.
 - `/sys` describes only contract-visible virtual devices and attributes.
 - `/sys/fs/cgroup` provides the cgroup v2 behavior required by the validated
   systemd baseline.
@@ -267,6 +271,15 @@ persist them as operational instance state. With no explicit attachment, the
 instance uses the host default network. `/proc` and `/sys` remain synthetic and
 Ginux-owned regardless of policy; policy controls visibility and operations,
 not passthrough to host kernel trees.
+
+Gate 12.1 makes that synthetic boundary concrete in the native runtime. The
+instance root contains only empty `proc` and `sys` mountpoint directories.
+Every visible directory entry, link, metadata record, descriptor, offset, and
+file payload is a Ginux-owned in-memory object generated from current virtual
+instance state when accessed. No host procfs or sysfs path is opened to satisfy
+an instance operation, and unsupported nodes fail closed. Host procfs may be
+sampled internally only for statistics about a managed host tracee; raw host
+paths and host identities are never projected into the instance.
 
 ### Observability and benchmarking
 
