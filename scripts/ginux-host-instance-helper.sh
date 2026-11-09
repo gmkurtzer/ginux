@@ -16,6 +16,8 @@ usage() {
     printf '%s\n' '       ginux edit NAME' >&2
     printf '%s\n' '       ginux export NAME' >&2
     printf '%s\n' '       ginux list' >&2
+    printf '%s\n' '       ginux lock NAME' >&2
+    printf '%s\n' '       ginux unlock NAME' >&2
     printf '%s\n' '       ginux start NAME [--attach] [--audit]' >&2
     printf '%s\n' '       ginux attach NAME' >&2
     printf '%s\n' '       ginux status NAME' >&2
@@ -195,6 +197,8 @@ read_deployment() {
     deployment_file=$1
     deployment_network=
     deployment_forwards=
+    deployment_contract=locked
+    deployment_contract_seen=false
     test -f "$deployment_file" || return 0
     while IFS="$(printf '\t')" read -r deployment_key deployment_value deployment_extra; do
         test -z "$deployment_extra" || return 1
@@ -208,6 +212,14 @@ read_deployment() {
                 deployment_forwards="$deployment_forwards
 $deployment_value"
                 ;;
+            contract)
+                test "$deployment_contract_seen" = false || return 1
+                case $deployment_value in
+                    locked|unlocked) deployment_contract=$deployment_value ;;
+                    *) return 1 ;;
+                esac
+                deployment_contract_seen=true
+                ;;
             '') ;;
             *) return 1 ;;
         esac
@@ -218,6 +230,11 @@ write_deployment() {
     deployment_file=$1
     deployment_network=$2
     deployment_forwards=$3
+    deployment_contract=${4:-locked}
+    case $deployment_contract in
+        locked|unlocked) ;;
+        *) return 1 ;;
+    esac
     deployment_tmp=$deployment_file.tmp.$$
     : >"$deployment_tmp"
     if test -n "$deployment_network"; then
@@ -231,6 +248,7 @@ write_deployment() {
         printf 'forward\t%s\n' "$deployment_forward" >>"$deployment_tmp"
     done
     IFS=$old_ifs
+    printf 'contract\t%s\n' "$deployment_contract" >>"$deployment_tmp"
     chmod 600 "$deployment_tmp"
     mv "$deployment_tmp" "$deployment_file"
 }
@@ -264,7 +282,34 @@ materialize_runtime_config() {
     if test -n "$forward_list"; then
         set -- "$@" "network.port_forwards=[$forward_list]"
     fi
-    "$runtime" config-merge "$materialize_recipe" "$@" >"$materialize_output"
+    if test "$deployment_contract" = unlocked; then
+        set -- "$@" \
+            'contract.allow=["*"]' \
+            'contract.deny=[]' \
+            'contract.syscalls.allow=["*"]' \
+            'contract.syscalls.deny=[]' \
+            'contract.filesystem.read=["/"]' \
+            'contract.filesystem.write=["/"]' \
+            'contract.filesystem.create=["/"]' \
+            'contract.filesystem.deny=[]' \
+            'contract.network.inbound=["tcp:*", "udp:*"]' \
+            'contract.network.outbound=["tcp:*", "udp:*"]' \
+            'contract.devices.read=["/"]' \
+            'contract.devices.write=["/"]' \
+            'contract.devices.create=["/"]' \
+            'contract.privileges.setuid=["/"]' \
+            'contract.privileges.setgid=["/"]' \
+            'contract.process.signals=["*"]' \
+            'contract.process.ptrace="allow"' \
+            'contract.process.namespace_create=["*"]' \
+            'contract.process.namespace_join=["*"]' \
+            'contract.kernel.proc_read=["/"]' \
+            'contract.kernel.sys_read=["/"]'
+    fi
+    if ! "$runtime" config-merge "$materialize_recipe" "$@" >"$materialize_output"; then
+        cat "$materialize_output" >&2
+        return 1
+    fi
     resolve_network_config "$materialize_output"
 }
 
@@ -407,7 +452,8 @@ $2"
         }
         trap cleanup_candidate 0 HUP INT TERM
         install -m 600 "$effective" "$candidate_config"
-        write_deployment "$candidate_deployment" "$create_network" "$create_forwards"
+        write_deployment "$candidate_deployment" "$create_network" "$create_forwards" \
+            "$deployment_contract"
         materialize_runtime_config \
             "$candidate_config" "$candidate_deployment" "$candidate_runtime"
         mv "$candidate_config" "$directory/config.toml"
@@ -433,7 +479,7 @@ $2"
     printf '  Preparing instance... '
     mkdir -p "$directory/root"
     install -m 600 "$effective" "$directory/config.toml"
-    write_deployment "$directory/deployment.state" "$create_network" "$create_forwards"
+    write_deployment "$directory/deployment.state" "$create_network" "$create_forwards" locked
     materialize_runtime_config \
         "$directory/config.toml" "$directory/deployment.state" "$directory/runtime.toml"
     tar -xf "$image_tar" -C "$directory/root"
@@ -545,7 +591,8 @@ $2"
     done
     IFS=$old_ifs
     "$runtime" config-merge "$directory/config.toml" "$@" >"$candidate_config"
-    write_deployment "$candidate_deployment" "$next_network" "$next_forwards"
+    write_deployment "$candidate_deployment" "$next_network" "$next_forwards" \
+        "$deployment_contract"
     materialize_runtime_config \
         "$candidate_config" "$candidate_deployment" "$candidate_runtime"
     mv "$candidate_config" "$directory/config.toml"
@@ -565,16 +612,22 @@ export_instance() {
 }
 
 list_instances() {
-    printf '%-24s %-10s %s\n' NAME STATE PID
+    printf '%-24s %-10s %-10s %s\n' NAME STATE CONTRACT PID
     for list_directory in "$state_root"/instances/*; do
         test -d "$list_directory" || continue
         list_name=${list_directory##*/}
         list_state=$(reported_state "$list_name")
         list_pid=-
+        if read_deployment "$list_directory/deployment.state"; then
+            list_contract=$deployment_contract
+        else
+            list_contract=invalid
+        fi
         if test "$list_state" = running; then
             list_pid=$(supervisor_identity "$list_name")
         fi
-        printf '%-24s %-10s %s\n' "$list_name" "$list_state" "$list_pid"
+        printf '%-24s %-10s %-10s %s\n' \
+            "$list_name" "$list_state" "$list_contract" "$list_pid"
     done
 }
 
@@ -585,13 +638,57 @@ status_instance() {
     directory=$(instance_dir "$name")
     test -d "$directory" || { printf '%s: not found\n' "$name" >&2; exit 66; }
     state=$(reported_state "$name")
-    printf 'name: %s\nstate: %s\n' "$name" "$state"
+    read_deployment "$directory/deployment.state" || {
+        printf '%s: invalid persisted instance deployment state\n' "$name" >&2
+        exit 65
+    }
+    printf 'name: %s\nstate: %s\ncontract: %s\n' \
+        "$name" "$state" "$deployment_contract"
     if test "$state" = running; then
         printf 'pid: %s\n' "$(supervisor_identity "$name")"
     fi
     printf 'config: %s\ndeployment: %s\nconsole-log: %s\naudit-log: %s\n' \
         "$directory/config.toml" "$directory/deployment.state" \
         "$directory/console.log" "$directory/audit.log"
+}
+
+set_contract_lock() {
+    test "$#" -eq 2 || usage
+    name=$1
+    next_contract=$2
+    validate_name "$name"
+    case $next_contract in
+        locked|unlocked) ;;
+        *) usage ;;
+    esac
+    directory=$(instance_dir "$name")
+    test -d "$directory" || { printf '%s: not found\n' "$name" >&2; exit 66; }
+    if supervisor_identity "$name" >/dev/null; then
+        printf '%s: stop the instance before changing the contract lock\n' "$name" >&2
+        exit 73
+    fi
+    read_deployment "$directory/deployment.state" || {
+        printf '%s: invalid persisted instance deployment state\n' "$name" >&2
+        exit 65
+    }
+    if test "$deployment_contract" = "$next_contract"; then
+        printf 'Instance "%s" contract is already %s.\n' "$name" "$next_contract"
+        return
+    fi
+    candidate_deployment=$directory/deployment.state.candidate.$$
+    candidate_runtime=$directory/runtime.toml.candidate.$$
+    cleanup_candidate() {
+        rm -f "$candidate_deployment" "$candidate_runtime"
+    }
+    trap cleanup_candidate 0 HUP INT TERM
+    write_deployment "$candidate_deployment" "$deployment_network" \
+        "$deployment_forwards" "$next_contract"
+    materialize_runtime_config \
+        "$directory/config.toml" "$candidate_deployment" "$candidate_runtime"
+    mv "$candidate_deployment" "$directory/deployment.state"
+    mv "$candidate_runtime" "$directory/runtime.toml"
+    trap - 0 HUP INT TERM
+    printf 'Instance "%s" contract %s.\n' "$name" "$next_contract"
 }
 
 start_instance() {
@@ -620,6 +717,14 @@ start_instance() {
     if supervisor_identity "$name" >/dev/null; then
         printf '%s: already running\n' "$name" >&2
         exit 73
+    fi
+    read_deployment "$directory/deployment.state" || {
+        printf '%s: invalid persisted instance deployment state\n' "$name" >&2
+        exit 65
+    }
+    if test "$deployment_contract" = unlocked; then
+        printf 'WARNING: %s is starting with its contract unlocked for maintenance.\n' \
+            "$name" >&2
     fi
     rm -f \
         "$directory/supervisor.pid" \
@@ -901,12 +1006,14 @@ case $command in
     export) export_instance "$@" ;;
     import) import_instance "$@" ;;
     list) test "$#" -eq 0 || usage; list_instances ;;
+    lock) test "$#" -eq 1 || usage; set_contract_lock "$1" locked ;;
     prepare-root) test "$#" -eq 1 || usage; prepare_root "$1" ;;
     resolve-network) test "$#" -eq 1 || usage; resolve_network_config "$1" ;;
     set) set_instance "$@" ;;
     start) start_instance "$@" ;;
     status) status_instance "$@" ;;
     stop) stop_instance "$@" ;;
+    unlock) test "$#" -eq 1 || usage; set_contract_lock "$1" unlocked ;;
     run-runtime) run_runtime "$@" ;;
     supervise) supervise_instance "$@" ;;
     *) usage ;;

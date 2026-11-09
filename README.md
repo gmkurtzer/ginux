@@ -212,6 +212,15 @@ ginux start rocky --attach
 self-contained recipe, `ginux export NAME` to print that recipe, and
 `ginux edit NAME` to validate and atomically apply an editor session.
 
+Instances are contract-locked by default. For an explicit maintenance window,
+stop the instance, run `ginux unlock NAME`, perform the required maintenance,
+stop it again, and run `ginux lock NAME`. `ginux list` and `ginux status NAME`
+show the current state, and starting an unlocked instance prints a warning.
+Unlocking relaxes configurable recipe restrictions only; Ginux still owns the
+virtual kernel boundary, rejects unsupported authority, reduces host identity,
+and applies `NoNewPrivs`. Lock state is host deployment state and is never
+written into an exported portable recipe.
+
 Syscall auditing is disabled by default. Add `--audit` to `ginux start` to
 record per-syscall decisions in the instance's `audit.log`; audit records are
 kept separate from the attached console.
