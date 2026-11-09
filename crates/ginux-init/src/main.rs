@@ -5761,7 +5761,14 @@ fn supervise_native(
             continue;
         }
         if signal == 17 {
-            if ptrace(PTRACE_CONT, host_pid, 0, 0) < 0 {
+            // Preserve the hybrid loop's phase: a userspace delivery stop
+            // has no syscall exit to collect, while a blocked call does.
+            let request = if task.awaiting_exit {
+                PTRACE_SYSCALL
+            } else {
+                PTRACE_CONT
+            };
+            if ptrace(request, host_pid, 0, 17) < 0 {
                 native_fail(instance, pid, b"native SIGCHLD resume failed");
             }
             continue;

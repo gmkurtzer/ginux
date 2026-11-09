@@ -24,9 +24,22 @@ def main():
         (root / "usr/bin/bash").chmod(0o755)
         work.chmod(0o755)
 
-        def run(scenario):
+        configured = work / "configured.toml"
+        configured.write_text(config.read_text().replace('init = "/bin/bash"',
+            'init = "/usr/bin/bash"') + """
+[contract.filesystem]
+read = ["/"]
+write = ["/"]
+create = ["/"]
+[contract.kernel]
+proc_read = ["/"]
+sys_read = ["/"]
+""")
+
+        def run(scenario, instance=config):
             (root / "scenario").write_text(scenario)
-            proc = subprocess.run([str(work / "ginux"), "native", str(config), str(root)],
+            proc = subprocess.run([str(work / "ginux"), "native", str(instance), str(root)]
+                                  + (["configured"] if instance == configured else []),
                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=20)
             return proc.returncode, proc.stdout.decode(errors="replace")
 
@@ -67,6 +80,16 @@ def main():
               and ("GINUX_INSTANCE: failed reason=native requires the x86-64 syscall ABI" in out
                    or "GINUX_INSTANCE: failed reason=unexpected native trace stop" in out),
               code, out)
+        for scenario in ("sigchld-busy", "sigchld"):
+            code, out = run(scenario, configured)
+            fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
+            expected = ["GINUX_FIXTURE: sigaction=0", "GINUX_FIXTURE: fork-ok=1"]
+            if scenario == "sigchld-busy":
+                expected.append("GINUX_FIXTURE: sigchld-userspace=1")
+            expected += ["GINUX_FIXTURE: sigchld-poll=1", "GINUX_FIXTURE: sigchld-handled=1",
+                         "GINUX_FIXTURE: wait-ok=1", "GINUX_FIXTURE: child-status=7"]
+            check(f"SIGCHLD reaches a handler ({scenario})",
+                  code == 0 and fixture == expected, code, out)
     print("test-native-supervision: PASS")
 
 
