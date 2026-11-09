@@ -126,6 +126,8 @@ honest security and compatibility boundary for the initial milestone.
 - `make demo-gate-13` -> passed deterministic fuzzing, denied host effects,
   residual-authority inspection, supervisor-loss and unexpected-stop cleanup,
   contract denial, and limitations-report inspection.
+- Pull request 255 CI -> `static-and-unit` and `launch-integration` both passed
+  on the delivered `hdae/boundary-hardening` branch.
 - `make bench-compare` against the default stale exploratory artifact failed
   and is not authoritative; that artifact predates the retained Gate 11
   optimizations.
@@ -179,4 +181,5 @@ performance criterion remains failed. Present `make demo-gate-13`, fresh
 evidence, the exact benchmark limitation, and the pull request. This gate
 cannot close the initial milestone unless the performance criterion passes or
 the human explicitly changes it and then accepts the evidence, residual risks,
-and scoped claims.
+and scoped claims. Pull request 255 is delivered with green CI and awaits that
+decision; it has not been merged or closed.

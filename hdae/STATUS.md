@@ -575,9 +575,13 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Commit and deliver Gate 13's partial result as a stacked pull request against
-Gate 12.5. Present the passing boundary/recovery evidence and the exact
-performance failure for human review. Do not merge or close any pull request.
+Human review is required before further gate execution. Review stacked pull
+requests 249, 251, 252, 253, 254, and 255 in order and decide whether to keep
+Gate 11 and Gate 13 partial under the unchanged 4% threshold, change the
+thread-yield performance criterion, or authorize a new architecture or
+environment investigation. Gate 14 remains explicitly deferred and is not
+actionable. Do not merge or close any pull request without explicit human
+direction.
 
 ## Context recovery
 
@@ -625,6 +629,11 @@ performance failure for human review. Do not merge or close any pull request.
   `make test`, and `make demo-gate-13` pass. The authoritative
   `build/gate11-balanced-final-v2` comparison fails only the five thread-yield
   rows at 0.938x, 0.930x, 0.953x, 0.921x, and 0.917x versus the 0.960x floor.
+- Delivery audit on 2026-11-09 verified pull requests 249, 251, 252, 253, 254,
+  and 255 are open, non-draft, cleanly mergeable, correctly stacked, and have
+  passing `static-and-unit` and `launch-integration` checks. No pull request was
+  merged or closed. Gate 14 is the only later ledger entry and remains under
+  `gates-deferred/`.
 - Completed paranoid work: the benchmark harness records dispatch mode and
   rejects cross-mode baseline comparison. The retained single-broker path has
   constant-time and precomputed contract decisions, bounded audit, and no
