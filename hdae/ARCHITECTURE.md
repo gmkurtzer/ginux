@@ -282,6 +282,15 @@ an instance operation, and unsupported nodes fail closed. Host procfs may be
 sampled internally only for statistics about a managed host tracee; raw host
 paths and host identities are never projected into the instance.
 
+Gate 12.5 separates the portable contract from an operational maintenance
+lock. Instances default to `locked`; a stopped instance may be explicitly
+`unlocked` so Ginux materializes a temporary broad contract for supported
+maintenance operations without changing the recipe. Unlocking never removes
+Ginux virtualization, promotes unsupported catalog operations, exposes host
+kernel trees, grants host credentials, or removes `NoNewPrivs`. Lock state is
+persisted beside host network deployment state, shown in lifecycle output, and
+must be restored before normal operation.
+
 ### Observability and benchmarking
 
 Audit events expose contract decisions and instance lifecycle without exposing

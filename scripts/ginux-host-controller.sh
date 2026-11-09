@@ -12,6 +12,8 @@ usage() {
     printf '%s\n' '  ginux edit NAME' >&2
     printf '%s\n' '  ginux export NAME' >&2
     printf '%s\n' '  ginux list' >&2
+    printf '%s\n' '  ginux lock NAME' >&2
+    printf '%s\n' '  ginux unlock NAME' >&2
     printf '%s\n' '  ginux start NAME [--attach] [--audit]' >&2
     printf '%s\n' '  ginux attach NAME' >&2
     printf '%s\n' '  ginux status NAME' >&2
@@ -39,7 +41,7 @@ case $command in
         test "$#" -eq 2 || usage
         exec "$runtime" instance-diff "$1" "$2"
         ;;
-    attach|create|export|import|list|set|start|status|stop) ;;
+    attach|create|export|import|list|lock|set|start|status|stop|unlock) ;;
     edit)
         test "$#" -eq 1 || usage
         name=$1

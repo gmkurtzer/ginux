@@ -72,7 +72,7 @@ test "$before" = "$(sha256sum "$directory/deployment.state" | awk '{ print $1 }'
 
 /usr/local/bin/ginux import defaulted /var/tmp/gate12-recipe.toml \
     --network default --forward none
-test ! -s "$state_root/instances/defaulted/deployment.state"
+test "$(awk -F '\\t' '$1 == "contract" && $2 == "locked" { count++ } END { print count + 0 }' "$state_root/instances/defaulted/deployment.state")" -eq 1
 
 /usr/local/bin/ginux create created --network default
 test -f "$state_root/instances/created/config.toml"
