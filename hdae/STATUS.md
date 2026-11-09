@@ -554,9 +554,8 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Execute the human-authorized stacked batch beginning with corrective Gate 12.1:
-replace the disk-backed synthetic `/proc` and `/sys` trees with on-demand,
-in-memory virtual filesystems. Then execute Gate 12.25 for the top-level CLI
+Deliver technically passed Gate 12.1 as a stacked pull request against
+`hdae/contract-network-ux`. Then execute Gate 12.25 for the top-level CLI
 restructure, Gate 12.5 for contract lock/unlock maintenance state, and Gate 13
 for boundary hardening. Use a dedicated stacked branch and pull request for
 each gate. Do not merge or close pull requests 249 or 251.
@@ -567,21 +566,19 @@ each gate. Do not merge or close pull requests 249 or 251.
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
 - Active work: Gate 12 is technically passed and delivered in pull request 251.
-  Gate 12.1 is active on `hdae/virtual-kernel-filesystems` and replaces the
-  disk-backed synthetic proc/sys implementation with on-demand, in-memory
-  virtual filesystems. Gate 11 remains partial on its parent branch and in pull
-  request 249.
+  Gate 12.1 is technically passed on `hdae/virtual-kernel-filesystems` and
+  awaits stacked pull-request delivery. Gate 11 remains partial on its parent
+  branch and in pull request 249.
 - Delivery: pull request https://github.com/gmkurtzer/ginux/pull/249 is open
   against `main`; it must not be merged or closed without explicit human
   authorization.
 - Gate 12 delivery: pull request https://github.com/gmkurtzer/ginux/pull/251 is
   open from `hdae/contract-network-ux` against the Gate 11 branch.
-- Last evidence: Gate 12 passed `make check`, `make test-contract`, Rocky QEMU
-  `make test-config`, `make test-instance`, `make test-contract-runtime`,
-  `make test-network`, the complete `make test-systemd` matrix, aggregate
-  `make test`, and `make demo-gate-12`. The demo showed the complete
-  hierarchical contract, repeatable create/set flags, one allowed operation,
-  one denied operation, and atomic failed-update behavior.
+- Last evidence: Gate 12.1 passed `make check`, `make test-kernel-views`,
+  `make test-process`, the complete `make test-systemd` matrix, aggregate
+  `make test`, and `make demo-gate-12.1`. The demo proved on-demand proc/sys
+  access, live virtual-PID lifecycle, virtual metadata, no host leakage, empty
+  backing mountpoints, multi-user systemd boot, and controlled shutdown.
 - Completed paranoid work: the benchmark harness records dispatch mode and
   rejects cross-mode baseline comparison. The retained single-broker path has
   constant-time and precomputed contract decisions, bounded audit, and no

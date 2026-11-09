@@ -272,6 +272,15 @@ instance uses the host default network. `/proc` and `/sys` remain synthetic and
 Ginux-owned regardless of policy; policy controls visibility and operations,
 not passthrough to host kernel trees.
 
+Gate 12.1 makes that synthetic boundary concrete in the native runtime. The
+instance root contains only empty `proc` and `sys` mountpoint directories.
+Every visible directory entry, link, metadata record, descriptor, offset, and
+file payload is a Ginux-owned in-memory object generated from current virtual
+instance state when accessed. No host procfs or sysfs path is opened to satisfy
+an instance operation, and unsupported nodes fail closed. Host procfs may be
+sampled internally only for statistics about a managed host tracee; raw host
+paths and host identities are never projected into the instance.
+
 ### Observability and benchmarking
 
 Audit events expose contract decisions and instance lifecycle without exposing
