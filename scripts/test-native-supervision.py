@@ -94,7 +94,8 @@ sys_read = ["/"]
               and out.count("GINUX_POLICY_AUDIT: action=deny policy=clone-arguments result=-1") == 5
               and fixture == [
             "GINUX_FIXTURE: readonly-clone=1", "GINUX_FIXTURE: readonly-unchanged=1",
-            "GINUX_FIXTURE: clone-zero-tail=1", "GINUX_FIXTURE: clone-vfork=1", "GINUX_FIXTURE: vfork-unchanged=1",
+            "GINUX_FIXTURE: clone-zero-tail=1", "GINUX_FIXTURE: clone-pidfd=1", "GINUX_FIXTURE: pidfd-input=1",
+            "GINUX_FIXTURE: clone-vfork=1", "GINUX_FIXTURE: vfork-unchanged=1",
             "GINUX_FIXTURE: clone-short=-22", "GINUX_FIXTURE: clone-large=-7",
             "GINUX_FIXTURE: clone-unreadable=-14", "GINUX_FIXTURE: clone-short-cgroup=-22",
             "GINUX_FIXTURE: clone-kernel-error=-22", "GINUX_FIXTURE: error-unchanged=1",

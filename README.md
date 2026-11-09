@@ -423,7 +423,8 @@ checks do not claim complete libc, job-control, or systemd compatibility.
 
 Native configured clone3 captures the Linux 6.12 argument structure before
 execution and gives the host a private read-only snapshot. Caller structures
-may be read-only; their bytes and syscall argument registers are preserved.
+may be read-only; Ginux does not rewrite them and restores syscall argument
+registers. Normal kernel-declared outputs, such as the pidfd output, still apply.
 The existing virtual-cgroup adaptation accepts only an owned virtual cgroup
 directory and starts the child in the parent's host cgroup; it does not
 implement host cgroup placement. Unknown nonzero extension bytes fail closed.

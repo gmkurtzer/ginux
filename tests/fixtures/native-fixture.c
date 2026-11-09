@@ -176,6 +176,18 @@ long native_fixture_main(void)
         print_result("GINUX_FIXTURE: readonly-unchanged=", args->flags == 0x300000000UL);
         pid = native_clone_spawn(args, 96); /* zero extension tail */
         print_result("GINUX_FIXTURE: clone-zero-tail=", pid > 0 && call4(61, pid, (word)&status, 0, 0) == pid && status == 1792);
+        int child_pidfd = -1;
+        call3(10, (word)args, 4096, 3);
+        args->flags = 0x300001000UL; /* preserve the declared PIDFD output */
+        args->pidfd = (word)&child_pidfd;
+        call3(10, (word)args, 4096, 1);
+        pid = native_clone_spawn(args, 88);
+        print_result("GINUX_FIXTURE: clone-pidfd=", pid > 0 && call4(61, pid, (word)&status, 0, 0) == pid && status == 1792 && child_pidfd >= 0 && call3(72, child_pidfd, 1, 0) == 1);
+        print_result("GINUX_FIXTURE: pidfd-input=", args->flags == 0x300001000UL && args->pidfd == (word)&child_pidfd);
+        if (child_pidfd >= 0) call3(3, child_pidfd, 0, 0);
+        call3(10, (word)args, 4096, 3);
+        args->pidfd = 0;
+        call3(10, (word)args, 4096, 1);
         word child_stack = call6(9, 0, 16384, 3, 0x22, -1, 0);
         call3(10, (word)args, 4096, 3);
         args->flags = 0x300004100UL; /* VM | VFORK | CLEAR_SIGHAND | INTO_CGROUP */
