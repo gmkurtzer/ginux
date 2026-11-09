@@ -7,15 +7,19 @@ image_tools=/usr/local/libexec/ginux-image
 image_config=$image_tools/rocky-systemd-oci.env
 image_cache=$state_root/images/rocky-10-ubi-init-amd64
 image_tar=$image_cache/rocky-10-ubi-init-amd64-rootfs.tar
+default_recipe=/etc/ginux/examples/rocky-systemd.toml
 
 usage() {
-    printf '%s\n' 'usage: ginux instance create NAME FILE [--set KEY=TOML_VALUE]... [--network ATTACHMENT] [--forward SPEC]...' >&2
-    printf '%s\n' '       ginux instance set NAME [--network ATTACHMENT] [--forward SPEC]...' >&2
-    printf '%s\n' '       ginux instance list' >&2
-    printf '%s\n' '       ginux instance start NAME [--attach] [--audit]' >&2
-    printf '%s\n' '       ginux instance attach NAME' >&2
-    printf '%s\n' '       ginux instance status NAME' >&2
-    printf '%s\n' '       ginux instance stop NAME' >&2
+    printf '%s\n' 'usage: ginux create NAME [--set KEY=TOML_VALUE]... [--network ATTACHMENT] [--forward SPEC]...' >&2
+    printf '%s\n' '       ginux import NAME FILE [--set KEY=TOML_VALUE]... [--network ATTACHMENT] [--forward SPEC]...' >&2
+    printf '%s\n' '       ginux set NAME [--set KEY=TOML_VALUE]... [--network ATTACHMENT] [--forward SPEC]...' >&2
+    printf '%s\n' '       ginux edit NAME' >&2
+    printf '%s\n' '       ginux export NAME' >&2
+    printf '%s\n' '       ginux list' >&2
+    printf '%s\n' '       ginux start NAME [--attach] [--audit]' >&2
+    printf '%s\n' '       ginux attach NAME' >&2
+    printf '%s\n' '       ginux status NAME' >&2
+    printf '%s\n' '       ginux stop NAME' >&2
     exit 64
 }
 
@@ -301,10 +305,11 @@ prepare_root() {
     test -x "$root/sbin/init"
 }
 
-create_instance() {
+import_instance() {
     test "$#" -ge 2 || usage
     name=$1
     config=$2
+    import_action=${GINUX_CREATE_MODE:-false}
     shift 2
     overrides=
     create_network=
@@ -355,7 +360,21 @@ $2"
         exit 69
     }
     directory=$(instance_dir "$name")
-    test ! -e "$directory" || { printf '%s: already exists\n' "$name" >&2; exit 73; }
+    replacing=false
+    if test -e "$directory"; then
+        test -d "$directory" || { printf '%s: invalid instance state\n' "$name" >&2; exit 65; }
+        if supervisor_identity "$name" >/dev/null; then
+            printf '%s: stop the instance before importing configuration\n' "$name" >&2
+            exit 73
+        fi
+        replacing=true
+        read_deployment "$directory/deployment.state" || {
+            printf '%s: invalid persisted deployment state\n' "$name" >&2
+            exit 65
+        }
+        test "$create_network_seen" = true || create_network=$deployment_network
+        test -n "$create_forward_mode" || create_forwards=$deployment_forwards
+    fi
 
     mkdir -p "$state_root/work"
     effective=$(mktemp "$state_root/work/config.XXXXXX")
@@ -379,7 +398,32 @@ $2"
         printf 'unsupported configured image: %s\n' "$configured_root" >&2
         exit 65
     fi
-    printf 'Creating instance "%s"\n' "$name"
+    if test "$replacing" = true; then
+        candidate_config=$directory/config.toml.candidate.$$
+        candidate_deployment=$directory/deployment.state.candidate.$$
+        candidate_runtime=$directory/runtime.toml.candidate.$$
+        cleanup_candidate() {
+            rm -f "$candidate_config" "$candidate_deployment" "$candidate_runtime"
+        }
+        trap cleanup_candidate 0 HUP INT TERM
+        install -m 600 "$effective" "$candidate_config"
+        write_deployment "$candidate_deployment" "$create_network" "$create_forwards"
+        materialize_runtime_config \
+            "$candidate_config" "$candidate_deployment" "$candidate_runtime"
+        mv "$candidate_config" "$directory/config.toml"
+        mv "$candidate_deployment" "$directory/deployment.state"
+        mv "$candidate_runtime" "$directory/runtime.toml"
+        trap - 0 HUP INT TERM
+        cleanup_effective
+        printf 'Instance "%s" imported.\n' "$name"
+        return
+    fi
+
+    if test "$import_action" = true; then
+        printf 'Creating instance "%s" from defaults\n' "$name"
+    else
+        printf 'Importing instance "%s"\n' "$name"
+    fi
     GINUX_OCI_CONFIG_FILE=$image_config \
         GINUX_OCI_CACHE_DIR_OVERRIDE=$image_cache \
         GINUX_OCI_WORK_DIR_OVERRIDE=$state_root/work/oci \
@@ -397,7 +441,22 @@ $2"
     printf 'done\n'
     trap - 0 HUP INT TERM
     cleanup_effective
-    printf 'Instance "%s" created.\n' "$name"
+    if test "$import_action" = true; then
+        printf 'Instance "%s" created.\n' "$name"
+    else
+        printf 'Instance "%s" imported.\n' "$name"
+    fi
+}
+
+create_instance() {
+    test "$#" -ge 1 || usage
+    name=$1
+    shift
+    test -r "$default_recipe" || {
+        printf 'default instance recipe is not readable: %s\n' "$default_recipe" >&2
+        exit 69
+    }
+    GINUX_CREATE_MODE=true import_instance "$name" "$default_recipe" "$@"
 }
 
 set_instance() {
@@ -421,8 +480,18 @@ set_instance() {
     set_forward_seen=false
     set_forward_mode=
     replacement_forwards=
+    recipe_overrides=
+    recipe_changed=false
     while test "$#" -gt 0; do
         case $1 in
+            --set)
+                test "$#" -ge 2 || usage
+                case $2 in *=*) ;; *) usage ;; esac
+                recipe_overrides="$recipe_overrides
+$2"
+                recipe_changed=true
+                shift 2
+                ;;
             --network)
                 test "$#" -ge 2 || usage
                 test "$set_network_seen" = false || usage
@@ -454,23 +523,45 @@ $2"
             *) usage ;;
         esac
     done
-    test "$set_network_seen" = true || test "$set_forward_seen" = true || usage
+    test "$set_network_seen" = true || test "$set_forward_seen" = true || \
+        test "$recipe_changed" = true || usage
     if test "$set_forward_seen" = true; then
         next_forwards=$replacement_forwards
     fi
     candidate_deployment=$directory/deployment.state.candidate.$$
+    candidate_config=$directory/config.toml.candidate.$$
     candidate_runtime=$directory/runtime.toml.candidate.$$
     cleanup_candidate() {
-        rm -f "$candidate_deployment" "$candidate_runtime"
+        rm -f "$candidate_deployment" "$candidate_config" "$candidate_runtime"
     }
     trap cleanup_candidate 0 HUP INT TERM
+    set --
+    old_ifs=$IFS
+    IFS='
+'
+    for recipe_override in $recipe_overrides; do
+        test -n "$recipe_override" || continue
+        set -- "$@" "$recipe_override"
+    done
+    IFS=$old_ifs
+    "$runtime" config-merge "$directory/config.toml" "$@" >"$candidate_config"
     write_deployment "$candidate_deployment" "$next_network" "$next_forwards"
     materialize_runtime_config \
-        "$directory/config.toml" "$candidate_deployment" "$candidate_runtime"
+        "$candidate_config" "$candidate_deployment" "$candidate_runtime"
+    mv "$candidate_config" "$directory/config.toml"
     mv "$candidate_deployment" "$directory/deployment.state"
     mv "$candidate_runtime" "$directory/runtime.toml"
     trap - 0 HUP INT TERM
     printf 'Instance "%s" updated.\n' "$name"
+}
+
+export_instance() {
+    test "$#" -eq 1 || usage
+    name=$1
+    validate_name "$name"
+    directory=$(instance_dir "$name")
+    test -r "$directory/config.toml" || { printf '%s: not found\n' "$name" >&2; exit 66; }
+    cat "$directory/config.toml"
 }
 
 list_instances() {
@@ -807,6 +898,8 @@ shift
 case $command in
     attach) attach_instance "$@" ;;
     create) create_instance "$@" ;;
+    export) export_instance "$@" ;;
+    import) import_instance "$@" ;;
     list) test "$#" -eq 0 || usage; list_instances ;;
     prepare-root) test "$#" -eq 1 || usage; prepare_root "$1" ;;
     resolve-network) test "$#" -eq 1 || usage; resolve_network_config "$1" ;;

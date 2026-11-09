@@ -21,7 +21,7 @@ if test -d "$directory"; then
     sudo /usr/local/libexec/ginux-instance-helper stop "$instance" >/dev/null || true
     sudo rm -rf "$directory"
 fi
-if ! ginux instance create "$instance" "$config"; then
+if ! ginux import "$instance" "$config"; then
     if test "$acquire" != on; then
         printf '%s\n' 'Gate 11 instance image is absent; run make bench-prepare first' >&2
     fi

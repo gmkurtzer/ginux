@@ -194,20 +194,25 @@ performance regressions. `make demo-gate-11` runs a bounded human-inspectable
 comparison and returns nonzero when a mandatory row misses its budget.
 
 `make run-host` boots the QEMU Rocky host and logs you into its ordinary shell.
-Ginux is installed in `PATH`. The first `instance create` downloads and verifies
-the pinned Rocky OCI image with live per-layer progress; later creates reuse the
+Ginux is installed in `PATH`. The first `create` or `import` downloads and verifies
+the pinned Rocky OCI image with live per-layer progress; later operations reuse the
 cache. The writable Rocky host overlay persists across `make run-host` sessions,
 so cached images, instance definitions, roots, and stopped status remain available.
 A complete first session is:
 
 ```sh
-ginux instance create rocky /etc/ginux/examples/rocky-systemd.toml
-ginux instance list
-ginux instance status rocky
-ginux instance start rocky --attach
+ginux create rocky
+ginux list
+ginux status rocky
+ginux start rocky --attach
 ```
 
-Syscall auditing is disabled by default. Add `--audit` to `instance start` to
+`create` starts from the documented default recipe. Use
+`ginux import NAME FILE` to create or atomically replace an instance from a
+self-contained recipe, `ginux export NAME` to print that recipe, and
+`ginux edit NAME` to validate and atomically apply an editor session.
+
+Syscall auditing is disabled by default. Add `--audit` to `ginux start` to
 record per-syscall decisions in the instance's `audit.log`; audit records are
 kept separate from the attached console.
 
@@ -217,11 +222,11 @@ network attachment and translated ports are deployment settings, supplied as
 repeatable flags when the instance is created or changed:
 
 ```sh
-ginux instance create web /etc/ginux/examples/rocky-systemd.toml \
+ginux import web /etc/ginux/examples/rocky-systemd.toml \
     --network eth0:1 \
     --forward protocol=tcp,external_port=8080,instance_port=80 \
     --forward protocol=tcp,external_port=8443,instance_port=443
-ginux instance set web \
+ginux set web \
     --network default \
     --forward none
 ```
@@ -241,9 +246,9 @@ contract is part of the instance rather than a separate operator object.
 Validate and inspect the complete instance recipe before launch:
 
 ```sh
-ginux instance validate /etc/ginux/examples/rocky-systemd.toml
-ginux instance inspect /etc/ginux/examples/rocky-systemd.toml
-ginux instance explain /etc/ginux/examples/rocky-systemd.toml filesystem.path.write
+ginux validate /etc/ginux/examples/rocky-systemd.toml
+ginux inspect /etc/ginux/examples/rocky-systemd.toml
+ginux explain /etc/ginux/examples/rocky-systemd.toml filesystem.path.write
 ```
 
 See [Self-contained userspace contract](docs/configurable-contract.md) for the
@@ -253,8 +258,8 @@ The attached terminal becomes the Ginux instance console. Log in as `root` with
 password `ginux`, explore normally, press `Ctrl-]` to detach while leaving the
 instance running, and run `kill -RTMIN+4 1` as instance root to
 shut down systemd and return to the host. Detached operation uses
-`ginux instance start rocky`, `ginux instance status rocky`, and
-`ginux instance stop rocky`. Exit the Rocky host shell to stop QEMU cleanly.
+`ginux start rocky`, `ginux status rocky`, and
+`ginux stop rocky`. Exit the Rocky host shell to stop QEMU cleanly.
 This stops the VM without deleting its persistent overlay; `make clean` resets
 that host state. `make demo-gate-9` uses the same operator workflow;
 `make run-systemd` remains as a compatibility alias, and

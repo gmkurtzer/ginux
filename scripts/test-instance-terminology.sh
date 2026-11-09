@@ -11,7 +11,7 @@ if ./scripts/ginux-host-controller.sh "$legacy_term" list >"$log" 2>&1; then
     printf '%s\n' 'legacy CLI noun was incorrectly accepted' >&2
     exit 1
 fi
-grep -Fq 'ginux instance create' "$log"
+grep -Fq 'ginux import' "$log"
 if grep -Fqi "$legacy_term" "$log"; then
     printf '%s\n' 'legacy CLI noun leaked into controller usage' >&2
     exit 1

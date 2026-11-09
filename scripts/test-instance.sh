@@ -20,7 +20,7 @@ rocky_scp \
     config/instance-gate4.toml \
     "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/gate4-valid.toml"
 
-rocky_ssh 'chmod 0755 /var/tmp/ginux /var/tmp/ginux-runtime-fixture; /var/tmp/ginux instance /var/tmp/gate4-valid.toml /var/tmp/ginux-runtime-fixture' > "$instance_log" 2>&1
+rocky_ssh 'chmod 0755 /var/tmp/ginux /var/tmp/ginux-runtime-fixture; /var/tmp/ginux /var/tmp/gate4-valid.toml /var/tmp/ginux-runtime-fixture' > "$instance_log" 2>&1
 grep -Fqx 'GINUX_LIFECYCLE: state=created resources=false managed-task=false' "$instance_log"
 grep -Fqx 'GINUX_LIFECYCLE: state=running resources=true managed-task=true' "$instance_log"
 grep -Fqx 'GINUX_INSTANCE: managed-output=fixture-argGINUX_GATE=4' "$instance_log"
@@ -29,7 +29,7 @@ grep -Fqx 'GINUX_INSTANCE: cleanup resources=false managed-task=false' "$instanc
 grep -Fqx 'GATE4: PASS' "$instance_log"
 
 rocky_ssh 'dd if=/var/tmp/ginux-runtime-fixture of=/var/tmp/ginux-runtime-malformed bs=16 count=1 status=none'
-if rocky_ssh '/var/tmp/ginux instance /var/tmp/gate4-valid.toml /var/tmp/ginux-runtime-malformed' > "$failure_log" 2>&1; then
+if rocky_ssh '/var/tmp/ginux /var/tmp/gate4-valid.toml /var/tmp/ginux-runtime-malformed' > "$failure_log" 2>&1; then
     printf '%s\n' 'malformed managed init was incorrectly accepted' >&2
     exit 1
 fi
@@ -38,7 +38,7 @@ grep -Fqx 'GINUX_LIFECYCLE: state=failed resources=false managed-task=false' "$f
 grep -Fqx 'GINUX_INSTANCE: cleanup resources=false managed-task=false' "$failure_log"
 
 rocky_ssh 'rm -f /var/tmp/ginux-runtime-missing'
-if rocky_ssh '/var/tmp/ginux instance /var/tmp/gate4-valid.toml /var/tmp/ginux-runtime-missing' > "$missing_log" 2>&1; then
+if rocky_ssh '/var/tmp/ginux /var/tmp/gate4-valid.toml /var/tmp/ginux-runtime-missing' > "$missing_log" 2>&1; then
     printf '%s\n' 'missing managed init was incorrectly accepted' >&2
     exit 1
 fi
@@ -54,7 +54,7 @@ grep -Fqx 'GINUX_LIFECYCLE: state=stopped resources=false managed-task=false' "$
 grep -Fqx 'GATE4_LIFECYCLE: PASS' "$lifecycle_log"
 
 # Reusable after the failure and stop cases: the last run must pass too.
-rocky_ssh '/var/tmp/ginux instance /var/tmp/gate4-valid.toml /var/tmp/ginux-runtime-fixture' > "$rerun_log" 2>&1
+rocky_ssh '/var/tmp/ginux /var/tmp/gate4-valid.toml /var/tmp/ginux-runtime-fixture' > "$rerun_log" 2>&1
 grep -Fqx 'GATE4: PASS' "$rerun_log"
 rocky_ssh 'rm -f /var/tmp/ginux /var/tmp/ginux-runtime-fixture /var/tmp/ginux-runtime-malformed /var/tmp/gate4-valid.toml /var/tmp/gate4-lifecycle.log'
 printf '%s\n' 'test-instance: PASS'
