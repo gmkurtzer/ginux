@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Check `ginux native` supervision edges with a fixture as /usr/bin/bash (Linux/root)."""
 import os
+import resource
 from pathlib import Path
 import shutil
 import subprocess
@@ -36,11 +37,11 @@ proc_read = ["/"]
 sys_read = ["/"]
 """)
 
-        def run(scenario, instance=config):
+        def run(scenario, instance=config, **options):
             (root / "scenario").write_text(scenario)
             proc = subprocess.run([str(work / "ginux"), "native", str(instance), str(root)]
                                   + (["configured"] if instance == configured else []),
-                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=20)
+                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30, **options)
             return proc.returncode, proc.stdout.decode(errors="replace")
 
         def check(name, ok, code, output):
@@ -86,6 +87,14 @@ sys_read = ["/"]
         check("waitid releases reaped children", code == 0 and fixture == [
             "GINUX_FIXTURE: waitid-peek=0", "GINUX_FIXTURE: waitid-after-peek=0",
             "GINUX_FIXTURE: waitid-reaped=200"], code, out)
+        code, out = run("null-wait", configured,
+                        preexec_fn=lambda: resource.setrlimit(resource.RLIMIT_NOFILE, (512, 512)))
+        fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
+        check("null-siginfo waitid and private pin reuse", code == 0 and fixture == [
+            "GINUX_FIXTURE: null-nohang=0", "GINUX_FIXTURE: null-peek=0",
+            "GINUX_FIXTURE: null-after-peek=0", "GINUX_FIXTURE: null-rewait=-10",
+            "GINUX_FIXTURE: null-invalid-options=-22", "GINUX_FIXTURE: null-rusage-fault=-14",
+            "GINUX_FIXTURE: fault-rewait=-10", "GINUX_FIXTURE: null-reaped=800"], code, out)
     print("test-native-supervision: PASS")
 
 
