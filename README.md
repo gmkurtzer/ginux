@@ -295,6 +295,11 @@ certification, does not provide complete Linux compatibility, and is not ready
 for production workloads. Unknown contract operations fail closed, but current
 coverage and guarantees are limited to the tested gates.
 
+The precise supported claims, retained supervisor authority, trusted
+components, exclusions, compatibility gaps, performance limitation, and
+reproducible boundary tests are documented in
+[Security boundary and limitations](docs/security-boundary.md).
+
 For agent containment, the protected object is the host and any authority not
 explicitly assigned to the instance. Ginux constrains the Linux processes in
 which an agent and its tools execute; it does not inspect model reasoning,
