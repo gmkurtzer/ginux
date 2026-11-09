@@ -4629,14 +4629,18 @@ struct SeccompNotificationResponse {
 
 struct BrokerPidMap {
     audit_lock: AtomicU32,
+    foreground_group: AtomicU32,
     entries: [AtomicU64; 128],
+    process_groups: [AtomicU32; 128],
 }
 
 impl BrokerPidMap {
     fn new() -> Self {
         Self {
             audit_lock: AtomicU32::new(0),
+            foreground_group: AtomicU32::new(0),
             entries: [const { AtomicU64::new(0) }; 128],
+            process_groups: [const { AtomicU32::new(0) }; 128],
         }
     }
 
@@ -4684,11 +4688,12 @@ impl BrokerPidMap {
         };
     }
 
-    fn set(&self, host_pid: usize, virtual_pid: u32) -> bool {
+    fn set(&self, host_pid: usize, virtual_pid: u32, process_group: u32) -> bool {
         let encoded = ((host_pid as u64) << 32) | u64::from(virtual_pid);
-        for entry in &self.entries {
+        for (index, entry) in self.entries.iter().enumerate() {
             let current = entry.load(Ordering::Acquire);
             if current >> 32 == host_pid as u64 {
+                self.process_groups[index].store(process_group, Ordering::Release);
                 entry.store(encoded, Ordering::Release);
                 return true;
             }
@@ -4697,6 +4702,7 @@ impl BrokerPidMap {
                     .compare_exchange(0, encoded, Ordering::AcqRel, Ordering::Acquire)
                     .is_ok()
             {
+                self.process_groups[index].store(process_group, Ordering::Release);
                 return true;
             }
         }
@@ -4704,13 +4710,44 @@ impl BrokerPidMap {
     }
 
     fn remove(&self, host_pid: usize) {
-        for entry in &self.entries {
+        for (index, entry) in self.entries.iter().enumerate() {
             let current = entry.load(Ordering::Acquire);
             if current >> 32 == host_pid as u64 {
                 entry.store(0, Ordering::Release);
+                self.process_groups[index].store(0, Ordering::Release);
                 return;
             }
         }
+    }
+
+    fn update_process_group(&self, host_pid: usize, process_group: u32) -> bool {
+        for (index, entry) in self.entries.iter().enumerate() {
+            if entry.load(Ordering::Acquire) >> 32 == host_pid as u64 {
+                self.process_groups[index].store(process_group, Ordering::Release);
+                return true;
+            }
+        }
+        false
+    }
+
+    fn set_foreground_group(&self, process_group: u32) {
+        self.foreground_group
+            .store(process_group, Ordering::Release);
+    }
+
+    fn interrupt_foreground(&self) -> bool {
+        let foreground = self.foreground_group.load(Ordering::Acquire);
+        let mut delivered = false;
+        for (index, entry) in self.entries.iter().enumerate() {
+            let encoded = entry.load(Ordering::Acquire);
+            if encoded != 0 && self.process_groups[index].load(Ordering::Acquire) == foreground {
+                let host_pid = (encoded >> 32) as usize;
+                if unsafe { syscall2(SYS_KILL, host_pid, SIGINT) } == 0 {
+                    delivered = true;
+                }
+            }
+        }
+        delivered
     }
 
     fn virtual_pid(&self, host_pid: u32) -> Option<u32> {
@@ -4739,6 +4776,35 @@ fn native_shared_pid_map() -> Option<&'static BrokerPidMap> {
     let map = address as *mut BrokerPidMap;
     unsafe { map.write(BrokerPidMap::new()) };
     Some(unsafe { &*map })
+}
+
+fn native_console_control_broker(pid_map: &'static BrokerPidMap) -> isize {
+    const PR_SET_PDEATHSIG: usize = 1;
+    const CONTROL_FD: usize = 10;
+    let child = unsafe { syscall0(SYS_FORK) };
+    if child != 0 {
+        return child;
+    }
+    if unsafe { syscall2(SYS_PRCTL, PR_SET_PDEATHSIG, SIGKILL) } < 0 {
+        exit_process(130);
+    }
+    let mut command = 0u8;
+    loop {
+        let read = unsafe {
+            syscall3(
+                SYS_READ_HOST,
+                CONTROL_FD,
+                &mut command as *mut u8 as usize,
+                1,
+            )
+        };
+        if read != 1 {
+            exit_process(131);
+        }
+        if command == b'I' {
+            let _ = pid_map.interrupt_foreground();
+        }
+    }
 }
 
 fn native_duplicate_listener(pid: usize, descriptor: usize) -> isize {
@@ -4885,6 +4951,24 @@ fn supervise_native(
     bootstrap_phase: bool,
     direct_yield: bool,
 ) -> ! {
+    // The host pseudo-terminal process group also contains this supervisor.
+    // Ctrl-C must interrupt the attached instance task without terminating
+    // Ginux itself. The tracee was forked before this point, so blocking
+    // SIGINT here affects only the supervisor; instance tasks retain normal
+    // terminal interrupt semantics.
+    let interrupt_mask = 1u64 << (SIGINT - 1);
+    if unsafe {
+        syscall4(
+            SYS_RT_SIGPROCMASK,
+            SIG_BLOCK,
+            &interrupt_mask as *const _ as usize,
+            0,
+            core::mem::size_of::<u64>(),
+        )
+    } < 0
+    {
+        native_fail(instance, pid, b"native supervisor SIGINT mask failed");
+    }
     const AUDIT_EVENT_LIMIT: u64 = 8192;
     const AUDIT_PREFIX: &[u8] = b"GINUX_NATIVE_AUDIT: sequence=";
     let audit_mode = instance.config().audit_mode;
@@ -5017,8 +5101,20 @@ fn supervise_native(
     let root_virtual = processes
         .create_init(virtual_credentials)
         .unwrap_or_else(|_| native_fail(instance, pid, b"native virtual init failed"));
-    if !pid_map.set(pid, root_virtual.pid) {
+    let root_view = processes
+        .view(root_virtual)
+        .unwrap_or_else(|_| native_fail(instance, pid, b"native root process view failed"));
+    if !pid_map.set(pid, root_virtual.pid, root_view.process_group) {
         native_fail(instance, pid, b"native broker PID map full");
+    }
+    pid_map.set_foreground_group(root_view.process_group);
+    let control_broker_pid = if unsafe { syscall2(SYS_FCNTL as usize, 10, F_GETFD as usize) } >= 0 {
+        native_console_control_broker(pid_map)
+    } else {
+        0
+    };
+    if control_broker_pid < 0 {
+        native_fail(instance, pid, b"native console control broker failed");
     }
     let mut tasks: [Option<NativeSupervisorTask>; 128] = [None; 128];
     let mut pending_child_stops = [0usize; 16];
@@ -5105,6 +5201,9 @@ fn supervise_native(
             }
             continue;
         }
+        if control_broker_pid > 0 && host_pid == control_broker_pid as usize {
+            native_fail(instance, pid, b"native console control broker exited");
+        }
         let task_index = tasks
             .iter()
             .position(|task| task.is_some_and(|task| task.host_pid == host_pid));
@@ -5148,6 +5247,11 @@ fn supervise_native(
                     let _ = unsafe { syscall2(SYS_KILL, yield_broker_pid, SIGKILL) };
                     let mut broker_status = 0i32;
                     let _ = wait(yield_broker_pid, &mut broker_status);
+                }
+                if control_broker_pid > 0 {
+                    let _ = unsafe { syscall2(SYS_KILL, control_broker_pid as usize, SIGKILL) };
+                    let mut control_status = 0i32;
+                    let _ = wait(control_broker_pid as usize, &mut control_status);
                 }
                 if instance.task_exited(exit_status == 0).is_err() {
                     instance_fail(instance, b"native exit transition failed");
@@ -5194,25 +5298,24 @@ fn supervise_native(
                 processes.fork(task.virtual_id)
             }
             .unwrap_or_else(|_| native_fail(instance, pid, b"native virtual child failed"));
-            if !pid_map.set(child_host_pid, child_virtual.pid) {
+            let child_view = processes.view(child_virtual).unwrap_or_else(|_| {
+                native_fail(instance, pid, b"native virtual child view failed")
+            });
+            if !pid_map.set(child_host_pid, child_virtual.pid, child_view.process_group) {
                 native_fail(instance, pid, b"native broker PID map full");
             }
             let child_start_ticks =
                 clock_nanoseconds(CLOCK_MONOTONIC).saturating_sub(instance_start_ns) / 10_000_000;
-            if mode == 3 {
-                let child_view = processes.view(child_virtual).unwrap_or_else(|_| {
-                    native_fail(instance, pid, b"native virtual child view failed")
-                });
-                if native_proc_materialize(
+            if mode == 3
+                && native_proc_materialize(
                     root_descriptor,
                     child_view,
                     child_host_pid,
                     child_start_ticks,
                 )
                 .is_none()
-                {
-                    native_fail(instance, pid, b"native virtual proc materialization failed");
-                }
+            {
+                native_fail(instance, pid, b"native virtual proc materialization failed");
             }
             let Some(child_slot) = tasks.iter().position(Option::is_none) else {
                 native_fail(instance, pid, b"native task table full");
@@ -6724,6 +6827,9 @@ fn supervise_native(
                     let task_view = processes.view(task.virtual_id).unwrap_or_else(|_| {
                         native_fail(instance, pid, b"native session view failed")
                     });
+                    if !pid_map.update_process_group(host_pid, task_view.process_group) {
+                        native_fail(instance, pid, b"native session PID map update failed");
+                    }
                     if native_proc_materialize(
                         root_descriptor,
                         task_view,
@@ -6769,6 +6875,11 @@ fn supervise_native(
                         .unwrap_or_else(|| {
                             native_fail(instance, pid, b"native process group task missing")
                         });
+                    if !pid_map
+                        .update_process_group(changed_supervisor.host_pid, task_view.process_group)
+                    {
+                        native_fail(instance, pid, b"native process group PID map update failed");
+                    }
                     if native_proc_materialize(
                         root_descriptor,
                         task_view,
@@ -7326,6 +7437,10 @@ fn supervise_native(
                     && registers.rdi as i64 == task.console_fd
                     && registers.rsi == 21_518 =>
             {
+                let task_view = processes.view(task.virtual_id).unwrap_or_else(|_| {
+                    native_fail(instance, pid, b"native controlling terminal view failed")
+                });
+                pid_map.set_foreground_group(task_view.process_group);
                 write_all(b"emulate surface=virtual-console-control result=0\n");
                 registers.orig_rax = u64::MAX;
                 task.awaiting_exit = true;
@@ -7354,7 +7469,16 @@ fn supervise_native(
                     )
                 } else {
                     read_tracee_u32(host_pid, registers.rdx as usize).is_some_and(|group| {
-                        task_view.session != 0 && group == task_view.process_group
+                        if task_view.session != 0
+                            && processes
+                                .process_group_in_session(task.virtual_id, group)
+                                .unwrap_or(false)
+                        {
+                            pid_map.set_foreground_group(group);
+                            true
+                        } else {
+                            false
+                        }
                     })
                 };
                 write_all(b"emulate surface=virtual-console-job-control result=");

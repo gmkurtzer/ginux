@@ -594,8 +594,10 @@ start_instance() {
         "$directory/supervisor.pid" \
         "$directory/runtime.pid" \
         "$directory/exit.status" \
-        "$directory/console.in"
+        "$directory/console.in" \
+        "$directory/control.in"
     mkfifo -m 600 "$directory/console.in"
+    mkfifo -m 600 "$directory/control.in"
     : >"$directory/audit.log"
     : >"$directory/console.log"
 
@@ -628,6 +630,7 @@ supervise_instance() {
     directory=$(instance_dir "$name")
     test -d "$directory" || { printf '%s: not found\n' "$name" >&2; exit 66; }
     exec 9<>"$directory/console.in"
+    exec 10<>"$directory/control.in"
     set +e
     # Let script(1) provide the pseudo-terminal, but record only the runtime
     # stream. Its normal typescript header/footer are implementation details,
@@ -726,11 +729,22 @@ attach_instance() {
         printf '%s: console is unavailable\n' "$name" >&2
         exit 69
     }
+    test -p "$directory/control.in" || {
+        printf '%s: control channel is unavailable\n' "$name" >&2
+        exit 69
+    }
 
     detach_marker=$directory/attach.$$.detach
     rm -f "$detach_marker"
     saved_tty=$(stty -g)
     exec 7<&0
+    exec 8>"$directory/console.in"
+    exec 9>"$directory/control.in"
+    # A terminal-generated SIGINT belongs to the attached foreground process,
+    # not to the controller-side attach transport. Background helpers inherit
+    # SIGINT ignored; the attach process sends the same interrupt request over
+    # Ginux's control channel if its terminal driver emits a signal instead.
+    trap '' INT
     tail -n 80 -F "$directory/console.log" &
     tail_pid=$!
     reader_pid=
@@ -758,21 +772,32 @@ EOF
         trap - 0 HUP INT TERM WINCH
         kill "$tail_pid" ${reader_pid:+"$reader_pid"} 2>/dev/null || true
         wait "$tail_pid" ${reader_pid:+"$reader_pid"} 2>/dev/null || true
+        exec 8>&-
+        exec 9>&-
         exec 7<&-
         stty "$saved_tty"
         rm -f "$detach_marker"
     }
-    trap cleanup_attach 0 HUP INT TERM
+    forward_interrupt() {
+        printf 'I' >&9 || true
+    }
+    trap cleanup_attach 0 HUP TERM
+    trap forward_interrupt INT
     trap 'sync_console_size' WINCH
     sync_console_size
     stty raw -echo
     (
-        exec 8>"$directory/console.in"
+        trap '' INT
         detach=$(printf '\035')
+        interrupt=$(printf '\003')
         while IFS= read -r -n 1 character <&7; do
             if test "$character" = "$detach"; then
                 : >"$detach_marker"
                 exit 0
+            fi
+            if test "$character" = "$interrupt"; then
+                printf 'I' >&9
+                continue
             fi
             if test -n "$character"; then
                 printf '%s' "$character" >&8

@@ -165,10 +165,28 @@ expect {
 }
 send -- "ginux\r"
 expect {
+    -re {initialize_job_control: no job control} { puts stderr "instance shell job control initialization failed"; exit 202 }
     -re {\[root@ginux [^]]+\]# } {}
     timeout { puts stderr "interactive instance shell timed out"; exit 88 }
     eof { puts stderr "instance shell exited early"; exit 89 }
 }
+send -- "sleep 30\r"
+after 1000
+send -- "\003"
+expect {
+    -re {\[root@ginux [^]]+\]# } {}
+    -re {rocky: detached} { puts stderr "Ctrl-C detached from the instance"; exit 196 }
+    -re {\[ginux@ginux-rocky [^]]+\]\$ } { puts stderr "Ctrl-C killed the attach command"; exit 197 }
+    timeout { puts stderr "Ctrl-C did not interrupt the instance foreground process"; exit 198 }
+    eof { puts stderr "Ctrl-C terminated the host session"; exit 199 }
+}
+send -- "printf 'GINUX_INTERRUPT_%s\\n' 'FORWARDED: PASS'\r"
+expect {
+    -re {GINUX_INTERRUPT_FORWARDED: PASS} {}
+    timeout { puts stderr "instance console was unusable after Ctrl-C"; exit 200 }
+    eof { puts stderr "instance exited after Ctrl-C"; exit 201 }
+}
+expect -re {\[root@ginux [^]]+\]# }
 send -- "printf 'GINUX_HUMAN_INTERACTIVE: PASS\\n'\r"
 expect {
     -re {GINUX_HUMAN_INTERACTIVE: PASS} {}

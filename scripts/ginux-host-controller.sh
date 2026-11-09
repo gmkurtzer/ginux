@@ -46,7 +46,27 @@ esac
 if test "$command" = start && test "$#" -eq 2 && test "$2" = --attach; then
     name=$1
     sudo "$helper" start "$name" --attach
-    exec sudo "$helper" attach "$name"
+    command=attach
+    set -- "$name"
+fi
+
+if test "$command" = attach && test "$#" -eq 1; then
+    # Keep terminal-generated Ctrl-C out of sudo's foreground process group.
+    # The attach transport switches to raw mode and forwards the ETX byte to
+    # the instance; this wrapper restores the caller's terminal on every exit.
+    saved_tty=$(stty -g)
+    restore_tty() {
+        trap - 0 HUP TERM
+        stty "$saved_tty"
+    }
+    trap restore_tty 0 HUP TERM
+    trap '' INT
+    stty -isig
+    status=0
+    sudo "$helper" attach "$1" || status=$?
+    restore_tty
+    trap - INT
+    exit "$status"
 fi
 
 exec sudo "$helper" "$command" "$@"
