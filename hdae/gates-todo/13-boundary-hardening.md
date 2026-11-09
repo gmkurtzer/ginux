@@ -38,7 +38,9 @@ honest security and compatibility boundary for the initial milestone.
 
 ## Completed work
 
-- [ ] None; gate not started.
+- [x] Human authorized autonomous execution and separate pull-request delivery.
+- [x] Inventoried parser, dispatcher, escape, recovery, authority, and existing
+  regression surfaces.
 
 ## Remaining work
 
@@ -94,17 +96,25 @@ honest security and compatibility boundary for the initial milestone.
 
 ## Decisions and limitations
 
-- Fuzz duration, target list, and resource ceiling are recorded before this
-  gate executes so completion cannot be declared from an arbitrary short run.
+- The deterministic bounded fuzz suite covers instance TOML parsing and
+  normalization, contract selectors and resolution, ELF loading, VFS index
+  parsing, virtual-kernel path lookup, device names/ranges, syscall/ioctl
+  dispatch inputs, and audit accounting.
+- Each target runs from a checked-in seed corpus for five seconds with a 4 KiB
+  maximum generated input. The complete run is bounded to 60 seconds, one
+  process, and a 256 MiB address-space limit. The fixed PRNG seed and target
+  name are recorded; the current input is written before execution so a crash
+  or timeout leaves a reproducible artifact under `build/security-fuzz/`.
 - An independent security audit and production-readiness program remain future
   work.
 
 ## Delivery strategy
 
 - Working branch: `hdae/boundary-hardening`
-- Intended base: `main`
-- Pull request: intended; dedicated branch push and PR creation authorized on
-  2026-11-03; never merge or close without explicit authorization
+- Intended base: `hdae/contract-maintenance-lock`
+- Pull request: intended as a stacked PR; dedicated branch push and PR creation
+  authorized by the human's 2026-11-08 batch direction; never merge or close
+  without explicit authorization
 - Planned commits: malformed-input and fuzz harnesses; escape and authority
   reduction; recovery and cleanup; full regression evidence and limitations
 - Actual commits: pending

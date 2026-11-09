@@ -567,9 +567,10 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Record the Gate 12.5 pull-request checkpoint, then begin Gate 13 boundary
-hardening on a dedicated branch based on Gate 12.5. Do not merge or close any
-pull request.
+Implement Gate 13's fixed malformed-input and bounded fuzz matrix, then its
+escape, residual-authority, recovery, regression, limitations, and
+demonstration evidence on `hdae/boundary-hardening`. Deliver it as a stacked
+pull request against Gate 12.5. Do not merge or close any pull request.
 
 ## Context recovery
 
@@ -580,8 +581,9 @@ pull request.
   Gate 12.1 is technically passed and delivered in pull request 252; Gate
   12.25 is technically passed and delivered in pull request 253. Gate 12.5 is
   technically passed and delivered in pull request 254 from
-  `hdae/contract-maintenance-lock`. Gate 11 remains partial on its parent
-  branch and in pull request 249.
+  `hdae/contract-maintenance-lock`. Gate 13 is active on
+  `hdae/boundary-hardening`, stacked on Gate 12.5. Gate 11 remains partial on
+  its parent branch and in pull request 249.
 - Gate 12.25 delivery: pull request
   https://github.com/gmkurtzer/ginux/pull/253 is open from
   `hdae/top-level-instance-cli` against the Gate 12.1 branch.
