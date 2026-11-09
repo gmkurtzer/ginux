@@ -43,7 +43,7 @@ The catalog is the reviewable inventory used to normalize instance contracts. An
 | `syscall.rt_sigaction` | syscall | 13 | partial | mediate | no | virtual signal state | `test-process` | x86-64 Linux ABI only |
 | `syscall.rt_sigprocmask` | syscall | 14 | partial | mediate | no | virtual signal state | `test-process` | x86-64 Linux ABI only |
 | `syscall.rt_sigreturn` | syscall | 15 | partial | mediate | no | supervised frame | `test-process` | x86-64 Linux ABI only |
-| `syscall.ioctl` | syscall | 16 | partial | mediate | no | cataloged request families only | `test-devices` | x86-64 Linux ABI only |
+| `syscall.ioctl` | syscall | 16 | partial | mediate | no | cataloged request families; no signal-driven I/O | `test-devices` | x86-64 Linux ABI only |
 | `syscall.pread64` | syscall | 17 | partial | mediate | no | bounded instance descriptor | `test-native-vfs` | x86-64 Linux ABI only |
 | `syscall.pwrite64` | syscall | 18 | partial | mediate | no | bounded instance descriptor | `test-systemd` | x86-64 Linux ABI only |
 | `syscall.writev` | syscall | 20 | partial | mediate | no | bounded vectors | `test-systemd` | x86-64 Linux ABI only |
@@ -77,7 +77,7 @@ The catalog is the reviewable inventory used to normalize instance contracts. An
 | `syscall.wait4` | syscall | 61 | partial | mediate | no | virtual child selector | `test-process` | x86-64 Linux ABI only |
 | `syscall.kill` | syscall | 62 | partial | mediate | no | virtual task selector | `test-process` | x86-64 Linux ABI only |
 | `syscall.uname` | syscall | 63 | complete | emulate | no | virtual kernel identity | `test-systemd-interactive` | x86-64 Linux ABI only |
-| `syscall.fcntl` | syscall | 72 | partial | mediate | no | cataloged commands | `test-systemd` | x86-64 Linux ABI only |
+| `syscall.fcntl` | syscall | 72 | partial | mediate | no | commands other than signal-driven I/O | `test-launch` | x86-64 Linux ABI only |
 | `syscall.flock` | syscall | 73 | partial | mediate | no | instance descriptor | `test-systemd` | x86-64 Linux ABI only |
 | `syscall.fsync` | syscall | 74 | complete | mediate | no | instance descriptor | `test-systemd` | x86-64 Linux ABI only |
 | `syscall.fdatasync` | syscall | 75 | complete | mediate | no | instance descriptor | `test-systemd` | x86-64 Linux ABI only |

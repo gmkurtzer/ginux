@@ -355,6 +355,39 @@ pub const fn futex_priority_inheritance(op: u64) -> bool {
     matches!(op & FUTEX_COMMAND, 6..=8 | 11..=13)
 }
 
+/// Whether an `fcntl` or `ioctl` request would set up signal-driven I/O, so
+/// that the host kernel signals a process when a descriptor becomes ready.
+/// The workload could name any host process its credentials may signal
+/// (`F_SETOWN`, `F_SETOWN_EX`, `FIOSETOWN`, `SIOCSPGRP`); `getpid()` gives its
+/// virtual pid, so even naming itself would name an unrelated host process.
+/// Enabling the I/O alone (`F_SETFL` with `O_ASYNC`, `FIOASYNC`) signals a
+/// descriptor's existing owner, such as the foreground process group of a
+/// terminal it inherited, which includes the supervisor; and `F_SETSIG`
+/// chooses the signal an existing owner receives. The kernel reads requests
+/// as 32-bit values. Other commands are not refused here; they do not let the
+/// workload choose a signal target.
+pub const fn signal_driven_io(syscall: u64, request: u64, argument: u64) -> bool {
+    const SYS_IOCTL: u64 = 16;
+    const SYS_FCNTL: u64 = 72;
+    const F_SETFL: u32 = 4;
+    const F_SETOWN: u32 = 8;
+    const F_SETSIG: u32 = 10;
+    const F_SETOWN_EX: u32 = 15;
+    const O_ASYNC: u64 = 0o20000;
+    const FIOASYNC: u32 = 0x5452;
+    const FIOSETOWN: u32 = 0x8901;
+    const SIOCSPGRP: u32 = 0x8902;
+    match syscall {
+        SYS_FCNTL => match request as u32 {
+            F_SETOWN | F_SETOWN_EX | F_SETSIG => true,
+            F_SETFL => argument & O_ASYNC != 0,
+            _ => false,
+        },
+        SYS_IOCTL => matches!(request as u32, FIOASYNC | FIOSETOWN | SIOCSPGRP),
+        _ => false,
+    }
+}
+
 pub const fn balanced_arguments_allowed(syscall: u64, arg0: u64, arg1: u64, arg2: u64) -> bool {
     const O_ACCMODE: u64 = 3;
     const O_CREAT: u64 = 0o100;
@@ -375,6 +408,9 @@ pub const fn balanced_arguments_allowed(syscall: u64, arg0: u64, arg1: u64, arg2
         2 => arg1 & (O_ACCMODE | MUTATING_OPEN_FLAGS) == 0,
         9 | 10 => arg2 & (PROT_WRITE | PROT_EXEC) != (PROT_WRITE | PROT_EXEC),
         17 => arg2 <= 1024 * 1024,
+        // ioctl is outside the balanced surface. Native mode also checks
+        // signal_driven_io before its broader ioctl admission.
+        16 | 72 => !signal_driven_io(syscall, arg1, arg2),
         257 => arg2 & (O_ACCMODE | MUTATING_OPEN_FLAGS) == 0,
         302 => arg0 == 0 && arg1 <= 15,
         318 => arg2 <= 256,
@@ -452,6 +488,64 @@ mod tests {
         for syscall in [0, 1, 9, SYS_FUTEX, SYS_WAIT4, 273, 334] {
             assert_eq!(balanced_mediated_result(syscall), None);
         }
+    }
+
+    #[test]
+    fn balanced_contract_refuses_signal_driven_io() {
+        const SYS_IOCTL: u64 = 16;
+        const SYS_FCNTL: u64 = 72;
+        const F_DUPFD: u64 = 0;
+        const F_GETFD: u64 = 1;
+        const F_SETFD: u64 = 2;
+        const F_GETFL: u64 = 3;
+        const F_SETFL: u64 = 4;
+        const F_SETLK: u64 = 6;
+        const F_SETOWN: u64 = 8;
+        const F_SETSIG: u64 = 10;
+        const F_SETOWN_EX: u64 = 15;
+        const F_DUPFD_CLOEXEC: u64 = 1030;
+        const O_NONBLOCK: u64 = 0o4000;
+        const O_ASYNC: u64 = 0o20000;
+        const HIGH: u64 = 0xffff_ffff_0000_0000;
+        const FIOASYNC: u64 = 0x5452;
+        const FIOSETOWN: u64 = 0x8901;
+        const SIOCSPGRP: u64 = 0x8902;
+        const TIOCGWINSZ: u64 = 0x5413;
+        for command in [F_DUPFD, F_GETFD, F_SETFD, F_GETFL, F_SETLK, F_DUPFD_CLOEXEC] {
+            assert!(balanced_arguments_allowed(SYS_FCNTL, 1, command, 0));
+            // The kernel ignores register bits above the 32-bit command.
+            assert!(balanced_arguments_allowed(SYS_FCNTL, 1, command | HIGH, 0));
+        }
+        for command in [F_SETOWN, F_SETSIG, F_SETOWN_EX] {
+            assert!(!balanced_arguments_allowed(SYS_FCNTL, 1, command, 0));
+            assert!(!balanced_arguments_allowed(SYS_FCNTL, 1, command | HIGH, 0));
+        }
+        assert!(balanced_arguments_allowed(
+            SYS_FCNTL, 1, F_SETFL, O_NONBLOCK
+        ));
+        assert!(balanced_arguments_allowed(
+            SYS_FCNTL,
+            1,
+            F_SETFL,
+            O_ASYNC << 32
+        ));
+        assert!(!balanced_arguments_allowed(
+            SYS_FCNTL,
+            1,
+            F_SETFL,
+            O_NONBLOCK | O_ASYNC
+        ));
+        assert!(!balanced_arguments_allowed(
+            SYS_FCNTL,
+            1,
+            F_SETFL | HIGH,
+            O_ASYNC | HIGH
+        ));
+        for request in [FIOASYNC, FIOSETOWN, SIOCSPGRP] {
+            assert!(signal_driven_io(SYS_IOCTL, request, 0));
+            assert!(!balanced_arguments_allowed(SYS_IOCTL, 1, request | HIGH, 0));
+        }
+        assert!(balanced_arguments_allowed(SYS_IOCTL, 1, TIOCGWINSZ, 0));
     }
 
     #[test]

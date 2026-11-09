@@ -24,9 +24,22 @@ def main():
         (root / "usr/bin/bash").chmod(0o755)
         work.chmod(0o755)
 
-        def run(scenario):
+        configured = work / "configured.toml"
+        configured.write_text(config.read_text().replace('init = "/bin/bash"',
+            'init = "/usr/bin/bash"') + """
+[contract.filesystem]
+read = ["/"]
+write = ["/"]
+create = ["/"]
+[contract.kernel]
+proc_read = ["/"]
+sys_read = ["/"]
+""")
+
+        def run(scenario, instance=config):
             (root / "scenario").write_text(scenario)
-            proc = subprocess.run([str(work / "ginux"), "native", str(config), str(root)],
+            proc = subprocess.run([str(work / "ginux"), "native", str(instance), str(root)]
+                                  + (["configured"] if instance == configured else []),
                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=20)
             return proc.returncode, proc.stdout.decode(errors="replace")
 
@@ -39,6 +52,21 @@ def main():
         code, out = run("fork")
         check("fork denied", code == 0 and "GINUX_FIXTURE: fork=-38\n" in out
               and "unsupervised child ran" not in out and "GINUX_NATIVE_CHECK: PASS" in out, code, out)
+
+        # fcntl cannot make the host kernel signal another process.
+        code, out = run("owner")
+        check("signal-driven I/O refused", code == 0
+              and all(f"GINUX_FIXTURE: {name}=-1\n" in out
+                      for name in ("setown", "setown-ex", "setsig", "async"))
+              and "GINUX_FIXTURE: nonblock=0\n" in out, code, out)
+
+        # Invalid FDs make the baseline safe: an admitted host ioctl returns
+        # EBADF; the argument guard must instead return EPERM before dispatch.
+        code, out = run("quiet-ioctl", configured)
+        check("native ioctl signal routing refused", code == 0
+              and all(f"GINUX_FIXTURE: {name}=-1\n" in out for name in
+                      ("fioasync", "fiosetown", "siocspgrp", "high-fioasync"))
+              and "GINUX_FIXTURE: tcgets=-9\n" in out, code, out)
 
         # The thread identity matches the virtual pid: set_tid_address returns
         # it instead of the host tid, and PI futexes, which would store the
