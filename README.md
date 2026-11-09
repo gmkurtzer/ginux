@@ -420,3 +420,13 @@ checks for syscall ABI dispatch, clone restrictions, descriptor inheritance,
 thread reuse, successful and failed worker exec, signals, wait-status writes,
 nonblocking waits, and vfork. The existing native fork fixture also runs. These
 checks do not claim complete libc, job-control, or systemd compatibility.
+
+Configured native waitid supports a null siginfo pointer without retaining
+reaped child slots. Ginux pins each waitable host child with a private pidfd
+before it runs and uses final-reap readiness (POLLHUP) to reconcile its
+process table. The host waitid call, selectors, options, rusage and errno
+semantics remain in force, including WNOHANG, WNOWAIT and copy-out failures.
+Exited zombies and stopped/continued children are not treated as reaped.
+Private pins close when waitid or wait4 reclaims the child; they do not change
+the instance-visible descriptor budget. The native host must support pidfd
+final-reap readiness, as in the Linux 6.12 ABI used for this contract.
