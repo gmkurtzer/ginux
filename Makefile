@@ -308,9 +308,11 @@ build-launch-fixture:
 	mkdir -p .artifacts/launch
 	$(CC) -nostdlib -static -fno-stack-protector -fno-builtin -O2 -Wall -Wextra -Werror tests/fixtures/launch-fixture.c -o .artifacts/launch/launch-fixture
 	$(CC) -nostdlib -static -fno-stack-protector -fno-builtin -O2 -Wall -Wextra -Werror tests/fixtures/native-fixture.c -o .artifacts/launch/native-fixture
+	$(CC) -nostdlib -static -fno-stack-protector -fno-builtin -O2 -Wall -Wextra -Werror -DCLONE_SNAPSHOT_COLLISION -Wl,--section-start=.ginux_clone_collision=0x600000000000 tests/fixtures/native-fixture.c -o .artifacts/launch/native-clone-collision-fixture
 
 test-launch:
 	python3 scripts/test-launch.py $(GINUX) .artifacts/launch/launch-fixture
 
 test-native-supervision:
 	python3 scripts/test-native-supervision.py $(GINUX) .artifacts/launch/native-fixture
+	python3 scripts/test-native-clone-snapshot.py $(GINUX) .artifacts/launch/native-fixture .artifacts/launch/native-clone-collision-fixture

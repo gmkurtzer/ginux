@@ -88,6 +88,20 @@ sys_read = ["/"]
             "GINUX_FIXTURE: clone3-invalid=-9", "GINUX_FIXTURE: clone3-ordinary=-9",
             "GINUX_FIXTURE: cgroup-open-ok=1", "GINUX_FIXTURE: clone3-ok=1",
             "GINUX_FIXTURE: wait-ok=1", "GINUX_FIXTURE: child-status=7"], code, out)
+        code, out = run("arguments", configured)
+        fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
+        check("immutable clone3 arguments and cleanup", code == 0
+              and out.count("GINUX_POLICY_AUDIT: action=deny policy=clone-arguments result=-1") == 5
+              and fixture == [
+            "GINUX_FIXTURE: readonly-clone=1", "GINUX_FIXTURE: readonly-unchanged=1",
+            "GINUX_FIXTURE: clone-zero-tail=1", "GINUX_FIXTURE: clone-vfork=1", "GINUX_FIXTURE: vfork-unchanged=1",
+            "GINUX_FIXTURE: clone-short=-22", "GINUX_FIXTURE: clone-large=-7",
+            "GINUX_FIXTURE: clone-unreadable=-14", "GINUX_FIXTURE: clone-short-cgroup=-22",
+            "GINUX_FIXTURE: clone-kernel-error=-22", "GINUX_FIXTURE: error-unchanged=1",
+            "GINUX_FIXTURE: clone-tail=-7", "GINUX_FIXTURE: clone-version0=1",
+            "GINUX_FIXTURE: snapshot-mmap=-1", "GINUX_FIXTURE: snapshot-mprotect=-1",
+            "GINUX_FIXTURE: snapshot-munmap=-1", "GINUX_FIXTURE: snapshot-madvise=-1",
+            "GINUX_FIXTURE: snapshot-mremap=-1", "GINUX_FIXTURE: snapshot-repeated=160"], code, out)
     print("test-native-supervision: PASS")
 
 

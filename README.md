@@ -420,3 +420,20 @@ checks for syscall ABI dispatch, clone restrictions, descriptor inheritance,
 thread reuse, successful and failed worker exec, signals, wait-status writes,
 nonblocking waits, and vfork. The existing native fork fixture also runs. These
 checks do not claim complete libc, job-control, or systemd compatibility.
+
+Native configured clone3 captures the Linux 6.12 argument structure before
+execution and gives the host a private read-only snapshot. Caller structures
+may be read-only; their bytes and syscall argument registers are preserved.
+The existing virtual-cgroup adaptation accepts only an owned virtual cgroup
+directory and starts the child in the parent's host cgroup; it does not
+implement host cgroup placement. Unknown nonzero extension bytes fail closed.
+
+The native runtime reserves `0x600000000000` through `0x600000080000` for
+transient clone snapshots (one 4 KiB page per active task slot, within existing
+memory and task limits). Workloads cannot map, discard, move or change
+permissions in this range. Parent and child remove their snapshots before
+returning to workload code. A pre-existing mapping is never overwritten;
+allocation errors propagate. Death during the private protocol fails the
+instance closed so a shared address space cannot retain a stale snapshot.
+Snapshot capture requires host `process_vm_readv`; it fails closed if the host
+cannot provide it.

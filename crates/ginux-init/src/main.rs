@@ -17,6 +17,7 @@ mod channel_hooks;
 mod dispatch;
 mod fs_hooks;
 mod launch;
+mod native_clone;
 mod process_hooks;
 mod supervisor;
 
@@ -3342,6 +3343,7 @@ fn native_tracee_setup_fail(code: usize) -> ! {
 #[derive(Clone, Copy)]
 struct NativeSupervisorTask {
     host_pid: usize,
+    clone_call: native_clone::Pending,
     virtual_id: TaskId,
     start_ticks: u64,
     awaiting_exit: bool,
@@ -5504,6 +5506,7 @@ fn supervise_native(
     let mut yield_broker_pid = 0usize;
     tasks[0] = Some(NativeSupervisorTask {
         host_pid: pid,
+        clone_call: native_clone::Pending::empty(),
         virtual_id: root_virtual,
         start_ticks: 0,
         awaiting_exit: false,
@@ -5585,6 +5588,15 @@ fn supervise_native(
         };
         let mut task = tasks[task_index].unwrap();
         if !stopped(status) {
+            if task.clone_call.phase != native_clone::Phase::Idle {
+                // A dead caller cannot finish its private protocol. Terminate
+                // the instance rather than leave a shared-VM snapshot behind.
+                native_fail(
+                    instance,
+                    pid,
+                    b"native clone interrupted during private setup",
+                );
+            }
             let exit_status = if status & 0x7f == 0 {
                 status >> 8
             } else {
@@ -5679,6 +5691,11 @@ fn supervise_native(
                 .position(|child| *child == child_host_pid);
             tasks[child_slot] = Some(NativeSupervisorTask {
                 host_pid: child_host_pid,
+                clone_call: if task.clone_call.phase == native_clone::Phase::Call {
+                    task.clone_call.child()
+                } else {
+                    native_clone::Pending::empty()
+                },
                 virtual_id: child_virtual,
                 start_ticks: child_start_ticks,
                 awaiting_exit: false,
@@ -5717,6 +5734,11 @@ fn supervise_native(
             if let Some(pending_slot) = pending_child_slot {
                 pending_child_stops[pending_slot] = 0;
                 let _ = ptrace(PTRACE_SETOPTIONS, child_host_pid, 0, options);
+                if let Some(child) = tasks[child_slot].as_mut() {
+                    native_clone_start_child(child).unwrap_or_else(|| {
+                        native_fail(instance, pid, b"native child clone cleanup failed")
+                    });
+                }
                 if ptrace(PTRACE_CONT, child_host_pid, 0, 0) < 0 {
                     native_fail(instance, pid, b"pending native child resume failed");
                 }
@@ -5753,10 +5775,26 @@ fn supervise_native(
                 native_fail(instance, pid, b"unexpected native trace stop");
             }
             task.initial_stop_pending = false;
+            native_clone_start_child(&mut task).unwrap_or_else(|| {
+                native_fail(instance, pid, b"native child clone cleanup failed")
+            });
             tasks[task_index] = Some(task);
             let _ = ptrace(PTRACE_SETOPTIONS, host_pid, 0, options);
             if ptrace(PTRACE_CONT, host_pid, 0, 0) < 0 {
                 native_fail(instance, pid, b"native child initial resume failed");
+            }
+            continue;
+        }
+        if signal == 17 && task.clone_call.phase != native_clone::Phase::Idle {
+            task.clone_call.sigchld = true;
+            let request = if task.awaiting_exit {
+                PTRACE_SYSCALL
+            } else {
+                PTRACE_CONT
+            };
+            tasks[task_index] = Some(task);
+            if ptrace(request, host_pid, 0, 0) < 0 {
+                native_fail(instance, pid, b"native clone signal deferral failed");
             }
             continue;
         }
@@ -5908,6 +5946,22 @@ fn supervise_native(
             unsafe { registers.assume_init() }
         };
 
+        if seccomp_entry
+            && matches!(
+                task.clone_call.phase,
+                native_clone::Phase::Call | native_clone::Phase::Unmap
+            )
+        {
+            if !task.clone_call.matches_entry(&registers) {
+                native_fail(instance, pid, b"native clone replay mismatch");
+            }
+            task.awaiting_exit = true;
+            tasks[task_index] = Some(task);
+            if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
+                native_fail(instance, pid, b"native clone replay resume failed");
+            }
+            continue;
+        }
         if !seccomp_entry && !task.awaiting_exit && registers.orig_rax == u64::MAX {
             tasks[task_index] = Some(task);
             if ptrace(PTRACE_CONT, host_pid, 0, 0) < 0 {
@@ -5917,6 +5971,52 @@ fn supervise_native(
         }
 
         if !seccomp_entry && task.awaiting_exit {
+            use native_clone::Phase;
+            match task.clone_call.phase {
+                Phase::Map if registers.rax as i64 >= 0 => {
+                    task.clone_call
+                        .mapped(host_pid, &mut registers)
+                        .unwrap_or_else(|_| {
+                            native_fail(instance, pid, b"native clone snapshot write failed")
+                        });
+                    task.awaiting_exit = false;
+                    tasks[task_index] = Some(task);
+                    if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                        || ptrace(PTRACE_CONT, host_pid, 0, 0) < 0
+                    {
+                        native_fail(instance, pid, b"native clone snapshot resume failed");
+                    }
+                    continue;
+                }
+                Phase::Call => {
+                    let result = if task.override_exit {
+                        task.override_result
+                    } else {
+                        registers.rax as i64
+                    };
+                    task.clone_call.unmap(&mut registers, result);
+                    task.awaiting_exit = false;
+                    task.override_exit = false;
+                    tasks[task_index] = Some(task);
+                    if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                        || ptrace(PTRACE_CONT, host_pid, 0, 0) < 0
+                    {
+                        native_fail(instance, pid, b"native clone cleanup resume failed");
+                    }
+                    continue;
+                }
+                Phase::Map | Phase::Unmap => {
+                    if task.clone_call.phase == Phase::Map {
+                        task.clone_call.result = registers.rax as i64;
+                    } else if registers.rax as i64 != 0 {
+                        native_fail(instance, pid, b"native clone snapshot cleanup failed");
+                    }
+                    task.clone_call.restore(&mut registers);
+                    task.override_exit = true;
+                    task.override_result = registers.rax as i64;
+                }
+                _ => {}
+            }
             if task.syscall == 247 && registers.rax as i64 == 0 && task.waitid_info != 0 {
                 let mut identity = 0u64;
                 if ptrace(
@@ -6180,7 +6280,10 @@ fn supervise_native(
             task.close_range_first = -1;
             task.close_range_last = -1;
             tasks[task_index] = Some(task);
-            if ptrace(PTRACE_CONT, host_pid, 0, 0) < 0 {
+            let signal = if task.clone_call.sigchld { 17 } else { 0 };
+            task.clone_call.sigchld = false;
+            tasks[task_index] = Some(task);
+            if ptrace(PTRACE_CONT, host_pid, 0, signal) < 0 {
                 native_fail(instance, pid, b"native resume failed");
             }
             continue;
@@ -6506,11 +6609,16 @@ fn supervise_native(
                 }
                 _ => false,
             };
-        let local_policy_denied =
-            path_policy_denied || setid_policy_denied || device_node_policy_denied;
+        let clone_memory_denied = mode == 3 && native_clone::changes_snapshot(syscall, &registers);
+        let local_policy_denied = clone_memory_denied
+            || path_policy_denied
+            || setid_policy_denied
+            || device_node_policy_denied;
         if local_policy_denied {
             write_all(b"GINUX_POLICY_AUDIT: action=deny policy=");
-            write_all(if path_policy_denied {
+            write_all(if clone_memory_denied {
+                b"clone-arguments"
+            } else if path_policy_denied {
                 b"filesystem-write"
             } else if setid_policy_denied {
                 b"setid"
@@ -8832,6 +8940,48 @@ fn supervise_native(
                     native_fail(instance, pid, b"native proc fd link emulation failed");
                 }
             }
+            Action::Mediate if mode == 3 && syscall == 435 => {
+                let snapshot = native_clone::Pending::snapshot(host_pid, task_index, &registers)
+                    .and_then(|mut snapshot| {
+                        if snapshot.flags() & 0x2_0000_0000 != 0 {
+                            let owned = native_virtual_kernel_fd(
+                                &virtual_kernel_fds,
+                                host_pid,
+                                snapshot.cgroup() as i64,
+                            )
+                            .is_some_and(|entry| {
+                                virtual_kernel_state
+                                    .cgroup_directory_exists(&entry.path[..entry.path_len])
+                            });
+                            if !owned {
+                                return Err(-EBADF);
+                            }
+                            snapshot.clear_cgroup();
+                        }
+                        Ok(snapshot)
+                    });
+                task.awaiting_exit = true;
+                match snapshot {
+                    Ok(snapshot) => {
+                        task.clone_call = snapshot;
+                        task.clone_call.map(&mut registers);
+                        line(b"mediate surface=immutable-clone-arguments result=pending");
+                    }
+                    Err(error) => {
+                        write_all(b"emulate surface=immutable-clone-arguments result=");
+                        write_i64(error);
+                        write_all(b"\n");
+                        registers.orig_rax = u64::MAX;
+                        task.override_exit = true;
+                        task.override_result = error;
+                    }
+                }
+                if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
+                {
+                    native_fail(instance, pid, b"native clone snapshot setup failed");
+                }
+            }
             Action::Mediate if native_arguments_allowed(syscall, &registers, mode) => {
                 if cgroup_procs_path {
                     task.pending_cgroup_procs_open = true;
@@ -8844,65 +8994,6 @@ fn supervise_native(
                 }
                 if mode == 3 && syscall == 5 {
                     task.pending_stat = registers.rsi as usize;
-                }
-                // The cgroup descriptor is owned by the virtual kernel tree,
-                // not by the host. Validate it before removing the host flag;
-                // the child remains in the parent's host cgroup. This is not
-                // host cgroup placement or enforcement of virtual membership.
-                const CLONE_INTO_CGROUP: u64 = 0x2_0000_0000;
-                if mode == 3 && syscall == 435 && registers.rsi >= 88 {
-                    let address = registers.rdi as usize;
-                    let translation = read_tracee_u64_pair(host_pid, address)
-                        .ok_or(-EFAULT)
-                        .and_then(|[flags, _]| {
-                            if flags & CLONE_INTO_CGROUP == 0 {
-                                return Ok(());
-                            }
-                            let at = address.checked_add(80).ok_or(-EFAULT)?;
-                            let mut cgroup = 0u64;
-                            if ptrace(
-                                PTRACE_PEEKDATA,
-                                host_pid,
-                                at,
-                                &mut cgroup as *mut _ as usize,
-                            ) < 0
-                            {
-                                return Err(-EFAULT);
-                            }
-                            let owned = native_virtual_kernel_fd(
-                                &virtual_kernel_fds,
-                                host_pid,
-                                cgroup as i64,
-                            )
-                            .is_some_and(|entry| {
-                                virtual_kernel_state
-                                    .cgroup_directory_exists(&entry.path[..entry.path_len])
-                            });
-                            if !owned {
-                                return Err(-EBADF);
-                            }
-                            write_tracee_bytes_result(
-                                host_pid,
-                                address,
-                                &(flags & !CLONE_INTO_CGROUP).to_ne_bytes(),
-                            )
-                        });
-                    if let Err(error) = translation {
-                        write_all(b"emulate surface=virtual-cgroup-clone result=");
-                        write_i64(error);
-                        write_all(b"\n");
-                        registers.orig_rax = u64::MAX;
-                        task.awaiting_exit = true;
-                        task.override_exit = true;
-                        task.override_result = error;
-                        tasks[task_index] = Some(task);
-                        if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
-                            || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
-                        {
-                            native_fail(instance, pid, b"native clone3 cgroup denial failed");
-                        }
-                        continue;
-                    }
                 }
                 if mode == 3 && syscall == ginux_core::SYS_PIDFD_OPEN {
                     let selected = registers.rdi as u32;
@@ -9135,6 +9226,34 @@ fn supervise_native(
         }
         tasks[task_index] = Some(task);
     }
+}
+
+fn native_clone_start_child(task: &mut NativeSupervisorTask) -> Option<()> {
+    if task.clone_call.phase != native_clone::Phase::Child {
+        return Some(());
+    }
+    let mut registers = core::mem::MaybeUninit::<UserRegs>::uninit();
+    if ptrace(
+        PTRACE_GETREGS,
+        task.host_pid,
+        0,
+        registers.as_mut_ptr() as usize,
+    ) < 0
+    {
+        return None;
+    }
+    let mut registers = unsafe { registers.assume_init() };
+    task.clone_call.unmap(&mut registers, 0);
+    if ptrace(
+        PTRACE_SETREGS,
+        task.host_pid,
+        0,
+        &registers as *const _ as usize,
+    ) < 0
+    {
+        return None;
+    }
+    Some(())
 }
 
 fn native_identity_result(syscall: u64, mode: usize) -> Option<i64> {

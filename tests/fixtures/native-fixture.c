@@ -2,6 +2,10 @@
  * supervision checks. `native` always runs bash with fixed arguments, so the
  * scenario is read from /scenario in the instance root. */
 typedef unsigned long word;
+#ifdef CLONE_SNAPSHOT_COLLISION
+__attribute__((used, section(".ginux_clone_collision")))
+static const char occupied_snapshot_page[4096] = {0x5a};
+#endif
 
 static long call3(long number, word a, word b, word c)
 {
@@ -18,6 +22,18 @@ static long call4(long number, word a, word b, word c, word d)
     register word r10 __asm__("r10") = d;
     __asm__ volatile("syscall" : "=a"(result)
                      : "a"(number), "D"(a), "S"(b), "d"(c), "r"(r10)
+                     : "rcx", "r11", "memory");
+    return result;
+}
+
+static long call6(long number, word a, word b, word c, word d, word e, word f)
+{
+    long result;
+    register word r10 __asm__("r10") = d;
+    register word r8 __asm__("r8") = e;
+    register word r9 __asm__("r9") = f;
+    __asm__ volatile("syscall" : "=a"(result)
+                     : "a"(number), "D"(a), "S"(b), "d"(c), "r"(r10), "r"(r8), "r"(r9)
                      : "rcx", "r11", "memory");
     return result;
 }
@@ -43,6 +59,19 @@ static void print_result(const char *label, long value)
     line[length++] = '\n';
     call3(1, 1, (word)line, length);
 }
+
+long native_clone_spawn(void *args, word size);
+__asm__(".global native_clone_spawn\n"
+        "native_clone_spawn:\n"
+        "mov $435, %rax\n"
+        "syscall\n"
+        "test %rax, %rax\n"
+        "jnz 1f\n"
+        "mov $7, %edi\n"
+        "mov $231, %eax\n"
+        "syscall\n"
+        "ud2\n"
+        "1: ret\n");
 
 long native_fixture_main(void)
 {
@@ -126,6 +155,101 @@ long native_fixture_main(void)
         print_result("GINUX_FIXTURE: child-status=", (status >> 8) & 0xff);
         return 0;
     }
+    case 'a': {
+        struct clone_args { word flags, pidfd, child_tid, parent_tid, exit_signal,
+            stack, stack_size, tls, set_tid, set_tid_size, cgroup; };
+        long cgroup = call3(2, (word)"/sys/fs/cgroup", 0x10000, 0);
+        struct clone_args *args = (void *)call6(9, 0, 4096, 3, 0x22, -1, 0);
+        if ((word)args > (word)-4096) return 83;
+        args->flags = 0x300000000UL; /* INTO_CGROUP and CLEAR_SIGHAND */
+        args->exit_signal = 17; args->cgroup = cgroup;
+        struct { word handler, flags, restorer, mask; } action = {0x1234, 0, 0, 0}, old = {0};
+        if (call4(13, 10, (word)&action, 0, 8) != 0) return 84;
+        if (call3(10, (word)args, 4096, 1) != 0) return 85;
+        long pid = call3(435, (word)args, sizeof *args, 0);
+        if (pid == 0) {
+            if (call4(13, 10, 0, (word)&old, 8) != 0 || old.handler != 0) return 86;
+            return args->flags == 0x300000000UL ? 7 : 87;
+        }
+        int status = 0;
+        print_result("GINUX_FIXTURE: readonly-clone=", pid > 0 && call4(61, pid, (word)&status, 0, 0) == pid && status == 1792);
+        print_result("GINUX_FIXTURE: readonly-unchanged=", args->flags == 0x300000000UL);
+        pid = native_clone_spawn(args, 96); /* zero extension tail */
+        print_result("GINUX_FIXTURE: clone-zero-tail=", pid > 0 && call4(61, pid, (word)&status, 0, 0) == pid && status == 1792);
+        word child_stack = call6(9, 0, 16384, 3, 0x22, -1, 0);
+        call3(10, (word)args, 4096, 3);
+        args->flags = 0x300004100UL; /* VM | VFORK | CLEAR_SIGHAND | INTO_CGROUP */
+        args->stack = child_stack; args->stack_size = 16384;
+        call3(10, (word)args, 4096, 1);
+        pid = native_clone_spawn(args, 88);
+        print_result("GINUX_FIXTURE: clone-vfork=", pid > 0 && call4(61, pid, (word)&status, 0, 0) == pid && status == 1792);
+        print_result("GINUX_FIXTURE: vfork-unchanged=", args->flags == 0x300004100UL && args->stack == child_stack && args->stack_size == 16384);
+        call3(10, (word)args, 4096, 3);
+        args->flags = 0x300000000UL; args->stack = 0; args->stack_size = 0;
+        call3(10, (word)args, 4096, 1);
+        print_result("GINUX_FIXTURE: clone-short=", call3(435, (word)args, 63, 0));
+        print_result("GINUX_FIXTURE: clone-large=", call3(435, (word)args, 4097, 0));
+        print_result("GINUX_FIXTURE: clone-unreadable=", call3(435, 1, 88, 0));
+        print_result("GINUX_FIXTURE: clone-short-cgroup=", call3(435, (word)args, 80, 0));
+        call3(10, (word)args, 4096, 3);
+        args->flags = 0x200010000UL; /* invalid THREAD without SIGHAND */
+        call3(10, (word)args, 4096, 1);
+        print_result("GINUX_FIXTURE: clone-kernel-error=", call3(435, (word)args, 88, 0));
+        print_result("GINUX_FIXTURE: error-unchanged=", args->flags == 0x200010000UL);
+        call3(10, (word)args, 4096, 3);
+        ((char *)args)[88] = 1;
+        print_result("GINUX_FIXTURE: clone-tail=", call3(435, (word)args, 89, 0));
+        ((char *)args)[88] = 0;
+        args->flags = 0; /* version 0 remains a real clone3 */
+        pid = call3(435, (word)args, 64, 0);
+        if (pid == 0) return 7;
+        print_result("GINUX_FIXTURE: clone-version0=", pid > 0 && call4(61, pid, (word)&status, 0, 0) == pid && status == 1792);
+        args->flags = 0x300000000UL;
+        call3(10, (word)args, 4096, 1);
+        const word reserved = 0x600000000000UL;
+        print_result("GINUX_FIXTURE: snapshot-mmap=", call6(9, reserved, 4096, 3, 0x100022, -1, 0));
+        print_result("GINUX_FIXTURE: snapshot-mprotect=", call3(10, reserved, 4096, 3));
+        print_result("GINUX_FIXTURE: snapshot-munmap=", call3(11, reserved, 4096, 0));
+        print_result("GINUX_FIXTURE: snapshot-madvise=", call3(28, reserved, 4096, 4));
+        print_result("GINUX_FIXTURE: snapshot-mremap=", call6(25, (word)args, 4096, 4096, 3, reserved, 0));
+        long repeated = 0;
+        for (int round = 0; round < 160; ++round) {
+            pid = call3(435, (word)args, 88, 0);
+            if (pid == 0) return 7;
+            if (pid <= 0 || call4(61, pid, (word)&status, 0, 0) != pid || status != 1792) break;
+            ++repeated;
+        }
+        print_result("GINUX_FIXTURE: snapshot-repeated=", repeated);
+        return 0;
+    }
+    case 'u': {
+        struct { word flags, pidfd, child_tid, parent_tid, exit_signal, stack,
+            stack_size, tls, set_tid, set_tid_size, cgroup; } args = {0};
+        args.flags = 0x300000000UL; args.exit_signal = 17;
+        args.cgroup = call3(2, (word)"/sys/fs/cgroup", 0x10000, 0);
+        print_result("GINUX_FIXTURE: race-args=", (word)&args);
+        long pid = call3(435, (word)&args, sizeof args, 0);
+        if (pid == 0) return 7;
+        int status = 0;
+        print_result("GINUX_FIXTURE: race-child=", pid > 0 && call4(61, pid, (word)&status, 0, 0) == pid && status == 1792);
+        print_result("GINUX_FIXTURE: race-caller-mutation=", args.flags == 0x8000000200000000UL);
+        return 0;
+    }
+#ifdef CLONE_SNAPSHOT_COLLISION
+    case 'k': {
+        struct { word flags, pidfd, child_tid, parent_tid, exit_signal, stack,
+            stack_size, tls, set_tid, set_tid_size, cgroup; } args = {0};
+        args.flags = 0x200000000UL; args.exit_signal = 17;
+        args.cgroup = call3(2, (word)"/sys/fs/cgroup", 0x10000, 0);
+        print_result("GINUX_FIXTURE: snapshot-collision=", call3(435, (word)&args, sizeof args, 0));
+        print_result("GINUX_FIXTURE: collision-input=", args.flags == 0x200000000UL);
+        const volatile unsigned char *page = (void *)0x600000000000UL;
+        int intact = page[0] == 0x5a;
+        for (int i = 1; i < 4096; ++i) if (page[i] != 0) intact = 0;
+        print_result("GINUX_FIXTURE: collision-mapping=", intact);
+        return 0;
+    }
+#endif
     default:
         return 81;
     }
