@@ -207,6 +207,10 @@ ginux instance status rocky
 ginux instance start rocky --attach
 ```
 
+Syscall auditing is disabled by default. Add `--audit` to `instance start` to
+record per-syscall decisions in the instance's `audit.log`; audit records are
+kept separate from the attached console.
+
 The instance specification supports typed recipe overrides, ingress and egress
 contract policy, volumes, virtual identity, and ordered pre-boot hooks. Host
 network attachment and translated ports are deployment settings, supplied as

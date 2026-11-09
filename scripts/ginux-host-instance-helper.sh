@@ -12,7 +12,7 @@ usage() {
     printf '%s\n' 'usage: ginux instance create NAME FILE [--set KEY=TOML_VALUE]... [--network ATTACHMENT] [--forward SPEC]...' >&2
     printf '%s\n' '       ginux instance set NAME [--network ATTACHMENT] [--forward SPEC]...' >&2
     printf '%s\n' '       ginux instance list' >&2
-    printf '%s\n' '       ginux instance start NAME [--attach]' >&2
+    printf '%s\n' '       ginux instance start NAME [--attach] [--audit]' >&2
     printf '%s\n' '       ginux instance attach NAME' >&2
     printf '%s\n' '       ginux instance status NAME' >&2
     printf '%s\n' '       ginux instance stop NAME' >&2
@@ -564,13 +564,25 @@ status_instance() {
 }
 
 start_instance() {
-    test "$#" -ge 1 && test "$#" -le 2 || usage
+    test "$#" -ge 1 || usage
     name=$1
+    shift
     start_mode=detached
-    if test "$#" -eq 2; then
-        test "$2" = --attach || usage
-        start_mode=attached
-    fi
+    start_audit=false
+    while test "$#" -gt 0; do
+        case $1 in
+            --attach)
+                test "$start_mode" = detached || usage
+                start_mode=attached
+                ;;
+            --audit)
+                test "$start_audit" = false || usage
+                start_audit=true
+                ;;
+            *) usage ;;
+        esac
+        shift
+    done
     validate_name "$name"
     directory=$(instance_dir "$name")
     test -d "$directory" || { printf '%s: not found\n' "$name" >&2; exit 66; }
@@ -587,7 +599,7 @@ start_instance() {
     : >"$directory/audit.log"
     : >"$directory/console.log"
 
-    nohup "$0" supervise "$name" >/dev/null 2>&1 </dev/null &
+    nohup "$0" supervise "$name" "$start_audit" >/dev/null 2>&1 </dev/null &
     pid=$!
     record_supervisor "$directory" "$pid"
     sleep 1
@@ -605,8 +617,13 @@ start_instance() {
 }
 
 supervise_instance() {
-    test "$#" -eq 1 || usage
+    test "$#" -eq 2 || usage
     name=$1
+    audit_override=$2
+    case $audit_override in
+        true|false) ;;
+        *) usage ;;
+    esac
     validate_name "$name"
     directory=$(instance_dir "$name")
     test -d "$directory" || { printf '%s: not found\n' "$name" >&2; exit 66; }
@@ -615,7 +632,7 @@ supervise_instance() {
     # Let script(1) provide the pseudo-terminal, but record only the runtime
     # stream. Its normal typescript header/footer are implementation details,
     # not instance console output.
-    script -qefE never -c "$0 run-runtime $name" /dev/null \
+    script -qefE never -c "$0 run-runtime $name $audit_override" /dev/null \
         <&9 >>"$directory/console.log" 2>>"$directory/audit.log" &
     console_pid=$!
     wait "$console_pid"
@@ -627,14 +644,25 @@ supervise_instance() {
 }
 
 run_runtime() {
-    test "$#" -eq 1 || usage
+    test "$#" -eq 2 || usage
     name=$1
+    audit_override=$2
+    case $audit_override in
+        true|false) ;;
+        *) usage ;;
+    esac
     validate_name "$name"
     directory=$(instance_dir "$name")
     test -d "$directory" || exit 66
     record_runtime "$directory" "$$"
     materialize_runtime_config \
         "$directory/config.toml" "$directory/deployment.state" "$directory/runtime.toml"
+    if test "$audit_override" = true; then
+        audit_candidate=$directory/runtime.toml.audit.$$
+        "$runtime" config-merge "$directory/runtime.toml" 'audit.mode="stderr"' \
+            >"$audit_candidate"
+        mv "$audit_candidate" "$directory/runtime.toml"
+    fi
     hook_plan=$($runtime hook-plan "$directory/runtime.toml") || exit 65
     hook_count=
     hook_timeout=
@@ -656,14 +684,16 @@ EOF
     hook_index=0
     while test "$hook_index" -lt "$hook_count"; do
         printf 'GINUX_HOOK_AUDIT: action=dispatch index=%s timeout=%s failure=%s context=instance\n' \
-            "$hook_index" "$hook_timeout" "$hook_failure" >&2
+            "$hook_index" "$hook_timeout" "$hook_failure" >>"$directory/audit.log"
         set +e
         timeout --signal=TERM --kill-after=2 "$hook_timeout" \
-            "$runtime" native-hook "$directory/runtime.toml" "$directory/root" "$hook_index"
+            "$runtime" native-hook "$directory/runtime.toml" "$directory/root" "$hook_index" \
+            >>"$directory/audit.log" 2>&1
         hook_status=$?
         set -e
         if test "$hook_status" -eq 0; then
-            printf 'GINUX_HOOK_AUDIT: action=complete index=%s result=pass\n' "$hook_index" >&2
+            printf 'GINUX_HOOK_AUDIT: action=complete index=%s result=pass\n' \
+                "$hook_index" >>"$directory/audit.log"
         else
             if test "$hook_status" -eq 124 || test "$hook_status" -eq 137; then
                 hook_result=timeout
@@ -671,7 +701,7 @@ EOF
                 hook_result=failed
             fi
             printf 'GINUX_HOOK_AUDIT: action=complete index=%s result=%s status=%s\n' \
-                "$hook_index" "$hook_result" "$hook_status" >&2
+                "$hook_index" "$hook_result" "$hook_status" >>"$directory/audit.log"
             if test "$hook_failure" = stop; then
                 exit "$hook_status"
             fi
