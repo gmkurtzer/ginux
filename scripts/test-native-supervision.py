@@ -24,9 +24,22 @@ def main():
         (root / "usr/bin/bash").chmod(0o755)
         work.chmod(0o755)
 
-        def run(scenario):
+        configured = work / "configured.toml"
+        configured.write_text(config.read_text().replace('init = "/bin/bash"',
+            'init = "/usr/bin/bash"') + """
+[contract.filesystem]
+read = ["/"]
+write = ["/"]
+create = ["/"]
+[contract.kernel]
+proc_read = ["/"]
+sys_read = ["/"]
+""")
+
+        def run(scenario, instance=config):
             (root / "scenario").write_text(scenario)
-            proc = subprocess.run([str(work / "ginux"), "native", str(config), str(root)],
+            proc = subprocess.run([str(work / "ginux"), "native", str(instance), str(root)]
+                                  + (["configured"] if instance == configured else []),
                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=20)
             return proc.returncode, proc.stdout.decode(errors="replace")
 
@@ -67,6 +80,25 @@ def main():
               and ("GINUX_INSTANCE: failed reason=native requires the x86-64 syscall ABI" in out
                    or "GINUX_INSTANCE: failed reason=unexpected native trace stop" in out),
               code, out)
+        # Upstream owns cgroups in memory. Retain the public API and
+        # containment regressions without requiring obsolete host files.
+        outside = work / "outside"
+        outside.mkdir()
+        sentinel = outside / "sentinel"
+        sentinel.write_bytes(b"preserve")
+        (root / "sys/fs/cgroup").mkdir(parents=True)
+        (root / "sys/fs/cgroup/escape").symlink_to(outside)
+        code, out = run("mkdir-cgroup", configured)
+        fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
+        check("virtual cgroup mkdir and containment", code == 0 and fixture == [
+            "GINUX_FIXTURE: mkdir=0", "GINUX_FIXTURE: procs-open-ok=1",
+            "GINUX_FIXTURE: procs-write=2", "GINUX_FIXTURE: mkdir-again=-17",
+            "GINUX_FIXTURE: mkdirat=0", "GINUX_FIXTURE: mkdirat-relative=0",
+            "GINUX_FIXTURE: events-open-ok=1", "GINUX_FIXTURE: kill-open-ok=1",
+            "GINUX_FIXTURE: mkdir-via-symlink=-2"]
+            and sentinel.read_bytes() == b"preserve"
+            and sorted(p.name for p in outside.iterdir()) == ["sentinel"]
+            and sorted(p.name for p in (root / "sys/fs/cgroup").iterdir()) == ["escape"], code, out)
     print("test-native-supervision: PASS")
 
 

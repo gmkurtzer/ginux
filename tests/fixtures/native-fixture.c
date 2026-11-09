@@ -101,6 +101,31 @@ long native_fixture_main(void)
         print_result("GINUX_FIXTURE: pi_flags_word=", pi_flags_word);
         return 0;
     }
+    case 'm': {
+        /* mkdir in the virtual cgroup tree creates the interface files a
+         * service manager attaches through, and stays inside the instance
+         * root even through a symlink in the tree. */
+        long made = call3(83, (word)"/sys/fs/cgroup/ginux-test.slice", 0755, 0);
+        long procs = call4(257, (word)-100, (word)"/sys/fs/cgroup/ginux-test.slice/cgroup.procs",
+                           1 /* O_WRONLY */, 0);
+        print_result("GINUX_FIXTURE: mkdir=", made);
+        print_result("GINUX_FIXTURE: procs-open-ok=", procs >= 0);
+        print_result("GINUX_FIXTURE: procs-write=", procs >= 0 ? call3(1, procs, (word)"0\n", 2) : procs);
+        print_result("GINUX_FIXTURE: mkdir-again=",
+                     call3(83, (word)"/sys/fs/cgroup/ginux-test.slice", 0755, 0));
+        print_result("GINUX_FIXTURE: mkdirat=",
+                     call4(258, -100, (word)"/sys/fs/cgroup/at.slice", 0755, 0));
+        long dir = call3(2, (word)"/sys/fs/cgroup/ginux-test.slice", 0x10000, 0);
+        print_result("GINUX_FIXTURE: mkdirat-relative=",
+                     call4(258, dir, (word)"child.slice", 0755, 0));
+        print_result("GINUX_FIXTURE: events-open-ok=",
+                     call3(2, (word)"/sys/fs/cgroup/ginux-test.slice/cgroup.events", 0, 0) >= 0);
+        print_result("GINUX_FIXTURE: kill-open-ok=",
+                     call3(2, (word)"/sys/fs/cgroup/ginux-test.slice/cgroup.kill", 1, 0) >= 0);
+        print_result("GINUX_FIXTURE: mkdir-via-symlink=",
+                     call3(83, (word)"/sys/fs/cgroup/escape/ginux-cgroup-escape-check", 0755, 0));
+        return 0;
+    }
     default:
         return 81;
     }
