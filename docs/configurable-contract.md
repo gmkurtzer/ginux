@@ -177,3 +177,19 @@ The default Rocky recipe disables auditing. `ginux start NAME --audit`
 enables it for that run and records it in the instance's `audit.log` without
 mixing audit records into the attached console. A recipe may instead request
 persistent auditing with `[audit] mode = "stderr"`.
+
+## Launch enforcement
+
+`ginux launch` checks the resolved contract before workload effects. Explicit
+denials take precedence over allowances. Allowances remain limited by the
+balanced implementation. Audit entries identify the winning operation and
+rule; audit mode `disabled` suppresses decision records while keeping config
+and completion diagnostics. A semantic denial wins, except an explicit syscall denial takes precedence
+over a semantic family that is merely not granted.
+
+Launch rejects explicit denials it cannot enforce, including host vDSO clock
+reads, console input aliases and proc/sys access. It rejects native-only typed
+filesystem, device, process, kernel, network and hook controls rather than
+pretending to enforce them. Launch does not provide native mode's resource
+limits; vcpus and memory_mib are metadata here. The root remains a privileged
+host-path bootstrap. This change does not add storage, network or process lanes.

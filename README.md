@@ -362,8 +362,33 @@ the workload exit code, or `128 + signal` for signal termination. Startup
 failure returns 2; supervision or result-writing failure returns 1. Native
 fork, clone, and subsequent exec are unsupported; fork returns `ENOSYS` until
 child supervision is implemented. Non-x86-64 syscall ABIs and job-control
-group stops fail explicitly. Audit output is capped at 64 KiB plus a truncation
-notice. This path does not implement resource quotas from the instance metadata.
+group stops fail explicitly. The resolved instance contract is checked at every
+workload syscall entry before the balanced policy: a denied syscall or semantic
+operation fails with its errno (EPERM for an explicit deny, ENOSYS when the
+contract does not grant it), and an allowance never widens the balanced surface.
+The contract governs the workload's syscalls, not launch's own bootstrap:
+launch chroots, drops privileges, creates a missing `workdir` and executes
+`init` before it applies.
+Launch maps the path syscalls the balanced policy allows to
+`filesystem.path.read` or `filesystem.path.write` (open by its flags), writes to
+standard output and error to `device.console.write`, and signal, memory,
+credential and terminal-size calls to their families. It cannot tell a
+descriptor stat made through `newfstatat` or `statx` from a path lookup, so
+denying `filesystem.path.read` also fails glibc's `fstat`. Standard output and
+error are the instance console, so a contract must grant `device.console.write`
+for the workload to write to them. A
+standard stream opened read-write on a regular file can still be written
+through a shared mapping. Console input, `/proc`, `/sys` and cgroup access, and
+clock reads, which the host vDSO answers without a syscall, are not enforced: a
+contract that only leaves them ungranted does not withhold them, and one that
+explicitly denies them, or a clock syscall the vDSO serves, is rejected at
+startup rather than started with the denial unenforced. Each audit entry record
+names the contract operation and the policy source and source-rule index of the
+contract rule applied to it, which may be an allowance the balanced policy then overrides; the
+launch header reports the instance and contract digest. Audit output is
+capped at 64 KiB plus a truncation notice; `[audit] mode = "disabled"`
+suppresses decision records. This path does not implement resource quotas
+from the instance metadata.
 
 When requested, the result file is reserved exclusively before launch, with
 mode 0600 and a maximum path length of 512 bytes. Existing files are never

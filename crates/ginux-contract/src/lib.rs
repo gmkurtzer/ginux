@@ -1848,6 +1848,31 @@ impl EffectiveContract {
         self.rules().iter().find(|rule| rule.operation.id == id)
     }
 
+    /// The rule that decides a syscall at runtime. A denial of its semantic
+    /// operation wins, unless the operation is merely not granted and the
+    /// syscall is explicitly denied; otherwise the syscall's own rule decides,
+    /// so a semantic allowance cannot grant a syscall the contract does not
+    /// list or denies.
+    pub fn runtime_rule(&self, number: u64, semantic: Option<&str>) -> Option<&EffectiveRule> {
+        let syscall = self.syscall_rule(number);
+        let explicit_deny = |rule: &EffectiveRule| {
+            matches!(rule.action, Action::Deny(_)) && rule.provenance != Provenance::DefaultDeny
+        };
+        match semantic
+            .and_then(|id| self.operation_rule(id))
+            .filter(|rule| matches!(rule.action, Action::Deny(_)))
+        {
+            Some(rule)
+                if rule.provenance == Provenance::DefaultDeny
+                    && syscall.is_some_and(explicit_deny) =>
+            {
+                syscall
+            }
+            Some(rule) => Some(rule),
+            None => syscall,
+        }
+    }
+
     fn index_syscalls(&mut self) {
         for index in 0..self.len {
             let Some(number) = self.rules[index].operation.abi_number else {
@@ -1860,6 +1885,21 @@ impl EffectiveContract {
                 *slot = index as u16;
             }
         }
+    }
+}
+
+/// The semantic operation of a syscall whose number alone decides it (for
+/// ioctl, together with its request). Path- and descriptor-dependent
+/// operations are classified by the lane that can inspect them.
+pub const fn syscall_semantic_operation(number: u64, request: u64) -> Option<&'static str> {
+    match number {
+        // The kernel reads an ioctl request as a 32-bit value.
+        16 if request as u32 == 0x5413 => Some("ioctl.tty.get_winsize"),
+        9..=12 | 25 | 28 => Some("memory.virtual.manage"),
+        13..=15 | 62 | 127..=130 | 289 | 424 => Some("signal.virtual.deliver"),
+        96 | 228 | 229 => Some("time.clock.read"),
+        105 | 106 | 113 | 114 | 116 | 117 | 119 | 122 | 123 => Some("credential.virtual.set"),
+        _ => None,
     }
 }
 
@@ -2370,6 +2410,73 @@ const fn hash_bytes(mut hash: u64, bytes: &[u8]) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn runtime_rule_keeps_semantic_and_syscall_denials() {
+        let semantic =
+            resolve(b"gate5-balanced-v1", &[], &[], &[b"filesystem.path.write"]).unwrap();
+        let rule = semantic
+            .runtime_rule(2, Some("filesystem.path.write"))
+            .unwrap();
+        assert_eq!(rule.action, Action::Deny(1));
+        assert_eq!(rule.provenance, Provenance::InstanceDeny);
+        assert_eq!(rule.operation.id, "filesystem.path.write");
+        let syscall = resolve(b"gate5-balanced-v1", &[], &[], &[b"syscall.open"]).unwrap();
+        assert_eq!(
+            syscall
+                .runtime_rule(2, Some("filesystem.path.write"))
+                .unwrap()
+                .action,
+            Action::Deny(1)
+        );
+        assert!(syscall
+            .runtime_rule(999, Some("filesystem.path.write"))
+            .is_none());
+        let minimal = resolve(b"minimal-v1", &[], &[b"filesystem.path.read"], &[]).unwrap();
+        assert_eq!(
+            minimal
+                .runtime_rule(2, Some("filesystem.path.read"))
+                .unwrap()
+                .action,
+            Action::Deny(38)
+        );
+        // An explicit syscall denial wins over a family that is only not
+        // granted, so the operator's rule decides and is audited.
+        let write = resolve(b"minimal-v1", &[], &[], &[b"syscall.write"]).unwrap();
+        let rule = write.runtime_rule(1, Some("device.console.write")).unwrap();
+        assert_eq!(rule.action, Action::Deny(1));
+        assert_eq!(rule.operation.id, "syscall.write");
+    }
+
+    #[test]
+    fn syscall_semantic_operations_are_catalogued() {
+        for number in 0..512 {
+            for request in [0, 0x5413] {
+                if let Some(id) = syscall_semantic_operation(number, request) {
+                    assert!(CATALOG.iter().any(|operation| operation.id == id), "{id}");
+                }
+            }
+        }
+        assert_eq!(syscall_semantic_operation(16, 0), None);
+        assert_eq!(
+            syscall_semantic_operation(16, (1 << 32) | 0x5413),
+            Some("ioctl.tty.get_winsize")
+        );
+        assert_eq!(syscall_semantic_operation(0, 0), None);
+        // mremap, madvise, rt_sigreturn (which installs a signal mask),
+        // pidfd_send_signal, setreuid and setregid belong to the family their
+        // syscall acts on, so its denial covers them.
+        for (number, id) in [
+            (25, "memory.virtual.manage"),
+            (28, "memory.virtual.manage"),
+            (15, "signal.virtual.deliver"),
+            (424, "signal.virtual.deliver"),
+            (113, "credential.virtual.set"),
+            (114, "credential.virtual.set"),
+        ] {
+            assert_eq!(syscall_semantic_operation(number, 0), Some(id));
+        }
+    }
 
     #[test]
     fn catalog_is_unique_and_bounded() {

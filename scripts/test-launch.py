@@ -86,6 +86,59 @@ def main():
         invoke(["int80"], 1, "supervisor-error")
         invoke(["descriptor"], 0, "exited")
         invoke(["list"], 0, "exited", stdout=b"input\n")
+        # Instance contract denials reach the workload with EPERM, and audit
+        # records name the rule; cwd exits 91 when its open fails.
+        contract_start = template.index("[contract]")
+        contract_end = template.index("[storage]")
+        original = template[contract_start:contract_end]
+
+        def rules(deny=(), syscall_deny=(), allow=("*",), syscall_allow=("*",)):
+            replacement = ('[contract]\nversion = 1\ncatalog = 2\ndefault = "deny"\n'
+                           + f'allow = {json.dumps(allow)}\ndeny = {json.dumps(deny)}\n'
+                           + '[contract.syscalls]\ncontrol = "paranoid"\ndefault = "deny"\n'
+                           + f'allow = {json.dumps([v.removeprefix("syscall.") for v in syscall_allow])}\ndeny = {json.dumps([v.removeprefix("syscall.") for v in syscall_deny])}\n\n')
+            return {original: replacement}
+
+        def denied(args, code, operation, syscall, *, changes):
+            proc = invoke(args, code, "exited", changes=changes)
+            if not re.search(rb"^ginux: launch contract instance=\S+ digest=[0-9a-f]{64}$",
+                             proc.stderr, re.M):
+                raise RuntimeError("launch did not report its resolved contract")
+            record = (rb"^ginux: audit sequence=\d+ phase=entry syscall=" + str(syscall).encode()
+                      + rb" operation=" + operation.encode()
+                      + rb" policy-source=exact-deny policy-rule=0 action=deny result=-1$")
+            if not re.search(record, proc.stderr, re.M):
+                raise RuntimeError(f"missing winning denial: {proc.stderr!r}")
+
+        denied(["cwd"], 91, "syscall.open", 2, changes=rules(syscall_deny=["syscall.open"]))
+        denied(["cwd"], 0, "syscall.write", 1, changes=rules(deny=["syscall.write"]))
+        denied(["cwd"], 91, "filesystem.path.read", 2, changes=rules(deny=["filesystem.path.read"]))
+        denied(["args", "hidden"], 0, "device.console.write", 1, changes=rules(deny=["device.console.write"]))
+        denied(["handler"], 86, "signal.virtual.deliver", 13, changes=rules(deny=["signal.virtual.deliver"]))
+        for selector in ("device.console.read", "proc.system.read", "sys.device.read",
+                         "time.clock.read", "syscall.clock_gettime"):
+            proc = invoke(["exit"], 2, "supervisor-error", changes=rules(deny=[selector]))
+            if b"reason=unenforced-deny operation=" + selector.encode() not in proc.stderr:
+                raise RuntimeError(f"unenforced denial accepted: {selector}: {proc.stderr!r}")
+        invoke(["exit"], 0, "exited", changes=rules(deny=[
+            "device.mmio.direct", "device.dma.direct", "network.packet.raw", "network.*"]))
+        proc = invoke(["cwd"], 91, "exited", changes=rules(allow=["filesystem.path.read", "syscall.exit"], syscall_allow=["syscall.exit_group"]))
+        if not re.search(rb"operation=syscall.open policy-source=default-deny policy-rule=0 action=deny result=-38", proc.stderr):
+            raise RuntimeError("missing default syscall denial")
+        denied(["args", "hidden"], 0, "syscall.write", 1,
+               changes=rules(allow=["syscall.exit_group"], syscall_deny=["syscall.write"]))
+        # Native typed controls cannot silently become unenforced promises.
+        for section in ('[contract.filesystem]\nwrite = ["/work"]',
+                        '[contract.process]\nmax_processes = 2',
+                        '[contract.kernel]\nproc_read = ["/"]',
+                        '[contract.devices]\nread = ["/dev/null"]'):
+            proc = invoke(["exit"], 2, "supervisor-error", changes={"[storage]": section + "\n[storage]"})
+            if b"launch does not enforce native typed controls" not in proc.stderr:
+                raise RuntimeError(f"typed control did not reach launch validation: {proc.stderr!r}")
+        proc = invoke(["args", "visible"], 0, "exited", stdout=b"visible\n",
+                      changes={'mode = "stderr"': 'mode = "disabled"'})
+        if b"ginux: audit " in proc.stderr:
+            raise RuntimeError("disabled audit emitted a decision record")
         # The thread identity matches the virtual pid: set_tid_address returns
         # it instead of the host tid, and PI futexes, which would store the
         # host tid in the futex word, are denied.
@@ -98,13 +151,20 @@ def main():
             secret.seek(0)
             invoke(["descriptor", str(secret.fileno())], 0, "exited", pass_fds=(secret.fileno(),))
         proc = invoke(["budget"], 0, "exited")
-        if proc.stderr.count(b"audit truncated") != 1 or len(proc.stderr) > 68000:
-            raise RuntimeError("audit output was not bounded")
+        config_begin = proc.stderr.index(b"ginux: effective config begin\n")
+        config_end = proc.stderr.index(b"ginux: effective config end\n")
+        config_bytes = config_end - config_begin
+        trace_bytes = sum(len(line) + 1 for line in proc.stderr.splitlines()
+                          if line.startswith(b"ginux: audit sequence="))
+        if (proc.stderr.count(b"audit truncated") != 1 or trace_bytes > 65536
+                or len(proc.stderr) - config_bytes > 68000):
+            raise RuntimeError(f"audit output was not bounded: trace={trace_bytes}, total={len(proc.stderr)}")
         # The budget drops whole records: the notice is a line of its own and
         # every syscall record before it is complete.
         lines = proc.stderr.splitlines()
         record = re.compile(rb"ginux: audit sequence=\d+ phase=(exit result=-?\d+|"
-                            rb"entry syscall=\d+ action=\S.* result=\S+)")
+                            rb"entry syscall=\d+ operation=\S+ policy-source=\S+ "
+                            rb"(policy-rule=\d+ )?action=\S.* result=\S+)")
         if (b"ginux: audit truncated budget=65536" not in lines
                 or any(line.startswith(b"ginux: audit sequence=") and not record.fullmatch(line)
                        for line in lines)):

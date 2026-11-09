@@ -149,7 +149,7 @@ pub const PTRACE_O_TRACEVFORK: usize = 1 << PTRACE_EVENT_VFORK;
 /// Lane membership by syscall number: the three process-creation entries
 /// plus the two executable-replacement entries belong to the process lane.
 /// Other entries are handled directly by the supervision loop.
-pub fn claims(syscall: u64) -> bool {
+pub const fn claims(syscall: u64) -> bool {
     syscall == SYS_FORK as u64
         || syscall == SYS_CLONE
         || syscall == SYS_VFORK
