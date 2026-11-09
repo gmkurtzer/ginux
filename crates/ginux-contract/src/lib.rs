@@ -1753,6 +1753,8 @@ impl AccessVerb {
 
 #[derive(Clone, Copy)]
 pub struct Recipe<'a> {
+    pub allow: &'a [&'a [u8]],
+    pub deny_all: &'a [&'a [u8]],
     pub read: &'a [&'a [u8]],
     pub write: &'a [&'a [u8]],
     pub execute: &'a [&'a [u8]],
@@ -1761,8 +1763,8 @@ pub struct Recipe<'a> {
     pub process: &'a [&'a [u8]],
     pub system: &'a [&'a [u8]],
     pub deny: &'a [&'a [u8]],
-    pub exact_allow: &'a [&'a [u8]],
-    pub exact_deny: &'a [&'a [u8]],
+    pub syscall_allow: &'a [&'a [u8]],
+    pub syscall_deny: &'a [&'a [u8]],
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1948,13 +1950,19 @@ pub fn resolve_recipe(recipe: Recipe<'_>) -> Result<EffectiveContract, ContractE
             apply_recipe_selector(&mut effective, verb, selector, index, false)?;
         }
     }
-    for (index, selector) in recipe.exact_allow.iter().enumerate() {
+    for (index, selector) in recipe.allow.iter().enumerate() {
+        apply_exact_selector(&mut effective, selector, index, false)?;
+    }
+    for (index, selector) in recipe.syscall_allow.iter().enumerate() {
         apply_exact_selector(&mut effective, selector, index, false)?;
     }
     for (index, selector) in recipe.deny.iter().enumerate() {
         apply_recipe_deny(&mut effective, selector, index, Provenance::RecipeDeny)?;
     }
-    for (index, selector) in recipe.exact_deny.iter().enumerate() {
+    for (index, selector) in recipe.deny_all.iter().enumerate() {
+        apply_exact_selector(&mut effective, selector, index, true)?;
+    }
+    for (index, selector) in recipe.syscall_deny.iter().enumerate() {
         apply_exact_selector(&mut effective, selector, index, true)?;
     }
     effective.digest = contract_digest(&effective);
@@ -2034,30 +2042,37 @@ fn apply_exact_selector(
     deny: bool,
 ) -> Result<(), ContractError> {
     validate_selector(selector)?;
-    if selector.contains(&b'*') {
-        return Err(ContractError::InvalidSelector);
+    let mut matched = 0usize;
+    let mut unsupported = 0usize;
+    for rule in &mut effective.rules[..effective.len] {
+        if !selector_matches(selector, rule.operation.id.as_bytes()) {
+            continue;
+        }
+        if !deny && !matches!(rule.operation.status, Status::Complete | Status::Partial) {
+            unsupported += 1;
+            continue;
+        }
+        matched += 1;
+        rule.action = if deny {
+            Action::Deny(1)
+        } else {
+            rule.operation.action
+        };
+        rule.provenance = if deny {
+            Provenance::ExactDeny
+        } else {
+            Provenance::ExactAllow
+        };
+        rule.source = if deny { "exact-deny" } else { "exact-allow" };
+        rule.source_rule = index as u16;
     }
-    let Some(rule) = effective.rules[..effective.len]
-        .iter_mut()
-        .find(|rule| rule.operation.id.as_bytes() == selector)
-    else {
-        return Err(ContractError::UnmatchedSelector);
-    };
-    if !deny && !matches!(rule.operation.status, Status::Complete | Status::Partial) {
-        return Err(ContractError::UnsupportedPromotion);
+    if matched == 0 {
+        return Err(if unsupported != 0 {
+            ContractError::UnsupportedPromotion
+        } else {
+            ContractError::UnmatchedSelector
+        });
     }
-    rule.action = if deny {
-        Action::Deny(1)
-    } else {
-        rule.operation.action
-    };
-    rule.provenance = if deny {
-        Provenance::ExactDeny
-    } else {
-        Provenance::ExactAllow
-    };
-    rule.source = if deny { "exact-deny" } else { "exact-allow" };
-    rule.source_rule = index as u16;
     Ok(())
 }
 
@@ -2514,6 +2529,8 @@ mod tests {
             b"network.packet.raw".as_slice(),
         ];
         let recipe = resolve_recipe(Recipe {
+            allow: &[],
+            deny_all: &[],
             read: all,
             write: all,
             execute: all,
@@ -2522,8 +2539,8 @@ mod tests {
             process: all,
             system: all,
             deny,
-            exact_allow: &[],
-            exact_deny: &[],
+            syscall_allow: &[],
+            syscall_deny: &[],
         })
         .unwrap();
         let legacy = resolve(b"gate9-systemd-v1", &[], &[], &[]).unwrap();
@@ -2544,6 +2561,8 @@ mod tests {
     #[test]
     fn recipe_denies_win_and_unsupported_authority_cannot_be_promoted() {
         let recipe = resolve_recipe(Recipe {
+            allow: &[],
+            deny_all: &[],
             read: &[b"fs.**"],
             write: &[b"fs.**"],
             execute: &[],
@@ -2552,8 +2571,8 @@ mod tests {
             process: &[],
             system: &[],
             deny: &[b"fs.path.write"],
-            exact_allow: &[],
-            exact_deny: &[],
+            syscall_allow: &[],
+            syscall_deny: &[],
         })
         .unwrap();
         let denied = recipe.operation_rule("filesystem.path.write").unwrap();
@@ -2562,6 +2581,8 @@ mod tests {
         assert_eq!(denied.source_rule, 0);
         assert_eq!(
             resolve_recipe(Recipe {
+                allow: &[],
+                deny_all: &[],
                 read: &[],
                 write: &[],
                 execute: &[],
@@ -2570,8 +2591,8 @@ mod tests {
                 process: &[],
                 system: &[],
                 deny: &[],
-                exact_allow: &[b"device.mmio.direct"],
-                exact_deny: &[],
+                syscall_allow: &[b"device.mmio.direct"],
+                syscall_deny: &[],
             })
             .err(),
             Some(ContractError::UnsupportedPromotion)

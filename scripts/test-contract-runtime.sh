@@ -27,14 +27,14 @@ rocky_ssh "sudo /var/tmp/ginux native /var/tmp/gate10.toml '$instance_root' prob
 grep -Fq 'GINUX_BALANCED_MUTATION: BLOCKED' "$log"
 grep -Fq 'GINUX_BALANCED_NETWORK: BLOCKED' "$log"
 grep -Fqx 'GINUX_NATIVE: supervisor=attached dispatch=paranoid direct-safe-syscalls=0' "$log"
-grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ instance=gate10-deny-socket .*operation=syscall.socket policy-source=deny policy-rule=0 phase=entry syscall=41 action=deny result=-1$' "$log"
+grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ instance=gate10-deny-socket .*operation=syscall.socket policy-source=exact-deny policy-rule=0 phase=entry syscall=41 action=deny result=-1$' "$log"
 rocky_ssh "test ! -e '$instance_root/tmp/ginux-mutation'"
 
 rocky_ssh "sudo /var/tmp/ginux native /var/tmp/gate11-selective.toml '$instance_root' probe" >"$selective_log" 2>&1
 grep -Fq 'GINUX_BALANCED_MUTATION: BLOCKED' "$selective_log"
 grep -Fq 'GINUX_BALANCED_NETWORK: BLOCKED' "$selective_log"
 grep -Fqx 'GINUX_NATIVE: supervisor=attached dispatch=selective direct-safe-syscalls=1' "$selective_log"
-grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ instance=gate11-selective-deny .*operation=syscall.socket policy-source=deny policy-rule=0 phase=entry syscall=41 action=deny result=-1$' "$selective_log"
+grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ instance=gate11-selective-deny .*operation=syscall.socket policy-source=exact-deny policy-rule=0 phase=entry syscall=41 action=deny result=-1$' "$selective_log"
 grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ instance=gate11-selective-deny .*operation=syscall.getpid .*phase=entry syscall=39 action=emulate surface=virtual-identity result=4242$' "$selective_log"
 rocky_ssh "test ! -e '$instance_root/tmp/ginux-mutation'"
 

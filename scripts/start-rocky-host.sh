@@ -19,6 +19,16 @@ if [ -f "$ROCKY_PID_FILE" ]; then
     rm -f "$ROCKY_PID_FILE"
 fi
 
+if command -v lsof >/dev/null 2>&1; then
+    listener=$(lsof -nP -t -iTCP:"$ROCKY_SSH_PORT" -sTCP:LISTEN 2>/dev/null | sed -n '1p')
+    if [ -n "$listener" ]; then
+        printf 'Rocky host SSH port %s is already used by PID %s.\n' \
+            "$ROCKY_SSH_PORT" "$listener" >&2
+        printf 'Run ./scripts/stop-rocky-host.sh or choose another port with ROCKY_SSH_PORT=<port>.\n' >&2
+        exit 1
+    fi
+fi
+
 base=${ROCKY_IMAGE_PATH:-build/cache/rocky/$ROCKY_IMAGE_NAME}
 case $base in
     /*) ;;

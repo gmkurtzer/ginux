@@ -20,10 +20,22 @@ profile = "balanced"
 backend = "ptrace-native"
 
 [contract]
-profile = "gate9-systemd-v1"
-templates = ["network-client-v1"]
-allow = ["syscall.read*"]
-deny = ["ioctl.*"]
+version = 1
+catalog = 2
+default = "deny"
+allow = ["*"]
+deny = ["device.mmio.direct", "device.dma.direct", "network.packet.raw", "ioctl.*"]
+
+[contract.syscalls]
+control = "selective"
+default = "deny"
+allow = ["*"]
+deny = []
+
+[contract.network]
+default = "deny"
+inbound = ["tcp:80"]
+outbound = ["tcp:443", "udp:53"]
 
 [storage]
 assignments = ["root-overlay"]
@@ -36,13 +48,6 @@ assignments = ["console", "null", "zero", "random", "net0"]
 
 [network]
 backend = "shared"
-interface = "eth0:1"
-source = "192.0.2.10"
-ingress_allow = ["tcp:80"]
-ingress_deny = ["tcp:22"]
-egress_allow = ["tcp:443", "udp:53"]
-egress_deny = ["tcp:25"]
-port_forwards = ["tcp/eth0:1/8080/80"]
 
 [access]
 uid = 0

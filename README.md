@@ -170,13 +170,14 @@ make run-host           # general interactive Rocky host with Ginux installed
 make demo-gate-9        # Gate 9 checkpoint through the same host workflow
 ```
 
-Instance recipes may select the syscall dispatch model under `[execution]`:
+Instance recipes select syscall control under `[contract.syscalls]`:
 
 ```toml
-[execution]
-profile = "balanced"
-backend = "ptrace-native"
-dispatch = "selective" # default; use "paranoid" for all-syscall mediation
+[contract.syscalls]
+control = "selective" # default; use "paranoid" for all-syscall mediation
+default = "deny"
+allow = ["*"]
+deny = []
 ```
 
 `selective` is the default and permits direct host execution only
@@ -206,19 +207,38 @@ ginux instance status rocky
 ginux instance start rocky --attach
 ```
 
-The instance specification also supports typed CLI overrides, network
-interface/source selection, ingress and egress port policy, translated ports,
-volumes, virtual identity, and ordered pre-boot hooks. Hooks run only as
+Syscall auditing is disabled by default. Add `--audit` to `instance start` to
+record per-syscall decisions in the instance's `audit.log`; audit records are
+kept separate from the attached console.
+
+The instance specification supports typed recipe overrides, ingress and egress
+contract policy, volumes, virtual identity, and ordered pre-boot hooks. Host
+network attachment and translated ports are deployment settings, supplied as
+repeatable flags when the instance is created or changed:
+
+```sh
+ginux instance create web /etc/ginux/examples/rocky-systemd.toml \
+    --network eth0:1 \
+    --forward protocol=tcp,external_port=8080,instance_port=80 \
+    --forward protocol=tcp,external_port=8443,instance_port=443
+ginux instance set web \
+    --network default \
+    --forward none
+```
+
+Omitting `--network` uses the host's default network. Multiple flags are
+validated and persisted atomically; an invalid combination changes nothing.
+Hooks run only as
 mediated instance processes; Ginux does not support arbitrary host-context hooks.
 See [Gate 9.75 instance specification](docs/gate-9.75-instance-specification.md)
 for the schema, precedence rules, examples, and verification targets.
 
-The same instance file contains a self-contained `[userspace.contract]`
-recipe. Human-facing `read`, `write`, `execute`, `connect`, `listen`, `process`,
-and `system` rules use bounded `*` and recursive `**` resource selectors;
-explicit denies always win. The contract is part of the instance rather than a
-separate operator object. Validate and inspect the complete instance recipe
-before launch:
+The same instance file contains a self-contained hierarchical contract under
+`[contract]` and its `syscalls`, `filesystem`, `network`, `devices`,
+`privileges`, `process`, and `kernel` subsections. Syscall names accept bounded
+globs compiled against the pinned catalog; explicit denies always win. The
+contract is part of the instance rather than a separate operator object.
+Validate and inspect the complete instance recipe before launch:
 
 ```sh
 ginux instance validate /etc/ginux/examples/rocky-systemd.toml

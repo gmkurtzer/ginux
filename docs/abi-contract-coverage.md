@@ -17,11 +17,11 @@ The catalog is the reviewable inventory used to normalize instance contracts. An
 
 ## Versioned contract inputs
 
-- Primary input: one self-contained `[userspace.contract]` recipe in the instance TOML
-- Human access groups: `read`, `write`, `execute`, `connect`, `listen`, `process`, and `system`
-- Selectors: component-bounded `*` and recursive `**` over canonical resources; `fs` and `dev` are readable aliases
-- Precedence: default deny, access grants, advanced exact grants, resource denies, then advanced exact denies
-- Migration-only inputs: versioned Gate 10 profiles, templates, and canonical operation selectors remain accepted but cannot be mixed with a recipe
+- Primary input: one hierarchical `[contract]` recipe in the instance TOML
+- Surfaces: `syscalls`, `filesystem`, `network`, `devices`, `privileges`, `process`, and synthetic `kernel` views
+- Selectors: component-aware canonical operation selectors and bounded syscall-name globs compiled against this catalog
+- Precedence: default deny, broad grants, surface-specific grants, then explicit denies
+- Replaced inputs: `[userspace.*]` tables and execution-level dispatch fields fail closed
 - Runtime representation: an explicit operation table tied to catalog version `2` and a deterministic digest
 
 ## Operation catalog

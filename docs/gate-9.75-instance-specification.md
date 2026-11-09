@@ -7,8 +7,9 @@ definition. Values are applied in this order:
 2. the configuration file; and
 3. typed `--set KEY=TOML_VALUE` command-line overrides.
 
-The result is normalized, validated, and saved as the instance's immutable
-effective configuration before any managed process starts. Unknown fields,
+The portable recipe is normalized, validated, and saved before any managed
+process starts. Host-specific network attachment and translated ports are
+validated separately and persisted as deployment state. Unknown fields,
 invalid combinations, unavailable network attachments, conflicting translated
 ports, protected virtual-tree volume mappings, and host-context hooks fail
 before startup.
@@ -20,9 +21,9 @@ before startup.
 | `instance`, `identity` | Instance ID, hostname, image, init, arguments, environment, and work directory |
 | `resources` | Virtual CPU and memory assignment |
 | `execution` | Explicit runtime backend and security/performance profile |
-| `userspace.contract` | Self-contained human access rules, explicit denies, catalog version, and derived digest |
+| `contract` and its subsections | Self-contained operation, syscall, filesystem, network, device, privilege, process, and synthetic-kernel policy |
 | `storage`, `volumes`, `devices` | Instance storage, reviewed host mappings, and assigned device frontends |
-| `network` | Backend, host interface/source, ingress/egress policy, and translated ports |
+| `network` | Instance network backend; access policy belongs to `contract.network` |
 | `access` | Initial virtual UID and GID |
 | `hooks` | Ordered instance-context pre-boot commands, timeout, and failure policy |
 | `lifecycle`, `audit`, `failure` | Stop bound, audit mode, and runtime failure behavior |
@@ -39,40 +40,38 @@ Create an instance from a file and override only the named values:
 ginux instance create rocky /etc/ginux/rocky.toml \
     --set resources.vcpus=4 \
     --set 'identity.hostname="build.example"' \
-    --set 'network.interface="eth0"'
+    --network eth0 \
+    --forward protocol=tcp,external_port=8080,instance_port=80
 ```
 
-The saved `/var/lib/ginux/instances/rocky/config.toml` is the exact normalized
-configuration used by startup. Unspecified file values and defaults remain
-unchanged. `ginux config-merge FILE KEY=TOML_VALUE...` prints the same
-normalized result without creating an instance.
+The saved `/var/lib/ginux/instances/rocky/config.toml` is the normalized
+portable recipe. `/var/lib/ginux/instances/rocky/deployment.state` stores the
+host-specific network settings, and `runtime.toml` is materialized from both
+before startup. Multiple flags are validated and committed atomically.
+Unspecified file values and defaults remain unchanged. `ginux config-merge
+FILE KEY=TOML_VALUE...` prints a normalized recipe without creating an
+instance.
 
 ## Shared networking and translated ports
 
-If the `network` section is omitted, the instance uses the host-shared backend.
-An explicit interface or source address selects the host attachment used by
-mediated sockets. The address must exist on that interface when the instance is
-created; if only an interface is supplied, Ginux records its resolved IPv4
-source in the effective configuration.
+If `--network` is omitted, the instance uses the host's default network. An
+explicit attachment selects the host interface or alias used by mediated
+sockets. It must exist when the instance is created or changed.
 
-Rules use `tcp:PORT`, `udp:PORT`, or a `*` port. Deny rules take precedence;
-an empty allow list means that otherwise-undisallowed ports remain available.
-A translation uses `protocol/attachment/external/internal`, for example:
+Contract rules use `tcp:PORT`, `udp:PORT`, or a `*` port. A translation names
+both sides explicitly:
 
-```toml
-[network]
-backend = "shared"
-interface = "eth0:1"
-source = "192.0.2.10"
-ingress_allow = ["tcp:80"]
-egress_deny = ["tcp:25"]
-port_forwards = ["tcp/eth0:1/8080/80"]
+```sh
+ginux instance set rocky \
+    --network eth0:1 \
+    --forward protocol=tcp,external_port=8080,instance_port=80
 ```
 
 The instance binds and observes port 80 while Ginux owns host port 8080 on the
 selected attachment. Untranslated binds retain ordinary host conflict
-semantics. A translated host port or instance port may appear only once per
-protocol, preventing ambiguous ownership.
+semantics. A translated external port or instance port may appear only once
+per protocol, preventing ambiguous ownership. `--network default` clears an
+explicit attachment; `--forward none` clears all translations.
 
 ## Pre-boot hooks
 

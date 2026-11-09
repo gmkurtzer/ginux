@@ -165,10 +165,28 @@ expect {
 }
 send -- "ginux\r"
 expect {
+    -re {initialize_job_control: no job control} { puts stderr "instance shell job control initialization failed"; exit 202 }
     -re {\[root@ginux [^]]+\]# } {}
     timeout { puts stderr "interactive instance shell timed out"; exit 88 }
     eof { puts stderr "instance shell exited early"; exit 89 }
 }
+send -- "sleep 30\r"
+after 1000
+send -- "\003"
+expect {
+    -re {\[root@ginux [^]]+\]# } {}
+    -re {rocky: detached} { puts stderr "Ctrl-C detached from the instance"; exit 196 }
+    -re {\[ginux@ginux-rocky [^]]+\]\$ } { puts stderr "Ctrl-C killed the attach command"; exit 197 }
+    timeout { puts stderr "Ctrl-C did not interrupt the instance foreground process"; exit 198 }
+    eof { puts stderr "Ctrl-C terminated the host session"; exit 199 }
+}
+send -- "printf 'GINUX_INTERRUPT_%s\\n' 'FORWARDED: PASS'\r"
+expect {
+    -re {GINUX_INTERRUPT_FORWARDED: PASS} {}
+    timeout { puts stderr "instance console was unusable after Ctrl-C"; exit 200 }
+    eof { puts stderr "instance exited after Ctrl-C"; exit 201 }
+}
+expect -re {\[root@ginux [^]]+\]# }
 send -- "printf 'GINUX_HUMAN_INTERACTIVE: PASS\\n'\r"
 expect {
     -re {GINUX_HUMAN_INTERACTIVE: PASS} {}
@@ -344,14 +362,14 @@ expect {
     eof { puts stderr "Rocky host shell exited before return"; exit 93 }
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
-send -- "grep -Fq 'GINUX_NATIVE_CHECK: PASS' /var/lib/ginux/instances/rocky/audit.log && ginux instance status rocky | grep -Fq 'state: stopped' && printf 'GINUX_INTERACTIVE_SHUTDOWN: PASS\\n'\r"
+send -- "grep -Fq 'GINUX_NATIVE_CHECK: PASS' /var/lib/ginux/instances/rocky/audit.log && ! grep -Fq 'GINUX_NATIVE_AUDIT:' /var/lib/ginux/instances/rocky/audit.log && ginux instance status rocky | grep -Fq 'state: stopped' && printf 'GINUX_INTERACTIVE_%s\\n' 'SHUTDOWN: PASS'\r"
 expect {
     -re {GINUX_INTERACTIVE_SHUTDOWN: PASS} {}
     timeout { puts stderr "interactive shutdown evidence missing"; exit 94 }
     eof { puts stderr "Rocky host shell exited during audit check"; exit 95 }
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
-send -- "ginux instance start rocky\r"
+send -- "ginux instance start rocky --audit\r"
 expect {
     -re {rocky: started detached} {}
     timeout { puts stderr "detached instance start timed out"; exit 96 }
@@ -368,6 +386,13 @@ expect {
     -re {state: running} {}
     timeout { puts stderr "detached instance status was not running"; exit 100 }
     eof { puts stderr "Rocky host shell exited during detached status"; exit 101 }
+}
+expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
+send -- "sudo sh -c 'i=0; while test \$i -lt 60; do grep -Fq \"GINUX_NATIVE_AUDIT:\" /var/lib/ginux/instances/rocky/audit.log && exit 0; i=\$((i+1)); sleep 1; done; exit 1' && printf 'GINUX_AUDIT_%s\\n' 'OPT_IN: PASS'\r"
+expect {
+    -re {GINUX_AUDIT_OPT_IN: PASS} {}
+    timeout { puts stderr "--audit did not enable native syscall records"; exit 194 }
+    eof { puts stderr "Rocky host shell exited during audit opt-in check"; exit 195 }
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
 send -- "runtime=\$(sudo awk '{print \$1}' /var/lib/ginux/instances/rocky/runtime.pid); args=\$(ps -o args= -p \"\$runtime\"); case \"\$args\" in *' systemd') exit 1;; esac; sudo grep -Fq 'init = \"/sbin/init\"' /var/lib/ginux/instances/rocky/config.toml && sudo grep -Fq 'args = \[\"--system\", \"--unit=multi-user.target\"\]' /var/lib/ginux/instances/rocky/config.toml && printf 'GINUX_RUNTIME_%s\\n' 'CONFIG: PASS'\r"
