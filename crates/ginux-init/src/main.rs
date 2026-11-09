@@ -8845,6 +8845,65 @@ fn supervise_native(
                 if mode == 3 && syscall == 5 {
                     task.pending_stat = registers.rsi as usize;
                 }
+                // The cgroup descriptor is owned by the virtual kernel tree,
+                // not by the host. Validate it before removing the host flag;
+                // the child remains in the parent's host cgroup. This is not
+                // host cgroup placement or enforcement of virtual membership.
+                const CLONE_INTO_CGROUP: u64 = 0x2_0000_0000;
+                if mode == 3 && syscall == 435 && registers.rsi >= 88 {
+                    let address = registers.rdi as usize;
+                    let translation = read_tracee_u64_pair(host_pid, address)
+                        .ok_or(-EFAULT)
+                        .and_then(|[flags, _]| {
+                            if flags & CLONE_INTO_CGROUP == 0 {
+                                return Ok(());
+                            }
+                            let at = address.checked_add(80).ok_or(-EFAULT)?;
+                            let mut cgroup = 0u64;
+                            if ptrace(
+                                PTRACE_PEEKDATA,
+                                host_pid,
+                                at,
+                                &mut cgroup as *mut _ as usize,
+                            ) < 0
+                            {
+                                return Err(-EFAULT);
+                            }
+                            let owned = native_virtual_kernel_fd(
+                                &virtual_kernel_fds,
+                                host_pid,
+                                cgroup as i64,
+                            )
+                            .is_some_and(|entry| {
+                                virtual_kernel_state
+                                    .cgroup_directory_exists(&entry.path[..entry.path_len])
+                            });
+                            if !owned {
+                                return Err(-EBADF);
+                            }
+                            write_tracee_bytes_result(
+                                host_pid,
+                                address,
+                                &(flags & !CLONE_INTO_CGROUP).to_ne_bytes(),
+                            )
+                        });
+                    if let Err(error) = translation {
+                        write_all(b"emulate surface=virtual-cgroup-clone result=");
+                        write_i64(error);
+                        write_all(b"\n");
+                        registers.orig_rax = u64::MAX;
+                        task.awaiting_exit = true;
+                        task.override_exit = true;
+                        task.override_result = error;
+                        tasks[task_index] = Some(task);
+                        if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                            || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
+                        {
+                            native_fail(instance, pid, b"native clone3 cgroup denial failed");
+                        }
+                        continue;
+                    }
+                }
                 if mode == 3 && syscall == ginux_core::SYS_PIDFD_OPEN {
                     let selected = registers.rdi as u32;
                     let target_host_pid = if selected == task.virtual_id.pid {

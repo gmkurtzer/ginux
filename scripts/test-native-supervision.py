@@ -24,9 +24,22 @@ def main():
         (root / "usr/bin/bash").chmod(0o755)
         work.chmod(0o755)
 
-        def run(scenario):
+        configured = work / "configured.toml"
+        configured.write_text(config.read_text().replace('init = "/bin/bash"',
+            'init = "/usr/bin/bash"') + """
+[contract.filesystem]
+read = ["/"]
+write = ["/"]
+create = ["/"]
+[contract.kernel]
+proc_read = ["/"]
+sys_read = ["/"]
+""")
+
+        def run(scenario, instance=config):
             (root / "scenario").write_text(scenario)
-            proc = subprocess.run([str(work / "ginux"), "native", str(config), str(root)],
+            proc = subprocess.run([str(work / "ginux"), "native", str(instance), str(root)]
+                                  + (["configured"] if instance == configured else []),
                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=20)
             return proc.returncode, proc.stdout.decode(errors="replace")
 
@@ -67,6 +80,14 @@ def main():
               and ("GINUX_INSTANCE: failed reason=native requires the x86-64 syscall ABI" in out
                    or "GINUX_INSTANCE: failed reason=unexpected native trace stop" in out),
               code, out)
+        # glibc 2.41+ posix_spawn starts children with clone3 CLONE_INTO_CGROUP.
+        (root / "sys/fs/cgroup").mkdir(parents=True, exist_ok=True)
+        code, out = run("cgroup-clone3", configured)
+        fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
+        check("clone3 CLONE_INTO_CGROUP starts a child", code == 0 and fixture == [
+            "GINUX_FIXTURE: clone3-invalid=-9", "GINUX_FIXTURE: clone3-ordinary=-9",
+            "GINUX_FIXTURE: cgroup-open-ok=1", "GINUX_FIXTURE: clone3-ok=1",
+            "GINUX_FIXTURE: wait-ok=1", "GINUX_FIXTURE: child-status=7"], code, out)
     print("test-native-supervision: PASS")
 
 
