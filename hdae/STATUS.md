@@ -145,6 +145,12 @@
   group has no compatibility alias. Default creation, atomic recipe updates,
   deployment-state separation, full Rocky systemd behavior, and aggregate
   regressions pass.
+- Gate 12.5 is technically passed on `hdae/contract-maintenance-lock`.
+  Instances default fail-closed to a persistent locked contract; top-level
+  `lock` and `unlock` require a stopped instance, preserve the portable recipe,
+  materialize a bounded maintenance contract atomically, expose their state in
+  lifecycle output, and warn on unlocked starts. A clean Rocky workflow proved
+  denial while locked, success while unlocked, and denial again after relock.
 
 ## Governing outcome and invariants
 
@@ -163,9 +169,10 @@ scope, threat model, and invariants.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 12.5, contract maintenance lock, is active on
-  `hdae/contract-maintenance-lock`. Gate 12.25 is technically passed and
-  delivered in pull request https://github.com/gmkurtzer/ginux/pull/253.
+- Active gate: Gate 12.5, contract maintenance lock, is technically passed on
+  `hdae/contract-maintenance-lock` and awaits stacked pull-request delivery.
+  Gate 12.25 is technically passed and delivered in pull request
+  https://github.com/gmkurtzer/ginux/pull/253.
 - Last evidence: `make check`, `make test-contract`, Rocky QEMU
   `make test-config`, `make test-contract-runtime`, `make test-systemd`, the
   complete aggregate `make test`, and the Gate 10.5 human demonstration pass.
@@ -560,10 +567,10 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Deliver the technically passed Gate 12.25 top-level CLI, followed by Gate 12.5
-for contract lock/unlock maintenance state and Gate 13 for boundary hardening.
-Use a dedicated stacked branch and pull request for each gate. Do not merge or
-close pull requests 249, 251, or 252.
+Push and open the technically passed Gate 12.5 stacked pull request against
+`hdae/top-level-instance-cli`, record its stable URL, then begin Gate 13
+boundary hardening on a dedicated branch based on Gate 12.5. Do not merge or
+close any pull request.
 
 ## Context recovery
 
@@ -573,8 +580,9 @@ close pull requests 249, 251, or 252.
 - Active work: Gate 12 is technically passed and delivered in pull request 251;
   Gate 12.1 is technically passed and delivered in pull request 252; Gate
   12.25 is technically passed and delivered in pull request 253. Gate 12.5 is
-  active on `hdae/contract-maintenance-lock`. Gate 11 remains partial on its
-  parent branch and in pull request 249.
+  technically passed on `hdae/contract-maintenance-lock` and awaits stacked
+  pull-request delivery. Gate 11 remains partial on its parent branch and in
+  pull request 249.
 - Gate 12.25 delivery: pull request
   https://github.com/gmkurtzer/ginux/pull/253 is open from
   `hdae/top-level-instance-cli` against the Gate 12.1 branch.
@@ -593,6 +601,12 @@ close pull requests 249, 251, or 252.
 - Gate 12.25 evidence: `make check`, `make demo-gate-12.25`, `make
   test-instance`, `make test-config`, `make test-systemd`, `make
   test-systemd-interactive`, and aggregate `make test` passed.
+- Gate 12.5 evidence: `make check`, `make test-gate125-lock`, the complete clean
+  Rocky `make test-systemd-interactive` workflow, `make test-config`, `make
+  test-instance`, `make test-systemd`, aggregate `make test`, and `make
+  demo-gate-12.5` passed. Rocky proved locked denial, unlocked maintenance
+  success, and denial after relocking while retaining mandatory host-boundary
+  backstops.
 - Completed paranoid work: the benchmark harness records dispatch mode and
   rejects cross-mode baseline comparison. The retained single-broker path has
   constant-time and precomputed contract decisions, bounded audit, and no
