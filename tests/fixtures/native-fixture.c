@@ -22,6 +22,17 @@ static long call4(long number, word a, word b, word c, word d)
     return result;
 }
 
+static long call5(long number, word a, word b, word c, word d, word e)
+{
+    long result;
+    register word r10 __asm__("r10") = d;
+    register word r8 __asm__("r8") = e;
+    __asm__ volatile("syscall" : "=a"(result)
+                     : "a"(number), "D"(a), "S"(b), "d"(c), "r"(r10), "r"(r8)
+                     : "rcx", "r11", "memory");
+    return result;
+}
+
 static void print(const char *value)
 {
     word count = 0;
@@ -99,6 +110,25 @@ long native_fixture_main(void)
         print_result("GINUX_FIXTURE: futex_lock_pi_flags=",
                      call4(202, (word)&pi_flags_word, 6 | 128 | 1024, 0, 0));
         print_result("GINUX_FIXTURE: pi_flags_word=", pi_flags_word);
+        return 0;
+    }
+    case 'p': {
+        /* waitid(P_PIDFD), as systemd 258+ waits for its children: the result
+         * names the child by its virtual pid. A pidfd of a non-child is
+         * ECHILD and a descriptor that is not a pidfd is EBADF. */
+        struct { int signo, error, code, pad, pid, uid, status, rest[25]; } info = {0};
+        long pid = call3(57, 0, 0, 0);
+        if (pid == 0) return 7;
+        long pidfd = call3(434, pid, 0, 0);
+        long self = call3(434, call3(39, 0, 0, 0), 0, 0);
+        print_result("GINUX_FIXTURE: pidfd-open-ok=", pidfd >= 0 && self >= 0);
+        print_result("GINUX_FIXTURE: waitid-self=", call5(247, 3, self, (word)&info, 4, 0));
+        print_result("GINUX_FIXTURE: waitid-not-pidfd=", call5(247, 3, 1, (word)&info, 4, 0));
+        print_result("GINUX_FIXTURE: waitid-invalid=", call5(247, 3, -1, (word)&info, 4, 0));
+        print_result("GINUX_FIXTURE: waitid-high=", call5(247, 3, (word)pidfd | 0xfeed000000000000UL, (word)&info, 0x01000004, 0));
+        print_result("GINUX_FIXTURE: waitid=", call5(247, 3, pidfd, (word)&info, 4, 0));
+        print_result("GINUX_FIXTURE: waited-child=", info.pid == pid);
+        print_result("GINUX_FIXTURE: child-status=", info.status);
         return 0;
     }
     default:

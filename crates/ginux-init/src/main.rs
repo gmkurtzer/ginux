@@ -8937,7 +8937,8 @@ fn supervise_native(
                             );
                         }
                     } else if registers.rdi == 3 {
-                        let selected_fd = registers.rsi as usize;
+                        // Linux consumes id_t as 32 bits, including for P_PIDFD.
+                        let selected_fd = registers.rsi as u32 as usize;
                         let target_host_pid = native_pidfd_host_target(host_pid, selected_fd);
                         let managed = target_host_pid.is_some_and(|selected| {
                             tasks
@@ -8948,7 +8949,16 @@ fn supervise_native(
                         if !managed {
                             task.awaiting_exit = true;
                             task.override_exit = true;
-                            task.override_result = -EPERM;
+                            task.override_result = if target_host_pid.is_some() {
+                                -ECHILD
+                            } else {
+                                -EBADF
+                            };
+                            // Finish the record before the early continue: the
+                            // audit lock is released by its newline.
+                            write_all(b"emulate surface=virtual-pidfd-wait result=");
+                            write_i64(task.override_result);
+                            write_all(b"\n");
                             registers.orig_rax = u64::MAX;
                             tasks[task_index] = Some(task);
                             if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize)
