@@ -269,18 +269,8 @@ prepare_root() {
     mkdir -p \
         "$root/run" \
         "$root/run/host" \
-        "$root/proc/1" \
-        "$root/proc/self/fd" \
-        "$root/proc/sys/fs" \
-        "$root/proc/sys/kernel" \
-        "$root/proc/sys/kernel/random" \
-        "$root/proc/pressure" \
-        "$root/sys/kernel/security" \
-        "$root/sys/fs/cgroup/systemd" \
-        "$root/sys/fs/cgroup/init.scope" \
-        "$root/sys/fs/cgroup/system.slice" \
-        "$root/sys/fs/cgroup/system.slice/console-getty.service" \
-        "$root/sys/fs/cgroup/system.slice/systemd-user-sessions.service" \
+        "$root/proc" \
+        "$root/sys" \
         "$root/dev/shm" \
         "$root/dev/pts" \
         "$root/run/log/journal" \
@@ -292,59 +282,10 @@ prepare_root() {
     if test -e /etc/resolv.conf; then
         cp /etc/resolv.conf "$root/etc/resolv.conf"
     fi
-    printf '%s\000' '/sbin/init --system --unit=multi-user.target' >"$root/proc/1/cmdline"
-    printf '0::/\n' >"$root/proc/1/cgroup"
-    printf '0::/\n' >"$root/proc/self/cgroup"
-    printf 'cpu  1 0 1 100 0 0 0 0 0 0\nbtime 1\nprocesses 1\nprocs_running 1\nprocs_blocked 0\n' >"$root/proc/stat"
-    printf '1.00 0.00\n' >"$root/proc/uptime"
-    printf 'MemTotal:        1048576 kB\nMemFree:          524288 kB\nMemAvailable:     524288 kB\n' >"$root/proc/meminfo"
-    printf 'none / proc rw,nosuid,nodev,noexec,relatime 0 0\n' >"$root/proc/mounts"
-    printf '0.00 0.00 0.00 1/1 1\n' >"$root/proc/loadavg"
-    : >"$root/proc/cpuinfo"
-    printf 'Ginux userspace kernel 0.1.0 (Linux ABI personality 6.12.0-ginux-abi1; contract gate9-systemd-v1; x86_64)\n' >"$root/proc/version"
-    printf '9223372036854775807\n' >"$root/proc/sys/fs/file-max"
-    printf '1048576\n' >"$root/proc/sys/fs/nr_open"
-    printf '40\n' >"$root/proc/sys/kernel/cap_last_cap"
-    printf 'ginux\n' >"$root/proc/sys/kernel/hostname"
-    printf 'Linux\n' >"$root/proc/sys/kernel/ostype"
-    printf '6.12.0-ginux-abi1\n' >"$root/proc/sys/kernel/osrelease"
-    printf 'Ginux userspace kernel 0.1.0\n' >"$root/proc/sys/kernel/version"
-    printf '4e45c53e-0e6a-4fb8-9f25-e0f11b40db9a\n' \
-        >"$root/proc/sys/kernel/random/boot_id"
-    printf 'some avg10=0.00 avg60=0.00 avg300=0.00 total=0\n' >"$root/proc/pressure/cpu"
-    : >"$root/sys/kernel/security/lsm"
-    printf 'cpu memory pids\n' >"$root/sys/fs/cgroup/cgroup.controllers"
-    touch \
-        "$root/sys/fs/cgroup/cgroup.procs" \
-        "$root/sys/fs/cgroup/cgroup.subtree_control" \
-        "$root/sys/fs/cgroup/init.scope/cgroup.procs" \
-        "$root/sys/fs/cgroup/system.slice/cgroup.procs" \
-        "$root/sys/fs/cgroup/system.slice/cgroup.events" \
-        "$root/sys/fs/cgroup/system.slice/cgroup.kill" \
-        "$root/sys/fs/cgroup/system.slice/console-getty.service/cgroup.procs" \
-        "$root/sys/fs/cgroup/system.slice/console-getty.service/cgroup.events" \
-        "$root/sys/fs/cgroup/system.slice/systemd-user-sessions.service/cgroup.procs" \
-        "$root/sys/fs/cgroup/system.slice/systemd-user-sessions.service/cgroup.events"
-    for service_file in "$root"/usr/lib/systemd/system/*.service; do
-        test -e "$service_file" || continue
-        service=${service_file##*/}
-        service_cgroup=$root/sys/fs/cgroup/system.slice/$service
-        mkdir -p "$service_cgroup"
-        touch \
-            "$service_cgroup/cgroup.procs" \
-            "$service_cgroup/cgroup.events" \
-            "$service_cgroup/cgroup.kill"
-    done
-    mkdir -p \
-        "$root/sys/fs/cgroup/system.slice/system-modprobe.slice" \
-        "$root/sys/fs/cgroup/system.slice/system-modprobe.slice/modprobe@configfs.service"
-    touch \
-        "$root/sys/fs/cgroup/system.slice/system-modprobe.slice/cgroup.procs" \
-        "$root/sys/fs/cgroup/system.slice/system-modprobe.slice/cgroup.events" \
-        "$root/sys/fs/cgroup/system.slice/system-modprobe.slice/cgroup.kill" \
-        "$root/sys/fs/cgroup/system.slice/system-modprobe.slice/modprobe@configfs.service/cgroup.procs" \
-        "$root/sys/fs/cgroup/system.slice/system-modprobe.slice/modprobe@configfs.service/cgroup.events" \
-        "$root/sys/fs/cgroup/system.slice/system-modprobe.slice/modprobe@configfs.service/cgroup.kill"
+    # procfs and sysfs are Ginux-owned, on-demand object models. Clear any
+    # materialized nodes left by an older runtime, retaining only mountpoints.
+    find "$root/proc" -mindepth 1 -delete
+    find "$root/sys" -mindepth 1 -delete
     for device_spec in 'console 5 0 600' 'null 1 3 666' 'zero 1 5 666' 'random 1 8 666' 'urandom 1 9 666'; do
         device_ifs=$IFS
         IFS=' '
@@ -352,7 +293,6 @@ prepare_root() {
         IFS=$device_ifs
         test -e "$root/dev/$1" || mknod -m "$4" "$root/dev/$1" c "$2" "$3"
     done
-    ln -s / "$root/proc/1/root"
     # The runtime drops root-launched workloads to the host nobody identity.
     # Ginux maintains instance-visible credentials independently.
     chown -R 65534:65534 "$root"
