@@ -266,11 +266,12 @@ Gate 12 separates portable policy from deployment-specific network state. The
 instance recipe owns a hierarchical `[contract]` describing syscall,
 filesystem, network, device, privilege, process, and synthetic-kernel-view
 authority. Host interface selection and external-to-instance port translation
-are not recipe fields; repeatable `instance create` and `instance set` flags
-persist them as operational instance state. With no explicit attachment, the
-instance uses the host default network. `/proc` and `/sys` remain synthetic and
-Ginux-owned regardless of policy; policy controls visibility and operations,
-not passthrough to host kernel trees.
+are not recipe fields; repeatable top-level `create`, `import`, and `set` flags
+persist them as operational instance state. The instance remains the managed
+object, but the CLI does not add a redundant `instance` command group. With no
+explicit attachment, the instance uses the host default network. `/proc` and
+`/sys` remain synthetic and Ginux-owned regardless of policy; policy controls
+visibility and operations, not passthrough to host kernel trees.
 
 Gate 12.1 makes that synthetic boundary concrete in the native runtime. The
 instance root contains only empty `proc` and `sys` mountpoint directories.

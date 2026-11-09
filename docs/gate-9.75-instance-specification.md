@@ -37,7 +37,7 @@ explanation workflow; Gate 9.75 records the remaining instance inputs.
 Create an instance from a file and override only the named values:
 
 ```sh
-ginux instance create rocky /etc/ginux/rocky.toml \
+ginux import rocky /etc/ginux/rocky.toml \
     --set resources.vcpus=4 \
     --set 'identity.hostname="build.example"' \
     --network eth0 \
@@ -62,7 +62,7 @@ Contract rules use `tcp:PORT`, `udp:PORT`, or a `*` port. A translation names
 both sides explicitly:
 
 ```sh
-ginux instance set rocky \
+ginux set rocky \
     --network eth0:1 \
     --forward protocol=tcp,external_port=8080,instance_port=80
 ```

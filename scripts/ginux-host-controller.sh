@@ -6,24 +6,24 @@ runtime=${GINUX_RUNTIME:-/usr/local/libexec/ginux-runtime}
 
 usage() {
     printf '%s\n' 'usage:' >&2
-    printf '%s\n' '  ginux instance create NAME FILE [--set KEY=TOML_VALUE]... [--network ATTACHMENT] [--forward SPEC]...' >&2
-    printf '%s\n' '  ginux instance set NAME [--network ATTACHMENT] [--forward SPEC]...' >&2
-    printf '%s\n' '  ginux instance list' >&2
-    printf '%s\n' '  ginux instance start NAME [--attach]' >&2
-    printf '%s\n' '  ginux instance attach NAME' >&2
-    printf '%s\n' '  ginux instance status NAME' >&2
-    printf '%s\n' '  ginux instance stop NAME' >&2
-    printf '%s\n' '  ginux instance validate FILE' >&2
-    printf '%s\n' '  ginux instance inspect FILE' >&2
-    printf '%s\n' '  ginux instance explain FILE OPERATION' >&2
-    printf '%s\n' '  ginux instance diff LEFT RIGHT' >&2
+    printf '%s\n' '  ginux create NAME [--set KEY=TOML_VALUE]... [--network ATTACHMENT] [--forward SPEC]...' >&2
+    printf '%s\n' '  ginux import NAME FILE [--set KEY=TOML_VALUE]... [--network ATTACHMENT] [--forward SPEC]...' >&2
+    printf '%s\n' '  ginux set NAME [--set KEY=TOML_VALUE]... [--network ATTACHMENT] [--forward SPEC]...' >&2
+    printf '%s\n' '  ginux edit NAME' >&2
+    printf '%s\n' '  ginux export NAME' >&2
+    printf '%s\n' '  ginux list' >&2
+    printf '%s\n' '  ginux start NAME [--attach] [--audit]' >&2
+    printf '%s\n' '  ginux attach NAME' >&2
+    printf '%s\n' '  ginux status NAME' >&2
+    printf '%s\n' '  ginux stop NAME' >&2
+    printf '%s\n' '  ginux validate FILE' >&2
+    printf '%s\n' '  ginux inspect FILE' >&2
+    printf '%s\n' '  ginux explain FILE OPERATION' >&2
+    printf '%s\n' '  ginux diff LEFT RIGHT' >&2
     exit 64
 }
 
-test "$#" -ge 2 || usage
-test "$1" = instance || usage
-shift
-
+test "$#" -ge 1 || usage
 command=$1
 shift
 case $command in
@@ -39,7 +39,21 @@ case $command in
         test "$#" -eq 2 || usage
         exec "$runtime" instance-diff "$1" "$2"
         ;;
-    attach|create|list|set|start|status|stop) ;;
+    attach|create|export|import|list|set|start|status|stop) ;;
+    edit)
+        test "$#" -eq 1 || usage
+        name=$1
+        edit_file=$(mktemp "${TMPDIR:-/tmp}/ginux-edit.XXXXXX") || exit 70
+        cleanup_edit() {
+            rm -f "$edit_file"
+        }
+        trap cleanup_edit 0 HUP INT TERM
+        sudo "$helper" export "$name" >"$edit_file"
+        editor=${VISUAL:-${EDITOR:-vi}}
+        "$editor" "$edit_file"
+        sudo "$helper" import "$name" "$edit_file"
+        exit
+        ;;
     *) usage ;;
 esac
 

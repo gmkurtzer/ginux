@@ -134,14 +134,14 @@ fi
 grep -Fqx 'GINUX_CONFIG: rejected reason=invalid-contract managed-started=false' "$contract_invalid_log"
 
 rocky_ssh "grep -Fqx '[contract]' /var/tmp/gate10-systemd.toml; grep -Fqx '[contract.syscalls]' /var/tmp/gate10-systemd.toml; ! grep -Fq '[userspace.' /var/tmp/gate10-systemd.toml"
-rocky_ssh 'GINUX_RUNTIME=/var/tmp/ginux /var/tmp/ginux-cli instance validate /var/tmp/gate10-systemd.toml' >"$instance_validate_log" 2>&1
+rocky_ssh 'GINUX_RUNTIME=/var/tmp/ginux /var/tmp/ginux-cli validate /var/tmp/gate10-systemd.toml' >"$instance_validate_log" 2>&1
 grep -Eq '^Contract valid: instance=rocky catalog=2 digest=[0-9a-f]{64} operations=[0-9]+$' "$instance_validate_log"
-rocky_ssh 'GINUX_RUNTIME=/var/tmp/ginux /var/tmp/ginux-cli instance explain /var/tmp/gate10-systemd.toml filesystem.path.write' >"$instance_explain_log" 2>&1
+rocky_ssh 'GINUX_RUNTIME=/var/tmp/ginux /var/tmp/ginux-cli explain /var/tmp/gate10-systemd.toml filesystem.path.write' >"$instance_explain_log" 2>&1
 grep -Fqx 'Decision: mediate' "$instance_explain_log"
 grep -Fqx 'Rule: exact-allow source=exact-allow index=0' "$instance_explain_log"
-rocky_ssh 'GINUX_RUNTIME=/var/tmp/ginux /var/tmp/ginux-cli instance diff /var/tmp/gate10-strict.toml /var/tmp/gate10-systemd.toml' >"$instance_diff_log" 2>&1
+rocky_ssh 'GINUX_RUNTIME=/var/tmp/ginux /var/tmp/ginux-cli diff /var/tmp/gate10-strict.toml /var/tmp/gate10-systemd.toml' >"$instance_diff_log" 2>&1
 grep -Eq '^Contract differences: [1-9][0-9]*$' "$instance_diff_log"
-rocky_ssh 'GINUX_RUNTIME=/var/tmp/ginux /var/tmp/ginux-cli instance inspect /var/tmp/gate10-systemd.toml' >"$instance_inspect_log" 2>&1
+rocky_ssh 'GINUX_RUNTIME=/var/tmp/ginux /var/tmp/ginux-cli inspect /var/tmp/gate10-systemd.toml' >"$instance_inspect_log" 2>&1
 grep -Eq '^Decisions: emulate=[0-9]+ mediate=[0-9]+ deny=[0-9]+ total=[0-9]+$' "$instance_inspect_log"
 
 if rocky_ssh 'GINUX_RUNTIME=/var/tmp/ginux /var/tmp/ginux-cli contract check /var/tmp/gate10-systemd.toml' >/dev/null 2>&1; then

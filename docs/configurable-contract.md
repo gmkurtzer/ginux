@@ -123,12 +123,12 @@ interface or claim external ports. Those host-specific settings are repeatable
 CLI flags, persisted separately from `config.toml`:
 
 ```sh
-ginux instance create web recipe.toml \
+ginux import web recipe.toml \
     --network eth0:1 \
     --forward protocol=tcp,external_port=8080,instance_port=80 \
     --forward protocol=tcp,external_port=8443,instance_port=443
 
-ginux instance set web \
+ginux set web \
     --network default \
     --forward protocol=tcp,external_port=9080,instance_port=80
 ```
@@ -142,12 +142,12 @@ or conflicting external ports leave the prior deployment unchanged.
 ## Operator workflow
 
 ```sh
-ginux instance validate recipe.toml
-ginux instance inspect recipe.toml
-ginux instance explain recipe.toml filesystem.path.write
-ginux instance diff strict.toml recipe.toml
-ginux instance create rocky recipe.toml --network default
-ginux instance set rocky --network eth0:1 \
+ginux validate recipe.toml
+ginux inspect recipe.toml
+ginux explain recipe.toml filesystem.path.write
+ginux diff strict.toml recipe.toml
+ginux import rocky recipe.toml --network default
+ginux set rocky --network eth0:1 \
     --forward protocol=tcp,external_port=8080,instance_port=80
 ```
 
@@ -173,7 +173,7 @@ does not imply host root.
 Runtime audit records contain the instance, contract digest, canonical
 operation, winning source rule, action, and result. The generated catalog
 inventory is [`abi-contract-coverage.md`](abi-contract-coverage.md).
-The default Rocky recipe disables auditing. `ginux instance start NAME --audit`
+The default Rocky recipe disables auditing. `ginux start NAME --audit`
 enables it for that run and records it in the instance's `audit.log` without
 mixing audit records into the attached console. A recipe may instead request
 persistent auditing with `[audit] mode = "stderr"`.

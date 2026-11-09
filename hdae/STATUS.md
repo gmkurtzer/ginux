@@ -139,6 +139,12 @@
   `make test-config`, `make test-instance`, `make test-contract-runtime`,
   `make test-network`, the complete `make test-systemd` matrix, aggregate
   `make test`, and `make demo-gate-12`.
+- Gate 12.25 is technically passed on `hdae/top-level-instance-cli`. Ginux now
+  manages instances through concise top-level `create`, `import`, `set`,
+  `edit`, `export`, inspection, and lifecycle commands; the removed command
+  group has no compatibility alias. Default creation, atomic recipe updates,
+  deployment-state separation, full Rocky systemd behavior, and aggregate
+  regressions pass.
 
 ## Governing outcome and invariants
 
@@ -157,8 +163,9 @@ scope, threat model, and invariants.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 12, contract and instance-network UX, is technically passed
-  on stacked branch `hdae/contract-network-ux` and awaiting human review.
+- Active gate: Gate 12.25, top-level instance CLI, is technically passed and
+  delivered in pull request https://github.com/gmkurtzer/ginux/pull/253. Gate
+  12.5 contract lock/unlock is next in the authorized batch.
 - Last evidence: `make check`, `make test-contract`, Rocky QEMU
   `make test-config`, `make test-contract-runtime`, `make test-systemd`, the
   complete aggregate `make test`, and the Gate 10.5 human demonstration pass.
@@ -244,11 +251,9 @@ scope, threat model, and invariants.
   observed non-PI futexes did not materially improve the result. The residual
   selective deficit is the host seccomp/task-work floor under QEMU TCG, not a
   missed Ginux allow rule or userspace hot path.
-- Exact next action: present Gate 12 for human review. Push the branch and open
-  its pull request only with explicit authorization. Keep Gate 12 in
-  `gates-todo/`, do not accept or close it, and do not begin Gate 12.5 without
-  human direction. Gate 11 remains partial in pull request 249 beneath this
-  stacked branch.
+- Exact next action: begin the authorized Gate 12.5 contract lock/unlock branch
+  stacked on Gate 12.25. Do not merge or close any pull request. Gate 11 remains
+  partial in pull request 249 beneath this stacked series.
 - Human direction on 2026-11-07 resolved the Gate 11 dispatch boundary. Each
   instance will configure `paranoid` or `selective` dispatch. Paranoid preserves
   a Ginux userspace decision for every syscall. Selective directly executes
@@ -554,9 +559,9 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Execute Gate 12.25 for the top-level CLI restructure, followed by Gate 12.5 for
-contract lock/unlock maintenance state and Gate 13 for boundary hardening. Use
-a dedicated stacked branch and pull request for each gate. Do not merge or
+Deliver the technically passed Gate 12.25 top-level CLI, followed by Gate 12.5
+for contract lock/unlock maintenance state and Gate 13 for boundary hardening.
+Use a dedicated stacked branch and pull request for each gate. Do not merge or
 close pull requests 249, 251, or 252.
 
 ## Context recovery
@@ -564,10 +569,13 @@ close pull requests 249, 251, or 252.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active work: Gate 12 is technically passed and delivered in pull request 251.
-  Gate 12.1 is technically passed on `hdae/virtual-kernel-filesystems` and
-  awaits stacked pull-request delivery. Gate 11 remains partial on its parent
-  branch and in pull request 249.
+- Active work: Gate 12 is technically passed and delivered in pull request 251;
+  Gate 12.1 is technically passed and delivered in pull request 252; Gate
+  12.25 is technically passed and delivered in pull request 253. Gate 12.5 is
+  next. Gate 11 remains partial on its parent branch and in pull request 249.
+- Gate 12.25 delivery: pull request
+  https://github.com/gmkurtzer/ginux/pull/253 is open from
+  `hdae/top-level-instance-cli` against the Gate 12.1 branch.
 - Delivery: pull request https://github.com/gmkurtzer/ginux/pull/249 is open
   against `main`; it must not be merged or closed without explicit human
   authorization.
@@ -580,6 +588,9 @@ close pull requests 249, 251, or 252.
   `make test`, and `make demo-gate-12.1`. The demo proved on-demand proc/sys
   access, live virtual-PID lifecycle, virtual metadata, no host leakage, empty
   backing mountpoints, multi-user systemd boot, and controlled shutdown.
+- Gate 12.25 evidence: `make check`, `make demo-gate-12.25`, `make
+  test-instance`, `make test-config`, `make test-systemd`, `make
+  test-systemd-interactive`, and aggregate `make test` passed.
 - Completed paranoid work: the benchmark harness records dispatch mode and
   rejects cross-mode baseline comparison. The retained single-broker path has
   constant-time and precomputed contract decisions, bounded audit, and no
