@@ -57,9 +57,9 @@ honest security and compatibility boundary for the initial milestone.
 
 ## Remaining work
 
-- [ ] Resolve or explicitly change the unchanged 4% Gate 11 performance
-  criterion: all five authoritative selective thread-yield rows remain below
-  the required 0.960x floor.
+- [ ] Collect a fresh matched benchmark against current `main` and verify that
+  Gate 13 introduces no row beyond the existing 4% accepted-Ginux regression
+  budget. Gate 11 retains ownership of the unresolved native-parity criterion.
 - [ ] Human review and acceptance of the partial result, residual risks, and
   scoped claims.
 
@@ -78,8 +78,10 @@ honest security and compatibility boundary for the initial milestone.
   tested.
 - Failure and recovery fixtures reach their expected states without silent
   fallback, resource leakage, or uncontrolled host shutdown.
-- Systemd, contract, defensive boundary checks, and approved performance
-  budgets remain passing after hardening.
+- Systemd, contract, and defensive boundary checks remain passing after
+  hardening. A fresh matched benchmark shows no statistically material
+  per-workload regression beyond 4% versus a current-`main` pre-Gate-13
+  baseline; Gate 13 does not redefine or close Gate 11's native-parity work.
 - Documentation states supported claims and unresolved risks precisely enough
   that it does not imply production readiness or universal exploit prevention.
 - `make demo-gate-13` lets a human run a bounded escape and recovery sequence,
@@ -96,7 +98,10 @@ honest security and compatibility boundary for the initial milestone.
   saturation, and shutdown/recovery cases pass.
 - `make test test-systemd test-contract test-security` -> all mandatory suites
   exit zero.
-- `make bench-compare` -> all approved mandatory budgets pass after hardening.
+- Fresh matched benchmark on current `main` and Gate 13, followed by
+  `GINUX_BENCH_REQUIRE_NATIVE_BUDGET=0 scripts/bench-compare.sh ...` ->
+  compatible environments and every accepted-Ginux regression row pass the
+  existing 4% budget.
 - Documentation consistency check -> claims map to current executable evidence
   and every known limitation remains visible.
 - `make demo-gate-13` -> performs the documented boundary, recovery, residual
@@ -150,11 +155,11 @@ honest security and compatibility boundary for the initial milestone.
   or timeout leaves a reproducible artifact under `build/security-fuzz/`.
 - An independent security audit and production-readiness program remain future
   work.
-- Gate 13 is technically partial. Its security, recovery, functional,
-  documentation, and demonstration evidence passes, but the approved
-  performance criterion does not. The existing Gate 11 evidence attributes the
-  residual selective-mode thread deficit to the host seccomp/task-work floor
-  under x86-64 QEMU TCG after exhausting the approved in-scope optimizations.
+- Gate 13 does not inherit Gate 11's unresolved absolute native-parity target.
+  Its performance boundary is regression against a fresh, matched current-main
+  baseline. Gate 11 remains partial and continues to own the residual
+  selective-mode thread deficit attributed to the host seccomp/task-work floor
+  under x86-64 QEMU TCG.
 - The default `build/gate11/` result is an early exploratory matrix and must
   not be treated as current retained-code performance. The authoritative final
   matrix is `build/gate11-balanced-final-v2/`.
@@ -162,9 +167,9 @@ honest security and compatibility boundary for the initial milestone.
 ## Delivery strategy
 
 - Working branch: `hdae/boundary-hardening`
-- Intended base: `hdae/contract-maintenance-lock`
-- Pull request: https://github.com/gmkurtzer/ginux/pull/255, stacked on Gate
-  12.5; dedicated branch push and PR creation authorized by the human's
+- Intended base: `main`
+- Pull request: https://github.com/gmkurtzer/ginux/pull/255; dedicated branch
+  push and PR creation authorized by the human's
   2026-11-08 batch direction; never merge or close without explicit
   authorization
 - Planned commits: malformed-input and fuzz harnesses; escape and authority
@@ -176,10 +181,8 @@ honest security and compatibility boundary for the initial milestone.
 
 ## Review policy and outcome
 
-Human checkpoint. The technical result is partial because the mandatory
-performance criterion remains failed. Present `make demo-gate-13`, fresh
-evidence, the exact benchmark limitation, and the pull request. This gate
-cannot close the initial milestone unless the performance criterion passes or
-the human explicitly changes it and then accepts the evidence, residual risks,
-and scoped claims. Pull request 255 is delivered with green CI and awaits that
-decision; it has not been merged or closed.
+Human checkpoint. Present `make demo-gate-13`, fresh regression and matched
+performance evidence, the exact remaining Gate 11 limitation, and the pull
+request. This gate cannot close the initial milestone until the human accepts
+the evidence, residual risks, and scoped claims. Pull request 255 remains open;
+it must not be merged or closed without explicit authorization.

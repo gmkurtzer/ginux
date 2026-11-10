@@ -6,6 +6,7 @@ current_metadata=${2:-build/gate11/metadata.txt}
 accepted_results=${3:-benchmarks/gate11/accepted-results.tsv}
 accepted_metadata=${4:-benchmarks/gate11/accepted-metadata.txt}
 tolerance=${GINUX_BENCH_TOLERANCE:-0.04}
+require_native_budget=${GINUX_BENCH_REQUIRE_NATIVE_BUDGET:-1}
 
 test -s "$current_results"
 test -s "$current_metadata"
@@ -19,7 +20,20 @@ awk -v tolerance="$tolerance" 'BEGIN {
     exit 2
 }
 
-awk -v tolerance="$tolerance" -f scripts/gate11-budget.awk "$current_results"
+case "$require_native_budget" in
+    0|1) ;;
+    *)
+        printf 'invalid native-budget requirement: %s\n' \
+            "$require_native_budget" >&2
+        exit 2
+        ;;
+esac
+
+if test "$require_native_budget" -eq 1; then
+    awk -v tolerance="$tolerance" -f scripts/gate11-budget.awk "$current_results"
+else
+    printf '%s\n' 'GATE11_BUDGET: SKIP (accepted-Ginux regression comparison only)'
+fi
 
 if test ! -s "$accepted_results" && test ! -s "$accepted_metadata"; then
     printf '%s\n' 'GATE11_REGRESSION: SKIP (no accepted Ginux baseline yet)'

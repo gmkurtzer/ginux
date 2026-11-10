@@ -47,6 +47,7 @@ EOF
 metadata "$test_dir/current.meta" test-kernel
 metadata "$test_dir/accepted.meta" test-kernel
 results "$test_dir/accepted.tsv" 100 100
+results "$test_dir/accepted-native-fail.tsv" 100 95
 results "$test_dir/pass.tsv" 100 97
 results "$test_dir/native-fail.tsv" 100 95
 results "$test_dir/regression-fail.tsv" 100 95
@@ -59,6 +60,10 @@ if ./scripts/bench-compare.sh "$test_dir/native-fail.tsv" "$test_dir/current.met
     printf '%s\n' 'native budget perturbation unexpectedly passed' >&2
     exit 1
 fi
+
+GINUX_BENCH_REQUIRE_NATIVE_BUDGET=0 ./scripts/bench-compare.sh \
+    "$test_dir/native-fail.tsv" "$test_dir/current.meta" \
+    "$test_dir/accepted-native-fail.tsv" "$test_dir/accepted.meta" >/dev/null
 
 # This row passes a 4% native budget when native is lowered to 98, while
 # still regressing 5% from the accepted Ginux value of 100.
@@ -90,6 +95,14 @@ if GINUX_BENCH_TOLERANCE=invalid ./scripts/bench-compare.sh \
     "$test_dir/pass.tsv" "$test_dir/current.meta" \
     "$test_dir/accepted.tsv" "$test_dir/accepted.meta" >/dev/null 2>&1; then
     printf '%s\n' 'invalid tolerance unexpectedly passed' >&2
+    exit 1
+fi
+
+
+if GINUX_BENCH_REQUIRE_NATIVE_BUDGET=invalid ./scripts/bench-compare.sh \
+    "$test_dir/pass.tsv" "$test_dir/current.meta" \
+    "$test_dir/accepted.tsv" "$test_dir/accepted.meta" >/dev/null 2>&1; then
+    printf '%s\n' 'invalid native-budget requirement unexpectedly passed' >&2
     exit 1
 fi
 
