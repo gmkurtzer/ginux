@@ -8,7 +8,7 @@ BASELINE := target/$(X86_TARGET)/release/baseline-runner
 RUNTIME_FIXTURE := target/$(X86_TARGET)/release/runtime-fixture
 PROCESS_NATIVE_FIXTURE := target/$(X86_TARGET)/release/process-native-fixture
 
-.PHONY: doctor host-image-fetch host-image-verify host-boot-test image-helper-fetch image-prepare instance-image-fetch instance-image-verify instance-image-prepare systemd-image-fetch systemd-image-verify systemd-image-prepare test-image test-oci-image test-oci-layers test-vfs test-native-vfs image-cache-clean build check-name check-instance-terminology check test-ci-changes contract-doc test-contract test-contract-runtime test test-unit test-intercept test-runtime test-config test-instance test-instance-terminology test-process build-process-fixtures test-process-native test-devices test-kernel-views test-systemd test-systemd-live test-systemd-interactive test-gate975-network test-gate975-hooks test-gate125-lock test-cgroup test-block test-network test-security test-recovery check-security-doc fuzz-security test-bench-compare run-host run-systemd bench-prepare bench bench-baseline bench-compare bench-systemd bench-report bench-block bench-network demo-gate-1 demo-gate-2 demo-gate-3 demo-gate-4 demo-gate-5 demo-gate-6 demo-gate-7 demo-gate-8 demo-gate-9 demo-gate-9.5 demo-gate-9.75 demo-gate-10 demo-gate-10.25 demo-gate-10.5 demo-gate-11 demo-gate-12 demo-gate-12.1 demo-gate-12.25 demo-gate-12.5 demo-gate-13 clean
+.PHONY: doctor host-image-fetch host-image-verify host-boot-test host-run host-reset test-host-lifecycle image-helper-fetch image-prepare instance-image-fetch instance-image-verify instance-image-prepare systemd-image-fetch systemd-image-verify systemd-image-prepare test-image test-oci-image test-oci-layers test-vfs test-native-vfs image-cache-clean build check-name check-instance-terminology check test-ci-changes contract-doc test-contract test-contract-runtime test test-unit test-intercept test-runtime test-config test-instance test-instance-terminology test-process build-process-fixtures test-process-native test-devices test-kernel-views test-systemd test-systemd-live test-systemd-interactive test-gate975-network test-gate975-hooks test-gate125-lock test-cgroup test-block test-network test-security test-recovery check-security-doc fuzz-security test-bench-compare bench-prepare bench bench-baseline bench-compare bench-systemd bench-report bench-block bench-network demo-gate-1 demo-gate-2 demo-gate-3 demo-gate-4 demo-gate-5 demo-gate-6 demo-gate-7 demo-gate-8 demo-gate-9 demo-gate-9.5 demo-gate-9.75 demo-gate-10 demo-gate-10.25 demo-gate-10.5 demo-gate-11 demo-gate-12 demo-gate-12.1 demo-gate-12.25 demo-gate-12.5 demo-gate-13 clean
 
 doctor:
 	@./scripts/doctor.sh
@@ -187,10 +187,14 @@ test-block:
 test-network:
 	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-devices network_
 
-run-host: build
+host-run: build
 	@./scripts/run-host.sh
 
-run-systemd: run-host
+host-reset:
+	@./scripts/reset-rocky-host.sh
+
+test-host-lifecycle:
+	@./scripts/test-host-lifecycle.sh
 
 test-vfs: build instance-image-prepare
 	@./scripts/with-rocky-host.sh ./scripts/test-vfs.sh
@@ -198,7 +202,7 @@ test-vfs: build instance-image-prepare
 test-native-vfs: build instance-image-prepare
 	@./scripts/with-rocky-host.sh ./scripts/test-native-vfs.sh
 
-test: check test-unit test-intercept test-runtime test-config test-instance test-image test-devices test-process test-kernel-views
+test: check test-host-lifecycle test-unit test-intercept test-runtime test-config test-instance test-image test-devices test-process test-kernel-views
 
 fuzz-security:
 	./scripts/fuzz-security.sh

@@ -173,7 +173,10 @@ does not imply host root.
 Runtime audit records contain the instance, contract digest, canonical
 operation, winning source rule, action, and result. The generated catalog
 inventory is [`abi-contract-coverage.md`](abi-contract-coverage.md).
-The default Rocky recipe disables auditing. `ginux start NAME --audit`
-enables it for that run and records it in the instance's `audit.log` without
-mixing audit records into the attached console. A recipe may instead request
-persistent auditing with `[audit] mode = "stderr"`.
+The default Rocky recipe uses `[audit] enabled = false`. `ginux start NAME
+--audit` enables auditing for that run and records it in the instance's
+`audit.log` without mixing audit records into the attached console. Set
+`enabled = true` in the recipe to audit every start. Audit configuration
+controls enablement only; the controller always owns the log destination.
+Legacy `mode = "stderr"` and `mode = "disabled"` recipes remain readable and
+normalize to `enabled = true` and `enabled = false`, respectively.

@@ -798,7 +798,7 @@ run_runtime() {
         "$directory/config.toml" "$directory/deployment.state" "$directory/runtime.toml"
     if test "$audit_override" = true; then
         audit_candidate=$directory/runtime.toml.audit.$$
-        "$runtime" config-merge "$directory/runtime.toml" 'audit.mode="stderr"' \
+        "$runtime" config-merge "$directory/runtime.toml" 'audit.enabled=true' \
             >"$audit_candidate"
         mv "$audit_candidate" "$directory/runtime.toml"
     fi

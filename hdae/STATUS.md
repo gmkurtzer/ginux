@@ -76,7 +76,7 @@
   accepted by the human on 2026-11-06. Their complete implementation reached
   `main` through signed merge commit `a8b46d21` and is now closed.
 - Gate 9.5 reuses the writable Rocky host overlay across
-  `make run-host` sessions, preserving verified OCI image content, instance
+  `make host-run` sessions, preserving verified OCI image content, instance
   definitions, roots, and status, and reports live layer-download progress.
   Synthetic proc refresh is now path-targeted rather than rebuilding the whole
   proc tree for each open. In a clean QEMU run, `ps -ef` fell from the human's
@@ -158,8 +158,11 @@
   A fresh matched comparison against current `main` passes every accepted-Ginux
   regression row within 4%; the worst ratio is 0.9718x and thread-yield ranges
   from 0.9760x to 1.0175x. Gate 11 separately retains ownership of its
-  unresolved native-parity target. The rebased result is delivered in pull
-  request https://github.com/gmkurtzer/ginux/pull/255 and awaits human
+  unresolved native-parity target. Post-review lifecycle cleanup now reserves
+  interactive-host destruction for explicit `make host-reset`, automated QEMU
+  tests use separate state, and audit recipes use explicit `enabled` booleans
+  with a controller-owned log destination. The rebased result is delivered in
+  pull request https://github.com/gmkurtzer/ginux/pull/255 and awaits human
   acceptance.
 
 ## Governing outcome and invariants
@@ -629,7 +632,10 @@ merge or close the pull request without explicit human direction. Gates 15 and
   current-main and Gate 13 matrices are environment-compatible and pass every
   accepted-Ginux regression row within 4%; the worst ratio is 0.9718x and all
   thread-yield ratios are 0.9760x or better. Gate 11's absolute native-parity
-  limitation remains documented and unchanged.
+  limitation remains documented and unchanged. Post-review evidence also
+  passes `make test-host-lifecycle`, `make test-config`, and the complete
+  `make test-systemd-interactive` clean/cache/audit/persistence workflow;
+  ordinary cleanup left the live interactive host and its overlay intact.
 - Delivery audit on 2026-11-09 verified pull requests 249, 251, 252, 253, 254,
   and 255 are open, non-draft, cleanly mergeable, correctly stacked, and have
   passing `static-and-unit` and `launch-integration` checks. No pull request was

@@ -166,7 +166,8 @@ make test-systemd       # cached image, external networking disabled
 make bench-prepare      # one-time networked setup for the pinned benchmark image
 make bench              # matched native/Ginux matrix plus mandatory budget checks
 make test-systemd-live  # shared network plus real upstream dnf -y update
-make run-host           # general interactive Rocky host with Ginux installed
+make host-run           # general interactive Rocky host with Ginux installed
+make host-reset         # discard that host's cache, instances, and writable state
 make demo-gate-9        # Gate 9 checkpoint through the same host workflow
 ```
 
@@ -193,11 +194,14 @@ baseline as well. Environment mismatches are reported separately from
 performance regressions. `make demo-gate-11` runs a bounded human-inspectable
 comparison and returns nonzero when a mandatory row misses its budget.
 
-`make run-host` boots the QEMU Rocky host and logs you into its ordinary shell.
+`make host-run` boots the QEMU Rocky host and logs you into its ordinary shell.
 Ginux is installed in `PATH`. The first `create` or `import` downloads and verifies
 the pinned Rocky OCI image with live per-layer progress; later operations reuse the
-cache. The writable Rocky host overlay persists across `make run-host` sessions,
-so cached images, instance definitions, roots, and stopped status remain available.
+cache. The writable Rocky host overlay persists across `make host-run`, ordinary
+cleanup, builds, and tests, so cached images, instance definitions, roots, and
+stopped status remain available. `make host-reset` is the explicit destructive
+operation that stops the host and removes that overlay; the next `make host-run`
+starts from the pinned clean Rocky image.
 A complete first session is:
 
 ```sh
@@ -221,9 +225,12 @@ virtual kernel boundary, rejects unsupported authority, reduces host identity,
 and applies `NoNewPrivs`. Lock state is host deployment state and is never
 written into an exported portable recipe.
 
-Syscall auditing is disabled by default. Add `--audit` to `ginux start` to
-record per-syscall decisions in the instance's `audit.log`; audit records are
-kept separate from the attached console.
+Syscall auditing is disabled by default with `[audit] enabled = false`. Add
+`--audit` to `ginux start` to enable it for that run, or set `enabled = true`
+to enable it for every start. Enabled audit records always go to the instance's
+`audit.log`; they are kept separate from the attached console.
+Existing recipes using `mode = "stderr"` or `mode = "disabled"` remain
+read-compatible and normalize to the new boolean form when rewritten.
 
 The instance specification supports typed recipe overrides, ingress and egress
 contract policy, volumes, virtual identity, and ordered pre-boot hooks. Host

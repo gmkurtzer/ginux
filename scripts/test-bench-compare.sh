@@ -23,7 +23,7 @@ benchmark_duration_seconds=5
 repetitions=3
 memory_limit_bytes=1073741824
 cpu_affinity=test-affinity
-audit_mode=stderr
+audit_enabled=1
 dispatch_mode=selective
 ginux_supervisor_cpu=shared-with-instance
 EOF

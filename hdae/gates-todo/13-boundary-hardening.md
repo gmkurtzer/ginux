@@ -54,6 +54,9 @@ honest security and compatibility boundary for the initial milestone.
   compatibility, operational, security, and performance limitations report.
 - [x] Ran the complete functional, contract, security, recovery, systemd, and
   aggregate regression suites after hardening.
+- [x] Isolated automated QEMU tests from the operator's persistent host,
+  reserved host destruction for explicit `make host-reset`, and replaced the
+  audit destination-as-mode syntax with explicit audit enablement.
 
 ## Remaining work
 
@@ -131,6 +134,14 @@ honest security and compatibility boundary for the initial milestone.
 - `make demo-gate-13` -> passed deterministic fuzzing, denied host effects,
   residual-authority inspection, supervisor-loss and unexpected-stop cleanup,
   contract denial, and limitations-report inspection.
+- `make test-host-lifecycle` -> passed; ordinary cleanup retains the operator
+  overlay and explicit reset removes only the selected host overlay.
+- Direct ordinary-cleanup verification -> the running interactive host,
+  overlay inode, overlay size, PID record, and serial log remained available.
+- `make test-config` -> passed on the isolated test-suite QEMU overlay.
+- `make test-systemd-interactive` -> passed the complete clean/cached restart,
+  default audit-disabled, `--audit` opt-in, contract, console, and persistence
+  workflow using `[audit] enabled = false`.
 - Pull request 255 CI -> `static-and-unit` and `launch-integration` both passed
   on the delivered `hdae/boundary-hardening` branch.
 - `make bench-compare` against the default stale exploratory artifact failed
@@ -176,6 +187,13 @@ honest security and compatibility boundary for the initial milestone.
 - The default `build/gate11/` result is an early exploratory matrix and must
   not be treated as current retained-code performance. The authoritative final
   matrix is `build/gate11-balanced-final-v2/`.
+- `make host-run` is the operator workflow and always reuses
+  `build/rocky-host-overlay.qcow2`; normal cleanup and automated tests do not
+  remove or share it. `make host-reset` is the only named Make target that
+  intentionally discards that host's writable state.
+- Audit recipes configure only `[audit] enabled = true|false`. Audit records
+  always belong to the controller-owned instance `audit.log`; `ginux start
+  NAME --audit` is a one-run enablement override.
 
 ## Delivery strategy
 
