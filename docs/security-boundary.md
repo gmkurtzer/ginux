@@ -75,7 +75,9 @@ rows. Its thread-yield rows remain approximately 0.917x to 0.953x native under
 x86-64 QEMU TCG and therefore miss the unchanged 4% budget. Same-harness
 controls attribute the remaining gap to the host seccomp/task-work path in
 that environment. Gate 11 remains partial; Gate 13 must not be read as
-accepting or hiding that Performance limitation.
+accepting or hiding that performance limitation. A fresh matched comparison
+against current `main` shows that Gate 13 itself adds no per-workload
+regression beyond the existing 4% accepted-Ginux budget.
 
 ## Reproducible evidence
 

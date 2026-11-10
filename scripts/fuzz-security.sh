@@ -14,13 +14,15 @@ test "$seconds" -le 5 || {
 mkdir -p "$artifacts"
 rm -f "$artifacts"/current-*.bin
 ulimit -v 262144 2>/dev/null || true
+cargo build --quiet -p security-fuzzer
+fuzzer=${CARGO_TARGET_DIR:-target}/debug/security-fuzzer
+test -x "$fuzzer"
 
 for target in config selector elf vfs-index kernel-path device syscall audit; do
     timeout_seconds=$((seconds + 2))
     timeout_marker=$artifacts/timeout-$target
     rm -f "$timeout_marker"
-    cargo run --quiet -p security-fuzzer -- \
-        "$target" "$seconds" "$artifacts" &
+    "$fuzzer" "$target" "$seconds" "$artifacts" &
     fuzz_pid=$!
     (
         sleep "$timeout_seconds"

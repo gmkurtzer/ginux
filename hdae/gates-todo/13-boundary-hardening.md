@@ -57,10 +57,10 @@ honest security and compatibility boundary for the initial milestone.
 
 ## Remaining work
 
-- [ ] Collect a fresh matched benchmark against current `main` and verify that
+- [x] Collected a fresh matched benchmark against current `main` and verified that
   Gate 13 introduces no row beyond the existing 4% accepted-Ginux regression
   budget. Gate 11 retains ownership of the unresolved native-parity criterion.
-- [ ] Human review and acceptance of the partial result, residual risks, and
+- [ ] Human review and acceptance of the technical result, residual risks, and
   scoped claims.
 
 ## Acceptance criteria
@@ -141,6 +141,19 @@ honest security and compatibility boundary for the initial milestone.
   /tmp/ginux-no-accepted-metadata` -> failed exactly the five authoritative
   thread-yield rows at 0.938x, 0.930x, 0.953x, 0.921x, and 0.917x against the
   required 0.960x floor; CPU, memory, and mutex rows passed.
+- Fresh current-main and Gate 13 matrices used five-second workloads, five
+  repetitions, four host vCPUs, selective dispatch, stderr audit, identical
+  affinity, and the same disposable clone of the prepared QEMU disk. The
+  current-main source was `55b719db`; the Gate 13 source was `792f71a2` plus
+  the benchmark-harness argument correction subsequently committed with this
+  evidence.
+- `GINUX_BENCH_REQUIRE_NATIVE_BUDGET=0 scripts/bench-compare.sh
+  build/gate13-branch/results.tsv build/gate13-branch/metadata.txt
+  build/gate13-main-baseline/results.tsv
+  build/gate13-main-baseline/metadata.txt` -> environments compatible and
+  `GATE11_REGRESSION: PASS`. The worst retained-code ratio was 0.9718x (CPU,
+  four vCPUs, one thread), above the 0.960x floor. Thread-yield ratios ranged
+  from 0.9760x to 1.0175x versus current main.
 
 ## Decisions and limitations
 
@@ -174,14 +187,17 @@ honest security and compatibility boundary for the initial milestone.
   authorization
 - Planned commits: malformed-input and fuzz harnesses; escape and authority
   reduction; recovery and cleanup; full regression evidence and limitations
-- Actual commits: `0b954c76` (gate start), `83b170c6` (bounded security
-  fuzzing), `e6e56e96` (native supervisor authority reduction), `d6cda551`
-  (boundary and recovery verification), `83f0fc99` (evidence checkpoint), plus
-  the pull-request record commit
+- Actual commits after the final rebase: `881da049` (gate start), `b9f7d140`
+  (bounded security fuzzing), `4d1690d2` (native supervisor authority
+  reduction), `c35f529a` (boundary and recovery verification), `8cf92c0c`
+  (evidence checkpoint), `7ed25d42` and `afa7c1a4` (delivery records), and
+  `792f71a2` plus the final evidence commit (performance criterion and fresh
+  closure evidence).
 
 ## Review policy and outcome
 
-Human checkpoint. Present `make demo-gate-13`, fresh regression and matched
+Human checkpoint. The gate is technically passed and awaits explicit human
+acceptance. Present `make demo-gate-13`, fresh regression and matched
 performance evidence, the exact remaining Gate 11 limitation, and the pull
 request. This gate cannot close the initial milestone until the human accepts
 the evidence, residual risks, and scoped claims. Pull request 255 remains open;

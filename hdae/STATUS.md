@@ -151,14 +151,16 @@
   materialize a bounded maintenance contract atomically, expose their state in
   lifecycle output, and warn on unlocked starts. A clean Rocky workflow proved
   denial while locked, success while unlocked, and denial again after relock.
-- Gate 13 boundary hardening is technically partial on
+- Gate 13 boundary hardening is technically passed on
   `hdae/boundary-hardening`. Its deterministic malformed-input and fuzz suite,
   post-bootstrap supervisor authority reduction, security and recovery suites,
   aggregate regressions, limitations report, and human demonstration pass.
-  The unchanged 4% performance criterion still fails all five authoritative
-  selective thread-yield rows at 0.917x to 0.953x native, so the gate is not
-  passed. The stacked result is delivered in pull request
-  https://github.com/gmkurtzer/ginux/pull/255.
+  A fresh matched comparison against current `main` passes every accepted-Ginux
+  regression row within 4%; the worst ratio is 0.9718x and thread-yield ranges
+  from 0.9760x to 1.0175x. Gate 11 separately retains ownership of its
+  unresolved native-parity target. The rebased result is delivered in pull
+  request https://github.com/gmkurtzer/ginux/pull/255 and awaits human
+  acceptance.
 
 ## Governing outcome and invariants
 
@@ -575,13 +577,10 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Human review is required before further gate execution. Review stacked pull
-requests 249, 251, 252, 253, 254, and 255 in order and decide whether to keep
-Gate 11 and Gate 13 partial under the unchanged 4% threshold, change the
-thread-yield performance criterion, or authorize a new architecture or
-environment investigation. Gate 14 remains explicitly deferred and is not
-actionable. Do not merge or close any pull request without explicit human
-direction.
+Present Gate 13 pull request 255, its fresh boundary, recovery, aggregate,
+demonstration, and matched no-regression evidence for human acceptance. Do not
+merge or close the pull request without explicit human direction. Gates 15 and
+16 planning remains isolated from this branch.
 
 ## Context recovery
 
@@ -592,14 +591,14 @@ direction.
   Gate 12.1 is technically passed and delivered in pull request 252; Gate
   12.25 is technically passed and delivered in pull request 253. Gate 12.5 is
   technically passed and delivered in pull request 254 from
-  `hdae/contract-maintenance-lock`. Gate 13 is technically partial on
-  `hdae/boundary-hardening`, stacked on Gate 12.5: its boundary, recovery,
-  authority, regression, documentation, and demonstration evidence passes,
-  while its inherited performance criterion fails. Gate 11 remains partial on
-  its parent branch and in pull request 249.
+  `hdae/contract-maintenance-lock`. Gate 13 is technically passed on
+  `hdae/boundary-hardening`, rebased onto current `main`: its boundary,
+  recovery, authority, regression, documentation, demonstration, and matched
+  accepted-Ginux performance evidence pass. Gate 11 remains independently
+  partial on its native-parity target.
 - Gate 13 delivery: pull request
   https://github.com/gmkurtzer/ginux/pull/255 is open from
-  `hdae/boundary-hardening` against the Gate 12.5 branch.
+  `hdae/boundary-hardening` against `main`.
 - Gate 12.25 delivery: pull request
   https://github.com/gmkurtzer/ginux/pull/253 is open from
   `hdae/top-level-instance-cli` against the Gate 12.1 branch.
@@ -626,9 +625,11 @@ direction.
   backstops.
 - Gate 13 evidence: `make check`, five-second-per-target `make fuzz-security`,
   `make test-security`, `make test-recovery`, `make test-contract`, aggregate
-  `make test`, and `make demo-gate-13` pass. The authoritative
-  `build/gate11-balanced-final-v2` comparison fails only the five thread-yield
-  rows at 0.938x, 0.930x, 0.953x, 0.921x, and 0.917x versus the 0.960x floor.
+  `make test`, and `make demo-gate-13` pass. Fresh five-second/five-repetition
+  current-main and Gate 13 matrices are environment-compatible and pass every
+  accepted-Ginux regression row within 4%; the worst ratio is 0.9718x and all
+  thread-yield ratios are 0.9760x or better. Gate 11's absolute native-parity
+  limitation remains documented and unchanged.
 - Delivery audit on 2026-11-09 verified pull requests 249, 251, 252, 253, 254,
   and 255 are open, non-draft, cleanly mergeable, correctly stacked, and have
   passing `static-and-unit` and `launch-integration` checks. No pull request was
