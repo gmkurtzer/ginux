@@ -57,6 +57,8 @@ honest security and compatibility boundary for the initial milestone.
 - [x] Isolated automated QEMU tests from the operator's persistent host,
   reserved host destruction for explicit `make host-reset`, and replaced the
   audit destination-as-mode syntax with explicit audit enablement.
+- [x] Completed virtual controlling-terminal semantics across duplicated
+  console descriptors so interactive shells retain job control.
 
 ## Remaining work
 
@@ -141,7 +143,10 @@ honest security and compatibility boundary for the initial milestone.
 - `make test-config` -> passed on the isolated test-suite QEMU overlay.
 - `make test-systemd-interactive` -> passed the complete clean/cached restart,
   default audit-disabled, `--audit` opt-in, contract, console, and persistence
-  workflow using `[audit] enabled = false`.
+  workflow using `[audit] enabled = false`. The same run rejected Bash's
+  terminal-process-group and no-job-control warnings, proved monitor mode,
+  foreground Ctrl-C delivery, pipelines, background jobs, detach/reattach,
+  terminal resizing, and controlled shutdown.
 - Pull request 255 CI -> `static-and-unit` and `launch-integration` both passed
   on the delivered `hdae/boundary-hardening` branch.
 - `make bench-compare` against the default stale exploratory artifact failed

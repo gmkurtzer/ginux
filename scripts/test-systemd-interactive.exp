@@ -171,10 +171,19 @@ expect {
 send -- "ginux\r"
 expect {
     -re {initialize_job_control: no job control} { puts stderr "instance shell job control initialization failed"; exit 202 }
+    -re {cannot set terminal process group} { puts stderr "instance shell could not establish its terminal process group"; exit 205 }
+    -re {no job control in this shell} { puts stderr "instance shell started without job control"; exit 206 }
     -re {\[root@ginux [^]]+\]# } {}
     timeout { puts stderr "interactive instance shell timed out"; exit 88 }
     eof { puts stderr "instance shell exited early"; exit 89 }
 }
+send -- "\[\[ -o monitor \]\] && printf 'GINUX_JOB_%s\\n' 'CONTROL: PASS'\r"
+expect {
+    -re {GINUX_JOB_CONTROL: PASS} {}
+    timeout { puts stderr "interactive shell job control was not enabled"; exit 207 }
+    eof { puts stderr "instance exited during job-control check"; exit 208 }
+}
+expect -re {\[root@ginux [^]]+\]# }
 send -- "sleep 30\r"
 after 1000
 send -- "\003"

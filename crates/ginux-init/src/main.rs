@@ -106,6 +106,9 @@ const GINUX_VERSION: &str = concat!("Ginux userspace kernel ", env!("CARGO_PKG_V
 const PTRACE_POKEDATA: usize = 5;
 const PTRACE_PEEKDATA: usize = 2;
 const SYS_IOCTL_HOST: usize = 16;
+const TIOCSCTTY: u64 = 0x540e;
+const TIOCGPGRP: u64 = 0x540f;
+const TIOCSPGRP: u64 = 0x5410;
 const SYS_MMAP_HOST: usize = 9;
 const SYS_FUTEX_HOST: usize = 202;
 const SYS_CLOSE_RANGE_HOST: usize = 436;
@@ -3350,6 +3353,8 @@ struct NativeSupervisorTask {
     override_result: i64,
     pending_console_open: bool,
     console_fd: i64,
+    console_fds: [u64; NATIVE_PROC_FD_LIMIT / 64],
+    pending_console_duplicate: i8,
     pipe2_address: usize,
     pipe_fds: [i64; 8],
     socket_fds: [NativeSocketFd; NATIVE_SOCKET_FD_LIMIT],
@@ -5116,6 +5121,10 @@ impl BrokerPidMap {
             .store(process_group, Ordering::Release);
     }
 
+    fn foreground_group(&self) -> u32 {
+        self.foreground_group.load(Ordering::Acquire)
+    }
+
     fn interrupt_foreground(&self) -> bool {
         let foreground = self.foreground_group.load(Ordering::Acquire);
         let mut delivered = false;
@@ -5501,6 +5510,12 @@ fn supervise_native(
     let mut pending_child_stops = [0usize; 16];
     let mut peak_managed_tasks = 1usize;
     let mut yield_broker_pid = 0usize;
+    let mut root_console_fds = [0u64; NATIVE_PROC_FD_LIMIT / 64];
+    for descriptor in [0, 1, 2, INSTANCE_CONSOLE_FD] {
+        if !native_fd_set(&mut root_console_fds, descriptor) {
+            native_fail(instance, pid, b"native console descriptor table full");
+        }
+    }
     tasks[0] = Some(NativeSupervisorTask {
         host_pid: pid,
         virtual_id: root_virtual,
@@ -5510,6 +5525,8 @@ fn supervise_native(
         override_result: 0,
         pending_console_open: false,
         console_fd: INSTANCE_CONSOLE_FD as i64,
+        console_fds: root_console_fds,
+        pending_console_duplicate: 0,
         pipe2_address: 0,
         pipe_fds: [-1; 8],
         socket_fds: [EMPTY_SOCKET_FD; NATIVE_SOCKET_FD_LIMIT],
@@ -5685,6 +5702,8 @@ fn supervise_native(
                 override_result: 0,
                 pending_console_open: false,
                 console_fd: task.console_fd,
+                console_fds: task.console_fds,
+                pending_console_duplicate: 0,
                 pipe2_address: 0,
                 pipe_fds: task.pipe_fds,
                 socket_fds: task.socket_fds,
@@ -6023,7 +6042,24 @@ fn supervise_native(
             write_all(b"\n");
             if task.pending_console_open {
                 task.console_fd = registers.rax as i64;
+                if registers.rax as i64 >= 0
+                    && !native_fd_set(&mut task.console_fds, registers.rax as usize)
+                {
+                    native_fail(instance, pid, b"native console descriptor table full");
+                }
                 task.pending_console_open = false;
+            }
+            if task.pending_console_duplicate != 0 {
+                if registers.rax as i64 >= 0 {
+                    let duplicated = registers.rax as usize;
+                    native_fd_clear(&mut task.console_fds, duplicated);
+                    if task.pending_console_duplicate > 0
+                        && !native_fd_set(&mut task.console_fds, duplicated)
+                    {
+                        native_fail(instance, pid, b"native console descriptor table full");
+                    }
+                }
+                task.pending_console_duplicate = 0;
             }
             if task.pending_mountinfo_open {
                 if registers.rax as i64 >= 0 {
@@ -6100,6 +6136,7 @@ fn supervise_native(
                 };
             }
             if task.syscall == 3 && registers.rax as i64 == 0 {
+                native_fd_clear(&mut task.console_fds, registers.rdi as usize);
                 if let Some(slot) = task
                     .socket_fds
                     .iter_mut()
@@ -6183,6 +6220,11 @@ fn supervise_native(
                     }
                 }
                 if task.close_range_first >= 0 && task.close_range_last >= 0 {
+                    native_fd_clear_range(
+                        &mut task.console_fds,
+                        task.close_range_first as usize,
+                        task.close_range_last as usize,
+                    );
                     native_fd_clear_range(
                         &mut task.cgroup_procs_fds,
                         task.close_range_first as usize,
@@ -8413,8 +8455,8 @@ fn supervise_native(
             Action::Mediate
                 if mode == 3
                     && syscall == 16
-                    && registers.rdi as i64 == task.console_fd
-                    && registers.rsi == 21_518 =>
+                    && native_fd_contains(&task.console_fds, registers.rdi as usize)
+                    && registers.rsi == TIOCSCTTY =>
             {
                 let task_view = processes.view(task.virtual_id).unwrap_or_else(|_| {
                     native_fail(instance, pid, b"native controlling terminal view failed")
@@ -8434,17 +8476,17 @@ fn supervise_native(
             Action::Mediate
                 if mode == 3
                     && syscall == 16
-                    && (registers.rdi <= 2 || registers.rdi as i64 == task.console_fd)
-                    && matches!(registers.rsi, 21_519 | 21_520) =>
+                    && native_fd_contains(&task.console_fds, registers.rdi as usize)
+                    && matches!(registers.rsi, TIOCGPGRP | TIOCSPGRP) =>
             {
                 let task_view = processes.view(task.virtual_id).unwrap_or_else(|_| {
                     native_fail(instance, pid, b"native job control view failed")
                 });
-                let allowed = if registers.rsi == 21_519 {
+                let allowed = if registers.rsi == TIOCGPGRP {
                     write_tracee_bytes(
                         host_pid,
                         registers.rdx as usize,
-                        &task_view.process_group.to_ne_bytes(),
+                        &pid_map.foreground_group().to_ne_bytes(),
                     )
                 } else {
                     read_tracee_u32(host_pid, registers.rdx as usize).is_some_and(|group| {
@@ -8475,6 +8517,12 @@ fn supervise_native(
             }
             Action::Mediate if mode == 3 && syscall == 32 => {
                 line(b"mediate surface=managed-descriptor-dup result=pending");
+                task.pending_console_duplicate =
+                    if native_fd_contains(&task.console_fds, registers.rdi as usize) {
+                        1
+                    } else {
+                        -1
+                    };
                 task.awaiting_exit = true;
                 if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
                     native_fail(instance, pid, b"native managed descriptor dup failed");
@@ -8482,6 +8530,12 @@ fn supervise_native(
             }
             Action::Mediate if mode == 3 && syscall == 292 && registers.rdx & !0x8_0000 == 0 => {
                 line(b"mediate surface=managed-descriptor-dup result=pending");
+                task.pending_console_duplicate =
+                    if native_fd_contains(&task.console_fds, registers.rdi as usize) {
+                        1
+                    } else {
+                        -1
+                    };
                 task.awaiting_exit = true;
                 if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
                     native_fail(instance, pid, b"native managed descriptor dup3 failed");
@@ -8501,6 +8555,12 @@ fn supervise_native(
             }
             Action::Mediate if mode == 3 && syscall == 33 => {
                 line(b"mediate surface=managed-descriptor-dup result=pending");
+                task.pending_console_duplicate =
+                    if native_fd_contains(&task.console_fds, registers.rdi as usize) {
+                        1
+                    } else {
+                        -1
+                    };
                 task.awaiting_exit = true;
                 if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
                     native_fail(instance, pid, b"native managed descriptor dup2 failed");

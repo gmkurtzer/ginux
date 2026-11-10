@@ -163,7 +163,11 @@
   tests use separate state, and audit recipes use explicit `enabled` booleans
   with a controller-owned log destination. The rebased result is delivered in
   pull request https://github.com/gmkurtzer/ginux/pull/255 and awaits human
-  acceptance.
+  acceptance. A subsequent terminal fix tracks duplicated console descriptors
+  and the virtual foreground process group; the complete Rocky interactive
+  workflow now proves Bash monitor mode, foreground Ctrl-C delivery, pipelines,
+  background jobs, detach/reattach, resizing, and shutdown without terminal
+  process-group or no-job-control warnings.
 
 ## Governing outcome and invariants
 
