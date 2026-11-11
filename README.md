@@ -88,7 +88,7 @@ The current implementation includes:
 This is a named compatibility baseline, not a claim of complete Linux or
 systemd compatibility. Its exact image, readiness marker, tests, evidence, and
 limitations are recorded in
-[`hdae/gates-todo/9-systemd-baseline.md`](hdae/gates-todo/9-systemd-baseline.md).
+[`hdae/gates-done/9-systemd-baseline.md`](hdae/gates-done/9-systemd-baseline.md).
 
 ### Agent containment research
 
