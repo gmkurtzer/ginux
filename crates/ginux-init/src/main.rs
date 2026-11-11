@@ -4418,12 +4418,49 @@ fn native_buffer_append_hundredths(
     native_buffer_append(output, length, &[b'0' + (value % 10) as u8])
 }
 
+fn native_identity_bytes(instance_id: &[u8]) -> [u8; 16] {
+    let mut first = 0xcbf2_9ce4_8422_2325u64;
+    let mut second = 0x8422_2325_cbf2_9ce4u64;
+    for byte in instance_id {
+        first ^= u64::from(*byte);
+        first = first.wrapping_mul(0x100_0000_01b3);
+        second ^= u64::from(*byte).wrapping_add(0x9d);
+        second = second.wrapping_mul(0x100_0000_01b3);
+    }
+    let mut identity = [0u8; 16];
+    identity[..8].copy_from_slice(&first.to_be_bytes());
+    identity[8..].copy_from_slice(&second.to_be_bytes());
+    // Present the stable per-instance value as an RFC 4122 variant/version UUID.
+    identity[6] = (identity[6] & 0x0f) | 0x40;
+    identity[8] = (identity[8] & 0x3f) | 0x80;
+    identity
+}
+
+fn native_buffer_append_identity_uuid(
+    output: &mut [u8],
+    length: &mut usize,
+    instance_id: &[u8],
+) -> Option<()> {
+    let identity = native_identity_bytes(instance_id);
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    for (index, byte) in identity.iter().enumerate() {
+        if matches!(index, 4 | 6 | 8 | 10) {
+            native_buffer_append(output, length, b"-")?;
+        }
+        native_buffer_append(output, length, &[HEX[(byte >> 4) as usize]])?;
+        native_buffer_append(output, length, &[HEX[(byte & 0x0f) as usize]])?;
+    }
+    Some(())
+}
+
 fn native_virtual_kernel_read(
     path: &[u8],
     current: TaskId,
     processes: &ProcessTable<128>,
     tasks: &[Option<NativeSupervisorTask>; 128],
     global: [u64; 4],
+    instance_id: &[u8],
+    hostname: &[u8],
     contract_profile: &[u8],
     output: &mut [u8],
 ) -> Option<usize> {
@@ -4455,7 +4492,8 @@ fn native_virtual_kernel_read(
             native_buffer_append(output, &mut length, b"40\n")?
         }
         b"/proc/sys/kernel/hostname" => {
-            native_buffer_append(output, &mut length, b"ginux\n")?
+            native_buffer_append(output, &mut length, hostname)?;
+            native_buffer_append(output, &mut length, b"\n")?;
         }
         b"/proc/sys/kernel/ostype" => native_buffer_append(output, &mut length, b"Linux\n")?,
         b"/proc/sys/kernel/osrelease" => {
@@ -4466,11 +4504,10 @@ fn native_virtual_kernel_read(
             native_buffer_append(output, &mut length, GINUX_VERSION.as_bytes())?;
             native_buffer_append(output, &mut length, b"\n")?;
         }
-        b"/proc/sys/kernel/random/boot_id" => native_buffer_append(
-            output,
-            &mut length,
-            b"4e45c53e-0e6a-4fb8-9f25-e0f11b40db9a\n",
-        )?,
+        b"/proc/sys/kernel/random/boot_id" => {
+            native_buffer_append_identity_uuid(output, &mut length, instance_id)?;
+            native_buffer_append(output, &mut length, b"\n")?;
+        }
         b"/sys/kernel/security/lsm" => {}
         b"/sys/devices/system/cpu/online" => {
             native_buffer_append(output, &mut length, b"0")?;
@@ -7128,6 +7165,8 @@ fn supervise_native(
                             instance.config().vcpus,
                             instance.config().memory_mib,
                         ],
+                        instance.config().id.as_bytes(),
+                        instance.config().hostname.as_bytes(),
                         contract_label(instance.config()),
                         &mut content,
                     )
@@ -7880,7 +7919,7 @@ fn supervise_native(
             Action::Emulate if mode == 3 && syscall == 63 => {
                 let mut uts = [0u8; 65 * 6];
                 write_uts_field(&mut uts, 0, b"Linux");
-                write_uts_field(&mut uts, 1, b"ginux");
+                write_uts_field(&mut uts, 1, instance.config().hostname.as_bytes());
                 write_uts_field(&mut uts, 2, GINUX_ABI_RELEASE);
                 write_uts_field(&mut uts, 3, GINUX_VERSION.as_bytes());
                 write_uts_field(&mut uts, 4, b"x86_64");
