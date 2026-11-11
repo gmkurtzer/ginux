@@ -103,6 +103,10 @@ replace it.
 15. **Dispatch-mode performance matrix**: reproducibly compare native Rocky,
     selective Ginux, and paranoid Ginux with paired controls, reusable test
     templates, combined tables and graphs, and complete operator documentation.
+17. **Concurrent-instance isolation**: run multiple Rocky systemd instances in
+    parallel and prove independent contracts, virtual state, writable overlays,
+    resources, audit, console, lifecycle, recovery, and documented shared-host
+    network behavior.
 
 Gates are stored in `hdae/gates-todo/` and remain there until they pass and are
 accepted at their checkpoint. Closed gate records move unchanged to
@@ -171,13 +175,16 @@ define their expected result.
   10, and 12.
 - Device mediation is built and measured by Gates 6, 10, 11, and 13.
 - Performance is measured from Gate 1 and judged in Gates 9, 11, and 13.
+- Cross-instance authority and lifecycle isolation are proven by Gate 17.
 - Reproducibility and offline testing are established by Gates 1 and 2 and
   remain regression criteria for every later gate.
 
 ## Deferred roadmap
 
 After the initial twelve gates, Gate 14 preserves the Unicorn Engine execution
-backend as a concrete alternative to native ptrace execution. Other likely
+backend as a concrete alternative to native ptrace execution. It remains
+explicitly deferred. A later kernel-module enforcement experiment was
+abandoned on 2026-11-11 and is not part of the roadmap. Other likely
 milestones include multiple concurrent
 instances, conventional containers within an instance, network and storage backend
 expansion, physical-device assignment with a separately reviewed IOMMU/VFIO

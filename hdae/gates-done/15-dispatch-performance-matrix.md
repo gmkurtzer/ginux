@@ -120,17 +120,17 @@ recapitulate the measurements.
 
 - Working branch: `hdae/dispatch-performance-matrix`
 - Intended base: `main`
-- Pull request: https://github.com/gmkurtzer/ginux/pull/257. The branch and
-  pull request were pushed and opened after explicit human authorization; do
-  not merge or close without explicit human authorization.
+- Pull request: https://github.com/gmkurtzer/ginux/pull/257, merged into `main`
+  on 2026-11-11 after explicit human review.
 - Planned commits: gate and templates; collection/validation/reporting; tests
   and Make interface; documentation; final benchmark evidence and checkpoint.
 
 ## Review policy and outcome
 
-Human checkpoint. Implementation and verification are authorized. Stop after
-the branch and pull request contain fresh evidence; Gate 15 closes only after
-human review and acceptance.
+Accepted and closed by the human during ledger reconciliation on 2026-11-11.
+Pull request 257 was merged into `main` on 2026-11-11 after the complete
+benchmark matrix and regression evidence passed. Gate 11 continues to own the
+documented selective thread-yield performance gap.
 
 ## Evidence
 
