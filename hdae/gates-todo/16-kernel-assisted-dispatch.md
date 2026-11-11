@@ -162,11 +162,11 @@ ptrace, a module, or another dispatcher.
   attempts return `EPERM` before mutation. Invalid identifiers are rejected,
   policy replacement is atomic, controller exit remains fail-closed, active
   policy prevents module unload, and BPF pin removal detaches deterministically.
-- Alternating, paired five-sample TCG microbenchmarks are checked in under
-  `benchmarks/gate16/results/`. Unrelated `sched_yield` throughput is `0.998x`
-  native for the module and `1.006x` for BPF LSM; allowed `mkdirat`
+- A fresh alternating, paired five-sample TCG run on 2026-11-10 is checked in
+  under `benchmarks/gate16/results/`. Unrelated `sched_yield` throughput is
+  `0.997x` native for the module and `1.004x` for BPF LSM; allowed `mkdirat`
   create/remove throughput is `1.000x` and `1.001x`. Denied `mkdirat`
-  throughput is 2.253M/s for seccomp, 1.614M/s for the module, and 0.323M/s for
+  throughput is 2.176M/s for seccomp, 1.605M/s for the module, and 0.320M/s for
   the later object-aware BPF LSM hook.
 - `ginux-instance` now derives deterministic enforcement components from
   semantic contract requirements and usable host integrations. Supported
@@ -176,10 +176,11 @@ ptrace, a module, or another dispatcher.
   Normal execution reports `dispatch=automatic` and the selected enforcement
   component set. Retained selective/paranoid selectors exist only for accepted
   comparison fixtures and explicit test overrides.
-- `make check test-contract test-security test-systemd test` passes, including
+- Fresh 2026-11-10 runs of `make check`, `make test-contract`,
+  `make test-security`, `make test-systemd`, and `make test` pass, including
   all unit, fuzz, authority, lifecycle, contract-runtime, Rocky systemd, and
-  aggregate QEMU integrations. `make test-config test-instance check` also
-  passes independently.
+  aggregate QEMU integrations. `make test-gate16-kernel-assist` then passed
+  the semantic/lifecycle checks and produced the checked-in benchmark refresh.
 
 ## Decisions and limitations
 

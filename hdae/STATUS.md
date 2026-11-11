@@ -198,8 +198,8 @@
   raw/static/thread/fork/exec `mkdirat` before mutation, survive controller
   exit fail-closed, and pass stale-identity, atomic replacement, detach, and
   unload lifecycle checks in the disposable Rocky host.
-- Gate 16's alternating paired microbenchmarks retain unrelated `sched_yield`
-  at `0.998x` native for the module and `1.006x` for BPF LSM; allowed
+- Gate 16's fresh alternating paired microbenchmarks retain unrelated
+  `sched_yield` at `0.997x` native for the module and `1.004x` for BPF LSM; allowed
   `mkdirat` is `1.000x` and `1.001x`. The evidence recommends supported
   BPF/native/seccomp composition,
   keeps ptrace/userspace as the sound semantic fallback, and retains the
@@ -208,8 +208,9 @@
 - Portable instance recipes no longer select execution or dispatch backends.
   The automatic planner derives a component set from contract requirements and
   usable host integrations, reports it at startup, and fails closed when no
-  complete plan exists. The full `make check test-contract test-security
-  test-systemd test` regression command and Gate 16 prototype suite pass.
+  complete plan exists. Fresh individual runs of `make check`,
+  `make test-contract`, `make test-security`, `make test-systemd`, aggregate
+  `make test`, and the Gate 16 prototype/benchmark suite pass.
 
 ## Governing outcome and invariants
 
