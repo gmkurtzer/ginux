@@ -174,6 +174,24 @@
   no-job-control warnings. `make check`,
   `make test-host-lifecycle`, aggregate `make test`, and the full
   `make test-systemd-interactive` workflow pass.
+- Gate 14 is parked by human direction and has no active implementation work.
+- Gate 15 is technically complete on `hdae/dispatch-performance-matrix` and is
+  awaiting human review. Checked-in suite, mode, and per-workload templates
+  drive a paired native/selective/paranoid matrix at 1/2/4 vCPUs. The workflow
+  preserves raw samples and provenance, validates compatible metadata, and
+  produces combined TSV, Markdown tables with mean and standard deviation, and
+  a native-relative SVG graph.
+- The full Gate 15 run collected 400 measured samples. Selective CPU, memory,
+  and mutex rows remain between `0.9642x` and `1.0235x` native; selective
+  thread-yield is `0.9216x` to `0.9401x`. Paranoid CPU, memory, and mutex rows
+  remain between `0.9618x` and `1.0417x`, while all-syscall mediation makes
+  paranoid thread-yield `0.0275x` to `0.0350x`. Gate 15 reports these costs;
+  Gate 11 retains responsibility for any further optimization.
+- Gate 15 verification passes `make test-gate15-report`,
+  `make demo-gate-15`, the full `make bench-modes` matrix,
+  `make bench-modes-report`, `make check`, `make test-contract`,
+  `make test-security`, `make test-systemd`, and aggregate `make test` including
+  all QEMU integrations.
 
 ## Governing outcome and invariants
 
@@ -192,18 +210,12 @@ scope, threat model, and invariants.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 12.5, contract maintenance lock, is technically passed and
-  delivered in pull request https://github.com/gmkurtzer/ginux/pull/254.
-  Gate 12.25 is technically passed and delivered in pull request
-  https://github.com/gmkurtzer/ginux/pull/253.
-- Last evidence: `make check`, `make test-contract`, Rocky QEMU
-  `make test-config`, `make test-contract-runtime`, `make test-systemd`, the
-  complete aggregate `make test`, and the Gate 10.5 human demonstration pass.
-  The compiler covers 182 operations and reports the winning human source rule
-  in explanation and runtime audit output. After review, the same lint, unit,
-  QEMU configuration, aggregate, and full demonstration evidence passed with
-  the corrected `ginux instance` interface; the removed top-level contract
-  command is a tested failure.
+- Active gate: Gate 15, dispatch-mode performance matrix, is technically
+  complete on `hdae/dispatch-performance-matrix` and awaits human review and
+  authorization to push and open its dedicated pull request.
+- Last evidence: the complete Gate 15 matrix and report generation pass, as do
+  `make check`, `make test-contract`, `make test-security`,
+  `make test-systemd`, and aggregate `make test` with all QEMU integrations.
 - The final CLI correction makes required configuration files positional:
   `instance create NAME FILE`, `validate FILE`, `inspect FILE`, and
   `explain FILE OPERATION`. Fresh `make check`, `make test-contract`, and
