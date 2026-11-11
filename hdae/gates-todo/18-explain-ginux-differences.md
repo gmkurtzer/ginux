@@ -48,13 +48,16 @@ or compatibility claims the current evidence does not support.
 - [x] Created `hdae/explain-ginux-differences` from synchronized `main`.
 - [x] Reviewed the complete HN discussion and authoritative UML and gVisor
   architecture documentation.
+- [x] Rewrote the README's primary mechanism, non-goals, comparison table, and
+  HDAE explanation.
+- [x] Added a focused architecture comparison covering UML, gVisor,
+  namespaces/seccomp, VMs, current syscall capture, trust, and differentiation.
+- [x] Reconciled architecture and security-boundary documentation.
+- [x] Added deterministic documentation assertions and ran all required
+  documentation, static, aggregate, and CI-classification regressions.
 
 ## Remaining work
 
-- [ ] Rewrite the README's primary explanation and comparison.
-- [ ] Add a focused architecture-comparison document with explicit boundaries.
-- [ ] Reconcile architecture and security documentation with the new wording.
-- [ ] Add and run deterministic documentation checks and aggregate regressions.
 - [ ] Push the branch and open the Gate 18 pull request.
 - [ ] Obtain human review and acceptance.
 
@@ -103,6 +106,14 @@ or compatibility claims the current evidence does not support.
 - gVisor architecture documentation -> gVisor is an application kernel whose
   platform captures syscalls and manages address spaces; its current platforms
   include KVM, systrap, and a deprecated ptrace backend.
+- `make check-architecture-doc check-security-doc check` -> passed mechanism,
+  comparison, limitation, terminology, formatting, and lint assertions.
+- `make test` -> passed the complete aggregate unit and QEMU integration suite.
+- `make test-ci-changes` -> passed all documentation/code classification cases.
+- Manual hostile-reading pass -> mechanism language matches the checked-in
+  seccomp/ptrace filter, current selective exception is limited to
+  `sched_yield`, gVisor is described as closest rather than equivalent, and no
+  VM-grade, complete-ABI, novelty, or production claim remains.
 
 ## Decisions and limitations
 
@@ -120,7 +131,8 @@ or compatibility claims the current evidence does not support.
 - Pull request: intended
 - Planned commits: gate definition; README and comparison documentation;
   deterministic checks and evidence; pull-request record
-- Actual commits: pending
+- Actual commits: `cdf12203`, `6644b3e4`, plus the final evidence checkpoint
+  commit.
 
 ## Review policy and outcome
 
