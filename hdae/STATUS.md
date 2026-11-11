@@ -590,15 +590,20 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Push the Gate 13 acceptance record to pull request 255, then merge only with
-explicit human direction. Gate 14 remains deferred; Gates 15 and 16 planning
-remains isolated from this branch.
+Implement Gate 15 on `hdae/dispatch-performance-matrix`: add checked-in native,
+selective, paranoid, and suite templates; build paired collection, validation,
+reporting, graph, and deterministic test paths; update affected documentation;
+then run the bounded demonstration and full matrix before human review. Gate 14
+remains explicitly deferred.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
+- Active gate: Gate 15 dispatch-mode performance matrix is approved and active
+  on `hdae/dispatch-performance-matrix`, based on merged Gate 13. It is a human
+  checkpoint and must not close without explicit acceptance.
 - Active work: Gate 12 is technically passed and delivered in pull request 251;
   Gate 12.1 is technically passed and delivered in pull request 252; Gate
   12.25 is technically passed and delivered in pull request 253. Gate 12.5 is
