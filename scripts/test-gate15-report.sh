@@ -10,7 +10,9 @@ trap cleanup 0 HUP INT TERM
 config=$test_dir/config
 mkdir -p "$config" "$test_dir/selective" "$test_dir/paranoid"
 cp benchmarks/gate15/native.conf benchmarks/gate15/selective.conf \
-    benchmarks/gate15/paranoid.conf "$config/"
+    benchmarks/gate15/paranoid.conf benchmarks/gate15/cpu.conf \
+    benchmarks/gate15/memory.conf benchmarks/gate15/threads.conf \
+    benchmarks/gate15/mutex.conf "$config/"
 cat >"$config/suite.conf" <<'EOF'
 schema=1
 duration_seconds=2

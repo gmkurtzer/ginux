@@ -8,7 +8,9 @@ cleanup() {
 trap cleanup 0 HUP INT TERM
 
 cp benchmarks/gate15/native.conf benchmarks/gate15/selective.conf \
-    benchmarks/gate15/paranoid.conf "$demo_config/"
+    benchmarks/gate15/paranoid.conf benchmarks/gate15/cpu.conf \
+    benchmarks/gate15/memory.conf benchmarks/gate15/threads.conf \
+    benchmarks/gate15/mutex.conf "$demo_config/"
 cat >"$demo_config/suite.conf" <<'EOF'
 schema=1
 duration_seconds=1

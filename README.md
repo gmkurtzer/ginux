@@ -165,6 +165,9 @@ Inspect the latest completed capability directly:
 make test-systemd       # cached image, external networking disabled
 make bench-prepare      # one-time networked setup for the pinned benchmark image
 make bench              # matched native/Ginux matrix plus mandatory budget checks
+make bench-modes-prepare # one-time setup for the three-way dispatch comparison
+make bench-modes        # native/selective/paranoid tables and graphs
+make demo-gate-15       # bounded reproducible three-way comparison
 make test-systemd-live  # shared network plus real upstream dnf -y update
 make host-run           # general interactive Rocky host with Ginux installed
 make host-reset         # discard that host's cache, instances, and writable state
@@ -193,6 +196,15 @@ accepted baseline is published under `benchmarks/gate11/`, against that Ginux
 baseline as well. Environment mismatches are reported separately from
 performance regressions. `make demo-gate-11` runs a bounded human-inspectable
 comparison and returns nonzero when a mandatory row misses its budget.
+
+Gate 15 provides a separate characterization workflow across native Rocky,
+selective Ginux, and paranoid Ginux. Native is the no-mediation control, not a
+Ginux instance mode. The checked-in templates under
+[`benchmarks/gate15/`](benchmarks/gate15/) fix the complete test protocol and
+may be copied without editing scripts. `make bench-modes` produces paired raw
+samples, metadata, a Markdown table, and an SVG graph under `build/gate15/`.
+See [Reproducible performance measurement](docs/performance.md) for the exact
+protocol, customization workflow, output schema, and interpretation limits.
 
 `make host-run` boots the QEMU Rocky host and logs you into its ordinary shell.
 Ginux is installed in `PATH`. The first `create` or `import` downloads and verifies
