@@ -165,8 +165,12 @@ Inspect the latest completed capability directly:
 make test-systemd       # cached image, external networking disabled
 make bench-prepare      # one-time networked setup for the pinned benchmark image
 make bench              # matched native/Ginux matrix plus mandatory budget checks
+make bench-modes-prepare # one-time setup for the three-way dispatch comparison
+make bench-modes        # native/selective/paranoid tables and graphs
+make demo-gate-15       # bounded reproducible three-way comparison
 make test-systemd-live  # shared network plus real upstream dnf -y update
-make run-host           # general interactive Rocky host with Ginux installed
+make host-run           # general interactive Rocky host with Ginux installed
+make host-reset         # discard that host's cache, instances, and writable state
 make demo-gate-9        # Gate 9 checkpoint through the same host workflow
 ```
 
@@ -193,11 +197,23 @@ baseline as well. Environment mismatches are reported separately from
 performance regressions. `make demo-gate-11` runs a bounded human-inspectable
 comparison and returns nonzero when a mandatory row misses its budget.
 
-`make run-host` boots the QEMU Rocky host and logs you into its ordinary shell.
+Gate 15 provides a separate characterization workflow across native Rocky,
+selective Ginux, and paranoid Ginux. Native is the no-mediation control, not a
+Ginux instance mode. The checked-in templates under
+[`benchmarks/gate15/`](benchmarks/gate15/) fix the complete test protocol and
+may be copied without editing scripts. `make bench-modes` produces paired raw
+samples, metadata, a Markdown table, and an SVG graph under `build/gate15/`.
+See [Reproducible performance measurement](docs/performance.md) for the exact
+protocol, customization workflow, output schema, and interpretation limits.
+
+`make host-run` boots the QEMU Rocky host and logs you into its ordinary shell.
 Ginux is installed in `PATH`. The first `create` or `import` downloads and verifies
 the pinned Rocky OCI image with live per-layer progress; later operations reuse the
-cache. The writable Rocky host overlay persists across `make run-host` sessions,
-so cached images, instance definitions, roots, and stopped status remain available.
+cache. The writable Rocky host overlay persists across `make host-run`, ordinary
+cleanup, builds, and tests, so cached images, instance definitions, roots, and
+stopped status remain available. `make host-reset` is the explicit destructive
+operation that stops the host and removes that overlay; the next `make host-run`
+starts from the pinned clean Rocky image.
 A complete first session is:
 
 ```sh
@@ -221,9 +237,12 @@ virtual kernel boundary, rejects unsupported authority, reduces host identity,
 and applies `NoNewPrivs`. Lock state is host deployment state and is never
 written into an exported portable recipe.
 
-Syscall auditing is disabled by default. Add `--audit` to `ginux start` to
-record per-syscall decisions in the instance's `audit.log`; audit records are
-kept separate from the attached console.
+Syscall auditing is disabled by default with `[audit] enabled = false`. Add
+`--audit` to `ginux start` to enable it for that run, or set `enabled = true`
+to enable it for every start. Enabled audit records always go to the instance's
+`audit.log`; they are kept separate from the attached console.
+Existing recipes using `mode = "stderr"` or `mode = "disabled"` remain
+read-compatible and normalize to the new boolean form when rewritten.
 
 The instance specification supports typed recipe overrides, ingress and egress
 contract policy, volumes, virtual identity, and ordered pre-boot hooks. Host
@@ -294,6 +313,11 @@ Ginux is research software. It has not received independent security
 certification, does not provide complete Linux compatibility, and is not ready
 for production workloads. Unknown contract operations fail closed, but current
 coverage and guarantees are limited to the tested gates.
+
+The precise supported claims, retained supervisor authority, trusted
+components, exclusions, compatibility gaps, performance limitation, and
+reproducible boundary tests are documented in
+[Security boundary and limitations](docs/security-boundary.md).
 
 For agent containment, the protected object is the host and any authority not
 explicitly assigned to the instance. Ginux constrains the Linux processes in

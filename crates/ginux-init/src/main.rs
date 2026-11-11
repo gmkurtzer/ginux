@@ -43,9 +43,9 @@ use crate::supervisor::{
     PTRACE_GETREGS, PTRACE_KILL, PTRACE_O_EXITKILL, PTRACE_O_TRACEEXEC, PTRACE_O_TRACEFORK,
     PTRACE_O_TRACESECCOMP, PTRACE_O_TRACESYSGOOD, PTRACE_PEEKTEXT, PTRACE_POKETEXT,
     PTRACE_SETOPTIONS, PTRACE_SETREGS, PTRACE_SYSCALL, PTRACE_SYSEMU, PTRACE_TRACEME, SIGCHLD,
-    SIGINT, SIGKILL, SIGSTOP, SIGTERM, SIG_BLOCK, SYS_CHDIR, SYS_CHROOT, SYS_CLOCK_GETTIME,
-    SYS_CLOSE_HOST, SYS_EXECVE, SYS_EXIT_HOST, SYS_FORK, SYS_FSTAT, SYS_FSYNC, SYS_KILL,
-    SYS_OPENAT_HOST, SYS_PAUSE, SYS_PIDFD_GETFD, SYS_PIDFD_OPEN, SYS_PRCTL, SYS_PREAD64,
+    SIGCONT, SIGINT, SIGKILL, SIGSTOP, SIGTERM, SIGTSTP, SIG_BLOCK, SYS_CHDIR, SYS_CHROOT,
+    SYS_CLOCK_GETTIME, SYS_CLOSE_HOST, SYS_EXECVE, SYS_EXIT_HOST, SYS_FORK, SYS_FSTAT, SYS_FSYNC,
+    SYS_KILL, SYS_OPENAT_HOST, SYS_PAUSE, SYS_PIDFD_GETFD, SYS_PIDFD_OPEN, SYS_PRCTL, SYS_PREAD64,
     SYS_PTRACE, SYS_PWRITE64, SYS_READ_HOST, SYS_RT_SIGPROCMASK, SYS_SETGID, SYS_SETGROUPS,
     SYS_SETUID, SYS_SIGNALFD4, SYS_WAIT4, SYS_WRITE_HOST, VIRTUAL_PID,
 };
@@ -107,8 +107,12 @@ const GINUX_VERSION: &str = concat!("Ginux userspace kernel ", env!("CARGO_PKG_V
 const PTRACE_POKEDATA: usize = 5;
 const PTRACE_PEEKDATA: usize = 2;
 const SYS_IOCTL_HOST: usize = 16;
+const TIOCSCTTY: u64 = 0x540e;
+const TIOCGPGRP: u64 = 0x540f;
+const TIOCSPGRP: u64 = 0x5410;
 const SYS_MMAP_HOST: usize = 9;
 const SYS_FUTEX_HOST: usize = 202;
+const SYS_CLOSE_RANGE_HOST: usize = 436;
 const FUTEX_WAIT: usize = 0;
 const FUTEX_WAKE: usize = 1;
 const PR_SET_PDEATHSIG: usize = 1;
@@ -3351,6 +3355,8 @@ struct NativeSupervisorTask {
     override_result: i64,
     pending_console_open: bool,
     console_fd: i64,
+    console_fds: [u64; NATIVE_PROC_FD_LIMIT / 64],
+    pending_console_duplicate: i8,
     pipe2_address: usize,
     pipe_fds: [i64; 8],
     socket_fds: [NativeSocketFd; NATIVE_SOCKET_FD_LIMIT],
@@ -3372,9 +3378,12 @@ struct NativeSupervisorTask {
     close_range_last: i64,
     syscall: u64,
     translated_rdi: u64,
+    wait_status: u64,
     waitid_info: u64,
     initial_stop_pending: bool,
     initial_exec_pending: bool,
+    job_stop_pending: bool,
+    job_stopped: bool,
     tracing: bool,
     limits: [[u64; 2]; 16],
 }
@@ -5014,6 +5023,7 @@ struct BrokerPidMap {
     foreground_group: AtomicU32,
     entries: [AtomicU64; 128],
     process_groups: [AtomicU32; 128],
+    suspend_requests: [AtomicU32; 128],
 }
 
 impl BrokerPidMap {
@@ -5023,6 +5033,7 @@ impl BrokerPidMap {
             foreground_group: AtomicU32::new(0),
             entries: [const { AtomicU64::new(0) }; 128],
             process_groups: [const { AtomicU32::new(0) }; 128],
+            suspend_requests: [const { AtomicU32::new(0) }; 128],
         }
     }
 
@@ -5075,6 +5086,7 @@ impl BrokerPidMap {
         for (index, entry) in self.entries.iter().enumerate() {
             let current = entry.load(Ordering::Acquire);
             if current >> 32 == host_pid as u64 {
+                self.suspend_requests[index].store(0, Ordering::Release);
                 self.process_groups[index].store(process_group, Ordering::Release);
                 entry.store(encoded, Ordering::Release);
                 return true;
@@ -5084,6 +5096,7 @@ impl BrokerPidMap {
                     .compare_exchange(0, encoded, Ordering::AcqRel, Ordering::Acquire)
                     .is_ok()
             {
+                self.suspend_requests[index].store(0, Ordering::Release);
                 self.process_groups[index].store(process_group, Ordering::Release);
                 return true;
             }
@@ -5097,6 +5110,7 @@ impl BrokerPidMap {
             if current >> 32 == host_pid as u64 {
                 entry.store(0, Ordering::Release);
                 self.process_groups[index].store(0, Ordering::Release);
+                self.suspend_requests[index].store(0, Ordering::Release);
                 return;
             }
         }
@@ -5117,19 +5131,37 @@ impl BrokerPidMap {
             .store(process_group, Ordering::Release);
     }
 
-    fn interrupt_foreground(&self) -> bool {
+    fn foreground_group(&self) -> u32 {
+        self.foreground_group.load(Ordering::Acquire)
+    }
+
+    fn signal_foreground(&self, signal: usize) -> bool {
         let foreground = self.foreground_group.load(Ordering::Acquire);
         let mut delivered = false;
         for (index, entry) in self.entries.iter().enumerate() {
             let encoded = entry.load(Ordering::Acquire);
             if encoded != 0 && self.process_groups[index].load(Ordering::Acquire) == foreground {
                 let host_pid = (encoded >> 32) as usize;
-                if unsafe { syscall2(SYS_KILL, host_pid, SIGINT) } == 0 {
+                if signal == SIGTSTP {
+                    self.suspend_requests[index].store(1, Ordering::Release);
+                }
+                if unsafe { syscall2(SYS_KILL, host_pid, signal) } == 0 {
                     delivered = true;
+                } else if signal == SIGTSTP {
+                    self.suspend_requests[index].store(0, Ordering::Release);
                 }
             }
         }
         delivered
+    }
+
+    fn take_suspend_request(&self, host_pid: usize) -> bool {
+        for (index, entry) in self.entries.iter().enumerate() {
+            if entry.load(Ordering::Acquire) >> 32 == host_pid as u64 {
+                return self.suspend_requests[index].swap(0, Ordering::AcqRel) != 0;
+            }
+        }
+        false
     }
 
     fn virtual_pid(&self, host_pid: u32) -> Option<u32> {
@@ -5160,7 +5192,7 @@ fn native_shared_pid_map() -> Option<&'static BrokerPidMap> {
     Some(unsafe { &*map })
 }
 
-fn native_console_control_broker(pid_map: &'static BrokerPidMap) -> isize {
+fn native_console_control_broker(pid_map: &'static BrokerPidMap, root_descriptor: usize) -> isize {
     const PR_SET_PDEATHSIG: usize = 1;
     const CONTROL_FD: usize = 10;
     let child = unsafe { syscall0(SYS_FORK) };
@@ -5170,6 +5202,7 @@ fn native_console_control_broker(pid_map: &'static BrokerPidMap) -> isize {
     if unsafe { syscall2(SYS_PRCTL, PR_SET_PDEATHSIG, SIGKILL) } < 0 {
         exit_process(130);
     }
+    let _ = unsafe { syscall1(SYS_CLOSE_HOST, root_descriptor) };
     let mut command = 0u8;
     loop {
         let read = unsafe {
@@ -5184,7 +5217,9 @@ fn native_console_control_broker(pid_map: &'static BrokerPidMap) -> isize {
             exit_process(131);
         }
         if command == b'I' {
-            let _ = pid_map.interrupt_foreground();
+            let _ = pid_map.signal_foreground(SIGINT);
+        } else if command == b'S' {
+            let _ = pid_map.signal_foreground(SIGTSTP);
         }
     }
 }
@@ -5338,7 +5373,7 @@ fn supervise_native(
     // Ginux itself. The tracee was forked before this point, so blocking
     // SIGINT here affects only the supervisor; instance tasks retain normal
     // terminal interrupt semantics.
-    let interrupt_mask = 1u64 << (SIGINT - 1);
+    let interrupt_mask = (1u64 << (SIGINT - 1)) | (1u64 << (SIGTSTP - 1));
     if unsafe {
         syscall4(
             SYS_RT_SIGPROCMASK,
@@ -5449,8 +5484,11 @@ fn supervise_native(
         | PTRACE_O_TRACEEXEC
         | PTRACE_O_TRACESECCOMP
         | PTRACE_O_EXITKILL;
-    if ptrace(PTRACE_SETOPTIONS, pid, 0, options) < 0 || ptrace(PTRACE_CONT, pid, 0, 0) < 0 {
+    if ptrace(PTRACE_SETOPTIONS, pid, 0, options) < 0 {
         native_fail(instance, pid, b"native ptrace setup failed");
+    }
+    if ptrace(PTRACE_CONT, pid, 0, 0) < 0 {
+        native_fail(instance, pid, b"native ptrace resume failed");
     }
     if mode == 3 {
         write_all(
@@ -5490,20 +5528,20 @@ fn supervise_native(
         native_fail(instance, pid, b"native broker PID map full");
     }
     pid_map.set_foreground_group(root_view.process_group);
-    let control_broker_pid = if unsafe { syscall2(SYS_FCNTL as usize, 10, F_GETFD as usize) } >= 0 {
-        native_console_control_broker(pid_map)
-    } else {
-        0
-    };
-    if control_broker_pid < 0 {
-        native_fail(instance, pid, b"native console control broker failed");
-    }
+    let control_available = unsafe { syscall2(SYS_FCNTL as usize, 10, F_GETFD as usize) } >= 0;
+    let mut control_broker_pid = 0isize;
     let mut tasks: [Option<NativeSupervisorTask>; 128] = [None; 128];
     let mut virtual_kernel_fds = [EMPTY_VIRTUAL_KERNEL_FD; NATIVE_VIRTUAL_KERNEL_FD_LIMIT];
     let mut virtual_kernel_state = NativeVirtualKernelState::new();
     let mut pending_child_stops = [0usize; 16];
     let mut peak_managed_tasks = 1usize;
     let mut yield_broker_pid = 0usize;
+    let mut root_console_fds = [0u64; NATIVE_PROC_FD_LIMIT / 64];
+    for descriptor in [0, 1, 2, INSTANCE_CONSOLE_FD] {
+        if !native_fd_set(&mut root_console_fds, descriptor) {
+            native_fail(instance, pid, b"native console descriptor table full");
+        }
+    }
     tasks[0] = Some(NativeSupervisorTask {
         host_pid: pid,
         clone_call: native_clone::Pending::empty(),
@@ -5514,6 +5552,8 @@ fn supervise_native(
         override_result: 0,
         pending_console_open: false,
         console_fd: INSTANCE_CONSOLE_FD as i64,
+        console_fds: root_console_fds,
+        pending_console_duplicate: 0,
         pipe2_address: 0,
         pipe_fds: [-1; 8],
         socket_fds: [EMPTY_SOCKET_FD; NATIVE_SOCKET_FD_LIMIT],
@@ -5535,9 +5575,12 @@ fn supervise_native(
         close_range_last: -1,
         syscall: 0,
         translated_rdi: 0,
+        wait_status: 0,
         waitid_info: 0,
         initial_stop_pending: false,
         initial_exec_pending: true,
+        job_stop_pending: false,
+        job_stopped: false,
         tracing: true,
         limits: native_default_limits(),
     });
@@ -5605,10 +5648,26 @@ fn supervise_native(
             if processes.exit(task.virtual_id, exit_status).is_err() {
                 native_fail(instance, pid, b"native virtual exit failed");
             }
+            let parent_virtual_pid = processes
+                .view(task.virtual_id)
+                .map(|view| view.parent)
+                .unwrap_or(0);
             pid_map.remove(task.host_pid);
             native_virtual_kernel_clear_owner(&mut virtual_kernel_fds, task.host_pid);
             task.tracing = false;
             tasks[task_index] = Some(task);
+            // Linux may report the parent's SIGCHLD delivery stop before the
+            // tracer receives the child's final exit status. That early
+            // notification is suppressed below because the virtual child is
+            // not reportable yet. Queue a replacement only after recording
+            // the exit, so an asynchronous shell handler can reap it.
+            if parent_virtual_pid != 0 {
+                if let Some(parent) = tasks.iter().flatten().find(|candidate| {
+                    candidate.virtual_id.pid == parent_virtual_pid && candidate.tracing
+                }) {
+                    let _ = unsafe { syscall2(SYS_KILL, parent.host_pid, SIGCHLD) };
+                }
+            }
             if task.virtual_id == root_virtual {
                 for descendant in tasks.iter().flatten() {
                     if descendant.tracing {
@@ -5703,6 +5762,8 @@ fn supervise_native(
                 override_result: 0,
                 pending_console_open: false,
                 console_fd: task.console_fd,
+                console_fds: task.console_fds,
+                pending_console_duplicate: 0,
                 pipe2_address: 0,
                 pipe_fds: task.pipe_fds,
                 socket_fds: task.socket_fds,
@@ -5724,9 +5785,12 @@ fn supervise_native(
                 close_range_last: -1,
                 syscall: 0,
                 translated_rdi: 0,
+                wait_status: 0,
                 waitid_info: 0,
                 initial_stop_pending: pending_child_slot.is_none(),
                 initial_exec_pending: false,
+                job_stop_pending: false,
+                job_stopped: false,
                 tracing: true,
                 limits: task.limits,
             });
@@ -5771,6 +5835,12 @@ fn supervise_native(
             native_fail(instance, pid, b"unexpected native ptrace event");
         }
         if signal == 19 {
+            if task.job_stop_pending {
+                task.job_stop_pending = false;
+                task.job_stopped = true;
+                tasks[task_index] = Some(task);
+                continue;
+            }
             if !task.initial_stop_pending {
                 native_fail(instance, pid, b"unexpected native trace stop");
             }
@@ -5799,8 +5869,45 @@ fn supervise_native(
             continue;
         }
         if signal == 17 {
-            if ptrace(PTRACE_CONT, host_pid, 0, 0) < 0 {
+            let reportable_child = tasks.iter().flatten().any(|candidate| {
+                !candidate.tracing
+                    && processes.view(candidate.virtual_id).is_ok_and(|view| {
+                        view.parent == task.virtual_id.pid
+                            && matches!(view.state, TaskState::Exited(_) | TaskState::Signaled(_))
+                    })
+            });
+            // Suppress a host notification that raced ahead of Ginux's
+            // virtual exit record. The exit path queues a replacement after
+            // the child is reportable.
+            let delivered_signal = if reportable_child { SIGCHLD } else { 0 };
+            if ptrace(PTRACE_CONT, host_pid, 0, delivered_signal) < 0 {
                 native_fail(instance, pid, b"native SIGCHLD resume failed");
+            }
+            continue;
+        }
+        if signal as usize == SIGTSTP && pid_map.take_suspend_request(host_pid) {
+            task.job_stop_pending = true;
+            tasks[task_index] = Some(task);
+            let request = if task.awaiting_exit {
+                PTRACE_SYSCALL
+            } else {
+                PTRACE_CONT
+            };
+            if ptrace(request, host_pid, 0, SIGSTOP) < 0 {
+                native_fail(instance, pid, b"native foreground suspend failed");
+            }
+            continue;
+        }
+        if signal as usize == SIGCONT && task.job_stopped {
+            task.job_stopped = false;
+            tasks[task_index] = Some(task);
+            let request = if task.awaiting_exit {
+                PTRACE_SYSCALL
+            } else {
+                PTRACE_CONT
+            };
+            if ptrace(request, host_pid, 0, SIGCONT) < 0 {
+                native_fail(instance, pid, b"native foreground resume failed");
             }
             continue;
         }
@@ -5849,17 +5956,38 @@ fn supervise_native(
         };
 
         if task.initial_exec_pending && entry_syscall == Some(59) {
+            let mut listener = -1isize;
             if !direct_yield {
-                let listener = native_duplicate_listener(host_pid, 3);
+                listener = native_duplicate_listener(host_pid, 3);
                 if listener < 0 {
                     native_fail(instance, pid, b"native seccomp listener duplication failed");
                 }
+            }
+            reduce_native_supervisor_authority(
+                instance,
+                pid,
+                root_descriptor,
+                if listener >= 0 {
+                    listener as usize
+                } else {
+                    usize::MAX
+                },
+            );
+            if control_available {
+                control_broker_pid = native_console_control_broker(pid_map, root_descriptor);
+                if control_broker_pid < 0 {
+                    native_fail(instance, pid, b"native console control broker failed");
+                }
+            }
+            if !direct_yield {
                 let broker = unsafe { syscall0(SYS_FORK) };
                 if broker < 0 {
                     let _ = unsafe { syscall1(SYS_CLOSE_HOST, listener as usize) };
                     native_fail(instance, pid, b"native yield broker fork failed");
                 }
                 if broker == 0 {
+                    let _ = unsafe { syscall1(SYS_CLOSE_HOST, root_descriptor) };
+                    let _ = unsafe { syscall1(SYS_CLOSE_HOST, 10) };
                     native_yield_broker(
                         listener as usize,
                         audit_mode,
@@ -6061,22 +6189,34 @@ fn supervise_native(
                 else {
                     native_fail(instance, pid, b"native wait result unknown");
                 };
-                if processes
-                    .wait(
-                        task.virtual_id,
-                        WaitTarget::Specific(waited_task.virtual_id.pid),
-                        0,
-                    )
-                    .is_err()
+                let wait_status = if task.wait_status == 0 {
+                    0
+                } else {
+                    read_tracee_u32(host_pid, task.wait_status as usize).unwrap_or_else(|| {
+                        native_fail(instance, pid, b"native wait status read failed")
+                    })
+                };
+                let child_state_only =
+                    waited_task.job_stopped || wait_status & 0xff == 0x7f || wait_status == 0xffff;
+                if !child_state_only
+                    && processes
+                        .wait(
+                            task.virtual_id,
+                            WaitTarget::Specific(waited_task.virtual_id.pid),
+                            0,
+                        )
+                        .is_err()
                 {
                     native_fail(instance, pid, b"native virtual wait result invalid");
                 }
                 registers.rax = waited_task.virtual_id.pid as u64;
                 task.override_exit = true;
-                if let Some(waited_slot) = tasks.iter_mut().find(|candidate| {
-                    candidate.is_some_and(|candidate| candidate.host_pid == waited_host)
-                }) {
-                    *waited_slot = None;
+                if !child_state_only {
+                    if let Some(waited_slot) = tasks.iter_mut().find(|candidate| {
+                        candidate.is_some_and(|candidate| candidate.host_pid == waited_host)
+                    }) {
+                        *waited_slot = None;
+                    }
                 }
             }
             if task.translated_rdi != 0 {
@@ -6103,7 +6243,24 @@ fn supervise_native(
             write_all(b"\n");
             if task.pending_console_open {
                 task.console_fd = registers.rax as i64;
+                if registers.rax as i64 >= 0
+                    && !native_fd_set(&mut task.console_fds, registers.rax as usize)
+                {
+                    native_fail(instance, pid, b"native console descriptor table full");
+                }
                 task.pending_console_open = false;
+            }
+            if task.pending_console_duplicate != 0 {
+                if registers.rax as i64 >= 0 {
+                    let duplicated = registers.rax as usize;
+                    native_fd_clear(&mut task.console_fds, duplicated);
+                    if task.pending_console_duplicate > 0
+                        && !native_fd_set(&mut task.console_fds, duplicated)
+                    {
+                        native_fail(instance, pid, b"native console descriptor table full");
+                    }
+                }
+                task.pending_console_duplicate = 0;
             }
             if task.pending_mountinfo_open {
                 if registers.rax as i64 >= 0 {
@@ -6180,6 +6337,7 @@ fn supervise_native(
                 };
             }
             if task.syscall == 3 && registers.rax as i64 == 0 {
+                native_fd_clear(&mut task.console_fds, registers.rdi as usize);
                 if let Some(slot) = task
                     .socket_fds
                     .iter_mut()
@@ -6264,6 +6422,11 @@ fn supervise_native(
                 }
                 if task.close_range_first >= 0 && task.close_range_last >= 0 {
                     native_fd_clear_range(
+                        &mut task.console_fds,
+                        task.close_range_first as usize,
+                        task.close_range_last as usize,
+                    );
+                    native_fd_clear_range(
                         &mut task.cgroup_procs_fds,
                         task.close_range_first as usize,
                         task.close_range_last as usize,
@@ -6273,6 +6436,7 @@ fn supervise_native(
             task.awaiting_exit = false;
             task.override_exit = false;
             task.translated_rdi = 0;
+            task.wait_status = 0;
             task.waitid_info = 0;
             task.pipe2_address = 0;
             task.pending_socket_type = 0;
@@ -8501,8 +8665,8 @@ fn supervise_native(
             Action::Mediate
                 if mode == 3
                     && syscall == 16
-                    && registers.rdi as i64 == task.console_fd
-                    && registers.rsi == 21_518 =>
+                    && native_fd_contains(&task.console_fds, registers.rdi as usize)
+                    && registers.rsi == TIOCSCTTY =>
             {
                 let task_view = processes.view(task.virtual_id).unwrap_or_else(|_| {
                     native_fail(instance, pid, b"native controlling terminal view failed")
@@ -8522,17 +8686,17 @@ fn supervise_native(
             Action::Mediate
                 if mode == 3
                     && syscall == 16
-                    && (registers.rdi <= 2 || registers.rdi as i64 == task.console_fd)
-                    && matches!(registers.rsi, 21_519 | 21_520) =>
+                    && native_fd_contains(&task.console_fds, registers.rdi as usize)
+                    && matches!(registers.rsi, TIOCGPGRP | TIOCSPGRP) =>
             {
                 let task_view = processes.view(task.virtual_id).unwrap_or_else(|_| {
                     native_fail(instance, pid, b"native job control view failed")
                 });
-                let allowed = if registers.rsi == 21_519 {
+                let allowed = if registers.rsi == TIOCGPGRP {
                     write_tracee_bytes(
                         host_pid,
                         registers.rdx as usize,
-                        &task_view.process_group.to_ne_bytes(),
+                        &pid_map.foreground_group().to_ne_bytes(),
                     )
                 } else {
                     read_tracee_u32(host_pid, registers.rdx as usize).is_some_and(|group| {
@@ -8563,6 +8727,12 @@ fn supervise_native(
             }
             Action::Mediate if mode == 3 && syscall == 32 => {
                 line(b"mediate surface=managed-descriptor-dup result=pending");
+                task.pending_console_duplicate =
+                    if native_fd_contains(&task.console_fds, registers.rdi as usize) {
+                        1
+                    } else {
+                        -1
+                    };
                 task.awaiting_exit = true;
                 if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
                     native_fail(instance, pid, b"native managed descriptor dup failed");
@@ -8570,6 +8740,12 @@ fn supervise_native(
             }
             Action::Mediate if mode == 3 && syscall == 292 && registers.rdx & !0x8_0000 == 0 => {
                 line(b"mediate surface=managed-descriptor-dup result=pending");
+                task.pending_console_duplicate =
+                    if native_fd_contains(&task.console_fds, registers.rdi as usize) {
+                        1
+                    } else {
+                        -1
+                    };
                 task.awaiting_exit = true;
                 if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
                     native_fail(instance, pid, b"native managed descriptor dup3 failed");
@@ -8589,9 +8765,32 @@ fn supervise_native(
             }
             Action::Mediate if mode == 3 && syscall == 33 => {
                 line(b"mediate surface=managed-descriptor-dup result=pending");
+                task.pending_console_duplicate =
+                    if native_fd_contains(&task.console_fds, registers.rdi as usize) {
+                        1
+                    } else {
+                        -1
+                    };
                 task.awaiting_exit = true;
                 if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
                     native_fail(instance, pid, b"native managed descriptor dup2 failed");
+                }
+            }
+            Action::Mediate
+                if mode == 3
+                    && syscall == SYS_FCNTL
+                    && matches!(registers.rsi, F_DUPFD | F_DUPFD_CLOEXEC) =>
+            {
+                line(b"mediate surface=managed-descriptor-fcntl-dup result=pending");
+                task.pending_console_duplicate =
+                    if native_fd_contains(&task.console_fds, registers.rdi as usize) {
+                        1
+                    } else {
+                        -1
+                    };
+                task.awaiting_exit = true;
+                if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
+                    native_fail(instance, pid, b"native managed descriptor fcntl dup failed");
                 }
             }
             Action::Mediate
@@ -8802,7 +9001,8 @@ fn supervise_native(
                             host_pid,
                             registers.rsi as usize,
                             b"/dev/console",
-                        )) =>
+                        )
+                        || tracee_string_equals(host_pid, registers.rsi as usize, b"/dev/tty")) =>
             {
                 let null_device =
                     tracee_string_equals(host_pid, registers.rsi as usize, b"/dev/null");
@@ -9128,6 +9328,7 @@ fn supervise_native(
                     }
                 }
                 if mode == 3 && syscall == 61 {
+                    task.wait_status = registers.rsi;
                     let selector = registers.rdi as u32 as i32;
                     if selector == -1 {
                         registers.rdi = u64::MAX;
@@ -9254,6 +9455,49 @@ fn native_clone_start_child(task: &mut NativeSupervisorTask) -> Option<()> {
         return None;
     }
     Some(())
+}
+
+/// Bootstrap opens the instance root and establishes tracing while privileged.
+/// Once the tracee is stopped under `PTRACE_O_EXITKILL`, the supervisor needs
+/// only stdio, the optional controller channel (fd 10), and its already-open
+/// instance-root descriptor. Drop every other inherited descriptor, host root
+/// identity, supplementary group, and privilege-gain path before resuming any
+/// managed instruction.
+fn reduce_native_supervisor_authority(
+    instance: &mut Instance,
+    pid: usize,
+    root_descriptor: usize,
+    preserved_descriptor: usize,
+) {
+    let mut descriptor = 3usize;
+    while descriptor < 256 {
+        if descriptor != root_descriptor && descriptor != preserved_descriptor && descriptor != 10 {
+            let _ = unsafe { syscall1(SYS_CLOSE_HOST, descriptor) };
+        }
+        descriptor += 1;
+    }
+    let _ = unsafe { syscall3(SYS_CLOSE_RANGE_HOST, 256, u32::MAX as usize, 0) };
+
+    let host_identity = managed_host_identity();
+    if host_identity.drop_root
+        && (unsafe { syscall2(SYS_SETGROUPS, 0, 0) } < 0
+            || unsafe { syscall1(SYS_SETGID, host_identity.gid) } < 0
+            || unsafe { syscall1(SYS_SETUID, host_identity.uid) } < 0)
+    {
+        native_fail(
+            instance,
+            pid,
+            b"native supervisor identity reduction failed",
+        );
+    }
+    if unsafe { syscall5(SYS_PRCTL, PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) } < 0 {
+        native_fail(instance, pid, b"native supervisor no-new-privileges failed");
+    }
+    write_all(b"GINUX_NATIVE_AUTHORITY: supervisor-uid=");
+    write_u64(host_identity.uid as u64);
+    write_all(b" supervisor-gid=");
+    write_u64(host_identity.gid as u64);
+    line(b" capabilities=none no-new-privileges=1 inherited-fds=bounded root=instance-only");
 }
 
 fn native_identity_result(syscall: u64, mode: usize) -> Option<i64> {

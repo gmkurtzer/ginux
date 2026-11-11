@@ -38,7 +38,7 @@ assignments = ["console", "null", "zero", "random"]
 backend = "none"
 
 [audit]
-mode = "stderr"
+enabled = true
 
 [failure]
 policy = "stop"
