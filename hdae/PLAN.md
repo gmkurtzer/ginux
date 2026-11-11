@@ -107,6 +107,12 @@ replace it.
     parallel and prove independent contracts, virtual state, writable overlays,
     resources, audit, console, lifecycle, recovery, and documented shared-host
     network behavior.
+18. **Architecture explanation and differentiation**: explain Ginux's execution,
+    contract, and isolation boundaries and distinguish them from UML, gVisor,
+    namespaces, conventional containers, and virtual machines.
+19. **Readable instance recipes and hooks**: support self-contained multiline
+    pre-boot scripts, simplify the Rocky systemd recipe, and provide validated
+    minimal, agent, network-service, and paranoid example recipes.
 
 Gates are stored in `hdae/gates-todo/` and remain there until they pass and are
 accepted at their checkpoint. Closed gate records move unchanged to

@@ -220,16 +220,16 @@ scope, threat model, and invariants.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 17, concurrent-instance isolation, is approved and active
-  on `hdae/concurrent-instance-isolation`. It is technically passed and
-  delivered in https://github.com/gmkurtzer/ginux/pull/259 for human acceptance.
-  Gate 11 remains partial, Gate 14 is deferred, and Gate 16 is abandoned.
-- Last evidence: `make test-multi-instance` boots two Rocky systemd instances
-  concurrently and passes independent identity, virtual PID, root, contract,
-  audit, console, shared/translated network, cross-signal, supervisor-loss,
-  restart, stale-record, and cleanup assertions.
-- Exact next action: create the separately approved Gate 18 documentation
-  branch from synchronized `main`; Gate 17 remains at its human checkpoint.
+- Active gate: Gate 19, readable instance recipes and hooks, is approved and
+  active on `hdae/readable-instance-recipes`. Gate 17 is accepted and closed
+  after pull request 259 merged. Gate 18 remains independently delivered in
+  pull request 260 for human review. Gate 11 remains partial, Gate 14 is
+  deferred, and Gate 16 is abandoned.
+- Last evidence: Gate 19 inspection confirmed that the existing parser is
+  physical-line based, `[hooks].pre_boot` rejects embedded newlines, and the
+  Rocky systemd recipe contains ten commands on one long source line.
+- Exact next action: implement bounded triple-quoted pre-boot scripts with
+  readable normalization, then simplify and validate the approved recipes.
 - The final CLI correction makes required configuration files positional:
   `instance create NAME FILE`, `validate FILE`, `inspect FILE`, and
   `explain FILE OPERATION`. Fresh `make check`, `make test-contract`, and
