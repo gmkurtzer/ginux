@@ -299,6 +299,15 @@ conventional container, and under Ginux. The suite covers CPU, memory, syscall
 latency, process operations, filesystem and block I/O, networking, boot time,
 and idle overhead.
 
+Gate 15 adds a reproducible dispatch matrix without changing execution
+semantics. Ordinary Rocky execution is the no-Ginux control. Selective and
+paranoid measurements each carry a native control collected in the same host
+session with identical workload, affinity, allocation, memory, warmup, and
+repetition settings. Combined reports retain both native controls and normalize
+each Ginux mode only to its paired samples. Checked-in templates define the
+profiles and suite; validation rejects incomplete rows or incompatible
+environments before generating tables or graphs.
+
 ## Important open decisions
 
 - Numeric performance budgets, set from reproducible baseline evidence before

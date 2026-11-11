@@ -83,3 +83,16 @@ version = "0.1.0"
 [[package]]
 name = "runtime-fixture"
 version = "0.1.0"
+
+[[package]]
+name = "security-fuzzer"
+version = "0.1.0"
+dependencies = [
+ "ginux-contract",
+ "ginux-core",
+ "ginux-devices",
+ "ginux-instance",
+ "ginux-kernel-views",
+ "ginux-runtime",
+ "ginux-vfs",
+]

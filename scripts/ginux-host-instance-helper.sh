@@ -793,12 +793,23 @@ run_runtime() {
     validate_name "$name"
     directory=$(instance_dir "$name")
     test -d "$directory" || exit 66
+    # util-linux script(1) does not preserve the supervisor shell's auxiliary
+    # descriptors when it starts the PTY command. Open the lifecycle-created
+    # FIFO in the runtime command itself so Ginux can receive attached-console
+    # signal requests on descriptor 10. Direct benchmark/runtime invocations do
+    # not create that FIFO and therefore must not manufacture an empty regular
+    # file that Ginux mistakes for a live control channel.
+    if test -p "$directory/control.in"; then
+        exec 10<>"$directory/control.in"
+    else
+        exec 10>&-
+    fi
     record_runtime "$directory" "$$"
     materialize_runtime_config \
         "$directory/config.toml" "$directory/deployment.state" "$directory/runtime.toml"
     if test "$audit_override" = true; then
         audit_candidate=$directory/runtime.toml.audit.$$
-        "$runtime" config-merge "$directory/runtime.toml" 'audit.mode="stderr"' \
+        "$runtime" config-merge "$directory/runtime.toml" 'audit.enabled=true' \
             >"$audit_candidate"
         mv "$audit_candidate" "$directory/runtime.toml"
     fi
@@ -870,7 +881,7 @@ attach_instance() {
         exit 69
     }
 
-    detach_marker=$directory/attach.$$.detach
+    detach_marker=${TMPDIR:-/tmp}/ginux-$name-attach.$$.detach
     rm -f "$detach_marker"
     saved_tty=$(stty -g)
     exec 7<&0
@@ -881,9 +892,12 @@ attach_instance() {
     # SIGINT ignored; the attach process sends the same interrupt request over
     # Ginux's control channel if its terminal driver emits a signal instead.
     trap '' INT
-    tail -n 80 -F "$directory/console.log" &
+    (
+        trap '' INT TSTP
+        exec tail -n 80 -F "$directory/console.log"
+    ) &
     tail_pid=$!
-    reader_pid=
+    watcher_pid=
     sync_console_size() {
         size=$(stty size 2>/dev/null) || return 0
         rows=
@@ -895,62 +909,80 @@ EOF
         case "$rows:$columns:$extra" in
             *[!0-9:]*|0:*|*:0:*|*:*:?*) return 0 ;;
         esac
-        attached_runtime=$(runtime_identity "$name" || true)
-        test -n "$attached_runtime" || return 0
-        runtime_tty=$(readlink "/proc/$attached_runtime/fd/0" 2>/dev/null || true)
-        case "$runtime_tty" in
-            /dev/pts/[0-9]*)
-                stty -F "$runtime_tty" rows "$rows" cols "$columns" 2>/dev/null || true
-                ;;
-        esac
+        sudo -n "$0" resize "$name" "$rows" "$columns" </dev/null >/dev/null 2>&1 || true
     }
     cleanup_attach() {
-        trap - 0 HUP INT TERM WINCH
-        kill "$tail_pid" ${reader_pid:+"$reader_pid"} 2>/dev/null || true
-        wait "$tail_pid" ${reader_pid:+"$reader_pid"} 2>/dev/null || true
+        trap - 0 HUP INT TERM TSTP USR1 WINCH
+        kill "$tail_pid" ${watcher_pid:+"$watcher_pid"} 2>/dev/null || true
+        wait "$tail_pid" ${watcher_pid:+"$watcher_pid"} 2>/dev/null || true
         exec 8>&-
         exec 9>&-
         exec 7<&-
         stty "$saved_tty"
         rm -f "$detach_marker"
     }
-    forward_interrupt() {
-        printf 'I' >&9 || true
+    terminate_attach() {
+        cleanup_attach
+        exit 129
     }
-    trap cleanup_attach 0 HUP TERM
-    trap forward_interrupt INT
-    trap 'sync_console_size' WINCH
-    sync_console_size
-    stty raw -echo
+    restore_raw_tty() {
+        sync_console_size
+        # sudo may restore the caller's terminal attributes after the bounded
+        # resize operation. Reassert byte transport while retaining ISIG so
+        # Ctrl-C and Ctrl-Z reach the forwarding traps below.
+        stty raw -echo isig
+    }
+    trap cleanup_attach 0
+    trap terminate_attach HUP TERM
+    # The public controller owns terminal-generated signal forwarding. Keep
+    # this private transport alive while it relays bytes and console output.
+    trap ':' INT TSTP
+    instance_stopped=false
+    trap 'instance_stopped=true' USR1
+    trap restore_raw_tty WINCH
+    restore_raw_tty
+    attach_pid=$$
     (
-        trap '' INT
-        detach=$(printf '\035')
-        interrupt=$(printf '\003')
-        while IFS= read -r -n 1 character <&7; do
-            if test "$character" = "$detach"; then
-                : >"$detach_marker"
-                exit 0
-            fi
-            if test "$character" = "$interrupt"; then
-                printf 'I' >&9
-                continue
-            fi
-            if test -n "$character"; then
-                printf '%s' "$character" >&8
-            else
-                printf '\n' >&8
-            fi
+        trap '' INT TSTP
+        while supervisor_identity "$name" >/dev/null && test ! -e "$detach_marker"; do
+            sleep 1 || true
         done
+        test -e "$detach_marker" || kill -USR1 "$attach_pid" 2>/dev/null || true
     ) &
-    reader_pid=$!
+    watcher_pid=$!
 
-    while kill -0 "$supervisor_pid" 2>/dev/null && test ! -e "$detach_marker"; do
-        sleep 1
+    # Keep input ownership in the attach process itself. A background reader
+    # can disappear after a terminal-generated signal or an interrupted read,
+    # which leaves the console visible but makes Ctrl-] ineffective. The
+    # watcher above terminates this loop if the instance exits.
+    detach=$(printf '\035')
+    interrupt=$(printf '\003')
+    suspend=$(printf '\032')
+    while test "$instance_stopped" = false && test ! -e "$detach_marker"; do
+        character=
+        IFS= read -r -n 1 character <&7 || continue
+        if test "$character" = "$detach"; then
+            : >"$detach_marker"
+            break
+        fi
+        if test "$character" = "$interrupt"; then
+            printf 'I' >&9
+            continue
+        fi
+        if test "$character" = "$suspend"; then
+            printf 'S' >&9
+            continue
+        fi
+        if test -n "$character"; then
+            printf '%s' "$character" >&8
+        else
+            printf '\n' >&8
+        fi
     done
     detached=false
     test -e "$detach_marker" && detached=true
     cleanup_attach
-    trap - 0 HUP INT TERM
+    trap - 0 HUP INT TERM USR1
     if test "$detached" = true; then
         printf '\n%s: detached; instance remains running\n' "$name"
     else
@@ -958,6 +990,50 @@ EOF
         test -r "$directory/exit.status" && status=$(cat "$directory/exit.status")
         printf '\n%s: stopped (status %s)\n' "$name" "$status"
     fi
+}
+
+authorize_attach() {
+    test "$#" -eq 3 || usage
+    name=$1
+    attach_uid=$2
+    attach_gid=$3
+    validate_name "$name"
+    case $attach_uid:$attach_gid in
+        *[!0-9:]*|:*|*:) usage ;;
+    esac
+    directory=$(instance_dir "$name")
+    test -d "$directory" || { printf '%s: not found\n' "$name" >&2; exit 66; }
+    supervisor_identity "$name" >/dev/null || {
+        printf '%s: not running\n' "$name" >&2
+        exit 69
+    }
+    for attach_endpoint in "$directory/console.in" "$directory/control.in"; do
+        test -p "$attach_endpoint" || {
+            printf '%s: console is unavailable\n' "$name" >&2
+            exit 69
+        }
+        chown "$attach_uid:$attach_gid" "$attach_endpoint"
+        chmod 600 "$attach_endpoint"
+    done
+    printf '%s\n' "$directory/control.in"
+}
+
+resize_instance() {
+    test "$#" -eq 3 || usage
+    name=$1
+    rows=$2
+    columns=$3
+    validate_name "$name"
+    case $rows:$columns in
+        *[!0-9:]*|0:*|*:0|:*|*:) usage ;;
+    esac
+    attached_runtime=$(runtime_identity "$name" || true)
+    test -n "$attached_runtime" || exit 69
+    runtime_tty=$(readlink "/proc/$attached_runtime/fd/0" 2>/dev/null || true)
+    case $runtime_tty in
+        /dev/pts/[0-9]*) stty -F "$runtime_tty" rows "$rows" cols "$columns" ;;
+        *) exit 69 ;;
+    esac
 }
 
 stop_instance() {
@@ -1002,6 +1078,7 @@ test -n "$command" || usage
 shift
 case $command in
     attach) attach_instance "$@" ;;
+    authorize-attach) authorize_attach "$@" ;;
     create) create_instance "$@" ;;
     export) export_instance "$@" ;;
     import) import_instance "$@" ;;
@@ -1009,6 +1086,7 @@ case $command in
     lock) test "$#" -eq 1 || usage; set_contract_lock "$1" locked ;;
     prepare-root) test "$#" -eq 1 || usage; prepare_root "$1" ;;
     resolve-network) test "$#" -eq 1 || usage; resolve_network_config "$1" ;;
+    resize) resize_instance "$@" ;;
     set) set_instance "$@" ;;
     start) start_instance "$@" ;;
     status) status_instance "$@" ;;

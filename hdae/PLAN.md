@@ -100,6 +100,9 @@ replace it.
 13. **Boundary hardening**: malformed ABI tests, fuzzing, escape attempts,
     Ginux privilege reduction, recovery, performance regression, and explicit
     limitations.
+15. **Dispatch-mode performance matrix**: reproducibly compare native Rocky,
+    selective Ginux, and paranoid Ginux with paired controls, reusable test
+    templates, combined tables and graphs, and complete operator documentation.
 
 Gates are stored in `hdae/gates-todo/` and remain there until they pass and are
 accepted at their checkpoint. Closed gate records move unchanged to
