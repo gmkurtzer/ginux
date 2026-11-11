@@ -209,7 +209,9 @@ ptrace, a module, or another dispatcher.
 - Actual commits: `584f26bc` (gate definition), `3502b4e6` (module/BPF
   prototypes, research, and planner), and `5b51300b` (automatic recipes,
   requirement matrix, lifecycle coverage, benchmarks, and documentation),
-  followed by `24bb489d` (paired evidence and authoritative architecture).
+  followed by `24bb489d` (paired evidence and authoritative architecture),
+  `a8784541` and `386c6946` (completion and pull-request checkpoints), and
+  `a2a139bc` (fresh full-suite verification and benchmark evidence).
 
 ## Review policy and outcome
 
