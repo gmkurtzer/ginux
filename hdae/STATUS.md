@@ -29,8 +29,10 @@
 - Runtime isolation unit: instance.
 - Policy unit: versioned contract.
 - The gate map has expanded through human-directed insertions while preserving
-  numeric order; Gates 1 through 10.5 are accepted and closed. Gate 11 remains
-  partial in pull request 249, and the human authorized stacked Gate 12 work.
+  numeric order. Gates 1 through 10.5, 12, 12.1, 12.25, 12.5, 13, and 15 are
+  accepted and closed. Gate 11 remains partial because its unchanged 4%
+  native-performance budget is not met by selective thread-yield. Gate 14
+  remains explicitly deferred.
 - Gate 9.75 was added and authorized on 2026-11-04 for comprehensive instance
   configuration, CLI overrides, network selection and policy, port translation,
   volumes, access, identity, resources, devices, and pre-boot hooks.
@@ -193,6 +195,13 @@
   `make bench-modes-report`, `make check`, `make test-contract`,
   `make test-security`, `make test-systemd`, and aggregate `make test` including
   all QEMU integrations.
+- Pull requests 251, 252, 253, and 254 merged the accepted Gate 12, 12.1,
+  12.25, and 12.5 work into `main` on 2026-11-09. Pull request 257 merged the
+  accepted Gate 15 work on 2026-11-11. Their authoritative records now reside
+  in `hdae/gates-done/`.
+- Gate 16's kernel-module enforcement direction was abandoned by human
+  decision on 2026-11-11. Pull request 258 was closed without merging, and no
+  Gate 16 implementation is present on `main`.
 
 ## Governing outcome and invariants
 
@@ -211,12 +220,16 @@ scope, threat model, and invariants.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 15, dispatch-mode performance matrix, is technically
-  complete on `hdae/dispatch-performance-matrix`, delivered in pull request
-  https://github.com/gmkurtzer/ginux/pull/257, and awaits human review.
-- Last evidence: the complete Gate 15 matrix and report generation pass, as do
-  `make check`, `make test-contract`, `make test-security`,
-  `make test-systemd`, and aggregate `make test` with all QEMU integrations.
+- Active gate: Gate 17, concurrent-instance isolation, is approved and active
+  on `hdae/concurrent-instance-isolation`. It is technically passed and
+  delivered in https://github.com/gmkurtzer/ginux/pull/259 for human acceptance.
+  Gate 11 remains partial, Gate 14 is deferred, and Gate 16 is abandoned.
+- Last evidence: `make test-multi-instance` boots two Rocky systemd instances
+  concurrently and passes independent identity, virtual PID, root, contract,
+  audit, console, shared/translated network, cross-signal, supervisor-loss,
+  restart, stale-record, and cleanup assertions.
+- Exact next action: create the separately approved Gate 18 documentation
+  branch from synchronized `main`; Gate 17 remains at its human checkpoint.
 - The final CLI correction makes required configuration files positional:
   `instance create NAME FILE`, `validate FILE`, `inspect FILE`, and
   `explain FILE OPERATION`. Fresh `make check`, `make test-contract`, and
@@ -238,7 +251,9 @@ scope, threat model, and invariants.
   Pull-request `launch-integration` now passes in 33 seconds, and
   `static-and-unit` passes in 41 seconds.
 - Open decision: no workload-specific tolerance exceptions are approved; the
-  default 4% per-row budget remains authoritative.
+  default 4% per-row Gate 11 budget remains authoritative. Further work on
+  that gap requires an explicitly approved approach that does not reintroduce
+  the abandoned kernel-module direction.
 - Gate 11 profiling corrected the mutex protocol; every exploratory 1/2/4-vCPU
   mutex row now passes within 0.7% of native. The retained seccomp user
   notification path improved one-vCPU thread yield from 3.299 to 19.731
