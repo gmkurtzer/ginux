@@ -4453,15 +4453,19 @@ fn native_buffer_append_identity_uuid(
     Some(())
 }
 
+struct NativeVirtualIdentity<'a> {
+    instance_id: &'a [u8],
+    hostname: &'a [u8],
+    contract_profile: &'a [u8],
+}
+
 fn native_virtual_kernel_read(
     path: &[u8],
     current: TaskId,
     processes: &ProcessTable<128>,
     tasks: &[Option<NativeSupervisorTask>; 128],
     global: [u64; 4],
-    instance_id: &[u8],
-    hostname: &[u8],
-    contract_profile: &[u8],
+    identity: NativeVirtualIdentity<'_>,
     output: &mut [u8],
 ) -> Option<usize> {
     let mut length = 0usize;
@@ -4471,7 +4475,7 @@ fn native_virtual_kernel_read(
             native_buffer_append(output, &mut length, b" (Linux ABI personality ")?;
             native_buffer_append(output, &mut length, GINUX_ABI_RELEASE)?;
             native_buffer_append(output, &mut length, b"; contract ")?;
-            native_buffer_append(output, &mut length, contract_profile)?;
+            native_buffer_append(output, &mut length, identity.contract_profile)?;
             native_buffer_append(output, &mut length, b"; x86_64)\n")?;
         }
         b"/proc/mounts" => native_buffer_append(
@@ -4492,7 +4496,7 @@ fn native_virtual_kernel_read(
             native_buffer_append(output, &mut length, b"40\n")?
         }
         b"/proc/sys/kernel/hostname" => {
-            native_buffer_append(output, &mut length, hostname)?;
+            native_buffer_append(output, &mut length, identity.hostname)?;
             native_buffer_append(output, &mut length, b"\n")?;
         }
         b"/proc/sys/kernel/ostype" => native_buffer_append(output, &mut length, b"Linux\n")?,
@@ -4505,7 +4509,7 @@ fn native_virtual_kernel_read(
             native_buffer_append(output, &mut length, b"\n")?;
         }
         b"/proc/sys/kernel/random/boot_id" => {
-            native_buffer_append_identity_uuid(output, &mut length, instance_id)?;
+            native_buffer_append_identity_uuid(output, &mut length, identity.instance_id)?;
             native_buffer_append(output, &mut length, b"\n")?;
         }
         b"/sys/kernel/security/lsm" => {}
@@ -7165,9 +7169,11 @@ fn supervise_native(
                             instance.config().vcpus,
                             instance.config().memory_mib,
                         ],
-                        instance.config().id.as_bytes(),
-                        instance.config().hostname.as_bytes(),
-                        contract_label(instance.config()),
+                        NativeVirtualIdentity {
+                            instance_id: instance.config().id.as_bytes(),
+                            hostname: instance.config().hostname.as_bytes(),
+                            contract_profile: contract_label(instance.config()),
+                        },
                         &mut content,
                     )
                 };
