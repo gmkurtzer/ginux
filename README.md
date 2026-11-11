@@ -265,6 +265,10 @@ Omitting `--network` uses the host's default network. Multiple flags are
 validated and persisted atomically; an invalid combination changes nothing.
 Hooks run only as
 mediated instance processes; Ginux does not support arbitrary host-context hooks.
+Longer hooks may use self-contained triple-quoted scripts, while short hooks
+remain ordinary quoted array entries. The readable Rocky reference recipe and
+minimal, constrained-agent, network-service, and paranoid examples are indexed
+in [`config/examples/`](config/examples/README.md).
 See [Gate 9.75 instance specification](docs/gate-9.75-instance-specification.md)
 for the schema, precedence rules, examples, and verification targets.
 

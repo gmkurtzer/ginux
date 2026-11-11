@@ -1,0 +1,98 @@
+# Service recipe. Host attachment and port translation are deployment state:
+# ginux import web config/examples/network-service.toml \
+#   --network default \
+#   --forward protocol=tcp,external_port=8080,instance_port=8080
+schema_version = 1
+
+[instance]
+id = "web"
+root = "docker.io/rockylinux/rockylinux@sha256:7a18ce2c9c1e0d8735f3e72685f9666150af25036e7f7b5ee4eede3754496f8c"
+init = "/bin/bash"
+args = ["-lc", "exec /opt/service/bin/server --listen 0.0.0.0:8080"]
+environment = ["HOME=/var/lib/service"]
+workdir = "/var/lib/service"
+
+[identity]
+hostname = "ginux-web"
+
+[resources]
+vcpus = 2
+memory_mib = 1024
+
+[execution]
+profile = "balanced"
+backend = "ptrace-native"
+
+[contract]
+version = 1
+catalog = 2
+default = "deny"
+allow = ["*"]
+deny = ["device.mmio.direct", "device.dma.direct", "network.packet.raw"]
+
+[contract.syscalls]
+control = "selective"
+default = "deny"
+allow = ["*"]
+deny = []
+
+[contract.filesystem]
+default = "deny"
+read = ["/"]
+write = ["/var/lib/service", "/tmp"]
+create = ["/var/lib/service", "/tmp"]
+deny = ["/boot", "/etc", "/usr"]
+
+[contract.network]
+default = "deny"
+inbound = ["tcp:8080"]
+outbound = ["tcp:443", "udp:53"]
+
+[contract.devices]
+default = "deny"
+read = ["/dev/console", "/dev/null", "/dev/zero", "/dev/urandom"]
+write = ["/dev/console", "/dev/null", "/dev/zero"]
+create = []
+
+[contract.privileges]
+default = "deny"
+setuid = []
+setgid = []
+
+[contract.process]
+default = "deny"
+max_processes = 128
+max_threads = 256
+signals = ["*"]
+ptrace = "deny"
+namespace_create = []
+namespace_join = []
+
+[contract.kernel]
+default = "deny"
+proc_read = ["/"]
+proc_write = []
+sys_read = ["/"]
+sys_write = []
+
+[storage]
+assignments = ["root-overlay"]
+
+[devices]
+assignments = ["console", "null", "zero", "random", "net0"]
+
+[hooks]
+pre_boot = [
+  """
+  /usr/bin/mkdir -p /var/lib/service
+  /usr/bin/chown 1000:1000 /var/lib/service
+  """,
+]
+timeout_seconds = 10
+failure = "stop"
+
+[audit]
+enabled = false
+
+[failure]
+policy = "stop"

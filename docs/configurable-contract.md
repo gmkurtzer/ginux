@@ -170,6 +170,25 @@ execute through Ginux mediation inside the instance root. Final contract
 restrictions activate after hooks finish, allowing a recipe to prepare state
 and then lock it down.
 
+Use ordinary strings for short commands and triple-quoted strings for readable
+multiline scripts. Each array item remains one ordered hook:
+
+```toml
+[hooks]
+pre_boot = [
+  """
+  /usr/bin/mkdir -p /workspace
+  /usr/bin/chown 1000:1000 /workspace
+  """,
+]
+timeout_seconds = 10
+failure = "stop"
+```
+
+The script is stored in the recipe and executes only inside the instance; it
+does not grant access to a host-side script. See the validated recipes under
+[`config/examples/`](../config/examples/README.md).
+
 Instance-visible credentials are virtual Ginux state. Independently, every
 native managed process sets `PR_SET_NO_NEW_PRIVS` before executing workload
 code. A root-launched runtime drops managed host execution to UID/GID 65534; a

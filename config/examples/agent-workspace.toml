@@ -1,0 +1,95 @@
+# Constrained interactive workspace for an automation or coding agent.
+schema_version = 1
+
+[instance]
+id = "agent-workspace"
+root = "docker.io/rockylinux/rockylinux@sha256:7a18ce2c9c1e0d8735f3e72685f9666150af25036e7f7b5ee4eede3754496f8c"
+init = "/bin/bash"
+args = ["--noprofile", "--norc"]
+environment = ["HOME=/workspace", "TERM=xterm-256color"]
+workdir = "/workspace"
+
+[identity]
+hostname = "ginux-agent"
+
+[resources]
+vcpus = 2
+memory_mib = 2048
+
+[execution]
+profile = "balanced"
+backend = "ptrace-native"
+
+[contract]
+version = 1
+catalog = 2
+default = "deny"
+allow = ["*"]
+deny = ["device.mmio.direct", "device.dma.direct", "network.packet.raw"]
+
+[contract.syscalls]
+control = "selective"
+default = "deny"
+allow = ["*"]
+deny = []
+
+[contract.filesystem]
+default = "deny"
+read = ["/"]
+write = ["/workspace", "/tmp"]
+create = ["/workspace", "/tmp"]
+deny = ["/boot", "/etc", "/usr"]
+
+[contract.network]
+default = "deny"
+inbound = []
+outbound = ["tcp:443", "udp:53"]
+
+[contract.devices]
+default = "deny"
+read = ["/dev/console", "/dev/tty", "/dev/null", "/dev/zero", "/dev/random", "/dev/urandom"]
+write = ["/dev/console", "/dev/tty", "/dev/null", "/dev/zero"]
+create = []
+
+[contract.privileges]
+default = "deny"
+setuid = []
+setgid = []
+
+[contract.process]
+default = "deny"
+max_processes = 512
+max_threads = 1024
+signals = ["*"]
+ptrace = "deny"
+namespace_create = []
+namespace_join = []
+
+[contract.kernel]
+default = "deny"
+proc_read = ["/"]
+proc_write = []
+sys_read = ["/"]
+sys_write = []
+
+[storage]
+assignments = ["root-overlay"]
+
+[devices]
+assignments = ["console", "null", "zero", "random", "net0"]
+
+[hooks]
+pre_boot = [
+  """
+  /usr/bin/mkdir -p /workspace
+  /usr/bin/chown 1000:1000 /workspace
+  """,
+]
+timeout_seconds = 10
+failure = "stop"
+
+[audit]
+enabled = false
+
+[failure]
+policy = "stop"
