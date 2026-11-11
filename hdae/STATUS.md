@@ -211,7 +211,8 @@
   scripts, a readable Rocky systemd recipe, and validated minimal Rocky,
   constrained-agent, network-service, and paranoid examples. Focused parser,
   configuration, hook, systemd, security, and aggregate suites pass. Delivery
-  is the remaining checkpoint before human review.
+  is pull request https://github.com/gmkurtzer/ginux/pull/261, now awaiting
+  human review and acceptance.
 
 ## Governing outcome and invariants
 
@@ -640,8 +641,8 @@ remains explicitly deferred.
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
 - Active gate: Gate 19 readable instance recipes is technically passed on
-  `hdae/readable-instance-recipes`; pull-request delivery and human acceptance
-  remain.
+  `hdae/readable-instance-recipes` and delivered in pull request 261; human
+  acceptance remains.
 - Active work: Gate 12 is technically passed and delivered in pull request 251;
   Gate 12.1 is technically passed and delivered in pull request 252; Gate
   12.25 is technically passed and delivered in pull request 253. Gate 12.5 is

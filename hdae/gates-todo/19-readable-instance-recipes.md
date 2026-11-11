@@ -44,7 +44,7 @@ moving pre-boot authority outside the portable recipe or weakening mediation.
 - [x] Add and document the four example recipes.
 - [x] Add deterministic positive, negative, and compatibility tests.
 - [x] Run focused and aggregate verification.
-- [ ] Commit, push, open the Gate 19 pull request, and stop for human review.
+- [x] Commit, push, open the Gate 19 pull request, and stop for human review.
 
 ## Acceptance criteria
 
@@ -108,13 +108,13 @@ moving pre-boot authority outside the portable recipe or weakening mediation.
 
 - Working branch: `hdae/readable-instance-recipes`
 - Intended base: `main`
-- Pull request: intended
+- Pull request: https://github.com/gmkurtzer/ginux/pull/261
 - Planned commits: gate and parser; recipes and documentation; evidence and
   pull-request checkpoint
-- Actual commits: `fd2c0aba`, `c9079530`, `fa828e70`, and `b66bbe72`, plus the
-  final evidence checkpoint commit.
+- Actual commits: `fd2c0aba`, `c9079530`, `fa828e70`, `b66bbe72`, and
+  `17502f43`, plus the pull-request checkpoint commit.
 
 ## Review policy and outcome
 
 Human checkpoint. The human approved implementation and pull-request delivery
-on 2026-11-11. Stop after delivery for review and acceptance.
+on 2026-11-11. Pull request 261 is delivered; stop for review and acceptance.
