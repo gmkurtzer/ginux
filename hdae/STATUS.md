@@ -151,7 +151,7 @@
   materialize a bounded maintenance contract atomically, expose their state in
   lifecycle output, and warn on unlocked starts. A clean Rocky workflow proved
   denial while locked, success while unlocked, and denial again after relock.
-- Gate 13 boundary hardening is technically passed on
+- Gate 13 boundary hardening was accepted and closed on 2026-11-10 on
   `hdae/boundary-hardening`. Its deterministic malformed-input and fuzz suite,
   post-bootstrap supervisor authority reduction, security and recovery suites,
   aggregate regressions, limitations report, and human demonstration pass.
@@ -162,8 +162,8 @@
   interactive-host destruction for explicit `make host-reset`, automated QEMU
   tests use separate state, and audit recipes use explicit `enabled` booleans
   with a controller-owned log destination. The rebased result is delivered in
-  pull request https://github.com/gmkurtzer/ginux/pull/255 and awaits human
-  acceptance. A subsequent terminal fix tracks duplicated console descriptors
+  pull request https://github.com/gmkurtzer/ginux/pull/255. A subsequent
+  terminal fix tracks duplicated console descriptors
   and the virtual foreground process group. Commit `20c036dd` keeps sudo out of
   the live relay, preserves the runtime control descriptor, and makes the
   attach process own input for its full lifetime. The complete clean Rocky
@@ -174,6 +174,25 @@
   no-job-control warnings. `make check`,
   `make test-host-lifecycle`, aggregate `make test`, and the full
   `make test-systemd-interactive` workflow pass.
+- Gate 14 is parked by human direction and has no active implementation work.
+- Gate 15 is technically complete on `hdae/dispatch-performance-matrix` and is
+  delivered for human review in pull request
+  https://github.com/gmkurtzer/ginux/pull/257. Checked-in suite, mode, and per-workload templates
+  drive a paired native/selective/paranoid matrix at 1/2/4 vCPUs. The workflow
+  preserves raw samples and provenance, validates compatible metadata, and
+  produces combined TSV, Markdown tables with mean and standard deviation, and
+  a native-relative SVG graph.
+- The full Gate 15 run collected 400 measured samples. Selective CPU, memory,
+  and mutex rows remain between `0.9642x` and `1.0235x` native; selective
+  thread-yield is `0.9216x` to `0.9401x`. Paranoid CPU, memory, and mutex rows
+  remain between `0.9618x` and `1.0417x`, while all-syscall mediation makes
+  paranoid thread-yield `0.0275x` to `0.0350x`. Gate 15 reports these costs;
+  Gate 11 retains responsibility for any further optimization.
+- Gate 15 verification passes `make test-gate15-report`,
+  `make demo-gate-15`, the full `make bench-modes` matrix,
+  `make bench-modes-report`, `make check`, `make test-contract`,
+  `make test-security`, `make test-systemd`, and aggregate `make test` including
+  all QEMU integrations.
 
 ## Governing outcome and invariants
 
@@ -192,18 +211,12 @@ scope, threat model, and invariants.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 12.5, contract maintenance lock, is technically passed and
-  delivered in pull request https://github.com/gmkurtzer/ginux/pull/254.
-  Gate 12.25 is technically passed and delivered in pull request
-  https://github.com/gmkurtzer/ginux/pull/253.
-- Last evidence: `make check`, `make test-contract`, Rocky QEMU
-  `make test-config`, `make test-contract-runtime`, `make test-systemd`, the
-  complete aggregate `make test`, and the Gate 10.5 human demonstration pass.
-  The compiler covers 182 operations and reports the winning human source rule
-  in explanation and runtime audit output. After review, the same lint, unit,
-  QEMU configuration, aggregate, and full demonstration evidence passed with
-  the corrected `ginux instance` interface; the removed top-level contract
-  command is a tested failure.
+- Active gate: Gate 15, dispatch-mode performance matrix, is technically
+  complete on `hdae/dispatch-performance-matrix`, delivered in pull request
+  https://github.com/gmkurtzer/ginux/pull/257, and awaits human review.
+- Last evidence: the complete Gate 15 matrix and report generation pass, as do
+  `make check`, `make test-contract`, `make test-security`,
+  `make test-systemd`, and aggregate `make test` with all QEMU integrations.
 - The final CLI correction makes required configuration files positional:
   `instance create NAME FILE`, `validate FILE`, `inspect FILE`, and
   `explain FILE OPERATION`. Fresh `make check`, `make test-contract`, and
@@ -590,28 +603,32 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Present Gate 13 pull request 255, its fresh boundary, recovery, aggregate,
-demonstration, and matched no-regression evidence for human acceptance. Do not
-merge or close the pull request without explicit human direction. Gates 15 and
-16 planning remains isolated from this branch.
+Implement Gate 15 on `hdae/dispatch-performance-matrix`: add checked-in native,
+selective, paranoid, and suite templates; build paired collection, validation,
+reporting, graph, and deterministic test paths; update affected documentation;
+then run the bounded demonstration and full matrix before human review. Gate 14
+remains explicitly deferred.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
+- Active gate: Gate 15 dispatch-mode performance matrix is approved and active
+  on `hdae/dispatch-performance-matrix`, based on merged Gate 13. It is a human
+  checkpoint and must not close without explicit acceptance.
 - Active work: Gate 12 is technically passed and delivered in pull request 251;
   Gate 12.1 is technically passed and delivered in pull request 252; Gate
   12.25 is technically passed and delivered in pull request 253. Gate 12.5 is
   technically passed and delivered in pull request 254 from
-  `hdae/contract-maintenance-lock`. Gate 13 is technically passed on
-  `hdae/boundary-hardening`, rebased onto current `main`: its boundary,
-  recovery, authority, regression, documentation, demonstration, and matched
-  accepted-Ginux performance evidence pass. Gate 11 remains independently
-  partial on its native-parity target.
+  `hdae/contract-maintenance-lock`. Gate 13 was accepted and closed on
+  2026-11-10 on `hdae/boundary-hardening`, rebased onto current `main`: its
+  boundary, recovery, authority, regression, documentation, demonstration, and
+  matched accepted-Ginux performance evidence pass. Gate 11 remains
+  independently partial on its native-parity target.
 - Gate 13 delivery: pull request
-  https://github.com/gmkurtzer/ginux/pull/255 is open from
-  `hdae/boundary-hardening` against `main`.
+  https://github.com/gmkurtzer/ginux/pull/255 is open with passing required CI
+  from `hdae/boundary-hardening` against `main`.
 - Gate 12.25 delivery: pull request
   https://github.com/gmkurtzer/ginux/pull/253 is open from
   `hdae/top-level-instance-cli` against the Gate 12.1 branch.

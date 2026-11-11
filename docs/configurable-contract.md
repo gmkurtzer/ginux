@@ -98,6 +98,12 @@ translated, or emulated operations remain Ginux-controlled.
 dispatcher before completion. This provides the strongest observation point
 at a substantial performance cost.
 
+There is deliberately no `none` syscall-control value. Performance reports use
+ordinary native Rocky execution as the no-Ginux control, but that control does
+not provide an instance contract or containment boundary. The reproducible
+native/selective/paranoid comparison is documented in
+[performance.md](performance.md).
+
 ## Filesystem, devices, and privilege elevation
 
 Filesystem and device sections use consistent `read`, `write`, and `create`

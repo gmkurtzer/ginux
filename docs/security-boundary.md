@@ -79,6 +79,13 @@ accepting or hiding that performance limitation. A fresh matched comparison
 against current `main` shows that Gate 13 itself adds no per-workload
 regression beyond the existing 4% accepted-Ginux budget.
 
+Gate 15 reports native, selective, and paranoid measurements side by side using
+paired native controls and checked-in templates. Native is not a Ginux mode and
+provides none of the instance boundary. Selective and paranoid results must be
+read with their different syscall-control semantics; faster execution is not
+evidence of equivalent enforcement. See [performance.md](performance.md) for
+the reproducible protocol and interpretation rules.
+
 ## Reproducible evidence
 
 Run the following from a checkout with the pinned images already cached:

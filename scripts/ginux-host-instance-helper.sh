@@ -794,10 +794,16 @@ run_runtime() {
     directory=$(instance_dir "$name")
     test -d "$directory" || exit 66
     # util-linux script(1) does not preserve the supervisor shell's auxiliary
-    # descriptors when it starts the PTY command. Open the control endpoint in
-    # the runtime command itself so Ginux can receive attached-console signal
-    # requests on descriptor 10.
-    exec 10<>"$directory/control.in"
+    # descriptors when it starts the PTY command. Open the lifecycle-created
+    # FIFO in the runtime command itself so Ginux can receive attached-console
+    # signal requests on descriptor 10. Direct benchmark/runtime invocations do
+    # not create that FIFO and therefore must not manufacture an empty regular
+    # file that Ginux mistakes for a live control channel.
+    if test -p "$directory/control.in"; then
+        exec 10<>"$directory/control.in"
+    else
+        exec 10>&-
+    fi
     record_runtime "$directory" "$$"
     materialize_runtime_config \
         "$directory/config.toml" "$directory/deployment.state" "$directory/runtime.toml"

@@ -69,8 +69,8 @@ honest security and compatibility boundary for the initial milestone.
 - [x] Collected a fresh matched benchmark against current `main` and verified that
   Gate 13 introduces no row beyond the existing 4% accepted-Ginux regression
   budget. Gate 11 retains ownership of the unresolved native-parity criterion.
-- [ ] Human review and acceptance of the technical result, residual risks, and
-  scoped claims.
+- [x] Human reviewed and accepted the technical result, residual risks, and
+  scoped claims on 2026-11-10 after pull request 255 passed all required CI.
 
 ## Acceptance criteria
 
@@ -231,16 +231,17 @@ honest security and compatibility boundary for the initial milestone.
 - Actual commits after the final rebase: `881da049` (gate start), `b9f7d140`
   (bounded security fuzzing), `4d1690d2` (native supervisor authority
   reduction), `c35f529a` (boundary and recovery verification), `8cf92c0c`
-  (evidence checkpoint), `7ed25d42` and `afa7c1a4` (delivery records), and
-  `792f71a2` plus the final evidence commit (performance criterion and fresh
-  closure evidence), and `20c036dd` (attached-console signal forwarding and
-  job control), and `5da5e868` (background-job completion notification).
+  (evidence checkpoint), `7ed25d42` and `afa7c1a4` (delivery records),
+  `792f71a2` and `fa7cf1d1` (performance criterion and fresh closure evidence),
+  `eb6279ed` (host persistence and audit configuration), `76483b5e`,
+  `20c036dd`, and `c6cc24a7` (attached-console job control, signal forwarding,
+  and evidence), and `5da5e868` and `ff078830` (background-job completion and
+  evidence).
 
 ## Review policy and outcome
 
-Human checkpoint. The gate is technically passed and awaits explicit human
-acceptance. Present `make demo-gate-13`, fresh regression and matched
-performance evidence, the exact remaining Gate 11 limitation, and the pull
-request. This gate cannot close the initial milestone until the human accepts
-the evidence, residual risks, and scoped claims. Pull request 255 remains open;
-it must not be merged or closed without explicit authorization.
+Human checkpoint accepted on 2026-11-10. The human accepted the passing
+boundary, recovery, aggregate, demonstration, and matched performance evidence,
+including the documented residual risks, scoped claims, and unchanged Gate 11
+native-parity limitation. Pull request 255 passed all required CI and is ready
+for the human-authorized merge.

@@ -57,6 +57,11 @@ The milestone succeeds when:
    network, and boot overhead against native and conventional-container
    controls.
 
+The post-milestone Gate 15 characterization makes the native, selective, and
+paranoid syscall-control costs directly comparable through paired controls,
+checked-in test templates, raw samples, tables, and graphs. Native remains a
+control rather than a Ginux execution mode.
+
 ## Threat model
 
 The primary adversary controls an unprivileged or privileged process inside a
