@@ -67,21 +67,49 @@ if test "$command" = start && test "$#" -eq 2 && test "$2" = --attach; then
 fi
 
 if test "$command" = attach && test "$#" -eq 1; then
-    # Keep terminal-generated Ctrl-C out of sudo's foreground process group.
-    # The attach transport switches to raw mode and forwards the ETX byte to
-    # the instance; this wrapper restores the caller's terminal on every exit.
+    # Authorize access to this instance's console endpoints, then keep sudo
+    # entirely out of the live terminal path. The attach transport switches to
+    # raw mode and forwards terminal controls to Ginux's virtual foreground
+    # process group.
+    control_endpoint=$(sudo "$helper" authorize-attach "$1" "$(id -u)" "$(id -g)")
+    exec 9>"$control_endpoint"
+    exec 7<&0
     saved_tty=$(stty -g)
     restore_tty() {
         trap - 0 HUP TERM
         stty "$saved_tty"
     }
+    forward_interrupt() {
+        printf 'I' >&9 || true
+    }
+    forward_suspend() {
+        printf 'S' >&9 || true
+    }
     trap restore_tty 0 HUP TERM
-    trap '' INT
-    stty -isig
+    trap forward_interrupt INT
+    trap forward_suspend TSTP
+    "$helper" attach "$1" <&7 &
+    attach_pid=$!
     status=0
-    sudo "$helper" attach "$1" || status=$?
+    while kill -0 "$attach_pid" 2>/dev/null; do
+        if wait "$attach_pid"; then
+            status=0
+            break
+        else
+            status=$?
+            # A caught terminal signal interrupts wait so its trap can forward
+            # immediately. The helper is still active; resume waiting for it.
+            if kill -0 "$attach_pid" 2>/dev/null; then
+                status=0
+                continue
+            fi
+            break
+        fi
+    done
     restore_tty
-    trap - INT
+    trap - INT TSTP
+    exec 7<&-
+    exec 9>&-
     exit "$status"
 fi
 

@@ -592,7 +592,7 @@ static mut RESULT_FD: isize = -1;
 
 static mut AUDIT_BYTES: usize = 0;
 static mut AUDIT_CAPPED: bool = false;
-// `[audit] mode = "disabled"` suppresses decision records.
+// `[audit] enabled = false` suppresses decision records.
 static mut AUDIT_DISABLED: bool = false;
 // One audit record is staged here and written whole once its newline
 // arrives, so the budget never splits a record and the truncation notice

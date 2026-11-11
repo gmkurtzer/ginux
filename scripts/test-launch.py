@@ -136,7 +136,7 @@ def main():
             if b"launch does not enforce native typed controls" not in proc.stderr:
                 raise RuntimeError(f"typed control did not reach launch validation: {proc.stderr!r}")
         proc = invoke(["args", "visible"], 0, "exited", stdout=b"visible\n",
-                      changes={'mode = "stderr"': 'mode = "disabled"'})
+                      changes={'enabled = true': 'enabled = false'})
         if b"ginux: audit " in proc.stderr:
             raise RuntimeError("disabled audit emitted a decision record")
         # The thread identity matches the virtual pid: set_tid_address returns
