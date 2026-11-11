@@ -184,6 +184,8 @@ expect {
     eof { puts stderr "instance exited during job-control check"; exit 208 }
 }
 expect -re {\[root@ginux [^]]+\]# }
+set saved_timeout $timeout
+set timeout 15
 send -- "sleep 30\r"
 after 1000
 send -- "\003"
@@ -200,6 +202,24 @@ expect {
     timeout { puts stderr "instance console was unusable after Ctrl-C"; exit 200 }
     eof { puts stderr "instance exited after Ctrl-C"; exit 201 }
 }
+expect -re {\[root@ginux [^]]+\]# }
+send -- "sleep 30\r"
+after 1000
+send -- "\032"
+expect {
+    -re {Stopped[[:space:]]+sleep 30} {}
+    -re {\[ginux@ginux-rocky [^]]+\]\$ } { puts stderr "Ctrl-Z stopped the host attach command"; exit 209 }
+    timeout { puts stderr "Ctrl-Z did not suspend the instance foreground process"; exit 210 }
+    eof { puts stderr "Ctrl-Z terminated the host attachment"; exit 211 }
+}
+expect -re {\[root@ginux [^]]+\]# }
+send -- "jobs -s | grep -q 'sleep 30' && printf 'GINUX_SUSPEND_%s\\n' 'FORWARDED: PASS'; kill -KILL %1; wait %1 2>/dev/null || true\r"
+expect {
+    -re {GINUX_SUSPEND_FORWARDED: PASS} {}
+    timeout { puts stderr "suspended instance job was not tracked by the shell"; exit 212 }
+    eof { puts stderr "instance exited during suspended-job cleanup"; exit 213 }
+}
+set timeout $saved_timeout
 expect -re {\[root@ginux [^]]+\]# }
 send -- "printf 'GINUX_HUMAN_INTERACTIVE: PASS\\n'\r"
 expect {

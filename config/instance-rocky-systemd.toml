@@ -44,8 +44,8 @@ outbound = ["tcp:*", "udp:*"]
 
 [contract.devices]
 default = "deny"
-read = ["/dev/console", "/dev/null", "/dev/zero", "/dev/random", "/dev/urandom"]
-write = ["/dev/console", "/dev/null", "/dev/zero", "/dev/random", "/dev/urandom"]
+read = ["/dev/console", "/dev/tty", "/dev/null", "/dev/zero", "/dev/random", "/dev/urandom"]
+write = ["/dev/console", "/dev/tty", "/dev/null", "/dev/zero", "/dev/random", "/dev/urandom"]
 create = []
 
 [contract.privileges]
