@@ -23,6 +23,10 @@ a claim of universal exploit prevention.
   resources required by the selected dispatch mode.
 - Supervisor loss terminates traced workloads through `PTRACE_O_EXITKILL`.
   Unexpected trace stops fail the instance closed and trigger cleanup.
+- Concurrent instances retain independent roots, writable state, contracts,
+  consoles, audit identity, virtual PIDs, synthetic kernel views, and lifecycle
+  state. Supported virtual process operations cannot address a peer instance's
+  host process identity.
 
 These claims apply only to the checked-in x86-64 Rocky Linux configurations,
 catalog, tests, and named execution modes. They are not a complete Linux ABI
@@ -66,7 +70,10 @@ ioctls, device operations, procfs/sysfs nodes, namespaces, and Linux behavior
 may return `EPERM`, `ENOSYS`, or another configured Linux error. The initial
 milestone covers one Rocky Linux 10 x86-64 systemd baseline and does not claim
 complete Linux conformance, arbitrary distributions, multiple architectures,
-physical-device passthrough, nested containers, or multi-instance isolation.
+physical-device passthrough, nested containers, private network namespaces, or
+production-scale multi-instance density. The bounded two-instance isolation
+evidence and shared-host networking limitation are documented in
+[multi-instance-isolation.md](multi-instance-isolation.md).
 
 ## Performance limitation
 
@@ -95,6 +102,7 @@ make check-security-doc
 make fuzz-security
 make test-security
 make test-recovery
+make test-multi-instance
 make demo-gate-13
 ```
 
