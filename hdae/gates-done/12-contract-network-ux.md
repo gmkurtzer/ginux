@@ -63,7 +63,7 @@ configured through repeatable `instance create` and `instance set` flags.
 
 ## Remaining work
 
-- [ ] Obtain human review and acceptance.
+- [x] Obtain human review and acceptance.
 - [x] Push the branch and open the Gate 12 pull request after explicit batch
   authorization.
 
@@ -142,16 +142,16 @@ configured through repeatable `instance create` and `instance set` flags.
   portable recipe and separate deployment state. Host interface/source and
   translated-port fields may appear only in that derived runtime input, not in
   the saved portable `config.toml`.
-- Because pull request 249 is still open, this branch is stacked on Gate 11 and
-  must be rebased or retargeted after that dependency is resolved.
+- During implementation, this branch was stacked on Gate 11 while pull request
+  249 remained open; both dependencies later merged into `main`.
 
 ## Delivery strategy
 
 - Working branch: `hdae/contract-network-ux`
-- Intended base: `hdae/performance-characterization` while pull request 249 is
-  open; retarget to `main` after Gate 11 lands
-- Pull request: https://github.com/gmkurtzer/ginux/pull/251; never merge or
-  close without explicit authorization
+- Intended base: `hdae/performance-characterization`, subsequently merged into
+  `main`
+- Pull request: https://github.com/gmkurtzer/ginux/pull/251, merged into `main`
+  on 2026-11-09
 - Planned commits: gate and architecture record; contract schema/compiler;
   operational network CLI/state; active recipe and documentation migration;
   regression and demonstration evidence
@@ -164,7 +164,6 @@ configured through repeatable `instance create` and `instance set` flags.
 
 ## Review policy and outcome
 
-Technically passed and delivered for human review in pull request 251. Human
-acceptance remains pending. The human authorized the subsequent corrective and
-UX gate batch on 2026-11-08; later stacked gates do not imply Gate 12 acceptance
-or authorize this pull request to be merged or closed.
+Accepted and closed by the human during ledger reconciliation on 2026-11-11.
+Pull request 251 was merged into `main` on 2026-11-09 after the technical
+evidence passed; subsequent stacked gates were also merged and reviewed.
