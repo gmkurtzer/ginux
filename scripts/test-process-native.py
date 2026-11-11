@@ -4,6 +4,7 @@ import ctypes
 import os
 from pathlib import Path
 import signal
+import shutil
 import struct
 import subprocess
 import sys
@@ -103,8 +104,20 @@ def main():
             base = RO_STATUS_FALLBACK if name == "ro_status" else expected[name]
             expected[name + suffix] = [*base, FALLBACK_AUDIT + b" process_vm_writev=-%d" % errno]
     with tempfile.TemporaryDirectory(prefix="ginux-process-") as directory:
+        # The reduced tracee UID must not need access to a developer's home.
+        work = Path(directory)
+        work.chmod(0o755)
+        staged = work / "fixtures"
+        shutil.copytree(fixtures, staged)
+        for entry in staged.iterdir():
+            if entry.is_file(): entry.chmod(0o555)
+        staged_legacy = work / "legacy"
+        shutil.copyfile(legacy, staged_legacy)
+        staged_legacy.chmod(0o555)
+        fixtures, legacy = str(staged), str(staged_legacy)
         sentinel = Path(directory) / "sentinel"
         sentinel.write_bytes(b"controlled sentinel\n")
+        sentinel.chmod(0o600)
         fd = os.open(sentinel, os.O_RDONLY)
         os.dup2(fd, 9)
         if fd != 9:
