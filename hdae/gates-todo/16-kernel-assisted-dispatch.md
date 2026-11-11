@@ -67,7 +67,7 @@ ptrace, a module, or another dispatcher.
 - [x] Run paired performance measurements and profile remaining overhead.
 - [x] Update all affected project and operator documentation.
 - [x] Run mandatory regressions and a bounded human demonstration.
-- [ ] Push the branch, open a pull request, and stop for human review.
+- [x] Push the branch, open a pull request, and stop for human review.
 
 ## Acceptance criteria
 
@@ -201,7 +201,8 @@ ptrace, a module, or another dispatcher.
 
 - Working branch: `hdae/kernel-assisted-dispatch`
 - Intended base: `main`
-- Pull request: intended; do not merge or close without human direction.
+- Pull request: https://github.com/gmkurtzer/ginux/pull/258; do not merge or
+  close without human direction.
 - Planned commits: gate and research matrix; prototypes; automatic planner and
   integration; verification and benchmarks; documentation and final evidence.
 - Actual commits: `584f26bc` (gate definition), `3502b4e6` (module/BPF

@@ -192,8 +192,9 @@
   `make bench-modes-report`, `make check`, `make test-contract`,
   `make test-security`, `make test-systemd`, and aggregate `make test` including
   all QEMU integrations.
-- Gate 16 is technically complete on `hdae/kernel-assisted-dispatch` and awaits
-  human review. A cgroup-bound kprobe module and BPF LSM prototype both deny
+- Gate 16 is technically complete in pull request
+  https://github.com/gmkurtzer/ginux/pull/258 and awaits human review. A
+  cgroup-bound kprobe module and BPF LSM prototype both deny
   raw/static/thread/fork/exec `mkdirat` before mutation, survive controller
   exit fail-closed, and pass stale-identity, atomic replacement, detach, and
   unload lifecycle checks in the disposable Rocky host.
