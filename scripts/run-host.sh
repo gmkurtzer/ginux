@@ -7,7 +7,7 @@ if test -f "$ROCKY_PID_FILE"; then
     existing=$(cat "$ROCKY_PID_FILE")
     if kill -0 "$existing" 2>/dev/null; then
         printf 'A Rocky test host is already running with PID %s.\n' "$existing" >&2
-        printf '%s\n' 'Stop it with ./scripts/stop-rocky-host.sh before running make run-host.' >&2
+        printf '%s\n' 'Stop it with ./scripts/stop-rocky-host.sh before running make host-run.' >&2
         exit 1
     fi
 fi
@@ -29,18 +29,18 @@ ROCKY_NETWORK_RESTRICT=off ./scripts/start-rocky-host.sh
 ./scripts/install-ginux-host.sh
 
 printf '%s\n' ''
-printf '%s\n' 'Rocky QEMU host ready. Ginux is installed; host cache and domains persist across runs.'
+printf '%s\n' 'Rocky QEMU host ready. Ginux is installed; host cache and instances persist across runs.'
 printf '%s\n' ''
 printf '%s\n' 'Example workflow:'
-printf '%s\n' '  ginux domain create rocky --config /etc/ginux/examples/rocky-systemd.toml'
-printf '%s\n' '  ginux domain list'
-printf '%s\n' '  ginux domain start rocky --attach'
-printf '%s\n' '  ginux domain status rocky'
-printf '%s\n' '  ginux domain stop rocky'
+printf '%s\n' '  ginux import rocky /etc/ginux/examples/rocky-systemd.toml'
+printf '%s\n' '  ginux list'
+printf '%s\n' '  ginux start rocky --attach'
+printf '%s\n' '  ginux status rocky'
+printf '%s\n' '  ginux stop rocky'
 printf '%s\n' ''
-printf '%s\n' 'Domain login: root     Password: ginux'
-printf '%s\n' 'Inside an attached domain, press Ctrl-] to detach without stopping it.'
-printf '%s\n' 'To power off the domain from its root shell, use: kill -RTMIN+4 1'
+printf '%s\n' 'Instance login: root     Password: ginux'
+printf '%s\n' 'Inside an attached instance, press Ctrl-] to detach without stopping it.'
+printf '%s\n' 'To power off the instance from its root shell, use: kill -RTMIN+4 1'
 printf '%s\n' 'Exit the Rocky host shell to stop QEMU and clean up.'
 printf '%s\n' 'GINUX_HOST: READY'
 

@@ -1,80 +1,188 @@
-# Configurable domain contract
+# Self-contained userspace contract
 
-Ginux resolves each domain's versioned contract before managed code starts.
-Runtime enforcement receives only the resulting explicit operation table and
-its deterministic digest; it never evaluates templates or wildcards while a
-domain is running.
-
-## Resolution order
-
-1. Catalog-version default deny.
-2. One versioned base profile.
-3. Ordered versioned templates.
-4. Domain `allow` selectors.
-5. Domain `deny` selectors.
-6. Validated command-line overrides, followed by complete re-resolution.
-
-Later layers win. Within one layer, selectors are applied in listed order.
-Exact selectors match one canonical operation; a selector may contain one `*`
-wildcard and must match at least one operation. Domain denies are deliberately
-final, so an allow cannot undo a domain deny. Unknown profiles or templates,
-unversioned names, malformed or empty selectors, unmatched selectors, and a
-supplied digest that differs from the derived digest fail before startup.
-
-Profiles and templates are pinned to catalog version 1. Therefore an old
-selector cannot automatically grant an operation added to a later catalog:
-the configuration must be resolved and accepted against that newer catalog.
-
-## Profiles and examples
-
-- `strict-v1` exposes only the small identity, output, and exit surface needed
-  by a negative-test workload.
-- `minimal-v1` is the deny-oriented development base.
-- `gate5-balanced-v1` preserves the accepted balanced native-shell surface.
-- `gate9-systemd-v1` is the tested Rocky systemd baseline.
-- `network-client-v1`, `read-only-time-v1`, and
-  `virtual-kernel-views-v1` are additive templates.
+Every Ginux instance carries its complete kernel/userspace contract in the
+same TOML recipe as its image, resources, identity, and hooks. The recipe is
+portable: host interface attachment and port translation are deployment state,
+not contract policy.
 
 ```toml
 [contract]
-profile = "minimal-v1"
-templates = ["read-only-time-v1"]
-allow = ["network.inet.tcp.connect"]
-deny = ["syscall.clock_settime"]
+version = 1
+catalog = 2
+default = "deny"
+allow = ["filesystem.*", "proc.*", "sys.*", "time.*"]
+deny = ["device.mmio.direct", "device.dma.direct", "network.packet.raw"]
+
+[contract.syscalls]
+control = "selective"
+default = "deny"
+allow = ["read*", "write*", "open*", "close", "mmap", "futex", "sched_yield"]
+deny = ["ptrace"]
+
+[contract.filesystem]
+default = "deny"
+read = ["/"]
+write = ["/run", "/tmp", "/var"]
+create = ["/run", "/tmp", "/var"]
+deny = ["/ginux-demo/read-only"]
+
+[contract.network]
+default = "deny"
+inbound = ["tcp:*"]
+outbound = ["tcp:*", "udp:53"]
+
+[contract.devices]
+default = "deny"
+read = ["/dev/null", "/dev/zero", "/dev/random", "/dev/urandom", "/dev/console"]
+write = ["/dev/null", "/dev/console"]
+create = []
+
+[contract.privileges]
+default = "deny"
+setuid = []
+setgid = []
+
+[contract.process]
+default = "deny"
+max_processes = 4096
+max_threads = 16384
+signals = ["*"]
+ptrace = "deny"
+namespace_create = []
+namespace_join = []
+
+[contract.kernel]
+default = "deny"
+proc_read = ["/"]
+proc_write = []
+sys_read = ["/"]
+sys_write = []
 ```
 
-`ginux contract-plan CONFIG` prints the catalog version, digest, and every
-explicit rule with its final action and provenance. The normalized domain
-configuration stores the derived digest; operators do not set it through a
-command-line override.
+Every subsection default is deliberately `deny`. Explicit deny wins over
+allow. Runtime enforcement receives the compiled operation table and
+deterministic digest; it never expands globs while managed code is running.
 
-## Resource constraints
+## Matching and precedence
 
-Canonical operation selectors choose authority families. Typed domain fields
-constrain resources within those families:
+`[contract].allow` and `[contract].deny` select canonical catalog operations.
+Their component-aware selectors use `*` for one dot-separated component and
+`**` recursively. Every selector must match the pinned catalog.
 
-- network rules use validated direction, protocol, CIDR/address, and bounded
-  port ranges;
-- port forwarding uses explicit protocol and internal/external ports;
-- volume assignments use component-aware absolute domain paths and validated
-  host sources;
-- device assignments name registry-owned virtual devices;
-- syscall and ioctl implementations validate their operation-specific
-  arguments before any host effect.
+`[contract.syscalls]` uses shell-style `*` over syscall names. For example,
+`open*` matches the cataloged `open` and `openat` syscalls. Every
+syscall selector must match at least one syscall. Expansion occurs against the
+declared catalog version, so a catalog update requires explicit revalidation
+and cannot silently enlarge an existing normalized contract.
 
-These typed fields are intentionally not arbitrary contract strings. Invalid
-CIDRs, ranges, paths, duplicate assignments, or conflicting forwards fail
-normalization.
+Filesystem, device, and virtual-kernel paths are absolute and component-aware.
+A directory selector covers that directory and its descendants; `/private`
+does not match `/private-other`. Invalid normalization and path escape fail
+closed. Resolution is deterministic:
 
-## Audit bounds
+1. start at default deny;
+2. apply broad grants;
+3. apply surface-specific grants; and
+4. apply explicit denies last.
 
-`audit.mode = "stderr"` emits structured native decision records containing
-the domain, contract digest, canonical operation, provenance, action, and
-result. A domain emits at most 8,192 detailed native audit records. Further
-records are dropped without buffering; dropped counts are reported at powers
-of two, bounding summary growth to at most 64 lines over a `u64` lifetime.
-`audit.mode = "disabled"` suppresses these records. Audit output never grants
-authority and does not include arbitrary managed-memory contents.
+The normalized digest includes every final action and its provenance.
 
-The generated operation inventory is
-[`abi-contract-coverage.md`](abi-contract-coverage.md).
+## Syscall control
+
+`control = "selective"` is the default. It permits direct host execution only
+when the contract allows the syscall and the pinned catalog independently
+classifies it as transparent and direct-safe. Denied, virtualized, inspected,
+translated, or emulated operations remain Ginux-controlled.
+
+`control = "paranoid"` sends every syscall through the Ginux userspace
+dispatcher before completion. This provides the strongest observation point
+at a substantial performance cost.
+
+There is deliberately no `none` syscall-control value. Performance reports use
+ordinary native Rocky execution as the no-Ginux control, but that control does
+not provide an instance contract or containment boundary. The reproducible
+native/selective/paranoid comparison is documented in
+[performance.md](performance.md).
+
+## Filesystem, devices, and privilege elevation
+
+Filesystem and device sections use consistent `read`, `write`, and `create`
+lists. A filesystem `deny` entry recursively blocks mutation below that path,
+including link-based bypasses. Device `create = []` prevents character and
+block device creation while ordinary FIFO creation remains governed by the
+filesystem and syscall rules.
+
+`setuid` and `setgid` are executable-path allow lists. Empty arrays permit no
+set-ID execution. Existing set-ID bits do not grant virtual or host authority
+unless the corresponding executable path is allowed.
+
+## Synthetic kernel views
+
+`/proc` and `/sys` are always synthetic, Ginux-owned views. The
+`[contract.kernel]` rules control which virtual paths are visible or writable;
+they never enable passthrough to the host trees.
+
+## Network policy and deployment
+
+`[contract.network]` defines what an instance may do. It does not select a host
+interface or claim external ports. Those host-specific settings are repeatable
+CLI flags, persisted separately from `config.toml`:
+
+```sh
+ginux import web recipe.toml \
+    --network eth0:1 \
+    --forward protocol=tcp,external_port=8080,instance_port=80 \
+    --forward protocol=tcp,external_port=8443,instance_port=443
+
+ginux set web \
+    --network default \
+    --forward protocol=tcp,external_port=9080,instance_port=80
+```
+
+Omitting `--network` selects the host default. `--network default` clears an
+explicit attachment and `--forward none` clears forwarding. One command may
+change the attachment and several forwards; Ginux validates the complete
+candidate and commits it atomically. Invalid syntax, unavailable attachments,
+or conflicting external ports leave the prior deployment unchanged.
+
+## Operator workflow
+
+```sh
+ginux validate recipe.toml
+ginux inspect recipe.toml
+ginux explain recipe.toml filesystem.path.write
+ginux diff strict.toml recipe.toml
+ginux import rocky recipe.toml --network default
+ginux set rocky --network eth0:1 \
+    --forward protocol=tcp,external_port=8080,instance_port=80
+```
+
+`validate` parses and compiles without launching an instance. `inspect`
+summarizes final decisions and the digest. `explain` identifies the winning
+rule and limitation for one catalog operation. `diff` reports authority
+changes between two complete recipes. There is no top-level `ginux contract`
+command and the replaced `[userspace.*]` syntax fails closed.
+
+## Bootstrap and host execution boundary
+
+Distribution customization belongs in `[hooks].pre_boot`. Pre-boot commands
+execute through Ginux mediation inside the instance root. Final contract
+restrictions activate after hooks finish, allowing a recipe to prepare state
+and then lock it down.
+
+Instance-visible credentials are virtual Ginux state. Independently, every
+native managed process sets `PR_SET_NO_NEW_PRIVS` before executing workload
+code. A root-launched runtime drops managed host execution to UID/GID 65534; a
+non-root runtime retains the caller's host identity. Virtual root therefore
+does not imply host root.
+
+Runtime audit records contain the instance, contract digest, canonical
+operation, winning source rule, action, and result. The generated catalog
+inventory is [`abi-contract-coverage.md`](abi-contract-coverage.md).
+The default Rocky recipe uses `[audit] enabled = false`. `ginux start NAME
+--audit` enables auditing for that run and records it in the instance's
+`audit.log` without mixing audit records into the attached console. Set
+`enabled = true` in the recipe to audit every start. Audit configuration
+controls enablement only; the controller always owns the log destination.
+Legacy `mode = "stderr"` and `mode = "disabled"` recipes remain readable and
+normalize to `enabled = true` and `enabled = false`, respectively.

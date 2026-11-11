@@ -1,22 +1,26 @@
 #!/usr/bin/expect -f
 
 if {$argc != 6} {
-    puts stderr "usage: expect-systemd-login.exp <key> <port> <user> <domain-root> <log> <measurements>"
+    puts stderr "usage: expect-systemd-login.exp <key> <port> <user> <instance-root> <log> <measurements>"
     exit 64
 }
 
 set key [lindex $argv 0]
 set port [lindex $argv 1]
 set user [lindex $argv 2]
-set domain_root [lindex $argv 3]
+set instance_root [lindex $argv 3]
 set log [lindex $argv 4]
 set measurements [lindex $argv 5]
 set timeout 50
 set started_ms [clock milliseconds]
 set send_slow {1 .005}
+set audit_override false
+if {[info exists env(GINUX_GATE9_AUDIT)] && $env(GINUX_GATE9_AUDIT) eq "on"} {
+    set audit_override true
+}
 
 log_file -noappend $log
-spawn ssh -tt -i $key -p $port -o BatchMode=yes -o ConnectTimeout=5 -o IdentitiesOnly=yes -o LogLevel=ERROR -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$user@127.0.0.1" "sudo sh -c '/var/tmp/ginux native /var/tmp/gate9.toml $domain_root 2>/var/tmp/ginux-gate9-audit.log'"
+spawn ssh -tt -i $key -p $port -o BatchMode=yes -o ConnectTimeout=5 -o IdentitiesOnly=yes -o LogLevel=ERROR -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$user@127.0.0.1" "sudo sh -c '/var/tmp/ginux-host-instance-helper-installed run-runtime gate9 $audit_override 2>/var/tmp/ginux-gate9-audit.log'"
 
 expect {
     -re {login:} {}
@@ -109,12 +113,12 @@ expect {
     timeout { puts stderr "managed shell prompt did not return after checks"; exit 102 }
     eof { puts stderr "managed shell exited after checks"; exit 103 }
 }
-puts stderr "requesting controlled domain poweroff"
+puts stderr "requesting controlled instance poweroff"
 send -s -- "kill -RTMIN+4 1\n"
 set timeout 120
 expect {
     eof {}
-    timeout { puts stderr "controlled domain poweroff timed out"; exit 78 }
+    timeout { puts stderr "controlled instance poweroff timed out"; exit 78 }
 }
 set stopped_ms [clock milliseconds]
 set total_ms [expr {$stopped_ms - $started_ms}]

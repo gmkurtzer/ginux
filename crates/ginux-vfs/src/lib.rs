@@ -1091,7 +1091,7 @@ mod tests {
     }
 
     #[test]
-    fn overlays_are_isolated_between_domain_instances() {
+    fn overlays_are_isolated_between_instances() {
         let bytes = index_bytes();
         let mut first: VirtualFs<'_, Reader, 4, 32, 4> =
             VirtualFs::new(Index::new(&bytes).unwrap(), Reader(*b"BASETOOL"));

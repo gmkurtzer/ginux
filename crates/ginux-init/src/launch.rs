@@ -1,21 +1,21 @@
 //! Launch-config handling for the native supervisor.
 //!
-//! Owner: G-launch. Initial-stack command parsing plus domain-config and
+//! Owner: G-launch. Initial-stack command parsing plus instance-config and
 //! input-file staging. Workload definitions stay with the entry points in
-//! `main.rs`; `launch` runs the executable and arguments from domain config.
+//! `main.rs`; `launch` runs the executable and arguments from instance config.
 
 use ginux_core::{
     balanced_identity_result, balanced_mediated_result, balanced_surface, Action, SYS_EXIT,
     SYS_EXIT_GROUP,
 };
-use ginux_domain::{ConfigError, Domain, DomainConfig, ExecutionBackend, ExecutionProfile};
+use ginux_instance::{ConfigError, ExecutionBackend, ExecutionProfile, Instance, InstanceConfig};
 
 use crate::dispatch::{
     balanced_surface_name, decide_native, native_arguments_allowed, NativeDecision,
 };
 use crate::supervisor::{
-    exit_process, line, ptrace, stopped, syscall0, syscall1, syscall2, syscall3, syscall4,
-    syscall5, wait, write_all, UserRegs, AT_FDCWD, DOMAIN_GID, DOMAIN_UID, O_RDONLY,
+    exit_process, line, managed_host_identity, ptrace, stopped, syscall0, syscall1, syscall2,
+    syscall3, syscall4, syscall5, wait, write_all, UserRegs, AT_FDCWD, O_RDONLY,
     PR_SET_NO_NEW_PRIVS, PTRACE_GETREGS, PTRACE_O_EXITKILL, PTRACE_O_TRACESYSGOOD,
     PTRACE_SETOPTIONS, PTRACE_SETREGS, PTRACE_SYSCALL, PTRACE_TRACEME, SYS_CHDIR, SYS_CHROOT,
     SYS_CLOSE_HOST, SYS_EXECVE, SYS_EXIT_HOST, SYS_FORK, SYS_FSYNC, SYS_OPENAT_HOST, SYS_PRCTL,
@@ -35,13 +35,17 @@ pub enum Command {
     Runtime(*const u8),
     Config(*const u8),
     ConfigMerge(*const u8, usize, *const usize),
-    ContractPlan(*const u8),
+    InstancePlan(*const u8),
+    InstanceValidate(*const u8),
+    InstanceExplain(*const u8, *const u8),
+    InstanceDiff(*const u8, *const u8),
+    InstanceInspect(*const u8),
     HookPlan(*const u8),
     Lifecycle(*const u8),
     Vfs(*const u8, *const u8, *const u8),
     Native(*const u8, *const u8, usize),
     NativeHook(*const u8, *const u8, usize),
-    Domain(*const u8, *const u8),
+    Instance(*const u8, *const u8),
     Process(*const u8),
     ProcessNative(*const u8, *const u8),
     Devices(*const u8, *const u8),
@@ -77,9 +81,23 @@ pub fn parse_argv(argc: usize, argv: *const usize) -> Option<Command> {
         Some(Command::ConfigMerge(config_path, argc - 3, unsafe {
             argv.add(3)
         }))
-    } else if c_string_equals(command, b"contract-plan") {
+    } else if c_string_equals(command, b"instance-plan") {
         let config_path = unsafe { *argv.add(2) as *const u8 };
-        Some(Command::ContractPlan(config_path))
+        Some(Command::InstancePlan(config_path))
+    } else if c_string_equals(command, b"instance-validate") {
+        let config_path = unsafe { *argv.add(2) as *const u8 };
+        Some(Command::InstanceValidate(config_path))
+    } else if argc >= 4 && c_string_equals(command, b"instance-explain") {
+        let config_path = unsafe { *argv.add(2) as *const u8 };
+        let operation = unsafe { *argv.add(3) as *const u8 };
+        Some(Command::InstanceExplain(config_path, operation))
+    } else if argc >= 4 && c_string_equals(command, b"instance-diff") {
+        let left = unsafe { *argv.add(2) as *const u8 };
+        let right = unsafe { *argv.add(3) as *const u8 };
+        Some(Command::InstanceDiff(left, right))
+    } else if c_string_equals(command, b"instance-inspect") {
+        let config_path = unsafe { *argv.add(2) as *const u8 };
+        Some(Command::InstanceInspect(config_path))
     } else if c_string_equals(command, b"hook-plan") {
         let config_path = unsafe { *argv.add(2) as *const u8 };
         Some(Command::HookPlan(config_path))
@@ -98,6 +116,9 @@ pub fn parse_argv(argc: usize, argv: *const usize) -> Option<Command> {
             1
         } else if argc >= 5 && c_string_equals(unsafe { *argv.add(4) as *const u8 }, b"probe") {
             2
+        } else if argc >= 5 && c_string_equals(unsafe { *argv.add(4) as *const u8 }, b"configured")
+        {
+            3
         } else {
             0
         };
@@ -107,10 +128,10 @@ pub fn parse_argv(argc: usize, argv: *const usize) -> Option<Command> {
         let root_path = unsafe { *argv.add(3) as *const u8 };
         let index = parse_decimal_c_string(unsafe { *argv.add(4) as *const u8 })?;
         Some(Command::NativeHook(config_path, root_path, index))
-    } else if argc >= 4 && c_string_equals(command, b"domain") {
+    } else if argc >= 4 && c_string_equals(command, b"instance") {
         let config_path = unsafe { *argv.add(2) as *const u8 };
         let fixture_path = unsafe { *argv.add(3) as *const u8 };
-        Some(Command::Domain(config_path, fixture_path))
+        Some(Command::Instance(config_path, fixture_path))
     } else if c_string_equals(command, b"process") {
         let config_path = unsafe { *argv.add(2) as *const u8 };
         Some(Command::Process(config_path))
@@ -163,18 +184,18 @@ fn parse_decimal_c_string(value: *const u8) -> Option<usize> {
     Some(result)
 }
 
-pub fn load_config(path: *const u8) -> DomainConfig {
+pub fn load_config(path: *const u8) -> InstanceConfig {
     let length = read_config(path);
     let bytes = unsafe {
         core::slice::from_raw_parts(core::ptr::addr_of!(CONFIG_BYTES).cast::<u8>(), length)
     };
-    match DomainConfig::parse(bytes) {
+    match InstanceConfig::parse(bytes) {
         Ok(config) => config,
         Err(error) => config_rejected(error),
     }
 }
 
-pub fn print_effective_config(config: &DomainConfig) {
+pub fn print_effective_config(config: &InstanceConfig) {
     let normalized = match config.normalized() {
         Ok(normalized) => normalized,
         Err(error) => config_rejected(error),
@@ -314,13 +335,13 @@ pub fn c_string_bytes(value: *const u8, limit: usize) -> Result<&'static [u8], C
 
 // ---- G01: configured native launch ----
 //
-// General path that executes the configured domain init with its configured
+// General path that executes the configured instance init with its configured
 // arguments, environment, and working directory under the existing balanced
 // ptrace-native supervision. The fixed Bash-only `native` demonstration is
 // untouched; this path is additive behind the `launch` command.
 //
 // Supported bootstrap: privileged chroot into the given host rootfs path,
-// then privilege drop to the domain UID/GID. Recipe never requires host
+// then privilege drop to the instance UID/GID. Recipe never requires host
 // root: when the mechanism is unavailable the launcher reports an explicit
 // startup failure instead of falling back to host execution.
 
@@ -342,22 +363,22 @@ pub fn launch_main(config_path: *const u8, root_path: *const u8, result_path: *c
     let config = launch_load_config(config_path);
     launch_validate(&config);
     print_launch_config(&config);
-    let mut domain = Domain::create(config);
-    if domain.start().is_err() {
-        launch_domain_fail(&mut domain, b"invalid launch start transition");
+    let mut instance = Instance::create(config);
+    if instance.start().is_err() {
+        launch_instance_fail(&mut instance, b"invalid launch start transition");
     }
     stage_launch(&config);
     let child = unsafe { syscall0(SYS_FORK) };
     if child < 0 {
-        launch_domain_fail(&mut domain, b"launch tracee fork failed");
+        launch_instance_fail(&mut instance, b"launch tracee fork failed");
     }
     if child == 0 {
         launch_tracee(root_path);
     }
-    supervise_launch(child as usize, &mut domain)
+    supervise_launch(child as usize, &mut instance)
 }
 
-fn launch_validate(config: &DomainConfig) {
+fn launch_validate(config: &InstanceConfig) {
     if config.execution_profile != ExecutionProfile::Balanced
         || config.execution_backend != ExecutionBackend::PtraceNative
     {
@@ -367,29 +388,29 @@ fn launch_validate(config: &DomainConfig) {
         launch_startup_fail(b"launch does not support storage or device assignments");
     }
     if config.id.as_bytes().is_empty() || config.id.as_bytes().len() > 64 {
-        launch_startup_fail(b"domain id length invalid");
+        launch_startup_fail(b"instance id length invalid");
     }
     if config.root.as_bytes().is_empty() || config.root.as_bytes().len() > 128 {
-        launch_startup_fail(b"domain root length invalid");
+        launch_startup_fail(b"instance root length invalid");
     }
     launch_validate_path(
         config.init.as_bytes(),
-        b"domain init must be an absolute confined path",
+        b"instance init must be an absolute confined path",
     );
     launch_validate_path(
         config.workdir.as_bytes(),
-        b"domain workdir must be an absolute confined path",
+        b"instance workdir must be an absolute confined path",
     );
     if config.args.as_slice().len() > 7 {
-        launch_startup_fail(b"domain args exceed 7 entries");
+        launch_startup_fail(b"instance args exceed 7 entries");
     }
     for argument in config.args.as_slice() {
         if argument.as_bytes().len() > MAX_LAUNCH_ARG_LEN || argument.as_bytes().contains(&0) {
-            launch_startup_fail(b"domain arg exceeds 128 bytes");
+            launch_startup_fail(b"instance arg exceeds 128 bytes");
         }
     }
     if config.environment.as_slice().len() > 8 {
-        launch_startup_fail(b"domain environment exceeds 8 entries");
+        launch_startup_fail(b"instance environment exceeds 8 entries");
     }
     for variable in config.environment.as_slice() {
         let bytes = variable.as_bytes();
@@ -399,7 +420,7 @@ fn launch_validate(config: &DomainConfig) {
             || equals == Some(0)
             || equals.is_none()
         {
-            launch_startup_fail(b"domain environment entry must be NAME=value within 256 bytes");
+            launch_startup_fail(b"instance environment entry must be NAME=value within 256 bytes");
         }
     }
 }
@@ -419,12 +440,12 @@ fn contains_dotdot(path: &[u8]) -> bool {
     path.split(|byte| *byte == b'/').any(|part| part == b"..")
 }
 
-fn stage_launch(config: &DomainConfig) {
+fn stage_launch(config: &InstanceConfig) {
     let exec = stage_nul(
         core::ptr::addr_of_mut!(LAUNCH_EXEC).cast::<u8>(),
         129,
         config.init.as_bytes(),
-        b"domain init staging failed",
+        b"instance init staging failed",
     );
     unsafe {
         core::ptr::addr_of_mut!(LAUNCH_ARGV[0]).write(exec);
@@ -432,7 +453,12 @@ fn stage_launch(config: &DomainConfig) {
     let mut argc = 1usize;
     for argument in config.args.as_slice() {
         let slot = unsafe { core::ptr::addr_of_mut!(LAUNCH_ARGS[(argc - 1) * 129]).cast::<u8>() };
-        let staged = stage_nul(slot, 129, argument.as_bytes(), b"domain arg staging failed");
+        let staged = stage_nul(
+            slot,
+            129,
+            argument.as_bytes(),
+            b"instance arg staging failed",
+        );
         unsafe {
             core::ptr::addr_of_mut!(LAUNCH_ARGV[argc]).write(staged);
         }
@@ -448,7 +474,7 @@ fn stage_launch(config: &DomainConfig) {
             slot,
             257,
             variable.as_bytes(),
-            b"domain environment staging failed",
+            b"instance environment staging failed",
         );
         unsafe {
             core::ptr::addr_of_mut!(LAUNCH_ENVP[envc]).write(staged);
@@ -462,7 +488,7 @@ fn stage_launch(config: &DomainConfig) {
         core::ptr::addr_of_mut!(LAUNCH_WORKDIR).cast::<u8>(),
         129,
         config.workdir.as_bytes(),
-        b"domain workdir staging failed",
+        b"instance workdir staging failed",
     );
 }
 
@@ -603,18 +629,18 @@ fn launch_read_config(path: *const u8) -> usize {
     length
 }
 
-fn launch_load_config(path: *const u8) -> DomainConfig {
+fn launch_load_config(path: *const u8) -> InstanceConfig {
     let length = launch_read_config(path);
     let bytes = unsafe {
         core::slice::from_raw_parts(core::ptr::addr_of!(CONFIG_BYTES).cast::<u8>(), length)
     };
-    match DomainConfig::parse(bytes) {
+    match InstanceConfig::parse(bytes) {
         Ok(config) => config,
         Err(error) => launch_rejected(error.as_str()),
     }
 }
 
-fn print_launch_config(config: &DomainConfig) {
+fn print_launch_config(config: &InstanceConfig) {
     let normalized = match config.normalized() {
         Ok(normalized) => normalized,
         Err(error) => launch_rejected(error.as_str()),
@@ -633,11 +659,13 @@ fn print_launch_config(config: &DomainConfig) {
 pub fn usage() -> ! {
     line_stderr(b"ginux: usage: ginux (no arguments: interception demonstration)");
     line_stderr(
-        b"ginux: usage: ginux config|contract-plan|lifecycle|process|kernel-views <config>",
+        b"ginux: usage: ginux config|instance-plan|instance-validate|instance-inspect|lifecycle|process|kernel-views <config>",
     );
+    line_stderr(b"ginux: usage: ginux instance-explain <config> <operation>");
+    line_stderr(b"ginux: usage: ginux instance-diff <left-config> <right-config>");
     line_stderr(b"ginux: usage: ginux runtime <elf>");
-    line_stderr(b"ginux: usage: ginux domain|process-native <config> <fixture>");
-    line_stderr(b"ginux: usage: ginux native <config> <root> [hold|probe]");
+    line_stderr(b"ginux: usage: ginux instance|process-native <config> <fixture>");
+    line_stderr(b"ginux: usage: ginux native <config> <root> [configured|hold|probe]");
     line_stderr(b"ginux: usage: ginux devices <config> <block>");
     line_stderr(b"ginux: usage: ginux device-bench <config> <block> <kind>");
     line_stderr(b"ginux: usage: ginux vfs <config> <rootfs> <index>");
@@ -868,23 +896,26 @@ fn launch_tracee(root_path: *const u8) -> ! {
             122,
         );
     }
-    if unsafe { syscall2(SYS_SETGROUPS, 0, 0) } < 0 {
-        tracee_setup_fail(
-            b"ginux: launch bootstrap failed: supplementary groups drop failed\n",
-            123,
-        );
-    }
-    if unsafe { syscall1(SYS_SETGID, DOMAIN_GID) } < 0 {
-        tracee_setup_fail(
-            b"ginux: launch bootstrap failed: group privilege drop failed\n",
-            124,
-        );
-    }
-    if unsafe { syscall1(SYS_SETUID, DOMAIN_UID) } < 0 {
-        tracee_setup_fail(
-            b"ginux: launch bootstrap failed: user privilege drop failed\n",
-            125,
-        );
+    let host_identity = managed_host_identity();
+    if host_identity.drop_root {
+        if unsafe { syscall2(SYS_SETGROUPS, 0, 0) } < 0 {
+            tracee_setup_fail(
+                b"ginux: launch bootstrap failed: supplementary groups drop failed\n",
+                123,
+            );
+        }
+        if unsafe { syscall1(SYS_SETGID, host_identity.gid) } < 0 {
+            tracee_setup_fail(
+                b"ginux: launch bootstrap failed: group privilege drop failed\n",
+                124,
+            );
+        }
+        if unsafe { syscall1(SYS_SETUID, host_identity.uid) } < 0 {
+            tracee_setup_fail(
+                b"ginux: launch bootstrap failed: user privilege drop failed\n",
+                125,
+            );
+        }
     }
     if unsafe { syscall5(SYS_PRCTL, PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) } < 0 {
         tracee_setup_fail(
@@ -894,7 +925,7 @@ fn launch_tracee(root_path: *const u8) -> ! {
     }
     if unsafe { syscall1(SYS_CHDIR, workdir as usize) } < 0 {
         tracee_setup_fail(
-            b"ginux: launch startup failure: configured domain workdir unavailable\n",
+            b"ginux: launch startup failure: configured instance workdir unavailable\n",
             128,
         );
     }
@@ -905,7 +936,7 @@ fn launch_tracee(root_path: *const u8) -> ! {
             core::ptr::addr_of!(LAUNCH_ARGV) as usize,
             core::ptr::addr_of!(LAUNCH_ENVP) as usize,
         );
-        write_stderr(b"ginux: launch startup failure: exec of configured domain init failed\n");
+        write_stderr(b"ginux: launch startup failure: exec of configured instance init failed\n");
         syscall1(SYS_EXIT_HOST, 127);
     }
     loop {
@@ -921,20 +952,20 @@ fn tracee_setup_fail(message: &[u8], code: usize) -> ! {
     }
 }
 
-fn supervise_launch(pid: usize, domain: &mut Domain) -> ! {
+fn supervise_launch(pid: usize, instance: &mut Instance) -> ! {
     let mut status = 0i32;
     if wait(pid, &mut status) < 0 {
-        launch_fail(domain, pid, b"launch tracee wait after exec failed");
+        launch_fail(instance, pid, b"launch tracee wait after exec failed");
     }
     if launch_exited(status) {
-        launch_early_fail(domain, launch_exit_reason(launch_exit_code(status)));
+        launch_early_fail(instance, launch_exit_reason(launch_exit_code(status)));
     }
     if !stopped(status) || (status >> 8) & 0xff != 5 {
-        launch_fail(domain, pid, b"launch tracee did not stop after exec");
+        launch_fail(instance, pid, b"launch tracee did not stop after exec");
     }
     let options = PTRACE_O_TRACESYSGOOD | PTRACE_O_EXITKILL;
     if ptrace(PTRACE_SETOPTIONS, pid, 0, options) < 0 || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0 {
-        launch_fail(domain, pid, b"launch ptrace setup failed");
+        launch_fail(instance, pid, b"launch ptrace setup failed");
     }
     line_stderr(b"ginux: launch backend=ptrace-native profile=balanced elf-loader=host");
     line_stderr(b"ginux: launch tracee-uid=1000 tracee-gid=1000 root=host-path-read-only");
@@ -946,7 +977,7 @@ fn supervise_launch(pid: usize, domain: &mut Domain) -> ! {
     loop {
         status = 0;
         if wait(pid, &mut status) < 0 {
-            launch_fail(domain, pid, b"launch tracee wait failed");
+            launch_fail(instance, pid, b"launch tracee wait failed");
         }
         if stopped(status) {
             let signal = ((status >> 8) & 0xff) as u8;
@@ -956,7 +987,7 @@ fn supervise_launch(pid: usize, domain: &mut Domain) -> ! {
                 const PTRACE_GETSIGINFO: usize = 0x4202;
                 let mut info = [0u64; 16];
                 if ptrace(PTRACE_GETSIGINFO, pid, 0, info.as_mut_ptr() as usize) < 0 {
-                    launch_fail(domain, pid, b"launch group stops are unsupported");
+                    launch_fail(instance, pid, b"launch group stops are unsupported");
                 }
                 // Signal-delivery stop, not a syscall trap: forward the
                 // signal and keep supervising so a terminating signal is
@@ -965,26 +996,26 @@ fn supervise_launch(pid: usize, domain: &mut Domain) -> ! {
                 audit_u64(signal as u64);
                 audit_write(b"\n");
                 if ptrace(PTRACE_SYSCALL, pid, 0, signal as usize) < 0 {
-                    launch_fail(domain, pid, b"launch signal forward failed");
+                    launch_fail(instance, pid, b"launch signal forward failed");
                 }
                 continue;
             }
         } else if launch_exited(status) {
             let code = launch_exit_code(status) as u64;
-            if domain.task_exited(true).is_err() {
-                launch_fail(domain, pid, b"invalid launch exit transition");
+            if instance.task_exited(true).is_err() {
+                launch_fail(instance, pid, b"invalid launch exit transition");
             }
             finish_exited(code);
         } else if launch_signaled(status) {
             let signal = launch_term_signal(status) as u64;
-            let _ = domain.task_exited(false);
+            let _ = instance.task_exited(false);
             finish_signaled(signal);
         } else {
-            launch_fail(domain, pid, b"launch tracee escaped supervision");
+            launch_fail(instance, pid, b"launch tracee escaped supervision");
         }
         let mut registers = core::mem::MaybeUninit::<UserRegs>::uninit();
         if ptrace(PTRACE_GETREGS, pid, 0, registers.as_mut_ptr() as usize) < 0 {
-            launch_fail(domain, pid, b"launch register read failed");
+            launch_fail(instance, pid, b"launch register read failed");
         }
         let mut registers = unsafe { registers.assume_init() };
 
@@ -992,7 +1023,7 @@ fn supervise_launch(pid: usize, domain: &mut Domain) -> ! {
             if override_exit {
                 registers.rax = override_result as u64;
                 if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0 {
-                    launch_fail(domain, pid, b"launch result override failed");
+                    launch_fail(instance, pid, b"launch result override failed");
                 }
             }
             audit_write(b"ginux: audit sequence=");
@@ -1003,7 +1034,7 @@ fn supervise_launch(pid: usize, domain: &mut Domain) -> ! {
             awaiting_exit = false;
             override_exit = false;
             if ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0 {
-                launch_fail(domain, pid, b"launch resume failed");
+                launch_fail(instance, pid, b"launch resume failed");
             }
             continue;
         }
@@ -1021,7 +1052,7 @@ fn supervise_launch(pid: usize, domain: &mut Domain) -> ! {
             || syscall_info[0] as u8 != 1
             || (syscall_info[0] >> 32) as u32 != 0xc000003e
         {
-            launch_fail(domain, pid, b"launch requires the x86-64 syscall ABI");
+            launch_fail(instance, pid, b"launch requires the x86-64 syscall ABI");
         }
         sequence += 1;
         let syscall = registers.orig_rax;
@@ -1046,7 +1077,7 @@ fn supervise_launch(pid: usize, domain: &mut Domain) -> ! {
                 if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0
                     || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0
                 {
-                    launch_fail(domain, pid, b"launch lane emulation failed");
+                    launch_fail(instance, pid, b"launch lane emulation failed");
                 }
                 continue;
             }
@@ -1069,14 +1100,14 @@ fn supervise_launch(pid: usize, domain: &mut Domain) -> ! {
                 if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0
                     || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0
                 {
-                    launch_fail(domain, pid, b"launch getpid emulation failed");
+                    launch_fail(instance, pid, b"launch getpid emulation failed");
                 }
             }
             Action::Emulate if syscall == SYS_EXIT || syscall == SYS_EXIT_GROUP => {
-                audit_line(b"emulate result=domain-stop");
+                audit_line(b"emulate result=instance-stop");
                 awaiting_exit = true;
                 if ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0 {
-                    launch_fail(domain, pid, b"launch exit resume failed");
+                    launch_fail(instance, pid, b"launch exit resume failed");
                 }
             }
             Action::Mediate if native_arguments_allowed(syscall, &registers) => {
@@ -1090,7 +1121,7 @@ fn supervise_launch(pid: usize, domain: &mut Domain) -> ! {
                     override_result = result;
                 }
                 if ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0 {
-                    launch_fail(domain, pid, b"launch mediated syscall failed");
+                    launch_fail(instance, pid, b"launch mediated syscall failed");
                 }
             }
             Action::Mediate => {
@@ -1102,7 +1133,7 @@ fn supervise_launch(pid: usize, domain: &mut Domain) -> ! {
                 if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0
                     || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0
                 {
-                    launch_fail(domain, pid, b"launch argument denial failed");
+                    launch_fail(instance, pid, b"launch argument denial failed");
                 }
             }
             Action::Deny(errno) => {
@@ -1116,10 +1147,10 @@ fn supervise_launch(pid: usize, domain: &mut Domain) -> ! {
                 if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0
                     || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0
                 {
-                    launch_fail(domain, pid, b"launch syscall denial failed");
+                    launch_fail(instance, pid, b"launch syscall denial failed");
                 }
             }
-            _ => launch_fail(domain, pid, b"invalid launch contract decision"),
+            _ => launch_fail(instance, pid, b"invalid launch contract decision"),
         }
     }
 }
@@ -1150,28 +1181,28 @@ fn launch_exit_reason(code: i32) -> &'static [u8] {
         124 => b"bootstrap failed: group privilege drop failed",
         125 => b"bootstrap failed: user privilege drop failed",
         126 => b"bootstrap failed: no-new-privileges failed",
-        127 => b"exec of configured domain init failed",
-        128 => b"configured domain workdir unavailable",
+        127 => b"exec of configured instance init failed",
+        128 => b"configured instance workdir unavailable",
         129 => b"descriptor cleanup failed",
         _ => b"tracee exited before supervision",
     }
 }
 
-fn launch_early_fail(domain: &mut Domain, reason: &[u8]) -> ! {
-    let _ = domain.task_exited(false);
+fn launch_early_fail(instance: &mut Instance, reason: &[u8]) -> ! {
+    let _ = instance.task_exited(false);
     launch_startup_fail(reason)
 }
 
-fn launch_domain_fail(domain: &mut Domain, reason: &[u8]) -> ! {
-    let _ = domain.task_exited(false);
+fn launch_instance_fail(instance: &mut Instance, reason: &[u8]) -> ! {
+    let _ = instance.task_exited(false);
     launch_startup_fail(reason)
 }
 
-fn launch_fail(domain: &mut Domain, pid: usize, reason: &[u8]) -> ! {
+fn launch_fail(instance: &mut Instance, pid: usize, reason: &[u8]) -> ! {
     let _ = unsafe { syscall2(crate::supervisor::SYS_KILL, pid, crate::supervisor::SIGKILL) };
     let mut status = 0;
     let _ = wait(pid, &mut status);
-    let _ = domain.task_exited(false);
+    let _ = instance.task_exited(false);
     write_stderr(b"ginux: launch supervision failure: ");
     write_stderr(reason);
     write_stderr(b"\n");
