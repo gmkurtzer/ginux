@@ -47,7 +47,7 @@ timeout_seconds = 1
 failure = "stop"
 
 [audit]
-mode = "stderr"
+enabled = true
 
 [failure]
 policy = "stop"

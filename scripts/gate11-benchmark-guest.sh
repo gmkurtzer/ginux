@@ -12,7 +12,7 @@ duration=${GINUX_BENCH_DURATION:-1}
 repetitions=${GINUX_BENCH_REPETITIONS:-3}
 allocations=${GINUX_BENCH_VCPUS:-"1 2 4"}
 workloads=${GINUX_BENCH_WORKLOADS:-"cpu memory threads mutex"}
-audit_mode=${GINUX_BENCH_AUDIT_MODE:-stderr}
+audit_enabled=${GINUX_BENCH_AUDIT_ENABLED:-1}
 supervisor_cpu=${GINUX_BENCH_SUPERVISOR_CPU:-}
 capture_audit=${GINUX_BENCH_CAPTURE_AUDIT:-0}
 dispatch_mode=${GINUX_BENCH_DISPATCH_MODE:-selective}
@@ -21,7 +21,7 @@ memory_bytes=1073741824
 case "$duration:$repetitions" in
     *[!0-9:]*|0:*|*:0|:*|*:) printf '%s\n' 'invalid Gate 11 duration or repetition count' >&2; exit 2 ;;
 esac
-case "$audit_mode" in stderr|disabled) ;; *) printf '%s\n' 'invalid Gate 11 audit mode' >&2; exit 2 ;; esac
+case "$audit_enabled" in 0|1) ;; *) printf '%s\n' 'invalid Gate 11 audit enablement' >&2; exit 2 ;; esac
 case "$capture_audit" in 0|1) ;; *) printf '%s\n' 'invalid Gate 11 audit capture mode' >&2; exit 2 ;; esac
 case "$dispatch_mode" in selective|paranoid) ;; *) printf '%s\n' 'invalid Gate 11 dispatch mode' >&2; exit 2 ;; esac
 
@@ -84,7 +84,7 @@ write_config() {
     args=$(toml_args "$workload" "$threads")
     sed -e "s/^vcpus = .*/vcpus = $vcpus/" \
         -e "s|^args = .*|args = $args|" \
-        -e "s/^mode = \"stderr\"/mode = \"$audit_mode\"/" \
+        -e "s/^enabled = .*/enabled = $(test "$audit_enabled" = 1 && printf true || printf false)/" \
         "$base_config" | sudo tee "$directory/config.toml" >/dev/null
 }
 
@@ -111,7 +111,7 @@ run_one() {
         ginux_cpus=$cpus
         test -z "$supervisor_cpu" || ginux_cpus=$supervisor_cpu
         if ! sudo taskset -c "$ginux_cpus" prlimit --as="$memory_bytes" -- \
-            "$helper" run-runtime "$instance" >"$output" 2>&1; then
+            "$helper" run-runtime "$instance" false >"$output" 2>&1; then
             cat "$output" >&2
             return 1
         fi

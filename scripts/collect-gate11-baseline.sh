@@ -8,7 +8,7 @@ duration=${GINUX_BENCH_DURATION:-1}
 repetitions=${GINUX_BENCH_REPETITIONS:-3}
 allocations=${GINUX_BENCH_VCPUS:-"1 2 4"}
 workloads=${GINUX_BENCH_WORKLOADS:-"cpu memory threads mutex"}
-audit_mode=${GINUX_BENCH_AUDIT_MODE:-stderr}
+audit_enabled=${GINUX_BENCH_AUDIT_ENABLED:-1}
 supervisor_cpu=${GINUX_BENCH_SUPERVISOR_CPU:-}
 capture_audit=${GINUX_BENCH_CAPTURE_AUDIT:-0}
 dispatch_mode=${GINUX_BENCH_DISPATCH_MODE:-selective}
@@ -37,7 +37,7 @@ rocky_scp scripts/gate11-guest-setup.sh scripts/gate11-benchmark-guest.sh \
     "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/"
 
 rocky_ssh 'chmod 0755 /var/tmp/gate11-guest-setup.sh /var/tmp/gate11-benchmark-guest.sh /var/tmp/gate11-sysbench-command.sh; /var/tmp/gate11-guest-setup.sh'
-rocky_ssh "GINUX_BENCH_DURATION='$duration' GINUX_BENCH_REPETITIONS='$repetitions' GINUX_BENCH_VCPUS='$allocations' GINUX_BENCH_WORKLOADS='$workloads' GINUX_BENCH_AUDIT_MODE='$audit_mode' GINUX_BENCH_SUPERVISOR_CPU='$supervisor_cpu' GINUX_BENCH_CAPTURE_AUDIT='$capture_audit' GINUX_BENCH_DISPATCH_MODE='$dispatch_mode' /var/tmp/gate11-benchmark-guest.sh"
+rocky_ssh "GINUX_BENCH_DURATION='$duration' GINUX_BENCH_REPETITIONS='$repetitions' GINUX_BENCH_VCPUS='$allocations' GINUX_BENCH_WORKLOADS='$workloads' GINUX_BENCH_AUDIT_ENABLED='$audit_enabled' GINUX_BENCH_SUPERVISOR_CPU='$supervisor_cpu' GINUX_BENCH_CAPTURE_AUDIT='$capture_audit' GINUX_BENCH_DISPATCH_MODE='$dispatch_mode' /var/tmp/gate11-benchmark-guest.sh"
 
 rocky_scp "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/gate11-results.tsv" "$output_dir/results.tsv"
 rocky_ssh 'tar -C /var/tmp -czf /var/tmp/gate11-raw.tar.gz gate11-raw'
@@ -49,7 +49,7 @@ if test "$dispatch_mode" = selective && \
     printf '%s\n' 'selective sched_yield unexpectedly entered Ginux audit' >&2
     exit 1
 fi
-if test "$audit_mode" = stderr; then
+if test "$audit_enabled" = 1; then
     grep -Eq '^GINUX_NATIVE_AUDIT: .*action=(mediate|emulate|deny)' \
         "$output_dir/final-audit.log"
 fi
@@ -71,7 +71,7 @@ fi
     printf 'memory_limit_bytes=1073741824\n'
     printf 'cpu_affinity=logical CPUs 0 through allocation-1\n'
     printf 'ordering=alternating native/Ginux by repetition\n'
-    printf 'audit_mode=%s\n' "$audit_mode"
+    printf 'audit_enabled=%s\n' "$audit_enabled"
     printf 'capture_per_run_audit=%s\n' "$capture_audit"
     printf 'dispatch_mode=%s\n' "$dispatch_mode"
     printf 'ginux_supervisor_cpu=%s\n' "${supervisor_cpu:-shared-with-instance}"
