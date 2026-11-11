@@ -26,7 +26,7 @@ test "$allowlisted_count" -le 1 || {
 
 unexpected=$(awk -v allowlisted="$allowlisted" -v mode="$mode" '
     { sub(/\r$/, "") }
-    /^GINUX_DOMAIN_START:/ { console = 1; next }
+    /^GINUX_INSTANCE_START:/ { console = 1; next }
     /GINUX_CONFIG_EFFECTIVE_END/ { console = 1; next }
     !console { next }
     $0 == allowlisted { next }

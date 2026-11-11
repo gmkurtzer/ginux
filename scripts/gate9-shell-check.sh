@@ -28,6 +28,24 @@ printf '%s\n' 'GINUX_LOCKDOWN_NAMESPACE: BLOCKED'
 
 set -- /proc/[0-9]*
 printf 'GINUX_MEASURE: idle-managed-proc-entries=%s\n' "$#"
+
+ls -l /proc >/tmp/ginux-proc-list
+ls -l /sys >/tmp/ginux-sys-list
+ps -ef >/tmp/ginux-ps
+top -b -n 1 >/tmp/ginux-top
+self_link=$(readlink /proc/self)
+case $self_link in
+    ''|*[!0-9]*) exit 93 ;;
+esac
+test ! -e "/proc/$self_link"
+test -e "/proc/$$"
+test "$(stat -c '%u:%g' /proc /sys /proc/$$ /proc/$$/stat | sort -u)" = "0:0"
+sleep 0.01 &
+short_lived_pid=$!
+wait "$short_lived_pid"
+test ! -e "/proc/$short_lived_pid"
+printf '%s\n' 'GINUX_VIRTUAL_KERNEL_FILESYSTEMS: PASS'
+
 if test -e /run/ginux-skip-network; then
     printf '%s\n' 'GINUX_NETWORK_DNS_HTTPS: SKIPPED'
     printf '%s\n' 'GINUX_NETWORK_BIND_ACCEPT_CONFLICT: SKIPPED'

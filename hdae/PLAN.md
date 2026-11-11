@@ -4,7 +4,7 @@
 
 Build Ginux from the security boundary outward. First prove that unmodified
 x86-64 code can run without unmediated host-syscall effects. Then add a cached
-Rocky userspace, domain configuration, Linux runtime behavior, virtual kernel
+Rocky userspace, instance configuration, Linux runtime behavior, virtual kernel
 objects, systemd compatibility, explicit contract controls, performance
 evidence, and boundary hardening.
 
@@ -25,10 +25,10 @@ checkpoint, weakening criteria, expanding scope, or resolving a material
 architecture decision silently.
 
 On 2026-11-05 the human inserted and authorized corrective Gate 9.5 after
-hands-on Gate 9 testing. It moves image acquisition into domain creation,
+hands-on Gate 9 testing. It moves image acquisition into instance creation,
 repairs shell job control and procfs compatibility, makes launch configuration
 authoritative, adds persistent attach/detach, and cleans Ginux-caused systemd
-diagnostics. The previously numbered domain-specification gate moved, while
+diagnostics. The previously numbered instance-specification gate moved, while
 still open, to position 9.75.
 
 Every gate must provide a working human demonstration through
@@ -45,10 +45,10 @@ replace it.
    syscall interception and benchmark controls without replacing host systemd.
 2. **Rocky image-pipeline foundation**: reproducibly extract and verify Rocky
    filesystem content as pipeline evidence and fixtures. Gate 5 supersedes its
-   cloud-image-derived domain root with the approved OCI domain-image path.
+   cloud-image-derived instance root with the approved OCI instance-image path.
 3. **Execution kernel**: address spaces, ELF loading, syscall ABI, central
    dispatch, and small unmodified programs.
-4. **Domain configuration and lifecycle**: versioned configuration,
+4. **Instance configuration and lifecycle**: versioned configuration,
    normalization, create/start/inspect/stop, resources, and failure behavior.
 5. **OCI-backed virtual VFS and native dynamic userspace**: explicit OCI
    acquisition, verified cached layers, virtual descriptors, immutable root and
@@ -77,18 +77,32 @@ replace it.
 9.5. **Systemd usability and operator lifecycle**: create-time OCI acquisition,
    configuration-derived launch, Bash job control, Ginux-owned procfs,
    persistent attach/detach, and clean systemd compatibility diagnostics.
-9.75. **Domain specification and network controls**: comprehensive versioned
-   domain configuration, deterministic file/CLI precedence, interface and
+9.75. **Instance specification and network controls**: comprehensive versioned
+   instance configuration, deterministic file/CLI precedence, interface and
    source-address selection, ingress and egress controls, port translation,
    volumes, access, identity, resources, devices, hooks, and effective-config
    evidence.
 10. **Configurable contract and audit**: versioned syscall, ioctl, device,
     filesystem, and kernel-view policy with fail-closed validation and logs.
+10.25. **Instance terminology migration**: cleanly replace the active `domain`
+    product vocabulary with `instance` across CLI, configuration, code,
+    persistence, audit, tests, and documentation without legacy aliases.
+10.5. **Intuitive contract configuration and UX**: make the complete contract
+    self-contained in one instance recipe using human access verbs, resource
+    namespaces, bounded globs, deterministic deny precedence, and explanatory
+    CLI workflows compiled into the Gate 10 enforcement table.
 11. **Performance characterization and optimization**: native, conventional
     container, and Ginux comparisons against approved budgets.
+12. **Contract and instance-network UX**: replace the active contract syntax
+    with a hierarchical, self-contained recipe; compile bounded syscall globs;
+    and move host-specific network attachment and forwarding to repeatable,
+    atomic `instance create` and `instance set` flags.
 13. **Boundary hardening**: malformed ABI tests, fuzzing, escape attempts,
     Ginux privilege reduction, recovery, performance regression, and explicit
     limitations.
+15. **Dispatch-mode performance matrix**: reproducibly compare native Rocky,
+    selective Ginux, and paranoid Ginux with paired controls, reusable test
+    templates, combined tables and graphs, and complete operator documentation.
 
 Gates are stored in `hdae/gates-todo/` and remain there until they pass and are
 accepted at their checkpoint. Closed gate records move unchanged to
@@ -125,7 +139,7 @@ make image-prepare
 make test-image
 make test-runtime
 make test-config
-make test-domain
+make test-instance
 make test-vfs
 make test-process
 make test-devices
@@ -153,8 +167,8 @@ define their expected result.
 
 - Kernel-exposure control is proven by Gates 1, 3, 10, and 13.
 - General systemd compatibility is built by Gates 2, 3, 5, 7, 8, and 9.
-- Per-domain configuration and ownership are built by Gates 4, 6, 8, 9.75, and
-  10.
+- Per-instance configuration and ownership are built by Gates 4, 6, 8, 9.75,
+  10, and 12.
 - Device mediation is built and measured by Gates 6, 10, 11, and 13.
 - Performance is measured from Gate 1 and judged in Gates 9, 11, and 13.
 - Reproducibility and offline testing are established by Gates 1 and 2 and
@@ -165,7 +179,7 @@ define their expected result.
 After the initial twelve gates, Gate 14 preserves the Unicorn Engine execution
 backend as a concrete alternative to native ptrace execution. Other likely
 milestones include multiple concurrent
-domains, conventional containers within a domain, network and storage backend
+instances, conventional containers within an instance, network and storage backend
 expansion, physical-device assignment with a separately reviewed IOMMU/VFIO
 model, non-x86 architectures, live lifecycle controls, distribution expansion,
 and production operational hardening. None is authorized by this plan.

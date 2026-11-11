@@ -26,7 +26,7 @@ printf '%s\n' '  [3/8] PASS  Ginux VFS: Rocky identity, ELF lookup, private over
 ./scripts/test-native-vfs.sh
 printf '%s\n' '  [4/8] PASS  host loaded unmodified Rocky loader and Bash under Ginux supervision'
 printf '%s\n' '  [5/8] PASS  balanced policy: read-only image/console allowed; mutation/network/ioctl denied'
-printf '%s\n' '  [6/8] PASS  virtual identity: PID 4242, parent 1, domain UID/GID 0'
+printf '%s\n' '  [6/8] PASS  virtual identity: PID 4242, parent 1, instance UID/GID 0'
 printf '%s\n' '  [7/8] PASS  fail-closed tracing: supervisor loss and unexpected stop killed tracees'
 
 ./scripts/verify-rocky-oci.sh >/dev/null
@@ -34,6 +34,6 @@ after_rootfs=$(shasum -a 256 "$rootfs" | awk '{print $1}')
 after_index=$(shasum -a 256 "$index" | awk '{print $1}')
 test "$before_rootfs" = "$after_rootfs"
 test "$before_index" = "$after_index"
-printf '  [8/8] PASS  cache unchanged and domain artifacts cleaned: rootfs=%s\n' "$after_rootfs"
+printf '  [8/8] PASS  cache unchanged and instance artifacts cleaned: rootfs=%s\n' "$after_rootfs"
 printf '%s\n' 'Not claimed: full Linux VFS, devices, networking, /proc, /sys, or systemd boot.'
 printf '%s\n' 'GATE5: PASS (8/8 demonstration checks)'

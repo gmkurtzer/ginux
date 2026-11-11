@@ -385,17 +385,17 @@ mod tests {
             cgroups.create(b"/host.slice", 1000),
             Err(ViewError::PermissionDenied)
         );
-        cgroups.create(b"/domain.slice", 0).unwrap();
+        cgroups.create(b"/instance.slice", 0).unwrap();
         assert_eq!(
             cgroups.create(b"/another.slice", 0),
             Err(ViewError::LimitExceeded)
         );
         assert_eq!(
-            cgroups.write(b"/domain.slice/cgroup.freeze", b"1\n", 0),
+            cgroups.write(b"/instance.slice/cgroup.freeze", b"1\n", 0),
             Err(ViewError::ReadOnly)
         );
-        cgroups.attach(b"/domain.slice", 7, 0).unwrap();
-        assert_eq!(cgroups.remove(b"/domain.slice", 0), Err(ViewError::Busy));
+        cgroups.attach(b"/instance.slice", 7, 0).unwrap();
+        assert_eq!(cgroups.remove(b"/instance.slice", 0), Err(ViewError::Busy));
         assert_eq!(cgroups.create(b"/../host", 0), Err(ViewError::InvalidPath));
     }
 }

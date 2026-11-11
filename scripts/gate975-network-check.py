@@ -6,7 +6,7 @@ import socket
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 server.bind(("0.0.0.0", 18080))
 if server.getsockname()[1] != 18080:
-    raise SystemExit("translated domain port leaked through getsockname")
+    raise SystemExit("translated instance port leaked through getsockname")
 server.listen(1)
 
 conflict = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
