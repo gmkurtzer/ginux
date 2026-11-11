@@ -23,13 +23,23 @@ assignments = []
 assignments = []
 
 [contract]
-profile = "minimal-v1"
+version = 1
+catalog = 2
+default = "deny"
+allow = []
+deny = []
+
+[contract.syscalls]
+control = "selective"
+default = "deny"
+allow = ["getpid", "getppid", "gettid", "write", "exit", "exit_group"]
+deny = []
 
 [failure]
 policy = "stop"
 
 [audit]
-mode = "stderr"
+enabled = true
 
 [network]
 backend = "none"

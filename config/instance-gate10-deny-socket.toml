@@ -16,8 +16,17 @@ profile = "balanced"
 backend = "ptrace-native"
 
 [contract]
-profile = "gate9-systemd-v1"
-deny = ["syscall.socket"]
+version = 1
+catalog = 2
+default = "deny"
+allow = ["*"]
+deny = ["device.mmio.direct", "device.dma.direct", "network.packet.raw"]
+
+[contract.syscalls]
+control = "paranoid"
+default = "deny"
+allow = ["*"]
+deny = ["socket"]
 
 [storage]
 assignments = []
@@ -29,7 +38,7 @@ assignments = []
 backend = "none"
 
 [audit]
-mode = "stderr"
+enabled = true
 
 [failure]
 policy = "stop"

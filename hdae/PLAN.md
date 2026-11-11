@@ -93,9 +93,16 @@ replace it.
     CLI workflows compiled into the Gate 10 enforcement table.
 11. **Performance characterization and optimization**: native, conventional
     container, and Ginux comparisons against approved budgets.
+12. **Contract and instance-network UX**: replace the active contract syntax
+    with a hierarchical, self-contained recipe; compile bounded syscall globs;
+    and move host-specific network attachment and forwarding to repeatable,
+    atomic `instance create` and `instance set` flags.
 13. **Boundary hardening**: malformed ABI tests, fuzzing, escape attempts,
     Ginux privilege reduction, recovery, performance regression, and explicit
     limitations.
+15. **Dispatch-mode performance matrix**: reproducibly compare native Rocky,
+    selective Ginux, and paranoid Ginux with paired controls, reusable test
+    templates, combined tables and graphs, and complete operator documentation.
 
 Gates are stored in `hdae/gates-todo/` and remain there until they pass and are
 accepted at their checkpoint. Closed gate records move unchanged to
@@ -160,8 +167,8 @@ define their expected result.
 
 - Kernel-exposure control is proven by Gates 1, 3, 10, and 13.
 - General systemd compatibility is built by Gates 2, 3, 5, 7, 8, and 9.
-- Per-instance configuration and ownership are built by Gates 4, 6, 8, 9.75, and
-  10.
+- Per-instance configuration and ownership are built by Gates 4, 6, 8, 9.75,
+  10, and 12.
 - Device mediation is built and measured by Gates 6, 10, 11, and 13.
 - Performance is measured from Gate 1 and judged in Gates 9, 11, and 13.
 - Reproducibility and offline testing are established by Gates 1 and 2 and

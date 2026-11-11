@@ -7,7 +7,7 @@ if test -f "$ROCKY_PID_FILE"; then
     existing=$(cat "$ROCKY_PID_FILE")
     if kill -0 "$existing" 2>/dev/null; then
         printf 'A Rocky test host is already running with PID %s.\n' "$existing" >&2
-        printf '%s\n' 'Stop it with ./scripts/stop-rocky-host.sh before running make run-host.' >&2
+        printf '%s\n' 'Stop it with ./scripts/stop-rocky-host.sh before running make host-run.' >&2
         exit 1
     fi
 fi
@@ -32,11 +32,11 @@ printf '%s\n' ''
 printf '%s\n' 'Rocky QEMU host ready. Ginux is installed; host cache and instances persist across runs.'
 printf '%s\n' ''
 printf '%s\n' 'Example workflow:'
-printf '%s\n' '  ginux instance create rocky --config /etc/ginux/examples/rocky-systemd.toml'
-printf '%s\n' '  ginux instance list'
-printf '%s\n' '  ginux instance start rocky --attach'
-printf '%s\n' '  ginux instance status rocky'
-printf '%s\n' '  ginux instance stop rocky'
+printf '%s\n' '  ginux import rocky /etc/ginux/examples/rocky-systemd.toml'
+printf '%s\n' '  ginux list'
+printf '%s\n' '  ginux start rocky --attach'
+printf '%s\n' '  ginux status rocky'
+printf '%s\n' '  ginux stop rocky'
 printf '%s\n' ''
 printf '%s\n' 'Instance login: root     Password: ginux'
 printf '%s\n' 'Inside an attached instance, press Ctrl-] to detach without stopping it.'

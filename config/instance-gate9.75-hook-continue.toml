@@ -16,7 +16,17 @@ profile = "balanced"
 backend = "ptrace-native"
 
 [contract]
-profile = "gate9-systemd-v1"
+version = 1
+catalog = 2
+default = "deny"
+allow = ["*"]
+deny = ["device.mmio.direct", "device.dma.direct", "network.packet.raw"]
+
+[contract.syscalls]
+control = "selective"
+default = "deny"
+allow = ["*"]
+deny = []
 
 [storage]
 assignments = ["root-overlay"]
@@ -37,7 +47,7 @@ timeout_seconds = 5
 failure = "continue"
 
 [audit]
-mode = "stderr"
+enabled = true
 
 [failure]
 policy = "stop"

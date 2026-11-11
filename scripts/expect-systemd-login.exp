@@ -14,9 +14,13 @@ set measurements [lindex $argv 5]
 set timeout 50
 set started_ms [clock milliseconds]
 set send_slow {1 .005}
+set audit_override false
+if {[info exists env(GINUX_GATE9_AUDIT)] && $env(GINUX_GATE9_AUDIT) eq "on"} {
+    set audit_override true
+}
 
 log_file -noappend $log
-spawn ssh -tt -i $key -p $port -o BatchMode=yes -o ConnectTimeout=5 -o IdentitiesOnly=yes -o LogLevel=ERROR -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$user@127.0.0.1" "sudo sh -c '/var/tmp/ginux native /var/tmp/gate9.toml $instance_root 2>/var/tmp/ginux-gate9-audit.log'"
+spawn ssh -tt -i $key -p $port -o BatchMode=yes -o ConnectTimeout=5 -o IdentitiesOnly=yes -o LogLevel=ERROR -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$user@127.0.0.1" "sudo sh -c '/var/tmp/ginux-host-instance-helper-installed run-runtime gate9 $audit_override 2>/var/tmp/ginux-gate9-audit.log'"
 
 expect {
     -re {login:} {}

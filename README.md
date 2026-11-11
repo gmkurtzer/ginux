@@ -163,39 +163,131 @@ Inspect the latest completed capability directly:
 
 ```sh
 make test-systemd       # cached image, external networking disabled
-make bench              # systemd timing and resource observations
+make bench-prepare      # one-time networked setup for the pinned benchmark image
+make bench              # matched native/Ginux matrix plus mandatory budget checks
+make bench-modes-prepare # one-time setup for the three-way dispatch comparison
+make bench-modes        # native/selective/paranoid tables and graphs
+make demo-gate-15       # bounded reproducible three-way comparison
 make test-systemd-live  # shared network plus real upstream dnf -y update
-make run-host           # general interactive Rocky host with Ginux installed
+make host-run           # general interactive Rocky host with Ginux installed
+make host-reset         # discard that host's cache, instances, and writable state
 make demo-gate-9        # Gate 9 checkpoint through the same host workflow
 ```
 
-`make run-host` boots the QEMU Rocky host and logs you into its ordinary shell.
-Ginux is installed in `PATH`. The first `instance create` downloads and verifies
-the pinned Rocky OCI image with live per-layer progress; later creates reuse the
-cache. The writable Rocky host overlay persists across `make run-host` sessions,
-so cached images, instance definitions, roots, and stopped status remain available.
+Instance recipes select syscall control under `[contract.syscalls]`:
+
+```toml
+[contract.syscalls]
+control = "selective" # default; use "paranoid" for all-syscall mediation
+default = "deny"
+allow = ["*"]
+deny = []
+```
+
+`selective` is the default and permits direct host execution only
+when the instance contract allows the operation and Ginux's versioned catalog
+independently classifies it as direct-safe. Denials, virtual state, inspection,
+translation, emulation, pointer or descriptor validation, and modified results
+remain Ginux-dispatched in both modes. `paranoid` is an explicit opt-in that
+sends every syscall through the Ginux userspace dispatcher before completion.
+
+`make bench-compare` checks every row against the 4% native budget and, after an
+accepted baseline is published under `benchmarks/gate11/`, against that Ginux
+baseline as well. Environment mismatches are reported separately from
+performance regressions. `make demo-gate-11` runs a bounded human-inspectable
+comparison and returns nonzero when a mandatory row misses its budget.
+
+Gate 15 provides a separate characterization workflow across native Rocky,
+selective Ginux, and paranoid Ginux. Native is the no-mediation control, not a
+Ginux instance mode. The checked-in templates under
+[`benchmarks/gate15/`](benchmarks/gate15/) fix the complete test protocol and
+may be copied without editing scripts. `make bench-modes` produces paired raw
+samples, metadata, a Markdown table, and an SVG graph under `build/gate15/`.
+See [Reproducible performance measurement](docs/performance.md) for the exact
+protocol, customization workflow, output schema, and interpretation limits.
+
+`make host-run` boots the QEMU Rocky host and logs you into its ordinary shell.
+Ginux is installed in `PATH`. The first `create` or `import` downloads and verifies
+the pinned Rocky OCI image with live per-layer progress; later operations reuse the
+cache. The writable Rocky host overlay persists across `make host-run`, ordinary
+cleanup, builds, and tests, so cached images, instance definitions, roots, and
+stopped status remain available. `make host-reset` is the explicit destructive
+operation that stops the host and removes that overlay; the next `make host-run`
+starts from the pinned clean Rocky image.
 A complete first session is:
 
 ```sh
-ginux instance create rocky --config /etc/ginux/examples/rocky-systemd.toml
-ginux instance list
-ginux instance status rocky
-ginux instance start rocky --attach
+ginux create rocky
+ginux list
+ginux status rocky
+ginux start rocky --attach
 ```
 
-The instance specification also supports typed CLI overrides, network
-interface/source selection, ingress and egress port policy, translated ports,
-volumes, virtual identity, and ordered pre-boot hooks. Hooks run only as
+`create` starts from the documented default recipe. Use
+`ginux import NAME FILE` to create or atomically replace an instance from a
+self-contained recipe, `ginux export NAME` to print that recipe, and
+`ginux edit NAME` to validate and atomically apply an editor session.
+
+Instances are contract-locked by default. For an explicit maintenance window,
+stop the instance, run `ginux unlock NAME`, perform the required maintenance,
+stop it again, and run `ginux lock NAME`. `ginux list` and `ginux status NAME`
+show the current state, and starting an unlocked instance prints a warning.
+Unlocking relaxes configurable recipe restrictions only; Ginux still owns the
+virtual kernel boundary, rejects unsupported authority, reduces host identity,
+and applies `NoNewPrivs`. Lock state is host deployment state and is never
+written into an exported portable recipe.
+
+Syscall auditing is disabled by default with `[audit] enabled = false`. Add
+`--audit` to `ginux start` to enable it for that run, or set `enabled = true`
+to enable it for every start. Enabled audit records always go to the instance's
+`audit.log`; they are kept separate from the attached console.
+Existing recipes using `mode = "stderr"` or `mode = "disabled"` remain
+read-compatible and normalize to the new boolean form when rewritten.
+
+The instance specification supports typed recipe overrides, ingress and egress
+contract policy, volumes, virtual identity, and ordered pre-boot hooks. Host
+network attachment and translated ports are deployment settings, supplied as
+repeatable flags when the instance is created or changed:
+
+```sh
+ginux import web /etc/ginux/examples/rocky-systemd.toml \
+    --network eth0:1 \
+    --forward protocol=tcp,external_port=8080,instance_port=80 \
+    --forward protocol=tcp,external_port=8443,instance_port=443
+ginux set web \
+    --network default \
+    --forward none
+```
+
+Omitting `--network` uses the host's default network. Multiple flags are
+validated and persisted atomically; an invalid combination changes nothing.
+Hooks run only as
 mediated instance processes; Ginux does not support arbitrary host-context hooks.
 See [Gate 9.75 instance specification](docs/gate-9.75-instance-specification.md)
 for the schema, precedence rules, examples, and verification targets.
+
+The same instance file contains a self-contained hierarchical contract under
+`[contract]` and its `syscalls`, `filesystem`, `network`, `devices`,
+`privileges`, `process`, and `kernel` subsections. Syscall names accept bounded
+globs compiled against the pinned catalog; explicit denies always win. The
+contract is part of the instance rather than a separate operator object.
+Validate and inspect the complete instance recipe before launch:
+
+```sh
+ginux validate /etc/ginux/examples/rocky-systemd.toml
+ginux inspect /etc/ginux/examples/rocky-systemd.toml
+ginux explain /etc/ginux/examples/rocky-systemd.toml filesystem.path.write
+```
+
+See [Self-contained userspace contract](docs/configurable-contract.md) for the
+syntax, precedence, migration behavior, and complete CLI workflow.
 
 The attached terminal becomes the Ginux instance console. Log in as `root` with
 password `ginux`, explore normally, press `Ctrl-]` to detach while leaving the
 instance running, and run `kill -RTMIN+4 1` as instance root to
 shut down systemd and return to the host. Detached operation uses
-`ginux instance start rocky`, `ginux instance status rocky`, and
-`ginux instance stop rocky`. Exit the Rocky host shell to stop QEMU cleanly.
+`ginux start rocky`, `ginux status rocky`, and
+`ginux stop rocky`. Exit the Rocky host shell to stop QEMU cleanly.
 This stops the VM without deleting its persistent overlay; `make clean` resets
 that host state. `make demo-gate-9` uses the same operator workflow;
 `make run-systemd` remains as a compatibility alias, and
@@ -221,6 +313,11 @@ Ginux is research software. It has not received independent security
 certification, does not provide complete Linux compatibility, and is not ready
 for production workloads. Unknown contract operations fail closed, but current
 coverage and guarantees are limited to the tested gates.
+
+The precise supported claims, retained supervisor authority, trusted
+components, exclusions, compatibility gaps, performance limitation, and
+reproducible boundary tests are documented in
+[Security boundary and limitations](docs/security-boundary.md).
 
 For agent containment, the protected object is the host and any authority not
 explicitly assigned to the instance. Ginux constrains the Linux processes in

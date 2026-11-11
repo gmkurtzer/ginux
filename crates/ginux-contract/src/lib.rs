@@ -2,7 +2,7 @@
 
 use core::fmt;
 
-pub const CATALOG_VERSION: u32 = 1;
+pub const CATALOG_VERSION: u32 = 2;
 pub const MAX_OPERATIONS: usize = 192;
 pub const DIGEST_HEX_BYTES: usize = 64;
 
@@ -131,6 +131,7 @@ pub struct Operation {
     pub abi_number: Option<u64>,
     pub status: Status,
     pub action: Action,
+    pub direct_safe: bool,
     pub constraint: &'static str,
     pub evidence: &'static str,
     pub limitation: &'static str,
@@ -144,6 +145,23 @@ macro_rules! syscall {
             abi_number: Some($number),
             status: Status::$status,
             action: $action,
+            direct_safe: false,
+            constraint: $constraint,
+            evidence: $evidence,
+            limitation: "x86-64 Linux ABI only",
+        }
+    };
+}
+
+macro_rules! direct_syscall {
+    ($name:literal, $number:literal, $status:ident, $action:expr, $constraint:literal, $evidence:literal) => {
+        Operation {
+            id: concat!("syscall.", $name),
+            kind: Kind::Syscall,
+            abi_number: Some($number),
+            status: Status::$status,
+            action: $action,
+            direct_safe: true,
             constraint: $constraint,
             evidence: $evidence,
             limitation: "x86-64 Linux ABI only",
@@ -159,6 +177,7 @@ macro_rules! operation {
             abi_number: None,
             status: Status::$status,
             action: $action,
+            direct_safe: false,
             constraint: $constraint,
             evidence: $evidence,
             limitation: $limitation,
@@ -326,6 +345,14 @@ pub static CATALOG: &[Operation] = &[
         Action::Mediate,
         "instance path",
         "test-native-vfs"
+    ),
+    direct_syscall!(
+        "sched_yield",
+        24,
+        Complete,
+        Action::Mediate,
+        "pre-effect contract approval",
+        "bench"
     ),
     syscall!(
         "mremap",
@@ -1653,6 +1680,7 @@ pub enum ContractError {
     UnmatchedSelector,
     TooManyOperations,
     DuplicateOperation,
+    UnsupportedPromotion,
 }
 
 impl fmt::Display for ContractError {
@@ -1664,6 +1692,7 @@ impl fmt::Display for ContractError {
             Self::UnmatchedSelector => "unmatched-contract-selector",
             Self::TooManyOperations => "contract-operation-capacity",
             Self::DuplicateOperation => "duplicate-catalog-operation",
+            Self::UnsupportedPromotion => "unsupported-contract-promotion",
         })
     }
 }
@@ -1675,6 +1704,10 @@ pub enum Provenance {
     Template,
     InstanceAllow,
     InstanceDeny,
+    RecipeAllow,
+    RecipeDeny,
+    ExactAllow,
+    ExactDeny,
 }
 
 impl Provenance {
@@ -1685,8 +1718,53 @@ impl Provenance {
             Self::Template => "template",
             Self::InstanceAllow => "instance-allow",
             Self::InstanceDeny => "instance-deny",
+            Self::RecipeAllow => "recipe-allow",
+            Self::RecipeDeny => "recipe-deny",
+            Self::ExactAllow => "exact-allow",
+            Self::ExactDeny => "exact-deny",
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AccessVerb {
+    Read,
+    Write,
+    Execute,
+    Connect,
+    Listen,
+    Process,
+    System,
+}
+
+impl AccessVerb {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Read => "read",
+            Self::Write => "write",
+            Self::Execute => "execute",
+            Self::Connect => "connect",
+            Self::Listen => "listen",
+            Self::Process => "process",
+            Self::System => "system",
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct Recipe<'a> {
+    pub allow: &'a [&'a [u8]],
+    pub deny_all: &'a [&'a [u8]],
+    pub read: &'a [&'a [u8]],
+    pub write: &'a [&'a [u8]],
+    pub execute: &'a [&'a [u8]],
+    pub connect: &'a [&'a [u8]],
+    pub listen: &'a [&'a [u8]],
+    pub process: &'a [&'a [u8]],
+    pub system: &'a [&'a [u8]],
+    pub deny: &'a [&'a [u8]],
+    pub syscall_allow: &'a [&'a [u8]],
+    pub syscall_deny: &'a [&'a [u8]],
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1695,6 +1773,7 @@ pub struct EffectiveRule {
     pub action: Action,
     pub provenance: Provenance,
     pub source: &'static str,
+    pub source_rule: u16,
 }
 
 const EMPTY_OPERATION: Operation = Operation {
@@ -1703,6 +1782,7 @@ const EMPTY_OPERATION: Operation = Operation {
     abi_number: None,
     status: Status::Denied,
     action: Action::Deny(38),
+    direct_safe: false,
     constraint: "",
     evidence: "",
     limitation: "",
@@ -1713,11 +1793,16 @@ const EMPTY_RULE: EffectiveRule = EffectiveRule {
     action: Action::Deny(38),
     provenance: Provenance::DefaultDeny,
     source: "default-deny",
+    source_rule: 0,
 };
+
+const SYSCALL_RULE_SLOTS: usize = 512;
+const NO_SYSCALL_RULE: u16 = u16::MAX;
 
 #[derive(Clone, Copy)]
 pub struct EffectiveContract {
     rules: [EffectiveRule; MAX_OPERATIONS],
+    syscall_rules: [u16; SYSCALL_RULE_SLOTS],
     len: usize,
     digest: [u8; DIGEST_HEX_BYTES],
 }
@@ -1726,6 +1811,7 @@ impl EffectiveContract {
     pub const fn empty() -> Self {
         Self {
             rules: [EMPTY_RULE; MAX_OPERATIONS],
+            syscall_rules: [NO_SYSCALL_RULE; SYSCALL_RULE_SLOTS],
             len: 0,
             digest: [0; DIGEST_HEX_BYTES],
         }
@@ -1746,6 +1832,13 @@ impl EffectiveContract {
     }
 
     pub fn syscall_rule(&self, number: u64) -> Option<&EffectiveRule> {
+        if let Ok(number) = usize::try_from(number) {
+            if let Some(index) = self.syscall_rules.get(number).copied() {
+                if index != NO_SYSCALL_RULE {
+                    return self.rules.get(usize::from(index));
+                }
+            }
+        }
         self.rules()
             .iter()
             .find(|rule| rule.operation.abi_number == Some(number))
@@ -1753,6 +1846,20 @@ impl EffectiveContract {
 
     pub fn operation_rule(&self, id: &str) -> Option<&EffectiveRule> {
         self.rules().iter().find(|rule| rule.operation.id == id)
+    }
+
+    fn index_syscalls(&mut self) {
+        for index in 0..self.len {
+            let Some(number) = self.rules[index].operation.abi_number else {
+                continue;
+            };
+            let Ok(number) = usize::try_from(number) else {
+                continue;
+            };
+            if let Some(slot) = self.syscall_rules.get_mut(number) {
+                *slot = index as u16;
+            }
+        }
     }
 }
 
@@ -1785,9 +1892,11 @@ pub fn resolve(
             action: Action::Deny(38),
             provenance: Provenance::DefaultDeny,
             source: "default-deny",
+            source_rule: 0,
         };
         effective.len += 1;
     }
+    effective.index_syscalls();
     apply_profile(&mut effective, profile)?;
     for template in templates {
         apply_template(&mut effective, template)?;
@@ -1812,6 +1921,283 @@ pub fn resolve(
     }
     effective.digest = contract_digest(&effective);
     Ok(effective)
+}
+
+pub fn resolve_recipe(recipe: Recipe<'_>) -> Result<EffectiveContract, ContractError> {
+    validate_catalog()?;
+    let mut effective = EffectiveContract::empty();
+    for operation in CATALOG {
+        effective.rules[effective.len] = EffectiveRule {
+            operation,
+            action: Action::Deny(38),
+            provenance: Provenance::DefaultDeny,
+            source: "default-deny",
+            source_rule: 0,
+        };
+        effective.len += 1;
+    }
+    effective.index_syscalls();
+    for (verb, selectors) in [
+        (AccessVerb::Read, recipe.read),
+        (AccessVerb::Write, recipe.write),
+        (AccessVerb::Execute, recipe.execute),
+        (AccessVerb::Connect, recipe.connect),
+        (AccessVerb::Listen, recipe.listen),
+        (AccessVerb::Process, recipe.process),
+        (AccessVerb::System, recipe.system),
+    ] {
+        for (index, selector) in selectors.iter().enumerate() {
+            apply_recipe_selector(&mut effective, verb, selector, index, false)?;
+        }
+    }
+    for (index, selector) in recipe.allow.iter().enumerate() {
+        apply_exact_selector(&mut effective, selector, index, false)?;
+    }
+    for (index, selector) in recipe.syscall_allow.iter().enumerate() {
+        apply_exact_selector(&mut effective, selector, index, false)?;
+    }
+    for (index, selector) in recipe.deny.iter().enumerate() {
+        apply_recipe_deny(&mut effective, selector, index, Provenance::RecipeDeny)?;
+    }
+    for (index, selector) in recipe.deny_all.iter().enumerate() {
+        apply_exact_selector(&mut effective, selector, index, true)?;
+    }
+    for (index, selector) in recipe.syscall_deny.iter().enumerate() {
+        apply_exact_selector(&mut effective, selector, index, true)?;
+    }
+    effective.digest = contract_digest(&effective);
+    Ok(effective)
+}
+
+fn apply_recipe_selector(
+    effective: &mut EffectiveContract,
+    verb: AccessVerb,
+    selector: &[u8],
+    index: usize,
+    deny: bool,
+) -> Result<(), ContractError> {
+    validate_resource_selector(selector)?;
+    let mut matched = 0usize;
+    let mut unsupported = 0usize;
+    for rule in &mut effective.rules[..effective.len] {
+        if resource_selector_matches(selector, rule.operation.id.as_bytes())
+            && operation_access(rule.operation) == verb
+        {
+            if !deny && !matches!(rule.operation.status, Status::Complete | Status::Partial) {
+                unsupported += 1;
+                continue;
+            }
+            matched += 1;
+            rule.action = if deny {
+                Action::Deny(1)
+            } else {
+                rule.operation.action
+            };
+            rule.provenance = if deny {
+                Provenance::RecipeDeny
+            } else {
+                Provenance::RecipeAllow
+            };
+            rule.source = verb.name();
+            rule.source_rule = index as u16;
+        }
+    }
+    if matched == 0 {
+        return Err(if unsupported != 0 {
+            ContractError::UnsupportedPromotion
+        } else {
+            ContractError::UnmatchedSelector
+        });
+    }
+    Ok(())
+}
+
+fn apply_recipe_deny(
+    effective: &mut EffectiveContract,
+    selector: &[u8],
+    index: usize,
+    provenance: Provenance,
+) -> Result<(), ContractError> {
+    validate_resource_selector(selector)?;
+    let mut matched = 0usize;
+    for rule in &mut effective.rules[..effective.len] {
+        if resource_selector_matches(selector, rule.operation.id.as_bytes()) {
+            matched += 1;
+            rule.action = Action::Deny(1);
+            rule.provenance = provenance;
+            rule.source = "deny";
+            rule.source_rule = index as u16;
+        }
+    }
+    if matched == 0 {
+        return Err(ContractError::UnmatchedSelector);
+    }
+    Ok(())
+}
+
+fn apply_exact_selector(
+    effective: &mut EffectiveContract,
+    selector: &[u8],
+    index: usize,
+    deny: bool,
+) -> Result<(), ContractError> {
+    validate_selector(selector)?;
+    let mut matched = 0usize;
+    let mut unsupported = 0usize;
+    for rule in &mut effective.rules[..effective.len] {
+        if !selector_matches(selector, rule.operation.id.as_bytes()) {
+            continue;
+        }
+        if !deny && !matches!(rule.operation.status, Status::Complete | Status::Partial) {
+            unsupported += 1;
+            continue;
+        }
+        matched += 1;
+        rule.action = if deny {
+            Action::Deny(1)
+        } else {
+            rule.operation.action
+        };
+        rule.provenance = if deny {
+            Provenance::ExactDeny
+        } else {
+            Provenance::ExactAllow
+        };
+        rule.source = if deny { "exact-deny" } else { "exact-allow" };
+        rule.source_rule = index as u16;
+    }
+    if matched == 0 {
+        return Err(if unsupported != 0 {
+            ContractError::UnsupportedPromotion
+        } else {
+            ContractError::UnmatchedSelector
+        });
+    }
+    Ok(())
+}
+
+pub fn validate_resource_selector(selector: &[u8]) -> Result<(), ContractError> {
+    if selector.is_empty()
+        || selector[0] == b'.'
+        || selector[selector.len() - 1] == b'.'
+        || selector.windows(2).any(|pair| pair == b"..")
+        || selector.iter().any(|byte| {
+            !byte.is_ascii_lowercase()
+                && !byte.is_ascii_digit()
+                && !matches!(*byte, b'.' | b'_' | b'-' | b'*')
+        })
+    {
+        return Err(ContractError::InvalidSelector);
+    }
+    for component in selector.split(|byte| *byte == b'.') {
+        if component.contains(&b'*') && component != b"*" && component != b"**" {
+            return Err(ContractError::InvalidSelector);
+        }
+    }
+    Ok(())
+}
+
+pub fn resource_selector_matches(selector: &[u8], operation: &[u8]) -> bool {
+    resource_components_match(selector, operation, true)
+}
+
+fn resource_components_match(pattern: &[u8], value: &[u8], first: bool) -> bool {
+    let (pattern_head, pattern_tail) = split_component(pattern);
+    let (value_head, value_tail) = split_component(value);
+    if pattern_head == b"**" {
+        if pattern_tail.is_empty() {
+            return true;
+        }
+        return resource_components_match(pattern_tail, value, false)
+            || (!value_tail.is_empty() && resource_components_match(pattern, value_tail, false));
+    }
+    if value_head.is_empty() {
+        return false;
+    }
+    let head_matches = pattern_head == b"*"
+        || pattern_head == value_head
+        || (first && pattern_head == b"fs" && value_head == b"filesystem")
+        || (first && pattern_head == b"dev" && value_head == b"device");
+    head_matches
+        && if pattern_tail.is_empty() {
+            value_tail.is_empty()
+        } else {
+            !value_tail.is_empty() && resource_components_match(pattern_tail, value_tail, false)
+        }
+}
+
+fn split_component(value: &[u8]) -> (&[u8], &[u8]) {
+    match value.iter().position(|byte| *byte == b'.') {
+        Some(index) => (&value[..index], &value[index + 1..]),
+        None => (value, &[]),
+    }
+}
+
+pub fn operation_access(operation: &Operation) -> AccessVerb {
+    let id = operation.id.as_bytes();
+    if operation.kind == Kind::Proc
+        || operation.kind == Kind::Sys
+        || id.ends_with(b".read")
+        || id.starts_with(b"syscall.read")
+        || id.starts_with(b"syscall.pread")
+        || id.starts_with(b"syscall.stat")
+        || id.starts_with(b"syscall.fstat")
+        || id.starts_with(b"syscall.newfstat")
+        || id.starts_with(b"syscall.getdents")
+        || id.starts_with(b"syscall.access")
+        || id.starts_with(b"syscall.faccess")
+    {
+        AccessVerb::Read
+    } else if id.ends_with(b".write")
+        || id.starts_with(b"syscall.write")
+        || id.starts_with(b"syscall.pwrite")
+        || id.starts_with(b"syscall.truncate")
+        || id.starts_with(b"syscall.ftruncate")
+        || id.starts_with(b"syscall.mkdir")
+        || id.starts_with(b"syscall.unlink")
+        || id.starts_with(b"syscall.rename")
+        || id.starts_with(b"syscall.link")
+        || id.starts_with(b"syscall.symlink")
+        || id.starts_with(b"syscall.chmod")
+        || id.starts_with(b"syscall.fchmod")
+        || id.starts_with(b"syscall.fallocate")
+        || id.starts_with(b"syscall.fsync")
+        || id.starts_with(b"syscall.fdatasync")
+        || id.starts_with(b"syscall.syncfs")
+    {
+        AccessVerb::Write
+    } else if id == b"syscall.execve" {
+        AccessVerb::Execute
+    } else if id.ends_with(b".connect")
+        || id.starts_with(b"syscall.connect")
+        || id.starts_with(b"syscall.send")
+        || id.starts_with(b"syscall.recv")
+        || id.starts_with(b"syscall.getsock")
+        || id.starts_with(b"syscall.getpeer")
+        || id.starts_with(b"syscall.setsock")
+        || id.starts_with(b"syscall.shutdown")
+    {
+        AccessVerb::Connect
+    } else if id.ends_with(b".bind")
+        || id == b"syscall.bind"
+        || id == b"syscall.listen"
+        || id.starts_with(b"syscall.accept")
+    {
+        AccessVerb::Listen
+    } else if operation.kind == Kind::Signal
+        || operation.kind == Kind::Credential
+        || id.starts_with(b"syscall.clone")
+        || id == b"syscall.fork"
+        || id == b"syscall.vfork"
+        || id.starts_with(b"syscall.wait")
+        || id.starts_with(b"syscall.kill")
+        || id.starts_with(b"syscall.pidfd")
+        || id.starts_with(b"syscall.rt_sig")
+    {
+        AccessVerb::Process
+    } else {
+        AccessVerb::System
+    }
 }
 
 fn apply_profile(effective: &mut EffectiveContract, profile: &[u8]) -> Result<(), ContractError> {
@@ -1950,9 +2336,11 @@ fn contract_digest(contract: &EffectiveContract) -> [u8; DIGEST_HEX_BYTES] {
     hash = hash_bytes(hash, &CATALOG_VERSION.to_le_bytes());
     for rule in contract.rules() {
         hash = hash_bytes(hash, rule.operation.id.as_bytes());
+        hash = hash_bytes(hash, &[rule.operation.direct_safe as u8]);
         hash = hash_bytes(hash, rule.action.name().as_bytes());
         hash = hash_bytes(hash, rule.provenance.name().as_bytes());
         hash = hash_bytes(hash, rule.source.as_bytes());
+        hash = hash_bytes(hash, &rule.source_rule.to_le_bytes());
     }
     let mut digest = [b'0'; DIGEST_HEX_BYTES];
     // Four independently salted FNV lanes produce a fixed 256-bit identity.
@@ -2004,6 +2392,16 @@ mod tests {
         assert_eq!(contract.syscall_action(39), Action::Emulate);
         assert_eq!(contract.syscall_action(228), Action::Deny(38));
         assert_eq!(contract.syscall_action(41), Action::Deny(38));
+    }
+
+    #[test]
+    fn systemd_profile_mediates_sched_yield_through_the_index() {
+        let contract = resolve(b"gate9-systemd-v1", &[], &[], &[]).unwrap();
+        let rule = contract.syscall_rule(24).unwrap();
+        assert_eq!(rule.operation.id, "syscall.sched_yield");
+        assert_eq!(rule.action, Action::Mediate);
+        assert!(rule.operation.direct_safe);
+        assert_eq!(contract.syscall_action(24), Action::Mediate);
     }
 
     #[test]
@@ -2079,7 +2477,7 @@ mod tests {
             .filter(|rule| rule.provenance == Provenance::InstanceAllow)
             .count();
         assert_eq!(selected, 2);
-        assert_eq!(CATALOG_VERSION, 1);
+        assert_eq!(CATALOG_VERSION, 2);
     }
 
     #[test]
@@ -2103,6 +2501,102 @@ mod tests {
                 (_, None) => panic!("implemented syscall {number} is missing from the catalog"),
             }
         }
+    }
+
+    #[test]
+    fn resource_globs_are_component_bounded_and_support_aliases() {
+        assert!(resource_selector_matches(b"fs.**", b"filesystem.path.read"));
+        assert!(resource_selector_matches(
+            b"network.*.tcp.connect",
+            b"network.inet.tcp.connect"
+        ));
+        assert!(!resource_selector_matches(
+            b"network.*.connect",
+            b"network.inet.tcp.connect"
+        ));
+        assert_eq!(
+            validate_resource_selector(b"network.in*.connect"),
+            Err(ContractError::InvalidSelector)
+        );
+    }
+
+    #[test]
+    fn self_contained_recipe_matches_the_systemd_authority_surface() {
+        let all = &[b"**".as_slice()];
+        let deny = &[
+            b"dev.mmio.direct".as_slice(),
+            b"dev.dma.direct".as_slice(),
+            b"network.packet.raw".as_slice(),
+        ];
+        let recipe = resolve_recipe(Recipe {
+            allow: &[],
+            deny_all: &[],
+            read: all,
+            write: all,
+            execute: all,
+            connect: all,
+            listen: all,
+            process: all,
+            system: all,
+            deny,
+            syscall_allow: &[],
+            syscall_deny: &[],
+        })
+        .unwrap();
+        let legacy = resolve(b"gate9-systemd-v1", &[], &[], &[]).unwrap();
+        for rule in recipe.rules() {
+            let legacy_action = legacy.operation_rule(rule.operation.id).unwrap().action;
+            assert_eq!(
+                matches!(rule.action, Action::Deny(_)),
+                matches!(legacy_action, Action::Deny(_)),
+                "{}",
+                rule.operation.id
+            );
+            if !matches!(rule.action, Action::Deny(_)) {
+                assert_eq!(rule.action, legacy_action, "{}", rule.operation.id);
+            }
+        }
+    }
+
+    #[test]
+    fn recipe_denies_win_and_unsupported_authority_cannot_be_promoted() {
+        let recipe = resolve_recipe(Recipe {
+            allow: &[],
+            deny_all: &[],
+            read: &[b"fs.**"],
+            write: &[b"fs.**"],
+            execute: &[],
+            connect: &[],
+            listen: &[],
+            process: &[],
+            system: &[],
+            deny: &[b"fs.path.write"],
+            syscall_allow: &[],
+            syscall_deny: &[],
+        })
+        .unwrap();
+        let denied = recipe.operation_rule("filesystem.path.write").unwrap();
+        assert_eq!(denied.action, Action::Deny(1));
+        assert_eq!(denied.provenance, Provenance::RecipeDeny);
+        assert_eq!(denied.source_rule, 0);
+        assert_eq!(
+            resolve_recipe(Recipe {
+                allow: &[],
+                deny_all: &[],
+                read: &[],
+                write: &[],
+                execute: &[],
+                connect: &[],
+                listen: &[],
+                process: &[],
+                system: &[],
+                deny: &[],
+                syscall_allow: &[b"device.mmio.direct"],
+                syscall_deny: &[],
+            })
+            .err(),
+            Some(ContractError::UnsupportedPromotion)
+        );
     }
 
     #[test]

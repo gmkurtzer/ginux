@@ -8,7 +8,7 @@ measurements=build/gate9-systemd-measurements.txt
 gate9_dnf=${GINUX_GATE9_DNF:-on}
 gate9_network=${GINUX_GATE9_NETWORK:-on}
 gate9_external_network=${GINUX_GATE9_EXTERNAL_NETWORK:-on}
-gate9_config=${GINUX_GATE9_CONFIG:-config/instance-gate9.toml}
+gate9_config=${GINUX_GATE9_CONFIG:-config/instance-rocky-systemd.toml}
 gate9_network_check=${GINUX_GATE9_NETWORK_CHECK:-scripts/gate9-network-check.py}
 GINUX_GATE9_DNF=$gate9_dnf GINUX_GATE9_NETWORK=$gate9_network \
     GINUX_GATE9_EXTERNAL_NETWORK=$gate9_external_network \
@@ -25,6 +25,8 @@ set -e
 
 ./scripts/check-systemd-console.sh "$log" "$gate9_dnf"
 rocky_ssh "sudo cat /var/tmp/ginux-gate9-audit.log" >>"$log" 2>/dev/null || true
+rocky_ssh "sudo cat /var/lib/ginux/instances/gate9/audit.log" >>"$log" 2>/dev/null || true
+rocky_ssh "test -z \"\$(sudo find '$instance_root/proc' '$instance_root/sys' -mindepth 1 -print -quit)\""
 
 printf 'systemd baseline exit: %s\n' "$status"
 tail -n 40 "$log"
@@ -37,6 +39,7 @@ grep -Fq 'GINUX_LOCKDOWN_HOST_PATHS: BLOCKED' "$log"
 grep -Fq 'GINUX_LOCKDOWN_DEVICES: BLOCKED' "$log"
 grep -Fq 'GINUX_LOCKDOWN_MOUNT: BLOCKED' "$log"
 grep -Fq 'GINUX_LOCKDOWN_NAMESPACE: BLOCKED' "$log"
+grep -Fq 'GINUX_VIRTUAL_KERNEL_FILESYSTEMS: PASS' "$log"
 if test "$gate9_network" = on; then
     if test "$gate9_external_network" = on; then
         grep -Fq 'GINUX_NETWORK_DNS_HTTPS: PASS' "$log"

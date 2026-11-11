@@ -616,6 +616,18 @@ impl<const TASKS: usize> ProcessTable<TASKS> {
         Ok(target.id)
     }
 
+    pub fn process_group_in_session(
+        &self,
+        caller: TaskId,
+        group: u32,
+    ) -> Result<bool, ProcessError> {
+        let caller = self.tasks[self.index(caller)?];
+        Ok(group != 0
+            && self.tasks.iter().any(|task| {
+                task.occupied && task.session == caller.session && task.process_group == group
+            }))
+    }
+
     pub fn create_session(&mut self, id: TaskId) -> Result<u32, ProcessError> {
         let index = self.index(id)?;
         let pid = self.tasks[index].id.pid;
@@ -1646,6 +1658,8 @@ mod tests {
             Ok(job)
         );
         assert_eq!(table.view(job).unwrap().process_group, job.pid);
+        assert_eq!(table.process_group_in_session(shell, job.pid), Ok(true));
+        assert_eq!(table.process_group_in_session(shell, 99), Ok(false));
         assert_eq!(table.set_process_group_for(job, 0, 0), Ok(job));
         assert_eq!(
             table.set_process_group_for(init, job.pid, job.pid),
