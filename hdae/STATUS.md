@@ -220,13 +220,17 @@ scope, threat model, and invariants.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: none. Gate 11 remains partial pending an explicit human decision
-  about its unresolved selective thread-yield budget; Gate 14 is deferred and
-  Gate 16 is abandoned.
+- Active gate: Gate 17, concurrent-instance isolation, is approved and active
+  on `hdae/concurrent-instance-isolation`. Gate 11 remains partial pending an
+  explicit human decision about its unresolved selective thread-yield budget;
+  Gate 14 is deferred and Gate 16 is abandoned.
 - Last evidence: pull request 257 merged the accepted Gate 15 matrix into
   `main`; the complete matrix and report generation passed, as did
   `make check`, `make test-contract`, `make test-security`,
   `make test-systemd`, and aggregate `make test` with all QEMU integrations.
+- Exact next action: establish the two-instance baseline, preserve failures,
+  then build deterministic isolation, network, lifecycle, and recovery tests
+  before fixing any observed defect.
 - The final CLI correction makes required configuration files positional:
   `instance create NAME FILE`, `validate FILE`, `inspect FILE`, and
   `explain FILE OPERATION`. Fresh `make check`, `make test-contract`, and
