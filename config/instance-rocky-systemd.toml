@@ -103,7 +103,7 @@ pre_boot = [
   /usr/bin/sh -c 'for u in dbus-broker.service dbus.service dbus.socket modprobe@.service systemd-userdbd.service systemd-userdbd.socket; do
     rm -f /etc/systemd/system/$u
     mkdir -p /etc/systemd/system/$u.d
-    printf "[Unit]\\nConditionPathExists=/run/ginux-enable-optional-service\\n" > /etc/systemd/system/$u.d/90-ginux-minimal-image.conf
+    printf "[Unit]\nConditionPathExists=/run/ginux-enable-optional-service\n" > /etc/systemd/system/$u.d/90-ginux-minimal-image.conf
   done'
   """,
   """
@@ -115,13 +115,13 @@ pre_boot = [
   """,
   """
   /usr/bin/mkdir -p /etc/systemd/system/systemd-journald.service.d
-  /usr/bin/printf '[Service]\\nIPAddressDeny=\\n' > /etc/systemd/system/systemd-journald.service.d/90-ginux-network.conf
-  /usr/bin/printf '[Unit]\\nDescription=Keyboard Request Target\\nDefaultDependencies=no\\n' > /etc/systemd/system/kbrequest.target
+  /usr/bin/printf '[Service]\nIPAddressDeny=\n' > /etc/systemd/system/systemd-journald.service.d/90-ginux-network.conf
+  /usr/bin/printf '[Unit]\nDescription=Keyboard Request Target\nDefaultDependencies=no\n' > /etc/systemd/system/kbrequest.target
   """,
   """
   /usr/bin/rm -f /etc/systemd/system/getty.target /etc/systemd/system/console-getty.service
   /usr/bin/ln -sf /usr/lib/systemd/system/console-getty.service /etc/systemd/system/getty.target.wants/console-getty.service
-  /usr/bin/printf '#%%PAM-1.0\\nauth required pam_unix.so\\naccount required pam_unix.so\\npassword required pam_unix.so\\nsession required pam_unix.so\\n' > /etc/pam.d/login
+  /usr/bin/printf '#%%PAM-1.0\nauth required pam_unix.so\naccount required pam_unix.so\npassword required pam_unix.so\nsession required pam_unix.so\n' > /etc/pam.d/login
   """,
 ]
 timeout_seconds = 30
