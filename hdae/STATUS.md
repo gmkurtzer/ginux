@@ -151,7 +151,7 @@
   materialize a bounded maintenance contract atomically, expose their state in
   lifecycle output, and warn on unlocked starts. A clean Rocky workflow proved
   denial while locked, success while unlocked, and denial again after relock.
-- Gate 13 boundary hardening is technically passed on
+- Gate 13 boundary hardening was accepted and closed on 2026-11-10 on
   `hdae/boundary-hardening`. Its deterministic malformed-input and fuzz suite,
   post-bootstrap supervisor authority reduction, security and recovery suites,
   aggregate regressions, limitations report, and human demonstration pass.
@@ -162,8 +162,8 @@
   interactive-host destruction for explicit `make host-reset`, automated QEMU
   tests use separate state, and audit recipes use explicit `enabled` booleans
   with a controller-owned log destination. The rebased result is delivered in
-  pull request https://github.com/gmkurtzer/ginux/pull/255 and awaits human
-  acceptance. A subsequent terminal fix tracks duplicated console descriptors
+  pull request https://github.com/gmkurtzer/ginux/pull/255. A subsequent
+  terminal fix tracks duplicated console descriptors
   and the virtual foreground process group. Commit `20c036dd` keeps sudo out of
   the live relay, preserves the runtime control descriptor, and makes the
   attach process own input for its full lifetime. The complete clean Rocky
@@ -590,10 +590,9 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Present Gate 13 pull request 255, its fresh boundary, recovery, aggregate,
-demonstration, and matched no-regression evidence for human acceptance. Do not
-merge or close the pull request without explicit human direction. Gates 15 and
-16 planning remains isolated from this branch.
+Push the Gate 13 acceptance record to pull request 255, then merge only with
+explicit human direction. Gate 14 remains deferred; Gates 15 and 16 planning
+remains isolated from this branch.
 
 ## Context recovery
 
@@ -604,14 +603,14 @@ merge or close the pull request without explicit human direction. Gates 15 and
   Gate 12.1 is technically passed and delivered in pull request 252; Gate
   12.25 is technically passed and delivered in pull request 253. Gate 12.5 is
   technically passed and delivered in pull request 254 from
-  `hdae/contract-maintenance-lock`. Gate 13 is technically passed on
-  `hdae/boundary-hardening`, rebased onto current `main`: its boundary,
-  recovery, authority, regression, documentation, demonstration, and matched
-  accepted-Ginux performance evidence pass. Gate 11 remains independently
-  partial on its native-parity target.
+  `hdae/contract-maintenance-lock`. Gate 13 was accepted and closed on
+  2026-11-10 on `hdae/boundary-hardening`, rebased onto current `main`: its
+  boundary, recovery, authority, regression, documentation, demonstration, and
+  matched accepted-Ginux performance evidence pass. Gate 11 remains
+  independently partial on its native-parity target.
 - Gate 13 delivery: pull request
-  https://github.com/gmkurtzer/ginux/pull/255 is open from
-  `hdae/boundary-hardening` against `main`.
+  https://github.com/gmkurtzer/ginux/pull/255 is open with passing required CI
+  from `hdae/boundary-hardening` against `main`.
 - Gate 12.25 delivery: pull request
   https://github.com/gmkurtzer/ginux/pull/253 is open from
   `hdae/top-level-instance-cli` against the Gate 12.1 branch.
