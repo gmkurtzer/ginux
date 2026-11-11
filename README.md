@@ -202,11 +202,13 @@ Inspect the latest completed capability directly:
 
 ```sh
 make test-systemd       # cached image, external networking disabled
+make test-multi-instance # two concurrent Rocky systemd instances and isolation
 make bench-prepare      # one-time networked setup for the pinned benchmark image
 make bench              # matched native/Ginux matrix plus mandatory budget checks
 make bench-modes-prepare # one-time setup for the three-way dispatch comparison
 make bench-modes        # native/selective/paranoid tables and graphs
 make demo-gate-15       # bounded reproducible three-way comparison
+make demo-gate-17       # operator-readable concurrent-instance isolation check
 make test-systemd-live  # shared network plus real upstream dnf -y update
 make host-run           # general interactive Rocky host with Ginux installed
 make host-reset         # discard that host's cache, instances, and writable state
@@ -357,6 +359,9 @@ The precise supported claims, retained supervisor authority, trusted
 components, exclusions, compatibility gaps, performance limitation, and
 reproducible boundary tests are documented in
 [Security boundary and limitations](docs/security-boundary.md).
+The tested concurrent lifecycle, virtual-state, root, contract, audit, and
+shared-network semantics are documented in
+[Concurrent instances and isolation](docs/multi-instance-isolation.md).
 
 For agent containment, the protected object is the host and any authority not
 explicitly assigned to the instance. Ginux constrains the Linux processes in

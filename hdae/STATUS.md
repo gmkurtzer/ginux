@@ -228,12 +228,12 @@ scope, threat model, and invariants.
 - Reload after context shift: required
 - Active gate: Gate 18, architecture explanation and differentiation, is
   approved and active on `hdae/explain-ginux-differences`. Gate 17 is
-  technically complete in pull request 259 and awaits human acceptance. Gate
-  11 remains partial, Gate 14 is deferred, and Gate 16 is abandoned.
-- Last evidence: pull request 257 merged the accepted Gate 15 matrix into
-  `main`; the complete matrix and report generation passed, as did
-  `make check`, `make test-contract`, `make test-security`,
-  `make test-systemd`, and aggregate `make test` with all QEMU integrations.
+  technically complete and merged through pull request 259 but awaits explicit
+  human acceptance. Gate 11 remains partial, Gate 14 is deferred, and Gate 16
+  is abandoned.
+- Last evidence: Gate 18 passed `make check-architecture-doc`,
+  `make check-security-doc`, `make check`, `make test-ci-changes`, and aggregate
+  `make test` with all QEMU integrations.
 - Exact next action: stop at the Gate 17 and Gate 18 human acceptance
   checkpoints in pull requests 259 and 260.
 - The final CLI correction makes required configuration files positional:
