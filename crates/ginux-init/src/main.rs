@@ -5856,7 +5856,13 @@ fn supervise_native(
             continue;
         }
         if signal == 17 && task.clone_call.phase != native_clone::Phase::Idle {
-            task.clone_call.sigchld = true;
+            task.clone_call.sigchld |= tasks.iter().flatten().any(|candidate| {
+                !candidate.tracing
+                    && processes.view(candidate.virtual_id).is_ok_and(|view| {
+                        view.parent == task.virtual_id.pid
+                            && matches!(view.state, TaskState::Exited(_) | TaskState::Signaled(_))
+                    })
+            });
             let request = if task.awaiting_exit {
                 PTRACE_SYSCALL
             } else {
