@@ -16,6 +16,8 @@ import time
 
 PTRACE_SETOPTIONS = 0x4200
 PTRACE_SYSEMU = 31
+HOST_NOBODY_UID = 65534
+HOST_NOBODY_GID = 65534
 
 RUN = 'mount --bind "$1" /var/tmp && exec "$2" "$3" "$4"'
 
@@ -30,6 +32,11 @@ def main():
             work = Path(directory)
             shutil.copyfile(payload, work / "ginux-managed-payload")
             (work / "ginux-managed-payload").chmod(0o755)
+            # Root-launched managed code drops to the host nobody identity
+            # before exec. Give that identity access to this private bind mount
+            # and permission to create the payload-ran marker if supervision
+            # ever fails open.
+            os.chown(work, HOST_NOBODY_UID, HOST_NOBODY_GID)
             try:
                 proc = subprocess.run(["unshare", "-m", "sh", "-c", RUN, "sh",
                                        str(work), deny, str(request), binary],

@@ -89,4 +89,6 @@ EOF
 mv "$identity_tmp" "$identity"
 trap - 0 HUP INT TERM
 
-printf 'OCI_PREPARE: rootfs=%s index=%s layers=%s\n' "$rootfs" "$index" "$layer_count"
+if ! oci_human_output; then
+    printf 'OCI_PREPARE: rootfs=%s index=%s layers=%s\n' "$rootfs" "$index" "$layer_count"
+fi

@@ -25,7 +25,7 @@ images, keys, overlays, logs, benchmark results, and binaries remain under
 `build/` or `target/` and are not committed. `make clean` preserves the
 verified source-image cache.
 
-## Host and domain boundary
+## Host and instance boundary
 
 ```text
 Rocky host systemd (real PID 1)
@@ -36,7 +36,7 @@ Rocky host systemd (real PID 1)
 Ginux does not replace, reboot, or shut down the Rocky host. The Gate 1 test
 waits for host systemd readiness before starting Ginux and checks host systemd
 again after Ginux exits. A later gate will run Rocky systemd beneath Ginux as
-virtual domain PID 1; that does not change the real host PID 1.
+virtual instance PID 1; that does not change the real host PID 1.
 
 ## Threat model for this proof
 
@@ -60,7 +60,7 @@ checks host systemd because normal host boot is a Gate 1 environment property,
 not because PID numbering is part of the Ginux interface.
 
 This proof does not yet provide general ELF loading, a Ginux-owned address
-space, threads, signals, dynamic linking, domain systemd, virtual filesystems,
+space, threads, signals, dynamic linking, instance systemd, virtual filesystems,
 or a complete syscall ABI. Linux `ptrace` is a bootstrap mechanism for the
 experiment, not the final Ginux execution architecture.
 
@@ -70,7 +70,7 @@ Gate 1 uses x86 `PTRACE_SYSEMU`. At syscall entry, Linux stops the tracee
 without executing the syscall. Ginux reads the register set, calls the central
 dispatcher, writes the Linux-style result, and resumes to the next syscall
 entry. This works as an ordinary process under QEMU TCG and requires neither
-KVM nor a nested guest kernel beneath the domain.
+KVM nor a nested guest kernel beneath the instance.
 
 Seccomp user notification was not selected because it is primarily a host
 mediation facility and does not by itself establish the application-kernel

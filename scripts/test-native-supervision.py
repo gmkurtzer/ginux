@@ -12,7 +12,7 @@ def main():
     if len(sys.argv) != 3 or os.geteuid() != 0:
         sys.exit("usage (as root): test-native-supervision.py <ginux binary> <native fixture>")
     binary, fixture = (str(Path(arg).resolve()) for arg in sys.argv[1:])
-    config = Path(__file__).resolve().parent.parent / "config/domain-gate5.toml"
+    config = Path(__file__).resolve().parent.parent / "config/instance-gate5.toml"
     with tempfile.TemporaryDirectory(prefix="ginux-native-") as directory:
         work = Path(directory)
         # The tracee drops to UID 1000 and must be able to execute the copies.
@@ -56,7 +56,7 @@ def main():
         code, out = run("trap")
         check("signal stop fails closed", code == 1 and "GINUX_FIXTURE: uname-before=-38\n" in out
               and "uname-after" not in out
-              and "GINUX_DOMAIN: failed reason=unexpected native trace stop" in out, code, out)
+              and "GINUX_INSTANCE: failed reason=unexpected native trace stop" in out, code, out)
         # int 0x80 selects the i386 table; supervision must stop instead of
         # classifying i386 fork (2) as x86-64 open. Without IA32 emulation the
         # host raises SIGSEGV on int 0x80, which ends supervision as an
@@ -64,8 +64,8 @@ def main():
         code, out = run("int80")
         check("i386 syscall ABI fails closed", code == 1 and "unsupervised child ran" not in out
               and "int80-fork" not in out
-              and ("GINUX_DOMAIN: failed reason=native requires the x86-64 syscall ABI" in out
-                   or "GINUX_DOMAIN: failed reason=unexpected native trace stop" in out),
+              and ("GINUX_INSTANCE: failed reason=native requires the x86-64 syscall ABI" in out
+                   or "GINUX_INSTANCE: failed reason=unexpected native trace stop" in out),
               code, out)
     print("test-native-supervision: PASS")
 

@@ -22,6 +22,62 @@ cleanup() {
 }
 trap cleanup 0 HUP INT TERM
 
+render_progress() {
+    progress_file=$1
+    progress_size=$2
+    progress_label=$3
+    progress_width=24
+    progress_bytes=0
+    test -f "$progress_file" && progress_bytes=$(wc -c <"$progress_file" | tr -d ' ')
+    test "$progress_bytes" -le "$progress_size" || progress_bytes=$progress_size
+    progress_percent=$((progress_bytes * 100 / progress_size))
+    progress_filled=$((progress_percent * progress_width / 100))
+    progress_empty=$((progress_width - progress_filled))
+    progress_done=$(printf '%*s' "$progress_filled" '' | tr ' ' '#')
+    progress_left=$(printf '%*s' "$progress_empty" '')
+    printf '\r    %-9s [%s%s] %3s%%  %s / %s' \
+        "$progress_label" "$progress_done" "$progress_left" "$progress_percent" \
+        "$(oci_human_bytes "$progress_bytes")" "$(oci_human_bytes "$progress_size")" >&2
+}
+
+download_layer() {
+    download_url=$1
+    download_accept=$2
+    download_destination=$3
+    download_label=$4
+    download_size=$5
+    case "$download_label" in
+        layer\ *) download_display="Layer ${download_label#layer }" ;;
+        *) download_display=$download_label ;;
+    esac
+
+    if test -t 2; then
+        curl -fsSL --retry 3 \
+            -H "Authorization: Bearer $token" \
+            -H "Accept: $download_accept" \
+            "$download_url" -o "$download_destination" &
+        download_pid=$!
+        while kill -0 "$download_pid" 2>/dev/null; do
+            render_progress "$download_destination" "$download_size" "$download_display"
+            sleep 0.2
+        done
+        if ! wait "$download_pid"; then
+            printf '\n' >&2
+            return 1
+        fi
+        render_progress "$download_destination" "$download_size" "$download_display"
+        printf '\n' >&2
+    else
+        printf '    Downloading %s (%s)... ' \
+            "$download_display" "$(oci_human_bytes "$download_size")"
+        curl -fsSL --retry 3 \
+            -H "Authorization: Bearer $token" \
+            -H "Accept: $download_accept" \
+            "$download_url" -o "$download_destination"
+        printf 'done\n'
+    fi
+}
+
 curl -fsSL --retry 3 \
     "https://auth.docker.io/token?service=$GINUX_OCI_AUTH_SERVICE&scope=repository:$GINUX_OCI_REPOSITORY:pull" \
     -o "$token_file"
@@ -35,7 +91,7 @@ fetch_object() {
     size=${5:-unknown}
     destination=$(oci_blob_path "$digest")
     if oci_verify_blob "$digest"; then
-        if [ "$label" != object ]; then
+        if ! oci_human_output && [ "$label" != object ]; then
             printf 'OCI_FETCH: cached %s digest=%s size=%s\n' "$label" "$digest" "$size"
         fi
         return 0
@@ -48,6 +104,21 @@ fetch_object() {
             -H "Accept: $accept" \
             "https://$GINUX_OCI_REGISTRY/v2/$GINUX_OCI_REPOSITORY/$endpoint/$digest" \
             -o "$partial"
+    elif oci_human_output; then
+        case "$label" in
+            layer\ *)
+                download_layer \
+                    "https://$GINUX_OCI_REGISTRY/v2/$GINUX_OCI_REPOSITORY/$endpoint/$digest" \
+                    "$accept" "$partial" "$label" "$size"
+                ;;
+            *)
+                curl -fsSL --retry 3 \
+                    -H "Authorization: Bearer $token" \
+                    -H "Accept: $accept" \
+                    "https://$GINUX_OCI_REGISTRY/v2/$GINUX_OCI_REPOSITORY/$endpoint/$digest" \
+                    -o "$partial"
+                ;;
+        esac
     else
         printf 'OCI_FETCH: downloading %s digest=%s size=%s bytes\n' "$label" "$digest" "$size"
         curl -fL --retry 3 --progress-bar --show-error \
@@ -123,5 +194,7 @@ mv "$layout_tmp" "$GINUX_OCI_CACHE_DIR/oci-layout"
 mv "$index_tmp" "$GINUX_OCI_CACHE_DIR/index.json"
 
 "$script_dir/verify-rocky-oci.sh"
-printf 'OCI_FETCH: cached=%s manifest=%s\n' \
-    "$GINUX_OCI_CACHE_DIR" "$GINUX_OCI_MANIFEST_DIGEST"
+if ! oci_human_output; then
+    printf 'OCI_FETCH: cached=%s manifest=%s\n' \
+        "$GINUX_OCI_CACHE_DIR" "$GINUX_OCI_MANIFEST_DIGEST"
+fi
