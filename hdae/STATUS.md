@@ -176,7 +176,8 @@
   `make test-systemd-interactive` workflow pass.
 - Gate 14 is parked by human direction and has no active implementation work.
 - Gate 15 is technically complete on `hdae/dispatch-performance-matrix` and is
-  awaiting human review. Checked-in suite, mode, and per-workload templates
+  delivered for human review in pull request
+  https://github.com/gmkurtzer/ginux/pull/257. Checked-in suite, mode, and per-workload templates
   drive a paired native/selective/paranoid matrix at 1/2/4 vCPUs. The workflow
   preserves raw samples and provenance, validates compatible metadata, and
   produces combined TSV, Markdown tables with mean and standard deviation, and
@@ -211,8 +212,8 @@ scope, threat model, and invariants.
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
 - Active gate: Gate 15, dispatch-mode performance matrix, is technically
-  complete on `hdae/dispatch-performance-matrix` and awaits human review and
-  authorization to push and open its dedicated pull request.
+  complete on `hdae/dispatch-performance-matrix`, delivered in pull request
+  https://github.com/gmkurtzer/ginux/pull/257, and awaits human review.
 - Last evidence: the complete Gate 15 matrix and report generation pass, as do
   `make check`, `make test-contract`, `make test-security`,
   `make test-systemd`, and aggregate `make test` with all QEMU integrations.

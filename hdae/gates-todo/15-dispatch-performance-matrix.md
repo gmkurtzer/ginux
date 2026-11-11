@@ -58,7 +58,7 @@ recapitulate the measurements.
 - [x] Update every affected project and operator document.
 - [x] Run static, deterministic, functional, and full benchmark verification.
 - [x] Record final evidence and limitations.
-- [ ] Deliver the pull request after explicit human authorization.
+- [x] Deliver the pull request after explicit human authorization.
 
 ## Acceptance criteria
 
@@ -120,8 +120,9 @@ recapitulate the measurements.
 
 - Working branch: `hdae/dispatch-performance-matrix`
 - Intended base: `main`
-- Pull request: dedicated Gate 15 pull request after verification; do not push,
-  merge, or close without explicit human authorization.
+- Pull request: https://github.com/gmkurtzer/ginux/pull/257. The branch and
+  pull request were pushed and opened after explicit human authorization; do
+  not merge or close without explicit human authorization.
 - Planned commits: gate and templates; collection/validation/reporting; tests
   and Make interface; documentation; final benchmark evidence and checkpoint.
 
