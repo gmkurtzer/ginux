@@ -774,8 +774,27 @@ supervise_instance() {
     script -qefE never -c "$0 run-runtime $name $audit_override" /dev/null \
         <&9 >>"$directory/console.log" 2>>"$directory/audit.log" &
     console_pid=$!
+    terminate_supervisor() {
+        trap - HUP INT TERM
+        runtime_pid=$(runtime_identity "$name" || true)
+        if test -n "$runtime_pid"; then
+            kill -TERM "$runtime_pid" 2>/dev/null || true
+            terminate_attempt=0
+            while kill -0 "$runtime_pid" 2>/dev/null && test "$terminate_attempt" -lt 20; do
+                terminate_attempt=$((terminate_attempt + 1))
+                sleep 0.1
+            done
+            kill -KILL "$runtime_pid" 2>/dev/null || true
+        fi
+        kill -TERM "$console_pid" 2>/dev/null || true
+        wait "$console_pid" 2>/dev/null || true
+        rm -f "$directory/runtime.pid" "$directory/supervisor.pid"
+        exit 143
+    }
+    trap terminate_supervisor HUP INT TERM
     wait "$console_pid"
     status=$?
+    trap - HUP INT TERM
     set -e
     printf '%s\n' "$status" >"$directory/exit.status"
     rm -f "$directory/runtime.pid" "$directory/supervisor.pid"
