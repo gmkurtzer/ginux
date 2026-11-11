@@ -103,6 +103,12 @@ replace it.
 15. **Dispatch-mode performance matrix**: reproducibly compare native Rocky,
     selective Ginux, and paranoid Ginux with paired controls, reusable test
     templates, combined tables and graphs, and complete operator documentation.
+17. **Concurrent-instance isolation**: run two Rocky systemd instances in
+    parallel and verify independent identity, state, contracts, lifecycle,
+    translated ports, and documented shared-host networking semantics.
+18. **Architecture explanation and differentiation**: answer recurring UML,
+    gVisor, namespaces, VM, syscall-capture, security, compatibility, and HDAE
+    questions with evidence-based README and architecture documentation.
 
 Gates are stored in `hdae/gates-todo/` and remain there until they pass and are
 accepted at their checkpoint. Closed gate records move unchanged to

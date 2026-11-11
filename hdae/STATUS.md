@@ -202,6 +202,10 @@
 - Gate 16's kernel-module enforcement direction was abandoned by human
   decision on 2026-11-11. Pull request 258 was closed without merging, and no
   Gate 16 implementation is present on `main`.
+- Gate 17 is technically complete in pull request 259 and awaits human review.
+- Gate 18 is approved and active on `hdae/explain-ginux-differences`. The HN
+  feedback and authoritative UML/gVisor architecture sources have been
+  reviewed; README, comparison documentation, checks, and PR delivery remain.
 
 ## Governing outcome and invariants
 
@@ -220,13 +224,16 @@ scope, threat model, and invariants.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: none. Gate 11 remains partial pending an explicit human decision
-  about its unresolved selective thread-yield budget; Gate 14 is deferred and
-  Gate 16 is abandoned.
+- Active gate: Gate 18, architecture explanation and differentiation, is
+  approved and active on `hdae/explain-ginux-differences`. Gate 17 is
+  technically complete in pull request 259 and awaits human acceptance. Gate
+  11 remains partial, Gate 14 is deferred, and Gate 16 is abandoned.
 - Last evidence: pull request 257 merged the accepted Gate 15 matrix into
   `main`; the complete matrix and report generation passed, as did
   `make check`, `make test-contract`, `make test-security`,
   `make test-systemd`, and aggregate `make test` with all QEMU integrations.
+- Exact next action: rewrite the README and add a focused architecture
+  comparison, then verify its claims and open the Gate 18 pull request.
 - The final CLI correction makes required configuration files positional:
   `instance create NAME FILE`, `validate FILE`, `inspect FILE`, and
   `explain FILE OPERATION`. Fresh `make check`, `make test-contract`, and
