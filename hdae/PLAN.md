@@ -177,7 +177,9 @@ define their expected result.
 ## Deferred roadmap
 
 After the initial twelve gates, Gate 14 preserves the Unicorn Engine execution
-backend as a concrete alternative to native ptrace execution. Other likely
+backend as a concrete alternative to native ptrace execution. It remains
+explicitly deferred. A later kernel-module enforcement experiment was
+abandoned on 2026-11-11 and is not part of the roadmap. Other likely
 milestones include multiple concurrent
 instances, conventional containers within an instance, network and storage backend
 expansion, physical-device assignment with a separately reviewed IOMMU/VFIO
