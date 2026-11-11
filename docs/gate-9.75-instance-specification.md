@@ -20,7 +20,7 @@ before startup.
 |---|---|
 | `instance`, `identity` | Instance ID, hostname, image, init, arguments, environment, and work directory |
 | `resources` | Virtual CPU and memory assignment |
-| `execution` | Explicit runtime backend and security/performance profile |
+| `execution` | Security/performance profile; runtime mechanisms are derived automatically |
 | `contract` and its subsections | Self-contained operation, syscall, filesystem, network, device, privilege, process, and synthetic-kernel policy |
 | `storage`, `volumes`, `devices` | Instance storage, reviewed host mappings, and assigned device frontends |
 | `network` | Instance network backend; access policy belongs to `contract.network` |

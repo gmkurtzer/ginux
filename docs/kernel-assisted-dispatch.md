@@ -131,13 +131,13 @@ The raw five-sample results and provenance are checked in under
 
 | Workload | Native/control mean ± sample SD | Module mean ± SD | BPF LSM mean ± SD |
 |---|---:|---:|---:|
-| Unrelated `sched_yield` calls/s | 798,975 ± 9,637 | 774,894 ± 3,036 (0.970x) | 776,408 ± 1,578 (0.972x) |
-| Allowed `mkdirat` create/remove pairs/s | 7,629 ± 95 | 7,466 ± 49 (0.979x) | 7,396 ± 102 (0.969x) |
+| Unrelated `sched_yield` calls/s | 785,041 ± 13,167 | 783,282 ± 9,869 (0.998x) | 789,950 ± 1,839 (1.006x) |
+| Allowed `mkdirat` create/remove pairs/s | 7,475 ± 56 | 7,475 ± 82 (1.000x) | 7,480 ± 96 (1.001x) |
 
 The differences are within the variance expected from TCG and show the key
 result: unrelated allowed syscalls do not enter a userspace dispatcher. For a
-denied `mkdirat`, seccomp produced 2,210,663 ± 11,178 denials/s, the module
-1,582,106 ± 14,492 denials/s, and BPF LSM 318,738 ± 3,880 denials/s. These
+denied `mkdirat`, seccomp produced 2,253,167 ± 29,922 denials/s, the module
+1,614,034 ± 34,374 denials/s, and BPF LSM 323,267 ± 4,001 denials/s. These
 figures are not equivalent hook points: seccomp rejects at syscall entry,
 whereas BPF LSM performs object-aware policy at the VFS security hook.
 

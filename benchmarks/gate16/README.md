@@ -11,7 +11,9 @@ make gate16-prepare
 make test-gate16-kernel-assist
 ```
 
-The suite uses five repetitions for:
+The suite uses five repetitions and rotates native, module, and BPF-LSM order
+within each repetition so every assisted sample has a same-repetition control.
+It measures:
 
 - an unrelated hot `sched_yield`, proving that allowed calls avoid userspace;
 - allowed `mkdirat` create/remove pairs; and

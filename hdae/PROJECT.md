@@ -13,15 +13,12 @@ reduce parts of that surface, but managed processes still execute permitted
 system calls directly against the host Linux kernel. A compromised process can
 therefore attempt to exploit any host-kernel path that remains reachable.
 
-Ginux interposes a userspace-kernel boundary. Every managed syscall is governed
-by a compiled instance contract before its host effect. An instance may select
-paranoid dispatch, in which every syscall enters the Ginux userspace dispatcher,
-or selective dispatch, in which only explicitly allowed operations whose
-semantics are cataloged as transparent may execute directly in the host kernel.
-Selective dispatch is the default so ordinary instances remain lightweight;
-paranoid dispatch is an explicit opt-in for all-syscall userspace inspection.
+Ginux interposes a userspace-kernel boundary. Every managed operation is
+governed by a compiled instance contract before its host effect. Ginux derives
+the narrowest sound combination of native kernel boundaries, kernel-resident
+policy, and userspace mediation from the contract and usable host integrations.
 Denied operations and operations requiring inspection, translation, emulation,
-or virtual state always enter Ginux before completion. The goal is to make
+or virtual state remain Ginux decisions before completion. The goal is to make
 compatibility an explicit, configurable security contract rather than an
 all-or-nothing inheritance from the host kernel.
 
@@ -48,7 +45,7 @@ starts and tests do not require network access.
 The milestone succeeds when:
 
 1. no managed x86-64 syscall completes against the host without enforcement of
-   the Ginux instance contract and selected dispatch mode;
+   the complete Ginux instance contract and automatic enforcement plan;
 2. systemd reproducibly reaches the defined multi-user readiness marker;
 3. the instance sees Ginux-owned `/dev`, `/proc`, `/sys`, and cgroup interfaces;
 4. instance configuration selects its image, resources, devices, contract, and
@@ -85,10 +82,9 @@ solved.
   Ginux runs inside it as an ordinary process or service.
 - An emulation-compatible syscall-interception mechanism selected by Gate 1;
   KVM acceleration is not required by the initial milestone.
-- Native x86-64 ELF execution with a configurable syscall-dispatch model: the
-  paranoid mode supervises every syscall through Ginux, while the selective
-  mode directly passes only contract-allowed, cataloged transparent operations
-  and keeps denial and complex semantics in Ginux.
+- Native x86-64 ELF execution with automatic enforcement planning: direct
+  execution is limited to contract-allowed, cataloged transparent operations,
+  while denial and complex semantics remain Ginux decisions.
 - Three explicit execution profiles: `security` interprets instructions and
   virtualizes kernel-facing state; `balanced` executes instructions natively
   while limiting passthrough to a minimal confined loader/memory surface; and
@@ -122,16 +118,15 @@ solved.
 
 ## Product principles
 
-- No managed syscall reaches a host effect outside the compiled Ginux contract
-  and selected dispatch mode.
-- "Direct passthrough" exists only in selective mode and means the operation is
+- No managed operation reaches a host effect outside the compiled Ginux
+  contract and its complete enforcement plan.
+- "Direct passthrough" means the operation is
   explicitly contract-allowed and cataloged as semantically transparent. It
   never applies to an operation requiring argument inspection, descriptor or
   pointer validation, translation, emulation, or virtual state.
-- Paranoid mode sends every syscall through Ginux before completion. Selective
-  mode sends every denial and every complex operation through Ginux, while its
-  cataloged direct-safe allow set may execute without a synchronous userspace
-  round trip. Selective is the default dispatch mode.
+- Enforcement machinery is host implementation state, not portable recipe
+  syntax. Ginux may combine native limits, BPF LSM/cgroup BPF, Landlock,
+  seccomp, and userspace mediation, but may not weaken a contract to start.
 - Unknown contract operations fail closed and produce useful audit evidence.
 - Instance-visible kernel state is Ginux state, not an accidental view of host
   `/proc`, `/sys`, `/dev`, or cgroups.

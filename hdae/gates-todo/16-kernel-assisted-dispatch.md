@@ -57,16 +57,16 @@ ptrace, a module, or another dispatcher.
 
 ## Planned work
 
-- [ ] Establish the current interception and emulation requirement matrix.
-- [ ] Research supported kernel extension points and document feasibility.
-- [ ] Implement the smallest viable kernel-assisted prototype.
-- [ ] Prototype any materially different credible path needed to decide the
+- [x] Establish the current interception and emulation requirement matrix.
+- [x] Research supported kernel extension points and document feasibility.
+- [x] Implement the smallest viable kernel-assisted prototype.
+- [x] Prototype any materially different credible path needed to decide the
   architecture.
-- [ ] Add automatic capability discovery and contract-to-backend planning.
-- [ ] Add semantic, failure, lifecycle, and bypass-resistance tests.
-- [ ] Run paired performance measurements and profile remaining overhead.
-- [ ] Update all affected project and operator documentation.
-- [ ] Run mandatory regressions and a bounded human demonstration.
+- [x] Add automatic capability discovery and contract-to-backend planning.
+- [x] Add semantic, failure, lifecycle, and bypass-resistance tests.
+- [x] Run paired performance measurements and profile remaining overhead.
+- [x] Update all affected project and operator documentation.
+- [x] Run mandatory regressions and a bounded human demonstration.
 - [ ] Push the branch, open a pull request, and stop for human review.
 
 ## Acceptance criteria
@@ -145,7 +145,41 @@ ptrace, a module, or another dispatcher.
 
 ## Evidence
 
-- Pending.
+- `docs/kernel-assisted-requirements.tsv` maps 14 mediated operation classes to
+  pre-effect needs, context, direct-path eligibility, preferred mechanism,
+  fallback, and disposition. `make test-gate16-requirements` validates the
+  complete matrix.
+- Primary Linux documentation eliminated Syscall User Dispatch, tracepoints,
+  unrestricted `fmod_ret`, syscall-table patching, and libc rewriting as sound
+  general enforcement. The evidence matrix retains native kernel primitives,
+  BPF LSM/cgroup BPF, Landlock where its monotonic model fits, seccomp, and
+  userspace fallback.
+- The disposable Rocky host runs kernel
+  `6.12.0-211.16.1.el10_2.0.1.x86_64` with BPF LSM, cgroup BPF, seccomp,
+  kprobes, modules, and Landlock ABI 6 available.
+- `make test-gate16-kernel-assist` builds and loads both a bounded cgroup-bound
+  kprobe module and a BPF LSM prototype. Raw, static, thread, fork, and exec
+  attempts return `EPERM` before mutation. Invalid identifiers are rejected,
+  policy replacement is atomic, controller exit remains fail-closed, active
+  policy prevents module unload, and BPF pin removal detaches deterministically.
+- Alternating, paired five-sample TCG microbenchmarks are checked in under
+  `benchmarks/gate16/results/`. Unrelated `sched_yield` throughput is `0.998x`
+  native for the module and `1.006x` for BPF LSM; allowed `mkdirat`
+  create/remove throughput is `1.000x` and `1.001x`. Denied `mkdirat`
+  throughput is 2.253M/s for seccomp, 1.614M/s for the module, and 0.323M/s for
+  the later object-aware BPF LSM hook.
+- `ginux-instance` now derives deterministic enforcement components from
+  semantic contract requirements and usable host integrations. Supported
+  kernel APIs are preferred, the module requires explicit host opt-in,
+  userspace handles uncovered semantics, and an unsatisfied plan fails closed.
+- Portable recipes omit execution backend and syscall-control mechanics.
+  Normal execution reports `dispatch=automatic` and the selected enforcement
+  component set. Retained selective/paranoid selectors exist only for accepted
+  comparison fixtures and explicit test overrides.
+- `make check test-contract test-security test-systemd test` passes, including
+  all unit, fuzz, authority, lifecycle, contract-runtime, Rocky systemd, and
+  aggregate QEMU integrations. `make test-config test-instance check` also
+  passes independently.
 
 ## Decisions and limitations
 
@@ -154,6 +188,14 @@ ptrace, a module, or another dispatcher.
 - Multiple implementations are permitted when they serve materially different
   contracts or host capabilities, but no fallback may weaken requested policy.
 - Kernel-module experimentation is confined to the disposable Rocky QEMU host.
+- The out-of-tree module is not recommended as the default. Its kprobe entry
+  redirection is kernel-version and architecture specific and carries build,
+  signing, upgrade, incident-response, and rollback costs. It remains a useful
+  experimental accelerator.
+- The preferred production path compiles each contract into a composition of
+  native kernel primitives, BPF LSM/cgroup BPF, Landlock when applicable,
+  seccomp for scalar syscall denial, and userspace only for emulation,
+  translation, virtual kernel state, or unsupported object semantics.
 
 ## Delivery strategy
 
@@ -162,7 +204,10 @@ ptrace, a module, or another dispatcher.
 - Pull request: intended; do not merge or close without human direction.
 - Planned commits: gate and research matrix; prototypes; automatic planner and
   integration; verification and benchmarks; documentation and final evidence.
-- Actual commits: pending.
+- Actual commits: `584f26bc` (gate definition), `3502b4e6` (module/BPF
+  prototypes, research, and planner), and `5b51300b` (automatic recipes,
+  requirement matrix, lifecycle coverage, benchmarks, and documentation),
+  followed by final evidence bookkeeping.
 
 ## Review policy and outcome
 

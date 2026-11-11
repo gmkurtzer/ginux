@@ -121,83 +121,99 @@ mkdir -p "$results"
     printf 'bpf_sha256=%s\n' "$(sha256sum ginux_lsm.bpf.o | awk '{print $1}')"
 } >"$results/provenance.txt"
 
-benchmark_yield() {
+record_yield() {
     label=$1
     output=$2
-    : >"$output"
-    taskset -c 0 ./bench-yield 100000 >/dev/null
-    repetition=1
-    while test "$repetition" -le 5; do
-        line=$(sudo sh -c "echo \$\$ > '$cgroup/cgroup.procs'; \
-            exec taskset -c 0 '$source_dir/bench-yield' 500000")
-        rate=$(printf '%s\n' "$line" | sed -n \
-            's/.*events_per_second=\([0-9.]*\).*/\1/p')
-        test -n "$rate"
-        printf '%s\t%s\n' "$repetition" "$rate" >>"$output"
-        repetition=$((repetition + 1))
-    done
-    mean=$(awk '{ total += $2 } END { printf "%.3f", total / NR }' "$output")
-    printf 'GATE16_BENCH: workload=yield mode=%s mean_events_per_second=%s\n' "$label" "$mean"
+    line=$(sudo sh -c "echo \$\$ > '$cgroup/cgroup.procs'; \
+        exec taskset -c 0 '$source_dir/bench-yield' 500000")
+    rate=$(printf '%s\n' "$line" | sed -n \
+        's/.*events_per_second=\([0-9.]*\).*/\1/p')
+    test -n "$rate"
+    printf '%s\t%s\n' "$repetition" "$rate" >>"$output"
+    printf 'GATE16_SAMPLE: repetition=%s workload=yield mode=%s rate=%s\n' \
+        "$repetition" "$label" "$rate"
 }
 
-benchmark_mkdir() {
+record_mkdir() {
     label=$1
     output=$2
-    : >"$output"
-    taskset -c 0 ./bench-mkdirat 100 >/dev/null
-    repetition=1
-    while test "$repetition" -le 5; do
-        line=$(taskset -c 0 ./bench-mkdirat 5000)
-        rate=$(printf '%s\n' "$line" | sed -n \
-            's/.*operations_per_second=\([0-9.]*\).*/\1/p')
-        test -n "$rate"
-        printf '%s\t%s\n' "$repetition" "$rate" >>"$output"
-        repetition=$((repetition + 1))
-    done
-    mean=$(awk '{ total += $2 } END { printf "%.3f", total / NR }' "$output")
-    printf 'GATE16_BENCH: workload=mkdir-allowed mode=%s mean_operations_per_second=%s\n' "$label" "$mean"
+    line=$(taskset -c 0 ./bench-mkdirat 5000)
+    rate=$(printf '%s\n' "$line" | sed -n \
+        's/.*operations_per_second=\([0-9.]*\).*/\1/p')
+    test -n "$rate"
+    printf '%s\t%s\n' "$repetition" "$rate" >>"$output"
+    printf 'GATE16_SAMPLE: repetition=%s workload=mkdir-allowed mode=%s rate=%s\n' \
+        "$repetition" "$label" "$rate"
 }
 
-benchmark_deny() {
+record_deny() {
     label=$1
     output=$2
     mechanism=$3
-    : >"$output"
-    repetition=1
-    while test "$repetition" -le 5; do
-        if test "$mechanism" = seccomp; then
-            line=$(taskset -c 0 ./bench-deny 100000 seccomp)
-        else
-            line=$(sudo sh -c "echo \$\$ > '$cgroup/cgroup.procs'; \
-                exec taskset -c 0 '$source_dir/bench-deny' 100000 external")
-        fi
-        rate=$(printf '%s\n' "$line" | sed -n \
-            's/.*denials_per_second=\([0-9.]*\).*/\1/p')
-        test -n "$rate"
-        printf '%s\t%s\n' "$repetition" "$rate" >>"$output"
-        repetition=$((repetition + 1))
-    done
-    mean=$(awk '{ total += $2 } END { printf "%.3f", total / NR }' "$output")
-    printf 'GATE16_BENCH: workload=mkdir-denied mode=%s mean_denials_per_second=%s\n' "$label" "$mean"
+    if test "$mechanism" = seccomp; then
+        line=$(taskset -c 0 ./bench-deny 100000 seccomp)
+    else
+        line=$(sudo sh -c "echo \$\$ > '$cgroup/cgroup.procs'; \
+            exec taskset -c 0 '$source_dir/bench-deny' 100000 external")
+    fi
+    rate=$(printf '%s\n' "$line" | sed -n \
+        's/.*denials_per_second=\([0-9.]*\).*/\1/p')
+    test -n "$rate"
+    printf '%s\t%s\n' "$repetition" "$rate" >>"$output"
+    printf 'GATE16_SAMPLE: repetition=%s workload=mkdir-denied mode=%s rate=%s\n' \
+        "$repetition" "$label" "$rate"
 }
 
-benchmark_yield native "$results/yield-native.tsv"
-benchmark_mkdir native "$results/mkdir-native.tsv"
-benchmark_deny seccomp "$results/deny-seccomp.tsv" seccomp
+for output in yield-native yield-module yield-bpf-lsm mkdir-native \
+    mkdir-module mkdir-bpf-lsm deny-seccomp deny-module deny-bpf-lsm; do
+    : >"$results/$output.tsv"
+done
+taskset -c 0 ./bench-yield 100000 >/dev/null
+taskset -c 0 ./bench-mkdirat 100 >/dev/null
 
-sudo insmod ./ginux_control.ko
-sudo ./test-control "$cgroup" >/dev/null
-benchmark_yield module "$results/yield-module.tsv"
-benchmark_mkdir module "$results/mkdir-module.tsv"
-benchmark_deny module "$results/deny-module.tsv" external
-sudo ./test-control --clear >/dev/null
-sudo rmmod ginux_control
+repetition=1
+while test "$repetition" -le 5; do
+    # Rotate the first measured mechanism so VM drift cannot systematically
+    # favor one path. Every repetition retains the same native pairing key.
+    case $((repetition % 3)) in
+        1) order='native module bpf-lsm' ;;
+        2) order='module bpf-lsm native' ;;
+        0) order='bpf-lsm native module' ;;
+    esac
+    for mode in $order; do
+        case "$mode" in
+            native)
+                record_yield native "$results/yield-native.tsv"
+                record_mkdir native "$results/mkdir-native.tsv"
+                record_deny seccomp "$results/deny-seccomp.tsv" seccomp
+                ;;
+            module)
+                sudo insmod ./ginux_control.ko
+                sudo ./test-control "$cgroup" >/dev/null
+                record_yield module "$results/yield-module.tsv"
+                record_mkdir module "$results/mkdir-module.tsv"
+                record_deny module "$results/deny-module.tsv" external
+                sudo ./test-control --clear >/dev/null
+                sudo rmmod ginux_control
+                ;;
+            bpf-lsm)
+                load_bpf_policy
+                record_yield bpf-lsm "$results/yield-bpf-lsm.tsv"
+                record_mkdir bpf-lsm "$results/mkdir-bpf-lsm.tsv"
+                record_deny bpf-lsm "$results/deny-bpf-lsm.tsv" external
+                sudo rm -rf "$bpf_programs" "$bpf_maps"
+                ;;
+        esac
+    done
+    repetition=$((repetition + 1))
+done
 
-load_bpf_policy
-benchmark_yield bpf-lsm "$results/yield-bpf-lsm.tsv"
-benchmark_mkdir bpf-lsm "$results/mkdir-bpf-lsm.tsv"
-benchmark_deny bpf-lsm "$results/deny-bpf-lsm.tsv" external
-sudo rm -rf "$bpf_programs" "$bpf_maps"
+for result in yield-native yield-module yield-bpf-lsm mkdir-native \
+    mkdir-module mkdir-bpf-lsm deny-seccomp deny-module deny-bpf-lsm; do
+    mean=$(awk '{ total += $2 } END { printf "%.3f", total / NR }' \
+        "$results/$result.tsv")
+    printf 'GATE16_BENCH: result=%s mean_per_second=%s\n' "$result" "$mean"
+done
 
 native_mean=$(awk '{ total += $2 } END { print total / NR }' \
     "$results/yield-native.tsv")
