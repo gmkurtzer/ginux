@@ -39,7 +39,7 @@ deny = []
 policy = "stop"
 
 [audit]
-mode = "stderr"
+enabled = true
 
 [network]
 backend = "none"
