@@ -69,7 +69,7 @@ shared-host networking semantics.
 
 ## Remaining work
 
-- [ ] Push the branch and open the Gate 17 pull request.
+- [x] Pushed the branch and opened the Gate 17 pull request.
 - [ ] Obtain human review and acceptance.
 
 ## Acceptance criteria
@@ -149,7 +149,7 @@ shared-host networking semantics.
 
 - Working branch: `hdae/concurrent-instance-isolation`
 - Intended base: `main`
-- Pull request: intended
+- Pull request: https://github.com/gmkurtzer/ginux/pull/259
 - Planned commits: gate and baseline; isolation/concurrency implementation and
   tests; Rocky integration and demonstration; documentation and evidence
 - Actual commits: `5566c0c2`, `5dd18da4`, `e71184a1`, `79786a17`, plus the
