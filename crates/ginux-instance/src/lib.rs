@@ -106,6 +106,137 @@ pub enum DispatchMode {
     Selective,
 }
 
+/// Host enforcement features discovered by the operator-side runtime. These
+/// are deliberately not part of an instance recipe: recipes describe required
+/// behavior, while the host chooses a sound implementation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct EnforcementCapabilities {
+    pub bpf_lsm: bool,
+    pub cgroup_bpf_network: bool,
+    pub cgroup_bpf_devices: bool,
+    pub landlock: bool,
+    pub seccomp: bool,
+    pub experimental_module: bool,
+    pub userspace_mediation: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct EnforcementOptions {
+    /// Testing/operator override. It may select a slower sound path, but never
+    /// permits startup when userspace mediation is unavailable.
+    pub force_userspace: bool,
+    /// The Gate 16 module is experimental and is never selected implicitly.
+    pub allow_experimental_module: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct EnforcementRequirements {
+    pub filesystem: bool,
+    pub network: bool,
+    pub devices: bool,
+    pub process_limits: bool,
+    pub exact_syscall_denial: bool,
+    pub virtual_kernel: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct EnforcementPlan {
+    pub native_limits: bool,
+    pub bpf_lsm: bool,
+    pub cgroup_bpf_network: bool,
+    pub cgroup_bpf_devices: bool,
+    pub landlock: bool,
+    pub seccomp: bool,
+    pub experimental_module: bool,
+    pub userspace_mediation: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EnforcementPlanError {
+    Filesystem,
+    Network,
+    Devices,
+    SyscallDenial,
+    VirtualKernel,
+    ForcedUserspace,
+}
+
+pub fn plan_enforcement(
+    requirements: EnforcementRequirements,
+    capabilities: EnforcementCapabilities,
+    options: EnforcementOptions,
+) -> Result<EnforcementPlan, EnforcementPlanError> {
+    let mut plan = EnforcementPlan {
+        native_limits: requirements.process_limits,
+        bpf_lsm: false,
+        cgroup_bpf_network: false,
+        cgroup_bpf_devices: false,
+        landlock: false,
+        seccomp: false,
+        experimental_module: false,
+        userspace_mediation: false,
+    };
+
+    if options.force_userspace {
+        if !capabilities.userspace_mediation {
+            return Err(EnforcementPlanError::ForcedUserspace);
+        }
+        plan.userspace_mediation = true;
+        return Ok(plan);
+    }
+
+    if requirements.filesystem {
+        if capabilities.bpf_lsm {
+            plan.bpf_lsm = true;
+        } else if capabilities.landlock {
+            plan.landlock = true;
+        } else if capabilities.userspace_mediation {
+            plan.userspace_mediation = true;
+        } else {
+            return Err(EnforcementPlanError::Filesystem);
+        }
+    }
+    if requirements.network {
+        if capabilities.cgroup_bpf_network {
+            plan.cgroup_bpf_network = true;
+        } else if capabilities.userspace_mediation {
+            plan.userspace_mediation = true;
+        } else {
+            return Err(EnforcementPlanError::Network);
+        }
+    }
+    if requirements.devices {
+        if capabilities.cgroup_bpf_devices {
+            plan.cgroup_bpf_devices = true;
+        } else if capabilities.userspace_mediation {
+            plan.userspace_mediation = true;
+        } else {
+            return Err(EnforcementPlanError::Devices);
+        }
+    }
+    if requirements.exact_syscall_denial {
+        // Prefer the supported kernel ABI. The module path is a deliberate
+        // operator opt-in until its versioning and packaging costs are solved.
+        if capabilities.seccomp {
+            plan.seccomp = true;
+        } else if options.allow_experimental_module && capabilities.experimental_module {
+            plan.experimental_module = true;
+        } else if capabilities.userspace_mediation {
+            plan.userspace_mediation = true;
+        } else {
+            return Err(EnforcementPlanError::SyscallDenial);
+        }
+    }
+    if requirements.virtual_kernel {
+        if capabilities.userspace_mediation {
+            plan.userspace_mediation = true;
+        } else {
+            return Err(EnforcementPlanError::VirtualKernel);
+        }
+    }
+    Ok(plan)
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NetworkBackend {
     None,
@@ -583,6 +714,37 @@ impl ConfigBuilder {
 }
 
 impl InstanceConfig {
+    pub fn enforcement_requirements(&self) -> EnforcementRequirements {
+        let selector_denies_syscall = self
+            .contract_deny
+            .as_slice()
+            .iter()
+            .any(|value| value.as_bytes().starts_with(b"syscall."))
+            || self
+                .contract_recipe_deny
+                .as_slice()
+                .iter()
+                .any(|value| value.as_bytes().starts_with(b"syscall."));
+        EnforcementRequirements {
+            filesystem: !self.filesystem_read.as_slice().is_empty()
+                || !self.filesystem_write.as_slice().is_empty()
+                || !self.filesystem_create.as_slice().is_empty()
+                || !self.filesystem_write_deny.as_slice().is_empty(),
+            network: !self.ingress_allow.as_slice().is_empty()
+                || !self.egress_allow.as_slice().is_empty(),
+            devices: !self.device_read.as_slice().is_empty()
+                || !self.device_write.as_slice().is_empty()
+                || !self.device_create.as_slice().is_empty(),
+            process_limits: self.process_max_processes != 0 || self.process_max_threads != 0,
+            exact_syscall_denial: !self.contract_exact_deny.as_slice().is_empty()
+                || selector_denies_syscall,
+            virtual_kernel: !self.kernel_proc_read.as_slice().is_empty()
+                || !self.kernel_proc_write.as_slice().is_empty()
+                || !self.kernel_sys_read.as_slice().is_empty()
+                || !self.kernel_sys_write.as_slice().is_empty(),
+        }
+    }
+
     fn derive_contract_grants(&mut self) -> Result<(), ConfigError> {
         if !self.filesystem_read.as_slice().is_empty() {
             push_unique(&mut self.contract_read, b"filesystem.**")?;
@@ -2844,6 +3006,146 @@ policy = "stop"
         assert!(config.privilege_setuid.as_slice().is_empty());
         assert!(config.privilege_setgid.as_slice().is_empty());
         assert!(!config.filesystem_device_nodes);
+    }
+
+    #[test]
+    fn enforcement_planner_combines_narrow_kernel_components() {
+        let requirements = EnforcementRequirements {
+            filesystem: true,
+            network: true,
+            devices: true,
+            process_limits: true,
+            exact_syscall_denial: true,
+            virtual_kernel: false,
+        };
+        let capabilities = EnforcementCapabilities {
+            bpf_lsm: true,
+            cgroup_bpf_network: true,
+            cgroup_bpf_devices: true,
+            landlock: true,
+            seccomp: true,
+            experimental_module: true,
+            userspace_mediation: true,
+        };
+        let plan = plan_enforcement(
+            requirements,
+            capabilities,
+            EnforcementOptions {
+                force_userspace: false,
+                allow_experimental_module: false,
+            },
+        )
+        .unwrap();
+        assert!(plan.native_limits);
+        assert!(plan.bpf_lsm);
+        assert!(plan.cgroup_bpf_network);
+        assert!(plan.cgroup_bpf_devices);
+        assert!(plan.seccomp);
+        assert!(!plan.landlock);
+        assert!(!plan.experimental_module);
+        assert!(!plan.userspace_mediation);
+    }
+
+    #[test]
+    fn enforcement_planner_uses_userspace_only_for_uncovered_semantics() {
+        let requirements = EnforcementRequirements {
+            filesystem: true,
+            network: false,
+            devices: false,
+            process_limits: false,
+            exact_syscall_denial: false,
+            virtual_kernel: true,
+        };
+        let capabilities = EnforcementCapabilities {
+            bpf_lsm: true,
+            cgroup_bpf_network: false,
+            cgroup_bpf_devices: false,
+            landlock: false,
+            seccomp: false,
+            experimental_module: false,
+            userspace_mediation: true,
+        };
+        let plan = plan_enforcement(
+            requirements,
+            capabilities,
+            EnforcementOptions {
+                force_userspace: false,
+                allow_experimental_module: false,
+            },
+        )
+        .unwrap();
+        assert!(plan.bpf_lsm);
+        assert!(plan.userspace_mediation);
+    }
+
+    #[test]
+    fn enforcement_planner_fails_closed_when_a_requirement_is_uncovered() {
+        let error = plan_enforcement(
+            EnforcementRequirements {
+                filesystem: false,
+                network: true,
+                devices: false,
+                process_limits: false,
+                exact_syscall_denial: false,
+                virtual_kernel: false,
+            },
+            EnforcementCapabilities {
+                bpf_lsm: false,
+                cgroup_bpf_network: false,
+                cgroup_bpf_devices: false,
+                landlock: false,
+                seccomp: false,
+                experimental_module: false,
+                userspace_mediation: false,
+            },
+            EnforcementOptions {
+                force_userspace: false,
+                allow_experimental_module: false,
+            },
+        );
+        assert_eq!(error, Err(EnforcementPlanError::Network));
+    }
+
+    #[test]
+    fn experimental_module_requires_host_opt_in() {
+        let requirements = EnforcementRequirements {
+            filesystem: false,
+            network: false,
+            devices: false,
+            process_limits: false,
+            exact_syscall_denial: true,
+            virtual_kernel: false,
+        };
+        let capabilities = EnforcementCapabilities {
+            bpf_lsm: false,
+            cgroup_bpf_network: false,
+            cgroup_bpf_devices: false,
+            landlock: false,
+            seccomp: false,
+            experimental_module: true,
+            userspace_mediation: false,
+        };
+        assert_eq!(
+            plan_enforcement(
+                requirements,
+                capabilities,
+                EnforcementOptions {
+                    force_userspace: false,
+                    allow_experimental_module: false,
+                },
+            ),
+            Err(EnforcementPlanError::SyscallDenial)
+        );
+        let plan = plan_enforcement(
+            requirements,
+            capabilities,
+            EnforcementOptions {
+                force_userspace: false,
+                allow_experimental_module: true,
+            },
+        )
+        .unwrap();
+        assert!(plan.experimental_module);
     }
 
     #[test]

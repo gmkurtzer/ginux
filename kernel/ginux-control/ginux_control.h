@@ -1,0 +1,15 @@
+#ifndef GINUX_CONTROL_H
+#define GINUX_CONTROL_H
+
+#include <linux/ioctl.h>
+
+#define GINUX_CONTROL_DEVICE "/dev/ginux-control"
+#define GINUX_CONTROL_IOC_MAGIC 0xB7
+#define GINUX_CONTROL_SET_CGROUP \
+	_IOW(GINUX_CONTROL_IOC_MAGIC, 1, int)
+#define GINUX_CONTROL_CLEAR _IO(GINUX_CONTROL_IOC_MAGIC, 2)
+#define GINUX_CONTROL_GET_ABI \
+	_IOR(GINUX_CONTROL_IOC_MAGIC, 3, unsigned int)
+#define GINUX_CONTROL_ABI 1U
+
+#endif
