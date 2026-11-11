@@ -87,9 +87,12 @@ results "$test_dir/paranoid/results.tsv" 0.40
 ./scripts/gate15-report.sh "$test_dir" "$config" >/dev/null
 
 grep -Fq '# Gate 15 dispatch-mode performance matrix' "$test_dir/report.md"
+grep -Fq '### Selective' "$test_dir/report.md"
+grep -Fq '### Paranoid' "$test_dir/report.md"
 grep -Fq '| threads | 2 | 2 |' "$test_dir/report.md"
 grep -Fq '0.9800x' "$test_dir/report.md"
 grep -Fq '0.4000x' "$test_dir/report.md"
+grep -Fq '| 2/2 |' "$test_dir/report.md"
 grep -Fq '<svg ' "$test_dir/performance.svg"
 grep -Fq 'selective' "$test_dir/performance.svg"
 grep -Fq 'paranoid' "$test_dir/performance.svg"

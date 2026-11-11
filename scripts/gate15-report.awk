@@ -31,9 +31,11 @@ function ratio(control, measured, direction_value) {
     return control / measured
 }
 
-END {
-    print "| Workload | vCPUs | Threads | Native (selective pair) | Selective | Ratio | Selective SD | Native (paranoid pair) | Paranoid | Ratio | Paranoid SD |"
-    print "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"
+function print_mode_table(mode, label,    w, a, t, workload, vcpus, threads, row, native_key, measured_key, native_mean, measured_mean, performance, difference) {
+    print "### " label
+    print ""
+    print "| Workload | vCPUs | Threads | Native mean | Native SD | Ginux mean | Ginux SD | Performance | Difference | Samples (native/Ginux) |"
+    print "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|"
     for (w = 1; w <= workload_count; w++) {
         workload = workloads[w]
         for (a = 1; a <= allocation_count; a++) {
@@ -42,19 +44,23 @@ END {
                 threads = (t == 1 ? 1 : vcpus)
                 if (t == 2 && vcpus == 1) continue
                 row = workload SUBSEP vcpus SUBSEP threads
-                ns = "native" SUBSEP "selective" SUBSEP row
-                s = "selective" SUBSEP "selective" SUBSEP row
-                np = "native" SUBSEP "paranoid" SUBSEP row
-                p = "paranoid" SUBSEP "paranoid" SUBSEP row
-                ns_mean = mean(ns)
-                s_mean = mean(s)
-                np_mean = mean(np)
-                p_mean = mean(p)
-                printf "| %s | %d | %d | %.3f %s | %.3f %s | %.4fx | %.3f | %.3f %s | %.3f %s | %.4fx | %.3f |\n", \
-                    workload, vcpus, threads, ns_mean, unit[row], s_mean, unit[row], \
-                    ratio(ns_mean, s_mean, direction[row]), sd(s), np_mean, unit[row], \
-                    p_mean, unit[row], ratio(np_mean, p_mean, direction[row]), sd(p)
+                native_key = "native" SUBSEP mode SUBSEP row
+                measured_key = mode SUBSEP mode SUBSEP row
+                native_mean = mean(native_key)
+                measured_mean = mean(measured_key)
+                performance = ratio(native_mean, measured_mean, direction[row])
+                difference = (performance - 1) * 100
+                printf "| %s | %d | %d | %.3f %s | %.3f | %.3f %s | %.3f | %.4fx | %+.2f%% | %d/%d |\n", \
+                    workload, vcpus, threads, native_mean, unit[row], sd(native_key), \
+                    measured_mean, unit[row], sd(measured_key), performance, difference, \
+                    count[native_key], count[measured_key]
             }
         }
     }
+    print ""
+}
+
+END {
+    print_mode_table("selective", "Selective")
+    print_mode_table("paranoid", "Paranoid")
 }
