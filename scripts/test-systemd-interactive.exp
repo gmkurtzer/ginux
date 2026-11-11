@@ -285,6 +285,23 @@ expect {
     eof { puts stderr "instance exited during background job"; exit 118 }
 }
 expect -re {\[root@ginux [^]]+\]# }
+send -- "sleep 2 &\r"
+expect -re {\[root@ginux [^]]+\]# }
+after 3000
+send -- "\r"
+expect {
+    -re {Done[[:space:]]+sleep 2} {}
+    timeout { puts stderr "background completion notification was absent"; exit 232 }
+    eof { puts stderr "instance exited during background completion check"; exit 233 }
+}
+expect -re {\[root@ginux [^]]+\]# }
+send -- "printf 'GINUX_JOB_%s\\n' 'NOTIFY: PASS'\r"
+expect {
+    -re {GINUX_JOB_NOTIFY: PASS} {}
+    timeout { puts stderr "shell was unusable after background completion"; exit 234 }
+    eof { puts stderr "instance exited after background completion"; exit 235 }
+}
+expect -re {\[root@ginux [^]]+\]# }
 send -- "test \"\$(uname -s)\" = Linux && test \"\$(uname -n)\" = ginux && test \"\$(uname -r)\" = 6.12.0-ginux-abi1 && test \"\$(uname -v)\" = 'Ginux userspace kernel 0.1.0' && grep -Fq 'Ginux userspace kernel 0.1.0 (Linux ABI personality 6.12.0-ginux-abi1; contract self-contained-v1; x86_64)' /proc/version && test \"\$(grep -c '^processor' /proc/cpuinfo)\" -eq 2 && grep -q '^model name' /proc/cpuinfo && printf 'GINUX_PROC_%s\\n' 'IDENTITY: PASS'\r"
 expect {
     -re {GINUX_PROC_IDENTITY: PASS} {}

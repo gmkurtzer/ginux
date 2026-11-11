@@ -5636,10 +5636,26 @@ fn supervise_native(
             if processes.exit(task.virtual_id, exit_status).is_err() {
                 native_fail(instance, pid, b"native virtual exit failed");
             }
+            let parent_virtual_pid = processes
+                .view(task.virtual_id)
+                .map(|view| view.parent)
+                .unwrap_or(0);
             pid_map.remove(task.host_pid);
             native_virtual_kernel_clear_owner(&mut virtual_kernel_fds, task.host_pid);
             task.tracing = false;
             tasks[task_index] = Some(task);
+            // Linux may report the parent's SIGCHLD delivery stop before the
+            // tracer receives the child's final exit status. That early
+            // notification is suppressed below because the virtual child is
+            // not reportable yet. Queue a replacement only after recording
+            // the exit, so an asynchronous shell handler can reap it.
+            if parent_virtual_pid != 0 {
+                if let Some(parent) = tasks.iter().flatten().find(|candidate| {
+                    candidate.virtual_id.pid == parent_virtual_pid && candidate.tracing
+                }) {
+                    let _ = unsafe { syscall2(SYS_KILL, parent.host_pid, SIGCHLD) };
+                }
+            }
             if task.virtual_id == root_virtual {
                 for descendant in tasks.iter().flatten() {
                     if descendant.tracing {
@@ -5815,7 +5831,18 @@ fn supervise_native(
             continue;
         }
         if signal == 17 {
-            if ptrace(PTRACE_CONT, host_pid, 0, 0) < 0 {
+            let reportable_child = tasks.iter().flatten().any(|candidate| {
+                !candidate.tracing
+                    && processes.view(candidate.virtual_id).is_ok_and(|view| {
+                        view.parent == task.virtual_id.pid
+                            && matches!(view.state, TaskState::Exited(_) | TaskState::Signaled(_))
+                    })
+            });
+            // Suppress a host notification that raced ahead of Ginux's
+            // virtual exit record. The exit path queues a replacement after
+            // the child is reportable.
+            let delivered_signal = if reportable_child { SIGCHLD } else { 0 };
+            if ptrace(PTRACE_CONT, host_pid, 0, delivered_signal) < 0 {
                 native_fail(instance, pid, b"native SIGCHLD resume failed");
             }
             continue;
