@@ -174,22 +174,22 @@ make host-reset         # discard that host's cache, instances, and writable sta
 make demo-gate-9        # Gate 9 checkpoint through the same host workflow
 ```
 
-Instance recipes select syscall control under `[contract.syscalls]`:
+Instance recipes describe syscall semantics, not enforcement machinery:
 
 ```toml
 [contract.syscalls]
-control = "selective" # default; use "paranoid" for all-syscall mediation
 default = "deny"
 allow = ["*"]
 deny = []
 ```
 
-`selective` is the default and permits direct host execution only
-when the instance contract allows the operation and Ginux's versioned catalog
-independently classifies it as direct-safe. Denials, virtual state, inspection,
-translation, emulation, pointer or descriptor validation, and modified results
-remain Ginux-dispatched in both modes. `paranoid` is an explicit opt-in that
-sends every syscall through the Ginux userspace dispatcher before completion.
+Ginux derives the narrowest sound enforcement plan from the complete contract
+and detected host capabilities. Native kernel boundaries, BPF LSM/cgroup BPF,
+Landlock, seccomp, and userspace mediation may be combined; startup fails
+rather than weakening an unsatisfied contract. Virtual state, translation, and
+emulation remain in userspace. See
+[Kernel-assisted syscall control research](docs/kernel-assisted-dispatch.md)
+for the Gate 16 prototypes, measurements, and recommendation.
 
 `make bench-compare` checks every row against the 4% native budget and, after an
 accepted baseline is published under `benchmarks/gate11/`, against that Ginux
@@ -370,8 +370,9 @@ executes `[instance].init` with the configured arguments and environment inside
 the supplied host root directory. The bootstrap requires chroot and credential
 change privileges, and a kernel with `close_range` (Linux 5.9 or later).
 It drops to UID/GID 1000 before executing the workload. The configuration must
-select `profile = "balanced"` and `backend = "ptrace-native"`; storage and device
-assignments are not implemented by this command and are rejected.
+select `profile = "balanced"`; Ginux derives the available execution and
+enforcement components. Storage and device assignments are not implemented by
+this command and are rejected.
 
 `[instance].workdir` is optional and defaults to `/work`; `/` is also supported.
 The bootstrap creates the working directory if its parent exists, then enters

@@ -3126,10 +3126,12 @@ fn native_main(
     } else {
         mode
     };
-    let direct_yield = config.dispatch_mode == DispatchMode::Selective
-        && contract.syscall_rule(24).is_some_and(|rule| {
-            rule.operation.direct_safe && rule.action == ContractAction::Mediate
-        });
+    let direct_yield = matches!(
+        config.dispatch_mode,
+        DispatchMode::Automatic | DispatchMode::Selective
+    ) && contract
+        .syscall_rule(24)
+        .is_some_and(|rule| rule.operation.direct_safe && rule.action == ContractAction::Mediate);
     let mut instance = Instance::create(config);
     if instance.start().is_err() {
         instance_fail(&mut instance, b"invalid native start transition");
@@ -9920,9 +9922,55 @@ fn print_instance_start_summary(config: &InstanceConfig) {
     });
     write_all(b" dispatch=");
     write_all(match config.dispatch_mode {
+        DispatchMode::Automatic => b"automatic",
         DispatchMode::Paranoid => b"paranoid",
         DispatchMode::Selective => b"selective",
     });
+    let plan = ginux_instance::plan_enforcement(
+        config.enforcement_requirements(),
+        ginux_instance::EnforcementCapabilities {
+            bpf_lsm: false,
+            cgroup_bpf_network: false,
+            cgroup_bpf_devices: false,
+            landlock: false,
+            seccomp: true,
+            experimental_module: false,
+            userspace_mediation: true,
+        },
+        ginux_instance::EnforcementOptions {
+            force_userspace: config.dispatch_mode == DispatchMode::Paranoid,
+            allow_experimental_module: false,
+        },
+    )
+    .unwrap_or_else(|_| {
+        write_all(b" enforcement=unsatisfied\n");
+        exit_process(125)
+    });
+    write_all(b" enforcement=");
+    if plan.native_limits {
+        write_all(b"native-limits,");
+    }
+    if plan.seccomp {
+        write_all(b"seccomp,");
+    }
+    if plan.userspace_mediation {
+        write_all(b"userspace,");
+    }
+    if plan.bpf_lsm {
+        write_all(b"bpf-lsm,");
+    }
+    if plan.cgroup_bpf_network {
+        write_all(b"cgroup-bpf-network,");
+    }
+    if plan.cgroup_bpf_devices {
+        write_all(b"cgroup-bpf-devices,");
+    }
+    if plan.landlock {
+        write_all(b"landlock,");
+    }
+    if plan.experimental_module {
+        write_all(b"experimental-module,");
+    }
     write_all(b" network=");
     line(match config.network_backend {
         NetworkBackend::None => b"none",

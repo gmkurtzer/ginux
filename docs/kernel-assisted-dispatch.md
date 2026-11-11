@@ -22,6 +22,11 @@ by the compiled instance contract:
 Portable instance recipes state these semantics. They do not select an
 implementation backend.
 
+The machine-checked operation-class inventory is
+[`kernel-assisted-requirements.tsv`](kernel-assisted-requirements.tsv). It is
+validated by `make test-gate16-requirements` so a class cannot silently lose
+its pre-effect requirement, mechanism, fallback, or disposition.
+
 ## Mechanism matrix
 
 | Mechanism | Pre-effect deny | Emulate or translate | Scope and inheritance | Allowed-call cost | Gate 16 disposition |
@@ -36,8 +41,8 @@ implementation backend.
 | Syscall User Dispatch | Signal before selected syscall execution | Userspace signal handler can emulate | Per thread; resets across fork/exec and is controlled by task memory | Direct region is fast; dispatched calls pay signal cost | Rejected for security enforcement; optional compatibility research only |
 | tracepoint/fentry/fexit BPF | Primarily observation | No general safe denial | Attachment-dependent | Hooked event cost | Rejected as sole enforcement path |
 | BPF `fmod_ret` | Only on kernel functions explicitly permitting return modification | Limited return replacement | Attachment-dependent | Hooked function cost | Insufficient for arbitrary syscalls |
-| loadable module with ftrace IP modification | Potentially, by redirecting selected syscall implementations | A module can return an errno; userspace emulation needs a separate queue | Requires module-owned task identity and fork/exec/exit tracking | Only hooked syscall implementations need pay | Prototype; compatibility and safety risks must be measured |
-| kprobe execution redirection | Technically possible by changing registers and instruction pointer | Module-specific | Requires module-owned task identity | Only probed functions need pay | Diagnostic fallback only; kernel documentation warns of architectural and crash risk |
+| loadable module with ftrace IP modification | Potentially, by redirecting selected syscall implementations | A module can return an errno; userspace emulation needs a separate queue | Requires module-owned policy identity | Only hooked syscall implementations need pay | Rejected on the tested Rocky kernel: required syscall entry symbols are not ftrace-modifiable |
+| kprobe execution redirection | Yes in the bounded prototype by replacing the selected syscall entry IP | Module-specific | Prototype scopes policy by cgroup, which survives thread/fork/exec | Only probed functions need pay | Implemented experimentally; kernel documentation warns of architectural, versioning, and crash risk |
 | syscall-table patching | Technically possible on some builds | Module-specific | Global, unsupported | Potentially low | Rejected: unsupported internal patching, global conflict, and unsafe lifecycle |
 | libc or binary rewriting | No reliable coverage | Limited | Bypassable by raw syscalls and static code | Low | Rejected as enforcement |
 
@@ -87,23 +92,72 @@ The runtime reports the selected components and why each was required. A debug
 override may force a slower sound implementation, but cannot force an
 implementation that weakens the contract.
 
-## Prototype questions
+The checked-in `ginux-instance` planner implements this as a deterministic
+composition rather than a single backend enum. Supported kernel APIs are
+preferred; the experimental module requires a host-side opt-in. Any uncovered
+requirement either selects userspace mediation or fails startup. Unit tests
+cover mixed component selection, userspace-only semantics, module opt-in, and
+an unsatisfied fail-closed plan.
 
-The kernel-module prototype must answer these questions before it can become a
-supported backend:
+## Prototype answers
 
-- Are the target syscall entry functions present and ftrace-modifiable on the
-  supported Rocky kernel without colliding with livepatch?
-- Can an instance be attached while its initial task is stopped, then inherit a
-  stable policy identity across every fork, clone, exec, and exit without an
-  uncontrolled interval?
-- Can policy lookup and selected denial remain RCU-safe without allocations,
-  sleeping, or userspace dependency in the ftrace callback?
-- Can module unload be refused while policies or managed tasks exist, and can
-  supervisor loss force managed tasks into a fail-closed state?
-- Does the measured improvement justify an out-of-tree module's kernel-version,
-  signing, packaging, and incident-response burden?
+- `__x64_sys_mkdirat` is kprobe-visible on Rocky
+  `6.12.0-211.16.1.el10_2.0.1.x86_64`, but it is the only tested syscall entry
+  among `getpid`, `sched_yield`, `mkdirat`, and `do_syscall_64` exposed through
+  the ftrace filter. The module prototype therefore uses a kprobe and does not
+  claim a stable kernel ABI.
+- A cgroup-bound policy covers the current task and descendants. Raw syscall,
+  pthread, fork, and post-exec static fixtures are all denied before a
+  filesystem mutation.
+- Policy lookup is RCU-protected and performs no allocation or userspace round
+  trip in the kprobe handler.
+- Policy survives controller exit. The module holds its own reference while a
+  policy is active, refuses unload, and can be unloaded only after explicit
+  policy removal.
+- The prototype demonstrates feasibility, not production suitability. Every
+  supported kernel build would need compilation, signing, symbol and behavior
+  validation, upgrade coordination, and an incident-safe rollback path.
 
 ## Evidence
 
-Pending Gate 16 prototypes and measurements.
+`make test-gate16-kernel-assist` builds both prototypes against the exact Rocky
+kernel, loads them only in the disposable QEMU host, and verifies raw, thread,
+fork, exec, detach, controller-loss, and unload behavior. Both paths pass. The
+BPF LSM link and map remain pinned after the loader exits; removing the link
+detaches enforcement deterministically. The host reports Landlock ABI 6.
+
+The raw five-sample results and provenance are checked in under
+[`benchmarks/gate16/results/`](../benchmarks/gate16/results/). Higher is better.
+
+| Workload | Native/control mean ± sample SD | Module mean ± SD | BPF LSM mean ± SD |
+|---|---:|---:|---:|
+| Unrelated `sched_yield` calls/s | 798,975 ± 9,637 | 774,894 ± 3,036 (0.970x) | 776,408 ± 1,578 (0.972x) |
+| Allowed `mkdirat` create/remove pairs/s | 7,629 ± 95 | 7,466 ± 49 (0.979x) | 7,396 ± 102 (0.969x) |
+
+The differences are within the variance expected from TCG and show the key
+result: unrelated allowed syscalls do not enter a userspace dispatcher. For a
+denied `mkdirat`, seccomp produced 2,210,663 ± 11,178 denials/s, the module
+1,582,106 ± 14,492 denials/s, and BPF LSM 318,738 ± 3,880 denials/s. These
+figures are not equivalent hook points: seccomp rejects at syscall entry,
+whereas BPF LSM performs object-aware policy at the VFS security hook.
+
+Gate 15 remains the authoritative current-runtime comparison. Its matched
+matrix shows why kernel assistance matters: selective is close to native for
+direct-safe operations, while paranoid all-syscall userspace notification is
+orders of magnitude slower on thread-yield. Gate 16 does not relabel prototype
+microbenchmarks as a full production runtime benchmark.
+
+## Recommendation
+
+Do not make the out-of-tree module the default. Keep it as an experimental
+accelerator until kernel-version compatibility, packaging, signing, complete
+operation coverage, policy update, and rollback are proven. Its kprobe entry
+redirection is materially less stable than supported security APIs.
+
+The preferred production path is a contract compiler that combines native
+namespaces/cgroups/rlimits, BPF LSM, cgroup BPF, Landlock where its monotonic
+allow-list model fits, and seccomp for simple syscall-number denial. Only ABI
+emulation, translation, virtual `/proc` and `/sys`, and pointer-aware semantics
+without a supported kernel hook remain in the userspace path. Ptrace/seccomp
+notification stays as the sound compatibility fallback. Startup fails rather
+than weakening the contract when the host cannot satisfy every requirement.

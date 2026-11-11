@@ -15,3 +15,6 @@ rocky_scp scripts/gate16-kernel-assist-guest.sh \
     ginux@127.0.0.1:/home/ginux/
 rocky_ssh 'chmod +x /home/ginux/gate16-kernel-assist-guest.sh && \
     /home/ginux/gate16-kernel-assist-guest.sh /home/ginux/ginux-control'
+rm -rf build/gate16-results
+rocky_scp -r ginux@127.0.0.1:/home/ginux/gate16-results build/
+printf '%s\n' 'Gate 16 raw benchmark samples: build/gate16-results/'

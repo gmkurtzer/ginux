@@ -102,6 +102,7 @@ pub enum ExecutionBackend {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DispatchMode {
+    Automatic,
     Paranoid,
     Selective,
 }
@@ -533,7 +534,7 @@ impl ConfigBuilder {
             memory_mib: 0,
             execution_profile: ExecutionProfile::Security,
             execution_backend: ExecutionBackend::Interpreter,
-            dispatch_mode: DispatchMode::Selective,
+            dispatch_mode: DispatchMode::Automatic,
             contract_profile: Text::empty(),
             contract_templates: TextList::empty(),
             contract_allow: TextList::empty(),
@@ -603,7 +604,9 @@ impl ConfigBuilder {
     }
 
     fn finish(self) -> Result<InstanceConfig, ConfigError> {
-        const REQUIRED: u128 = ((1 << 16) - 1) & !(1 << 13);
+        // Execution backend is derived from the semantic profile when omitted.
+        // It remains accepted only for compatibility and test overrides.
+        const REQUIRED: u128 = ((1 << 16) - 1) & !(1 << 9) & !(1 << 13);
         const WORKDIR_BIT: u128 = 1 << 16;
         const HOSTNAME_BIT: u128 = 1 << 17;
         const CONTRACT_DIGEST_BIT: u128 = 1 << 21;
@@ -629,6 +632,16 @@ impl ConfigBuilder {
         } else {
             self.id
         };
+        let execution_backend = if self.seen & (1 << 9) != 0 {
+            self.execution_backend
+        } else {
+            match self.execution_profile {
+                ExecutionProfile::Security => ExecutionBackend::Interpreter,
+                ExecutionProfile::Balanced | ExecutionProfile::Performance => {
+                    ExecutionBackend::PtraceNative
+                }
+            }
+        };
         let supplied_contract_digest = self.contract_digest;
         let supplied_contract_digest_set = self.seen & CONTRACT_DIGEST_BIT != 0;
         let mut config = InstanceConfig {
@@ -643,7 +656,7 @@ impl ConfigBuilder {
             vcpus: self.vcpus,
             memory_mib: self.memory_mib,
             execution_profile: self.execution_profile,
-            execution_backend: self.execution_backend,
+            execution_backend,
             dispatch_mode: self.dispatch_mode,
             contract_profile: self.contract_profile,
             contract_templates: self.contract_templates,
@@ -859,6 +872,7 @@ impl InstanceConfig {
             }
             b"contract.syscalls.control" => {
                 self.dispatch_mode = match parse_string::<32>(value)?.as_bytes() {
+                    b"automatic" => DispatchMode::Automatic,
                     b"paranoid" => DispatchMode::Paranoid,
                     b"selective" => DispatchMode::Selective,
                     _ => return Err(ConfigError::InvalidValue),
@@ -1247,12 +1261,6 @@ impl InstanceConfig {
             ExecutionProfile::Balanced => b"balanced",
             ExecutionProfile::Performance => b"performance",
         })?;
-        output.raw(b"\nbackend = ")?;
-        output.quoted(match self.execution_backend {
-            ExecutionBackend::Interpreter => b"interpreter",
-            ExecutionBackend::PtraceSysemu => b"ptrace-sysemu",
-            ExecutionBackend::PtraceNative => b"ptrace-native",
-        })?;
         output.raw(b"\n\n[contract]\nversion = ")?;
         output.number(self.contract_recipe_version)?;
         output.raw(b"\ncatalog = ")?;
@@ -1263,12 +1271,17 @@ impl InstanceConfig {
         output.list(self.contract_deny.as_slice())?;
         output.raw(b"\ndigest = ")?;
         output.quoted(self.contract_digest.as_bytes())?;
-        output.raw(b"\n\n[contract.syscalls]\ncontrol = ")?;
-        output.quoted(match self.dispatch_mode {
-            DispatchMode::Paranoid => b"paranoid",
-            DispatchMode::Selective => b"selective",
-        })?;
-        output.raw(b"\ndefault = \"deny\"\nallow = ")?;
+        output.raw(b"\n\n[contract.syscalls]\n")?;
+        if self.dispatch_mode != DispatchMode::Automatic {
+            output.raw(b"control = ")?;
+            output.quoted(match self.dispatch_mode {
+                DispatchMode::Automatic => b"automatic",
+                DispatchMode::Paranoid => b"paranoid",
+                DispatchMode::Selective => b"selective",
+            })?;
+            output.raw(b"\n")?;
+        }
+        output.raw(b"default = \"deny\"\nallow = ")?;
         output.syscall_list(self.contract_exact_allow.as_slice())?;
         output.raw(b"\ndeny = ")?;
         output.syscall_list(self.contract_exact_deny.as_slice())?;
@@ -1718,6 +1731,7 @@ fn parse_field(
         (Section::ContractSyscalls, b"control") => {
             builder.mark(1u128 << 52)?;
             builder.dispatch_mode = match parse_string::<32>(value)?.as_bytes() {
+                b"automatic" => DispatchMode::Automatic,
                 b"paranoid" => DispatchMode::Paranoid,
                 b"selective" => DispatchMode::Selective,
                 _ => return Err(ConfigError::InvalidValue),
@@ -2465,7 +2479,6 @@ vcpus = 1
 memory_mib = 128
 [execution]
 profile = "security"
-backend = "interpreter"
 [contract]
 version = 1
 catalog = 2
@@ -2490,7 +2503,7 @@ policy = "stop"
         assert_eq!(config.schema_version, 1);
         assert_eq!(config.id.as_bytes(), b"demo");
         assert_eq!(config.execution_profile, ExecutionProfile::Security);
-        assert_eq!(config.dispatch_mode, DispatchMode::Selective);
+        assert_eq!(config.dispatch_mode, DispatchMode::Automatic);
         assert_eq!(config.contract_digest.as_bytes().len(), 64);
         let normalized = config.normalized().unwrap();
         let reparsed = InstanceConfig::parse(normalized.as_bytes()).unwrap();
@@ -2498,9 +2511,9 @@ policy = "stop"
     }
 
     #[test]
-    fn dispatch_mode_is_strict_and_defaults_to_selective() {
+    fn dispatch_mode_defaults_to_automatic_and_retains_debug_overrides() {
         let defaulted = InstanceConfig::parse(VALID.as_bytes()).unwrap();
-        assert_eq!(defaulted.dispatch_mode, DispatchMode::Selective);
+        assert_eq!(defaulted.dispatch_mode, DispatchMode::Automatic);
 
         let paranoid = VALID.replace(
             "[contract]",
@@ -2515,13 +2528,15 @@ policy = "stop"
             DispatchMode::Paranoid
         );
 
-        let unknown = VALID.replace(
+        let automatic = VALID.replace(
             "[contract]",
             "[contract.syscalls]\ncontrol = \"automatic\"\n[contract]",
         );
         assert_eq!(
-            InstanceConfig::parse(unknown.as_bytes()),
-            Err(ConfigError::InvalidValue)
+            InstanceConfig::parse(automatic.as_bytes())
+                .unwrap()
+                .dispatch_mode,
+            DispatchMode::Automatic
         );
     }
 
@@ -2722,7 +2737,7 @@ policy = "stop"
             "# operator comment\nschema_version = 1\n[instance]",
         );
         let resources = "[resources]\nvcpus = 1\nmemory_mib = 128\n";
-        let execution = "[execution]\nprofile = \"security\"\nbackend = \"interpreter\"\n";
+        let execution = "[execution]\nprofile = \"security\"\n";
         let reordered = commented
             .replace(resources, "GATE4_SECTION_PLACEHOLDER\n")
             .replace(execution, resources)
@@ -2756,7 +2771,10 @@ policy = "stop"
 
     #[test]
     fn rejects_unsupported_execution_before_start() {
-        let performance = VALID.replace("profile = \"security\"", "profile = \"performance\"");
+        let performance = VALID.replace(
+            "profile = \"security\"",
+            "profile = \"performance\"\nbackend = \"interpreter\"",
+        );
         assert_eq!(
             InstanceConfig::parse(performance.as_bytes()),
             Err(ConfigError::UnsupportedExecution)
@@ -2765,9 +2783,7 @@ policy = "stop"
 
     #[test]
     fn accepts_native_ptrace_execution_pair() {
-        let native = VALID
-            .replace("profile = \"security\"", "profile = \"balanced\"")
-            .replace("backend = \"interpreter\"", "backend = \"ptrace-native\"");
+        let native = VALID.replace("profile = \"security\"", "profile = \"balanced\"");
         let config = InstanceConfig::parse(native.as_bytes()).unwrap();
         assert_eq!(config.execution_profile, ExecutionProfile::Balanced);
         assert_eq!(config.execution_backend, ExecutionBackend::PtraceNative);

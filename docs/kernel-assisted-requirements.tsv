@@ -1,0 +1,15 @@
+class	pre_effect	pointer_or_object_context	direct_allowed_path	preferred	fallback	disposition
+syscall.exact-deny	yes	no	yes	seccomp	userspace	implemented-supported
+filesystem.path	yes	yes	yes	bpf-lsm	userspace	prototype-implemented
+network.socket	yes	yes	yes	cgroup-bpf	userspace	planned-supported-api
+device.access	yes	yes	yes	cgroup-bpf-device	userspace	planned-supported-api
+process.limits	yes	yes	yes	cgroup-rlimit	userspace	implemented-supported
+ioctl.object	yes	yes	yes	bpf-lsm	userspace	partial-hook-coverage
+proc.virtual	yes	yes	no	userspace	none	implemented-userspace
+sys.virtual	yes	yes	no	userspace	none	implemented-userspace
+credential.transition	yes	yes	yes	bpf-lsm	userspace	planned-supported-api
+signal.target	yes	yes	yes	bpf-lsm	userspace	planned-supported-api
+time.virtual	yes	yes	no	userspace	none	implemented-userspace
+memory.translation	yes	yes	no	userspace	none	implemented-userspace
+abi.emulation	yes	yes	no	userspace	none	implemented-userspace
+syscall.selected-module	yes	limited	yes	module-kprobe	userspace	prototype-experimental

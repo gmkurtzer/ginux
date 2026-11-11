@@ -8,7 +8,7 @@ BASELINE := target/$(X86_TARGET)/release/baseline-runner
 RUNTIME_FIXTURE := target/$(X86_TARGET)/release/runtime-fixture
 PROCESS_NATIVE_FIXTURE := target/$(X86_TARGET)/release/process-native-fixture
 
-.PHONY: doctor host-image-fetch host-image-verify host-boot-test host-run host-reset test-host-lifecycle image-helper-fetch image-prepare instance-image-fetch instance-image-verify instance-image-prepare systemd-image-fetch systemd-image-verify systemd-image-prepare test-image test-oci-image test-oci-layers test-vfs test-native-vfs image-cache-clean build check-name check-instance-terminology check test-ci-changes contract-doc test-contract test-contract-runtime test test-unit test-intercept test-runtime test-config test-instance test-instance-terminology test-process build-process-fixtures test-process-native test-devices test-kernel-views test-systemd test-systemd-live test-systemd-interactive test-gate975-network test-gate975-hooks test-gate125-lock test-cgroup test-block test-network test-security test-recovery check-security-doc fuzz-security test-bench-compare test-gate15-report gate16-prepare test-gate16-kernel-assist bench-prepare bench bench-baseline bench-compare bench-systemd bench-report bench-block bench-network bench-modes-prepare bench-modes bench-modes-report demo-gate-1 demo-gate-2 demo-gate-3 demo-gate-4 demo-gate-5 demo-gate-6 demo-gate-7 demo-gate-8 demo-gate-9 demo-gate-9.5 demo-gate-9.75 demo-gate-10 demo-gate-10.25 demo-gate-10.5 demo-gate-11 demo-gate-12 demo-gate-12.1 demo-gate-12.25 demo-gate-12.5 demo-gate-13 demo-gate-15 demo-gate-16 clean
+.PHONY: doctor host-image-fetch host-image-verify host-boot-test host-run host-reset test-host-lifecycle image-helper-fetch image-prepare instance-image-fetch instance-image-verify instance-image-prepare systemd-image-fetch systemd-image-verify systemd-image-prepare test-image test-oci-image test-oci-layers test-vfs test-native-vfs image-cache-clean build check-name check-instance-terminology check test-ci-changes contract-doc test-contract test-contract-runtime test test-unit test-intercept test-runtime test-config test-instance test-instance-terminology test-process build-process-fixtures test-process-native test-devices test-kernel-views test-systemd test-systemd-live test-systemd-interactive test-gate975-network test-gate975-hooks test-gate125-lock test-cgroup test-block test-network test-security test-recovery check-security-doc fuzz-security test-bench-compare test-gate15-report gate16-prepare test-gate16-requirements test-gate16-kernel-assist bench-prepare bench bench-baseline bench-compare bench-systemd bench-report bench-block bench-network bench-modes-prepare bench-modes bench-modes-report demo-gate-1 demo-gate-2 demo-gate-3 demo-gate-4 demo-gate-5 demo-gate-6 demo-gate-7 demo-gate-8 demo-gate-9 demo-gate-9.5 demo-gate-9.75 demo-gate-10 demo-gate-10.25 demo-gate-10.5 demo-gate-11 demo-gate-12 demo-gate-12.1 demo-gate-12.25 demo-gate-12.5 demo-gate-13 demo-gate-15 demo-gate-16 clean
 
 doctor:
 	@./scripts/doctor.sh
@@ -199,7 +199,10 @@ test-host-lifecycle:
 gate16-prepare:
 	@./scripts/prepare-gate16-host.sh
 
-test-gate16-kernel-assist:
+test-gate16-requirements:
+	@./scripts/validate-gate16-requirements.sh
+
+test-gate16-kernel-assist: test-gate16-requirements
 	@./scripts/test-gate16-kernel-assist.sh
 
 demo-gate-16: test-gate16-kernel-assist

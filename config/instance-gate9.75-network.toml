@@ -16,7 +16,6 @@ memory_mib = 1024
 
 [execution]
 profile = "balanced"
-backend = "ptrace-native"
 
 [contract]
 version = 1

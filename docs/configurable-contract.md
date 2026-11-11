@@ -14,7 +14,6 @@ allow = ["filesystem.*", "proc.*", "sys.*", "time.*"]
 deny = ["device.mmio.direct", "device.dma.direct", "network.packet.raw"]
 
 [contract.syscalls]
-control = "selective"
 default = "deny"
 allow = ["read*", "write*", "open*", "close", "mmap", "futex", "sched_yield"]
 deny = ["ptrace"]
@@ -87,22 +86,31 @@ closed. Resolution is deterministic:
 
 The normalized digest includes every final action and its provenance.
 
-## Syscall control
+## Automatic enforcement planning
 
-`control = "selective"` is the default. It permits direct host execution only
-when the contract allows the syscall and the pinned catalog independently
-classifies it as transparent and direct-safe. Denied, virtualized, inspected,
-translated, or emulated operations remain Ginux-controlled.
+The recipe does not select ptrace, a kernel module, BPF, or another dispatcher.
+Ginux compiles the complete contract against detected host capabilities and
+combines the narrowest mechanisms that satisfy it. Contract-allowed operations
+execute directly only when their result needs no inspection, translation,
+emulation, virtual state, pointer validation, or modified result. An uncovered
+requirement fails startup; fallback never weakens policy.
 
-`control = "paranoid"` sends every syscall through the Ginux userspace
-dispatcher before completion. This provides the strongest observation point
-at a substantial performance cost.
+Native namespaces, cgroups, rlimits, and mount topology are preferred when
+they exactly express the requirement. BPF LSM/cgroup BPF and seccomp cover
+supported pre-effect decisions. Operations requiring Ginux-owned semantics
+remain in userspace. The out-of-tree Gate 16 module is experimental and is not
+selected unless a host-side test override explicitly permits it.
 
 There is deliberately no `none` syscall-control value. Performance reports use
 ordinary native Rocky execution as the no-Ginux control, but that control does
 not provide an instance contract or containment boundary. The reproducible
 native/selective/paranoid comparison is documented in
 [performance.md](performance.md).
+
+The retained selective and paranoid values are benchmark identities for the
+Gate 15 comparison, not portable recipe requirements. New recipes omit them.
+The planner and kernel-assisted evidence are documented in
+[kernel-assisted-dispatch.md](kernel-assisted-dispatch.md).
 
 ## Filesystem, devices, and privilege elevation
 

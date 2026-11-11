@@ -7,20 +7,19 @@ a claim of universal exploit prevention.
 
 ## Supported boundary claims
 
-- A managed syscall is resolved through the compiled instance contract and
-  selected dispatch mode before its permitted host effect. Unknown operations
-  fail closed.
-- Paranoid dispatch sends every syscall through the Ginux userspace decision
-  path. Selective dispatch permits direct execution only for operations that
-  are both contract-allowed and independently cataloged as transparent and
-  direct-safe. Denials and complex operations remain Ginux decisions.
+- A managed operation is resolved through the compiled instance contract and
+  automatically planned enforcement components before its permitted host
+  effect. Unknown operations and unsatisfied plans fail closed.
+- Direct execution is allowed only for operations that are contract-permitted,
+  independently cataloged as transparent, and need no Ginux-owned result or
+  virtual state. Denials and complex operations remain Ginux decisions.
 - Ginux supplies instance-owned process identities, descriptors, devices,
   `/proc`, `/sys`, and cgroup views. Host kernel trees are not projected into
   an instance.
 - The balanced native supervisor drops a root-origin host identity to UID/GID
   65534, clears supplementary groups, has no effective capabilities, enables
   `NoNewPrivs`, and closes inherited descriptors after acquiring the bootstrap
-  resources required by the selected dispatch mode.
+  resources required by the selected enforcement plan.
 - Supervisor loss terminates traced workloads through `PTRACE_O_EXITKILL`.
   Unexpected trace stops fail the instance closed and trigger cleanup.
 
@@ -85,6 +84,14 @@ provides none of the instance boundary. Selective and paranoid results must be
 read with their different syscall-control semantics; faster execution is not
 evidence of equivalent enforcement. See [performance.md](performance.md) for
 the reproducible protocol and interpretation rules.
+
+Gate 16 demonstrates pre-effect denial through bounded BPF LSM and experimental
+module prototypes while unrelated allowed calls avoid userspace. The module is
+not a supported default: its kprobe entry redirection depends on unstable
+kernel internals. The supported direction composes native kernel boundaries,
+BPF LSM/cgroup BPF, Landlock where its model fits, seccomp, and a sound
+userspace fallback. See
+[kernel-assisted-dispatch.md](kernel-assisted-dispatch.md).
 
 ## Reproducible evidence
 

@@ -13,7 +13,6 @@ memory_mib = 128
 
 [execution]
 profile = "security"
-backend = "interpreter"
 
 [contract]
 version = 1
