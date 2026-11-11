@@ -39,11 +39,11 @@ moving pre-boot authority outside the portable recipe or weakening mediation.
 
 ## Remaining work
 
-- [ ] Implement bounded multiline hook parsing and readable normalization.
-- [ ] Simplify the Rocky recipe without changing its boot behavior.
-- [ ] Add and document the four example recipes.
-- [ ] Add deterministic positive, negative, and compatibility tests.
-- [ ] Run focused and aggregate verification.
+- [x] Implement bounded multiline hook parsing and readable normalization.
+- [x] Simplify the Rocky recipe without changing its boot behavior.
+- [x] Add and document the four example recipes.
+- [x] Add deterministic positive, negative, and compatibility tests.
+- [x] Run focused and aggregate verification.
 - [ ] Commit, push, open the Gate 19 pull request, and stop for human review.
 
 ## Acceptance criteria
@@ -75,7 +75,22 @@ moving pre-boot authority outside the portable recipe or weakening mediation.
 
 ## Evidence
 
-- Pending implementation.
+- `cargo test -p ginux-instance` -> 27 parser, normalization, compatibility,
+  rejection, policy, and documented-example tests passed.
+- `make demo-gate-19` -> all four documented recipes validated and the focused
+  instance tests passed.
+- `make test-config` -> complete configuration workflow passed under an
+  isolated Rocky QEMU host.
+- `make test-gate975-hooks` -> ordering, mediation, stop/continue failure,
+  timeout, init suppression, and audit behavior passed.
+- `make test-systemd` -> cold, warm, repeat, offline, package-failure,
+  configured-failure, and controlled-shutdown paths passed with the readable
+  Rocky recipe.
+- `make test-security` -> malformed input, deterministic fuzz, authority,
+  denial, host-view, range, exhaustion, and teardown checks passed.
+- `make check` and aggregate `make test` -> formatting, lint, unit, image,
+  configuration, lifecycle, device, process, virtual-kernel, and QEMU
+  integration regressions passed.
 
 ## Decisions and limitations
 
@@ -83,6 +98,9 @@ moving pre-boot authority outside the portable recipe or weakening mediation.
   recipes portable and prevents implicit host authority.
 - Existing hook size and count bounds remain explicit and fail closed; any
   capacity change must remain bounded and covered by negative tests.
+- Triple-quoted hook bodies preserve their script bytes. Shell escapes such as
+  `\n` therefore appear once in the recipe, rather than using the doubled
+  escaping required by the legacy one-line string form.
 - The network-service recipe documents host attachment and forwarding as CLI
   deployment state rather than embedding host-specific values in the recipe.
 
@@ -93,7 +111,8 @@ moving pre-boot authority outside the portable recipe or weakening mediation.
 - Pull request: intended
 - Planned commits: gate and parser; recipes and documentation; evidence and
   pull-request checkpoint
-- Actual commits: pending
+- Actual commits: `fd2c0aba`, `c9079530`, `fa828e70`, and `b66bbe72`, plus the
+  final evidence checkpoint commit.
 
 ## Review policy and outcome
 

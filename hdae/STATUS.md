@@ -202,6 +202,16 @@
 - Gate 16's kernel-module enforcement direction was abandoned by human
   decision on 2026-11-11. Pull request 258 was closed without merging, and no
   Gate 16 implementation is present on `main`.
+- Gate 17 concurrent-instance isolation was accepted after pull request 259
+  merged on 2026-11-11. Its authoritative record is in `gates-done/`.
+- Gate 18 documentation clarification is independently delivered in pull
+  request 260 and is awaiting human review.
+- Gate 19 readable instance recipes is technically passed on
+  `hdae/readable-instance-recipes`. It adds bounded triple-quoted pre-boot hook
+  scripts, a readable Rocky systemd recipe, and validated minimal Rocky,
+  constrained-agent, network-service, and paranoid examples. Focused parser,
+  configuration, hook, systemd, security, and aggregate suites pass. Delivery
+  is the remaining checkpoint before human review.
 
 ## Governing outcome and invariants
 
@@ -629,9 +639,9 @@ remains explicitly deferred.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 15 dispatch-mode performance matrix is approved and active
-  on `hdae/dispatch-performance-matrix`, based on merged Gate 13. It is a human
-  checkpoint and must not close without explicit acceptance.
+- Active gate: Gate 19 readable instance recipes is technically passed on
+  `hdae/readable-instance-recipes`; pull-request delivery and human acceptance
+  remain.
 - Active work: Gate 12 is technically passed and delivered in pull request 251;
   Gate 12.1 is technically passed and delivered in pull request 252; Gate
   12.25 is technically passed and delivered in pull request 253. Gate 12.5 is
