@@ -175,9 +175,8 @@
   `make test-host-lifecycle`, aggregate `make test`, and the full
   `make test-systemd-interactive` workflow pass.
 - Gate 14 is parked by human direction and has no active implementation work.
-- Gate 15 is technically complete on `hdae/dispatch-performance-matrix` and is
-  delivered for human review in pull request
-  https://github.com/gmkurtzer/ginux/pull/257. Checked-in suite, mode, and per-workload templates
+- Gate 15 was accepted and closed after the human merged pull request
+  https://github.com/gmkurtzer/ginux/pull/257 on 2026-11-10. Checked-in suite, mode, and per-workload templates
   drive a paired native/selective/paranoid matrix at 1/2/4 vCPUs. The workflow
   preserves raw samples and provenance, validates compatible metadata, and
   produces combined TSV, Markdown tables with mean and standard deviation, and
@@ -211,10 +210,10 @@ scope, threat model, and invariants.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 15, dispatch-mode performance matrix, is technically
-  complete on `hdae/dispatch-performance-matrix`, delivered in pull request
-  https://github.com/gmkurtzer/ginux/pull/257, and awaits human review.
-- Last evidence: the complete Gate 15 matrix and report generation pass, as do
+- Active gate: Gate 16, kernel-assisted automatic syscall control, is approved
+  and active on `hdae/kernel-assisted-dispatch`. It is a human checkpoint and
+  will be delivered through a dedicated pull request without merging it.
+- Last accepted evidence: the complete Gate 15 matrix and report generation pass, as do
   `make check`, `make test-contract`, `make test-security`,
   `make test-systemd`, and aggregate `make test` with all QEMU integrations.
 - The final CLI correction makes required configuration files positional:
@@ -603,20 +602,21 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Implement Gate 15 on `hdae/dispatch-performance-matrix`: add checked-in native,
-selective, paranoid, and suite templates; build paired collection, validation,
-reporting, graph, and deterministic test paths; update affected documentation;
-then run the bounded demonstration and full matrix before human review. Gate 14
-remains explicitly deferred.
+Map current syscall interception requirements to supported Linux extension
+points, then build the smallest kernel-assisted prototype inside the disposable
+Rocky QEMU host. Prove pre-effect denial and process-transition inheritance
+before integrating automatic contract-to-backend selection. Gate 14 remains
+explicitly deferred.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 15 dispatch-mode performance matrix is approved and active
-  on `hdae/dispatch-performance-matrix`, based on merged Gate 13. It is a human
-  checkpoint and must not close without explicit acceptance.
+- Active gate: Gate 16 kernel-assisted automatic syscall control is approved
+  and active on `hdae/kernel-assisted-dispatch`, based on merged and accepted
+  Gate 15. It is a human checkpoint and must not close without explicit
+  acceptance.
 - Active work: Gate 12 is technically passed and delivered in pull request 251;
   Gate 12.1 is technically passed and delivered in pull request 252; Gate
   12.25 is technically passed and delivered in pull request 253. Gate 12.5 is

@@ -128,9 +128,8 @@ recapitulate the measurements.
 
 ## Review policy and outcome
 
-Human checkpoint. Implementation and verification are authorized. Stop after
-the branch and pull request contain fresh evidence; Gate 15 closes only after
-human review and acceptance.
+Human checkpoint. The human merged pull request 257 and directed work to
+advance to the next gate on 2026-11-10. Gate 15 is accepted and closed.
 
 ## Evidence
 

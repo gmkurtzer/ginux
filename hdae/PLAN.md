@@ -103,6 +103,10 @@ replace it.
 15. **Dispatch-mode performance matrix**: reproducibly compare native Rocky,
     selective Ginux, and paranoid Ginux with paired controls, reusable test
     templates, combined tables and graphs, and complete operator documentation.
+16. **Kernel-assisted automatic syscall control**: research, prototype, and
+    benchmark kernel-assisted and kernel-native enforcement paths; select the
+    narrowest backend automatically from the instance contract and host
+    capabilities rather than exposing dispatcher mechanics in portable recipes.
 
 Gates are stored in `hdae/gates-todo/` and remain there until they pass and are
 accepted at their checkpoint. Closed gate records move unchanged to
