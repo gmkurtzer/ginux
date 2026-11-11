@@ -46,7 +46,7 @@ assignments = ["console", "null", "zero", "random", "net0"]
 backend = "shared"
 
 [audit]
-mode = "stderr"
+enabled = true
 
 [failure]
 policy = "stop"

@@ -76,7 +76,7 @@
   accepted by the human on 2026-11-06. Their complete implementation reached
   `main` through signed merge commit `a8b46d21` and is now closed.
 - Gate 9.5 reuses the writable Rocky host overlay across
-  `make run-host` sessions, preserving verified OCI image content, instance
+  `make host-run` sessions, preserving verified OCI image content, instance
   definitions, roots, and status, and reports live layer-download progress.
   Synthetic proc refresh is now path-targeted rather than rebuilding the whole
   proc tree for each open. In a clean QEMU run, `ps -ef` fell from the human's
@@ -151,6 +151,29 @@
   materialize a bounded maintenance contract atomically, expose their state in
   lifecycle output, and warn on unlocked starts. A clean Rocky workflow proved
   denial while locked, success while unlocked, and denial again after relock.
+- Gate 13 boundary hardening is technically passed on
+  `hdae/boundary-hardening`. Its deterministic malformed-input and fuzz suite,
+  post-bootstrap supervisor authority reduction, security and recovery suites,
+  aggregate regressions, limitations report, and human demonstration pass.
+  A fresh matched comparison against current `main` passes every accepted-Ginux
+  regression row within 4%; the worst ratio is 0.9718x and thread-yield ranges
+  from 0.9760x to 1.0175x. Gate 11 separately retains ownership of its
+  unresolved native-parity target. Post-review lifecycle cleanup now reserves
+  interactive-host destruction for explicit `make host-reset`, automated QEMU
+  tests use separate state, and audit recipes use explicit `enabled` booleans
+  with a controller-owned log destination. The rebased result is delivered in
+  pull request https://github.com/gmkurtzer/ginux/pull/255 and awaits human
+  acceptance. A subsequent terminal fix tracks duplicated console descriptors
+  and the virtual foreground process group. Commit `20c036dd` keeps sudo out of
+  the live relay, preserves the runtime control descriptor, and makes the
+  attach process own input for its full lifetime. The complete clean Rocky
+  workflow now proves Bash monitor mode, foreground Ctrl-C interruption,
+  foreground Ctrl-Z suspension with job tracking, Ctrl-] detach after either
+  signal, pipelines, background jobs, prompt-time background completion,
+  reattach, resizing, and shutdown without terminal process-group or
+  no-job-control warnings. `make check`,
+  `make test-host-lifecycle`, aggregate `make test`, and the full
+  `make test-systemd-interactive` workflow pass.
 
 ## Governing outcome and invariants
 
@@ -567,9 +590,10 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Record the Gate 12.5 pull-request checkpoint, then begin Gate 13 boundary
-hardening on a dedicated branch based on Gate 12.5. Do not merge or close any
-pull request.
+Present Gate 13 pull request 255, its fresh boundary, recovery, aggregate,
+demonstration, and matched no-regression evidence for human acceptance. Do not
+merge or close the pull request without explicit human direction. Gates 15 and
+16 planning remains isolated from this branch.
 
 ## Context recovery
 
@@ -580,8 +604,14 @@ pull request.
   Gate 12.1 is technically passed and delivered in pull request 252; Gate
   12.25 is technically passed and delivered in pull request 253. Gate 12.5 is
   technically passed and delivered in pull request 254 from
-  `hdae/contract-maintenance-lock`. Gate 11 remains partial on its parent
-  branch and in pull request 249.
+  `hdae/contract-maintenance-lock`. Gate 13 is technically passed on
+  `hdae/boundary-hardening`, rebased onto current `main`: its boundary,
+  recovery, authority, regression, documentation, demonstration, and matched
+  accepted-Ginux performance evidence pass. Gate 11 remains independently
+  partial on its native-parity target.
+- Gate 13 delivery: pull request
+  https://github.com/gmkurtzer/ginux/pull/255 is open from
+  `hdae/boundary-hardening` against `main`.
 - Gate 12.25 delivery: pull request
   https://github.com/gmkurtzer/ginux/pull/253 is open from
   `hdae/top-level-instance-cli` against the Gate 12.1 branch.
@@ -606,6 +636,27 @@ pull request.
   demo-gate-12.5` passed. Rocky proved locked denial, unlocked maintenance
   success, and denial after relocking while retaining mandatory host-boundary
   backstops.
+- Gate 13 evidence: `make check`, five-second-per-target `make fuzz-security`,
+  `make test-security`, `make test-recovery`, `make test-contract`, aggregate
+  `make test`, and `make demo-gate-13` pass. Fresh five-second/five-repetition
+  current-main and Gate 13 matrices are environment-compatible and pass every
+  accepted-Ginux regression row within 4%; the worst ratio is 0.9718x and all
+  thread-yield ratios are 0.9760x or better. Gate 11's absolute native-parity
+  limitation remains documented and unchanged. Post-review evidence also
+  passes `make test-host-lifecycle`, `make test-config`, and the complete
+  `make test-systemd-interactive` clean/cache/audit/persistence workflow;
+  ordinary cleanup left the live interactive host and its overlay intact.
+  Attached-console follow-up evidence also passes a focused Ctrl-C/Ctrl-Z/
+  Ctrl-]/reattach/poweroff session. Commit `5da5e868` additionally orders
+  `SIGCHLD` delivery after virtual child-exit recording; a focused session and
+  the complete `make test-systemd-interactive` workflow now prove that
+  `sleep 2 &` reports `Done` on the next prompt. Post-fix `make check` and
+  aggregate `make test` also pass.
+- Delivery audit on 2026-11-09 verified pull requests 249, 251, 252, 253, 254,
+  and 255 are open, non-draft, cleanly mergeable, correctly stacked, and have
+  passing `static-and-unit` and `launch-integration` checks. No pull request was
+  merged or closed. Gate 14 is the only later ledger entry and remains under
+  `gates-deferred/`.
 - Completed paranoid work: the benchmark harness records dispatch mode and
   rejects cross-mode baseline comparison. The retained single-broker path has
   constant-time and precomputed contract decisions, bounded audit, and no
