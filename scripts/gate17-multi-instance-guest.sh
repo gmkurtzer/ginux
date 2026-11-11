@@ -23,6 +23,23 @@ wait_for_log() {
     done
 }
 
+console_check() {
+    console_name=$1
+    console_peer=$2
+    console_peer_pid=$3
+    console_input=$state/$console_name/console.in
+    printf 'root\n' >"$console_input"
+    sleep 1
+    printf 'ginux\n' >"$console_input"
+    sleep 1
+    printf 'if kill -0 %s 2>/dev/null; then echo GINUX_GATE17_CROSS_SIGNAL_FAIL; else echo GINUX_GATE17_CROSS_SIGNAL_PASS; fi\n' \
+        "$console_peer_pid" >"$console_input"
+    printf 'if test ! -e /ginux-gate17/%s; then echo GINUX_GATE17_PEER_ROOT_HIDDEN: PASS; else echo GINUX_GATE17_PEER_ROOT_HIDDEN: FAIL; fi\n' \
+        "$console_peer" >"$console_input"
+    wait_for_log "$console_name" 'GINUX_GATE17_CROSS_SIGNAL_PASS'
+    wait_for_log "$console_name" 'GINUX_GATE17_PEER_ROOT_HIDDEN: PASS'
+}
+
 stage_instance() {
     stage_name=$1
     stage_peer=$2
@@ -37,7 +54,7 @@ stage_instance() {
         "contract.filesystem.deny=[\"/ginux-gate17/blocked-$stage_name\"]" \
         >"$stage_directory/config.toml"
     {
-        printf 'forward\tprotocol=tcp external_port=%s instance_port=18180\n' \
+        printf 'forward\tprotocol=tcp,external_port=%s,instance_port=18180\n' \
             "$stage_external"
         printf 'contract\tlocked\n'
     } >"$stage_directory/deployment.state"
@@ -93,14 +110,19 @@ stage_instance gate17-b gate17-a 18182
 
 wait_for_log gate17-a 'GINUX_GATE17_INSTANCE: name=gate17-a'
 wait_for_log gate17-b 'GINUX_GATE17_INSTANCE: name=gate17-b'
-wait_for_log gate17-a 'Reached target multi-user.target - Multi-User System.'
-wait_for_log gate17-b 'Reached target multi-user.target - Multi-User System.'
+wait_for_log gate17-a 'gate17-a login:'
+wait_for_log gate17-b 'gate17-b login:'
 wait_for_log gate17-a 'GINUX_GATE17_CHECK: PASS name=gate17-a'
 wait_for_log gate17-b 'GINUX_GATE17_CHECK: PASS name=gate17-b'
 
 pid_a=$(awk 'NR == 1 { print $1 }' "$state/gate17-a/supervisor.pid")
 pid_b=$(awk 'NR == 1 { print $1 }' "$state/gate17-b/supervisor.pid")
 test -n "$pid_a" && test -n "$pid_b" && test "$pid_a" != "$pid_b"
+kill -0 "$pid_a"
+kill -0 "$pid_b"
+
+console_check gate17-a gate17-b "$pid_b"
+console_check gate17-b gate17-a "$pid_a"
 kill -0 "$pid_a"
 kill -0 "$pid_b"
 
@@ -122,6 +144,14 @@ test -f "$state/gate17-b/root/ginux-gate17/gate17-b-runtime"
 test ! -e "$state/gate17-b/root/ginux-gate17/gate17-a-runtime"
 test -z "$(find "$state/gate17-a/root/proc" "$state/gate17-a/root/sys" -mindepth 1 -print -quit)"
 test -z "$(find "$state/gate17-b/root/proc" "$state/gate17-b/root/sys" -mindepth 1 -print -quit)"
+grep -Fq 'blocked-gate17-a' "$state/gate17-a/runtime.toml"
+grep -Fq 'blocked-gate17-b' "$state/gate17-b/runtime.toml"
+test "$(sha256sum "$state/gate17-a/runtime.toml" | awk '{print $1}')" != \
+    "$(sha256sum "$state/gate17-b/runtime.toml" | awk '{print $1}')"
+grep -Fq 'id=gate17-a' "$state/gate17-a/audit.log"
+grep -Fq 'id=gate17-b' "$state/gate17-b/audit.log"
+! grep -Fq 'id=gate17-b' "$state/gate17-a/audit.log"
+! grep -Fq 'id=gate17-a' "$state/gate17-b/audit.log"
 
 shared_winners=$(grep -h 'GINUX_GATE17_INSTANCE:' \
     "$state/gate17-a/console.log" "$state/gate17-b/console.log" | \
@@ -137,15 +167,39 @@ grep -Fq 'translated-port=bound' "$state/gate17-b/console.log"
 boot_a=$(sed -n 's/.*boot-id=\([^ ]*\).*/\1/p' "$state/gate17-a/console.log" | tail -n 1)
 boot_b=$(sed -n 's/.*boot-id=\([^ ]*\).*/\1/p' "$state/gate17-b/console.log" | tail -n 1)
 test -n "$boot_a" && test -n "$boot_b" && test "$boot_a" != "$boot_b"
+proc_a=$(sed -n 's/.*name=gate17-a .*pids=\([^ ]*\).*/\1/p' "$state/gate17-a/console.log" | tail -n 1)
+proc_b=$(sed -n 's/.*name=gate17-b .*pids=\([^ ]*\).*/\1/p' "$state/gate17-b/console.log" | tail -n 1)
+case ,$proc_a, in *,$pid_b,*) exit 1 ;; esac
+case ,$proc_b, in *,$pid_a,*) exit 1 ;; esac
 
-"$controller" stop gate17-a
+runtime_a=$(awk 'NR == 1 { print $1 }' "$state/gate17-a/runtime.pid")
+kill -TERM "$pid_a"
+loss_attempt=0
+while kill -0 "$pid_a" 2>/dev/null || kill -0 "$runtime_a" 2>/dev/null; do
+    loss_attempt=$((loss_attempt + 1))
+    test "$loss_attempt" -lt 50 || exit 1
+    sleep 0.1
+done
 kill -0 "$pid_b"
+test "$($controller status gate17-a | sed -n 's/^state: //p')" = stopped
 test "$($controller status gate17-b | sed -n 's/^state: //p')" = running
 "$controller" unlock gate17-a
 grep -Fq 'contract=unlocked' "$state/gate17-a/deployment.state" || \
     grep -Fq 'contract	unlocked' "$state/gate17-a/deployment.state"
 grep -Fq 'contract	locked' "$state/gate17-b/deployment.state"
 "$controller" lock gate17-a
+
+"$controller" start gate17-a
+wait_for_log gate17-a 'gate17-a login:'
+wait_for_log gate17-a 'GINUX_GATE17_CHECK: PASS name=gate17-a'
+test "$($controller status gate17-a | sed -n 's/^state: //p')" = running
+test "$($controller status gate17-b | sed -n 's/^state: //p')" = running
+"$controller" stop gate17-a
+
+printf '999999 1\n' >"$state/gate17-a/supervisor.pid"
+test "$($controller status gate17-a | sed -n 's/^state: //p')" = stopped
+"$controller" stop gate17-a
+test ! -e "$state/gate17-a/supervisor.pid"
 
 "$controller" stop gate17-b
 trap - 0 HUP INT TERM

@@ -170,7 +170,7 @@ test-systemd-interactive: build
 	@./scripts/test-systemd-interactive.exp
 
 test-multi-instance: build systemd-image-prepare
-	@ROCKY_NETWORK_RESTRICT=on ROCKY_VCPUS=4 ROCKY_MEMORY_MIB=4096 ./scripts/with-rocky-host.sh ./scripts/test-multi-instance.sh
+	@ROCKY_SSH_PORT=22417 ROCKY_PID_FILE=build/rocky-gate17-host.pid ROCKY_SERIAL_LOG=build/rocky-gate17-host-serial.log ROCKY_OVERLAY_DISK=build/rocky-gate17-host-overlay.qcow2 ROCKY_NETWORK_RESTRICT=on ROCKY_VCPUS=4 ROCKY_MEMORY_MIB=4096 ./scripts/with-rocky-host.sh ./scripts/test-multi-instance.sh
 
 test-gate975-network: build systemd-image-prepare
 	@ROCKY_NETWORK_RESTRICT=on ./scripts/with-rocky-host.sh ./scripts/test-gate975-network.sh
@@ -352,7 +352,7 @@ demo-gate-17: doctor build systemd-image-prepare
 	@printf '%s\n' 'Gate 17: boot two Rocky systemd instances concurrently and verify isolation.'
 	@printf '%s\n' 'Expected: independent state, overlays, virtual kernel views, contracts, lifecycle, and translated ports.'
 	@printf '%s\n' 'Expected networking: one ordinary shared-port winner/conflict pair; both translated binds succeed.'
-	@ROCKY_NETWORK_RESTRICT=on ROCKY_VCPUS=4 ROCKY_MEMORY_MIB=4096 ./scripts/with-rocky-host.sh ./scripts/test-multi-instance.sh
+	@ROCKY_SSH_PORT=22417 ROCKY_PID_FILE=build/rocky-gate17-host.pid ROCKY_SERIAL_LOG=build/rocky-gate17-host-serial.log ROCKY_OVERLAY_DISK=build/rocky-gate17-host-overlay.qcow2 ROCKY_NETWORK_RESTRICT=on ROCKY_VCPUS=4 ROCKY_MEMORY_MIB=4096 ./scripts/with-rocky-host.sh ./scripts/test-multi-instance.sh
 
 clean:
 	cargo clean
