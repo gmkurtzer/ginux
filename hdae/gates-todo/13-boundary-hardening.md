@@ -61,6 +61,8 @@ honest security and compatibility boundary for the initial milestone.
   console descriptors so interactive shells retain job control, foreground
   Ctrl-C interrupts commands, foreground Ctrl-Z suspends jobs, and Ctrl-]
   remains a reliable detach sequence after either signal.
+- [x] Ordered managed `SIGCHLD` delivery after virtual child-exit recording so
+  interactive shells promptly reap and report completed background jobs.
 
 ## Remaining work
 
@@ -153,6 +155,14 @@ honest security and compatibility boundary for the initial milestone.
 - Focused attached-console regression -> passed Ctrl-C interruption of
   `sleep 30`, Ctrl-Z suspension and `jobs -s` visibility, Ctrl-] detach,
   reattach, and normal systemd poweroff in one session.
+- Focused background-job regression -> `sleep 2 &`, a three-second delay, and
+  one blank Enter immediately reported `[1]+ Done sleep 2`; the same session
+  retained Ctrl-C, Ctrl-Z, detach, reattach, and controlled poweroff behavior.
+- Post-fix `make test-systemd-interactive` -> passed the exact background-job
+  notification workflow plus the complete clean/cache/audit/persistence,
+  terminal, policy, lifecycle, and warm-restart matrix.
+- Post-fix `make check` and aggregate `make test` -> passed after ordered
+  `SIGCHLD` delivery was added.
 - Post-fix `make check`, `make test-host-lifecycle`, and aggregate `make test`
   -> passed after the attached-console signal changes.
 - Pull request 255 CI -> `static-and-unit` and `launch-integration` both passed
@@ -224,7 +234,7 @@ honest security and compatibility boundary for the initial milestone.
   (evidence checkpoint), `7ed25d42` and `afa7c1a4` (delivery records), and
   `792f71a2` plus the final evidence commit (performance criterion and fresh
   closure evidence), and `20c036dd` (attached-console signal forwarding and
-  job control).
+  job control), and `5da5e868` (background-job completion notification).
 
 ## Review policy and outcome
 

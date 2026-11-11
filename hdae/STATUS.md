@@ -169,8 +169,9 @@
   attach process own input for its full lifetime. The complete clean Rocky
   workflow now proves Bash monitor mode, foreground Ctrl-C interruption,
   foreground Ctrl-Z suspension with job tracking, Ctrl-] detach after either
-  signal, pipelines, background jobs, reattach, resizing, and shutdown without
-  terminal process-group or no-job-control warnings. `make check`,
+  signal, pipelines, background jobs, prompt-time background completion,
+  reattach, resizing, and shutdown without terminal process-group or
+  no-job-control warnings. `make check`,
   `make test-host-lifecycle`, aggregate `make test`, and the full
   `make test-systemd-interactive` workflow pass.
 
@@ -646,9 +647,11 @@ merge or close the pull request without explicit human direction. Gates 15 and
   `make test-systemd-interactive` clean/cache/audit/persistence workflow;
   ordinary cleanup left the live interactive host and its overlay intact.
   Attached-console follow-up evidence also passes a focused Ctrl-C/Ctrl-Z/
-  Ctrl-]/reattach/poweroff session, `make check`, `make test-host-lifecycle`,
-  aggregate `make test`, and the complete clean/cached
-  `make test-systemd-interactive` workflow.
+  Ctrl-]/reattach/poweroff session. Commit `5da5e868` additionally orders
+  `SIGCHLD` delivery after virtual child-exit recording; a focused session and
+  the complete `make test-systemd-interactive` workflow now prove that
+  `sleep 2 &` reports `Done` on the next prompt. Post-fix `make check` and
+  aggregate `make test` also pass.
 - Delivery audit on 2026-11-09 verified pull requests 249, 251, 252, 253, 254,
   and 255 are open, non-draft, cleanly mergeable, correctly stacked, and have
   passing `static-and-unit` and `launch-integration` checks. No pull request was
