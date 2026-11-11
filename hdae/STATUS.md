@@ -221,16 +221,15 @@ scope, threat model, and invariants.
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
 - Active gate: Gate 17, concurrent-instance isolation, is approved and active
-  on `hdae/concurrent-instance-isolation`. Its complete two-instance Rocky
-  QEMU workflow passes; aggregate regression and pull-request delivery remain.
+  on `hdae/concurrent-instance-isolation`. It is technically passed and awaits
+  pull-request delivery and human acceptance.
   Gate 11 remains partial, Gate 14 is deferred, and Gate 16 is abandoned.
 - Last evidence: `make test-multi-instance` boots two Rocky systemd instances
   concurrently and passes independent identity, virtual PID, root, contract,
   audit, console, shared/translated network, cross-signal, supervisor-loss,
   restart, stale-record, and cleanup assertions.
-- Exact next action: run Gate 17 focused and aggregate regressions, record its
-  evidence and limitations, push the branch, and open its pull request. Then
-  create the separately approved Gate 18 documentation branch from `main`.
+- Exact next action: push Gate 17 and open its pull request. Then create the
+  separately approved Gate 18 documentation branch from synchronized `main`.
 - The final CLI correction makes required configuration files positional:
   `instance create NAME FILE`, `validate FILE`, `inspect FILE`, and
   `explain FILE OPERATION`. Fresh `make check`, `make test-contract`, and

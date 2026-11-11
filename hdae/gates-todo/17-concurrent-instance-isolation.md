@@ -53,15 +53,22 @@ shared-host networking semantics.
   branch and pull request, and execution through PR delivery.
 - [x] Created dedicated branch `hdae/concurrent-instance-isolation` from
   synchronized `main`.
+- [x] Added a deterministic two-instance Rocky systemd workflow with distinct
+  recipes, contracts, identities, translated ports, roots, consoles, audits,
+  virtual process views, and lifecycle state.
+- [x] Added live cross-instance signal/root checks, ordinary shared-port
+  conflict evidence, translated-port coexistence, duplicate-start rejection,
+  abrupt supervisor cleanup, restart, stale-record recovery, and peer survival.
+- [x] Made native virtual hostnames and boot IDs instance-specific and made the
+  legacy systemd fixture hostname explicit rather than relying on a hardcode.
+- [x] Hardened supervisor termination so a controller supervisor loss closes
+  its runtime and traced workload without affecting another instance.
+- [x] Documented concurrent-instance and shared-host network semantics.
+- [x] Ran focused, security, recovery, systemd, aggregate, and demonstration
+  evidence successfully.
 
 ## Remaining work
 
-- [ ] Establish a two-instance baseline and preserve any failures.
-- [ ] Implement deterministic concurrency and cross-instance isolation tests.
-- [ ] Fix in-scope defects found by the tests.
-- [ ] Add the complete Rocky QEMU workflow and bounded human demonstration.
-- [ ] Update architecture, security limitations, README, and operator guidance.
-- [ ] Run focused and aggregate regression evidence.
 - [ ] Push the branch and open the Gate 17 pull request.
 - [ ] Obtain human review and acceptance.
 
@@ -112,12 +119,28 @@ shared-host networking semantics.
 
 ## Evidence
 
-- Pending.
+- `make test-multi-instance` -> passed parallel Rocky systemd boot, distinct
+  live supervisor identities, login readiness, virtual PID/root/identity
+  isolation, cross-signal rejection, distinct contract and audit state,
+  duplicate-start rejection, one expected shared-port conflict, two successful
+  translated binds, abrupt supervisor cleanup, peer survival, lock isolation,
+  restart, stale-record recovery, and complete cleanup.
+- `make check test-contract` -> passed strict formatting/lint, 13 contract tests,
+  24 configuration tests, and generated ABI coverage verification.
+- `make test-security` -> passed deterministic malformed-input/fuzz,
+  authority-reduction, denial, virtual-view, device, and teardown evidence.
+- `make test-recovery` -> passed supervisor loss, startup failure, forced stop,
+  audit bounds, and the complete cold/warm/repeat systemd matrix.
+- `make test` -> passed the full aggregate unit and QEMU integration suite.
+- `make demo-gate-17` -> passed the operator-readable two-instance workflow.
 
 ## Decisions and limitations
 
 - Gate 17 validates the current shared-host network design. It does not claim
   private network namespaces; ordinary host bind conflicts are expected.
+- The baseline exposed two concrete gaps: native virtual identity values were
+  process-global constants, and terminating a controller supervisor could
+  leave its runtime alive. Both now have deterministic regressions.
 - A supported operation must not acquire peer-instance authority merely because
   both runtimes are ordinary host processes under the same Ginux installation.
 - The gate proves a bounded two-instance baseline, not production density.
@@ -129,7 +152,8 @@ shared-host networking semantics.
 - Pull request: intended
 - Planned commits: gate and baseline; isolation/concurrency implementation and
   tests; Rocky integration and demonstration; documentation and evidence
-- Actual commits: pending
+- Actual commits: `5566c0c2`, `5dd18da4`, `e71184a1`, `79786a17`, plus the
+  final evidence checkpoint commit.
 
 ## Review policy and outcome
 
