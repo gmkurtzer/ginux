@@ -58,7 +58,7 @@ or compatibility claims the current evidence does not support.
 
 ## Remaining work
 
-- [ ] Push the branch and open the Gate 18 pull request.
+- [x] Pushed the branch and opened the Gate 18 pull request.
 - [ ] Obtain human review and acceptance.
 
 ## Acceptance criteria
@@ -128,7 +128,7 @@ or compatibility claims the current evidence does not support.
 
 - Working branch: `hdae/explain-ginux-differences`
 - Intended base: `main`
-- Pull request: intended
+- Pull request: https://github.com/gmkurtzer/ginux/pull/260
 - Planned commits: gate definition; README and comparison documentation;
   deterministic checks and evidence; pull-request record
 - Actual commits: `cdf12203`, `6644b3e4`, plus the final evidence checkpoint

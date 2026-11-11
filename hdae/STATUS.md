@@ -206,7 +206,8 @@
 - Gate 18 is approved and active on `hdae/explain-ginux-differences`. The HN
   feedback and authoritative UML/gVisor architecture sources have been
   reviewed. Its README, comparison, architecture, security, deterministic
-  checks, and aggregate regressions pass; PR delivery and acceptance remain.
+  checks, and aggregate regressions pass. It is delivered in pull request 260
+  and awaits human acceptance.
 
 ## Governing outcome and invariants
 
@@ -233,8 +234,8 @@ scope, threat model, and invariants.
   `main`; the complete matrix and report generation passed, as did
   `make check`, `make test-contract`, `make test-security`,
   `make test-systemd`, and aggregate `make test` with all QEMU integrations.
-- Exact next action: push Gate 18 and open its pull request, then stop at its
-  human acceptance checkpoint.
+- Exact next action: stop at the Gate 17 and Gate 18 human acceptance
+  checkpoints in pull requests 259 and 260.
 - The final CLI correction makes required configuration files positional:
   `instance create NAME FILE`, `validate FILE`, `inspect FILE`, and
   `explain FILE OPERATION`. Fresh `make check`, `make test-contract`, and
