@@ -1,0 +1,14 @@
+[package]
+name = "security-fuzzer"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[dependencies]
+ginux-contract = { path = "../ginux-contract" }
+ginux-core = { path = "../ginux-core" }
+ginux-devices = { path = "../ginux-devices" }
+ginux-instance = { path = "../ginux-instance" }
+ginux-kernel-views = { path = "../ginux-kernel-views" }
+ginux-runtime = { path = "../ginux-runtime" }
+ginux-vfs = { path = "../ginux-vfs" }
