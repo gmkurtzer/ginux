@@ -59,6 +59,11 @@ host kernel, and operator or configuration compromise are excluded. Ginux has
 not received formal verification, a third-party penetration test, or an
 Independent security review.
 
+Ginux has no guest kernel or hardware-enforced guest boundary. Its current
+native backend is not VM- or microVM-equivalent isolation. See
+[How Ginux differs from UML, gVisor, namespaces, and VMs](how-ginux-differs.md)
+for the architectural comparison.
+
 ## Known compatibility gaps
 
 Compatibility is intentionally contract-specific. Unsupported syscalls,

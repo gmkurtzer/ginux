@@ -36,7 +36,7 @@ Ginux decides whether to emulate it, perform a validated mediated operation,
 or deny it.
 
 Put bluntly: **Linux must not break userspace; Ginux is designed to break the
-full Linux ABI guarantee deliberately and selectively.** A instance receives
+full Linux ABI guarantee deliberately and selectively.** An instance receives
 only the capabilities and interface behavior its approved workload requires.
 Every departure is intended to be explicit, versioned, reviewable, and tested,
 rather than accidental incompatibility.
@@ -69,6 +69,41 @@ chooses one of three outcomes:
 - **Mediate:** validate and translate the request, then perform a narrow
   Ginux-owned host operation.
 - **Deny:** return a configured Linux-compatible error or terminate the task.
+
+### How execution works today
+
+Ginux is not running another Linux kernel. In the balanced backend, host Linux
+loads each x86-64 ELF, creates its address space and tasks, and schedules its
+instructions on the host CPU. Ginux remains attached as the trusted supervisor.
+A mandatory seccomp filter sends managed syscalls to ptrace stops before their
+host implementation, where Ginux can inspect registers and memory and then
+emulate, mediate, or deny the operation.
+
+The current selective optimization has one deliberately narrow exception:
+contract-approved `sched_yield` may execute directly in host Linux. Paranoid
+mode sends that operation through a seccomp user-notification broker as well,
+so every managed syscall receives a Ginux userspace decision. The host kernel,
+ptrace, seccomp, ELF loader, memory manager, scheduler, and CPU execution remain
+trusted in both modes. This is therefore not a VM or microVM security boundary.
+
+### What Ginux is not
+
+- It is **not User-Mode Linux**: UML runs a complete Linux kernel as a host
+  process over paravirtual hardware; Ginux implements a deliberately incomplete
+  contract and uses host Linux for native execution services.
+- It is **not a mature gVisor alternative**: gVisor is the closest established
+  architectural relative, but it has a broad Linux System API and years of
+  production engineering. Ginux is a much narrower research prototype.
+- It is **not just namespaces or seccomp policy**: those mechanisms partition
+  or filter host-kernel behavior. Ginux additionally supplies contract-specific
+  results and virtual kernel objects such as process identities, `/proc`,
+  `/sys`, devices, and lifecycle state.
+- It is **not VM-equivalent isolation**: there is no guest kernel or
+  hardware-enforced guest boundary, and current trusted host surface is
+  substantial.
+
+See [How Ginux differs from UML, gVisor, namespaces, and
+VMs](docs/how-ginux-differs.md) for the complete comparison.
 
 The current implementation includes:
 
@@ -115,20 +150,24 @@ made.
 
 ## Relationship to other systems
 
-The userspace-kernel idea is established research and engineering territory.
-Ginux explores a particular point in that design space:
+The userspace-kernel idea is established research and engineering territory;
+Ginux does not claim to have invented it. Its closest established comparison is
+gVisor, not UML. The specific experiment is whether one self-contained,
+versioned instance contract can define a deliberately reduced ABI together
+with virtual kernel state, filesystems, devices, networking, resources,
+lifecycle, and audit evidence.
 
-| Approach | Primary boundary | Difference in emphasis |
-|---|---|---|
-| Linux [seccomp](https://docs.kernel.org/userspace-api/seccomp_filter.html) | Filters host syscalls | Restricts the existing ABI rather than defining a complete virtual contract |
-| [User-Mode Linux](https://kernel.org/doc/html/latest/virt/uml/user_mode_linux.html) | Runs Linux as a host process | Reuses a complete Linux kernel over virtual hardware |
-| [gVisor](https://gvisor.dev/docs/) | Implements an application kernel in userspace | Closely related model with different compatibility and performance goals |
-| [Gramine](https://gramine.readthedocs.io/en/stable/) | Packages applications with a library OS | Uses manifests and a library-OS boundary |
-| [Proxos](https://www.usenix.org/legacy/events/osdi06/tech/ta-min.html) | Routes calls between private and commodity OSes | Makes trust placement configurable across the syscall interface |
-| **Ginux** | Gives each instance a versioned kernel contract | Treats the declared contract, virtual state, devices, resources, and lifecycle as one reviewable boundary |
+| System | What runs for the workload | Compatibility goal | Main distinction from Ginux |
+|---|---|---|---|
+| Linux namespaces and seccomp | The workload talks to host Linux through partitioned objects and filtered syscalls | Host Linux ABI | They constrain the existing host API; Ginux also implements contract-specific virtual results and objects |
+| [User-Mode Linux](https://docs.kernel.org/virt/uml/user_mode_linux_howto_v2.html) | A complete Linux kernel runs as a host process over paravirtual devices | Linux kernel behavior | Ginux does not boot or reuse a guest Linux kernel and intentionally exposes less than Linux |
+| [gVisor](https://gvisor.dev/docs/architecture_guide/intro/) | A mature application kernel implements a broad Linux System API | Broad application/container compatibility | It is the closest relative; Ginux is narrower, contract-first, and currently a research prototype |
+| VM or microVM | A guest kernel runs behind a hardware virtualization boundary | Guest-kernel compatibility | Ginux has no guest kernel or hardware-enforced guest boundary and trusts more host Linux surface |
+| **Ginux** | Native tasks run under a userspace contract supervisor | Named workloads and contracts only | The portable recipe intentionally grants only the ABI and virtual resources that a workload is meant to receive |
 
-Ginux does **not** promise the complete Linux ABI. Compatibility claims apply
-only to named contracts, workloads, and executable evidence.
+Ginux does **not** promise the complete Linux ABI, VM-grade isolation, or
+production readiness. Compatibility claims apply only to named contracts,
+workloads, and executable evidence.
 
 ## Development and testing
 
@@ -340,6 +379,11 @@ human-owned product intent, architecture, constraints, and acceptance
 boundaries combined with agent-executed implementation, diagnosis, and test
 loops. Each approved gate records its scope, non-goals, acceptance criteria,
 verification, evidence, and stopping point in `hdae/`.
+
+AI assistance is the means used to build and revise the experiment, not a claim
+that the output is correct, secure, maintainable, or novel. Human direction
+sets the architecture and boundaries; executable gates supply the evidence;
+review determines what can actually be claimed.
 
 ## Historical standalone kernel
 
