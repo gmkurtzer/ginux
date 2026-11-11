@@ -164,10 +164,15 @@
   with a controller-owned log destination. The rebased result is delivered in
   pull request https://github.com/gmkurtzer/ginux/pull/255 and awaits human
   acceptance. A subsequent terminal fix tracks duplicated console descriptors
-  and the virtual foreground process group; the complete Rocky interactive
-  workflow now proves Bash monitor mode, foreground Ctrl-C delivery, pipelines,
-  background jobs, detach/reattach, resizing, and shutdown without terminal
-  process-group or no-job-control warnings.
+  and the virtual foreground process group. Commit `20c036dd` keeps sudo out of
+  the live relay, preserves the runtime control descriptor, and makes the
+  attach process own input for its full lifetime. The complete clean Rocky
+  workflow now proves Bash monitor mode, foreground Ctrl-C interruption,
+  foreground Ctrl-Z suspension with job tracking, Ctrl-] detach after either
+  signal, pipelines, background jobs, reattach, resizing, and shutdown without
+  terminal process-group or no-job-control warnings. `make check`,
+  `make test-host-lifecycle`, aggregate `make test`, and the full
+  `make test-systemd-interactive` workflow pass.
 
 ## Governing outcome and invariants
 
@@ -640,6 +645,10 @@ merge or close the pull request without explicit human direction. Gates 15 and
   passes `make test-host-lifecycle`, `make test-config`, and the complete
   `make test-systemd-interactive` clean/cache/audit/persistence workflow;
   ordinary cleanup left the live interactive host and its overlay intact.
+  Attached-console follow-up evidence also passes a focused Ctrl-C/Ctrl-Z/
+  Ctrl-]/reattach/poweroff session, `make check`, `make test-host-lifecycle`,
+  aggregate `make test`, and the complete clean/cached
+  `make test-systemd-interactive` workflow.
 - Delivery audit on 2026-11-09 verified pull requests 249, 251, 252, 253, 254,
   and 255 are open, non-draft, cleanly mergeable, correctly stacked, and have
   passing `static-and-unit` and `launch-integration` checks. No pull request was

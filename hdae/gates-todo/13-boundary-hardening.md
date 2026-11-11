@@ -58,7 +58,9 @@ honest security and compatibility boundary for the initial milestone.
   reserved host destruction for explicit `make host-reset`, and replaced the
   audit destination-as-mode syntax with explicit audit enablement.
 - [x] Completed virtual controlling-terminal semantics across duplicated
-  console descriptors so interactive shells retain job control.
+  console descriptors so interactive shells retain job control, foreground
+  Ctrl-C interrupts commands, foreground Ctrl-Z suspends jobs, and Ctrl-]
+  remains a reliable detach sequence after either signal.
 
 ## Remaining work
 
@@ -145,8 +147,14 @@ honest security and compatibility boundary for the initial milestone.
   default audit-disabled, `--audit` opt-in, contract, console, and persistence
   workflow using `[audit] enabled = false`. The same run rejected Bash's
   terminal-process-group and no-job-control warnings, proved monitor mode,
-  foreground Ctrl-C delivery, pipelines, background jobs, detach/reattach,
-  terminal resizing, and controlled shutdown.
+  foreground Ctrl-C delivery, foreground Ctrl-Z suspension with Bash job
+  tracking, pipelines, background jobs, Ctrl-] detach after signal delivery,
+  reattach, terminal resizing, and controlled shutdown.
+- Focused attached-console regression -> passed Ctrl-C interruption of
+  `sleep 30`, Ctrl-Z suspension and `jobs -s` visibility, Ctrl-] detach,
+  reattach, and normal systemd poweroff in one session.
+- Post-fix `make check`, `make test-host-lifecycle`, and aggregate `make test`
+  -> passed after the attached-console signal changes.
 - Pull request 255 CI -> `static-and-unit` and `launch-integration` both passed
   on the delivered `hdae/boundary-hardening` branch.
 - `make bench-compare` against the default stale exploratory artifact failed
@@ -215,7 +223,8 @@ honest security and compatibility boundary for the initial milestone.
   reduction), `c35f529a` (boundary and recovery verification), `8cf92c0c`
   (evidence checkpoint), `7ed25d42` and `afa7c1a4` (delivery records), and
   `792f71a2` plus the final evidence commit (performance criterion and fresh
-  closure evidence).
+  closure evidence), and `20c036dd` (attached-console signal forwarding and
+  job control).
 
 ## Review policy and outcome
 
