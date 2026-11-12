@@ -107,9 +107,9 @@ replace it.
     parallel and prove independent contracts, virtual state, writable overlays,
     resources, audit, console, lifecycle, recovery, and documented shared-host
     network behavior.
-18. **Architecture explanation and differentiation**: explain Ginux's execution,
-    contract, and isolation boundaries and distinguish them from UML, gVisor,
-    namespaces, conventional containers, and virtual machines.
+18. **Architecture explanation and differentiation**: answer recurring UML,
+    gVisor, namespaces, VM, syscall-capture, security, compatibility, and HDAE
+    questions with evidence-based README and architecture documentation.
 19. **Readable instance recipes and hooks**: support self-contained multiline
     pre-boot scripts, remove the controller's Rocky-only OCI restriction, and
     provide validated Rocky, Ubuntu CMS, and Alpine native-boot recipes.

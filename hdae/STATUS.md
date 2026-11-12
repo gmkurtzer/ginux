@@ -204,8 +204,9 @@
   Gate 16 implementation is present on `main`.
 - Gate 17 concurrent-instance isolation was accepted after pull request 259
   merged on 2026-11-11. Its authoritative record is in `gates-done/`.
-- Gate 18 documentation clarification is independently delivered in pull
-  request 260 and is awaiting human review.
+- Gate 18 documentation clarification merged through pull request 260. Its
+  exact-prose CI assertions received follow-up review and are being corrected
+  separately without changing Gate 19.
 - Gate 19 readable instance recipes is technically passed on
   `hdae/readable-instance-recipes`. It adds bounded triple-quoted pre-boot hook
   scripts, generic digest-pinned public OCI acquisition, and five validated
@@ -234,16 +235,16 @@ scope, threat model, and invariants.
 - Reload after context shift: required
 - Active gate: Gate 19, readable instance recipes and hooks, is approved and
   active on `hdae/readable-instance-recipes`. Gate 17 is accepted and closed
-  after pull request 259 merged. Gate 18 remains independently delivered in
-  pull request 260 for human review. Gate 11 remains partial, Gate 14 is
-  deferred, and Gate 16 is abandoned.
+  after pull request 259 merged. Gate 18 merged through pull request 260. Gate
+  11 remains partial, Gate 14 is deferred, and Gate 16 is abandoned.
 - Last evidence: `make test-generic-oci`, `make demo-gate-19`,
   `make test-gate19-native-examples`, `make check`, `make test-config`,
   `make test-gate975-hooks`, `make test-security`, `make test-systemd`, and
   aggregate `make test` passed. Rocky and Ubuntu reached systemd
   `multi-user.target`; Alpine reached its BusyBox init console login.
-- Exact next action: commit and push the expanded Gate 19 implementation to
-  pull request 261, then stop for human review and acceptance.
+- Exact next action: resolve pull request 261 against current `main`, rerun
+  affected verification, push the resolved branch, and stop for human review
+  and acceptance.
 - The final CLI correction makes required configuration files positional:
   `instance create NAME FILE`, `validate FILE`, `inspect FILE`, and
   `explain FILE OPERATION`. Fresh `make check`, `make test-contract`, and
