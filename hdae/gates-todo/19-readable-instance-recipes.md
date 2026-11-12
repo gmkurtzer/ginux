@@ -174,7 +174,8 @@ moving pre-boot authority outside the portable recipe or weakening mediation.
 - Planned commits: gate and parser; recipes and documentation; evidence and
   pull-request checkpoint
 - Actual commits: `fd2c0aba`, `c9079530`, `fa828e70`, `b66bbe72`, and
-  `17502f43`, plus the pull-request checkpoint commit.
+  `17502f43`, `af4f119b`, and `bb204373`, plus the pull-request checkpoint
+  commit.
 
 ## Review policy and outcome
 
