@@ -59,7 +59,7 @@ or compatibility claims the current evidence does not support.
 ## Remaining work
 
 - [x] Pushed the branch and opened the Gate 18 pull request.
-- [ ] Obtain human review and acceptance.
+- [x] Obtained human review and acceptance on 2026-11-12.
 
 ## Acceptance criteria
 
@@ -110,6 +110,9 @@ or compatibility claims the current evidence does not support.
   comparison, limitation, terminology, formatting, and lint assertions.
 - `make test` -> passed the complete aggregate unit and QEMU integration suite.
 - `make test-ci-changes` -> passed all documentation/code classification cases.
+- Pull request 260 merged as `8ce4f590` on 2026-11-12.
+- Follow-up pull request 262 replaced exact-prose CI assertions with document
+  existence and cross-link integrity checks, then merged as `2fe3648d`.
 - Manual hostile-reading pass -> mechanism language matches the checked-in
   seccomp/ptrace filter, current selective exception is limited to
   `sched_yield`, gVisor is described as closest rather than equivalent, and no
@@ -131,11 +134,10 @@ or compatibility claims the current evidence does not support.
 - Pull request: https://github.com/gmkurtzer/ginux/pull/260
 - Planned commits: gate definition; README and comparison documentation;
   deterministic checks and evidence; pull-request record
-- Actual commits: `cdf12203`, `6644b3e4`, plus the final evidence checkpoint
-  commit.
+- Actual commits: `cdf12203`, `6644b3e4`, the final evidence checkpoint commit,
+  merge `8ce4f590`, and follow-up merge `2fe3648d`.
 
 ## Review policy and outcome
 
-Human checkpoint. The human authorized implementation and pull-request delivery
-on 2026-11-11. The gate remains open until the PR evidence is reviewed and
-accepted.
+Accepted and closed by explicit human direction on 2026-11-12 after pull
+request 260 and its documentation-check follow-up, pull request 262, merged.

@@ -204,17 +204,9 @@
   Gate 16 implementation is present on `main`.
 - Gate 17 concurrent-instance isolation was accepted after pull request 259
   merged on 2026-11-11. Its authoritative record is in `gates-done/`.
-- Gate 18 documentation clarification merged through pull request 260. Its
-  exact-prose CI assertions received follow-up review and are being corrected
-  separately without changing Gate 19.
-- Gate 19 readable instance recipes is technically passed on
-  `hdae/readable-instance-recipes`. It adds bounded triple-quoted pre-boot hook
-  scripts, generic digest-pinned public OCI acquisition, and five validated
-  examples spanning Rocky systemd, Ubuntu systemd, and Alpine BusyBox init.
-  Focused parser, OCI, configuration, hook, native-boot, security, systemd, and
-  aggregate suites pass. Delivery remains pull request
-  https://github.com/gmkurtzer/ginux/pull/261, awaiting human review and
-  acceptance.
+- Gates 18 and 19 were explicitly accepted and closed by the human on
+  2026-11-12. Pull requests 260, 261, and the Gate 18 documentation-check
+  follow-up 262 are merged; their authoritative records are in `gates-done/`.
 
 ## Governing outcome and invariants
 
@@ -233,18 +225,15 @@ scope, threat model, and invariants.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 19, readable instance recipes and hooks, is approved and
-  active on `hdae/readable-instance-recipes`. Gate 17 is accepted and closed
-  after pull request 259 merged. Gate 18 merged through pull request 260. Gate
-  11 remains partial, Gate 14 is deferred, and Gate 16 is abandoned.
+- Active gate: none. Gates 18 and 19 are accepted and closed. Gate 11 remains
+  partial, Gate 14 is deferred, and Gate 16 is abandoned.
 - Last evidence: `make test-generic-oci`, `make demo-gate-19`,
   `make test-gate19-native-examples`, `make check`, `make test-config`,
   `make test-gate975-hooks`, `make test-security`, `make test-systemd`, and
   aggregate `make test` passed. Rocky and Ubuntu reached systemd
   `multi-user.target`; Alpine reached its BusyBox init console login.
-- Exact next action: resolve pull request 261 against current `main`, rerun
-  affected verification, push the resolved branch, and stop for human review
-  and acceptance.
+- Exact next action: obtain human direction on whether to resume or defer the
+  partial Gate 11 performance target. Gate 14 remains deferred.
 - The final CLI correction makes required configuration files positional:
   `instance create NAME FILE`, `validate FILE`, `inspect FILE`, and
   `explain FILE OPERATION`. Fresh `make check`, `make test-contract`, and
@@ -633,17 +622,16 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Commit and push the expanded Gate 19 implementation to pull request 261, then
-stop for human review and acceptance. Gate 14 remains explicitly deferred.
+Obtain human direction on whether to resume or defer the partial Gate 11
+performance target. Gate 14 remains explicitly deferred.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 19 readable instance recipes is technically passed on
-  `hdae/readable-instance-recipes` and delivered in pull request 261; human
-  acceptance remains.
+- Active gate: none. Gates 18 and 19 were accepted and closed on 2026-11-12.
+  Gate 11 remains partial and Gate 14 remains deferred.
 - Active work: Gate 12 is technically passed and delivered in pull request 251;
   Gate 12.1 is technically passed and delivered in pull request 252; Gate
   12.25 is technically passed and delivered in pull request 253. Gate 12.5 is

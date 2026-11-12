@@ -141,6 +141,8 @@ moving pre-boot authority outside the portable recipe or weakening mediation.
 - `make check` and aggregate `make test` -> formatting, lint, unit, image,
   configuration, lifecycle, device, process, virtual-kernel, and QEMU
   integration regressions passed.
+- Pull request 261 merged as `4a8888d8` on 2026-11-12 after its conflicts with
+  current `main` were resolved and all required CI checks passed.
 
 ## Decisions and limitations
 
@@ -175,9 +177,9 @@ moving pre-boot authority outside the portable recipe or weakening mediation.
   pull-request checkpoint
 - Actual commits: `fd2c0aba`, `c9079530`, `fa828e70`, `b66bbe72`, and
   `17502f43`, `af4f119b`, and `bb204373`, plus the pull-request checkpoint
-  commit.
+  commit and merge `4a8888d8`.
 
 ## Review policy and outcome
 
-Human checkpoint. The human approved implementation and pull-request delivery
-on 2026-11-11. Pull request 261 is delivered; stop for review and acceptance.
+Accepted and closed by explicit human direction on 2026-11-12 after pull
+request 261 merged with passing required CI.
