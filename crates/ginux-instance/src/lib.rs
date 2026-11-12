@@ -3001,6 +3001,18 @@ failure = "stop"
             include_bytes!("../../../config/examples/paranoid-shell.toml").as_slice(),
         ] {
             let config = InstanceConfig::parse(recipe).unwrap();
+            assert_eq!(config.init.as_bytes(), b"/sbin/init");
+            assert_eq!(config.args.as_slice().len(), 2);
+            assert_eq!(config.args.as_slice()[0].as_bytes(), b"--system");
+            assert_eq!(
+                config.args.as_slice()[1].as_bytes(),
+                b"--unit=multi-user.target"
+            );
+            assert!(config
+                .environment
+                .as_slice()
+                .iter()
+                .any(|value| value.as_bytes() == b"container=ginux"));
             assert!(config.pre_boot_hooks.as_slice().iter().any(|hook| {
                 hook.as_bytes()
                     .windows(b"$6$ginux$".len())

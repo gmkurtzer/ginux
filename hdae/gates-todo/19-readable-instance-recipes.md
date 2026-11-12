@@ -20,6 +20,8 @@ moving pre-boot authority outside the portable recipe or weakening mediation.
   and paranoid syscall-control example recipes.
 - Give every shipped example the explicit development root password `ginux`,
   mark it `CHANGEME`, and explain that it is not a production credential.
+- Boot every shipped example through Rocky systemd to `multi-user.target`; no
+  example may use Bash or an application directly as PID 1.
 - Document hook syntax, limits, example intent, and relevant CLI workflows.
 - Add parser, normalization, rejection, recipe-validation, and regression tests.
 
@@ -46,6 +48,8 @@ moving pre-boot authority outside the portable recipe or weakening mediation.
 - [x] Add and document the four example recipes.
 - [x] Make the development root credential explicit and consistent across all
   four examples, with a regression assertion preventing omission.
+- [x] Convert every current example to systemd PID 1 and verify login/readiness under
+  Rocky QEMU.
 - [x] Add deterministic positive, negative, and compatibility tests.
 - [x] Run focused and aggregate verification.
 - [x] Commit, push, open the Gate 19 pull request, and stop for human review.
@@ -66,6 +70,9 @@ moving pre-boot authority outside the portable recipe or weakening mediation.
   validate, normalize, and document their intended tradeoffs.
 - Every shipped example sets root's development password to `ginux`, marks it
   `CHANGEME`, and passes the credential-presence regression check.
+- Every shipped example configures `/sbin/init --system
+  --unit=multi-user.target`, reaches the systemd multi-user target under Rocky
+  QEMU, and never launches Bash or an application directly as PID 1.
 - Existing configuration, hook, systemd, security, and aggregate suites remain
   green.
 
@@ -78,6 +85,8 @@ moving pre-boot authority outside the portable recipe or weakening mediation.
   timeout, and host-authority behavior.
 - `make check test-security test-systemd test` -> mandatory regressions pass.
 - `make demo-gate-19` -> validates and summarizes every example and exits zero.
+- `make test-gate19-systemd-examples` -> each example reaches a console login,
+  authenticates as root with its development password, and shuts down cleanly.
 
 ## Evidence
 
@@ -94,6 +103,9 @@ moving pre-boot authority outside the portable recipe or weakening mediation.
   Rocky recipe.
 - `make test-security` -> malformed input, deterministic fuzz, authority,
   denial, host-view, range, exhaustion, and teardown checks passed.
+- `make test-gate19-systemd-examples` -> agent workspace, network service, and
+  paranoid examples each reached `multi-user.target`, authenticated root with
+  the documented development password, and shut down cleanly.
 - `make check` and aggregate `make test` -> formatting, lint, unit, image,
   configuration, lifecycle, device, process, virtual-kernel, and QEMU
   integration regressions passed.

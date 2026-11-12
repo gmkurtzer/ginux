@@ -13,15 +13,20 @@ ginux import my-agent my-agent.toml
 | Recipe | Purpose | Important tradeoff |
 | --- | --- | --- |
 | [`../instance-rocky-systemd.toml`](../instance-rocky-systemd.toml) | Minimal Rocky systemd environment with an interactive login | Broad compatibility policy for the reference systemd workflow |
-| [`agent-workspace.toml`](agent-workspace.toml) | Interactive automation or coding workspace | Writes are limited to `/workspace` and `/tmp`; inbound networking is denied |
-| [`network-service.toml`](network-service.toml) | Service listening on instance TCP port 8080 | The service binary is illustrative and must be supplied by the chosen image or overlay |
-| [`paranoid-shell.toml`](paranoid-shell.toml) | Shell with every syscall mediated in userspace | Strongest syscall visibility, with substantial syscall-heavy performance cost |
+| [`agent-workspace.toml`](agent-workspace.toml) | Rocky systemd environment for an automation or coding workspace | Writes are limited to systemd runtime paths, `/workspace`, and `/tmp`; inbound networking is denied |
+| [`network-service.toml`](network-service.toml) | Rocky systemd environment for a service listening on instance TCP port 8080 | The service binary is illustrative and must be supplied by the chosen image or overlay |
+| [`paranoid-shell.toml`](paranoid-shell.toml) | Rocky systemd environment with every syscall mediated in userspace | Strongest syscall visibility, with substantial syscall-heavy performance cost |
 
 Every shipped example sets the development root password to `ginux` in a
 pre-boot hook. Each occurrence is marked `CHANGEME`; replace it before using a
 recipe outside a local test environment. Direct-shell and service recipes do
 not normally present a login prompt, but retain the same explicit development
 credential for consistency.
+
+All four recipes boot `/sbin/init` as systemd with `multi-user.target`; none
+lands directly in Bash. Interactive recipes reach a console login, while the
+service recipe starts `ginux-example.service` when
+`/opt/service/bin/server` is present and executable.
 
 The network-service recipe contains only portable network policy. Select the
 host attachment and external forwarding when importing or changing an instance:
