@@ -107,6 +107,9 @@ replace it.
     parallel and prove independent contracts, virtual state, writable overlays,
     resources, audit, console, lifecycle, recovery, and documented shared-host
     network behavior.
+18. **Architecture explanation and differentiation**: answer recurring UML,
+    gVisor, namespaces, VM, syscall-capture, security, compatibility, and HDAE
+    questions with evidence-based README and architecture documentation.
 
 Gates are stored in `hdae/gates-todo/` and remain there until they pass and are
 accepted at their checkpoint. Closed gate records move unchanged to

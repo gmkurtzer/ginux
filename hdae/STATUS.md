@@ -202,6 +202,12 @@
 - Gate 16's kernel-module enforcement direction was abandoned by human
   decision on 2026-11-11. Pull request 258 was closed without merging, and no
   Gate 16 implementation is present on `main`.
+- Gate 17 is technically complete in pull request 259 and awaits human review.
+- Gate 18 is approved and active on `hdae/explain-ginux-differences`. The HN
+  feedback and authoritative UML/gVisor architecture sources have been
+  reviewed. Its README, comparison, architecture, security, deterministic
+  checks, and aggregate regressions pass. It is delivered in pull request 260
+  and awaits human acceptance.
 
 ## Governing outcome and invariants
 
@@ -220,16 +226,16 @@ scope, threat model, and invariants.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 17, concurrent-instance isolation, is approved and active
-  on `hdae/concurrent-instance-isolation`. It is technically passed and
-  delivered in https://github.com/gmkurtzer/ginux/pull/259 for human acceptance.
-  Gate 11 remains partial, Gate 14 is deferred, and Gate 16 is abandoned.
-- Last evidence: `make test-multi-instance` boots two Rocky systemd instances
-  concurrently and passes independent identity, virtual PID, root, contract,
-  audit, console, shared/translated network, cross-signal, supervisor-loss,
-  restart, stale-record, and cleanup assertions.
-- Exact next action: create the separately approved Gate 18 documentation
-  branch from synchronized `main`; Gate 17 remains at its human checkpoint.
+- Active gate: Gate 18, architecture explanation and differentiation, is
+  approved and active on `hdae/explain-ginux-differences`. Gate 17 is
+  technically complete and merged through pull request 259 but awaits explicit
+  human acceptance. Gate 11 remains partial, Gate 14 is deferred, and Gate 16
+  is abandoned.
+- Last evidence: Gate 18 passed `make check-architecture-doc`,
+  `make check-security-doc`, `make check`, `make test-ci-changes`, and aggregate
+  `make test` with all QEMU integrations.
+- Exact next action: stop at the Gate 17 and Gate 18 human acceptance
+  checkpoints in pull requests 259 and 260.
 - The final CLI correction makes required configuration files positional:
   `instance create NAME FILE`, `validate FILE`, `inspect FILE`, and
   `explain FILE OPERATION`. Fresh `make check`, `make test-contract`, and
