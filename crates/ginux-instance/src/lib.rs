@@ -2999,15 +2999,10 @@ failure = "stop"
             include_bytes!("../../../config/examples/agent-workspace.toml").as_slice(),
             include_bytes!("../../../config/examples/network-service.toml").as_slice(),
             include_bytes!("../../../config/examples/paranoid-shell.toml").as_slice(),
+            include_bytes!("../../../config/examples/alpine-native.toml").as_slice(),
         ] {
             let config = InstanceConfig::parse(recipe).unwrap();
             assert_eq!(config.init.as_bytes(), b"/sbin/init");
-            assert_eq!(config.args.as_slice().len(), 2);
-            assert_eq!(config.args.as_slice()[0].as_bytes(), b"--system");
-            assert_eq!(
-                config.args.as_slice()[1].as_bytes(),
-                b"--unit=multi-user.target"
-            );
             assert!(config
                 .environment
                 .as_slice()
@@ -3017,6 +3012,14 @@ failure = "stop"
                 hook.as_bytes()
                     .windows(b"$6$ginux$".len())
                     .any(|window| window == b"$6$ginux$")
+                    || hook
+                        .as_bytes()
+                        .windows(b"\\$6\\$ginux\\$".len())
+                        .any(|window| window == b"\\$6\\$ginux\\$")
+                    || hook
+                        .as_bytes()
+                        .windows(b"root:ginux".len())
+                        .any(|window| window == b"root:ginux")
             }));
             let normalized = config.normalized().unwrap();
             assert_eq!(
@@ -3024,6 +3027,30 @@ failure = "stop"
                 config
             );
         }
+    }
+
+    #[test]
+    fn documented_examples_use_distribution_native_boot() {
+        for recipe in [
+            include_bytes!("../../../config/instance-rocky-systemd.toml").as_slice(),
+            include_bytes!("../../../config/examples/agent-workspace.toml").as_slice(),
+            include_bytes!("../../../config/examples/network-service.toml").as_slice(),
+            include_bytes!("../../../config/examples/paranoid-shell.toml").as_slice(),
+        ] {
+            let config = InstanceConfig::parse(recipe).unwrap();
+            assert_eq!(config.args.as_slice().len(), 2);
+            assert_eq!(config.args.as_slice()[0].as_bytes(), b"--system");
+            assert_eq!(
+                config.args.as_slice()[1].as_bytes(),
+                b"--unit=multi-user.target"
+            );
+        }
+
+        let alpine = InstanceConfig::parse(include_bytes!(
+            "../../../config/examples/alpine-native.toml"
+        ))
+        .unwrap();
+        assert!(alpine.args.as_slice().is_empty());
     }
 
     #[test]

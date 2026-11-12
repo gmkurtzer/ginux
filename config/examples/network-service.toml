@@ -1,4 +1,5 @@
-# Service recipe. Host attachment and port translation are deployment state:
+# Ubuntu 24.04 blank CMS recipe. Host attachment and port translation are
+# deployment state:
 # ginux import web config/examples/network-service.toml \
 #   --network default \
 #   --forward protocol=tcp,external_port=8080,instance_port=8080
@@ -6,10 +7,10 @@ schema_version = 1
 
 [instance]
 id = "web"
-root = "docker.io/rockylinux/rockylinux@sha256:7a18ce2c9c1e0d8735f3e72685f9666150af25036e7f7b5ee4eede3754496f8c"
+root = "docker.io/jrei/systemd-ubuntu@sha256:7f3fb638ecdf2cd6ca25f73635472ce07b23dbcc9fb7f9cc1160d21f1b629d31"
 init = "/sbin/init"
 args = ["--system", "--unit=multi-user.target"]
-environment = ["container=ginux"]
+environment = ["container=ginux", "SYSTEMD_IN_CHROOT=0", "SYSTEMD_IGNORE_CHROOT=1"]
 
 [identity]
 hostname = "ginux-web"
@@ -38,14 +39,14 @@ deny = []
 [contract.filesystem]
 default = "deny"
 read = ["/"]
-write = ["/run", "/var/lib/service", "/var/log", "/tmp"]
-create = ["/run", "/var/lib/service", "/var/log", "/tmp"]
+write = ["/run", "/var/lib/ginux-cms", "/var/log", "/tmp"]
+create = ["/run", "/var/lib/ginux-cms", "/var/log", "/tmp"]
 deny = ["/boot", "/etc", "/usr"]
 
 [contract.network]
 default = "deny"
 inbound = ["tcp:8080"]
-outbound = ["tcp:443", "udp:53"]
+outbound = ["tcp:443", "tcp:8080", "udp:53"]
 
 [contract.devices]
 default = "deny"
@@ -84,45 +85,40 @@ assignments = ["console", "null", "zero", "random", "net0"]
 # CHANGEME: this example sets the development root password to "ginux".
 # Replace it before using this recipe outside a local test environment.
 pre_boot = [
-  "/usr/bin/cp --remove-destination /usr/share/zoneinfo/UTC /etc/localtime",
   """
-  /usr/bin/awk -F: -v OFS=: -v h='$6$ginux$5fZDUU2yskfStn1c0m2HsJ06zu3nvK7qFBLD476WxfLLpR6BrDTmG6qNrx0C./uhKIKvTQgrHwXxjSXdyBnBo0' '{if ($1 == "root") $2=h; print}' /etc/shadow > /etc/.shadow.ginux
+  /usr/bin/sed 's|^root:[^:]*:|root:$6$ginux$5fZDUU2yskfStn1c0m2HsJ06zu3nvK7qFBLD476WxfLLpR6BrDTmG6qNrx0C./uhKIKvTQgrHwXxjSXdyBnBo0:|' /etc/shadow > /etc/.shadow.ginux
   /usr/bin/cat /etc/.shadow.ginux > /etc/shadow
   /usr/bin/rm -f /etc/.shadow.ginux
-  /usr/bin/awk -F: '$1 == "root" && $2 != "" {found=1} END {exit !found}' /etc/shadow
   """,
   """
-  /usr/bin/mkdir -p /var/lib/service
-  /usr/bin/chown 1000:1000 /var/lib/service
+  /usr/bin/mkdir -p /var/lib/ginux-cms
+  /usr/bin/printf '<!doctype html>\n<title>Ginux CMS</title>\n<h1>Blank CMS</h1>\n<p>Edit /var/lib/ginux-cms/index.html to begin.</p>\n' > /var/lib/ginux-cms/index.html
   """,
   """
-  /usr/bin/printf '[Unit]\nDescription=Example Ginux network service\nAfter=network-online.target\nConditionPathIsExecutable=/opt/service/bin/server\n\n[Service]\nExecStart=/opt/service/bin/server --listen 0.0.0.0:8080\nRestart=on-failure\n\n[Install]\nWantedBy=multi-user.target\n' > /etc/systemd/system/ginux-example.service
+  /usr/bin/printf '[Unit]\nDescription=Ginux blank CMS\nAfter=network.target\n\n[Service]\nExecStart=/usr/bin/python3 -m http.server 8080 --directory /var/lib/ginux-cms\nRestart=on-failure\n\n[Install]\nWantedBy=multi-user.target\n' > /etc/systemd/system/ginux-cms.service
   /usr/bin/mkdir -p /etc/systemd/system/multi-user.target.wants
-  /usr/bin/ln -sf ../ginux-example.service /etc/systemd/system/multi-user.target.wants/ginux-example.service
+  /usr/bin/ln -sf ../ginux-cms.service /etc/systemd/system/multi-user.target.wants/ginux-cms.service
   """,
   """
-  /usr/bin/sh -c 'for u in dbus-broker.service dbus.service dbus.socket modprobe@.service systemd-userdbd.service systemd-userdbd.socket; do
+  /usr/bin/sh -c 'for u in dbus.service dbus.socket systemd-resolved.service systemd-timesyncd.service; do
     rm -f /etc/systemd/system/$u
     mkdir -p /etc/systemd/system/$u.d
-    printf "[Unit]\nConditionPathExists=/run/ginux-enable-optional-service\n" > /etc/systemd/system/$u.d/90-ginux-minimal-image.conf
+    printf "[Unit]\nConditionPathExists=/run/ginux-enable-optional-service\n" > /etc/systemd/system/$u.d/90-ginux.conf
   done'
   """,
   """
-  /usr/bin/rm -f /usr/lib/systemd/system/sysinit.target.wants/systemd-update-utmp.service
-  /usr/bin/rm -f /usr/lib/systemd/system/graphical.target.wants/systemd-update-utmp-runlevel.service
-  /usr/bin/rm -f /usr/lib/systemd/system/multi-user.target.wants/systemd-update-utmp-runlevel.service
-  /usr/bin/rm -f /usr/lib/systemd/system/rescue.target.wants/systemd-update-utmp-runlevel.service
-  /usr/bin/rm -f /etc/systemd/system/systemd-initctl.service /etc/systemd/system/systemd-initctl.socket
+  /usr/bin/mkdir -p /etc/systemd/system/multi-user.target.wants
+  /usr/bin/ln -sf /lib/systemd/system/console-getty.service /etc/systemd/system/multi-user.target.wants/console-getty.service
+  /usr/bin/mkdir -p /etc/systemd/system/console-getty.service.d
+  /usr/bin/printf '[Service]\nImportCredential=\n' > /etc/systemd/system/console-getty.service.d/90-ginux.conf
   """,
   """
   /usr/bin/mkdir -p /etc/systemd/system/systemd-journald.service.d
-  /usr/bin/printf '[Service]\nIPAddressDeny=\n' > /etc/systemd/system/systemd-journald.service.d/90-ginux-network.conf
-  /usr/bin/printf '[Unit]\nDescription=Keyboard Request Target\nDefaultDependencies=no\n' > /etc/systemd/system/kbrequest.target
+  /usr/bin/ln -sf /dev/null /etc/systemd/system/systemd-journald.service.d/nice.conf
+  /usr/bin/printf '[Service]\nIPAddressDeny=\n' > /etc/systemd/system/systemd-journald.service.d/90-ginux.conf
   """,
   """
-  /usr/bin/rm -f /etc/systemd/system/getty.target /etc/systemd/system/console-getty.service
-  /usr/bin/ln -sf /usr/lib/systemd/system/console-getty.service /etc/systemd/system/getty.target.wants/console-getty.service
-  /usr/bin/printf '#%%PAM-1.0\nauth required pam_unix.so\naccount required pam_unix.so\npassword required pam_unix.so\nsession required pam_unix.so\n' > /etc/pam.d/login
+  /usr/bin/sh -c 'for u in systemd-tmpfiles-setup-dev-early.service systemd-tmpfiles-setup-dev.service systemd-tmpfiles-setup.service; do mkdir -p /etc/systemd/system/$u.d; printf "[Service]\nImportCredential=\n" > /etc/systemd/system/$u.d/90-ginux.conf; done'
   """,
 ]
 timeout_seconds = 30

@@ -111,8 +111,8 @@ replace it.
     contract, and isolation boundaries and distinguish them from UML, gVisor,
     namespaces, conventional containers, and virtual machines.
 19. **Readable instance recipes and hooks**: support self-contained multiline
-    pre-boot scripts, simplify the Rocky systemd recipe, and provide validated
-    minimal, agent, network-service, and paranoid example recipes.
+    pre-boot scripts, remove the controller's Rocky-only OCI restriction, and
+    provide validated Rocky, Ubuntu CMS, and Alpine native-boot recipes.
 
 Gates are stored in `hdae/gates-todo/` and remain there until they pass and are
 accepted at their checkpoint. Closed gate records move unchanged to

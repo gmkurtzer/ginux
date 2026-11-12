@@ -8032,6 +8032,58 @@ fn supervise_native(
                     native_fail(instance, pid, b"native virtual setsid failed");
                 }
             }
+            Action::Emulate if mode == 3 && syscall == 124 => {
+                let target = u32::try_from(registers.rdi).ok();
+                let result = match target {
+                    Some(0) => processes
+                        .view(task.virtual_id)
+                        .map(|view| i64::from(view.session))
+                        .unwrap_or(-ESRCH),
+                    Some(target) => processes
+                        .lookup(target)
+                        .map(|view| i64::from(view.session))
+                        .unwrap_or(-ESRCH),
+                    None => -ESRCH,
+                };
+                write_all(b"emulate surface=virtual-session-query result=");
+                write_i64(result);
+                write_all(b"\n");
+                registers.orig_rax = u64::MAX;
+                task.awaiting_exit = true;
+                task.override_exit = true;
+                task.override_result = result;
+                if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
+                {
+                    native_fail(instance, pid, b"native virtual getsid failed");
+                }
+            }
+            Action::Emulate if mode == 3 && syscall == 121 => {
+                let target = u32::try_from(registers.rdi).ok();
+                let result = match target {
+                    Some(0) => processes
+                        .view(task.virtual_id)
+                        .map(|view| i64::from(view.process_group))
+                        .unwrap_or(-ESRCH),
+                    Some(target) => processes
+                        .lookup(target)
+                        .map(|view| i64::from(view.process_group))
+                        .unwrap_or(-ESRCH),
+                    None => -ESRCH,
+                };
+                write_all(b"emulate surface=virtual-process-group-query result=");
+                write_i64(result);
+                write_all(b"\n");
+                registers.orig_rax = u64::MAX;
+                task.awaiting_exit = true;
+                task.override_exit = true;
+                task.override_result = result;
+                if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
+                {
+                    native_fail(instance, pid, b"native virtual getpgid failed");
+                }
+            }
             Action::Emulate if mode == 3 && syscall == 109 => {
                 let changed_task = u32::try_from(registers.rdi)
                     .ok()
@@ -8570,7 +8622,9 @@ fn supervise_native(
                     && syscall == ginux_core::SYS_READLINKAT
                     && tracee_decimal_fd_path(host_pid, registers.rsi as usize) =>
             {
-                let target = b"/memfd:ginux-instance";
+                let target: &[u8] = tracee_proc_self_fd_number(host_pid, registers.rsi as usize)
+                    .filter(|fd| native_fd_contains(&task.console_fds, *fd))
+                    .map_or(b"/memfd:ginux-instance", |_| b"/dev/console");
                 let count = core::cmp::min(target.len(), registers.r10 as usize);
                 let allowed =
                     write_tracee_bytes(host_pid, registers.rdx as usize, &target[..count]);
@@ -8932,17 +8986,39 @@ fn supervise_native(
             }
             Action::Mediate
                 if mode == 3
-                    && syscall == 257
-                    && (tracee_string_equals(host_pid, registers.rsi as usize, b"/dev/null")
-                        || tracee_string_equals(
-                            host_pid,
-                            registers.rsi as usize,
-                            b"/dev/console",
-                        )
-                        || tracee_string_equals(host_pid, registers.rsi as usize, b"/dev/tty")) =>
+                    && matches!(syscall, 2 | 257)
+                    && (tracee_string_equals(
+                        host_pid,
+                        if syscall == 2 {
+                            registers.rdi as usize
+                        } else {
+                            registers.rsi as usize
+                        },
+                        b"/dev/null",
+                    ) || tracee_string_equals(
+                        host_pid,
+                        if syscall == 2 {
+                            registers.rdi as usize
+                        } else {
+                            registers.rsi as usize
+                        },
+                        b"/dev/console",
+                    ) || tracee_string_equals(
+                        host_pid,
+                        if syscall == 2 {
+                            registers.rdi as usize
+                        } else {
+                            registers.rsi as usize
+                        },
+                        b"/dev/tty",
+                    )) =>
             {
-                let null_device =
-                    tracee_string_equals(host_pid, registers.rsi as usize, b"/dev/null");
+                let path_address = if syscall == 2 {
+                    registers.rdi as usize
+                } else {
+                    registers.rsi as usize
+                };
+                let null_device = tracee_string_equals(host_pid, path_address, b"/dev/null");
                 let source = if null_device {
                     INSTANCE_NULL_FD
                 } else {

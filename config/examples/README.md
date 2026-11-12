@@ -14,8 +14,9 @@ ginux import my-agent my-agent.toml
 | --- | --- | --- |
 | [`../instance-rocky-systemd.toml`](../instance-rocky-systemd.toml) | Minimal Rocky systemd environment with an interactive login | Broad compatibility policy for the reference systemd workflow |
 | [`agent-workspace.toml`](agent-workspace.toml) | Rocky systemd environment for an automation or coding workspace | Writes are limited to systemd runtime paths, `/workspace`, and `/tmp`; inbound networking is denied |
-| [`network-service.toml`](network-service.toml) | Rocky systemd environment for a service listening on instance TCP port 8080 | The service binary is illustrative and must be supplied by the chosen image or overlay |
+| [`network-service.toml`](network-service.toml) | Ubuntu 24.04 systemd environment serving a blank CMS on instance TCP port 8080 | Uses the digest-pinned third-party `jrei/systemd-ubuntu` OCI root and a small Python HTTP service |
 | [`paranoid-shell.toml`](paranoid-shell.toml) | Rocky systemd environment with every syscall mediated in userspace | Strongest syscall visibility, with substantial syscall-heavy performance cost |
+| [`alpine-native.toml`](alpine-native.toml) | Minimal Alpine environment using its native BusyBox init | Smallest example; intentionally does not add or emulate systemd |
 
 Every shipped example sets the development root password to `ginux` in a
 pre-boot hook. Each occurrence is marked `CHANGEME`; replace it before using a
@@ -23,13 +24,18 @@ recipe outside a local test environment. Direct-shell and service recipes do
 not normally present a login prompt, but retain the same explicit development
 credential for consistency.
 
-All four recipes boot `/sbin/init` as systemd with `multi-user.target`; none
-lands directly in Bash. Interactive recipes reach a console login, while the
-service recipe starts `ginux-example.service` when
-`/opt/service/bin/server` is present and executable.
+Every recipe boots the distribution's native init path and none lands directly
+in Bash. Rocky and Ubuntu use systemd; Alpine uses BusyBox init. Interactive
+recipes reach a console login, while the Ubuntu service recipe starts the
+included `ginux-cms.service` and serves its blank page on port 8080.
 
-The network-service recipe contains only portable network policy. Select the
-host attachment and external forwarding when importing or changing an instance:
+The Ubuntu CMS recipe uses the third-party `jrei/systemd-ubuntu` image because
+the official minimal Ubuntu OCI image does not ship `/sbin/init`. Its exact
+manifest is digest-pinned and verified by the same generic OCI acquisition path
+as the other examples.
+
+The Ubuntu CMS recipe contains only portable network policy. Select the host
+attachment and external forwarding when importing or changing an instance:
 
 ```sh
 ginux import web config/examples/network-service.toml \

@@ -208,11 +208,12 @@
   request 260 and is awaiting human review.
 - Gate 19 readable instance recipes is technically passed on
   `hdae/readable-instance-recipes`. It adds bounded triple-quoted pre-boot hook
-  scripts, a readable Rocky systemd recipe, and validated minimal Rocky,
-  constrained-agent, network-service, and paranoid examples. Focused parser,
-  configuration, hook, systemd, security, and aggregate suites pass. Delivery
-  is pull request https://github.com/gmkurtzer/ginux/pull/261, now awaiting
-  human review and acceptance.
+  scripts, generic digest-pinned public OCI acquisition, and five validated
+  examples spanning Rocky systemd, Ubuntu systemd, and Alpine BusyBox init.
+  Focused parser, OCI, configuration, hook, native-boot, security, systemd, and
+  aggregate suites pass. Delivery remains pull request
+  https://github.com/gmkurtzer/ginux/pull/261, awaiting human review and
+  acceptance.
 
 ## Governing outcome and invariants
 
@@ -236,11 +237,13 @@ scope, threat model, and invariants.
   after pull request 259 merged. Gate 18 remains independently delivered in
   pull request 260 for human review. Gate 11 remains partial, Gate 14 is
   deferred, and Gate 16 is abandoned.
-- Last evidence: Gate 19 inspection confirmed that the existing parser is
-  physical-line based, `[hooks].pre_boot` rejects embedded newlines, and the
-  Rocky systemd recipe contains ten commands on one long source line.
-- Exact next action: implement bounded triple-quoted pre-boot scripts with
-  readable normalization, then simplify and validate the approved recipes.
+- Last evidence: `make test-generic-oci`, `make demo-gate-19`,
+  `make test-gate19-native-examples`, `make check`, `make test-config`,
+  `make test-gate975-hooks`, `make test-security`, `make test-systemd`, and
+  aggregate `make test` passed. Rocky and Ubuntu reached systemd
+  `multi-user.target`; Alpine reached its BusyBox init console login.
+- Exact next action: commit and push the expanded Gate 19 implementation to
+  pull request 261, then stop for human review and acceptance.
 - The final CLI correction makes required configuration files positional:
   `instance create NAME FILE`, `validate FILE`, `inspect FILE`, and
   `explain FILE OPERATION`. Fresh `make check`, `make test-contract`, and
@@ -629,11 +632,8 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Implement Gate 15 on `hdae/dispatch-performance-matrix`: add checked-in native,
-selective, paranoid, and suite templates; build paired collection, validation,
-reporting, graph, and deterministic test paths; update affected documentation;
-then run the bounded demonstration and full matrix before human review. Gate 14
-remains explicitly deferred.
+Commit and push the expanded Gate 19 implementation to pull request 261, then
+stop for human review and acceptance. Gate 14 remains explicitly deferred.
 
 ## Context recovery
 
@@ -665,7 +665,11 @@ remains explicitly deferred.
   open from `hdae/contract-network-ux` against the Gate 11 branch.
 - Gate 12.1 delivery: pull request https://github.com/gmkurtzer/ginux/pull/252
   is open from `hdae/virtual-kernel-filesystems` against the Gate 12 branch.
-- Last evidence: Gate 12.1 passed `make check`, `make test-kernel-views`,
+- Last evidence: Gate 19 passed `make test-generic-oci`,
+  `make demo-gate-19`, `make test-gate19-native-examples`, `make check`,
+  `make test-config`, `make test-gate975-hooks`, `make test-security`,
+  `make test-systemd`, and aggregate `make test`. Gate 12.1 also passed `make
+  check`, `make test-kernel-views`,
   `make test-process`, the complete `make test-systemd` matrix, aggregate
   `make test`, and `make demo-gate-12.1`. The demo proved on-demand proc/sys
   access, live virtual-PID lifecycle, virtual metadata, no host leakage, empty
