@@ -82,7 +82,15 @@ assignments = ["root-overlay"]
 assignments = ["console", "null", "zero", "random", "net0"]
 
 [hooks]
+# CHANGEME: this example sets the development root password to "ginux".
+# Replace it before using this recipe outside a local test environment.
 pre_boot = [
+  """
+  /usr/bin/awk -F: -v OFS=: -v h='$6$ginux$5fZDUU2yskfStn1c0m2HsJ06zu3nvK7qFBLD476WxfLLpR6BrDTmG6qNrx0C./uhKIKvTQgrHwXxjSXdyBnBo0' '{if ($1 == "root") $2=h; print}' /etc/shadow > /etc/.shadow.ginux
+  /usr/bin/cat /etc/.shadow.ginux > /etc/shadow
+  /usr/bin/rm -f /etc/.shadow.ginux
+  /usr/bin/awk -F: '$1 == "root" && $2 != "" {found=1} END {exit !found}' /etc/shadow
+  """,
   """
   /usr/bin/mkdir -p /var/lib/service
   /usr/bin/chown 1000:1000 /var/lib/service

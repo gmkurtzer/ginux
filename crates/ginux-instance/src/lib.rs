@@ -3001,6 +3001,11 @@ failure = "stop"
             include_bytes!("../../../config/examples/paranoid-shell.toml").as_slice(),
         ] {
             let config = InstanceConfig::parse(recipe).unwrap();
+            assert!(config.pre_boot_hooks.as_slice().iter().any(|hook| {
+                hook.as_bytes()
+                    .windows(b"$6$ginux$".len())
+                    .any(|window| window == b"$6$ginux$")
+            }));
             let normalized = config.normalized().unwrap();
             assert_eq!(
                 InstanceConfig::parse(normalized.as_bytes()).unwrap(),

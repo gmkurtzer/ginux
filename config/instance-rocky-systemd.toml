@@ -83,9 +83,11 @@ backend = "shared"
 
 [hooks]
 # Pre-boot commands run inside the mediated instance root before the final
-# filesystem restrictions activate. This example sets the temporary root
-# password to "ginux", creates policy test paths, and adapts the minimal Rocky
-# image for systemd. Production recipes should supply credentials differently.
+# filesystem restrictions activate.
+# CHANGEME: this example sets the development root password to "ginux".
+# Replace it before using this recipe outside a local test environment.
+# The remaining hooks create policy test paths and adapt the minimal Rocky
+# image for systemd.
 pre_boot = [
   "/usr/bin/cp --remove-destination /usr/share/zoneinfo/UTC /etc/localtime",
   """

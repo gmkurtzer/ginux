@@ -18,6 +18,8 @@ moving pre-boot authority outside the portable recipe or weakening mediation.
 - Rewrite the Rocky systemd recipe into short, logically grouped scripts.
 - Add validated minimal Rocky, constrained agent/workspace, networked service,
   and paranoid syscall-control example recipes.
+- Give every shipped example the explicit development root password `ginux`,
+  mark it `CHANGEME`, and explain that it is not a production credential.
 - Document hook syntax, limits, example intent, and relevant CLI workflows.
 - Add parser, normalization, rejection, recipe-validation, and regression tests.
 
@@ -42,6 +44,8 @@ moving pre-boot authority outside the portable recipe or weakening mediation.
 - [x] Implement bounded multiline hook parsing and readable normalization.
 - [x] Simplify the Rocky recipe without changing its boot behavior.
 - [x] Add and document the four example recipes.
+- [x] Make the development root credential explicit and consistent across all
+  four examples, with a regression assertion preventing omission.
 - [x] Add deterministic positive, negative, and compatibility tests.
 - [x] Run focused and aggregate verification.
 - [x] Commit, push, open the Gate 19 pull request, and stop for human review.
@@ -60,6 +64,8 @@ moving pre-boot authority outside the portable recipe or weakening mediation.
   retains its existing bootstrap, lockdown, login, and systemd behavior.
 - Minimal Rocky, agent/workspace, networked-service, and paranoid recipes all
   validate, normalize, and document their intended tradeoffs.
+- Every shipped example sets root's development password to `ginux`, marks it
+  `CHANGEME`, and passes the credential-presence regression check.
 - Existing configuration, hook, systemd, security, and aggregate suites remain
   green.
 
@@ -78,7 +84,7 @@ moving pre-boot authority outside the portable recipe or weakening mediation.
 - `cargo test -p ginux-instance` -> 27 parser, normalization, compatibility,
   rejection, policy, and documented-example tests passed.
 - `make demo-gate-19` -> all four documented recipes validated and the focused
-  instance tests passed.
+  instance tests passed, including the required development root credential.
 - `make test-config` -> complete configuration workflow passed under an
   isolated Rocky QEMU host.
 - `make test-gate975-hooks` -> ordering, mediation, stop/continue failure,

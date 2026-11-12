@@ -17,6 +17,12 @@ ginux import my-agent my-agent.toml
 | [`network-service.toml`](network-service.toml) | Service listening on instance TCP port 8080 | The service binary is illustrative and must be supplied by the chosen image or overlay |
 | [`paranoid-shell.toml`](paranoid-shell.toml) | Shell with every syscall mediated in userspace | Strongest syscall visibility, with substantial syscall-heavy performance cost |
 
+Every shipped example sets the development root password to `ginux` in a
+pre-boot hook. Each occurrence is marked `CHANGEME`; replace it before using a
+recipe outside a local test environment. Direct-shell and service recipes do
+not normally present a login prompt, but retain the same explicit development
+credential for consistency.
+
 The network-service recipe contains only portable network policy. Select the
 host attachment and external forwarding when importing or changing an instance:
 
