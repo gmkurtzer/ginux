@@ -93,7 +93,7 @@ expect {
     eof { puts stderr "Rocky host shell exited during instance creation"; exit 77 }
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
-send -- "sudo test -s /var/lib/ginux/images/rocky-10-ubi-init-amd64/rocky-10-ubi-init-amd64-rootfs.tar && printf 'GINUX_CREATE_%s\\n' 'ACQUIRE: PASS'\r"
+send -- "sudo sh -c 'for identity in /var/lib/ginux/images/*/identity; do grep -Fqx \"IMAGE_REF=docker.io/rockylinux/rockylinux@sha256:7a18ce2c9c1e0d8735f3e72685f9666150af25036e7f7b5ee4eede3754496f8c\" \"\$identity\" && test -s \"\${identity%/*}/rootfs.tar\" && exit 0; done; exit 1' && printf 'GINUX_CREATE_%s\\n' 'ACQUIRE: PASS'\r"
 expect {
     -re {GINUX_CREATE_ACQUIRE: PASS} {}
     timeout { puts stderr "create-time image acquisition was not cached"; exit 129 }

@@ -110,6 +110,9 @@ replace it.
 18. **Architecture explanation and differentiation**: answer recurring UML,
     gVisor, namespaces, VM, syscall-capture, security, compatibility, and HDAE
     questions with evidence-based README and architecture documentation.
+19. **Readable instance recipes and hooks**: support self-contained multiline
+    pre-boot scripts, remove the controller's Rocky-only OCI restriction, and
+    provide validated Rocky, Ubuntu CMS, and Alpine native-boot recipes.
 
 Gates are stored in `hdae/gates-todo/` and remain there until they pass and are
 accepted at their checkpoint. Closed gate records move unchanged to

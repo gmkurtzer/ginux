@@ -1,0 +1,131 @@
+# Ubuntu 24.04 blank CMS recipe. Host attachment and port translation are
+# deployment state:
+# ginux import web config/examples/network-service.toml \
+#   --network default \
+#   --forward protocol=tcp,external_port=8080,instance_port=8080
+schema_version = 1
+
+[instance]
+id = "web"
+root = "docker.io/jrei/systemd-ubuntu@sha256:7f3fb638ecdf2cd6ca25f73635472ce07b23dbcc9fb7f9cc1160d21f1b629d31"
+init = "/sbin/init"
+args = ["--system", "--unit=multi-user.target"]
+environment = ["container=ginux", "SYSTEMD_IN_CHROOT=0", "SYSTEMD_IGNORE_CHROOT=1"]
+
+[identity]
+hostname = "ginux-web"
+
+[resources]
+vcpus = 2
+memory_mib = 1024
+
+[execution]
+profile = "balanced"
+backend = "ptrace-native"
+
+[contract]
+version = 1
+catalog = 2
+default = "deny"
+allow = ["*"]
+deny = ["device.mmio.direct", "device.dma.direct", "network.packet.raw"]
+
+[contract.syscalls]
+control = "selective"
+default = "deny"
+allow = ["*"]
+deny = []
+
+[contract.filesystem]
+default = "deny"
+read = ["/"]
+write = ["/run", "/var/lib/ginux-cms", "/var/log", "/tmp"]
+create = ["/run", "/var/lib/ginux-cms", "/var/log", "/tmp"]
+deny = ["/boot", "/etc", "/usr"]
+
+[contract.network]
+default = "deny"
+inbound = ["tcp:8080"]
+outbound = ["tcp:443", "tcp:8080", "udp:53"]
+
+[contract.devices]
+default = "deny"
+read = ["/dev/console", "/dev/null", "/dev/zero", "/dev/urandom"]
+write = ["/dev/console", "/dev/null", "/dev/zero"]
+create = []
+
+[contract.privileges]
+default = "deny"
+setuid = []
+setgid = []
+
+[contract.process]
+default = "deny"
+max_processes = 128
+max_threads = 256
+signals = ["*"]
+ptrace = "deny"
+namespace_create = []
+namespace_join = []
+
+[contract.kernel]
+default = "deny"
+proc_read = ["/"]
+proc_write = []
+sys_read = ["/"]
+sys_write = []
+
+[storage]
+assignments = ["root-overlay"]
+
+[devices]
+assignments = ["console", "null", "zero", "random", "net0"]
+
+[hooks]
+# CHANGEME: this example sets the development root password to "ginux".
+# Replace it before using this recipe outside a local test environment.
+pre_boot = [
+  """
+  /usr/bin/sed 's|^root:[^:]*:|root:$6$ginux$5fZDUU2yskfStn1c0m2HsJ06zu3nvK7qFBLD476WxfLLpR6BrDTmG6qNrx0C./uhKIKvTQgrHwXxjSXdyBnBo0:|' /etc/shadow > /etc/.shadow.ginux
+  /usr/bin/cat /etc/.shadow.ginux > /etc/shadow
+  /usr/bin/rm -f /etc/.shadow.ginux
+  """,
+  """
+  /usr/bin/mkdir -p /var/lib/ginux-cms
+  /usr/bin/printf '<!doctype html>\n<title>Ginux CMS</title>\n<h1>Blank CMS</h1>\n<p>Edit /var/lib/ginux-cms/index.html to begin.</p>\n' > /var/lib/ginux-cms/index.html
+  """,
+  """
+  /usr/bin/printf '[Unit]\nDescription=Ginux blank CMS\nAfter=network.target\n\n[Service]\nExecStart=/usr/bin/python3 -m http.server 8080 --directory /var/lib/ginux-cms\nRestart=on-failure\n\n[Install]\nWantedBy=multi-user.target\n' > /etc/systemd/system/ginux-cms.service
+  /usr/bin/mkdir -p /etc/systemd/system/multi-user.target.wants
+  /usr/bin/ln -sf ../ginux-cms.service /etc/systemd/system/multi-user.target.wants/ginux-cms.service
+  """,
+  """
+  /usr/bin/sh -c 'for u in dbus.service dbus.socket systemd-resolved.service systemd-timesyncd.service; do
+    rm -f /etc/systemd/system/$u
+    mkdir -p /etc/systemd/system/$u.d
+    printf "[Unit]\nConditionPathExists=/run/ginux-enable-optional-service\n" > /etc/systemd/system/$u.d/90-ginux.conf
+  done'
+  """,
+  """
+  /usr/bin/mkdir -p /etc/systemd/system/multi-user.target.wants
+  /usr/bin/ln -sf /lib/systemd/system/console-getty.service /etc/systemd/system/multi-user.target.wants/console-getty.service
+  /usr/bin/mkdir -p /etc/systemd/system/console-getty.service.d
+  /usr/bin/printf '[Service]\nImportCredential=\n' > /etc/systemd/system/console-getty.service.d/90-ginux.conf
+  """,
+  """
+  /usr/bin/mkdir -p /etc/systemd/system/systemd-journald.service.d
+  /usr/bin/ln -sf /dev/null /etc/systemd/system/systemd-journald.service.d/nice.conf
+  /usr/bin/printf '[Service]\nIPAddressDeny=\n' > /etc/systemd/system/systemd-journald.service.d/90-ginux.conf
+  """,
+  """
+  /usr/bin/sh -c 'for u in systemd-tmpfiles-setup-dev-early.service systemd-tmpfiles-setup-dev.service systemd-tmpfiles-setup.service; do mkdir -p /etc/systemd/system/$u.d; printf "[Service]\nImportCredential=\n" > /etc/systemd/system/$u.d/90-ginux.conf; done'
+  """,
+]
+timeout_seconds = 30
+failure = "stop"
+
+[audit]
+enabled = false
+
+[failure]
+policy = "stop"

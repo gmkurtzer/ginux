@@ -85,7 +85,7 @@ pub const fn decide_systemd(syscall: u64, shared_network: bool) -> Decision {
         };
     }
     let action = match syscall {
-        63 | 92 | 93 | 94 | 109 | 112 | 153 | 165 | 166 | 260 | SYS_GETPRIORITY
+        63 | 92 | 93 | 94 | 109 | 112 | 121 | 124 | 153 | 165 | 166 | 260 | SYS_GETPRIORITY
         | SYS_SETPRIORITY | SYS_GETTID | SYS_SETUID | SYS_SETGID | SYS_SETREUID | SYS_SETREGID
         | SYS_SETGROUPS | SYS_SETRESUID | SYS_SETRESGID | SYS_REBOOT => Action::Emulate,
         7
@@ -244,6 +244,8 @@ pub const fn systemd_surface(syscall: u64, shared_network: bool) -> BalancedSurf
             | 81
             | 109
             | 112
+            | 121
+            | 124
             | 128
             | 135
             | 213
@@ -557,6 +559,10 @@ mod tests {
         assert_eq!(systemd_surface(62, true), BalancedSurface::Task);
         assert_eq!(decide_systemd(112, true).action, Action::Emulate);
         assert_eq!(systemd_surface(112, true), BalancedSurface::Task);
+        assert_eq!(decide_systemd(124, true).action, Action::Emulate);
+        assert_eq!(systemd_surface(124, true), BalancedSurface::Task);
+        assert_eq!(decide_systemd(121, true).action, Action::Emulate);
+        assert_eq!(systemd_surface(121, true), BalancedSurface::Task);
         assert_eq!(decide_systemd(109, true).action, Action::Emulate);
         assert_eq!(systemd_surface(109, true), BalancedSurface::Task);
         assert_eq!(decide_systemd(93, true).action, Action::Emulate);
