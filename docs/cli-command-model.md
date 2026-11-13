@@ -21,6 +21,13 @@ Gate 25 replaces only the public parser with a normal Rust host binary using
 `clap`. It does not link `clap` into the freestanding runtime and does not make
 the helper or runtime public.
 
+The following inventory records are machine-checked against generated public
+help and the private dispatch tables:
+
+<!-- cli-inventory:public attach create edit explain export help import inspect list lock set start status stop unlock validate -->
+<!-- cli-inventory:helper attach authorize-attach create export import list lock prepare-root resize resolve-network run-runtime set start status stop supervise unlock -->
+<!-- cli-inventory:runtime config config-merge device-bench devices hook-plan instance instance-diff instance-explain instance-inspect instance-plan instance-validate kernel-views launch lifecycle native native-hook process process-native runtime vfs -->
+
 ## Current public command inventory
 
 The following are the complete commands accepted by

@@ -387,6 +387,11 @@ demo-gate-19:
 	@printf '%s\n' '  Alpine native init:   config/examples/alpine-native.toml'
 	@printf '%s\n' 'Gate 19 example validation: PASS'
 
+demo-gate-25: doctor build
+	@./scripts/test-cli.sh
+	@ROCKY_NETWORK_RESTRICT=on ./scripts/with-rocky-host.sh ./scripts/test-gate12-cli.sh
+	@./scripts/demo-gate-25.sh
+
 clean:
 	cargo clean
 	@./scripts/clean-build.sh

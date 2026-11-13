@@ -4,6 +4,8 @@ set -eu
 cargo build -q -p ginux-cli
 cli=target/debug/ginux-cli
 test -x "$cli"
+mkdir -p build
+./scripts/check-cli-command-inventory.sh
 
 test_directory=$(mktemp -d "${TMPDIR:-/tmp}/ginux-cli-test.XXXXXX")
 cleanup() {
