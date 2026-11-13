@@ -71,6 +71,14 @@ static void print_result(const char *label, long value)
     call3(1, 1, (word)line, length);
 }
 
+static volatile long yield_signals;
+
+static void yield_signal_handler(int signal)
+{
+    (void)signal;
+    ++yield_signals;
+}
+
 static int sigchld_pipe = -1;
 static volatile int sigchld_seen;
 
@@ -176,6 +184,25 @@ long native_fixture_main(void)
         print_result("GINUX_FIXTURE: futex_lock_pi_flags=",
                      call4(202, (word)&pi_flags_word, 6 | 128 | 1024, 0, 0));
         print_result("GINUX_FIXTURE: pi_flags_word=", pi_flags_word);
+        return 0;
+    }
+    case 'Y': {
+        /* scripts/test-native-yield-broker.py releases each sched_yield with
+         * a byte on stdin and interrupts the first two while the paranoid
+         * broker holds their notifications. Without SA_RESTART an
+         * interrupted yield returns -EINTR. */
+        struct { word handler, flags, restorer, mask; } action = {
+            (word)yield_signal_handler, 0x04000000 /* SA_RESTORER */, (word)sigchld_restorer, 0};
+        static const char *const labels[] = {"GINUX_FIXTURE: yield-before-receive=",
+                                             "GINUX_FIXTURE: yield-before-reply=",
+                                             "GINUX_FIXTURE: yield-after=", 0};
+        char go;
+        if (call4(13, 10, (word)&action, 0, 8) != 0) return 82;
+        for (const char *const *label = labels; *label; ++label) {
+            if (call3(0, 0, (word)&go, 1) != 1) return 83;
+            print_result(*label, call3(24, 0, 0, 0));
+        }
+        print_result("GINUX_FIXTURE: yield-signals=", yield_signals);
         return 0;
     }
     case 'y': {
