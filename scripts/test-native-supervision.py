@@ -202,6 +202,13 @@ sys_read = ["/"]
             "GINUX_FIXTURE: snapshot-mmap=-1", "GINUX_FIXTURE: snapshot-mprotect=-1",
             "GINUX_FIXTURE: snapshot-munmap=-1", "GINUX_FIXTURE: snapshot-madvise=-1",
             "GINUX_FIXTURE: snapshot-mremap=-1", "GINUX_FIXTURE: snapshot-repeated=160"], code, out)
+        # PIDFD_GET_INFO must not reach the host: it reports host pids.
+        code, out = run("host-info", configured)
+        fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
+        check("PIDFD_GET_INFO is ENOTTY", code == 0 and fixture == [
+            "GINUX_FIXTURE: pidfd-open-ok=1", "GINUX_FIXTURE: pidfd-info=-25",
+            "GINUX_FIXTURE: pidfd-info-high=-25", "GINUX_FIXTURE: pidfd-info-invalid=-25",
+            "GINUX_FIXTURE: unrelated-ioctl=-9", "GINUX_FIXTURE: wait-ok=1"], code, out)
     print("test-native-supervision: PASS")
 
 
