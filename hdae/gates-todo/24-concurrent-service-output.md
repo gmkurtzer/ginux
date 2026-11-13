@@ -110,8 +110,9 @@ complete, instance-isolated output.
   authorized by the human on 2026-11-12
 - Planned commits: signed gate/control-plane commit; signed implementation and
   focused-regression commit; signed evidence and delivery reconciliation commit
-- Actual commits: `e3ba757f` (gate/control plane), `a9c51034`
-  (implementation and focused regression), evidence reconciliation pending
+- Actual commits: `b39f0324` (gate/control plane), `f3b7ed6a`
+  (implementation and focused regression), `5309eff3` (passing evidence),
+  delivery reconciliation pending
 
 ## Review policy and outcome
 Technically passed checkpoint gate. Publish it, then stop for human review. Do
