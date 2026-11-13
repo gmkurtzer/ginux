@@ -1056,6 +1056,12 @@ fn supervise_launch(pid: usize, instance: &mut Instance) -> ! {
         }
         sequence += 1;
         let syscall = registers.orig_rax;
+        if syscall == 318 && registers.rsi > 256 {
+            registers.rsi = 256;
+            if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0 {
+                launch_fail(instance, pid, b"launch getrandom clamp failed");
+            }
+        }
         let decision = match decide_native(syscall, registers.rdi, registers.rsi, registers.rdx) {
             NativeDecision::Contract(decision) => decision,
             NativeDecision::Hooked { lane, result } => {

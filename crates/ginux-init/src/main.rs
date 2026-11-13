@@ -6403,6 +6403,12 @@ fn supervise_native(
             native_fail(instance, pid, b"native seccomp syscall identity mismatch");
         }
         task.syscall = syscall;
+        if syscall == 318 && registers.rsi > 256 {
+            registers.rsi = 256;
+            if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0 {
+                native_fail(instance, pid, b"native getrandom clamp failed");
+            }
+        }
         let shared_network =
             mode == 3 && instance.config().network_backend == NetworkBackend::Shared;
         let socket_table_full =
