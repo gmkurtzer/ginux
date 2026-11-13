@@ -5962,8 +5962,9 @@ fn supervise_native(
             // remains meaningful even if the numeric host PID is reused.
             let mut lifetime_pidfd = unsafe { syscall2(SYS_PIDFD_OPEN, child_host_pid, 0) };
             // A non-leader thread is not waitid-reapable and older pidfd
-            // ABIs cannot open it. Preserve that existing thread lane.
-            if event == PTRACE_EVENT_CLONE && matches!(lifetime_pidfd, -22 | -3) {
+            // ABIs cannot open it: EINVAL, or ENOENT on newer kernels such as
+            // 7.0. Preserve that existing thread lane.
+            if event == PTRACE_EVENT_CLONE && matches!(lifetime_pidfd, -22 | -3 | -2) {
                 lifetime_pidfd = -1;
             } else if lifetime_pidfd < 0 {
                 native_fail(instance, pid, b"native child lifetime pin failed");
