@@ -285,6 +285,16 @@ long native_fixture_main(void)
         print_result("GINUX_FIXTURE: child-status=", info.status);
         return 0;
     }
+    case 'b': {
+        /* Early denials of virtual-pid lookups: each must finish its audit
+         * record, or the next audited syscall waits on the audit lock. */
+        struct { int signo, error, code, pad, pid, uid, status, rest[25]; } info = {0};
+        print_result("GINUX_FIXTURE: pidfd-open-unknown=", call3(434, 0x7ffffff0, 0, 0));
+        print_result("GINUX_FIXTURE: waitid-unknown-pid=", call5(247, 1, 0x7ffffff0, (word)&info, 4, 0));
+        print_result("GINUX_FIXTURE: waitid-bad-type=", call5(247, 7, 1, (word)&info, 4, 0));
+        print_result("GINUX_FIXTURE: getpid-after=", call3(39, 0, 0, 0) > 0);
+        return 0;
+    }
     case 'c': {
         /* clone3 CLONE_INTO_CGROUP, as glibc 2.41+ posix_spawn starts every
          * systemd 258+ service: the cgroup is a directory of the virtual tree. */
