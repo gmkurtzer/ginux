@@ -7247,9 +7247,12 @@ fn supervise_native(
         write_all(b" action=");
         match decision.action {
             Action::Mediate if syscall == 99 => {
-                let result =
-                    write_tracee_bytes_result(host_pid, registers.rdi as usize, &virtual_sysinfo())
-                        .map_or_else(|error| error, |_| 0);
+                let result = write_tracee_bytes_result(
+                    host_pid,
+                    registers.rdi as usize,
+                    &virtual_sysinfo(instance.config().memory_mib),
+                )
+                .map_or_else(|error| error, |_| 0);
                 write_all(b"emulate surface=virtual-system result=");
                 write_i64(result);
                 write_all(b"\n");

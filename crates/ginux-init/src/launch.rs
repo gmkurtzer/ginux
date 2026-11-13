@@ -1238,8 +1238,12 @@ fn supervise_launch(pid: usize, instance: &mut Instance, contract: &EffectiveCon
                 }
             }
             Action::Mediate if syscall == 99 => {
-                let result = write_tracee_bytes(pid, registers.rdi as usize, &virtual_sysinfo())
-                    .map_or_else(|error| error, |_| 0);
+                let result = write_tracee_bytes(
+                    pid,
+                    registers.rdi as usize,
+                    &virtual_sysinfo(instance.config().memory_mib),
+                )
+                .map_or_else(|error| error, |_| 0);
                 audit_write(b"emulate surface=virtual-system result=");
                 audit_i64(result);
                 audit_write(b"\n");

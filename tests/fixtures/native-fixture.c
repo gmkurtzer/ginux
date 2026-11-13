@@ -182,12 +182,14 @@ long native_fixture_main(void)
         unsigned char info[112];
         for (word i = 0; i < sizeof info; ++i) info[i] = 0xaa;
         long result = call3(99, (word)info, 0, 0);
-        word zero = 1;
+        word private = 1;
         for (word i = 0; i < sizeof info; ++i) {
-            if (i < 104 || i >= 108) zero &= info[i] == 0;
+            if ((i < 32 || i >= 40) && (i < 104 || i >= 108))
+                private &= info[i] == 0;
         }
         print_result("GINUX_FIXTURE: sysinfo=", result);
-        print_result("GINUX_FIXTURE: sysinfo-zero=", zero);
+        print_result("GINUX_FIXTURE: sysinfo-private=", private);
+        print_result("GINUX_FIXTURE: totalram=", *(unsigned long *)(info + 32));
         print_result("GINUX_FIXTURE: mem-unit=", *(unsigned int *)(info + 104));
         print_result("GINUX_FIXTURE: sysinfo-null=", call3(99, 0, 0, 0));
         return 0;

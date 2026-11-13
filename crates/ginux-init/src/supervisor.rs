@@ -318,10 +318,13 @@ pub fn write_tracee_bytes(pid: usize, address: usize, bytes: &[u8]) -> Result<()
     poke_tracee_bytes(pid, address, bytes).map_err(fault_errno)
 }
 
-/// Deterministic x86-64 `struct sysinfo`: no host counters are exposed and
-/// `mem_unit = 1` keeps libc's page calculations well-defined.
-pub fn virtual_sysinfo() -> [u8; 112] {
+/// Deterministic x86-64 `struct sysinfo`: total memory comes from the instance
+/// configuration, no host counters are exposed, and `mem_unit = 1` keeps
+/// libc's memory calculations well-defined.
+pub fn virtual_sysinfo(memory_mib: u64) -> [u8; 112] {
     let mut info = [0u8; 112];
+    let totalram = memory_mib.saturating_mul(1024 * 1024);
+    info[32..40].copy_from_slice(&totalram.to_ne_bytes());
     info[104..108].copy_from_slice(&1u32.to_ne_bytes());
     info
 }
