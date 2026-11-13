@@ -45,7 +45,6 @@ complete, instance-isolated output.
 - [x] Pass static, aggregate, and complete Rocky systemd verification.
 
 ## Remaining work
-- [ ] Push the gate branch and open its stacked pull request.
 - [ ] Stop for human checkpoint review without merging.
 
 ## Acceptance criteria
@@ -106,14 +105,14 @@ complete, instance-isolated output.
 ## Delivery strategy
 - Working branch: `hdae/concurrent-service-output`
 - Intended base: `hdae/virtual-sysinfo-systemd-compat`
-- Pull request: intended as a stacked pull request; publication explicitly
-  authorized by the human on 2026-11-12
+- Pull request: https://github.com/gmkurtzer/ginux/pull/267, stacked on Gate 23
+  pull request 266; publication authorized by the human on 2026-11-12
 - Planned commits: signed gate/control-plane commit; signed implementation and
   focused-regression commit; signed evidence and delivery reconciliation commit
 - Actual commits: `b39f0324` (gate/control plane), `f3b7ed6a`
   (implementation and focused regression), `5309eff3` (passing evidence),
-  delivery reconciliation pending
+  `457f4198` (stacked-history reconciliation), plus this delivery record
 
 ## Review policy and outcome
-Technically passed checkpoint gate. Publish it, then stop for human review. Do
-not merge or close either Gate 23 or Gate 24 pull request.
+Technically passed checkpoint gate delivered in pull request 267. Stop for
+human review. Do not merge or close either Gate 23 or Gate 24 pull request.
