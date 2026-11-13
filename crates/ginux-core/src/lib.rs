@@ -85,7 +85,7 @@ pub const fn decide_systemd(syscall: u64, shared_network: bool) -> Decision {
         };
     }
     let action = match syscall {
-        63 | 92 | 93 | 94 | 109 | 112 | 153 | 165 | 166 | 260 | SYS_GETPRIORITY
+        63 | 92 | 93 | 94 | 109 | 112 | 121 | 124 | 153 | 165 | 166 | 260 | SYS_GETPRIORITY
         | SYS_SETPRIORITY | SYS_GETTID | SYS_SETUID | SYS_SETGID | SYS_SETREUID | SYS_SETREGID
         | SYS_SETGROUPS | SYS_SETRESUID | SYS_SETRESGID | SYS_REBOOT => Action::Emulate,
         7
@@ -244,6 +244,8 @@ pub const fn systemd_surface(syscall: u64, shared_network: bool) -> BalancedSurf
             | 81
             | 109
             | 112
+            | 121
+            | 124
             | 128
             | 135
             | 213
@@ -377,7 +379,7 @@ pub const fn balanced_arguments_allowed(syscall: u64, arg0: u64, arg1: u64, arg2
         17 => arg2 <= 1024 * 1024,
         257 => arg2 & (O_ACCMODE | MUTATING_OPEN_FLAGS) == 0,
         302 => arg0 == 0 && arg1 <= 15,
-        318 => arg2 <= 256,
+        318 => arg1 <= 256,
         SYS_WAIT4 => arg0 == u64::MAX || arg0 > 0,
         SYS_FUTEX => !futex_priority_inheritance(arg1),
         _ => true,
@@ -432,6 +434,15 @@ mod tests {
         assert_eq!(balanced_surface(16), BalancedSurface::Denied);
         assert_eq!(balanced_surface(41), BalancedSurface::Denied);
         assert_eq!(balanced_surface(105), BalancedSurface::Denied);
+        assert!(balanced_arguments_allowed(0, 3, 0x1000, 1024 * 1024));
+        assert!(!balanced_arguments_allowed(0, 3, 0x1000, 1024 * 1024 + 1));
+        assert!(balanced_arguments_allowed(1, 1, 0x1000, 4096));
+        assert!(!balanced_arguments_allowed(1, 1, 0x1000, 4097));
+        assert!(balanced_arguments_allowed(17, 3, 0x1000, 1024 * 1024));
+        assert!(!balanced_arguments_allowed(17, 3, 0x1000, 1024 * 1024 + 1));
+        assert!(balanced_arguments_allowed(318, 0x1000, 256, 0));
+        assert!(!balanced_arguments_allowed(318, 0x1000, 257, 0));
+        assert!(balanced_arguments_allowed(318, 0x1000, 32, 4));
     }
 
     #[test]
@@ -557,6 +568,10 @@ mod tests {
         assert_eq!(systemd_surface(62, true), BalancedSurface::Task);
         assert_eq!(decide_systemd(112, true).action, Action::Emulate);
         assert_eq!(systemd_surface(112, true), BalancedSurface::Task);
+        assert_eq!(decide_systemd(124, true).action, Action::Emulate);
+        assert_eq!(systemd_surface(124, true), BalancedSurface::Task);
+        assert_eq!(decide_systemd(121, true).action, Action::Emulate);
+        assert_eq!(systemd_surface(121, true), BalancedSurface::Task);
         assert_eq!(decide_systemd(109, true).action, Action::Emulate);
         assert_eq!(systemd_surface(109, true), BalancedSurface::Task);
         assert_eq!(decide_systemd(93, true).action, Action::Emulate);

@@ -3,8 +3,8 @@ set -eu
 
 state_root=/var/lib/ginux
 image_root=/usr/local/libexec/ginux-image
-cache=$state_root/images/rocky-10-ubi-init-amd64
-rootfs=$cache/rocky-10-ubi-init-amd64-rootfs.tar
+cache=$state_root/images/gate125-fixture
+rootfs=$cache/rootfs.tar
 name=maintenance
 directory=$state_root/instances/$name
 
@@ -23,12 +23,12 @@ chmod 0755 "$fixture/sbin/init"
 printf 'root:*:0:0:99999:7:::\n' >"$fixture/etc/shadow"
 tar -cf "$rootfs" -C "$fixture" .
 
-cat >"$image_root/ensure-rocky-oci.sh" <<'EOF'
+cat >"$image_root/ensure-oci-image.sh" <<EOF
 #!/bin/sh
+printf '%s\n' '$rootfs' >"\$GINUX_OCI_RESULT_FILE"
 exit 0
 EOF
-chmod 0755 "$image_root/ensure-rocky-oci.sh"
-: >"$image_root/rocky-systemd-oci.env"
+chmod 0755 "$image_root/ensure-oci-image.sh"
 
 /usr/local/bin/ginux import "$name" /var/tmp/gate12-recipe.toml --network default
 test "$(awk -F '\\t' '$1 == "contract" && $2 == "locked" { count++ } END { print count + 0 }' "$directory/deployment.state")" -eq 1

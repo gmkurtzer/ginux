@@ -318,6 +318,14 @@ pub fn write_tracee_bytes(pid: usize, address: usize, bytes: &[u8]) -> Result<()
     poke_tracee_bytes(pid, address, bytes).map_err(fault_errno)
 }
 
+/// Deterministic x86-64 `struct sysinfo`: no host counters are exposed and
+/// `mem_unit = 1` keeps libc's page calculations well-defined.
+pub fn virtual_sysinfo() -> [u8; 112] {
+    let mut info = [0u8; 112];
+    info[104..108].copy_from_slice(&1u32.to_ne_bytes());
+    info
+}
+
 /// Map a failed ptrace access to the errno a user copy would report: an
 /// unmapped address (`EIO` or `EFAULT`) is `-EFAULT`; anything else, such as
 /// `ESRCH` for a tracee that is gone, stays as it is.

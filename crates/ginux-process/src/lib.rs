@@ -1,6 +1,6 @@
 #![no_std]
 
-pub const MAX_GROUPS: usize = 8;
+pub const MAX_GROUPS: usize = 64;
 pub const MAX_SIGNAL: u8 = 64;
 pub const CAP_SYS_ADMIN: u64 = 1 << 21;
 /// SIGKILL and SIGSTOP: never blockable and never caught or ignored.
@@ -1673,11 +1673,12 @@ mod tests {
         let init = table.create_init(Credentials::root()).unwrap();
         let child = table.fork(init).unwrap();
         let credentials = table.credentials_mut(child).unwrap();
-        credentials.set_groups(&[10, 20]).unwrap();
+        let alpine_login_groups = [0, 1, 2, 3, 4, 6, 10, 11, 20, 26, 27, 28];
+        credentials.set_groups(&alpine_login_groups).unwrap();
         credentials.drop_capabilities(CAP_SYS_ADMIN);
         credentials.set_gid(1000).unwrap();
         credentials.set_uid(1000).unwrap();
-        assert_eq!(credentials.groups(), &[10, 20]);
+        assert_eq!(credentials.groups(), &alpine_login_groups);
         assert_eq!(credentials.capabilities, 0);
         assert_eq!(credentials.set_uid(0), Err(ProcessError::PermissionDenied));
     }

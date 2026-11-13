@@ -20,6 +20,23 @@ install restrictions and then disappear. Instance systemd and its descendants
 execute as managed code and see a Linux-compatible interface implemented by
 Ginux.
 
+## Relationship to existing systems
+
+Ginux is an application-kernel experiment, not a claim to a new systems
+category. User-Mode Linux runs a complete Linux kernel as a host process;
+Ginux does not run a guest kernel. Linux namespaces partition host-kernel
+objects and seccomp filters host syscalls; Ginux adds contract-specific
+emulation, translation, and virtual kernel state. gVisor is the closest mature
+architectural comparison, but Ginux currently has a much narrower verified
+surface and studies deliberately reduced, self-contained per-instance
+contracts. Ginux has no hardware-enforced guest boundary and must not be
+described as VM-equivalent isolation.
+
+The mechanism, comparison, and claimed differentiators are documented in
+[`docs/how-ginux-differs.md`](../docs/how-ginux-differs.md). The precise trust
+boundary and limitations remain authoritative in
+[`docs/security-boundary.md`](../docs/security-boundary.md).
+
 ## Security invariants
 
 1. Every managed syscall is governed by the immutable instance contract and
