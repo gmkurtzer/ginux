@@ -414,6 +414,22 @@ long native_fixture_main(void)
         print_result("GINUX_FIXTURE: race-caller-mutation=", args.flags == 0x8000000200000000UL);
         return 0;
     }
+    case 'x': {
+        /* scripts/test-native-clone-restart.py queues an ignored SIGUSR1
+         * while the replayed clone3 runs; the kernel abandons that call with
+         * ERESTARTNOINTR, which the caller must never observe. */
+        struct { word flags, pidfd, child_tid, parent_tid, exit_signal, stack,
+            stack_size, tls, set_tid, set_tid_size, cgroup; } args = {0};
+        struct { word handler, flags, restorer, mask; } ignore = {1 /* SIG_IGN */, 0, 0, 0};
+        args.exit_signal = 17;
+        if (call4(13, 10, (word)&ignore, 0, 8) != 0) return 88;
+        long pid = call3(435, (word)&args, sizeof args, 0);
+        if (pid == 0) return 7;
+        int status = 0;
+        print_result("GINUX_FIXTURE: restart-clone3=", pid > 0 ? 1 : pid);
+        print_result("GINUX_FIXTURE: restart-child=", pid > 0 && call4(61, pid, (word)&status, 0, 0) == pid && status == 1792);
+        return 0;
+    }
 #ifdef CLONE_SNAPSHOT_COLLISION
     case 'k': {
         struct { word flags, pidfd, child_tid, parent_tid, exit_signal, stack,
