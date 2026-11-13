@@ -1,0 +1,84 @@
+Name:           ginux
+Version:        @VERSION@
+Release:        1%{?dist}
+Summary:        Configurable userspace kernel for Linux compatibility instances
+License:        Apache-2.0
+URL:            https://github.com/gmkurtzer/ginux
+Source0:        %{name}-%{version}.tar.gz
+Source1:        %{name}-%{version}-vendor.tar.gz
+Source2:        ginux.tmpfiles
+
+BuildRequires:  cargo
+BuildRequires:  rust >= 1.85
+BuildRequires:  rust-std-static
+BuildRequires:  clang
+BuildRequires:  systemd-rpm-macros
+Requires:       coreutils
+Requires:       gawk
+Requires:       grep
+Requires:       iproute
+Requires:       procps-ng
+Requires:       sed
+Requires:       shadow-utils
+Requires:       sudo
+Requires:       systemd
+Requires:       util-linux
+
+%global debug_package %{nil}
+
+%description
+Ginux is a configurable userspace kernel that runs isolated Linux
+compatibility instances under explicit, versioned kernel-interface contracts.
+This package contains the public operator CLI, private runtime and image
+materializer, privileged helper, and complete example instance recipes.
+
+%prep
+%autosetup -a 1
+cat >> .cargo/config.toml <<'EOF'
+
+[source.crates-io]
+replace-with = "vendored-sources"
+
+[source.vendored-sources]
+directory = "vendor"
+EOF
+
+%build
+RUSTFLAGS='' cargo build --offline --locked --release -p ginux-cli -p ginux-oci
+cargo build --offline --locked --release -p ginux-init --target x86_64-unknown-linux-gnu
+
+%install
+install -D -m 0755 target/release/ginux-cli %{buildroot}%{_bindir}/ginux
+install -D -m 0755 target/release/ginux-oci %{buildroot}%{_libexecdir}/ginux/ginux-image
+install -D -m 0755 target/x86_64-unknown-linux-gnu/release/ginux \
+    %{buildroot}%{_libexecdir}/ginux/ginux-runtime
+install -D -m 0755 scripts/ginux-host-instance-helper.sh \
+    %{buildroot}%{_libexecdir}/ginux/ginux-helper
+install -d -m 0755 %{buildroot}%{_sysconfdir}/ginux/examples
+install -m 0644 config/examples/*.toml %{buildroot}%{_sysconfdir}/ginux/examples/
+install -D -m 0644 %{SOURCE2} %{buildroot}%{_tmpfilesdir}/ginux.conf
+install -d -m 0755 %{buildroot}%{_docdir}/ginux
+install -m 0644 README.md NOTICE docs/cli-command-model.md \
+    docs/configurable-contract.md docs/security-boundary.md \
+    %{buildroot}%{_docdir}/ginux/
+install -D -m 0644 LICENSE %{buildroot}%{_licensedir}/ginux/LICENSE
+
+%post
+%tmpfiles_create ginux.conf
+
+%files
+%license %{_licensedir}/ginux/LICENSE
+%doc %{_docdir}/ginux/*
+%{_bindir}/ginux
+%dir %{_libexecdir}/ginux
+%{_libexecdir}/ginux/ginux-helper
+%{_libexecdir}/ginux/ginux-image
+%{_libexecdir}/ginux/ginux-runtime
+%dir %{_sysconfdir}/ginux
+%dir %{_sysconfdir}/ginux/examples
+%config(noreplace) %{_sysconfdir}/ginux/examples/*.toml
+%{_tmpfilesdir}/ginux.conf
+
+%changelog
+* Fri Nov 13 2026 Gregory M. Kurtzer <gmk@ciq.com> - @VERSION@-1
+- Initial Rocky Linux 10 package

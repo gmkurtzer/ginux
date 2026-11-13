@@ -396,6 +396,24 @@ that the output is correct, secure, maintainable, or novel. Human direction
 sets the architecture and boundaries; executable gates supply the evidence;
 review determines what can actually be claimed.
 
+## Installable package
+
+Ginux builds as one Rocky Linux 10 x86-64 RPM plus its matching source RPM.
+The package installs the public `ginux` command, private runtime components,
+distribution-prefixed example recipes, and the empty persistent/runtime state
+structure. It does not pull images or create or start instances during
+installation.
+
+```sh
+make rpm
+sudo dnf install build/rpm/RPMS/x86_64/ginux-*.rpm
+sudo rpm -V ginux
+```
+
+Build preparation, offline RPM construction, file layout, upgrade/removal
+behavior, retained state, and the clean-host lifecycle test are documented in
+[`docs/packaging.md`](docs/packaging.md).
+
 ## Historical standalone kernel
 
 The independent bootable kernel remains available for research and historical

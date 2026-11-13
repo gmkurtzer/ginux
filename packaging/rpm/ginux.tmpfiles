@@ -1,0 +1,9 @@
+d /var/lib/ginux 0755 root root -
+d /var/lib/ginux/cache 0755 root root -
+d /var/lib/ginux/cache/oci 0755 root root -
+d /var/lib/ginux/cache/oci/blobs 0755 root root -
+d /var/lib/ginux/cache/oci/blobs/sha256 0755 root root -
+d /var/lib/ginux/instances 0755 root root -
+d /var/lib/ginux/work 0700 root root -
+d /run/ginux 0755 root root -
+d /run/ginux/instances 0755 root root -
