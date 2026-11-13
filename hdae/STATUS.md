@@ -15,16 +15,17 @@
   It proposes a flat top-level operator taxonomy, a versioned private helper
   protocol, generated help/version behavior, and the disposition of every
   runtime selector.
-- The human approved the command design on 2026-11-13 with one correction:
-  remove `diff` from the public CLI. Implementation may now proceed within the
-  approved Gate 25 boundary.
-- Fresh baseline evidence: `make check` passes on the synchronized branch.
-- Design checkpoint commit: `5b315d3e`.
+- The approved Rust `clap` CLI is implemented and installed separately from the
+  private runtime. Public `diff` is absent and rejected with parser exit 2.
+- Fresh evidence passes `cargo test -p ginux-cli`, `make test-cli`, `make
+  check`, `make build`, `make test-config`, and the Gate 12 CLI workflow in the
+  Rocky QEMU host.
+- Pull request: https://github.com/gmkurtzer/ginux/pull/273
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Exact next action: implement the approved Rust `clap` command model without
-  public `diff`, then add parser, installation, and workflow verification.
+- Exact next action: complete the remaining Gate 25 regression matrix, record
+  criterion-level evidence, and stop for final human acceptance.
 
 - Gate 1 is accepted and closed under the corrected ordinary-host-process
   architecture. Pull request https://github.com/gmkurtzer/ginux-us/pull/1 was

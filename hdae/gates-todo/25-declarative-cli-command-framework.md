@@ -202,13 +202,14 @@ runtime, fixture, helper, and backend commands out of the public interface.
 
 - Working branch: `hdae/cli-command-framework`
 - Intended base: `main`, synchronized after pull request 272 is merged
-- Pull request: intended after implementation and verification; not created by
-  this planning handoff
+- Pull request: https://github.com/gmkurtzer/ginux/pull/273
 - Planned commits: gate and command inventory; approved CLI framework and
   public command model; internal-boundary and installation migration; tests and
   documentation; evidence reconciliation
-- Actual commits: `557349c2` (gate draft after rebase); `5b315d3e`
-  (command inventory and design checkpoint)
+- Actual commits: `557349c2` (gate draft); `5b315d3e` (command inventory and
+  design checkpoint); `248135d7` and `aa3c24ce` (checkpoint approval);
+  `bad3723d` and `056fafef` (compiled CLI and versioned helper protocol);
+  `36cac356` (public `diff` removal, inventory checks, and documentation)
 
 ## Review policy and outcome
 
