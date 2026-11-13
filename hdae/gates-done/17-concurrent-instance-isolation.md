@@ -70,7 +70,7 @@ shared-host networking semantics.
 ## Remaining work
 
 - [x] Pushed the branch and opened the Gate 17 pull request.
-- [ ] Obtain human review and acceptance.
+- [x] Obtained human review and acceptance after pull request 259 merged.
 
 ## Acceptance criteria
 
@@ -158,5 +158,5 @@ shared-host networking semantics.
 ## Review policy and outcome
 
 Human checkpoint. The human authorized implementation and pull-request delivery
-on 2026-11-11. The gate remains open until the PR evidence is reviewed and
-accepted.
+on 2026-11-11. Pull request 259 was merged and the human accepted the gate on
+2026-11-11.

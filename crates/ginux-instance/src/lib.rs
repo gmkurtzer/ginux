@@ -286,7 +286,7 @@ impl fmt::Display for ConfigError {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 enum Section {
     Root,
     Instance,
@@ -626,7 +626,8 @@ impl InstanceConfig {
         let source = core::str::from_utf8(input).map_err(|_| ConfigError::InvalidUtf8)?;
         let mut builder = ConfigBuilder::new();
         let mut section = Section::Root;
-        for original_line in source.lines() {
+        let mut lines = source.lines();
+        while let Some(original_line) = lines.next() {
             let line = strip_comment(original_line.as_bytes())?;
             let line = trim(line);
             if line.is_empty() {
@@ -644,6 +645,11 @@ impl InstanceConfig {
             let value = trim(&line[equals + 1..]);
             if key.is_empty() || value.is_empty() || !is_key(key) {
                 return Err(ConfigError::InvalidSyntax);
+            }
+            if section == Section::Hooks && key == b"pre_boot" && value == b"[" {
+                builder.mark(1u128 << 32)?;
+                builder.pre_boot_hooks = parse_multiline_hook_list(&mut lines)?;
+                continue;
             }
             parse_field(&mut builder, section, key, value)?;
         }
@@ -1185,7 +1191,7 @@ impl InstanceConfig {
         output.raw(b"\ngid = ")?;
         output.number(self.access_gid)?;
         output.raw(b"\n\n[hooks]\npre_boot = ")?;
-        output.list(self.pre_boot_hooks.as_slice())?;
+        output.hook_list(self.pre_boot_hooks.as_slice())?;
         output.raw(b"\ntimeout_seconds = ")?;
         output.number(self.hook_timeout_seconds)?;
         output.raw(b"\nfailure = ")?;
@@ -1413,6 +1419,29 @@ impl NormalizedConfig {
                 self.raw(b", ")?;
             }
             self.quoted(value.as_bytes())?;
+        }
+        self.byte(b']')
+    }
+
+    fn hook_list<const N: usize>(&mut self, values: &[Text<N>]) -> Result<(), ConfigError> {
+        if values.is_empty() {
+            return self.raw(b"[]");
+        }
+        self.raw(b"[\n")?;
+        for value in values {
+            self.raw(b"  ")?;
+            if value.as_bytes().contains(&b'\n') {
+                self.raw(b"\"\"\"\n")?;
+                self.raw(value.as_bytes())?;
+                if value.as_bytes().last().copied() != Some(b'\n') {
+                    self.byte(b'\n')?;
+                }
+                self.raw(b"  \"\"\",")?;
+            } else {
+                self.quoted(value.as_bytes())?;
+                self.byte(b',')?;
+            }
+            self.byte(b'\n')?;
         }
         self.byte(b']')
     }
@@ -1899,6 +1928,65 @@ fn parse_list<const ITEMS: usize, const N: usize>(
     Ok(output)
 }
 
+fn parse_multiline_hook_list(
+    lines: &mut core::str::Lines<'_>,
+) -> Result<TextList<HOOK_ITEMS, HOOK_BYTES>, ConfigError> {
+    let mut output = TextList::empty();
+    let mut end_required = false;
+    loop {
+        let original = lines.next().ok_or(ConfigError::InvalidSyntax)?;
+        let raw = original.as_bytes();
+        let candidate = trim(raw);
+        if candidate.is_empty() || candidate.first().copied() == Some(b'#') {
+            continue;
+        }
+        if end_required {
+            let line = trim(strip_comment(raw)?);
+            return if line == b"]" {
+                Ok(output)
+            } else {
+                Err(ConfigError::InvalidSyntax)
+            };
+        }
+        if candidate == b"\"\"\"" {
+            let mut script: Text<HOOK_BYTES> = Text::empty();
+            let mut has_line = false;
+            loop {
+                let script_line = lines.next().ok_or(ConfigError::InvalidSyntax)?;
+                let script_bytes = script_line.as_bytes();
+                let delimiter = trim(script_bytes);
+                if delimiter == b"\"\"\"," || delimiter == b"\"\"\"" {
+                    let script_bytes = trim(script.as_bytes());
+                    output.push(Text::from_bytes(script_bytes)?)?;
+                    end_required = delimiter == b"\"\"\"";
+                    break;
+                }
+                if has_line {
+                    script.push(b'\n')?;
+                }
+                for byte in script_bytes {
+                    script.push(*byte)?;
+                }
+                has_line = true;
+            }
+            continue;
+        }
+
+        let line = trim(strip_comment(raw)?);
+        if line == b"]" {
+            return Ok(output);
+        }
+
+        let (item, has_comma) = if let Some(item) = line.strip_suffix(b",") {
+            (trim(item), true)
+        } else {
+            (line, false)
+        };
+        output.push(parse_string(item)?)?;
+        end_required = !has_comma;
+    }
+}
+
 fn parse_syscall_list(
     value: &[u8],
 ) -> Result<TextList<CONTRACT_RULE_ITEMS, CONTRACT_RULE_BYTES>, ConfigError> {
@@ -2160,14 +2248,18 @@ fn protected_virtual_path(path: &[u8]) -> bool {
 }
 
 fn validate_instance_command(bytes: &[u8]) -> Result<(), ConfigError> {
-    let executable = bytes
+    let command = trim(bytes);
+    let executable = command
         .split(|byte| byte.is_ascii_whitespace())
         .next()
         .ok_or(ConfigError::InvalidValue)?;
     if executable.is_empty()
-        || bytes.contains(&0)
-        || bytes.contains(&b'\n')
-        || bytes.contains(&b'\r')
+        || command
+            .iter()
+            .any(|byte| matches!(*byte, 0..=8 | 11..=31 | 127))
+        || command
+            .split(|byte| *byte == b'\n')
+            .any(|line| trim(line) == b"\"\"\"")
     {
         return Err(ConfigError::InvalidValue);
     }
@@ -2333,6 +2425,57 @@ policy = "stop"
         let normalized = config.normalized().unwrap();
         let reparsed = InstanceConfig::parse(normalized.as_bytes()).unwrap();
         assert_eq!(reparsed, config);
+    }
+
+    #[test]
+    fn parses_readable_multiline_pre_boot_hooks() {
+        let recipe = VALID.replace(
+            "[audit]",
+            r#"[hooks]
+pre_boot = [
+  "/usr/bin/true",
+  """
+  /usr/bin/install -d /run/example
+  /usr/bin/printf 'ready\n' > /run/example/state
+  """,
+]
+timeout_seconds = 20
+failure = "stop"
+
+[audit]"#,
+        );
+        let config = InstanceConfig::parse(recipe.as_bytes()).unwrap();
+        assert_eq!(config.pre_boot_hooks.as_slice().len(), 2);
+        assert_eq!(
+            config.pre_boot_hooks.as_slice()[0].as_bytes(),
+            b"/usr/bin/true"
+        );
+        assert_eq!(
+            config.pre_boot_hooks.as_slice()[1].as_bytes(),
+            b"/usr/bin/install -d /run/example\n  /usr/bin/printf 'ready\\n' > /run/example/state"
+        );
+
+        let normalized = config.normalized().unwrap();
+        let normalized_text = core::str::from_utf8(normalized.as_bytes()).unwrap();
+        assert!(normalized_text.contains("pre_boot = [\n"));
+        assert!(normalized_text.contains("  \"\"\"\n"));
+        assert_eq!(
+            InstanceConfig::parse(normalized.as_bytes()).unwrap(),
+            config
+        );
+    }
+
+    #[test]
+    fn rejects_malformed_multiline_pre_boot_hooks() {
+        for hooks in [
+            "pre_boot = [\n  \"\"\"\n  /usr/bin/true\n]",
+            "pre_boot = [\n  \"\"\"\n  relative-command\n  \"\"\",\n]",
+            "pre_boot = [\n  \"\"\"\n  /usr/bin/true\u{0007}\n  \"\"\",\n]",
+            "pre_boot = [\n  \"\"\"\n  /usr/bin/true\n  \"\"\"\n  \"/usr/bin/false\",\n]",
+        ] {
+            let recipe = VALID.replace("[audit]", &std::format!("[hooks]\n{hooks}\n[audit]"));
+            assert!(InstanceConfig::parse(recipe.as_bytes()).is_err());
+        }
     }
 
     #[test]
@@ -2835,15 +2978,79 @@ policy = "stop"
             "../../../config/instance-rocky-systemd.toml"
         ))
         .unwrap();
-        assert_eq!(config.pre_boot_hooks.as_slice().len(), 10);
+        assert_eq!(config.pre_boot_hooks.as_slice().len(), 7);
         assert!(config.pre_boot_hooks.as_slice()[1]
             .as_bytes()
             .windows(b"$6$ginux$".len())
             .any(|window| window == b"$6$ginux$"));
+        assert!(config.pre_boot_hooks.as_slice()[1]
+            .as_bytes()
+            .contains(&b'\n'));
         assert!(config.filesystem_write_denied(b"/ginux-demo/read-only/child"));
         assert!(config.privilege_setuid.as_slice().is_empty());
         assert!(config.privilege_setgid.as_slice().is_empty());
         assert!(!config.filesystem_device_nodes);
+    }
+
+    #[test]
+    fn documented_instance_examples_validate_and_round_trip() {
+        for recipe in [
+            include_bytes!("../../../config/instance-rocky-systemd.toml").as_slice(),
+            include_bytes!("../../../config/examples/agent-workspace.toml").as_slice(),
+            include_bytes!("../../../config/examples/network-service.toml").as_slice(),
+            include_bytes!("../../../config/examples/paranoid-shell.toml").as_slice(),
+            include_bytes!("../../../config/examples/alpine-native.toml").as_slice(),
+        ] {
+            let config = InstanceConfig::parse(recipe).unwrap();
+            assert_eq!(config.init.as_bytes(), b"/sbin/init");
+            assert!(config
+                .environment
+                .as_slice()
+                .iter()
+                .any(|value| value.as_bytes() == b"container=ginux"));
+            assert!(config.pre_boot_hooks.as_slice().iter().any(|hook| {
+                hook.as_bytes()
+                    .windows(b"$6$ginux$".len())
+                    .any(|window| window == b"$6$ginux$")
+                    || hook
+                        .as_bytes()
+                        .windows(b"\\$6\\$ginux\\$".len())
+                        .any(|window| window == b"\\$6\\$ginux\\$")
+                    || hook
+                        .as_bytes()
+                        .windows(b"root:ginux".len())
+                        .any(|window| window == b"root:ginux")
+            }));
+            let normalized = config.normalized().unwrap();
+            assert_eq!(
+                InstanceConfig::parse(normalized.as_bytes()).unwrap(),
+                config
+            );
+        }
+    }
+
+    #[test]
+    fn documented_examples_use_distribution_native_boot() {
+        for recipe in [
+            include_bytes!("../../../config/instance-rocky-systemd.toml").as_slice(),
+            include_bytes!("../../../config/examples/agent-workspace.toml").as_slice(),
+            include_bytes!("../../../config/examples/network-service.toml").as_slice(),
+            include_bytes!("../../../config/examples/paranoid-shell.toml").as_slice(),
+        ] {
+            let config = InstanceConfig::parse(recipe).unwrap();
+            assert_eq!(config.args.as_slice().len(), 2);
+            assert_eq!(config.args.as_slice()[0].as_bytes(), b"--system");
+            assert_eq!(
+                config.args.as_slice()[1].as_bytes(),
+                b"--unit=multi-user.target"
+            );
+        }
+
+        let alpine = InstanceConfig::parse(include_bytes!(
+            "../../../config/examples/alpine-native.toml"
+        ))
+        .unwrap();
+        assert!(alpine.args.as_slice().is_empty());
     }
 
     #[test]
