@@ -45,7 +45,8 @@ EOF
 
 %build
 RUSTFLAGS='' cargo build --offline --locked --release -p ginux-cli -p ginux-oci
-cargo build --offline --locked --release -p ginux-init --target x86_64-unknown-linux-gnu
+CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS='-C linker=clang -C link-arg=-nostdlib -C link-arg=-static -C link-arg=-no-pie -C relocation-model=static' \
+    cargo build --offline --locked --release -p ginux-init --target x86_64-unknown-linux-gnu
 
 %install
 install -D -m 0755 target/release/ginux-cli %{buildroot}%{_bindir}/ginux

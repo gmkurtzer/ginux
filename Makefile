@@ -179,7 +179,7 @@ test-kernel-views: build
 test-systemd: build systemd-image-prepare
 	@ROCKY_NETWORK_RESTRICT=on ./scripts/with-rocky-host.sh ./scripts/test-systemd.sh
 
-test-gate19-native-examples: build
+test-gate19-native-examples: rpm
 	@ROCKY_NETWORK_RESTRICT=off ROCKY_SSH_PORT=22419 ROCKY_PID_FILE=build/rocky-gate19-host.pid ROCKY_SERIAL_LOG=build/rocky-gate19-host-serial.log ROCKY_OVERLAY_DISK=build/rocky-gate19-host-overlay.qcow2 ./scripts/with-rocky-host.sh ./scripts/test-gate19-native-examples.sh
 
 test-generic-oci:
@@ -212,7 +212,7 @@ test-block:
 test-network:
 	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-devices network_
 
-host-run: build
+host-run: rpm
 	@./scripts/run-host.sh
 
 host-reset:
@@ -271,7 +271,7 @@ test-recovery:
 	@$(MAKE) test-systemd
 	@printf '%s\n' 'test-recovery: PASS (startup failure, supervisor loss, forced stop, audit bound, controlled shutdown)'
 
-bench-prepare: build
+bench-prepare: rpm
 	@ROCKY_NETWORK_RESTRICT=off ./scripts/with-gate11-host.sh ./scripts/prepare-gate11-benchmark.sh
 
 bench-baseline: build
