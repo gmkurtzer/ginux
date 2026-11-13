@@ -6403,6 +6403,21 @@ fn supervise_native(
             native_fail(instance, pid, b"native seccomp syscall identity mismatch");
         }
         task.syscall = syscall;
+        let transfer_limit = if mode != 3 {
+            match syscall {
+                0 | 17 => Some(1024 * 1024),
+                1 if matches!(registers.rdi, 1 | 2) => Some(4096),
+                _ => None,
+            }
+        } else {
+            None
+        };
+        if transfer_limit.is_some_and(|limit| registers.rdx > limit) {
+            registers.rdx = transfer_limit.unwrap_or(registers.rdx);
+            if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0 {
+                native_fail(instance, pid, b"native transfer clamp failed");
+            }
+        }
         if syscall == 318 && registers.rsi > 256 {
             registers.rsi = 256;
             if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0 {

@@ -434,6 +434,12 @@ mod tests {
         assert_eq!(balanced_surface(16), BalancedSurface::Denied);
         assert_eq!(balanced_surface(41), BalancedSurface::Denied);
         assert_eq!(balanced_surface(105), BalancedSurface::Denied);
+        assert!(balanced_arguments_allowed(0, 3, 0x1000, 1024 * 1024));
+        assert!(!balanced_arguments_allowed(0, 3, 0x1000, 1024 * 1024 + 1));
+        assert!(balanced_arguments_allowed(1, 1, 0x1000, 4096));
+        assert!(!balanced_arguments_allowed(1, 1, 0x1000, 4097));
+        assert!(balanced_arguments_allowed(17, 3, 0x1000, 1024 * 1024));
+        assert!(!balanced_arguments_allowed(17, 3, 0x1000, 1024 * 1024 + 1));
         assert!(balanced_arguments_allowed(318, 0x1000, 256, 0));
         assert!(!balanced_arguments_allowed(318, 0x1000, 257, 0));
         assert!(balanced_arguments_allowed(318, 0x1000, 32, 4));

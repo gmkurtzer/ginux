@@ -22,6 +22,7 @@ def main():
         (root / "usr/bin").mkdir(parents=True)
         shutil.copyfile(fixture, root / "usr/bin/bash")
         (root / "usr/bin/bash").chmod(0o755)
+        (root / "large").write_bytes(b"r" * (1024 * 1024 + 1))
         work.chmod(0o755)
 
         def run(scenario):
@@ -50,6 +51,12 @@ def main():
             "GINUX_FIXTURE: gettid=-38", "GINUX_FIXTURE: futex_lock_pi=-1",
             "GINUX_FIXTURE: pi_word=0", "GINUX_FIXTURE: futex_lock_pi_flags=-1",
             "GINUX_FIXTURE: pi_flags_word=0"] and "GINUX_NATIVE_CHECK: PASS" in out, code, out)
+
+        code, out = run("oversized")
+        check("oversized I/O uses short transfers",
+              code == 0 and "GINUX_FIXTURE: read=1048576\n" in out
+              and "GINUX_FIXTURE: pread=1048576\n" in out
+              and "GINUX_NATIVE_CHECK: PASS" in out, code, out)
 
         code, out = run("random")
         check("getrandom is a bounded short read",
