@@ -29,12 +29,15 @@ instance-scoped, and free of host memory or topology disclosure.
 ## Completed work
 - [x] Reproduce and diagnose the Rocky systemd failure on current `main`.
 - [x] Align the corrective gate and dedicated delivery branch with the human.
+- [x] Implement configured virtual total memory in both supervisor paths.
+- [x] Add focused regression coverage for virtual memory and private counters.
+- [x] Pass static, aggregate, and complete Rocky systemd verification.
+- [x] Commit the gate and implementation with sign-off.
 
 ## Remaining work
-- [ ] Implement configured virtual total memory in both supervisor paths.
-- [ ] Add focused regression coverage for virtual memory and private counters.
-- [ ] Run all verification commands and record fresh evidence.
-- [ ] Commit the verified implementation and stop for human checkpoint review.
+- [ ] Resolve the separately discovered concurrent service-output regression,
+  then rerun `make test-multi-instance`.
+- [ ] Complete human checkpoint review after every criterion passes.
 
 ## Acceptance criteria
 - Successful x86-64 `sysinfo` reports `totalram = memory_mib * 1024 * 1024`
@@ -59,6 +62,20 @@ instance-scoped, and free of host memory or topology disclosure.
   was zero.
 - Pre-fix `make doctor build check test` -> passed, localizing the regression
   to the full systemd acceptance path.
+- `make check` -> passed after implementation.
+- Isolated permitted `make test` with a dedicated QEMU host port and overlay ->
+  passed all unit, image, lifecycle, and QEMU integration checks, including the
+  updated launch/native sysinfo fixture.
+- Isolated permitted `make test-systemd` -> passed cold, warm, repeat, offline,
+  DNF-failure-integrity, configured-startup-failure, and shutdown checks. The
+  pre-fix systemd physical-memory assertion did not recur.
+- `make test-multi-instance` -> failed waiting for the Gate 17 checker marker
+  even though both Rocky instances reached login. A materially different rerun
+  on a fresh host overlay and port reproduced the missing marker.
+- Read-only preserved-host diagnosis -> both instance-private checker artifacts
+  existed and the oneshot service exited successfully, but its expected stdout
+  marker was absent from both the instance journal and virtual console. This is
+  a separate concurrent service-output regression, not a sysinfo failure.
 
 ## Decisions and limitations
 - The configured virtual memory value is already the authoritative
@@ -67,6 +84,9 @@ instance-scoped, and free of host memory or topology disclosure.
 - This value is descriptive virtual topology, not quota enforcement. Resource
   enforcement remains outside this corrective gate.
 - Accepted Gate 22 remains locked; this file owns the compatibility correction.
+- Gate 23 is technically partial because its required concurrent regression is
+  blocked by a newly reproduced service-output defect outside this gate's
+  approved sysinfo scope.
 
 ## Delivery strategy
 - Working branch: `hdae/virtual-sysinfo-systemd-compat`
@@ -74,8 +94,12 @@ instance-scoped, and free of host memory or topology disclosure.
 - Pull request: intended, publication requires separate current authorization
 - Planned commits: signed gate/control-plane commit; signed implementation and
   focused-regression commit; signed evidence reconciliation commit if needed
-- Actual commits: pending
+- Actual commits: `db45403e` (gate/control plane), `72ad3373`
+  (implementation and focused regressions), evidence reconciliation pending
 
 ## Review policy and outcome
-Human-approved checkpoint gate. The agent may implement and verify it, then
-must stop for human review; technical passage does not close the gate.
+Human-approved checkpoint gate. The sysinfo correction passes its focused,
+aggregate, and full systemd evidence, but the gate remains partial because the
+required concurrent-instance suite exposed a separate reproducible output
+defect. Human direction is required before creating and executing that
+corrective gate; technical passage does not close Gate 23.

@@ -4,22 +4,31 @@
 
 ### Active corrective checkpoint: Gate 23
 
-- Gate 23 is active on `hdae/virtual-sysinfo-systemd-compat` after the human
-  approved correction of the post-Gate-22 Rocky systemd regression.
+- Gate 23 is technically partial on `hdae/virtual-sysinfo-systemd-compat` after
+  the human approved correction of the post-Gate-22 Rocky systemd regression.
 - Accepted Gate 22 remains locked. Gate 23 makes `sysinfo.totalram` match the
   instance's configured virtual memory while retaining zero/private host
   counters, `mem_unit = 1`, and `-EFAULT` behavior.
 - Pre-fix evidence: `make doctor build check test` passed; `make test-systemd`
   failed before login because systemd rejected zero physical memory from
   `sysinfo`.
-- Remaining work: implement both supervision paths, update focused fixtures,
-  run `make check`, `make test`, `make test-systemd`, and
-  `make test-multi-instance`, record evidence, and stop for human review.
+- Implemented evidence: `make check`, isolated permitted `make test`, and the
+  complete `make test-systemd` matrix pass. Cold, warm, and repeat Rocky boots
+  reach controlled shutdown; the zero-memory assertion no longer occurs.
+- Blocking evidence: `make test-multi-instance` and a materially different
+  fresh-host rerun both fail because successful Gate 17 oneshot checker output
+  reaches neither the instance journal nor virtual console. Both instances
+  reach login, both private artifacts exist, and the service exits successfully,
+  so this is a separate concurrent service-output regression rather than a
+  sysinfo failure.
+- Remaining work: obtain human approval for a new corrective gate that
+  reproduces and repairs concurrent service-output delivery, then rerun the
+  Gate 23 concurrent-instance criterion and stop for review.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Exact next action: implement configured virtual total memory and focused
-  regressions without exposing host state or claiming quota enforcement.
+- Exact next action: ask whether to create and execute the proposed concurrent
+  service-output corrective gate; do not expand Gate 23 silently.
 
 - Gate 1 is accepted and closed under the corrected ordinary-host-process
   architecture. Pull request https://github.com/gmkurtzer/ginux-us/pull/1 was
