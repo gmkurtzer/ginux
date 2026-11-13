@@ -2986,6 +2986,7 @@ impl BaseReader for HostRootfs {
 }
 
 fn vfs_main(config_path: *const u8, rootfs_path: *const u8, index_path: *const u8) -> ! {
+    const OVERLAY_VALUE: &[u8] = b"instance-local";
     let config = load_config(config_path);
     let mut instance = Instance::create(config);
     if instance.start().is_err() {
@@ -3071,7 +3072,7 @@ fn vfs_main(config_path: *const u8, rootfs_path: *const u8, index_path: *const u
             b"overlay create failed",
         ),
     };
-    if vfs.write(overlay_fd, b"instance-local") != Ok(12) {
+    if vfs.write(overlay_fd, OVERLAY_VALUE) != Ok(OVERLAY_VALUE.len()) {
         vfs_fail(
             &mut instance,
             &mut vfs,
@@ -3085,7 +3086,8 @@ fn vfs_main(config_path: *const u8, rootfs_path: *const u8, index_path: *const u
     line(config.root.as_bytes());
     line(b"GINUX_VFS: base=/etc/os-release identity=Rocky-Linux");
     line(b"GINUX_VFS: base=/usr/bin/bash format=ELF64-x86_64");
-    line(b"GINUX_VFS: overlay=/ginux-overlay-proof value=instance-local");
+    write_all(b"GINUX_VFS: overlay=/ginux-overlay-proof value=");
+    line(OVERLAY_VALUE);
     line(b"GINUX_VFS: managed-host-paths=unexposed managed-host-fds=unexposed");
     vfs.teardown();
     let _ = unsafe { syscall1(SYS_CLOSE_HOST, descriptor as usize) };
