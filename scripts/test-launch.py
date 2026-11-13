@@ -195,6 +195,10 @@ def main():
             secret.seek(0)
             invoke(["descriptor", str(secret.fileno())], 0, "exited", pass_fds=(secret.fileno(),))
         proc = invoke(["budget"], 0, "exited")
+        # Run as root, the header reports the identity the workload got.
+        if b"ginux: launch tracee-uid=65534 tracee-gid=65534 root=host-path-read-only\n" not in proc.stderr:
+            header = [line for line in proc.stderr.splitlines() if b"launch tracee-" in line]
+            raise RuntimeError(f"launch header identity: {header!r}")
         config_begin = proc.stderr.index(b"ginux: effective config begin\n")
         config_end = proc.stderr.index(b"ginux: effective config end\n")
         config_bytes = config_end - config_begin

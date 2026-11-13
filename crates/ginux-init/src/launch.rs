@@ -1055,7 +1055,13 @@ fn supervise_launch(pid: usize, instance: &mut Instance, contract: &EffectiveCon
         launch_fail(instance, pid, b"launch ptrace setup failed");
     }
     line_stderr(b"ginux: launch backend=ptrace-native profile=balanced elf-loader=host");
-    line_stderr(b"ginux: launch tracee-uid=1000 tracee-gid=1000 root=host-path-read-only");
+    // The same decision `launch_tracee` applied before exec.
+    let identity = managed_host_identity();
+    write_stderr(b"ginux: launch tracee-uid=");
+    write_stderr_u64(identity.uid as u64);
+    write_stderr(b" tracee-gid=");
+    write_stderr_u64(identity.gid as u64);
+    line_stderr(b" root=host-path-read-only");
     write_stderr(b"ginux: launch contract instance=");
     write_stderr(instance.config().id.as_bytes());
     write_stderr(b" digest=");

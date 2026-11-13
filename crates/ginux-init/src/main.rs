@@ -5598,7 +5598,13 @@ fn supervise_native(
             b"GINUX_NATIVE: backend=ptrace-native profile=balanced elf-loader=host contract=",
         );
         line(contract_label(instance.config()));
-        line(b"GINUX_NATIVE: tracee-uid=1000 tracee-gid=1000 root=oci-read-only");
+        // The same decision `native_tracee` applied before exec.
+        let identity = managed_host_identity();
+        write_all(b"GINUX_NATIVE: tracee-uid=");
+        write_u64(identity.uid as u64);
+        write_all(b" tracee-gid=");
+        write_u64(identity.gid as u64);
+        line(b" root=oci-read-only");
     }
 
     let mut sequence = 0u64;

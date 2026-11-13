@@ -6,7 +6,7 @@ EPERM: every request except PTRACE_TRACEME, so `native` and `process-native`
 fail their ptrace setup and must still kill the stopped tracee, or only
 PTRACE_KILL, so a post-setup native failure and Gate 1 must still end their
 tracee. A supervisor without CAP_KILL (dropped from the bounding set) cannot
-signal the native tracee after it drops to UID 1000 and must still end it
+signal the native tracee after it drops to UID 65534 and must still end it
 through its tracer relationship. Each run gets a private mount namespace with a temporary
 directory bound over /var/tmp, so the host's /var/tmp is not touched.
 """
@@ -42,7 +42,7 @@ def main():
         with tempfile.TemporaryDirectory(prefix="ginux-kill-") as directory:
             work = Path(directory)
             # Bound over /var/tmp: the marker of a process-native payload and
-            # the Gate 1 payload path. The native tracee drops to UID 1000 in
+            # the Gate 1 payload path. The native tracee drops to UID 65534 in
             # its chroot and records into root/var/tmp.
             work.chmod(0o755)
             root = work / "root"

@@ -16,7 +16,7 @@ def main():
     config = Path(__file__).resolve().parent.parent / "config/instance-gate5.toml"
     with tempfile.TemporaryDirectory(prefix="ginux-native-") as directory:
         work = Path(directory)
-        # The tracee drops to UID 1000 and must be able to execute the copies.
+        # The tracee drops to UID 65534 and must be able to execute the copies.
         shutil.copyfile(binary, work / "ginux")
         (work / "ginux").chmod(0o755)
         root = work / "root"
