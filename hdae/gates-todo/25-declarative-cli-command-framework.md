@@ -72,11 +72,18 @@ runtime, fixture, helper, and backend commands out of the public interface.
   `ginux start`.
 - [x] Recorded the human direction to use a Cobra-like declarative framework
   and re-evaluate the entire CLI before implementation.
+- [x] Synchronized the dedicated branch with `origin/main` after pull request
+  272 merged.
+- [x] Inventoried the public controller, privileged helper, freestanding
+  runtime, fixture, benchmark, documentation-generator, image-tool, and build
+  command surfaces and their known executable callers in
+  `docs/cli-command-model.md`.
+- [x] Proposed the flat public command taxonomy, exact argument shapes,
+  generated help/version behavior, error policy, compatibility boundary,
+  versioned private helper protocol, and internal runtime disposition.
 
 ## Remaining work
 
-- [ ] Produce the command/caller inventory and proposed public/internal
-  boundary.
 - [ ] Present the proposed public command specification and compatibility plan,
   then stop for human design approval.
 - [ ] Implement the approved declarative public CLI and narrow internal
@@ -155,6 +162,17 @@ runtime, fixture, helper, and backend commands out of the public interface.
 - Prior Gate 12.25 evidence -> the top-level instance workflow is accepted and
   supplies the regression baseline; this gate re-evaluates its organization
   and implementation rather than assuming every current command is permanent.
+- `rg` inspection of `scripts/ginux-host-controller.sh`,
+  `scripts/ginux-host-instance-helper.sh`, `crates/ginux-init/src/launch.rs`,
+  `crates/ginux-init/src/main.rs`, tests, demos, Make targets, and installation
+  scripts -> every currently accepted public, helper, runtime, fixture,
+  benchmark, and maintainer command is classified with its known callers in
+  `docs/cli-command-model.md`.
+- `git rebase origin/main` -> Gate 25 is based on merged pull request 272,
+  including strict fixed-arity runtime parsing.
+- `make check` -> the synchronized design checkpoint passes naming,
+  terminology, formatting, and all workspace clippy checks before CLI code
+  changes begin.
 
 ## Decisions and limitations
 
@@ -165,6 +183,13 @@ runtime, fixture, helper, and backend commands out of the public interface.
 - `native` is not an approved public operator command. The inventory must
   determine whether its internal behavior remains necessary, but its current
   implementation name is not a reason to expose it.
+- The design proposal retains the accepted flat top-level lifecycle rather
+  than reintroducing a redundant `instance` group. Production runtime selectors
+  remain private, component selectors remain test-only, and no new product
+  commands or compatibility aliases are proposed.
+- Public parse errors are proposed to standardize on exit 2. Operational
+  helper/runtime results retain their existing meanings. This compatibility
+  choice requires approval with the rest of the command design.
 - This gate has two mandatory human checkpoints: command-design approval before
   implementation and final acceptance after verified delivery.
 - Pull request 272 may harden the existing internal parser independently; this
@@ -179,7 +204,8 @@ runtime, fixture, helper, and backend commands out of the public interface.
 - Planned commits: gate and command inventory; approved CLI framework and
   public command model; internal-boundary and installation migration; tests and
   documentation; evidence reconciliation
-- Actual commits: pending
+- Actual commits: `557349c2` (gate draft after rebase); design-checkpoint
+  commit pending
 
 ## Review policy and outcome
 

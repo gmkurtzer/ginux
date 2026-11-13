@@ -2,22 +2,27 @@
 
 ## Current checkpoint
 
-### Planned checkpoint: Gate 25 drafted for agent handoff
+### Active checkpoint: Gate 25 command design ready for review
 
 - Gate 25 defines a complete CLI inventory, a human-approved command-design
   checkpoint, migration from the shell controller to a declarative Rust
   command framework, and an explicit private boundary around runtime/backend
   commands such as `native`.
-- The gate is drafted on `hdae/cli-command-framework` and is being synchronized
-  with current `origin/main` after pull request 272 merged.
-- No Gate 25 implementation, dependency change, push, or pull request has been
-  performed.
+- The dedicated branch is synchronized with current `origin/main`, including
+  merged pull request 272.
+- `docs/cli-command-model.md` inventories the public controller, privileged
+  helper, freestanding runtime, test/benchmark tools, and their known callers.
+  It proposes a flat top-level operator taxonomy, a versioned private helper
+  protocol, generated help/version behavior, and the disposition of every
+  runtime selector.
+- No CLI implementation or dependency change has been performed. Gate 25 is at
+  its mandatory command-design checkpoint.
+- Fresh baseline evidence: `make check` passes on the synchronized branch.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Exact next action: the implementing agent inventories every command and
-  caller, proposes the final public/internal command specification, and stops
-  for human design approval before changing the CLI.
+- Exact next action: obtain human approval or correction of the six decisions
+  in `docs/cli-command-model.md`, then implement the approved declarative CLI.
 
 - Gate 1 is accepted and closed under the corrected ordinary-host-process
   architecture. Pull request https://github.com/gmkurtzer/ginux-us/pull/1 was
@@ -642,18 +647,18 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-For Gate 25, inventory every command and caller, and present the proposed public/internal
-command specification for human approval before implementation. Gate 11
-remains partial and Gate 14 remains explicitly deferred.
+For Gate 25, obtain human approval or correction of the proposed public and
+private command model before implementation. Gate 11 remains partial and Gate
+14 remains explicitly deferred.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 25 is drafted for a separate implementing agent and is
-  stopped at its command-design checkpoint. Gate 11 remains partial and Gate
-  14 remains deferred.
+- Active gate: Gate 25 has completed its command inventory and is stopped at
+  its mandatory command-design checkpoint. Gate 11 remains partial and Gate 14
+  remains deferred.
 - Active work: Gate 12 is technically passed and delivered in pull request 251;
   Gate 12.1 is technically passed and delivered in pull request 252; Gate
   12.25 is technically passed and delivered in pull request 253. Gate 12.5 is
