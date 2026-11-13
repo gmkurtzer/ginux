@@ -2,6 +2,56 @@
 
 ## Current checkpoint
 
+### Active corrective checkpoint: Gate 24 passed, delivery pending
+
+- Gate 24 is active on `hdae/concurrent-service-output`, stacked on Gate 23.
+  The human approved implementing it and publishing the verified work for
+  morning review without merging.
+- Goal: restore successful managed service stdout to its instance's systemd
+  journal and virtual console during concurrent Rocky systemd execution,
+  without weakening isolation or substituting host-side evidence.
+- Root cause: merged pull request 247 reclaims a task record as soon as
+  `waitid` reaps the child. Queued journald credentials can be consumed after
+  that point, so the host sender PID no longer maps to its virtual identity.
+- Correction: a bounded credential tombstone retains the virtual PID, UID, and
+  GID while its pidfd pins the exact host PID; full task and process slots still
+  recycle.
+- Verification passed: the focused credential-after-reap native suite, `make
+  check`, unchanged `make test-multi-instance`, complete `make test-systemd`,
+  and aggregate `make test`.
+- Delivery: Gate 23 is open for review in pull request
+  https://github.com/gmkurtzer/ginux/pull/266. Gate 24 implementation and
+  evidence commits are local pending branch push and the stacked pull request.
+  Stop with both pull requests open for review.
+- Active skill: `hdae-development`
+- Skill path: `.agents/skills/hdae-development/SKILL.md`
+- Reload after context shift: required
+- Exact next action: publish Gate 24 stacked on Gate 23, record its URL, and
+  stop without merging.
+
+### Passed corrective checkpoint: Gate 23, delivery pending
+
+- Gate 23 is technically passed on `hdae/virtual-sysinfo-systemd-compat` after
+  the human approved correction of the post-Gate-22 Rocky systemd regression.
+- Accepted Gate 22 remains locked. Gate 23 makes `sysinfo.totalram` match the
+  instance's configured virtual memory while retaining zero/private host
+  counters, `mem_unit = 1`, and `-EFAULT` behavior.
+- Pre-fix evidence: `make doctor build check test` passed; `make test-systemd`
+  failed before login because systemd rejected zero physical memory from
+  `sysinfo`.
+- Implemented evidence: `make check`, isolated permitted `make test`, and the
+  complete `make test-systemd` matrix pass. Cold, warm, and repeat Rocky boots
+  reach controlled shutdown; the zero-memory assertion no longer occurs.
+- Gate 24 resolved the separate service-output regression. The unchanged
+  `make test-multi-instance` suite now passes, as do fresh `make test-systemd`
+  and aggregate `make test` runs.
+- Delivery: pull request https://github.com/gmkurtzer/ginux/pull/266 is open
+  against `main`; human review remains with Gate 24 stacked above it.
+- Active skill: `hdae-development`
+- Skill path: `.agents/skills/hdae-development/SKILL.md`
+- Reload after context shift: required
+- Exact next action: publish Gate 24 above this branch; do not merge Gate 23.
+
 - Gate 1 is accepted and closed under the corrected ordinary-host-process
   architecture. Pull request https://github.com/gmkurtzer/ginux-us/pull/1 was
   merged by the human on 2026-11-04.
@@ -625,16 +675,24 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Obtain human direction on whether to resume or defer the partial Gate 11
-performance target. Gate 14 remains explicitly deferred.
+Commit and push the Gate 23 delivery record, rebase and push Gate 24 above it,
+open the Gate 24 pull request, record its stable URL, and stop for human review
+without merging or closing either gate.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: none. Gates 18 and 19 were accepted and closed on 2026-11-12.
-  Gate 11 remains partial and Gate 14 remains deferred.
+- Active gate: Gate 24 is technically passed on
+  `hdae/concurrent-service-output` and unblocks technically passed Gate 23 on
+  `hdae/virtual-sysinfo-systemd-compat`. Both remain checkpoint gates in
+  `gates-todo/` pending delivery and human review.
+- Last evidence: focused native supervision, `make check`, unchanged `make
+  test-multi-instance`, complete `make test-systemd`, and aggregate `make test`
+  all pass on the Gate 24 implementation branch.
+- Exact next action: publish the Gate 24 stacked pull request, record its URL,
+  and stop without merging or closing either pull request.
 - Active work: Gate 12 is technically passed and delivered in pull request 251;
   Gate 12.1 is technically passed and delivered in pull request 252; Gate
   12.25 is technically passed and delivered in pull request 253. Gate 12.5 is

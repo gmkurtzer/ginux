@@ -130,7 +130,8 @@ sys_read = ["/"]
         code, out = run("ysinfo")
         fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
         check("sysinfo is deterministic and private", code == 0 and fixture == [
-            "GINUX_FIXTURE: sysinfo=0", "GINUX_FIXTURE: sysinfo-zero=1",
+            "GINUX_FIXTURE: sysinfo=0", "GINUX_FIXTURE: sysinfo-private=1",
+            "GINUX_FIXTURE: totalram=268435456",
             "GINUX_FIXTURE: mem-unit=1", "GINUX_FIXTURE: sysinfo-null=-14"]
             and "GINUX_NATIVE_CHECK: PASS" in out, code, out)
 
