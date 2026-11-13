@@ -59,7 +59,7 @@ stage_instance() {
         printf 'contract\tlocked\n'
     } >"$stage_directory/deployment.state"
     chmod 600 "$stage_directory/config.toml" "$stage_directory/deployment.state"
-    "$helper" prepare-root "$stage_directory/root"
+    "$helper" --protocol 1 prepare-root "$stage_directory/root"
     mkdir -p \
         "$stage_directory/root/ginux-gate17" \
         "$stage_directory/root/usr/local/sbin" \
@@ -92,14 +92,14 @@ EOF
 }
 
 cleanup() {
-    "$helper" stop gate17-a >/dev/null 2>&1 || true
-    "$helper" stop gate17-b >/dev/null 2>&1 || true
+    "$helper" --protocol 1 stop gate17-a >/dev/null 2>&1 || true
+    "$helper" --protocol 1 stop gate17-b >/dev/null 2>&1 || true
 }
 trap cleanup 0 HUP INT TERM
 
 install -m 755 /var/tmp/ginux-gate17-runtime "$runtime"
 install -m 755 /var/tmp/ginux-gate17-helper "$helper"
-install -m 755 /var/tmp/ginux-gate17-controller "$controller"
+install -m 755 /var/tmp/ginux-gate17-cli "$controller"
 mkdir -p "$state"
 
 stage_instance gate17-a gate17-b 18181

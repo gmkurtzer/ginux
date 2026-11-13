@@ -18,7 +18,7 @@ fi
 test "$(rpm -q sysbench)" = "$sysbench_nevra"
 
 if test -d "$directory"; then
-    sudo /usr/local/libexec/ginux-instance-helper stop "$instance" >/dev/null || true
+    sudo /usr/local/libexec/ginux-instance-helper --protocol 1 stop "$instance" >/dev/null || true
     sudo rm -rf "$directory"
 fi
 if ! ginux import "$instance" "$config"; then

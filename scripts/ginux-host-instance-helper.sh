@@ -7,18 +7,7 @@ image_tools=/usr/local/libexec/ginux-image
 default_recipe=/etc/ginux/examples/rocky-systemd.toml
 
 usage() {
-    printf '%s\n' 'usage: ginux create NAME [--set KEY=TOML_VALUE]... [--network ATTACHMENT] [--forward SPEC]...' >&2
-    printf '%s\n' '       ginux import NAME FILE [--set KEY=TOML_VALUE]... [--network ATTACHMENT] [--forward SPEC]...' >&2
-    printf '%s\n' '       ginux set NAME [--set KEY=TOML_VALUE]... [--network ATTACHMENT] [--forward SPEC]...' >&2
-    printf '%s\n' '       ginux edit NAME' >&2
-    printf '%s\n' '       ginux export NAME' >&2
-    printf '%s\n' '       ginux list' >&2
-    printf '%s\n' '       ginux lock NAME' >&2
-    printf '%s\n' '       ginux unlock NAME' >&2
-    printf '%s\n' '       ginux start NAME [--attach] [--audit]' >&2
-    printf '%s\n' '       ginux attach NAME' >&2
-    printf '%s\n' '       ginux status NAME' >&2
-    printf '%s\n' '       ginux stop NAME' >&2
+    printf '%s\n' 'usage: ginux-instance-helper --protocol 1 COMMAND [ARGUMENT]...' >&2
     exit 64
 }
 
@@ -780,7 +769,7 @@ start_instance() {
     : >"$directory/audit.log"
     : >"$directory/console.log"
 
-    nohup "$0" supervise "$name" "$start_audit" >/dev/null 2>&1 </dev/null &
+    nohup "$0" --protocol 1 supervise "$name" "$start_audit" >/dev/null 2>&1 </dev/null &
     pid=$!
     record_supervisor "$directory" "$pid"
     sleep 1
@@ -814,7 +803,7 @@ supervise_instance() {
     # Let script(1) provide the pseudo-terminal, but record only the runtime
     # stream. Its normal typescript header/footer are implementation details,
     # not instance console output.
-    script -qefE never -c "$0 run-runtime $name $audit_override" /dev/null \
+    script -qefE never -c "$0 --protocol 1 run-runtime $name $audit_override" /dev/null \
         <&9 >>"$directory/console.log" 2>>"$directory/audit.log" &
     console_pid=$!
     terminate_supervisor() {
@@ -971,7 +960,7 @@ EOF
         case "$rows:$columns:$extra" in
             *[!0-9:]*|0:*|*:0:*|*:*:?*) return 0 ;;
         esac
-        sudo -n "$0" resize "$name" "$rows" "$columns" </dev/null >/dev/null 2>&1 || true
+        sudo -n "$0" --protocol 1 resize "$name" "$rows" "$columns" </dev/null >/dev/null 2>&1 || true
     }
     cleanup_attach() {
         trap - 0 HUP INT TERM TSTP USR1 WINCH
@@ -996,9 +985,10 @@ EOF
     }
     trap cleanup_attach 0
     trap terminate_attach HUP TERM
-    # The public controller owns terminal-generated signal forwarding. Keep
-    # this private transport alive while it relays bytes and console output.
-    trap ':' INT TSTP
+    # The private transport owns terminal-generated signal forwarding after
+    # the public CLI authorizes the console endpoints.
+    trap 'printf I >&9 || true' INT
+    trap 'printf S >&9 || true' TSTP
     instance_stopped=false
     trap 'instance_stopped=true' USR1
     trap restore_raw_tty WINCH
@@ -1134,10 +1124,16 @@ stop_instance() {
     printf '%s: stopped\n' "$name"
 }
 
-mkdir -p "$state_root/instances"
-command=${1-}
-test -n "$command" || usage
+test "${1-}" = --protocol || usage
+test "${2-}" = 1 || {
+    printf 'unsupported helper protocol: %s\n' "${2-}" >&2
+    exit 64
+}
+test "$#" -ge 3 || usage
+shift 2
+command=$1
 shift
+mkdir -p "$state_root/instances"
 case $command in
     attach) attach_instance "$@" ;;
     authorize-attach) authorize_attach "$@" ;;

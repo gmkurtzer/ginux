@@ -6,12 +6,13 @@ log=$(mktemp)
 trap 'rm -f "$log"' 0 HUP INT TERM
 
 ./scripts/check-instance-terminology.sh
+cargo build -q -p ginux-cli
 
-if ./scripts/ginux-host-controller.sh "$legacy_term" list >"$log" 2>&1; then
+if ./target/debug/ginux-cli "$legacy_term" list >"$log" 2>&1; then
     printf '%s\n' 'legacy CLI noun was incorrectly accepted' >&2
     exit 1
 fi
-grep -Fq 'ginux import' "$log"
+grep -Fq 'Usage: ginux' "$log"
 if grep -Fqi "$legacy_term" "$log"; then
     printf '%s\n' 'legacy CLI noun leaked into controller usage' >&2
     exit 1

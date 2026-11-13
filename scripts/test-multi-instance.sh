@@ -13,8 +13,8 @@ rocky_scp target/x86_64-unknown-linux-gnu/release/ginux \
     "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/ginux-gate17-runtime"
 rocky_scp scripts/ginux-host-instance-helper.sh \
     "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/ginux-gate17-helper"
-rocky_scp scripts/ginux-host-controller.sh \
-    "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/ginux-gate17-controller"
+rocky_scp target/x86_64-unknown-linux-musl/release/ginux-cli \
+    "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/ginux-gate17-cli"
 rocky_scp scripts/gate17-instance-check.py \
     "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/ginux-gate17-check"
 rocky_scp scripts/gate17-multi-instance-guest.sh \

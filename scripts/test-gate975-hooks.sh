@@ -20,7 +20,7 @@ run_case() {
     config=$2
     expected=$3
     rocky_scp "$config" "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/ginux-hook-case.toml"
-    rocky_ssh "sudo install -m 644 /var/tmp/ginux-hook-case.toml '$instance_dir/config.toml'; sudo rm -f '$instance_dir/root/run/ginux-init-ran' '$instance_dir/root/run/ginux-timeout-init-ran' '$instance_dir/root/run/ginux-hook-continued'; sudo sh -c ': > \"$audit_log\"'; set +e; sudo '$helper' run-runtime gate9 false >/var/tmp/ginux-hook-$case_name.console 2>/var/tmp/ginux-hook-$case_name.stderr; status=\$?; set -e; printf '%s\n' \$status >/var/tmp/ginux-hook-$case_name.status; test \$status -eq $expected"
+    rocky_ssh "sudo install -m 644 /var/tmp/ginux-hook-case.toml '$instance_dir/config.toml'; sudo rm -f '$instance_dir/root/run/ginux-init-ran' '$instance_dir/root/run/ginux-timeout-init-ran' '$instance_dir/root/run/ginux-hook-continued'; sudo sh -c ': > \"$audit_log\"'; set +e; sudo '$helper' --protocol 1 run-runtime gate9 false >/var/tmp/ginux-hook-$case_name.console 2>/var/tmp/ginux-hook-$case_name.stderr; status=\$?; set -e; printf '%s\n' \$status >/var/tmp/ginux-hook-$case_name.status; test \$status -eq $expected"
 }
 
 run_case success config/instance-gate9.75-hooks.toml 0

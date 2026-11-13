@@ -111,7 +111,7 @@ run_one() {
         ginux_cpus=$cpus
         test -z "$supervisor_cpu" || ginux_cpus=$supervisor_cpu
         if ! sudo taskset -c "$ginux_cpus" prlimit --as="$memory_bytes" -- \
-            "$helper" run-runtime "$instance" false >"$output" 2>&1; then
+            "$helper" --protocol 1 run-runtime "$instance" false >"$output" 2>&1; then
             cat "$output" >&2
             return 1
         fi
