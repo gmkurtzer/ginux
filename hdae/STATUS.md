@@ -2,6 +2,25 @@
 
 ## Current checkpoint
 
+### Active corrective checkpoint: Gate 23
+
+- Gate 23 is active on `hdae/virtual-sysinfo-systemd-compat` after the human
+  approved correction of the post-Gate-22 Rocky systemd regression.
+- Accepted Gate 22 remains locked. Gate 23 makes `sysinfo.totalram` match the
+  instance's configured virtual memory while retaining zero/private host
+  counters, `mem_unit = 1`, and `-EFAULT` behavior.
+- Pre-fix evidence: `make doctor build check test` passed; `make test-systemd`
+  failed before login because systemd rejected zero physical memory from
+  `sysinfo`.
+- Remaining work: implement both supervision paths, update focused fixtures,
+  run `make check`, `make test`, `make test-systemd`, and
+  `make test-multi-instance`, record evidence, and stop for human review.
+- Active skill: `hdae-development`
+- Skill path: `.agents/skills/hdae-development/SKILL.md`
+- Reload after context shift: required
+- Exact next action: implement configured virtual total memory and focused
+  regressions without exposing host state or claiming quota enforcement.
+
 - Gate 1 is accepted and closed under the corrected ordinary-host-process
   architecture. Pull request https://github.com/gmkurtzer/ginux-us/pull/1 was
   merged by the human on 2026-11-04.
