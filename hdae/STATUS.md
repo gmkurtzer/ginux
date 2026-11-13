@@ -19,14 +19,15 @@
 - Verification passed: the focused credential-after-reap native suite, `make
   check`, unchanged `make test-multi-instance`, complete `make test-systemd`,
   and aggregate `make test`.
-- Delivery: implementation commit `7db0ca62`; final evidence commit, branch
-  push, and stacked pull request remain. Stop with both Gate 23 and Gate 24
-  pull requests open for human checkpoint review.
+- Delivery: Gate 23 is open for review in pull request
+  https://github.com/gmkurtzer/ginux/pull/266. Gate 24 implementation commit
+  `a9c51034` and evidence commit `24a334e4` are local pending branch push and
+  the stacked pull request. Stop with both pull requests open for review.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Exact next action: commit the reconciled evidence, publish Gate 23 to `main`,
-  publish Gate 24 stacked on Gate 23, record both URLs, and stop without merging.
+- Exact next action: publish Gate 24 stacked on Gate 23, record its URL, and
+  stop without merging.
 
 ### Passed corrective checkpoint: Gate 23, delivery pending
 
@@ -44,12 +45,12 @@
 - Gate 24 resolved the separate service-output regression. The unchanged
   `make test-multi-instance` suite now passes, as do fresh `make test-systemd`
   and aggregate `make test` runs.
-- Remaining work: push the branch, open its pull request to `main`, and stop for
-  human review with Gate 24 stacked above it.
+- Delivery: pull request https://github.com/gmkurtzer/ginux/pull/266 is open
+  against `main`; human review remains with Gate 24 stacked above it.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Exact next action: publish the verified Gate 23 branch; do not merge it.
+- Exact next action: publish Gate 24 above this branch; do not merge Gate 23.
 
 - Gate 1 is accepted and closed under the corrected ordinary-host-process
   architecture. Pull request https://github.com/gmkurtzer/ginux-us/pull/1 was
@@ -674,9 +675,9 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Commit the reconciled Gate 23/24 evidence, push both dedicated branches, open
-Gate 23 against `main` and Gate 24 against the Gate 23 branch, record their
-stable URLs, and stop for human review without merging or closing either gate.
+Commit and push the Gate 23 delivery record, rebase and push Gate 24 above it,
+open the Gate 24 pull request, record its stable URL, and stop for human review
+without merging or closing either gate.
 
 ## Context recovery
 
@@ -689,9 +690,9 @@ stable URLs, and stop for human review without merging or closing either gate.
   `gates-todo/` pending delivery and human review.
 - Last evidence: focused native supervision, `make check`, unchanged `make
   test-multi-instance`, complete `make test-systemd`, and aggregate `make test`
-  all pass on implementation commit `7db0ca62`.
-- Exact next action: publish the two stacked pull requests, record their URLs,
-  and stop without merging or closing them.
+  all pass on implementation commit `a9c51034`.
+- Exact next action: publish the Gate 24 stacked pull request, record its URL,
+  and stop without merging or closing either pull request.
 - Active work: Gate 12 is technically passed and delivered in pull request 251;
   Gate 12.1 is technically passed and delivered in pull request 252; Gate
   12.25 is technically passed and delivered in pull request 253. Gate 12.5 is

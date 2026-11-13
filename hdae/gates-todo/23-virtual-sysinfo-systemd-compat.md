@@ -37,7 +37,6 @@ instance-scoped, and free of host memory or topology disclosure.
   through Gate 24 and pass `make test-multi-instance` unchanged.
 
 ## Remaining work
-- [ ] Push the branch and open its pull request to `main`.
 - [ ] Complete human checkpoint review after every criterion passes.
 
 ## Acceptance criteria
@@ -96,12 +95,12 @@ instance-scoped, and free of host memory or topology disclosure.
 ## Delivery strategy
 - Working branch: `hdae/virtual-sysinfo-systemd-compat`
 - Intended base: `main`
-- Pull request: intended; publication authorized by the human on 2026-11-12
+- Pull request: https://github.com/gmkurtzer/ginux/pull/266 against `main`
 - Planned commits: signed gate/control-plane commit; signed implementation and
   focused-regression commit; signed evidence reconciliation commit if needed
 - Actual commits: `db45403e` (gate/control plane), `72ad3373`
   (implementation and focused regressions), `b9c2aa0b` (initial verification
-  checkpoint), final evidence reconciliation pending
+  checkpoint), `f41f005a` (passing evidence and delivery checkpoint)
 
 ## Review policy and outcome
 Technically passed checkpoint gate. The sysinfo correction passes focused,
