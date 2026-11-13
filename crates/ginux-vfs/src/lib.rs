@@ -328,7 +328,7 @@ struct Descriptor {
     open: bool,
     overlay: bool,
     object: usize,
-    offset: usize,
+    description: usize,
     readable: bool,
     writable: bool,
     close_on_exec: bool,
@@ -340,7 +340,7 @@ impl Descriptor {
             open: false,
             overlay: false,
             object: 0,
-            offset: 0,
+            description: 0,
             readable: false,
             writable: false,
             close_on_exec: false,
@@ -353,6 +353,7 @@ pub struct VirtualFs<'a, R, const FILES: usize, const FILE_SIZE: usize, const FD
     reader: R,
     overlay: [OverlayFile<FILE_SIZE>; FILES],
     descriptors: [Descriptor; FDS],
+    offsets: [usize; FDS],
 }
 
 impl<'a, R: BaseReader, const FILES: usize, const FILE_SIZE: usize, const FDS: usize>
@@ -364,6 +365,7 @@ impl<'a, R: BaseReader, const FILES: usize, const FILE_SIZE: usize, const FDS: u
             reader,
             overlay: [OverlayFile::empty(); FILES],
             descriptors: [Descriptor::empty(); FDS],
+            offsets: [0; FDS],
         }
     }
 
@@ -382,6 +384,17 @@ impl<'a, R: BaseReader, const FILES: usize, const FILE_SIZE: usize, const FDS: u
             .descriptors
             .iter()
             .position(|descriptor| !descriptor.open)
+            .ok_or(VfsError::DescriptorLimit)?;
+        // Each open creates one open-file description; duplicates share it, and
+        // with it the offset, until their last close. A free descriptor slot
+        // means at most FDS - 1 descriptions are in use, so one is always free.
+        let description = (0..FDS)
+            .find(|description| {
+                !self
+                    .descriptors
+                    .iter()
+                    .any(|fd| fd.open && fd.description == *description)
+            })
             .ok_or(VfsError::DescriptorLimit)?;
         let overlay_index = self.find_overlay(path.as_bytes());
         let object: usize;
@@ -428,11 +441,12 @@ impl<'a, R: BaseReader, const FILES: usize, const FILE_SIZE: usize, const FDS: u
             self.overlay[object].len = 0;
         }
 
+        self.offsets[description] = 0;
         self.descriptors[slot] = Descriptor {
             open: true,
             overlay,
             object,
-            offset: 0,
+            description,
             readable,
             writable,
             close_on_exec: flags & O_CLOEXEC != 0,
@@ -446,49 +460,49 @@ impl<'a, R: BaseReader, const FILES: usize, const FILE_SIZE: usize, const FDS: u
             return Err(VfsError::PermissionDenied);
         }
         let state = self.descriptors[slot];
+        let offset = self.offsets[state.description];
         let available = if state.overlay {
-            self.overlay[state.object].len.saturating_sub(state.offset)
+            self.overlay[state.object].len.saturating_sub(offset)
         } else {
             let entry = self.index.entry(state.object)?;
             usize::try_from(entry.size)
                 .map_err(|_| VfsError::FileTooLarge)?
-                .saturating_sub(state.offset)
+                .saturating_sub(offset)
         };
         let length = available.min(output.len());
         if state.overlay {
-            output[..length].copy_from_slice(
-                &self.overlay[state.object].data[state.offset..state.offset + length],
-            );
+            output[..length]
+                .copy_from_slice(&self.overlay[state.object].data[offset..offset + length]);
         } else {
             let entry = self.index.entry(state.object)?;
-            self.reader.read_at(
-                entry.data_offset + state.offset as u64,
-                &mut output[..length],
-            )?;
+            self.reader
+                .read_at(entry.data_offset + offset as u64, &mut output[..length])?;
         }
-        self.descriptors[slot].offset += length;
+        self.offsets[state.description] += length;
         Ok(length)
     }
 
     pub fn write(&mut self, descriptor: i32, input: &[u8]) -> Result<usize, VfsError> {
         let slot = self.descriptor(descriptor)?;
         let state = self.descriptors[slot];
+        let offset = self.offsets[state.description];
         if !state.writable || !state.overlay {
             return Err(VfsError::PermissionDenied);
         }
-        let end = state
-            .offset
+        let end = offset
             .checked_add(input.len())
             .ok_or(VfsError::FileTooLarge)?;
         if end > FILE_SIZE {
             return Err(VfsError::FileTooLarge);
         }
-        self.overlay[state.object].data[state.offset..end].copy_from_slice(input);
+        self.overlay[state.object].data[offset..end].copy_from_slice(input);
         self.overlay[state.object].len = self.overlay[state.object].len.max(end);
-        self.descriptors[slot].offset = end;
+        self.offsets[state.description] = end;
         Ok(input.len())
     }
 
+    /// Share the open-file description, and with it the offset; close-on-exec
+    /// stays per descriptor.
     pub fn duplicate(&mut self, descriptor: i32, close_on_exec: bool) -> Result<i32, VfsError> {
         let source = self.descriptor(descriptor)?;
         let target = self
@@ -992,11 +1006,12 @@ mod tests {
         let mut output = [0; 3];
         assert_eq!(vfs.read(fresh, &mut output), Ok(3));
         assert_eq!(&output, b"new");
-        assert_eq!(vfs.read(old, &mut output), Ok(3));
-        assert_eq!(&output, b"old");
+        assert_eq!(vfs.read(old, &mut output[..1]), Ok(1));
+        assert_eq!(&output[..1], b"o");
         vfs.close(old).unwrap();
-        assert_eq!(vfs.read(alias, &mut output), Ok(3));
-        assert_eq!(&output, b"old");
+        assert_eq!(vfs.read(alias, &mut output), Ok(2));
+        assert_eq!(&output[..2], b"ld");
+        assert_eq!(vfs.read(alias, &mut output), Ok(0));
         vfs.close_on_exec();
         assert_eq!(vfs.close(alias), Err(VfsError::InvalidDescriptor));
         vfs.close(fresh).unwrap();
@@ -1097,5 +1112,86 @@ mod tests {
         first.teardown();
         assert_eq!(first.overlay_files(), 0);
         assert_eq!(second.overlay_files(), 0);
+    }
+
+    #[test]
+    fn duplicated_reads_share_offset_while_separate_opens_do_not() {
+        let bytes = index_bytes();
+        let mut vfs: VirtualFs<'_, Reader, 4, 32, 4> =
+            VirtualFs::new(Index::new(&bytes).unwrap(), Reader(*b"BASETOOL"));
+        let original = vfs.open(b"/base", O_READ).unwrap();
+        let alias = vfs.duplicate(original, false).unwrap();
+        let separate = vfs.open(b"/base", O_READ).unwrap();
+        let mut byte = [0];
+        assert_eq!(vfs.read(original, &mut byte), Ok(1));
+        assert_eq!(&byte, b"B");
+        assert_eq!(vfs.read(alias, &mut byte), Ok(1));
+        assert_eq!(&byte, b"A");
+        assert_eq!(vfs.read(separate, &mut byte), Ok(1));
+        assert_eq!(&byte, b"B");
+        assert_eq!(vfs.read(original, &mut byte), Ok(1));
+        assert_eq!(&byte, b"S");
+    }
+
+    #[test]
+    fn duplicated_writes_and_reads_advance_the_same_offset() {
+        let bytes = index_bytes();
+        let mut vfs: VirtualFs<'_, Reader, 4, 32, 4> =
+            VirtualFs::new(Index::new(&bytes).unwrap(), Reader(*b"BASETOOL"));
+        let original = vfs.open(b"/base", O_READ | O_WRITE).unwrap();
+        let alias = vfs.duplicate(original, false).unwrap();
+        assert_eq!(vfs.write(alias, b"X"), Ok(1));
+        let mut byte = [0];
+        assert_eq!(vfs.read(original, &mut byte), Ok(1));
+        assert_eq!(&byte, b"A");
+        assert_eq!(vfs.write(original, b"Y"), Ok(1));
+        assert_eq!(vfs.read(alias, &mut byte), Ok(1));
+        assert_eq!(&byte, b"E");
+        let separate = vfs.open(b"/base", O_READ).unwrap();
+        let mut contents = [0; 4];
+        assert_eq!(vfs.read(separate, &mut contents), Ok(4));
+        assert_eq!(&contents, b"XAYE");
+    }
+
+    #[test]
+    fn duplicated_offset_survives_close_slot_reuse_and_cloexec() {
+        let bytes = index_bytes();
+        let mut vfs: VirtualFs<'_, Reader, 4, 32, 4> =
+            VirtualFs::new(Index::new(&bytes).unwrap(), Reader(*b"BASETOOL"));
+        let original = vfs.open(b"/base", O_READ).unwrap();
+        let alias = vfs.duplicate(original, true).unwrap();
+        let mut byte = [0];
+        assert_eq!(vfs.read(original, &mut byte), Ok(1));
+        vfs.close(original).unwrap();
+        // The reused slot opens a new description; the alias keeps the old one.
+        let reused = vfs.open(b"/base", O_READ).unwrap();
+        assert_eq!(reused, original);
+        assert_eq!(vfs.read(reused, &mut byte), Ok(1));
+        assert_eq!(&byte, b"B");
+        assert_eq!(vfs.read(alias, &mut byte), Ok(1));
+        assert_eq!(&byte, b"A");
+        vfs.close_on_exec();
+        assert_eq!(vfs.read(alias, &mut byte), Err(VfsError::InvalidDescriptor));
+        assert_eq!(vfs.read(reused, &mut byte), Ok(1));
+        assert_eq!(&byte, b"A");
+    }
+
+    #[test]
+    fn closing_every_alias_releases_its_description() {
+        let bytes = index_bytes();
+        let mut vfs: VirtualFs<'_, Reader, 4, 32, 4> =
+            VirtualFs::new(Index::new(&bytes).unwrap(), Reader(*b"BASETOOL"));
+        for _ in 0..8 {
+            let original = vfs.open(b"/base", O_READ).unwrap();
+            let alias = vfs.duplicate(original, false).unwrap();
+            let mut byte = [0];
+            assert_eq!(vfs.read(alias, &mut byte), Ok(1));
+            vfs.close(original).unwrap();
+            vfs.close(alias).unwrap();
+            let separate = vfs.open(b"/base", O_READ).unwrap();
+            assert_eq!(vfs.read(separate, &mut byte), Ok(1));
+            assert_eq!(&byte, b"B");
+            vfs.close(separate).unwrap();
+        }
     }
 }
