@@ -91,6 +91,8 @@ def main():
         invoke(["virtual-tid"], 0, "exited",
                stdout=b"set_tid_address=4242\ngetpid=4242\ngettid=-38\nfutex_lock_pi=-1\n"
                b"pi_word=0\nfutex_lock_pi_flags=-1\npi_flags_word=0\n")
+        invoke(["ysinfo"], 0, "exited",
+               stdout=b"sysinfo=0\nsysinfo-zero=1\nmem-unit=1\nsysinfo-null=-14\n")
         invoke(["oversized"], 0, "exited",
                stdout=b"read=1048576\npread=1048576\n" + b"x" * 4096 + b"write=4096\n")
         invoke(["random"], 0, "exited", stdout=b"getrandom=256\n")

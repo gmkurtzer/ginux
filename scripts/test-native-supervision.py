@@ -52,6 +52,13 @@ def main():
             "GINUX_FIXTURE: pi_word=0", "GINUX_FIXTURE: futex_lock_pi_flags=-1",
             "GINUX_FIXTURE: pi_flags_word=0"] and "GINUX_NATIVE_CHECK: PASS" in out, code, out)
 
+        code, out = run("ysinfo")
+        fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
+        check("sysinfo is deterministic and private", code == 0 and fixture == [
+            "GINUX_FIXTURE: sysinfo=0", "GINUX_FIXTURE: sysinfo-zero=1",
+            "GINUX_FIXTURE: mem-unit=1", "GINUX_FIXTURE: sysinfo-null=-14"]
+            and "GINUX_NATIVE_CHECK: PASS" in out, code, out)
+
         code, out = run("oversized")
         check("oversized I/O uses short transfers",
               code == 0 and "GINUX_FIXTURE: read=1048576\n" in out

@@ -15,11 +15,12 @@ use crate::dispatch::{
 };
 use crate::supervisor::{
     exit_process, line, managed_host_identity, ptrace, stopped, syscall0, syscall1, syscall2,
-    syscall3, syscall4, syscall5, wait, write_all, UserRegs, AT_FDCWD, O_RDONLY,
-    PR_SET_NO_NEW_PRIVS, PTRACE_GETREGS, PTRACE_O_EXITKILL, PTRACE_O_TRACESYSGOOD,
-    PTRACE_SETOPTIONS, PTRACE_SETREGS, PTRACE_SYSCALL, PTRACE_TRACEME, SYS_CHDIR, SYS_CHROOT,
-    SYS_CLOSE_HOST, SYS_EXECVE, SYS_EXIT_HOST, SYS_FORK, SYS_FSYNC, SYS_OPENAT_HOST, SYS_PRCTL,
-    SYS_PTRACE, SYS_READ_HOST, SYS_SETGID, SYS_SETGROUPS, SYS_SETUID, SYS_WRITE_HOST,
+    syscall3, syscall4, syscall5, virtual_sysinfo, wait, write_all, write_tracee_bytes, UserRegs,
+    AT_FDCWD, O_RDONLY, PR_SET_NO_NEW_PRIVS, PTRACE_GETREGS, PTRACE_O_EXITKILL,
+    PTRACE_O_TRACESYSGOOD, PTRACE_SETOPTIONS, PTRACE_SETREGS, PTRACE_SYSCALL, PTRACE_TRACEME,
+    SYS_CHDIR, SYS_CHROOT, SYS_CLOSE_HOST, SYS_EXECVE, SYS_EXIT_HOST, SYS_FORK, SYS_FSYNC,
+    SYS_OPENAT_HOST, SYS_PRCTL, SYS_PTRACE, SYS_READ_HOST, SYS_SETGID, SYS_SETGROUPS, SYS_SETUID,
+    SYS_WRITE_HOST,
 };
 
 pub const MAX_ELF_SIZE: usize = 64 * 1024;
@@ -1125,6 +1126,22 @@ fn supervise_launch(pid: usize, instance: &mut Instance) -> ! {
                 awaiting_exit = true;
                 if ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0 {
                     launch_fail(instance, pid, b"launch exit resume failed");
+                }
+            }
+            Action::Mediate if syscall == 99 => {
+                let result = write_tracee_bytes(pid, registers.rdi as usize, &virtual_sysinfo())
+                    .map_or_else(|error| error, |_| 0);
+                audit_write(b"emulate surface=virtual-system result=");
+                audit_i64(result);
+                audit_write(b"\n");
+                registers.orig_rax = u64::MAX;
+                awaiting_exit = true;
+                override_exit = true;
+                override_result = result;
+                if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0
+                {
+                    launch_fail(instance, pid, b"launch sysinfo emulation failed");
                 }
             }
             Action::Mediate if native_arguments_allowed(syscall, &registers) => {
