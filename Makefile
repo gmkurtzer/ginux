@@ -395,4 +395,5 @@ test-launch:
 
 test-native-supervision:
 	python3 scripts/test-native-supervision.py $(GINUX) .artifacts/launch/native-fixture
+	python3 scripts/test-native-yield-broker.py $(GINUX) .artifacts/launch/native-fixture
 	python3 scripts/test-native-clone-snapshot.py $(GINUX) .artifacts/launch/native-fixture .artifacts/launch/native-clone-collision-fixture

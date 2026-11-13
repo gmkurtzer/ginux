@@ -5393,6 +5393,8 @@ fn native_yield_broker(
     pid_map: &BrokerPidMap,
 ) -> ! {
     const AUDIT_EVENT_LIMIT: u64 = 8192;
+    const ENOENT: isize = 2;
+    const EINTR: isize = 4;
     let _ = unsafe { syscall5(SYS_PRCTL, PR_SET_PDEATHSIG, SIGKILL, 0, 0, 0) };
     let rule = contract
         .syscall_rule(24)
@@ -5420,6 +5422,14 @@ fn native_yield_broker(
                 &mut notification as *mut _ as usize,
             )
         };
+        // A signal can take the caller out of its yield before the receive,
+        // leaving a stale wakeup that fails with ENOENT. Since Linux 6.11 it
+        // also fails with ENOENT once no instance task remains, which the
+        // listener reports as a hang-up. Before 6.6, stopping, freezing or
+        // attaching to this broker fails the receive with EINTR.
+        if received == -EINTR || (received == -ENOENT && !native_listener_hung_up(listener)) {
+            continue;
+        }
         if received < 0 {
             exit_process(0);
         }
@@ -5496,18 +5506,36 @@ fn native_yield_broker(
             // sched_yield after the mediated yield has completed.
             flags: 0,
         };
-        if unsafe {
+        let sent = unsafe {
             syscall3(
                 SYS_IOCTL_HOST,
                 listener,
                 SECCOMP_IOCTL_NOTIF_SEND,
                 &response as *const _ as usize,
             )
-        } < 0
-        {
+        };
+        // ENOENT: a signal took the caller out of its yield after the
+        // receive, and Linux has already returned EINTR or restarted it.
+        if sent < 0 && sent != -ENOENT {
             exit_process(132);
         }
     }
+}
+
+fn native_listener_hung_up(listener: usize) -> bool {
+    #[repr(C)]
+    struct PollFd {
+        fd: i32,
+        events: i16,
+        revents: i16,
+    }
+    let mut descriptor = PollFd {
+        fd: listener as i32,
+        events: 1,
+        revents: 0,
+    };
+    let result = unsafe { syscall3(7, &mut descriptor as *mut _ as usize, 1, 0) };
+    result < 0 || descriptor.revents & 16 != 0
 }
 
 fn supervise_native(
