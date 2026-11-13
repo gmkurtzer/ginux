@@ -15,19 +15,34 @@ script.
 ## Approved scope
 
 - Add a maintained RPM spec and source-manifest workflow for the Ginux CLI,
-  freestanding runtime, privileged helper, OCI image helpers, example recipes,
-  documentation, license, and notices.
+  freestanding runtime, privileged helper, example recipes, documentation,
+  license, and notices.
+- Move generic OCI acquisition, digest verification, layer caching, whiteout
+  processing, and direct instance-root assembly into the compiled Rust control
+  plane. Do not package OCI acquisition shell scripts or duplicate pinned-image
+  metadata; each recipe's digest-qualified `instance.root` is authoritative.
 - Package the compiled operator CLI as `/usr/bin/ginux` and keep runtime and
   privileged implementation programs under `/usr/libexec` with no public
   aliases.
 - Replace production assumptions about `/usr/local` with canonical packaged
   paths while retaining explicit test overrides where fixtures require them.
-- Create required persistent state directories under `/var/lib/ginux` through
-  a packaged tmpfiles declaration. Package removal must not delete images,
-  instance roots, overlays, recipes, deployment state, logs, or other operator
+- Create `/var/lib/ginux/cache/oci` and `/var/lib/ginux/instances` through a
+  packaged tmpfiles declaration. OCI manifests, configuration objects, and
+  compressed layers are retained by digest under `cache/oci`; each instance's
+  fully expanded writable filesystem is
+  `/var/lib/ginux/instances/NAME/root`. Package removal must not delete cached
+  blobs, expanded roots, recipes, deployment state, logs, or other operator
   data.
+- Assemble a new instance directly from verified cached OCI blobs into a
+  staging root and atomically publish the instance directory. Do not persist a
+  redundant assembled `rootfs.tar` beside the source OCI layers.
+- Keep transient PIDs, FIFOs, and control endpoints under
+  `/run/ginux/instances/NAME`, not in persistent state.
 - Install representative example recipes under `/etc/ginux/examples` without
-  overwriting operator changes during upgrade.
+  overwriting operator changes during upgrade. Name every recipe
+  `<distribution><major>-<purpose>.toml`, such as
+  `rocky10-agent-workspace.toml` and `ubuntu24-network-service.toml`; determine
+  and record the exact Alpine base before naming its recipe.
 - Declare runtime and build dependencies explicitly; do not rely on whatever
   happens to be present in the development VM.
 - Generate a binary RPM and SRPM from a clean source archive. Dependency
@@ -50,6 +65,7 @@ script.
   Rocky Linux 10 in this first packaging gate.
 - Architectures other than x86-64.
 - Automatically starting a daemon or instance during installation.
+- Storing system-wide images or instances in an invoking user's home directory.
 - Installing a broad sudoers rule, weakening SELinux, changing firewall
   policy, or granting ordinary users new host privileges.
 - Splitting Ginux into multiple subpackages before package contents and update
@@ -73,6 +89,8 @@ script.
   dependency, external command, writable path, and ownership/mode requirement.
 - [ ] Implement the source archive, vendored dependency, spec, tmpfiles, and
   package build workflow.
+- [ ] Replace the installed shell OCI pipeline with compiled Rust acquisition
+  and direct layer-to-instance-root assembly.
 - [ ] Migrate production path defaults and the development installer to one
   authoritative layout without exposing private executables.
 - [ ] Add package metadata, contents, permission, and dependency tests.
@@ -94,8 +112,18 @@ script.
   the authoritative project version rather than duplicated silently.
 - The RPM owns every shipped file and directory with reviewed modes and
   ownership. Public executables are under `/usr/bin`; private executables are
-  under `/usr/libexec`; examples and documentation are in documented canonical
-  locations; no production file is installed under `/usr/local`.
+  under `/usr/libexec`; distribution-prefixed example recipes are under
+  `/etc/ginux/examples`; documentation is in its canonical location; no
+  production file is installed under `/usr/local`.
+- No OCI acquisition shell script, separate image-pin environment file, or
+  assembled `rootfs.tar` is installed or retained. The recipe's digest-qualified
+  root reference selects content-addressed OCI blobs, and instance creation
+  expands those blobs directly into the instance root with OCI whiteout and
+  replacement semantics preserved.
+- Persistent state is limited to `/var/lib/ginux/cache` and
+  `/var/lib/ginux/instances`; each expanded instance root is stored under its
+  named instance directory. Transient process and console-control state is
+  under `/run/ginux/instances` and is recreated safely after reboot.
 - Installation creates only required package and empty state structure. It
   does not pull an OCI image, create or start an instance, enable a service,
   add broad privilege rules, disable SELinux, or change firewall policy.
@@ -124,8 +152,10 @@ script.
 - `make rpm` -> runs an offline `rpmbuild -ba` and produces the expected SRPM
   and x86-64 RPM or returns nonzero.
 - `make test-rpm-metadata` -> verifies NEVRA, architecture, license, source,
-  dependencies, scripts, file ownership, modes, canonical paths, and absence of
-  `/usr/local` payloads or public private-command aliases.
+  dependencies, scripts, file ownership, modes, canonical paths,
+  distribution-prefixed recipe names, and absence of `/usr/local` payloads,
+  OCI acquisition scripts, duplicate image-pin metadata, or public
+  private-command aliases.
 - `rpmlint <SRPM> <RPM>` -> returns no packaging errors; reviewed warnings, if
   any, are recorded with rationale.
 - `make test-rpm` -> boots a clean Rocky Linux 10 x86-64 QEMU host; installs
@@ -145,6 +175,11 @@ script.
 - `scripts/install-ginux-host.sh` inspection -> current development installation
   copies the public CLI to `/usr/local/bin`, private components to
   `/usr/local/libexec`, and an example recipe to `/etc/ginux/examples`.
+- `scripts/ginux-host-instance-helper.sh` inspection -> current persistent
+  instances are fully expanded at `/var/lib/ginux/instances/NAME/root`, while
+  the generic image pipeline also retains an assembled `rootfs.tar`; Gate 26
+  removes that redundant intermediate and retains only verified OCI content
+  blobs plus each instance root.
 - Gate 25 pull request https://github.com/gmkurtzer/ginux/pull/273 -> supplies
   the compiled public CLI and explicit public/private executable boundary that
   packaging will consume after acceptance.
@@ -157,6 +192,12 @@ script.
 - The package manages software, immutable examples, and empty state-directory
   structure. Instance state and OCI caches are operator data and intentionally
   survive package erase.
+- Example recipes are RPM configuration files under `/etc/ginux/examples` and
+  use distribution-and-major-version filename prefixes.
+- OCI acquisition is product functionality, not packaged shell tooling. Its
+  Rust implementation shares the same typed image reference and error model as
+  the public control plane while privileged state mutation remains narrowly
+  separated.
 - Package installation does not imply authorization to operate privileged
   Ginux functions. Existing host administrator authorization remains required.
 - Gate 26 depends on Gate 25 acceptance because the RPM must package the final
