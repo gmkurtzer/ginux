@@ -287,6 +287,39 @@ sys_read = ["/"]
         check("denied waitid preserves caller registers", code == 0 and fixture == [
             "GINUX_FIXTURE: denied-waitid=-1", "GINUX_FIXTURE: denied-selector-preserved=1"], code, out)
 
+        # Console descriptor tracking follows the host descriptor table:
+        # CLONE_FILES children and threads share it, other children own a
+        # copy, and exec drops the close-on-exec descriptors, which an open
+        # of /dev/console with O_CLOEXEC must make. With console writes
+        # denied, a write on a number the exec freed is a plain write.
+        denied_console = work / "denied-console-write.toml"
+        denied_console.write_text(configured.read_text().replace(
+            'deny = ["device.mmio.direct"', 'deny = ["device.console.write", "device.mmio.direct"'))
+        if denied_console.read_text() == configured.read_text():
+            raise RuntimeError("console write deny was not added to the configuration")
+        with open(work / "console-output", "w+b") as console:
+            code, out = run("L-console-tracking", denied_console, stdin=console, configured_launch=True)
+            fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
+            check("console tracking follows shared tables and exec", code == 0
+                  and fixture == ["GINUX_FIXTURE: protected-close-console=1",
+                                  "GINUX_FIXTURE: console-open-ok=1",
+                                  "GINUX_FIXTURE: high-bits-dup-console=1",
+                                  "GINUX_FIXTURE: shared-dup-console=1",
+                                  "GINUX_FIXTURE: shared-reuse-same-number=1",
+                                  "GINUX_FIXTURE: shared-reuse-console=0",
+                                  "GINUX_FIXTURE: private-close-console=1",
+                                  "GINUX_FIXTURE: thread-dup-console=1",
+                                  "GINUX_FIXTURE: write-thread-open=-1",
+                                  "GINUX_FIXTURE: overwritten-console=0",
+                                  "GINUX_FIXTURE: closed-range-console=0",
+                                  "GINUX_FIXTURE: console-cloexec=1",
+                                  "GINUX_FIXTURE: open-arguments-kept=1",
+                                  "GINUX_FIXTURE: cloexec-range-console=1",
+                                  "GINUX_FIXTURE: exec-reused-console=0",
+                                  "GINUX_FIXTURE: exec-write-reused=-9",
+                                  "GINUX_FIXTURE: exec-dropped-console=0",
+                                  "GINUX_FIXTURE: exec-kept-console=4"], code, out)
+
         # Upstream owns cgroups in memory. Retain the public API and
         # containment regressions without requiring obsolete host files.
         cgroup_outside = work / "cgroup-outside"
