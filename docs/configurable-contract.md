@@ -151,7 +151,6 @@ or conflicting external ports leave the prior deployment unchanged.
 ginux validate recipe.toml
 ginux inspect recipe.toml
 ginux explain recipe.toml filesystem.path.write
-ginux diff strict.toml recipe.toml
 ginux import rocky recipe.toml --network default
 ginux set rocky --network eth0:1 \
     --forward protocol=tcp,external_port=8080,instance_port=80
@@ -159,9 +158,9 @@ ginux set rocky --network eth0:1 \
 
 `validate` parses and compiles without launching an instance. `inspect`
 summarizes final decisions and the digest. `explain` identifies the winning
-rule and limitation for one catalog operation. `diff` reports authority
-changes between two complete recipes. There is no top-level `ginux contract`
-command and the replaced `[userspace.*]` syntax fails closed.
+rule and limitation for one catalog operation. There is no public `diff` or
+top-level `ginux contract` command, and the replaced `[userspace.*]` syntax
+fails closed.
 
 ## Bootstrap and host execution boundary
 
@@ -208,7 +207,8 @@ normalize to `enabled = true` and `enabled = false`, respectively.
 
 ## Launch enforcement
 
-`ginux launch` checks the resolved contract before workload effects. Explicit
+The maintainer-only `ginux-runtime launch` diagnostic checks the resolved
+contract before workload effects. Explicit
 denials take precedence over allowances. Allowances remain limited by the
 balanced implementation. Audit entries identify the winning operation and
 rule; `[audit] enabled = false` suppresses decision records while keeping config

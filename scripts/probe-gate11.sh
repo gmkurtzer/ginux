@@ -10,4 +10,4 @@ rocky_scp scripts/gate11-guest-setup.sh \
     "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/gate11-guest-setup.sh"
 
 rocky_ssh 'chmod 0755 /var/tmp/gate11-guest-setup.sh; /var/tmp/gate11-guest-setup.sh'
-rocky_ssh 'sudo taskset -c 0 /usr/local/libexec/ginux-instance-helper run-runtime gate11-benchmark'
+rocky_ssh 'sudo taskset -c 0 /usr/local/libexec/ginux-instance-helper --protocol 1 run-runtime gate11-benchmark false'

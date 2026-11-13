@@ -9,3 +9,7 @@ rustflags = [
     "-C", "relocation-model=static",
 ]
 
+[target.x86_64-unknown-linux-musl]
+# The public CLI is a normal std binary. Build it as a static Linux executable
+# so macOS development hosts do not need a GNU cross-linker or target libc.
+linker = "rust-lld"

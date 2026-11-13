@@ -1,14 +1,16 @@
 SHELL := /bin/sh
 
 X86_TARGET := x86_64-unknown-linux-gnu
+CLI_TARGET := x86_64-unknown-linux-musl
 BUILD_DIR := build
 GINUX := target/$(X86_TARGET)/release/ginux
+GINUX_CLI := target/$(CLI_TARGET)/release/ginux-cli
 PAYLOAD := target/$(X86_TARGET)/release/managed-payload
 BASELINE := target/$(X86_TARGET)/release/baseline-runner
 RUNTIME_FIXTURE := target/$(X86_TARGET)/release/runtime-fixture
 PROCESS_NATIVE_FIXTURE := target/$(X86_TARGET)/release/process-native-fixture
 
-.PHONY: doctor host-image-fetch host-image-verify host-boot-test host-run host-reset test-host-lifecycle image-helper-fetch image-prepare instance-image-fetch instance-image-verify instance-image-prepare systemd-image-fetch systemd-image-verify systemd-image-prepare test-image test-oci-image test-generic-oci test-oci-layers test-vfs test-native-vfs image-cache-clean build check-name check-instance-terminology check test-ci-changes contract-doc test-contract test-contract-runtime test test-unit test-intercept test-runtime test-config test-instance test-instance-terminology test-process build-process-fixtures test-process-native test-devices test-kernel-views test-systemd test-systemd-live test-systemd-interactive test-multi-instance test-gate19-native-examples test-gate975-network test-gate975-hooks test-gate125-lock test-cgroup test-block test-network test-security test-recovery check-architecture-doc check-security-doc fuzz-security test-bench-compare test-gate15-report bench-prepare bench bench-baseline bench-compare bench-systemd bench-report bench-block bench-network bench-modes-prepare bench-modes bench-modes-report demo-gate-1 demo-gate-2 demo-gate-3 demo-gate-4 demo-gate-5 demo-gate-6 demo-gate-7 demo-gate-8 demo-gate-9 demo-gate-9.5 demo-gate-9.75 demo-gate-10 demo-gate-10.25 demo-gate-10.5 demo-gate-11 demo-gate-12 demo-gate-12.1 demo-gate-12.25 demo-gate-12.5 demo-gate-13 demo-gate-15 demo-gate-17 demo-gate-19 clean
+.PHONY: doctor host-image-fetch host-image-verify host-boot-test host-run host-reset test-host-lifecycle image-helper-fetch image-prepare instance-image-fetch instance-image-verify instance-image-prepare systemd-image-fetch systemd-image-verify systemd-image-prepare test-image test-oci-image test-generic-oci test-oci-layers test-vfs test-native-vfs image-cache-clean build check-name check-instance-terminology check test-cli test-ci-changes contract-doc test-contract test-contract-runtime test test-unit test-intercept test-runtime test-config test-instance test-instance-terminology test-process build-process-fixtures test-process-native test-devices test-kernel-views test-systemd test-systemd-live test-systemd-interactive test-multi-instance test-gate19-native-examples test-gate975-network test-gate975-hooks test-gate125-lock test-cgroup test-block test-network test-security test-recovery check-architecture-doc check-security-doc fuzz-security test-bench-compare test-gate15-report bench-prepare bench bench-baseline bench-compare bench-systemd bench-report bench-block bench-network bench-modes-prepare bench-modes bench-modes-report demo-gate-1 demo-gate-2 demo-gate-3 demo-gate-4 demo-gate-5 demo-gate-6 demo-gate-7 demo-gate-8 demo-gate-9 demo-gate-9.5 demo-gate-9.75 demo-gate-10 demo-gate-10.25 demo-gate-10.5 demo-gate-11 demo-gate-12 demo-gate-12.1 demo-gate-12.25 demo-gate-12.5 demo-gate-13 demo-gate-15 demo-gate-17 demo-gate-19 demo-gate-25 clean
 
 doctor:
 	@./scripts/doctor.sh
@@ -60,6 +62,7 @@ image-cache-clean:
 
 build:
 	cargo build -p ginux-init --target $(X86_TARGET) --release
+	cargo build -p ginux-cli --target $(CLI_TARGET) --release
 	cargo build -p managed-payload --target $(X86_TARGET) --release
 	cargo build -p baseline-runner --target $(X86_TARGET) --release
 	cargo build -p runtime-fixture --target $(X86_TARGET) --release
@@ -86,6 +89,7 @@ test-ci-changes:
 
 check: check-name check-instance-terminology
 	cargo fmt --check
+	cargo clippy -p ginux-cli --all-targets -- -D warnings
 	cargo clippy -p ginux-contract --all-targets -- -D warnings
 	cargo clippy -p ginux-core --all-targets -- -D warnings
 	cargo clippy -p ginux-instance --all-targets -- -D warnings
@@ -113,6 +117,7 @@ test-contract-runtime: build instance-image-prepare
 	@./scripts/with-rocky-host.sh ./scripts/test-contract-runtime.sh
 
 test-unit:
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-cli
 	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-core
 	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-contract
 	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-instance
@@ -121,6 +126,9 @@ test-unit:
 	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-process
 	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-vfs
 	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-kernel-views
+
+test-cli:
+	@./scripts/test-cli.sh
 
 test-release-overflow:
 	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test --release -p ginux-vfs-index --test overflow_checks_release
@@ -217,7 +225,7 @@ test-vfs: build instance-image-prepare
 test-native-vfs: build instance-image-prepare
 	@./scripts/with-rocky-host.sh ./scripts/test-native-vfs.sh
 
-test: check test-gate15-report test-host-lifecycle test-unit test-intercept test-runtime test-config test-instance test-image test-devices test-process test-kernel-views
+test: check test-cli test-gate15-report test-host-lifecycle test-unit test-intercept test-runtime test-config test-instance test-image test-devices test-process test-kernel-views
 
 fuzz-security:
 	./scripts/fuzz-security.sh
@@ -378,6 +386,11 @@ demo-gate-19:
 	@printf '%s\n' '  paranoid shell:       config/examples/paranoid-shell.toml'
 	@printf '%s\n' '  Alpine native init:   config/examples/alpine-native.toml'
 	@printf '%s\n' 'Gate 19 example validation: PASS'
+
+demo-gate-25: doctor build
+	@./scripts/test-cli.sh
+	@ROCKY_NETWORK_RESTRICT=on ./scripts/with-rocky-host.sh ./scripts/test-gate12-cli.sh
+	@./scripts/demo-gate-25.sh
 
 clean:
 	cargo clean

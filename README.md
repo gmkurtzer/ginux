@@ -418,9 +418,12 @@ the `G` officially stands for GPT.
 Ginux is available under the Apache License 2.0. See [`LICENSE`](LICENSE) and
 [`NOTICE`](NOTICE).
 
-## Configured native launch
+## Internal configured native launch diagnostic
 
-On x86-64 Linux, `ginux launch <config> <root> [--result-file <fresh host path>]`
+This section documents an internal maintainer and component-test surface, not
+operator syntax. It is intentionally absent from `ginux --help`.
+
+On x86-64 Linux, `ginux-runtime launch <config> <root> [--result-file <fresh host path>]`
 executes `[instance].init` with the configured arguments and environment inside
 the supplied host root directory. The bootstrap requires chroot and credential
 change privileges, and a kernel with `close_range` (Linux 5.9 or later).
@@ -440,7 +443,7 @@ arguments of 128 bytes each and eight `NAME=value` environment entries of
 Workload stdout stays separate from supervisor diagnostics on stderr. Only
 stdin, stdout, and stderr are inherited by the workload, and launch refuses to
 start when any of them is a directory or cannot be checked: a directory there
-would anchor `openat` and other `*at` calls outside the root. `ginux native`
+would anchor `openat` and other `*at` calls outside the root. `ginux-runtime native`
 applies the same check and closes every other inherited descriptor with
 `close_range`, so it also needs Linux 5.9 or later. The launcher returns the
 workload exit code, or `128 + signal` for signal termination. Startup

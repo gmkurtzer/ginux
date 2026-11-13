@@ -3,6 +3,7 @@ members = [
     "crates/baseline-runner",
     "crates/ginux-core",
     "crates/ginux-contract",
+    "crates/ginux-cli",
     "crates/ginux-instance",
     "crates/ginux-devices",
     "crates/ginux-init",

@@ -14,7 +14,7 @@ set timeout 180
 set send_slow {1 .005}
 
 log_file -noappend $log
-spawn ssh -tt -i $key -p $port -o BatchMode=yes -o ConnectTimeout=5 -o IdentitiesOnly=yes -o LogLevel=ERROR -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$user@127.0.0.1" "sudo sh -c '/var/tmp/ginux-host-instance-helper-installed run-runtime gate9 false'"
+spawn ssh -tt -i $key -p $port -o BatchMode=yes -o ConnectTimeout=5 -o IdentitiesOnly=yes -o LogLevel=ERROR -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$user@127.0.0.1" "sudo sh -c '/var/tmp/ginux-host-instance-helper-installed --protocol 1 run-runtime gate9 false'"
 
 expect {
     -re {login:} {}

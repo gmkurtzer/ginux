@@ -20,7 +20,7 @@ if {[info exists env(GINUX_GATE9_AUDIT)] && $env(GINUX_GATE9_AUDIT) eq "on"} {
 }
 
 log_file -noappend $log
-spawn ssh -tt -i $key -p $port -o BatchMode=yes -o ConnectTimeout=5 -o IdentitiesOnly=yes -o LogLevel=ERROR -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$user@127.0.0.1" "sudo sh -c '/var/tmp/ginux-host-instance-helper-installed run-runtime gate9 $audit_override 2>/var/tmp/ginux-gate9-audit.log'"
+spawn ssh -tt -i $key -p $port -o BatchMode=yes -o ConnectTimeout=5 -o IdentitiesOnly=yes -o LogLevel=ERROR -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$user@127.0.0.1" "sudo sh -c '/var/tmp/ginux-host-instance-helper-installed --protocol 1 run-runtime gate9 $audit_override 2>/var/tmp/ginux-gate9-audit.log'"
 
 expect {
     -re {login:} {}
