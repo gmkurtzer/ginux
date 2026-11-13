@@ -44,7 +44,7 @@ callers; README and `docs/` references are documentation rather than callers.
 | `validate` | `FILE` | runtime `instance-validate` | no public-CLI test; documented workflow only | retain public; move behind normal host-library API |
 | `inspect` | `FILE` | runtime `instance-inspect` | no public-CLI test; documented workflow only | retain public; move behind normal host-library API |
 | `explain` | `FILE OPERATION` | runtime `instance-explain` | no public-CLI test; documented workflow only | retain public; move behind normal host-library API |
-| `diff` | `LEFT RIGHT` | runtime `instance-diff` | no public-CLI test; documented workflow only | retain public; move behind normal host-library API |
+| `diff` | `LEFT RIGHT` | runtime `instance-diff` | no public-CLI test; documented workflow only | remove from the public CLI; retain runtime coverage only where needed by component tests |
 
 The public script also accepts no global options. `--help`, `help`, and
 `--version` are currently usage errors. Gate 25 adds generated global and
@@ -156,8 +156,6 @@ Inspect recipes:
   validate  Validate and compile a recipe without changing state
   inspect   Show a recipe's normalized effective contract
   explain   Explain one operation's effective contract decision
-  diff      Compare two effective contracts
-
 Options:
   -h, --help       Print help
   -V, --version    Print version
@@ -184,7 +182,6 @@ ginux unlock NAME
 ginux validate FILE
 ginux inspect FILE
 ginux explain FILE OPERATION
-ginux diff LEFT RIGHT
 ```
 
 `--set` and `--forward` preserve command-line order. `--network` occurs at
@@ -239,7 +236,7 @@ Implementation must not begin until the human approves these points:
    `ginux instance ...`.
 2. Retain every currently successful public command shape, while adding
    generated help/version behavior and standardizing public parse failures to
-   exit 2.
+   exit 2, except for the explicitly removed `diff` command.
 3. Keep production backend selectors such as `native`, `native-hook`,
    `config-merge`, and `hook-plan` only in the private runtime protocol.
 4. Keep component and benchmark selectors available only through the private
@@ -247,3 +244,6 @@ Implementation must not begin until the human approves these points:
 5. Do not add compatibility aliases or new product commands in this gate.
 6. Version the private CLI/helper protocol so an incompatible caller fails
    before any privileged state change.
+
+The human approved this design on 2026-11-13 with one correction: remove
+`diff` from the public operator CLI.

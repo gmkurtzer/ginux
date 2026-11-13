@@ -81,11 +81,11 @@ runtime, fixture, helper, and backend commands out of the public interface.
 - [x] Proposed the flat public command taxonomy, exact argument shapes,
   generated help/version behavior, error policy, compatibility boundary,
   versioned private helper protocol, and internal runtime disposition.
+- [x] Received human approval of the command design on 2026-11-13 with the
+  explicit removal of public `diff`.
 
 ## Remaining work
 
-- [ ] Present the proposed public command specification and compatibility plan,
-  then stop for human design approval.
 - [ ] Implement the approved declarative public CLI and narrow internal
   protocol on this dedicated branch.
 - [ ] Add parser, help, failure, installation, and end-to-end workflow tests.
@@ -189,7 +189,10 @@ runtime, fixture, helper, and backend commands out of the public interface.
   commands or compatibility aliases are proposed.
 - Public parse errors are proposed to standardize on exit 2. Operational
   helper/runtime results retain their existing meanings. This compatibility
-  choice requires approval with the rest of the command design.
+  choice was approved with the rest of the command design.
+- Public `diff` is removed by explicit human direction. The internal
+  `instance-diff` component selector may remain only where runtime regression
+  coverage still requires it.
 - This gate has two mandatory human checkpoints: command-design approval before
   implementation and final acceptance after verified delivery.
 - Pull request 272 may harden the existing internal parser independently; this
@@ -211,6 +214,7 @@ runtime, fixture, helper, and backend commands out of the public interface.
 
 Human checkpoint gate. The implementing agent must first deliver the inventory
 and proposed command specification, then stop for human approval before
-changing the CLI. After implementation and complete verification, publish one
+changing the CLI. The human approved the design on 2026-11-13 after removing
+public `diff`. After implementation and complete verification, publish one
 dedicated pull request and stop again for final human acceptance. Technical
 passage alone does not close Gate 25.
