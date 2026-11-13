@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Check `ginux native` supervision edges with a fixture as /usr/bin/bash (Linux/root)."""
 import os
+import resource
 from pathlib import Path
 import shutil
 import subprocess
@@ -42,7 +43,7 @@ sys_read = ["/"]
             (root / "scenario").write_text(scenario)
             proc = subprocess.run([str(work / "ginux"), "native", str(instance), str(root)]
                                   + (["configured"] if instance == configured else []),
-                                  stdin=stdin, stdout=stdout, stderr=stderr, timeout=20, **options)
+                                  stdin=stdin, stdout=stdout, stderr=stderr, timeout=30, **options)
             # Audit records and fixture output have separate writers. Merge
             # only after capture so a concurrent audit fragment cannot prefix
             # an otherwise complete fixture line.
@@ -209,6 +210,28 @@ sys_read = ["/"]
             "GINUX_FIXTURE: pidfd-open-ok=1", "GINUX_FIXTURE: pidfd-info=-25",
             "GINUX_FIXTURE: pidfd-info-high=-25", "GINUX_FIXTURE: pidfd-info-invalid=-25",
             "GINUX_FIXTURE: unrelated-ioctl=-9", "GINUX_FIXTURE: wait-ok=1"], code, out)
+        # systemd reaps with waitid; each reaped child must free its slot.
+        code, out = run("many-reap", configured)
+        fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
+        check("waitid releases reaped children", code == 0 and fixture == [
+            "GINUX_FIXTURE: waitid-peek=0", "GINUX_FIXTURE: waitid-after-peek=0",
+            "GINUX_FIXTURE: waitid-reaped=200"], code, out)
+        code, out = run("null-wait", configured,
+                        preexec_fn=lambda: resource.setrlimit(resource.RLIMIT_NOFILE, (512, 512)))
+        fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
+        check("null-siginfo waitid and private pin reuse", code == 0 and fixture == [
+            "GINUX_FIXTURE: null-nohang=0", "GINUX_FIXTURE: null-peek=0",
+            "GINUX_FIXTURE: null-selector-preserved=1",
+            "GINUX_FIXTURE: null-after-peek=0", "GINUX_FIXTURE: null-rewait=-10",
+            "GINUX_FIXTURE: null-invalid-options=-22", "GINUX_FIXTURE: null-rusage-fault=-14",
+            "GINUX_FIXTURE: fault-rewait=-10", "GINUX_FIXTURE: null-reaped=800"], code, out)
+        denied = work / "denied-waitid.toml"
+        denied.write_text(configured.read_text().replace('allow = ["*"]\ndeny = []',
+                                                       'allow = ["*"]\ndeny = ["waitid"]'))
+        code, out = run("zero-effects", denied)
+        fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
+        check("denied waitid preserves caller registers", code == 0 and fixture == [
+            "GINUX_FIXTURE: denied-waitid=-1", "GINUX_FIXTURE: denied-selector-preserved=1"], code, out)
     print("test-native-supervision: PASS")
 
 

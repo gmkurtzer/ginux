@@ -3383,6 +3383,7 @@ fn native_tracee_setup_fail(code: usize) -> ! {
 struct NativeSupervisorTask {
     host_pid: usize,
     clone_call: native_clone::Pending,
+    lifetime_pidfd: isize,
     virtual_id: TaskId,
     start_ticks: u64,
     awaiting_exit: bool,
@@ -3415,6 +3416,7 @@ struct NativeSupervisorTask {
     translated_rdi: u64,
     wait_status: u64,
     waitid_info: u64,
+    waitid_selector: u64,
     initial_stop_pending: bool,
     initial_exec_pending: bool,
     job_stop_pending: bool,
@@ -3975,6 +3977,25 @@ fn native_default_limits() -> [[u64; 2]; 16] {
     limits[7] = [4096, 4096];
     limits[8] = [64 * 1024, 64 * 1024];
     limits
+}
+
+fn native_pidfd_reaped(fd: isize) -> Option<bool> {
+    #[repr(C)]
+    struct PollFd {
+        fd: i32,
+        events: i16,
+        revents: i16,
+    }
+    let mut descriptor = PollFd {
+        fd: fd as i32,
+        events: 1,
+        revents: 0,
+    };
+    let result = unsafe { syscall3(7, &mut descriptor as *mut _ as usize, 1, 0) };
+    if result < 0 || descriptor.revents & 32 != 0 {
+        return None;
+    }
+    Some(descriptor.revents & 16 != 0)
 }
 
 fn native_pidfd_host_target(caller_host_pid: usize, fd: usize) -> Option<usize> {
@@ -5621,6 +5642,7 @@ fn supervise_native(
     tasks[0] = Some(NativeSupervisorTask {
         host_pid: pid,
         clone_call: native_clone::Pending::empty(),
+        lifetime_pidfd: -1,
         virtual_id: root_virtual,
         start_ticks: 0,
         awaiting_exit: false,
@@ -5653,6 +5675,7 @@ fn supervise_native(
         translated_rdi: 0,
         wait_status: 0,
         waitid_info: 0,
+        waitid_selector: 0,
         initial_stop_pending: false,
         initial_exec_pending: true,
         job_stop_pending: false,
@@ -5824,6 +5847,17 @@ fn supervise_native(
             let pending_child_slot = pending_child_stops
                 .iter()
                 .position(|child| *child == child_host_pid);
+            // Pin this exact host task before it can leave its initial stop.
+            // POLLHUP distinguishes final reaping from an exited zombie and
+            // remains meaningful even if the numeric host PID is reused.
+            let mut lifetime_pidfd = unsafe { syscall2(SYS_PIDFD_OPEN, child_host_pid, 0) };
+            // A non-leader thread is not waitid-reapable and older pidfd
+            // ABIs cannot open it. Preserve that existing thread lane.
+            if event == PTRACE_EVENT_CLONE && matches!(lifetime_pidfd, -22 | -3) {
+                lifetime_pidfd = -1;
+            } else if lifetime_pidfd < 0 {
+                native_fail(instance, pid, b"native child lifetime pin failed");
+            }
             tasks[child_slot] = Some(NativeSupervisorTask {
                 host_pid: child_host_pid,
                 clone_call: if task.clone_call.phase == native_clone::Phase::Call {
@@ -5831,6 +5865,7 @@ fn supervise_native(
                 } else {
                     native_clone::Pending::empty()
                 },
+                lifetime_pidfd,
                 virtual_id: child_virtual,
                 start_ticks: child_start_ticks,
                 awaiting_exit: false,
@@ -5863,6 +5898,7 @@ fn supervise_native(
                 translated_rdi: 0,
                 wait_status: 0,
                 waitid_info: 0,
+                waitid_selector: 0,
                 initial_stop_pending: pending_child_slot.is_none(),
                 initial_exec_pending: false,
                 job_stop_pending: false,
@@ -6268,6 +6304,43 @@ fn supervise_native(
                     }
                 }
             }
+            if task.syscall == 247 {
+                for slot in 0..tasks.len() {
+                    let Some(child) = tasks[slot] else {
+                        continue;
+                    };
+                    if child.tracing || child.lifetime_pidfd < 0 {
+                        continue;
+                    }
+                    let state = native_pidfd_reaped(child.lifetime_pidfd).unwrap_or_else(|| {
+                        native_fail(instance, pid, b"native child lifetime check failed")
+                    });
+                    if !state {
+                        continue;
+                    }
+                    let parent = processes
+                        .view(child.virtual_id)
+                        .ok()
+                        .and_then(|view| {
+                            tasks
+                                .iter()
+                                .flatten()
+                                .find(|candidate| candidate.virtual_id.pid == view.parent)
+                        })
+                        .map(|parent| parent.virtual_id)
+                        .unwrap_or_else(|| {
+                            native_fail(instance, pid, b"native waitid parent unknown")
+                        });
+                    if processes
+                        .wait(parent, WaitTarget::Specific(child.virtual_id.pid), 0)
+                        .is_err()
+                    {
+                        native_fail(instance, pid, b"native virtual waitid result invalid");
+                    }
+                    let _ = unsafe { syscall1(SYS_CLOSE_HOST, child.lifetime_pidfd as usize) };
+                    tasks[slot] = None;
+                }
+            }
             if task.syscall == 61 && registers.rax as i64 > 0 {
                 let waited_host = registers.rax as usize;
                 let Some(waited_task) = tasks
@@ -6304,8 +6377,22 @@ fn supervise_native(
                     if let Some(waited_slot) = tasks.iter_mut().find(|candidate| {
                         candidate.is_some_and(|candidate| candidate.host_pid == waited_host)
                     }) {
+                        if waited_task.lifetime_pidfd >= 0 {
+                            let _ = unsafe {
+                                syscall1(SYS_CLOSE_HOST, waited_task.lifetime_pidfd as usize)
+                            };
+                        }
                         *waited_slot = None;
                     }
+                }
+            }
+            if task.syscall == 247 {
+                // P_PID translates RSI internally; return its original ABI
+                // value even on errors/restarts, rather than a host PID.
+                registers.rsi = task.waitid_selector;
+                if !task.override_exit {
+                    task.override_exit = true;
+                    task.override_result = registers.rax as i64;
                 }
             }
             if task.translated_rdi != 0 {
@@ -6574,6 +6661,9 @@ fn supervise_native(
             if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0 {
                 native_fail(instance, pid, b"native getrandom clamp failed");
             }
+        }
+        if syscall == 247 {
+            task.waitid_selector = registers.rsi;
         }
         let shared_network =
             mode == 3 && instance.config().network_backend == NetworkBackend::Shared;

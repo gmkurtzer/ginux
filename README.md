@@ -547,3 +547,13 @@ allocation errors propagate. Death during the private protocol fails the
 instance closed so a shared address space cannot retain a stale snapshot.
 Snapshot capture requires host `process_vm_readv`; it fails closed if the host
 cannot provide it.
+
+Configured native waitid supports a null siginfo pointer without retaining
+reaped child slots. Ginux pins each waitable host child with a private pidfd
+before it runs and uses final-reap readiness (POLLHUP) to reconcile its
+process table. The host waitid call, selectors, options, rusage and errno
+semantics remain in force, including WNOHANG, WNOWAIT and copy-out failures.
+Exited zombies and stopped/continued children are not treated as reaped.
+Private pins close when waitid or wait4 reclaims the child; they do not change
+the instance-visible descriptor budget. The native host must support pidfd
+final-reap readiness, as in the Linux 6.12 ABI used for this contract.

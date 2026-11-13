@@ -433,6 +433,77 @@ long native_fixture_main(void)
         print_result("GINUX_FIXTURE: wait-ok=", call4(61, pid, (word)&status, 0, 0) == pid);
         return 0;
     }
+    case 'm': {
+        /* Children reaped by waitid release their process slots: more children
+         * than the native process table holds, one at a time. A WNOWAIT peek
+         * first must leave the child to be reaped. */
+        struct { int signo, error, code, pad, pid, uid, status, rest[25]; } info = {0};
+        long reaped = 0;
+        long pid = call3(57, 0, 0, 0);
+        if (pid == 0) return 0;
+        print_result("GINUX_FIXTURE: waitid-peek=", call5(247, 1, pid, (word)&info, 0x01000004, 0));
+        print_result("GINUX_FIXTURE: waitid-after-peek=", call5(247, 1, pid, (word)&info, 4, 0));
+        for (int round = 0; round < 200; ++round) {
+            pid = call3(57, 0, 0, 0);
+            if (pid == 0) return 0;
+            if (pid < 0 || call5(247, 1, pid, (word)&info, 4, 0) != 0) break;
+            ++reaped;
+        }
+        print_result("GINUX_FIXTURE: waitid-reaped=", reaped);
+        return 0;
+    }
+    case 'n': {
+        int status = 0, fds[2];
+        struct { int signo, error, code, pad, pid, uid, status, rest[25]; } info = {0};
+        if (call3(293, (word)fds, 0, 0) < 0) return 83;
+        long pid = call3(57, 0, 0, 0);
+        if (pid == 0) { char go; call3(0, fds[0], (word)&go, 1); return 7; }
+        print_result("GINUX_FIXTURE: null-nohang=", call5(247, 1, pid, 0, 5, 0));
+        call3(1, fds[1], (word)"g", 1);
+        word selected = pid;
+        long result;
+        register word r10 __asm__("r10") = 0x01000004;
+        register word r8 __asm__("r8") = 0;
+        __asm__ volatile("syscall" : "=a"(result), "+S"(selected)
+                         : "a"(247L), "D"(1L), "d"(0L), "r"(r10), "r"(r8)
+                         : "rcx", "r11", "memory");
+        print_result("GINUX_FIXTURE: null-peek=", result);
+        print_result("GINUX_FIXTURE: null-selector-preserved=", selected == (word)pid);
+        print_result("GINUX_FIXTURE: null-after-peek=", call5(247, 1, pid, 0, 4, 0));
+        print_result("GINUX_FIXTURE: null-rewait=", call4(61, pid, (word)&status, 0, 0));
+        pid = call3(57, 0, 0, 0);
+        if (pid == 0) return 7;
+        print_result("GINUX_FIXTURE: null-invalid-options=", call5(247, 1, pid, 0, 0x84, 0));
+        print_result("GINUX_FIXTURE: null-rusage-fault=", call5(247, 1, pid, 0, 4, 1));
+        print_result("GINUX_FIXTURE: fault-rewait=", call4(61, pid, (word)&status, 0, 0));
+        long reaped = 0;
+        for (int round = 0; round < 800; ++round) {
+            pid = call3(57, 0, 0, 0);
+            if (pid == 0) return 7;
+            long pidfd = round % 3 == 2 ? call3(434, pid, 0, 0) : -1;
+            long which = round % 3 == 0 ? 1 : round % 3 == 1 ? 0 : 3;
+            long selected = which == 1 ? pid : which == 3 ? pidfd : 0;
+            if (round % 20 == 0 && call5(247, which, selected, (word)&info, 0x01000004, 0) != 0) return 84;
+            word usage[18] = {0};
+            if (pid < 0 || call5(247, which, selected, 0, 4, (word)usage) != 0) break;
+            if (pidfd >= 0) call3(3, pidfd, 0, 0);
+            ++reaped;
+        }
+        print_result("GINUX_FIXTURE: null-reaped=", reaped);
+        return 0;
+    }
+    case 'z': {
+        word selected = 0xfeed000000000007UL;
+        long result;
+        register word r10 __asm__("r10") = 4;
+        register word r8 __asm__("r8") = 0;
+        __asm__ volatile("syscall" : "=a"(result), "+S"(selected)
+                         : "a"(247L), "D"(1L), "d"(0L), "r"(r10), "r"(r8)
+                         : "rcx", "r11", "memory");
+        print_result("GINUX_FIXTURE: denied-waitid=", result);
+        print_result("GINUX_FIXTURE: denied-selector-preserved=", selected == 0xfeed000000000007UL);
+        return 0;
+    }
     default:
         return 81;
     }
