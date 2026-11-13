@@ -6315,6 +6315,7 @@ fn supervise_native(
 
         if !seccomp_entry && task.awaiting_exit {
             use native_clone::Phase;
+            let mut reissued = false;
             match task.clone_call.phase {
                 Phase::Map if registers.rax as i64 >= 0 => {
                     task.clone_call
@@ -6354,7 +6355,7 @@ fn supervise_native(
                     } else if registers.rax as i64 != 0 {
                         native_fail(instance, pid, b"native clone snapshot cleanup failed");
                     }
-                    task.clone_call.restore(&mut registers);
+                    reissued = task.clone_call.restore(&mut registers);
                     task.override_exit = true;
                     task.override_result = registers.rax as i64;
                 }
@@ -6517,7 +6518,13 @@ fn supervise_native(
             write_all(b" contract=");
             write_all(contract.digest());
             write_all(b" phase=exit result=");
-            write_i64(registers.rax as i64);
+            // A reissued clone3 has its number back in RAX; record what the
+            // kernel returned for the abandoned attempt.
+            write_i64(if reissued {
+                task.clone_call.result
+            } else {
+                registers.rax as i64
+            });
             write_all(b"\n");
             if task.pending_console_open {
                 task.console_fd = registers.rax as i64;
