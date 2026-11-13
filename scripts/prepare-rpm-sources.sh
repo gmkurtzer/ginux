@@ -20,11 +20,12 @@ install -d -m 755 "$sources" "$specs" "$work"
 git archive --format=tar --prefix="ginux-$version/" HEAD | gzip -n > \
     "$sources/ginux-$version.tar.gz"
 cargo vendor --quiet --locked "$work/vendor" >/dev/null
-COPYFILE_DISABLE=1 tar -C "$work" -cf - vendor | gzip -n > \
+COPYFILE_DISABLE=1 tar --no-xattrs -C "$work" -cf - vendor | gzip -n > \
     "$sources/ginux-$version-vendor.tar.gz"
 sed "s/@VERSION@/$version/g" packaging/rpm/ginux.spec.in > \
     "$specs/ginux.spec"
 install -m 644 packaging/rpm/ginux.tmpfiles "$sources/ginux.tmpfiles"
+install -m 644 packaging/rpm/ginux.rpmlintrc "$sources/ginux.rpmlintrc"
 (
     cd "$sources"
     sha256sum * >SHA256SUMS

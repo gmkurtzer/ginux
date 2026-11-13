@@ -7,6 +7,7 @@ URL:            https://github.com/gmkurtzer/ginux
 Source0:        %{name}-%{version}.tar.gz
 Source1:        %{name}-%{version}-vendor.tar.gz
 Source2:        ginux.tmpfiles
+Source3:        ginux.rpmlintrc
 
 BuildRequires:  cargo
 BuildRequires:  rust >= 1.85
@@ -31,7 +32,7 @@ Requires:       util-linux
 Ginux is a configurable userspace kernel that runs isolated Linux
 compatibility instances under explicit, versioned kernel-interface contracts.
 This package contains the public operator CLI, private runtime and image
-materializer, privileged helper, and complete example instance recipes.
+preparation tool, privileged helper, and complete example instance recipes.
 
 %prep
 %autosetup -a 1

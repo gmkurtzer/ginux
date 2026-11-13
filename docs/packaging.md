@@ -1,7 +1,7 @@
 # Rocky Linux RPM packaging
 
 Ginux ships as one x86-64 RPM for Rocky Linux 10. The package contains the
-public CLI, the private runtime, image materializer and privileged helper, and
+public CLI, the private runtime, image preparation tool and privileged helper, and
 complete example recipes. It does not pull an image, create an instance, start
 a service, add sudo policy, or change SELinux or firewall policy at install
 time.
@@ -18,9 +18,11 @@ make test-rpm-metadata
 
 `make rpm-source` creates a versioned source archive and a separate vendored
 Rust dependency archive under `build/rpm/SOURCES/`. Network access is allowed
-only for this explicit preparation step. `make rpm` performs `rpmbuild -ba`
-without network access. On macOS it uses the repository's Rocky Linux 10 QEMU
-builder and copies the resulting artifacts back to:
+only for this explicit preparation step and for installing declared builder
+packages. `make rpm` gives Cargo only the vendored source tree and performs
+`rpmbuild -ba` in offline mode. On macOS it uses the repository's Rocky Linux
+10 QEMU builder, runs `rpmlint` on both artifacts, and copies the results back
+to:
 
 ```text
 build/rpm/RPMS/x86_64/
@@ -70,6 +72,13 @@ no Ginux processes remain, then remove `/var/lib/ginux` explicitly. This is an
 operator action and is never performed by the RPM.
 
 Run the complete clean Rocky package lifecycle test with `make test-rpm`.
+
+`rpmlint` intentionally suppresses only its static-binary error for
+`ginux-runtime`: that freestanding `no_std` program enters the instance root
+and cannot depend on host shared libraries. Its remaining warnings document
+intentional tmpfiles-managed persistent state, local source archives, and the
+current absence of a generated manual page and RPM `%check` phase; the package
+has separate metadata, lifecycle, and repository regression tests.
 
 ## Initial limitations
 
