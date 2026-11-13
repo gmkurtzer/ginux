@@ -113,6 +113,10 @@ replace it.
 19. **Readable instance recipes and hooks**: support self-contained multiline
     pre-boot scripts, remove the controller's Rocky-only OCI restriction, and
     provide validated Rocky, Ubuntu CMS, and Alpine native-boot recipes.
+25. **Declarative operator CLI and internal command boundary**: inventory and
+    re-evaluate every command, obtain human approval of the public taxonomy,
+    replace hand-written public parsing with a Cobra-like Rust command
+    framework, and keep runtime/backend commands out of the operator surface.
 
 Gates are stored in `hdae/gates-todo/` and remain there until they pass and are
 accepted at their checkpoint. Closed gate records move unchanged to
@@ -182,6 +186,8 @@ define their expected result.
 - Device mediation is built and measured by Gates 6, 10, 11, and 13.
 - Performance is measured from Gate 1 and judged in Gates 9, 11, and 13.
 - Cross-instance authority and lifecycle isolation are proven by Gate 17.
+- Operator CLI coherence, discoverability, and the public/internal command
+  boundary are established by Gates 12.25 and 25.
 - Reproducibility and offline testing are established by Gates 1 and 2 and
   remain regression criteria for every later gate.
 
