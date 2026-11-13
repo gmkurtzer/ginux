@@ -424,9 +424,11 @@ On x86-64 Linux, `ginux launch <config> <root> [--result-file <fresh host path>]
 executes `[instance].init` with the configured arguments and environment inside
 the supplied host root directory. The bootstrap requires chroot and credential
 change privileges, and a kernel with `close_range` (Linux 5.9 or later).
-It drops to UID/GID 1000 before executing the workload. The configuration must
-select `profile = "balanced"` and `backend = "ptrace-native"`; storage and device
-assignments are not implemented by this command and are rejected.
+Started as root, it drops to host UID/GID 65534 before executing the workload;
+started as another user, the workload keeps that user's UID/GID. The
+configuration must select `profile = "balanced"` and
+`backend = "ptrace-native"`; storage and device assignments are not
+implemented by this command and are rejected.
 
 `[instance].workdir` is optional and defaults to `/work`; `/` is also supported.
 The bootstrap creates the working directory if its parent exists, then enters

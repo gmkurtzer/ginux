@@ -20,7 +20,7 @@ rocky_ssh "set -eu; sudo rm -rf /var/lib/ginux/instances/gate5; sudo mkdir -p '$
 
 rocky_ssh "sudo /var/tmp/ginux native /var/tmp/gate5.toml '$instance_root'" > "$native_log" 2>&1
 grep -Fqx 'GINUX_NATIVE: backend=ptrace-native profile=balanced elf-loader=host contract=self-contained-v1' "$native_log"
-grep -Fqx 'GINUX_NATIVE: tracee-uid=1000 tracee-gid=1000 root=oci-read-only' "$native_log"
+grep -Fqx 'GINUX_NATIVE: tracee-uid=65534 tracee-gid=65534 root=oci-read-only' "$native_log"
 grep -Fqx 'GINUX_NATIVE_AUTHORITY: supervisor-uid=65534 supervisor-gid=65534 capabilities=none no-new-privileges=1 inherited-fds=bounded root=instance-only' "$native_log"
 grep -Fqx 'GINUX_NATIVE_SHELL: PASS' "$native_log"
 grep -Fqx 'GINUX_NATIVE: supervisor=attached dispatch=paranoid direct-safe-syscalls=0' "$native_log"
