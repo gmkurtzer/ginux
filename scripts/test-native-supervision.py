@@ -180,6 +180,18 @@ sys_read = ["/"]
             "GINUX_FIXTURE: waitid-not-pidfd=-9", "GINUX_FIXTURE: waitid-invalid=-9",
             "GINUX_FIXTURE: waitid-high=0", "GINUX_FIXTURE: waitid=0",
             "GINUX_FIXTURE: waited-child=1", "GINUX_FIXTURE: child-status=7"], code, out)
+        # Early denials must finish their audit record: an unfinished record
+        # keeps the audit lock, and the next audited syscall deadlocks (the
+        # run then hits the 30 second timeout).
+        code, out = run("bad-selectors", configured)
+        fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
+        check("early denials finish their audit records", code == 0 and fixture == [
+            "GINUX_FIXTURE: pidfd-open-unknown=-3", "GINUX_FIXTURE: waitid-unknown-pid=-1",
+            "GINUX_FIXTURE: waitid-bad-type=-1", "GINUX_FIXTURE: getpid-after=1"]
+              and out.count("deny result=-3 reason=unknown-process\n") == 1
+              and out.count("deny result=-1 reason=unknown-process\n") == 1
+              and out.count("deny result=-1 reason=unsupported-wait-id-type\n") == 1,
+              code, out)
         # glibc 2.41+ posix_spawn starts children with clone3 CLONE_INTO_CGROUP.
         (root / "sys/fs/cgroup").mkdir(parents=True, exist_ok=True)
         code, out = run("cgroup-clone3", configured)

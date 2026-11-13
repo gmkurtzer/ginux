@@ -9514,6 +9514,9 @@ fn supervise_native(
                         task.awaiting_exit = true;
                         task.override_exit = true;
                         task.override_result = -3;
+                        // Finish the record before the early continue: the
+                        // audit lock is released by its newline.
+                        write_all(b"deny result=-3 reason=unknown-process\n");
                         registers.orig_rax = u64::MAX;
                         tasks[task_index] = Some(task);
                         if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
@@ -9571,6 +9574,11 @@ fn supervise_native(
                             task.awaiting_exit = true;
                             task.override_exit = true;
                             task.override_result = -EPERM;
+                            // Finish the record before the early continue: the
+                            // audit lock is released by its newline.
+                            write_all(b"deny result=-");
+                            write_u64(EPERM as u64);
+                            write_all(b" reason=unknown-process\n");
                             registers.orig_rax = u64::MAX;
                             tasks[task_index] = Some(task);
                             if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize)
@@ -9631,6 +9639,11 @@ fn supervise_native(
                         task.awaiting_exit = true;
                         task.override_exit = true;
                         task.override_result = -EPERM;
+                        // Finish the record before the early continue: the
+                        // audit lock is released by its newline.
+                        write_all(b"deny result=-");
+                        write_u64(EPERM as u64);
+                        write_all(b" reason=unsupported-wait-id-type\n");
                         registers.orig_rax = u64::MAX;
                         tasks[task_index] = Some(task);
                         if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
