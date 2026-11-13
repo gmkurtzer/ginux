@@ -58,7 +58,7 @@ def main():
     if len(sys.argv) not in (4, 5):
         sys.exit("usage: test-process-native.py <ginux> <fixture directory> <legacy fixture> [scenario]")
     binary, fixtures, legacy = (str(Path(arg).resolve()) for arg in sys.argv[1:4])
-    config = Path(__file__).resolve().parent.parent / "config/domain-gate7.toml"
+    config = Path(__file__).resolve().parent.parent / "config/instance-gate7.toml"
     def wait_fault(status):
         # wait4 fails with EFAULT after reaping the child, whether it had
         # exited (nohang) or the wait blocked; a writable status is stored

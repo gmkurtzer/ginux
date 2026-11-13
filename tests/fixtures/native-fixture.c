@@ -1,6 +1,6 @@
 /* Freestanding x86-64 workload installed as /usr/bin/bash for `ginux native`
  * supervision checks. `native` always runs bash with fixed arguments, so the
- * scenario is read from /scenario in the domain root. */
+ * scenario is read from /scenario in the instance root. */
 typedef unsigned long word;
 
 static long call3(long number, word a, word b, word c)
@@ -99,6 +99,33 @@ long native_fixture_main(void)
         print_result("GINUX_FIXTURE: futex_lock_pi_flags=",
                      call4(202, (word)&pi_flags_word, 6 | 128 | 1024, 0, 0));
         print_result("GINUX_FIXTURE: pi_flags_word=", pi_flags_word);
+        return 0;
+    }
+    case 'y': {
+        unsigned char info[112];
+        for (word i = 0; i < sizeof info; ++i) info[i] = 0xaa;
+        long result = call3(99, (word)info, 0, 0);
+        word zero = 1;
+        for (word i = 0; i < sizeof info; ++i) {
+            if (i < 104 || i >= 108) zero &= info[i] == 0;
+        }
+        print_result("GINUX_FIXTURE: sysinfo=", result);
+        print_result("GINUX_FIXTURE: sysinfo-zero=", zero);
+        print_result("GINUX_FIXTURE: mem-unit=", *(unsigned int *)(info + 104));
+        print_result("GINUX_FIXTURE: sysinfo-null=", call3(99, 0, 0, 0));
+        return 0;
+    }
+    case 'o': {
+        static char input[1024 * 1024 + 1];
+        long input_fd = call3(2, (word)"/large", 0, 0);
+        if (input_fd < 0) return 82;
+        print_result("GINUX_FIXTURE: read=", call3(0, input_fd, (word)input, sizeof input));
+        print_result("GINUX_FIXTURE: pread=", call4(17, input_fd, (word)input, sizeof input, 0));
+        return 0;
+    }
+    case 'r': {
+        static char random[512];
+        print_result("GINUX_FIXTURE: getrandom=", call3(318, (word)random, sizeof random, 0));
         return 0;
     }
     default:

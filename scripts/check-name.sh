@@ -19,8 +19,8 @@ found=$(rg -n \
     --glob '!.artifacts/**' \
     --glob '!.git/**' \
     --glob '!hdae/gates-done/**' \
-    --glob '!hdae/gates-todo/7.5-ginux-us-rename.md' \
-    --glob '!hdae/gates-todo/7.75-ginux-rename.md' \
+    --glob '!hdae/gates-done/7.5-ginux-us-rename.md' \
+    --glob '!hdae/gates-done/7.75-ginux-rename.md' \
     --glob '!scripts/check-name.sh' \
     "$pattern" .)
 status=$?
@@ -49,7 +49,7 @@ all_paths=$(find . \
     -path './target' -prune -o \
     -path './.artifacts' -prune -o \
     -path './hdae/gates-done' -prune -o \
-    -path './hdae/gates-todo/7.5-ginux-us-rename.md' -prune -o \
+    -path './hdae/gates-done/7.5-ginux-us-rename.md' -prune -o \
     -print)
 status=$?
 if [ "$status" -ne 0 ]; then

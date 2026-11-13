@@ -1,0 +1,136 @@
+schema_version = 1
+
+[instance]
+id = "rocky"
+root = "docker.io/rockylinux/rockylinux@sha256:7a18ce2c9c1e0d8735f3e72685f9666150af25036e7f7b5ee4eede3754496f8c"
+init = "/sbin/init"
+args = ["--system", "--unit=multi-user.target"]
+environment = ["container=ginux"]
+
+[identity]
+hostname = "ginux"
+
+[resources]
+vcpus = 2
+memory_mib = 1024
+
+[execution]
+profile = "balanced"
+backend = "ptrace-native"
+
+[contract]
+version = 1
+catalog = 2
+default = "deny"
+allow = ["*"]
+deny = ["device.mmio.direct", "device.dma.direct", "network.packet.raw"]
+
+[contract.syscalls]
+control = "selective"
+default = "deny"
+allow = ["*"]
+deny = []
+
+[contract.filesystem]
+default = "deny"
+read = ["/"]
+write = ["/"]
+create = ["/"]
+# A directory rule applies to the directory and all descendants, but not a
+# neighboring prefix such as /ginux-demo/read-only-other.
+deny = ["/ginux-demo/read-only"]
+
+[contract.network]
+default = "deny"
+inbound = ["tcp:*", "udp:*"]
+outbound = ["tcp:*", "udp:*"]
+
+[contract.devices]
+default = "deny"
+read = ["/dev/console", "/dev/tty", "/dev/null", "/dev/zero", "/dev/random", "/dev/urandom"]
+write = ["/dev/console", "/dev/tty", "/dev/null", "/dev/zero", "/dev/random", "/dev/urandom"]
+create = []
+
+[contract.privileges]
+default = "deny"
+setuid = []
+setgid = []
+
+[contract.process]
+default = "deny"
+max_processes = 4096
+max_threads = 4096
+signals = ["*"]
+ptrace = "deny"
+namespace_create = []
+namespace_join = []
+
+[contract.kernel]
+default = "deny"
+proc_read = ["/"]
+proc_write = []
+sys_read = ["/"]
+sys_write = []
+
+[storage]
+assignments = ["root-overlay"]
+
+[devices]
+assignments = ["console", "null", "zero", "random", "net0"]
+
+[network]
+backend = "shared"
+
+[hooks]
+# Pre-boot commands run inside the mediated instance root before the final
+# filesystem restrictions activate.
+# CHANGEME: this example sets the development root password to "ginux".
+# Replace it before using this recipe outside a local test environment.
+# The remaining hooks create policy test paths and adapt the minimal Rocky
+# image for systemd.
+pre_boot = [
+  "/usr/bin/cp --remove-destination /usr/share/zoneinfo/UTC /etc/localtime",
+  """
+  /usr/bin/awk -F: -v OFS=: -v h='$6$ginux$5fZDUU2yskfStn1c0m2HsJ06zu3nvK7qFBLD476WxfLLpR6BrDTmG6qNrx0C./uhKIKvTQgrHwXxjSXdyBnBo0' '{if ($1 == "root") $2=h; print}' /etc/shadow > /etc/.shadow.ginux
+  /usr/bin/cat /etc/.shadow.ginux > /etc/shadow
+  /usr/bin/rm -f /etc/.shadow.ginux
+  /usr/bin/awk -F: '$1 == "root" && $2 != "" {found=1} END {exit !found}' /etc/shadow
+  """,
+  """
+  /usr/bin/mkdir -p /ginux-demo/read-only/child /ginux-demo/writable /ginux-demo/read-only-other
+  /usr/bin/printf protected > /ginux-demo/read-only/child/value
+  /usr/bin/printf writable > /ginux-demo/writable/value
+  """,
+  """
+  /usr/bin/sh -c 'for u in dbus-broker.service dbus.service dbus.socket modprobe@.service systemd-userdbd.service systemd-userdbd.socket; do
+    rm -f /etc/systemd/system/$u
+    mkdir -p /etc/systemd/system/$u.d
+    printf "[Unit]\nConditionPathExists=/run/ginux-enable-optional-service\n" > /etc/systemd/system/$u.d/90-ginux-minimal-image.conf
+  done'
+  """,
+  """
+  /usr/bin/rm -f /usr/lib/systemd/system/sysinit.target.wants/systemd-update-utmp.service
+  /usr/bin/rm -f /usr/lib/systemd/system/graphical.target.wants/systemd-update-utmp-runlevel.service
+  /usr/bin/rm -f /usr/lib/systemd/system/multi-user.target.wants/systemd-update-utmp-runlevel.service
+  /usr/bin/rm -f /usr/lib/systemd/system/rescue.target.wants/systemd-update-utmp-runlevel.service
+  /usr/bin/rm -f /etc/systemd/system/systemd-initctl.service /etc/systemd/system/systemd-initctl.socket
+  """,
+  """
+  /usr/bin/mkdir -p /etc/systemd/system/systemd-journald.service.d
+  /usr/bin/printf '[Service]\nIPAddressDeny=\n' > /etc/systemd/system/systemd-journald.service.d/90-ginux-network.conf
+  /usr/bin/printf '[Unit]\nDescription=Keyboard Request Target\nDefaultDependencies=no\n' > /etc/systemd/system/kbrequest.target
+  """,
+  """
+  /usr/bin/rm -f /etc/systemd/system/getty.target /etc/systemd/system/console-getty.service
+  /usr/bin/ln -sf /usr/lib/systemd/system/console-getty.service /etc/systemd/system/getty.target.wants/console-getty.service
+  /usr/bin/printf '#%%PAM-1.0\nauth required pam_unix.so\naccount required pam_unix.so\npassword required pam_unix.so\nsession required pam_unix.so\n' > /etc/pam.d/login
+  """,
+]
+timeout_seconds = 30
+failure = "stop"
+
+[audit]
+enabled = false
+
+[failure]
+policy = "stop"

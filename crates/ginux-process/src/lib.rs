@@ -1,6 +1,6 @@
 #![no_std]
 
-pub const MAX_GROUPS: usize = 8;
+pub const MAX_GROUPS: usize = 64;
 pub const MAX_SIGNAL: u8 = 64;
 pub const CAP_SYS_ADMIN: u64 = 1 << 21;
 /// SIGKILL and SIGSTOP: never blockable and never caught or ignored.
@@ -577,6 +577,55 @@ impl<const TASKS: usize> ProcessTable<TASKS> {
         }
         self.tasks[index].process_group = group;
         Ok(())
+    }
+
+    pub fn set_process_group_for(
+        &mut self,
+        caller: TaskId,
+        target_pid: u32,
+        group: u32,
+    ) -> Result<TaskId, ProcessError> {
+        let caller_index = self.index(caller)?;
+        let caller_task = self.tasks[caller_index];
+        let target_pid = if target_pid == 0 {
+            caller_task.id.pid
+        } else {
+            target_pid
+        };
+        let target_index = self
+            .tasks
+            .iter()
+            .position(|task| task.occupied && task.id.pid == target_pid)
+            .ok_or(ProcessError::InvalidTask)?;
+        let target = self.tasks[target_index];
+        if target.id != caller && target.parent != caller_task.id.pid {
+            return Err(ProcessError::PermissionDenied);
+        }
+        if target.session != caller_task.session || target.session == target.id.pid {
+            return Err(ProcessError::PermissionDenied);
+        }
+        let group = if group == 0 { target.id.pid } else { group };
+        let group_exists = group == target.id.pid
+            || self.tasks.iter().any(|task| {
+                task.occupied && task.session == target.session && task.process_group == group
+            });
+        if !group_exists {
+            return Err(ProcessError::PermissionDenied);
+        }
+        self.tasks[target_index].process_group = group;
+        Ok(target.id)
+    }
+
+    pub fn process_group_in_session(
+        &self,
+        caller: TaskId,
+        group: u32,
+    ) -> Result<bool, ProcessError> {
+        let caller = self.tasks[self.index(caller)?];
+        Ok(group != 0
+            && self.tasks.iter().any(|task| {
+                task.occupied && task.session == caller.session && task.process_group == group
+            }))
     }
 
     pub fn create_session(&mut self, id: TaskId) -> Result<u32, ProcessError> {
@@ -1599,16 +1648,37 @@ mod tests {
     }
 
     #[test]
+    fn parent_establishes_child_job_control_group() {
+        let mut table: ProcessTable<8> = ProcessTable::new();
+        let init = table.create_init(Credentials::root()).unwrap();
+        let shell = table.fork(init).unwrap();
+        let job = table.fork(shell).unwrap();
+        assert_eq!(
+            table.set_process_group_for(shell, job.pid, job.pid),
+            Ok(job)
+        );
+        assert_eq!(table.view(job).unwrap().process_group, job.pid);
+        assert_eq!(table.process_group_in_session(shell, job.pid), Ok(true));
+        assert_eq!(table.process_group_in_session(shell, 99), Ok(false));
+        assert_eq!(table.set_process_group_for(job, 0, 0), Ok(job));
+        assert_eq!(
+            table.set_process_group_for(init, job.pid, job.pid),
+            Err(ProcessError::PermissionDenied)
+        );
+    }
+
+    #[test]
     fn virtual_credentials_never_require_host_privilege() {
         let mut table: ProcessTable<4> = ProcessTable::new();
         let init = table.create_init(Credentials::root()).unwrap();
         let child = table.fork(init).unwrap();
         let credentials = table.credentials_mut(child).unwrap();
-        credentials.set_groups(&[10, 20]).unwrap();
+        let alpine_login_groups = [0, 1, 2, 3, 4, 6, 10, 11, 20, 26, 27, 28];
+        credentials.set_groups(&alpine_login_groups).unwrap();
         credentials.drop_capabilities(CAP_SYS_ADMIN);
         credentials.set_gid(1000).unwrap();
         credentials.set_uid(1000).unwrap();
-        assert_eq!(credentials.groups(), &[10, 20]);
+        assert_eq!(credentials.groups(), &alpine_login_groups);
         assert_eq!(credentials.capabilities, 0);
         assert_eq!(credentials.set_uid(0), Err(ProcessError::PermissionDenied));
     }
