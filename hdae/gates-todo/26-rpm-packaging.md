@@ -80,26 +80,34 @@ script.
   helper, image tools, and one example recipe into `/usr/local` and `/etc`.
 - [x] Drafted the initial package boundary, lifecycle behavior, and verification
   requirements.
+- [x] Obtained human approval of the package scope, paths, Rocky Linux 10
+  x86-64 target, and checkpoint policy.
+- [x] Inventoried the installed executables, dependencies, writable paths,
+  ownership, permissions, and public/private command boundary.
+- [x] Added reproducible source and vendored-dependency archives, an RPM spec,
+  tmpfiles policy, offline Cargo/rpmbuild workflow, package lint, and binary
+  RPM/SRPM construction in a Rocky Linux 10 QEMU builder.
+- [x] Replaced the installed shell OCI pipeline with compiled Rust acquisition,
+  digest verification, content-addressed layer caching, OCI whiteout handling,
+  and direct atomic expansion into each instance root.
+- [x] Migrated production defaults and the development-host installer to the
+  packaged `/usr`, `/var/lib/ginux`, and `/run/ginux` layout without exposing
+  private commands through the public CLI or `PATH`.
+- [x] Added deterministic metadata, content, dependency, permission, clean
+  install, functional lifecycle, offline cache reuse, reinstall, erase-state
+  retention, and reinstall-recovery tests.
+- [x] Added distribution-prefixed Rocky, Ubuntu, and Alpine example recipes and
+  documented package build, installation, verification, upgrade, removal,
+  retained state, and deliberate purge behavior.
+- [x] Ran the complete package and existing regression matrix and recorded fresh
+  evidence below.
 
 ## Remaining work
 
-- [ ] Obtain human approval of the package scope, paths, platform target, and
-  checkpoint policy after Gate 25 is accepted.
-- [ ] Inventory every installed file, executable interpreter, shared-library
-  dependency, external command, writable path, and ownership/mode requirement.
-- [ ] Implement the source archive, vendored dependency, spec, tmpfiles, and
-  package build workflow.
-- [ ] Replace the installed shell OCI pipeline with compiled Rust acquisition
-  and direct layer-to-instance-root assembly.
-- [ ] Migrate production path defaults and the development installer to one
-  authoritative layout without exposing private executables.
-- [ ] Add package metadata, contents, permission, and dependency tests.
-- [ ] Add clean install, package verification, reinstall/upgrade, functional
-  instance workflow, erase, and persistent-state tests on Rocky Linux 10.
-- [ ] Update user and maintainer documentation.
-- [ ] Run all criterion-mapped verification and record fresh evidence.
-- [ ] Push the dedicated branch, publish one pull request, and stop for human
-  acceptance.
+- [ ] Obtain explicit authorization to push the dedicated branch and publish
+  its pull request.
+- [ ] Stop for human review and acceptance; technical passage does not close
+  this checkpoint gate.
 
 ## Acceptance criteria
 
@@ -183,6 +191,29 @@ script.
 - Gate 25 pull request https://github.com/gmkurtzer/ginux/pull/273 -> supplies
   the compiled public CLI and explicit public/private executable boundary that
   packaging will consume after acceptance.
+- `make rpm` -> produced
+  `build/rpm/RPMS/x86_64/ginux-0.1.0-1.el10.x86_64.rpm` and
+  `build/rpm/SRPMS/ginux-0.1.0-1.el10.src.rpm` through offline Cargo and
+  rpmbuild; rpmlint reported 0 errors, 14 reviewed warnings, 12 filtered
+  findings, and 0 badness.
+- `./scripts/test-rpm-metadata.sh` -> passed NEVRA, architecture, license,
+  source, dependency, script, mode, ownership, canonical-path, example-name,
+  and prohibited-payload checks.
+- `./scripts/test-rpm.sh` -> passed on a clean Rocky Linux 10 x86-64 QEMU host:
+  DNF install, `rpm -V`, version/help/recipe validation, online Alpine import,
+  start/status/stop, network-isolated cached import/start/stop, reinstall,
+  erase with retained cache and instances, and reinstall recovery.
+- `make check test-cli test-unit` and `make test-contract` -> passed static,
+  generated-help, unit, contract, and configuration regressions.
+- `make test-systemd` -> passed the complete Rocky systemd compatibility matrix
+  after direct runtime launch was corrected to create transient state safely.
+- `make test-security test` -> passed the complete security and aggregate QEMU
+  regression matrix, including interception, runtime, instance, device,
+  process, virtual-kernel-view, and prior-gate checks.
+- `make demo-gate-26` -> rebuilt the RPM and SRPM, repeated metadata and clean
+  lifecycle verification, displayed package metadata and contents, and
+  reported `GATE26_DEMO: PASS` for offline build, install, verification, cache
+  reuse, erase-state retention, and reinstall.
 
 ## Decisions and limitations
 
@@ -202,6 +233,21 @@ script.
   Ginux functions. Existing host administrator authorization remains required.
 - Gate 26 depends on Gate 25 acceptance because the RPM must package the final
   compiled public CLI and command boundary.
+- Runtime OCI acquisition is compiled into `ginux-image`; the package contains
+  no OCI acquisition script, duplicate image-pin environment, or assembled
+  `rootfs.tar` cache.
+- OCI content is retained by digest below
+  `/var/lib/ginux/cache/oci/blobs/sha256`; expanded writable roots live below
+  `/var/lib/ginux/instances/NAME/root`; transient PIDs and control endpoints
+  live below `/run/ginux/instances/NAME`.
+- EPEL is used only to install `rpmlint` in the isolated package builder. The
+  RPM itself does not require EPEL.
+- Reviewed rpmlint warnings cover tmpfiles-managed persistent/transient state,
+  the deliberately static freestanding runtime, the deferred man page and
+  `%check` surfaces, and local source/vendor archives. No packaging errors
+  remain.
+- The first deliverable remains unsigned, Rocky Linux 10 x86-64 only, and is
+  not published in a package repository.
 
 ## Delivery strategy
 
@@ -211,11 +257,15 @@ script.
 - Planned commits: gate alignment and installed-file inventory; RPM source and
   spec implementation; canonical path and installation integration; package
   lifecycle tests; documentation and evidence reconciliation
-- Actual commits: pending
+- Actual commits: `b365b1eb`, `810e30da`, `631170dc`, `7e070c68`, `125139d1`,
+  `19381d6a`, `905c0ee7`, `a54c31b0`, `9a319f72`, `5a0ecf1f`, `56cee9d5`, and
+  `593cbe5c`; final evidence reconciliation is pending this record's commit.
 
 ## Review policy and outcome
 
 Human checkpoint gate. Gate 26 must not begin implementation until Gate 25 is
 accepted and merged and the human approves this package scope. After complete
 verification, publish one dedicated pull request and stop for human acceptance.
-Technical passage alone does not close the gate.
+Technical passage alone does not close the gate. All mandatory local criteria
+now pass; Gate 26 remains in `gates-todo/` pending explicit branch/PR
+authorization and human acceptance.
