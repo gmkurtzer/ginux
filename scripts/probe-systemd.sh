@@ -8,7 +8,7 @@ measurements=build/gate9-systemd-measurements.txt
 gate9_dnf=${GINUX_GATE9_DNF:-on}
 gate9_network=${GINUX_GATE9_NETWORK:-on}
 gate9_external_network=${GINUX_GATE9_EXTERNAL_NETWORK:-on}
-gate9_config=${GINUX_GATE9_CONFIG:-config/instance-rocky-systemd.toml}
+gate9_config=${GINUX_GATE9_CONFIG:-config/examples/rocky10-systemd.toml}
 gate9_network_check=${GINUX_GATE9_NETWORK_CHECK:-scripts/gate9-network-check.py}
 GINUX_GATE9_DNF=$gate9_dnf GINUX_GATE9_NETWORK=$gate9_network \
     GINUX_GATE9_EXTERNAL_NETWORK=$gate9_external_network \

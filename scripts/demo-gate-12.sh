@@ -2,7 +2,7 @@
 set -eu
 
 printf '%s\n' 'Gate 12 portable hierarchical contract'
-sed -n '/^\[contract\]$/,/^\[storage\]$/p' config/instance-rocky-systemd.toml
+sed -n '/^\[contract\]$/,/^\[storage\]$/p' config/examples/rocky10-systemd.toml
 
 printf '%s\n' 'Gate 12 repeatable deployment flags'
 printf '%s\n' \

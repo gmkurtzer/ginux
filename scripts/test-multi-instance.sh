@@ -19,7 +19,7 @@ rocky_scp scripts/gate17-instance-check.py \
     "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/ginux-gate17-check"
 rocky_scp scripts/gate17-multi-instance-guest.sh \
     "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/ginux-gate17-guest"
-rocky_scp config/instance-rocky-systemd.toml \
+rocky_scp config/examples/rocky10-systemd.toml \
     "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/ginux-gate17-rocky.toml"
 rocky_scp "$rootfs" \
     "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/ginux-gate17-rootfs.tar"

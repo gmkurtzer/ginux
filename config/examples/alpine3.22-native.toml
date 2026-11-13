@@ -1,4 +1,4 @@
-# Alpine's native BusyBox init path. This intentionally does not add systemd.
+# Alpine 3.22 native BusyBox init path. This intentionally does not add systemd.
 schema_version = 1
 
 [instance]

@@ -8,6 +8,7 @@ members = [
     "crates/ginux-devices",
     "crates/ginux-init",
     "crates/ginux-kernel-views",
+    "crates/ginux-oci",
     "crates/ginux-process",
     "crates/ginux-runtime",
     "crates/ginux-vfs",

@@ -1,10 +1,23 @@
 #!/bin/sh
 set -eu
 
-state_root=/var/lib/ginux
-runtime=/usr/local/libexec/ginux-runtime
-image_tools=/usr/local/libexec/ginux-image
-default_recipe=/etc/ginux/examples/rocky-systemd.toml
+state_root=${GINUX_STATE_ROOT:-/var/lib/ginux}
+run_root=${GINUX_RUN_ROOT:-/run/ginux}
+runtime=${GINUX_RUNTIME:-/usr/libexec/ginux/ginux-runtime}
+image_tool=${GINUX_IMAGE_TOOL:-/usr/libexec/ginux/ginux-image}
+default_recipe=${GINUX_DEFAULT_RECIPE:-/etc/ginux/examples/rocky10-systemd.toml}
+
+# Preserve the development fixtures while production installs use only the
+# canonical packaged paths above.
+if test ! -x "$runtime" && test -x /usr/local/libexec/ginux-runtime; then
+    runtime=/usr/local/libexec/ginux-runtime
+fi
+if test ! -x "$image_tool" && test -x /usr/local/libexec/ginux-image/ensure-oci-image.sh; then
+    image_tool=/usr/local/libexec/ginux-image
+fi
+if test ! -r "$default_recipe" && test -r /etc/ginux/examples/rocky-systemd.toml; then
+    default_recipe=/etc/ginux/examples/rocky-systemd.toml
+fi
 
 usage() {
     printf '%s\n' 'usage: ginux-instance-helper --protocol 1 COMMAND [ARGUMENT]...' >&2
@@ -22,6 +35,35 @@ validate_name() {
 
 instance_dir() {
     printf '%s/instances/%s' "$state_root" "$1"
+}
+
+runtime_dir() {
+    printf '%s/instances/%s' "$run_root" "$1"
+}
+
+materialize_image() {
+    materialize_reference=$1
+    materialize_destination=$2
+    if test -x "$image_tool" && test ! -d "$image_tool"; then
+        "$image_tool" materialize \
+            "$materialize_reference" "$state_root/cache/oci" "$materialize_destination"
+        return
+    fi
+
+    # Test-only compatibility for predecessor fixtures. This directory is not
+    # installed by the RPM or the canonical host installer.
+    test -x "$image_tool/ensure-oci-image.sh" || return 69
+    materialize_result=$(mktemp "$state_root/work/image-result.XXXXXX")
+    GINUX_OCI_RESULT_FILE=$materialize_result GINUX_OCI_OUTPUT=human \
+        "$image_tool/ensure-oci-image.sh" \
+        "$materialize_reference" "$state_root/images" "$state_root/work/oci"
+    materialize_tar=$(sed -n '1p' "$materialize_result")
+    test -r "$materialize_tar" || {
+        rm -f "$materialize_result"
+        return 65
+    }
+    tar -xf "$materialize_tar" -C "$materialize_destination"
+    rm -f "$materialize_result"
 }
 
 root_path_is_executable() {
@@ -50,7 +92,7 @@ root_path_is_executable() {
 }
 
 supervisor_identity() {
-    supervisor_directory=$(instance_dir "$1")
+    supervisor_directory=$(runtime_dir "$1")
     supervisor_file=$supervisor_directory/supervisor.pid
     test -f "$supervisor_file" || return 1
     supervisor_pid=
@@ -85,7 +127,7 @@ record_runtime() {
 }
 
 runtime_identity() {
-    runtime_directory=$(instance_dir "$1")
+    runtime_directory=$(runtime_dir "$1")
     runtime_file=$runtime_directory/runtime.pid
     test -f "$runtime_file" || return 1
     runtime_pid=
@@ -410,7 +452,7 @@ $2"
     validate_name "$name"
     test -r "$config" || { printf 'configuration is not readable: %s\n' "$config" >&2; exit 66; }
     test -x "$runtime" || { printf '%s\n' 'Ginux runtime is not installed' >&2; exit 69; }
-    test -x "$image_tools/ensure-oci-image.sh" || {
+    test -x "$image_tool" || test -x "$image_tool/ensure-oci-image.sh" || {
         printf '%s\n' 'Ginux image acquisition support is not installed' >&2
         exit 69
     }
@@ -481,25 +523,10 @@ $2"
     else
         printf 'Importing instance "%s"\n' "$name"
     fi
-    image_result=$(mktemp "$state_root/work/image-result.XXXXXX")
-    cleanup_image_result() {
-        rm -f "$image_result"
-    }
-    trap cleanup_image_result 0 HUP INT TERM
-    GINUX_OCI_RESULT_FILE=$image_result \
-        GINUX_OCI_OUTPUT=human \
-        "$image_tools/ensure-oci-image.sh" \
-        "$configured_root" "$state_root/images" "$state_root/work/oci"
-    image_tar=$(sed -n '1p' "$image_result")
-    test -r "$image_tar" || {
-        printf 'prepared OCI root is unavailable: %s\n' "$configured_root" >&2
-        exit 65
-    }
-    printf '  Preparing instance... '
+    printf '  Preparing instance filesystem\n'
     staging=$state_root/work/instance.$name.$$
     cleanup_staging() {
         rm -rf "$staging"
-        rm -f "$image_result"
         rm -f "$effective"
     }
     trap cleanup_staging 0 HUP INT TERM
@@ -508,16 +535,15 @@ $2"
     write_deployment "$staging/deployment.state" "$create_network" "$create_forwards" locked
     materialize_runtime_config \
         "$staging/config.toml" "$staging/deployment.state" "$staging/runtime.toml"
-    tar -xf "$image_tar" -C "$staging/root"
+    materialize_image "$configured_root" "$staging/root"
     root_path_is_executable "$staging/root" "$configured_init" || {
         printf '\nconfigured init is missing or not executable: %s\n' "$configured_init" >&2
         exit 65
     }
     prepare_root "$staging/root"
     mv "$staging" "$directory"
-    printf 'done\n'
+    printf '  Instance filesystem ready\n'
     trap - 0 HUP INT TERM
-    rm -f "$image_result"
     cleanup_effective
     if test "$import_action" = true; then
         printf 'Instance "%s" created.\n' "$name"
@@ -745,6 +771,7 @@ start_instance() {
     done
     validate_name "$name"
     directory=$(instance_dir "$name")
+    runtime_directory=$(runtime_dir "$name")
     test -d "$directory" || { printf '%s: not found\n' "$name" >&2; exit 66; }
     if supervisor_identity "$name" >/dev/null; then
         printf '%s: already running\n' "$name" >&2
@@ -758,23 +785,24 @@ start_instance() {
         printf 'WARNING: %s is starting with its contract unlocked for maintenance.\n' \
             "$name" >&2
     fi
+    install -d -m 700 "$runtime_directory"
     rm -f \
-        "$directory/supervisor.pid" \
-        "$directory/runtime.pid" \
-        "$directory/exit.status" \
-        "$directory/console.in" \
-        "$directory/control.in"
-    mkfifo -m 600 "$directory/console.in"
-    mkfifo -m 600 "$directory/control.in"
+        "$runtime_directory/supervisor.pid" \
+        "$runtime_directory/runtime.pid" \
+        "$runtime_directory/exit.status" \
+        "$runtime_directory/console.in" \
+        "$runtime_directory/control.in"
+    mkfifo -m 600 "$runtime_directory/console.in"
+    mkfifo -m 600 "$runtime_directory/control.in"
     : >"$directory/audit.log"
     : >"$directory/console.log"
 
     nohup "$0" --protocol 1 supervise "$name" "$start_audit" >/dev/null 2>&1 </dev/null &
     pid=$!
-    record_supervisor "$directory" "$pid"
+    record_supervisor "$runtime_directory" "$pid"
     sleep 1
     if ! kill -0 "$pid" 2>/dev/null; then
-        rm -f "$directory/supervisor.pid"
+        rm -f "$runtime_directory/supervisor.pid"
         printf '%s: failed to start; inspect %s and %s\n' \
             "$name" "$directory/console.log" "$directory/audit.log" >&2
         exit 70
@@ -796,9 +824,10 @@ supervise_instance() {
     esac
     validate_name "$name"
     directory=$(instance_dir "$name")
+    runtime_directory=$(runtime_dir "$name")
     test -d "$directory" || { printf '%s: not found\n' "$name" >&2; exit 66; }
-    exec 9<>"$directory/console.in"
-    exec 10<>"$directory/control.in"
+    exec 9<>"$runtime_directory/console.in"
+    exec 10<>"$runtime_directory/control.in"
     set +e
     # Let script(1) provide the pseudo-terminal, but record only the runtime
     # stream. Its normal typescript header/footer are implementation details,
@@ -820,7 +849,7 @@ supervise_instance() {
         fi
         kill -TERM "$console_pid" 2>/dev/null || true
         wait "$console_pid" 2>/dev/null || true
-        rm -f "$directory/runtime.pid" "$directory/supervisor.pid"
+        rm -f "$runtime_directory/runtime.pid" "$runtime_directory/supervisor.pid"
         exit 143
     }
     trap terminate_supervisor HUP INT TERM
@@ -828,8 +857,8 @@ supervise_instance() {
     status=$?
     trap - HUP INT TERM
     set -e
-    printf '%s\n' "$status" >"$directory/exit.status"
-    rm -f "$directory/runtime.pid" "$directory/supervisor.pid"
+    printf '%s\n' "$status" >"$runtime_directory/exit.status"
+    rm -f "$runtime_directory/runtime.pid" "$runtime_directory/supervisor.pid"
     exit "$status"
 }
 
@@ -843,6 +872,7 @@ run_runtime() {
     esac
     validate_name "$name"
     directory=$(instance_dir "$name")
+    runtime_directory=$(runtime_dir "$name")
     test -d "$directory" || exit 66
     # util-linux script(1) does not preserve the supervisor shell's auxiliary
     # descriptors when it starts the PTY command. Open the lifecycle-created
@@ -850,12 +880,12 @@ run_runtime() {
     # signal requests on descriptor 10. Direct benchmark/runtime invocations do
     # not create that FIFO and therefore must not manufacture an empty regular
     # file that Ginux mistakes for a live control channel.
-    if test -p "$directory/control.in"; then
-        exec 10<>"$directory/control.in"
+    if test -p "$runtime_directory/control.in"; then
+        exec 10<>"$runtime_directory/control.in"
     else
         exec 10>&-
     fi
-    record_runtime "$directory" "$$"
+    record_runtime "$runtime_directory" "$$"
     materialize_runtime_config \
         "$directory/config.toml" "$directory/deployment.state" "$directory/runtime.toml"
     if test "$audit_override" = true; then
@@ -918,16 +948,17 @@ attach_instance() {
     name=$1
     validate_name "$name"
     directory=$(instance_dir "$name")
+    runtime_directory=$(runtime_dir "$name")
     test -d "$directory" || { printf '%s: not found\n' "$name" >&2; exit 66; }
     supervisor_pid=$(supervisor_identity "$name") || {
         printf '%s: not running\n' "$name" >&2
         exit 69
     }
-    test -p "$directory/console.in" || {
+    test -p "$runtime_directory/console.in" || {
         printf '%s: console is unavailable\n' "$name" >&2
         exit 69
     }
-    test -p "$directory/control.in" || {
+    test -p "$runtime_directory/control.in" || {
         printf '%s: control channel is unavailable\n' "$name" >&2
         exit 69
     }
@@ -936,8 +967,8 @@ attach_instance() {
     rm -f "$detach_marker"
     saved_tty=$(stty -g)
     exec 7<&0
-    exec 8>"$directory/console.in"
-    exec 9>"$directory/control.in"
+    exec 8>"$runtime_directory/console.in"
+    exec 9>"$runtime_directory/control.in"
     # A terminal-generated SIGINT belongs to the attached foreground process,
     # not to the controller-side attach transport. Background helpers inherit
     # SIGINT ignored; the attach process sends the same interrupt request over
@@ -1039,7 +1070,7 @@ EOF
         printf '\n%s: detached; instance remains running\n' "$name"
     else
         status=unknown
-        test -r "$directory/exit.status" && status=$(cat "$directory/exit.status")
+        test -r "$runtime_directory/exit.status" && status=$(cat "$runtime_directory/exit.status")
         printf '\n%s: stopped (status %s)\n' "$name" "$status"
     fi
 }
@@ -1054,12 +1085,13 @@ authorize_attach() {
         *[!0-9:]*|:*|*:) usage ;;
     esac
     directory=$(instance_dir "$name")
+    runtime_directory=$(runtime_dir "$name")
     test -d "$directory" || { printf '%s: not found\n' "$name" >&2; exit 66; }
     supervisor_identity "$name" >/dev/null || {
         printf '%s: not running\n' "$name" >&2
         exit 69
     }
-    for attach_endpoint in "$directory/console.in" "$directory/control.in"; do
+    for attach_endpoint in "$runtime_directory/console.in" "$runtime_directory/control.in"; do
         test -p "$attach_endpoint" || {
             printf '%s: console is unavailable\n' "$name" >&2
             exit 69
@@ -1067,7 +1099,7 @@ authorize_attach() {
         chown "$attach_uid:$attach_gid" "$attach_endpoint"
         chmod 600 "$attach_endpoint"
     done
-    printf '%s\n' "$directory/control.in"
+    printf '%s\n' "$runtime_directory/control.in"
 }
 
 resize_instance() {
@@ -1093,9 +1125,10 @@ stop_instance() {
     name=$1
     validate_name "$name"
     directory=$(instance_dir "$name")
+    runtime_directory=$(runtime_dir "$name")
     test -d "$directory" || { printf '%s: not found\n' "$name" >&2; exit 66; }
     if ! pid=$(supervisor_identity "$name"); then
-        rm -f "$directory/supervisor.pid"
+        rm -f "$runtime_directory/supervisor.pid"
         printf '%s: already stopped\n' "$name"
         return
     fi
@@ -1120,7 +1153,7 @@ stop_instance() {
     if kill -0 "$pid" 2>/dev/null; then
         kill -KILL "$pid" 2>/dev/null || true
     fi
-    rm -f "$directory/supervisor.pid" "$directory/runtime.pid"
+    rm -f "$runtime_directory/supervisor.pid" "$runtime_directory/runtime.pid"
     printf '%s: stopped\n' "$name"
 }
 

@@ -1,4 +1,4 @@
-# Constrained interactive workspace for an automation or coding agent.
+# Rocky Linux 10 constrained interactive workspace for an automation or coding agent.
 schema_version = 1
 
 [instance]

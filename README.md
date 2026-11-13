@@ -291,7 +291,7 @@ network attachment and translated ports are deployment settings, supplied as
 repeatable flags when the instance is created or changed:
 
 ```sh
-ginux import web /etc/ginux/examples/rocky-systemd.toml \
+ginux import web /etc/ginux/examples/rocky10-systemd.toml \
     --network eth0:1 \
     --forward protocol=tcp,external_port=8080,instance_port=80 \
     --forward protocol=tcp,external_port=8443,instance_port=443
@@ -321,9 +321,9 @@ contract is part of the instance rather than a separate operator object.
 Validate and inspect the complete instance recipe before launch:
 
 ```sh
-ginux validate /etc/ginux/examples/rocky-systemd.toml
-ginux inspect /etc/ginux/examples/rocky-systemd.toml
-ginux explain /etc/ginux/examples/rocky-systemd.toml filesystem.path.write
+ginux validate /etc/ginux/examples/rocky10-systemd.toml
+ginux inspect /etc/ginux/examples/rocky10-systemd.toml
+ginux explain /etc/ginux/examples/rocky10-systemd.toml filesystem.path.write
 ```
 
 See [Self-contained userspace contract](docs/configurable-contract.md) for the

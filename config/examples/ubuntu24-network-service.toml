@@ -1,6 +1,6 @@
 # Ubuntu 24.04 blank CMS recipe. Host attachment and port translation are
 # deployment state:
-# ginux import web config/examples/network-service.toml \
+# ginux import web config/examples/ubuntu24-network-service.toml \
 #   --network default \
 #   --forward protocol=tcp,external_port=8080,instance_port=8080
 schema_version = 1

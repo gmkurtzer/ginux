@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const DEFAULT_HELPER: &str = "/usr/local/libexec/ginux-instance-helper";
+const DEFAULT_HELPER: &str = "/usr/libexec/ginux/ginux-helper";
 const HELPER_PROTOCOL: &str = "1";
 
 #[derive(Debug, Parser)]
@@ -301,7 +301,13 @@ pub fn run(cli: Cli) -> Result<i32, String> {
 }
 
 fn helper_path() -> OsString {
-    env::var_os("GINUX_INSTANCE_HELPER").unwrap_or_else(|| DEFAULT_HELPER.into())
+    env::var_os("GINUX_INSTANCE_HELPER").unwrap_or_else(|| {
+        if Path::new(DEFAULT_HELPER).exists() {
+            DEFAULT_HELPER.into()
+        } else {
+            "/usr/local/libexec/ginux-instance-helper".into()
+        }
+    })
 }
 
 fn deployment_arguments(args: &DeploymentArgs) -> Vec<OsString> {

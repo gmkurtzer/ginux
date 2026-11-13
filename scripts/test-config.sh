@@ -54,7 +54,7 @@ rocky_scp \
     config/instance-gate10-strict.toml \
     "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/gate10-strict.toml"
 rocky_scp \
-    config/instance-rocky-systemd.toml \
+    config/examples/rocky10-systemd.toml \
     "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/gate10-systemd.toml"
 
 rocky_ssh 'chmod 0755 /var/tmp/ginux /var/tmp/ginux-cli; /var/tmp/ginux config /var/tmp/gate4-valid.toml' > "$valid_log" 2>&1

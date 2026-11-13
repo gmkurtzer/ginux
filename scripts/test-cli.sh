@@ -22,9 +22,9 @@ for command in create import set edit export list status start attach stop lock 
 done
 ! grep -Eq '^  (diff|native|native-hook|launch)[[:space:]]' "$test_directory/help"
 
-"$cli" validate config/instance-rocky-systemd.toml >"$test_directory/validate"
-"$cli" inspect config/instance-rocky-systemd.toml >"$test_directory/inspect"
-"$cli" explain config/instance-rocky-systemd.toml filesystem.path.read \
+"$cli" validate config/examples/rocky10-systemd.toml >"$test_directory/validate"
+"$cli" inspect config/examples/rocky10-systemd.toml >"$test_directory/inspect"
+"$cli" explain config/examples/rocky10-systemd.toml filesystem.path.read \
     >"$test_directory/explain"
 grep -Fq 'Contract valid:' "$test_directory/validate"
 grep -Fq 'Decisions:' "$test_directory/inspect"
