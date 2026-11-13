@@ -122,6 +122,7 @@ record_supervisor() {
 record_runtime() {
     record_directory=$1
     record_pid=$2
+    install -d -m 700 "$record_directory"
     record_start=$(awk '{ print $22 }' "/proc/$record_pid/stat")
     printf '%s %s\n' "$record_pid" "$record_start" >"$record_directory/runtime.pid"
 }
