@@ -41,6 +41,9 @@ Prevent launch/native workloads from observing host uptime, load, memory, swap, 
 - Pull request: https://github.com/gmkurtzer/ginux/pull/265
 - Source comment: https://github.com/gmkurtzer/ginux/issues/219#issuecomment-6841188138
 - Reciprocal PR comment: https://github.com/gmkurtzer/ginux/pull/265#issuecomment-6841189329
+- Hosted CI on implementation commit `86e6016e`:
+  https://github.com/gmkurtzer/ginux/actions/runs/43346029214 -> static/unit
+  and Linux launch integration passed.
 
 ## Decisions and limitations
 - Zero values avoid both host disclosure and a false claim that recipe memory metadata is currently enforced as a quota.
@@ -57,4 +60,5 @@ Prevent launch/native workloads from observing host uptime, load, memory, swap, 
 - Actual commits: `86e6016e`; gate reconciliation in the branch tip
 
 ## Review policy and outcome
-Human checkpoint. The gate remains in `gates-todo/` until reviewed and accepted.
+Technically passed on implementation commit `86e6016e`. Human checkpoint:
+the gate remains in `gates-todo/` until reviewed and accepted.
