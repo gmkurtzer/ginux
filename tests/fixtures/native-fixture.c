@@ -44,6 +44,22 @@ static void print_result(const char *label, long value)
     call3(1, 1, (word)line, length);
 }
 
+static int sigchld_pipe = -1;
+static volatile int sigchld_seen;
+
+static void sigchld_handler(int signal)
+{
+    (void)signal;
+    sigchld_seen = 1;
+    call3(1, sigchld_pipe, (word)"c", 1);
+}
+
+void sigchld_restorer(void);
+__asm__(".global sigchld_restorer\n"
+        "sigchld_restorer:\n"
+        "mov $15, %rax\n"
+        "syscall\n");
+
 long native_fixture_main(void)
 {
     char scenario[16] = {0};
@@ -157,6 +173,57 @@ long native_fixture_main(void)
         print_result("GINUX_FIXTURE: fd-241=", call3(72, 241, 1, 0));
         print_result("GINUX_FIXTURE: fd-242=", call3(72, 242, 1, 0));
         print_result("GINUX_FIXTURE: fd-300=", call3(72, 300, 1, 0));
+        return 0;
+    }
+    case 's': {
+        /* SIGCHLD reaches a handler (systemd profile, where fork is
+         * supervised): the parent catches SIGCHLD with a handler that writes
+         * to a pipe, as OpenRC, busybox and shells do, forks a child that
+         * exits, then polls the pipe. systemd reads SIGCHLD from a signalfd
+         * instead, so it never depends on this delivery. */
+        struct kernel_sigaction {
+            word handler, flags, restorer, mask;
+        } action = {(word)sigchld_handler, 0x04000000 /* SA_RESTORER */,
+                    (word)sigchld_restorer, 0};
+        struct pollfd_word {
+            int fd;
+            short events, revents;
+        } poll_fd;
+        int fds[2];
+        int start_fds[2];
+        int userspace = scenario[7] == '-';
+        int status = 0;
+        long pid;
+        if (call4(293, (word)fds, 0, 0, 0) < 0) return 82;
+        if (userspace && call4(293, (word)start_fds, 0, 0, 0) < 0) return 83;
+        sigchld_pipe = fds[1];
+        print_result("GINUX_FIXTURE: sigaction=", call4(13, 17, (word)&action, 0, 8));
+        pid = call3(57, 0, 0, 0);
+        if (pid == 0) {
+            char go;
+            if (userspace && call3(0, start_fds[0], (word)&go, 1) != 1) return 84;
+            return 7;
+        }
+        print_result("GINUX_FIXTURE: fork-ok=", pid > 0);
+        if (userspace) {
+            /* Let the child exit only after the parent is ready to stay in
+             * userspace. No poll or other syscall can supply an exit stop
+             * while the parent waits for the actual signal handler. */
+            if (call3(1, start_fds[1], (word)"g", 1) != 1) return 85;
+            while (!sigchld_seen) __asm__ volatile("pause");
+            print_result("GINUX_FIXTURE: sigchld-userspace=", sigchld_seen);
+        }
+        poll_fd.fd = fds[0];
+        poll_fd.events = 1; /* POLLIN */
+        poll_fd.revents = 0;
+        long ready;
+        /* A handler run interrupts the poll (EINTR) or makes the pipe readable. */
+        do ready = call3(7, (word)&poll_fd, 1, 2000);
+        while (ready == -4);
+        print_result("GINUX_FIXTURE: sigchld-poll=", ready);
+        print_result("GINUX_FIXTURE: sigchld-handled=", sigchld_seen);
+        print_result("GINUX_FIXTURE: wait-ok=", call4(61, -1, (word)&status, 0, 0) == pid);
+        print_result("GINUX_FIXTURE: child-status=", (status >> 8) & 0xff);
         return 0;
     }
     default:

@@ -5918,7 +5918,14 @@ fn supervise_native(
             // virtual exit record. The exit path queues a replacement after
             // the child is reportable.
             let delivered_signal = if reportable_child { SIGCHLD } else { 0 };
-            if ptrace(PTRACE_CONT, host_pid, 0, delivered_signal) < 0 {
+            // Preserve the hybrid loop's phase: a userspace delivery stop
+            // has no syscall exit to collect, while a blocked call does.
+            let request = if task.awaiting_exit {
+                PTRACE_SYSCALL
+            } else {
+                PTRACE_CONT
+            };
+            if ptrace(request, host_pid, 0, delivered_signal) < 0 {
                 native_fail(instance, pid, b"native SIGCHLD resume failed");
             }
             continue;
