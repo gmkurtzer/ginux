@@ -117,6 +117,10 @@ replace it.
     re-evaluate every command, obtain human approval of the public taxonomy,
     replace hand-written public parsing with a Cobra-like Rust command
     framework, and keep runtime/backend commands out of the operator surface.
+26. **Rocky Linux RPM packaging**: build one native Rocky Linux 10 x86-64 RPM
+    and SRPM for the accepted public CLI, private runtime, helper, image tools,
+    examples, and state layout; verify clean install, operation, upgrade,
+    state-preserving erase, reinstall, and complete package metadata.
 
 Gates are stored in `hdae/gates-todo/` and remain there until they pass and are
 accepted at their checkpoint. Closed gate records move unchanged to

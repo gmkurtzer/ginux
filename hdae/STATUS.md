@@ -21,6 +21,9 @@
   check`, `make build`, `make test-config`, and the Gate 12 CLI workflow in the
   Rocky QEMU host.
 - Pull request: https://github.com/gmkurtzer/ginux/pull/273
+- Gate 26 is drafted on `hdae/rpm-packaging` as the dependent next gate for a
+  Rocky Linux 10 x86-64 RPM and SRPM. It remains at its design checkpoint and
+  cannot begin until Gate 25 is accepted and merged.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
