@@ -75,7 +75,11 @@ pub fn materialize(
         .user_agent(concat!("ginux/", env!("CARGO_PKG_VERSION")))
         .build()
         .map_err(|error| format!("unable to initialize OCI client: {error}"))?;
-    let token = registry_token(&client, &reference)?;
+    let token = if image_is_fully_cached(cache_root, &reference.digest)? {
+        None
+    } else {
+        registry_token(&client, &reference)?
+    };
     let root = fetch_blob(
         &client,
         &reference,
@@ -222,6 +226,48 @@ fn bearer_fields(challenge: &str) -> Result<Vec<(String, String)>, String> {
     Ok(fields)
 }
 
+fn image_is_fully_cached(cache_root: &Path, root_digest: &str) -> Result<bool, String> {
+    let Some(root) = cached_blob(cache_root, root_digest)? else {
+        return Ok(false);
+    };
+    let root_document = read_json(&root)?;
+    let manifest = if let Some(descriptor) = select_manifest(&root_document)? {
+        let Some(path) = cached_blob(cache_root, &descriptor.digest)? else {
+            return Ok(false);
+        };
+        read_json(&path)?
+    } else {
+        root_document
+    };
+    let config = descriptor(manifest.get("config"), "config")?;
+    if cached_blob(cache_root, &config.digest)?.is_none() {
+        return Ok(false);
+    }
+    let layers = manifest
+        .get("layers")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "OCI manifest has no layer array".to_owned())?;
+    for layer in layers {
+        let layer = descriptor(Some(layer), "layer")?;
+        if cached_blob(cache_root, &layer.digest)?.is_none() {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+fn cached_blob(cache_root: &Path, digest: &str) -> Result<Option<PathBuf>, String> {
+    validate_digest(digest)?;
+    let target = cache_root
+        .join("blobs/sha256")
+        .join(digest.trim_start_matches("sha256:"));
+    if target.is_file() && digest_file(&target)? == digest {
+        Ok(Some(target))
+    } else {
+        Ok(None)
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn fetch_blob(
     client: &Client,
@@ -239,7 +285,7 @@ fn fetch_blob(
     let directory = cache_root.join("blobs/sha256");
     fs::create_dir_all(&directory).map_err(io_error)?;
     let target = directory.join(hex);
-    if target.is_file() && digest_file(&target)? == digest {
+    if cached_blob(cache_root, digest)?.is_some() {
         writeln!(progress, "  {label}: cached").map_err(io_error)?;
         return Ok(target);
     }
