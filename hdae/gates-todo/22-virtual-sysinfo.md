@@ -19,7 +19,7 @@ Prevent launch/native workloads from observing host uptime, load, memory, swap, 
 ## Completed work
 - [x] Add the bounded virtual structure and both supervisor paths.
 - [x] Add deterministic regression coverage.
-- [ ] Verify, commit, push, open the PR, and add reciprocal links.
+- [x] Verify, commit, push, open the PR, and add reciprocal links.
 
 ## Remaining work
 - [ ] Human review and merge.
@@ -38,6 +38,9 @@ Prevent launch/native workloads from observing host uptime, load, memory, swap, 
 - `make test-unit` -> passed across all unit-test crates.
 - x86-64 Linux-target compile of both C fixtures with strict warnings -> passed.
 - Local launch/native runtime execution -> not run; the macOS arm64 host cannot execute the Linux x86-64 supervisor integration, so hosted CI remains mandatory.
+- Pull request: https://github.com/gmkurtzer/ginux/pull/265
+- Source comment: https://github.com/gmkurtzer/ginux/issues/219#issuecomment-6841188138
+- Reciprocal PR comment: https://github.com/gmkurtzer/ginux/pull/265#issuecomment-6841189329
 
 ## Decisions and limitations
 - Zero values avoid both host disclosure and a false claim that recipe memory metadata is currently enforced as a quota.
@@ -49,9 +52,9 @@ Prevent launch/native workloads from observing host uptime, load, memory, swap, 
 ## Delivery strategy
 - Working branch: `hdae/virtual-sysinfo`
 - Intended base: `main`
-- Pull request: intended
+- Pull request: https://github.com/gmkurtzer/ginux/pull/265
 - Planned commits: signed implementation/gate commit, then an evidence/link reconciliation commit if required
-- Actual commits: pending
+- Actual commits: `86e6016e`; gate reconciliation in the branch tip
 
 ## Review policy and outcome
 Human checkpoint. The gate remains in `gates-todo/` until reviewed and accepted.
