@@ -366,6 +366,39 @@ pub fn poke_tracee_bytes(pid: usize, address: usize, bytes: &[u8]) -> Result<(),
     Ok(())
 }
 
+/// Why a chrooted workload cannot start with its standard streams, if it
+/// cannot: it keeps descriptors 0 to 2, and a directory there would anchor
+/// openat, fchdir and the other *at calls outside its root. A closed stream
+/// anchors nothing; one that cannot be examined is refused.
+pub fn standard_stream_refusal() -> Option<&'static [u8]> {
+    const S_IFMT: u64 = 0o170000;
+    const S_IFDIR: u64 = 0o040000;
+    const REFUSALS: [[&[u8]; 2]; 3] = [
+        [
+            b"standard input is a directory",
+            b"standard input cannot be checked",
+        ],
+        [
+            b"standard output is a directory",
+            b"standard output cannot be checked",
+        ],
+        [
+            b"standard error is a directory",
+            b"standard error cannot be checked",
+        ],
+    ];
+    (0..3).find_map(|fd| {
+        // x86_64 struct stat: st_mode is the u32 at byte offset 24.
+        let mut stat = [0u64; 18];
+        match unsafe { syscall2(SYS_FSTAT, fd, stat.as_mut_ptr() as usize) } {
+            0 if stat[3] & S_IFMT == S_IFDIR => Some(REFUSALS[fd][0]),
+            0 => None,
+            error if error == -(EBADF as isize) => None,
+            _ => Some(REFUSALS[fd][1]),
+        }
+    })
+}
+
 pub fn line(message: &[u8]) {
     write_all(message);
     write_all(b"\n");

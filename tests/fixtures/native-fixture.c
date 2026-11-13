@@ -128,6 +128,16 @@ long native_fixture_main(void)
         print_result("GINUX_FIXTURE: getrandom=", call3(318, (word)random, sizeof random, 0));
         return 0;
     }
+    case 'd': {
+        /* descriptors: the launcher passed a host directory as 239, 242 and
+         * 300; only the protected null (240) and console (241) stay open. */
+        print_result("GINUX_FIXTURE: fd-239=", call3(72, 239, 1, 0));
+        print_result("GINUX_FIXTURE: fd-240=", call3(72, 240, 1, 0));
+        print_result("GINUX_FIXTURE: fd-241=", call3(72, 241, 1, 0));
+        print_result("GINUX_FIXTURE: fd-242=", call3(72, 242, 1, 0));
+        print_result("GINUX_FIXTURE: fd-300=", call3(72, 300, 1, 0));
+        return 0;
+    }
     default:
         return 81;
     }
