@@ -77,10 +77,10 @@ pub fn parse_argv(argc: usize, argv: *const usize) -> Option<Command> {
     if argc < 3 {
         return Some(Command::Usage);
     }
-    if c_string_equals(command, b"runtime") {
+    if argc == 3 && c_string_equals(command, b"runtime") {
         let path = unsafe { *argv.add(2) as *const u8 };
         Some(Command::Runtime(path))
-    } else if c_string_equals(command, b"config") {
+    } else if argc == 3 && c_string_equals(command, b"config") {
         let config_path = unsafe { *argv.add(2) as *const u8 };
         Some(Command::Config(config_path))
     } else if c_string_equals(command, b"config-merge") {
@@ -88,74 +88,78 @@ pub fn parse_argv(argc: usize, argv: *const usize) -> Option<Command> {
         Some(Command::ConfigMerge(config_path, argc - 3, unsafe {
             argv.add(3)
         }))
-    } else if c_string_equals(command, b"instance-plan") {
+    } else if argc == 3 && c_string_equals(command, b"instance-plan") {
         let config_path = unsafe { *argv.add(2) as *const u8 };
         Some(Command::InstancePlan(config_path))
-    } else if c_string_equals(command, b"instance-validate") {
+    } else if argc == 3 && c_string_equals(command, b"instance-validate") {
         let config_path = unsafe { *argv.add(2) as *const u8 };
         Some(Command::InstanceValidate(config_path))
-    } else if argc >= 4 && c_string_equals(command, b"instance-explain") {
+    } else if argc == 4 && c_string_equals(command, b"instance-explain") {
         let config_path = unsafe { *argv.add(2) as *const u8 };
         let operation = unsafe { *argv.add(3) as *const u8 };
         Some(Command::InstanceExplain(config_path, operation))
-    } else if argc >= 4 && c_string_equals(command, b"instance-diff") {
+    } else if argc == 4 && c_string_equals(command, b"instance-diff") {
         let left = unsafe { *argv.add(2) as *const u8 };
         let right = unsafe { *argv.add(3) as *const u8 };
         Some(Command::InstanceDiff(left, right))
-    } else if c_string_equals(command, b"instance-inspect") {
+    } else if argc == 3 && c_string_equals(command, b"instance-inspect") {
         let config_path = unsafe { *argv.add(2) as *const u8 };
         Some(Command::InstanceInspect(config_path))
-    } else if c_string_equals(command, b"hook-plan") {
+    } else if argc == 3 && c_string_equals(command, b"hook-plan") {
         let config_path = unsafe { *argv.add(2) as *const u8 };
         Some(Command::HookPlan(config_path))
-    } else if c_string_equals(command, b"lifecycle") {
+    } else if argc == 3 && c_string_equals(command, b"lifecycle") {
         let config_path = unsafe { *argv.add(2) as *const u8 };
         Some(Command::Lifecycle(config_path))
-    } else if argc >= 5 && c_string_equals(command, b"vfs") {
+    } else if argc == 5 && c_string_equals(command, b"vfs") {
         let config_path = unsafe { *argv.add(2) as *const u8 };
         let rootfs_path = unsafe { *argv.add(3) as *const u8 };
         let index_path = unsafe { *argv.add(4) as *const u8 };
         Some(Command::Vfs(config_path, rootfs_path, index_path))
-    } else if argc >= 4 && c_string_equals(command, b"native") {
+    } else if (argc == 4 || argc == 5) && c_string_equals(command, b"native") {
         let config_path = unsafe { *argv.add(2) as *const u8 };
         let root_path = unsafe { *argv.add(3) as *const u8 };
-        let mode = if argc >= 5 && c_string_equals(unsafe { *argv.add(4) as *const u8 }, b"hold") {
-            1
-        } else if argc >= 5 && c_string_equals(unsafe { *argv.add(4) as *const u8 }, b"probe") {
-            2
-        } else if argc >= 5 && c_string_equals(unsafe { *argv.add(4) as *const u8 }, b"configured")
-        {
-            3
-        } else {
+        let mode = if argc == 4 {
             0
+        } else {
+            let mode = unsafe { *argv.add(4) as *const u8 };
+            if c_string_equals(mode, b"hold") {
+                1
+            } else if c_string_equals(mode, b"probe") {
+                2
+            } else if c_string_equals(mode, b"configured") {
+                3
+            } else {
+                return Some(Command::Usage);
+            }
         };
         Some(Command::Native(config_path, root_path, mode))
-    } else if argc >= 5 && c_string_equals(command, b"native-hook") {
+    } else if argc == 5 && c_string_equals(command, b"native-hook") {
         let config_path = unsafe { *argv.add(2) as *const u8 };
         let root_path = unsafe { *argv.add(3) as *const u8 };
         let index = parse_decimal_c_string(unsafe { *argv.add(4) as *const u8 })?;
         Some(Command::NativeHook(config_path, root_path, index))
-    } else if argc >= 4 && c_string_equals(command, b"instance") {
+    } else if argc == 4 && c_string_equals(command, b"instance") {
         let config_path = unsafe { *argv.add(2) as *const u8 };
         let fixture_path = unsafe { *argv.add(3) as *const u8 };
         Some(Command::Instance(config_path, fixture_path))
-    } else if c_string_equals(command, b"process") {
+    } else if argc == 3 && c_string_equals(command, b"process") {
         let config_path = unsafe { *argv.add(2) as *const u8 };
         Some(Command::Process(config_path))
-    } else if argc >= 4 && c_string_equals(command, b"process-native") {
+    } else if argc == 4 && c_string_equals(command, b"process-native") {
         let config_path = unsafe { *argv.add(2) as *const u8 };
         let fixture_path = unsafe { *argv.add(3) as *const u8 };
         Some(Command::ProcessNative(config_path, fixture_path))
-    } else if argc >= 4 && c_string_equals(command, b"devices") {
+    } else if argc == 4 && c_string_equals(command, b"devices") {
         let config_path = unsafe { *argv.add(2) as *const u8 };
         let block_path = unsafe { *argv.add(3) as *const u8 };
         Some(Command::Devices(config_path, block_path))
-    } else if argc >= 5 && c_string_equals(command, b"device-bench") {
+    } else if argc == 5 && c_string_equals(command, b"device-bench") {
         let config_path = unsafe { *argv.add(2) as *const u8 };
         let block_path = unsafe { *argv.add(3) as *const u8 };
         let kind = unsafe { *argv.add(4) as *const u8 };
         Some(Command::DeviceBench(config_path, block_path, kind))
-    } else if c_string_equals(command, b"kernel-views") {
+    } else if argc == 3 && c_string_equals(command, b"kernel-views") {
         let config_path = unsafe { *argv.add(2) as *const u8 };
         Some(Command::KernelViews(config_path))
     } else if argc >= 4 && c_string_equals(command, b"launch") {

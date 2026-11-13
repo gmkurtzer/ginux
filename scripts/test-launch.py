@@ -305,6 +305,29 @@ def main():
             if proc.returncode != 2 or proc.stdout or b"ginux: usage:" not in proc.stderr:
                 raise RuntimeError(f"unknown or incomplete argv ran the demonstration: {proc!r}")
         print("PASS unknown and incomplete commands report usage without running a demo")
+        valid = work / "valid.toml"
+        valid.write_text(template)
+        proc = subprocess.run([binary, "instance-validate", str(valid)], capture_output=True,
+                              timeout=10)
+        if proc.returncode != 0 or b"Contract valid:" not in proc.stdout:
+            raise RuntimeError(f"fixed-arity command no longer succeeds: {proc!r}")
+        # Each command takes exactly this many operands; one more is a usage
+        # error, never ignored. `native` takes one optional, named mode.
+        operands = {"runtime": 1, "config": 1, "instance-plan": 1, "instance-validate": 1,
+                    "instance-inspect": 1, "hook-plan": 1, "lifecycle": 1, "process": 1,
+                    "kernel-views": 1, "instance-explain": 2, "instance-diff": 2,
+                    "instance": 2, "process-native": 2, "devices": 2, "vfs": 3,
+                    "native-hook": 3, "device-bench": 3, "native": 3}
+        for command, count in operands.items():
+            args = [str(valid)] * (count + 1)
+            proc = subprocess.run([binary, command, *args], capture_output=True, timeout=10)
+            if proc.returncode != 2 or proc.stdout or b"ginux: usage:" not in proc.stderr:
+                raise RuntimeError(f"{command} accepted an extra argument: {proc!r}")
+        proc = subprocess.run([binary, "native", str(valid), str(root), "configurd"],
+                              capture_output=True, timeout=10)
+        if proc.returncode != 2 or proc.stdout or b"ginux: usage:" not in proc.stderr:
+            raise RuntimeError(f"native accepted an unknown mode: {proc!r}")
+        print("PASS fixed-arity commands reject extra arguments and unknown modes")
         # Exercise the bootstrap failure in a real unprivileged process.
         work.chmod(0o755)
         config_path = work / "unprivileged.toml"
