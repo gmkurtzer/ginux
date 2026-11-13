@@ -21,7 +21,8 @@ Preserve balanced-profile read, write, and pread bounds while returning Linux-co
 - [x] Verify, commit, push, open the PR, and add reciprocal links.
 
 ## Remaining work
-- [ ] Human review and merge.
+- [x] Human review and acceptance.
+- [ ] Merge the accepted pull request.
 
 ## Acceptance criteria
 - Oversized balanced reads and preads return exactly 1 MiB when sufficient input exists.
@@ -58,5 +59,5 @@ Preserve balanced-profile read, write, and pread bounds while returning Linux-co
 - Actual commits: `63655990`; gate reconciliation in the branch tip
 
 ## Review policy and outcome
-Technically passed on implementation commit `63655990`. Human checkpoint:
-the gate remains in `gates-todo/` until reviewed and accepted.
+Technically passed on implementation commit `63655990`. The human explicitly
+accepted the gate on 2026-11-12 and authorized its merge and issue closure.
