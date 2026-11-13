@@ -232,6 +232,26 @@ sys_read = ["/"]
         fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
         check("denied waitid preserves caller registers", code == 0 and fixture == [
             "GINUX_FIXTURE: denied-waitid=-1", "GINUX_FIXTURE: denied-selector-preserved=1"], code, out)
+
+        # Upstream owns cgroups in memory. Retain the public API and
+        # containment regressions without requiring obsolete host files.
+        cgroup_outside = work / "cgroup-outside"
+        cgroup_outside.mkdir()
+        sentinel = cgroup_outside / "sentinel"
+        sentinel.write_bytes(b"preserve")
+        (root / "sys/fs/cgroup").mkdir(parents=True, exist_ok=True)
+        (root / "sys/fs/cgroup/escape").symlink_to(cgroup_outside)
+        code, out = run("layout-cgroup", configured)
+        fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
+        check("virtual cgroup mkdir and containment", code == 0 and fixture == [
+            "GINUX_FIXTURE: mkdir=0", "GINUX_FIXTURE: procs-open-ok=1",
+            "GINUX_FIXTURE: procs-write=2", "GINUX_FIXTURE: mkdir-again=-17",
+            "GINUX_FIXTURE: mkdirat=0", "GINUX_FIXTURE: mkdirat-relative=0",
+            "GINUX_FIXTURE: events-open-ok=1", "GINUX_FIXTURE: kill-open-ok=1",
+            "GINUX_FIXTURE: mkdir-via-symlink=-2"]
+            and sentinel.read_bytes() == b"preserve"
+            and sorted(p.name for p in cgroup_outside.iterdir()) == ["sentinel"]
+            and sorted(p.name for p in (root / "sys/fs/cgroup").iterdir()) == ["escape"], code, out)
     print("test-native-supervision: PASS")
 
 
