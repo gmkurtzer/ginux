@@ -18,7 +18,7 @@ Enforce the balanced profile's 256-byte `getrandom` bound on the buffer length w
 ## Completed work
 - [x] Correct the policy and supervisor register handling.
 - [x] Add deterministic regression coverage.
-- [ ] Verify, commit, push, open the PR, and add reciprocal links.
+- [x] Verify, commit, push, open the PR, and add reciprocal links.
 
 ## Remaining work
 - [ ] Human review and merge.
@@ -39,6 +39,9 @@ Enforce the balanced profile's 256-byte `getrandom` bound on the buffer length w
 - `make check` -> passed.
 - x86-64 Linux-target compile of both C fixtures with strict warnings -> passed.
 - Local launch/native runtime execution -> not run; the macOS arm64 host cannot execute the Linux x86-64 supervisor integration, so hosted CI remains mandatory.
+- Pull request: https://github.com/gmkurtzer/ginux/pull/263
+- Source comment: https://github.com/gmkurtzer/ginux/issues/163#issuecomment-6841183072
+- Reciprocal PR comment: https://github.com/gmkurtzer/ginux/pull/263#issuecomment-6841184333
 
 ## Decisions and limitations
 - Clamping retains the per-call resource bound without converting a legal larger request into `EPERM`.
@@ -47,9 +50,9 @@ Enforce the balanced profile's 256-byte `getrandom` bound on the buffer length w
 ## Delivery strategy
 - Working branch: `hdae/getrandom-short-read`
 - Intended base: `main`
-- Pull request: intended
+- Pull request: https://github.com/gmkurtzer/ginux/pull/263
 - Planned commits: signed implementation/gate commit, then an evidence/link reconciliation commit if required
-- Actual commits: pending
+- Actual commits: `309acf58`; gate reconciliation in the branch tip
 
 ## Review policy and outcome
 Human checkpoint. The gate remains in `gates-todo/` until reviewed and accepted.
