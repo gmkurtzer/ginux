@@ -42,6 +42,9 @@ Preserve balanced-profile read, write, and pread bounds while returning Linux-co
 - Pull request: https://github.com/gmkurtzer/ginux/pull/264
 - Source comment: https://github.com/gmkurtzer/ginux/issues/178#issuecomment-6841185350
 - Reciprocal PR comment: https://github.com/gmkurtzer/ginux/pull/264#issuecomment-6841187126
+- Hosted CI on implementation commit `63655990`:
+  https://github.com/gmkurtzer/ginux/actions/runs/43346019387 -> static/unit
+  and Linux launch integration passed.
 
 ## Decisions and limitations
 - Register clamping preserves the resource ceiling and the Linux short-transfer contract.
@@ -55,4 +58,5 @@ Preserve balanced-profile read, write, and pread bounds while returning Linux-co
 - Actual commits: `63655990`; gate reconciliation in the branch tip
 
 ## Review policy and outcome
-Human checkpoint. The gate remains in `gates-todo/` until reviewed and accepted.
+Technically passed on implementation commit `63655990`. Human checkpoint:
+the gate remains in `gates-todo/` until reviewed and accepted.
