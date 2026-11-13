@@ -6470,7 +6470,13 @@ fn supervise_native(
                 }
             }
             if task.translated_rdi != 0 {
+                // Like RSI above: the guest keeps its virtual selector, and a
+                // restarted call is translated again at its next entry.
                 registers.rdi = task.translated_rdi;
+                if !task.override_exit {
+                    task.override_exit = true;
+                    task.override_result = registers.rax as i64;
+                }
             }
             if task.override_exit {
                 if task.syscall != 61 || registers.rax as i64 <= 0 {
@@ -9605,6 +9611,7 @@ fn supervise_native(
                         }
                         continue;
                     };
+                    task.translated_rdi = registers.rdi;
                     registers.rdi = target_host_pid as u64;
                     if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0 {
                         native_fail(instance, pid, b"native pidfd selector translation failed");
