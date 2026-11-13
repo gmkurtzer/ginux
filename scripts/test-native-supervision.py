@@ -152,6 +152,16 @@ sys_read = ["/"]
         check("signal stop fails closed", code == 1 and "GINUX_FIXTURE: uname-before=-38\n" in out
               and "uname-after" not in out
               and "GINUX_INSTANCE: failed reason=unexpected native trace stop" in out, code, out)
+        # The same failure in a thread while the leader spins. The killed
+        # thread stays a zombie until Ginux reaps it, and the leader is not
+        # reported before then: a reap of the leader alone never returns, and
+        # the run hits the 30 second timeout. Where the thread's lifetime pin
+        # fails, the instance fails at the thread's creation instead, also
+        # with the thread alive, so any failure reason is accepted.
+        code, out = run("Thread-trap", configured)
+        check("failure with a live thread exits", code == 1
+              and "GINUX_FIXTURE: thread=" not in out
+              and "GINUX_INSTANCE: failed reason=" in out, code, out)
         # int 0x80 selects the i386 table; supervision must stop instead of
         # classifying i386 fork (2) as x86-64 open. Without IA32 emulation the
         # host raises SIGSEGV on int 0x80, which ends supervision as an
