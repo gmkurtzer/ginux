@@ -170,6 +170,15 @@ sys_read = ["/"]
                          "GINUX_FIXTURE: wait-ok=1", "GINUX_FIXTURE: child-status=7"]
             check(f"SIGCHLD reaches a handler ({scenario})",
                   code == 0 and fixture == expected, code, out)
+        # systemd 258+ waits for children through waitid(P_PIDFD), with no
+        # fallback.
+        code, out = run("pidfd-wait", configured)
+        fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
+        check("waitid(P_PIDFD) reaps a managed child", code == 0 and fixture == [
+            "GINUX_FIXTURE: pidfd-open-ok=1", "GINUX_FIXTURE: waitid-self=-10",
+            "GINUX_FIXTURE: waitid-not-pidfd=-9", "GINUX_FIXTURE: waitid-invalid=-9",
+            "GINUX_FIXTURE: waitid-high=0", "GINUX_FIXTURE: waitid=0",
+            "GINUX_FIXTURE: waited-child=1", "GINUX_FIXTURE: child-status=7"], code, out)
     print("test-native-supervision: PASS")
 
 
