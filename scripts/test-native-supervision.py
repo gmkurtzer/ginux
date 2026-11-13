@@ -39,10 +39,10 @@ sys_read = ["/"]
 """)
 
         def run(scenario, instance=config, stdin=None, stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE, **options):
+                stderr=subprocess.PIPE, configured_launch=False, **options):
             (root / "scenario").write_text(scenario)
             proc = subprocess.run([str(work / "ginux"), "native", str(instance), str(root)]
-                                  + (["configured"] if instance == configured else []),
+                                  + (["configured"] if instance == configured or configured_launch else []),
                                   stdin=stdin, stdout=stdout, stderr=stderr, timeout=30, **options)
             # Audit records and fixture output have separate writers. Merge
             # only after capture so a concurrent audit fragment cannot prefix
@@ -226,6 +226,15 @@ sys_read = ["/"]
             "GINUX_FIXTURE: null-after-peek=0", "GINUX_FIXTURE: null-rewait=-10",
             "GINUX_FIXTURE: null-invalid-options=-22", "GINUX_FIXTURE: null-rusage-fault=-14",
             "GINUX_FIXTURE: fault-rewait=-10", "GINUX_FIXTURE: null-reaped=800"], code, out)
+        credential_config = work / "credential.toml"
+        credential_config.write_text(configured.read_text().replace(
+            '[network]\nbackend = "none"', '[network]\nbackend = "shared"'))
+        code, out = run("expired-credentials", credential_config, configured_launch=True)
+        fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
+        check("queued credentials survive sender reap", code == 0 and fixture == [
+            "GINUX_FIXTURE: credential-wait=0", "GINUX_FIXTURE: credential-recv=1",
+            "GINUX_FIXTURE: credential-pid=1", "GINUX_FIXTURE: credential-uid=1",
+            "GINUX_FIXTURE: credential-gid=1"], code, out)
         denied = work / "denied-waitid.toml"
         denied.write_text(configured.read_text().replace('allow = ["*"]\ndeny = []',
                                                        'allow = ["*"]\ndeny = ["waitid"]'))
