@@ -36,11 +36,15 @@ complete, instance-isolated output.
   while their stdout markers are absent from journal and console.
 - [x] Obtain human approval to create, execute, and publish this corrective
   gate for review.
+- [x] Localize the regression to immediate task-record removal after a
+  `waitid` reap in merged pull request 247.
+- [x] Retain a bounded, pidfd-pinned virtual credential tombstone after task
+  and process slots are reclaimed.
+- [x] Add deterministic credential-after-reap coverage and pass the unchanged
+  concurrent service-output acceptance test.
+- [x] Pass static, aggregate, and complete Rocky systemd verification.
 
 ## Remaining work
-- [ ] Localize the output-loss root cause.
-- [ ] Implement the narrow correction and focused regression.
-- [ ] Run all verification commands and record fresh evidence.
 - [ ] Push the gate branch and open its stacked pull request.
 - [ ] Stop for human checkpoint review without merging.
 
@@ -53,9 +57,9 @@ complete, instance-isolated output.
 - Gate 23's full Rocky systemd behavior and aggregate regressions remain green.
 
 ## Verification plan
-- Focused deterministic service-output regression -> two concurrent services
-  emit unique markers; each marker is present only in its originating instance
-  console and journal.
+- Focused deterministic native-supervision regression -> a queued UNIX message
+  received after `waitid` reaps its sender retains the sender's virtual PID,
+  UID, and GID.
 - `make check` -> formatting, build, clippy, documentation, and static checks
   pass.
 - `make test-multi-instance` -> complete Gate 17 concurrent acceptance passes.
@@ -69,6 +73,24 @@ complete, instance-isolated output.
 - Preserved-host inspection -> private checker artifacts exist; systemd reports
   successful oneshot completion; marker is absent from both journal and
   console.
+- Commit bisect with the Gate 23 sysinfo correction applied to every candidate
+  -> `d23c0cff` and earlier pass Gate 17; `e5be0578` (merge of pull request
+  247) introduces the deterministic missing-output timeout.
+- Descriptor and syscall tracing -> each checker successfully writes its
+  unique marker to its per-instance journald UNIX socket; the later receiver
+  loses the sender mapping only after systemd reaps the short-lived process.
+- Focused native-supervision suite -> all existing cases pass, including the
+  new check that reaps a sender before `recvmsg` and still receives the correct
+  virtual PID, UID, and GID.
+- `make check` -> passed.
+- `make test-multi-instance` -> passed the complete unchanged Gate 17 matrix;
+  both unique service markers reached their own journal and console, neither
+  reached its peer, and all isolation, contract, network, restart, and teardown
+  assertions passed.
+- `make test-systemd` -> passed cold, warm, repeat, offline, DNF-failure
+  integrity, configured-startup-failure, and controlled-shutdown checks.
+- `make test` -> passed static checks, unit tests, image and host lifecycle
+  checks, and every aggregate QEMU integration.
 
 ## Decisions and limitations
 - Gate 23 remains partial until this gate passes and its concurrent criterion
@@ -76,6 +98,10 @@ complete, instance-isolated output.
 - Missing output is treated as a product regression because systemd explicitly
   routes the service to `journal+console`; the fix must not substitute a test
   artifact for that operator-visible interface.
+- Reclaimed tasks move only their immutable virtual credential mapping into a
+  128-entry bounded cache. Each retained pidfd pins the exact host identity;
+  cache eviction closes the pin before that mapping is discarded, preventing
+  host-PID reuse from being translated as an older virtual sender.
 
 ## Delivery strategy
 - Working branch: `hdae/concurrent-service-output`
@@ -84,8 +110,9 @@ complete, instance-isolated output.
   authorized by the human on 2026-11-12
 - Planned commits: signed gate/control-plane commit; signed implementation and
   focused-regression commit; signed evidence and delivery reconciliation commit
-- Actual commits: pending
+- Actual commits: `e3ba757f` (gate/control plane), `a9c51034`
+  (implementation and focused regression), evidence reconciliation pending
 
 ## Review policy and outcome
-Human-approved checkpoint gate. Execute and publish it, then stop for human
-review. Do not merge or close either Gate 23 or Gate 24 pull request.
+Technically passed checkpoint gate. Publish it, then stop for human review. Do
+not merge or close either Gate 23 or Gate 24 pull request.
