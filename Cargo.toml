@@ -2,7 +2,8 @@
 members = [
     "crates/baseline-runner",
     "crates/ginux-core",
-    "crates/ginux-domain",
+    "crates/ginux-contract",
+    "crates/ginux-instance",
     "crates/ginux-devices",
     "crates/ginux-init",
     "crates/ginux-kernel-views",
@@ -13,6 +14,7 @@ members = [
     "crates/managed-payload",
     "crates/process-native-fixture",
     "crates/runtime-fixture",
+    "crates/security-fuzzer",
 ]
 resolver = "2"
 

@@ -1,8 +1,8 @@
-# Gate 2 Rocky domain-userspace pipeline
+# Gate 2 Rocky instance-userspace pipeline
 
 Gate 2 turns the checksum-pinned Rocky 10.2 GenericCloud QCOW2 from Gate 1
-into an offline domain-userspace artifact. The source disk is data: Ginux does
-not boot its kernel to prepare or run the domain.
+into an offline instance-userspace artifact. The source disk is data: Ginux does
+not boot its kernel to prepare or run the instance.
 
 ## Preparation boundary
 
@@ -19,17 +19,17 @@ This helper kernel is tooling, not the Rocky kernel stored in the source image
 and not a Ginux workload boundary. The helper receives no network access.
 Preparation never modifies the source QCOW2.
 
-The helper image is pinned in `config/rocky-domain-image.env`. Fetch it once,
+The helper image is pinned in `config/rocky-instance-image.env`. Fetch it once,
 when needed, with the explicit `make image-helper-fetch` acquisition target.
 All preparation, validation, and demonstrations after source and helper
 acquisition run with networking disabled.
 
 ## Cache and cleanup
 
-Prepared artifacts live under `build/cache/domain/`, outside Git. `make clean`
+Prepared artifacts live under `build/cache/instance/`, outside Git. `make clean`
 removes temporary conversion state but preserves both the verified source and
 prepared caches. `make image-cache-clean` is the explicit destructive target
-for the prepared domain cache; it does not delete the Gate 1 source QCOW2 or
+for the prepared instance cache; it does not delete the Gate 1 source QCOW2 or
 the Docker helper image.
 
 The tar byte stream is not the reproducibility contract because tar tool

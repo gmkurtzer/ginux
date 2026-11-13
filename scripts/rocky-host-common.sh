@@ -3,8 +3,9 @@
 ROCKY_SSH_PORT=${ROCKY_SSH_PORT:-22222}
 ROCKY_SSH_USER=ginux
 ROCKY_KEY=build/cache/rocky/gate1_ed25519
-ROCKY_PID_FILE=build/rocky-host.pid
-ROCKY_SERIAL_LOG=build/rocky-host-serial.log
+ROCKY_PID_FILE=${ROCKY_PID_FILE:-build/rocky-host.pid}
+ROCKY_SERIAL_LOG=${ROCKY_SERIAL_LOG:-build/rocky-host-serial.log}
+ROCKY_OVERLAY_DISK=${ROCKY_OVERLAY_DISK:-build/rocky-host-overlay.qcow2}
 
 rocky_ssh() {
     ssh \
@@ -30,4 +31,17 @@ rocky_scp() {
         -o StrictHostKeyChecking=no \
         -o UserKnownHostsFile=/dev/null \
         "$@"
+}
+
+rocky_ssh_tty() {
+    ssh -tt \
+        -i "$ROCKY_KEY" \
+        -p "$ROCKY_SSH_PORT" \
+        -o BatchMode=yes \
+        -o ConnectTimeout=5 \
+        -o IdentitiesOnly=yes \
+        -o LogLevel=ERROR \
+        -o StrictHostKeyChecking=no \
+        -o UserKnownHostsFile=/dev/null \
+        "$ROCKY_SSH_USER@127.0.0.1" "$@"
 }

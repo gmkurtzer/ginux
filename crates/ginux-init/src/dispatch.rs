@@ -97,6 +97,8 @@ pub fn balanced_surface_name(surface: BalancedSurface) -> &'static [u8] {
         BalancedSurface::Task => b"task result=pending",
         BalancedSurface::Console => b"bootstrap-console result=pending",
         BalancedSurface::Random => b"random result=pending",
+        BalancedSurface::InstanceWrite => b"disposable-instance-write result=pending",
+        BalancedSurface::Network => b"shared-network result=pending",
         BalancedSurface::VirtualIdentity | BalancedSurface::Lifecycle | BalancedSurface::Denied => {
             b"invalid result=denied"
         }

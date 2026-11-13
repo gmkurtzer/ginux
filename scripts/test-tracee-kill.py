@@ -50,8 +50,8 @@ def main():
             install(program, work / "payload")
             install(program, work / "ginux-managed-payload")
             arguments = {
-                "native": ["native", str(configs / "domain-gate5.toml"), str(root)],
-                "process-native": ["process-native", str(configs / "domain-gate7.toml"),
+                "native": ["native", str(configs / "instance-gate5.toml"), str(root)],
+                "process-native": ["process-native", str(configs / "instance-gate7.toml"),
                                    "/var/tmp/payload"],
                 "gate1": [],
             }[command]
@@ -85,11 +85,11 @@ def main():
     # Before PTRACE_O_EXITKILL is set, a supervisor that blocks or exits
     # without killing the stopped tracee lets it run untraced.
     check("native setup failure kills tracee without PTRACE_KILL", "all", "native", payload,
-          1, "GINUX_DOMAIN: failed reason=native ptrace setup failed\n", True)
+          1, "GINUX_INSTANCE: failed reason=native ptrace setup failed\n", True)
     check("process-native setup failure kills tracee without PTRACE_KILL", "all",
           "process-native", payload,
-          1, "GINUX_DOMAIN: failed reason=process ptrace options failed\n", True)
-    # The domain-stop paths reap the tracee after killing it at its exit.
+          1, "GINUX_INSTANCE: failed reason=process ptrace options failed\n", True)
+    # The lifecycle-stop paths reap the tracee after killing it at its exit.
     check("native exit without PTRACE_KILL", PTRACE_KILL, "native", payload,
           0, "GINUX_NATIVE_CHECK: PASS\n", False)
     check("gate1 exit without PTRACE_KILL", PTRACE_KILL, "gate1", managed,

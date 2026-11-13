@@ -8,7 +8,7 @@ log=build/gate6-devices.log
 ./scripts/check-rocky-host.sh
 rocky_scp target/x86_64-unknown-linux-gnu/release/ginux \
     "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/ginux"
-rocky_scp config/domain-gate6.toml \
+rocky_scp config/instance-gate6.toml \
     "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/gate6.toml"
 
 rocky_ssh 'chmod 0755 /var/tmp/ginux; dd if=/dev/zero of=/var/tmp/ginux-block.img bs=4096 count=1 status=none; /var/tmp/ginux devices /var/tmp/gate6.toml /var/tmp/ginux-block.img' > "$log" 2>&1

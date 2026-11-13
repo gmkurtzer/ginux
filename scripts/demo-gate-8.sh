@@ -3,7 +3,7 @@ set -eu
 
 printf '%s\n' 'Gate 8 demonstration: Ginux-owned virtual kernel views.'
 printf '%s\n' 'Expected: virtual procfs, sysfs, cgroup, mount, and identity data'
-printf '%s\n' '          expose only domain objects; host inventory and mutation remain denied.'
+printf '%s\n' '          expose only instance objects; host inventory and mutation remain denied.'
 printf '\n'
 
 ./scripts/test-kernel-views.sh >/dev/null

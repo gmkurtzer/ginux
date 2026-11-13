@@ -5,6 +5,7 @@ set -eu
 . ./scripts/rocky-host-common.sh
 
 ./scripts/verify-rocky-host.sh
+printf '%s\n' 'Rocky host: preparing cloud-init seed'
 mkdir -p build/cache/rocky build/rocky-seed
 
 if [ ! -f "$ROCKY_KEY" ]; then
@@ -47,3 +48,4 @@ if [ -f build/rocky-seed.iso.cdr ] && [ ! -f build/rocky-seed.iso ]; then
     mv build/rocky-seed.iso.cdr build/rocky-seed.iso
 fi
 test -f build/rocky-seed.iso
+printf '%s\n' 'Rocky host: cloud-init seed ready'
