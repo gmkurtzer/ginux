@@ -8,12 +8,12 @@ The catalog is the reviewable inventory used to normalize instance contracts. An
 
 | Status | Operations |
 |---|---:|
-| complete | 24 |
+| complete | 26 |
 | partial | 156 |
 | denied | 1 |
 | planned | 1 |
 | out-of-scope | 1 |
-| **Total** | **183** |
+| **Total** | **185** |
 
 ## Versioned contract inputs
 
@@ -116,6 +116,8 @@ The catalog is the reviewable inventory used to normalize instance contracts. An
 | `syscall.setgroups` | syscall | 116 | partial | emulate | no | virtual credentials only | `test-systemd` | x86-64 Linux ABI only |
 | `syscall.setresuid` | syscall | 117 | partial | emulate | no | virtual credentials only | `test-systemd` | x86-64 Linux ABI only |
 | `syscall.setresgid` | syscall | 119 | partial | emulate | no | virtual credentials only | `test-systemd` | x86-64 Linux ABI only |
+| `syscall.getpgid` | syscall | 121 | complete | emulate | no | virtual process group | `test-systemd` | x86-64 Linux ABI only |
+| `syscall.getsid` | syscall | 124 | complete | emulate | no | virtual session | `test-systemd` | x86-64 Linux ABI only |
 | `syscall.capget` | syscall | 125 | partial | mediate | no | virtual capability view | `test-systemd` | x86-64 Linux ABI only |
 | `syscall.capset` | syscall | 126 | partial | mediate | no | authority reduction only | `test-systemd` | x86-64 Linux ABI only |
 | `syscall.rt_sigtimedwait` | syscall | 128 | partial | mediate | no | virtual signal state | `test-systemd` | x86-64 Linux ABI only |
