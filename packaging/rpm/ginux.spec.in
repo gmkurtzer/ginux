@@ -25,6 +25,7 @@ Requires:       systemd
 Requires:       util-linux
 
 %global debug_package %{nil}
+%global cargo_target %{_topdir}/CARGO_TARGET
 
 %description
 Ginux is a configurable userspace kernel that runs isolated Linux
@@ -44,14 +45,15 @@ directory = "vendor"
 EOF
 
 %build
+export CARGO_TARGET_DIR=%{cargo_target}
 RUSTFLAGS='' cargo build --offline --locked --release -p ginux-cli -p ginux-oci
 CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS='-C linker=clang -C link-arg=-nostdlib -C link-arg=-static -C link-arg=-no-pie -C relocation-model=static' \
     cargo build --offline --locked --release -p ginux-init --target x86_64-unknown-linux-gnu
 
 %install
-install -D -m 0755 target/release/ginux-cli %{buildroot}%{_bindir}/ginux
-install -D -m 0755 target/release/ginux-oci %{buildroot}%{_libexecdir}/ginux/ginux-image
-install -D -m 0755 target/x86_64-unknown-linux-gnu/release/ginux \
+install -D -m 0755 %{cargo_target}/release/ginux-cli %{buildroot}%{_bindir}/ginux
+install -D -m 0755 %{cargo_target}/release/ginux-oci %{buildroot}%{_libexecdir}/ginux/ginux-image
+install -D -m 0755 %{cargo_target}/x86_64-unknown-linux-gnu/release/ginux \
     %{buildroot}%{_libexecdir}/ginux/ginux-runtime
 install -D -m 0755 scripts/ginux-host-instance-helper.sh \
     %{buildroot}%{_libexecdir}/ginux/ginux-helper
