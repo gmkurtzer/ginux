@@ -18,7 +18,7 @@ Preserve balanced-profile read, write, and pread bounds while returning Linux-co
 ## Completed work
 - [x] Implement balanced-path register clamping.
 - [x] Add deterministic regression coverage.
-- [ ] Verify, commit, push, open the PR, and add reciprocal links.
+- [x] Verify, commit, push, open the PR, and add reciprocal links.
 
 ## Remaining work
 - [ ] Human review and merge.
@@ -39,6 +39,9 @@ Preserve balanced-profile read, write, and pread bounds while returning Linux-co
 - `make check` -> passed.
 - x86-64 Linux-target compile of both C fixtures with strict warnings -> passed.
 - Local launch/native runtime execution -> not run; the macOS arm64 host cannot execute the Linux x86-64 supervisor integration, so hosted CI remains mandatory.
+- Pull request: https://github.com/gmkurtzer/ginux/pull/264
+- Source comment: https://github.com/gmkurtzer/ginux/issues/178#issuecomment-6841185350
+- Reciprocal PR comment: https://github.com/gmkurtzer/ginux/pull/264#issuecomment-6841187126
 
 ## Decisions and limitations
 - Register clamping preserves the resource ceiling and the Linux short-transfer contract.
@@ -47,9 +50,9 @@ Preserve balanced-profile read, write, and pread bounds while returning Linux-co
 ## Delivery strategy
 - Working branch: `hdae/io-short-transfers`
 - Intended base: `main`
-- Pull request: intended
+- Pull request: https://github.com/gmkurtzer/ginux/pull/264
 - Planned commits: signed implementation/gate commit, then an evidence/link reconciliation commit if required
-- Actual commits: pending
+- Actual commits: `63655990`; gate reconciliation in the branch tip
 
 ## Review policy and outcome
 Human checkpoint. The gate remains in `gates-todo/` until reviewed and accepted.
