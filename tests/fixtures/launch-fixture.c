@@ -169,6 +169,11 @@ long launch_fixture_main(word *stack)
         print_number("write=", written);
         return 0;
     }
+    case 'r': {
+        static char random[512];
+        print_number("getrandom=", call3(318, (word)random, sizeof random, 0));
+        return 0;
+    }
     default: return 98;
     }
 }

@@ -379,7 +379,7 @@ pub const fn balanced_arguments_allowed(syscall: u64, arg0: u64, arg1: u64, arg2
         17 => arg2 <= 1024 * 1024,
         257 => arg2 & (O_ACCMODE | MUTATING_OPEN_FLAGS) == 0,
         302 => arg0 == 0 && arg1 <= 15,
-        318 => arg2 <= 256,
+        318 => arg1 <= 256,
         SYS_WAIT4 => arg0 == u64::MAX || arg0 > 0,
         SYS_FUTEX => !futex_priority_inheritance(arg1),
         _ => true,
@@ -440,6 +440,9 @@ mod tests {
         assert!(!balanced_arguments_allowed(1, 1, 0x1000, 4097));
         assert!(balanced_arguments_allowed(17, 3, 0x1000, 1024 * 1024));
         assert!(!balanced_arguments_allowed(17, 3, 0x1000, 1024 * 1024 + 1));
+        assert!(balanced_arguments_allowed(318, 0x1000, 256, 0));
+        assert!(!balanced_arguments_allowed(318, 0x1000, 257, 0));
+        assert!(balanced_arguments_allowed(318, 0x1000, 32, 4));
     }
 
     #[test]

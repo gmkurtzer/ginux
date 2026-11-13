@@ -109,6 +109,11 @@ long native_fixture_main(void)
         print_result("GINUX_FIXTURE: pread=", call4(17, input_fd, (word)input, sizeof input, 0));
         return 0;
     }
+    case 'r': {
+        static char random[512];
+        print_result("GINUX_FIXTURE: getrandom=", call3(318, (word)random, sizeof random, 0));
+        return 0;
+    }
     default:
         return 81;
     }

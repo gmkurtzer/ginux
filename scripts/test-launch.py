@@ -93,6 +93,7 @@ def main():
                b"pi_word=0\nfutex_lock_pi_flags=-1\npi_flags_word=0\n")
         invoke(["oversized"], 0, "exited",
                stdout=b"read=1048576\npread=1048576\n" + b"x" * 4096 + b"write=4096\n")
+        invoke(["random"], 0, "exited", stdout=b"getrandom=256\n")
         with (work / "secret").open("w+b") as secret:
             secret.write(b"host-only data")
             secret.flush()
