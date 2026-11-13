@@ -19,8 +19,8 @@ install -d -m 755 "$sources" "$specs" "$work"
 
 git archive --format=tar --prefix="ginux-$version/" HEAD | gzip -n > \
     "$sources/ginux-$version.tar.gz"
-cargo vendor --locked "$work/vendor" >/dev/null
-tar -C "$work" -cf - vendor | gzip -n > \
+cargo vendor --quiet --locked "$work/vendor" >/dev/null
+COPYFILE_DISABLE=1 tar -C "$work" -cf - vendor | gzip -n > \
     "$sources/ginux-$version-vendor.tar.gz"
 sed "s/@VERSION@/$version/g" packaging/rpm/ginux.spec.in > \
     "$specs/ginux.spec"
