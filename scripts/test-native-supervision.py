@@ -51,6 +51,11 @@ def main():
             "GINUX_FIXTURE: pi_word=0", "GINUX_FIXTURE: futex_lock_pi_flags=-1",
             "GINUX_FIXTURE: pi_flags_word=0"] and "GINUX_NATIVE_CHECK: PASS" in out, code, out)
 
+        code, out = run("random")
+        check("getrandom is a bounded short read",
+              code == 0 and "GINUX_FIXTURE: getrandom=256\n" in out
+              and "GINUX_NATIVE_CHECK: PASS" in out, code, out)
+
         # A plain SIGTRAP stop is not a syscall stop; supervision must fail
         # closed instead of treating the next syscall entry as an exit.
         code, out = run("trap")

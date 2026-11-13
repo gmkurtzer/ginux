@@ -90,6 +90,7 @@ def main():
         invoke(["virtual-tid"], 0, "exited",
                stdout=b"set_tid_address=4242\ngetpid=4242\ngettid=-38\nfutex_lock_pi=-1\n"
                b"pi_word=0\nfutex_lock_pi_flags=-1\npi_flags_word=0\n")
+        invoke(["random"], 0, "exited", stdout=b"getrandom=256\n")
         with (work / "secret").open("w+b") as secret:
             secret.write(b"host-only data")
             secret.flush()
