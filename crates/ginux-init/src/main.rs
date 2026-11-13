@@ -49,9 +49,7 @@ use crate::supervisor::{
     SYS_RT_SIGPROCMASK, SYS_SETGID, SYS_SETGROUPS, SYS_SETUID, SYS_SIGNALFD4, SYS_WAIT4,
     SYS_WRITE_HOST, VIRTUAL_PID,
 };
-use crate::supervisor::{
-    fault_errno, poke_tracee_bytes, write_tracee_bytes as write_tracee_bytes_result, EFAULT,
-};
+use crate::supervisor::{fault_errno, write_tracee_bytes as write_tracee_bytes_result, EFAULT};
 use ginux_devices::{
     BlockBackend, DeviceError, DeviceKind, DeviceName, DeviceRegistry, DeviceView, IsolatedNetwork,
     Partition, IOCTL_CONSOLE_GET_SIZE,
@@ -1625,19 +1623,24 @@ fn supervise_process_native(root_host_pid: usize, instance: &mut Instance) -> ! 
                     registers.rax = virtual_pid as u64;
                     current.override_result = true;
                     if current.clone_ptid != 0 {
-                        if store_tracee_tid(host_pid, current.clone_ptid, virtual_pid).is_err() {
-                            killed_or_fail(
-                                &mut tasks,
-                                task_index,
-                                instance,
-                                root_host_pid,
-                                b"thread tid store failed",
-                            );
-                            continue;
+                        match store_tracee_tid(host_pid, current.clone_ptid, virtual_pid) {
+                            Err(()) => {
+                                killed_or_fail(
+                                    &mut tasks,
+                                    task_index,
+                                    instance,
+                                    root_host_pid,
+                                    b"thread tid store failed",
+                                );
+                                continue;
+                            }
+                            Ok(true) => {
+                                write_all(b"GINUX_NATIVE_PROCESS_AUDIT: thread-tid virtual-tid=");
+                                write_u64(virtual_pid as u64);
+                                write_all(b"\n");
+                            }
+                            Ok(false) => {}
                         }
-                        write_all(b"GINUX_NATIVE_PROCESS_AUDIT: thread-tid virtual-tid=");
-                        write_u64(virtual_pid as u64);
-                        write_all(b"\n");
                     }
                 }
                 current.thread_pending = false;
@@ -2538,7 +2541,7 @@ fn store_wait_results(
 ) -> Result<(), i64> {
     const RUSAGE_BYTES: usize = 144;
     if user_status != 0 {
-        store_tracee_status(host_pid, user_status, status)?;
+        store_tracee_u32(host_pid, user_status, status)?;
     }
     if user_rusage != 0 {
         write_tracee_bytes_result(host_pid, user_rusage, &[0; RUSAGE_BYTES])?;
@@ -2546,18 +2549,19 @@ fn store_wait_results(
     Ok(())
 }
 
-/// Store the status word all or nothing, as the kernel's single 4-byte
-/// store does. A word that crosses a page boundary is written in two parts,
-/// the second page first: if that part faults nothing is written, and if the
-/// first page then faults, the second part gets its previous bytes back.
-fn store_tracee_status(host_pid: usize, user_status: usize, status: u32) -> Result<(), i64> {
+/// Store a 4-byte word (a wait status or a clone tid) all or nothing, as
+/// the kernel's single 4-byte `put_user` does. A word that crosses a page
+/// boundary is written in two parts, the second page first: if that part
+/// faults nothing is written, and if the first page then faults, the second
+/// part gets its previous bytes back.
+fn store_tracee_u32(host_pid: usize, address: usize, value: u32) -> Result<(), i64> {
     const PAGE_SIZE: usize = 4096;
-    let bytes = status.to_le_bytes();
-    let head = PAGE_SIZE - (user_status & (PAGE_SIZE - 1));
+    let bytes = value.to_le_bytes();
+    let head = PAGE_SIZE - (address & (PAGE_SIZE - 1));
     if head >= bytes.len() {
-        return write_tracee_bytes_result(host_pid, user_status, &bytes);
+        return write_tracee_bytes_result(host_pid, address, &bytes);
     }
-    let Some(tail) = user_status.checked_add(head) else {
+    let Some(tail) = address.checked_add(head) else {
         return Err(-EFAULT);
     };
     // The page-aligned tail starts a ptrace word; a page that cannot be read
@@ -2573,7 +2577,7 @@ fn store_tracee_status(host_pid: usize, user_status: usize, status: u32) -> Resu
         return Err(fault_errno(read as i64));
     }
     write_tracee_bytes_result(host_pid, tail, &bytes[head..])?;
-    if let Err(error) = write_tracee_bytes_result(host_pid, user_status, &bytes[..head]) {
+    if let Err(error) = write_tracee_bytes_result(host_pid, address, &bytes[..head]) {
         let _ = write_tracee_bytes_result(
             host_pid,
             tail,
@@ -2592,13 +2596,26 @@ fn write_wait_fault(caller: u32, child: u32) {
     write_all(b"\n");
 }
 
-/// Publish the virtual tid into the tracee's parent-tid cell. The host
-/// kernel stored the host tid there during `clone` with
-/// `CLONE_PARENT_SETTID`; thread identity requires the parent to observe the
-/// virtual tid instead. A valid int pointer may straddle two ptrace words;
-/// [`poke_tracee_bytes`] preserves every neighboring byte.
-fn store_tracee_tid(host_pid: usize, user_tid: usize, tid: u32) -> Result<(), ()> {
-    poke_tracee_bytes(host_pid, user_tid, &tid.to_le_bytes()).map_err(|_| ())
+/// Publish the virtual tid into a `clone` tid cell: the parent's for
+/// `CLONE_PARENT_SETTID`, the child's for `CLONE_CHILD_SETTID`. The host
+/// kernel stored the host tid there; thread identity requires the virtual
+/// tid instead. The store goes through [`store_tracee_u32`] and so honors the
+/// page protections like the kernel's `put_user` (except on the ptrace
+/// fallback of [`write_tracee_bytes`], where only unmapped memory faults).
+/// The kernel ignores a failed tid store and `clone` still succeeds, so a
+/// fault is only audited here and returns `Ok(false)`; any other error, such
+/// as `ESRCH` for a tracee that is gone, is reported.
+fn store_tracee_tid(host_pid: usize, user_tid: usize, tid: u32) -> Result<bool, ()> {
+    match store_tracee_u32(host_pid, user_tid, tid) {
+        Ok(()) => Ok(true),
+        Err(error) if error == -EFAULT => {
+            write_all(b"GINUX_NATIVE_PROCESS_AUDIT: tid store fault virtual-tid=");
+            write_u64(tid as u64);
+            write_all(b"\n");
+            Ok(false)
+        }
+        Err(_) => Err(()),
+    }
 }
 
 fn process_native_fail(instance: &mut Instance, root_pid: usize, reason: &[u8]) -> ! {
