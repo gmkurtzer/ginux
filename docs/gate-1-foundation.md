@@ -113,8 +113,10 @@ requires `GATE1: FAIL` and that the payload never runs past its stop after
 `execve`. `sudo make test-tracee-kill` refuses every request but
 `PTRACE_TRACEME`, or only `PTRACE_KILL`, the same way: `native` and
 `process-native` must still kill their tracee when the ptrace setup fails, and
-Gate 1 and `native` must still end the payload at its exit and pass. The
-supervisors end a tracee with `kill(2)` and `SIGKILL`.
+Gate 1 must still end the payload at exit. A post-setup `native` failure must
+also end its tracee when `PTRACE_KILL` is refused, including when `kill(2)`
+requires the tracer fallback because `CAP_KILL` is unavailable. The supervisors
+end a tracee with `kill(2)` and `SIGKILL`.
 
 ## Baseline benchmark method
 

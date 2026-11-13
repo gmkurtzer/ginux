@@ -138,7 +138,7 @@ test-gate1-setup:
 	python3 scripts/test-gate1-setup.py $(GINUX) .artifacts/gate1/deny-ptrace .artifacts/gate1/payload
 
 test-tracee-kill:
-	python3 scripts/test-tracee-kill.py $(GINUX) .artifacts/gate1/deny-ptrace .artifacts/gate1/payload $(PAYLOAD)
+	python3 scripts/test-tracee-kill.py $(GINUX) .artifacts/gate1/deny-ptrace .artifacts/gate1/payload $(PAYLOAD) .artifacts/launch/native-fixture
 
 test-runtime: build
 	@./scripts/with-rocky-host.sh ./scripts/test-runtime.sh
