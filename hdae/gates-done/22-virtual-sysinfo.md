@@ -22,7 +22,8 @@ Prevent launch/native workloads from observing host uptime, load, memory, swap, 
 - [x] Verify, commit, push, open the PR, and add reciprocal links.
 
 ## Remaining work
-- [ ] Human review and merge.
+- [x] Human review and acceptance.
+- [ ] Merge the accepted pull request.
 
 ## Acceptance criteria
 - `sysinfo` returns zero for success, all counters are zero, and `mem_unit` is one.
@@ -60,5 +61,5 @@ Prevent launch/native workloads from observing host uptime, load, memory, swap, 
 - Actual commits: `86e6016e`; gate reconciliation in the branch tip
 
 ## Review policy and outcome
-Technically passed on implementation commit `86e6016e`. Human checkpoint:
-the gate remains in `gates-todo/` until reviewed and accepted.
+Technically passed on implementation commit `86e6016e`. The human explicitly
+accepted the gate on 2026-11-12 and authorized its merge and issue closure.

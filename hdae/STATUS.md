@@ -207,6 +207,9 @@
 - Gates 18 and 19 were explicitly accepted and closed by the human on
   2026-11-12. Pull requests 260, 261, and the Gate 18 documentation-check
   follow-up 262 are merged; their authoritative records are in `gates-done/`.
+- Gates 20, 21, and 22 were explicitly accepted and closed by the human on
+  2026-11-12. Pull requests 263 and 264 are merged, and pull request 265 is the
+  accepted Gate 22 delivery; their authoritative records are in `gates-done/`.
 
 ## Governing outcome and invariants
 
