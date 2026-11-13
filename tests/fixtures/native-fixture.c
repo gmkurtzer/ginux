@@ -89,6 +89,14 @@ static void sigchld_handler(int signal)
     call3(1, sigchld_pipe, (word)"c", 1);
 }
 
+static volatile int restart_signals;
+
+static void restart_handler(int signal)
+{
+    (void)signal;
+    ++restart_signals;
+}
+
 void sigchld_restorer(void);
 __asm__(".global sigchld_restorer\n"
         "sigchld_restorer:\n"
@@ -545,6 +553,55 @@ long native_fixture_main(void)
             ++reaped;
         }
         print_result("GINUX_FIXTURE: null-reaped=", reaped);
+        return 0;
+    }
+    case 'j': {
+        /* Translated pid selectors: kill and pidfd_open leave the caller's
+         * virtual pid in RDI, as the syscall ABI preserves it, and a wait4
+         * that an SA_RESTART handler interrupts selects the same child when
+         * the kernel restarts it. */
+        struct kernel_sigaction {
+            word handler, flags, restorer, mask;
+        } action = {(word)restart_handler, 0x14000000 /* SA_RESTORER | SA_RESTART */,
+                    (word)sigchld_restorer, 0};
+        int fds[2], status = 0;
+        long self = call3(39, 0, 0, 0), result;
+        word selected = self;
+        __asm__ volatile("syscall" : "=a"(result), "+D"(selected)
+                         : "a"(62L), "S"(0L)
+                         : "rcx", "r11", "memory");
+        print_result("GINUX_FIXTURE: kill-self=", result);
+        print_result("GINUX_FIXTURE: kill-selector-preserved=", selected == (word)self);
+        selected = self;
+        __asm__ volatile("syscall" : "=a"(result), "+D"(selected)
+                         : "a"(434L), "S"(0L)
+                         : "rcx", "r11", "memory");
+        print_result("GINUX_FIXTURE: pidfd-open-ok=", result >= 0);
+        print_result("GINUX_FIXTURE: pidfd-selector-preserved=", selected == (word)self);
+        if (call4(293, (word)fds, 0, 0, 0) < 0) return 82;
+        if (call4(13, 10, (word)&action, 0, 8) != 0) return 83;
+        long slow = call3(57, 0, 0, 0);
+        if (slow == 0) {
+            char go;
+            call3(0, fds[0], (word)&go, 1);
+            return 7;
+        }
+        long helper = call3(57, 0, 0, 0);
+        if (helper == 0) {
+            /* Interrupt the parent's wait repeatedly before the slow child
+             * may exit. */
+            for (int round = 0; round < 20; ++round) {
+                call3(7, 0, 0, 10);
+                call3(62, self, 10, 0);
+            }
+            call3(1, fds[1], (word)"g", 1);
+            return 0;
+        }
+        long waited = call4(61, slow, (word)&status, 0, 0);
+        print_result("GINUX_FIXTURE: restarted-wait=", waited == slow);
+        print_result("GINUX_FIXTURE: child-status=", (status >> 8) & 0xff);
+        print_result("GINUX_FIXTURE: signal-handled=", restart_signals > 0);
+        print_result("GINUX_FIXTURE: helper-wait=", call4(61, helper, (word)&status, 0, 0) == helper);
         return 0;
     }
     case 'e': {

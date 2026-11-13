@@ -238,6 +238,15 @@ sys_read = ["/"]
             "GINUX_FIXTURE: null-after-peek=0", "GINUX_FIXTURE: null-rewait=-10",
             "GINUX_FIXTURE: null-invalid-options=-22", "GINUX_FIXTURE: null-rusage-fault=-14",
             "GINUX_FIXTURE: fault-rewait=-10", "GINUX_FIXTURE: null-reaped=800"], code, out)
+        # A translated pid selector goes back to the guest's virtual pid, also
+        # when an SA_RESTART handler makes the kernel reissue the wait.
+        code, out = run("juggled-pids", configured)
+        fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
+        check("translated pid selectors are restored", code == 0 and fixture == [
+            "GINUX_FIXTURE: kill-self=0", "GINUX_FIXTURE: kill-selector-preserved=1",
+            "GINUX_FIXTURE: pidfd-open-ok=1", "GINUX_FIXTURE: pidfd-selector-preserved=1",
+            "GINUX_FIXTURE: restarted-wait=1", "GINUX_FIXTURE: child-status=7",
+            "GINUX_FIXTURE: signal-handled=1", "GINUX_FIXTURE: helper-wait=1"], code, out)
         credential_config = work / "credential.toml"
         credential_config.write_text(configured.read_text().replace(
             '[network]\nbackend = "none"', '[network]\nbackend = "shared"'))
