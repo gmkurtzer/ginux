@@ -20,9 +20,9 @@
   check`, unchanged `make test-multi-instance`, complete `make test-systemd`,
   and aggregate `make test`.
 - Delivery: Gate 23 is open for review in pull request
-  https://github.com/gmkurtzer/ginux/pull/266. Gate 24 implementation commit
-  `a9c51034` and evidence commit `24a334e4` are local pending branch push and
-  the stacked pull request. Stop with both pull requests open for review.
+  https://github.com/gmkurtzer/ginux/pull/266. Gate 24 implementation and
+  evidence commits are local pending branch push and the stacked pull request.
+  Stop with both pull requests open for review.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
@@ -690,7 +690,7 @@ without merging or closing either gate.
   `gates-todo/` pending delivery and human review.
 - Last evidence: focused native supervision, `make check`, unchanged `make
   test-multi-instance`, complete `make test-systemd`, and aggregate `make test`
-  all pass on implementation commit `a9c51034`.
+  all pass on the Gate 24 implementation branch.
 - Exact next action: publish the Gate 24 stacked pull request, record its URL,
   and stop without merging or closing either pull request.
 - Active work: Gate 12 is technically passed and delivered in pull request 251;
