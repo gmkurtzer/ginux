@@ -18,13 +18,17 @@ the host kernel's mature ELF, CPU, and memory behavior while Ginux intercepts
 every syscall before effect. Implementing and validating a second CPU backend
 now would delay that path and is not required for Gate 5 acceptance.
 
+The human reconsidered this option after accepting Gate 13 on 2026-11-10 and
+reaffirmed that it belongs in the parking lot. Ginux prioritizes lightweight,
+near-native execution; a CPU-emulation backend would add substantial
+compatibility work and likely performance cost.
+
 ## Return condition
 
-Reconsider this gate after the native ptrace path runs the Gate 9
-systemd baseline and Gate 11 has measured its performance, and before Ginux
-makes production-boundary claims. Reconsider it earlier if native supervision
-cannot satisfy a gate without unchecked syscall continuation, or if the exposed
-host ELF, memory, signal, fault, scheduling, or ptrace surface is unacceptable.
+Reconsider only after explicit human direction, if a high-isolation emulated
+backend becomes a product requirement, or if native supervision cannot satisfy
+an approved boundary without unchecked syscall continuation. Do not reactivate
+it merely because native performance or compatibility work is difficult.
 
 ## Proposed scope
 
@@ -32,7 +36,7 @@ host ELF, memory, signal, fault, scheduling, or ptrace surface is unacceptable.
 - Map OCI-backed executable content and writable memory into an engine owned by
   Ginux rather than a native host tracee.
 - Hook x86-64 `syscall` instructions into the existing Ginux dispatcher.
-- Reuse domain configuration, virtual VFS, descriptors, contracts, devices,
+- Reuse instance configuration, virtual VFS, descriptors, contracts, devices,
   kernel views, lifecycle, and audit semantics across both backends.
 - Define explicit backend selection and fail closed when the requested backend
   is unavailable.
@@ -50,7 +54,7 @@ host ELF, memory, signal, fault, scheduling, or ptrace surface is unacceptable.
   with equivalent observable Ginux syscall decisions.
 - A Unicorn-managed `syscall` cannot enter the host syscall implementation.
 - Managed memory and register state remain engine/Ginux-owned and host pointers
-  are not accepted as domain authority.
+  are not accepted as instance authority.
 - Backend-differential tests identify semantic mismatches deterministically.
 - Benchmarks quantify compatibility and overhead relative to native
   native ptrace supervision.

@@ -17,6 +17,6 @@ printf '%s\n' '  [5/9] PASS  futex, eventfd, epoll readiness, and periodic timer
 printf '%s\n' '  [6/9] PASS  model shutdown left zero tasks and released runtime state'
 printf '%s\n' '  [7/9] PASS  native virtual PID 1 forked 32 children, two concurrently per round'
 printf '%s\n' '  [8/9] PASS  fork/getpid/getppid/wait exposed virtual PIDs; wait restart race passed'
-printf '%s\n' '  [9/9] PASS  every native child was traced/reaped; domain cleanup left zero tasks'
+printf '%s\n' '  [9/9] PASS  every native child was traced/reaped; instance cleanup left zero tasks'
 printf '%s\n' 'Not claimed: complete Linux process conformance or systemd compatibility (Gate 9).'
 printf '%s\n' 'GATE7: PASS (9/9 demonstration checks)'

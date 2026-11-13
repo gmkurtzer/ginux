@@ -18,10 +18,10 @@ else
     missing=1
 fi
 
-. ./config/rocky-domain-image.env
+. ./config/rocky-instance-image.env
 if docker info >/dev/null 2>&1; then
     printf '%s\n' 'doctor: Docker engine            running'
-    if docker image inspect "$ROCKY_DOMAIN_HELPER_IMAGE" >/dev/null 2>&1; then
+    if docker image inspect "$ROCKY_INSTANCE_HELPER_IMAGE" >/dev/null 2>&1; then
         printf '%s\n' 'doctor: pinned image helper      present'
     else
         printf '%s\n' 'doctor: pinned image helper      absent (run make image-helper-fetch)'

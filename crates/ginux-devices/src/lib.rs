@@ -77,7 +77,7 @@ impl DeviceName {
 #[derive(Clone, Copy)]
 struct Assignment {
     active: bool,
-    domain: u64,
+    instance: u64,
     backend: u64,
     name: DeviceName,
     kind: DeviceKind,
@@ -87,7 +87,7 @@ impl Assignment {
     const fn empty() -> Self {
         Self {
             active: false,
-            domain: 0,
+            instance: 0,
             backend: 0,
             name: DeviceName {
                 bytes: [0; MAX_DEVICE_NAME],
@@ -101,7 +101,7 @@ impl Assignment {
 #[derive(Clone, Copy)]
 struct Descriptor {
     open: bool,
-    domain: u64,
+    instance: u64,
     assignment: usize,
 }
 
@@ -109,7 +109,7 @@ impl Descriptor {
     const fn empty() -> Self {
         Self {
             open: false,
-            domain: 0,
+            instance: 0,
             assignment: 0,
         }
     }
@@ -138,7 +138,7 @@ impl<const DEVICES: usize, const FDS: usize> DeviceRegistry<DEVICES, FDS> {
 
     pub fn assign(
         &mut self,
-        domain: u64,
+        instance: u64,
         backend: u64,
         name: DeviceName,
         kind: DeviceKind,
@@ -146,7 +146,7 @@ impl<const DEVICES: usize, const FDS: usize> DeviceRegistry<DEVICES, FDS> {
         if self.assignments.iter().any(|entry| {
             entry.active
                 && (entry.backend == backend
-                    || (entry.domain == domain && entry.name.as_bytes() == name.as_bytes()))
+                    || (entry.instance == instance && entry.name.as_bytes() == name.as_bytes()))
         }) {
             return Err(DeviceError::AssignmentConflict);
         }
@@ -157,7 +157,7 @@ impl<const DEVICES: usize, const FDS: usize> DeviceRegistry<DEVICES, FDS> {
             .ok_or(DeviceError::RegistryFull)?;
         *slot = Assignment {
             active: true,
-            domain,
+            instance,
             backend,
             name,
             kind,
@@ -165,12 +165,12 @@ impl<const DEVICES: usize, const FDS: usize> DeviceRegistry<DEVICES, FDS> {
         Ok(())
     }
 
-    pub fn visible(&self, domain: u64, output: &mut [DeviceName]) -> usize {
+    pub fn visible(&self, instance: u64, output: &mut [DeviceName]) -> usize {
         let mut count = 0;
         for entry in self
             .assignments
             .iter()
-            .filter(|entry| entry.active && entry.domain == domain)
+            .filter(|entry| entry.active && entry.instance == instance)
         {
             if count == output.len() {
                 break;
@@ -181,13 +181,13 @@ impl<const DEVICES: usize, const FDS: usize> DeviceRegistry<DEVICES, FDS> {
         count
     }
 
-    pub fn views(&self, domain: u64, output: &mut [DeviceView]) -> usize {
+    pub fn views(&self, instance: u64, output: &mut [DeviceView]) -> usize {
         let mut count = 0usize;
         for (index, entry) in self
             .assignments
             .iter()
             .enumerate()
-            .filter(|(_, entry)| entry.active && entry.domain == domain)
+            .filter(|(_, entry)| entry.active && entry.instance == instance)
         {
             if count == output.len() {
                 break;
@@ -211,12 +211,12 @@ impl<const DEVICES: usize, const FDS: usize> DeviceRegistry<DEVICES, FDS> {
         count
     }
 
-    pub fn open(&mut self, domain: u64, name: &[u8]) -> Result<u32, DeviceError> {
+    pub fn open(&mut self, instance: u64, name: &[u8]) -> Result<u32, DeviceError> {
         let assignment = self
             .assignments
             .iter()
             .position(|entry| {
-                entry.active && entry.domain == domain && entry.name.as_bytes() == name
+                entry.active && entry.instance == instance && entry.name.as_bytes() == name
             })
             .ok_or(DeviceError::NotAssigned)?;
         let descriptor = self
@@ -226,13 +226,13 @@ impl<const DEVICES: usize, const FDS: usize> DeviceRegistry<DEVICES, FDS> {
             .ok_or(DeviceError::DescriptorLimit)?;
         self.descriptors[descriptor] = Descriptor {
             open: true,
-            domain,
+            instance,
             assignment,
         };
         Ok(0x4000_0000 | descriptor as u32)
     }
 
-    fn descriptor(&self, domain: u64, fd: u32) -> Result<&Assignment, DeviceError> {
+    fn descriptor(&self, instance: u64, fd: u32) -> Result<&Assignment, DeviceError> {
         if fd & 0x4000_0000 == 0 {
             return Err(DeviceError::InvalidDescriptor);
         }
@@ -240,16 +240,21 @@ impl<const DEVICES: usize, const FDS: usize> DeviceRegistry<DEVICES, FDS> {
         let descriptor = self
             .descriptors
             .get(index)
-            .filter(|entry| entry.open && entry.domain == domain)
+            .filter(|entry| entry.open && entry.instance == instance)
             .ok_or(DeviceError::InvalidDescriptor)?;
         self.assignments
             .get(descriptor.assignment)
-            .filter(|entry| entry.active && entry.domain == domain)
+            .filter(|entry| entry.active && entry.instance == instance)
             .ok_or(DeviceError::InvalidDescriptor)
     }
 
-    pub fn read(&mut self, domain: u64, fd: u32, output: &mut [u8]) -> Result<usize, DeviceError> {
-        let kind = self.descriptor(domain, fd)?.kind;
+    pub fn read(
+        &mut self,
+        instance: u64,
+        fd: u32,
+        output: &mut [u8],
+    ) -> Result<usize, DeviceError> {
+        let kind = self.descriptor(instance, fd)?.kind;
         match kind {
             DeviceKind::Null | DeviceKind::Console => Ok(0),
             DeviceKind::Zero => {
@@ -269,8 +274,8 @@ impl<const DEVICES: usize, const FDS: usize> DeviceRegistry<DEVICES, FDS> {
         }
     }
 
-    pub fn write(&self, domain: u64, fd: u32, input: &[u8]) -> Result<usize, DeviceError> {
-        match self.descriptor(domain, fd)?.kind {
+    pub fn write(&self, instance: u64, fd: u32, input: &[u8]) -> Result<usize, DeviceError> {
+        match self.descriptor(instance, fd)?.kind {
             DeviceKind::Null | DeviceKind::Console => Ok(input.len()),
             DeviceKind::Zero | DeviceKind::Random | DeviceKind::Block | DeviceKind::Network => {
                 Err(DeviceError::PermissionDenied)
@@ -280,12 +285,12 @@ impl<const DEVICES: usize, const FDS: usize> DeviceRegistry<DEVICES, FDS> {
 
     pub fn ioctl(
         &self,
-        domain: u64,
+        instance: u64,
         fd: u32,
         request: u64,
         payload: &mut [u8],
     ) -> Result<(), DeviceError> {
-        let kind = self.descriptor(domain, fd)?.kind;
+        let kind = self.descriptor(instance, fd)?.kind;
         match (kind, request) {
             (DeviceKind::Console, IOCTL_CONSOLE_GET_SIZE) if payload.len() == 8 => {
                 payload.copy_from_slice(&[24, 0, 80, 0, 0, 0, 0, 0]);
@@ -296,26 +301,26 @@ impl<const DEVICES: usize, const FDS: usize> DeviceRegistry<DEVICES, FDS> {
         }
     }
 
-    pub fn map(&self, domain: u64, fd: u32) -> Result<(), DeviceError> {
-        self.descriptor(domain, fd)?;
+    pub fn map(&self, instance: u64, fd: u32) -> Result<(), DeviceError> {
+        self.descriptor(instance, fd)?;
         Err(DeviceError::DirectMappingDenied)
     }
 
-    pub fn close(&mut self, domain: u64, fd: u32) -> Result<(), DeviceError> {
-        self.descriptor(domain, fd)?;
+    pub fn close(&mut self, instance: u64, fd: u32) -> Result<(), DeviceError> {
+        self.descriptor(instance, fd)?;
         let index = (fd & 0x3fff_ffff) as usize;
         self.descriptors[index] = Descriptor::empty();
         Ok(())
     }
 
-    pub fn revoke(&mut self, domain: u64) {
+    pub fn revoke(&mut self, instance: u64) {
         for descriptor in &mut self.descriptors {
-            if descriptor.open && descriptor.domain == domain {
+            if descriptor.open && descriptor.instance == instance {
                 *descriptor = Descriptor::empty();
             }
         }
         for assignment in &mut self.assignments {
-            if assignment.active && assignment.domain == domain {
+            if assignment.active && assignment.instance == instance {
                 *assignment = Assignment::empty();
             }
         }
