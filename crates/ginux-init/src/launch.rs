@@ -4,11 +4,17 @@
 //! input-file staging. Workload definitions stay with the entry points in
 //! `main.rs`; `launch` runs the executable and arguments from instance config.
 
-use ginux_core::{
-    balanced_identity_result, balanced_mediated_result, balanced_surface, Action, SYS_EXIT,
-    SYS_EXIT_GROUP,
+use ginux_contract::{
+    syscall_semantic_operation, Action as ContractAction, EffectiveContract, EffectiveRule, Kind,
+    Provenance, Status,
 };
-use ginux_instance::{ConfigError, ExecutionBackend, ExecutionProfile, Instance, InstanceConfig};
+use ginux_core::{
+    balanced_identity_result, balanced_mediated_result, balanced_surface,
+    is_shared_network_syscall, Action, BalancedSurface, SYS_EXIT, SYS_EXIT_GROUP,
+};
+use ginux_instance::{
+    AuditMode, ConfigError, ExecutionBackend, ExecutionProfile, Instance, InstanceConfig,
+};
 
 use crate::dispatch::{
     balanced_surface_name, decide_native, native_arguments_allowed, NativeDecision,
@@ -361,6 +367,21 @@ pub fn launch_main(config_path: *const u8, root_path: *const u8, result_path: *c
     stage_result_path(result_path);
     let config = launch_load_config(config_path);
     launch_validate(&config);
+    let contract = config
+        .effective_contract()
+        .unwrap_or_else(|error| launch_rejected(error.as_str()));
+    // Refuse an instance that explicitly denies what launch cannot enforce,
+    // rather than accept the denial and ignore it.
+    if let Some(rule) = contract
+        .rules()
+        .iter()
+        .find(|rule| launch_cannot_enforce(rule))
+    {
+        launch_unenforced(rule.operation.id);
+    }
+    unsafe {
+        AUDIT_DISABLED = config.audit_mode == AuditMode::Disabled;
+    }
     if let Some(reason) = standard_stream_refusal() {
         launch_startup_fail(reason);
     }
@@ -377,7 +398,7 @@ pub fn launch_main(config_path: *const u8, root_path: *const u8, result_path: *c
     if child == 0 {
         launch_tracee(root_path);
     }
-    supervise_launch(child as usize, &mut instance)
+    supervise_launch(child as usize, &mut instance, &contract)
 }
 
 fn launch_validate(config: &InstanceConfig) {
@@ -388,6 +409,43 @@ fn launch_validate(config: &InstanceConfig) {
     }
     if !config.storage.as_slice().is_empty() || !config.devices.as_slice().is_empty() {
         launch_startup_fail(b"launch does not support storage or device assignments");
+    }
+    // Native-only controls have no owner in this balanced launch backend.
+    // Fail before forking instead of echoing restrictions we cannot enforce.
+    if !config.filesystem_read.as_slice().is_empty()
+        || !config.filesystem_write.as_slice().is_empty()
+        || !config.filesystem_create.as_slice().is_empty()
+        || !config.filesystem_write_deny.as_slice().is_empty()
+        || !config.privilege_setuid.as_slice().is_empty()
+        || !config.privilege_setgid.as_slice().is_empty()
+        || !config.device_read.as_slice().is_empty()
+        || !config.device_write.as_slice().is_empty()
+        || !config.device_create.as_slice().is_empty()
+        || !config.process_signals.as_slice().is_empty()
+        || !config.process_namespace_create.as_slice().is_empty()
+        || !config.process_namespace_join.as_slice().is_empty()
+        || !config.kernel_proc_read.as_slice().is_empty()
+        || !config.kernel_proc_write.as_slice().is_empty()
+        || !config.kernel_sys_read.as_slice().is_empty()
+        || !config.kernel_sys_write.as_slice().is_empty()
+        || !config.volumes.as_slice().is_empty()
+        || !config.pre_boot_hooks.as_slice().is_empty()
+        || !config.ingress_allow.as_slice().is_empty()
+        || !config.ingress_deny.as_slice().is_empty()
+        || !config.egress_allow.as_slice().is_empty()
+        || !config.egress_deny.as_slice().is_empty()
+        || !config.port_forwards.as_slice().is_empty()
+        || config.filesystem_device_nodes
+        || config.process_ptrace
+        || config.process_max_processes != 4096
+        || config.process_max_threads != 4096
+        || config.access_uid != 0
+        || config.access_gid != 0
+        || config.network_backend != ginux_instance::NetworkBackend::None
+        || !config.network_interface.as_bytes().is_empty()
+        || !config.network_source.as_bytes().is_empty()
+    {
+        launch_startup_fail(b"launch does not enforce native typed controls");
     }
     if config.id.as_bytes().is_empty() || config.id.as_bytes().len() > 64 {
         launch_startup_fail(b"instance id length invalid");
@@ -536,9 +594,13 @@ static mut RESULT_FD: isize = -1;
 
 static mut AUDIT_BYTES: usize = 0;
 static mut AUDIT_CAPPED: bool = false;
+// `[audit] enabled = false` suppresses decision records.
+static mut AUDIT_DISABLED: bool = false;
 // One audit record is staged here and written whole once its newline
 // arrives, so the budget never splits a record and the truncation notice
 // always starts its own line.
+// The longest record, an entry with the longest catalog operation id and
+// policy source, stays under 200 bytes.
 const AUDIT_RECORD_CAPACITY: usize = 256;
 static mut AUDIT_RECORD: [u8; AUDIT_RECORD_CAPACITY] = [0; AUDIT_RECORD_CAPACITY];
 static mut AUDIT_RECORD_LEN: usize = 0;
@@ -588,6 +650,14 @@ fn stage_result_path(path: *const u8) {
     unsafe {
         RESULT_FD = descriptor;
     }
+}
+
+fn launch_unenforced(operation: &str) -> ! {
+    write_stderr(b"ginux: launch config rejected reason=unenforced-deny operation=");
+    write_stderr(operation.as_bytes());
+    write_stderr(b"\n");
+    write_completion_result(OUTCOME_SUPERVISOR_ERROR, false, 0, false, 0);
+    exit_process(2)
 }
 
 fn launch_rejected(reason: &str) -> ! {
@@ -682,7 +752,7 @@ pub fn launch_usage() -> ! {
 
 fn audit_write(bytes: &[u8]) {
     let record = unsafe {
-        if AUDIT_CAPPED {
+        if AUDIT_DISABLED || AUDIT_CAPPED {
             return;
         }
         let start = AUDIT_RECORD_LEN;
@@ -710,6 +780,21 @@ fn audit_write(bytes: &[u8]) {
         &record[..length]
     };
     write_stderr(record);
+}
+
+/// The contract rule behind a decision, as in native audit records.
+fn audit_rule(rule: Option<&EffectiveRule>) {
+    audit_write(b" operation=");
+    audit_write(rule.map_or(b"unknown".as_slice(), |r| r.operation.id.as_bytes()));
+    audit_write(b" policy-source=");
+    match rule {
+        Some(rule) => {
+            audit_write(rule.source.as_bytes());
+            audit_write(b" policy-rule=");
+            audit_u64(rule.source_rule as u64);
+        }
+        None => audit_write(b"default-deny"),
+    }
 }
 
 fn audit_cap() {
@@ -954,7 +1039,7 @@ fn tracee_setup_fail(message: &[u8], code: usize) -> ! {
     }
 }
 
-fn supervise_launch(pid: usize, instance: &mut Instance) -> ! {
+fn supervise_launch(pid: usize, instance: &mut Instance, contract: &EffectiveContract) -> ! {
     let mut status = 0i32;
     if wait(pid, &mut status) < 0 {
         launch_fail(instance, pid, b"launch tracee wait after exec failed");
@@ -971,6 +1056,11 @@ fn supervise_launch(pid: usize, instance: &mut Instance) -> ! {
     }
     line_stderr(b"ginux: launch backend=ptrace-native profile=balanced elf-loader=host");
     line_stderr(b"ginux: launch tracee-uid=1000 tracee-gid=1000 root=host-path-read-only");
+    write_stderr(b"ginux: launch contract instance=");
+    write_stderr(instance.config().id.as_bytes());
+    write_stderr(b" digest=");
+    write_stderr(contract.digest());
+    write_stderr(b"\n");
 
     let mut sequence = 0u64;
     let mut awaiting_exit = false;
@@ -1075,7 +1165,19 @@ fn supervise_launch(pid: usize, instance: &mut Instance) -> ! {
                 launch_fail(instance, pid, b"launch getrandom clamp failed");
             }
         }
-        let decision = match decide_native(syscall, registers.rdi, registers.rsi, registers.rdx) {
+        // The resolved instance contract is checked first: its denials apply
+        // before any effect, and its allowances never widen the balanced surface.
+        let rule = contract.runtime_rule(syscall, launch_semantic_operation(&registers));
+        let native = match rule.map_or(ContractAction::Deny(38), |rule| rule.action) {
+            ContractAction::Deny(errno) => NativeDecision::Contract(ginux_core::Decision {
+                syscall,
+                action: Action::Deny(errno),
+            }),
+            ContractAction::Emulate | ContractAction::Mediate => {
+                decide_native(syscall, registers.rdi, registers.rsi, registers.rdx)
+            }
+        };
+        let decision = match native {
             NativeDecision::Contract(decision) => decision,
             NativeDecision::Hooked { lane, result } => {
                 let lane_name: &[u8] = match lane {
@@ -1084,7 +1186,12 @@ fn supervise_launch(pid: usize, instance: &mut Instance) -> ! {
                     crate::dispatch::Lane::Channel => b"channel",
                     crate::dispatch::Lane::Contract => b"contract",
                 };
-                audit_write(b"ginux: emulate surface=lane-");
+                audit_write(b"ginux: audit sequence=");
+                audit_u64(sequence);
+                audit_write(b" phase=entry syscall=");
+                audit_u64(syscall);
+                audit_rule(rule);
+                audit_write(b" action=emulate surface=lane-");
                 audit_write(lane_name);
                 audit_write(b" result=");
                 audit_i64(result);
@@ -1105,6 +1212,7 @@ fn supervise_launch(pid: usize, instance: &mut Instance) -> ! {
         audit_u64(sequence);
         audit_write(b" phase=entry syscall=");
         audit_u64(syscall);
+        audit_rule(rule);
         audit_write(b" action=");
         match decision.action {
             Action::Emulate if balanced_identity_result(syscall).is_some() => {
@@ -1187,6 +1295,94 @@ fn supervise_launch(pid: usize, instance: &mut Instance) -> ! {
             }
             _ => launch_fail(instance, pid, b"invalid launch contract decision"),
         }
+    }
+}
+
+/// The semantic families whose denial launch enforces: those
+/// `launch_semantic_operation` classifies, and the network families, which
+/// no launch workload can reach. Clock reads are classified but not listed:
+/// the host vDSO answers them without a syscall.
+const LAUNCH_ENFORCED_OPERATIONS: [&str; 11] = [
+    "filesystem.path.read",
+    "filesystem.path.write",
+    "device.console.write",
+    "ioctl.tty.get_winsize",
+    "memory.virtual.manage",
+    "signal.virtual.deliver",
+    "credential.virtual.set",
+    "network.inet.tcp.bind",
+    "network.inet.tcp.connect",
+    "network.inet.udp.bind",
+    "network.inet.udp.connect",
+];
+
+// The network families are unreachable only while no hook lane claims, and
+// the balanced policy denies, every socket and io_uring syscall.
+const _: () = {
+    let mut number = 0;
+    while number < 512 {
+        if is_shared_network_syscall(number) || matches!(number, 425..=427) {
+            assert!(
+                matches!(
+                    crate::dispatch::classify(number),
+                    crate::dispatch::Lane::Contract
+                ) && matches!(balanced_surface(number), BalancedSurface::Denied)
+            );
+        }
+        number += 1;
+    }
+};
+
+/// The x86-64 vDSO entries: time, gettimeofday, clock_gettime, clock_getres
+/// and getcpu. Launch execs the workload with the host vDSO mapped, so libc
+/// answers these calls without a syscall.
+const VDSO_SYSCALLS: [u64; 5] = [96, 201, 228, 229, 309];
+
+/// Whether launch would accept this rule's explicit denial without
+/// enforcing it.
+fn launch_cannot_enforce(rule: &EffectiveRule) -> bool {
+    let explicit = matches!(
+        rule.provenance,
+        Provenance::InstanceDeny | Provenance::RecipeDeny | Provenance::ExactDeny
+    );
+    // An operation the catalog never grants is denied whatever the contract
+    // says.
+    let grantable = matches!(rule.operation.status, Status::Complete | Status::Partial);
+    explicit
+        && grantable
+        && match rule.operation.kind {
+            Kind::Syscall => rule
+                .operation
+                .abi_number
+                .is_some_and(|number| VDSO_SYSCALLS.contains(&number)),
+            _ => !LAUNCH_ENFORCED_OPERATIONS.contains(&rule.operation.id),
+        }
+}
+
+/// The semantic operation of a launch syscall, from its registers alone.
+/// Descriptors are compared as the kernel reads them, as 32-bit values.
+fn launch_semantic_operation(registers: &UserRegs) -> Option<&'static str> {
+    // O_WRONLY | O_RDWR, O_CREAT, O_TRUNC and O_APPEND.
+    const WRITE_FLAGS: u64 = 3 | 0o100 | 0o1000 | 0o2000;
+    let path = |flags: u64| {
+        if flags & WRITE_FLAGS != 0 {
+            "filesystem.path.write"
+        } else {
+            "filesystem.path.read"
+        }
+    };
+    // The balanced policy lets write and writev reach only descriptors 1 and
+    // 2, so those writes are console output. Reads are allowed on any
+    // descriptor, and a duplicate of stdin is just another number, so console
+    // input cannot be told apart here and is not classified.
+    let fd = registers.rdi as u32;
+    match registers.orig_rax {
+        1 | 20 if fd == 1 || fd == 2 => Some("device.console.write"),
+        2 => Some(path(registers.rsi)),
+        257 => Some(path(registers.rdx)),
+        4 | 6 | 21 | 89 | 262 | 267 | 332 | 439 => Some("filesystem.path.read"),
+        83 | 87 | 90 | 258 | 263 | 268 => Some("filesystem.path.write"),
+        syscall => syscall_semantic_operation(syscall, registers.rsi),
     }
 }
 

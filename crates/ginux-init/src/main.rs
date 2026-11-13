@@ -6803,8 +6803,6 @@ fn supervise_native(
             } else {
                 Some("filesystem.path.read")
             }
-        } else if syscall == 16 && registers.rsi == 0x5413 {
-            Some("ioctl.tty.get_winsize")
         } else if syscall == 0 && registers.rdi as i64 == task.console_fd {
             Some("device.console.read")
         } else if syscall == 1 && registers.rdi as i64 == task.console_fd {
@@ -6817,22 +6815,10 @@ fn supervise_native(
                 (2, 49) => Some("network.inet.udp.bind"),
                 _ => None,
             }
-        } else if matches!(syscall, 9..=12) {
-            Some("memory.virtual.manage")
-        } else if matches!(syscall, 13 | 14 | 62 | 127..=130 | 289) {
-            Some("signal.virtual.deliver")
-        } else if matches!(syscall, 96 | 228 | 229) {
-            Some("time.clock.read")
-        } else if matches!(syscall, 105 | 106 | 116 | 117 | 119 | 122 | 123) {
-            Some("credential.virtual.set")
         } else {
-            None
+            ginux_contract::syscall_semantic_operation(syscall, registers.rsi)
         };
-        let semantic_rule = semantic_operation.and_then(|id| contract.operation_rule(id));
-        let syscall_rule = contract.syscall_rule(syscall);
-        let contract_rule = semantic_rule
-            .filter(|rule| matches!(rule.action, ContractAction::Deny(_)))
-            .or(syscall_rule);
+        let contract_rule = contract.runtime_rule(syscall, semantic_operation);
         let contract_action = contract_rule
             .map(|rule| rule.action)
             .unwrap_or(ContractAction::Deny(38));
