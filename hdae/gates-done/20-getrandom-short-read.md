@@ -21,7 +21,8 @@ Enforce the balanced profile's 256-byte `getrandom` bound on the buffer length w
 - [x] Verify, commit, push, open the PR, and add reciprocal links.
 
 ## Remaining work
-- [ ] Human review and merge.
+- [x] Human review and acceptance.
+- [ ] Merge the accepted pull request.
 
 ## Acceptance criteria
 - `balanced_arguments_allowed(318, ..., 256, flags)` accepts the request and a length above 256 does not pass unchanged.
@@ -58,5 +59,5 @@ Enforce the balanced profile's 256-byte `getrandom` bound on the buffer length w
 - Actual commits: `309acf58`; gate reconciliation in the branch tip
 
 ## Review policy and outcome
-Technically passed on implementation commit `309acf58`. Human checkpoint:
-the gate remains in `gates-todo/` until reviewed and accepted.
+Technically passed on implementation commit `309acf58`. The human explicitly
+accepted the gate on 2026-11-12 and authorized its merge and issue closure.
