@@ -3426,6 +3426,23 @@ struct NativeSupervisorTask {
 }
 
 #[derive(Clone, Copy)]
+struct NativeRetiredCredential {
+    host_pid: usize,
+    virtual_pid: u32,
+    uid: u32,
+    gid: u32,
+    lifetime_pidfd: isize,
+}
+
+const EMPTY_RETIRED_CREDENTIAL: NativeRetiredCredential = NativeRetiredCredential {
+    host_pid: 0,
+    virtual_pid: 0,
+    uid: 0,
+    gid: 0,
+    lifetime_pidfd: -1,
+};
+
+#[derive(Clone, Copy)]
 struct NativeSocketFd {
     fd: i64,
     protocol: u8,
@@ -3996,6 +4013,43 @@ fn native_pidfd_reaped(fd: isize) -> Option<bool> {
         return None;
     }
     Some(descriptor.revents & 16 != 0)
+}
+
+fn native_retire_credential(
+    task: NativeSupervisorTask,
+    processes: &ProcessTable<128>,
+    retired: &mut [NativeRetiredCredential; 128],
+    next: &mut usize,
+) -> bool {
+    // Reclaim the full task/process slot while retaining the small identity
+    // that queued UNIX messages and connected peers may still report. Keeping
+    // the pidfd open pins the numeric host PID, so the bounded cache cannot
+    // translate a reused PID as an older virtual sender.
+    if task.lifetime_pidfd < 0 {
+        return true;
+    }
+    let Ok(view) = processes.view(task.virtual_id) else {
+        return false;
+    };
+    let slot = retired
+        .iter()
+        .position(|credential| credential.lifetime_pidfd < 0)
+        .unwrap_or_else(|| {
+            let slot = *next % retired.len();
+            *next = next.wrapping_add(1);
+            slot
+        });
+    if retired[slot].lifetime_pidfd >= 0 {
+        let _ = unsafe { syscall1(SYS_CLOSE_HOST, retired[slot].lifetime_pidfd as usize) };
+    }
+    retired[slot] = NativeRetiredCredential {
+        host_pid: task.host_pid,
+        virtual_pid: task.virtual_id.pid,
+        uid: view.credentials.uid,
+        gid: view.credentials.gid,
+        lifetime_pidfd: task.lifetime_pidfd,
+    };
+    true
 }
 
 fn native_pidfd_host_target(caller_host_pid: usize, fd: usize) -> Option<usize> {
@@ -5634,6 +5688,8 @@ fn supervise_native(
     let control_available = unsafe { syscall2(SYS_FCNTL as usize, 10, F_GETFD as usize) } >= 0;
     let mut control_broker_pid = 0isize;
     let mut tasks: [Option<NativeSupervisorTask>; 128] = [None; 128];
+    let mut retired_credentials = [EMPTY_RETIRED_CREDENTIAL; 128];
+    let mut next_retired_credential = 0usize;
     let mut virtual_kernel_fds = [EMPTY_VIRTUAL_KERNEL_FD; NATIVE_VIRTUAL_KERNEL_FD_LIMIT];
     let mut virtual_kernel_state = NativeVirtualKernelState::new();
     let mut pending_child_stops = [0usize; 16];
@@ -6337,13 +6393,20 @@ fn supervise_native(
                         .unwrap_or_else(|| {
                             native_fail(instance, pid, b"native waitid parent unknown")
                         });
+                    if !native_retire_credential(
+                        child,
+                        &processes,
+                        &mut retired_credentials,
+                        &mut next_retired_credential,
+                    ) {
+                        native_fail(instance, pid, b"native waitid credential retirement failed");
+                    }
                     if processes
                         .wait(parent, WaitTarget::Specific(child.virtual_id.pid), 0)
                         .is_err()
                     {
                         native_fail(instance, pid, b"native virtual waitid result invalid");
                     }
-                    let _ = unsafe { syscall1(SYS_CLOSE_HOST, child.lifetime_pidfd as usize) };
                     tasks[slot] = None;
                 }
             }
@@ -6367,6 +6430,16 @@ fn supervise_native(
                 let child_state_only =
                     waited_task.job_stopped || wait_status & 0xff == 0x7f || wait_status == 0xffff;
                 if !child_state_only
+                    && !native_retire_credential(
+                        waited_task,
+                        &processes,
+                        &mut retired_credentials,
+                        &mut next_retired_credential,
+                    )
+                {
+                    native_fail(instance, pid, b"native wait credential retirement failed");
+                }
+                if !child_state_only
                     && processes
                         .wait(
                             task.virtual_id,
@@ -6383,11 +6456,6 @@ fn supervise_native(
                     if let Some(waited_slot) = tasks.iter_mut().find(|candidate| {
                         candidate.is_some_and(|candidate| candidate.host_pid == waited_host)
                     }) {
-                        if waited_task.lifetime_pidfd >= 0 {
-                            let _ = unsafe {
-                                syscall1(SYS_CLOSE_HOST, waited_task.lifetime_pidfd as usize)
-                            };
-                        }
                         *waited_slot = None;
                     }
                 }
@@ -6464,6 +6532,7 @@ fn supervise_native(
                         host_pid,
                         task.pending_recvmsg,
                         &tasks,
+                        &retired_credentials,
                         task,
                         &processes,
                     )
@@ -6482,6 +6551,7 @@ fn supervise_native(
                         host_pid,
                         task.pending_peercred,
                         &tasks,
+                        &retired_credentials,
                         task,
                         &processes,
                     )
@@ -11581,6 +11651,7 @@ fn native_rewrite_stat_identity(tracee_pid: usize, address: usize, uid: u32, gid
 fn native_virtual_ucred(
     sender_host_pid: usize,
     tasks: &[Option<NativeSupervisorTask>; 128],
+    retired: &[NativeRetiredCredential; 128],
     current: NativeSupervisorTask,
     processes: &ProcessTable<128>,
 ) -> Option<[u8; 12]> {
@@ -11600,6 +11671,13 @@ fn native_virtual_ucred(
             encoded[4..8].copy_from_slice(&view.credentials.uid.to_ne_bytes());
             encoded[8..12].copy_from_slice(&view.credentials.gid.to_ne_bytes());
         }
+    } else if let Some(sender) = retired
+        .iter()
+        .find(|candidate| candidate.lifetime_pidfd >= 0 && candidate.host_pid == sender_host_pid)
+    {
+        encoded[..4].copy_from_slice(&sender.virtual_pid.to_ne_bytes());
+        encoded[4..8].copy_from_slice(&sender.uid.to_ne_bytes());
+        encoded[8..12].copy_from_slice(&sender.gid.to_ne_bytes());
     } else {
         // A queued datagram can outlive its already-reaped sender. Never expose
         // an unmatched host PID or host credentials through the virtual ABI.
@@ -11613,13 +11691,15 @@ fn native_rewrite_ucred(
     tracee_pid: usize,
     address: usize,
     tasks: &[Option<NativeSupervisorTask>; 128],
+    retired: &[NativeRetiredCredential; 128],
     current: NativeSupervisorTask,
     processes: &ProcessTable<128>,
 ) -> bool {
     let Some(sender_host_pid) = read_tracee_u32(tracee_pid, address).map(|pid| pid as usize) else {
         return false;
     };
-    let Some(encoded) = native_virtual_ucred(sender_host_pid, tasks, current, processes) else {
+    let Some(encoded) = native_virtual_ucred(sender_host_pid, tasks, retired, current, processes)
+    else {
         return false;
     };
     write_tracee_bytes(tracee_pid, address, &encoded)
@@ -11629,6 +11709,7 @@ fn native_rewrite_recvmsg_credentials(
     tracee_pid: usize,
     message_address: usize,
     tasks: &[Option<NativeSupervisorTask>; 128],
+    retired: &[NativeRetiredCredential; 128],
     current: NativeSupervisorTask,
     processes: &ProcessTable<128>,
 ) -> bool {
@@ -11665,7 +11746,14 @@ fn native_rewrite_recvmsg_credentials(
         );
         if level == 1 && kind == 2 && length >= 28 {
             let credential_address = control_address.saturating_add(offset).saturating_add(16);
-            if !native_rewrite_ucred(tracee_pid, credential_address, tasks, current, processes) {
+            if !native_rewrite_ucred(
+                tracee_pid,
+                credential_address,
+                tasks,
+                retired,
+                current,
+                processes,
+            ) {
                 return false;
             }
         }

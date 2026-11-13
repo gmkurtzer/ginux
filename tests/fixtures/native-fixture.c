@@ -504,6 +504,45 @@ long native_fixture_main(void)
         print_result("GINUX_FIXTURE: null-reaped=", reaped);
         return 0;
     }
+    case 'e': {
+        /* A receiver can consume SCM_CREDENTIALS after waitid has reaped the
+         * short-lived sender. The queued identity must stay virtual. */
+        struct iovec { void *base; word length; };
+        struct message {
+            void *name; unsigned name_length, name_padding;
+            struct iovec *iov; word iov_count;
+            void *control; word control_length;
+            unsigned flags, flags_padding;
+        };
+        struct credentials { int pid; unsigned uid, gid; };
+        struct control_header { word length; int level, type; };
+        int fds[2] = {-1, -1}, enabled = 1;
+        char payload = 0;
+        word control[8] = {0};
+        struct iovec iov = {&payload, 1};
+        struct message message = {0, 0, 0, &iov, 1, control, sizeof control, 0, 0};
+        struct { int signo, error, code, pad, pid, uid, status, rest[25]; } info = {0};
+        if (call4(53, 1, 2, 0, (word)fds) < 0
+            || call5(54, fds[0], 1, 16, (word)&enabled, sizeof enabled) < 0) return 85;
+        long pid = call3(57, 0, 0, 0);
+        if (pid == 0) {
+            call3(1, fds[1], (word)"x", 1);
+            call3(231, 0, 0, 0);
+            return 86;
+        }
+        long waited = call5(247, 1, pid, (word)&info, 4, 0);
+        long received = call3(47, fds[0], (word)&message, 0);
+        struct control_header *header = (void *)control;
+        struct credentials *credentials = (void *)(header + 1);
+        print_result("GINUX_FIXTURE: credential-wait=", waited);
+        print_result("GINUX_FIXTURE: credential-recv=", received);
+        print_result("GINUX_FIXTURE: credential-pid=",
+                     header->length >= 28 && header->level == 1 && header->type == 2
+                     && credentials->pid == pid);
+        print_result("GINUX_FIXTURE: credential-uid=", credentials->uid == 0);
+        print_result("GINUX_FIXTURE: credential-gid=", credentials->gid == 0);
+        return 0;
+    }
     case 'z': {
         word selected = 0xfeed000000000007UL;
         long result;
