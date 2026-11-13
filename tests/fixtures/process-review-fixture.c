@@ -213,6 +213,40 @@ long probe_main(word *stack) {
     int status=0;
     show("signal wait=",call3(61,child,(word)&status,0));
     show("signal status=",status);
+#elif defined(CASE_orphan_reparent) || defined(CASE_orphan_zombie)
+    // The middle process exits without reaping its child; init must then be
+    // that child's parent and able to wait for it.
+    if(call3(22,(word)descriptors,0,0))return 10;
+    long middle=call3(57,0,0,0);
+    if(!middle) {
+        long child=call3(57,0,0,0);
+        if(!child) {
+#if defined(CASE_orphan_reparent)
+            char byte;
+            call3(0,descriptors[0],(word)&byte,1);
+            show("orphan getppid=",call3(110,0,0,0));
+#else
+            call3(1,descriptors[1],(word)"x",1);
+#endif
+            return 7;
+        }
+        if(child<0)return 11;
+#if defined(CASE_orphan_zombie)
+        // Let the child exit first, so it is already dead when adopted.
+        char byte;
+        call3(0,descriptors[0],(word)&byte,1);
+        for(int i=0;i<100;i++)call3(186,0,0,0);
+#endif
+        return 0;
+    }
+    int status=0;
+    show("orphan middle wait=",call3(61,middle,(word)&status,0));
+#if defined(CASE_orphan_reparent)
+    call3(1,descriptors[1],(word)"x",1);
+#endif
+    status=0;
+    show("orphan wait=",call3(61,-1,(word)&status,0));
+    show("orphan status=",status);
 #elif defined(CASE_sigpipe)
     long child=call3(57,0,0,0);
     if(!child) {
