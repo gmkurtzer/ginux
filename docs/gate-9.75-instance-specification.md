@@ -84,12 +84,20 @@ or helper authority. Host-context hooks such as `host:/path` are rejected.
 ```toml
 [hooks]
 pre_boot = [
-  "/usr/bin/install -d /run/example",
-  "/usr/bin/printf ready > /run/example/state",
+  """
+  /usr/bin/install -d /run/example
+  /usr/bin/printf ready > /run/example/state
+  """,
 ]
 timeout_seconds = 20
 failure = "stop"
 ```
+
+Each array entry is one hook. Triple-quoted entries keep related shell commands
+readable and embedded in the portable recipe; they do not name or import a host
+script. Existing single-line entries remain supported. Hooks are bounded to 12
+entries and 512 bytes each, and the first executable must be an absolute path
+inside the instance.
 
 `failure = "stop"` prevents init from running after a failure or timeout.
 `failure = "continue"` records the failure and advances to the next hook. Every

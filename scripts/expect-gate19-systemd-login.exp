@@ -1,0 +1,48 @@
+#!/usr/bin/expect -f
+
+if {$argc != 5} {
+    puts stderr "usage: expect-gate19-systemd-login.exp <key> <port> <user> <name> <log>"
+    exit 64
+}
+
+set key [lindex $argv 0]
+set port [lindex $argv 1]
+set user [lindex $argv 2]
+set name [lindex $argv 3]
+set log [lindex $argv 4]
+set timeout 180
+set send_slow {1 .005}
+
+log_file -noappend $log
+spawn ssh -tt -i $key -p $port -o BatchMode=yes -o ConnectTimeout=5 -o IdentitiesOnly=yes -o LogLevel=ERROR -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$user@127.0.0.1" "sudo sh -c '/var/tmp/ginux-host-instance-helper-installed run-runtime gate9 false'"
+
+expect {
+    -re {login:} {}
+    timeout { puts stderr "$name: systemd login prompt timed out"; exit 70 }
+    eof { puts stderr "$name: systemd exited before login prompt"; exit 71 }
+}
+send -s -- "root\r"
+expect {
+    -re {Password:} {}
+    timeout { puts stderr "$name: password prompt timed out"; exit 72 }
+    eof { puts stderr "$name: login exited before password prompt"; exit 73 }
+}
+send -s -- "ginux\r"
+expect {
+    -re {\[root@[^ ]+ [^]]+\]# } {}
+    timeout { puts stderr "$name: authenticated shell prompt timed out"; exit 74 }
+    eof { puts stderr "$name: login exited before authenticated shell"; exit 75 }
+}
+send -s -- "printf 'GINUX_GATE19_LOGIN_OK:%s\\n' '$name'\r"
+expect {
+    -re "GINUX_GATE19_LOGIN_OK:$name" {}
+    timeout { puts stderr "$name: login marker timed out"; exit 76 }
+    eof { puts stderr "$name: shell exited before login marker"; exit 77 }
+}
+expect -re {\[root@[^ ]+ [^]]+\]# }
+send -s -- "kill -RTMIN+4 1\r"
+set timeout 120
+expect {
+    eof {}
+    timeout { puts stderr "$name: controlled shutdown timed out"; exit 78 }
+}

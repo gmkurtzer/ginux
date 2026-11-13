@@ -1,0 +1,106 @@
+# Alpine's native BusyBox init path. This intentionally does not add systemd.
+schema_version = 1
+
+[instance]
+id = "alpine-native"
+root = "docker.io/library/alpine@sha256:9db2934886712d877c932e07249c75a59e6ca27adfbccc05261987a17bef2d63"
+init = "/sbin/init"
+args = []
+environment = ["container=ginux"]
+
+[identity]
+hostname = "ginux-alpine"
+
+[resources]
+vcpus = 1
+memory_mib = 512
+
+[execution]
+profile = "balanced"
+backend = "ptrace-native"
+
+[contract]
+version = 1
+catalog = 2
+default = "deny"
+allow = ["*"]
+deny = ["device.mmio.direct", "device.dma.direct", "network.packet.raw"]
+
+[contract.syscalls]
+control = "selective"
+default = "deny"
+allow = ["*"]
+deny = []
+
+[contract.filesystem]
+default = "deny"
+read = ["/"]
+write = ["/run", "/root", "/tmp", "/var"]
+create = ["/run", "/root", "/tmp", "/var"]
+deny = ["/boot", "/usr"]
+
+[contract.network]
+default = "deny"
+inbound = []
+outbound = ["tcp:443", "udp:53"]
+
+[contract.devices]
+default = "deny"
+read = ["/dev/console", "/dev/tty", "/dev/null", "/dev/zero", "/dev/random", "/dev/urandom"]
+write = ["/dev/console", "/dev/tty", "/dev/null", "/dev/zero"]
+create = []
+
+[contract.privileges]
+default = "deny"
+setuid = []
+setgid = []
+
+[contract.process]
+default = "deny"
+max_processes = 128
+max_threads = 256
+signals = ["*"]
+ptrace = "deny"
+namespace_create = []
+namespace_join = []
+
+[contract.kernel]
+default = "deny"
+proc_read = ["/"]
+proc_write = []
+sys_read = ["/"]
+sys_write = []
+
+[storage]
+assignments = ["root-overlay"]
+
+[devices]
+assignments = ["console", "null", "zero", "random", "net0"]
+
+[hooks]
+# CHANGEME: this example sets the development root password to "ginux".
+# Replace it before using this recipe outside a local test environment.
+pre_boot = [
+  """
+  /bin/sh -c '
+  /bin/sed "s|^root:[^:]*:|root:\$6\$ginux\$5fZDUU2yskfStn1c0m2HsJ06zu3nvK7qFBLD476WxfLLpR6BrDTmG6qNrx0C./uhKIKvTQgrHwXxjSXdyBnBo0:|" /etc/shadow > /tmp/.ginux-shadow
+  /bin/cat /tmp/.ginux-shadow > /etc/shadow
+  '
+  """,
+  """
+  /bin/sh -c '
+  /bin/busybox sed "/^tty[1-6]::respawn:/d;/^#ttyS0::respawn:/d;/^console::respawn:/d" /etc/inittab > /tmp/.ginux-inittab
+  printf "console::respawn:/sbin/getty -L 115200 console vt100\n" >> /tmp/.ginux-inittab
+  /bin/busybox cat /tmp/.ginux-inittab > /etc/inittab
+  /bin/grep -qx UNKNOWN /etc/securetty || printf "UNKNOWN\n" >> /etc/securetty
+  '
+  """,
+]
+timeout_seconds = 10
+failure = "stop"
+
+[audit]
+enabled = false
+
+[failure]
+policy = "stop"
