@@ -9545,6 +9545,9 @@ fn virtual_credential_target(current: u32, values: &[u64]) -> Option<u32> {
 }
 
 fn native_arguments_allowed(syscall: u64, registers: &UserRegs, mode: usize) -> bool {
+    if ginux_core::signal_driven_io(syscall, registers.rsi, registers.rdx) {
+        return false;
+    }
     if mode == 3 {
         match syscall {
             ginux_core::SYS_PIDFD_OPEN => registers.rdi > 0 && registers.rsi == 0,

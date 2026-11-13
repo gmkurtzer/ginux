@@ -25,10 +25,27 @@ def main():
         (root / "large").write_bytes(b"r" * (1024 * 1024 + 1))
         work.chmod(0o755)
 
-        def run(scenario, stdin=None, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **options):
+        configured = work / "configured.toml"
+        configured.write_text(config.read_text().replace('init = "/bin/bash"',
+            'init = "/usr/bin/bash"') + """
+[contract.filesystem]
+read = ["/"]
+write = ["/"]
+create = ["/"]
+[contract.kernel]
+proc_read = ["/"]
+sys_read = ["/"]
+""")
+
+        def run(scenario, instance=config, stdin=None, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, **options):
             (root / "scenario").write_text(scenario)
-            proc = subprocess.run([str(work / "ginux"), "native", str(config), str(root)],
+            proc = subprocess.run([str(work / "ginux"), "native", str(instance), str(root)]
+                                  + (["configured"] if instance == configured else []),
                                   stdin=stdin, stdout=stdout, stderr=stderr, timeout=20, **options)
+            # Audit records and fixture output have separate writers. Merge
+            # only after capture so a concurrent audit fragment cannot prefix
+            # an otherwise complete fixture line.
             output = (proc.stdout or b"") + (proc.stderr or b"")
             return proc.returncode, output.decode(errors="replace")
 
@@ -82,6 +99,21 @@ def main():
         code, out = run("fork")
         check("fork denied", code == 0 and "GINUX_FIXTURE: fork=-38\n" in out
               and "unsupervised child ran" not in out and "GINUX_NATIVE_CHECK: PASS" in out, code, out)
+
+        # fcntl cannot make the host kernel signal another process.
+        code, out = run("guard")
+        check("signal-driven I/O refused", code == 0
+              and all(f"GINUX_FIXTURE: {name}=-1\n" in out
+                      for name in ("setown", "setown-ex", "setsig", "async"))
+              and "GINUX_FIXTURE: nonblock=0\n" in out, code, out)
+
+        # Invalid FDs make the baseline safe: an admitted host ioctl returns
+        # EBADF; the argument guard must instead return EPERM before dispatch.
+        code, out = run("quiet-ioctl", configured)
+        check("native ioctl signal routing refused", code == 0
+              and all(f"GINUX_FIXTURE: {name}=-1\n" in out for name in
+                      ("fioasync", "fiosetown", "siocspgrp", "high-fioasync"))
+              and "GINUX_FIXTURE: tcgets=-9\n" in out, code, out)
 
         # The thread identity matches the virtual pid: set_tid_address returns
         # it instead of the host tid, and PI futexes, which would store the

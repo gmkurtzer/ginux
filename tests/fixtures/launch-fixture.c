@@ -103,6 +103,22 @@ long launch_fixture_main(word *stack)
         word fd = argc > 2 ? number(argv[2]) : 3;
         return call3(0, fd, (word)&byte, 1) == -9 ? 0 : 97;
     }
+    case 'g': {
+        /* owner: fcntl cannot set up signal-driven I/O (EPERM); descriptor
+         * and status flags still work. Descriptor 1 is the test's stdout
+         * pipe, whose status flags are restored. */
+        struct { int type, pid; } owner = {1 /* F_OWNER_PID */, 0};
+        long flags = call3(72, 1, 3, 0);                            /* F_GETFL */
+        if (flags < 0) return 105;
+        if (call3(72, 1, 8, 0) != -1) return 100;                   /* F_SETOWN */
+        if (call3(72, 1, 15, (word)&owner) != -1) return 101;       /* F_SETOWN_EX */
+        if (call3(72, 1, 10, 15) != -1) return 102;                 /* F_SETSIG */
+        if (call3(72, 1, 4, flags | 020000) != -1) return 103;      /* F_SETFL O_ASYNC */
+        if (call3(72, 1, 4, flags | 04000) != 0) return 104;        /* F_SETFL O_NONBLOCK */
+        if (call3(72, 1, 4, flags) != 0) return 104;
+        if (call3(72, 1, 1, 0) < 0) return 105;                     /* F_GETFD */
+        return 0;
+    }
     case 'w':
         print("ready");
         for (;;) __asm__ volatile("pause");

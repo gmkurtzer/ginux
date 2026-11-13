@@ -86,6 +86,8 @@ def main():
         invoke(["trap"], 133, "signaled")
         invoke(["handler"], 0, "exited", stdout=b"handled\n")
         invoke(["segv"], 139, "signaled")
+        # fcntl cannot make the host kernel signal another process.
+        invoke(["guard"], 0, "exited")
         invoke(["fork"], 0, "exited")
         invoke(["int80"], 1, "supervisor-error")
         invoke(["descriptor"], 0, "exited")
