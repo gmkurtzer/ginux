@@ -189,6 +189,7 @@ pub const fn systemd_surface(syscall: u64, shared_network: bool) -> BalancedSurf
             | 76
             | 77
             | 82
+            | 83
             | 84
             | 87
             | 88
@@ -201,6 +202,7 @@ pub const fn systemd_surface(syscall: u64, shared_network: bool) -> BalancedSurf
             | 190
             | 196
             | 199
+            | 258
             | 259
             | 260
             | 280
@@ -227,27 +229,34 @@ pub const fn systemd_surface(syscall: u64, shared_network: bool) -> BalancedSurf
             | SYS_SETRESGID
     ) {
         BalancedSurface::VirtualIdentity
-    } else if matches!(syscall, 193 | SYS_READLINKAT) {
+    } else if matches!(syscall, 137 | 138 | 193 | SYS_READLINKAT) {
         BalancedSurface::ImageRead
     } else if matches!(
         syscall,
         7 | 15
+            | 16
             | 24
             | 32
             | 33
             | 56
             | 57
             | 58
+            | 59
             | 61
             | 62
             | 79
+            | 80
             | 81
+            | 95
             | 109
             | 112
             | 121
             | 124
+            | 125
+            | 126
             | 128
             | 135
+            | 157
             | 213
             | 228
             | 230
@@ -425,6 +434,35 @@ pub const fn balanced_arguments_allowed(syscall: u64, arg0: u64, arg1: u64, arg2
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn systemd_mediated_syscalls_have_a_surface() {
+        for syscall in 0..512 {
+            if matches!(decide_systemd(syscall, false).action, Action::Mediate) {
+                assert_ne!(
+                    systemd_surface(syscall, false),
+                    BalancedSurface::Denied,
+                    "syscall {syscall} is mediated but has no surface"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn systemd_surface_labels_ordinary_mediated_calls() {
+        for syscall in [83, 258] {
+            assert_eq!(
+                systemd_surface(syscall, false),
+                BalancedSurface::InstanceWrite
+            );
+        }
+        for syscall in [137, 138] {
+            assert_eq!(systemd_surface(syscall, false), BalancedSurface::ImageRead);
+        }
+        for syscall in [16, 59, 80, 95, 125, 126, 157] {
+            assert_eq!(systemd_surface(syscall, false), BalancedSurface::Task);
+        }
+    }
 
     #[test]
     fn emulates_virtual_identity() {
