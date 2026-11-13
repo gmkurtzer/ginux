@@ -33,10 +33,11 @@ instance-scoped, and free of host memory or topology disclosure.
 - [x] Add focused regression coverage for virtual memory and private counters.
 - [x] Pass static, aggregate, and complete Rocky systemd verification.
 - [x] Commit the gate and implementation with sign-off.
+- [x] Resolve the separately discovered concurrent service-output regression
+  through Gate 24 and pass `make test-multi-instance` unchanged.
 
 ## Remaining work
-- [ ] Resolve the separately discovered concurrent service-output regression,
-  then rerun `make test-multi-instance`.
+- [ ] Push the branch and open its pull request to `main`.
 - [ ] Complete human checkpoint review after every criterion passes.
 
 ## Acceptance criteria
@@ -76,6 +77,11 @@ instance-scoped, and free of host memory or topology disclosure.
   existed and the oneshot service exited successfully, but its expected stdout
   marker was absent from both the instance journal and virtual console. This is
   a separate concurrent service-output regression, not a sysinfo failure.
+- Post-Gate-24 `make test-multi-instance` -> passed the complete unchanged Gate
+  17 concurrent-instance acceptance matrix.
+- Post-Gate-24 `make test-systemd` -> passed cold, warm, repeat, offline,
+  DNF-failure-integrity, configured-startup-failure, and shutdown checks.
+- Post-Gate-24 `make test` -> passed the complete aggregate suite.
 
 ## Decisions and limitations
 - The configured virtual memory value is already the authoritative
@@ -84,22 +90,21 @@ instance-scoped, and free of host memory or topology disclosure.
 - This value is descriptive virtual topology, not quota enforcement. Resource
   enforcement remains outside this corrective gate.
 - Accepted Gate 22 remains locked; this file owns the compatibility correction.
-- Gate 23 is technically partial because its required concurrent regression is
-  blocked by a newly reproduced service-output defect outside this gate's
-  approved sysinfo scope.
+- Gate 24 owns the separate service-output correction and is stacked on this
+  branch; its passing evidence completes Gate 23's final blocked criterion.
 
 ## Delivery strategy
 - Working branch: `hdae/virtual-sysinfo-systemd-compat`
 - Intended base: `main`
-- Pull request: intended, publication requires separate current authorization
+- Pull request: intended; publication authorized by the human on 2026-11-12
 - Planned commits: signed gate/control-plane commit; signed implementation and
   focused-regression commit; signed evidence reconciliation commit if needed
 - Actual commits: `db45403e` (gate/control plane), `72ad3373`
-  (implementation and focused regressions), evidence reconciliation pending
+  (implementation and focused regressions), `b9c2aa0b` (initial verification
+  checkpoint), final evidence reconciliation pending
 
 ## Review policy and outcome
-Human-approved checkpoint gate. The sysinfo correction passes its focused,
-aggregate, and full systemd evidence, but the gate remains partial because the
-required concurrent-instance suite exposed a separate reproducible output
-defect. Human direction is required before creating and executing that
-corrective gate; technical passage does not close Gate 23.
+Technically passed checkpoint gate. The sysinfo correction passes focused,
+aggregate, full systemd, and concurrent-instance evidence after the separately
+approved Gate 24 correction. Publish it and stop for human review; technical
+passage does not close Gate 23.
