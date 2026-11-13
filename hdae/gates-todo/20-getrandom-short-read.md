@@ -42,6 +42,9 @@ Enforce the balanced profile's 256-byte `getrandom` bound on the buffer length w
 - Pull request: https://github.com/gmkurtzer/ginux/pull/263
 - Source comment: https://github.com/gmkurtzer/ginux/issues/163#issuecomment-6841183072
 - Reciprocal PR comment: https://github.com/gmkurtzer/ginux/pull/263#issuecomment-6841184333
+- Hosted CI on implementation commit `309acf58`:
+  https://github.com/gmkurtzer/ginux/actions/runs/43346008057 -> static/unit
+  and Linux launch integration passed.
 
 ## Decisions and limitations
 - Clamping retains the per-call resource bound without converting a legal larger request into `EPERM`.
@@ -55,4 +58,5 @@ Enforce the balanced profile's 256-byte `getrandom` bound on the buffer length w
 - Actual commits: `309acf58`; gate reconciliation in the branch tip
 
 ## Review policy and outcome
-Human checkpoint. The gate remains in `gates-todo/` until reviewed and accepted.
+Technically passed on implementation commit `309acf58`. Human checkpoint:
+the gate remains in `gates-todo/` until reviewed and accepted.
