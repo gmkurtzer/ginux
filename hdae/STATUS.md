@@ -18,6 +18,7 @@
 - No CLI implementation or dependency change has been performed. Gate 25 is at
   its mandatory command-design checkpoint.
 - Fresh baseline evidence: `make check` passes on the synchronized branch.
+- Design checkpoint commit: `5b315d3e`.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required

@@ -204,8 +204,8 @@ runtime, fixture, helper, and backend commands out of the public interface.
 - Planned commits: gate and command inventory; approved CLI framework and
   public command model; internal-boundary and installation migration; tests and
   documentation; evidence reconciliation
-- Actual commits: `557349c2` (gate draft after rebase); design-checkpoint
-  commit pending
+- Actual commits: `557349c2` (gate draft after rebase); `5b315d3e`
+  (command inventory and design checkpoint)
 
 ## Review policy and outcome
 
