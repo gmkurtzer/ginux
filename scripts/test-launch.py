@@ -30,6 +30,7 @@ def main():
         shutil.copyfile(fixture, root / "bin/fixture")
         (root / "bin/fixture").chmod(0o755)
         (root / "work/input").write_bytes(b"configured working directory\n")
+        (root / "work/large").write_bytes(b"r" * (1024 * 1024 + 1))
         (root / "input").write_bytes(b"root working directory\n")
         (root / "work/a..b").mkdir()
         counter = 0
@@ -92,6 +93,9 @@ def main():
                b"pi_word=0\nfutex_lock_pi_flags=-1\npi_flags_word=0\n")
         invoke(["ysinfo"], 0, "exited",
                stdout=b"sysinfo=0\nsysinfo-zero=1\nmem-unit=1\nsysinfo-null=-14\n")
+        invoke(["oversized"], 0, "exited",
+               stdout=b"read=1048576\npread=1048576\n" + b"x" * 4096 + b"write=4096\n")
+        invoke(["random"], 0, "exited", stdout=b"getrandom=256\n")
         with (work / "secret").open("w+b") as secret:
             secret.write(b"host-only data")
             secret.flush()

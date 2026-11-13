@@ -115,6 +115,19 @@ long native_fixture_main(void)
         print_result("GINUX_FIXTURE: sysinfo-null=", call3(99, 0, 0, 0));
         return 0;
     }
+    case 'o': {
+        static char input[1024 * 1024 + 1];
+        long input_fd = call3(2, (word)"/large", 0, 0);
+        if (input_fd < 0) return 82;
+        print_result("GINUX_FIXTURE: read=", call3(0, input_fd, (word)input, sizeof input));
+        print_result("GINUX_FIXTURE: pread=", call4(17, input_fd, (word)input, sizeof input, 0));
+        return 0;
+    }
+    case 'r': {
+        static char random[512];
+        print_result("GINUX_FIXTURE: getrandom=", call3(318, (word)random, sizeof random, 0));
+        return 0;
+    }
     default:
         return 81;
     }

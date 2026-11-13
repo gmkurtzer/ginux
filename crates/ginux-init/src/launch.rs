@@ -1057,6 +1057,23 @@ fn supervise_launch(pid: usize, instance: &mut Instance) -> ! {
         }
         sequence += 1;
         let syscall = registers.orig_rax;
+        let transfer_limit = match syscall {
+            0 | 17 => Some(1024 * 1024),
+            1 if matches!(registers.rdi, 1 | 2) => Some(4096),
+            _ => None,
+        };
+        if transfer_limit.is_some_and(|limit| registers.rdx > limit) {
+            registers.rdx = transfer_limit.unwrap_or(registers.rdx);
+            if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0 {
+                launch_fail(instance, pid, b"launch transfer clamp failed");
+            }
+        }
+        if syscall == 318 && registers.rsi > 256 {
+            registers.rsi = 256;
+            if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0 {
+                launch_fail(instance, pid, b"launch getrandom clamp failed");
+            }
+        }
         let decision = match decide_native(syscall, registers.rdi, registers.rsi, registers.rdx) {
             NativeDecision::Contract(decision) => decision,
             NativeDecision::Hooked { lane, result } => {
